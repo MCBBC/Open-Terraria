@@ -24,7 +24,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, hitCritters, hitCrittersAll } from './projTargets';
-import { ghostHealProc } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出）
+import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出;★清偿刀 T 门位快照单源）
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -42,8 +42,15 @@ const TAU = Math.PI * 2;
  *  iframes:13972/dontTakeDamage:13978）+血尽级联（:14369 族,伤害已实扣=原版受理）+
  *  普通未致命尾档（:15037）。受理面谓词=调用侧 !vanillaGated（读门位）,本返回值
  *  不再消费（BJ393 判据,击杀位契约退役） */
-function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): boolean {
-  return e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+/** pierce：Enemy.hurt 免疫门选档（Enemy.ts:13988）——0=门照走+受理写 10t（通用缺省
+ *  档 :14176-14182 尾档）/1=flag3 单发弹豁免（:12635 maxPenetrate==1 缺省链,三不写）/
+ *  -2=门照走+三不写（★清偿刀 R:634/635 Kill AoE——门 :12636 照走〔Kill :73265-73269
+ *  先置 maxPenetrate=-1,flag3 假〕,写支 :14294-14295 两档全不达,窗值由弹侧补写
+ *  :14080-14082 专支 5t;与孢子云 567/568 IDStatic 三不写档同行为位）/
+ *  -3=usesLocal 族清零档（★清偿刀 L:645 爆相——门 :12636 照走,受理写 immune[owner]=0
+ *  :14175-14178,节流全归弹侧局部表,多星齐射不互饿） */
+function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number, pierce = 0): boolean {
+  return e.hurt(dmg, kdir * kb, 0, game, pen, crit, pierce, true);   // 音/飘值=单点;fromPlayer=DPS 计
 }
 
 // ================= 星云烈焰弹 634/635（AI_001 :51577-51762） =================
@@ -306,18 +313,33 @@ export class NebulaBlazeBolt extends Entity {
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      // ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词 !vanillaGated——Enemy.hurt
-      //  返真=「本拍击杀」（Enemy.ts:15033）,返假三族=门拒（dead:13971/iframes:13972/
-      //  dontTakeDamage:13978）+血尽级联（:14369 族,伤害已实扣=原版受理）+普通未致命
-      //  尾档（:15037）。原版 proc（:13877-79）/numHits++（:14263）在受理面无死亡复查
-      //  → 门拒不 proc 不计数,非门拒（血尽/普通未致命）照 proc 照计数。strike 传
-      //  pierce=0 → 门拒可及面=iframes>0 ∪ dontTakeDamage（dead 已上方前置）。
-      //  旧「strike 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+      // ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词=读门位非 hurt 返真——返假
+      //  三族=门拒（dead:13971/iframes:13972/dontTakeDamage:13978）+血尽级联（:14369
+      //  族,伤害已实扣=原版受理）+普通未致命尾档（:15037）。原版 proc（:13877-79）/
+      //  numHits++（:14263）在受理面无死亡复查 → 门拒不 proc 不计数,非门拒照 proc
+      //  照计数。旧「strike 返真」=击杀位判据对非致死命中整面不 proc,退役。
+      //  ★清偿刀 F（2026-09-29,清偿刀 B 新立债#1）：飞行盒 flag3 豁免定谳——
+      //  maxPenetrate 缺省链 :366（字段缺省 1;SetDefaults :6818-6839 无 penetrate/
+      //  usesLocalNPCImmunity 行）→ :10675 `maxPenetrate = penetrate` → :12635
+      //  flag3=真 → :12636 免疫门不拦=iframes 残窗内第二发飞行盒照打（旧 strike 传
+      //  pierce=0 → Enemy.ts:13988 门拒整跳=假红窗,原版本相照打）。受理残门仅
+      //  dontTakeDamage（:12600;dead 已前置;flag4 immortal&&npcProj/trap 对玩家弹恒假）。
+      //  命中写支：:14080-14082 634/635 专支无条件写 immune[owner]=5（残窗余值同被
+      //  覆写）——Enemy.hurt pierce=1 档三不写（BJ340 F-A 判谳面向「无类型写支」的
+      //  泛 flag3 弹,405 泡泡等）→ 该写支在弹侧受理面补写。窗的消费者=后续非 flag3
+      //  弹（本弹 penetrate 1→0 :14196 → Kill :17312;Kill AoE :73267 先置
+      //  maxPenetrate=-1 → flag3 假 → 被 skipId+此窗双重挡=原版同相）。
+      // ★清偿刀 T（X4-债12,2026-09-29）：门位读前置快照（读侧单源 snapshotVanillaGate
+      //  ——判据=「进 hurt 前状态」,原版免疫门 :12634-12637/:12686 全读 StrikeNPC 前）。
+      //  pierce=1 flag3 臂 iframes 不构成门拒（:12635）→ exemptIframes=true,可达门拒
+      //  仅 dontTakeDamage（:12686;本站原后置读与快照等位——hurt 无 dontTakeDamage
+      //  写支,唯四塔转换写 iframes 不写旗=本就无污染;转快照为全族单源同形）。
+      const gate = snapshotVanillaGate(e);
       strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen);
-      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
-        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
-      if (!vanillaGated) {
+        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen, 1);
+      const accepted = !vanillaGateRejected(gate, true);
+      if (accepted) {
+        (e as { iframes?: number }).iframes = 5;                // :14080-14082 专支写 5t
         ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（读自增前值）
         this.pveNumHits++;                                      //（:14263 受理后自增）
       }
@@ -327,8 +349,9 @@ export class NebulaBlazeBolt extends Entity {
   }
 
   /** Kill 链（:68745-68807）：50×50 居中 AoE + Item14 + 尘爆。
-   *  skipId = 刚被飞行盒命中的敌（原版由 npc.immune[owner] 10t 挡住 Kill 内
-   *  Damage() 的二次结算——本仓 hurt iframe 等价，但免同帧双记显式跳过） */
+   *  skipId = 刚被飞行盒命中的敌（原版由飞行盒写支 npc.immune[owner]=5t 专支窗
+   *  挡住 Kill 内 Damage() 的二次结算——本仓 hurt iframe 等价，但免同帧双记显式
+   *  跳过；★清偿刀 R 后 AoE 面免疫门照走，该敌即使不 skip 也被 ：12636 拦） */
   private burst(game: GameHooks, skipId = -1): void {
     if (this.dead) return;
     this.dead = true;
@@ -350,13 +373,28 @@ export class NebulaBlazeBolt extends Entity {
       const crit = Math.random() < this.critChance;
       // ★X2-D1（同飞行盒站注）：受理面谓词 !vanillaGated——Kill 内 Damage()（:73251）
       //  同链,门拒不 proc 不计数,血尽级联/普通未致命返假照 proc 照计数
+      //  ★清偿刀 R（2026-09-29,X4-债11）：AoE 写支档位归正——Kill :73265-73269 先置
+      //  maxPenetrate=penetrate=-1 → :12635 flag3=假 → :12636 免疫门照走（残窗敌不
+      //  受理）≠飞行盒 flag3 豁免档。旧 pierce=0 受理写 10t 双重偏差：①窗值 10≠原版
+      //  专支 5t（:14080-14082 type 634/635 显型定档——写支梯 else-if 链先于尾档
+      //  :14176-14182,飞行盒/AoE 两面同梯同值 5,桥表 vanillaProjImmuneTiers:80 同钉）；
+      //  ②受理写支（Enemy.ts:14295,血尽级联 :14369 在其后=致死/非致死均写）污染下方
+      //  vanillaGated 门位读（hurt 内 iframes 0→10 ⇒ 读恒真）→ AoE 受理命中 proc/
+      //  numHits 恒跳,吸血域断供。-2 档（Enemy.ts 现役,零改动复用）=门照走+三不写
+      //  → 门位读复原=残窗照拒/受理照达;窗值由弹侧补写 5t（同刀 F 飞行盒形态;
+      //  原版写位 :14080 在 proc :13877 后,ghostHeal 不读窗,序等价）。
+      // ★清偿刀 T（X4-债12,2026-09-29）：门位读前置快照（读侧单源）——-2 档三不写后
+      //  后置读在普通面已等位,唯死亡转换写支（Enemy.ts:14421 四塔血尽转演出写
+      //  iframes=2,写支 1:1 禁改）仍污染致死命中拍（原版 proc :13877-79/numHits++:
+      //  14263 受理面无死亡复查,照达）。快照判据=「进 hurt 前状态」=原版门位语义。
+      const gate = snapshotVanillaGate(e);
       strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen);
-      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
-        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen, -2);
+      const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
+        (e as { iframes?: number }).iframes = 5;                // :14080-14082 专支写 5t
         ghostHealProc(game, this.projId, this.pveNumHits, e);   // Kill 内 Damage()（:73251）同链
-        this.pveNumHits++;
+        this.pveNumHits++;                                      //（:14263 受理后自增）
       }
     }
     // 尘爆（40 彩 + 20 底）——vector30 = (rot−π/2)向 ×|vel|×3
@@ -535,10 +573,20 @@ export class LunarFlareStar extends Entity {
         const crit = Math.random() < this.critChance;
         // ★X2-D1（同 634 飞行盒站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
         //  血尽级联（:14369 族）/普通未致命尾档（:15037）返假照 proc 照计数
+        //  ★清偿刀 L（2026-09-29）：pierce=-3（usesLocal 族清零档,BJ398 现役梯）——
+        //  原版爆相受理写支 :14175-14178 = immune[owner]=0 + local[victim]=
+        //  localNPCHitCooldown=-1（局部节流,弹侧 hitSet 承载）;旧 pierce=0 写 10t
+        //  全局窗 → 多星齐射首星后其余星被 :12636 门拒整饿死（原版 N 星=N 独立命中）
+        //  且受理写支污染 vanillaGated 门位读（proc/numHits 恒跳,原版受理照 proc
+        //  :13877-79 照计数 :14263）。-3 档写 0（受理面 immune[owner] 已为 0=无操作
+        //  等位）→ 门位读复原=齐射不饿+proc/入账照达。
+        // ★清偿刀 T（X4-债12,同 AoE 站注）：门位读前置快照（读侧单源）——-3 档写 0
+        //  后后置读在普通面已等位,唯死亡转换写支（Enemy.ts:14421 写 iframes=2,与
+        //  pierce 档无关）仍污染致死命中拍;快照判据=「进 hurt 前状态」。
+        const gate = snapshotVanillaGate(e);
         strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen);
-        const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
-          || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen, -3);
+        const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（爆炸相首敌 0 档率 0.20）
           this.pveNumHits++;
@@ -589,10 +637,19 @@ export class LunarFlareStar extends Entity {
     //  victim 循环 :12618）;与敌怪面同构=本仓飞行相零伤转爆承载,伤害面在爆炸相。
     if (hitCritters(this, game)) { this.explodeNow(); return; }
     // 命中敌 → 转爆炸（:16706-16710，非 Kill）
+    // ★清偿刀 L（2026-09-29）：飞行盒受理门补全——原版转爆支 :14257-14262 在
+    //  Damage_PVE_Inner 受理面【后】,门链 = :12593 局部表（弹侧 hitSet 承载,已在
+    //  上行）+ :12598 dontTakeDamage + :12635-12637 immune[owner]==0（645 flag3=假：
+    //  penetrate=-1+usesLocalNPCImmunity :6955-6965,免疫门照走）→ 残窗/免伤敌
+    //  【不】触发转爆相,星照常下坠（60px AI 索敌支 :57987-58006 无免疫门=原版本相,
+    //  不受此门——近敌径由该支转爆,爆伤受 :12636 门拒=零伤,两支合流与原版同相）。
+    //  受理面零伤转爆承载不变（爆相 pierce=-3 承伤,BJ398 清窗档→齐射不饿）。
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead || this.hitSet.has(e.id)) continue;
+      if ((e as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;   // :12598 外门（免伤敌不受理不转爆）
+      if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // :12635-12637 免疫门（flag3=假照走——残窗敌不触发 :14257 转爆相）
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       this.explodeNow();
       return;

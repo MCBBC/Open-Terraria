@@ -132,24 +132,47 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(log.length).toBe(0);
   });
 
-  it('拒收（门拒形态 iframes>0,hurt false）不 proc 不计数：numHits++ 仅受理面（原版 immune 门整跳）——★X2-D1 夹具忠实化', () => {
+  it('飞行盒 flag3：iframes 残窗照打照 proc 照计数 + 命中写支 immune=5（:12635-12637 豁免/:14080-14082）——★清偿刀 F 翻案（X2-D1 旧钉基于 pierce=0 假红窗,退役）', () => {
+    // 定谳：634/635 SetDefaults（P.cs:6818-6839）无 penetrate/usesLocal 行 → :366
+    //  缺省 1 → :10675 maxPenetrate=1 → :12635 flag3=真 → :12636 免疫门不拦。
+    //  几何注：弹 40×40 出生即与敌盒重叠 → 本夹具实际走飞行盒支（非 Kill AoE）。
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 100);
     let attempts = 0;
-    e.hurt = () => { attempts++; return false; };
-    // ★X2-D1 夹具忠实化（2026-09-29）：hurt 返假在真 Enemy 合同里两族异义——门拒
-    //  （iframes 残窗 :13972 读【调用前】值）vs 受理（血尽级联 :14369/普通未致命
-    //  :15037）。本测模拟门拒 → 补 iframes 残窗承载（判据改 !vanillaGated 后,
-    //  缺字段裸返假会被正确读作受理——见下案）。
-    e.iframes = 10;
+    e.hurt = () => { attempts++; return false; };          // 血尽/未致命返假形态（无门位）
+    e.iframes = 10;                                        // 残窗（他源 10t）
     const game = makeGame(log, [e]);
     const bolt = new NebulaBlazeBolt(80 * TILE, 100 * TILE, 0, 0, 130, 3, 634);
     bolt.critChance = 0;
     bolt.fixedUpdate(1, game);
-    expect(bolt.dead).toBe(true);                         // 爆照走（Kill 链独立于结算）
-    expect(attempts).toBe(1);
-    expect(log.length).toBe(0);
-    expect(bolt.pveNumHits).toBe(0);
+    expect(bolt.dead).toBe(true);                          // 命中 → penetrate 0 → Kill
+    expect(attempts).toBe(1);                              // 飞行盒照打（不被残窗拦）
+    expect(log.length).toBe(1);                            // 受理 → proc 照达
+    expect(log[0].numHits).toBe(0);
+    expect(bolt.pveNumHits).toBe(1);                       // :14263 受理后自增
+    expect(e.iframes).toBe(5);                             // :14080-14082 专支覆写 5t（残窗 10 被覆写）
+  });
+
+  it('Kill AoE 门拒（maxPenetrate=-1 :73267 → flag3 假 → :12636 immune 门）:仅爆盒缘重叠的残窗敌不 proc 不计数', () => {
+    // 敌 B 盒 1256..1280 ∩ 爆盒 1275..1325 ✓ ∩ 飞行盒 1280..1320 ✗（B 不被飞行盒
+    // 命中 → 无 skipId,纯 AoE 面）——iframes 残窗下 AoE 门拒（原版 flag3 只豁免
+    // maxPenetrate==1 的飞行盒;Kill 前 :73265-73267 置 -1 → 门照走）。
+    const log: StealCall[] = [];
+    const a = enemySpy(1, 81, 100);
+    let attemptsA = 0;
+    a.hurt = () => { attemptsA++; return false; };
+    const b = enemySpy(2, 78.5 + 0, 100.6);                // x=1256,y=1609.6,盒 1256..1280×1609.6..1633.6
+    b.iframes = 10;                                        // 残窗（他源）
+    const game = makeGame(log, [a, b]);
+    const bolt = new NebulaBlazeBolt(80 * TILE, 100 * TILE, 0, 0, 130, 3, 634);
+    bolt.critChance = 0;
+    bolt.fixedUpdate(1, game);
+    expect(bolt.dead).toBe(true);
+    expect(attemptsA).toBe(1);                             // a 走飞行盒（flag3 照打）
+    expect(log.length).toBe(1);                            // 只 a 的 proc（b 被门读拦）
+    expect(log[0].numHits).toBe(0);
+    expect(bolt.pveNumHits).toBe(1);                       // b 门拒不计数
+    expect(b.iframes).toBe(10);                            // b 残窗原样（AoE 面无弹侧写支）
   });
 
   it('受理（普通未致命形态,hurt 返假无门位）照 proc 照计数（:14263 无死亡复查）——★X2-D1 判别面', () => {

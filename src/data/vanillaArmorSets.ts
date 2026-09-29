@@ -71,7 +71,8 @@ export interface ArmorSetBonus {
                              // onHitDodge;Player.cs:6937-6940 shadowDodgeTimer==0 门 →
                              // AddBuff(59,1800) 幻影闪避——Hurt 第四闪避支来源链）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
-  ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，engine 未接）
+  ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，on-hit 浮魂弹 356——
+                             // ★2026-08-31 对齐批⑥已接：entities/SpectreSoulProj.ts）
   forbidden?: boolean;       // ★组C 终盘（2026-09-18）禁戒全套（Benefits.Forbidden
                              // ArmorSetBonuses.cs:61-65——setForbidden 置位 + 每拍
                              // UpdateForbiddenSetLock + 光照(0.8,0.7,0.2);行为型 engine =
@@ -241,7 +242,8 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '46|27|26': { dmgMelee: 0.1, dmgRanged: 0.1, frostBurn: true, name: 'Frost' },
   // 幽灵套（Spectre Robe 66 / Pants 55；Player.cs:15850-15860）：
   // 头 101 兜帽 → ghostHeal（魔法命中回血，魔法伤 −40%）；
-  // 头 156 面具 → ghostHurt（伤害强化 engine 未接，登记）
+  // 头 156 面具 → ghostHurt（on-hit 浮魂弹 356——★批⑥已接 SpectreSoulProj.ts；
+  //   物品 id 域同登记 :411 triples [[2189,1504,1505]]，两域同义）
   '101|66|55': { ghostHeal: true, dmgMagic: -0.4, name: 'SpectreHealing' },
   '156|66|55': { ghostHurt: true, name: 'SpectreDamage' },
   // ★BEGIN FORBIDDEN-SET 组C 终盘（2026-09-18,只加本键勿动它键——并行扩表隔离块）

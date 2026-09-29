@@ -13958,6 +13958,9 @@ export class Enemy extends Entity {
     //         红蓝-J3 2026-09-18）→ 免疫门照走（原版 :12636 immune[owner]==0,
     //         flag3=false）但命中【三不写】（:14031-14038 首支内层条件假:组行/
     //         全局窗/尾档全不可达）=不开全局窗,多云同拍连击同敌本相。
+    //         ★清偿刀 R（2026-09-29）第二消费位：634/635 Kill AoE 环（Kill 先置
+    //         maxPenetrate=penetrate=-1 → flag3 假门照走;原版写支=显型定档 5t
+    //         :14080-14082,由弹侧受理面补写——本档三不写=门位读不被写支污染）。
     //         （−1 已被日曜爆闪 608 反击面占用:penetrate=−1 非-IDStatic → 原版
     //         尾档真=写 10t,Game.ts:39206 依赖该支,勿混用）
     //   -3  = usesLocalNPCImmunity 族（禁戒沙暴柱 656：SetDefaults :7059-7060
@@ -14389,19 +14392,37 @@ export class Enemy extends Entity {
         this.realLifeHost.die(game);
         return false;
       }
-      // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
+      // 月总族(396/397/398)血尽不直死:原版 checkDead(:78864-78883)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
       // 月总族:血尽转 -2/-3/演出在各 AI 首行,放行。★398 死亡演出态(ai0==2)
       // 豁免——演出 600t 满时 AI 调 die() 走标准死亡管线(掉落/旗标),若仍放行
       // = 零掉落(boss 袋/夜明矿/武器池全不出,2026-08-19 终审修)
+      // ★清偿刀 Y（2026-09-29,X4-债14）：补 PrepareForDeathAnimation 真旗
+      //   （:78870/:78881 → :78838 dontTakeDamage=true）。原版在致死 StrikeNPC 内
+      //   同步写旗（StrikeNPC_Inner :82393-82398 尾调 checkDead,无 AI tick 延迟）,
+      //   转换窗（致死拍→下个 AI tick）内全通道拒收：弹幕 Damage_PVE 两门
+      //   （Projectile.cs:12598/:12686）、近战（Player.cs:20542 等）、NPC 互伤
+      //   （:93557）。旧档只放行不写旗=窗内清零档写入方（567/568/251 idStatic、
+      //   656/856 usesLocal,命中写 iframes=0）下同拍补刀可再结算（飘字/proc/入账/
+      //   iframes 覆写）。ai0===-2/-3 态不可达（首转换已写旗+满血,checkDead 于
+      //   life>0 早退）——此处无条件写=幂等。
       if (this.vanillaId === 396 || this.vanillaId === 397
-        || (this.vanillaId === 398 && this.ai0 !== 2)) return false;
+        || (this.vanillaId === 398 && this.ai0 !== 2)) {
+        this.dontTakeDamage = true;
+        return false;
+      }
       // 猪鲨爆裂泡泡（NPC 371）：血尽不直死——checkDead（NPC.cs:78850-78855）
       // 转 ai[0]=1/ai[1]=4 引信态 + PrepareForDeathAnimation（life=lifeMax/
       // dontTakeDamage=true），转换逻辑在 dukeBubbleAI 首行接管（★1458 行为裁定,
       // 台账②——旧 1456 零伤早退档已退役,见上方 hurt 头部注释）。
       // 爆裂态（ai0==1）内再次血尽（理论不可达,dontTakeDamage 拒后续弹）直接放行死亡。
-      if (this.vanillaId === 371 && this.ai0 !== 1) return false;
+      // ★清偿刀 Y（X4-债14）：写旗提前到致死拍（原版 :78854 直调,无 ai 守卫）——
+      //   引信态转出前（AI 首 tick 前）同拍补刀（清零档清窗）照拒;引信态本身由
+      //   dukeBubbleAI :1363 每 tick 重写旗维持（台账①面）。
+      if (this.vanillaId === 371 && this.ai0 !== 1) {
+        this.dontTakeDamage = true;
+        return false;
+      }
       // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
       // 首行——一阶段本体无敌,玩家先打头的场景本体必活;本体死后原版头是
       // StrikeNPCNoInteraction 标准死 :31287-31290,落回通用管线)。
@@ -14410,12 +14431,26 @@ export class Enemy extends Entity {
       // 拳 247/248 = 普通死亡(原版无转换)。★曾全族放行→转换只在 AI 首行而拳/
       // 本体无处理 = 负血条不死(用户报 2026-08-19,放行在 dead=true 之前,hurt
       // 不会置 dead——"AI 首行接管"的契约对本/拳不成立)
+      // ★清偿刀 Y（X4-债14）：原版 checkDead 无 246 支——挂载头致死拍=HitEffect
+      //   召 249（:85913-85920）+ 标准死 active=false,后续命中被 active 门天然拒。
+      //   本仓转换在 golemHeadAI 首行（boss#19 定案,golemHeadGoFree=召 249+原位
+      //   dead 让位）,窗内以真旗闭合同拍补刀;下 tick AI 双向归位（自由态 true/
+      //   挂载态 false 各自每拍重写）。本体死分支走标准死管线不受此旗影响
+      //   （golemHeadAI 强杀面先清旗再 die,:31287-31290 等价）。
       if (this.vanillaId === 246
-        && (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 245)) return false;
-      // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78867-78875）血尽转 ai2=1 死亡演出
+        && (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 245)) {
+        this.dontTakeDamage = true;
+        return false;
+      }
+      // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78884-78889）血尽转 ai2=1 死亡演出
       // （ai1=0、满血续命 + dontTakeDamage），180t 上升渐隐后由 towerAI 走标准死亡管线（掉碎片）
       if (this.vanillaId != null && this.vanillaId in TOWER_KEY && this.ai2 !== 1) {
         this.ai2 = 1; this.ai1 = 0; this.hp = this.maxHp; this.iframes = 2;
+        // ★清偿刀 Y（X4-债14）：补真旗（:78888 → :78838）。旧档只写 iframes=2,
+        //   flag3 单发弹（pierce===1 豁免免疫门 :13990）转换同帧至下个 AI tick 间
+        //   绕门再结算（2t 窄缝）;真旗=全通道闸,演出期由 towerAI 每 tick 重写
+        //   （R23b-P1 形态）,本行=原版 checkDead 位（AI tick 前的窗闭合）。
+        this.dontTakeDamage = true;
         return false;
       }
       this.dead = true;

@@ -78,6 +78,17 @@ export interface ItemDef {
   accessory?: 'lucky_horseshoe' | 'feral_claws'; // 配饰效果
   // ★armor 字段已移除（2026-09-02 死字段清理：全仓零写入,防御/部位真值源 =
   //   vanilla-itemstats.json 经 statOfInternal/armorSlotIndexOfInternal）
+  /** Item.expertOnly（Item.cs:129;ResetStats :48960 每次置 false）——专家档物品：
+   *  经典世界不授装备效益。消费门（★清偿刀 U 2026-09-29,三处 1457 亲读）：
+   *  UpdateEquips k-loop :13017-13018 `(!effectiveArmor.expertOnly || Main.expertMode)`
+   *  （GrantPrefixBenefits+GrantArmorBenefits 全效益）/ApplyEquipFunctional 头
+   *  :14475-14478 整函数早退（功能配饰全旗面,画廊/线色臂在 UpdateVisibleAccessory
+   *  不设门照画）/矿车 :22859（+ :22401 同族——Game.ts 坐骑面,登记债）。
+   *  ★数据定谳：1.4.5.7 反编译全树【零】`expertOnly = true` 赋值面（Item.cs:129/
+   *  :48960 与四消费点外无第三处;1456/1405 对拍同相）——原版内容全 false,本字段
+   *  仅 Mods.SandboxWorld.* 物品可置（原版行为分支为模组留的门,照建模不裁剪）。
+   *  非 Item 实例字段（不入存档,SetDefaults 面常量）。 */
+  expertOnly?: boolean;
   value?: number;         // 钱币价值（铜币）
   wireTool?: {            // 电路工具（原版 Player.cs:30289-30444 ItemCheck_UseWiringTools）
     place?: number;       // 单击放置的导线位掩码(TOOL_RED/BLUE/GREEN/YELLOW/ACTUATOR)

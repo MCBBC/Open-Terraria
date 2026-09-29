@@ -4,6 +4,7 @@
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { Clock } from '../world/World';
 import { Clock as ClockVal } from '../world/World';
+import { liqpolish } from './perfFlags';   // ★liqpolish 微抛光刀总闸（星 cs/sn 更新侧缓存）
 
 /** 天空实体染色缓存（GetColor RGB × 贴图 multiply 预染；键含 1/16 量化色档） */
 const AMB_TINT_CACHE = new Map<string, HTMLCanvasElement>();
@@ -86,7 +87,10 @@ function lerpColor(a: string, b: string, t: number): string {
   return mix(a, b, t);
 }
 
-/** 原版星结构(Star.cs 字段 1:1;position 为 1920×1200 天空空间) */
+/** 原版星结构(Star.cs 字段 1:1;position 为 1920×1200 天空空间)。
+ *  ★liqpolish:cs/sn=cos/sin(rot) 更新侧缓存（★非原版字段——构造路径优化面）。
+ *  csRot=缓存产出的 rot 值（读侧验证戳——paused 翻旗/漏更窗下 cs/sn 可能陈旧,
+ *  csRot!==rot 即回退就地求值=任意时序下逐位安全） */
 interface SkyStar {
   x: number; y: number;
   rot: number; scale: number; type: number;
@@ -94,6 +98,7 @@ interface SkyStar {
   falling: boolean; hidden: boolean;
   fvx: number; fvy: number; fallTime: number;
   fadeIn: number;
+  cs: number; sn: number; csRot: number;
 }
 
 /** 原版日月贴图(Main.cs:62279 DrawSunAndMoon):Sun.png 整图 114×114;
@@ -1093,15 +1098,19 @@ export class SkyRenderer {
     const R = () => Math.random();
     const next = (min: number, max?: number) => max === undefined
       ? Math.floor(R() * min) : min + Math.floor(R() * (max - min));
+    const rot = next(628) * 0.01;
     const star: SkyStar = {
       x: next(1921), y: next(1201),
-      rot: next(628) * 0.01,
+      rot,
       scale: next(70, 130) * 0.006,
       type: next(0, 4),
       twinkle: next(60, 101) * 0.01,
       twSpeed: next(30, 110) * 0.0001,
       rotSpeed: next(5, 50) * 0.0001,
       falling: false, hidden: false, fvx: 0, fvy: 0, fallTime: 0, fadeIn: 0,
+      // ★liqpolish:cs/sn 更新侧缓存（draw 侧 trig 外提;值=Math.cos/sin(rot) 逐位同,
+      //  rot 全部写点同步重算——见 updateStar）
+      cs: Math.cos(rot), sn: Math.sin(rot), csRot: rot,
     };
     if (next(2) === 0) star.twSpeed *= -1;
     if (next(2) === 0) star.rotSpeed *= -1;
@@ -1116,7 +1125,9 @@ export class SkyRenderer {
     for (let i = 0; i < this.numStars; i++) this.spawnStar(-1);
   }
   /** Star.Update(:70-113):fadeIn 夜间渐显(6.1728395e-5·dayRate·10/tick)、
-   *  twinkle 0.6-1.0 往返、rotation 环绕;falling 支三倍速+0.5/tick 自旋 */
+   *  twinkle 0.6-1.0 往返、rotation 环绕;falling 支三倍速+0.5/tick 自旋。
+   *  ★liqpolish:rot 写点同步重算 cs/sn（draw 侧 trig 外提;值逐位同 draw 时
+   *  Math.cos/sin(s.rot)——rot 在 update 与 draw 之间不变） */
   private updateStar(s: SkyStar, dayRate: number): void {
     if (s.falling && !s.hidden) {
       s.fallTime += dayRate;
@@ -1128,6 +1139,7 @@ export class SkyRenderer {
       else if (s.twinkle < 0.6) { s.twinkle = 0.6; s.twSpeed *= -1; }
       s.rot += 0.5;
       if (s.rot > 6.28) s.rot -= 6.28;
+      if (liqpolish) { s.cs = Math.cos(s.rot); s.sn = Math.sin(s.rot); s.csRot = s.rot; }
       return;
     }
     if (s.fadeIn > 0) {
@@ -1139,6 +1151,7 @@ export class SkyRenderer {
     s.rot += s.rotSpeed;
     if (s.rot > 6.28) s.rot -= 6.28;
     if (s.rot < 0) s.rot += 6.28;
+    if (liqpolish) { s.cs = Math.cos(s.rot); s.sn = Math.sin(s.rot); s.csRot = s.rot; }
   }
   /** Star.UpdateStars(:137-163):昼 time≥27000 重生 hidden 星;逐星 Update */
   private updateStars(dayRate: number, isDay: boolean, dayTicks: number): void {
@@ -1235,7 +1248,10 @@ export class SkyRenderer {
     }
     const tex = this.starTex(s.type);
     if (!tex) return;
-    const cs = Math.cos(s.rot), sn = Math.sin(s.rot);
+    // ★liqpolish:cos/sin 读更新侧缓存（csRot 验证戳=缓存产出 rot——任意时序
+    //  （paused 翻旗/漏更）下陈旧即回退就地求值,值逐位同 Math.cos/sin(s.rot)）
+    const cs = liqpolish && s.csRot === s.rot ? s.cs : Math.cos(s.rot);
+    const sn = liqpolish && s.csRot === s.rot ? s.sn : Math.sin(s.rot);
     if (s.falling) {
       // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha
       // 衰减+rotation。★位移乘视口变换(×viewW/1920,×viewH/1200)——原版 1920×1200
@@ -3986,9 +4002,41 @@ export class SkyRenderer {
     // "地底下没有背景墙体的远景没有光衰减")。状态更新(晨昏/极光/天气罩)仍照跑
     // 供光种/帧状态消费,只跳过绘制并以黑打底(原版 skyTarget Clear(Transparent)
     // 合成底=黑同效;地下带层缝隙兜底)。
+    // ★SW-微光星空闪烁修复（2026-09-29 用户实报"微光环境背景星光原版会闪烁,
+    //  本仓疑似静态"定谳）：vanilla Star.UpdateStars 的钟在【update 相】
+    //  （Main.cs:17429-17449）——地上 `if (screenPosition.Y < worldSurface*16+16)`
+    //  支恒跑;地下走 `else if (shimmerAlpha > 0f)` 支【同样恒跑】(+1/90·tick
+    //  坠星掷+hidden 星重生)。本仓曾把逐星 Update 挂在 sky.draw 自然星段
+    //  （:4125 updateStars）=深度门 early-return 整体跳过 → 微光域（地下）
+    //  twinkle 冻结=人工星空静态（判别器:活帧 0/8 星 twinkle 160 tick 恒值;
+    //  手动 updateStars 可推进=钟源活、调用点死）。修=地下支按 vanilla 语义
+    //  补 updateStars（shimmerAlpha>0 门+坠星掷）;地上支照旧（:4125 不动,
+    //  无双更新——地下臂 return 不落自然星段）。
     if (screenTopWorld >= this.fx.surfaceY + 16) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, viewW, viewH);
+      if (!this.frameCtx?.paused && this.shimmerAlpha > 0) {
+        this.updateStars(this.frameCtx?.world?.dayRate?.() ?? 1, isDay, dayTimeTicks);
+        // vanilla :17439-17448:1/90·tick 随机坠星+hidden 星重生（SpawnStars(j)
+        // 的 10 次探位版,fadeIn=1 渐显）——本仓 starFallAt(AI_148 路径)之外的
+        // 环境坠星源;随机取星=vanilla rand.Next(numStars) 同式
+        if (Math.random() * 90 < 1) {
+          const stars = this.stars;
+          if (stars.length) {
+            const num5 = Math.floor(Math.random() * this.numStars);
+            const s5 = stars[num5];
+            if (s5 && !s5.hidden && !s5.falling) {
+              s5.fallTime = 0;
+              s5.falling = true;
+              s5.fvy = (700 + Math.floor(Math.random() * 301)) * 0.01;
+              s5.fvx = (Math.floor(Math.random() * 801) - 400) * 0.01;
+            }
+            for (let j = 0; j < this.numStars; j++) {
+              if (stars[j]?.hidden) { this.spawnStar(j); stars[j].fadeIn = 1; }
+            }
+          }
+        }
+      }
       return;
     }
     const [top, bottom] = this.skyColors(t);

@@ -100,6 +100,38 @@ export function vanillaFlag10LifeMaxOk(e: { maxHp?: number; def?: { lifeMax?: nu
   return lifeMax === undefined || lifeMax > 5;
 }
 
+// ---- vanillaGated 门位读前置快照（★清偿刀 T,2026-09-29,X4-债12 族级残差）----
+// 病灶（清偿刀 R 定谳,本刀推广全族）：受理面谓词的门位判据必须是「进入 hurt 之前的
+// 状态」——原版免疫门 Projectile.cs:12634-12637（`targetNPC.immune[owner]==0`）与
+// :12686（`targetNPC.dontTakeDamage`）都读【StrikeNPC 之前】的受害者态;proc
+// （:13877-79）与 numHits++（:14263）在受理面无死亡复查。仓内后置读站（hurt 返值后
+// 读 e.iframes/dontTakeDamage）会被 hurt 内写支污染,两源：
+//   ① 受理写支（Enemy.ts:14297-14298 通用尾档 pierce≠-3/-2/1 写 10t）——pierce=0 站
+//      （251/632/461/536/856）受理拍读恒真 → proc/numHits 恒跳（吸血域断供,同刀 R
+//      「旧 pierce=0 受理写 10t」判谳;刀 R/L 以写支档位 -2/-3 治标,本刀以读前置治本）;
+//   ② 死亡转换写支（Enemy.ts:14421,星璇四塔 517/422/507/493 血尽转演出写 iframes=2
+//      ——原版形态 PrepareForDeathAnimation（NPC.cs:78835-78841）写 dontTakeDamage=true,
+//      写支本身 1:1 禁改）——任何 pierce 档的致死命中撞上转换族都污染后置读。
+// 处方：strike 调用【前】快照,返回后用快照判 vanillaGated。判别测试
+// tests/debt-t-gate-snapshot.test.ts（塔转换致死命中 proc/入账照达+门拒面零回归）。
+export interface VanillaGateSnapshot {
+  iframes: number;
+  dontTakeDamage: boolean;
+}
+/** strike 前置快照：读受害者门位字段（iframes/dontTakeDamage）冻结进判据。
+ *  入参 duck-typed（unknown——各站弱型敌视图 EnemyLike/MedusaEnemy/内联桩无门位
+ *  字段声明,缺字段=0/假（mock 桩同面）,与原后置读的 `?? 0`/`=== true` 容缺同构）。 */
+export function snapshotVanillaGate(e: unknown): VanillaGateSnapshot {
+  const t = e as { iframes?: number; dontTakeDamage?: boolean } | null | undefined;
+  return { iframes: t?.iframes ?? 0, dontTakeDamage: t?.dontTakeDamage === true };
+}
+/** 受理面谓词（快照判据）：vanillaGated=门拒（iframes>0 / dontTakeDamage）。
+ *  exemptIframes = flag3 臂（:12635 maxPenetrate==1 单发弹免疫门豁免——pierce==1
+ *  调用方传 true,iframes 不再构成门拒,dontTakeDamage 照拦 :12686）。 */
+export function vanillaGateRejected(s: VanillaGateSnapshot, exemptIframes = false): boolean {
+  return (!exemptIframes && s.iframes > 0) || s.dontTakeDamage;
+}
+
 export function ghostHealProc(game: GameHooks, projId: number, numHits: number,
   e: GhostHealVictimLike): void {
   if (!(projId > 0 && projectileData(projId)?.magic)) return;

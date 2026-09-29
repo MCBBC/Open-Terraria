@@ -28,7 +28,7 @@ import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
-import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源
+import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源（★清偿刀 T 门位快照单源）
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
 
@@ -210,9 +210,14 @@ export class MedusaHeadProj extends Entity {
       //  dontTakeDamage:13978）+血尽级联（:14369 族）+普通未致命尾档（:15037）;
       //  原版 proc/numHits++ 在受理面无死亡复查 → 门拒不 proc 不计数,非门拒照 proc。
       //  旧「hurt 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+      // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源,判据=「进
+      //  hurt 前状态」）。旧后置读两源污染：①受理写支（Enemy.ts:14297 pierce=0 写
+      //  10t;536 vanilla 写梯尾档 10t 同值,写面 1:1）→ 受理拍读恒真 → proc 真机恒跳
+      //  （mock hurt 无写支故测试绿;同刀 R「旧 pierce=0 受理写 10」判谳）；②死亡转换
+      //  写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死命中拍误判门拒。
+      const gate = snapshotVanillaGate(t);
       t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
-      const vanillaGated = ((t as { iframes?: number }).iframes ?? 0) > 0
-        || (t as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
         ghostHealProc(game, 536, 0, t);
       }

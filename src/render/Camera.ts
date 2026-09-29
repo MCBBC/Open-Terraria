@@ -1,6 +1,7 @@
 // 相机：跟随玩家 + 缓动 + 世界边界钳制
 import { TILE } from '../core/constants';
 import { CameraModifierStack } from './CameraModifierStack';
+import { DroneCameraTracker } from './DroneCameraTracker';
 
 export class Camera {
   x = 0; y = 0;         // 视野中心（世界 px）
@@ -39,6 +40,15 @@ export class Camera {
    *  写入方：Game.fixedUpdate（player.fixedUpdate 后）与 Renderer.render 帧头
    *  双点同步 = player.gravDir===-1。 */
   flipY = false;
+
+  // ★X4 清偿刀I（2026-09-29）：DroneCameraTracker 通道宿主（原版单例
+  //  Main.DroneCameraTracker，Main.cs:1893；Terraria.DataStructures/
+  //  DroneCameraTracker.cs 全文 1:1 见 src/render/DroneCameraTracker.ts）。
+  //  生命周期：本仓 Camera 每世界重建（Game.ts :7157 构造点）≙ WorldGen.cs:6950
+  //  DroneCameraTracker.WorldClear 进图复位（BJ400 注先例：CurrentPan=Zero ≙
+  //  WorldGen.cs:6952 同法）。消费点 = Game fixedUpdate 物体跟踪链
+  //  （GetObjectTrackingCameraPan Main.cs:63692-63694 支，序=观战→死门→无人机→高尔夫）。
+  readonly droneTracker = new DroneCameraTracker();
 
   constructor(public worldW: number, public worldH: number) {}
 

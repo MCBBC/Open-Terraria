@@ -148,18 +148,21 @@ export function rulerReadoutText(dx: number, dy: number): string | null {
 }
 
 // ---- 配饰槽 vid 扫描（Player.cs:12897 旗位判定的仓内等价）----
-/** 装备式配饰（armor[3..accSlotMax)，Player.cs:36326 armor[3-7 基座+8 恶魔之心]）
+/** 装备式配饰（armor[3..9] 解锁格——Player.cs:36326 armor[3-7 基座+8 恶魔之心+9 大师]）
  *  当前是否持有 vid（重力地球仪 1131 / 图标门 486/2799/3619/3611/3624/2216/3061/5126）。
+ *  ★清偿刀 P：accSlotMax 连续界退役,改逐槽解锁谓词（Player.cs:12669-12690
+ *  IsItemSlotUnlockedAndUsable——大师无恶魔心态=8 锁 9 开,连续界不可表达）。
  *  ★未注册 vid → VI_ID=0 → 恒 false（空槽 null 不撞 0）。 */
 export function playerAccessoryVidEquipped(
   armor: ReadonlyArray<{ id: number } | null | undefined>,
-  accSlotMax: number,
+  isSlotUnlocked: (slot: number) => boolean,
   vid: number,
 ): boolean {
   if (vid <= 0) return false;
   const want = VI_ID(vid);
   if (want === 0) return false;
-  for (let i = 3; i < accSlotMax && i < armor.length; i++) {
+  for (let i = 3; i < 10 && i < armor.length; i++) {
+    if (!isSlotUnlocked(i)) continue;
     if (armor[i] && armor[i]!.id === want) return true;
   }
   return false;
@@ -176,7 +179,7 @@ export function playerAccessoryVidEquipped(
 export function playerVidCarried(
   slots: ReadonlyArray<{ id: number } | null | undefined>,
   armor: ReadonlyArray<{ id: number } | null | undefined>,
-  accSlotMax: number,
+  isSlotUnlocked: (slot: number) => boolean,
   vid: number,
 ): boolean {
   if (vid <= 0) return false;
@@ -185,7 +188,8 @@ export function playerVidCarried(
   for (let i = 0; i < slots.length && i < 58; i++) {
     if (slots[i] && slots[i]!.id === want) return true;
   }
-  for (let i = 3; i < accSlotMax && i < armor.length; i++) {
+  for (let i = 3; i < 10 && i < armor.length; i++) {   // ★清偿刀 P：逐槽解锁门
+    if (!isSlotUnlocked(i)) continue;
     if (armor[i] && armor[i]!.id === want) return true;
   }
   return false;

@@ -287,7 +287,7 @@ describe('BJ116 ① 容器右键装备 src 修复（旧码误读 inv.dye[i]）',
     expect(inv.armor[4]).toMatchObject({ id: WATCH_COPPER });            // 其余段位不动
     expect(inv.dye[0]).toMatchObject({ id: RED_DYE });       // 染料格不被误读/误装
     expect(inv.miscDyes[0]).toBeNull();                      // 旧码错位回写格不落在
-    expect(sfx).toEqual(['menuTick']);
+    expect(sfx).toEqual(['pickup']);                   // SoundEngine.PlaySound(7)（★清偿刀 U:ArmorSwap :3643 统一 Swap 三原语,旧 menuTick=取件臂声误挂）
   });
 
   it('箱中染料右键→染料位（旧码同错源面）', () => {

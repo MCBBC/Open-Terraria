@@ -25,12 +25,12 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
 import { tintedTex } from '../render/StringLine';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源
+import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源（★清偿刀 T 门位快照单源）
 
 // ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
 //  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
@@ -230,18 +230,33 @@ export class PrismProng extends Entity {
           //  原版 proc/numHits++ 在受理面无死亡复查 → 门拒（iframes>0,dontTakeDamage
           //  ——pierce=0 承载,dead 已上方前置）不 proc 不计数,非门拒照 proc 照计数。
           //  旧「hurt 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+          // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源,判据=
+          //  「进 hurt 前状态」）。旧后置读两源污染：①受理写支（Enemy.ts:14297
+          //  pierce=0 写 10t）→ 受理拍读恒真 → proc/numHits 恒跳（真机吸血域断供,
+          //  mock hurt 无写支故测试绿;同刀 R「旧 pierce=0 受理写 10」判谳）；②死亡
+          //  转换写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死命中拍误判。
+          const gate = snapshotVanillaGate(e);
           e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
-          const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
-          if (!vanillaGated) {
-            ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
-            this.pveNumHits++;
-          }
+          const vanillaGated = vanillaGateRejected(gate);
           // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
           // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t
           // （缺省 5——旧桩 player 无此方法时行为不变）
-          this.hitCd.set(e.id, (game.player as unknown as {
+          const win = (game.player as unknown as {
             getSlowMagicUseTime?: (n: number) => number;
-          }).getSlowMagicUseTime?.(5) ?? 5);
+          }).getSlowMagicUseTime?.(5) ?? 5;
+          this.hitCd.set(e.id, win);
+          if (!vanillaGated) {
+            // ★清偿刀 W（X4-债13②,2026-09-29）：写面对齐 :14056-14058 632 专支——
+            //  受理尾 immune[owner]=GetSlowMagicUseTime(5)。旧 pierce=0 通用尾档写
+            //  10t → hitCd 5t 期满后 5..10t 段再命中被 Enemy.hurt 头门 :13991 整拒,
+            //  真机节拍 10t vs 原版 5t。受理面双域同写（R 刀范式）：弹幕域 iframes=
+            //  win + 近战域表（桥 632→PROJ_IMMUNE_SLOW_MAGIC_TIER 自换算）。正窗
+            //  覆写不触四塔/371 血尽转换写支的 kill-tick 护窗（>0 恒拦）。
+            (e as unknown as { iframes?: number }).iframes = win;
+            noteVanillaProjImmune(game, this.projId, e.id);
+            ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
+            this.pveNumHits++;
+          }
           break;
         }
       }
@@ -658,8 +673,13 @@ export class BlasterBeam extends Entity {
         //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
         //  ★X2-D1（同 632 站注）：受理面谓词 !vanillaGated——门拒（iframes>0/
         //  dontTakeDamage）不 proc 不计数,血尽级联/普通未致命返假照 proc 照计数
+        // ★清偿刀 T（X4-债12,同 632 站注）：门位读【前置快照】——旧后置读被受理写支
+        //  （Enemy.ts:14297 pierce=0 写 10t;461 vanilla 写梯尾档 10t :14176-14182 同值,
+        //  写面 1:1）与死亡转换写支（Enemy.ts:14421 四塔写 2）双源污染,受理拍读恒真
+        //  → proc/numHits 真机恒跳。快照判据=「进 hurt 前状态」。
+        const gate = snapshotVanillaGate(e);
         e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
-        const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+        const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
           this.pveNumHits++;

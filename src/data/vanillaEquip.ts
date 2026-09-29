@@ -4,6 +4,7 @@
 //   / hook=mountType==-1 && Main.projHook[shoot]（projHook=aiStyle 7）
 import equipJson from './vanilla-equip.json';
 import { ITEM_DEFS } from './items';
+import { statOfInternal } from './vanillaItemStats';   // ★清偿刀 Z：accPairConflicts 双翼臂翼表（无环:vanillaItemStats 不回依本模块）
 
 export type EquipKind = 'dye' | 'pet' | 'light' | 'mount' | 'cart' | 'hook';
 
@@ -47,3 +48,34 @@ export const MISC_KINDS: EquipKind[] = ['pet', 'light', 'cart', 'mount', 'hook']
 export function miscSlotAccepts(slot: number, id: number): boolean {
   return KIND_BY_IID.get(id) === MISC_KINDS[slot];
 }
+
+// ---- ★清偿刀 Z（2026-09-29）配饰互斥组谓词单源（原 UI.ts 模块内私有,提至数据层——
+// Inventory.ts armorAccepts 本体组臂收口（U 刀登记债,其内部消费面 CanShareArmor
+// :311/Loadout :337 自动承接）与 UI 三面（右键/拖放/时装互换）共用;提源原因:
+// UI.ts 已 import Inventory.ts（UI.ts:199）,反向 import 成环,数据层无环）----
+
+/** ItemID.Sets.AccessoryIncompatibilityType（ItemID.cs:58,1457 亲读）：四件同组
+ *  （值全 6168：6168/6169/6193/6194 弹药循环族）——组员两两互斥（CanEquipBothAccessories
+ *  :3475-3480 `num != -1 && num == num2`）。其余 vid 无组（−1）。 */
+export const ACC_INCOMPAT_GROUP = new Set([6168, 6169, 6193, 6194]);
+
+/** HasSameItemInSlot（ItemSlot.cs:3517-3538,1457 亲读）：段内同 type（:3527-3530）
+ *  ∨ 同互斥组（:3531-3535）——【无】双翅臂。ArmorSwap 对段门（:3593/:3598）用。 */
+export const accGroupClash = (a: number, b: number): boolean =>
+  a === b ||
+  (ACC_INCOMPAT_GROUP.has(ITEM_DEFS[a]?.vid ?? -1) && ACC_INCOMPAT_GROUP.has(ITEM_DEFS[b]?.vid ?? -1));
+
+/** CanEquipBothAccessories 的否定（ItemSlot.cs:3460-3481,1457 亲读）——ArmorSwap
+ *  自段冲突扫描（:3618 HasIncompatibleAccessory 逐槽调）：同 type（:3462-3464）/
+ *  双翅（:3465-3474 wingSlot 双正;社交段 3580 例外 :3466-3473）/互斥组（:3475-3480）。
+ *  空槽恒不冲突（air type=0/wingSlot=0/组 −1——调用侧先判空）。@param vanity =
+ *  目标段为社交段（ArmorSwap :3618 传 item.vanity） */
+export const accPairConflicts = (a: number, b: number, vanity: boolean): boolean => {
+  if (a === b) return true;
+  const wa = statOfInternal(a)?.wing, wb = statOfInternal(b)?.wing;
+  if (wa != null && wb != null) {
+    if (vanity && (ITEM_DEFS[a]?.vid === 3580 || ITEM_DEFS[b]?.vid === 3580)) return false;
+    return true;
+  }
+  return ACC_INCOMPAT_GROUP.has(ITEM_DEFS[a]?.vid ?? -1) && ACC_INCOMPAT_GROUP.has(ITEM_DEFS[b]?.vid ?? -1);
+};

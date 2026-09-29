@@ -365,7 +365,7 @@ describe('⑤ BJ208 外门收口：光标持不可叠物仍进换型/装备臂�
     expect(inv.armor[0]?.id).toBe(DIVING_HELM);        // 装备上身
     expect(inv.slots[10]).toBeNull();                  // 旧装备位空 → 槽清空
     expect(ui.heldStack).toMatchObject({ id: TORCH, stack: 3 });   // 光标持物不动
-    expect(sfx).toEqual(['menuTick']);                 // swapEquipItem 装备声
+    expect(sfx).toEqual(['pickup']);                   // swapEquipItem 装备声=Sound 7（★清偿刀 U:ArmorSwap :3643 统一,旧 menuTick=取件臂声误挂）
   });
 
   it('⑩ 可叠同款（同 id 同词缀）照旧跳过两臂直落取件臂（:1636 CanStack=true）', () => {

@@ -71,7 +71,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 //     通道不受守卫限制;
 //   ③ 锚 fail-loud：methodBody 签名未找到即 throw（禁止「找不到就吃空体」静默兜底）;
 //   ④ 判别力自证：tests/extract-itemcombat-era-guard.test.ts（变异:摘干跑门=静默写库;
-//     毒化方法签名=fail-loud）。BJ215 定谳：1457 重产 vs 现库逐值零漂移（4369 items +
+//     毒化方法签名=fail-loud;★清偿刀 M 2026-09-29 增 M3=摘根修门复现 F 债九 alias 双缺/
+//     M4=委托链断 combat 失联;★清偿刀 Q 2026-09-29 退役六锯钻 LUNAR_DELEGATE 手补面
+//     （M 根修后委托链单源直出,沙箱重产 sha256 逐字节相等复证）,M4 判别面扩至全 15 件
+//     月主委托件）。BJ215 定谳：1457 重产 vs 现库逐值零漂移（4369 items +
 //     978 useSound）,bare 重跑幂等态成立,B-form 对拍闸在位。
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,stdout 出 JSON 摘要
@@ -617,7 +620,17 @@ function applyRec(id, lines) {
   const rec = fieldsFromLines(id, lines);
   const sound = soundOfLines(lines);
   if (sound !== undefined) SOUND.set(id, sound);
-  if (!Object.keys(rec).length && sound === undefined) return;
+  // ★清偿刀 M 根修（清偿刀 F 新立债#2,2026-09-29）：委托行判据【先于】早退门。
+  //   「纯委托 alias」精确判据 = 本块含 SetDefaultsN(M) 委托行 && rec 空 && sound
+  //   undefined——本体只有 type/glowMask/width/height/useStyle 等非 combat 域字段
+  //   （combat 域 = NUM_FIELDS∪BOOL_FIELDS + UseSound 侧道,均不入 rec/sound）,
+  //   整件战斗身份全在基底 M。原序（早退门在前）把这类件整件吞掉——连 delegates
+  //   都不进,月主九挥砍件（2777/2780/2781/2782/2785/2786/3462/3465/3466,本体
+  //   `SetDefaults3(N); type=X; glowMask=M;`） combat+sound 双缺根因。
+  //   修后:纯 alias 先进 delegates 链,委托展开（合并循环）继承基底全字段/UseSound;
+  //   「早退判定移到委托展开后」由两条机制兑现——①target 可解析→基底终态全拷入表;
+  //   ②target 无记录→件不入表且 --audit X-02 unresolved-target 报红（fail-loud,
+  //   非静默早退）。既有路径行为零变化（rec/sound 任一非空的委托件原就进链）。
   const dl = lines.find((l) => /^SetDefaults\d?\(\d+\);/.test(l));
   if (dl) {
     // ★targetId 取括号内模板号（`/\d+/` 会先抓到 SetDefaultsN 的方法号 N——
@@ -626,6 +639,7 @@ function applyRec(id, lines) {
     delegates.push({ id, targetId: parseInt(dl.match(/\((\d+)\)/)[1], 10), rec, sound });
     return;
   }
+  if (!Object.keys(rec).length && sound === undefined) return;
   // 同 id 多处赋值（分段 switch/嵌套覆盖可能重复）：合并（后者覆盖）
   if (Object.keys(rec).length) literal.set(id, { ...(literal.get(id) || {}), ...rec });
 }
@@ -818,11 +832,14 @@ function main() {
   }
   obj['2350'] = { ...obj['2350'], useTime: 30, useAnimation: 30 };
   //  · 月主委托件 15 件（2026-08-25 r33 蓝队；red-team-r33 §三 P0-①②）：委托段
-  //    `SetDefaults3(N)` 本体只有 type/glowMask[/shoot]——九挥砍件 rec/sound 双空被
-  //    applyRec 早退门吞掉（连 delegates 都不进），六锯钻是老脚本产物只落了 {shoot:N}。
-  //    值=基底 case 终态+本段覆写（C# 先跑基底再覆写；1458 :26566-26615/:31056-31078，
-  //    两版同值已对账）。★六锯钻 dump 侧委托合并已能产出正确终态，此处固化仅为
-  //    "重跑不丢"与提交态对齐。
+  //    `SetDefaults3(N)` 本体只有 type/glowMask[/shoot]。★清偿刀 M 根修（2026-09-29）
+  //    后 applyRec 委托行判据先于早退门——九挥砍件（rec/sound 双空）与六锯钻
+  //    （rec={shoot}）全部原生进 delegates 链,委托合并直出基底终态+本件覆写
+  //    （C# 先跑基底再覆写；1458 :26566-26615/:31056-31078,两版同值已对账）。
+  //    ★清偿刀 Q（2026-09-29）：六锯钻 LUNAR_DELEGATE 手补面退役（M 退役九挥砍件
+  //    后的最后一块月主手补面）——SW_OUT 沙箱重产 vs 现库 sha256 逐字节相等复证
+  //    通过,15 件全走委托链单源;保留曾掩蔽 M4 变异判别（链断时六锯钻 combat 被
+  //    手补从基底兜底恢复）,退役后 M4 判别面覆盖全 15 件（era-guard 测试复验）。
   //  · 496 冰雪法杖 knockBack=2（:7297 knockBack=0f 后 :7300 再赋 2f——首匹配取 0，
   //    C# 顺序语义终值 2）。
   //  · 纸飞机/新奇品/PrincessWeapon 批次 A 回填：DefaultToThrownWeapon
@@ -830,17 +847,18 @@ function main() {
   //    noMelee/ranged/consumable）与 DefaultToStaff(:48016 = DefaultToMagicWeapon
   //    (proj,singleShotTime,pushSpeed,autoReuse)+mana+40×40+Item43) 形参赋值。
   //    ★golden 表的 useTime=4/8 系把第三参 shotVelocity 误当 useTime，源码为 17/25/20。
-  const LUNAR_DELEGATE = {
-    2778: { base: '2773', shoot: 429 }, 2783: { base: '2773', shoot: 431 }, 3463: { base: '2773', shoot: 610 },
-    2779: { base: '2774', shoot: 430 }, 2784: { base: '2774', shoot: 432 }, 3464: { base: '2774', shoot: 609 },
-  };
-  for (const [vid, d] of Object.entries(LUNAR_DELEGATE)) {
-    obj[vid] = { ...obj[d.base], ...obj[vid], shoot: d.shoot };
-  }
-  for (const [vid, base] of Object.entries({ 2777: '2772', 2782: '2772', 3462: '2772',
-    2780: '2775', 2785: '2775', 3465: '2775', 2781: '2776', 2786: '2776', 3466: '2776' })) {
-    obj[vid] = { ...obj[base] };
-  }
+  // ★清偿刀 Q（2026-09-29）：六锯钻 LUNAR_DELEGATE 手补面（2778/2783/3463←base 2773,
+  //  2779/2784/3464←base 2774,shoot 429/431/610/430/432/609）整体退役——委托链单源
+  //  直出（applyRec 根修后六件 rec={shoot} 原生进 delegates,合并直出与手补逐字节
+  //  等价,M 刀 dump 对拍+Q 刀沙箱 sha256 复证）。案由见上方月主委托件注。
+  // ★清偿刀 M（2026-09-29）：九挥砍件 combat 手补面退役——applyRec 根修后委托合并
+  //  原生直出 obj[2777]={...obj[2772]} 等（值与 F 刀手补逐字节等价,dump 对拍证明）。
+  //  保留会掩盖根修回归（M3 变异=摘根修门,若手补在位则九件不缺=变异无判别力）。
+  // ★清偿刀 F→M（2026-09-29）：F 刀九件 UseSound 侧道手补面退役——applyRec 根修后
+  //  委托合并循环原生继承基底 UseSound（`d.sound===undefined && SOUND.has(targetId)`
+  //  → SOUND.set(id, base 的 Item_1;基底显式行 case 2772 :26479 / case 2776 :26540 /
+  //  case 2775 :26558,委托链 :26566-26615/:31056-31078）,与 F 手补逐值等价。
+  //  F 刀定谳存档:缺键面=Game.playUseSound→itemUseSoundWav 静默 null=挥砍无声。
   if (obj['496']) obj['496'] = { ...obj['496'], knockBack: 2 };
   const THROWN_WEAPONS = {
     4343: { shoot: 761, useTime: 17, useAnimation: 17, shootSpeed: 5, damage: 4, knockBack: 2 },

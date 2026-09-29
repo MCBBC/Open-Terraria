@@ -309,7 +309,7 @@ describe('折叠凳（Step Stool 4341:站定+按上 → 命中盒 +26/jump +5/�
     const p2 = new Player(60 * TILE, 66 * TILE, inv);
     p2.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
     p2.inv.armor[4] = { id: ITEM_BY_KEY[vanillaItemKey(1131)!], stack: 1 };
-    expect(playerAccessoryVidEquipped(p2.inv.armor, p2.inv.accSlotMax, 1131)).toBe(true);
+    expect(playerAccessoryVidEquipped(p2.inv.armor, (k) => p2.inv.isItemSlotUnlockedAndUsable(k), 1131)).toBe(true);
     for (let i = 0; i < 30; i++) step(p2, game);
     p2.inputUp = true;
     step(p2, game);                       // upEdge 帧:凳门无 gravControl2 → 当帧长凳

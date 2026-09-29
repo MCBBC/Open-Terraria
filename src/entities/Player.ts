@@ -1702,18 +1702,26 @@ export class Player extends Entity {
   /** Lucky Horseshoe 158（本地 accessory 枚举退役,vid 判定） */
   get hasHorseshoe(): boolean {
     const want = VI_ID(158);
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) { // armor[3-7 基座+恶魔之心 8(原版 Player.cs:36326)
+    for (let i = ACC_ARMOR_START; i < 10; i++) { // armor[3-7 基座+恶魔之心 8+大师 9(原版 Player.cs:36326)
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P :12669-12690
       const s = this.inv.armor[i];
-      if (s && s.id === want) return true;
+      if (!s) continue;
+      // ★清偿刀 U：expertOnly 效益门（ApplyEquipFunctional 头 :14475-14478——
+      //   hasLuck_LuckyHorseshoe 在该函数 :12628 族内,门内）
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
+      if (s.id === want) return true;
     }
     return false;
   }
   /** Feral Claws 211 */
   get hasFeralClaws(): boolean {
     const want = VI_ID(211);
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
+    for (let i = ACC_ARMOR_START; i < 10; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P :12669-12690
       const s = this.inv.armor[i];
-      if (s && s.id === want) return true;
+      if (!s) continue;
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;   // ★清偿刀 U :14475
+      if (s.id === want) return true;
     }
     return false;
   }
@@ -1724,7 +1732,11 @@ export class Player extends Entity {
     for (const id of this.inv.equippedArmor()) {
       // ★armor.defense 死前腿已随 ItemDef.armor 死字段移除（2026-09-02,全仓零写入,
       //   真值源 = vanilla-itemstats.json,与配饰段同源）
-      if (id != null) d += statOfInternal(id)?.def ?? 0;
+      if (id == null) continue;
+      // ★清偿刀 U：expertOnly 效益门（GrantArmorBenefits :13220 statDefense +=
+      //   armorPiece.defense,k-loop :13017-13018 门内——专家档甲经典世界零防御）
+      if (ITEM_DEFS[id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
+      d += statOfInternal(id)?.def ?? 0;
     }
     // 破甲(36)/枯萎护甲(195)：终值各减半（Player.cs:25704/:25708——全部来源加总之后）
     if (this.buffs.has(BuffType.BrokenArmor)) d = Math.floor(d / 2);
@@ -1741,6 +1753,7 @@ export class Player extends Entity {
   wingDyeVid(): number {
     let slot = -1;
     for (let i = 0; i < 20; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P：UpdateItemDye :9693 同门
       const it = this.inv.armor[i];
       if (!it) continue;
       if ((statOfInternal(it.id)?.wing ?? 0) > 0) slot = i % 10;
@@ -1803,7 +1816,8 @@ export class Player extends Entity {
    *  ★IIIII250(2026-09-14):键值由字符串改【双独立 32 位 FNV 族哈希】——
    *  h1 质数 0x01000193(FNV-1a 标准质数)/h2 质数 0x27220a95,每段先混段 tag
    *  再混值;定长段(甲/染每槽固定 3 值)无跨界歧义,变长段(背包命中格/buffs/
-   *  hide 位)以 tag+显式 accSlotMax 定界。打包 (h1>>>0)*2^21+(h2>>>0 & 2^21-1)
+   *  hide 位)以 tag+槽位/解锁位定界（清偿刀 P：hide 段=解锁位+解锁格 hide 位）。
+   *  打包 (h1>>>0)*2^21+(h2>>>0 & 2^21-1)
    *  落在 [0,2^53-1] 精确整数域(=== 逐位比较,无浮点误差)。伪相等概率/对
    *  ≈2^-53,实际可达状态空间(换装/词缀/buff 组合远小于 2^53)期望碰撞≈0;
    *  逐访问语义不变:任一输入位变化→h1/h2 全域雪崩→键必变(概率意义)→
@@ -1854,9 +1868,17 @@ export class Player extends Entity {
     mix(6); mix(this.panicTime > 0 ? 1 : 0);
     mix(7); mix(this.controlDownHold ? 1 : 0);   // shimmerImmune（5355 && !controlDownHold :15643）的输入
     // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
-    // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..accSlotMax）
-    mix(8); mix(inv.accSlotMax);
-    for (let i = ACC_ARMOR_START; i < inv.accSlotMax; i++) mix(this.hideVisibleAccessory[i] ? 1 : 0);
+    // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..9。
+    // ★清偿刀 P：键面改逐槽解锁位(8/9)+解锁格 hide 位——锁槽的 hide 位与
+    // accSlotMax 界均不进输出面（绘制/效果被 :12669-12690 门拦）,不入键;
+    // 解锁位保证「大师无恶魔心」等开合翻转正确失效缓存）
+    mix(8);
+    mix(inv.isItemSlotUnlockedAndUsable(8) ? 1 : 0);
+    mix(inv.isItemSlotUnlockedAndUsable(9) ? 1 : 0);
+    for (let i = ACC_ARMOR_START; i < 10; i++) {
+      if (!inv.isItemSlotUnlockedAndUsable(i)) continue;
+      mix(this.hideVisibleAccessory[i] ? 1 : 0);
+    }
     // 背包生效域段（I 档,信息/机械饰品背包扫描 :12494-12500 的输入）+ 虚空袋
     // 4131 在场位探测（★F3）——★IIIII250 单遍合并：只记 INV_EFFECTIVE_VIDS
     // 命中格（vid+槽位）——未命中格不影响 computeEquipStats 输出，内容键对
@@ -1896,7 +1918,12 @@ export class Player extends Entity {
     mix(this.vampireBurningInSunlight ? (this.sunScorchCounter >= 120 ? 2 : 1) : 0);
     // 夜/日食相位（月亮石 900 天界石复合门 :14871-14874——昼夜翻转帧必须重算）
     mix(13); mix(this.nightPhase ? 1 : 0);
+    // ★清偿刀 U：expertOnly 效益门输入位（:13018/:14475 Main.expertMode——
+    //   旅程滑杆改档翻转帧必须失效;gateExpert∨gateMaster ≙ World.isExpert≥EXPERT）
     mix(14);
+    mix(this.inv.gateExpert ? 1 : 0);
+    mix(this.inv.gateMaster ? 1 : 0);
+    mix(15);
     for (const bt of this.buffs.active.keys()) mix(bt);
     // 打包：两独立 32 位字 → 2^53 精确整数（h1 无符号全宽 ×2^21 + h2 低 21 位）
     return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 2097151);
@@ -2081,9 +2108,30 @@ export class Player extends Entity {
     // 社交槽 ApplyEquipVanity 无 aggro）
     const AGGRO_NEG = new Set([3015, 3991, 4005, 4006, 6175]);   // 6175 侦察哨兵背包（★1457 :14670-14677 aggro-=400;V6 复核补）
     const AGGRO_POS = new Set([3016, 3992, 3998]);
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
+    for (let i = ACC_ARMOR_START; i < 10; i++) {   // ★清偿刀 P：段恒 3..9,逐槽 :13044 门
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // :12669-12690（锁槽不结算不显）
       const s = effArmor(i);   // R4-19：功能配饰聚合走 GetEffectiveArmor（:13044-13048）
       if (!s) continue;
+      const sVid = (ITEM_DEFS[s.id]?.vid ?? -1);
+      // ★清偿刀 U（2026-09-29）：expertOnly 门【不】遮的两臂先结算——画廊臂
+      //  （UpdateVisibleAccessories :36331-36351）与线色臂（UpdateVisibleAccessory
+      //  :36441-36449）原版无 expertOnly 门（UpdateEquips_CanItemGrantBenefits/
+      //  ApplyEquipFunctional 头两门都不在可见轮上）：专家档配饰经典世界仍上身
+      //  照画/照染线,只是零效益。两臂与后段写互不叠写（独立变量,槽序即写序）,
+      //  提序不改语义。
+      if (sVid > 0 && !this.hideVisibleAccessory[i]) accDrawApply(s, i);
+      if (sVid === 5540 || sVid === 5541) stringColor = 29;
+      const funcStrV = statOfInternal(s.id)?.str;
+      if ((funcStrV ?? 0) > 0) stringColor = funcStrV!;
+      // ★清偿刀 U：expertOnly 效益门——k-loop :13017-13018
+      //  `(!effectiveArmor.expertOnly || Main.expertMode)`（GrantPrefixBenefits+
+      //  GrantArmorBenefits 全效益）+ ApplyEquipFunctional 头 :14475-14478 整函数
+      //  早退（本循环余下全部臂=该两原版函数的内容物：行为旗/aggro/语音/免疫/
+      //  翅膀/悠悠球/def/life/词缀 62-80；RefreshInfo/Mechanical 由 GrantArmorBenefits
+      //  :13204-13205 载体,同门）。Main.expertMode ≙ gateExpert∨gateMaster
+      //  （World.isExpert = difficulty ≥ EXPERT,大师含）。命中即 continue =
+      //  原版两门逐槽合取的最短路径。
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
       const fx = accFxOfInternal(s.id);
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
@@ -2097,7 +2145,8 @@ export class Player extends Entity {
       // :36361——per-slot 隐藏开关已建模（hideVisibleAccessory,眼睛图标只藏贴图,
       // 功能效果 ApplyEquipFunctional :13962 独立扫不受影响）;社交槽 13-19 轮在
       // 下方独立 for,原版无 hide 门）
-      if (accVid > 0 && !this.hideVisibleAccessory[i]) accDrawApply(s, i);
+      // ★清偿刀 U：accDrawApply 已提序到循环头 expertOnly 门之前（原版可见轮
+      //   :36331 无 expertOnly 门,专家档配饰经典世界照画）——此处不再重复结算。
       // 仇恨轴（aggro ±400 七件,见 PlayerEquipStats.aggroAcc 注）
       if (AGGRO_NEG.has(accVid)) aggroAcc -= 400;
       else if (AGGRO_POS.has(accVid)) aggroAcc += 400;
@@ -2157,11 +2206,8 @@ export class Player extends Entity {
       }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
       if (statOfInternal(s.id)?.str) yoyoString = true;
-      // 线色（Player.cs:36441-36449 UpdateVisibleAccessory）：魔法线 5540/5541 → 29
-      //（无 item.stringColor 字段），其余线饰品 → 其 str；同帧逐槽后写覆盖前写
-      if (accVid === 5540 || accVid === 5541) stringColor = 29;
-      const funcStr = statOfInternal(s.id)?.str;
-      if ((funcStr ?? 0) > 0) stringColor = funcStr!;
+      // 线色（Player.cs:36441-36449 UpdateVisibleAccessory）两行已提序到循环头
+      // expertOnly 门之前（★清偿刀 U：可见面不设门,funcStrV 同 str 源）。
       // ---- 悠悠球袋族（Player.cs:14174-14226 ApplyEquipFunctional if-chain；提取器
       //      default 区间段抓不到，此处 vid 直表）。★配重球掷骰(1/7→1079 黑/
       //      556+Next(6) 彩,:14176/:14200)2026-08-19 迁消费端 rollYoyoCounterweight:
@@ -2252,7 +2298,7 @@ export class Player extends Entity {
       if (grantArmorBenefits && itemLife) life += itemLife;
       // ★item.defense 面（GrantArmorBenefits :13220 statDefense += armorPiece.defense——
       //   原版 UpdateEquips :13015-13026 k=0..9 全装备槽统一加算；盔甲 0-2 走 defense
-      //   getter 的 equippedArmor()，此处只补配饰段 3..accSlotMax 防双计。曾整面缺失=
+      //   getter 的 equippedArmor()，此处只补配饰段 3..9（逐槽 :13044 门）防双计。曾整面缺失=
       //   脚镣/钴盾/黑曜石骷髅/黑曜石盾/圣骑士盾/魔力手铐/天界手铐/肉拳/克苏鲁盾/
       //   狂战士手套/冰冻盾/英雄盾/6177/6183 防御不叠，仅 6188 由 BEHAVIOR_FX 硬补）
       const itemDef = statOfInternal(s.id)?.def ?? 0;
@@ -2405,7 +2451,11 @@ export class Player extends Entity {
     // 原版【无】hideVisibleAccessory 门（:36368-36375 第二轮无条件;Main.cs:40855
     // 眼睛图标只挂 num40>2 功能配饰段）——"虚荣槽 13-19 可隐藏"与原版不符,
     // 审计登记项回写备案,本仓同原版不设门。
+    // ★清偿刀 P：解锁门仍在（ApplyEquipVanity :13110+可见轮 :37080 同门
+    // :12669-12690——社交 18/19=恶魔心/大师孪生格,大师无心态 18 锁 19 开;
+    // N 刀「放置 UI 门下正常玩法不可达」已证伪：右键装备段扫 13..19 可达 18）。
     for (let i = 13; i < 20; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // :12669-12690
       const s = effArmor(i);   // ApplyEquipVanity :13108-13112 同走 GetEffectiveArmor
       if (!s) continue;
       const v = ITEM_DEFS[s.id];
@@ -2486,6 +2536,9 @@ export class Player extends Entity {
     // 原版 ApplyEquipFunctional armor[0-9] 单遍 = 盔甲三件 + 配饰各扫（SummonFx 同表直查）
     const sumFx = (s: { id: number } | null): void => {
       if (!s) return;
+      // ★清偿刀 U：expertOnly 效益门（k-loop :13017-13018——sumFx 全调用点
+      //   = GrantArmorBenefits 面 0-2 甲件 + 3-9 配饰,k=0..9 统一门内）
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) return;
       const d = ITEM_DEFS[s.id];
       const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       const fx = vid >= 0 ? SUMMON_GEAR[vid] : undefined;
@@ -2525,6 +2578,8 @@ export class Player extends Entity {
     for (let i = 0; i < 3; i++) {
       const s = effArmor(i);
       if (!s) continue;
+      // ★清偿刀 U：expertOnly 效益门（k-loop :13017-13018,甲件面同门）
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
       const afx = accFxOfInternal(s.id);
       if (afx?.divingHelm) divingHelm = true;
       if (afx?.nightVision) nightVisionArmor = true;
@@ -2533,24 +2588,36 @@ export class Player extends Entity {
     // ——vidOfItemId（★IIIII250 查表族）单源复用（BJ147 组D）
     const aVid = (i: number): number => vidOfItemId(effArmor(i)?.id ?? -1);
     const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
+    // ★清偿刀 U：GrantArmorBenefits 单件面的 vid 读（套装【检测】面除外——
+    //   ArmorSetBonus.QueryContext :29-35 直读 GetEffectiveArmor,无 expertOnly 门,
+    //   故 aVid/vidSet 不设门;下方 gVid 只喂单件效益消费位）：
+    //   死人毛衣 5007(:13226)/月亮领主腿 5001(:13215)/神灵诅咒 3770(:13360)/
+    //   巫师帽 238(:13352)/甲件 aggro 轴(:13852/:13983)/蘑菇矿头 1546-1548(:13274)/
+    //   DD2 散件 3798-3882(:13236-13342)——k-loop :13017-13018 门内。
+    const gVid = (i: number): number => {
+      const s = effArmor(i);
+      if (!s) return -1;
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) return -1;
+      return vidOfItemId(s.id);
+    };
     // SW-AC1 2026-09-04：死人毛衣 5007 胸甲件旗（GrantArmorBenefits case 5007
     //  Player.cs:13226-13229 `deadMansSweater = true`——装甲三件扫描位,社交槽
     //  3-9 门=item.accessory 不授 :12970-12989;消费=SelfHurtPlayers :15131-15134）
     let deadMansSweater = false;
-    if (bVid === 5007) deadMansSweater = true;
+    if (gVid(1) === 5007) deadMansSweater = true;    // ★清偿刀 U：单件效益面走 gVid（:13018 门）
     // ★组A/B 单件面批（2026-09-18）甲件行为旗 vid 直查（同 deadMansSweater 件位形态;
     //  声明位在配饰环上方本地块,旗消费链见 PlayerEquipStats 字段注）：
-    if (lVid === 5001) moonLordLegsArmor = true;     // 月亮领主腿（:13215-13219）
+    if (gVid(2) === 5001) moonLordLegsArmor = true;  // 月亮领主腿（:13215-13219;★U gVid）
     if (moonLordLegsArmor) extraFall += 10;          // :19733 extraFall += 10（BJ234 摔伤面:
                                                      // 摔伤安全距 25→35,消费 fixedUpdate 摔伤结算
                                                      // safeT=25+eqM.extraFall ≙ :25497-25498;
                                                      // jumpSpeed+1.8 走 accfx '5001'.jumpSpd;
                                                      // jumpHeight++ 走 jumpBaseSnapshot 消费
                                                      // equipStats.moonLordLegs）
-    if (lVid === 3770) slowFallArmor = true;         // 神灵诅咒（:13360-13362）
+    if (gVid(2) === 3770) slowFallArmor = true;      // 神灵诅咒（:13360-13362;★U gVid）
     // ★IIIII224（GrantArmorBenefits case 238,Player.cs:13352-13359）：巫师帽
     //  （头槽 238）magicDamage +5%；十周年世界随从上限 +1（tenthAnniversaryWorld）
-    if (hVid === 238) {
+    if (gVid(0) === 238) {
       dmgMagic += 0.05;
       if (this.worldSeedFlags?.tenthAnniversary) minionSlots += 1;
     }
@@ -2572,14 +2639,18 @@ export class Player extends Entity {
     // 甲件 aggro 轴（GrantArmorBenefits :13852-13874/:13983-13997——逐槽 +=：
     //   龟甲三件 +250、甲虫头/腿 +250 与壳胸 +400、日曜三件各 +300。
     //   ★终零波批（2026-09-01）实装——旧注"甲件轴暂未建模,登记"退役）
-    const aggroPiece = (AGGRO_ARMOR_PIECE[hVid] ?? 0)
-      + (AGGRO_ARMOR_PIECE[bVid] ?? 0) + (AGGRO_ARMOR_PIECE[lVid] ?? 0);
+    //   ★清偿刀 U：单件效益面走 gVid（:13018 门）
+    const aggroPiece = (AGGRO_ARMOR_PIECE[gVid(0)] ?? 0)
+      + (AGGRO_ARMOR_PIECE[gVid(1)] ?? 0) + (AGGRO_ARMOR_PIECE[gVid(2)] ?? 0);
     // 蘑菇矿头单件 type 面（GrantArmorBenefits case 1546-1548 :13274-13288——
     //   箭/弹/火箭 ×1.12 + crit+5,shroomiteType 单源承载,套装层 vidSet 之上）
-    if (hVid === 1546) shroomiteType = 'arrow';
-    else if (hVid === 1547) shroomiteType = 'bullet';
-    else if (hVid === 1548) shroomiteType = 'rocket';
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(effArmor(i));   // R4-19
+    if (gVid(0) === 1546) shroomiteType = 'arrow';
+    else if (gVid(0) === 1547) shroomiteType = 'bullet';
+    else if (gVid(0) === 1548) shroomiteType = 'rocket';
+    for (let i = ACC_ARMOR_START; i < 10; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P :13044 门
+      sumFx(effArmor(i));   // R4-19
+    }
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     // DD2 盔甲散件主属性（DD2_PIECE_FX——GrantArmorBenefits case 3798-3882 :13236-13342
     //  胸/腿件逐件扫描;2026-08-13 建,2026-09-03 对账批补 dmgMelee/dmgRanged/lifeRegen/
@@ -2588,7 +2659,7 @@ export class Player extends Entity {
       const _fx = DD2_PIECE_FX[hVid + bVid + lVid]; void _fx;
       break;
     }
-    const dd2Vids = [hVid, bVid, lVid];
+    const dd2Vids = [gVid(0), gVid(1), gVid(2)];   // ★清偿刀 U：单件效益面走 gVid（:13018 门）
     for (const _v of dd2Vids) {
       const _d = DD2_PIECE_FX[_v];
       if (!_d) continue;
@@ -3930,7 +4001,14 @@ export class Player extends Entity {
     // AddBuff(151, 2)=2【t】每帧钉值——Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄。
     // ★曾误写 2【秒】(120t) 顶破 >2t 无字门显「2秒」（2026-08-31 tick/秒单位族审计）
     if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2 / 60);
-    const buffHeal = this.buffs.tick(dt);
+    // ★X4-债3 清偿（2026-09-29）：死亡/幽灵相 buffs.tick 停——原版 UpdateBuffs 主调用
+    //  Player.cs:25763 在 ghost/dead 早退（:24938-24948 `if (ghost) { Ghost(); return; }`
+    //  `if (dead) { UpdateDead(); …; return; }`）之后，死亡/幽灵相整帧不跑（计时冻结）；
+    //  死亡相改跑 UpdateDead（每帧清非持久 buff，Player.ts 死亡分支 clearNonPersistent）。
+    //  本 tick 仍跑=死亡判定在 :4842 之后（死亡拍原版也在 UpdateBuffs 帧内发生，同相）；
+    //  次拍起 dead=true 整门停。幽灵相 dead 恒 true（isGhostPhase 判据含 this.dead）→
+    //  计时冻结与原版 Ghost() 相同。返回值 0=死亡相 heal/DoT 消费本就 hp>0 门惰性
+    const buffHeal = this.dead ? 0 : this.buffs.tick(dt);
     // ★BJ357 坐骑 buff 钉时（Player.cs:9968-9971 UpdateBuffs：MountType buff 每 tick
     //  buffTime=10 重钉）——首授予 AddBuff(_data.buff,3600) 在 Game.useMountItem
     //  （SetMount :6291）;图标无倒计时字+不入档 = Main.cs:9344-9352 双置位
@@ -4878,6 +4956,13 @@ export class Player extends Entity {
       // （新机制字段随死亡归零；1456 无此两行。本仓 manaSick=buff 载体 → 同步摘除）
       this.buffs.remove(BuffType.ManaSickness);
       this.manaHeat = 1;
+      // ★X4-债3 清偿（2026-09-29）死亡相清非持久 buff（UpdateDead :17112-17117 1:1，
+      //  判据=!Main.persistentBuff[v]，持久表=武器浸剂八族 {71,73-79} Main.cs:9337-9344
+      //  ——黄金浸剂 72 不在内照清）。原版每帧跑同幂等清（UpdateDead 每帧经 :24945），
+      //  本分支同每 tick 跑=同相；裸字段写零无音效/尘/飘字（表现=图标下帧消失）。
+      //  幽灵相不走此路（上方 isGhostPhase 早退——原版 ghost 相 UpdateDead 停摆，
+      //  buff 在死亡相已清空，UpdateBuffs 不跑=冻结）
+      this.buffs.clearNonPersistent();
       this.slowMagicUse = false;
       // ShimmerUnstuckHelper.Clear()（UpdateDead :17041——脱困保护随死亡清零）
       this.shimmerUnstuckIndefinite = false;
@@ -9911,9 +9996,15 @@ export class Player extends Entity {
     let b = this.equipStats.luckyCoin ? 0.05 : 0;      // :12640-12646 hasLuck_LuckyCoin
     // hasLuck_LuckyHorseshoe = 精确九件集（ApplyEquipFunctional 赋值处），armor[3-9]
     let horseshoe = false;
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax && !horseshoe; i++) {
+    for (let i = ACC_ARMOR_START; i < 10 && !horseshoe; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P :13044 门
       const s = this.inv.armor[i];
-      if (s && Player.LUCK_HORSESHOE_VIDS.has(ITEM_DEFS[s.id]?.vid ?? -1)) horseshoe = true;
+      if (!s) continue;
+      // ★清偿刀 U：expertOnly 效益门（hasLuck_LuckyHorseshoe = ApplyEquipFunctional
+      //   赋值族,:14475-14478 头门内;四叶草臂不同——RefreshInfoAccs :12722 由
+      //   Main.cs:17548 帧路径调,原版不设门）
+      if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
+      if (Player.LUCK_HORSESHOE_VIDS.has(ITEM_DEFS[s.id]?.vid ?? -1)) horseshoe = true;
     }
     if (horseshoe) b += 0.05;                          // :12628-12631
     // 四叶草三旗：背包 0-57 + 装备槽 armor[0-9]（UpdateEquips :12494-12530 双扫描）
@@ -9928,6 +10019,7 @@ export class Player extends Entity {
       if (s) see(ITEM_DEFS[s.id]?.vid ?? -1);
     }
     for (let i = 0; i < 10; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P：RefreshInfoAccs :12722 同门
       const s = this.inv.armor[i];
       if (s) see(ITEM_DEFS[s.id]?.vid ?? -1);
     }
@@ -10674,6 +10766,7 @@ export class Player extends Entity {
     // ---- 水晶鞋：armor[13-19]（时装配饰槽）任一 = 5077（ApplyEquipVanity :13821）----
     let slipper = false;
     for (let i = 13; i <= 19; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P：ApplyEquipVanity :13110 同门
       const it = this.inv.armor[i];
       if (it && (ITEM_DEFS[it.id]?.vid ?? -1) === 5077) { slipper = true; break; }
     }
@@ -11182,7 +11275,8 @@ export function updateGravityControls(
   playSfx?: (name: string, vol?: number, x?: number, y?: number) => void,
 ): void {
   const gravControl = p.buffs.has(BuffType.Gravitation);
-  const gravControl2 = playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 1131);
+  // ★清偿刀 P：配饰扫描逐槽解锁门（:13044 面,1131 重力地球仪）
+  const gravControl2 = playerAccessoryVidEquipped(p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k), 1131);
   if (p.forcedGravityT > 0) {
     p.gravDir = -1;
   } else if ((gravControl || gravControl2) && !p.mount.active) {

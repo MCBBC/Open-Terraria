@@ -45,27 +45,25 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt, noteVanillaProjImmune } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
-import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源
+import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源（★清偿刀 T 门位快照单源）
 import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
 import { ParticleOrchestraType } from '../net/syncModules';
 
-/** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
+/** ★三轮蓝队 F6：immune[owner] 读门（:12636-12641）。原版 flag3 单发族
  *  （maxPenetrate==1 ∧ 无两旗）豁免此窗——但 856 usesLocalNPCImmunity=true ⇒ flag3
  *  恒假 ⇒ 【完整吃】该窗：immune[owner]!=0 的受害者在命中轮【整个被跳过】（localNPCImmunity
- *  表也不写——拒收发生在任何写尾之前）；命中落地后写尾 :14169 `targetNPC.immune[owner]=0`
- *  （usesLocalNPCImmunity && cooldown≠-2 支）清掉近战桥留下的全局窗。
- *  读 = Game.meleeNpcPlayerImmune 同构 duck-call（VolcanoBlastProj/meleeOnHitProjs 先例）；
- *  写 = noteNpcPlayerImmune(id,0)（GC1 出口）。 */
+ *  表也不写——拒收发生在任何写尾之前）。
+ *  读 = Game.meleeNpcPlayerImmune 同构 duck-call（VolcanoBlastProj/meleeOnHitProjs 先例）。
+ *  ★清偿刀 W（X4-债13③,2026-09-29）：写半面已归桥——弹幕域 iframes 由 stellarStrike
+ *  pierce=-3 在 Enemy.ts 写梯清零（:14297）,近战域表由受理面 noteVanillaProjImmune
+ *  （856 face=usesLocal→0 出表）承载;旧 sparkImmuneWindowClear(id,0) 裸写+无条件跑
+ *  （门拒跳也清=over-clear）退役。 */
 function sparkImmuneWindowOpen(e: { id: number }, game: GameHooks): boolean {
   const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
   return !(gate.meleeNpcImmuneGateOf?.(e.id) === false);
-}
-function sparkImmuneWindowClear(e: { id: number }, game: GameHooks): void {
-  (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
-    .noteNpcPlayerImmune?.(e.id, 0);
 }
 
 /** XNA Vector2.CatmullRom（同 MinionProj 内私有实现;此处独立避免跨类内联依赖） */
@@ -122,10 +120,14 @@ function stellarStrike(
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
+  // ★清偿刀 W（X4-债13③,2026-09-29）：pierce 0→-3（usesLocal 族清零档,Enemy.ts
+  //  :14297——门 :13991 照走,受理写 immune[owner]=0 ≡ :14175-14178 usesLocal 支）。
+  //  旧 pierce=0 通用尾档写 10t=背靠背二奏 10t 内被头门整拒（写面偏差;节流本就
+  //  由 hitOnce〔localNPCHitCooldown=-1 每敌终生一跳〕承载,10t 全局窗纯多余）。
   return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
     + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
     kx, 0, game, armorPen,
-    critGuitar, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
+    critGuitar, -3, true);          // StrikeNPC 单点（Enemy.hurt 同构）
 }
 
 /** 出手暴击率单源（★二轮蓝队 FR2-F：词缀位曾漏——Game case4715 只吃 stTune.crit）。
@@ -370,18 +372,26 @@ export class SparkleGuitarProj extends Entity {
         //  受理）+普通未致命尾档（:15037）;原版 proc/numHits++ 在受理面无死亡复查 →
         //  门拒不 proc 不计数,非门拒照 proc 照计数。旧「hurt 返真」=击杀位判据对非
         //  致死命中整面不 proc（吸血 under-fire）,退役。
+        // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源,判据=「进
+        //  hurt 前状态」）。旧后置读两源污染：①受理写支（stellarStrike pierce=0 →
+        //  Enemy.ts:14297 写 10t;856 vanilla 写梯 =usesLocal 支清零 immune[owner]=0
+        //  :14175-14178——写面偏差 10≠0 登记债）→ 受理拍读恒真 → proc/numHits 真机
+        //  恒跳;②死亡转换写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死
+        //  命中拍误判门拒。快照双源同治。
+        const gate = snapshotVanillaGate(e);
         stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
           stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
           { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
-        const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
-          || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);
           this.pveNumHits++;
+          // ★清偿刀 W（X4-债13③）：近战域半面随受理面（桥 856 face=usesLocal→0
+          //   出表）——原版 :14175-14178 单写 immune[owner]=0 一笔覆盖全域,仓内
+          //   两域分体各落半面;旧 sparkImmuneWindowClear 无条件跑=门拒跳也清
+          //   （over-clear）,现归受理面=拒收不落任何写尾（原版门拒 return 在梯前）。
+          noteVanillaProjImmune(game, this.projId, e.id);
         }
-        // ★F6 命中尾显式清窗（:14169 usesLocalNPCImmunity 支 immune[owner]=0）——
-        //   近战桥留下的全局窗在本弹命中面被覆盖清零（noteNpcPlayerImmune(id,0) 出表）
-        sparkImmuneWindowClear(e, game);
         this.killStellarTune(game);                // penetrate==0 → 同拍 Kill（含爆裂结算）
         break;                                     // keepIterating=false 单敌截断（:12603/:14203）
       }
@@ -430,23 +440,26 @@ export class SparkleGuitarProj extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // ★F6：拒收门同样罩住爆裂轮逐受害者（flag3 恒假,窗关闭者跳过且不落标）；
-      //   命中尾同款显式清窗（:14169）——被近战免伤窗盖住的敌人爆裂不吃,已开伤者清窗
+      //   命中尾清窗已归受理面（★清偿刀 W——弹幕域 pierce=-3+近战域桥写,见直击站注）
       if (!sparkImmuneWindowOpen(e, game)) continue;
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
       // ★BJ382：爆裂轮同链 proc（:72840 Damage() 同一弹对象,numHits 累积读自增前值）
       //  ★X2-D1（同直击站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
       //  血尽级联/普通未致命返假照 proc 照计数
+      //  ★清偿刀 T（X4-债12,同直击站注）：门位读前置快照（读侧单源）。
+      const gate = snapshotVanillaGate(e);
       stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
         stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
         { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
-      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
-        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
         ghostHealProc(game, this.projId, this.pveNumHits, e);
         this.pveNumHits++;
+        // ★清偿刀 W（X4-债13③）：爆裂轮同款受理面近战域清窗（:14175-14178 同支,
+        //   Kill 内 Damage() :72840 同链同梯）——旧无条件清=门拒跳也 over-clear。
+        noteVanillaProjImmune(game, this.projId, e.id);
       }
-      sparkImmuneWindowClear(e, game);
     }
   }
 

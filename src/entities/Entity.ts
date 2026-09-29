@@ -212,8 +212,13 @@ export class EntityManager {
           //     （W.cs:72337,★F3:旧 :72335 系误记→P.cs:10866-69）≠myPlayer → 不割;
           //     813 血云双旗但 vanilla 出生显式
           //     owner=Main.myPlayer（NPC.cs:48026）→ vanilla 照割,不标=同相。
-          //   · 玩家侧登记债（本刀不修,照报=零回退豁免）：250/298/305 型录无
-          //     friendly 行;444/460/633/971·975（钉扎态 ai0==1,Player.cs:44518 出生
+          //   · 玩家侧登记债（本刀不修,照报=零回退豁免）：250/298/305/254 型录无
+          //     friendly 行（254 磁球=★清偿刀 V 2026-09-29 补登记:BJ345 独立实体化
+          //     后入族——P.cs:3369-3377 SetDefaults 无 friendly/hostile 行 → 割门
+          //     P.cs:18021 `(friendly||hostile)` 不落=vanilla 零割;本仓 vid=0 缺省
+          //     照报=照割,tripwire REGISTRY 同日定性 playerSide,
+          //     tests/bj294-vid0-cut-facing.test.ts）;
+          //     444/460/633/971·975（钉扎态 ai0==1,Player.cs:44518 出生
           //     即 1）/818 落 vanilla Damage_CanDealDamage（:12461）豁免表 → vanilla
           //     实际不割、本仓照割=多割相位差家族（SW 自造玩家弹侧,登记待刀）。
           //   · ★307 防回潮锚（件 4 零修刀）：vanilla 306 尖球 Kill 原位派生 307

@@ -250,4 +250,25 @@ describe('BJ394-件4 SandboxWorld.Toast.BossFled 孤儿键摘除（BJ388 登记�
     const game = readFileSync('src/core/Game.ts', 'utf8');
     expect(game).toContain('this.boss.bossFled');
   });
+
+  // ★清偿刀G（2026-09-29,l10n 清淤专项）：Mods.Mods.* 错位残留键全 12 语言零命中
+  //   （X1 定谳:zh/en custom 的 Mods 组内带 "Mods." 前缀散键 → flattenDeep 产出
+  //   Mods.Mods.SandboxWorld.Settings.PanControl* 5 键,经 enBase 传播全 12 语言产物;
+  //   已从 custom 摘除+重建。此锁防错位写法回潮=变异 oracle）。
+  it('★清偿刀G：产物全 12 语言零 Mods.Mods.* 残留 + PanControl 平键功能面在位', () => {
+    const langs = ['de-DE', 'en-US', 'es-ES', 'fr-FR', 'it-IT', 'ja-JP', 'ko-KR', 'pl-PL', 'pt-BR', 'ru-RU', 'zh-Hans', 'zh-Hant'];
+    for (const l of langs) {
+      const pack = JSON.parse(readFileSync(`public/l10n/${l}.json`, 'utf8')) as {
+        Mods: Record<string, string>;
+      };
+      const dirty = Object.keys(pack.Mods ?? {}).filter((k) => k.startsWith('Mods.'));
+      expect(dirty, l).toEqual([]);
+      // 正确平键功能面（Settings.ts 消费:Lang.text('Mods.SandboxWorld.Settings.PanControl*')）
+      expect(typeof pack.Mods['SandboxWorld.Settings.PanControl'], l).toBe('string');
+      for (const suf of ['_Hold', '_Click', '_OnAlways', '_OffAlways']) {
+        expect(typeof pack.Mods[`SandboxWorld.Settings.PanControl${suf}`], l).toBe('string');
+      }
+      expect(typeof pack.Mods['SandboxWorld.Settings.BackgroundRun'], l).toBe('string');
+    }
+  });
 });

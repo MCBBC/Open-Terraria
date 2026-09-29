@@ -1,9 +1,11 @@
-// trace-x-ray fixture 单测（2026-09-25,工具刃交付件）：
+// trace-x-ray fixture 单测（2026-09-25,工具刃交付件;2026-09-29 增录制器干扰项过滤批）：
 // 用手工合成的最小 trace 锁住拆解器全部机制面——解析器 bug 一次捕获,永久免疫。
 // 覆盖：流式状态机↔整读双路径一致性（含 8MB 块边界 carry 重放路径——2026-09-25 曾在此
 // 炸出 Buffer.slice=视图 非 拷贝 的 carry 覆写事故,10MB pad 强制跨块,双路径 digest 必须
 // 逐字段全等）、帧锚/帧距、profile 重组（跨 chunk 自耗收账）、GC canonical 计数+堆序列、
-// LPR/Commit 画布面、worker/降级桶/签名、probe 嫌疑表、CLI 三模式。
+// LPR/Commit 画布面、worker/降级桶/签名、probe 嫌疑表、CLI 三模式;
+// 第二 describe=录制器干扰项:StartProfiling 伪影帧标记/剔除/--include-recorder 语义/
+// 预热窗 --tune/worker (program) 空闲采样伪影 idleSamplingSuspect/音频 step 标签词表。
 // 运行：npx vitest run tests/trace-x-ray-fixture.test.mjs
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -101,6 +103,62 @@ function buildFixtureTrace(dir) {
 // worker:wall=10000µs,self (idle)=7000 blurLine=3000 → busy=3000 → busyPctOfSpan=2%
 // gc main: minor=1 major=1;heap 3 点,斜率>0;majorDrop 中位=2MB(drops[2M,5M,0.2M]→2M)
 // canvas: lpr total=6 perFrame=0.75 maxPerFrame=6;commit n=1 mean=12000µs
+
+// ─────────────────────────── fixture B：录制器干扰项（全部数字手算可复核） ───────────────────────────
+
+function buildRecorderFixtureTrace(dir) {
+  const T0 = 2_000_000; // 起始 µs
+  // 6 个渲染帧锚:gaps = 16,74,16,16,16(ms)——idx1 的 74ms gap 就是"巨帧"展位
+  const anchorOff = [0, 16000, 90000, 106000, 122000, 138000];
+  const ev = [];
+  const M = (o) => ev.push({ cat: '__metadata', ph: 'M', ts: 0, ...o });
+
+  M({ name: 'process_name', pid: 9, tid: 0, args: { name: 'Renderer' } });
+  M({ name: 'thread_name', pid: 9, tid: 100, args: { name: 'CrRendererMain' } });
+  M({ name: 'thread_name', pid: 9, tid: 102, args: { name: 'DedicatedWorker thread' } });
+  M({ name: 'thread_name', pid: 9, tid: 103, args: { name: 'DedicatedWorker thread' } });
+
+  // 渲染帧锚 + 渲染帧（FunctionCall loop dur≥1500µs）
+  for (const off of anchorOff) {
+    ev.push({ cat: 'devtools.timeline', name: 'FireAnimationFrame', ph: 'X', pid: 9, tid: 100, ts: T0 + off, dur: 3500 });
+    ev.push({ cat: 'devtools.timeline', name: 'FunctionCall', ph: 'X', pid: 9, tid: 100, ts: T0 + off, dur: 12000, args: { data: { functionName: 'loop' } } });
+  }
+  // 音频 rAF 回调宿主（094306 判例形态）+ 打断它的录制器启动事件（主线程,279.54ms 的缩比形态）
+  ev.push({ cat: 'devtools.timeline', name: 'FunctionCall', ph: 'X', pid: 9, tid: 100, ts: T0 + 18000, dur: 12000, args: { data: { functionName: 'step' } } });
+  ev.push({ cat: 'disabled-by-default-devtools.timeline', name: 'CpuProfiler::StartProfiling', ph: 'X', pid: 9, tid: 100, ts: T0 + 18000, dur: 12000 });
+  // 第二 isolate 的 StartProfiling（span 外,0 重叠——锁会话清单完整性）
+  ev.push({ cat: 'disabled-by-default-devtools.timeline', name: 'CpuProfiler::StartProfiling', ph: 'X', pid: 9, tid: 102, ts: T0 + 150000, dur: 2000 });
+
+  // 主线程 profile session '0x1'：step(音频根回调,父=(root))→drawImage;样本落 idx1 帧窗
+  //   samples [step,drawImage,step] td [18000,1000,1000,1000] → 采样墙钟 21ms;
+  //   样本 ts 18/19/20ms 全在 idx1 窗 [16,116) → tag audio=2ms(drawImage 样本经 step 祖先标 audio);
+  //   self:drawImage=1000µs
+  ev.push({ cat: 'v8.cpu_profiler', name: 'Profile', id: '0x1', ph: 'P', pid: 9, tid: 100, ts: T0, args: { data: { startTime: T0 } } });
+  ev.push({ cat: 'v8.cpu_profiler', name: 'ProfileChunk', id: '0x1', ph: 'P', pid: 9, tid: 100, ts: T0 + 1000, args: { data: { cpuProfile: { nodes: [
+    { id: 41, callFrame: { functionName: '(root)', url: '', lineNumber: -1 } },
+    { id: 42, parent: 41, callFrame: { functionName: 'step', url: 'http://localhost:5199/src/core/Audio.ts', lineNumber: 325 } },
+    { id: 43, parent: 42, callFrame: { functionName: 'drawImage', url: '', lineNumber: -1 } },
+  ], samples: [42, 43, 42] }, timeDeltas: [18000, 1000, 1000, 1000] } } });
+
+  // worker profile session '0x2'（tid102,空闲采样伪影形态:21 样本全落 (program)/1 个 named）
+  //   wall=21×2000=42000µs;self:(program)=38000 blurLine=2000 → named 4.76%<5%,prog 90.48%>50% → suspect
+  ev.push({ cat: 'v8.cpu_profiler', name: 'Profile', id: '0x2', ph: 'P', pid: 9, tid: 102, ts: T0, args: { data: { startTime: T0 } } });
+  ev.push({ cat: 'v8.cpu_profiler', name: 'ProfileChunk', id: '0x2', ph: 'P', pid: 9, tid: 102, ts: T0 + 1000, args: { data: { cpuProfile: { nodes: [
+    { id: 21, callFrame: { functionName: '(program)', url: '', lineNumber: -1 } },
+    { id: 22, parent: 21, callFrame: { functionName: 'blurLine', url: 'http://localhost:5199/src/render/LightWorker.ts', lineNumber: 8 } },
+  ], samples: [21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21] }, timeDeltas: Array(21).fill(2000) } } });
+
+  // worker profile session '0x3'（tid103,真实忙碌对照:exportTo 60ms,named 66.67% → 非 suspect）
+  ev.push({ cat: 'v8.cpu_profiler', name: 'Profile', id: '0x3', ph: 'P', pid: 9, tid: 103, ts: T0, args: { data: { startTime: T0 } } });
+  ev.push({ cat: 'v8.cpu_profiler', name: 'ProfileChunk', id: '0x3', ph: 'P', pid: 9, tid: 103, ts: T0 + 1000, args: { data: { cpuProfile: { nodes: [
+    { id: 31, callFrame: { functionName: '(root)', url: '', lineNumber: -1 } },
+    { id: 32, parent: 31, callFrame: { functionName: 'exportTo', url: 'http://localhost:5199/src/render/LightWorker.ts', lineNumber: 20 } },
+  ], samples: [32, 32, 32] }, timeDeltas: [30000, 30000, 30000] } } });
+
+  const file = path.join(dir, 'fixture-trace-recorder.json');
+  fs.writeFileSync(file, JSON.stringify({ metadata: {}, traceEvents: ev }));
+  return file;
+}
 
 describe('trace-x-ray fixture（机制面免疫锁）', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txr-fixture-'));
@@ -265,5 +323,133 @@ describe('trace-x-ray fixture（机制面免疫锁）', () => {
     fs.writeFileSync(p, '[{"name":"x"}]');
     const r = scanTraceStream(p, () => {});
     expect(r.total).toBe(0);
+  });
+});
+
+// ═══════════════ 录制器干扰项过滤 fixture（2026-09-29 批,登记债落刀）═════════════════════════
+// 注入 CpuProfiler::StartProfiling（主线程宿主形态=094306 判例:音频 rAF 回调 step 被启动成本
+// 打断成"巨帧"）+ (program) 主导的空闲 worker 线程（Windows 判例:idle 样本落 (program) 而非
+// (idle),ServiceWorker busy 实 0% 但 (program) 99.98%）。锁:recorder 段/伪影标记与剔除/
+// 预热窗/--include-recorder 语义/worker idleSamplingSuspect/音频标签。
+describe('trace-x-ray recorder 过滤 fixture（StartProfiling 伪影 + 空闲 worker 采样伪影）', () => {
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'txr-recorder-'));
+  const recFile = buildRecorderFixtureTrace(dir2);
+
+  // 期望值（手算）:
+  //   锚 6 个 offsets[0,16,90,106,122,138]ms → gaps[16,74,16,16,16];span=150ms(worker sp 顶到 150)
+  //   StartProfiling 主线程 t=+18ms dur=12ms → 伪影窗 [18,30+预热];首次带 500ms 预热 → [18,530]
+  //   worker sp t=+150ms dur=2ms → 窗 [150,152](span 外,0 重叠)
+  //   默认口径:伪影帧=idx1..5(5 个,宿主帧 idx1 靠锚窗相交,其余靠 gap 区间) → counted=1,
+  //     effSpan=150-132=18ms,fps=50;gap 全空;RECORDING_ARTIFACT hit
+  //   tune warmup=10ms:窗 [18,40] → 伪影=idx1,idx2(2 个) → gaps 剩[16,16,16] p50=16 max=16,
+  //     effSpan=150-24=126→0.13,fps=4/0.13=30.8
+  //   include-recorder:全帧口径 gaps[16,74,16,16,16] p50=16 max=74,fps=6/0.15=40;
+  //     slowest[0]=idx2(gap74,recorderArtifact=true);idx1 行 audioMs=2
+  //   worker tid102:21 样本 wall=42ms,(program)=38ms(90.48%) named blurLine=2ms(4.76%) → suspect
+  //   worker tid103:3 样本 wall=90ms,exportTo=60ms(66.67%) → 非 suspect,busy=40%>25 → ANOMALY hit
+  it('recorder fixture：流式 vs 整读双路径全等', async () => {
+    const whole = await digestTrace(recFile, {});
+    const stream = await digestTrace(recFile, { forceStream: true });
+    const strip = (d) => { const c = JSON.parse(JSON.stringify(d)); delete c.source.scanMs; c.source.path = ''; c.source.parseMode = ''; return c; };
+    expect(strip(stream)).toEqual(strip(whole));
+    expect(whole.source.parseBad).toBe(0);
+  });
+
+  it('recorder 段：会话窗/时长/重叠帧清单/预热窗标注', async () => {
+    const d = await digestTrace(recFile, {});
+    expect(d.recorder.detected).toBe(true);
+    expect(d.recorder.warmupMs).toBe(500);
+    expect(d.recorder.sessions).toHaveLength(2);
+    const main = d.recorder.sessions[0];
+    expect(main).toMatchObject({
+      tidKey: '9:100', name: 'CrRendererMain', startRelMs: 18, durMs: 12,
+      isFirst: true, windowRelMs: [18, 530], overlapFrames: 5,
+    });
+    const wk = d.recorder.sessions[1];
+    expect(wk).toMatchObject({ tidKey: '9:102', isFirst: false, startRelMs: 150, durMs: 2, windowRelMs: [150, 152], overlapFrames: 0 });
+    expect(d.recorder.artifactFrames).toBe(5);
+    expect(d.recorder.artifactUnionMs).toBe(132);
+    // 首会话重叠帧清单:宿主帧 idx1(gap16)+被延迟帧 idx2..5(gap 74/16/16/16)
+    expect(main.overlapFrameList.map((f) => f.gapMs)).toEqual([16, 74, 16, 16, 16]);
+  });
+
+  it('伪影帧缺省剔除：counted/effSpan/fps/gap 全空/慢帧表清空', async () => {
+    const d = await digestTrace(recFile, {});
+    expect(d.frames.anchors).toBe(6);
+    expect(d.frames.recorderArtifactFrames).toBe(5);
+    expect(d.frames.countedFrames).toBe(1);
+    expect(d.frames.effSpanS).toBe(0.02);          // 150ms-132ms 伪影窗并集
+    expect(d.frames.fps).toBe(50);                 // 1/0.02
+    expect(d.frames.gap).toMatchObject({ p50: 0, max: 0 });
+    expect(d.frames.count33ms).toBe(0);
+    expect(d.frames.slowest).toHaveLength(1);      // 只剩 idx0(gap=0)
+    expect(d.frames.slowest[0].recorderArtifact).toBeUndefined();
+    const sig = d.signatures.find((s) => s.id === 'RECORDING_ARTIFACT');
+    expect(sig.hit).toBe(true);
+    expect(sig.value).toEqual({ recorderSessions: 2, artifactFrames: 5, excludedFromStats: true, artifactUnionMs: 132 });
+  });
+
+  it('--tune recorderWarmupMs 收窄预热窗：宿主帧+gap 帧仍标,后续帧恢复统计', async () => {
+    const d = await digestTrace(recFile, { tune: { recorderWarmupMs: 10 } });
+    expect(d.recorder.warmupMs).toBe(10);
+    expect(d.recorder.artifactFrames).toBe(2);     // idx1(锚窗相交)+idx2(gap 区间相交)
+    expect(d.frames.countedFrames).toBe(4);
+    expect(d.frames.gap.p50).toBe(16);             // gaps 剩 [16,16,16]
+    expect(d.frames.gap.max).toBe(16);             // 74ms gap 已随 idx2 剔除
+    expect(d.frames.effSpanS).toBe(0.13);          // 150-22-2
+    expect(d.frames.fps).toBe(30.8);               // 4/0.13
+  });
+
+  it('--include-recorder 语义：全帧口径仅标记不剔除,慢帧表带 recorderArtifact 旗', async () => {
+    const d = await digestTrace(recFile, { includeRecorder: true });
+    expect(d.recorder.excludedFromStats).toBe(false);
+    expect(d.frames.countedFrames).toBe(6);
+    expect(d.frames.recorderArtifactFrames).toBe(5);
+    expect(d.frames.gap.p50).toBe(16);
+    expect(d.frames.gap.max).toBe(74);             // 巨帧 gap 回到统计面
+    expect(d.frames.fps).toBe(40);                 // 6/0.15
+    expect(d.frames.effSpanS).toBe(0.15);
+    const sig = d.signatures.find((s) => s.id === 'RECORDING_ARTIFACT');
+    expect(sig.value.excludedFromStats).toBe(false);
+    const giant = d.frames.slowest.find((s) => s.gapMs === 74);
+    expect(giant.recorderArtifact).toBe(true);
+    // 音频宿主帧(idx1)标签:step 根回调子树样本 2ms(audio 词表+伪根父门控)
+    const host = d.frames.slowest.find((s) => s.tMs === 16);
+    expect(host.audioMs).toBe(2);
+    expect(host.recorderArtifact).toBe(true);
+  });
+
+  it('worker 空闲采样伪影：(program) 主导+named<5% → suspect,busy 恒 named 口径', async () => {
+    const d = await digestTrace(recFile, {});
+    expect(d.workers).toHaveLength(2);
+    const suspect = d.workers.find((w) => w.tid === 102);
+    expect(suspect.idleSamplingSuspect).toBe(true);
+    expect(suspect.programSelfPct).toBe(90.48);    // 38/42
+    expect(suspect.namedSelfPct).toBe(4.76);       // 2/42 <5%
+    expect(suspect.idleSelfPct).toBe(0);
+    expect(suspect.busyPctOfSpan).toBe(1.3);       // 2/150——以 named 为准,非 (program) 的 90%
+    expect(suspect.top[0]).toMatchObject({ fn: '(program)', selfMs: 38 });
+    const busy = d.workers.find((w) => w.tid === 103);
+    expect(busy.idleSamplingSuspect).toBe(false);  // named 66.67% ≥5%,真实忙碌
+    expect(busy.busyPctOfSpan).toBe(40);           // 60/150 >25 → ANOMALY 数据源
+    expect(busy.programSelfPct).toBe(0);
+  });
+
+  it('WORKER_ANOMALY：busy 命中,idleSuspect 只展示不定罪', async () => {
+    const d = await digestTrace(recFile, {});
+    const sig = d.signatures.find((s) => s.id === 'WORKER_ANOMALY');
+    expect(sig.hit).toBe(true);
+    expect(sig.value.busyWorkers).toEqual(['DedicatedWorker thread(40%)']);
+    expect(sig.value.idleSuspectWorkers).toEqual(['DedicatedWorker thread(1.3% named,(program)90.48% 采样伪影)']);
+  });
+
+  it('音频标签词表：step 根回调进 audio,样本聚合面不受伪影剔除影响', async () => {
+    const d = await digestTrace(recFile, {});
+    expect(d.profile.tagSelfMs.audio).toBe(2);     // 2 个 step-子树样本 ×1ms
+    expect(d.profile.tagSelfMs.game).toBeUndefined(); // 无 loop 子树,无误标
+    // profile 采样聚合面(api/GC)与伪影剔除正交——回归保证的 fixture 级缩比
+    const api = Object.fromEntries(d.profile.api.map((r) => [r.fn, r]));
+    expect(api.drawImage.selfMs).toBe(1);
+    expect(d.profile.mainSamples).toBe(3);
   });
 });

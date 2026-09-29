@@ -87,19 +87,20 @@ describe('配饰旗位门（Player.cs:12897-12913 RefreshMechanicalAccsFromItemT
   it('③ 装备槽 vid 扫描：armor[3]=3061（已注册）命中;1131 重力地球仪已注册可命中', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: iid(3061), stack: 1 };
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 3061)).toBe(true);
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 5126)).toBe(false);
+    const unlocked = (k: number) => p.inv.isItemSlotUnlockedAndUsable(k);   // ★清偿刀 P 逐槽谓词
+    expect(playerAccessoryVidEquipped(p.inv.armor, unlocked, 3061)).toBe(true);
+    expect(playerAccessoryVidEquipped(p.inv.armor, unlocked, 5126)).toBe(false);
     // 1131 重力地球仪已注册（VI_ID≠0）→ gravControl2 装备门可达（:15184）
     expect(VI_ID(1131)).toBeGreaterThan(0);
     p.inv.armor[4] = { id: VI_ID(1131), stack: 1 };
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 1131)).toBe(true);
+    expect(playerAccessoryVidEquipped(p.inv.armor, unlocked, 1131)).toBe(true);
     p.inv.armor[4] = null;
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 1131)).toBe(false);
+    expect(playerAccessoryVidEquipped(p.inv.armor, unlocked, 1131)).toBe(false);
   });
-  it('④ 时装槽（armor[10..]）不参与旗位（仅装备段 3..accSlotMax）', () => {
+  it('④ 时装槽（armor[10..]）不参与旗位（仅装备段 3..9 解锁格）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[13] = { id: iid(3061), stack: 1 };     // 时装段
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 3061)).toBe(false);
+    expect(playerAccessoryVidEquipped(p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k), 3061)).toBe(false);
   });
 });
 

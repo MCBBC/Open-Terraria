@@ -68,6 +68,11 @@ describe('装备面板空槽幽灵帧（ItemSlot.cs:2443-2478 → Extra[54] Equi
     expect(src).toMatch(/background:url\(sprites\/vanilla\/Extra_54\.png\) \$\{-col \* 34\}px \$\{-row \* 34\}px/);
     expect(src).toMatch(/opacity:0\.35/);
     // 有物隐藏（:2312 `item.type <= 0 || stack <= 0` 门等价——paint 链翻 display）
-    expect(src).toMatch(/ghost\)\s*\(ghost as HTMLElement\)\.style\.display = content \? 'none' : 'block';/);
+    //   ★清偿刀 V（2026-09-29）重锚：旧钉 `style.display = content ? 'none' : 'block'`
+    //   被「开包 hitch diff 门」刀改写为同值守卫（写前比对,恒等值零 DOM 写,
+    //   UI.ts paintSlot 尾段）——display 终值语义不变（空槽 block/有物 none）,
+    //   钉的旧形态系实现细节 → 重锚新两行（ternary 语义行 + 守卫写行）。
+    expect(src).toMatch(/const ghostWant = content \? 'none' : 'block';/);
+    expect(src).toMatch(/style\.display !== ghostWant\) \(ghost as HTMLElement\)\.style\.display = ghostWant;/);
   });
 });

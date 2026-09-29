@@ -103,7 +103,7 @@ function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
-import { swPerf, searchHasParam } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面
+import { swPerf, searchHasParam, liqpolish } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面+★liqpolish 微抛光刀总闸
 import { GLShimCensus } from './glshim/GLShimCensus';   // ★B0 census 仪具(?b0shadow=1 激活,缺省零触碰)
 import { GLShimExecutor } from './glshim/GLShimExecutor';   // ★B2 shim 执行器（实体/弹/尘族 drawImage→GL quad 桥;riding ?bgl=1）
 import type { GoreSegSpec } from './glshim/GLShimExecutor'; // ★F-gore 批段规格（buildGoreQuadBatch 产出面）
@@ -3643,6 +3643,14 @@ export class Renderer {
     if (!shim?.active) return false;
     return shim.pushQuadBatchRgba(img, key, data, quads, replay);
   }
+  /** ★liqpolish 液体 ADD 批中介（2026-09-29 微抛光刀;emitLiquidQuadBatch 同构——
+   *  sparkle/glint ADD 段的发射口,pushLiquidAddBatch 通道,tier-1 保序入队） */
+  emitLiquidAddQuadBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    return shim.pushLiquidAddBatch(img, key, data, quads, replay);
+  }
   /** ★F-gore 批中介（2026-09-28;emitRainQuadBatch 同构多段形态）:drawGorePieces
    *  顶点批段的发射口——pushGoreQuadBatch 通道（段序=绘制序原位入队）。无活跃窗
    *  （纯 2D 帧/逃生门/GL 死）返回 false=调用方走 2D 逐件原链。 */
@@ -3672,7 +3680,10 @@ export class Renderer {
   /** ★liqgl 批钩（drawVanillaLiquids 注入面;acc 窗活性+可用性逐 pass 预检） */
   private liqBatchHook(): LiqBatchEmit | null {
     if (!liqgl || this._accMode !== 'acc' || !this.liqBatchAvail()) return null;
-    return { emit: (img, key, data, quads, replay) => this.emitLiquidQuadBatch(img, key, data, quads, replay) };
+    return {
+      emit: (img, key, data, quads, replay) => this.emitLiquidQuadBatch(img, key, data, quads, replay),
+      emitAdd: (img, key, data, quads, replay) => this.emitLiquidAddQuadBatch(img, key, data, quads, replay),
+    };
   }
   /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
    *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
@@ -6897,7 +6908,12 @@ export class Renderer {
       // ★IIIII251 CPU 路（★IIIII257 转正缺省开）：实心层坡面斜面带+256 亮线随波场
       // bob——门与表层 bob 同构（GL 全屏扭曲路径交付位移,不双重 bob）；
       // ?slopewave=0 逃生门同关
-      slopeWaveEnabled && waterWaves.quality > 0 && !this.warpPathActive());
+      slopeWaveEnabled && waterWaves.quality > 0 && !this.warpPathActive(),
+      null, null,
+      // ★liqpolish:实心层微光带批化钩（acc 窗预检同 liqMode 面;256 亮线/足迹
+      // 路不批=恒 CPU 原链;rec 入队位=本 pass 原位=层序零改动）
+      liqpolish && liqgl && this._accMode === 'acc' && !this.isCpuRender()
+        ? this.liqBatchHook() : null);
   }
 
   /** 全屏扭曲管线本帧激活（drawLiquids warpOn 同式抽提——IIIII251 bob 门复用） */
@@ -14822,11 +14838,20 @@ export class Renderer {
     //  染色族 colorArmorBody/Legs/Head/Neck/Shield... 全 Color.Transparent →
     //  骑乘期不可见；61 妖精=本刀目标，用户实报"妖精形态身上还带着装备
     //  （盾牌等）"——盾 25_Shield :3055-3127 染 colorArmorBody 同隐）。
-    //  54 迅猛龙除外：hideEntirePlayerExceptHelmetsAndFaceAccessories
-    //  （:1689-1693）保留 colorArmorHead → 脸饰照画（原版 CanDrawOnVelociraptorMount
-    //  门 :2823/:2843，本仓无该表维持现画法，登记）；54 的身前非脸族本仓仍画
-    //  （陈旧偏差，非本刀口径，登记不动）。
-    if (mnt && MOUNT_SETS.PlayerIsHidden?.[mnt.type] && mnt.type !== 54) return;
+    //  ★X4-债6 清偿（2026-09-29）：54 迅猛龙旧豁免支拆除——原版
+    //  hideEntirePlayerExceptHelmetsAndFaceAccessories（AdjustmentsForVelociraptorMount
+    //  PlayerDrawSet.cs:1886，消费 :1689-1693）把 colorArmorBody/colorArmorLegs/
+    //  colorShoes 等 14 色全染 Transparent、仅留 colorArmorHead——本族各层染色
+    //  亲读：18_OffhandAcc :2060=colorArmorBody、19_WaistAcc :2076=colorArmorLegs、
+    //  20_NeckAcc :2090=colorArmorBody、25_Shield :3096/:3109=colorArmorBody、
+    //  29_OnhandAcc :3867=colorArmorBody、32_FrontAcc :3917+=colorArmorBody、
+    //  12_1_BalloonFronts :1117/:1136=colorArmorBody、14_Shoes=colorShoes——
+    //  身前非脸族在迅猛龙上原版整族不可见；旧豁免=照画（登记偏差）。唯
+    //  22_FaceAcc 脸饰（CanDrawOnVelociraptorMount 门 :2823/:2843）原版仍画——
+    //  本仓无 face/faceMask/faceFlower 装备槽与 AccFace 贴图族（引擎级缺口，
+    //  勿在渲染层硬造），拆豁免无脸饰损失面。头盔照画走 veloHead 纸娃娃路径
+    //  （drawPlayer 主流程 :16131 区，colorArmorHead 保留同原版）。
+    if (mnt && MOUNT_SETS.PlayerIsHidden?.[mnt.type]) return;
     const atlas = this.atlas;
     const bodyRow = accRows.body;
     const legRow = accRows.legs;

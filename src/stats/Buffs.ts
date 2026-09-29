@@ -524,6 +524,13 @@ export const BUFF_NO_TIME_DISPLAY = new Set<number>([19, 27, 28, 29, 34, 37, 38,
  374, 377, 384,   // ★BJ357 变身坐骑伴生（Main.cs:9344-9352 全 MountType buff 循环段）
  382, 385, 386, 389, 390, 393, 394]);
 
+/** Main.persistentBuff 持久表（★X4-债3 2026-09-29 亲读 1457 Main.cs:9337-9344——
+ *  全表仅此 8 项置真，其余 600+ 项默认 false）：武器浸剂八族 {71 Venom/73 CursedFlames/
+ *  74 Fire/75 Gold/76 Ichor/77 Nanites/78 Confetti/79 Poison}。72 Midas 【不】在内
+ *  ——死亡清 buff 时黄金浸剂不留（BuffID.cs:295-311 实名核对）。唯一消费点 =
+ *  UpdateDead 清 buff 门（Player.cs:17113） */
+export const PERSISTENT_BUFFS = new Set<number>([71, 73, 74, 75, 76, 77, 78, 79]);
+
 /** BuffID.Sets.BuffTextHandlers（1457 Terraria.ID/BuffID.cs:36-145，共 28 项）：
  *  随从族 buff 图标下方的文字不是时长而是**在册随从计数**——CachedProjectileCounterBuffTextHandler
  *  (Terraria.DataStructures) 对 ownedProjectileCounts 按弹型求和，>0 → `"x"+n`（如"x3"），
@@ -1238,6 +1245,21 @@ export class BuffState {
   }
   remove(type: BuffType) {
     this.active.delete(type);
+  }
+  /** 死亡相清非持久 buff（★X4-债3 清偿 2026-09-29；UpdateDead Player.cs:17112-17117
+   *  `for i<maxBuffs: if (buffType[i]<=0 || !Main.persistentBuff[buffType[i]])
+   *  { buffTime[i]=0; buffType[i]=0; }`——裸字段写零，无音效/尘/飘字等视觉伴随，
+   *  表现面=仅图标下帧消失。Main.persistentBuff（Main.cs:9337-9344）全程仅 8 项
+   *  置真 = 武器浸剂八族 {71,73-79}（72 Midas 不在内——死亡连黄金浸剂也清），
+   *  其余全表默认 false。本仓 PERSISTENT_BUFFS 按该表挂 vanillaBuff 判；表外
+   *  （含无 vanilla 映射的自造 buff）一律按非持久清（原版无表项=persistentBuff
+   *  数组默认 false=同判）。调用点：Player.fixedUpdate 死亡分支每 tick（原版
+   *  UpdateDead 每帧跑同幂等）；幽灵相不走此路（buff 在死亡相已清空） */
+  clearNonPersistent(): void {
+    for (const [t] of [...this.active]) {
+      const v = BUFF_DEFS[t]?.vanillaBuff;
+      if (v === undefined || !PERSISTENT_BUFFS.has(v)) this.active.delete(t);
+    }
   }
   /** 直写剩余秒（原版 `buffTime[i] = n` 赋值语义，可缩短——区别于 apply 的
    *  AddBuff max 合并）。消费方：玩家微光穿落 buffTime=6t 刷新（Player.cs:11416） */

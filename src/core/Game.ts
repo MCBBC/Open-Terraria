@@ -2411,12 +2411,24 @@ function slotVanillaId(itemId: number): number {
   return (ITEM_DEFS[itemId]?.vid ?? -1);
 }
 
-/** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
+/** 配饰槽（armor[3..9] 解锁格，原版 ApplyEquipFunctional :12543-12550+:13044 门）→ 原版 item id 列表。
+ *  ★清偿刀 X（2026-09-29）债③：expertOnly 效益门——本表消费族在原版全为门内旗面：
+ *  strongBees=ApplyEquipFunctional :15461 / starCloakItem 族=:15700 / dontHurtNature
+ *  经 GrantArmorBenefits :13208-13210（UpdateEquips k-loop :13018 门内）——设旗面头门
+ *  ApplyEquipFunctional :14475-14478 `expertOnly && !Main.expertMode → return`，经典
+ *  世界专家档配饰零效益。1457 全树零 `expertOnly = true` 赋值（Item.cs:129/:48960 外
+ *  无第三处）→ 门为可达谓词（模组物品建模面,判别力由测试点亮 def 验证——照清偿刀
+ *  U 面①形态）。8 消费点（:22035/:33610/:33658/:34243/:34527/:40896/:41039/:41399）
+ *  经本单点全门。 */
 export function accessoryVanillaIds(p: Player): number[] {
   const out: number[] = [];
-  for (let acc = ACC_ARMOR_START; acc < p.inv.accSlotMax; acc++) {
+  for (let acc = ACC_ARMOR_START; acc < 10; acc++) {
+    if (!p.inv.isItemSlotUnlockedAndUsable(acc)) continue;   // ★清偿刀 P :12669-12690
     const s = p.inv.armor[acc];
-    if (s) out.push(slotVanillaId(s.id));
+    if (!s) continue;
+    // ★清偿刀 X：expertOnly 效益门（:13018/:14475——经典世界专家档件不计入消费表）
+    if (ITEM_DEFS[s.id]?.expertOnly && !(p.inv.gateExpert || p.inv.gateMaster)) continue;
+    out.push(slotVanillaId(s.id));
   }
   return out;
 }
@@ -2738,9 +2750,10 @@ export interface NpcButton {
   excl?: boolean;
 }
 
-/** 造型师理发报价纯式（Main.cs:43198-43211 逐行）：
- *  发型 100000 + 发色 20000 → 折扣 ×0.8 截断（:43208）→ ×PriceAdjustment 截断
- *  （:43210）→ Round(/10000)×10000 取整到金（:43211）。0 改动 = 0（GameUI.Buy 免费） */
+/** 造型师理发报价纯式（Main.cs:44522-44542 逐行——旧注 43198-43211 系 1456 陈锚,
+ *  1457 该域为 DrawHotbarLockIcon;★清偿刀 H 勘误 2026-09-29）：
+ *  发型 100000 + 发色 20000 → 折扣 ×0.8 截断（:44536）→ ×PriceAdjustment 截断
+ *  （:44538）→ Round(/10000)×10000 取整到金（:44539）。0 改动 = 0（GameUI.Buy 免费） */
 export function hairRestylePriceRaw(hairChanged: boolean, colorChanged: boolean,
   discountAvailable: boolean, priceAdjustment: number): number {
   let price = 0;
@@ -5533,20 +5546,30 @@ export class Game implements GameHooks {
   }
 
   /** 玩家可用的矿车坐骑型（miscEquips[2] 装备矿车 > 手持 > 背包扫描；
-   *  无矿车族物品 → -1 = 默认木质矿车 13，仍可上车） */
+   *  无矿车族物品 → -1 = 默认木质矿车 13，仍可上车）。
+   *  ★清偿刀 X（2026-09-29）债①：expertOnly 矿车效益门——原版唯一矿车型消费面
+   *  = GrappleMovement 贴轨上车段（Player.cs:22856 `int num4 = 13` 木质缺省 +
+   *  :22859 `(!miscEquips[2].expertOnly || Main.expertMode)`）：门不满足即恒 13 木质车,
+   *  经典世界专家档矿车族物品零上车效益。1457 全树零 `expertOnly = true` 赋值
+   *  （Item.cs:129/:48960 外无第三处）→ 门为可达谓词（模组物品建模面,判别力由测试
+   *  点亮 def 验证——照清偿刀 U 面①形态）。手持/背包两级后备 = 本仓无原版对应面的
+   *  近似（:5531 既有登记）,按同门收束（效益面一致：专家档件经典世界不供矿车型）。 */
   private bestCartMount(): number {
-    const misc = this.player.inv.miscEquips?.[2];
-    if (misc) {
+    const inv = this.player.inv;
+    const expertGated = (id: number): boolean =>
+      !!(ITEM_DEFS[id]?.expertOnly && !(inv.gateExpert || inv.gateMaster));
+    const misc = inv.miscEquips?.[2];
+    if (misc && !expertGated(misc.id)) {
       const m = this.cartMountOfItem(misc.id);
       if (m >= 0) return m;
     }
-    const held = this.player.inv.heldItem();
-    if (held) {
+    const held = inv.heldItem();
+    if (held && !expertGated(held.id)) {
       const m = this.cartMountOfItem(held.id);
       if (m >= 0) return m;
     }
-    for (const s of this.player.inv.slots) {
-      if (!s) continue;
+    for (const s of inv.slots) {
+      if (!s || expertGated(s.id)) continue;
       const m = this.cartMountOfItem(s.id);
       if (m >= 0) return m;
     }
@@ -9243,11 +9266,15 @@ export class Game implements GameHooks {
     // 原版先播 Item166 再走变身 if-chain（无映射曲只响声不变身），此处同序；
     // 变身目标 = musicBoxRecordItem（curMusic→style→vid，WorldGen :43138 逆表） ----
     if (this.lastMusic > 0 && this.lastMusic <= 105) {
-      for (let acc = ACC_ARMOR_START; acc < player.inv.accSlotMax; acc++) {
+      for (let acc = ACC_ARMOR_START; acc < 10; acc++) {
+        if (!player.inv.isItemSlotUnlockedAndUsable(acc)) continue;   // ★清偿刀 P :13044 门
         const slot = player.inv.armor[acc];
         if (!slot) continue;
         const heldDef = ITEM_DEFS[slot.id];
         if (!heldDef || (heldDef.vid ?? -1) !== MUSIC_BOX_EMPTY_VID) continue;
+        // ★清偿刀 X：expertOnly 效益门（录音支在 ApplyEquipFunctional 内 :15725——
+        //   函数头 :14475-14478 expertOnly∧经典世界整函数早退=录音不掷;同族面同门）
+        if (heldDef.expertOnly && !(player.inv.gateExpert || player.inv.gateMaster)) continue;
         if (Math.floor(Math.random() * 540) !== 0) continue;
         this.sfx.play('record');   // SoundID.Item166（录音完成音）
         const recKey = VANILLA_ITEM_KEY_BY_ID[musicBoxRecordItem(this.lastMusic)];
@@ -11499,8 +11526,17 @@ export class Game implements GameHooks {
     // ★BJ103-A1b（2026-09-16）：传送滑行窗（cameraLerp>0）内以原版 cameraLerp 语义
     // 收编（Camera.advanceTeleportLerp——率 0.1 起+ramp+到位吸合,Main.cs:18326-18340/
     // :63580-63600）；窗外维持本仓 follow 常驻缓动（自创模型,非本刀范围）。
-    const camTX = golfCam ? golfCam.x : (specCam ? specCam.x : player.cx);
-    const camTY = golfCam ? golfCam.y : (specCam ? specCam.y : player.cy);
+    // ★X4 清偿刀I（2026-09-29）：DroneCameraTracker 通道接入（GetObjectTrackingCameraPan
+    //  全链优先序 1:1，Main.cs:63677-63699）——观战支 :63682-63687（本仓 specCam
+    //  net-only 同相）→ dead 门 :63688-63691（dead → 无人机/高尔夫双断,镜头锁尸位
+    //  BJ397 同相）→ 无人机跟拍 :63692-63694 → 高尔夫 :63696-63699。旧码
+    //  golfCam>specCam 反序（IIIII233 注自称「优先级低于观战」而实现反序）——本刀
+    //  顺位归正（同链互斥序=本刀交付面）。装备门 remoteVisionForDrone = 面部配饰槽
+    //  3-9/13-19 任一佩戴 5452 FPV 眼镜（Player.cs:14314-14316 虚荣支/:15574-15577
+    //  功能支;本仓 DroneCameraTracker.tryTracking 内现算,Player.ts 零触碰）。
+    const droneCam = !player.dead ? this.camera.droneTracker.tryTracking(this.player, player.inv) : null;
+    const camTX = specCam ? specCam.x : (droneCam ? droneCam.x : (golfCam ? golfCam.x : player.cx));
+    const camTY = specCam ? specCam.y : (droneCam ? droneCam.y : (golfCam ? golfCam.y : player.cy));
     if (this.camera.teleportLerp > 0) {
       this.camera.advanceTeleportLerp(camTX, camTY, Math.hypot(player.vx, player.vy));
     } else {
@@ -11854,7 +11890,16 @@ export class Game implements GameHooks {
     // 超亮 5=(1.4³) 黄 6=(0.9,0.9,0) 恶魔 8=(1,1.6,0.5) 冰 9=(0.75,0.85,1.4) 沙漠 10=(1,0.5,0)
     // 丛林 11=(1.4,1.4,0.7) 腐化 12/猩红 13/神圣 15 …）；蜡烛 105/713 = (1,0.95,0.8)。
     // 生物群系火把映射（EmitHeldItemLight 显式 case + item≥427 → torchId=item-426）
-    const heldDef = player.inv.heldDef();
+    // ★X4-债4 手持光抑制半边（2026-09-29 清偿）：原版 EmitHeldItemLight 调用挂
+    //  :43178 `if (!JustDroppedAnItem && IsAllowedToHoldItems)` 门——IsAllowedToHoldItems
+    //  由变身坐骑 Mount.UpdateEffects case 55/56/61 置 false（Mount.cs:5195-5200，
+    //  DontHoldItems{55,56,61} MountID.cs:29），每帧 ResetEffects 复位（Player.cs:18393）。
+    //  骑三变身坐骑时手持光全族熄（火把/荧光棒/水炬/水蜡烛…——下方全消费块读本值）。
+    //  食饮粒子半边同门（:43180-43182）本仓 emitFoodDrinkParticles 已被 this.swing
+    //  早退天然覆盖（三坐骑使用链整禁=无 swing，Game.ts:11546 门）
+    const heldDef = (player.ridingMount && (MOUNT_SETS.DontHoldItems?.[player.mount.type] ?? false))
+      ? null
+      : player.inv.heldDef();
     const TORCH_LIGHT: Record<number, [number, number, number]> = {
       0: [1, 0.95, 0.8], 1: [0, 0.1, 1.3], 2: [1, 0.1, 0.1], 3: [0, 1, 0.1], 4: [0.9, 0, 0.9],
       5: [1.4, 1.4, 1.4], 6: [0.9, 0.9, 0], 8: [1, 1.6, 0.5], 9: [0.75, 0.85, 1.4],
@@ -14164,8 +14209,15 @@ export class Game implements GameHooks {
         this.player.useTime = 15;                     // ApplyItemTime（useTime=useAnimation=15）
         this.input.rightDown = false;
       }
-      // 书杖风暴 3852 右键 alt（R34-⑤，Player.cs:49555-49562）：发 704 风暴柱
+      // 书杖风暴 3852 右键 alt（R34-⑤，Player.cs:49557-49561）：发 704 风暴柱
       //  （Bottom−100 水平横扫 vx=direction×speed、伤×1.75、蓝×2 :53320）。
+      //  ★X4-债7② 零修刀定谳（清偿刀D 亲读）：原版 x=pointPosition.X——
+      //  RotatedRelativePoint(MountedCenter).X（:47605+:4209-4235 无坐骑→PlayerOffset
+      //  0→num2=4、无 fullRotation→恒等）=盒心X（MountedCenter :3321-3326=
+      //  position.X+width/2）≡本仓 player.cx——「杖尖」读法不成立（非 heldItemTip
+      //  绘制尖端直算面）;NewProjectile :10878-10879 传点即弹心,本仓构造器 −w/2 同构。
+      //  残余=fullRotation 斜面项 +(21−4)·sin(φ)px 与 mount.PlayerOffset≠0 支——
+      //  本仓 fullRotation 未建模（Player.ts:5170 注）,登记维持不建模。
       //  连发门 :31902 flag2&&alt==0&&itemAnimation==0 → 自动升 alt——按住 RMB 每动画窗
       //  一发（本支不消费 rightDown,以 useTime===0 节流）;:43826 单窗单发同门覆盖。
       //  挂 tile 交互分派之后 = !tileInteractionHappened 语义（同 3384/3858 先例）
@@ -14182,11 +14234,16 @@ export class Game implements GameHooks {
           this.player.checkMana(bsCost);              // ManaV2 空蓝照放语义单点端口
           const bsDmg = Math.max(1, Math.trunc((this.player.damageMult('magic')
             * (bsData?.damage ?? 36) * (bsPs?.dmg ?? 1)) * 1.75));    // weaponDamage 链再 ×1.75 截断
-          // ★BJ374 风暴方向=鼠标侧（:47626-47634 ChangeDir 点积）：alt 窗首拍
-          //  ItemCheck_Shoot 以鼠标向跑 ChangeDir → direction=sign(鼠标X−pointPosition.X)。
-          //  旧用陈旧 player.facing=面朝反侧时风暴背身飞（实测 vx=−11 而鼠标在右）
+          // ★BJ374 风暴方向=鼠标侧（Player.cs:47612-47634 ChangeDir 点积）：alt 窗首拍
+          //  （ItemAnimationJustStarted :4050）vector=normalize(MouseWorld−pointPosition)、
+          //  num=Dot(UnitX.RotatedBy(fullRotation),vector) >0 → ChangeDir(1) 否则 −1。
+          //  本仓 fullRotation 未建模（Player.ts:5170 注,φ=0）⇒ num=sign(dx)/|d| ⇒
+          //  点积门收敛为 sign(鼠标X−盒心X)（pointPosition.X≡Center.X,X4-债7② 判语）。
+          //  ★X4-债7③ 边界定谳（清偿刀D）：dx==0 同轴拍 num=0 不满足 >0 → 落 else 支
+          //  =朝左——旧 `>=` 同轴拍翻右=反相,改严格 `>`。
+          //  （旧用陈旧 player.facing=面朝反侧时风暴背身飞,实测 vx=−11 而鼠标在右）
           const [bsMwx] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          this.player.facing = bsMwx >= this.player.cx ? 1 : -1;
+          this.player.facing = bsMwx > this.player.cx ? 1 : -1;
           const pb = this.player as unknown as { cy: number; y?: number; h?: number };
           const feetY = pb.y !== undefined && pb.h ? pb.y + pb.h : pb.cy + 22;
           const twister = new BookStormTwister(this.player.cx, feetY - 100,
@@ -14301,6 +14358,13 @@ export class Game implements GameHooks {
             pc5?.damage ?? 1, pc5?.knockBack ?? 0, shootId5, { grav: 0, pierce: 1 });
           mech.ownerPlayer = this.player;
           this.entities.add(mech, 'projectiles');
+          // ★X4 清偿刀I：DroneCameraTracker 通道出膛位——原版 Track 调用点在
+          //  AI_195/AI_205 owner==myPlayer 支（Projectile.cs:38825/:41688）,本仓两 AI
+          //  未实装（ai195/205 本体行为另批登记,见上注）,过渡期由本 spawn 支代行
+          //  （单实例替换语义下与逐帧 Track 观测等价:Track 幂等覆写）。AI 批落地后
+          //  由其逐帧 Track 接管（双写无害,幂等）;装备门 remoteVisionForDrone 在
+          //  TryTracking 侧（无 5452 FPV 眼镜不跟拍,原版同相）。
+          this.camera.droneTracker.track(mech);
           this.useSwing(heldDef, pa5);
           this.player.useTime = Math.max(1, pc5?.useAnimation ?? 20);
           this.playUseSound(pmVid, 'tink');
@@ -18532,7 +18596,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  ——曾无 this.swing 门:swing 归零(null)后 swT0=0<win 恒真,按住期间
           //  永久吞施法=法杖放下不回举（2026-08-25 用户实报连发瞬态）
           const swT0 = this.swing.t, swDur0 = this.swing.dur;
-          const win = TAIL_SILENCE_WIN[critVid] * (cw.useTime || 4);
+          // ★X4-债7①（清偿刀D）原版式兜底（Player.cs:43819-43823,ItemCheck_OwnerOnlyCode
+          //  `int useTime = itemTimeMax; if (useTime == 0) { useTime = sItem.useTime; }`）：
+          //  本仓无 itemTimeMax 台账（swing=itemAnimation、player.useTime=itemTime,
+          //  Game.ts:13518 注）——itemTimeMax 本仓对映=窗内已施用 useTime（慢施档
+          //  ApplyItemTime(sItem,2.5) :4406-4415 → itemTimeMax=⌊useTime×2.5⌋),仓内
+          //  载体=swing.multishot.useTime（R27 续发钟同源同值,msU27 口径）;兜底
+          //  cw.useTime≡sItem.useTime 数据面,末档 4=cw 缺表防御档（原版该支不可达:
+          //  武器 useTime≥1,本仓仅 6152 恰=4 同值）。
+          const win = TAIL_SILENCE_WIN[critVid] * (this.swing.multishot?.useTime || cw.useTime || 4);
           // ★swT0>1:t≤1=动画已尽/autoReuse 保活钉——放行重施（原版 itemAnimation
           //  归零同帧重施,0 态不停留）
           if (swT0 > 1 && swT0 < swDur0 - win) {
@@ -19138,11 +19210,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           let mwx6152 = mzX, mwy6152 = mzY;
           { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); mwx6152 = wx; mwy6152 = wy; }
           let midSwing6152 = false;
+          // ★X4-债7①（清偿刀D）：续发钟=窗内已施用 useTime（原版 itemTimeMax 对映,
+          //  慢施档 ApplyItemTime(sItem,2.5) :4406-4415 同式缩放）——尾停发窗与续发钟
+          //  同源同值（Player.cs:43847 的 useTime 局部=itemTimeMax,==0 兜底
+          //  sItem.useTime :43819-43823 → 本仓 cw.useTime 数据面;末档 4=防御档）
+          const appliedU6152 = this.player.getSlowMagicUseTime(cw.useTime) || cw.useTime || 4;
           fireBloom6152();                                  // 首发（含 UseSound/mouseDown 消费）
           if (sw6152 && animDur6152 > cw.useTime && cw.useTime > 0) {
-            const winTail6152 = TAIL_SILENCE_WIN[critVid] * (cw.useTime || 4);
+            const winTail6152 = TAIL_SILENCE_WIN[critVid] * appliedU6152;
             sw6152.multishot = {
-              useTime: this.player.getSlowMagicUseTime(cw.useTime),
+              useTime: appliedU6152,
               fired: 1,
               // ★F-03：慢施那一击按缩放对计发数（正常对透传不变;6152 数据面缺
               // useAnimation 行 → 慢施分叉旁路=slowMagicSprayPlan 登记债）
@@ -19828,8 +19905,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  swT <= dur−win。旧 `swT <` 在 e=win 拍（anim=13<14,如 3852 第 5 发）
           //  放行=每窗多发一发（实测 5 发,原版 4 发）
           const winTail = TAIL_SILENCE_WIN[critVid];
+          // ★X4-债7①（清偿刀D）：续发钟=窗内已施用 useTime（原版 itemTimeMax 对映,
+          //  慢施 ×2.5 缩放 ApplyItemTime :4406-4415）——尾停发窗 gate 同源同值
+          //  （Player.cs:43819-43823 useTime=itemTimeMax,==0 兜底 sItem.useTime→
+          //  本仓 cw.useTime 数据面）。旧 gate (cw.useTime||4) 慢施窗不随 itemTimeMax
+          //  缩放=窗单位分裂（续发钟 7/窗 3）
+          const msU27 = this.player.getSlowMagicUseTime(cw.useTime);
           this.swing.multishot = ms27 = {
-            useTime: this.player.getSlowMagicUseTime(cw.useTime),
+            useTime: msU27,
             fired: 1,
             // ★F-03：慢施那一击按缩放对计发数（swing.dur 已由付款点拉伸 →
             // A_eff=dur−1−rd;正常对透传 spray27 原值,R26 冻结面零改动）
@@ -19840,7 +19923,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             ...(winTail !== undefined ? {
               gate: (): boolean => {
                 const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 0;
-                return !(swDur > 0 && swT <= swDur - winTail * (cw.useTime || 4));
+                return !(swDur > 0 && swT <= swDur - winTail * (msU27 || cw.useTime || 4));
               },
             } : {}),
           };
@@ -33294,6 +33377,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 分族由颜色表承载：食物表（useStyle 2 咀嚼族）50% 掷、饮料表（useStyle 9
     // 仰饮族）每帧，尘 284 于嘴区）
     this.emitFoodDrinkParticles(this.player.inv.heldItem());
+    // ★X4-债4 清偿（2026-09-29）耍蛇笛 4262 音符 gore（ItemCheck_ApplyUseStyle
+    //  useStyle==5 支 Player.cs:51723-51751——itemAnimation>0 期间每帧经
+    //  AnimatePlayerAndGetItemFrame :43712 调用）：Next(20)==0 → gore Next(570,573)
+    //  于 (Center.X+dir·30−6, MountedCenter.Y−36)（itemLocation.Y=MountedCenter.Y−6
+    //  再 −30），v=(WindForVisuals×2+dir·0.3, −0.5) 逐分量 ×(1+Next(−50,51)×0.01)，
+    //  571→X−4、572→X−8（Gore_570-572.png 音符贴图在库,NewGore 非perfect=标准扰动
+    //  vy−=Next(10,31)×0.1/vx+=Next(−20,21)×0.1, Gore.cs:1350-1353→GorePiece.newGore
+    //  perfect:false 同相）。门 = 非 DontHoldItems 坐骑（:51735-51737 flag 支）；
+    //  本仓 useTime===0 起手块（:14388 区）已承载秘蛇召唤主面,此为动画窗特效位。
+    //  MountedCenter 取 (cx,cy)（站立恒等;DontHoldItems 坐骑已整门,其余坐骑
+    //  mountOffset 近似差备案——53 骸骨马等可持笛坐骑罕见）
+    if (this.swing.t > 0 && (ITEM_DEFS[this.swing.item]?.vid ?? -1) === 4262
+      && !(this.player.ridingMount && (MOUNT_SETS.DontHoldItems?.[this.player.mount.type] ?? false))
+      && Math.floor(Math.random() * 20) === 0) {
+      const dir = this.player.facing >= 0 ? 1 : -1;
+      const vid57x = 570 + Math.floor(Math.random() * 3);          // Next(570,573)
+      let gx = this.player.cx + dir * 30 - 6;
+      if (vid57x === 572) gx -= 8;
+      else if (vid57x === 571) gx -= 4;
+      const gy = this.player.cy - 36;
+      const wind = this.world.weather?.windSpeedCurrent ?? 0;
+      const jx = (Math.random() * 101 - 50) * 0.01;                // Next(-50,51)×0.01
+      const jy = (Math.random() * 101 - 50) * 0.01;
+      const g = GorePiece.newGore(vid57x, gx, gy,
+        (wind * 2 + dir * 0.3) * (1 + jx), -0.5 * (1 + jy), 0.8);
+      void g;   // livePool 自注册（GorePiece.ts:477），渲染走 liveGorePieces——无需 entities.add
+    }
     const held = this.player.inv.heldItem();
     if (!held) return;
     const heldDef = ITEM_DEFS[held.id];
@@ -36474,7 +36584,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 画金币条（DrawMoney,NPCChatPanel.cs:140-144；本仓=收集钮右侧同行价签——
     // FX52 定谳:币条占钮右 106 预留槽,:135 先推进 rect.X 故锚为钮右非钮左）
     if (npc.npcKey === 'tax_collector' && this.player.taxMoney > 0) {
-      buttons.push({ id: 'collect', label: Lang.inter(89), coins: Math.floor(this.player.taxMoney) });
+      // 金币条显示 = 税款 ÷ PriceAdjustment（GetCoinValueText_TaxCollector Main.cs:40625
+      //  `(int)((float)taxMoney/PA)`——税官自身幸福价,负值钳 0;<0 守卫同 :40627）
+      //  ★清偿刀 H(2026-09-29)：旧显示税额原值未除幸福乘区;f32 语义= Math.fround(f32 同义)
+      const taxShown = Math.max(0, Math.trunc(Math.fround(Math.fround(this.player.taxMoney)
+        / Math.fround(this.dialogHappiness?.priceMul ?? 1))));
+      buttons.push({ id: 'collect', label: Lang.inter(89), coins: taxShown });
     } else if (npc.npcKey === 'tax_collector') {
       buttons.push({ id: 'collect', label: Lang.inter(89) });
     }
@@ -38372,6 +38487,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       hardMode: !!this.world.flags.hardMode,
       expertMode: this.world.isExpert,   // R14-E8：Main.expertMode 金钱 ×2
       ownedTypes: owned,
+      // ★清偿刀 H（2026-09-29）：GetAnglerReward（Player.cs:56968）稀有度乘区
+      //   ×(currentShoppingSettings.PriceAdjustment+1)/2——渔夫幸福快照（对话交付时
+      //   currentShoppingSettings=渔夫; unhappy(1.5)→×1.25 稀有度, happy(0.75)→×0.875）。
+      //   旧未传参=纯函数侧缺省 → ×0.5 恒定（连原版 NotInShop ×1 都不及）
+      priceAdjustment: this.dialogHappiness?.priceMul ?? 1,
     })) {
       const key = VI(g.id);
       if (!key) continue;
@@ -39517,6 +39637,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
     return computeHappiness({
       npcVanillaId: npc.vanillaId,
+      remixWorld: !!w.seedFlags?.remix,   // Main.remixWorld（ProcessMood :107 提前 return 门）★清偿刀 H
       homeless: !home,
       distFromHome: home ? Math.hypot(cx - home.x, cy - home.y) : 0,
       playerInCorrupt: !!sc?.zoneCorrupt, playerInCrimson: !!sc?.zoneCrimson, playerInDungeon: !!sc?.zoneDungeon,
@@ -40472,12 +40593,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.world.clock.xMas = f.xMas;
   }
 
-  /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes + Player.CollectTaxes :23854）：
-   *  税款由 update 每游戏小时累积（50 铜 × 已入住城镇 NPC 数，上限 25 金），对话领取 */
+  /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes → Main.NPCChatText_DoTaxCollector
+   *  Main.cs:40873-40910 + Player.CollectTaxes :24320）：
+   *  税款由 update 每游戏小时累积（50 铜 × 已入住城镇 NPC 数，上限 25 金），对话领取。
+   *  ★清偿刀 H（2026-09-29）：实付 = 税款 ÷ PriceAdjustment（:40878 `(int)((float)taxMoney/PA)`
+   *  ——税官自身幸福价乘区, unhappy 税官(乘区 1.5)到手少、happy(0.75)到手多），尾款
+   *  taxMoney=0（:40907）——被乘区吃掉的差额随清零弃置（原版同相） */
   private taxCollect() {
-    const t = this.player.taxMoney;
-    if (t <= 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.TaxEmpty')); return; }
-    this.player.taxMoney = 0;
+    if (this.player.taxMoney <= 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.TaxEmpty')); return; }  // :40873 门（除前）
+    const pa = this.dialogHappiness?.priceMul ?? 1;
+    const t = Math.max(0, Math.trunc(Math.fround(Math.fround(this.player.taxMoney) / Math.fround(pa))));   // :40878
+    this.player.taxMoney = 0;   // :40907 除后无条件清零——÷PA 截为 0 时税款随乘区弃置,原版同相
+    if (t <= 0) return;          // :40879 while 环不进 = 无币发放
     this.gainCopper(t);
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
@@ -40524,10 +40651,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (f['downed_4'] || f.downedEyeOfCthulhu) num *= 3;   // EoC（★RB28-F1 别名并读,同 :10017 门）
     if (this.world.isExpert) num *= 2;
     // :39506-39509 折扣卡 ×0.8（(int) 先截后乘）；:39511 ×currentShoppingSettings
-    // PriceAdjustment（快乐度购物价乘区——护士是服务非商品，原版仍乘，本仓
-    // shopHappinessMul 开店时快照，此处同链取当前值）
+    // PriceAdjustment（快乐度购物价乘区——护士是服务非商品，原版仍乘）。★清偿刀 H
+    // （2026-09-29）快照源勘正：currentShoppingSettings 在 SetTalkNPC（Player.cs:4370-4374）
+    // 快照=dialogHappiness——旧读 shopHappinessMul（openNpcShop 才刷新）在「直接对话
+    // 护士治疗、未开过店」时取到陈店/缺省 1,与原版护士自身幸福价脱钩
     if (this.player.equipStats.discount) num = Math.floor(num * 0.8);
-    num *= this.shopHappinessMul || 1;
+    num *= this.dialogHappiness?.priceMul || 1;
     return Math.floor(num);
   }
 
@@ -42732,7 +42861,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  ai[1]=回复量，飞达目标后结算（aiStyle 52 :27114-27165，见 HealProj）——不再
    *  直回当前玩家。原版鬼疗跨队友选最缺血者（:11424-11434），本仓无队友体系，
    *  目标恒本地玩家（vampireHeal :11447 同为 owner 自己）。canGhostHeal 按恒 true；
-   *  ghostHurt 未接 */
+   *  ghostHurt（面具浮魂 356）已接——SpectreSoulProj.ghostHurtOnHit（★批⑥，2026-08-31）*/
   applyLifeSteal(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic = false): number {
     const p = this.player;
     if (p.buffs.moonLeech) return 0;                       // 月噬 145 全禁（:12879/:12885/:27124）
@@ -48019,9 +48148,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (vid != null) this.achievements.notifyItemCraft(vid);
   }
 
-  // ---- 造型师理发（StylistHairWindow → OpenHairWindow Main.cs:43073 + 报价
-  //      :43198-43211 + BuyHairWindow :43105-43113）----
-  /** 理发报价（Main.cs:43198-43211 逐行）：发型改动 +100000（10 金）/ 发色改动
+  // ---- 造型师理发（StylistHairWindow → OpenHairWindow Main.cs:44391 + 报价
+  //      :44522-44542 + BuyHairWindow :44423——旧注 43073/43198-43211/43105-43113
+  //      系 1456 陈锚,★清偿刀 H 勘误 2026-09-29）----
+  /** 理发报价（Main.cs:44522-44542 逐行）：发型改动 +100000（10 金）/ 发色改动
    *  +20000（2 金）→ 折扣卡 ×0.8 截断 → ×快乐度 PriceAdjustment 截断 →
    *  Round(price/10000)×10000（取整到金）。0 改动 = 0（免费「购买」） */
   hairRestylePrice(next: { hair: number; hairColor: { r: number; g: number; b: number } }): number {
@@ -48048,12 +48178,17 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
 
   // ---- 重铸（哥布林工匠，DrawInventory Main.cs:41710 费用段 :42295-42312 + ReforgeItemInReforgeSlot :42618） ----
 
-  /** 重铸费用 = value×stack → ×0.8 折扣先行 → ÷3（★BJ392 勘误 2026-09-29：阶序按
-   *  Main.cs:42297-42303——num55=value*stack → discountAvailable `(long)(num55*0.8)`
-   *  （:42299-42301,floor）→ PriceAdjustment → `/=3`（:42303）;旧注释 :41026-41032 系
-   *  1456 陈锚（1457 该域为 NPC 头像绘制段）。旧实现 ÷3 先行再 ×0.8=
-   *  floor(floor(V/3)×0.8) 与原版 floor(V×0.8/3) 阶序错位（V=50000:13332≠13333）。
-   *  PriceAdjustment（哥布林幸福价 :42302）未建模=登记债,勿臆造。
+  /** 重铸费用 = value×stack → ×0.8 折扣先行 → ×PriceAdjustment（幸福价）→ ÷3
+   *  （★BJ392 勘误 2026-09-29：阶序按 Main.cs:42297-42303——num55=value*stack →
+   *  discountAvailable `(long)((double)num55*0.8)`（:42299-42301,floor）→
+   *  PriceAdjustment `(long)((float)num55*pa)`（:42302,f32 乘后截断）→ `/=3`（:42303）;
+   *  旧注释 :41026-41032 系 1456 陈锚（1457 该域为 NPC 头像绘制段）。旧实现 ÷3 先行
+   *  再 ×0.8= floor(floor(V/3)×0.8) 与原版 floor(V×0.8/3) 阶序错位（V=50000:13332≠13333）。
+   *  ★清偿刀 H（2026-09-29）：PriceAdjustment（哥布林幸福价 :42302）实装——乘子 =
+   *  ShopHelper.ProcessMood 产出（computeHappiness.priceMul,钳 [0.75,1.5] + 0.01 圆）,
+   *  快照源 = Player.SetTalkNPC（Player.cs:4370-4374）→ 本仓 dialogHappiness
+   *  （openNpcDialog 时 computeShopHappiness）;非对话态 = ShoppingSettings.NotInShop 1f。
+   *  f32 语义走 truncCSf32Mul（ScaleStats:= trunc(f32(f32(a)*f32(b)))=C# (long)((float)a*b)）。
    *  vi_ 物品注册期 value=1 占位——权威值查 vanilla-itemvalue.json（extract-itemrare.mjs） */
   reforgeCost(item: { id: number; stack: number }): number {
     const def = ITEM_DEFS[item.id];
@@ -48062,6 +48197,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
     let cost = value * item.stack;
     if (this.player.equipStats.discount) cost = Math.floor(cost * 0.8);   // 折扣先行（:42299-42301）
+    // 幸福价乘区（:42302 (long)((float)num55*PriceAdjustment)）——乘子取对话 NPC
+    // （哥布林工匠）的幸福快照；重铸门只许对话态开启（vanilla InReforgeMenu 在
+    //  talkNPC==-1 时即关 Main.cs:42278-42280）,非对话兜底 = NotInShop 1f
+    cost = truncCSf32Mul(cost, this.dialogHappiness?.priceMul ?? 1);      // 幸福价乘区（:42302）
     cost = Math.floor(cost / 3);                                          // ÷3 后行（:42303）
     return Math.max(1, cost);   // num60<1→1 兜底（:42309-42312）
   }
@@ -48079,7 +48218,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     return rollablePrefixes(vid, isPrefixableAccessory(item.id)) !== null;
   }
 
-  /** 执行重铸（ReforgeItemInReforgeSlot :41346-41351：ResetPrefix + Prefix(-2)）。
+  /** 执行重铸（ReforgeItemInReforgeSlot Main.cs:42618——旧注 :41346-41351 系 1456 陈锚，
+   *  1457 该域为绘图片段：ResetPrefix + Prefix(-2)）。
    *  成功：扣费、写回 item.prefix 并返回新词缀号；失败（钱不够/不可重铸）返回 -1。
    *  out.topTier 回传掷中最优档与否（rolledPrefixIsTopTier :42620）——UI 重铸冷却
    *  面以此门控：reforgeCooldown=60 仅最优档掷中置位（:42626），普通档零冷却=连点
@@ -49224,7 +49364,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //  [0..57] 槽 + GrantArmorBenefits :13204 装备段——信息配件族不必装备）。
     {
       const gates = builderAccGateSet((vid) =>
-        playerVidCarried(this.player.inv.slots, this.player.inv.armor, this.player.inv.accSlotMax, vid));
+        playerVidCarried(this.player.inv.slots, this.player.inv.armor,
+          (k) => this.player.inv.isItemSlotUnlockedAndUsable(k), vid));
       const lineOn = this.player.builderAccStatus[BACC.RulerLine] === 0;
       const gridOn = gates.rulerGrid && this.player.builderAccStatus[BACC.RulerGrid] === 0;
       if (lineOn || gridOn) {

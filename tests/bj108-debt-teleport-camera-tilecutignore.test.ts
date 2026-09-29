@@ -187,7 +187,8 @@ function cutHarness(tiles: Map<number, number>, acc5309: boolean) {
   game.player = {
     inv: {
       armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // armor[3]=配饰首槽（ACC_ARMOR_START;★方案 A:运行时反查）
-      accSlotMax: 8,
+      accSlotMax: 8,   // 遗留数据键（清偿刀 P 后 src 不再读;基座 5 开=下方谓词 true 同义）
+      isItemSlotUnlockedAndUsable: () => true,
       heldItem: () => null,
     },
   };

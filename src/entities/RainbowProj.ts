@@ -17,8 +17,8 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll } from './projTargets';
-import { ghostHealProc } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（与其他 magic 弹同构）
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
+import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源）
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -96,6 +96,14 @@ export class RainbowSegment extends Entity {
       segImmuneUntil.set(e.id, nowMs() + IMMUNE_MS);
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
+      // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源
+      //  snapshotVanillaGate,判据=「进 hurt 前状态」=原版免疫门 :12634-12637/:12686
+      //  读 StrikeNPC 前的受害者态）。旧后置读两源污染：①受理写支（Enemy.ts:14297
+      //  pierce=0 写 10t）→ 受理拍读恒真 → proc/numHits 恒跳（吸血域断供——同刀 R 对
+      //  634 AoE「旧 pierce=0 受理写 10」判谳;251 真机面 proc 全灭,测试 mock hurt 无
+      //  写支故绿,本刀修复）；②死亡转换写支（Enemy.ts:14421 四塔血尽转演出写
+      //  iframes=2,写支 1:1 禁改）→ 致死命中拍误判门拒。快照双源同治。
+      const gate = snapshotVanillaGate(e);
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // ★X2-D2（2026-09-29）：251 幽灵兜帽吸血 proc 接线——原版 Damage() 通用 on-hit
       //  段 :13712 flag10（251 magic/friendly/aiStyle46≠59）→ :13875 canGhostHeal 门 →
@@ -104,8 +112,15 @@ export class RainbowSegment extends Entity {
       //  :13972/dontTakeDamage :13978,dead 已上方前置）不 proc 不计数;血尽级联
       //  （:14369 族）/普通未致命尾档（:15037）返假照 proc 照计数（251
       //  usesIDStaticNPCImmunity → flag3 假 :12635 免疫门照适用=pierce 0 承载）。
-      const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+      const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
+        // ★清偿刀 W（X4-债13①,2026-09-29）：写面对齐 :14032-14037 IDStatic 支——
+        //  受理尾 immune[owner]=0（全局窗显式清零,251 节流归 segImmuneUntil 10t
+        //  共享表）。旧 pierce=0 通用尾档写 10t=残窗误拦他型弹 10t（缺 Arrow B6D
+        //  式清窗补偿,Arrow.ts:9445 同范式）;近战域表由桥写（251 face=idStatic→0
+        //  出表;显参 penetrate=-1〔:3341〕/idStaticFace 防 json 数据面漂移）。
+        (e as unknown as { iframes?: number }).iframes = 0;
+        noteVanillaProjImmune(game, this.projId, e.id, { penetrate: -1, idStaticFace: true });
         ghostHealProc(game, this.projId, this.pveNumHits,
           e as never as Parameters<typeof ghostHealProc>[3]);
         this.pveNumHits++;

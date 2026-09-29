@@ -31,7 +31,10 @@ export interface QuadOpts {
   flipX?: boolean;                                   // 水平镜像(u0/u1 交换;云族用)
 }
 
-export interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean; key?: string }
+export interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean; key?: string;
+  /** ★liqpolish texCheck 批检代际戳（tileGen 语义:chk===texGen ⇒ 本 flush 窗已验活;
+   *  仅 GLSpriteLayer 写,消费方只读。可选字段=旧 entry 结构兼容） */
+  chk?: number }
 
 /** ★B1 quadExact tie 相位补正（texel 单位;见 quadExact 内注） */
 const QUAD_TIE_EPS = 1 / 4096;
@@ -950,7 +953,25 @@ export class GLSpriteLayer {
     return !e.key || this.texs.get(e.key) === e;
   }
 
-  /** 按键主动释放(全屏地图关闭时丢弃整幅纹理——地图只在打开期占 GPU) */
+  /** ★liqpolish 纹理表代际（2026-09-29 微抛光刀;微光环境 texAlive self 176.9ms/
+   *  1.26% 定谳面——稳定键族 resolveTex 逐 rec texAlive=Map.get+恒等比较逐 quad 税）。
+   *  【所有删表路径必 bump】evictLRU（有删才 bump）/dropTexture/dispose 系列
+   *  texs.clear()——bump 后旧 chk 戳全部失效=逐出窗语义与逐 rec texAlive 逐位同
+   *  （判别器=逐出注入下守卫仍拦得住,tests/liqpolish-guard.test.ts）。 */
+  texGen = 0;
+
+  /** ★liqpolish 按 flush 代际批检的 texAlive（语义=逐 rec 查询,成本=命中窗一次
+   *  Map.get+数字比较/op）:entry.chk===texGen ⇒ 本代际（自上次删表以来）已验活,
+   *  直通;否则真查 texAlive 并盖戳。批检窗=两次删表之间（flush 期内批 rec 的
+   *  texFromImage 可能触发 evictLRU=bump→后续 rec 重验=LRU 逐出窗语义保持）。 */
+  texCheck(e: TexEntry): boolean {
+    if (e.chk === this.texGen) return true;
+    if (!e.key || this.texs.get(e.key) === e) { e.chk = this.texGen; return true; }
+    return false;
+  }
+
+  /** 按键主动释放(全屏地图关闭时丢弃整幅纹理——地图只在打开期占 GPU)。
+   *  ★liqpolish:删表必 bump 代际（texCheck 批检窗闭合） */
   dropTexture(key: string): void {
     if (!this.gl) return;
     const e = this.texs.get(key);
@@ -959,6 +980,7 @@ export class GLSpriteLayer {
     this.bytes -= e.bytes;
     glStatDelete(this.statName, e.bytes);   // #perf-gpulog
     this.gl.deleteTexture(e.tex);
+    this.texGen++;
   }
 
   /** SpriteAtlas DrawRect 便捷入口 */
@@ -1356,6 +1378,7 @@ export class GLSpriteLayer {
 
   private evictLRU(keepKey: string): void {
     if (!this.gl) return;
+    let evicted = 0;
     while (this.bytes > GLSpriteLayer.MAX_BYTES) {
       let oldest: string | null = null;
       let min = Infinity;
@@ -1366,7 +1389,10 @@ export class GLSpriteLayer {
       this.bytes -= dead.bytes;
       glStatDelete(this.statName, dead.bytes);   // #perf-gpulog
       this.gl.deleteTexture(dead.tex);
+      evicted++;
     }
+    // ★liqpolish:有删必 bump 代际（texCheck 批检窗闭合——逐出后旧戳失效重验）
+    if (evicted > 0) this.texGen++;
   }
 
   // ---- 拖尾三角带 pass（2026-08-30 天顶剑 GL 化：obj58 像素语义 1:1）----
@@ -1735,6 +1761,7 @@ void main(){
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.uni = {}; this.uniCloud = {}; this.uniTile = {}; this.rainUni = {};
     this.texs.clear();
+    this.texGen++;   // ★liqpolish:清表必 bump（texCheck 批检窗闭合）
     this.bytes = 0;
     this.canvas.width = 0;
     this.canvas.height = 0;
@@ -1777,6 +1804,7 @@ void main(){
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.pipeFbo = null;
     this.texs.clear();
+    this.texGen++;   // ★liqpolish:清表必 bump（texCheck 批检窗闭合）
     this.bytes = 0;
     if (this.ownsPipe) this.pipe?.dispose();
   }

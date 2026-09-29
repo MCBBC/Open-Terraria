@@ -11,7 +11,7 @@
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { canMergeStack, onlyNeedOneInInventory } from '../ui/SlotActions';   // ★SW-AY1 R1 合并谓词单源（Item.CanStack）
 import { VI_KEY } from '../data/itemKeys';
-import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
+import { isDyeItem, miscSlotAccepts, accGroupClash } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源（UI.ts 提源,数据层无环）
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -179,24 +179,41 @@ export class Inventory {
   /** 世界难度门镜像（Game 每帧回写自 world.isExpert/isMaster——旅程滑杆改档即时生效） */
   gateExpert = false;
   gateMaster = false;
-  /** 功能配饰槽上界(不含)——★2026-08-28 翻案旧"不设门偏差备案"：门可达
-   *  （.sbw 世界导出/玩家跨世界携带),按原版 1:1 设门：
-   *  cs:18402-18409 `extraAccessory && (expertMode||gameMenu) → extraAccessorySlots=1`
-   *  + cs:IsItemSlotUnlockedAndUsable(9) 大师世界原生第 7 格(9 号槽,无需道具) */
-  get accSlotMax(): number {
-    return ACC_ARMOR_START + 5
-      + ((this.extraAccessory && (this.gateExpert || this.gateMaster)) ? 1 : 0)
-      + (this.gateMaster ? 1 : 0);
+  /** ★清偿刀 P（2026-09-29）逐槽解锁谓词——原版唯一真值源 Player.cs:12669-12690
+   *  IsItemSlotUnlockedAndUsable（本仓旧 accSlotMax 连续界建模已退役：连续界无法
+   *  表达「大师世界无恶魔心」态=原版 8 号格(恶魔心)锁+9 号格(大师水晶)开,连续界
+   *  反相成 8 开 9 锁。逐槽语义：0-7/10-17 恒真;8/18=extraAccessory∧(expert∨
+   *  gameMenu)（cs:18402-18409 同式,extraAccessory=false 时连 gameMenu 也不开）;
+   *  9/19=masterMode∨gameMenu。消费面：UpdateEquips :13018/:13044/:13110、
+   *  UpdateVisibleAccessories :37040/:37080、UpdateItemDye :9693、RefreshInfoAccs
+   *  :12722、UI Handle condition（Main.cs:42114/42185/42218）、ItemSlot 放置/换装
+   *  （:1287/:1297/:1348/:1357/:3620/:3631）、ArmorSwap/DyeSwap 跳锁（:3558/:3620/
+   *  :3631）、CanDemonHeart/MasterModeAccessoryBeShown :4263/:4272。
+   *  gameMenu：原版仅菜单编辑态为真;本仓背包 UI 全部在局内,缺省 false。 */
+  isItemSlotUnlockedAndUsable(slot: number, gameMenu = false): boolean {
+    if (slot === 8 || slot === 18) {
+      if (!this.extraAccessory) return false;
+      return this.gateExpert || this.gateMaster || gameMenu;
+    }
+    if (slot === 9 || slot === 19) return this.gateMaster || gameMenu;
+    return true;
   }
-  /** 绘制格数（Player.cs:4279 GetAmountOfExtraAccessorySlotsToShow：解锁【或】格内
-   *  有物即显示——经典世界带专家档存物也显示,只是不生效）。hasAt(slot,dyeSlot)=
-   *  格/染料格非空判定,由 UI 注入（读自身数组,避免 Inventory←UI 反向依赖） */
-  shownExtraCount(hasAt: (slot: number, dyeSlot: number) => boolean): number {
-    let n = 0;
-    const heartUsable = this.extraAccessory && (this.gateExpert || this.gateMaster);
-    if (heartUsable || hasAt(ACC_ARMOR_START + 5, 8)) n++;
-    if (this.gateMaster || hasAt(ACC_ARMOR_START + 6, 9)) n++;
-    return n;
+  /** 追加槽显隐态（Player.cs:4259-4281 CanDemonHeartAccessoryBeShown/
+   *  CanMasterModeAccessoryBeShown：解锁【或】功能格占【或】社交孪生格占【或】
+   *  染料格占——经典世界带专家档存物也显示,只是不生效;社交孪生 18/19 占格同开显,
+   *  ★清偿刀 P 补——旧版漏 18/19 孪生臂）。UI 装备/时装/染料三列追加格共用。 */
+  extraSlotShown(): { heart: boolean; master: boolean } {
+    const occ = (a: number, d: number, twin: number) =>
+      !!this.armor[a] || !!this.armor[twin] || !!this.dye[d];
+    return {
+      heart: this.isItemSlotUnlockedAndUsable(8) || occ(8, 8, 18),
+      master: this.isItemSlotUnlockedAndUsable(9) || occ(9, 9, 19),
+    };
+  }
+  /** 绘制格数（Player.cs:4279 GetAmountOfExtraAccessorySlotsToShow = 上两布尔之和） */
+  shownExtraCount(): number {
+    const s = this.extraSlotShown();
+    return (s.heart ? 1 : 0) + (s.master ? 1 : 0);
   }
   /** 垃圾桶持久槽（Player.trashItem :1380——关背包保留、死亡清空 :53394） */
   trash: InvItem | null = null;
@@ -282,8 +299,10 @@ export class Inventory {
    *  CanShareArmor（:5699-5727 槽型门 + CanEquipBothAccessories 配件互斥）承担,
    *  不存在"属性走裸 armor[]"的例外。视觉族（Main.cs:17552 头身腿帧/Player.cs:9696
    *  UpdateItemDye/UpdateVisibleAccessories）同样走 effective。
-   *  CanShareArmor 的配件互斥深检（ItemSlot.CanEquipBothAccessories 物品对表）
-   *  未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 幽灵绘制/角标/空槽
+   *  CanShareArmor 的配件互斥深检：第一门 CanEquipInArmorSlot（含互斥组臂）已随
+   *  armorAccepts 组臂落全（★清偿刀 Z,ItemSlot.cs:3474-3480/:3531-3535）;低位空槽
+   *  逐槽配对扫（:5713-5732,CanEquipBothAccessories 物品对表）仍未建模（R4-19 登记
+   *  债残面）;sharedFromLoadout 幽灵绘制/角标/空槽
    *  悬停代打已接（UI.paintLoadoutShare + showTooltipFor,ItemSlot.Draw :2454-2473） */
   getEffectiveArmor(slot: number): InvItem | null {
     const cur = this.armor[slot] ?? null;
@@ -364,10 +383,12 @@ export class Inventory {
     return it ? ITEM_DEFS[it.id] : null;
   }
 
-  /** 已装备的配饰列表（armor[3-9]，原版 Player.cs:36326 循环范围） */
+  /** 已装备的配饰列表（armor[3-9] 解锁格——原版 Player.cs:36326 循环范围+
+   *  :13044 IsItemSlotUnlockedAndUsable 门，★清偿刀 P 逐槽化） */
   equippedAccessories(): number[] {
     const out: number[] = [];
-    for (let i = ACC_ARMOR_START; i < this.accSlotMax; i++) {
+    for (let i = ACC_ARMOR_START; i < 10; i++) {
+      if (!this.isItemSlotUnlockedAndUsable(i)) continue;
       const s = this.armor[i];
       if (s && ITEM_DEFS[s.id]?.accessory) out.push(s.id);
     }
@@ -393,6 +414,16 @@ export class Inventory {
    *  LeftClick block :1251/:1260）;3-9 功能配饰（vanity 排除）/13-19 社交配饰——
    *  段内同 type 唯一（自身槽放行 = 换回原位）+ 双翅膀互斥（CanEquipBothAccessories
    *  :3196-3205）+ 对段（功能↔社交）同 type 互斥（:1313/:1322）。
+   *  ★清偿刀 Z（2026-09-29）互斥组臂（U 刀登记债收口,原 P 刀终态盲区）：同段
+   *  HasIncompatibleAccessory（ItemSlot.cs:3483-3495 逐槽 CanEquipBothAccessories,
+   *  组臂 :3474-3480,冲突槽=目标槽放行 :3544——与同款臂共用 k===i 跳过）+ 对段
+   *  HasSameItemInSlot 组员跨段同拘（:3531-3535 `num != -1 && num == num2`,
+   *  ItemID.cs:58 组表={6168,6169,6193,6194}——谓词单源 vanillaEquip.accGroupClash,
+   *  与 UI.ts 右键/拖放/时装互换三面同源）。部位槽（0-2/10-12）组值恒 −1 组臂天然
+   *  直通（clash 循环只覆盖配饰段,不入组臂）。内部消费面 CanShareArmor 快捷装备
+   *  （getEffectiveArmor :311）/Loadout（effectiveSharedFrom :337）经本门自动承接——
+   *  原版 CanShareArmor（Player.cs:5706-5734）=CanEquipInArmorSlot（含组臂）+
+   *  低位空槽逐槽配对扫（:5713-5732,仍未建模=R4-19 登记债残面）。
    *  vi_ 批次物品的部位/配饰归属查 vanilla-itemstats.json（注册期无字段） */
   armorAccepts(i: number, id: number): boolean {
     if (i < 0 || i >= ARMOR_TOTAL) return false;
@@ -432,12 +463,20 @@ export class Inventory {
         if (t === undefined) continue;
         if (t === id) return true;                  // 段内同 type（:3201）
         if (isWing && statOfInternal(t)?.wing != null) return true;  // 双翅膀（:3202）
+        // ★清偿刀 Z：互斥组臂（HasIncompatibleAccessory 组臂 :3474-3480——
+        //   同款/双翅已前置短路,此处组员跨型互斥为真增量;谓词单源 vanillaEquip）
+        if (accGroupClash(t, id)) return true;
       }
       return false;
     };
     if (clash(sameSeg[0], sameSeg[1])) return false;
     for (let k = otherSeg[0]; k < otherSeg[1]; k++) {   // 对段同 type（含自身位）:1313/:1322
-      if (this.armor[k]?.id === id) return false;
+      const t = this.armor[k]?.id;
+      if (t === undefined) continue;
+      if (t === id) return false;
+      // ★清偿刀 Z：组员跨段同拘（HasSameItemInSlot 组臂 :3531-3535——对段无自槽
+      //   例外形态,组臂跨段同拘同原版;air 槽 id=undefined 组值 −1 天然直通）
+      if (accGroupClash(t, id)) return false;
     }
     return true;
   }

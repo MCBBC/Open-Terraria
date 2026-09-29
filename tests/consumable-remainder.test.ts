@@ -182,33 +182,33 @@ describe('B 货郎背包 5343 peddlersSatchelWasUsed → SetupTravelShop num+1�
 
 // ============ C. 恶魔之心 3335：第 6 配饰槽 ============
 describe('C 恶魔之心 3335 extraAccessory → 配饰槽容量（:44575-44581）', () => {
-  it('accSlotMax：经典 8（3+5）；恶魔之心仅专家/大师 +1（:18402-18409，08-28 翻案后门可达）；大师原生第 7 格', () => {
-    // ★2026-08-28 翻案(Inventory.ts:163):旧钉值"extraAccessory=true 恒 +1"为
-    //  门不可达时代的近似——原版门=extraAccessory && (expertMode||gameMenu),
-    //  本仓玩家档跨世界携带(.sbw)后门可达,按原版 1:1 重钉。
+  it('逐槽解锁真值（★清偿刀 P :12669-12690——accSlotMax 连续界退役）：'
+    + '经典 8 锁/大师无心态 8 锁 9 开/专家+心 8 开', () => {
+    // ★2026-08-28 门（extraAccessory && (expertMode||gameMenu)）+ 大师水晶槽
+    //  :12685-12689 无道具门;连续界在「大师无恶魔心」态反相已清偿（demon-heart-slots 判别锁）
     const p = mkPlayer();
-    expect(p.inv.accSlotMax).toBe(8);                 // 经典:恶魔之心不 +1
+    expect(p.inv.isItemSlotUnlockedAndUsable(8)).toBe(false);   // 经典:锁
     p.inv.extraAccessory = true;
-    expect(p.inv.accSlotMax).toBe(8);
+    expect(p.inv.isItemSlotUnlockedAndUsable(8)).toBe(false);   // 旗在格锁(cs:18402)
     p.inv.gateExpert = true;
-    expect(p.inv.accSlotMax).toBe(9);                 // 专家:第 6 槽(armor[8])
+    expect(p.inv.isItemSlotUnlockedAndUsable(8)).toBe(true);    // 专家:第 6 槽(armor[8])
     p.inv.gateExpert = false;
     p.inv.gateMaster = true;
-    expect(p.inv.accSlotMax).toBe(10);                // 大师:+1 心槽 + 原生第 7 格(9 号槽)
+    expect(p.inv.isItemSlotUnlockedAndUsable(8)).toBe(true);    // 大师:心槽开
+    expect(p.inv.isItemSlotUnlockedAndUsable(9)).toBe(true);    // 大师:原生第 7 格(9 号槽,无心亦开)
   });
-  it('消费端在位：装备枚举/聚合/掉落判定均以 accSlotMax 为界', () => {
-    expect(playerSrc.match(/accSlotMax/g)?.length).toBeGreaterThanOrEqual(4);
-    expect(gameSrc).toContain('for (let acc = ACC_ARMOR_START; acc < p.inv.accSlotMax; acc++)');
+  it('消费端在位：装备枚举/聚合以逐槽解锁谓词为门（★清偿刀 P）', () => {
+    expect(playerSrc.match(/isItemSlotUnlockedAndUsable/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(gameSrc).toContain('if (!p.inv.isItemSlotUnlockedAndUsable(acc)) continue;');
   });
   it('使用链：专家/大师门 + 经典惰性 + 已用不重播（★V2a ⚠️f：经典 CanUse false :51212≡1457:52689'
     + ' =整支不可用三无;已用 !extraAccessory 门防重播音）', () => {
     expect(gameSrc).toContain("if (!(this.world.isExpert || this.world.isMaster)) break;");
     expect(gameSrc).toContain("if (!p.inv.extraAccessory) flagOnce(() => { p.inv.extraAccessory = true; });");
   });
-  it('★难度门偏差备案在案（:18139-18145 extraAccessorySlots 仅 expert/gameMenu 生效——'
-    + '本仓玩家档与世界档同存亡,门结构不可达）', () => {
+  it('★清偿刀 P 逐槽谓词在案（:12669-12689——「大师无恶魔心」8 锁 9 开,连续界建模退役）', () => {
     expect(readFileSync(new URL('../src/items/Inventory.ts', import.meta.url), 'utf8'))
-      .toContain('★2026-08-28 翻案旧"不设门偏差备案"：门可达');
+      .toContain('isItemSlotUnlockedAndUsable(slot: number, gameMenu = false)');
   });
 });
 
@@ -304,9 +304,16 @@ describe('E① BiomeTorchPlaceStyle 群系→样式表（Player.cs:39586-39635�
   });
 });
 
-/** torchGodsFlavor 桩：小世界 + 雪原群系 + 指定样式火把 */
+/** torchGodsFlavor 桩：小世界 + 雪原群系 + 指定样式火把。
+ *  ★清偿刀 V（2026-09-29）夹具定谳：world.h 不得用 64——underworld 门 =
+ *  `p.y > (h-200)*16`（Game.biomeTorchZonesAt,Player.cs:40574 [1457] 1:1;
+ *  UnderworldLayer = maxTilesY-200,Main.cs:2886 = 世界高度比例面,原版在
+ *  64 高世界同样恒地狱）→ 64 高使阈值 (64-200)*16 = -2176px 退化恒真,
+ *  样式恒 7（地狱）,雪原 9 不可达（旧红:expected 7 to be 9）。h=300 →
+ *  阈值 1600px（100 格）,夹具玩家 p.y=467 在其上 → underworld=false。
+ *  生产零修刀（本仓式与原版逐式对拍一致）。 */
 const mkFlavor = (torch: { x: number; y: number; style: number } | null, zoneSnow = true) => {
-  const w = new World(64, 64, 32, 'torchflavor');
+  const w = new World(64, 300, 32, 'torchflavor');
   if (torch) w.store.setTileSilent(torch.x, torch.y, T.TORCH, 0, torch.style * 22);
   const p = mkPlayer();
   p.x = 30 * 16 + 8 - 10; p.y = 30 * 16 + 8 - 21;   // cx,cy = 格中心 (488,488)

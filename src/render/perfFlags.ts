@@ -87,3 +87,28 @@ export function searchHasParam(name: string): boolean {
 
 /** 缓存重置(仅测试/对拍仪具;生产禁调) */
 export function searchHasResetForTest(): void { _spHasSearchKey = null; _spHasCache.clear(); }
+
+// ---------------------------------------------------------------------------
+// ★liqpolish（2026-09-29 微光环境微抛光刀）——四压力点构造路径刀总闸（灰度缺省关）。
+//
+// trace 定谳（/tmp/txr-shimmer3.digest.json,实机 20260929T112019,fps 108.1）残余四点:
+//   ①drawVanillaLiquids self 5.17%(725.6ms) ②drawLiquidBehindTilesOnly 1.51%(212.4ms)
+//   ③drawShimmerStars 1.24%(174.8ms) ④texAlive 1.26%(176.9ms)。
+// 落刀面（全部零语义目标——顶点/像素逐位或 GL±1LSB 登记）:
+//   A. 微光 tile 场求值单源+跨 pass 波值缓存（12 sin/tile→bg 8/fg 0,分配归零）;
+//   B. sparkle/glint ADD 批化（per-tile shim rec+save/restore 退役→每 pass ≤2 段;
+//      色相进顶点色=单白纹理段,像素式逐项对拍 _liqpolish-ab）;
+//   C. 星 cs/sn 更新侧缓存（draw 侧 trig 外提,值逐位同）;
+//   D. texAlive 按 flush 代际批检（GLSpriteLayer.texCheck/texGen;LRU 逐出窗语义
+//      保持——逐出点必 bump 代际,判别器=逐出注入下守卫仍拦得住,见
+//      tests/liqpolish-guard.test.ts）。
+// `?liqpolish=1` 显式激活（缺省关=现行行为逐位）;对拍全绿后转正翻缺省（liqgl 先例）。
+export let liqpolish = (() => {
+  try {
+    if (typeof location === 'undefined') return false;
+    return new URLSearchParams(location.search).get('liqpolish') === '1';
+  } catch { return false; }
+})();
+
+/** 测试/对拍翻面(生产代码禁调——生产只读 URLSearchParams 一次) */
+export function liqpolishSetForTest(v: boolean): void { liqpolish = v; }

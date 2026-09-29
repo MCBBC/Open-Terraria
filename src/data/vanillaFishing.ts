@@ -493,7 +493,10 @@ export interface AnglerRewardOpts {
   expertMode?: boolean;
   /** 玩家持有的物品类型全集（inventory/armor/bank×4/loadouts，DropAnglerAccByMissing :55647-55685） */
   ownedTypes: Set<number>;
-  /** currentShoppingSettings.PriceAdjustment（:55356）——本仓无快乐度议价，缺省 0 */
+  /** currentShoppingSettings.PriceAdjustment（:55356）——交付时=渔夫幸福快照
+   *  （Game.grantAnglerRewards 传 dialogHappiness.priceMul）；缺省 1f =
+   *  ShoppingSettings.NotInShop（ShoppingSettings.cs:9-14——旧缺省 0 使乘区恒 ×0.5,
+   *  连原版缺省 ×1 都不及,清偿刀 H 勘正） */
   priceAdjustment?: number;
   rng?: Rng;
 }
@@ -505,7 +508,7 @@ export function rollAnglerRewards(opts: AnglerRewardOpts): AnglerRewardGrant[] {
   const rng = opts.rng ?? mathRng;
   const n = opts.questsDone;
   let rarity = anglerRewardRarityMultiplier(n);
-  rarity *= ((opts.priceAdjustment ?? 0) + 1) / 2;              // :55356
+  rarity *= ((opts.priceAdjustment ?? 1) + 1) / 2;              // :55356（缺省 NotInShop=1f→×1）
   const grants: AnglerRewardGrant[] = [];
   const push = (id: number, stack = 1) => grants.push({ id, stack });
 

@@ -88,30 +88,30 @@ describe('网格旗判定域=背包∪装备（UpdateEquips :12997-13004 + Grant
   it('① 背包格（10 号工具行）持 2799 即亮——旧「仅配饰槽」退化值=红', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.slots[10] = { id: iid(2799), stack: 1 };
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 2799)).toBe(true);
-    expect(playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 2799)).toBe(false);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),2799)).toBe(true);
+    expect(playerAccessoryVidEquipped(p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),2799)).toBe(false);
   });
   it('② 钱币/弹药格（50-53/54-57）在扫描域内（vanilla j<58 全含）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.slots[53] = { id: iid(3619), stack: 1 };
     p.inv.slots[57] = { id: iid(2216), stack: 1 };
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 3619)).toBe(true);
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 2216)).toBe(true);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),3619)).toBe(true);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),2216)).toBe(true);
   });
-  it('③ 装备段 armor[3..accSlotMax) 仍命中;时装段 armor[10..] 不参与', () => {
+  it('③ 装备段 armor[3..9] 解锁格仍命中;时装段 armor[10..] 不参与（★清偿刀 P 逐槽化）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: iid(3611), stack: 1 };
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 3611)).toBe(true);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),3611)).toBe(true);
     p.inv.armor[3] = null;
     p.inv.armor[13] = { id: iid(3611), stack: 1 };   // 时装配饰段
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 3611)).toBe(false);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),3611)).toBe(false);
   });
   it('④ 未注册 vid（VI_ID=0）与空表恒 false;486 已注册（短剑,镜像层仍可达）', () => {
     const p = new Player(0, 0, new Inventory());
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 486)).toBe(false);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),486)).toBe(false);
     expect(VI_ID(486)).toBeGreaterThan(0);
     p.inv.slots[0] = { id: VI_ID(486), stack: 1 };
-    expect(playerVidCarried(p.inv.slots, p.inv.armor, p.inv.accSlotMax, 486)).toBe(true);
+    expect(playerVidCarried(p.inv.slots, p.inv.armor, (k) => p.inv.isItemSlotUnlockedAndUsable(k),486)).toBe(true);
   });
 });
 

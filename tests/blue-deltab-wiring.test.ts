@@ -20,15 +20,22 @@ import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { RNG } from '../src/core/rng';
 import type { GameHooks } from '../src/entities/types';
 
-// ---- B13 需要确定性 top-tier 词缀——只劫 rollPrefix 的掷点，其余全透传原模块 ----
+// ---- B13 需要确定性 top-tier 词缀——只劫掷点，其余全透传原模块 ----
+// ★BJ400 连坐修（2026-09-29 清偿刀 H 顺带）：doReforge 掷入口已迁 rollReforgePrefix
+//   （TryGet 门化,旧 rollPrefix 直掷通道退役）——只劫 rollPrefix 令 B13 劫点失明,
+//   doReforge 落回 Math.random 掷出非顶档（56≠59）。两掷入口同挂一钩,语义不变
 const rollHook = vi.hoisted(() => ({ pick: null as null | ((pool: number[]) => number) }));
 vi.mock('../src/data/vanillaPrefixes', async (importOriginal) => {
   const m = await importOriginal<typeof import('../src/data/vanillaPrefixes')>();
   const origRoll = m.rollPrefix;
+  const origReforge = m.rollReforgePrefix;
   return {
     ...m,
     rollPrefix: (pool: number[], wantBest: boolean) =>
       rollHook.pick ? rollHook.pick(pool) : origRoll(pool, wantBest),
+    rollReforgePrefix: (pool: number[], rand: () => number,
+      stat?: Parameters<typeof origReforge>[2]) =>
+      rollHook.pick ? rollHook.pick(pool) : origReforge(pool, rand, stat),
   };
 });
 beforeEach(() => { rollHook.pick = null; });

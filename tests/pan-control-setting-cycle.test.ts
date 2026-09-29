@@ -46,9 +46,13 @@ describe('平移档③：设置行接线与消费字段', () => {
       const pack = JSON.parse(readFileSync(`public/l10n/${lang}.json`, 'utf8')) as {
         Mods: Record<string, string>;
       };
-      expect(typeof pack.Mods['Mods.SandboxWorld.Settings.PanControl']).toBe('string');
+      // ★清偿刀G（2026-09-29）oracle 重产：产物形态 = 类别 Mods + 条目键
+      //   'SandboxWorld.Settings.PanControl*'（平键全键 Mods.SandboxWorld.*）。
+      //   旧断言误写 pack.Mods['Mods.SandboxWorld.Settings.PanControl']——该访问路径
+      //   恰好只能被 Mods.Mods.* 错位残留键命中（X1 定谳的脏面,本波已摘除）。
+      expect(typeof pack.Mods['SandboxWorld.Settings.PanControl']).toBe('string');
       for (const suf of ['_Hold', '_Click', '_OnAlways', '_OffAlways']) {
-        expect(typeof pack.Mods[`Mods.SandboxWorld.Settings.PanControl${suf}`]).toBe('string');
+        expect(typeof pack.Mods[`SandboxWorld.Settings.PanControl${suf}`]).toBe('string');
       }
     }
   });

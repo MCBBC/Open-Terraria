@@ -28,6 +28,7 @@
 // SkMatrix::setConcat 同构;和内单次舍入差 ≤1e-7 相对,census 口径）。
 import type { GLSpriteLayer, TexEntry } from '../GLSpriteLayer';
 import { texEpoch, texId } from '../texId';
+import { liqpolish } from '../perfFlags';   // ★liqpolish 微抛光刀总闸（texCheck 批检/pushLiquidAddBatch 消费）
 
 /** 宿主接口（Renderer 注入;flush 所需的世界层现场） */
 export interface ShimHost {
@@ -1400,6 +1401,22 @@ export class GLShimExecutor {
     return true;
   }
 
+  /** ★liqpolish 液体 ADD 批入队（2026-09-29 微抛光刀;pushGoreQuadBatch 单段形态,
+   *  tier=1 恒 ADD）：drawVanillaLiquids sparkle/glint ADD 段的发射口——逐 tile
+   *  shim rec（save/gco/globalAlpha/drawImage/restore+resolveTex 逐 rec texAlive）
+   *  退役面。门=gore 批同款（clip/filter 真门;ga/gco 逐 quad 编码进顶点不设入口门
+   *  ——'lighter' 语义在 tier-1 blend+顶点 α,与入口态无关）。 */
+  pushLiquidAddBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    if (this.clipped || this.filterV !== 'none') return false;
+    if (quads <= 0) return true;        // 零活段=无事可画（与 2D 零绘制等价）
+    this.push(1, null, false, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+      1, 1, 1, false, false, false, false, null);
+    this.tail!.batch = { img, key, data, quads, replay, rgba: true };
+    return true;
+  }
+
   /** ★liqgl 批通道可用性预检（drawVanillaLiquids pass 级 all-or-nothing 判据）——
    *  窗活跃/GL 层在场/无 clip/无 filter;ga/gco 由调用方归一后再过 pushQuadBatchRgba
    *  同门（本预检不含二者,避免预检面重复状态耦合）。 */
@@ -1681,14 +1698,17 @@ export class GLShimExecutor {
     this.stats.flushes++;
   }
 
-  /** 纹理解析（flush 期逐 rec;LRU 逐出/动态源/尘对惰性建面都在此收口） */
+  /** 纹理解析（flush 期逐 rec;LRU 逐出/动态源/尘对惰性建面都在此收口）。
+   *  ★liqpolish（2026-09-29 微抛光刀）:稳定键族逐 rec texAlive 改 texCheck 批检
+   *  （代际戳命中窗一次 Map.get+数字比较;LRU 逐出窗语义保持——删表路径必 bump
+   *  texGen,逐出注入判别器 tests/liqpolish-guard.test.ts）。 */
   private resolveTex(glw: GLSpriteLayer, p: QuadRec): TexEntry | null {
     // ★I类:bake 期已上传纹理直取（flush 期绝不再 texRefresh——共享 scratch 的字节
     //  此时已是【最后一次烘焙】的,重传=先行 quad 错拿末次内容）。LRU 逐出（罕见）
     //  → null → accFail 2D 重放（有界降级,宁降级不丢）。
-    if (p.preTex) return glw.texAlive(p.preTex) ? p.preTex : null;
+    if (p.preTex) return (liqpolish ? glw.texCheck(p.preTex) : glw.texAlive(p.preTex)) ? p.preTex : null;
     if (p.pair) {
-      if (!p.pair.tex || !glw.texAlive(p.pair.tex)) {
+      if (!p.pair.tex || !(liqpolish ? glw.texCheck(p.pair.tex) : glw.texAlive(p.pair.tex))) {
         p.pair.tex = glw.texFromData(`dpair:${texId(p.pair.add)}`, p.pair.gl, p.pair.w, p.pair.h);
         if (p.pair.tex) this.stats.uploads++;
       }
@@ -1729,7 +1749,7 @@ export class GLShimExecutor {
       const hit = sub.get(packed);
       // ★纪元参与命中判定（2026-09-27 变体①终扫）:epoch≠缓存纪元=源被原地覆写
       //  （TintAtlas 页矩形回收族）——旧条目作废重传;epoch 恒 0 的静态源零开销。
-      if (hit && hit.ep === ep && glw.texAlive(hit.e)) {
+      if (hit && hit.ep === ep && (liqpolish ? glw.texCheck(hit.e) : glw.texAlive(hit.e))) {
         // ★R3-F1 驻留上界:满容触达刷新（LRU）——驱逐只删 JS 侧 Map 条目,
         //  GL 纹理仍驻留（texFromRegion 键幂等）由层 192MB LRU 兜底
         if (sub.size >= TEX_CACHE_SUB_CAP) { sub.delete(packed); sub.set(packed, hit); }
@@ -1868,10 +1888,12 @@ export class GLShimExecutor {
 
 /** 1×1 白纹理（fillRect 纯色面;惰性建,键恒 '__white'——GLSpriteLayer.fillQuad 同款）。
  *  ★R1-F7:命中面加 texAlive 卫兵——层 192MB LRU 逐出/releaseAll 清表（切世界/读档）
- *  后 WeakMap 缓存的是死条目,续用=画已删纹理（fillRect 全族静默消失）。 */
+ *  后 WeakMap 缓存的是死条目,续用=画已删纹理（fillRect 全族静默消失）。
+ *  ★liqpolish:卫兵改 texCheck 批检（__white 不进 evictLRU 逐出集,死窗=清表族
+ *  ——清表必 bump texGen=批检窗闭合,语义同逐 rec texAlive）。 */
 function WHITE_E(glw: GLSpriteLayer): TexEntry {
   const hit = WHITE_CACHE.get(glw);
-  if (hit && glw.texAlive(hit)) return hit;
+  if (hit && (liqpolish ? glw.texCheck(hit) : glw.texAlive(hit))) return hit;
   const c = document.createElement('canvas');
   c.width = 1; c.height = 1;
   const x = c.getContext('2d')!;

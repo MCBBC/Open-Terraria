@@ -43,7 +43,7 @@ function shell(w: World, drops: Drop[]): Game & Record<string, unknown> {
     x: 5 * 16, y: 5 * 16,                  // 盒左上域（BJ111 判例）
     cx: 5 * 16 + 8, cy: 5 * 16 + 8,
     equipStats: {},
-    inv: { accSlotMax: 0, armor: [], heldItem: () => null },
+    inv: { accSlotMax: 0, isItemSlotUnlockedAndUsable: () => false, armor: [], heldItem: () => null },   // 清偿刀 P：旧界 0=无配饰,谓词 false 同义
   } as never;
   return g;
 }

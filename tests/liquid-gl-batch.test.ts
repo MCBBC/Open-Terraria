@@ -322,8 +322,24 @@ describe('★liqgl 结构锁', () => {
     expect(VL).toContain('export function emitVanillaLiquidGate(');
     expect(VL).toContain('function replayLiqRun2D(');
     expect(VL).toContain("runKey = `liq:${texId(tex)}`");
-    expect(VL).toContain('if (doSpark) flushRun();');
-    expect(VL).toContain('if (doGlint) flushRun();');
+    // ★liqpolish（2026-09-29 微抛光刀）:sparkle/glint 批化支延后收口（ADD 环累积,
+    //  pass 尾 flushAddRuns2DAndEmit——全基底段先于 ADD 段=重叠序）;旧/CPU 支
+    //  立即收口保留（flag-off 逐位原链）。
+    expect(VL).toContain('if (doSpark && !polish) flushRun();');
+    expect(VL).toContain('if (doGlint && !polish) flushRun();');
+    expect(VL).toContain('if (polish) flushAddRuns2DAndEmit(ctx, bat ?? null, isBackground);');
+    expect(VL).toContain('function flushAddRuns2DAndEmit(');
+    expect(VL).toContain('function batQuadAdd(');
+    expect(VL).toContain('function replayLiqAddRun2D(');
+    expect(VL).toContain('function shimmerCornersFromWaves(');
+    expect(VL).toContain('function glitter4FromWaves(');
+    expect(VL).toContain('function shimmerWaves4(');
+    // ★liqpolish 带批化/fg 复用/ADD 环锁（2026-09-29 微抛光刀）
+    expect(VL).toContain('const flushBandRun = (');
+    expect(VL).toContain('const fgReuse = polish && !needsPrep && batOn && bat !== null');
+    expect(VL).toContain('const _fgReuseRing = new Float32Array(');
+    expect(VL).toContain('batQuadAdd(sSrcX - 48, sSrcY, sw, sh, band.width, band.height,');
+    expect(VL).toContain('五旗早退');
     expect(VL).toContain('footSink: FootQuad[] | null = null');
     expect(VL).toContain('flushRun();                 // ★liqgl:主循环批段收尾');
   });

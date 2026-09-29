@@ -17,7 +17,9 @@
 //     （Player.cs:26316-26322 CanUseWings 族）——BJ358 既有门，本套件锁存防回退
 // 本刀三面：
 //   ① drawAccBehindLayers（披风/气球）挂 PlayerIsHidden 门（原无门=泄漏源一）
-//   ② drawAccFrontLayers（盾/鞋/手/腰/颈/脸/前饰/气球前族）挂门（54 除外=登记偏差维持）
+//   ② drawAccFrontLayers（盾/鞋/手/腰/颈/脸/前饰/气球前族）挂门
+//      （★X4-债6 清偿 2026-09-29：54 迅猛龙旧豁免支拆除,全族同门——原版
+//      ExceptHelmets 支把身前非脸族染色全 Transparent,照画=登记偏差已修）
 //   ③ 静持手持物挂 DontHoldItems 门（61 不再画火把等静持物；52/54 照画）
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -129,11 +131,11 @@ describe('BJ401 渲染层：变身坐骑（61）配饰身架族整隐', () => {
     expect(bunnyFiles).toContain('vanilla/Acc_Neck_2.png');
   });
 
-  it('54 迅猛龙例外面维持现画法（hideEntirePlayerExceptHelmets 家族,登记偏差不回退）', () => {
+  it('54 迅猛龙身前非脸族整隐（★X4-债6 清偿 2026-09-29：旧豁免支拆除——ExceptHelmets 染色面亲读 PlayerDrawSet.cs:1886+:1689-1693,身前各族 colorArmorBody/Legs/Shoes 全 Transparent,唯脸饰原版照画而本仓无该槽=零损失）', () => {
     const p = new Player(30 * 16, 77 * 16, new Inventory());
     equipFullKit(p);
     const files = drawAccWithFake('drawAccFrontLayers', p, { type: 54 }).files;
-    expect(files).toContain('vanilla/Acc_Shield_1.png');   // 陈旧偏差原样（登记）
+    expect(files).toEqual([]);   // 与 52/55/56/61 同相（原版同相：盾/鞋/腰/颈全隐）
   });
 
   it('52/55/56 同族同门（hideEntirePlayer 全族,与 61 同相）', () => {
@@ -159,10 +161,11 @@ describe('BJ401 源码锚锁：三门落位 + BJ358 锚不回退', () => {
     const seg = src.slice(i, i + 900);
     expect(seg).toContain('MOUNT_SETS.PlayerIsHidden?.[mnt.type]) return;');
   });
-  it('drawAccFrontLayers 头部挂 PlayerIsHidden 门（54 迅猛龙豁免支）', () => {
+  it('drawAccFrontLayers 头部挂 PlayerIsHidden 门（★X4-债6 清偿：54 豁免支已拆,全族同门）', () => {
     const i = src.indexOf('private drawAccFrontLayers');
-    const seg = src.slice(i, i + 1100);
-    expect(seg).toContain('MOUNT_SETS.PlayerIsHidden?.[mnt.type] && mnt.type !== 54) return;');
+    const seg = src.slice(i, i + 2400);
+    expect(seg).toContain('MOUNT_SETS.PlayerIsHidden?.[mnt.type]) return;');
+    expect(seg).not.toContain('mnt.type !== 54');   // 旧豁免支防复活
   });
   it('静持手持物挂 DontHoldItems 门（61 禁持,PlayerDrawLayers.cs:3149 同相）', () => {
     const i = src.indexOf('if (staticHoldStyle\n');

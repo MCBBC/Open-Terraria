@@ -29,6 +29,31 @@ const ITEM_RARE = vanillaRareJson as Record<string, number>;
  *  tools/extract-expert.mjs 提取，recon-item 闸门对账——Game.ts:287 同源表） */
 const ITEM_EXPERT = vanillaExpertJson as Record<string, number>;
 
+// ★清偿刀 U（2026-09-29）：DyeSwap 持久计数器（ItemSlot.dyeSwapCounter :292
+// private static——UI 层会话态）。轮转语义（DyeSwap :3556-3577,1457 亲读）：
+// while 跳锁（:3558-3561,mod 10 环扫）→ 全表 0..9 扫首个「解锁∧空」槽优先
+// （:3563-3568）→ 与计数槽 SwapClearFavorite（:3571,全满时【不】早退=与计数槽
+// 交换,被换下染料回源格）→ targetSlot=计数槽 → 计数器 +1 mod 10（:3573）。
+// 持久域定谳：ItemSlot 静态字段 = 会话态【不入档】（Player.cs 存档段无此字段,
+// SavePlayer 序列化面零触及）;重置点 = ResetInventoryStateCounters（:3262-3265）
+// 由 Main.DrawInterface_26_InterfaceLogic3 的 !playerInventory 支每帧调
+// （Main.cs:46445）——即【背包一关就归零】,重开背包后轮转从头开始。
+let dyeSwapCounter = 0;
+/** ResetInventoryStateCounters（ItemSlot.cs:3262-3265）。本仓触发点 = closeInventory
+ *  （!playerInventory 单漏斗：Esc 关包/死亡强收包/设置浮层收包均过此）+ 测试直调 */
+export function resetInventoryStateCounters(): void {
+  dyeSwapCounter = 0;
+}
+
+/** ★清偿刀 X（2026-09-29）：U 刀「放置面仍盲」债②已收口——右键面（accPairConflicts/
+ *  accGroupClash）/时装互换面（accFitsInSegment 改全臂单源）/拖放面（armorAcceptsDrag）
+ *  三面同组。★清偿刀 Z（2026-09-29）第四面收口：armorAccepts 本体组臂已落
+ *  （Inventory.ts,其内部消费面 CanShareArmor 快捷装备 :311/Loadout :337 自动承接）。
+ *  谓词单源已提至数据层 vanillaEquip.ts（ACC_INCOMPAT_GROUP/accGroupClash/
+ *  accPairConflicts 三导出——UI.ts 已 import Inventory.ts,反向 import 成环,故不在
+ *  UI 层;ItemID.cs:58 组表/ItemSlot.cs:3460-3538 锚随定义迁移）。本文件 :1816/:1924
+ *  （accPairConflicts）与 armorAcceptsDrag（accGroupClash）消费签名零改动。 */
+
 /** 原版像素面板底(IngameOptions.Draw + Utils.DrawInvBG 1:1):
  *  Inventory_Back13(52×52)九宫——角 10×10、边/心拉伸(Utils.DrawInvBG :2681-2691 同式),
  *  逐像素乘 IngameOptions 面板色 (33,15,91)×0.685(颜色乘法:XNA Color*float 同时乘 RGB 与 A)。
@@ -134,7 +159,7 @@ import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';
 import { bannerNpcOfItem } from '../world/Banners';
-import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
+import { equipKindOfInternal, MISC_KINDS, accGroupClash, accPairConflicts } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源提至数据层（本文件原模块内私有）
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
 import { assembleTooltipLines, buildTooltipBody, materialVids } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）
@@ -1711,9 +1736,13 @@ export class UI {
     return k === 'dye' || k === 'pet' || k === 'light' || k === 'cart' || k === 'mount' || k === 'hook';
   }
 
-  /** 一键装备（ItemSlot.SwapEquip :3287-3368/ArmorSwap :3578 近似）：部位→armor[0-2]
-   *  （时装→[10-12]），配饰→armor[3-9] 第一个空槽/原槽交换；染料→dye 第一个空槽；
-   *  杂项→对应 miscEquips 槽；成功后取消收藏（SwapClearFavorite :1237 双端清）。
+  /** 一键装备（ItemSlot.SwapEquip :3287-3368 → ArmorSwap :3578-3648/DyeSwap
+   *  :3550-3577/EquipSwap :3649-3660,★清偿刀 U 2026-09-29 起 1:1 非"近似"）：
+   *  部位→armor[0-2]（时装→[10-12],同款在功能/时装盔甲段任一槽→早退 :3592-3596）;
+   *  配饰→对段同款/互斥组早退（:3597-3600）→ 自段冲突【换入冲突槽】（:3608-3623,
+   *  锁槽才早退）→ 无冲突首个解锁空槽/全满段首（:3627-3635）;染料→计数器轮转
+   *  （:3556-3577,全满与计数槽交换）;杂项→对应 miscEquips 槽;成功统一
+   *  PlaySound(7)+SwapClearFavorite（:1237 双端清）。
    *  ★SW-BJ116-a（2026-09-18）右键 case 0/3/4/32 专属（装备列 case 8/10/12/16-20/33
    *  已改道 PickupItemIntoMouse/ SwapVanityEquip,见 RightClick 路由注）——src 改经
    *  slotContent 单源（容器向 chest 曾误读 inv.dye[i]:右键箱中装备=空转或错装染料格
@@ -1730,37 +1759,80 @@ export class UI {
     if (src.stack !== 1) return;
     let target = -1;
     let targetWhere: SlotWhere = 'armor';
-    // ★vanity 路由（ArmorSwap :3289 `num = item.vanity ? 10 : 0`）：时装类右键进
+    // ★vanity 路由（ArmorSwap :3596 `int num = item.vanity ? 10 : 0`）：时装类右键进
     // 社交段（盔甲 10-12 / 配饰 13+）——曾恒进功能段:纯社交配饰(acc=0)被功能槽
     // armorAccepts 门拒 = "时装穿不上"根因（2026-08-14 用户实抓）
     const van = statOfInternal(cur.id)?.van === 1;
     // ★d.armor 死分支已移除（2026-09-02:字段全仓零写入,恒走 itemstats 部位表）
     if (armorSlotIndexOfInternal(cur.id) >= 0) {
-      target = armorSlotIndexOfInternal(cur.id) + (van ? 10 : 0); // vi_ 盔甲（vanilla-itemstats 部位）
+      const part = armorSlotIndexOfInternal(cur.id);
+      // ★清偿刀 U：ArmorSwap :3592-3596 HasSameItemInSlot(ArmorSlots)∨
+      // HasSameItemInSlot(VanityArmorSlots)——同款已在功能/时装盔甲段【含目标槽
+      // 自身】（HasSameItemInSlot :3517 全段扫,手上有同款第二件=无动作早退无声）。
+      // ★刻意不 share armorAccepts 的 DualEquipArmor{205,5004,4955} 白名单：右键
+      //   面 :3593 无此例外臂（放置/右键两语境原版本就异门）。
+      if (inv.armor[part]?.id === cur.id || inv.armor[part + 10]?.id === cur.id) return;
+      target = part + (van ? 10 : 0); // vi_ 盔甲（vanilla-itemstats 部位）
     } else if (d?.accessory || statOfInternal(cur.id)?.acc !== undefined) {   // ★方案 A：`?.` 洞守卫（BJ265）
       // vi_ 配饰走 itemstats acc 判定(legacy accessory 字段已随退役消失——曾只认
       // legacy 字段导致 vi_ 配饰右键一键装备静默失效)
-      const accBase = van ? 13 : 3;   // 社交配饰段 13+（ArmorSwap :3315 3+num）
-      const accMax = van ? 13 + (inv.accSlotMax - 3) : inv.accSlotMax;
-      for (let k = accBase; k < accMax; k++) {
-        if (!inv.armor[k]) { target = k; break; }
+      const accBase = van ? 13 : 3;   // 社交配饰段 13+（ArmorSwap :3596 3+num）
+      const oppBase = van ? 3 : 13;   // 对段（:3598 item.vanity ? AccSlots : VanityAccSlots）
+      // ★清偿刀 U：对段 HasSameItemInSlot（:3597-3600——同 type ∨ 同互斥组在
+      // 对段=无动作早退;方向：功能件扫社交段/社交件扫功能段）
+      for (let k = oppBase; k < oppBase + 7; k++) {
+        const t = inv.armor[k];
+        if (t && accGroupClash(t.id, cur.id)) return;
       }
-      if (target < 0) target = accBase; // 全满→交换段首槽
+      // ★清偿刀 U（面②定谳,2026-09-29）：自段冲突 → 【换入冲突槽】（:3608-3623
+      // HasIncompatibleAccessory 出 collisionSlot=首个 !CanEquipBothAccessories 槽 →
+      // targetSlot=collisionSlot;仅 :3620-3623 锁槽才早退）。旧面 armorAccepts 拒→
+      // 早退 = 自创语义（原版冲突=顶掉冲突件,非拒装;同 type 已在段=与己互换无害,
+      // 原版照样 Sound7+成功）。
+      let collision = -1;
+      for (let k = accBase; k < accBase + 7; k++) {
+        const t = inv.armor[k];
+        if (t && accPairConflicts(t.id, cur.id, van)) { collision = k; break; }
+      }
+      if (collision >= 0) {
+        if (!inv.isItemSlotUnlockedAndUsable(collision)) return;   // :3620-3623
+        target = collision;
+      } else {
+        // 无冲突：首个解锁∧空槽（:3628-3635 解锁门 :12669-12690——大师无恶魔心
+        // 态跳 8 落 9/19;全满 → 段首槽 :3627 targetSlot=accessories.Offset,
+        // 3/13 恒解锁）
+        target = accBase;
+        for (let k = accBase; k < accBase + 7; k++) {
+          if (inv.isItemSlotUnlockedAndUsable(k) && !inv.armor[k]) { target = k; break; }
+        }
+      }
     } else {
       const kind = equipKindOfInternal(cur.id);
       if (kind === 'dye') {
-        // 染料→dye[0-9] 第一个空槽（SwapEquip :3030 dye 分支）
-        for (let k = 0; k < inv.dye.length; k++) {
-          if (!inv.dye[k]) { target = k; break; }
+        // ★清偿刀 U（面③定谳,2026-09-29）：DyeSwap :3556-3577 持久计数器轮转——
+        // while 跳锁（:3558-3561 mod 10 环扫）→ 全表 0..9 扫首个解锁∧空槽优先
+        // （:3563-3568）→ 与计数槽 SwapClearFavorite（:3571）→ 计数器 +1 mod 10
+        // （:3573）。旧面「全满早退」= 自创：原版全满【与计数槽交换】（被换下
+        // 染料回源格）。计数器=UI 会话态（:292 static 不入档）,关背包归零
+        // （closeInventory → resetInventoryStateCounters,Main.cs:46445 !playerInventory）。
+        let c = dyeSwapCounter;
+        while (!inv.isItemSlotUnlockedAndUsable(c)) c = (c + 1) % 10;
+        for (let k = 0; k < 10; k++) {
+          if (inv.isItemSlotUnlockedAndUsable(k) && !inv.dye[k]) { c = k; break; }
         }
+        target = c;
+        dyeSwapCounter = (c + 1) % 10;
         targetWhere = 'dye';
-        if (target < 0) return;
       } else if (kind && MISC_KINDS.includes(kind)) {
         target = MISC_KINDS.indexOf(kind);
         targetWhere = 'misc';
       } else return;
     }
-    if (targetWhere === 'armor' && !inv.armorAccepts(target, cur.id)) return;
+    // ★清偿刀 U：armorAccepts 放置门在此退役——右键面门序已由上方逐臂原版语义
+    //   承接（ArmorSwap :3592-3637/DyeSwap :3556-3577）。armorAccepts 的段内同款/
+    //   双翅/对段门会误拒「换入冲突槽」臂（:3617 targetSlot=collisionSlot 本就顶
+    //   冲突件）与全满段首交换臂;盔甲部位/段归属校验已由构造保证（target 由
+    //   armorSlotIndexOf/段基址直算,非法物不入此臂=canSwapEquip 前置）。
     src.favorited = false; // 装上取消收藏（原版 ArmorSwap :3341）
     const arr = targetWhere === 'armor' ? inv.armor : targetWhere === 'dye' ? inv.dye : inv.miscEquips;
     const tmp = arr[target];
@@ -1773,8 +1845,11 @@ export class UI {
     else if (where === 'misc') inv.miscEquips[i] = tmp ?? null;
     else if (where === 'miscDye') inv.miscDyes[i] = tmp ?? null;
     else if (this.openChest) this.openChest.items[i] = tmp ?? null;
-    this.game.sfx.play('menuTick', 1);
-    // 成就：装备态检查（AchievementsHelper.HandleOnEquip）
+    // ★清偿刀 U：SoundEngine.PlaySound(7)（ArmorSwap :3643/DyeSwap :3570/EquipSwap
+    //   :3657 三 Swap 原语成功支内统一——swapVanityEquip :1857 同声=本仓 'pickup'）。
+    //   旧 'menuTick'(Sound 12)=取件臂声,误挂。
+    this.game.sfx.play('pickup', 1);
+    // 成就：装备态检查（AchievementsHelper.HandleOnEquip——SwapEquip :3301/:3358）
     this.game.achNotifyEquipChanged();
   }
 
@@ -1807,24 +1882,25 @@ export class UI {
 
   /** CanEquipAccessoryInSlot（ItemSlot.cs:3540-3547,SwapVanityEquip context 11 门）：
    *  只扫目标段（AccSlots=armor[3..9] / VanityAccSlots=armor[13..19],ArraySegment
-   *  段宽恒 7 :3502-3515——【不】设 accSlotMax 解锁门=原版段宽定值）段内同 type
-   *  （CanEquipBothAccessories :3462）/双翅（:3466-3473,建模面与 armorAccepts 同款
-   *  =statOfInternal().wing;AccessoryIncompatibilityType 集合面 armorAccepts 亦未
-   *  建模=既登记水平一致）互斥;空槽恒不冲突（air 收尾 true :3474-3480）;冲突槽=
-   *  目标槽自身放行（HasIncompatibleAccessory collisionSlot==slot :3544——被换出件
-   *  占目标槽天然放行）。对段【不】扫（此门无 :1313 跨段臂——armorAccepts 的跨段
-   *  同款臂属放置语境,SwapVanityEquip 无） */
+   *  段宽恒 7 :3502-3515——【不】设逐槽解锁门（解锁门在放置/效果面=清偿刀 P））段内
+   *  CanEquipBothAccessories 全臂（HasIncompatibleAccessory :3472-3482 逐槽调）：同 type
+   *  （:3462）/双翅（:3466-3473,社交段 3580 例外）/互斥组（:3475-3480）;空槽恒不冲突
+   *  （air 收尾 true :3474-3480）;冲突槽=目标槽自身放行（collisionSlot==slot :3544——
+   *  被换出件占目标槽天然放行）。对段【不】扫（此门无 :1313 跨段臂——armorAccepts
+   *  的跨段同款臂属放置语境,SwapVanityEquip 无）。
+   *  ★清偿刀 X（2026-09-29）债②收口：同 type/双翅/互斥组三臂整链改 accPairConflicts
+   *  单源（与右键面同源勿复制）——旧内联缺互斥组臂（6168/6169/6193/6194 两两可共段
+   *  =自创放行）且缺 3580 社交段双翼例外臂（开发者翼 3580×翼在社交段原版可共戴,
+   *  Item.cs:32290 wingSlot=33;旧面误拒）。 */
   private accFitsInSegment(target: number, id: number, vanitySide: boolean): boolean {
     const arr = this.game.player.inv.armor;
     const lo = vanitySide ? VANITY_ARMOR_START + ACC_ARMOR_START : ACC_ARMOR_START;
     const hi = lo + (ARMOR_SLOTS - ACC_ARMOR_START);
-    const isWing = statOfInternal(id)?.wing != null;
     for (let k = lo; k < hi; k++) {
       if (k === target) continue;                            // 冲突槽=目标槽放行（:3544）
       const t = arr[k];
       if (!t) continue;                                      // 空槽不冲突
-      if (t.id === id) return false;                         // 段内同 type（:3462）
-      if (isWing && statOfInternal(t.id)?.wing != null) return false;   // 双翅（:3466）
+      if (accPairConflicts(id, t.id, vanitySide)) return false;   // 全臂单源（:3462/:3466/:3475）
     }
     return true;
   }
@@ -2580,6 +2656,40 @@ export class UI {
     return inv.miscDyes;
   }
 
+  /** ★清偿刀 X（2026-09-29）拖放面互斥组门（债②收口——armorAccepts 组臂盲区在调用
+   *  侧合成;armorAccepts 本体在 Inventory.ts〔清偿刀 P 终态禁碰〕）。原版拖放门链
+   *  PickItemMovementAction case 8-11（ItemSlot.cs:1496-1503）→ CanEquipInArmorSlot
+   *  （:1399-1458）配饰支双段扫均含互斥组臂：同段 CanEquipAccessoryInSlot→
+   *  HasIncompatibleAccessory（:3472-3482,冲突槽=目标槽放行 :3544——拖放=顶掉被换件
+   *  语义）+ 对段 HasSameItemInSlot（:3505-3520,组员跨段同拘——6168 功能段时 6169
+   *  拖不进社交段,反之亦然）。armorAccepts 已接部位/同款/双翅/对段同款臂,组臂盲区
+   *  此处补——accGroupClash 单源复用（同款/双翅臂与 armorAccepts 重叠=同判,组臂为
+   *  真增量）。盔甲部位槽（0-2/10-12）组值恒 −1 直通 armorAccepts。
+   *  ★清偿刀 Z（2026-09-29）：armorAccepts 本体组臂已落（Inventory.ts）——本门双段
+   *  组扫转为与本体【同判重叠】（幂等冗余,保留=门序原文形态不动;组臂真值面收归
+   *  vanillaEquip.accGroupClash 单源）。
+   *  ★反向校验（placeHeld 交换臂 :2715 取出件回查）【不】换组门：原版无取出回查
+   *  （本仓防御性保留=只收不严）,组臂若入回查会把前门时代落盘的既有组员状态钉死
+   *  无法换出——取出恒合法语义不变。 */
+  private armorAcceptsDrag(i: number, id: number): boolean {
+    const inv = this.game.player.inv;
+    if (!inv.armorAccepts(i, id)) return false;
+    if (i % VANITY_ARMOR_START < ACC_ARMOR_START) return true;   // 部位槽无组面（:3505 组值 −1）
+    const segLen = ARMOR_SLOTS - ACC_ARMOR_START;
+    const segBase = i < VANITY_ARMOR_START ? ACC_ARMOR_START : VANITY_ARMOR_START + ACC_ARMOR_START;
+    for (let k = segBase; k < segBase + segLen; k++) {
+      if (k === i) continue;                                     // 冲突槽=目标槽放行（:3544）
+      const t = inv.armor[k];
+      if (t && accGroupClash(t.id, id)) return false;
+    }
+    const oppBase = i < VANITY_ARMOR_START ? VANITY_ARMOR_START + ACC_ARMOR_START : ACC_ARMOR_START;
+    for (let k = oppBase; k < oppBase + segLen; k++) {           // 对段全扫（HasSameItemInSlot 无自槽例外）
+      const t = inv.armor[k];
+      if (t && accGroupClash(t.id, id)) return false;
+    }
+    return true;
+  }
+
   /** 放下到背包/宝箱格（合并→交换，装备位校验） */
   private placeHeld(i: number, where: SlotWhere): void {
     if (!this.heldStack) return;
@@ -2593,8 +2703,13 @@ export class UI {
     if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
       const inv = this.game.player.inv;
       const arr = this.equipArray(where);
+      // ★清偿刀 P：锁槽放置/交换拒（Main.cs:42114/42185/42218 Handle condition=
+      // 解锁∨光标空;GetDimSlotForMouseItem :1348/:1357 同判——持物对锁槽一律无
+      // 动作,取出走拾取路径不受限。大师无恶魔心态 armor[8]/dye[8] 锁）
+      if ((where === 'armor' || where === 'dye') && !inv.isItemSlotUnlockedAndUsable(i)) return;
       // 部位/配饰/染料/杂项分类校验（ItemSlot.PickItemMovementAction 同源判定）
-      if (where === 'armor' && !inv.armorAccepts(i, this.heldStack.id)) return;
+      // ★清偿刀 X：armor 面 +互斥组臂（armorAcceptsDrag=armorAccepts∧组扫,:1496-1503 链）
+      if (where === 'armor' && !this.armorAcceptsDrag(i, this.heldStack.id)) return;
       if (where === 'dye' && !inv.dyeAccepts(this.heldStack.id)) return;
       if (where === 'misc' && !inv.miscAccepts(i, this.heldStack.id)) return;
       if (where === 'miscDye' && !inv.dyeAccepts(this.heldStack.id)) return;
@@ -3337,15 +3452,16 @@ export class UI {
     // inpOverDomUi 门承担,光标持物由 uiHeldItemRef 门承担。
   }
 
-  /** 装备页追加槽显隐（Player.cs:4279 Shown=解锁∨占格；效果门在 accSlotMax） */
+  /** 装备页追加槽显隐（Player.cs:4279 Shown=解锁∨功能格∨社交孪生∨染料格;效果门=逐槽 :12669-12690） */
   private refreshEquipExtras(): void {
     const inv = this.game?.player.inv;
     const els = this.equipExtraSlots;
     if (!inv || !els) return;
-    const hasAt = (slot: number, dyeSlot: number): boolean =>
-      !!inv.armor[slot] || !!inv.dye[dyeSlot];
-    const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
-    const masterShown = inv.gateMaster || hasAt(9, 9);
+    // ★清偿刀 P 单源（Inventory.extraSlotShown :4259-4281——解锁∨功能格∨社交
+    // 孪生 18/19∨染料格;旧 inline 版漏社交孪生臂）
+    const shown = inv.extraSlotShown();
+    const heartShown = shown.heart;
+    const masterShown = shown.master;
     if (els.equip[0]) els.equip[0].style.display = heartShown ? '' : 'none';
     if (els.equip[1]) els.equip[1].style.display = masterShown ? '' : 'none';
     if (els.dye[0]) els.dye[0].style.display = heartShown ? '' : 'none';
@@ -3355,6 +3471,9 @@ export class UI {
   }
 
   closeInventory() {
+    // ★清偿刀 U：ResetInventoryStateCounters（ItemSlot.cs:3262-3265,Main.cs:46445
+    //   !playerInventory 支每帧调）——DyeSwap 计数器关包归零（重开轮转从头开始）
+    resetInventoryStateCounters();
     this.closeHousingPanel();
     // ★住房光标随关包解除（Main.cs:46429 !playerInventory → SetMouseNPC(-1,-1);
     //   死亡强收包 :46435-46440 同面）——HousingPanel 条已由 closeHousingPanel
@@ -4671,8 +4790,9 @@ export class UI {
     eqPage.appendChild(dyeCol);
     // 恶魔之心(armor[8]/dye[8])+大师(dye[9] 无独立时装...armor[9]) 追加槽——
     // 建面板即建、refreshEquipExtras 按解锁/占格显隐（Player.cs:4279 Shown 判定：
-    // 解锁【或】格内有物；经典世界专家旗存物也显示但不生效=cs:18402 效果门在
-    // Inventory.accSlotMax）。时装列 18/19 同步追加（无眼钮——眼只挂功能段 3-9）
+    // 解锁【或】格内有物【或】社交孪生占【或】染料格占；经典世界专家旗存物也
+    // 显示但不生效=效果门逐槽 :12669-12690，清偿刀 P）。时装列 18/19 同步追加
+    // （无眼钮——眼只挂功能段 3-9）
     const equipExtras: HTMLElement[] = [];
     const vanityExtras: HTMLElement[] = [];
     const dyeExtras: HTMLElement[] = [];
@@ -7887,7 +8007,8 @@ export class UI {
           // ★SW-FX36：判定域改背包∪装备扫描（同 vinvBuildBuilderAccToggles gatesOf）
           const g = this.game
             ? builderAccGateSet((vid) => playerVidCarried(
-              this.game!.player.inv.slots, this.game!.player.inv.armor, this.game!.player.inv.accSlotMax, vid))
+              this.game!.player.inv.slots, this.game!.player.inv.armor,
+              (k) => this.game!.player.inv.isItemSlotUnlockedAndUsable(k), vid))
             : null;
           return hotbarLockXY(!!g && builderAccTotalIcons(
             g, !!this.game?.world.flags.unlockedBiomeTorches) >= 10);
@@ -8139,9 +8260,11 @@ export class UI {
     const K = vanillaScaleFor(vw, vh, options.data.uiScale);
     const sw = vw / K, sh = vh / K;
     const inv = this.game.player.inv;
-    const hasAt = (slot: number, dyeSlot: number): boolean => !!inv.armor[slot] || !!inv.dye[dyeSlot];
-    const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
-    const masterShown = inv.gateMaster || hasAt(9, 9);
+    // ★清偿刀 P 单源（Inventory.extraSlotShown :4259-4281——解锁∨功能格∨社交
+    // 孪生 18/19∨染料格;旧 inline 版漏社交孪生臂）
+    const shownX = inv.extraSlotShown();
+    const heartShown = shownX.heart;
+    const masterShown = shownX.master;
     const chestOpen = !!this.openChest || this.game.npcShopOpen;
     // ★SW-RB13b(2026-09-11):ChestOrShopUIVisible(Main.cs:3035-3046)=chest/shop 态
     //   ∧ !NewCraftingUI.Visible ∧ !PipsUseGrid——网格态回位垃圾桶/图鉴/表情
@@ -8176,7 +8299,7 @@ export class UI {
     //   rulerLine 恒真（ResetEffects :18809）不入签。
     // ★SW-FX41:再含 modern 窗开态(窗开 → 切换钮/就近箱钮换锚 + 经典合成面隐藏 +
     //   ChestOrShopUIVisible 折叠,Main.cs:42418-42456/:3037)
-    const bg = builderAccGateSet((vid) => playerVidCarried(inv.slots, inv.armor, inv.accSlotMax, vid));
+    const bg = builderAccGateSet((vid) => playerVidCarried(inv.slots, inv.armor, (k) => inv.isItemSlotUnlockedAndUsable(k), vid));
     // ★反馈轮7:unlockedBiomeTorches 入签(:48166 start.Y+=24*torchGodIcons 列体位移
     //   + :48370 炬图标显隐)——旗翻(炬神事件结算)不入签则图标列滞留旧位与炬图标重叠
     const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}${this.game.world.flags.unlockedBiomeTorches ? 1 : 0}`;
@@ -10460,7 +10583,7 @@ export class UI {
     //  GrantArmorBenefits :13204。旧「仅配饰槽」域=wiki 明证偏差）
     const gatesOf = () => builderAccGateSet((vid) => {
       const g = this.game;
-      return !!g && playerVidCarried(g.player.inv.slots, g.player.inv.armor, g.player.inv.accSlotMax, vid);
+      return !!g && playerVidCarried(g.player.inv.slots, g.player.inv.armor, (k) => g.player.inv.isItemSlotUnlockedAndUsable(k), vid);
     });
     const ICON_SRC = 'sprites/vanilla-ui/UI_BuilderIcons.png';
     const slotEls: Array<HTMLButtonElement | null> = BUILDER_ACC_ICON_ORDER.map(() => null);

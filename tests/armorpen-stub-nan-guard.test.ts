@@ -2,7 +2,21 @@
 // 背景：BJ175 已把 Player stat getter + manaCost/pickSpeed 等 26 站防御化并声明
 // 「Game.ts 武器管线深处的站点由同类站点代表」。armorPen 是 equipStats 数值面
 // 最大单面——消费面普查（2026-09-19 复核）：97 站 = Game.ts 92（算术直读 90 +
-// 已护 2）+ WhipProj 1（三元臂）+ MountCombat 1 + MinionProj 3。测试壳
+// 已护 2）+ WhipProj 1（三元臂）+ MountCombat 1 + MinionProj 3。
+// ★清偿刀 Z（2026-09-29）钉数复核重计：Game.ts 92→97——5 新站全为 eq 形、出生
+// 即带 `(… ?? 0)` 括号习语（防御闸/括号闸均过,纯钉数陈旧红）。逐站身份（快照
+// 对账定谳:/tmp/game-backup.ts 09-25 00:59 实测 95→current 97 差分=BJ345 两站;
+// census 92→95 差分=BJ282/BJ286 三站,测试出生日期交叉钉）：
+//   ① `fang.armorPen`   :18814 BJ282 毒液法杖 2188/剧毒法杖 1308 专支
+//     （tests/bj282-multishot-census.test.ts 09-22 生）
+//   ② `knife.armorPen`  :20242 BJ282 吸血鬼飞刀 1569 专支（shoot 304,同批）
+//   ③ `wall.armorPen`   :18857 BJ286 爬藤怪法杖 3014 诅咒焰墙
+//     （tests/bj286-clinger-staff-wall.test.ts 09-23 生）
+//   ④ `sphere.armorPen` :18880 BJ345 磁球 1266（MagnetSphereProj 254,
+//     tests/magnet-sphere.test.ts 09-25 生）
+//   ⑤ `bolt260.armorPen`:18898 BJ345 同族收编炼狱叉 1295（HeatRay BeamBolt 260）
+//   今日 X 刀增补零 armorPen 字样——今日 5 会话 590 处 Edit 逐条解析零 armorPen
+//   触笔（transcript 逐 Edit 解析+09-27→今日站数 97 恒等双证）。测试壳
 // `equipStats:{}` 桩致动 = undefined 入算术 ⇒ NaN 注入弹幕 armorPen，经弹间
 // 拷贝（spore/cloud/slam/blade 系）/`+=`（Arrow:2212）/settlePen 链式放大。
 // 本刀（BJ184）把算术直读 90 站（全在 Game.ts）+ WhipProj 三元臂 1 站扫
@@ -34,7 +48,7 @@ import { npcCheckArmorPenetration } from '../src/entities/projStatus';
 /** 消费面 5 文件（equipStats 源 armorPen 读的全集——普查 2026-09-19，
  *  data/vanilla* 为生产面、其余实体文件为弹幕自身字段面（类缺省 0+汇截断），不在闸内） */
 const FILES: Array<[string, number]> = [
-  ['src/core/Game.ts', 92],      // 82 eq 形 + 10 this.player.equipStats 直读形
+  ['src/core/Game.ts', 97],      // 87 eq 形 + 10 this.player.equipStats 直读形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2,见头注逐站清单）
   ['src/entities/WhipProj.ts', 1],   // :626 三元臂（本批归一 ?? 0）
   ['src/entities/MountCombat.ts', 1], // :646 playerArmorPenOf 唯一桶
   ['src/entities/MinionProj.ts', 3],  // :2826/:2958/:4330
@@ -86,7 +100,7 @@ function scan(): ScanResult {
 }
 
 describe('BJ184 armorPen 桩面 NaN 防御判别网', () => {
-  it('①静态站闸：97 站全防御（?? 紧随）、Game.ts 90 刀站全括号习语、站数钉死', () => {
+  it('①静态站闸：102 站全防御（?? 紧随）、Game.ts 95 刀站全括号习语、站数钉死', () => {
     const res = scan();
     expect(res.unguarded).toEqual([]);
     expect(res.unparened).toEqual([]);

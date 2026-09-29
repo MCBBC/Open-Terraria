@@ -103,7 +103,7 @@ function emGame() {
   stub._staffHarvestBonus = false;
   game.player = {
     x: -500, y: -500, w: 20, h: 42, cx: -490, cy: -479, dead: true, iframes: 0,
-    inv: { armor: {}, accSlotMax: 8, heldItem: () => null },
+    inv: { armor: {}, accSlotMax: 8, isItemSlotUnlockedAndUsable: () => true, heldItem: () => null },   // 清偿刀 P：基座 5 开=谓词 true 同义
     buffs: new Set(), equipStats: {}, critChance: () => 0,
   } as unknown as GameHooks['player'];
   const cutCalls: Array<[number, number, number | undefined]> = [];
@@ -288,7 +288,9 @@ const REGISTRY: Record<string, 'marked' | 'playerSide' | 'nonProjBucket'> = {
   XenoBubbleProj: 'playerSide',      // 444 friendly（:12461 豁免表另案登记）
   ElectroSphereProj: 'playerSide',   // 443 无 projId 字段（快照约束同族）;回收相由 getter 覆写
   RainbowBolt: 'playerSide',         // 250 无 friendly 行（照报偏差登记）
-  RainbowSegment: 'playerSide',      // 251 friendly
+  // RainbowSegment 键已摘（★清偿刀 V 2026-09-29）：12:48 并行 vid 穿线刀挂
+  //   readonly projId=251（RainbowProj.ts:39,湿段/ghostHealProc 消费面）→
+  //   出 vid=0 普查域走型录面,按件 2 同款纪律（YoyoShotProj 先例）不入册。
   HealProj: 'playerSide',            // 298/305 无 friendly 行（照报偏差登记）
   ChargedBlaster: 'playerSide',      // 460 friendly（:12461 豁免表另案登记）
   PrismProj: 'playerSide',           // 633 friendly（:12461 豁免表另案登记）
@@ -311,6 +313,13 @@ const REGISTRY: Record<string, 'marked' | 'playerSide' | 'nonProjBucket'> = {
   HorsemansPumpkin: 'playerSide',
   SolarFlare: 'playerSide',          // 614/636 族 friendly
   SolarEruptionWhip: 'playerSide',
+  // ★清偿刀 V（2026-09-29）BJ345 磁球独立实体化（vanillaProjAlpha.ts 注）后补登记：
+  //   254 磁球悬停球 SetDefaults 无 friendly 行（P.cs:3369-3377 aiStyle47/magic/
+  //   timeLeft900/light0.5）→ vanilla 割门 P.cs:18021 `owner==myPlayer &&
+  //   CanCutTiles() && (friendly||hostile) && damage>0` 不落 = 零割;本仓 vid=0
+  //   缺省照报 = 照割（多割相位差家族,与 250/298/305 同族登记债,玩家侧不修）。
+  //   非 marked：玩家侧弹（Game.ts:18851 玩家施放 owner=myPlayer,伤害面在 255 弹）
+  MagnetSphereProj: 'playerSide',
   // 非投射物桶——不进中央割收口
   Portal: 'nonProjBucket',           // props 桶（placePortal）
   Minecart: 'nonProjBucket',         // props 桶（坐骑）
@@ -362,6 +371,8 @@ describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', ()
     expect(new Set(names).size).toBe(names.length);
     const unregistered = census.filter((c) => REGISTRY[c.cls] === undefined);
     expect(unregistered.map((c) => `${c.file} ${c.cls}`)).toEqual([]);
+    // ★清偿刀 V（2026-09-29）净零换位对账：RainbowSegment 挂 projId=251 出域
+    //   （12:48 并行 vid 穿线刀,RainbowProj.ts:39）+ MagnetSphereProj 入域,计数仍 46。
     expect(census.length).toBe(46);   // 定性面冻结（增删类须同步改本表与 Entity.ts 注）
   });
 

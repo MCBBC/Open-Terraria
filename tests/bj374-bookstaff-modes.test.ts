@@ -5,13 +5,19 @@
 //         vector=itemRotation 向量自锁;全族唯一 vid 覆盖)、:43820-43852(尾停发窗
 //         itemAnimation < max−useTime×4——★itemAnimation 起手拍已递减 → 静默边界
 //         =swT<=dur−win,旧 `<` 在 e=win 拍多发一发,实测 5 发 vs 原版 4 发)
-//   右键  Player.cs:49557-49567(alt→704,Bottom−100,伤×1.75)、:47626-47634
-//         (ChangeDir 点积=鼠标侧)、:53317-53321(蓝×2)、:4471-4484(窗=useAnim+1)
+//   右键  Player.cs:49557-49561(alt→704,pointPosition.X/Bottom−100,伤×1.75)、
+//         :47612-47634(ChangeDir 点积=鼠标侧,dx==0→左)、:53317-53321(蓝×2)、
+//         :4471-4484(窗=useAnim+1)
 //   弹幕  Projectile.cs:7449-7461(704 SetDefaults)/71421-71575(AI_145:vy 阶梯
 //         ±2/±4 钳 ±16、localAI[0] 快升支 +2 与 ≥16 提前收口 :71445-71447、
 //         尘 274 几何 :71515-71537、彩带 gore 1007/1008 三掷 :71545-71575)/
 //         7551-7562(712 SetDefaults penetrate 缺省 1=命中即亡)
 // 实现在 src/entities/proj1457.ts(BookStormTwister) + src/core/Game.ts(发射链)。
+// ★X4-债7 三条边界微差清偿(清偿刀D,2026-09-29):①尾窗单位原版式兜底
+//   (Player.cs:43819-43823 itemTimeMax==0→sItem.useTime;本仓对映=窗内已施用
+//   useTime=swing.multishot.useTime/getSlowMagicUseTime,慢施档随 itemTimeMax 缩放)
+//   ②风暴出生 x=盒心(零修刀:pointPosition.X=RotatedRelativePoint(MountedCenter).X
+//   ≡Center.X,:4209-4235/:3321-3326/:10878-10879) ③朝向门 dx==0→左(严格 >)。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -188,8 +194,23 @@ describe('BJ374-④ 发射链源锚(修前五差异回归闩)', () => {
   it('尾停发窗边界=swT <= swDur−winTail×U(:43820-43852——itemAnimation 起手拍已递减,', () => {
     const s = src();
     // 旧 `swT < swDur - winTail` 在 e=win 拍(3852 第 5 发,anim=13<14)放行=每窗多发
-    expect(s).toMatch(/swT <= swDur - winTail \* \(cw\.useTime \|\| 4\)/);
+    // ★X4-债7①:窗单位 U=窗内已施用 useTime(慢施缩放档,msU27 口径)
+    expect(s).toMatch(/swT <= swDur - winTail \* \(msU27 \|\| cw\.useTime \|\| 4\)/);
     expect(s).not.toMatch(/swT < swDur - winTail/);
+  });
+  it('尾窗单位原版式兜底:itemTimeMax==0→sItem.useTime 三站位(:43819-43823,慢施随缩放)', () => {
+    const s = src();
+    // 站A case'magic' 派发门:U=当前窗已施用值(swing.multishot.useTime=R27 续发钟)
+    expect(s).toMatch(/const win = TAIL_SILENCE_WIN\[critVid\] \* \(this\.swing\.multishot\?\.useTime \|\| cw\.useTime \|\| 4\)/);
+    // 站B 6152:appliedU6152 兜底链,续发钟与尾窗同源同值(:19170 旧双式分裂已收)
+    expect(s).toMatch(/const appliedU6152 = this\.player\.getSlowMagicUseTime\(cw\.useTime\) \|\| cw\.useTime \|\| 4;/);
+    expect(s).toMatch(/const winTail6152 = TAIL_SILENCE_WIN\[critVid\] \* appliedU6152;/);
+    expect(s).toMatch(/useTime: appliedU6152,/);
+    // 站C 泛化 spray:msU27 同源(msU27=续发钟),gate 兜底链
+    expect(s).toMatch(/const msU27 = this\.player\.getSlowMagicUseTime\(cw\.useTime\);\s*\n\s*this\.swing\.multishot = ms27 = \{\s*\n\s*useTime: msU27,/);
+    // 负面:旧「裸 cw.useTime 兜 4」形回退即红(慢施窗单位分裂:钟 ⌊U×2.5⌋/窗 U)
+    expect(s).not.toMatch(/winTail \* \(cw\.useTime \|\| 4\)/);
+    expect(s).not.toMatch(/winTail6152 = TAIL_SILENCE_WIN\[critVid\] \* \(cw\.useTime/);
   });
   it('3852 续发锁向:fireAgain27 critVid===3852 早退沿 lockAng27/lockPose27(:47615/47739)', () => {
     const s = src();
@@ -200,9 +221,19 @@ describe('BJ374-④ 发射链源锚(修前五差异回归闩)', () => {
     const s = src();
     expect(s).toMatch(/&& \(ITEM_DEFS\[this\.swing\.item\]\?\.vid \?\? -1\) !== 3852\)/);
   });
-  it('右键风暴方向=鼠标侧 ChangeDir 点积(:47626-47634——旧用陈旧 facing 反身飞)', () => {
+  it('右键风暴方向=鼠标侧严格 >(点积>0 :47626-47634——dx==0 同轴拍 num=0 落 else=朝左)', () => {
     const s = src();
-    expect(s).toMatch(/bsMwx >= this\.player\.cx \? 1 : -1/);
+    // ★X4-债7③:全量旋转未建模(φ=0)⇒ num=sign(dx);dx==0 边沿 vanilla 翻左
+    expect(s).toMatch(/bsMwx > this\.player\.cx \? 1 : -1/);
+    expect(s).not.toMatch(/bsMwx >= this\.player\.cx/);
+  });
+  it('右键风暴出生 x=盒心(零修刀:pointPosition.X≡Center.X,「杖尖」读法不成立)', () => {
+    const s = src();
+    // ★X4-债7②:pointPosition=RotatedRelativePoint(MountedCenter)(:47605+:4209-4235
+    // 无坐骑无旋转恒等盒心;NewProjectile :10878-10879 传点即弹心)≡player.cx。
+    // 正面钉当前式;负面杀双变异——出生锚被换成绘制杖尖(resolveShotAnchor)或被摘除
+    expect(s).toMatch(/const twister = new BookStormTwister\(this\.player\.cx, feetY - 100,/);
+    expect(s).not.toMatch(/new BookStormTwister\((?!this\.player\.cx)/);
   });
   it('右键窗长=useAnimation+1(ApplyItemAnimation :4471-4484 style5+autoReuse 补间帧)', () => {
     const s = src();

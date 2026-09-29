@@ -103,13 +103,18 @@ describe('装备唯一性（CanEquipAccessoryInSlot :1311-1327）', () => {
     expect(inv.armorAccepts(10 + dSlot, dual)).toBe(true);            // 白名单放行
   });
 
-  it('空配饰槽位范围:accSlotMax 内可用(5 基座 + 恶魔之心)', () => {
+  it('逐槽解锁谓词（★清偿刀 P :12669-12690）:基座 3-7 恒开,心 8=extraAccessory∧expert,大师 9=master', () => {
     const inv = new Inventory();
-    expect(inv.accSlotMax).toBe(ACC_ARMOR_START + 5);
+    for (let k = ACC_ARMOR_START; k <= 7; k++) expect(inv.isItemSlotUnlockedAndUsable(k)).toBe(true);
+    expect(inv.isItemSlotUnlockedAndUsable(8)).toBe(false);
+    expect(inv.isItemSlotUnlockedAndUsable(9)).toBe(false);
     // ★2026-08-28 门（cs:18402-18409 extraAccessory && (expertMode||gameMenu)）：
     inv.gateExpert = true;
     inv.extraAccessory = true;
-    expect(inv.accSlotMax).toBe(ACC_ARMOR_START + 6);
+    expect(inv.isItemSlotUnlockedAndUsable(8)).toBe(true);
+    expect(inv.isItemSlotUnlockedAndUsable(9)).toBe(false);   // 大师水晶槽仍锁
+    inv.gateMaster = true;
+    expect(inv.isItemSlotUnlockedAndUsable(9)).toBe(true);
     void ARMOR_SLOTS;
   });
 });

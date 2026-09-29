@@ -13,7 +13,8 @@ import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
 import { texId, texReady } from './texId';
-import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
+import { swPerf, liqpolish } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
+                                                    // ★liqpolish 微抛光刀总闸(灰度缺省关;?liqpolish=1 激活)
 import { visEffectFrames } from '../entities/Enemy';   // ★2026-09-27 微光 tVis 重钉钟面（function 声明=环安全;函数体内调用）
 import { gameTickCount } from '../core/GameTime';      // ★2026-09-27 液体相位逐 tick 累计钟源
 
@@ -98,6 +99,12 @@ export function liqglSetForTest(v: boolean): void { liqgl = v; }
 export interface LiqBatchEmit {
   emit(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
     replay: (ctx: CanvasRenderingContext2D) => void): boolean;
+  /** ★liqpolish ADD 批通道（sparkle/glint 逐 tile shim rec 退役面）——tier-1 保序
+   *  入队（pushLiquidAddBatch;ga/gco 逐 quad 编码进顶点,入口态不设门=gore 批判例）。
+   *  可选（测试桩/旧钩缺省=undefined→ADD 段走 2D 直画兜底）。
+   *  false=入口门拒（clip/filter/GL 死）→调用方本段 2D 直画兜底。 */
+  emitAdd?(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean;
 }
 
 // ---- 批环（单槽跨帧复用;雨刀 rainBatchData 判例）----
@@ -115,6 +122,187 @@ let _batOverflow = false;                    // 帽触发位（触发后本帧�
 const _gateData = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
 /** 微光四角色单槽（shimmerCornerColors 写入,batQuad 读——消费即弃零驻留） */
 const _batCols = new Float32Array(12);
+
+// ---- ★liqpolish ADD 批环（sparkle/glint;2026-09-29 微光微抛光刀）----
+// 【trace 定谳】微光湖 doSpark tile 逐格 ctx.save/gco/globalAlpha/drawImage/restore
+//  经 shim 成逐格 rec（resolveTex 逐 rec texAlive=稳定键族 texAlive 176.9ms 的主力
+//  面+逐格 quadSprite draw call）;glint 逐格 flushRun 把基底批切成逐列段+fillRect
+//  solid rec。本环把两族改顶点批:ADD 段（tier-1）每 pass ≤2 段单 drawArrays。
+// 【与 SO 基底环分离】基底段与 ADD 段时序交错,单环无法保连续段;分离环+段收口序
+//  =全 pass 基底段先于 ADD 段（重叠序论证:ADD quad 域 ⊆ 本格∪上格（bob 上侵）,
+//  上格基底恒先画——all-bases-before-adds 与原逐格交织逐像素同）。
+const _addRing = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
+/** fg 复用环（bg 构造段缩放拷贝目标;★禁原位缩放——bg rec 持 _batRing 活视图,
+ *  flush 前原位改写=bg 已入队数据被污染(背景水吃 fg α 的实锤级 bug 面) */
+const _fgReuseRing = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
+/** 每 quad 重放面:sx,sy,sw,shSrc（同 _batMeta 布局;重放 drawImage 取源矩形） */
+const _addMeta = new Float32Array(LIQ_RING_CAP * 4);
+let _addN = 0;
+let _addOverflow = false;
+/** sparkle 段（单白度带纹理=色相进顶点色,全 pass 一段;段界=帧界/环帽/发射失败） */
+let _spOn = false, _spStart = 0, _spQuads = 0, _spImg: CanvasImageSource | null = null, _spKey = '';
+/** glint 段（白 1×1 纹理,前景 pass 一段） */
+let _glOn = false, _glStart = 0, _glQuads = 0;
+/** sparkle 16 档色相 RGB/255 顶点色表（惰性;与 tintSparkleBand 同源同量化:
+ *  hslToRgb(hueIdx/16,1,0.5) → round(·255)/255） */
+let _sparkHueRGB: Float32Array | null = null;
+function sparkHueRGB(): Float32Array {
+  if (_sparkHueRGB) return _sparkHueRGB;
+  const t = new Float32Array(16 * 3);
+  for (let i = 0; i < 16; i++) {
+    const [r, g, b] = hslToRgb(i / SPARKLE_HUE_STEPS, 1, 0.5);
+    t[i * 3] = Math.round(r * 255) / 255;
+    t[i * 3 + 1] = Math.round(g * 255) / 255;
+    t[i * 3 + 2] = Math.round(b * 255) / 255;
+  }
+  _sparkHueRGB = t;
+  return t;
+}
+/** sparkle 段顶点色单槽（四角同色;batQuadAdd 读——消费即弃） */
+const _spCols = new Float32Array(12);
+
+// ---- ★liqpolish fg 复用账（bg pass 构造段登记→fg pass 缩放重发射）----
+// 【不变式】双 pass 逐 tile 构造确定性同值（prep 同帧缓存/P3 幂等重跑/波场
+// sampleDisplace 帧内确定/shimmer 场只依赖 (x,y,tVis)/设备矩形同变换）⇒
+// fg quad = bg quad 的 α 缩放体:min(1,o·k)=o·k（opacity≤1 恒成立——P3 写入
+// k∈(0,1]/fill(1) 初值）,rgb 预乘同比例;sparkle 双 pass 同 α（无 isBackground
+// 因子）逐位拷贝;glint bg 记录臂（sampleGlint 帧内确定,bg 不画）。fg 逐 tile
+// 构造循环整体跳过（trace 定谳 drawVanillaLiquids self 的 ~50% 构成面）。
+interface BgRun { img: CanvasImageSource; key: string; start: number; quads: number; k: number; cols: boolean }
+let _bgBaseRuns: BgRun[] = [];
+let _bgSpark: { start: number; quads: number; img: CanvasImageSource; key: string } | null = null;
+let _bgGlint: { start: number; quads: number } | null = null;
+let _bgRunsFrame = -1;
+/** sparkle 白度带（RGB=255,A=亮度——premul 上传后 tex_p=(L,L,L,L),rainbow 色相经
+ *  顶点色:out.rgb = L×(R8/255×ga) ≙ 旧染色带 premul(R8·L/255)×ga（±1LSB f32 域,
+ *  census 登记）。旧 per-hue 染色带 16 段→单白带 1 段。键含 texId（_sparkleTintCache
+ *  同款跨世界判例）;null=源未就绪→本 tile 落 CPU 原链。 */
+const _sparkBandCache = new Map<string, HTMLCanvasElement | null>();
+function shimmerSparkBand(tex: ImageBitmap | HTMLImageElement): HTMLCanvasElement | null {
+  if (!texReady(tex)) return null;
+  const ck = `band|${texId(tex)}`;
+  if (_sparkBandCache.has(ck)) return _sparkBandCache.get(ck) ?? null;
+  const bandX = 48;
+  const bandW = tex.width - bandX;
+  if (bandW <= 0 || typeof document === 'undefined') { _sparkBandCache.set(ck, null); return null; }
+  const c = document.createElement('canvas');
+  c.width = bandW; c.height = tex.height;
+  const cc = c.getContext('2d', { willReadFrequently: true });
+  if (!cc) { _sparkBandCache.set(ck, null); return null; }
+  cc.imageSmoothingEnabled = false;
+  cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);
+  // 灰度亮度 → alpha（tintSparkleBand 同式,先取后写）;RGB 恒 255（白）——色相改顶点色承载
+  const img = cc.getImageData(0, 0, bandW, tex.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+    d[i + 3] = lum;
+  }
+  cc.putImageData(img, 0, 0);
+  _sparkBandCache.set(ck, c);
+  return c;
+}
+/** 白 1×1 canvas（glint ADD 批纹理;fillRect '#ffffff' 'lighter' 的批化源） */
+let _glintWhiteCv: HTMLCanvasElement | null = null;
+function glintWhiteCv(): HTMLCanvasElement {
+  if (_glintWhiteCv) return _glintWhiteCv;
+  const c = document.createElement('canvas');
+  c.width = 1; c.height = 1;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, 1, 1);
+  _glintWhiteCv = c;
+  return c;
+}
+/** ADD quad 入批环（batQuad 同构,目标=_addRing/_addMeta/_addN;溢出置 _addOverflow）。 */
+function batQuadAdd(
+  sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
+  dx0: number, dy0: number, dw: number, dh: number, a: number,
+  cols: Float32Array | null, colOff: number,
+): boolean {
+  if (_addN >= LIQ_RING_CAP) { _addOverflow = true; return false; }
+  const o = _addN * LIQ_QUAD_FLOATS;
+  const ua = (sx - LIQ_TIE_EPS) / texW, ub = (sx + sw - LIQ_TIE_EPS) / texW;
+  const va = (sy - LIQ_TIE_EPS) / texH, vb = (sy + shSrc - LIQ_TIE_EPS) / texH;
+  const D = _addRing;
+  const r0 = (cols ? cols[colOff] : 1) * a, g0 = (cols ? cols[colOff + 1] : 1) * a, b0 = (cols ? cols[colOff + 2] : 1) * a;
+  const r1 = (cols ? cols[colOff + 3] : 1) * a, g1 = (cols ? cols[colOff + 4] : 1) * a, b1 = (cols ? cols[colOff + 5] : 1) * a;
+  const r2 = (cols ? cols[colOff + 6] : 1) * a, g2 = (cols ? cols[colOff + 7] : 1) * a, b2 = (cols ? cols[colOff + 8] : 1) * a;
+  const r3 = (cols ? cols[colOff + 9] : 1) * a, g3 = (cols ? cols[colOff + 10] : 1) * a, b3 = (cols ? cols[colOff + 11] : 1) * a;
+  const x1 = dx0 + dw, y1 = dy0 + dh;
+  D[o] = dx0; D[o + 1] = dy0; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r0; D[o + 5] = g0; D[o + 6] = b0; D[o + 7] = a;
+  D[o + 8] = x1; D[o + 9] = dy0; D[o + 10] = ub; D[o + 11] = va; D[o + 12] = r1; D[o + 13] = g1; D[o + 14] = b1; D[o + 15] = a;
+  D[o + 16] = x1; D[o + 17] = y1; D[o + 18] = ub; D[o + 19] = vb; D[o + 20] = r2; D[o + 21] = g2; D[o + 22] = b2; D[o + 23] = a;
+  D[o + 24] = dx0; D[o + 25] = dy0; D[o + 26] = ua; D[o + 27] = va; D[o + 28] = r0; D[o + 29] = g0; D[o + 30] = b0; D[o + 31] = a;
+  D[o + 32] = x1; D[o + 33] = y1; D[o + 34] = ub; D[o + 35] = vb; D[o + 36] = r2; D[o + 37] = g2; D[o + 38] = b2; D[o + 39] = a;
+  D[o + 40] = dx0; D[o + 41] = y1; D[o + 42] = ua; D[o + 43] = vb; D[o + 44] = r3; D[o + 45] = g3; D[o + 46] = b3; D[o + 47] = a;
+  const m = _addN * 4;
+  _addMeta[m] = sx; _addMeta[m + 1] = sy; _addMeta[m + 2] = sw; _addMeta[m + 3] = shSrc;
+  _addN++;
+  return true;
+}
+/** ADD 批段 2D 降级重放（'lighter' 逐 quad drawImage/fillRect;宁回退不丢精灵）。
+ *  solidGlint=true:白 fillRect 支（glint 段;顶点几何即设备矩形）。 */
+function replayLiqAddRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
+  tex: CanvasImageSource, solidGlint: boolean): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalCompositeOperation = 'lighter';
+  const D = _addRing;
+  for (let q = 0; q < quads; q++) {
+    const o = (startQuad + q) * LIQ_QUAD_FLOATS;
+    const m = (startQuad + q) * 4;
+    const ga = D[o + 7];
+    const dw = D[o + 8] - D[o], dh = D[o + 41] - D[o + 1];
+    if (ga <= 0 || dw <= 0 || dh <= 0) continue;
+    ctx.globalAlpha = ga;
+    if (solidGlint) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(D[o], D[o + 1], dw, dh);
+    } else {
+      ctx.drawImage(tex, _addMeta[m], _addMeta[m + 1], _addMeta[m + 2], _addMeta[m + 3],
+        D[o], D[o + 1], dw, dh);
+    }
+  }
+  ctx.restore();
+}
+/** ADD 段收尾（主循环尾/溢出/batOn 断点调用;发射失败/钩缺省=本段 2D 直画兜底）。
+ *  ★调用序契约:必须在本 pass 基底段 flushRun() 之后（重叠序 all-bases-before-adds）。
+ *  record=true（bg pass）:GL 发射成功段登记 fg 复用账（_bgSpark/_bgGlint）。 */
+function flushAddRuns2DAndEmit(
+  ctx: CanvasRenderingContext2D, bat: LiqBatchEmit | null, record: boolean,
+): void {
+  if (_spOn) {
+    _spOn = false;
+    if (_spQuads > 0 && bat?.emitAdd && _spImg) {
+      const s0 = _spStart, nQ = _spQuads, img = _spImg, k = _spKey;
+      const ok = bat.emitAdd(img, k, _addRing.subarray(s0 * LIQ_QUAD_FLOATS, (s0 + nQ) * LIQ_QUAD_FLOATS),
+        nQ, (raw) => replayLiqAddRun2D(raw, s0, nQ, img, false));
+      if (!ok) replayLiqAddRun2D(ctx, s0, nQ, img, false);
+      else if (record) _bgSpark = { start: s0, quads: nQ, img, key: k };
+    } else if (_spQuads > 0 && _spImg) {
+      replayLiqAddRun2D(ctx, _spStart, _spQuads, _spImg, false);
+    }
+    _spQuads = 0; _spImg = null; _spKey = '';
+  }
+  if (_glOn) {
+    _glOn = false;
+    if (_glQuads > 0 && bat?.emitAdd) {
+      const s0 = _glStart, nQ = _glQuads;
+      const img = glintWhiteCv();
+      const k = `liqglint:${texId(img)}`;
+      const ok = bat.emitAdd(img, k, _addRing.subarray(s0 * LIQ_QUAD_FLOATS, (s0 + nQ) * LIQ_QUAD_FLOATS),
+        nQ, (raw) => replayLiqAddRun2D(raw, s0, nQ, img, true));
+      if (!ok) replayLiqAddRun2D(ctx, s0, nQ, img, true);
+      else if (record) _bgGlint = { start: s0, quads: nQ };
+    } else if (_glQuads > 0) {
+      replayLiqAddRun2D(ctx, _glStart, _glQuads, glintWhiteCv(), true);
+    }
+    _glQuads = 0;
+  }
+}
 
 /** 批段（一次发射=同纹理连续 quad 区间;可见批与 gate 重发射共用） */
 interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; }
@@ -159,6 +347,80 @@ function shimmerCornerColors(
     out[o + ci * 3 + 1] = bil(u, v, 1) / 255;
     out[o + ci * 3 + 2] = bil(u, v, 2) / 255;
   }
+}
+
+// ---- ★liqpolish 微光场单源（2026-09-29 微抛光刀）----
+// 【trace 定谳】微光 tile 每格旧路径 sin×12（基色 4+glitter 4 波值重复求值+噪声 sin 4）
+//  + ~10 处分配/格（shimmerBaseColorF 返回三元组×4、lerp 闭包×4、bil 闭包、corners
+//  表×4 子表）——数百列湖 ×2 pass/帧的构造税主体之一。
+// 【本核】四节点波值一次求出（基色四角与 glitter 透明度共享,12→8 sin/格）;跨 pass
+//  波值缓存（bg 写/fg 读,fg 每格 0 sin）。旧三函数保留=CPU 原链与测试锚不动。
+const SHIM_A_R = 0.64705884, SHIM_D_R = 41 / 51 - 0.64705884;   // GetShimmerBaseColor lerp 端点
+const SHIM_A_G = 26 / 51, SHIM_D_G = 41 / 51 - 26 / 51;
+const SHIM_A_B = 14 / 15, SHIM_D_B = 1 - 14 / 15;
+/** 波值+噪声 sin 缓存（8 f64/tile: w00,w10,w01,w11,n00,n10,n01,n11;索引域=at(lx,ly)）。
+ *  ★f64 容器（非 f32!）:旧路径波值全程 f64,缓存量化即位破（f32 边界翻转实证——
+ *  位等锁 tests/liqpolish-shimmer-field.test.ts 抓的正是这个）。
+ *  有效性 stamps:帧 token+ tVis+ 窗高 ph——三者任一变即失效重算（写臂=帧内首 pass）。 */
+let _wvArr: Float64Array | null = null;
+let _wvCap = 0;
+let _wvTok: number | undefined;
+let _wvTVis = -1;
+let _wvPh = 0;
+/** 微光 tile 场单源求值（三件套:波值解析/glitter 四节点/基色四角——旧路径每格
+ *  sin×12+分配×10 的构造税核）。位等论证与实测锁见各函数头注。 */
+const _wvLocal = new Float64Array(8);        // 无缓存臂的每格波值暂存（写臂/本地同构;★f64=波值不量化,位等前提）
+const _wvTint = new Float64Array(8);         // applyShimmerBaseTint 波值暂存（主循环 _wvLocal 不共用=调用域隔离）
+const _glit4 = new Float64Array(4);          // glitter 四节点单槽（★f64:sparkGa 均值在顶点 α 入环前不量化）
+/** multiply fillStyle 串 memo（applyShimmerBaseTint/replayLiqRun2D 共用;键=rgb 打包,
+ *  值=串实例——同值复用免重复构造+解析;串值逐字节同=canvas 状态逐位同） */
+const _tintStyleMemo = new Map<number, string>();
+/** 四节点波值+噪声 sin 解析（无缓存臂;缓存臂由调用方直读 _wvArr）。写 out:
+ *  [w00,w10,w01,w11,n00,n10,n01,n11]。 */
+function shimmerWaves4(x: number, y: number, tVis: number, out: Float64Array, o: number): void {
+  out[o] = shimmerWave(x, y, tVis);
+  out[o + 1] = shimmerWave(x + 1, y, tVis);
+  out[o + 2] = shimmerWave(x, y + 1, tVis);
+  out[o + 3] = shimmerWave(x + 1, y + 1, tVis);
+  out[o + 4] = Math.sin(shimmerWhiteNoise(x, y) / 10 + tVis / 180);
+  out[o + 5] = Math.sin(shimmerWhiteNoise(x + 1, y) / 10 + tVis / 180);
+  out[o + 6] = Math.sin(shimmerWhiteNoise(x, y + 1) / 10 + tVis / 180);
+  out[o + 7] = Math.sin(shimmerWhiteNoise(x + 1, y + 1) / 10 + tVis / 180);
+}
+/** GetShimmerGlitterOpacity 四节点体部式（top 门在调用方;num2=缓存噪声 sin,w=共享波值
+ *  ——与旧函数逐项同式:remap(remap(w,-0.5,1,0,0.35)×num2, 0,0.5,0,1)）。 */
+function glitter4FromWaves(wv: Float64Array, wo: number, glOut: Float64Array): void {
+  glOut[0] = remap(remap(wv[wo], -0.5, 1, 0, 0.35) * wv[wo + 4], 0, 0.5, 0, 1);
+  glOut[1] = remap(remap(wv[wo + 1], -0.5, 1, 0, 0.35) * wv[wo + 5], 0, 0.5, 0, 1);
+  glOut[2] = remap(remap(wv[wo + 2], -0.5, 1, 0, 0.35) * wv[wo + 6], 0, 0.5, 0, 1);
+  glOut[3] = remap(remap(wv[wo + 3], -0.5, 1, 0, 0.35) * wv[wo + 7], 0, 0.5, 0, 1);
+}
+/** 基色四角（缓存波值版 shimmerCornerColors——角序/乘加序/除 255 逐项同;
+ *  lerp 端点同构 f64 常量预析（模块初始化求值=运行期同值））。 */
+function shimmerCornersFromWaves(
+  wv: Float64Array, wo: number,
+  uL: number, uR: number, vT: number, vB: number,
+  out: Float32Array, o: number,
+): void {
+  const w00 = wv[wo], w10 = wv[wo + 1], w01 = wv[wo + 2], w11 = wv[wo + 3];
+  const k00 = 0.1 + w00 * 0.4, k10 = 0.1 + w10 * 0.4, k01 = 0.1 + w01 * 0.4, k11 = 0.1 + w11 * 0.4;
+  const r00 = 255 * (SHIM_A_R + SHIM_D_R * k00), g00 = 255 * (SHIM_A_G + SHIM_D_G * k00), b00 = 255 * (SHIM_A_B + SHIM_D_B * k00);
+  const r10 = 255 * (SHIM_A_R + SHIM_D_R * k10), g10 = 255 * (SHIM_A_G + SHIM_D_G * k10), b10 = 255 * (SHIM_A_B + SHIM_D_B * k10);
+  const r01 = 255 * (SHIM_A_R + SHIM_D_R * k01), g01 = 255 * (SHIM_A_G + SHIM_D_G * k01), b01 = 255 * (SHIM_A_B + SHIM_D_B * k01);
+  const r11 = 255 * (SHIM_A_R + SHIM_D_R * k11), g11 = 255 * (SHIM_A_G + SHIM_D_G * k11), b11 = 255 * (SHIM_A_B + SHIM_D_B * k11);
+  const uLc = 1 - uL, uRc = 1 - uR, vTc = 1 - vT, vBc = 1 - vB;
+  out[o] = (r00 * uLc * vTc + r10 * uL * vTc + r01 * uLc * vT + r11 * uL * vT) / 255;
+  out[o + 1] = (g00 * uLc * vTc + g10 * uL * vTc + g01 * uLc * vT + g11 * uL * vT) / 255;
+  out[o + 2] = (b00 * uLc * vTc + b10 * uL * vTc + b01 * uLc * vT + b11 * uL * vT) / 255;
+  out[o + 3] = (r00 * uRc * vTc + r10 * uR * vTc + r01 * uRc * vT + r11 * uR * vT) / 255;
+  out[o + 4] = (g00 * uRc * vTc + g10 * uR * vTc + g01 * uRc * vT + g11 * uR * vT) / 255;
+  out[o + 5] = (b00 * uRc * vTc + b10 * uR * vTc + b01 * uRc * vT + b11 * uR * vT) / 255;
+  out[o + 6] = (r00 * uRc * vBc + r10 * uR * vBc + r01 * uRc * vB + r11 * uR * vB) / 255;
+  out[o + 7] = (g00 * uRc * vBc + g10 * uR * vBc + g01 * uRc * vB + g11 * uR * vB) / 255;
+  out[o + 8] = (b00 * uRc * vBc + b10 * uR * vBc + b01 * uRc * vB + b11 * uR * vB) / 255;
+  out[o + 9] = (r00 * uLc * vBc + r10 * uL * vBc + r01 * uLc * vB + r11 * uL * vB) / 255;
+  out[o + 10] = (g00 * uLc * vBc + g10 * uL * vBc + g01 * uLc * vB + g11 * uL * vB) / 255;
+  out[o + 11] = (b00 * uLc * vBc + b10 * uL * vBc + b01 * uLc * vB + b11 * uL * vB) / 255;
 }
 
 /** 2D tile quad 入批环（设备空间;uv=全跨度−ε tie 补正,quadSprite 同式）。
@@ -207,11 +469,11 @@ function batQuad(
  *  ——旧「r!==1 即微光」启发式在预乘后会把 α<1 普通水 quad（rgb=α≠1）误判成调制
  *  quad;段旗消除歧义。multiply 用色按 R2b-F3 unpre 惯例拆回未预乘原值。 */
 function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
-  tex: CanvasImageSource, hasCols: boolean): void {
+  tex: CanvasImageSource, hasCols: boolean, ring: Float32Array = _batRing): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  const D = _batRing;
+  const D = ring;
   for (let q = 0; q < quads; q++) {
     const o = (startQuad + q) * LIQ_QUAD_FLOATS;
     const m = (startQuad + q) * 4;
@@ -346,11 +608,12 @@ export function replayLiquidFootQuads2D(ctx: CanvasRenderingContext2D): void {
  *  _fgRuns 空/缺段=gate 缺水主体≈0,整帧位移场丢。 */
 export function liqRingOverflow(): boolean { return _batOverflow; }
 
-/** white 1×1 entry（GLShimExecutor.WHITE_E 同式;模块缓存防重复建面） */
+/** white 1×1 entry（GLShimExecutor.WHITE_E 同式;模块缓存防重复建面）。
+ *  ★liqpolish:卫兵改 texCheck 批检（__white 死窗=清表族,清表必 bump texGen）。 */
 const _whiteCache = new WeakMap<GLSpriteLayer, TexEntry>();
 function whiteEntry(glw: GLSpriteLayer): TexEntry {
   const hit = _whiteCache.get(glw);
-  if (hit && glw.texAlive(hit)) return hit;
+  if (hit && (liqpolish ? glw.texCheck(hit) : glw.texAlive(hit))) return hit;
   if (typeof document === 'undefined') {
     // node 测试环境（无 canvas）:结构桩 entry（仅测试 fake glw 可达;生产 GL 会话
     // 恒有 document）
@@ -372,6 +635,10 @@ function whiteEntry(glw: GLSpriteLayer): TexEntry {
 export function resetLiquidBatchForFrame(frame: number): void {
   if (_batFrame !== frame) {
     _batFrame = frame; _batN = 0; _batOverflow = false; _fgRuns = [];
+    // ★liqpolish ADD 环帧界复位（sparkle/glint 段状态随基底环同生命周期）
+    _addN = 0; _addOverflow = false; _spOn = false; _spQuads = 0; _glOn = false; _glQuads = 0;
+    // ★liqpolish fg 复用账帧界失效（bg pass 重录;失效=fg 走逐 tile 构造原链）
+    _bgRunsFrame = -1;
   }
   if (_footFrame !== frame) {
     _footFrame = frame; _footQuads = [];
@@ -390,6 +657,23 @@ export function shimmerCornerColorsForTest(
   return r;
 }
 
+/** ★liqpolish 场单源测试面（位等锁:shimmerCornersFromWaves/glitter4FromWaves 与
+ *  旧 shimmerCornerColors/shimmerGlitterOpacity 逐位对照;tests/liqpolish-shimmer-field.test.ts） */
+export function shimmerFieldPolishForTest(
+  x: number, y: number, tVis: number,
+  uL: number, uR: number, vT: number, vB: number,
+): { cols: [number, number, number][]; gl: [number, number, number, number] } {
+  const wv = new Float64Array(8);
+  shimmerWaves4(x, y, tVis, wv, 0);
+  const cols = new Float32Array(12);
+  shimmerCornersFromWaves(wv, 0, uL, uR, vT, vB, cols, 0);
+  const gl = new Float64Array(4);
+  glitter4FromWaves(wv, 0, gl);
+  const r: [number, number, number][] = [];
+  for (let i = 0; i < 4; i++) r.push([cols[i * 3], cols[i * 3 + 1], cols[i * 3 + 2]]);
+  return { cols: r, gl: [gl[0], gl[1], gl[2], gl[3]] };
+}
+
 /** LiquidCache.IsSolid（LiquidRenderer.cs:198 → WorldGen.SolidOrSlopedTile :70515-70537）
  *  纯谓词，P1 两处扫描（needsPrep 首扫/复用失效重扫）共用的单源：
  *  active(flags≠0) ∧ !inActive(致动位清零,WorldGen.cs:70534 IL_004c `return !tile.inActive()`)
@@ -399,6 +683,14 @@ export function shimmerCornerColorsForTest(
  *  曾漏门 = 致动墙仍压住邻格液面/拖尾形态。 */
 export function liquidCacheIsSolid(flags: number, wire: number, solid: boolean | undefined): boolean {
   return flags !== 0 && (wire & TileStore.WIRE_ACTUATED) === 0 && solid === true;
+}
+/** ★liqpolish type→solid LUT（TILE_DEFS 静态派生;P1 全窗扫 8400 格/帧的
+ *  TILE_DEFS[t]?.solid 属性链→Map.get;值域=模块常量,跨世界不变） */
+const _solidLut = new Map<number, boolean>();
+function tileSolidLut(t: number): boolean {
+  let v = _solidLut.get(t);
+  if (v === undefined) { v = TILE_DEFS[t]?.solid === true; _solidLut.set(t, v); }
+  return v;
 }
 /** 液体表选择（原版 _liquidTextures[num2] 语义）：微光/岩浆/蜂蜜 = 固定表【不吃
  *  waterStyle】（vanilla 血月染红只及 Type0 水：DrawNormalLiquids :655 case 0 才
@@ -441,8 +733,9 @@ function remap(v: number, a: number, b: number, c: number, d: number): number {
   const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
   return c + (d - c) * t;
 }
-/** GetShimmerGlitterOpacity :773-790：top（液面格）恒 0.5；体部 = Remap(wave项×噪声项, 0, 0.5, 0, 1) */
-function shimmerGlitterOpacity(top: boolean, x: number, y: number, tVis: number): number {
+/** GetShimmerGlitterOpacity :773-790：top（液面格）恒 0.5；体部 = Remap(wave项×噪声项, 0, 0.5, 0, 1)。
+ *  ★导出=liqpolish 场单源位等锁消费（tests/liqpolish-shimmer-field.test.ts 旧路径锚） */
+export function shimmerGlitterOpacity(top: boolean, x: number, y: number, tVis: number): number {
   if (top) return 0.5;
   const num = remap(shimmerWave(x, y, tVis), -0.5, 1, 0, 0.35);
   const num2 = Math.sin(shimmerWhiteNoise(x, y) / 10 + tVis / 180);
@@ -483,8 +776,28 @@ function applyShimmerBaseTint(
   ctx: CanvasRenderingContext2D, x: number, y: number,
   dstX: number, dstY: number, w: number, h: number, tVis: number,
 ): void {
-  const c00 = shimmerBaseColorF(x, y, tVis), c10 = shimmerBaseColorF(x + 1, y, tVis);
-  const c01 = shimmerBaseColorF(x, y + 1, tVis), c11 = shimmerBaseColorF(x + 1, y + 1, tVis);
+  // ★liqpolish（2026-09-29 微抛光刀）:波值经 shimmerWaves4 单源+标量通道直算
+  //  （旧路径 4×shimmerBaseColorF=4×[数组+闭包]分配+4 sin 重复求值）;fillStyle 串
+  //  memo（同值串实例复用=Blink 侧跳过重复解析;串值逐字节同=状态逐位同）。
+  //  flag 关=旧路径逐位（三元组数组+闭包+模板串）。
+  let r00: number, g00: number, b00: number, r10: number, g10: number, b10: number;
+  let r01: number, g01: number, b01: number, r11: number, g11: number, b11: number;
+  if (liqpolish) {
+    shimmerWaves4(x, y, tVis, _wvTint, 0);
+    const w00 = _wvTint[0], w10 = _wvTint[1], w01 = _wvTint[2], w11 = _wvTint[3];
+    const k00 = 0.1 + w00 * 0.4, k10 = 0.1 + w10 * 0.4, k01 = 0.1 + w01 * 0.4, k11 = 0.1 + w11 * 0.4;
+    r00 = 255 * (SHIM_A_R + SHIM_D_R * k00); g00 = 255 * (SHIM_A_G + SHIM_D_G * k00); b00 = 255 * (SHIM_A_B + SHIM_D_B * k00);
+    r10 = 255 * (SHIM_A_R + SHIM_D_R * k10); g10 = 255 * (SHIM_A_G + SHIM_D_G * k10); b10 = 255 * (SHIM_A_B + SHIM_D_B * k10);
+    r01 = 255 * (SHIM_A_R + SHIM_D_R * k01); g01 = 255 * (SHIM_A_G + SHIM_D_G * k01); b01 = 255 * (SHIM_A_B + SHIM_D_B * k01);
+    r11 = 255 * (SHIM_A_R + SHIM_D_R * k11); g11 = 255 * (SHIM_A_G + SHIM_D_G * k11); b11 = 255 * (SHIM_A_B + SHIM_D_B * k11);
+  } else {
+    const c00 = shimmerBaseColorF(x, y, tVis), c10 = shimmerBaseColorF(x + 1, y, tVis);
+    const c01 = shimmerBaseColorF(x, y + 1, tVis), c11 = shimmerBaseColorF(x + 1, y + 1, tVis);
+    r00 = c00[0]; g00 = c00[1]; b00 = c00[2];
+    r10 = c10[0]; g10 = c10[1]; b10 = c10[2];
+    r01 = c01[0]; g01 = c01[1]; b01 = c01[2];
+    r11 = c11[0]; g11 = c11[1]; b11 = c11[2];
+  }
   ctx.save();
   // 原版 SetShimmerVertexColors 的乘法是【无条件 modulate】（纹理×顶点色），不带
   // 透明 pass 的 0.75 衰减——若沿用调用方残留的 globalAlpha，白色基底（表面格
@@ -499,9 +812,20 @@ function applyShimmerBaseTint(
       // 子块中心在 tile 内的归一化位置（dstX 相对 x*16 有壁值裁剪偏移）→ 四角双线性插值
       const u = (dstX + bx * subW + bw / 2 - x * 16) / 16;
       const v = (dstY + by * subH + bh / 2 - y * 16) / 16;
-      const ch = (i: number) => c00[i] * (1 - u) * (1 - v) + c10[i] * u * (1 - v)
-        + c01[i] * (1 - u) * v + c11[i] * u * v;
-      ctx.fillStyle = `rgb(${Math.round(ch(0))},${Math.round(ch(1))},${Math.round(ch(2))})`;
+      // 乘加序 = 旧 ch(i) 逐项左结合同构;polish 支 fillStyle 串走 memo（值逐字节同）
+      const u1 = 1 - u, v1 = 1 - v;
+      const cr = r00 * u1 * v1 + r10 * u * v1 + r01 * u1 * v + r11 * u * v;
+      const cg = g00 * u1 * v1 + g10 * u * v1 + g01 * u1 * v + g11 * u * v;
+      const cb = b00 * u1 * v1 + b10 * u * v1 + b01 * u1 * v + b11 * u * v;
+      const rr = Math.round(cr), rg = Math.round(cg), rb = Math.round(cb);
+      if (liqpolish) {
+        const key = (rr << 16) | (rg << 8) | rb;
+        let s = _tintStyleMemo.get(key);
+        if (s === undefined) { s = `rgb(${rr},${rg},${rb})`; _tintStyleMemo.set(key, s); }
+        ctx.fillStyle = s;
+      } else {
+        ctx.fillStyle = `rgb(${rr},${rg},${rb})`;
+      }
       ctx.fillRect(dstX + bx * subW, dstY + by * subH, bw, bh);
     }
   }
@@ -835,7 +1159,7 @@ export function drawVanillaLiquids(
       // ★W-A4（2026-09-03）：谓词单源化至 liquidCacheIsSolid（补 !inActive 致动门,
       //  WorldGen.cs:70534 IL_004c `return !tile.inActive()`）
       isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],
-        TILE_DEFS[st.type[si]]?.solid) ? 1 : 0;
+        tileSolidLut(st.type[si])) ? 1 : 0;
     }
   }
   }   // P1 结束
@@ -867,7 +1191,7 @@ export function drawVanillaLiquids(
       // ★W-A4（2026-09-03）：同 P1 首扫,谓词单源 liquidCacheIsSolid（本段是
       //  同帧复用失效时的全量重扫副本）
       isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],
-        TILE_DEFS[st.type[si]]?.solid) ? 1 : 0;
+        tileSolidLut(st.type[si])) ? 1 : 0;
     }
   }
   }   // ★BJ77 P1 复位扫守卫结束
@@ -1061,12 +1385,18 @@ export function drawVanillaLiquids(
 
   // ---- 绘制 ----
   const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
+  // ★liqpolish:末次查询 memo（微光湖单表场景 Map.get/tile→比较/tile;pass 内
+  //  表就绪态不变故未命中亦可钉——Map 语义仅跨帧,本 memo 生命周期=单次调用）
+  let _texLastVt = -1;
+  let _texLastT: ImageBitmap | HTMLImageElement | null = null;
   const texFor = (vt: number) => {
+    if (polish && vt === _texLastVt) return _texLastT;
     let t = texCache.get(vt);
     if (t === undefined) {
       t = atlas.ensureVImage(waterSheet(vt, waterStyle)) ?? null;
       if (t) texCache.set(vt, t);  // 只缓存命中(缓存 null 会把未就绪永久化)
     }
+    _texLastVt = vt; _texLastT = t;
     return t;
   };
   // 双动画帧（1456 LiquidRenderer.Update :844-856）：
@@ -1123,16 +1453,48 @@ export function drawVanillaLiquids(
   let runKey = '';
   let runCols = false;   // 本段含微光调制 quad（重放面用;段按 sheet 同质——微光表
                          // Misc_water_14 与普通水表 0-13 文件互异,不可能混段）
+  let runVt = -1;        // ★liqpolish fg 复用:段 vt→fg α 系数（DEFAULT_OPACITY[vt];sheet↔vt 单射）
   let tVisCache = -1;   // 微光 tVis 每 pass 取一次（visEffectFrames 渲染段内不变）
+
+  // ---- ★liqpolish 波值跨 pass 缓存臂（bg=写,fg=读;帧 token+tVis+窗高 stamps）----
+  //  微光 tile 波值/噪声 sin 只依赖 (x,y,tVis)——同帧双 pass 同值;第二 pass 直读
+  //  =每格 8 sin→0。窗口/水型/帧任一变即失效（stamp 三键）。frameToken 缺省
+  //  （无 token 调用）=无缓存,每格写 _wvLocal 单槽（格内 glitter/基色共享）。
+  const polish = liqpolish;
+  // ★liqpolish:needsPrep（=帧内首 pass/bg）清 fg 复用账（本 pass 重录;
+  //  bg 段经 flushRun/flushAddRuns2DAndEmit(record) 登记见下）
+  if (needsPrep) {
+    _bgBaseRuns.length = 0; _bgSpark = null; _bgGlint = null;
+  }
+  const tVisPass = polish ? visEffectFrames() : -1;
+  let wvRead: Float64Array | null = null;
+  let wvWrite: Float64Array | null = null;
+  if (polish) {
+    if (frameToken !== undefined && _wvTok === frameToken && _wvTVis === tVisPass
+      && _wvPh === ph && _wvArr && n <= _wvCap) {
+      wvRead = _wvArr;
+    } else {
+      if (!_wvArr || n > _wvCap) { _wvCap = n; _wvArr = new Float64Array(n * 8); }
+      if (frameToken !== undefined) {
+        _wvTok = frameToken; _wvTVis = tVisPass; _wvPh = ph;
+        wvWrite = _wvArr;
+      }
+    }
+  }
   const flushRun = (): void => {
     const quads = _batN - runStart;
     if (quads <= 0 || !runImg || !bat) return;
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    const img = runImg, s0 = runStart, nQ = quads, k = runKey, cols = runCols;
+    const img = runImg, s0 = runStart, nQ = quads, k = runKey, cols = runCols, vt = runVt;
     bat.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
       (raw) => replayLiqRun2D(raw, s0, nQ, img, cols));
     if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ });
+    // ★liqpolish fg 复用:bg 段登记（k=fg α 系数;溢出帧不录=fg 走构造原链）
+    if (polish && isBackground && !_batOverflow && !_addOverflow && frameToken !== undefined) {
+      _bgBaseRuns.push({ img, key: k, start: s0, quads: nQ, k: DEFAULT_OPACITY[vt] ?? 0.6, cols });
+      _bgRunsFrame = frameToken;
+    }
     runStart = _batN;
     runImg = null;
     runCols = false;
@@ -1140,6 +1502,63 @@ export function drawVanillaLiquids(
   if (gateCapture && isBackground) {
     _footWld.a = wldT.a; _footWld.b = wldT.b; _footWld.c = wldT.c;
     _footWld.d = wldT.d; _footWld.e = wldT.e; _footWld.f = wldT.f;
+  }
+  // ---- ★liqpolish fg 复用臂（bg 构造段缩放重发射;fg 逐 tile 构造循环整体跳过）----
+  //  有效性 = 同帧 token+bg 已录+双环未溢出（溢出帧 fg 走逐 tile 构造原链——
+  //  溢出段的 CPU 兜底逐 tile 画,复用账不含）。重发射序 = [缩放基底段][sparkle
+  //  拷贝][glint 拷贝] —— 与 bg 段序同构（全基底先于 ADD=重叠序契约）。
+  //  【位等/登记域】基底段 rgb,a 同乘 k（f32 双舍入 ±1LSB 登记）;sparkle/glint
+  //  段逐位拷贝。gate 重发射读缩放后环数据（obj19 α×100 饱和域,无害）。
+  const fgReuse = polish && !needsPrep && batOn && bat !== null
+    && !_batOverflow && !_addOverflow && frameToken !== undefined
+    && _bgRunsFrame === frameToken;
+  if (fgReuse && bat) {
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    for (let ri = 0; ri < _bgBaseRuns.length; ri++) {
+      const r = _bgBaseRuns[ri];
+      const nF = r.quads * LIQ_QUAD_FLOATS, src = r.start * LIQ_QUAD_FLOATS;
+      const S = _batRing, D = _fgReuseRing;
+      if (r.k === 1) {
+        D.set(S.subarray(src, src + nF), src);   // 逐位拷贝（sparkle 同 α 面同此;基底段 k<1）
+      } else {
+        for (let i2 = 0; i2 < nF; i2 += LIQ_STRIDE) {
+          const o = src + i2;
+          D[o] = S[o]; D[o + 1] = S[o + 1]; D[o + 2] = S[o + 2]; D[o + 3] = S[o + 3];
+          D[o + 4] = S[o + 4] * r.k; D[o + 5] = S[o + 5] * r.k; D[o + 6] = S[o + 6] * r.k; D[o + 7] = S[o + 7] * r.k;
+        }
+      }
+      bat.emit(r.img, r.key, D.subarray(src, src + nF), r.quads,
+        (raw) => replayLiqRun2D(raw, r.start, r.quads, r.img, r.cols, D));
+      if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads });
+    }
+    if (_bgSpark && bat.emitAdd) {
+      const sp = _bgSpark;
+      bat.emitAdd(sp.img, sp.key,
+        _addRing.subarray(sp.start * LIQ_QUAD_FLOATS, (sp.start + sp.quads) * LIQ_QUAD_FLOATS),
+        sp.quads, (raw) => replayLiqAddRun2D(raw, sp.start, sp.quads, sp.img, false));
+    }
+    if (_bgGlint && bat.emitAdd) {
+      const gl = _bgGlint;
+      const gimg = glintWhiteCv();
+      bat.emitAdd(gimg, `liqglint:${texId(gimg)}`,
+        _addRing.subarray(gl.start * LIQ_QUAD_FLOATS, (gl.start + gl.quads) * LIQ_QUAD_FLOATS),
+        gl.quads, (raw) => replayLiqAddRun2D(raw, gl.start, gl.quads, gimg, true));
+    }
+    // 调试快照（主循环尾同字段;sheetsReady 复用臂不重建 texCache=空表）
+    _liqDebug.calls++;
+    _liqDebug.lastMs = nowMs;
+    _liqDebug.waterStyle = waterStyle;
+    _liqDebug.waterSheet = waterSheet(0, waterStyle);
+    _liqDebug.isBackground = isBackground;
+    _liqDebug.animFrame = animFrame;
+    _liqDebug.waterfallFrame = waterfallFrame;
+    _liqDebug.windSpeed = windSpeed;
+    _liqDebug.window = [tx0, ty0, tx1, ty1];
+    _liqDebug.sheetsReady = [];
+    _liqDebug.atlasReady = true;
+    ctx.globalAlpha = 1;
+    return;
   }
   for (let lx = bx0; lx <= bx1; lx++) {
     const x = px0 + lx;
@@ -1207,20 +1626,42 @@ export function drawVanillaLiquids(
         // ★2026-09-27 重钉（火苗速率案普查株连）：消费 visEffectFrames()（逐 tick
         //  计数器,stepVisEffectTick 每 fixedUpdate +1;C 批改型 2026-08-31 同判例
         //  同钟面）——渲染段内计数器不变,每 pass 取一次（原逐 tile 读同值）。
-        const tVis = tVisCache < 0 ? (tVisCache = visEffectFrames()) : tVisCache;   // Main.timeForVisualEffects（帧计数,1458 Main.cs:17340）
+        //  ★liqpolish:tVis 在循环前已解析（tVisPass,波值缓存 stamp 用）——同值直用。
+        const tVis = tVisCache < 0 ? (tVisCache = polish ? tVisPass : visEffectFrames()) : tVisCache;   // Main.timeForVisualEffects（帧计数,1458 Main.cs:17340）
         const flag = shimmerSparkleGate(sx, sy);               // :717（★FX61：曾误写 !(A||B)=∧，表层格彩虹条整缺）
         const wantSpark = flag || (x + y) % 2 === 0;
-        // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
-        // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
-        // 数值等价（全网格采样验证平均差 0.0000），top（=有干燥邻边的表层/边缘格，
-        // :719 flag=true）四角恒 0.5；body（全浸没 (sx,sy)=(16,48) 内部格）复算
-        // 均值 0.09 / 峰值 0.34 → 星点恒为极淡彩虹（近白微闪）。注意 sparkle 不乘
-        // 前景 0.75/背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接
-        // ×= ptr->Opacity
-        const sparkGa = wantSpark ? (shimmerGlitterOpacity(flag, x, y, tVis)
-          + shimmerGlitterOpacity(flag, x + 1, y, tVis)
-          + shimmerGlitterOpacity(flag, x, y + 1, tVis)
-          + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25 : 0;  // :773-790
+        // ★liqpolish 场单源（2026-09-29 微抛光刀）:四节点波值 bg 写/fg 读（跨 pass
+        //  缓存;旧路径基色+glitter 各求 4 波=8 sin/格+分配 ~10/格,本核 bg 8 sin 零
+        //  分配 / fg 0 sin）。波值只依赖 (x,y,tVis)=同帧双 pass 同值（缓存 stamp
+        //  三键:帧 token+tVis+窗高）。top（=有干燥邻边的表层/边缘格）glitter 四角
+        //  恒 0.5（旧函数首门同式）;body 复算均值——语义注同下旧支（:773-790）。
+        let sparkGa = 0;
+        let wv: Float64Array | null = null;
+        let wo = 0;
+        if (polish) {
+          if (wvRead) { wv = wvRead; wo = i * 8; }
+          else if (wvWrite) { wo = i * 8; shimmerWaves4(x, y, tVis, wvWrite, wo); wv = wvWrite; }
+          else { shimmerWaves4(x, y, tVis, _wvLocal, 0); wv = _wvLocal; }
+          if (wantSpark) {
+            if (flag) sparkGa = 0.5;
+            else {
+              glitter4FromWaves(wv, wo, _glit4);
+              sparkGa = (_glit4[0] + _glit4[1] + _glit4[2] + _glit4[3]) * 0.25;
+            }
+          }
+        } else {
+          // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
+          // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
+          // 数值等价（全网格采样验证平均差 0.0000），top（=有干燥邻边的表层/边缘格，
+          // :719 flag=true）四角恒 0.5；body（全浸没 (sx,sy)=(16,48) 内部格）复算
+          // 均值 0.09 / 峰值 0.34 → 星点恒为极淡彩虹（近白微闪）。注意 sparkle 不乘
+          // 前景 0.75/背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接
+          // ×= ptr->Opacity
+          sparkGa = wantSpark ? (shimmerGlitterOpacity(flag, x, y, tVis)
+            + shimmerGlitterOpacity(flag, x + 1, y, tVis)
+            + shimmerGlitterOpacity(flag, x, y + 1, tVis)
+            + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25 : 0;  // :773-790
+        }
         const doSpark = wantSpark && sparkGa > 0.02;
         let batched = false;
         if (batOn) {
@@ -1233,23 +1674,28 @@ export function drawVanillaLiquids(
           //  applyShimmerBaseTint 的 canvas multiply 2×2 子块近似在本路径
           //  退役（CPU 原链保留=?liqgl=0 逃生门;语义差=canvas multiply 半透明 dst
           //  补正项 color×(1−αdst)——原版无此项=批化支更贴原版,census 有界登记）。
-          if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; }
+          if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; runVt = vt; }
           const gaT = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
           // 裁剪角 (u,v)（tile 内归一）——双线性张量在裁剪角求值（原版=节点值置位,
           // 两式仅未裁剪时相等;偏差备案见 shimmerCornerColors 注）
           const uL = (dstX - x * 16) / 16, uR = (dstX + sw - x * 16) / 16;
           const vT = (dstY - y * 16) / 16, vB = (dstY + drawSh - y * 16) / 16;
-          shimmerCornerColors(x, y, tVis, uL, uR, vT, vB, _batCols, 0);
+          if (polish && wv) shimmerCornersFromWaves(wv, wo, uL, uR, vT, vB, _batCols, 0);
+          else shimmerCornerColors(x, y, tVis, uL, uR, vT, vB, _batCols, 0);
           const sex0 = dstX * devSX + devTE, sey0 = dstY * devSY + devTF;
           const sex1 = (dstX + sw) * devSX + devTE, sey1 = (dstY + drawSh) * devSY + devTF;
           if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height,
             sex0, sey0, sex1 - sex0, sey1 - sey0, gaT, _batCols, 0)) {
             batched = true;
             runCols = true;
-            if (doSpark) flushRun();   // sparkle=ADD quad,须在基底层批段之后（层序）
+            // sparkle=ADD,须在基底层批段之后（层序）。★liqpolish 批化支延后收口
+            // （ADD 环累积,pass 尾 flushAddRuns2DAndEmit——全基底段先于 ADD 段=
+            // 重叠序 all-bases-before-adds,非重叠面 ADD 可交换）;CPU 支照旧立即收口。
+            if (doSpark && !polish) flushRun();
           } else {
             batOn = false;             // 帽溢出:批段收尾,本 tile 落 CPU 原链
             flushRun();
+            if (polish) flushAddRuns2DAndEmit(ctx, bat!, isBackground);   // 基底先于 ADD 段入队（重叠序）
           }
         }
         if (!batched) {
@@ -1261,34 +1707,80 @@ export function drawVanillaLiquids(
           if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
         }
         if (doSpark) {
-          if (batched) ctx.setTransform(wldT);
-          const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
-          // :716 sparkle 前把 sourceRectangle 重置回原始 SourceRectangle 再加偏移——
-          // 表面格的基底层虽强制切 Y=1280（:700），但 sparkle 的 Y 用的是原始 sy+80*fr
-          // （shimmerSparkleSource）。旧实现误用 1280+80*fr：表面格 sparkle 几乎全部
-          // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
-          const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
-          if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
-            const hue = shimmerGlitterHue(x, y, tVis);       // :768 彩虹相位（纯函数单源）
-            const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
-              + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
-            const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
-            ctx.save();
-            // 原版 sparkle pass 是【加色叠加】非 source-over：GetShimmerGlitterColor
-            // :766-771 先 color.A=0 再 vector4×glitter → 顶点 alpha 恒 0、RGB 已预乘
-            // glitter 强度；tileBatch = SpriteBatch 默认 AlphaBlend（预乘 (One,
-            // InvSrcAlpha)，TileBatch.Begin :216）→ 最终像素 = 基底 + 灰度纹素×彩虹×
-            // glitter×tileOpacity，黑底纹素贡献恰为 0、基色不被替换。旧实现 source-over
-            // 以饱和彩虹【替换】基色（dst×(1-a)+彩虹×a）→ body 星点呈高可见度彩色块
-            // （用户实测"闪光点变成彩色的"），改 'lighter' 后 body 星点 = 基底上微弱
-            // 增亮的近白微闪、表面白基底上呈漂移彩虹条（与原版一致）。
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = Math.min(1, opacity[i] * sparkGa);
-            ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
-              dstX, dstY, sw, sh);
-            ctx.restore();
+          // ★liqpolish:sparkle 批化（单白度带 RGB=255/A=亮度+色相进顶点色;全 pass
+          //  一段单 drawArrays——旧逐 tile shim rec（save/gco/globalAlpha/drawImage/
+          //  restore+resolveTex texAlive）退役）。像素式:GL out=(L·(R8/255·ga),
+          //  L·ga) ≙ 2D lighter premul(R8·L/255)·ga（±1LSB f32 域,census 登记）。
+          let sparkCpu = true;
+          if (polish && batOn && !_addOverflow) {
+            const gaS = Math.min(1, opacity[i] * sparkGa);
+            if (gaS > 0) {
+              const fr = shimmerFrame(flag, x, y, tVis);       // :791-801
+              // :716 sparkle 源矩形=原始 SourceRectangle+X+48/Y+80×fr（表面格基底
+              //  层虽切 Y=1280,sparkle 仍按原始 sy 取带——shimmerSparkleSource 注）。
+              //  ★liqpolish:直算内联（shimmerSparkleSource 每格元组分配退役;
+              //  表达式逐字同 shimmerSparkleSource 本体）
+              const sSrcX = sx + 48, sSrcY = sy + 80 * fr;
+              if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
+                const band = shimmerSparkBand(tex);
+                if (band) {
+                  // ★ADD 环与基底环分离+pass 尾统一收口（flushAddRuns2DAndEmit 在
+                  //  flushRun 之后调用）=队列序 [全基底段][ADD 段]——base(k)<add(k)
+                  //  重叠序由收口序保证,【逐 tile 勿 flushRun】（曾逐 sparkle 收口=
+                  //  基底批碎成 ~1-3 quad/段×420 段/帧,每段 bufferData+drawArrays+
+                  //  texFromImage 全税——计数实证 _liqpolish-ab 计数支 addN/baseN）。
+                  if (!_spOn) { _spOn = true; _spStart = _addN; _spQuads = 0; _spImg = band; _spKey = `liqspark:${texId(band)}`; }
+                  const hue = shimmerGlitterHue(x, y, tVis);   // :768 彩虹相位（纯函数单源）
+                  const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
+                    + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
+                  const hb = sparkHueRGB();
+                  _spCols[0] = hb[hueIdx * 3]; _spCols[1] = hb[hueIdx * 3 + 1]; _spCols[2] = hb[hueIdx * 3 + 2];
+                  _spCols[3] = _spCols[0]; _spCols[4] = _spCols[1]; _spCols[5] = _spCols[2];
+                  _spCols[6] = _spCols[0]; _spCols[7] = _spCols[1]; _spCols[8] = _spCols[2];
+                  _spCols[9] = _spCols[0]; _spCols[10] = _spCols[1]; _spCols[11] = _spCols[2];
+                  if (batQuadAdd(sSrcX - 48, sSrcY, sw, sh, band.width, band.height,
+                    dstX * devSX + devTE, dstY * devSY + devTF, sw * devSX, sh * devSY,
+                    gaS, _spCols, 0)) {
+                    _spQuads++;
+                    sparkCpu = false;
+                  }
+                }
+              }
+            } else {
+              sparkCpu = false;   // gaS=0 = 无贡献（旧 α=0 drawImage 等价跳过）
+            }
           }
-          if (batched) ctx.setTransform(1, 0, 0, 1, 0, 0);
+          if (sparkCpu) {
+            if (polish && batched) flushRun();   // shim rec 须在基底段后（polish 延后收口序）
+            if (batched) ctx.setTransform(wldT);
+            // :716 sparkle 前把 sourceRectangle 重置回原始 SourceRectangle 再加偏移——
+            // 表面格的基底层虽强制切 Y=1280（:700），但 sparkle 的 Y 用的是原始 sy+80*fr
+            // （shimmerSparkleSource）。旧实现误用 1280+80*fr：表面格 sparkle 几乎全部
+            // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
+            const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
+            const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
+            if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
+              const hue = shimmerGlitterHue(x, y, tVis);       // :768 彩虹相位（纯函数单源）
+              const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
+                + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
+              const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
+              ctx.save();
+              // 原版 sparkle pass 是【加色叠加】非 source-over：GetShimmerGlitterColor
+              // :766-771 先 color.A=0 再 vector4×glitter → 顶点 alpha 恒 0、RGB 已预乘
+              // glitter 强度；tileBatch = SpriteBatch 默认 AlphaBlend（预乘 (One,
+              // InvSrcAlpha)，TileBatch.Begin :216）→ 最终像素 = 基底 + 灰度纹素×彩虹×
+              // glitter×tileOpacity，黑底纹素贡献恰为 0、基色不被替换。旧实现 source-over
+              // 以饱和彩虹【替换】基色（dst×(1-a)+彩虹×a）→ body 星点呈高可见度彩色块
+              // （用户实测"闪光点变成彩色的"），改 'lighter' 后 body 星点 = 基底上微弱
+              // 增亮的近白微闪、表面白基底上呈漂移彩虹条（与原版一致）。
+              ctx.globalCompositeOperation = 'lighter';
+              ctx.globalAlpha = Math.min(1, opacity[i] * sparkGa);
+              ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
+                dstX, dstY, sw, sh);
+              ctx.restore();
+            }
+            if (batched) ctx.setTransform(1, 0, 0, 1, 0, 0);
+          }
         }
         if (!batched) ctx.setTransform(1, 0, 0, 1, 0, 0);   // 回身份变换（设备像素主循环）
         continue;
@@ -1306,19 +1798,28 @@ export function drawVanillaLiquids(
       // ★warpMode 下仍画（进离屏随位移场整体扭动——原版 glint 加在全屏 pass 输出上，
       //   位置与波前水线一致）；波光仅 q>0 门，不受 warpMode 关闭影响。
       //   采样前置（批化分支也要做 doGlint 判削;sampleGlint 纯采样无副作用）
+      //   ★liqpolish:glint bg 记录臂——sampleGlint 帧内确定,bg pass 采样入 ADD 环
+      //   （bg 不画=旧 bg 本就无 glint,记录不改 bg 像素）,fg 复用臂整段重发射
+      //   （fg 逐列采样+逐列 flushRun 切段退役）。
       const glintOn = waterWaves.quality > 0 && !isBackground && hasTE[i];
-      const glV = glintOn ? waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8, lumAt?.(x, y) ?? 0.75) : 0;
+      const glintRec = polish && isBackground && batOn && !_addOverflow
+        && waterWaves.quality > 0 && hasTE[i];
+      const glV = (glintOn || glintRec) ? waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8, lumAt?.(x, y) ?? 0.75) : 0;
       const doGlint = glintOn && glV > 0.03;
       let batched = false;
       if (batOn) {
-        if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; }
+        if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; runVt = vt; }
         if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height, dx0, dy0, dw, dh,
           Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6))), null, 0)) {
           batched = true;
-          if (doGlint) flushRun();   // glint=ADD quad,须在本 tile 批段之后（层序）
+          // glint=ADD quad,须在本 tile 批段之后（层序）。★liqpolish 批化支延后收口
+          // （ADD 环累积,pass 尾 flushAddRuns2DAndEmit——全基底段先于 ADD 段=重叠序:
+          //   glint(k) 域 ⊆ 本格∪上格,上格基底恒先画）;旧/CPU 支照旧立即收口。
+          if (doGlint && !polish) flushRun();
         } else {
           batOn = false;             // 帽溢出:批段收尾,本 tile 落 CPU 原链
           flushRun();
+          if (polish) flushAddRuns2DAndEmit(ctx, bat!, isBackground);   // 基底先于 ADD 段入队（重叠序）
         }
       }
       if (!batched) {
@@ -1326,15 +1827,43 @@ export function drawVanillaLiquids(
         ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dx0, dy0, dw, dh);
       }
       if (doGlint) {
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(dx0, dy0, dw, dh);
-        ctx.globalCompositeOperation = 'source-over';
+        // ★liqpolish:glint 批化（白 1×1 ADD quad——旧逐列 flushRun 把基底批切成
+        //  逐列段+fillRect solid rec 退役;像素式 out=(ga,ga,ga,ga) ≙ fillRect 白
+        //  'lighter' globalAlpha=ga 逐位同式）。ga≤0 跳过=旧 α=0 fillRect 等价。
+        let glintCpu = true;
+        if (polish && batOn && !_addOverflow) {
+          const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+          if (gaG > 0) {
+            if (!_glOn) { _glOn = true; _glStart = _addN; _glQuads = 0; }
+            if (batQuadAdd(0, 0, 1, 1, 1, 1, dx0, dy0, dw, dh, gaG, null, 0)) {
+              _glQuads++;
+              glintCpu = false;
+            }
+          } else {
+            glintCpu = false;
+          }
+        }
+        if (glintCpu) {
+          if (polish && batched) flushRun();   // shim solid rec 须在基底段后（polish 延后收口序）
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(dx0, dy0, dw, dh);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+      } else if (glintRec && glV > 0.03) {
+        // ★liqpolish bg glint 记录（fg 复用重发射;ga 公式=fg 支逐字同式）
+        const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+        if (gaG > 0) {
+          if (!_glOn) { _glOn = true; _glStart = _addN; _glQuads = 0; }
+          if (batQuadAdd(0, 0, 1, 1, 1, 1, dx0, dy0, dw, dh, gaG, null, 0)) _glQuads++;
+        }
       }
     }
   }
   flushRun();                 // ★liqgl:主循环批段收尾（后随坡面增强/浸润带仍 ctx 直绘）
+  // ★liqpolish:ADD 段收尾（sparkle/glint;必须在基底段之后——重叠序契约）
+  if (polish) flushAddRuns2DAndEmit(ctx, bat ?? null, isBackground);
   ctx.setTransform(wldT);   // 恢复世界变换（坡面增强/浸润带仍世界坐标）
 
   // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"）----
@@ -1443,7 +1972,9 @@ export function drawVanillaLiquids(
   //   compositeLight 后统一施加，浸润带随场景一起扭，无需离屏足迹机制）
   if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false, 0, slopeWaveBob, gateFootprintCtx ?? null,
     // ★liqgl：足迹画布缺席时改四边形收集（gate 发射消费;canvas 路径不受扰）
-    (gateCapture && !gateFootprintCtx) ? _footQuads : null);
+    (gateCapture && !gateFootprintCtx) ? _footQuads : null,
+    // ★liqpolish:微光浸润带批化钩（bg pass 传入主批钩;实心层调用不传=CPU 原链）
+    polish ? (bat ?? null) : null);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -1543,6 +2074,12 @@ export function drawLiquidBehindTilesOnly(
    *  坡面/半砖足迹改推 _footQuads（世界坐标）,emitVanillaLiquidGate 折算设备后
    *  画进 FBO('liqgate')——语义=canvas 足迹同款（α≈0.02 饱和 obj19 门控）。 */
   footSink: FootQuad[] | null = null,
+  /** ★liqpolish 带 lt===3 批发射钩（2026-09-29 微抛光刀;drawVanillaLiquids bg 调用
+   *  传入=主批钩,drawLiquidBehindSolidTiles 实心层调用不传=CPU 原链）：微光浸润带
+   *  逐 tile drawImage rec+applyShimmerBaseTint 4×MULT solid rec（~5k rec/帧实测面）
+   *  → 顶点色调制 SO quad 入基底环（=drawBand+multiply 的批化同构;偏差族=liqgl
+   *  刀2 modulate 单式,AA 边 multiply 补正项缺席 census 登记）。 */
+  batBand?: LiqBatchEmit | null,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
@@ -1551,8 +2088,16 @@ export function drawLiquidBehindTilesOnly(
   //    为瞬时切换无过渡态,该循环恒不触发=与"无喷泉过渡"的原版行为一致;
   //  ③lavaOpacity(lavaVision 熔岩潜水镜未移植,恒用默认 1f)。
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
+  // ★liqpolish:旗面+末次查询 memo+每 pass tVis（微光带支逐 tile 读同值）
+  const polishBand = liqpolish;
+  let bandTVis = -1;
+  let _texLastVt = -1;
+  let _texLastT: ImageBitmap | HTMLImageElement | null = null;
+  let _slpLastVt = -1;
+  let _slpLastT: ImageBitmap | HTMLImageElement | null = null;
   const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const texFor = (vt: number) => {
+    if (polishBand && vt === _texLastVt) return _texLastT;
     let t = texCache.get(vt);
     if (t === undefined) {
       const file = vt === 1 ? 'vanilla/Liquid_1.png' : vt === 2 ? 'vanilla/Liquid_11.png'
@@ -1561,36 +2106,112 @@ export function drawLiquidBehindTilesOnly(
       t = atlas.ensureVImage(file) ?? null;
       if (t) texCache.set(vt, t); // 只缓存命中(缓存 null 会把未就绪永久化——首帧丢条带)
     }
+    _texLastVt = vt; _texLastT = t;
     return t;
   };
   // LiquidSlope 表缓存（同款"只缓存命中"策略；坡面格才触碰）
   const slopeTexCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const slopeTexFor = (vt: number) => {
+    if (polishBand && vt === _slpLastVt) return _slpLastT;
     let t = slopeTexCache.get(vt);
     if (t === undefined) {
       t = atlas.ensureVImage(liquidSlopeSheet(vt, waterStyle)) ?? null;
       if (t) slopeTexCache.set(vt, t);
     }
+    _slpLastVt = vt; _slpLastT = t;
     return t;
+  };
+
+  // ---- ★liqpolish 带批化状态（lt===3 微光浸润带 → 基底环 SO 段;实心层调用
+  //  batBand 缺省 null=CPU 原链。设备折算=入口 CTM（调用点=世界变换,轴对齐门）----）
+  let bandBatOn = false;
+  let bandDevX = 1, bandDevY = 1, bandDevE = 0, bandDevF = 0;
+  let bsStart = 0;
+  let bsImg: CanvasImageSource | null = null;
+  let bsKey = '';
+  if (polishBand && batBand && !_batOverflow) {
+    const bt = ctx.getTransform();
+    if (bt.b === 0 && bt.c === 0) {
+      bandBatOn = true;
+      bandDevX = bt.a; bandDevY = bt.d; bandDevE = bt.e; bandDevF = bt.f;
+      bsStart = _batN;
+    }
+  }
+  const flushBandRun = (): void => {
+    const quads = _batN - bsStart;
+    if (quads <= 0 || !bsImg || !batBand) return;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    const img = bsImg, s0 = bsStart, nQ = quads, k = bsKey;
+    batBand.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
+      (raw) => replayLiqRun2D(raw, s0, nQ, img, true));
+    bsStart = _batN;
+    bsImg = null;
+  };
+  /** 带 quad 入基底环（batQuad 同式;a=1 不透明带,cols=四角波色——消费即弃） */
+  const bandQuadEmit = (
+    tex: ImageBitmap | HTMLImageElement, key: string,
+    sx: number, sy: number, sw: number, shSrc: number,
+    dx0: number, dy0: number, dw: number, dh: number,
+  ): boolean => {
+    void key;
+    if (dw <= 0 || dh <= 0) return true;   // 零面积段=与 drawImage 零绘制等价
+    return batQuad(sx, sy, sw, shSrc, tex.width, tex.height, dx0, dy0, dw, dh, 1, _batCols, 0);
   };
 
   // ★IIIII251：足迹离屏默认 identity,而带坐标是世界 px——先对齐主 ctx 当前
   //  变换(浸润带调用点=世界变换,见 drawVanillaLiquids :792 恢复),循环尾恢复。
   if (footprintCtx) footprintCtx.setTransform(ctx.getTransform());
+  // ★liqpolish:按 type 打包 LUT（solid/platform/sheet/blocksWater 一次预析——
+  //  逐 tile TILE_DEFS[t] 三重属性链+5 次 sheet 比较→一次 Map.get+位测;
+  //  值域=TILE_DEFS 静态派生,构造路径等价;Map 命中窗=世界 tile 表不变）。
+  let bandLut: Map<number, number> | null = null;
+  if (polishBand) bandLut = new Map();
   for (let x = Math.max(1, tx0); x <= Math.min(st.w - 2, tx1); x++) {
     for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
       const i = st.idx(x, y);
       if (!st.flags[i]) continue; // 空格没有"方块后面"
       if ((st.wire[i] & 32) !== 0) continue; // 致动幽灵格不画浸润(:3906 !active() 同族)
-      const def = TILE_DEFS[st.type[i]];
-      if (!def || !def.solid || def.platform) continue; // 仅实心方块(:4075 tileSolid 排除)
+      // ★liqpolish 五旗早退（2026-09-29 微抛光刀;纯检查重排序=逐位同）:
+      //  四邻液+自液全零且左右邻非活半砖 → 五旗(fL/fR/fU/fD/f5)必然全空
+      //  （fL/fR 唯一零邻液置位路径=IIIII248 半砖视觉水补丁——需邻格活半砖前提,
+      //  先测 flags∧half 排除;f5/grate 需自液>0）→ 与原五旗全空 continue 逐位同,
+      //  免去窗口主体（实心无液邻格 ~60-70% 格）的 LUT/sheet/num4/坡面门全套。
+      //  注意保序:flags/wire 门在先（同原序）;LUT 惰性到快退之后。
+      {
+        const wA = st.w, liqA = st.liquid;
+        const selfLq0 = liqA[i];
+        if (selfLq0 === 0) {
+          const li = y * wA + (x - 1), ri = y * wA + (x + 1);
+          const ui = (y - 1) * wA + x, di = (y + 1) * wA + x;
+          if (liqA[li] === 0 && liqA[ri] === 0 && liqA[ui] === 0 && liqA[di] === 0) {
+            const fl = st.flags[li], fr = st.flags[ri];
+            if (!((fl !== 0 && st.half[li] !== 0) || (fr !== 0 && st.half[ri] !== 0))) continue;
+          }
+        }
+      }
+      const ty = st.type[i];
+      let lut = bandLut ? bandLut.get(ty) : undefined;
+      if (lut === undefined) {
+        const def = TILE_DEFS[ty];
+        if (!def || !def.solid || def.platform) {   // 仅实心方块(:4075 tileSolid 排除)
+          if (bandLut) bandLut.set(ty, -1);
+          continue;
+        }
+        const sheet = def.vanilla?.sheet ?? -1;
+        // :3910 BlocksWaterDrawingBehindSelf(TileID.cs:357):玻璃54/回声541/彩纸328/
+        // 雪落459/假人470 —— 平面格(slope==0)整块挡水,不画背后的带
+        const blocks = sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 470 ? 1 : 0;
+        lut = (sheet << 2) | blocks;   // sheet ≤ 2^29 打包安全;bit0=blocksWater
+        if (bandLut) bandLut.set(ty, lut);
+      } else if (lut === -1) {
+        continue;
+      }
       const slope = st.slope[i];
       // blockType(num4)语义:0=整块 / 1=半砖 / 2-5=坡面(:3907 blockType())
       const num4 = slope !== 0 ? slope : (st.half[i] ? 1 : 0);
-      const sheet = def.vanilla?.sheet ?? -1;
-      // :3910 BlocksWaterDrawingBehindSelf(TileID.cs:357):玻璃54/回声541/彩纸328/
-      // 雪落459/假人470 —— 平面格(slope==0)整块挡水,不画背后的带
-      const blocksWaterBehindSelf = sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 470;
+      const sheet = lut >>> 2;
+      const blocksWaterBehindSelf = (lut & 1) !== 0;
       if (slope === 0 && blocksWaterBehindSelf) continue;
       // :3923-3925 传送带(379)自身格有液体 → 整格跳过
       if (sheet === 379 && st.liquid[i] > 0) continue;
@@ -1761,8 +2382,10 @@ export function drawLiquidBehindTilesOnly(
       if (srcW <= 0 || srcH <= 0) continue;
       const dstH = srcH;
       const dstW = srcW;
-      /** 主段 + 越界余段(末行/列边缘重复,= XNA PointClamp)；oy = ★IIIII251 波 bob 垂直位移 */
-      const drawBand = (oy = 0) => {
+      /** 主段 + 越界余段(末行/列边缘重复,= XNA PointClamp)；oy = ★IIIII251 波 bob 垂直位移。
+       *  ★liqpolish:闭包仅旗关臂构造（每带 tile 一次闭包+Context 分配;旗开臂两调用点
+       *  内联展开,参数逐字同式=逐位同）。 */
+      const drawBand = polishBand ? ((oy = 0) => {
         ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py + oy, dstW, dstH);
         if (rh > srcH) {
           ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + oy + dstH, dstW, rh - srcH);
@@ -1770,7 +2393,7 @@ export function drawLiquidBehindTilesOnly(
         if (rw > srcW) {
           ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py + oy, rw - srcW, dstH);
         }
-      };
+      }) : null;
 
       // ---- ★IIIII251 斜坡水缘波纹（?slopewave=1）----
       // CPU 路 bob：坡面/半砖浸润带随波场垂直位移（与表层水面格同一采样点=格中心、
@@ -1833,11 +2456,54 @@ export function drawLiquidBehindTilesOnly(
       // 彩色叠加【该有】：旧注释"省略彩色叠加"与末尾的 multiply 叠加自相矛盾，
       // 按源码对齐为"不透明直画 + 2×2 子块波色 multiply"（与前景 DrawShimmer 同式）。
       if (lt === 3) {
+        // ★liqpolish 带批化臂（batBand 在场+轴对齐 CTM+无溢出）:drawBand×N 段
+        //  drawImage rec+applyShimmerBaseTint 4×MULT solid rec → 顶点色调制 SO quad
+        //  （tex.premul×vCol=modulate 单式;multiply 在 AA 边的 (1−αdst) 补正项缺席
+        //  =liqgl 刀2 同族登记偏差）。段按带表纹理同质（Liquid_14/LiquidSlope_14）。
+        if (bandBatOn) {
+          const tVb = bandTVis < 0 ? (bandTVis = visEffectFrames()) : bandTVis;
+          if (bsImg !== drawTex) { flushBandRun(); bsImg = drawTex; bsKey = `liqband:${texId(drawTex)}`; }
+          // 裁剪角（带矩形相对格原点归一;v 含 bob 位移——与 applyShimmerBaseTint
+          //  的 v 域同构(py+bob 相对 y*16)）
+          const buL = (px - x * 16) / 16, buR = (px + dstW - x * 16) / 16;
+          const bvT = (py + bobDy251 - y * 16) / 16, bvB = (py + bobDy251 + dstH - y * 16) / 16;
+          shimmerWaves4(x, y, tVb, _wvTint, 0);
+          shimmerCornersFromWaves(_wvTint, 0, buL, buR, bvT, bvB, _batCols, 0);
+          const bdx0 = px * bandDevX + bandDevE, bdy0 = (py + bobDy251) * bandDevY + bandDevF;
+          const bgx1 = (px + dstW) * bandDevX + bandDevE, bgy1 = (py + bobDy251 + dstH) * bandDevY + bandDevF;
+          const bdw = bgx1 - bdx0, bdh = bgy1 - bdy0;
+          // 主段 + 越界余段（drawBand 逐字拆 quad;全部同纹理=同段）
+          let bOk = bandQuadEmit(drawTex, bsKey, srx, ry, srcW, srcH, bdx0, bdy0, bdw, bdh);
+          if (bOk && rh > srcH) {
+            bOk = bandQuadEmit(drawTex, bsKey, srx, texEdgeY, srcW, 1,
+              bdx0, (py + bobDy251 + dstH) * bandDevY + bandDevF,
+              (dstW) * bandDevX, (rh - srcH) * bandDevY);
+          }
+          if (bOk && rw > srcW) {
+            bOk = bandQuadEmit(drawTex, bsKey, drawTex.width - 1, ry, 1, srcH,
+              (px + dstW) * bandDevX + bandDevE, bdy0,
+              (rw - srcW) * bandDevX, bdh);
+          }
+          if (bOk) continue;
+          flushBandRun();   // 溢出:段收口,本 tile 落 CPU 原链
+        }
         ctx.globalAlpha = 1;
-        drawBand(bobDy251);
+        if (drawBand) drawBand(bobDy251);
+        else {
+          // ★liqpolish 内联展开（drawBand 旗关臂同式逐字;免每 tile 闭包构造）
+          ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py + bobDy251, dstW, dstH);
+          if (rh > srcH) {
+            ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + bobDy251 + dstH, dstW, rh - srcH);
+          }
+          if (rw > srcW) {
+            ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py + bobDy251, rw - srcW, dstH);
+          }
+        }
         // ★2026-09-27 重钉：同前景 pass（drawVanillaLiquids 内 tVis）——visEffectFrames()
+        //  ★liqpolish:每 pass 一次解析（渲染段内计数器不变,逐 tile 读同值——主循环
+        //  tVisCache 同判例）
         if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py + bobDy251, dstW, dstH,
-          visEffectFrames());
+          bandTVis < 0 ? (bandTVis = visEffectFrames()) : bandTVis);
         continue;
       }
 
@@ -1856,7 +2522,17 @@ export function drawLiquidBehindTilesOnly(
       // 离屏填充模式绕过（带被方块贴图盖住不可见，但保住位移采样足迹）
       if (!warpFill && st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
       ctx.globalAlpha = alpha;
-      drawBand(bobDy251);
+      if (drawBand) drawBand(bobDy251);
+      else {
+        // ★liqpolish 内联展开（同上）
+        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py + bobDy251, dstW, dstH);
+        if (rh > srcH) {
+          ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + bobDy251 + dstH, dstW, rh - srcH);
+        }
+        if (rw > srcW) {
+          ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py + bobDy251, rw - srcW, dstH);
+        }
+      }
       // ---- ★IIIII256 白色水面亮线沿水位线延伸过斜坡格水面段（用户明示偏差，2026-09-14）----
       // 【断线根因】平水面亮边 = 水面带 srcY=1280 顶 2px / Liquid_N 顶 2px（147,177,253）；
       // 坡面格的水最终呈现 = 实心层 pass（本 pass）的 LiquidSlope 斜面表——该表全暗
@@ -1885,6 +2561,8 @@ export function drawLiquidBehindTilesOnly(
       }
     }
   }
+  // ★liqpolish:带批段收尾（基底环续交;带 rec 在水 ADD 段之后=与直画序同）
+  if (bandBatOn) flushBandRun();
   // ★IIIII251：足迹画完恢复 identity（beginFgPass 每帧重设变换，此处为防御复位）
   if (footprintCtx) footprintCtx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
