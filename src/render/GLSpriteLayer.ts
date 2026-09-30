@@ -624,6 +624,9 @@ export class GLSpriteLayer {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
     if (this.pipe) {
+      // ★C10e:帧首屏面清透明+屏栈清零（本帧首个会话代理——render 头 pipe 可能
+      //  尚未建立;screenCleared 由 Renderer.render 帧头复位）
+      if (this.pipe.screenStackMode && !this.pipe.screenCleared) this.pipe.clearScreenForStack();
       const w = this.canvas.width, h = this.canvas.height;
       if (w === 0 || h === 0) { this.pipeFbo = null; return; }   // 防上一会话残留 FBO 被 end 误 present
       const f = this.pipe.fbo(fboName, w, h);
@@ -686,14 +689,18 @@ export class GLSpriteLayer {
    *  不回贴）,供 worldCompose pass3 over(warped, sky) 直采后单 present 消费（单
    *  present 合并刀:两次全屏回贴并成一次）。仅共管管线合并会话（mergedSession,
    *  恒 pipe 后端）使用;FBO 引用必清（防后续 end() 双重 present）。 */
-  end(present = true): void {
+  end(present = true, over = false): void {
     if (this.unavailable || !this.gl) return;
     this.gl.bindVertexArray(null);
     if (this.pipe && this.pipeFbo) {
-      if (present) this.pipe.present(this.pipeFbo);
+      if (present) this.pipe.present(this.pipeFbo, over);
       this.pipeFbo = null;
     }
   }
+
+  /** ★C10e：共管管线访问器（屏 present 面=pipe.canvas=可见 DOM 画布;调用方据此
+   *  判「end 后无需 2D blit」——非管线后端（glfx 自持画布）恒 null=照旧 blit） */
+  get pipeBackend(): GLPipeline | null { return this.pipe; }
 
   /** ★B2b 累积态收口（2026-09-24）：解绑 VAO、【不 present】,把开着的世界 FBO
    *  交还调用方（GLWorldCompose compose 直采其纹理=worldCanvas 上传链退役;

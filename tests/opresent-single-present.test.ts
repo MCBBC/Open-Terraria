@@ -51,9 +51,12 @@ describe('opresent 合并门（先定谳再动刀——defer 前全数可判）'
 
   it('wK 计算上移 bg 段前（defer 前定值;世界段共用同值——表达式逐字同,仅一处定义）', () => {
     // 上移点:opresent 前置注释+计算三行
-    expect(RDR).toMatch(/★opresent 前置:世界层缩放系数在此定值[\s\S]{0,400}let wK = this\.effectiveRenderScale\(\);\s*\n\s*if \(wK < 1 && this\._waveLiquidInView && waterWaves\.quality > 0 && this\.waterWarp\.active\(\)\) wK = 1;\s*\n\s*this\._worldLowK = wK;/);
-    // 原位只留指针注——双定义禁（单源）
-    expect(RDR.match(/let wK = this\.effectiveRenderScale\(\);/g)?.length ?? 0).toBe(1);
+    // ★C10e（2026-10-01）:wK 计算再上移至 sky.draw 前帧分类块（C10e 帧门需要
+    //  wK===1;两位置间输入无变异点=值恒等,原位读 this._worldLowK 缓存）
+    expect(RDR).toMatch(/★opresent 前置:世界层缩放系数在此定值[\s\S]{0,400}const wK = this\._worldLowK;/);
+    expect(RDR).toMatch(/const wKc = \(\(\) => \{\s*\n\s*const k = this\.effectiveRenderScale\(\);\s*\n\s*if \(k < 1 && this\._waveLiquidInView && waterWaves\.quality > 0 && this\.waterWarp\.active\(\)\) return 1;\s*\n\s*return k;\s*\n\s*\}\)\(\);\s*\n\s*this\._worldLowK = wKc;/);
+    // 原位只留指针注——双定义禁（单源;★C10e 后仅帧分类块一处计算）
+    expect(RDR.match(/const wKc = \(\(\) => \{/g)?.length ?? 0).toBe(1);
   });
 
   it('defer 只在 C10b 合并分支置位（mergedSession 在场=pipe 后端;skyMergeable 上游已含色罩/黑闪/remix 门）', () => {
@@ -79,13 +82,16 @@ describe('opresent 夹层谓词（SkyRenderer 单源,保守超集——宁可不
     // 早退收口:defer=不 present 不 blit
     // ★C10c（2026-09-30）:blit 分账计数器插入（cloudBlitStats.mergedFull/mergedDefer）
     //  ——defer 语义不变,锚随盘刷新（c10b-bg-cloud-pipe 同批）。
-    expect(SKY).toMatch(/if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit\);\s*\n\s*if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
+    // ★C10e:over 直出门（管线后端 skip blit——glCanvas 栈式叠合;旗关原路径逐位）
+    expect(SKY).toMatch(/if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit, !deferBlit && this\.c10eOver\);\s*\n\s*\/\/ ★C10e[^]*?if \(!deferBlit\) \{\s*\n\s*SkyRenderer\.cloudBlitStats\.mergedFull\+\+;\s*\n\s*if \(!\(this\.c10eOver && merged\.pipeBackend\)\) \{ ctx\.drawImage\(merged\.canvas, 0, 0\); \}\s*\n\s*ctx\.globalAlpha = 1;\s*\n\s*\}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
     // finishBatch:defer=跳过全幅 blit;非合并会话（bbox 路径）不受 defer 影响
-    expect(SKY).toMatch(/shared\.end\(!deferBlit\);[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(shared\.canvas, 0, 0\); \}/);
+    // ★C10e:shared.end over 档 + directOut 门（管线后端直出 skip blit）
+    expect(SKY).toMatch(/shared\.end\(!deferBlit, !deferBlit && this\.c10eOver\);[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; if \(!directOut\) ctx\.drawImage\(shared\.canvas, 0, 0\); \}/);
   });
 
   it('GLSpriteLayer.end(present=true) 缺省=FBO→管线画布 present 旧语义;defer=FBO 引用必清', () => {
-    expect(SRC).toMatch(/end\(present = true\): void \{\s*\n\s*if \(this\.unavailable \|\| !this\.gl\) return;\s*\n\s*this\.gl\.bindVertexArray\(null\);\s*\n\s*if \(this\.pipe && this\.pipeFbo\) \{\s*\n\s*if \(present\) this\.pipe\.present\(this\.pipeFbo\);\s*\n\s*this\.pipeFbo = null;/);
+    // ★C10e:end 增 over 缺省参（屏栈直出档透传;缺省 false=present 旧语义逐位）
+    expect(SRC).toMatch(/end\(present = true, over = false\): void \{\s*\n\s*if \(this\.unavailable \|\| !this\.gl\) return;\s*\n\s*this\.gl\.bindVertexArray\(null\);\s*\n\s*if \(this\.pipe && this\.pipeFbo\) \{\s*\n\s*if \(present\) this\.pipe\.present\(this\.pipeFbo, over\);\s*\n\s*this\.pipeFbo = null;/);
   });
 });
 
@@ -104,8 +110,10 @@ describe('opresent pass3（GLWorldCompose compose 尾）', () => {
     expect(COMP).toContain('outColor = vec4(w.rgb + s.rgb * (1.0 - w.a), w.a + s.a * (1.0 - w.a));');
     expect(COMP).toMatch(/const fboSky = sky && sky\.w === w && sky\.h === h \? pipeline\.fbo\(sky\.fboName, sky\.w, sky\.h\) : null;/);
     // 合并路径 present FBO('opresent');回退路径保持原单 present（A2 面零改动）
-    expect(COMP).toMatch(/this\.lastMergeUsed = true;\s*\n\s*pipeline\.present\(this\.fboOpresent\);\s*\n\s*return true;/);
-    expect(COMP).toMatch(/pipeline\.present\(this\.fboWarped\);\s*\n\s*return true;/);
+    // ★C10e:尾 present 透传 presentOver（纯帧=屏 over 直出;缺省 false=blend off 原路径）
+    expect(COMP).toMatch(/this\.lastMergeUsed = true;\s*\n\s*pipeline\.present\(this\.fboOpresent, presentOver\);\s*\n\s*return true;/);
+    // ★C10e:回退支同透传 presentOver（over 缺省 false=旗关 blend off 原路径）
+    expect(COMP).toMatch(/pipeline\.present\(this\.fboWarped, presentOver\);\s*\n\s*return true;/);
   });
 
   it('lastMergeUsed 语义:compose 头重置 false,pass3 独置 true（调用方据此补贴）', () => {
@@ -122,13 +130,15 @@ describe('opresent pass3（GLWorldCompose compose 尾）', () => {
 
   it('fullbright 支补贴（防运行时翻面竞态漏挂起）;补贴面=presentPendingSky（★R1-F9:死亡帧 dead-drop 显式丢弃）', () => {
     expect(RDR).toMatch(/if \(this\.fullbright\) \{ \/\/ 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）\s*\n\s*\/\/ ★opresent:defer 帧补贴（门已挡 fullbright——防运行时翻面竞态漏挂起）\s*\n\s*if \(skyPend\) this\.presentPendingSky\(skyPend, viewW, viewH\);/);
-    expect(RDR).toMatch(/private presentPendingSky\(sky: \{ fboName: string; w: number; h: number \}, viewW: number, viewH: number\): void \{\s*\n\s*const pipe = this\.swPipe;\s*\n\s*if \(!pipe \|\| pipe\.unavailable\) \{\s*\n\s*this\.opresentStats\['dead-drop'\] = \(this\.opresentStats\['dead-drop'\] \|\| 0\) \+ 1;\s*\n\s*return;\s*\n\s*\}\s*\n\s*const f = pipe\.fbo\(sky\.fboName, sky\.w, sky\.h\);\s*\n\s*if \(f\?\.tex\) \{\s*\n\s*pipe\.present\(f\);\s*\n\s*this\.ctx\.drawImage\(pipe\.canvas, 0, 0, viewW, viewH\);/);
+    // ★C10e:补贴 over 档分支（屏栈模式=present(f,true) 直出入栈,删 blit;
+    //  旗关=原 present+drawImage 路径逐位）
+    expect(RDR).toMatch(/private presentPendingSky\(sky: \{ fboName: string; w: number; h: number \}, viewW: number, viewH: number\): void \{\s*\n\s*const pipe = this\.swPipe;\s*\n\s*if \(!pipe \|\| pipe\.unavailable\) \{\s*\n\s*this\.opresentStats\['dead-drop'\] = \(this\.opresentStats\['dead-drop'\] \|\| 0\) \+ 1;\s*\n\s*return;\s*\n\s*\}\s*\n\s*const f = pipe\.fbo\(sky\.fboName, sky\.w, sky\.h\);\s*\n\s*if \(f\?\.tex\) \{\s*\n\s*\/\/ ★C10e[^]*?if \(this\._c10eFrame && pipe\.screenStackMode\) \{\s*\n\s*pipe\.present\(f, true\);\s*\n\s*\} else \{\s*\n\s*pipe\.present\(f\);\s*\n\s*this\.ctx\.drawImage\(pipe\.canvas, 0, 0, viewW, viewH\);\s*\n\s*\}\s*\n\s*\}/);
   });
 });
 
 describe('opresent 周边结构保留', () => {
   it('GLPipeline A0 面零改动（pass3 复用 present/drawQuad/fbo 门面,不另起炉灶）', () => {
-    expect(PIPE).toContain('present(src: PipelineFbo)');
+    expect(PIPE).toContain('present(src: PipelineFbo, over = false)');   // ★C10e:over 缺省参
     expect(PIPE).toContain('drawQuad(p: PipelineProgram, uDst: [number, number, number, number], flipY = 1)');
     expect(RDR).not.toContain('this.swPipe.recreate()');
   });

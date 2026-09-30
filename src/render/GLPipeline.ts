@@ -71,6 +71,15 @@ export class GLPipeline {
   readonly canvas: HTMLCanvasElement;
   unavailable = false;
   diedAt = 0;
+  // ---- ★C10e 屏直出栈（2026-10-01）：可见画布上的栈式 present 记账 ----
+  /** Renderer 分体画布注入（glCanvas=DOM 呈现面）时置 true——over present 走
+   *  premul source-over 叠合并入栈；replace present（内部读回面）不入栈。 */
+  screenStackMode = false;
+  /** 帧首清屏闩：本帧首个会话 begin 触发 clearScreenForStack（帧头 pipe 可能尚未
+   *  建立,不能在 render 头清——由 GLSpriteLayer.begin 代理首拍） */
+  screenCleared = false;
+  /** 本帧已 over-present 的 FBO 序（层序=入栈序;restack 重放源） */
+  private screenStack: PipelineFbo[] = [];
   private gl: WebGL2RenderingContext | null = null;
   /** ★BJ344（件3）：contextlost 具名监听（dispose 摘除——脱离 canvas 上的闭包滞留面） */
   private ctxLostHandler: ((e: Event) => void) | null = null;
@@ -81,9 +90,13 @@ export class GLPipeline {
   private frameW = 0;
   private frameH = 0;
 
-  constructor(statName = 'pipeline') {
+  constructor(statName = 'pipeline', canvas?: HTMLCanvasElement) {
     this.statName = statName;
-    this.canvas = document.createElement('canvas');
+    // ★C10e（2026-10-01）分体画布呈现：注入画布=可见 DOM 画布（Renderer 持有,
+    //  z 序夹在 sky2D 与 HUD 之间）——present 直出屏面,跨上下文拷贝归零。
+    //  不传=离屏画布（旗关/旧路径零变化）。revive 链传新元素（死上下文同元素
+    //  getContext 恒回死上下文,GLSpriteLayer 判例——Renderer 侧 replaceWith 换元）。
+    this.canvas = canvas ?? document.createElement('canvas');
     this.canvas.width = 0;
     this.canvas.height = 0;
     this.init();
@@ -290,18 +303,52 @@ export class GLPipeline {
    *  blend off+flipY=1（GL 纹理 Y 向上→画布 Y 向下,≙2D drawImage 语义）。
    *  ★2026-09-23 用户实报全黑案:uniform1i 必须在 useProgram 之后——原实现先设
    *  uTex 再于 drawQuad 内 useProgram = 上一 pass 程序在场 → INVALID_OPERATION
-   *  每帧刷屏（location is not from the associated program）且 uTex 未落。 */
-  present(src: PipelineFbo): void {
+   *  每帧刷屏（location is not from the associated program）且 uTex 未落。
+   *  ★C10e over 档（2026-10-01）：screenStackMode 下 over=true = premul source-over
+   *  叠合出屏（栈式呈现——屏面已画内容在下,本 FBO 在上,porter-duff over 结合律
+   *  ≙ 原单画布 2D 序列;不透明 FBO 逐位同 blend-off）并入屏栈;false=blend off
+   *  直写（内部读回面/旗关路径,字节路径零变化）不入栈。 */
+  present(src: PipelineFbo, over = false): void {
     const gl = this.gll();
     if (!gl || !src.tex || !this.presentProg?.prog) return;
     this.bindTarget(null);
-    this.setBlend('off');
+    if (over && this.screenStackMode) {
+      this.setBlend('premul');
+      this.screenStack.push(src);
+    } else {
+      this.setBlend('off');
+    }
     gl.useProgram(this.presentProg.prog);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, src.tex);
     gl.uniform1i(this.uni(this.presentProg, 'uTex'), 0);
     this.drawQuad(this.presentProg, [0, 0, this.frameW, this.frameH], 1);
     registerFence(this.statName, gl);
+  }
+
+  /** ★C10e 帧首屏面清透明+屏栈清零（本帧首个会话 begin 经此闯入——pipe 帧头可能
+   *  未建,不能在 render 头做）。保留 drawImage 读回所需的 preserve 语义:clear 后
+   *  后续 present 重建内容。 */
+  clearScreenForStack(): void {
+    const gl = this.gll();
+    if (!gl) return;
+    this.bindTarget(null);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.screenStack.length = 0;
+    this.screenCleared = true;
+  }
+
+  /** ★C10e 内部 present（blend off 直写读回面）踩踏屏面后的恢复：清屏+按栈重放
+   *  屏栈（层序=入栈序）。栈语义不变式：任意帧内任意时点,glCanvas 内容 ≙ 屏栈
+   *  FBO 的 over 折叠——内部读回位（degradeAcc/bgl 桥/人工星 blit）踩踏后必须调。 */
+  restackScreen(): void {
+    if (!this.screenStackMode) return;
+    const gl = this.gll();
+    if (!gl) return;
+    const stack = this.screenStack.slice();   // clear 会清栈——先快照再重放
+    this.clearScreenForStack();
+    for (const f of stack) this.present(f, true);
   }
 
   /** 上下文丢失/退避后重建（消费方判 now-diedAt>5000 才调,防风暴） */

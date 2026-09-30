@@ -3184,6 +3184,9 @@ export class Renderer {
       this.worldCtxLayer.globalCompositeOperation = 'source-over';
       this.worldCtxLayer.drawImage(this.swPipe.canvas, 0, 0);
       this.worldCtxLayer.restore();
+      // ★C10e:内部 present（blend off 直写读回面）踩踏屏面 → restack 恢复
+      // 「glCanvas=屏栈」不变式（后续世界合成 over 栈/透明洞露出屏栈）
+      if (this._c10eFrame) this.swPipe.restackScreen();
     }
     this.bglPathUsed = 'b2b-acc-degraded';
     this.bglPathStats['b2b-acc-degraded'] = (this.bglPathStats['b2b-acc-degraded'] || 0) + 1;
@@ -3233,7 +3236,9 @@ export class Renderer {
    *  acc 门重开而 compose 仍在另一上下文=跨上下文句柄）→ 整弃重建（构造零成本,
    *  失败由 newWorldCompose null 支每帧重试兜底）。 */
   private ensureWorldCompose(): void {
-    if (this.worldCompose && this.worldCompose.ownsPipe !== !Renderer.cloudPipe) {
+    // ★C10e:旗面判据加 c10e（c10e 下 compose 强制共管——见 newWorldCompose 注;
+    //  cloudpipe=0 逃生门在 c10e 收窄,错位实例整弃重建同式）
+    if (this.worldCompose && this.worldCompose.ownsPipe !== !(Renderer.cloudPipe || Renderer.c10e)) {
       this.worldCompose.dispose();
       this.worldCompose = null;
     }
@@ -3361,11 +3366,45 @@ export class Renderer {
     }
     const f = pipe.fbo(sky.fboName, sky.w, sky.h);
     if (f?.tex) {
-      pipe.present(f);
-      this.ctx.drawImage(pipe.canvas, 0, 0, viewW, viewH);
+      // ★C10e（2026-10-01）：屏栈模式=over present 直出 glCanvas（入栈,层序=世界
+      //  present 之前 ✓——本补贴恒先于一切世界回贴),删 2D blit;夹层帧(世界走 HUD
+      //  blit)同样 over 直出——HUD 侧无天空栈内容,blit 反而缺下层。旗关=原路径。
+      if (this._c10eFrame && pipe.screenStackMode) {
+        pipe.present(f, true);
+      } else {
+        pipe.present(f);
+        this.ctx.drawImage(pipe.canvas, 0, 0, viewW, viewH);
+      }
     }
     this.opresentStats['fallback'] = (this.opresentStats['fallback'] || 0) + 1;
   }
+  // ---- ★C10e 分体画布帧态（2026-10-01;设计文档 docs/c10e-design.md §四）----
+  /** 本帧走 C10e 呈现栈（帧头定谳;旗关/拍照/cpuRender/低清档/远云夹层帧=false=
+   *  整帧旗关行为）。GL 中途死亡不改本旗——各 acquire 失败支的既有 2D 回退
+   *  自然落位（bg 2D 路由 sky2D/世界 2D 链落 HUD）。 */
+  private _c10eFrame = false;
+  /** 本帧夹层路由：世界 present 改 blit→HUD（夹层族/veil+人工星 2D 内容已在
+   *  HUD=主 ctx,世界必须画其上）。帧头定谳（opresentInterlayerPending+shimmer）。 */
+  private _c10eWorldToHud = false;
+  /** 本帧已做「sky2D+glCanvas→HUD 全帧合成」（幂等闩——死亡灰化/重力翻转等
+   *  全帧自拷消费者各有一个触发点,先到先得） */
+  private _c10eComposited = false;
+  /** 滤镜链输入合成 scratch（懒建;仅 passes 非空帧使用,链头三 blit 合成全帧） */
+  private _c10eChainScratch: HTMLCanvasElement | null = null;
+  private _c10eChainScratchCtx: CanvasRenderingContext2D | null = null;
+  /** ★C10e 全帧自拷消费者在帧（死亡灰化 / 重力翻转整幅自拷镜像）——P1/P2 合成
+   *  触发条件（与 7-死亡灰化段/:5937 翻转段门同源同帧 settle：gravDir/immuneAlpha
+   *  均渲染期前 settle;filter 能力检查同原门 'filter' in ctx） */
+  private c10eFullXformCond(player: Player, world: World): boolean {
+    if (player.gravDir === -1) return true;   // cam.flipY 同源（render 头逐帧同式赋值）
+    return player.dead && player.immuneAlpha > 0 && !player.isGhostPhase(world)
+      && 'filter' in this.ctx;
+  }
+  /** sky2D 画布（C10e 底层;旗关=null 零创建） */
+  skyCanvas: HTMLCanvasElement | null = null;
+  skyCtx: CanvasRenderingContext2D | null = null;
+  /** glCanvas DOM 元素（Renderer 持有并注入 GLPipeline;旗关=null=管线自建离屏） */
+  private glCanvasEl: HTMLCanvasElement | null = null;
   /** 最近一次 recon 失败原因（lrecon-fail 时由 compose.lastFail 填入） */
   composeLastFail = '';
   /** ★P0-A 共管管线降级帧累计（swpipe acquire 任一失败支的【去重帧】数——
@@ -3380,10 +3419,15 @@ export class Renderer {
   waterWarpGlUnavailable(): boolean { return this.waterWarp.glUnavailable(); }
   /** 主画布 2D 上下文统一属性(构造器与 recreateMainCanvas 两处创建点必须同参——
    *  同一元素重复 getContext 属性以首次为准)。alpha:false=不透明后备
-   *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染 */
+   *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染。
+   *  ★C10e（2026-10-01）：分体画布下主画布=HUD 顶层面布,恒 alpha:true（透明,
+   *  露出下层 sky2D/glCanvas;canvas 属性 getContext 定死→只能构造期分支）——
+   *  opaqueMain 语义失效（登记边界,设计文档 §八.5）;回退帧以不透明天空填充
+   *  获得覆盖力（视觉等价,fillRect 黑底 ≙ opaque 后备） */
   private mainCtxAttrs(): CanvasRenderingContext2DSettings {
     const a: CanvasRenderingContext2DSettings = {};
-    if (Renderer.opaqueMain) a.alpha = false;
+    if (Renderer.c10e) a.alpha = true;
+    else if (Renderer.opaqueMain) a.alpha = false;
     if (this.isCpuRender()) a.willReadFrequently = true;
     return a;
   }
@@ -3823,28 +3867,102 @@ export class Renderer {
         // null（acc 帧全幅 readPixels）。GLStats 内按 STARVE_PROBE_MS 同拍去重,
         // 多消费方同帧串联确认只计一拍。
         noteStarveProbeOk();
+        this.c10ePipeAlive(cur);
         return cur;
       }
-      if (performance.now() - cur.diedAt < 5000) { this.markSwPipeSkip('backoff'); return null; }   // 退避窗（哨兵同款）
+      if (performance.now() - cur.diedAt < 5000) { this.markSwPipeSkip('backoff'); this.c10ePipeDead(); return null; }   // 退避窗（哨兵同款）
       this.reviveSwPipe();
-      return this.swPipe && !this.swPipe.unavailable ? this.swPipe : null;
+      const ok = this.swPipe && !this.swPipe.unavailable ? this.swPipe : null;
+      if (!ok) this.c10ePipeDead();
+      return ok;
     }
-    if (performance.now() < this.swPipeRetryAt) { this.markSwPipeSkip('backoff'); return null; }
-    if (starvedLock()) { this.markSwPipeSkip('starvelock'); return null; }
+    if (performance.now() < this.swPipeRetryAt) { this.markSwPipeSkip('backoff'); this.c10ePipeDead(); return null; }
+    if (starvedLock()) { this.markSwPipeSkip('starvelock'); this.c10ePipeDead(); return null; }
     try {
-      const inst = new GLPipeline(Renderer.SWPIPE_STAT);
-      if (inst.unavailable) { inst.dispose(); this.armRetryLatch('swpipe'); this.markSwPipeSkip('init-fail'); return null; }
+      // ★C10e:呈现面元素注入（离屏画布→可见 DOM glCanvas;revive 由 takeGlCanvasEl
+      //  换元——死上下文同元素 getContext 恒回死上下文,GLSpriteLayer 判例）
+      const inst = new GLPipeline(Renderer.SWPIPE_STAT, Renderer.c10e ? this.takeGlCanvasEl() : undefined);
+      if (inst.unavailable) { inst.dispose(); this.armRetryLatch('swpipe'); this.markSwPipeSkip('init-fail'); this.c10ePipeDead(); return null; }
       this.swPipe = inst;
       this.swPipeRetryLadder = 0;
       this.swPipeLastOkAt = performance.now();
       noteStarveProbeOk();   // ★P0-A 半开试探成功（连续 ≥2 拍成功即闭合饥饿锁）
+      this.c10ePipeAlive(inst);
       return inst;
     } catch {
       this.armRetryLatch('swpipe');
       this.markSwPipeSkip('init-fail');
+      this.c10ePipeDead();
       return null;
     }
   }
+  /** ★C10e:管线健康窗=呈现窗开（幂等去抖;首帧 acquire 成功即亮屏面）。
+   *  screenStackMode 随旗同步（帧级分类在 render 头细调——F-lowres 帧关栈机制）。 */
+  private c10ePipeAlive(pipe: GLPipeline): void {
+    if (!Renderer.c10e) return;
+    pipe.screenStackMode = true;
+    this.c10eSetGlCanvasVisible(true);
+  }
+  /** ★C10e:管线死/退避窗=呈现面隐藏（glCanvas 残余屏防鬼影——回退帧的 2D 内容
+   *  落 HUD/sky2D,glCanvas 若残留上帧屏会从透明洞里渗出） */
+  private c10ePipeDead(): void {
+    if (!Renderer.c10e) return;
+    this.c10eSetGlCanvasVisible(false);
+  }
+
+  /** ★C10e P1/P2 全帧合成（2026-10-01,设计文档 §四 F-xform）：sky2D+glCanvas →
+   *  HUD（主 ctx）——死亡灰化/重力翻转等「整幅自拷 ctx.canvas」消费者的前置合成,
+   *  此后 HUD 含完整画面,自拷语义与原单画布逐位同。幂等（_c10eComposited 闩）。
+   *  glCanvas 缺席（管线死窗,已隐藏）时只合成 sky2D——sky2D 序列含渐变/星/远云/
+   *  biomeBg 2D 回退全量,世界由 2D 链随后落 HUD ✓。合成后 glCanvas 内容被 HUD
+   *  覆盖（天空渐变不透明）,视觉零差。 */
+  private c10eCompositeIntoHud(): void {
+    if (this._c10eComposited || !this._c10eFrame) return;
+    this._c10eComposited = true;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    if (this.skyCanvas) ctx.drawImage(this.skyCanvas, 0, 0);
+    const pipe = this.swPipe;
+    if (this.glCanvasEl && pipe && !pipe.unavailable) ctx.drawImage(this.glCanvasEl, 0, 0);
+    ctx.restore();
+    this._c10eCompositeStats = (this._c10eCompositeStats || 0) + 1;
+  }
+  /** ★C10e 诊断面:全帧合成帧累计（F5/探针——正常游玩恒 0,死亡/重力/滤镜帧出现） */
+  _c10eCompositeStats = 0;
+
+  /** ★C10e 滤镜链输入源（2026-10-01,设计文档 §四 F-sfx）：滤镜链采「整个画面」
+   *  ——c10e 下画面分居 sky2D/glCanvas/HUD 三画布，链头一次性折叠到 scratch
+   *  （sky2D→scratch 2D、glCanvas→scratch【本帧唯一跨上下文拷贝,登记面】、
+   *  HUD→scratch 2D——HUD 内容(夹层族/世界 blit/post-present) 恒最上层 ✓）。
+   *  链输出 blit→HUD 照旧。幂等无（每链调用一折叠;链每帧至多一次）。
+   *  旗关/回退帧=主画布原路径零变化。 */
+  private c10eChainSource(): HTMLCanvasElement {
+    if (!this._c10eFrame || !this.skyCanvas) return this.canvas;
+    const w = this.canvas.width, h = this.canvas.height;
+    if (!this._c10eChainScratch) {
+      this._c10eChainScratch = document.createElement('canvas');
+      this._c10eChainScratchCtx = this._c10eChainScratch.getContext('2d');
+    }
+    const sc = this._c10eChainScratch!;
+    if (sc.width !== w || sc.height !== h) { sc.width = w; sc.height = h; }
+    const sctx = this._c10eChainScratchCtx!;
+    sctx.save();
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.clearRect(0, 0, w, h);
+    sctx.drawImage(this.skyCanvas, 0, 0);
+    const pipe = this.swPipe;
+    if (this.glCanvasEl && pipe && !pipe.unavailable) sctx.drawImage(this.glCanvasEl, 0, 0);
+    sctx.drawImage(this.canvas, 0, 0);
+    sctx.restore();
+    this._c10eChainScratchCount++;
+    return sc;
+  }
+  /** ★C10e 诊断面:链 scratch 折叠帧累计（滤镜活动帧频=色罩/塔/月总/热浪窗口） */
+  _c10eChainScratchCount = 0;
   /** ★共管熔断链:管线上下文重生=recreate 清程序表（A3 判例）——全消费方必须
    *  重注册,故不走 GLPipeline.recreate 同画布复活,整链 dispose+全新实例:
    *  云/bg 层弃（acquire 全新 initPipeMode 注册 sprite:quad/sprite:cloud）+
@@ -3856,16 +3974,20 @@ export class Renderer {
     if (performance.now() < this.swPipeRetryAt) { this.markSwPipeSkip('backoff'); return false; }
     if (starvedLock()) { this.markSwPipeSkip('starvelock'); return false; }
     try {
-      const inst = new GLPipeline(Renderer.SWPIPE_STAT);
+      // ★C10e:revive 换元注入（takeGlCanvasEl replaceWith——死上下文同元素
+      //  getContext 恒回死上下文,判例同上）
+      const inst = new GLPipeline(Renderer.SWPIPE_STAT, Renderer.c10e ? this.takeGlCanvasEl() : undefined);
       if (!inst.unavailable) {
         this.swPipe = inst;
         this.swPipeRetryLadder = 0;
         this.swPipeLastOkAt = performance.now();
         this.composeSkipStreak = 0;
         noteStarveProbeOk();
+        this.c10ePipeAlive(inst);
         return true;
       }
       inst.dispose();
+      this.c10ePipeDead();
     } catch { /* 构造异常按失败计 */ }
     this.armRetryLatch('swpipe');
     this.markSwPipeSkip('init-fail');
@@ -3888,7 +4010,9 @@ export class Renderer {
    *  且 opresent pass3 会在自建上下文里租 FBO('bg')（错上下文空面）→ 天空栈直采
    *  恒透明=世界盖掉整帧天空。调用方 ??= 每帧重试至 acquire 成功（构造零成本）。 */
   private newWorldCompose(): GLWorldCompose | null {
-    if (!Renderer.cloudPipe) return new GLWorldCompose('worldCompose', null);
+    // ★C10e:呈现面架构依赖 compose 尾 present 落共管管线（pipe.canvas=DOM
+    //  glCanvas）——cloudpipe=0 逃生门在 c10e 下收窄（设计文档 §八.4）,强制共管
+    if (!Renderer.cloudPipe && !Renderer.c10e) return new GLWorldCompose('worldCompose', null);
     const pipe = this.acquireSwPipe();
     if (!pipe) {
       // ★P0-A(R1-F10 续):静默返 null+每帧 ??= 重试不写指纹=F5 盲区主犯——
@@ -4094,6 +4218,15 @@ export class Renderer {
       this.lightCanvas = nu;
       this.lightCtx = this.isCpuRender() ? nu.getContext('2d', { willReadFrequently: true })! : nu.getContext('2d')!;
       console.warn('[Renderer] 光照画布已死,已重建');
+    }
+    // ★C10e:sky2D 上下文死亡重建（replaceWith 保 DOM 位次;内容由每帧 sky.draw
+    //  全量重画自愈——渐变/日月/2D 回退族恒整幅覆盖）
+    if (this.skyCtx && (this.skyCtx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.()) {
+      const nu = document.createElement('canvas');
+      this.skyCanvas!.replaceWith(nu);
+      this.skyCanvas = nu;
+      this.skyCtx = nu.getContext('2d')!;
+      console.warn('[Renderer] sky2D 画布已死,已重建(C10e)');
     }
     // ★迷雾 CPU 缓冲不清(2026-08-19 用户实报雾闪):fogPix 是纯 CPU 数据,
     // 与画布上下文死活无关——曾被此链每 20s 误清一次(看门狗巡检)→ 整幅
@@ -4369,6 +4502,14 @@ export class Renderer {
     //   的凶器,见 ChunkCache 页画布去毒注）;页恒 GPU 后备。
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
+    // ★C10e 三画布栈脚手架（2026-10-01）：sky2D（底层 2D,透明）+ glCanvas（中层
+    //  GL 呈现面,元素由本类持有/注入 GLPipeline）——attach 序=DOM paint 序=层序。
+    //  主画布转 HUD 顶层（mainCtxAttrs 已分支 alpha:true）。旗关=零创建零开销。
+    if (Renderer.c10e) {
+      this.skyCanvas = document.createElement('canvas');
+      this.skyCtx = this.skyCanvas.getContext('2d')!;
+      this.glCanvasEl = this.mkGlCanvasEl();
+    }
     this.lightCanvas = document.createElement('canvas');
     // ★lightCanvas 恒 alpha:true——光照图构建写 α=255 但 putImageData/乘光链路
     //   语义依赖 RGBA 后备,勿随主画布改 opaque
@@ -4426,6 +4567,14 @@ export class Renderer {
     this.worldLight?.dispose();
     this.worldLight = null;
     this.sky.disposeCloudGL();
+    // ★C10e:分体画布 DOM 节点随实例同链摘除（主画布由 Game.destroy canvas.remove()
+    //  摘——sky2D/glCanvas 为本类持有,在此同责;不清则退菜单后残影层浮在主菜单上）
+    this.skyCanvas?.remove();
+    this.skyCanvas = null; this.skyCtx = null;
+    this.glCanvasEl?.remove();
+    this.glCanvasEl = null;
+    this._glCanvasShown = false;
+    this._c10eChainScratch = null; this._c10eChainScratchCtx = null;
   }
 
   /** 物品图标：优先 Maples 素材，缺省回退程序化(懒物化,首次访问切片) */
@@ -4516,9 +4665,55 @@ export class Renderer {
     this.canvas.height = window.innerHeight;
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
+    // ★C10e:三画布同步 resize（sky2D/glCanvas 尺寸=HUD 尺寸;glCanvas 会话级
+    //  resize 每帧对齐,此处兜底窗口 resize 与首帧前几何）
+    if (this.skyCanvas) this.c10eSyncCanvasSize(this.skyCanvas);
+    if (this.glCanvasEl) this.c10eSyncCanvasSize(this.glCanvasEl);
+  }
+
+  /** ★C10e:GL 呈现面元素工厂/换元。GLPipeline 构造期注入（离屏→DOM 呈现面）;
+   *  revive 链换新元素（死上下文同元素 getContext 恒回死上下文,GLSpriteLayer
+   *  判例——replaceWith 保 DOM 位次）。样式:position:absolute 铺满+pointer-events
+   *  none（HUD 顶层接输入,双画布同 rect=坐标映射零改动）;image-rendering:auto
+   *  （GL 1:1 present 不受影响,低清回退窗的 CSS 拉伸取平滑≙旧链 drawImage）。 */
+  private mkGlCanvasEl(): HTMLCanvasElement {
+    const el = document.createElement('canvas');
+    el.id = 'sw-c10e-glcanvas';
+    el.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
+      + 'pointer-events:none;image-rendering:auto;display:none;';
+    return el;
+  }
+  /** 管线构造/复活取呈现面元素：首取=建+挂 DOM（attach 前调用则 attach 补挂）;
+   *  再取=replaceWith 换元（旧上下文已死）。 */
+  private takeGlCanvasEl(): HTMLCanvasElement {
+    const nu = this.mkGlCanvasEl();
+    if (this.glCanvasEl) {
+      this.glCanvasEl.replaceWith(nu);
+    } else {
+      this.canvas.parentElement?.insertBefore(nu, this.canvas);   // HUD 之前=中层
+    }
+    this.glCanvasEl = nu;
+    return nu;
+  }
+  /** C10e 画布背板尺寸对齐（幂等） */
+  private c10eSyncCanvasSize(c: HTMLCanvasElement): void {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  }
+  /** glCanvas 可见性（GL 呈现窗开/闭:acquire 失败窗隐藏防陈旧屏鬼影;
+   *  首次 over present 前须可见——由 c10eMarkGlAlive 统一管理,幂等去抖） */
+  private _glCanvasShown = false;
+  private c10eSetGlCanvasVisible(v: boolean): void {
+    if (this._glCanvasShown === v) return;
+    this._glCanvasShown = v;
+    if (this.glCanvasEl) this.glCanvasEl.style.display = v ? 'block' : 'none';
   }
 
   attach(parent: HTMLElement) {
+    // ★C10e:三画布挂载序=DOM paint 序=层序（sky2D 底 → glCanvas 中 → HUD 顶;
+    //  cursor/icon 覆盖层 z-300/301 兄弟节点照旧盖顶）。旗关=单画布原序。
+    if (this.skyCanvas) parent.appendChild(this.skyCanvas);
+    if (this.glCanvasEl && !this.glCanvasEl.isConnected) parent.appendChild(this.glCanvasEl);
     parent.appendChild(this.canvas);
   }
 
@@ -4809,8 +5004,10 @@ export class Renderer {
     //  与 bg 会话同层同上下文——bg 注入点在本函数 1.5 段;退避/死亡期同语义返
     //  null → 2D 兜底)。?cloudpipe=0 = 逃生门(云+bg 整体回旧 glfx 共享会话)。
     //  useGLClouds/cpuRender 总门对两路一致生效。
+    // ★C10e:c10e 下云会话强制共管管线（呈现面=pipe.canvas=DOM glCanvas;
+    //  cloudpipe=0 逃生门收窄,设计文档 §八.4）
     const cloudGl = !this.cpuRender && this.sky.useGLClouds
-      ? (Renderer.cloudPipe ? this.acquireCloudPipe() : this.acquireGL())
+      ? ((Renderer.cloudPipe || Renderer.c10e) ? this.acquireCloudPipe() : this.acquireGL())
       : null;
     this.sky.cloudGlLayer = cloudGl;
     // ★C10a 仪器面(composePathUsed 同款口径):本帧云 GL 会话来源
@@ -4864,21 +5061,51 @@ export class Renderer {
     // ★SW-BJ41 2026-09-09：自然星微光衰减输入（SkyRenderer.draw 内 :63034 门 +
     //  :64003-64007 天空色衰减——monoFilters.update 已在本帧早段推进完毕）
     this.sky.shimmerAlpha = this.monoFilters.shimmerAlpha;
+    // ★C10e 帧分类·上半（2026-10-01,设计文档 docs/c10e-design.md §四）：wK 表达式
+    //  自 :5004 原位再上移至 sky.draw 前（帧分类门需要 wK===1;两位置间输入
+    //  （options/capturePass/cpuRender/worldLightLayer 惰性建—首调构造即返同值/
+    //  _waveLiquidInView/waterWarp）无变异点=值恒等）。夹层路由判定（下半）在
+    //  sky.draw 之后——opresentInterlayerPending 读【后绘】状态与 :5042 opresent
+    //  门同相（灯笼推进在 sky.draw far 遍历内,前置读会差激活沿一帧）。
+    // ★C10e 帧门含 worldLayerEnabled:?worldlayer=0 逃生门的默认全屏乘光路径在
+    //  主画布(=HUD)上做全屏 multiply——分体画布下天空在 sky2D,HUD 洞区会被光色
+    //  直写（multiply 对透明背板=源语义）→ 该逃生门帧整帧回退旗关行为
+    const c10eBase = Renderer.c10e && !this._capturePass && !this.isCpuRender()
+      && this.worldLayerEnabled;
+    const wKc = (() => {
+      const k = this.effectiveRenderScale();
+      if (k < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) return 1;
+      return k;
+    })();
+    this._worldLowK = wKc;
+    this._c10eFrame = c10eBase && wKc === 1 && !this.sky.farInterlayerActive(cam.y);
+    this._c10eComposited = false;
+    this.sky.c10eOver = this._c10eFrame;
+    // pipe 屏栈机制随帧分类启停（回退帧=false→会话 present/收口全走原路径;
+    // c10eFrame 时清屏闩复位=本帧首个会话 begin 清透明 glCanvas+清屏栈）
+    if (this.swPipe) {
+      this.swPipe.screenStackMode = this._c10eFrame;
+      this.swPipe.screenCleared = !this._c10eFrame;
+    }
     // ★C10d 远云并入 bg 会话门（sky.draw 前置:remix/色罩/黑闪与 section 1.5
     //  合并门同源同值——均读上一帧尾状态;夹层判定在 drawVanillaClouds 同帧做）
     const remixSkipSurfaceBg = !!world.seedFlags?.remix;
     this.sky.farDeferGate = Renderer.cloudPipe && this.bgGlEnabled && !this.isCpuRender()
       && this.sky.useGLClouds && !remixSkipSurfaceBg
       && !this.sky.hasSkyWeatherTint() && !this.hasBgFlash();
-    this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
+    // ★C10e 自然星直出同门（farDeferGate 假帧远云 2D 直画落 sky2D——星若 GL
+    //  直出会压到 sky2D 远云之上=层序倒挂,故星与远云必须同面）
+    this.sky.c10eStarDirect = this._c10eFrame && this.sky.farDeferGate;
+    this.sky.draw(this._c10eFrame ? (this.skyCtx ?? ctx) : ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
+    // ★C10e 帧分类·下半：夹层路由（世界 present 改 blit→HUD）。读 sky.draw 后
+    //  状态=与 opresent 门同相（见上半注）。
+    this._c10eWorldToHud = this._c10eFrame
+      && (this.sky.opresentInterlayerPending() || this.monoFilters.shimmerAlpha > 0);
 
     // ★opresent 前置:世界层缩放系数在此定值（原计算在世界层切换段,opresent 合并
     //  门须在 bg 段判 wK——defer 一旦成立,天空栈 blit 即被豁免,门条件必须先于
-    //  收口全数定谳。表达式逐字上移,输入（_waveLiquidInView=updateWaterWaves 帧头
-    //  已写/waterWarp.active()/options/capturePass）在两位置间无变异点=值恒等）
-    let wK = this.effectiveRenderScale();
-    if (wK < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) wK = 1;
-    this._worldLowK = wK;
+    //  收口全数定谳。★C10e:计算再上移至本帧分类块（上上注）,此处读缓存值）
+    const wK = this._worldLowK;
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
     if (this.scene) {
@@ -4930,7 +5157,9 @@ export class Renderer {
         // 恒真 → 每帧 new GLSpriteLayer(构造器 createElement)= 60 张/秒风暴
         // ★C10b:cloudpipe 开=bg 会话迁入共管管线（与云同层同上下文）;关=glfx
         // （逃生门=云+bg 整体回旧共享会话,总门/cpuRender 两路一致）
-        const glbg = Renderer.cloudPipe ? this.acquireCloudPipe() : this.acquireGL();
+        // ★C10e:c10e 下 bg 会话强制共管管线（同上——glfx 后端的 blit 目标无法
+        //  保持 bg→世界层序,呈现面架构强依赖 pipe.canvas=DOM glCanvas）
+        const glbg = (Renderer.cloudPipe || this._c10eFrame) ? this.acquireCloudPipe() : this.acquireGL();
         if (glbg) {
           glbg.resize(this.canvas.width, this.canvas.height);
           if (skyMergeable) {
@@ -4950,15 +5179,21 @@ export class Renderer {
               this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             }
             glbg.end();
-            ctx.drawImage(glbg.canvas, 0, 0);
+            // ★C10e:屏栈模式=bg 会话 over present 直出 glCanvas（入栈,biomeBg 在
+            //  自然星之上/色罩·近云之下=原层序位),删 2D blit;旗关/glfx 后端=原路径
+            if (!(this._c10eFrame && glbg.pipeBackend)) ctx.drawImage(glbg.canvas, 0, 0);
           }
           bgDone = true;
         }
       }
       if (!bgDone && !remixSkipSurfaceBg) {
         // ★C10d 2D 回退:glbg 未开成帧的远云 stash 原位重放（biomeBg 前=原层序）
-        this.sky.replayFarDeferred2D(ctx);
-        this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
+        // ★C10e:回退目标路由 sky2D（bg 2D 必须在自然星/远云 2D 回退之上、而
+        //  HUD 已被夹层族/世界回退占用——sky2D 序列=渐变→星→远云→biomeBg 全保序;
+        //  上层 glCanvas 的近云/世界 present 以透明洞露出 ✓）。旗关=原 ctx 路径。
+        const bg2dCtx = this._c10eFrame ? (this.skyCtx ?? ctx) : ctx;
+        this.sky.replayFarDeferred2D(bg2dCtx);
+        this.biomeBg.draw(bg2dCtx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       }
       // ★暴风雪/沙尘暴背景色罩(#三开压测批 层位修正):原版 BlizzardSky/
       //   SandstormSky 经 SkyManager.DrawToDepth 在 DrawBackground 背景段内触发
@@ -4966,8 +5201,11 @@ export class Renderer {
       //   绝不能挂最终滤镜链(曾致室内罩白,用户实报)。置于此=天空+远山层之后、
       //   世界内容之前;地下时 cave 背景随后覆盖(与原版层序一致)。
       //   ★C10b 合并帧本段与黑闪段恒空(合并判定前置)——保持调用=代码序不变
+      //   ★C10e:c10e 帧传 sky2D 上下文——GL 分支(层内 over quad)忽略 ctx;
+      //   2D 回退分支(管线死/旗关)落 sky2D=biomeBg 2D 回退之上、glCanvas 近云/
+      //   世界 present 透明洞之下 ✓ 层序保持
       if (!this.isCpuRender()) {
-        this.sky.drawWeatherTint2D(ctx, viewW, viewH);
+        this.sky.drawWeatherTint2D(this._c10eFrame ? (this.skyCtx ?? ctx) : ctx, viewW, viewH);
       }
       // 群系切换黑闪（DrawSurfaceBG_DrawChangeOverlay :60460-60532/:62042）：
       // ★BJ372（2026-09-27）画位归位=逐槽内联于 BiomeBackground.drawSurface 前景
@@ -4991,6 +5229,14 @@ export class Renderer {
         const mk = bgDone ? (wasMerged ? 'merged' : 'split') : '-';
         this.cloudMergeUsed = mk;
         this.cloudMergeStats[mk] = (this.cloudMergeStats[mk] || 0) + 1;
+      }
+      // ★C10e P1 全帧合成（2026-10-01）：夹层帧 + 全帧自拷消费者（死亡灰化/重力
+      //  翻转）→ 在夹层族落笔前把 sky2D+glCanvas 合成进 HUD——此后 HUD=完整画面
+      //  （夹层族→世界 blit→自拷全链在单画布上,自拷语义与原单画布逐位同）。
+      //  纯帧的合成点在 compositeLight 后（P2）——幂等闩防双份。
+      if (this._c10eFrame && this._c10eWorldToHud && !this._c10eComposited
+        && this.c10eFullXformCond(player, world)) {
+        this.c10eCompositeIntoHud();
       }
       // 灯笼夜 near 带 + 派对气球（DrawRemainingDepth :59055 = 全部背景层【含群系
       // 前景】之后的最末尾——曾画在云前=云盖灯/气球,用户实报）
@@ -5259,6 +5505,9 @@ export class Renderer {
       wctx.globalCompositeOperation = 'source-over';
       wctx.drawImage(glw.canvas, 0, 0, lw, lh);
       wctx.restore();
+      // ★C10e:内部 present（blend off 直写读回面）踩踏屏面 → restack 恢复
+      //  「glCanvas=屏栈」（墙/格两段各一次;世界合成随后 over 栈）
+      if (this._c10eFrame && glw.pipeBackend) glw.pipeBackend.restackScreen();
       this.bglPathUsed = layer === 'wall' ? 'world-gl-wall' : 'world-gl-tile';
       this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
       return true;
@@ -5689,10 +5938,12 @@ export class Renderer {
     //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上）
     this.drawWires(world, cam, viewW, viewH, z);
     this.drawGrandPreview();
-    // 4.56 建筑配件标尺覆盖层（★SW-FX19：DrawInterface_4_Ruler 标尺线 Main.cs:47046-
-    //     :47140 + DrawInterface_3_LaserRuler 标尺网格 :47146-47224——尺子 486/机械
-    //     标尺 2799 装备面,builderAccStatus[0]/[1]==0 才画）
-    this.drawBuilderRulers(world, cam, viewW, viewH, z);
+    // 4.56 建筑配件标尺覆盖层——★BJ422（2026-10-01）挪至光照合成后 7a-pre：
+    //     原版属接口层（SetupDrawInterfaceLayers Main.cs:45500/:45505）=世界渲染
+    //     （逐格顶点采光）之后的无光直绘;画在世界层内被 compositeLight 全屏乘光
+    //     压暗,所站格光≈0 即消失（用户实报 140/180 英尺阴影带格子没了、走两步
+    //     又见=位置相关非深度阈值,截图 49/50/51）。4.55 导线/宏伟蓝图仍留世界层
+    //     =原版 DrawWires 世界段语义,不受本刀影响。
 
     // 5. 粒子
     for (const p of particles) {
@@ -5752,6 +6003,13 @@ export class Renderer {
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     restoreShimmerLiquidLightFloor(lightR, lightG, lightB, this._shimFloorTouched);
     this.restoreSelfLuminousProjLight(lightR, lightG, lightB);
+    // ★C10e P2 全帧合成（2026-10-01）：纯帧（无夹层路由）+ 全帧自拷消费者在帧
+    //  （死亡灰化/重力翻转）→ 世界 present 已进 glCanvas（over 栈），此处把
+    //  sky2D+glCanvas 合成进 HUD=完整画面，其后自拷/滤镜链输入语义与原单画布
+    //  逐位同。夹层帧在 P1（bg 段）已合成——幂等闩防双份。
+    if (this._c10eFrame && !this._c10eComposited && this.c10eFullXformCond(player, world)) {
+      this.c10eCompositeIntoHud();
+    }
 
     // 7-死亡灰化（★用户需求 2026-08-24 修订：灰化只作用于【世界画面】——地形/实体/
     //    弹幕；右上 UI（小地图/信息饰品）、左下信息列表、死亡文字（保持偏红）不生效。
@@ -5887,6 +6145,27 @@ export class Renderer {
     //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
     //     MissileProj 实体段收集）
     this.flushTrailShade(cam, z, viewW, viewH);
+
+    // 7a-pre. 建筑配件标尺（★BJ422 2026-10-01：从世界层 4.56 挪出）：原版
+    //     "Vanilla: Laser Ruler"/"Vanilla: Ruler" 接口层（SetupDrawInterfaceLayers
+    //     Main.cs:45500/:45505）在世界渲染之后无光直绘——网格色
+    //     (0.24,0.8,0.9,0.5)×0.4×num3（:47162-47163,驱动=残影滞后距离）/标尺线
+    //     (0.24,0.8,0.9,1)×0.8×num4（:47103-47104,驱动=velocity）皆常量×速度淡出,
+    //     零光照零深度门 ⇒ 黑暗地牢格子照样亮青（用户实报截图 51 原版形态）。
+    //     旧 4.56 位在世界层内=compositeLight 全屏乘光按所站格光值压暗,光≈0 即
+    //     消失（140/180 英尺阴影带、走两步又见=位置相关非深度阈值）。主画布此处
+    //     为恒等变换,按世界段同式重建相机变换（7d' Faeling 同款 round 吸附;
+    //     低清档 wK<1 时按全分辨率直绘=vanilla 接口层全分辨率语义,与 wld 内容的
+    //     亚像素偏差≤1 设备像素,同 7d' 既有惯例）;层内序=接口层 3/4 < 图格网格 6
+    //     （Main.cs:45500/:45505 < :45515）。
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
+    this.drawBuilderRulers(ctx, world, cam, viewW, viewH, z);
+    ctx.restore();
 
     // 7a-bis. 图格网格（DrawInterface_6_TileGridOption Main.cs:45634-45671 1:1）：
     // 开关=Main.MouseShowBuildingGrid（IngameOptions.cs:745）；智能光标激活时不画；
@@ -6659,6 +6938,22 @@ export class Renderer {
   })();
   static get opresent() { return this._opresent; }
   static opresentSetForTest(v: boolean): void { this._opresent = v; }
+  /** ★C10e 分体画布呈现架构（2026-10-01,docs/c10e-design.md）——三画布栈
+   *  sky2D(底)/glCanvas(中,GL 唯一呈现面)/HUD(顶),把「GL 画布→2D 画布」全屏
+   *  跨上下文拷贝（Windows SHM 实测 2-4 次/帧 × 1.5-2.5ms=60→100+ 决定性刀）
+   *  在常态帧归零：GL 会话屏 over present 直出可见 glCanvas,DOM 合成替代拷贝。
+   *  ?c10e=1 显式开启（缺省关=单画布架构零变化——旗外全部分支死代码）;转正由
+   *  用户实机验证后另批。?c10e=0=显式关（同缺省）。运行时回退=帧分类自动落位
+   *  （cpuRender/低清档/拍照/GL 死亡/远云夹层→旗关行为,见设计文档 §四）。
+   *  ★构造期旗（canvas ctx attrs 定死约束:HUD 需 alpha:true）——运行时翻面对
+   *  已构造实例无效,仅影响后续 new Renderer（对拍走双页范式 scripts/_c10e-ab.mjs）。 */
+  private static _c10e = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('c10e') === '1';
+    } catch { return false; }
+  })();
+  static get c10e() { return this._c10e; }
+  static c10eSetForTest(v: boolean): void { this._c10e = v; }
   /** ★A1 screenFx 滤镜链入管线旗（2026-09-25,渲染 v2 路线图最后一枚收割刀）——
    *  GLScreenFilters 多 pass 链从「GL→2D→GL 乒乓、每 pass 全帧重传」迁入共管
    *  GLPipeline：FBO('sfxA'/'sfxB') 乒乓直采+非末 pass 直通 blit 翻向+末 pass
@@ -7323,19 +7618,22 @@ export class Renderer {
     return c;
   }
 
-  /** ★SW-FX19：建筑配件标尺覆盖层（世界空间,水前/线后——原版 Interface 层序
+  /** ★SW-FX19：建筑配件标尺覆盖层（世界空间——原版 Interface 层序
    *  DrawInterface_3_LaserRuler(:47146-47224 网格)/_4_Ruler(:47046-47140 标尺线)
    *  在世界之上;世界空间等价绘制,栅格 16px 对齐与原版逐像素同源）。
    *  ★SW-FX36 门修正：标尺线门 = Ruler 档开关位[0]（旗 rulerLine 经 ResetEffects
    *  Player.cs:18809 恒真,无物品面——旧「486/3611 装备」门撤销）;网格门 = 旗
-   *  rulerGrid（2799/3611 背包∪装备扫描,Game 注入）∧开关位[1]。 */
-  private drawBuilderRulers(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+   *  rulerGrid（2799/3611 背包∪装备扫描,Game 注入）∧开关位[1]。
+   *  ★BJ422（2026-10-01）：ctx 改参数传入（调用位在光照合成后主画布,变换由
+   *  调用方重建,见 7a-pre）——本函数体零光照引用、调色恒量×速度/残影淡出,
+   *  原版接口层语义（Main.cs:47162-47163/:47103-47104 常量色直绘,零光照读点）。 */
+  private drawBuilderRulers(ctx: CanvasRenderingContext2D, world: World,
+    cam: Camera, viewW: number, viewH: number, z: number) {
     this.rulerReadout = null;   // 每帧重置（线关/1×1/speed>6 时保持 null = 计数控不显）
     const r = this.builderRulers;
     if (!r) return;
     if (!r.lineOn && !r.gridOn) return;
     if (!this.atlas) return;
-    const ctx = this.ctx;
     const ts = TILE;
     // 视区世界像素（cam.x/y=视区中心）
     const leftPx = cam.x - viewW / 2 / z;
@@ -7351,6 +7649,14 @@ export class Renderer {
       // 调色（:47162-47163 color=(0.24,0.8,0.9,0.5)*0.4*num3 / color2=(1,0.8,0.9,0.5)
       //   *0.5*num3——XNA Color(float)→byte 截断 (61,204,229,127)/(255,204,229,127)
       //   再全通道乘；rgb 进烘焙,α（127/255 系数）走 globalAlpha）
+      //   ★BJ422② XNA 预乘α直译修正（BlendState.AlphaBlend=One/InvSrcAlpha——
+      //   「XNA α=0 纯加法」同族判例）：tint 全通道乘后的 rgb 即【预乘贡献额】,
+      //   混合 = rgb 全额加算 + dst×(1−a)。Canvas source-over 会把 globalAlpha
+      //   再乘进 rgb = α 因子双重施加（旧码 rgb 已含 0.4num3 又 ×a≈0.14 → 贡献
+      //   缩水 ~7×,黑背景上 (2,8,9) 近不可见 = 用户实报②原发灶之一）。修 =
+      //   'lighter' 直加预乘 rgb（gA=1）——暗背景（dst≈0）与原版逐位等价;亮
+      //   背景缺 dst×(1−a) 衰减,偏差 ≤ a×dst（a=0.2num3/0.249num3≤0.174,登记
+      //   债 BJ422-DEBT-brightwash;精确化需第二遍黑罩 multiply,暂不值 2× 绘制）。
       const img = this.tintedExtra('vanilla/Extra_68.png',
         Math.floor(61 * 0.4 * num3), Math.floor(204 * 0.4 * num3), Math.floor(229 * 0.4 * num3), 0);
       const imgHi = this.tintedExtra('vanilla/Extra_68.png',
@@ -7364,10 +7670,9 @@ export class Renderer {
         const ny = Math.floor((viewH / z + 100) / ts);
         // 鼠标格（相对起点 :47225-47228 point）
         const px = r.mouseTx - ox, py = r.mouseTy - oy;
-        const gA = (127 / 255) * 0.4 * num3;   // tint.a = 127/255×0.4×num3
-        const cA = (127 / 255) * 0.5 * num3;   // tint2.a = 127/255×0.5×num3
         ctx.save();
         ctx.imageSmoothingEnabled = false;
+        ctx.globalCompositeOperation = 'lighter';   // ★BJ422② 预乘 rgb 直加
         // 普通格（:47231-47235 `if (i != point.X && j != point.Y) 画`——十字行/列
         // 不画普通格,改由下方加亮线覆盖）
         for (let j = 0; j < ny; j++) {
@@ -7378,12 +7683,10 @@ export class Renderer {
             const sy = insetY ? 2 : 18, sh = insetY ? 14 : 16;
             const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;  // vec -= One :47229
             const dy = (oy + j) * ts + (insetY ? 2 : 0) - 1;
-            ctx.globalAlpha = gA;
             ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
           }
         }
         // 十字加亮行/列（:47277-47302——point.Y 行横贯（x 向循环）+ point.X 列纵贯）
-        ctx.globalAlpha = cA;
         for (let k = 0; k < nx; k++) {
           // 横行 source (0,0,16,16) 端格 / (0,0,16,18) 其余（:47283-47293）
           ctx.drawImage(imgHi, 0, 0, 16, k === px ? 16 : 18,
@@ -7395,7 +7698,6 @@ export class Renderer {
           ctx.drawImage(imgHi, 0, 0, 18, 16,
             (ox + px) * ts - 1, (oy + l) * ts - 1, 18, 16);
         }
-        ctx.globalAlpha = 1;
         ctx.restore();
       }
     }
@@ -7409,8 +7711,11 @@ export class Renderer {
       // α（:47058-47066 num4 = speed≤2 → 1,2..6 线性降 0）× num12 0.8（:47104）
       // 调色：XNA 全通道乘 ⇒ rgb=(0.24,0.8,0.9)×0.8×num4（byte 链 floor(61·k) 等）,
       //   α=0.8×num4 走 globalAlpha——旧码裸白模无青调=色偏,现同帧重烘
-      const img = this.tintedExtra('vanilla/Extra_2.png',
-        Math.floor(61 * alpha), Math.floor(204 * alpha), Math.floor(229 * alpha), 0);
+      //   ★BJ422② 预乘α直译：本支可单遍精确——XNA 预乘贡献 = c×k（k=0.8num4）
+      //   恰等于 Cs(=c 本色)×gA(=k) 的 source-over 一次缩放（衰减 dst×(1−k) 同式
+      //   对齐）⇒ 烘焙改【本色 61/204/229 不乘 k】,globalAlpha=k 不变——旧码烘焙
+      //   已乘 k 再 ×gA = 双重 α（线体贡献缩水 k 倍,快走淡出时几乎隐形）。
+      const img = this.tintedExtra('vanilla/Extra_2.png', 61, 204, 229, 0);
       if (img) {
         let dx = r.feetTx, dy = r.feetTy;                     // (num6,num7) 脚底格
         if (r.gravDir === -1) dy--;                           // :47071-47073 num7--（距离锚）
@@ -16300,6 +16605,34 @@ export class Renderer {
         const pad = 4;
         const hairCol = dyeColor ?? p.appearance.hairColor;   // 拆层回画用（无染料=原生发色）
         if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, true);
+        // ★BJ423 浮游圈管体·背半（DrawPlayer_12_Skin_Composite :1273-1280——后发后、
+        //   躯干皮肤前；源=Extra_105 上半 (0,0,40,56)）。门 = hasFloatingTube（可见轮
+        //   两环,Player.ts hasFloatingTubeVis）∧ !hideEntirePlayer 族（外层 mntHidden
+        //   块已含）。锚 = 帧行帧盒（−20,−52,40,56）——行 10 浮姿头具修正 (0,2)−2=0、
+        //   bob 行 (0,0)−2 → vector+=+2 恰抵消复合件行内 −2 bob（PlayerDrawSet.cs
+        //   :1259-1262 ×Main.OffsetsPlayerHeadgear）⇒ 管体恒贴静态帧盒不随身体起伏。
+        //   坐姿背半随整体平移（site1 vector.Y+=torsoOffset :1259=本仓坐下
+        //   translate 含项）；前半不叠（site2 无此臂）→ 前半 dy 补 −trunc(seatOffsetY)。
+        //   alpha = GetImmuneAlphaPure(0.75 高度白光,shadow)（:455,全局光照乘法面）
+        //   × stealth² 三支同乘皮肤族（:1595/:1637/:1679=num25/27/29 平方后）= skinMul；
+        //   染料 cFloatingTube（UpdateItemDye :9815-9818 → accDraw.dyeFloatingTube）。
+        const tubeTex = stEq.hasFloatingTube
+          ? loadExtraSprite(105)   // Extra_N 走专用直载通道（vanilla.json 无清单键,ensureVImage 必落空）
+          : null;
+        const tubeDyeEmu = tubeTex && tubeTex.width > 0 && stEq.accDraw.dyeFloatingTube > 0
+          ? dyeApplyOf(stEq.accDraw.dyeFloatingTube) : null;
+        if (tubeDyeEmu) tubeDyeEmu.uniforms.uDirection = p.facing;
+        const tubeAlpha = stealthClamp < 1 ? stF.skinMul : 1;
+        const tubeDraw = (sy: number, dy: number): void => {
+          if (!tubeTex || tubeTex.width <= 0) return;
+          const ga = ctx.globalAlpha;
+          if (tubeAlpha < 1) ctx.globalAlpha = ga * tubeAlpha;
+          const sc = tubeDyeEmu ? this.wingTexSource(tubeTex, 0, sy, 40, 56, tubeDyeEmu, null) : null;
+          if (sc) ctx.drawImage(sc, -20, -52 + dy);
+          else ctx.drawImage(tubeTex, 0, sy, 40, 56, -20, -52 + dy, 40, 56);
+          ctx.globalAlpha = ga;
+        };
+        tubeDraw(0, 0);   // 背半
         if (stealthClamp >= 1) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
         } else {
@@ -16334,6 +16667,10 @@ export class Renderer {
             ctx.globalAlpha = ga2;
           }
         }
+        // ★BJ423 浮游圈管体·前半（DrawPlayer_17_TorsoComposite :2037-2044——躯干甲/
+        //   大衣后、OffhandAcc/Head 前；源=Extra_105 下半 (0,56,40,56)）。同锚帧盒,
+        //   坐姿补 −torsoOffset（site2 无 torsoOffset 臂 vs 本仓坐下整体平移含项）。
+        tubeDraw(56, p.sitting ? -Math.trunc(p.seatOffsetY) : 0);   // 前半
         // ---- 头层脸饰（DrawPlayer_21_Head_TheFace :2574-2650——发层之下的头层路径,
         //      2026-09-03 四层路由批接入）----
         if (facePlan?.split) {
@@ -18567,7 +18904,10 @@ export class Renderer {
         if (Renderer.sfxPipe && this._worldLowK === 1) {
           const pipe = this.acquireSwPipe();
           if (pipe && !pipe.unavailable) {
-            chainOk = gl.drawChainPipe(pipe, this.canvas, passes, [
+            // ★C10e:链输入换全帧合成 scratch（链采「整个画面」——c10e 下画面分居
+            //  三画布;scratch=sky2D+glCanvas+HUD-so-far 单画布折叠,HUD 后续层照常
+            //  叠加。旗关/回退帧=主画布原路径）
+            chainOk = gl.drawChainPipe(pipe, this.c10eChainSource(), passes, [
               this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
             ]);
             if (chainOk) {
@@ -18579,7 +18919,7 @@ export class Renderer {
         }
         // 逃生门（?sfxgl=0）/管线失败回落=旧「GL→2D→GL」乒乓链（双路径并存;
         //  再败落下方 2D 近似链——既有回退语义不动）
-        if (!chainOk && gl.drawChain(this.canvas, passes,
+        if (!chainOk && gl.drawChain(this.c10eChainSource(), passes,
           [this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255])) {
           ctx.drawImage(gl.canvas, 0, 0);
           chainOk = true;
@@ -18606,7 +18946,7 @@ export class Renderer {
     this.sfxPathUsed = '2d';
     this.sfxPathStats['2d'] = (this.sfxPathStats['2d'] || 0) + 1;
     if (mono.heatVisible) {
-      mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
+      mono.drawHeat2D(ctx, this.c10eChainSource(), viewW, viewH,
         { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },
         globalTimeWrappedHourly());   // ★BJ330 GTW 单源（=GL FilterHeatDistortion uTime 同口径）
     }
@@ -18614,7 +18954,7 @@ export class Renderer {
       // 月总核心屏幕位（MoonLord 滤镜 UseTargetPosition=npc[398].Center，
       // MoonLordScreenShaderData.cs:42-45——aimAtPlayer=false 支）
       const core = this._moonLordFilterTarget(this._frameEntities);
-      mono.draw(ctx, this.canvas, viewW, viewH, {
+      mono.draw(ctx, this.c10eChainSource(), viewW, viewH, {
         x: (player.cx - cam.x) * z + viewW / 2,
         y: (player.cy - cam.y) * z + viewH / 2,
       }, core ? {
@@ -18986,9 +19326,16 @@ export class Renderer {
       // ★opresent:defer 帧补贴（门已挡 fullbright——防运行时翻面竞态漏挂起）
       if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
       // 低清档(#perf-gpulog):世界层 K 缩 → 拉伸回填全尺寸
+      // ★C10e:纯帧=over present 直出 glCanvas（世界叠在天空栈上,删 blit）;
+      //   夹层帧=present+blit→HUD（世界画在 HUD 夹层族之上）+restack
       if (accFbo && this.swPipe) {
+        if (this._c10eFrame && !this._c10eWorldToHud && this.swPipe.screenStackMode) {
+          this.swPipe.present(accFbo, true);
+          return;
+        }
         this.swPipe.present(accFbo);
         this.ctx.drawImage(this.swPipe.canvas, 0, 0, viewW, viewH);
+        if (this._c10eFrame) this.swPipe.restackScreen();
         return;
       }
       if (this.worldLayerActive && this.worldCanvas) this.ctx.drawImage(this.worldCanvas, 0, 0, viewW, viewH);
@@ -19059,6 +19406,9 @@ export class Renderer {
           woL[0], woL[1],
           { r: lightR, g: lightG, b: lightB, rx, ry, rw, rh, tx0, ty0, w2, h2 },
           skyPend,   // ★opresent:天空栈挂起→pass3 合并（单 present）
+          // ★C10e:纯帧=尾 present 走屏 over 档（glCanvas 直出,删 2D blit）;
+          // 夹层帧/旗关=blend off+调用方 blit 原路径
+          this._c10eFrame && !this._c10eWorldToHud,
         );
         if (okL) {
           // ★opresent:合并走了=本 blit 即唯一全屏回贴;未走（程序缺/FBO 失败/
@@ -19071,7 +19421,12 @@ export class Renderer {
             this._markPath('lrecon');
             if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
           }
-          this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
+          // ★C10e:纯帧=已 over 直出（无 blit）;夹层帧=blit→HUD（世界落夹层族上）
+          //  +restack（present 踩踏屏栈→恢复 glCanvas=屏栈不变式）
+          if (!(this._c10eFrame && !this._c10eWorldToHud)) {
+            this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
+            if (this._c10eFrame) wcL.pipeline.restackScreen();
+          }
           return;
         }
         this._markPath('lrecon-fail:' + (wcL.lastFail || '?'));
@@ -19325,6 +19680,9 @@ export class Renderer {
             ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]) as readonly [number, number],
             undefined,   // rawLight:本支=lightCanvas 路径（raw 直传是 lrecon 支专属）
             skyPend,   // ★opresent:天空栈挂起→pass3 合并（单 present）
+            // ★C10e:纯帧=尾 present 屏 over 档（glCanvas 直出,删 blit）;
+            // 夹层帧/旗关=blend off+blit 原路径
+            this._c10eFrame && !this._c10eWorldToHud,
           );
           if (ok) {
             // ★opresent:同 lrecon 支——合并走了=单回贴;未走=补贴天空栈
@@ -19336,7 +19694,11 @@ export class Renderer {
               this._markPath('a2');
               if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
             }
-            this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
+            // ★C10e:纯帧=已 over 直出;夹层帧=blit→HUD+restack（同 lrecon 支）
+            if (!(this._c10eFrame && !this._c10eWorldToHud)) {
+              this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
+              if (this._c10eFrame) wc.pipeline.restackScreen();
+            }
             return;
           }
         }
@@ -19393,8 +19755,14 @@ export class Renderer {
           //  曾把低清世界画在左上角（可达面:?wfbo=0 逃生门或 A2 compose 失败帧
           //  × lightFast 全亮 × K<1 角落链）。
           if (accFbo && this.swPipe) {
+            // ★C10e:纯帧=over 直出（全亮世界叠天空栈,删 blit）;夹层帧=blit→HUD+restack
+            if (this._c10eFrame && !this._c10eWorldToHud && this.swPipe.screenStackMode) {
+              this.swPipe.present(accFbo, true);
+              return;
+            }
             this.swPipe.present(accFbo);
             this.ctx.drawImage(this.swPipe.canvas, 0, 0, viewW, viewH);
+            if (this._c10eFrame) this.swPipe.restackScreen();
           } else {
             this.ctx.drawImage(this.worldCanvas!, 0, 0, viewW, viewH);
           }

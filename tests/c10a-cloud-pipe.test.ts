@@ -26,9 +26,10 @@ describe('C10a 旗面与接线（C10b 转正后旗面演进——缺省开,逃�
   });
 
   it('注入点分支:cloudpipe 开=acquireCloudPipe;关=acquireGL(旧会话);useGLClouds/cpuRender 总门一致', () => {
-    expect(RDR).toMatch(/Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
+    // ★C10e:c10e 帧强制共管（呈现面=pipe.canvas=DOM glCanvas,cloudpipe=0 收窄）
+    expect(RDR).toMatch(/\(Renderer\.cloudPipe \|\| Renderer\.c10e\) \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
     // 总门在分支外（!this.cpuRender && this.sky.useGLClouds 先判——两路同门）
-    expect(RDR).toMatch(/!this\.cpuRender && this\.sky\.useGLClouds\s*\n\s*\? \(Renderer\.cloudPipe/);
+    expect(RDR).toMatch(/!this\.cpuRender && this\.sky\.useGLClouds\s*\n\s*\? \(\(Renderer\.cloudPipe \|\| Renderer\.c10e\)/);
   });
 
   it('仪器面:cloudPathUsed/cloudPathStats(composePathUsed 同款探针读面)', () => {
@@ -73,7 +74,7 @@ describe('C10a GLSpriteLayer 管线后端', () => {
     expect(SRC).toContain("begin(fboName = 'clouds'");   // ★B2b 起带 clear 缺省参
     expect(SRC).toContain('this.pipe.fbo(fboName, w, h)');
     expect(SRC).toContain('this.pipe.bindTarget(f)');
-    expect(SRC).toContain('this.pipe.present(this.pipeFbo)');
+    expect(SRC).toContain('this.pipe.present(this.pipeFbo, over)');   // ★C10e:over 缺省参透传（屏栈直出档）
     // 会话态逐帧显式（present 离场留 blend off——谁设谁还原判例）
     expect(SRC).toMatch(/pipe\) \{[\s\S]{0,1600}gl\.blendFunc\(gl\.ONE, gl\.ONE_MINUS_SRC_ALPHA\)/);
     expect(SRC).toContain('this.pipe.beginFrame(w, h)');   // resize=帧界同步
@@ -126,6 +127,7 @@ describe('C10a 周边结构保留', () => {
 
   it('GLPipeline 零改动(A0 面原样——FBO RGBA8/present flipY/字节账)', () => {
     expect(PIPE).toContain('gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null');
-    expect(PIPE).toContain('present(src: PipelineFbo)');
+    // ★C10e:present 增 over 缺省参（屏栈直出;缺省 false=blend off 原路径逐位）
+    expect(PIPE).toContain('present(src: PipelineFbo, over = false)');
   });
 });

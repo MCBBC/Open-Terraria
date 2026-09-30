@@ -41,6 +41,7 @@ import { applyProjStatus } from './projStatus';
 import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
 // broadcast 上行同用此函数）。★终零波裁决注：module8 已有 netApply 消费面
 // （Game.netApplyParticleOrchestra case RainbowRodHit → 同一 rainbowRodHitFx），
@@ -330,8 +331,7 @@ export class MagicMissileProj extends Entity {
   critChance = 0.04;
   /** 护甲穿透（N:81913 减防——spawn 注入） */
   armorPen = 0;
-  /** 星云套 booster 回调（StrikeNPC :12892-12905） */
-  nebulaCb: (() => void) | null = null;
+  /** ★BJ424 星云触发已单源 nebulaBoosterOnHit（ghostHurtOnHit 同位）——回调退役 */
   /** 弹体点光（Game 实体光扫读） */
   lightRGB: [number, number, number] | null = null;
   dead = false;
@@ -858,8 +858,6 @@ export class MagicMissileProj extends Entity {
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
-      if (this.nebulaCb) this.nebulaCb();
-      // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）：
       // 可控导弹族三型（16/34/79）均 magic 数据面 → 原版同样不触发；双支类门
       // projectileSnapStrikeBonus 单源（melee|ranged/ranged 过滤），站位补齐；
       // 返回 num14 加伤随暴击并入实伤参。
@@ -934,6 +932,15 @@ export class MagicMissileProj extends Entity {
             vanillaId: v156.vanillaId,
             dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同位）——触发单源
+      // nebulaBoosterOnHit（全 magic 弹面）;旧 nebulaCb 仅 Game 四专支接线且
+      // 调用在 e.hurt 前（dealt 未结算）+ 私有数组无渲染,已退役
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2,
+          vanillaId: v156.vanillaId,
+          lifeMax: v156.maxHp ?? v156.def?.lifeMax,
+          dealt: v156.lastStrikeDealt ?? 0 });
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)

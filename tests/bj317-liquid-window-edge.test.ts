@@ -81,10 +81,13 @@ function byTile(recs: BodyRec[]): Map<string, BodyRec> {
 }
 
 describe('BJ317 液体绘制窗边界采样', () => {
-  it('①窗口纯函数：左/右/上外扩 MARGIN=4、下缘 +5、缩放无关、世界钳', () => {
+  it('①窗口纯函数：左/右/上外扩 MARGIN=4、下缘 +5+MARGIN（★BJ427 拖尾带掩蔽）、缩放无关、世界钳', () => {
     // 屏左 tile=1960、屏右=2040、屏顶=225、屏底=280（z=1）
     const w = liquidDrawWindow(32000, 4000, 1280, 800, 1, 4200, 1200);
-    expect(w).toEqual([1960 - LIQUID_WINDOW_MARGIN, 225 - LIQUID_WINDOW_MARGIN, 2040 + LIQUID_WINDOW_MARGIN, 280]);
+    // ★BJ427（2026-10-01）：窗底 +5 → +5+MARGIN=9——P3 瀑布拖尾带（窗底 ty1-8 以下
+    //  3+ 行 opacity k<1 永不自纠）在 +5 时恰落屏底三行（用户实报"岩浆底部逐层半透"）,
+    //  掩蔽需求 ≥8,取与左右上同 MARGIN 语义（=原版 offScreenRange 各向等深结构）。
+    expect(w).toEqual([1960 - LIQUID_WINDOW_MARGIN, 225 - LIQUID_WINDOW_MARGIN, 2040 + LIQUID_WINDOW_MARGIN, 280 + LIQUID_WINDOW_MARGIN]);
     // z=2：屏幕半宽换算 tile 后 margin 恒 4 格（tile 计量与 zoom 无关）
     const w2 = liquidDrawWindow(32000, 4000, 1280, 800, 2, 4200, 1200);
     expect(w2[0]).toBe(Math.floor((32000 - 1280 / 2 / 2) / 16) - LIQUID_WINDOW_MARGIN);
@@ -100,7 +103,7 @@ describe('BJ317 液体绘制窗边界采样', () => {
     //  原版管线 pad=k∈[2,W-2)——伪影可入窗深 PAD=2 列（P2 扫描窗内缘两列 hasVisA
     //  恒假）→ 不变式 = w[0]+PAD ≤ 屏左−1（窗缘+pad 深度全在屏外）;右/上同构;
     //  且 MARGIN≥3（margin 2 时 w[0]+PAD=屏左 → 不变式破 = 伪影回屏）。
-    //  底缘沿用原版 +5（vanilla GetScreenDrawArea offScreenRange 同相,只验 ≥屏底+1）
+    //  底缘 +5+MARGIN（★BJ427 P3 拖尾带掩蔽 ≥8;vanilla GetScreenDrawArea +offScreenRange 同相）
     const PAD = 2;
     expect(LIQUID_WINDOW_MARGIN, 'margin 须 ≥3（伪影入窗深 2 列+屏外 ≥1 格）').toBeGreaterThanOrEqual(3);
     expect(w[0] + PAD, '左缘伪影带须全出屏').toBeLessThanOrEqual(screenLeftTile - 1);

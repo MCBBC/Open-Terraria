@@ -1356,15 +1356,17 @@ export class SkyRenderer {
   }
 
   /** 星批 mini-session:begin→分段 quadBatchRgba(smooth)→end;调用方随即
-   *  ctx.drawImage(layer.canvas) 原位 blit（层序由 blit 位保持）。 */
-  private emitStarBatchGL(layer: GLSpriteLayer, batch: NonNullable<ReturnType<SkyRenderer['buildStarBatch']>>, fboName: string, viewW: number, viewH: number): void {
+   *  ctx.drawImage(layer.canvas) 原位 blit（层序由 blit 位保持）。
+   *  ★C10e over=true=管线后端收口走屏 over present（glCanvas 直出,调用方跳过
+   *  blit——层序=glCanvas 栈位保持）;非管线后端忽略 over 恒原路径。 */
+  private emitStarBatchGL(layer: GLSpriteLayer, batch: NonNullable<ReturnType<SkyRenderer['buildStarBatch']>>, fboName: string, viewW: number, viewH: number, over = false): void {
     layer.resize(viewW, viewH);
     layer.begin(fboName);
     for (const seg of batch.segments) {
       const e = layer.texFromImage(seg.key, seg.img, false, true);
       if (e) layer.quadBatchRgba(e, seg.data, seg.quads, true);
     }
-    layer.end();
+    layer.end(true, over);
   }
 
   /** ★SW-BJ41 2026-09-09：Main.shimmerAlpha（SceneState.UpdateShimmer :332-357
@@ -1403,11 +1405,15 @@ export class SkyRenderer {
     const layer = this.cloudGlLayer;
     if (batch && layer && !layer.unavailable) {
       this.emitStarBatchGL(layer, batch, 'sstars', viewW, viewH);
-      // ★blit 恒等变换（同 'sstarn' 位注）
+      // ★blit 恒等变换（同 'sstarn' 位注）。★C10e：星必须落 HUD（veil 在 HUD 之上
+      //  才能盖天空栈、星在 veil 后同层序;世界 present 在 glCanvas=HUD 之下——
+      //  星若 glCanvas 直出会被世界 present 盖住=层序破坏）。管线后端 present 为
+      //  blend-off 直写=踩踏屏栈 → blit 后 restackScreen 恢复「glCanvas=屏栈」。
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(layer.canvas, 0, 0);
       ctx.restore();
+      layer.pipeBackend?.restackScreen();
       return;
     }
     ctx.save();
@@ -2383,6 +2389,23 @@ export class SkyRenderer {
   drawWeatherTint2D(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
     for (const p of this.weatherTintPasses()) {
       if (p.kind !== 'SkyWeatherTint') continue;
+      // ★C10e（2026-10-01）：管线后端在场=色罩走 GL mini-session over present
+      //  （glCanvas 栈位=bg 会话之后、近云会话之前——原 2D fillRect 的层序位;
+        //  2D 画布侧无法落在两次 GL present 之间,fillQuad(白 tex×tint×α,premul
+      //  over) ≙ fillRect(rgb,globalAlpha) 逐式）。旗关/GL 缺=ctx.fillRect 原路径
+      //  （ctx 由调用方路由:c10e 帧传 sky2D——色罩位在 biomeBg(2D 回退)上）。
+      const glLayer = this.c10eOver ? this.cloudGlLayer : null;
+      if (glLayer && glLayer.pipeBackend && !glLayer.unavailable) {
+        const a = Math.max(0, Math.min(1, p.alpha));
+        if (a <= 0) continue;
+        glLayer.resize(viewW, viewH);
+        glLayer.begin('wtint');
+        glLayer.fillQuad(0, 0, viewW, viewH,
+          Math.max(0, Math.min(1, p.color[0])), Math.max(0, Math.min(1, p.color[1])),
+          Math.max(0, Math.min(1, p.color[2])), a);
+        glLayer.end(true, true);
+        continue;
+      }
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
       ctx.fillStyle = `rgb(${Math.round(p.color[0] * 255)},${Math.round(p.color[1] * 255)},${Math.round(p.color[2] * 255)})`;
@@ -2595,8 +2618,14 @@ export class SkyRenderer {
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) {
       if (merged) {
-        merged.end(!deferBlit);
-        if (!deferBlit) { SkyRenderer.cloudBlitStats.mergedFull++; ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; }
+        merged.end(!deferBlit, !deferBlit && this.c10eOver);
+        // ★C10e:管线后端 over present=glCanvas 直出（早退支同样叠合进屏栈）,
+        //  跳过 2D blit;非管线/旗关=原路径
+        if (!deferBlit) {
+          SkyRenderer.cloudBlitStats.mergedFull++;
+          if (!(this.c10eOver && merged.pipeBackend)) { ctx.drawImage(merged.canvas, 0, 0); }
+          ctx.globalAlpha = 1;
+        }
         else SkyRenderer.cloudBlitStats.mergedDefer++;
       }
       return;
@@ -2639,16 +2668,21 @@ export class SkyRenderer {
     };
     const finishBatch = () => {
       if (shared && batchBegun) {
-        shared.end(!deferBlit);   // ★opresent:defer=不 present,FBO 挂起给 pass3
+        // ★C10e:管线后端 over=屏直出（glCanvas 栈式叠合,defer 语义不变——defer 帧
+        //  FBO 挂起给 pass3,消费端补贴走 over 同栈）;跳过 2D blit
+        shared.end(!deferBlit, !deferBlit && this.c10eOver);
+        const directOut = this.c10eOver && !!shared.pipeBackend;
         if (mergedMode) {
           // ★C10b 合并收口:bg+云单背板【全幅】blit(单次 drawImage 替代旧
           //  「bg 全幅+云 bbox」两次;bg 层平铺全宽,bbox 收口不适用)
           //  ★opresent:deferBlit=跳过 blit——FBO('bg') 挂起,世界合成 pass3 消费
-          if (!deferBlit) { SkyRenderer.cloudBlitStats.mergedFull++; ctx.drawImage(shared.canvas, 0, 0); }
+          if (!deferBlit) { SkyRenderer.cloudBlitStats.mergedFull++; if (!directOut) ctx.drawImage(shared.canvas, 0, 0); }
           else SkyRenderer.cloudBlitStats.mergedDefer++;
-        } else {
+        } else if (!directOut) {
           SkyRenderer.cloudBlitStats.bboxBoth++;
           this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
+        } else {
+          SkyRenderer.cloudBlitStats.bboxBoth++;   // C10e 直出帧同位记账（无 blit）
         }
         ctx.globalAlpha = 1;
       }
@@ -2793,7 +2827,12 @@ export class SkyRenderer {
     ctx.restore();
     ctx.globalAlpha = 1;
     // 批模式('both' 双通道共享会话)的 end+全屏 blit 由 drawCloudsNear 统一收口
-    if (gl && !batch) { gl.end(); SkyRenderer.cloudBlitStats.bboxNoBatch++; this.cloudBlitRect(ctx, gl); }   // 合成进主画布(三 pass 间 clear 复用;★perf3:全幅→bbox 子矩形)
+    // ★C10e:管线后端 over=屏直出跳过 bbox blit（非管线/旗关原路径）
+    if (gl && !batch) {
+      gl.end(true, this.c10eOver);
+      SkyRenderer.cloudBlitStats.bboxNoBatch++;
+      if (!(this.c10eOver && gl.pipeBackend)) this.cloudBlitRect(ctx, gl);   // 合成进主画布(三 pass 间 clear 复用;★perf3:全幅→bbox 子矩形)
+    }
   }
 
   // ---- 云 GL 共享层(#A 2026-08-19 合并:云与背景层共用 Renderer.glfx 一个
@@ -2804,6 +2843,21 @@ export class SkyRenderer {
    *  黑闪;每帧重置——菜单/非世界帧不置位=不延迟）。夹层判定（极光/far 灯笼）
    *  在 drawVanillaClouds 同帧状态法。 */
   farDeferGate = false;
+  // ---- ★C10e 分体画布呈现旗（2026-10-01;Renderer.render 帧头逐帧重置——
+  //      菜单/旗关/回退帧恒 false=全部走原 blit 路径,零行为变化） ----
+  /** 管线后端会话收口走屏 over present（glCanvas 栈式叠合），跳过 2D blit。
+   *  仅当会话 layer.pipeBackend 在场才生效（菜单自持层不受影响）。 */
+  c10eOver = false;
+  /** 自然星 'sstarn' mini-session 直出（=c10eOver 且远云同走 GL stash——farDeferGate
+   *  假帧远云 2D 直画落 sky2D,星若 GL 直出会压到 sky2D 远云之上=层序倒挂,故同门） */
+  c10eStarDirect = false;
+  /** ★C10e 远云夹层谓词（drawVanillaClouds 同源提取——极光 tileColor 态/
+   *  far 灯笼夜活跃;星批直出门与 Renderer 帧分类共用,同帧状态法两读恒等。
+   *  camY 由调用方传 draw 同款值=逐式同源） */
+  farInterlayerActive(camY: number): boolean {
+    return this.aurora.tileColorState() !== null
+      || (this.lanternOpacity > 0.001 && camY <= this.fx.surfaceY);
+  }
   /** ★C10d 远云 pass1 延迟选集（drawVanillaClouds stash→section 1.5 bg 会话首段
    *  消费;未消费帧=下一帧入口清+菜单帧单帧远云缺=不可见级） */
   private farDeferred: { clouds: VanillaCloud[]; distY: number; camY: number } | null = null;
@@ -4360,13 +4414,19 @@ export class SkyRenderer {
         const batch = this.buildStarBatch(false, starDim, viewW, viewH, skyBgTopY, bt, shim, cotsFaded);
         const layer = this.cloudGlLayer;
         if (batch && layer && !layer.unavailable) {
-          this.emitStarBatchGL(layer, batch, 'sstarn', viewW, viewH);
-          // ★blit 恒等变换:角点已含 bt(setTransform 替换语义=设备空间),原位 CTM
-          //  若非恒等会二次应用（回归判据:星空随天幕变换漂移）
-          ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.drawImage(layer.canvas, 0, 0);
-          ctx.restore();
+          // ★C10e:管线后端+直出门 → end(over) 屏直出（glCanvas 栈底=biomeBg 前,
+          //  层序原位保持）,零 2D blit;否则 mini-session+原位 blit（原路径逐位）
+          if (this.c10eStarDirect && layer.pipeBackend) {
+            this.emitStarBatchGL(layer, batch, 'sstarn', viewW, viewH, true);
+          } else {
+            this.emitStarBatchGL(layer, batch, 'sstarn', viewW, viewH);
+            // ★blit 恒等变换:角点已含 bt(setTransform 替换语义=设备空间),原位 CTM
+            //  若非恒等会二次应用（回归判据:星空随天幕变换漂移）
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(layer.canvas, 0, 0);
+            ctx.restore();
+          }
         } else {
           // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
           //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部

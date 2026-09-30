@@ -204,7 +204,7 @@ import {
   CHEST_SCALE, CHEST_NAME_XY, chestSlotXY, chestButtonXY,   // ★SW-FX28 刀①:箱条几何单源(ChestUI.cs 域)
   SHOP_TITLE_XY, shopSlotXY,                                // ★SW-FX32 刀①:货架/店名同格单源(Main.cs:42500-42532)
   shopHappinessIconXY, shopHappinessTextXY, happinessFrameX, // ★SW-FX32:快乐度图标/倍率位(Main.cs:42504-42512)
-  shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757)
+  shopSavingsLabelXY, shopSavingsCoinXY, shopSavingsCoinTextXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757);★BJ421 计数锚
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
   settingsAnchorOf, defenseRowOf, advisorRowOf, advisorInlineXY, hasSpaceForInlineAdvisor,   // ★BJ416:设置钮锚/装备列尾行族单源(Main.cs:46254-46285/42091-42102)
@@ -7659,7 +7659,7 @@ export class UI {
     //  测得 +376/轮 为自捕伪影——DevTools console 全局句柄钉住查询结果数组,弃用）：
     //  每轮游离 vinv 面板整树（~400 节点/~900 监听器）经 UI 单例【漏网字段】滞留——
     //  vinvModernGridInner(14 钮)/vinvModernFilterBtns(11 钮)/vinvPageEls(equip/misc/
-    //  housing 页)/accEyeEls(Map×7)/pvpSwordBtn/vinvShopHappyIcon/Text/vinvShopCoinRow/
+    //  housing 页)/accEyeEls(Map×7)/pvpSwordBtn/vinvShopHappyIcon/Text/vinvShopCoinIcons/
     //  tooltip 等既不合 *El/*Els 命名门也不在 BJ328 补扫清单;window 级
     //  vinvGridWheelHandler(wheel)/vinvResizeHandler(resize)/modern 滚轮
     //  mousemove/mouseup 更是只有【重建时】才跑的 teardownInventoryPanel 才解绑。
@@ -11558,7 +11558,7 @@ export class UI {
   private vinvShopCells: HTMLDivElement[] = [];
   private vinvShopTitleEl: HTMLElement | null = null;
   private vinvShopSavedEl: HTMLElement | null = null;
-  private vinvShopCoinRow: HTMLElement | null = null;
+  private vinvShopCoinIcons: HTMLImageElement[] = [];   // ★BJ421:币图标逐 j 中心锚(曾 coinRow 单容器=计数竖排撞快乐带)
   private vinvShopCoinCnts: HTMLElement[] = [];
   private vinvShopBankImgs: HTMLImageElement[] = [];
   private vinvShopHappyIcon: HTMLElement | null = null;
@@ -11618,33 +11618,39 @@ export class UI {
       } });
     }
 
-    // 币图标+计数(ItemSlot.cs:3699-3710:j=0..3 币种 74-j=铂/金/银/铜,图标
-    //  @(shopx+11+24j,shopy+75),计数在下 :3705-3710(0.75 缩放——DOM 以 12px 近似
-    //  =字体度量偏差备案);计数帽 999 :3704-3706;>0 才画整行 :3726)
-    const coinRow = el('div');
-    coinRow.style.cssText = 'position:absolute; pointer-events:none;';
+    // 币图标+计数(ItemSlot.cs:3699-3710:j=0..3 币种 74-j=铂/金/银/铜。图标=【中心】
+    //  锚 @(shopx+11+24j,shopy+75)——DrawItemCoin CoinSlot.cs:254-270 origin=Size()/2,
+    //  DOM 20px 盒中心锚=尺寸偏差备案;计数文字=【同带交叠】字形左上 @(shopx+24j+num2,
+    //  字形顶=shopy+75) :3705-3710 origin(0,LineSpacing=24)→顶=position−18,0.75 缩放
+    //  DOM 以 12px 近似=字体度量偏差备案;num2=−6 仅铂>99 :3698(refresh 乘,免布局签)。
+    //  计数覆图标下半=原版同款画序(DOM 后插在上)。★BJ421(2026-09-23 用户实报):曾
+    //  coinRow 单容器把 (515+24j,333) 当左上+图标上/计数下竖排,计数带 ~353..368 撞
+    //  快乐图标(354..378)/「100%」(356..)——原版两行天然不叠(计数带≤351<354),
+    //  改逐 j 双 item 消费 shopSavingsCoinXY/TextXY;>0 才画整行 :3726)
     for (let j = 0; j < 4; j++) {
-      const cell = el('div');
-      cell.style.cssText = 'position:absolute; width:24px;';
-      cell.style.left = `${24 * j}px`;
       const icon = document.createElement('img');
       icon.draggable = false;
-      icon.style.cssText = 'width:20px; height:20px; margin:0 auto; display:block;'
+      icon.style.cssText = 'position:absolute; width:20px; height:20px;'
         + 'image-rendering:pixelated; pointer-events:none;';
       icon.src = (this.game ? iconUrl(this.game, internalIdOfVid(74 - j)) : '') || '';
+      root.appendChild(icon);
+      this.vinvShopCoinIcons.push(icon);
+      const wHalf = 10;
+      this.vinvLayoutItems.push({ el: icon, pos: () => {
+        if (!vis() || !(this.game && this.game.coinSavingsCopper() > 0)) return null;
+        const c = shopSavingsCoinXY(j);
+        return { x: c.x - wHalf, y: c.y - wHalf };
+      } });
       const cnt = el('div');
-      cnt.style.cssText = 'font-size:12px; text-align:center; color:#fff; text-shadow:1px 1px 0 #000;';
-      cell.appendChild(icon);
-      cell.appendChild(cnt);
-      coinRow.appendChild(cell);
+      cnt.style.cssText = 'position:absolute; font-size:12px; line-height:12px;'
+        + 'color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
+      root.appendChild(cnt);
       this.vinvShopCoinCnts.push(cnt);
+      this.vinvLayoutItems.push({ el: cnt, pos: () => {
+        if (!vis() || !(this.game && this.game.coinSavingsCopper() > 0)) return null;
+        return shopSavingsCoinTextXY(j);   // num2 −6 由 vinvRefreshShop marginLeft 乘(:3698)
+      } });
     }
-    root.appendChild(coinRow);
-    this.vinvShopCoinRow = coinRow;
-    this.vinvLayoutItems.push({ el: coinRow, pos: () => {
-      if (!vis() || !(this.game && this.game.coinSavingsCopper() > 0)) return null;
-      return shopSavingsCoinXY(0);
-    } });
 
     // 快乐度表情(Main.cs:42504-42509:NPCHappiness 4 帧 Frame(4,1,frameX),中心锚
     //  (504+12,invBottom+108) scale 1——Main.cs:67679-67680 offsets;恒画,帧随
@@ -11726,12 +11732,15 @@ export class UI {
     const mul = pay?.happinessMul ?? 1;
     if (this.vinvShopHappyIcon) this.vinvShopHappyIcon.style.backgroundPosition = `${-happinessFrameX(mul) * 24}px 0px`;
     if (this.vinvShopHappyText) this.vinvShopHappyText.textContent = happinessPct(mul);
-    // 币计数(ItemSlot.cs:3705-3710 split[3-j],帽 999 :3704-3706)
-    if (on && this.vinvShopCoinRow) {
+    // 币计数(ItemSlot.cs:3705-3710 split[3-j],帽 999 :3704-3706;num2=−6 仅铂>99
+    //  :3698——marginLeft 乘,随计数同拍刷新免入布局签)
+    if (on && this.vinvShopCoinCnts.length) {
       const split = g.coinSavingsSplit();
       for (let j = 0; j < 4; j++) {
         const cnt = this.vinvShopCoinCnts[j];
-        if (cnt) cnt.textContent = String(Math.min(999, split[3 - j]));
+        if (!cnt) continue;
+        cnt.textContent = String(Math.min(999, split[3 - j]));
+        cnt.style.marginLeft = (j === 0 && split[3] > 99) ? '-6px' : '';
       }
     }
     // 40 格内容(Main.cs:42531 逐格 ItemSlot.Draw;afford 着色=经典面同款呈现,
@@ -12203,7 +12212,7 @@ export class UI {
     this.vinvShopCells = [];
     this.vinvShopTitleEl = null;
     this.vinvShopSavedEl = null;
-    this.vinvShopCoinRow = null;
+    this.vinvShopCoinIcons = [];
     this.vinvShopCoinCnts = [];
     this.vinvShopBankImgs = [];
     this.vinvShopHappyIcon = null;

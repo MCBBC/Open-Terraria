@@ -7,6 +7,7 @@ import { ITEM_DEFS, ITEM_NO_GRAVITY_VIDS, ITEM_RECOVERABLE_IMPORTANT } from '../
 import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
 import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
+import { NEBULA_BOOSTER_VIDS, nebulaBoosterFamOf } from './NebulaBooster';   // ★BJ424 星云 booster 单源
 import { getDropScanCtx, grabRangeBonusFor } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
@@ -68,7 +69,10 @@ export class ItemDrop extends Entity {
   alpha?: number;
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
-  pickup?: 'heart' | 'star' | 'manastar';
+  /** 星云 booster（★BJ424：'nebula' = 3453-55 NebulaPickup 族——拾取 →
+   *  NebulaLevelup（Player.PickupItem :35322-35332），fam 由 vid 反查：
+   *  3453=伤/3454=命/3455=魔） */
+  pickup?: 'heart' | 'star' | 'manastar' | 'nebula';
   /** 原版 grabDelayTime 同构位：玩家主动抛出的物品 =100t（Player.cs:5191
    *  DropSelectedItem → NewItemOwnership.GrabDelayForLocalPlayer/ForAllPlayers →
    *  WorldItem.cs:309-317 grabDelayTime=DefaultGrabDelay(100)），GrabItems
@@ -294,7 +298,14 @@ export class ItemDrop extends Entity {
       //  无独立 intake 位可漏。
       if (touching && canAccept) {
         if (this.pickup) {
-          if (this.pickup === 'heart') {
+          if (this.pickup === 'nebula') {
+            // 星云 booster 拾取（Player.PickupItem :35322-35332）：音 7 +
+            // NebulaLevelup（buffType=Item 3453→179伤/3454→173命/3455→176魔,
+            // Item.cs:31008-31017）+ TurnToAir。原版无飘字/粒子（区别于心/星的
+            // HealEffect/ManaEffect 面板文字）——可见反馈 = buff 栏三色档位图标
+            // （Player.nebulaBuffIcons UI 补 C 批已挂 Buff_173-181.png）
+            player.nebulaLevelup(nebulaBoosterFamOf(ITEM_DEFS[this.itemId]?.vid ?? -1));
+          } else if (this.pickup === 'heart') {
             player.hp = Math.min(player.maxHp, player.hp + 20);
             game.addDamageNumber(player.cx, player.y, 20, false, '#40E080');
           } else if (this.pickup === 'manastar') {
@@ -370,14 +381,24 @@ export class ItemDrop extends Entity {
         // 的持续重叠不得每拍一帧刷屏——2026-08-28 全面 review 收口） */
         if (left > 0 && left !== before && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
       } else if (inGrabRange && canAccept) {   // ★F5① 拉取面同门（CanPullItem :39453）
+        this.shimmered = false;
+        beingGrabbed = true;
+        this.grabbed = true;
+        // ★BJ424：NebulaPickup 恒走 PullItem_Pickup 档（GrabItems :35229-35230,
+        // speed 12/acc 5——归一方向×speed 与现速按 (acc−1):1 混合,Player.cs
+        // :34527-34541）。心/星/币的 Pickup 档各有自身条件门（lifeMagnet/manaMagnet/
+        // goldRing）,缺省 Common 与本仓既有面同相——本刀只接 nebula 恒达档。
+        if (NEBULA_BOOSTER_VIDS.has(vidThis)) {
+          const dxN = player.cx - this.cx, dyN = player.cy - this.cy;
+          const dN = Math.sqrt(dxN * dxN + dyN * dyN) || 1;
+          this.vx = (this.vx * 4 + (dxN / dN) * 12) / 5;
+          this.vy = (this.vy * 4 + (dyN / dN) * 12) / 5;
+        } else {
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
         // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597
         // else 分支仅 position+=velocity),物品穿墙飞向玩家。
         // ★CanPullItem 分支先清 shimmered（Player.cs:34498）——拉动一旦开始,
         // 微光速度门解除,后续按普通物品吸走拾取（此前不清 → 拉动中恒 ≥0.2 死锁）
-        this.shimmered = false;
-        beingGrabbed = true;
-        this.grabbed = true;
         const SPEED = 0.45, MAXV = 4, BACK = 0.75;
         if (player.cx > this.cx) {
           if (this.vx < MAXV + player.vx) this.vx += SPEED;
@@ -392,6 +413,7 @@ export class ItemDrop extends Entity {
         } else {
           if (this.vy > -MAXV) this.vy -= SPEED;
           if (this.vy > 0) this.vy -= SPEED * BACK;
+        }
         }
       }
       }   // /if (grabbable) —— 顶部速度门（Player.cs:34466）

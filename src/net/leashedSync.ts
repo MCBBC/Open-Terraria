@@ -164,9 +164,10 @@ export function internalIdOfVid(itemVid: number): number {
 // 原版锚桩（TELeashedEntityAnchorWithItem）只有破坏掉物一路（DropItemForTileBreak
 // :20-30 + OnRemoved → DespawnLeashedEntity），无 OnPlayerInteraction——"右键取回"
 // 是本仓扩展交互（房主/单人本地直取，访客经 sub4 请求房主代取）。此处只做
-// 纯状态约简（furniture 记录 + 拴绳实体 + 掉物/广播回调），不触 tile——锚桩
-// 本体保留（空桩可再放置，= 原版 itemType=0 的合法态）；tile 破坏仍走既有
-// msg17 TileBatch 链（破坏掉物语义不变，见 Game 破坏钩）。
+// 纯状态约简（furniture 记录 + 拴绳实体 + 掉物/广播回调），不触 tile——★BJ426 ④
+// （2026-10-01）：锚桩 tile 本体由绑定方（Game.retrieveLeashedAnchor）在取回成功后
+// 清除，= 原版唯一回收路（tile 破坏）同态，线圈贴图随实体亡；旧「tile 保留=空桩
+// 可再放置」自创态已撤（回收后线圈残留=用户实报④）。
 
 /** 房主侧取回的世界绑定（Game.retrieveLeashedAnchor 组装；测试以 mock 注入） */
 export interface LeashedRetrieveHost {

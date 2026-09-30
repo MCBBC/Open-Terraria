@@ -240,3 +240,54 @@ describe('W×H 读数绘制位=黑幕之后/HUD 尾段（Renderer 结构锁,清�
     expect(iReadout).toBeLessThan(at('this.drawMouseTextLayer(ctx, player);'));
   });
 });
+
+// ============================================================
+// ★BJ422 2026-10-01（用户实报：①标尺网格约 140 英尺阴影带消失,不严格按深度——
+//  走两步又见=位置相关;②黑暗地牢格子应亮青显示,本仓随光照减弱而消失/变暗）。
+//  定谳：原版标尺两件（网格 Main.cs:47146-47224 / 标尺线 :47046-47140）属接口层
+//  SetupDrawInterfaceLayers（"Vanilla: Laser Ruler" :45500 / "Vanilla: Ruler"
+//  :45505）=世界渲染（逐格顶点采光）之后的【无光直绘】:调色恒量
+//  (0.24,0.8,0.9,0.5)×0.4×num3（:47162-47163,驱动=Distance(position,shadowPos[2])
+//  残影滞后）/ (0.24,0.8,0.9,1)×0.8×num4（:47103-47104,驱动=velocity.Length()）,
+//  【零光照引用、零深度门】;層序 接口层 3/4 < 图格网格 6（:45515）。
+//  本仓病灶：调用位曾挂世界层 4.56（compositeLight 之前）→ 全屏乘光把格子按所站
+//  格光值压暗,光≈0 即消失（=两症状同根;"140 英尺"只是该处天空环境光衰减尽位,
+//  非代码深度阈值——Game.ts 注入门域无任何深度条件）。落刀=挪至 compositeLight
+//  之后 7a-pre（主画布重建相机变换）。
+//  ★变异证红：①调用位回挪世界层（compositeLight 之前）即红;②绘制体引入
+//  lightR/lightB/lightAt/GetColor 任一光照读点即红;③层内序倒转（画到图格网格
+//  之后）即红。
+// ============================================================
+describe('★BJ422 标尺绘制位=光照合成后（接口层 3/4 无光直绘语义）', () => {
+  const rendererSrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'src/render/Renderer.ts'), 'utf8');
+  const at = (s: string): number => rendererSrc.indexOf(s);
+
+  it('① 调用位在 compositeLight 之后（回挪世界层 4.56 旧位=乘光病灶,即红）', () => {
+    const iLight = at('this.compositeLight(');
+    const iRuler = at('this.drawBuilderRulers(');
+    expect(iLight).toBeGreaterThan(-1);
+    expect(iRuler).toBeGreaterThan(iLight);
+    // 全文件唯一调用:compositeLight 之前不得再出现调用点（含 4.56 旧位回潮）
+    expect(rendererSrc.slice(0, iLight)).not.toContain('this.drawBuilderRulers(');
+  });
+  it('② 层内序：标尺(接口层 3/4)在图格网格(接口层 6)之前（Main.cs:45500/:45505 < :45515）', () => {
+    expect(at('this.drawBuilderRulers(')).toBeLessThan(at('this.drawBuildingGrid('));
+  });
+  it('③ 绘制体零光照引用（恒量色直绘锁:引入 lightR/lightB/lightAt/GetColor 读点即红）', () => {
+    const iDef = rendererSrc.indexOf('private drawBuilderRulers(');
+    expect(iDef).toBeGreaterThan(-1);
+    const iDoc = rendererSrc.lastIndexOf('/**', iDef);   // 含方法头定谳注释
+    const iNext = rendererSrc.indexOf('\n  private ', iDef + 10);
+    const body = rendererSrc.slice(iDoc, iNext);
+    expect(body).toMatch(/调色恒量|常量色|无光|零光照/);   // 定谳注释在位（防锁体漂移到别方法）
+    expect(body).not.toMatch(/\blight[RGB]\b|\blightAt\b|GetColor|getColor|compositeLight/);
+  });
+  it('④ ctx 参数化锁（调用方传主画布 ctx;旧 this.ctx 直取=世界层耦合回潮即红）', () => {
+    const iDef = rendererSrc.indexOf('private drawBuilderRulers(');
+    const iNext = rendererSrc.indexOf('\n  private ', iDef + 10);
+    const body = rendererSrc.slice(iDef, iNext);
+    expect(body).not.toContain('this.ctx');
+    expect(rendererSrc.slice(iDef, iDef + 120)).toMatch(/drawBuilderRulers\(ctx: CanvasRenderingContext2D/);
+  });
+});

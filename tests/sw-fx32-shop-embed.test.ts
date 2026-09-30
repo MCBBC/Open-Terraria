@@ -17,6 +17,7 @@ import {
   shopSlotXY, chestSlotXY, shopShelfBand,
   shopHappinessIconXY, shopHappinessTextXY, happinessFrameX,
   shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE,
+  shopSavingsRowXY, shopSavingsCoinTextXY, SHOP_SAVINGS_CNT_BAND_H,   // ★BJ421
 } from '../src/ui/vanillaInvLayout';
 import { Game } from '../src/core/Game';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
@@ -120,9 +121,13 @@ describe('SW-FX32 ①储蓄行金标(ItemSlot.cs:3712-3757 DrawSavings→DrawMon
     expect(itemSlotSrc).toContain('if (num5 > 0)');                                              // :3726 门
     expect(itemSlotSrc).toContain('DrawMoney(sb, Lang.inter[66].Value, shopx, shopy, Utils.CoinsSplit(num5), horizontal, fromSavings: true)');  // :3757
     expect(itemSlotSrc).toContain('new Vector2(shopx + 11f + (float)(24 * j), shopy + 75f - drawState.coinYOffset)');   // :3699-3701
+    // ★BJ421 判别锚:计数文字 origin(0,LineSpacing) 抵消自身 y 偏移 → 字形顶=shopy+75
+    //  (与币图标中心同 y,同带交叠非竖排;Utils.cs:2633-2664 五连画同 origin)
+    expect(itemSlotSrc).toContain('new Vector2(0f, FontAssets.ItemStack.Value.LineSpacing)');   // :3710 origin
+    expect(itemSlotSrc).toContain('shopy + 75f + (float)FontAssets.ItemStack.Value.LineSpacing * 0.75f');   // :3705-3710 position
   });
 
-  it('储蓄标签 @(504,298)(DrawMoney :3671 shopx,shopy+40)/币图标 @(515+24j,333)(:3699-3701)', () => {
+  it('储蓄标签 @(504,298)(DrawMoney :3671 shopx,shopy+40)/币图标【中心】@(515+24j,333)(:3699-3701 DrawItemCoin 中心锚)', () => {
     expect(shopSavingsLabelXY()).toEqual({ x: 504, y: 258 + 40 });
     expect([0, 1, 2, 3].map(shopSavingsCoinXY)).toEqual([
       { x: 504 + 11, y: 258 + 75 },
@@ -144,6 +149,58 @@ describe('SW-FX32 ①储蓄行金标(ItemSlot.cs:3712-3757 DrawSavings→DrawMon
 });
 
 // ============================================================
+// ①b BJ421 判别测试(2026-09-23 用户实报:储蓄计数行与快乐度图标/百分比重叠)
+//   原版行谱(Main.cs:42500-42532 右列 x=504 自上而下):店名(+0)/储蓄行(DrawSavings
+//   :42503 → 标签+40/银行图标+45..60/币图标中心+75/计数字形顶+75)/快乐度行
+//   (图标中心+108→顶+96,文字顶+98)——储蓄计数带 333..333+18=351 与快乐带
+//   354..378 天然不叠。本仓曾竖排堆叠(计数 ~353..368)撞带=重叠,本段钉死不叠定理。
+// ============================================================
+describe('SW-FX32 ①b BJ421 储蓄行/快乐度行并存不叠(ItemSlot.cs:3699-3710 × Main.cs:67677-67680)', () => {
+  const cntBand = (): [number, number] => {
+    // 带顶取 UI 消费面锚(shopSavingsCoinTextXY=cnt item pos 源)——锚漂移即三测齐红
+    const top = shopSavingsCoinTextXY(0).y;                 // 333 = 计数字形顶
+    return [top, top + SHOP_SAVINGS_CNT_BAND_H];            // lineSpacing 24×0.75=18
+  };
+  const happyIconBand = (): [number, number] => {
+    const c = shopHappinessIconXY();                        // 中心 (516,366)
+    return [c.y - 12, c.y + 12];                            // 24×24 帧中心锚
+  };
+  const happyTextTop = (): number => shopHappinessTextXY().y;   // 356
+  const overlap = (a: [number, number], b: [number, number]): boolean =>
+    a[0] < b[1] && b[0] < a[1];
+
+  it('锚钉值:计数带 333..351/快乐图标带 354..378/快乐文字顶 356(Main.cs:67677-67680)', () => {
+    expect(shopSavingsRowXY()).toEqual({ x: 504, y: 258 + 75 });
+    expect([0, 1, 2, 3].map(shopSavingsCoinTextXY)).toEqual([
+      { x: 504, y: 258 + 75 },
+      { x: 504 + 24, y: 258 + 75 },
+      { x: 504 + 48, y: 258 + 75 },
+      { x: 504 + 72, y: 258 + 75 },
+    ]);
+    expect(SHOP_SAVINGS_CNT_BAND_H).toBe(18);               // Item_Stack lineSpacing=24 × 0.75
+    expect(happyIconBand()).toEqual([258 + 96, 258 + 120]); // 中心+108 −/+12
+    expect(happyTextTop()).toBe(258 + 98);
+  });
+
+  it('不叠定理:两行同显时储蓄计数带 ∩ 快乐带 = ∅(余隙 3px,变异=竖排回潮即红)', () => {
+    const [ct, cb] = cntBand();
+    const [it_, ib] = happyIconBand();
+    expect(cb).toBeLessThanOrEqual(it_);                    // 351 ≤ 354
+    expect(cb).toBeLessThanOrEqual(happyTextTop());         // 351 ≤ 356(文字更低)
+    expect(overlap([ct, cb], happyIconBand())).toBe(false);
+    expect(overlap([ct, cb], [happyTextTop(), happyTextTop() + 18])).toBe(false);
+    expect(it_ - cb).toBeGreaterThanOrEqual(3);             // 原版余隙钉值
+  });
+
+  it('同带交叠语义:计数文字与币图标同 y(交叠)=原版画序,非上下堆叠', () => {
+    for (let j = 0; j < 4; j++) {
+      expect(shopSavingsCoinTextXY(j).y).toBe(shopSavingsCoinXY(j).y);   // 同带
+      expect(shopSavingsCoinTextXY(j).x).toBe(shopSavingsCoinXY(j).x - 11);   // :3705 shopx+24j vs :3699 shopx+11+24j
+    }
+  });
+});
+
+// ============================================================
 // ② 单源接线锚定(结构锁,变异证红):vinvBuildShop 几何只认 vanillaInvLayout
 // ============================================================
 describe('SW-FX32 ②单源接线锚定(结构锁,变异证红)', () => {
@@ -161,9 +218,23 @@ describe('SW-FX32 ②单源接线锚定(结构锁,变异证红)', () => {
     expect(uiSrc).toContain('const { x, y } = shopSlotXY(i);');
     expect(uiSrc).toContain('{ x: SHOP_TITLE_XY.x, y: SHOP_TITLE_XY.y }');
     expect(uiSrc).toContain('return shopSavingsLabelXY();');
-    expect(uiSrc).toContain('return shopSavingsCoinXY(0);');
+    expect(uiSrc).toContain('const c = shopSavingsCoinXY(j);');
+    expect(uiSrc).toContain('return shopSavingsCoinTextXY(j);');
     expect(uiSrc).toContain('shopHappinessIconXY()');
     expect(uiSrc).toContain('vis() ? shopHappinessTextXY() : null');
+  });
+
+  it('★BJ421 结构锁:币图标中心锚+计数独立 item(禁 coinRow 容器竖排回潮)', () => {
+    const start = uiSrc.indexOf('private vinvBuildShop');
+    const body = uiSrc.slice(start, uiSrc.indexOf('private vinvRefreshShop', start));
+    expect(body).toContain('const c = shopSavingsCoinXY(j);');
+    expect(body).toContain('return { x: c.x - wHalf, y: c.y - wHalf };');   // 中心锚(DrawItemCoin origin=Size()/2)
+    expect(body).toContain('return shopSavingsCoinTextXY(j);');             // 计数=独立 item 字形左上
+    // 竖排回潮三禁(曾把计数推入快乐带=BJ421 重叠根因)
+    expect(body).not.toContain('vinvShopCoinRow');       // 单容器行
+    expect(body).not.toContain('margin:0 auto');         // 图标流式占位再叠计数
+    expect(body).not.toContain('text-align:center');     // 计数居中(原版=左对齐 +24j)
+    expect(uiSrc).not.toContain('return shopSavingsCoinXY(0);');   // 行左上锚消费面(语义已废)
   });
 
   it('反向锁定:内联字面已废除,禁回潮(货架/happiness/储蓄坐标不落 UI.ts)', () => {
@@ -277,7 +348,8 @@ describe('SW-FX32 ③买卖接线/悬停单源(SW-BJ22 语义面 vanilla 载体)
   it('悬停 tooltip 单源:showShopCellTooltip 浮面板/内嵌货架共用(SW-BJ22 语义面)', () => {
     expect(uiSrc).toContain('private showShopCellTooltip(hover: ShopCellHover, anchor: HTMLElement | null): void');
     expect(uiSrc).toContain('(hover, anchor) => this.showShopCellTooltip(hover, anchor)');
-    expect(uiSrc).toContain('this.showShopCellTooltip({ vid: it.vanillaId, stack: 1, prefix: it.prefix, buyback: it.buyback }, cell)');
+    // ★S4 后盘上代码以 (e.currentTarget as HTMLElement) 传锚 ≡ cell(监听即挂在 cell 上)
+    expect(uiSrc).toContain('this.showShopCellTooltip({ vid: it.vanillaId, stack: 1, prefix: it.prefix, buyback: it.buyback }, (e.currentTarget as HTMLElement))');
   });
 
   it('店名文案回写:vinvRefreshShop 画 payload title(探针实测曾漏=空店名,红方回锁)', () => {

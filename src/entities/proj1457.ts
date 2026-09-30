@@ -25,6 +25,7 @@ import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll 
 // ★BJ420 幽灵伤害头 ghostHurt 同单源 + 受理面快照（清偿刀 T 族规）
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt,
   snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
@@ -1114,6 +1115,15 @@ export class PetalstormShot extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
       this.dead = true;                                       // penetrate=1 → Kill
     });
@@ -1814,6 +1824,15 @@ export class StormLightning extends Entity {
             lifeMax: e.maxHp,
             dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      // （本类竖落闪电无 vx,projDirX=0 → num40 缺省向 +1）
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: 0 },
+        { x: e.x, y: e.y, w: e.w, h: e.h,
+          cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+          vanillaId: e.vanillaId,
+          lifeMax: e.maxHp,
+          dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     }
   }
@@ -2339,6 +2358,15 @@ export class GlacierFangShot extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.hits++;
       this.pveNumHits++;                                     // ★X2-D4 写位（与 hits 同面）
       if (this.hits >= this.penTier) this.dead = true;          // penetrate 耗尽 → Kill
@@ -2641,6 +2669,15 @@ export class ThunderBoltShot extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     });                                                        // 缺省免疫窗（非 local 表族）
   }
@@ -2879,6 +2916,15 @@ export class LaserMachinegunLaser extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     });
   }
@@ -3093,6 +3139,15 @@ export class BookStormTwister extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     });                                                         // localNPCHitCooldown=−1
   }
@@ -3377,6 +3432,15 @@ export class PrincessMagicCircle extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     });                                                         // 缺省免疫窗
   }

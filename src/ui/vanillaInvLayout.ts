@@ -138,16 +138,37 @@ export function shopHappinessIconXY(): { x: number; y: number } {
 }
 /** 储蓄行(ItemSlot.cs:3712-3757 DrawSavings→DrawMoney vertical fromSavings)。
  *  语义:【只】合计 bank..bank4 币值(存钱罐/保险箱/熔炉/虚空保险库)>0 才画整行;
- *  文字 = Lang.inter[66] @(shopx,shopy+40)(ItemSlot.cs:3671);币图标 @(shopx+11+24j,
- *  shopy+75) j=0..3 = 74-ji(铂/金/银/铜)(ItemSlot.cs:3699-3701);数量文字在图标下
- *  (ItemStack 字体 0.75 缩放,基线偏移=字体度量——DOM 以 CSS 近似,偏差备案) */
+ *  文字 = Lang.inter[66] @(shopx,shopy+40)(ItemSlot.cs:3671);币图标【中心】
+ *  @(shopx+11+24j,shopy+75) j=0..3 = 74-ji(铂/金/银/铜)(ItemSlot.cs:3699-3701 →
+ *  CoinSlot.DrawItemCoin CoinSlot.cs:254-270 origin=Size()/2 中心锚;帧 12x14/12x16/
+ *  12x18/14x18);计数文字与币图标【同带交叠】非竖排:DrawBorderStringFourWay
+ *  @(shopx+24j+num2,shopy+75+LineSpacing·0.75) origin(0,LineSpacing=24) scale 0.75
+ *  → 字形顶 = position.y−24·0.75 = shopy+75(Utils.cs:2633-2664 五连画同 origin;
+ *  Item_Stack 字体 lineSpacing=24)——★BJ421(2026-09-23 用户实报):曾把 (shopx+11+24j,
+ *  shopy+75) 当【左上】锚+图标上/计数下竖排堆叠,计数被推入 y≥354 快乐带(图标顶
+ *  =366−12=354)撞「100%」——原版计数带 333..351 与快乐带 354..378 天然不叠,禁回潮 */
 export const SHOP_SAVED_LABEL_OFF = { x: 0, y: 40 } as const;
 export function shopSavingsLabelXY(): { x: number; y: number } {
   return { x: 504 + SHOP_SAVED_LABEL_OFF.x, y: 258 + SHOP_SAVED_LABEL_OFF.y };
 }
+/** 币行总锚 = 计数文字字形左上基带 x=504(ItemSlot.cs:3705-3710 shopx+24j);
+ *  UI 消费:计数文字 pos=本锚+24j,币图标 pos=shopSavingsCoinXY(j) 中心锚 */
+export function shopSavingsRowXY(): { x: number; y: number } {
+  return { x: 504, y: 258 + 75 };
+}
+/** 币图标【中心】(ItemSlot.cs:3699-3701 shopx+11+24j,shopy+75−coinYOffset;
+ *  DrawItemCoin 中心锚 CoinSlot.cs:254-270) */
 export function shopSavingsCoinXY(j: number): { x: number; y: number } {
   return { x: 504 + 11 + 24 * j, y: 258 + 75 };
 }
+/** 计数文字字形左上(ItemSlot.cs:3705-3710 shopx+24j+num2,字形顶=shopy+75;
+ *  num2 = −6 仅 j=0 且铂>99 :3698,消费面乘) */
+export function shopSavingsCoinTextXY(j: number): { x: number; y: number } {
+  return { x: 504 + 24 * j, y: 258 + 75 };
+}
+/** 计数带高上界(Item_Stack lineSpacing=24 × 0.75 缩放 = 18px;行带 333..351,
+ *  快乐图标顶 354——BJ421 判别测试钉值) */
+export const SHOP_SAVINGS_CNT_BAND_H = 18;
 /** 四银行小图标落位(ItemSlot.cs:3727-3740;CenteredRectangle 中心点,贴图 ×0.65):
  *  bank4 虚空袋 4076 (70,45)/bank3 守护者熔炉 3813 (92,45)/bank2 保险箱 346 (80,50)/
  *  bank 存钱罐 87 (70,60)——bank = 本仓 p.banks 下标(-2 存钱罐..-5 虚空对应 0..3) */

@@ -49,6 +49,7 @@ import { dealContacts, ID_STATIC_482_TABLE } from './proj1457';
 // ★清偿刀 R1 D1（2026-09-30）：ghostHurt 幽灵伤害头同构补面（BJ420 登记债五弹之末）
 import { hitCritters } from './projTargets';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { PLATFORMS_SHEETS } from '../data/tiles';
 import { limitPointToPlayerReachableArea } from './PlayerReachableArea';   // ★BJ290 件3 单源化
@@ -255,6 +256,15 @@ export class ClingerStaffWallProj extends Entity {
             lifeMax: v420.maxHp ?? v420.def?.lifeMax,
             dealt: v420.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持全部门
+      nebulaBoosterOnHit(game,
+        { projId: this.projId, projDirX: this.vx },
+        { x: t.x, y: t.y, w: t.w, h: t.h,
+          cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+          vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+          lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+            ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+          dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       this.pveNumHits++;
     }, undefined, -2, false, halveWormDamage);
   }

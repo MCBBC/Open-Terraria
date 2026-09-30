@@ -14,6 +14,7 @@ import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision } from './npcLiquid';   // lavaCollision 随湿段收口迁 projWetSection 共享体（2026-09-08）
@@ -1263,8 +1264,6 @@ export class Arrow extends Entity {
   private get settlePen(): number {
     return this.armorPen + (projectileData(this.projId)?.armorPenetration ?? 0);
   }
-  /** 星云套 booster 回调（StrikeNPC :12892-12905：魔法弹命中 → Game 判定掉落） */
-  nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
   /** 冰霜盔甲引擎资格（ranged 弹 true;魔法/召唤弹 false——原版 melee||ranged 门） */
@@ -9454,7 +9453,8 @@ export class Arrow extends Entity {
           applyFrostBurn((game.player as unknown as { equipStats: { frostBurn: boolean } }).equipStats.frostBurn,
             e as unknown as Record<string, number>);
         }
-        if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
+        // ★BJ424：旧 nebulaCb 回调退役——星云触发单源 nebulaBoosterOnHit（下方
+        // ghostHurt 同位,Damage_PVE_Inner :13885-13891 全 magic 弹面）
         // ★焰爆石 kind1 + 拍击石 kind0 弹幕侧双支（Damage_PVE_Inner :13439-13446，
         // 书写序 = k1 先 k0 后）。★F3/F1 收编（2026-08-31 蓝队四轮）：类门+触发走
         // projectileSnapStrikeBonus 单源（pyroclastProjectileGate /
@@ -9581,6 +9581,15 @@ export class Arrow extends Entity {
                 lifeMax: v661.maxHp ?? v661.def?.lifeMax,
                 dealt: v661.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
           }
+          // ★BJ424 星云套装 proc（:13885-13891,原版 ghostHurt 同块同门面）——引擎
+          // 自持 magic/CD/1/3/受害者门,全 magic 弹面生效（旧 nebulaCb 仅 4 专支）
+          nebulaBoosterOnHit(game,
+            { projId: this.projId, projDirX: this.vx },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: v661.vanillaId,
+              lifeMax: v661.maxHp ?? v661.def?.lifeMax,
+              dealt: v661.lastStrikeDealt ?? 0 });
         }
         // ★BJ157-②③：numHits++（:14263——吸血链/ghostHurt on-hit 段之后的命中尾位,
         //  与原版递增点同相;读点（上方吸血链）取自增前值）

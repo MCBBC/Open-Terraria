@@ -1723,8 +1723,9 @@ export class ClientNet {
   }
 
   /** 访客取回锚桩存物请求（sub4，服务器定向转发房主——房主校验 furniture 记录后
-   *  权威取回：弹存物 + 消散实体 + 掉物走既有 msg21，访客收包拾取。锚桩 tile
-   *  不动（破坏仍走 msg17 TileBatch 链）） */
+   *  权威取回：弹存物 + 消散实体 + 掉物走既有 msg21，访客收包拾取。★BJ426 ④：取回
+   *  后锚桩 tile 一并清除（= 原版唯一回收路 tile 破坏同态,线圈随实体亡）——房主侧
+   *  setTile 经 netReporter msg17 TileBatch 广播,访客落格） */
   sendLeashedRetrieveRequest(ax: number, ay: number, kind: number) {
     this.send(writeLeashedRetrieveRequest(ax, ay, kind));
   }

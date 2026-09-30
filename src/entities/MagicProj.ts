@@ -9,6 +9,7 @@
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
@@ -230,6 +231,14 @@ export class MagicProj extends Entity {
                   lifeMax: v156.maxHp ?? v156.def?.lifeMax,
                   dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
             }
+            // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——触发单源
+            nebulaBoosterOnHit(game,
+              { projId: this.projId, projDirX: this.vx },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v156.vanillaId,
+                lifeMax: v156.maxHp ?? v156.def?.lifeMax,
+                dealt: v156.lastStrikeDealt ?? 0 });
           }
         }
         this.dead = true;

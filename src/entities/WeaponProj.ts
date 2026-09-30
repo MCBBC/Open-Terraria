@@ -26,6 +26,7 @@ import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道
 import { ProjGhostRing, projTrailingMode, drawRainbowChain, drawHslMidpointTrail } from './projGhostTrail';   // ★BJ235 1089/563 残影
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt, ghostHealProc } from './SpectreSoulProj';   // ★BJ382 雨滴 239/245 proc 单源
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 // Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
 // 直生 + broadcast 上行同用此函数）
 import { paladinsHammerShockwaveFx } from '../fx/orchestraFx';
@@ -4130,6 +4131,15 @@ export class YoyoShotProj extends Entity {
             vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
             dealt: v156.lastStrikeDealt ?? 0 });
       }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持 magic 门
+      if (this.projId > 0) {
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h, cx: (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
+      }
       if (this.projId === 1134) break;                       // penetrate 1（:10643）
     }
   }
@@ -7955,6 +7965,16 @@ export class DaybreakFlare extends Entity {
             cy: ((e as unknown as { cy?: number }).cy ?? e.y + e.h / 2),
             vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
             dealt: v156.lastStrikeDealt ?? 0 });
+      }
+      // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持 magic 门
+      if (this.projId > 0) {
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: ((e as unknown as { cx?: number }).cx ?? e.x + e.w / 2),
+            cy: ((e as unknown as { cy?: number }).cy ?? e.y + e.h / 2),
+            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       }
       // :10691-10693 + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,

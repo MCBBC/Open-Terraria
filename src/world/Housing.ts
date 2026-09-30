@@ -1334,6 +1334,150 @@ export function unspawnHomelessSweep<K>(
   return { despawned: { ...target }, flagCleared: null, skippedByPlayer: false };
 }
 
+// ================= 流浪落位核（SpawnHomelessNPC WorldGen.cs:5037-5115，★BJ425 2026-10-01） =================
+// ★BJ425 用户实报「发型师嵌地牢入口长梯砖内」定谳（Game.updateTownNpcArrival ③ 旧
+// ±(30..80)/±20 近似三债同发；BJ37 曾把旅行商同款修掉、本面系其登记剩债）：
+//   ① 锚池含 37 老人（:5019 锚数组 type!=37 字面排除——老人 home=地牢口 → 锚落
+//     dungeonX 邻域，扫描列下探竖井）；修=调用方改从 anchorPool 取锚。
+//   ② 落位无净空门 + 谓词穿平台 + Bottom 传 (ay+1)*TILE=地面格【底边】（开阔地
+//     也嵌 16px；平台九件套被 isSolid 漏判 → 长梯踏板不落、一路下探实心地牢砖）。
+//   ③ 扫描域越 worldSurface（:5060-5093 纵向钳 [bestY-n, worldSurface]——地牢
+//     竖井 vanilla 永不可达）。
+// 本核 = :5037-5093 落位逐字（锚行走查→30 掷同层列→菱形扩环→落位/泄漏怪癖），
+// 四实心谓词走 BJ37 单源（spawnTileSolid/solidTilesCell/worldSolidTile/
+// vanillaTileSolidPure/VANILLA_TILE_SOLID_TOP），生成几何契约见返回注释。
+
+import {
+  spawnTileSolid, solidTilesCell, worldSolidTile,
+  vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP,
+} from './spawn/VanillaSpawner';
+
+export interface HomelessWanderPlacement {
+  /** 生成列/行（num8/num9：地板行口径；脚底 = spawnY*TILE = 地面格【顶边】，
+   *  NewNPC Bottom=(num8*16,num9*16) NPC.cs:81607 同构；调用方 x=spawnX*TILE−w/2） */
+  spawnX: number;
+  spawnY: number;
+  /** homeTile 写值（:5107-5108 = 【掷列】bestX/锚地行 bestY——非落位列，quirk；
+   *  QuickFindHome 扫描锚=此值,失败不清） */
+  homeX: number;
+  homeY: number;
+  /** 方向（:5111-5115：num8<bestX→1 / num8>bestX→−1 / 无变化→0=调用方不改向） */
+  dir: 0 | 1 | -1;
+}
+
+/**
+ * SpawnHomelessNPC 流浪落位核（WorldGen.cs:5037-5093 逐字；调用方先按 ：5019 门
+ * 排除 37 老人再传锚）。输入 anchorX/anchorY = vanilla homeTile 口径【地板行】。
+ * 三段：
+ *  · 锚行走查（:5039-5052）：自锚列左右各 ≤9 格连片走查——floor=SolidTile||
+ *    tileSolidTop（平台可作地）、上 3 格 clear=!active||!tileSolid||tileSolidTop
+ *    （家具/平台不阻、致动实心阻）；
+ *  · 30 掷同层列（:5053-5066）：前 20 掷须离锚列 ≥2、后 10 掷须 ≠ 锚列，全拒
+ *    =锚列（bestX 保持）；
+ *  · 菱形扩环（:5068-5093；门 ：5069 `!(bestY>worldSurface)`——锚在地表线下
+ *    【整段跳过】）：n∈[20,500) × 左右 ±2n 列，列内自 max(10,bestY−n) 向下扫到
+ *    min(bestY+n, worldSurface)：floor=nactive&&tileSolid（spawnTileSolid——平台
+ *    踏板【可落】）、列内首实心格即止：液检（上 3 行 liquid≠0→列死）→ SolidTiles
+ *    3×3 净空（solidTilesCell——平台不阻；命中→列死）→ 玩家屏盒（sWidth/sHeight
+ *    +safeRange,相交→flag2 翻 false 继续扫）。
+ *  ★原版字面怪癖（BJ37 旅行商同款先例）：扫描失败时 num8/num9 停在【最后一次尝试
+ *    值】（可为越界列/死列——num8 侧循环头无条件覆写、num9 逐行覆写），落位即用
+ *    该值,不做任何有效性补救——逐字照抄,勿"修好"。
+ *  本仓守卫（登记差异）：锚越界→null（vanilla tile 数组无越界语义）;落点越界由
+ *    调用方放弃生成（TileStore 无世界外格）。
+ */
+export function homelessWanderPlacement(
+  st: TileStore,
+  anchorX: number, anchorY: number, worldSurface: number,
+  players: ReadonlyArray<{ x: number; y: number; w: number; h: number }> = [],
+  rand: () => number = Math.random,
+): HomelessWanderPlacement | null {
+  if (!st.inBounds(anchorX, anchorY)) return null;
+  let bestX = anchorX;
+  const bestY = anchorY;
+  // 锚行走查单列谓词（:5039-5046 条件体）
+  const walkCol = (x: number): boolean => {
+    if (!st.inBounds(x, bestY)) return false;
+    // floor = SolidTile || tileSolidTop（后者无 active 门,原版字面读 type 表）
+    if (!(worldSolidTile(st, x, bestY) || VANILLA_TILE_SOLID_TOP.has(st.type[st.idx(x, bestY)]))) return false;
+    for (let k = 1; k <= 3; k++) {
+      if (!st.inBounds(x, bestY - k)) return false;
+      const t = st.type[st.idx(x, bestY - k)];
+      // clear = !active() || !tileSolid[type] || tileSolidTop[type]
+      if (st.hasTile(x, bestY - k) && vanillaTileSolidPure(t) && !VANILLA_TILE_SOLID_TOP.has(t)) return false;
+    }
+    return true;
+  };
+  // 左走查（num6 自 bestX 起,> bestX-10）：锚列自检不过则两向都不延展
+  let minValue = bestX;
+  for (let num6 = bestX; num6 > bestX - 10 && walkCol(num6); num6--) minValue = num6;
+  // 右走查（l 自 bestX 起,< bestX+10）
+  let num4 = bestX;
+  for (let l = bestX; l < bestX + 10 && walkCol(l); l++) num4 = l;
+  // 30 掷（:5053-5066）：Next(minValue, num4+1) 半开
+  for (let m = 0; m < 30; m++) {
+    const num7 = minValue + Math.floor(rand() * (num4 + 1 - minValue));
+    if (m < 20) {
+      if (num7 < bestX - 1 || num7 > bestX + 1) { bestX = num7; break; }
+    } else if (num7 !== bestX) { bestX = num7; break; }
+  }
+  // 菱形扩环（:5068-5093）——num8/num9 方法级变量,泄漏怪癖照抄
+  let num8 = bestX;
+  let num9 = bestY;
+  let flag2 = false;
+  if (!(bestY > worldSurface)) {
+    scan:
+    for (let n = 20; n < 500; n++) {
+      for (let side = 0; side < 2; side++) {
+        num8 = side !== 0 ? bestX - n * 2 : bestX + n * 2;
+        if (num8 > 10 && num8 < st.w - 10) {
+          let num11 = bestY - n;
+          let num12 = bestY + n;
+          if (num11 < 10) num11 = 10;
+          if (num12 > worldSurface) num12 = worldSurface;
+          for (let num13 = num11; num13 < num12; num13++) {
+            num9 = num13;
+            if (!spawnTileSolid(st, num8, num9)) continue;
+            // 液检（:5082-5083 上 3 行 liquid≠0 → 列死）
+            if ((st.inBounds(num8, num9 - 3) && st.liquid[st.idx(num8, num9 - 3)] !== 0)
+              || (st.inBounds(num8, num9 - 2) && st.liquid[st.idx(num8, num9 - 2)] !== 0)
+              || (st.inBounds(num8, num9 - 1) && st.liquid[st.idx(num8, num9 - 1)] !== 0)) break;
+            // SolidTiles(num8-1,num8+1,num9-3,num9-1)（:5084）——任一实心 → 列死
+            let solidHit = false;
+            for (let dx = num8 - 1; dx <= num8 + 1 && !solidHit; dx++) {
+              for (let dy = num9 - 3; dy <= num9 - 1 && !solidHit; dy++) {
+                if (solidTilesCell(st, dx, dy)) solidHit = true;
+              }
+            }
+            if (solidHit) break;
+            flag2 = true;
+            // 玩家屏盒（:5085-5090 Rectangle(num8*16+8−sWidth/2−safeRangeX, …)）
+            const rx = num8 * 16 + 8 - NPC_S_WIDTH / 2 - NPC_SAFE_RANGE_X;
+            const ry = num9 * 16 + 8 - NPC_S_HEIGHT / 2 - NPC_SAFE_RANGE_Y;
+            const rw = NPC_S_WIDTH + NPC_SAFE_RANGE_X * 2;
+            const rh = NPC_S_HEIGHT + NPC_SAFE_RANGE_Y * 2;
+            for (const p of players) {
+              if (p.x < rx + rw && p.x + p.w > rx && p.y < ry + rh && p.y + p.h > ry) {
+                flag2 = false;
+                break;
+              }
+            }
+            break;
+          }
+        }
+        if (flag2) break scan;
+      }
+    }
+  }
+  return {
+    spawnX: num8,
+    spawnY: num9,
+    homeX: bestX,
+    homeY: bestY,
+    dir: num8 < bestX ? 1 : num8 > bestX ? -1 : 0,
+  };
+}
+
 export interface NearChainOutcome<K> {
   /** wallHouse 命中采样点（null=本步未命中） */
   seedHit: [number, number] | null;

@@ -19,9 +19,12 @@ import { visEffectFrames } from '../entities/Enemy';   // ★2026-09-27 微光 t
 import { gameTickCount } from '../core/GameTime';      // ★2026-09-27 液体相位逐 tick 累计钟源
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
-const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
-                                          // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150);
-                                          // 微光 = DrawShimmer val×0.75（LiquidRenderer.cs:700）
+// ★BJ427（2026-10-01）：前景基色表对齐 1457 终值 DEFAULT_OPACITY（LiquidRenderer.cs:108
+//  {0.6,0.95,0.95,0.75};1405:25 同前三维）——旧 {0.5,0.9,0.8} 系误抄【复古光照路】
+//  oldDrawWater 的水基 0.5（Main.cs:58528 num17=0.5f,仅 Lighting.NotRetro=false 才走）;
+//  本仓管线 = DrawNormalLiquids（NotRetro 现役路,:650 `num = Opacity × DEFAULT_OPACITY[Type]`,
+//  岩浆另 ×player.lavaOpacity 恒 1——熔岩潜水镜未移植,本文件浸润带注已登记）。
+const DEFAULT_OPACITY = [0.6, 0.95, 0.95, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——微光 = DrawShimmer val×0.75（LiquidRenderer.cs:707）
 
 // ---- ★IIIII251 斜坡水缘波纹覆盖（用户明示偏差；★IIIII257 转正缺省 true）----
 // 【偏差语义】原版坡面/半砖岸格的水线 = 方块贴图斜边 + 静态浸润带，波场不覆盖
@@ -1009,11 +1012,24 @@ const _liqDebug: LiquidDebugState = {
 // 【修】本仓窗口原=可见屏（底缘已有 +5）,伪影恰好落屏缘 → 左/右/上各外扩 MARGIN
 //  格,使误判列/行出屏。MARGIN=4 ≥ 内窗 pad(2)+包围盒 M(3) 需求（液池恰起于屏缘时
 //  bx0=liquid±3 仍盖住屏缘格 ±1 邻域）,且伪影格 ≥1 格出屏。管线本体零触碰。
+// 【★BJ427（2026-10-01）底缘 +5 不够——P3 瀑布拖尾带露进屏底三行】
+//  机制：P3 拖尾循环界 n < rectangle.Height-10（LiquidRenderer.cs:253,本仓 ph-11
+//  同构）→ 最后处理行 L=窗底 ty1-8;L+1..L+WATERFALL_LENGTH 收 opacity k<1 且
+//  【永不自纠】（P3 不再到达,hasVisA 已由 P2 置位的满液格照画）。原版同带被窗深
+//  （offScreenRange 12.5+5 → 带落屏底下方 10-12 格）掩蔽;本仓窗底仅 +5 → 带顶
+//  三行 ty1-7..ty1-5 = 屏底 sB-2..sB = 用户实报"岩浆底部逐层半透（k=0.75/0.5/0.25
+//  三档）/液面比实际高两格（0.25 行近隐形→可见岩浆边界比实际高约 2 格）/站低即
+//  恢复（池底升出屏底带区）"三症状同根（探针 scripts/_bj427-lava-band.mjs 机位
+//  扫描实测:fade 带随屏底逐格平移,off=+4 恢复）。修=底缘 +5+LIQUID_WINDOW_MARGIN
+//  =9 ≥ 8（掩蔽需求:ty1-7 > sB ⇔ 底缘 ≥8）,与左/右/上同 MARGIN 语义（=原版
+//  offScreenRange 结构:各向等深,+5 为 GetScreenDrawArea 自带项）。世界底钳
+//  （worldH-3）处原版同相（maxTilesY-4 同样钳,深带可回屏=原版同潜病,不另修）。
 export const LIQUID_WINDOW_MARGIN = 4;
 
 /** 液体绘制窗（Renderer.drawLiquids 双 pass 共用；纯函数供单测）。
  *  返回 [tx0, ty0, tx1, ty1]——比可见屏左/右/上各外扩 LIQUID_WINDOW_MARGIN 格、
- *  下缘沿用原版 +5（Main.cs:42900-42908 屏下边距,P3 底带不建区出屏）。 */
+ *  下缘 +5（GetScreenDrawArea 自带项,TileDrawing.cs:6669）+LIQUID_WINDOW_MARGIN
+ *  （★BJ427：P3 拖尾带掩蔽需求 ≥8,见上注）。 */
 export function liquidDrawWindow(
   camX: number, camY: number, viewW: number, viewH: number, z: number,
   worldW: number, worldH: number,
@@ -1023,7 +1039,7 @@ export function liquidDrawWindow(
     Math.max(2, Math.floor((camX - viewW / 2 / z) / ts) - LIQUID_WINDOW_MARGIN),
     Math.max(2, Math.floor((camY - viewH / 2 / z) / ts) - LIQUID_WINDOW_MARGIN),
     Math.min(worldW - 3, Math.ceil((camX + viewW / 2 / z) / ts) + LIQUID_WINDOW_MARGIN),
-    Math.min(worldH - 3, Math.ceil((camY + viewH / 2 / z) / ts) + 5),
+    Math.min(worldH - 3, Math.ceil((camY + viewH / 2 / z) / ts) + 5 + LIQUID_WINDOW_MARGIN),
   ];
 }
 

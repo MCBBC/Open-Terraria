@@ -31,7 +31,9 @@ describe('A0 GLPipeline 管线壳', () => {
     expect(pipelineSrc).toContain('fbo(name: string, w: number, h: number)');
     expect(pipelineSrc).toContain('program(name: string, vs: string, fs: string)');
     expect(pipelineSrc).toContain('setBlend(mode: BlendMode)');
-    expect(pipelineSrc).toContain('present(src: PipelineFbo)');
+    // ★C10e（2026-10-01）：present 增 over 档缺省参（屏栈直出;缺省 false=blend off
+    //  原路径逐位）——API 面演进,A0 字节语义零变化
+    expect(pipelineSrc).toContain('present(src: PipelineFbo, over = false)');
     expect(pipelineSrc).toContain('uploadCanvas(tex: WebGLTexture, src: TexImageSource, w: number, h: number)');
     expect(pipelineSrc).toContain('beginFrame(w: number, h: number)');
     expect(pipelineSrc).toContain('recreate(): boolean');

@@ -277,6 +277,9 @@ export class GLWorldCompose {
     worldX = 0, worldY = 0, waveOffX = 0, waveOffY = 0,
     rawLight?: RawLight,
     sky?: SkyPresentRef | null,
+    /** ★C10e（2026-10-01）：尾 present 走屏 over 档（premul source-over 叠出可见
+     *  glCanvas,不入 2D blit;旗关/夹层帧 false=blend off+调用方 blit 原路径） */
+    presentOver = false,
   ): boolean {
     this.lastMergeUsed = false;   // ★opresent:每次 compose 重置（失败/回退面=未合并）
     const pipeline = this.pipeline;
@@ -490,11 +493,11 @@ export class GLWorldCompose {
         pipeline.setBlend('off');
         pipeline.drawQuad(this.pOver, [0, 0, w, h], 0);
         this.lastMergeUsed = true;
-        pipeline.present(this.fboOpresent);
+        pipeline.present(this.fboOpresent, presentOver);
         return true;
       }
     }
-    pipeline.present(this.fboWarped);
+    pipeline.present(this.fboWarped, presentOver);
     return true;
   }
 

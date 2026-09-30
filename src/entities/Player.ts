@@ -500,6 +500,14 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
      *  =976/984 与裸 953/975 无差别（item-audit ⚠️ 档位塌缩，本批还原）。 */
     spikedBoots: number;
     canFloat: boolean;   // canFloatInWater（字段 :2711——仅两源：甲件 4404 水上漂靴 :13364-67 ∪ buff265 Flamingo 坐骑 :9982-86；脚蹼药 109 只授 ignoreWater+accFlipper 不置此位 :10257-59、flipper 饰品亦不授——旧注":9592 脚蹼药水"系 1456 期 ignoreWater 面错锚，R1-F1 勘误 2026-09-03）
+    /** Player.hasFloatingTube（:2713）——浮游圈 4404 管体绘制旗（UpdateVisibleAccessory
+     *  :37265-37268 置位）。源=可见轮两环：功能槽 3-9（!hideVisibleAccessory 门内
+     *  :36362-36364）∪ 社交槽 13-19（无条件 :36368-36375）——功能槽与 canFloat 的
+     *  差分面：①per-slot 隐藏开关挡管不挡浮力（canFloat 走 ApplyEquipFunctional
+     *  :13364 独立扫）②社交槽挂管不授浮力 ③expertOnly 门不入可见轮（清偿刀 U
+     *  同臂——专家档浮游圈经典世界照画管体零浮力）。消费=渲染管体（PlayerDrawSet
+     *  :1797 drawFloatingTube → PlayerDrawLayers :1273 背半/:2037 前半） */
+    hasFloatingTube: boolean;
     shimmerImmune: boolean;   // Player.shimmerImmune（:15643-46 幻彩斗篷 5355 且未按住下 45t——浮液/微光 buff 双消费 :23641/:27944）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
     /** 死人毛衣 5007（GrantArmorBenefits case 5007 :13226-13229 `deadMansSweater = true`
@@ -536,6 +544,9 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
       dyeBalloon: number; dyeBalloonFront: number;
       dyeHandOn: number; dyeHandOff: number; dyeBeard: number;
       dyeBackpack: number; dyeTail: number;
+      /** ★BJ423：cFloatingTube（浮游圈 4404 专染料通道,UpdateItemDye :9815-9818——
+       *  非槽族不走 accDrawSlotsOf 路由,功能/社交两环直写；-1=无染料） */
+      dyeFloatingTube: number;
     };
     /** 配饰仇恨轴合计（ApplyEquipFunctional aggro ±400：3015 恶臭香氛/3991 奥术花/
      *  4005 侦察瞄准镜/4006 潜行箭袋 -400(:14098/:13992/:14064/:14067)，
@@ -2001,6 +2012,7 @@ export class Player extends Entity {
     // ★SW-FX1 单件批四旗（jellyfishNecklace/boneGlove/sporeSac/volatileGelatin）
     let jellyfishNecklace = false, boneGlove = false, sporeSac = false, volatileGelatin = false;
     let canFloat = false;   // canFloatInWater（4404 甲件；buff265 在消费侧并集）
+    let hasFloatingTubeVis = false;   // hasFloatingTube（4404 可见轮——功能槽 !hide 门 ∪ 社交槽无条件,注释见接口字段）
     let shimmerImmune = false;   // Player.shimmerImmune（5355 幻彩斗篷 :15643-46）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
   let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
@@ -2073,6 +2085,7 @@ export class Player extends Entity {
       dyeNeck: -1, dyeFace: -1, dyeFaceMask: -1, dyeFaceFlower: -1, dyeFaceHead: -1,
       dyeBalloon: -1, dyeBalloonFront: -1,
       dyeHandOn: -1, dyeHandOff: -1, dyeBeard: -1, dyeBackpack: -1, dyeTail: -1,
+      dyeFloatingTube: -1,   // ★BJ423：cFloatingTube（UpdateItemDye :9815-9818——4404 专通道,非槽族不走 accDrawSlotsOf 路由,两环直写）
     };
     /** 槽 → 族赋值（UpdateVisibleAccessory :36451-36520 后写覆盖语义 + back 披风
      *  清 front :36468-36471；face 槽按 ArmorIDs.Face.Sets 分流 face/mask/flower/
@@ -2153,6 +2166,16 @@ export class Player extends Entity {
       if (sVid === 5540 || sVid === 5541) stringColor = 29;
       const funcStrV = statOfInternal(s.id)?.str;
       if ((funcStrV ?? 0) > 0) stringColor = funcStrV!;
+      // 浮游圈管体可见旗+染料（UpdateVisibleAccessory :37265-37268 在 !hide 门内
+      // :36362-36364;染料 UpdateItemDye :9815-9818,num/flag 门 :9714——功能槽隐藏
+      // 时 `!num&&flag` 早退=染料也不写,同门合并）——置于 expertOnly 门【前】
+      // （可见轮/染轮均无该门,清偿刀 U 同臂;浮力旗 canFloat 仍走下方门后
+      // =ApplyEquipFunctional :13364 门语义）
+      if (sVid === 4404 && !this.hideVisibleAccessory[i]) {
+        hasFloatingTubeVis = true;
+        const tubeDyeItem = this.inv.getEffectiveDye(i % 10);   // UpdateDyes :9697 num=i%10
+        accDraw.dyeFloatingTube = tubeDyeItem ? (ITEM_DEFS[tubeDyeItem.id]?.vid ?? -1) : -1;
+      }
       // ★清偿刀 U：expertOnly 效益门——k-loop :13017-13018
       //  `(!effectiveArmor.expertOnly || Main.expertMode)`（GrantPrefixBenefits+
       //  GrantArmorBenefits 全效益）+ ApplyEquipFunctional 头 :14475-14478 整函数
@@ -2503,6 +2526,15 @@ export class Player extends Entity {
       // 社交槽身上贴图（UpdateVisibleAccessories :36353-36361 第二轮：
       // UpdateVisibleAccessory 无 !hide 门,时装配饰贴图无条件生效,后写覆盖功能槽）
       if (vid > 0) accDrawApply(s, i);
+      // 浮游圈社交槽挂管+染料（UpdateVisibleAccessory :37265-37268 同函数,社交槽
+      // :36368-36375 无 !hide 门;染料 UpdateItemDye :9815-9818——isNotInVanitySlot
+      // =false → flag 恒假,`!num&&flag` 早退不触发=染料照写）——管体照画,
+      // 浮力不授（canFloat 仅功能轮）
+      if (vid === 4404) {
+        hasFloatingTubeVis = true;
+        const tubeDyeItem = this.inv.getEffectiveDye(i % 10);   // UpdateDyes :9697 num=i%10
+        accDraw.dyeFloatingTube = tubeDyeItem ? (ITEM_DEFS[tubeDyeItem.id]?.vid ?? -1) : -1;
+      }
     }
     // ---- 信息/机械饰品背包生效域（配饰审计系统性批 2026-08-22）----
     // UpdateEquips :12494-12500：for j=0..57 inventory 全格扫
@@ -2912,6 +2944,7 @@ export class Player extends Entity {
       wing, dash, blackBelt, bees, carpet,
       strongBees,   // 蜂巢背包 3333（beeType 566 档/强蜂伤/kb——Game 1121 蜂枪分支消费）
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat, shimmerImmune,
+      hasFloatingTube: hasFloatingTubeVis,   // 浮游圈管体（可见轮两环,注释见接口字段）
       jellyfishNecklace, boneGlove, sporeSac, volatileGelatin,   // ★SW-FX1 单件批四旗
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
@@ -7464,6 +7497,10 @@ export class Player extends Entity {
         if (this.nebula[f] > 0) this.nebulaT[f] = 480;
       }
     }
+    // nebulaCD 递减（Benefits.Nebula ArmorSetBonuses.cs:49-52——UpdateArmorSets 每
+    // tick 经套装 Effect 走，只在套装在身时递减；卸装冻结。★BJ424：旧态在 Game
+    // updateNebulaBoosters 无门递减=偏差，随 booster 迁移落原版语义位）
+    if (this.nebulaCD > 0 && this.equipStats.nebulaSet) this.nebulaCD--;
     // 星云生命 173-175（:10111-10115 lifeRegen+6/级 = 3HP/s/级）
     if (this.nebula[1] > 0 && this.hp > 0) {
       this.nebulaLifeAccum += 3 * this.nebula[1] * dt;

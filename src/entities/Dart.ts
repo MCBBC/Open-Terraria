@@ -22,6 +22,7 @@ import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
 import { applyProjStatus } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { noteVanillaProjImmune } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { GorePiece } from './GorePiece';
@@ -808,6 +809,15 @@ export class TrapShot extends Entity {
             { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2,
               vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
               dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+        }
+        // ★BJ424 星云套装 proc（:13885-13891,ghostHurt 同块同门面）——引擎自持
+        // magic 门（现役陷阱弹全 non-magic 恒空掷,未来 magic 弹自动生效）
+        if (trapProjId !== undefined) {
+          nebulaBoosterOnHit(game,
+            { projId: trapProjId, projDirX: this.vx },
+            { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+              dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
         }
       }
     }

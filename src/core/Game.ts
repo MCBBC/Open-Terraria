@@ -47,7 +47,8 @@ import { housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, vali
   MUSHROOM_TILE_THRESHOLD,
   // ★SW-BO1 2026-09-07（债①优先型锁/债③夜扫清场）
   pickPrioritizedTownNPCType, unspawnHomelessSweep,
-  quickFindHome } from '../world/Housing';
+  // ★BJ425：SpawnHomelessNPC 流浪落位核（WorldGen.cs:5037-5093 1:1）
+  quickFindHome, homelessWanderPlacement } from '../world/Housing';
 import type { NearChainNpcView } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
@@ -138,7 +139,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -262,6 +263,7 @@ import {
   LEASHED_SUB_FULL, LEASHED_SUB_PARTIAL, LEASHED_SUB_REMOVE, LEASHED_SUB_PLACE_REQUEST,
   LEASHED_SUB_RETRIEVE_REQUEST,
   LEASHED_KIND_CRITTER, LEASHED_KIND_KITE,
+  platformProperTopFrame,   // ★BJ426：锚桩底锚 SolidWithTop 平台臂（WorldGen.cs:70686 单源）
   type LeashedNetMsg, type LeashedCritterEntity, type LeashedKiteEntity,
 } from '../entities/LeashedCritter';
 import { internalIdOfVid, applyLeashedRetrieve } from '../net/leashedSync';
@@ -483,6 +485,7 @@ import { SkyLanternProj } from '../entities/SkyLanternProj';
 import { chumOnPreUpdateAll } from '../entities/chumBucket';
 import { FlintChargeProj, FlintWaveProj, FlintSpikeProj, emitFlintSpikes } from '../entities/DeadCellsFlint';
 import { NebulaBlazeBolt, LunarFlareStar } from '../entities/LunarNebula';
+import { NEBULA_BOOSTER_VIDS } from '../entities/NebulaBooster';   // ★BJ424 星云 booster 三键单源
 import { Celeb2Muzzle, Celeb2Rocket } from '../entities/Celeb2';
 import { ClusterFragmentProj, CLUSTER_FRAGMENT_OF } from '../entities/ClusterFragmentProj';   // SW-Q1 2026-09-03 集束裂片
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
@@ -1491,6 +1494,148 @@ const TILE_BREAK_WHEN_PLACING = internalIdsOfVanSheets([
 function placeObstructionClearable(typeId: number, sheet: number): boolean {
   return (TILE_CUT.has(typeId) && sheet !== 484 && sheet !== 654)
     || TILE_BREAK_WHEN_PLACING.has(typeId);
+}
+
+// ============================================================================
+// ★BJ426（2026-10-01）锚桩 723/724 位置门——TileObjectData 五锚档 1:1。
+//  原版判据 = TileObject.CanPlace（TileObject.cs:263-560）逐锚档 full-score 首中：
+//    档 0 底锚 AnchorBottom  = SolidTile|SolidWithTop|SolidSide|AlternateTile
+//      （TileObjectData.cs:4485-4507；AlternateTiles={124,561,574-578} :4489）
+//    档 1 顶锚 AnchorTop     = SolidTile|SolidSide|AlternateTile|SolidBottom（:4493-4495）
+//    档 2 左锚 AnchorLeft    = SolidTile|SolidSide|Tree|AlternateTile（:4497-4499）
+//    档 3 右锚 AnchorRight   = SolidTile|SolidSide|Tree|AlternateTile（:4501-4503）
+//    档 4 墙锚 AnchorWall    = isValidWallAnchor(wall)=wall≠0（:4505-4506/:1948-1962）
+//  逐支判据（CanPlace 行号）：
+//    SolidTile    = nactive ∧ tileSolid ∧ !tileSolidTop ∧ !tileNoAttach ∧
+//                   blockType()==0（:459-462；723/724 FlattenAnchors 缺省 false）
+//    SolidWithTop = 平台 ∧ !halfBrick ∧ PlatformProperTopFrame（:466-473）∨
+//                   tileSolid ∧ tileSolidTop（:474-476——239/380 档）
+//    SolidSide    = tileSolid ∧ !tileSolidTop ∧ blockType ∈档集——底 {4,5}=slope 3/4
+//                   （:556-560 底缘平）/ 顶 {2,3}=slope 1/2（:436-441 顶缘平）/
+//                   右 {2,4}=slope 1/3（:487-493 左缘平）/ 左 {3,5}=slope 2/4（:498-510 右缘平）
+//    SolidBottom  = tileSolid ∧ (!tileSolidTop ∨ (平台 ∧ (halfBrick ∨ topSlope)))
+//                   ∨ halfBrick ∨ topSlope，且 !NotReallySolid ∧ !bottomSlope（:421-434）
+//    Tree         = IsATreeTrunk ∧ 上邻 ∧ 下邻 皆 trunk（1 格锚=干身三格,1×1 tileCount=1
+//                   时 n==0 与 n==last 同格双检,:530-560/:600-640）
+//    AlternateTile= AnchorAlternateTiles 七件（:564-570）
+//  档序 = base(0)→alt1..4 顺序首个满分档（:754-760 num35==1f 首中 break）→ 档号即放置
+//  帧档（frameX=档×18,StyleHorizontal；CalculatePlacementStyle :1990-1998 style×1+档Style；
+//  WorldGen.CheckAnchor :54290 frameX/18 反推同域）。返回 -1 = 五档全失（原版拒置）。
+//  旧 hasSupport 近似（底实心∪墙）对锚桩两向偏差：漏顶/左/右/平台/SolidWithTop 档
+//  （严于原版——吊顶/侧挂/平台上放不下）+ SolidTile 漏 tileNoAttach 排除（松于原版
+//  ——可浮贴门/火把等 noAttach 件顶上）。723/724 两表逐字相同（:4485-4507 vs :4514-4536）。
+//  ★域纪律：入参一律 TileStore 坐标,内部经 TILE_DEFS[x].vanilla.sheet 反查 sheet 域
+//  集合（PLATFORMS/IS_A_TREE_TRUNK/NO_ATTACH/NOT_REALLY_SOLID/TILE_SOLID_TOP_FAMILY）。
+// ============================================================================
+
+/** TileObjectData 723/724 AnchorAlternateTiles（TileObjectData.cs:4489）——sheet 域 */
+export const ANCHOR_ALTERNATE_SHEETS: ReadonlySet<number> = new Set([124, 561, 574, 575, 576, 577, 578]);
+
+/** 锚格实心平块支（SolidTile 全式 :459-462）：nactive ∧ tileSolid ∧ !tileSolidTop ∧
+ *  !tileNoAttach ∧ 坡/半砖皆无（blockType()==0）。tileSolid∧!tileSolidTop = def.solid
+ *  ∧ 非 VAN_TILE_SOLID_EXTRA 九件套（tileSolid∩tileSolidTop——19/239/380/427/435-439,
+ *  sheet 域单源 GenSolid;★勿用 TouchDamage.TILE_SOLID_TOP_FAMILY——那是 tid() 平移后的
+ *  内部 id 域镜像,双域同名异值）。 */
+function anchorSolidFlat(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const i = st.idx(x, y);
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !d.solid || VAN_TILE_SOLID_EXTRA.has(d.vanilla?.sheet ?? -1)) return false;
+  if (TILE_NO_ATTACH_SHEETS.has(d.vanilla?.sheet ?? -1)) return false;
+  return st.slope[i] === 0 && !st.half[i];
+}
+
+/** 锚邻格实心非 solidTop（SolidSide 前置门 + SolidBottom 首支）：
+ *  tileSolid ∧ !tileSolidTop = def.solid ∧ 非 solidTop 九件套。 */
+function anchorSolidNonTop(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const d = TILE_DEFS[st.type[st.idx(x, y)]];
+  return !!d && d.solid && !VAN_TILE_SOLID_EXTRA.has(d.vanilla?.sheet ?? -1);
+}
+
+/** 底锚 SolidWithTop 平台臂（:466-473）：Platforms ∧ !halfBrick ∧ PlatformProperTopFrame
+ *  （WorldGen.cs:70686-70697——repo 单源 LeashedCritter.platformProperTopFrame）。 */
+function anchorPlatformTop(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const i = st.idx(x, y);
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !PLATFORMS_SHEETS.has(d.vanilla?.sheet ?? -1)) return false;
+  return !st.half[i] && platformProperTopFrame(st.frameX[i] ?? 0);
+}
+
+/** 底锚 SolidWithTop 非平台臂（:474-476）：tileSolid ∧ tileSolidTop（239/380 档——
+ *  平台族已由上臂接管,原版 else-if 互斥）。tileSolidTop = solidTop 九件套 ∪ 平台旗。 */
+function anchorSolidTopSolid(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const d = TILE_DEFS[st.type[st.idx(x, y)]];
+  if (!d) return false;
+  const sh = d.vanilla?.sheet ?? -1;
+  return (VAN_TILE_SOLID_EXTRA.has(sh) || (d.solid && d.platform)) && !PLATFORMS_SHEETS.has(sh);
+}
+
+/** 顶锚 SolidBottom 臂（:421-434）：!NotReallySolid ∧ !bottomSlope ∧ [tileSolid∧!tileSolidTop
+ *  ∨ 平台∧(halfBrick∨topSlope) ∨ halfBrick ∨ topSlope]。halfBrick/topSlope/bottomSlope
+ *  =格态（half 位/slope 1|2/slope 3|4）；平台平顶不承（缺 proper-top 门=原版 SolidBottom
+ *  平台支只认 half/topSlope 态,平放平台被 :421 首支 !tileSolidTop 拒）。 */
+function anchorSolidBottom(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const i = st.idx(x, y);
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || NOT_REALLY_SOLID_SHEETS.has(d.vanilla?.sheet ?? -1)) return false;
+  const slope = st.slope[i] ?? 0;
+  if (slope === 3 || slope === 4) return false;                 // !bottomSlope
+  if (d.solid && !VAN_TILE_SOLID_EXTRA.has(d.vanilla?.sheet ?? -1)) return true;
+  return !!st.half[i] || slope === 1 || slope === 2;
+}
+
+/** 左/右锚 Tree 臂（:530-560/:600-640）：IsATreeTrunk ∧ 上邻 ∧ 下邻 皆 trunk
+ *  （1×1 锚 tileCount=1 → n==0 与 n==last 同格,三格整干缺一即拒）。 */
+function anchorTreeTrunk(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  if (!IS_A_TREE_TRUNK_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1)) return false;
+  const trunkAt = (ax: number, ay: number): boolean =>
+    st.inBounds(ax, ay) && st.isActive(ax, ay)
+    && IS_A_TREE_TRUNK_SHEETS.has(TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? -1);
+  return trunkAt(x, y - 1) && trunkAt(x, y + 1);
+}
+
+/**
+ * 锚桩 723/724 放置档判定（TileObject.CanPlace 1:1,五档首中制）。
+ * @returns 0 底锚 / 1 顶锚 / 2 左锚 / 3 右锚 / 4 墙锚；-1 = 全失（拒置）
+ */
+export function anchorTilePlacementStyle(st: TileStore, x: number, y: number): number {
+  // 档 0 底锚（CanPlace 逐支序:SolidTile→SolidWithTop→SolidSide→AlternateTile :455-570）
+  if (anchorSolidFlat(st, x, y + 1)
+    || anchorPlatformTop(st, x, y + 1)
+    || anchorSolidTopSolid(st, x, y + 1)
+    || (anchorSolidNonTop(st, x, y + 1)
+      && (() => { const s = st.slope[st.idx(x, y + 1)]; return s === 3 || s === 4; })())
+    || (st.isActive(x, y + 1)
+      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y + 1)]]?.vanilla?.sheet ?? -1))) return 0;
+  // 档 1 顶锚（SolidTile→SolidBottom→SolidSide→AlternateTile :421-470 区）
+  if (anchorSolidFlat(st, x, y - 1)
+    || anchorSolidBottom(st, x, y - 1)
+    || (anchorSolidNonTop(st, x, y - 1)
+      && (() => { const s = st.slope[st.idx(x, y - 1)]; return s === 1 || s === 2; })())
+    || (st.isActive(x, y - 1)
+      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? -1))) return 1;
+  // 档 2 左锚（SolidTile→SolidSide{slope 2|4}→Tree→AlternateTile :498-570）
+  if (anchorSolidFlat(st, x - 1, y)
+    || (anchorSolidNonTop(st, x - 1, y)
+      && (() => { const s = st.slope[st.idx(x - 1, y)]; return s === 2 || s === 4; })())
+    || anchorTreeTrunk(st, x - 1, y)
+    || (st.isActive(x - 1, y)
+      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x - 1, y)]]?.vanilla?.sheet ?? -1))) return 2;
+  // 档 3 右锚（SolidTile→SolidSide{slope 1|3}→Tree→AlternateTile :479-570）
+  if (anchorSolidFlat(st, x + 1, y)
+    || (anchorSolidNonTop(st, x + 1, y)
+      && (() => { const s = st.slope[st.idx(x + 1, y)]; return s === 1 || s === 3; })())
+    || anchorTreeTrunk(st, x + 1, y)
+    || (st.isActive(x + 1, y)
+      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x + 1, y)]]?.vanilla?.sheet ?? -1))) return 3;
+  // 档 4 墙锚（AnchorWall=isValidWallAnchor(wall)≠0 :4505-4506/:1948-1962——无 active 门）
+  if (st.inBounds(x, y) && st.wall[st.idx(x, y)] > 0) return 4;
+  return -1;
 }
 /** ★M-4（2026-09-02 九批）PlaceThing_Tiles_BlockPlacementIfOverPlayers 实体门名单
  *  （Player.cs:41753-41789,switch 各档）：{138,664,711-716,484}=32×32px /
@@ -3972,13 +4117,19 @@ export class Game implements GameHooks {
    * 锚桩存物取回（sub4 落账 = 房主侧；单人/房主右键同走此链）。
    *  约简逻辑在 net/leashedSync.ts applyLeashedRetrieve（furniture 记录 + 实体 +
    *  掉物/广播回调注入）；掉物走 spawnDrop → 既有 msg21 SyncItem 广播（房主权威，
-   *  访客收包拾取），实体消散广播 sub0 Remove（仅房主联机态上行）。锚桩 tile 保留
-   *  （空桩可再放置 = 原版 itemType=0 合法态；tile 破坏仍走 msg17 破坏链）。
+   *  访客收包拾取），实体消散广播 sub0 Remove（仅房主联机态上行）。
+   *  ★BJ426 ④（2026-10-01 用户实报「回收后线圈图标还在原地」）：取回成功后清除锚桩
+   *  tile 本体——原版锚桩唯一回收路 = tile 破坏（KillTile → DropItemForTileBreak
+   *  WorldGen.cs:64205-64207 + TEKiteAnchor/TECritterAnchor.Kill :64386-64391 →
+   *  TE OnRemoved → DespawnLeashedEntity）,线圈贴图随实体亡,不存在「空桩」存续态。
+   *  旧实现保留 tile（「空桩可再放置」自创态）= 回收后线圈残留,已撤——右键取回现
+   *  与破坏回收面完全同态（掉物+实体消散+tile 清除+碎块尘/dig 音）。tile 写走
+   *  st.setTile → netReporter 上报（房主侧自动 msg17 广播,访客落格同收敛）。
    *  原版锚桩无 OnPlayerInteraction（TELeashedEntityAnchorWithItem 仅破坏掉物），
-   *  右键取回是本仓扩展交互——备案。
+   *  右键取回仍是本仓扩展交互——备案。
    */
   private retrieveLeashedAnchor(ax: number, ay: number, kind: number): boolean {
-    return applyLeashedRetrieve({
+    const ok = applyLeashedRetrieve({
       records: this.world.furnitureItems,
       netIdsAt: (x, y) => this.leashed.netIdsAt(x, y),
       removeAt: (x, y) => this.leashed.removeAt(x, y),
@@ -3988,6 +4139,16 @@ export class Game implements GameHooks {
       },
       keyOf: (id) => ITEM_DEFS[id]?.key ?? '',
     }, ax, ay, kind);
+    if (ok) {
+      const st = this.world.store;
+      if (st.inBounds(ax, ay) && st.hasTile(ax, ay)) {
+        const def = TILE_DEFS[st.get(ax, ay)];
+        st.setTile(ax, ay, 0);
+        this.spawnParticles(ax * TILE + 8, ay * TILE + 8, def?.mapColor, 6, 1.5);
+        this.sfx.play('dig', 1, ax * TILE + 8, ay * TILE + 8);
+      }
+    }
+    return ok;
   }
 
   /**
@@ -9916,7 +10077,9 @@ export class Game implements GameHooks {
     // ★_prevMouseDown/_prevRightDown 须在 updateUse 【之后】记录上一帧值——
     // 此前记在 updateUse 之前(= 本帧值),⑩ 边沿门 mouseDown&&!prev 恒 false,
     // 非 autoReuse 武器(链球/回旋镖/悠悠球/长矛)全体掷不出(2026-08-13 实锤)
-    this.updateNebulaBoosters();
+    // ★BJ424：updateNebulaBoosters 退役——booster 已迁 ItemDrop 全基建（渲染/
+    // 悬停物理/拉取/拾取全走 drops 桶）;nebulaCD 递减移 Player.fixedUpdate 星云
+    // 衰减段（原版递减位 = Benefits.Nebula,套装在身才走——旧态无门恒递减=偏差）
     if (this.player.sleeping) {
       // 床格/方向/输入门（PlayerSleepingHelper.UpdateState :93-117 1:1）：
       // coords = Bottom+(0,−2) 处必须仍是床格（GetSleepingTargetInfo :193-224 可解
@@ -19867,11 +20030,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             bolt.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
-            bolt.nebulaCb = () => {
-              if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
-              this.player.nebulaCD = 30;
-              this.spawnNebulaBooster(bolt.cx, bolt.cy);
-            };
+            // ★BJ424：星云 booster 触发链单源化——旧 nebulaCb 回调（仅 4 个专支
+            // 接线+私有数组无渲染）退役,触发统一走 Arrow/MissileProj 命中环的
+            // nebulaBoosterOnHit（Damage_PVE_Inner :13885-13891,全 magic 弹面）
             this.entities.add(bolt, 'projectiles');
           }
           // R26 GAP-07：3870 贝希之怒 rd=10（case 3870 :34217-34219;★BJ282 勘误）——收招后摇收口
@@ -19957,12 +20118,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           b261.critBonus = this.player.critChance('magic')
             + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
           b261.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
-          b261.nebulaCb = () => {
-            if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
-            this.player.nebulaCD = 30;
-            this.spawnNebulaBooster(b261.cx, b261.cy);
-          };
-          this.entities.add(b261, 'projectiles');
+          this.entities.add(b261, 'projectiles');   // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit）
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');
@@ -20089,12 +20245,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             placeAtShootSpawn(m, mx, my);
             m.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
             m.critChance = critTotal;
-            m.nebulaCb = () => {
-              if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1/3) return;
-              this.player.nebulaCD = 30; // :12895
-              this.spawnNebulaBooster(m.cx, m.cy);
-            };
-            this.entities.add(m, 'projectiles');
+            this.entities.add(m, 'projectiles');   // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit）
           };
           spawnMissile(mzX, mzY, Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed);
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -26552,7 +26703,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  的放置/幸存不对称）
     const isMultiDirPlace = (def?.vanilla?.sheet ?? -1) === 129
       || (def?.vanilla?.sheet ?? -1) === 149;
-    const needSupport = !isTrack && !isAlchPlace && !isLogicLamp && !isMultiDirPlace
+    // ★BJ426 ①c（2026-10-01 用户实报「随意放/位置门」）：锚桩 723/724 位置门 =
+    //  TileObjectData 五锚档 1:1（TileObject.CanPlace :263-560 逐档 full-score 首中——
+    //  底/顶/左/右/墙,判据+行号见 anchorTilePlacementStyle 头注）。旧 hasSupport 近似
+    //  （底实心∪墙）两向偏差:漏顶/左/右/平台档（吊顶/侧挂/平台上放不下,严于原版）+
+    //  SolidTile 漏 noAttach 排除（松于原版）。命中档号 anchorPlaceStyle 同步作 723 放置
+    //  帧档（frameX=档×18,CalculatePlacementStyle :1990-1998 与 CheckAnchor :54290 同域）。
+    const anchorSheet = def?.vanilla?.sheet ?? -1;
+    const isAnchorTile = anchorSheet === 723 || anchorSheet === 724;
+    let anchorPlaceStyle = -1;
+    if (isAnchorTile) {
+      anchorPlaceStyle = anchorTilePlacementStyle(st, tx, ty);
+      if (anchorPlaceStyle < 0) return;   // 五档全失=原版拒置（CanPlace false → 零消耗）
+    }
+    const needSupport = !isTrack && !isAlchPlace && !isLogicLamp && !isMultiDirPlace && !isAnchorTile
       && (def.solid || def.platform || def.framed);
     // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
     if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
@@ -26910,9 +27074,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     // 风筝桩 723（TEKiteAnchor 同基类链 :43-65）：写入手持风筝 + 生成拴绳风筝
-    // （projType = item.shoot，CreateLeashedEntity :54-62）。风筝 consumable=false，
-    // 但钩子内 --stack（TELeashedEntityAnchorWithItem.cs:46-48）= 放置消耗 1——
-    // 与下方通用 removeAt(selected,1) 等量，无需另扣。联机分支同 724（访客仅请求）
+    // （projType = item.shoot，CreateLeashedEntity :54-62）。★BJ426：风筝 consumable=false
+    // （Item.cs DefaultToKite :47835）→ 通用消耗门整体跳过,放置消耗由本臂补扣 1
+    // （= 原版钩子 PlaceFromPlayerPlacementHook :46-48;旧注「与通用 removeAt 等量
+    // 无需另扣」系误读已撤——通用门对 consumable===false 不扣,旧态=零消耗复制链）。
+    // 联机分支同 724（访客仅请求,消耗请求端本地完成）
     if (tileId === TILE_BY_KEY['v_723_kite_anchor']) {
       const held = this.player.inv.heldItem();
       if (held) {
@@ -26922,6 +27088,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // Size = _dummy.Size（LeashedKite.SetDefaults :32-35 → Projectile.SetDefaults →
           // Projectile.DefaultToKite :10133-10140 width=height=4；提取表缺条目时兜底 4）
           const pd = projectileData(proj);
+          // ★BJ426 ①c：帧档 = 命中锚档（TileObjectData 723 StyleHorizontal,frameX=档×18
+          //  ——CalculatePlacementStyle :1990-1998 `style×1+档Style`;0 底/1 顶/2 左/3 右/4 墙,
+          //  WorldGen.CheckAnchor :54290 frameX/18 反推同域）。通用写循环恒写 style0 帧,
+          //  顶/左/右/墙档在此覆写（同 724 臂 anchorStyleOfItem 覆写位次）。
+          st.setTile(tx, ty, tileId, anchorPlaceStyle * 18, 0);
           if (this.net?.active && !this.net.policy.isHost) {
             this.net.sendLeashedPlaceRequest(tx, ty, vid);
           } else {
@@ -26938,6 +27109,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
             }
           }
+          // ★BJ426 ②（2026-10-01 用户实报「不消耗/无限放」）：放置消耗 1 =
+          //  TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook（:46-48
+          //  `if (!heldItem.consumable && --heldItem.stack <= 0) heldItem.TurnToAir()`）
+          //  ——风筝 consumable=false（Item.cs DefaultToKite :47835）→ 通用消耗门
+          //  （本函数尾 :42602 域 `consumable !== false 才扣`）直跳过,原版由本钩子补扣 1;
+          //  小动物 724 档 consumable=true（DefaultToCapturedCritter :48008）走通用门,
+          //  原版钩子 !consumable 恒假不双扣。旧注「与通用 removeAt 等量,无需另扣」
+          //  系误读（通用门对 consumable===false 整体跳过）=放置零消耗→每桩白存一份
+          //  手持风筝,回收即复制（用户实报②③复制链根因）,已撤。
+          this.player.inv.removeHeld(1);
+          this.cb.onInventoryChanged();
         }
       }
     }
@@ -27754,11 +27936,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.input.rightDown = false;
     } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
       // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
-      // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
-      // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
-      // （autoReuse，DefaultToCapturedCritter :47614）；放置失败（占位/无支撑）
-      // 落空即可，不透传 interactAt。动画同 createTile 档（ApplyItemAnimation
-      // :4270-4272——使用即挥动，放置成败不影响）
+      // doPlacementAction）：捕获小动物 → 锚桩 724 / 风筝 → 锚桩 723。
+      // ★BJ426 ①a（2026-10-01 用户实报「随意放/无限放」）——右键边沿门：全 117 件
+      // ∉ ItemsThatAllowRepeatedRightClick（ItemID.cs:66={3384,3858,3852}）→
+      // ItemCheck_ManageRightClickFeatures :31768 `!repeat && !mouseRightRelease →
+      // flag2=false`：仅按压沿触发一次，按住不重放（旧实现「按住连放由 useTime 门
+      // 节流」+每 rightDown 帧进臂=扫过光标即连桩，实报①②主根因之一，已撤）。
+      // 按住帧整臂让位（return true=原版 doPlacementAction=false 的 PlaceThing no-op
+      // 面，不透传 interactAt 防按住误触交互臂）。
+      if (this._prevRightDown) return true;
+      // ★BJ426 ①b——飞行态门（Player.cs:43870 `altFunctionUse==2 && IsAKite[type] &&
+      //  sItem.holdStyle != 0 → flag3=false + StartChanneling()`）：风筝弹在飞
+      //  （holdStyle=1,ItemCheck_HackHoldStyles :53495-53511 场上有同 shoot owned 弹）
+      //  时右键=收线，不放置。本仓 holdStyle 等价 = kiteProjAirborne(shoot)；
+      //  收线电平由 KiteProj.ctx.channel（rightDown）独立承载，本臂仅让位不放置。
+      {
+        const hv = heldDef.vid ?? -1;
+        const hShoot = hv >= 0 ? (itemCombat(hv)?.shoot ?? -1) : -1;
+        if (hShoot > 0 && KITE_ITEM_PROJ[hv] !== undefined && this.kiteProjAirborne(hShoot)) {
+          return true;
+        }
+      }
+      // 动画同 createTile 档（ApplyItemAnimation :4270-4272——使用即挥动，放置成败不影响）
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
       return true;
@@ -27858,7 +28057,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  右键取回为本仓新增，见 net/leashedSync.ts applyLeashedRetrieve 备案）。
     //  房主/单人 = 本地权威直取；访客 = sub4 请求房主代取（furniture 记录只在
     //  房主端，= msg31 箱子请求同款模式），房主弹存物+消散实体后掉物走既有
-    //  msg21，访客收包拾取。锚桩 tile 本体不动（破坏仍走 msg17 链）----
+    //  msg21，访客收包拾取。★BJ426 ④：取回后锚桩 tile 一并清除（= 原版唯一回收路
+    //  tile 破坏同态，线圈贴图随实体亡；旧「tile 保留=空桩可再放置」自创态已撤）----
     if (type === TILE_BY_KEY['v_724_critter_anchor'] || type === TILE_BY_KEY['v_723_kite_anchor']) {
       const kind = type === TILE_BY_KEY['v_724_critter_anchor'] ? LEASHED_KIND_CRITTER : LEASHED_KIND_KITE;
       if (this.net?.active && !this.net.policy.isHost) {
@@ -33385,12 +33585,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       placeAtShootSpawn(b, bx, by);
       b.armorPen = arpen;
       b.critBonus = critBonus;
-      // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
-      b.nebulaCb = () => {
-        if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
-        this.player.nebulaCD = 30; // :12895
-        this.spawnNebulaBooster(b.cx, b.cy);
-      };
+      // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit——全 magic 弹面命中环接线）
       this.entities.add(b, 'projectiles');
     };
     if (gemFlags?.allGems) {
@@ -36317,8 +36512,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let ay = Math.max(4, this.world.spawnY - 20);
         const limit = Math.min(st.h - 3, this.world.spawnY + 20);
         while (ay < limit && !st.isSolid(ax, ay)) ay++;
-        if (ay < limit) {
-          const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
+        // ★BJ425（2026-10-01）嵌面同族普查修：①脚底锚 (ay+1)*TILE=地面格【底边】
+        // （开阔地也嵌 16px,与流浪链/BJ37 旅行商②同款）→ ay*TILE（地面格顶边,
+        // NewNPC Bottom 语义）;②补落位净空窗（spawnSpace 2×3 列[ax-1,ax]×行
+        // [ay-3,ay-1] spawnTileSolid 拒 + 岩浆拒——hasTileSpawnSpace NPC.cs:5406
+        // 同构;此面系本仓 TownManager 未移植期的自有落位近似,域登记不变）。
+        let ok = ay < limit;
+        for (let dx = -1; ok && dx <= 0; dx++) {
+          for (let dy = -3; dy <= -1; dy++) {
+            if (!st.inBounds(ax + dx, ay + dy)) { ok = false; break; }
+            const i = st.idx(ax + dx, ay + dy);
+            if (spawnTileSolid(st, ax + dx, ay + dy)
+              || (st.liquid[i] > 0 && st.liquidType[i] === LIQUID_TYPE.LAVA)) { ok = false; break; }
+          }
+        }
+        if (ok) {
+          const npc = new TownNPC(pick, ax * TILE + 8, ay * TILE);
           this.entities.add(npc, 'npcs');
           this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
         }
@@ -36402,26 +36611,50 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★R3-1（1457 W57:5551-5564 FindAnyHomelessTownNPC）："已有流浪者"门带四元
       //  排除集 {37 老人/453 骷髅商/368 旅行商/160 松露人}——原版这四者恒 homeless
       //  （老人地牢驻点/骷髅商·旅商本就无家/松露人无蘑菇房时恒无家），不排除则
-      //  任一在场即把流浪到达链永久锁死（旅商每天白天在场=日常必现）
-      if (npcs.some((n) => !n.home && ![37, 453, 368, 160].includes(n.vanillaId))) return;
+      //  任一在场即把流浪到达链永久锁死（旅商每天白天在场=日常必现）。
+      //  ★BJ425（2026-10-01）：补 !n.bound 排除——原版被缚族（105/106/123/354/589）
+      //  是【非 townNPC】独立型（:5553 `nPC.townNPC` 门不计）,本仓以 TownNPC.bound
+      //  同桶建模 → 不排则任一被缚在场（750t 消散窗内恒在场）流浪到达链被锁死
+      //  = 比原版严一格（同族普查实机探针定谳,probe S2 卡门根因）。
+      if (npcs.some((n) => !n.home && !n.bound && ![37, 453, 368, 160].includes(n.vanillaId))) return;
       if (npcs.some((nn) => nn.vanillaId === this.prioritizedTownNPCType)) return;   // :4977
-      const homeAnchor = homes[Math.floor(Math.random() * homes.length)];  // 同 pickAnchor 口径（此处已保证 homes 非空）
-      const ax = homeAnchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
-      if (ax < 3 || ax > st.w - 4) return;
-      let ay = Math.max(4, homeAnchor.y - 20);
-      const limit = Math.min(st.h - 3, homeAnchor.y + 20);
-      while (ay < limit && !st.isSolid(ax, ay)) ay++;
-      if (ay >= limit) return;
-      const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
+      // ★★BJ425 2026-10-01 落位重写（SpawnHomelessNPC WorldGen.cs:5014-5115 1:1，
+      // 决策核=Housing.homelessWanderPlacement）：用户实报「发型师嵌地牢入口长梯
+      // 砖内」定谳=旧 ±(30..80)/±20 近似三债同发——①锚池含 37 老人（:5019 锚数组
+      // type!=37 字面排除；老人 home=地牢口 → 锚落 dungeonX 邻域、扫描列下探竖井，
+      // 本行由 homes[] 改 anchorPool[] 即修）；②落位无净空门+isSolid 穿平台九件套
+      // （长梯踏板不落、下探实心地牢砖）+Bottom 传 (ay+1)*TILE=地面格底边（开阔地
+      // 也嵌 16px,BJ37 旅行商②同款=其登记剩债）;③扫描域越 worldSurface（:5069/
+      // :5080 纵向钳——地牢竖井 vanilla 永不可达）。
+      // ★37 排除位注：anchorPool=homes 滤 37（:36125）,此处 anchorPool.length>0
+      // 已由 :36203 早退保证。pets 有家可作锚（:5019 仅排 37,字面）。
+      const homeAnchor = anchorPool[Math.floor(Math.random() * anchorPool.length)];
+      const pl = this.player;
+      const placed = homelessWanderPlacement(
+        st, homeAnchor.x, homeAnchor.y + 1,   // 本仓 home.y 站立行 → 地行 +1（homeTile 口径）
+        this.world.groundLevel,
+        pl ? [{ x: pl.x, y: pl.y, w: pl.w, h: pl.h }] : [],
+      );
+      // 本仓守卫（登记差异）：扫描泄漏怪癖可吐越界落点（vanilla 会把 NPC 生成在
+      // 世界外——TileStore 无越界语义,放弃生成）; practically 不可达（扫描失败
+      // 需 ±2n 全列无效,n∈[20,500)）。
+      if (!placed || placed.spawnX <= 3 || placed.spawnX > st.w - 4
+        || placed.spawnY <= 3 || placed.spawnY > st.h - 4) return;
+      // 生成（:5094-5115）：NewNPC Bottom=(num8*16, num9*16)——脚底=地面格【顶边】
+      // （TownNPC(x=左缘,y=脚) → x=spawnX*TILE−w/2）;homeTile=(掷列 bestX,锚地行)
+      // 快找锚=掷列非落位列（:5107-5108 quirk）;direction 按 num8 翻（:5111-5115）。
+      const npc = new TownNPC(pick, placed.spawnX * TILE, placed.spawnY * TILE);
+      npc.x = placed.spawnX * TILE - npc.w / 2;
+      if (placed.dir !== 0) npc.facing = placed.dir;
       this.entities.add(npc, 'npcs');
       // （★批②2026-09-01：原在此处的 homelessSpawnTimeout=54000 已删——置位按
       // cs:4986-4989 字面只在快路径成功支,见上方 house 支）
       // ★SW-BO1 2026-09-07：流浪生成三连（:5107-5110 homeTile=锚 + homelessDespawn
       //  置位;:5128 QuickFindHome）——homeTile 借 anchorTile（地行）承接,后续每轮
       //  ① 面自同锚重扫（vanilla homeTile 失败不清值,同语义）。
-      npc.anchorTile = { x: homeAnchor.x, y: homeAnchor.y + 1 };
+      npc.anchorTile = { x: placed.homeX, y: placed.homeY };
       npc.homelessDespawn = true;
-      const housed = this.runQuickFindHome(npc, homeAnchor.x, homeAnchor.y);
+      const housed = this.runQuickFindHome(npc, placed.homeX, placed.homeY - 1);
       // 公告（:5116-5122）：`!homeless → Announcement.HasArrived`,否则 HomelessArrived_N
       if (housed && npc.home) {
         this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
@@ -41303,6 +41536,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
     //   （dropVid=入参 key 的 vid;节日替代仅 58/184 两 vid 触发,替代后两侧判值均≠4143,复用同相）
     if (dropVid === 4143) drop.pickup = 'manastar';
+    // 星云三 booster 3453-3455 = pickup 类（ItemID.Sets.NebulaPickup :1116 +
+    // ItemsThatShouldNotBeInInventory :72——拾取 → NebulaLevelup（Player.cs
+    // :35322-35332 音 7+TurnToAir）,永不进背包）。★BJ424：booster 从 Game 私有
+    // 数组（无渲染/重力错挂/拉距 52）迁入 ItemDrop 全基建——pickup 标签在
+    // spawnDrop 按 vid 注入,MP 重建路径（msg21→spawnDrop）同位生效
+    if (NEBULA_BOOSTER_VIDS.has(dropVid)) drop.pickup = 'nebula';
     // ★原版 Main.item 槽位上限 400（Main.cs:1696 WorldItem[401],NewItem 扫 0..399）:
     //  满槽 → 回收【最老的 pickup 类】槽位（Item.cs:49781-49800:IsAPickup 里
     //  timeSinceItemSpawned 最大者——普通掉落从不被抢占;曾不判型 shift() 最旧,
@@ -41427,48 +41666,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     return res.freed;
-  }
-
-  /** 星云 booster 实体（原版是 Item 3453-55：WI:418 重力 0.1；PC:34497 抓取 42px 内
-   *  PullItem 速度 12/acc 5；拾取 → NebulaLevelup（3453 伤/3454 命/3455 魔）+ 音效 7） */
-  private nebulaBoosters: Array<{ x: number; y: number; vx: number; vy: number; fam: 0 | 1 | 2 | -1 }> = [];
-  private spawnNebulaBooster(x: number, y: number): void {
-    const fam = (Math.floor(Math.random() * 3) as 0 | 1 | 2); // SelectRandom(3453,3454,3455)
-    const side = Math.random() < 0.5 ? -1 : 1;
-    this.nebulaBoosters.push({
-      x, y,
-      vx: (10 + Math.floor(Math.random() * 21)) * 0.2 * side, // :12898
-      vy: (-20 + Math.floor(Math.random() * 21)) * 0.2,       // :12897
-      fam,
-    });
-  }
-  private updateNebulaBoosters(): void {
-    const p = this.player;
-    if (p.nebulaCD > 0) p.nebulaCD--;
-    for (const b of this.nebulaBoosters) {
-      const d = Math.hypot(p.cx - b.x, p.cy - b.y);
-      if (d < 42 + 10) { // grabRange 42（PC:2406）→ PullItem 速 12/acc 5（PC:34581-34596）
-        b.vx += ((p.cx - b.x) / (d || 1)) * 5;
-        b.vy += ((p.cy - b.y) / (d || 1)) * 5;
-        const sp = Math.hypot(b.vx, b.vy);
-        if (sp > 12) { b.vx *= 12 / sp; b.vy *= 12 / sp; }
-      } else {
-        b.vy = Math.min(b.vy + 0.1, 10); // 物品重力（WI:418）
-      }
-      b.x += b.vx; b.y += b.vy;
-      const tb = this.world.store;
-      const tx = Math.floor(b.x / TILE), ty = Math.floor(b.y / TILE);
-      if (tb.inBounds(tx, ty) && tb.isSolid(tx, ty)) { b.y -= b.vy; b.vy = 0; b.vx *= 0.9; }
-      if (d < 20 && b.fam !== -1) { // 碰体拾取（PC:34476-34480;已回收跳过）
-        const fam = b.fam; // 收窄 0|1|2(下述 -1 标记回收前留存)
-        p.nebulaLevelup(fam);
-        this.sfx.play('pickup', 1, -1); // SoundID 7（PC:34601）
-        // 先用原 fam 取色再覆盖 -1 标记回收——顺序颠倒会令三色 boosters 全喷粉色
-        this.spawnParticles(b.x, b.y, ['#FF6AD5', '#FF3C3C', '#3CB8FF'][fam], 6, 2, { life: 24 });
-        b.fam = -1; // 标记回收
-      }
-    }
-    this.nebulaBoosters = this.nebulaBoosters.filter((b) => b.fam !== -1);
   }
 
   /** contactOnly：伤害源是 NPC **接触**（Player.cs:30880-30970 的 Main.npc[i] 循环）——

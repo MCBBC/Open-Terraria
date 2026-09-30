@@ -21,10 +21,12 @@ describe('C10b 转正旗面与 bg 注入点', () => {
   it('?cloudpipe 缺省开（C10b 转正维持;★SW-闪屏案 C10d 硬ening 后回归）,?cloudpipe=0 逃生门=云+bg 整体回 glfx', () => {
     expect(RDR).toContain("get('cloudpipe') !== '0'");
     // bg 注入点同旗:cloudpipe 开=acquireCloudPipe（共管管线）;关=acquireGL(glfx)
-    expect(RDR).toMatch(/const glbg = Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
+    // ★C10e:c10e 帧强制共管（呈现面=pipe.canvas=DOM glCanvas;cloudpipe=0 收窄）
+    expect(RDR).toMatch(/const glbg = \(Renderer\.cloudPipe \|\| this\._c10eFrame\) \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
     // 云注入点保持 C10a 分支形态（两路同门:useGLClouds/cpuRender 先判）
-    expect(RDR).toMatch(/Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
-    expect(RDR.match(/Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/g)?.length).toBe(2);
+    // ★C10e:双注入点各自强制共管（云=c10e 静态旗||cloudpipe;bg=_c10eFrame 帧旗）
+    expect(RDR).toMatch(/\(Renderer\.cloudPipe \|\| Renderer\.c10e\) \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
+    expect(RDR).toMatch(/\(Renderer\.cloudPipe \|\| this\._c10eFrame\) \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
   });
 
   it('bg 会话 FBO=\'bg\'（纯 bg 与合并会话同 FBO 名=开会方）;云会话缺省 \'clouds\'——命名空间防撞', () => {
@@ -57,7 +59,8 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
     // ★opresent deferBlit=true 收口不 present/blit——FBO 挂起给世界合成 pass3）
     // ★C10c（2026-09-30）:blit 分账计数器插入（cloudBlitStats.mergedFull/mergedDefer）
     //  ——结构语义不变,锚随盘刷新（C10b 锚随盘刷新判例 2026-09-28 同族）。
-    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit\);\s*\n\s*if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
+    // ★C10e:收口 over 档（end 第二参=c10eOver;管线后端 skip blit 直出 glCanvas）
+    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit, !deferBlit && this\.c10eOver\);[\s\S]{0,400}if \(!deferBlit\) \{\s*\n\s*SkyRenderer\.cloudBlitStats\.mergedFull\+\+;\s*\n\s*if \(!\(this\.c10eOver && merged\.pipeBackend\)\) \{ ctx\.drawImage\(merged\.canvas, 0, 0\); \}\s*\n\s*ctx\.globalAlpha = 1;\s*\n\s*\}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
     // 正常路径:合并会话禁再 begin（begin=清屏会抹掉已交 bg quads）
     expect(SKY).toContain('let batchBegun = mergedMode;');
     // 收口后 Renderer 清引用（每帧独立判定,无跨帧残留;★opresent defer 挂起登记在清引用后）
@@ -67,16 +70,19 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
   it('分回合回退=双会话双 blit（夹层内容在场;bg 全幅 blit 结构与 C10a/glfx 同）', () => {
     // else 分支:bg begin→draw→end→全幅 blit（1:1 旧结构,夹层矩形仍画主画布）
     // ★C10d:split 分支 begin 后插入远云 stash 发射（flushFarDeferredGL）
-    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
-    // 天气色罩/黑闪绘制段保持原位（层序语义零改动）
-    expect(RDR).toContain('this.sky.drawWeatherTint2D(ctx, viewW, viewH);');
+    // ★C10e:end 后 blit 加直出门（管线后端 skip blit;glfx/旗关=原路径）
+    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*\/\/ ★C10e[\s\S]{0,300}if \(!\(this\._c10eFrame && glbg\.pipeBackend\)\) ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
+    // 天气色罩/黑闪绘制段保持原位（层序语义零改动;★C10e:c10e 帧传 sky2D——GL
+    //  quad 分支忽略 ctx,2D 回退分支落 sky2D 保持层序）
+    expect(RDR).toContain('this.sky.drawWeatherTint2D(this._c10eFrame ? (this.skyCtx ?? ctx) : ctx, viewW, viewH);');
     expect(RDR).toContain("ctx.fillStyle = '#000';");
   });
 
   it('合并收口=全幅 blit（bg 覆盖面不以云 bbox 为界——cloudBlitRect bbox 收口不适用）', () => {
     // ★opresent:deferBlit=true 时收口跳过 blit（FBO 挂起）——缺省路径仍全幅 blit
     // ★C10c:blit 分账计数器插入（mergedFull/mergedDefer/bboxBoth）——锚随盘刷新
-    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(shared\.canvas, 0, 0\); \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\} else \{\s*\n\s*SkyRenderer\.cloudBlitStats\.bboxBoth\+\+;\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
+    // ★C10e:directOut 门（管线后端 over 直出 skip blit;else 支=同位记账）
+    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; if \(!directOut\) ctx\.drawImage\(shared\.canvas, 0, 0\); \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\} else if \(!directOut\) \{\s*\n\s*SkyRenderer\.cloudBlitStats\.bboxBoth\+\+;\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
   });
 
   it('诊断面:cloudMergeUsed/cloudMergeStats（merged/split/- 三态;DebugReport cloudPath 段）', () => {
@@ -101,7 +107,8 @@ describe('C10b 管线实例共管（三消费方单实例）', () => {
     // ★R1-F10（2026-09-25 红蓝批 B）：构造口可返 null——共管旗开而 acquireSwPipe
     //  缺（退避窗/饥饿/渐进闩）走旧链/降级,禁自建第二管线（旧锁面按新承诺改）
     //  ★P0-A 金标再生（2026-09-25 塌方定谳续刀）：null 支带指纹落账+一次性 toast
-    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\)[^]*?this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);/);
+    // ★C10e:c10e 下 compose 强制共管（呈现面依赖;cloudpipe=0 收窄——判据加 c10e）
+    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*\/\/ ★C10e[^]*?if \(!Renderer\.cloudPipe && !Renderer\.c10e\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\)[^]*?this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);/);
     expect(COMP).toContain("constructor(statName = 'worldCompose', pipe?: GLPipeline | null)");
     expect(COMP).toContain('this.ownsPipe = !pipe;');
     expect(COMP).toContain('this.pipeline = pipe ?? new GLPipeline(statName);');
@@ -146,7 +153,7 @@ describe('C10b 周边结构保留', () => {
 
   it('GLPipeline A0 面零改动（FBO RGBA8/present flipY/程序表）——共管不修门面', () => {
     expect(PIPE).toContain('gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null');
-    expect(PIPE).toContain('present(src: PipelineFbo)');
+    expect(PIPE).toContain('present(src: PipelineFbo, over = false)');   // ★C10e:over 缺省参（屏栈直出档,缺省=原路径）
     expect(PIPE).toContain('recreate(): boolean');
   });
 
@@ -173,7 +180,9 @@ describe('★C10d 远云 pass 并入 bg 会话（2026-09-30;cloudBlitRect 1.5s/5
     expect(SKY10D).toContain('replayFarDeferred2D(ctx: CanvasRenderingContext2D): void');
     expect(SKY10D).toContain('if (batch && !force2D) {');
     expect(RDR.match(/this\.sky\.flushFarDeferredGL\(glbg, ctx\);/g)?.length).toBe(2);   // merged+split 双分支
-    expect(RDR).toContain('this.sky.replayFarDeferred2D(ctx);');
+    // ★C10e:bg 2D 回退路由 sky2D（bg2dCtx=c10e 帧 skyCtx,旗关=原 ctx）
+    expect(RDR).toContain('const bg2dCtx = this._c10eFrame ? (this.skyCtx ?? ctx) : ctx;');
+    expect(RDR).toContain('this.sky.replayFarDeferred2D(bg2dCtx);');
   });
   it('drawVanillaClouds 每帧入口清残留 stash（防跨帧陈旧）', () => {
     expect(SKY10D).toMatch(/const scratch = this\.cloudScratch;\s*\n\s*scratch\.length = 0;\s*\n\s*for \(const c of this\.vclouds\) if \(c\.scale < 1\) scratch\.push\(c\);\s*\n\s*\/\/ ★C10d 远云并入 bg 会话/);
