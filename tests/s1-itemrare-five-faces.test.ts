@@ -189,7 +189,7 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
         env: { ...process.env, SW_ITEM_VER: ver },
       });
       expect(r.status).toBe(0);
-      return JSON.parse(r.stdout.toString('utf8')) as { RARE: Record<string, number>; VALUE: Record<string, number> };
+      return JSON.parse(String(r.stdout)) as { RARE: Record<string, number>; VALUE: Record<string, number> };
     };
     const d57 = dumpOf('1457');
     for (const ver of ['1456', '1458']) {
@@ -217,7 +217,7 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_ITEM_VER: '1457' },
     });
-    const out = r.stdout.toString('utf8');
+    const out = String(r.stdout);
     return { r, parsed: out ? (JSON.parse(out) as { RARE: Record<string, number>; VALUE: Record<string, number> }) : null };
   };
 
