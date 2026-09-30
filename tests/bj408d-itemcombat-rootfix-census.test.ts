@@ -203,3 +203,102 @@ describe('J-⑤ 重产零回退抽样（era guard B-form 的运行时旁证）',
     expect(TABLE['3290']).toMatchObject({ damage: 43, knockBack: 4.5 });
   });
 });
+
+// ────────── ⑥ ★清偿刀 Q1（2026-09-30）：helper 体字段面（extract-itemcombat 头注⑨）
+//    ——可放置族体面 + 宠物/高尔夫/溶液/炸弹四形参族 + SetDefaults3 尾段九件 +
+//    combatWeapon 三族显式退出（'shot' 兜底回归防护）──────────
+
+const Q1_PLACEABLE_SAMPLE: Array<[number, number, number]> = [
+  [562, 15, 10],   // DefaultToMusicBox(0)（SetDefaults1 case 562 :8056）
+  [2742, 15, 10],  // DefaultToMusicBox（嵌套 switch 内调用点, nestedSwitchCases 通道）
+  [4052, 15, 7],   // DefaultToPlaceableWall（time 7 档）
+  [4383, 15, 10],  // DefaultToTorch(17)（:42773 附近,allowWaterPlacement 具名族 4384 同）
+  [5651, 15, 10],  // DefaultToBanner→PlaceableTile 委托链
+  [5113, 15, 10],  // DefaultToMonolith→PlaceableTile 委托链
+  [86, 15, 10],    // MakeUsableWithChlorophyteExtractinator（case 86 :2400）
+  [1329, 15, 10],  // MakeUsable（case 1329 :16478）
+];
+
+describe('Q1-① helper 体面·可放置族（anim15/time10|7/autoReuse/consumable 原生直出）', () => {
+  it.each(Q1_PLACEABLE_SAMPLE)('vid %i：anim=%i/time=%i+autoReuse+consumable', (vid, anim, time) => {
+    expect(TABLE[String(vid)]).toMatchObject({
+      useAnimation: anim, useTime: time, autoReuse: true, consumable: true,
+    });
+  });
+
+  it('SeaShell 2625/2626（贯穿组;体无 useTurn=原版同相）∧ Critter 261 全值+noUseGraphic', () => {
+    for (const vid of [2625, 2626]) {
+      expect(TABLE[String(vid)]).toEqual({ autoReuse: true, useAnimation: 15, useTime: 10, consumable: true });
+    }
+    expect(TABLE['261']).toEqual({ autoReuse: true, useTurn: true, useAnimation: 15, useTime: 10, consumable: true, noUseGraphic: true });
+  });
+
+  it('heldUseAnimation 输入面：可放置件 itemCombat().useAnimation 真值 15/7（C3 病灶「回落 30」消除）', () => {
+    for (const vid of [562, 2742, 5651, 5113, 86, 1329]) {
+      expect(itemCombat(vid)?.useAnimation, `vid ${vid}`).toBe(15);
+    }
+    expect(itemCombat(4052)?.useAnimation).toBe(15);   // Wall 体:useAnimation 15 档
+    expect(itemCombat(4052)?.useTime).toBe(7);         // Wall 体:useTime 7 档（anim15/time7 分立）
+  });
+});
+
+describe('Q1-② 四形参族（Vanitypet/GolfBall/GolfClub/Solution/Bomb）', () => {
+  it('Vanitypet 4365/5131：damage0/anim20/time20/noMelee/shoot=形参', () => {
+    expect(TABLE['4365']).toEqual({ damage: 0, useAnimation: 20, useTime: 20, noMelee: true, shoot: 764 });
+    expect(TABLE['5131']).toEqual({ damage: 0, useAnimation: 20, useTime: 20, noMelee: true, shoot: 881 });
+  });
+
+  it('高尔夫球 3989/4242（shoot=形参 721/739+speed12+noUseGraphic+noMelee）/球杆 4039（shoot722+speed6+anim12）', () => {
+    expect(TABLE['3989']).toEqual({ shoot: 721, shootSpeed: 12, useAnimation: 15, useTime: 15, noUseGraphic: true, noMelee: true });
+    expect(TABLE['4242']).toMatchObject({ shoot: 739, shootSpeed: 12, useAnimation: 15, useTime: 15, noUseGraphic: true, noMelee: true });
+    expect(TABLE['4039']).toEqual({ shootSpeed: 6, shoot: 722, useTime: 12, useAnimation: 12, noMelee: true });
+  });
+
+  it('溶液 5392-5394（shoot=projId-145 算式+ammo780）/炸弹 5594-5595（shoot=1086+(type-5594)+40/40 档）', () => {
+    expect(TABLE['5392']).toEqual({ shoot: 870, ammo: 780, consumable: true });
+    expect(TABLE['5393']).toMatchObject({ shoot: 871, ammo: 780, consumable: true });
+    expect(TABLE['5394']).toMatchObject({ shoot: 872, ammo: 780, consumable: true });
+    expect(TABLE['5594']).toEqual({ shootSpeed: 6, shoot: 1086, consumable: true, useAnimation: 40, useTime: 40, noUseGraphic: true, noMelee: true });
+    expect(TABLE['5595']).toMatchObject({ shoot: 1087, shootSpeed: 6, useAnimation: 40, useTime: 40, consumable: true, noMelee: true });
+  });
+
+  it('割草机 4049（useAnim30/time10/autoReuse）∧ 4715 双通道终值（体面+链式除式 6）', () => {
+    expect(TABLE['4049']).toEqual({ useAnimation: 30, useTime: 10, autoReuse: true });
+    expect(TABLE['4715']).toMatchObject({ useAnimation: 12, useTime: 6, autoReuse: true });
+  });
+
+  it('后置别名族 4041-4048/4241（useTime = useAnimation 吃体面 15;autoReuse=false 显式覆写保有）', () => {
+    for (const vid of [4041, 4042, 4043, 4044, 4045, 4046, 4047, 4048, 4241]) {
+      expect(TABLE[String(vid)], `草种子 ${vid}`).toEqual({
+        autoReuse: false, useAnimation: 15, useTime: 15, useTurn: true, consumable: true,
+      });
+    }
+  });
+
+  it('TryGet 四门输入面定谳：三族 combatWeapon 显式退出（不落 \'shot\' 直射兜底）', () => {
+    // 宠物 51 件/高尔夫球 15 件/球杆 16 件——shoot+noMelee 已入表但原版使用链在专支消费
+    // （宠物=装备槽域;球=IsAGolfBall 重定向 :47935;杆=AI_150 蓄力）——combatWeapon 返 null
+    for (const vid of [4365, 5131, 4797, 5098, 3989, 4242, 4255, 4039, 4094, 4598]) {
+      expect(combatWeapon({ key: `vi_${vid}_q1guard`, vid }), `vid ${vid} 不落武器兜底`).toBeNull();
+    }
+    // 对照:669/753（显式 case 宠物件,updateUse 拦截支先行）同受退出保护
+    expect(combatWeapon({ key: 'vi_669_fish', vid: 669 })).toBeNull();
+    // 风筝 24 件（BJ413 'kite' 归支）不受宠物/高尔夫退出影响
+    expect(combatWeapon({ key: 'vi_4367_kite', vid: 4367 })?.kind).toBe('kite');
+    // 委托基底件 5651 无 shoot → combatWeapon null（无 shoot 无战斗语义）
+    expect(combatWeapon({ key: 'vi_5651_banner', vid: 5651 })).toBeNull();
+  });
+});
+
+describe('Q1-③ SetDefaults3 尾段九件（C3 定谳:守卫外尾段 :27621-27626 数值面）', () => {
+  it('2192-2198/2203/2204 全值（useTurn+anim15/time10/autoReuse/consumable）', () => {
+    for (const vid of [2192, 2193, 2194, 2195, 2196, 2197, 2198, 2203, 2204]) {
+      expect(TABLE[String(vid)], `尾段 ${vid}`).toEqual({ useTurn: true, useAnimation: 15, useTime: 10, autoReuse: true, consumable: true });
+    }
+  });
+
+  it('对照:守卫内件 2199/2205 相（2199 无战斗面/2205 Critter 全值）不受尾段外溢', () => {
+    expect(TABLE['2199']).toBeUndefined();
+    expect(TABLE['2205']).toEqual({ autoReuse: true, useTurn: true, useAnimation: 15, useTime: 10, consumable: true, noUseGraphic: true });
+  });
+});

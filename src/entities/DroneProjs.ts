@@ -102,13 +102,18 @@ function heldItemVid(game: GameHooks): number {
   return ITEM_DEFS[held.id]?.vid ?? -1;
 }
 
-/** 弹幕染料通道 vid（清偿刀 N 2026-09-30）——GetProjectileDesiredShader 1:1：
- *  1020/1105 均走 switch 覆写 → cPet（owner!=255 面由本函数承载：本地弹读属主
- *  inv.miscDyes[0];傀儡 miscDyes 未同步（protocol ItemContainer 仅 Slots/Armor/Dye
- *  三容器）→ 通道全 0=无染,登记 MP 边界债）。damage 传弹实值（switch 覆写无
- *  damage 门,projPet 支 1020 本就 damage==0）、aiStyle 数据面。 */
+/** 弹幕染料通道 vid（清偿刀 N 2026-09-30;★Q3 2026-09-30 MP 面清偿）——
+ *  GetProjectileDesiredShader 1:1：1020/1105 均走 switch 覆写 → cPet（owner!=255
+ *  面由本函数承载：本地弹读属主 inv.miscDyes[0];傀儡经 dyeInvProbe 读拥有端代理
+ *  inv——msg5 ItemContainer.MiscDyes=3 段同步后与本地同源;probe 缺/段缺=通道 0
+ *  fail-open 同相）。damage 传弹实值（switch 覆写无 damage 门,projPet 支 1020
+ *  本就 damage==0）、aiStyle 数据面。 */
 function droneDyeVid(d: DroneBase): number {
-  const inv = (d.ownerPlayer as unknown as { inv?: DyeInvSource } | undefined)?.inv;
+  const inv = d.ownerPlayer !== undefined
+    ? (d.ownerPlayer as unknown as { inv?: DyeInvSource } | undefined)?.inv
+    : (d.dyeInvProbe && d.netOwnerSlot !== undefined
+      ? (d.dyeInvProbe(d.netOwnerSlot) as { inv?: DyeInvSource } | null | undefined)?.inv
+      : undefined);
   if (!inv) return 0;
   const ch = dyeChannelsOf(inv);
   if (!(ch.cPet > 0)) return 0;
@@ -134,6 +139,10 @@ export abstract class DroneBase extends Entity {
    *  镜像,Game.netMakeProj case 11 接线;本地弹恒 undefined 走 game.player） */
   netOwnerSlot?: number;
   ownerDeadProbe?: (slot: number) => boolean;
+  /** ★清偿刀 Q3（2026-09-30）：傀儡染料槽读口——拥有端代理 inv（msg5 miscDyes 段
+   *  已同步,proxy.inv 即 DyeInvSource）。Game.netMakeProj case 11 接线;本地弹恒
+   *  undefined（ownerPlayer.inv 直读）。旧端降级=probe 缺/miscDyes 全 null → 通道 0。 */
+  dyeInvProbe?: (slot: number) => unknown;
   /** Projectile.ai[0]：输入位包（0=left 1=right 2=up 3=down,1105 加 4=jump 5=mode） */
   ai0 = 0;
   /** Projectile.ai[1]：姿态角（AI 头 rotation=ai[1]、尾 ai[1]=rotation） */

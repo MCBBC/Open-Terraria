@@ -384,7 +384,7 @@ describe('BJ304 C. 边界', () => {
     expect(String(TABLE._meta.batch3)).toContain('翻案');
     expect(String(TABLE._meta.batch3)).toContain('生长目标');
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(334);                      // 332 + 402/661（★BJ327 批4 转正;426/427 批3 已在）
+    expect(ids.length).toBe(335);                      // 332 + 402/661（★BJ327 批4 转正;426/427 批3 已在;BJ411 23）
     for (const vid of ['415', '416', '417', '418', '419', '420', '421', '423', '424', '425', '426', '427', '429', '518', '524', '525', '526', '527']) {
       expect(TABLE[vid]).toBeDefined();
     }

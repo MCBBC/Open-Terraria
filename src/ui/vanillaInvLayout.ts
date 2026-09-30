@@ -212,6 +212,48 @@ export function defenseCenterXY(sw: number, num20: number, lastVisibleRow: numbe
   return { x: sw - 210, y: y + 26 };
 }
 
+// ---- 装备列尾行族(Main.cs:42091-42102;★BJ416 2026-09-30 单源) ----
+//   num37 = num19-1 = 末可见行号(防御盾行,:42132-42135 num39==num37 → DrawDefenseCounter);
+//   设置钮挤碰侧移(_settingsButtonIsPushedToSide)时 num37 再 -1(:42094-42097);
+//   num38 = num37-1 = 成就顾问行(:42098;:42127-42131 num39==num38 ∧ !CanDrawAboveCoins
+//   → DrawOneAchievement @(num41-10-47-47-14-14, num42+8))。HasSpace 不过时 num38=-1=不画。
+//   ★BJ416 病灶=旧刀把顾问钉在 last(=num37)行:比原版低 1-2 行,卡体(58×61 竖式)
+//   正压下一行防御盾+设置钮——用户实报"成就按钮跑到右下角紧邻设置"。
+export function defenseRowOf(visibleRows: number, settingsPushed: boolean): number {
+  return visibleRows - 1 - (settingsPushed ? 1 : 0);
+}
+/** 成就顾问内联行(Main.cs:42098 num38 = num37-1;HasSpace=false 时调用方须改判 -1 不画) */
+export function advisorRowOf(visibleRows: number, settingsPushed: boolean): number {
+  return defenseRowOf(visibleRows, settingsPushed) - 1;
+}
+/** 顾问内联落位(Main.cs:42129:num41=sw-92 → x=sw-224;y=num42+8) */
+export function advisorInlineXY(sw: number, num20: number, row: number): { x: number; y: number } {
+  return { x: sw - 224, y: equipRowY(num20, row) + 8 };
+}
+
+// ---- 设置钮锚(RefreshSettingsButtonStatus Main.cs:46254-46285;★BJ416 单源) ----
+//   缺省 (sw-110, sh-20) 文本中心;挤碰判据 posY-28 <= num3,num3 = (174+mH) +
+//   (int)(47.600002f*(8+extraAcc))(:46269-46275 自算 174+mH——【不采】DrawInventory
+//   num20 的 sh<950 矮屏压缩(:41858-41861),含恶魔心/大师槽时两域差 47.6/格);
+//   挤碰 → posX-=140 / posY=num3-47+30,并置 _settingsButtonIsPushedToSide
+//   (:46278-46282)。死亡 posX+=40(:46261-46265)不建:本仓死亡强收包
+//   (DrawInterface_26 playerInventory=false 等价),设置钮不画=同语义面。
+export function settingsAnchorOf(sw: number, sh: number, mH: number, visibleRows: number): { x: number; y: number; pushed: boolean } {
+  const num3 = 174 + mH + Math.trunc(CELL_STEP * visibleRows);
+  if (sh - 20 - 28 <= num3) return { x: sw - 110 - 140, y: num3 - 17, pushed: true };
+  return { x: sw - 110, y: sh - 20, pushed: false };
+}
+
+/** HasSpaceForControllerAchievementAdvisor(Main.cs:3019-3033)1:1——无可显卡
+ *  (HasAvailableCardToDisplay,AchievementAdvisor.cs:185-197)或(挤碰侧移 ∧ 无
+ *  恶魔心/大师槽 ∧ INFOACCCOUNT≥9)→ 内联顾问不画(:42099-42102 num38=-1)。
+ *  extraAccRows = GetAmountOfExtraAccessorySlotsToShow(Player.cs:4279-4291);
+ *  infoAccCount = GetDrawInfoAccCount(Main.cs:47505-47553) 开包全计臂 */
+export function hasSpaceForInlineAdvisor(hasCard: boolean, extraAccRows: number, infoAccCount: number, settingsPushed: boolean): boolean {
+  if (!hasCard) return false;
+  return !(settingsPushed && extraAccRows === 0 && infoAccCount >= 9);
+}
+
 // ---- 页签(DrawPageIcons Main.cs:43511-43593;y=num20-32) ----
 //   杂项 x=sw-80(DisplaySlots_2/3 28×26)/住房 x=sw-128(_4/5 22×24)/相机 x=sw-176(_8/10 32×32)
 export const TAB_Y = (num20: number): number => num20 - 32;

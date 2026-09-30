@@ -1,27 +1,27 @@
 {
- "at": "2026-09-29T10:50:13.422Z",
+ "at": "2026-09-30T06:29:18.108Z",
  "release": true,
- "totalJsMb": 27.51,
+ "totalJsMb": 28.21,
  "chunks": [
   {
-   "file": "assets/index-32AXGsL8.js",
-   "kb": 12397.9
+   "file": "assets/index-CJvdDdBK.js",
+   "kb": 12542.2
   },
   {
-   "file": "assets/worldGen.worker-C_0sgErQ.js",
-   "kb": 5117.1
+   "file": "assets/worldGen.worker-BsEtFqJ7.js",
+   "kb": 5262.9
   },
   {
-   "file": "assets/BakeWorker-DjKUdYql.js",
-   "kb": 3997.9
+   "file": "assets/BakeWorker-DaasRlPn.js",
+   "kb": 4142.5
   },
   {
-   "file": "assets/LightWorker-DpjZvKv-.js",
-   "kb": 3702
+   "file": "assets/LightWorker-B6tpLGHm.js",
+   "kb": 3843.2
   },
   {
-   "file": "assets/save.worker-B4xbrse9.js",
-   "kb": 2884.7
+   "file": "assets/save.worker-CUpD4D2x.js",
+   "kb": 3026.3
   },
   {
    "file": "sw.js",
@@ -29,14 +29,14 @@
   },
   {
    "file": "assets/WaveWorker-BSWMST4D.js",
-   "kb": 25.7
+   "kb": 25.8
   },
   {
    "file": "assets/asset-warm.worker-B-VjK1d3.js",
-   "kb": 10
+   "kb": 9.8
   },
   {
-   "file": "assets/RemasterPanel-BXzoXt9N.js",
+   "file": "assets/RemasterPanel-B3d9i4Q2.js",
    "kb": 8.2
   },
   {

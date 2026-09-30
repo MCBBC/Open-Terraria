@@ -40,7 +40,8 @@ export function mountUpdateBanner(root: HTMLElement, onApply: () => void): Updat
   return {
     show(version: string, apply: () => void): void {
       // 版本号来自 build-id.txt 首段(数字版,含 -beta 预发布后缀 2026-09-23;异常缺段时回落 bundle 指纹短码)
-      const display = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/.test(version) ? version : version.replace(/^index-/, '').replace(/\.js$/, '').slice(0, 6);
+      const vTokens = version.split(/\s+/);
+      const display = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/.test(vTokens[0] ?? '') ? [vTokens[0]!, /^\d{10}$/.test(vTokens[1] ?? '') ? vTokens[1]! : ''].filter(Boolean).join(' ') : version.replace(/^index-/, '').replace(/\.js$/, '').slice(0, 6);
       label.textContent = Lang.text('Mods.SandboxWorld.UpdateBanner', display);
       btn.textContent = Lang.text('Mods.SandboxWorld.UpdateApply');
       btn.onclick = () => { btn.textContent = '…'; apply(); };

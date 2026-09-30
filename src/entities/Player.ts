@@ -266,6 +266,11 @@ const VANILLA_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** Player.AFKTimeNeededForNoWormSpawns（Player.cs:971）——AFK 计数达此值 →
  *  NPC.cs:412 noGroundWorms=true（挂机玩家周围不出蠕虫族） */
 export const AFK_TIME_NEEDED_FOR_NO_WORM_SPAWNS = 300;
+/** Player.AFKTimeNeededForAutoKiting（Player.cs:977 `public static int` 原值 3600）
+ *  ——afkCounterForKiting 达此值 → PickItemSelectionOverride 自动选中+使用风筝
+ *  （Player.cs:17537-17547）。★Q4 刀 2026-09-30（BJ413 登记·挂机放风筝建模）：
+ *  此前已登记未建模（Player.ts:6216/Game.ts:6217 注），本刀全链接通。 */
+export const AFK_TIME_NEEDED_FOR_AUTO_KITING = 3600;
 /** AFK 计数链步进核（纯函数,tests/finalzero-game-domain 直测）——
  *  Player.cs:25692-25701 Update 段 1:1：IsConsideredStandingStill(:3307 |vx|<0.05
  *  && |vy|<0.05) && (itemAnimation==0 || IsAKite[HeldItem]) && 六输入皆空
@@ -5118,6 +5123,12 @@ export class Player extends Entity {
       this.vx = 0; this.vy = 0;
       this.onGround = true;
       if (this.sitting) this.sitTicks++;
+      // ★Q4 刀 2026-09-30（BJ413 AFK 自动风筝）：:25705-25710 petting/sitting/
+      // sleeping 逐拍清 afkCounterForKiting——本仓坐/睡态 fixedUpdate 在此整体早退
+      // （AFK 步进块 :7613 不可达）⇒ 清零面在早退位补齐,防「坐下前 kite 计数已满
+      // → 起身次拍即触发自动放风筝」（原文坐/睡不步进两计数且 kite 计数逐拍归零）。
+      // afkCounter 坐/睡冻结 vs 原文照步（站立即步）= 本仓早退结构既有偏差,登记不接。
+      this.afkCounterForKiting = 0;
       return;
     }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
@@ -7590,21 +7601,48 @@ export class Player extends Entity {
     //      消费=NPC.cs:412 noGroundWorms（≥300=AFKTimeNeededForNoWormSpawns）→
     //      SetSpawnFlagsForChosenTile:1053 !skyMob 门起 noWorms（挂机不出蠕虫族）。
     //      ★计时粒度：本仓 fixedUpdate 定步频 60Hz 与原版 Update 同拍。
-    //      controlTorch=this.inputTorch（Game 输入合成段写入）;体力面（petting/
-    //      sitting/sleeping 清 afkCounterForKiting :25702-25705）只涉风筝自动切、
-    //      未建模（登记）；死亡观战退出钳 300（HandleSpectatingControls :17200）
-    //      同属风筝计数链旁支不接。Select 族清零在 Game 键位段（ Digit/Hotbar±）。
-    //      步进核心抽 stepAfkCounter 纯函数（tests/finalzero-game-domain 直测） ----
+    //      controlTorch=this.inputTorch（Game 输入合成段写入）;死亡观战退出钳 300
+    //      （HandleSpectatingControls :17200）同属计数链旁支不接（登记）。
+    //      Select 族清零在 Game 键位段（ Digit/Hotbar±/滚轮）。
+    //      步进核心抽 stepAfkCounter 纯函数（tests/finalzero-game-domain 直测）。
+    //      ★Q4 刀 2026-09-30（BJ413 登记·挂机放风筝）：afkCounterForKiting 同条件
+    //      同拍步进（:25697-25702 两计数同一 if/else），独有清零面两支补齐——
+    //      ①光标持物（:25702-25704 `i==whoAmI && !Main.mouseItem.IsAir`→0,本仓
+    //      等价=inv.cursorMirror）②petting/sitting/sleeping（:25705-25710→0）。
+    //      消费=Game.updateSmartSelect AFK 臂（PickItemSelectionOverride :17537）。 ----
     {
       const heldAfk = this.inv.heldItem();
       const heldVidAfk = heldAfk ? (ITEM_DEFS[heldAfk.id]?.vid ?? (ITEM_DEFS[heldAfk.id].vid ?? -1)) : -1;
-      this.afkCounter = stepAfkCounter({
+      const steppedAfk = stepAfkCounter({
         vx: this.vx, vy: this.vy, itemAnimTicks: this.itemAnimTicks,
         inputX: this.inputX, inputUp: this.inputUp, inputDown: this.inputDown,
         inputJump: this.inputJump, inputTorch: this.inputTorch,
         heldIsKite: KITE_ITEM_VIDS.has(heldVidAfk),
         afkCounter: this.afkCounter,
       });
+      this.afkCounter = steppedAfk;
+      this.afkCounterForKiting = steppedAfk;                     // :25697/:25702 同拍
+      if (this.inv.cursorMirror) this.afkCounterForKiting = 0;   // :25702-25704 光标持物
+      if (this.petting.isPetting || this.sitting || this.sleeping) {
+        this.afkCounterForKiting = 0;                            // :25705-25710 体力面
+      }
+      // selectedKite 逐 tick 重算（UpdateEquips :12994/:13001 →
+      // RefreshAutoKitingFromItemTypeAndSlot :12939-12944：每 tick ResetEffects
+      // :18548 先清 -1，再 HeldItem 槽优先、后 0..57 顺序扫——首个 IsAKite 槽胜出）
+      this.selectedKite = -1;
+      const heldSel = this.inv.heldItem();
+      const heldSelVid = heldSel ? (ITEM_DEFS[heldSel.id]?.vid ?? -1) : -1;
+      if (heldSelVid >= 0 && KITE_ITEM_VIDS.has(heldSelVid)) {
+        this.selectedKite = this.inv.selected;                   // :12994 HeldItem 优先
+      }
+      if (this.selectedKite < 0) {
+        const slots = this.inv.slots;
+        for (let j = 0; j < slots.length && j < 58; j++) {       // :13001 j<58
+          const it = slots[j];
+          const vid = it ? (ITEM_DEFS[it.id]?.vid ?? -1) : -1;
+          if (vid >= 0 && KITE_ITEM_VIDS.has(vid)) { this.selectedKite = j; break; }
+        }
+      }
     }
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
@@ -10055,6 +10093,20 @@ export class Player extends Entity {
    *  计数链在 fixedUpdate 尾（IsConsideredStandingStill && 六输入皆空 &&
    *  (itemAnimation==0 || 风筝持械)）；Select 族换栏清零(:498-499)。 */
   afkCounter = 0;
+  /** afkCounterForKiting（Player.cs:975）：与 afkCounter 同条件同拍步进
+   *  （:25696-25702 同一 if/else），独有清零面=光标持物（:25702-25704）/
+   *  petting·sitting·sleeping（:25705-25710）；消费=PickItemSelectionOverride
+   *  （Player.cs:17537）——≥AFKTimeNeededForAutoKiting(3600) ∧ selectedKite≥0
+   *  ∧ !noItems ∧ !isOperatingAnotherEntity ∧ spectating<0 → 自动选中风筝槽
+   *  （holdStyle==0 再置 controlUseItem=releaseUseItem=true 自动使用）。
+   *  ★Q4 刀 2026-09-30（BJ413 登记）建模；Select 族换栏同清（Game 键位段）。 */
+  afkCounterForKiting = 0;
+  /** selectedKite（Player.cs:1447）：背包内首个风筝物品槽（RefreshAutoKitingFrom-
+   *  ItemTypeAndSlot :12939-12944 `selectedKite <= -1 && IsAKite[accType]` → slot）。
+   *  每 tick 重算（ResetEffects :18548 清 -1 → UpdateEquips :12994 HeldItem 槽优先
+   *  + :13001 0..57 顺序扫）——首个（含手持位）IsAKite 槽胜出,无风筝=恒 -1。
+   *  消费=PickItemSelectionOverride AFK 臂（Game.updateSmartSelect 尾,本仓承载）。 */
+  selectedKite = -1;
   /** pendingItemReuse（Player.cs:1443,ItemCheck :43148-43151 写真）：
    *  动画归零拍 autoReuse 持续按压（且无 reuseDelay 后摇）置真、下一 ItemCheck
    *  头复位（:42921）——UsingOrReusingItem(:4052) 的「复用间隙仍在用」窗，

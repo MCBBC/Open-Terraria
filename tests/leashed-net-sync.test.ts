@@ -229,16 +229,21 @@ describe('FullSync 逐字段往返（LeashedCritter.cs:59-101 字段序）', () 
     const st = groundWorld();
     const host = new LeashedEntityManager();
     host.attach({ store: st });
-    const env = mkEnv({ playerCx: 60 * 16, playerCy: 20 * 16, windForVisuals: 0.6, cloudAlpha: 0.3 });
+    const env = mkEnv({ playerCx: 60 * 16, playerCy: 20 * 16, windForVisuals: 5, cloudAlpha: 0.3 });
     const e = host.spawnKite(60, 39, 766, env, 4);
     expect(e.projType).toBe(766);
-    // 原版风档语义（LeashedKite.cs:149-157）：windCurrent 每帧 = Lerp(0, windTarget,
-    // 0.05) ≤ 0.05×target，恒低于 0.2 飞行门 → 锚桩风筝常态下垂（timeWithoutWind
-    // 累积、线长 250→48 收缩）——断言下垂 + 湍流水平漂移（字段非平凡）
-    for (let i = 0; i < 200; i++) host.update({ store: st }, env, env.playerCx, env.playerCy);
+    // 原版风档语义（LeashedKite.cs:149-157；★Q4 刀勘误 2026-09-30：windCurrent =
+    // Lerp(windCurrent, windTarget, 0.05) 从【当前值】5%/t 缓动——旧档 Lerp(0,…)
+    // 恒 0.05×target 永不过 0.2 飞行门系错读）。两相造非平凡字段：强风 5 起飞
+    // （湍流水平漂移）→ 收风 0 衰减过 0.2 门（下垂 + 线长 250→48 收缩）
+    for (let i = 0; i < 60; i++) host.update({ store: st }, env, env.playerCx, env.playerCy);
+    expect(e.timeWithoutWind).toBe(0);              // 强风档飞行中（windCurrent 收敛 ≥0.2）
+    expect(e.timeCounter).toBeGreaterThan(0);
+    const envCalm = mkEnv({ playerCx: 60 * 16, playerCy: 20 * 16, windForVisuals: 0, cloudAlpha: 0.3 });
+    for (let i = 0; i < 200; i++) host.update({ store: st }, envCalm, envCalm.playerCx, envCalm.playerCy);
     expect(e.timeWithoutWind).toBeGreaterThan(120);
     expect(e.kiteDistance).toBeLessThan(250);
-    expect(Math.abs(e.cx - (60 * 16 + 8))).toBeGreaterThan(1);
+    expect(Math.abs(e.cx - (60 * 16 + 8))).toBeGreaterThan(1);   // 强风相位漂移残留
     expect(e.timeCounter).toBeGreaterThan(0);
 
     const g = roundtripKite(e);

@@ -67,6 +67,12 @@ const CSS = `
   background-repeat:no-repeat; image-rendering:pixelated; }
 .sw-ach-advisor .tx { font-size:11px; color:#e8ecf8; text-align:center; line-height:1.3;
   max-width:72px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+/* ---- BJ416:sw<1000 装备列内联小卡(Main.cs:42129)——原版小卡=0.35 缩纯图标
+ *      (DrawCard scale 0.35,边框 72→25px,无文字)。文字版卡 61px 高会压进下一行
+ *      防御盾/设置钮带(行距 47.6)——窄屏分支摘文字+收 padding,32px 图标保留
+ *      (≈原版 22.4px 的 QoL 放大=登记偏差,盒面同锚 advisorInlineXY) ---- */
+.sw-ach-inline .tx { display:none; }
+.sw-ach-inline .sw-ach-advisor { padding:2px 3px; }
 `;
 
 let cssInjected = false;
@@ -262,6 +268,17 @@ const ADVISOR_ORDER = [
   'STAR_DESTROYER', 'CHAMPION_OF_TERRARIA',
 ];
 
+/** 顾问可显卡判定（AchievementAdvisor.HasAvailableCardToDisplay :185-197 等价）。
+ *  IsAchievableInWorld 未建模（原版查世界进度门槛,本仓成就无条件可达）=登记偏差;
+ *  判据 = 精选序列（Initialize 36 项）中存在未完成。★BJ416 抽单源:卡 update 与
+ *  UI.ts 装备列 HasSpace 门（vanillaInvLayout.hasSpaceForInlineAdvisor 入参）同源。 */
+export function advisorHasCard(a: import('../core/Achievements').Achievements): boolean {
+  for (const name of ADVISOR_ORDER) {
+    if (a.defOf(name) && !a.isCompleted(name)) return true;
+  }
+  return false;
+}
+
 /** ★BJ318：getGame 动态解析——曾直捕 Game 实例,Advisor DOM 卡随 UI 单例跨局
  *  存活（teardownInventoryPanel 只在重建时清）,退世界后 card.update/mousedown
  *  闭包把死 Game 整图钉在 UI 上（forward-BFS 定谳锚之一）。动态解析零滞留。 */
@@ -284,6 +301,7 @@ export function createAchievementAdvisor(getGame: () => Game | null): HTMLElemen
     const game = getGame();
     if (!game) { card.style.display = 'none'; return; }
     const a = game.achievements;
+    if (!advisorHasCard(a)) { card.style.display = 'none'; return; }
     let best: string | null = null;
     for (const name of ADVISOR_ORDER) {
       if (a.defOf(name) && !a.isCompleted(name)) { best = name; break; }

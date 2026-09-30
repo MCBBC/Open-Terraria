@@ -45,11 +45,14 @@ export function startUpdateCheck(onNewVersion: (version: string, bundle: string)
       //  回退,未同步边缘/旧 SW 的 /build-id.txt 404 会被回退成 index.html——内容
       //  必须形如 index-*.js 才认,否则静默忽略等下轮(探针自愈:边缘同步后自正)
       const parts = (await r.text()).trim().split(/\s+/);
-      const bundle = parts[1] ?? parts[0] ?? '';
+      // ★2026-09-30:格式=<版本> <10位戳> <bundle>(戳可选,老档两段)——bundle 取末段防戳挤位
+      const bundle = parts[parts.length - 1] ?? '';
       // ★2026-09-23:版本段允许预发布后缀(0.1.35-beta;用户令测试版一律带 -beta,
       //   bump-version.mjs 自动补缀)——旧纯三段式正则把 -beta 判非版本,横幅回退
       //   显示 bundle 指纹短码(用户实报「vBvemkH」根因)
-      const version = parts[1] && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/.test(parts[0] ?? '') ? parts[0]! : '';
+      const vOk = parts[1] && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/.test(parts[0] ?? '');
+      const stamp10 = /^\d{10}$/.test(parts[1] ?? '') ? parts[1]! : '';
+      const version = vOk ? [parts[0]!, stamp10].filter(Boolean).join(' ') : '';
       if (/^index-[A-Za-z0-9_-]+\.js$/.test(bundle) && bundle !== cur) {
         stopped = true;
         onNewVersion(version || bundle, bundle);

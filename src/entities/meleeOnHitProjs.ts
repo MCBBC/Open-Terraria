@@ -4,6 +4,7 @@
 // （截断盒相交 + playerCanHitEnemy + Main.DamageVar ±15% + crit 折叠 + e.hurt 单点）。
 // 免疫写方桥统一走 game.noteNpcPlayerImmune（GC1 出口）。
 import { Entity } from './Entity';
+import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileWetSection } from './projWetSection';
@@ -294,8 +295,14 @@ export class MuramasaSlashProj extends Entity {
       //   被拒命中不得烧蓄能充能,终审补）
       if ((raw as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (!playerCanHitEnemy(raw as never, game)) continue;
-      const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
-      if (gate.meleeNpcImmuneGateOf && !gate.meleeNpcImmuneGateOf(e.id)) continue;
+      // ★Q4 刀 2026-09-30（C5 同族 P1 定谳#2 勘误,与 856 同病）：全局免疫窗
+      //  （Damage_PVE_Inner :12636 `if (!((owner<0||targetNPC.immune[owner]==0)|flag3))
+      //  return;`——977 penetrate=1 但 usesLocalNPCImmunity=true ⇒ flag3(:12635)=false
+      //  ⇒ 门生效）原门读【弹幕域】targetNPC.immune[owner] ≙ 本仓 Enemy.iframes
+      //  共享窗（清偿刀 T 单源快照判据）——旧档 duck-call Game.meleeNpcImmuneGateOf
+      //  读近战三重门独立簿（事实恒空）= 弹幕域有窗敌被误放行/近战簿有窗被误拒。
+      //  门拒 = 原文 return：不落 hitSet、penetrate 不减、弹体存活。
+      if (vanillaGateRejected(snapshotVanillaGate(e))) continue;
       if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
       // ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
       let crit = (this.critChanceFn?.() ?? 0) > Math.random();
@@ -314,7 +321,10 @@ export class MuramasaSlashProj extends Entity {
       e.hurt(dmgVar * (crit ? 2 : 1)
         + (snapBonusMuramasa ? Math.trunc(snapBonusMuramasa * (crit ? 2 : 1)) : 0),
         Math.sign((e.cx ?? this.cx) - this.cx) || 1,     // kb 原文 0f → 位移 0；方向位保留
-        0, game, this.armorPenInject + 5, crit, 0, true, 0, 977);   // ★A-F1：srcProjId 进排除表
+        // pierce=-3 = usesLocal 族清零档（BJ398 梯,Enemy.hurt iframes=0 ≙ 原文
+        // :14175-14178 immune[owner]=0 写面）——★Q4 刀写半面对齐：旧档 pierce=0
+        // 写 10t 弹幕域窗,977 节流归 hitSet 局部表,原文命中后全局窗清零非新开窗
+        0, game, this.armorPenInject + 5, crit, -3, true, 0, 977);   // ★A-F1：srcProjId 进排除表
       clearGlobalImmune(game, e.id);
       this.hitSet.add(e.id);
       if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=1

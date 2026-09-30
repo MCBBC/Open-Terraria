@@ -202,6 +202,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
+import { AFK_TIME_NEEDED_FOR_AUTO_KITING } from '../entities/Player';   // ★Q4 刀：AFK 自动风筝阈值（Player.cs:977）
 import { insideUnbreakableWallsScan } from '../entities/Player';   // ★SW-BJ48 传送药水落点双地牢不可破墙重扫（UnbreakableWallScan.cs:47-66）
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
@@ -445,6 +446,7 @@ import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, boomerangBlockedByOwned, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, FlaironHeadProj, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, FertilizerCloud, FERTILIZER_PROJ_BY_ITEM, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, flaironSpawnNudge, type CounterweightCtx, type CounterweightPlayView, CrystalSerpentProj, rollCrystalSerpentVelocity } from '../entities/WeaponProj';
+import { KiteProj } from '../entities/KiteProj';   // ★BJ413 风筝弹幕（aiStyle 160）
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
 import { TitaniumStormShard,
   ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
@@ -507,7 +509,7 @@ import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, shopHelperCountsNeighbor, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
-import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt, canKillTileAt, type KillTileCtx, MOUNT_SETS } from '../entities/Mounts';
+import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt, canKillTileAt, inAPlaceWithWind, type KillTileCtx, MOUNT_SETS } from '../entities/Mounts';
 import { MOUNT_DASH6_TYPES } from '../entities/MountCombat';   // R8② dash6 坐骑注入门(DoorOpeningHelper velocity-alone 窗)
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine, playerCanHitEntity } from '../physics/LineOfSight';
@@ -4400,6 +4402,11 @@ export class Game implements GameHooks {
           : new RemoteControlCarProj(s.x + half, s.y + half, s.vx, s.vy);
         d.netOwnerSlot = s.netId >>> 24;
         d.ownerDeadProbe = (slot) => this.net?.players.get(slot)?.dead === true;
+        // ★清偿刀 Q3（2026-09-30）：傀儡染料槽读口——拥有端代理 inv（msg5 miscDyes
+        //  段 Q3 起同步进 remoteItems bag → proxy.inv;DroneProjs.droneDyeVid 傀儡支消费。
+        //  旧端降级=bag.miscDyes 恒 null → 通道 0 fail-open 同相）
+        d.dyeInvProbe = (slot) => this.remotePlayerProxies.find(
+          (pr) => (pr as unknown as { __netSlot?: number }).__netSlot === slot) ?? null;
         if (Number.isFinite(rotMilli)) d.rotation = rotMilli / 1000;
         if (Number.isFinite(s.aux)) d.ai0 = s.aux & 63;
         return d;
@@ -5680,6 +5687,11 @@ export class Game implements GameHooks {
   smartSelect = new SmartSelect();
   /** SelectedItemState.Hotbar 镜像（Player.cs:391）：最近一次 0-9 快捷栏选择 */
   private smartSelectHotbar = 0;
+  /** ★Q4 刀 2026-09-30（BJ413 AFK 自动风筝）一拍强制使用旗：PickItemSelection-
+   *  Override 的 controlUseItem=(releaseUseItem=true)（Player.cs:17541-17543,
+   *  holdStyle==0 臂）——updateSmartSelect AFK 臂置位、updateUse cw 支消费、
+   *  updateUse 尾清（一拍语义,原文 controlUseItem/releaseUseItem 逐拍重置）。 */
+  private _afkKiteForceUse = false;
   /** Smart Select 槽画像复用缓冲（smartSelectSlots 每帧原地填充） */
   private _smartSelectSlots: SmartSelectSlot[] = Array.from({ length: INV_SIZE }, () => ({ ...EMPTY_SLOT }));
   /** 事件进度条"定时"档显示窗（Main.invasionProgressDisplayLeft，:47077 起 160t
@@ -6213,20 +6225,23 @@ export class Game implements GameHooks {
           this.player.inv.selected = hotbarSlot;
           if (prevSel !== hotbarSlot) this.playSfx('menuTick');
           // SelectedItemState.Select（Player.cs:498-499）：换栏清 AFK 两计数
-          //（afkCounterForKiting 未建模,见 Player.afkCounter 注）
+          //（★Q4 刀 2026-09-30：afkCounterForKiting 已建模,见 Player.afkCounterForKiting 注）
           this.player.afkCounter = 0;
+          this.player.afkCounterForKiting = 0;
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarMinus', code)) {
           const prevSel = this.player.inv.selected;
           this.player.inv.selected = (this.player.inv.selected + 9) % 10;
           if (prevSel !== this.player.inv.selected) this.playSfx('menuTick');
           this.player.afkCounter = 0;              // Select(:498) 同款清零
+          this.player.afkCounterForKiting = 0;
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarPlus', code)) {
           const prevSel = this.player.inv.selected;
           this.player.inv.selected = (this.player.inv.selected + 1) % 10;
           if (prevSel !== this.player.inv.selected) this.playSfx('menuTick');
           this.player.afkCounter = 0;              // Select(:498) 同款清零
+          this.player.afkCounterForKiting = 0;
           this.cb.onInventoryChanged();
         }
       }
@@ -8915,7 +8930,7 @@ export class Game implements GameHooks {
    *  是 >9 工具槽,原版基准从不取它,OverrideSelection 从不写 :391）;while 环绕 ≡ 双 mod
    *  （Hotbar∈[0,9] ∧ |num| 有限）。
    *  Select 本地等价三件套=数字键臂（:5648-5659）同款：selected 写回 + afkCounter=0
-   *  （Select :498-499;kiting 计数未建模同数字键臂）+ cb.onInventoryChanged()。
+   *  （Select :498-499;kiting 计数★Q4 刀 2026-09-30 已建模同清）+ cb.onInventoryChanged()。
    *  同帧序：原版数字键块（:25289-25330）先于滚轮块（:25406）读同一 selectedItemState,
    *  末写者胜;本仓 keydown 边沿即时写、tick 滚轮相对叠加=同相。QuickMount 链
    *  （:12264-12288 坐骑键族）零滚轮消费面=无交叉。
@@ -8929,6 +8944,7 @@ export class Game implements GameHooks {
     this.player.inv.selected = target;
     if (prevSel !== target) this.playSfx('menuTick');   // Select :490-493 变更拍（同数字键臂）
     this.player.afkCounter = 0;             // Select(:498) 同款清零
+    this.player.afkCounterForKiting = 0;    // ★Q4 刀：kiting 计数同清（Select :498-499 两计数）
     this.cb.onInventoryChanged();
   }
 
@@ -10237,6 +10253,8 @@ export class Game implements GameHooks {
     this.updateContainerPetInteraction();
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
+    this._afkKiteForceUse = false;   // ★Q4 刀：一拍旗尾清（未消费帧自灭——原文
+    //  controlUseItem/releaseUseItem 逐拍重置同相;uiBlocking/死亡早退帧=旗白置）
     // ---- 光标持物镜像结算（SW-AZ1：消耗尽的镜像此刻清 UI 光标——归零后 HeldItem
     //      次拍回热栏,vanilla :524 `selected>=10 && HeldItem.IsAir → selected=hotbar`）----
     this.commitCursorMirror();
@@ -13673,6 +13691,54 @@ export class Game implements GameHooks {
     };
     this.smartSelect.update(env, host);
     p.inv.selected = host.selected;
+    // ---- PickItemSelectionOverride 第三臂（Player.cs:17533-17547）★Q4 刀 2026-09-30
+    // （BJ413 登记·挂机放风筝 AFK 链消费端）：前两臂=①mouseItem 非空→伪选中 58
+    // （:17528-17531,SmartSelect.update 的 env.mouseItemHeld 短路承载）②SmartSelect-
+    // Lookup（:17536→:17266,controlTorch 臂）——本臂仅当两臂皆空（!cursorMirror ∧
+    // !controlTorch）才可达（Lookup 返回 false=未消费才落到此,原文同序）。门全表：
+    // afkCounterForKiting>=3600（AFKTimeNeededForAutoKiting :977,步进链在
+    // Player.fixedUpdate 尾）∧ selectedKite>=0（UpdateEquips :12994/:13001 每 tick
+    // 重算,Player 侧承载）∧ !noItems（:17538——noItems 语义=Cursed buff 23
+    // :11821+钻头坐骑 8 :53576,【非】PvP 观战;★Q4 定谳勘误,原 KiteProj 注系误标）
+    // ∧ !isOperatingAnotherEntity（:17539——Jim's Drone 1020/遥控车 1105 在场,
+    // 本仓两物未建模=恒 false 登记面）∧ spectating<0（:17538,本仓 spectatingSlot）。
+    // 命中 → OverrideSelection(selectedKite)（:17539-17540,host.selected 已先还原
+    // 智选覆盖=原文 SelectedItemState.Update 序）+holdStyle==0 → controlUseItem=
+    // releaseUseItem=true（:17541-17543）——holdStyle 由 ItemCheck_HackHoldStyles
+    // （:53495-53512）逐拍写:场上有同型风筝弹=1,无=0。本仓等价:无同型 KiteProj
+    // 在场 → 一拍强制使用旗（_afkKiteForceUse,updateUse cw 支消费,尾注同锚）。
+    // 与原版同拍序：计数步进（player.fixedUpdate :9689）→ 本臂（:10233 updateSmart-
+    // Select）→ updateUse（:10240 强制使用）=原文 Update 内 SelectedItemState.Update
+    // → ItemCheck 同拍。inventory 开启且无光标物的帧 updateUse 早退旗自灭（一拍
+    // 旗语义,原文 controlUseItem 亦逐拍重置——登记近似）。 ----
+    if (host.canChangeImmediately && !env.mouseItemHeld && !controlTorch
+      && p.afkCounterForKiting >= AFK_TIME_NEEDED_FOR_AUTO_KITING
+      && p.selectedKite >= 0 && this.spectatingSlot < 0
+      && !(p.buffs.has(BuffType.Cursed) || (p.ridingMount && p.mount.type === 8))) {
+      const kiteSlotDef = p.inv.slots[p.selectedKite]
+        ? ITEM_DEFS[p.inv.slots[p.selectedKite]!.id] : undefined;
+      const kiteVid = kiteSlotDef?.vid ?? -1;
+      const kiteShoot = kiteVid >= 0 ? (itemFuncOfVid(kiteVid)?.shoot ?? -1) : -1;
+      if (kiteShoot > 0) {
+        const prevSelAfk = p.inv.selected;
+        p.inv.selected = p.selectedKite;                 // OverrideSelection(:424-434)
+        if (prevSelAfk !== p.inv.selected) this.cb.onInventoryChanged();  // :511-513
+        // holdStyle==0 面（:17541-17543）：无同型在飞 → 强制一拍使用
+        if (!this.kiteProjAirborne(kiteShoot)) this._afkKiteForceUse = true;
+      }
+    }
+  }
+
+  /** 场上是否有同型风筝弹在飞（ItemCheck_HackHoldStyles :53500-53511 等价——
+   *  owner==whoAmI ∧ projectile.type==sItem.shoot → holdStyle=1;本仓单机
+   *  owner 恒本地,KiteProj.projId 即弹型） */
+  private kiteProjAirborne(shoot: number): boolean {
+    const list = this.entities.projectiles as ReadonlyArray<{ projId?: number; dead?: boolean }>;
+    for (const pr of list) {
+      if (!pr || pr.dead) continue;
+      if ((pr as { projId?: number }).projId === shoot) return true;
+    }
+    return false;
   }
 
   /**
@@ -17206,15 +17272,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     } else if (heldDef && cw && (((cw as { autoReuse?: boolean }).autoReuse
       || this.autoReuseAllChain(heldDef.vid ?? -1))   // SW-AT1 2026-09-05：改走单一真源（补 damage>0）
-      ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
-      : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
+      ? (inp.mouseDown || inp.mouseHeld || this._afkKiteForceUse)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
+      : (inp.mouseDown || this._afkKiteForceUse))    //   是边沿消费量,发射即被清=按住只出一发。
       && this.player.useTime === 0 && cw.kind !== 'melee'
+      // ★Q4 刀 2026-09-30（BJ413 AFK 自动风筝）：_afkKiteForceUse=PickItemSelection-
+      // Override 的 controlUseItem=(releaseUseItem=true)（Player.cs:17541-17543,
+      // holdStyle==0 臂）——AFK 臂刚选中风筝槽且无同型风筝弹在飞的一拍,与原版同拍
+      // （SelectedItemState.Update 置旗 → 同 tick ItemCheck 消费）。旗只在风筝槽
+      // 被选中时置位 → 本 cw 支唯一可达 case='kite'（风筝非 autoReuse,⑩ 并入）。
       && ((cw as { autoReuse?: boolean }).autoReuse
         || this.autoReuseAllChain(heldDef.vid ?? -1)
-        || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门（★全局档并列：
-        // Main.SettingsEnabled_AutoReuseAllItems 归 Player.cs:24182 autoReuseAllWeapons,
-        // TryAllowingItemReuse(P.cs:52044) 对【一切 damage>0 物品】生效——此前本支漏并
-        // 全局档(挥砍支 9821 已并),回旋镖族在全局连发开时持握不自动再掷(2026-08-31)
+        || (inp.mouseDown && !this._prevMouseDown)
+        || this._afkKiteForceUse)) { // ⑩ autoReuse 门（★全局档并列：
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
@@ -18275,6 +18344,72 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false;
+        break;
+      }
+      case 'kite': {
+        // ★BJ413 2026-09-30（风筝无效用户实报）：AI_160_Kites 全链（KiteProj 头注）。
+        // 出膛 = ItemCheck_Shoot 通用尾支：pointPosition=玩家中心、初速=朝鼠标×
+        // shootSpeed 8、damage 0（风筝弹本体无伤害面）；【无同型在场门】——原版
+        // Kill 门只核对手持 shoot（:49313-49315），同型多只合法共存。
+        // 右键 = PlaceTileOnAltUse 放置锚桩链（Game 放置域承载,channel 电平不受
+        // 消费影响——controlUseTile 同时驱动收线 Player.cs:43123 flag5 门）。
+        const itemId = ITEM_BY_KEY[def.key] ?? 0;
+        const kiteRef: { k?: KiteProj } = {};
+        const store = this.world.store;
+        const kite = new KiteProj(this.player.cx, this.player.cy, cw.shoot, {
+          channel: () => this.input.rightDown && !this.input.uiBlocking,
+          letOut: () => this.input.mouseHeld && !this.input.uiBlocking
+            && this.player.inv.heldItem()?.id === itemId
+            && this.player.itemAnimTicks <= 0 && this.player.useTime <= 0,
+          heldShoot: () => {
+            const hv = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1;
+            return hv >= 0 ? (itemFuncOfVid(hv)?.shoot ?? -1) : -1;
+          },
+          cced: () => this.player.cced,
+          // ★Q4 刀 2026-09-30（任务3 noItems 腿定谳后补刀）：vanilla noItems=Cursed
+          // buff 23（Player.cs:11821 noItems=true+cursed=true）+钻头坐骑 mount 8
+          // （:53576 ItemCheck_HandleMount）——【非】PvP 观战（原 KiteProj 注误标,
+          // spectating 是独立字段,AI_160 另有 dead 腿）。两域本仓均已建模,读门补齐。
+          noItems: () => this.player.buffs.has(BuffType.Cursed)
+            || (this.player.ridingMount && this.player.mount.type === 8),
+          pulley: () => this.player.pulley,
+          dead: () => this.player.dead,
+          armPos: () => this.player.yoyoStringAnchor(),
+          playerDir: () => this.player.facing,
+          faceDir: (d) => { this.player.facing = d; },
+          applyKiteBuff: () => this.player.buffs.apply(BuffType.KiteBuff, 12 / 60),
+          playerTopY: () => this.player.y,
+          playerCenter: () => ({ x: this.player.cx, y: this.player.cy }),
+          wind: () => this.world.weather?.windSpeedCurrent ?? 0,
+          cloudAlpha: () => this.world.weather?.cloudAlpha ?? 0,
+          inWind: () => {
+            const k = kiteRef.k;
+            if (!k || !store) return false;
+            return inAPlaceWithWind(store, k.x, k.y, k.w, k.h,
+              this.world.groundLevel, !!this.world.seedFlags?.remix);
+          },
+          playReelSfx: (pitch) => this.playSfxWav('Item_192', 1,
+            kiteRef.k?.cx ?? this.player.cx, kiteRef.k?.cy ?? this.player.cy, pitch),
+          solidBox: (px, py, w2, h2) => {
+            if (!store) return false;
+            const x0 = Math.floor(px / 16), y0 = Math.floor(py / 16);
+            const x1 = Math.floor((px + w2 - 0.0001) / 16), y1 = Math.floor((py + h2 - 0.0001) / 16);
+            for (let tx = x0; tx <= x1; tx++) {
+              for (let ty = y0; ty <= y1; ty++) {
+                if (store.isSolid(tx, ty)) return true;
+              }
+            }
+            return false;
+          },
+        });
+        kiteRef.k = kite;
+        placeAtShootSpawn(kite, this.player.cx, this.player.cy);
+        kite.vx = Math.cos(ang) * cw.shootSpeed;
+        kite.vy = Math.sin(ang) * cw.shootSpeed;
+        this.entities.add(kite, 'projectiles');
+        this.useSwing(def, ang);
+        this.player.useTime = cw.useTime;
         this.input.mouseDown = false;
         break;
       }
@@ -21566,7 +21701,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // return → 无音无尘无积累（蓝队 F6：曾 dmg=0 但音尘照播）
     if (sheet !== 504) {
       this.killTileBreakSound(type, tx, ty);
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
+      // ★BJ411 陨石挖掘尘（KillTile fail 支 GetTileDustAmount 缺省档 3 粒 × MakeTileDust
+      //  :69470-69473 sheet 37 → Next(2)==0?6:23）：火尘替 mapColor 色点（用户实报定谳面）
+      if (sheet === 37) {
+        this.spawnMeteoriteBreakDust(tx, ty, 3);
+      } else {
+        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
+      }
     }
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
@@ -22713,6 +22854,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** ★BJ411 陨石破坏/挖掘尘（KillTile_MakeTileDust WorldGen.cs:69470-69473,1458 同位
+   *  :69477-69480 逐字节全等）：sheet 37 → 尘 id = genRand.Next(2)!=0 ? 23 : 6
+   *  （1 掷/粒;23=陨石岩尘、6=火星）；盒 = (i*16,j*16,16,16) 缺省支直出
+   *  （:69692 NewDust(i*16,j*16,16,16,num),速/α/scale 全缺省）。
+   *  粒数 = KillTile_GetTileDustAmount(:67119) 缺省档：破坏 10 / fail 3（调用侧传）。
+   *  仅替换 mapColor 色点近似面（sheet 37 专属支）；镐/钻/爆炸/液体冲毁等一切破坏
+   *  路径共用 breakTile 尾=原版 KillTile 单源同面 */
+  private spawnMeteoriteBreakDust(tx: number, ty: number, n: number): void {
+    for (let k = 0; k < n; k++) {
+      this.spawnDust(tx * TILE, ty * TILE, TILE, TILE, Math.random() < 0.5 ? 6 : 23);
+    }
+  }
+
   /**
    * ★byPlayer 语义（2026-09-04 成就触发面审计重定）= 原版 AchievementsHelper.
    * _isMining 窗内破坏（NotifyTileDestroyed 门 WorldGen.cs:64396 `!Main.gameMenu &&
@@ -23639,7 +23793,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && vanillaPlaceableTileKeys().has(def.key)) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     }
     this.killTileBreakSound(type, x, y);
-    this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+    // ★BJ411 陨石破坏尘（1×1 普通尾=陨石唯一破坏尾;多格支不涉 37）。破坏支
+    //  KillTile_GetTileDustAmount 缺省档 10 粒 × MakeTileDust（WorldGen.cs:69470-69473,
+    //  1458 同位 :69477-69480）sheet 37 → Next(2)!=0?23:6（1 掷/粒;23=陨石岩尘、6=火星）
+    //  → 火尘替 mapColor 色点；镐/钻/爆炸/液体冲毁一切破坏路径共用本尾=原版 KillTile
+    //  单源同面（尾位=deactivate/液体/419 段之后,尘序无相位消费,与原版 :64215 段同面）
+    if (def.vanilla?.sheet === 37) {
+      this.spawnMeteoriteBreakDust(x, y, 10);
+    } else {
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+    }
   }
 
   /** 小堆饰 185 内容掉落（Check2x1 case 185 :47180-47232 逐条 Item.NewItem 1:1）：
@@ -26987,6 +27150,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       playerCx: this.player?.cx ?? 0,   // afterWorldLoad 阶段 player 尚未构造（读档/建世链）
       playerCy: this.player?.cy ?? 0,
       // 风筝线长变化音（LeashedKite KiteLogic → SoundID.Item192,Projectile.cs:49385-49393）
+      // ★Q4 刀 2026-09-30 勘误：播音门 :49389 `if (!flag)`/flag=owner==255 → 锚桩
+      // 风筝【恒静音】,本 env 线不再有播音消费（LeashedCritter.kiteLogic 簿记保留）;
+      // 通道保留=LeashedEnv 接口面（同参直传,零行为）
       playSfxWav: (file, vol, x, y, pitch) => this.playSfxWav(file, vol, x, y, pitch),
       addLight: (i, j, r, g, b) => {
         if (this.world.store.inBounds(i, j)) this.lighting.addLight(i, j, r, g, b);
@@ -45668,6 +45834,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (rule.dust !== undefined && lightNum43 <= 0) continue;
           if (rule.dust !== undefined) {
             const h = rule.color;
+            if (!h) continue;            // dust(闪光)通道强制色;dustRaw 通道不入此支
             const rgb = {
               r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16),
               b: parseInt(h.slice(5, 7), 16), a: 255,
@@ -45675,6 +45842,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const dd = this.spawnDust(x * TILE, y * TILE, 16, 16, rule.dust, 0, 0,
               rule.dustAlpha ?? 254, rgb, rule.dustScale ?? 0.5);
             if (dd) { dd.vx = 0; dd.vy = 0; }
+            continue;
+          }
+          // ★BJ411 陨石火星通道二（TileDrawing.cs:7512-7518）：自然色原版尘、α0、
+          //  出速不归零（NewDust 内部抖动）、无光门无概率乘区（37 支在尘段不在 shine 段）；
+          //  scale=Next(dustScaleRand)（1 掷）、scale>dustNgGt 时 noGravity（原版仅
+          //  scale 2 档悬浮）。掷在 spawn 前=原版 `NewDust(…, _rand.Next(3))` 实参同拍。
+          if (rule.dustRaw !== undefined) {
+            const s = rule.dustScaleRand !== undefined
+              ? Math.floor(Math.random() * rule.dustScaleRand)
+              : (rule.dustScale ?? 1);
+            const dd = this.spawnDust(x * TILE, y * TILE, 16, 16, rule.dustRaw, 0, 0, 0, null, s);
+            if (dd && rule.dustNgGt !== undefined && dd.scale > rule.dustNgGt) dd.noGravity = true;
             continue;
           }
           // dxBox/dyBox（NewDust 矩形盒 1:1，TileParticles.ts 头注）：命中时取代
@@ -45691,7 +45870,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           pt.vx = (rule.sideways ?? 0) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.5) * 0.2;
           pt.vy = -rise * (0.7 + Math.random() * 0.6);
           pt.life = life; pt.maxLife = life;
-          pt.color = rule.color;
+          pt.color = rule.color!;   // 色点支恒带色（dust/dustRaw 两通道已在上方 continue;dustRaw 可缺省色）
           pt.size = smin + Math.random() * (smax - smin);
           pt.grav = rule.grav ?? (rise < 0 ? 0.1 : -0.005);
           pt.damp = rule.damp ?? 0.985;
@@ -50438,6 +50617,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         proxy.inv.slots = bag.inv;
         proxy.inv.armor = bag.armor;
         proxy.inv.dye = bag.dye;
+        // ★清偿刀 Q3（2026-09-30）：+miscDyes（ItemContainer.MiscDyes=3 段）——代理
+        //  inv 自此满足 DyeInvSource 全形,弹幕染料四通道傀儡/代理面与本地同源。
+        //  旧服务器剥段=bag.miscDyes 恒 null（fail-open 同相,降级矩阵）
+        if (bag.miscDyes) proxy.inv.miscDyes = bag.miscDyes;
         proxy.inv.selected = Math.min(rp.selectedItem, 9); // 快捷栏 0-9（heldItem 依赖）
       }
       // useItem 位 → 远端挥舞动画（原版：远端客户端以 controlUseItem 跑 ItemCheck 设置

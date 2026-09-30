@@ -1203,39 +1203,31 @@ export class SkyRenderer {
    *  save/getTransform 一次,逐星 setTransform 折叠旋转+缩放+平移,尾迹同式;
    *  光栅结果逐像素一致(同一 CTM 语义),状态机往返全消。imageSmoothingEnabled
    *  同步提升到环外(原每星设一次) */
-  private drawStar(
-    ctx: CanvasRenderingContext2D, i: number, starOpacity: number,
-    viewW: number, viewH: number, bgTopY: number,
-    bt: DOMMatrix,
-    shimmerAlpha = 0, artificial = false,
-    cotsOverride?: readonly number[] | null,
-  ): void {
+  /** ★C13 星批化（2026-09-30）:单星绘制数据纯计算——drawStar(2D 路径)与
+   *  buildStarBatch(GL 批路径)共用,逐式同源(Star.cs + Main.DrawStar
+   *  :62481-62604;改一处必改两处)。null=本星本帧不可见(隐没/亮度≤0/贴图未载)。 */
+  private starCompute(
+    i: number, starOpacity: number, viewW: number, viewH: number, bgTopY: number,
+    shim: number, artificial: boolean, cots: readonly number[] | null,
+  ): { s: SkyStar; tex: ImageBitmap | HTMLImageElement; alpha: number; px: number; py: number; cs: number; sn: number } | null {
     const s = this.stars[i];
-    if (!s || s.hidden) return;
-    // ★SW-BJ41 2026-09-09：微光域两 pass 同吃衰减天空色（Main.DrawStarsInBackground
-    //  :64003-64007 `if (shimmerAlpha > 0f) colorOfTheSkies *= 1f - shimmerAlpha;`
-    //  ——自然/人工星共用同一局部色,基色越暗星越亮;shimmerAlpha=1 时基色→0,
-    //  地下/白昼亮度门(:64015)恒开 = 以太星空浮现的机制本体）
-    const cots = cotsOverride ?? this.cots;
+    if (!s || s.hidden) return null;
     const bgR = cots ? cots[0] : 255, bgG = cots ? cots[1] : 255, bgB = cots ? cots[2] : 255;
     const num2 = 1 - s.fadeIn;
     const r0 = (255 - bgR - 100) * s.twinkle * num2;
     const g0 = (255 - bgG - 100) * s.twinkle * num2;
     const b0 = (255 - bgB - 100) * s.twinkle * num2;
     let lum = Math.floor((r0 + g0 + b0) / 3);
-    if (lum <= 0) return;
+    if (lum <= 0) return null;
     lum = Math.min(255, Math.floor(lum * 1.4));
     let alpha = Math.max(0, Math.min(1, (lum / 255) * starOpacity));
-    if (shimmerAlpha > 0) {
-      // ★SW-BJ41：DrawStar 微光 tint（Main.cs:64032-64057）——value = color 单通道
-      // (i%3: 0→G / 1→B / 2→R) ×twinkle²（原式 (1f−num·0f)≡1 为反编译保留项）,
-      // color = Lerp(color, value, num);artificial → color ×= num,:64057-64058
-      // else color ×= (1−num)。三通道初值全等(由 :62492-62496 均值化) → 通道均值
-      // 因子 = 1 − num·(1−twinkle²)/3;canvas 单 alpha 管线以均值因子承载亮度,
+    if (shim > 0) {
+      // ★SW-BJ41：DrawStar 微光 tint（Main.cs:64032-64057）——通道均值因子
+      // = 1 − num·(1−twinkle²)/3;canvas 单 alpha 管线以均值因子承载亮度,
       // 单通道色相偏移登记债（同 TileShine 顶点色域管线限制）
       const tw2 = s.twinkle * s.twinkle;
-      const meanF = 1 - shimmerAlpha * (1 - tw2) / 3;
-      alpha *= artificial ? shimmerAlpha * meanF : (1 - shimmerAlpha) * meanF;
+      const meanF = 1 - shim * (1 - tw2) / 3;
+      alpha *= artificial ? shim * meanF : (1 - shim) * meanF;
     }
     // 位置映射(:62544-62549)
     let px = s.x / 1920 * viewW;
@@ -1247,11 +1239,25 @@ export class SkyRenderer {
       if (py > viewH) py -= viewH;
     }
     const tex = this.starTex(s.type);
-    if (!tex) return;
+    if (!tex) return null;
     // ★liqpolish:cos/sin 读更新侧缓存（csRot 验证戳=缓存产出 rot——任意时序
     //  （paused 翻旗/漏更）下陈旧即回退就地求值,值逐位同 Math.cos/sin(s.rot)）
     const cs = liqpolish && s.csRot === s.rot ? s.cs : Math.cos(s.rot);
     const sn = liqpolish && s.csRot === s.rot ? s.sn : Math.sin(s.rot);
+    return { s, tex, alpha, px, py, cs, sn };
+  }
+
+  private drawStar(
+    ctx: CanvasRenderingContext2D, i: number, starOpacity: number,
+    viewW: number, viewH: number, bgTopY: number,
+    bt: DOMMatrix,
+    shimmerAlpha = 0, artificial = false,
+    cotsOverride?: readonly number[] | null,
+  ): void {
+    const cots = cotsOverride ?? this.cots;
+    const d = this.starCompute(i, starOpacity, viewW, viewH, bgTopY, shimmerAlpha, artificial, cots);
+    if (!d) return;
+    const { s, tex, alpha, px, py, cs, sn } = d;
     if (s.falling) {
       // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha
       // 衰减+rotation。★位移乘视口变换(×viewW/1920,×viewH/1200)——原版 1920×1200
@@ -1271,6 +1277,94 @@ export class SkyRenderer {
     ctx.globalAlpha = alpha;
     this.starXform(ctx, bt, cs, sn, s.scale * s.twinkle, px, py);
     ctx.drawImage(tex, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
+  }
+
+  // ---- ★C13 星场批（2026-09-30 SHM 逐星 drawImage 洪峰根治）----
+  // 【病灶】自然夜空/微光人工星空 = 每帧 200-400 星 × save/setTransform/drawImage
+  //  逐星 2D op（Windows trace LPR/帧=337 实锤,健康 GPU 路径 ≈1）——SHM 机器上
+  //  逐 op 主线程录制+光栅税把 render 打到 13-25ms=掉到 30-50fps 相位（"不稳"）。
+  // 【正解】gore 批同款范式:每星 CPU 折算 4 角（starXform 复合矩阵逐式同源）+
+  //  顶点色 alpha,按星贴图（Star_0..3）分段 quadBatchRgba（smooth 线性）——
+  //  300 op → ≤4 draw call。降级=现有 2D 逐星循环原样保留（宁回退不丢内容）。
+  // 【发射位】两个 mini-session,FBO 命名空间新增 'sstarn'/'sstars'（与
+  //  clouds/bg/lit/warped/light2 防撞）:自然星在 sky.draw 星位原位（层序=星空
+  //  在天空渐变上/日月塔幕下的既有位置由【原位 blit】保持）;人工星在微光 veil
+  //  后原位。GL 层不可用帧走 2D 回退。
+  private starTexIds = new WeakMap<object, number>();
+  private starTexIdSeq = 0;
+
+  private buildStarBatch(
+    artificial: boolean, starOpacity: number, viewW: number, viewH: number,
+    bgTopY: number, bt: DOMMatrix, shim: number, cots: readonly number[] | null,
+  ): { segments: Array<{ texIdx: number; img: ImageBitmap | HTMLImageElement; key: string; data: Float32Array; quads: number }>; quads: number } | null {
+    interface Slot { nums: number[]; qn: number; idxs: number[] }
+    const byTex = new Map<number, Slot>();
+    let any = false;
+    for (let i = 0; i < this.numStars; i++) {
+      const d = this.starCompute(i, starOpacity, viewW, viewH, bgTopY, shim, artificial, cots);
+      if (!d || d.alpha <= 0) continue;
+      const { s, tex, alpha, px, py, cs, sn } = d;
+      let slot = byTex.get(s.type);
+      if (!slot) { slot = { nums: [], qn: 0, idxs: [] }; byTex.set(s.type, slot); }
+      const tw = tex.width, th = tex.height, hw = tw / 2, hh = th / 2;
+      // UV=全跨度−tie-eps（quadSprite 同式;线性采样防边缘渗色）
+      const u0 = -1 / 4096 / tw, u1 = (tw - 1 / 4096) / tw;
+      const v0 = -1 / 4096 / th, v1 = (th - 1 / 4096) / th;
+      const push = (sc: number, x: number, y: number, a: number): void => {
+        // 角点 = starXform 复合矩阵（base × translate × rotate × scale）×(±hw,±hh)
+        // 逐式同源 setTransform 六参（改一处必改 starXform）
+        const ra = cs * sc, rb = sn * sc;
+        const mA = bt.a * ra - bt.b * rb, mB = bt.a * rb + bt.b * ra;
+        const mC = bt.c * ra - bt.d * rb, mD = bt.c * rb + bt.d * ra;
+        const mE = bt.e + bt.a * x + bt.c * y, mF = bt.f + bt.b * x + bt.d * y;
+        const cs2 = [
+          [mE + mA * -hw + mC * -hh, mF + mB * -hw + mD * -hh, u0, v0],
+          [mE + mA * hw + mC * -hh, mF + mB * hw + mD * -hh, u1, v0],
+          [mE + mA * hw + mC * hh, mF + mB * hw + mD * hh, u1, v1],
+          [mE + mA * -hw + mC * hh, mF + mB * -hw + mD * hh, u0, v1],
+        ];
+        // TRIANGLES 两三角 (v0,v1,v2)+(v0,v2,v3);顶点色 rgb=a（★2D globalAlpha
+        // 语义精确式:预乘管线 out.rgb=texP.rgb×vCol.rgb——rgb 不携 alpha 时暗星
+        // 只减覆盖不减亮度=黄昏星提前显形（用户实报 17:30 出星）;rgb=a 后
+        // 贡献=白×shapeA×a ≙ 2D globalAlpha 逐位）
+        for (const vi of [0, 1, 2, 0, 2, 3]) {
+          const c = cs2[vi];
+          slot.nums.push(c[0], c[1], c[2], c[3], a, a, a, a);
+        }
+        slot.qn++;
+      };
+      if (s.falling) {
+        const ft = Math.min(s.fallTime, 30);
+        const sxv = viewW / 1920, syv = viewH / 1200;
+        for (let j = 1; j < ft; j++) {
+          push(s.scale * (1 - j / 30), px - s.fvx * j * 0.4 * sxv, py - s.fvy * j * 0.4 * syv, alpha * (1 - j / 30));
+        }
+      }
+      push(s.scale * s.twinkle, px, py, alpha);
+      slot.idxs.push(i);
+      any = true;
+    }
+    if (!any) return null;
+    const segments = [];
+    for (const [texIdx, slot] of byTex) {
+      const tex = this.starTex(texIdx)!;
+      let id = this.starTexIds.get(tex);
+      if (id === undefined) { id = ++this.starTexIdSeq; this.starTexIds.set(tex, id); }
+      segments.push({ texIdx, img: tex, key: `sbat:${texIdx}:${id}`, data: new Float32Array(slot.nums), quads: slot.qn });
+    }
+    return { segments, quads: segments.reduce((s2, x) => s2 + x.quads, 0) };
+  }
+
+  /** 星批 mini-session:begin→分段 quadBatchRgba(smooth)→end;调用方随即
+   *  ctx.drawImage(layer.canvas) 原位 blit（层序由 blit 位保持）。 */
+  private emitStarBatchGL(layer: GLSpriteLayer, batch: NonNullable<ReturnType<SkyRenderer['buildStarBatch']>>, fboName: string, viewW: number, viewH: number): void {
+    layer.resize(viewW, viewH);
+    layer.begin(fboName);
+    for (const seg of batch.segments) {
+      const e = layer.texFromImage(seg.key, seg.img, false, true);
+      if (e) layer.quadBatchRgba(e, seg.data, seg.quads, true);
+    }
+    layer.end();
   }
 
   /** ★SW-BJ41 2026-09-09：Main.shimmerAlpha（SceneState.UpdateShimmer :332-357
@@ -1302,9 +1396,22 @@ export class SkyRenderer {
     const remixWorldForDraw = !!this.frameCtx?.world?.seedFlags?.remix;
     const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
     if (!remixWorldForDraw && visGate <= 0) return;
+    // ★C13 星批化:GL 层在场=批路径（begin('sstars')→原位 blit,层序=veil 后/
+    // 世界前的既有位）;GL 不可用帧=2D 逐星回退（原路径逐位）
+    const bt = ctx.getTransform();
+    const batch = this.buildStarBatch(true, starDim, viewW, viewH, this._lastStarBgTopY, bt, shim, cotsFaded);
+    const layer = this.cloudGlLayer;
+    if (batch && layer && !layer.unavailable) {
+      this.emitStarBatchGL(layer, batch, 'sstars', viewW, viewH);
+      // ★blit 恒等变换（同 'sstarn' 位注）
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(layer.canvas, 0, 0);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    const bt = ctx.getTransform();
     for (let i = 0; i < this.numStars; i++) {
       this.drawStar(ctx, i, starDim, viewW, viewH, this._lastStarBgTopY, bt, shim, true, cotsFaded);
     }
@@ -4172,15 +4279,30 @@ export class SkyRenderer {
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
       if (!this.frameCtx?.paused) this.updateStars(dayRate, isDay, dayTimeTicks);   // Star.UpdateStars 同门(:17198)——暂停冻结
       if (starDim > 0 && shim < 1 && (remixWorldForDraw || visGate > 0)) {
-        // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
-        //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部
-        ctx.save();
-        ctx.imageSmoothingEnabled = true;   // 星为软边贴图
+        // ★C13 星批化:GL 层在场=批路径（begin('sstarn')→分段 quadBatchRgba→end→
+        //   原位 blit——blit 位=原 2D 星位,层序保持:星在天空渐变上/日月塔幕下）;
+        //   GL 不可用帧=2D 逐星回退（原路径逐位）
         const bt = ctx.getTransform();
-        for (let i = 0; i < this.numStars; i++) {
-          this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt, shim, false, cotsFaded);
+        const batch = this.buildStarBatch(false, starDim, viewW, viewH, skyBgTopY, bt, shim, cotsFaded);
+        const layer = this.cloudGlLayer;
+        if (batch && layer && !layer.unavailable) {
+          this.emitStarBatchGL(layer, batch, 'sstarn', viewW, viewH);
+          // ★blit 恒等变换:角点已含 bt(setTransform 替换语义=设备空间),原位 CTM
+          //  若非恒等会二次应用（回归判据:星空随天幕变换漂移）
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(layer.canvas, 0, 0);
+          ctx.restore();
+        } else {
+          // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
+          //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部
+          ctx.save();
+          ctx.imageSmoothingEnabled = true;   // 星为软边贴图
+          for (let i = 0; i < this.numStars; i++) {
+            this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt, shim, false, cotsFaded);
+          }
+          ctx.restore();
         }
-        ctx.restore();
       }
     }
 

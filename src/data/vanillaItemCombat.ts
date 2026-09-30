@@ -1,9 +1,11 @@
 // 原版物品战斗数据（tools/extract-itemcombat.mjs 从 Terarria1457 Item.cs SetDefaults 提取；
-// ★清偿刀 J 2026-09-30 头注⑦四根修后整表重产 4369→4608 键,era guard B-form 零漂移幂等）：
+// ★清偿刀 J 2026-09-30 头注⑦四根修后整表重产 4369→4608 键;★清偿刀 Q1 2026-09-30 头注⑨
+// helper 体字段面根修后 4608→4688 键（+80 全纯加）,era guard B-form 零漂移幂等）：
 // damage/knockBack/useTime/useAnimation/shoot/useAmmo/shootSpeed/ammo/consumable/noMelee/autoReuse/mana
 import combatJson from './vanilla-itemcombat.json';
-import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
+import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_KITE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
 import { activeVariantStatsOfVid } from './vanillaItemVariants';
+import { petInfoOfVid } from './vanillaPets';
 
 export interface ItemCombat {
   damage?: number;
@@ -44,9 +46,9 @@ const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number
 
 // ---- 提取缺口补丁（历史注：曾「只解析 case 内字面赋值」——★清偿刀 J 2026-09-30 后
 //   提取器已覆盖嵌套贯穿组/链式复合除式/DefaultTo* 七 helper 形参位/守卫链数值面
-//   （extract-itemcombat.mjs 头注⑦）,本表绝大多数条目已被提取器原生复现（逐字段
-//   对拍全等）,条目按 BJ205 定谳保留作双保险;仍 LAG 面 4049/5392-5394/5594-5595
-//   见下方 BJ205 注）----
+//   （extract-itemcombat.mjs 头注⑦）;★清偿刀 Q1 2026-09-30 头注⑨ 后 helper 体字段面
+//   26 helper 全数原生（4049/5392-5394/5594-5595 六件 LAG 收口,本表条目与原生值逐字段
+//   全等）,条目按 BJ205 定谳保留作双保险;仍 LAG 面=零（见下方 BJ205 注）----
 // DefaultToSpear/DefaultToStaff/DefaultToMagicWeapon/DefaultToRangedWeapon 的形参
 // 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/5629 仅剩 damage/knockBack、
 // 4788-4790（剑矛三件 DefaultToSpear+SetWeaponValues）与 4060-4062 整条缺失。
@@ -215,11 +217,13 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //       ★清偿刀 J（2026-09-30,extract-itemcombat 头注⑦b）后收缩为 13 件——
   //       4956/5669（`useTime = useAnimation / 3` 除式 :40011/:44557）已原生解析
   //       （json useTime=10 与本表逐字节等价,条目保留作双保险）；
-  //       其余 13 件 LAG 维持：4049（DefaultToLawnMower 体 :48532-48541 useAnim30/
-  //         useTime10/autoReuse 未建 helper 体字段面）、5392-5394（DefaultToSolution
-  //         体 :47800-47808 shoot=projId-145/ammo 780/consumable）、5594/5595
-  //         （DefaultToBomb 体 :47771-47783+形参算式 :44027 shoot=1086+(type-5594)/
-  //         speed6/40/40/consumable/noMelee）；
+  //       ★清偿刀 Q1（2026-09-30,extract-itemcombat 头注⑨ helper 体字段面根修）后
+  //       再收口 6 件——4049（DefaultToLawnMower 体 :48532-48541 useAnim30/useTime10/
+  //         autoReuse）/5392-5394（DefaultToSolution 体 :47800-47808 shoot=projId-145/
+  //         ammo 780/consumable）/5594/5595（DefaultToBomb 体 :47771-47783+形参算式
+  //         :44027 shoot=1086+(type-5594)/speed6/40/40/consumable/noMelee）全部原生
+  //         复现（--dump 与本表逐字段对拍全等,Q1 判别测试锁）→【现行 LAG 残余=零】,
+  //         13 件中其余 7 件=下方 4423+4824-4827/4908/4909 的【禁反哺】刻意偏差面；
   //   · 4423+4824-4827/4908/4909 的 noMelee 七件=【刻意偏差】非原版值——原版
   //     SetDefaults 各 case 无 noMelee 字面（:37462-37474/:39505-39514/:39805-39816）,
   //     本表补它只为 combatWeapon `consumable && noMelee` 爆炸物门派发,【禁反哺】;
@@ -283,7 +287,7 @@ export type CombatWeapon =
   | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
   | { kind: 'whip'; shoot: number; damage: number; knockback: number; useTime: number; shootSpeed: number; itemId: number }
   | {
-      kind: 'boomerang' | 'spear' | 'anchored' | 'yoyo' | 'flail' | 'flairon' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
+      kind: 'boomerang' | 'spear' | 'anchored' | 'yoyo' | 'flail' | 'flairon' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon' | 'kite';
       shoot: number;
       damage: number;
       knockback: number;
@@ -338,6 +342,20 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   if (!c || c.useAmmo || c.ammo) return null; // 弓弩/弹药体系不在此分流
   const shoot = c.shoot ?? 0;
   const ai = shoot ? projectileData(shoot)?.aiStyle ?? -1 : -1;
+  // ★清偿刀 Q1 helper 体面（2026-09-30）：DefaultToVanitypet（51 件）/DefaultToGolfBall
+  //  （15 件）/DefaultToGolfClub（16 件）体把 shoot+noMelee 并入 combat 表后,通用
+  //  'shot' 直射兜底会对这三族误开火（宠物弹 201-1090/球弹 721-752/杆 helper 722 被射成
+  //  通用箭体）——原版使用链在专支消费,不走 ItemCheck_Shoot 通用尾链：
+  //   · 宠物=装备槽域（miscEquips[0]+PetFollower,ItemCheck_UsePetLicenses :45737/
+  //     TogglePet :17191;本仓 miscEquips 装备面,Game.updateUse 宠物拦截支 669/753 先行）
+  //   · 高尔夫球=ItemCheck_Shoot :47935 `IsAGolfBall[projToShoot]` →
+  //     TryPlacingAGolfBallNearANearbyTee(:50206) 重定向（本仓 GolfBall 实体 +
+  //     fixedUpdate GOLF_CLUBS 蓄力块 :10005 自动摆球）
+  //   · 球杆=AI_150_GolfClubHelper 蓄力（:49498-49627;本仓 GOLF_CLUBS 通道）
+  //  combatWeapon 显式退出（同 3384 传送门枪/5451·5738 机件先例）——退出前不损伤
+  //  现行为:51 宠物件/15 球件/16 杆件 combat 表原生首见 shoot,通用兜底此前不可达。
+  const aiIsGolfHelper = ai === 149 || ai === 150;   // AI_149 高尔夫球 / AI_150 球杆蓄力 helper
+  if (aiIsGolfHelper || petInfoOfVid(vid)) return null;
   const base = {
     damage: c.damage ?? 1,
     knockback: c.knockBack ?? 3,
@@ -377,6 +395,15 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
       return { kind: 'anchored', shoot, ...base };
     }
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
+    // ★BJ413 2026-09-30（风筝无效用户实报）：风筝 24 件（Item.DefaultToKite :47829-47838,
+    //   ItemID.Sets.IsAKite ItemID.cs:157 同 24 id）——此前 itemcombat 只落 noUseGraphic
+    //   一键（J 刀 Helper 体面登记债）→ combatWeapon 因 noMelee 落 'shot' 兜底 = 通用
+    //   直射箭弹（0 伤弹+风筝 AI 整缺=「使用无反应」）。现 json 原生全值（提取器
+    //   DefaultToKite 形参位,BJ413 根修）→ 显式归 'kite' 交 Game 专支（KiteProj
+    //   AI_160_Kites 全链）。damage 缺省 0（C# 字段缺省——base ?? 1 为武器面兜底,
+    //   风筝弹本体无伤害面,?? 0 直读终值）;consumable=false（体尾覆写）不入
+    //   thrownCombat;右键=放置锚桩（PLACE_TILE_ON_ALT_USE 面已接,Game 放置链承载）。
+    if (ai === AI_KITE) return { kind: 'kite', shoot, ...base, damage: c.damage ?? 0 };
     if (c.summon) {
       // 召唤武器（31 件）：按投射物 AI 分流哨兵与随从。哨兵 aiStyle 集合 = 53（冰九头蛇
       // 308/蜘蛛皇后 377/猎犬 966，:3724/:4342/:8860）/123（月门 641/彩虹水晶 643，:6638/:6651）

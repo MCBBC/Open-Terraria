@@ -181,6 +181,30 @@ const PROJ_GRID: Record<string, ProjGrid> = {
   1113: { cols: 6, rows: 9, cw: 64, ch: 46, fw: 62, fh: 44 },
   1092: { cols: 6, rows: 9, cw: 40, ch: 40, fw: 40, fh: 40 },
   660: { cols: 14, rows: 1, cw: 38, ch: 38, fw: 38, fh: 38 },
+  // ★BJ415 2026-09-30「猪龙风筝天上飞三只猪龙」定谳：风筝族本体帧是【横切】网格——
+  //    Main.DrawKite（1457 Main.cs:37972）`value.Frame(projFrames[type], 1, proj.frame)`
+  //    横参=列数/竖参=1 → 帧矩形 = W/列 × H 全高（Utils.Frame :1389 num*tex.Width/横参）,
+  //    与通用弹幕竖条切片 Frame(1,frames,0,frame) 轴向相反。旧竖切把 826 猪龙
+  //    336×80 三变体横排表（粉/紫/红 各 112×80）切成 336×27 全宽横带 = 三只"猪龙"
+  //    同屏、线拴中间只（用户实报三只之谜=单只单draw,非连放三只;frame=ai[1]
+  //    AI 无写入恒 0=粉变体,P.cs:49544）。12 多帧型全表（帧数锚=Main.projFrames
+  //    Main.cs:8771-8797;其余 12 单帧型 771/822/823/827/830/838/843/844/845/846/
+  //    850/852 两轴同形不列,缺省整图即帧）：
+  //    766-770 五色 272×68·4 帧 68×68 / 824·839·840 兔兔 456×78·4 帧 114×78 /
+  //    826 猪龙 336×80·3 帧 112×80 / 828·829 水母 116×44·2 帧 58×44 /
+  //    853 独角兽 512×132·4 帧 128×132。rows=1 → col=⌊frame/1⌋=frame、row=0（660 同式）。
+  766: { cols: 4, rows: 1, cw: 68, ch: 68, fw: 68, fh: 68 },
+  767: { cols: 4, rows: 1, cw: 68, ch: 68, fw: 68, fh: 68 },
+  768: { cols: 4, rows: 1, cw: 68, ch: 68, fw: 68, fh: 68 },
+  769: { cols: 4, rows: 1, cw: 68, ch: 68, fw: 68, fh: 68 },
+  770: { cols: 4, rows: 1, cw: 68, ch: 68, fw: 68, fh: 68 },
+  824: { cols: 4, rows: 1, cw: 114, ch: 78, fw: 114, fh: 78 },
+  826: { cols: 3, rows: 1, cw: 112, ch: 80, fw: 112, fh: 80 },
+  828: { cols: 2, rows: 1, cw: 58, ch: 44, fw: 58, fh: 44 },
+  829: { cols: 2, rows: 1, cw: 58, ch: 44, fw: 58, fh: 44 },
+  839: { cols: 4, rows: 1, cw: 114, ch: 78, fw: 114, fh: 78 },
+  840: { cols: 4, rows: 1, cw: 114, ch: 78, fw: 114, fh: 78 },
+  853: { cols: 4, rows: 1, cw: 128, ch: 132, fw: 128, fh: 132 },
 };
 
 export function projFrameCount(projId: number): number {

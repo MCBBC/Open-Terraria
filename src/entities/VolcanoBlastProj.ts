@@ -50,6 +50,7 @@ import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { applyProjStatus } from './projStatus';
 import { hitCritters, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
@@ -245,9 +246,17 @@ export class VolcanoBlastProj extends Entity {
       //   被拒命中不得烧蓄能充能,终审补）
       if ((rawEnt as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (!playerCanHitEnemy(rawEnt as never, game)) continue;
-      // ★R2-04 ①全局免疫窗（Damage_PVE_Inner :12641-46）：immune[owner]!=0 即拒
-      const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
-      if (gate.meleeNpcImmuneGateOf && !gate.meleeNpcImmuneGateOf(e.id)) continue;
+      // ★R2-04 ①全局免疫窗（Damage_PVE_Inner :12636 `if (!((owner<0||
+      //   targetNPC.immune[owner]==0)|flag3)) return;`——978 maxPenetrate=3∧
+      //   usesLocalNPCImmunity=true ⇒ flag3(:12635)=false ⇒ 门生效）。
+      //   ★Q4 刀 2026-09-30（C5 同族 P1 定谳#2 勘误,与 856 同病）：原门读【弹幕域】
+      //   targetNPC.immune[owner] ≙ 本仓 Enemy.iframes 共享窗（清偿刀 T 单源
+      //   snapshotVanillaGate 快照判据）——旧档 duck-call Game.meleeNpcImmuneGateOf
+      //   读的是近战三重门的仓内独立簿（npcImmuneByAttacker,近战不写+清零桥面
+      //   =事实恒空）⇒ 弹幕域有窗（他弹残窗 iframes>0）的敌被误放行/近战簿有窗
+      //   被误拒。门拒 = 原文 return：不落 hitSet、penetrate 不减、弹体存活。
+      const gate = snapshotVanillaGate(e);
+      if (vanillaGateRejected(gate)) continue;
       if (!(px < Math.trunc(e.x) + e.w && Math.trunc(e.x) < px + this.w
         && py < Math.trunc(e.y) + e.h && Math.trunc(e.y) < py + this.h)) continue;
       // ★R2-04 ②ownerHitCheck（:12659）：noTileCollide 豁免 + 距离 1000px +
@@ -289,7 +298,11 @@ export class VolcanoBlastProj extends Entity {
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(dmgVar * (crit ? 2 : 1)
         + (snapBonusVolcano ? Math.trunc(snapBonusVolcano * (crit ? 2 : 1)) : 0),
-        kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, 0, true);
+        // pierce=-3 = usesLocal 族清零档（BJ398 现役梯,Enemy.hurt :14317 iframes=0
+        // ≙ 原文 :14175-14178 `immune[owner]=0` 写面）——★Q4 刀写半面对齐：旧档
+        // pierce=0 写 10t 弹幕域窗,而 978 usesLocalNPCImmunity 节流归弹内局部表
+        // （hitSet）,原文命中后全局窗【清零】非新开 10t 窗
+        kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, -3, true);
       // StatusNPC（Projectile.cs:11365）：AddBuff(24,180)=On Fire! 3s（提取表驱动）
       applyProjStatus(978, e as unknown as Record<string, number | undefined>);
       // usesLocalNPCImmunity 族落地 = 全局窗清零段（GC1：Projectile.cs:14177）

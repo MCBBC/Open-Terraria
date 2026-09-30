@@ -24,4 +24,24 @@ describe('update-version-beta 更新横幅版本段', () => {
     expect(re.test('index-BvemkHnu.js')).toBe(false);
     expect(re.test('<!DOCTYPE')).toBe(false);
   });
+
+  it('★2026-09-30 构建时间戳面:build-id 三段式解析 + 横幅组合显示 + 本地构建刷戳', () => {
+    const uc = srcOf('src/update/UpdateCheck.ts');
+    const ub = srcOf('src/update/UpdateBanner.ts');
+    // UpdateCheck:bundle 取末段(戳挤位防御)+ 10 位戳识别并拼进 version
+    expect(uc).toContain("parts[parts.length - 1] ?? ''");
+    expect(uc).toContain('/^\\d{10}$/.test(parts[1]');
+    expect(uc).toContain("filter(Boolean).join(' ')");
+    // UpdateBanner:首段版本+次段戳组合显示(戳缺省容忍)
+    expect(ub).toContain("version.split(/\\s+/)");
+    expect(ub).toContain('/^\\d{10}$/.test(vTokens[1]');
+    // 本地构建刷戳:dev/build/build:analyze/start/start:analyze 前缀 stamp-build(不升版;
+    // ★start:analyze 是自带完整 vite build 的独立长命令,漏接=用户实报「本地构建仍显示旧戳」)
+    const pkg = JSON.parse(srcOf('package.json'));
+    for (const k of ['dev', 'build', 'build:analyze', 'start', 'start:analyze']) {
+      expect(pkg.scripts[k].startsWith('node scripts/stamp-build.mjs')).toBe(true);
+    }
+    expect(srcOf('scripts/versionStamp.mjs')).toContain('APP_BUILD_STAMP');
+    expect(srcOf('scripts/bump-version.mjs')).toContain('writeVersionTs');
+  });
 });

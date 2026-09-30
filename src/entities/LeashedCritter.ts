@@ -859,7 +859,9 @@ export interface LeashedEnv {
   dust?: LeashedDustPool;
   /** 单 wav 直播（风筝线长变化音 SoundID.Item192——KiteLogic :49385-49393；
    *  pitch = Projectile.kiteSoundPitch，LegacySoundPlayer case 192 :632 消费。
-   *  可选 = 测试 mock 兼容） */
+   *  可选 = 测试 mock 兼容）。★Q4 刀 2026-09-30 勘误：播音门 :49389 `if (!flag)`
+   *  / flag=owner==255（:49352）→ 锚桩风筝（本 env 唯一 kite 消费体）恒静音,
+   *  生产链零消费（通道保留=接口面）；手持风筝弹的 Item_192 走 KiteProj ctx） */
   playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number): void;
   /** Lighting.GetColor(i, j) → [r,g,b] 0-255（金系闪光的照度门，LeashedCritter.cs:143-156） */
   lightAt?(i: number, j: number): [number, number, number];
@@ -2176,7 +2178,8 @@ export class LeashedKiteEntity {
   projectileLocalAI1 = 0;
   frame = 0;
   frameCounter = 0;
-  /** localAI[2]——线长变化音效簿记（KiteLogic :45838-45854；owner!=myPlayer 不播） */
+  /** localAI[2]——线长变化音效簿记（KiteLogic :45838-45854；owner==255 → 播音门
+   *  `if (!flag)`（:49389）恒假=锚桩风筝静音,簿记照跑——★Q4 刀勘误见 kiteLogic 注） */
   private localAI2 = 0;
   private soundDelay = 0;
   /** Main.player[255].direction（MoveKite 借空 Player 持朝向，KiteLogic 尾行消费） */
@@ -2286,10 +2289,16 @@ export class LeashedKiteEntity {
       this.windTarget = env.windForVisuals;
       this.cloudAlpha = env.cloudAlpha;
     }
-    // :149-157：windCurrent 先清零；有风处 = Lerp(0, windTarget, 0.05)（快进 = 直取）
-    this.windCurrent = 0;
+    // :149-157（★Q4 刀勘误 2026-09-30）：原文 `windCurrent = fastForward ? windTarget
+    //  : MathHelper.Lerp(windCurrent, windTarget, 0.05f)`（LeashedKite.cs:150）——
+    //  从【当前值】向目标 5%/tick 缓动（风 gate 0.2 在 |wind|≥0.58 时 ~12t 可达）。
+    //  旧档 `windTarget * 0.05` ≙ Lerp(0,…) 恒定小值：|wind|<4 的全部常风天下
+    //  锚桩风筝永不过 0.2 升力门（放不出来）。清零支照原文（else windTarget=0,
+    //  无「先清 windCurrent」原文语义——无风拍 windCurrent 保持旧值,出风域缓降面
+    //  保留;原文 windCurrent 无显式清零,风停靠 windTarget=0 后 lerp 归 0 同效）
     if (this.inWind(env)) {
-      this.windCurrent = fastForward ? this.windTarget : this.windTarget * 0.05;
+      this.windCurrent = fastForward ? this.windTarget
+        : this.windCurrent + (this.windTarget - this.windCurrent) * 0.05;
     } else {
       this.windTarget = 0;
     }
@@ -2404,22 +2413,24 @@ export class LeashedKiteEntity {
   private kiteLogic(st: TileStore, env: LeashedEnv, bobOffset: number): void {
     void st;
     const ai0 = this.kiteDistance;
-    // :45838-45854 localAI[2] 线长簿记 + soundDelay（owner!=myPlayer → 不播音效；
-    // 锚桩风筝 owner=255 dummy 恒非本地 → !flag 恒真必播 :49390-49392）
+    // :45838-45854 localAI[2] 线长簿记 + soundDelay。★Q4 刀 2026-09-30（BJ413 相邻
+    // 域勘误：锚桩风筝收线音方向反——定谳翻案）：原文 KiteLogic 头 `bool flag =
+    // owner == 255`（Projectile.cs:49352），播音门 = `if (!flag)`（:49389）——
+    // 锚桩风筝 LeashedKite.MoveKite 置 `_dummy.owner = 255`（LeashedKite.cs:168）
+    // → flag 恒真 → !flag 恒假 → 【恒静音】。旧注「owner!=myPlayer → 不播音效；
+    // owner=255 恒非本地 → !flag 恒真必播」系把收放线输入块的 owner==Main.myPlayer
+    // 门（:49356）误并到播音门上（播音门读的是 owner!=255，非 owner==myPlayer）。
+    // 手持风筝（owner=玩家位）才播 Item_192（KiteProj.kiteLogic 同表）；锚桩静音
+    // = 本仓对齐面。簿记（localAI2 跟线长 + soundDelay 节流）照原文保留——
+    // 静音只省 PlaySound 一行，非整块剪除。
     if (this.localAI2 === 0) this.localAI2 = ai0;
     else if (this.localAI2 !== ai0) {
       this.localAI2 = ai0;
       if (this.soundDelay === 0) {
         this.soundDelay = 30;
-        // SoundID.Item192（Projectile.cs:49385-49393 KiteLogic）：pitch 存
-        // kiteSoundPitch（:49388，num=4/num2=500 收放线界）由 LegacySoundPlayer
-        // case 192（LegacySoundPlayer.cs:631-633）落到实例 Pitch；本仓经
-        // playWavFile 第 5 参直传。位置 = player.position = AnchorWorldPosition
-        // （LeashedKite.cs:169 CopyToDummy 后 player.Center=锚点）→ 本仓 anchorX/Y
-        if (env.playSfxWav) {
-          const pitch = ((this.localAI2 - 4) / (500 - 4)) * -0.12 + 0.06;   // :49388
-          env.playSfxWav('Item_192', 1, this.anchorX, this.anchorY, pitch);
-        }
+        // :49388 kiteSoundPitch 仍逐拍算（原版字段写入无条件,消费面仅手持弹）；
+        // SoundID.Item192 播音在 !flag 门内（:49389-49392）——owner==255 不达,
+        // 本实体恒静音（旧档恒播=勘误面,判别测试 tests/q4-kite-critter-domain）。
       }
     }
     if (this.soundDelay > 0) this.soundDelay--;
@@ -2935,8 +2946,9 @@ function hue2rgb(p: number, q: number, tIn: number): number {
 //     controlUseItem +5）经源码证实 owner==Main.myPlayer 才走——LeashedKite 恒
 //     owner=255（MoveKite :168）→ 锚桩风筝原版即无收放输入，等价（不移植）。
 //     残留：HandleMovement 的 SlopeCollision 坡面贴合段从略（生成期坡面罕见）；
-//     风筝无碰撞音效（kiteSoundPitch 计算无消费端，:45845-45854 owner!=myPlayer
-//     不播）。
+//     风筝无碰撞音效（★Q4 刀勘误 2026-09-30：:49352 flag=owner==255 → :49389
+//     `if (!flag)` 恒假=锚桩风筝 Item_192 恒静音,非「owner!=myPlayer 不播」;
+//     kiteSoundPitch 计算保留,消费端仅手持风筝弹 KiteProj）。
 //   ② DrawBubble —— 已对齐：Renderer.drawLeashedBubble（Gore_413 +
 //     (isAquatic&&liquid<255)||(!isAquatic&&liquid>0) 判定，LeashedCritter.cs:200-205）。
 //   ③ FindFrame —— 已对齐：拴绳全集 31 组 case（兔/金鱼/鸟/鹦鹉/鸮/鸭+泳姿/

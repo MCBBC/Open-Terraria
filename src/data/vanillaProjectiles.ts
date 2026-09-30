@@ -192,3 +192,4 @@ export const AI_YOYO = 99;        // 悠悠球（按住持续滞留）
 export const AI_SHORTSWORD = 161; // 短剑直刺
 export const AI_WHIP = 165;       // 鞭
 export const AI_GLOWSTICK = 14;   // 荧光棒族（弹跳物理/粘性/妖精）
+export const AI_KITE = 160;       // 风筝（24 型 766-853,Projectile.DefaultToKite P.cs:10746——拴线飞行/风响应,BJ413）

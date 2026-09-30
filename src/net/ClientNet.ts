@@ -1779,7 +1779,10 @@ export class ClientNet {
 
   /** 远端玩家物品快照（Game 侧拷入 proxy.inv——手持/盔甲纸娃娃/挥舞动画渲染用） */
   // ★R17（红队缺陷④收尾）：bag 条目带 prefix——远端装备词缀经 msg5 到达后不再丢弃
-  remoteItems = new Map<number, { inv: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> }>();
+  // ★Q3（2026-09-30）：+miscDyes[5]（弹幕染料 cPet/cLight/cGrapple 源槽,protocol
+  //  ItemContainer.MiscDyes=3）——傀儡染料通道自此与本地同源;旧服务器剥 container=3
+  //  段时袋内 miscDyes 恒 null=fail-open（降级矩阵）。
+  remoteItems = new Map<number, { inv: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null>; miscDyes: Array<{ id: number; stack: number; prefix?: number } | null> }>();
 
   /** 本地已同步快照（差分基准；null = 尚未全量 dump） */
   private sentInv: Array<Array<{ id: number; stack: number; prefix?: number } | null>> | null = null;
@@ -1787,18 +1790,21 @@ export class ClientNet {
   private lastInvSync = 0;
 
   /** 全量 dump（进房后立即 + 外部可请求） */
+  // ★Q3（2026-09-30）：容器循环 3→4（+MiscDyes）——miscDyes[0]/[1]/[4] = 弹幕染料
+  //  cPet/cLight/cGrapple 源槽（Player.UpdateDyes Player.cs:9667-9692）,不同步则
+  //  远端傀儡染料通道恒 0（fail-open,projDye MP 边界债）。
   private sendFullInventory() {
-    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> } };
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null>; miscDyes: Array<{ id: number; stack: number; prefix?: number } | null> } };
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
-    for (let c = 0; c < 3; c++) {
-      const arr = c === 0 ? p.inv.slots : c === 1 ? p.inv.armor : p.inv.dye;
+    for (let c = 0; c < INV_SYNC_SIZES.length; c++) {
+      const arr = c === 0 ? p.inv.slots : c === 1 ? p.inv.armor : c === 2 ? p.inv.dye : p.inv.miscDyes;
       for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
         // ★R17：上行带 prefix（R16-13 只接了线上格式,上行漏带 → 远端永远收不到词缀）
         entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: arr[i]?.id ?? 0, stack: arr[i]?.stack ?? 0, prefix: arr[i]?.prefix ?? 0 });
       }
     }
     this.send(writePlayerItems(entries));
-    this.sentInv = [p.inv.slots.map(s => s ? { ...s } : null), p.inv.armor.map(s => s ? { ...s } : null), p.inv.dye.map(s => s ? { ...s } : null)];
+    this.sentInv = [p.inv.slots.map(s => s ? { ...s } : null), p.inv.armor.map(s => s ? { ...s } : null), p.inv.dye.map(s => s ? { ...s } : null), p.inv.miscDyes.map(s => s ? { ...s } : null)];
     this.invDumpPending = false;
   }
 
@@ -1808,10 +1814,10 @@ export class ClientNet {
     if (this.invDumpPending || !this.sentInv) { this.sendFullInventory(); return; }
     if (now - this.lastInvSync < 250) return;
     this.lastInvSync = now;
-    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> } };
-    const cur = [p.inv.slots, p.inv.armor, p.inv.dye];
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null>; miscDyes: Array<{ id: number; stack: number; prefix?: number } | null> } };
+    const cur = [p.inv.slots, p.inv.armor, p.inv.dye, p.inv.miscDyes];   // ★Q3 +MiscDyes
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
-    for (let c = 0; c < 3; c++) {
+    for (let c = 0; c < INV_SYNC_SIZES.length; c++) {
       const arr = cur[c];
       const sent = this.sentInv[c];
       for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
@@ -1827,17 +1833,20 @@ export class ClientNet {
     if (entries.length) this.send(writePlayerItems(entries));
   }
 
+  // ★Q3：container 门 2→3（miscDyes 段落袋）。旧端降级面=本门旧值 `>2` 整条丢弃
+  //  （新端→旧端帧旧端自弃、旧服务器→新端段被服务器剥除两向同 fail-open）。
   private applyRemoteItems(entries: Array<ItemSyncEntry & { playerSlot: number }>) {
     for (const e of entries) {
-      if (e.container > 2 || e.itemSlot >= INV_SYNC_SIZES[e.container]) continue;
+      if (e.container > 3 || e.itemSlot >= INV_SYNC_SIZES[e.container]) continue;
       let bag = this.remoteItems.get(e.playerSlot);
       if (!bag) {
         bag = {
           inv: Array(58).fill(null), armor: Array(20).fill(null), dye: Array(10).fill(null),
+          miscDyes: Array(5).fill(null),
         };
         this.remoteItems.set(e.playerSlot, bag);
       }
-      const arr = e.container === 0 ? bag.inv : e.container === 1 ? bag.armor : bag.dye;
+      const arr = e.container === 0 ? bag.inv : e.container === 1 ? bag.armor : e.container === 2 ? bag.dye : bag.miscDyes;
       // ★R17：prefix 落袋（原版 msg5 消费端 `if (prefix != item.prefix) Prefix(prefix)`
       //  条件应用——本仓词缀是纯数据字段,直接写入即等价,不重 roll）
       arr[e.itemSlot] = e.itemId ? { id: e.itemId, stack: e.stack, prefix: e.prefix } : null;

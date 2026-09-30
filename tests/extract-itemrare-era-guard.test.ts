@@ -175,7 +175,7 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
       expect(rare['1293']).toBe(8);          // 1457 :15981 新增 rare 档
       expect('6147' in rare).toBe(true);     // 1457 新物品段首
       expect('6195' in rare).toBe(true);     // 段尾
-      expect(Object.keys(rare).length).toBe(3275);   // 与现库同基数（零缺失）
+      expect(Object.keys(rare).length).toBe(3299);   // 与现库同基数（零缺失;BJ413 +24 风筝 HAND 面 3275→3299）
       expect(md5(LIVE_RARE)).toBe(beforeR);
     } finally {
       rmSync(dir, { recursive: true, force: true });

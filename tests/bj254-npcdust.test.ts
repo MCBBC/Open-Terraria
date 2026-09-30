@@ -151,9 +151,9 @@ describe('BJ254 A. vanilla-npcdust.json 首批钉值', () => {
       expect(TABLE[vid], `vid=${vid} 不应出现在表`).toBeUndefined();
     }
     // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314 + 批3 fadeIn 族 18 型 = 332
-    //   + 批4 收官 402/661 转正 = 334,BJ327;426/427 批3 已在表）
+    //   + 批4 收官 402/661 转正 = 334,BJ327;426/427 批3 已在表 + BJ411 流星头 23 = 335）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(334);
+    expect(ids.length).toBe(335);
   });
 });
 

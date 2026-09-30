@@ -431,7 +431,11 @@ function parseProjGrid() {
   for (const e of m[1].matchAll(/(\d+):\s*\{\s*cols:\s*(\d+),\s*rows:\s*(\d+),\s*cw:\s*(\d+),\s*ch:\s*(\d+),\s*fw:\s*(\d+),\s*fh:\s*(\d+)/g)) {
     grid[+e[1]] = { cols: +e[2], rows: +e[3], cw: +e[4], ch: +e[5], fw: +e[6], fh: +e[7] };
   }
-  must(Object.keys(grid).length === 4, `PROJ_GRID 基数 ${Object.keys(grid).length} ≠ 4（1094/1113/1092/660）`);
+  // ★BJ415 2026-09-30：风筝族横切网格 12 型入表（766-770/824/826/828/829/839/840/853
+  //  ——Main.DrawKite Main.cs:37972 Frame(projFrames,1,frame) 横参=列数）→ 基数
+  //  4（1094/1113/1092/660）→ 16。贴合闸（gridFit）对全表生效,轴面由 tests/
+  //  bj415-kite-frames.test.ts 钉值。
+  must(Object.keys(grid).length === 16, `PROJ_GRID 基数 ${Object.keys(grid).length} ≠ 16（1094/1113/1092/660+风筝族12）`);
   return grid;
 }
 

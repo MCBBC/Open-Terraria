@@ -489,6 +489,72 @@
    }
   ]
  },
+ "23": {
+  "hit": [
+   {
+    "hitK": 100,
+    "body": [
+     {
+      "dust": 0,
+      "idPick": [
+       6,
+       25
+      ],
+      "sx": "hd",
+      "sy": -1,
+      "line": 90575
+     },
+     {
+      "dust": 6,
+      "sx": "velX*0.2",
+      "sy": "velY*0.2",
+      "alpha": 100,
+      "scale": 2,
+      "posts": [
+       [
+        "ng",
+        true
+       ]
+      ],
+      "line": 90576
+     }
+    ],
+    "line": 90573
+   }
+  ],
+  "death": [
+   {
+    "dust": 0,
+    "idPick": [
+     6,
+     25
+    ],
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 90588
+   },
+   {
+    "dust": 6,
+    "n": 50,
+    "sx": "velX*0.2",
+    "sy": "velY*0.2",
+    "alpha": 100,
+    "scale": 2.5,
+    "posts": [
+     [
+      "velMul",
+      6
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90596
+   }
+  ]
+ },
  "26": {
   "hit": [
    {
@@ -12679,6 +12745,7 @@
     ]
    }
   ],
-  "unreachableAfterReturn": []
+  "unreachableAfterReturn": [],
+  "batch5": "BJ411（2026-09-30）流星头 23 接入（用户实报「流星头粒子没有」定谳=HitEffect 表缺 23+FindFrame 火尾缺——本表补 HitEffect 两相；FindFrame 火尾 cs:74803-74809 属 Enemy.swarmerAI 直刀,不在表）。★手工条目（extract-npcdust.mjs 未含 `int numN=A; if(Next(2)==0) numN=B;` 局部 id 模式,重产前须先扩提取器,否则本键被抹=测试红）：idPick[6,25]=`Next(2)==0?6:25` 等价直译（1 掷同拍）；hit=for(hitK100){idPick尘(hd,-1)+d6(vel*0.2,α100,s2,ng)}→return（无通用尾,_meta.noGenericTail 同相）；death=50×idPick尘(2hd,-2)+50×d6(vel*0.2,α100,s2.5,vel×6,ng)。行锚 90567-90605/74803,1458 同行逐字节全等。"
  }
 }

@@ -723,6 +723,13 @@ export const enum ItemContainer {
   Slots = 0,  // inv.slots[0..57]
   Armor = 1,  // inv.armor[0..19]（0-2 盔甲/3-9 配饰/10-12 时装/13-19 时装配饰）
   Dye = 2,    // inv.dye[0..9]
+  // ★清偿刀 Q3（2026-09-30）：miscDyes 段（inv.miscDyes[0..4] 杂项装备染料,
+  //  Player.cs:1378）——弹幕染料四通道 cPet/cLight/cGrapple 的源槽（UpdateDyes
+  //  Player.cs:9667-9692）。曾缺 → 傀儡弹染料通道全 0=fail-open（projDye MP 边界债）。
+  //  段形态与既有三段同构（逐条 playerSlot+container+itemSlot+u16id+u16stack+prefix,
+  //  条目定长 8 字节）;降级矩阵：旧端 applyRemoteItems `container>2` 门整条丢弃、
+  //  readPlayerItems 定长循环不错位（帧级前向兼容,无需 PROTO_VER 翻面）。
+  MiscDyes = 3, // inv.miscDyes[0..4]
 }
 
 export interface ItemSyncEntry {
@@ -735,7 +742,8 @@ export interface ItemSyncEntry {
   prefix?: number;
 }
 
-export const INV_SYNC_SIZES = [58, 20, 10];
+/** 容器→槽容量（★Q3 +miscDyes[5];消费面数组长度门+服务器值域校验同源） */
+export const INV_SYNC_SIZES = [58, 20, 10, 5];
 
 export function writePlayerItems(entries: Array<ItemSyncEntry & { playerSlot: number }>): Uint8Array {
   const w = new NetWriter(Msg.SyncPlayerItem);

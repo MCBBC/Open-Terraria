@@ -833,12 +833,21 @@ export class GLSpriteLayer {
     if (sw <= 0 || sh <= 0) return null;
     const hit = this.texs.get(key);
     if (hit) { hit.stamp = ++this.stamp; return hit; }
+    // ★闪屏根因修复（2026-09-30）：亚像素区域（水面波纹相位使表面条带源高 sh∈(0,1)
+    //  px——腐化群系水池锁定复现）此前 canvas.height=0.52 → IDL 无符号长整型截断
+    //  为 0 → texFromImage !h 守卫 null → resolveTex null → accFail('tex') →
+    //  整帧降级=闪屏本体（波相位进 (0,1) 带期间每帧唯一键+每帧失败,ledger 实锤
+    //  273/273 全为本型）。修=区域钳 ≥1 整数像素（2D drawImage 亚像素源=采样首行,
+    //  1px 纹理同语义,视觉零差）;键含原始小数=每帧唯一 miss 照旧（34×1 纹理
+    //  ~136B,LRU 压力可忽略）——键归一是上游刀,不属本修。
+    const rsw = Math.max(1, Math.round(sw));
+    const rsh = Math.max(1, Math.round(sh));
     if (!this.regScratch) this.regScratch = document.createElement('canvas');
     const sc = this.regScratch;
-    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    if (sc.width !== rsw || sc.height !== rsh) { sc.width = rsw; sc.height = rsh; }
     const scx = this.regScratchCtx ??= sc.getContext('2d', { willReadFrequently: true })!;
-    scx.clearRect(0, 0, sw, sh);
-    scx.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, sw, sh);
+    scx.clearRect(0, 0, rsw, rsh);
+    scx.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, rsw, rsh);
     return this.texFromImage(key, sc, false, true);
   }
   private regScratch: HTMLCanvasElement | null = null;
@@ -1314,7 +1323,7 @@ export class GLSpriteLayer {
   /** ★C5b 雪沙批发射口（quadBatch 同款;stride 8=x,y,u,v,r,g,b,a——第 4 分量
    *  逐 quad α,沙尘叠画 180/255 精确保序单 drawArrays。blend/纹理参数不在本
    *  方法设（SO 基态由 begin 约定）;离场还原程序态/VAO（quadBatch 判例同款）。 */
-  quadBatchRgba(e: TexEntry, data: Float32Array, quads: number): boolean {
+  quadBatchRgba(e: TexEntry, data: Float32Array, quads: number, smooth = false): boolean {
     if (this.unavailable || !this.gl || quads <= 0) return false;
     if (!this.ensurePrecip()) return false;
     const gl = this.gl;
@@ -1326,7 +1335,11 @@ export class GLSpriteLayer {
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
-    gl.bindSampler(0, this.samp.nearest!);
+    // ★C13 星场批（2026-09-30）：smooth=true=线性采样（星贴图缩放软边语义,2D
+    //  imageSmoothingEnabled=true 对位;缺省 false=既有雨/沙/gore 调用零变化）
+    gl.bindSampler(0, smooth
+      ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
+      : this.samp.nearest!);
     gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
     glStatDraw(this.statName, quads * 6);
     gl.bindSampler(0, null);

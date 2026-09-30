@@ -541,15 +541,16 @@ describe('拴绳风筝（LeashedKite.cs + Projectile.KiteLogic :45809-46036）',
     expect(k.kiteDistance).toBe(250);          // 既不被收到 4 也不放到 500
   });
 
-  it('常风（0.5）：windCurrent=0.05×wind < 0.2 门 → 下垂档，线长衰减收敛 48（:149-160）', () => {
+  it('常风（0.5）有风档飞稳（★Q4 刀勘误 2026-09-30:Lerp(windCurrent,windTarget,0.05) 从当前值缓动可达 0.2 门,旧档 Lerp(0,…) 恒 0.025=永垂）→ 收风衰减下垂收敛 48（:149-160）', () => {
     const st = groundWorld(120, 80, 40);
     const m = mkManager(st);
     const k = m.spawnKite(60, 20, 766, mkEnv({ windForVisuals: 0.5 }));
     runTicks(m, st, 500, 60 * 16 + 8, 20 * 16 + 8, mkEnv({ windForVisuals: 0.5 }));
-    expect(k.windCurrent).toBeCloseTo(0.025, 6);   // Lerp(0, 0.5, 0.05)
-    expect(k.timeWithoutWind).toBeGreaterThan(0);
-    expect(k.kiteDistance).toBeLessThan(250);
-    // 无风档跑满 420t → 48 下限（Utils.Remap(120,420,250,48)）
+    expect(k.windCurrent).toBeCloseTo(0.5, 5);     // 500t 收敛至 target（0.5×(1−0.95^500)≈0.5）
+    expect(k.timeWithoutWind).toBe(0);             // ≥0.2 门 → 飞行（线长不衰减）
+    expect(k.kiteDistance).toBe(250);
+    // 收风（windTarget=0,风域仍在 → windCurrent 5%/t 衰减过 0.2 门）→ 下垂档跑满
+    // 420t → 48 下限（Utils.Remap(120,420,250,48)）
     runTicks(m, st, 3000, 60 * 16 + 8, 20 * 16 + 8, mkEnv({ windForVisuals: 0 }));
     expect(k.kiteDistance).toBeCloseTo(48, 5);
     // 下垂累积 localAI[0]（无升力档每 tick +1 钳 300，:45871）

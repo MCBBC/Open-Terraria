@@ -306,9 +306,12 @@ describe('extract-itemcombat era guard（B-form 干跑对拍 + 输出通道三�
   });
 
   // ★变异 J2:链式/复合/除式 pass 摘除（链式判据门置 false,主字段直写+chain fill 双断）
-  //   → 1296/1345/2350/4870/4715 useTime/useAnimation 双缺复现 BJ408 债#2 同族
+  //   → 1296/1345/2350/4870 useTime/useAnimation 双缺复现 BJ408 债#2 同族
   //  （2350 手补退役后无兜底=判别面）。
-  it('变异 J2:链式赋值 pass 摘除 → 1296/2350/4715 anim/time 双缺复现', () => {
+  //  ★清偿刀 Q1（2026-09-30）后 4715 升级为双通道件:DefaultToGuitar 体面供基值
+  //  anim12/time12/autoReuse,链式 pass 独占贡献= `useTime /= 2` 除式（12→6）——
+  //  摘链式 pass 后 4715 useTime 6→12 漂移=链式 pass 判别面（体面救不掉除式）。
+  it('变异 J2:链式赋值 pass 摘除 → 1296/2350 anim/time 双缺复现;4715 useTime 6→12 漂移', () => {
     const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
     const b1 = md5(LIVE_COMBAT);
     try {
@@ -326,30 +329,30 @@ describe('extract-itemcombat era guard（B-form 干跑对拍 + 输出通道三�
         expect(dump.items[vid]?.useTime, `${vid} useTime 缺`).toBeUndefined();
         expect(dump.items[vid]?.useAnimation, `${vid} useAnimation 缺`).toBeUndefined();
       }
-      expect(dump.items['4715']?.useAnimation, '4715 链式 anim 缺').toBeUndefined();
-      expect(dump.items['4715']?.useTime, '4715 复合除 useTime 缺').toBeUndefined();
+      expect(dump.items['4715']?.useAnimation, '4715 体面 anim12 仍在').toBe(12);
+      expect(dump.items['4715']?.useTime, '4715 useTime 6→12（除式半边消失=链式 pass 判别）').toBe(12);
       expect(md5(LIVE_COMBAT)).toBe(b1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  // ★变异 J3:DefaultToWhip 形参位摘除（调用点正则去 Whip）→ 18 鞭回落
-  //   {noUseGraphic} 单键原病灶（BJ408 用户实报相;combat 表与 vanilla-whips.json
-  //   双源同值,J3 后 combat 单源自证）。
-  it('变异 J3:DefaultToWhip 形参位摘除 → 5480 回落 noUseGraphic 单键', () => {
+  // ★变异 J3:DefaultToWhip 形参位摘除 → 18 鞭回落 {noUseGraphic} 单键原病灶
+  //  （BJ408 用户实报相）。★清偿刀 Q1 后调用点正则=全 DefaultTo\w+,Whip 走
+  //  DEFAULT_TO_PARAMS 手编规格（体编译跳过手编族）——摘除点=callEffectOf Whip 门。
+  it('变异 J3:DefaultToWhip 形参位摘除（callEffectOf Whip 门）→ 5480 回落 noUseGraphic 单键', () => {
     const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
     const b1 = md5(LIVE_COMBAT);
     try {
       const src = readFileSync(SCRIPT, 'utf8');
       const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
-      const WHIP_ANCHOR = '|MagicWeapon|Whip))\\s*\\((.*)\\);\\s*$';
+      const CE_ANCHOR = 'function callEffectOf(name, argText, id) {\n  const spec = DEFAULT_TO_PARAMS[name];';
       expect(src).toContain(ROOT_TRIGGER);
-      expect(src).toContain('|MagicWeapon|Whip))');
+      expect(src).toContain(CE_ANCHOR);
       const mutant = join(dir, 'extract-itemcombat-mutant-j3.mjs');
       writeFileSync(mutant, src
         .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
-        .replace(WHIP_ANCHOR, '|MagicWeapon))\\s*\\((.*)\\);\\s*$')); // ★变异J3
+        .replace(CE_ANCHOR, "function callEffectOf(name, argText, id) {\n  if (name === 'DefaultToWhip') return null; // ★变异J3:Whip 形参位摘除\n  const spec = DEFAULT_TO_PARAMS[name];"));
       const dump = dumpOf(mutant);
       expect(dump.items['5480'], '5480 回落 noUseGraphic 单键（damage/kb/anim 全缺）')
         .toEqual({ noUseGraphic: true });
@@ -381,6 +384,193 @@ describe('extract-itemcombat era guard（B-form 干跑对拍 + 输出通道三�
         expect(dump.items[vid], `${vid} 守卫链面摘除后整件缺失`).toBeUndefined();
       }
       expect(dump.items['3287'], '对照:case 域件不受守卫链摘除影响').toMatchObject({ damage: 70 });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ============================================================
+  // ★清偿刀 Q1（2026-09-30,J 刀登记债「helper 体字段面」收口+C3 尾段数值面）
+  //   根修判别力:①helper 体字面面 / ②SetDefaults3 尾段数值面 / ③helper 委托链 /
+  //   ④形参消费（fail-loud）。每形态一刀变异;目标件均无 EXTRACT_PATCH 手补兜底
+  //   （562/2192/5651/5594 皆不在 vanillaItemCombat.ts 补丁面;5594 补丁在 TS 层,
+  //   --dump 断言的是 json 提取面,不受 TS 层影响）。
+  // ============================================================
+
+  // 根修行:helper 体面原生直出（--dump 零写盘）——可放置族/宠物/高尔夫/溶液/炸弹/
+  // 尾段九件逐族锚。与 vanillaItemCombat.ts Q1 行为锁（combatWeapon 宠物/高尔夫退出）
+  // 互为两面。
+  it('根修行 Q1:helper 体面原生直出——六族抽样+尾段九件（--dump 零写盘）', () => {
+    const b1 = md5(LIVE_COMBAT);
+    const b2 = md5(LIVE_SOUND);
+    const r = spawnSync('node', [SCRIPT, '--dump'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+    expect(r.status).toBe(0);
+    const dump = JSON.parse(r.stdout) as { items: Record<string, Record<string, unknown>>; useSound: Record<string, string> };
+    // 可放置族（MusicBox 562/Tile 委托 Banner 5651/Wall 4052 time7/Torch 4383）
+    expect(dump.items['562']).toEqual({ useTurn: true, useAnimation: 15, useTime: 10, autoReuse: true, consumable: true });
+    expect(dump.items['5651']).toEqual({ useAnimation: 15, useTime: 10, useTurn: true, autoReuse: true, consumable: true });
+    expect(dump.items['4052']).toMatchObject({ useTime: 7, useAnimation: 15, autoReuse: true, consumable: true, useTurn: true });
+    expect(dump.items['4383']).toMatchObject({ useTime: 10, useAnimation: 15, autoReuse: true, consumable: true, useTurn: true });
+    // CapturedCritter（261 显式 UseSound 面+体面）与 SeaShell（2625 贯穿组;体无 useTurn）
+    expect(dump.items['261']).toEqual({ autoReuse: true, useTurn: true, useAnimation: 15, useTime: 10, consumable: true, noUseGraphic: true });
+    expect(dump.items['2625']).toEqual({ autoReuse: true, useAnimation: 15, useTime: 10, consumable: true });
+    // Vanitypet（4365:形参 shoot+体 damage0/anim20/time20/noMelee）
+    expect(dump.items['4365']).toEqual({ damage: 0, useAnimation: 20, useTime: 20, noMelee: true, shoot: 764 });
+    // 高尔夫球/球杆（3989 形参 shoot 721/球 4039 体 shoot722+speed6）
+    expect(dump.items['3989']).toEqual({ shoot: 721, shootSpeed: 12, useAnimation: 15, useTime: 15, noUseGraphic: true, noMelee: true });
+    expect(dump.items['4039']).toEqual({ shootSpeed: 6, shoot: 722, useTime: 12, useAnimation: 12, noMelee: true });
+    // 溶液（5392:形参算式 projId-145 + AmmoID.Solution 枚举）/炸弹（5594:调位 type 算式）
+    expect(dump.items['5392']).toEqual({ shoot: 870, ammo: 780, consumable: true });
+    expect(dump.items['5594']).toEqual({ shootSpeed: 6, shoot: 1086, consumable: true, useAnimation: 40, useTime: 40, noUseGraphic: true, noMelee: true });
+    // 割草机/吉他/发声配件（215 显式行后置覆写=30/30 保有,体面 17/17 不逆写）
+    expect(dump.items['4049']).toEqual({ useAnimation: 30, useTime: 10, autoReuse: true });
+    expect(dump.items['4057']).toEqual({ autoReuse: true, useTime: 12, useAnimation: 12 });
+    expect(dump.items['215']).toEqual({ useTime: 30, useAnimation: 30, useTurn: true, noUseGraphic: true });
+    // SetDefaults3 尾段九件（C3 定谳:守卫外尾段 :27621-27626 数值面）
+    for (const vid of ['2192', '2193', '2194', '2195', '2196', '2197', '2198', '2203', '2204']) {
+      expect(dump.items[vid], `尾段 ${vid}`).toEqual({ useTurn: true, useAnimation: 15, useTime: 10, autoReuse: true, consumable: true });
+    }
+    // 对照:零 combat 域 helper（Minecart 2343/Accessory 3990）不入表;守卫链面 8 不受扰
+    expect(dump.items['2343']).toBeUndefined();
+    expect(dump.items['3990']).toBeUndefined();
+    expect(dump.items['8']).toMatchObject({ useTime: 10, useAnimation: 15 });
+    // 别名后置族（4041-4048/4241 草种子:useTime = useAnimation 吃体面 15,非体面 useTime 10）
+    expect(dump.items['4041']).toEqual({ autoReuse: false, useAnimation: 15, useTime: 15, useTurn: true, consumable: true });
+    // 既有别名支回归锁:1226 字面先行（useAnimation=32 :15124 → useTime=32）
+    expect(dump.items['1226']).toMatchObject({ useAnimation: 32, useTime: 32 });
+    expect(md5(LIVE_COMBAT)).toBe(b1);
+    expect(md5(LIVE_SOUND)).toBe(b2);
+  });
+
+  // ★变异 Q1-A:helper 体面摘除（callEffectOf 体编译规格门置 false）→ 可放置族回落
+  //  {useTurn:true} 单键原病灶相（C3:「heldUseAnimation 回落 30+autoReuse 缺」）,
+  //  体面新键件（4049/4365/3989/5392）整件/字段消失。
+  it('变异 Q1-A:helper 体面摘除 → 562 回落 useTurn 单键;4049/5392 失联;3989 回落 noUseGraphic', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const BODY_ANCHOR = '  // ★清偿刀 Q1:helper 体编译规格（scanHelperBodySpecs 产物）接续消费\n  const bodySpec = DEFAULT_TO_BODY.get(name);\n  if (bodySpec) return bodySpec(argText, id);\n  return null;';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(BODY_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-q1a.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(BODY_ANCHOR, '  const bodySpec = DEFAULT_TO_BODY.get(name);\n  if (false && bodySpec) return bodySpec(argText, id); // ★变异Q1-A:体面摘除\n  return null;'));
+      const dump = dumpOf(mutant);
+      expect(dump.items['562'], '562 回落 useTurn 单键（C3 病灶相）').toEqual({ useTurn: true });
+      expect(dump.items['4049'], '4049 割草机整件失联').toBeUndefined();
+      expect(dump.items['5392'], '5392 溶液整件失联').toBeUndefined();
+      expect(dump.items['3989'], '3989 高尔夫球回落 noUseGraphic 单键').toEqual({ noUseGraphic: true });
+      expect(dump.items['2192'], '对照:尾段面独立通道不受体面摘除影响').toMatchObject({ useTurn: true, useAnimation: 15 });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 Q1-B:SetDefaults3 尾段数值面摘除（尾段表回退 useTurn 单键,复现 C3 病灶）
+  it('变异 Q1-B:尾段数值面摘除 → 2192 回落 useTurn 单键（C3 病灶相）', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const TAIL_ANCHOR = 'const SETDEFAULTS3_TAIL = { useTurn: true, useAnimation: 15, useTime: 10, autoReuse: true, consumable: true };';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(TAIL_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-q1b.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(TAIL_ANCHOR, 'const SETDEFAULTS3_TAIL = { useTurn: true }; // ★变异Q1-B:尾段数值面摘除'));
+      const dump = dumpOf(mutant);
+      for (const vid of ['2192', '2196', '2203', '2204']) {
+        expect(dump.items[vid], `${vid} 回落 useTurn 单键`).toEqual({ useTurn: true });
+      }
+      // 对照:562 走 helper 体面通道,与尾段互不掩护
+      expect(dump.items['562']).toMatchObject({ useAnimation: 15, useTime: 10, autoReuse: true, consumable: true });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 Q1-C:helper 委托链摘除（spec 运行时跳过 delegate 步进）→ Banner/Monolith
+  //  体面全失（其 combat 面全来自 PlaceableTile 基座）,三通道 useTurn 继承仍存活
+  //  （独立通道旁证,同 M4 sound 侧道独立性判例）。
+  it('变异 Q1-C:委托链摘除 → 5651 Banner 回落 useTurn 单键（基座面失联）', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const DEL_ANCHOR = '        if (st.delegate) {\n          const sub = DEFAULT_TO_BODY.get(st.delegate)(st.argText, id);';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(DEL_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-q1c.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(DEL_ANCHOR, '        if (st.delegate) {\n          continue; // ★变异Q1-C:委托步进摘除'));
+      const dump = dumpOf(mutant);
+      expect(dump.items['5651'], '5651 Banner 基座面失联,三通道 useTurn 独立存活').toEqual({ useTurn: true });
+      expect(dump.items['5113'], '5113 Monolith 同回落').toEqual({ useTurn: true });
+      // 对照:直落体面件（562 无委托）不受扰
+      expect(dump.items['562']).toMatchObject({ useAnimation: 15, autoReuse: true, consumable: true });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 Q1-D:形参消费摘除（evalBodyRhs 形参引用支移除）→ 炸弹 shoot=projectileID
+  //  不可解 = 编译 fail-loud（era guard ③ 静默兜底禁令的运行时半边——不可解即炸,
+  //  禁止把形参位吃成 undefined 静默缺字段）。
+  it('变异 Q1-D:形参引用支摘除 → 5594 shoot 求值不可解 fail-loud（exit≠0+指名）', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const ENV_ANCHOR = '    if (env[s] !== undefined) return evalBodyRhs(env[s], env, id);\n    return evalCallArg(rhs, id);';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(ENV_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-q1d.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(ENV_ANCHOR, '    // ★变异Q1-D:形参引用支摘除\n    return evalCallArg(rhs, id);'));
+      const r = spawnSync('node', [mutant, '--dump'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('不可解');
+      // 首个命中=SetDefaults5 首个形参消费调用点（DefaultToGolfBall(721) :35438）
+      expect(r.stderr).toContain('DefaultToGolfBall 字段 shoot 不可解:projid');
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 Q1-E:后置别名 pass 摘除（useTime = useAnimation 别名行在 helper 调用后
+  //  的右值换源支）→ 4041 族 useTime 15→10 回落（体面直填值漏过别名覆写）,
+  //  对照 1226（字面先行,既有支解析）不受扰。
+  it('变异 Q1-E:后置别名 pass 摘除 → 4041 useTime 15→10 回落;1226 不受扰', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const ALIAS_ANCHOR = '      if (callAt >= 0 && aliasAt > callAt && !laterLit) rec.useTime = rec.useAnimation;';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(ALIAS_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-q1e.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(ALIAS_ANCHOR, '      if (false) rec.useTime = rec.useAnimation; // ★变异Q1-E:后置别名支摘除'));
+      const dump = dumpOf(mutant);
+      expect(dump.items['4041']?.useTime, '4041 useTime 回落体面直填 10（别名覆写丢失）').toBe(10);
+      expect(dump.items['4241']?.useTime, '4241 同族回落').toBe(10);
+      expect(dump.items['1226']?.useTime, '对照:1226 字面先行走既有支不受扰').toBe(32);
       expect(md5(LIVE_COMBAT)).toBe(b1);
     } finally {
       rmSync(dir, { recursive: true, force: true });

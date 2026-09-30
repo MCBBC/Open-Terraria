@@ -36,13 +36,43 @@
 //     （4060/5629/4058/4381/4788-4790/6155/6171/6173）+本文件 THROWN_WEAPONS 手补表
 //     （4343 族）+obj['5065']——dry-run 对拍逐字段全等。
 //   ④登记不解析（形参位家族剩余面,须先建 helper 体字段面机制）：
-//     · DefaultToPlaceableTile/Wall/MusicBox/Bomb/Solution/Kite/Torch/CapturedCritter
+//     · DefaultToPlaceableTile/Wall/MusicBox/Bomb/Solution/Torch/CapturedCritter
 //       等 placeable 族（useTime=10/useAnimation=15/autoReuse/consumable 的 helper 体
-//       值——json 现缺,量级数百 id,独立刀）;
+//       值——json 现缺,量级数百 id,独立刀）;★BJ413 2026-09-30:Kite 已出列
+//       （DEFAULT_TO_PARAMS.DefaultToKite,24 件原生全值）;
 //     · 4241 的 useTime 别名（依赖 PlaceableTile 体 useAnimation）。
 //   ⑤真值变登记（真值变=停下登记判例）：6152 json useTime=4 系旧提取 shotVelocity
 //     误读遗留——源码 case 有字面 `useTime = 4;`（:47414）在调用之后,C# 终值即 4,
 //     源序解析与之同值,非本批改动面。
+//   ⑨★清偿刀 Q1 2026-09-30（J 刀登记债「helper 体字段面」收口,C3 红蓝同揭）：
+//     DefaultTo*/MakeUsableWithChlorophyteExtractinator 家族【helper 定义体】的
+//     combat 域字段解析根修（此前 HELPER_EFFECTS 只扫三通道 useTurn/noUseGraphic/
+//     UseSound,数值面 useTime/useAnimation/consumable/autoReuse/damage/shoot/… 全漏
+//     ——DefaultTo* 形参位只解了武器族 8 helper,Banner/Monolith 之外的可放置族
+//     ~1400 调用点只剩 useTurn 一键→heldUseAnimation 回落 30=放置动画 2×慢+autoReuse
+//     缺=按住连放失效）。机制：scanHelperBodySpecs 亲编译每个 helper 定义体（形参表
+//     →调位环境;体行序模拟——字面/链式括号/形参引用/形参±N/AmmoID 枚举/委托递归;
+//     未识别 combat 赋值形态 fail-loud）,形参先、体尾覆写后（DefaultToKite 判例:
+//     委托基面→体尾覆写终值）;调用点 fill-when-undefined（全量 census 零「字面先于
+//     调用」险情=2026-09-30 census-helper.mjs 0 条,重叠字面均在调用后=显式覆写语义
+//     由字面 pass 保有,与武器族判例同源）。已解形参族 8 helper（RangedWeapon/Bow/
+//     ThrownWeapon/Spear/MagicWeapon/Staff/Whip/Kite）维持 DEFAULT_TO_PARAMS 手编规格
+//     （金标对拍已锁,不重编）;新编译面覆盖其余 26 helper。零 combat 域字段 helper
+//     （Minecart/Accessory/InfoAccessory/Headgear/Body/Legs/QuestFish）=空规格,零效果。
+//     SetDefaults3 守卫补集尾段（2192-2198/2203/2204,C3 定谳）扩数值面——尾段
+//     `useAnimation=15/useTime=10/autoReuse=true/consumable=true`（:27621-27626,守卫
+//     if 外,guardNumericWalk 不可达）随既有 useTurn 补丁通道仅补空。
+//     ★TryGet 四门输入面变化（damage/useAnimation/knockBack/mana,Item.cs:1067-1079）:
+//     useAnimation 系面扩 ~1300 可放置件（TryGet 池 spd 门解压——此前零 anim 门全杀,
+//     可放置件本就不进重铸池,无实际掷域变化）;damage 仅 Vanitypet 51 件显式 0（ TryGet
+//     假值门不翻）;knockBack/mana 零新增。消费面 'shot' 兜底回归防护=vanillaItemCombat
+//     .ts combatWeapon 宠物/高尔夫三族显式退出（vanilla 专支消费判例,见该文件注）。
+//     补遗（对拍 sweep 1436 调用点全量核出的真 bug,非本刀制造）：后置别名
+//     `useTime = useAnimation`（4041-4048/4241 草种子族九件,Item.cs:35601-35612——
+//     别名行在 DefaultToPlaceableTile 调用后,右值吃体面 useAnimation=15 → C# 终值
+//     useTime=15;体面直填 useTime=10 须被覆写,头注④「4241 useTime 别名」登记债的
+//     终态即此值）。全文件该别名形恰 2 处（1226 字面先行走既有支）;era guard 变异
+//     Q1-A…Q1-E 五刀（体面/尾段/委托/形参 fail-loud/后置别名）。
 //   ⑦★清偿刀 J 2026-09-30（BJ408 债#1/#2 收口）四根修——TryGet 四门输入面
 //     （damage/useAnimation/knockBack/mana,Item.cs:1067-1079）全普查后落刀：
 //     a.嵌套 switch(type) 贯穿组（nestedSwitchCases 此前逐 case 切块,`case A: case B:`
@@ -519,20 +549,177 @@ const DEFAULT_TO_PARAMS = {
     noMelee: true,
     summon: true,
   }),
+  // ★BJ413 2026-09-30（风筝无效实报,Helper 体面登记债收口之一）：47829-47838
+  //   DefaultToKite(int projId)——体:width20/height28（不进 combat 列）+
+  //   DefaultToThrownWeapon(projId, 15, 8f) 链内委托 + 体尾覆写 consumable=false /
+  //   ranged=false / noUseGraphic=true + SetShopValues(Blue1, buyPrice(0,2))
+  //   （rare/value 走 extract-itemrare.mjs HAND 表,不进本表）+ createTile=723
+  //   （itemfunc 面已有）。17 调用点（4367-4371 组/4379/4610-4612/4613/4648-4651 组/
+  //   4669-4671/4674-4677/4681/4683-4684 = 24 件）。damage 缺省 0（C# 字段缺省,
+  //   风筝弹 aiStyle160 无伤害面）。autoReuse 缺省 false 不注入（同判例）。
+  DefaultToKite: (pos, _named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    useTime: 15,
+    useAnimation: 15,
+    shootSpeed: 8,
+    noMelee: true,
+    ranged: false,
+    consumable: false,
+    noUseGraphic: true,
+  }),
 };
 /** 调用点 → 基座字段（fill-when-undefined 消费）。实参拆分:具名 `hasAutoReuse:`
  *  摘出,其余按位;25 调用点全 census 具名只有 hasAutoReuse 一名。 */
 function callEffectOf(name, argText, id) {
   const spec = DEFAULT_TO_PARAMS[name];
-  if (!spec) return null;
-  const pos = [];
-  const named = {};
-  for (const p of splitCallArgs(argText)) {
-    const nm = /^([a-z]\w*)\s*:\s*(.+)$/.exec(p);
-    if (nm) named[nm[1]] = nm[2].trim();
-    else pos.push(p);
+  if (spec) {
+    const pos = [];
+    const named = {};
+    for (const p of splitCallArgs(argText)) {
+      const nm = /^([a-z]\w*)\s*:\s*(.+)$/.exec(p);
+      if (nm) named[nm[1]] = nm[2].trim();
+      else pos.push(p);
+    }
+    return spec(pos, named, id);
   }
-  return spec(pos, named, id);
+  // ★清偿刀 Q1:helper 体编译规格（scanHelperBodySpecs 产物）接续消费
+  const bodySpec = DEFAULT_TO_BODY.get(name);
+  if (bodySpec) return bodySpec(argText, id);
+  return null;
+}
+
+// ---- ★清偿刀 Q1（2026-09-30,头注⑨）：DefaultTo*/MakeUsable* helper 定义体编译 ----
+// 机制（先定谳再动刀, Terarria1457 逐 helper 亲读 census）：每个 helper 的 combat 域
+// 产出 = 定义体行【按源序模拟】的终值——委托调用先（继承基面）,自身行后（覆写）,
+// 即「形参先、体尾覆写后」DefaultToKite 判例的通用化。已手编的武器族 8 helper
+// （DEFAULT_TO_PARAMS 键集）不重编（金标对拍已锁）。
+const COMBAT_FIELDS = new Set([...NUM_FIELDS, ...BOOL_FIELDS]);
+const DEFAULT_TO_BODY = new Map(); // name -> (argText, id) => {field: value}
+{
+  // ① 收集全部声明（含重载——DefaultToPlaceableTile int/ushort 双载,forwarder 自委托）
+  const decls = new Map();
+  const declRe2 = /\b(?:public|private|internal|protected)\s+(?:static\s+)?[\w<>\[\], .?]+\s+(DefaultTo\w+|MakeUsableWithChlorophyteExtractinator)\s*\(([^)]*)\)\s*\{/g;
+  let dm;
+  while ((dm = declRe2.exec(src))) {
+    const name = dm[1];
+    const start = src.indexOf('{', dm.index);
+    let d = 0, end = -1;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') d++;
+      else if (src[i] === '}') { d--; if (d === 0) { end = i; break; } }
+    }
+    if (end < 0) continue;
+    if (!decls.has(name)) decls.set(name, []);
+    decls.get(name).push({ params: dm[2], body: src.slice(start + 1, end) });
+    declRe2.lastIndex = end + 1;
+  }
+  // ② 形参表 → [{name, def}];调位环境:实参表达式【惰性】存 raw,消费时才求值
+  //   （调位实参含 type 算式 `1086 + (type - 5594)` 与显式转换 `(short)(...)`）
+  const parseParams = (text) => text.split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
+    const pm = /^[\w<>\[\]]+\s+(\w+)\s*(?:=\s*(.+))?$/.exec(p);
+    return pm ? { name: pm[1], def: pm[2] } : null;
+  });
+  // ③ RHS 求值序：bool 字面 → AmmoID 枚举 → 数值字面 → 形参±N → 形参引用 →
+  //   调位算式（evalCallArg,type 线性式按 id）。不可解 → undefined（调用侧跳过该字段;
+  //   消费位不可解 = 源码漂移,由 applyBodySteps 的 fail-loud 兜底）
+  function evalBodyRhs(rhs, env, id) {
+    const s = rhs.replace(/\(\s*(?:ushort|short|sbyte|uint|int)\s*\)/g, '').replace(/\s+/g, '').trim();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    const em = /^AmmoID\.(\w+)$/.exec(s);
+    if (em) return AMMO_ID[em[1]] ?? -1;
+    if (/^-?\d+(\.\d+)?f?$/.test(s)) return parseFloat(s);
+    const pm = /^(\w+)([+-])(\d+(?:\.\d+)?)f?$/.exec(s);
+    if (pm && env[pm[1]] !== undefined) {
+      const base = evalBodyRhs(env[pm[1]], env, id);
+      return typeof base === 'number' ? base + (pm[2] === '-' ? -1 : 1) * parseFloat(pm[3]) : undefined;
+    }
+    if (env[s] !== undefined) return evalBodyRhs(env[s], env, id);
+    return evalCallArg(rhs, id);
+  }
+  // ④ 委托实参环境传递：raw 表达式里的形参名以【调用者 env 值】置换（Banner→Tile
+  //   `(ushort)91, tileStyleToPlace`——Tile combat 面不消费形参,此通道为完备性而设）
+  function delegateEnv(calleeName, argText, env, id) {
+    const specs = parseParams(decls.get(calleeName)[0].params);
+    const pos = [];
+    const named = {};
+    for (const p of splitCallArgs(argText)) {
+      const nm = /^([a-z]\w*)\s*:\s*(.+)$/.exec(p);
+      if (nm) named[nm[1]] = nm[2].trim();
+      else pos.push(p);
+    }
+    const out = {};
+    specs.forEach((ps, i) => {
+      if (!ps) return;
+      const raw = named[ps.name] ?? pos[i] ?? ps.def;
+      if (raw === undefined) { out[ps.name] = undefined; return; }
+      const stripped = raw.replace(/\(\s*(?:ushort|short|sbyte|uint|int)\s*\)/g, '').trim();
+      out[ps.name] = env[stripped] !== undefined ? env[stripped] : raw;
+    });
+    return { specs, env: out, named, pos };
+  }
+  // ⑤ 体编译：行序步进（委托/赋值）,运行时按 env+id 求终值。未识别 combat 赋值
+  //   形态 fail-loud（era guard ③ 静默兜底禁令;不可解 RHS 在 spec 运行时抛）
+  function compileBody(name, stack) {
+    if (DEFAULT_TO_BODY.has(name)) return DEFAULT_TO_BODY.get(name);
+    if (stack.has(name)) throw new Error(`[extract-itemcombat] helper 委托环:${[...stack, name].join('→')}`);
+    const list = decls.get(name);
+    if (!list) throw new Error(`[extract-itemcombat] helper 体缺失:${name}（Item.cs 漂移,禁止静默空体）`);
+    stack.add(name);
+    // 多重载合并（forwarder 在前）：行源序收平,自委托行（int→ushort 转发）跳过
+    const steps = [];
+    for (const dcl of list) {
+      let depth = 0;
+      for (const raw of dcl.body.split('\n')) {
+        const o = (raw.match(/\{/g) || []).length, c = (raw.match(/\}/g) || []).length;
+        const t = raw.trim();
+        if (depth === 0 && o === 0 && t) {
+          if (new RegExp(`^${name}\\s*\\(`).test(t)) continue;   // 自转发行
+          const dm2 = /^(DefaultTo\w+|MakeUsableWithChlorophyteExtractinator)\s*\((.*)\);\s*$/.exec(t);
+          if (dm2) { steps.push({ delegate: dm2[1], argText: dm2[2] }); continue; }
+          const am = /^(\w+)\s*=\s*(.+?);?$/.exec(t);
+          if (am && COMBAT_FIELDS.has(am[1])) { steps.push({ assign: am[1], rhs: am[2] }); continue; }
+        }
+        depth += o - c;
+        if (depth < 0) depth = 0;
+      }
+    }
+    // 委托基座【编译期】递归解析（环检测在此发生;手编族委托=桥接未建 fail-loud）
+    for (const st of steps) {
+      if (!st.delegate) continue;
+      if (DEFAULT_TO_PARAMS[st.delegate]) {
+        throw new Error(`[extract-itemcombat] helper ${name} 委托入已手编族 ${st.delegate}:桥接未建,禁止静默`);
+      }
+      compileBody(st.delegate, stack);
+    }
+    stack.delete(name);
+    const spec = (argText, id) => {
+      const { env } = delegateEnv(name, argText, {}, id);
+      const eff = {};
+      for (const st of steps) {
+        if (st.delegate) {
+          const sub = DEFAULT_TO_BODY.get(st.delegate)(st.argText, id);
+          for (const [k, v] of Object.entries(sub ?? {})) eff[k] = v;
+          continue;
+        }
+        let rhs = st.rhs;
+        const cm = /^\(\s*(\w+)\s*=\s*(.+)\s*\)$/.exec(rhs);
+        const chainInto = cm && COMBAT_FIELDS.has(cm[1]) ? cm[1] : null;
+        if (chainInto) rhs = cm[2];
+        const v = evalBodyRhs(rhs, env, id);
+        if (v === undefined) throw new Error(`[extract-itemcombat] helper ${name} 字段 ${st.assign} 不可解:${st.rhs}`);
+        if (chainInto) eff[chainInto] = v;
+        eff[st.assign] = v;
+      }
+      return eff;
+    };
+    DEFAULT_TO_BODY.set(name, spec);
+    return spec;
+  }
+  for (const name of decls.keys()) {
+    if (DEFAULT_TO_PARAMS[name]) continue;   // 武器族 8 helper 手编规格维持（金标已锁）
+    compileBody(name, new Set());
+  }
 }
 
 /** 深度 0 行里的辅助函数调用效果（显式赋值优先——源序近似：case 体先 DefaultTo*
@@ -684,13 +871,33 @@ function fieldsFromLines(id, lines) {
   //  EXTRACT_PATCH（vanillaItemCombat.ts）/THROWN_WEAPONS（本文件 main 手补表）/
   //  obj['5065']/json 4703 逐字段全等见 dry-run。
   for (const l of lines) {
-    const cm = /^(DefaultTo(?:RangedWeapon|Bow|ThrownWeapon|Spear|Staff|MagicWeapon|Whip))\s*\((.*)\);\s*$/.exec(l);
+    // ★BJ413：alternation 增 Kite;★清偿刀 Q1：扩全 DefaultTo*+MakeUsableWithChlorophyte
+    //   Extractinator——武器族 8 helper 走 DEFAULT_TO_PARAMS 手编规格,其余走
+    //   DEFAULT_TO_BODY 体编译规格（未注册名 callEffectOf 返 null=零效果）
+    const cm = /^(DefaultTo\w+|MakeUsableWithChlorophyteExtractinator)\s*\((.*)\);\s*$/.exec(l);
     if (!cm) continue;
     const paramEff = callEffectOf(cm[1], cm[2], id);
     if (paramEff) {
       for (const [k, v] of Object.entries(paramEff)) {
         if (v !== undefined && rec[k] === undefined) rec[k] = v;
       }
+    }
+  }
+  // ★清偿刀 Q1 补遗（2026-09-30,census 定谳:全文件 `useTime = useAnimation;` 恰 2 处
+  //  ——1226 :15125 字面先行由上方既有别名支解析;4041-4048/4241 草种子族九件
+  //  `DefaultToPlaceableTile((ushort)3,0); SetShopValues; autoReuse=false;
+  //  useTime = useAnimation;`（Item.cs:35601-35612,别名行在 helper 调用【之后】）：
+  //  别名右值吃 rec.useAnimation【当前值】=体面 15 → C# 终值 useTime=15。
+  //  体面直填的 useTime=10 须被覆写（源序:helper 先、别名后）;无调用行不触发
+  //  （1226 归既有支）;别名行后还有 useTime 字面的形态全文件零存在（census）,
+  //  防御性保留 laterLit 门。`useTime /= 2` 类除式后置形态零存在（4715 的链式+除式
+  //  在调用后但为括号形,链式 pass 先跑已终值 anim12/time6,不经此支）。
+  {
+    const aliasAt = lines.findIndex((l) => /^useTime = useAnimation;$/.test(l));
+    if (aliasAt >= 0 && rec.useAnimation !== undefined) {
+      const callAt = lines.findIndex((l) => /^(DefaultTo\w+|MakeUsableWithChlorophyteExtractinator)\s*\(/.test(l));
+      const laterLit = lines.slice(aliasAt + 1).some((l) => /^useTime = -?[\d.]+f?;$/.test(l));
+      if (callAt >= 0 && aliasAt > callAt && !laterLit) rec.useTime = rec.useAnimation;
     }
   }
   // 辅助函数族效果：显式行在场则显式胜（DefaultToPlaceableTile 后再 useTurn=false 之类）
@@ -919,12 +1126,20 @@ for (const body of bodies) {
 // ---- 守卫补集尾段（guard complement）补丁 ----
 // SetDefaults3 `if (type < 2192 || type > 2198) { 守卫链 }` 尾段（Item.cs:27602-27630）
 // 为守卫补集服务：2192-2198（遗物族,守卫外直落尾段）+ 2203/2204（守卫内 case 空组
-// break 贯穿到尾段）吃 `useTurn = true`。全文件仅此一处守卫+尾段带三通道
+// break 贯穿到尾段）吃尾段整块。全文件仅此一处守卫+尾段带三通道
 // （SetDefaults4 3315-3317 是 goto case 别名,走既有别名通道），按源码固化。
+// ★清偿刀 Q1（2026-09-30,C3 红蓝定谳）：尾段数值面扩补——:27621-27626
+// `useStyle=1/useTurn=true/useAnimation=15/useTime=10/autoReuse=true/consumable=true`
+// 在守卫 if【外】,guardNumericWalk 不可达;此前只补 useTurn → 九件 heldUseAnimation
+// 回落 30（放置动画 2×慢）+autoReuse 缺（按住连放失效）。尾段 reachable 集复核
+// （2026-09-30 亲读）：守卫 if 全臂 case 皆 return（default 链入嵌套 switch 亦全
+// return,:22360-27618）,唯 2192-2198（守卫排除）与 2203/2204（空组 break 穿出）达尾段。
+// 仅补空不覆盖（与既有通道同纪律）。
+const SETDEFAULTS3_TAIL = { useTurn: true, useAnimation: 15, useTime: 10, autoReuse: true, consumable: true };
 for (const id of [2192, 2193, 2194, 2195, 2196, 2197, 2198, 2203, 2204]) {
   const cur = literal.get(id);
-  if (cur === undefined) literal.set(id, { useTurn: true });
-  else if (cur.useTurn === undefined) cur.useTurn = true;
+  if (cur === undefined) literal.set(id, { ...SETDEFAULTS3_TAIL });
+  else for (const [k, v] of Object.entries(SETDEFAULTS3_TAIL)) if (cur[k] === undefined) cur[k] = v;
 }
 
 // ---- SetFoodDefaults（Item.cs:47653）：仅三通道（食物族不进 combat 表，
@@ -990,6 +1205,13 @@ function main() {
   if (noUseGraphicTrue < 180) audit.push({ kind: 'nousegraphic-below-floor', count: noUseGraphicTrue });
   const soundEntries = [...SOUND.entries()].filter(([, v]) => v !== null && v !== undefined);
   if (soundEntries.length < 550) audit.push({ kind: 'usesound-below-floor', count: soundEntries.length });
+  // X-08:helper 体字段面基数护栏（清偿刀 Q1,2026-09-30——体编译面静默归零=半坏无人察觉;
+  //   基数=终表 autoReuse&&consumable&&useAnimation 在场记录数,主体=可放置族体面+守卫链面）
+  let placeableFace = 0;
+  for (const rec of data.values()) {
+    if (rec.autoReuse === true && rec.consumable === true && rec.useAnimation !== undefined) placeableFace++;
+  }
+  if (placeableFace < 1500) audit.push({ kind: 'placeable-face-below-floor', count: placeableFace });
 
   const obj = {};
   for (const [k, v] of data) obj[k] = v;

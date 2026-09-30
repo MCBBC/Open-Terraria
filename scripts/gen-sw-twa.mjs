@@ -124,10 +124,13 @@ writeFileSync(join(outDir, 'sw-twa.js'), out);
 const buildId = jsRefs[0].replace(/^\/assets\//, '');
 // 数字版本号与 bundle 指纹同行(bump-version.mjs 同步 package.json/version.ts——以 package 为准)
 const appVersion = JSON.parse(readFileSync(join(gameRoot, 'package.json'), 'utf8')).version ?? '';
+// ★2026-09-30:build-id.txt 带构建时间戳(versionStamp 写入 src/version.ts;横幅显示用)
+const stampM = /APP_BUILD_STAMP = '([0-9]{10})'/.exec(readFileSync(join(gameRoot, 'src/version.ts'), 'utf8'));
+const appStamp = stampM ? stampM[1] : '';
 const idPath = join(outDir, 'build-id.txt');
-writeFileSync(idPath, `${appVersion} ${buildId}\n`);
-if (readFileSync(idPath, 'utf8').trim() !== `${appVersion} ${buildId}`) {
+writeFileSync(idPath, `${appVersion} ${appStamp} ${buildId}\n`);
+if (readFileSync(idPath, 'utf8').trim() !== `${appVersion} ${appStamp} ${buildId}`) {
   console.error('[gen-sw-twa] build-id.txt 写入校验失败');
   process.exit(1);
 }
-console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 network-first;主 chunk ${jsRefs.length} 个校验通过;build-id=${buildId})`);
+console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 network-first;主 chunk ${jsRefs.length} 个校验通过;build-id=${appVersion} ${appStamp} ${buildId})`);

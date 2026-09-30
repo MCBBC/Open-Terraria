@@ -416,7 +416,7 @@ describe('BJ327 C. 边界', () => {
   it('_meta：批4 四型入表（402/426/427/661）+ pending 型域出清（收官:滚动清单+根级门组外无登记）', () => {
     for (const vid of ['402', '426', '427', '661']) expect(TABLE[vid]).toBeDefined();
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(334);
+    expect(ids.length).toBe(335);                      // 334 + BJ411 流星头 23
     const pend = TABLE._meta.pending as Array<{ types: number[]; reason: string }>;
     const pendIds = new Set(pend.filter((p) => p.types.length < 100).flatMap((p) => p.types));
     for (const vid of [402, 426, 427, 661]) {

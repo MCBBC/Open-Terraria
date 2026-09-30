@@ -27,6 +27,13 @@
 //     ③['velFromCenter',k]=velocity=(position−Center)×k（0 掷派生,posCircular 后求值）;
 //     ④stmt.clone={posts}=CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 1:1 在位,
 //     GameHooks.cloneDust 钩子新建;`numX != 6000` 池满守卫=spawn null 短路同面）。
+// BJ411（2026-09-30）批5 流星头 23 接入（用户实报「流星头粒子没有」定谳面之一）：HitEffect
+//   :90567-90605（1458 同行逐字节全等）——hit=for(hitK100){idPick[6,25]尘(hd,-1)+
+//   d6(vel×0.2,α100,s2,ng)}→return（原版无通用尾=表外型零尘同相）;death=50×idPick尘(2hd,-2)
+//   +50×d6(vel×0.2,α100,s2.5,vel×6,ng)。★idPick[6,25]=`int numN=25;if(Next(2)==0) numN=6`
+//   等价直译（idPick[roll]:0→6/1→25,1 掷同拍）——该局部 id 模式提取器未支持,本条目手工录入
+//   （_meta.batch5;extract 重产前须先扩提取器,否则 23 被抹=测试红）。FindFrame 火尾
+//   :74803-74809（每 tick dust 6 盒=position−velocity）不在本表——Enemy.swarmerAI 直刀。
 //
 // 数据源：tools/extract-npcdust.mjs（Terarria1457/Terraria/NPC.cs HitEffect
 // :82492-:90939 机械提取；1458 同区逐字节全等）。首批 = 78 门组 / 275 型（BJ254）；

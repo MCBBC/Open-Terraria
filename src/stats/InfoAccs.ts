@@ -76,6 +76,27 @@ export function infoAccGatesOf(vanillaIds: Iterable<number>): InfoAccGates {
   return g;
 }
 
+/** GetDrawInfoAccCount(Main.cs:47505-47553)等价——12 门禁命中计数。
+ *  原版逐项 `gate && (!hideInfo[i] || playerInventory)`:本函数消费面=开包态
+ *  装备列成就顾问 HasSpace 门(★BJ416,Main.cs:3019-3033 INFOACCCOUNT),开包态
+ *  hideInfo 全放行 → 只建全计臂;HUD 态按 hideInfo 折算臂不建=登记偏差。 */
+export function drawInfoAccCount(g: InfoAccGates): number {
+  let n = 0;
+  if (g.accWatch > 0) n++;
+  if (g.accWeatherRadio) n++;
+  if (g.accCalendar) n++;
+  if (g.accFishFinder) n++;
+  if (g.accOreFinder) n++;
+  if (g.accCritterGuide) n++;
+  if (g.accThirdEye) n++;
+  if (g.accJarOfSouls) n++;
+  if (g.accDreamCatcher) n++;
+  if (g.accStopwatch) n++;
+  if (g.accCompass > 0) n++;
+  if (g.accDepthMeter > 0) n++;
+  return n;
+}
+
 // ================= 雷达(第三只眼)敌怪计数谓词(Main.cs:47800-47816 1:1) =================
 
 /** NPC.dontCountMe 全表——1457 NPC.cs SetDefaults 共 30 处赋 true(NPC.cs:8836/8865/

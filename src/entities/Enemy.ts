@@ -1993,6 +1993,11 @@ export class Enemy extends Entity {
    *  【后】快照 NPC.cs:18197——首入态 6 捕获、态 0 复位消费；直接读写 def.* 会逐 tick
    *  复利。AI_039 417 逐值批 2026-09-03） */
   srollerDefBase?: { dmg: number; def: number };
+  /** AI_039 oldVelocity.X 快照（NPC.cs:93681 `oldVelocity = velocity` 在 ApplyTileCollision
+   *  :93687 之前——即"本拍 AI 写速后、碰撞改速前"的 vx；下一拍态 0 翻转臂
+   *  `!justHit && velocity.X != oldVelocity.X`（:29469-29472）消费 = 上一拍碰撞是否改变
+   *  了 vx（撞墙停/反向 → 折返）。tortoiseAI 每 tick 移动积分前写（与原版每拍写同相） */
+  tortoiseOldVx = 0;
   /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true / :8423 SetDefaults 复位）。
    *  FTW 世界 245-248 石巨人族置 false（getGoodAdjustments :17945/:17950/:17955，
    *  249 不置）。原版门控消费两处：GetNPCColorTintedByBuffs 染色（:92026，经
@@ -7069,9 +7074,12 @@ export class Enemy extends Entity {
   }
 
   /** AI_039 陆龟族 153/154/417/496/497（NPC.cs:29257-29783）：
-   *  justHit → 回待机（417 除外，knockBackResist=0）；
-   *  0 待机：远距(>200)+视线蓄力+4/t（496/497 +2），>600 再+10/t，wet 直跳 1000，≥400 → 1；
-   *    行走 accel 0.07，近(<400) clamp±1 远 ±1.5（496/497 ±0.5），前方 3×4 无地转身；
+   *  justHit → 回待机（417 除外；无 ai0 门——旋冲受击同断,回待机拍 TargetClosest 面向）；
+   *  0 待机：direction=sign(vx)（vx==0 保向）+ 速度反转折返（!justHit∧vx≠oldVx → 反转）；
+   *    远距(>200)+视线蓄力+4/t（496/497 +2），>600 ∧（视线∨盒底>玩家顶−200）再+10/t
+   *    （496/497 +4），wet→1000 仅非 496/497（wet=碰撞盒触液），≥400 → 1（转态拍
+   *    走完态 0 尾不早退）；行走 accel 0.07 三臂（|vx|>max∧vy==0 衰减 ×0.8 / direction
+   *    门加速 / 死区），近(<400) max±1 远 ±1.5（496/497 恒 0.5），前方 3×4 无地转身；
    *  1 蓄势：vx×0.5、ai[1]+1(496/497 ×0.5) ≥30 → 3（417 → 6 态滚动）；
    *  3 旋冲：首帧定速 有视线10/无视线6（496/497 ×0.75；瞄准 Y 加 |dx|*0.2、无视线强制
    *    vy=-10），飞行中与玩家 X 重叠 → vx×0.8 停升，否则 vy-=0.22 持续上旋，≥90t → 4；
@@ -7093,19 +7101,36 @@ export class Enemy extends Entity {
     if (this.ai0 < 0) this.ai0 = 0;
     const t496 = this.vanillaId === 496 || this.vanillaId === 497;
     const sroller = this.vanillaId === 417;
-    if (this.justHit && !sroller && this.ai0 !== 3) { this.ai0 = 0; this.ai1 = 0; }
+    // justHit 复位（NPC.cs:29393-29398）：门 = justHit ∧ type!=417——★【无 ai0 门】，
+    // 旋冲（态 3/4/5）受击同断（BJ410-Q2 定谳#5;旧 `ai0!==3` 门=自造豁免,旋冲不断=偏差）。
+    // TargetClosest()（:29397,faceTarget=true → SetTargetTrackingValues :78515 朝向段,
+    // 含 aggro 不转身门/confused 反转）= 本仓 seekDirX 同语义;朝向随后被态 0 头
+    // direction=sign(vx) 覆写（vx≠0 时）——与原版同序
+    if (this.justHit && !sroller) {
+      this.ai0 = 0; this.ai1 = 0;
+      this.facing = this.seekDirX(player);
+    }
     const dx = player ? player.cx - this.cx : 0;
     const dy = player ? player.cy - this.cy : 0;
     const dist = player ? Math.hypot(dx, dy) : Infinity;
     const los = !!player && !player.dead && this.canSeePlayer(st, player);
-    const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     const gravityStep = () => {
+      // oldVelocity.X 快照（NPC.cs:93681 Update 尾 oldVelocity=velocity 在
+      // ApplyTileCollision :93687 前）——态 0 翻转臂 :29469 消费;每拍移动前写=原版每拍写同相
+      this.tortoiseOldVx = this.vx;
       this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
     };
     if (this.ai0 === 0 || this.ai0 > 5) {
       // ---- 待机/接近 ----
       if (this.ai0 === 0) {
+        // 态 0 头：direction = sign(velocity.X)（vx==0 保持原向,NPC.cs:29413-29420）——
+        // 朝向源=行进向而非玩家侧（BJ410-Q2 定谳#1;旧 facing=sign(dx) 每 tick 重查玩家
+        // 侧 = 崖边折返后下一拍又转回玩家 → 贴崖爬行;原版一次折返 vx=0.1×direction →
+        // 下一拍 sign(vx) 定向 → 全速离崖。spriteDirection=direction（:29421）本仓
+        // facing 同源双角色）
+        if (this.vx < 0) this.facing = -1;
+        else if (this.vx > 0) this.facing = 1;
         if (sroller) {
           // 态 0 每 tick 属性复位（:29464-29466 damage=defDamage / defense=defDefense /
           // knockBackResist=GetKnockbackMultiplier_ScaledByDifficulty(0.3)）——态 6 覆写
@@ -7117,11 +7142,25 @@ export class Enemy extends Entity {
           }
           this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.3, this.difficulty || 1);
         }
+        // 蓄力双臂（NPC.cs:29427-29451）：>200∧视线 +2/4；>600 ∧（视线 ∨ 盒底>
+        // 玩家顶−200）+4/10——★第二臂纵向条件 = NPC【不】在玩家头顶远处（BJ410-Q2
+        // 定谳#3;旧 `dy>200`=只在远高于玩家时才蓄,与原版反相=无视线蓄力臂恒断）。
+        // wet→ai[1]=1000 仅非 496/497 支（:29448-29451），wet=碰撞盒 WetCollision
+        // 任意接触（this.wet 中心小盒判水线,非 liquid>80 阈;BJ410-Q2 定谳#2——
+        // 旧无差别越族:496/497 入水即满蓄直跳蓄势）
         if (los && dist > 200) this.ai1 += t496 ? 2 : 4;
-        if (dist > 600 && (los || dy > 200)) this.ai1 += t496 ? 4 : 10;
-        if (inW) this.ai1 = 1000;
-        if (this.ai1 >= 400) { this.ai0 = 1; this.ai1 = 0; return; }
-        if (player && !player.dead) this.facing = dx > 0 ? 1 : -1;
+        if (dist > 600 && (los || (!!player && this.y + this.h > player.y - 200))) {
+          this.ai1 += t496 ? 4 : 10;
+        }
+        if (!t496 && this.wet) this.ai1 = 1000;
+        // ai[1]++ / ≥400 → 态 1（:29463-29468）——★不早退：原版 else-if 链,转态拍
+        // 继续走完态 0 尾（反转折返/崖边折返/加速,下拍才进态 1;BJ410-Q2 定谳#4;
+        // 旧 `return`=转态拍整尾蒸发,崖边恰好满蓄时折返丢失）
+        this.ai1 += 1;
+        if (this.ai1 >= 400) { this.ai0 = 1; this.ai1 = 0; }
+        // 速度反转折返（:29469-29472）：!justHit ∧ vx≠oldVelocity.X（oldVx=上一拍
+        // AI 写速后/碰撞改速前快照——差值=上一拍碰撞改了 vx,撞墙停/反向）→ direction 反转
+        if (!this.justHit && this.vx !== this.tortoiseOldVx) this.facing *= -1;
         // 崖边折返（NPC.cs:29473-29504 1:1,BJ410 2026-09-30 定谳刀）：门 = 落地
         // (velocity.Y==0) ∧ 玩家顶<盒底（Main.player[target].position.Y <
         // position.Y+height）——★玩家在下方悬崖外时【不】折返,原版继续头朝玩家
@@ -7148,9 +7187,33 @@ export class Enemy extends Entity {
           }
           if (!ground) { this.facing *= -1; this.vx = 0.1 * this.facing; }
         }
-        const max = t496 ? 0.5 : dist < 400 ? 1 : 1.5;
-        this.vx += this.facing * 0.07;
-        this.vx = Math.max(-max, Math.min(max, this.vx));
+        // 加速三臂（NPC.cs:29506-29532 496/497 / :29534-29570 其余；BJ410-Q2 定谳#6;
+        // 旧单臂恒 accel+clamp = 超速瞬钳到 max 且空中照钳——原版:|vx|>max ∧ vy==0
+        // 才衰减 ×0.8（两轴 velocity×0.8,vx 主导）,空中超速三臂全跳=速度保持;
+        // |vx|≤max 时 direction 门 accel 0.07 死区收口。496/497 原文本臂尾 return
+        // 只截 AI 不截物理（碰撞在 AI 外通用段）→ 本仓 gravityStep 照跑）
+        if (t496) {
+          if (this.vx < -0.5 || this.vx > 0.5) {
+            if (this.vy === 0) this.vx *= 0.8;
+          } else if (this.vx < 0.5 && this.facing === 1) {
+            this.vx += 0.07;
+            if (this.vx > 0.5) this.vx = 0.5;
+          } else if (this.vx > -0.5 && this.facing === -1) {
+            this.vx -= 0.07;
+            if (this.vx < -0.5) this.vx = -0.5;
+          }
+        } else {
+          const max = dist < 400 ? 1 : 1.5;
+          if (this.vx < -max || this.vx > max) {
+            if (this.vy === 0) this.vx *= 0.8;
+          } else if (this.vx < max && this.facing === 1) {
+            this.vx += 0.07;
+            if (this.vx > max) this.vx = max;
+          } else if (this.vx > -max && this.facing === -1) {
+            this.vx -= 0.07;
+            if (this.vx < -max) this.vx = -max;
+          }
+        }
         gravityStep();
         return;
       }
@@ -7228,12 +7291,13 @@ export class Enemy extends Entity {
       }
       // ⑦wet 上浮助推（:29828-29830）+ 旋转（:29831-29832 rotation += clamp(
       //   velocity.X/10×direction, ±π/10)）
-      if (inW && this.dirY < 0) this.vy -= 0.3;
+      if (this.wet && this.dirY < 0) this.vy -= 0.3;
       this.visAngle += Math.max(-Math.PI / 10, Math.min(Math.PI / 10, this.vx / 10 * this.facing));
       // ⑧Collision_MoveSolarSroller（NPC.cs:93879-93896）：态 6 撞块 → ai[2]−−、
       //   ai[3]=1（尘爆子计数点火/接触专盒窗开启）;预算 ai[2]>0 时速度 ×0.9 镜面反弹、
       //   X 反弹伴随 direction 翻转。ai0===6 守卫 = 原文本句首门（同 tick 内 ⑥ 已切
       //   态 5 则不再结算反弹）
+      this.tortoiseOldVx = this.vx;   // oldVelocity 快照同相（:93681）
       this.applyGravity(game);
       const ovx = this.vx, ovy = this.vy;
       moveAndCollide(this, game.world, this.vx, this.vy);
@@ -7311,7 +7375,7 @@ export class Enemy extends Entity {
       if (this.ai2 > 0) this.visAngle += this.ai2 * this.facing;
       else if (this.vy >= 0) this.visAngle = 0;
       gravityStep();
-      if (this.ai2 <= 0 && (this.onGround || inW)) { this.ai0 = 5; this.ai1 = 0; this.visAngle = 0; }
+      if (this.ai2 <= 0 && (this.onGround || this.wet)) { this.ai0 = 5; this.ai1 = 0; this.visAngle = 0; }
       return;
     }
     // ---- 5 复位 ----
@@ -7322,7 +7386,7 @@ export class Enemy extends Entity {
     this.vx = 0;
     this.ai1 += t496 ? 0.5 : 1;
     gravityStep();
-    if (inW) { this.ai0 = 3; this.ai1 = 0; return; }
+    if (this.wet) { this.ai0 = 3; this.ai1 = 0; return; }
     if (this.ai1 >= 30) { this.ai0 = 0; this.ai1 = 0; }
   }
 
@@ -8146,16 +8210,33 @@ export class Enemy extends Entity {
         if (this.vy > 0 && this.vy < 1.5) this.vy = 2;
         if (this.vy < 0 && this.vy > -1.5) this.vy = -2;
       }
-      // 拖尾尘：619 每 tick 血尘（cs:51082-51086）；6/23/94/173 1/20（黄蜂/蜂/蛾/
+      // 拖尾尘：619 每 tick 血尘（cs:51082-51086）；6/94/173 1/20（黄蜂/蜂/蛾/
       // 探针/鹦鹉族无尘；dust 18 紫 / 173 Crimera dust 5 红）
+      // ★BJ411 同族普查（2026-09-30）：6/94/173 紫尘 1/20 的锚 cs:51082-51086 经 1457
+      // 亲读为【幻影锚】（该区=moth/probe ai[3] 段零尘；aiStyle 5 主族 AI 全域
+      // Dust.NewDust=0 发,唯一拖尾=下方 23 火尾）——登记 npcdust 族债,勿在本刀强扩。
+      // 23 摘出紫尘支（原版无紫尾）→ 走下方 1:1 火尾。
       if (vid === 619) {
         game.spawnParticles(this.cx, this.cy, '#B01830', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
-      } else if (!isHornet && vid !== 139 && vid !== 205 && !isBee && Math.random() < 1 / 20) {
+      } else if (!isHornet && vid !== 139 && vid !== 205 && vid !== 23 && !isBee && Math.random() < 1 / 20) {
         game.spawnParticles(this.cx, this.y + this.h * 0.5,
           vid === 173 ? '#8A3030' : '#7A4FA8', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
       }
     } else if (vid !== 252 && Math.random() < 1 / 40) {
       game.spawnParticles(this.cx, this.y + this.h * 0.5, '#8A3030', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
+    }
+    // ---- 陨石头火尾（★BJ411：NPC.cs:74803-74809 FindFrame case 23,1458 同行逐字节
+    //      全等;FindFrame 每 tick 在 AI 后跑=本仓 swarmerAI 移动/反弹段后同拍）：
+    //      每 tick 1 发 dust 6,盒 = position−velocity（移动后旧位=拖尾同相）、
+    //      初速 vel×0.2、α100、scale 2、noGravity、尘速 ×0.3 ----
+    if (vid === 23) {
+      const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy, this.w, this.h, 6,
+        this.vx * 0.2, this.vy * 0.2, 100, null, 2);
+      if (d) {
+        d.noGravity = true;
+        d.vx *= 0.3;
+        d.vy *= 0.3;
+      }
     }
     // ---- wet 浮力（cs:51106-51141,审计蜂群#7）：6/94/173/619 vy>0 ×0.95、−0.3、
     //      钳 −2（不重瞄）；205 −0.5 钳 −4 + TargetClosest ----

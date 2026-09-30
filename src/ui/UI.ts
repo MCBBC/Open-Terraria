@@ -207,6 +207,7 @@ import {
   shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757)
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
+  settingsAnchorOf, defenseRowOf, advisorRowOf, advisorInlineXY, hasSpaceForInlineAdvisor,   // ★BJ416:设置钮锚/装备列尾行族单源(Main.cs:46254-46285/42091-42102)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool, buildItemSearchView } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源;★BJ207 view 构建单源
 import {
@@ -238,7 +239,8 @@ import {
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
 import { sortContainerItems } from '../stats/ItemSorting';   // ★SW-RB13c:chestSortChest 换 FX29 精确引擎（sortingLayerIndex 旧近似随旧实现退役）
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
-import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
+import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor, advisorHasCard } from './AchievementsUI';
+import { drawInfoAccCount } from '../stats/InfoAccs';   // ★BJ416:GetDrawInfoAccCount 等价(HasSpace 门入参)
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
 import { openPlayerListPanel } from './PlayerListPanel';
@@ -5483,7 +5485,14 @@ export class UI {
     this.buffBar = el('div');
     // 11×38=418 行宽 = 原版 num2=11 行卷绕，行距 50-32=18（纵排 bug 修复：此前
     // 缺 flex-direction 显式声明且行宽 412 装不下第 11 个）
-    this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-direction:row; flex-wrap:wrap; width:418px; column-gap:6px; row-gap:18px; align-content:flex-start;';
+    // ★BJ414（2026-09-30 用户实报）容器空白不拦世界输入：原版 mouseInterface 只在
+    //  【逐图标矩形】悬停时置位（DrawBuffIcon Main.cs:44065 `mouseX<x+32 && mouseY<y+32
+    //  && mouseX>x && mouseY>y`），容器空白（行内右侧空档/行间隙/图标后空带）不置位=
+    //  点击照常攻击。此前容器 pointer-events:auto → 418px 整带实机普查 54% 面为
+    //  空白拦截（docs/evidence/bj414/）。修 = 容器吃 .sw-root 的 pointer-events:none
+    //  （空白→elementFromPoint 落 canvas=世界输入），命中面收窄到 .sw-buff 块
+    //  （类上 pointer-events:auto 保有）+32×32 图标矩形 ≙ 原版逐图标面。
+    this.buffBar.style.cssText = 'position:fixed; top:76px; left:32px; display:flex; flex-direction:row; flex-wrap:wrap; width:418px; column-gap:6px; row-gap:18px; align-content:flex-start;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
     this.petBuffBlocks.clear();
@@ -5547,7 +5556,11 @@ export class UI {
     icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block; opacity:0.4; transition:opacity 0.2s linear;';
     block.appendChild(icon);
     const time = el('span', '', '');
-    time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
+    // ★BJ414：时长文字非命中面——原版 DrawBuffIcon 悬停矩形=图标贴图本身（:44065
+    //  只测 x..x+Width/y..y+Height）,图标下的时长文字（:44049-44064 DrawString）不可
+    //  悬停=该域世界输入照常。span left/right:-4px 外溢块外,不置 none 会拦图标下方
+    //  一条 40×16 的世界输入面
+    time.style.cssText = 'pointer-events:none; position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
     block.appendChild(time);
     // 悬停提亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4 的 CSS 近似）
     block.addEventListener('mouseenter', (e) => {
@@ -6093,7 +6106,11 @@ export class UI {
     icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block; opacity:0.4; transition:opacity 0.2s linear;';
     block.appendChild(icon);
     const time = el('span', '', '');
-    time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
+    // ★BJ414：时长文字非命中面——原版 DrawBuffIcon 悬停矩形=图标贴图本身（:44065
+    //  只测 x..x+Width/y..y+Height）,图标下的时长文字（:44049-44064 DrawString）不可
+    //  悬停=该域世界输入照常。span left/right:-4px 外溢块外,不置 none 会拦图标下方
+    //  一条 40×16 的世界输入面
+    time.style.cssText = 'pointer-events:none; position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
     block.appendChild(time);
     block.addEventListener('mouseenter', () => { icon.style.opacity = '1'; });
     block.addEventListener('mouseleave', () => { icon.style.opacity = '0.4'; });
@@ -7964,6 +7981,7 @@ export class UI {
   private vinvRowMap = new Map<string, number>();   // `equip:8`→可见行号(追加槽重编号;查不到=隐藏)
   private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; cosUiVisible: boolean; visibleRows: number; minimapOn: boolean; cartUnlocked: boolean } | null = null;   // cosUiVisible=★SW-RB13b ChestOrShopUIVisible(Main.cs:3035-3046)
   private vinvLayoutSig = '';
+  private vinvSettingsPushed = false;   // ★BJ416:_settingsButtonIsPushedToSide 等价(RefreshSettingsButtonStatus :46282;顾问/防御盾行随它 -1,行号判据单源 settingsAnchorOf)
   private vinvResizeHandler: (() => void) | null = null;
   /** 当前已建布局(分派/重建判据;null=未建) */
   private _builtLayout: 'classic' | 'vanilla' | null = null;
@@ -8118,13 +8136,21 @@ export class UI {
     root.appendChild(advWrap);
     // ★红队 m8b 清偿:CanDrawAboveCoins 在 sw<1000 为 false(AchievementAdvisor.cs:26-36)
     // → 改画装备列旁第二落位 (:42096-42100 sw-224, 末行y+8),非恒钉 (501,25)
+    // ★BJ416(2026-09-30 定谳重写):sw<1000 内联行=Main.cs:42098 num38=num37-1
+    //   (num37=末行:42091,设置钮挤碰再 -1:42094-42097)——旧刀钉 last(=num37)行
+    //   低 1-2 行,竖式卡体正压下一行防御盾+设置钮(用户实报"成就按钮跑到右下角
+    //   紧邻设置");HasSpace 门(:3019-3033,:42099-42102)不过或页≠0(:42083 else 支)
+    //   不画;窄屏卡体退纯图标(原版小卡 0.35 纯图标,CSS .sw-ach-inline 摘文字)
     pos(advWrap, () => {
       const c = this.vinvLayoutCtx!;
+      advWrap.classList.toggle('sw-ach-inline', c.sw < 1000);
       // ★2026-09-13 用户要求:成就卡顶对齐背包格顶(y=20;vanilla 25 = 5px 差,偏差备案)
       if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: 20 };
-      let last = 7;
-      for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
-      return { x: c.sw - 224, y: equipRowY(c.num20, last) + 8 };
+      if (this.vinvPageCurrent !== 0) return null;
+      const hasCard = this.game ? advisorHasCard(this.game.achievements) : false;
+      const infoN = this.game ? drawInfoAccCount(this.game.player.equipStats.infoAccs) : 0;
+      if (!hasSpaceForInlineAdvisor(hasCard, c.visibleRows - 8, infoN, this.vinvSettingsPushed)) return null;
+      return advisorInlineXY(c.sw, c.num20, advisorRowOf(c.visibleRows, this.vinvSettingsPushed));
     });
     // ---- 钱币/弹药列(Main.cs:42460-42495:标签 (496,84)/(532,84),槽 x=497/534) ----
     const coinLbl = txt(Lang.text('LegacyInterface.26'));
@@ -8346,9 +8372,9 @@ export class UI {
       this.vinvDefenseEl = defRow;
       pagePos(defRow, () => {
         const c = this.vinvLayoutCtx!;
-        let last = 7;
-        for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
-        const ctr = defenseCenterXY(c.sw, c.num20, last);
+        // ★BJ416:行=Main.cs:42132-42135 num37(末行;设置钮挤碰侧移再 -1:42094-42097)
+        //   ——旧刀恒钉 last(挤碰态低 1 行,与设置钮同带挤簇)
+        const ctr = defenseCenterXY(c.sw, c.num20, defenseRowOf(c.visibleRows, this.vinvSettingsPushed));
         return { x: ctr.x - 20, y: ctr.y - 18 };   // 40×36 盒左上=中心-(20,18)
       });
     }
@@ -8559,12 +8585,12 @@ export class UI {
       if (!c) return null;
       // ★反馈轮8:(sw-110, sh-20) 是文本【中心】(Main.cs:46344 origin=Size/2)——
       //   居中由元素 translate(-50%,-50%) 承载,pos 只写中心点
-      let px = c.sw - 110, py = c.sh - 20;
-      let last = 7;
-      for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
-      const colBottom = equipRowY(c.num20, last) + 44.2;
-      if (py - 28 <= colBottom) { px -= 140; py = colBottom - 17; }   // :46274-46282 推挤(posY=num3-47+30)
-      return { x: px, y: py };
+      // ★BJ416:挤碰判据/锚值改 settingsAnchorOf 单源(RefreshSettingsButtonStatus
+      //   :46254-46285)。旧 colBottom=equipRowY(num20,last)+44.2 系近似且吃了 num20
+      //   矮屏压缩(:41858)——vanilla num3=:46269 自算 174+mH 不压缩,含恶魔心/大师
+      //   槽的矮屏两域差 47.6/格
+      const a = settingsAnchorOf(c.sw, c.sh, c.mH, c.visibleRows);
+      return { x: a.x, y: a.y };
     } });
 
     // ---- 建筑配件图标列（★SW-FX19 债：DrawBuilderAccToggles Main.cs:48142-48377）----
@@ -8724,6 +8750,7 @@ export class UI {
     root.style.transformOrigin = 'top left';
     root.style.transform = `scale(${K})`;
     this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, cosUiVisible, visibleRows, minimapOn, cartUnlocked: this.game.superCartUnlocked() };
+    this.vinvSettingsPushed = settingsAnchorOf(sw, sh, mH, visibleRows).pushed;   // ★BJ416:pos 回调先于 settings 钮注册消费,须在 pos 循环前置算(原版 Main 字段=同帧全局,无序问题)
     this.vinvComputeRows(heartShown, masterShown);
     // 签名含 uiScale(★红队 MINOR-4:K 依赖 uiScale,漏签 = 改缩放右锚列不重排);
     // ★SW-FX10:再含 minimapOn(mH 变 → num20/页签/右锚列全体位移)与矿车解锁(开关框显隐)

@@ -8624,7 +8624,9 @@ export class Renderer {
       addLight: () => { /* 绘制期不点光（update 期已推 LightingEngine） */ },
     };
     for (const e of leashed.kites) {
-      if (visible(e.ax, e.ay, e.cx, e.cy)) this.drawLeashedKite(ctx, e, world);
+      if (visible(e.ax, e.ay, e.cx, e.cy)) {
+        this.drawLeashedKite(ctx, e, world.weather?.windSpeedCurrent ?? 0);
+      }
     }
     for (const e of leashed.critters) {
       if (!visible(e.ax, e.ay, e.cx, e.cy)) continue;
@@ -8768,10 +8770,18 @@ export class Renderer {
    *  ③ 本体：proj 帧 + rotation + num6 摆角
    *  num18 = Remap(localAI0, 0,300,0,1)（无风下垂）、num19 = localAI1（下垂插值）
    */
+  /** 风筝绘制面（Main.DrawKite 消费字段的结构化口径——LeashedKiteEntity 与
+   *  KiteProj（BJ413 手持飞行风筝）两载体共用 drawLeashedKite 全表） */
   private drawLeashedKite(
     ctx: CanvasRenderingContext2D,
-    k: import('../entities/LeashedCritter').LeashedKiteEntity,
-    world: World,
+    k: {
+      projType: number; spriteDirection: number; frame: number;
+      projectileLocalAI0: number; projectileLocalAI1: number;
+      cx: number; cy: number; netOffsetX: number; netOffsetY: number;
+      anchorX: number; anchorY: number; vx: number; vy: number; rotation: number;
+      oldPos: Array<{ x: number; y: number }>; oldRot: number[]; oldSpriteDirection: number[];
+    },
+    wind: number,   // Main.WindForVisuals（锚桩=world.weather;飞行风筝=实体 windSnapshot）
   ) {
     const atlas = this.atlas;
     if (!atlas) return;
@@ -8781,7 +8791,7 @@ export class Renderer {
     const lineTex = atlas.vmisc('vanilla/FishingLine.png');
     if (!img || !ropeTex || !lineTex) return;
     const t = visEffectFrames();
-    const windAbs = Math.abs(world.weather?.windSpeedCurrent ?? 0);   // num17 = |WindForVisuals|
+    const windAbs = Math.abs(wind);   // num17 = |WindForVisuals|
     const num18 = remapClamped(k.projectileLocalAI0, 0, 300, 0, 1);
     const num19 = k.projectileLocalAI1;
     const light = this.lighting
@@ -8994,6 +9004,23 @@ export class Renderer {
     ctx.restore();
   }
 
+
+  /** ★BJ413 2026-09-30：手持飞行风筝绘制出射口（Main.DrawKite Main.cs:37763——
+   *  KiteProj.draw → 本口,与锚桩 drawLeashedKite 共用全表;风读数=实体
+   *  windSnapshot 快照,渲染层不回读 weather）。 */
+  drawFlyingKite(
+    k: {
+      projType: number; spriteDirection: number; frame: number;
+      projectileLocalAI0: number; projectileLocalAI1: number;
+      cx: number; cy: number; netOffsetX: number; netOffsetY: number;
+      anchorX: number; anchorY: number; vx: number; vy: number; rotation: number;
+      oldPos: Array<{ x: number; y: number }>; oldRot: number[]; oldSpriteDirection: number[];
+      windSnapshot: number;
+    },
+  ): void {
+    if (!this.ctx) return;
+    this.drawLeashedKite(this.ctx, k, k.windSnapshot);
+  }
 
   private drawDrop(d: ItemDrop) {
     const bob = Math.sin((d.age + d.bobPhase * 60) * 0.1) * 1.5;
@@ -9839,7 +9866,18 @@ export class Renderer {
         let gRot = 0;
         let gMirror = false;
         if (gid === 477 || gid === 479 || (gid >= 125 && gid <= 131)) gRot = e.spin;
-        else if (gid === 94) gRot = e.vx !== 0 ? Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0) : 0;
+        // ★BJ412（2026-09-30 用户实报"腐化者幻影无角度"）：原版 94 残影块
+        //  （Main.cs:25472-25485）rotation=rCurrentNPC.rotation=【本体当前 rotation】
+        //  ——本体 94 rotation=atan2(num5,num4)−1.57（AI_005 cs:51182-51185 瞄准向）。
+        //  旧式 atan2(vy,vx)+[vx<0 加 π] 系恶魔眼族 FindFrame 公式（cs:74815-74827）
+        //  张冠李戴：①缺 −π/2 基准=残影恒与本体差 ~90°；②vx==0 恒 0=悬停/垂直动
+        //  时残影完全无角度（用户截图形态）；③vx<0 加 π=原版无此翻转（94/6/173/619
+        //  不写 spriteDirection,rotation 独扛朝向）。139 探针同病同刀：残影同用
+        //  rCurrentNPC.rotation（:25486 机械族块）,本体=visAngle（AI_005 cs:50962-51026
+        //  atan2(num5,num4)+[π]）——旧式落空 gRot=0。140 本体 aiStyle 3 恒不转=残影
+        //  rot 0 正确,不收。镜像:94 原版从不翻（gRotDriven 禁镜像同相）;139 借用
+        //  tiltOnly5 镜像通道（gMirror=facing>0=本体同款,见下 !gRotDriven 分支）。
+        else if (gid === 94 || gid === 139) gRot = e.visAngle || 0;
         else if (gRotDriven) gRot = ROTATION_NPC.has(gid) ? e.spin : (e.visAngle || 0);
         // 旋转链在本体变换内但 rotationDriven 未收的档（stR 39/44/103/108/110
         // ——:7735/:7733/:7760/:7793），残影 rot 同本体=visAngle，镜像保留

@@ -451,9 +451,9 @@ describe('BJ296 C. 边界', () => {
       expect(pendIds.has(vid)).toBe(false);
     }
     // 批3/4 边界（★BJ327 后收敛）：fadeIn 族/524-527 已入表（fadeIn 定谳翻案=生长目标语义,
-    // VDust.fadeIn 引擎 1:1）;402/661 已随批4 转正（尘面收官）
+    // VDust.fadeIn 引擎 1:1）;402/661 已随批4 转正（尘面收官;BJ411 流星头 23 入表=335）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(334);
+    expect(ids.length).toBe(335);
     for (const vid of ['661', '402']) expect(TABLE[vid]).toBeDefined();
   });
 });

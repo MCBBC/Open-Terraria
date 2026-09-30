@@ -538,6 +538,96 @@ describe('BJ237-B drawEnemy 绘制序锁（记录型 ctx 直调——antlion-til
   });
 });
 
+// ===================== ★BJ412 残影 rotation ≡ 本体当前 rotation（2026-09-30 用户实报） =====================
+// 原版锚：94 残影块 Main.cs:25472-25485 / 机械族块 :25486-25498——oldPos 拖影全部以
+// rCurrentNPC.rotation（=【本体当前 rotation】）绘制。94 本体 rotation=atan2(num5,num4)−1.57
+// （AI_005 cs:51182-51185,瞄准向,每 tick）；139 探针=atan2(num5,num4)+[π]（cs:50962-51026）
+// ——本仓两者皆承载于 e.visAngle（Enemy.ts aiStyle5 分流,本体 ctx.rotate(e.visAngle)）。
+// 病灶（已修）：残影 rot=atan2(vy,vx)+[vx<0 加 π]（恶魔眼族 FindFrame 公式 cs:74815-74827
+// 张冠李戴）且 vx==0 恒 0——残影与本体差 ~90°/悬停相位完全无角度（用户截图形态）；
+// 139 落空派发表 gRot=0 同病。140 附魔甲本体 aiStyle3 恒不转=残影 rot 0 正确（负例）。
+describe('BJ412 残影 rotation=本体当前 rotation（drawEnemy 直调,ghost 槽 rotate 钉值）', () => {
+  function drive412(e: EnemyT): Array<{ m: string; a: unknown[] }> {
+    const calls: Array<{ m: string; a: unknown[] }> = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => (k === 'canvas' ? undefined
+        : k === 'getTransform'
+          ? (...a: unknown[]) => { calls.push({ m: 'getTransform', a }); return { __parentT: true }; }
+          : (...a: unknown[]) => { calls.push({ m: String(k), a }); }),
+    });
+    const fake = {
+      ctx,
+      assets: { enemySprites: new Map() },
+      atlas: {
+        vnpc: () => ({ img: { width: 8, height: 8 }, sx: 0, sy: 0, sw: 8, sh: 8 }),
+        ensureVImage: () => ({ width: 64, height: 128 }),
+        vmisc: () => null,
+      },
+      drawNpcGlow: () => {},
+      drawTwinsChain: () => {},
+    };
+    (Renderer.prototype as unknown as {
+      drawEnemy: (this: unknown, e: EnemyT, w: unknown, ents?: unknown[]) => void;
+    }).drawEnemy.call(fake, e, { store: { idx: () => 0, liquid: [0] } }, []);
+    return calls;
+  }
+  /** ghost 槽=[setTransform, 配对 restore)；槽内 rotate ops（drawGhostSprite rot=0 不出 rotate） */
+  function ghostSlotRots(calls: Array<{ m: string; a: unknown[] }>): number[] {
+    const st = calls.findIndex((c) => c.m === 'setTransform');
+    expect(st, 'ghost 槽 setTransform 缺失（BJ237 槽未生效）').toBeGreaterThanOrEqual(0);
+    const rots: number[] = [];
+    let depth = 0;
+    for (let i = st + 1; i < calls.length; i++) {
+      if (calls[i].m === 'save') depth++;
+      else if (calls[i].m === 'restore') {
+        if (depth === 0) return rots;
+        depth--;
+      } else if (calls[i].m === 'rotate') rots.push(calls[i].a[0] as number);
+    }
+    return rots;
+  }
+
+  it('94 腐化者：vx=0（旧式恒 0 的病灶相位）残影 rot=e.visAngle 三份全同', () => {
+    const e = Enemy.fromVanilla(94, 100, 100) as EnemyT;
+    e.visAngle = 0.7;              // 本体瞄准角（AI_005 每 tick 写,此处钉值）
+    e.vx = 0; e.vy = 0;
+    e.spawnAlpha = 0;              // 出生渐显关（Opacity=1）
+    tickN(e, 6, 2, 1);
+    const rots = ghostSlotRots(drive412(e));
+    expect(rots.length, 'i=1,3,5 三份残影各一 rotate（旧式 rot=0 连 rotate op 都不出）').toBe(3);
+    for (const r of rots) expect(r, '残影 rot ≡ 本体 visAngle（Main.cs:25472 rCurrentNPC.rotation）').toBeCloseTo(0.7, 6);
+  });
+
+  it('94 腐化者：速度向≠瞄准向时残影仍随本体角（旧式 atan2(vy,vx)+[π] 张冠李戴）', () => {
+    const e = Enemy.fromVanilla(94, 100, 100) as EnemyT;
+    e.visAngle = -1.1;
+    e.vx = -3; e.vy = 0;           // 旧式给 atan2(0,−3)+π=π ≠ −1.1
+    e.spawnAlpha = 0;
+    tickN(e, 6, 0, 2);
+    const rots = ghostSlotRots(drive412(e));
+    expect(rots.length).toBe(3);
+    for (const r of rots) expect(r).toBeCloseTo(-1.1, 6);
+  });
+
+  it('139 探针（ai3=0 机械族块 :25486）：残影 rot=e.visAngle（旧式落空派发表恒 0）', () => {
+    const e = Enemy.fromVanilla(139, 100, 100) as EnemyT;
+    e.visAngle = 0.35;
+    e.spawnAlpha = 0;
+    tickN(e, 10, 3, 0);
+    const rots = ghostSlotRots(drive412(e));
+    expect(rots.length, 'i=9,7,5,3,1 五份').toBe(5);
+    for (const r of rots) expect(r).toBeCloseTo(0.35, 6);
+  });
+
+  it('140 附魔甲（同块负例）：本体 aiStyle3 恒不转 → ghost 槽零 rotate', () => {
+    const e = Enemy.fromVanilla(140, 100, 100) as EnemyT;
+    e.spawnAlpha = 0;
+    tickN(e, 10, 3, 0);
+    const rots = ghostSlotRots(drive412(e));
+    expect(rots.length, '140 残影 rot≡本体 0（rot=0 不出 rotate op）').toBe(0);
+  });
+});
+
 // ===================== ★BJ245 邪教徒仪式召唤环（2026-09-21，BJ237 立案清偿） =====================
 // 原版锚（case 439/440 环段 Main.cs:24907-24931 亲读；1458 :24858-24940 对拍逐字节
 // 等价=零变更；BJ211 NPC_AURA_RINGS 只收通用大表 num57,本 case 在表外）：

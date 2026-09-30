@@ -1266,8 +1266,25 @@ export class PetFollower extends Entity {
         ctx.save();
         ctx.globalAlpha *= this.starOpacity;                   // A=255×Opacity
         ctx.rotate(this.starRot);                              // proj.rotation+localAI[1]
-        ctx.drawImage(itemImg, 0, 0, itemImg.width, ifh,
-          -itemImg.width / 2, -ifh / 2, itemImg.width, ifh);
+        // ★清偿刀 Q3（2026-09-30）覆绘接染：vanilla 此绘走 EntitySpriteDraw
+        //  （Main.cs:38333）过 GetProjectileDesiredShader——764∈projPet(dmg0)→cPet,
+        //  与本体同染（整弹批同染语义,t0Rect 缺省=帧矩形/整图 uSourceRect/uImageSize0
+        //  同源）。染料/字节码缺 → dyedProjCanvas null 回退原图直绘（零改动面）。
+        {
+          const dv764 = this.petDyeVid();
+          const star = dv764 > 0
+            ? dyedProjCanvas(itemImg, 0, 0, itemImg.width, ifh, dv764,
+                { facing: face || 1, box: { x: this.x, y: this.y, w: this.w, h: this.h },
+                  lightAt: r.lighting?.lightAt?.bind(r.lighting) ?? null })
+            : null;
+          if (star) {
+            ctx.drawImage(star, 0, 0, itemImg.width, ifh,
+              -itemImg.width / 2, -ifh / 2, itemImg.width, ifh);
+          } else {
+            ctx.drawImage(itemImg, 0, 0, itemImg.width, ifh,
+              -itemImg.width / 2, -ifh / 2, itemImg.width, ifh);
+          }
+        }
         ctx.restore();
       }
     }
@@ -1295,8 +1312,8 @@ export class PetFollower extends Entity {
     // ★清偿刀 N（2026-09-30）：cPet/cLight 通道本体染（GetProjectileDesiredShader
     //  1:1——projPet∧dmg0∧!LightPet→cPet / LightPet∧dmg0→cLight,miscDyes[0]/[1]）。
     //  EntitySpriteDraw×Armor.Apply 等价=逐贴图过 SM2 pass;t0Rect=帧源矩形。
-    //  登记债：1090 滚动专绘/764 陨星覆绘/legacyDraw 兜底三支未接染（本体面已覆
-    //  盖主消费域,专绘支染料债登记）。
+    //  ★Q3（2026-09-30）：专绘支染料债清偿——1090 滚动专绘/764 陨星覆绘/legacyDraw
+    //  兜底三支已接染（各支见本文件 rainbowBoulderPetDraw/draw 764 覆绘块/legacyDraw）。
     const dyeVid = this.petDyeVid();
     if (dyeVid > 0) {
       const dyed = dyedProjCanvas(img, sx, sy, sw, sh, dyeVid,
@@ -1370,6 +1387,19 @@ export class PetFollower extends Entity {
    *  ★登记近似：Extra_283 逐帧 hsl 染色经模块内 scratch canvas source-in 直染
    *  （Renderer 域染色通道不涉）;XNA A=0 加法色 = canvas 'lighter'×α（惯用法同族）。 */
   private rainbowBoulderPetDraw(r: Renderer, ctx: CanvasRenderingContext2D): void {
+    // ★清偿刀 Q3（2026-09-30）专绘支接染：vanilla 1090 的虹晕/拖尾/星芒/本体全部走
+    //  EntitySpriteDraw（Main.cs:33355/:33380/:33406/:33212-33217 换装）——
+    //  GetProjectileDesiredShader(1090∈projPet,dmg0,非光宠)→cPet 整弹批同染。
+    //  通道 vid 一次解出;染料/字节码缺 → dyedProjCanvas null → 原图直绘（零改动面）。
+    //  t0Rect 缺省=帧矩形/整图（uSourceRect/uImageSize0 同源）。
+    const dyeVid = this.petDyeVid();
+    const dyeOpt = {
+      facing: (this.params?.e.faceFrom === 'player'
+        ? (this.ownerRef()?.facing ?? 1)
+        : this.dir) || 1,
+      box: { x: this.x, y: this.y, w: this.w, h: this.h },
+      lightAt: r.lighting?.lightAt?.bind(r.lighting) ?? null,
+    };
     const rolling = this.flying;                      // ai[0]==1（Main.cs:33212 门）
     let blend = this.rbBlend < 0 ? 0 : this.rbBlend > 1 ? 1 : this.rbBlend;   // :33343 Clamp
     if (blend > 0 && rolling) {                       // :33344-33346
@@ -1390,7 +1420,12 @@ export class PetFollower extends Entity {
         for (let k = 0; k < 3; k++) {                 // num352 = 0,1/3,2/3
           const t = (num353 + k / 3) % 1;
           // 染色 scratch 不可用（无 DOM 环境）→ 原图直绘降档（色相相缺失,位/α/加法面保留）
-          const drawable = tintGlow(glow, orchestraHslCss(t, 1, 0.5)) ?? glow;
+          let drawable: ImageBitmap | HTMLImageElement | HTMLCanvasElement =
+            tintGlow(glow, orchestraHslCss(t, 1, 0.5)) ?? glow;
+          // ★Q3：虹晕同染（vanilla EntitySpriteDraw(value98…) :33355 整贴图源）
+          if (dyeVid > 0) {
+            drawable = dyedProjCanvas(drawable, 0, 0, glow.width, glow.height, dyeVid, dyeOpt) ?? drawable;
+          }
           const a = t * Math.PI * 2;
           const ox = Math.floor(Math.cos(a) * 4);
           const oy = Math.floor(Math.sin(a) * 4);
@@ -1419,7 +1454,12 @@ export class PetFollower extends Entity {
           ctx.translate(x1, y1);
           ctx.rotate(Math.atan2(y0 - y1, x0 - x1) - Math.PI / 2);
           ctx.globalAlpha = (127 / 255) * blend * (1 - i / 10) * (1 - i / 10);
-          ctx.drawImage(streak, -streak.width * 1.1 / 2, 0, streak.width * 1.1, Math.max(1, seg));
+          // ★Q3：拖尾带同染（vanilla EntitySpriteDraw(value99…) :33380 整贴图源;
+          //  染后画布=整图坐标域,3 参 drawImage 直用）
+          const stTex = dyeVid > 0
+            ? (dyedProjCanvas(streak, 0, 0, streak.width, streak.height, dyeVid, dyeOpt) ?? streak)
+            : streak;
+          ctx.drawImage(stTex, -streak.width * 1.1 / 2, 0, streak.width * 1.1, Math.max(1, seg));
           ctx.restore();
         }
       }
@@ -1442,7 +1482,16 @@ export class PetFollower extends Entity {
           ctx.globalAlpha = a;
           ctx.translate(this.trailX[i] + this.w / 2, this.trailY[i] + this.h / 2);
           ctx.rotate(rot);
-          ctx.drawImage(spark, 0, fi * sh, spark.width, sh, -ox * sc, -oy * sc, spark.width * sc, sh * sc);
+          // ★Q3：星芒同染（vanilla EntitySpriteDraw(value101=Frame(1,4) 帧源) :33406
+          //  ——染后画布=帧坐标域(0,0,w,sh),帧源矩形分流）
+          const spDyed = dyeVid > 0
+            ? dyedProjCanvas(spark, 0, fi * sh, spark.width, sh, dyeVid, dyeOpt)
+            : null;
+          if (spDyed) {
+            ctx.drawImage(spDyed, 0, 0, spark.width, sh, -ox * sc, -oy * sc, spark.width * sc, sh * sc);
+          } else {
+            ctx.drawImage(spark, 0, fi * sh, spark.width, sh, -ox * sc, -oy * sc, spark.width * sc, sh * sc);
+          }
           ctx.restore();
         }
         ctx.restore();
@@ -1455,14 +1504,29 @@ export class PetFollower extends Entity {
       if (shell && shell.width > 0) {
         const cell = rainbowBoulderCell(this.rbFrame, shell.width, shell.height);
         ctx.rotate(this.rollRot);
-        ctx.drawImage(shell, cell.sx, cell.sy, cell.sw, cell.sh,
-          -cell.sw / 2, -cell.sh / 2, cell.sw, cell.sh);   // vector82=0.5×2=1 → 19×19 壳格
+        // ★Q3：滚动态壳格同染（vanilla 本体 EntitySpriteDraw 链尾 :33212-33217 换装
+        //  1047 壳表——uSourceRect=壳格/uImageSize0=整表;染后画布=格坐标域分流）
+        const shellDyed = dyeVid > 0
+          ? dyedProjCanvas(shell, cell.sx, cell.sy, cell.sw, cell.sh, dyeVid, dyeOpt)
+          : null;
+        if (shellDyed) {
+          ctx.drawImage(shellDyed, 0, 0, cell.sw, cell.sh,
+            -cell.sw / 2, -cell.sh / 2, cell.sw, cell.sh);   // vector82=0.5×2=1 → 19×19 壳格
+        } else {
+          ctx.drawImage(shell, cell.sx, cell.sy, cell.sw, cell.sh,
+            -cell.sw / 2, -cell.sh / 2, cell.sw, cell.sh);   // vector82=0.5×2=1 → 19×19 壳格
+        }
       }
     } else {
       const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`);
       if (img) {
         ctx.rotate(this.rollRot);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        // ★Q3：归位飞行态本体同染（整图源;同染语义与通用支 body 一致）
+        const bodyDyed = dyeVid > 0
+          ? dyedProjCanvas(img, 0, 0, img.width, img.height, dyeVid, dyeOpt)
+          : null;
+        if (bodyDyed) ctx.drawImage(bodyDyed, -img.width / 2, -img.height / 2);
+        else ctx.drawImage(img, -img.width / 2, -img.height / 2);
       }
     }
     ctx.restore();
@@ -1519,13 +1583,24 @@ export class PetFollower extends Entity {
     const fi = frames > 1 ? Math.floor(this.animTick / 8) % frames : 0;
     const p = this.ownerRef();
     const flip = p ? p.facing < 0 : false;
+    // ★清偿刀 Q3（2026-09-30）兜底支接染：vanilla 染料判定=projPet 表驱动
+    //  （GetProjectileDesiredShader 不依赖本仓 params 表）——表外 id 命中 projPet
+    //  （dmg0,非光宠）时同走 cPet 过染。dyeVid=0（表外/无染/inv 缺）→ 原图直绘零改动。
+    //  t0Rect 缺省=帧矩形/整图;lighting 探针缺省 null（legacyDraw 无 Renderer 形参,
+    //  反射族光照退 [0,0,0,0] 回退=projDye 同惯例）。
+    const dyeVid = this.petDyeVid();
+    const dyed = dyeVid > 0
+      ? dyedProjCanvas(img, fi * fw, 0, fw, fw, dyeVid, { facing: (p?.facing ?? 1) || 1 })
+      : null;
+    const tex = dyed ?? img;
+    const dsx = dyed ? 0 : fi * fw;
     ctx.save();
     if (flip) {
       ctx.translate(this.x + this.w, this.y);
       ctx.scale(-1, 1);
-      ctx.drawImage(img, fi * fw, 0, fw, fw, 0, 0, this.w, this.h);
+      ctx.drawImage(tex, dsx, 0, fw, fw, 0, 0, this.w, this.h);
     } else {
-      ctx.drawImage(img, fi * fw, 0, fw, fw, this.x, this.y, this.w, this.h);
+      ctx.drawImage(tex, dsx, 0, fw, fw, this.x, this.y, this.w, this.h);
     }
     ctx.restore();
   }

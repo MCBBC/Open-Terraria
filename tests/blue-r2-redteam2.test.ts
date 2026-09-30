@@ -221,15 +221,15 @@ describe('R2-04/R2-05 978 命中门', () => {
     const world = new World(200, 200, 30, 'volc');
     const player = { cx: 500, cy: 500, x: 490, y: 479, w: 20, h: 42, facing: 1 } as never;
     const immuneWritesRef: Array<[number, number]> = [];
-    let gateOpen = true;
     const enemiesArr = enemies;
     const gg = {
       world, player, enemies: () => enemiesArr, critters: () => [],
       playSfx: vi.fn(),
       noteNpcPlayerImmune: (id: number, t: number) => immuneWritesRef.push([id, t]),
-      meleeNpcImmuneGateOf: () => gateOpen,
+      // ★Q4 刀 2026-09-30（P1 同族勘误后）：978 门读【弹幕域】e.iframes（清偿刀 T
+      //   单源 snapshotVanillaGate）——旧 stub meleeNpcImmuneGateOf 已不消费,退役。
     } as unknown as import('../src/entities/types').GameHooks;
-    return { gg, setGate: (v: boolean) => { gateOpen = v; }, immuneWritesRef };
+    return { gg, immuneWritesRef };
   }
   function mk(id: number, x: number, y: number): VolcFE {
     const e: VolcFE = {
@@ -239,10 +239,10 @@ describe('R2-04/R2-05 978 命中门', () => {
     return e;
   }
 
-  it('全局免疫窗 gate=false → 零结算（:12641-46 flag3 排除路径）', () => {
+  it('全局免疫窗（弹幕域 iframes>0）→ 零结算（Damage_PVE_Inner :12636 flag3=false 门;★Q4 刀 P1 同族勘误:读域=Enemy.iframes 非近战簿）', () => {
     const tgt = mk(1, 450, 450);
-    const { gg, setGate } = volcGame(tgt);
-    setGate(false);
+    (tgt as { iframes?: number }).iframes = 10;   // 他弹残窗（弹幕域）
+    const { gg } = volcGame(tgt);
     const b = new VolcanoBlastProj(458, 458, 0, -1, 40, 3, 1);
     b.fixedUpdate(1 / 60, gg);
     expect(tgt.hits).toHaveLength(0);

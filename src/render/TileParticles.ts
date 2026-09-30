@@ -53,7 +53,8 @@ import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 export interface TileParticleRule {
   /** 原版 Tiles_N sheet id（规则键） */
   sheet: number;
-  color: string;
+  /** 色点近似色 / dust(闪光)通道的 newColor——dustRaw 通道无色（自然尘色）可缺省 */
+  color?: string;
   /** 每 tick 发射概率（原版每帧概率 ×3：我们每 3 tick 扫一次） */
   prob: number;
   /** 简单帧门：fx/fy 必须等于此值（缺省不限制） */
@@ -84,6 +85,15 @@ export interface TileParticleRule {
   dust?: number;
   dustAlpha?: number;
   dustScale?: number;
+  /** ★BJ411 陨石火星通道二（TileDrawing.cs:7512-7518,1458 同行）：原版尘直渲【自然色】
+   *  支——与 dust(闪光通道) 的差别：color=null（尘自身色）、α=0、无光照概率乘区/
+   *  无光门（原版 37 支在尘段不在 shine 段,tileShine[37] 未赋值 Main.cs:7645-7688）、
+   *  出速不归零（NewDust 内部 ±0.4 抖动承担）。dustScaleRand=n → scale=Next(n)
+   *  （原版 _rand.Next(3)∈{0,1,2},1 掷）；dustNgGt=k → scale>k 时 noGravity=true
+   *  （原版 `if (_dust[num40].scale > 1f)` → 仅 scale 2 档悬浮,0/1 档吃重力下坠） */
+  dustRaw?: number;
+  dustScaleRand?: number;
+  dustNgGt?: number;
 }
 
 // ---- Dust 色表（dust id → 近似 hex；TileDrawing 各分支引用的 dust 编号）----
@@ -300,7 +310,13 @@ function buildRules(): TileParticleRule[] {
   add({ sheet: 31, color: dust(14), prob: 1 / 20 * 3, pred: (fx) => fx < 36, rise: 0.4, life: 44 });
 
   // ---- 环境族 ----
-  for (const sheet of [37, 58, 76]) {
+  // ★BJ411 陨石火星（TileDrawing.cs:7512-7518,1458 同行）：1/250/帧/可见格 → ×3 扫描折算；
+  //  dust 6 自然色、scale=Next(3)（0/1/2 三档等权）、仅 scale>1 档 noGravity——
+  //  走 dustRaw 通道（原版尘直渲;旧 rise 色点近似退役=用户实报「陨石块粒子好像没有」
+  //  定谳修正,与 2026-09-07 闪光可见度批同族判例）。火把 58/76 同支原文再叠 noLight=true
+  //  （:7524-7530）——dustRaw 通道暂无 noLight 位,登记同族债（本刀只动实报件 37）。
+  add({ sheet: 37, dustRaw: 6, dustScaleRand: 3, dustNgGt: 1, prob: 1 / 250 * 3 });
+  for (const sheet of [58, 76]) {
     add({ sheet, color: dust(6), prob: 1 / 250 * 3, rise: 0.5, life: 46 });
   }
   add({ sheet: 71, color: dust(41), prob: 1 / 500 * 3, rise: 0.4, life: 50, size: [1.5, 2.5] });
