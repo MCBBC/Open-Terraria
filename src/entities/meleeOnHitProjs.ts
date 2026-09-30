@@ -487,6 +487,14 @@ export class BladetongueGlobProj extends Entity {
         if (!playerCanHitEnemy(raw as never, game)) continue;
         const exp = GLOB_IDSTATIC_HITS.get(e.id);
         if (exp !== undefined && now < exp) continue;
+        // ★清偿刀 R1（2026-09-30,Q4 定谳落刀）：全局免疫窗门（Damage_PVE_Inner
+        //  :12635-12638 `if (!((owner<0||targetNPC.immune[owner]==0)|flag3)) return;`
+        //  ——524 usesIDStaticNPCImmunity（SetDefaults :5952-5953）⇒ flag3=false ⇒ 门
+        //  生效,读【弹幕域】targetNPC.immune[owner] ≙ Enemy.iframes 共享窗,快照判据=
+        //  清偿刀 T 单源）——旧档整缺 = 残窗敌被误放行（与 978/977 Q4 刀同族）。
+        //  门拒 = 原文 return：静态表行不写（GLOB_IDSTATIC_HITS 不落）、ai[0] 不加、
+        //  penetrate 不减、弹体存活。
+        if (vanillaGateRejected(snapshotVanillaGate(e))) continue;
         if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         // ★F9/F1：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区；命中回写 ai[0]+=50
         // （type==524 特例 :13261-63）
@@ -506,10 +514,13 @@ export class BladetongueGlobProj extends Entity {
         e.hurt(dmgVar * (crit ? 2 : 1)
           + (snapBonusGlob ? Math.trunc(snapBonusGlob * (crit ? 2 : 1)) : 0),
           Math.sign((e.cx ?? this.cx) - this.cx) || 1, 0,
-          game, this.armorPenInject, crit, 0, true);
+          game, this.armorPenInject, crit, -2, true);      // ★R1 写面：pierce=-2 三不写档
+          // （写梯 :14031-14038 usesIDStatic 支：penetrate=5≠1 ⇒ 内层真 = immune[owner]=0
+          //  清窗+perIDStatic 静态表行——【非】pierce=0 的 10t 新全局窗;清窗由下方
+          //  clearGlobalImmune（:14035 桥）承载,静态表行由 GLOB_IDSTATIC_HITS 落行承载）
         this.ai0 += 50;                                    // :13261 netUpdate=true; ai[0]+=50f
-        GLOB_IDSTATIC_HITS.set(e.id, now + GLOB_IDSTATIC_COOLDOWN_TICKS);
-        clearGlobalImmune(game, e.id);
+        GLOB_IDSTATIC_HITS.set(e.id, now + GLOB_IDSTATIC_COOLDOWN_TICKS);   // :14036 静态表行
+        clearGlobalImmune(game, e.id);                     // :14035 immune[owner]=0 清窗
         if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=5 计数耗尽
       }
     }

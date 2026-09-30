@@ -9,7 +9,7 @@ import {
   type MonolithEnv,
 } from '../src/render/MonolithFilters';
 import { TEAM_COLORS } from '../src/stats/Pvp';
-import { PVP_TEAM_BUTTONS, pvpIconFrame, PVP_COOLDOWN_MS } from '../src/ui/UI';
+import { PVP_TEAM_BUTTONS, pvpIconFrame, pvpHoverFrame, PVP_COOLDOWN_MS } from '../src/ui/UI';
 import {
   cycleMapStyle, stepMapAlpha, MAP_ALPHA_MIN, MAP_ALPHA_STEP, MAP_STYLE_MAX, MAP_STYLE_MIN,
   mapChestHoverName, mapHoverNameKey,
@@ -96,12 +96,16 @@ describe('② PvP 背包快切钮（Main.cs:42074-42195）', () => {
     expect(TEAM_COLORS[5]).toEqual([224, 100, 242]);   // Purple（文案键 Pink）
   });
 
-  it('PvP 剑帧：col=(hostile?2:0)+(hover?1:0) / row=team（:42094/:42112-42113）', () => {
-    expect(pvpIconFrame(false, false, 0)).toEqual([0, 0]);
-    expect(pvpIconFrame(true, false, 3)).toEqual([2, 3]);
-    expect(pvpIconFrame(false, true, 0)).toEqual([1, 0]);
-    expect(pvpIconFrame(true, true, 5)).toEqual([3, 5]);
-    expect(pvpIconFrame(true, true, 9)).toEqual([3, 5]);   // team 夹 0-5
+  it('PvP 剑帧（★BJ417 1457 制 Frame(2,7)：col=hostile?1:0 / row=team 0-5,Main.cs:43419-43420）', () => {
+    expect(pvpIconFrame(false, 0)).toEqual([0, 0]);
+    expect(pvpIconFrame(true, 3)).toEqual([1, 3]);
+    expect(pvpIconFrame(false, 5)).toEqual([0, 5]);
+    expect(pvpIconFrame(true, 9)).toEqual([1, 5]);   // team 夹 0-5
+  });
+
+  it('PvP 剑悬停覆盖帧 = (hostile 列, 行 6)（:43432-43434 X 不变 Y=Height*PlayerTeamID.Count）', () => {
+    expect(pvpHoverFrame(false)).toEqual([0, 6]);
+    expect(pvpHoverFrame(true)).toEqual([1, 6]);
   });
 
   it('切换冷却 = teamCooldownLen 300t（Main.cs:1026 → 5000ms）', () => {

@@ -238,7 +238,7 @@ export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appeara
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,
-  liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,
+  liqgl, liqC13b, emitVanillaLiquidGate, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,
   type LiqBatchEmit } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
@@ -2148,12 +2148,21 @@ export function deerclopsNextFrame(
  *  偏移为层偏移（消费侧再叠加锚点 -originX/-originY）;gt=GlobalTimeWrappedHourly
  *  （进程秒%3600）。公式锚：r=lai3/36(:26737)、红雾 α=(128/255)(1-r²/2)——★SW-RB10e
  *  2026-09-10 勘误:【不乘 Opacity】（value2=(80,0,0,255)×0.5=:26743;Lerp(·,value2,
- *  amount2=1) 整体覆写 GetAlpha 光照链,Opacity 不进结果）、本体 α=Opacity(1-r²)(1-num7)
- *  （:26756+:26790,Opacity 经 GetAlpha :94549 rgb×(255-alpha)/255 进链）、
+ *  amount2=1) 整体覆写 GetAlpha 光照链,Opacity 不进结果）、
+ *  ★BJ418（2026-09-30 用户实报"一闪一闪"定谳刀）本体 α 链 1:1（XNA Color.Lerp 四通道
+ *  同插,Color.cs Lerp 逐字节含 A）：首段 Lerp(Transparent,color,1−num3)（:26742,A×
+ *  (1−num3)）之后还有【两次把 A 向 255 拉回】的紫影 Lerp——lai3>0 支 Lerp(·,(50,0,160,
+ *  A=255),Remap(lai3,0,20,0,1))（:26759-26762）与 ai0∈{7,8} 支 Lerp(·,num7)（:26767）,
+ *  末段 ×(1−num7)（:26768）再整体乘。故 A=[(1−num3)(1−r1)+r1] →（7/8）[(·)(1−num7)+
+ *  num7](1−num7);lai3∈[0,30] 恒 ≥0.9556——原版远距态=【不透明紫影剪影】（r1→1 纯
+ *  (50,0,160)）,从不整段淡出。旧式 α=Opacity(1−r²)(1−num7) 漏两次 alpha 回升 → 玩家
+ *  ≥450px 本体衰减到 0.3056、450px 阈值往返=逐拍翻转闪烁（用户实报根因,Opacity 本身
+ *  经 GetAlpha :94549 只乘 rgb 不乘 A——668 的 npc.alpha 恒 0）、
  *  num7=Remap(ai1,20,60,0,2) 三角波（:26765-26769）、紫重影 α=本体×0.5（color2×0.5
  *  :26783）、双轨道 R1=80n⁹/R2=80n⁹+30j·n⁹（:26774-26775）、fog α=(66/255)×Opacity×
  *  Remap(lai3,0,20,0,1)×0.25×(1-num7)（:26795,Opacity 显式在链）。tPurple=本体紫电
- *  Lerp 合成系数（两段 Lerp(·,(50,0,160),·) 链,:26757-26769）。 */
+ *  Lerp 合成系数（★BJ418 精确折叠:首段 Transparent lerp 把 rgb×(1−num3) 向黑,折叠进
+ *  单一 C→P 系数 t1=1−(1−num3)(1−r1),再与 7/8 num7 lerp 合成,:26757-26769）。 */
 export interface DeerclopsDrawLayer {
   kind: 'redGhost' | 'purpleGhost' | 'body' | 'fog';
   dx: number;
@@ -2173,8 +2182,17 @@ export function deerclopsDrawLayers(s: {
     num7 = ai1 <= 20 ? 0 : ai1 >= 60 ? 2 : ((ai1 - 20) / 40) * 2;   // :26765
     if (num7 > 1) num7 = 2 - num7;                                  // 三角波 0→1→0
   }
-  const bodyAlpha = opacity * (1 - r2) * (1 - num7);
-  const tPurple = r1 + num7 - r1 * num7;          // Lerp(Lerp(x,t,a),t,b) 合成
+  // ★BJ418 alpha 链 1:1：A 通道逐段 = [(1−num3)(1−r1)+r1]（lai3>0 支,否则 1）→
+  // （7/8 态）[(·)(1−num7)+num7]×(1−num7)。两次紫影 Lerp 的目标 (50,0,160) A=255,
+  // XNA Color.Lerp 四通道同插 → 把首段 Lerp(Transparent) 压掉的 A 拉回（lai3∈[0,30]
+  // 恒 ≥0.9556=不透明紫影剪影）;旧式 (1−r²)(1−num7) 漏回升=远距半透明闪烁根因。
+  const a1 = lai3 > 0 ? (1 - r2) * (1 - r1) + r1 : 1;
+  const a2 = (ai0 === 7 || ai0 === 8) ? (a1 * (1 - num7) + num7) * (1 - num7) : a1;
+  const bodyAlpha = opacity * a2;
+  // ★BJ418 rgb 折叠精确化：首段 Transparent lerp 把 rgb×(1−num3)（向黑）,与 r1 紫 lerp
+  //  折叠成单一 C→P 系数 t1 = 1−(1−num3)(1−r1) = num3+r1−num3·r1（lai3>0;旧式漏 num3 档）
+  const t1 = lai3 > 0 ? r2 + r1 - r2 * r1 : 0;
+  const tPurple = 1 - (1 - t1) * (1 - num7);      // Lerp(Lerp(C→P,t1),P,num7) 合成
   const layers: DeerclopsDrawLayer[] = [];
   if (lai3 > 0) {
     // ★SW-RB10e：红雾环不乘 Opacity——原版 value3 链（:26747-26751）
@@ -3363,24 +3381,6 @@ export class Renderer {
   /** 主画布 2D 上下文统一属性(构造器与 recreateMainCanvas 两处创建点必须同参——
    *  同一元素重复 getContext 属性以首次为准)。alpha:false=不透明后备
    *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染 */
-  /** ★C13b 字体记忆（2026-09-30 Windows trace "set font" 829ms/58s 定谳）:ctx.font
-   *  赋值即触发 Chrome 字体解析（同串重复赋值同样付费）——HUD/文本路径每帧多次
-   *  set 同一字体串。实例级 memo:同值跳过原生 set（getter 回读 memo 值=与原生
-   *  恒等,因跳过仅在等值时发生）。仅挂主画布 ctx（worldCanvas/light 画布文本
-   *  面小,不挂零风险）。 */
-  private static fontMemo(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
-    const desc = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'font');
-    if (!desc?.set || !desc.get) return ctx;
-    let last: string | null = null;
-    Object.defineProperty(ctx, 'font', {
-      get: () => last ?? desc.get!.call(ctx),
-      set: (v: string) => {
-        if (v !== last) { desc.set!.call(ctx, v); last = v; }
-      },
-    });
-    return ctx;
-  }
-
   private mainCtxAttrs(): CanvasRenderingContext2DSettings {
     const a: CanvasRenderingContext2DSettings = {};
     if (Renderer.opaqueMain) a.alpha = false;
@@ -4368,7 +4368,7 @@ export class Renderer {
     //   页画布背板不再随 bgl 旗降 CPU/SHM（耦合=GL 路径死亡时回退 blit 7-12× 慢 op
     //   的凶器,见 ChunkCache 页画布去毒注）;页恒 GPU 后备。
     this.canvas = document.createElement('canvas');
-    this.ctx = Renderer.fontMemo(this.canvas.getContext('2d', this.mainCtxAttrs())!);
+    this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
     this.lightCanvas = document.createElement('canvas');
     // ★lightCanvas 恒 alpha:true——光照图构建写 α=255 但 putImageData/乘光链路
     //   语义依赖 RGBA 后备,勿随主画布改 opaque
@@ -6942,9 +6942,10 @@ export class Renderer {
       // ?slopewave=0 逃生门同关
       slopeWaveEnabled && waterWaves.quality > 0 && !this.warpPathActive(),
       null, null,
-      // ★liqpolish:实心层微光带批化钩（acc 窗预检同 liqMode 面;256 亮线/足迹
-      // 路不批=恒 CPU 原链;rec 入队位=本 pass 原位=层序零改动）
-      liqpolish && liqgl && this._accMode === 'acc' && !this.isCpuRender()
+      // ★liqpolish 微光带批钩 / ★C13b（2026-09-30）非微光带+III256 亮线批钩（两旗
+      // 正交,任一开即传钩,臂内各按本旗判;acc 窗预检同 liqMode 面;rec 入队位=本
+      // pass 原位=层序零改动）
+      (liqpolish || liqC13b) && liqgl && this._accMode === 'acc' && !this.isCpuRender()
         ? this.liqBatchHook() : null);
   }
 

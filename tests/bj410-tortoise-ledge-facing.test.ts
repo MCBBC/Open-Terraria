@@ -242,8 +242,11 @@ describe('BJ410-Q2 邻接六刀（NPC.cs:29393/29413/29444/29448/29463/29469/295
   });
 
   it('定谳#3: 蓄力第二臂纵向条件=盒底>玩家顶−200——高处无视线不蓄/低处无视线照蓄', () => {
-    // 玩家 dead → los=false（隔离视线臂）;dist>600 隔离距离门 → 纯测纵向条件极性。
-    {  // A 龟在高台(盒底≈320)、玩家 700px 下方:旧 dy>200 → +10/t=330;原版 320>782 假 → 仅 +1/t
+    // 隔离视线臂（R3 重锚 2026-09-30）:flag46=CanHit 纯几何后 dead 不再压 los
+    // （R3#4 定谳）→ 几何遮断（墙）替代 dead 作隔离手段;dist>600 隔离距离门 →
+    // 纯测纵向条件极性。
+    {  // A 龟在高台(盒底≈320)、玩家 700px 下方（地板遮断视线）:旧 dy>200 → +10/t=330;
+      //  原版 320>782 假 → 仅 +1/t
       const player = { ...playerMock(50 * T, 64 * T), dead: true };
       const { w, hooks } = flatHooks(player);
       for (let x = 36; x <= 44; x++) w.store.setTileSilent(x, 20, 2);
@@ -251,12 +254,15 @@ describe('BJ410-Q2 邻接六刀（NPC.cs:29393/29413/29444/29448/29463/29469/295
       for (let t = 0; t < 30; t++) driveOnce(e, hooks, player);
       expect(e.ai1).toBeLessThan(100);        // 原版:30（旧:330 红）
     }
-    {  // B 龟在地面(盒底≈960)、玩家 700px 上方:旧 dy<0 → +1/t=30;原版 960>14 真 → +10/t
+    {  // B 龟在地面(盒底≈960)、玩家 700px 上方（墙 col 45 rows 14..59 遮断 Y 主导
+      //  步进路径=几何 los 假）:旧 dy<0 → +1/t=30;原版 960>14 真 → +10/t
       const player = { ...playerMock(50 * T, 16 * T), dead: true };
-      const { hooks } = flatHooks(player);
+      const { w, hooks } = flatHooks(player);
+      for (let y = 14; y <= 59; y++) w.store.setTileSilent(45, y, 2);
       const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
       for (let t = 0; t < 30; t++) driveOnce(e, hooks, player);
-      expect(e.ai1).toBeGreaterThan(200);     // 原版:330（旧:30 红）
+      expect(e.ai1).toBeGreaterThan(200);     // 原版:330（旧:30 红）;los 臂被墙隔离
+      expect(e.ai0).toBe(0);                  // 无 los 臂 → 不满蓄转态（330<400）
     }
   });
 
@@ -323,5 +329,178 @@ describe('BJ410-Q2 邻接六刀（NPC.cs:29393/29413/29444/29448/29463/29469/295
       driveOnce(e, hooks, near);
       expect(e.vx).toBeCloseTo(0.96, 5);
     }
+  });
+});
+
+// ===================== BJ410-R3 陆龟 AI 邻接四刀（2026-09-30 清债落刀） =====================
+// 四条（Q2 亲读登记债;锚行号已 R3 亲读复核——Q2 报行号漂移 +19~31,语义锚全等）：
+//   R3#1 态 0 每 tick 属性复位非 417 支（:29453-29462 全型段,旧只落 417）:
+//     defense=defDefense/damage=defDamage/kbResist=scaled(0.75 496/497|0.3)。
+//     ★稳态行为面零差（153/154 SetDefaults kb=0.3 :10965/:10980、496/497=0.75 :14716,
+//     ScaleStats :18114 出生已乘同曲线;def.damage/defense 现无 AI 内写点）——落位为
+//     态 3 伤害/防御强化债（:29556-29558,登记中）的前置机构。
+//   R3#2 态 3 wet 段（:29693-29696 wet∧dirY<0 → vy-=0.3,每拍含弹射拍;同族态 4
+//     :29701-29704 一并落位）+ 弹射单式两支（:29636-29655）:无视线支 vx=朝玩家归一
+//     分量（旧 facing×spd 全速）+LOS 支 bias 反号修正（旧 dy+bias=压低,原版
+//     playerTop−cy−bias=玩家在上方时再抬高）+顶对心基准。首帧 TargetClosest
+//     （:29635,旧缺=无视线按行走朝向发射）。
+//   R3#3 态 5（:29838/:29847-29856）:rotation=0 每拍 + ≥30 转 0 态前 TargetClosest
+//     （:29850）+ 转态门先于 wet（wet 覆写转 3 拍 TargetClosest 仍面;旧序反+缺面）。
+//   R3#4 num606 距离基准（:29424-29427）= hypot(ΔcenterX, playerTopY−npcCenterY)
+//     ——玩家顶对龟心（≈21px 偏置;旧中心距在近竖直方位跨档）;flag46=CanHit 纯几何
+//     无 dead 门（:29428;原版 target 停留死玩家 → 尸体位姿照常蓄力/弹射=死亡玩家
+//     角落语义对齐,旧 los 含 !player.dead）。
+// 判别面（每条一发）：
+//   R3-1 属性复位序列:投毒 def→态 0 一拍复原+kbResist 档（154 0.3/496 0.75）。
+//   R3-2 wet 段 vy（态 3 弹射后/态 4,dirY 极性对照）+无视线弹射 vx 朝玩家+LOS bias 面。
+//   R3-3 态 5 rotation 归零/转态拍面向/wet∧≥30 拍 TargetClosest 仍面+转 3。
+//   R3-4 加速档 21px 偏置跨档（中心距<400 而顶心距>400 → max 1.5）+死亡玩家蓄力臂。
+// 变异基线:去 R3#1 else 支→R3-1 红;去 wet 段→R3-2a/b 红;弹射回 facing*spd→R3-2c 红;
+// dist 回中心距→R3-4a 红;los 回 !dead→R3-4b 红;去态 5 rotation/TargetClosest→R3-3 红。
+
+import { getKnockbackMultiplierScaledByDifficulty } from '../src/stats/ScaleStats';
+
+describe('BJ410-R3 陆龟邻接四刀（NPC.cs:29453/29636/29693/29701/29838/29850 1:1）', () => {
+  const scaled = (v: number, e: Enemy) => getKnockbackMultiplierScaledByDifficulty(v, e.difficulty || 1);
+
+  it('R3#1: 态 0 每 tick 属性复位·非 417 支——投毒 def 一拍复原+kbResist 0.3/0.75 档', () => {
+    {  // 154:毒 def.damage/defense=999 + kb 哨兵 0.5 → 一拍复原 + 0.3 档
+      const player = playerMock(52 * T, 60 * T);
+      const { hooks } = flatHooks(player);
+      const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+      driveOnce(e, hooks, player);                       // 首拍:aiInit 捕获基准（先于投毒）
+      const base = e.tortoiseDefBase!;
+      expect(base.dmg).toBeLessThan(900);
+      e.def = { ...e.def, damage: 999, defense: 999 };   // 实例拷贝后投毒（防共享表污染）
+      e.kbResistOverride = 0.5;
+      driveOnce(e, hooks, player);
+      expect(e.def.damage).toBe(base.dmg);               // 旧：999（复位缺失=红）
+      expect(e.def.defense).toBe(base.def);              // 旧：999（红）
+      expect(e.kbResistOverride).toBeCloseTo(scaled(0.3, e), 6);  // 旧：0.5（红）
+    }
+    {  // 496:kbResist=0.75 档（旧：不复位=红）
+      const player = playerMock(52 * T, 60 * T);
+      const { hooks } = flatHooks(player);
+      const e = Enemy.fromVanilla(496, 40 * T, 59 * T)!;
+      driveOnce(e, hooks, player);
+      expect(e.kbResistOverride).toBeCloseTo(scaled(0.75, e), 6);
+    }
+  });
+
+  it('R3#2a: 态 3 wet 段——wet∧dirY<0 → vy-=0.3（弹射后飞行拍;dirY=1 对照不助推）', () => {
+    const player = playerMock(52 * T, 60 * T);           // 远离:else 支纯飞行
+    const { hooks } = flatHooks(player);
+    const mk = () => {
+      const e = Enemy.fromVanilla(154, 40 * T, 20 * T)!; // 半空（无块碰撞污染 vy）
+      e.ai0 = 3; e.ai1 = 5; e.ai3 = 1;                   // 弹射后飞行拍（ai3≠0 → vy-=0.22 支）
+      e.vx = 0; e.vy = 0;
+      return e;
+    };
+    {  // dirY=-1（玩家在上）:vy = 0−0.22−0.3(wet) +0.2(wet 重力) = −0.32（旧：−0.02 红）
+      const e = mk(); e.wet = true; e.dirY = -1;
+      driveOnce(e, hooks, player);
+      expect(e.vy).toBeCloseTo(-0.32, 5);
+    }
+    {  // dirY=+1 对照:wet 段不助推 → −0.02
+      const e = mk(); e.wet = true; e.dirY = 1;
+      driveOnce(e, hooks, player);
+      expect(e.vy).toBeCloseTo(-0.02, 5);
+    }
+  });
+
+  it('R3#2b: 态 4 wet 段——同谓词族（wet∧dirY<0 → vy-=0.3;旧缺=红）', () => {
+    const player = playerMock(52 * T, 60 * T);
+    const { hooks } = flatHooks(player);
+    const e = Enemy.fromVanilla(154, 40 * T, 20 * T)!;
+    e.ai0 = 4; e.ai2 = 0.5; e.wet = true; e.dirY = -1; e.vx = 0; e.vy = 0;
+    driveOnce(e, hooks, player);
+    expect(e.vy).toBeCloseTo(-0.1, 5);                   // 0−0.3(wet)+0.2(wet 重力)（旧：+0.2 红）
+    expect(e.ai0).toBe(4);                               // ai2=0.49>0 不转态（隔离转态面）
+  });
+
+  it('R3#2c: 态 3 无视线弹射——vx=朝玩家归一分量+首帧 TargetClosest（旧 facing×spd 全速=红）', () => {
+    // 墙 col 46 隔断视线;龟朝左出生、玩家在右:原版弹射仍朝玩家（vx>0）;dirY=−1 →
+    // num620=playerTop−cy−|dx|×0.2 → vx=dx/hypot×6、vy 强制 −10。
+    // ★墙位=rows 38..40:80 高测试世界 underworld 钳（clampYTile hi=st.h−40=40）把
+    //   两端 tile 钳到行 40,墙须落钳后步行行上（rows>40 的墙对 los 不可见）
+    const player = playerMock(52 * T, 60 * T);
+    const { w, hooks } = flatHooks(player);
+    for (let y = 38; y <= 40; y++) w.store.setTileSilent(46, y, 2);
+    const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+    e.ai0 = 3;                                           // 直驱态 3 弹射拍（ai1=0 → 首帧支）
+    e.facing = -1;                                       // 行走朝向与玩家侧相反（旧按此发射=−6 红）
+    const cx0 = e.cx, cy0 = e.cy;                        // 弹射时刻盒心（driveOnce 会位移,预期式须用发射时基准）
+    driveOnce(e, hooks, player);
+    const num618 = player.cx - cx0;
+    const num620 = (player.y - cy0) - Math.abs(num618) * 0.2;    // dirY=−1（刷新后玩家在上）
+    const expectVx = (num618 / Math.hypot(num618, num620)) * 6;
+    expect(e.facing).toBe(1);                            // TargetClosest 先于弹射（旧缺=保 −1）
+    expect(e.vx).toBeCloseTo(expectVx, 6);               // ≈+5.66（旧 −6 红）
+    expect(e.vx).toBeGreaterThan(0);
+  });
+
+  it('R3#2d: 态 3 LOS 弹射 bias 面——playerTop−cy−|dx|×0.2（玩家在上再抬高;旧 dy+bias=压低=红）', () => {
+    // 玩家 mock 悬空直置（driveOnce 无物理,无需立足面）;无遮断 → flag46 真=10 速档
+    const player = playerMock(52 * T, 30 * T);
+    const { hooks } = flatHooks(player);
+    const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;   // 地面（cy=944,玩家远上方）
+    e.ai0 = 3;                                           // 直驱态 3 弹射拍（ai1=0 → 首帧支）
+    const cx0 = e.cx, cy0 = e.cy;                        // 弹射时刻盒心（同 2c）
+    driveOnce(e, hooks, player);
+    const num618 = player.cx - cx0;
+    const num620 = (player.y - cy0) - Math.abs(num618) * 0.2;    // dirY=−1 → bias 不归 0
+    const expectVx = (num618 / Math.hypot(num618, num620)) * 10;
+    expect(e.vx).toBeCloseTo(expectVx, 6);               // ≈3.33（旧 dy+bias 式 ≈3.95 红）
+  });
+
+  it('R3#3: 态 5——rotation=0 每拍 + ≥30 转 0 态前 TargetClosest + wet∧≥30 拍仍面且转 3', () => {
+    {  // a) rotation 归零（旧保持 1.234=红）
+      const player = playerMock(52 * T, 60 * T);
+      const { hooks } = flatHooks(player);
+      const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+      e.ai0 = 5; e.visAngle = 1.234;
+      driveOnce(e, hooks, player);
+      expect(e.visAngle).toBe(0);
+    }
+    {  // b) ai1≥30 转态拍 TargetClosest 先行（旧不面=红）
+      const player = playerMock(52 * T, 60 * T);
+      const { hooks } = flatHooks(player);
+      const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+      e.ai0 = 5; e.ai1 = 29; e.facing = -1;              // 玩家在右、龟朝左
+      driveOnce(e, hooks, player);
+      expect(e.ai0).toBe(0);
+      expect(e.facing).toBe(1);                          // 旧：−1（无 TargetClosest=红）
+    }
+    {  // c) wet∧≥30:TargetClosest 仍面（原版序 :29850 先于 wet 覆写 :29853）且转 3
+      const player = playerMock(52 * T, 60 * T);
+      const { hooks } = flatHooks(player);
+      const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+      e.ai0 = 5; e.ai1 = 29; e.facing = -1; e.wet = true;
+      driveOnce(e, hooks, player);
+      expect(e.facing).toBe(1);                          // 旧：wet 先判早退→面蒸发=红
+      expect(e.ai0).toBe(3);                             // wet 覆写转 3
+      expect(e.ai1).toBe(0);
+    }
+  });
+
+  it('R3#4a: num606 距离基准 21px 偏置面——中心距<400 而顶心距>400 → 加速档 max=1.5', () => {
+    // 玩家正上方偏 9px:中心距 hypot(9,−5)≈10.3（旧 max=1 → 1.2 衰减 0.96 红）;
+    // 顶心距 hypot(9,−411)≈411.1（原版 max=1.5 → 1.2+0.07=1.27）
+    const player = { ...playerMock(42 * T, 60 * T), y: 533, cy: 554 };
+    const { hooks } = flatHooks(player);
+    const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+    e.vx = 1.2; e.vy = 0;
+    (e as unknown as { tortoiseOldVx: number }).tortoiseOldVx = 1.2;
+    driveOnce(e, hooks, player);
+    expect(e.vx).toBeCloseTo(1.27, 5);                   // 旧（中心距）:0.96 红
+  });
+
+  it('R3#4b: flag46 纯几何——死亡玩家角落蓄力臂照常（旧 los 含 !dead=红）', () => {
+    const player = { ...playerMock(60 * T, 60 * T), dead: true };  // 300px>200 几何开阔 → flag46 真
+    const { hooks } = flatHooks(player);
+    const e = Enemy.fromVanilla(154, 40 * T, 59 * T)!;
+    for (let t = 0; t < 30; t++) driveOnce(e, hooks, player);
+    expect(e.ai0).toBe(0);
+    expect(e.ai1).toBeGreaterThan(100);                  // +4(los 臂)+1/t ≈150;旧:30 红
   });
 });

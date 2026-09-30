@@ -92,10 +92,16 @@ describe('SW-BJ51 ③偏移公式（gt=0 时解析可算,逐值锚定）', () =>
   });
 });
 
-describe('SW-BJ51 ④alpha 公式链（预乘语义折算,逐值锚定）', () => {
-  it('本体 α=Opacity·(1-r²)·(1-num7)：lai3=18（r²=0.25）→ 0.75', () => {
+describe('SW-BJ51 ④alpha 公式链（预乘语义折算,逐值锚定;★BJ418 重产:金标=反编译直读）', () => {
+  // ★BJ418（2026-09-30）:本块 3 处旧值把「漏紫影 Lerp alpha 回升」的误转录钉成了金标
+  //  （α=Opacity(1−r²)(1−num7)）。反编译直读重产:XNA Color.Lerp 四通道同插,
+  //  首段 Lerp(Transparent,color,1−num3) A×(1−num3)（:26742）→ lai3 支 Lerp(·,(50,0,160),
+  //  A=255,r1)（:26759-26762）→（7/8）Lerp(·,num7)（:26767）→ ×(1−num7)（:26768）:
+  //  A=[(1−num3)(1−r1)+r1] →（7/8）[(·)(1−num7)+num7](1−num7)。lai3=18: r²=0.25,
+  //  r1=0.9 → A=0.75×0.1+0.9=0.975（旧值 0.75 误）
+  it('本体 α=Opacity·[(1-r²)(1-r1)+r1]：lai3=18（r²=0.25,r1=0.9）→ 0.975（★BJ418 重产,旧 0.75=误转录）', () => {
     const { layers } = deerclopsDrawLayers({ lai3: 18, ai0: 0, ai1: 0, opacity: 1, gt: 0 });
-    expect(near(layers.find((l) => l.kind === 'body')!.alpha, 0.75)).toBe(true);
+    expect(near(layers.find((l) => l.kind === 'body')!.alpha, 0.975)).toBe(true);
   });
 
   it('本体 α 含消散衰减：ai0=7,ai1=30 → num7=0.5 → 0.5;ai1=40 → num7=1 → 0（全消散）', () => {
@@ -124,9 +130,13 @@ describe('SW-BJ51 ④alpha 公式链（预乘语义折算,逐值锚定）', () =
     expect(near(half.layers.find((l) => l.kind === 'fog')!.alpha, 66 / 255 * 0.5 * 0.25)).toBe(true);
   });
 
-  it('本体透明化=远距可见主因：lai3=30 → α=1-(30/36)²≈0.3056（用户所见半透明重影态）', () => {
-    const { layers } = deerclopsDrawLayers({ lai3: 30, ai0: 0, ai1: 0, opacity: 1, gt: 0 });
-    expect(near(layers.find((l) => l.kind === 'body')!.alpha, 1 - (30 / 36) ** 2)).toBe(true);
+  // ★BJ418 重产（本断言=用户实报"一闪一闪"的定谳锚）:lai3=30 时 r1=1 → 紫影 Lerp 把 A
+  //  拉回 255 → 本体【不透明】纯紫影剪身（tPurple=1）,α 旧值 0.3056 是漏回升的误转录。
+  //  原版远距态从不整段淡出（Main.cs:26759-26762 Lerp 目标 (50,0,160,255)）。
+  it('★BJ418：本体 α=1（远距 lai3=30=不透明紫影剪影,旧 0.3056 淡出=闪烁根因已废）', () => {
+    const { layers, tPurple } = deerclopsDrawLayers({ lai3: 30, ai0: 0, ai1: 0, opacity: 1, gt: 0 });
+    expect(near(layers.find((l) => l.kind === 'body')!.alpha, 1)).toBe(true);
+    expect(near(tPurple, 1)).toBe(true);   // r1=1 → 纯 (50,0,160) 紫影
   });
 
   // ★SW-RB10e 2026-09-10：红雾环不乘 Opacity——原版 value3 链 Lerp(·,value2,1)
@@ -186,10 +196,15 @@ describe('SW-BJ51 ⑤num7 三角波与 tPurple 合成', () => {
     }
   });
 
-  it('tPurple=Lerp 链合成 r1+num7-r1·num7：lai3=20,ai0=0 → 1（全紫）;lai3=10 → 0.5', () => {
+  // ★BJ418 重产:精确折叠 t1=1−(1−num3)(1−r1)（首段 Transparent lerp 的 rgb×(1−num3)
+  //  向黑档不丢）。lai3=10: r²=100/1296,r1=0.5 → t1=0.5+0.5×100/1296≈0.53858（旧值 0.5 漏档）
+  it('tPurple=精确折叠 1−(1−t1)(1−num7),t1=num3+r1−num3·r1：lai3=20 → 1（全紫）;lai3=10 → 0.53858', () => {
     expect(near(deerclopsDrawLayers({ lai3: 20, ai0: 0, ai1: 0, opacity: 1, gt: 0 }).tPurple, 1)).toBe(true);
-    expect(near(deerclopsDrawLayers({ lai3: 10, ai0: 0, ai1: 0, opacity: 1, gt: 0 }).tPurple, 0.5)).toBe(true);
+    const t10 = deerclopsDrawLayers({ lai3: 10, ai0: 0, ai1: 0, opacity: 1, gt: 0 }).tPurple;
+    expect(near(t10, 0.5 + 0.5 * (10 / 36) ** 2)).toBe(true);
     // lai3=0 且非消散态 → 0（原色）
     expect(near(deerclopsDrawLayers({ lai3: 0, ai0: 0, ai1: 0, opacity: 1, gt: 0 }).tPurple, 0)).toBe(true);
+    // 7/8 态合成:num7 lerp 与 t1 的乘积补（lai3=0,ai1=40 → num7=1 → 纯紫）
+    expect(near(deerclopsDrawLayers({ lai3: 0, ai0: 8, ai1: 40, opacity: 1, gt: 0 }).tPurple, 1)).toBe(true);
   });
 });

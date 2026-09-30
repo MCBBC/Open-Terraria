@@ -121,6 +121,22 @@ export function kiteReelPitch(len: number): number {
   return ((len - KITE_STRING_MIN) / (KITE_STRING_MAX - KITE_STRING_MIN)) * -0.12 + 0.06;
 }
 
+/** 发射侧在场门（★BJ417 2026-09-30 重定谳——BJ413「原版无单实例门」系漏检）：
+ *  ItemID.Sets.HasAProjectileThatHasAUsabilityCheck = 风筝 24 件全集（ItemID.cs:177）
+ *  → ItemCheck_CheckCanUse_Inner 尾支（Player.cs:52932-52935）
+ *  → ItemCheck_CheckUsabilityOfProjectiles（:52994-53005）逐 active owned 弹
+ *  → Projectile.CheckUsability（Projectile.cs:54404-54410）`aiStyle==160 → false`。
+ *  语义 = 【任意】aiStyle160 弹在场（owner==whoAmI）→ 风筝物品 TryStartUse 整体
+ *  失败=零副作用（不起手动画/不出膛/不消费点击）——非「同型」门：任何一只风筝
+ *  在飞时,手持另一型风筝同样被拒（原版单风筝语义）。本仓等价:场上存在活 KiteProj
+ *  即拒;netPuppet 为远端傀儡（非 owner 域,同 boomerangBlockedByOwned 口径）不计。 */
+export function kiteBlockedByOwnedAirborne(projectiles: readonly unknown[]): boolean {
+  for (const e of projectiles) {
+    if (e instanceof KiteProj && !e.dead && !e.netPuppet) return true;
+  }
+  return false;
+}
+
 const clampF = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 export class KiteProj extends Entity {

@@ -46,8 +46,9 @@ import type { Camera } from '../render/Camera';
 import { dealContacts, ID_STATIC_482_TABLE } from './proj1457';
 // ★BJ383 小动物命中面 + 幽灵兜帽吸血 proc（BJ381 登记债清偿;482=proj1457 dealContacts
 //  第 12 调用方——「其余 11 个」含本文件）
+// ★清偿刀 R1 D1（2026-09-30）：ghostHurt 幽灵伤害头同构补面（BJ420 登记债五弹之末）
 import { hitCritters } from './projTargets';
-import { ghostHealProc } from './SpectreSoulProj';
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { PLATFORMS_SHEETS } from '../data/tiles';
 import { limitPointToPlayerReachableArea } from './PlayerReachableArea';   // ★BJ290 件3 单源化
@@ -232,10 +233,28 @@ export class ClingerStaffWallProj extends Entity {
     // 命中面：usesIDStaticNPCImmunity+10t 全场同型表（penetrate=-1 ⇒ hitPierce=-2 清窗档，
     // SporeGasCloud 判例）；damageAdj = :12983 蠕形减半（DamageVar 后/banner/暴击前）
     dealContacts(this, game, ID_STATIC_482_TABLE, 10, (t) => {
-      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;482 magic :5584）
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;482 magic :5585）
       //  ——proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★清偿刀 R1 D1（2026-09-30）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/
+      //  :12021 方法体,SpectreSoulProj 单源零改动复用;BJ420 1115/1116 同构）——
+      //  482 数据面 magic（SetDefaults :5574-5588 `magic = true` :5585）+ 幽灵面具
+      //  套装 → 受害者 Center 放浮魂 356。受理面 = dealContacts 内环免疫门
+      //  （:12635/:12600 收编,在 onHit 前拒）⇒ 到达本位即 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     }, undefined, -2, false, halveWormDamage);
   }

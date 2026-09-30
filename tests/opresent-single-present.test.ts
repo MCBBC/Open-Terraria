@@ -77,9 +77,11 @@ describe('opresent 夹层谓词（SkyRenderer 单源,保守超集——宁可不
   it('drawCloudsNear defer 参数:早退与 finishBatch 双收口点都尊重 defer（C10b 缺省路径逐位不变）', () => {
     expect(SKY).toMatch(/mergedSession\?: GLSpriteLayer \| null,\s*\n\s*\/\*\* ★opresent[^]*?deferBlit = false\) \{/);
     // 早退收口:defer=不 present 不 blit
-    expect(SKY).toMatch(/if \(merged\) \{ merged\.end\(!deferBlit\); if \(!deferBlit\) \{ ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\}\s*\n\s*return;/);
+    // ★C10c（2026-09-30）:blit 分账计数器插入（cloudBlitStats.mergedFull/mergedDefer）
+    //  ——defer 语义不变,锚随盘刷新（c10b-bg-cloud-pipe 同批）。
+    expect(SKY).toMatch(/if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit\);\s*\n\s*if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
     // finishBatch:defer=跳过全幅 blit;非合并会话（bbox 路径）不受 defer 影响
-    expect(SKY).toMatch(/shared\.end\(!deferBlit\);[\s\S]{0,420}if \(!deferBlit\) ctx\.drawImage\(shared\.canvas, 0, 0\);/);
+    expect(SKY).toMatch(/shared\.end\(!deferBlit\);[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(shared\.canvas, 0, 0\); \}/);
   });
 
   it('GLSpriteLayer.end(present=true) 缺省=FBO→管线画布 present 旧语义;defer=FBO 引用必清', () => {

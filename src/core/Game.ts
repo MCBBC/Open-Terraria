@@ -446,7 +446,7 @@ import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, boomerangBlockedByOwned, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, FlaironHeadProj, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, FertilizerCloud, FERTILIZER_PROJ_BY_ITEM, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, flaironSpawnNudge, type CounterweightCtx, type CounterweightPlayView, CrystalSerpentProj, rollCrystalSerpentVelocity } from '../entities/WeaponProj';
-import { KiteProj } from '../entities/KiteProj';   // ★BJ413 风筝弹幕（aiStyle 160）
+import { KiteProj, kiteBlockedByOwnedAirborne } from '../entities/KiteProj';   // ★BJ413 风筝弹幕（aiStyle 160）;★BJ417 在场门
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
 import { TitaniumStormShard,
   ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
@@ -18100,6 +18100,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   拒绝也【不消费 mouseDown】,持握/连点在飞行期间空转,弹消亡后下一帧放行 =
     //   "回手后再掷"节奏。门表 = WeaponProj.ts BOOMERANG_OWN_LIMIT。
     if (cwIn.kind === 'boomerang' && boomerangBlockedByOwned(this.entities.projectiles, cwIn.shoot)) return;
+    // ★BJ417 2026-09-30（风筝无限出膛用户实报）：原版有在场门——
+    //   HasAProjectileThatHasAUsabilityCheck（ItemID.cs:177 风筝全集）→
+    //   CheckCanUse_Inner 尾支（Player.cs:52932-52935）→ 逐弹 CheckUsability
+    //   （Projectile.cs:54404-54410 aiStyle160→false）。任意 KiteProj 在场即拒,
+    //   被拒尝试零副作用（同回旋镖首守卫纪律）;BJ413 注「原版无单实例门」勘误。
+    if (cwIn.kind === 'kite' && kiteBlockedByOwnedAirborne(this.entities.projectiles)) return;
     const inp = this.input;
     // 瞄准角 = 玩家中心→鼠标世界坐标（ItemCheck_Shoot :47610 vector = MouseWorld −
     // pointPosition 起算）。曾用"鼠标−画布中心"——相机被世界边缘钳制时玩家不在屏心
@@ -18350,8 +18356,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'kite': {
         // ★BJ413 2026-09-30（风筝无效用户实报）：AI_160_Kites 全链（KiteProj 头注）。
         // 出膛 = ItemCheck_Shoot 通用尾支：pointPosition=玩家中心、初速=朝鼠标×
-        // shootSpeed 8、damage 0（风筝弹本体无伤害面）；【无同型在场门】——原版
-        // Kill 门只核对手持 shoot（:49313-49315），同型多只合法共存。
+        // shootSpeed 8、damage 0（风筝弹本体无伤害面）。
+        // ★BJ417 2026-09-30 勘误+补门：在场门=本函数首守卫（kiteBlockedByOwned-
+        // Airborne——CheckUsability aiStyle160 任意型在场即拒,Projectile.cs:54404;
+        // 原「【无同型在场门】同型多只合法共存」系 BJ413 漏检已撤, Kill 门手持
+        // shoot 核对（:49313-49315）只是【存活】门非【使用】门）。
         // 右键 = PlaceTileOnAltUse 放置锚桩链（Game 放置域承载,channel 电平不受
         // 消费影响——controlUseTile 同时驱动收线 Player.cs:43123 flag5 门）。
         const itemId = ITEM_BY_KEY[def.key] ?? 0;

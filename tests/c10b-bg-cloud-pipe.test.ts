@@ -54,7 +54,9 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
     expect(RDR).toMatch(/if \(skyMergeable\) \{[\s\S]{0,600}glbg\.begin\('bg'\);[\s\S]{0,400}biomeBg\.draw\(new GLBgBlit\(glbg\)[\s\S]{0,200}mergedSession = glbg;/);
     // 消费侧:早退路径也收口（merged.end()+全幅 blit+globalAlpha 归位;
     // ★opresent deferBlit=true 收口不 present/blit——FBO 挂起给世界合成 pass3）
-    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{ merged\.end\(!deferBlit\); if \(!deferBlit\) \{ ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\}\s*\n\s*return;/);
+    // ★C10c（2026-09-30）:blit 分账计数器插入（cloudBlitStats.mergedFull/mergedDefer）
+    //  ——结构语义不变,锚随盘刷新（C10b 锚随盘刷新判例 2026-09-28 同族）。
+    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{\s*\n\s*merged\.end\(!deferBlit\);\s*\n\s*if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\}\s*\n\s*return;/);
     // 正常路径:合并会话禁再 begin（begin=清屏会抹掉已交 bg quads）
     expect(SKY).toContain('let batchBegun = mergedMode;');
     // 收口后 Renderer 清引用（每帧独立判定,无跨帧残留;★opresent defer 挂起登记在清引用后）
@@ -71,7 +73,8 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
 
   it('合并收口=全幅 blit（bg 覆盖面不以云 bbox 为界——cloudBlitRect bbox 收口不适用）', () => {
     // ★opresent:deferBlit=true 时收口跳过 blit（FBO 挂起）——缺省路径仍全幅 blit
-    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,400}if \(!deferBlit\) ctx\.drawImage\(shared\.canvas, 0, 0\);[\s\S]{0,120}\} else \{\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
+    // ★C10c:blit 分账计数器插入（mergedFull/mergedDefer/bboxBoth）——锚随盘刷新
+    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,500}if \(!deferBlit\) \{ SkyRenderer\.cloudBlitStats\.mergedFull\+\+; ctx\.drawImage\(shared\.canvas, 0, 0\); \}\s*\n\s*else SkyRenderer\.cloudBlitStats\.mergedDefer\+\+;\s*\n\s*\} else \{\s*\n\s*SkyRenderer\.cloudBlitStats\.bboxBoth\+\+;\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
   });
 
   it('诊断面:cloudMergeUsed/cloudMergeStats（merged/split/- 三态;DebugReport cloudPath 段）', () => {

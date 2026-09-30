@@ -411,8 +411,17 @@ export class Inventory {
   /** armor[20] 下标能否接收物品（ItemSlot.PickItemMovementAction :1363-1494 +
    *  同款唯一性 CanEquipAccessoryInSlot :1311-1327/:3238-3245 + HasSameItemInSlot :3222）：
    *  0-2/10-12 部位校验（head/body/leg slot）+ 功能/时装段同款互斥（DualEquipArmor 例外,
-   *  LeftClick block :1251/:1260）;3-9 功能配饰（vanity 排除）/13-19 社交配饰——
-   *  段内同 type 唯一（自身槽放行 = 换回原位）+ 双翅膀互斥（CanEquipBothAccessories
+   *  LeftClick block :1251/:1260）;3-9 功能配饰/13-19 社交配饰【两段同类门】——
+   *  ★清偿刀 R4（2026-09-30,Q3 登记收口）：原版类门唯 `checkItem.accessory`
+   *  （CanEquipInArmorSlot :1444,功能/社交两支共用,无 vanity 排除臂）——数据面映射
+   *  定谳：itemstats acc:1⟺accessory∧¬vanity（336 件,与 van:1 零交集,★BJ392 审计）、
+   *  acc:0⟺accessory∧vanity 双旗（35 件逐例核实=208/1987/2276/2501/3536-3539/3581/
+   *  3730-3731/3929/4054/4318/4563/4744/4762/4769/4771/4773/4775/4822/5075-5077/5080/
+   *  5104-5106/5345/5347/5587/5596/5628/6141,如 4762 CritterShampoo Item.cs:39177-39185
+   *  accessory=true+vanity=true+hasVanityEffects=true）⇒ 本仓 `acc!==undefined`⟺原版
+   *  Item.accessory,双旗族可进功能段（拖放/CanShareArmor 面;右键面 ArmorSwap :3596
+   *  按 vanity 路由仍进社交段=原版同相）。段内同 type 唯一（自身槽放行 = 换回原位）
+   *  + 双翅膀互斥（CanEquipBothAccessories
    *  :3196-3205;★P4 社交段 3580 例外 :3466-3473 经 accPairConflicts 单源承接）
    *  + 对段（功能↔社交）同 type 互斥（:1313/:1322）。
    *  ★清偿刀 Z（2026-09-29）互斥组臂（U 刀登记债收口,原 P 刀终态盲区）：同段
@@ -445,11 +454,13 @@ export class Inventory {
     }
     const st = statOfInternal(id);
     if (d.accessory) {
-      if (i >= VANITY_ARMOR_START) return false;   // legacy 配饰仅进功能段
-    } else if (i < VANITY_ARMOR_START) {
-      if (st?.acc !== 1) return false;             // 功能配饰槽：vanity 排除
+      if (i >= VANITY_ARMOR_START) return false;   // legacy SW 效果枚举配饰（10034/10035,无原版 vid）仅进功能段=自创域保留
     } else if (st?.acc === undefined) {
-      return false;                                // 社交配饰槽：功能/社交都收
+      // ★清偿刀 R4（2026-09-30）：原版两段同类门=Item.accessory（ItemSlot.cs:1444,
+      //   :1446/:1452 功能/社交支同门,无 vanity 排除臂）——acc:1 功能 ∪ acc:0 双旗
+      //   （van:1 全族=原版 accessory+vanity 双 true）都收;旧 `acc!==1` 排除臂曾把
+      //   4762 等 35 件双旗族拒在功能段外=装备面 parity 偏差（Q3 登记,本刀收口）。
+      return false;
     }
     // ---- 唯一性（CanEquipAccessoryInSlot）----
     const sameSeg: [number, number] = i < VANITY_ARMOR_START

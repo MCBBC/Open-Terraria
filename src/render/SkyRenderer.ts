@@ -2561,7 +2561,11 @@ export class SkyRenderer {
     const merged = mergedSession ?? null;
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) {
-      if (merged) { merged.end(!deferBlit); if (!deferBlit) { ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; } }
+      if (merged) {
+        merged.end(!deferBlit);
+        if (!deferBlit) { SkyRenderer.cloudBlitStats.mergedFull++; ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; }
+        else SkyRenderer.cloudBlitStats.mergedDefer++;
+      }
       return;
     }
     const { bgTopY } = this.cloudBgTop(camY, viewH);
@@ -2607,8 +2611,10 @@ export class SkyRenderer {
           // ★C10b 合并收口:bg+云单背板【全幅】blit(单次 drawImage 替代旧
           //  「bg 全幅+云 bbox」两次;bg 层平铺全宽,bbox 收口不适用)
           //  ★opresent:deferBlit=跳过 blit——FBO('bg') 挂起,世界合成 pass3 消费
-          if (!deferBlit) ctx.drawImage(shared.canvas, 0, 0);
+          if (!deferBlit) { SkyRenderer.cloudBlitStats.mergedFull++; ctx.drawImage(shared.canvas, 0, 0); }
+          else SkyRenderer.cloudBlitStats.mergedDefer++;
         } else {
+          SkyRenderer.cloudBlitStats.bboxBoth++;
           this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
         }
         ctx.globalAlpha = 1;
@@ -2751,7 +2757,7 @@ export class SkyRenderer {
     ctx.restore();
     ctx.globalAlpha = 1;
     // 批模式('both' 双通道共享会话)的 end+全屏 blit 由 drawCloudsNear 统一收口
-    if (gl && !batch) { gl.end(); this.cloudBlitRect(ctx, gl); }   // 合成进主画布(三 pass 间 clear 复用;★perf3:全幅→bbox 子矩形)
+    if (gl && !batch) { gl.end(); SkyRenderer.cloudBlitStats.bboxNoBatch++; this.cloudBlitRect(ctx, gl); }   // 合成进主画布(三 pass 间 clear 复用;★perf3:全幅→bbox 子矩形)
   }
 
   // ---- 云 GL 共享层(#A 2026-08-19 合并:云与背景层共用 Renderer.glfx 一个
@@ -2764,6 +2770,29 @@ export class SkyRenderer {
   /** 'both' 双通道共享批总门(?cloudbatch=0 回退每通道独立会话——2026-08-26 前语义) */
   static readonly batchBoth = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('cloudbatch') !== '0' : true;
+  /** ★C10c（2026-09-30）云尾 blit 归因分账计数器（探针/trace 复核面;静态对象=页内
+   *  直改复位口,P1B_REGION_OFF 判例同款）。【为什么存在】Windows SHM trace
+   *  （Trace-20260930T144504）曾把 1530ms 全屏 blit 记到 cloudBlitRect 名下,而同
+   *  trace merge=merged 占 99.6%——merged 收口恒走 finishBatch 全幅 ctx.drawImage
+   *  支,bbox 支（cloudBlitRect）只应 'both' 独立批会话帧到达 ⇒ 疑 minified 内联/
+   *  sourcemap 段邻接归因错位。本分账把两支实跑分布钉死:
+   *   mergedFull       = merged 收口全幅 drawImage（含早退支;defer 帧不计=不落画）
+   *   mergedDefer      = opresent defer 帧（FBO 挂起,本帧零 blit）
+   *   bbox             = cloudBlitRect bbox 子矩形 blit 实绘
+   *   bboxNoBatch      = ↑中来自无 batch 令牌支（远云 pass1/菜单单通道——游戏内
+   *                      每帧必达面;C10c 定谳的 trace 热点主体）
+   *   bboxBoth         = ↑中来自 'both' 独立批会话支（非 merged 合并门外的近云帧）
+   *   bboxSkipEmpty    = bbox 空/零面积跳过（零提交帧）
+   *   bboxFullFallback = ?cloudcache=0 全幅回退支
+   *   bboxAreaPx       = bbox 实绘面积累计（px²;÷bbox=均单帧 blit 面积,
+   *                      ÷(W×H×帧数)=面积占比——远云 pass 每帧独立会话走此支）
+   *  判读:★C10c 实跑定谳（scripts/_c10c-blit-attribution.mjs）——merged 帧
+   *  mergedFull 与 bbox 【双双 1:1 帧到达】:bbox 支每帧必达的真实 caller=远云
+   *  pass（drawVanillaClouds → drawCloudPass(pass1,无 batch 令牌) → 末尾
+   *  gl.end()+cloudBlitRect,独立会话）,与近云 merged 收口无关。trace 的
+   *  cloudBlitRect 1530ms 归因【非错位】,热点主体=远云 bbox blit（面积占比见
+   *  bboxAreaPx 面）。 */
+  static cloudBlitStats = { mergedFull: 0, mergedDefer: 0, bbox: 0, bboxNoBatch: 0, bboxBoth: 0, bboxSkipEmpty: 0, bboxFullFallback: 0, bboxAreaPx: 0 };
   /** ★perf3(2026-09-19 trace 三批:drawCloudsNear 3.3s,其中 finishBatch 全屏 blit
    *  3.2s native blit;DPR=2 全屏层 blit 面积 4×):尾blit 区域收口——只合成当帧
    *  已提交云 quad 的旋转 bbox 并集子矩形。逐位等价论证:GL 会话 begin() 每帧全幅
@@ -2798,17 +2827,19 @@ export class SkyRenderer {
   /** 云层尾blit:全幅 → 当帧 bbox 子矩形(hatch off / 空 bbox 退旧语义:
    *  空 bbox = 本帧零提交,旧路径 blit 全透明画布 = source-over 恒等,跳过同效)。 */
   private cloudBlitRect(ctx: CanvasRenderingContext2D, layer: GLSpriteLayer): void {
-    if (!SkyRenderer.cloudRegionBlit) { ctx.drawImage(layer.canvas, 0, 0); return; }
+    if (!SkyRenderer.cloudRegionBlit) { SkyRenderer.cloudBlitStats.bboxFullFallback++; ctx.drawImage(layer.canvas, 0, 0); return; }
     const W = layer.canvas.width, H = layer.canvas.height;
     const b = this.cloudBlitBox;
-    if (!b.any || W === 0 || H === 0) return;
+    if (!b.any || W === 0 || H === 0) { SkyRenderer.cloudBlitStats.bboxSkipEmpty++; return; }
     const PAD = SkyRenderer.CLOUD_BLIT_PAD;
     const sx = Math.max(0, Math.floor(b.x0) - PAD);
     const sy = Math.max(0, Math.floor(b.y0) - PAD);
     const ex = Math.min(W, Math.ceil(b.x1) + PAD);
     const ey = Math.min(H, Math.ceil(b.y1) + PAD);
     const sw = ex - sx, sh = ey - sy;
-    if (sw <= 0 || sh <= 0) return;
+    if (sw <= 0 || sh <= 0) { SkyRenderer.cloudBlitStats.bboxSkipEmpty++; return; }
+    SkyRenderer.cloudBlitStats.bbox++;
+    SkyRenderer.cloudBlitStats.bboxAreaPx += sw * sh;
     ctx.drawImage(layer.canvas, sx, sy, sw, sh, sx, sy, sw, sh);
   }
   disposeCloudGL(): void {

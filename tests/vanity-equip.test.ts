@@ -32,11 +32,15 @@ describe('vanity 数据（van 标记）', () => {
 });
 
 describe('armorAccepts 槽位门（社交/功能）', () => {
-  it('功能配饰槽拒社交配饰（acc=0），社交配饰槽收功能/社交两种', () => {
+  it('双旗配饰（acc=0,原版 accessory+vanity）两段都收（★清偿刀 R4 翻案：旧断言"功能槽拒 acc=0"=Q3 登记偏差本体）', () => {
     const inv = new Inventory();
     const halo = internalOf('vi_1987_AngelHalo');
     const boots = internalOf('vi_54_hermes_boots');
-    expect(inv.armorAccepts(3, halo)).toBe(false);      // 功能槽拒 acc=0
+    // ★R4 定谳（2026-09-30）：原版类门唯 `checkItem.accessory`（ItemSlot.cs:1444,
+    //   功能/社交两支共用,无 vanity 排除臂）;1987 天使光环 Item.cs case 1987 =
+    //   accessory=true+vanity=true+hasVanityEffects=true 双旗 → 功能槽照收。
+    //   旧断言 armorAccepts(3, halo)=false 编码的正是 Q3 登记的装备面 parity 偏差。
+    expect(inv.armorAccepts(3, halo)).toBe(true);       // 功能槽收双旗（:1444）
     expect(inv.armorAccepts(13, halo)).toBe(true);      // 社交槽收 acc=0
     expect(inv.armorAccepts(3, boots)).toBe(true);      // 功能槽收 acc=1
     expect(inv.armorAccepts(13, boots)).toBe(true);     // 社交槽也收功能配饰

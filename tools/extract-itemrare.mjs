@@ -58,6 +58,18 @@
 //   守卫探测读注入夹具（零缺失→放行）而写盘落缺省 OUT_DIR=现库 game/src/data，
 //   探测与写盘分离=守卫被绕过洗库。处置：显式 SW_OUT（与探测同沙箱）或同时清
 //   探测 env 走真实现库守卫；--dump 对账通道不写盘不受此限。
+// ★R2 边界登记（2026-09-30 helper 体面收官时的同域残留面,均【未】在本件建模——
+//   逐面有源码锚,修复须各自定谳）：
+//   ① SetFoodDefaults 方法尾 rare=(int)(num/4f)（:48395;1456:48007/1458 同式）——
+//     86 件食物/Eggnog1912/无 case 的 4010 错值型面（饱食档越高 rare 越高,json 恒 SSV 的 1）;
+//   ② SetDefaults3 方法尾 value=buyPrice(0,10)（:27641,2192-2208 笼件段+2194 覆写）——value 缺键;
+//   ③ 方法级 if 范围守卫 rare 面（case 组不可达,QuestFish 2450-2488 已 HAND 同族）：
+//     1522-1527=1(:18541)/1533-1537=8(:18563)/1977-1986=2(:21241)/2104-2113=1(:21879)/
+//     2214-2217=3(:22380)/2284-2287=5(:22993)/3309-3314=2(:30262)/2421=1(:23088);
+//   ④ case 内 per-type if 链 rare（RB20b 同族残留）：bait 链 2303-2321（:23171-23270）、
+//     2420/2421 if-else（:23088-23096）、30189 内层 switch rare=2;
+//   ⑤ SetDefaults 派发后方法级块（:48721-48836 value if 链 + :48843 bait>0 → rare 3/2/1）;
+//   ⑥ 变体 if 分支（Weaker/StrongerVariant）=按设计忽略（本表建模基础变体,非债）。
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
@@ -161,6 +173,109 @@ const FACTORY_VALUE = {
   DefaultToMusicBox: () => '100000',      // value = 100000 字面量
 };
 
+// ============ ★清偿刀 R2（2026-09-30,头注续）：DefaultTo* helper 体 rare/value 编译 ============
+//  extract-itemcombat Q1 DEFAULT_TO_BODY 同法移植（两提取器独立文件,按本件 rare/value
+//  两域裁剪为「委托基座先、自身行后覆写」的行源序模拟;形参不参与 rare/value 表达式
+//  ——11 helper 逐条亲核 RHS 全为字面/buyPrice/sellPrice/ItemRarityColor）。
+//  census（1457 逐 helper 亲读;1456/1458 三版同构零漂移——BodyCensus 对照脚本实证）：
+//  33 名 DefaultTo* 中 11 名体含 rare/value/SetShopValues——DefaultToMusicBox rare=4+
+//  value=100000（:48649-48650）、DefaultToSolution rare=3+value（:47806-47807）、
+//  DefaultToVanitypet rare=3+value（:47944/47946）、DefaultToFood rare=1+value（:48565-
+//  48566）、DefaultToHealingPotion rare=1+value（:48583-48584）、DefaultToTorch value=60
+//  （:48482）、DefaultToQuestFish rare=-11（:27658）、DefaultToKite SSV(Blue1,buyPrice(0,2))
+//  （:47835）、DefaultToBanner SSV(Blue1,1000)（:47756）、DefaultToGolfBall value=0→
+//  SSV(Green2,buyPrice(0,1))（:35459-35460,行序尾胜=rare2/10000）。case 体顶层可达调用点
+//  （id 对,由区域扫描组归属）：MusicBox 101/Solution 3/Vanitypet 51/Kite 24/Banner 3/
+//  GolfBall 15/QuestFish 2/Food 85/Potion 1/SeaShell 5/Torch 8;其余 22 名体无 rare/value。
+//  value 域分工（配方核对,禁双源漂移）：FACTORY_VALUE 七表维持权威（金标已锁;SeaShell
+//  per-type switch 体编译器不可达=表唯一来源）;编译器对七表 helper 做编译值≡表值对拍,
+//  不等即 throw;表缺的 Kite/Banner/GolfBall 由编译器供值。rare 域：编译器唯一权威
+//  （MusicBox=4/Solution=3/Vanitypet=3/Kite=1/Banner=1/GolfBall=2/QuestFish=-11/Food=1/
+//  Potion=1——Food/Potion 调用点全带尾随 SetShopValues,case 级 rare 已在,编译值不新增键）。
+//  fail-loud：①helper 体/委托缺失 ②depth>0 处 rare/value/SetShopValues 不可达编译（唯
+//  SeaShell per-type switch 已知例外,FACTORY_VALUE 承接）③rare RHS 非整数字面 ④value
+//  RHS evalPrice 不可解 ⑤七表 helper 编译值≠表值。
+const DEFAULT_TO_BODY_RV = (() => {
+  const SPEC = new Map(); // name -> (id) => {rare?, value?}
+  // ① 收集全部 DefaultTo* 声明（含重载——DefaultToPlaceableTile int/ushort 双载,自转发）
+  const decls = new Map(); // name -> body[]
+  const declRe = /\b(?:public|private)\s+void\s+(DefaultTo\w+)\s*\(([^)]*)\)\s*\{/g;
+  let dm;
+  while ((dm = declRe.exec(src))) {
+    const name = dm[1];
+    const start = src.indexOf('{', dm.index);
+    let d = 0, end = -1;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') d++;
+      else if (src[i] === '}') { d--; if (d === 0) { end = i; break; } }
+    }
+    if (end < 0) continue;
+    if (!decls.has(name)) decls.set(name, []);
+    decls.get(name).push(src.slice(start + 1, end));
+    declRe.lastIndex = end + 1;
+  }
+  // ② 体编译：行序步进（委托/rare/value/SetShopValues 赋值）;depth>0 的本域赋值不可达
+  //   编译即 fail-loud（era guard ③ 静默兜底禁令;唯 SeaShell switch(type) 已知例外）
+  function compileBody(name, stack) {
+    if (SPEC.has(name)) return SPEC.get(name);
+    if (stack.has(name)) throw new Error(`[extract-itemrare] helper 委托环:${[...stack, name].join('→')}`);
+    const bodies = decls.get(name);
+    if (!bodies) throw new Error(`[extract-itemrare] helper 体缺失:${name}（Item.cs 漂移,禁止静默空体）`);
+    stack.add(name);
+    const steps = [];
+    for (const body of bodies) {
+      let depth = 0;
+      for (const raw of body.split('\n')) {
+        const o = (raw.match(/{/g) || []).length, c = (raw.match(/}/g) || []).length;
+        const t = raw.trim();
+        if (t) {
+          if (depth === 0 && o === 0) {
+            let m;
+            if (new RegExp(`^${name}\\s*\\(`).test(t)) { /* 自转发重载行（int→ushort） */ }
+            else if ((m = /^(DefaultTo\w+)\s*\((.*)\);\s*$/.exec(t))) steps.push({ delegate: m[1] });
+            else if ((m = /^SetShopValues\(ItemRarityColor\.(\w+),\s*([^;]+)\);\s*$/.exec(t))) {
+              const r = RARITY_COLOR[m[1]];
+              if (r === undefined) throw new Error(`[extract-itemrare] helper ${name} SetShopValues 档名不可解:${m[1]}`);
+              steps.push({ rare: r }, { value: m[2] });
+            } else if ((m = /^rare = (-?\d+);\s*$/.exec(t))) steps.push({ rare: +m[1] });
+            else if ((m = /^value = ([^;]+);\s*$/.exec(t))) steps.push({ value: m[1] });
+            // 其它语句（width/height/useStyle…）与本域无关,忽略
+          } else if (/^(rare = |value = |SetShopValues\()/.test(t) && name !== 'DefaultToSeaShell') {
+            throw new Error(`[extract-itemrare] helper ${name} depth>${depth} 处 rare/value/SetShopValues 不可达编译（Item.cs 漂移,禁止静默跳过）:${t}`);
+          }
+        }
+        depth += o - c;
+        if (depth < 0) depth = 0;
+      }
+    }
+    // 委托基座【编译期】递归解析（环检测在此发生）
+    for (const st of steps) if (st.delegate) compileBody(st.delegate, stack);
+    stack.delete(name);
+    const spec = () => {
+      const out = {};
+      for (const st of steps) {
+        if (st.delegate) {
+          const sub = SPEC.get(st.delegate)();
+          if (sub.rare !== undefined) out.rare = sub.rare;
+          if (sub.value !== undefined) out.value = sub.value;
+          continue;
+        }
+        if (st.rare !== undefined) out.rare = st.rare;
+        else {
+          const v = evalPrice(st.value);
+          if (v === null) throw new Error(`[extract-itemrare] helper ${name} value 不可解:${st.value}`);
+          out.value = v;
+        }
+      }
+      return out;
+    };
+    SPEC.set(name, spec);
+    return spec;
+  }
+  for (const name of decls.keys()) compileBody(name, new Set());
+  return SPEC;
+})();
+
 const RARE = {};
 const VALUE = {};
 
@@ -188,7 +303,24 @@ for (const [from, to] of REGIONS) {
       for (const e of g.entries) {
         if (e.kind === 'value') val = e.v;
         else if (e.kind === 'rare') rar = e.v;
-        else if (e.kind === 'factory') { const fv = evalPrice(FACTORY_VALUE[e.name](id)); if (fv !== null) val = fv; }
+        else if (e.kind === 'factory') {
+          // ★R2：工厂调用 → DEFAULT_TO_BODY_RV 体编译规格。rare 域=编译器唯一权威;
+          //   value 域=FACTORY_VALUE 七表权威（金标已锁）+编译值对拍（不等即 throw,
+          //   禁双源漂移）;表缺 helper（Kite/Banner/GolfBall 等）由编译器供值。
+          const spec = DEFAULT_TO_BODY_RV.get(e.name);
+          if (!spec) throw new Error(`[extract-itemrare] 工厂 ${e.name} 无体编译规格（Item.cs 漂移,禁止静默空面）`);
+          const b = spec(id);
+          if (b.rare !== undefined) rar = b.rare;
+          const table = FACTORY_VALUE[e.name];
+          if (table) {
+            const fv = evalPrice(table(id));
+            if (fv === null) throw new Error(`[extract-itemrare] ${e.name} FACTORY_VALUE 不可解:${table(id)}`);
+            if (b.value !== undefined && fv !== b.value) throw new Error(`[extract-itemrare] ${e.name} value 双源漂移:表=${fv} 体编译=${b.value}`);
+            val = fv;
+          } else if (b.value !== undefined) {
+            val = b.value;
+          }
+        }
       }
       if (val !== undefined && VALUE[id] === undefined) VALUE[id] = val;
       if (rar !== undefined && RARE[id] === undefined) RARE[id] = rar;
@@ -219,7 +351,10 @@ for (const [from, to] of REGIONS) {
       if (v !== null) g.entries.push({ kind: 'value', v });
       continue;
     }
-    if ((m = s.match(/^(DefaultTo(?:SeaShell|Solution|Vanitypet|Torch|Food|HealingPotion|MusicBox))\(/))) {
+    // ★R2：工厂 regex 扩面 7 名 → DefaultTo\w+ 全量（Kite/Banner/GolfBall/QuestFish 等
+    //   体含 rare/SetShopValues 的 helper 调用点此前整行不可见;体面产出走
+    //   DEFAULT_TO_BODY_RV 编译规格,见 flush 工厂分支）
+    if ((m = s.match(/^(DefaultTo\w+)\(/))) {
       g.entries.push({ kind: 'factory', name: m[1] });
       continue;
     }
@@ -265,6 +400,21 @@ const HAND_RARE = {
   4648: 1, 4649: 1, 4650: 1, 4651: 1,
   4669: 1, 4670: 1, 4671: 1, 4674: 1, 4675: 1, 4676: 1, 4677: 1,
   4681: 1, 4683: 1, 4684: 1,
+  // ★R2 2026-09-30（helper 体 rare 面·方法级 if 范围守卫形态,Kite/BJ413 判例同构）：
+  //   angler 任务鱼 2450-2488（39 件）rare=-11——rare 由 DefaultToQuestFish 体 :27657
+  //   `rare = -11;` 落,但调用点在 SetDefaults3 方法级范围守卫 `if (type >= 2450 &&
+  //   type <= 2488)`（:24153-24157,内层 switch 收口后）=非 case 组顶层,本扫描器
+  //   「只认 case 体顶层」口径不可达→HAND 钉值。case 顶层调用的 4393/4394 走上方
+  //   DEFAULT_TO_BODY_RV 体编译器自动入面（同 rare=-11）,3385-3388 为 case 级显式行
+  //   （:30975）既有——任务鱼全族 45 件=39+2+4。消费面：Bobber consumeBait
+  //   （Player.cs:53148-53156 rare<0 饵不耗,任务鱼原版同款）+ tooltip 稀有色 quest 档
+  //   （UI rarityColor −11 档）。
+  2450: -11, 2451: -11, 2452: -11, 2453: -11, 2454: -11, 2455: -11, 2456: -11,
+  2457: -11, 2458: -11, 2459: -11, 2460: -11, 2461: -11, 2462: -11, 2463: -11,
+  2464: -11, 2465: -11, 2466: -11, 2467: -11, 2468: -11, 2469: -11, 2470: -11,
+  2471: -11, 2472: -11, 2473: -11, 2474: -11, 2475: -11, 2476: -11, 2477: -11,
+  2478: -11, 2479: -11, 2480: -11, 2481: -11, 2482: -11, 2483: -11, 2484: -11,
+  2485: -11, 2486: -11, 2487: -11, 2488: -11,
 };
 for (const [id, r] of Object.entries(HAND_RARE)) RARE[id] = r;
 // ★BJ413：24 风筝 value=20000（2 金）——DefaultToKite 体 :47835 buyPrice(0, 2)

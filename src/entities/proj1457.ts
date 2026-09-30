@@ -22,7 +22,9 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll } from './projTargets';
 // ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
-import { ghostHealProc } from './SpectreSoulProj';
+// ★BJ420 幽灵伤害头 ghostHurt 同单源 + 受理面快照（清偿刀 T 族规）
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt,
+  snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
@@ -399,6 +401,13 @@ export function dealContacts(
     //  方法,本仓 Game.takeDamageFromJellyfish 单源）;②随后 `if (dontTakeDamage)
     //  return` 拦掉本次伤害。非充能水母（zapJelly && !jellyDontTake）不进本块,照常
     //  受伤。原版 immune 窗门（:12650）先于水母块 ⇒ 本块置 cd.ready 后同拍。
+    //  ★登记债 R1-C（清偿刀 R1,2026-09-30,D2 同族窄面不落刀）：原版水母 return 在写梯
+    //  :14031 前=拒收零落账;本仓 cd.ready【读+写】在块前——充能水母被拒/被电拍照消费
+    //  冷却行（HitCdImpl/IdStaticSharedTable 皆读时写）。精确修复须拆 ready() 为
+    //  peek/commit 两相（12 调用方共享抽象,双相偏差面:表读门内移则电击门脱离 :12596
+    //  节流）→ 不属本刀机械可落域,登记下窗。现役受影响成员:1126/1127（接触族）+
+    //  482（非接触族仅消费无电击）;水母充能态本就 dontTakeDamage 零伤,可观测面=解
+    //  充能后 10t 内的节流残留。
     //  GAP 登记：同款外环门+水母块在 Arrow 主命中环 / WhipProj.tryHit 环未接（两环
     //  现状=整靶跳过,伤害面与原版同值,仅缺接触族反噬电击——鞭 IsAWhip 属接触族）
     if (zapJelly && jellyDontTake) {
@@ -1058,6 +1067,23 @@ export class PetalstormShot extends Entity {
       //  （immune/cd 门 continue 在 onHit 前）。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★BJ420 幽灵伤害头 ghostHurt（Projectile.cs:13881/:12021,SpectreSoulProj 单源）：
+      //  1116 数据面 magic（:10419-10426）+ 幽灵面具套装 → 受害者 Center 放浮魂 356。
+      //  受理面 = dealContacts 内环免疫门（红蓝-L1① 收编,:12635-12638/:12600 在
+      //  onHit 前拒）⇒ 到达本位即原版 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
       this.dead = true;                                       // penetrate=1 → Kill
     });
@@ -1671,7 +1697,15 @@ export class StormLightning extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // aiStyle203 Colliding 全口径（bolt 折线 ±8 含容 / 爆域 / 液体导通——A①②）
       if (!this.stormBoltCollides(game, e.x, e.y, e.w, e.h)) continue;
-      if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;
+      // ★清偿刀 R1（2026-09-30,D2+D3 收口）：原版序 = :12635 免疫门（拒收 return——
+      //  StatusNPC :13634/StrikeNPC :13702/写梯 :14031-14038/numHits++ :14263 全不可达,
+      //  零结算零写零耗）→ :12596 表读门 → 结算 → 写梯。旧档 cd.ready（1122=IDStatic
+      //  共享表【读+写】）先于免疫门 = 拒收拍先消费 10t 表行（D2：原版写梯受理后才写,
+      //  被拒不落表——本拍/下拍本应受理的同型弹反被表行拒）;1117/1091 的 per-bolt
+      //  HitCdImpl 单趟循环恒不拒,门位前移零观测。快照仍取 hurt 前态（清偿刀 T 族规）。
+      const gateSnap = snapshotVanillaGate(e);
+      if (vanillaGateRejected(gateSnap)) continue;                    // :12635 门拒全静默（D3 面）
+      if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;  // 表行随受理写（D2 面）
       const crit = Math.random() < this.critChance;
       let dmg = crit ? this.damage * 2 : this.damage;
       // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633,
@@ -1704,19 +1738,52 @@ export class StormLightning extends Entity {
         }
       }
       const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★D4 写面对齐（清偿刀 R1,2026-09-30）：1122 usesIDStatic 支（:14031-14038,
+      //  Kill 覆写 maxPenetrate=penetrate=-1 :71920-71921 ⇒ 内层 :14033 真）真值 =
+      //  `immune[owner]=0` 清窗（:14035）+ perIDStatic 静态表行（:14036）——节流归
+      //  型级共享表,【非】新开全局窗 ⇒ Enemy.hurt pierce=-2（三不写档,SporeGasCloud
+      //  567/568 与 482 判例同式）,静态表行由上方 cd.ready 受理支承载。1117/1091 无
+      //  免疫旗 → 走尾档 :14180-14183（penetrate=-1≠1 → immune[owner]=10 新窗）=
+      //  pierce=0 面正确不动（1091 hostile 排除同相:SetDefaults :10178-10186 无 magic
+      //  行+flag10 !hostile 段,下方 proc 双 magic 门零行为过滤）。
+      //  （门已在上方受理面收口——BJ420 旧后置快照+wrapper 退役:到达本位恒受理面,
+      //  pveNumHits/proc 无条件达;门拒面 comboSeed 治疗支（:12795-12807 return）随
+      //  门位前移一并收口——旧档 iframes>0 敌照治。）
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit,
+        this.projId === 1122 ? -2 : 0, true);   // fromPlayer=DPS 计（1122=-2 清窗档,D4）
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
+      //  ★D3 受理面化：StatusNPC :13634 在 :12635 门后 = 拒收不可达（Arrow BJ395
+      //  受理面化同族）——门拒 continue 已在上方,此处恒受理面（旧档拒收拍照跑 =
+      //  buff 400 照上,判别测试红）。
       applyProjStatus(this.projId, ent as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;1117/1122 数据面
       //  magic ⇒ 原版本就吸血）——proc 先于 :14263 numHits++（读自增前值）;拒收不
-      //  proc 不计数（cd.ready/stormBoltCollides continue 在本位前）。1091 hostile∧
+      //  proc 不计数（免疫门 continue 已在上方受理面收口,R1 门位前移）。1091 hostile∧
       //  非 magic（SetDefaults :10178-10186 无 magic 行）经 ghostHealProc magic 门
       //  零行为过滤（flag10 的 !hostile 段同判）。comboSeed 治疗支 continue 在 hurt
       //  前 ⇒ 不达本位=不 proc 不计数（原版 StrikeNPC 不跑,同态）。
       //  ★BJ384：critter 桶已收口（上方小动物命中面——victim 循环同舱,桶序登记）。
       ghostHealProc(game, this.projId, this.pveNumHits,
         e as never as Parameters<typeof ghostHealProc>[3]);
+      // ★BJ420 幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/:12021 方法体,
+      //  SpectreSoulProj 单源复用——MagicProj/Arrow/MissileProj/Dart/WeaponProj 既站
+      //  同构）：1117/1122 数据面 magic（SetDefaults :10433-10437/:10439-10446
+      //  `magic = true`）+ 幽灵面具套装（player.ghostHurt）→ 受害者 Center 放追踪
+      //  浮魂弹 356（伤=弹基伤,防后实扣 dealt 只做 >1 门）。用户实报「电弧涌动
+      //  （6173→1122）不触发幽灵套」定谳=本缺面。1091 由数据面 magic 门过滤
+      //  （SetDefaults :10178-10186 无 magic 行,flag10 !hostile 段同判）。
+      if (projectileData(this.projId)?.magic && playerHasGhostHurt(game.player)) {
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+            vanillaId: e.vanillaId,
+            lifeMax: e.maxHp,
+            dealt: (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     }
   }
@@ -2226,6 +2293,22 @@ export class GlacierFangShot extends Entity {
       //  :10469）——hits 读自增前值（:14263 numHits++ 在 proc 后 ⇒ 首跳 0 档率 0.20）。
       ghostHealProc(game, this.projId, this.hits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★BJ420 幽灵伤害头 ghostHurt（Projectile.cs:13881/:12021,SpectreSoulProj 单源）：
+      //  1115 数据面 magic（:10464-10470）+ 幽灵面具套装 → 受害者 Center 放浮魂 356。
+      //  受理面 = dealContacts 内环免疫门（红蓝-L1①,同 1116 站注）。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.hits++;
       this.pveNumHits++;                                     // ★X2-D4 写位（与 hits 同面）
       if (this.hits >= this.penTier) this.dead = true;          // penetrate 耗尽 → Kill
@@ -2506,10 +2589,28 @@ export class ThunderBoltShot extends Entity {
     //  弹体命中后续航）——BJ381 债域仅 critter 面,敌面下窗独立定谳。
     if (hitCritters(this, game)) { this.die(game); return; }
     dealContacts(this, game, this.hitCd, 10, (t) => {
-      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;731 magic :7701）——proc 先于
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;731 magic :7702）——proc 先于
       //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★清偿刀 R1 D1（2026-09-30）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/
+      //  :12021 方法体,SpectreSoulProj 单源零改动复用;BJ420 1115/1116 同构）——
+      //  731 数据面 magic（SetDefaults :7696-7706 `magic = true` :7702）+ 幽灵面具
+      //  套装 → 受害者 Center 放浮魂 356。受理面 = dealContacts 内环免疫门
+      //  （:12635/:12600 收编,在 onHit 前拒）⇒ 到达本位即 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     });                                                        // 缺省免疫窗（非 local 表族）
   }
@@ -2726,10 +2827,28 @@ export class LaserMachinegunLaser extends Entity {
     //  ★登记：敌面 hit-death/flag3 单发免疫豁免未建模（同 731,缺省免疫窗近似）。
     if (hitCritters(this, game)) { this.die(game); return; }
     dealContacts(this, game, this.hitCd, 10, (t) => {
-      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;440 magic :5125）——proc 先于
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;440 magic :5116）——proc 先于
       //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★清偿刀 R1 D1（2026-09-30）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/
+      //  :12021 方法体,SpectreSoulProj 单源零改动复用;BJ420 1115/1116 同构）——
+      //  440 数据面 magic（SetDefaults :5106-5117 `magic = true` :5116）+ 幽灵面具
+      //  套装 → 受害者 Center 放浮魂 356。受理面 = dealContacts 内环免疫门
+      //  （:12635/:12600 收编,在 onHit 前拒）⇒ 到达本位即 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     });
   }
@@ -2921,11 +3040,29 @@ export class BookStormTwister extends Entity {
     //  critter lifeMax=5 经 flag10 lifeMax>5 段恒不吸血——hitCritters 支只入账不 proc）
     if (hitCritters(this, game)) this.pveNumHits++;
     dealContacts(this, game, this.hitCd, -1, (t) => {
-      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;704 magic :7454）
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;704 magic :7455）
       //  ——与 BJ381 hitCritters 命中面共存:critter 支不 proc（见上）,敌面受理位
       //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★清偿刀 R1 D1（2026-09-30）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/
+      //  :12021 方法体,SpectreSoulProj 单源零改动复用;BJ420 1115/1116 同构）——
+      //  704 数据面 magic（SetDefaults :7449-7462 `magic = true` :7455）+ 幽灵面具
+      //  套装 → 受害者 Center 放浮魂 356。受理面 = dealContacts 内环免疫门
+      //  （:12635/:12600 收编,在 onHit 前拒）⇒ 到达本位即 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     });                                                         // localNPCHitCooldown=−1
   }
@@ -3188,10 +3325,28 @@ export class PrincessMagicCircle extends Entity {
     //  critter lifeMax=5 恒不吸血,只入账）。
     if (hitCritters(this, game)) this.pveNumHits++;
     dealContacts(this, game, this.hitCd, 10, (t) => {
-      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;950 magic :8969）——proc 先于
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;950 magic :8964）——proc 先于
       //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
       ghostHealProc(game, this.projId, this.pveNumHits,
         t as never as Parameters<typeof ghostHealProc>[3]);
+      // ★清偿刀 R1 D1（2026-09-30）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点/
+      //  :12021 方法体,SpectreSoulProj 单源零改动复用;BJ420 1115/1116 同构）——
+      //  950 数据面 magic（SetDefaults :8958-8970 `magic = true` :8964）+ 幽灵面具
+      //  套装 → 受害者 Center 放浮魂 356。受理面 = dealContacts 内环免疫门
+      //  （:12635/:12600 收编,在 onHit 前拒）⇒ 到达本位即 flag10 块可达面。
+      if (playerHasGhostHurt(game.player)) {
+        const v420 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+          maxHp?: number; def?: { lifeMax?: number } };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: t.x + t.w / 2, cy: t.y + t.h / 2,
+            vanillaId: v420.vanillaId,
+            lifeMax: v420.maxHp ?? v420.def?.lifeMax,
+            dealt: v420.lastStrikeDealt ?? 0 });
+      }
       this.pveNumHits++;
     });                                                         // 缺省免疫窗
   }

@@ -1993,6 +1993,9 @@ export class Enemy extends Entity {
    *  【后】快照 NPC.cs:18197——首入态 6 捕获、态 0 复位消费；直接读写 def.* 会逐 tick
    *  复利。AI_039 417 逐值批 2026-09-03） */
   srollerDefBase?: { dmg: number; def: number };
+  /** 非 417 陆龟族 defDamage/defDefense 基准快照（首 AI 拍=ScaleStats 后、先于任何 AI
+   *  写点）——态 0 每拍属性复位（NPC.cs:29453-29462）的 def 侧基准（R3 清债落位） */
+  tortoiseDefBase?: { dmg: number; def: number };
   /** AI_039 oldVelocity.X 快照（NPC.cs:93681 `oldVelocity = velocity` 在 ApplyTileCollision
    *  :93687 之前——即"本拍 AI 写速后、碰撞改速前"的 vx；下一拍态 0 翻转臂
    *  `!justHit && velocity.X != oldVelocity.X`（:29469-29472）消费 = 上一拍碰撞是否改变
@@ -7081,10 +7084,14 @@ export class Enemy extends Entity {
    *    走完态 0 尾不早退）；行走 accel 0.07 三臂（|vx|>max∧vy==0 衰减 ×0.8 / direction
    *    门加速 / 死区），近(<400) max±1 远 ±1.5（496/497 恒 0.5），前方 3×4 无地转身；
    *  1 蓄势：vx×0.5、ai[1]+1(496/497 ×0.5) ≥30 → 3（417 → 6 态滚动）；
-   *  3 旋冲：首帧定速 有视线10/无视线6（496/497 ×0.75；瞄准 Y 加 |dx|*0.2、无视线强制
-   *    vy=-10），飞行中与玩家 X 重叠 → vx×0.8 停升，否则 vy-=0.22 持续上旋，≥90t → 4；
-   *  4 下落：vx×0.96，落地 → 5；
-   *  5 复位：vx=0，+1/t(×0.5) ≥30 → 回 0；wet 直接回 3；417 底边锚定复原 52 高；
+   *  3 旋冲：首帧 TargetClosest（:29635）+单式两支定速 有视线10/无视线6（496/497 ×0.75;
+   *    aim=player顶−cy−|dx|×0.2（directionY>0 归 0）归一,vx=朝玩家归一分量,无视线仅
+   *    vy=-10,R3）,飞行中与玩家 X 重叠 → vx×0.8 停升，否则 vy-=0.22 持续上旋，≥90t → 4；
+   *    wet∧dirY<0 → vy-=0.3（:29693,每拍含弹射拍,R3）；
+   *  4 下落：wet∧dirY<0 → vy-=0.3（:29701,R3）+ vx×0.96，落地 → 5；
+   *  5 复位：rotation=0（:29838,R3）+ vx=0，+1/t(×0.5) ≥30 → TargetClosest（:29850,
+   *    先于清零,R3）→ 回 0；wet 直接回 3（转态门后置,≥30∧wet 拍 TargetClosest 仍面）；
+   *    417 底边锚定复原 52 高；
    *  6 Sroller 日耀滚动（NPC.cs:29699-29832 全量,2026-09-03 骨架→逐值定版）：
    *    每 tick damage=lerp(defDmg×1.8,×1.4)/defense=defDef×2/kbResist=0（:29700-03）；
    *    2/3 尘 aura（:29704-12）；ai[1]++ 后 ai[3] 尘爆子计数 1..10 循环（:29717-53，
@@ -7097,7 +7104,14 @@ export class Enemy extends Entity {
   private tortoiseAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     // npc.rotation 默认 0（visAngle 类字段默认 π 是 EoC 语境）
-    if (!this.aiInit) { this.aiInit = true; this.visAngle = 0; }
+    if (!this.aiInit) {
+      this.aiInit = true;
+      this.visAngle = 0;
+      // defDamage/defDefense 基准快照（首 AI 拍=ScaleStats 后、先于任何 AI 写点;
+      // :29453-29462 态 0 每拍复位的 def 侧基准。417 走 srollerDefBase 态 6 快照,
+      // 此快照对其仅为冗余兜底）
+      this.tortoiseDefBase = { dmg: this.def.damage ?? 0, def: this.def.defense ?? 0 };
+    }
     if (this.ai0 < 0) this.ai0 = 0;
     const t496 = this.vanillaId === 496 || this.vanillaId === 497;
     const sroller = this.vanillaId === 417;
@@ -7112,8 +7126,17 @@ export class Enemy extends Entity {
     }
     const dx = player ? player.cx - this.cx : 0;
     const dy = player ? player.cy - this.cy : 0;
-    const dist = player ? Math.hypot(dx, dy) : Infinity;
-    const los = !!player && !player.dead && this.canSeePlayer(st, player);
+    // num606 距离基准（NPC.cs:29424-29427）= hypot(playerCenterX−npcCenterX,
+    //   player【顶】Y−npcCenterY)——玩家顶对龟心（非中心距;42 高玩家 ≈21px 偏置）。
+    //   消费面=蓄力双臂（>200/>600）与加速档（<400）——本仓 dist 单源同式（R3 定谳:
+    //   旧中心距在玩家近竖直方位时跨档=加速 max 1/1.5 误档、蓄力 200/600 阈漂移）
+    const dist = player ? Math.hypot(dx, player.y - this.cy) : Infinity;
+    // flag46（:29428 Collision.CanHit）= 纯几何,无 dead 门——原版 target 停留死玩家
+    //   （TargetClosest 只在【选段】跳过 dead(:78459),旧 target 保持 → flag46/弹射
+    //   仍以尸体位姿几何结算;死亡玩家角落照常蓄力/全速弹射=原版语义）。faceTarget=
+    //   false 的「不面向死玩家」由各 TargetClosest 位点的 !dead 门承担（R3 定谳,
+    //   旧 los 含 !player.dead → 蓄力臂断+弹射降档=偏差）
+    const los = !!player && this.canSeePlayer(st, player);
     const gravityStep = () => {
       // oldVelocity.X 快照（NPC.cs:93681 Update 尾 oldVelocity=velocity 在
       // ApplyTileCollision :93687 前）——态 0 翻转臂 :29469 消费;每拍移动前写=原版每拍写同相
@@ -7141,6 +7164,23 @@ export class Enemy extends Entity {
             this.def.defense = this.srollerDefBase.def;
           }
           this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.3, this.difficulty || 1);
+        } else {
+          // 态 0 每 tick 属性复位·非 417 支（:29453-29462 1:1,R3 定谳——原版复位是
+          // 全型段,旧只落 417=登记债）：defense=defDefense / damage=defDamage /
+          // knockBackResist=GetKnockbackMultiplier_ScaledByDifficulty(0.75 496/497 |
+          // 0.3)。★现时行为面=稳态零差（153/154 SetDefaults kb=0.3 :10965/:10980、
+          // 496/497=0.75 :14716,ScaleStats :18114 出生已乘同曲线=复位值;def.damage/
+          // defense 现无 AI 内写点）——落位为态 3 伤害/防御强化债（:29556-29558,
+          // 登记中）的前置机构,该写点落地日起本复位成为其逐拍解除点。
+          // 写值等值时不动 this.def（ENEMY_DEFS 共享 def 防跨实例污染;异值=外部
+          // 写点已 COW 或此处 COW 后逐实例复位=原版 per-NPC 字段语义）
+          const tBase = this.tortoiseDefBase;
+          if (tBase && ((this.def.damage ?? 0) !== tBase.dmg || (this.def.defense ?? 0) !== tBase.def)) {
+            if (this.def === (ENEMY_DEFS[this.key] ?? PLACEHOLDER_DEF)) this.def = { ...this.def };
+            this.def.damage = tBase.dmg;
+            this.def.defense = tBase.def;
+          }
+          this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(t496 ? 0.75 : 0.3, this.difficulty || 1);
         }
         // 蓄力双臂（NPC.cs:29427-29451）：>200∧视线 +2/4；>600 ∧（视线 ∨ 盒底>
         // 玩家顶−200）+4/10——★第二臂纵向条件 = NPC【不】在玩家头顶远处（BJ410-Q2
@@ -7337,16 +7377,26 @@ export class Enemy extends Entity {
     if (this.ai0 === 3) {
       // ---- 旋转弹射 ----
       if (this.ai1 === 0) {
-        const spd = (los ? 10 : 6) * (t496 ? 0.75 : 1);
-        if (los && player) {
-          const aimY = dy + (dy > 0 ? 0 : Math.abs(dx) * 0.2); // directionY>0 时偏置为 0
-          const d = Math.hypot(dx, aimY) || 1;
-          this.vx = (dx / d) * spd;
-          this.vy = (aimY / d) * spd;
-        } else {
-          this.vy = -10;
-          this.vx = this.facing * spd;
+        // TargetClosest（:29635,faceTarget=true;dead→faceTarget=false 不转向 :78540-42）
+        // ——先于弹射/偏置/旋向消费（旧缺=无视线支按行走朝向发射、dirY 域无源,R3 定谳）
+        if (player && !player.dead) {
+          this.facing = this.seekDirX(player);
+          this.dirY = dy < 0 ? -1 : 1;
         }
+        // 弹射定速（:29636-29655 单式两支,R3 定谳——旧 LOS 支 bias 反号+中心距、
+        //   无视线支 vx=facing×spd 全速=三重偏差）：num617=视线 10/无 6（496/497
+        //   ×0.75 :29645-47）;num618=playerCenterX−centerX;num619=|num618|×0.2
+        //   （directionY>0 归 0 :29644-46）;num620=player【顶】Y−centerY−num619
+        //   （玩家在上方时 bias 再抬高=弧线补偿）;归一×num617（:29650-54）;无视线
+        //   仅 vy 强制 −10（:29652-54）,vx 仍=朝玩家归一分量（玩家近正上/正下方
+        //   时 vx→0,非全速）
+        const spd = (los ? 10 : 6) * (t496 ? 0.75 : 1);
+        const num618 = dx;
+        const num619 = this.dirY > 0 ? 0 : Math.abs(num618) * 0.2;
+        const num620 = (player ? player.y - this.cy : 0) - num619;
+        const num621 = Math.hypot(num618, num620) || 1;
+        this.vx = (num618 / num621) * spd;
+        this.vy = los ? (num620 / num621) * spd : -10;
         this.ai3 = this.vx; // 存 vx
         // 旋踢一脚（cs:29562-29563 首帧）：ai[2] +0.3 且 rotation += ai[2]×direction
         this.ai2 += 0.3;
@@ -7360,6 +7410,9 @@ export class Enemy extends Entity {
           this.vy -= 0.22;
         }
       }
+      // wet 段（:29693-29696,态 3 每拍含弹射拍;原版序=else 支/转态门后、旋转尾前;
+      //   R3 定谳=旧缺）：wet ∧ directionY<0（玩家在上）→ vy−=0.3 上浮助推
+      if (this.wet && this.dirY < 0) this.vy -= 0.3;
       // 全程续旋（cs:29619 态尾）：rotation += ai[2]×direction（恒速，~0.3 rad/t）
       this.visAngle += this.ai2 * this.facing;
       this.ai1 += 1;
@@ -7370,6 +7423,8 @@ export class Enemy extends Entity {
     if (this.ai0 === 4) {
       // ---- 下落恢复（cs:29631-29645）：ai[2]>0 时 −0.01/t 且续旋衰减；
       //      ai[2]≤0 且 vy≥0 → rotation=0；落地清 ai[2]/rotation → 复位 ----
+      // wet 段（:29701-29704,与态 3 同谓词同族;R3 定谳一并落位）
+      if (this.wet && this.dirY < 0) this.vy -= 0.3;
       this.vx *= 0.96;
       this.ai2 -= 0.01;
       if (this.ai2 > 0) this.visAngle += this.ai2 * this.facing;
@@ -7383,11 +7438,24 @@ export class Enemy extends Entity {
       // （NPC.cs:29813-29816）罐装高度复原 32→52（底边锚定;h 已 52 时逐 tick 无操作）
       this.y += this.h; this.h = 52; this.y -= this.h;
     }
+    // rotation=0（:29838,态 5 每拍;R3 定谳=旧缺,收旋期残余倾角带入复位态）
+    this.visAngle = 0;
     this.vx = 0;
     this.ai1 += t496 ? 0.5 : 1;
     gravityStep();
-    if (this.wet) { this.ai0 = 3; this.ai1 = 0; return; }
-    if (this.ai1 >= 30) { this.ai0 = 0; this.ai1 = 0; }
+    // 转态门先于 wet（原版序 :29847-29856）:≥30 → TargetClosest（:29850,先于
+    //   ai1/ai0 清零——wet tick 亦面,面后 wet 覆写转 3 :29853-29856）→ 回 0 态
+    //   （回 0 态头 sign(vx)=vx 0 保向 → 此处面向即复走朝向,R3 定谳=旧缺+旧序
+    //   wet 先判早退使 ≥30∧wet 拍 TargetClosest 整蒸发）
+    if (this.ai1 >= 30) {
+      if (player && !player.dead) {
+        this.facing = this.seekDirX(player);
+        this.dirY = dy < 0 ? -1 : 1;
+      }
+      this.ai1 = 0;
+      this.ai0 = 0;
+    }
+    if (this.wet) { this.ai0 = 3; this.ai1 = 0; }
   }
 
   /** AI_041 赫柏林 174/德普林 177（NPC.cs:30017-30280）：ai[0] 负数倒计时（ai[2]==0 时

@@ -95,6 +95,24 @@ export let liqgl = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('liqgl') !== '0' : true;
 export function liqglSetForTest(v: boolean): void { liqgl = v; }
 
+// ---- ★C13b 液体 op-batch 总闸（2026-09-30;P1 性能战役主刀）----
+// 【trace 定谳（Trace-20260930T144504,Windows SHM 58s）】flushAcc self=1349ms +
+//  resolveTex=782ms = 逐 op shim 税。liqgl（主循环/微光基色,09-27 转正）与
+//  liqpolish（sparkle/glint ADD/微光浸润带/fg 复用,09-29 转正）落位后,残余逐 op
+//  形态（探针 scripts/_c13b-census.mjs 实测水面场景 ≈234 shim drawImage/帧）:
+//   ①浸润带非微光支（水/岩浆/蜂蜜;bg pass + 实心层 pass 双份,~130+104 drawImage/帧）
+//   ②斜面覆盖增强（bg pass,LiquidSlope 懒载表,~24/帧）
+//   ③IIIII256 白色水面亮线（实心层 pass,slope1/2 水线格）。
+//  三形态全是【轴对齐纹理 quad】（坡面切条=LiquidSlope 纹理源矩形,非几何切分;
+//  亮线=2px 源条）→ 可折顶点批。复用 liqgl 基底环（batQuad/flushBandRun/
+//  pushQuadBatchRgba 通道）,发射位=调用位=层序保持。
+// 【本刀】bandBatC13b 臂（非微光带+亮线）+ slopeBatOn 臂（斜面增强）:
+//  ?c13b=0 = 逃生门（三形态回逐 op 原链逐位;liqpolish 微光臂不受本旗管——两旗正交,
+//  ?liqpolish=0 语义不变）。
+export let liqC13b = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('c13b') !== '0' : true;
+export function liqC13bSetForTest(v: boolean): void { liqC13b = v; }
+
 /** 批发射钩（Renderer 中介→GLShimExecutor.pushQuadBatchRgba;emitPrecipQuadBatch 同构） */
 export interface LiqBatchEmit {
   emit(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
@@ -118,6 +136,10 @@ const _batMeta = new Float32Array(LIQ_RING_CAP * 4);
 let _batN = 0;                               // 本帧已入环 quad 总数
 let _batFrame = -1;                          // 环复位帧号（frameToken=animTick）
 let _batOverflow = false;                    // 帽触发位（触发后本帧余量恒 CPU 路径）
+/** ★C13b 软溢出位（带/坡面批专用）：溢出只把本批臂余帧降级 CPU（=现行逐 op 行为）,
+ *  【不】置 _batOverflow——硬位会连带触发 fg canvas-gate 回退（liqRingOverflow 消费）
+ *  与 fg 复用停用,带 quads 不在 gate（_fgRuns 只收主循环段）,连带=重场景无谓劣化。 */
+let _batSoftOvf = false;
 /** gate y 镜像重发射数据槽（消费即弃,单槽同帧消费——雨刀同判例） */
 const _gateData = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
 /** 微光四角色单槽（shimmerCornerColors 写入,batQuad 读——消费即弃零驻留） */
@@ -432,13 +454,19 @@ function shimmerCornersFromWaves(
  *  _slope-water-flip-ab 定谳面:前景格 wOn=[53,92,214] vs wOff=[49,61,119]
  *  （Δ=0.5·S_texel;bg+fg 叠格 1.5·S 钳 255）=用户实报「水格子太亮像叠色/
  *  偶发闪烁」。微光重放用色由 replayLiqRun2D 按 R2b-F3 unpre 惯例拆回。
- *  r=g=b=1 → 恒等调制(预乘后=α);微光 tile 传四角逐通道色(预乘 gaT)。 */
+ *  r=g=b=1 → 恒等调制(预乘后=α);微光 tile 传四角逐通道色(预乘 gaT)。
+ *  ★C13b soft 入参（缺省 false=主循环硬域）：带批/坡面增强段传 true——帽触发只置
+ *  _batSoftOvf（本批臂余帧降 CPU）,不触 _batOverflow 硬面（gate 回退/复用停用连带
+ *  面见其注;带 quads 不在 gate）。 */
 function batQuad(
   sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
   dx0: number, dy0: number, dw: number, dh: number, a: number,
-  cols: Float32Array | null, colOff: number,
+  cols: Float32Array | null, colOff: number, soft = false,
 ): boolean {
-  if (_batN >= LIQ_RING_CAP) { _batOverflow = true; return false; }
+  if (_batN >= LIQ_RING_CAP) {
+    if (soft) _batSoftOvf = true; else _batOverflow = true;
+    return false;
+  }
   const o = _batN * LIQ_QUAD_FLOATS;
   const ua = (sx - LIQ_TIE_EPS) / texW, ub = (sx + sw - LIQ_TIE_EPS) / texW;
   const va = (sy - LIQ_TIE_EPS) / texH, vb = (sy + shSrc - LIQ_TIE_EPS) / texH;
@@ -608,6 +636,11 @@ export function replayLiquidFootQuads2D(ctx: CanvasRenderingContext2D): void {
  *  _fgRuns 空/缺段=gate 缺水主体≈0,整帧位移场丢。 */
 export function liqRingOverflow(): boolean { return _batOverflow; }
 
+/** ★C13b 软溢出探针（诊断/守卫测试消费）：带/坡面批帽触发位——恒有
+ *  liqBatchSoftOverflow()=true ⇒ liqRingOverflow()=false（软位不进硬面,见
+ *  _batSoftOvf 注）。 */
+export function liqBatchSoftOverflow(): boolean { return _batSoftOvf; }
+
 /** white 1×1 entry（GLShimExecutor.WHITE_E 同式;模块缓存防重复建面）。
  *  ★liqpolish:卫兵改 texCheck 批检（__white 死窗=清表族,清表必 bump texGen）。 */
 const _whiteCache = new WeakMap<GLSpriteLayer, TexEntry>();
@@ -635,6 +668,7 @@ function whiteEntry(glw: GLSpriteLayer): TexEntry {
 export function resetLiquidBatchForFrame(frame: number): void {
   if (_batFrame !== frame) {
     _batFrame = frame; _batN = 0; _batOverflow = false; _fgRuns = [];
+    _batSoftOvf = false;   // ★C13b 软溢出位随帧复位
     // ★liqpolish ADD 环帧界复位（sparkle/glint 段状态随基底环同生命周期）
     _addN = 0; _addOverflow = false; _spOn = false; _spQuads = 0; _glOn = false; _glQuads = 0;
     // ★liqpolish fg 复用账帧界失效（bg pass 重录;失效=fg 走逐 tile 构造原链）
@@ -1885,6 +1919,28 @@ export function drawVanillaLiquids(
   if (isBackground) {
     const slopeTexForType = (vt: number): HTMLImageElement | null =>
       getSlopeTex(vt === 2 ? 1 : vt === 3 ? 11 : vt === 4 ? 14 : waterStyle);
+    // ---- ★C13b 斜面增强批臂（LiquidSlope 覆盖 quad;2026-09-30）----
+    //  形态=轴对齐纹理 quad（LiquidSlope_{sheet} 16×16 单元,斜切=源矩形列选择）,
+    //  折顶点入基底环（软溢出域;发射位=本段 flush 位=层序保持——本段整体先于浸润带
+    //  pass,flushSlopeRun 在带 pass 入环前收口=两段环域不相交）。设备折算复用主循环
+    //  devSX/devSY/devTE/devTF（同一 wldT——:1443 捕获、:1867 恢复,段内未变）。
+    const slopeBatOn = liqC13b && bat != null && frameToken !== undefined
+      && !_batOverflow && !_batSoftOvf && wldT.b === 0 && wldT.c === 0;
+    let slStart = _batN;
+    let slImg: CanvasImageSource | null = null;
+    let slKey = '';
+    const flushSlopeRun = (): void => {
+      const quads = _batN - slStart;
+      if (quads <= 0 || !slImg || !bat) return;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      const img = slImg, s0 = slStart, nQ = quads, k = slKey;
+      const ok = bat.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
+        (raw) => replayLiqRun2D(raw, s0, nQ, img, false));
+      if (!ok) replayLiqRun2D(ctx, s0, nQ, img, false);   // 入口门拒=2D 原位重放（flushBandRun 同式）
+      slStart = _batN;
+      slImg = null;
+    };
     for (let lx = PAD; lx < pw - PAD; lx++) {
       const x = px0 + lx;
       for (let ly = PAD; ly < ph - PAD; ly++) {
@@ -1950,10 +2006,23 @@ export function drawVanillaLiquids(
           dy251 = Math.round(Math.min(16, Math.max(-16, _slopeDisp251[1]
             / Math.max(1e-6, waterWaves.viewZoom()))));
         }
-        ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
-        ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6 + dy251, 16, sh);
+        // ★C13b 批臂:单 quad 入环（a=1 不透明——溢出后 CPU 重画幂等,同微光带判例）;
+        //  软域（soft=true）——帽触发只降本臂,不触 gate/复用降级面。
+        let slopeBatched = false;
+        if (slopeBatOn && _batN < LIQ_RING_CAP) {
+          if (slImg !== slopeTex) { flushSlopeRun(); slImg = slopeTex; slKey = `liqslack:${texId(slopeTex)}`; }
+          slopeBatched = batQuad(sx, num6, 16, sh, slopeTex.width, slopeTex.height,
+            (x * 16) * devSX + devTE, (y * 16 + num6 + dy251) * devSY + devTF,
+            16 * devSX, sh * devSY, 1, null, 0, true);
+          if (!slopeBatched) { flushSlopeRun(); slImg = null; }   // 帽触发:段收口,本 tile CPU 重画（幂等）
+        }
+        if (!slopeBatched) {
+          ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
+          ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6 + dy251, 16, sh);
+        }
       }
     }
+    if (slopeBatOn) flushSlopeRun();   // ★C13b:段收口（先于浸润带 pass——环域不相交）
     ctx.globalAlpha = 1;
   }
 
@@ -1973,8 +2042,9 @@ export function drawVanillaLiquids(
   if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false, 0, slopeWaveBob, gateFootprintCtx ?? null,
     // ★liqgl：足迹画布缺席时改四边形收集（gate 发射消费;canvas 路径不受扰）
     (gateCapture && !gateFootprintCtx) ? _footQuads : null,
-    // ★liqpolish:微光浸润带批化钩（bg pass 传入主批钩;实心层调用不传=CPU 原链）
-    polish ? (bat ?? null) : null);
+    // ★liqpolish 微光带批钩 / ★C13b 非微光带+亮线批钩（两旗正交:任一开即传钩,
+    //  臂内各按本旗判——?liqpolish=0 时微光臂仍 CPU 原链,?c13b=0 时 C13b 臂仍 CPU 原链）
+    (polish || liqC13b) ? (bat ?? null) : null);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -2123,18 +2193,26 @@ export function drawLiquidBehindTilesOnly(
   };
 
   // ---- ★liqpolish 带批化状态（lt===3 微光浸润带 → 基底环 SO 段;实心层调用
-  //  batBand 缺省 null=CPU 原链。设备折算=入口 CTM（调用点=世界变换,轴对齐门）----）
+  //  batBand 缺省 null=CPU 原链。设备折算=入口 CTM（调用点=世界变换,轴对齐门）----
+  //  ★C13b（2026-09-30）:通道扩成双臂——bandBatOn=微光臂（liqpolish 域,门逐位保持）,
+  //  bandBatC13b=非微光带/III256 亮线臂（?c13b=0 逃生门,与 polish 正交）。run 状态机
+  //  （bsStart/bsImg/bsKey）双臂共享:lt===3 与非微光带贴图互异（Liquid_14 vs
+  //  Liquid_0..13/LiquidSlope_N）→ run 按纹理自动分段,永不混段。）
   let bandBatOn = false;
+  let bandBatC13b = false;
   let bandDevX = 1, bandDevY = 1, bandDevE = 0, bandDevF = 0;
   let bsStart = 0;
   let bsImg: CanvasImageSource | null = null;
   let bsKey = '';
-  if (polishBand && batBand && !_batOverflow) {
+  /** 本 run 含微光调制 quad（重放面 hasCols;按纹理分段保证同质——同上注） */
+  let bsCols = false;
+  if (batBand && !_batOverflow && (polishBand || liqC13b)) {
     const bt = ctx.getTransform();
     if (bt.b === 0 && bt.c === 0) {
-      bandBatOn = true;
       bandDevX = bt.a; bandDevY = bt.d; bandDevE = bt.e; bandDevF = bt.f;
       bsStart = _batN;
+      bandBatOn = polishBand;   // 微光臂=现行门（liqpolish 域;旗关臂逐位原链）
+      bandBatC13b = liqC13b;    // ★C13b 臂（独立逃生门）
     }
   }
   const flushBandRun = (): void => {
@@ -2142,21 +2220,27 @@ export function drawLiquidBehindTilesOnly(
     if (quads <= 0 || !bsImg || !batBand) return;
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    const img = bsImg, s0 = bsStart, nQ = quads, k = bsKey;
-    batBand.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
-      (raw) => replayLiqRun2D(raw, s0, nQ, img, true));
+    const img = bsImg, s0 = bsStart, nQ = quads, k = bsKey, cols = bsCols;
+    // ★C13b:入口门拒（clip/filter/GL 死）→ 2D 原位重放（flushAddRuns2DAndEmit
+    //  emitAdd 判例同式）——rec 不入队=重放落本 flush 位=层序保持,宁回退不丢。
+    const ok = batBand.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
+      (raw) => replayLiqRun2D(raw, s0, nQ, img, cols));
+    if (!ok) replayLiqRun2D(ctx, s0, nQ, img, cols);
     bsStart = _batN;
     bsImg = null;
+    bsCols = false;
   };
-  /** 带 quad 入基底环（batQuad 同式;a=1 不透明带,cols=四角波色——消费即弃） */
+  /** 带 quad 入基底环（batQuad 同式;★C13b 扩参:a=带 alpha（微光臂恒 1）,cols=四角
+   *  波色（非微光臂 null=rgb 预乘恒等）,soft=true=软溢出域）。 */
   const bandQuadEmit = (
     tex: ImageBitmap | HTMLImageElement, key: string,
     sx: number, sy: number, sw: number, shSrc: number,
     dx0: number, dy0: number, dw: number, dh: number,
+    a = 1, cols: Float32Array | null = _batCols,
   ): boolean => {
     void key;
     if (dw <= 0 || dh <= 0) return true;   // 零面积段=与 drawImage 零绘制等价
-    return batQuad(sx, sy, sw, shSrc, tex.width, tex.height, dx0, dy0, dw, dh, 1, _batCols, 0);
+    return batQuad(sx, sy, sw, shSrc, tex.width, tex.height, dx0, dy0, dw, dh, a, cols, 0, true);
   };
 
   // ★IIIII251：足迹离屏默认 identity,而带坐标是世界 px——先对齐主 ctx 当前
@@ -2462,7 +2546,7 @@ export function drawLiquidBehindTilesOnly(
         //  =liqgl 刀2 同族登记偏差）。段按带表纹理同质（Liquid_14/LiquidSlope_14）。
         if (bandBatOn) {
           const tVb = bandTVis < 0 ? (bandTVis = visEffectFrames()) : bandTVis;
-          if (bsImg !== drawTex) { flushBandRun(); bsImg = drawTex; bsKey = `liqband:${texId(drawTex)}`; }
+          if (bsImg !== drawTex) { flushBandRun(); bsImg = drawTex; bsKey = `liqband:${texId(drawTex)}`; bsCols = true; }
           // 裁剪角（带矩形相对格原点归一;v 含 bob 位移——与 applyShimmerBaseTint
           //  的 v 域同构(py+bob 相对 y*16)）
           const buL = (px - x * 16) / 16, buR = (px + dstW - x * 16) / 16;
@@ -2521,6 +2605,48 @@ export function drawLiquidBehindTilesOnly(
       // ★半砖+上格有液+有墙 → 整带不画(:4148-4151;地下半砖上的水由水体本体呈现)。
       // 离屏填充模式绕过（带被方块贴图盖住不可见，但保住位移采样足迹）
       if (!warpFill && st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
+      // ---- ★C13b 非微光带批臂（水/岩浆/蜂蜜浸润带 + III256 亮线;2026-09-30）----
+      //  形态=轴对齐纹理 quad：平面带（Liquid_N 全矩形/条带）或斜面带（LiquidSlope_N
+      //  源矩形,srx=rx+18*(slope-1)）+ 亮线（Liquid_N 顶 2px 条）——全部折顶点入基底
+      //  环,发射位=本 pass 调用位（flushBandRun 位）=层序保持（探针 _c13b-census
+      //  实测此族 ≈234 shim drawImage/帧=逐 op 税主体）。
+      //  【all-or-nothing 预检】入环前查容量（主段+底/右缘重复+亮线 ≤4 quad）——
+      //  预检失败=整 tile 落 CPU 原链。部分入环后 CPU 重画对 α<1 带是二次混合变深
+      //  （微光带 a=1 幂等重画域,此处不成立）,故不许部分入环。
+      //  【亮线同批】III256 亮线与带同 tile 相邻序（带→线）;纹理异（LiquidSlope_N
+      //  vs Liquid_N）时 flushBandRun 换段——段序=绘制序逐位同。
+      if (bandBatC13b && !_batSoftOvf) {
+        const lineQ = solidLayer && (slope === 1 || slope === 2) && Uq === 0
+          && !st.isSolidStrict(x, y - 1) && (fL || fR);
+        const need = 1 + (rh > srcH ? 1 : 0) + (rw > srcW ? 1 : 0) + (lineQ ? 1 : 0);
+        if (_batN + need <= LIQ_RING_CAP) {
+          const bdx0 = px * bandDevX + bandDevE, bdy0 = (py + bobDy251) * bandDevY + bandDevF;
+          const bgx1 = (px + dstW) * bandDevX + bandDevE, bgy1 = (py + bobDy251 + dstH) * bandDevY + bandDevF;
+          if (bsImg !== drawTex) { flushBandRun(); bsImg = drawTex; bsKey = `liqband:${texId(drawTex)}`; }
+          let bOk = bandQuadEmit(drawTex, bsKey, srx, ry, srcW, srcH,
+            bdx0, bdy0, bgx1 - bdx0, bgy1 - bdy0, alpha, null);
+          if (bOk && rh > srcH) {
+            bOk = bandQuadEmit(drawTex, bsKey, srx, texEdgeY, srcW, 1,
+              bdx0, (py + bobDy251 + dstH) * bandDevY + bandDevF,
+              dstW * bandDevX, (rh - srcH) * bandDevY, alpha, null);
+          }
+          if (bOk && rw > srcW) {
+            bOk = bandQuadEmit(drawTex, bsKey, drawTex.width - 1, ry, 1, srcH,
+              (px + dstW) * bandDevX + bandDevE, bdy0,
+              (rw - srcW) * bandDevX, bgy1 - bdy0, alpha, null);
+          }
+          if (bOk && lineQ) {
+            if (bsImg !== tex) { flushBandRun(); bsImg = tex; bsKey = `liqband:${texId(tex)}`; }
+            bOk = bandQuadEmit(tex, bsKey, rx, 0, Math.min(rw, tex.width - rx), 2,
+              bdx0, bdy0, rw * bandDevX, 2 * bandDevY, alpha, null);
+          }
+          if (bOk) continue;
+          flushBandRun();   // 防御收口（预检后容量恒足,bOk 假不可达;真触发=整 tile CPU 重画兜底）
+        } else {
+          _batSoftOvf = true;   // 软溢出:余帧带批降 CPU（不触 _batOverflow 硬面）
+          flushBandRun();       // 开放段收口（后续 CPU 带落其后=层序保持）
+        }
+      }
       ctx.globalAlpha = alpha;
       if (drawBand) drawBand(bobDy251);
       else {
@@ -2561,8 +2687,9 @@ export function drawLiquidBehindTilesOnly(
       }
     }
   }
-  // ★liqpolish:带批段收尾（基底环续交;带 rec 在水 ADD 段之后=与直画序同）
-  if (bandBatOn) flushBandRun();
+  // ★liqpolish:带批段收尾（基底环续交;带 rec 在水 ADD 段之后=与直画序同）。
+  // ★C13b:双臂任一开即收口（bandBatC13b 的 run 共享同一状态机,漏收=段永不发射）。
+  if (bandBatOn || bandBatC13b) flushBandRun();
   // ★IIIII251：足迹画完恢复 identity（beginFgPass 每帧重设变换，此处为防御复位）
   if (footprintCtx) footprintCtx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;

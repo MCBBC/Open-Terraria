@@ -851,13 +851,17 @@ export interface CompatReport {
   tilesDegraded: CompatEntry[]; tilesCleared: CompatEntry[]; itemsSkipped: CompatEntry[];
 }
 
-// ---- PvP 背包快切钮（DrawPVPIcons Main.cs:42074-42195 1:1） ----
-// 布局：PvP 剑图标（UI_PVP_0，4 列×6 行 38px 帧——列=hostile?2:0 + hover?1:0、行=队伍，
-// :42094/:42112-42113）+ 其下 2 列×3 行 20px 队伍格（:42129 x=num2+i%2*20 / y=num3+i/2*20，
-// 图标 UI_PVP_1 六帧 18×18 裁 16 宽 :42185-42192，悬停高亮 UI_PVP_2 20×20 @-2 :42188）。
-// 点击：teamCooldown=300t（:42106/:42171 teamCooldownLen Main.cs:1026）+ 音效 12（MenuTick）
+// ---- PvP 背包快切钮（DrawPVPIcons Main.cs:43378-43512 1:1;★BJ417 帧制勘误——
+// 旧注引 :42074-42195 系 1456 行号,1457 该域已重写） ----
+// 布局：PvP 剑图标（UI_PVP_0=76×266,Frame(2,7)→38×38 帧 2 列×7 行 :43419;
+// 【1456=Frame(4,6)+Width-2/Height-1 裁 36×37,1457 已弃】列=hostile?1:0、行=team 0-5,
+// 行 6=悬停高亮整帧【第二遍覆盖绘制】(:43428-43434 rectangle.Y=Height*PlayerTeamID.Count,
+// X 保持 hostile 列;满白不参与冷却 num4 调光,冷却调光只作用基帧 :43426 White*num4)。
+// 队伍格 2 列×3 行 20px（:43440 x=num2+i%2*20 / y=num3+i/2*20,图标 UI_PVP_1 六帧
+// 18×18 裁 16 宽 :43502-43505,悬停高亮 UI_PVP_2 20×20 @-2 :43500-43502）。
+// 点击：teamCooldown=300t（:43426/:43481 teamCooldownLen Main.cs:1026）+ 音效 12（MenuTick）
 // + hostile 翻转/team=i；原版发 msg30/157，本仓走 msg13 快速通道（ClientNet.sendPvpState）。
-// 文案键：UI.PvpIcon_{Active,Inactive}（:42100）+ UI.TeamIcon{Name}_{Active,Inactive}（:42160，
+// 文案键：UI.PvpIcon_{Active,Inactive}（:43402）+ UI.TeamIcon{Name}_{Active,Inactive}（:43462，
 // Name ∈ None/Red/Green/Blue/Yellow/Pink——第 5 队 ID=Purple 但文案键历史遗留为 Pink，
 // PlayerTeamID.cs:20）。TeamChangeAllowed 恒 true（Player.cs:4303-4306，misc[84] 拒绝支死码）。
 
@@ -884,9 +888,17 @@ function localizedDuration(totalSec: number): string {
   return `${sec} ${Lang.text('Misc.ShortSeconds')}`;
 }
 
-/** PvP 剑帧（UI_PVP_0 :42094/:42112-42113）：col=(hostile?2:0)+(hover?1:0)、row=team(0-5) */
-export function pvpIconFrame(hostile: boolean, hover: boolean, team: number): readonly [number, number] {
-  return [(hostile ? 2 : 0) + (hover ? 1 : 0), Math.max(0, Math.min(5, team))];
+/** PvP 剑帧（★BJ417 1457 制：UI_PVP_0 76×266=Frame(2,7) 38×38 帧,Main.cs:43419-43420）
+ *  col=hostile?1:0、row=team(0-5);悬停高亮【非列号】=行 6 整帧第二遍覆盖
+ *  （:43432-43434 rectangle.Y=Height*PlayerTeamID.Count,X 保持 hostile 列）→
+ *  见 pvpHoverFrame。1456 旧制 (4,6)+hover 计入列+Width-2/Height-1 裁 36×37 已废。 */
+export function pvpIconFrame(hostile: boolean, team: number): readonly [number, number] {
+  return [hostile ? 1 : 0, Math.max(0, Math.min(5, team))];
+}
+
+/** PvP 剑悬停覆盖帧（:43432-43434：X 不变=hostile 列,Y=Height*6=行 6） */
+export function pvpHoverFrame(hostile: boolean): readonly [number, number] {
+  return [hostile ? 1 : 0, 6];
 }
 
 /** 队伍切换冷却（teamCooldownLen=300t × 1000/60ms，:1026；冷却期无悬停提示/不可点） */
@@ -4713,17 +4725,27 @@ export class UI {
   /** ★页签机制已拆（2026-08-27 用户要求）：装备/杂项合并为常驻左列+右缘杂项列，
    *  页签只剩 住房（覆盖层入口）/图鉴；setEquipPage/EquipPage 概念随之退役 */
 
-  // ---- PvP/队伍快切钮行为（DrawPVPIcons Main.cs:42074-42195） ----
+  // ---- PvP/队伍快切钮行为（DrawPVPIcons Main.cs:43378-43512） ----
 
-  /** 刷新剑帧/队伍格悬停高亮/提示文案（帧式 :42094/:42112-42113，冷却期无提示 :42099/:42135） */
+  /** 刷新剑帧/队伍格悬停高亮/提示文案（★BJ417 1457 帧式 :43419-43434,冷却期无提示 :43401/:43437） */
   refreshPvpButtons(): void {
     if (!this.pvpSwordBtn || !this.game?.player) return;
     const p = this.game.player;
     const cool = performance.now() < this.pvpCooldownUntil;
     const swordHover = !cool && this.pvpSwordBtn.matches(':hover');
-    const [col, row] = pvpIconFrame(p.hostile, swordHover, p.team);
-    // background-position 百分比 = col/(4-1)、row/(6-1)（38px 帧裁 36×37）
-    this.pvpSwordBtn.style.backgroundPosition = `${(col / 3) * 100}% ${(row / 5) * 100}%`;
+    const [col, row] = pvpIconFrame(p.hostile, p.team);
+    // background-position 百分比 = col/(2-1)、row/(7-1)（Frame(2,7) 38×38 整帧）
+    this.pvpSwordBtn.style.backgroundPosition = `${col * 100}% ${(row / 6) * 100}%`;
+    // 冷却调光 = 基帧 White*num4（:43426 num4=cooldown?0.25:1;悬停覆盖层满白,
+    // 但 flag 门本就要求 !cool → 覆盖层显示期恒不透明,opacity 挂按钮无冲突）
+    this.pvpSwordBtn.style.opacity = cool ? '0.25' : '1';
+    // 悬停覆盖层 = 行 6 整帧再画一遍（:43432-43434）
+    const hov = this.pvpSwordBtn.querySelector<HTMLElement>('[data-pvp-hover]');
+    if (hov) {
+      const [hc, hr] = pvpHoverFrame(p.hostile);
+      hov.style.backgroundPosition = `${hc * 100}% ${(hr / 6) * 100}%`;
+      hov.style.display = swordHover ? 'block' : 'none';
+    }
     // ★2026-09-13 反馈轮6:vanilla 布局 hover 名走自有气泡(classic 保持原生 title=
     //  零变化白名单);气泡只在悬停态显示/刷新(mouseenter/点击经本函数),隐藏由
     //  构建区 mouseleave 管——本函数在共享刷新链(:5591)每拍跑,不可无条件 hide
@@ -4736,7 +4758,7 @@ export class UI {
     PVP_TEAM_BUTTONS.forEach((tb, k) => {
       const cell = this.pvpTeamBtns[k];
       const hover = !cool && cell.matches(':hover');
-      // 悬停高亮 = UI_PVP_2 垫底（:42186-42188）；提示 = TeamIcon{Name}_{Active|Inactive}（:42160）
+      // 悬停高亮 = UI_PVP_2 垫底（:43500-43502）；提示 = TeamIcon{Name}_{Active|Inactive}（:43462）
       cell.style.backgroundImage = hover ? 'url(sprites/vanilla-ui/UI_PVP_2.png)' : 'none';
       if (!vanillaTip) {
         cell.title = cool ? '' : Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`);
@@ -5280,11 +5302,21 @@ export class UI {
     // margin-top 拉开与钩爪行（杂项列末行）的间距（2026-08-27 用户要求；2026-09-02
     // 随杂项列迁右下角坞,miscStack gap 10px 已含基础间距,此 margin 减半）
     pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; margin-top:12px;';
-    // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
+    // PvP 剑（★BJ417 1457 制 :43419-43434：Frame(2,7) 38×38 整帧,scale 1 无裁;
+    // 悬停=行 6 整帧覆盖层;1456 旧制 36×37 @400%×600% 已废——76×266 表上按 4×6
+    // 取窗=跨行采样出「剑+邻帧」拼贴(用户实报贴图变形+跨帧)）
     this.pvpSwordBtn = el('button', 'sw-btn');
-    this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
-      + 'border:none; background:url(sprites/vanilla-ui/UI_PVP_0.png); background-size:400% 600%;'
-      + 'background-position:0% 0%; image-rendering:pixelated; cursor:pointer;';
+    this.pvpSwordBtn.style.cssText = 'margin:0; width:38px; height:38px; padding:0; flex:none; position:relative;'
+      + 'border:none; background:url(sprites/vanilla-ui/UI_PVP_0.png); background-size:200% 700%;'
+      + 'background-position:0% 0%; background-repeat:no-repeat; image-rendering:pixelated; cursor:pointer;';
+    {
+      const hov = el('div');
+      hov.dataset.pvpHover = '1';
+      hov.style.cssText = 'position:absolute; left:0; top:0; width:100%; height:100%; display:none;'
+        + 'background:url(sprites/vanilla-ui/UI_PVP_0.png); background-size:200% 700%;'
+        + 'background-repeat:no-repeat; image-rendering:pixelated; pointer-events:none;';
+      this.pvpSwordBtn.appendChild(hov);
+    }
     this.pvpSwordBtn.addEventListener('mouseenter', () => this.refreshPvpButtons());
     this.pvpSwordBtn.addEventListener('mouseleave', () => this.refreshPvpButtons());
     this.pvpSwordBtn.addEventListener('mousedown', (e) => {
@@ -6808,9 +6840,17 @@ export class UI {
     // 循环不写 vid），裸取 def.vid 会级联落空 → 恒显 inter(37)"物品"（退役批回归）
     // ★SW-AZ1 2026-09-06：经 heldItem() 取手持（光标持物伪选中时=镜像槽 58——
     // vanilla 该行读 HeldItem Player.cs:3835-3837,光标捏物时显示光标物名）
+    // ★BJ419（2026-09-30）用户实报「顶部单行名不带词缀」定谳刀：原版此名 =
+    // selectedItem.AffixName()（Main.cs:44331,1458 :44337 同位同文）——词缀组合名
+    // Lang.GetPrefixedItemName（Lang.cs:225-239 → CombineFormat.Prefix）,非裸
+    // .Name。旧 itemNameByKey 直显裸名=病灶（如「‹传奇›坠落星」只显「坠落星」）。
+    // 拼装单源复用 affixedItemName（BJ390,tooltip 头行/飘字同管,≡popupAffixName
+    // Game.ts:319）;inter(37) 空手回退原版同序（Name=="" 门 :44330 先于 AffixName）。
+    // 热键栏悬停单行名（:44361 hoverItemName=AffixName）在仓内=showTooltipFor 全载荷
+    // 气泡头行 buildTooltipHtml:3236 同源已带词缀,本行是最后一个裸名位。
     const held = inv.heldItem();
     const name = held ? Lang.itemNameByKey(ITEM_DEFS[held.id]?.key ?? '') : null;
-    this.hotbarNameEl.textContent = name || Lang.inter(37);
+    this.hotbarNameEl.textContent = (held && name ? affixedItemName(held.prefix, name) : '') || Lang.inter(37);
   }
 
   /** 背包网格几何=热键栏实测值（2026-09-02 用户复报格距不一致）：读热键栏【未选中】
@@ -8613,11 +8653,21 @@ export class UI {
     // ---- PvP/队伍(DrawPVPIcons Main.cs:43389-43443;本仓常开语义沿用 classic) ----
     {
       const sword = el('button', 'vinv-btn sw-btn') as HTMLButtonElement;
-      sword.style.width = '36px'; sword.style.height = '37px';
+      // ★BJ417 1457 帧制(38×38 @200%×700%;Frame(2,7) 整帧无裁,悬停覆盖层同 classic
+      // 构建区;refreshPvpButtons 帧算依赖)
+      sword.style.width = '38px'; sword.style.height = '38px';
       sword.style.backgroundImage = 'url(sprites/vanilla-ui/UI_PVP_0.png)';
-      sword.style.backgroundSize = '400% 600%';
-      // 视觉尺寸沿用 classic 帧制(36×37 @400%×600%;refreshPvpButtons 帧算依赖),
-      // 仅锚点取原版位(pvpSwordXY);原版 76×32×0.6 整帧绘制=帧制债
+      sword.style.backgroundSize = '200% 700%';
+      sword.style.backgroundRepeat = 'no-repeat';
+      sword.style.position = 'relative';
+      {
+        const hov = el('div');
+        hov.dataset.pvpHover = '1';
+        hov.style.cssText = 'position:absolute; left:0; top:0; width:100%; height:100%; display:none;'
+          + 'background:url(sprites/vanilla-ui/UI_PVP_0.png); background-size:200% 700%;'
+          + 'background-repeat:no-repeat; image-rendering:pixelated; pointer-events:none;';
+        sword.appendChild(hov);
+      }
       sword.addEventListener('mouseenter', () => this.refreshPvpButtons());
       sword.addEventListener('mouseleave', () => this.refreshPvpButtons());
       sword.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpToggleHostile(); });
