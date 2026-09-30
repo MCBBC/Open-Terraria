@@ -163,7 +163,7 @@ import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS, accGroupClash, accPairConflicts } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源提至数据层（本文件原模块内私有）
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
-import { assembleTooltipLines, buildTooltipBody, materialVids } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）
+import { assembleTooltipLines, buildTooltipBody, materialVids, planteraCursedTip } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）;★S4 planteraCursedTip（诅咒首行特例,tooltip+检索域双消费）
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
@@ -321,11 +321,44 @@ function internalIdOfVid(vid: number): number {
   return k !== undefined ? (ITEM_BY_KEY[k] ?? -1) : -1;
 }
 
+/** ★S4 静态说明单源（原版 item.ToolTip ← l10n ItemTooltip.*,Main.cs:21149 循环体
+ *  GetLine 域）。★从 buildTooltipHtml 内联域提取（原内联逐句迁入,行为零变化）——
+ *  BySearch 检索域语料同吃本域（ItemFilters.BySearch.FitsFilter :28-48 直调全量
+ *  GetLinesInfo,ToolTip 段在语料内）,双消费面单源防漂移。旗帜族
+ *  {$NPCName.None} → 该旗 NPC 显示名注入（L171 语义;BJ334 负 netID 面随迁） */
+function resolveStaticTip(vid: number): string | null {
+  const nameKey = ITEM_NAME_BY_ID[vid];
+  if (!nameKey) return null;
+  const path = `ItemTooltip.${nameKey}`;
+  // ★Q4-D A3 链源锁形制保持（`if (Lang.has(path))` 正形+先 has() 再取=缺失键静默空）
+  if (Lang.has(path)) {
+    let tip = Lang.text(path);
+    if (tip && tip.includes('NPCName.None')) {
+      const bn = bannerNpcOfItem(vid);
+      if (bn > 0 || bn <= -2) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
+    }
+    return tip || null;
+  }
+  return null;
+}
+
 /** ★SW-FX41 BySearch 检索域填充(ItemFilters.BySearch :28-48 = tooltip 全行检索——
  *  Main.MouseText_DrawItemTooltip_GetLinesInfo 每查一次全量重算,本仓按 vid 缓存;
  *  行 0 = 物品名(GetLinesInfo 首行=AffixName)。player=null/无词缀槽 = 检索域近似
- *  (伤害等玩家增幅行不参与,登记偏差:原版同名增幅行文本随玩家变动,搜索面不敏感)) */
-function vinvFillTooltipLines(it: FilterItem): void {
+ *  (伤害等玩家增幅行不参与,登记偏差:原版同名增幅行文本随玩家变动,搜索面不敏感;
+ *  金币枪 71-74 门面同属玩家态域)。
+ *  ★S4（Q4 登记）：静态说明行入语料（原版 BySearch 吃全量 GetLinesInfo——
+ *  ToolTip 段 Main.cs:21149-21162 在语料内=搜说明文案命中）+行序后段
+ *  buffTime 持续（:21213-21220）→ expert（:21228-21231,item.expert 旗）→
+ *  master（:21232-21235,item.rare==-13 字段值）→ 套装奖励（:21473-21517;
+ *  BySearch 直调 GetLinesInfo 不走 ItemSlot.MouseHover=wornArmor/social 全缺省
+ *  →非佩戴面=缺省 ctx 同相）→ 任务鱼行（:20663-20666,game.anglerQuestItemId 注入）。
+ *  Plantera 诅咒首行替换特例（:21153-21156,见 planteraCursedTip）入语料。
+ *  登记残留（语料仍缺,均需调用侧无的上下文/数据）：旅程研究行（:21163-21178,
+ *  献祭进度数据域）、BestiaryNotes（:21519 后段）、特种子行（tenthAnniversary/
+ *  getGood/Mechdusa,:21166-21212）、悠悠球商标空行（:21220-21227,空格行不可检索
+ *  =零行为差）、词缀差分行（本域 stack1 无词缀=原版同缺）。 */
+export function vinvFillTooltipLines(it: FilterItem, planteraDowned = false, anglerQuestItemId = 0): void {
   const iid = internalIdOfVid(it.vid);
   const def = iid >= 0 ? ITEM_DEFS[iid] : undefined;
   const lines: string[] = [];
@@ -333,8 +366,14 @@ function vinvFillTooltipLines(it: FilterItem): void {
   lines.push(nameKey ? (Lang.itemNameByKey(nameKey) ?? String(it.vid)) : String(it.vid));
   if (def && iid >= 0) {
     try {
-      const body = buildTooltipBody(def, { id: iid, stack: 1 }, null);
+      const body = buildTooltipBody(def, { id: iid, stack: 1 }, null, { anglerQuestItemId });
       for (const ln of body.lines) lines.push(ln.text);
+      const staticTip = planteraCursedTip(it.vid, resolveStaticTip(it.vid), planteraDowned);
+      if (staticTip) for (const t of staticTip.split('\n')) lines.push(t);
+      if (body.durationLine) lines.push(body.durationLine.text);
+      if (ITEM_EXPERT[String(it.vid)] === 1) lines.push(Lang.text('GameUI.Expert'));
+      if (ITEM_RARE[String(it.vid)] === -13) lines.push(Lang.text('GameUI.Master'));
+      for (const ln of body.setBonusLines) lines.push(ln.text);
     } catch { /* 检索域尽力填充(数据缺失件=仅名字行) */ }
   }
   it.tooltipLines = lines;
@@ -3272,26 +3311,15 @@ export class UI {
 
     // 物品自带说明（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*）。
     // ★先 has() 再取（缺失键静默空，铜剑/药水/钱币等老物品本无静态 tooltip）
+    // ★S4：内联域提取单源 resolveStaticTip（BySearch 语料同吃,注释随迁）+
+    //  Plantera 诅咒首行特例（Main.cs:21149-21162:UsesCursedByPlanteraTooltip
+    //  {1533-1537,4714} && !downedPlantBoss → 首行替换 tip[59];作用于 item.ToolTip
+    //  段本体——def.desc 为本仓扩展拼接面,故替换先于 desc 追加）
     let staticTip: string | null = null;
     if (def.key.startsWith('vi_')) {
       const vid = parseInt(def.key.slice(3), 10);
-      const nameKey = ITEM_NAME_BY_ID[vid];
-      if (nameKey) {
-        const path = `ItemTooltip.${nameKey}`;
-        if (Lang.has(path)) {
-          let tip = Lang.text(path);
-          // 旗帜族 tooltip（{$NPCName.None} 构建期已落为裸键名,原版 L171 语义）:
-          // NPCName.None → 该旗对应 NPC 的显示名（原版由旗帜 tooltip 代码动态注入）
-          if (tip && tip.includes('NPCName.None')) {
-            const bn = bannerNpcOfItem(vid);
-            // ★BJ334(2026-09-24)：负 netID 旗也注入名——绿史莱姆旗 item 2928 →
-            //  BannerToNPC(119)=-3（BannerSystem.cs:1337）,原版 tooltip 名走负表
-            //  （Lang.cs:186-189）。哨兵 -1（非旗帜）与 0 仍排除。
-            if (bn > 0 || bn <= -2) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
-          }
-          staticTip = tip || null;
-        }
-      }
+      staticTip = resolveStaticTip(vid);
+      staticTip = planteraCursedTip(vid, staticTip, !!this.game?.world?.flags?.['downed_262']);
     }
     if (def.desc) staticTip = staticTip ? `${staticTip}\n${def.desc}` : def.desc;
     // ---- 悬停上下文（低频行族门数据，Main.cs:20178-20220）----
@@ -4382,8 +4410,18 @@ export class UI {
     //  （钉鞋 975 是原料且内部 iid=24 ⇒ has(24) 假真 ⇒ 木剑 24 误过门）。
     const isMaterialVid = (vid: number): boolean => vid >= 0 && materialVids().has(vid);
     const maxStackOf = (iid: number): number => ITEM_DEFS[iid]?.maxStack ?? 999;
+    // ★S4：悬停 tooltip（ItemSlot.Handle(ref guideItem,7) → MouseHover → HoverItem
+    //  → MouseText 全载荷,Main.cs:42409-42413;重铸槽同族绑定式,见 refreshGuideSlotTooltip）
+    slotBox.addEventListener('mouseenter', () => this.refreshGuideSlotTooltip(slotBox));
+    slotBox.addEventListener('mouseleave', () => {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+    });
     slotBox.addEventListener('mousedown', (e) => {
-      this.guideSlotMouseDown(e as MouseEvent, () => { refreshHeader(); renderRecipes(); applyFilter(); });
+      this.guideSlotMouseDown(e as MouseEvent, () => {
+        refreshHeader(); renderRecipes(); applyFilter();
+        this.refreshGuideSlotTooltip(slotBox);   // ★S4：换件随拍（原版逐帧 tooltip 语义）
+      });
     });
     slotBox.addEventListener('contextmenu', (e) => e.preventDefault());
     filterInput.addEventListener('input', (e) => {
@@ -4475,6 +4513,33 @@ export class UI {
   /** ★刀19:ctx7 槽点击语义共享体(向导反查浮层与 vanilla 布局向导槽共用;ItemSlot.cs
    *  case-0/RightClick 1:1,注释锚见原 openGuideSearch 体内迁前行)。repaint=槽态
    *  变化后的面板重刷(浮层=header/列表/筛选;vanilla=槽绘制+vinvRefreshCraft) */
+  /** ★S4 向导槽悬停 tooltip（原版面：Main.cs:42409-42413 槽域悬停 →
+   *  ItemSlot.Handle(ref guideItem, 7) → ItemSlot.MouseHover :3164-3190
+   *  Main.HoverItem=Clone+tooltipContext 7（context 7 不在 wornArmor/social/buy
+   *  置位 switch=无特化旗）→ MouseText 全载荷 GetLinesInfo——与背包/重铸槽同一
+   *  tooltip 管线;空槽悬停零提示（context 7 不在空槽文案分支,MouseHover :3176
+   *  空槽早退臂）。本仓三面槽实例（classic 覆层/vinv 经典位/vinv modern 窗位）
+   *  此前零悬停 tooltip=本刀主债。绑定式 = 重铸槽同族先例（mouseenter 有件即显/
+   *  mousedown 换件随拍/leave 收,reforge 槽 :4093-4095）——原版逐帧刷新语义在
+   *  DOM 域的既有等价 */
+  private refreshGuideSlotTooltip(slotEl: HTMLElement | null): void {
+    if (!slotEl || !slotEl.matches(':hover')) return;   // 非悬停拍不管（leave 通道管收）
+    const pl = this.guidePlaced;
+    if (!pl) {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+      return;
+    }
+    this.showTooltipFor(pl.id, 'inv', {
+      slot: {
+        id: pl.id, stack: pl.stack,
+        ...(pl.prefix !== undefined ? { prefix: pl.prefix } : {}),
+        ...(pl.favorited ? { favorited: true } : {}),
+      },
+      anchor: slotEl,
+    });
+  }
+
   private guideSlotMouseDown(e: MouseEvent, repaint: () => void): void {
     e.preventDefault();
     e.stopPropagation();
@@ -4760,6 +4825,11 @@ export class UI {
       const hover = !cool && cell.matches(':hover');
       // 悬停高亮 = UI_PVP_2 垫底（:43500-43502）；提示 = TeamIcon{Name}_{Active|Inactive}（:43462）
       cell.style.backgroundImage = hover ? 'url(sprites/vanilla-ui/UI_PVP_2.png)' : 'none';
+      // ★S4 基帧冷却调光（:43506 White*num4——num4=teamCooldown==0?1:0.25 :43399;
+      //  BJ417 只落了剑钮基帧 :43425 同式。悬停高亮满白不调光——其 flag2 门本就
+      //  要求 teamCooldown==0（鼠标路径 :43491-43493）,与 hover=!cool 同相）
+      const icon = cell.querySelector<HTMLElement>('[data-pvp-team-icon]');
+      if (icon) icon.style.opacity = cool ? '0.25' : '1';
       if (!vanillaTip) {
         cell.title = cool ? '' : Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`);
       } else if (hover) {
@@ -5336,6 +5406,8 @@ export class UI {
         + 'border:none; background:none; background-color:transparent;'
         + 'image-rendering:pixelated; cursor:pointer;';
       const icon = el('div');
+      // data-pvp-team-icon = refreshPvpButtons 基帧调光消费柄（★S4 :43506 White*num4）
+      icon.dataset.pvpTeamIcon = '1';
       icon.style.cssText = 'position:absolute; left:2px; top:1px; width:16px; height:18px;'
         + `background:url(sprites/vanilla-ui/UI_PVP_1.png); background-size:600% 100%;`
         + `background-position:${tb.team * 20}% 0%; image-rendering:pixelated; pointer-events:none;`;
@@ -8691,6 +8763,8 @@ export class UI {
         const cell = el('button', 'vinv-btn sw-btn') as HTMLButtonElement;
         cell.style.width = '20px'; cell.style.height = '20px';
         const icon = el('div');
+        // data-pvp-team-icon = refreshPvpButtons 基帧调光消费柄（★S4 :43506 White*num4）
+        icon.dataset.pvpTeamIcon = '1';
         icon.style.cssText = 'position:absolute; left:2px; top:1px; width:16px; height:18px;'
           + `background:url(sprites/vanilla-ui/UI_PVP_1.png); background-size:600% 100%;`
           + `background-position:${PVP_TEAM_BUTTONS[i].team * 20}% 0%; image-rendering:pixelated; pointer-events:none;`;
@@ -9100,8 +9174,17 @@ export class UI {
         + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform:scale(0.85);'
         + 'transform-origin:top left; pointer-events:auto;';
       cgSlot.addEventListener('contextmenu', (e) => e.preventDefault());
+      // ★S4：悬停 tooltip（同 classic 覆层面——三面槽实例同一原版 ctx7 面）
+      cgSlot.addEventListener('mouseenter', () => this.refreshGuideSlotTooltip(cgSlot));
+      cgSlot.addEventListener('mouseleave', () => {
+        this.tooltip.style.display = 'none';
+        cancelAnimationFrame(this.tooltipPulseRaf);
+      });
       cgSlot.addEventListener('mousedown', (e) => {
-        this.guideSlotMouseDown(e as MouseEvent, () => { this.vinvPaintGuideCraft(); this.vinvRefreshCraft(); });
+        this.guideSlotMouseDown(e as MouseEvent, () => {
+          this.vinvPaintGuideCraft(); this.vinvRefreshCraft();
+          this.refreshGuideSlotTooltip(cgSlot);
+        });
       });
       root.appendChild(cgSlot);
       this.vinvGuideSlotClassicEl = cgSlot;
@@ -9575,8 +9658,17 @@ export class UI {
       + `--slot-bgimg:url(${MCRAFT_GUIDE_TEX}); --slot-tint:rgb(255,255,255);`
       + `--slot-alpha:${MCRAFT_SLOT_HL_ALPHA};`;
     gSlot.addEventListener('contextmenu', (e) => e.preventDefault());
+    // ★S4：悬停 tooltip（同 classic 覆层面——三面槽实例同一原版 ctx7 面）
+    gSlot.addEventListener('mouseenter', () => this.refreshGuideSlotTooltip(gSlot));
+    gSlot.addEventListener('mouseleave', () => {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+    });
     gSlot.addEventListener('mousedown', (e) => {
-      this.guideSlotMouseDown(e as MouseEvent, () => { this.vinvPaintGuideCraft(); this.vinvRefreshCraft(); });
+      this.guideSlotMouseDown(e as MouseEvent, () => {
+        this.vinvPaintGuideCraft(); this.vinvRefreshCraft();
+        this.refreshGuideSlotTooltip(gSlot);
+      });
     });
     win.appendChild(gSlot);
     this.vinvGuideSlotModernEl = gSlot;
@@ -10063,7 +10155,12 @@ export class UI {
     const vid = r.create;
     const it = filterItemOfVid(vid);
     if (search !== null || active.length > 0) {
-      if (search !== null && it.tooltipLines.length === 0) vinvFillTooltipLines(it);
+      if (search !== null && it.tooltipLines.length === 0) {
+        // ★S4：世界态/任务鱼随语料注入（Plantera 诅咒首行特例 + 任务鱼行,见
+        //  vinvFillTooltipLines 头注——BySearch 语料 = GetLinesInfo 全量,两态都是
+        //  原版语料的组成行）
+        vinvFillTooltipLines(it, !!this.game?.world?.flags?.['downed_262'], this.game?.anglerQuestItemId?.() ?? 0);
+      }
       if (!filtererFits(search, active, it)) return false;
     }
     if (this.vinvModernCraftFilter !== null && !recipeFilterAccepts(r, this.vinvModernCraftFilter)) return false;

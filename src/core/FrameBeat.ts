@@ -188,10 +188,14 @@ const VSYNC_MAX_MS = 100;
 const VSYNC_GAP_RESET_MS = 250;
 /** shouldRender 的时间护栏余量(vsync 估计失真时的兜底,吸收 rAF 时间戳抖动) */
 const TARGET_GUARD_MS = 2;
-/** 拍地板容差(相对):minK 折算容许 vsync 估计低于目标 4%(31 样本中位数在 ±10%
- *  rAF 抖动下的 3σ 噪声≈±4%)——容差须【相对】于目标周期:绝对 ε 会被估计噪声击穿
- *  (60Hz 拍 ratio 1.02 处地板 1↔2 翻转=恒久 30fps,首版实测炸点) */
-const FLOOR_TOL = 0.04;
+/** 拍地板容差(相对):minK 折算容许 vsync 估计低于目标 15%——★v8 放宽(2026-09-30
+ *  "升 120 被拉回 60"定谳:拍迁移记录仪实锤 floor=2 反复触发,用户的 rAF 间隔估计
+ *  =7.93-8.00ms(比理论 8.33 系统性低 ~4.2%,Chrome/Metal 时间戳语义)——旧 0.04
+ *  容差(阈值=目标×0.96=8.0ms)被 0.25% 的越界反复击穿=120↔60 打摆 79 翻转/43s。
+ *  0.15 下 7.98 ≥ 8.33×0.85=7.08 → floor=1 ✓;真 60Hz 屏判别(估计 16.7≫目标)
+ *  与 cap30/cap60 折算不受影响。容差须【相对】于目标周期:绝对 ε 会被估计噪声
+ *  击穿(60Hz 拍 ratio 1.02 处地板 1↔2 翻转=恒久 30fps,首版实测炸点) */
+const FLOOR_TOL = 0.15;
 
 /** 拍变更原因(诊断/探针)。★v5:'overbudget'(v4 单帧立即降)已退役——成本驱动
  *  降拍统一 'capacity';类型保留该字面量仅为旧探针快照兼容,引擎不再发出 */
@@ -362,6 +366,10 @@ export class FrameBeat {
     const vsync = this.vsyncPeriod;
     const floor = this.minK();
     const prevK = this.k;
+    const prevReason = this.lastReason;
+    const preState = { cost, gap: this.lastGap, vsync, p50: this.costP50(), p95: this.costP95(),
+      breach: this.capacityBreach(), miss: this.missStreak, stallMs: this.missStallMs,
+      floor, settle: this.settleGuard };
 
     // 失拍记账(帧距在 beginRender 记)——序数计数天然吸附下一拍,这里只做容量诊断。
     // 对齐顺延豁免见 isCapacityMiss(v7 案①:落 n×vsync 网格的长帧距=锁相节奏非失稳);
@@ -422,6 +430,15 @@ export class FrameBeat {
         this.missStallMs = 0;
         this.upHoldN = 0;
       }
+    }
+    // ★拍迁移记录仪（2026-09-30 "升 120 被拉回 60"定谳仪）:任何拍变更即打印
+    //  完整降/升拍瞬间状态（work=帧 span/vsync 估计/p50/ breach 判定/失拍账/
+    //  地板/护栏）——三降档臂与观测数据对不上账的 Blackbox 一发定谳。
+    if (this.k !== prevK || this.lastReason !== prevReason) {
+      console.warn(`[beat] k:${prevK}→${this.k} reason=${this.lastReason} ` +
+        `work=${preState.cost.toFixed(1)} gap=${preState.gap.toFixed(1)} vsync=${preState.vsync.toFixed(2)} ` +
+        `p50=${preState.p50.toFixed(1)} p95=${preState.p95.toFixed(1)} breach=${preState.breach} ` +
+        `miss=${preState.miss} stall=${preState.stallMs.toFixed(0)} floor=${preState.floor} guard=${preState.settle}`);
     }
   }
 

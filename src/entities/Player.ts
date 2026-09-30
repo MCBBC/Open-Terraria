@@ -378,6 +378,16 @@ export { refreshMechanicalAccsFromItemType };
  *  默认全真，例外仅此二件——虚空袋内【不】重放信息/机械刷新。
  *  ★终零波批注订正：CanVoidVaultAccept 注"例外未逐 id 建表"退役——本表即逐 id 真值 */
 const WORKS_IN_VOID_BAG_FALSE = new Set<number>([4346, 5095]);
+/** UpdateItemDye hidden 早退豁免名单（Player.cs:9708 `bool num =`，★R4-acc0-① 2026-09-30）：
+ *  num = armorItem.wingSlot>0 ∨ type∈{934 飞毯,4341 折叠凳,5126 造物之手,4563 Shroud,
+ *  1987 天使光环}——功能槽∧隐藏（:9709 flag）时 `!num && flag` 早退（:9714）对名单成员
+ *  不生效 ⇒ 隐藏配饰仍把配对染料写进 c* 通道（视觉槽仍被 UpdateVisibleAccessory
+ *  :36361 !hide 门挡住=只染不显,染的是该层【其他】 occupants 的贴图）。
+ *  翼 face 不入本表（wingSlot>0 分支在调用点经 statOfInternal().wing 判）;934/4341/
+ *  4563/1987 的 cCarpet/cPortableStool/cUnicornHorn/cAngelHalo 专通道本仓未建模
+ *  （无绘制面,染料无消费端=落位即 no-op,登记债）;5126 的 back/handOn/handOff 为
+ *  可达判别面。 */
+const HIDDEN_DYE_NUM = new Set<number>([934, 4341, 5126, 4563, 1987]);
 /** 甲件 aggro 轴（终零波批 2026-09-01）——GrantArmorBenefits :13201 逐 armorPiece.type
  *  if 链的 aggro 半臂（:13852-13874/:13983-13997）：龟甲三件 1316/1317/1318 各 +250、
  *  甲虫头/腿 2199/2202 各 +250、壳胸 2201 +400、日曜三件 2763/2764/2765 各 +300。
@@ -2066,29 +2076,34 @@ export class Player extends Entity {
     };
     /** 槽 → 族赋值（UpdateVisibleAccessory :36451-36520 后写覆盖语义 + back 披风
      *  清 front :36468-36471；face 槽按 ArmorIDs.Face.Sets 分流 face/mask/flower/
-     *  head 四层——本仓单层合并,head 层并入 face（同锚同帧,登记偏差）） */
-    const accDrawApply = (s: { id: number }, slotIdx: number): void => {
+     *  head 四层——本仓单层合并,head 层并入 face（同锚同帧,登记偏差））。
+     *  ★dyeOnly（R4-acc0-①）：hidden num 名单直通模式——视觉槽不写（原版可见轮
+     *  :36361 !hide 门独立于 UpdateItemDye）,仅染料通道照写（UpdateItemDye :9714
+     *  `!num&&flag` 早退的 num 豁免 :9708）;back 披风的 front 互斥清写亦跳过
+     *  （那是 :36468-36471 可见轮语义,UpdateItemDye 无此臂）。 */
+    const accDrawApply = (s: { id: number }, slotIdx: number, dyeOnly = false): void => {
       const d = ITEM_DEFS[s.id];
       const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       const ds = accDrawSlotsOf(vid);
       if (!ds) return;
       const dyeItem = this.inv.getEffectiveDye(slotIdx % 10);   // UpdateItemDye :9696 走 GetEffectiveDye
       const dyeVid = dyeItem ? (ITEM_DEFS[dyeItem.id]?.vid ?? -1) : -1;
-      if (ds.handOn) { accDraw.handOn = ds.handOn; accDraw.dyeHandOn = dyeVid; }
-      if (ds.handOff) { accDraw.handOff = ds.handOff; accDraw.dyeHandOff = dyeVid; }
+      if (ds.handOn) { if (!dyeOnly) accDraw.handOn = ds.handOn; accDraw.dyeHandOn = dyeVid; }
+      if (ds.handOff) { if (!dyeOnly) accDraw.handOff = ds.handOff; accDraw.dyeHandOff = dyeVid; }
       if (ds.back) {
         // Back 子层三路由（UpdateVisibleAccessory :36455-36466）：DrawInBackpackLayer
         // → Player.backpack / DrawInTailLayer → Player.tail（两者不占 back 不清 front）/
         // 其余（披风族）→ back + front=-1 互斥清写
-        if (BACK_DRAW_IN_BACKPACK.has(ds.back)) { accDraw.backpack = ds.back; accDraw.dyeBackpack = dyeVid; }
-        else if (BACK_DRAW_IN_TAIL.has(ds.back)) { accDraw.tail = ds.back; accDraw.dyeTail = dyeVid; }
+        if (BACK_DRAW_IN_BACKPACK.has(ds.back)) { if (!dyeOnly) accDraw.backpack = ds.back; accDraw.dyeBackpack = dyeVid; }
+        else if (BACK_DRAW_IN_TAIL.has(ds.back)) { if (!dyeOnly) accDraw.tail = ds.back; accDraw.dyeTail = dyeVid; }
+        else if (dyeOnly) { accDraw.dyeBack = dyeVid; }
         else { accDraw.back = ds.back; accDraw.dyeBack = dyeVid; accDraw.front = 0; accDraw.dyeFront = -1; }
       }
-      if (ds.front) { accDraw.front = ds.front; accDraw.dyeFront = dyeVid; }
-      if (ds.shoe) { accDraw.shoe = ds.shoe; accDraw.dyeShoe = dyeVid; }
-      if (ds.waist) { accDraw.waist = ds.waist; accDraw.dyeWaist = dyeVid; }
-      if (ds.shield) { accDraw.shield = ds.shield; accDraw.dyeShield = dyeVid; }
-      if (ds.neck) { accDraw.neck = ds.neck; accDraw.dyeNeck = dyeVid; }
+      if (ds.front) { if (!dyeOnly) accDraw.front = ds.front; accDraw.dyeFront = dyeVid; }
+      if (ds.shoe) { if (!dyeOnly) accDraw.shoe = ds.shoe; accDraw.dyeShoe = dyeVid; }
+      if (ds.waist) { if (!dyeOnly) accDraw.waist = ds.waist; accDraw.dyeWaist = dyeVid; }
+      if (ds.shield) { if (!dyeOnly) accDraw.shield = ds.shield; accDraw.dyeShield = dyeVid; }
+      if (ds.neck) { if (!dyeOnly) accDraw.neck = ds.neck; accDraw.dyeNeck = dyeVid; }
       if (ds.face) {
         // face 四层路由（UpdateVisibleAccessory :37216-37230 逐槽分流，★1457
         // ArmorIDs.cs:2143-2150 集合）：head 层（12/10/13/11 骷髅族）→ faceHead /
@@ -2097,16 +2112,16 @@ export class Player extends Entity {
         // 至多四件；染料逐族随路由（UpdateItemDye :9774-9788 cFaceHead/cFaceMask/
         // cFaceFlower/cFace）。头盔互斥/换档门（PlayerFrame :36252-36271）按帧在
         // 渲染侧 resolveFaceLayers 应用（head 随狼/人鱼强改在纸娃娃装备侧）
-        if (FACE_HEAD_LAYER.has(ds.face)) { accDraw.faceHead = ds.face; accDraw.dyeFaceHead = dyeVid; }
-        else if (FACE_MASK_LAYER.has(ds.face)) { accDraw.faceMask = ds.face; accDraw.dyeFaceMask = dyeVid; }
-        else if (FACE_FLOWER_LAYER.has(ds.face)) { accDraw.faceFlower = ds.face; accDraw.dyeFaceFlower = dyeVid; }
-        else { accDraw.face = ds.face; accDraw.dyeFace = dyeVid; }
+        if (FACE_HEAD_LAYER.has(ds.face)) { if (!dyeOnly) accDraw.faceHead = ds.face; accDraw.dyeFaceHead = dyeVid; }
+        else if (FACE_MASK_LAYER.has(ds.face)) { if (!dyeOnly) accDraw.faceMask = ds.face; accDraw.dyeFaceMask = dyeVid; }
+        else if (FACE_FLOWER_LAYER.has(ds.face)) { if (!dyeOnly) accDraw.faceFlower = ds.face; accDraw.dyeFaceFlower = dyeVid; }
+        else { if (!dyeOnly) accDraw.face = ds.face; accDraw.dyeFace = dyeVid; }
       }
-      if (ds.beard) { accDraw.beard = ds.beard; accDraw.dyeBeard = dyeVid; }
+      if (ds.beard) { if (!dyeOnly) accDraw.beard = ds.beard; accDraw.dyeBeard = dyeVid; }
       if (ds.balloon) {
         // DrawInFrontOfBackArmLayer（ArmorIDs.cs:2213={18}）→ balloonFront,余 → balloon
-        if (BALLOON_TORSO_FRAMING.has(ds.balloon)) { accDraw.balloonFront = ds.balloon; accDraw.dyeBalloonFront = dyeVid; }
-        else { accDraw.balloon = ds.balloon; accDraw.dyeBalloon = dyeVid; }
+        if (BALLOON_TORSO_FRAMING.has(ds.balloon)) { if (!dyeOnly) accDraw.balloonFront = ds.balloon; accDraw.dyeBalloonFront = dyeVid; }
+        else { if (!dyeOnly) accDraw.balloon = ds.balloon; accDraw.dyeBalloon = dyeVid; }
       }
     };
     // 仇恨轴（ApplyEquipFunctional case 内 aggro ±400 直赋——功能槽 only,
@@ -2124,7 +2139,17 @@ export class Player extends Entity {
       //  ApplyEquipFunctional 头两门都不在可见轮上）：专家档配饰经典世界仍上身
       //  照画/照染线,只是零效益。两臂与后段写互不叠写（独立变量,槽序即写序）,
       //  提序不改语义。
-      if (sVid > 0 && !this.hideVisibleAccessory[i]) accDrawApply(s, i);
+      // ★R4-acc0-①（2026-09-30）：hidden num 名单染料直通（UpdateItemDye
+      //   :9708-9717——num=wingSlot>0∨{934,4341,5126,4563,1987} 时 `!num∧flag`
+      //   早退豁免=隐藏仍染;视觉槽仍被可见轮 :36361 !hide 门挡住=只染不显）。
+      //   R4 双旗族进功能段后 1987/4563 使该缝新可达。翼 face=wingDyeVid 无 hide
+      //   门（:1758）=cWings num 豁免同相,不在此重复落位。
+      if (sVid > 0) {
+        if (!this.hideVisibleAccessory[i]) accDrawApply(s, i);
+        else if (HIDDEN_DYE_NUM.has(sVid) || (statOfInternal(s.id)?.wing ?? 0) > 0) {
+          accDrawApply(s, i, true);
+        }
+      }
       if (sVid === 5540 || sVid === 5541) stringColor = 29;
       const funcStrV = statOfInternal(s.id)?.str;
       if ((funcStrV ?? 0) > 0) stringColor = funcStrV!;

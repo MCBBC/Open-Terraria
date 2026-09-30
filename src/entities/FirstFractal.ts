@@ -11,7 +11,7 @@
 //   全不适用,不接 projectileWetSection。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { projSprite } from './Arrow';
+import { projFrameImg } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 export class FirstFractalSlash extends Entity {
@@ -75,20 +75,21 @@ export class FirstFractalSlash extends Entity {
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
-    const img = projSprite(857);
+    // ★S2/BJ415（2026-09-30）切片轴修正：原文 DrawProj 专支 Main.cs:33934
+    //  `texture2D4.Frame(15, 1, proj.frame)` = 15 列横切（帧 90×84,贴图 1350×84 横条;
+    //  frame=AI_168 :43897 出生 Next(15) 掷定恒定）。旧式以 height/width 推帧数
+    //  （84/1350→0 钳 1）= 整幅 1350×84 画出（15 剑一排,660 天界碎裂剑同病）。
+    //  单源 = Arrow.PROJ_GRID[857]（projFrameImg 列主序横切,越界钳末帧）。
+    const fr = projFrameImg(857, this.frame);
     const ctx = r.ctx;
-    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    if (!fr || !(fr.width > 0) || !ctx) return;
     if (this.opacity <= 0.02) return;
-    const frames = Math.max(1, Math.round(img.height / img.width));
-    const fh = img.height / frames;
-    const idx = Math.min(frames - 1, this.frame % frames);
     ctx.save();
     ctx.globalAlpha = this.opacity;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     if (this.vx < 0) ctx.scale(1, -1);
-    ctx.drawImage(img, 0, idx * fh, img.width, fh,
-      -img.width / 2, -fh / 2, img.width, fh);
+    ctx.drawImage(fr, -fr.width / 2, -fr.height / 2);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

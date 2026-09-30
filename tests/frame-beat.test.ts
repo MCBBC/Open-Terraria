@@ -849,11 +849,11 @@ describe('★digest 修前/修后节拍对照(帧距序列跳变次数+p50 随 c
     const stO = gapStats(steady(old_.rendered, 5000));
     expect(stO.p50).toBeGreaterThan(GRID_MS - 2);      // 旧 p50≈16.7
     expect(stO.p50).toBeLessThan(GRID_MS + 2);
-    // 绿(修后):稳态 k=1 恒 120fps。冷启动首样本噪声可瞬时抬 floor(k=2),滞回升拍
-    // ~2.5s 自愈(lastReason='upgrade' 即自愈凭证;真实流程 afterWorldLoad resetSampling
-    // 用成熟估计无此瞬态)——判别面取 5s 后稳态段
+    // 绿(修后):稳态 k=1 恒 120fps。★v8 FLOOR_TOL 0.04→0.15:估计噪声(-4.2%
+    // 时间戳语义)不再抬 floor——冷启动即 k=1(reason 恒 init,地板零迁移=打摆
+    // 根治的更强形态;旧升级自愈路径不再需要)
     expect(neo.beat.k).toBe(1);
-    expect(neo.beat.lastReason).toBe('upgrade');
+    expect(neo.beat.lastReason).toBe('init');
     const stN = gapStats(steady(neo.rendered, 5000));
     expect(stN.p50).toBeGreaterThan(HZ120 - 1);        // 新 p50≈8.3
     expect(stN.p50).toBeLessThan(HZ120 + 1);

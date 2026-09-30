@@ -7157,8 +7157,8 @@ export class Enemy extends Entity {
         if (sroller) {
           // 态 0 每 tick 属性复位（:29464-29466 damage=defDamage / defense=defDefense /
           // knockBackResist=GetKnockbackMultiplier_ScaledByDifficulty(0.3)）——态 6 覆写
-          // 的解除点；仅 417 落位（陆龟族 def 从未被本 AI 覆写；态 3 的 defDamage×2
-          // 伤害强化 :29556-29558 属陆龟域,未移植不在本批,登记见测试头注）
+          // 的解除点；仅 417 落位（态 3 强化面 :29629-29630 已由 S3 刀落位,经 wet 转态
+          // 3 的 417 亦被该面覆盖;态 0 复位=其逐拍解除点）
           if (this.srollerDefBase) {
             this.def.damage = this.srollerDefBase.dmg;
             this.def.defense = this.srollerDefBase.def;
@@ -7170,8 +7170,8 @@ export class Enemy extends Entity {
           // knockBackResist=GetKnockbackMultiplier_ScaledByDifficulty(0.75 496/497 |
           // 0.3)。★现时行为面=稳态零差（153/154 SetDefaults kb=0.3 :10965/:10980、
           // 496/497=0.75 :14716,ScaleStats :18114 出生已乘同曲线=复位值;def.damage/
-          // defense 现无 AI 内写点）——落位为态 3 伤害/防御强化债（:29556-29558,
-          // 登记中）的前置机构,该写点落地日起本复位成为其逐拍解除点。
+          // defense 的 AI 内写点=态 3 强化面 :29629-29630,S3 刀已落位）——
+          // 本复位=该强化面的逐拍解除点（进 3 强化/回 0 卸载同拍互验）。
           // 写值等值时不动 this.def（ENEMY_DEFS 共享 def 防跨实例污染;异值=外部
           // 写点已 COW 或此处 COW 后逐实例复位=原版 per-NPC 字段语义）
           const tBase = this.tortoiseDefBase;
@@ -7311,7 +7311,10 @@ export class Enemy extends Entity {
       //   num632=playerTop−cy−num631 归一×速;无视线 vy 强制 −12（:29803-29805）
       if (this.ai1 === 1) {
         if (player && !player.dead) {
-          this.facing = dx > 0 ? 1 : -1;
+          // TargetClosest 朝向段（:29781→SetTargetTrackingValues :78515）= seekDirX
+          // 同语义（冗余备案③c 收刀:旧 raw sign(dx) 缺 aggro 不转身/镇静/confused
+          // 反转门——与态 3 弹射/态 5 复位/态 1 转态位点同族统一）
+          this.facing = this.seekDirX(player);
           this.dirY = dy < 0 ? -1 : 1;
         }
         const spd = los ? 16 : 10;
@@ -7356,6 +7359,11 @@ export class Enemy extends Entity {
       this.vx *= 0.5;
       this.ai1 += t496 ? 0.5 : 1;
       gravityStep();
+      // 冗余备案③a（S3 定谳,:29599 TargetClosest）：原版转态拍调 TargetClosest,但其
+      // 朝向在下拍弹射拍重调（:29635 非 417|:29781 417）消费前【零读点】（转态尾无
+      // direction 消费,物理段不读）→ 行为面无差=冗余。本仓非 417 支省略=等价;
+      // 417 支落位（罐装段与 TargetClosest 同拍,height 变不影响朝向）——门语义对齐
+      // 见下 seekDirX。
       if (this.ai1 >= 30) {
         this.ai0 = sroller ? 6 : 3;
         this.ai1 = 0;
@@ -7363,9 +7371,12 @@ export class Enemy extends Entity {
         if (sroller) {
           // （NPC.cs:29613-29622）TargetClosest（通用中心比规则 :78544-78552）→
           // 罐装高度 52→32（position.Y±height 底边锚定换算）、ai[0]=6、
-          // ai[2]=Next(2,5) 撞块弹跳预算（态 6 ⑧消费）
+          // ai[2]=Next(2,5) 撞块弹跳预算（态 6 ⑧消费）。
+          // 冗余备案③c 收刀:TargetClosest 朝向段（:29599→SetTargetTrackingValues
+          // :78515）= seekDirX 同语义——旧 raw sign(dx) 缺 aggro 不转身/镇静/
+          // confused 反转三门（与态 3 弹射/态 5 复位位点同族统一）
           if (player && !player.dead) {
-            this.facing = dx > 0 ? 1 : -1;
+            this.facing = this.seekDirX(player);
             this.dirY = dy < 0 ? -1 : 1;
           }
           this.y += this.h; this.h = 32; this.y -= this.h;
@@ -7376,6 +7387,22 @@ export class Enemy extends Entity {
     }
     if (this.ai0 === 3) {
       // ---- 旋转弹射 ----
+      // 态 3 每拍伤害/防御强化（NPC.cs:29624-29630,Q2/R3 登记主面 S3 落刀）：
+      //   num616=2（全域缺省 :29624）|1.5（496/497 :29625-29628 系数亲读）;
+      //   damage = GetAttackDamage_LerpBetweenFinalValues(defDamage×num616,
+      //   defDamage×num616×0.9)（:29629 = Utils.Remap Classic→Expert 截断,NPC.cs:7074,
+      //   ≥Expert 取右值——经典 ×2/专家 ×1.8,496/497 ×1.5/×1.35）;defense =
+      //   defDefense×2（:29630）。defDamage/defDefense 基准 = tortoiseDefBase
+      //   （首 AI 拍 ScaleStats 后快照,防复利）;COW 同态 0 复位机构。417 经 wet 转态 3
+      //   （态 5 :29855-29858）亦落本面（原版无型门,num616 对 417 取 2）。出态 3 后
+      //   态 4/5 原版无复位写点（值残留）→ 态 0 复位机构（R3#1）=逐拍解除点,
+      //   与本写点同拍互验（进 3 强化/回 0 卸载）。
+      if (this.def === (ENEMY_DEFS[this.key] ?? PLACEHOLDER_DEF)) this.def = { ...this.def };
+      const num616 = t496 ? 1.5 : 2;
+      const tBase3 = this.tortoiseDefBase ?? { dmg: this.def.damage ?? 0, def: this.def.defense ?? 0 };
+      this.def.damage = Math.trunc(remap(this.difficulty || 1, GDL.CLASSIC, GDL.EXPERT,
+        tBase3.dmg * num616, tBase3.dmg * num616 * 0.9));
+      this.def.defense = tBase3.def * 2;
       if (this.ai1 === 0) {
         // TargetClosest（:29635,faceTarget=true;dead→faceTarget=false 不转向 :78540-42）
         // ——先于弹射/偏置/旋向消费（旧缺=无视线支按行走朝向发射、dirY 域无源,R3 定谳）
@@ -7402,10 +7429,21 @@ export class Enemy extends Entity {
         this.ai2 += 0.3;
         this.visAngle += this.ai2 * this.facing;
       } else {
-        if (player && Math.abs(dx) < (this.w + player.w) / 2 + 8) {
+        // 飞行重叠阻尼门（:29672-29680 两段【串行】if,非互斥——S3 定谳收刀）：
+        //   X 重叠 = 盒对盒（npc 右>玩家左 ∧ npc 左<玩家右——旧 |dx|<(w1+w2)/2+8
+        //   的 +8=自造容差,退位）∧ Y 门 npc 顶<玩家底（:29672 第三连项,旧缺=
+        //   玩家悬在上方时也阻尼）→ vx×0.8 / ai3 归零 / vy<0→+0.2 托升（旧缺）;
+        //   ai3≠0（续航段）→ vx=ai3 恒速 + vy−=0.22 上推。★串行序:重叠拍 ai3
+        //   先归零 → 同拍续航支空转（旧 if/else 在 ai3==0 时照写 vx=0+vy−=0.22
+        //   =无源上推偏差）。同款形态参照 sroller 态 6 ⑥（:29810-29817 ×0.9 无
+        //   ai3 归零臂）。
+        if (player && this.x + this.w > player.x && this.x < player.x + player.w
+          && this.y < player.y + player.h) {
           this.vx *= 0.8;
           this.ai3 = 0;
-        } else {
+          if (this.vy < 0) this.vy += 0.2;
+        }
+        if (this.ai3 !== 0) {
           this.vx = this.ai3;
           this.vy -= 0.22;
         }
@@ -7417,6 +7455,10 @@ export class Enemy extends Entity {
       this.visAngle += this.ai2 * this.facing;
       this.ai1 += 1;
       gravityStep();
+      // 转态门（:29686-29690）——冗余备案③b（S3 定谳）:原版同拍还写 noGravity=false
+      // （:29688）,但本族 SetDefaults 显式 false（153 :10972 / 154 :10990）、496/497/
+      // 417 字段缺省 false（:14710-14721/:15388-15399 无写点）,aiStyle 39 全域
+      // （:29335-29861）无 noGravity=true 写点 → 恒空操作,本仓省略=等价。
       if (this.ai1 >= 90) { this.ai0 = 4; }
       return;
     }

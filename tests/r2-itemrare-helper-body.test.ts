@@ -130,12 +130,15 @@ describe('R2 helper 体 rare/value 面（extract-itemrare DEFAULT_TO_BODY_RV）'
     }
   });
 
-  it('Food/Potion 体 rare=1 零新增键（85+1 调用点全带尾随 SetShopValues,case 级既有）', () => {
-    // 4022 等食物档位=SetFoodDefaults 尾式 rare=(int)(num/4f)（:48395,1456:48007/1458 同）
-    // ——该尾式面为 R2 边界外【已登记债】（错值型,86 件）,本刀不动:json 维持 SSV rare=1。
-    expect(RARE['4022']).toBe(1);
-    expect(RARE['1912']).toBe(1);
-    expect(RARE['5326']).toBe(3);   // case 5326 SSV(Orange3) 覆写 DefaultToFood 体 rare=1
+  it('Food/Potion 体 rare=1 仅非 IsFood 调用点生效（IsFood 86 件归 S1① 食物尾式终值）', () => {
+    // 4022 等 IsFood 86 件的档位=SetFoodDefaults 尾式 rare=(int)(num/4f)（:48395,1456:48007/
+    // 1458 同）——SSV rare 为尾式死码。★S1（2026-09-30 五段续刀）已落刀:4022=6/1912=0,
+    // 详见 tests/s1-itemrare-five-faces.test.ts（本测锚改为 S1 后终值）。
+    expect(RARE['4022']).toBe(6);
+    expect(RARE['1912']).toBe(0);
+    // 5326 ∉ IsFood（SetDefaults5 case 直调 DefaultToFood,不走 SetFoodDefaults 尾式）
+    // → 体 rare=1 + case SSV(Orange3) 源序尾胜=3,与 S1 无涉,保持。
+    expect(RARE['5326']).toBe(3);
   });
 
   it('live json ≡ 提取器现产（重产零漂移;键集与值双向全等）', () => {

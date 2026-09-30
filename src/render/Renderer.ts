@@ -3322,7 +3322,7 @@ export class Renderer {
   /** ★C10b 合并/分回合计数（诊断面——合并率异常低=夹层内容常在,查天气色罩/黑闪） */
   cloudMergeStats: Record<string, number> = {};
   /** ★C10b 合并判定半:群系切换黑闪是否在场（与绘制循环同阈 >0.01——零分配逐槽扫） */
-  private hasBgFlash(): boolean {
+  hasBgFlash(): boolean {
     for (let a = 0; a < 13; a++) {
       if (this.biomeBg.bgFlash[a] > 0.01) return true;
     }
@@ -4864,6 +4864,12 @@ export class Renderer {
     // ★SW-BJ41 2026-09-09：自然星微光衰减输入（SkyRenderer.draw 内 :63034 门 +
     //  :64003-64007 天空色衰减——monoFilters.update 已在本帧早段推进完毕）
     this.sky.shimmerAlpha = this.monoFilters.shimmerAlpha;
+    // ★C10d 远云并入 bg 会话门（sky.draw 前置:remix/色罩/黑闪与 section 1.5
+    //  合并门同源同值——均读上一帧尾状态;夹层判定在 drawVanillaClouds 同帧做）
+    const remixSkipSurfaceBg = !!world.seedFlags?.remix;
+    this.sky.farDeferGate = Renderer.cloudPipe && this.bgGlEnabled && !this.isCpuRender()
+      && this.sky.useGLClouds && !remixSkipSurfaceBg
+      && !this.sky.hasSkyWeatherTint() && !this.hasBgFlash();
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // ★opresent 前置:世界层缩放系数在此定值（原计算在世界层切换段,opresent 合并
@@ -4885,7 +4891,7 @@ export class Renderer {
       //  (gameMenu && remixWorldGen) 菜单例外/ (!remixWorldGen || !drunkWorldGen) 门
       //  属 drunk 菜单域,本仓菜单不走 remixWorldGen → 恒 false,只判 remix&&!menu
       let bgDone = false;
-      const remixSkipSurfaceBg = !!world.seedFlags?.remix;
+      // ★C10d:remixSkipSurfaceBg 已在 sky.draw 前置计算（远云门同源,见上）
       // ★BJ372:拍照重渲黑闪抑制同步（原版 DrawCapture 无切换黑闪层;黑闪绘制
       //   已归位 BiomeBackground.drawSurface 前景循环逐槽内联,见下 方块注）
       this.biomeBg.flashSuppressed = this._capturePass;
@@ -4931,12 +4937,15 @@ export class Renderer {
             // ★C10b 合并会话:bg quads 后【保持开放】,drawCloudsNear 收口
             // （必收口——含云早退路径,否则 bg 永不回贴;见 drawCloudsNear mergedSession 注）
             glbg.begin('bg');
+            // ★C10d:远云 pass1 选集首段发射（stash 在场时;层序=远云在 biomeBg 前）
+            this.sky.flushFarDeferredGL(glbg, ctx);
             // ★只画地表层(2026-08-20 地下背景光照修复):地下层须进世界层吃光
             this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             mergedSession = glbg;
             opresentDefer = opresentWanted;   // ★opresent:合并帧延迟收口（旗门齐才 defer）
           } else {
             glbg.begin('bg');
+            this.sky.flushFarDeferredGL(glbg, ctx);
             if (!remixSkipSurfaceBg) {
               this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             }
@@ -4947,6 +4956,8 @@ export class Renderer {
         }
       }
       if (!bgDone && !remixSkipSurfaceBg) {
+        // ★C10d 2D 回退:glbg 未开成帧的远云 stash 原位重放（biomeBg 前=原层序）
+        this.sky.replayFarDeferred2D(ctx);
         this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       }
       // ★暴风雪/沙尘暴背景色罩(#三开压测批 层位修正):原版 BlizzardSky/

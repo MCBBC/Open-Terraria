@@ -77,14 +77,18 @@ class SporeIdStaticGroup extends HitCdImpl {
   private sm = new Map<number, number>();
   private readonly cdMs = Math.round(10 * 1000 / 60);    // idStaticNPCHitCooldown 10t ≈167ms(60fps 基数)
   override tick(): void { /* 时间驱动,无逐拍衰减（dealContacts 循环头调用位） */ }
-  override ready(id: number, _cooldown: number): boolean {
+  // ★S2 拆相（R1-C,2026-09-30）：ready 覆写改两相覆写——基类 ready 组合 peek/commit
+  //  虚分派,dealContacts 拆相后走 peek/commit;直调 ready 面同值（时间驱动组行语义
+  //  不变,红蓝-J1 判别面 hurtCalls=1 保持）。
+  override peek(id: number): boolean {
+    return (this.sm.get(id) ?? 0) <= Date.now();
+  }
+  override commit(id: number, _cooldown: number): void {
     const now = Date.now();
-    if ((this.sm.get(id) ?? 0) > now) return false;
     this.sm.set(id, now + this.cdMs);
     if (this.sm.size > 512) {
       for (const [k, v] of this.sm) if (v <= now) this.sm.delete(k);
     }
-    return true;
   }
 }
 /** 云组门恒真过路表（拍板#1A）：perIDStaticNPCImmunity[567,*] 原版无写入点（见
@@ -92,7 +96,10 @@ class SporeIdStaticGroup extends HitCdImpl {
  *  恒开。占位达成 dealContacts cd 形参——ready 恒真不落账（曾 10t 组窗=自造节流,
  *  复辟即被 tests/sw-fx1 多云同拍连击判别面爆红）。 */
 class PassThroughCD extends HitCdImpl {
-  override ready(_id: number, _cooldown: number): boolean { return true; }
+  // ★S2 拆相（R1-C）：两相覆写——peek 恒真/commit 不落账（组行原版无写入点,
+  //  J3 勘误在案;基类 ready 组合两相,直调面同值恒真不落账）
+  override peek(_id: number): boolean { return true; }
+  override commit(_id: number, _cooldown: number): void { /* 恒不落账 */ }
 }
 const SPORE_CLOUD_PASS = new PassThroughCD();
 /** 气团组表：immunityIdentity=569（569/570/571 三变体共行,:6219）——penetrate=−1

@@ -338,7 +338,8 @@ describe('BJ410-Q2 邻接六刀（NPC.cs:29393/29413/29444/29448/29463/29469/295
 //     defense=defDefense/damage=defDamage/kbResist=scaled(0.75 496/497|0.3)。
 //     ★稳态行为面零差（153/154 SetDefaults kb=0.3 :10965/:10980、496/497=0.75 :14716,
 //     ScaleStats :18114 出生已乘同曲线;def.damage/defense 现无 AI 内写点）——落位为
-//     态 3 伤害/防御强化债（:29556-29558,登记中）的前置机构。
+//     态 3 伤害/防御强化面（:29629-29630,S3 刀已落位,见
+//     tests/bj410-tortoise-s3-buff.test.ts）的前置机构。
 //   R3#2 态 3 wet 段（:29693-29696 wet∧dirY<0 → vy-=0.3,每拍含弹射拍;同族态 4
 //     :29701-29704 一并落位）+ 弹射单式两支（:29636-29655）:无视线支 vx=朝玩家归一
 //     分量（旧 facing×spd 全速）+LOS 支 bias 反号修正（旧 dy+bias=压低,原版

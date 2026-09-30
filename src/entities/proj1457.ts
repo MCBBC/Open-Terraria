@@ -35,7 +35,7 @@ import { wetCollision } from './npcLiquid';
 import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
-import { projSprite } from './Arrow';
+import { projSprite, projFrameImg } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
   type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
 
@@ -67,10 +67,22 @@ export class HitCdImpl {
       else this.map.set(k, v - 1);
     }
   }
+  /** ★S2 拆相（清偿刀 R1-C 落刀,2026-09-30）：peek=读门判定（原版外环 flag2 表读,
+   *  Projectile.cs:12596——无副作用）/ commit=受理写（写梯 :14031-14038 usesIDStatic
+   *  支/:14168-14173 usesLocal 支=受里面深位）。ready() 保留为组合式（peek+commit）,
+   *  直调面（MinionProj/WeaponProj/SkyDragonFury/TownShot/MonkStaffFury/
+   *  PhoenixBowProj/damageAlongBolt D2）零变化;dealContacts 拆两相后,水母块
+   *  （:12673-12688 原文 return :12687 在写梯前=拒收零落账）不再消费冷却行。 */
+  peek(id: number): boolean {
+    return !this.map.has(id);
+  }
+  commit(id: number, cooldown: number): void {
+    this.map.set(id, cooldown < 0 ? 2147483647 : cooldown);
+  }
   /** cooldown<0 = localNPCHitCooldown −1（每敌一次） */
   ready(id: number, cooldown: number): boolean {
-    if (this.map.has(id)) return false;
-    this.map.set(id, cooldown < 0 ? 2147483647 : cooldown);
+    if (!this.peek(id)) return false;
+    this.commit(id, cooldown);
     return true;
   }
 }
@@ -120,13 +132,20 @@ class IdStaticSharedTable {
   constructor(private readonly cooldownMs: number) {}
   /** dealContacts 循环头调用位——时间驱动衰减,无需逐弹递减 */
   tick(): void {}
-  ready(id: number, _cooldown?: number): boolean {
+  /** ★S2 拆相（R1-C,同 HitCdImpl 注）：peek 读门/commit 写行。ready 组合式保留。 */
+  peek(id: number): boolean {
+    return (this.m.get(id) ?? 0) <= Date.now();
+  }
+  commit(id: number, _cooldown?: number): void {
     const now = Date.now();
-    if ((this.m.get(id) ?? 0) > now) return false;
     this.m.set(id, now + this.cooldownMs);
     if (this.m.size > 512) {
       for (const [k, v] of this.m) if (v <= now) this.m.delete(k);
     }
+  }
+  ready(id: number, _cooldown?: number): boolean {
+    if (!this.peek(id)) return false;
+    this.commit(id);
     return true;
   }
 }
@@ -393,21 +412,27 @@ export function dealContacts(
       }
     }
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
-    if (!cd.ready(e.id, cooldown)) continue;
+    // ★S2 拆相（R1-C 落刀,2026-09-30）：原档 cd.ready【读+写】融于本位——充能水母
+    //  被电/被拒拍即消费冷却行（HitCdImpl/IdStaticSharedTable 皆读时写）,而原版表读
+    //  在外环 flag2（:12596,无副作用）、写梯在 :14031-14038（水母块 return :12687
+    //  之后的受里面深位）⇒ 充能水母接触路径原版零落账（zap 每拍可达,受玩家 Hurt
+    //  免疫限频;解充能后无节流残留）。拆相：本位只 peek（≙外环 flag2 读面）,
+    //  commit 移至命中收尾（下方 onHit 后=写梯原位）。
+    if (!cd.peek(e.id)) continue;
     // ★水母块（Damage_PVE_Inner :12676-12688 内层 1:1）：充能态（dontTakeDamage）水母
     //  不受伤——外环 :12600 豁免只做两件事：①接触族弹幕（aiStyle 19/161/75/140 ||
     //  IsAWhip || AllowsContactDamageFromJellyfish{972,982,984,997,1043}）命中 →
     //  TakeDamageFromJellyfish 电玩家（近战 Player.cs:44620 / 弹幕 :12682 共用同一
     //  方法,本仓 Game.takeDamageFromJellyfish 单源）;②随后 `if (dontTakeDamage)
     //  return` 拦掉本次伤害。非充能水母（zapJelly && !jellyDontTake）不进本块,照常
-    //  受伤。原版 immune 窗门（:12650）先于水母块 ⇒ 本块置 cd.ready 后同拍。
-    //  ★登记债 R1-C（清偿刀 R1,2026-09-30,D2 同族窄面不落刀）：原版水母 return 在写梯
-    //  :14031 前=拒收零落账;本仓 cd.ready【读+写】在块前——充能水母被拒/被电拍照消费
-    //  冷却行（HitCdImpl/IdStaticSharedTable 皆读时写）。精确修复须拆 ready() 为
-    //  peek/commit 两相（12 调用方共享抽象,双相偏差面:表读门内移则电击门脱离 :12596
-    //  节流）→ 不属本刀机械可落域,登记下窗。现役受影响成员:1126/1127（接触族）+
-    //  482（非接触族仅消费无电击）;水母充能态本就 dontTakeDamage 零伤,可观测面=解
-    //  充能后 10t 内的节流残留。
+    //  受伤。原版 immune 窗门（:12650）先于水母块 ⇒ 本块置 cd 读门后同拍。
+    //  ★R1-C 已落刀（清偿刀 S2,2026-09-30）：cd 拆 peek/commit 两相——本块上方只
+    //  peek（≙外环 flag2 读 :12596,无副作用）,commit 移至命中收尾（写梯 :14031 位）。
+    //  充能水母接触路径（本块 continue）零落账=原版 return :12687 同构;zap 每拍可达
+    //  （TakeDamageFromJellyfish 限频=玩家 Hurt 免疫+meleeNpcCd/attackCD 双面,原版
+    //  Player.cs:44607-44612 同构）。现役可观测成员:1127（aiStyle 161∈{19,161,75,140}）
+    //  ——1126 aiStyle 190 非接触族（旧登记「1126/1127 接触族」系误并,S2 勘）;482/
+    //  567-571/227/花瓣/1128/1129 等非接触族本块不可达,拆相前后同值。
     //  GAP 登记：同款外环门+水母块在 Arrow 主命中环 / WhipProj.tryHit 环未接（两环
     //  现状=整靶跳过,伤害面与原版同值,仅缺接触族反噬电击——鞭 IsAWhip 属接触族）
     if (zapJelly && jellyDontTake) {
@@ -458,6 +483,11 @@ export function dealContacts(
     // 命中回写共享表（StrikeNPC :14343 SetMeleeHitCooldown——玩家挥击弧同帧不再结算）
     gate?.sharedHits?.add(e.id);
     onHit?.(ent as unknown as HitTarget);
+    // ★S2 拆相（R1-C）：受理写梯位（:14031-14038 usesIDStatic 支/:14168-14173
+    //  usesLocal 支——原版写梯在 on-hit 效果 :13642 与 StrikeNPC :13701 之后=受里面
+    //  深位,水母块 return :12687 使拒收/电击拍零落账）。stopAfterFirstHit 前置=首
+    //  命中即亡弹照落账（penetrate 递减 :14186 在写梯后,同序）。
+    cd.commit(e.id, cooldown);
     if (stopAfterFirstHit) return;       // keepIterating=false（:14200——首命中即止,同拍不再遍历后继敌怪）
   }
 }
@@ -3427,16 +3457,20 @@ export class TitaniumStormShard extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
+    // ★S2/BJ415（2026-09-30）单源化：原手绘横切（img.width/12）轴向本就对（原文
+    //  Main.cs:33918 `Frame(projFrames[908]=12, 1, frame)`;贴图 288×28=12×24×28 横条,
+    //  原文贴图源=TitaniumStorm Buff RT :33911,本仓无 RT 系统=恒回退弹体贴图同位）,
+    //  入 Arrow.PROJ_GRID[908] 后与染料 pass projFrameSrcRect（旧竖切 288×2.3 横条
+    //  切片=错轴）双消费单源。
     const ctx = r.ctx;
     if (!ctx) return;
-    const img = projSprite(908);
+    const fr = projFrameImg(908, this.frame);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    if (img && img.width > 0) {
-      const fw = img.width / 12;
-      ctx.drawImage(img, this.frame * fw, 0, fw, img.height, -fw / 2, -img.height / 2, fw, img.height);
+    if (fr) {
+      ctx.drawImage(fr, -fr.width / 2, -fr.height / 2);
     } else {
       ctx.fillStyle = '#B8C4D8';
       ctx.fillRect(-5, -5, 10, 10);

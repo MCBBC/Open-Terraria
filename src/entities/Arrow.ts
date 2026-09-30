@@ -205,6 +205,18 @@ const PROJ_GRID: Record<string, ProjGrid> = {
   839: { cols: 4, rows: 1, cw: 114, ch: 78, fw: 114, fh: 78 },
   840: { cols: 4, rows: 1, cw: 114, ch: 78, fw: 114, fh: 78 },
   853: { cols: 4, rows: 1, cw: 128, ch: 132, fw: 128, fh: 132 },
+  // ★S2/BJ415 观察项收口（2026-09-30）：DrawProj 专支（非 DrawKite 域）横切二型——
+  //  · 857 初代分形（Main.cs:33934 `rectangle23 = texture2D4.Frame(15, 1, proj.frame)`,
+  //    帧数无 Main.projFrames 赋值（恒 1）由 AI_168 :43897 出生 Next(15) 掷定恒定;
+  //    贴图 1350×84 = 15×90×84 横条。旧 FirstFractal.draw 以 height/width 推帧数
+  //    =0→钳 1 整幅画出（15 剑一排,660 同病）。
+  //  · 908 钛金风暴碎片（Main.cs:33918 `texture2D4.Frame(projFrames[908]=12, 1,
+  //    proj.frame)`;AI_175 :46150 frame=rand(12) 掷定恒定;贴图 288×28=12×24×28 横条。
+  //    原文贴图源=TitaniumStorm Buff 渲染目标（:33911 RT 未就绪回退弹体贴图,本仓
+  //    无 RT 系统=恒回退面）。实体手绘横切已对轴,入表=染料 pass projFrameSrcRect
+  //    （旧竖切 288×2.3 横条切片）与实体 draw 双消费单源化。
+  857: { cols: 15, rows: 1, cw: 90, ch: 84, fw: 90, fh: 84 },
+  908: { cols: 12, rows: 1, cw: 24, ch: 28, fw: 24, fh: 28 },
 };
 
 export function projFrameCount(projId: number): number {

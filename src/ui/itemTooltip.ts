@@ -192,6 +192,26 @@ const TOOLTIP_DMG_MUL: Record<number, number> = {
   162: 2, 801: 2, 163: 2, 220: 2, 389: 2, 1259: 2, 4272: 2, 5011: 2, 5012: 2, 5526: 2,
 };
 
+/** ★S4 Plantera 诅咒首行特例置位面（ItemID.Sets.UsesCursedByPlanteraTooltip,
+ *  Terraria.ID/ItemID.cs:155——1456:151/1458:155 同表）：丛林/腐化/猩红/神圣/冰雪
+ *  地牢钥匙 1533-1537 + 地牢沙漠钥匙 4714 */
+export const USES_CURSED_BY_PLANTERA_VIDS: ReadonlySet<number> = new Set([1533, 1534, 1535, 1536, 1537, 4714]);
+
+/** ★S4 静态说明首行 Plantera 诅咒替换（GetLinesInfo 的 item.ToolTip 行循环,
+ *  Main.cs:21149-21162——1456 :20787-20798/1458 :21153-21162 同文）：
+ *  `i==0 && UsesCursedByPlanteraTooltip[type] && !NPC.downedPlantBoss` → 首行
+ *  【替换】为 Lang.tip[59]「它已被一个强大的丛林生物诅咒」（行 1+ 原样保留）。
+ *  ★特例在行循环【内】=只改写已存在行,不新增（ToolTip==null 零行=零替换——
+ *  staticTip null 原样透传）;击杀世纪之花（world.flags downed_262）后恢复原文。
+ *  消费面 = tooltip 静态说明装配（UI.buildTooltipHtml）∪ BySearch 检索域语料
+ *  （UI.vinvFillTooltipLines——语料同吃替换后行,搜「诅咒」命中钥匙 = 原版同相） */
+export function planteraCursedTip(vid: number, staticTip: string | null, planteraDowned: boolean): string | null {
+  if (!staticTip || planteraDowned || !USES_CURSED_BY_PLANTERA_VIDS.has(vid)) return staticTip;
+  const lines = staticTip.split('\n');
+  lines[0] = T('LegacyTooltip.59');
+  return lines.join('\n');
+}
+
 /** 击退档（:20602-20632） */
 const KB_TIERS: Array<[number, number]> = [
   [1.5, 15], [3, 16], [4, 17], [6, 18], [7, 19], [9, 20], [11, 21],

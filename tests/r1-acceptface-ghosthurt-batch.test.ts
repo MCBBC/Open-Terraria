@@ -405,11 +405,12 @@ describe('R1-524:全局免疫窗门 + IDStatic 写面（BladetongueGlobProj）',
     g1.critChanceFn = () => 0;
     g1.fixedUpdate(1 / 60, gg);
     expect(e.pierceCalls).toEqual([-2]);
-    // ★登记债 R1-A（524 Ichor 缺面,不在 Q4 verdict 刀域）：vanilla StatusNPC :11393
-    //  `if (type == 524) nPC.AddBuff(69, …)`（数据表 vanilla-projstatus.json['524'] 已
-    //  提取在案）——本仓 524 无 applyProjStatus 调用 = 受理拍不上 Ichor。同族 978 有
-    //  接线（VolcanoBlastProj:307）,524 缺 → 下窗清偿（与 977/978 ghostHeal 缺面同批）。
-    expect(e.ichorT ?? 0).toBe(0);                          // 缺面钉锚（清偿时翻 >0 并去本行）
+    // ★清偿刀 S2/R1-A（2026-09-30）兑现：StatusNPC :11393 Ichor(69) 180-420t 面
+    //  已接线（BladetongueGlobProj 受理位 applyProjStatus 表驱动）——旧「缺面钉锚
+    //  ichorT=0」按本行自带指令翻正移除,判别面迁 tests/s2-proj-acceptface-batch §A。
+    expect(e.ichorT ?? 0).toBeGreaterThan(0);
+    expect(e.ichorT ?? 0).toBeGreaterThanOrEqual(3);
+    expect(e.ichorT ?? 0).toBeLessThanOrEqual(7);
     expect(e.pierceCalls).toHaveLength(1);                  // 静态表行已落（6 子步仅 1 结算）
     const g2 = new BladetongueGlobProj(458, 458, 0, 0, 30, 2);
     g2.critChanceFn = () => 0;

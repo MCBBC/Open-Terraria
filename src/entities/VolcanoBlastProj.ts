@@ -304,6 +304,9 @@ export class VolcanoBlastProj extends Entity {
         // （hitSet）,原文命中后全局窗【清零】非新开 10t 窗
         kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, -3, true);
       // StatusNPC（Projectile.cs:11365）：AddBuff(24,180)=On Fire! 3s（提取表驱动）
+      // ★S2/R1-B 定谳（2026-09-30）：ghostHeal/ghostHurt 不接=判例面——978 melee 非
+      //  magic（SetDefaults :9255-9271 无 magic 行）,ghostHurt :12022 早退零面、
+      //  ghostHeal :12089 白耗预算面=家族级债（全链锚见 meleeOnHitProjs.ts 文件尾批注）。
       applyProjStatus(978, e as unknown as Record<string, number | undefined>);
       // usesLocalNPCImmunity 族落地 = 全局窗清零段（GC1：Projectile.cs:14177）
       (game as unknown as { noteNpcPlayerImmune?: (id: number, ticks: number) => void })

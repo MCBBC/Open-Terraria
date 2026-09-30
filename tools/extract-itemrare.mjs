@@ -70,6 +70,46 @@
 //     2420/2421 if-else（:23088-23096）、30189 内层 switch rare=2;
 //   ⑤ SetDefaults 派发后方法级块（:48721-48836 value if 链 + :48843 bait>0 → rare 3/2/1）;
 //   ⑥ 变体 if 分支（Weaker/StrongerVariant）=按设计忽略（本表建模基础变体,非债）。
+//
+// ★清偿刀 S1（2026-09-30,五段续刀,R2 基线=DEFAULT_TO_BODY_RV 编译器+HAND 通道+FACTORY_VALUE
+//   七表——在其上扩方法级域:if 范围守卫/尾段算式/派发后块三形态）。五段 1457 亲读定谳,
+//   1456/1458 三版同构跨版对拍实证（foodTail 式/isFood=86/baitBlock 阈值 50>3,30>2,15>1/
+//   sd3tail/cageGuard/food 形参 85/链 30 ids/(c) numKs/(d) 14 ids 全同;守卫行号随版漂移,
+//   内容锚定不锚行）。行源序语义:case 组(区域扫描) < 方法级守卫/链 < 既有 HAND <
+//   派发后块(无条件覆写) < 食物尾式(食物 case 的 SSV rare=死码,尾式恒胜):
+//   ① SetFoodDefaults 尾段 rare=(int)(num/4f)（:48395;1456:48007/1458 同式）编译器:
+//     num = (buffType==207?12:buffType==206?8:3) + buffTime/14400(C# 整除); rare=trunc(num/4)。
+//     buffType/buffTime 取各 case 的 DefaultToFood 第 3/4 形参（DefaultToHealingPotion→0/0;
+//     无 case 的 4010(ApplePieSlice)→0/0→rare=0）。IsFood=ItemID.cs CreateBoolSet 动态解析
+//     （86 ids=85 case+4010）。48 件错值漂移（4022=6/1919=3/4011=4/Eggnog1912=0 等）。
+//   ② SetDefaults3 方法尾笼件段 value=buyPrice(0,10)（:27641）:可达集=尾卫
+//     `if (type < 2192 || type > 2198)`（:22289,块尾无条件 return :27618）之补集
+//     [2192,2198]∩(SD3 无 2192-2198 case 标签=亲核零)——R2 census「2192-2208」过宽
+//     （2199+ 落卫内提前 return）;尾内 case 2203/2204=死码。2194→buyPrice(0,2,70)/
+//     2196→200 覆写机械解析。
+//   ③ 方法级 if 范围守卫 rare 面:sweep（SD1-5 全域 `if (type >= A && type <= B)` 块顶层
+//     rare）≡钉表（10 族=8 注册族+3 census 外同形扫获:3390-3452 事件旗 rare=1、
+//     3456-3459 四碎片 rare=9、3638-3642 队块平台 rare=1）——新守卫现形即 throw 逼定谳
+//     （era-guard 变异守卫扩面）。另钉:单件守卫 2320（rare=3,:23100,census 外同形）、
+//     if-else 守卫 2421/2422（rare 1/3,:23075-23098;census 误记 2420,实际范围 [2421,2422]）。
+//     全族 liveness 亲核=守卫线前零 case 标签（脚本实证 NONE(live)）。
+//   ④ per-type if 链 rare:鱼链 2303-2321（共享 case 2290-2321(无 2314)体 :23165-23270,
+//     链 if 全带 value+rare 双写——本刀按注册面只取 rare,value 面另登记债）。链前返回构造
+//     亲核:2290-2296 鱼竿组 return/2314 独立 case(rare=1 既有)/2320 独立守卫——链 16 ids
+//     全 live、bait=0(鱼非饵,派发后 bait 块不覆写)。:30189 内层 switch default(rare=2)=
+//     死码定谳:可达集 {3262,3278-3292,3315-3317(外层 default goto case 3262)} 全有内层
+//     case 零 id 命中 default→不落刀（census 过计）。
+//   ⑤ SetDefaults 派发后方法级块（:48716-48915）:value if 链 30 ids+:48860 1994-2001 num
+//     块+:48892 14-id 或块（与链同族,census 行号域只圈到 48836,同构补面）+bait 块
+//     （bait>=50→3/>=30→2/>=15→1,阈值机械解析;1-14 档不写）×37 bait 赋值行——上下文
+//     走栈解析器逐行定 id 集（裸 case 体/if(type==X)/if(num==K)/多或/内层 switch 段五形态,
+//     形态外 throw）。
+//   新登记债（本刀不修,值已定谳待各自刀）:③④守卫/链的 value 面（1977-86=50000,
+//     1980=100000,1984=75000,1985=150000;2104-13=3750;2214-17=100000;2284-87=50000;
+//     3309-14=50000;3390-3452=1000;3456-59=10000;3638-42=100;2421=156000,2422=500000;
+//     2320=75000(另:现库 2320 value=2500 系死标签污染);鱼链 2298-2321 per-type value 覆写）、
+//     :48905-48909 SetDefaults 递归 1803-1807→SetDefaults(1533+type-1803)（终值=1533-1537 面,
+//     rare=8/value=0）。
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
@@ -81,8 +121,10 @@ const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 
 /** 提取库:Item.cs 全文 → { RARE, VALUE }（id → 档位/价值,铜币,原版 value 字段终值——
- *  sellPrice 系含 ×5 尾乘,2026-08-23 修正） */
-export function extractRareValue(src) {
+ *  sellPrice 系含 ×5 尾乘,2026-08-23 修正）。
+ *  ★S1 起第二参 itemIdsSrc = 同版本 Terraria.ID/ItemID.cs 全文（S1① IsFood 集解析;
+ *  缺省 null 时食物尾段编译器 fail-loud——禁静默跳过,防 1456/1457 双实例口径漂移） */
+export function extractRareValue(src, itemIdsSrc = null) {
   const LINES = src.split('\n');
 
 // ============ 区域：SetDefaults1..5 + SetFoodDefaults 方法体 ============
@@ -431,10 +473,528 @@ const HAND_VALUE = {
 };
 for (const [id, v] of Object.entries(HAND_VALUE)) VALUE[id] = v;
 
+// ============ ★清偿刀 S1（2026-09-30,五段续刀）============
+// 行源序:case 组 < 方法级守卫/链 < 既有 HAND < 派发后块 < 食物尾式。逐段头注见文件顶。
+
+// ---- S1① SetFoodDefaults 尾段 rare=(int)(num/4f) 编译器 ----
+const S1_FOOD = (() => {
+  if (itemIdsSrc === null) throw new Error('[extract-itemrare] S1① 缺 ItemID.cs 源（IsFood 解析不可用,禁静默跳过）');
+  const im = itemIdsSrc.match(/IsFood\s*=\s*Factory\.CreateBoolSet\(([^)]*)\)/);
+  if (!im) throw new Error('[extract-itemrare] S1① ItemID.cs IsFood=Factory.CreateBoolSet 未找到（源漂移,禁静默）');
+  const ids = im[1].split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isInteger);
+  if (!ids.length) throw new Error('[extract-itemrare] S1① IsFood 集为空（解析漂移）');
+  const [fFrom, fTo] = REGIONS[5];
+  if (!LINES[fFrom] || !LINES[fFrom].includes('SetFoodDefaults(')) {
+    throw new Error('[extract-itemrare] S1① REGIONS[5] 非 SetFoodDefaults（区域表漂移,禁静默）');
+  }
+  const args = new Map(); // id → [buffType, buffTime]
+  let cur = null;
+  for (let i = fFrom; i <= fTo; i++) {
+    const line = LINES[i];
+    const cm = line.match(/^\t\tcase (\d+):\s*$/);
+    if (cm) { cur = parseInt(cm[1], 10); continue; }
+    if (/^\t\tbreak;\s*$/.test(line)) {
+      if (cur !== null) throw new Error(`[extract-itemrare] S1① 食物 case ${cur} 无 DefaultToFood/DefaultToHealingPotion 调用（形态漂移,禁静默）`);
+      cur = null;
+      continue;
+    }
+    if (cur === null) continue;
+    if (/^\t\tbuffType = |^\t\tbuffTime = /.test(line)) {
+      throw new Error(`[extract-itemrare] S1① case ${cur} 直写 buffType/buffTime（未建模形态,禁静默）:${line.trim()}`);
+    }
+    const fm = line.trim().match(/^(DefaultToFood|DefaultToHealingPotion)\(([^)]*)\);\s*$/);
+    if (fm) {
+      if (fm[1] === 'DefaultToHealingPotion') { args.set(cur, [0, 0]); continue; }
+      const a = fm[2].split(',').map((x) => x.trim());
+      const buff = parseInt(a[2], 10);
+      const time = parseInt(a[3], 10);
+      if (!Number.isInteger(buff) || !Number.isInteger(time)) {
+        throw new Error(`[extract-itemrare] S1① case ${cur} DefaultToFood 第 3/4 形参不可解（具名/表达式形参未建模）:${fm[2]}`);
+      }
+      args.set(cur, [buff, time]);
+    }
+  }
+  for (const id of args.keys()) {
+    if (!ids.includes(id)) throw new Error(`[extract-itemrare] S1① SetFoodDefaults case ${id} 不在 IsFood 集（死 case,源漂移）`);
+  }
+  // num 语义（:48390-48394 亲读）:饱食档→基值（207 三档=12/206 两档=8/其余含 26 一档与
+  // 无 buff=3）+ buffTime/14400 整除（14400 帧=4 分钟=1 档位）;rare=(int)(num/4f) 截断。
+  const rare = {};
+  for (const id of ids) {
+    const [buff, time] = args.get(id) ?? [0, 0];
+    const base = buff === 207 ? 12 : buff === 206 ? 8 : 3;
+    rare[id] = Math.trunc((base + Math.trunc(time / 14400)) / 4);
+  }
+  return { ids, rare };
+})();
+for (const [id, r] of Object.entries(S1_FOOD.rare)) RARE[id] = r;
+
+// ---- S1② SetDefaults3 方法尾笼件段 value=buyPrice(0,10)（可达集=尾卫补集） ----
+(() => {
+  const [cFrom, cTo] = REGIONS[2]; // SetDefaults3
+  if (!LINES[cFrom] || !LINES[cFrom].includes('SetDefaults3(')) {
+    throw new Error('[extract-itemrare] S1② REGIONS[2] 非 SetDefaults3（区域表漂移）');
+  }
+  // 尾卫 `if (type < A || type > B)`(2-tab,块尾无条件 return) → 可达集 [A,B]
+  let guard = null;
+  for (let i = cFrom; i <= cTo; i++) {
+    const gm = LINES[i].match(/^\t\tif \(type < (\d+) \|\| type > (\d+)\)\s*$/);
+    if (!gm) continue;
+    let d = 0;
+    let blockEnd = -1;
+    for (let j = i + 1; j <= cTo; j++) {
+      if (j === i + 1 && LINES[j].trim() === '{') { d = 1; continue; }
+      d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+      if (d === 0 && j > i + 1) { blockEnd = j; break; }
+    }
+    const blockText = LINES.slice(i + 1, blockEnd).join('\n').trim();
+    // 块尾（剥掉内层块的闭括号链后）须为无条件 return——可达集推导的结构前提
+    if (!/return;\s*$/.test(blockText.replace(/(?:\s*\})+\s*$/, ''))) {
+      throw new Error(`[extract-itemrare] S1② 尾卫块(:${i + 1})块尾非无条件 return（结构漂移,可达集推导失效）`);
+    }
+    guard = { lo: +gm[1], hi: +gm[2], blockEnd, line: i };
+    break;
+  }
+  if (!guard) throw new Error('[extract-itemrare] S1② SetDefaults3 尾卫 `if (type < A || type > B)` 未找到（源漂移）');
+  // 可达性前提:SD3 内零 [lo,hi] case 标签（有=该 id 提前 return,尾段对它死码）
+  for (let id = guard.lo; id <= guard.hi; id++) {
+    const re = new RegExp(`^\\t*case ${id}:\\s*$`);
+    for (let i = cFrom; i <= cTo; i++) {
+      if (re.test(LINES[i])) throw new Error(`[extract-itemrare] S1② 可达集破约:case ${id} 在 SD3 出现(:${i + 1}),尾段对其死码——须重定谳`);
+    }
+  }
+  // 尾段:卫块后首个 2-tab `value = buyPrice(0, 10);` + 后随 if(type==N) 覆写块
+  let baseExpr = null;
+  const over = {}; // id → expr
+  for (let i = guard.blockEnd + 1; i <= cTo; i++) {
+    const line = LINES[i];
+    if (baseExpr === null) {
+      if (/^\t\tvalue = [^;]+;\s*$/.test(line)) baseExpr = line.trim().match(/^value = ([^;]+);$/)[1];
+      continue;
+    }
+    const m = line.match(/^\t\tif \(type == (\d+)\)\s*$/);
+    if (!m) continue;
+    const vm = (LINES[i + 2] ?? '').trim().match(/^value = ([^;]+);\s*$/);
+    if (!vm || LINES[i + 1].trim() !== '{') {
+      throw new Error(`[extract-itemrare] S1② 尾段覆写块形态漂移(:${i + 1}):${LINES[i + 1]?.trim()}|${LINES[i + 2]?.trim()}`);
+    }
+    over[+m[1]] = vm[1];
+  }
+  if (baseExpr === null) throw new Error('[extract-itemrare] S1② 尾段基值行未找到');
+  const baseVal = evalPrice(baseExpr);
+  if (baseVal === null) throw new Error(`[extract-itemrare] S1② 尾段基值不可解:${baseExpr}`);
+  for (let id = guard.lo; id <= guard.hi; id++) VALUE[id] = baseVal;
+  for (const [id, expr] of Object.entries(over)) {
+    const v = evalPrice(expr);
+    if (v === null) throw new Error(`[extract-itemrare] S1② 覆写值不可解:${expr}`);
+    VALUE[id] = v;
+  }
+})();
+
+// ---- S1③ 方法级 if 范围守卫 rare 面（sweep ≡ 钉表,新守卫现形即 throw） ----
+const S1_GUARD_PINS = [
+  // 8 注册族（R2 census）+ 3 census 外同形扫获（事件旗/四碎片/队块平台）;行号=1457 锚
+  { lo: 1522, hi: 1527, rare: 1, at: ':18537' },
+  { lo: 1533, hi: 1537, rare: 8, at: ':18559' },
+  { lo: 1977, hi: 1986, rare: 2, at: ':21236' },
+  { lo: 2104, hi: 2113, rare: 1, at: ':21874' },
+  { lo: 2214, hi: 2217, rare: 3, at: ':22375' },
+  { lo: 2284, hi: 2287, rare: 5, at: ':22988' },
+  { lo: 3309, hi: 3314, rare: 2, at: ':30258' },
+  { lo: 3390, hi: 3452, rare: 1, at: ':30986' },
+  { lo: 3456, hi: 3459, rare: 9, at: ':31021' },
+  { lo: 3638, hi: 3642, rare: 1, at: ':32793' },
+];
+(() => {
+  const swept = [];
+  for (const [from, to] of REGIONS.slice(0, 5)) { // SetDefaults1..5
+    for (let i = from; i <= to; i++) {
+      const m = LINES[i].match(/^(\t*)if \(type >= (\d+) && type <= (\d+)\)\s*\{?\s*$/);
+      if (!m) continue;
+      const depth = m[1].length;
+      const inline = /\{\s*$/.test(LINES[i]);
+      let d = depth + (inline ? 1 : 0);
+      let rareVal;
+      for (let j = i + 1; j <= to; j++) {
+        const bd = LINES[j].match(/^\t*/)[0].length;
+        const t = LINES[j].trim();
+        if (!inline && j === i + 1 && t === '{') { d += 1; continue; }
+        if (bd === depth + 1 && d === depth + 1) {
+          const rm = t.match(/^rare = (-?\d+);\s*$/);
+          if (rm) rareVal = +rm[1];
+        }
+        d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+        if (j > i + 1 && d < depth + 1) break;
+      }
+      if (rareVal !== undefined) swept.push(`${m[2]}-${m[3]}=${rareVal}`);
+    }
+  }
+  const pinKeys = S1_GUARD_PINS.map((g) => `${g.lo}-${g.hi}=${g.rare}`).sort();
+  const sweptKeys = [...swept].sort();
+  if (sweptKeys.length !== pinKeys.length || sweptKeys.some((k, i2) => k !== pinKeys[i2])) {
+    throw new Error(`[extract-itemrare] S1③ 范围守卫 sweep≠钉表——新守卫现形须先定谳再入钉表:\n  sweep=[${sweptKeys.join(' ')}]\n  pins =[${pinKeys.join(' ')}]`);
+  }
+  for (const g of S1_GUARD_PINS) for (let id = g.lo; id <= g.hi; id++) RARE[id] = g.rare;
+  // 单件方法级守卫 2320（census 外同形;锚 :23100-23117,块内 rare=3,return）
+  const single = findTypeGuardBlock(2320);
+  if (!single || single.rare !== 3) {
+    throw new Error(`[extract-itemrare] S1③ 单件守卫 2320 锚漂移:found=${JSON.stringify(single)}（expected rare=3）`);
+  }
+  RARE[2320] = 3;
+  // if-else 守卫 2421/2422（:23075-23098;if 体 rare=1→2421,else 体 rare=3→2422;
+  // census 误记 2420——实际范围 [2421,2422]）
+  const ie = findTypeGuardBlock(2421, 'type >= 2421 && type <= 2422');
+  if (!ie || ie.rare !== 1 || !ie.elseBlock || ie.elseRare !== 3) {
+    throw new Error(`[extract-itemrare] S1③ if-else 守卫 2421/2422 锚漂移:${JSON.stringify(ie)}（expected if rare=1/else rare=3）`);
+  }
+  RARE[2421] = 1;
+  RARE[2422] = 3;
+})();
+
+/** 方法级 `if (type == X)`/`if (type >= A && type <= B)` 块定位（SD 域内首处;brace 次行/同行
+ *  双型),返回 { line, rare, elseBlock, elseRare }——rare 取块顶层或块内嵌套 if(type==N)/else
+ *  分支体首条 rare 赋值（2421/2422 型:rare 在嵌套 if/else 各支;2320 型:平铺在守卫体顶层）。 */
+function findTypeGuardBlock(id, condOverride) {
+  const cond = condOverride ?? `type == ${id}`;
+  for (const [from, to] of REGIONS.slice(0, 5)) {
+    for (let i = from; i <= to; i++) {
+      const m = LINES[i].match(new RegExp(`^(\\t*)if \\(${cond.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*\\{?\\s*$`));
+      if (!m) continue;
+      const depth = m[1].length;
+      const inline = /\{\s*$/.test(LINES[i]);
+      let d = depth + (inline ? 1 : 0);
+      let rare = null;
+      let elseBlock = false;
+      let elseRare = null;
+      let branch = null;      // null | 'if' | 'else'（嵌套分支体归属）
+      let branchDepth = -1;   // 嵌套分支体的 brace 深度
+      for (let j = i + 1; j <= to; j++) {
+        const bd = LINES[j].match(/^\t*/)[0].length;
+        const t = LINES[j].trim();
+        if (!inline && j === i + 1 && t === '{') { d += 1; continue; }
+        if (branch === null && bd === depth + 1 && d === depth + 1) {
+          if (/^if \(.*\)\s*$/.test(t) || /^if \(.*\)\s*\{\s*$/.test(t)) {
+            branch = 'if';
+            branchDepth = d + 1;
+            if (/\{\s*$/.test(t)) d += 1;
+            continue;
+          }
+          if (/^else\s*$/.test(t)) {
+            branch = 'else';
+            branchDepth = d + 1;
+            elseBlock = true;
+            continue;
+          }
+          const rm = t.match(/^rare = (-?\d+);\s*$/);
+          if (rm && rare === null) rare = +rm[1];
+        } else if (branch !== null && bd === branchDepth && d === branchDepth) {
+          const rm = t.match(/^rare = (-?\d+);\s*$/);
+          if (rm) {
+            if (branch === 'if') { if (rare === null) rare = +rm[1]; }
+            else if (elseRare === null) elseRare = +rm[1];
+          }
+        }
+        d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+        if (branch !== null && d < branchDepth) { branch = null; branchDepth = -1; }
+        if (j > i + 1 && d < depth + 1) break;
+      }
+      return { line: i + 1, rare, elseBlock, elseRare };
+    }
+  }
+  return null;
+}
+
+// ---- S1④ 鱼链 2303-2321 per-type if 链 rare 面（共享 case 2290-2321 无 2314） ----
+(() => {
+  const S1_FISH_PINS = {
+    2303: 1, 2304: 1, 2305: 1, 2306: 1, 2307: 2, 2308: 3, 2309: 1, 2310: 3,
+    2311: 1, 2312: 2, 2313: 1, 2315: 2, 2317: 4, 2318: 1, 2319: 1, 2321: 1,
+  };
+  const [cFrom, cTo] = REGIONS[2];
+  // 定位共享 case 标签连（含 2303 且 2321;2314 独立 case 不在连内）
+  let runStart = -1;
+  let runEnd = -1;
+  let runIds = null;
+  for (let i = cFrom; i <= cTo; i++) {
+    if (!/^\t*case \d+:\s*$/.test(LINES[i])) continue;
+    const ids = [];
+    let j = i;
+    while (j <= cTo) {
+      const m2 = LINES[j].match(/^\t*case (\d+):\s*$/);
+      if (!m2) break;
+      ids.push(+m2[1]);
+      j++;
+    }
+    if (ids.includes(2303) && ids.includes(2321)) { runStart = i; runEnd = j - 1; runIds = ids; break; }
+  }
+  if (runStart < 0) throw new Error('[extract-itemrare] S1④ 鱼链共享 case 标签连未找到（源漂移）');
+  const expectedRun = [];
+  for (let id = 2290; id <= 2321; id++) if (id !== 2314) expectedRun.push(id);
+  if (JSON.stringify(runIds) !== JSON.stringify(expectedRun)) {
+    throw new Error(`[extract-itemrare] S1④ 鱼链标签连漂移:${runIds.join(',')}（expected ${expectedRun.join(',')};2314 独立 case/2320 独立守卫/2290-2296 鱼竿组须重新定谳）`);
+  }
+  // 解析体至 return;:per-type `if (type == X)` 块内 rare 面（value 面另登记债,不取）
+  const parsed = {};
+  for (let i = runEnd + 1; i <= cTo; i++) {
+    const t = LINES[i].trim();
+    if (/^(break;|return\b)/.test(t)) break;
+    const m = t.match(/^if \(type == (\d+)\)\s*$/);
+    if (!m) continue;
+    if ((LINES[i + 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] S1④ 链块形态漂移(:${i + 1})`);
+    let d = 1;
+    const body = [];
+    let end = -1;
+    for (let j = i + 2; j <= cTo; j++) {
+      if (d === 1) body.push(LINES[j].trim());
+      d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+      if (d === 0) { end = j; break; }
+    }
+    const rm = body.map((x) => x.match(/^rare = (-?\d+);\s*$/)).find(Boolean);
+    if (rm) parsed[+m[1]] = +rm[1];
+    i = end;
+  }
+  const parsedKeys = Object.keys(parsed).map(Number).sort((a, b) => a - b);
+  const pinKeys = Object.keys(S1_FISH_PINS).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(parsedKeys) !== JSON.stringify(pinKeys) || pinKeys.some((k) => parsed[k] !== S1_FISH_PINS[k])) {
+    throw new Error(`[extract-itemrare] S1④ 鱼链 rare 面漂移:${JSON.stringify(parsed)}（expected ${JSON.stringify(S1_FISH_PINS)}——新链支现形须先定谳）`);
+  }
+  for (const [id, r] of Object.entries(parsed)) RARE[id] = r;
+})();
+
+// ---- S1⑤ SetDefaults 派发后方法级块（value if 链 + 1994-2001 num 块 + 14-id 或块 + bait rare） ----
+(() => {
+  const [dFrom, dTo] = methodRange('SetDefaults');
+  const dyeIdx = dFrom + LINES.slice(dFrom, dTo + 1).findIndex((l) => /\tdye = \(byte\)GameShaders\.Armor\.GetShaderIdFromItemId\(type\);/.test(l));
+  const baitIdx = dFrom + LINES.slice(dFrom, dTo + 1).findIndex((l) => /^\t\tif \(bait > 0\)\s*$/.test(l));
+  if (dyeIdx < dFrom || baitIdx < dFrom) throw new Error('[extract-itemrare] S1⑤ SetDefaults 尾锚(dye/bait>0)未找到（源漂移）');
+  // value if 链（dye..bait 之间,2-tab `if (type == X) { value = E; }` 四行块）
+  const chain = {};
+  for (let i = dyeIdx + 1; i < baitIdx; i++) {
+    const m = LINES[i].match(/^\t\tif \(type == (\d+)\)\s*$/);
+    if (!m) continue;
+    const vm = (LINES[i + 2] ?? '').trim().match(/^value = ([^;]+);\s*$/);
+    if (!vm || (LINES[i + 1] ?? '').trim() !== '{' || (LINES[i + 3] ?? '').trim() !== '}') {
+      throw new Error(`[extract-itemrare] S1⑤ value 链块形态漂移(:${i + 1}):${LINES[i + 1]?.trim()}|${LINES[i + 2]?.trim()}`);
+    }
+    chain[+m[1]] = vm[1];
+  }
+  // bait 块阈值（机械解析,不硬编码 50/30/15;块形=`if (bait >= T)`/独立行 `else if (bait >= T)`+次行 {+rare）
+  const tiers = [];
+  for (let i = baitIdx; i <= dTo; i++) {
+    const m = LINES[i].match(/^\t\t\t(?:else )?if \(bait >= (\d+)\)\s*$/);
+    if (m) {
+      if ((LINES[i + 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] S1⑤ bait 阈值块形态漂移(:${i + 1})`);
+      const rm = (LINES[i + 2] ?? '').trim().match(/^rare = (-?\d+);\s*$/);
+      if (!rm) throw new Error(`[extract-itemrare] S1⑤ bait 阈值块形态漂移(:${i + 1})`);
+      tiers.push([+m[1], +rm[1]]);
+    }
+    if (i > baitIdx && /^\t\t\}$/.test(LINES[i])) break; // bait 块收口
+  }
+  if (tiers.length < 2) throw new Error(`[extract-itemrare] S1⑤ bait 阈值面不足（tiers=${JSON.stringify(tiers)}）`);
+  const baitRareOf = (p) => {
+    for (const [t, r] of tiers) if (p >= t) return r;
+    return null; // 1-14 档:不写 rare
+  };
+  // (c) 1994-2001 num 块 + (d) 14-id 或块（bait 块之后,同族补面）
+  const cBlock = {};   // id → expr
+  const dBlock = {};   // id → expr
+  for (let i = baitIdx + 1; i <= dTo; i++) {
+    if (/^\t\tif \(type >= 1994 && type <= 2001\)\s*$/.test(LINES[i])) {
+      const nm = (LINES[i + 2] ?? '').trim().match(/^int num = type - (\d+);\s*$/);
+      if (!nm || (LINES[i + 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] S1⑤ num 块形态漂移(:${i + 1})`);
+      const base = +nm[1];
+      for (let j = i + 3; j <= dTo; j++) {
+        const km = LINES[j].match(/^\t\t\tif \(num == (\d+)\)\s*$/);
+        if (!km) continue;
+        const vm = (LINES[j + 2] ?? '').trim().match(/^value = ([^;]+);\s*$/);
+        if (!vm) throw new Error(`[extract-itemrare] S1⑤ num 块分支形态漂移(:${j + 1})`);
+        cBlock[base + +km[1]] = vm[1];
+        if ((LINES[j + 3] ?? '').trim() === '}' && /^\t\t\}$/.test(LINES[j + 4] ?? '')) break; // 外块收口
+      }
+    }
+    const dm = LINES[i].match(/^\t\tif \(type == \d+(?: \|\| type == \d+)+\)\s*$/);
+    if (dm) {
+      const vm = (LINES[i + 2] ?? '').trim().match(/^value = ([^;]+);\s*$/);
+      if (!vm || (LINES[i + 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] S1⑤ 或块形态漂移(:${i + 1})`);
+      for (const idm of LINES[i].matchAll(/type == (\d+)/g)) dBlock[+idm[1]] = vm[1];
+    }
+  }
+  // 键集钉面（值机械流过,键集漂移即 throw 逼定谳;1456/1457/1458 三版同构已对拍）
+  const CHAIN_PINS = [2015, 2016, 2017, 5212, 5300, 5311, 5312, 5313, 2019, 2018, 3563, 261, 2205, 2123, 2122, 2003, 2156, 2157, 2121, 1992, 2004, 2002, 2740, 2006, 3191, 3192, 3193, 3194, 2007, 2673].sort((a, b) => a - b);
+  const chainKeys = Object.keys(chain).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(chainKeys) !== JSON.stringify(CHAIN_PINS)) {
+    throw new Error(`[extract-itemrare] S1⑤ value 链键集漂移:${chainKeys.join(',')}（expected ${CHAIN_PINS.join(',')}）`);
+  }
+  const C_PINS = [1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001].sort((a, b) => a - b);
+  const cKeys = Object.keys(cBlock).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(cKeys) !== JSON.stringify(C_PINS)) {
+    throw new Error(`[extract-itemrare] S1⑤ num 块键集漂移:${cKeys.join(',')}（expected ${C_PINS.join(',')}）`);
+  }
+  const D_PINS = [2663, 1720, 2137, 2155, 2151, 1704, 2143, 1710, 2238, 2133, 2147, 2405, 1716, 1705].sort((a, b) => a - b);
+  const dKeys = Object.keys(dBlock).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(dKeys) !== JSON.stringify(D_PINS)) {
+    throw new Error(`[extract-itemrare] S1⑤ 或块键集漂移:${dKeys.join(',')}（expected ${D_PINS.join(',')}）`);
+  }
+  for (const [id, expr] of Object.entries(chain)) {
+    const v = evalPrice(expr);
+    if (v === null) throw new Error(`[extract-itemrare] S1⑤ value 链不可解:${expr}`);
+    VALUE[id] = v;
+  }
+  for (const [id, expr] of Object.entries(cBlock)) {
+    const v = evalPrice(expr);
+    if (v === null) throw new Error(`[extract-itemrare] S1⑤ num 块值不可解:${expr}`);
+    VALUE[id] = v;
+  }
+  for (const [id, expr] of Object.entries(dBlock)) {
+    const v = evalPrice(expr);
+    if (v === null) throw new Error(`[extract-itemrare] S1⑤ 或块值不可解:${expr}`);
+    VALUE[id] = v;
+  }
+  // bait 赋值行 → id 集（上下文走栈解析器）+ 阈值 rare 覆写
+  for (const [rFrom, rTo] of REGIONS.slice(0, 5)) {
+    for (let i = rFrom; i <= rTo; i++) {
+      const bm = LINES[i].match(/^\t*bait = (\d+);\s*$/);
+      if (!bm) continue;
+      const ids = baitIdsOf(i, rFrom);
+      const rare = baitRareOf(+bm[1]);
+      if (rare === null) continue;
+      for (const id of ids) RARE[id] = rare;
+    }
+  }
+
+  /** bait 赋值行 → 覆盖 id 集。向上走栈（brace 次行/同行双型）:
+   *  ①governing=首个 case|default 标签连（同层、与 bait 行之间无段终止符 break/return/goto）
+   *  ②governing 为 run:之后先遇同层段终止符=外层组自身→收工;先遇 `switch (type)` 块头=
+   *    内层 switch 段→跨头后首个无终止符间隔的标签连=外层组（取到即收工;走栈到底未取到
+   *    =外层 switch 头误检,fallback:governing 即外层组）
+   *  ③governing='default':至 switch 块头之间沿途 case 标签（含跨段终止符后的兄弟段）=
+   *    显式集,default 补集=外层组−显式集
+   *  ④if 守卫链:type==X / num==K(须有 int num = type - B 声明) / 多或;&& 合取、混合条件、
+   *    块头形态外一律 throw 逼定谳 */
+  function baitIdsOf(baitLine, regionFrom) {
+    let need = 0;
+    let crossedTerm = false;
+    let governing = null;        // number[]（标签连）| 'default'
+    let resolved = false;
+    let siblingLabels = [];
+    let pendingInner = false;    // 已跨出 switch 块头,外层组待取
+    let outer = null;            // number[]
+    const conds = [];
+    let numBase = null;
+    const collectRun = (hit) => {
+      const run = [];
+      let j = hit;
+      while (j >= regionFrom) {
+        const m2 = LINES[j].trim().match(/^case (\d+):\s*$/);
+        if (!m2) break;
+        run.unshift(+m2[1]);
+        j--;
+      }
+      return { run, above: j };
+    };
+    for (let i = baitLine - 1; i >= regionFrom; i--) {
+      const raw = LINES[i];
+      const t = raw.trim();
+      const opens = (raw.match(/{/g) || []).length;
+      const closes = (raw.match(/}/g) || []).length;
+      const atScope = need === 0;
+      if (atScope && /^(break;|return\b|goto )/.test(t)) {
+        // 段终止符=已离开所属 case:governing 即终值（pendingInner 仍立=跨出的 switch 头
+        // 系外层 switch 误检,fallback 用 governing——外层组在 case 体顶部无终止符间隔,
+        // 先遇终止符即证跨出的不是包裹本段的内层 switch）
+        if (governing !== null && governing !== 'default') { resolved = true; break; }
+        crossedTerm = true;
+        continue;
+      }
+      const ndm = t.match(/^int num = type - (\d+);\s*$/);
+      if (ndm && numBase === null) numBase = +ndm[1];
+      const isCase = t.match(/^case (\d+):\s*$/);
+      const isDefault = t === 'default:';
+      if (atScope && (isCase || isDefault)) {
+        if (governing === null && !crossedTerm) {
+          if (isDefault) { governing = 'default'; need += closes - opens; continue; }
+          const { run, above } = collectRun(i);
+          governing = run;
+          i = above + 1; // 跃过标签连（循环 i-- 落到连上方行）
+          continue;
+        }
+        if (governing === 'default' && !pendingInner) {
+          siblingLabels.push(+isCase[1]); // 同 switch 显式段（跨段终止符后的兄弟段也算）
+          need += closes - opens;
+          continue;
+        }
+        if (pendingInner && !crossedTerm && isCase) {
+          const { run } = collectRun(i);
+          outer = run;
+          resolved = true;
+          break;
+        }
+        need += closes - opens;
+        continue;
+      }
+      need += closes - opens;
+      if (need < 0) {
+        // 块头行:行内除括号外有内容=头在本行（inline）;纯括号行=头在上一行（decompile 次行型）
+        const bareBrace = /^[\t{}]*$/.test(raw);
+        const headLine = bareBrace ? (LINES[i - 1] ?? '').trim() : t;
+        if (/^switch\s*\(\s*type\s*\)/.test(headLine)) {
+          if (governing !== null && !pendingInner) {
+            pendingInner = true;   // governing 为内层 switch 段（或 default）,外层组另取
+            crossedTerm = false;
+          }
+          need = 0;
+          continue;
+        }
+        if (/^\t*(case \d+:|default:)\s*$/.test(headLine)) { need = 0; continue; } // case 体块 `{`（头行=标签）
+        if (/^\t*(public|private)\s+\S+.*\(.*\)\s*$/.test(headLine)) {
+          // 方法体边界=走栈收工（governing 已定即终值;SD 首案例:外层 switch 头误检后触界）
+          if (governing !== null) { resolved = true; break; }
+        }
+        const im = headLine.match(/^if \((.*)\)\s*\{?\s*$/);
+        if (im) {
+          const cond = im[1].trim();
+          if (/&&/.test(cond)) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:合取守卫未建模:${cond}`);
+          const terms = [...cond.matchAll(/\b(type|num) == (\d+)\b/g)];
+          if (!terms.length) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:守卫条件不可解:${cond}`);
+          const kinds = new Set(terms.map((x) => x[1]));
+          if (kinds.size > 1) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:混合 type/num 条件未建模:${cond}`);
+          // num 条件延迟解析:num 声明行在 cond 块上方,走栈至此尚未经过——走栈收工后统一求值
+          conds.unshift({ num: kinds.has('num'), values: terms.map((x) => +x[2]) });
+          need = 0;
+          continue;
+        }
+        throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:块头不可解(:${i + 1})"${headLine}"（形态外,须定谳）`);
+      }
+    }
+    if (!resolved || governing === null) {
+      throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:走栈失败（governing=${JSON.stringify(governing)}）`);
+    }
+    let ids;
+    if (governing === 'default') {
+      if (!outer) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:default 段外层组未定`);
+      ids = outer.filter((x) => !siblingLabels.includes(x));
+    } else {
+      ids = governing; // pendingInner 无 outer=governing 即外层组（外层 switch 头误检 fallback）
+    }
+    for (const c of conds) {
+      const condIds = c.num ? (numBase === null
+        ? (() => { throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:num 条件无 int num = type - B 声明`); })()
+        : c.values.map((k) => numBase + k))
+        : c.values;
+      ids = ids.filter((x) => condIds.includes(x));
+    }
+    if (!ids.length) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:id 集为空（约束解析失败）`);
+    return ids;
+  }
+})();
+
   return { RARE, VALUE };
 }
 
-const { RARE, VALUE } = extractRareValue(readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8'));
+const { RARE, VALUE } = extractRareValue(
+  readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8'),
+  readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria.ID/ItemID.cs`, 'utf8'), // S1① IsFood 集源
+);
 export { RARE, VALUE };
 if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
   // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用;守卫不拦

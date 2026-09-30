@@ -12,6 +12,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
+import { applyProjStatus } from './projStatus';
 import type { GameHooks } from './types';
 
 interface EnemyLike {
@@ -518,6 +519,15 @@ export class BladetongueGlobProj extends Entity {
           // （写梯 :14031-14038 usesIDStatic 支：penetrate=5≠1 ⇒ 内层真 = immune[owner]=0
           //  清窗+perIDStatic 静态表行——【非】pierce=0 的 10t 新全局窗;清窗由下方
           //  clearGlobalImmune（:14035 桥）承载,静态表行由 GLOB_IDSTATIC_HITS 落行承载）
+        // ★清偿刀 S2/R1-A（2026-09-30）：StatusNPC debuff 面接线——原文 :11393
+        //  `if (type == 524) nPC.AddBuff(69, 60 * Main.rand.Next(3, 8))` = Ichor(69)
+        //  180-420t。表驱动 vanilla-projstatus.json['524']（src=11393,提取器同源）,
+        //  SUPPORTED[69]='ichorT'（Enemy.hurt npcCheckArmorPenetration :81916 已接
+        //  +15 穿甲消费位）。族例序 = e.hurt 后 applyProjStatus（VolcanoBlast 978/
+        //  proj1457 同式;原版 StatusNPC :13634 在 StrikeNPC :13701 前——死亡拍双态
+        //  字段写均不可观察,族口径一致优先）。拒收拍（门拒 continue 在上）不可达
+        //  = 原文 :12635 门后位。ghostHeal/ghostHurt 不接（R1-B 定谳见文件尾批注）。
+        applyProjStatus(524, e as unknown as Record<string, number | undefined>);
         this.ai0 += 50;                                    // :13261 netUpdate=true; ai[0]+=50f
         GLOB_IDSTATIC_HITS.set(e.id, now + GLOB_IDSTATIC_COOLDOWN_TICKS);   // :14036 静态表行
         clearGlobalImmune(game, e.id);                     // :14035 immune[owner]=0 清窗
@@ -528,3 +538,23 @@ export class BladetongueGlobProj extends Entity {
 
   draw(): void { /* AI_096 无 α 回退 → 全程不可见（视觉=拖尾尘 170）*/ }
 }
+
+// ============================================================================
+// ★清偿刀 S2/R1-B 定谳存档（2026-09-30）：近战 on-hit 弹族 524/977/978 的
+// ghostHeal/ghostHurt（幽灵套两支）不接线 = 判例面（非缺面）。机制链：
+//   · flag10 资格【有】：:13712 `num41>0 ∧ lifeMax>5 ∧ friendly ∧ !hostile ∧
+//     aiStyle≠59` 无伤害类别门——三弹 friendly（SetDefaults :5951/:9221/:9263）
+//     且 aiStyle 96/152/189 ≠59,原版 flag10 块对近战弹可达。
+//   · ghostHurt 资格【无】：方法体 :12022-12026 `if (!magic || damage <= 0) return`
+//     先于一切状态写（预算池 :12029-33/候选收集/356 出弹）——非 magic 零观察面,
+//     接线即死码（ghostHurtOnHit src.magic 门同判）。
+//   · ghostHeal 资格【仅剩白耗面】：:12089 `lifeSteal -= num2` 在 :12090-91
+//     `if (!magic) return` 之前 = 非 magic 命中在幽灵兜帽在身时白扣治疗预算不出
+//     治疗球。本仓 PVE per-class 单源 ghostHealProc magic 预门（SpectreSoulProj:137,
+//     BJ382 习语;Arrow :9544 调用位 magic 门同族）⇒ 非 magic 家族该面整体未建模
+//     （1091 接线被门过滤=proj1457:1763 在案先例;PVP 中央面 :14741-44 无类别门,
+//     applyLifeSteal isMagic 直传已 1:1）。家族级债登记=S2 台账,非本批逐弹面。
+// 三弹类别锚：524 melee（:5941-5954 无 magic 行）/ 977 melee（:9210-9225 无
+// magic 行）/ 978 melee（:9255-9271 无 magic 行;数据面 vanilla-projectiles.json
+// 三键均无 magic 旗——判别测试 s2-proj-acceptface-batch §B 钉死）。
+// ============================================================================

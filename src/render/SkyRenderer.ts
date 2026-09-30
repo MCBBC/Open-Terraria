@@ -2471,9 +2471,42 @@ export class SkyRenderer {
     const scratch = this.cloudScratch;
     scratch.length = 0;
     for (const c of this.vclouds) if (c.scale < 1) scratch.push(c);
+    // ★C10d 远云并入 bg 会话（2026-09-30）:门=Renderer 前置（bg 会话将开+无色罩/
+    //  黑闪）×夹层判定（极光 tileColorState 非空/far 灯笼夜活跃——同帧状态法,无
+    //  prev 帧陈旧）。命中=pass1 选集 stash,section 1.5 的 bg 会话首段发射
+    //  （batch 令牌既有机制,层序=远云在 biomeBg 前=原位）;夹层在场=独立会话+blit
+    //  原路径（极光/far 灯笼画其上=原版序 :58829/:59310）。每帧入口清残留 stash。
+    this.farDeferred = null;
+    const farInterlayer = this.aurora.tileColorState() !== null
+      || (this.lanternOpacity > 0.001 && camY <= this.fx.surfaceY);
+    if (this.farDeferGate && !farInterlayer && scratch.length) {
+      this.farDeferred = { clouds: scratch.slice(), distY, camY };
+      void isNight;
+      return;
+    }
     this.drawCloudPass(ctx, scratch, 1, camY,
       (c) => c.y + distY);
     void isNight;
+  }
+
+  /** ★C10d:远云选集向已开启的 bg 会话发射（batch 令牌=无 session/blit,收口归
+   *  drawCloudsNear/compose pass3——远云 quads 落 FBO('bg') 首段=biomeBg 前=原层序）。
+   *  ctx=主画布（drawCloudPass 的视口裁剪读 canvas 尺寸用）。 */
+  flushFarDeferredGL(layer: GLSpriteLayer, ctx: CanvasRenderingContext2D): void {
+    const d = this.farDeferred;
+    this.farDeferred = null;
+    if (!d) return;
+    this.drawCloudPass(ctx, d.clouds, 1, d.camY, (c) => c.y + d.distY,
+      { openGl: () => layer });
+  }
+
+  /** ★C10d 2D 回退:glbg 未开成（acquire 退避窗）时原位 2D 直画（force2D 绕过
+   *  GL 获取,cloudTint 路径与独立会话帧逐位同）。 */
+  replayFarDeferred2D(ctx: CanvasRenderingContext2D): void {
+    const d = this.farDeferred;
+    this.farDeferred = null;
+    if (!d) return;
+    this.drawCloudPass(ctx, d.clouds, 1, d.camY, (c) => c.y + d.distY, undefined, true);
   }
   /** 上帧昼夜/月相（sky.draw 头部写入;CloudsEnd 天体色/强度输入） */
   private lastMoonPhase = 0;
@@ -2654,8 +2687,11 @@ export class SkyRenderer {
     camY: number, yOf: (c: VanillaCloud) => number,
     /** 共享批令牌(#perf2026-08-26,'both' 双通道合并专用):传入时本函数只向调用方
      *  已开启的 GL 层提交四边形,跳过 begin 与尾blit(统一由 drawCloudsNear 收口);
-     *  返回 null=GL 不可用 → 本 pass 走 2D 兜底直画(与独立路径一致)。 */
+     *  返回 null=GL 不可用 → 本 pass 走 2D 兜底直画(与独立路径一致)。
+     *  ★C10d:force2D=true=绕过 GL 获取直走 2D cloudTint（远云 stash 的 no-GL
+     *  回放专用;批令牌在场时 force2D 优先）。 */
     batch?: { openGl: () => GLSpriteLayer | null },
+    force2D = false,
   ) {
     if (!clouds.length) return;
     const atmo = this.atmoValue(camY);
@@ -2681,7 +2717,7 @@ export class SkyRenderer {
     // #A 合并(2026-08-19):云不再持有独立 WebGL 上下文——与背景层共用
     // Renderer.glfx(每帧注入;不可用/退避/cpuRender/?cloudgl=0 → 2D cloudTint 兜底)
     let gl: GLSpriteLayer | null;
-    if (batch) {
+    if (batch && !force2D) {
       gl = batch.openGl();
     } else {
       const glRaw = this.useGLClouds ? this.cloudGlLayer : null;
@@ -2764,6 +2800,13 @@ export class SkyRenderer {
   //      WebGL 上下文,每窗少一个上下文+全屏背板;生命周期(死亡退避/重建/
   //      释放)全归 Renderer.acquireGL,本类只持当帧注入的引用) ----
   cloudGlLayer: GLSpriteLayer | null = null;
+  /** ★C10d 远云并入 bg 会话门（Renderer 在 sky.draw 前置位=bg 会话将开+无色罩/
+   *  黑闪;每帧重置——菜单/非世界帧不置位=不延迟）。夹层判定（极光/far 灯笼）
+   *  在 drawVanillaClouds 同帧状态法。 */
+  farDeferGate = false;
+  /** ★C10d 远云 pass1 延迟选集（drawVanillaClouds stash→section 1.5 bg 会话首段
+   *  消费;未消费帧=下一帧入口清+菜单帧单帧远云缺=不可见级） */
+  private farDeferred: { clouds: VanillaCloud[]; distY: number; camY: number } | null = null;
   /** GL 云总门(?cloudgl=0 逃生门;cpuRender 由 Renderer 注入 null 实现) */
   useGLClouds = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('cloudgl') !== '0' : true;

@@ -46,7 +46,8 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
 
   it('夹层内容判定面:天气色罩（weatherTintPasses 同判,零分配）+切换黑闪（同阈 0.01）', () => {
     expect(SKY).toMatch(/hasSkyWeatherTint\(\): boolean \{\s*\n\s*if \(!this\.cots\) return false;\s*\n\s*return this\.sandTintState\.opacity > 0\.001 \|\| this\.blizzTintState\.opacity > 0\.001;/);
-    expect(RDR).toMatch(/private hasBgFlash\(\): boolean \{\s*\n\s*for \(let a = 0; a < 13; a\+\+\) \{\s*\n\s*if \(this\.biomeBg\.bgFlash\[a\] > 0\.01\) return true;/);
+    // ★C10d:hasBgFlash 转 public（远云并入门在 sky.draw 前置读取;语义零变化）
+    expect(RDR).toMatch(/hasBgFlash\(\): boolean \{\s*\n\s*for \(let a = 0; a < 13; a\+\+\) \{\s*\n\s*if \(this\.biomeBg\.bgFlash\[a\] > 0\.01\) return true;/);
   });
 
   it('合并会话:bg begin 后保开放续交云 quads;drawCloudsNear 恒收口（早退路径含——防 bg 丢）', () => {
@@ -65,7 +66,8 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
 
   it('分回合回退=双会话双 blit（夹层内容在场;bg 全幅 blit 结构与 C10a/glfx 同）', () => {
     // else 分支:bg begin→draw→end→全幅 blit（1:1 旧结构,夹层矩形仍画主画布）
-    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
+    // ★C10d:split 分支 begin 后插入远云 stash 发射（flushFarDeferredGL）
+    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
     // 天气色罩/黑闪绘制段保持原位（层序语义零改动）
     expect(RDR).toContain('this.sky.drawWeatherTint2D(ctx, viewW, viewH);');
     expect(RDR).toContain("ctx.fillStyle = '#000';");
@@ -152,5 +154,28 @@ describe('C10b 周边结构保留', () => {
     expect(SKY).toContain('gl.cloudQuad(gtex, 0, 0, gtex.w, gtex.h, c.x, yOf(c), w, h, c.rot, !!c.flip, {');
     expect(SKY).toContain("gl.texFromImage(`cloud:${c.type}`, tex)");
     expect(SKY).toContain('ctx.drawImage(layer.canvas, sx, sy, sw, sh, sx, sy, sw, sh)');   // bbox 收口保留（分回合云会话）
+  });
+});
+
+describe('★C10d 远云 pass 并入 bg 会话（2026-09-30;cloudBlitRect 1.5s/58s 消刀）', () => {
+  const SKY10D = readFileSync(resolve(__dirname, '../src/render/SkyRenderer.ts'), 'utf8');
+  it('门与 stash:farDeferGate（Renderer 前置）×夹层同帧判定（极光 tileColorState/far 灯笼）;stash 帧入口清', () => {
+    expect(RDR).toContain('this.sky.farDeferGate = Renderer.cloudPipe && this.bgGlEnabled && !this.isCpuRender()');
+    expect(RDR).toContain('const remixSkipSurfaceBg = !!world.seedFlags?.remix;');
+    expect((RDR.match(/const remixSkipSurfaceBg = !!world\.seedFlags\?\.remix;/g) ?? []).length).toBe(1);   // 前置单源,section 1.5 复用
+    expect(SKY10D).toContain('const farInterlayer = this.aurora.tileColorState() !== null');
+    expect(SKY10D).toContain('(this.lanternOpacity > 0.001 && camY <= this.fx.surfaceY)');
+    expect(SKY10D).toContain('if (this.farDeferGate && !farInterlayer && scratch.length) {');
+    expect(SKY10D).toContain('this.farDeferred = { clouds: scratch.slice(), distY, camY };');
+  });
+  it('发射/回退:flushFarDeferredGL=batch 令牌（无 session/blit）;replayFarDeferred2D=force2D;双 bg 分支均消费', () => {
+    expect(SKY10D).toContain('flushFarDeferredGL(layer: GLSpriteLayer, ctx: CanvasRenderingContext2D): void');
+    expect(SKY10D).toContain('replayFarDeferred2D(ctx: CanvasRenderingContext2D): void');
+    expect(SKY10D).toContain('if (batch && !force2D) {');
+    expect(RDR.match(/this\.sky\.flushFarDeferredGL\(glbg, ctx\);/g)?.length).toBe(2);   // merged+split 双分支
+    expect(RDR).toContain('this.sky.replayFarDeferred2D(ctx);');
+  });
+  it('drawVanillaClouds 每帧入口清残留 stash（防跨帧陈旧）', () => {
+    expect(SKY10D).toMatch(/const scratch = this\.cloudScratch;\s*\n\s*scratch\.length = 0;\s*\n\s*for \(const c of this\.vclouds\) if \(c\.scale < 1\) scratch\.push\(c\);\s*\n\s*\/\/ ★C10d 远云并入 bg 会话/);
   });
 });
