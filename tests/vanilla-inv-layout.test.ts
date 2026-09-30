@@ -132,6 +132,7 @@ import {
   mHOf, equipAreaTop, equipRowY, accessoryCheckY,
   EQUIP_COL_X, VANITY_COL_X, DYE_COL_X, ACCESSORY_CHECK_X,
   loadoutBtnXY, defenseCenterXY,
+  settingsAnchorOf, defenseRowOf, advisorRowOf, advisorInlineXY, hasSpaceForInlineAdvisor,
   TAB_Y, TAB_MISC_X, TAB_HOUSING_X, TAB_CAMERA_X,
   miscRowY, miscCheckXY, housingSlotPositions,
   pvpSwordXY, pvpTeamXY, craftPanelRect, craftCellXY, craftDetailLayout,
@@ -139,6 +140,7 @@ import {
 } from '../src/ui/vanillaInvLayout';
 import { selectEquipPageOf, equipPageCapOf, type EquipPageCap } from '../src/ui/SlotActions';
 import { ITEM_DEFS } from '../src/data/items';
+import { drawInfoAccCount, emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../src/stats/InfoAccs';
 
 const cap = (o: Partial<EquipPageCap>): EquipPageCap => ({
   projHook: false, mountType: false, vanityPet: false, lightPet: false,
@@ -225,6 +227,116 @@ describe('刀1 几何:三列/行 y/勾选框/配装轨/防御(Main.cs:42085-4289
   });
   it('防御计数中心 (sw-210, 末行 y+26)', () => {
     expect(defenseCenterXY(sw, num20, 7)).toEqual({ x: 1070, y: 793 });
+  });
+});
+
+// ---- ★BJ416(2026-09-30 用户实报"成就按钮跑到右下角紧邻设置")窄屏锚钉 ----
+// 原版锚:装备列尾行族 Main.cs:42091-42102(num37/num38,设置钮挤碰再 -1)+
+// 顾问内联 :42127-42131 @(sw-224, 行y+8)+防御盾 :42132-42135(行 num37)+
+// 设置钮 RefreshSettingsButtonStatus :46254-46285(num3=174+mH+int(47.6·(8+acc))
+// 【不采 num20 矮屏压缩】;挤碰 posX-=140/posY=num3-47+30)+ HasSpace :3019-3033。
+// 旧刀病灶:顾问恒钉 last(=num37)行、防御恒钉 last、设置挤碰判据吃压缩 num20
+// → sw<1000 时顾问竖式卡(61px 高)正压防御盾+设置钮 = 右下角三件挤簇。
+describe('BJ416 装备列尾行族(Main.cs:42091-42102 num37/num38)', () => {
+  it('num37=末行,挤碰再 -1;num38=num37-1(顾问行)', () => {
+    expect(defenseRowOf(8, false)).toBe(7);
+    expect(advisorRowOf(8, false)).toBe(6);
+    expect(defenseRowOf(8, true)).toBe(6);    // 挤碰:42094-42097 num37--
+    expect(advisorRowOf(8, true)).toBe(5);
+    expect(defenseRowOf(9, true)).toBe(7);
+    expect(advisorRowOf(9, true)).toBe(6);
+    expect(defenseRowOf(10, false)).toBe(9);
+    expect(advisorRowOf(10, false)).toBe(8);
+    expect(defenseRowOf(10, true)).toBe(8);
+  });
+  it('顾问内联落位 (sw-224, 行y+8)(:42129 num41=sw-92)', () => {
+    // 800×800 逻辑(挤碰态):num20=374,行 num38=5 → y=374+trunc(238)+4+8=624
+    expect(advisorInlineXY(800, 374, 5)).toEqual({ x: 576, y: 624 });
+    // 960×1080 逻辑(不挤碰):num20=430,行 6 → y=430+trunc(285.6)+4+8=727
+    expect(advisorInlineXY(960, 430, 6)).toEqual({ x: 736, y: 727 });
+  });
+});
+
+describe('BJ416 设置钮锚(settingsAnchorOf=RefreshSettingsButtonStatus :46254-46285)', () => {
+  it('缺省 (sw-110, sh-20);不挤碰原位(960×1080 逻辑)', () => {
+    expect(settingsAnchorOf(960, 1080, 256, 8)).toEqual({ x: 850, y: 1060, pushed: false });
+  });
+  it('挤碰:posX-=140 / posY=num3-17(=num3-47+30,:46278-46282)', () => {
+    // 800×800 逻辑:num3=374+380=754,sh-48=752≤754 → (550, 737)
+    expect(settingsAnchorOf(800, 800, 200, 8)).toEqual({ x: 550, y: 737, pushed: true });
+    // 800×600 逻辑(用户截图同域):num3=554,552≤554 → (550, 537)
+    expect(settingsAnchorOf(800, 600, 0, 8)).toEqual({ x: 550, y: 537, pushed: true });
+  });
+  it('挤碰判据含等号(sh-48 == num3 仍挤;sh-803 边界外弹回)', () => {
+    expect(settingsAnchorOf(800, 802, 200, 8).pushed).toBe(true);    // 754 ≤ 754
+    expect(settingsAnchorOf(800, 803, 200, 8)).toEqual({ x: 690, y: 783, pushed: false });
+  });
+  it('★num3 用未压缩 174+mH(:46269 自算,不采 :41858 矮屏压缩)——含大师/恶魔心 10 行矮屏仍以 430 基准', () => {
+    // sh=900,mH=256,rows=10:旧式(吃压缩 num20=382)给 py=841.2;原版 num3=430+476=906 → (710, 889)
+    expect(settingsAnchorOf(960, 900, 256, 10)).toEqual({ x: 710, y: 889, pushed: true });
+  });
+});
+
+describe('BJ416 HasSpace 门(Main.cs:3019-3033 HasSpaceForControllerAchievementAdvisor)', () => {
+  it('无可显卡 → false(HasAvailableCardToDisplay AchievementAdvisor.cs:185-197)', () => {
+    expect(hasSpaceForInlineAdvisor(false, 0, 0, false)).toBe(false);
+  });
+  it('挤碰 ∧ 无恶魔心/大师槽 ∧ INFOACCCOUNT≥9 → false(:3027)', () => {
+    expect(hasSpaceForInlineAdvisor(true, 0, 9, true)).toBe(false);
+    expect(hasSpaceForInlineAdvisor(true, 0, 8, true)).toBe(true);    // 8 个仍画
+    expect(hasSpaceForInlineAdvisor(true, 1, 9, true)).toBe(true);    // 有恶魔心槽仍画
+    expect(hasSpaceForInlineAdvisor(true, 0, 9, false)).toBe(true);   // 不挤碰仍画
+  });
+});
+
+describe('BJ416 GetDrawInfoAccCount 等价(InfoAccs.drawInfoAccCount,Main.cs:47505-47553)', () => {
+  const bump = (fn: (g: InfoAccGates) => void): InfoAccGates => {
+    const g = emptyInfoAccGates();
+    fn(g);
+    return g;
+  };
+  it('空门禁=0;雷达单件=1;罗盘单件=1;GPS=12(Player.cs:12856-12900 3123 入全门禁);手机=12(全开)', () => {
+    expect(drawInfoAccCount(emptyInfoAccGates())).toBe(0);
+    expect(drawInfoAccCount(bump((g) => refreshInfoAccsFromItemType(g, 3084)))).toBe(1);
+    expect(drawInfoAccCount(bump((g) => refreshInfoAccsFromItemType(g, 393)))).toBe(1);
+    expect(drawInfoAccCount(bump((g) => refreshInfoAccsFromItemType(g, 3123)))).toBe(12);
+    expect(drawInfoAccCount(bump((g) => refreshInfoAccsFromItemType(g, 5358)))).toBe(12);
+  });
+});
+
+describe('BJ416 窄屏三件簇端到端锚钉(多断点:挤碰/不挤碰/宽屏上钱币)', () => {
+  // 语义:sw<1000 时顾问(num38 行)/防御盾(num37 行)/设置钮三件在装备列左带竖排,
+  // 原版逐件有 40px+ 级间距;旧病灶=顾问压到 num37 行与盾同带正叠。
+  it('800×800 逻辑(挤碰):顾问(576,624) → 盾心(590,689) → 设置(550,737),竖排无叠', () => {
+    const pushed = settingsAnchorOf(800, 800, 200, 8).pushed;
+    expect(pushed).toBe(true);
+    const adv = advisorInlineXY(800, 374, advisorRowOf(8, pushed));
+    const def = defenseCenterXY(800, 374, defenseRowOf(8, pushed));
+    const set = settingsAnchorOf(800, 800, 200, 8);
+    expect(adv).toEqual({ x: 576, y: 624 });
+    expect(def).toEqual({ x: 590, y: 689 });
+    expect(set).toEqual({ x: 550, y: 737, pushed: true });
+    // 内联小卡盒高 ≈42(32px 图标+padding;CSS .sw-ach-inline)不压下一行盾盒顶
+    expect(adv.y + 42).toBeLessThanOrEqual(def.y - 18);
+    expect(def.y + 18).toBeLessThanOrEqual(set.y - 12);
+  });
+  it('960×1080 逻辑(不挤碰):顾问(736,727) → 盾心(750,793) → 设置原位(850,1060)', () => {
+    const pushed = settingsAnchorOf(960, 1080, 256, 8).pushed;
+    expect(pushed).toBe(false);
+    const adv = advisorInlineXY(960, 430, advisorRowOf(8, pushed));
+    const def = defenseCenterXY(960, 430, defenseRowOf(8, pushed));
+    const set = settingsAnchorOf(960, 1080, 256, 8);
+    expect(adv).toEqual({ x: 736, y: 727 });
+    expect(def).toEqual({ x: 750, y: 793 });
+    expect(set).toEqual({ x: 850, y: 1060, pushed: false });
+    expect(adv.y + 42).toBeLessThanOrEqual(def.y - 18);
+  });
+  it('顾问行恒在盾行上一行(全行数×挤碰态矩阵)', () => {
+    for (const rows of [8, 9, 10]) {
+      for (const pushed of [false, true]) {
+        expect(advisorRowOf(rows, pushed)).toBe(defenseRowOf(rows, pushed) - 1);
+      }
+    }
   });
 });
 
@@ -376,6 +488,27 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
     // ★BJ81(2026-09-14):道具搜索浮窗选择器 .sw-itemsearch 入 closest 门登记——
     //   字面锁随扩展同步(缝隙点击不穿透语义不变,集合扩员)
     expect(s).toContain("'.sw-panel, .sw-eqdock, .sw-vinv, .sw-itemsearch'");
+  });
+  it('★BJ416:顾问/防御盾/设置钮行族单源接线(srcMatch)', () => {
+    const s = ui();
+    // pushed 前置算(pos 循环前;settings 钮注册序在顾问/盾之后)
+    expect(s).toContain('this.vinvSettingsPushed = settingsAnchorOf(sw, sh, mH, visibleRows).pushed;');
+    // 顾问:sw<1000 内联 = num38 行 + HasSpace 门 + 页 0 门 + 图标化 class
+    expect(s).toContain("advWrap.classList.toggle('sw-ach-inline', c.sw < 1000);");
+    expect(s).toContain('hasSpaceForInlineAdvisor(hasCard, c.visibleRows - 8, infoN, this.vinvSettingsPushed)');
+    expect(s).toContain('advisorInlineXY(c.sw, c.num20, advisorRowOf(c.visibleRows, this.vinvSettingsPushed))');
+    // 防御盾行 = num37(挤碰再 -1)
+    expect(s).toContain('defenseCenterXY(c.sw, c.num20, defenseRowOf(c.visibleRows, this.vinvSettingsPushed))');
+    // 设置钮 = settingsAnchorOf 单源(旧 equipRowY+44.2 近似退役)
+    expect(s).toContain('const a = settingsAnchorOf(c.sw, c.sh, c.mH, c.visibleRows);');
+    // 顾问可显卡门经 AchievementsUI 单源(非 UI.ts 内联重扫)
+    expect(s).toContain('advisorHasCard(this.game.achievements)');
+    expect(s).toContain('drawInfoAccCount(this.game.player.equipStats.infoAccs)');
+  });
+  it('★BJ416:内联小卡 CSS(文字摘除)与 advisorHasCard/drawInfoAccCount 单源在场', () => {
+    expect(srcOf('src/ui/AchievementsUI.ts')).toContain('.sw-ach-inline .tx { display:none; }');
+    expect(srcOf('src/ui/AchievementsUI.ts')).toContain('export function advisorHasCard');
+    expect(srcOf('src/stats/InfoAccs.ts')).toContain('export function drawInfoAccCount');
   });
 });
 

@@ -3363,6 +3363,24 @@ export class Renderer {
   /** 主画布 2D 上下文统一属性(构造器与 recreateMainCanvas 两处创建点必须同参——
    *  同一元素重复 getContext 属性以首次为准)。alpha:false=不透明后备
    *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染 */
+  /** ★C13b 字体记忆（2026-09-30 Windows trace "set font" 829ms/58s 定谳）:ctx.font
+   *  赋值即触发 Chrome 字体解析（同串重复赋值同样付费）——HUD/文本路径每帧多次
+   *  set 同一字体串。实例级 memo:同值跳过原生 set（getter 回读 memo 值=与原生
+   *  恒等,因跳过仅在等值时发生）。仅挂主画布 ctx（worldCanvas/light 画布文本
+   *  面小,不挂零风险）。 */
+  private static fontMemo(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
+    const desc = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'font');
+    if (!desc?.set || !desc.get) return ctx;
+    let last: string | null = null;
+    Object.defineProperty(ctx, 'font', {
+      get: () => last ?? desc.get!.call(ctx),
+      set: (v: string) => {
+        if (v !== last) { desc.set!.call(ctx, v); last = v; }
+      },
+    });
+    return ctx;
+  }
+
   private mainCtxAttrs(): CanvasRenderingContext2DSettings {
     const a: CanvasRenderingContext2DSettings = {};
     if (Renderer.opaqueMain) a.alpha = false;
@@ -4350,7 +4368,7 @@ export class Renderer {
     //   页画布背板不再随 bgl 旗降 CPU/SHM（耦合=GL 路径死亡时回退 blit 7-12× 慢 op
     //   的凶器,见 ChunkCache 页画布去毒注）;页恒 GPU 后备。
     this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
+    this.ctx = Renderer.fontMemo(this.canvas.getContext('2d', this.mainCtxAttrs())!);
     this.lightCanvas = document.createElement('canvas');
     // ★lightCanvas 恒 alpha:true——光照图构建写 α=255 但 putImageData/乘光链路
     //   语义依赖 RGBA 后备,勿随主画布改 opaque
