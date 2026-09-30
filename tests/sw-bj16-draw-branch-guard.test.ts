@@ -113,6 +113,21 @@ const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' |
   // （MinionProj.draw 946 支=全层 1:1+EmpressBladeDrawer 拖尾）
   946: { branch: 'generic', impl: 'special' },
   966: { branch: 'generic', impl: 'generic' }, 1025: { branch: 'generic', impl: 'generic' },
+  // ---- ★清偿刀 J（2026-09-30）鞭 18 弹入域：itemcombat DefaultToWhip 形参位根修后
+  //  combat 表 18 鞭原生 summon=true（vanilla 真值,DefaultToWhip 体 :47821）→
+  //  DOMAIN_WEAPONS 46→64。提取器分类=generic 支（鞭链绘制在原版通用路内,
+  //  extract-draw-branch-families.mjs 2026-09-30 复核输出）;本仓 impl='whip-proj'
+  //  = WhipProj 专绘承载（entities/WhipProj.ts,Game whip 分支直召,不经 MinionProj）。
+  841: { branch: 'generic', impl: 'whip-proj' }, 847: { branch: 'generic', impl: 'whip-proj' },
+  848: { branch: 'generic', impl: 'whip-proj' }, 849: { branch: 'generic', impl: 'whip-proj' },
+  912: { branch: 'generic', impl: 'whip-proj' }, 913: { branch: 'generic', impl: 'whip-proj' },
+  914: { branch: 'generic', impl: 'whip-proj' }, 915: { branch: 'generic', impl: 'whip-proj' },
+  952: { branch: 'generic', impl: 'whip-proj' },
+  1028: { branch: 'generic', impl: 'whip-proj' }, 1029: { branch: 'generic', impl: 'whip-proj' },
+  1030: { branch: 'generic', impl: 'whip-proj' }, 1031: { branch: 'generic', impl: 'whip-proj' },
+  1032: { branch: 'generic', impl: 'whip-proj' }, 1033: { branch: 'generic', impl: 'whip-proj' },
+  1034: { branch: 'generic', impl: 'whip-proj' }, 1035: { branch: 'generic', impl: 'whip-proj' },
+  1104: { branch: 'generic', impl: 'whip-proj' },
 };
 
 /** MinionProj 域内、经 CENTER_ANCHOR_33703 实现的成员（= 集合应有字面） */
@@ -121,7 +136,9 @@ const SET_33703_EXPECTED = [613, 623, 625, 626, 627, 628, 643, 758, 759, 831, 95
 
 describe('SW-BJ16 ①分派链注册表：召唤物域全员归类（新增召唤物未查表即爆红）', () => {
   it('域数据源健全（summon 武器 shoot/鞭伴生/派生体/特殊直召非空且与提取器口径一致）', () => {
-    expect(DOMAIN_WEAPONS.size).toBe(46);
+    // ★清偿刀 J（2026-09-30）：46→64——combat 表鞭 18 件原生 summon=true（vanilla
+    //  真值,DefaultToWhip 体 :47821;此前 combat 表鞭仅 {noUseGraphic} 一键被域漏收）
+    expect(DOMAIN_WEAPONS.size).toBe(64);
     expect([...DOMAIN_SIDEKICK].sort((a, b) => a - b)).toEqual([917, 1036]);
     expect(DOMAIN.has(613) && DOMAIN.has(963) && DOMAIN.has(1098) && DOMAIN.has(1123)).toBe(true);
   });
@@ -143,7 +160,8 @@ describe('SW-BJ16 ①分派链注册表：召唤物域全员归类（新增召�
     expect(byBranch.B_33693.sort((a, b) => a - b)).toEqual(
       [613, 623, 625, 626, 627, 628, 643, 663, 665, 667, 677, 678, 679, 691, 692, 693, 758, 759, 831, 951, 963, 970, 1094, 1098, 1113, 1119, 1123]);
     expect(byBranch.generic.sort((a, b) => a - b)).toEqual(
-      [191, 266, 308, 317, 373, 375, 377, 387, 390, 407, 533, 688, 689, 690, 755, 838, 864, 917, 946, 966, 1025]);
+      // ★清偿刀 J（2026-09-30）：+18 鞭弹（841-1104,提取器 generic 支分类复核）
+      [191, 266, 308, 317, 373, 375, 377, 387, 390, 407, 533, 688, 689, 690, 755, 838, 841, 847, 848, 849, 864, 912, 913, 914, 915, 917, 946, 952, 966, 1025, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1104]);
   });
 
   it('实现位一致性：B 支 MinionProj 域成员必居 {set-33703, special, debt} 之一且不越界', () => {

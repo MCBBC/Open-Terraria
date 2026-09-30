@@ -302,6 +302,20 @@ export const VANILLA_BOSS_IDS = new Set([
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
+/** tileSolid∩tileSolidTop 平台九件套（vanilla sheet 域 {19,239,380,427,435-439}；
+ *  Main.cs tileSolid 表含平台——BJ187 本仓 SOLID_LUT≡tileSolid∧!tileSolidTop,
+ *  原版裸 tileSolid[type] 谓词消费位（AI_039 陆龟崖边折返 NPC.cs:29494）须补此集。
+ *  内部 type id 域,经 TILE_DEFS[].vanilla.sheet 反查） */
+const TILE_SOLID_TOP_NINE: ReadonlySet<number> = (() => {
+  const s = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const sheet = TILE_DEFS[i]?.vanilla?.sheet;
+    if (sheet != null && (sheet === 19 || sheet === 239 || sheet === 380 || sheet === 427
+      || (sheet >= 435 && sheet <= 439))) s.add(i);
+  }
+  return s;
+})();
+
 // AI_003 战士族昼行豁免表（DespawnEncouragement_AIStyle3_Fighters_NotDiscouraged
 // NPC.cs:60694-60724 全量 1:1，2026-08-19 B-3/B-4 批）：
 //  - 大排除清单（:60696 逐 npcID!=X 项）：白天地表仍索敌的群系原住民。
@@ -2637,13 +2651,17 @@ export class Enemy extends Entity {
     // UpdateNPC 对【全体】NPC 调用,敌怪与城镇 NPC 同式同环——刀B 只落了 TownNPC 侧,
     // 本补 Enemy 桶。发射式单源 = GorePiece.newLovestruckHeart（公式/掷序/调用侧
     // 三连 ×0.4/vy−0.6/sticky=false 全注在那边;视觉掷 = Math.random 纯演出面）。
-    // canDisplayBuffs（:6206 缺省 true/:8519 ResetEffects 复位）false 面 = 石巨人
-    // 四件 245-248（:18042-18052 SetDefaults）→ 本方法头 :92265 整环早退,敌怪侧
-    // 须自门（城镇侧恒真无需门）。
+    // ★清偿刀 P3-F1（2026-09-30,C1 红蓝翻案）：门改读逐实例 canDisplayBuffs——
+    // 原版 false 面只由 getGoodAdjustments 置（:18040-18052 245-248）,而该函数
+    // 整体在 Main.getGoodWorld 门内（SetDefaults :17875-17878）⇒ 仅 FTW 世界
+    // 石巨人四件拒发;普通世界四件 ResetEffects :8519 复位 true（字段缺省 :6206
+    // 亦 true）照发爱心。旧 vid 硬拒把普通世界四件误杀。本仓字段链=种子档
+    // fromVanilla :1493 / Transform :6508 双路落位（scaleStats.getGoodAdjustments
+    // 已按 getGoodWorld 条件化）。递减保留在门外（原版倒数在 lowerBuffTime
+    // :93099-93102,与 :92265 VFX 环早退互不影响=同相）。
     if (this.lovestruckT > 0) {
       this.lovestruckT -= dt;
-      const vid0 = this.vanillaId;
-      if (!(vid0 === 245 || vid0 === 246 || vid0 === 247 || vid0 === 248)) {
+      if (this.canDisplayBuffs) {
         newLovestruckHeart(this.x, this.y, this.w, this.h);
       }
     }
@@ -7104,15 +7122,35 @@ export class Enemy extends Entity {
         if (inW) this.ai1 = 1000;
         if (this.ai1 >= 400) { this.ai0 = 1; this.ai1 = 0; return; }
         if (player && !player.dead) this.facing = dx > 0 ? 1 : -1;
+        // 崖边折返（NPC.cs:29473-29504 1:1,BJ410 2026-09-30 定谳刀）：门 = 落地
+        // (velocity.Y==0) ∧ 玩家顶<盒底（Main.player[target].position.Y <
+        // position.Y+height）——★玩家在下方悬崖外时【不】折返,原版继续头朝玩家
+        // 跟进（随行跳崖）;此前缺 Y 门 = 玩家在下方也折返 → 龟在崖边滞留、屁股朝
+        // 玩家（用户实报"贴图朝向与角色相反"实锚）。窗 = 朝向侧 center..center±3
+        // 列（4 列）× num609..num609+4 行（5 行,num609=floor((bottom+2)/16)−1）。
+        // 谓词 = nactive() ∧ tileSolid[type]——本仓 SOLID_LUT≡tileSolid∧
+        // !tileSolidTop,平台九件套（tileSolid∩tileSolidTop,sheet 19/239/380/427/
+        // 435-439）补 TILE_SOLID_TOP_NINE 支（active 位+致动位同门）。全空 →
+        // direction*=−1 且 velocity.X=0.1×direction;序 = 先折返后加速（原版折返
+        // :29473 在 accel :29507 前,加速吃折返后 direction——本仓 facing 同源）
+        if (this.vy === 0 && player && player.y < this.y + this.h) {
+          const cCol = Math.floor(this.cx / TILE);
+          const colA = this.facing > 0 ? cCol : cCol - 3;
+          const colB = this.facing > 0 ? cCol + 3 : cCol;
+          const row0 = Math.floor((this.y + this.h + 2) / TILE) - 1;
+          let ground = false;
+          for (let cx2 = colA; cx2 <= colB && !ground; cx2++) {
+            for (let cy2 = row0; cy2 <= row0 + 4 && !ground; cy2++) {
+              if (st.isSolid(cx2, cy2)) { ground = true; break; }
+              if (!st.hasTile(cx2, cy2) || st.isActuated(cx2, cy2)) continue;
+              if (TILE_SOLID_TOP_NINE.has(st.type[st.idx(cx2, cy2)])) { ground = true; break; }
+            }
+          }
+          if (!ground) { this.facing *= -1; this.vx = 0.1 * this.facing; }
+        }
         const max = t496 ? 0.5 : dist < 400 ? 1 : 1.5;
         this.vx += this.facing * 0.07;
         this.vx = Math.max(-max, Math.min(max, this.vx));
-        // 前方 3 格 × 下 4 格无地面 → 转身（cs:29395-29427）
-        const fx = Math.floor((this.cx + this.facing * 24) / TILE);
-        const fy = Math.floor((this.y + this.h - 1) / TILE);
-        let ground = false;
-        for (let k = 1; k <= 4 && !ground; k++) if (st.isSolid(fx, fy + k)) ground = true;
-        if (!ground) this.facing *= -1;
         gravityStep();
         return;
       }

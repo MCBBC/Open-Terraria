@@ -173,6 +173,15 @@ export function rollNaturalPrefix(pool: number[], rand: () => number,
 // 全等 + Item.cs DefaultToWhip 各 case 实参）。★只回填前缀链读取面（本函数）,
 // 不动 itemCombat TABLE——shoot/useTime 等字段的外溢消费面（发射链/使用节奏/
 // tooltip）不属本刀,登记债（同族残余:弓/魔法 25 件 damage 缺提=另行立案）。
+// ★清偿刀 J（2026-09-30）结案：上述登记债已立案清偿——extract-itemcombat.mjs
+// 四根修（嵌套贯穿组/链式复合除式/DefaultToWhip 形参位/守卫链数值面,头注⑦）后
+// combat 表鞭 18 件原生全值（与 vanilla-whips.json 逐字段对拍全等）、3287 悠悠球
+// damage70/kb4.5、1296/4715 链式 anim/time 等全数归位（SW_OUT 沙箱重产+既有键零
+// 回退验证）。本函数 WHIPS 兜底保留作双保险（两源同值,st?.x ?? w?.x 恒取同值,
+// BJ408 终态行为零变化）;当项普查顺带翻案：BJ408 预报的「19 弓缺 kb/3069/5147
+// 缺 kb/2320 无条目」经逐件亲读源码证伪（弓族与 3069/5147 原文本即无 knockBack
+// 字面=原版 kb0;2320 系守卫链 if(type==2320) 全武器面提取器三通道盲区——本刀
+// 根修 d 原生归位 damage24/kb6/anim24/time14）。
 const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
 
 /** Prefix 链 TryGet 四门输入（Item.cs:1067-1079 读 damage/useAnimation/mana/knockBack

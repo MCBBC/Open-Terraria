@@ -93,7 +93,10 @@ export class RainbowSegment extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const until = segImmuneUntil.get(e.id) ?? 0;
       if (until > nowMs()) continue;
-      segImmuneUntil.set(e.id, nowMs() + IMMUNE_MS);
+      // ★清偿刀 P1（C5 定谳#4）：perIDStatic 写（:14033-14036 perIDStaticNPCImmunity[
+      //  identity,victim]=UpdateCount+cd）在【受理支】内——免疫门 :12635-12637 拒收
+      //  （他源 iframes 残窗）发生在任何写尾之前,门拒敌不落静态标 → 残窗期满后本段
+      //  照吃;旧档 set 前置=残窗敌被整段 10t 静态窗吞（set 移入下方 !vanillaGated 支）。
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源
@@ -114,6 +117,7 @@ export class RainbowSegment extends Entity {
       //  usesIDStaticNPCImmunity → flag3 假 :12635 免疫门照适用=pierce 0 承载）。
       const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
+        segImmuneUntil.set(e.id, nowMs() + IMMUNE_MS);   // ★清偿刀 P1：:14033-14036 静态表写=受理支内
         // ★清偿刀 W（X4-债13①,2026-09-29）：写面对齐 :14032-14037 IDStatic 支——
         //  受理尾 immune[owner]=0（全局窗显式清零,251 节流归 segImmuneUntil 10t
         //  共享表）。旧 pierce=0 通用尾档写 10t=残窗误拦他型弹 10t（缺 Arrow B6D

@@ -4012,9 +4012,11 @@ export class Player extends Entity {
     // ★BJ357 坐骑 buff 钉时（Player.cs:9968-9971 UpdateBuffs：MountType buff 每 tick
     //  buffTime=10 重钉）——首授予 AddBuff(_data.buff,3600) 在 Game.useMountItem
     //  （SetMount :6291）;图标无倒计时字+不入档 = Main.cs:9344-9352 双置位
-    //  （BUFF_NO_TIME_DISPLAY/BUFF_NO_SAVE 已收 374/377/384）。CheckMountBuff
-    //  （Mount.cs:5333,经 Player.cs:18948）缺 buff 强制下坐——本仓 buff 无主动移除面
-    //  （右键取消 UI 未建,登记）,钉时恒同相,该支随取消 UI 域批接续
+    //  （BUFF_NO_TIME_DISPLAY/BUFF_NO_SAVE 已收 374/377/384/391/392）。CheckMountBuff
+    //  （Mount.cs:5333,经 Player.cs:18948）缺 buff 强制下坐——★BJ405-D1 右键取消
+    //  面已建（UI 坐骑通道 dismountFromBuffBar=下坐本体,buff 随 ridingMount 失真
+    //  同拍停钉→10t 内自然衰亡=ClearBuff 等价）;本重钉面为 BJ357 兼容残面（真值
+    //  仍在 mount.active,通道图标不读 BuffState）,摘除须连坐 bj357 测试面重锚（登记）
     if (this.ridingMount) {
       const mbt = buffTypeByVanilla(this.mount.data?.buff ?? -1);
       if (mbt !== undefined) this.buffs.apply(mbt, 10 / 60);

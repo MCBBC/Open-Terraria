@@ -261,4 +261,129 @@ describe('extract-itemcombat era guard（B-form 干跑对拍 + 输出通道三�
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // ============================================================
+  // ★清偿刀 J（2026-09-30,BJ408 债#1/#2 收口）四根修判别力:根修 a 嵌套贯穿组 /
+  //   b 链式复合除式 / c DefaultToWhip 形参位 / d 守卫链数值面。每根修一刀变异
+  //   （摘除后 --dump 断言目标面回落病灶相）,目标件均无 EXTRACT_PATCH 手补=
+  //   零掩蔽（3287/2320/1296/5480 皆不在 vanillaItemCombat.ts 补丁面）。
+  // ============================================================
+
+  function dumpOf(mutant: string) {
+    const r = spawnSync('node', [mutant, '--dump'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024 });
+    expect(r.status, r.stderr.slice(-400)).toBe(0);
+    return JSON.parse(r.stdout) as { items: Record<string, Record<string, unknown>>; useSound: Record<string, string> };
+  }
+
+  // ★变异 J1:嵌套贯穿组收集摘除（嵌套 switch 恢复逐 case 切块,复现 BJ408 债#1）→
+  //   3287 RedsYoyo damage/kb 双缺（原病灶）;2289 钓竿 anim/time 半缺;对照 3288
+  //  （组末 id 原序本就吃到共享体）不受影响。
+  it('变异 J1:嵌套贯穿组摘除 → 3287 damage/kb 双缺复现（对照 3288 全值）', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      // 唯一锚:嵌套版用 inner.indexOf（外层 parseSwitch 用 body.indexOf）
+      const GROUP_ANCHOR = 'const between = inner.slice(afterColon, marks2[j + 1][1]);';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(GROUP_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-j1.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        // 贯穿组立即断组 → 组内非末 id 回落空块=applyRec 早退
+        .replace(GROUP_ANCHOR, `${GROUP_ANCHOR}\n        break; // ★变异J1:嵌套贯穿组摘除`));
+      const dump = dumpOf(mutant);
+      expect(dump.items['3287']?.damage, '3287 damage 回落病灶（缺）').toBeUndefined();
+      expect(dump.items['3287']?.knockBack, '3287 knockBack 回落病灶（缺）').toBeUndefined();
+      expect(dump.items['3287']?.useTime, '3287 外层共享体仍在（useTime 25）').toBe(25);
+      expect(dump.items['3288'], '对照:组末 id 3288 原序全值不受影响').toMatchObject({ damage: 70, knockBack: 4.5 });
+      expect(dump.items['2289']?.useTime, '2289 钓竿 anim/time 半缺复现').toBeUndefined();
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 J2:链式/复合/除式 pass 摘除（链式判据门置 false,主字段直写+chain fill 双断）
+  //   → 1296/1345/2350/4870/4715 useTime/useAnimation 双缺复现 BJ408 债#2 同族
+  //  （2350 手补退役后无兜底=判别面）。
+  it('变异 J2:链式赋值 pass 摘除 → 1296/2350/4715 anim/time 双缺复现', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const CHAIN_ANCHOR = 'if (m && NUM_FIELDS.includes(m[1]) && NUM_FIELDS.includes(m[2])) {';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(CHAIN_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-j2.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(CHAIN_ANCHOR, 'if (false) { // ★变异J2:链式判据门摘除'));
+      const dump = dumpOf(mutant);
+      for (const vid of ['1296', '1345', '2350', '4870']) {
+        expect(dump.items[vid]?.useTime, `${vid} useTime 缺`).toBeUndefined();
+        expect(dump.items[vid]?.useAnimation, `${vid} useAnimation 缺`).toBeUndefined();
+      }
+      expect(dump.items['4715']?.useAnimation, '4715 链式 anim 缺').toBeUndefined();
+      expect(dump.items['4715']?.useTime, '4715 复合除 useTime 缺').toBeUndefined();
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 J3:DefaultToWhip 形参位摘除（调用点正则去 Whip）→ 18 鞭回落
+  //   {noUseGraphic} 单键原病灶（BJ408 用户实报相;combat 表与 vanilla-whips.json
+  //   双源同值,J3 后 combat 单源自证）。
+  it('变异 J3:DefaultToWhip 形参位摘除 → 5480 回落 noUseGraphic 单键', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const WHIP_ANCHOR = '|MagicWeapon|Whip))\\s*\\((.*)\\);\\s*$';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain('|MagicWeapon|Whip))');
+      const mutant = join(dir, 'extract-itemcombat-mutant-j3.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(WHIP_ANCHOR, '|MagicWeapon))\\s*\\((.*)\\);\\s*$')); // ★变异J3
+      const dump = dumpOf(mutant);
+      expect(dump.items['5480'], '5480 回落 noUseGraphic 单键（damage/kb/anim 全缺）')
+        .toEqual({ noUseGraphic: true });
+      expect(dump.items['5473']).toEqual({ noUseGraphic: true });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异 J4:守卫链数值面摘除（scopeFn 恒 false）→ 2320 战锤整件缺失复现
+  //  （BJ408 预报「2320 无条目」的原病灶相）;2421/2422 钓竿对同缺;对照 case 字面件
+  //   3287 不受影响（守卫链与 case 域互斥）。
+  it('变异 J4:守卫链数值面摘除 → 2320/2421/2422 整件缺失复现', () => {
+    const dir = mkdtempSync(join(TMP, 'itemcombat-guard-'));
+    const b1 = md5(LIVE_COMBAT);
+    try {
+      const src = readFileSync(SCRIPT, 'utf8');
+      const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');";
+      const WALK_ANCHOR = 'guardNumericWalk(body, () => true, regions);';
+      expect(src).toContain(ROOT_TRIGGER);
+      expect(src).toContain(WALK_ANCHOR);
+      const mutant = join(dir, 'extract-itemcombat-mutant-j4.mjs');
+      writeFileSync(mutant, src
+        .replace(ROOT_TRIGGER, "const ROOT = join(process.cwd(), '..'); // ★变异:ROOT 重锚")
+        .replace(WALK_ANCHOR, 'guardNumericWalk(body, () => false, regions); // ★变异J4'));
+      const dump = dumpOf(mutant);
+      for (const vid of ['2320', '2421', '2422']) {
+        expect(dump.items[vid], `${vid} 守卫链面摘除后整件缺失`).toBeUndefined();
+      }
+      expect(dump.items['3287'], '对照:case 域件不受守卫链摘除影响').toMatchObject({ damage: 70 });
+      expect(md5(LIVE_COMBAT)).toBe(b1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -12,7 +12,8 @@
 //   （同型同主单实例语义下与逐帧 Track 观测等价：Track 幂等覆写，type/owner 出膛
 //   后不变；AI 批落地后由其逐帧 Track 接管，双写无害）。
 // WorldClear = WorldGen.cs:6950（clearWorld 家族，紧邻 LocalGolfState.WorldClear
-//   :6951）——本仓 Camera 每世界重建（Game.ts :7157 构造点）= 同相复位（BJ400 注
+//   :6951）——本仓 Camera 每世界重建（Game.ts :7264 构造点,★清偿刀 P4 锚勘误
+//   2026-09-30:旧引 :7157 漂移,亲读复核）= 同相复位（BJ400 注
 //   先例：CurrentPan=Zero ≙ WorldGen.cs:6952），tracker 宿主于 Camera.droneTracker。
 // 装备门 remoteVisionForDrone：Player.cs:2373 字段；ResetEffects :18828 复位；
 //   UpdateEquips 两支 case 5452 置位——功能配饰环 m∈[3,10) ApplyEquipFunctional

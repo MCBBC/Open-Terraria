@@ -80,7 +80,7 @@ describe('itemcombat 表条目（Item.cs SetDefaults）', () => {
   });
 
   it('回归药水 2350 补 useTime=useAnimation=30（引导冷却 3 倍拉长根因）', () => {
-    // Item.cs:23621 `useTime = (useAnimation = 30)` 链式赋值未解析——此前表条目
+    // Item.cs:23648 `useTime = (useAnimation = 30)` 链式赋值未解析——此前表条目
     // 只有 consumable/useTurn,Game.ts:9020 `?? 90` 兜底错值
     const c = itemCombat(2350)!;
     expect(c.useTime).toBe(30);

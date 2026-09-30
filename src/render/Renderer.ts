@@ -202,7 +202,7 @@ function setMatchLegs(legs: number, male: boolean): number {
  *  "时装头不显示"根因;2026-09-02 def.armor 死字段及其 legacy 兜底分支整体移除）。
  *  app 传入时跑 SetMatch 三查（PlayerFrame :35336-35374：①身甲裙腿替 ②腿甲性别
  *  换装 ③头 201 女换 202——armor[10-12] 时装覆盖优先已由 displayArmor 处理 ✓） */
-function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
+export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
   const idx = (itemId: number | null | undefined, slot: 0 | 1 | 2): number | null => {
     if (itemId == null) return null;
     const def = ITEM_DEFS[itemId];
@@ -3936,6 +3936,7 @@ export class Renderer {
       used: this.bglPathUsed,
       stats: { ...this.bglPathStats },
       worldCanvasCreations: this.b2bWorldCanvasCreations,
+      accFailLedger: { ...GLShimExecutor.accFailLedger },   // ★闪屏定谳仪:会话级降级原因累计（不随帧清）
       shim: this.bglEntShim
         ? { fallback: this.bglEntShim.stats.fallback, replays: this.bglEntShim.stats.replays, draws: this.bglEntShim.stats.draws }
         : null,
@@ -6492,6 +6493,12 @@ export class Renderer {
    *  像素对拍探针 _c10a/_c10b 用,跨载入对拍受 bootstrap 洗参限制）。 */
   private static _cloudPipe = (() => {
     try {
+      // ★SW-闪屏案旗面史（2026-09-30）：曾热修回退缺省关（glfx 独立会话）——用户实测
+      //  止闪但**不可发**：①glfx 慢路径帧率大幅倒退（C10b 提升的正是云+bg 两段）
+      //  ②云+bg+实体/尘/gore 纹理挤 glfx 单 LRU,龙卷风尘潮逐出 NPC 精灵=全员消失
+      //  （BookStormTwister 尘 274×1+31×4/tick 洪峰）。已由 C10c 云并入 opresent
+      //  单 present 根治多 present 互扰（闪屏触发面）,恢复缺省开（C10b 转正）。
+      //  ?cloudpipe=0 = 逃生门（A/B 探针/回归口）。
       // node（无 location）恒关——GLPipeline/GLSpriteLayer 管线面 document 判死
       return typeof location !== 'undefined' && new URLSearchParams(location.search).get('cloudpipe') !== '0';
     } catch { return false; }

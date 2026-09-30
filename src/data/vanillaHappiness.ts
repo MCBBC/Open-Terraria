@@ -226,11 +226,11 @@ export function computeHappiness(inp: HappinessInput): HappinessResult {
   ] as Array<[boolean, string]>) {
     if (flag && mul < 1000) { line('HateBiome', { biomeNameKey: nameKey }); break; }  // IsPlayerInEvilBiomes :355-370（首命中）
   }
+  // ★清偿刀 P4（2026-09-30）残段收敛（C1 H-1 化妆）：原两连写块条件逻辑全等
+  //  （ruined ≙ homeless||distFromHome>120,:219 已并）——幂等零行为差,并为一段。
+  //  原版 ShopHelper.cs:110-121 三写位（RuinMoodIfHomeless/IsFarFromHome/邪恶群系）
+  //  同域同值（1000f）,无乘区夹层
   if (ruined || inp.playerInCorrupt || inp.playerInCrimson || inp.playerInDungeon) {
-    mul = 1000;
-  }
-  if (inp.homeless || inp.distFromHome > 120
-    || inp.playerInCorrupt || inp.playerInCrimson || inp.playerInDungeon) {
     mul = 1000;
   }
   // 拥挤/宽敞（:123-157）。公主：拥挤系数 1.0（报告照发）且不吃 LoveSpace

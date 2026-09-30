@@ -78,10 +78,15 @@ describe('BJ408-① 身份/census（ItemID.cs:12506 + Player.cs:49150 + Item.cs:
     expect(prefixCombatStatForVid(MOONLORD_WHIP)).toEqual({ damage: 110, useAnimation: 30, mana: 0, kb: 4 });
   });
 
-  it('非鞭原样=零回归前提：4788（矛）/2320（无 combat 条目）不走鞭回填', () => {
+  it('非鞭原样=零回归前提：4788（矛）/3822（无 combat 条目,仅 width/height）不走鞭回填', () => {
     const spear = prefixCombatStatForVid(4788)!;
     expect(spear.damage).toBe((itemCombat(4788) as { damage?: number }).damage!);
-    expect(prefixCombatStatForVid(2320)).toBeUndefined();   // itemCombat null ∧ 非鞭 → undefined 同旧相
+    // ★清偿刀 J（2026-09-30）勘误：旧断言钉 2320「无 combat 条目」——J 刀守卫链数值
+    //   面根修后 2320 战锤原生全条目（damage24/kb6/anim24/time14,Item.cs:23100-23117
+    //   if(type==2320) 块,extract-itemcombat 头注⑦d）,改钉 3822（源 case 仅
+    //   width/height,Item.cs:33947-33951,combat 恒 null → undefined 同旧相）。
+    expect(prefixCombatStatForVid(3822)).toBeUndefined();   // itemCombat null ∧ 非鞭 → undefined 同旧相
+    expect(prefixCombatStatForVid(2320)).toEqual({ damage: 24, useAnimation: 24, mana: 0, kb: 6 });
   });
 });
 
@@ -270,16 +275,23 @@ describe('BJ408-⑦ 武器面零回归（3389/5323/4788/1244/3287 best 档金标
     }
   });
 
-  it('翡翠法杖 1244（kb==0 判别件,BJ400 金标 1.2650 不变）/ Reds 悠悠球 3287（鞭族外提取缺口原样保留）', () => {
+  it('翡翠法杖 1244（kb==0 判别件,BJ400 金标 1.2650 不变）/ Reds 悠悠球 3287（★J 刀勘误：best=59 Godly）', () => {
     const stat1244 = prefixCombatStatForVid(1244)!;
     expect(stat1244.kb).toBe(0);
     expect(bestPrefixValue(PREFIX_POOLS.PrefixesForMagic, stat1244)).toBeCloseTo(1.2649999856948853, 10);
-    // 3287 RedsYoyo：vanilla 70/4.5,本仓 combat 缺 damage/knockBack（悠悠球族提取
-    // 缺口,BJ408 登记债）——本刀零改：仅暴击档 36/61 过门,best=61 Zealous。
+    // ★清偿刀 J（2026-09-30）暴击-only 档勘误（BJ400/BJ408 旧注作废）：旧注断言
+    //   3287「缺 damage/knockBack,仅暴击档 36/61 过门,best=61 Zealous」=病灶相,
+    //   非 vanilla 相。真值（Item.cs:30170-30174 case 3287: case 3288: 贯穿组共享体
+    //   knockBack=4.5f/damage=70,J 刀嵌套贯穿组根修后原生归位）→ dmg/kb 档全过门,
+    //   best = 59 Godly（1.15×1.15×1.1=1.4549...）> 61 Zealous（1.1）。
+    //   旧断言 damage=0/kb=0/best=61 三行全翻,金标改钉 vanilla 终值。
     const stat3287 = prefixCombatStatForVid(3287)!;
-    expect(stat3287.damage).toBe(0);
-    expect(stat3287.kb).toBe(0);
-    expect(bestPrefixValue(PREFIX_POOLS.PrefixesForBoomeransAndChakrums, stat3287)).toBe(prefixValueMul(61));
+    expect(stat3287.damage).toBe(70);
+    expect(stat3287.kb).toBe(4.5);
+    expect(stat3287.useAnimation).toBe(25);
+    expect(prefixTryGetFailsForItem(61, stat3287)).toBe(false);
+    expect(bestPrefixValue(PREFIX_POOLS.PrefixesForBoomeransAndChakrums, stat3287)).toBe(prefixValueMul(59));
+    expect(prefixValueMul(59)).toBeGreaterThan(prefixValueMul(61));
   });
 });
 

@@ -11,7 +11,7 @@
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { canMergeStack, onlyNeedOneInInventory } from '../ui/SlotActions';   // ★SW-AY1 R1 合并谓词单源（Item.CanStack）
 import { VI_KEY } from '../data/itemKeys';
-import { isDyeItem, miscSlotAccepts, accGroupClash } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源（UI.ts 提源,数据层无环）
+import { isDyeItem, miscSlotAccepts, accGroupClash, accPairConflicts } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源（UI.ts 提源,数据层无环）;★P4：armorAccepts 自段扫描改 accPairConflicts 全臂单源
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -413,7 +413,8 @@ export class Inventory {
    *  0-2/10-12 部位校验（head/body/leg slot）+ 功能/时装段同款互斥（DualEquipArmor 例外,
    *  LeftClick block :1251/:1260）;3-9 功能配饰（vanity 排除）/13-19 社交配饰——
    *  段内同 type 唯一（自身槽放行 = 换回原位）+ 双翅膀互斥（CanEquipBothAccessories
-   *  :3196-3205）+ 对段（功能↔社交）同 type 互斥（:1313/:1322）。
+   *  :3196-3205;★P4 社交段 3580 例外 :3466-3473 经 accPairConflicts 单源承接）
+   *  + 对段（功能↔社交）同 type 互斥（:1313/:1322）。
    *  ★清偿刀 Z（2026-09-29）互斥组臂（U 刀登记债收口,原 P 刀终态盲区）：同段
    *  HasIncompatibleAccessory（ItemSlot.cs:3483-3495 逐槽 CanEquipBothAccessories,
    *  组臂 :3474-3480,冲突槽=目标槽放行 :3544——与同款臂共用 k===i 跳过）+ 对段
@@ -455,17 +456,18 @@ export class Inventory {
       ? [ACC_ARMOR_START, ARMOR_SLOTS] : [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS];
     const otherSeg: [number, number] = i < VANITY_ARMOR_START
       ? [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS] : [ACC_ARMOR_START, ARMOR_SLOTS];
-    const isWing = st?.wing != null;
+    // ★清偿刀 P4（2026-09-30）：自段冲突扫描改 accPairConflicts 单源全臂（同款/双翅/
+    //   互斥组三臂+社交段 3580 例外,ItemSlot.cs:3460-3481）——旧内联双翅臂缺
+    //   `vanity && (type==3580||type==3580)` 例外臂（:3466-3473）,拖放/CanShareArmor
+    //   面拒「开发者翼 3580×普通翼同戴社交段」（原版允许;右键面 UI.ts 已接,本体缺）。
+    //   vanity 实参=目标段（CanEquipInArmorSlot :1452 功能段传 false/:1458 社交段传 true）。
+    //   对段扫描（下方 otherSeg）仍独立=HasSameItemInSlot :3517 语义（同款+组,无翅臂）。
     const clash = (lo: number, hi: number) => {
       for (let k = lo; k < hi; k++) {
         if (k === i) continue;                      // 冲突槽=自身槽放行（:3242 slot == collisionSlot）
         const t = this.armor[k]?.id;
         if (t === undefined) continue;
-        if (t === id) return true;                  // 段内同 type（:3201）
-        if (isWing && statOfInternal(t)?.wing != null) return true;  // 双翅膀（:3202）
-        // ★清偿刀 Z：互斥组臂（HasIncompatibleAccessory 组臂 :3474-3480——
-        //   同款/双翅已前置短路,此处组员跨型互斥为真增量;谓词单源 vanillaEquip）
-        if (accGroupClash(t, id)) return true;
+        if (accPairConflicts(t, id, i >= VANITY_ARMOR_START)) return true;
       }
       return false;
     };

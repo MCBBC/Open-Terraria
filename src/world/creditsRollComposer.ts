@@ -17,8 +17,13 @@
 // 文本源 = Language.FindAll(Lang.CreateDialogFilter("CreditsRollCategory_X."))——经
 // lineResolver 注入（LanguageManager.keysFromCategory 保插入序等价）。
 // 登记债：SkeletonMerchant 骨头散落/SantaItemExample（FillSegments 未调用=死代码）
-// 等 item 喷洒段不渲染（Wait 链时长原样保留）；PlayerSegment 玩家形象渲染缺独立
-// 烘焙口（时序保留），详见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md 本批章。
+// 等 item 喷洒段不渲染（Wait 链时长原样保留）；★M 刀起 PlayerSegment 玩家形象段
+// 已实装渲染（ui/CreditsRollOverlay.ts 玩家分支 + deps.playerVisual 本地玩家供给），
+// 详见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md 本批章。
+// ★C6-P2 清偿刀（2026-09-30 红蓝 C6 F1/F2/F5/F6）：F1 actLength('frames')=tpf*len
+// （Actions.cs:987-994）→ 树段账 30→102、endTime 金标 20473→20545；F2 帧序列两形态
+// （hold/循环+相位锚段首,渲染端 seqFrameIndex）；F5 DryadSayingBye 三处欠账+两处
+// 追加定谳（tav :402 Wait/item6 气泡 :440+bg1 :443）；F6 Blink(180) 663/108。
 
 export interface Vec { x: number; y: number }
 
@@ -35,7 +40,8 @@ export type Act =
   | { a: 'party'; delay: number }                                            // NPCs.PartyHard
   | { a: 'rest'; d: number; delay: number }                                  // NPCs.DoBunnyRestAnimation
   | { a: 'knock'; d: number; delay: number }                                 // NPCs.ZombieKnockOnDoor
-  | { a: 'frames'; frames: Array<[number, number]>; tpf: number; delay: number }  // Sprites.SetFrameSequence(无限; tpf=每帧 tick 数)
+  | { a: 'blink'; d: number; delay: number }                                 // NPCs.Blink（C6-F6）
+  | { a: 'frames'; frames: Array<[number, number]>; tpf: number; delay: number }  // Sprites.SetFrameSequence 无时长参构造=一次性钳末帧 hold（C6-F2①）
   | { a: 'framesFor'; frames: Array<[number, number]>; tpf: number; d: number; delay: number } // SetFrameSequence(dur,…; tpf=每帧 tick 数)
   | { a: 'frame'; x: number; y: number; delay: number }                      // Sprites.SetFrame
   | { a: 'gravity'; v0: Vec; g: Vec; rot: number; d: number; delay: number } // Sprites.SimulateGravity
@@ -46,7 +52,11 @@ function actLength(a: Act): number {
   switch (a.a) {
     case 'look': case 'variant': case 'forceAlt': case 'party': return 0;
     case 'fade': return a.dur ?? 0;
-    case 'frames': return 0;
+    // ★C6-F1：无时长参 SetFrameSequence 构造器 _duration = _timePerFrame *
+    //  _frameIndices.Length（Actions.cs:987-994）——ExpectedLengthOfActionInFrames
+    //  进账面（此前 0=漏账：树段 C#:790 seq(9帧,8) dedicated 72 漏记,
+    //  num 账 30 vs vanilla 102 → endTime 20473 vs 20545）
+    case 'frames': return a.tpf * a.frames.length;
     case 'frame': return 0;                     // SetFrame(0,1,0,0) duration=0
     default: return a.d;
   }
@@ -294,6 +304,8 @@ function spawnWaveNpc(out: Seg[], startTime: number, anchor: Vec, type: number,
   const emoteId = WAVE_EMOTE[type] ?? -1;             // num10
   const duration2 = emoteId >= 0 ? (type % 6) * 20 + 60 : 0;             // :294-296
   const num5 = (ATTACK_TYPE[type] ?? -1) * 6 + (type % 13) * 2 + 20;      // :250
+  // ★C6-F6：num6（:243-248）——%7 支为空操作,实义 = 663/108 → 180（Blink 时长）
+  const num6 = (type === 663 || type === 108) ? 180 : 0;
   const num11 = totalSceneTime - jumpAt - 0 - 240;    // :299 duration - timeToJumpAt - num(0) - num8(240)
   npc(out, startTime, type, anchor, sx * 26, sy * 24, (an) => {  // GetProperPosition :35-38 pos*(26,24)
     an.then({ a: 'fade', target: 255 }).with({ a: 'fade', per: -5, dur: 51 })
@@ -304,6 +316,8 @@ function spawnWaveNpc(out: Seg[], startTime: number, anchor: Vec, type: number,
       .with({ a: 'move', vx: 0, vy: 0.00001, d: 40 })
       .then({ a: 'wait', d: num11 - 90 + num5 })
       .then({ a: 'wait', d: 90 - num5 });
+    if (num6 > 0) an.with({ a: 'blink', d: num6 });   // :306-308 With(Blink)——delay=末段
+    //  Wait(90-num5) 起点（=Then 链 _lastDedicatedTimeNeeded 语义）
     an.then({ a: 'fade', per: 3, dur: 85 });          // :310 Fade(3,85)
     if (type === 663) {
       // AddEmote(pos, fromTime, duration, blinkTime=num5, 17, lookDirection)
@@ -610,7 +624,10 @@ function playDryadSayingByeToTavernKeep(out: Seg[], startTime: number, anchorIn:
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 51 })
       // :429 门板.Then(SetFrameSequence(num-startTime=770, 8 帧, 5))——窗延伸兼
       // 8 帧弹跳动画（★BJ409⑥ 此前漏装=门段窗 0,酒馆门整场不可见）
-      .then({ a: 'framesFor', frames: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]], tpf: 5, d: 770 });
+      .then({ a: 'framesFor', frames: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]], tpf: 5, d: 770 })
+      // ★C6-F5①：:441 Then(Fade(0, num6-30=60))——门板窗延至 830、尾段 60 帧淡出
+      // （此前缺=窗 770 硬切）
+      .then({ a: 'fade', target: 0, dur: 60 });
   });
   num += dry.time;
   const num6 = 90;
@@ -635,16 +652,37 @@ function playDryadSayingByeToTavernKeep(out: Seg[], startTime: number, anchorIn:
   bg1.then({ a: 'wait', d: num7 });
   num += num7;
   dry.then({ a: 'move', vx: -1, vy: 0, d: 30 });
-  tav.then({ a: 'move', vx: -1, vy: 0, d: 30 });
+  // ★C6-F5③（追加定谳）：:402 tav 是 Wait(30) 非 Move（此前误拷 :382 Move(−1,30)）
+  tav.then({ a: 'wait', d: 30 });
   bg1.then({ a: 'wait', d: 30 });
   num += 30;
-  dry.then({ a: 'wait', d: 80 });
+  // ★C6-F5②：:405-425 NPC_550 贴图 LooseSprite 跃走段（:449 入列,此前整段缺失）——
+  //  位置 = sceneAnchor+(num9-30,2)（num9=54）；origin = Size*(0.5,1) 系底锚；
+  //  贴图 = NPC_550（Tavernkeep 25 行 = Frame(1,npcFrameCount[550]),Main.cs:67493 表）。
+  //  链 = Then(Fade(1)) → Then(SimulateGravity((−0.2,−0.35),0,0,80))（dedicated 80）
+  //  → With(SetFrameSequence(80, 13 帧(0,2)..(0,14), tpf4) 循环系) → With(Fade(0,85)),
+  //  两 With 均 delay=0（_lastDedicatedTimeNeeded 语义）——循环+整窗淡出并行。
+  spr(out, num, 'NPC_550', anchor, num9 - 30, 2, { frames: 25, originBottom: true }, (an) => {
+    an.then({ a: 'fade', target: 1 })
+      .then({ a: 'gravity', v0: { x: -0.2, y: -0.35 }, g: { x: 0, y: 0 }, rot: 0, d: 80 })
+      .with({ a: 'framesFor', frames: [
+        [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [0, 9],
+        [0, 10], [0, 11], [0, 12], [0, 13], [0, 14],
+      ], tpf: 4, d: 80 })
+      .with({ a: 'fade', target: 0, dur: 85 });
+  });
+  // :426-428（★C6-F5③ dry 多给 wait(80) 删除——dry 链止于 :401,demand dedicated 690 硬切）
   tav.then({ a: 'wait', d: 80 });
   bg1.then({ a: 'wait', d: 80 });
   num += 80;
-  dry.then({ a: 'move', vx: -0.5, vy: 0, d: 120 }).with({ a: 'fade', per: 2, dur: 127 });
-  tav.then({ a: 'move', vx: -0.5, vy: 0, d: 120 }).with({ a: 'fade', per: 2, dur: 127 });
-  bg1.then({ a: 'fade', target: 0, dur: 127 });
+  // :440 item6 气泡（id 10,t=num,dur=num6）——此前漏装（追加定谳,:456 入列）
+  emote(out, 10, num, num6, anchor, num8, 0, false);
+  // :441 门板尾 Fade(0,60) 已并入上门板链（窗 830）
+  tav.then({ a: 'wait', d: num6 });                   // :442（★C6-F5③ 补漏）
+  bg1.then({ a: 'wait', d: num6 });                   // :443（同上追加定谳）
+  // :444 tav Fade(2,127) 原地淡出 [860,987]（★C6-F5③ 此前误配 move(−0.5,120)+fade）
+  tav.then({ a: 'fade', per: 2, dur: 127 });
+  bg1.then({ a: 'fade', target: 0, dur: 127 });       // :445
   num += 187;
   return num - startTime;
 }
@@ -1101,7 +1139,9 @@ function playWitchDoctorGoingToHisPeople(out: Seg[], startTime: number, anchorIn
   emote(out, 10, num, num4, anchor, 0, 0, true, true);
   const num5 = 6;
   pri.then({ a: 'wait', d: num4 }); doc.then({ a: 'wait', d: num4 }); lil.then({ a: 'wait', d: num4 });
-  liana.then({ a: 'framesFor', frames: [[0, 3], [0, 2], [0, 1], [0, 0]], tpf: num5, d: 0 });
+  // ★C6-F2①：:693 无时长参 SetFrameSequence 构造 = 一次性钳末帧（hold,4 帧×6=24
+  //  进 dedicated）——此前误标 framesFor(d:0) 循环系（liana 窗 120 vs vanilla 144）
+  liana.then({ a: 'frames', frames: [[0, 3], [0, 2], [0, 1], [0, 0]], tpf: num5 });
   bg1.then({ a: 'wait', d: num4 });
   num += num4;
   const dur2 = num4 - num5 * 4;

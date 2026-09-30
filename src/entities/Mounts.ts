@@ -2165,7 +2165,10 @@ export class MountInstance {
    *  真源表达（391→64/392→65 的映射在 BUFF_TO_MOUNT，续期语义由 active 常驻承载，
    *  下坐即无 buff——与 Dismount :6214 ClearBuff 等价），buff 附带效果（131/168/265
    *  的 ignoreWater 等）由 swimFree/免淹门直接消费；出生尘（DoSpawnDust :6363）与
-   *  62-65 上骑音（PalChillet :6349-6352）经 game 回调 */
+   *  62-65 上骑音（PalChillet :6349-6352）经 game 回调。★BJ405-D1：buff 栏图标由
+   *  UI 坐骑通道按 mount.active 派生渲染（无时长字 Main.cs:9345-9352 全 MountType
+   *  buffNoTimeDisplay+buffNoSave;★P4 锚勘误:旧引 :9342-9349 漂移），右键图标 =
+   *  下马（TryRemovingBuff 坐骑支 :44100-44103）*/
   setMount(m: number, p: MountedPlayerView & { buffs?: { remove(t: unknown): void } }, game?: {
     spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
     playSfxFiles?(files: string[], vol?: number, x?: number, y?: number): void;
@@ -2227,9 +2230,14 @@ export class MountInstance {
     ) !== null;
   }
 
-  tryDismount(p: MountedPlayerView): boolean {
+  /** @param game 透传 dismount 的出生尘回调（★BJ405-D1：右键下马
+   *  Main.cs:44100-44103 TryDismount → Dismount :6234 DoSpawnDust(isDismounting)
+   *  1:1——buff 栏右键路径带尘；既有调用方不传=零变化） */
+  tryDismount(p: MountedPlayerView, game?: {
+    spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
+  }): boolean {
     if (!this.canDismount(p)) return false;
-    this.dismount(p);
+    this.dismount(p, game);
     return true;
   }
 

@@ -6,7 +6,8 @@
 //     EmoteSegment 目标帧 = fromTime+duration-blinkTime、时长 60、偏移恒 RIGHT。
 //  ③ 画板 origin 语义（DrawData origin = Size*(0.5,1)+(ox,oy)、位置 verbatim）——
 //     折叠错向曾致背景画板整体抬高（收场画板底边应恰在人群脚线 anchor.y）。
-// 金标 = 反编译 1457/1458 亲读值； endTime 金标（20473@twoLines）不受本批影响
+// 金标 = 反编译 1457/1458 亲读值； endTime 金标（20545@twoLines,★C6-F1 重锚——
+// 20473 系树段 seq 零账面病的实现值）不受本批影响
 // （emote/origin 零计时面），连同复断 = 计时面变异哨。
 import { describe, expect, it } from 'vitest';
 import { fillSegments, type Seg, type Anim } from '../src/world/creditsRollComposer';
@@ -118,20 +119,23 @@ describe('BJ409③ 画板 origin 语义（DrawData origin = Size*(0.5,1)+(ox,oy)
     expect(bunny!.originBottom).toBe(false);   // 原文 origin = Size()/2 中心锚
   });
 
-  it('酒馆门板 Extra_240：窗 = :429 SetFrameSequence(770) 延伸（旧病漏装=窗 0 整场不可见）', () => {
+  it('酒馆门板 Extra_240：窗 = :429 SetFrameSequence(770)+:441 Fade(0,60) 延伸=830'
+    + '（旧病漏装=窗 0 整场不可见;★C6-F5① 补尾淡出 770→830）', () => {
     const segs = build();
     const door = segs.find((s): s is Extract<Seg, { k: 'spr' }> => s.k === 'spr' && s.tex === 'Extra_240');
     expect(door).toBeDefined();
-    expect(door!.acts.time).toBe(770);
+    expect(door!.acts.time).toBe(830);
     const seqAct = door!.acts.acts.find((a) => a.a === 'framesFor');
     expect(seqAct).toBeDefined();
+    const tailFade = door!.acts.acts.find((a) => a.a === 'fade' && a.delay === 770);
+    expect(tailFade).toMatchObject({ target: 0, dur: 60 });   // :441 Fade(0, num6-30)
   });
 });
 
 describe('BJ409 计时面哨兵（emote/origin 零计时面）', () => {
-  it('endTime 金标不受本批影响：20473@twoLines（原 IIII232 金标复断）', () => {
+  it('endTime 金标不受本批影响：20545@twoLines（原 IIII232 金标复断;★C6-F1 重锚）', () => {
     const out: Seg[] = [];
     const { endTime } = fillSegments(out, twoLines, true);
-    expect(endTime).toBe(20473);
+    expect(endTime).toBe(20545);
   });
 });

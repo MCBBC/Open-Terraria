@@ -89,6 +89,62 @@ describe('清偿刀 Z 门② CanShareArmor 快捷装备面（getEffectiveArmor/e
   });
 });
 
+// ===================== ★清偿刀 P4（2026-09-30）社交段 3580 双翼例外臂 =====================
+// 定谳锚（1457 亲读）：CanEquipBothAccessories（ItemSlot.cs:3460-3481）双翅臂
+// :3465-3474——`vanity && (acc1.type == 3580 || acc2.type == 3580)` 例外先行于
+// 翅膀恒拒；armorAccepts 本体旧内联双翅臂缺此例外（C4 定谳：右键面 accPairConflicts
+// 已接/本体缺——拖放与 CanShareArmor 面拒「开发者翼 3580×普通翼同戴社交段」）。
+// 本刀修=本体自段扫描改 accPairConflicts 全臂单源（vanity 实参=目标段）。
+describe('清偿刀 P4 门③ 社交段 3580 例外臂（:3465-3474 经 accPairConflicts 单源）', () => {
+  const DEV_WING = idOfVid(3580);   // 开发者翼 wing:33（Item.cs:32290 wingSlot=33,X 刀同锚）
+  const WING = idOfVid(492);        // 天使之翼 wing:1（普通翼对照）
+
+  it('判别位：普通翼占社交 14,开发者翼拖入社交 13 → 放行（收刀前拒）', () => {
+    const inv = new Inventory();
+    inv.armor[14] = { id: WING, stack: 1 };
+    expect(inv.armorAccepts(13, DEV_WING)).toBe(true);
+  });
+
+  it('对称位：开发者翼占社交 13,普通翼拖入社交 14 → 放行（例外对 a/b 两支对称）', () => {
+    const inv = new Inventory();
+    inv.armor[13] = { id: DEV_WING, stack: 1 };
+    expect(inv.armorAccepts(14, WING)).toBe(true);
+  });
+
+  it('例外仅 3580：普通翼×普通翼同段仍拒（双翅恒拒臂不变）', () => {
+    const inv = new Inventory();
+    inv.armor[14] = { id: WING, stack: 1 };
+    expect(inv.armorAccepts(13, WING)).toBe(false);
+  });
+
+  it('同款臂先于例外：社交段 3580 在场,第二个 3580 拖入 → 拒（:3462-3464 type 相等先判）', () => {
+    const inv = new Inventory();
+    inv.armor[13] = { id: DEV_WING, stack: 1 };
+    expect(inv.armorAccepts(14, DEV_WING)).toBe(false);
+  });
+
+  it('功能段无例外：普通翼占 3,开发者翼拖入功能段 4 → 拒（vanity=false 臂）', () => {
+    const inv = new Inventory();
+    inv.armor[3] = { id: WING, stack: 1 };
+    expect(inv.armorAccepts(4, DEV_WING)).toBe(false);
+  });
+
+  it('CanShareArmor 快捷装备面自动承接：普通翼占社交 14,Loadout 收藏开发者翼共享入 13', () => {
+    const inv = new Inventory();
+    inv.armor[14] = { id: WING, stack: 1 };
+    inv.loadouts[0].armor[13] = { id: DEV_WING, stack: 1, favorited: true };
+    expect(inv.getEffectiveArmor(13)).toMatchObject({ id: DEV_WING });
+    expect(inv.effectiveSharedFrom(13, false)).toBe(0);
+  });
+
+  it('CanShareArmor 反例锁：收藏普通翼（例外不适用）→ 拒共享', () => {
+    const inv = new Inventory();
+    inv.armor[14] = { id: WING, stack: 1 };
+    inv.loadouts[0].armor[13] = { id: WING, stack: 1, favorited: true };
+    expect(inv.getEffectiveArmor(13)).toBeNull();
+  });
+});
+
 describe('清偿刀 Z 门③ 静态结构锁', () => {
   it('Entity.ts BJ294 玩家侧登记债枚举已同步补 254（V 刀 REGISTRY playerSide 同步,防注释回退）', () => {
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/entities/Entity.ts'), 'utf8');
@@ -100,9 +156,9 @@ describe('清偿刀 Z 门③ 静态结构锁', () => {
     expect(seg).toContain('playerSide');
   });
 
-  it('互斥组谓词单源：Inventory.armorAccepts 与 UI 消费同源 vanillaEquip.accGroupClash（提源判据=无环数据层）', () => {
+  it('互斥组谓词单源：Inventory.armorAccepts 与 UI 消费同源 vanillaEquip.accGroupClash/accPairConflicts（提源判据=无环数据层;★P4 自段扫描改 accPairConflicts 全臂）', () => {
     const invSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/items/Inventory.ts'), 'utf8');
-    expect(invSrc).toContain("accGroupClash } from '../data/vanillaEquip'");
+    expect(invSrc).toContain("accGroupClash, accPairConflicts } from '../data/vanillaEquip'");
     const eqSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/data/vanillaEquip.ts'), 'utf8');
     expect(eqSrc).toContain('export const accGroupClash');
     expect(eqSrc).toContain('export const accPairConflicts');

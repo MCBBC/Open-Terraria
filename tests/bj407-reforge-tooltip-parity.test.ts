@@ -150,3 +150,56 @@ describe('BJ407 ④ 结构锁（内容装配单源,回退自装贫面即红）',
     expect(body).not.toContain('prefixLines(');
   });
 });
+
+// ============ ⑤ 脉冲面（2026-09-30 债）：startTooltipPulse 与物品栏同相 ============
+// 定谳锚（1457）：重铸槽悬停 = 物品栏同一 MouseText 管线 → 每帧重绘,文字基色 =
+// mouseTextColor（Main.cs:20428-20429）,该值由 DoUpdate_AnimateCursorColors
+// （Main.cs:18396-18407,经 :17322 每帧调用）190↔255 ping-pong 连续推进;−12 disco/
+// −13 master 活色档同函数内逐帧重染（:20432/:20436）。本仓每帧重绘的承载 =
+// startTooltipPulse（rAF 逐帧 filter 亮度 + .sw-tooltip-rare 重染）——重铸路径曾缺
+// = 悬停 tooltip 静止死色（BJ407 登记债,与 BJ176 三面哨兵同批清偿）。
+describe('BJ407 ⑤ 脉冲面：重铸槽 tooltip 挂 startTooltipPulse（与物品栏同相）', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'UI.ts'), 'utf8');
+
+  /** 函数体截取（sw-tt1-sentinel 同习语;锚漂移=爆红不静默放行） */
+  const bodyOf = (decl: string, next: string): string => {
+    const a = src.indexOf(decl);
+    expect(a, `UI.ts 缺 ${decl}`).toBeGreaterThan(-1);
+    const b = src.indexOf(next, a);
+    expect(b, `UI.ts 缺 ${next}（${decl} 体截取锚）`).toBeGreaterThan(a);
+    return src.slice(a, b);
+  };
+
+  it('三 tooltip 路径全挂脉冲（物品栏 ∪ 重铸槽 ∪ buff 气泡=同管同相）', () => {
+    for (const [name, decl, next] of [
+      ['showTooltipFor', 'private showTooltipFor(', 'private shopTooltipContext('],
+      ['showReforgeTooltip', 'private showReforgeTooltip(): void {', 'closeReforge(): void {'],
+      ['showBuffTooltip', 'private showBuffTooltip(anchor: HTMLElement', 'private hideBuffTooltip(): void {'],
+    ] as const) {
+      const body = bodyOf(decl, next);
+      expect(body).toContain('this.startTooltipPulse();');
+      // 序：脉冲挂在内联装配之后（startTooltipPulse 查 .sw-tooltip-lines,须后于 innerHTML）
+      expect(body.indexOf('this.startTooltipPulse();'),
+        `${name}: 脉冲须后于 innerHTML 装配`).toBeGreaterThan(body.indexOf('.innerHTML'));
+    }
+  });
+
+  it('重铸路径脉冲序 = display 块开后、applyTooltipBg 烘底前（与 showTooltipFor 同序）', () => {
+    const body = bodyOf('private showReforgeTooltip(): void {', 'closeReforge(): void {');
+    const display = body.indexOf("this.tooltip.style.display = 'block';");
+    const pulse = body.indexOf('this.startTooltipPulse();');
+    const bg = body.indexOf('this.applyTooltipBg();');
+    expect(pulse).toBeGreaterThan(display);
+    expect(pulse).toBeLessThan(bg);
+  });
+
+  it('脉冲挂线全文件恰 3 处（三路径;新增第四路径须同批扩哨）', () => {
+    expect(src.split('this.startTooltipPulse();').length - 1).toBe(3);
+  });
+
+  it('变异判别：startTooltipPulse 本体仍承载 −12/−13 活色重染（摘重染=死脉冲）', () => {
+    const body = bodyOf('private startTooltipPulse(): void {', '\n  private ');
+    expect(body).toContain("querySelector<HTMLElement>('.sw-tooltip-rare')");
+    expect(body).toContain('mouseTextInnerColor(');
+  });
+});

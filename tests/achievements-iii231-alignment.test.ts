@@ -263,7 +263,7 @@ describe('④ 进世界基线补全（OnPlayerEnteredWorld :192-197）', () => {
     const g = stubGame();
     g.entities = { npcs: [], projectiles: [], enemies: [] };
     g.world = { flags: { unlockedBiomeTorches: true }, bestiary: { completion: () => ({ percent: 0 }) } };
-    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [] }, banks: [], maxHp: 100, maxMana: 20 };
+    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [], isItemSlotUnlockedAndUsable: () => true }, banks: [], maxHp: 100, maxMana: 20 };
     (g as unknown as { achOnWorldEnter(): void }).achOnWorldEnter();
     expect((g.achievements as Achievements).isCompleted('GAIN_TORCH_GODS_FAVOR')).toBe(true);
   });
@@ -271,7 +271,7 @@ describe('④ 进世界基线补全（OnPlayerEnteredWorld :192-197）', () => {
     const g = stubGame();
     g.entities = { npcs: [], projectiles: [], enemies: [] };
     g.world = { flags: {}, bestiary: { completion: () => ({ percent: 0 }) } };
-    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [] }, banks: [], maxHp: 100, maxMana: 20 };
+    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [], isItemSlotUnlockedAndUsable: () => true }, banks: [], maxHp: 100, maxMana: 20 };
     (g as unknown as { achOnWorldEnter(): void }).achOnWorldEnter();
     expect((g.achievements as Achievements).isCompleted('GAIN_TORCH_GODS_FAVOR')).toBe(false);
   });
@@ -279,7 +279,7 @@ describe('④ 进世界基线补全（OnPlayerEnteredWorld :192-197）', () => {
     const g = stubGame();
     g.entities = { npcs: [], projectiles: [], enemies: [] };
     g.world = { flags: {}, bestiary: { completion: () => ({ percent: 1 }) } };
-    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [] }, banks: [], maxHp: 100, maxMana: 20 };
+    g.player = { inv: { slots: [], armor: [], dye: [], miscEquips: [], miscDyes: [], loadouts: [], isItemSlotUnlockedAndUsable: () => true }, banks: [], maxHp: 100, maxMana: 20 };
     (g as unknown as { achOnWorldEnter(): void }).achOnWorldEnter();
     expect((g.achievements as Achievements).isCompleted('BOOK_WORM')).toBe(true);
   });
@@ -293,6 +293,7 @@ describe('⑤ achCheckEquipState 两面谓词（DYE_HARD 两面 + TOPPED_OFF 字
     g.player = {
       inv: {
         slots: [], armor: [], miscEquips: [], dye, miscDyes, loadouts: [],
+        isItemSlotUnlockedAndUsable: () => true,   // ★P4：DYE_HARD 门逐槽解锁谓词（旧 every 桩无此臂）
       },
       maxHp, maxMana,
     };
@@ -328,5 +329,59 @@ describe('⑤ achCheckEquipState 两面谓词（DYE_HARD 两面 + TOPPED_OFF 字
     const g = mkGame(true, true, 400, 20);
     (g as unknown as { achCheckEquipState(enterWorld?: boolean): void }).achCheckEquipState(true);
     expect((g.achievements as Achievements).isCompleted('TOPPED_OFF')).toBe(false);
+  });
+});
+
+// ===================== ★清偿刀 P4（2026-09-30）DYE_HARD 锁槽豁免（C4 真漏） =====================
+// 定谳锚（1457 亲读）：两 face 逐槽门 AchievementsHelper.cs:183（进世界）/ :267
+// （HandleOnEquip 12/33）——`IsItemSlotUnlockedAndUsable(num8) && (dye[num8].type<1
+// || stack<1) → 不发` =【锁槽不计入】。经典世界 dye[8]/[9] 恒锁（Player.cs:12669
+// 逐槽谓词）→ 8 格满即成;旧 `dye.every(!!s)` 要求全 10 格=经典世界永不可达。
+// 判别位：同一全缺矩阵,只换解锁域 → 达成态翻转。
+describe('⑤b DYE_HARD 锁槽豁免（★P4,cs:183/:267 IsItemSlotUnlockedAndUsable 逐槽门）', () => {
+  const mkClassic = (unlockedMax: number, fillMax: number) => {
+    const g = stubGame();
+    const dye = Array.from({ length: 10 }, (_, i) => (i < fillMax ? { id: 1, stack: 1 } : null));
+    g.player = {
+      inv: {
+        slots: [], armor: [], miscEquips: [], dye,
+        miscDyes: [null, null, null, null, null], loadouts: [],
+        isItemSlotUnlockedAndUsable: (s: number) => s < unlockedMax,   // 经典=8（0-7 开,8/9 锁）
+      },
+      maxHp: 400, maxMana: 20,
+    };
+    return g;
+  };
+  const run = (g: unknown, enterWorld: boolean) =>
+    (g as { achCheckEquipState(enterWorld?: boolean): void }).achCheckEquipState(enterWorld);
+
+  it('判别核心：经典世界 8 格全满（8/9 锁）→ 进世界基线 DYE_HARD 达成（收刀前永锁）', () => {
+    const g = mkClassic(8, 8);
+    run(g, true);
+    expect((g.achievements as Achievements).isCompleted('DYE_HARD')).toBe(true);
+  });
+
+  it('装备时刻同态：主染料 8 格满但 miscDyes 空 → 不发（miscDyes 面不受本刀影响）', () => {
+    const g = mkClassic(8, 8);
+    run(g, false);
+    expect((g.achievements as Achievements).isCompleted('DYE_HARD')).toBe(false);
+  });
+
+  it('解锁域内空 1 格（7 格满）→ 不发（解锁∧有染料 计数面,并非「有染料的格≥8」）', () => {
+    const g = mkClassic(8, 7);
+    run(g, true);
+    expect((g.achievements as Achievements).isCompleted('DYE_HARD')).toBe(false);
+  });
+
+  it('恶魔心解锁 8 号槽但 dye[8] 空 → 不发（新解锁格立即入计数域）', () => {
+    const g = mkClassic(9, 8);
+    run(g, true);
+    expect((g.achievements as Achievements).isCompleted('DYE_HARD')).toBe(false);
+  });
+
+  it('恶魔心解锁 8 号槽且 dye[8] 满 → 发（9 格满,9 号仍锁不计入）', () => {
+    const g = mkClassic(9, 9);
+    run(g, true);
+    expect((g.achievements as Achievements).isCompleted('DYE_HARD')).toBe(true);
   });
 });

@@ -168,6 +168,10 @@ export interface ShimExecStats {
   regionUploads: number; // ★P1-B 子区增量上传笔数（texRefreshRegion 支;探针分账面）
   replays: number;      // GL 失败 2D 重放
   emitBatchQuads: number; // ★C5 雨批发射四边形数（quadBatch 路径;探针对账面）
+  /** ★闪屏定谳仪（2026-09-30）：accFail 原因分布（'nogl'/'tex'/'tex2'/'gl'/'begin'/
+   *  'op:*'——b2b-acc-degraded 计数无归因面,本案 1473 次降级=原因黑箱;原因计数
+   *  直连 F5 报告 render.acc.shim.accFails）。 */
+  accFails: Record<string, number>;
 }
 
 const fround = Math.fround;
@@ -327,8 +331,12 @@ export class GLShimExecutor {
   private dynKeys = new WeakMap<object, string>();
   stats: ShimExecStats = GLShimExecutor.blankStats();
 
+  /** ★闪屏定谳仪（2026-09-30）：accFail 会话级累计账（静态,不随 frameReset 每帧清;
+   *  key=`why` 或 `why:失败纹理键`——F5 报告 render.acc.accFailLedger 消费） */
+  static accFailLedger: Record<string, number> = {};
+
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0 };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0, accFails: {} };
   }
 
   constructor(host: ShimHost) {
@@ -1463,10 +1471,16 @@ export class GLShimExecutor {
     if (!this.head) return;
     const glw = this.glw && !this.glw.unavailable ? this.glw : this.host.acquireGl();
     if (!glw || glw.unavailable) { this.accFail('nogl'); return; }
+
     // 预解析门（bridge presentBatch 同款;动态源在发射期解析;批纹理在发射期解析）
     for (let p: QuadRec | null = this.head; p; p = p.next) {
       if (p.solid || p.pair || p.dynamic || p.batch) continue;
-      if (!this.resolveTex(glw, p)) { this.accFail('tex'); return; }
+      if (!this.resolveTex(glw, p)) {
+        // ★闪屏定谳仪:静态路径失败=er: 键明细（img id+纪元+子区矩形,直指哪张区域纹理）
+        const id = texId(p.img as object);
+        this.accFail('tex', `er:${id}:${texEpoch(p.img as object)}:${p.sx},${p.sy},${p.sw},${p.sh}`);
+        return;
+      }
     }
     // 开 FBO（帧首段 clear;后续段续交幂等）
     if (!glw.isAccumOpen('world')) {
@@ -1505,7 +1519,7 @@ export class GLShimExecutor {
         const e = rg
           ? glw.texFromRegion(p.batch.key, p.batch.img as TexImageSource, rg.sx, rg.sy, rg.sw, rg.sh)
           : glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
-        if (!e) { this.dropEmittedPrefix(p); this.accFail('tex'); return; }
+        if (!e) { this.dropEmittedPrefix(p); this.accFail('tex', p.batch.key); return; }
         const ok = p.batch.rgba
           ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
           : glw.quadBatch(e, p.batch.data, p.batch.quads);
@@ -1520,7 +1534,9 @@ export class GLShimExecutor {
         if (curTier === 2) glw.blendErase(false);
         if (curTier === 3) glw.blendMult(false);
         this.dropEmittedPrefix(p);
-        this.accFail('tex2');
+        // ★闪屏定谳仪:mid-loop 静态失败=er: 键明细
+        const id2 = texId(p.img as object);
+        this.accFail('tex2', `er:${id2}:${texEpoch(p.img as object)}:${p.sx},${p.sy},${p.sw},${p.sh}`);
         return;
       }
       const usx = p.texKind === 'full' ? p.sx : 0;
@@ -1550,7 +1566,15 @@ export class GLShimExecutor {
    *  尾段,degrade present 的 FBO 已含前缀,replay 只补尾=前缀不二次落画
    *  （旧码 replay 全队列=SO 变浓/ADD 双亮）;入口失败（'nogl'/'tex' 预解析门/
    *  'begin'）无前缀,全队列重放语义不变。 */
-  private accFail(why: string): void {
+  private accFail(why: string, detail?: string): void {
+    // ★闪屏定谳仪（2026-09-30）：原因入账——stats.accFails 随 frameReset 每帧清
+    //  （本案 1473 次降级的重放账曾被每帧清零吞掉=报告全零假象）,定谳账走
+    //  【静态累计】accFailLedger（不随帧清,F5 报告 render.acc.accFailLedger 消费）;
+    //  detail=失败纹理键（'tex'/'tex2' 携带,直指哪张贴图）。
+    const f = this.stats.accFails;
+    f[why] = (f[why] ?? 0) + 1;
+    const lk = detail ? `${why}:${detail}` : why;
+    GLShimExecutor.accFailLedger[lk] = (GLShimExecutor.accFailLedger[lk] ?? 0) + 1;
     const hadFbo = this.glw?.isAccumOpen('world') ?? false;
     if (this.host.degradeAcc && (hadFbo || why === 'nogl')) {
       if (this.host.degradeAcc()) { this.replay2D(); return; }

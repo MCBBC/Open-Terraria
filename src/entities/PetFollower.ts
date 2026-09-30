@@ -27,6 +27,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projectileData } from '../data/vanillaProjectiles';
+import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import petAiJson from '../data/vanilla-petai.json';
@@ -1291,8 +1292,40 @@ export class PetFollower extends Entity {
     //  SetDefaults（:2994-3004）无 alpha 行 ≡0、AI_026 211 支不写 α=恒满强。
     if (this.projId === 211) ctx.globalCompositeOperation = 'lighter';
     // 帧按原像素尺寸 1:1 绘制（原版投射物 scale=1，判定盒小于贴图帧）
+    // ★清偿刀 N（2026-09-30）：cPet/cLight 通道本体染（GetProjectileDesiredShader
+    //  1:1——projPet∧dmg0∧!LightPet→cPet / LightPet∧dmg0→cLight,miscDyes[0]/[1]）。
+    //  EntitySpriteDraw×Armor.Apply 等价=逐贴图过 SM2 pass;t0Rect=帧源矩形。
+    //  登记债：1090 滚动专绘/764 陨星覆绘/legacyDraw 兜底三支未接染（本体面已覆
+    //  盖主消费域,专绘支染料债登记）。
+    const dyeVid = this.petDyeVid();
+    if (dyeVid > 0) {
+      const dyed = dyedProjCanvas(img, sx, sy, sw, sh, dyeVid,
+        { facing: face || 1, box: { x: this.x, y: this.y, w: this.w, h: this.h },
+          lightAt: r.lighting?.lightAt?.bind(r.lighting) ?? null });
+      if (dyed) {
+        ctx.drawImage(dyed, 0, 0, sw, sh, -sw / 2, -sh / 2, sw, sh);
+        ctx.restore();
+        return;
+      }
+    }
     ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
     ctx.restore();
+  }
+
+  /** 弹幕染料通道 vid（清偿刀 N 2026-09-30）——GetProjectileDesiredShader 1:1：
+   *  本类域=宠物/光宠弹（projPet 家族,minion=false,damage=0,aiStyle 数据面）→
+   *  cPet（miscDyes[0]）/cLight（miscDyes[1]）两通道;owner 引用实为本体 Player
+   *  （Game.ts updatePetSlot 闭包 `() => this.player`）,窄接口读 inv。傀儡/测试
+   *  桩 inv 缺失 → 0=无染。 */
+  private petDyeVid(): number {
+    const inv = (this.ownerRef() as unknown as { inv?: DyeInvSource } | null)?.inv;
+    if (!inv) return 0;
+    const ch = dyeChannelsOf(inv);
+    if (!(ch.cPet > 0) && !(ch.cLight > 0)) return 0;
+    return getProjDesiredDyeVid(
+      { vid: this.projId, minion: false, damage: 0, aiStyle: projectileData(this.projId)?.aiStyle },
+      ch,
+    );
   }
 
   // ===========================================================================

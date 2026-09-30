@@ -33,6 +33,7 @@
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
+import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, dyedSolidBand, type DyeInvSource } from '../data/projDye';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { moveAndCollide, tileCollisionProbeBlocked, walkDownSlopePre } from '../physics/TileCollision';
 import { remap } from '../stats/ScaleStats';
@@ -99,6 +100,22 @@ function heldItemVid(game: GameHooks): number {
   const held = game.player.inv?.heldItem?.();
   if (!held) return -1;
   return ITEM_DEFS[held.id]?.vid ?? -1;
+}
+
+/** 弹幕染料通道 vid（清偿刀 N 2026-09-30）——GetProjectileDesiredShader 1:1：
+ *  1020/1105 均走 switch 覆写 → cPet（owner!=255 面由本函数承载：本地弹读属主
+ *  inv.miscDyes[0];傀儡 miscDyes 未同步（protocol ItemContainer 仅 Slots/Armor/Dye
+ *  三容器）→ 通道全 0=无染,登记 MP 边界债）。damage 传弹实值（switch 覆写无
+ *  damage 门,projPet 支 1020 本就 damage==0）、aiStyle 数据面。 */
+function droneDyeVid(d: DroneBase): number {
+  const inv = (d.ownerPlayer as unknown as { inv?: DyeInvSource } | undefined)?.inv;
+  if (!inv) return 0;
+  const ch = dyeChannelsOf(inv);
+  if (!(ch.cPet > 0)) return 0;
+  return getProjDesiredDyeVid(
+    { vid: d.projId, minion: false, damage: d.damage, aiStyle: projectileData(d.projId)?.aiStyle },
+    ch,
+  );
 }
 
 /** 共享基类：SetDefaults/输入字节/自毁链/Track/循环音/Kill 单口。
@@ -437,16 +454,42 @@ export class JimsDroneProj extends DroneBase {
 
   /** 绘制（Main.cs:28508 DrawContinuousTrail → :28301-28328 双尾迹 + :33178 通用支
    *  origin(16,14) 旋转画）：
-   *  尾迹 = MagicPixel 1×1 段带（宽 4、沿 oldPos 环、色 (177,255,32,127)×Remap
-   *  (i,0,20,1,0) 渐隐,cPet==0 无染料档——本仓宠物染料弹域未建模,恒绿档;偏移
-   *  (10,2)/(−10,2) 按各槽 oldRot 旋）;本体 = Center 旋转 rotation,origin(16,14)。 */
+   *  尾迹 = MagicPixel 1×1 段带（宽 4、沿 oldPos 环、×Remap(num2,0,20,1,0) 渐隐;偏移
+   *  (10,2)/(−10,2) 按各槽 oldRot 旋）;本体 = Center 旋转 rotation,origin(16,14)。
+   *  ★清偿刀 N（2026-09-30）cPet 染料门（Main.cs:28300-28303 逐式）：cPet==0 →
+   *  绿带 (177,255,32,127);cPet!=0 → 白带 (255,255,255,255) 过整弹染料 pass——
+   *  本仓 = projDye.dyedSolidBand（1×1 白像素过 SM2 pass,MagicPixel 同 UV 恒同
+   *  输出=每拍一色 1:1）+ fade 顶点色后乘（v0 可交换域,A2 架构账同尘/翼面;
+   *  V0_MID_PASSES 族 fade 相位近似,登记债）;本体经 dyedProjCanvas 逐贴图染
+   *  （EntitySpriteDraw×Armor.Apply 等价,compositeLight 全屏乘光=「白烘×染后
+   *  光乘」可交换域）。
+   *  ★清偿刀 P3-F3（2026-09-30）：fade 序对齐——vanilla oldPos[0]=最新
+   *  （Projectile.cs:17252-17264 逐槽下移+[0]=当前）,num4=Remap(num2,0,num,1,0)
+   *  （Main.cs:28324）键在段旧端索引 num2=段龄;本环 push 序=尾→头（ring[0] 最旧
+   *  反向）⇒ 段龄 = ring.length−i（旧端=ring[i−1]）——旧码 remap(i) 沿尾迹倒置
+   *  （机身最暗/尾端最亮,原版相反）。逐段点亮旧码已同相（段数 0,1,…,19 与原版
+   *  逐帧全等,Zero 门只跳未填槽）,非独立缺陷。
+   *  ★清偿刀 P3-F4：fade 曲线补四通道乘——vanilla baseColor*num4（:28325）rgba
+   *  四通道全乘后 (SrcAlpha,InvSrcAlpha)（Main.cs:38678 PrepareDrawnEntityDrawing
+   *  BlendState.AlphaBlend）⇒ rgb 有效贡献 ∝ fade²、遮蔽 src.a ∝ fade¹;旧码仅
+   *  globalAlpha 乘（贡献 ∝ fade¹,中段 ~2× 偏亮）。本仓取【顶点色×fade 四通道
+   *  直乘 fillStyle、globalAlpha 恒 1】= 原版语义逐式对齐（ga=fade·fade 只对齐
+   *  rgb 贡献,src.a 会过遮蔽 1−fade² vs 1−fade,弃）。
+   *  ★清偿刀 P3-F7：uDirection=entity.direction（ArmorShaderData.cs:109 Apply 尾
+   *  entity 覆写,带/体同源）——Projectile.direction 每拍按 AutomaticallyChanges
+   *  Direction（Projectile.cs:17387-17401,aiStyle 195 不在豁免表）由 velocity.X
+   *  符号重导（:17121-17132,0→+1）;旧码 dir/spriteDir 恒 0→||1 恒 1,向左发射时
+   *  渐变族染料方向反。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(1020);
+    const dyeVid = droneDyeVid(this);
+    const facing = this.vx < 0 ? -1 : 1;      // ★P3-F7 direction（:17125-17131 逐拍重导）
     const ring = this.posRing;
     if (ring.length > 1) {
       const n = JimsDroneProj.RING;
+      const band = dyeVid > 0 ? dyedSolidBand(dyeVid, facing) : null;
       for (const off of [{ x: 10, y: 2 }, { x: -10, y: 2 }]) {
         for (let i = n - 1; i > 0; i--) {
           const a = ring[i];
@@ -463,23 +506,33 @@ export class JimsDroneProj extends DroneBase {
           const len = Math.hypot(dx, dy);
           if (len < 0.001) continue;
           const rot = Math.atan2(dy, dx) + Math.PI / 2;   // num3 + π/2 :28325
-          const fade = remap(i, 0, n, 1, 0);              // num4 :28324
+          const fade = remap(ring.length - i, 0, n, 1, 0);   // ★P3-F3 num4=num2 段龄 :28324
+          const f = Math.max(0, Math.min(1, fade));
           ctx.save();
           ctx.translate(ax, ay);
           ctx.rotate(rot);
-          ctx.fillStyle = `rgba(177,255,32,${(127 / 255) * Math.max(0, Math.min(1, fade))})`;
+          if (band) {
+            // 白带×pass 输出 ×顶点色 fade 四通道（baseColor*num4 :28325,v0 可交换域）
+            ctx.fillStyle = `rgba(${Math.round(band[0] * f)},${Math.round(band[1] * f)},${Math.round(band[2] * f)},${((band[3] / 255) * f).toFixed(4)})`;
+          } else {
+            ctx.fillStyle = `rgba(${Math.round(177 * f)},${Math.round(255 * f)},${Math.round(32 * f)},${((127 / 255) * f).toFixed(4)})`;
+          }
           ctx.fillRect(-2, -len, 4, len);                 // origin(0.5,1) scale(4,y) :28327
           ctx.restore();
         }
       }
     }
     if (!img || !(img.width > 0)) return;
+    const bodyTex = dyeVid > 0
+      ? (dyedProjCanvas(img, 0, 0, img.width, img.height, dyeVid,
+        { facing, box: { x: this.x, y: this.y, w: this.w, h: this.h } }) ?? img)
+      : img;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rotation);
     // origin(16,14)：:33178-33180 显式 origin24.Y=14f（32×20 贴图,锚点低于几何心 4px）
-    ctx.drawImage(img, -img.width / 2, -14);
+    ctx.drawImage(bodyTex as CanvasImageSource, -img.width / 2, -14);
     ctx.restore();
   }
 }
@@ -743,7 +796,10 @@ export class RemoteControlCarProj extends DroneBase {
   /** 绘制（宠物帧支 Main.cs:33697-33698 → :33775-33784 位移门 → :34210 通用画）：
    *  帧 = 七帧竖带 Frame(1,7,0,frame)（56×266 → 每帧 56×38）;位 = Center + (0,
    *  −2 + (ground ? 4×GetLerpValue(0,π/4,|rot|) : 4));旋转 = rotation;origin(28,19);
-   *  dir=FlipHorizontally ⇔ spriteDirection==−1（:30529-30532）。 */
+   *  dir=FlipHorizontally ⇔ spriteDirection==−1（:30529-30532）。
+   *  ★清偿刀 N：switch 覆写 1105 → cPet（Main.cs:22457-22464 无 damage/minion 门）
+   *  ——本体帧逐贴图过染料 pass（EntitySpriteDraw×Armor.Apply 等价,t0Rect=帧行
+   *  源矩形）;TrailingMode[1105]=−1 无尾迹面。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
@@ -751,6 +807,11 @@ export class RemoteControlCarProj extends DroneBase {
     if (!img || !(img.width > 0)) return;
     const fw = img.width;                                 // 56
     const fh = img.height / 7;                            // 38
+    const dyeVid = droneDyeVid(this);
+    const frameTex = dyeVid > 0
+      ? (dyedProjCanvas(img, 0, this.frame * fh, fw, fh, dyeVid,
+        { facing: this.spriteDir || 1, box: { x: this.x, y: this.y, w: this.w, h: this.h } }) ?? img)
+      : img;
     const grounded = this.vy === 0;
     const yOff = -2 + (grounded
       ? 4 * Math.max(0, Math.min(1, Math.abs(this.rotation) / (Math.PI / 4)))
@@ -760,7 +821,8 @@ export class RemoteControlCarProj extends DroneBase {
     ctx.translate(this.cx, this.cy + yOff);
     ctx.rotate(this.rotation);
     if (this.spriteDir === -1) ctx.scale(-1, 1);
-    ctx.drawImage(img, 0, this.frame * fh, fw, fh, -fw / 2, -fh / 2, fw, fh);
+    if (frameTex !== img) ctx.drawImage(frameTex as CanvasImageSource, 0, 0, fw, fh, -fw / 2, -fh / 2, fw, fh);
+    else ctx.drawImage(img, 0, this.frame * fh, fw, fh, -fw / 2, -fh / 2, fw, fh);
     ctx.restore();
   }
 }

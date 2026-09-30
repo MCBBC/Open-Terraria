@@ -214,6 +214,21 @@ export function setProjSpriteOverride(projId: number, img: ImageBitmap | HTMLIma
   const prefix = `${projId}|`;
   for (const k of frameCache.keys()) if (k.startsWith(prefix)) frameCache.delete(k);
 }
+/** 帧源矩形（projFrameImg 切片式照录,清偿刀 N 2026-09-30）——弹幕染料 pass 的
+ *  t0Rect/uSourceRect 语义用（渐变族 T0 坐标须与原片源矩形同源）;非网格型=竖条
+ *  帧高切片、网格型=列主序。纯函数,不改 projFrameImg 行为。 */
+export function projFrameSrcRect(projId: number, frameIdx: number): { sx: number; sy: number; sw: number; sh: number } | null {
+  const img = projSprite(projId);
+  if (!img || !(img.width > 0)) return null;
+  const grid = projGridRect(projId, frameIdx);
+  if (grid) return { sx: grid.sx, sy: grid.sy, sw: grid.sw, sh: grid.sh };
+  const frames = projFrameCount(projId);
+  const idx = Math.max(0, Math.min(frames - 1, frameIdx));
+  const fh = img.height / frames;
+  if (!Number.isFinite(fh) || fh < 1) return null;
+  return { sx: 0, sy: Math.round(idx * fh), sw: img.width, sh: Math.round(fh) };
+}
+
 export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElement | null {
   const img = projSprite(projId);
   if (!img || !(img.width > 0) || img.width === 0) return null;
@@ -3156,9 +3171,14 @@ export class Arrow extends Entity {
     //      503 星怒在上方独占支内补挂（rot=vel−π/2 本体角语义）。
     //      ★BJ235：绿带 1020/1024/1026 = DrawProjDirect 头 DrawTrail 面（:28508-28561
     //      原版在最前,先于一切——此处挂通用残影前同序）,与通用表 1026 条目并存
-    //      （原版 1026 两面都画）;1020/1024 无通用表条目（仅绿带）。 ----
+    //      （原版 1026 两面都画）;1020/1024 无通用表条目（仅绿带）。
+    //      ★清偿刀 N（2026-09-30）：1020 支退役——1020/1105 载体已随刀 A 改挂
+    //      DroneProjs 实体（JimsDroneProj.draw 自带尾迹+本体,染色版在彼处）,
+    //      Arrow 不再携带 1020=本条件死支摘除;1024/1026 仍为 Arrow 载体维持。
+    //      原版 1024/1026 DrawTrail 无 cPet 门（仅 1020 DrawContinuousTrail 有,
+    //      Main.cs:28301-28303）=本函数固定色 1:1 不涉染料。 ----
     if (this.ghostRing !== undefined && this.ghostRing !== null
-      && (this.projId === 1020 || this.projId === 1024 || this.projId === 1026)) {
+      && (this.projId === 1024 || this.projId === 1026)) {
       drawGreenBandTrail(ctx, this.ghostRing, this.projId, this.w, this.h);
     }
     if (this.ghostRing !== undefined && this.ghostRing !== null) {

@@ -640,7 +640,11 @@ describe('★F3 弹体 CutTiles/小动物旁路（Projectile.cs:12513-12518→Cu
   });
 });
 
-describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门 + :14169 显式清窗）', () => {
+// ★清偿刀 P1（C5 红蓝定谳#2,2026-09-29）本组夹具勘误：:12635-12641 门读【弹幕域】
+//  immune[owner]=本仓 Enemy.iframes 共享窗——旧档 duck-call meleeNpcImmuneGateOf
+//  （近战三重门 :44598 的仓内独立簿）系错域投影,夹具从近战域簿桩改 victim.iframes
+//  承载;近战域簿只保留 ② 的受理写尾桥面（W 刀 face=usesLocal→0 出表）。
+describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门弹幕域 + 受理写尾清近战域簿）', () => {
   function burstScene(winTicks?: number): {
     hooks: GameHooks; victim: ReturnType<typeof mkEnemy>; winPeek: (id: number) => number | undefined;
     advanceTick: (n: number) => void;
@@ -658,17 +662,18 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门 + :14169 �
     return { ...scene, victim, gproj: g } as never;
   }
 
-  it('①近战窗拒爆裂：窗内受害者整跳跳过且【不落局部免疫标】', () => {
+  it('①弹幕域残窗拒爆裂：iframes>0 受害者整跳跳过且【不落局部免疫标】', () => {
     const { hooks } = makeHooks([], undefined, new Player(120, 940, new Inventory()));
     const victim = mkEnemy(10, 494, 950, 18, 18);           // 落于爆裂 128 盒内
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
-    const hs = hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
-    hs.noteNpcPlayerImmune(victim.id, 10);
+    (victim as { iframes?: number }).iframes = 10;          // ★P1：弹幕域窗（快照判据读此域,旧近战域簿桩退役）
     const g1 = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g1, hooks);
     expect(victim.hits).toEqual([]);                        // 窗开 ⇒ 爆裂整圈不吃
-    // 「不落标」证明：窗过期后同弹同盒再爆一轮即可吃伤（若首轮误写 hitOnce 会仍零伤）
+    // 「不落标」证明：窗过期（iframes 归 0,敌 tick 衰减语义外置模拟）后同盒再爆一轮即可吃伤
+    // （同弹 hitOnce 不落标的直击面=debt-p1 判别测试;此处锁窗本体+爆裂轮门拒零结算）
+    (victim as { iframes?: number }).iframes = 0;           // 窗过期
     const sceneB = makeHooks([], undefined, new Player(120, 940, new Inventory()));
     (sceneB.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
     const g2 = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
@@ -678,41 +683,38 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门 + :14169 �
     expect(victim.hits).toEqual([81]);                      // 新弹无窗正常结算
   });
 
-  it('②爆裂清窗释放后续弹：命中尾 noteNpcPlayerImmune(id,0) 出表,第二发立即可结', () => {
+  it('②近战域簿对门位惰性（P1 勘误面）+受理写尾 noteNpcPlayerImmune(id,0) 出表照达', () => {
     const p = new Player(120, 940, new Inventory());
     const scene = makeHooks([], undefined, p);
     const victim = mkEnemy(11, 494, 950, 18, 18);
     (scene.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
     const hs = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
-    // 先给一个「已过期但未出表」的残窗 —— meleeNpcGateOf 读惰性清 + 我方写尾显式 0 双保险
+    // 近战域簿残窗（已过期未出表）——P1 后该簿【不再】参与 856 门位（弹幕域 iframes=0 开门）
     hs.noteNpcPlayerImmune(victim.id, -0 + 1);              // expiry=tick+1
     scene.advanceTick(2);                                   // 已过期仍未删表(懒删语义)
     expect(scene.winPeek(victim.id)).toBeDefined();
     const gA = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(gA, scene.hooks);
-    expect(scene.winPeek(victim.id)).toBeUndefined();       // ★尾清窗生效
-    expect(victim.hits).toEqual([81]);                      // 过期窗不拒收
+    expect(scene.winPeek(victim.id)).toBeUndefined();       // ★受理写尾桥面出表（W 刀 face=usesLocal→0）
+    expect(victim.hits).toEqual([81]);                      // 弹幕域开门 → 照结
   });
 
-  it('③独立计数隔离：带窗者拒、不带者结；两账互不串扰,窗满释后后续弹照样落地', () => {
+  it('③独立计数隔离：弹幕域带窗者拒、不带者结；两账互不串扰,窗满释后后续弹照样落地', () => {
     const p = new Player(120, 940, new Inventory());
     const scene = makeHooks([], undefined, p);
-    const wVictim = mkEnemy(12, 494, 950, 18, 18);          // 带窗 10t
+    const wVictim = mkEnemy(12, 494, 950, 18, 18);          // 带弹幕域窗 10t
     const clean = mkEnemy(13, 500, 906, 18, 18);            // 同盒但无窗(盒上沿内侧)
     (scene.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [wVictim, clean];
-    const hs = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
-    hs.noteNpcPlayerImmune(wVictim.id, 10);
+    (wVictim as { iframes?: number }).iframes = 10;         // ★P1：弹幕域窗
     const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g, scene.hooks);
     expect(wVictim.hits).toEqual([]);                       // 带窗拒
     expect(clean.hits).toEqual([81]);                       // 无窗照结
     expect(scene.winPeek(clean.id)).toBeUndefined();
-    expect(scene.winPeek(wVictim.id)).toBeDefined();        // 拒收不消费他人窗
-    scene.advanceTick(10);                                  // 窗自然到期
-    const hs0 = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
-    hs0.noteNpcPlayerImmune(wVictim.id, 0);                 // 若有残留任意源也可显式清
+    expect(scene.winPeek(wVictim.id)).toBeUndefined();      // ★拒收不落任何写尾（含近战域桥）
+    (wVictim as { iframes?: number }).iframes = 0;          // 窗自然到期（敌 tick 衰减语义外置模拟）
     const later = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (lh: GameHooks) => void).call(later, scene.hooks);

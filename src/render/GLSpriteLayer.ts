@@ -1005,12 +1005,32 @@ export class GLSpriteLayer {
   }
 
   /** 核心:单 quad。uv 半像素内缩(防 CLAMP 边缘渗色) */
+  /** ★C10d 共享上下文绘制态自包含（2026-09-30 闪屏定谳硬化工）：swpipe 单上下文
+   *  跑多个 GLSpriteLayer 实例（acc 世界层+云/bg 会话管线后端），program/VAO 是
+   *  【上下文级】共享态——任何他实例 begin()/present() 都会换掉它们，而下列
+   *  绘制入口曾依赖「begin 约定」（本实例 begin 早已设好）= 跨实例互扰窗
+   *  （云会话 begin 换态 → acc flush 拿他实例 VAO/程序画 tile 批=坏帧指纹
+   *  「bg 纹理透出 tile 位」）。uniform 属程序态(per-program)不受会话切换影响；
+   *  blend/采样器各绘制位自设。幂等：态已在位=两次廉价冗余状态调用。 */
+  private ensureBaseState(): void {
+    const gl = this.gl!;
+    gl.useProgram(this.prog);
+    gl.bindVertexArray(this.vao);
+  }
+
+  /** ★C10d:仅恢复本实例 VAO（quadTile 等自管程序位用——drawArrays 顶点若经
+   *  attrib 指针取数,他实例 VAO=他 VBO 残留） */
+  private bindOwnVao(): void {
+    this.gl!.bindVertexArray(this.vao);
+  }
+
   quad(
     e: TexEntry, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number, opts?: QuadOpts,
   ): void {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     const gl = this.gl;
+    this.ensureBaseState();
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     // 采样器按【纹理是否带 mip】分流：mipped 用三线(linear)，noMip 用无 mip 线性
     // (linearNoMip)——拿三线采样器采无 mip 纹理=不完整恒黑
@@ -1049,6 +1069,7 @@ export class GLSpriteLayer {
   ): void {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     const gl = this.gl;
+    this.ensureBaseState();   // ★C10d
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     gl.bindSampler(0, this.samp.nearest!);   // 恒 NEAREST(与 2D smoothing off 同采样)
     // ★tie 相位补正:采样域整体 −ε（texel 单位）——Chrome 2D 最近邻在【精确 tie】
@@ -1081,6 +1102,7 @@ export class GLSpriteLayer {
   ): void {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     const gl = this.gl;
+    this.ensureBaseState();   // ★C10d:跨实例互扰硬ening（注释见 ensureBaseState）
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     gl.bindSampler(0, (opts?.smooth ?? false)
       ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
@@ -1142,6 +1164,7 @@ export class GLSpriteLayer {
     if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return false;
     const gl = this.gl;
     gl.useProgram(this.progTile);
+    this.bindOwnVao();   // ★C10d:tile 顶点经 uniforms 合成,VAO 只需本实例在场（他实例 VAO=他 VBO 残留）
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     gl.bindSampler(0, null);   // texelFetch 不经采样器;解绑防残留
     gl.uniform2f(this.uniTile.uCanvas, this.canvas.width, this.canvas.height);
@@ -1320,6 +1343,7 @@ export class GLSpriteLayer {
   ): void {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || totalW <= 0 || dh <= 0) return;
     const gl = this.gl;
+    this.ensureBaseState();   // ★C10d
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     // repeat 档同理按 mipped 分流（现网调用方均为 mipped 世界背景；noMip+REPEAT
     // 组合留 linearNoMipRepeat 防将来踩同坑）

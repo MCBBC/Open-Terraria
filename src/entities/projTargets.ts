@@ -14,6 +14,7 @@ import {
   getGlobalHurtBuckets, ImmunityCooldownID,
 } from '../player/HurtCooldownBuckets';
 import { getProjScanCtx } from './projScanCtx';
+import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★清偿刀 P1 门位快照单源（C5 定谳#3——ESM 函数声明环安全:两侧均仅运行时调用）
 
 /** ★IIIII248 弹幕命中扫描 equip 取用面（projScanCtx.ts 头注全证明）：
  *  projectiles 桶步进窗内 = tick 级快照（六布尔字段与 equipStats 同名同义）;
@@ -363,7 +364,16 @@ function critterRejectFlag(
 }
 
 /** 单靶受理结算（dead/几何/复权三门 + hurt 落地）。★SW-RB10d（F-BJ47-D,2026-09-10）
- *  的 fromPlayer 语义注释随实现收进本单源：trap 弹 ownedBySomeone=false。 */
+ *  的 fromPlayer 语义注释随实现收进本单源：trap 弹 ownedBySomeone=false。
+ *  ★清偿刀 P1（C5 红蓝定谳#3,2026-09-29）：返真=hurt 已调【且受理】——原版 victim
+ *  循环（Projectile.cs:12618）对 critter 与敌怪同链,免疫门 :12598（dontTakeDamage 侧
+ *  由 :13978 同面承载）与 :12635-12637（immune[owner]==0,pierce=0 → flag3 假门照走）
+ *  拒收 = 整体跳过：不 StrikeNPC、不耗 keepIterating、不 numHits++（:14263）——弹侧
+ *  消费面（爆/亡/穿透/入账）全在受理面后。旧档无条件返真=残窗小动物被计入
+ *  pveNumHits/hitCritters 布尔（弹因此爆/亡）。修=hurt 返假且快照门拒（T 刀单源
+ *  判据=「进 hurt 前状态」,Enemy.hurt 头门 :14040/:14046 同式）→ 返假+不计数（与
+ *  敌怪同面）;hurt 返假非门拒族（血尽级联 :14369 族/普通未致命尾档 :15037——黑化
+ *  critter lifeMax 25 吃 5 伤存活即此形态）照返真=原版受理（numHits++ 无死亡复查）。 */
 function settleCritterHit(
   game: GameHooks,
   ctx: HitCritterCtx | undefined,
@@ -375,10 +385,13 @@ function settleCritterHit(
   if (!hitTest(c)) return false;
   // :20680-20688（isCritterThatIsHostileToPlayers 复权 + CountsAsCritter∧flag 拒收）
   if (flag && !isCritterThatIsHostileToPlayers(c)) return false;
-  (c as unknown as {
+  const victim = c as unknown as { iframes?: number; dontTakeDamage?: boolean };
+  const gate = snapshotVanillaGate(victim);
+  const landed = (c as unknown as {
     hurt: (d: number, kx: number, ky: number, g: GameHooks,
       armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
   }).hurt(5, 0, 0, game, 0, false, 0, ctx?.trap !== true);
+  if (!landed && vanillaGateRejected(gate)) return false;   // 门拒（iframes 残窗/dontTakeDamage）=整体跳过
   return true;
 }
 

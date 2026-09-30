@@ -167,7 +167,8 @@ import { assembleTooltipLines, buildTooltipBody, materialVids } from './itemTool
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
-import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames, buffRightClickRemovable } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames, buffRightClickRemovable, buffTypeByVanilla } from '../stats/Buffs';
+import { BUFF_TO_MOUNT } from '../entities/Mounts';   // ★BJ405-D1：坐骑 buff 通道哨兵源（BuffID.Sets.MountType 等价表）
 import { mainDifficulty, GDL, mainMasterMode, roundCSf32Mul } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
@@ -4168,12 +4169,17 @@ export class UI {
    *  旧自装「名行+prefixLines」贫面两层缺=BJ407 病灶,锚见 buildTooltipHtml 头注）。
    *  词缀档位移名色经 tooltipRareOf 同链保持（SW-BJ116-b 面零变化,where='inv' 无
    *  wornArmor/social/buy 特化=ctx5 同相）。定位/烘底序=SW-TT1 同族②（清位→量宽→
-   *  钳制→终布局后烘底,BJ176 三面哨兵锁定本方法体） */
+   *  钳制→终布局后烘底,BJ176 三面哨兵锁定本方法体）。★BJ407 债（2026-09-30）：
+   *  脉冲面与物品栏同相挂线——重铸槽悬停=同一 MouseText 管线（Main.cs:42389-42391
+   *  →MouseText_DrawItemTooltip 每帧重绘 + DoUpdate_AnimateCursorColors :18064-18075
+   *  mouseTextColor 190↔255 亮度脉冲）,startTooltipPulse 承载该逐帧面（含 −12 disco/
+   *  −13 master 活色档 .sw-tooltip-rare 逐帧重染）;曾缺=重铸槽 tooltip 静止死色 */
   private showReforgeTooltip(): void {
     const s = this.reforgeItem;
     if (!s) return;
     this.tooltip.innerHTML = this.buildTooltipHtml({ id: s.id, stack: s.stack, prefix: s.prefix }, 'inv', -1);
     this.tooltip.style.display = 'block';
+    this.startTooltipPulse();   // ★BJ407：与 showTooltipFor 同序（innerHTML 后挂帧驱动）
     // ★SW-TT1 同族②（2026-09-19 实报「重铸格 tooltip 背景平铺成多块气泡」）：本路径
     //   此前从不烘底——元素一直带着上一次物品气泡的固有尺寸底图，重铸文本更宽时
     //   默认 repeat 整面平铺 = 多块气泡贴图；旧 left 约束挤窄量测同族。统一走
@@ -5481,6 +5487,7 @@ export class UI {
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
     this.petBuffBlocks.clear();
+    this.mountBuffBlocks.clear();
     this.nebulaBuffBlocks.clear();
     // 块按激活顺序动态创建（原版按 buff 槽序全量显示，无白名单——此前硬编码
     // 19 种，战斗/镇静/挖矿/糖分冲刺等 20+ 种永不显示）
@@ -5526,8 +5533,10 @@ export class UI {
   /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化）。
    *  t=null 时为宠物 buff 通道块（BuffType 无宠物成员，不进 BuffState.active）：
    *  无倒计时（buffNoTimeDisplay）+ 右键 = 收宠（原版 TryRemovingBuff
-   *  Main.cs:42788 → CheckBuffHideMisc :42808：右键宠物 buff 图标即 hideMisc 翻转） */
-  private makeBuffBlock(t: BuffType | null, petSlot: 0 | 1 = 0): { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement } {
+   *  Main.cs:42788 → CheckBuffHideMisc :42808：右键宠物 buff 图标即 hideMisc 翻转）。
+   *  mountChannel=true 时为坐骑 buff 通道块（★BJ405-D1）：右键 = 下马
+   *  （TryRemovingBuff 坐骑支 Main.cs:44100-44103 CheckBuff→TryDismount 顶替 DelBuff） */
+  private makeBuffBlock(t: BuffType | null, petSlot: 0 | 1 = 0, mountChannel = false): { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement } {
     const block = el('div', 'sw-buff');
     block.style.display = 'none';
     block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
@@ -5557,13 +5566,14 @@ export class UI {
     //  过门照删——消散由 Game.maintainMinionBuffs 槽位门接管（buff 槽=召唤活体凭证,
     //  删除即取消召唤,次 tick 在役随从 m.dead）。宠物 buff 走 CheckBuffHideMisc
     //  收宠（togglePetSlot 内自带 Sound 12）,不走 buffs.remove。
-    //  坐骑支（mount.CheckBuff→TryDismount :44100-44103）本仓不可达（坐骑 buff 不出栏,
-    //  BJ405-D1 登记）。门判别锁：tests/buff-rightclick-bj405
+    //  坐骑支（mount.CheckBuff→TryDismount :44100-44103）= mountChannel 通道块承接
+    //  （★BJ405-D1 落刀：坐骑 buff 出栏,右键下马——dismountFromBuffBar）
     block.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       this.hideBuffTooltip();   // 右键后块可能消失/上移，先收气泡
       if (!this.game) return;
-      if (t === null) this.game.togglePetSlot(petSlot);
+      if (mountChannel) this.dismountFromBuffBar();
+      else if (t === null) this.game.togglePetSlot(petSlot);
       else if (buffRightClickRemovable(t)) {
         this.game.player.buffs.remove(t);
         this.game.sfx.play('menuTick');
@@ -5599,6 +5609,45 @@ export class UI {
       UI._petVanillaBuffs = s;
     }
     return UI._petVanillaBuffs;
+  }
+
+  /** 坐骑 buff 显示通道（★BJ405-D1；key 恒 0 = 单坐骑）。原版坐骑 buff = 真 buff 槽
+   *  成员（SetMount AddBuff(buff,3600) Mount.cs:6291 + 每 tick buffTime=10 重钉
+   *  Player.cs:9968-9971），本仓以 mount.active 单一真源表达（Mounts.ts setMount 注
+   *  承运），图标由此派生通道独家承载、普通循环跳过（mountVanillaBuffs 哨兵）防
+   *  374/377/384/391/392 双图标；右键 = 下马（TryRemovingBuff 坐骑支 :44100-44103，
+   *  dismountFromBuffBar）。矿车族 buff（184/118 等）不在本通道——矿车=cart.mounted
+   *  独立模型（Minecart.ts 承运,不进 MountInstance）,登记残债 */
+  mountBuffBlocks = new Map<0, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
+  /** vanilla-mounts.json BUFF_TO_MOUNT 全表伴生 buff 集（66 坐骑 =
+   *  BuffID.Sets.MountType 表 BuffID.cs:152 等价;普通循环跳过哨兵,懒建一次） */
+  private static _mountVanillaBuffs: Set<number> | null = null;
+  private static mountVanillaBuffs(): Set<number> {
+    if (!UI._mountVanillaBuffs) {
+      UI._mountVanillaBuffs = new Set(Object.keys(BUFF_TO_MOUNT).map(Number));
+    }
+    return UI._mountVanillaBuffs;
+  }
+
+  /** 坐骑通道签名位（mount.active → buff id,未骑恒 0）：进出骑乘态当帧触发整刷
+   *  （原版 buff 槽生灭同帧可见;纯 1Hz 刷新会拖 ≤1s 图标残影） */
+  private mountBarSig(): number {
+    const m = this.game?.player?.mount;
+    return m && m.active ? Math.max(0, m.buff) : 0;
+  }
+
+  /** 右键坐骑 buff 下马（★BJ405-D1；Main.TryRemovingBuff 坐骑支 :44100-44103 1:1）：
+   *  `mount.Active && mount.CheckBuff(b)` → TryDismount（canDismount 空间门内联,
+   *  FailedNoSpace 单次拒绝——无 QuickMount 三连败链,坐骑与图标保持）;Sound 12 在
+   *  flag 判定之前恒响（:44107）;DelBuff 被 flag=true 顶替（buff 消失=Dismount 内
+   *  ClearBuff :6214 的派生面,即下坐本身）。抚摸随下坐终止（Dismount :6229-6231,
+   *  本仓同 Game.tryDismountMount 外置惯例） */
+  private dismountFromBuffBar(): void {
+    const p = this.game.player;
+    if (!p.mount.active) return;   // CheckBuff 门（通道块只在骑乘态显示,双保险）
+    if (p.petting.mount) p.stopPettingAnimal();
+    p.mount.tryDismount(p, this.game);
+    this.game.sfx.play('menuTick');   // SoundID 12（:44107,失败支亦响）
   }
 
   /** 槽位当前应显示的宠物 buff：装备在槽 + 跟随体存活（hideMisc/玩家死亡时
@@ -5762,6 +5811,7 @@ export class UI {
     const buffs = this.game.player.buffs;
     let sig = '';
     for (const t of buffs.active.keys()) sig += t + ',';
+    sig += 'm' + this.mountBarSig() + ',';   // ★BJ405-D1：骑乘态进出当帧整刷
     if (sig !== this._buffSig) { this.refreshBuffs(); return; }   // refreshBuffs 会回写 _buffSig
     for (const [t, ui] of this.buffBlocks) {
       if (ui.block.style.display === 'none') continue;
@@ -5802,7 +5852,7 @@ export class UI {
     const c = this.vinvLayoutCtx;
     const rows = c ? miscBuffRowsPerCol(c.sh, c.minimapOn) : 3;
     const inCol = host === this.miscBuffCol && !!this.miscBuffCol;
-    const pools = [this.buffBlocks, this.petBuffBlocks, this.nebulaBuffBlocks];
+    const pools = [this.buffBlocks, this.petBuffBlocks, this.mountBuffBlocks, this.nebulaBuffBlocks];
     for (const pool of pools) {
       let n = 0;
       for (const ui of pool.values()) {
@@ -5842,6 +5892,10 @@ export class UI {
       //  承载（无倒计时+右键收宠,原版 TryRemovingBuff→CheckBuffHideMisc :42788/:42808
       //  同面）——普通循环跳过,防同 buff 双图标
       if (UI.petVanillaBuffs().has(BUFF_DEFS[t].vanillaBuff)) continue;
+      // ★BJ405-D1：坐骑伴生 buff（66 坐骑全表,含 374/377/384/391/392 五个在册
+      //  BuffType 成员）图标由坐骑通道独家承载（无倒计时+右键下马=TryRemovingBuff
+      //  坐骑支）——普通循环跳过,防同 Buff_*.png 双图标
+      if (UI.mountVanillaBuffs().has(BUFF_DEFS[t].vanillaBuff)) continue;
       let ui = this.buffBlocks.get(t);
       if (!ui) {
         // 动态建块：无白名单，任何激活 buff 都显示（原版按 buff 槽序）
@@ -5913,6 +5967,7 @@ export class UI {
     {  // 回写键集合签名（tickBuffLive 的变更检测基准）
       let sig = '';
       for (const t of buffs.active.keys()) sig += t + ',';
+      sig += 'm' + this.mountBarSig() + ',';   // ★BJ405-D1：坐骑通道签名位同源
       this._buffSig = sig;
     }
     // ---- 宠物/光宠 buff（独立通道；原版同栏追加在普通 buff 之后，无倒计时） ----
@@ -5955,6 +6010,37 @@ export class UI {
     const liveBlocks = petStates.filter((s) => s.pb && s.ui).map((s) => s.ui!.block);
     if (liveBlocks.length && this.buffHost.lastElementChild !== liveBlocks[liveBlocks.length - 1]) {
       for (const b of liveBlocks) this.buffHost.appendChild(b);
+    }
+    // ---- 坐骑 buff（★BJ405-D1 派生通道；原版同 buff 槽成员：SetMount AddBuff(buff,3600)
+    //      Mount.cs:6291 + 每 tick buffTime=10 重钉 Player.cs:9968-9971——本仓 mount.active
+    //      单一真源（Mounts.ts setMount 注承运）,图标/悬停名描述由本通道独家承载。
+    //      无时长字 = Main.cs:9345-9352 循环段对全 MountType buff 置 buffNoTimeDisplay
+    //      （+buffNoSave 双置位;★P4 锚勘误 2026-09-30:旧引 :9342-9349 漂移）。
+    //      右键 = 下马（TryRemovingBuff 坐骑支 :44100-44103 → dismountFromBuffBar）。
+    //      追加序在宠物后（原版 AddBuff 找空槽追加同idiom）,矿车族不在本通道（登记）----
+    const mountBuff = this.game.player.mount.active ? this.game.player.mount.buff : -1;
+    if (mountBuff >= 0 && !this.mountBuffBlocks.get(0)) {
+      this.mountBuffBlocks.set(0, this.makeBuffBlock(null, 0, true));
+    }
+    const mui = this.mountBuffBlocks.get(0);
+    if (mui) {
+      if (mountBuff < 0) {
+        mui.block.style.display = 'none';
+      } else {
+        mui.block.style.display = 'flex';
+        // 名/描述：在册五伴生（374/377/384/391/392）走 BUFF_DEFS 自有键,其余 61 走
+        // 原版语料 BuffName.<Internal>（LANG.BuffName 已收 64 款原版坐骑 buff）
+        const mbtv = buffTypeByVanilla(mountBuff);
+        const mnm = mbtv !== undefined ? buffName(mbtv) : Lang.buffName(mountBuff);
+        mui.block.dataset.swTipName = mnm ?? '';
+        mui.block.dataset.swTipDesc = mbtv !== undefined ? buffDesc(mbtv) : (Lang.buffDesc(mountBuff) ?? '');
+        mui.time.textContent = '';   // buffNoTimeDisplay 全 66（Main.cs:9345-9352）
+        const mwant = remasterBuffIcon?.(mountBuff) ?? `/sprites/vanilla/Buff_${mountBuff}.png`;
+        if (!(mui.icon as HTMLImageElement).src.endsWith(mwant)) {
+          (mui.icon as HTMLImageElement).src = mwant;
+        }
+        if (this.buffHost.lastElementChild !== mui.block) this.buffHost.appendChild(mui.block);
+      }
     }
     // ---- 星云增益派生通道（补 C ⚠️图标批：原版拾取星云 booster 即 AddBuff
     //      173-181（NebulaLevelup Player.cs:56091-56121），buff 栏随档位显示
@@ -7463,10 +7549,11 @@ export class UI {
     // 不退订=游离 vinv 面板 ~400 节点/轮被钉死）。下局构建器重订阅,无行为变化。
     for (const u of this.optionsUnsubs) u();
     this.optionsUnsubs.length = 0;
-    // buff 三 Map(buildBuffBar 逐轮覆写键值,退世界窗口期持旧轮 buff 节点)
+    // buff 四 Map(buildBuffBar 逐轮覆写键值,退世界窗口期持旧轮 buff 节点)
     // ——只在 closeAll 清（rebuildInventoryPanel→teardown 路径不清:紧接重建依赖旧值显示）
     this.buffBlocks.clear();
     this.petBuffBlocks.clear();
+    this.mountBuffBlocks.clear();
     this.nebulaBuffBlocks.clear();
   }
 

@@ -27,11 +27,20 @@ describe('autoReuseAllChain（TryAllowingItemReuse Player.cs:53550）', () => {
       expect(chain(1130)).toBe(true);  // 蜜雷锋（孤儿 B1 支,damage 12）
       expect(chain(949)).toBe(true);   // 雪球（thrownCombat 支,damage 8）
       expect(chain(2366)).toBe(true);  // 蜘蛛杖（cw 支 summon,非原生 autoReuse,damage 26）
+      // ★清偿刀 J（2026-09-30）：鞭 5480 combat 表原生 damage 110（此前仅 {noUseGraphic}
+      //  单键=damage 0 被拒）——原版鞭 sItem.damage>0 应随全局档连发（:53550 同门;
+      //  鞭无 channel,(!sItem.channel||!channel) 恒过）
+      expect(chain(5480)).toBe(true);
       // damage 0：手雷 166（弹 28 自带伤）/足球/天灯/晶洞/打窝桶——原版不连发
       for (const v of [166, 4743, 4702, 4400, 4608]) expect(chain(v)).toBe(false);
-      // melee 支内联同式：5129 melee/damage 0/非 autoReuse → 全局档也不连挥
-      expect(combatWeapon(defOf(5129))?.kind).toBe('melee');
-      expect(chain(5129)).toBe(false);
+      // melee 支内联同式：捕虫网 1991 无 damage 字面（Item.cs:21306-21316,原版 damage 0）
+      // → 全局档也不连挥（原版 sItem.damage>0 门）。
+      // ★清偿刀 J（2026-09-30）勘误：旧钉 5129 Flymeal「damage 0」——BJ121 反哺批
+      //  SetWeaponValues(15,5f) 形参解析后 json damage=15（Item.cs:40441,1457 同构）,
+      //  原版 damage>0 应连发;旧 pin 陈旧（基线即红）,J 刀改钉 1991 并补 5129 真相。
+      expect(itemCombat(1991)?.damage ?? 0).toBe(0);
+      expect(chain(1991)).toBe(false);
+      expect(chain(5129)).toBe(true);   // damage 15>0：全局档连发=原版同相
     } finally { options.data.autoReuseAllItems = false; }
   });
   it('分支归类锚：补接门的 vid 确实落在对应分支', () => {

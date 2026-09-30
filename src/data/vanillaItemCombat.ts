@@ -1,4 +1,5 @@
-// 原版物品战斗数据（tools/extract-itemcombat.mjs 从 Terarria1456 Item.cs SetDefaults 提取）：
+// 原版物品战斗数据（tools/extract-itemcombat.mjs 从 Terarria1457 Item.cs SetDefaults 提取；
+// ★清偿刀 J 2026-09-30 头注⑦四根修后整表重产 4369→4608 键,era guard B-form 零漂移幂等）：
 // damage/knockBack/useTime/useAnimation/shoot/useAmmo/shootSpeed/ammo/consumable/noMelee/autoReuse/mana
 import combatJson from './vanilla-itemcombat.json';
 import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
@@ -41,7 +42,11 @@ const RAW = combatJson as unknown as Record<string, ItemCombat>;
 import whipsJson from './vanilla-whips.json';
 const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
 
-// ---- 提取缺口补丁（tools/extract-itemcombat.mjs 只解析 case 内字面赋值）----
+// ---- 提取缺口补丁（历史注：曾「只解析 case 内字面赋值」——★清偿刀 J 2026-09-30 后
+//   提取器已覆盖嵌套贯穿组/链式复合除式/DefaultTo* 七 helper 形参位/守卫链数值面
+//   （extract-itemcombat.mjs 头注⑦）,本表绝大多数条目已被提取器原生复现（逐字段
+//   对拍全等）,条目按 BJ205 定谳保留作双保险;仍 LAG 面 4049/5392-5394/5594-5595
+//   见下方 BJ205 注）----
 // DefaultToSpear/DefaultToStaff/DefaultToMagicWeapon/DefaultToRangedWeapon 的形参
 // 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/5629 仅剩 damage/knockBack、
 // 4788-4790（剑矛三件 DefaultToSpear+SetWeaponValues）与 4060-4062 整条缺失。
@@ -207,11 +212,14 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //     tests/extract-audit;4703/5065/5129 等非本表件亦已原生覆盖（json 直填/主流程
   //     手补被原生复现,case 4703 :38653-38663 亲读）。
   //   · 仍 LAG 15 件 33 字段（提取器盲区,本表为唯一数据源,测试钉值锁死）：
-  //       4049（DefaultToLawnMower 体 :48532-48541 useAnim30/useTime10/autoReuse 未建
-  //         helper 体字段面）、4956/5669（`useTime = useAnimation / 3` 算式 :40011/:44557,
-  //         1458 同行号）、5392-5394（DefaultToSolution 体 :47800-47808 shoot=projId-145/
-  //         ammo 780/consumable）、5594/5595（DefaultToBomb 体 :47771-47783+形参算式
-  //         :44027 shoot=1086+(type-5594)/speed6/40/40/consumable/noMelee）；
+  //       ★清偿刀 J（2026-09-30,extract-itemcombat 头注⑦b）后收缩为 13 件——
+  //       4956/5669（`useTime = useAnimation / 3` 除式 :40011/:44557）已原生解析
+  //       （json useTime=10 与本表逐字节等价,条目保留作双保险）；
+  //       其余 13 件 LAG 维持：4049（DefaultToLawnMower 体 :48532-48541 useAnim30/
+  //         useTime10/autoReuse 未建 helper 体字段面）、5392-5394（DefaultToSolution
+  //         体 :47800-47808 shoot=projId-145/ammo 780/consumable）、5594/5595
+  //         （DefaultToBomb 体 :47771-47783+形参算式 :44027 shoot=1086+(type-5594)/
+  //         speed6/40/40/consumable/noMelee）；
   //   · 4423+4824-4827/4908/4909 的 noMelee 七件=【刻意偏差】非原版值——原版
   //     SetDefaults 各 case 无 noMelee 字面（:37462-37474/:39505-39514/:39805-39816）,
   //     本表补它只为 combatWeapon `consumable && noMelee` 爆炸物门派发,【禁反哺】;

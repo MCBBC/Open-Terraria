@@ -56,15 +56,19 @@ import { ParticleOrchestraType } from '../net/syncModules';
  *  （maxPenetrate==1 ∧ 无两旗）豁免此窗——但 856 usesLocalNPCImmunity=true ⇒ flag3
  *  恒假 ⇒ 【完整吃】该窗：immune[owner]!=0 的受害者在命中轮【整个被跳过】（localNPCImmunity
  *  表也不写——拒收发生在任何写尾之前）。
- *  读 = Game.meleeNpcPlayerImmune 同构 duck-call（VolcanoBlastProj/meleeOnHitProjs 先例）。
  *  ★清偿刀 W（X4-债13③,2026-09-29）：写半面已归桥——弹幕域 iframes 由 stellarStrike
  *  pierce=-3 在 Enemy.ts 写梯清零（:14297）,近战域表由受理面 noteVanillaProjImmune
  *  （856 face=usesLocal→0 出表）承载;旧 sparkImmuneWindowClear(id,0) 裸写+无条件跑
- *  （门拒跳也清=over-clear）退役。 */
-function sparkImmuneWindowOpen(e: { id: number }, game: GameHooks): boolean {
-  const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
-  return !(gate.meleeNpcImmuneGateOf?.(e.id) === false);
-}
+ *  （门拒跳也清=over-clear）退役。
+ *  ★清偿刀 P1（C5 红蓝定谳#2,2026-09-29）：门位读域勘误——原版该门读【弹幕域】
+ *  targetNPC.immune[owner]（Projectile.cs:12635-12641）=本仓 Enemy.iframes 共享窗,
+ *  旧档 duck-call Game.meleeNpcImmuneGateOf（近战三重门 :44598 immune 分量的仓内
+ *  独立簿）系错域投影：①弹幕域有窗（他弹残窗 iframes>0）而近战域簿空的敌被误放行
+ *  → 落 hitOnce.add+killStellarTune（触敌即亡）,原版=门拒 return 不落标、弹体存活
+ *  可后继命中;②近战域簿有窗而弹幕域无窗的敌被误拒。读口归 T 刀单源快照
+ *  （snapshotVanillaGate+vanillaGateRejected,读「进 hurt 前状态」）,旧 duck-call
+ *  退役（meleeNpcImmuneGateOf 仍服务近战自身三重门,与本弹无涉）。 */
+/** XNA Vector2.CatmullRom（同 MinionProj 内私有实现;此处独立避免跨类内联依赖） */
 
 /** XNA Vector2.CatmullRom（同 MinionProj 内私有实现;此处独立避免跨类内联依赖） */
 export function catmullRom(
@@ -355,7 +359,11 @@ export class SparkleGuitarProj extends Entity {
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;
         // ★三轮蓝队 F6：immune[owner]!=0 拒收门（:12635-12641）——先于 localNPCImmunity
         //   写面，被拒受害者连 hitOnce 标记都不落（原版拒收 return 在任何写尾之前）
-        if (!sparkImmuneWindowOpen(e, game)) continue;
+        //   ★清偿刀 P1（C5 定谳#2）：读口归【弹幕域】快照判据（T 刀单源,读进 hurt 前
+        //   状态;快照同时供 strike 后受理面判 vanillaGated——两读之间零写面,单快照双消费）。
+        //   门拒不落 hitOnce 标+弹体存活（penetrate-- :14189 与 Kill :17312 全在受理面后）。
+        const gate = snapshotVanillaGate(e);
+        if (vanillaGateRejected(gate)) continue;
         if (this.hitOnce.has(e.id)) continue;
         this.hitOnce.add(e.id);                    // array[victimIndex] = -1（:14158-14163）
         // ★ModifyStellarTuneDamage（:13333-13339 命中结算点）：每轮即时判 LOS——
@@ -377,8 +385,8 @@ export class SparkleGuitarProj extends Entity {
         //  Enemy.ts:14297 写 10t;856 vanilla 写梯 =usesLocal 支清零 immune[owner]=0
         //  :14175-14178——写面偏差 10≠0 登记债）→ 受理拍读恒真 → proc/numHits 真机
         //  恒跳;②死亡转换写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死
-        //  命中拍误判门拒。快照双源同治。
-        const gate = snapshotVanillaGate(e);
+        //  命中拍误判门拒。快照双源同治。★清偿刀 P1：快照上提到前置拒收门（上方）
+        //  单快照双消费。
         stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
           stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
           { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
@@ -441,14 +449,15 @@ export class SparkleGuitarProj extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // ★F6：拒收门同样罩住爆裂轮逐受害者（flag3 恒假,窗关闭者跳过且不落标）；
       //   命中尾清窗已归受理面（★清偿刀 W——弹幕域 pierce=-3+近战域桥写,见直击站注）
-      if (!sparkImmuneWindowOpen(e, game)) continue;
+      //   ★清偿刀 P1（C5 定谳#2）：读口归【弹幕域】快照判据（T 刀单源,同直击站注）。
+      const gate = snapshotVanillaGate(e);
+      if (vanillaGateRejected(gate)) continue;
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
       // ★BJ382：爆裂轮同链 proc（:72840 Damage() 同一弹对象,numHits 累积读自增前值）
       //  ★X2-D1（同直击站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
       //  血尽级联/普通未致命返假照 proc 照计数
-      //  ★清偿刀 T（X4-债12,同直击站注）：门位读前置快照（读侧单源）。
-      const gate = snapshotVanillaGate(e);
+      //  ★清偿刀 T（X4-债12,同直击站注）：门位读前置快照（读侧单源;P1 快照上提前置门）。
       stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
         stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
         { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参

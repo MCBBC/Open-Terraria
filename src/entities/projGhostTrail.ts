@@ -678,10 +678,12 @@ export function drawGreenBandTrail(
       ctx.restore();
     }
   };
-  if (id === 1020) {
-    pass(10, 2, [177, 255, 32], 127 / 255);                // :28303（cPet==0 档,染笼白档未建模=登记）
-    pass(-10, 2, [177, 255, 32], 127 / 255);               // :28304
-  } else if (id === 1024 || id === 1026) {
+  // ★清偿刀 N（2026-09-30）：1020 支退役——1020 载体已随刀 A 改挂 DroneProjs 实体
+  //  （JimsDroneProj.draw 自带双尾迹+本体）,Arrow 不再携带 1020=本函数 1020 分支
+  //  死支摘除;且 1020 原版 DrawContinuousTrail（Main.cs:28301-28328）有 cPet 染料门
+  //  （cPet==0 绿带 127/255、cPet!=0 白带过整弹染料 pass）,染色版在 DroneProjs 落地
+  //  （src/data/projDye.ts dyedSolidBand）,本函数仅承载无染料门的 1024/1026。
+  if (id === 1024 || id === 1026) {
     pass(0, 0, [140, 234, 180], 1);                        // :28556-28561
   }
 }

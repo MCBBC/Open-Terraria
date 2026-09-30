@@ -1,6 +1,8 @@
 // IIII232：图鉴杀数交互门收口 + CreditsRollEvent/CreditsRollComposer 机制对齐测试。
 // 金标 = 手算 1458 源值（详见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md
-// CCV 章 §2）：fillSegments(inGame, 每类目 2 行) endTime = 20143；
+// CCV 章 §2）：fillSegments(inGame, 每类目 2 行) endTime = 20545
+// （★C6-F1 重锚：actLength('frames')=tpf*len（Actions.cs:987-994）——20473 系
+// 树段 seq 账面漏记 72 的 TS 实现值,反编译亲读 = 102 进账,旧"手算"实为沿实现）；
 // 行距 55（1458 变更面）；类目序 = FillSegments 派发序。
 import { describe, expect, it, beforeEach } from 'vitest';
 import { creditsRoll, CREDITS_ROLL_MAX_TIME, onGameEventClearedMoonLord } from '../src/world/CreditsRoll';
@@ -98,13 +100,13 @@ describe('IIIII232 CreditsRollEvent（CreditsRollEvent.cs 1:1）', () => {
 });
 
 describe('IIIII232 CreditsRollComposer（FillSegments 1:1 金标）', () => {
-  it('endTime 金标：inGame + 每类目 2 行 = 20473（手算：头 630 + 18 类目行账 990'
-    + ' + 14 小剧场 11128（Guide597/Merch1207/Demo1032/Tink487/DryadBye957/Wiz787/'
-    + 'Cloth380/Angl967/Zoo622/Skel777/Tree720/Steam541/Santa907/Witch1147）'
+  it('endTime 金标：inGame + 每类目 2 行 = 20545（手算：头 630 + 18 类目行账 990'
+    + ' + 14 小剧场 11200（Guide597/Merch1207/Demo1032/Tink487/DryadBye957/Wiz787/'
+    + 'Cloth380/Angl967/Zoo622/Skel777/Tree792/Steam541/Santa907/Witch1147）'
     + ' + 间隔 33×210=6930 + 收场 785 + 尾 10）', () => {
     const out: Seg[] = [];
     const { endTime } = fillSegments(out, twoLines, true);
-    expect(endTime).toBe(20473);
+    expect(endTime).toBe(20545);
   });
 
   it('行数敏感：每类目 +1 行 → endTime 恰 +18×55（PlaySegment_TextRoll totalTime=n*55-55）', () => {

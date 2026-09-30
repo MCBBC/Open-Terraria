@@ -18,11 +18,11 @@ const PIPE = readFileSync(resolve(__dirname, '../src/render/GLPipeline.ts'), 'ut
 const REP = readFileSync(resolve(__dirname, '../src/debug/DebugReport.ts'), 'utf8');
 
 describe('C10b 转正旗面与 bg 注入点', () => {
-  it('?cloudpipe 缺省开（C10b 转正）,?cloudpipe=0 逃生门=云+bg 整体回 glfx', () => {
+  it('?cloudpipe 缺省开（C10b 转正维持;★SW-闪屏案 C10d 硬ening 后回归）,?cloudpipe=0 逃生门=云+bg 整体回 glfx', () => {
     expect(RDR).toContain("get('cloudpipe') !== '0'");
     // bg 注入点同旗:cloudpipe 开=acquireCloudPipe（共管管线）;关=acquireGL(glfx)
     expect(RDR).toMatch(/const glbg = Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
-    // 云注入点保持 C10a 分支形态（逃生门两路同门:useGLClouds/cpuRender 先判）
+    // 云注入点保持 C10a 分支形态（两路同门:useGLClouds/cpuRender 先判）
     expect(RDR).toMatch(/Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/);
     expect(RDR.match(/Renderer\.cloudPipe \? this\.acquireCloudPipe\(\) : this\.acquireGL\(\)/g)?.length).toBe(2);
   });

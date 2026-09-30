@@ -130,7 +130,10 @@ describe('BJ343 件 2：C# 舍入三式（f32 操作数 + 银行家/(int) 截断
     }
     // 判别面规模钉值（435 对 @ 2026-09-25 表态——表更新即重钉,防单源语义静默漂移;
     //  审计口径「452 对」按掷池/鞭表扩域枚举,本面钉 itemCombat×dmg 档全域）
-    expect(divergent.length).toBe(435);
+    //  ★清偿刀 J（2026-09-30）重钉 458：itemcombat 四根修重产后新显影 +23 对,
+    //  全部来自新获 damage 的件（3287 悠悠球 70 + 鞭 4678/4680/4911/4914/5477-5480/
+    //  5688 九鞭）,零移除（对拍 bak 435=now 子集,增量对=纯加面,无既有对翻向）。
+    expect(divergent.length).toBe(458);
     // 抽点钉值（每对 [vid, base, prefix, 新值]——含银行家/f32 翻向两种成因）
     const pin = (vid: number, base: number, p: number, want: number) => {
       const hit = divergent.find(([v, d, pp]) => v === vid && d === base && pp === p);

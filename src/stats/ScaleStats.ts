@@ -439,7 +439,9 @@ export function scaleStatsWorldOf(
 //     （NPCBestiaryDrawOffset[488].Hide=true，NPCID.cs:10429-10435 → 本仓
 //     BESTIARY_HIDE_IDS）。
 //   ②canDisplayBuffs——NPC 字段（:6124 默认 true / :8423 SetDefaults 复位）；
-//     FTW 245/246/247/248 石巨人族置 false（:17945/:17950/:17955；249 无此项）。
+//     FTW 245/246/247/248 石巨人族置 false（★清偿刀 P4 锚勘误 2026-09-30：旧引
+//     :17945/:17950/:17955 系 1456 行号——1457 实锚 :18042/:18047/:18052,亲读复核；
+//     249 无此项）。
 //     原版仅两处消费：GetNPCColorTintedByBuffs 染色门（:92026，Main.cs:22797）、
 //     UpdateNPC_BuffApplyVFX 鞭标闪电粒子门（:92135）——两消费者本仓均未移植
 //     （debuff 自发光段 :92181+ 原版不受此门）；BuffID.Sets 无图标显隐集

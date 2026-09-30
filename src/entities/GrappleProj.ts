@@ -38,6 +38,32 @@ import type { Player } from './Player';
 import { BuffType } from '../stats/Buffs';
 import { TILE } from '../core/constants';
 import { projectileWetSection } from './projWetSection';
+import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
+
+/** 钩爪弹染面逐行烘焙（清偿刀 N 2026-09-30）：链/头贴图是竖排多帧行,原版逐
+ *  EntitySpriteDraw 的 quad=单行 → 渐变族 T0 uv 以【行高】归一;整片烘焙会把渐变
+ *  相位摊到全片。此 helper 逐行过 pass 后拼回整片（drawChain/drawHead 切片逻辑
+ *  零改动）。rowH 缺省=整图（单行语义）。缓存交给 projDye 内层（逐行 dyedProjCanvas
+ *  自带 vid|rect|bucket 键）。 */
+type DyeImg2D = HTMLImageElement | ImageBitmap | HTMLCanvasElement;
+function dyedRowsSheet(img: DyeImg2D, dyeVid: number, facing: number, rowH: number): DyeImg2D | null {
+  if (!(dyeVid > 0) || !(rowH >= 1)) return null;
+  const rows = Math.max(1, Math.round(img.height / rowH));
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const cx = cv.getContext('2d');
+  if (!cx) return null;
+  let any = false;
+  for (let k = 0; k < rows; k++) {
+    const y = k * rowH;
+    const h = Math.min(rowH, img.height - y);
+    if (h < 1) break;
+    const dyed = dyedProjCanvas(img, 0, y, img.width, h, dyeVid, { facing });
+    if (dyed) { cx.drawImage(dyed, 0, y); any = true; }
+    else cx.drawImage(img as CanvasImageSource, 0, y, img.width, h, 0, y, img.width, h);
+  }
+  return any ? cv : null;
+}
 import {
   HOOK_KILL_DISTANCE, HOOK_RETRACT_KILL_DIST, HOOK_TIME_LEFT, CRACKED_BRICK_SHEETS,
   TREE_TRUNK_SHEETS, TRACK_SHEET, TREE_SHEET, HOOK_PROJ_STATS, isHookProjectile,
@@ -326,6 +352,18 @@ export class GrappleProj extends Entity {
   }
 
   // ---- 渲染（Main.cs DrawProjDirect 链段 if-else 链 :28188-29206 + 通用钩头绘制 1:1）----
+  /** 弹幕染料通道 vid（清偿刀 N 2026-09-30）——projHook（aiStyle==7 派生,
+   *  Main.cs:6755-6763）→ cGrapple（miscDyes[4],钩爪染料;GetProjectileDesiredShader
+   *  次序②,无 damage/minion 门）。owner=playerRef 本体 Player,窄接口读 inv;
+   *  缺 → 0=无染。 */
+  private hookDyeVid(): number {
+    const inv = (this.playerRef() as unknown as { inv?: DyeInvSource } | null)?.inv;
+    if (!inv) return 0;
+    const ch = dyeChannelsOf(inv);
+    if (!(ch.cGrapple > 0)) return 0;
+    return getProjDesiredDyeVid({ vid: this.projType, minion: false, damage: 0, aiStyle: 7 }, ch);
+  }
+
   draw(r: GrappleDrawHost, _cam: unknown): void {
     const p = this.playerRef();
     if (!p) return;
@@ -333,9 +371,24 @@ export class GrappleProj extends Entity {
     const spec = hookChainOf(this.projType);
     const atlas = r.atlas ?? null;
     // 链贴图（ensureVImage 懒加载：未就绪返回 null → 本帧走旧线段兜底，下帧自愈）
-    const img = spec && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.tex}`)) : null;
-    const glow = spec?.glowTex && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.glowTex}`)) : null;
-    const head = atlas ? asImg(atlas.ensureVImage(`vanilla/Projectile_${this.projType}.png`)) : null;
+    let img = spec && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.tex}`)) : null;
+    let glow = spec?.glowTex && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.glowTex}`)) : null;
+    let head = atlas ? asImg(atlas.ensureVImage(`vanilla/Projectile_${this.projType}.png`)) : null;
+    // ★清偿刀 N：cGrapple 整弹染（链/辉层/头逐行烘焙,渐变族 T0 每行同源;
+    //  行高 = drawChain/drawHead 切片高——frameRows 族 frameH、缺省整图、头按帧行）
+    const dyeVid = this.hookDyeVid();
+    if (dyeVid > 0) {
+      const chainRowH = spec?.frameRows ? (spec.frameH ?? (img ? img.height / 4 : 0)) : (img?.height ?? 0);
+      if (img && chainRowH >= 1) {
+        img = (dyedRowsSheet(img as DyeImg2D, dyeVid, p.facing, chainRowH) as typeof img) ?? img;
+        if (glow) glow = (dyedRowsSheet(glow as DyeImg2D, dyeVid, p.facing, chainRowH) as typeof glow) ?? glow;
+      }
+      if (head) {
+        const hs = hookHeadOf(this.projType);
+        const headRowH = head.height / Math.max(1, hs.frames ?? 1);
+        head = (dyedRowsSheet(head as DyeImg2D, dyeVid, p.facing, headRowH) as typeof head) ?? head;
+      }
+    }
     if (spec && img) this.drawChain(r, p, spec, img, glow);
     else this.drawLegacyChain(ctx, p);                       // 兜底（全表贴图已解包，恒不触发）
     if (head) this.drawHead(ctx, head);

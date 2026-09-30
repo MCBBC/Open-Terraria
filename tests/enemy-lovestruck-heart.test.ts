@@ -8,10 +8,14 @@
 //         Next(5)==0 门;位 = 左上 + (Next(width+1),Next(height+1));速 = 单位向
 //         (X×0.66)×Next(3,6)×0.33 → Gore.NewGore 内扰动(:1347-1348) → 调用侧
 //         ×0.4 → vy−0.6;档 = Next(40,121)×0.01;sticky=false(:92464-92466)。
-//   门    canDisplayBuffs（:6206 缺省 true/:8519 ResetEffects 复位）false 面 =
-//         石巨人四件 245-248（:18042-18052 SetDefaults）→ :92265 整环早退。
-//         敌怪侧须自门;119 免疫表仅 [31]（vanillaNpcImmunity.ts:101）,石巨人
-//         可被上 buff → 该门对石巨人实活。
+//   门    canDisplayBuffs（:6206 缺省 true/:8519 ResetEffects 复位）false 面只由
+//         getGoodAdjustments 置（:18040-18052 石巨人四件 245-248）,而该函数整体在
+//         Main.getGoodWorld 门内（SetDefaults :17875-17878）⇒ 仅 FTW 世界拒发;
+//         普通世界四件照发爱心（:92265 整环早退只在 false 面）。
+//         ★清偿刀 P3-F1（2026-09-30,C1 红蓝翻案）：旧 vid 硬拒（245-248 无条件）
+//         系误判——发射位改读逐实例 canDisplayBuffs（Enemy :1493/:6508 双路落位,
+//         ScaleStats.getGoodAdjustments 已按 getGoodWorld 条件化）;119 免疫表仅
+//         [31]（vanillaNpcImmunity.ts:101）,石巨人可被上 buff → 该门对石巨人实活。
 //   单源  GorePiece.newLovestruckHeart（刀B TownNPC 内联实现提取,2026-09-29）——
 //         掷序按原版实参求值序修齐（位x/位y 在速/档之前,:92459-92462 实参左→右;
 //         刀B 旧序 spd 前置,零掷下无观察差,统计序按原版收口）。
@@ -23,6 +27,7 @@ import { Enemy } from '../src/entities/Enemy';
 import { TownNPC } from '../src/entities/TownNPC';
 import { GorePiece } from '../src/entities/GorePiece';
 import { applyBuffTicks } from '../src/entities/projStatus';
+import { bindScaleStatsWorld, scaleStatsWorldOf } from '../src/stats/ScaleStats';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
@@ -156,32 +161,48 @@ describe('刀F-③ Enemy 头爱心发射（UpdateNPC_BuffApplyVFX :92455-92466,�
 });
 
 // ===========================================================================
-// ④ canDisplayBuffs 敌怪侧门（:18042-18052 石巨人四件 245-248 → :92265 整环早退）
+// ④ canDisplayBuffs 敌怪侧门（★P3-F1 2026-09-30 重锚,原「vid 245-248 恒拒」翻案）：
+//   vanilla false 面只在 FTW 世界（getGoodAdjustments :18040-18052 ⊂ Main.getGoodWorld
+//   门 :17875-17878）;普通世界石巨人四件 :8519 复位 true 照发爱心。发射位读逐实例
+//   canDisplayBuffs（Enemy fromVanilla :1493 / Transform :6508 落位链）。
 // ===========================================================================
-describe('刀F-④ canDisplayBuffs 自门：vanillaId 245-248 不发射（VFX 块其余照常）', () => {
-  for (const vid of [245, 246, 247, 248]) {
-    it(`vid ${vid}：lovestruckT 在位仍零 331,且递减已执行（非前置抛掷假绿）`, () => {
-      const e = new Enemy('zombie', 100 * 16, 96 * 16);
-      e.vanillaId = vid;   // 石巨人四件覆写（门读取面 = VFX 段 vanillaId）
-      const game = makeGame(flatWorld());
-      for (let i = 0; i < 12; i++) {
-        try { e.fixedUpdate(1 / 60, game); } catch { /* 石巨人族 AI 需全量体节态,落定阶段允许 */ }
-      }
-      e.lovestruckT = 30;
-      const { spy } = heartSpy();
-      Math.random = () => 0;
-      try {
-        e.fixedUpdate(1 / 60, game);
-      } catch {
-        // 石巨人 AI 后段可能因缺体节态抛——VFX 门段在此之前,断言仍有效
-      }
-      expect(spy.mock.calls.filter(([id]) => id === 331).length).toBe(0);
-      // 块执行证明：递减已发生（门在递减之后、发射之前）——若抛在前段则此断言红
-      expect(e.lovestruckT).toBeCloseTo(30 - 1 / 60, 12);
-    });
-  }
-  it('非 245-248（zombie vid=3）同条件照常发射（门只摘石巨人四件）', () => {
+describe('刀F-④ canDisplayBuffs 自门（P3-F1 重锚：FTW 条件化,vid 硬拒翻案）', () => {
+  it('FTW 世界夹具：fromVanilla(245) 种子档落 canDisplayBuffs=false → 门字段活、零 331 且递减已执行', () => {
+    const w = new World(100, 100, 7, 'p3-ftw-lovestruck');
+    w.seedFlags = { ...w.seedFlags, getGoodWorld: true };
+    bindScaleStatsWorld(scaleStatsWorldOf(w, () => false));
+    const golem = Enemy.fromVanilla(245, 100 * 16, 96 * 16)!;
+    bindScaleStatsWorld(null);
+    expect(golem.canDisplayBuffs).toBe(false);   // FTW getGoodAdjustments 落位（:18040-18052）
+    // 发射位读取面 = 该逐实例字段（zombie 载体保持 AI 稳定,门语义与石巨人同位）
     const e = new Enemy('zombie', 100 * 16, 96 * 16);
+    e.canDisplayBuffs = false;
+    const game = makeGame(flatWorld());
+    for (let i = 0; i < 12; i++) e.fixedUpdate(1 / 60, game);
+    e.lovestruckT = 30;
+    const { spy } = heartSpy();
+    Math.random = () => 0;
+    e.fixedUpdate(1 / 60, game);
+    expect(spy.mock.calls.filter(([id]) => id === 331).length).toBe(0);
+    // 块执行证明：递减已发生（门在递减之后、发射之前）——若抛在前段则此断言红
+    expect(e.lovestruckT).toBeCloseTo(30 - 1 / 60, 12);
+  });
+
+  it('普通世界石巨人四件：fromVanilla(245..248) canDisplayBuffs=true（:8519 复位,C1 翻案面）', () => {
+    bindScaleStatsWorld(scaleStatsWorldOf(new World(100, 100, 7, 'p3-classic'), () => false));
+    try {
+      for (const vid of [245, 246, 247, 248]) {
+        const g = Enemy.fromVanilla(vid, 100 * 16, 96 * 16)!;
+        expect(g.canDisplayBuffs).toBe(true);
+      }
+    } finally {
+      bindScaleStatsWorld(null);
+    }
+  });
+
+  it('普通世界照发：门字段 true（=普通世界四件终态）→ 331 照常发射（旧 vid 硬拒误杀面）', () => {
+    const e = new Enemy('zombie', 100 * 16, 96 * 16);
+    expect(e.canDisplayBuffs).toBe(true);        // 字段缺省 true（NPC.cs:6206 同相）
     const game = makeGame(flatWorld());
     for (let i = 0; i < 12; i++) e.fixedUpdate(1 / 60, game);
     Math.random = () => 0;

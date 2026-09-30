@@ -239,8 +239,13 @@ export enum BuffType {
                        //   为 1.4.5.7 新增（wiki Desktop 1.4.5.7），1456 反编译无此逻辑
                        //   （AddBuff 全链 :5066-5203 无 Warmth 分支）——本仓按 1457 保留，
                        //   已备案。授予 = 暖冬药水 2359（vi_2359 桥接 900s）
-  // ---- 1457 新敌怪 debuff 家族（diff 批 2；BuffID.cs:961-971；仅 StatusNPC 侧，
-  //      玩家不吃——不进 BuffState.DEBUFFS。施加源 = 1457 Projectile.cs:11203 毒液
+  // ---- 1457 新敌怪 debuff 家族（diff 批 2；BuffID.cs:961-971。★BJ405-D2 勘误
+  //      2026-09-30：旧注「仅 StatusNPC 侧，玩家不吃——不进 BuffState.DEBUFFS」
+  //      已过时——395/397/398/399/400 五件全在 Main.debuff 表（Main.cs:9004-9079
+  //      写位金标,判别锁 tests/buff-rightclick-bj405 ③全表对拍）,已按 BJ405 分类
+  //      归位进 BuffState.DEBUFFS（右键不可取消/护士计价/驱逐三面共用分类位）,
+  //      且凡 BUFF_DEFS 在册即出 buff 栏——施加源与分类位是两个正交轴。
+  //      施加源 = 1457 Projectile.cs:11203 毒液
   //      浸剂伴发 395 / :11685 弹 282-283 / :11732 弹 1127 / :11195 催化腕带
   //      catalystBand 398 / :11233 弹 1117→399 / :11237 弹 1122→400 +
   //      Player.cs:6507/6537——新弹/新饰品未移植部分登记）----
@@ -521,9 +526,12 @@ const BUFF_TIME_EXTENDED_BY_DIFFICULTY = new Set([20, 22, 23, 24, 323, 30, 31, 3
  *  ★环境光环十族（87/146/157/158/215/86/89/147/194/350）【不在本表】——它们的
  *  唯一隐字防线=每帧 2t 重钉+>2t 门（成对设计，Game.ts 场景光环块）；曾误注
  *  "表内双保险"（红队 A3），后人勿据该误注往表里补光环 id。坐骑族另经
- *  MountType 循环(:9343-9351)全标——本仓坐骑不进 buff 栏，故不含 */
+ *  MountType 循环(:9345-9352)全标——本仓坐骑不进 buff 栏，故不含 */
 export const BUFF_NO_TIME_DISPLAY = new Set<number>([19, 27, 28, 29, 34, 37, 38, 40, 41, 42, 43, 45, 49, 60, 62, 64, 68, 81, 82, 83, 93, 95, 96, 97, 98, 99, 100, 101, 102, 125, 126, 133, 134, 135, 136, 139, 140, 150, 159, 161, 163, 165, 170, 171, 172, 182, 186, 187, 188, 199, 200, 201, 202, 213, 214, 216, 217, 219, 258, 259, 260, 261, 262, 263, 264, 266, 267, 268, 271, 274, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 312, 317, 322, 325, 327, 328, 329, 330, 331, 334, 335, 341, 345, 348, 349, 351, 352, 353, 354, 355, 356, 365, 366, 371, 372, 373,
- 374, 377, 384,   // ★BJ357 变身坐骑伴生（Main.cs:9344-9352 全 MountType buff 循环段）
+ 374, 377, 384, 391, 392,   // ★BJ357 变身坐骑伴生 + ★BJ405-D1 补收可靠疾旋鼬族
+                            //  （Main.cs:9342-9349 循环段对【全部】MountType buff 置
+                            //  buffNoTimeDisplay——坐骑图标无时长字;五件=本仓唯一
+                            //  入 BuffState 的坐骑伴生,余 61 件不出栏无消费面）
  382, 385, 386, 389, 390, 393, 394]);
 
 /** Main.persistentBuff 持久表（★X4-债3 2026-09-29 亲读 1457 Main.cs:9337-9344——
@@ -939,9 +947,15 @@ export const BUFF_NO_SAVE = new Set([
   175, 176, 177, 178, 179, 180, 181, 182, 187, 188, 194, 195, 196, 197, 198,
   199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
   366, 385, 386, 389, 390, 393, 394,   // 1457 Palworld 随从伴生（Main.cs:9199-9204）
-  374, 377, 384,   // ★BJ357 变身坐骑伴生——Main.cs:9344-9352 对【全部】MountType buff
-                   //  置 buffNoSave（★勘误：旧注「391/392 坐骑伴生不在表=随档保存」系
-                   //  漏读该循环段——391/392 同属 MountType 表,本仓未映射不落库,同相）
+  374, 377, 384, 391, 392,   // ★BJ357 变身坐骑伴生 + ★清偿刀 P4（2026-09-30）补收
+                             //  391/392 疾旋鼬族——Main.cs:9345-9352 for 循环对【全部】
+                             //  MountType buff（BuffID.cs:152 全 66 对,391→64/392→65）
+                             //  置 buffNoTimeDisplay+buffNoSave。★勘误：旧注「391/392
+                             //  本仓未映射不落库」失实——BuffType 120/121 已映射（:721-722）,
+                             //  BJ357 重钉面（Game.useMountItem apply 60s + Player.fixedUpdate
+                             //  ridingMount 每 tick 重钉 10t≈0.167s）使骑乘态 391/392 恒
+                             //  活在 BuffState,toSave 的 0.05s 阈（:1341）拦不住——不补=
+                             //  骑乘存档落 391/392+读档幻影 buff（原版 buffNoSave 拦截）
 ]);
 /** vanilla buff id → 本仓 BuffType 反查（存档恢复 + statusPlayer 授予链共用）。
  *  ★Object.keys 恒返回【字符串】——必须 Number() 还原枚举数值键，否则
@@ -1737,8 +1751,9 @@ export class BuffState {
  *  133/134/135/139/140/182/188/216/325/335/355 等全族不在 Main.debuff 表
  *  Main.cs:9004-9079）DelBuff + SoundID 12 → 随从族消散链见 Game.maintainMinionBuffs
  *  BJ405 注（buff 槽 = 召唤活体凭证,删除即取消召唤）。原版坐骑支（:44100-44103
- *  mount.CheckBuff→TryDismount 顶替 DelBuff）本仓不可达——坐骑 buff 不入
- *  BuffState 不出 buff 栏（Mounts.ts:2162 单一真源模型,BJ405-D1 登记）。
+ *  mount.CheckBuff→TryDismount 顶替 DelBuff）★BJ405-D1 落刀后可达——坐骑 buff
+ *  出栏走 UI 坐骑通道（mount.active 单一真源派生,Mounts.ts setMount 注）,右键 =
+ *  UI.dismountFromBuffBar（不经本门,坐骑支先于 DelBuff 判定=DelBuff 被顶替语义）。
  *  宠物支 = CheckBuffHideMisc hideMisc 翻转（UI 宠物通道块 t===null 分支承接,
  *  togglePetSlot 内自带 Sound 12）。无 vanillaBuff 映射的自造 buff 按非 debuff
  *  可右键（=原版"表外默认 false"同判）。判别锁：tests/buff-rightclick-bj405 */

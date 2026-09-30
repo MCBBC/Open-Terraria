@@ -43,7 +43,23 @@
 //   ⑤真值变登记（真值变=停下登记判例）：6152 json useTime=4 系旧提取 shotVelocity
 //     误读遗留——源码 case 有字面 `useTime = 4;`（:47414）在调用之后,C# 终值即 4,
 //     源序解析与之同值,非本批改动面。
-//   ⑥BJ205 2026-09-20 LAG 残余盘点（dry-run --dump 1457 × vanillaItemCombat.ts
+//   ⑦★清偿刀 J 2026-09-30（BJ408 债#1/#2 收口）四根修——TryGet 四门输入面
+//     （damage/useAnimation/knockBack/mana,Item.cs:1067-1079）全普查后落刀：
+//     a.嵌套 switch(type) 贯穿组（nestedSwitchCases 此前逐 case 切块,`case A: case B:`
+//       共享体只落到组末 id——悠悠球 3287 RedsYoyo damage70/kb4.5 全缺=重铸池压缩
+//       到 size/crit 档,best 误判;同组族 2289-2296 钓竿/2237-2262·2432-2438 等
+//       约百件可放置族 anim/time 半缺）;
+//     b.链式/复合/除式赋值（`useAnimation = (useTime = 24);` 双赋值 1296/1345/2350/
+//       4870/4715 + `useTime /= 2` 4715 + `useTime = useAnimation / N` 4722/4956/5669）;
+//     c.DefaultToWhip 形参位（:47811-47828 五参,18 鞭 damage/kb/useTime/useAnimation/
+//       shootSpeed/shoot 全在实参——此前 combat 表仅 noUseGraphic 一键,BJ408 以
+//       vanilla-whips.json 在前缀链定点回填,本刀后 combat 表原生全值）;
+//     d.守卫链数值面（default 臂纯 type 条件 if/else 块——此前只取三通道
+//       useTurn/noUseGraphic/UseSound;数值全漏:2320 战锤全武器面 damage24/kb6/
+//       anim24/time14/scale1.05、2421/2422 钓竿对（含 else 臂 shootSpeed16.5）、
+//       约三百件可放置族 anim15/time10|7|17）。父域谓词收窄递归,仅补空不覆盖。
+//     era guard:SW_OUT 沙箱重产=既有键值零回退+本四类新增键逐一亲读源码定谳。
+//   ⑧BJ205 2026-09-20 LAG 残余盘点（dry-run --dump 1457 × vanillaItemCombat.ts
 //     EXTRACT_PATCH 逐字段对拍）：45 手补件中 29 件已被①②③反哺全字段原生复现
 //     （另 8 件部分字段:炸弹族 shoot 六件/5594-5595 noUseGraphic;1 件末值覆盖:1319）,
 //     仍 LAG 15 件 33 字段——手补面记录（vanillaItemCombat.ts EXTRACT_PATCH 为唯一
@@ -222,7 +238,12 @@ function nestedTypeIfCases(block) {
   return out;
 }
 
-/** 块内嵌套 switch(type) 的 case 条目（id → 块） */
+/** 块内嵌套 switch(type) 的 case 条目（id → 块）。
+ *  ★刀J 根修 a（BJ408 债#1,2026-09-30）：嵌套 case 贯穿组（`case A: case B:` 相邻
+ *  标签间只有空白/注释）此前逐 case 切块——组内非末 id 拿到空块=applyRec 早退=整段
+ *  字段缺失（悠悠球 3287 RedsYoyo damage70/kb4.5 全缺=重铸池压缩;2289-2296 钓竿组
+ *  2289-2295 anim8/time8 半缺）。修=与外层 parseSwitch 同款贯穿组收集,共享体赋给
+ *  组内全部 id（C# 语义:组内每个 id 依次执行共享体+自身内层 switch 覆写）。 */
 function nestedSwitchCases(block) {
   const out = [];
   const re = /switch\s*\(\s*type\s*\)/gi;
@@ -240,10 +261,23 @@ function nestedSwitchCases(block) {
     const marks2 = [];
     let m2;
     while ((m2 = caseRe2.exec(inner))) marks2.push([+m2[1], m2.index]);
-    for (let j = 0; j < marks2.length; j++) {
-      const s2 = inner.indexOf(':', marks2[j][1]) + 1;
-      const e2 = j + 1 < marks2.length ? marks2[j + 1][1] : inner.length;
-      out.push({ id: marks2[j][0], block: inner.slice(s2, e2) });
+    let j = 0;
+    while (j < marks2.length) {
+      // 贯穿组收集：当前 case 冒号到下一 case 标签之间只有空白/注释 → 同组
+      const group = [marks2[j][0]];
+      let end = j + 1 < marks2.length ? marks2[j + 1][1] : inner.length;
+      while (j + 1 < marks2.length) {
+        const afterColon = inner.indexOf(':', marks2[j][1]) + 1;
+        const between = inner.slice(afterColon, marks2[j + 1][1]);
+        if (between.trim().length > 0 && !/^[\s/*]+$/.test(between)) break;
+        group.push(marks2[j + 1][0]);
+        j++;
+        end = j + 1 < marks2.length ? marks2[j + 1][1] : inner.length;
+      }
+      const start = inner.indexOf(':', marks2[j][1]) + 1;
+      const shared = inner.slice(start, end);
+      for (const id of group) out.push({ id, block: shared });
+      j++;
     }
   }
   return out;
@@ -468,6 +502,23 @@ const DEFAULT_TO_PARAMS = {
     magic: true,
     autoReuse: true,
   }),
+  // ★刀J 根修 c（BJ408 债#1 鞭系,2026-09-30）:47811-47828 DefaultToWhip(int projectileId,
+  //   int dmg, float kb, float shootspeed, int animationTotalTime = 30)——18 鞭全数值
+  //   在形参（此前 combat 表仅 noUseGraphic 一键,BJ408 以 vanilla-whips.json 在前缀链
+  //   定点回填,本刀后 combat 表原生全值;vanilla-whips.json 18 件已 recon 闸门对拍=
+  //   两源同值）。体赋值:useAnim=useTime=animationTotalTime(缺省 30)/noMelee/summon/
+  //   noUseGraphic+UseSound Item152（后两者走既有三通道）;autoReuse=false 缺省不注入
+  //   （照 SetWeaponValues 2 参判例）。
+  DefaultToWhip: (pos, _named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    damage: evalCallArg(pos[1], id),
+    knockBack: evalCallArg(pos[2], id),
+    shootSpeed: evalCallArg(pos[3], id),
+    useTime: evalCallArg(pos[4], id) ?? 30,
+    useAnimation: evalCallArg(pos[4], id) ?? 30,
+    noMelee: true,
+    summon: true,
+  }),
 };
 /** 调用点 → 基座字段（fill-when-undefined 消费）。实参拆分:具名 `hasAutoReuse:`
  *  摘出,其余按位;25 调用点全 census 具名只有 hasAutoReuse 一名。 */
@@ -584,6 +635,39 @@ function fieldsFromLines(id, lines) {
       if (ua) rec.useTime = parseFloat(ua.match(/-?[\d.]+/)[0]);
     }
   }
+  // ★刀J 根修 b（BJ408 债#2 同族,2026-09-30）：链式/复合/除式赋值三形态（源序遍历）——
+  //   · `useAnimation = (useTime = 24);` 解括号双赋值（1296 Razorpine :16035 / 1345
+  //     :16651 / 2350 :23648 / 4870 / 4715 :38758——两字段同值;★清偿刀 P4 锚勘误
+  //     2026-09-30:旧引 :16040/:23621 漂移,1457 亲读复核）;
+  //   · `useTime /= 2;` 复合除（4715 :38759——作用于【本块先前】链式值 12→6,终值
+  //     useTime 6/useAnimation 12）;
+  //   · `useTime = useAnimation / 5;` 除式（4722 :38801 / 4956 :40011 / 5669 :44557
+  //     ——取本行之前的 useAnimation 字面 35|30,与 useTime 别名 pass 同口径;除数
+  //     全 int 精除恰尽）。
+  //   fill-when-undefined：字面 pass 已收的字段不覆写（现无同块双写,防逆序覆盖
+  //   同 SetWeaponValues 判例）。
+  {
+    const chain = {};
+    let uaLit;
+    for (const l of lines) {
+      let m = /^(\w+) = \((\w+) = (-?[\d.]+)f?\);$/.exec(l);
+      if (m && NUM_FIELDS.includes(m[1]) && NUM_FIELDS.includes(m[2])) {
+        const v = Number(m[3]);
+        if (rec[m[1]] === undefined) rec[m[1]] = v;
+        chain[m[2]] = v;
+        continue;
+      }
+      m = /^(\w+) \/= (-?[\d.]+)f?;$/.exec(l);
+      if (m && chain[m[1]] !== undefined) { chain[m[1]] = chain[m[1]] / Number(m[2]); continue; }
+      m = /^useAnimation = (-?[\d.]+)f?;$/.exec(l);
+      if (m) { uaLit = parseFloat(m[1]); continue; }
+      m = /^useTime = useAnimation \/ ([\d.]+)f?;$/.exec(l);
+      if (m && rec.useTime === undefined && uaLit !== undefined) rec.useTime = uaLit / parseFloat(m[1]);
+    }
+    for (const [f, v] of Object.entries(chain)) {
+      if (rec[f] === undefined) rec[f] = v;
+    }
+  }
   const swv = lines.find((l) => /^SetWeaponValues\(/.test(l));
   if (swv) {
     const sm = swv.match(/^SetWeaponValues\(\s*(-?\d+)\s*,\s*(-?[\d.]+)f?\s*(?:,\s*(-?\d+)\s*)?\)/);
@@ -600,7 +684,7 @@ function fieldsFromLines(id, lines) {
   //  EXTRACT_PATCH（vanillaItemCombat.ts）/THROWN_WEAPONS（本文件 main 手补表）/
   //  obj['5065']/json 4703 逐字段全等见 dry-run。
   for (const l of lines) {
-    const cm = /^(DefaultTo(?:RangedWeapon|Bow|ThrownWeapon|Spear|Staff|MagicWeapon))\s*\((.*)\);\s*$/.exec(l);
+    const cm = /^(DefaultTo(?:RangedWeapon|Bow|ThrownWeapon|Spear|Staff|MagicWeapon|Whip))\s*\((.*)\);\s*$/.exec(l);
     if (!cm) continue;
     const paramEff = callEffectOf(cm[1], cm[2], id);
     if (paramEff) {
@@ -744,6 +828,94 @@ for (const body of bodies) {
   }
 }
 
+// ---- ★刀J 根修 d（BJ408 债#2 同族,2026-09-30）：守卫链数值面（父域谓词收窄递归）----
+// default 臂纯 type 条件 if/else 块的【数值】赋值——上方守卫链补扫只取三通道
+// （useTurn/noUseGraphic/UseSound）,damage/knockBack/useTime/useAnimation/mana 等
+// NUM_FIELDS 全漏。实报面（census:Terarria1457 六体全量;★清偿刀 P4 锚勘误 2026-09-30:
+//   旧引 :23120-23137/:23140-23159 漂移,1457 亲读复核实锚如下）：
+//   · 2320 战锤（if (type == 2320) :23100-23117 全武器面 damage24/kb6/anim24/time14/
+//     scale1.05/melee——SwordsHammersAxesPicks 成员=前缀池压缩同病）;
+//   · 2421/2422 钓竿对（if (type >= 2421 && type <= 2422) :23075-23098 共享
+//     anim8/time8/shoot 算式 + :23084-23097 if(2421) else 臂 2422 shootSpeed16.5
+//     ——else 臂须父域谓词取非）;
+//   · 约三百件可放置族（1479-1722/2055-2155/2254-2264/2376-2449/2631-2690/2792-2794/
+//     3638-3916 等 anim15/time10|7 与 1977-1986 药水族 anim17/time17）——useTime 为
+//     放置节奏面,useAnimation 为放置挥动动画面（ApplyItemAnimation createTile 档）。
+// 语义：父域谓词收窄（then=父∧fn / else=父∧¬fn）逐 id 精确归属;仅补空不覆盖
+//（case 字面/委托/别名先跑的字段保有——守卫链 id 与 case id 互斥,理论无冲突,
+//  fill-when-undefined 为防御性）。递归下钻与三通道补扫同构;`N + type - M` 算式
+//  行由 fieldsFromLines 既有 eLine 通道求值。
+function guardNumericWalk(text, scopeFn, out) {
+  const re = /(?:else\s+)?if\s*\(/g;
+  let m;
+  while ((m = re.exec(text))) {
+    let d = 0, condEnd = -1;
+    for (let i = m.index + m[0].length - 1; i < text.length; i++) {
+      if (text[i] === '(') d++;
+      else if (text[i] === ')') { d--; if (d === 0) { condEnd = i + 1; break; } }
+    }
+    if (condEnd < 0) break;
+    const cond = text.slice(m.index + m[0].length - 1, condEnd);
+    if (/\bType\b/.test(cond)) { re.lastIndex = condEnd; continue; }
+    const stripped = cond.replace(/\btype\b/g, '');
+    if (!/^[\s\d()&|=<>!*]+$/.test(stripped)) { re.lastIndex = condEnd; continue; }
+    let fn;
+    try { fn = new Function('type', `return (${cond});`); } catch { re.lastIndex = condEnd; continue; }
+    const braceAt = text.indexOf('{', condEnd);
+    if (braceAt < 0 || text.slice(condEnd, braceAt).trim() !== '') { re.lastIndex = condEnd; continue; }
+    let depth = 0, close = braceAt;
+    for (let i = braceAt; i < text.length; i++) {
+      if (text[i] === '{') depth++;
+      else if (text[i] === '}') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    const inner = text.slice(braceAt + 1, close);
+    const thenPred = (id) => { try { return scopeFn(id) && !!fn(id); } catch { return false; } };
+    // else 臂定位（紧随其后的 else {）——谓词取非
+    let eb = close + 1;
+    while (eb < text.length && /\s/.test(text[eb])) eb++;
+    let elseInner = null;
+    let stopAt = close + 1;
+    if (text.startsWith('else', eb)) {
+      let p = eb + 4;
+      while (p < text.length && /\s/.test(text[p])) p++;
+      if (text[p] === '{') {
+        let d2 = 0, e2 = p;
+        for (let i = p; i < text.length; i++) {
+          if (text[i] === '{') d2++;
+          else if (text[i] === '}') { d2--; if (d2 === 0) { e2 = i; break; } }
+        }
+        elseInner = text.slice(p + 1, e2);
+        stopAt = e2 + 1;
+      } else stopAt = p;
+    }
+    re.lastIndex = stopAt;
+    out.push({ pred: thenPred, lines: depth1Lines(inner) });
+    guardNumericWalk(inner, thenPred, out);
+    if (elseInner !== null) {
+      const elsePred = (id) => { try { return scopeFn(id) && !fn(id); } catch { return false; } };
+      out.push({ pred: elsePred, lines: depth1Lines(elseInner) });
+      guardNumericWalk(elseInner, elsePred, out);
+    }
+  }
+}
+for (const body of bodies) {
+  const regions = [];
+  guardNumericWalk(body, () => true, regions);
+  for (const { pred, lines } of regions) {
+    if (!lines.some((l) => NUM_FIELDS.some((f) => new RegExp(`^${f}\\s*=`).test(l))
+      || BOOL_FIELDS.some((f) => l === `${f} = true;` || l === `${f} = false;`))) continue;
+    for (let id = 0; id <= 5500; id++) {
+      if (!pred(id)) continue;
+      const rec = fieldsFromLines(id, lines);
+      if (!Object.keys(rec).length) continue;
+      const cur = literal.get(id);
+      const merged = { ...(cur ?? {}) };
+      for (const [k, v] of Object.entries(rec)) if (merged[k] === undefined) merged[k] = v;
+      literal.set(id, merged);
+    }
+  }
+}
+
 // ---- 守卫补集尾段（guard complement）补丁 ----
 // SetDefaults3 `if (type < 2192 || type > 2198) { 守卫链 }` 尾段（Item.cs:27602-27630）
 // 为守卫补集服务：2192-2198（遗物族,守卫外直落尾段）+ 2203/2204（守卫内 case 空组
@@ -825,12 +997,13 @@ function main() {
   //  · 544/556/557 机械三王召唤物：赋值在 `if (Variant != DisabledBossSummonVariant)`
   //    块内（深度 2,Item.cs:7855-7862/:7987-7994/:8000-8007）,深度 1 扫描漏收
   //    ——useStyle 4/consumable/useAnimation 45/useTime 45
-  //  · 2350 回归药水：`useTime = (useAnimation = 30)` 链式赋值未解析
-  //    （Item.cs:23621）——useTime/useAnimation 30
+  //  · 2350 回归药水手补面退役（★清偿刀 J 2026-09-30,头注⑦b）：`useTime =
+  //    (useAnimation = 30)` 链式赋值（Item.cs:23648,★P4 锚勘误:旧引 :23621 漂移）
+  //    已由根修 b 原生解析,重产
+  //    逐字节等价（SW_OUT 沙箱 sha256 复证）——保留会掩蔽根修回归（同 M/Q 刀判例）。
   for (const vid of ['544', '556', '557']) {
     obj[vid] = { useTime: 45, useAnimation: 45, consumable: true };
   }
-  obj['2350'] = { ...obj['2350'], useTime: 30, useAnimation: 30 };
   //  · 月主委托件 15 件（2026-08-25 r33 蓝队；red-team-r33 §三 P0-①②）：委托段
   //    `SetDefaults3(N)` 本体只有 type/glowMask[/shoot]。★清偿刀 M 根修（2026-09-29）
   //    后 applyRec 委托行判据先于早退门——九挥砍件（rec/sound 双空）与六锯钻
@@ -857,7 +1030,9 @@ function main() {
   // ★清偿刀 F→M（2026-09-29）：F 刀九件 UseSound 侧道手补面退役——applyRec 根修后
   //  委托合并循环原生继承基底 UseSound（`d.sound===undefined && SOUND.has(targetId)`
   //  → SOUND.set(id, base 的 Item_1;基底显式行 case 2772 :26479 / case 2776 :26540 /
-  //  case 2775 :26558,委托链 :26566-26615/:31056-31078）,与 F 手补逐值等价。
+  //  case 2775 :26558,★P4 补 F 基底锚 2026-09-30:六锯钻双基底 case 2773 :26497 /
+  //  case 2774 :26518（UseSound=Item23,亲读）,委托链 :26566-26615/:31056-31078）,
+  //  与 F 手补逐值等价。
   //  F 刀定谳存档:缺键面=Game.playUseSound→itemUseSoundWav 静默 null=挥砍无声。
   if (obj['496']) obj['496'] = { ...obj['496'], knockBack: 2 };
   const THROWN_WEAPONS = {
@@ -991,8 +1166,9 @@ function main() {
   }
   const bows = [...data.values()].filter((v) => v.useAmmo === 40);
   const arrows = [...data.values()].filter((v) => v.ammo === 40);
-  // ★BJ283 口径勘误：原「共 ${data.size}」=委托合并面（4357,手补回填前）——现库终表
-  //  4369 含手补回填键（544/556/557/2350/月主 15/THROWN_WEAPONS 等）,打印改终表口径。
+  // ★BJ283 口径勘误：原「共 ${data.size}」=委托合并面——现库终表含手补回填键
+  //  （544/556/557/THROWN_WEAPONS 等;★刀J 后 2350/月主 15 已原生,2350 手补退役）,
+  //  打印改终表口径。
   console.error(`共 ${Object.keys(obj).length} 物品（终表,含手补回填）/ 弓类 ${bows.length} / 箭类 ${arrows.length}（bows/arrows 系委托合并面统计）`);
   console.error(`useTurn=true ${useTurnTrue} 件 / noUseGraphic=true ${noUseGraphicTrue} 件 / UseSound ${soundEntries.length} 件`);
   console.error('木弓(99):', JSON.stringify(obj['99']));

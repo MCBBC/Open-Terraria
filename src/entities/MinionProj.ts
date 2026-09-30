@@ -19,7 +19,8 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
-import { Arrow, projFrameImg, projFrameCount, projSprite } from './Arrow';
+import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect } from './Arrow';
+import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
@@ -863,6 +864,29 @@ export class MinionProj extends Entity {
   /** 同列槽位序（多随从环形悬停错位） */
   slot: number;
   private ownerRef: () => Player | null;
+
+  /** 弹幕染料通道 vid（清偿刀 N 2026-09-30）——GetProjectileDesiredShader 1:1：
+   *  随从族（minion 旗取数据面 vanillaProjectiles.minion=SetDefaults 照录;哨兵
+   *  663/677 族原版 minion=false=无通道）→ cMinion=唯一源 CritterShampoo(4762)
+   *  配对染料（Player.cs:9832-9834 UpdateItemDye 链）;623 虽 minion=true 但 switch
+   *  覆写 → cPet（Main.cs:22457-22459）;818 扑击弹同 switch → cMinion（TigerPounce
+   *  同款）。owner 引用=本体 Player,窄接口读 inv;缺 → 0。 */
+  private minionDyeVid(): number {
+    const p = this.ownerRef();
+    const inv = (p as unknown as { inv?: DyeInvSource } | null)?.inv;
+    if (!inv) return 0;
+    const ch = dyeChannelsOf(inv);
+    if (!(ch.cPet > 0) && !(ch.cMinion > 0)) return 0;
+    return getProjDesiredDyeVid(
+      {
+        vid: this.projId,
+        minion: !!projectileData(this.projId)?.minion,
+        damage: this.damage,
+        aiStyle: projectileData(this.projId)?.aiStyle,
+      },
+      ch,
+    );
+  }
   hitCd = new MinionHitCd(); // dragon 全链共用实例
   private shootCd = 0;
   /** 地面型重力 */
@@ -5996,6 +6020,33 @@ export class MinionProj extends Entity {
     //  docs/audit/summon-draw-branch-registry-2026-09-07.md 与 SW-FX6 报告）。
     //  行为锁 = tests/sw-fx6-draw-debt-closure.test.ts（摘本支应红）。
     if (this.projId === 831 || this.projId === 970) return;
+    // ★清偿刀 N（2026-09-30）：弹幕染料（GetProjectileDesiredShader 1:1,通道解析见
+    //  minionDyeVid 注）——EntitySpriteDraw×Armor.Apply 等价=逐贴图过 SM2 pass。
+    //  dFrameImg=帧裁切面（t0Rect=原片内矩形,渐变族 T0 与 vanilla 同源）;
+    //  dSheetSub=整片/子矩形面。残影 gimg 按整片染（渐变族 T0 相位近似,登记债）。
+    const dyeVid = this.minionDyeVid();
+    const dyeOpt = {
+      facing: this.facing >= 0 ? 1 : -1,
+      box: { x: this.x, y: this.y, w: this.w, h: this.h },
+      lightAt: r.lighting?.lightAt?.bind(r.lighting) ?? null,
+    };
+    const dFrameImg = (id: number, fr: number): HTMLCanvasElement | null => {
+      const base = projFrameImg(id, fr);
+      if (!base || !(dyeVid > 0)) return base;
+      const rect = projFrameSrcRect(id, fr);
+      const sheet = rect ? projSprite(id) : null;
+      const dyed = dyedProjCanvas(base, 0, 0, base.width, base.height, dyeVid,
+        rect && sheet
+          ? { ...dyeOpt, t0Rect: { sx: rect.sx, sy: rect.sy, sheetW: sheet.width, sheetH: sheet.height } }
+          : dyeOpt);
+      return dyed ?? base;
+    };
+    type ProjTex = NonNullable<ReturnType<typeof projSprite>>;
+    type DrawTex = ProjTex | HTMLCanvasElement;
+    const dSheetSub = (sheet: ProjTex, sx: number, sy: number, sw: number, sh: number): DrawTex => {
+      if (!sheet || !(dyeVid > 0)) return sheet;
+      return dyedProjCanvas(sheet, sx, sy, sw, sh, dyeVid, dyeOpt) ?? sheet;
+    };
     const frames = projFrameCount(this.projId);
     let frame: number;
     if (this.projId === 623) {
@@ -6048,13 +6099,16 @@ export class MinionProj extends Entity {
     } else {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }
-    const img = projFrameImg(this.projId, frame);
+    const img = dFrameImg(this.projId, frame);
     // ---- ★BJ235 随从通用残影（Main.cs:30609-31400 通用表;原版残影块先于本体绘制）——
     //      533 致命球（ai0 三态冲刺档 :31084-31098,dA0 直喂）/ 755 血蝙蝠（Crimson 特支
     //      :31190-31192）/ 833-835 沙漠虎（速度染+底心锚帧门 :30706-30721/:31307-31314）。
     //      ghostRing 非空才有记录式——其余随从 id mode=-1 短路零开销。 ----
     if (this.ghostRing) {
-      const gimg = projSprite(this.projId);
+      const gRaw = projSprite(this.projId);
+      const gimg = gRaw && dyeVid > 0
+        ? (dyedProjCanvas(gRaw, 0, 0, gRaw.width, gRaw.height, dyeVid, dyeOpt) ?? gRaw)
+        : gRaw;   // 残影整片染（渐变族 T0 相位近似,登记债）
       if (gimg && gimg.width > 0) {
         drawProjGhosts(ctx, {
           ring: this.ghostRing,
@@ -6091,6 +6145,7 @@ export class MinionProj extends Entity {
         // rectangle23.X += rectangle23.Width;`——此前携行不建模恒取左半）
         const sx = this.carriedByBackpack ? halfW : 0;
         const sy = Math.round(frame * fh);   // 与 projFrameImg round 语义同源
+        const dsub = dSheetSub(sheet, sx, sy, halfW, fh);
         ctx.save();
         if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
         // 炮向翻转：AI_130 首帧 direction=spriteDirection=player.direction（:69340）——
@@ -6098,7 +6153,10 @@ export class MinionProj extends Entity {
         ctx.translate(this.cx, this.cy + this.h / 2);
         if (this.facing < 0) ctx.scale(-1, 1);
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(sheet as CanvasImageSource,
+        if (dsub !== sheet) ctx.drawImage(dsub as CanvasImageSource,
+          0, 0, halfW, fh,
+          -halfW / 2, -(fh - 4), halfW, fh);              // origin=(半宽/2, 半高−4)
+        else ctx.drawImage(sheet as CanvasImageSource,
           sx, sy, halfW, fh,
           -halfW / 2, -(fh - 4), halfW, fh);              // origin=(半宽/2, 半高−4)
         ctx.restore();
@@ -6163,7 +6221,7 @@ export class MinionProj extends Entity {
         ctx.translate(this.cx, this.cy + ay);
         ctx.rotate(this.rot);
         if (flipV) ctx.scale(1, -1);
-        const fimg = projFrameImg(this.projId, frame);
+        const fimg = dFrameImg(this.projId, frame);
         if (fimg) ctx.drawImage(fimg as CanvasImageSource, -ox, -oy);
         else ctx.drawImage(sheet as CanvasImageSource, 0, Math.round(frame * fh), fw, fh,
           -ox, -oy, fw, fh);
@@ -6281,7 +6339,11 @@ export class MinionProj extends Entity {
         const sheet = projSprite(963);
         if (sheet) {
           const fh = sheet.height / 13, fw = sheet.width / 4;
-          ctx.drawImage(sheet as CanvasImageSource, 0, Math.round(frame * fh), fw, fh,
+          const sy9 = Math.round(frame * fh);
+          const dsub = dSheetSub(sheet, 0, sy9, fw, fh);
+          if (dsub !== sheet) ctx.drawImage(dsub as CanvasImageSource, 0, 0, fw, fh,
+            -fw / 2, -fh / 2, fw, fh);
+          else ctx.drawImage(sheet as CanvasImageSource, 0, sy9, fw, fh,
             -fw / 2, -fh / 2, fw, fh);
         }
       } else {
@@ -6819,12 +6881,30 @@ export class TigerPounce extends Entity {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = projFrameImg(818, 0);
+    // ★清偿刀 N：switch 覆写 818 → cMinion（Main.cs:22463-22465 无 damage/minion 门,
+    //  扑击弹染属主 CritterShampoo 配对染料）——EntitySpriteDraw×Armor.Apply 等价。
+    let tex: HTMLCanvasElement | null = img;
+    if (img) {
+      const p = this.ownerRef();
+      const inv = (p as unknown as { inv?: DyeInvSource } | null)?.inv;
+      if (inv) {
+        const ch = dyeChannelsOf(inv);
+        if (ch.cMinion > 0) {
+          const dv = getProjDesiredDyeVid({ vid: 818, minion: false, damage: this.damage, aiStyle: projectileData(818)?.aiStyle }, ch);
+          if (dv > 0) {
+            tex = dyedProjCanvas(img, 0, 0, img.width, img.height, dv,
+              { facing: 1, box: { x: this.x, y: this.y, w: this.w, h: this.h },
+                lightAt: r.lighting?.lightAt?.bind(r.lighting) ?? null }) ?? img;
+          }
+        }
+      }
+    }
     ctx.save();
     ctx.globalAlpha = this.op;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    if (img) ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    if (tex) ctx.drawImage(tex, -tex.width / 2, -tex.height / 2);
     else {
       ctx.fillStyle = '#E8C060';
       ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);

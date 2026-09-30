@@ -4,9 +4,11 @@
 // 本文件即该场景判别锁（清偿刀 N 定谳 → 刀 P 清偿；N 刀「社交 18 放置 UI 门下
 // 不可达」判断已证伪——右键装备段扫 13..19 可达 18，社交环门随本刀落地）。
 import { describe, expect, it } from 'vitest';
-import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/items';
+import { isDyeItem } from '../src/data/vanillaEquip';
 import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
+import { UI } from '../src/ui/UI';
 
 /** vid → 内部 id 权威反查（drone-visor-face-draw.test.ts 同口径） */
 const vidIdx = (vid: number): number =>
@@ -119,5 +121,81 @@ describe('效果/绘制结算面（:13044/:13110 逐槽门,Player 级）', () =>
     off.inv.gateMaster = true;
     off.inv.armor[18] = { id: cloak, stack: 1 };
     expect(off.equipStats.accDraw.face).toBe(0);   // 旧版社交环 13..20 无门 → 21（N 刀登记面）
+  });
+});
+
+// ===================== ★清偿刀 P4（2026-09-30）placeHeld 锁格门判别（C4 漏测补钉） =====================
+// 定谳锚（1457 亲读）：拖放/换装对锁槽一律无动作——Main.cs:42114/42185/42218
+// Handle condition = IsItemSlotUnlockedAndUsable(slot) ∨ 光标空;GetDimSlotForMouseItem
+// （ItemSlot.cs:1348/:1357）同判=持物对锁槽 dim。本仓本体 UI.placeHeld :2881 门
+// （P 刀已接=修刀本体已正确,C4 定谳仅漏测）——大师无恶魔心态 armor[8]/dye[8] 锁。
+type AnyUI = Record<string, any>;
+
+function mkUi(): { ui: AnyUI; sfx: string[] } {
+  const ui = Object.create(UI.prototype) as unknown as AnyUI;
+  const sfx: string[] = [];
+  ui.game = {
+    player: { inv: new Inventory() },
+    sfx: { play: (name: string) => { sfx.push(name); } },
+    achNotifyEquipChanged: () => {},
+    npcShopOpen: false,
+  };
+  ui.heldStack = null;
+  ui.heldFrom = null;
+  ui.openChest = null;
+  ui.refreshAll = () => {};
+  return { ui, sfx };
+}
+
+describe('★P4 placeHeld 锁格门（大师无恶魔心,armor[8]/dye[8] 拖入被拒）', () => {
+  const HORSE = vidIdx(158);   // Lucky Horseshoe（acc:1 功能配饰）
+  // 染料件取注册面首个 isDyeItem 真值（equip kind 'dye' 门单源,不硬编 vid）
+  const DYE = (() => {
+    for (let i = 0; i < ITEM_DEFS.length; i++) {
+      if (ITEM_DEFS[i] && isDyeItem(i)) return i;
+    }
+    throw new Error('注册面无染料件');
+  })();
+
+  it('拖装备入 8 号格：无动作（槽空保持,heldStack 未动,零音效）', () => {
+    const { ui, sfx } = mkUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.gateMaster = true;               // 大师世界:9 开 8 锁（无恶魔心,判别核心态）
+    ui.heldStack = { id: HORSE, stack: 1 };
+    ui.placeHeld(8, 'armor');
+    expect(inv.armor[8]).toBeNull();
+    expect(ui.heldStack).toMatchObject({ id: HORSE, stack: 1 });
+    expect(sfx).toEqual([]);
+  });
+
+  it('拖染料入 8 号染料格：同门拒（armor/dye 双面同式,:1348/:1357）', () => {
+    const { ui, sfx } = mkUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.gateMaster = true;
+    ui.heldStack = { id: DYE, stack: 1 };
+    ui.placeHeld(8, 'dye');
+    expect(inv.dye[8]).toBeNull();
+    expect(sfx).toEqual([]);
+  });
+
+  it('对照位：恶魔心后 8 号格照常入（同态同件=门只差 extraAccessory）', () => {
+    const { ui, sfx } = mkUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.gateMaster = true;
+    inv.extraAccessory = true;
+    ui.heldStack = { id: HORSE, stack: 1 };
+    ui.placeHeld(8, 'armor');
+    expect(inv.armor[8]).toMatchObject({ id: HORSE });
+    expect(ui.heldStack).toBeNull();
+    expect(sfx).toContain('pickup');
+  });
+
+  it('大师 9 号格恒开：无恶魔心同态照常入（判别位反差=逐槽谓词非连续界）', () => {
+    const { ui } = mkUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.gateMaster = true;
+    ui.heldStack = { id: HORSE, stack: 1 };
+    ui.placeHeld(9, 'armor');
+    expect(inv.armor[9]).toMatchObject({ id: HORSE });
   });
 });

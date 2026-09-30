@@ -474,7 +474,11 @@ export class LunarFlareStar extends Entity {
   private ecx = 0; private ecy = 0;
   /** 每 update 序（tick 首 update 才搜敌） */
   private updInTick = 0;
-  /** 爆炸相每敌一次（localNPCHitCooldown=−1） */
+  /** 爆炸相每敌一次（localNPCHitCooldown=−1）。★清偿刀 P1（C5 定谳#1,2026-09-29）：
+   *  局部表写=受理支内——原版 immuneArray[victim]=cd 写位 :14175-14178 在免疫门
+   *  :12635-12637【后】,门拒敌（他源 10t 残窗,如近战刚命中）不落标 → 窗期满后
+   *  照吃爆伤;旧档无条件 add=首次重叠即永久标记,残窗敌全程零爆伤（原版 10t
+   *  期满后下一子步照结算） */
   private hitSet = new Set<number>();
   /** ★R28 §7 命中线重估门：原版 ai[2] = num5+pointPosition.Y = 出生 Y + 钳后
    *  |dy|(|dy|≥20) 恒在出生点【下】方;Game.ts :11466 曾用原始 dy(可负) → 高打低
@@ -590,8 +594,10 @@ export class LunarFlareStar extends Entity {
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（爆炸相首敌 0 档率 0.20）
           this.pveNumHits++;
+          // ★清偿刀 P1（C5 定谳#1）：局部表写 :14175-14178（immuneArray[victim]=cd=-1）
+          //  在受理支内——门拒敌（残窗快照）不落标,窗期满后下一子步照吃爆伤。
+          this.hitSet.add(e.id);
         }
-        this.hitSet.add(e.id);
       }
       if (this.ai0 >= 126) {                         // 7×MaxUpdates(6)×3
         this.dead = true;

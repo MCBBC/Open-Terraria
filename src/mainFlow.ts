@@ -47,6 +47,7 @@ import { UISfx } from './vui/UISfx';
 import type { Appearance } from './player/Appearance';
 import { ITEM_DEFS } from './data/items';
 import { mountCreditsRollOverlay } from './ui/CreditsRollOverlay';   // IIII232 名单演出
+import { dollEquipFromInv } from './render/Renderer';   // ★M 刀：PlayerSegment phantom 盔甲三槽（单源）
 import { creditsRoll } from './world/CreditsRoll';
 
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
@@ -105,6 +106,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const g = game;
       if (!g) return false;
       return creditsRoll.canPlay(g.scene?.musicBoxStyle === 85, false, 0);
+    },
+    // ★M 刀 PlayerSegment（Segments.cs:209 CopyVisuals(Main.LocalPlayer)）本仓供给：
+    // phantom 皮肤/盔甲 1:1 本地玩家——dollEquipFromInv 单源（displayArmor 时装覆盖
+    // + SetMatch 三查同链）。菜单态无本地玩家 → null（演出段窗内不画）
+    playerVisual: () => {
+      const g = game;
+      if (!g || !g.player.appearance) return null;
+      return {
+        appearance: g.player.appearance,
+        equip: dollEquipFromInv(g.player.inv, g.player.appearance),
+      };
     },
   });
   // GOING_OLDSCHOOL B1 收口：菜单级成就句柄（标题屏日月拖拽首访即达——

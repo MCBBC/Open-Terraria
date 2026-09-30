@@ -68,6 +68,12 @@ describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
       'combat[4270].damage', 'combat[4607].knockBack', 'combat[4765].noMelee', 'combat[4765].noUseGraphic',
       'combat[4766].noMelee', 'combat[4766].noUseGraphic', 'combat[5285].noMelee', 'combat[5285].noUseGraphic',
       'combat[5663].damage', 'combat[5687].damage',
+      // ★清偿刀 J（2026-09-30,extract-itemcombat 头注⑦c DefaultToWhip 形参位根修）后
+      //   新显影的两条真迁移：鞭 5477 花鞭 damage 1456=75→1457=50、鞭 5688 史莱姆鞭
+      //   1456=12→1457=15（与 whips[5477]/whips[5688] 同源同值,vanilla-whips.json
+      //   recon 闸门已核）——1456 档 dump 现同样解析 DefaultToWhip 形参,显影=提取器
+      //   盲区消除,非新回归。
+      'combat[5477].damage', 'combat[5688].damage',
       'rare[1293].rare', 'rare[3315].rare', 'rare[3316].rare',
       'value[255].value', 'value[4672].value', 'value[5920].value', 'value[5926].value',
       'stats[982].life', 'stats[1595].def', 'stats[1613].def', 'stats[2221].def',

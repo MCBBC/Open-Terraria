@@ -5471,8 +5471,9 @@ export class Game implements GameHooks {
     if (!p.mount.setMount(mountId, p, this)) return false;
     // ★BJ357 坐骑伴生 buff（SetMount :6291 AddBuff(_data.buff, 3600)）：61=法埃的
     //  形态 384 / 55=大鼠本性 374 / 56=蝙蝠诅咒 377——每 tick 重钉 10t 在
-    //  Player.fixedUpdate（Player.cs:9968-9971）;图标无字+不入档=Main.cs:9344-9352。
-    //  未入 BUFF_DEFS 的坐骑 buff 静默跳过（域债:全坐骑 buff 图标未建,登记）
+    //  Player.fixedUpdate（Player.cs:9968-9971）;图标无字+不入档=Main.cs:9345-9352。
+    //  ★BJ405-D1 后：全 66 坐骑 buff 图标=UI 坐骑通道（mount.active 派生）独家
+    //  承载;此 BUFF_DEFS 补挂面仅余五伴生 BuffType 的兼容残面（真值在 mount.active）
     const mbt = buffTypeByVanilla(p.mount.data?.buff ?? -1);
     if (mbt !== undefined) p.buffs.apply(mbt, 60);
     // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆
@@ -14444,7 +14445,8 @@ export class Game implements GameHooks {
     //    damage=0——两件 SetDefaults 均无 damage 行,shootSpeed 9/1,itemCombat 表）；
     //  ③Track 不在此处——原版 Track 调用点在 AI owner==myPlayer 支（P.cs:41688/:38825）,
     //    本仓 AI fixedUpdate 逐帧 track（droneCameraTrack 钩子）;I 刀出膛位代行退役
-    //    （updateUse(:10155) 先于 entities.update(:10183)=出生拍 AI 即跑,零空窗）。
+    //    （updateUse(:10239) 先于 entities.update(:10268)=出生拍 AI 即跑,零空窗;
+    //    ★清偿刀 P4 锚勘误 2026-09-30:旧引 :10155/:10183 漂移,亲读复核）。
     {
       const pmVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (pmVid === 5451 || pmVid === 5738) {
@@ -36637,11 +36639,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.net?.sendBestiaryEvent({ sub: BestiarySub.Chat, netId: npc.vanillaId });
     }
     this.achCheckBestiary();
-    // 快乐度快照（Player.SetTalkNPC Player.cs:4189-4193：GetShoppingSettings 一次算好，
-    // currentShoppingSettings 供商店价格/心情报告/成就共用）
+    // 快乐度快照（Player.SetTalkNPC 1457 Player.cs:4360-4378,GetShoppingSettings :4374
+    // 一次算好,currentShoppingSettings 供商店价格/心情报告/成就共用;★清偿刀 P4 锚
+    // 勘误 2026-09-30:旧引 :4189-4193 系 1456 行号——1457 SetTalkNPC 实锚 :4360）
     this.dialogHappiness = this.computeShopHappiness(npc);
-    // 成就：与最大快乐度 NPC 对话（Player.cs:4195-4197 PriceAdjustment<=0.82 → event 20）。
-    // 1457 加门（:4376）：`nPC != null && type >= 0 && !BoundTownNPCs[type] && !homeless`
+    // 成就：与最大快乐度 NPC 对话（1457 Player.cs:4376-4378 PriceAdjustment<=0.82 →
+    // event 20;1456 旧锚 :4195-4197）。1457 加门（:4376 同 if 内联）：
+    // `nPC != null && type >= 0 && !BoundTownNPCs[type] && !homeless`
     // ——被绑定城镇 NPC（老人/睡渔夫等）与无家者不再误触发砍价成就
     if (npc.vanillaId >= 0 && !Game.BOUND_TOWN_NPC_VANILLA.has(npc.vanillaId)
       && npc.home !== null && this.dialogHappiness.priceMul <= 0.82) {
@@ -43476,9 +43480,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  三件套→MATCHING_ATTIRE / 时装三件→FASHION_STATEMENT / 全染料→DYE_HARD
    *  （GAIN_TORCH_GODS_FAVOR 使用侧 :45616 + 进世界基线 :192-195→achOnWorldEnter）
    *  @param enterWorld 进世界基线变体：原版两处 DYE_HARD 谓词不同面——
-   *  OnPlayerEnteredWorld :180-191 只查 10 个主染料槽（无 miscDyes 面）；
-   *  HandleOnEquip(12/33) :261-279 = 10 主染料 + 全部 miscDyes。TOPPED_OFF 两处
-   *  均 `== 500 && == 200` 字面等值（IIIII231 订正旧 >=） */
+   *  OnPlayerEnteredWorld :180-190 只查 10 个主染料槽（无 miscDyes 面）；
+   *  HandleOnEquip(12/33) :265-279 = 10 主染料（同式解锁门）+ 全部 miscDyes。
+   *  ★清偿刀 P4（2026-09-30）：主染料门改逐槽「解锁∧有染料」计数面（cs:183/:267
+   *  IsItemSlotUnlockedAndUsable）——锁槽不计入,经典世界 8 格满即成;两 face 同修。
+   *  TOPPED_OFF 两处均 `== 500 && == 200` 字面等值（IIIII231 订正旧 >=） */
   achCheckEquipState(enterWorld = false): void {
     const inv = this.player.inv;
     const a = this.achievements;
@@ -43489,7 +43495,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (inv.armor[0] && inv.armor[1] && inv.armor[2]) a.completeFlag('MATCHING_ATTIRE', 'Equip');
     if (inv.armor[10] && inv.armor[11] && inv.armor[12]) a.completeFlag('FASHION_STATEMENT', 'Equip');
-    let allDye = inv.dye.every((s) => !!s);
+    // DYE_HARD 门（AchievementsHelper.cs:180-190/:265-279,1457 亲读）：逐槽
+    //   `IsItemSlotUnlockedAndUsable(num8) && (dye[num8].type<1 || stack<1) → 不发`
+    //   =【锁槽不计入】——经典世界 dye[8]/[9] 恒锁,8 格满即成（两 face 同式;
+    //   HandleOnEquip 另加 miscDyes 全查 :271-277）。旧 `dye.every(!!s)` 要求全
+    //   10 格=经典世界永不可达（清偿刀 P4 定谳真漏）。解锁谓词单源
+    //   Inventory.isItemSlotUnlockedAndUsable（:193,与原版 Player.cs:12669 同构）
+    let allDye = true;
+    for (let i = 0; i < 10; i++) {
+      if (inv.isItemSlotUnlockedAndUsable(i) && !inv.dye[i]) { allDye = false; break; }
+    }
     if (allDye && !enterWorld) allDye = inv.miscDyes.every((s) => !!s);
     if (allDye) a.completeFlag('DYE_HARD', 'Equip');
     // 生命/魔力双满 → TOPPED_OFF（:139-143 / :152-155，字面 ==）

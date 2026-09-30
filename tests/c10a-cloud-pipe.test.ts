@@ -16,11 +16,13 @@ const SKY = readFileSync(resolve(__dirname, '../src/render/SkyRenderer.ts'), 'ut
 const PIPE = readFileSync(resolve(__dirname, '../src/render/GLPipeline.ts'), 'utf8');
 
 describe('C10a 旗面与接线（C10b 转正后旗面演进——缺省开,逃生门=0）', () => {
-  it('?cloudpipe 缺省开（C10b 转正 2026-09-24;!==\'0\'）,node 无 location 恒关,逃生门=0', () => {
+  it('?cloudpipe 缺省开（C10b 转正维持;★SW-闪屏案 2026-09-30:曾回退后由 C10d 共享上下文绘制态自包含硬ening 根治互扰,旗面注存案）,逃生门=0', () => {
     expect(RDR).toContain("get('cloudpipe') !== '0'");
-    expect(RDR).toMatch(/_cloudPipe = \(\(\) => \{[\s\S]{0,300}cloudpipe[\s\S]{0,160}!== '0'/);
+    expect(RDR).toMatch(/_cloudPipe = \(\(\) => \{[\s\S]{0,900}cloudpipe[\s\S]{0,160}!== '0'/);
     // node 判死:typeof location 守卫在旗内（GLPipeline 管线面 document 判死同族）
     expect(RDR).toMatch(/typeof location !== 'undefined' && new URLSearchParams\(location\.search\)\.get\('cloudpipe'\) !== '0'/);
+    // 定谳史注在旗内（防无证据动旗面）
+    expect(RDR).toContain('SW-闪屏案旗面史');
   });
 
   it('注入点分支:cloudpipe 开=acquireCloudPipe;关=acquireGL(旧会话);useGLClouds/cpuRender 总门一致', () => {

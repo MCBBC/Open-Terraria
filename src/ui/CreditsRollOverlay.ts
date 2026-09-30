@@ -28,12 +28,24 @@
 // 资产 = public/sprites/vanilla/{NPC_,Extra_,Projectile_}*.png（既有抽取管线资产）；
 // emote 气泡 = Extra_48（EmoteSegment :464-495，8×N 帧表 34×28）。
 // 字体 = Fusion Pixel（UIFont 注入）近似 FontAssets.DeathText ×0.7（原版位图字库）。
-// 登记债见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md 本批章（玩家形象段、
-// item 喷洒段、NPC 变体/AlternativeTexture/派对帽形象、ShowItem 手持物）。
+// ★M 刀（清偿 BJ409 债#1）：PlayerSegment 玩家形象段 1:1 实装（Segments.cs:117-213）——
+//  phantom = CopyVisuals(Main.LocalPlayer)（:209 皮肤/盔甲全复制）→ 本仓 deps.playerVisual
+//  供给本地玩家 appearance+displayArmor 三槽（Renderer.dollEquipFromInv 单源,SetMatch
+//  三查同链）；帧 = PlayerFrame 闭式（velocity.Y≠0 → 行5 跳跃 :36523/:36824,静止 → 行0;
+//  眨眼由 Player.Update 驱动,phantom 从不 Update → 睁眼恒定=原版同相）；锚 = 盒底中心
+//  （:187-188 position-=(width/2,height)）；绘制复用 compositePaperDoll rows 模式。
+// 登记债见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md 本批章（item 喷洒段、
+// NPC 变体/AlternativeTexture/派对帽形象、ShowItem 手持物、染色剂 dye 通道）。
+// ★C6-P2 清偿刀（2026-09-30）：F2 帧序列两形态 1:1（seqFrameIndex——hold 钳末帧/
+// 循环相位锚段首,Actions.cs:1005-1039）；F6 Blink 域（EvalState.blink+帧梯 rest>
+// blink>walk,帧行 npcFrameCount−AFC−1,NPC.cs:69972）；F8 PauseSkies=零改动定谳
+// （暂停期 fixedUpdate 冻结→tick 自然冻结,见 tick 注）。
 
 import { getCreditsRollFill, invalidateCreditsRollFill, type Act, type Anim, type Seg } from '../world/creditsRollComposer';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
 import { Lang } from '../i18n/Lang';
+import { compositePaperDoll, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import type { Appearance } from '../player/Appearance';
 
 /** Extra_48 气泡帧 34×28（272×1092 → 8 列×39 行） */
 const EMOTE_FW = 34;
@@ -45,21 +57,44 @@ interface SheetImg {
   h: number;
 }
 
-/** 段求值态（Actions.cs ApplyTo 重放载体；NPC=alphaNpc 语义 / 精灵=opacity 语义） */
-interface EvalState {
+/** 段求值态（Actions.cs ApplyTo 重放载体；NPC=alphaNpc 语义 / 精灵=opacity 语义；导出=测试消费面） */
+export interface EvalState {
   alphaNpc: number;        // NPC alpha（0=不透明 … 255=隐；DrawNPCDirect alpha<255 才画）
   opacity: number;         // 精灵 opacity（1=不透明）
   dx: number;              // 相对锚点累计位移
   dy: number;
   rot: number;
   look: number;            // 最后 LookAt（渲染翻面用）
-  seq: { frames: Array<[number, number]>; tpf: number; delay: number } | null;
+  seq: { frames: Array<[number, number]>; tpf: number; delay: number; loop: boolean } | null;
   frame: [number, number] | null;
   moving: boolean;         // Move/accel 活动中（走路动画相位）
   party: boolean;
+  blink: boolean;          // ★C6-F6：NPCs.Blink 域（ai[0]==1001 → 眨眼帧行）
+  vy: number;              // ★M 刀：最后速度 Y（Players.Wait 置 0 / Move=vy / accel=v0+a·num
+                           //  —— Actions.cs 逐类 ApplyTo 终值；玩家帧行判据 velocity.Y≠0）
+  restRow: number | null;  // ★M 刀：NPCs.DoBunnyRestAnimation 钉帧行（:426-470 闭式）
 }
 
 const clamp = (v: number, lo: number, hi: number): number => v < lo ? lo : v > hi ? hi : v;
+
+/** ★C6-F2：SetFrameSequence 帧号闭式（Actions.cs:1005-1039 两形态；导出=测试消费面）。
+ *  循环系（时长参构造 :980-985,_loop=true）——idx = local%(tpf*len)/tpf,相位锚段首
+ *  （local=段本地时间,非 local−delay;:1013-1021,delay 只作 :1007 门槛）；
+ *  一次性系（无时长参 :987-994,hold）——local−delay 钳 [0,tpf*len] 除 tpf,钳末帧
+ *  （:1022-1033）。尾护 idx≥len→len−1（:1017-1020/:1030-1033 浮点护）。 */
+export function seqFrameIndex(seq: NonNullable<EvalState['seq']>, local: number): number {
+  const cyc = seq.tpf * seq.frames.length;
+  let idx: number;
+  if (seq.loop) idx = Math.floor((local % cyc) / seq.tpf);
+  else idx = Math.floor(clamp(local - seq.delay, 0, cyc) / seq.tpf);
+  if (idx >= seq.frames.length) idx = seq.frames.length - 1;
+  return idx;
+}
+
+/** NPCID.Sets.AttackFrameCount（NPCID.cs:4839）——Blink 帧行消费面（本剧仅 108/663
+ *  触发 Blink;其余 id 缺省=不适用）。眨眼帧行 = npcFrameCount−AFC−1（NPC.cs:69433
+ *  num60−1 :69972-69976） */
+export const BLINK_ATTACK_FRAMES: Record<number, number> = { 108: 2, 663: 2 };
 
 /** ★BJ409①：段时间窗门（Segments.cs:244-245 NPCSegment / :397 SpriteSegment 消费端
  *  硬窗 1:1）——`TimeInAnimation < _targetTime || > _targetTime+DedicatedTimeNeeded
@@ -73,7 +108,8 @@ export function inSegWindow(seg: Extract<Seg, { acts: Anim }>, t: number): boole
 /** Anim 动作链求值（Actions.cs ApplyTo 逐条重放；delay 由 Then/With 预分配）。
  *  gravity/rotor/move 的位移在求值期直接累计（vanilla position += 闭式项，
  *  已过窗的动作钳 num=duration 保留终值——与逐帧重放等价） */
-function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean): void {
+/** 动作链求值（纯函数；导出=测试消费面,与 inSegWindow 同域） */
+export function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean): void {
   for (const a of acts) {
     const local = t - a.delay;
     if (local < 0) continue;
@@ -102,6 +138,7 @@ function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean
         break;
       case 'wait':
         st.moving = false;
+        st.vy = 0;              // Wait.ApplyTo（:65-94）：velocity = Vector2.Zero
         break;
       case 'move': {
         const num = Math.min(local, a.d);
@@ -109,6 +146,7 @@ function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean
         st.dy += a.vy * num;
         if (a.vx !== 0) st.look = a.vx > 0 ? 1 : -1;
         st.moving = a.vx !== 0 || a.vy !== 0;
+        st.vy = a.vy;           // NPC Move（:316）：velocity = offsetPerFrame
         break;
       }
       case 'accel': {
@@ -116,6 +154,26 @@ function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean
         st.dx += a.vx * num + a.ax * (num * num * 0.5);
         st.dy += a.vy * num + a.ay * (num * num * 0.5);
         if (a.vx !== 0) st.look = a.vx > 0 ? 1 : -1;
+        st.moving = true;
+        st.vy = a.vy + a.ay * num;   // MoveWithAcceleration（:166）终值
+        break;
+      }
+      case 'rest': {
+        // ★M 刀 DoBunnyRestAnimation（Actions.cs:426-470）：ai[0]=21/ai[1]=31（休息态）
+        //  + frame.Y = 行 {10,11,12,13} 每 4 帧一进（while num3>4 递进、封顶 13）——
+        //  本仓 npc 帧机钉到此行（FindFrame 休息态复现同域,见 BJ409 债章节注）
+        const num = Math.min(local, a.d);
+        st.restRow = Math.min(10 + Math.floor(num / 4), 13);
+        st.moving = false;
+        break;
+      }
+      case 'knock': {
+        // ★M 刀 ZombieKnockOnDoor（Actions.cs:645-685）：bumpOffset=(-1,0)——
+        //  (int)num%60/4 ≤ 3（C# 整除:num%60∈[0,15] 前 16 帧）position += (-1,0)
+        //  +velocity=(0.75,0)，否则 position -= (-1,0)（回位）+velocity=0。位移闭式
+        //  逐帧无状态复现 + velocity.X≠0 → FindFrame 走路帧
+        const num = Math.min(local, a.d);
+        st.dx += Math.floor((Math.floor(num) % 60) / 4) <= 3 ? -1 : 1;
         st.moving = true;
         break;
       }
@@ -146,16 +204,28 @@ function evalActs(acts: readonly Act[], t: number, st: EvalState, isNpc: boolean
         st.seq = null;
         break;
       case 'frames':
-        st.seq = { frames: a.frames, tpf: a.tpf, delay: a.delay };
+        // ★C6-F2①：无时长参 SetFrameSequence 构造（Actions.cs:987-994）= 一次性
+        //  钳末帧（hold）——非无限循环
+        st.seq = { frames: a.frames, tpf: a.tpf, delay: a.delay, loop: false };
         break;
       case 'framesFor':
-        st.seq = { frames: a.frames, tpf: a.tpf, delay: a.delay };
+        // ★C6-F2②：时长参构造（Actions.cs:980-985）= 循环（相位锚段首,见
+        //  seqFrameIndex——delay 只作门槛）
+        st.seq = { frames: a.frames, tpf: a.tpf, delay: a.delay, loop: true };
+        break;
+      case 'blink':
+        // ★C6-F6 Blink（Actions.cs:509-543）：local≥delay → velocity=Zero +
+        //  ai[0]=0；local≤delay+dur → ai[0]=1001（眨眼域,NPC.cs:69972 消费）；
+        //  过窗恒写 ai[0]=0 = 归位正常帧梯
+        st.moving = false;
+        st.vy = 0;
+        st.blink = local <= a.d;
         break;
       case 'party':
         st.party = true;
         break;
       default:
-        break;   // variant/forceAlt/rest/knock：形象变体/专用姿态（登记债）
+        break;   // variant/forceAlt：形象变体/专用贴图域（登记债勿强扩）
     }
   }
 }
@@ -164,6 +234,11 @@ export interface CreditsRollOverlayDeps {
   /** Main.CanPlayCreditsRoll（Main.cs:3223-3232）：!gameMenu && hasCreditsSceneMusicBox
    *  ∪ gameMenu&&menuMode==3000 ∪ IsEventOngoing——由装配侧注入（musicBoxStyle===85） */
   canPlay(): boolean;
+  /** ★M 刀 PlayerSegment.ResetPlayerAnimation → CopyVisuals(Main.LocalPlayer)
+   *  （Segments.cs:209）的本仓供给：本地玩家外观 + 盔甲三槽（dollEquipFromInv
+   *  单源,SetMatch 三查同链——phantom 皮肤/盔甲 1:1 本地玩家）。菜单态无本地玩家
+   *  → null（段窗内不画；同 creditsRoll.canPlay menuMode 3000 登记域） */
+  playerVisual?(): { appearance: Appearance; equip: { head: number | null; body: number | null; legs: number | null } } | null;
 }
 
 class CreditsRollOverlay {
@@ -183,7 +258,16 @@ class CreditsRollOverlay {
   }
 
   /** CreditsRollSky.Update（:35-66）——Game 60Hz 固定档每 tick 调
-   *  （原版 = SkyManager.Instance.Update，Main.cs:17317 每 Main.Update 帧） */
+   *  （原版 = SkyManager.Instance.Update，Main.cs:17317 每 Main.Update 帧）。
+   *  ★C6-F8 定谳（2026-09-30,零改动）：原版 Update 头 FocusHelper.PauseSkies 门
+   *  （CreditsRollSky.cs:37-40,= !IsSelectedApplication ∨ Main.gamePaused）在本仓
+   *  由消费位自然等价——本 tick 只被 Game.fixedUpdate 调（Game.ts fixedUpdate 内
+   *  creditsRoll.updateTime 同帧位）,而本仓 paused（手动/autoPause/失焦自暂停）
+   *  时 fixedUpdate 整段冻结（Game.ts frame() !paused 门+后台泵 pumpGate paused
+   *  门）→ 暂停期 tick 不跑 = _currentTime 自然冻结,与原版门逐帧同相。
+   *  分歧域登记：backgroundRun+playWhenUnfocused 双开的后台挂机态本仓世界照走
+   *  （用户明令特性）而原版 PauseSkies 仍冻天穹钟——与 AuroraSky.ts 同一门既有
+   *  判例（「本仓无对应态」）一致,后台无渲染面、回前台时钟前跳,登记债勿强接门。 */
   tick(): void {
     const playing = this.deps.canPlay();
     if (playing && !this.active) this.activate();
@@ -306,9 +390,18 @@ class CreditsRollOverlay {
         const st: EvalState = blankState();
         evalActs(seg.acts.acts, local, st, true);
         if (!(st.alphaNpc < 255)) continue;          // DrawNPCDirect alpha<255 门
-        // 走路动画相位（FindFrame 城镇分支近似：移动推进帧 2..12、站定帧 0）
+        const frames = VANILLA_NPCS[String(seg.type)]?.frames ?? 1;
+        // 帧梯（FindFrame 城镇分支 ai[0] else-if 链序 :69436-69976：20-22 休息 >
+        // 1001 眨眼 > 走路）：rest → blink → walk 相位/站定
         let frame = 0;
-        if (st.moving) {
+        if (st.restRow !== null) {
+          frame = st.restRow;          // ★M 刀：休息动画钉帧（DoBunnyRestAnimation 行 10..13）
+        } else if (st.blink && BLINK_ATTACK_FRAMES[seg.type] !== undefined) {
+          // ★C6-F6：Blink 帧行 = npcFrameCount−AttackFrameCount−1（NPC.cs:69433
+          //  num60−1 → :69972-69976 frame.Y=num*(num60-1);108/663 AFC=2）
+          frame = frames - BLINK_ATTACK_FRAMES[seg.type] - 1;
+          this.walkPhase.delete(seg);
+        } else if (st.moving) {
           const ph = (this.walkPhase.get(seg) ?? 0) + 1;
           this.walkPhase.set(seg, ph);
           frame = 2 + Math.floor(ph / 6) % 11;
@@ -317,7 +410,6 @@ class CreditsRollOverlay {
         }
         this.loadSheet(`NPC_${seg.type}`, (s) => {
           if (!s) return;
-          const frames = VANILLA_NPCS[String(seg.type)]?.frames ?? 1;
           const fh = s.h / frames;
           const fw = s.w;
           // 城镇 NPC 原生朝左；direction 1（右）→ 水平翻转（Main.cs:23356-23359
@@ -346,8 +438,9 @@ class CreditsRollOverlay {
           const fw = s.w;
           let col = 0, row = 0;
           if (st.seq) {
-            const idx = Math.floor(Math.max(0, local - st.seq.delay) / st.seq.tpf) % st.seq.frames.length;
-            [col, row] = st.seq.frames[idx];
+            // ★C6-F2：帧号闭式两形态（hold/循环+相位锚段首）——此前统一取模循环
+            //  且相位锚动作起点（local−delay）= 双偏离（Actions.cs:1005-1039）
+            [col, row] = st.seq.frames[seqFrameIndex(st.seq, local)];
           } else if (st.frame) {
             [col, row] = st.frame;
           }
@@ -365,16 +458,49 @@ class CreditsRollOverlay {
         });
         continue;
       }
-      // k==='player'：PlayerSegment（Segments.cs:170-206）——本仓缺独立玩家烘焙口，
-      // 时序保留（登记债：形象不渲染，不影响 timeline/endTime）
+      if (seg.k === 'player') {
+        // ★M 刀：PlayerSegment.Draw（Segments.cs:170-206）1:1——
+        //  窗门 :172-175（同 npc/spr）→ ResetPlayerAnimation :207-212（锚+动作链闭式
+        //  重放）→ PlayerFrame 帧行 → DrawPlayer（盒底中心锚,opacityForAnimation×
+        //  DisplayOpacity 乘色,fullRotation=0,socialIgnoreLight=无光照 tint）。
+        //  染色剂 dye 通道（ImmediateSpritebatchForPlayerDyesEffect :126-139 批模式
+        //  切换面）不渲染=登记债。
+        if (!inSegWindow(seg, t)) continue;
+        const local = t - seg.t;
+        const st = blankState();
+        evalActs(seg.acts.acts, local, st, false);
+        if (st.opacity <= 0) continue;               // opacityForAnimation=0 → 乘色全透明
+        const visual = this.deps.playerVisual?.() ?? null;
+        if (!visual) continue;                       // 无本地玩家（菜单态）：窗内不画
+        // 帧行（PlayerFrame :36523/:36824 velocity.Y≠0 → 跳跃行5、静止 → 行0；phantom
+        // 域无翼/骑乘/沙暴/eocDash 分支——CopyVisuals 不复制 buff,ResetEffects 后恒 0）
+        const rows = st.vy !== 0 ? { body: 5, legs: 5 } : { body: 0, legs: 0 };
+        const doll = compositePaperDoll(visual.appearance, visual.equip, { rows });
+        if (!doll) continue;                         // 贴图未就绪（texReady 门,下帧自愈）
+        const px = ax + (seg.dx + st.dx) * S;
+        const py = ay + (seg.dy + st.dy) * S;
+        // 玩家 20 帧表默认朝右（与城镇 NPC 相反）→ direction 1 不翻、-1 镜像
+        // （Renderer 实体玩家同式 scale(facing,1),Renderer.ts:16007-16008）
+        const flip = st.look < 0 ? -1 : 1;
+        ctx.save();
+        ctx.globalAlpha = st.opacity * displayOpacity;   // opacityForAnimation *= DisplayOpacity（:189）
+        ctx.translate(px, py);
+        ctx.scale(flip * S, S);
+        // 贴底 +4（原版全层 Position.Y+height−frameH+4,Renderer.ts:16223-16225 同源）
+        ctx.drawImage(doll, 0, 0, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + 4, FRAME_W, FRAME_H);
+        ctx.restore();
+        continue;
+      }
     }
   }
 }
 
-function blankState(): EvalState {
+/** 求值态初值（导出=测试消费面） */
+export function blankState(): EvalState {
   return {
     alphaNpc: 0, opacity: 1, dx: 0, dy: 0, rot: 0, look: 1,
-    seq: null, frame: null, moving: false, party: false,
+    seq: null, frame: null, moving: false, party: false, blink: false,
+    vy: 0, restRow: null,
   };
 }
 

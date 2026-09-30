@@ -11,8 +11,11 @@
  *  · 三受理门唯一否决位 = hiScore>0，roomEvil 仅为 hiScore≤0 时的文案选择器：
  *    QuickFindHome cs:5692-5713 / SpawnTownNPC cs:5356-5360 / MoveTownNPC
  *    cs:4719-4747（occupied→evil→无站位→缺件 文案序）。
- *  · moveOut = 复核链 QuickFindHome 失败 → homeless=true（cs:5705-5713；
- *    Main.cs:65088-65092 每 7200t 对 !homeless 全员重跑）。
+ *  · moveOut = 复核链 QuickFindHome 失败 → homeless=true（cs:5705-5713 两 else 支,
+ *    写位 :5707/:5712；每 7200t 对 !homeless 全员重跑 = Main.cs:66526-66534 门
+ *    （checkForSpawns<7200/worldUpdateRate :66529）+ :66590-66592 调用
+ *    （★清偿刀 P4 锚勘误 2026-09-30:旧引 Main.cs:65088-65092 漂移,1457 亲读复核;
+ *    夜扫 UnspawnHomelessNPC = :66022-66024）。
  *  · 本仓病灶层 = housingCheckAt 曾把 roomEvil 恒作否决位（比原版严一格：
  *    evilNet∈[50,300) 且站位分>0 的腐化带装饰房,原版放行,本仓手动分配被拒）。
  *    ——本文件 T5 锁刀;T1-T4/T6-T7 锁环境门本体与 moveOut。

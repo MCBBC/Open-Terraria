@@ -160,21 +160,20 @@ describe('BJ235 ③ 绿带 1020/1024/1026（DrawTrail 1:1）', () => {
     expect(fills[0].args.slice(-2)).toEqual([30, 4]);   // 段长 30 × 宽 4
     expect(String(ctx.fillStyle)).toBe('rgb(140,234,180)');
   });
-  it('1020 双遍（±(10,2) 偏移随 oldRot 旋）：段数×2、α=(127/255)×(1−i/20)、色 (177,255,32)', () => {
+  it('1020 支已随清偿刀 N 退役（2026-09-30）：载体=DroneProjs JimsDroneProj（自带双尾迹+cPet 染色版）,Arrow 不再携带 1020 → drawGreenBandTrail(1020)=no-op', () => {
+    // 旧锚（绿带 4 段/α=(127/255)×(1−i/20)/色 (177,255,32)）已随 1020 分支摘除
+    // 而失效——原版 DrawContinuousTrail（Main.cs:28300-28328）有 cPet 染料门
+    // （cPet==0 绿带 / cPet!=0 白带过整弹染料 pass）,染色实装面在
+    // src/data/projDye.ts（dyedSolidBand）+ DroneProjs.draw,本函数只承载无染料
+    // 门的 1024/1026（上方两锚维持）。判别锁：1020 入参零绘制=死支摘除回归锁。
     const ring = new ProjGhostRing(1020);               // cap 20/mode 2
     ring.record(0, 0, 0.5, 1, true);
     ring.record(40, 0, 0.5, 1, true);
     ring.record(80, 0, 0.5, 1, true);
     const ctx = makeCtx();
     drawGreenBandTrail(ctx, ring, 1020, 32, 20);
-    const fills = ctx.calls.filter((c) => c.op === 'fillRect');
-    expect(fills.length).toBe(4);                       // 2 段 × 2 遍
-    expect(fills[0].alpha).toBeCloseTo((127 / 255) * (1 - 2 / 20), 6);
-    expect(String(ctx.fillStyle)).toBe('rgb(177,255,32)');
-    // 偏移 (10,2) 随 oldRot=0.5 旋 → 起点不在纯 size/2 上（两遍 translate 不同）
-    const trs = ctx.calls.filter((c) => c.op === 'translate');
-    expect(trs.length).toBe(4);
-    expect(trs[0].args[0]).not.toBe(trs[1].args[0]);    // +off 与 −off 两遍镜像
+    expect(ctx.calls.filter((c) => c.op === 'fillRect').length).toBe(0);
+    expect(ctx.calls.filter((c) => c.op === 'translate').length).toBe(0);
   });
   it('未填槽（Zero 哨兵）不画', () => {
     const ring = new ProjGhostRing(1026);
