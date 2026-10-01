@@ -435,7 +435,13 @@ function parseProjGrid() {
   //  ——Main.DrawKite Main.cs:37972 Frame(projFrames,1,frame) 横参=列数）→ 基数
   //  4（1094/1113/1092/660）→ 16。贴合闸（gridFit）对全表生效,轴面由 tests/
   //  bj415-kite-frames.test.ts 钉值。
-  must(Object.keys(grid).length === 16, `PROJ_GRID 基数 ${Object.keys(grid).length} ≠ 16（1094/1113/1092/660+风筝族12）`);
+  // ★S2/BJ415 观察项收口 2026-10-01（Arrow.ts 同批,tests/s2-proj-acceptface-batch.test.ts
+  //  §D 钉值）：DrawProj 专支横切二型入表——857 初代分形（Main.cs:33934 Frame(15,1,
+  //  frame);Main.projFrames[857] 无赋值恒 1,帧数由本表供出）+ 908 钛金风暴碎片
+  //  （Main.cs:33918 Frame(projFrames[908]=12,1,frame)）→ 基数 16 → 18。
+  //  ★清偿刀 V2 2026-10-01 金标再生核：金标 9/30 冻结面 16 键陈旧,按「金标陈旧须
+  //  oracle 重产」判例双旗重产（diff=恰 857/908 新增面,见 tests/golden 再生批注）。
+  must(Object.keys(grid).length === 18, `PROJ_GRID 基数 ${Object.keys(grid).length} ≠ 18（1094/1113/1092/660+风筝族12+857/908 专支横切二型）`);
   return grid;
 }
 

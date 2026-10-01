@@ -23,7 +23,6 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { hitEnemies, HitCooldown, FlailProj, RainCloudProj } from '../src/entities/WeaponProj';
 import { projDrawOffsetFor } from '../src/entities/WeaponProj';
 import { setProjSpriteOverride } from '../src/entities/Arrow';
-import { ghostHealProc } from '../src/entities/SpectreSoulProj';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -183,13 +182,15 @@ describe('BJ393 件2: onAccepted 判据 !vanillaGated（直呼 hitEnemies 判别
     };
     const g = makeHitGame([e], stealLog);
     const self = { x: PX - 2, y: PY - 2, w: 20, h: 20, vx: 1, damage: 50, knockback: 0, projId: 245, critChance: 0 };
+    // ★清偿刀 U2（2026-10-01）：ghostHealProc 已上收 hitEnemies 受理位单源（旧档雨滴
+    //  onAccepted 内嵌式=本测当时镜像的生产接线,现撤）——回调退纯受理记账面,proc
+    //  断言改由共享环单源承载（245 magic 数据面 → isMagic=true 同相）。
     hitEnemies(self, g, new HitCooldown(), 10, 1, 0, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, (ent) => {
         accepted.push(ent);
-        ghostHealProc(g, 245, 0, ent as Parameters<typeof ghostHealProc>[3]);   // 雨滴接线同式（:13877-79）
       });
     expect(accepted.length).toBe(1);                      // ★判据面:返假≠门拒 → 受理
-    expect(stealLog.length).toBe(1);                      // ghostHealProc 同平面照 proc
+    expect(stealLog.length).toBe(1);                      // ghostHealProc 受理位单源照 proc
     expect(stealLog[0].isMagic).toBe(true);               // 245 magic 数据面
   });
 

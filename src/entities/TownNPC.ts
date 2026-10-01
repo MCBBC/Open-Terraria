@@ -1192,6 +1192,13 @@ export class TownNPC extends Entity {
   hp: number;
   maxHp: number;
   iframes = 0;
+  // ★清偿刀 W1（2026-10-01）：justHit 显式载体（原版 ResetEffects 每 tick 复位
+  //  NPC.cs:8534 / StrikeNPC 受理置真 :82103）。旧近似「iframes===10」(:1872-74)
+  //  键于 hurt 通用档写位——鞭写梯清窗（immune[owner]=0,Projectile.cs:14175-14178
+  //  usesLocal 主支）后 iframes=0,近似面丢失=鞭×微光转化镇民衰减档(−0.1/t :92650)
+  //  假阴。受理 hurt 恒置 1、tick 头读后递减——与旧近似在全部既有路径逐位同相
+  //  （10t 档写 10→首拍头真;同拍双伤复核/force 直击通道/xMas 清算同真）。
+  justHitT = 0;
   // ---- 自卫攻击（AI_007 攻击态 ai[0]=10/12/14/15,NPC.cs:54747-55538）----
   /** 当前攻击态(0 空闲 / 10 近战弹 / 12 弓 / 14 魔法 / 15 挥击) */
   private atkState = 0;
@@ -1443,6 +1450,7 @@ export class TownNPC extends Entity {
     dmg = Math.trunc(calc * (crit ? 2 : 1));
     this.hp -= dmg;
     this.iframes = 10;
+    this.justHitT = 1;   // ★W1：受理 StrikeNPC 置真（NPC.cs:82103）——含 force 通道
     // ★对齐批①：受击打断医师治疗态——原版 StrikeNPC 的 townNPC 分支直接改写
     // ai[0]=1（NPC.cs:82148-82157），治疗态同理被打断；弹已离手（独立实体）不受
     // 影响（aiStyle110 弹与发射者解耦）。本仓其余「转身走开」面维持既有 hurt
@@ -1869,9 +1877,11 @@ export class TownNPC extends Entity {
         else this.swingImmune.set(k, v - 1);
       }
     }
-    // justHit 近似（原版逐 tick 旗标）：hurt() 置 iframes=10 且只在无无敌帧时生效
-    // → 递减前 ==10 恰好标记"自上 tick 起受过击"（微光衰减 −0.1 档 NPC.cs:92650）
-    const justHit = this.iframes === 10;
+    // justHit 显式载体（★W1 替换旧「iframes===10」近似——鞭写梯清窗面丢失案,
+    //  字段注见 hurt/声明处）：hurt() 受理置 1（NPC.cs:82103）,tick 头读后递减
+    //  （=ResetEffects :8534 复位位次）——微光衰减 −0.1 档（:92650）消费同前。
+    const justHit = this.justHitT > 0;
+    if (this.justHitT > 0) this.justHitT--;
     if (this.iframes > 0) this.iframes--;
     // buff 25 Tipsy 递减（NPC.cs:93174 lowerBuffTime,UpdateNPC 每 tick 头部）+
     // 醉酒气泡金尘（:92349-92370：rand(4)==0 且 rand(2)==0 → 净 1/8,尘 4

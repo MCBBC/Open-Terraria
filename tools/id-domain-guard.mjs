@@ -106,7 +106,9 @@ const T_SHEET_TABLES = [
   ['TILE_NO_SUN_LIGHT_SHEETS', ['lighting/lightTables.ts', 'lighting/TileLightScanner.ts']],
   ['FLICKER_SHEETS', ['lighting/lightTables.ts', 'lighting/TileLightScanner.ts']],
   ['MUSHROOM_GLOW_SHEETS', ['lighting/lightTables.ts', 'lighting/TileLightScanner.ts']],
-  ['ALLOW_LIGHT_IN_WATER_SHEETS', ['lighting/lightTables.ts', 'lighting/TileLightScanner.ts']],
+  // ★BJ426-债A(2026-10-01):BJ221 已把定义家迁 data/tiles.ts(lightTables 本地副本拆除,
+  //   lightTables.ts:157 注;唯一消费面 TileLightScanner:752 sheet 域)——定义家入清单
+  ['ALLOW_LIGHT_IN_WATER_SHEETS', ['data/tiles.ts', 'lighting/lightTables.ts', 'lighting/TileLightScanner.ts']],
   // ★BJ158①/②（2026-09-18）单源收编家族:data/tiles.ts=唯一定义家,其余=已核读消费面
   //  （sheet 域直查消费,均已亲读键域相配）;新消费面须先平移到内部域或走 FORBIDS_SLOPING_IDS
   ['FORBIDS_SLOPING_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'world/gen/vanilla/TrackPass.ts',
@@ -118,13 +120,17 @@ const T_SHEET_TABLES = [
   //   AV_BREAK_PLACE 与 IsATreeTrunk×4/Boulders×7/Platforms×8 世界生成面)已拆除——
   //   任何文件再出现这些名字的【定义】即 T2 红(结构锁=无副本可立;家清单内=已核读
   //   sheet 域消费面)。BOULDERS_IDS 为内部域镜像,入清单同样只作防复活锁。
-  //   ★登记债:core/Game.ts:1554 同名本地副本 PLATFORMS_SHEETS 未收编(Game.ts 为并行
-  //   会话热文件,本批不落刀)——此处白名单仅豁免其既有存在,收编时从清单摘除。
+  //   ★BJ426-债A 复核(2026-10-01):旧登记债「Game.ts:1554 同名本地副本 PLATFORMS_SHEETS
+  //   未收编」已灭——Game.ts:142 现为 data/tiles.ts 单源 import,盘上无本地副本
+  //   (Game.ts:1751 收编注在锚),core/Game.ts 作已核读消费面留驻清单。
   ['TILE_CUT_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'world/TileAnchorValidator.ts',
     'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/evolution/WorldEvolution.ts',
     'entities/RollingBoulder.ts', 'world/gen/vanilla/FinalCleanupPass.ts',
     'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/DesertPass.ts',
-    'world/gen/vanilla/DungeonPass.ts', 'world/liquid/LiquidSim.ts']],
+    'world/gen/vanilla/DungeonPass.ts', 'world/liquid/LiquidSim.ts',
+    // ★BJ426-债A(2026-10-01)转正:Door.ts shiftTrapdoor 折翼行门/砍切臂(cellSheet 平移
+    //   sheet 域,≡WorldGen.cs:52001/:52013-52019 tileCut 臂,BJ324 新消费面)
+    'world/Door.ts']],
   ['BREAKABLE_WHEN_PLACING_SHEETS', ['data/tiles.ts', 'world/TileAnchorValidator.ts',
     'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/evolution/WorldEvolution.ts',
     'entities/RollingBoulder.ts', 'player/SmartCursor.ts',
@@ -153,17 +159,25 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/FinalSeedCleanupPass.ts', 'world/gen/vanilla/FinishNoTrapsPass.ts',
     'world/gen/vanilla/LivingTreePass.ts', 'world/gen/vanilla/MarbleGranitePass.ts',
     'world/gen/vanilla/NotTheBeesPass.ts', 'world/gen/vanilla/SecretSeedDoEndsPass.ts',
-    'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/gen/vanilla/TrapsPass.ts']],
+    'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/gen/vanilla/TrapsPass.ts',
+    // ★BJ426-债A(2026-10-01)转正:VanillaFraming SETS_ORE=S256([...ORE_SHEETS]) 构建
+    //   期 sheet 键 LUT(facade Ore:(t)=>SETS_ORE[t],t=原版 tile.type;BJ210 收编面漏挂)
+    'render/VanillaFraming.ts']],
   ['NOT_REALLY_SOLID_SHEETS', ['data/tiles.ts', 'render/RenderAudit.ts', 'world/Torch.ts',
     'player/SmartCursor.ts', 'render/VanillaTiler.ts',
     'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts',
     'world/gen/vanilla/TeleportSpotCheck.ts', 'world/gen/vanilla/TrapsPass.ts',
-    'world/liquid/LiquidSim.ts']],
+    'world/liquid/LiquidSim.ts',
+    // ★BJ426-债A(2026-10-01)转正:Game.ts:1584 anchorSolidBottom 顶锚 !NotReallySolid
+    //   臂(d.vanilla?.sheet 域直查,≡TileID.cs:359;§6h 金标已锁表值)
+    'core/Game.ts']],
   ['IS_BEAM_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'render/RenderAudit.ts',
     'world/Torch.ts', 'player/SmartCursor.ts',
     'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/TeleportSpotCheck.ts']],
   ['IS_A_DRIP_TILE_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'entities/RollingBoulder.ts',
-    'render/WindSway.ts']],
+    'render/WindSway.ts',
+    // ★BJ426-债A(2026-10-01)转正:Door.ts 折翼行门/砍切臂(同 TILE_CUT_SHEETS 注)
+    'world/Door.ts']],
   ['IS_A_CONTAINER_SHEETS', ['data/tiles.ts', 'wld/WldImport.ts',
     'world/gen/vanilla/TrackPass.ts', 'world/liquid/LiquidSim.ts']],
   ['IS_A_TREE_TRUNK_IDS', ['data/tiles.ts', 'world/gen/vanilla/HalfBrickPass.ts',
@@ -192,7 +206,12 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/HellforgesPass.ts', 'world/gen/vanilla/PilesPass.ts',
     'world/gen/vanilla/StatuesPass.ts', 'world/gen/vanilla/TeleportSpotCheck.ts',
     'world/gen/vanilla/TemplePass.ts', 'world/gen/vanilla/TileCleanupPass.ts',
-    'world/gen/vanilla/TrapsPass.ts']],
+    'world/gen/vanilla/TrapsPass.ts',
+    // ★BJ426-债A(2026-10-01)转正两处:
+    //   · VanillaFraming SETS_PLATFORMS=S256([...PLATFORMS_SHEETS]) sheet 键 LUT(BJ221 收编面漏挂)
+    //   · ClingerStaffWallProj CLINGER_WALL_STOP_SHEETS=[...PLATFORMS_SHEETS,380] 停行集
+    //     (sheetAt sheet 域消费,≡Player.cs:49110-49117 弹482 发射侧下扫 Platforms[t]∥t==380)
+    'render/VanillaFraming.ts', 'entities/ClingerStaffWallProj.ts']],
   ['PLATFORMS_IDS', ['data/tiles.ts', 'world/gen/vanilla/CorruptionPass.ts',
     'world/gen/vanilla/QuickCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts']],
 ];
@@ -273,6 +292,28 @@ function findName(codeLines, name) {
   return hits;
 }
 
+/** 词边界版(BJ426-债A 2026-10-01,T2 家清单判定专用):裸 indexOf 会把
+ *  IGNORED_IN_HOUSE_SC|ORE_SHEETS 这样的超名子串误判成整名漏出(Housing.ts 伪报
+ *  判例——其全文件零 ORE_SHEETS 消费,词边界 grep 恒落空)。命中两侧任一为
+ *  [A-Za-z0-9_$] 即拒。★T_ANCHORS/IDG-1..4 不改用本函数:防空洞锚有意的子串
+ *  语义('ORE_FINDER_PRIORITY_SHEET' 须命中 '..._SHEETS' 消费面)勿动。 */
+export function findNameBounded(codeLines, name) {
+  const wordChar = /[A-Za-z0-9_$]/;
+  const hits = [];
+  codeLines.forEach((line, i) => {
+    let idx = line.indexOf(name);
+    while (idx >= 0) {
+      const before = idx > 0 ? line[idx - 1] : '';
+      const after = idx + name.length < line.length ? line[idx + name.length] : '';
+      if (!wordChar.test(before) && !wordChar.test(after)) {
+        hits.push({ line: i + 1, text: line.trim().slice(0, 120) });
+      }
+      idx = line.indexOf(name, idx + name.length);
+    }
+  });
+  return hits;
+}
+
 export function auditIdDomains(srcDir = SRC) {
   const violations = [];
   const files = collectTs(srcDir);
@@ -330,9 +371,10 @@ export function auditIdDomains(srcDir = SRC) {
       if (findName(lines, a).length === 0) violations.push({ rule: 'IDG-T1', file: f, msg: `tile 域平移链锚失位:代码面找不到 \`${a}\`(修法重构须随迁本守卫)` });
     }
   }
-  // IDG-T2 裸 sheet 表跨文件漏出禁令(注释面豁免=codeSurface 已剥)
+  // IDG-T2 裸 sheet 表跨文件漏出禁令(注释面豁免=codeSurface 已剥;词边界匹配=
+  //   BJ426-债A 收编刀,防超名子串伪报——Housing.ts IGNORED_IN_HOUSE_SCORE_SHEETS 判例)
   for (const [name, homes] of T_SHEET_TABLES) {
-    const hitFiles = files.filter((f) => findName(surfaceOf(f), name).length > 0);
+    const hitFiles = files.filter((f) => findNameBounded(surfaceOf(f), name).length > 0);
     for (const f of hitFiles) {
       const rel = f.slice(SRC.length + 1);
       if (!homes.includes(rel)) {

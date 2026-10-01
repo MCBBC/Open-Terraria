@@ -299,10 +299,10 @@ export class Inventory {
    *  CanShareArmor（:5699-5727 槽型门 + CanEquipBothAccessories 配件互斥）承担,
    *  不存在"属性走裸 armor[]"的例外。视觉族（Main.cs:17552 头身腿帧/Player.cs:9696
    *  UpdateItemDye/UpdateVisibleAccessories）同样走 effective。
-   *  CanShareArmor 的配件互斥深检：第一门 CanEquipInArmorSlot（含互斥组臂）已随
-   *  armorAccepts 组臂落全（★清偿刀 Z,ItemSlot.cs:3474-3480/:3531-3535）;低位空槽
-   *  逐槽配对扫（:5713-5732,CanEquipBothAccessories 物品对表）仍未建模（R4-19 登记
-   *  债残面）;sharedFromLoadout 幽灵绘制/角标/空槽
+   *  CanShareArmor 全门已落（★W3 清偿刀 2026-10-01,R4-19 登记债收口）：第一门
+   *  CanEquipInArmorSlot（含互斥组臂,清偿刀 Z,ItemSlot.cs:3474-3480/:3531-3535）+
+   *  第二段低位空槽逐槽配对扫（:5712-5732,canShareArmor ②）——见该方法注;
+   *  sharedFromLoadout 幽灵绘制/角标/空槽
    *  悬停代打已接（UI.paintLoadoutShare + showTooltipFor,ItemSlot.Draw :2454-2473） */
   getEffectiveArmor(slot: number): InvItem | null {
     const cur = this.armor[slot] ?? null;
@@ -310,8 +310,8 @@ export class Inventory {
     for (const lo of this.loadouts) {
       const item = lo.armor[slot];
       if (item && item.favorited) {
-        if (this.armorAccepts(slot, item.id)) return item;   // CanShareArmor 槽型门
-        break;                                               // :5688-5691 不兼容 → break
+        if (this.canShareArmor(item, slot)) return item;   // CanShareArmor 全门（①槽型门+②低位配对扫）
+        break;                                             // :5693-5695 不兼容 → break
       }
     }
     return cur;
@@ -330,17 +330,52 @@ export class Inventory {
 
   /** 共享来源序号（tooltip "共享自配装{0}"/ItemLoadoutSharedFrom 用,GetEffectiveArmor
    *  的 out sharedFromLoadout 位）：当前槽非空 → null;否则首个同槽收藏件（甲侧过
-   *  armorAccepts 门,不兼容 break 同 :5688-5691）→ 其 Loadout 序号 */
+   *  canShareArmor 全门,不兼容 break 同 :5693-5695）→ 其 Loadout 序号 */
   effectiveSharedFrom(slot: number, dye: boolean): number | null {
     if ((dye ? this.dye[slot] : this.armor[slot])) return null;
     for (let i = 0; i < this.loadouts.length; i++) {
       const item = (dye ? this.loadouts[i].dye : this.loadouts[i].armor)[slot];
       if (item && item.favorited) {
-        if (!dye && !this.armorAccepts(slot, item.id)) break;
+        if (!dye && !this.canShareArmor(item, slot)) break;
         return i;
       }
     }
     return null;
+  }
+
+  /** CanShareArmor（1457 Player.cs:5706-5734）1:1——共享准入双门（★W3 清偿刀
+   *  2026-10-01,R4-19 登记残面「低位空槽逐槽配对扫」收口）：
+   *  ①第一门 armorAccepts（:5708-5711 CanEquipInArmorSlot,组臂/类门已随 Z/R4/P4 落全）。
+   *  ②第二段（:5712-5732）：vanity=shareItem 所在半段（:5712）;自目标槽在【同半段内】
+   *  向低位逐槽步进（while slot%10>3 → 功能段 4-9 扫 3..slot-1、时装段 14-19 扫
+   *  13..slot-1;部位槽与首配饰槽 3/13 不进扫——:5713-5715）。低位【被占】continue
+   *  （该位 worn 非空=共享不发生,无新增配对面 :5716-5719）;低位【空】则扫全部
+   *  Loadout（含当前仓——原版 Loadouts[Current] 仅换装时 Swap 交换、非实时镜像,
+   *  与本仓同构）首个【收藏】件定谳：与 shareItem 过 CanEquipBothAccessories
+   *  （accPairConflicts 单源:同款/双翅+社交段 3580 例外/互斥组,ItemSlot.cs:3460-3481;
+   *  vanity 实参=shareItem 半段 :5725）冲突 → 整体拒共享（return false :5729）;
+   *  兼容 → 该低位放行,继续扫更低位（break :5727,后续 Loadout 不再看）。
+   *  全低位通过 → true（:5733）。语义=shareItem 入位后低位空槽的收藏件将经
+   *  GetEffectiveArmor 一并共享入位、两件同时在场——配对冲突者不得同时共享。
+   *  ★只查【收藏】件对,不复核低位件自身共享资格（原版同式——低位件第一门若败
+   *  本段仍按其位收藏状态定谳,保守同构）。GetEffectiveArmor(:307)/
+   *  effectiveSharedFrom(:334) 两消费面同走本门=原版唯二调用点同源 */
+  private canShareArmor(shareItem: InvItem, slot: number): boolean {
+    if (!this.armorAccepts(slot, shareItem.id)) return false;   // :5708-5711 ①第一门
+    const vanity = slot >= VANITY_ARMOR_START;                  // :5712
+    let s = slot;
+    while (s % VANITY_ARMOR_START > ACC_ARMOR_START) {          // :5713 同半段向低,止于 3/13
+      s--;
+      if (this.armor[s]) continue;                              // :5716-5719 低位被占=无共享面
+      for (const lo of this.loadouts) {                         // :5720-5731
+        const item = lo.armor[s];
+        if (item && item.favorited) {
+          if (accPairConflicts(shareItem.id, item.id, vanity)) return false;   // :5725-5729
+          break;                                                // :5727 该低位放行,继续更低位
+        }
+      }
+    }
+    return true;                                                // :5733
   }
 
   /** 该槽位是否为油漆/涂层（Item.PaintOrCoating，Item.cs:334-344：
@@ -430,10 +465,10 @@ export class Inventory {
    *  HasSameItemInSlot 组员跨段同拘（:3531-3535 `num != -1 && num == num2`,
    *  ItemID.cs:58 组表={6168,6169,6193,6194}——谓词单源 vanillaEquip.accGroupClash,
    *  与 UI.ts 右键/拖放/时装互换三面同源）。部位槽（0-2/10-12）组值恒 −1 组臂天然
-   *  直通（clash 循环只覆盖配饰段,不入组臂）。内部消费面 CanShareArmor 快捷装备
-   *  （getEffectiveArmor :311）/Loadout（effectiveSharedFrom :337）经本门自动承接——
-   *  原版 CanShareArmor（Player.cs:5706-5734）=CanEquipInArmorSlot（含组臂）+
-   *  低位空槽逐槽配对扫（:5713-5732,仍未建模=R4-19 登记债残面）。
+   *  直通（clash 循环只覆盖配饰段,不入组臂）。内部消费面经 canShareArmor 第一门
+   *  自动承接——原版 CanShareArmor（Player.cs:5706-5734）=CanEquipInArmorSlot（含组臂）
+   *  +低位空槽逐槽配对扫（:5712-5732,★W3 清偿刀 2026-10-01 已落 canShareArmor ②,
+   *  R4-19 收口）。
    *  vi_ 批次物品的部位/配饰归属查 vanilla-itemstats.json（注册期无字段） */
   armorAccepts(i: number, id: number): boolean {
     if (i < 0 || i >= ARMOR_TOTAL) return false;

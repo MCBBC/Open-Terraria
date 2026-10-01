@@ -86,10 +86,17 @@ function canKillTile(st: TileStore, x: number, y: number): boolean {
   if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
     if (st.flags[up]) {
-      const sh = sheetOf(st.type[up]);
-      const self = sheetOf(st.type[i]);
-      if (UP_PROTECT_FAMILY.has(sh) && self !== sh) return false;
-      if (IS_TREE_TRUNK.has(sh) || sh === 323) {
+      // ★BJ426（2026-09-23 域错位定谳+落刀）：UP_PROTECT_FAMILY（idsByVanillaSheet 产物）
+      //  与 IS_TREE_TRUNK（=IS_A_TREE_TRUNK_IDS 镜像,BJ182b 收编）均为【内部 id 域】表，
+      //  曾裸传 sheetOf(...)（sheet 域）→ 两臂全死（758/760 defs 两域撞号仅 2 例,该七值
+      //  21/26/72/77/88/467/488 与树干族恰不撞）=CanKillTile 上邻箱/祭坛/树干保护整缺
+      //  （传送器清场臂 :183-197 可杀箱下格,原版拒）。修=两表改传内部 id（原版 type 对
+      //  type 比较语义）;sh 保留 sheet 域供 323 字面与帧位门（TileCleanupPass/
+      //  FinalSeedCleanupPass 同款谓词走 sheet 表=域一致,勿混抄）。
+      const tUp = st.type[up];
+      const sh = sheetOf(tUp);
+      if (UP_PROTECT_FAMILY.has(tUp) && st.type[i] !== tUp) return false;
+      if (IS_TREE_TRUNK.has(tUp) || sh === 323) {
         const fx = st.frameX[up], fy = st.frameY[up];
         // 帧位例外（:62282-84 侧枝列放行）
         const sideBranch = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110)

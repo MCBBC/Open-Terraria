@@ -70,8 +70,10 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
   it('分回合回退=双会话双 blit（夹层内容在场;bg 全幅 blit 结构与 C10a/glfx 同）', () => {
     // else 分支:bg begin→draw→end→全幅 blit（1:1 旧结构,夹层矩形仍画主画布）
     // ★C10d:split 分支 begin 后插入远云 stash 发射（flushFarDeferredGL）
+    // ★A3:远云发射后接 far 灯笼选集发射（flushFarLanternGL——远云后/biomeBg 前
+    //  =sky.draw 4741 位原 2D 层序;lantern 夜帧回收刀 2026-10-01）
     // ★C10e:end 后 blit 加直出门（管线后端 skip blit;glfx/旗关=原路径）
-    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*\/\/ ★C10e[\s\S]{0,300}if \(!\(this\._c10eFrame && glbg\.pipeBackend\)\) ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
+    expect(RDR).toMatch(/glbg\.begin\('bg'\);\s*\n\s*this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*(\/\/[^\n]*\n\s*)*this\.sky\.flushFarLanternGL\(glbg\);\s*\n\s*(\/\/[^\n]*\n\s*)*if \(!remixSkipSurfaceBg\) \{[\s\S]{0,300}glbg\.end\(\);\s*\n\s*\/\/ ★C10e[\s\S]{0,300}if \(!\(this\._c10eFrame && glbg\.pipeBackend\)\) ctx\.drawImage\(glbg\.canvas, 0, 0\);/);
     // 天气色罩/黑闪绘制段保持原位（层序语义零改动;★C10e:c10e 帧传 sky2D——GL
     //  quad 分支忽略 ctx,2D 回退分支落 sky2D 保持层序）
     expect(RDR).toContain('this.sky.drawWeatherTint2D(this._c10eFrame ? (this.skyCtx ?? ctx) : ctx, viewW, viewH);');

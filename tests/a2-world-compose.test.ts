@@ -34,7 +34,7 @@ describe('A2 GLWorldCompose 结构锁', () => {
     expect(composeSrc).toContain("pipeline.fbo('lit', w, h)");
     expect(composeSrc).toContain("pipeline.fbo('warped', w, h)");
     expect(composeSrc).toContain('gl.bindTexture(gl.TEXTURE_2D, this.fboLit.tex)');
-    expect(composeSrc).toContain('pipeline.present(this.fboWarped)');
+    expect(composeSrc).toContain('pipeline.present(this.fboWarped, presentOver)');   // ★C10e:over 透传
   });
 
   it('uniform 表逐式（pass1 五键/pass2 十一键）', () => {

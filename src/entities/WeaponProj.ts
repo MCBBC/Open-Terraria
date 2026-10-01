@@ -25,7 +25,8 @@ import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道（GorePiece 引擎池）
 import { ProjGhostRing, projTrailingMode, drawRainbowChain, drawHslMidpointTrail } from './projGhostTrail';   // ★BJ235 1089/563 残影
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
-import { ghostHurtOnHit, playerHasGhostHurt, ghostHealProc } from './SpectreSoulProj';   // ★BJ382 雨滴 239/245 proc 单源
+import { ghostHurtOnHit, playerHasGhostHurt, ghostHealProc } from './SpectreSoulProj';   // ★BJ382 雨滴 239/245 proc 单源（★清偿刀 U2 2026-10-01：proc 上收共享环受理位,雨滴回调退纯 penetrate 记账）
+import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';   // ★清偿刀 U2（2026-10-01）：水母块 Arrow/WhipProj/proj1457 形态复用（S2-债2 同表单源）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 // Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
 // 直生 + broadcast 上行同用此函数）
@@ -238,6 +239,12 @@ export class HitCooldown {   // exported：combat-stitch-final 确定性测试�
     else this.map.set(id, 2147483647); // 永不再中
     return true;
   }
+  /** ★清偿刀 U2（2026-10-01）：读面/写面拆相（proj1457 R1-C cd.peek 同款）——
+   *  只查行不落账（≙原版外环 flag2 读 :12595 无副作用）。写面（ready）由调用方
+   *  在水母块之后补（:14036 写梯位）——充能水母接触路径（:12686 return）零落账。 */
+  peek(id: number): boolean {
+    return !this.map.has(id);
+  }
   clear(): void { this.map.clear(); }
 }
 
@@ -355,9 +362,16 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
   const imbuNano = pl.buffs.has(BuffType.ImbueNano);
   const imbuParty = pl.buffs.has(BuffType.ImbueParty);
   for (const ent of game.enemies()) {
-    // ★dontTakeDamage 目标排除（近战侧 Player.cs:44618 目标选择门——浸剂/冰霜/岩浆石/
-    // confetti 全在其后,曾绕过 hurt 门照施加,评审 C 定谳 2026-09-02 补）
-    if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+    // ★dontTakeDamage 目标排除（Projectile.cs:12600 外环门 `!nPC.dontTakeDamage ||
+    // ZappingJellyfish[nPC.type]`——浸剂/冰霜/岩浆石/confetti 全在其后,曾绕过 hurt 门
+    // 照施加,评审 C 定谳 2026-09-02 补）
+    // ★清偿刀 U2（2026-10-01,§B）：ZappingJellyfish{63,64,103,242} 与 dontTakeDamage
+    // 并列豁免（proj1457/Arrow/WhipProj 同款）——充能水母放行到下方水母块做接触反噬
+    // 判定;非水母 dontTakeDamage 靶照旧整跳。
+    const jellyVid = (ent as unknown as { vanillaId?: number }).vanillaId;
+    const zapJelly = jellyVid !== undefined && jellyVid > 0 && ZAPPING_JELLYFISH.has(jellyVid);
+    const jellyDontTake = (ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+    if (jellyDontTake && !zapJelly) continue;
     if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
@@ -372,7 +386,24 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       // 玩家级共享免疫门（:12603/:12635-12637 npc.immune[owner]==0 前置;本仓 = Enemy.iframes,
       // hurt 落地置 10t）——替代逐弹 hitCd 私账（mock 敌无 iframes 字段 = 恒放行）
       if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;
-    } else if (!hitCd.ready(e.id, cooldown)) continue;
+    } else if (!hitCd.peek(e.id)) continue;
+    // ★清偿刀 U2（2026-10-01,§B）水母块（Damage_PVE_Inner :12680-12689 1:1;S2-债2
+    //  Arrow/WhipProj/proj1457 形态复用）：充能态（dontTakeDamage）水母不受伤——接触族
+    //  （aiStyle 19/161/75/140 || AllowsContactDamageFromJellyfish{972,982,984,997,1043};
+    //  IsAWhip 面由 WhipProj 自环承载不入本环）→ TakeDamageFromJellyfish 电玩家（1.3×,
+    //  Game.takeDamageFromJellyfish 单源;限频=玩家 Hurt 免疫,原版 Player.cs:44607 同构）
+    //  → :12686 `if (dontTakeDamage) return` 拦本次伤害（写梯 :14031-14183/proc :13877
+    //  /numHits++ :14263 全不达=零落账）。门位=免疫窗后、命中面前（原版 :12635→:12677
+    //  Colliding→:12680 序;本环 Colliding 等价=bodyHit/extHit 已在上）。hitCd 写面拆相：
+    //  peek 在上（外环 flag2 读 :12595 无副作用）、ready 补在块后（:14036 写梯位）——
+    //  充能拍零白写（旧档 ready 融合写=解冻后 cooldown 内漏命中,S2-债2 判别面同病）。
+    if (zapJelly && jellyDontTake) {
+      if (jellyZapProjectile(self.projId ?? 0, projectileData(self.projId ?? 0)?.aiStyle)) {
+        game.takeDamageFromJellyfish?.(ent);
+      }
+      continue;
+    }
+    if (!playerImmune) hitCd.ready(e.id, cooldown);   //（:14036 局部免疫表写面=受理拍落账）
     // ★BJ388 件1（BJ385 登记债清偿,2026-09-28）受理位定谳：原版 Damage_PVE_Inner 的
     //   全部命中段——特例链 :13056-13134/aiStyle99 链 :13290-13330/555·546 里程碑
     //   :13424-13436/StatusNPC :13637/676 反射 :13721-13725/悠悠球 per-hit 族
@@ -499,7 +530,23 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //  ★BJ393 件2：判据 acceptedHere→!vanillaGated——原版 proc/penetrate--/numHits++
     //  全在受理面（免疫门后无死亡复查）,旧「hurt 返真」实为击杀位=普通命中/级联返假
     //  两族不 proc 不耗穿（唯一接线 239/245 雨滴实害:吸血近零+穿透数永不消耗）,见上注
-    if (!vanillaGated) onAccepted?.(e);
+    //  ★清偿刀 U2（2026-10-01）：ghostHeal proc 上收共享环受理位（meleeOnHitProjs.ts
+    //  :542-560 S2 台账家族债清偿）——:13877-79 调用点在 Damage() 通用 on-hit 段【无类别
+    //  白名单】,本环全调用方（回旋镖/长矛/悠悠球/连枷/破晓/水晶蛇/雨滴…）原版同走该段;
+    //  旧档只 239/245 回调挂=近战族白耗面整缺。isMagic 由 ghostHealProc 数据面
+    //  （projectileData(projId).magic）忠实直传——逐弹 magic 真值分流（magic 弹=治疗面,
+    //  非 magic=白耗面）;!hostile/aiStyle≠59/lifeMax>5/victim 门单源内自证。
+    //  numHits++（:14263）同步上收（弹字段 pveNumHits,缺则建——:14263 对 Damage() 全
+    //  受理命中自增,ghostHeal 率 0.2−0.05n 衰减的计数源;Arrow 自环另有同位对）。
+    //  onAccepted 语义收窄为纯 penetrate--/回收门（雨滴 dropHits++）——旧内嵌
+    //  ghostHealProc+pveNumHits++ 撤除防双计。
+    if (!vanillaGated) {
+      const hitSelf = self as { pveNumHits?: number };
+      ghostHealProc(game, self.projId ?? 0, hitSelf.pveNumHits ?? 0,
+        e as unknown as Parameters<typeof ghostHealProc>[3]);
+      onAccepted?.(e);
+      hitSelf.pveNumHits = (hitSelf.pveNumHits ?? 0) + 1;   //（:14263 受理后自增）
+    }
     // ★BJ388 件1：onHit 移入受理位（原版命中段全景在免疫门 :12634-12637 后,门拒整段
     //  静默;逐调用方定谳=回旋镖回收门/悠悠球链/配重球链/锚定鱼 23 三击门/262 族回收/
     //  481 链枷回摆/405·523 首中即亡/404 回收翻转——锚全在受理面,无一"拒收跑"同相;
@@ -8221,6 +8268,13 @@ class RainDropSharedImmunity extends HitCooldown {
     }
     return true;
   }
+  /** ★清偿刀 U2（2026-10-01）：hitEnemies 读/写拆相（peek/ready）后本类须同拆——
+   *  旧只覆写 ready 时,基类 peek 读私有空 map 恒真=行存在拒收面整失明,而
+   *  hitEnemies 的 ready 调用已不承担拒收（写位后移）⇒ 双重结算。读面=sm 行在窗内
+   *  即拒（与 ready 拒支同判）。 */
+  override peek(id: number): boolean {
+    return !((this.sm.get(id) ?? 0) > Date.now());
+  }
   override clear(): void { this.sm.clear(); }
 }
 const RAIN_DROP_IMMUNE_239 = new RainDropSharedImmunity();
@@ -8481,10 +8535,10 @@ export class RainCloudProj extends Entity {
       this.x = body.x; this.y = body.y;
       if (body.hitWall || body.collideY || body.hitHead) { this.killDrop(game); return; }
       // ★BJ382（2026-09-28）：雨滴 239/245 幽灵兜帽吸血 proc（Projectile.cs:13877-79
-      //  Damage() 通用 on-hit 段,数据面 magic=true ⇒ 原版雨云雨滴本就吸血）。挂共享环
-      //  新增 onAccepted 受理回调（严格受理位,:14263 numHits++ 在 proc 后 ⇒ 读自增前值;
-      //  拒收不 proc 不计数）——本环既有调用方（回旋镖/长矛/悠悠球/连枷/破晓/水晶蛇）
-      //  数据面全非 magic,ghostHealProc magic 门自动过滤零行为。
+      //  Damage() 通用 on-hit 段,数据面 magic=true ⇒ 原版雨云雨滴本就吸血）。
+      //  ★清偿刀 U2（2026-10-01）：ghostHealProc+pveNumHits++ 上收 hitEnemies 受理位
+      //  单源（本回调旧内嵌两行撤除=防双计）——本环全调用方同走 :13877-79,雨滴数据面
+      //  magic=true 由单源数据门自动分流治疗面,行为零漂移（bj382 基线锁保形）。
       //  ★BJ385 修正（BJ382 登记债清偿）：dropHits++（penetrate--）从 onHit（命中即调
       //  拒收亦跑=非受理位）移入 onAccepted——原版 penetrate--（:14189-14196）在
       //  Damage_PVE_Inner 受理面内,拒收跳（:12634-12637 immune 残窗 return）不耗穿透;
@@ -8499,10 +8553,7 @@ export class RainCloudProj extends Entity {
       hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, undefined,
         undefined, undefined, undefined, undefined, undefined, undefined,
         (ent) => {
-          ghostHealProc(game, this.projId, this.pveNumHits,
-            ent as unknown as Parameters<typeof ghostHealProc>[3]);
           this.dropHits++;                                      //（:14189 penetrate-- 受理位）
-          this.pveNumHits++;                                    //（:14263 受理后自增）
         });
       if (this.dropHits >= (projectileData(this.projId)?.penetrate ?? 5)) {   // 239=5(:3213)/245=2(:3280)
         this.killDrop(game);                             // penetrate==0 → Kill(:17313) → 尘

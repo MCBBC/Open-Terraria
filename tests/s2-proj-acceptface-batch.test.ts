@@ -160,14 +160,19 @@ describe('S2-§B：524/977/978 幽灵套两支判例面（melee 非 magic）', (
       .toEqual([96, 152, 189]);                           // 全 ≠59（flag10 排除档不涉）
   });
 
-  it('ghostHealProc 三弹零行为（magic 预门=BJ382 习语;ste 不入账）', () => {
+  it('ghostHealProc 三弹白耗面（★S2-债1 摘 magic 预门,2026-10-01——原版 :12090 预算'
+    + '先扣/:12091-93 非魔法拒回复 ⇒ applyLifeSteal isMagic=false 忠实直传;旧锁'
+    + '「零行为」=债面钉,随家族级清偿迁为白耗钉）', () => {
     const ste: StealCall[] = [];
     const { hooks } = makeHooks({ ste });
     const victim = { x: 0, y: 0, w: 24, h: 24, vanillaId: 15, lastStrikeDealt: 50, maxHp: 100 };
     for (const id of [524, 977, 978]) {
       ghostHealProc(hooks, id, 0, victim);
     }
-    expect(ste).toHaveLength(0);                          // applyLifeSteal 未达（:12090-91 门=单源预门承载）
+    expect(ste).toHaveLength(3);                          // 白耗面活（旧档 0=预门挡死）
+    expect(ste.every((c) => c.kind === 'ghost'
+      && c.isMagic === false                              // 数据面非 magic 直传（真扣不回复）
+      && c.dmg === 50 && c.numHits === 0)).toBe(true);
   });
 
   it('ghostHurtOnHit magic:false 零行为（:12022-12026 早退=零预算/零 356）', () => {

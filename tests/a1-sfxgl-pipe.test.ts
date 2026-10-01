@@ -119,8 +119,8 @@ describe('A1 uniform 转录哨兵（禁改滤镜数学——与旧链逐式对�
 
 describe('A1 逃生门双路（Renderer.drawScreenFilterChain）', () => {
   it('管线链先行（sfxPipe 旗×wK===1 低清档门）,失败/旗关落旧 drawChain——次序锁定', () => {
-    expect(RDR).toMatch(/if \(Renderer\.sfxPipe && this\._worldLowK === 1\) \{\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(pipe && !pipe\.unavailable\) \{\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, this\.canvas, passes,/);
-    expect(RDR).toMatch(/if \(!chainOk && gl\.drawChain\(this\.canvas, passes,/);
+    expect(RDR).toMatch(/if \(Renderer\.sfxPipe && this\._worldLowK === 1\) \{\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(pipe && !pipe\.unavailable\) \{\s*\n\s*\/\/ ★C10e[\s\S]{0,400}chainOk = gl\.drawChainPipe\(pipe, this\.c10eChainSource\(\), passes,/);
+    expect(RDR).toMatch(/if \(!chainOk && gl\.drawChain\(this\.c10eChainSource\(\), passes,/);
     // 旧链体原样保留（逃生路径零改动——staging 乒乓仍在）
     expect(SFX).toContain('sctx.drawImage(this.canvas, 0, 0);');
   });
@@ -147,7 +147,7 @@ describe('A1 A0 壳锁联动', () => {
 
   it('GLPipeline 门面零改动（复用 fbo/program/bindTarget/setBlend/drawQuad/present/beginFrame/uni,不另起炉灶）', () => {
     expect(PIPE).toContain('fbo(name: string, w: number, h: number)');
-    expect(PIPE).toContain('present(src: PipelineFbo)');
+    expect(PIPE).toContain('present(src: PipelineFbo, over = false)');   // ★C10e:over 缺省参
     expect(SFX).toContain('pipe.beginFrame(w, h);');
     expect(SFX).toContain('pipe.bindTarget(outFbo);');
     expect(SFX).toContain('pipe.bindTarget(fboB);');

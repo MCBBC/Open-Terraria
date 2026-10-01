@@ -24,7 +24,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, hitCritters, hitCrittersAll } from './projTargets';
-import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出;★清偿刀 T 门位快照单源）
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出;★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -341,6 +342,29 @@ export class NebulaBlazeBolt extends Entity {
       if (accepted) {
         (e as { iframes?: number }).iframes = 5;                // :14080-14082 专支写 5t
         ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（读自增前值）
+        // ★BJ424-T3 魔法命中漏斗面收编：ghostHurt :13881 / nebula :13885 与 ghostHeal
+        //  :13877 同块同受理面（634/635 数据面 magic ⇒ 凡走本面两引擎都该触发）。
+        if (playerHasGhostHurt(game.player)) {
+          const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: v424.vanillaId,
+              lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+              dealt: v424.lastStrikeDealt ?? 0 });
+        }
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+            vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+            lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+              ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+            dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
         this.pveNumHits++;                                      //（:14263 受理后自增）
       }
       this.burst(game, e.id);
@@ -394,6 +418,29 @@ export class NebulaBlazeBolt extends Entity {
       if (!vanillaGated) {
         (e as { iframes?: number }).iframes = 5;                // :14080-14082 专支写 5t
         ghostHealProc(game, this.projId, this.pveNumHits, e);   // Kill 内 Damage()（:73251）同链
+        // ★BJ424-T3 魔法命中漏斗面收编：Kill AoE 面同块同 face——原版 Kill 先把弹盒
+        //  Resize 50×50 再跑 Damage()（:73267-73269）⇒ ghostHurt 候选窗锚 = 爆盒几何。
+        if (playerHasGhostHurt(game.player)) {
+          const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: ex - 25, projY: ey - 25, projW: 50, projH: 50,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: v424.vanillaId,
+              lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+              dealt: v424.lastStrikeDealt ?? 0 });
+        }
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+            vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+            lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+              ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+            dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
         this.pveNumHits++;                                      //（:14263 受理后自增）
       }
     }
@@ -593,6 +640,29 @@ export class LunarFlareStar extends Entity {
         const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（爆炸相首敌 0 档率 0.20）
+          // ★BJ424-T3 魔法命中漏斗面收编：爆相面同块同 face（645 数据面 magic;爆盒
+          //  140×140 已回写锚定 → ghostHurt 候选窗 = this 盒几何）。
+          if (playerHasGhostHurt(game.player)) {
+            const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+              maxHp?: number; def?: { lifeMax?: number } };
+            ghostHurtOnHit(game,
+              { magic: true, projDamage: this.damage,
+                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                ownerCx: game.player.cx, ownerCy: game.player.cy },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v424.vanillaId,
+                lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+                dealt: v424.lastStrikeDealt ?? 0 });
+          }
+          nebulaBoosterOnHit(game,
+            { projId: this.projId, projDirX: this.vx },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+              lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+                ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+              dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
           this.pveNumHits++;
           // ★清偿刀 P1（C5 定谳#1）：局部表写 :14175-14178（immuneArray[victim]=cd=-1）
           //  在受理支内——门拒敌（残窗快照）不落标,窗期满后下一子步照吃爆伤。

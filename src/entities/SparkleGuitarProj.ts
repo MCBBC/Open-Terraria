@@ -48,7 +48,8 @@ import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt, noteVanillaProjImmune } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
-import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源（★清偿刀 T 门位快照单源）
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
 import { ParticleOrchestraType } from '../net/syncModules';
 
@@ -393,6 +394,29 @@ export class SparkleGuitarProj extends Entity {
         const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);
+          // ★BJ424-T3 魔法命中漏斗面收编：ghostHurt :13881 / nebula :13885 与 ghostHeal
+          //  :13877 同块同受理面（856 数据面 magic ⇒ 凡走本面两引擎都该触发）。
+          if (playerHasGhostHurt(game.player)) {
+            const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+              maxHp?: number; def?: { lifeMax?: number } };
+            ghostHurtOnHit(game,
+              { magic: true, projDamage: this.damage,
+                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                ownerCx: game.player.cx, ownerCy: game.player.cy },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v424.vanillaId,
+                lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+                dealt: v424.lastStrikeDealt ?? 0 });
+          }
+          nebulaBoosterOnHit(game,
+            { projId: this.projId, projDirX: this.vx },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+              lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+                ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+              dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
           this.pveNumHits++;
           // ★清偿刀 W（X4-债13③）：近战域半面随受理面（桥 856 face=usesLocal→0
           //   出表）——原版 :14175-14178 单写 immune[owner]=0 一笔覆盖全域,仓内
@@ -464,6 +488,29 @@ export class SparkleGuitarProj extends Entity {
       const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
         ghostHealProc(game, this.projId, this.pveNumHits, e);
+        // ★BJ424-T3 魔法命中漏斗面收编：爆裂轮同块同 face（Kill 内 Damage() :72840 同一
+        //  弹对象;爆盒 128×128 已展开 → ghostHurt 候选窗 = this 盒几何）。
+        if (playerHasGhostHurt(game.player)) {
+          const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: v424.vanillaId,
+              lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+              dealt: v424.lastStrikeDealt ?? 0 });
+        }
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+            vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+            lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+              ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+            dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
         this.pveNumHits++;
         // ★清偿刀 W（X4-债13③）：爆裂轮同款受理面近战域清窗（:14175-14178 同支,
         //   Kill 内 Damage() :72840 同链同梯）——旧无条件清=门拒跳也 over-clear。

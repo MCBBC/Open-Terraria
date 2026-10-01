@@ -17,6 +17,8 @@
 //     M3 selectedKite 扫描 held-first 支删 → A4 红（同持双风筝档 held 不胜出）
 //     M4 Game AFK 臂门 `!controlTorch` 删 → B8 红（Shift 智选被 AFK 抢占）
 //     M5 Game AFK 臂 noItems 腿删 → B4/B5 红（诅咒/钻头坐骑照切风筝）
+//   ★BJ428（2026-10-01）M6 updateUse G1 总闸 `&& !this._afkKiteForceUse` 删 →
+//     C1 红（装备置旗但 KiteProj 出膛数 0——用户实报「装备不放飞」断链层）
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -176,6 +178,7 @@ interface AfkShell {
   _afkKiteForceUse: boolean;
   usingOrReusingItem(): boolean;
   updateSmartSelect(): void;
+  updateUse(_dt: number): void;
   kiteProjAirborne(shoot: number): boolean;
 }
 
@@ -304,6 +307,232 @@ describe('Q4-B PickItemSelectionOverride AFK 臂（Player.cs:17533-17547）', ()
     g.updateSmartSelect();
     expect(p.inv.selected).toBe(0);
     expect(g._afkKiteForceUse).toBe(false);
+  });
+});
+
+// ═══ BJ428 全链消费（2026-10-01 用户实报「AFK 自动装备风筝但不放飞」）═══
+// 定谳断链层：updateUse G1 总闸（曾 `(?!mouseDown && !holdOk)` 即 return）不认
+//   _afkKiteForceUse 旗——旗置位后 updateUse 在分派链起点早退,尾清自灭,装备当拍
+//   永不放飞。原版同拍序：SelectedItemState.Update（PickItemSelectionOverride
+//   :17541-17543 controlUseItem=(releaseUseItem=true)）→ 同 tick ItemCheck 消费
+//   （controlUseItem 消费【无 mouseDown 前置】,TriggersSet.cs:835-847 MouseLeft
+//   只是置位源之一）。修复=G1 第三触发源 `!this._afkKiteForceUse` 放行。
+// 变异证红（手工执行实录）：
+//   M6 G1 门 `&& !this._afkKiteForceUse` 删 → C1 红（装备但 KiteProj 出膛数 0）
+describe('Q4-D BJ428 全链消费：G1 消费面放行→装备当拍同链放飞（:17541→ItemCheck 同拍）', () => {
+  /** updateUse 面追加字段（afkShell 只覆盖 updateSmartSelect 面） */
+  function useShell(p: Player): AfkShell {
+    const g = afkShell(p) as AfkShell & Record<string, unknown>;
+    Object.assign(g.input, {
+      mouseDown: false, mouseHeld: false, rightDown: false,
+      uiBlocking: false, blockMouse: false, delayUseItem: false,
+    });
+    g.inpOverDomUi = () => false;
+    g.smartCursor = { showing: false, x: 0, y: 0 };
+    (g.camera as unknown as { tileUnder: () => [number, number] }).tileUnder = () => [20, 20];
+    g.world = {
+      store: {
+        w: 400, h: 400, get: () => 0, hasTile: () => false,
+        idx: () => 0, inBounds: () => false, liquid: [0], flags: [0], slope: [0],
+      },
+    };
+    const projectiles: unknown[] = [];
+    g.entities = {
+      projectiles,
+      add: (e: unknown) => { projectiles.push(e); return e; },
+    } as unknown as AfkShell['entities'];
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g.recLog = () => {};
+    g._prevMouseDown = false;
+    g._prevRightDown = false;
+    g.annotateMode = false;
+    return g;
+  }
+
+  it('C1 全链实驱：fixedUpdate 3600+ 拍 → updateSmartSelect 装备+置旗 → updateUse 同拍放飞出膛', () => {
+    const w = mkWorld();
+    const inv = new Inventory();
+    inv.slots[3] = { id: iidOf(KITE_VID), stack: 1 };
+    const p = mkPlayer(w, inv);
+    const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    let n = 0;
+    while (p.afkCounterForKiting < 3600 && n < 8000) { tick(); n++; }  // 落地收敛后步进至阈值
+    expect(p.afkCounterForKiting).toBeGreaterThanOrEqual(3600);
+    const g = useShell(p);
+    p.inv.selected = 0;
+    g.updateSmartSelect();
+    expect(p.inv.selected).toBe(3);                      // 装备（OverrideSelection）
+    expect(g._afkKiteForceUse).toBe(true);               // controlUseItem=(releaseUseItem=true)
+    g.updateUse(1 / 60);                                 // 同拍 ItemCheck（G1 放行）
+    const kites = (g.entities.projectiles as unknown[]).filter((e) => e instanceof KiteProj);
+    expect(kites.length).toBe(1);                        // ★BJ428 判别：放飞出膛（断链曾=0）
+    expect(p.inv.selected).toBe(3);                      // 装备保持
+    expect(p.useTime).toBe(15);                          // combat useTime 15（vanilla-itemcombat）
+    expect(p.inv.slots[3]).toBeTruthy();                 // 风筝不消耗（非 consumable）
+  });
+
+  it('C2 未达阈值对照：3599 拍 → 不装备不置旗不放飞', () => {
+    const w = mkWorld();
+    const inv = new Inventory();
+    inv.slots[3] = { id: iidOf(KITE_VID), stack: 1 };
+    const p = mkPlayer(w, inv);
+    const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    for (let i = 0; i < 3599; i++) tick();               // 顶格 3599 拍（落地收敛只减不增）< 3600
+    expect(p.afkCounterForKiting).toBeLessThan(3600);
+    const g = useShell(p);
+    g.updateSmartSelect();
+    expect(p.inv.selected).toBe(0);
+    expect(g._afkKiteForceUse).toBe(false);
+    g.updateUse(1 / 60);
+    expect((g.entities.projectiles as unknown[]).filter((e) => e instanceof KiteProj).length).toBe(0);
+  });
+
+  it('C3 在场弹挡门对照（holdStyle==1 面）：有同型风筝弹 → 旗不置,G1 不放行', () => {
+    const w = mkWorld();
+    const inv = new Inventory();
+    inv.slots[3] = { id: iidOf(KITE_VID), stack: 1 };
+    const p = mkPlayer(w, inv);
+    const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    let n = 0;
+    while (p.afkCounterForKiting < 3600 && n < 8000) { tick(); n++; }
+    const g = useShell(p);
+    const shoot = itemFuncOfVid(KITE_VID)?.shoot ?? -1;
+    (g.entities.projectiles as unknown[]).push({ projId: shoot, dead: false });
+    g.updateSmartSelect();
+    expect(p.inv.selected).toBe(3);                      // 只切选
+    expect(g._afkKiteForceUse).toBe(false);              // 不强制使用
+    g.updateUse(1 / 60);
+    expect((g.entities.projectiles as unknown[]).filter((e) => e instanceof KiteProj).length).toBe(0);
+  });
+});
+
+// ═══ BJ428-D1 uiBlocking 帧残面（2026-10-01 定谳+清偿）═══
+// 定谳（原版开包挂机【照放飞】,逐行）：uiBlocking 等价面（开包/悬停面板/全屏地图）
+//   不拦 AFK 链——Player.Update 逐拍序：ResetControls(:24961 清 controlUseItem) →
+//   CopyInto(:24964;TriggersSet.cs:846-853 的 blockMouse/mouseInterface 门只拦
+//   【MouseLeft 置位源】,不清既有置位) → :25583 mouseInterface→delayUseItem 与
+//   :24993 mapFullscreen 全零站 → :25413 selectedItemState.Update【AFK 臂后置重申】
+//   controlUseItem=(releaseUseItem=true)(:17537-17547,无任何 UI 门) → ItemCheck
+//   消费门 :43064 / CanUse :52657 均无 playerInventory/mouseInterface 门（后者仅
+//   LocalPlayerHasPendingInventoryActions :43322=FakeCursorItem/制作请求,与开包
+//   无关）。死亡面反证：:24948-24957 dead 路径 return 先于 ResetControls/selection/
+//   ItemCheck → 死亡拍臂不跑不放飞（本仓 dead 排除同相）。cursorHeld 拍=光标持物,
+//   臂门 !env.mouseItemHeld+计数清零 :25702-25704 → 旗恒 false=自然 no-op。
+// 本仓病面：updateUse uiBlocking/inpOverDomUi 早退（mouseInterface 等价拦截面,拦
+//   鼠源使用拦得对）吞掉 override 直置旗 → 旗尾清自灭=悬停帧永不放飞。
+// 修复=早退块内旗救援：直调 useCombatWeapon kite 支（⑩臂同路,useTime==0 同门,
+//   kind==='kite' defensive 门零旁漏;dead/annotateMode 排除）。
+// 变异证红（手工执行实录）：
+//   M7 救援块整删 → D1/D2/D6 红（uiBlocking/inpOverDomUi/fullMap 帧 KiteProj 出膛 0）
+describe('Q4-E BJ428-D1 uiBlocking 帧残面：早退块内旗救援→悬停/面板帧照放飞', () => {
+  function useShell(p: Player): AfkShell & Record<string, unknown> {
+    const g = afkShell(p) as AfkShell & Record<string, unknown>;
+    Object.assign(g.input, {
+      mouseDown: false, mouseHeld: false, rightDown: false,
+      uiBlocking: false, blockMouse: false, delayUseItem: false,
+    });
+    g.inpOverDomUi = () => false;
+    g.smartCursor = { showing: false, x: 0, y: 0 };
+    (g.camera as unknown as { tileUnder: () => [number, number] }).tileUnder = () => [20, 20];
+    g.world = {
+      store: {
+        w: 400, h: 400, get: () => 0, hasTile: () => false,
+        idx: () => 0, inBounds: () => false, liquid: [0], flags: [0], slope: [0],
+        isSolid: () => false,
+      },
+    };
+    const projectiles: unknown[] = [];
+    g.entities = {
+      projectiles,
+      add: (e: unknown) => { projectiles.push(e); return e; },
+    } as unknown as AfkShell['entities'];
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g.recLog = () => {};
+    g._prevMouseDown = false;
+    g._prevRightDown = false;
+    g.annotateMode = false;
+    return g;
+  }
+
+  /** 阈值达+风筝在槽 3 的玩家（C1 同款准备面） */
+  function readyKitePlayer(): { w: ReturnType<typeof mkWorld>; p: Player; g: AfkShell & Record<string, unknown> } {
+    const w = mkWorld();
+    const inv = new Inventory();
+    inv.slots[3] = { id: iidOf(KITE_VID), stack: 1 };
+    const p = mkPlayer(w, inv);
+    const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    let n = 0;
+    while (p.afkCounterForKiting < 3600 && n < 8000) { tick(); n++; }
+    const g = useShell(p);
+    p.inv.selected = 0;
+    g.updateSmartSelect();                               // AFK 臂：装备风筝槽+置旗
+    expect(p.inv.selected).toBe(3);
+    expect(g._afkKiteForceUse).toBe(true);
+    return { w, p, g };
+  }
+
+  const kiteCount = (g: AfkShell & Record<string, unknown>): number =>
+    ((g.entities.projectiles as unknown[]).filter((e) => e instanceof KiteProj)).length;
+
+  it('D1 uiBlocking 帧（模态面板等价面,sim 照跑）→ 早退块内救援放飞', () => {
+    const { p, g } = readyKitePlayer();
+    (g.input as unknown as { uiBlocking: boolean }).uiBlocking = true;
+    g.updateUse(1 / 60);                                 // 早退块 → 救援支
+    expect(kiteCount(g)).toBe(1);                        // ★判别：照放飞（病面曾=0）
+    expect(p.useTime).toBe(15);                          // 出手面=⑩臂同路（combat useTime）
+    expect(p.inv.selected).toBe(3);                      // 装备保持
+  });
+
+  it('D2 inpOverDomUi 帧（mouseInterface 等价面,悬停面板）→ 救援放飞', () => {
+    const { p, g } = readyKitePlayer();
+    g.inpOverDomUi = () => true;                         // 光标压在 DOM 面板上
+    g.updateUse(1 / 60);
+    expect(kiteCount(g)).toBe(1);
+    expect(p.useTime).toBe(15);
+  });
+
+  it('D6 fullMap.open 帧（Main.mapFullscreen 等价面,:24993 全零站后臂重申）→ 救援放飞', () => {
+    const { g } = readyKitePlayer();
+    (g.renderer as { fullMap: { open: boolean } }).fullMap.open = true;
+    g.updateUse(1 / 60);
+    expect(kiteCount(g)).toBe(1);
+  });
+
+  it('D3 dead 帧 → 不放飞（原版 :24948-24957 死亡路径 return 先于臂/ItemCheck=同相反证）', () => {
+    const { p, g } = readyKitePlayer();
+    p.dead = true;
+    g.updateUse(1 / 60);
+    expect(kiteCount(g)).toBe(0);
+  });
+
+  it('D4 defensive kind 门：旗在场但手持非风筝（脏态漂移）→ 零旁漏不放飞', () => {
+    const { p, g } = readyKitePlayer();
+    p.inv.selected = 1;                                  // 手持改非风筝（槽 1 空火把域）
+    p.inv.slots[1] = { id: iidOf(8) /* 火把,combatWeapon=null */, stack: 1 };
+    g._afkKiteForceUse = true;                           // 强制旗在场（模拟漂移）
+    (g.input as unknown as { uiBlocking: boolean }).uiBlocking = true;
+    g.updateUse(1 / 60);
+    expect(kiteCount(g)).toBe(0);                        // kind 门拦=非风筝零旁漏
+    expect(p.useTime).toBe(0);                           // useSwing/useTime 零副作用
+  });
+
+  it('D5 cursorHeld 拍对照：旗不置（臂门 mouseItemHeld+计数清零）→ 早退不放飞=原版同相', () => {
+    const w = mkWorld();
+    const inv = new Inventory();
+    inv.slots[3] = { id: iidOf(KITE_VID), stack: 1 };
+    const p = mkPlayer(w, inv);
+    const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    let n = 0;
+    while (p.afkCounterForKiting < 3600 && n < 8000) { tick(); n++; }
+    const g = useShell(p);
+    p.inv.cursorMirror = { id: 1, stack: 1 };            // 光标持物（mouseItem 非空）
+    g.updateSmartSelect();
+    expect(g._afkKiteForceUse).toBe(false);              // 臂不动（:17528-17531 第一臂短路）
+    g.inpOverDomUi = () => true;
+    g.updateUse(1 / 60);
+    expect(kiteCount(g)).toBe(0);
   });
 });
 

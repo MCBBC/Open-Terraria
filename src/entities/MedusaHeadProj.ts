@@ -28,7 +28,8 @@ import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
-import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源（★清偿刀 T 门位快照单源）
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
 
@@ -220,6 +221,33 @@ export class MedusaHeadProj extends Entity {
       const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
         ghostHealProc(game, 536, 0, t);
+        // ★BJ424-T3 魔法命中漏斗面收编：ghostHurt :13881 / nebula :13885 与 ghostHeal
+        //  :13877 同块同受理面（结算载体 536 数据面 magic ⇒ 凡走本面两引擎都该触发）。
+        //  原版形态（AI_100 :45424-45431）：536 出生即 Center=受害者 Center + damage=num3
+        //  → Damage() 当拍结算 ⇒ ghostHurt 候选窗锚 = 536 盒（10×10,SetDefaults :5360）
+        //  钉在受害者 Center;projDamage = 弹基伤 num3（crit 在 Damage() 内掷,不改 damage 字段）;
+        //  nebula projDirX = v.X（束向 = 受害者心−持弹心）。
+        if (playerHasGhostHurt(game.player)) {
+          const v424 = t as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: tcx - 5, projY: tcy - 5, projW: 10, projH: 10,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: t.x, y: t.y, w: t.w, h: t.h,
+              cx: tcx, cy: tcy,
+              vanillaId: v424.vanillaId,
+              lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+              dealt: v424.lastStrikeDealt ?? 0 });
+        }
+        nebulaBoosterOnHit(game,
+          { projId: 536, projDirX: tcx - hx },
+          { x: t.x, y: t.y, w: t.w, h: t.h,
+            cx: tcx, cy: tcy,
+            vanillaId: (t as never as { vanillaId?: number | null }).vanillaId,
+            lifeMax: (t as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+              ?? (t as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+            dealt: (t as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
       }
       this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });
     }

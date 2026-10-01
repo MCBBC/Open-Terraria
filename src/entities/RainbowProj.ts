@@ -18,7 +18,8 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
-import { ghostHealProc, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源）
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -127,6 +128,29 @@ export class RainbowSegment extends Entity {
         noteVanillaProjImmune(game, this.projId, e.id, { penetrate: -1, idStaticFace: true });
         ghostHealProc(game, this.projId, this.pveNumHits,
           e as never as Parameters<typeof ghostHealProc>[3]);
+        // ★BJ424-T3 魔法命中漏斗面收编：ghostHurt :13881 / nebula :13885 与 ghostHeal
+        //  :13877 同块同受理面（251 数据面 magic/friendly/aiStyle46 ⇒ 凡走本面都该触发）。
+        if (playerHasGhostHurt(game.player)) {
+          const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: v424.vanillaId,
+              lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+              dealt: v424.lastStrikeDealt ?? 0 });
+        }
+        nebulaBoosterOnHit(game,
+          { projId: this.projId, projDirX: this.vx },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+            vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+            lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+              ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+            dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
         this.pveNumHits++;
       }
     }

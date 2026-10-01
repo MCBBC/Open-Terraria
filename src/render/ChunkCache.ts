@@ -89,6 +89,13 @@ export class ChunkCache {
    *  查询恒 true（幕布语义零变化）。★预算占位对不入账（无 worker 请求,渐进
    *  过渡块不阻塞幕布/冻结窗——预算摊完即真对）。 */
   readonly workerAwaiting = new Set<number>();
+  /** ★帧内预算占位对账（2026-10-01,用户实报「进世界/传送后可见逐块渲染」定谳扩账）：
+   *  bakeBudgetMs 超限块建的占位对（无 worker 请求）此前不入账 → 入场覆盖门
+   *  viewportCovered() 对其全盲=幕布掀开时余块渐进可见（逐块渲染本体）。
+   *  get() 预算支建占位入账;原位重烘成真对（get 预算支）/LRU 淘汰/dispose 出账;
+   *  viewportCovered() 同权消费（幕布+传送幕帘共门）。旗关/降级（预算支不建占位）
+   *  恒空=语义零变化。 */
+  readonly budgetAwaiting = new Set<number>();
 
   // ---- ★帧内烘焙预算（2026-09-29 Windows 28fps 取证追加修复项）----
   // 渲染期 get() 可视 miss/占位重建的同步烘焙【不受】flushDirty.budgetMs 管
@@ -288,6 +295,7 @@ export class ChunkCache {
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();
     this.workerAwaiting.clear();
+    this.budgetAwaiting.clear();
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
     if (this.bakeArriveTimer) { clearTimeout(this.bakeArriveTimer); this.bakeArriveTimer = 0; }
@@ -471,12 +479,26 @@ export class ChunkCache {
 
   /** ★入场幕布覆盖门查询（2026-09-28）：可视视口内是否还有 worker 占位 chunk
    *  （透明页区）。false = 幕布不可掀（Game.whenViewportBaked 消费）。
-   *  旗关/降级（workerAwaiting 恒空）/视域未置恒 true = 幕布语义零变化。 */
+   *  ★2026-10-01 扩账（用户实报「进世界/传送后可见逐块渲染」定谳）：预算占位对
+   *  此前刻意不入账（「渐进过渡块不阻塞幕布」）——但入场覆盖门因此对预算占位
+   *  【全盲】,幕布掀开时余块仍在眼前逐帧摊开（预算 8ms/帧 vs 视口 ~40 块×0.47ms
+   *  ≈ 2-4 帧渐进）。修=预算占位对入账 budgetAwaiting,本查询同权覆盖（幕布/
+   *  传送幕帘窗内多等 2-4 帧,3s 保险帽兜底;旗关/降级=budgetAwaiting 恒空,
+   *  幕布语义零变化）。
+   *  自洁语义:出账走重建/淘汰路径（renderChunk 成功/trimLru 淘汰）;查询侧对
+   *  「已真对/已淘汰」的残 key 跳过（防死 key 拖门）。 */
   viewportCovered(): boolean {
     const v = this.animView;
-    if (!v || this.workerAwaiting.size === 0) return true;
+    if (!v) return true;
+    if (this.workerAwaiting.size === 0 && this.budgetAwaiting.size === 0) return true;
     const s = CHUNK * TILE;
     for (const k of this.workerAwaiting) {
+      const x = (k & 0xffff) * s, y = ((k >> 16) & 0xffff) * s;
+      if (x + s > v.x0 && x < v.x1 && y + s > v.y0 && y < v.y1) return false;
+    }
+    for (const k of this.budgetAwaiting) {
+      const c = this.chunks.get(k);
+      if (!c || !c.placeholder) continue;   // 已真对/已淘汰=出账（残 key 不拖门）
       const x = (k & 0xffff) * s, y = ((k >> 16) & 0xffff) * s;
       if (x + s > v.x0 && x < v.x1 && y + s > v.y0 && y < v.y1) return false;
     }
@@ -671,6 +693,7 @@ export class ChunkCache {
         const rebuilt = this.renderChunk(cx, cy);
         this._bakeSpent += performance.now() - t0;
         this.workerAwaiting.delete(k);
+        this.budgetAwaiting.delete(k);   // ★C10g:占位重烘成真对=出账
         this.chunks.delete(k);
         this.chunks.set(k, rebuilt);   // 重插 Map 尾=LRU recency 刷新
         this.trimLru();
@@ -699,7 +722,9 @@ export class ChunkCache {
       return pair;
     }
     // ★帧内预算:超限且 worker 路径在（旗关/降级不经预算=现状逐位）→ 预算占位对
-    // （无 worker 请求、不入 workerAwaiting、不进 dirtyQueue——渲染循环下帧自动摊）
+    // （无 worker 请求、不进 dirtyQueue——渲染循环下帧自动摊）。
+    // ★C10g（2026-10-01）:入账 budgetAwaiting——入场覆盖门/传送幕帘由此可见预算
+    // 占位（旧「不入账」政策=覆盖门全盲,幕布掀开后逐块渐进可见=用户实报本体）。
     if (this.bakeClient && this._bakeSpent >= this.bakeBudgetMs) {
       const cell = this.acquireCell(k);        // 粘滞槽位（下帧原位重烘）
       const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
@@ -711,6 +736,7 @@ export class ChunkCache {
         cell, placeholder: true,
       };
       this.chunks.set(k, pair);
+      this.budgetAwaiting.add(k);   // ★C10g:预算占位入账（覆盖门/传送幕帘可见）
       this.trimLru();
       return pair;
     }
@@ -718,6 +744,7 @@ export class ChunkCache {
     c = this.renderChunk(cx, cy);
     if (this.bakeClient) this._bakeSpent += performance.now() - t0;   // 混合路由 only（旗关不计账）
     this.workerAwaiting.delete(k);   // 重建即出账（覆盖门不被死 key 拖住）
+    this.budgetAwaiting.delete(k);
     this.chunks.set(k, c);
     this.trimLru();
     return c;

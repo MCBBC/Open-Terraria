@@ -13,7 +13,7 @@ import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatu
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
-import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk, ghostHealProc } from './SpectreSoulProj';
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
@@ -9175,6 +9175,17 @@ export class Arrow extends Entity {
         e.hurt(applyBannerDamageDealt(game, e, dN)
           + (snapBonusNail ? Math.trunc(snapBonusNail * (critN ? 2 : 1)) : 0),
           0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+        // ★清偿刀 U2（2026-10-01）：钉 514 首击 ghostHeal 白耗面（:13877-79 通用 on-hit
+        //  段,StrikeNPC :13716 后=本位;命中专管不入主环 → 主环白耗臂对刺入首击不可达,
+        //  S2 台账「Arrow 主环第三臂」残差站）。514 数据面 ranged 非 magic（SetDefaults
+        //  :5843-5852 无 magic 行）→ isMagic=false 直传=白耗同相（幽灵兜帽在身时白扣治疗
+        //  预算不出治疗球,:12090 lifeSteal -= num2 先于 :12091-93 !magic return）。
+        //  numHits=自增前值（:14263 位 ++ 在下;pierce=1 flag3 刺入不耗穿但 numHits 照
+        //  自增——原版 numHits++ 无 pierce 门）;刺入态 DoT 走 AI 侧隔拍直投不入 Damage()
+        //  ⇒ 无后续 proc/计数面（原版同构）。ghostHurt 不接=非 magic 死码（S2/R1-B 定谳）。
+        ghostHealProc(game, this.projId, this.pveNumHits,
+          e as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.pveNumHits++;                     //（:14263 受理后自增）
         this.nailAi0 = -(e.id + 1);            // :13372-13373 ai[0] = -victimIndex-1
         this.nailAi1 = 0;                      // :13370 ai[1] = 0
         this.vx = e.cx - this.cx;              // :13374 velocity = targetNPC.Center - Center
@@ -9287,12 +9298,31 @@ export class Arrow extends Entity {
         let immFaceLocal = false;
         if (this.projId === 502) {
           immFaceLocal = true;      // ★GC1 face 记录（同 usesLocalNPCImmunity 形）
+          // ★水母块（★S2-债2 清偿刀,2026-10-01——原 else 支 :9304 同面展开到 502/
+          //  局部免疫支）：Damage_PVE_Inner :12686 `if (dontTakeDamage) return` 在写梯
+          //  :14031-14183【之前】⇒ 充能水母重叠拍不落局部免疫账（旧档先写
+          //  meowHitCd=充能期白写,水母解冻后 10t 内漏命中）;读门后写前位=原版
+          //  flag2 表行门（:12595）对 zap 的同构面。非接触族（502 aiStyle 8）不电。
+          if (zapJelly && jellyDontTake) {
+            if (jellyZapProjectile(this.projId, projectileData(this.projId)?.aiStyle)) {
+              game.takeDamageFromJellyfish?.(ent);
+            }
+            continue;
+          }
           const cd = this.meowHitCd.get(e.id) ?? 0;
           if (cd > 0) continue;
           this.meowHitCd.set(e.id, 10);
         } else if (this.localImmune > 0) {
           // 1457: 通用局部免疫（usesLocalNPCImmunity+localNPCHitCooldown=N，数据列驱动）
           immFaceLocal = true;      // ★GC1 face 记录
+          // ★水母块（★S2-债2,同 502 支——本支接触族成员 611(aiStyle75)/697·707
+          //  (aiStyle140) 充能水母重叠拍照电玩家;旧档先写 localImmuneCd=白写+漏电）
+          if (zapJelly && jellyDontTake) {
+            if (jellyZapProjectile(this.projId, projectileData(this.projId)?.aiStyle)) {
+              game.takeDamageFromJellyfish?.(ent);
+            }
+            continue;
+          }
           const cd = this.localImmuneCd.get(e.id) ?? 0;
           if (cd > 0) continue;
           this.localImmuneCd.set(e.id, this.localImmune);
@@ -9590,6 +9620,23 @@ export class Arrow extends Entity {
               vanillaId: v661.vanillaId,
               lifeMax: v661.maxHp ?? v661.def?.lifeMax,
               dealt: v661.lastStrikeDealt ?? 0 });
+        } else if (!vanillaGated) {
+          // ★S2-债1 白耗面（2026-10-01,R1-B 定谳存档 meleeOnHitProjs.ts:552-570 台账
+          //  兑现——本通用环=箭/回旋镖/召唤弹等非 magic PVE 命中最大族,旧档 magic 门
+          //  把白耗整面挡死）。原版 :13877-79 调用点无类别门,:12090 `lifeSteal -= num2`
+          //  先于 :12091-93 `if (!magic) return` ⇒ 幽灵兜帽在身时非 magic 命中【白扣
+          //  治疗预算不出治疗球】=原版本相。isMagic=false 忠实直传（本臂仅数据面非
+          //  magic 可达;真扣不回复由 applyLifeSteal :43432-33 承载,套装/月噬门在扣前
+          //  =原版 :13877 调用点同位）;victim 门+flag10 lifeMax>5 段与 magic 臂同源;
+          //  numHits = 自增前受理数（下方 :14263 位 ++ 在后,magic 臂同面）;
+          //  !hostile/aiStyle≠59 段由环路径承载（:9134 hostile 早退/reflected 上拦;
+          //  356 浮魂不流本环）。
+          const v661 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          if (vanillaFlag10LifeMaxOk(v661) && spectreVictimEligible(v661.vanillaId)) {
+            game.applyLifeSteal?.('ghost', v661.lastStrikeDealt ?? 0, this.pveNumHits,
+              e.x + e.w / 2, e.y + e.h / 2, false);
+          }
         }
         // ★BJ157-②③：numHits++（:14263——吸血链/ghostHurt on-hit 段之后的命中尾位,
         //  与原版递增点同相;读点（上方吸血链）取自增前值）

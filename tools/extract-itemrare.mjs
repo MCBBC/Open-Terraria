@@ -110,6 +110,135 @@
 //     2320=75000(另:现库 2320 value=2500 系死标签污染);鱼链 2298-2321 per-type value 覆写）、
 //     :48905-48909 SetDefaults 递归 1803-1807→SetDefaults(1533+type-1803)（终值=1533-1537 面,
 //     rare=8/value=0）。
+//
+// ★清偿刀 T4（2026-10-01,value 面续刀,S1 终态为基线）:上记 S1 债三件全部落刀——
+//   ①③守卫 value 面:S1_GUARD_VALUE_PINS 钉表+rangeGuardValueFace 机械解析（base 顶层
+//     value 行+per-type if(type==N) 覆写;sweep≡钉表,漂移 throw 逼定谳）+单件/if-else 守卫
+//     2320=75000/2421=156000/2422=500000（findTypeGuardBlock 扩 value/elseValue 采集）。
+//     ★S1 头注勘误:2104-13 真值=37500 非 3750——源锚 `value = sellPrice(0, 0, 75);`
+//     （1457:21880/1456:21854/1458:21880 三版同式）,boss 面具卖价 75 银×5 口径,S1 头注
+//     「3750」系笔误（3750=sellPrice(0,0,7,50) 另物）。三版同构对拍实证。
+//   ②鱼链 value 面:S1_FISH_VALUE_PINS 22 ids（2298-2319,2321;块内 value+rare 双写的 value
+//     支）——运行基值 sellPrice(0,0,5)=2500 仅 2290/2297 存活（2291-2296 鱼竿组内层 switch
+//     后提前 return、2320 走 :23100 守卫提前 return=标签死码）,其余 22 件全被 per-type
+//     覆写;expected-override-ids=标签连−{2320}−{无块存活性已由 rare 面亲核}机械断言。
+//   ③2320 死标签污染修正:现库 value=2500（鱼链运行基值经死标签写入）→ 75000（守卫
+//     sellPrice(0,1,50)）;S1③ 单件守卫段扩 value 断言。
+//   ④S1⑥ 新段:SetDefaults 派发后递归 `if (type >= 1803 && type <= 1807) { SetDefaults(1533
+//     + type - 1803); }`（:48922;1456:48525/1458:48922 三版同锚）——递归整体重置重建,终值=
+//     目标面 1533-1537（S1③ rare=8;value 缺键=0）→ RARE[1803-1807]=8、VALUE 强制缺键
+//     （delete 清区域扫描可能写入的 case 级死码值;运行时递归覆写语义 1:1）。目标面 rare
+//     非均匀/value 非缺键即 throw 逼重定谳。1803-1807=Jungle/Crimson/Corruption/Frozen/
+//     Hallowed KeyMold（1.3 时代钥匙模具,终值=对应钥匙面,Identities 亲核 ItemID.cs:
+//     5152 JungleKeyMold=1803）。
+//   消费面:Shimmer groupDecraftItemId（组 31 碎片 3456-3459 四件同切 10000=均匀平移,
+//     OrderBy(value) 代表不变=3458;其余新增 value id 不属任何 RecipeGroup）/Game.ts reforge
+//     cost（:48799 权威值查表,面具/鱼/锤衣面重铸费由死值 0/2500 归真）/tooltip 稀有色
+//     （rare 面零变更,唯 1803-1807 新增 8）。
+//   ★T4 新登记债（本刀不修,census 已扫获待各自刀定谳）:方法级【无 rare】value 守卫面——
+//     SD1-5 范围守卫 if(type>=A&&type<=B) 块顶 value 行 34 族全 live（守卫线前零 case 标签
+//     机械核）全缺键:1481-1494=10000/1500-1502=5000/1528-1532=2500/1538-1540=5000/1541-1542=5000/
+//     1543-1545=300000/1709-1712=200/1713-1718=300/1719-1722=2000/2055-2065=3000/2066-2071=2000/
+//     2072-2081=300/2082-2091=500/2092-2103=1500/2114-2118=2500/2129-2134=500/2135-2138=300/
+//     2145-2148=150/2149-2152=1500/2153-2155=300/2254-2256=300/2376-2385=300(2379=100000)/
+//     2386-2396=300(2389=100000)/2397-2416=300/2442-2449=25000/2631-2633=150/2634-2636=300/
+//     2648-2651=300/2652-2657=3000/2658-2663=300/2664-2668=1500/3651-3662=300/3739-3741=50/
+//     3915-3916=300;另 4695-4697 守卫=死码（case 标签 :38616-38618 先捕获,不取）。per-type
+//     覆写/嵌套形态未逐族亲读,落刀前须各族机械解析+三版同构对拍。
+//
+// ★清偿刀 U1（2026-10-01,方法级【无 rare】value 守卫 34 族,T4 census 主面落刀;S1/T4 终态为基线）:
+//   「无 rare」语义=守卫块内无 rare 行（与 S1③④有 rare 守卫对偶）的 value 面。SD1-5 方法级链
+//   （顺序 guard/switch,命中即 return）内 if(type>=A&&type<=B) 守卫采集 base（块顶 value 行,后写
+//   胜）/over（嵌套 if(type==N) 顶层 value）/ifElse（嵌套 if(范围){v}else{v} 双支,else 覆盖=父域−
+//   if 域,双侧开口未建模）。34 族逐族亲读定谳+三版（1456/1457/1458）逐行同构对拍零漂移（行号随
+//   版漂移,内容锚定;1457 锚）:1481-1494=10000（buyPrice(0,1),:18311,嵌套于父守卫 1479-1494
+//   @:18300 的 if 支）/1500-1502=5000（:18354）/1528-1532=2500（:18544）/1538-1540=5000（:18566）/
+//   1541-1542=5000（:18581）/1543-1545=300000（sellPrice(0,6),:18596）/1709-1712=200（:19271）/
+//   1713-1718=300（:19285）/1719-1722=2000（:19300）/2055-2065=3000（:21799）/2066-2071=2000
+//   （:21814）/2072-2081=300（:21829）/2082-2091=500（:21844）/2092-2103=1500（:21859）/
+//   2114-2118=2500（sellPrice(0,0,5),:21884）/2129-2134=500（:21950）/2135-2138=300（:21965）/
+//   2145-2148=150（:22025）/2149-2152=1500（:22040）/2153-2155=300（sellPrice(0,0,0,60),:22055）/
+//   2254-2256=300（:22724,SD3 尾卫 if(type<2192||type>2198) 反演大块内 d4,11 个 d4 族同域）/
+//   2376-2385=300+2379=100000（:23921;buyPrice(0,10) :23936）/2386-2396=300+2389=100000（:23940/
+//   :23955）/2397-2416=300（:23959）/2442-2449=25000（sellPrice(0,0,50),:24138）/2631-2633=150
+//   （:25645）/2634-2636=300（:25660）/2648-2651=300（sellPrice(0,0,0,60),:25759）/2652-2657=3000
+//   （:25775）/2658-2663=300（:25790）/2664-2668=1500（:25805）/3651-3662=300（:32835）/3739-3741=50
+//   （buyPrice(0,0,0,50),:33105）/3915-3916=300（:34600）。
+//   ★census 外同形扫获（liveness 亲核 live）:1479-1480=5000——1479-1494 父守卫 if-else 的 else 支
+//   （:18317 sellPrice(0,0,10)）;1479/1480 无 case 标签、无更早守卫捕获（SD2 域内机械核）。
+//   liveness 全 35 族=守卫线前零 case 标签+零前向遮蔽守卫（脚本机械核）。★T4 4695-4697「死码」
+//   结构定性【翻案】::38632 的 if(type>=4695&&type<=4697){value=1000}else{value=40000} 在
+//   case 4695-4700 体【内】（:38616-38621,体尾 break :38640）=case 体嵌套 if-else 活面,非方法级
+//   ——本刀不写值,登债待 case 体 per-type if 值域专刀（U1 sweep 收录 fail-loud:嵌套清单漂移即
+//   爆红;同域已核实 debt:2242=2000（现库 20 错值）/2258=5000（20）/2434=50（缺）/2843=100000
+//   （300）/SD5 5218+ 组 per-type 覆写族（5222/5228/5231 等现库 5000,真值待普查））。
+//   行源序:本段在 S1⑤ 之前——族内 10 id（1710/1716/1720/2133/2137/2147/2151/2155/2405/2663）
+//   随后被 S1⑤ SetDefaults 派发后或块终值覆写 100000（或块在 SetDefaultsN 返回之后运行,覆写序
+//   1:1）;2413=300 与现库死标签值（case :24880,守卫 :23959-23973 提前 return=死码）同值零漂移。
+//   消费面:groupDecraftItemId 组代表零变更（U1 全 217 id 不属任何 RecipeGroup,机械核）/
+//   SellChain 卖价/Game.ts reforgeCost 由 0 兜底归真值。守卫:sweep≡钉表（35 族键+值+覆写+
+//   liveness+嵌套清单+形态缝+单件清单七维,漂移即 throw）+tests/u1-itemrare-no-rare-guard-value.test.ts。
+//
+// ★清偿刀 V1(2026-10-01,case 体嵌套 per-type if 值域全域普查+落刀;U1 终态为基线):
+//   U1 门②收录的「case 体嵌套域」从单点 4695-4697 扩成全域语义普查——每 region 从方法体顶层
+//   起语义走栈演步(case run 连排合并/内层 switch 按 run 分发含 default 补集/if(type==N|范围|
+//   补集复合 type<A||type>B) 分支分区/return 灭集跨层上传/goto case 重派发),写入面按 path 四分:
+//   method(方法级=既有 S1③④⑤/T4/U1 域,本刀不写)/top(case 体顶层直写=区域扫描域)/
+//   nested(case 体【任意深度,含 default 体】内经 type-if 派生=本刀域)/variant(非 type 条件域,
+//   R2⑥ 按设计忽略,11 处 Variant 块全登记)。scope 语义:nontype 支配(变体块内的 type-if 仍属
+//   变体域),switch run 体重置 scope(嵌套 switch 的 case 体顶层仍是扫描域)。
+//   ★三版对拍:1456/1457/1458 nested 面+variant 清单逐键全等(普查脚本 _v1-nested-value-sweep
+//   三版 IDENTICAL;唯一 tv 漂移=255/5920/5926/6148+ 既有 recon 域)。liveness 全 62 面机械核
+//   (case 标签捕获+前向遮蔽+灭集传播)。
+//   普查定谳(62 面/138 id):分两域——
+//   ①「ch/ch-post」40 面 112 id=既有通道已收(本刀只锁键集+id 集,值由各通道 sweep≡pins 承载):
+//     ch(S1③/T4/U1 已落,运行时先于本刀)=2214-2217/2254-2256/2284-2287/2320/2421/2422/
+//     2376-2385(+2379)/2386-2396(+2389)/2397-2416/2442-2449/2631-2668;
+//     ch-post(S1④ 鱼链,后于本刀落值=键集门只锁形态)=2298-2321 22 面。
+//   ②「v1」22 面 26 id=本刀落值(现库全错/全缺,1457 亲读逐面定谳+三版同构):
+//     2242=2000(buyPrice(0,0,20) :22647;现库 20=case 体顶层基值冒充)/2258=5000(buyPrice(0,0,50)
+//     :22756;现库 20)/2434=50(buyPrice(0,0,0,50) :24091;现库缺)/2843=100000(buyPrice(0,10)
+//     :27103;现库 300)/4695-4697=1000(:38634)/4698-4700=40000(:38638 else 支;全缺)=U1 门②
+//     唯一登记域兑现/SD5 旗帜墙四组 per-type 覆写(基值 sellPrice(0,0,10)=5000 全组已对):
+//     5231=10000/5222=5228=100000(:41641-41649)/5243=30000/5245=10000/5235=25000(:41677-41685)/
+//     5251=5253=5257=10000/5252=5256=25000(:41737-41753)/5266=100000/5259=5265=5264=5263=25000
+//     (:41785-41801)。
+//   消费面:卖价域=value÷5(2242 卖 400 银→真值 buyPrice 面;2258/2843/52xx 组同步归真)/
+//   Game.ts reforgeCost 权威值查表归真/Shimmer groupDecraftItemId 零变更(26 id 不属任何
+//   RecipeGroup,机械核)/rare 面零变更(nested rare 面 29 id 对拍全等=既有通道)。
+//   ★V1 sweep≡V1_NESTED_PINS 七维门(键/id 集/own 分域/v1 值),漂移即 throw 逼定谳。
+//   ★新登记债(本刀不修,值已定谳待专刀):SD3 尾段基值面 2203/2204=100000 现库缺键——
+//     S1② 结构前提「尾卫块尾无条件 return」不成立:卫块内唯一 return 在 switch A default 体
+//     尾(:27618@4tab),case 2203/2204 体=裸 break(:22295)→穿出卫块落入尾段 value=buyPrice(0,10)
+//     (:27641);S1②「尾内 case 2203/2204=死码」系该前提误推。V1 语义走栈 method 面机械实证;
+//     修复须重推 S1② 可达集([2192,2198]∪{2203,2204})+消费面定谳,本刀不动。
+//     ★S1b 已兑现（2026-10-01,见文件头 S1b 节+S1② 块重写）。
+//   守卫测试:tests/v1-itemrare-nested-value.test.ts。
+//
+// ★清偿刀 S1b(2026-10-01,V1 走栈翻案兑现专刀;S1② 定谳翻正落刀):
+//   S1② 原「尾卫块尾无条件 return(:27618)→case 2203/2204 死码、100000 缺键非债」翻正——
+//   亲读+机械走栈三版复核（1456 guard:22263/tail:27614,1458=1457;行漂移内容逐字节全等）:
+//   ①卫块（:22289 if(type<2192||type>2198)）内唯一语句=switch(:22291-27619),其收口与卫块
+//     收口(:27620)之间零语句;
+//   ②卫块内唯一 return :27618 在 switch default 段体尾（default 标签 :22374,体含嵌套 switch
+//     :27550-27617）,非「块尾无条件 return」——case 2203/2204 裸 break 不经它;
+//   ③case 2203/2204 体=裸 break(:22295)=switch 直接段唯一 break-exit 集,穿出 switch→穿出
+//     卫块→落尾段 value=buyPrice(0,10)(:27641)=100000 铜=10 金买价;
+//   ④尾段可达集修正=[2192,2198]∪{2203,2204}（[2192,2198]=卫块补集直达,前提「SD3 零
+//     case 2192-2198 标签」不变;2199-2213 直接段全 return;default 段尾 return=无第三路径）。
+//   落刀:S1② 块重写（结构前提 A/B 机械断言+break-exit≡{2203,2204} 钉面+尾段 base/over
+//   表达式钉面,fail-loud 漂移即 throw 逼定谳）+VALUE[2203]=VALUE[2204]=100000。2192-2198
+//   同值面不变（2194=27000/2196=200 覆写保留）。
+//   消费面:2203=SteampunkBoiler/2204=HoneyDispenser（ItemID.cs:5952/5954;tile 307/308 同名,
+//   任务猜测「血腥祭坛」不实）——双表口径:运行时卖回/货架=vanilla-shopstock.json（Steampunker
+//   178 两格 price=100000+values['2203'/'2204']=100000 既有,本刀不改其运行时行为;可放置物块
+//   不可重铸,Game.ts reforgeCost(:48840) 的 ITEM_VALUE 唯一消费点不受累）;本刀兑现
+//   vanilla-itemvalue.json 权威值面与货架/卖回表同值对齐（消缺键债,extract-itemsorting
+//   对照校验源同步归真）。RecipeGroup 零成员（机械核,decraft 代表零变更）/
+//   rare 面零变更（value 键 5344→5346,rare 3632 不变）。
+//   守卫:tests/s1-itemrare-five-faces.test.ts（② 扩锚+变异二发源）+
+//   tests/v1-itemrare-nested-value.test.ts（⑤ 缺键锚翻正为兑现锚）。
+
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
@@ -529,13 +658,18 @@ const S1_FOOD = (() => {
 })();
 for (const [id, r] of Object.entries(S1_FOOD.rare)) RARE[id] = r;
 
-// ---- S1② SetDefaults3 方法尾笼件段 value=buyPrice(0,10)（可达集=尾卫补集） ----
+// ---- S1② SetDefaults3 方法尾笼件段 value=buyPrice(0,10)（可达集=卫块补集∪break-exit） ----
+// ★清偿刀 S1b（2026-10-01,V1 走栈翻案兑现;S1② 定谳翻正）:原「块尾无条件 return」前提
+//   不成立——卫块内唯一 return 在内层 switch default 段体尾(:27618),case 2203/2204 体=裸
+//   break(:22295) 穿出 switch→穿出卫块→落尾段 value=buyPrice(0,10)(:27641)。可达集=
+//   [2192,2198]∪{2203,2204}。结构前提 A/B+break-exit 钉面+尾段表达式钉面全部 fail-loud
+//   （机械断言见下;三版同构锚:1456:22263/27614,1458=1457,头注 S1b 节）。
 (() => {
   const [cFrom, cTo] = REGIONS[2]; // SetDefaults3
   if (!LINES[cFrom] || !LINES[cFrom].includes('SetDefaults3(')) {
     throw new Error('[extract-itemrare] S1② REGIONS[2] 非 SetDefaults3（区域表漂移）');
   }
-  // 尾卫 `if (type < A || type > B)`(2-tab,块尾无条件 return) → 可达集 [A,B]
+  // 尾卫 `if (type < A || type > B)`(2-tab)
   let guard = null;
   for (let i = cFrom; i <= cTo; i++) {
     const gm = LINES[i].match(/^\t\tif \(type < (\d+) \|\| type > (\d+)\)\s*$/);
@@ -547,16 +681,87 @@ for (const [id, r] of Object.entries(S1_FOOD.rare)) RARE[id] = r;
       d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
       if (d === 0 && j > i + 1) { blockEnd = j; break; }
     }
-    const blockText = LINES.slice(i + 1, blockEnd).join('\n').trim();
-    // 块尾（剥掉内层块的闭括号链后）须为无条件 return——可达集推导的结构前提
-    if (!/return;\s*$/.test(blockText.replace(/(?:\s*\})+\s*$/, ''))) {
-      throw new Error(`[extract-itemrare] S1② 尾卫块(:${i + 1})块尾非无条件 return（结构漂移,可达集推导失效）`);
-    }
     guard = { lo: +gm[1], hi: +gm[2], blockEnd, line: i };
     break;
   }
   if (!guard) throw new Error('[extract-itemrare] S1② SetDefaults3 尾卫 `if (type < A || type > B)` 未找到（源漂移）');
-  // 可达性前提:SD3 内零 [lo,hi] case 标签（有=该 id 提前 return,尾段对它死码）
+  // ★S1b 结构前提 A:卫块内唯一语句=顶层 switch(type),其收口与卫块收口之间零语句
+  //   （break-exit 穿出 switch 后直落尾段的通路前提;新语句现形=路径面变化,须重定谳）
+  const swHead = LINES[guard.line + 1].trim() === '{' ? guard.line + 2 : guard.line + 1;
+  if (!/^\t\t\tswitch \(type\)\s*$/.test(LINES[swHead] ?? '')) {
+    throw new Error(`[extract-itemrare] S1② 卫块(:${guard.line + 1})首语句非 3-tab switch(type)(:${swHead + 1}):${LINES[swHead]?.trim()}——结构漂移,须重定谳`);
+  }
+  let swD = 0;
+  let swEnd = -1;
+  for (let j = swHead + 1; j <= guard.blockEnd; j++) {
+    swD += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+    if (swD === 0) { swEnd = j; break; }
+  }
+  if (swEnd < 0) throw new Error('[extract-itemrare] S1② 卫块内 switch 未收口（结构漂移）');
+  for (let j = swEnd + 1; j < guard.blockEnd; j++) {
+    if (LINES[j].trim()) {
+      throw new Error(`[extract-itemrare] S1② 卫块 switch 收口(:${swEnd + 1})后残留语句(:${j + 1}):${LINES[j].trim()}——break-exit 通路面变化,须重定谳`);
+    }
+  }
+  // ★S1b 结构前提 B:switch 直接 case 段终止符谱 → break-exit 集（=落尾段的唯一 id 来源;
+  //   直接标签=3-tab/体顶层=4-tab;段终止符=体顶层 bal==0 的 break/return/goto）
+  const runs = [];
+  let cur = null;
+  for (let j = swHead + 1; j < swEnd; j++) {
+    const lm = LINES[j].match(/^\t\t\tcase (\d+):\s*$/);
+    const isDef = /^\t\t\tdefault:\s*$/.test(LINES[j]);
+    if (!lm && !isDef) continue;
+    const lab = lm ? +lm[1] : 'default';
+    if (cur && j === cur.end + 1 && cur.labels !== 'default' && lab !== 'default') {
+      cur.labels.push(lab);
+      cur.end = j;
+    } else {
+      if (cur) runs.push(cur);
+      cur = { labels: lab === 'default' ? 'default' : [lab], start: j + 1, end: j, labStart: j };
+    }
+  }
+  if (cur) runs.push(cur);
+  const breakExit = [];
+  for (let k = 0; k < runs.length; k++) {
+    const run = runs[k];
+    const spanTo = k + 1 < runs.length ? runs[k + 1].labStart - 1 : swEnd - 1;
+    const terms = [];
+    let topStmts = 0;
+    let bal = 0;
+    for (let q = run.start; q <= spanTo; q++) {
+      const t = LINES[q].trim();
+      const dq = (LINES[q].match(/^\t*/) ?? [''])[0].length;
+      if (bal === 0 && dq === 4 && t && !t.startsWith('case ') && t !== 'default:') {
+        topStmts++;
+        if (/^(break;|return\b|goto\b)/.test(t)) terms.push(t);
+      }
+      bal += (LINES[q].match(/{/g) || []).length - (LINES[q].match(/}/g) || []).length;
+      if (bal < 0) bal = 0;
+    }
+    if (run.labels === 'default') {
+      // default 段=补集:尾 return 终止（若变 break-终止=补集全体改落尾段,可达集剧变须重定谳）
+      if (terms.length !== 1 || !/^return/.test(terms[0])) {
+        throw new Error(`[extract-itemrare] S1② 卫块 switch default 段终止符漂移:[${terms.join('|')}]（expected 唯一 return）——须重定谳`);
+      }
+      continue;
+    }
+    if (terms.length !== 1) {
+      throw new Error(`[extract-itemrare] S1② 卫块 switch 段(${run.labels.join(',')})终止符数≠1:[${terms.join('|')}]——复合/贯穿形态未建模,须重定谳`);
+    }
+    if (/^break;/.test(terms[0])) {
+      if (topStmts !== 1) {
+        throw new Error(`[extract-itemrare] S1② break-exit 段(${run.labels.join(',')})非裸 break（体 ${topStmts} 语句）——体语句面变化,须重定谳`);
+      }
+      breakExit.push(...run.labels);
+    } else if (!/^return/.test(terms[0])) {
+      throw new Error(`[extract-itemrare] S1② 段终止符形态外(${run.labels.join(',')}):${terms[0]}——goto/复合须重定谳`);
+    }
+  }
+  breakExit.sort((a, b) => a - b);
+  if (JSON.stringify(breakExit) !== JSON.stringify([2203, 2204])) {
+    throw new Error(`[extract-itemrare] S1② break-exit 集漂移:[${breakExit.join(',')}]（expected [2203,2204]——V1 走栈翻案面,漂移须重定谳）`);
+  }
+  // 可达性前提（补集部分,不变）:SD3 内零 [lo,hi] case 标签（有=该 id 提前 return,尾段对它死码）
   for (let id = guard.lo; id <= guard.hi; id++) {
     const re = new RegExp(`^\\t*case ${id}:\\s*$`);
     for (let i = cFrom; i <= cTo; i++) {
@@ -581,9 +786,20 @@ for (const [id, r] of Object.entries(S1_FOOD.rare)) RARE[id] = r;
     over[+m[1]] = vm[1];
   }
   if (baseExpr === null) throw new Error('[extract-itemrare] S1② 尾段基值行未找到');
+  // ★S1b 尾段表达式钉面（源漂移即 throw,禁静默重放新值;三版逐字节全等锚=buyPrice(0, 10)）
+  if (baseExpr !== 'buyPrice(0, 10)') {
+    throw new Error(`[extract-itemrare] S1② 尾段基值漂移:${baseExpr}（expected buyPrice(0, 10)）——须重定谳`);
+  }
+  const S1B_OVER_PINS = { 2194: 'buyPrice(0, 2, 70)', 2196: '200' };
+  const overKeys = Object.keys(over).map(Number).sort((a, b) => a - b);
+  const pinKeys = Object.keys(S1B_OVER_PINS).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(overKeys) !== JSON.stringify(pinKeys) || pinKeys.some((k) => over[k] !== S1B_OVER_PINS[k])) {
+    throw new Error(`[extract-itemrare] S1② 尾段覆写面漂移:${JSON.stringify(over)}（expected ${JSON.stringify(S1B_OVER_PINS)}）——须重定谳`);
+  }
   const baseVal = evalPrice(baseExpr);
   if (baseVal === null) throw new Error(`[extract-itemrare] S1② 尾段基值不可解:${baseExpr}`);
   for (let id = guard.lo; id <= guard.hi; id++) VALUE[id] = baseVal;
+  for (const id of breakExit) VALUE[id] = baseVal; // ★S1b:2203/2204 裸 break 落尾段,同值面 100000
   for (const [id, expr] of Object.entries(over)) {
     const v = evalPrice(expr);
     if (v === null) throw new Error(`[extract-itemrare] S1② 覆写值不可解:${expr}`);
@@ -649,11 +865,669 @@ const S1_GUARD_PINS = [
   }
   RARE[2421] = 1;
   RARE[2422] = 3;
+  // ★T4 ①:单件/if-else 守卫的 value 面（亲读锚:2320 sellPrice(0,1,50)=75000 :23105;
+  //   2421 sellPrice(0,3,12)=156000 :23089;2422 sellPrice(0,10)=500000 :23096）
+  const sv = findTypeGuardBlock(2320);
+  if (!sv || sv.value === null || evalPrice(sv.value) !== 75000) {
+    throw new Error(`[extract-itemrare] S1③value 单件守卫 2320 value 面漂移:${JSON.stringify(sv)}（expected sellPrice(0,1,50)=75000）`);
+  }
+  VALUE[2320] = 75000; // 死标签污染修正:鱼链运行基值 2500 经死标签写入现库,真值=守卫面
+  if (ie.value === null || ie.elseValue === null || evalPrice(ie.value) !== 156000 || evalPrice(ie.elseValue) !== 500000) {
+    throw new Error(`[extract-itemrare] S1③value if-else 守卫 2421/2422 value 面漂移:${JSON.stringify(ie)}（expected if=sellPrice(0,3,12)=156000/else=sellPrice(0,10)=500000）`);
+  }
+  VALUE[2421] = 156000;
+  VALUE[2422] = 500000;
+  // ★T4 ①续:范围守卫 value 面（sweep≡钉表;per-type 覆写机械解析,漂移 throw 逼定谳）
+  const S1_GUARD_VALUE_PINS = [
+    // 10 注册族全列（含两族无 value 行=缺省 0,缺行也钉——新增 value 行即 throw）
+    { lo: 1522, hi: 1527, base: null, over: {}, at: ':18537' },
+    { lo: 1533, hi: 1537, base: null, over: {}, at: ':18559' }, // =S1⑥ 递归目标面(value 缺键前提)
+    { lo: 1977, hi: 1986, base: 50000, over: { 1980: 100000, 1984: 75000, 1985: 150000 }, at: ':21236' }, // buyPrice(0,5)+三覆写
+    { lo: 2104, hi: 2113, base: 37500, over: {}, at: ':21874' }, // sellPrice(0,0,75)——S1 头注「3750」系笔误勘误
+    { lo: 2214, hi: 2217, base: 100000, over: {}, at: ':22375' }, // buyPrice(0,10)
+    { lo: 2284, hi: 2287, base: 50000, over: {}, at: ':22988' }, // buyPrice(0,5)
+    { lo: 3309, hi: 3314, base: 50000, over: {}, at: ':30258' }, // buyPrice(0,5)
+    { lo: 3390, hi: 3452, base: 1000, over: {}, at: ':30986' },  // value=1000 字面量
+    { lo: 3456, hi: 3459, base: 10000, over: {}, at: ':31021' }, // sellPrice(0,0,20)
+    { lo: 3638, hi: 3642, base: 100, over: {}, at: ':32793' },   // buyPrice(0,0,1)
+  ];
+  for (const pin of S1_GUARD_VALUE_PINS) {
+    const face = rangeGuardValueFace(pin.lo, pin.hi);
+    if (!face) throw new Error(`[extract-itemrare] S1③value 守卫 ${pin.lo}-${pin.hi} 块未找到（源漂移）:${pin.at}`);
+    const baseV = face.base === null ? null : evalPrice(face.base);
+    if ((baseV ?? null) !== (pin.base ?? null)) {
+      throw new Error(`[extract-itemrare] S1③value 守卫 ${pin.lo}-${pin.hi} base 漂移:parsed=${face.base}(=${baseV}) pin=${pin.base}——新面现形须先定谳`);
+    }
+    const parsedOver = {};
+    for (const [idS, expr] of Object.entries(face.over)) {
+      const v = evalPrice(expr);
+      if (v === null) throw new Error(`[extract-itemrare] S1③value 守卫 ${pin.lo}-${pin.hi} 覆写不可解:${expr}`);
+      parsedOver[+idS] = v;
+    }
+    const pinKeys = Object.keys(pin.over).map(Number).sort((a, b) => a - b);
+    const parseKeys = Object.keys(parsedOver).map(Number).sort((a, b) => a - b);
+    if (JSON.stringify(pinKeys) !== JSON.stringify(parseKeys) || pinKeys.some((k) => pin.over[k] !== parsedOver[k])) {
+      throw new Error(`[extract-itemrare] S1③value 守卫 ${pin.lo}-${pin.hi} 覆写面漂移:parsed=${JSON.stringify(parsedOver)} pin=${JSON.stringify(pin.over)}——新覆写现形须先定谳`);
+    }
+    if (baseV !== null) for (let id = pin.lo; id <= pin.hi; id++) VALUE[id] = baseV;
+    for (const [idS, v] of Object.entries(parsedOver)) VALUE[+idS] = v;
+  }
 })();
 
+// ---- ★清偿刀 U1（2026-10-01,方法级【无 rare】value 守卫 35 面,T4 census 主面落刀）----
+// 34 census 族 + census 外同形 else 面（1479-1480）;定谳/翻案/debt 全录文件头注 U1 节。
+// 行源序:本段在 S1④⑤⑥ 之前（族内 10 id 由 S1⑤ 或块终值覆写=运行时覆写序 1:1）。
+const U1_PINS = [
+  // { lo, hi, base（铜币终值）, over:{id:终值}, at=1457 行号锚 }
+  { lo: 1479, hi: 1480, base: 5000, over: {}, at: ':18317 else sellPrice(0,0,10)（父守卫 1479-1494@:18300）' },
+  { lo: 1481, hi: 1494, base: 10000, over: {}, at: ':18313 buyPrice(0,1)' },
+  { lo: 1500, hi: 1502, base: 5000, over: {}, at: ':18365 sellPrice(0,0,10)' },
+  { lo: 1528, hi: 1532, base: 2500, over: {}, at: ':18556' },
+  { lo: 1538, hi: 1540, base: 5000, over: {}, at: ':18577 sellPrice(0,0,10)' },
+  { lo: 1541, hi: 1542, base: 5000, over: {}, at: ':18592 sellPrice(0,0,10)' },
+  { lo: 1543, hi: 1545, base: 300000, over: {}, at: ':18605 sellPrice(0,6)' },
+  { lo: 1709, hi: 1712, base: 200, over: {}, at: ':19282' },
+  { lo: 1713, hi: 1718, base: 300, over: {}, at: ':19297' },
+  { lo: 1719, hi: 1722, base: 2000, over: {}, at: ':19311' },
+  { lo: 2055, hi: 2065, base: 3000, over: {}, at: ':21811' },
+  { lo: 2066, hi: 2071, base: 2000, over: {}, at: ':21826' },
+  { lo: 2072, hi: 2081, base: 300, over: {}, at: ':21841' },
+  { lo: 2082, hi: 2091, base: 500, over: {}, at: ':21856' },
+  { lo: 2092, hi: 2103, base: 1500, over: {}, at: ':21871' },
+  { lo: 2114, hi: 2118, base: 2500, over: {}, at: ':21895 sellPrice(0,0,5)' },
+  { lo: 2129, hi: 2134, base: 500, over: {}, at: ':21962' },
+  { lo: 2135, hi: 2138, base: 300, over: {}, at: ':21976' },
+  { lo: 2145, hi: 2148, base: 150, over: {}, at: ':22037' },
+  { lo: 2149, hi: 2152, base: 1500, over: {}, at: ':22052' },
+  { lo: 2153, hi: 2155, base: 300, over: {}, at: ':22067 sellPrice(0,0,0,60)' },
+  { lo: 2254, hi: 2256, base: 300, over: {}, at: ':22736' },
+  { lo: 2376, hi: 2385, base: 300, over: { 2379: 100000 }, at: ':23933 base+:23936 buyPrice(0,10)' },
+  { lo: 2386, hi: 2396, base: 300, over: { 2389: 100000 }, at: ':23952 base+:23955 buyPrice(0,10)' },
+  { lo: 2397, hi: 2416, base: 300, over: {}, at: ':23971' },
+  { lo: 2442, hi: 2449, base: 25000, over: {}, at: ':24149 sellPrice(0,0,50)' },
+  { lo: 2631, hi: 2633, base: 150, over: {}, at: ':25657' },
+  { lo: 2634, hi: 2636, base: 300, over: {}, at: ':25672' },
+  { lo: 2648, hi: 2651, base: 300, over: {}, at: ':25771 sellPrice(0,0,0,60)' },
+  { lo: 2652, hi: 2657, base: 3000, over: {}, at: ':25787' },
+  { lo: 2658, hi: 2663, base: 300, over: {}, at: ':25802' },
+  { lo: 2664, hi: 2668, base: 1500, over: {}, at: ':25817' },
+  { lo: 3651, hi: 3662, base: 300, over: {}, at: ':32846' },
+  { lo: 3739, hi: 3741, base: 50, over: {}, at: ':33116 buyPrice(0,0,0,50)' },
+  { lo: 3915, hi: 3916, base: 300, over: {}, at: ':34611' },
+];
+// case 体嵌套域清单（非方法级,本刀不写值=债;唯一已知=4695-4697 翻案面,头注 U1 节）
+const U1_NESTED_INV = ['4695-4697'];
+// live 无 rare 带面单件守卫清单（值面由 S1②over/S1③over/本刀 over 各自承载,此处只锁键集）
+const U1_SINGLE_INV = ['1980', '1984', '1985', '2194', '2196', '2379', '2389'];
+
+(() => {
+  /** 平衡括号块跨度:块头行 gi（brace 同行或次行）→ 收口行 idx（含）;未收口=-1 */
+  function spanOf(gi, to) {
+    const inline = /\{\s*$/.test(LINES[gi]);
+    let d = 0;
+    let started = false;
+    for (let j = gi; j <= to; j++) {
+      const raw = LINES[j];
+      if (j === gi && inline) { d += (raw.match(/{/g) || []).length - (raw.match(/}/g) || []).length; started = d > 0; continue; }
+      if (!started && raw.trim() === '{') { d = 1; started = true; continue; }
+      if (!started) continue;
+      d += (raw.match(/{/g) || []).length - (raw.match(/}/g) || []).length;
+      if (d === 0) return j;
+    }
+    return -1;
+  }
+  /** 块 [gi+1,end) 顶层（bd===depth+1）采集 { base, over, ifElse, rareSeen };嵌套 if 块整体跳过 */
+  function faceOf(gi, end, depth) {
+    let base = null;
+    const over = {};
+    const ifElse = [];
+    let rareSeen = false;
+    for (let j = gi + 1; j < end; j++) {
+      const t = LINES[j].trim();
+      if (LINES[j].match(/^\t*/)[0].length !== depth + 1) continue;
+      const vm = t.match(/^value = ([^;]+);\s*$/);
+      if (vm) base = vm[1]; // 后写胜（C# 赋值序）
+      if (/^rare = /.test(t) || /^SetShopValues\(/.test(t)) rareSeen = true;
+      const nm = t.match(/^if \(type == (\d+)\)\s*\{?\s*$/);
+      const rm = t.match(/^if \(type >= (\d+) && type <= (\d+)\)\s*\{?\s*$/);
+      if (!nm && !rm) continue;
+      const end2 = spanOf(j, end);
+      if (end2 < 0) throw new Error(`[extract-itemrare] U1 嵌套块未收口(:${j + 1})`);
+      const sub = faceOf(j, end2, depth + 1);
+      if (sub.rareSeen) rareSeen = true;
+      let skipTo = end2;
+      if (nm) {
+        over[+nm[1]] = sub.base;
+      } else {
+        // 嵌套范围 if 的 else 支（else 独立行+次行 {;else if 链未建模）
+        const nxt = (LINES[end2 + 1] ?? '').trim();
+        if (nxt === 'else') {
+          if ((LINES[end2 + 2] ?? '').trim() !== '{') {
+            throw new Error(`[extract-itemrare] U1 else 支形态漂移(:${end2 + 3}):${(LINES[end2 + 2] ?? '').trim()}——else if 未建模`);
+          }
+          const elseEnd = spanOf(end2 + 2, end);
+          if (elseEnd < 0) throw new Error(`[extract-itemrare] U1 else 块未收口(:${end2 + 3})`);
+          const sub2 = faceOf(end2 + 2, elseEnd, depth + 1);
+          if (sub2.rareSeen) rareSeen = true;
+          ifElse.push({ lo: +rm[1], hi: +rm[2], ifVal: sub.base, elseVal: sub2.base });
+          skipTo = elseEnd;
+        } else if (/^else/.test(nxt)) {
+          throw new Error(`[extract-itemrare] U1 else if 链未建模(:${end2 + 2}):${nxt}`);
+        } else {
+          ifElse.push({ lo: +rm[1], hi: +rm[2], ifVal: sub.base, elseVal: null });
+        }
+      }
+      j = skipTo;
+    }
+    return { base, over, ifElse, rareSeen };
+  }
+  const evalP = (expr, at) => {
+    const v = evalPrice(expr);
+    if (v === null) throw new Error(`[extract-itemrare] U1 ${at} value 不可解:${expr}`);
+    return v;
+  };
+  const caseHitOf = (lo, hi, from, gi) => {
+    let n = 0;
+    for (let k = from; k < gi; k++) {
+      const cm = LINES[k].match(/^\t*case (\d+):\s*$/);
+      if (cm && +cm[1] >= lo && +cm[1] <= hi) n++;
+    }
+    return n;
+  };
+  // pass1:各 region 全部 range 守卫位置+跨度（前向遮蔽核用;同 region 内才构成遮蔽）
+  const spans = [];
+  REGIONS.slice(0, 5).forEach(([from, to], ri) => {
+    for (let i = from; i <= to; i++) {
+      const gm = LINES[i].match(/^(\t*)if \(type >= (\d+) && type <= (\d+)\)\s*\{?\s*$/);
+      if (gm) spans.push({ ri, lo: +gm[2], hi: +gm[3], gi: i, end: spanOf(i, to) });
+    }
+  });
+  // pass2:守卫分类采集（range=本刀面;singles=键集清单;形态缝=拒）
+  const faces = new Map(); // 'lo-hi' → { base:number|null, over:{id:number}, srcs:string[] }
+  const mergeFace = (lo, hi, baseV, overV, src) => {
+    const key = `${lo}-${hi}`;
+    let f = faces.get(key);
+    if (!f) { f = { base: null, over: {}, srcs: [] }; faces.set(key, f); }
+    if (baseV !== null) {
+      if (f.base !== null && f.base !== baseV) {
+        throw new Error(`[extract-itemrare] U1 守卫面多源漂移 ${key}:${f.srcs.join('/')}=${f.base} vs ${src}=${baseV}`);
+      }
+      f.base = baseV;
+    }
+    for (const [id, v] of Object.entries(overV)) {
+      if (f.over[id] !== undefined && f.over[id] !== v) {
+        throw new Error(`[extract-itemrare] U1 守卫覆写多源漂移 ${key}#${id}:${f.over[id]} vs ${v}（${src}）`);
+      }
+      f.over[id] = v;
+    }
+    f.srcs.push(src);
+  };
+  const deadMethod = [];
+  const nestedInv = [];
+  const oddForms = [];
+  const singlesGate = new Set();
+  REGIONS.slice(0, 5).forEach(([from, to], ri) => {
+    for (let i = from; i <= to; i++) {
+      const gm = LINES[i].match(/^(\t*)if \(type >= (\d+) && type <= (\d+)\)\s*\{?\s*$/);
+      const sm = gm ? null : LINES[i].match(/^(\t*)if \(type == (\d+)\)\s*\{?\s*$/);
+      if (!gm && !sm) {
+        // 形态缝:条件子串在而守卫形态不在=单行体/复合条件等未建模形态（已知例外两处:
+        //   :25554 placeStyle 双支/:27415 bait 多或,块内均无 value/rare 面）
+        if (/if \(type >= \d+ && type <= \d+\)/.test(LINES[i]) || /if \(type == \d+\)/.test(LINES[i])) {
+          oddForms.push(`${i + 1}:${LINES[i].trim()}`);
+        }
+        continue;
+      }
+      if (sm) {
+        // 单件守卫:live∧无 rare∧带面 → 键集清单（值由 S1②over/S1③over/U1 over 承载）
+        const end = spanOf(i, to);
+        if (end < 0) throw new Error(`[extract-itemrare] U1 单件守卫块未收口(:${i + 1})`);
+        const face = faceOf(i, end, sm[1].length);
+        if (caseHitOf(+sm[2], +sm[2], from, i) === 0 && !face.rareSeen && face.base !== null) {
+          singlesGate.add(String(sm[2]));
+        }
+        continue;
+      }
+      const lo = +gm[2];
+      const hi = +gm[3];
+      const depth = gm[1].length;
+      const end = spanOf(i, to);
+      if (end < 0) throw new Error(`[extract-itemrare] U1 守卫块未收口(:${i + 1})`);
+      const face = faceOf(i, end, depth);
+      const caseHit = caseHitOf(lo, hi, from, i);
+      const hasFace = face.base !== null || Object.keys(face.over).length > 0 || face.ifElse.length > 0;
+      const at = `:${i + 1}`;
+      if (caseHit > 0) {
+        // 方法级链死码（d2）/case 体嵌套域（d>2,债:4695-4697 翻案面）——只收录不写值
+        if (hasFace && !face.rareSeen) (depth === 2 ? deadMethod : nestedInv).push(`${lo}-${hi}@${at}`);
+        continue;
+      }
+      if (face.rareSeen) continue; // S1③/S1④ 有 rare 守卫域,自有 sweep≡pins 守卫
+      // 前向遮蔽核:更早 range 守卫与本族相交且本守卫不在其块内=遮蔽（须定谳）
+      for (const s of spans) {
+        if (s.ri > ri) break;
+        if (s.ri === ri && s.gi < i && s.lo <= hi && s.hi >= lo && !(i < s.end)) {
+          throw new Error(`[extract-itemrare] U1 前向遮蔽:守卫 ${lo}-${hi}@${at} 被 ${s.lo}-${s.hi}@:${s.gi + 1} 遮蔽——须定谳`);
+        }
+      }
+      // ifElse 面:if 支=[嵌套域];else 支=父域−if 域（双侧开口未建模）
+      for (const e of face.ifElse) {
+        if (e.ifVal !== null) mergeFace(e.lo, e.hi, evalP(e.ifVal, `${at}→if`), {}, `${at}if`);
+        if (e.elseVal === null) continue;
+        const loPart = e.lo > lo;
+        const hiPart = e.hi < hi;
+        if (loPart && hiPart) throw new Error(`[extract-itemrare] U1 else 覆盖双侧开口未建模:${lo}-${hi}−[${e.lo},${e.hi}]@${at}`);
+        if (loPart) mergeFace(lo, e.lo - 1, evalP(e.elseVal, `${at}→else`), {}, `${at}else`);
+        if (hiPart) mergeFace(e.hi + 1, hi, evalP(e.elseVal, `${at}→else`), {}, `${at}else`);
+      }
+      if (face.base !== null) mergeFace(lo, hi, evalP(face.base, at), {}, at);
+      for (const [id, expr] of Object.entries(face.over)) {
+        if (expr === null) throw new Error(`[extract-itemrare] U1 覆写块无 value 行:${lo}-${hi}#${id}@${at}（形态外,须定谳）`);
+        mergeFace(lo, hi, null, { [+id]: evalP(expr, `${at}#${id}`) }, `${at}#${id}`);
+      }
+    }
+  });
+  // 门①:方法级死码 range 守卫带面（今天=空;新现形须定谳）
+  if (deadMethod.length) throw new Error(`[extract-itemrare] U1 方法级死码 range 守卫带面:${deadMethod.join(' ')}`);
+  // 门②:case 体嵌套域清单（今天=4695-4697 唯一;漂移即爆红逼定谳）
+  const nestedKeys = [...new Set(nestedInv.map((s) => s.split('@')[0]))].sort();
+  if (JSON.stringify(nestedKeys) !== JSON.stringify(U1_NESTED_INV)) {
+    throw new Error(`[extract-itemrare] U1 case 体嵌套 value 守卫清单漂移:${nestedInv.join(' ')}（expected ${U1_NESTED_INV.join(',')}——T4 4695-4697 翻案面,新现形须定谳）`);
+  }
+  // 门③:未建模 if(type) 形态缝
+  if (oddForms.length) throw new Error(`[extract-itemrare] U1 未建模 if(type) 形态:${oddForms.join(' | ')}`);
+  // 门④:live 无 rare 带面单件守卫键集
+  const singlesGot = [...singlesGate].sort();
+  if (JSON.stringify(singlesGot) !== JSON.stringify(U1_SINGLE_INV)) {
+    throw new Error(`[extract-itemrare] U1 单件守卫清单漂移:${singlesGot.join(',')}（expected ${U1_SINGLE_INV.join(',')}）`);
+  }
+  // 门⑤:sweep 面 ≡ 钉表（键+base 值+覆写键值;新守卫面现形须先定谳）
+  const faceKeys = [...faces.keys()].sort();
+  const pinKeys = U1_PINS.map((p) => `${p.lo}-${p.hi}`).sort();
+  if (JSON.stringify(faceKeys) !== JSON.stringify(pinKeys)) {
+    throw new Error(`[extract-itemrare] U1 sweep 面≠钉表(键):faces=[${faceKeys.join(' ')}] pins=[${pinKeys.join(' ')}]——新守卫面现形须先定谳`);
+  }
+  for (const pin of U1_PINS) {
+    const f = faces.get(`${pin.lo}-${pin.hi}`);
+    if ((f.base ?? null) !== (pin.base ?? null)) {
+      throw new Error(`[extract-itemrare] U1 守卫 ${pin.lo}-${pin.hi} base 漂移:parsed=${f.base} pin=${pin.base}(${pin.at})——新面现形须先定谳`);
+    }
+    const pOverKeys = Object.keys(pin.over).map(Number).sort((a, b) => a - b);
+    const fOverKeys = Object.keys(f.over).map(Number).sort((a, b) => a - b);
+    if (JSON.stringify(pOverKeys) !== JSON.stringify(fOverKeys) || pOverKeys.some((k) => f.over[k] !== pin.over[k])) {
+      throw new Error(`[extract-itemrare] U1 守卫 ${pin.lo}-${pin.hi} 覆写面漂移:parsed=${JSON.stringify(f.over)} pin=${JSON.stringify(pin.over)}(${pin.at})——新覆写现形须先定谳`);
+    }
+  }
+  // 落刀（行源序:S1④⑤⑥ 在后,S1⑤ 或块对 10 id 终值覆写 100000）
+  for (const pin of U1_PINS) {
+    if (pin.base !== null) for (let id = pin.lo; id <= pin.hi; id++) VALUE[id] = pin.base;
+    for (const [id, v] of Object.entries(pin.over)) VALUE[+id] = v;
+  }
+})();
+
+// ---- ★清偿刀 V1(2026-10-01):case 体嵌套 per-type if 值域全域 sweep + 落刀 ----
+// 语义走栈机械核(三版对拍脚本 tools/_v1-nested-value-sweep.mjs 同构;头注见文件顶 V1 节)。
+// 面键 = region|runKey|tagChain(tagChain=type-if 条件链,→if/→else 分支标记);own 三态:
+//   v1=本刀落值 / ch=既有通道已落且先于本刀(值做对拍,漂移 throw) / ch-post=S1④ 后置落值(只锁形态)。
+const V1_NESTED_PINS = [
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2214&&type<=2217→if', ids: [2214, 2215, 2216, 2217], own: 'ch', at: ':22381' },
+  { key: 'SetDefaults3|2242-2243(2)|type<2192||type>2198→if/type==2242→if', ids: [2242], own: 'v1', value: 2000, at: ':22647' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2254&&type<=2256→if', ids: [2254, 2255, 2256], own: 'ch', at: ':22736' },
+  { key: 'SetDefaults3|2257-2258(2)|type<2192||type>2198→if/type==2258→if', ids: [2258], own: 'v1', value: 5000, at: ':22756' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2284&&type<=2287→if', ids: [2284, 2285, 2286, 2287], own: 'ch', at: ':22992' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2421&&type<=2422→if/type==2421→if', ids: [2421], own: 'ch', at: ':23089' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2421&&type<=2422→if/type==2421→else', ids: [2422], own: 'ch', at: ':23096' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type==2320→if', ids: [2320], own: 'ch', at: ':23105' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2308→if', ids: [2308], own: 'ch-post', at: ':23170' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2312→if', ids: [2312], own: 'ch-post', at: ':23175' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2317→if', ids: [2317], own: 'ch-post', at: ':23180' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2310→if', ids: [2310], own: 'ch-post', at: ':23185' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2321→if', ids: [2321], own: 'ch-post', at: ':23190' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2315→if', ids: [2315], own: 'ch-post', at: ':23195' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2303→if', ids: [2303], own: 'ch-post', at: ':23200' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2304→if', ids: [2304], own: 'ch-post', at: ':23205' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2316→if', ids: [2316], own: 'ch-post', at: ':23210' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2311→if', ids: [2311], own: 'ch-post', at: ':23214' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2313→if', ids: [2313], own: 'ch-post', at: ':23219' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2306→if', ids: [2306], own: 'ch-post', at: ':23224' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2307→if', ids: [2307], own: 'ch-post', at: ':23229' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2319→if', ids: [2319], own: 'ch-post', at: ':23234' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2318→if', ids: [2318], own: 'ch-post', at: ':23239' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2298→if', ids: [2298], own: 'ch-post', at: ':23244' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2309→if', ids: [2309], own: 'ch-post', at: ':23248' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2300→if', ids: [2300], own: 'ch-post', at: ':23253' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2301→if', ids: [2301], own: 'ch-post', at: ':23257' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2302→if', ids: [2302], own: 'ch-post', at: ':23261' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2299→if', ids: [2299], own: 'ch-post', at: ':23265' },
+  { key: 'SetDefaults3|2290-2321(31)|type<2192||type>2198→if/type==2305→if', ids: [2305], own: 'ch-post', at: ':23269' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2376&&type<=2385→if', ids: [2376, 2377, 2378, 2379, 2380, 2381, 2382, 2383, 2384, 2385], own: 'ch', at: ':23933' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2376&&type<=2385→if/type==2379→if', ids: [2379], own: 'ch', at: ':23936' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2386&&type<=2396→if', ids: [2386, 2387, 2388, 2389, 2390, 2391, 2392, 2393, 2394, 2395, 2396], own: 'ch', at: ':23952' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2386&&type<=2396→if/type==2389→if', ids: [2389], own: 'ch', at: ':23955' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2397&&type<=2416→if', ids: [2397, 2398, 2399, 2400, 2401, 2402, 2403, 2404, 2405, 2406, 2407, 2408, 2409, 2410, 2411, 2412, 2413, 2414, 2415, 2416], own: 'ch', at: ':23971' },
+  { key: 'SetDefaults3|2432-2434(3)|type<2192||type>2198→if/type==2434→if', ids: [2434], own: 'v1', value: 50, at: ':24091' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2442&&type<=2449→if', ids: [2442, 2443, 2444, 2445, 2446, 2447, 2448, 2449], own: 'ch', at: ':24149' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2631&&type<=2633→if', ids: [2631, 2632, 2633], own: 'ch', at: ':25657' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2634&&type<=2636→if', ids: [2634, 2635, 2636], own: 'ch', at: ':25672' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2648&&type<=2651→if', ids: [2648, 2649, 2650, 2651], own: 'ch', at: ':25771' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2652&&type<=2657→if', ids: [2652, 2653, 2654, 2655, 2656, 2657], own: 'ch', at: ':25787' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2658&&type<=2663→if', ids: [2658, 2659, 2660, 2661, 2662, 2663], own: 'ch', at: ':25802' },
+  { key: 'SetDefaults3|default|type<2192||type>2198→if/type>=2664&&type<=2668→if', ids: [2664, 2665, 2666, 2667, 2668], own: 'ch', at: ':25817' },
+  { key: 'SetDefaults3|2827-2855(29)|type<2192||type>2198→if/type==2843→if', ids: [2843], own: 'v1', value: 100000, at: ':27103' },
+  { key: 'SetDefaults5|4695-4700(6)|type>=4695&&type<=4697→if', ids: [4695, 4696, 4697], own: 'v1', value: 1000, at: ':38634' },
+  { key: 'SetDefaults5|4695-4700(6)|type>=4695&&type<=4697→else', ids: [4698, 4699, 4700], own: 'v1', value: 40000, at: ':38638' },
+  { key: 'SetDefaults5|5218-5233(16)|type==5231→if', ids: [5231], own: 'v1', value: 10000, at: ':41641' },
+  { key: 'SetDefaults5|5218-5233(16)|type==5228→if', ids: [5228], own: 'v1', value: 100000, at: ':41645' },
+  { key: 'SetDefaults5|5218-5233(16)|type==5222→if', ids: [5222], own: 'v1', value: 100000, at: ':41649' },
+  { key: 'SetDefaults5|5234-5245(12)|type==5243→if', ids: [5243], own: 'v1', value: 30000, at: ':41677' },
+  { key: 'SetDefaults5|5234-5245(12)|type==5245→if', ids: [5245], own: 'v1', value: 10000, at: ':41681' },
+  { key: 'SetDefaults5|5234-5245(12)|type==5235→if', ids: [5235], own: 'v1', value: 25000, at: ':41685' },
+  { key: 'SetDefaults5|5248-5257(10)|type==5251→if', ids: [5251], own: 'v1', value: 10000, at: ':41737' },
+  { key: 'SetDefaults5|5248-5257(10)|type==5253→if', ids: [5253], own: 'v1', value: 10000, at: ':41741' },
+  { key: 'SetDefaults5|5248-5257(10)|type==5257→if', ids: [5257], own: 'v1', value: 10000, at: ':41745' },
+  { key: 'SetDefaults5|5248-5257(10)|type==5252→if', ids: [5252], own: 'v1', value: 25000, at: ':41749' },
+  { key: 'SetDefaults5|5248-5257(10)|type==5256→if', ids: [5256], own: 'v1', value: 25000, at: ':41753' },
+  { key: 'SetDefaults5|5258-5273(16)|type==5266→if', ids: [5266], own: 'v1', value: 100000, at: ':41785' },
+  { key: 'SetDefaults5|5258-5273(16)|type==5259→if', ids: [5259], own: 'v1', value: 25000, at: ':41789' },
+  { key: 'SetDefaults5|5258-5273(16)|type==5265→if', ids: [5265], own: 'v1', value: 25000, at: ':41793' },
+  { key: 'SetDefaults5|5258-5273(16)|type==5264→if', ids: [5264], own: 'v1', value: 25000, at: ':41797' },
+  { key: 'SetDefaults5|5258-5273(16)|type==5263→if', ids: [5263], own: 'v1', value: 25000, at: ':41801' },
+];
+(() => {
+  /** 平衡块跨度({ 同行或次行;V1 局部版) */
+  function spanV1(gi, to) {
+    const inline = /\{\s*$/.test(LINES[gi]);
+    let d = 0;
+    let started = false;
+    for (let j = gi; j <= to; j++) {
+      const raw = LINES[j];
+      if (j === gi && inline) { d += (raw.match(/{/g) || []).length - (raw.match(/}/g) || []).length; started = started || d > 0; if (started && d === 0) return j; continue; }
+      if (!started) { if (raw.trim() === '{') { d = 1; started = true; } continue; }
+      d += (raw.match(/{/g) || []).length - (raw.match(/}/g) || []).length;
+      if (d === 0) return j;
+    }
+    return -1;
+  }
+  /** switch(type) runs 解析(连排标签合并;default 单列;★本反编译器 switch 头/`{`/标签同深度,
+   *  体语句=+1;run 终止=体语句层(bal==0)的 break/return/goto——嵌套 switch 的 break 不算) */
+  function runsV1(head, swEnd, labelDepth) {
+    const inline = /\{\s*$/.test(LINES[head]);
+    const bodyStart = inline ? head + 1 : head + 2;
+    if (!inline && (LINES[bodyStart - 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] V1 switch 块头无体 :${head + 1}`);
+    const runs = [];
+    let cur = null;
+    for (let j = bodyStart; j < swEnd; j++) {
+      const tj = LINES[j].trim();
+      const dj = (LINES[j].match(/^\t*/) ?? [''])[0].length;
+      if (dj !== labelDepth) continue;
+      const cm = tj.match(/^case (\d+):\s*$/);
+      const isDef = /^default:\s*$/.test(tj);
+      if (!cm && !isDef) continue;
+      const lab = cm ? +cm[1] : 'default';
+      if (cur !== null && j === cur.start && cur.labels !== 'default' && lab !== 'default') { cur.labels.push(lab); cur.start = j + 1; }
+      else { if (cur) runs.push(cur); cur = { labels: lab === 'default' ? 'default' : [lab], start: j + 1 }; }
+    }
+    if (cur) runs.push(cur);
+    return runs.map((r, k) => {
+      const nextStart = k + 1 < runs.length ? runs[k + 1].start - 1 : swEnd;
+      let end = nextStart;
+      let bal = 0;
+      for (let q = r.start; q <= nextStart; q++) {
+        const raw = LINES[q];
+        const tq = raw.trim();
+        const dq = (raw.match(/^\t*/) ?? [''])[0].length;
+        if (bal === 0 && dq === labelDepth + 1 && /^(break;|return\b|goto\b)/.test(tq)) { end = q; break; }
+        bal += (raw.match(/{/g) || []).length - (raw.match(/}/g) || []).length;
+        if (bal < 0) bal = 0;
+      }
+      return { ...r, end };
+    });
+  }
+  function mergeGotoV1(map, tg, ids) {
+    if (!map.has(tg)) map.set(tg, new Set());
+    for (const id of ids) map.get(tg).add(id);
+  }
+  /** 语义走栈:返回 { dead, gotoOut };out 累加写入 {id, expr, at, path, faceTag}。
+   *  path=!inCase?'method':scope==='none'?'top':scope==='type'?'nested':'variant'(头注 V1 节)。 */
+  function walkV1(from, to, depth, liveIn, runLabels, inCase, scope, out, ctx, faceTag) {
+    const path = !inCase ? 'method' : scope === 'none' ? 'top' : scope === 'type' ? 'nested' : 'variant';
+    const live = new Set(liveIn);
+    const dead = new Set();
+    const gotoOut = new Map();
+    let i = from;
+    while (i <= to) {
+      if (live.size === 0) break;
+      const raw = LINES[i];
+      const t = raw.trim();
+      if (t === '' || t.startsWith('//') || t.startsWith('#')) { i++; continue; }
+      const bd = (raw.match(/^\t*/) ?? [''])[0].length;
+      if (bd < depth) break;
+      if (bd > depth) { i++; continue; }
+      let m;
+      if ((m = t.match(/^goto case (\d+);\s*$/)) || (m = t.match(/^goto default;\s*$/))) {
+        const target = m[1] !== undefined ? +m[1] : 'default';
+        if (!gotoOut.has(target)) gotoOut.set(target, new Set());
+        for (const id of live) { gotoOut.get(target).add(id); dead.add(id); }
+        live.clear(); break;
+      }
+      if (/^return\b/.test(t)) { for (const id of live) dead.add(id); live.clear(); break; }
+      if (/^break;/.test(t)) { live.clear(); break; }
+      if (/^(case \d+:|default:)\s*$/.test(t)) { i++; continue; }
+      if ((m = t.match(/^(value|rare) = ([^;]+);$/))) {
+        if (m[1] === 'value') for (const id of live) out.push({ id, expr: m[2], at: i + 1, path, runLabels, faceTag: faceTag ?? '' });
+        i++; continue;
+      }
+      if (/^SetShopValues\(|^DefaultTo\w+\(/.test(t)) { i++; continue; }
+      if (/^switch\s*\(type\)\s*\{?\s*$/.test(t)) {
+        const inline = /\{\s*$/.test(LINES[i]);
+        const swEnd = inline ? spanV1(i, to) : spanV1(i + 1, to);
+        if (swEnd < 0) throw new Error(`[extract-itemrare] V1 switch 未收口 :${i + 1} (${ctx.region})`);
+        const runs = runsV1(i, swEnd, depth);
+        const explicitIds = new Set();
+        for (const r of runs) if (r.labels !== 'default') for (const x of r.labels) explicitIds.add(x);
+        for (const r of runs) {
+          if (r.labels === 'default') continue;
+          const bodyIds = new Set([...live].filter((id) => r.labels.includes(id)));
+          if (!bodyIds.size) continue;
+          const sub = walkV1(r.start, r.end, depth + 1, bodyIds, r.labels, true, 'none', out, ctx, faceTag);
+          for (const id of bodyIds) if (sub.dead.has(id)) { live.delete(id); dead.add(id); }
+          if (sub.gotoOut.size) dispatchV1(sub, runs, depth + 1, r, out, ctx, live, faceTag);
+        }
+        const defRun = runs.find((r) => r.labels === 'default');
+        if (defRun) {
+          const defIds = new Set([...live].filter((id) => !explicitIds.has(id)));
+          if (defIds.size) {
+            const sub = walkV1(defRun.start, defRun.end, depth + 1, defIds, 'default', true, 'none', out, ctx, faceTag);
+            for (const id of defIds) if (sub.dead.has(id)) { live.delete(id); dead.add(id); }
+            if (sub.gotoOut.size) dispatchV1(sub, runs, depth + 1, defRun, out, ctx, live, faceTag);
+          }
+        }
+        i = swEnd + 1;
+        continue;
+      }
+      if ((m = t.match(/^if\s*\((.*)\)\s*\{?\s*$/))) {
+        const cond = m[1].trim();
+        const inlineBr = /\{\s*$/.test(LINES[i]);
+        let ifEnd;
+        if (inlineBr) ifEnd = spanV1(i, to);
+        else {
+          if ((LINES[i + 1] ?? '').trim() !== '{') throw new Error(`[extract-itemrare] V1 if 单行体未建模 :${i + 1} (${ctx.region}):${t}`);
+          ifEnd = spanV1(i + 1, to);
+        }
+        if (ifEnd < 0) throw new Error(`[extract-itemrare] V1 if 块未收口 :${i + 1} (${ctx.region})`);
+        let elseEnd = -1;
+        let chainElseIf = false;
+        if (ifEnd + 1 <= to) {
+          const nxt = (LINES[ifEnd + 1] ?? '').trim();
+          if (nxt === 'else') {
+            const es = ifEnd + 2;
+            if (/\{\s*$/.test(LINES[es]) || (LINES[es] ?? '').trim() === '{') elseEnd = spanV1(es, to);
+            else { chainElseIf = true; ctx.unmodeled.push(`${ctx.region}:${es + 1} else-if/单行 else`); }
+          } else if (/^else/.test(nxt)) chainElseIf = true;
+        }
+        const brScope = scope === 'nontype' ? 'nontype' : 'type';
+        const cSingle = cond.match(/^type == (-?\d+)$/);
+        const cRange = cond.match(/^type >= (\d+) && type <= (\d+)$/);
+        const cCompl = cond.match(/^type < (\d+) \|\| type > (\d+)$/);
+        if (cSingle || cRange || cCompl) {
+          let lo; let hi; let invert = false;
+          if (cSingle) { lo = hi = +cSingle[1]; } else if (cRange) { lo = +cRange[1]; hi = +cRange[2]; } else { lo = +cCompl[1]; hi = +cCompl[2]; invert = true; }
+          const inIf = new Set([...live].filter((id) => (id >= lo && id <= hi) !== invert));
+          const outIf = new Set([...live].filter((id) => (id >= lo && id <= hi) === invert));
+          const tagIf = (faceTag ? faceTag + '/' : '') + cond.replace(/\s+/g, '') + '→if';
+          const subIf = walkV1(inlineBr ? i + 1 : i + 2, ifEnd, depth + 1, inIf, runLabels, inCase, brScope, out, ctx, tagIf);
+          let subElse = { dead: new Set(), gotoOut: new Map() };
+          if (!chainElseIf && elseEnd >= 0) subElse = walkV1(ifEnd + 3, elseEnd, depth + 1, outIf, runLabels, inCase, brScope, out, ctx, (faceTag ? faceTag + '/' : '') + cond.replace(/\s+/g, '') + '→else');
+          for (const id of subIf.dead) { live.delete(id); dead.add(id); }
+          for (const id of subElse.dead) { live.delete(id); dead.add(id); }
+          for (const [tg, ids] of subIf.gotoOut) mergeGotoV1(gotoOut, tg, ids);
+          for (const [tg, ids] of subElse.gotoOut) mergeGotoV1(gotoOut, tg, ids);
+          if (chainElseIf && outIf.size) ctx.unmodeled.push(`${ctx.region}:${i + 1} else-if 链:${cond}`);
+          i = (elseEnd >= 0 ? elseEnd : ifEnd) + 1;
+          continue;
+        }
+        // 非 type 条件:scope=nontype(变体域 R2⑥;其内 type-if 不收);有 value 写入=形态外登记
+        const probeStart = out.length;
+        const subA = walkV1(inlineBr ? i + 1 : i + 2, ifEnd, depth + 1, live, runLabels, inCase, 'nontype', out, ctx, faceTag);
+        let subB = { dead: new Set(), gotoOut: new Map() };
+        if (!chainElseIf && elseEnd >= 0) subB = walkV1(ifEnd + 3, elseEnd, depth + 1, live, runLabels, inCase, 'nontype', out, ctx, faceTag);
+        for (const id of subA.dead) { live.delete(id); dead.add(id); }
+        for (const id of subB.dead) { live.delete(id); dead.add(id); }
+        for (const [tg, ids] of subA.gotoOut) mergeGotoV1(gotoOut, tg, ids);
+        for (const [tg, ids] of subB.gotoOut) mergeGotoV1(gotoOut, tg, ids);
+        if (!/Variant/.test(cond) && out.length > probeStart) ctx.unmodeled.push(`${ctx.region}:${i + 1} 非type条件 if(${cond}) 带写入`);
+        i = (elseEnd >= 0 ? elseEnd : ifEnd) + 1;
+        continue;
+      }
+      if (/;\s*$/.test(t) && !/[{}]/.test(t)) { i++; continue; }
+      if (t === '{') { const e2 = spanV1(i, to); if (e2 < 0) throw new Error(`[extract-itemrare] V1 裸块未收口 :${i + 1}`); walkV1(i + 1, e2, depth + 1, live, runLabels, inCase, scope, out, ctx, faceTag); i = e2 + 1; continue; }
+      if (t === '}') { i++; continue; }
+      ctx.unmodeled.push(`${ctx.region}:${i + 1} 语句形态外:${t.slice(0, 60)}`);
+      i++;
+    }
+    return { dead, gotoOut };
+  }
+  /** goto case 重派发(目标=本 switch 的 run;写序在 goto 体之后;灭集上传给调用方 sub) */
+  function dispatchV1(sub, runs, bodyDepth, fromRun, out, ctx, live, faceTag) {
+    for (const [tg, ids] of sub.gotoOut) {
+      const target = runs.find((r) => r.labels !== 'default' && r.labels.includes(tg));
+      if (!target || target === fromRun) throw new Error(`[extract-itemrare] V1 goto case ${tg} 目标未找到/自指 (${ctx.region})`);
+      const bodyIds = new Set([...ids].filter((id) => live.has(id) || sub.dead.has(id)));
+      if (!bodyIds.size) continue;
+      const sub2 = walkV1(target.start, target.end, bodyDepth, bodyIds, target.labels, true, 'none', out, ctx, undefined);
+      for (const id of bodyIds) if (sub2.dead.has(id)) { live.delete(id); sub.dead.add(id); }
+      if (sub2.gotoOut.size) throw new Error(`[extract-itemrare] V1 goto 链未建模 (${ctx.region} case ${tg})`);
+    }
+  }
+  // sweep:SetDefaults1..5+SetFoodDefaults 全域(nested 面=本刀域;method/top 只演步不收)
+  const V1_SEED_MAX = 6200; // ItemID.Count=6196 上界余量
+  const v1Faces = new Map(); // key → { key, ids:[], val, expr, at }
+  const v1Unmodeled = [];
+  const v1FinalNested = new Map(); // id → 终值嵌套写(行序=执行序,末写胜;base+override 叠加时以 override 为终)
+  for (const name of ['SetDefaults1', 'SetDefaults2', 'SetDefaults3', 'SetDefaults4', 'SetDefaults5', 'SetFoodDefaults']) {
+    const [fFrom, fTo] = methodRange(name);
+    const ctx = { region: name, unmodeled: v1Unmodeled };
+    const out = [];
+    const all = new Set();
+    for (let id = 1; id <= V1_SEED_MAX; id++) all.add(id);
+    walkV1(fFrom + 2, fTo, 2, all, null, false, 'none', out, ctx, undefined);
+    // nested 写入按 (runKey, faceTag) 聚合成 face(值必须单值;ids 按首写序)
+    const regWrites = out.filter((w) => w.path === 'nested');
+    regWrites.sort((a, b) => a.at - b.at);
+    for (const w of regWrites) {
+      const runKey = w.runLabels === 'default' ? 'default' : `${Math.min(...w.runLabels)}-${Math.max(...w.runLabels)}(${w.runLabels.length})`;
+      const key = `${name}|${runKey}|${w.faceTag}`;
+      let f = v1Faces.get(key);
+      if (!f) { f = { key, ids: [], val: null, expr: w.expr, at: w.at }; v1Faces.set(key, f); }
+      if (!f.ids.includes(w.id)) f.ids.push(w.id);
+      const v = evalPrice(w.expr);
+      if (v === null) throw new Error(`[extract-itemrare] V1 face 值不可解:${key} expr=${w.expr}`);
+      if (f.val !== null && f.val !== v) throw new Error(`[extract-itemrare] V1 face 多值漂移:${key}:${f.val} vs ${v}(${w.expr})——形态漂移须定谳`);
+      f.val = v;
+      v1FinalNested.set(w.id, v); // regWrites 已按行序(=执行序)排序,末写胜
+    }
+  }
+  // 门①:形态外语句(今天=空;现形须定谳)
+  if (v1Unmodeled.length) throw new Error(`[extract-itemrare] V1 未建模形态:\n  ${v1Unmodeled.join('\n  ')}`);
+  // 门②:sweep faces ≡ 钉表(键+id 集+own 分域+v1 值)
+  const pinKeys = V1_NESTED_PINS.map((p) => p.key).sort();
+  const sweepKeys = [...v1Faces.keys()].sort();
+  if (JSON.stringify(sweepKeys) !== JSON.stringify(pinKeys)) {
+    const onlySweep = sweepKeys.filter((k) => !pinKeys.includes(k));
+    const onlyPins = pinKeys.filter((k) => !sweepKeys.includes(k));
+    throw new Error(`[extract-itemrare] V1 嵌套面清单漂移——新面现形/旧面消失须先定谳:\n  sweep 独有=[${onlySweep.join(' ')}]\n  pins 独有=[${onlyPins.join(' ')}]`);
+  }
+  for (const pin of V1_NESTED_PINS) {
+    const f = v1Faces.get(pin.key);
+    if (JSON.stringify(f.ids) !== JSON.stringify(pin.ids)) {
+      throw new Error(`[extract-itemrare] V1 face id 集漂移:${pin.key} parsed=[${f.ids.join(',')}] pin=[${pin.ids.join(',')}](${pin.at})`);
+    }
+    if (pin.own === 'v1') {
+      if (f.val !== pin.value) {
+        throw new Error(`[extract-itemrare] V1 face 值漂移:${pin.key} ids=[${pin.ids.join(',')}] parsed=${f.val} pin=${pin.value}(${pin.at})`);
+      }
+      for (const id of pin.ids) VALUE[id] = f.val; // 落刀(覆写区域扫描基值:2242/2258/2843/52xx 组)
+    } else if (pin.own === 'ch') {
+      // 既有通道(S1③value/T4/U1)先于本刀已落值:按 per-id 终值嵌套写对拍防双源漂移
+      for (const id of pin.ids) {
+        if (VALUE[id] !== v1FinalNested.get(id)) {
+          throw new Error(`[extract-itemrare] V1 ch 面对拍漂移:${pin.key}#${id} 本刀解析终值=${v1FinalNested.get(id)} 通道值=${VALUE[id]}(${pin.at})——通道钉表与本刀解析失同步`);
+        }
+      }
+    } // ch-post:S1④ 后置落值,只锁形态(键+id 集)
+  }
+})();
+
+/** ★T4:方法级范围守卫 `if (type >= lo && type <= hi)` 块的 value 面（SD1-5 首处;base=块顶
+ *  层 value 行,over=嵌套 per-type `if (type == N)` 体顶层 value 行;brace 次行/同行双型）。
+ *  返回 { base: string|null, over: Record<number,string> }。 */
+function rangeGuardValueFace(lo, hi) {
+  for (const [from, to] of REGIONS.slice(0, 5)) {
+    for (let i = from; i <= to; i++) {
+      const m = LINES[i].match(new RegExp(`^(\\t*)if \\(type >= ${lo} && type <= ${hi}\\)\\s*\\{?\\s*$`));
+      if (!m) continue;
+      const depth = m[1].length;
+      const inline = /\{\s*$/.test(LINES[i]);
+      let d = depth + (inline ? 1 : 0);
+      let base = null;
+      const over = {};
+      for (let j = i + 1; j <= to; j++) {
+        const bd = LINES[j].match(/^\t*/)[0].length;
+        const t = LINES[j].trim();
+        if (!inline && j === i + 1 && t === '{') { d += 1; continue; }
+        if (bd === depth + 1 && d === depth + 1) {
+          const vm = t.match(/^value = ([^;]+);\s*$/);
+          if (vm) base = vm[1]; // 后写胜（C# 赋值序语义;族内恰一行）
+          const om = t.match(/^if \(type == (\d+)\)\s*\{?\s*$/);
+          if (om) {
+            const n = +om[1];
+            let d2 = d + (/\{\s*$/.test(t) ? 1 : 0);
+            for (let k = j + 1; k <= to; k++) {
+              const t2 = LINES[k].trim();
+              const bd2 = LINES[k].match(/^\t*/)[0].length;
+              if (!/\{\s*$/.test(t) && k === j + 1 && t2 === '{') { d2 += 1; continue; }
+              if (bd2 === d2 && d2 === d + 1) {
+                const vm2 = t2.match(/^value = ([^;]+);\s*$/);
+                if (vm2) over[n] = vm2[1];
+              }
+              d2 += (LINES[k].match(/{/g) || []).length - (LINES[k].match(/}/g) || []).length;
+              if (k > j + 1 && d2 <= d) break;
+            }
+          }
+        }
+        d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
+        if (j > i + 1 && d < depth + 1) break;
+      }
+      return { base, over };
+    }
+  }
+  return null;
+}
+
 /** 方法级 `if (type == X)`/`if (type >= A && type <= B)` 块定位（SD 域内首处;brace 次行/同行
- *  双型),返回 { line, rare, elseBlock, elseRare }——rare 取块顶层或块内嵌套 if(type==N)/else
- *  分支体首条 rare 赋值（2421/2422 型:rare 在嵌套 if/else 各支;2320 型:平铺在守卫体顶层）。 */
+ *  双型),返回 { line, rare, elseBlock, elseRare, value, elseValue }——rare/value 取块顶层或
+ *  块内嵌套 if(type==N)/else 分支体首条赋值（2421/2422 型:rare/value 在嵌套 if/else 各支;
+ *  2320 型:平铺在守卫体顶层）。★T4 扩 value/elseValue 采集（value 面续刀）。 */
 function findTypeGuardBlock(id, condOverride) {
   const cond = condOverride ?? `type == ${id}`;
   for (const [from, to] of REGIONS.slice(0, 5)) {
@@ -666,6 +1540,8 @@ function findTypeGuardBlock(id, condOverride) {
       let rare = null;
       let elseBlock = false;
       let elseRare = null;
+      let value = null;
+      let elseValue = null;
       let branch = null;      // null | 'if' | 'else'（嵌套分支体归属）
       let branchDepth = -1;   // 嵌套分支体的 brace 深度
       for (let j = i + 1; j <= to; j++) {
@@ -687,18 +1563,25 @@ function findTypeGuardBlock(id, condOverride) {
           }
           const rm = t.match(/^rare = (-?\d+);\s*$/);
           if (rm && rare === null) rare = +rm[1];
+          const vm = t.match(/^value = ([^;]+);\s*$/);
+          if (vm && value === null) value = vm[1];
         } else if (branch !== null && bd === branchDepth && d === branchDepth) {
           const rm = t.match(/^rare = (-?\d+);\s*$/);
           if (rm) {
             if (branch === 'if') { if (rare === null) rare = +rm[1]; }
             else if (elseRare === null) elseRare = +rm[1];
           }
+          const vm = t.match(/^value = ([^;]+);\s*$/);
+          if (vm) {
+            if (branch === 'if') { if (value === null) value = vm[1]; }
+            else if (elseValue === null) elseValue = vm[1];
+          }
         }
         d += (LINES[j].match(/{/g) || []).length - (LINES[j].match(/}/g) || []).length;
         if (branch !== null && d < branchDepth) { branch = null; branchDepth = -1; }
         if (j > i + 1 && d < depth + 1) break;
       }
-      return { line: i + 1, rare, elseBlock, elseRare };
+      return { line: i + 1, rare, elseBlock, elseRare, value, elseValue };
     }
   }
   return null;
@@ -733,8 +1616,17 @@ function findTypeGuardBlock(id, condOverride) {
   if (JSON.stringify(runIds) !== JSON.stringify(expectedRun)) {
     throw new Error(`[extract-itemrare] S1④ 鱼链标签连漂移:${runIds.join(',')}（expected ${expectedRun.join(',')};2314 独立 case/2320 独立守卫/2290-2296 鱼竿组须重新定谳）`);
   }
-  // 解析体至 return;:per-type `if (type == X)` 块内 rare 面（value 面另登记债,不取）
+  // 解析体至 return;:per-type `if (type == X)` 块内 rare 面 + ★T4 value 面（链 if 全带
+  //   value+rare 双写,rare 面 S1 已落,value 面本刀补齐——S1_FISH_VALUE_PINS 22 ids）
+  const S1_FISH_VALUE_PINS = {
+    2298: 3750, 2299: 3750, 2300: 3750, 2301: 3750, 2302: 7500,
+    2303: 7500, 2304: 15000, 2305: 3750, 2306: 7500, 2307: 12500,
+    2308: 500000, 2309: 3750, 2310: 50000, 2311: 7500, 2312: 25000,
+    2313: 7500, 2315: 7500, 2316: 7500, 2317: 150000, 2318: 7500,
+    2319: 7500, 2321: 12500,
+  };
   const parsed = {};
+  const parsedValue = {};
   for (let i = runEnd + 1; i <= cTo; i++) {
     const t = LINES[i].trim();
     if (/^(break;|return\b)/.test(t)) break;
@@ -751,6 +1643,12 @@ function findTypeGuardBlock(id, condOverride) {
     }
     const rm = body.map((x) => x.match(/^rare = (-?\d+);\s*$/)).find(Boolean);
     if (rm) parsed[+m[1]] = +rm[1];
+    const vm = body.map((x) => x.match(/^value = ([^;]+);\s*$/)).find(Boolean);
+    if (vm) {
+      const v = evalPrice(vm[1]);
+      if (v === null) throw new Error(`[extract-itemrare] S1④ 鱼链 ${m[1]} value 不可解:${vm[1]}`);
+      parsedValue[+m[1]] = v;
+    }
     i = end;
   }
   const parsedKeys = Object.keys(parsed).map(Number).sort((a, b) => a - b);
@@ -758,7 +1656,24 @@ function findTypeGuardBlock(id, condOverride) {
   if (JSON.stringify(parsedKeys) !== JSON.stringify(pinKeys) || pinKeys.some((k) => parsed[k] !== S1_FISH_PINS[k])) {
     throw new Error(`[extract-itemrare] S1④ 鱼链 rare 面漂移:${JSON.stringify(parsed)}（expected ${JSON.stringify(S1_FISH_PINS)}——新链支现形须先定谳）`);
   }
+  // ★T4 value 面对拍:解析覆写集 ≡ 钉表（键+值）;存活覆盖=标签连 − {2320(守卫提前 return,
+  //   死标签)} − {2290/2297(无覆写块,运行基值 2500 存活)} ≡ 覆写块全集——新成员无块入连
+  //   即 throw（防死基值静默写新 id）。
+  const vParsedKeys = Object.keys(parsedValue).map(Number).sort((a, b) => a - b);
+  const vPinKeys = Object.keys(S1_FISH_VALUE_PINS).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(vParsedKeys) !== JSON.stringify(vPinKeys) || vPinKeys.some((k) => parsedValue[k] !== S1_FISH_VALUE_PINS[k])) {
+    throw new Error(`[extract-itemrare] S1④ 鱼链 value 面漂移:${JSON.stringify(parsedValue)}（expected ${JSON.stringify(S1_FISH_VALUE_PINS)}——新覆写现形须先定谳）`);
+  }
+  const noBlockSurvivors = [2290, 2297]; // 运行基值 sellPrice(0,0,5)=2500 存活件（亲核:无覆写块）
+  const earlyReturnIds = [2291, 2292, 2293, 2294, 2295, 2296]; // 鱼竿组:体前内层 switch 后提前 return,不达鱼链体
+  const expectedOver = runIds
+    .filter((id) => id !== 2320 && !noBlockSurvivors.includes(id) && !earlyReturnIds.includes(id))
+    .sort((a, b) => a - b);
+  if (JSON.stringify(vParsedKeys) !== JSON.stringify(expectedOver)) {
+    throw new Error(`[extract-itemrare] S1④ 鱼链 value 覆写覆盖漂移:blocks=${vParsedKeys.join(',')}（expected ${expectedOver.join(',')}）——基值存活集变动须重定谳`);
+  }
   for (const [id, r] of Object.entries(parsed)) RARE[id] = r;
+  for (const [id, v] of Object.entries(parsedValue)) VALUE[id] = v;
 })();
 
 // ---- S1⑤ SetDefaults 派发后方法级块（value if 链 + 1994-2001 num 块 + 14-id 或块 + bait rare） ----
@@ -985,6 +1900,46 @@ function findTypeGuardBlock(id, condOverride) {
     }
     if (!ids.length) throw new Error(`[extract-itemrare] S1⑤ bait ${baitLine + 1}:id 集为空（约束解析失败）`);
     return ids;
+  }
+})();
+
+// ---- S1⑥ SetDefaults 派发后递归（★T4 新段）:1803-1807→SetDefaults(1533+type-1803) ----
+//  锚=SetDefaults 派发器体唯一 `SetDefaults(` 调用（:48922;1456:48525/1458:48922 三版同锚,
+//  体遍历机械核唯一）。递归=整体重置重建,终值=目标面 C..C+(B-A)（rare/value 全被内层
+//  SetDefaults 覆写;外层 case 体=死码）。1803-1807=五钥匙模具（JungleKeyMold 等）,终值=
+//  对应钥匙 1533-1537 面（S1③ rare=8/value 缺键 0）。
+(() => {
+  const [dFrom, dTo] = methodRange('SetDefaults');
+  let rec = null;
+  for (let i = dFrom; i <= dTo; i++) {
+    if (!LINES[i].includes('SetDefaults(')) continue;
+    if (LINES[i].match(/^\t(public|private) void SetDefaults\(/)) continue; // 签名行
+    const m = LINES[i].trim().match(/^SetDefaults\((\d+) \+ type - (\d+)\);\s*$/);
+    if (!m) throw new Error(`[extract-itemrare] S1⑥ 未建模的 SetDefaults 调用形态(:${i + 1}):${LINES[i].trim()}——须定谳`);
+    if (rec) throw new Error(`[extract-itemrare] S1⑥ 多处递归锚（:${rec.line} 与 :${i + 1}）——须扩面定谳`);
+    const A = +m[2];
+    const Bm = (LINES[i - 2] ?? '').match(/^\t\tif \(type >= (\d+) && type <= (\d+)\)\s*$/);
+    if (!Bm || +Bm[1] !== A || (LINES[i - 1] ?? '').trim() !== '{' || (LINES[i + 1] ?? '').trim() !== '}') {
+      throw new Error(`[extract-itemrare] S1⑥ 递归守卫块形态漂移(:${i + 1}):${JSON.stringify([LINES[i - 2], LINES[i - 1], LINES[i], LINES[i + 1]])}`);
+    }
+    rec = { A, B: +Bm[2], C: +m[1], line: i + 1 };
+  }
+  if (!rec) throw new Error('[extract-itemrare] S1⑥ 递归锚未找到（源漂移）');
+  // 目标面终值核:rare 均匀单值（S1③ 已落）+value 缺键（=0 重置默认）——任一破约即 throw
+  const targetIds = [];
+  for (let k = 0; k <= rec.B - rec.A; k++) targetIds.push(rec.C + k);
+  const targetRares = new Set(targetIds.map((id) => RARE[id]));
+  if (targetRares.size !== 1 || targetRares.has(undefined)) {
+    throw new Error(`[extract-itemrare] S1⑥ 目标面 ${rec.C}-${rec.C + (rec.B - rec.A)} rare 非均匀/缺键:${[...targetRares]}——须重定谳`);
+  }
+  for (const id of targetIds) {
+    if (VALUE[id] !== undefined) {
+      throw new Error(`[extract-itemrare] S1⑥ 目标面 value 非缺键(${id}=${VALUE[id]})——递归终值面漂移,须重定谳`);
+    }
+  }
+  for (let k = 0; k <= rec.B - rec.A; k++) {
+    RARE[rec.A + k] = RARE[rec.C + k];  // 递归覆写:rare=目标面
+    delete VALUE[rec.A + k];            // 终值 value=0=缺键(清区域扫描可能写入的 case 级死码值)
   }
 })();
 

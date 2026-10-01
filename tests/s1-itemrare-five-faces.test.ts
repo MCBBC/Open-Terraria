@@ -5,8 +5,11 @@
 //     num=(buffType==207?12:buffType==206?8:3)+buffTime/14400(C# 整除);rare=trunc(num/4)。
 //     48 件错值漂移（4022=6/1919=3/4011=4/Eggnog1912=0/无 case 的 4010=0）。
 //   ② SetDefaults3 方法尾笼件段 value=buyPrice(0,10)（:27641）——可达集=尾卫
-//     `if (type < 2192 || type > 2198)`（:22289,块尾无条件 return :27618）补集 [2192,2198]
-//     （R2 census「2192-2208」过宽:2199+ 落卫内提前 return;尾内 case 2203/2204 死码）。
+//     `if (type < 2192 || type > 2198)`（:22289）补集 [2192,2198]（R2 census「2192-2208」
+//     过宽:2199+ 落卫内提前 return）。★S1b 2026-10-01 翻正:原「块尾无条件 return :27618→
+//     尾内 case 2203/2204 死码」不成立——卫块内唯一 return 在内层 switch default 段体尾
+//     （:27618,default@:22374）,case 2203/2204 体=裸 break(:22295)=唯一 break-exit 集,穿出
+//     卫块落尾段→可达集=[2192,2198]∪{2203,2204},两 id 同值 100000（V1 走栈翻案兑现）。
 //   ③ 方法级 if 范围守卫 rare 10 族（8 注册+3 census 外同形扫获:3390-3452 事件旗=1、
 //     3456-3459 四碎片=9、3638-3642 队块=1）+单件守卫 2320=3（census 外同形）+
 //     if-else 守卫 2421/2422=1/3（census 误记 2420,实际 [2421,2422]）。
@@ -15,8 +18,10 @@
 //   ⑤ SetDefaults 派发后方法级块:value if 链 30 ids+1994-2001 num 块+14-id 或块（同族补面,
 //     census 行号域只圈到 :48836）+bait 块（>=50→3/>=30→2/>=15→1,1-14 档不写）。
 // 消费面:tooltip 稀有色（UI rarityColor 档位）、Game.ts 权威 value/商店/重铸/decraft 组代表。
-// 变异（判别力,era-guard 判例同法）:六发——五段各一发（compiler 摘除→dump 判别值翻转）
-//   +钉面漂移一发（sweep≡pins 守卫 fail-loud exit≠0）。原文件 sha256 前后全等=零接触。
+// 变异（判别力,era-guard 判例同法）:七发——五段各一发（compiler 摘除→dump 判别值翻转）
+//   +钉面漂移一发（sweep≡pins 守卫 fail-loud exit≠0）+S1b break-exit apply 摘除一发
+//   （2203/2204 面唯一承载判别;源变异二发在 tests/v1-itemrare-nested-value.test.ts 变异⑥⑦）。
+//   原文件 sha256 前后全等=零接触。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -53,8 +58,10 @@ const FOOD_RARE: Record<number, number> = {
   5277: 1, 5278: 1, 5537: 1, 5645: 1,
 };
 
-/** S1② 笼件尾段 value（2194→buyPrice(0,2,70)=27000;2196→200;余 buyPrice(0,10)=100000） */
-const CAGE_VALUE: Record<number, number> = { 2192: 100000, 2193: 100000, 2194: 27000, 2195: 100000, 2196: 200, 2197: 100000, 2198: 100000 };
+/** S1② 笼件尾段 value（2194→buyPrice(0,2,70)=27000;2196→200;余 buyPrice(0,10)=100000。
+ *  ★S1b 2026-10-01:可达集=[2192,2198]∪{2203,2204}——case 2203/2204 裸 break 穿出卫块
+ *  落尾段（V1 走栈翻案兑现）,2203=SteampunkBoiler/2204=HoneyDispenser 同值 100000 */
+const CAGE_VALUE: Record<number, number> = { 2192: 100000, 2193: 100000, 2194: 27000, 2195: 100000, 2196: 200, 2197: 100000, 2198: 100000, 2203: 100000, 2204: 100000 };
 
 /** S1③ 守卫 rare 面（10 范围族+单件 2320+if-else 2421/2422;行号=1457 锚） */
 const GUARD_RARE: Array<{ ids: number[]; rare: number; at: string }> = [
@@ -117,7 +124,7 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     for (const id of ids) expect(RARE[String(id)], `rare[${id}]`).toBe(FOOD_RARE[id]);
   });
 
-  it('②笼件尾段:2192-2198 value 钉表（2194/2196 覆写;可达集=尾卫补集,SD3 零 case 2192-2198）', () => {
+  it('②笼件尾段:2192-2198+2203/2204 value 钉表（2194/2196 覆写;可达集=[2192,2198]∪{2203,2204},SD3 零 case 2192-2198）', () => {
     for (const [id, v] of Object.entries(CAGE_VALUE)) expect(VALUE[id], `value[${id}]`).toBe(v);
     // 结构锁:尾卫存在+尾段锚（buyPrice(0,10) 与 2194 覆写相邻=唯一性）、SD3 无 2192-2198
     // case 标签（可达集前提;2199+ 落卫内提前 return=census「2192-2208」过宽的证伪面）
@@ -127,6 +134,12 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     for (let id = 2192; id <= 2198; id++) {
       expect(src.match(new RegExp(`case ${id}:`)), `SD3 零 case ${id}`).toBeFalsy();
     }
+    // ★S1b 结构锚:case 2203/2204 裸 break 段（唯一 break-exit,穿出卫块落尾段的通路本体;
+    //   卫块内唯一 return :27618 在 default 段体尾,不经此段）+尾段 createTile 307/308 落穿面
+    //   （BJ69 尾支落穿锚同流互证）
+    expect(src).toContain('case 2203:\n\t\t\tcase 2204:\n\t\t\t\tbreak;');
+    expect(src).toContain('case 2203:\n\t\t\tcreateTile = 307;');
+    expect(src).toContain('case 2204:\n\t\t\tcreateTile = 308;');
   });
 
   it('③守卫 rare:12 面逐 id=钉表（含 census 外同形 3 族+单件 2320+if-else 2421/2422）', () => {
@@ -233,38 +246,53 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     expect(shaOf()).toBe(before);   // 原文件逐字节零接触
   });
 
-  it('变异②摘笼件尾段 apply→value[2192] 缺键（证明 7 件面由 S1② 唯一承载）', () => {
+  it('变异②摘笼件补集 apply→value[2192] 缺键而 value[2203]=100000 不动（证明补集面由补集 apply 唯一承载,且 S1b break-exit 面独立）', () => {
     const before = shaOf();
     const { r, parsed } = runMutant((s) => s.replace(
       'for (let id = guard.lo; id <= guard.hi; id++) VALUE[id] = baseVal;',
-      '// ★变异:笼件尾段 apply 摘除',
+      '// ★变异:笼件补集 apply 摘除',
     ));
     expect(r.status).toBe(0);
     expect(parsed!.VALUE['2192']).toBeUndefined();
+    expect(parsed!.VALUE['2203']).toBe(100000);   // S1b break-exit 面独立承载
     expect(shaOf()).toBe(before);
   });
 
-  it('变异③摘守卫 apply→rare[1533]/rare[3456] 缺键（证明 120 件面由 S1③ 唯一承载）', () => {
+  it('变异⑦摘 S1b break-exit apply→value[2203/2204] 缺键而 value[2192]=100000 不动（证明 2203/2204 面由 S1b apply 唯一承载;V1 测⑤缺键锚翻正的提取器侧判别）', () => {
+    const before = shaOf();
+    const { r, parsed } = runMutant((s) => s.replace(
+      'for (const id of breakExit) VALUE[id] = baseVal; // ★S1b:2203/2204 裸 break 落尾段,同值面 100000',
+      '// ★变异:S1b break-exit apply 摘除',
+    ));
+    expect(r.status).toBe(0);
+    expect(parsed!.VALUE['2203']).toBeUndefined();
+    expect(parsed!.VALUE['2204']).toBeUndefined();
+    expect(parsed!.VALUE['2192']).toBe(100000);   // 补集面不受累
+    expect(shaOf()).toBe(before);
+  });
+
+  it('变异③摘守卫 apply→S1⑥ 目标面 rare 均匀性破约 fail-loud exit≠0（证明 120 件面由 S1③ 唯一承载,且为 S1⑥ 结构前提;★T4:摘除后不再静默缺键而是 throw——era 纪律静默兜底禁令）', () => {
     const before = shaOf();
     const { r, parsed } = runMutant((s) => s.replace(
       'for (const g of S1_GUARD_PINS) for (let id = g.lo; id <= g.hi; id++) RARE[id] = g.rare;',
       '// ★变异:守卫 apply 摘除',
     ));
-    expect(r.status).toBe(0);
-    expect(parsed!.RARE['1533']).toBeUndefined();
-    expect(parsed!.RARE['3456']).toBeUndefined();
+    expect(r.status).not.toBe(0);
+    expect(parsed).toBeNull();
+    expect(r.stderr).toContain('S1⑥ 目标面');
     expect(shaOf()).toBe(before);
   });
 
-  it('变异④摘鱼链 apply→rare[2308] 缺键（证明 16 件面由 S1④ 唯一承载）', () => {
+  it('变异④摘鱼链 rare apply→rare[2308]/rare[2303] 缺键（证明 16 件 rare 面由 S1④ 唯一承载;value apply 不动=value 面不受累）', () => {
     const before = shaOf();
     const { r, parsed } = runMutant((s) => s.replace(
-      '  for (const [id, r] of Object.entries(parsed)) RARE[id] = r;\n})();',
-      '  // ★变异:鱼链 apply 摘除\n})();',
+      '  for (const [id, r] of Object.entries(parsed)) RARE[id] = r;',
+      '  // ★变异:鱼链 rare apply 摘除',
     ));
     expect(r.status).toBe(0);
     expect(parsed!.RARE['2308']).toBeUndefined();
     expect(parsed!.RARE['2303']).toBeUndefined();
+    expect(parsed!.VALUE['2308']).toBe(500000);   // ★T4:value 面独立承载,不随 rare apply 摘除丢失
     expect(shaOf()).toBe(before);
   });
 

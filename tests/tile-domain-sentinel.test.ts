@@ -45,6 +45,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+// @ts-expect-error - tools/id-domain-guard.mjs 无声明文件(工具域 .mjs;id-domain-guard.test.ts 同款)
+import { auditIdDomains, findNameBounded } from '../tools/id-domain-guard.mjs';
 import { World } from '../src/world/World';
 import { scanScene, ORE_FINDER_PRIORITY_SHEET } from '../src/world/SceneMetrics';
 import {
@@ -487,6 +489,9 @@ describe('§6e BJ168-债2 结构锁:收编副本禁复活（源码扫描=事故�
     ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'PLATFORMS_SHEETS.has('],
     ['src/world/Torch.ts', 'IS_A_TREE_TRUNK_SHEETS'],
     ['src/world/Torch.ts', 'PLATFORMS_SHEETS'],
+    // ★BJ426-债A(2026-10-01):Door.ts shiftTrapdoor 折翼行砍切门(BJ324 消费面转正,
+    //   ≡WorldGen.cs:52013-52019 `active()&&(tileCut∥drip)→KillTile`)
+    ['src/world/Door.ts', 'TILE_CUT_SHEETS.has('],
   ];
   it('禁复活:22 个收编副本旧定义字节签名禁入(注释面提及不受影响)', () => {
     for (const [file, sig] of FORBIDDEN) {
@@ -778,6 +783,12 @@ describe('§6h BJ203 收编金标:TileID.cs 五表第二收编批(Ore/NotReallyS
       ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'ORE_SHEETS'],
       ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'ORE_SHEETS'],
       ['src/render/VanillaTiler.ts', 'NOT_REALLY_SOLID_SHEETS'],
+      // ★BJ426-债A(2026-10-01):IDG-T2 八处基线违例收编后四消费面转正入锚(域判别
+      //   详证见 §6m;REQUIRED=防收编面静默拆除)
+      ['src/core/Game.ts', 'NOT_REALLY_SOLID_SHEETS.has(d.vanilla?.sheet ?? -1)'],
+      ['src/world/Door.ts', 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'S256([...ORE_SHEETS])'],
+      ['src/entities/ClingerStaffWallProj.ts', 'PLATFORMS_SHEETS'],
     ];
     it('禁复活:33 处收编副本「=new Set/=lutFromSheets(new Set」字节签名禁入(单源别名转出口不受影响)', () => {
       for (const [file, sig] of FORBIDDEN) {
@@ -1787,5 +1798,77 @@ describe('§6l BJ263 收编金标:TileID.cs 第七收编批(块交换/替换破�
         expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
       }
     });
+  });
+});
+
+// ============================== §6m BJ426-债A ==============================
+// ★BJ426-债A(2026-10-01)IDG-T2 八处基线违例收编(T1 tile 错域普查登记债清偿):
+//   T1 普查时 IDG-T2 基线红恰 8 处,逐处三态定谳(表定义域 vs 消费传参域+原版亲读)
+//   ——零域错位真病/零死码:7 处=域一致消费面(T2 家清单陈旧,转正),1 处=守卫匹配伪报。
+//     ① data/tiles.ts:1776 ALLOW_LIGHT_IN_WATER_SHEETS 定义家(BJ221 已迁单源,
+//       lightTables.ts 本地副本拆除,唯二消费 TileLightScanner:752 sheet 域)→家清单补定义家;
+//     ② world/Door.ts:355 foldRowBlocked TILE_CUT∪IS_A_DRIP 拒开门(cellSheet 平移
+//       sheet 域,≡WorldGen.cs:52001 `!tileCut && !IsADripTile` 折翼行门)→转正;
+//     ③ world/Door.ts:465 开臂砍切(≡WorldGen.cs:52013-52019 `active&&(tileCut∥drip)
+//       →KillTile`)→转正(②③同批);
+//     ④ render/VanillaFraming.ts:83 SETS_ORE=S256([...ORE_SHEETS]) 构建期 sheet 键 LUT
+//       (facade `Ore:(t)=>SETS_ORE[t]`,t=原版 tile.type;TileID.cs:403 §6h 金标已锁)→转正;
+//     ⑤ render/VanillaFraming.ts:84 SETS_PLATFORMS=S256([...PLATFORMS_SHEETS]) 同构
+//       (:243;§6k REQUIRED 已有本文件 PLATFORMS_SHEETS 锚)→转正;
+//     ⑥ core/Game.ts:1584 anchorSolidBottom 顶锚 !NotReallySolid 臂
+//       (`NOT_REALLY_SOLID_SHEETS.has(d.vanilla?.sheet ?? -1)`;TileID.cs:359 §6h 金标)→转正;
+//     ⑦ entities/ClingerStaffWallProj.ts:68 CLINGER_WALL_STOP_SHEETS=[...PLATFORMS,380]
+//       停行集(sheetAt sheet 域消费,≡Player.cs:49110-49117 弹482 发射侧下扫
+//       `Platforms[t]∥t==380`;行为面 tests/bj286-clinger-staff-wall §e 已锁 380)→转正;
+//     ⑧ world/Housing.ts:19/286「ORE_SHEETS 跨文件漏出」=守卫伪报——IGNORED_IN_HOUSE_
+//       SCORE_SHEETS 超名子串(SC|ORE_SHEETS);词边界 grep 全文件零 ORE_SHEETS,其真实
+//       消费面 IGNORED_IN_HOUSE_SCORE_SHEETS 本就是 BJ221 收编单源(§6k REQUIRED 在锚)
+//       →守卫 T2 改词边界匹配 findNameBounded,Housing.ts 零改动。
+//   收编面=tools/id-domain-guard.mjs(T_SHEET_TABLES 六表家清单+T2 词边界)+
+//   §6e/§6h REQUIRED 转正面入锚;旧行为对拍=守卫修前恰 8 红(7 实+1 伪),修后全绿
+//   (tests/id-domain-guard.test.ts)。
+// ★变异证红记录(2026-10-01,均在验证后逐字节还原+sha256 对拍):
+//   M42 守卫 TILE_CUT_SHEETS 家清单摘 world/Door.ts → tests/id-domain-guard.test.ts
+//       IDG-T2 红(转正面失效即红);
+//   M43 ClingerStaffWallProj 停行集摘 380 → §6m 消费面锚红+tests/bj286-clinger-staff-wall
+//       §e(380 停行)行为红;
+//   M44 Door.ts cellSheet 换向内部域(st.get 直返,BJ154 同款危险面) → §6m 域判别锚红
+//       +tests/bj324-trapdoor-shift-vanilla 折翼行门行为红。
+describe('§6m BJ426-债A 收编:IDG-T2 八处基线违例转正（家清单+词边界+消费面域判别）', () => {
+  const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+  const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+  it('T2 词边界判别:超名子串(SCORE_SHEETS 判例)不误报,整名漏出必报', () => {
+    // 伪报面:Housing.ts 消费的是 IGNORED_IN_HOUSE_SCORE_SHEETS(单源在锚),非 ORE_SHEETS
+    expect(findNameBounded(['const IGNORED_IN_HOUSE_SCORE = IGNORED_IN_HOUSE_SCORE_SHEETS;'], 'ORE_SHEETS')).toEqual([]);
+    expect(findNameBounded(['import { IGNORED_IN_HOUSE_SCORE_SHEETS } from "../data/tiles";'], 'ORE_SHEETS')).toEqual([]);
+    // 真漏出面仍须红(守卫 T2 主齿不钝)
+    expect(findNameBounded(['import { ORE_SHEETS } from "../data/tiles";'], 'ORE_SHEETS').length).toBe(1);
+    expect(findNameBounded(['if (ORE_SHEETS.has(sh)) kill();'], 'ORE_SHEETS').length).toBe(1);
+    expect(findNameBounded(['export const ORE_SHEETS2 = null;'], 'ORE_SHEETS')).toEqual([]);
+  });
+  it('守卫 T2 基线清零:八处收编后 IDG-T2 零违例(其余规则面由 id-domain-guard.test 全绿闸承责)', () => {
+    expect(auditIdDomains().filter((v: { rule: string }) => v.rule === 'IDG-T2')).toEqual([]);
+  });
+  it('消费面域判别锚:五处转正面在盘上仍以 sheet 域消费(被换向内部域/拆除即红)', () => {
+    // ⑥ Game.ts:1584——锚串内嵌 d.vanilla?.sheet=域证据
+    expect(srcOf('src/core/Game.ts')).toContain('NOT_REALLY_SOLID_SHEETS.has(d.vanilla?.sheet ?? -1)');
+    // ②③ Door.ts——cellSheet 平移面+双表同臂原文
+    const door = srcOf('src/world/Door.ts');
+    expect(door).toContain('return TILE_DEFS[st.get(x, y)]?.vanilla?.sheet ?? -1;');
+    expect(door).toContain('!TILE_CUT_SHEETS.has(sh) && !IS_A_DRIP_TILE_SHEETS.has(sh)');
+    expect(door).toContain('if (TILE_CUT_SHEETS.has(sh) || IS_A_DRIP_TILE_SHEETS.has(sh)) st.setTile(cx, cy, 0)');
+    // ④⑤ VanillaFraming——构建期 spread 单源(sheet 键 LUT)
+    const vf = srcOf('src/render/VanillaFraming.ts');
+    expect(vf).toContain('const SETS_ORE = S256([...ORE_SHEETS])');
+    expect(vf).toContain('const SETS_PLATFORMS = S256([...PLATFORMS_SHEETS])');
+    // ⑦ ClingerStaffWallProj——停行集原文+sheetAt 消费面
+    const cs = srcOf('src/entities/ClingerStaffWallProj.ts');
+    expect(cs).toContain('const CLINGER_WALL_STOP_SHEETS = new Set<number>([...PLATFORMS_SHEETS, 380]);');
+    expect(cs).toContain('CLINGER_WALL_STOP_SHEETS.has(s.sheetAt(tileX, row))');
+  });
+  it('域判别(∪ 面不串域):380 平底花箱∈ClingerWallStop 而 ∉ PLATFORMS_SHEETS(七项平台族)', () => {
+    expect(PLATFORMS_SHEETS.has(19)).toBe(true);      // 平台 sheet 真身(§6d 金标首项)
+    expect(PLATFORMS_SHEETS.has(380)).toBe(false);    // 380=PlanterBox 非平台——∪ 前须补值
+    expect(PLATFORMS_SHEETS.size).toBe(7);
   });
 });

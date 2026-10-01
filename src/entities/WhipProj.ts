@@ -46,6 +46,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
+import { ghostHealProc } from './SpectreSoulProj';   // ★清偿刀 V2（2026-10-01）ghostHeal 白耗面（U2 家族债鞭域残留）;★S3b 快照判据退役（前置门 1:1 上位,见 tryHit）
 import { Arrow } from './Arrow';
 import { tintedTex } from '../render/StringLine';
 import { prettyStarSparkle } from '../render/Renderer';
@@ -155,6 +156,9 @@ export class WhipProj extends Entity {
   private dmgNow: number;
   /** 本挥动已命中敌（localNPCHitCooldown=-1 → 每敌一次 :10104） */
   private hitSet = new Set<number>();
+  /** 受理命中数（Projectile.numHits 等位,:14263 受理拍自增;ghostHeal proc 读自增前值
+   *  → 率 0.2−0.05n 衰减计数源,首跳 0 档 0.20——U2/V2 家族习语同式） */
+  pveNumHits = 0;
   /** 星座星每挥动一次门（case 1034 localAI[0]==0 :14001-14007） */
   private localAI0 = 0;
   /** localAI[1]（AI_165 :48541-48543：1035 首次更新 1+Main.rand.Next(3)——月主鞭
@@ -576,8 +580,45 @@ export class WhipProj extends Entity {
     for (const p of pts) {
       // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
       // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)
+      // ★清偿刀 W1（2026-10-01）S3b 姊妹刀——城镇侧鞭面与敌怪环同构（定谳锚：
+      //  Terarria1457/Terraria/Projectile.cs Damage_PVE_Inner 亲读）：
+      //  ①免疫窗门 :12635-12639 对城镇靶【同面】——`immune[owner]==0` 严格门
+      //    （鞭 flag3=false）,残窗（他弹 10t 档 :14197-14199 写入）整链跳过:
+      //    不 tag(:13635 门后)/不写 minionTarget(:14321 门后)/不耗 falloff
+      //    (:13453-13550 门后)/不占局部表(:14175-14179 门后)——TownNPC.hurt
+      //    帧窗返假（BJ395⑤ 受理谓词契约）承载本门,门拒不进 onAccept。
+      //  ②受理写梯 :14175-14179 usesLocal 主支 1:1——`immune[owner]=0`【清全局窗
+      //    不开窗】（TownNPC.hurt :1445 通用档 iframes=10=原版通用尾档,鞭面须清零;
+      //    旧形态鞭命中给城镇 NPC 开 10t 全局窗=他弹/第二鞭连携被自造窗拒,两向偏差）
+      //    + hitSet 占位（immuneArray[victim]=-1,本挥每靶一次——同敌怪环;skip 门
+      //    在巫毒窄门前整靶跳,写位在受理拍）。
+      //  ③tag/minionTarget 面 :13635-13638/:14321-14327——两写位【无 friendly 门】
+      //    （后者仅 targetNPC.active 门）,城镇受理照写;minionTarget 失效清除走
+      //    Player.cs:57682-57685 CanBeChasedBy（城镇 friendly 恒假 → 次拍清,原版同相）。
+      //  ④falloff/numHits :13453-13550/:14263 受理面无条件段,城镇靶同耗。
+      //  登记不接（城镇侧弹幕家族 GAP,与敌怪环同名单）：StatusNPC 鞭 debuff
+      //  （:13634——城镇 NPC 无 onFire3T/frostburn2T 载体）/TryDoingOnHitEffects
+      //  proc·伴生·自buff（:13641-13643 life>5 门,受理读前值序差）/浸剂 nano·party
+      //  （:13687-96）/ghostHeal flag10（:13712/:13869）/TagEffectStack.OnHit(:13713)/
+      //  OnKillNPC 墓碑成就（:13703——鞭调用点未传 onKill,存量 GAP 非 W1 引入）。
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, this.dmgNow,
-        Math.sign(p.x - this.x) * 2, 'playerProj');
+        Math.sign(p.x - this.x) * 2, 'playerProj', 0,
+        undefined, undefined,
+        (n) => this.hitSet.has(n.id),   // 局部表门（:12596 flag2 usesLocal 臂）
+        (n) => {
+          const tn = n as unknown as { id: number; iframes: number; vanillaId?: number };
+          tn.iframes = 0;               // 写梯 :14175-14178 usesLocal 主支=清全局窗
+          this.hitSet.add(tn.id);       // 写梯 :14179 immuneArray[victim]=-1 占位
+          this.pveNumHits++;            // :14263（proc 读自增前值,同敌怪环习语）
+          // 衰减链（:13453-13550 switch）：受理拍鞭 damage 字段 ×falloff,城镇靶同耗
+          this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
+          if (owner) {
+            // tag（TryApplyTagToNPC :13635-13638）——ImmuneToWhips 门在栈内
+            //  （城镇 NPC 不在表）;minionTarget（:14321-14327 aiStyle165 支,无 friendly 门）
+            owner.tagEffectStack.tryApplyTagToNPC(this.itemId, tn.id, tn.vanillaId ?? 0, this.bonusTagDmg);
+            owner.minionTargetId = tn.id;
+          }
+        });
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
         //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）
@@ -593,6 +634,20 @@ export class WhipProj extends Entity {
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
+        // ★清偿刀 S3b（2026-10-01）前置全局免疫窗门（Damage_PVE_Inner :12635-12639 1:1）：
+        //  `flag3 = maxPenetrate==1 && !usesLocalNPCImmunity && !usesIDStaticNPCImmunity` 对鞭
+        //  恒 false（DefaultToWhip :10706-10720 usesLocalNPCImmunity=true + penetrate=-1）→
+        //  `targetNPC.immune[owner]==0` 门【严格生效】=本仓 e.iframes（Enemy.hurt :14235
+        //  pierce!==1 臂同源共享窗）。门拒（他弹残窗）=原文 :12638 整跳 return——鞭链
+        //  【全部】不跑：不 tag（TryApplyTagToNPC :13637 门后）/不 falloff（衰减链
+        //  :13453-13550 门后）/不 proc（TryDoingOnHitEffects :13641 门后）/不 debuff
+        //  （StatusNPC :13634 门后）/不出水母反噬（:12676 门后）/不写 minionTarget
+        //  （:14321-14327 门后）/不占 hitSet（写梯 :14175-14179 门后=局部表留白,窗期满
+        //  同拍照吃）。既有形态「hitSet.add 先于 hurt 且环无前置门」就此收口；V2 快照判据
+        //  （门位读 strike 前态的等价替身）由本前置门 1:1 上位退役。读位在 AABB 求交后、
+        //  水母块前=原文门(:12636)→几何(:12668)→水母(:12676) 序的纯谓词等价换位
+        //  （AABB 无副作用,受理集=门过∧盒交,两序相同）。
+        if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
         // ★水母块（Damage_PVE_Inner :12676-12688 1:1,免疫窗后同位）：充能态水母
         //  不受伤——鞭=IsAWhip 恒接触反噬资格 → TakeDamageFromJellyfish 电玩家 →
         //  `if (dontTakeDamage) return` 拦本次伤害（最终清零补,GAP 销账）
@@ -623,7 +678,35 @@ export class WhipProj extends Entity {
             (e as unknown as { vy?: number }).vy ?? 0));
         }
         const wpOwner = this.ownerRef();
-        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）
+        // ★清偿刀 V2（2026-10-01）：ghostHeal 白耗面（Projectile.cs:13877-79 通用 on-hit
+        //  段,StrikeNPC 后/写梯 :14031 前=本位;U2 台账家族债鞭域残留补课）。鞭数据面定谳
+        //  （SetDefaults 逐型亲读）：18 型全走 DefaultToWhip（:8144-8146/:8157-8169/
+        //  :8668-8680/:8987-8989/:9738-9768/:10293-10295）无 magic 行 → 非 magic =
+        //  ghostHeal 白耗单面（:12090 lifeSteal 先扣/:12091-93 !magic return 预算照扣
+        //  不出治疗球=原版本相）+ ghostHurt 死码（:12022 `!magic` 早退零观察面,S2/R1-B
+        //  定谳保形）→ 不接。isMagic 数据面由 ghostHealProc 经 projectileData 忠实直传
+        //  （18 型 magic 缺省=false）;flag10 投弹侧段（:13712 num41>0∧lifeMax>5∧friendly∧
+        //  !hostile∧aiStyle≠59——正常局 :12843 初值臂仅 DebugOptions 假人支可达,鞭面
+        //  全由 :13712 段承载）由 ghostHealProc 数据门+applyLifeSteal num41>0 契约自证。
+        //  门位（★S3b 2026-10-01 收口）：:12635-12639 前置免疫窗门已上位本环头（见上）
+        //  ——V2 快照判据（门位读 strike 前态的等价替身,彼时「环无前置门」的既有形态
+        //  约束下产物）就此退役;门过拍 ghostHealProc/pveNumHits++ 无条件达=原文受理面
+        //  (:13877-79/:14263 均在门后无条件段)。pre-gate 与 hurt 之间无 iframes 写点
+        //  （spawnFriendlyProj=entities.add 队列出生,非同步结算）→ 快照=pre-gate 同值,
+        //  无信息增量。
+        //  pveNumHits++=:14263 位（proc 读自增前值;localNPCHitCooldown=-1 每敌一次,
+        //  多敌可叠跳）。
+        //  ★S3b 写位对齐（写梯 :14175-14179 usesLocal 主支 1:1）：pierce 0→-3——鞭
+        //  DefaultToWhip（:10706-10720）=usesLocalNPCImmunity+localNPCHitCooldown=-1 →
+        //  受理命中写 `immune[owner]=0`【清全局窗不开窗】+ 局部表 -1（=hitSet,永续档
+        //  :17380 仅 >0 递减）。旧 pierce=0 走 Enemy.hurt 缺省档写 iframes=10=原版无的
+        //  全局窗（多鞭回声/蛇环补挥/后到他弹被自造窗拒 10t=鞭→随从连携核心机制反向
+        //  砍伤）;pierce=-3 档（Enemy.ts :14427/:14541 BJ398 约定）=门照走（:14235
+        //  pierce!==1 臂,flag3=false 同鞭）+命中写清零。局部节流已由 hitSet 承载。
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, false, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）
+        ghostHealProc(game, this.projId, this.pveNumHits,
+          e as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.pveNumHits++;
         // ★L5 长尾批：月主鞭 1035 命中编排（Projectile.Damage case1035 :13025-13029——
         // settings.MovementVector=velocity.RotatedBy(±τ×0.1)、clientOnly:false → 本地直生
         // + module8 上行。PositionInWorld=目标盒内随机点（本仓以敌盒随机点近似）。

@@ -60,9 +60,11 @@ describe('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩�
     expect(tick).not.toContain('advanceAnim');   // tileAnim.tick 冻结（烘焙钟自洽）
   });
 
-  it('光照单源：tickLighting 双消费点（fixedUpdate 原位+冻结帧）,方法体含 ensureRegion/衰减/compute', () => {
+  it('光照单源：tickLighting 三消费点（fixedUpdate 原位+冻结帧+★C10g 传送幕帘帧 2026-10-01）,方法体含 ensureRegion/衰减/compute', () => {
     expect(GAME).toContain('private tickLighting(viewTW: number, viewTH: number): void {');
-    expect(GAME.match(/this\.tickLighting\(viewTW, viewTH\);/g)?.length).toBe(2);
+    // ★C10g:传送幕帘帧面 tpVeilTick 增第三消费点（不 render=保持上帧,光照须在
+    //  幕帘窗内算到揭幕即用;锚随盘刷新判例——2→3）
+    expect(GAME.match(/this\.tickLighting\(viewTW, viewTH\);/g)?.length).toBe(3);
     const at = GAME.indexOf('private tickLighting');
     const method = GAME.slice(at, GAME.indexOf('this.lighting.compute(w.clock.dayFactor);', at) + 80);
     expect(method).toContain('this.lighting.ensureRegion(');

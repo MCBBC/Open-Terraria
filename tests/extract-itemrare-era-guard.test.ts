@@ -175,7 +175,7 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
       expect(rare['1293']).toBe(8);          // 1457 :15981 新增 rare 档
       expect('6147' in rare).toBe(true);     // 1457 新物品段首
       expect('6195' in rare).toBe(true);     // 段尾
-      expect(Object.keys(rare).length).toBe(3627);   // 与现库同基数（零缺失;BJ413 +24 风筝 HAND 面 3275→3299;R2 helper 体 rare 面 +169=3468;★S1 2026-09-30 五段续刀 +159（食物尾式 86 内 +1 显式零 4010/守卫 120/鱼链 16/bait 22）+58 改值 0 删键=3468→3627）
+      expect(Object.keys(rare).length).toBe(3632);   // 与现库同基数（零缺失;BJ413 +24 风筝 HAND 面 3275→3299;R2 helper 体 rare 面 +169=3468;★S1 2026-09-30 五段续刀 +159（食物尾式 86 内 +1 显式零 4010/守卫 120/鱼链 16/bait 22）+58 改值 0 删键=3468→3627;★T4 2026-10-01 value 面续刀 rare +5=1803-1807 递归面→3632）
       expect(md5(LIVE_RARE)).toBe(beforeR);
     } finally {
       rmSync(dir, { recursive: true, force: true });

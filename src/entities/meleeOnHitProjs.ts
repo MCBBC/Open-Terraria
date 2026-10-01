@@ -4,7 +4,7 @@
 // （截断盒相交 + playerCanHitEnemy + Main.DamageVar ±15% + crit 折叠 + e.hurt 单点）。
 // 免疫写方桥统一走 game.noteNpcPlayerImmune（GC1 出口）。
 import { Entity } from './Entity';
-import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）
+import { snapshotVanillaGate, vanillaGateRejected, ghostHealProc } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）;★清偿刀 U2（2026-10-01）补 524/977 ghostHeal 白耗面（S2 台账家族债）
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileWetSection } from './projWetSection';
@@ -326,6 +326,13 @@ export class MuramasaSlashProj extends Entity {
         // :14175-14178 immune[owner]=0 写面）——★Q4 刀写半面对齐：旧档 pierce=0
         // 写 10t 弹幕域窗,977 节流归 hitSet 局部表,原文命中后全局窗清零非新开窗
         0, game, this.armorPenInject + 5, crit, -3, true, 0, 977);   // ★A-F1：srcProjId 进排除表
+      // ★清偿刀 U2（2026-10-01）：ghostHeal 白耗面（:13877-79,写梯 :14031 前=clearGlobalImmune
+      //  上方本位;S2 台账家族债兑现,全链锚见文件尾批注）。977 数据面 melee（SetDefaults
+      //  :9210-9225 无 magic 行）→ isMagic=false 直传=白耗同相;ghostHurt 不接=非 magic
+      //  死码（S2/R1-B 定谳保形）。numHits 实参恒 0：penetrate=1（:9224）单受理,
+      //  :14263 自增点对本体至多达一次且在 Kill 判定后=计数无第二次消费位。
+      ghostHealProc(game, 977, 0,
+        e as unknown as Parameters<typeof ghostHealProc>[3]);
       clearGlobalImmune(game, e.id);
       this.hitSet.add(e.id);
       if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=1
@@ -430,6 +437,9 @@ export class BladetongueGlobProj extends Entity {
   armorPenInject = 0;
   /** live 注入口（调用方接 () => 0.04+player.critChance('melee')/100——melee 类别源） */
   critChanceFn: (() => number) | null = null;
+  /** ★清偿刀 U2（2026-10-01）：Projectile.numHits 等位（:14263 每受理命中自增——
+   *  ghostHeal 率 0.2−0.05n 衰减计数源;proc 读自增前值） */
+  pveNumHits = 0;
   private penLeft = 5;
   private ai0 = 0;
 
@@ -519,6 +529,16 @@ export class BladetongueGlobProj extends Entity {
           // （写梯 :14031-14038 usesIDStatic 支：penetrate=5≠1 ⇒ 内层真 = immune[owner]=0
           //  清窗+perIDStatic 静态表行——【非】pierce=0 的 10t 新全局窗;清窗由下方
           //  clearGlobalImmune（:14035 桥）承载,静态表行由 GLOB_IDSTATIC_HITS 落行承载）
+        // ★清偿刀 U2（2026-10-01）：ghostHeal 白耗面（Projectile.cs:13877-79 通用 on-hit
+        //  段,StrikeNPC :13716 后/写梯 :14031 前=本位;meleeOnHitProjs.ts:542-560 S2 台账
+        //  家族债兑现）。524 数据面 melee（SetDefaults :5941-5954 无 magic 行）→ isMagic
+        //  =false 直传：幽灵兜帽在身时白扣治疗预算不出治疗球=原版本相（:12090 lifeSteal
+        //  -= num2 先于 :12091-93 !magic return）。ghostHurt 不接=非 magic 死码（:12022
+        //  早退零观察面,S2/R1-B 定谳保形）。pveNumHits++=:14263 位（proc 读自增前值,
+        //  penetrate=5 多跳衰减 0.20→0.15→0.10→0.05→0）。
+        ghostHealProc(game, 524, this.pveNumHits,
+          e as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.pveNumHits++;
         // ★清偿刀 S2/R1-A（2026-09-30）：StatusNPC debuff 面接线——原文 :11393
         //  `if (type == 524) nPC.AddBuff(69, 60 * Main.rand.Next(3, 8))` = Ichor(69)
         //  180-420t。表驱动 vanilla-projstatus.json['524']（src=11393,提取器同源）,
@@ -557,4 +577,17 @@ export class BladetongueGlobProj extends Entity {
 // 三弹类别锚：524 melee（:5941-5954 无 magic 行）/ 977 melee（:9210-9225 无
 // magic 行）/ 978 melee（:9255-9271 无 magic 行;数据面 vanilla-projectiles.json
 // 三键均无 magic 旗——判别测试 s2-proj-acceptface-batch §B 钉死）。
+// ----------------------------------------------------------------------------
+// ★清偿刀 U2（2026-10-01）兑现记录：上账「白耗面未建模」家族债落刀——
+//   · 524（BladetongueGlobProj）：受理支 e.hurt 后挂 ghostHealProc（:13877-79 位,
+//     applyProjStatus 前）+ pveNumHits 字段（:14263 位自增,penetrate=5 多跳衰减）。
+//   · 977（MuramasaSlashProj）：e.hurt 后/clearGlobalImmune 前挂 ghostHealProc;
+//     numHits 恒 0（penetrate=1 单受理,:14263 无第二次消费位）。
+//   · 978（VolcanoBlastProj.ts）：同日同款落刀（e.hurt 后/applyProjStatus 前）,
+//     旧「不接=判例面」批注撤改。
+//   · WeaponProj.hitEnemies 共享环：proc 上收受理位单源（239/245 回调内嵌撤除防双计,
+//     onAccepted 语义收窄为纯 penetrate--/回收门）——回旋镖/长矛/悠悠球/连枷/破晓/
+//     水晶蛇等全调用方白耗面一次到位;numHits++（:14263）同步上收。
+//   · ghostHurt 不接线维持判例面（非 magic 死码,:12022 早退零观察面）。
+//   判别测试 tests/u2-ghostheal-stations-jellyzap.test.ts。
 // ============================================================================

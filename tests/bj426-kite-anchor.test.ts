@@ -273,6 +273,15 @@ describe('BJ426 ④ 线圈清理面：取回后锚桩 tile 清除（= 原版回�
     expect(gameSrc).not.toMatch(/锚桩 tile 保留/);
     expect(gameSrc).not.toMatch(/锚桩 tile 本体不动/);
   });
+
+  it('取回按压沿门：interactAt 锚桩臂含 !_prevRightDown（place→instant retrieve 摆锤闭合证）', () => {
+    // 放最后一只（stack1→手持清空）后同按住下一帧命中刚放的桩=原地取回吞放置——
+    // 探针追凶实锤（_bj426-diag8 CLEAR@retrieveLeashedAnchor ← interactAt ← hold 帧2）。
+    // 门后取回语义 = 一次按压一次取回（原版锚桩无 interaction,按住恒无操作）。
+    expect(gameSrc).toMatch(
+      /if \(\(type === TILE_BY_KEY\['v_724_critter_anchor'\] \|\| type === TILE_BY_KEY\['v_723_kite_anchor'\]\)\s*\n?\s*&& !this\._prevRightDown\) \{/,
+    );
+  });
 });
 
 // ============================================================================

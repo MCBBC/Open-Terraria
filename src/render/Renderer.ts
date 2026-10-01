@@ -246,6 +246,11 @@ import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaT
 import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask, smartHighlightSampleLight, SMART_CURSOR_ARROW_COLOR } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门;SW-BJ61 用户分歧采样+箭头原版 White
 import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset, tileAnim } from './TileAnim';
+import {
+  VOID_LENS_FW, VOID_LENS_FH, VOID_LENS_ECHO_PHASES,
+  voidLensCenterOf, voidLensFrameOf, voidLensEchoPulse,
+  voidLensEchoAlpha, voidLensEchoRadius, voidLensEchoAngle, voidLensDustSpec,
+} from './VoidLens';   // ★BJ429 虚空保险库悬浮透镜纯算面（VoidLensHelper.cs 1:1）
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
@@ -3916,6 +3921,20 @@ export class Renderer {
    *  glCanvas 缺席（管线死窗,已隐藏）时只合成 sky2D——sky2D 序列含渐变/星/远云/
    *  biomeBg 2D 回退全量,世界由 2D 链随后落 HUD ✓。合成后 glCanvas 内容被 HUD
    *  覆盖（天空渐变不透明）,视觉零差。 */
+  /** ★A3 债收齐（2026-10-01）：GL 夹层增量合成——只画 glCanvas（sky2D 已在 P1
+   *  入 HUD）。消费位=夹层路由帧（_c10eWorldToHud）+ P1 已合成 + 本帧 GL 夹层
+   *  会话（'lantern' near/'ambgl'）已发射：死亡灰化/重力翻转的「整幅自拷
+   *  ctx.canvas」源在 HUD,而 GL 会话内容落 glCanvas（P1 之后）=自拷漏灯/鸟。
+   *  半透明 bg 像素二次叠 ±1LSB（xform∩inter 稀有窗,登记口径）。 */
+  private c10eCompositeGlDelta(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.glCanvasEl || !this.swPipe || this.swPipe.unavailable) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.glCanvasEl, 0, 0);
+    ctx.restore();
+  }
+
   private c10eCompositeIntoHud(): void {
     if (this._c10eComposited || !this._c10eFrame) return;
     this._c10eComposited = true;
@@ -4505,10 +4524,18 @@ export class Renderer {
     // ★C10e 三画布栈脚手架（2026-10-01）：sky2D（底层 2D,透明）+ glCanvas（中层
     //  GL 呈现面,元素由本类持有/注入 GLPipeline）——attach 序=DOM paint 序=层序。
     //  主画布转 HUD 顶层（mainCtxAttrs 已分支 alpha:true）。旗关=零创建零开销。
+    //  ★实机断裂修复（2026-10-01 补充定谳）：sky2D 无 position 时按 display:block
+    //  进正常文档流占位（布局高=背板高 800px）→ 流内 HUD 画布被顶出视口下缘=
+    //  「世界层消失」实报（HUD 背板回读有世界/DOM 不可见=布局与背板劈叉;
+    //  冻结态对拍卖 canvas 背板故未暴露）。修复=三画布全部出流 absolute 铺满,
+    //  paint 序仍由 attach 挂载序保证。
     if (Renderer.c10e) {
       this.skyCanvas = document.createElement('canvas');
+      this.skyCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;';
       this.skyCtx = this.skyCanvas.getContext('2d')!;
       this.glCanvasEl = this.mkGlCanvasEl();
+      this.canvas.style.position = 'absolute';
+      this.canvas.style.inset = '0';
     }
     this.lightCanvas = document.createElement('canvas');
     // ★lightCanvas 恒 alpha:true——光照图构建写 α=255 但 putImageData/乘光链路
@@ -5081,11 +5108,28 @@ export class Renderer {
     this._c10eFrame = c10eBase && wKc === 1 && !this.sky.farInterlayerActive(cam.y);
     this._c10eComposited = false;
     this.sky.c10eOver = this._c10eFrame;
-    // pipe 屏栈机制随帧分类启停（回退帧=false→会话 present/收口全走原路径;
-    // c10eFrame 时清屏闩复位=本帧首个会话 begin 清透明 glCanvas+清屏栈）
+    this.sky.glInterlayerEmitted = false;   // ★A3 债收齐:GL 夹层会话发射标记帧头清
+    // pipe 屏栈机制随帧分类启停（回退帧=false→会话 present/收口全走原路径）。
+    // ★C10e 帧首【显式】清屏（2026-10-01 实机拖影/远景丢失补充定谳）：任何 GL 会话
+    // 开之前对 glCanvas 默认帧缓冲确定性清一次透明+清屏栈——旧「首会话 begin 代理
+    // 清屏」在管线帧中 revive（新实例 screenCleared=false→世界段 begin 清屏=抹掉已
+    // present 的 bg+屏栈句柄跨上下文失效）与帧类切换时失效/清错目标=拖影+远景丢失;
+    // 显式一次=确定性干净底板,present(over) 叠合语义不变。
     if (this.swPipe) {
       this.swPipe.screenStackMode = this._c10eFrame;
-      this.swPipe.screenCleared = !this._c10eFrame;
+      if (this._c10eFrame) this.swPipe.clearScreenForStack();
+    }
+    // ★C10e 帧首 HUD 清屏（2026-10-01 前景拖影定谳）：分体后天空渐变落 sky2D，
+    //  主画布（HUD,alpha:true）帧头再无全幅不透明垫底=不清自净。F-inter 帧世界
+    //  blit(drawImage) 是 source-over——上帧 HUD 残留在本帧不透明区被覆写、透明区
+    //  (无背景墙/天空)原样保留 → 逐帧叠合成弧（活机探针实锤:拖影红像素 hudRed=125
+    //  vs glRed=0/skyRed=0;F-pure 帧不新画但陈旧残留照旧可见,故每 c10e 帧都清）。
+    //  非分体帧（含回退/照相）主画布仍由天空渐变自净,不在此清。
+    if (this._c10eFrame) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.restore();
     }
     // ★C10d 远云并入 bg 会话门（sky.draw 前置:remix/色罩/黑闪与 section 1.5
     //  合并门同源同值——均读上一帧尾状态;夹层判定在 drawVanillaClouds 同帧做）
@@ -5100,7 +5144,7 @@ export class Renderer {
     // ★C10e 帧分类·下半：夹层路由（世界 present 改 blit→HUD）。读 sky.draw 后
     //  状态=与 opresent 门同相（见上半注）。
     this._c10eWorldToHud = this._c10eFrame
-      && (this.sky.opresentInterlayerPending() || this.monoFilters.shimmerAlpha > 0);
+      && (this.sky.worldRouteInterlayerPending() || this.monoFilters.shimmerAlpha > 0);
 
     // ★opresent 前置:世界层缩放系数在此定值（原计算在世界层切换段,opresent 合并
     //  门须在 bg 段判 wK——defer 一旦成立,天空栈 blit 即被豁免,门条件必须先于
@@ -5168,6 +5212,9 @@ export class Renderer {
             glbg.begin('bg');
             // ★C10d:远云 pass1 选集首段发射（stash 在场时;层序=远云在 biomeBg 前）
             this.sky.flushFarDeferredGL(glbg, ctx);
+            // ★A3（2026-10-01 灯笼夜帧回收）:far 灯笼选集发射（远云后/biomeBg 前
+            // =sky.draw 4741 位原 2D 层序;stash 缺=零提交）
+            this.sky.flushFarLanternGL(glbg);
             // ★只画地表层(2026-08-20 地下背景光照修复):地下层须进世界层吃光
             this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             mergedSession = glbg;
@@ -5175,6 +5222,8 @@ export class Renderer {
           } else {
             glbg.begin('bg');
             this.sky.flushFarDeferredGL(glbg, ctx);
+            // ★A3:far 灯笼选集发射（同合并支——远云后/biomeBg 前原 2D 层序）
+            this.sky.flushFarLanternGL(glbg);
             if (!remixSkipSurfaceBg) {
               this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             }
@@ -5193,6 +5242,8 @@ export class Renderer {
         //  上层 glCanvas 的近云/世界 present 以透明洞露出 ✓）。旗关=原 ctx 路径。
         const bg2dCtx = this._c10eFrame ? (this.skyCtx ?? ctx) : ctx;
         this.sky.replayFarDeferred2D(bg2dCtx);
+        // ★A3:far 灯笼 stash 2D 重放（远云后/biomeBg 前=原层序;stash 缺=零操作）
+        this.sky.replayFarLantern2D(bg2dCtx);
         this.biomeBg.draw(bg2dCtx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       }
       // ★暴风雪/沙尘暴背景色罩(#三开压测批 层位修正):原版 BlizzardSky/
@@ -5240,7 +5291,13 @@ export class Renderer {
       }
       // 灯笼夜 near 带 + 派对气球（DrawRemainingDepth :59055 = 全部背景层【含群系
       // 前景】之后的最末尾——曾画在云前=云盖灯/气球,用户实报）
-      this.sky.drawLanternsNear(ctx, viewW, viewH, cam.x, cam.y, 16.7);
+      // ★A3（2026-10-01 灯笼夜帧回收）:纯帧+屏栈开=传共管层走 'lantern' GL 桥
+      //  （bg present 后/世界 present 前=原 2D 位,鸟群 'ambgl' 桥同款形态）;
+      //  夹层帧/退避窗=2D 原路径。lantern 项已摘出 worldRouteInterlayerPending
+      //  （两带全桥化,灯夜帧世界回归 over present）——谓词分工见 sky 同名注。
+      const lantGl = this._c10eFrame && this.swPipe?.screenStackMode
+        ? this.acquireCloudPipe() : null;
+      this.sky.drawLanternsNear(ctx, viewW, viewH, cam.x, cam.y, 16.7, lantGl);
       this.sky.drawPartyBalloonsNear(ctx, viewW, viewH, cam.x, 16.7);
       // ★BJ409：通关名单演出（CreditsRollSky）同槽归位——原版=SkyManager 深度 1
       // 天空,经 DrawRemainingDepth（Main.cs:60564/:53484 背景段收尾）绘制：全部
@@ -5252,7 +5309,22 @@ export class Renderer {
 
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
     //     鸟群/夜空腹足怪，调度 1:1 AmbienceServer——10-120s 一次尝试）
-    this.sky.drawAmbience(ctx, viewW, viewH, cam.x, cam.y, 16.7);
+    // ★C10e 二期（2026-10-01 F-inter 收刀）:纯帧+屏栈开=传共管层走 'ambgl' GL 桥
+    //  （bg present 后/世界 present 前槽位）;夹层帧/退避窗=2D 原路径。谓词分工见
+    //  sky.worldRouteInterlayerPending 注。
+    const ambGl = this._c10eFrame && this.swPipe?.screenStackMode
+      ? this.acquireCloudPipe() : null;
+    this.sky.drawAmbience(ctx, viewW, viewH, cam.x, cam.y, 16.7, ambGl);
+    // ★A3 债收齐（2026-10-01）:夹层路由帧的 GL 夹层增量合成——P1 全帧合成在
+    //  鸟群/灯笼 GL 会话【之前】（5250 位 vs 'lantern'/'ambgl' over present 在
+    //  后落 glCanvas）→ 死亡灰化/重力翻转的 HUD 自拷源缺灯/鸟。本帧若 GL 会话
+    //  已发射,glCanvas（bg+灯+鸟）增量再入 HUD 补全（bg 半透明像素二次叠=±1LSB
+    //  级,仅 xform∩inter 稀有窗,登记口径）。纯帧 P2 合成在世界 present 后=天然
+    //  含全量,不进此支。
+    if (this._c10eFrame && this._c10eWorldToHud && this._c10eComposited
+      && this.sky.glInterlayerEmitted) {
+      this.c10eCompositeGlDelta();
+    }
     // 1.6 天塔柱滤镜：原"天空层子集近似"已上移为全屏后处理（步骤 7d，
     //     SceneState → Filters.Scene["Monolith*"] 整屏合成语义 1:1）
 
@@ -5639,6 +5711,17 @@ export class Renderer {
       const fty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
       const fty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
       drawTileFlames(ctx, this.atlas, world.store, ftx0, fty0, ftx1, fty1, flicker);
+    }
+
+    // 2c'.0 虚空保险库悬浮透镜层（TileDrawing.DrawVoidLenses :8876-8902——与晶塔
+    //   水晶同批 special point 尾扫,原版 PostDrawTiles 内 DrawVoidLenses→
+    //   DrawTeleportationPylons 先后序 :427-429）。★BJ429（2026-09-23 用户实报
+    //   "虚空保险库只剩底座,悬浮部分不见"）——本体不在 Tiles_491 内（sheet 右半
+    //   addFrX=54 只有底座行,悬浮透镜=Projectile_734 独立贴图,TileDrawing.cs:700-705
+    //   中心格登记 VoidLens special point）,本仓 BJ248 只对齐了 tile 面基座、
+    //   special point 尾扫整缺 → 补 1:1 层（详 drawVoidLenses 注）。
+    if (this.atlas) {
+      this.drawVoidLenses(cam, world, viewW, viewH, z);
     }
 
     // 2c'.1 晶塔悬浮水晶层（TileDrawing.DrawTeleportationPylons :8806-8888——原版
@@ -6949,7 +7032,12 @@ export class Renderer {
    *  已构造实例无效,仅影响后续 new Renderer（对拍走双页范式 scripts/_c10e-ab.mjs）。 */
   private static _c10e = (() => {
     try {
-      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('c10e') === '1';
+      // ★转正（2026-10-01,用户令「A1 应该 ok,可以先转正」）：缺省开,?c10e=0=二级
+      //  逃生门（逐帧回退语义不动——回退帧/回退类走原单画布行为）。旗面史：
+      //  灰度期 ?c10e=1 显式开（2026-10-01 三轮实机定谳——HUD 残留拖影=帧头清屏
+      //  补齐、条带黑块=shader 真预乘 alpha、F-inter 鸟群桥收刀）后 Mac+Windows
+      //  实机通过转正。cloudpipe 转正同款旗面形态。
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('c10e') !== '0';
     } catch { return false; }
   })();
   static get c10e() { return this._c10e; }
@@ -19131,6 +19219,171 @@ export class Renderer {
     return this._b0shim ? this._b0shim.snapshot() : null;
   }
 
+  /** 虚空保险库悬浮透镜层（TileDrawing.DrawVoidLenses :8876-8902 + VoidLensHelper.cs
+   *  1:1）。★BJ429（2026-09-23 用户实报"虚空保险库只剩一个底座,上面的悬浮部分不见了"）
+   *  定谳：本体从不在 Tiles_491 贴图内——sheet 108×54 的 tile 面采样带（右半,
+   *  TileDrawing.cs:5405-5407 addFrX=54,BJ248 已对齐）只有底座行（左半才是整库旧画,
+   *  原版永不采样）；悬浮透镜 = 独立绘制面：TileDrawing.cs:700-705 对中心格
+   *  （frameX==18&&frameY==18）登记 VoidLens special point → DrawVoidLenses 以
+   *  Projectile_734 贴图（34×48×8 帧条）画悬浮体。本仓 BJ248 只对齐了 tile 面,
+   *  special point 尾扫整缺 ⇒ 一切已放置库（新放/存档皆同——绘制层缺面,与锚/存档
+   *  无关;BJ377 修复面只触 21 箱锚,491 不在判别域）恒缺悬浮体。
+   *  1:1 面（VoidLensHelper.cs 行号）:
+   *  · 登记：中心格 active（:700-705;special point 随可视 tile 循环登记 ⇒ 本仓按可视
+   *    域扫描同语义——仅屏内库体吃透镜/光/尘,屏外不画）；
+   *  · 位置 = 中心格 ToWorldCoordinates(+8,+8) 再 Y−2（:28）= 库体几何中心上移 2px；
+   *  · 帧 = (int)((tileFrameCounter[491]+_position.X+_position.Y)%40)/5（:31;计数器
+   *    Main.cs:19410 每 tick+1 回卷 40=8 帧×5t;含世界像素坐标 ⇒ 逐库错相;
+   *    tileAnim.tick 同拍等价）；
+   *  · 本体 = proj734 帧×1,色 = Lerp(光照,White,0.5)（:82-83）——白化项由世界层合成
+   *    乘光承载（pylon 水晶同判例,不自乘 lightAt 防双重受光）；库体双灯:tile 光
+   *    0.5/0.4/0.7（TileLightScanner.cs:427-433,def.light 已接）+ Helper.Update 点光
+   *    0.4/0.2/0.9（:36,渲染端 addLight 次帧生效,坐骑灯惯例）；
+   *  · 回声×3 = A=0 纯加法惯式（Color(127,50,127,0) :88 → 'lighter';XNA 预乘 α0=纯加）,
+   *    tint=贴图×(127,50,127)/255、scale×1.1（:91）、α=0.3+0.1·cos(GTW·2π/5)（:93,
+   *    0.2..0.4 呼吸）、轨道 = ((GTW/5+num)·2π) 单位向×(cos(GTW·2π/5)+2)px（:94,num
+   *    ∈{0,0.34,0.68},半径 1..3px 绕心公转）；
+   *  · 智能光标选中 = Extra_93 同帧栅格叠画（:99-105,GetSelectionGlowColor,avg>10 门;
+   *    Extra_93=34×384 与 proj734 帧栅格同构——VoidLensProj.draw 判例已证）；命中域 =
+   *    智能光标候选 coords 落库体 3×3 足迹（原版 InSmartCursorHighlightArea 中心格域）；
+   *  · 尘 = !gamePaused 每帧 1/3 掷、两支各半（:40-63）:尘 86/88 noGravity+
+   *    noLightEmittance（不设 noLight ⇒ GetAlpha :2511 走 (255,255,255,0) 纯加白闪档,
+   *    本仓 alphaOf case 86-91 同构）,scale=0.5+rand,fadeIn=0.5;A 支 pos=心−单位向×
+   *    rand(10..20)、v=⊥×2;B 支 rand(5..9)、v=⊥×3（⊥=RotatedBy(±π/2)）;公共尾
+   *    position+=v×10、velocity×−1（:60-62）。方向向量 = UnitY.RotatedByRandom(2π)×
+   *    (0.5,1) 再 SafeNormalize。customData=struct 装箱,Dust.cs :511-589 仅
+   *    Player/Projectile/int 三型消费位 ⇒ 普通尘行为,不建模。
+   *  层序 = render 2c'.0（tile 层后、晶塔水晶 2c'.1 前=原版 PostDrawTiles 同批
+   *  DrawVoidLenses→DrawTeleportationPylons 先后序 :427-429）。 */
+  private drawVoidLenses(cam: Camera, world: World, viewW: number, viewH: number, z: number): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    const tex = atlas.vmisc('vanilla/Projectile_734.png');
+    if (!tex) return;
+    const vaultTile = TILE_BY_KEY['v_491_void_vault'];
+    if (vaultTile === undefined) return;
+    const store = world.store;
+    const FW = VOID_LENS_FW, FH = VOID_LENS_FH;   // proj734 帧 34×48（34×384 ÷ 8）
+    const t = this.lighting?.clock?.globalTimeWrappedHourly ?? 0;   // GlobalTimeWrappedHourly
+    const tick = tileAnim.tick;                   // ⟺ tileFrameCounter[491]（每 tick +1,回卷 40）
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const wKg = this._worldLowK || 1;
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
+    const zz = z * wKg;
+    // 可视域扫描（原版 special point 仅随可视 tile 循环登记,:700-705 同域语义;
+    // 边距覆盖透镜本体 ±17/−26..+22px 外溢）
+    const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / TILE) - 3);
+    const tx1 = Math.min(world.w - 1, Math.ceil((cam.x + viewW / 2 / z) / TILE) + 3);
+    const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / TILE) - 4);
+    const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / TILE) + 4);
+    const ctx = this.ctx;
+    const scr = this._lensScr ??= (typeof document !== 'undefined'
+      ? document.createElement('canvas') : null);
+    const sc = scr?.getContext('2d') ?? null;
+    const pulseX = voidLensEchoPulse(t);                     // :92-93 x（−1..1 呼吸）
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    try {
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const si = store.idx(tx, ty);
+          if (store.type[si] !== vaultTile || (store.flags[si] & 1) === 0) continue;
+          if (store.frameX[si] !== 18 || store.frameY[si] !== 18) continue;   // :701 中心格
+          // 中心格 ToWorldCoordinates(+8,+8) 再 Y−2（:28）;帧含世界像素坐标（:31）
+          const [cx, cy] = voidLensCenterOf(tx, ty);
+          const frameNum = voidLensFrameOf(tick, cx, cy);
+          const dw = Math.max(1, Math.round(FW * zz)), dh = Math.max(1, Math.round(FH * zz));
+          const xd = ox + Math.round((cx - camRX) * zz) - dw / 2;
+          const yd = oy + Math.round((cy - camRY) * zz) - dh / 2;
+          // 点光 0.4/0.2/0.9（Helper.Update :36;!gamePaused 门 :429;渲染端次帧生效）
+          if (!this._worldPaused) this.lighting?.addLight(tx, ty, 0.4, 0.2, 0.9);
+          // 本体（scale 1;光照白化 Lerp(光照,White,0.5) :83 由世界层合成乘光承载）
+          ctx.drawImage(tex.img, tex.sx, tex.sy + frameNum * FH, FW, FH, xd, yd, dw, dh);
+          // 回声×3（:87-97）：纯加法 tint(127,50,127)、scale×1.1、绕心轨道 1..3px
+          if (scr && sc) {
+            if (scr.width !== FW || scr.height !== FH) { scr.width = FW; scr.height = FH; }
+            sc.globalCompositeOperation = 'source-over';
+            sc.clearRect(0, 0, FW, FH);
+            sc.imageSmoothingEnabled = false;
+            sc.drawImage(tex.img, tex.sx, tex.sy + frameNum * FH, FW, FH, 0, 0, FW, FH);
+            sc.globalCompositeOperation = 'multiply';
+            sc.fillStyle = 'rgb(127,50,127)';
+            sc.fillRect(0, 0, FW, FH);
+            sc.globalCompositeOperation = 'destination-in';
+            sc.drawImage(tex.img, tex.sx, tex.sy + frameNum * FH, FW, FH, 0, 0, FW, FH);
+            sc.globalCompositeOperation = 'source-over';
+            const dw2 = Math.max(1, Math.round(FW * 1.1 * zz));
+            const dh2 = Math.max(1, Math.round(FH * 1.1 * zz));
+            ctx.globalCompositeOperation = 'lighter';
+            for (const num of VOID_LENS_ECHO_PHASES) {
+              const ang = voidLensEchoAngle(t, num);             // :94 轨道相位
+              const rad = voidLensEchoRadius(pulseX);            // :94 半径 1..3px
+              const ex = ox + Math.round((cx + Math.cos(ang) * rad - camRX) * zz) - dw2 / 2;
+              const ey = oy + Math.round((cy + Math.sin(ang) * rad - camRY) * zz) - dh2 / 2;
+              ctx.globalAlpha = voidLensEchoAlpha(pulseX);       // :93 0.2..0.4 呼吸
+              ctx.drawImage(scr, ex, ey, dw2, dh2);
+            }
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+          }
+          // 悬浮尘（:40-63,!gamePaused 门 :429 门内才掷=原版 Update 整跳;1/3 掷,两支各半;
+          // 86/88 noGravity+noLightEmittance,position/velocity/scale/fadeIn 全覆写=
+          // NewDustDirect 后置面;掷序/算式=voidLensDustSpec 纯函数 1:1,Math.random 独立流）
+          if (this.vanillaDust && !this._worldPaused) {
+            const spec = voidLensDustSpec(cx, cy, Math.random);
+            if (spec) {
+              const d = this.vanillaDust.spawn(spec.x, spec.y, 0, 0, spec.type);
+              if (d) {
+                d.x = spec.x; d.y = spec.y;
+                d.vx = spec.vx; d.vy = spec.vy;
+                d.scale = spec.scale;
+                d.fadeIn = spec.fadeIn;
+                d.noGravity = true;
+                d.noLightEmittance = true;
+              }
+            }
+          }
+          // 智能光标选中辉光（:99-105）：候选 coords 落库体 3×3 足迹 → Extra_93 同帧
+          // 栅格 GetSelectionGlowColor 叠画,avg = 光照 (R+G+B)/3 整除、>10 门
+          const frame = smartInteractTileFrame;
+          if (frame.tileWon && scr && sc) {
+            const hit = frame.coords.find((c) => c.x >= tx && c.x <= tx + 2 && c.y >= ty && c.y <= ty + 2);
+            if (hit) {
+              const [lr2, lg2, lb2] = this.lighting?.lightAt(tx, ty) ?? [255, 255, 255];
+              const avg = Math.floor((lr2 + lg2 + lb2) / 3);
+              if (avg > 10) {
+                const [gr, gg, gb, ga] = getSelectionGlowColor(
+                  frame.selected.has(`${hit.x},${hit.y}`), avg);
+                const selTex = atlas.vmisc('vanilla/Extra_93.png');
+                if (selTex) {
+                  if (scr.width !== FW || scr.height !== FH) { scr.width = FW; scr.height = FH; }
+                  sc.globalCompositeOperation = 'source-over';
+                  sc.clearRect(0, 0, FW, FH);
+                  sc.imageSmoothingEnabled = false;
+                  sc.drawImage(selTex.img, selTex.sx, selTex.sy + frameNum * FH, FW, FH, 0, 0, FW, FH);
+                  sc.globalCompositeOperation = 'multiply';
+                  sc.fillStyle = `rgb(${gr | 0},${gg | 0},${gb | 0})`;
+                  sc.fillRect(0, 0, FW, FH);
+                  sc.globalCompositeOperation = 'destination-in';
+                  sc.drawImage(selTex.img, selTex.sx, selTex.sy + frameNum * FH, FW, FH, 0, 0, FW, FH);
+                  sc.globalCompositeOperation = 'source-over';
+                  ctx.globalAlpha = ga / 255;
+                  ctx.drawImage(scr, xd, yd, dw, dh);
+                  ctx.globalAlpha = 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      ctx.restore();
+    }
+  }
+
   /** 晶塔悬浮水晶（TileDrawing.DrawTeleportationPylons TileDrawing.cs:8806-8888 1:1）：
    *  水晶层不在 Tiles_597 基座贴图内，在独立 Extra_181（420×368 = 14 列×8 行帧，
    *  30×46/帧——列 0..2 为保留/选中辉光列，列 3+style 为 11 塔型水晶列）。
@@ -19263,6 +19516,7 @@ export class Renderer {
   }
 
   /** 晶塔水晶乘色 scratch（30×46,drawPylonCrystals 每帧复用） */
+  private _lensScr: HTMLCanvasElement | null = null;    // BJ429 虚空透镜 tint 刮擦布（34×48）
   private _pylonScr: HTMLCanvasElement | null = null;
 
   /** 荧光涂层叠层（render 7-涂层钩子）：把各 chunk 的 pair.glow（荧光涂层格 16×16

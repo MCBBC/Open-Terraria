@@ -134,3 +134,74 @@ describe('LoadoutShare 机制三律（GetEffectiveArmor/GetEffectiveDye 1:1）',
     expect(inv.loadouts[1].armor[3]?.favorited).toBe(true);
   });
 });
+
+// ★W3 清偿刀（2026-10-01,R4-19 登记残面收口）：CanShareArmor 第二段=低位空槽
+// 逐槽配对扫（1457 Player.cs:5712-5732）。定谳：shareItem 入位后,低位【空】槽的
+// 收藏件将经 GetEffectiveArmor 一并共享入位（两件同时在场）→ 须过
+// CanEquipBothAccessories 配对（同款/双翅/互斥组;vanity=shareItem 半段）,冲突拒;
+// 低位【被占】continue;首配饰槽 3/13 与部位槽不进扫;首个收藏件定谳。
+describe('CanShareArmor 第二段：低位空槽逐槽配对扫（Player.cs:5712-5732）', () => {
+  // itemstats 定谳：492/493=双翅（wing:1/2）,3580=开发者翅（wing:33）,899=无翅配饰
+  const wingA = 492, wingB = 493, devWing = 3580, plain = 899;
+
+  it('功能段：低位 3 空槽收藏翅 + 共享异翅入 4 → 双翅配对冲突拒（:5713-5731）', () => {
+    const inv = new Inventory();
+    inv.loadouts[1].armor[3] = { id: iid(wingA), stack: 1, favorited: true };
+    inv.loadouts[1].armor[4] = { id: iid(wingB), stack: 1, favorited: true };
+    // worn 全空（新 Inventory）→ 3/4 双双待共享
+    expect(inv.getEffectiveArmor(3)?.id).toBe(iid(wingA));   // 首配饰槽 3 不进扫（3%10=3）→ 放行
+    expect(inv.getEffectiveArmor(4)).toBeNull();             // 低位 3 空槽有收藏翅 → 拒
+    expect(inv.effectiveSharedFrom(4, false)).toBeNull();
+    expect(inv.effectiveSharedFrom(3, false)).toBe(1);
+  });
+
+  it('低位被占 → continue 无配对面（:5716-5719）,异翅共享放行（防过拒回归）', () => {
+    const inv = new Inventory();
+    inv.loadouts[1].armor[3] = { id: iid(wingA), stack: 1, favorited: true };
+    inv.loadouts[1].armor[4] = { id: iid(wingB), stack: 1, favorited: true };
+    inv.armor[3] = { id: iid(plain), stack: 1 };   // 功能 3 worn 被占（无翅,与翅兼容）
+    expect(inv.getEffectiveArmor(4)?.id).toBe(iid(wingB));   // 3 被占=该位无共享 → 放行
+    expect(inv.effectiveSharedFrom(4, false)).toBe(1);
+  });
+
+  it('同款臂跨位配对（非翅件）：低位 3 收藏件与共享件同款 → 拒（:3462-3464）', () => {
+    const inv = new Inventory();
+    inv.loadouts[2].armor[3] = { id: iid(plain), stack: 1, favorited: true };
+    inv.loadouts[2].armor[4] = { id: iid(plain), stack: 1, favorited: true };
+    expect(inv.getEffectiveArmor(3)?.id).toBe(iid(plain));   // 3 放行
+    expect(inv.getEffectiveArmor(4)).toBeNull();             // 4 与低位 3 收藏同款 → 拒
+  });
+
+  it('时装段（:5712 vanity=shareItem 半段）：双普通翅拒,普通翅×3580 例外放行（:3465-3473）', () => {
+    // 拒面：低位 13 收藏普通翅 A,共享普通翅 B 入 15（社交段无例外臂适用）
+    const inv1 = new Inventory();
+    inv1.loadouts[0].armor[13] = { id: iid(wingA), stack: 1, favorited: true };
+    inv1.loadouts[0].armor[15] = { id: iid(wingB), stack: 1, favorited: true };
+    expect(inv1.getEffectiveArmor(15)).toBeNull();
+    expect(inv1.effectiveSharedFrom(15, false)).toBeNull();
+    // 放行面：低位 13 收藏 3580（开发者翅）,共享普通翅入 15——社交段例外臂
+    const inv2 = new Inventory();
+    inv2.loadouts[0].armor[13] = { id: iid(devWing), stack: 1, favorited: true };
+    inv2.loadouts[0].armor[15] = { id: iid(wingB), stack: 1, favorited: true };
+    expect(inv2.getEffectiveArmor(15)?.id).toBe(iid(wingB));
+    expect(inv2.effectiveSharedFrom(15, false)).toBe(0);
+  });
+
+  it('低位首个收藏件定谳（:5720-5731 break/return,后续 Loadout 不再看）', () => {
+    const inv = new Inventory();
+    inv.loadouts[0].armor[3] = { id: iid(wingA), stack: 1, favorited: true };   // 首个=冲突件
+    inv.loadouts[1].armor[3] = { id: iid(plain), stack: 1, favorited: true };   // 后仓兼容件不看
+    inv.loadouts[0].armor[4] = { id: iid(wingB), stack: 1, favorited: true };
+    expect(inv.getEffectiveArmor(4)).toBeNull();   // L0 翅定谳拒（即便 L1 有兼容件）
+  });
+
+  it('部位槽/首时装槽不进扫（slot%10<=3）：盔甲 0-2 与时装 13 共享不受配对扫约束', () => {
+    const inv = new Inventory();
+    inv.loadouts[0].armor[0] = { id: iid(90), stack: 1, favorited: true };    // 铁头盔
+    inv.loadouts[0].armor[13] = { id: iid(wingA), stack: 1, favorited: true };
+    inv.loadouts[0].armor[14] = { id: iid(wingB), stack: 1, favorited: true };
+    expect(inv.getEffectiveArmor(0)?.id).toBe(iid(90));       // 部位槽只过第一门
+    expect(inv.getEffectiveArmor(13)?.id).toBe(iid(wingA));   // 13 不进扫（13%10=3）→ 放行
+    expect(inv.getEffectiveArmor(14)).toBeNull();             // 14 进扫,低位 13 收藏异翅 → 拒
+  });
+});

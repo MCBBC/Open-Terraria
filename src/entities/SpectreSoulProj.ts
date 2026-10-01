@@ -90,8 +90,10 @@ export interface GhostHealVictimLike {
 /** ★BJ385 flag10 lifeMax>5 段单源门（Terarria1457/Projectile.cs:13712）：
  *  flag10 = num41>0 ∧ targetNPC.lifeMax>5 ∧ friendly ∧ !hostile ∧ aiStyle≠59 ——
  *  304 吸血鬼飞刀 vampireHeal（:13877-78）与 ghostHeal（:13879）同在 flag10 块内。
- *  本仓 num41>0 由 applyLifeSteal floor 后拒承载;friendly/!hostile/aiStyle≠59 由
- *  调用方路径承载;本门补 lifeMax>5 段（critter 一击致死小血量族不 proc）。
+ *  本仓 num41>0 由 applyLifeSteal floor 后拒承载;friendly/!hostile/aiStyle≠59 段
+ *  ★S2-债1（2026-10-01）起由 ghostHealProc 数据门自证（旧注「调用方路径承载」随
+ *  magic 预门撤销作废——1091 hostile 面曾靠预门双职过滤）;本门补 lifeMax>5 段
+ *  （critter 一击致死小血量族不 proc）。
  *  maxHp/def.lifeMax 均缺 = 容缺放行（mock 桩面零漂移;实体 Enemy 恒有 maxHp）。
  *  BJ380 定谳于 LunarNebula.ts 私有式,BJ385 提升为域导出供三老站
  *  （MagicProj BJ157-① / Arrow BJ167 / MissileProj BJ167）统一补门 */
@@ -134,11 +136,24 @@ export function vanillaGateRejected(s: VanillaGateSnapshot, exemptIframes = fals
 
 export function ghostHealProc(game: GameHooks, projId: number, numHits: number,
   e: GhostHealVictimLike): void {
-  if (!(projId > 0 && projectileData(projId)?.magic)) return;
+  // ★S2-债1（2026-10-01,家族级清偿——R1-B 定谳存档 meleeOnHitProjs.ts:552-570 台账
+  //  兑现）：旧 magic 预门（BJ382 习语）撤销。原版语义（Projectile.cs 亲读定谳）：
+  //    :12090 `lifeSteal -= num2` 在 :12091-93 `if (!magic) return`【之前】,调用点
+  //    :13877-79（Damage() 通用 on-hit 段）无类别门 ⇒ 非 magic PVE 命中在幽灵兜帽
+  //    在身时【白扣治疗预算不出治疗球】=原版本相（「白耗」,非本仓建模差）。
+  //  承载分工：扣不扣/治不治 = Game.applyLifeSteal（:43432 先扣/:43433 非魔法拒回复）
+  //    ——isMagic 数据面忠实直传（PVP 中央面 FR6-F 同式）;flag10 投弹侧段（:13712
+  //    friendly/!hostile/aiStyle≠59）数据门自证——1091 雷暴闪电（hostile=true,
+  //    proc 站唯一非 magic 成员）旧靠 magic 预门双职过滤,摘门后显式承接（bj383
+  //    1091 零行为锁保形）;aiStyle 59（浮魂弹 356/357/358 自身）同段防自噬。
+  //    num41>0 段 = applyLifeSteal floor 后拒（既有契约）;lifeMax>5/victim 门照旧。
+  const pd = projId > 0 ? projectileData(projId) : undefined;
+  if (pd?.hostile === true) return;                      //（flag10 !hostile 段 :13712）
+  if (pd?.aiStyle === 59) return;                        //（flag10 aiStyle≠59 段 :13712）
   if (!vanillaFlag10LifeMaxOk(e)) return;                //（:13712 flag10 lifeMax>5 段）
   if (!spectreVictimEligible(e.vanillaId)) return;
   game.applyLifeSteal?.('ghost', e.lastStrikeDealt ?? 0, numHits,
-    e.x + e.w / 2, e.y + e.h / 2, true);
+    e.x + e.w / 2, e.y + e.h / 2, pd?.magic === true);
 }
 
 // ---- 预算池（Player.ghostDmg,Player.cs:991/:24652-24660 1:1）----

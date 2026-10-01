@@ -3366,6 +3366,20 @@ export class Game implements GameHooks {
   private lastTime = 0;
   /** 最近 60 个 rAF 帧间隔（ms）——F5 调试报告 fps 的唯一数据源 */
   private frameDts: number[] = [];
+  // ---- ★C10g 传送幕帘（2026-10-01 用户令:「传送希望确保目标位置已经逐块渲染
+  //  完毕后再传送」）----
+  //  定谳链（同日,与进世界逐块渲染同根）：ChunkCache 帧内烘焙预算（8ms/帧,巨帧
+  //  护栏）超限块建占位对跨帧摊——传送落点 ~40 块×0.47ms 必然摊 2-4 帧=肉眼可见
+  //  逐块渐进。修=玩家单帧位移超阈（无合法移动一 tick 达 1000px）即判定传送,
+  //  幕帘帧保持上帧画面（不 render）,幕帘帧面预烘目标视口（相机收敛+烘焙派发+
+  //  光照,viewportCovered 含预算占位账）或 600ms 保险后揭幕=整幅就绪画面一次
+  //  切换。worldless/入口冻结期不触发（入口由幕布覆盖门管）。
+  private _tpVeil = false;
+  private _tpVeilDeadline = 0;
+  private _lastPlayerCx = NaN;
+  private _lastPlayerCy = NaN;
+  private static readonly TP_VEIL_JUMP_PX = 1000;   // 62.5 tile/tick——合法移动极限（矿车 ~11px/tick）远不可达
+  private static readonly TP_VEIL_CAP_MS = 600;
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
   /** 旅程 SkipToTime 落点（相位翻转帧由昼夜事件块收尾应用，Main.SkipToTime :64657） */
@@ -5850,8 +5864,9 @@ export class Game implements GameHooks {
   private smartSelectHotbar = 0;
   /** ★Q4 刀 2026-09-30（BJ413 AFK 自动风筝）一拍强制使用旗：PickItemSelection-
    *  Override 的 controlUseItem=(releaseUseItem=true)（Player.cs:17541-17543,
-   *  holdStyle==0 臂）——updateSmartSelect AFK 臂置位、updateUse cw 支消费、
-   *  updateUse 尾清（一拍语义,原文 controlUseItem/releaseUseItem 逐拍重置）。 */
+   *  holdStyle==0 臂）——updateSmartSelect AFK 臂置位、updateUse 消费（G1 放行+
+   *  ⑩臂消费;★BJ428-D1 uiBlocking/悬停帧在早退块内救援消费）、updateUse 尾清
+   *  （一拍语义,原文 controlUseItem/releaseUseItem 逐拍重置）。 */
   private _afkKiteForceUse = false;
   /** Smart Select 槽画像复用缓冲（smartSelectSlots 每帧原地填充） */
   private _smartSelectSlots: SmartSelectSlot[] = Array.from({ length: INV_SIZE }, () => ({ ...EMPTY_SLOT }));
@@ -8488,6 +8503,33 @@ export class Game implements GameHooks {
    *  派发+光照,末位复查解除。animView 必须先于 viewportCovered 复查置位
    *  （fixedUpdate 不跑,唯一写点在此——否则视域未置恒 covered=冻结秒退+幕布
    *  提前掀开=入场空白病灶复现）。advanceAnim 刻意不跑（tileAnim.tick 冻结）。 */
+  /** ★C10g 传送幕帘帧面（2026-10-01）：相机收敛+烘焙派发+光照,【不 render】=
+   *  保持上帧画面（Game.frame 渲染门跳过）;viewportCovered（含预算占位账,
+   *  ChunkCache.budgetAwaiting）或 600ms 保险后落幕。预烘循环=get() 预算内
+   *  逐块驱熟（渲染循环 get() 的替代口——幕帘帧不 render,烘焙必须在此驱动;
+   *  8ms/帧共窗=巨帧护栏不变,目标视口 ~40 块摊 2-4 帧后揭幕）。 */
+  private tpVeilTick(): void {
+    const cc = this.chunks!;
+    const cam = this.camera;
+    cam.follow(this.player.cx, this.player.cy);
+    cam.easeZoom();
+    cam.clamp();
+    const hw = cam.viewW / 2 / cam.zoom + 2 * CHUNK * TILE, hh = cam.viewH / 2 / cam.zoom + 2 * CHUNK * TILE;
+    // ★animView 先于 flushDirty（entryFreezeTick 同款纪律:视口内同步烘焙的判定面）
+    cc.animView = { x0: cam.x - hw, y0: cam.y - hh, x1: cam.x + hw, y1: cam.y + hh };
+    cc.flushDirty();
+    const s = CHUNK * TILE;
+    const cx0 = Math.floor(cc.animView.x0 / s), cx1 = Math.floor((cc.animView.x1 - 1) / s);
+    const cy0 = Math.floor(cc.animView.y0 / s), cy1 = Math.floor((cc.animView.y1 - 1) / s);
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) cc.get(cx, cy);
+    }
+    const viewTW = Math.ceil(cam.viewW / cam.zoom / TILE) + 2;
+    const viewTH = Math.ceil(cam.viewH / cam.zoom / TILE) + 2;
+    this.tickLighting(viewTW, viewTH);
+    if (performance.now() >= this._tpVeilDeadline || cc.viewportCovered()) this._tpVeil = false;
+  }
+
   private entryFreezeTick(): void {
     const cc = this.chunks!;
     const cam = this.camera;
@@ -8778,6 +8820,13 @@ export class Game implements GameHooks {
       this.acc = 0;
       this.input.resetWheelAccumulators();
       this.entryFreezeTick();
+    } else if (this._tpVeil) {
+      // ★C10g 传送幕帘帧：世界模拟整段暂停（语义同入场冻结窗——「渲染未完成则
+      //  世界时间暂停」,vanilla 无此机制=本仓传送 UX）;wheelDelta 补重锚（FX51
+      //  同款——endFrame 不跑增量会滞留揭幕首拍）。
+      this.acc = 0;
+      this.input.resetWheelAccumulators();
+      this.tpVeilTick();
     } else if (!this.paused) {
       // 配饰格难度门镜像（Inventory.gateExpert/gateMaster——旅程滑杆改档下帧生效）
       const invGates = this.player.inv;
@@ -8791,6 +8840,16 @@ export class Game implements GameHooks {
         this.acc -= FIXED_DT;
         steps++;
       }
+      // ★C10g 传送签名检测（fixedUpdate 后=落点已定）：单帧玩家位移超阈即传送
+      // （本帧渲染已被下方 gate 跳过=落点占位对不可见,次帧起走幕帘帧面预烘）。
+      if (!this._tpVeil && Number.isFinite(this._lastPlayerCx)
+        && (Math.abs(this.player.cx - this._lastPlayerCx) > Game.TP_VEIL_JUMP_PX
+          || Math.abs(this.player.cy - this._lastPlayerCy) > Game.TP_VEIL_JUMP_PX)) {
+        this._tpVeil = true;
+        this._tpVeilDeadline = performance.now() + Game.TP_VEIL_CAP_MS;
+      }
+      this._lastPlayerCx = this.player.cx;
+      this._lastPlayerCy = this.player.cy;
     } else {
       // ★SW-FX51 2026-09-13：暂停窗滚轮重锚（PlayerInput.cs:1400-1404
       //  ——1403 双锚行;RB15d 勘误:原写 1407-1409 系误记;!AllowInputProcessing
@@ -8885,7 +8944,9 @@ export class Game implements GameHooks {
     // ★BJ269:配方列表逐帧探针（绘制相;SuppressDraw 抑制帧不进=原版同相,详见探针注）
     if (this.world) this.probeCraftListRefresh();
     const r0 = performance.now();
-    this.render();
+    // ★C10g:幕帘帧保持上帧画面——目标视口烘毕（viewportCovered 含预算占位账）
+    // 才揭幕=「逐块渲染完毕后再传送」（用户令 2026-10-01）
+    if (!this._tpVeil) this.render();
     gfxQuality.drawsThisSecond++;
     gfxQuality.tick(r0);
   }
@@ -10417,7 +10478,8 @@ export class Game implements GameHooks {
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
     this._afkKiteForceUse = false;   // ★Q4 刀：一拍旗尾清（未消费帧自灭——原文
-    //  controlUseItem/releaseUseItem 逐拍重置同相;uiBlocking/死亡早退帧=旗白置）
+    //  controlUseItem/releaseUseItem 逐拍重置同相;死亡早退帧=旗白置同相;
+    //  ★BJ428-D1 uiBlocking/DOM 悬停帧已在早退块内救援消费,不再白置）
     // ---- 光标持物镜像结算（SW-AZ1：消耗尽的镜像此刻清 UI 光标——归零后 HeldItem
     //      次拍回热栏,vanilla :524 `selected>=10 && HeldItem.IsAir → selected=hotbar`）----
     this.commitCursorMirror();
@@ -13869,11 +13931,14 @@ export class Game implements GameHooks {
     // 智选覆盖=原文 SelectedItemState.Update 序）+holdStyle==0 → controlUseItem=
     // releaseUseItem=true（:17541-17543）——holdStyle 由 ItemCheck_HackHoldStyles
     // （:53495-53512）逐拍写:场上有同型风筝弹=1,无=0。本仓等价:无同型 KiteProj
-    // 在场 → 一拍强制使用旗（_afkKiteForceUse,updateUse cw 支消费,尾注同锚）。
+    // 在场 → 一拍强制使用旗（_afkKiteForceUse,updateUse G1 controlUseItem 消费面
+    // 放行→cw 支消费,尾注同锚;★BJ428 定谳=G1 曾不认旗=装备当拍不放飞的断链层）。
     // 与原版同拍序：计数步进（player.fixedUpdate :9689）→ 本臂（:10233 updateSmart-
     // Select）→ updateUse（:10240 强制使用）=原文 Update 内 SelectedItemState.Update
-    // → ItemCheck 同拍。inventory 开启且无光标物的帧 updateUse 早退旗自灭（一拍
-    // 旗语义,原文 controlUseItem 亦逐拍重置——登记近似）。 ----
+    // → ItemCheck 同拍。uiBlocking/悬停 DOM 面板帧 updateUse 早退——★BJ428-D1
+    // （2026-10-01）定谳原版此类帧照放飞（臂后置重申 :25413>一切 controlUseItem=false
+    // 站;消费门无 UI 门）→ 早退块内旗救援面已补（updateUse uiBlocking 早退注）。
+    // 死亡拍旗仍自灭（原版死亡路径 return 先于臂=同相）。 ----
     if (host.canChangeImmediately && !env.mouseItemHeld && !controlTorch
       && p.afkCounterForKiting >= AFK_TIME_NEEDED_FOR_AUTO_KITING
       && p.selectedKite >= 0 && this.spectatingSlot < 0
@@ -14290,6 +14355,33 @@ export class Game implements GameHooks {
       || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
       || this.renderer.minimapUiHover) {
       this.mining = null;
+      // ★BJ428-D1（2026-10-01 定谳+清偿）uiBlocking/mouseInterface 帧 AFK 臂旗被本
+      //  早退吞=不放飞残面。原版定谳（开包挂机照放飞,逐行）：uiBlocking 等价面
+      //  （开包/悬停面板/全屏地图）【不拦】AFK 链——逐拍序 Player.Update:ResetControls
+      //  (:24961 清 controlUseItem)→CopyInto(:24964;TriggersSet.cs:846-853 的
+      //  blockMouse/mouseInterface 门只拦【MouseLeft 置位源】,不清既有置位;:25583
+      //  mouseInterface→delayUseItem 与 :24993 mapFullscreen 全零站均早于 :25413),
+      //  而 AFK 臂(PickItemSelectionOverride :17537-17547)在 :25413 selectedItemState.
+      //  Update【后置重申】controlUseItem=(releaseUseItem=true)——一切 controlUseItem
+      //  =false 站都不构成对臂的压制;消费门 ItemCheck :43064 与 CanUse :52657 均无
+      //  playerInventory/mouseInterface 门（后者仅 LocalPlayerHasPendingInventoryActions
+      //  :43322=FakeCursorItem/制作请求,与开包无关）。本仓此早退=mouseInterface 等价
+      //  拦截面（BJ 系 2026-09-02 定谳）,对鼠源使用拦得对,但旗是 override 直置源,
+      //  原版照穿 → 救援：旗在场（=AFK 臂本拍已切选手持风筝）时直调 useCombatWeapon
+      //  kite 支=⑩臂同路（useTime==0 同门;kind==='kite' defensive 门零旁漏）。排除：
+      //  dead（原版 :24948-24957 死亡路径 return 先于 ResetControls/selection/
+      //  ItemCheck=死亡拍臂不跑不放飞）、annotateMode（G1 同门一致）。cursorHeld 拍
+      //  旗恒 false（臂门 !env.mouseItemHeld+计数清零 :25702-25704）=自然 no-op;
+      //  blockMouse/delayUseItem 不设救——原版两门同属鼠源压制且均先于 :25413,臂
+      //  后置重申照穿。尾清 :10419 仍在=一拍旗语义不动。
+      if (this._afkKiteForceUse && !this.player.dead && !this.annotateMode) {
+        const heldDefAfk = this.player.inv.heldItem()
+          ? ITEM_DEFS[this.player.inv.heldItem()!.id] : null;
+        const cwAfk = heldDefAfk ? combatWeapon(heldDefAfk) : null;
+        if (heldDefAfk && cwAfk && cwAfk.kind === 'kite' && this.player.useTime === 0) {
+          this.useCombatWeapon(cwAfk, heldDefAfk);
+        }
+      }
       return;
     }
     // ★BJ357 变身坐骑禁道具（Mount.cs UpdateEffects case 55/56/61 :5201-5202
@@ -14626,7 +14718,16 @@ export class Game implements GameHooks {
     // controlUseItem 强制 false——使用/挖掘/放置/挥击整链压制（旧版在 Input.mousedown
     // 吞整沿且 mouseup 才清旗=回焦首击全死,原版无此面,见 Input.ts 同注）。
     // 沿不消费:按住期门恒真,松键(mouseHeld 消失→endFrame 清旗)后下一沿恢复。
-    if ((!inp.mouseDown && !holdOk) || this.annotateMode || inp.blockMouse || inp.delayUseItem) {
+    // ★BJ428（2026-10-01 用户实报「AFK 自动装备风筝但不放飞」定谳断链层）：本门即
+    //  本仓 controlUseItem 消费面,AFK 强制使用旗（PickItemSelectionOverride
+    //  :17541-17543 controlUseItem=(releaseUseItem=true) 的旗等价）是 controlUseItem
+    //  的第三来源——原版 ItemCheck 消费 controlUseItem 【无 mouseDown 前置】
+    //  （TriggersSet.cs:835-847 MouseLeft 只是 controlUseItem 众多置位源之一,
+    //  override 直置同源同效,装备当拍即放飞=同 tick ItemCheck）。旗只在 AFK 臂
+    //  选中风筝槽且无同型弹在飞时置位,放行面唯一可达 kite 支（风筝非工具/非放置
+    //  PLACE_TILE_ON_ALT_USE/各前支全带 mouseDown 门）,零旁漏。
+    if ((!inp.mouseDown && !holdOk && !this._afkKiteForceUse)
+      || this.annotateMode || inp.blockMouse || inp.delayUseItem) {
       this.mining = null;
       return;
     }
@@ -26306,8 +26407,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  IsReplaceableBlock 臂（:40066-40072,岩浆门对致动格不生效）。
       if (gated && !st.hasTile(tx, ty) && st.inBounds(tx, ty)
         && st.liquid[iL] > 0 && st.liquidType[iL] === LIQUID_TYPE.LAVA) {
-        // tileSolid 短路（:41815-41817 `Main.tileSolid[createTile]`）——真表代理见上注
-        if (def.solid || TILE_SOLID_TOP_FAMILY.has(shL)) return;
+        // tileSolid 短路（:41815-41817 `Main.tileSolid[createTile]`）——真表代理见上注。
+        // ★BJ426（2026-09-23 域错位定谳+落刀）：TILE_SOLID_TOP_FAMILY 是 tid() 平移后的
+        //  【内部 id 域】表（stats/TouchDamage.ts:57 setOf(VAN_TILE_SOLID_EXTRA)），此处
+        //  shL 是 sheet 域——曾裸传 shL 双向失效：平台九件套全漏（岩浆门对平台漏判，
+        //  style13/43/47 lava-allowed 平台与花盆箱 380 误放行）+ sheet 11/132/442/529/
+        //  535-539 撞号误命中（11 已被 gated 上游豁免,132/442/529/538 判值恰与
+        //  liquidSpecOf/LAVA_DEATH 支同值=行为零差,535-539 被 def.solid 掩蔽）。修=
+        //  查表前 sheet→内部 id 平移（tests/bj426-tile-domain-census 钉死）。
+        if (def.solid || TILE_SOLID_TOP_FAMILY.has(TILE_INTERNAL_BY_SHEET.get(shL) ?? -1)) return;
         const specL = liquidSpecOf(shL);
         if (specL) {
           const liqL = specL.liqStyles?.[String(itemDef.placeStyle ?? 0)] ?? specL.liq;
@@ -27099,15 +27207,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             kiteAnchorPlace(this.world.furnitureItems, tx, ty, held);
             const e = this.leashed.spawnKite(tx, ty, proj, this.leashedEnv(), pd?.width ?? 4);
             if (e && this.net?.active) this.net.sendLeashedFull(e);
-            // 成就：FLY_A_KITE_ON_A_WINDY_DAY（Player.ItemCheck_Shoot Player.cs:49980-49982：
-            // `projectile.aiStyle == 160 && Main.IsItAHappyWindyDay → HandleSpecialEvent(17)`
-            // ——原版风筝弹=aiStyle 160（DefaultToKite 投掷弹）使用即掷;本仓风筝为
-            // 锚桩+拴绳实体模型（登记模型差）,本放置点 = 玩家"使用风筝"等价位。
-            // IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2999）
-            if (this.world.weather?.shouldUseWindyDayMusic) {
-              this.achievements.handleSpecialEvent(17,
-                { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
-            }
           }
           // ★BJ426 ②（2026-10-01 用户实报「不消耗/无限放」）：放置消耗 1 =
           //  TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook（:46-48
@@ -27120,6 +27219,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  手持风筝,回收即复制（用户实报②③复制链根因）,已撤。
           this.player.inv.removeHeld(1);
           this.cb.onInventoryChanged();
+          // 成就：FLY_A_KITE_ON_A_WINDY_DAY（Player.ItemCheck_Shoot Player.cs:49980-49982：
+          // `projectile.aiStyle == 160 && Main.IsItAHappyWindyDay → HandleSpecialEvent(17)`
+          // ——原版风筝弹=aiStyle 160（DefaultToKite 投掷弹）使用即掷;本仓风筝为
+          // 锚桩+拴绳实体模型（登记模型差）,本放置点 = 玩家"使用风筝"等价位。
+          // IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2999）。
+          // ★BJ426 位次：消耗在成就【前】——原版钩子内扣件（PlaceTile 域）先于
+          // ItemCheck_Shoot 域成就,且成就面异常不得吞消耗（探针曾观测间歇跳扣）
+          if (this.world.weather?.shouldUseWindyDayMusic) {
+            this.achievements.handleSpecialEvent(17,
+              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+          }
         }
       }
     }
@@ -27201,7 +27311,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  本仓块换分支同不接（上方早退）。
     {
       const shSolid = def?.vanilla?.sheet ?? -1;
-      const tileSolidCreate = !!def.solid || TILE_SOLID_TOP_FAMILY.has(shSolid);
+      // ★BJ426（2026-09-23 域错位定谳+落刀）：TILE_SOLID_TOP_FAMILY=内部 id 域
+      //  （TouchDamage.ts:57）,shSolid=sheet 域——曾裸传双向失效:平台九件套全漏
+      //  （KillGrassForSolids 对平台整缺=平台压草不转化,239/380 另漏 Unslope）+
+      //  sheet 11/132/442/529/538 撞号误入（门/拉杆/压力板/瓢虫笼误触发拍坡除草,
+      //  535-539 被 def.solid 掩蔽）。修=查表前 sheet→内部 id 平移（同 :26310 岩浆门）。
+      const tileSolidCreate = !!def.solid || TILE_SOLID_TOP_FAMILY.has(TILE_INTERNAL_BY_SHEET.get(shSolid) ?? -1);
       if (tileSolidCreate) {
         if (!PLATFORMS_SHEETS.has(shSolid)) this.placeThingUnslopeForSolids(clickX, clickY);
         this.placeThingKillGrassForSolids(clickX, clickY, shSolid);
@@ -27517,6 +27632,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           this.player.inv.removeHeld(1);
           this.cb.onInventoryChanged();
+          // 成就：FLY_A_KITE_ON_A_WINDY_DAY（Player.ItemCheck_Shoot Player.cs:49980-49982：
+          // `projectile.aiStyle == 160 && Main.IsItAHappyWindyDay → HandleSpecialEvent(17)`
+          // ——原版风筝弹=aiStyle 160（DefaultToKite 投掷弹）使用即掷;本仓风筝为
+          // 锚桩+拴绳实体模型（登记模型差）,本放置点 = 玩家"使用风筝"等价位。
+          // IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2999）。
+          // ★BJ426 位次：消耗在成就【前】——原版钩子内扣件（PlaceTile 域）先于
+          // ItemCheck_Shoot 域成就,且成就面异常不得吞消耗（探针曾观测间歇跳扣）
+          if (this.world.weather?.shouldUseWindyDayMusic) {
+            this.achievements.handleSpecialEvent(17,
+              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+          }
         }
       }
       this.input.rightDown = false;
@@ -27929,6 +28055,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (this.useSuspiciousEye()) {
           this.player.inv.removeHeld(1);
           this.cb.onInventoryChanged();
+          // 成就：FLY_A_KITE_ON_A_WINDY_DAY（Player.ItemCheck_Shoot Player.cs:49980-49982：
+          // `projectile.aiStyle == 160 && Main.IsItAHappyWindyDay → HandleSpecialEvent(17)`
+          // ——原版风筝弹=aiStyle 160（DefaultToKite 投掷弹）使用即掷;本仓风筝为
+          // 锚桩+拴绳实体模型（登记模型差）,本放置点 = 玩家"使用风筝"等价位。
+          // IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2999）。
+          // ★BJ426 位次：消耗在成就【前】——原版钩子内扣件（PlaceTile 域）先于
+          // ItemCheck_Shoot 域成就,且成就面异常不得吞消耗（探针曾观测间歇跳扣）
+          if (this.world.weather?.shouldUseWindyDayMusic) {
+            this.achievements.handleSpecialEvent(17,
+              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+          }
         }
       } else {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
@@ -28058,8 +28195,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  房主/单人 = 本地权威直取；访客 = sub4 请求房主代取（furniture 记录只在
     //  房主端，= msg31 箱子请求同款模式），房主弹存物+消散实体后掉物走既有
     //  msg21，访客收包拾取。★BJ426 ④：取回后锚桩 tile 一并清除（= 原版唯一回收路
-    //  tile 破坏同态，线圈贴图随实体亡；旧「tile 保留=空桩可再放置」自创态已撤）----
-    if (type === TILE_BY_KEY['v_724_critter_anchor'] || type === TILE_BY_KEY['v_723_kite_anchor']) {
+    //  tile 破坏同态，线圈贴图随实体亡；旧「tile 保留=空桩可再放置」自创态已撤）。
+    //  ★BJ426 ②连带（2026-10-01 探针追凶定谳）：取回按压沿门——放最后一只风筝
+    //  （stack 1）后手持清空,同一次按住的下一帧走 interactAt 命中「刚放好的桩」
+    //  → 原地取回=放置被同拍吞掉（place→instant retrieve 摆锤）。原版锚桩无
+    //  interaction,按住右键恒无操作;本仓扩展交互收敛为「一次按压=一次取回」
+    //  （=本仓右键族按压沿惯例,BJ250 注同款）,按住帧整臂让位----
+    if ((type === TILE_BY_KEY['v_724_critter_anchor'] || type === TILE_BY_KEY['v_723_kite_anchor'])
+      && !this._prevRightDown) {
       const kind = type === TILE_BY_KEY['v_724_critter_anchor'] ? LEASHED_KIND_CRITTER : LEASHED_KIND_KITE;
       if (this.net?.active && !this.net.policy.isHost) {
         this.net.sendLeashedRetrieveRequest(tx, ty, kind);

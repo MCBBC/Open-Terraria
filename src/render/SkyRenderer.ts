@@ -60,7 +60,7 @@ function eventTintedSprite(
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
-import type { GLSpriteLayer } from './GLSpriteLayer';
+import type { GLSpriteLayer, TexEntry } from './GLSpriteLayer';
 import { texId, texReady } from './texId';
 import { horizonPhaseOf, sunColorOf, moonDrawColor } from '../lighting/Horizon';
 import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
@@ -362,6 +362,29 @@ const VIRTUAL_CAM_SIZE = 4096;
 const VIRTUAL_CAM_HALF = VIRTUAL_CAM_SIZE / 2;
 
 /** FadingSkyEntity（AmbientSky.cs:88-184）本仓表示（全族） */
+/** ★C10e 二期:单鸟绘制计划（2D 循环与 GL quad 发射共用单源,见 ambPlan/emitAmbienceGl 注——
+ *  防「计算双份漂移」;星批 buildStarBatch 同范式） */
+interface AmbDrawPlan {
+  e: AmbientEnt;
+  tinted: HTMLCanvasElement;        // AMB_TINT_CACHE 染色画布（key 稳定内容不变=GL 纹理可驻留）
+  key8: string;                     // 染色缓存键（GL 纹理键前缀 ambt:）
+  fw: number; fh: number; scale: number;
+  sx: number; sy: number;           // 屏坐标（局部单位;GL 侧经 ctx 变换映设备像素）
+  alpha: number;
+  flip: boolean;                    // SpriteEffects.FlipHorizontally（eyeball/eos/crimera 恒 false）
+}
+
+/** ★A3 灯笼夜帧回收:单灯绘制计划（drawLanterns 2D 兜底/GL 发射/far stash 三路单源
+ *  ——ambPlan/starCompute 同范式;alpha 表达式逐字同旧 2D 内联式,防双路漂移） */
+interface LanternPlan {
+  variant: number;                  // Extra_134 三变体列（0-2）
+  rot: number;                      // l.rot（2D rotate=GL quadSprite rot 同源）
+  scale: number;                    // (1/depth)×1.2（:225-234 视差 X 缩放;dest 尺寸=fw·scale·2）
+  sx: number; sy: number;           // 屏坐标（X 已 4000 包裹;GL 侧经 ctx 变换映设备像素）
+  alphaGlow: number;                // 光晕副本 α = 0.4·mul·opacity·flicker（:248-252）
+  alphaMain: number;                // 主贴图 α = 0.47·mul·opacity（:194-253）
+}
+
 interface AmbientEnt {
   kind: AmbientFamily;
   x: number; y: number;             // SkyEntity.Position（世界 px）
@@ -2004,7 +2027,19 @@ export class SkyRenderer {
 
   // ---- 灯笼夜天空（LanternSky.cs 1:1，贴图 Extra_134 三变体 20×20）----
   private lanternTex: ImageBitmap | HTMLImageElement | null = null;
-  private lanternOpacity = 0;   // _opacity：±0.01/帧向 LanternsUp 逼近（Update :119）
+  private lanternOpacity = 0;   // _opacity：±0.01/帧向 LanternsUp 逼近（Update :119;★A3 债收齐后单源=advanceLanternNight）
+
+  /** ★A3 债收齐（2026-10-01）:灯笼夜推进唯一写点（sky.draw 头每帧一次;underground
+   *  亦推进=原版 Update 全局语义）。旧双调用双推进（far+near=±0.02/帧）退役。 */
+  private advanceLanternNight(dtMs: number): void {
+    const up = LanternNight.lanternsUp;
+    this.lanternOpacity = Math.max(0, Math.min(1, this.lanternOpacity + (up ? 0.01 : -0.01) * (dtMs / (1000 / 60))));
+  }
+
+  /** ★A3 债收齐:GL 夹层会话发射标记（'lantern' near 会话/'ambgl' 鸟会话本帧成功
+   *  over present 置位;Renderer 帧头清零）。消费=Renderer 世界段后 GL 增量合成
+   *  （P1 合成先于 GL 会话的夹层路由帧,自拷源补全——c10eCompositeGlDelta 注）。 */
+  glInterlayerEmitted = false;
   private lanterns: Array<{
     x: number; y: number; depth: number; speed: number; variant: number;
     time: number; timeMax: number; rot: number; active: boolean;
@@ -2046,10 +2081,13 @@ export class SkyRenderer {
    *  三份旋转光晕副本 + 主贴图 :243-254） */
   /** band: far=深度>5（远山之后,原版 DrawToDepth(5) 前带）/ near=深度≤5（全部山层
    *  之前,:59310 后带——LanternSky 深度 1.6..6.0 按带插入山层,曾全画山后） */
-  private drawLanterns(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number, band: 'far' | 'near' = 'far'): void {
+  private drawLanterns(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number, band: 'far' | 'near' = 'far', gl?: GLSpriteLayer | null): void {
+    // ★A3 债收齐:推进已上移 sky.draw 头 advanceLanternNight（单源 ±0.01/帧）——
+    //  本方法只读 lanternOpacity（清理门保留）。
     const up = LanternNight.lanternsUp;
-    // _opacity ±0.01/帧（:119）
-    this.lanternOpacity = Math.max(0, Math.min(1, this.lanternOpacity + (up ? 0.01 : -0.01) * (dtMs / (1000 / 60))));
+    // ★A3 灯笼夜帧回收（2026-10-01）:far 带每帧入口清残留 stash（未消费帧=本帧重产,
+    //  同 farDeferred 入口清语义;sky.draw 深度门早退帧不清=与远云同款地下遮蔽语义）
+    if (band === 'far') this.farLanternDeferred = null;
     if (this.lanternOpacity <= 0.001) {
       if (!up) { this.lanterns.length = 0; this.lanternsLeaving = false; }
       return;
@@ -2100,6 +2138,34 @@ export class SkyRenderer {
     //  冻结（BJ330 语义,原 performance.now 墙钟相位照走=漂移）
     const hourY = Math.sin((globalTimeWrappedHourly() % 6) / 6 * Math.PI * 2);
     const flicker = hourY * 0.2 + 0.8;                  // DrawLantern :245-246
+    // ★A3 dispatch 前置（bird 'ambgl' 桥同款 all-or-nothing）:
+    //  near+gl → 'lantern' mini-session:纹理预解析【先于】begin（B2b 判例——半截
+    //  quads 不可回退）;任一失败=整支回 2D（宁回退不丢内容）。
+    //  far+farDeferGate → 选集 stash（flushFarLanternGL 于 bg 会话首段发射=远云后/
+    //  biomeBg 前原 2D 位 4741;bg 会话未开成=replayFarLantern2D 原位 2D 重放）。
+    let glEntry: TexEntry | null = null;
+    let glM: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+    let glK = 1;
+    if (band === 'near' && gl && !gl.unavailable && gl.canvas.width > 0 && gl.canvas.height > 0) {
+      const bt = ctx.getTransform();
+      const k = Math.sqrt(Math.abs(bt.a * bt.d - bt.b * bt.c));   // 均匀标量（emitAmbienceGl 同式）
+      if (Number.isFinite(k) && k > 0) {
+        glEntry = gl.texFromImage('lantern:Extra_134', tex);
+        if (glEntry) {
+          gl.begin('lantern');
+          if (gl.unavailable) glEntry = null;   // begin 失败:未发射未 present,2D 兜底
+          else { glK = k; glM = [bt.a, bt.b, bt.c, bt.d, bt.e, bt.f]; }
+        }
+      }
+    }
+    const stash: Array<LanternPlan> | null = band === 'far' && this.farDeferGate ? [] : null;
+    let stashM: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+    let stashK = 1;
+    if (stash) {
+      const bt = ctx.getTransform();
+      const k = Math.sqrt(Math.abs(bt.a * bt.d - bt.b * bt.c));
+      if (Number.isFinite(k) && k > 0) { stashK = k; stashM = [bt.a, bt.b, bt.c, bt.d, bt.e, bt.f]; }
+    }
     for (let i = 0; i < N; i++) {
       const l = this.lanterns[i];
       if (!l.active) continue;
@@ -2118,23 +2184,23 @@ export class SkyRenderer {
       const sy = (l.y - cy) * scaleY + cy - camY;
       sx = (((sx + 500) % 4000) + 4000) % 4000 - 500;
       if (sx < -100 || sx > viewW + 100 || sy < -100 || sy > viewH + 100) continue;
-      // 光晕三副本（:248-252）：绕 (0,2) 旋转 120° 均布 × 环绕 Y
-      const glowA = 0.4 * mul * this.lanternOpacity * flicker;
-      ctx.save();
-      ctx.translate(sx, sy);
-      ctx.rotate(l.rot);
-      ctx.imageSmoothingEnabled = false;
-      ctx.globalAlpha = glowA;
-      for (let k = 0; k < 3; k++) {
-        const a = (Math.PI * 2 * k) / 3 + l.rot;
-        ctx.drawImage(tex, fw * l.variant, 0, fw, fh,
-          Math.cos(a) * 2 * hourY - (fw * scale * 2) / 2,
-          Math.sin(a) * 2 * hourY - (fh * scale * 2) / 2, fw * scale * 2, fh * scale * 2);
+      // ★A3 单灯计划（2D/GL/stash 三路单源——表达式逐字同旧 2D 内联式,防双路漂移）
+      const plan: LanternPlan = {
+        variant: l.variant, rot: l.rot, scale, sx, sy,
+        alphaGlow: 0.4 * mul * this.lanternOpacity * flicker,
+        alphaMain: 0.47 * mul * this.lanternOpacity,
+      };
+      if (glEntry) {
+        this.emitLanternQuads(gl!, glEntry, { fw, fh, hourY, m: glM, k: glK }, plan);
+        continue;
       }
-      // 主贴图：Color(250,120,60,120) × 分档 × 不透明度（:194-253）
-      ctx.globalAlpha = 0.47 * mul * this.lanternOpacity;
-      ctx.drawImage(tex, fw * l.variant, 0, fw, fh, -(fw * scale * 2) / 2, -(fh * scale * 2) / 2, fw * scale * 2, fh * scale * 2);
-      ctx.restore();
+      if (stash) { stash.push(plan); continue; }
+      this.drawLanternPlan2D(ctx, tex, fw, fh, hourY, plan);
+    }
+    if (glEntry) { gl!.end(true, true); this.glInterlayerEmitted = true; return; }   // over present 入屏栈（bg 后/世界前）
+    if (stash) {
+      if (stash.length) this.farLanternDeferred = { plans: stash, tex, fw, fh, hourY, m: stashM, k: stashK };
+      return;   // stash 帧:2D 落笔由 bg 会话 flush（GL）/原位 replay（回退）承担
     }
     ctx.globalAlpha = 1;
   }
@@ -2181,11 +2247,124 @@ export class SkyRenderer {
     return false;
   }
 
+  /** ★C10e 二期（2026-10-01 F-inter 收刀）：世界路由谓词——opresentInterlayerPending
+   *  去【鸟群三项】（ambEntities/pendingAmbientSpawns/ambNextAttempt≤2）。★A3
+   *  （2026-10-01 灯笼夜帧回收）再去【lantern 项】:far/near 灯笼带已全 GL 桥化
+   *  （far=bg 会话首段 stash、near='lantern' mini-session 落屏栈 bg 侧槽）,灯夜帧
+   *  世界回归 over present 叠其上（纯帧零全幅 blit）。其余项（party/slime/martin/
+   *  drama）未桥化=保持路由 F-inter 2D（层序正确性:未桥化内容只能画 HUD,其帧世界
+   *  必须 blit 过去叠它）。★opresent 延迟门与合并门继续用【旧】谓词（鸟帧/灯帧禁
+   *  pass3 合并/云并会——合并 present 是天空+世界单 quad,鸟 quads/灯 quads 无法
+   *  插入其间=会被天空云盖住;分回合 bg present → 夹层 quads → 世界 present 才是
+   *  正确层序）。 */
+  worldRouteInterlayerPending(): boolean {
+    if (this.fx.party && this.fx.surfaceY > 0) return true;
+    if (this.slimeSky.isActive || this.martianSky.isActive) return true;
+    if (this.dramaCore !== null || this.dramaPieces.length > 0 || this.dramaExplosions.length > 0) return true;
+    return false;
+  }
+
   /** 灯笼夜 near 带（深度≤5 的近灯 = 全部群系背景层之前,原版 :59310 后带）——
-   *  Renderer 在 biomeBg.draw('surface') 之后调用。状态推进仍在 far 遍历内
-   *  （本方法只读不推进,重复调用安全） */
-  drawLanternsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number): void {
-    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs, 'near');
+   *  Renderer 在 biomeBg.draw('surface') 之后调用。状态推进（opacity/本带运动环）
+   *  在本调用内照跑（far 带调用点在 sky.draw 4741 位——两带各自推进一次,与桥化
+   *  前逐位同）。★A3:gl 在场（纯帧+屏栈开）→ 'lantern' mini-session 直出 glCanvas
+   *  （bg over-present 之后/世界 present 之前=原 2D 位）;任一环节失败=2D 原路径。 */
+  drawLanternsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number, gl?: GLSpriteLayer | null): void {
+    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs, 'near', gl);
+  }
+
+  // ---- ★A3 灯笼夜帧回收（2026-10-01,C10e F-inter 收刀——bird 'ambgl' 桥同族） ----
+  // 灯夜帧原由 farInterlayerActive lantern 项在帧头整帧打回 F-inter（每帧全幅 blit）。
+  // 回收=两带全桥化:far 带 stash→bg 会话首段（flushFarLanternGL,C10d flushFarDeferredGL
+  // 同款）;near 带 'lantern' mini-session over present（drawLanternsNear 调用点原位）。
+  // 层序:远云 < far 灯 < biomeBg < 近云 < near 灯 < 世界,与 2D 序逐位同（far 灯在
+  // bg FBO 内=sky2D 远云之上 ✓;near 灯会话在近云所在 bg present 之后 ✓）。
+
+  /** ★A3 far 带选集 stash（drawLanterns far 帧内产,farDeferGate 门;Renderer bg 会话
+   *  begin 后 flushFarLanternGL 消费;未消费帧=下一帧 far 带入口清——同 farDeferred
+   *  「菜单帧单帧缺=不可见级」语义）。m/k=stash 时刻 ctx 变换（本仓天空段恒恒等
+   *  ——相机在计划式内;留档防未来变换位）。 */
+  private farLanternDeferred: {
+    plans: LanternPlan[];
+    tex: ImageBitmap | HTMLImageElement;
+    fw: number; fh: number; hourY: number;
+    m: [number, number, number, number, number, number]; k: number;
+  } | null = null;
+
+  /** ★A3:far 灯笼选集向已开启的 bg 会话发射（C10d flushFarDeferredGL 同款批令牌形态
+   *  ——不 begin 不 end,quads 落 FBO('bg') 段=远云 stash 之后、biomeBg 之前=原 2D 位
+   *  4741）。纹理解析失败=本帧弃（far 云同款 2830 语义——跳过不落 2D,防同帧混路径
+   *  叠画）。plans 空=零提交。 */
+  flushFarLanternGL(layer: GLSpriteLayer): void {
+    const d = this.farLanternDeferred;
+    this.farLanternDeferred = null;
+    if (!d || !d.plans.length || layer.unavailable) return;
+    const entry = layer.texFromImage('lantern:Extra_134', d.tex);
+    if (!entry) return;
+    for (const p of d.plans) this.emitLanternQuads(layer, entry, d, p);
+  }
+
+  /** ★A3 2D 回退:bg 会话未开成（acquire 退避/GL 死）时 far 灯笼 stash 原位 2D 重放
+   *  （调用点=Renderer biomeBg 2D 之前、replayFarDeferred2D 之后=灯在云上/山层下
+   *  =原层序）。 */
+  replayFarLantern2D(ctx: CanvasRenderingContext2D): void {
+    const d = this.farLanternDeferred;
+    this.farLanternDeferred = null;
+    if (!d) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const p of d.plans) this.drawLanternPlan2D(ctx, d.tex, d.fw, d.fh, d.hourY, p);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** ★A3:单灯 2D 绘制（drawLanterns 2D 兜底与 far stash 2D replay 单源——逐位同旧
+   *  内联式:translate·rotate + 光晕三副本(120° 均布×hourY 微摆,globalAlpha=glowA)
+   *  + 主贴图(0.47·mul·opacity),source-over 最近邻（imageSmoothingEnabled=false）） */
+  private drawLanternPlan2D(ctx: CanvasRenderingContext2D,
+    tex: ImageBitmap | HTMLImageElement, fw: number, fh: number, hourY: number,
+    p: { variant: number; rot: number; scale: number; sx: number; sy: number; alphaGlow: number; alphaMain: number }): void {
+    ctx.save();
+    ctx.translate(p.sx, p.sy);
+    ctx.rotate(p.rot);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = p.alphaGlow;
+    for (let k = 0; k < 3; k++) {
+      const a = (Math.PI * 2 * k) / 3 + p.rot;
+      ctx.drawImage(tex, fw * p.variant, 0, fw, fh,
+        Math.cos(a) * 2 * hourY - (fw * p.scale * 2) / 2,
+        Math.sin(a) * 2 * hourY - (fh * p.scale * 2) / 2, fw * p.scale * 2, fh * p.scale * 2);
+    }
+    // 主贴图：Color(250,120,60,120) × 分档 × 不透明度（:194-253）
+    ctx.globalAlpha = p.alphaMain;
+    ctx.drawImage(tex, fw * p.variant, 0, fw, fh,
+      -(fw * p.scale * 2) / 2, -(fh * p.scale * 2) / 2, fw * p.scale * 2, fh * p.scale * 2);
+    ctx.restore();
+  }
+
+  /** ★A3:单灯 GL 发射（near 'lantern' 会话与 far bg-FBO flush 共用）——光晕三副本
+   *  在前、主贴图在后,序同 2D（save/rotate 内三 drawImage+主 drawImage=source-over
+   *  叠序保序）。quadSprite(rot) 绕 dst 中心旋转 ≙ 2D translate(sx,sy)·rotate(rot)·
+   *  drawImage 中心锚:副本中心 = 灯心 + R(rot)·wobble（2D 局部偏移 a=2πk/3+rot
+   *  经 rotate(rot) 再旋=R(rot)·wobble,同构）;尺寸×k（ctx 均匀标量→设备像素）;
+   *  smooth:false=2D imageSmoothingEnabled=false 同档。 */
+  private emitLanternQuads(gl: GLSpriteLayer, entry: TexEntry,
+    s: { fw: number; fh: number; hourY: number; m: [number, number, number, number, number, number]; k: number },
+    p: { variant: number; rot: number; scale: number; sx: number; sy: number; alphaGlow: number; alphaMain: number }): void {
+    const [ma, mb, mc, md, me, mf] = s.m;
+    const dw = s.fw * p.scale * 2 * s.k, dh = s.fh * p.scale * 2 * s.k;
+    const cx0 = ma * p.sx + mc * p.sy + me, cy0 = mb * p.sx + md * p.sy + mf;
+    const cr = Math.cos(p.rot), sr = Math.sin(p.rot);
+    for (let g = 0; g < 3; g++) {
+      const a = (Math.PI * 2 * g) / 3 + p.rot;
+      const ox = Math.cos(a) * 2 * s.hourY, oy = Math.sin(a) * 2 * s.hourY;
+      gl.quadSprite(entry, p.variant * s.fw, 0, s.fw, s.fh,
+        cx0 + cr * ox - sr * oy - dw / 2, cy0 + sr * ox + cr * oy - dh / 2, dw, dh,
+        { alpha: p.alphaGlow, rot: p.rot, smooth: false });
+    }
+    gl.quadSprite(entry, p.variant * s.fw, 0, s.fw, s.fh,
+      cx0 - dw / 2, cy0 - dh / 2, dw, dh,
+      { alpha: p.alphaMain, rot: p.rot, smooth: false });
   }
 
   /** 派对气球 near 入口（PartySky 深 1.6..3.35 全 <5 = 全部背景层之前）——
@@ -2487,7 +2666,10 @@ export class SkyRenderer {
     this.updateClouds(dtMs, viewW, camX);
     if (!this.frameCtx?.paused) this.maintainClouds(viewW, viewH);   // 暂停冻结（UpdateClouds 同门 :17199）
     const camTop = camY - viewH / 2;
-    if (camTop >= this.fx.surfaceY + 16) return;
+    // ★A3 债收齐（2026-10-01）:深度门早退帧【先】清残留 stash（旧=清位在门后,
+    //  地下帧上一帧未消费 stash 存活到下个 bg 会话=单帧陈旧 flush;地下不透明 bg
+    //  遮蔽虽备案良性,错帧内容仍不正——farLanternDeferred 入口清语义对齐）
+    if (camTop >= this.fx.surfaceY + 16) { this.farDeferred = null; return; }
     this.updateCloudCelestial(camY - viewH / 2);
     const { num3 } = this.cloudBgTop(camY, viewH);
     const distY = num3 * 750 + 830;                          // :59115（scAdj/pushBGTopHack=0）
@@ -2499,6 +2681,12 @@ export class SkyRenderer {
     //  prev 帧陈旧）。命中=pass1 选集 stash,section 1.5 的 bg 会话首段发射
     //  （batch 令牌既有机制,层序=远云在 biomeBg 前=原位）;夹层在场=独立会话+blit
     //  原路径（极光/far 灯笼画其上=原版序 :58829/:59310）。每帧入口清残留 stash。
+    //  ★A3（2026-10-01）lantern 项保留 rationale 更新:far 灯笼带已 GL 桥化
+    //  （stash→bg FBO 首段/2D 回退 replay）,恒落 sky2D 远云【之上】——若本处摘项
+    //  把远云 stash 进 FBO,2D 回退帧（bg 会话未开成）远云 replay 与灯 replay 虽保序,
+    //  但 GL 帧远云 quads 与灯 quads 的相对层序依赖 flush 调用序,且灯夜帧远云将
+    //  离开「同帧状态法」保守面。维持灯夜帧远云 2D 直画=灯恒在云上（原版序）,
+    //  farInterlayerActive（帧分类用）已摘 lantern 项,两谓词自此分工不同（方法注）。
     this.farDeferred = null;
     const farInterlayer = this.aurora.tileColorState() !== null
       || (this.lanternOpacity > 0.001 && camY <= this.fx.surfaceY);
@@ -2851,12 +3039,15 @@ export class SkyRenderer {
   /** 自然星 'sstarn' mini-session 直出（=c10eOver 且远云同走 GL stash——farDeferGate
    *  假帧远云 2D 直画落 sky2D,星若 GL 直出会压到 sky2D 远云之上=层序倒挂,故同门） */
   c10eStarDirect = false;
-  /** ★C10e 远云夹层谓词（drawVanillaClouds 同源提取——极光 tileColor 态/
-   *  far 灯笼夜活跃;星批直出门与 Renderer 帧分类共用,同帧状态法两读恒等。
-   *  camY 由调用方传 draw 同款值=逐式同源） */
+  /** ★C10e 远云夹层谓词（★A3 2026-10-01 摘 lantern 项:far/near 灯笼带已全 GL 桥化
+   *  ——far 带 stash→bg 会话首段、near 带 'lantern' mini-session,灯夜帧回归 F-pure;
+   *  剩【极光 tileColor 态】一项=唯一未桥化 far 夹层。camY 形参保留（调用点/锚
+   *  稳定;lantern 项摘除后暂无消费）。注意与 drawVanillaClouds 局部 farInterlayer
+   *  的分工:后者保留 lantern 项=远云「灯在云上」层序卫（far 灯 2D 回退帧若远云
+   *  stash 进 FBO 会层序倒挂——见 drawVanillaClouds 注） */
   farInterlayerActive(camY: number): boolean {
-    return this.aurora.tileColorState() !== null
-      || (this.lanternOpacity > 0.001 && camY <= this.fx.surfaceY);
+    void camY;
+    return this.aurora.tileColorState() !== null;
   }
   /** ★C10d 远云 pass1 延迟选集（drawVanillaClouds stash→section 1.5 bg 会话首段
    *  消费;未消费帧=下一帧入口清+菜单帧单帧远云缺=不可见级） */
@@ -3353,7 +3544,7 @@ export class SkyRenderer {
    * 调度门关（ambientRemoteDriven），帧首消费广播队列（同 seed 重放）。
    */
   drawAmbience(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
-    camX: number, camY: number, dtMs = 16.7): void {
+    camX: number, camY: number, dtMs = 16.7, gl?: GLSpriteLayer | null): void {
     if (this.fx.surfaceY <= 0) return;   // 未进世界（fx 未注入）
     const ticks = Math.max(1, Math.round(dtMs / (1000 / 60)));
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
@@ -3423,76 +3614,134 @@ export class SkyRenderer {
       return [(sv >> 16) & 255, (sv >> 8) & 255, sv & 255] as [number, number, number];
     })();
     const sr = cbg[0], sg = cbg[1], sb = cbg[2];
+    // ★C10e 二期鸟群 GL 桥（2026-10-01,F-inter 收刀普查 scripts/_c10e-inter-census.mjs
+    //  定谳:常态 F-inter 100% 由鸟群驻留触发,1-2 只小精灵逼全帧 blit+restack）：
+    //  gl 在场（纯帧+屏栈开）→ 'ambgl' mini-session 逐鸟 quadSprite 直出 glCanvas
+    //  （bg over-present 之后、世界 over-present 之前=屏栈 bg 侧槽位,层序逐位同
+    //  2D）；任一环节失败=整支回退下方 2D 循环（宁回退不丢内容）。drama/slime/
+    //  martin 绘制在上方分支外照旧 2D（其帧由路由谓词保持 F-inter）。
+    if (gl && this.emitAmbienceGl(gl, ctx, viewW, viewH, camX, camY, atmo, sr, sg, sb)) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const e of this.ambEntities) {
-      const tex = this.ambTex(e.texKey);
-      // ★texReady 半加载窗守卫（2026-08-25 用户实报鸟群白闪循环）：元数据已到
-      //  （width>0）但主体未完时下方 AMB_TINT_CACHE 烘焙 = 平色矩形入缓存——
-      //  鸟动画循环 4 帧反复重访毒化帧键（白闪）、cots 漂移换色桶后新键烘出
-      //  正常 → "一会正常一会白"循环往复。未就绪本帧跳过，就绪后自然恢复
-      if (!tex || !texReady(tex)) continue;
-      // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
-      const wx = (e.x - camX) / e.depth + camX;
-      const wy = (e.y - camY) * 0.9 / e.depth + camY;
-      const sx = wx - camX + viewW / 2;
-      const sy = wy - camY + viewH / 2;
-      if (sx < -400 || sx > viewW + 400 || sy < -400 || sy > viewH + 400) continue;
-      const fw = tex.width, fh = tex.height / e.rows;
-      const scale = (3 + e.depthScaleAdj) / e.depth;   // CommonDraw :79 + 各族 Draw depthScale 偏移
-      // GetColor（各族覆盖）：
-      //  常规 = Lerp(bg, 白, BrightnessLerper)（:165-168）；
-      //  gastropod = Lerp(bg, (102,0,63), 0.75)（:658 + Colors.cs:39）；
-      //  hellbats = Lerp(白, 灰, Depth/15)（:871，无 atmo 乘）
-      let cr: number, cg: number, cb: number;
-      if (e.kind === 'gastropod') {
-        cr = sr + (102 - sr) * 0.75; cg = sg * 0.25; cb = sb + (63 - sb) * 0.75;
-      } else if (e.grayDepthFade) {
-        const k = Math.min(1, e.depth / 15);
-        cr = 255 + (128 - 255) * k; cg = cr; cb = cr;
-      } else {
-        const b = e.brightness;
-        cr = sr + (255 - sr) * b; cg = sg + (255 - sg) * b; cb = sb + (255 - sb) * b;
-      }
-      // GetColor 染色落贴图 RGB（XNA SourceBlend.One 预乘语义：out = texel.RGB × color.RGB）：
-      //  multiply 预染缓存（量化 1/16 限幅防缓存打爆——同火把 Disco 16 档先例）
-      const key8 = `${e.texKey}:${e.frame}:${cr >> 4},${cg >> 4},${cb >> 4}`;
-      let tinted = AMB_TINT_CACHE.get(key8);
-      if (!tinted) {
-        tinted = document.createElement('canvas');
-        tinted.width = fw; tinted.height = fh;
-        const tc = tinted.getContext('2d')!;
-        tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
-        tc.globalCompositeOperation = 'multiply';
-        tc.fillStyle = `rgb(${cr | 0},${cg | 0},${cb | 0})`;
-        tc.fillRect(0, 0, fw, fh);
-        tc.globalCompositeOperation = 'destination-in';
-        tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
-        if (AMB_TINT_CACHE.size > 96) AMB_TINT_CACHE.clear();   // 简易容量闸
-        AMB_TINT_CACHE.set(key8, tinted);
-      }
-      // 群系前景背景层 alpha 乘子（各族 GetColor 覆盖 ×Main.bgAlphaFrontLayer[i]，索引语义
-      //  = Main.cs:58951-59030 的 bgStyle 槽：0/10-12 森林系 1 腐化 2 沙漠 3 丛林 4 海洋
-      //  5/13/14 善恶沙漠 6 神圣 7 雪原 8 猩红 9 蘑菇——与 BiomeBackground.bgStyle 同表）
-      const alpha = Math.min(1, e.opacity * (e.grayDepthFade ? 1 : atmo)
-        * this.familyBiomeAlphaMul(e.kind));
-      if (alpha <= 0.01) continue;
+      const p = this.ambPlan(e, viewW, viewH, camX, camY, atmo, sr, sg, sb);
+      if (!p) continue;
       ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(sx, sy);
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.sx, p.sy);
       ctx.rotate(e.rotation);
       // EOCSkyEntity（eyeball/eos/crimera）原版不写 Effects=恒 None——朝向完全由
       // Rotation=Velocity.ToRotation() 承担（:1296，贴图原生朝右）；曾叠 dir 翻转
       // =左飞时 rotate π 已转头再镜像回反→虹膜拖在身后（"眼球在屁股后面走",
       // 2026-08-25 用户实报）。其余族 Effects=风向翻转（:191 等全族同式）≈dir 翻转
-      if (e.dir < 0 && e.kind !== 'eyeball' && e.kind !== 'eos' && e.kind !== 'crimera') {
+      if (p.flip) {
         ctx.scale(-1, 1);   // SpriteEffects.FlipHorizontally
       }
-      ctx.drawImage(tinted, -fw * scale / 2, -fh * scale / 2, fw * scale, fh * scale);
+      ctx.drawImage(p.tinted, -p.fw * p.scale / 2, -p.fh * p.scale / 2, p.fw * p.scale, p.fh * p.scale);
       ctx.restore();
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+  }
+
+  /** ★C10e 二期:单鸟绘制计划（2D 循环与 GL 发射【单源】——位置/染色/α/翻转计算
+   *  只此一份,防双路漂移;星批 starCompute 同范式）。返回 null=本实体本帧跳过
+   *  （贴图半加载窗/屏外/α≤0.01,与旧 2D 逐项 continue 同门）。 */
+  private ambPlan(e: AmbientEnt, viewW: number, viewH: number, camX: number, camY: number,
+    atmo: number, sr: number, sg: number, sb: number): AmbDrawPlan | null {
+    const tex = this.ambTex(e.texKey);
+    // ★texReady 半加载窗守卫（2026-08-25 用户实报鸟群白闪循环）：元数据已到
+    //  （width>0）但主体未完时下方 AMB_TINT_CACHE 烘焙 = 平色矩形入缓存——
+    //  鸟动画循环 4 帧反复重访毒化帧键（白闪）、cots 漂移换色桶后新键烘出
+    //  正常 → "一会正常一会白"循环往复。未就绪本帧跳过，就绪后自然恢复
+    if (!tex || !texReady(tex)) return null;
+    // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
+    const wx = (e.x - camX) / e.depth + camX;
+    const wy = (e.y - camY) * 0.9 / e.depth + camY;
+    const sx = wx - camX + viewW / 2;
+    const sy = wy - camY + viewH / 2;
+    if (sx < -400 || sx > viewW + 400 || sy < -400 || sy > viewH + 400) return null;
+    const fw = tex.width, fh = tex.height / e.rows;
+    const scale = (3 + e.depthScaleAdj) / e.depth;   // CommonDraw :79 + 各族 Draw depthScale 偏移
+    // GetColor（各族覆盖）：
+    //  常规 = Lerp(bg, 白, BrightnessLerper)（:165-168）；
+    //  gastropod = Lerp(bg, (102,0,63), 0.75)（:658 + Colors.cs:39）；
+    //  hellbats = Lerp(白, 灰, Depth/15)（:871，无 atmo 乘）
+    let cr: number, cg: number, cb: number;
+    if (e.kind === 'gastropod') {
+      cr = sr + (102 - sr) * 0.75; cg = sg * 0.25; cb = sb + (63 - sb) * 0.75;
+    } else if (e.grayDepthFade) {
+      const k = Math.min(1, e.depth / 15);
+      cr = 255 + (128 - 255) * k; cg = cr; cb = cr;
+    } else {
+      const b = e.brightness;
+      cr = sr + (255 - sr) * b; cg = sg + (255 - sg) * b; cb = sb + (255 - sb) * b;
+    }
+    // GetColor 染色落贴图 RGB（XNA SourceBlend.One 预乘语义：out = texel.RGB × color.RGB）：
+    //  multiply 预染缓存（量化 1/16 限幅防缓存打爆——同火把 Disco 16 档先例）
+    const key8 = `${e.texKey}:${e.frame}:${cr >> 4},${cg >> 4},${cb >> 4}`;
+    let tinted = AMB_TINT_CACHE.get(key8);
+    if (!tinted) {
+      tinted = document.createElement('canvas');
+      tinted.width = fw; tinted.height = fh;
+      const tc = tinted.getContext('2d')!;
+      tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
+      tc.globalCompositeOperation = 'multiply';
+      tc.fillStyle = `rgb(${cr | 0},${cg | 0},${cb | 0})`;
+      tc.fillRect(0, 0, fw, fh);
+      tc.globalCompositeOperation = 'destination-in';
+      tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
+      if (AMB_TINT_CACHE.size > 96) AMB_TINT_CACHE.clear();   // 简易容量闸
+      AMB_TINT_CACHE.set(key8, tinted);
+    }
+    // 群系前景背景层 alpha 乘子（各族 GetColor 覆盖 ×Main.bgAlphaFrontLayer[i]，索引语义
+    //  = Main.cs:58951-59030 的 bgStyle 槽：0/10-12 森林系 1 腐化 2 沙漠 3 丛林 4 海洋
+    //  5/13/14 善恶沙漠 6 神圣 7 雪原 8 猩红 9 蘑菇——与 BiomeBackground.bgStyle 同表）
+    const alpha = Math.min(1, e.opacity * (e.grayDepthFade ? 1 : atmo)
+      * this.familyBiomeAlphaMul(e.kind));
+    if (alpha <= 0.01) return null;
+    // EOCSkyEntity（eyeball/eos/crimera）原版不写 Effects=恒 None——朝向完全由
+    // Rotation=Velocity.ToRotation() 承担（:1296，贴图原生朝右）；曾叠 dir 翻转
+    // =左飞时 rotate π 已转头再镜像回反→虹膜拖在身后（"眼球在屁股后面走",
+    // 2026-08-25 用户实报）。其余族 Effects=风向翻转（:191 等全族同式）≈dir 翻转
+    const flip = e.dir < 0 && e.kind !== 'eyeball' && e.kind !== 'eos' && e.kind !== 'crimera';
+    return { e, tinted, key8, fw, fh, scale, sx, sy, alpha, flip };
+  }
+
+  /** ★C10e 二期:鸟群 GL 发射（'ambgl' FBO,命名空间防撞 clouds/bg/lit/warped/
+   *  light2/sstarn/sstars）。quadSprite(rot+flipX)=2D translate·rotate·[scale(-1,1)]
+   *  ·drawImage(中心锚 −fw·scale/2) 逐式对位（中心锚=quadSprite 绕 dst 中心旋转
+     同构;flipX=UV 反向 ≙ scale(-1,1) 中心镜像,R·F 复合序两路同）;尺寸×k（ctx
+   *  变换均匀标量=zoom×DPR,2D 局部尺寸→设备像素）。★all-or-nothing:全实体
+   *  纹理预解析【先于】begin（B2b 判例——半截 quads 不可回退,任一失败即整体
+   *  走 2D,无半成品泄漏）。染色缓存画布 key 稳定内容不变 → texFromImage 一次
+   *  上传驻留（LRU 压力 KB 级）。返回 false=调用方 2D 兜底。 */
+  private emitAmbienceGl(gl: GLSpriteLayer, ctx: CanvasRenderingContext2D, viewW: number,
+    viewH: number, camX: number, camY: number,
+    atmo: number, sr: number, sg: number, sb: number): boolean {
+    if (gl.unavailable || gl.canvas.width === 0 || gl.canvas.height === 0) return false;
+    const bt = ctx.getTransform();
+    const k = Math.sqrt(Math.abs(bt.a * bt.d - bt.b * bt.c));   // 均匀标量（相机=uniform scale+平移）
+    if (!Number.isFinite(k) || k <= 0) return false;
+    const resolved: Array<{ pl: AmbDrawPlan; entry: TexEntry }> = [];
+    for (const e of this.ambEntities) {
+      const pl = this.ambPlan(e, viewW, viewH, camX, camY, atmo, sr, sg, sb);
+      if (!pl) continue;
+      const entry = gl.texFromImage(`ambt:${pl.key8}`, pl.tinted);
+      if (!entry) return false;   // 预解析失败:未开会话=零半成品,整体 2D
+      resolved.push({ pl, entry });
+    }
+    gl.begin('ambgl');
+    if (gl.unavailable) return false;   // begin 失败:未发射未 present,2D 兜底
+    for (const { pl, entry } of resolved) {
+      const dw = pl.fw * pl.scale * k, dh = pl.fh * pl.scale * k;
+      const cx = bt.a * pl.sx + bt.c * pl.sy + bt.e, cy = bt.b * pl.sx + bt.d * pl.sy + bt.f;
+      gl.quadSprite(entry, 0, 0, pl.fw, pl.fh, cx - dw / 2, cy - dh / 2, dw, dh,
+        { alpha: pl.alpha, rot: pl.e.rotation, flipX: pl.flip, smooth: false });
+    }
+    gl.end(true, true);   // over present → glCanvas 屏栈（bg 之后/世界之前,over=true 入栈）
+    this.glInterlayerEmitted = true;   // ★A3 债收齐:GL 夹层增量合成标记
+    return true;
   }
 
   // ================= 帧数据挂点 + 各子系统共用的小读数 =================
@@ -4164,6 +4413,11 @@ export class SkyRenderer {
   }
 
   draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7, camY = 0) {
+    // ★A3 债收齐（2026-10-01）:灯笼夜推进单源——原版 Update ±0.01/帧（LanternNight
+    //  全局,与相机/带位无关）。旧实现 far（sky.draw）+near（Renderer 群系背景后）
+    //  双调用各推一次=±0.02/帧（2× 原版速率,灯夜起落整体快一倍,登记债本刀兑现）。
+    //  drawLanterns 从此只读（清理门保留）。
+    this.advanceLanternNight(dtMs);
     // ---- 帧数据消化：稀有云世界旗标（Cloud.cs RollRareCloud 门）----
     {
       const wf = this.frameCtx?.world?.flags;

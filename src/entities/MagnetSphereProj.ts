@@ -67,7 +67,8 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { canHitPoint } from '../physics/LineOfSight';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters } from './projTargets';
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
-import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源
+import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源（★BJ424-T3 补 ghostHurt 漏斗面）
+import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { TILE } from '../core/constants';
 
 /** 悬停球 254（ProjectileID.MagnetSphereBall） */
@@ -232,6 +233,30 @@ export class BeamBoltProj extends Entity {
           //  255/260 数据面 magic ⇒ 原版磁球激光/炼狱叉光束本就吸血,本仓漏接）——
           //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
           ghostHealProc(game, this.projId, this.pveNumHits, e);
+          // ★BJ424-T3（2026-10-01 魔法命中漏斗面收编）：原版同一 if 块三引擎同 face——
+          //  ghostHeal :13877-79 → ghostHurt :13881-83 → nebula :13885-91。凡走本受理面
+          //  的命中（255/260 数据面 magic）两引擎都该触发,此前同缺。
+          if (playerHasGhostHurt(game.player)) {
+            const v424 = e as never as { vanillaId?: number | null; lastStrikeDealt?: number;
+              maxHp?: number; def?: { lifeMax?: number } };
+            ghostHurtOnHit(game,
+              { magic: true, projDamage: this.damage,
+                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                ownerCx: game.player.cx, ownerCy: game.player.cy },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v424.vanillaId,
+                lifeMax: v424.maxHp ?? v424.def?.lifeMax,
+                dealt: v424.lastStrikeDealt ?? 0 });
+          }
+          nebulaBoosterOnHit(game,
+            { projId: this.projId, projDirX: this.vx },
+            { x: e.x, y: e.y, w: e.w, h: e.h,
+              cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: (e as never as { vanillaId?: number | null }).vanillaId,
+              lifeMax: (e as never as { maxHp?: number; def?: { lifeMax?: number } }).maxHp
+                ?? (e as never as { def?: { lifeMax?: number } }).def?.lifeMax,
+              dealt: (e as never as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0 });
           this.pveNumHits++;
         }
         this.killBeam(game);

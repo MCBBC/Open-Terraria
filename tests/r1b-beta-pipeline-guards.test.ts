@@ -24,7 +24,7 @@ describe('R1b-2 跨上下文句柄结构性禁止', () => {
   });
   it('ensureWorldCompose 一致性重建（运行时翻旗旗面错位整弃）+两调用点接线', () => {
     expect(RDR).toContain('private ensureWorldCompose(): void');
-    expect(RDR).toContain('this.worldCompose.ownsPipe !== !Renderer.cloudPipe');
+    expect(RDR).toContain('this.worldCompose.ownsPipe !== !(Renderer.cloudPipe || Renderer.c10e)');   // ★C10e:旗面判据加 c10e
     expect(RDR.match(/this\.ensureWorldCompose\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
   it('WorldTexSrc.gl 产生面指纹+两产生面填 gl+compose 入口 xctx 守卫', () => {

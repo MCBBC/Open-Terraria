@@ -139,6 +139,79 @@ void main() {
   outColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);   // 预乘纹理×顶点色×quad α
 }`;
 
+// ---- ★C13c 微光波场 GLSL 程序（2026-10-01 二期刀;docs/c13c-shimmer-wave-glsl-design.md）----
+// 【VS】PRECIP_VS 同构 + 两顶点属性扩展（设计案 §3.1 "VS=PRECIP_VS 复用" 的机械落地:
+//  FS 需要 vTile/vNoise varying ⇒ VS 必须声明 out——pos/uv/col 三属性逐字同 PRECIP_VS,
+//  location 3=aTile(vec2)/4=aNoise(float),stride 44B（11 float,方案 H §3.2）。
+//  aTile = 像素的世界 tile 连续坐标（world px/16,VS 线性插值逐像素精确——world→device
+//  仿射(b=c=0 门)复合线性插值仍精确=场世界锚定）;aNoise = CPU 逐节点 noise-sin
+//  （§2.2 定谳:uint hash→float 高位损失 256 ⇒ sin 相位差 25.6rad 位等不可达 ⇒ hash+sin
+//  留 CPU 经属性上传;FS 侧 glitter(§2.5)消费位=三期 sparkle 段,本刀基体主式(§2.4)不读）。 */
+const LIQSHIM_VS = `#version 300 es
+uniform vec2 uCanvas;
+layout(location=0) in vec2 aPos;   // 设备 px（顶点已含世界变换,VanillaLiquidRenderer 构建）
+layout(location=1) in vec2 aUv;    // 图集 uv
+layout(location=2) in vec4 aCol;   // 预乘恒等（rgb===a;§3.3 预乘锁域）
+layout(location=3) in vec2 aTile;  // 世界 tile 连续坐标（corner=世界px/16）
+layout(location=4) in float aNoise; // CPU 逐节点 noise-sin（方案 H）
+out vec2 vUv;
+out vec4 vCol;
+out vec2 vTile;
+out float vNoise;
+void main() {
+  gl_Position = vec4(aPos.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - aPos.y / uCanvas.y * 2.0, 0.0, 1.0);
+  vUv = aUv; vCol = aCol; vTile = aTile; vNoise = aNoise;
+}`;
+
+// 【FS】逐像素场合成（设计案 §2.1/§2.3/§2.4 逐条翻译;§2.5 glitter 纯函数随附——
+//  三期 sparkle 段消费位,本刀基体主式不调用=编译器消除无害）:
+//   shimmerWave = GetShimmerWave(LiquidRenderer.cs:761-763) 1:1
+//   field       = GetShimmerBaseColor(:803-807) 端点常量预析（SHIM_A/SHIM_DV 与 JS 侧
+//                 SHIM_A_*/SHIM_D_* 同源 f32 编译期常量）
+//   glitter     = GetShimmerGlitterOpacity 体部式(:773-790) remap×remap
+//  out = (tex_p.rgb × field × vCol.a, tex_p.a × vCol.a)——顶点 rgb 不再进乘链（§2.4
+//  "乘 vCol.rgb 退役"）,环数据仍写 rgb===a 保持预乘恒等式（§3.3 测试锁域）。
+//  ★precision highp float 强制（§5 风险2:mediump 漏入=离线场值 readback 闸抓）。 */
+const LIQSHIM_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform float uTVis;   // visEffectFrames()（渲染段内不变;批发射点单点写入）
+in vec2 vUv;
+in vec4 vCol;
+in vec2 vTile;
+in float vNoise;
+out vec4 outColor;
+const float TAU = 6.283185307179586;
+const vec3 SHIM_A = vec3(0.64705884, 0.50980393, 0.93333333);   // (0.64705884, 26/51, 14/15)
+const vec3 SHIM_DV = vec3(0.80392158, 0.80392158, 1.0) - SHIM_A; // lerp 端点差（预析）
+float shimmerWave(vec2 tile) {
+  return sin(((tile.x + tile.y / 6.0) / 10.0 - uTVis / 360.0) * TAU);
+}
+float remap(float v, float a, float b, float c, float d) {
+  return c + (d - c) * clamp((v - a) / (b - a), 0.0, 1.0);
+}
+float glitter(vec2 tile, float noiseSinV) {
+  return remap(remap(shimmerWave(tile), -0.5, 1.0, 0.0, 0.35) * noiseSinV, 0.0, 0.5, 0.0, 1.0);
+}
+void main() {
+  vec4 c = texture(uTex, vUv);
+  float w = shimmerWave(vTile);
+  vec3 field = SHIM_A + SHIM_DV * (0.1 + w * 0.4);
+  outColor = vec4(c.rgb * field * vCol.a, c.a * vCol.a);
+}`;
+
+/** ★C13c 着色器源导出（离线场值 readback 闸 §4.1 直采同源——探针编译本常量,
+ *  禁转录漂移;设计案"实现前可行性闸"判据面） */
+export const LIQSHIM_VS_SRC = LIQSHIM_VS;
+export const LIQSHIM_FS_SRC = LIQSHIM_FS;
+
+/** ★C13c uTVis 帧界单点（模块态; VanillaLiquidRenderer 批发射点写入——渲染段内
+ *  visEffectFrames 不变判例（§5 风险6:帧界错拍=跨相位时钟管线判例同族,发射点=
+ *  flushShimRun/gate 重发射/fg 复用重发射,三处同段同值） */
+let _liqShimTVis = 0;
+export function setLiqShimmerTVis(v: number): void { _liqShimTVis = v; }
+
 const VERT_SRC = `#version 300 es
 uniform vec2 uCanvas;
 uniform vec4 uSrc;    // uv 基 + uv 跨度
@@ -296,6 +369,13 @@ export class GLSpriteLayer {
   private precipVao: WebGLVertexArrayObject | null = null;
   private precipVbo: WebGLBuffer | null = null;
   private precipFail = false;
+  /** ★C13c 微光波场批程序（LIQSHIM_*——stride 11 带 aTile/aNoise;同款惰性/失败面） */
+  private shimProg: WebGLProgram | null = null;
+  private shimProgHandle: PipelineProgram | null = null;
+  private shimUni: Record<string, WebGLUniformLocation | null> = {};
+  private shimVao: WebGLVertexArrayObject | null = null;
+  private shimVbo: WebGLBuffer | null = null;
+  private shimFail = false;
   private vao: WebGLVertexArrayObject | null = null;
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
     { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
@@ -624,9 +704,10 @@ export class GLSpriteLayer {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
     if (this.pipe) {
-      // ★C10e:帧首屏面清透明+屏栈清零（本帧首个会话代理——render 头 pipe 可能
-      //  尚未建立;screenCleared 由 Renderer.render 帧头复位）
-      if (this.pipe.screenStackMode && !this.pipe.screenCleared) this.pipe.clearScreenForStack();
+      // ★C10e:帧首清屏已改 Renderer.render 头【显式】执行（2026-10-01 实机拖影
+      //  补充定谳——隐式「首会话 begin 代理」在帧类变化/管线帧中 revive 时失效或
+      //  清错时机,且代理清屏对「帧内首个 pipe 操作非 begin」的帧（compose 直入）
+      //  无覆盖;显式=确定性一次,删代理）
       const w = this.canvas.width, h = this.canvas.height;
       if (w === 0 || h === 0) { this.pipeFbo = null; return; }   // 防上一会话残留 FBO 被 end 误 present
       const f = this.pipe.fbo(fboName, w, h);
@@ -1332,6 +1413,11 @@ export class GLSpriteLayer {
    *  方法设（SO 基态由 begin 约定）;离场还原程序态/VAO（quadBatch 判例同款）。 */
   quadBatchRgba(e: TexEntry, data: Float32Array, quads: number, smooth = false): boolean {
     if (this.unavailable || !this.gl || quads <= 0) return false;
+    // ★C13c 数据形状分派（加法支;既有调用零变化判据=既有面 stride 恒 48 float/quad,
+    //  66 float/quad 仅 VanillaLiquidRenderer._shimRing 微光段产出——C13 星场批 smooth
+    //  缺省参判例同构「缺省=既有调用零变化」）。分派点=本发射口的理由:stride-11 数据
+    //  经 shim rec（Renderer 中介/GLShimExecutor 队列）到此是唯一既见数据又见 GL 的位。
+    if (data.length === quads * 66) return this.quadBatchLiqShimmer(e, data, quads);
     if (!this.ensurePrecip()) return false;
     const gl = this.gl;
     gl.useProgram(this.precipProg);
@@ -1347,6 +1433,88 @@ export class GLSpriteLayer {
     gl.bindSampler(0, smooth
       ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
       : this.samp.nearest!);
+    gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
+    glStatDraw(this.statName, quads * 6);
+    gl.bindSampler(0, null);
+    gl.bindVertexArray(this.vao);
+    gl.useProgram(this.prog);
+    return true;
+  }
+
+  /** ★C13c 微光波场批程序惰性装配（ensurePrecip 同款失败面:shimFail=true 恒走 2D 兜底）。
+   *  管线模式走 pipe.program('sprite:liqshimmer') 按名登记（禁单删判例）;独立上下文
+   *  模式走 rain 同款本地编译。VAO:location0=aPos(vec2)/1=aUv(vec2)/2=aCol(vec4)/
+   *  3=aTile(vec2)/4=aNoise(float),stride 44B（11 float）,顶点数据调用方每帧
+   *  STREAM_DRAW 重传（复用本层单 VBO判例）。 */
+  private ensureLiqShim(): boolean {
+    if (this.shimFail) return false;
+    if (this.shimProg) return true;
+    const gl = this.gl;
+    if (!gl) return false;
+    if (this.pipe) {
+      const p = this.pipe.program('sprite:liqshimmer', LIQSHIM_VS, LIQSHIM_FS);
+      if (!p.prog) { this.shimFail = true; return false; }
+      this.shimProgHandle = p;
+      this.shimProg = p.prog;
+      for (const n of ['uCanvas', 'uTex', 'uTVis']) this.shimUni[n] = this.pipe.uni(p, n);
+    } else {
+      const mk = (type: number, src: string): WebGLShader | null => {
+        const sh = gl.createShader(type)!;
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+          console.warn('[GLSpriteLayer] liqshimmer shader 编译失败:', gl.getShaderInfoLog(sh));
+          gl.deleteShader(sh);
+          return null;
+        }
+        return sh;
+      };
+      const vs = mk(gl.VERTEX_SHADER, LIQSHIM_VS);
+      const fs = mk(gl.FRAGMENT_SHADER, LIQSHIM_FS);
+      if (!vs || !fs) { this.shimFail = true; return false; }
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[GLSpriteLayer] liqshimmer 程序链接失败:', gl.getProgramInfoLog(prog));
+        this.shimFail = true;
+        return false;
+      }
+      this.shimProg = prog;
+      for (const n of ['uCanvas', 'uTex', 'uTVis']) this.shimUni[n] = gl.getUniformLocation(prog, n);
+    }
+    this.shimVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.shimVao);
+    this.shimVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.shimVbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 44, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 44, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 44, 16);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 44, 32);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, 44, 40);
+    gl.bindVertexArray(null);
+    return true;
+  }
+
+  /** ★C13c 微光波场批发射口（quadBatchRgba 同族;stride 11=x,y,u,v,r,g,b,a,tileX,tileY,
+   *  noise——方案 H:波场 FS 逐像素解析,aNoise=CPU 逐节点 noise-sin 顶点属性）。
+   *  NEAREST 采样;blend/纹理参数不在本方法设（SO 基态由 begin 约定）;uTVis 读模块态
+   *  （setLiqShimmerTVis——批发射点单点写入,帧界错拍风险 §5-6 处置）;离场还原程序态/
+   *  VAO（quadBatch 判例同款）。 */
+  quadBatchLiqShimmer(e: TexEntry, data: Float32Array, quads: number): boolean {
+    if (this.unavailable || !this.gl || quads <= 0) return false;
+    if (!this.ensureLiqShim()) return false;
+    const gl = this.gl;
+    gl.useProgram(this.shimProg);
+    gl.uniform2f(this.shimUni.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this.shimUni.uTVis, _liqShimTVis);
+    gl.uniform1i(this.shimUni.uTex, 0);
+    gl.bindVertexArray(this.shimVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.shimVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, this.samp.nearest!);
     gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
     glStatDraw(this.statName, quads * 6);
     gl.bindSampler(0, null);
@@ -1493,8 +1661,12 @@ void main(){
   //   ~86/剑，多剑叠加 150-220 ✓）只吻合 (One,One)/(One,1−a)；(SrcAlpha,One) 会被
   //   out.a(~0.1-0.2) 压到 ~8/剑 = 可见部分塌成细丝（本仓"细螺旋"亮度病根，与
   //   贴图裁剪病叠加）。取 (One,One)：直加 oc.rgb、零压暗（GIF 实测零暗带）；
-  //   alpha 恒写 1——预乘画布读出有 rgb≤a 隐式钳制，恒 1 杜绝 rgb>a 被钳暗。
-  oC = vec4(oc.rgb, 1.0);
+  //   alpha 写 max(oc.rgb)（2026-10-01 C10e 透明 HUD 拖影黑块定谳改）：预乘画布
+  //   读出有 rgb≤a 隐式钳制，a=max(rgb) ≥ 每通道=零钳制零色移（与恒 1 同字节）;
+  //   旧不透明主画布 'lighter' 只加 rgb 不读源 alpha=逐位不变;透明 HUD（C10e）
+  //   'lighter' 连 alpha 一起加——恒 1 的暗 texel(rgb≈0,a=1)=不透明黑块叠过场景
+  //   （天顶剑/彩虹魔杖黑带实报），a=max(rgb) 暗处 a≈0 保留 dst=黑块根除。
+  oC = vec4(oc.rgb, max(oc.r, max(oc.g, oc.b)));
 }`;
 
   /** 惰性编译拖尾程序（失败→trailOK=false 永久走 2D 兜底）。
@@ -1648,7 +1820,9 @@ void main(){
   vec4 blade = texture(uS0, vec2(p, across));
   float edge = clamp(2.0 * (gate - wEnv), 0.0, 1.0);
   vec4 oc = blade * (mult * edge) * vColor * uMM.x;
-  oC = vec4(oc.rgb, 1.0);
+  // ★alpha=max(rgb)（2026-10-01 C10e 透明 HUD 拖影黑块定谳,同 obj58 注——
+  //  零钳制零色移;旧不透明画布 'lighter' 逐位不变;透明 HUD 暗处 a≈0 保留 dst）
+  oC = vec4(oc.rgb, max(oc.r, max(oc.g, oc.b)));
 }`;
 
   /** 惰性编译 obj55 程序（失败→null 永久走 CPU 兜底;管线后端同 ensureTrail 不承载） */
@@ -1788,6 +1962,10 @@ void main(){
       if (this.precipProg) this.gl.deleteProgram(this.precipProg);
       if (this.precipVao) this.gl.deleteVertexArray(this.precipVao);
       if (this.precipVbo) this.gl.deleteBuffer(this.precipVbo);
+      // ★C13c:liqshimmer 程序/VAO/VBO（standalone 自编译=可单删;R1b-5 判例同表）
+      if (this.shimProg) this.gl.deleteProgram(this.shimProg);
+      if (this.shimVao) this.gl.deleteVertexArray(this.shimVao);
+      if (this.shimVbo) this.gl.deleteBuffer(this.shimVbo);
       if (this.vao) this.gl.deleteVertexArray(this.vao);
       for (const s of Object.values(this.samp)) if (s) this.gl.deleteSampler(s);
     }
@@ -1801,6 +1979,9 @@ void main(){
     this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
     this.precipProg = null; this.precipProgHandle = null; this.precipVao = null;
     this.precipVbo = null; this.precipFail = false; this.precipUni = {};
+    // ★C13c:liqshimmer 引用清面（同 R1b-5 重建期早退失效判据）
+    this.shimProg = null; this.shimProgHandle = null; this.shimVao = null;
+    this.shimVbo = null; this.shimFail = false; this.shimUni = {};
     this.vao = null;
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.uni = {}; this.uniCloud = {}; this.uniTile = {}; this.rainUni = {};
@@ -1832,6 +2013,9 @@ void main(){
       if (this.rainVbo) gl.deleteBuffer(this.rainVbo);
       if (this.precipVao) gl.deleteVertexArray(this.precipVao);
       if (this.precipVbo) gl.deleteBuffer(this.precipVbo);
+      // ★C13c:liqshimmer VAO/VBO（层自建对象可单删;程序句柄归 pipe.dispose 整表）
+      if (this.shimVao) gl.deleteVertexArray(this.shimVao);
+      if (this.shimVbo) gl.deleteBuffer(this.shimVbo);
     }
     this.progHandle = null; this.progCloudHandle = null;
     this.progTileHandle = null;
@@ -1839,6 +2023,10 @@ void main(){
     // ★R1b-5:precip 句柄此前漏置——残留句柄让重建期 ensurePrecip 的
     //  `if (this.precipProg) return true` 早退命中死上下文对象
     this.precipProgHandle = null;
+    // ★C13c:liqshimmer 句柄/引用清面（同上重建期早退失效判据）
+    this.shimProgHandle = null;
+    this.shimProg = null; this.shimVao = null; this.shimVbo = null;
+    this.shimFail = false; this.shimUni = {};
     this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
     this.uniTile = {};
     this.rainProg = null; this.rainVao = null; this.rainVbo = null; this.rainFail = false;

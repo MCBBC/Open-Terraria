@@ -15,14 +15,19 @@ const PIPE = readFileSync(resolve(__dirname, '../src/render/GLPipeline.ts'), 'ut
 const COMP = readFileSync(resolve(__dirname, '../src/render/GLWorldCompose.ts'), 'utf8');
 
 describe('C10e 旗面与三画布脚手架', () => {
-  it('?c10e=1 显式开启（缺省关=单画布零变化）;构造期旗（HUD alpha 属性定死约束）', () => {
-    expect(RDR).toContain("get('c10e') === '1'");
+  it('?c10e 缺省开（★2026-10-01 转正:灰度期 =1 显式开→Mac+Windows 实机三轮定谳通过;?c10e=0=二级逃生门,逐帧回退语义不动）;构造期旗（HUD alpha 属性定死约束）', () => {
+    expect(RDR).toContain("get('c10e') !== '0'");
+    expect(RDR).not.toContain("get('c10e') === '1'");   // 灰度面已翻（防回改）
+    expect(RDR).toContain('★转正（2026-10-01');          // 旗面史在旗内（防无证据动旗面）
     expect(RDR).toContain('static get c10e()');
     expect(RDR).toContain('static c10eSetForTest(v: boolean): void');
   });
 
   it('三画布创建:sky2D(2D)+glCanvas(元素工厂)+主画布=HUD;旗关=零创建', () => {
-    expect(RDR).toMatch(/if \(Renderer\.c10e\) \{\s*\n\s*this\.skyCanvas = document\.createElement\('canvas'\);\s*\n\s*this\.skyCtx = this\.skyCanvas\.getContext\('2d'\)!;\s*\n\s*this\.glCanvasEl = this\.mkGlCanvasEl\(\);\s*\n\s*\}/);
+    // ★实机断裂修复锁（2026-10-01 补充定谳）:三画布必须全部出流 absolute——
+    //  sky2D 留在正常文档流会占布局高把流内 HUD 顶出视口=「世界层消失」实报
+    //  （HUD 背板回读有世界/DOM 不可见=布局与背板劈叉,冻结态对拍盲区）
+    expect(RDR).toMatch(/if \(Renderer\.c10e\) \{\s*\n\s*this\.skyCanvas = document\.createElement\('canvas'\);\s*\n\s*this\.skyCanvas\.style\.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;';\s*\n\s*this\.skyCtx = this\.skyCanvas\.getContext\('2d'\)!;\s*\n\s*this\.glCanvasEl = this\.mkGlCanvasEl\(\);\s*\n\s*this\.canvas\.style\.position = 'absolute';\s*\n\s*this\.canvas\.style\.inset = '0';\s*\n\s*\}/);
     expect(RDR).toMatch(/mainCtxAttrs\(\): CanvasRenderingContext2DSettings \{[\s\S]{0,200}if \(Renderer\.c10e\) a\.alpha = true;\s*\n\s*else if \(Renderer\.opaqueMain\) a\.alpha = false;/);
   });
 
@@ -53,8 +58,34 @@ describe('C10e 帧分类与路由（帧头定谳——状态全 settle）', () =
     expect(RDR).toMatch(/this\._c10eFrame = c10eBase && wKc === 1 && !this\.sky\.farInterlayerActive\(cam\.y\);/);
   });
 
-  it('夹层路由（世界→HUD blit）=interlayer 谓词∨shimmer;读 sky.draw 后状态与 opresent 门同相', () => {
-    expect(RDR).toMatch(/this\._c10eWorldToHud = this\._c10eFrame\s*\n\s*&& \(this\.sky\.opresentInterlayerPending\(\) \|\| this\.monoFilters\.shimmerAlpha > 0\);/);
+  it('夹层路由（世界→HUD blit）=worldRoute 谓词（去鸟群项——GL 桥化）∨shimmer;读 sky.draw 后状态与 opresent 门同相', () => {
+    // ★C10e 二期（2026-10-01 F-inter 收刀,普查 scripts/_c10e-inter-census.mjs:
+    //   常态 F-inter 100%=鸟群驻留触发,空转帧 0）:鸟群 'ambgl' quads 落屏栈 bg 侧槽,
+    //   鸟帧路由回 F-pure（世界 over-present 叠其上）
+    expect(RDR).toMatch(/this\._c10eWorldToHud = this\._c10eFrame\s*\n\s*&& \(this\.sky\.worldRouteInterlayerPending\(\) \|\| this\.monoFilters\.shimmerAlpha > 0\);/);
+  });
+
+  it('★谓词分工锁:worldRoute=opresentInterlayerPending 去鸟群三项+lantern 项（★A3 灯笼夜帧回收——far/near 灯带已全 GL 桥化,灯夜帧世界回归 over present）;旧谓词原样保留（opresent 延迟门+合并门继续用——鸟帧/灯帧禁 pass3 合并/云并会,合并 present=天空+世界单 quad,鸟/灯 quads 无法插入其间会被云盖住;分回合 bg present→夹层 quads→世界 present 才是正确层序）', () => {
+    // 新谓词:未桥化内容全保留（party/slime/martin/drama）,鸟群三项+lantern 摘除
+    expect(SKY).toMatch(/worldRouteInterlayerPending\(\): boolean \{\s*\n\s*if \(this\.fx\.party && this\.fx\.surfaceY > 0\) return true;\s*\n\s*if \(this\.slimeSky\.isActive \|\| this\.martianSky\.isActive\) return true;\s*\n\s*if \(this\.dramaCore !== null \|\| this\.dramaPieces\.length > 0 \|\| this\.dramaExplosions\.length > 0\) return true;\s*\n\s*return false;/);
+    // 旧谓词原样（含鸟群三项+lantern 项——opresent-single-present.test.ts 的 opresentWanted 锚依赖）
+    expect(SKY).toMatch(/opresentInterlayerPending\(\): boolean \{\s*\n\s*if \(this\.lanternOpacity > 0\.001\) return true;[\s\S]{0,340}this\.ambEntities\.length > 0 \|\| this\.pendingAmbientSpawns\.length > 0[\s\S]{0,120}ambNextAttempt <= 2[\s\S]{0,40}return false;/);
+  });
+
+  it('★鸟群 GL 桥锁（ambPlan 单源/emitAmbienceGl all-or-nothing/ambgl 会话/over present）', () => {
+    // 单源:2D 循环与 GL 发射共用 ambPlan（防计算双份漂移;星批 starCompute 同范式）
+    expect(SKY).toContain('const p = this.ambPlan(e, viewW, viewH, camX, camY, atmo, sr, sg, sb);');
+    expect(SKY).toContain('private ambPlan(e: AmbientEnt');
+    // GL 分支:gl 在场才 emit,失败整支回 2D（宁回退不丢内容）
+    expect(SKY).toMatch(/if \(gl && this\.emitAmbienceGl\(gl, ctx, viewW, viewH, camX, camY, atmo, sr, sg, sb\)\) return;/);
+    // all-or-nothing:纹理预解析先于 begin（B2b 判例——半截 quads 不可回退）
+    expect(SKY).toMatch(/const entry = gl\.texFromImage\(`ambt:\$\{pl\.key8\}`, pl\.tinted\);\s*\n\s*if \(!entry\) return false;/);
+    expect(SKY).toMatch(/gl\.begin\('ambgl'\);\s*\n\s*if \(gl\.unavailable\) return false;/);
+    // over present=入屏栈（bg 之后/世界之前）;quadSprite 中心锚+rot+flipX 对位 2D
+    expect(SKY).toMatch(/gl\.end\(true, true\);/);
+    expect(SKY).toMatch(/gl\.quadSprite\(entry, 0, 0, pl\.fw, pl\.fh, cx - dw \/ 2, cy - dh \/ 2, dw, dh,\s*\n\s*\{ alpha: pl\.alpha, rot: pl\.e\.rotation, flipX: pl\.flip, smooth: false \}\);/);
+    // Renderer 调用点:纯帧+屏栈开才传层（夹层帧/退避窗=2D 原路径）
+    expect(RDR).toMatch(/const ambGl = this\._c10eFrame && this\.swPipe\?\.screenStackMode\s*\n\s*\? this\.acquireCloudPipe\(\) : null;\s*\n\s*this\.sky\.drawAmbience\(ctx, viewW, viewH, cam\.x, cam\.y, 16\.7, ambGl\);/);
   });
 
   it('sky.draw 目标画布分支:c10e 帧=sky2D;旗关/回退=原主 ctx;星直出同门 farDeferGate', () => {
@@ -63,14 +94,31 @@ describe('C10e 帧分类与路由（帧头定谳——状态全 settle）', () =
   });
 
   it('pipe 屏栈机制随帧分类启停（回退帧 present 全走原路径）;帧首清屏闩复位', () => {
-    expect(RDR).toMatch(/if \(this\.swPipe\) \{\s*\n\s*this\.swPipe\.screenStackMode = this\._c10eFrame;\s*\n\s*this\.swPipe\.screenCleared = !this\._c10eFrame;\s*\n\s*\}/);
+    expect(RDR).toMatch(/if \(this\.swPipe\) \{\s*\n\s*this\.swPipe\.screenStackMode = this\._c10eFrame;\s*\n\s*if \(this\._c10eFrame\) this\.swPipe\.clearScreenForStack\(\);\s*\n\s*\}/);
+  });
+
+  it('★帧首 HUD 清屏锁（2026-10-01 前景拖影定谳）:c10e 帧 clearRect 主画布——分体后天空落 sky2D,HUD 无全幅不透明垫底,世界 blit source-over 会逐帧叠陈旧残留（活机实锤 hudRed=125 vs glRed=0/skyRed=0;探针 scripts/_c10e-trail-locate.mjs）。回退帧仍靠天空渐变自净,不在此清', () => {
+    expect(RDR).toMatch(/if \(this\._c10eFrame\) \{\s*\n\s*ctx\.save\(\);\s*\n\s*ctx\.setTransform\(1, 0, 0, 1, 0, 0\);\s*\n\s*ctx\.clearRect\(0, 0, this\.canvas\.width, this\.canvas\.height\);\s*\n\s*ctx\.restore\(\);\s*\n\s*\}/);
+    // 清屏位必须在 glCanvas 帧头清屏同区（帧头=任何 HUD 落笔前）
+    const iHud = RDR.indexOf('ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)');
+    const iStack = RDR.indexOf('this.swPipe.clearScreenForStack();');
+    expect(iHud).toBeGreaterThan(-1);
+    expect(iStack).toBeGreaterThan(-1);
+    expect(Math.abs(iHud - iStack)).toBeLessThan(600);
+  });
+
+  it('★条带 shader alpha=max(rgb) 锁（2026-10-01 透明 HUD 黑块定谳）:obj58/obj55 条带几何全域写 a=1 时,glfx 画布 lighter 叠透明 HUD 连 alpha 一起加=暗 texel(rgb≈0,a=1)变不透明黑块（天顶剑/彩虹魔杖黑带实报）。a=max(rgb)=预乘读出零钳制（rgb≤a 恒成立）+旧不透明画布 lighter 只加 rgb 不读源 alpha=逐位不变+透明 HUD 暗处 a≈0 保留 dst', () => {
+    expect((SRC.match(/oC = vec4\(oc\.rgb, max\(oc\.r, max\(oc\.g, oc\.b\)\)\);/g) ?? []).length).toBe(2);
+    expect(SRC).not.toContain('oC = vec4(oc.rgb, 1.0);');   // a=1 恒写禁回归
+    // 上屏链保持 'lighter' 加算（flushTrailShade）——改混合式会丢加算语义
+    expect(RDR).toMatch(/globalCompositeOperation = 'lighter';\s*\n\s*ctx\.drawImage\(gx\.canvas, 0, 0\);/);
   });
 });
 
 describe('C10e GLPipeline 屏直出栈', () => {
   it('screenStackMode/screenCleared/屏栈 API 齐备;over=premul 叠合入栈,off=直写不入栈', () => {
     expect(PIPE).toContain('screenStackMode = false;');
-    expect(PIPE).toContain('screenCleared = false;');
+    expect(PIPE).not.toContain('screenCleared');   // ★实机拖影定谳:帧首清屏闩废除（显式帧头清屏替代）
     expect(PIPE).toContain('clearScreenForStack(): void');
     expect(PIPE).toContain('restackScreen(): void');
     expect(PIPE).toMatch(/present\(src: PipelineFbo, over = false\): void \{[\s\S]{0,400}if \(over && this\.screenStackMode\) \{\s*\n\s*this\.setBlend\('premul'\);\s*\n\s*this\.screenStack\.push\(src\);\s*\n\s*\} else \{\s*\n\s*this\.setBlend\('off'\);\s*\n\s*\}/);
@@ -78,8 +126,10 @@ describe('C10e GLPipeline 屏直出栈', () => {
     expect(PIPE).toMatch(/restackScreen\(\): void \{[\s\S]{0,200}const stack = this\.screenStack\.slice\(\);[\s\S]{0,200}for \(const f of stack\) this\.present\(f, true\);/);
   });
 
-  it('GLSpriteLayer.begin 帧首清屏代理（pipe 帧头可能未建——首会话闯入）;end over 缺省参', () => {
-    expect(SRC).toMatch(/if \(this\.pipe\.screenStackMode && !this\.pipe\.screenCleared\) this\.pipe\.clearScreenForStack\(\);/);
+  it('帧首清屏=Renderer 显式（2026-10-01 实机拖影定谳:代理清屏废除——revive 帧清错目标/帧类切换失效）;end over 缺省参', () => {
+    expect(SRC).not.toContain('clearScreenForStack');   // 代理清屏已删（begin 内零触碰）
+    expect(PIPE).toMatch(/clearScreenForStack\(\): void \{[\s\S]{0,300}this\.bindTarget\(null\);/);   // 清屏目标=默认帧缓冲
+    expect(RDR).toMatch(/if \(this\.swPipe\) \{\s*\n\s*this\.swPipe\.screenStackMode = this\._c10eFrame;\s*\n\s*if \(this\._c10eFrame\) this\.swPipe\.clearScreenForStack\(\);\s*\n\s*\}/);
     expect(SRC).toContain('end(present = true, over = false): void');
     expect(SRC).toContain('get pipeBackend(): GLPipeline | null');
   });
@@ -141,13 +191,67 @@ describe('C10e 逃生门与登记边界', () => {
     expect(RDR).toMatch(/if \(this\.worldCompose && this\.worldCompose\.ownsPipe !== !\(Renderer\.cloudPipe \|\| Renderer\.c10e\)\) \{/);
   });
 
-  it('SkyRenderer 旗逐帧重置（菜单/非世界帧恒 false=零行为变化）', () => {
+  it('SkyRenderer 旗逐帧重置（菜单/非世界帧恒 false=零行为变化）;★A3 farInterlayerActive 摘 lantern 项（灯带全桥化,灯夜帧回归 F-pure;aurora 项保留=唯一未桥化 far 夹层）', () => {
     expect(SKY).toContain('c10eOver = false;');
     expect(SKY).toContain('c10eStarDirect = false;');
-    expect(SKY).toMatch(/farInterlayerActive\(camY: number\): boolean \{\s*\n\s*return this\.aurora\.tileColorState\(\) !== null\s*\n\s*\|\| \(this\.lanternOpacity > 0\.001 && camY <= this\.fx\.surfaceY\);\s*\n\s*\}/);
+    expect(SKY).toMatch(/farInterlayerActive\(camY: number\): boolean \{\s*\n\s*void camY;\s*\n\s*return this\.aurora\.tileColorState\(\) !== null;\s*\n\s*\}/);
+  });
+
+  it('★A3 灯笼夜帧回收·far 带 stash 桥（C10d flushFarDeferredGL 同款）:far 带入口清残留→farDeferGate 选集 stash→bg 会话首段发射（远云后/biomeBg 前）→回退 2D 重放', () => {
+    // far 带每帧入口清（未消费帧=本帧重产,同 farDeferred 入口清语义）
+    expect(SKY).toMatch(/if \(band === 'far'\) this\.farLanternDeferred = null;/);
+    // 选集门=far 带×farDeferGate（色罩/黑闪/remix/云 GL 门同源;命中=2D 循环改 stash）
+    expect(SKY).toMatch(/const stash: Array<LanternPlan> \| null = band === 'far' && this\.farDeferGate \? \[\] : null;/);
+    // stash 写入（plans 空=零 stash——全剔除帧零提交）
+    expect(SKY).toMatch(/if \(stash\.length\) this\.farLanternDeferred = \{ plans: stash, tex, fw, fh, hourY, m: stashM, k: stashK \};/);
+    // 发射:C10d 批令牌形态（不 begin 不 end,quads 落 FBO('bg') 段）;纹理解析失败=本帧弃（far 云同款）
+    expect(SKY).toMatch(/flushFarLanternGL\(layer: GLSpriteLayer\): void \{\s*\n\s*const d = this\.farLanternDeferred;\s*\n\s*this\.farLanternDeferred = null;\s*\n\s*if \(!d \|\| !d\.plans\.length \|\| layer\.unavailable\) return;\s*\n\s*const entry = layer\.texFromImage\('lantern:Extra_134', d\.tex\);\s*\n\s*if \(!entry\) return;/);
+    // Renderer 双支发射位=flushFarDeferredGL 之后（远云后/biomeBg 前=原 2D 位 4741）
+    expect(RDR.match(/this\.sky\.flushFarDeferredGL\(glbg, ctx\);\s*\n\s*(\/\/[^\n]*\n\s*)*this\.sky\.flushFarLanternGL\(glbg\);/g)?.length).toBe(2);
+    // 2D 回退:replayFarDeferred2D 之后、biomeBg 2D 之前（灯在云上/山层下=原层序）
+    expect(RDR).toMatch(/this\.sky\.replayFarDeferred2D\(bg2dCtx\);\s*\n\s*(\/\/[^\n]*\n\s*)*this\.sky\.replayFarLantern2D\(bg2dCtx\);\s*\n\s*this\.biomeBg\.draw\(bg2dCtx/);
+  });
+
+  it('★A3 灯笼夜帧回收·near 带 lantern mini-session 桥（bird ambgl 同族）:纹理预解析先于 begin/all-or-nothing 回退/over present 入屏栈', () => {
+    // gl 线程:drawLanternsNear 第 7 参 → drawLanterns('near', gl)
+    expect(SKY).toMatch(/drawLanternsNear\(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number, gl\?: GLSpriteLayer \| null\): void \{\s*\n\s*this\.drawLanterns\(ctx, viewW, viewH, camX, camY, dtMs, 'near', gl\);\s*\n\s*\}/);
+    // 纹理预解析【先于】begin（B2b 判例）;begin 失败=零半成品整支回 2D
+    expect(SKY).toMatch(/glEntry = gl\.texFromImage\('lantern:Extra_134', tex\);\s*\n\s*if \(glEntry\) \{\s*\n\s*gl\.begin\('lantern'\);\s*\n\s*if \(gl\.unavailable\) glEntry = null;/);
+    // over present=入屏栈（bg 之后/世界之前,原 2D 位）
+    expect(SKY).toMatch(/if \(glEntry\) \{ gl!\.end\(true, true\); this\.glInterlayerEmitted = true; return; \}/);   // ★A3 债收齐:发射标记行随盘刷新
+    // Renderer 调用点:纯帧+屏栈开才传层（夹层帧/退避窗=2D 原路径;bird ambGl 同门）
+    expect(RDR).toMatch(/const lantGl = this\._c10eFrame && this\.swPipe\?\.screenStackMode\s*\n\s*\? this\.acquireCloudPipe\(\) : null;\s*\n\s*this\.sky\.drawLanternsNear\(ctx, viewW, viewH, cam\.x, cam\.y, 16\.7, lantGl\);/);
+  });
+
+  it('★A3 单灯计划单源（2D 兜底/GL 发射/far stash 三路共用;光晕三副本在前主贴图在后=2D 叠序保序;quadSprite rot 中心锚 ≙ 2D translate·rotate）', () => {
+    // 计划结构（alpha 表达式逐字同旧 2D 内联式）
+    expect(SKY).toMatch(/alphaGlow: 0\.4 \* mul \* this\.lanternOpacity \* flicker,\s*\n\s*alphaMain: 0\.47 \* mul \* this\.lanternOpacity,/);
+    // 2D 兜底与 replay 共用单实现（防双路漂移）
+    expect(SKY.match(/this\.drawLanternPlan2D\(ctx, tex, fw, fh, hourY, plan\);/g)?.length).toBe(1);
+    expect(SKY).toMatch(/for \(const p of d\.plans\) this\.drawLanternPlan2D\(ctx, d\.tex, d\.fw, d\.fh, d\.hourY, p\);/);
+    // GL 发射:光晕×3+主贴图=4 quads,smooth:false（2D imageSmoothingEnabled=false 同档）
+    expect(SKY).toMatch(/\{ alpha: p\.alphaGlow, rot: p\.rot, smooth: false \}/);
+    expect(SKY).toMatch(/\{ alpha: p\.alphaMain, rot: p\.rot, smooth: false \}/);
+    expect(SKY).toContain("layer.texFromImage('lantern:Extra_134', d.tex)");
   });
 
   it('sky2D 上下文死亡重建（recreateAuxCanvases——replaceWith 保 DOM 位次）', () => {
     expect(RDR).toMatch(/if \(this\.skyCtx && \(this\.skyCtx as CanvasRenderingContext2D & \{ isContextLost\?: \(\) => boolean \}\)\.isContextLost\?\.\(\)\) \{\s*\n\s*const nu = document\.createElement\('canvas'\);\s*\n\s*this\.skyCanvas!\.replaceWith\(nu\);\s*\n\s*this\.skyCanvas = nu;\s*\n\s*this\.skyCtx = nu\.getContext\('2d'\)!;/);
+  });
+
+  it('★A3 债收齐锁（2026-10-01）:灯笼夜推进单源（±0.01/帧=原版速率;far+near 双推进 ±0.02 退役）+GL 夹层增量合成+farDeferred 深度门早退清', () => {
+    // 债②:推进唯一写点=advanceLanternNight（sky.draw 头调用）;drawLanterns 只读
+    expect(SKY).toContain('private advanceLanternNight(dtMs: number): void {');
+    expect(SKY).toContain('this.advanceLanternNight(dtMs);');
+    expect(SKY.match(/this\.lanternOpacity = Math\.max\(0, Math\.min\(1, this\.lanternOpacity \+ \(up \? 0\.01 : -0\.01\)/g)?.length).toBe(1);   // 写点唯一
+    expect(SKY).not.toContain('+ (up ? 0.01 : -0.01) * (dtMs / (1000 / 60))));\n    if (this.lanternOpacity');   // 旧双推进位（drawLanterns 内）已删
+    // 债①:GL 夹层发射标记+增量合成（xform∩inter 稀有窗自拷源补全）
+    expect(SKY).toContain('glInterlayerEmitted = false;');
+    expect(SKY.match(/this\.glInterlayerEmitted = true;/g)?.length).toBe(2);   // lantern 会话+ambgl 会话两发射位
+    expect(RDR).toMatch(/this\.sky\.glInterlayerEmitted = false;/);   // 帧头清
+    expect(RDR).toMatch(/if \(this\._c10eFrame && this\._c10eWorldToHud && this\._c10eComposited\s*\n\s*&& this\.sky\.glInterlayerEmitted\) \{\s*\n\s*this\.c10eCompositeGlDelta\(\);/);
+    expect(RDR).toMatch(/private c10eCompositeGlDelta\(\): void \{[\s\S]{0,300}ctx\.drawImage\(this\.glCanvasEl, 0, 0\);/);
+    // 债③:farDeferred 深度门早退帧也清（单帧陈旧 flush 根除;farLanternDeferred 入口清已在）
+    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{ this\.farDeferred = null; return; \}/);
   });
 });

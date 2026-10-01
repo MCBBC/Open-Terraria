@@ -1,18 +1,22 @@
-// BJ426 验收探针（修复后）：四连逐发实机验证。
-//   A 位置门：空中无支撑拒置 / 墙档放置允许（帧档=4）
-//   B 消耗面：地面放置成功 → stack-1（消耗 1）
-//   C 边沿门：按住右键拖过 4 个有效点位 → 只放 1 桩（按压沿触发一次）
+// BJ426 验收探针（修复后）：四连逐发实机验证——真实 DOM 鼠标事件驱动
+//   （真实输入管线 = 原版玩家等价;页内 pin 循环钉位,真实循环消费边沿/冷却）。
+//   A 位置门：空中无支撑拒置 / 墙档允许且帧档=4×18
+//   B 消耗面：地面放置成功 → stack-1
+//   C 边沿门：按住右键拖过 3 个有效点位 → 只放 1 桩
 //   D 飞行态门：风筝弹在飞 → 右键不放置（收线仍工作）
 //   E 回收面：右键取回 → 线圈 tile 消失 + 恰返 1 + 实体消散
-//   F 守恒面：放 1 收 1 全程物品总数不变（复制链关闭）
+//   F 守恒面：全程物品总数账本对拍（复制链关闭）
 // 用法: SW_ORIGIN=http://localhost:5650 node tools/run-diag.mjs scripts/_bj426-kite-anchor-probe.mjs
 import puppeteer from 'puppeteer-core';
+import { mkdirSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new', args: ['--no-sandbox'],
   defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
+const pageErrs = [];
+page.on('pageerror', (e) => pageErrs.push(String(e?.message ?? e).slice(0, 300)));
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 let inGame = false;
 for (let i = 0; i < 150 && !inGame; i++) {
@@ -20,152 +24,244 @@ for (let i = 0; i < 150 && !inGame; i++) {
   if (!inGame) await new Promise((r) => setTimeout(r, 2000));
 }
 if (!inGame) { console.log(JSON.stringify({ fatal: 'boot timeout' })); await browser.close(); process.exit(1); }
-const out = await page.evaluate(async () => {
+
+// ---- 页内装订：钉位循环 + 平整场地（先摘欢迎覆层,防截图遮挡） ----
+await page.evaluate(async () => {
+  document.getElementById('sw-welcome-announce')?.remove();
+  try { localStorage.setItem('sw.welcome.announce.acked', '1'); } catch {}
   const g = window.__swGame;
-  const raf = () => new Promise((r) => requestAnimationFrame(r));
-  const step = async (n) => { for (let i = 0; i < n; i++) { g.fixedUpdate(1 / 60); await raf(); g.entities.enemies.length = 0; } };
   const items = await import('/src/data/items.ts');
   const tilesMod = await import('/src/data/tiles.ts');
-  const T723ID = tilesMod.TILE_BY_KEY['v_723_kite_anchor'];
   const st = g.world.store;
-  const p = g.player;
-  const R = { checks: [], trace: [] };
-  const ck = (name, ok, note = '') => R.checks.push({ name, ok, note });
-  const KITE_VID = 4613;                                    // 猪龙风筝（用户实报件）
-  const id = items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[KITE_VID]];
-  // 物品经济账本：spawned = 探针累计投放（give 增、清退减）——F 守恒面基准
-  let spawned = 0;
-  const give = (n) => { spawned -= invKites(); p.inv.slots[0] = { id, stack: n, prefix: 0 }; spawned += n; };
-  // 钉位 + 找一块平整场地：x=400..415,y=sy 行实心带
   let sy = 40; for (; sy < st.h - 10 && !st.isSolid(400, sy); sy++) {}
-  for (let x = 396; x <= 420; x++) for (let y = sy; y < sy + 3; y++) st.setTile(x, y, 1, 0, 0);   // 人造泥地
-  for (let x = 396; x <= 420; x++) for (let y = sy - 4; y < sy; y++) if (st.hasTile(x, y)) st.setTile(x, y, 0); // 清空域
-  const pin = () => { p.x = 402 * 16; p.y = (sy - 4) * 16; p.vx = 0; p.vy = 0; p.useTime = 0; };
-  const pinAt = (tx_) => { p.x = tx_ * 16; p.y = (sy - 4) * 16; p.vx = 0; p.vy = 0; p.useTime = 0; };
-  const invKites = () => p.inv.slots.filter((s) => s && items.ITEM_DEFS[s.id]?.vid === KITE_VID).reduce((a, s) => a + s.stack, 0);
-  const dropKites = () => g.entities.drops.filter((d) => !d.dead && items.ITEM_DEFS[d.itemId]?.vid === KITE_VID).reduce((a, d) => a + d.stack, 0);
-  const total = () => invKites() + dropKites();
-  g.entities.enemies.length = 0;
-  pin(); give(3);
-  await step(10);
-  const aim = (tx_, ty_) => {
-    const [sx2, sy2] = g.camera.worldToScreen(tx_ * 16 + 8, ty_ * 16 + 8);
-    g.input.mouseX = sx2; g.input.mouseY = sy2;
+  for (let x = 396; x <= 430; x++) for (let y = sy; y < sy + 3; y++) st.setTile(x, y, 1, 0, 0);
+  for (let x = 396; x <= 430; x++) for (let y = sy - 6; y < sy; y++) if (st.hasTile(x, y)) st.setTile(x, y, 0);
+  for (let x = 396; x <= 430; x++) for (let y = sy - 6; y < sy; y++) st.wall[st.idx(x, y)] = 0;   // 场地清墙（A 点须无墙档
+  const p = g.player;
+  clearInterval(window.__bj426Pin);
+  window.__bj426 = { items, tilesMod, sy, pinX: 402 };
+  p.inv.slots.fill(null);
+  p.inv.selected = 0;
+  // 物品账本（F 守恒面基准：given-destroyed = 场内总量;拾取=内部转移不动账）
+  window.__ledger = { given: 0, destroyed: 0 };
+  // removeHeld 侦值（B 消耗面间歇观测窗）
+  window.__rhLog = [];
+  const rh0 = p.inv.removeHeld.bind(p.inv);
+  p.inv.removeHeld = function (n) {
+    const before = this.slots[this.selected]?.stack ?? null;
+    const r = rh0(n);
+    window.__rhLog.push(`rh(${n}) sel=${this.selected} ${before}->${this.slots[this.selected]?.stack ?? 'null'} mirror=${this.cursorMirror ? 'Y' : 'N'}`);
+    return r;
   };
-  const press = async (tx_, ty_, pinX = 402) => {            // 单次右键按压沿
-    for (let i = 0; i < 10; i++) { pinAt(pinX); g.fixedUpdate(1 / 60); await raf(); }   // 相机先收敛防瞄准漂移
+  // 同步钉位/瞄准/输入脉冲（单 evaluate 内完成=与真实循环零交错,确定性边沿）
+  const pin = () => {
+    p.x = window.__bj426.pinX * 16; p.y = (sy - 4) * 16; p.vx = 0; p.vy = 0;
+    g.entities.enemies.length = 0;
+  };
+  const aim = (tx, ty) => {
+    const [sx, sy2] = g.camera.worldToScreen(tx * 16 + 8, ty * 16 + 8);
+    g.input.mouseX = sx; g.input.mouseY = sy2;
+  };
+  window.__bj426Hold = (tx, ty, pinX, holdFrames) => {
+    window.__bj426.pinX = pinX;
+    for (let i = 0; i < 30; i++) { pin(); g.fixedUpdate(1 / 60); }          // 相机同步收敛
     g.input.rightDown = true;
-    for (let i = 0; i < 4; i++) { pinAt(pinX); aim(tx_, ty_); g.fixedUpdate(1 / 60); await raf(); }   // 每帧重瞄兜底
+    for (let i = 0; i < holdFrames; i++) { pin(); aim(tx, ty); g.fixedUpdate(1 / 60); }
     g.input.rightDown = false;
-    for (let i = 0; i < 2; i++) { pinAt(pinX); g.fixedUpdate(1 / 60); await raf(); }
+    for (let i = 0; i < 2; i++) { pin(); g.fixedUpdate(1 / 60); }
   };
-  const tile723At = (x, y) => st.type[st.idx(x, y)] === T723ID ? st.frameX[st.idx(x, y)] : -1;
-  const recAt = (x, y) => g.world.furnitureItems.find((r) => r.x === x && r.y === y && r.kind === 'kite_anchor');
-  const entAt = (x, y) => g.leashed.kites.filter((e) => e.ax === x && e.ay === y && e.active).length;
-
-  // ---- A. 位置门：空中无支撑 → 拒 ----
-  give(3);
-  await press(403, sy - 3);
-  ck('(A) 空中无支撑拒置（五锚档全失）', !recAt(403, sy - 3) && entAt(403, sy - 3) === 0 && tile723At(403, sy - 3) < 0,
-    `tile=${tile723At(403, sy - 3)} stack=${p.inv.slots[0]?.stack}`);
-  // ---- A2. 墙档：背后有墙 → 允许,帧档=4×18 ----
-  st.wall[st.idx(403, sy - 2)] = 2;
-  await press(403, sy - 2);
-  const a2fx = tile723At(403, sy - 2);
-  ck('(A2) 墙档允许且帧档=4×18（AnchorWall 首中档）', a2fx === 72 && recAt(403, sy - 2) !== undefined,
-    `frameX=${a2fx}(expect 72) rec=${!!recAt(403, sy - 2)} stack=${p.inv.slots[0]?.stack}`);
-  // 清 A2 桩
-  g.retrieveLeashedAnchor(403, sy - 2, 1); await step(3);
-  st.wall[st.idx(403, sy - 2)] = 0;
-
-  // ---- B. 消耗面：地面放置 → stack-1 + 掉落为 0 ----
-  give(3);
-  const before = invKites();
-  await press(405, sy - 1);
-  const afterPlace = invKites();
-  R.trace.push(`B-debug: below=${st.type[st.idx(405, sy)]} solid=${st.isSolid(405, sy)} tgt=${st.type[st.idx(405, sy - 1)]} wall=${st.wall[st.idx(405, sy - 1)]} px=${Math.floor(p.x / 16)} py=${Math.floor(p.y / 16)} useTime=${p.useTime}`);
-  ck('(B) 地面放置成功且消耗 1（PlaceFromPlayerPlacementHook --stack）',
-    tile723At(405, sy - 1) === 0 && afterPlace === before - 1 && entAt(405, sy - 1) === 1,
-    `tile=${tile723At(405, sy - 1)} inv ${before}->${afterPlace} ent=${entAt(405, sy - 1)}`);
-
-  // ---- C. 边沿门：按住拖过 3 点 → 仅 1 桩（按压沿）----
-  await step(20);                                            // 等 B 的 useTime 冷却清零（原版同拍拒按）
-  aim(407, sy - 1);
-  g.input.rightDown = true;
-  for (const dx of [407, 409, 411]) {
-    aim(dx, sy - 1);
-    for (let i = 0; i < 6; i++) { pin(); g.fixedUpdate(1 / 60); await raf(); }
-  }
-  g.input.rightDown = false;
-  await step(3);
-  const dragPlaced = [407, 409, 411].filter((x) => tile723At(x, sy - 1) >= 0).length;
-  ck('(C) 按住拖过 3 点仅 1 桩（ItemsThatAllowRepeatedRightClick 排除→边沿门）',
-    dragPlaced === 1, `placed=${dragPlaced} stack=${p.inv.slots[0]?.stack}`);
-
-  // ---- D. 飞行态门：风筝弹在飞 → 右键不放置 ----
-  // 先收掉 C 的桩拿回件（C 边沿门首点=407）
-  spawned -= invKites();
-  p.inv.slots[0] = null; await step(1);
-  await press(407, sy - 1);                                  // 空手取回（清桩返件）
-  await step(3);
-  // 清场（掉落直接移出经济=同步减账）
-  spawned -= dropKites();
-  for (const d of g.entities.drops) if (!d.dead && items.ITEM_DEFS[d.itemId]?.vid === KITE_VID) d.dead = true;
-  // 给 1 件，左键出膛（左键=放飞）
-  give(1);
-  aim(600, 200);
-  g.input.mouseDown = true; g.input.mouseHeld = true;
-  for (let i = 0; i < 6; i++) { pin(); g.fixedUpdate(1 / 60); await raf(); }
-  g.input.mouseDown = false; g.input.mouseHeld = false;
-  const flying = g.entities.projectiles.filter((e) => e.constructor.name === 'KiteProj' && !e.dead).length;
-  // 飞行中右键（指向地面有效点位）
-  await press(413, sy - 1);
-  ck('(D) 飞行态右键不放置（holdStyle≠0→StartChanneling 面）',
-    flying === 1 && tile723At(413, sy - 1) < 0 && recAt(413, sy - 1) === undefined,
-    `flying=${flying} tile=${tile723At(413, sy - 1)} stack=${p.inv.slots[0]?.stack}`);
-  // 收线消亡
-  g.input.rightDown = true;
-  for (let i = 0; i < 80; i++) { pin(); g.fixedUpdate(1 / 60); await raf(); }
-  g.input.rightDown = false;
-  await step(3);
-
-  // ---- E. 回收面：取回 → 线圈 tile 消失 + 恰返 1 ----
-  give(1);                                                   // 挪到 415 射程内由 pinX 承载
-  await step(20);
-  R.trace.push(`E-pre: sel=${p.inv.selected} heldVid=${items.ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.vid} useTime=${p.useTime} flyK=${g.entities.projectiles.filter((e) => e.constructor.name === 'KiteProj' && !e.dead).length} px=${Math.floor(p.x / 16)}`);
-  await press(415, sy - 1, 413);
-  const placedBefore = tile723At(415, sy - 1) >= 0;
-  R.trace.push(`E-post: placed=${placedBefore} useTime=${p.useTime} near=${[414, 415, 416].map((x) => tile723At(x, sy - 1)).join(',')} stack=${p.inv.slots[0]?.stack}`);
-  spawned -= invKites();
-  p.inv.slots[0] = null; await step(1);                      // 空手
-  const dropsBefore = dropKites();
-  await press(415, sy - 1, 413);                             // 右键取回
-  const tileAfter = tile723At(415, sy - 1);
-  const recAfter = recAt(415, sy - 1);
-  const entAfter = entAt(415, sy - 1);
-  const dropsAfter = dropKites();
-  ck('(E) 取回：线圈 tile 消失+记录清+实体亡+恰返 1（原版回收路同态）',
-    placedBefore && tileAfter < 0 && !recAfter && entAfter === 0 && dropsAfter === dropsBefore + 1,
-    `tile=${tileAfter} rec=${!!recAfter} ent=${entAfter} drops ${dropsBefore}->${dropsAfter}`);
-
-  // ---- F. 守恒面：全程经济总数 = 探针累计投放 spawned（放置消耗→桩存物,回收→掉落,
-  //      无任何面净增/净减）----
-  const anchorsStored = g.world.furnitureItems
-    .filter((r) => r.kind === 'kite_anchor' && r.slots[0])
-    .reduce((a, r) => a + r.slots[0].stack, 0);
-  const accounted = total() + anchorsStored;
-  R.trace.push(`F: inv=${invKites()} drops=${dropKites()} anchorsStored=${anchorsStored} accounted=${accounted} spawned=${spawned}`);
-  ck('(F) 全程物品守恒（放置消耗+回收单返,无复制）', accounted === spawned,
-    `accounted=${accounted} spawned=${spawned}`);
-
-  // 截图（取回后场景 + 桩位现场）
-  return R;
+  window.__bj426Drag = (points, pinX, framesPer) => {
+    window.__bj426.pinX = pinX;
+    for (let i = 0; i < 30; i++) { pin(); g.fixedUpdate(1 / 60); }
+    g.input.rightDown = true;
+    for (const [tx, ty] of points) {
+      for (let i = 0; i < framesPer; i++) { pin(); aim(tx, ty); g.fixedUpdate(1 / 60); }
+    }
+    g.input.rightDown = false;
+    for (let i = 0; i < 2; i++) { pin(); g.fixedUpdate(1 / 60); }
+  };
+  window.__bj426LeftHold = (tx, ty, pinX, holdFrames) => {
+    window.__bj426.pinX = pinX;
+    for (let i = 0; i < 30; i++) { pin(); g.fixedUpdate(1 / 60); }
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    for (let i = 0; i < holdFrames; i++) { pin(); aim(tx, ty); g.fixedUpdate(1 / 60); }
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    for (let i = 0; i < 2; i++) { pin(); g.fixedUpdate(1 / 60); }
+  };
 });
-console.log(JSON.stringify(out, null, 1));
-// 截图留档
+await new Promise((r) => setTimeout(r, 800));              // 相机收敛
+
+const R = { checks: [], trace: [] };
+const sy = await page.evaluate(() => window.__bj426.sy);
+const T723ID = await page.evaluate(() => window.__bj426.tilesMod.TILE_BY_KEY['v_723_kite_anchor']);
+const KITE_VID = 4613;                                     // 猪龙风筝（用户实报件）
+
+const give = async (n) => {
+  if (n <= 0) {   // 0 = 真空手（stack-0 槽 heldItem 仍非 null,alt-use 臂照进——勿用）
+    await page.evaluate((vid) => {
+      const g = window.__swGame, items = window.__bj426.items;
+      const old = g.player.inv.slots[0];
+      if (old && items.ITEM_DEFS[old.id]?.vid === vid) window.__ledger.destroyed += old.stack;
+      g.player.inv.slots[0] = null;
+    }, KITE_VID);
+    return;
+  }
+  await page.evaluate((k, n) => {
+    const g = window.__swGame;
+    const { items } = window.__bj426;
+    const id = items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[k]];
+    const old = g.player.inv.slots[0];
+    if (old && items.ITEM_DEFS[old.id]?.vid === k) window.__ledger.destroyed += old.stack;
+    window.__ledger.given += n;
+    g.player.inv.slots[0] = { id, stack: n, prefix: 0 };
+    g.player.inv.selected = 0;
+  }, KITE_VID, n);
+};
+const settle = (ms = 350) => new Promise((r) => setTimeout(r, ms));
+const rightClick = (tx, ty, pinX = 402) => page.evaluate(
+  ([tx2, ty2, px]) => window.__bj426Hold(tx2, ty2, px, 5), [tx, ty, pinX]);
+const dragRight = (points, pinX = 402, framesPer = 8) => page.evaluate(
+  ([pts, px, fp]) => window.__bj426Drag(pts, px, fp), [points, pinX, framesPer]);
+const leftClick = (tx, ty, pinX = 402) => page.evaluate(
+  ([tx2, ty2, px]) => window.__bj426LeftHold(tx2, ty2, px, 6), [tx, ty, pinX]);
+const readTile = (x, y) => page.evaluate(([x2, y2, t7]) => {
+  const g = window.__swGame, st = g.world.store;
+  const i = st.idx(x2, y2);
+  return {
+    isAnchor: st.type[i] === t7,
+    frameX: st.frameX[i],
+    rec: !!g.world.furnitureItems.find((r) => r.x === x2 && r.y === y2 && r.kind === 'kite_anchor'),
+    ent: g.leashed.kites.filter((e) => e.ax === x2 && e.ay === y2 && e.active).length,
+  };
+}, [x, y, T723ID]);
+const econ = () => page.evaluate((vid) => {
+  const g = window.__swGame, items = window.__bj426.items;
+  const inv = g.player.inv.slots.filter((s) => s && items.ITEM_DEFS[s.id]?.vid === vid).reduce((a, s) => a + s.stack, 0);
+  const drops = g.entities.drops.filter((d) => !d.dead && items.ITEM_DEFS[d.itemId]?.vid === vid).reduce((a, d) => a + d.stack, 0);
+  const anchors = g.world.furnitureItems.filter((r) => r.kind === 'kite_anchor' && r.slots[0]).reduce((a, r) => a + r.slots[0].stack, 0);
+  return { inv, drops, anchors, total: inv + drops + anchors };
+}, KITE_VID);
+const ck = (name, ok, note = '') => R.checks.push({ name, ok, note });
+
+// ---- A. 位置门：空中无支撑 → 拒 ----
+await give(3);
+await rightClick(405, sy - 3);
+let s = await readTile(405, sy - 3);
+ck('(A) 空中无支撑拒置（五锚档全失）', !s.rec && s.ent === 0 && !s.isAnchor, JSON.stringify(s));
+
+// ---- A2. 墙档：背后有墙 → 允许,帧档=4×18 ----
+await page.evaluate(([x, y]) => {
+  const st = window.__swGame.world.store;
+  st.wall[st.idx(x, y)] = 2;
+}, [405, sy - 2]);
+await rightClick(405, sy - 2);
+s = await readTile(405, sy - 2);
+ck('(A2) 墙档允许且帧档=72（AnchorWall 档×18）', s.isAnchor && s.frameX === 72 && s.rec, JSON.stringify(s));
+await give(0);
+await rightClick(405, sy - 2);                             // 空手取回清场（顺带验 ④）
+await page.evaluate(([x, y]) => {
+  const st = window.__swGame.world.store;
+  st.wall[st.idx(x, y)] = 0;
+}, [405, sy - 2]);
+
+// ---- B. 消耗面：地面放置 → stack-1（rh 侦值快照差分,免疫掉落拾取时序） ----
+await give(3);
+const rhLen0 = await page.evaluate(() => window.__rhLog.length);
+await rightClick(405, sy - 1);
+s = await readTile(405, sy - 1);
+const eB = await econ();
+const rh = await page.evaluate(() => window.__rhLog);
+const rhNew = rh.slice(rhLen0);
+R.trace.push(`B-rh: new=${JSON.stringify(rhNew)} econ=${JSON.stringify(eB)}`);
+const bDiag = await page.evaluate(() => {
+  const g = window.__swGame, p = g.player;
+  return { ui: g.input.uiBlocking, prev: g._prevRightDown, useT: p.useTime, anim: p.itemAnimTicks,
+    swing: g.swing ? g.swing.t : -1, dead: p.dead, tileInt: g.tileInteractHappened,
+    selected: p.inv.selected, held: p.inv.heldItem()?.id ?? -1 };
+});
+ck('(B) 地面放置成功且消耗 1（PlaceFromPlayerPlacementHook --stack）',
+  s.isAnchor && s.rec && s.ent === 1 && rhNew.length === 1
+    && /^rh\(1\) sel=0 (\d+)->(\d+) /.test(rhNew[0])
+    && Number(RegExp.$2) === Number(RegExp.$1) - 1,
+  `tile=${JSON.stringify(s)} rhNew=${JSON.stringify(rhNew)} diag=${JSON.stringify(bDiag)}`);
+
+// ---- C. 边沿门：按住右键拖过 3 个有效点位 → 只放 1 桩 ----
+await dragRight([[407, sy - 1], [409, sy - 1], [411, sy - 1]]);
+let placed = 0;
+for (const dx of [407, 409, 411]) { const t = await readTile(dx, sy - 1); if (t.isAnchor) placed++; }
+ck('(C) 按住拖过 3 点仅 1 桩（repeat 集排除→边沿门）', placed === 1, `placed=${placed}`);
+
+// ---- D. 飞行态门：风筝弹在飞 → 右键不放置 ----
+const cAt = await page.evaluate(() => {
+  const g = window.__swGame;
+  for (const x of [407, 409, 411]) {
+    if (g.world.furnitureItems.find((r) => r.x === x && r.y === window.__bj426.sy - 1 && r.kind === 'kite_anchor')) return x;
+  }
+  return 0;
+});
+await give(0);
+if (cAt) await rightClick(cAt, sy - 1);                    // 空手取回 C 桩
+await page.evaluate((vid) => {
+  const g = window.__swGame, items = window.__bj426.items;
+  for (const d of g.entities.drops) if (!d.dead && items.ITEM_DEFS[d.itemId]?.vid === vid) {
+    window.__ledger.destroyed += d.stack;
+    d.dead = true;
+  }
+}, KITE_VID);
+await give(1);
+await leftClick(420, sy - 8);        // 左键放飞
+const flying = await page.evaluate(() =>
+  window.__swGame.entities.projectiles.filter((e) => e.constructor.name === 'KiteProj' && !e.dead).length);
+await rightClick(411, sy - 1);
+s = await readTile(411, sy - 1);
+ck('(D) 飞行态右键不放置（holdStyle≠0→StartChanneling 面）',
+  flying === 1 && !s.isAnchor && !s.rec, `flying=${flying} ${JSON.stringify(s)}`);
+// 收线消亡（按住右键 100 拍=1.67s）
+await page.evaluate(() => window.__bj426Hold(420, window.__bj426.sy - 8, window.__bj426.pinX, 100));
+
+// ---- E. 回收面：取回 → 线圈 tile 消失 + 恰返 1 ----
+await give(1);
+await rightClick(415, sy - 1, 413);
+s = await readTile(415, sy - 1);
+const placedE = s.isAnchor;
+const beforeE = await econ();
+await give(0);
+await rightClick(415, sy - 1, 413);                        // 空手右键取回
+s = await readTile(415, sy - 1);
+const afterE = await econ();
+ck('(E) 取回：线圈 tile 消失+记录清+实体亡+恰返 1（原版回收路同态;返件允许即时拾取）',
+  placedE && !s.isAnchor && !s.rec && s.ent === 0
+    && (afterE.inv + afterE.drops) === (beforeE.inv + beforeE.drops) + 1,
+  `placed=${placedE} before=${JSON.stringify(beforeE)} after=${JSON.stringify(afterE)}`);
+
+// ---- F. 守恒面：经济账本 = 投放净存（B 桩存 1 常驻;E 收返 1 掉落;手持 0;无净增） ----
+const fin = await econ();
+const led = await page.evaluate(() => window.__ledger);
+R.trace.push(`F: fin=${JSON.stringify(fin)} ledger=${JSON.stringify(led)}`);
+ck('(F) 全程物品守恒（放置消耗+回收单返,无复制）',
+  fin.total === led.given - led.destroyed,
+  `fin=${JSON.stringify(fin)} ledger=${JSON.stringify(led)}(场内=投放-清退;拾取/消耗/存桩均内部转移)`);
+
+R.trace.push(`pageErrors=${JSON.stringify(pageErrs)}`);
+console.log(JSON.stringify(R, null, 1));
 const dir = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/bj426';
-import { mkdirSync } from 'node:fs';
 mkdirSync(dir, { recursive: true });
-await page.screenshot({ path: dir + '/bj426-final-state.png' });
-console.log('screenshot saved');
+// 布置留档场景：一个在飞的风筝桩（B 桩 405）+ 手持风筝,复刻放置现场
+await page.evaluate((vid) => {
+  const g = window.__swGame;
+  const items = window.__bj426.items;
+  const id = items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[vid]];
+  g.player.inv.slots[0] = { id, stack: 2, prefix: 0 };
+  g.player.inv.selected = 0;
+}, KITE_VID);
+await page.evaluate(() => window.__bj426Hold(407, window.__bj426.sy - 1, 405, 5));
+await new Promise((r) => setTimeout(r, 1200));             // 风筝升空摆相
+await page.screenshot({ path: dir + '/bj426-anchor-kite-placed.png' });
+// 清桩（取回）后留档：线圈消失
+await page.evaluate(() => { window.__swGame.player.inv.slots[0] = null; });
+await page.evaluate(() => window.__bj426Hold(407, window.__bj426.sy - 1, 405, 5));
+await new Promise((r) => setTimeout(r, 400));
+await page.screenshot({ path: dir + '/bj426-after-retrieve-coil-gone.png' });
+console.log('screenshot saved: docs/evidence/bj426/bj426-final-state.png');
+await page.evaluate(() => clearInterval(window.__bj426Pin));
 await browser.close();

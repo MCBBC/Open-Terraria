@@ -270,7 +270,9 @@ describe('★SW-BP1 放置实心尾奏 UnslopeForSolids/KillGrassForSolids（BE1
     expect(grassAt).toBeGreaterThan(unslopeAt);
     expect(paintAt).toBeGreaterThan(grassAt);
     // tileSolid 门（def.solid ∪ TILE_SOLID_TOP_FAMILY 真表代理）+ 平台排 Unslope 不排 KillGrass
-    expect(game).toContain('const tileSolidCreate = !!def.solid || TILE_SOLID_TOP_FAMILY.has(shSolid);');
+    // ★BJ426（2026-09-23）：TILE_SOLID_TOP_FAMILY=内部 id 域,shSolid=sheet 域——查表前
+    //   须经 TILE_INTERNAL_BY_SHEET 平移（旧裸传 shSolid 双向失效,tests/bj426-tile-domain-census 钉死）。
+    expect(game).toContain('const tileSolidCreate = !!def.solid || TILE_SOLID_TOP_FAMILY.has(TILE_INTERNAL_BY_SHEET.get(shSolid) ?? -1);');
     expect(game).toContain('if (!PLATFORMS_SHEETS.has(shSolid)) this.placeThingUnslopeForSolids(clickX, clickY);');
   });
 

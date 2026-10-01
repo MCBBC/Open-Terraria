@@ -50,7 +50,7 @@ import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { applyProjStatus } from './projStatus';
 import { hitCritters, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
-import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）
+import { snapshotVanillaGate, vanillaGateRejected, ghostHealProc } from './SpectreSoulProj';   // ★Q4 刀：门位快照单源（T 刀,856 同款）;★清偿刀 U2（2026-10-01）补 978 ghostHeal 白耗面（S2 台账家族债）
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
@@ -101,6 +101,9 @@ export class VolcanoBlastProj extends Entity {
     return this.critChanceFn ? this.critChanceFn() : 0.04;
   }
   armorPen = 0;
+  /** ★清偿刀 U2（2026-10-01）：Projectile.numHits 等位（:14263 每受理命中自增——
+   *  ghostHeal 率 0.2−0.05n 衰减计数源;proc 读自增前值） */
+  pveNumHits = 0;
   /** :13131 —— direction = Main.player[owner].direction */
   direction = 1;
   /** penetrate :9266 —— 3 次，穿完即消亡 */
@@ -303,10 +306,17 @@ export class VolcanoBlastProj extends Entity {
         // pierce=0 写 10t 弹幕域窗,而 978 usesLocalNPCImmunity 节流归弹内局部表
         // （hitSet）,原文命中后全局窗【清零】非新开 10t 窗
         kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, -3, true);
+      // ★清偿刀 U2（2026-10-01）：ghostHeal 白耗面（Projectile.cs:13877-79 通用 on-hit
+      //  段,StrikeNPC :13716 后/写梯 :14031 前=本位;S2 台账家族债兑现,全链锚见
+      //  meleeOnHitProjs.ts 文件尾批注）。978 数据面 melee（SetDefaults :9255-9271 无
+      //  magic 行）→ isMagic=false 直传：幽灵兜帽在身时白扣治疗预算不出治疗球=原版本相
+      //  （:12090 lifeSteal -= num2 先于 :12091-93 !magic return）。ghostHurt 不接=
+      //  非 magic 死码（:12022 早退零观察面,S2/R1-B 定谳保形）。pveNumHits++=:14263 位
+      //  （proc 读自增前值;usesLocal 每敌一次但多敌可叠跳）。
+      ghostHealProc(game, 978, this.pveNumHits,
+        e as unknown as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
       // StatusNPC（Projectile.cs:11365）：AddBuff(24,180)=On Fire! 3s（提取表驱动）
-      // ★S2/R1-B 定谳（2026-09-30）：ghostHeal/ghostHurt 不接=判例面——978 melee 非
-      //  magic（SetDefaults :9255-9271 无 magic 行）,ghostHurt :12022 早退零面、
-      //  ghostHeal :12089 白耗预算面=家族级债（全链锚见 meleeOnHitProjs.ts 文件尾批注）。
       applyProjStatus(978, e as unknown as Record<string, number | undefined>);
       // usesLocalNPCImmunity 族落地 = 全局窗清零段（GC1：Projectile.cs:14177）
       (game as unknown as { noteNpcPlayerImmune?: (id: number, ticks: number) => void })

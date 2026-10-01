@@ -64,6 +64,17 @@ export function hitTownNpcs(
    *  当场死亡（hurt 内 hp≤0 → dead=true 同步置位）时回调,消费端 = 墓碑弹杀镇民
    *  成就 36 GRAVE_MISTAKE（Player.OnKillNPC Player.cs:20623-20636） */
   onKill?: (n: { vanillaId?: number }) => void,
+  /** ★清偿刀 W1（2026-10-01）S3b 姊妹刀——城镇侧鞭面两通道：
+   *  ①skip = 命中前局部表门（Damage_PVE :12596 flag2 的 usesLocal 臂
+   *    `array[i]==0` 等价——鞭 localNPCImmunity[victim]=-1 写后整挥每靶一次;
+   *    城镇靶同面, whip 侧以 hitSet 承载）。门拒 = 整靶跳过（:12598 flag2 假）。
+   *  ②onAccept = 受理拍回调（写梯位,:14031-14179 与 :14263/:14321-14327 家族——
+   *    原文序 OnKillNPC :13703-06 之后）。城镇 NPC 受理面与敌怪同构：
+   *    免疫窗写/局部表占位/tag/minionTarget/衰减/numHits 全在门后;调用方
+   *    （WhipProj W1）在此做写梯对齐,TownNPC.hurt 通用档 iframes=10 不动
+   *    （= 原版弹幕通用尾档 :14197-14199,非鞭弹照写）。 */
+  skip?: (n: { id: number }) => boolean,
+  onAccept?: (n: { id: number; iframes?: number; vanillaId?: number }) => void,
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -74,10 +85,14 @@ export function hitTownNpcs(
     const n = ent as {
       x: number; y: number; w: number; h: number; dead: boolean;
       hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
-      bound?: boolean; vanillaId?: number;
+      bound?: boolean; vanillaId?: number; id: number; iframes?: number;
     };
     if (n.dead || typeof n.hurt !== 'function') continue;
     if (n.bound) continue; // 被缚待救不可打(近似;原版 bound 型有独立受击语义)
+    // ★W1：局部表门（:12596 flag2 usesLocal 臂 `array[i]==0`）——鞭 hitSet 占位靶
+    //   整挥每靶一次,城镇靶同面;门拒在巫毒窄门/AABB 之前 = 原版 :12598 flag2 假
+    //   整靶跳过序（Damage_PVE 循环头门先于 Inner 全链）
+    if (skip?.(n)) continue;
     if (!(collide ? collide(n) : projOverlap(self.x, self.y, self.w, self.h, n))) continue;
     if (source === 'playerProj') {
       // 巫毒窄门(:11970-11972):22→killGuide / 54→killClothier,其余 false;
@@ -98,6 +113,9 @@ export function hitTownNpcs(
     //   onKill 由 n.dead 复核=DidNPCDie()（Projectile.cs:13703）非受理面,同相。
     if (n.hurt(dmg, kb, 0, game)) {
       if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
+      // ★W1：受理拍回调 = 写梯位（:14031-14179 immune[owner]=0+局部表/:14263
+      //   numHits/:14321-14327 minionTarget——原文序在 OnKillNPC 之后,同拍序保持）
+      onAccept?.(n);
       any = true;
     }
   }

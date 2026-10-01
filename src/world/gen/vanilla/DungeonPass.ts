@@ -108,6 +108,9 @@ const DG_DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 // ★IIIII112：TileID.Sets.Clouds（TileID.cs:197）——DungeonDesertCleanup→FindLowestCloud
 //   的活性格判定面（vanilla sheet 域→内部 id）——★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS
 //   （与旧 TILE_INTERNAL_BY_SHEET.map 平移逐值全等,tests/tile-domain-sentinel §6i）
+// ★BJ426 域哨兵（2026-09-23）：本别名【名带 SHEETS 实为内部 id 域】——CLOUDS_IDS 是
+//   内部域镜像;消费点 :781 `DG_CLOUD_SHEETS.has(st.type[qi])` 传 st.type=内部域 ✓ 一致。
+//   勿因名误改传 sheet（sheet 6 项 189/196/460/717-719 与内部 id 91/105/552/728-730 全错位）。
 const DG_CLOUD_SHEETS = CLOUDS_IDS;
 const DG_FRAMED_NOT_CUT = new Set<number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {

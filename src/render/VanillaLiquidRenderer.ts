@@ -8,7 +8,7 @@
 //  P6/P7 角落修正（瀑布侧/内角填充）
 //  绘制：water_N 表（48×1360：3 列变体 × 80px 动画带）按四壁裁源矩形 + 偏移贴图
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
-import type { GLSpriteLayer, TexEntry } from './GLSpriteLayer';
+import { setLiqShimmerTVis, type GLSpriteLayer, type TexEntry } from './GLSpriteLayer';
 import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
@@ -116,6 +116,21 @@ export let liqC13b = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('c13b') !== '0' : true;
 export function liqC13bSetForTest(v: boolean): void { liqC13b = v; }
 
+// ---- ★C13c 微光波场 GLSL 化（2026-10-01 二期刀;docs/c13c-shimmer-wave-glsl-design.md）----
+// 【定谳核心】噪声 uint→f32 高位损失 256（§2.2:sin 相位差 25.6rad,位等不可达）
+//  ⇒ noise hash+noiseSin 留 CPU 逐节点求值,经每顶点属性 aNoise 上 GPU（方案 H §3.2,
+//  CPU sin 减半:波值 4 sin 上 GPU,噪声 4 sin 留 CPU;双线性张量/_wvArr 跨 pass 缓存
+//  在本臂退役）。stride-11 环 + sprite:liqshimmer 程序（GLSpriteLayer 惰性装配）,
+//  基色/波场改 FS 逐像素解析（替代 CPU 双线性张量——§5.3 系统性差=域内登记,方向中性）。
+// 【灰度缺省关（?c13c=1 激活）】设计案 §4.4 的 ?c13c=0 逃生门语义=转正后翻面兑现;
+//  灰度期缺省关的理由:tests/liquid-gl-batch.test.ts 微光预乘锁断言顶点色 R<G<B<α 域
+//  （c13c 环数据 rgb===a 预乘恒等,域不同）,该测试文件不在本刀产权内——转正（翻缺省
+//  +迁移该锁到 liqshim 键族）登记收尾债。?liqpolish=0 时本臂不激活（正交:CPU 原链
+//  三重回退全保留,§0 不目标）。
+export let liqC13c = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('c13c') === '1' : false;
+export function liqC13cSetForTest(v: boolean): void { liqC13c = v; }
+
 /** 批发射钩（Renderer 中介→GLShimExecutor.pushQuadBatchRgba;emitPrecipQuadBatch 同构） */
 export interface LiqBatchEmit {
   emit(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
@@ -164,6 +179,39 @@ const _fgReuseRing = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
 const _addMeta = new Float32Array(LIQ_RING_CAP * 4);
 let _addN = 0;
 let _addOverflow = false;
+
+// ---- ★C13c 微光波场批环（stride 11;2026-10-01 二期刀;liqgl 刀2/C13b _batRing 同构新环）----
+// 【stride 11 = x,y,u,v,r,g,b,a + tileX,tileY + noise】方案 H（设计案 §3.2 采纳）:
+//  波值场 FS 逐像素解析（aTile=世界px/16 连续坐标,VS 线性插值精确）;noise hash+sin 留
+//  CPU 逐节点（uint→f32 高位损失 256=相位级差位等不可达,§2.2 定谳）经 aNoise 属性上传。
+//  【与主环分离】stride 不同（66 vs 48 float/quad）,同环混排=偏移数学破坏;分离环+
+//  发射位=调用位（flushRun/flushShimRun 成对收口）=层序保持。
+//  【惰性分配】灰度旗缺省关——未激活会话零静态内存;首次 c13c 批臂触碰一次建面。
+const LIQ_SHIM_STRIDE = 11;
+const LIQ_SHIM_QUAD_FLOATS = 6 * LIQ_SHIM_STRIDE;   // 66
+let _shimRing: Float32Array | null = null;
+/** 每 quad 重放面:sx,sy,sw,shSrc（_batMeta 同布局;重放 drawImage 取源矩形） */
+let _shimMeta: Float32Array | null = null;
+/** fg 复用缩放拷贝目标（_fgReuseRing 判例同构——★禁原位缩放;stride 11） */
+let _fgReuseShimRing: Float32Array | null = null;
+/** gate y 镜像重发射槽（_gateData 判例同构;stride 11） */
+let _gateShimData: Float32Array | null = null;
+function ensureShimRings(): void {
+  if (_shimRing) return;
+  _shimRing = new Float32Array(LIQ_RING_CAP * LIQ_SHIM_QUAD_FLOATS);
+  _shimMeta = new Float32Array(LIQ_RING_CAP * 4);
+  _fgReuseShimRing = new Float32Array(LIQ_RING_CAP * LIQ_SHIM_QUAD_FLOATS);
+  _gateShimData = new Float32Array(LIQ_RING_CAP * LIQ_SHIM_QUAD_FLOATS);
+}
+let _shimN = 0;
+/** 微光批段状态（主循环微光臂与浸润带微光臂共用——时序不相交:主循环段收口先于
+ *  带 pass;段=微光表纹理同质（Misc_water_14/Liquid_14/LiquidSlope_14 文件互异→
+ *  纹理换段自动分段,永不混段,C13b 双臂共享判例同构） */
+let _shimOn = false, _shimStart = 0, _shimImg: CanvasImageSource | null = null, _shimKey = '';
+/** noise-sin 单槽（方案 H CPU 4 sin/tile;_shimWv=[w0..w3,ns0..ns3] 供 glitter4FromWaves
+ *  位等复用——与 polish 臂同代码路径=sparkGa 逐位同） */
+const _shimNs = new Float64Array(4);
+const _shimWv = new Float64Array(8);
 /** sparkle 段（单白度带纹理=色相进顶点色,全 pass 一段;段界=帧界/环帽/发射失败） */
 let _spOn = false, _spStart = 0, _spQuads = 0, _spImg: CanvasImageSource | null = null, _spKey = '';
 /** glint 段（白 1×1 纹理,前景 pass 一段） */
@@ -193,7 +241,7 @@ const _spCols = new Float32Array(12);
 // k∈(0,1]/fill(1) 初值）,rgb 预乘同比例;sparkle 双 pass 同 α（无 isBackground
 // 因子）逐位拷贝;glint bg 记录臂（sampleGlint 帧内确定,bg 不画）。fg 逐 tile
 // 构造循环整体跳过（trace 定谳 drawVanillaLiquids self 的 ~50% 构成面）。
-interface BgRun { img: CanvasImageSource; key: string; start: number; quads: number; k: number; cols: boolean }
+interface BgRun { img: CanvasImageSource; key: string; start: number; quads: number; k: number; cols: boolean; shim?: boolean }
 let _bgBaseRuns: BgRun[] = [];
 let _bgSpark: { start: number; quads: number; img: CanvasImageSource; key: string } | null = null;
 let _bgGlint: { start: number; quads: number } | null = null;
@@ -329,8 +377,9 @@ function flushAddRuns2DAndEmit(
   }
 }
 
-/** 批段（一次发射=同纹理连续 quad 区间;可见批与 gate 重发射共用） */
-interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; }
+/** 批段（一次发射=同纹理连续 quad 区间;可见批与 gate 重发射共用）。
+ *  ★C13c shim=true=stride-11 微光段（源环 _shimRing,gate 重发射走 _gateShimData） */
+interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; shim?: boolean; }
 /** 前景 pass 批段登记（emitVanillaLiquidGate 消费;帧界由 gateCapture 调用重置） */
 let _fgRuns: LiqRun[] = [];
 /** 坡面足迹四边形（世界坐标;gate 发射时经 wldT 折算设备——fgCanvas 足迹画布退役面） */
@@ -492,6 +541,119 @@ function batQuad(
   return true;
 }
 
+/** ★C13c 微光 quad 入批环（batQuad 同构 stride-11 版）:
+ *  wX0/wY0/wW/wH=世界像素矩形（aTile=世界px/16 逐角——VS 线性插值逐像素精确,
+ *  world→device 仿射(b=c=0 门)复合下插值仍精确=场世界锚定）;dx0..dh=设备矩形;
+ *  ns=四角节点 noise-sin,数组序 [TL,TR,BL,BR]=shimmerWaves4 布局（(x,y),(x+1,y),
+ *  (x,y+1),(x+1,y+1)）;角映射 TL←0/TR←1/BL←2/BR←3=原版 SetShimmerVertexColors
+ *  节点值置位于 quad 角语义（R2b-F5）,裁剪格同式。
+ *  rgb 预乘恒等（rgb===a,§3.3 锁域——场调制全部进 FS,vCol.rgb 不进乘链 §2.4）。
+ *  溢出返 false=调用方 batOn=false 收口降级（不置 _batOverflow——微光环独立于主环,
+ *  已入队段仍有效,fg 复用/gate 账不受扰;软/硬位域都不进）。 */
+function shimQuad(
+  sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
+  wX0: number, wY0: number, wW: number, wH: number,
+  dx0: number, dy0: number, dw: number, dh: number, a: number,
+  ns: Float64Array,
+): boolean {
+  if (_shimN >= LIQ_RING_CAP) return false;
+  ensureShimRings();
+  const R = _shimRing!, M = _shimMeta!;
+  const o = _shimN * LIQ_SHIM_QUAD_FLOATS;
+  const ua = (sx - LIQ_TIE_EPS) / texW, ub = (sx + sw - LIQ_TIE_EPS) / texW;
+  const va = (sy - LIQ_TIE_EPS) / texH, vb = (sy + shSrc - LIQ_TIE_EPS) / texH;
+  const tx0 = wX0 / 16, ty0 = wY0 / 16, tx1 = (wX0 + wW) / 16, ty1 = (wY0 + wH) / 16;
+  const x1 = dx0 + dw, y1 = dy0 + dh;
+  // TRIANGLES 两三角 (p0,p1,p2)+(p0,p2,p3)（batQuad 同式;顶点序 TL,TR,BR,BL）
+  // v0 TL
+  R[o] = dx0; R[o + 1] = dy0; R[o + 2] = ua; R[o + 3] = va;
+  R[o + 4] = a; R[o + 5] = a; R[o + 6] = a; R[o + 7] = a;
+  R[o + 8] = tx0; R[o + 9] = ty0; R[o + 10] = ns[0];
+  // v1 TR
+  R[o + 11] = x1; R[o + 12] = dy0; R[o + 13] = ub; R[o + 14] = va;
+  R[o + 15] = a; R[o + 16] = a; R[o + 17] = a; R[o + 18] = a;
+  R[o + 19] = tx1; R[o + 20] = ty0; R[o + 21] = ns[1];
+  // v2 BR（ns[3]=节点 (x+1,y+1)——数组序 TL,TR,BL,BR）
+  R[o + 22] = x1; R[o + 23] = y1; R[o + 24] = ub; R[o + 25] = vb;
+  R[o + 26] = a; R[o + 27] = a; R[o + 28] = a; R[o + 29] = a;
+  R[o + 30] = tx1; R[o + 31] = ty1; R[o + 32] = ns[3];
+  // v0'（第二三角首顶点=复用 v0——TRIANGLES 无索引环,重写）
+  R[o + 33] = dx0; R[o + 34] = dy0; R[o + 35] = ua; R[o + 36] = va;
+  R[o + 37] = a; R[o + 38] = a; R[o + 39] = a; R[o + 40] = a;
+  R[o + 41] = tx0; R[o + 42] = ty0; R[o + 43] = ns[0];
+  // v2'（复用 v2）
+  R[o + 44] = x1; R[o + 45] = y1; R[o + 46] = ub; R[o + 47] = vb;
+  R[o + 48] = a; R[o + 49] = a; R[o + 50] = a; R[o + 51] = a;
+  R[o + 52] = tx1; R[o + 53] = ty1; R[o + 54] = ns[3];
+  // v3 BL（ns[2]=节点 (x,y+1)）
+  R[o + 55] = dx0; R[o + 56] = y1; R[o + 57] = ua; R[o + 58] = vb;
+  R[o + 59] = a; R[o + 60] = a; R[o + 61] = a; R[o + 62] = a;
+  R[o + 63] = tx0; R[o + 64] = ty1; R[o + 65] = ns[2];
+  const m = _shimN * 4;
+  M[m] = sx; M[m + 1] = sy; M[m + 2] = sw; M[m + 3] = shSrc;
+  _shimN++;
+  return true;
+}
+
+/** ★C13c 微光批段 2D 降级重放（replayLiqRun2D 同构 stride-11 版;宁回退不丢精灵）。
+ *  乘色 = FS 场公式的 CPU 同式逐子块中心求值（aTile 角线性插值→shimmerWave→基色
+ *  lerp;tVis=visEffectFrames()——降级帧同渲染段内不变判例）。multiply 用色=场色直取
+ *  （c13c 环 rgb 恒等无预乘拆回需求,与 replayLiqRun2D 的 unpre 惯例域不同）;
+ *  fillStyle 串 memo 与 applyShimmerBaseTint 共用（同值串实例复用判例）。 */
+function replayLiqShimRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
+  tex: CanvasImageSource): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const tVis = visEffectFrames();
+  const D = _shimRing!;
+  for (let q = 0; q < quads; q++) {
+    const o = (startQuad + q) * LIQ_SHIM_QUAD_FLOATS;
+    const m = (startQuad + q) * 4;
+    const ga = D[o + 7];
+    const dw = D[o + 11] - D[o], dh = D[o + 56] - D[o + 1];   // v1.x−v0.x / v5(BL).y−v0.y
+    if (ga <= 0 || dw <= 0 || dh <= 0) continue;
+    ctx.globalAlpha = ga;
+    ctx.drawImage(tex, _shimMeta![m], _shimMeta![m + 1], _shimMeta![m + 2], _shimMeta![m + 3],
+      D[o], D[o + 1], dw, dh);
+    // 2×2 子块 multiply（场色=子块中心真场;tx 沿 x 线性/ty 沿 y 线性——aTile 线性属性）
+    const tx0 = D[o + 8], ty0 = D[o + 9];
+    const tx1 = D[o + 19];
+    const ty3 = D[o + 64];   // v5(BL).ty
+    const subW = Math.ceil(dw / 2), subH = Math.ceil(dh / 2);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'multiply';
+    for (let by = 0; by < 2; by++) {
+      for (let bx = 0; bx < 2; bx++) {
+        const bw = Math.min(subW, dw - bx * subW), bh = Math.min(subH, dh - by * subH);
+        if (bw <= 0 || bh <= 0) continue;
+        const u = (bx * subW + bw / 2) / dw, v = (by * subH + bh / 2) / dh;
+        const tx = tx0 + (tx1 - tx0) * u, ty = ty0 + (ty3 - ty0) * v;
+        const wv = Math.sin(((tx + ty / 6) / 10 - tVis / 360) * Math.PI * 2);
+        const k = 0.1 + wv * 0.4;
+        const rr = Math.round(255 * (SHIM_A_R + SHIM_D_R * k));
+        const rg = Math.round(255 * (SHIM_A_G + SHIM_D_G * k));
+        const rb = Math.round(255 * (SHIM_A_B + SHIM_D_B * k));
+        const ck = (rr << 16) | (rg << 8) | rb;
+        let s = _tintStyleMemo.get(ck);
+        if (s === undefined) { s = `rgb(${rr},${rg},${rb})`; _tintStyleMemo.set(ck, s); }
+        ctx.fillStyle = s;
+        ctx.fillRect(D[o] + bx * subW, D[o + 1] + by * subH, bw, bh);
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.restore();
+}
+
+/** ★C13c 微光段发射核（bat.emit 通道;stride-11 数据形状（66 float/quad）=
+ *  GLSpriteLayer.quadBatchRgba 分派 sprite:liqshimmer 程序的判据面）。 */
+function emitShimRun(bat: LiqBatchEmit, s0: number, nQ: number,
+  img: CanvasImageSource, key: string): boolean {
+  return bat.emit(img, key, _shimRing!.subarray(s0 * LIQ_SHIM_QUAD_FLOATS, (s0 + nQ) * LIQ_SHIM_QUAD_FLOATS),
+    nQ, (raw) => replayLiqShimRun2D(raw, s0, nQ, img));
+}
+
 /** 批段 2D 降级重放（GLShimExecutor.replay2D 经 rec.batch.replay 调用;宁回退不丢精灵）。
  *  恒等 tile:drawImage 原参;微光 tile（hasCols=段内含调制 quad,flushRun 按段同质性
  *  传入）:drawImage+2×2 子块 multiply（顶点环内四角色重构双线性——降级帧已是灾难
@@ -585,7 +747,25 @@ export function emitVanillaLiquidGate(
     }
   }
   // 水批段:y 镜像重发射（同 uv/tint/α——gate 只读 α,obj19 ×100 饱和）
+  // ★C13c:微光段 uTVis 单点（gate 重发射与批发射同渲染段——visEffectFrames 同值）
+  setLiqShimmerTVis(visEffectFrames());
   for (const run of _fgRuns) {
+    if (run.shim) {
+      // ★C13c stride-11 微光段 y 镜像重发射（aTile/aNoise 随顶点镜像不变——场依赖
+      //  tile 坐标非屏幕 y,设计案 §3.3;数据源 _shimRing→_gateShimData;发射经
+      //  quadBatchRgba 形状分派=同一 liqshimmer 程序,α 输出与 PRECIP 契约同式）
+      const nF = run.quads * LIQ_SHIM_QUAD_FLOATS;
+      const src = run.start * LIQ_SHIM_QUAD_FLOATS;
+      const G = _gateShimData!;
+      for (let i = 0; i < nF; i += LIQ_SHIM_STRIDE) {
+        G[src + i] = _shimRing![src + i];
+        G[src + i + 1] = H - _shimRing![src + i + 1];   // y 镜像（逐顶点）
+        for (let k2 = 2; k2 < LIQ_SHIM_STRIDE; k2++) G[src + i + k2] = _shimRing![src + i + k2];
+      }
+      const e = glw.texFromImage(run.key, run.img as TexImageSource, false, true);
+      if (!e || !glw.quadBatchRgba(e, G.subarray(src, src + nF), run.quads)) { ok = false; break; }
+      continue;
+    }
     const nF = run.quads * LIQ_QUAD_FLOATS;
     const src = run.start * LIQ_QUAD_FLOATS;
     const G = _gateData;
@@ -674,6 +854,8 @@ export function resetLiquidBatchForFrame(frame: number): void {
     _batSoftOvf = false;   // ★C13b 软溢出位随帧复位
     // ★liqpolish ADD 环帧界复位（sparkle/glint 段状态随基底环同生命周期）
     _addN = 0; _addOverflow = false; _spOn = false; _spQuads = 0; _glOn = false; _glQuads = 0;
+    // ★C13c 微光环帧界复位（stride-11 段状态随基底环同生命周期;环缓冲惰性分配不释放）
+    _shimN = 0; _shimOn = false; _shimImg = null; _shimKey = '';
     // ★liqpolish fg 复用账帧界失效（bg pass 重录;失效=fg 走逐 tile 构造原链）
     _bgRunsFrame = -1;
   }
@@ -1511,6 +1693,10 @@ export function drawVanillaLiquids(
   //  =每格 8 sin→0。窗口/水型/帧任一变即失效（stamp 三键）。frameToken 缺省
   //  （无 token 调用）=无缓存,每格写 _wvLocal 单槽（格内 glitter/基色共享）。
   const polish = liqpolish;
+  // ★C13c 臂域:liqC13c ∧ polish（?liqpolish=0 保整条 CPU 原链=正交逃生门;批通道
+  //  在场（batOn 前置）+环惰性建面——灰度关会话零成本）。
+  const c13cOn = liqC13c && polish;
+  if (c13cOn && batOn) ensureShimRings();
   // ★liqpolish:needsPrep（=帧内首 pass/bg）清 fg 复用账（本 pass 重录;
   //  bg 段经 flushRun/flushAddRuns2DAndEmit(record) 登记见下）
   if (needsPrep) {
@@ -1519,7 +1705,9 @@ export function drawVanillaLiquids(
   const tVisPass = polish ? visEffectFrames() : -1;
   let wvRead: Float64Array | null = null;
   let wvWrite: Float64Array | null = null;
-  if (polish) {
+  // ★C13c:波值跨 pass 缓存在本臂退役（§3.2——波值场已上 GPU;stamp 不更新=旗翻回
+  //  CPU 臂时 bg 必重写,防跨旗翻面读到陈旧 stamp 标记下的旧帧数据）
+  if (polish && !c13cOn) {
     if (frameToken !== undefined && _wvTok === frameToken && _wvTVis === tVisPass
       && _wvPh === ph && _wvArr && n <= _wvCap) {
       wvRead = _wvArr;
@@ -1549,6 +1737,28 @@ export function drawVanillaLiquids(
     runImg = null;
     runCols = false;
   };
+  // ★C13c 微光段收口（flushRun 同式;数据源=_shimRing stride 11,发射经 emitShimRun
+  //  → quadBatchRgba 形状分派 → sprite:liqshimmer 程序）。bg pass 登记 fg 复用账
+  //  （shim 段 k=DEFAULT_OPACITY[3];fg 重发射 rgba 同步缩=预乘恒等保持）;fg pass
+  //  gateCapture 登记 _fgRuns（shim:true——gate 重发射走 _gateShimData stride 11）。
+  //  发射失败=2D 原位重放（flushBandRun 判例;宁回退不丢精灵）。 */
+  const flushShimRun = (): void => {
+    const quads = _shimN - _shimStart;
+    if (quads <= 0 || !_shimImg || !bat) return;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    const img = _shimImg, s0 = _shimStart, nQ = quads, k = _shimKey;
+    _shimOn = false;
+    const ok = emitShimRun(bat, s0, nQ, img, k);
+    if (!ok) replayLiqShimRun2D(ctx, s0, nQ, img);   // 入口门拒=2D 原位重放
+    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ, shim: true });
+    if (polish && isBackground && !_batOverflow && !_addOverflow && frameToken !== undefined) {
+      _bgBaseRuns.push({ img, key: k, start: s0, quads: nQ, k: DEFAULT_OPACITY[3], cols: false, shim: true });
+      _bgRunsFrame = frameToken;
+    }
+    _shimStart = _shimN;
+    _shimImg = null;
+  };
   if (gateCapture && isBackground) {
     _footWld.a = wldT.a; _footWld.b = wldT.b; _footWld.c = wldT.c;
     _footWld.d = wldT.d; _footWld.e = wldT.e; _footWld.f = wldT.f;
@@ -1567,6 +1777,27 @@ export function drawVanillaLiquids(
     ctx.globalCompositeOperation = 'source-over';
     for (let ri = 0; ri < _bgBaseRuns.length; ri++) {
       const r = _bgBaseRuns[ri];
+      if (r.shim) {
+        // ★C13c 微光段缩放重发射（stride 11;rgba 同步缩=预乘恒等保持,aTile/aNoise
+        //  原样拷贝——场属性与 α 无关;_fgReuseRing 判例同构禁原位缩放）
+        const nF = r.quads * LIQ_SHIM_QUAD_FLOATS, src = r.start * LIQ_SHIM_QUAD_FLOATS;
+        const S = _shimRing!, D = _fgReuseShimRing!;
+        if (r.k === 1) {
+          D.set(S.subarray(src, src + nF), src);
+        } else {
+          for (let i2 = 0; i2 < nF; i2 += LIQ_SHIM_STRIDE) {
+            const o = src + i2;
+            D[o] = S[o]; D[o + 1] = S[o + 1]; D[o + 2] = S[o + 2]; D[o + 3] = S[o + 3];
+            D[o + 4] = S[o + 4] * r.k; D[o + 5] = S[o + 5] * r.k; D[o + 6] = S[o + 6] * r.k; D[o + 7] = S[o + 7] * r.k;
+            D[o + 8] = S[o + 8]; D[o + 9] = S[o + 9]; D[o + 10] = S[o + 10];
+          }
+        }
+        setLiqShimmerTVis(tVisPass);
+        bat.emit(r.img, r.key, D.subarray(src, src + nF), r.quads,
+          (raw) => replayLiqShimRun2D(raw, r.start, r.quads, r.img));
+        if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads, shim: true });
+        continue;
+      }
       const nF = r.quads * LIQ_QUAD_FLOATS, src = r.start * LIQ_QUAD_FLOATS;
       const S = _batRing, D = _fgReuseRing;
       if (r.k === 1) {
@@ -1688,7 +1919,30 @@ export function drawVanillaLiquids(
         let sparkGa = 0;
         let wv: Float64Array | null = null;
         let wo = 0;
-        if (polish) {
+        if (c13cOn) {
+          // ★C13c 方案 H:噪声 4 sin CPU（aNoise 单源,sparkGa 共享同值）;波值 4 sin 仅
+          //  flag=false 的 sparkle tile 需要（flag 表层 glitter 恒 0.5,基色场已上 GPU=
+          //  基体 tile 8→4 sin）。位等论证:噪声/波值 sin 参数与 polish 臂逐字同式→
+          //  f64 sin 确定性同值;glitter4FromWaves 复用=同代码路径（sparkGa 逐位同,
+          //  单元锁 tests/liquid-c13c-shimmer-glsl.test.ts）。
+          _shimNs[0] = Math.sin(shimmerWhiteNoise(x, y) / 10 + tVis / 180);
+          _shimNs[1] = Math.sin(shimmerWhiteNoise(x + 1, y) / 10 + tVis / 180);
+          _shimNs[2] = Math.sin(shimmerWhiteNoise(x, y + 1) / 10 + tVis / 180);
+          _shimNs[3] = Math.sin(shimmerWhiteNoise(x + 1, y + 1) / 10 + tVis / 180);
+          if (wantSpark) {
+            if (flag) sparkGa = 0.5;
+            else {
+              _shimWv[0] = shimmerWave(x, y, tVis);
+              _shimWv[1] = shimmerWave(x + 1, y, tVis);
+              _shimWv[2] = shimmerWave(x, y + 1, tVis);
+              _shimWv[3] = shimmerWave(x + 1, y + 1, tVis);
+              _shimWv[4] = _shimNs[0]; _shimWv[5] = _shimNs[1];
+              _shimWv[6] = _shimNs[2]; _shimWv[7] = _shimNs[3];
+              glitter4FromWaves(_shimWv, 0, _glit4);
+              sparkGa = (_glit4[0] + _glit4[1] + _glit4[2] + _glit4[3]) * 0.25;
+            }
+          }
+        } else if (polish) {
           if (wvRead) { wv = wvRead; wo = i * 8; }
           else if (wvWrite) { wo = i * 8; shimmerWaves4(x, y, tVis, wvWrite, wo); wv = wvWrite; }
           else { shimmerWaves4(x, y, tVis, _wvLocal, 0); wv = _wvLocal; }
@@ -1714,7 +1968,29 @@ export function drawVanillaLiquids(
         }
         const doSpark = wantSpark && sparkGa > 0.02;
         let batched = false;
-        if (batOn) {
+        if (batOn && c13cOn) {
+          // ★C13c stride-11 微光 quad（方案 H）:主环开放段先收口（层序——微光前的水
+          //  quad 恒先发射;runImg=null=段后主环重开新段,[水][微光][水'] 分段结构与
+          //  现行逐纹理分段同构）;uTVis 单点写入（发射点=渲染段内,visEffectFrames
+          //  不变判例）。aTile=世界px/16 逐角（bob 后 dstY——场采样随液面 bob 同现行
+          //  CPU vT/vB 域）;rgb 预乘恒等（gaT）,场调制全部 FS 内逐像素解析。
+          flushRun();
+          runImg = null;
+          if (_shimOn && _shimImg !== tex) flushShimRun();
+          if (!_shimOn) { _shimOn = true; _shimStart = _shimN; _shimImg = tex; _shimKey = `liqshim:${texId(tex)}`; }
+          setLiqShimmerTVis(tVis);
+          const gaT = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
+          const sex0 = dstX * devSX + devTE, sey0 = dstY * devSY + devTF;
+          const sex1 = (dstX + sw) * devSX + devTE, sey1 = (dstY + drawSh) * devSY + devTF;
+          if (shimQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height,
+            dstX, dstY, sw, drawSh, sex0, sey0, sex1 - sex0, sey1 - sey0, gaT, _shimNs)) {
+            batched = true;
+          } else {
+            batOn = false;             // 微光环帽:批段收口,本 tile 落 CPU 原链
+            flushShimRun();
+            if (polish) flushAddRuns2DAndEmit(ctx, bat!, isBackground);   // 基底先于 ADD 段（重叠序）
+          }
+        } else if (batOn) {
           // ★liqgl 刀2：基底层+波色 = 【顶点色调制单 quad】——原版
           //  SetShimmerVertexColors（LiquidRenderer.cs:745-759）SpriteBatch modulate：
           //  out = tex.premul × baseColor × opacity,GPU 顶点插值≈原版逐顶点插值。
@@ -1835,6 +2111,9 @@ export function drawVanillaLiquids(
         if (!batched) ctx.setTransform(1, 0, 0, 1, 0, 0);   // 回身份变换（设备像素主循环）
         continue;
       }
+      // ★C13c:微光段开放时先收口（非微光 tile 任何批发射/CPU 直画都排其后=层序;
+      //  batOn 已断时 CPU 直画同样需要——shim rec 队列序=2D 流序,flushBandRun 判例同式）
+      if (c13cOn) flushShimRun();
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       // ★设备矩形共享边 ceil 分区（见循环前块注）：不重不漏，分数 zoom 零缝
@@ -1912,6 +2191,7 @@ export function drawVanillaLiquids(
     }
   }
   flushRun();                 // ★liqgl:主循环批段收尾（后随坡面增强/浸润带仍 ctx 直绘）
+  if (c13cOn) flushShimRun();   // ★C13c:微光段收尾（带 pass 前收口=两环域不相交,共用段状态）
   // ★liqpolish:ADD 段收尾（sparkle/glint;必须在基底段之后——重叠序契约）
   if (polish) flushAddRuns2DAndEmit(ctx, bat ?? null, isBackground);
   ctx.setTransform(wldT);   // 恢复世界变换（坡面增强/浸润带仍世界坐标）
@@ -2246,6 +2526,22 @@ export function drawLiquidBehindTilesOnly(
     bsImg = null;
     bsCols = false;
   };
+  // ★C13c 带微光段收口（主循环 flushShimRun 同式;【不】登记 fg 复用/gate 账——
+  //  带 pass 恒 bg 层（isBackground 调用域）且不在 _fgRuns（与 flushBandRun 不登记
+  //  同语义）;段状态（_shimOn/_shimStart/_shimImg）与主循环共用——主循环段已收口
+  //  （主循环尾 flushShimRun 先于本 pass）,纹理互异自动换段。 */
+  const flushShimBandRun = (): void => {
+    const quads = _shimN - _shimStart;
+    if (quads <= 0 || !_shimImg || !batBand) return;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    const img = _shimImg, s0 = _shimStart, nQ = quads, k = _shimKey;
+    _shimOn = false;
+    const ok = emitShimRun(batBand, s0, nQ, img, k);
+    if (!ok) replayLiqShimRun2D(ctx, s0, nQ, img);   // 入口门拒=2D 原位重放
+    _shimStart = _shimN;
+    _shimImg = null;
+  };
   /** 带 quad 入基底环（batQuad 同式;★C13b 扩参:a=带 alpha（微光臂恒 1）,cols=四角
    *  波色（非微光臂 null=rgb 预乘恒等）,soft=true=软溢出域）。 */
   const bandQuadEmit = (
@@ -2560,7 +2856,41 @@ export function drawLiquidBehindTilesOnly(
         //  drawImage rec+applyShimmerBaseTint 4×MULT solid rec → 顶点色调制 SO quad
         //  （tex.premul×vCol=modulate 单式;multiply 在 AA 边的 (1−αdst) 补正项缺席
         //  =liqgl 刀2 同族登记偏差）。段按带表纹理同质（Liquid_14/LiquidSlope_14）。
-        if (bandBatOn) {
+        if (bandBatOn && liqC13c) {
+          // ★C13c 带微光臂:stride-11 quad 入微光环（方案 H——噪声 4 sin CPU,波场 FS;
+          //  主环开放带段先收口=层序;段状态与主循环共用,纹理互异自动换段）。
+          //  aTile 世界矩形:主段=带矩形（px,py+bob,dstW,dstH）;越界余段=带矩形外扩域
+          //  （aTile 随矩形连续延伸=场连续域 ✓ bobDy251 位移随 py 进 aTile 域=与现行
+          //  CPU cols 臂 bvT/bvB 含 bob 同构）。
+          const tVb = bandTVis < 0 ? (bandTVis = visEffectFrames()) : bandTVis;
+          flushBandRun();
+          _shimNs[0] = Math.sin(shimmerWhiteNoise(x, y) / 10 + tVb / 180);
+          _shimNs[1] = Math.sin(shimmerWhiteNoise(x + 1, y) / 10 + tVb / 180);
+          _shimNs[2] = Math.sin(shimmerWhiteNoise(x, y + 1) / 10 + tVb / 180);
+          _shimNs[3] = Math.sin(shimmerWhiteNoise(x + 1, y + 1) / 10 + tVb / 180);
+          if (_shimOn && _shimImg !== drawTex) flushShimBandRun();
+          if (!_shimOn) { _shimOn = true; _shimStart = _shimN; _shimImg = drawTex; _shimKey = `liqshim:${texId(drawTex)}`; }
+          setLiqShimmerTVis(tVb);
+          const bdx0 = px * bandDevX + bandDevE, bdy0 = (py + bobDy251) * bandDevY + bandDevF;
+          const bgx1 = (px + dstW) * bandDevX + bandDevE, bgy1 = (py + bobDy251 + dstH) * bandDevY + bandDevF;
+          // 主段 + 越界余段（drawBand 逐字拆 quad;全部同纹理=同段;a=1 不透明 bg 带）
+          let bOk = shimQuad(srx, ry, srcW, srcH, drawTex.width, drawTex.height,
+            px, py + bobDy251, dstW, dstH, bdx0, bdy0, bgx1 - bdx0, bgy1 - bdy0, 1, _shimNs);
+          if (bOk && rh > srcH) {
+            bOk = shimQuad(srx, texEdgeY, srcW, 1, drawTex.width, drawTex.height,
+              px, py + bobDy251 + dstH, dstW, rh - srcH,
+              bdx0, (py + bobDy251 + dstH) * bandDevY + bandDevF,
+              dstW * bandDevX, (rh - srcH) * bandDevY, 1, _shimNs);
+          }
+          if (bOk && rw > srcW) {
+            bOk = shimQuad(drawTex.width - 1, ry, 1, srcH, drawTex.width, drawTex.height,
+              px + dstW, py + bobDy251, rw - srcW, dstH,
+              (px + dstW) * bandDevX + bandDevE, bdy0,
+              (rw - srcW) * bandDevX, bgy1 - bdy0, 1, _shimNs);
+          }
+          if (bOk) continue;
+          flushShimBandRun();   // 溢出:段收口,本 tile 落 CPU 原链
+        } else if (bandBatOn) {
           const tVb = bandTVis < 0 ? (bandTVis = visEffectFrames()) : bandTVis;
           if (bsImg !== drawTex) { flushBandRun(); bsImg = drawTex; bsKey = `liqband:${texId(drawTex)}`; bsCols = true; }
           // 裁剪角（带矩形相对格原点归一;v 含 bob 位移——与 applyShimmerBaseTint
@@ -2631,6 +2961,9 @@ export function drawLiquidBehindTilesOnly(
       //  （微光带 a=1 幂等重画域,此处不成立）,故不许部分入环。
       //  【亮线同批】III256 亮线与带同 tile 相邻序（带→线）;纹理异（LiquidSlope_N
       //  vs Liquid_N）时 flushBandRun 换段——段序=绘制序逐位同。
+      // ★C13c:微光带段开放时先收口（非微光带任何发射/CPU 直画排其后=层序;
+      //  bandBatC13b 关=CPU 直画同样需要——shim rec 队列序=2D 流序）
+      if (bandBatOn && liqC13c) flushShimBandRun();
       if (bandBatC13b && !_batSoftOvf) {
         const lineQ = solidLayer && (slope === 1 || slope === 2) && Uq === 0
           && !st.isSolidStrict(x, y - 1) && (fL || fR);
@@ -2706,6 +3039,7 @@ export function drawLiquidBehindTilesOnly(
   // ★liqpolish:带批段收尾（基底环续交;带 rec 在水 ADD 段之后=与直画序同）。
   // ★C13b:双臂任一开即收口（bandBatC13b 的 run 共享同一状态机,漏收=段永不发射）。
   if (bandBatOn || bandBatC13b) flushBandRun();
+  if (bandBatOn && liqC13c) flushShimBandRun();   // ★C13c:带微光段收尾
   // ★IIIII251：足迹画完恢复 identity（beginFgPass 每帧重设变换，此处为防御复位）
   if (footprintCtx) footprintCtx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;

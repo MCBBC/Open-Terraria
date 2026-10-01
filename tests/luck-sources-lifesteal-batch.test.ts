@@ -94,7 +94,7 @@ describe('火把僵尸 590/591 手持火把点光（NPC.cs:57309-57366）', () =
 });
 
 describe('吸血链分发（Projectile.cs:12877-12892）', () => {
-  interface Log { calls: Array<[string, number]>; }
+  interface Log { calls: Array<[string, number, number, number, number, boolean]>; }
   function makeGame(log: Log, enemy: unknown): GameHooks {
     return {
       world: new World(64, 32, 42, '测试'),
@@ -102,7 +102,10 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
       enemies: () => [enemy], critters: () => [], spawnDrop: () => null,
       damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       spawnParticles: () => {}, playSfxFiles: () => {},
-      applyLifeSteal: (kind: 'vampire' | 'ghost', dmg: number) => { log.calls.push([kind, dmg]); return 0; },
+      applyLifeSteal: (kind: 'vampire' | 'ghost', dmg: number, numHits: number,
+        x: number, y: number, isMagic?: boolean) => {
+        log.calls.push([kind, dmg, numHits, x, y, !!isMagic]); return 0;
+      },
     } as unknown as GameHooks;
   }
   function targetEnemy(x: number): { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: () => boolean } {
@@ -119,7 +122,7 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
     expect(log.calls[0][1]).toBe(100);
   });
 
-  it('魔法弹命中 → ghost；非魔法非 304 弹不分发', () => {
+  it('魔法弹命中 → ghost（isMagic=true）;非魔法弹 → ghost 白耗面（isMagic=false）', () => {
     const log: Log = { calls: [] };
     const game = makeGame(log, targetEnemy(30 * 16));
     // 恶魔镰刀 15（vanilla-projectiles magic=true）
@@ -127,11 +130,18 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
     for (let i = 0; i < 8 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     expect(log.calls.length).toBe(1);
     expect(log.calls[0][0]).toBe('ghost');
+    expect(log.calls[0][5]).toBe(true);     // isMagic 直传（治疗面）
     const log2: Log = { calls: [] };
     const game2 = makeGame(log2, targetEnemy(30 * 16));
-    // 木箭 1（melee/ranged 均非）→ 不进吸血链
+    // 木箭 1（数据面非 magic）→ ghostHeal 白耗面照走：:12090 `lifeSteal -= num2`
+    //   先于 :12091-93 `if (!magic) return`，调用点 :13877-79 无类别门 ⇒ 非 magic
+    //   PVE 命中在幽灵兜帽在身时白扣治疗预算不出治疗球=原版本相（★清偿刀 S2-债1
+    //   定谳 + U2 判别面复核；旧断言「非魔法不分发」=摘门前的陈旧 oracle 已改判）。
+    //   真扣不回复由 Game.applyLifeSteal :43432-33 承载（本 mock 直记调用面）。
     const b = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 1, { grav: 0, life: 300, pierce: 1 });
     for (let i = 0; i < 8 && !b.dead; i++) b.fixedUpdate(1 / 60, game2);
-    expect(log2.calls.length).toBe(0);
+    expect(log2.calls.length).toBe(1);
+    expect(log2.calls[0][0]).toBe('ghost');
+    expect(log2.calls[0][5]).toBe(false);   // isMagic=false 忠实直传
   });
 });

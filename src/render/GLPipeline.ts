@@ -75,9 +75,6 @@ export class GLPipeline {
   /** Renderer 分体画布注入（glCanvas=DOM 呈现面）时置 true——over present 走
    *  premul source-over 叠合并入栈；replace present（内部读回面）不入栈。 */
   screenStackMode = false;
-  /** 帧首清屏闩：本帧首个会话 begin 触发 clearScreenForStack（帧头 pipe 可能尚未
-   *  建立,不能在 render 头清——由 GLSpriteLayer.begin 代理首拍） */
-  screenCleared = false;
   /** 本帧已 over-present 的 FBO 序（层序=入栈序;restack 重放源） */
   private screenStack: PipelineFbo[] = [];
   private gl: WebGL2RenderingContext | null = null;
@@ -336,7 +333,6 @@ export class GLPipeline {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     this.screenStack.length = 0;
-    this.screenCleared = true;
   }
 
   /** ★C10e 内部 present（blend off 直写读回面）踩踏屏面后的恢复：清屏+按栈重放
