@@ -433,6 +433,18 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           ui.hideProgress();
           stopMenu();   // 撤菜单幕布+清 VUI 加载页(世界已上屏,零空窗)
           ui.setHudSuppressed(false);   // ★掀幕同帧放行 HUD（开启沿挂载;幂等,旗关=无类可摘零变化）
+          // ★K3 星批 idle 预热（2026-10-01）:首夜帧 ~132ms 尖峰（sprite:precip 惰性
+          //  编译+Star_0..3 纹理首传）消解——世界就绪掀幕后的空闲期预编译/预传
+          //  （SkyRenderer.prewarmStarBatch:loadTex 触发+就绪预传+GL 层 prewarmPrecip;
+          //  失败静默=首夜照旧惰性路径）。rIC 空闲期执行不与首屏渲染争帧;
+          //  worker/node 判死守卫在 prewarmStarBatch 内（typeof document）。
+          {
+            const prewarmStars = (): void => {
+              try { g.renderer.sky.prewarmStarBatch(); } catch { /* 预热失败=惰性路径兜底 */ }
+            };
+            if (typeof requestIdleCallback === 'function') requestIdleCallback(prewarmStars, { timeout: 2000 });
+            else setTimeout(prewarmStars, 100);
+          }
           // SW-BN2 2026-09-07（用户令#3）：欢迎语键位标注改【活绑表驱动】——曾硬编码
           // "A/D 移动，空格跳跃，E 背包，Esc 暂停"，缺省表对齐原版后 E/背包含义反转
           // 即刻陈旧。四段标签全部经 keybindHintLabel 现读 bindsOf（重绑跟随）；

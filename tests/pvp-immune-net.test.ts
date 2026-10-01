@@ -80,7 +80,7 @@ function mkNet(mySlot: number, hooks: Record<string, unknown> = {}, player: Reco
     {
       player: {
         appearance: null, hostile: false, team: 0,
-        inv: { slots: [], armor: [], dye: [], selected: 0 },
+        inv: { slots: [], armor: [], dye: [], miscDyes: [], selected: 0 },   // ★X2 补桩:Q3（7ca51ffd）四容器 +miscDyes[5]
         x: 0, y: 0, vx: 0, vy: 0, facing: 1, dead: false, sleeping: false,
         inputX: 0, inputJump: false, inputDown: false, inputUp: false,
         hp: 100, maxHp: 100, deathsPve: 0, deathsPvp: 0, mana: 50, maxMana: 100, luck: 0,

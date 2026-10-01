@@ -137,18 +137,24 @@ describe('结构锁（变异即红）', () => {
     const iClear = f.indexOf('this.mouseOversClear()');
     const iSplit = f.indexOf('if (!this.paused) {');
     const iFixed = f.indexOf('this.fixedUpdate(FIXED_DT)');
-    const iSuppress = f.indexOf('return;   // SuppressDraw');
+    // ★X2 重锚（2026-10-01）：SuppressDraw 早退分支已退役（Game.ts 帧模式注
+    //   「本分支已退役(2026-09-28 调度面修复刃)」——0 步进帧照常渲染,绘制相
+    //   无早退,frame() 内已无任何 return）,旧锚 'return;   // SuppressDraw' 锚面灭。
+    //   重建拍不变量同值改锚逻辑相收尾行（累计器块末 = !paused 分支尾）：
+    //   refresh 仍恒在整段逻辑相之后、render 之前 = 每【绘制】帧语义不变。
+    const iLogicEnd = f.indexOf('this._lastPlayerCx = this.player.cx;');
     const iRefresh = f.indexOf('this.refreshCursorIconDrawState()');
     const iRender = f.indexOf('this.render()');
     for (const [name, i] of [['autoPause', iAuto], ['clear', iClear], ['split', iSplit],
-      ['fixed', iFixed], ['suppress', iSuppress], ['refresh', iRefresh], ['render', iRender]] as const) {
+      ['fixed', iFixed], ['logicEnd', iLogicEnd], ['refresh', iRefresh], ['render', iRender]] as const) {
       expect(i, name).toBeGreaterThan(0);
     }
     // 清空拍先于暂停分支（原版 MouseOversClear :17213 先于 gamePaused 门 :17372 同位）
     expect(iClear, '清零须在暂停分支前（暂停拍也清）').toBeGreaterThan(iAuto);
     expect(iClear).toBeLessThan(iSplit);
-    // 重建拍在 SuppressDraw 早退之后、render 之前（=每【绘制】帧,原版 Verification 在 draw 内同相）
-    expect(iRefresh).toBeGreaterThan(iSuppress);
+    // 重建拍在逻辑相收尾之后、render 之前（=每【绘制】帧,原版 Verification 在 draw 内
+    // 同相;SuppressDraw 抑制帧面已随分支退役归一——0 步进帧照常渲染）
+    expect(iRefresh).toBeGreaterThan(iLogicEnd);
     expect(iRefresh).toBeLessThan(iRender);
   });
 

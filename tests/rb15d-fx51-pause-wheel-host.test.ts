@@ -43,14 +43,29 @@ const gameSrc = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
 const uiSrc = readFileSync(join(ROOT, 'src/ui/UI.ts'), 'utf8');
 
 describe('RB15d-FX51 暂停期滚轮：宿主死机制结构锁（翻案存证）', () => {
-  it('H1 fixedUpdate 全仓唯一调用点在 frame() !paused 门体内（暂停期消费宿主死=:17372-17377 同相）', () => {
+  it('H1 fixedUpdate 调用点=frame() !paused 门体内 + onPumpMsg 后台泵（pumpGate !paused 门后;暂停期两路皆死=:17372-17377 同相）', () => {
+    // ★X2 重锚（2026-10-01）:后台挂机泵（53591c24,2026-09-28）新增 onPumpMsg 第二
+    //  调用点——pumpGate（BackgroundPumpCore.ts:42）真值表含 !i.paused（暂停=用户
+    //  选择,泵拒驱动）→ 暂停窗两路皆死,宿主死机制不变;「第二调用点=暂停窗活路径」
+    //  旧前提由②泵门替位锁承保。
     const calls = [...gameSrc.matchAll(/this\.fixedUpdate\(FIXED_DT\)/g)].map((m) => m.index!);
-    expect(calls, 'fixedUpdate 调用点必须唯一（第二调用点=暂停窗活路径,滚轮/生成/液体全破）').toHaveLength(1);
-    const gate = gameSrc.lastIndexOf('if (!this.paused) {', calls[0]);
+    expect(calls, 'fixedUpdate 调用点恒两处:frame() 模拟相 + onPumpMsg 后台泵（出现第三处=新增宿主面须过审）').toHaveLength(2);
+    // ① frame() 调用点（后一处）仍须在 !paused 门体内（原锁语义保持）
+    const gate = gameSrc.lastIndexOf('if (!this.paused) {', calls[1]);
     expect(gate).toBeGreaterThan(-1);
     // 门与调用点之间不得出现同缩进层（4 空格）块闭合——出现即调用点已不在门体内
-    const between = gameSrc.slice(gate, calls[0]);
+    const between = gameSrc.slice(gate, calls[1]);
     expect(/^    \}/m.test(between), '调用点脱离 !paused 门体=暂停期滚轮/生成/液体全部复活').toBe(false);
+    // ② 泵调用点（前一处）须在 pumpGate 展开消费之后（含 paused 字段传参=门后）,
+    //    且门体与步进之间不得有同缩进层块闭合（脱门即暂停窗活路径复活）
+    const pumpCall = calls[0];
+    const pumpGateUse = gameSrc.lastIndexOf('pumpGate({', pumpCall);
+    expect(pumpGateUse, '泵 fixedUpdate 须在 pumpGate 消费之后').toBeGreaterThan(-1);
+    const gateArgs = gameSrc.slice(pumpGateUse, pumpCall);
+    expect(gateArgs).toContain('paused: this.paused,');
+    expect(gateArgs).toContain('})) return;');
+    expect(/^    \}/m.test(gameSrc.slice(gameSrc.indexOf('})) return;', pumpGateUse), pumpCall)),
+      '泵步进脱离 pumpGate 门体=暂停期后台消费复活').toBe(false);
   });
 
   it('H2 滚轮分支树宿主=fixedUpdate（树在签名与下一方法之间,移出=暂停窗活路径,即红）', () => {

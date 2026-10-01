@@ -35374,6 +35374,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const i = st.idx(cl.x, cl.y);
       st.liquid[i] = cl.liquid;
       st.liquidType[i] = cl.liquidType;
+      // ★BJ427-W2（2026-10-01）清偿 C9d2 登记债「联机 netApplyLiquid 直写面漏闸」:
+      //  直写不入 tileWriteLog → worker delta 影子陈旧 ≤120 帧才被锚帧自愈——补推送
+      //  （本地 log=null 零开销;与 liquidDirty 标脏同刻,访客端 worker 面同收）
+      st.tileWriteLog?.push(i);
       if (wake && cl.liquid > 0) this.liquid.addWater(cl.x, cl.y);
     }
     if (this.lighting) this.lighting.liquidDirty = true;

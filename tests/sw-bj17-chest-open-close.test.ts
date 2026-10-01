@@ -208,9 +208,14 @@ describe('SW-BJ17 渲染姿态 chestLidPoseAt / drawVanillaCell', () => {
     //   （chestLidPoseAt 是 O(chests) 全表查,急切求值=烘焙成本放大器）。
     expect(vt).toContain('chestPose > 0 && chestPoseSheet(sheet)) ofy += chestPose * 38');
     expect(vt).toContain('export function chestPoseSheet(sheet: number): boolean {\n  return sheet === 21 || sheet === 467;\n}');
+    // ★X2 重锚（2026-10-01）:C4 烘焙 Worker 化（77163898,2026-09-28）——姿态喂点随
+    //  烘焙内核迁至 ChunkBake.ts（主遍 :290 + 上溢补绘条带 :358,env.chests 注入态,
+    //  门控短路形态保持）;ChunkCache 经 bakeEnv 传 world.chests。
+    const cb = readFileSync(new URL('../src/render/ChunkBake.ts', import.meta.url), 'utf8');
     const cc = readFileSync(new URL('../src/render/ChunkCache.ts', import.meta.url), 'utf8');
-    expect(cc.match(/chestLidPoseAt\(this\.world\.chests/g)?.length).toBe(2);  // 主遍+上溢补绘条带
-    expect(cc.match(/chestPoseSheet\((\w+\.)?vanilla\.sheet\)|chestPoseSheet\(sheet\)/g)?.length).toBe(2); // ★两路皆门控短路
+    expect(cb.match(/chestLidPoseAt\(env\.chests/g)?.length).toBe(2);  // 主遍+上溢补绘条带
+    expect(cb.match(/chestPoseSheet\((\w+\.)?vanilla\.sheet\)|chestPoseSheet\(sheet\)/g)?.length).toBe(2); // ★两路皆门控短路
+    expect(cc).toContain('chests: this.world.chests');   // bakeEnv 注入链在位
     const g = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     expect(g).toContain('this.updateChestFrames();   // ★SW-BJ17 2026-09-07');
   });

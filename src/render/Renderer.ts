@@ -3394,7 +3394,17 @@ export class Renderer {
   /** 本帧已做「sky2D+glCanvas→HUD 全帧合成」（幂等闩——死亡灰化/重力翻转等
    *  全帧自拷消费者各有一个触发点,先到先得） */
   private _c10eComposited = false;
-  /** 滤镜链输入合成 scratch（懒建;仅 passes 非空帧使用,链头三 blit 合成全帧） */
+  /** ★K1（2026-10-01）滤镜待发预测：P1/P2 全帧合成门拓宽臂。滤镜链活动帧把
+   *  「sky2D+glCanvas→HUD」合成提前到 7x 直绘覆盖层（尘/拖尾/翼光/智能光标…）
+   *  落笔之前跑,链输入直取 HUD——省折叠 scratch 清屏+HUD 腿两次全幅搬运
+   *  （trace 定谳 15% 墙钟主炸点;原版采集界=Main.cs:63050 BeginCapture(天空)→
+   *  :63279 EndCapture(Dust/Obstruction 后、UI 前)→HUD 侧覆盖层恒在滤镜输入内,
+   *  语义同原）。谓词=drawScreenFilterChain 块门保守超集（?c10ek1=0 逃生门）,
+   *  render() 帧分类下半每帧一次。误真帧（预测后链未跑）多付一次合成=边界帧
+   *  登记;误假帧=链输入缺 HUD 覆盖层=禁止。 */
+  private _c10eFilterPending = false;
+  /** 滤镜链输入合成 scratch（懒建;仅未合成帧的链调用使用,链头三 blit 合成全帧;
+   *  ★K1 后合成闩在帧（xform∨滤镜待发）走 HUD 直取,不再进本路径） */
   private _c10eChainScratch: HTMLCanvasElement | null = null;
   private _c10eChainScratchCtx: CanvasRenderingContext2D | null = null;
   /** ★C10e 全帧自拷消费者在帧（死亡灰化 / 重力翻转整幅自拷镜像）——P1/P2 合成
@@ -3404,6 +3414,21 @@ export class Renderer {
     if (player.gravDir === -1) return true;   // cam.flipY 同源（render 头逐帧同式赋值）
     return player.dead && player.immuneAlpha > 0 && !player.isGhostPhase(world)
       && 'filter' in this.ctx;
+  }
+  /** ★K1:滤镜待发谓词（只读;render() 帧分类下半 _c10eWorldToHud 赋值后每帧
+   *  单次调用——P1 位之前）。与 drawScreenFilterChain 块门（!anyInUse&&
+   *  !heatInUse&&shakeI<=0&&!towVisible 早退）同源取保守超集：月总倒计时用
+   *  >0 整臂（正弦负半相帧 shakeI=0 链不跑,多付一次合成=登记口径,免公式
+   *  复制漂移）;塔染色用 tow!=null∨斜坡>0 双臂（1/s 斜坡升沿帧 opacity 仍 0、
+   *  降沿帧塔已出 Zone 而链照跑——预测必须覆盖两沿）。sfxgl=0/K1 逃生门关
+   *  →链恒走折叠 scratch 原路径,合成纯亏 → 不预测。 */
+  private c10eFilterPending(world: World, player: Player): boolean {
+    if (!Renderer.sfxPipe || !Renderer.c10eK1) return false;
+    const mono = this.monoFilters;
+    if (mono.anyInUse || mono.heatInUse) return true;
+    if (world.lunarEvent && world.lunarEvent.moonLordCountdown > 0) return true;
+    if (this._towerFilterOpacity > 0) return true;
+    return this._lunarTowerFilterTarget(this._frameEntities, player.cx, player.cy, world) != null;
   }
   /** sky2D 画布（C10e 底层;旗关=null 零创建） */
   skyCanvas: HTMLCanvasElement | null = null;
@@ -3920,7 +3945,10 @@ export class Renderer {
    *  此后 HUD 含完整画面,自拷语义与原单画布逐位同。幂等（_c10eComposited 闩）。
    *  glCanvas 缺席（管线死窗,已隐藏）时只合成 sky2D——sky2D 序列含渐变/星/远云/
    *  biomeBg 2D 回退全量,世界由 2D 链随后落 HUD ✓。合成后 glCanvas 内容被 HUD
-   *  覆盖（天空渐变不透明）,视觉零差。 */
+   *  覆盖（天空渐变不透明）,视觉零差。
+   *  ★K1（2026-10-01）:消费面拓宽——滤镜链活动帧（_c10eFilterPending,含非
+   *  xform）同样在此合成,合成产物即滤镜链输入（链源直取 HUD,折叠 scratch 退役）,
+   *  见 drawScreenFilterChain K1 分档注。 */
   /** ★A3 债收齐（2026-10-01）：GL 夹层增量合成——只画 glCanvas（sky2D 已在 P1
    *  入 HUD）。消费位=夹层路由帧（_c10eWorldToHud）+ P1 已合成 + 本帧 GL 夹层
    *  会话（'lantern' near/'ambgl'）已发射：死亡灰化/重力翻转的「整幅自拷
@@ -3941,11 +3969,17 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'source-over';
+    // ★K1（2026-10-01）:destination-over=合成落【既有 HUD 内容之下】。K1 门拓宽后
+    //  合成可能跑在气球/credits/2D 回退覆盖层已落笔之后——这些覆盖层恒在 sky/gl
+    //  之上（原版采集界内=背景后 UI 前）,source-over 会用不透明天空埋掉它们;
+    //  空 HUD 帧（xform 原门常态）与 source-over 逐位同。gl 先 sky 后=dest-over
+    //  逐层垫底 ≙ source-over 的 sky→gl 序（porter-duff 逆序构造,层序不变式:
+    //  sky < gl < 既有 HUD 覆盖层）。
+    ctx.globalCompositeOperation = 'destination-over';
     ctx.globalAlpha = 1;
-    if (this.skyCanvas) ctx.drawImage(this.skyCanvas, 0, 0);
     const pipe = this.swPipe;
     if (this.glCanvasEl && pipe && !pipe.unavailable) ctx.drawImage(this.glCanvasEl, 0, 0);
+    if (this.skyCanvas) ctx.drawImage(this.skyCanvas, 0, 0);
     ctx.restore();
     this._c10eCompositeStats = (this._c10eCompositeStats || 0) + 1;
   }
@@ -3957,7 +3991,11 @@ export class Renderer {
    *  （sky2D→scratch 2D、glCanvas→scratch【本帧唯一跨上下文拷贝,登记面】、
    *  HUD→scratch 2D——HUD 内容(夹层族/世界 blit/post-present) 恒最上层 ✓）。
    *  链输出 blit→HUD 照旧。幂等无（每链调用一折叠;链每帧至多一次）。
-   *  旗关/回退帧=主画布原路径零变化。 */
+   *  旗关/回退帧=主画布原路径零变化。
+   *  ★K1（2026-10-01）热路径退役:合成闩在帧（xform∨滤镜待发）链源直取 HUD
+   *  （=sky2D+glCanvas 已在 P1/P2 合成进 HUD+7x 覆盖层在其上）,不再进本折叠;
+   *  本路径保留给 2D 回退链（drawChain/drawHeat2D/mono.draw——目标=HUD 本身,
+   *  源取 HUD 有自绘读写别名风险,必须独立 scratch）与未合成帧。 */
   private c10eChainSource(): HTMLCanvasElement {
     if (!this._c10eFrame || !this.skyCanvas) return this.canvas;
     const w = this.canvas.width, h = this.canvas.height;
@@ -5145,6 +5183,9 @@ export class Renderer {
     //  状态=与 opresent 门同相（见上半注）。
     this._c10eWorldToHud = this._c10eFrame
       && (this.sky.worldRouteInterlayerPending() || this.monoFilters.shimmerAlpha > 0);
+    // ★K1:滤镜待发预测（P1 位之前定谳;谓词/登记口径见 c10eFilterPending 方法注）
+    this._c10eFilterPending = this._c10eFrame
+      && this.c10eFilterPending(world, player);
 
     // ★opresent 前置:世界层缩放系数在此定值（原计算在世界层切换段,opresent 合并
     //  门须在 bg 段判 wK——defer 一旦成立,天空栈 blit 即被豁免,门条件必须先于
@@ -5285,8 +5326,11 @@ export class Renderer {
       //  翻转）→ 在夹层族落笔前把 sky2D+glCanvas 合成进 HUD——此后 HUD=完整画面
       //  （夹层族→世界 blit→自拷全链在单画布上,自拷语义与原单画布逐位同）。
       //  纯帧的合成点在 compositeLight 后（P2）——幂等闩防双份。
+      // ★K1（2026-10-01）:门拓宽——滤镜待发帧（含非 xform）也在此合成（P1 位=
+      //  夹层族/世界 blit 落笔前;合成 destination-over 垫底,既有 HUD 覆盖层保序）。
+      //  合成后 HUD=全帧,滤镜链输入直取主画布（drawScreenFilterChain K1 分档）。
       if (this._c10eFrame && this._c10eWorldToHud && !this._c10eComposited
-        && this.c10eFullXformCond(player, world)) {
+        && (this.c10eFullXformCond(player, world) || this._c10eFilterPending)) {
         this.c10eCompositeIntoHud();
       }
       // 灯笼夜 near 带 + 派对气球（DrawRemainingDepth :59055 = 全部背景层【含群系
@@ -6090,7 +6134,13 @@ export class Renderer {
     //  （死亡灰化/重力翻转）→ 世界 present 已进 glCanvas（over 栈），此处把
     //  sky2D+glCanvas 合成进 HUD=完整画面，其后自拷/滤镜链输入语义与原单画布
     //  逐位同。夹层帧在 P1（bg 段）已合成——幂等闩防双份。
-    if (this._c10eFrame && !this._c10eComposited && this.c10eFullXformCond(player, world)) {
+    // ★K1（2026-10-01）:门拓宽——纯帧滤镜待发（含非 xform）也在此合成。位=7x
+    //  直绘覆盖层（尘/拖尾/翼光/智能光标/标尺/遮屏孔…）落笔之前,覆盖层全部落在
+    //  合成内容之上 → 滤镜链输入=完整采集帧（原版采集界 Main.cs:63050
+    //  BeginCapture(天空)→:63279 EndCapture(Dust/ScreenObstruction 后、UI 前)）。
+    //  xform 帧原门已覆盖;夹层帧在 P1（幂等闩防双份）。
+    if (this._c10eFrame && !this._c10eComposited
+      && (this.c10eFullXformCond(player, world) || this._c10eFilterPending)) {
       this.c10eCompositeIntoHud();
     }
 
@@ -7061,6 +7111,16 @@ export class Renderer {
     } catch { return false; }
   })();
   static get sfxPipe() { return this._sfxPipe; }
+  /** ★K1（2026-10-01）滤镜链源折叠瘦身总门:?c10ek1=0 逃生门=链源恒走三画布
+   *  折叠 scratch 原路径（P1/P2 门不拓宽/链源不取 HUD——逐项回 K1 前行为;
+   *  compositeIntoHud 的 destination-over 为无条件的正确性改良,不随本门回退,
+   *  空 HUD 帧与 source-over 逐位同）。探针 scripts/_k1-fold-ab.mjs A/B 用。 */
+  private static _c10eK1 = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('c10ek1') !== '0';
+    } catch { return true; }
+  })();
+  static get c10eK1() { return this._c10eK1; }
   static sfxPipeSetForTest(v: boolean): void { this._sfxPipe = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
@@ -18992,10 +19052,16 @@ export class Renderer {
         if (Renderer.sfxPipe && this._worldLowK === 1) {
           const pipe = this.acquireSwPipe();
           if (pipe && !pipe.unavailable) {
-            // ★C10e:链输入换全帧合成 scratch（链采「整个画面」——c10e 下画面分居
-            //  三画布;scratch=sky2D+glCanvas+HUD-so-far 单画布折叠,HUD 后续层照常
-            //  叠加。旗关/回退帧=主画布原路径）
-            chainOk = gl.drawChainPipe(pipe, this.c10eChainSource(), passes, [
+            // ★K1（2026-10-01）:链输入源分档——合成闩在（P1/P2 门拓宽:xform∨滤镜
+            //  待发帧）→ HUD 已含 sky2D+glCanvas 全帧+7x 直绘覆盖层=链源直取主画布,
+            //  省折叠 scratch 清屏+HUD 腿两次全幅搬运（trace 定谳 15% 墙钟主炸点;
+            //  xform∩滤镜帧另消「sky+gl 二次叠 ±1LSB」登记债）。未合成帧（sfxgl=0/
+            //  c10ek1=0/低清/预测漏/管线帧中暴毙）=原三画布折叠 scratch 原路径。
+            //  采集界=原版 BeginCapture(天空)→EndCapture(Dust/Obstruction 后、UI 前)
+            //  （Main.cs:63050/:63279）——两档语义同。
+            const chainSrc = (Renderer.c10eK1 && this._c10eFrame && this._c10eComposited)
+              ? this.canvas : this.c10eChainSource();
+            chainOk = gl.drawChainPipe(pipe, chainSrc, passes, [
               this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
             ]);
             if (chainOk) {

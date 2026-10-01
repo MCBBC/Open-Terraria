@@ -282,18 +282,25 @@ describe('SW-AZ1 结构锁', () => {
     // 同步/结算挂点：智能选取之前同步（PickItemSelectionOverride 先于 SmartSelectLookup），
     // updateUse 之后结算
     expect(game).toMatch(/this\.syncCursorMirror\(\);[\s\S]{0,200}this\.updateSmartSelect\(\);/);
-    expect(game).toMatch(/this\.updateUse\(dt\);[\s\S]{0,200}this\.commitCursorMirror\(\);/);
+    // ★X2 窗口重锚（2026-10-01）:{0,200}→{0,400}——HEAD 9c545615 落 _afkKiteForceUse
+    //  旗尾清（★Q4 刀）插行+注于 updateUse 与 commitCursorMirror 之间( gap 200→343),
+    //  结算序不变量完好;窗口放宽保序锁判别力（commitCursorMirror 前移仍必红）
+    expect(game).toMatch(/this\.updateUse\(dt\);[\s\S]{0,400}this\.commitCursorMirror\(\);/);
     // CanChangeSelectedItemImmediately 门（:415-421）三臂
     expect(game).toMatch(/if \(this\.usingOrReusingItem\(\) \|\| this\._dirtRodChannel \|\| this\.player\.useTime !== 0\) return;/);
   });
 
-  it('Game 手持消耗统一入口：56 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
+  it('Game 手持消耗统一入口：57 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
     // ★2026-09-08:56→57——SW-BN5 换墙批新增 ReplaceWall 消费位(Game.ts:21297,
     //  换墙消耗手持墙件=合法入账;行为面仍由"全走 removeHeld+无 removeAt 残留"两钉锁死)
     // ★RB17a-R7（2026-09-14）重锚:57→56——第 57 处（宝藏袋持用左键开包链 removeHeld）
     //  已随 commit 31604771「§五裁决:开包唯 ItemSlot 右键首支」整支摘除（自创消费面
     //  合法退役,非丢失扣减;HEAD~2=57→HEAD~=56 亲证）,锁数随实际消费位回落。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(56);
+    // ★X2 重锚（2026-10-01）:56→57——commit bf69b208 风筝锚放置补扣位
+    //  （TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook :46-48——
+    //  consumable=false 风筝跳过通用消耗门,原版钩子补扣 1;旧注「与通用 removeAt
+    //  等量,无需另扣」系误读=放置零消耗回收复制,用户实报根因修复）,合法入账。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(57);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

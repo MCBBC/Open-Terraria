@@ -69,28 +69,35 @@ describe('动态层设备空间 doctrine 结构闸门', () => {
   });
 
   it('烘焙跳过表 ↔ 动态消费表双向闭合（跳过无消费=隐形,消费无跳过=重影）', () => {
+    // ★X2 重锚（2026-10-01）:C4 烘焙 Worker 化（77163898,2026-09-28）——烘焙内核
+    //  （bakeChunkInto/bakeChunkBody+跳过表）整体迁出至 ChunkBake.ts（主线程/worker
+    //  同一函数对象,wbake-* 把门）;ChunkCache 保留 isDynamicAnimSheet 消费（动画格
+    //  census）。跳过表读取面随迁,消费侧锚不变。
     const chunk = readFileSync(`${ROOT}/game/src/render/ChunkCache.ts`, 'utf8');
+    const bake = readFileSync(`${ROOT}/game/src/render/ChunkBake.ts`, 'utf8');
     const renderer = readFileSync(`${ROOT}/game/src/render/Renderer.ts`, 'utf8');
     const tileAnim = readFileSync(`${ROOT}/game/src/render/TileAnim.ts`, 'utf8');
     const windSway = readFileSync(`${ROOT}/game/src/render/WindSway.ts`, 'utf8');
     // 正向:显式字面量跳过族必须有活消费方
     //  378 → drawDummyTileAnim(vframeAt(378);272 → drawAnimatedTileLayer(TILE_ANIM_RATE[272])
-    expect(chunk.match(/if \(sheet === 378\) continue;/) ?? chunk.match(/vanilla\?\.sheet === 378\) continue;/),
+    expect(bake.match(/if \(sheet === 378\) continue;/) ?? bake.match(/vanilla\?\.sheet === 378\) continue;/),
       '378 跳过点丢失').toBeTruthy();
     expect(/vframeAt\(378,/.test(renderer), '378 无动态消费方(drawDummyTileAnim)').toBe(true);
-    expect(chunk.includes('vanilla?.sheet === 272') || chunk.includes('sheet === 272'),
+    expect(bake.includes('vanilla?.sheet === 272') || bake.includes('sheet === 272'),
       '272 跳过点丢失').toBeTruthy();
     expect(/TILE_ANIM_RATE\[272\]|\b272\b/.test(tileAnim), '272 无动态消费方').toBe(true);
     // 谓词族:swayBakeSkip/cageFamilyOf/isDynamicAnimSheet 的 skip 与消费必须同存
-    for (const [pred, consumerFile, consumerMark] of [
-      ['swayBakeSkip', windSway, 'drawWindSwayTiles'],
-      ['isDynamicAnimSheet', tileAnim, 'TILE_ANIM_RATE'],
+    //  （skip 消费面=ChunkBake 烘焙侧;isDynamicAnimSheet 在 ChunkCache census 支仍在）
+    for (const [pred, skipFile, consumerFile, consumerMark] of [
+      ['swayBakeSkip', bake, windSway, 'drawWindSwayTiles'],
+      ['isDynamicAnimSheet', bake, tileAnim, 'TILE_ANIM_RATE'],
+      ['isDynamicAnimSheet', chunk, tileAnim, 'TILE_ANIM_RATE'],
     ] as const) {
-      expect(chunk.includes(pred), `${pred} 跳过点丢失`).toBe(true);
+      expect(skipFile.includes(pred), `${pred} 跳过点丢失`).toBe(true);
       expect(consumerFile.includes(pred) || consumerMark && consumerFile.includes(consumerMark),
         `${pred} 无动态消费方`).toBe(true);
     }
     // 反向:378/272 若从跳过表移除会双画(烘焙静止行+动态层=同朝向重影,2026-08-23 实报)
-    expect((chunk.match(/sheet === 378/g) ?? []).length, '378 跳过应恰有两处(两遍扫描)').toBeGreaterThanOrEqual(2);
+    expect((bake.match(/sheet === 378/g) ?? []).length, '378 跳过应恰有两处(两遍扫描)').toBeGreaterThanOrEqual(2);
   });
 });

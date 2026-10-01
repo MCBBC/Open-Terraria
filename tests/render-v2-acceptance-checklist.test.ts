@@ -43,7 +43,9 @@ describe('渲染 v2 验收 checklist（三判例制度锁）', () => {
   });
 
   it('判例③ 回退态帧耗可测:降级指纹面在位+trace-x-ray 工具在场', () => {
-    expect(SHIM).toContain("this.accFail('tex');");          // acc 纹理降级计数链
+    // ★X2 重锚（2026-10-01）:闪屏定谳仪（ba37429f,2026-09-30）accFail 加 detail
+    //  实参（原因入账直连 F5 报告）——判例③「回退态可测」语义恰被强化
+    expect(SHIM).toContain("this.accFail('tex',");           // acc 纹理降级计数链（带 detail）
     expect(SHIM).toContain('this.stats.fallback++;');        // 2D 回退计数
     expect(WW).toContain('_wwStat.falls++;');                // 波场失联回落计数
     expect(existsSync(new URL('../tools/trace-x-ray.mjs', import.meta.url))).toBe(true);

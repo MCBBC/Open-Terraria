@@ -1371,11 +1371,39 @@ export class SkyRenderer {
     const segments = [];
     for (const [texIdx, slot] of byTex) {
       const tex = this.starTex(texIdx)!;
-      let id = this.starTexIds.get(tex);
-      if (id === undefined) { id = ++this.starTexIdSeq; this.starTexIds.set(tex, id); }
-      segments.push({ texIdx, img: tex, key: `sbat:${texIdx}:${id}`, data: new Float32Array(slot.nums), quads: slot.qn });
+      segments.push({ texIdx, img: tex, key: this.starTexKey(texIdx) ?? `sbat:${texIdx}:0`, data: new Float32Array(slot.nums), quads: slot.qn });
     }
     return { segments, quads: segments.reduce((s2, x) => s2 + x.quads, 0) };
+  }
+
+  /** ★C13 星批纹理幂等键单源（2026-10-01 K3 预热刀抽出——buildStarBatch 与
+   *  prewarmStarBatch 共用,键漂移=预热白做/批纹理 miss） */
+  private starTexKey(texIdx: number): string | null {
+    const t = this.starTexs[texIdx];
+    if (!t || !(t.width > 0)) return null;
+    let id = this.starTexIds.get(t);
+    if (id === undefined) { id = ++this.starTexIdSeq; this.starTexIds.set(t, id); }
+    return `sbat:${texIdx}:${id}`;
+  }
+
+  /** ★K3 星批 idle 预热（2026-10-01;首夜帧 ~132ms 尖峰定谳=sprite:precip 惰性
+   *  编译+Star_0..3 texFromImage 首传）——世界载入完成后空闲期调用（mainFlow
+   *  幕布掀除后 rIC 挂点）：
+   *  ①starTex(0..3) 触发 loadTex 异步装载（与昼间并行,幂等）;
+   *  ②就绪即 texFromImage 预传（键=starTexKey 单源,首夜帧零首传）;
+   *  ③GL 层在场则 prewarmPrecip 编译（首夜帧零编译,雨/沙批同程序同收益）。
+   *  失败/不可用静默（首夜照旧惰性路径=逐字节原语义）;worker/node 判死守卫
+   *  （typeof document）。 */
+  prewarmStarBatch(): void {
+    if (typeof document === 'undefined') return;
+    for (let i = 0; i < 4; i++) {
+      this.starTex(i);                       // 触发异步装载（幂等;未就绪帧跳过自愈）
+      const key = this.starTexKey(i);
+      if (!key) continue;
+      const t = this.starTexs[i]!;
+      if (t.width > 0) this.cloudGlLayer?.texFromImage(key, t, false, true);
+    }
+    this.cloudGlLayer?.prewarmPrecip();
   }
 
   /** 星批 mini-session:begin→分段 quadBatchRgba(smooth)→end;调用方随即

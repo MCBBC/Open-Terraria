@@ -337,7 +337,12 @@ describe('★F-gore 结构锁', () => {
 
   it('GLSpriteLayer:零改动锁（gore 复用 quadBatchRgba 通道,禁新着色器漂移）', () => {
     expect(GL).toContain('outColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);   // 预乘纹理×顶点色×quad α');
-    expect(GL).toContain('quadBatchRgba(e: TexEntry, data: Float32Array, quads: number): boolean');
-    expect(GL).not.toContain('gore');
+    // ★X2 重锚（2026-10-01）:C13 星场批（7ca51ffd,2026-09-30）加 smooth 缺省参
+    //  （缺省=既有 gore 调用零变化,零改动锁语义不变）
+    expect(GL).toContain('quadBatchRgba(e: TexEntry, data: Float32Array, quads: number, smooth = false): boolean');
+    // ★X2 勘注（2026-10-01）:C13 smooth 缺省参头注提及 gore（「既有雨/沙/gore 调用
+    //  零变化」）——零改动锁语义=无 gore 专用代码/着色器路径,注释提及不算漂移,
+    //  断言收窄为非注释文本。
+    expect(GL.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('gore');
   });
 });

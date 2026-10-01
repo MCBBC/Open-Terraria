@@ -103,7 +103,10 @@ async function relay(room: RoomStub, c: RcStub, msgId: number, frame: Uint8Array
 }
 
 describe('★B1 Room 中继分层：msg27 纯透传 / msg42·44 策略层上帽保留', () => {
-  it('msg27：>9999 dmg 快照全量透传（协议语义=原版弹幕案零改写），kind>9 脏条仍剥', async () => {
+  it('msg27：>9999 dmg 快照全量透传（协议语义=原版弹幕案零改写），kind>12 脏条仍剥', async () => {
+    // ★X2 重锚（2026-10-01）:合法 kind 表三次上移（9=星璇之音/10=雨云/11=帕鲁机件
+    //  双弹,room.ts 脏条门随更 >12）——脏样本 12→13 保「超门剥除」判别力
+    // （0x3f 段内取值,避开 0x40 PvP/0x80 NPC 位语义）。
     const { room, mkClient } = await mkRoom();
     const host = mkClient(0, true);
     const guest = mkClient(1);
@@ -111,12 +114,12 @@ describe('★B1 Room 中继分层：msg27 纯透传 / msg42·44 策略层上帽�
     w.u16(2);
     w.u32(900); w.u8(1); w.str('ab'); w.i16(30000); w.i16(5);
     w.f32(100); w.f32(100); w.f32(0); w.f32(0);
-    w.u32(901); w.u8(12); w.str('cd'); w.i16(50); w.i16(5);
+    w.u32(901); w.u8(13); w.str('cd'); w.i16(50); w.i16(5);
     w.f32(120); w.f32(120); w.f32(0); w.f32(0);
     await relay(room, host, Msg.SyncProjectile, w.finish());
     const got = parseFrames(guest.ws.sent).filter((f) => f.msgId === Msg.SyncProjectile);
     expect(got).toHaveLength(1);
-    expect(got[0].payload.u16()).toBe(1);             // kind>9 脏条剥除=余 1
+    expect(got[0].payload.u16()).toBe(1);             // kind>12 脏条剥除=余 1
     expect(got[0].payload.u32()).toBe(900);
     got[0].payload.u8(); got[0].payload.str();
     expect(got[0].payload.i16()).toBe(30000);         // ★30000 存活（修复前钳 9999）

@@ -30,7 +30,7 @@ import { getSwingStatsAnchor, tweakSwingStats } from './townNpcSwing';
 import { npcCheckArmorPenetration, applyBuffTicks } from './projStatus';
 import { drownCollision } from '../stats/TouchDamage';
 // ★2026-08-31 治理批 B1：危险扫描候选记录门（NPC.cs:54042 flag19 = CanBeChasedBy）
-import { canBeChasedBy } from './projTargets';
+import { canBeChasedBy, ON_HIT_EXCLUDED_PROJS } from './projTargets';
 import { projSprite } from './Arrow';
 import { updateNpcLiquid, wetCollision } from './npcLiquid';
 import { spawnEmote } from '../render/EmoteBubble';
@@ -1409,9 +1409,13 @@ export class TownNPC extends Entity {
    *   仅溺水致死一击使用。原版 StrikeNPCNoInteraction(owner=255)（NPC.cs:82012 →
    *   :82017 StrikeNPC 全链）【不查】dontTakeDamage（该旗只在 Projectile.Damage/
    *   GetHurtByOtherNPCs 等调用方门禁消费）——微光上升态(ai[0]==25)内 CheckDrowning
-   *   的 StrikeNPCNoInteraction(2) 照常结算可致死。 */
+   *   的 StrikeNPCNoInteraction(2) 照常结算可致死。
+   *  ★X1 face 2（第 9/10 参,缺省关闭）：fromPlayer/srcProjId——TryDoingOnHitEffects
+   *   （Projectile.cs:13640-43 `ownedBySomeone && targetNPC.life > 5` → Player.OnHit
+   *   :6912-7040）的城镇靶受理面。gate 细节见函数体 face 2 块注。 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks,
-    penPercent = 0, flatPen = 0, crit = false, force = false): boolean {
+    penPercent = 0, flatPen = 0, crit = false, force = false,
+    fromPlayer = false, srcProjId = 0): boolean {
     if (this.dead) return false;
     // force=true = 内部直击通道(StrikeNPCNoInteraction owner=255 同形):不查
     // 无敌帧也不查 dontTakeDamage(原版 StrikeNPC 全链两者皆不读)
@@ -1425,6 +1429,44 @@ export class TownNPC extends Entity {
     //   :82199 `if (netMode != 1 && !flag)` NPCDamageTracker（本仓无此记账面）——
     //   清算击杀不冒 9999 大字（原版系统致杀静默）;死亡/击退/ai 复位不受门影响
     const strikeSilent = dmg >= 9999;
+    this.lastStrikeDealt = 0;   // ★X1：入口清零（Enemy.hurt 习语——拒收路径不残留陈值）
+    // ---- ★X1 face 2：TryDoingOnHitEffects（Projectile.cs:13640-43）城镇靶受理面 ----
+    //  原文：`if (ownedBySomeone && targetNPC.life > 5) TryDoingOnHitEffects(targetNPC);`
+    //  → Player.OnHit（Player.cs:6912-7040）。门序：ownedBySomeone ≈ fromPlayer（hostile
+    //  弹 owner=255 走不到 :13640）;`life > 5` 读【受击前】值——本块置于 hp 扣减前
+    //  =快照位（Enemy.hurt α-H4 同式）。效果逐支（Player.OnHit 全 5 支,与 Enemy.hurt
+    //  内联块同构;stardust 613 反击支在 MinionProj 侧,同 Enemy 面登记）：
+    //  · 钛金风暴 flag 门 = 488 ∪ SpawnedFromStatue ∪ cd>0——城镇 NPC 两项天然不含;
+    //  · 幻影闪避/帕拉钯再生/山铜花瓣无受害者的豁免;
+    //  · 叶绿水晶叶支 :6988 `victim.CanBeChasedBy` 门——城镇 NPC friendly 恒假
+    //    （projTargets.canBeChasedBy）→ 城镇靶【结构性排除】,不接（原版同相）;
+    //  · 来源排除表 {221,227,614,729,908,977}（TryDoingOnHitEffects :15210-15220）。
+    if (fromPlayer && dmg > 0 && this.hp > 5
+      && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
+      const pl = game.player as unknown as {
+        dead?: boolean; cx?: number; cy?: number; titaniumStormCd?: number;
+        shadowDodgeTimer?: number; petalTimer?: number;
+        buffs: { apply(t: number, s: number): void };
+        equipStats?: { titaniumStorm?: boolean; onHitDodge?: boolean;
+          onHitRegen?: boolean; onHitPetal?: boolean };
+      } | null | undefined;
+      if (pl && !pl.dead) {
+        if (pl.equipStats?.titaniumStorm === true && (pl.titaniumStormCd ?? 0) <= 0) {
+          pl.titaniumStormCd = 10;                     // titaniumStormCooldown=10（:6928）
+          pl.buffs.apply(306, 10);                     // AddBuff(306,600t)=10s（:6929）
+          game.spawnTitaniumShard?.(pl.cx ?? 0, pl.cy ?? 0);
+        }
+        if (pl.equipStats?.onHitDodge === true && (pl.shadowDodgeTimer ?? 0) <= 0) {
+          pl.buffs.apply(BuffType.ShadowDodge, 30);    // AddBuff(59,1800t)=30s（:6938）
+        }
+        if (pl.equipStats?.onHitRegen === true) {
+          pl.buffs.apply(BuffType.RapidHealing, 5);    // AddBuff(58,300t)=5s（:6943）
+        }
+        if (pl.equipStats?.onHitPetal === true && (pl.petalTimer ?? 0) <= 0) {
+          game.spawnOnHitPetals?.(this.cx, this.cy);   // :6964 petalTimer=20 在 Game 端
+        }
+      }
+    }
     // ↑ ai[0]==25 dontTakeDamage 承接位(= :53736 块：复位 dontTakeDamage=false
     //   :53736 + if(ai[0]==25f) 置真 :53738-39——★1457 锚行校准,非 :53596);force
     //   仅溺水致死一击使用
@@ -1449,6 +1491,7 @@ export class TownNPC extends Entity {
     if (calc < 1) calc = 1;
     dmg = Math.trunc(calc * (crit ? 2 : 1));
     this.hp -= dmg;
+    this.lastStrikeDealt = dmg;   // ★X1 face 4：num41 等位（StrikeNPC 返值=防后实扣）
     this.iframes = 10;
     this.justHitT = 1;   // ★W1：受理 StrikeNPC 置真（NPC.cs:82103）——含 force 通道
     // ★对齐批①：受击打断医师治疗态——原版 StrikeNPC 的 townNPC 分支直接改写
@@ -1620,6 +1663,61 @@ export class TownNPC extends Entity {
     this.hp = Math.min(this.maxHp, this.hp + 250);
   }
 
+  /** ★X1 face 1：debuff DoT 逐拍结算（UpdateNPC_BuffApplyDOTs :92577-92847 等价,
+   *  DOTTally 速率面与 Enemy.fixedUpdate 同构——城镇 NPC 原版同一 DoT 环,NPC.cs
+   *  :91484 lifeRegenCount 对全体 NPC 结算）。速率（HP/s）：onFire 4(:92616) /
+   *  onFire3 15(:92632) / frostburn2 25(:92668) / poison 6(:92584) / venom 30(:92703) /
+   *  cursed 24(:92684) / potentAcid 90(:92751 AddPoison(180,60)) / eelWhip 50(:92781
+   *  裸 Add 不可加速）。可加速池（398,SupportAcceleration :127-131 → :92840-92847）
+   *  = AddPoison/AddBloodLoss/AddFlamable 三族 = 毒(20/70/395)+六火系(24/39/323/324);
+   *  裸 Add（362）不吃。Slimed(137) 六火系翻倍（AddFlamable :113-115）。扣血面 =
+   *  裸 hp 减（DoT 不过防御/iframes——原版 lifeRegen 独立管线）,致死经 force hurt
+   *  走完整死亡链。视觉 = 六火系火焰尘（UpdateNPC_BuffApplyVFX 火尘近似,Enemy 同款
+   *  颜色/概率）+ DoT 飘值（LifeRegenNegative 小字档,'#FF8C28'）。 */
+  private tickDebuffs(dt: number, game: GameHooks): void {
+    const slimedMul = this.slimedT > 0 ? 2 : 1;
+    const accelMul = this.acceleratePoisonsT > 0 ? 2 : 1;
+    const fireOn = this.onFireT > 0 || this.onFire3T > 0 || this.cursedT > 0 || this.frostburn2T > 0;
+    if (this.onFireT > 0) { this.onFireT -= dt; this.onFireDoT += 4 * slimedMul * accelMul * dt; }
+    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * slimedMul * accelMul * dt; }
+    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * slimedMul * accelMul * dt; }
+    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * slimedMul * accelMul * dt; }
+    if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * accelMul * dt; }
+    if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * accelMul * dt; }
+    if (this.potentAcidT > 0) { this.potentAcidT -= dt; this.potentAcidDoT += 90 * accelMul * dt; }
+    if (this.eelWhipT > 0) { this.eelWhipT -= dt; this.eelWhipDoT += 50 * dt; }
+    if (this.slimedT > 0) this.slimedT -= dt;
+    if (this.acceleratePoisonsT > 0) this.acceleratePoisonsT -= dt;
+    if (this.ichorT > 0) this.ichorT -= dt;
+    if (this.midasT > 0) this.midasT -= dt;
+    // 小数累计结算（⌊acc⌋ 扣血,DOTTally 家族同式）
+    for (const dKey of ['onFireDoT', 'onFire3DoT', 'frostburn2DoT', 'poisonDoT',
+      'venomDoT', 'potentAcidDoT', 'cursedDoT', 'eelWhipDoT'] as const) {
+      const acc = this[dKey];
+      if (acc >= 1) {
+        const n = Math.floor(acc);
+        this[dKey] = acc - n;
+        this.applyDoT(n, game);
+        game.addDamageNumber?.(this.cx, this.y, n, false, '#FF8C28', true);
+      }
+    }
+    // 六火系火焰尘（Enemy 同款 0.75/拍）
+    if (fireOn && Math.random() < 0.75) {
+      game.spawnParticles?.(
+        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+        Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.8,
+        { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
+    }
+  }
+
+  /** DoT 裸扣（无防御/无 iframes——原版 lifeRegen 独立管线）+ 致死走 force hurt
+   *  （StrikeNPCNoInteraction(9999) 同形：owner=255 静默判据 strikeSilent 不飘大字,
+   *  force 绕无敌帧保证死亡落地,死亡链/drops/音效全走 hurt 内置段）。 */
+  private applyDoT(n: number, game: GameHooks): void {
+    this.hp -= n;
+    if (this.hp <= 0) this.hurt(9999, 0, 0, game, 0, 0, false, true);
+  }
+
   private cbApplied = false;
 
   /** buff 25 Tipsy 剩余 tick（NPC.buffType/buffTime 单槽近似——本仓城镇 NPC 无
@@ -1655,6 +1753,48 @@ export class TownNPC extends Entity {
    *  .computeHappiness 在 remix/368/453/37/宠物提前 return 门【之前】乘,消费点
    *  = Game.computeShopHappiness 快照进 dialogHappiness.priceMul） */
   lovestruckT = 0;
+
+  // ---- ★清偿刀 X1（2026-10-01）face 1：城镇 NPC debuff 载体最小面 ----
+  //  锚：Damage_PVE_Inner :13634 StatusNPC(victimIndex) 对城镇靶【同面】（巫毒窄门
+  //  :11970-11972 过门后无条件段）——原版城镇 NPC 有完整 buffType/buffTime 五槽
+  //  （NPC.AddBuff :91035 全体 NPC 同构,UpdateNPC_BuffSetFlags :93099 同环）,着火/
+  //  中毒照吃 DoT。本仓沿 lovestruckT/tipsyT 单字段先例建【载体集】= 鞭受击面实际
+  //  可达集（HitTownNpcs 巫毒拍写入面逐键定谳,勿当全 buff 系统用）：
+  //  · ApplyWhipDebuffs（Projectile.cs:11067-11090）：323/324/20/362;
+  //  · StatusNPC 鞭表（:11255-11272 火鞭 1104 → 137 Slimed 180t + 鞭尖窗 24）;
+  //  · 催化指环（:11189-11196 → 398）;
+  //  · 武器浸剂 meleeEnchant（:11197-11221 → 70+395/39/24/72/69/[31 城镇免疫被
+  //    applyBuffTicks 的 npcImmuneTo 门拦]/20）。31 Confused：城镇 NPC 全员在
+  //    DebuffImmunitySets [31]（vanillaNpcImmunity.ts 22/17/18/19/20…）→ 不建载体。
+  //  单位=秒（applyBuffTicks 写入口径,ticks/60）。DoT 消费 = tickDebuffs
+  //  （UpdateNPC_BuffApplyDOTs :92577-92847 等价,DOTTally 速率面 1:1）。
+  //  ★onFireT/onFire3T 两载体已有（:1158 液体宿主面——岩浆上火/入水熄火,单位同
+  //  秒）：本刀并入同一 tickDebuffs 结算环（旧形态液体上火无 DoT 无倒计时=潜在
+  //  火不灭残账,就此一并收编）。
+  frostburn2T = 0;         // 324 Frostburn2 25 HP/s（:92668-92680）
+  poisonT = 0;             // 20 Poisoned 6 HP/s（:92584-92591）
+  venomT = 0;              // 70 Venom 30 HP/s（:92703-92710）
+  potentAcidT = 0;         // 395 PotentAcid 90 HP/s（:92751 AddPoison(180,60)）
+  cursedT = 0;             // 39 CursedInferno 24 HP/s（:92684-92695）
+  ichorT = 0;              // 69 Ichor 纯倒数（穿甲位在 hurt 的 npcCheckArmorPenetration {} 档不消费——登记）
+  midasT = 0;              // 72 Midas 纯倒数（城镇 NPC value=0 掉钱面不存在）
+  slimedT = 0;             // 137 Slimed 纯倒数+六火系 ×2 消费位（:92623 等）
+  eelWhipT = 0;            // 362 EelWhip 50 HP/s 平铺（:92781 Add(100,50),裸 Add 不可加速）
+  acceleratePoisonsT = 0;  // 398 可加速族 DoT ×2（:92840-92847）
+  // DoT 小数累计器（DOTTally 家族：tick 累入 dps×dt、⌊acc⌋ 扣血保小数,同 Enemy）
+  private onFireDoT = 0;
+  private onFire3DoT = 0;
+  private frostburn2DoT = 0;
+  private poisonDoT = 0;
+  private venomDoT = 0;
+  private potentAcidDoT = 0;
+  private cursedDoT = 0;
+  private eelWhipDoT = 0;
+
+  /** ★X1 face 2 伴生：StrikeNPC 实扣值镜像（num41 等位,Enemy.lastStrikeDealt 同名
+   *  同义）。入口清零/受理写实扣（防后）——ghostHealProc :13877 的 num41 消费端
+   *  （face 4）读本面。 */
+  lastStrikeDealt = 0;
 
   /** GetMagicAuraColor（★对抗修复批⑤ A11 行号考古：真锚 NPC.cs:53466 起,旧注
    *  ":53317-53332"/NPCID ":4853" 系错引——表定义体在 NPCID.cs:4859）1:1：
@@ -1907,6 +2047,9 @@ export class TownNPC extends Entity {
       this.lovestruckT -= dt;
       newLovestruckHeart(this.x, this.y, this.w, this.h);
     }
+    // ★X1 face 1：debuff DoT 逐拍（UpdateNPC_BuffApplyDOTs 等价——lovestruck 同环,
+    //  原版该层对全体 NPC 每 tick 运行）
+    this.tickDebuffs(dt, game);
     // ★BJ259：踢出冷却递减（NPC.UpdateNPC :91434-91437 `if (lookForHomeTimeout > 0)
     //  lookForHomeTimeout--;` 每 tick 字面）
     if (this.lookForHomeTimeout > 0) this.lookForHomeTimeout--;

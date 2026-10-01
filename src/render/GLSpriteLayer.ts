@@ -206,6 +206,93 @@ void main() {
 export const LIQSHIM_VS_SRC = LIQSHIM_VS;
 export const LIQSHIM_FS_SRC = LIQSHIM_FS;
 
+// ---- ★K2 力场泡场程序（2026-10-01 二期刀;px_ForceField 字节码逐指令 GLSL 移植）----
+// 【背景】四柱盾泡 SM2 产物链（200ms 桶缓存后仍 ~100ms/s）定谳=5 桶/秒 × ~25ms
+//  解释器冷跑（128² ImageData 逐像素 f64 VM/codegen）。本程序把 ForceField 像素
+//  场整体移入 FS——每塔每帧 1 quad,冷跑/产物画布/putImageData/texImage2D 全归零。
+// 【VS】LIQSHIM_VS 同构三属性（pos/uv/col）+ 第 4 顶点分量 aTime（stride 36B,
+//  9 float/顶点×6=54/quad——★形状分派判别值:既有 rgba 面 stride 8=48/quad、
+//  微光 stride 11=66/quad 零交集,分派点=quadBatchRgba 发射口 c13c 判例）。
+//  uTime 逐 quad 携带（VS 透传 varying）=四塔可同批发射免 uniform 分档。
+// 【FS】px_ForceField 生成体（src/fx/gen/px_ForceField.gen.ts,50 实指令）逐式直译:
+//  preshader 终值按产物口径 (uSourceRect=(0,0,128,128),uImageSize0=(128,128))
+//  编译期折叠:c0.xy=SR.xy/IS0.xy=(0,0)、c1.xy=IS0.xy/SR.xy=(1,1)、
+//  c2.xy=0.5+SR.wh/IS0.wh=(1.5,1.5)、c3.x=uTime+5（★PRSI 标量 add 非 ×5,
+//  旧注释误读;fxPixelShader.json ForceField pres insts[8]=0xA040 lits[13]=5）。
+//  def 常量逐字（c5..c12 活跃子集）:c5=(−0.5,1.5,1,0) c6=(2.8,−1,20,30)
+//  c7=(−0.3,0.75) c9.z=0.0795774907(=1/4π) c9.w=−1.498e−6 c10=(2π,−π,−0.5,0.5)
+//  c8.x/c8.y=inst22 死码（fxc 残留,inst25 覆写 R[1] 前无消费——不移植）。
+//  ★dp2add(0x5A)=真 x²+y²（gen 体 inst14 逐字;VM 回退支 x²-only 是登记偏差,
+//  运行时 SM2_CODEGEN=true 恒走生成体=本表为运行时行为对齐）。
+//  ★pr≤0 守卫=JS NaN 钳 0 语义复刻:inst41 1/pr=Inf→inst43 s1·Inf+…=NaN（s1=0
+//  时 0·Inf=NaN）→ w=NaN → Uint8ClampedArray 钳 0=全通道 0;GLSL IEEE 同式可
+//  达同值,但 UNORM NaN 写入行为实现定义——显式分支钉死（离线场值闸判读）。
+//  ★采样档=LINEAR CLAMP 无 mip（runPassOnImageData sampleImageInto 双线性+钳
+//  边逐式同构;texFromImage(…,noMip=true) 同参;Perlin α 恒 255=预乘上传恒等）。
+//  ★输出语义=2D 产物 drawImage 等价:产物直 alpha (rgb=uColor·w, a=w) 源过
+//  globalAlpha=ga 的 source-over → 预乘管线 out_p = uColor·w²·ga + dst·(1−w·ga)
+//  ⇒ FS 写 vec4(vCol.rgb·w·w·ga, w·ga)、blend 走批基态 (ONE,1−SA)。
+//  ★与 2D 产物链的登记差:FS 逐像素求值（dst 分辨率）vs 2D 128² 产物双线性放大
+//  ——原版即逐像素（600² quad 直跑像素着色器）,GL 路径更贴原版;场值闸锚 128²
+//  网格（scripts/_k2-fieldgate.mjs maxd≤2/255 c13c 判例）。
+const FFIELD_VS = `#version 300 es
+uniform vec2 uCanvas;
+layout(location=0) in vec2 aPos;   // 设备 px（ForceFieldBubble 构建,世界变换已折算）
+layout(location=1) in vec2 aUv;    // 泡内 0..1（t0,y 向下=2D 产物行序同相）
+layout(location=2) in vec4 aCol;   // uColor.rgb(1..2 破盾/重塑窗)+globalAlpha
+layout(location=3) in float aTime; // uTime 秒（GTW;逐 quad 携带免 uniform 分档）
+out vec2 vUv;
+out vec4 vCol;
+out float vT;
+void main() {
+  gl_Position = vec4(aPos.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - aPos.y / uCanvas.y * 2.0, 0.0, 1.0);
+  vUv = aUv; vCol = aCol; vT = aTime;
+}`;
+
+const FFIELD_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+in vec2 vUv;
+in vec4 vCol;
+in float vT;
+out vec4 outColor;
+void main() {
+  vec2 t0 = vUv;
+  vec2 u = t0 - 0.5;                                   // inst8/10: (t0−c0)·c1 + c5.x
+  float x = u.x * 1.5;                                 // inst13 ×c5.y（y×c5.z=1 恒等）
+  float y = u.y;
+  float rho = sqrt(x * x + y * y);                     // inst14 dp2add + inst15/16 rsq·rcp
+  float z = y * 30.0 + (vT + 5.0);                     // inst11/12: y·c6.w + c3.x
+  float s = z * 0.0795774906873703;                    // inst17 ×c9.z(=1/4π)
+  float fa = fract(abs(s));                            // inst18/19
+  float saw = z >= 0.0 ? fa : -fa;                     // inst20 cmp（含 −0.0≥0 同 IEEE）
+  float ang = saw >= 0.0 ? -0.0000014980281548560015   // inst25 cmp（c9.w）
+            : fract(saw * 1.9999996423721313 + 0.5) * 6.2831854820251465 - 3.1415927410125732;
+  float band = cos(ang) * -0.5 + 0.5;                  // inst26/27（c10.zw）
+  float d = rho * 2.799999952316284;                   // inst28 ×c6.x
+  float e = clamp((d - 1.0) * 20.0, 0.0, 1.0);         // inst29/30（c6.y=−1,c6.z=20）
+  float sd = sqrt(d);                                  // inst31/32（r0.z=d）
+  vec2 puv = (t0 - 1.5) * sd + 0.5;                    // inst33/34（c2.xy=1.5,−c5.x=+0.5）
+  vec4 p = texture(uTex, puv);                         // inst35（LINEAR CLAMP）
+  float pr = p.r;
+  float t = clamp((pr * band - 0.3) * 20.0, 0.0, 1.0); // inst36/37（c7.x=−0.3,c6.z=20）
+  float s1 = (3.0 - 2.0 * t) * t * t;                  // inst38-40 smoothstep 多项式
+  if (pr <= 0.0) { outColor = vec4(0.0); return; }     // inst41 NaN 钳 0 语义复刻（见类注）
+  float lr = s1 / pr + (1.0 - s1);                     // inst41 rcp + inst43 lrp(c5.z=1)
+  float P = pr * pr * lr;                              // inst42/44
+  float A = 1.0 - (3.0 - 2.0 * e) * e * e;             // inst45-47 1−smoothstep(e)
+  float w1 = P * band * A;                             // inst48/49（Perlin 项）
+  float w2 = A * d * d * d;                            // inst51-53 A·(2.8ρ)³（径向项）
+  float w = 0.75 * w2 + w1;                            // inst55 ×c7.y(0.75) 混合=oC.a
+  outColor = vec4(vCol.rgb * w * w * vCol.a, w * vCol.a);   // 预乘输出（见类注）
+}`;
+
+/** ★K2 着色器源导出（离线场值 readback 闸 scripts/_k2-fieldgate.mjs 直采同源——
+ *  探针编译本常量,禁转录漂移;c13c LIQSHIM_*_SRC 判例同款） */
+export const FFIELD_VS_SRC = FFIELD_VS;
+export const FFIELD_FS_SRC = FFIELD_FS;
+
 /** ★C13c uTVis 帧界单点（模块态; VanillaLiquidRenderer 批发射点写入——渲染段内
  *  visEffectFrames 不变判例（§5 风险6:帧界错拍=跨相位时钟管线判例同族,发射点=
  *  flushShimRun/gate 重发射/fg 复用重发射,三处同段同值） */
@@ -376,6 +463,13 @@ export class GLSpriteLayer {
   private shimVao: WebGLVertexArrayObject | null = null;
   private shimVbo: WebGLBuffer | null = null;
   private shimFail = false;
+  /** ★K2 力场泡场批程序（FFIELD_*——stride 9 带 aTime;同款惰性/失败面） */
+  private ffProg: WebGLProgram | null = null;
+  private ffProgHandle: PipelineProgram | null = null;
+  private ffUni: Record<string, WebGLUniformLocation | null> = {};
+  private ffVao: WebGLVertexArrayObject | null = null;
+  private ffVbo: WebGLBuffer | null = null;
+  private ffFail = false;
   private vao: WebGLVertexArrayObject | null = null;
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
     { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
@@ -1418,6 +1512,10 @@ export class GLSpriteLayer {
     //  缺省参判例同构「缺省=既有调用零变化」）。分派点=本发射口的理由:stride-11 数据
     //  经 shim rec（Renderer 中介/GLShimExecutor 队列）到此是唯一既见数据又见 GL 的位。
     if (data.length === quads * 66) return this.quadBatchLiqShimmer(e, data, quads);
+    // ★K2 力场泡场数据形状分派（stride 9=x,y,u,v,r,g,b,a,t——54/quad 唯一判别,
+    //  既有 rgba 面 stride 8=48/quad、微光 stride 11=66/quad 零交集;分派点=本发射口
+    //  「既见数据又见 GL」c13c 判例同位）
+    if (data.length === quads * 54) return this.quadBatchForceField(e, data, quads);
     if (!this.ensurePrecip()) return false;
     const gl = this.gl;
     gl.useProgram(this.precipProg);
@@ -1493,6 +1591,91 @@ export class GLSpriteLayer {
     gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 44, 32);
     gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, 44, 40);
     gl.bindVertexArray(null);
+    return true;
+  }
+
+  /** ★K3 星批 idle 预热面（2026-10-01）:sprite:precip 程序惰性编译提前——
+   *  世界载入完成后空闲期调用（SkyRenderer.prewarmStarBatch → mainFlow 幕布掀除后
+   *  rIC 挂点）;失败面=precipFail 恒走 2D 兜底语义不变。 */
+  prewarmPrecip(): boolean { return this.ensurePrecip(); }
+
+  /** ★K2 力场泡场批程序惰性装配（ensureLiqShim 同款失败面:ffFail=true 恒走 2D 兜底）。
+   *  管线模式走 pipe.program('sprite:forcefield') 按名登记（禁单删判例）;独立上下文
+   *  模式走 rain 同款本地编译。VAO:location0=aPos(vec2)/1=aUv(vec2)/2=aCol(vec4)/
+   *  3=aTime(float),stride 36B（9 float）,顶点数据调用方每帧 STREAM_DRAW 重传
+   *  （复用本层单 VBO 判例）。 */
+  private ensureForceField(): boolean {
+    if (this.ffFail) return false;
+    if (this.ffProg) return true;
+    const gl = this.gl;
+    if (!gl) return false;
+    if (this.pipe) {
+      const p = this.pipe.program('sprite:forcefield', FFIELD_VS, FFIELD_FS);
+      if (!p.prog) { this.ffFail = true; return false; }
+      this.ffProgHandle = p;
+      this.ffProg = p.prog;
+      for (const n of ['uCanvas', 'uTex']) this.ffUni[n] = this.pipe.uni(p, n);
+    } else {
+      const mk = (type: number, src: string): WebGLShader | null => {
+        const sh = gl.createShader(type)!;
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+          console.warn('[GLSpriteLayer] forcefield shader 编译失败:', gl.getShaderInfoLog(sh));
+          gl.deleteShader(sh);
+          return null;
+        }
+        return sh;
+      };
+      const vs = mk(gl.VERTEX_SHADER, FFIELD_VS);
+      const fs = mk(gl.FRAGMENT_SHADER, FFIELD_FS);
+      if (!vs || !fs) { this.ffFail = true; return false; }
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[GLSpriteLayer] forcefield 程序链接失败:', gl.getProgramInfoLog(prog));
+        this.ffFail = true;
+        return false;
+      }
+      this.ffProg = prog;
+      for (const n of ['uCanvas', 'uTex']) this.ffUni[n] = gl.getUniformLocation(prog, n);
+    }
+    this.ffVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.ffVao);
+    this.ffVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.ffVbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 36, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 36, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 36, 16);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 36, 32);
+    gl.bindVertexArray(null);
+    return true;
+  }
+
+  /** ★K2 力场泡场批发射口（quadBatchLiqShimmer 同族;stride 9=x,y,u,v,r,g,b,a,t——
+   *  uColor 逐 quad 顶点色、uTime 逐 quad aTime,四塔免 uniform 分档）。LINEAR CLAMP
+   *  采样（=runPassOnImageData 双线性+钳边档）;blend 不在此设（批基态 (ONE,1−SA)=
+   *  2D 产物 source-over 直 alpha 语义,FS 侧预乘式已折算）;离场还原程序态/VAO
+   *  （quadBatch 判例同款）。 */
+  quadBatchForceField(e: TexEntry, data: Float32Array, quads: number): boolean {
+    if (this.unavailable || !this.gl || quads <= 0) return false;
+    if (!this.ensureForceField()) return false;
+    const gl = this.gl;
+    gl.useProgram(this.ffProg);
+    gl.uniform2f(this.ffUni.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform1i(this.ffUni.uTex, 0);
+    gl.bindVertexArray(this.ffVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.ffVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, this.samp.linearNoMip!);
+    gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
+    glStatDraw(this.statName, quads * 6);
+    gl.bindSampler(0, null);
+    gl.bindVertexArray(this.vao);
+    gl.useProgram(this.prog);
     return true;
   }
 
@@ -1966,6 +2149,10 @@ void main(){
       if (this.shimProg) this.gl.deleteProgram(this.shimProg);
       if (this.shimVao) this.gl.deleteVertexArray(this.shimVao);
       if (this.shimVbo) this.gl.deleteBuffer(this.shimVbo);
+      // ★K2:forcefield 程序/VAO/VBO（同上判例）
+      if (this.ffProg) this.gl.deleteProgram(this.ffProg);
+      if (this.ffVao) this.gl.deleteVertexArray(this.ffVao);
+      if (this.ffVbo) this.gl.deleteBuffer(this.ffVbo);
       if (this.vao) this.gl.deleteVertexArray(this.vao);
       for (const s of Object.values(this.samp)) if (s) this.gl.deleteSampler(s);
     }
@@ -1982,6 +2169,9 @@ void main(){
     // ★C13c:liqshimmer 引用清面（同 R1b-5 重建期早退失效判据）
     this.shimProg = null; this.shimProgHandle = null; this.shimVao = null;
     this.shimVbo = null; this.shimFail = false; this.shimUni = {};
+    // ★K2:forcefield 引用清面（同上判据）
+    this.ffProg = null; this.ffProgHandle = null; this.ffVao = null;
+    this.ffVbo = null; this.ffFail = false; this.ffUni = {};
     this.vao = null;
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.uni = {}; this.uniCloud = {}; this.uniTile = {}; this.rainUni = {};
@@ -2016,6 +2206,9 @@ void main(){
       // ★C13c:liqshimmer VAO/VBO（层自建对象可单删;程序句柄归 pipe.dispose 整表）
       if (this.shimVao) gl.deleteVertexArray(this.shimVao);
       if (this.shimVbo) gl.deleteBuffer(this.shimVbo);
+      // ★K2:forcefield VAO/VBO（同上判例）
+      if (this.ffVao) gl.deleteVertexArray(this.ffVao);
+      if (this.ffVbo) gl.deleteBuffer(this.ffVbo);
     }
     this.progHandle = null; this.progCloudHandle = null;
     this.progTileHandle = null;
@@ -2027,6 +2220,10 @@ void main(){
     this.shimProgHandle = null;
     this.shimProg = null; this.shimVao = null; this.shimVbo = null;
     this.shimFail = false; this.shimUni = {};
+    // ★K2:forcefield 句柄/引用清面（同上判据）
+    this.ffProgHandle = null;
+    this.ffProg = null; this.ffVao = null; this.ffVbo = null;
+    this.ffFail = false; this.ffUni = {};
     this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
     this.uniTile = {};
     this.rainProg = null; this.rainVao = null; this.rainVbo = null; this.rainFail = false;

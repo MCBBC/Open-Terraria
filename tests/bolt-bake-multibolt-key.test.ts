@@ -38,7 +38,9 @@ describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
 
   it('resolveTex:preTex 直取支在前（flush 期绝不再重传共享 scratch 末次字节）', () => {
     const rt = SHIM.indexOf('private resolveTex(');
-    const pre = SHIM.indexOf('if (p.preTex) return glw.texAlive(p.preTex) ? p.preTex : null;');
+    // ★X2 重锚（2026-10-01）:liqpolish（9545b31c,2026-09-29）把 texAlive 改
+    //  texCheck/texAlive 双臂（代际戳批检;守卫=tests/liqpolish-guard.test.ts）
+    const pre = SHIM.indexOf('if (p.preTex) return (liqpolish ? glw.texCheck(p.preTex) : glw.texAlive(p.preTex)) ? p.preTex : null;');
     const dyn = SHIM.indexOf("const key = this.dynKeys.get(p.img as object)", rt);
     expect(pre).toBeGreaterThan(rt);
     expect(pre).toBeLessThan(dyn);
@@ -59,9 +61,11 @@ describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
   });
 
   it('Renderer 中介:uploadScratchBake 透传子区参+preBytes;无 key markDynamic 旧语义保持', () => {
-    expect(RDR).toContain('markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {');
-    expect(RDR).toContain('if (key) this.bglShimReg().uploadScratchNow(img, key);');
-    expect(RDR).toContain('else this.bglShimReg().markDynamic(img);');
+    // ★X2 重锚（2026-10-01）:shineslice（77163898,2026-09-28）签名扩第三形态
+    //  (key,tint)→boolean;无 key markDynamic 旧语义保持（early-return 去裸 else）
+    expect(RDR).toContain("markWorldDynamicScratch(img: HTMLCanvasElement, key?: string,\n    tint?: readonly [number, number, number]): boolean {");
+    expect(RDR).toContain('if (key) { this.bglShimReg().uploadScratchNow(img, key); return false; }');
+    expect(RDR).toContain('this.bglShimReg().markDynamic(img);');
     expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');
     expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
   });

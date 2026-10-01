@@ -157,8 +157,10 @@ describe('SW-BJ41 接线 tripwire（env 漏喂/表现层回退防再发）', () 
   it('SkyRenderer 人工星 pass 与自然星微光衰减在位（:63034/:64003-64057）', () => {
     const s = src('../src/render/SkyRenderer.ts');
     expect(s).toMatch(/drawShimmerStars\(ctx: CanvasRenderingContext2D/);
-    expect(s).toMatch(/shimmerAlpha \* meanF/);           // 人工星 ×num
-    expect(s).toMatch(/\(1 - shimmerAlpha\) \* meanF/);   // 自然星 ×(1−num)
+    // ★X2 重锚（2026-10-01）:C13 星场批（7ca51ffd,2026-09-30）拆出 buildStarBatch,
+    //  shimmerAlpha 参数改名显式 shim（调用方仍传 this.shimmerAlpha）;公式逐字保留
+    expect(s).toMatch(/shim \* meanF/);                   // 人工星 ×num
+    expect(s).toMatch(/\(1 - shim\) \* meanF/);           // 自然星 ×(1−num)
     expect(s).not.toMatch(/本仓无微光天空态,恒 0/);        // 旧误判注不得回潮
     //（旧注原文「…恒 0=原版跳过=1:1」——SW-BJ41 判定其误判并清辞;
     //  现文只允许以「作废引述」形式出现）

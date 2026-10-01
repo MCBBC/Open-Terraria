@@ -20,6 +20,7 @@ const mkGame = (world: World) => {
   g.player = { cx: 60 * 16, cy: 60 * 16, w: 20, h: 42, equipStats: {}, luck: 0, lastDamageCause: null, addDPS: () => {} };   // SW-AA1:水晶支 Enemy.hurt fromPlayer 面 DPS 口
   g.entities = { enemies: [], critters: [], npcs: [], drops: [], add: () => {} };
   g.dmgNumbers = []; g.particles = []; g._bannerNpcs = new Set();   // 旗覆盖集空=无旗档
+  g._particleFree = [];   // ★X2 补桩（2026-10-01）:粒子池化（744b0ad0）类字段壳上不初始化,受击血粒子 acquireParticle 需要池
   g.sfx = { playFiles: () => true };   // TownNPC.hurt 受击音口（playSfxFiles 消费面）
   g.sfxAt = () => {}; g.damagePlayer = () => 0; g.recLog = () => {};
   return g;

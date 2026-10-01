@@ -53,9 +53,15 @@ describe('SW-BJ87 新角色三件套逐槽直置（UICharacterCreation.cs:1749-1
   it('幂等：loadWorld 授予 × applyPlayerWithCharacter 新角色臂双跑不重不乱序', () => {
     const inv = new Inventory();
     grantStarterKit(inv);
-    const snap = JSON.stringify(inv.slots.slice(0, 10));
+    // ★X2 快照口径收窄（2026-10-01）:BJ390（8504d274,2026-09-28）开局件逐件
+    //  Prefix(-1) 自然词缀掷（vanillaPrefixes 1/4 无词缀早退+骰源随机）——双跑
+    //  重掷词缀=原版 SetDefaults 原地覆盖同相;幂等锁承保的是【槽位放置面】
+    //  （id/stack/序）,故快照剥 prefix。
+    const snapShape = (inv2: Inventory) =>
+      JSON.stringify(inv2.slots.slice(0, 10).map((it) => it && { id: it.id, stack: it.stack }));
+    const snap = snapShape(inv);
     grantStarterKit(inv);
-    expect(JSON.stringify(inv.slots.slice(0, 10))).toBe(snap);
+    expect(snapShape(inv)).toBe(snap);
     expect(inv.slots[0]?.id).toBe(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD]);
   });
 });
@@ -136,9 +142,12 @@ describe('SW-BJ91 旅程难度新角色大礼包（UICharacterCreation.cs:1720-1
   it('幂等：旅程授予双跑不叠不乱序（SetDefaults 原地覆盖语义）', () => {
     const inv = new Inventory();
     grantStarterKit(inv, 3);
-    const snap = JSON.stringify(inv.slots.slice(0, 12));
+    // ★X2 快照口径收窄（2026-10-01）:同 BJ390 词缀重掷勘注——幂等锁=槽位放置面
+    const snapShape = (inv2: Inventory) =>
+      JSON.stringify(inv2.slots.slice(0, 12).map((it) => it && { id: it.id, stack: it.stack }));
+    const snap = snapShape(inv);
     grantStarterKit(inv, 3);
-    expect(JSON.stringify(inv.slots.slice(0, 12))).toBe(snap);
+    expect(snapShape(inv)).toBe(snap);
     expect(inv.slots[5]?.stack).toBe(100);
   });
 
@@ -163,7 +172,8 @@ describe('SW-BJ91 旅程难度新角色大礼包（UICharacterCreation.cs:1720-1
     expect(src).toContain('export function grantStarterKit(inv: import(\'../items/Inventory\').Inventory, difficulty = 0)');
     expect(src).toMatch(/if \(difficulty === 3\)/);
     expect(src).toContain('grantStarterKit(inv);');                      // 死亡发还=不带 difficulty
-    expect(src).toMatch(/inv\.armor\[3\] = \{ id: wings, stack: 1 \}/);   // :1740 直置
+    // ★X2 重锚（2026-10-01）:BJ390 开局件 ...starterPrefixOf(wings) 自然词缀掷
+    expect(src).toMatch(/inv\.armor\[3\] = \{ id: wings, stack: 1, \.\.\.starterPrefixOf\(wings\) \}/);   // :1740 直置+词缀掷
     const flow = FLOW_SRC();
     expect(flow.match(/grantStarterKit\(g\.player\.inv, /g)?.length).toBe(2);   // 新角色臂+importWld 带参
   });

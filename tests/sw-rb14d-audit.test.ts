@@ -104,7 +104,11 @@ describe('SW-RB14d B：玩家落速字段终值 10.01（:24637;湿档 3/7/6/2 �
     const p = SRC('entities/Player.ts');
     expect(p).toContain('lMaxFall = 3.01');
     expect(p).toContain('lMaxFall = 7.01');
-    expect(p).toContain('lMaxFall = 6.01; lJSpd = 5.51; lJT = 25;');
+    // ★X2 重锚（2026-10-01）:BJ260-F1（b21333f4,2026-09-22）湿链残项 S6——原版序
+    //  =液体档覆写先于 UpdateJumpHeight 尾段（jumpBoost 钳 max 6.51 + jumpSpeed
+    //  加成 :19717-19720/:19745）,单行平值形态拆两段=湿态蛙腿/徽章加成不再整丢
+    expect(p).toContain('lMaxFall = 6.01');
+    expect(p).toContain('lJSpd = Math.max(5.51, eqM.jumpBoost ? 6.51 : 0) + eqM.jumpSpd; lJT = 25;');
     expect(p).toContain('lMaxFall = 2.01');
     expect(p).not.toContain('lMaxFall = 5;');          // 水档旧值退役
     // 干链钳位（行为面 = sw-fx40 域B B1-B3 已换算 PLAYER_MAX_FALL_SPEED）

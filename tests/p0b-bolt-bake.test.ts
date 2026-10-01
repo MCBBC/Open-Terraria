@@ -52,9 +52,10 @@ describe('P0-B ① 专用化通道:整 bolt 单 scratch 烘焙', () => {
     // （旧锚 markWorldDynamicScratch(sc) 已停两代前形态,在途金标禁重冻判据重产）
     expect(SRC).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);");
     const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
-    expect(RDR).toContain('markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {');
-    expect(RDR).toContain('if (key) this.bglShimReg().uploadScratchNow(img, key);');
-    expect(RDR).toContain('else this.bglShimReg().markDynamic(img);');
+    // ★X2 重锚（2026-10-01）:shineslice（77163898）第三形态签名;无 key markDynamic 语义保持
+    expect(RDR).toContain("markWorldDynamicScratch(img: HTMLCanvasElement, key?: string,\n    tint?: readonly [number, number, number]): boolean {");
+    expect(RDR).toContain('if (key) { this.bglShimReg().uploadScratchNow(img, key); return false; }');
+    expect(RDR).toContain('this.bglShimReg().markDynamic(img);');
   });
   it('scratch 面纪律:模块级复用+P1-A 滞回回落+willReadFrequently（CanvasWatch/R3-F8/R3b-2① 判例）', () => {
     // ★2026-09-28 锚重产:旧「只增不减」已按 R3b-2① 换滞回回落（单次离群大 bbox

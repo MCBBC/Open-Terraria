@@ -36,12 +36,17 @@ const scene = await page.evaluate(() => {
   for (const wx of [-22, -21, 21, 22]) for (let dy = -3; dy <= 16; dy++) st.setTile(bx + wx, by + dy, 1);
   for (let dx = -20; dx <= 20; dx++) for (let dy = 14; dy <= 16; dy++) st.setTile(bx + dx, by + dy, 1);
   // 岩浆池：行 by..by+13（14 行深）满液 255,liquidType 2 = 岩浆（toVanillaType: 2→1）
+  // ★BJ427-W2 定谳（2026-10-01）：裸 setLiquid 自带通知面（liquidListeners→引擎
+  //  liquidDirty + tileWriteLog→worker delta）——实测 ≤2 帧点亮
+  //  （scripts/_bj427-w2-light-verdict.mjs S1/S2）。旧注释「setLiquid 不派发 tile
+  //  listeners → 岩浆光不重算」系误诊:真机制=光照区域锚玩家（Game.ts:12202
+  //  ensureRegion(player.cx)）vs 原版 GetAreaToLight 锚相机（Main.cs:64888）——旧版
+  //  本探针把玩家瞬移 bx+60 → 区域左缘=bx-9 → 池左半在区外 lightAt=0 恒黑
+  //  （bj427-A-disease.png 黑区右缘 ~500px=640-9×16 逐格吻合）。修正=玩家贴池。
   for (let dx = -20; dx <= 20; dx++) for (let dy = 0; dy <= 13; dy++) st.setLiquid(bx + dx, by + dy, 255, 2);
-  // ★光照脏区助推：setLiquid 不派发 tile listeners → 岩浆光不重算（左半池黑块=光脏区未
-  //  覆盖）。touch 池上方空气行派发 listeners → 光照重算扫描覆盖池体。
-  for (let dx = -24; dx <= 24; dx++) st.setTile(bx + dx, by - 2, 0);
-  // 玩家移出池区（右侧远处地面外——清场区边缘外站浮空由 no-op follow 掩蔽）
-  p.x = (bx + 60) * 16 + 8; p.y = (by - 4) * 16; p.vx = 0; p.vy = 0;
+  // 玩家钉右墙顶（墙 dy=-3..16,顶行 by-3;池区外免岩浆灼杀）——区域=玩家
+  // ±(viewW/2+29)=±69 ⇒ 双机位视口（±40）全在区内=游戏内可达布局
+  p.x = (bx + 21) * 16 + 8; p.y = (by - 3) * 16 - p.h; p.vx = 0; p.vy = 0;
   g.camera.follow = () => {};
   try {
     const w = g.world.weather;
@@ -54,7 +59,8 @@ const scene = await page.evaluate(() => {
 console.log('[probe] scene', JSON.stringify(scene));
 await freezeClock(page, { tod: 0.5 });
 await pump(page, 120);
-// ★光照脏区排干：大规模 setTile/setLiquid 后光照重算队列需足帧排干（黑块=未排干）
+// ★BJ427-W2 更正（2026-10-01）：此排干非「光照脏区」所需（裸 setLiquid ≤2 帧点亮,
+// 见 scripts/_bj427-w2-light-verdict.mjs）——保窗口为液体模拟沉降+光照稳定收敛余量
 for (let i = 0; i < 240; i++) await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
 
 // ---- 采样器：覆盖率 (R−B) 归一化 + 截图 + 逐列扫描 ----

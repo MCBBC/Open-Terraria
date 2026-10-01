@@ -393,7 +393,8 @@ describe('★C5b precip-gl 结构锁', () => {
     expect(GS).toContain("this.pipe.program('sprite:precip', PRECIP_VS, PRECIP_FS)");
     expect(GS).toContain('outColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);');
     expect(GS).toContain('gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16);');
-    expect(GS).toContain('quadBatchRgba(e: TexEntry, data: Float32Array, quads: number): boolean {');
+    // ★X2 重锚（2026-10-01）:C13 星场批（7ca51ffd）smooth 缺省参（缺省=precip 调用零变化）
+    expect(GS).toContain('quadBatchRgba(e: TexEntry, data: Float32Array, quads: number, smooth = false): boolean {');
     expect(GS).toContain('gl.bindSampler(0, this.samp.nearest!)');
   });
 

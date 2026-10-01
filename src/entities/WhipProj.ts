@@ -596,27 +596,99 @@ export class WhipProj extends Entity {
       //    （后者仅 targetNPC.active 门）,城镇受理照写;minionTarget 失效清除走
       //    Player.cs:57682-57685 CanBeChasedBy（城镇 friendly 恒假 → 次拍清,原版同相）。
       //  ④falloff/numHits :13453-13550/:14263 受理面无条件段,城镇靶同耗。
-      //  登记不接（城镇侧弹幕家族 GAP,与敌怪环同名单）：StatusNPC 鞭 debuff
-      //  （:13634——城镇 NPC 无 onFire3T/frostburn2T 载体）/TryDoingOnHitEffects
-      //  proc·伴生·自buff（:13641-13643 life>5 门,受理读前值序差）/浸剂 nano·party
-      //  （:13687-96）/ghostHeal flag10（:13712/:13869）/TagEffectStack.OnHit(:13713)/
-      //  OnKillNPC 墓碑成就（:13703——鞭调用点未传 onKill,存量 GAP 非 W1 引入）。
-      hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, this.dmgNow,
-        Math.sign(p.x - this.x) * 2, 'playerProj', 0,
+      //  登记债收编（★X1 2026-10-01 六面落刀,详注见下方 onAccept 内）：face 1 鞭
+      //  debuff 载体（TownNPC 12 字段+tickDebuffs）/face 2 OnHit proc（TownNPC.hurt
+      //  第 9/10 参+projTargets 透传）/face 3 nano·party/face 4 ghostHeal/face 5
+      //  proc 窗启用。★face 6 勘误（W1 锚翻案）：GRAVE_MISTAKE=墓碑弹杀【城镇
+      //  NPC】/队友玩家（Player.OnKillNPC :20623-20636 IsAGravestone∧townNPC /
+      //  Player.KillMe :39133-39137 队友臂）,非"鞭杀向导"——原版 OnKillNPC(ref
+      //  attempt, 鞭) 体仅 item 5096 自buff+墓碑两支,鞭杀向导零效果=零修刀;
+      //  墓碑侧已在 Tombstone.applyDamage 接线（FTW 面+onKill→notifyProgression
+      //  Event(36)）。残债（新登记）：随从/哨兵弹 vs 城镇 NPC 通道整缺（:13711
+      //  OnHit 消费半面/:12947 ModifyHit tag 乘区对城镇不可达）;WHIP_HIT_SIDEKICK
+      //  （917/1036）与 WHIP_HIT_BUFF（312/365）:13988-13997 城镇臂未接。
+      // ★清偿刀 X1 face 3（:13687-96 nano 乘区,城镇靶同面）：`ownedBySomeone &&
+      //  (melee||IsAWhip) && meleeEnchant==6 → dmg=(int)(dmg×1.05f)`——鞭 SetDefaults
+      //  无 melee 类旗,IsAWhip 臂即为此设（同敌怪环 F2 位）。nano 浸剂在身时受理
+      //  命中伤 ×1.05（(int) 截断同式;不写回 dmgNow——衰减链独立管 dmgNow）。
+      const townDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05) : this.dmgNow;
+      hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, townDmg,
+        Math.sign(p.x - this.x) * 2, 'playerProj', this.projId,
         undefined, undefined,
         (n) => this.hitSet.has(n.id),   // 局部表门（:12596 flag2 usesLocal 臂）
         (n) => {
-          const tn = n as unknown as { id: number; iframes: number; vanillaId?: number };
+          const tn = n as unknown as { id: number; iframes: number; vanillaId?: number;
+            x: number; y: number; w: number; h: number; vx?: number; vy?: number };
           tn.iframes = 0;               // 写梯 :14175-14178 usesLocal 主支=清全局窗
           this.hitSet.add(tn.id);       // 写梯 :14179 immuneArray[victim]=-1 占位
+          const preHits = this.pveNumHits;
           this.pveNumHits++;            // :14263（proc 读自增前值,同敌怪环习语）
           // 衰减链（:13453-13550 switch）：受理拍鞭 damage 字段 ×falloff,城镇靶同耗
           this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
+          // ---- ★清偿刀 X1（2026-10-01）城镇受理面家族收编（六面落刀位）----
+          //  原文 Damage_PVE_Inner 受理梯（逐行号）：:13633 SpawnHitVisuals →
+          //  :13634 StatusNPC（内含 ApplyWhipDebuffs :11067 与浸剂/meleeEnchant
+          //  :11197-11221）→ :13635-38 TryApplyTagToNPC → :13640-43
+          //  TryDoingOnHitEffects（TownNPC.hurt 内 face 2 块,projTargets 透传
+          //  fromPlayer/srcProjId）→ :13687-96 nano/party → :13698-13706
+          //  NPCKillAttempt/StrikeNPC/OnKillNPC（hitTownNpcs 内,见上）→ :13711
+          //  TagEffectStack.OnHit → :13712/:13869-77 flag10/ghostHeal → :13976/
+          //  :14012 proc 窗。登记偏差两笔（零同拍观察面）：debuff/party 原文在
+          //  StrikeNPC 前,本仓 onAccept 形态落在受理拍后——城镇 DoT 次拍才起,
+          //  无同拍消费点;OnHit 消费半面（CanRunHitEffects=随从/哨兵弹限定,
+          //  WhipTagEffect.cs:95-105）鞭自体命中恒假 → :13711 对鞭自体调用为空,
+          //  消费侧随从弹 vs 城镇 NPC 通道（MinionProj 无 hitTownNpcs 环）登记新债。
           if (owner) {
+            // face 1①：ApplyWhipDebuffs（:11067-11090 表,debuffWriteAllowed 闸内）
+            applyWhipDebuffs(this.projId, tn as unknown as Record<string, number>);
+            // face 1②：StatusNPC 鞭表（1104 → 137 Slimed 180t;24 表项抑制、按
+            //  鞭尖窗直投 :11255-11272——spark1104/tipBox1104 为 tryHit 头共享快照）
+            const bandCtx = { catalystBand: owner.equipStats.catalystBand === true };
+            if (this.projId === 1104) {
+              applyProjStatus(this.projId, tn as unknown as Record<string, number>,
+                { suppressBuff: 24, ...bandCtx });
+              if (spark1104 && tipBox1104
+                && tipBox1104.x < tn.x + tn.w && tipBox1104.x + tipBox1104.w > tn.x
+                && tipBox1104.y < tn.y + tn.h && tipBox1104.y + tipBox1104.h > tn.y) {
+                applyBuffTicks(tn as unknown as Record<string, number>, 24,
+                  60 * (3 + Math.floor(Math.random() * 3)));   // 60×Next(3,6)=180-300t
+              }
+            } else {
+              applyProjStatus(this.projId, tn as unknown as Record<string, number>, bandCtx);
+            }
+            // face 1③：武器浸剂 meleeEnchant（:11197-11221——venom70+395/cursed39/
+            //  fire24/gold72/ichor69/nano31[城镇免疫被闸]/poison20;party 彩尘）
+            applyMeleeImbue(
+              (owner as unknown as { buffs: { has: (b: never) => boolean } }).buffs,
+              tn as unknown as Record<string, number>,
+              () => game.spawnParticles(tn.x + tn.w / 2, tn.y + tn.h / 2,
+                ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
             // tag（TryApplyTagToNPC :13635-13638）——ImmuneToWhips 门在栈内
             //  （城镇 NPC 不在表）;minionTarget（:14321-14327 aiStyle165 支,无 friendly 门）
             owner.tagEffectStack.tryApplyTagToNPC(this.itemId, tn.id, tn.vanillaId ?? 0, this.bonusTagDmg);
             owner.minionTargetId = tn.id;
+          }
+          // face 3②：party 彩带伴生（:13693-95 meleeEnchant==7 → NewProjectile 289
+          //  于目标 Center、速=目标速度——门 `ownedBySomeone && (melee||IsAWhip)`,
+          //  鞭走 IsAWhip 臂; whipImbuParty= tryHit 头快照）
+          if (whipImbuParty) {
+            game.spawnFriendlyProj?.(new ConfettiBurstProj(
+              tn.x + tn.w / 2, tn.y + tn.h / 2, tn.vx ?? 0, tn.vy ?? 0));
+          }
+          // face 4：ghostHeal 白耗面（:13712 flag10 = num41>0∧lifeMax>5∧friendly∧
+          //  !hostile∧aiStyle≠59——TownNPC.lastStrikeDealt=num41 等位,hurt 内 X1 落值;
+          //  canGhostHeal 缺省 true（NPC.cs:6270,城镇族无 false 置位）;旗标/预算/白耗
+          //  语义由 Game.applyLifeSteal 单源自证,V2 敌怪环同式）。:13711 OnHit 消费
+          //  半面对鞭自体恒空（CanRunHitEffects 随从/哨兵限定,见上注）→ 无调用位。
+          ghostHealProc(game, this.projId, preHits,
+            tn as unknown as Parameters<typeof ghostHealProc>[3]);
+          // face 5：proc 窗启用（:13976 {913,1031,1032} localAI[0]==0 首鞭门 /
+          //  :14012 {847,1033,1035} 无条件——tag 消费机制半面,城镇靶同面;消费侧
+          //  = 随从弹命中被 tag 城镇 NPC 时的 OnProcHit,通道登记新债见上注）
+          if (owner && WHIP_PROC_ITEMS.has(this.itemId)
+            && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {
+            this.procEnabled = true;
+            owner.tagEffectStack.tryEnableProcOnNPC(this.itemId, tn.id);
           }
         });
       for (const ent of game.enemies()) {

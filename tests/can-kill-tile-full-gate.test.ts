@@ -56,11 +56,13 @@ describe('CanKillTile 全函数门（SW-G1 2026-09-03）', () => {
     expect(canKillTileAt(st, 12, 12, ctx([{ x: 12, y: 12, items: [null] }]))).toBe(true);
   });
 
-  it('挖掘面重锚在位：Game.ts 消费 canKillTile ×6，镐/斧/锤面不再直挂 tileAboveProtected', () => {
+  it('挖掘面重锚在位：Game.ts 消费 canKillTile ×7，镐/斧/锤面不再直挂 tileAboveProtected', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     // SW-K1 2026-09-03：+1 = Dirt Rod 使用链（useDirtRod 光标格 CanKillTile 全函数门,
     // Player.cs:52946）;割草机 MowingTheGrass 语境走 canKillTileMowingAt 包装不入计数
-    expect(src.match(/\bthis\.canKillTile\(/g)?.length).toBe(6);
+    // ★X2 重锚（2026-10-01）:6→7——BJ324（028ecf65,2026-09-24）活板门移植
+    //  toggleTrapdoor 关门件可毁检查 canKill 闭包（原版 :51990-51992）入账
+    expect(src.match(/\bthis\.canKillTile\(/g)?.length).toBe(7);
     expect(src).not.toContain('this.tileAboveProtected(tx, ty)');   // 挖掘面门点全重锚
     expect(src).toContain('this.tileAboveProtected(x, y)');         // breakTile 头 CheckTileBreakability 门保留
   });

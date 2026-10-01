@@ -32,6 +32,10 @@ import { UI } from '../src/ui/UI';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/items';
 
+// node 环境无 rAF 族（★BJ407 后 showReforgeTooltip→startTooltipPulse :3519 消费
+// cancelAnimationFrame;s4-tooltip-residual 同款习语）
+(globalThis as Record<string, unknown>).cancelAnimationFrame ??= () => {};
+
 type AnyUI = Record<string, any>;
 
 const idOfVid = (vid: number): number => {
@@ -78,7 +82,10 @@ function mkUi(): { ui: AnyUI; sfx: string[]; achCalls(): number } {
   ui.openChest = null;
   ui.refreshAll = () => {};
   // ★SW-TT1：showReforgeTooltip 现走 applyTooltipBg 终局（清 nobox 类→display 门早退）
+  // ★X2 清偿（BJ407 后 display 门已前移常真）：querySelector 返 null=脉冲管线早退
+  //   （startTooltipPulse :3521-3522,与 s4:212 同款;断言面=innerHTML 不受影响）
   ui.tooltip = { style: {} as CSSStyleDeclaration, innerHTML: '',
+    querySelector: () => null,
     classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false } } as never;
   ui.reforgeItem = null;
   ui.reforgeSlotEl = null;

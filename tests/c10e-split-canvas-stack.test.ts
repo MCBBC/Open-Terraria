@@ -166,21 +166,35 @@ describe('C10e present 位处置（设计文档 §二 P1-P14）', () => {
     expect(RDR).toMatch(/wctx\.drawImage\(glw\.canvas, 0, 0, lw, lh\);\s*\n\s*wctx\.restore\(\);\s*\n\s*\/\/ ★C10e[\s\S]{0,200}if \(this\._c10eFrame && glw\.pipeBackend\) glw\.pipeBackend\.restackScreen\(\);/);
   });
 
-  it('P14 滤镜链输入=全帧合成 scratch（三画布折叠;旗关=主画布原路径）', () => {
-    expect(RDR).toContain('chainOk = gl.drawChainPipe(pipe, this.c10eChainSource(), passes, [');
+  it('P14 滤镜链输入=全帧合成 scratch（三画布折叠;旗关=主画布原路径）;★K1 分档:合成闩在帧链源直取 HUD（省折叠 scratch 清屏+HUD 腿）,未合成帧/2D 回退链=折叠 scratch 原路径', () => {
+    expect(RDR).toContain('const chainSrc = (Renderer.c10eK1 && this._c10eFrame && this._c10eComposited)');
+    expect(RDR).toContain('? this.canvas : this.c10eChainSource();');
+    expect(RDR).toContain('chainOk = gl.drawChainPipe(pipe, chainSrc, passes, [');
     expect(RDR).toContain('if (!chainOk && gl.drawChain(this.c10eChainSource(), passes,');
     expect(RDR).toContain('private c10eChainSource(): HTMLCanvasElement {');
   });
 
-  it('P1/P2 全帧合成（死亡灰化/重力翻转自拷消费者前置）;幂等闩', () => {
+  it('P1/P2 全帧合成（死亡灰化/重力翻转自拷消费者前置）;幂等闩;★K1 门拓宽（xform∨滤镜待发——合成产物即滤镜链输入）', () => {
     expect(RDR).toMatch(/private c10eCompositeIntoHud\(\): void \{[\s\S]{0,200}if \(this\._c10eComposited \|\| !this\._c10eFrame\) return;\s*\n\s*this\._c10eComposited = true;/);
-    expect(RDR).toMatch(/if \(this\._c10eFrame && this\._c10eWorldToHud && !this\._c10eComposited\s*\n\s*&& this\.c10eFullXformCond\(player, world\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
-    expect(RDR).toMatch(/if \(this\._c10eFrame && !this\._c10eComposited && this\.c10eFullXformCond\(player, world\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    expect(RDR).toMatch(/if \(this\._c10eFrame && this\._c10eWorldToHud && !this\._c10eComposited\s*\n\s*&& \(this\.c10eFullXformCond\(player, world\) \|\| this\._c10eFilterPending\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    expect(RDR).toMatch(/if \(this\._c10eFrame && !this\._c10eComposited\s*\n\s*&& \(this\.c10eFullXformCond\(player, world\) \|\| this\._c10eFilterPending\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    // ★K1:合成 destination-over 落既有 HUD 覆盖层之下+gl→sky 逆序垫底
+    //  （空 HUD 帧与 source-over sky→gl 逐位同;气球/credits/2D 回退类不透明天空埋层消除）
+    expect(RDR).toMatch(/ctx\.globalCompositeOperation = 'destination-over';[\s\S]{0,200}ctx\.drawImage\(this\.glCanvasEl, 0, 0\);\s*\n\s*if \(this\.skyCanvas\) ctx\.drawImage\(this\.skyCanvas, 0, 0\);/);
   });
 
   it('P15 天气色罩 GL quad mini-session（bg 后/近云前原层序位）;回退=fillRect 原路径', () => {
     expect(SKY).toMatch(/const glLayer = this\.c10eOver \? this\.cloudGlLayer : null;[\s\S]{0,600}glLayer\.begin\('wtint'\);\s*\n\s*glLayer\.fillQuad\(0, 0, viewW, viewH,/);
     expect(SKY).toContain("ctx.fillStyle = `rgb(${Math.round(p.color[0] * 255)},${Math.round(p.color[1] * 255)},${Math.round(p.color[2] * 255)})`;");
+  });
+
+  it('★K1 滤镜待发预测单源（2026-10-01）:谓词=块门保守超集（sfxPipe×c10eK1 门/anyInUse∨heatInUse/月总倒计时/塔斜坡双臂）;帧分类下半 P1 前计算一次', () => {
+    expect(RDR).toContain('private c10eFilterPending(world: World, player: Player): boolean {');
+    expect(RDR).toMatch(/if \(!Renderer\.sfxPipe \|\| !Renderer\.c10eK1\) return false;\s*\n\s*const mono = this\.monoFilters;\s*\n\s*if \(mono\.anyInUse \|\| mono\.heatInUse\) return true;\s*\n\s*if \(world\.lunarEvent && world\.lunarEvent\.moonLordCountdown > 0\) return true;\s*\n\s*if \(this\._towerFilterOpacity > 0\) return true;\s*\n\s*return this\._lunarTowerFilterTarget\(this\._frameEntities, player\.cx, player\.cy, world\) != null;/);
+    expect(RDR).toMatch(/this\._c10eFilterPending = this\._c10eFrame\s*\n\s*&& this\.c10eFilterPending\(world, player\);/);
+    // 逃生门:static c10eK1（?c10ek1=0 逐项回 K1 前行为）
+    expect(RDR).toMatch(/private static _c10eK1 = \(\(\) => \{[\s\S]{0,200}get\('c10ek1'\) !== '0';/);
+    expect(RDR).toContain('static get c10eK1() { return this._c10eK1; }');
   });
 });
 

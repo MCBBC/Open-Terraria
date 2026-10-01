@@ -96,6 +96,24 @@ for (let i = 0; i < 12; i++) {
   if (s.path.startsWith('b2b-acc') && s.inv) { chk('场面就绪(液体在视+acc 窗)', true, JSON.stringify(s)); break; }
   if (i === 11) chk('场面就绪(液体在视+acc 窗)', false, JSON.stringify(s));
 }
+// ★玩家钉位（未暂停渲染面交付确定性:落底后钉坐标+零速,防相机跟手 1px 抖动
+//  污染全帧 census——20261001 determinism bbox 漂移判谳）
+await page.evaluate(() => {
+  const g = window.__swGame;
+  window.__drive(90);   // 落底 settle
+  window.__pin = { x: g.player.x, y: g.player.y };
+  window.__drive = (n) => {
+    for (let i = 0; i < n; i++) {
+      window.__vnow += 16.6667;
+      g.player.x = window.__pin.x; g.player.y = window.__pin.y;
+      g.player.vx = 0; g.player.vy = 0;
+      g.frame(window.__vnow);
+    }
+    return window.__vnow;
+  };
+  g.camera.x = g.player.x; g.camera.y = g.player.y;
+});
+
 // 波场定格（对拍确定性——worker 场吞掉,_c13b-ab 同式）。★不暂停:C13b 同款
 // paused 态在当前构建下 g.frame 不重渲世界（臂翻面后 canvas 恒旧帧=20261001 实测,
 // canvas sweep+PNG 留档判谳）——确定性由 freezeClock+波场冻结+按臂重置 vnow 序列交付。
@@ -184,17 +202,63 @@ const dumpDiffPng = async (aFin, bFin, tag) => {
   writeFileSync(`/tmp/c13c-diff-${tag}.png`, Buffer.from(dataUrl.split(',')[1], 'base64'));
 };
 
+// ★渲染确定性判谳:同 vnow 重渲差分（零=帧级确定;非零=墙钟环境域在帧间漂移）
+await page.evaluate(({ v0, K }) => { window.__vnow = v0; for (let i = 0; i < K; i++) window.__drive(1); }, { v0: (await page.evaluate(() => window.__vnow)), K: 3 });
+const detA = await snapFin();
+await page.evaluate(({ v0, K }) => { window.__vnow = v0; for (let i = 0; i < K; i++) window.__drive(1); }, { v0: (await page.evaluate(() => window.__vnow)), K: 3 });
+const detB = await snapFin();
+const detC = await census(detA, detB, null);
+console.log(`[determinism] same-vnow re-render diff n=${detC.n} maxd=${detC.maxd} bbox=${JSON.stringify(detC.bbox)}`);
+// ★LA 判据域自校准:漂移域底边以下=帧级确定域（树冠/云=墙钟环境不确定性,臂无关,
+//  探针环境登记）;湖带顶边抬到漂移域之下
+const driftBottom = detC.bbox ? detC.bbox[3] + 2 : 0;
 // 湖带屏域（c13c 差异域;树冠/云=墙钟动画漂移域排除——差值图判谳:顶部黄边团=环境
 //  动画在两臂快照间的墙钟相位漂移,非场差,探针环境登记）
-const lakeBand = await page.evaluate(() => {
+const lakeBandRaw = await page.evaluate(() => {
   const g = window.__swGame, sc = window.__scene;
   const z = g.camera.zoom ?? 1.25, H = g.renderer.canvas.height;
   const yTop = Math.max(0, Math.round((sc.ry * 16 - g.camera.y) * z + H / 2) - 48);
   const yBot = Math.round(((sc.ry + sc.depth) * 16 - g.camera.y) * z + H / 2) + 8;
   return [yTop, yBot];
 });
+const lakeBand = [Math.max(lakeBandRaw[0], driftBottom), lakeBandRaw[1]];
+console.log(`[band] raw=${JSON.stringify(lakeBandRaw)} driftBottom=${driftBottom} calibrated=${JSON.stringify(lakeBand)}`);
+if (lakeBand[1] - lakeBand[0] < 24) {
+  chk('LA 判据域（漂移域吞没湖带=不可判）', false, `band=${JSON.stringify(lakeBand)}`);
+  const fails0 = results.filter((r) => !r.ok).length;
+  console.log(`== ${fails0} FAIL ==`);
+  process.exit(1);
+}
 
-const K = 3;
+const K = 4;
+// ★跨 pair 逐像素最小差分判别器（场像素=全部 pair 一致差[确定];漂移像素=部分 pair 差
+//  [随机]——min 跨 pair 归零即分离;树冠/云墙钟漂移=臂无关环境域,由此剔除）
+await page.evaluate(() => {
+  window.__minDiff = null;
+  window.__minW = 0;
+  window.__pairMin = (aB64, bB64) => {
+    const dec = (s) => { const bin = atob(s); const u = new Uint8ClampedArray(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+    const P = dec(aB64), Q = dec(bB64);
+    if (!window.__minDiff) { window.__minDiff = new Float32Array(P.length / 4); window.__minW = P.length; }
+    const M = window.__minDiff;
+    for (let i = 0, p = 0; i < P.length; i += 4, p++) {
+      const dd = Math.max(Math.abs(P[i] - Q[i]), Math.abs(P[i + 1] - Q[i + 1]), Math.abs(P[i + 2] - Q[i + 2]));
+      if (window.__pairMinCall === undefined) M[p] = dd;
+      else if (dd < M[p]) M[p] = dd;
+    }
+    window.__pairMinCall = (window.__pairMinCall ?? 0) + 1;
+  };
+  window.__minStats = (band) => {
+    const M = window.__minDiff, W = Math.sqrt(0) || 0;
+    let n = 0, maxd = 0, sum = 0;
+    for (let p = 0; p < M.length; p++) {
+      const py = (p / 1280) | 0;
+      if (band && (py < band[0] || py >= band[1])) continue;
+      if (M[p] > 0) { n++; sum += M[p]; if (M[p] > maxd) maxd = M[p]; }
+    }
+    return { n, maxd, mean: n ? sum / n : 0 };
+  };
+});
 const pairs = [];
 for (let k = 0; k < K; k++) {
   const v0 = await page.evaluate(() => window.__vnow);
@@ -209,6 +273,7 @@ for (let k = 0; k < K; k++) {
   const md5B = md5fin(`B${k}`, finB);
   const c = await census(finA, finB, lakeBand);
   const cFull = await census(finA, finB, null);
+  await page.evaluate((p) => window.__pairMin(p.a, p.b), { a: finA.b64, b: finB.b64 });
   if (k === 0) await dumpDiffPng(finA, finB, 'pair0');
   pairs.push({ k, c, cFull, md5A, md5B, stB });
   console.log(`[pair ${k}] md5 A=${md5A.slice(0, 8)} B=${md5B.slice(0, 8)} census[湖带] n=${c.n}(${(c.n * 100 / Math.max(1, c.area)).toFixed(4)}%) maxd=${c.maxd} mean=${c.mean.toFixed(3)} bbox=${JSON.stringify(c.bbox)} | full n=${cFull.n} maxd=${cFull.maxd} | B: batch=${stB?.batch} fb=${stB?.fb} rp=${stB?.rp}`);
@@ -217,6 +282,7 @@ const area = await page.evaluate(() => window.__swGame.renderer.canvas.width * w
 // ---- 快照活性自证（判据面前置）:同臂 v0 vs v0+120 tick——场相位 +2.09rad+纹理
 //  帧带前移 ⇒ 快照必变;不变=快照死面（census 判据作废,直 FAIL）----
 const live0 = await page.evaluate(() => window.__vnow);
+
 await page.evaluate(({ v0, K }) => { window.__vnow = v0; for (let i = 0; i < K; i++) window.__drive(1); }, { v0: live0, K: 3 });
 const finL0 = await snapFin();
 await page.evaluate(({ v0, K }) => { window.__vnow = v0; for (let i = 0; i < K; i++) window.__drive(1); }, { v0: live0 + 120, K: 3 });
@@ -230,8 +296,13 @@ const bandArea = pairs.reduce((s, p) => s + p.c.area, 0) / pairs.length;
 const nPct = (tot / Math.max(1, bandArea * pairs.length)) * 100;
 const worstMaxd = Math.max(...pairs.map((p) => p.c.maxd));
 const worstFull = Math.max(...pairs.map((p) => p.cFull?.maxd ?? 0));
-chk('LA census 有界（c13c 域=湖带;登记域:逐像素场 vs CPU 双线性张量 §5.3+highp sin 域;maxd≤72 ∧ n%<20）',
-  worstMaxd <= 72 && nPct < 20, `湖带 n=${tot}(${nPct.toFixed(4)}%) maxd=${worstMaxd} | 全幅 maxd=${worstFull}（含环境漂移域,留档）`);
+// ★LA 终判=跨 pair min-diff（湖带域;场像素 4/4 一致差,漂移像素被 min 剔除）。
+//  真域以实测收紧（设计案 §4.2 条款）:确定湖域实测 maxd=2（≙离线场值闸字节界）,
+//  判据收紧 maxd≤8 ∧ mean≤2;n%=场 ±1LSB 弥散面（逐像素场 vs 双线性本质形态）留档
+const minStats = await page.evaluate((band) => window.__minStats(band), lakeBand);
+chk('LA census 有界（c13c 域=确定湖带×跨pair一致差;实测收紧 maxd≤8 ∧ mean≤2;登记上限 72）',
+  minStats.maxd <= 8 && minStats.mean <= 2,
+  `湖带一致差 maxd=${minStats.maxd} mean=${minStats.mean.toFixed(3)} n=${minStats.n}(${(minStats.n * 100 / Math.max(1, (lakeBand[1] - lakeBand[0]) * 1280)).toFixed(4)}%) | 逐对最差 maxd=${worstMaxd}（含漂移渗入） | 全幅 maxd=${worstFull}（树冠/云墙钟漂移域,臂无关,留档）`);
 chk('LB B 臂批真在走（batchQuads>0/fallback=0/replays=0）',
   pairs.every((p) => p.stB?.batch > 0 && p.stB?.fb === 0 && p.stB?.rp === 0),
   `batch=${pairs[0]?.stB?.batch}`);

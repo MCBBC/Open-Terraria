@@ -84,7 +84,9 @@ export function hitTownNpcs(
   for (const ent of list) {
     const n = ent as {
       x: number; y: number; w: number; h: number; dead: boolean;
-      hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
+      hurt: (d: number, kx: number, ky: number, g: GameHooks,
+        penPercent?: number, flatPen?: number, crit?: boolean, force?: boolean,
+        fromPlayer?: boolean, srcProjId?: number) => boolean;
       bound?: boolean; vanillaId?: number; id: number; iframes?: number;
     };
     if (n.dead || typeof n.hurt !== 'function') continue;
@@ -111,7 +113,12 @@ export function hitTownNpcs(
     //   清单唯一备案站）。消费面对照：any=受理聚合（调用方 pierce 经济,原版
     //   penetrate-- :14189-14196 在 Damage_PVE_Inner 受理面同理）;
     //   onKill 由 n.dead 复核=DidNPCDie()（Projectile.cs:13703）非受理面,同相。
-    if (n.hurt(dmg, kb, 0, game)) {
+    // ★清偿刀 X1（2026-10-01）face 2 管线位：fromPlayer（source==='playerProj' ≈
+    //   Damage_PVE_Inner :13640 ownedBySomeone 臂——hostile 弹 owner=255 走不到
+    //   TryDoingOnHitEffects）+ srcProjId（TryDoingOnHitEffects :15210-15220 来源
+    //   排除表 {221,227,614,729,908,977}）透传 TownNPC.hurt 第 9/10 参。
+    //   penPercent/flatPen/crit/force 恒缺省（本通道无穿甲/暴击入参面,既有形态）。
+    if (n.hurt(dmg, kb, 0, game, 0, 0, false, false, source === 'playerProj', projId)) {
       if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
       // ★W1：受理拍回调 = 写梯位（:14031-14179 immune[owner]=0+局部表/:14263
       //   numHits/:14321-14327 minionTarget——原文序在 OnKillNPC 之后,同拍序保持）

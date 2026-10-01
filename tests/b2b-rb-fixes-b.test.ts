@@ -59,8 +59,11 @@ describe('R1-F10 共管退避窗禁自建管线', () => {
     // ★P0-A（2026-09-25 塌方定谳续刀）:null 支不再静默——markSwPipeSkip 按 acquire
     //  失败因落 lrecon-skip:swpipe-* 指纹+notifySwPipeDegrade 一次性 toast;禁自建
     //  第二管线承诺不变（pipe 缺 → return null,不触 GLWorldCompose 构造）。
+    // ★X2 重锚（2026-10-01）:C10e（bf69b208）在首门加 !Renderer.c10e 收窄臂+两行
+    //  注释——cloudpipe=0 逃生门在 c10e 下强制共管（Renderer.ts:4032-4035,设计文档
+    //  §八.4）;null 支/markSwPipeSkip/notify/尾构造逐字未动,仅首门条件扩张。
     expect(RDR).toMatch(
-      /private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\) as 'backoff' \| 'init-fail' \| 'starvelock'\);\s*\n\s*this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);\s*\n\s*\}/);
+      /private newWorldCompose\(\): GLWorldCompose \| null \{[^]*?if \(!Renderer\.cloudPipe && !Renderer\.c10e\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\) as 'backoff' \| 'init-fail' \| 'starvelock'\);\s*\n\s*this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);\s*\n\s*\}/);
   });
   it('双消费点 null 安全（lrecon 支+A2 支;??= 每帧重试语义保持）', () => {
     // ★R1b-2（2026-09-27 红蓝批 β）:??= 收口进 ensureWorldCompose（旗面错位实例
@@ -98,6 +101,8 @@ const anySys = waterWaves as unknown as Record<string, unknown> & {
   _R2: Float32Array; _G2: Float32Array; _R: Float32Array;
   _wwOn: boolean; _ww: { postMessage(m: unknown): void; terminate(): void } | null;
   _wwStartedAt: number;
+  _wwWd: { healthy(now: number, errored: boolean): boolean; fallReason(): string;
+    onSend(now: number): void; onResult(now: number): void } | null;
 };
 
 const INP = { camX: 0, camY: 0, zoom: 1, viewW: 40, viewH: 40, tileX: 5, tileY: 5,
@@ -145,13 +150,23 @@ describe('R2-F3 看门狗回落帧重放注入批', () => {
     anySys._ww = { postMessage() { /* 吞 */ }, terminate() { /* no-op */ } };
     anySys._wwOn = true;
     anySys._wwStartedAt = performance.now();
+    // ★X2 夹具补桩（2026-10-01）:看门狗治理（9b217f01,2026-09-28）后 frame() 经
+    //  _wwWd.healthy(outstanding-aware) 定谳失效,假 worker 直设路径不再自带 _wwWd
+    //  → 桩补齐;定谳开关由用例显式臂控（旧墙钟 _wwStartedAt 窗已退役）。
+    let wdHealthy = true;
+    anySys._wwWd = {
+      healthy: () => wdHealthy,
+      fallReason: () => 'test-stub',
+      onSend: () => {},
+      onResult: () => {},
+    };
     anySys.frame(INP);                          // worker 分支:_wwCapture 归空批
     anySys.injectWash(20, 20, 40, 40, 0.9, 0.5, 0.8);   // 世界 px → 栅格中心洗掠
     queueRippleRaw(24, 24, 20, 20, 0.25, 0.6, 0.5, RippleShape.Circle, 0);
     // 快照喂场（10×10 对齐 INP 视口栅格）——回落帧注入写进这份场
     anySys._wwApplyField({ R: new Float32Array(100).fill(0.5), G: new Float32Array(100).fill(0.5),
       gW: 10, gH: 10, progress: 0.5, intensity: 1, waveOff: [0, 0], cam: [0, 0, 1], scroll: [0, 0] });
-    anySys._wwStartedAt = performance.now() - 3000;   // 越看门狗窗
+    wdHealthy = false;                          // 越看门狗窗 → 桩定谳失效
     anySys.frame(INP);                          // 回落帧:批重放+本地模拟
     expect(anySys.wwActive()).toBe(false);
     const R = anySys.readGridR();

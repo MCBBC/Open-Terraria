@@ -215,7 +215,12 @@ describe('wbake 混合路由（worker 慢路径旁路）', () => {
     expect(p.placeholder).toBe(true);                  // 预算占位对
     expect(client.request).not.toHaveBeenCalled();     // 无 worker 请求（区别于视口外占位）
     expect((cc as unknown as { workerAwaiting: Set<number> }).workerAwaiting.size).toBe(0);
-    expect(cc.viewportCovered()).toBe(true);           // 渐进块不阻塞幕布
+    // ★X2 语义重锚（2026-10-01）:C10g（9c545615,2026-10-01 用户实报「进世界/传送后
+    //  可见逐块渲染」）——预算占位对入账 budgetAwaiting,viewportCovered() 同权消费
+    //  =覆盖门在预算渐进窗内【 hold 幕布 2-4 帧】（旧断言 true=覆盖门对预算占位全盲,
+    //  正是幕布掀开后逐块可见的病灶面）。出账=重烘成真对/淘汰。
+    expect((cc as unknown as { budgetAwaiting: Set<number> }).budgetAwaiting.has(0)).toBe(true);
+    expect(cc.viewportCovered()).toBe(false);          // 预算渐进窗=幕布同权等待（C10g）
     // 下一帧预算窗重置 → 渲染循环 get() 原位续摊 = 真对（跨帧摊,总时长无回退）
     (cc as unknown as { beginBakeBudget(): void }).beginBakeBudget();
     (cc as unknown as { bakeBudgetMs: number }).bakeBudgetMs = 8;
@@ -223,6 +228,8 @@ describe('wbake 混合路由（worker 慢路径旁路）', () => {
     expect(q.placeholder).toBeFalsy();                 // 预算内重烘真对
     expect(q.cell).toBe(p.cell);                       // 粘滞槽位原位
     expect(client.request).not.toHaveBeenCalled();
+    expect((cc as unknown as { budgetAwaiting: Set<number> }).budgetAwaiting.has(0)).toBe(false);
+    expect(cc.viewportCovered()).toBe(true);           // 出账后覆盖门放行（C10g 自洁）
   });
 
   it('★帧内预算：占位重建分支同样受限（超限=占位保持,预算内=原位重烘）', () => {

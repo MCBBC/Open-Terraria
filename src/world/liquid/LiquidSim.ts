@@ -190,6 +190,23 @@ export class LiquidSim {
    *  两时刻记格，Liquid.cs:1189/:1583；null=单机/访客（不模拟）零开销）。
    *  60ms 节流上报见 net/syncModules.ts module0 注 */
   netChangeSink: ((x: number, y: number) => void) | null = null;
+  /** ★BJ427-W2（2026-10-01）定谳落刀：sim 直写格推送光照差量写日志。
+   *  【机制】sim 流动直写 st.liquid[] 数组（Liquid.cs 流动支逐句照抄,原版无
+   *  监听面）——本地路径靠 Game 兜底 liquidDirty（Game.ts 液体段）20Hz 重算即
+   *  收敛;worker+delta 路径（C9d2,缺省开）worker 影子的 tile 数据只随
+   *  tileWriteLog（记账写）/暴露带（区域移动）/全量锚帧（LIGHT_DELTA_ANCHOR_EVERY
+   *  =120 帧周期）投递——流动格不入日志则其光照最长陈旧 ≤120 帧（实测 paired
+   *  探针 S4w ch3 lag≈+75 帧对 local;原版全图重扫 ≤4 绘制帧）。
+   *  【覆盖面】AddWater（格入列=新得液/被唤醒——新发射格必经）与 DelWater（格
+   *  出列=液量归零——发射格消失必经）两时刻,与 NetSendLiquid 记账点同位
+   *  （Liquid.cs:1189/:1583）。残差=在列格液量数值变化（>0→>0）不入账：光照
+   *  可见面只剩水衰减/水 mask(128)阈微差,延迟至锚帧自愈,登记债。
+   *  【开销】log=null（delta 关）零开销;开时每入列/出列格 1 次 push,send 每帧
+   *  消费清空,溢出(>LIGHT_DELTA_LOG_CAP)退全量锚帧=既有兜底语义。 */
+  private lightLogPush(x: number, y: number): void {
+    const log = this.world.store.tileWriteLog;
+    if (log) log.push(this.world.store.idx(x, y));
+  }
   /** 诊断观察钩：3 格均分晋升掷触点（UUU 批液体域定罪用；生产恒 undefined） */
   r30Trace?: (x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void;
   /** UUU 批：模块级 R30 触点槽——settle 内部新建 sim 实例也能被探针捕获 */
@@ -831,6 +848,7 @@ export class LiquidSim {
     // NetSendLiquid（Liquid.cs:1188-1190：netMode==2 且入列成功才记——缓冲路径
     // 此处未达，回灌出列再入时会补记）
     this.netChangeSink?.(x, y);
+    this.lightLogPush(x, y);   // ★BJ427-W2：worker delta 面流动格投递（见字段注）
     // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）。
     //  与 blocksLiquid 同理走 nactive（幽灵 type 不算实心）。★isGeneratingOrLoading
     //  World 门槛（L1199 `!tile.active() || isGeneratingOrLoadingWorld → return`）：
@@ -1630,6 +1648,7 @@ export class LiquidSim {
     }
     // NetSendLiquid（Liquid.cs:1582-1584：DelWater 末尾、checkingLiquid(false) 前）
     this.netChangeSink?.(x, y);
+    this.lightLogPush(x, y);   // ★BJ427-W2：液量归零格（发射格消失）投递（见字段注）
     // swap-remove（Liquid.cs:1193-1197）：只搬 x/y/kill，delay 保留本槽旧值（原版语义）
     this.numLiquid--;
     this.checking[i5] = 0;

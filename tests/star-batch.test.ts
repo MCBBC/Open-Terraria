@@ -142,3 +142,33 @@ describe('★C13 结构锁', () => {
     expect(GL).toContain('bindSampler(0, smooth');
   });
 });
+
+describe('★K3 星批 idle 预热（2026-10-01 prewarmStarBatch）', () => {
+  it('starTexKey 与 buildStarBatch 段键同源（键漂移=预热白做守卫）', () => {
+    const { sky } = mkSky([mkStar(), mkStar({ type: 1 })]);
+    const batch = build(sky, 2);
+    const keyOf = (i: number) => (sky as unknown as { starTexKey(i: number): string | null }).starTexKey(i);
+    for (const seg of batch!.segments) expect(keyOf(seg.texIdx)).toBe(seg.key);
+  });
+
+  it('starTexKey 未就绪贴图=null（loadTex 异步窗跳过自愈）', () => {
+    const { sky } = mkSky([mkStar()]);
+    (sky as unknown as { starTexs: unknown[] }).starTexs = [null];
+    expect((sky as unknown as { starTexKey(i: number): string | null }).starTexKey(0)).toBeNull();
+  });
+
+  it('prewarmStarBatch 无 GL 层静默不抛（node 面判死守卫+懒路径兜底语义）', () => {
+    const { sky } = mkSky([mkStar(), mkStar({ type: 2 })]);
+    expect(() => (sky as unknown as { prewarmStarBatch(): void }).prewarmStarBatch()).not.toThrow();
+    // 再跑一遍幂等（重复预热=幂等 texFromImage 键）
+    expect(() => (sky as unknown as { prewarmStarBatch(): void }).prewarmStarBatch()).not.toThrow();
+  });
+
+  it('结构锁:mainFlow rIC 挂点+GLSpriteLayer.prewarmPrecip 面', () => {
+    const MF = (() => { try { return require('fs').readFileSync('src/mainFlow.ts', 'utf8'); } catch { return ''; } })();
+    expect(MF).toContain('prewarmStarBatch()');
+    expect(MF).toContain('requestIdleCallback');
+    const GL = (() => { try { return require('fs').readFileSync('src/render/GLSpriteLayer.ts', 'utf8'); } catch { return ''; } })();
+    expect(GL).toContain('prewarmPrecip(): boolean');
+  });
+});

@@ -459,7 +459,10 @@ describe('R9 批二接线源锁（src/core/Game.ts 九处配对）', () => {
     ['#16 3543→636（flare）',
       /new DaybreakFlare\(this\.player\.cx, this\.player\.cy,[\s\S]{0,900}?placeAtShootSpawn\(flare, this\.player\.cx, this\.player\.cy\);/],
     ['#18 shot 尾支（shotArrow）',
-      /pierce: HOMING_FAMILY_PIERCE\.has\(cw\.shoot\)[\s\S]{0,600}?placeAtShootSpawn\(shotArrow, shotTip\.x, shotTip\.y\);/],
+      // ★X2 重锚（2026-10-01）:BJ348b（beabdece,2026-09-25）3476 星云奥秘出生锚
+      //  豁免支——尾支统一走 arcanumSpawn 计算的 spawnX/spawnY（非 3476 件
+      //  spawnX≡shotTip.x,盒心回正语义等价）
+      /pierce: HOMING_FAMILY_PIERCE\.has\(cw\.shoot\)[\s\S]{0,700}?placeAtShootSpawn\(shotArrow, spawnX, spawnY\);/],
     ['#20 1168→196（smk）',
       /196, \{ grav: 0.2, life: 600, pierce: -1, bounce: true \}\);[\s\S]{0,800}?placeAtShootSpawn\(smk, px, py\);/],
     ['#22 通用投掷（thrownArrow）',
