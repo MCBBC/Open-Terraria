@@ -7121,6 +7121,9 @@ export class Renderer {
     } catch { return true; }
   })();
   static get c10eK1() { return this._c10eK1; }
+  /** ★K1 运行时翻面（探针 scripts/_k1-fold-ab.mjs 单页 A/B 用;生产路径禁调——
+   *  sfxPipeSetForTest 同款先例）。 */
+  static c10eK1SetForTest(v: boolean): void { this._c10eK1 = v; }
   static sfxPipeSetForTest(v: boolean): void { this._sfxPipe = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();

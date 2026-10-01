@@ -20,9 +20,12 @@ const CLIENT = readFileSync(join(ROOT, 'src/workers/BakeClient.ts'), 'utf8');
 
 describe('wbake 转正①：旗面翻转（缺省开+逃生门+node 判死）', () => {
   it('行为锁：node 无 location → WBAKE_ENABLED 恒 false（判死）', async () => {
+    // ★超时宽限（2026-10-01）：动态导入=BakeClient 全图（ChunkCache→VanillaTiler→
+    //  渲染面族,transform 实测 6-8s 且随导入图增重漂移）——5s 缺省超时伪红
+    //  （vitest 超时伪红判例;导入图重量=结构债另册）
     const m = await import('../src/workers/BakeClient');
     expect(m.WBAKE_ENABLED).toBe(false);
-  });
+  }, 120_000);
 
   it('源锚：缺省开 `flag !== \'0\'`;?wbake=0 逃生门;node 判死分支', () => {
     expect(CLIENT).toContain("return flag !== '0';");

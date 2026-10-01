@@ -12199,7 +12199,21 @@ export class Game implements GameHooks {
   private tickLighting(viewTW: number, viewTH: number): void {
     const w = this.world;
     const player = this.player;
-    this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
+    // ★W4 光照区域锚相机（2026-10-01）：原版 GetAreaToLight（Main.cs:64888-64899）
+    //  锚 Camera.ScaledPosition/UnscaledPosition=【相机/屏幕域】——区域逐帧随相机
+    //  移动,屏内恒有光（Color 模式 Scaled/旧模式 Unscaled,双支皆相机）。旧锚
+    //  player.cx/cy（W2 登记缺口）两暴露面（探针 _w4-light-anchor 定谳）：
+    //  ① 跟踪镜头（高尔夫/无人机 FPV/观战——camTX 汇入 follow 而光照仍锚玩家）：
+    //     相机距玩家 >~110 格后视口整体出区,lightAt 全 0=全屏黑持续整个跟踪窗;
+    //  ② 传送滑行（advanceTeleportLerp 起步 ≤blackFadeDist≈52 格 > 区域余量 ~29
+    //     格）：t1-t4 视缘黑带（coverage 0.82-0.98）。
+    //  调用序：三调用点（fixedUpdate :12041 / 冻结窗 entryFreezeTick / tpVeilTick）
+    //  相机段均已终态（follow/teleportLerp/pan/clamp 全走完）,camera.x/y=视口中心
+    //  世界 px,语义=原版相机锚 1:1。区域跳变面由既有三门承载（C9d 体系,锚无关）：
+    //  移动脏 regionMovedDirty（差量门扣除）/世代校验 resultCoversViewport（在途
+    //  旧快照丢弃）/live 大跳门 snapCoveredByPublic（视口出公共域→本地同帧全周期,
+    //  =原版传送双 LightTiles 结构等价,Game.ts:12657 注）。
+    this.lighting.ensureRegion(this.camera.x, this.camera.y, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
     // SceneState 附加（SceneState.cs:303-360）：headcovered ×0.85、微光域 shimmerAlpha、

@@ -69,6 +69,7 @@ interface GShell {
   dumpChest: () => void;
   killTileDropBait: () => void;
   trackTile: number;
+  flexWandCycle: number;   // ★X2:类字段（Game.ts:3311）壳上须显式补桩
   scene: unknown;
   hitTiles: { addDamage: () => number; clear: () => void };
   achievements: unknown;
@@ -92,6 +93,7 @@ function mkShell(seed = 11): { g: GShell; w: World; consumed: { n: number } } {
   g.dumpChest = () => {};
   g.killTileDropBait = () => {};
   g.trackTile = 0;
+  g.flexWandCycle = 0;   // ★X2 补桩（2026-10-01）:BJ362（260f52a4）place_v 克隆退位→vid 275/2625 真件走 FlexibleTileWand 支,类字段壳上不初始化=NaN 解构炸
   g.scene = null;
   g.hitTiles = { addDamage: () => 100, clear: () => {} };
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {}, plantedAcorn: () => {} };
@@ -299,7 +301,11 @@ describe('BJ121-② 珊瑚 81/贝壳沙滩堆 324：目标格可清族门（Play
     const st = w.store;
     for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, STONE, 0, 0);
     g.tryPlace(12, 12, placeItem('v_81_coral'));
-    expect(consumed.n).toBe(1);
+    // ★X2 重锚（2026-10-01）:BJ362 后珊瑚=vanilla FlexibleTileWand.Coral 自体魔杖
+    //  （FlexibleTileWand.cs:52 CreateSingleTileWand(275,81,0..5).WithoutAmmoConsumption
+    //  ——消耗门 Player.cs:40493-40501 ConsumesAmmoItem=false 不扣件=原版本相;
+    //  旧克隆件路径的 removeHeld 消费随克隆退役,判据改「落格+零消耗」）
+    expect(consumed.n).toBe(0);
     expect(st.get(12, 12)).toBe(CORAL);
   });
 
@@ -332,11 +338,13 @@ describe('BJ121-② 珊瑚 81/贝壳沙滩堆 324：目标格可清族门（Play
     const st = w.store;
     for (let dx = 0; dx < 8; dx++) st.setTileSilent(10 + dx, 13, STONE, 0, 0);
     g.tryPlace(11, 12, placeItem('v_324_seashells'));
-    expect(consumed.n).toBe(1);
+    // ★X2 重锚（2026-10-01）:同珊瑚——Seashell=自体魔杖 WithoutAmmoConsumption
+    //  （FlexibleTileWand.cs:54;消耗门 Player.cs:40493-40501）,放置/拒放均零消耗
+    expect(consumed.n).toBe(0);
     expect(st.get(11, 12)).toBe(SHELLS);
     (g.player as unknown as { useTime: number }).useTime = 0;
     g.tryPlace(11, 12, placeItem('v_324_seashells'));
-    expect(consumed.n).toBe(1);                          // 拒=零追加消耗
+    expect(consumed.n).toBe(0);                          // 拒=零追加消耗（放置本身亦零消耗）
     expect(st.get(11, 12)).toBe(SHELLS);
   });
 });

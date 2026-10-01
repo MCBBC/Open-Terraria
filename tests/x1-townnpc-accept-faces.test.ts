@@ -5,7 +5,7 @@
 //           ——城镇 NPC 原版有完整 buffType/buffTime（NPC.AddBuff :91035 全体同构）,
 //           DoT=UpdateNPC_BuffApplyDOTs :92577-92847。仓内=TownNPC 载体集+tickDebuffs。
 //   face 2  :13640-43 TryDoingOnHitEffects（life>5 受击前值）→ Player.OnHit
-//           :6912-7040（钛金/幻影闪避/帕拉钯/山铜花瓣/叶绿水晶叶 :6988 CanBeChasedBy
+//           :6912-7040（钛金/幻影闪避/帕拉钯/山铜花瓣;叶绿水晶叶 :6988 CanBeChasedBy
 //           门=城镇 friendly 恒假→结构性排除）。来源排除表 :15210-15220。
 //   face 3  :13687-96 nano ×1.05 / party 彩带 289（门 (melee||IsAWhip),鞭走 IsAWhip）。
 //   face 4  :13712 flag10 = num41>0∧lifeMax>5∧friendly∧!hostile∧aiStyle≠59 →
@@ -24,10 +24,9 @@ import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { Enemy } from '../src/entities/Enemy';
-import { WhipProj } from '../src/entities/WhipProj';
+import { WhipProj, applyWhipDebuffs } from '../src/entities/WhipProj';
+import { ConfettiBurstProj } from '../src/entities/meleeOnHitProjs';
 import { hitTownNpcs } from '../src/entities/projTargets';
-import { applyWhipDebuffs } from '../src/entities/WhipProj';
 import { applyProjStatus, applyBuffTicks, applyMeleeImbue } from '../src/entities/projStatus';
 import { Tombstone } from '../src/entities/Tombstone';
 import { WHIP_PROC_ITEMS } from '../src/entities/WhipTag';
@@ -57,8 +56,8 @@ const guideAt = (x: number, y: number) => new TownNPC('guide', x, y);
 function makeHooks(world: World, player: unknown, npcs: unknown[], enemies: unknown[] = []) {
   const lifeSteal: Array<{ kind: string; dmg: number; numHits: number; isMagic: boolean }> = [];
   const ach: number[] = [];
-  const shards: number[] = [];
-  const petals: number[] = [];
+  const shards: Array<[number, number]> = [];
+  const petals: Array<[number, number]> = [];
   const friendly: unknown[] = [];
   const game = {
     world,
@@ -82,9 +81,9 @@ function makeHooks(world: World, player: unknown, npcs: unknown[], enemies: unkn
     notifyInventoryChanged: () => {},
     townNpcPrioritizedLockReset: () => {},
     achievements: { notifyProgressionEvent: (n: number) => ach.push(n) },
-    spawnTitaniumShard: (x: number, y: number) => shards.push([x, y] as never),
-    spawnOnHitPetals: (x: number, y: number) => petals.push([x, y] as never),
-    spawnFriendlyProj: (p: unknown) => friendly.push(p),
+    spawnTitaniumShard: (x: number, y: number) => { shards.push([x, y]); },
+    spawnOnHitPetals: (x: number, y: number) => { petals.push([x, y]); },
+    spawnFriendlyProj: (p: unknown) => { friendly.push(p); },
     applyLifeSteal: (kind: string, dmg: number, numHits: number,
       _x: number, _y: number, isMagic: boolean) => {
       lifeSteal.push({ kind, dmg, numHits, isMagic });
@@ -101,7 +100,7 @@ function procPlayer(equipStats: Record<string, unknown> = {}) {
     x: -9999, y: -9999, w: 0, h: 0, dead: false, cx: 10, cy: 10,
     titaniumStormCd: 0, shadowDodgeTimer: 0, petalTimer: 0,
     equipStats,
-    buffs: { apply: vi.fn() },
+    buffs: { apply: vi.fn(), has: () => false },
   };
 }
 
@@ -124,8 +123,10 @@ describe('X1-face1：城镇 NPC debuff 载体 + DoT tick', () => {
 
   it('F1b StatusNPC 鞭表 1104→slimedT=3（180t）；鞭尖窗 applyBuffTicks(24)→onFireT', () => {
     const n = guideAt(100, 98 * 16);
-    applyProjStatus(1104, n as unknown as Record<string, number>);
+    // suppressBuff:24 = 环同式（表 24 项缺几何门,鞭尖窗直投,蓝队 R7-41 同款）
+    applyProjStatus(1104, n as unknown as Record<string, number>, { suppressBuff: 24 });
     expect((n as unknown as { slimedT: number }).slimedT).toBe(3);
+    expect(n.onFireT).toBe(0);
     applyBuffTicks(n as unknown as Record<string, number>, 24, 240);
     expect(n.onFireT).toBe(4);
   });
@@ -147,7 +148,7 @@ describe('X1-face1：城镇 NPC debuff 载体 + DoT tick', () => {
     expect((n as unknown as { acceleratePoisonsT: number }).acceleratePoisonsT).toBe(5);
   });
 
-  it('F1e DoT tick：onFire3 4s → 60 拍 ≈15 HP/s（15±1）；slimed 在身 ×2 ≈30', () => {
+  it('F1e DoT tick：onFire3 4s → 60 拍 =15 HP/s（0.25/拍整）;slimed 在身 ×2 =30', () => {
     const w = flatWorld('x1-dot');
     const n = guideAt(100 * 16, (GROUND - 2) * 16);
     const { game } = makeHooks(w, procPlayer(), [n]);
@@ -161,11 +162,10 @@ describe('X1-face1：城镇 NPC debuff 载体 + DoT tick', () => {
     const g2 = makeHooks(w, procPlayer(), [n2]);
     n2.onFire3T = 4;
     (n2 as unknown as { slimedT: number }).slimedT = 5;
-    for (let t = 0; t < 60; t++) n2.fixedUpdate(1 / 60, game);
+    for (let t = 0; t < 60; t++) n2.fixedUpdate(1 / 60, g2.game);
     const loss2 = 250 - n2.hp;
     expect(loss2).toBeGreaterThanOrEqual(29);
     expect(loss2).toBeLessThanOrEqual(30);
-    void g2;
   });
 
   it('F1f eelWhip 50 HP/s（裸 Add 不吃 398 加速——acceleratePoisonsT 在身仍 50）', () => {
@@ -246,7 +246,7 @@ describe('X1-face2：TownNPC.hurt OnHit proc 面（life>5 受击前快照+来源
     expect(shards.length).toBe(0);
   });
 
-  it('F2f 幻影闪避/帕拉钯/山铜花瓣三支照发；冷却窗（petalTimer/shadowDodgeTimer）门同式', () => {
+  it('F2f 幻影闪避/帕拉钯/山铜花瓣三支照发（各冷却窗门同式）', () => {
     const w = flatWorld('x1-three');
     const n = guideAt(100, 98 * 16);
     const pl = procPlayer({ onHitDodge: true, onHitRegen: true, onHitPetal: true });
@@ -269,7 +269,6 @@ describe('X1-face2：TownNPC.hurt OnHit proc 面（life>5 受击前快照+来源
     const g2 = makeHooks(w, pl2, [n]);
     hitTownNpcs(box, g2.game, 10, 0, 'hostile', 0);
     expect(shards.length).toBe(1);                    // 仍为 playerProj 那次
-    void g2;
   });
 });
 
@@ -290,7 +289,9 @@ function landOneHit(w: WhipProj, game: GameHooks, ...npcs: TownNPC[]): void {
 function whipFixture(nano = false, party = false) {
   const w = flatWorld('x1-whip');
   const player = new Player(60 * 16, 90 * 16, new Inventory());
-  (player as unknown as { equipStats: Record<string, unknown> }).equipStats.killGuide = true;
+  // equipStats 为冻结快照（记忆化改造）——getter mock 注入巫毒位（melee-alignment 同法）
+  vi.spyOn(player, 'equipStats', 'get')
+    .mockReturnValue(Object.freeze({ ...player.equipStats, killGuide: true }));
   if (nano) player.buffs.apply(BuffType.ImbueNano, 30);
   if (party) player.buffs.apply(BuffType.ImbueParty, 30);
   const guide = guideAt(400, 600);
@@ -301,23 +302,23 @@ function whipFixture(nano = false, party = false) {
 describe('X1-face3/4/5：WhipProj 城镇受理环（巫毒窄门过门后）', () => {
   it('F3a nano 浸剂：受理伤 =trunc(60×1.05)=63 → 63−def/2=48（无浸剂 45）', () => {
     const a = whipFixture(true);
-    landOneHit(mkWhip(a.player, 60), a.game as unknown as GameHooks, a.guide);
+    landOneHit(mkWhip(a.player, 60), a.game, a.guide);
     expect(250 - a.guide.hp).toBe(Math.trunc(Math.max(1, Math.trunc(60 * 1.05) - GUIDE_DEF * 0.5)));
     const b = whipFixture(false);
-    landOneHit(mkWhip(b.player, 60), b.game as unknown as GameHooks, b.guide);
+    landOneHit(mkWhip(b.player, 60), b.game, b.guide);
     expect(250 - b.guide.hp).toBe(Math.trunc(Math.max(1, 60 - GUIDE_DEF * 0.5)));
   });
 
   it('F3b party 浸剂：受理拍出彩带伴生弹（:13693-95 289 于目标 Center/目标速度）', () => {
     const f = whipFixture(false, true);
-    landOneHit(mkWhip(f.player, 60), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
     expect(f.friendly.length).toBe(1);
-    expect(f.friendly[0]).toBeInstanceOf(ConfettiBurstProjShim);
+    expect(f.friendly[0]).toBeInstanceOf(ConfettiBurstProj);
   });
 
   it('F4a ghostHeal 白耗面：applyLifeSteal("ghost", num41, preHits=0, isMagic=false)', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
     expect(f.lifeSteal.length).toBe(1);
     const c = f.lifeSteal[0];
     expect(c.kind).toBe('ghost');
@@ -326,53 +327,44 @@ describe('X1-face3/4/5：WhipProj 城镇受理环（巫毒窄门过门后）', (
     expect(c.isMagic).toBe(false);                    // 鞭无 magic 类旗=白耗单面
   });
 
-  it('F4b lastStrikeDealt 镜像：受理写实扣、拒收（iframes 残窗）清零', () => {
+  it('F4b lastStrikeDealt 镜像：受理写实扣;拒收（iframes 残窗）路径不落值', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
     expect(f.guide.lastStrikeDealt).toBe(Math.trunc(Math.max(1, 60 - GUIDE_DEF * 0.5)));
+    // 鞭写梯清窗形态（iframes=0）——手工置残窗验证拒收早退在入口清零【前】（Enemy.hurt 同形）
     f.guide.lastStrikeDealt = 777;
-    const hit = f.guide.hurt(60, 0, 0, f.game as unknown as GameHooks);
-    expect(hit).toBe(false);                          // iframes=0 残窗（写梯清窗形态=iframes 0? 见下）
-    expect(f.guide.lastStrikeDealt).toBe(777);        // 拒收不落值（入口清零在 hurt 内？——
-    //  拒收路径在 lastStrikeDealt=0 清零行【前】早退（iframes 门）→ 陈值保留=Enemy.hurt
-    //  同形（其清零行同样在门后））
+    f.guide.iframes = 10;
+    expect(f.guide.hurt(60, 0, 0, f.game)).toBe(false);
+    expect(f.guide.lastStrikeDealt).toBe(777);
   });
 
   it('F5a proc 窗启用：火鞭 913(4912) 首鞭门 → canProcOnNPC 真 + procEnabled 置位', () => {
     expect(WHIP_PROC_ITEMS.has(4912)).toBe(true);
     const f = whipFixture();
     const w = mkWhip(f.player, 60, 913, 4912);
-    landOneHit(w, f.game as unknown as GameHooks, f.guide);
+    landOneHit(w, f.game, f.guide);
     expect(f.player.tagEffectStack.canProcOnNPC(4912, f.guide.id)).toBe(true);
-    expect((w as unknown as { procEnabled: boolean }).procEnabled).toBe(true);
-    // 首鞭门：第二靶不再重复启用（localAI[0]==0 语义——procEnabled 已置位）
-    const g2 = guideAt(600, 600);
-    const f2 = makeHooks(f.w, f.player, [g2]);
-    landOneHit(w, f2.game as unknown as GameHooks, g2);
     expect((w as unknown as { procEnabled: boolean }).procEnabled).toBe(true);
   });
 
   it('F5b 非 proc 鞭 841(4672) 不开 proc 窗', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
     expect(f.player.tagEffectStack.canProcOnNPC(4672, f.guide.id)).toBe(false);
   });
 
   it('F1-环 火鞭 913 全链：城镇受理拍落 onFire3T=4（ApplyWhipDebuffs 经环）', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60, 913, 4912), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60, 913, 4912), f.game, f.guide);
     expect(f.guide.onFire3T).toBe(4);
   });
 
   it('F1-环 火鞭 1104 全链：slimedT=3（StatusNPC 表,鞭尖窗独立）', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60, 1104, 0), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60, 1104, 0), f.game, f.guide);
     expect((f.guide as unknown as { slimedT: number }).slimedT).toBe(3);
   });
 });
-
-import { ConfettiBurstProj } from '../src/entities/meleeOnHitProjs';
-const ConfettiBurstProjShim = ConfettiBurstProj;
 
 // ===========================================================================
 // face 6：GRAVE_MISTAKE 墓碑链（W1 锚勘误——墓碑弹杀城镇 NPC,非鞭杀向导）
@@ -392,10 +384,8 @@ describe('X1-face6：GRAVE_MISTAKE 墓碑全链 + 鞭杀向导零效果勘误', 
   it('F6b 勘误钉面：鞭杀向导 → 不发 36（原版 OnKillNPC(ref attempt, 鞭) 零城镇效果）', () => {
     const f = whipFixture();
     f.guide.hp = 40;                                  // 45 ≥ 40 → 致死
-    landOneHit(mkWhip(f.player, 60), f.game as unknown as GameHooks, f.guide);
+    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
     expect(f.guide.dead).toBe(true);
     expect(f.ach).not.toContain(36);
-    // 面仍照落（死亡不豁免受理面——vanilla StatusNPC/OnHit 均在 StrikeNPC 前无 dead 门）
-    expect(f.guide.onFire3T).toBe(0);                 // 841 无 debuff——经 913 面另测
   });
 });

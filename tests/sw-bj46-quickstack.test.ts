@@ -31,15 +31,16 @@ const mkChest = (items: Slot[], x = 20, y = 38): { x: number; y: number; items: 
 
 // ===================== A. 快堆主链：place_v 哨兵碰撞回归（实报根因） =====================
 describe('SW-BJ46 A：place_v_* vid 哨兵 -1 碰撞面（QuickStacking.cs:490 type 域）', () => {
-  it('前提锚：两 place_v 物品 vanillaIdOfItem 同为 -1（旧谓词同键）而 itemMatchKey 唯一', () => {
+  it('前提锚（BJ362 后）：place_v 键退位到真件异 vid=碰撞面在根上消除,itemMatchKey 唯一', () => {
     expect(ITEM_BY_KEY['place_v_51_cobweb']).toBeDefined();
     expect(ITEM_BY_KEY['place_v_189_cloud_block']).toBeDefined();
-    // 旧谓词域：直接比 vanillaIdOfItem → -1 === -1 跨物判同（变异实验的旧态证明）
-    expect(vanillaIdOfItem(cobweb)).toBe(-1);
-    expect(vanillaIdOfItem(cloud)).toBe(-1);
-    // 新键域：vid<0 → 内部 id 负域编码,跨物必异
+    // ★X2 重锚（2026-10-01）:BJ362（260f52a4）place_v 克隆退位——两键现指真件
+    //  （蛛网 tile51→真件 vid 150/云块 tile189→真件 vid 751）,旧「-1 哨兵同键
+    //  碰撞」病灶面在根上消除;itemMatchKey 负域编码仅 vid<0 兜底,真值面=异 vid 异键
+    expect(vanillaIdOfItem(cobweb)).toBe(150);
+    expect(vanillaIdOfItem(cloud)).toBe(751);
     expect(itemMatchKey(cobweb)).not.toBe(itemMatchKey(cloud));
-    expect(itemMatchKey(cobweb)).toBeLessThan(0);
+    expect(itemMatchKey(cobweb)).toBe(150);
     // vid 域物品键不变（原版域真值）
     expect(itemMatchKey(torch)).toBe(8);
   });

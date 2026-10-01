@@ -216,12 +216,14 @@ export const LIQSHIM_FS_SRC = LIQSHIM_FS;
 //  uTime 逐 quad 携带（VS 透传 varying）=四塔可同批发射免 uniform 分档。
 // 【FS】px_ForceField 生成体（src/fx/gen/px_ForceField.gen.ts,50 实指令）逐式直译:
 //  preshader 终值按产物口径 (uSourceRect=(0,0,128,128),uImageSize0=(128,128))
-//  编译期折叠:c0.xy=SR.xy/IS0.xy=(0,0)、c1.xy=IS0.xy/SR.xy=(1,1)、
-//  c2.xy=0.5+SR.wh/IS0.wh=(1.5,1.5)、c3.x=uTime+5（★PRSI 标量 add 非 ×5,
-//  旧注释误读;fxPixelShader.json ForceField pres insts[8]=0xA040 lits[13]=5）。
+//  编译期折叠——★公式由 setupConstants 变参扫描经验定谳（scripts/_k2-fdiag3.mjs,
+//  token 手解码两处翻车由场值闸抓出）:c0.xy=SR.xy/IS0.xy=(0,0)、
+//  c1.xy=IS0.xy/SR.wh=(1,1)、c2.xy=0.5·SR.wh/IS0.wh=(0.5,0.5)、
+//  c3.x=5·uTime（「×5」——旧 BUCKET_PHASE 注本正确,「+5」系手解码错）。
 //  def 常量逐字（c5..c12 活跃子集）:c5=(−0.5,1.5,1,0) c6=(2.8,−1,20,30)
-//  c7=(−0.3,0.75) c9.z=0.0795774907(=1/4π) c9.w=−1.498e−6 c10=(2π,−π,−0.5,0.5)
-//  c8.x/c8.y=inst22 死码（fxc 残留,inst25 覆写 R[1] 前无消费——不移植）。
+//  c7=(−0.3,0.75) c8=(12.566,−6.283,2,0.5)（inst22 产物=inst25 cmp 条件源——
+//  「死码」初判被场值闸证伪）c9.z=0.0795774907(=1/4π) c9.w=−1.498e−6
+//  c10=(2π,−π,−0.5,0.5)。
 //  ★dp2add(0x5A)=真 x²+y²（gen 体 inst14 逐字;VM 回退支 x²-only 是登记偏差,
 //  运行时 SM2_CODEGEN=true 恒走生成体=本表为运行时行为对齐）。
 //  ★pr≤0 守卫=JS NaN 钳 0 语义复刻:inst41 1/pr=Inf→inst43 s1·Inf+…=NaN（s1=0
@@ -263,17 +265,19 @@ void main() {
   float x = u.x * 1.5;                                 // inst13 ×c5.y（y×c5.z=1 恒等）
   float y = u.y;
   float rho = sqrt(x * x + y * y);                     // inst14 dp2add + inst15/16 rsq·rcp
-  float z = y * 30.0 + (vT + 5.0);                     // inst11/12: y·c6.w + c3.x
+  float z = y * 30.0 + vT * 5.0;                       // inst11/12: y·c6.w + c3.x(=5·uTime)
   float s = z * 0.0795774906873703;                    // inst17 ×c9.z(=1/4π)
   float fa = fract(abs(s));                            // inst18/19
-  float saw = z >= 0.0 ? fa : -fa;                     // inst20 cmp（含 −0.0≥0 同 IEEE）
-  float ang = saw >= 0.0 ? -0.0000014980281548560015   // inst25 cmp（c9.w）
+  float saw = z >= 0.0 ? fa : -fa;                     // inst20 cmp（条件源 R[2]=z 未覆写）
+  // inst22 非死码:c8.x/c8.y 产物 = inst25 cmp 的条件源（4π(saw−0.5)≥0 ⟺ saw≥0.5）
+  float cmpv = saw * 12.566368103027344 - 6.283184051513672;
+  float ang = cmpv >= 0.0 ? -0.0000014980281548560015  // inst25 cmp（c9.w）
             : fract(saw * 1.9999996423721313 + 0.5) * 6.2831854820251465 - 3.1415927410125732;
   float band = cos(ang) * -0.5 + 0.5;                  // inst26/27（c10.zw）
   float d = rho * 2.799999952316284;                   // inst28 ×c6.x
   float e = clamp((d - 1.0) * 20.0, 0.0, 1.0);         // inst29/30（c6.y=−1,c6.z=20）
   float sd = sqrt(d);                                  // inst31/32（r0.z=d）
-  vec2 puv = (t0 - 1.5) * sd + 0.5;                    // inst33/34（c2.xy=1.5,−c5.x=+0.5）
+  vec2 puv = (t0 - 0.5) * sd + 0.5;                    // inst33/34（c2.xy=0.5·span,−c5.x=+0.5）
   vec4 p = texture(uTex, puv);                         // inst35（LINEAR CLAMP）
   float pr = p.r;
   float t = clamp((pr * band - 0.3) * 20.0, 0.0, 1.0); // inst36/37（c7.x=−0.3,c6.z=20）
@@ -285,7 +289,10 @@ void main() {
   float w1 = P * band * A;                             // inst48/49（Perlin 项）
   float w2 = A * d * d * d;                            // inst51-53 A·(2.8ρ)³（径向项）
   float w = 0.75 * w2 + w1;                            // inst55 ×c7.y(0.75) 混合=oC.a
-  outColor = vec4(vCol.rgb * w * w * vCol.a, w * vCol.a);   // 预乘输出（见类注）
+  // 产物 8bit 钳制语义:Uint8ClampedArray 每通道钳 1（uColor=2 破盾支 w>0.5 时
+  // uColor·w 饱和）——直 alpha 产物 rgb=min(uColor·w,1),预乘=×w
+  vec3 straight = min(vCol.rgb * w, vec3(1.0));
+  outColor = vec4(straight * w * vCol.a, w * vCol.a);   // 预乘输出（见类注）
 }`;
 
 /** ★K2 着色器源导出（离线场值 readback 闸 scripts/_k2-fieldgate.mjs 直采同源——

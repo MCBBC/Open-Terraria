@@ -50,7 +50,11 @@ function mkEnemy(id: number, x: number, y: number, opts?: {
   const e = {
     id, x, y, w: opts?.w ?? 40, h: opts?.h ?? 40, dead: false,
     vanillaId: opts?.vanillaId,
-    def: { lifeMax: opts?.lifeMax ?? 100, friendly: false },
+    // ★X2 桩修正（2026-10-01）:BJ89 幻影字段定谳——EnemyDef 只有 hp 无 lifeMax,
+    //  canBeChasedBy（projTargets.ts:538）读 t.maxHp ?? t.def?.hp;旧桩只写幻影
+    //  lifeMax → 小生命排除谓词恒失明（随机误选 50%）。补写真实消费字段。
+    maxHp: opts?.lifeMax ?? 100,
+    def: { hp: opts?.lifeMax ?? 100, friendly: false },
     hurtCalls: 0,
     hurt() { e.hurtCalls++; return true; },
   };

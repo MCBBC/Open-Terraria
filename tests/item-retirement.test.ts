@@ -76,10 +76,18 @@ describe('拍板#6A:10140 place_v_225_hive_block 读档 remap（BJ114-b 翻案�
     expect(ITEM_DEFS[hiveId].tile).toBeUndefined();   // def 无 tile=tryPlace 无落点
   });
 
-  it('place_v_225_hive_block 自动 def 仍在库且存盘方向稳定 id 不变（零平移,单向漏斗）', () => {
+  it('place_v_225_hive_block 键面退位=真件恒等域；旧档 10140 读桥愈合到真件（BJ362 ⑦+#6A 漏斗）', () => {
+    // ★X2 重锚（2026-10-01）:BJ362（260f52a4,2026-09-27）place_v 克隆退位——
+    //  ①键面 byKey[cloneKey]→真件（items.ts ⑦）②读档桥 ITEM_INTERNAL_OF_STABLE
+    //  [克隆 stable]→真件;写向恒等表不动。新放置写真件稳定 id（1129 域）,
+    //  旧档 10140 由 ②桥+itemMigration #6A 漏斗双保险愈合。
     const pv = ITEM_BY_KEY['place_v_225_hive_block'];
-    expect(pv, '自动注册面被删=内部 id 平移事故(见 items.ts 零下标平移注)').toBeDefined();
-    expect(ITEM_STABLE_OF_INTERNAL[pv]).toBe(10140);   // 存盘仍写 10140,读入时归一
+    expect(pv, '键面退位缺失=BJ362 ①被回退').toBeDefined();
+    expect(ITEM_DEFS[pv].key).toMatch(/^vi_1129_/);    // 键面=tile 225 唯一真件（蜂巢魔杖 1129）
+    expect(ITEM_STABLE_OF_INTERNAL[pv]).toBe(pv);      // 真件恒等域（存盘写真件 id）
+    // 旧档 10140 终态=#6A 单向漏斗归一 vi_1124_Hive（ BJ114-b:1124 蜂巢不可放置=
+    // 物品身份归正;items.ts ②桥先写 1129,itemMigration 尾部覆写 1124 为最终态）
+    expect(ITEM_DEFS[ITEM_INTERNAL_OF_STABLE.get(10140)!].key).toMatch(/^vi_1124_/);
   });
 });
 
@@ -98,11 +106,19 @@ describe('D1 稳定 id 闸门（2026-08-21;方案 A 恒等域重钉 BJ264 2026-0
       if (!d) continue;
       occupied++;
       if (ITEM_STABLE_OF_INTERNAL[i] !== i) bad.push(`#${i} ${d.key} 写向≠恒等`);
-      // 读向恒等带唯一有意豁免:10140 蜂巢读档单向漏斗（itemMigration 尾部覆写
-      //   10140→vi_1124 内部 id;拍板#6A/BJ114-b）——恒等域下仅存非恒等映射
-      const wantHive = i === 10140;
+      // 读向恒等带两类有意豁免:
+      //   ① BJ362 place_v 克隆退位读档桥（items.ts ⑦:ITEM_INTERNAL_OF_STABLE[s]=
+      //      真件;写向恒等表不动）——place_v_* 键 def 反查=非 place_v 真件,
+      //      未退位克隆恒等;
+      //   ② 10140 蜂巢读档单向漏斗（itemMigration 尾部覆写;拍板#6A/BJ114-b）,
+      //      已被 ① 覆盖（退位目标即 vi_1124 真件）,保留注记为存档迁移史锚。
       const got = ITEM_INTERNAL_OF_STABLE.get(i);
-      if (wantHive ? !/^vi_1124_/.test(ITEM_DEFS[got ?? -1]?.key ?? '') : got !== i) {
+      if (/^place_v_/.test(d.key)) {
+        const td = ITEM_DEFS[got ?? -1];
+        if (!(got === i || (got !== undefined && td && !/^place_v_/.test(td.key)))) {
+          bad.push(`#${i} ${d.key} 反查失败`);
+        }
+      } else if (got !== i) {
         bad.push(`#${i} ${d.key} 反查失败`);
       }
     }

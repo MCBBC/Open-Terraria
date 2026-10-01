@@ -64,8 +64,8 @@ function ensureWhiteCanvas(): HTMLCanvasElement | null {
 //  （alpha/grow）全在 blit 侧（globalAlpha+drawImage 目标矩形）,不入键;uColor 稳态
 //  恒 (1,1,1)（4 塔共享同一条目）,破盾 (2,2,2),重塑窗逐 tick 变化（30t 窗外事件,
 //  冷跑上界=事件粒度非逐帧）。同桶像素逐位（缓存画布直 blit）;首帧建面后零解释器。
-//  ★K2 补注：preshader c3.x=uTime+5（标量 add 非 ×5,PRSI insts[8]=0xA040
-//  lits[13]=5 逐字）——旧注「BUCKET_PHASE=×5 相位步进」系误读;桶宽 200ms 保持
+//  ★K2 补注：preshader c3.x=5·uTime（setupConstants 变参扫描经验定谳,桶左沿
+//  相位步进 =1.0/桶——旧 BUCKET_PHASE 注本正确）;桶宽 200ms 保持
 //  （2D 回退链视觉零变化,GL 路径 uTime 连续不入桶）。
 const bubbleCache = new Map<string, HTMLCanvasElement>();
 let bubbleCachePruneAt = 0;

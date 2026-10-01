@@ -235,11 +235,14 @@ describe('AI_096 水流入侵者 407', () => {
     const e = spawn(h, 407, T(40), T(100));
     tick(h, 69, [e]);
     expect(h.projectiles.filter((p) => p instanceof LunarOrb && p.kind === 539)).toHaveLength(0);
-    tick(h, 3, [e]);
+    // ★X2 断言窗重锚（2026-10-01）:甩出拍（第 70 tick）读速——旧 tick(3) 读=出生后
+    //  又步进 2 拍,LunarOrb AI ACC=0.15 索敌修正可把 |vx| 拖出 1.5 界（RNG 相位偶发
+    //  红）。出膛重掷不变量 |ox|≥1.5（重掷环）−当拍一次步进 0.15=确定性下界 1.35。
+    tick(h, 1, [e]);
     const orb = h.projectiles.find((p) => p instanceof LunarOrb) as LunarOrb;
     expect(orb).toBeTruthy();
     expect(orb.kind).toBe(539);
-    expect(Math.abs(orb.vx)).toBeGreaterThanOrEqual(1.5);   // 近水平甩出
+    expect(Math.abs(orb.vx)).toBeGreaterThanOrEqual(1.35);   // 近水平甩出（重掷环 1.5−当拍 ACC 0.15）
   });
 });
 

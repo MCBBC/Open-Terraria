@@ -31,6 +31,10 @@ const DIRECT_READ_ALLOW: Record<string, string> = {
   'main.ts': '调试 tile 检查器(有 meta&&img 守卫,只读展示)',
   'ui/UI.ts': '调试贴图选择器 toast(miss 有提示)',
   'ui/BestiaryPanel.ts': '快路径查缓存,miss 自取 new Image+onload 补画(面板作用域)',
+  // ★X2 追加（2026-10-01,带理由）:C4 烘焙 Worker 化（77163898,2026-09-28）新面——
+  //   worker 域无 document/new Image,懒加载通道本身不可用:
+  'workers/BakeWorker.ts': 'WorkerAtlas.ensureVImage 覆写=worker 无 DOM 禁懒加载,直读位图缓存表,miss 走 missing 记账→回包上报→ship 重派(设计判据见类头注)',
+  'workers/BakeClient.ts': 'shipFiles 预载循环+缺图留 awaiting(落地链兜底)——vimages 为普通 Map 直读无懒加载副作用(SpriteAtlas.ts:209),不触发加载',
 };
 
 describe('贴图防线:静态 lint', () => {

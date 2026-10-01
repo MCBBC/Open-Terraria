@@ -263,10 +263,16 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const sp80 = Math.hypot(orb.vx, orb.vy);
     expect(sp80).toBeLessThanOrEqual(4.01);    // :35353-35357 归一 4 速
     expect(sp80).toBeGreaterThanOrEqual(3.4);  // 慢速段追踪 lerp 可短时 <4（无下限钳）
-    // 慢速段锁敌（敌在上方）→ vy 向上收敛（:35443-35441 v=(v×7+dir×4)/8）——
-    // 收敛后悬停于敌心（速度衰减趋 0，取收敛途中拍验证）
+    // 慢速段锁敌（敌在上方）→ 收敛窗净位移向上 + 悬停贴敌（:35443 v=(v×7+dir×4)/8）
+    // ★X2 重锚（2026-10-01）:收敛后 orb 悬停敌心、速度在 0 附近按 lerp 振荡——
+    //  旧「固定拍 vy<0」撞悬停振荡相位（刀口快照被邻域演化推离符号翻转点）,
+    //  改不变量断言:收敛窗净上移 + 终点贴敌心
+    const y80 = orb.y;
+    const x80 = orb.x;
     stepAll(60);
-    expect(orb.vy).toBeLessThan(0);
+    expect(orb.y).toBeLessThan(y80 - 40);      // 收敛窗净上移≥40px（敌在上方 120px）
+    expect(Math.hypot(orb.x - x80, orb.y - y80)).toBeGreaterThan(40);   // 追踪位移显著
+    expect(Math.abs(orb.x - e.cx)).toBeLessThan(48);    // 横向贴敌心（悬停收敛）
     // 618 火花已掷（慢速段 ai[0] 清零重计，每 30 update 一枚——至收敛悬停 ~3 枚）
     const sparks = spawned.filter((s) => s.projId === 618);
     expect(sparks.length).toBeGreaterThanOrEqual(2);

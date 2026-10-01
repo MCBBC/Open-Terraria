@@ -59,7 +59,10 @@ describe('SW-N1 AI_016 时序四件', () => {
     };
     const d637 = drop(637);
     const d29 = drop(29);
-    expect(d637.bounce).toBeCloseTo(-0.4 * d637.lastVy, 6);            // 无 ×0.8
+    // ★X2 重锚（2026-10-01）:BJ252（92541666,2026-09-21）弹力族——637 ∈ BOUNCY_PROJS
+    //  走原版 type 分支 ×−0.9（:18597-18600,先于 aiStyle16 通用 −0.4）,无 ×0.8 追加;
+    //  29 非弹力族走通用支 −0.4+×0.8 不变
+    expect(d637.bounce).toBeCloseTo(-0.9 * d637.lastVy, 6);            // 弹力族纯 ×−0.9
     expect(d29.bounce).toBeCloseTo(-0.4 * 0.8 * d29.lastVy, 6);        // 29 有 ×0.8
   });
 });

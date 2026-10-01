@@ -47,7 +47,7 @@ export const CHEATSHEET = {
     { name: 'Entity.vx/vy/dead', file: 'src/entities/Entity.ts', token: 'dead = false;', note: '清桶用 d.dead=true(下一 tick compact 剔除)+entities.length=0 直清' },
     { name: 'ItemDrop.itemId', file: 'src/entities/ItemDrop.ts', token: 'itemId: number;', note: '内部物品 id——原版 vid 须经 __swFlow.itemByVid(vid) 反查(坑表 I3)' },
     { name: 'ItemDrop.stack', file: 'src/entities/ItemDrop.ts', token: 'stack: number;', note: '堆叠数——【不是 count】(IIIII237 首写踩坑);掉落计数 drops.filter(d=>d.itemId===iid).reduce((a,d)=>a+d.stack,0)' },
-    { name: 'ItemDrop.pickup', file: 'src/entities/ItemDrop.ts', token: "pickup?: 'heart' | 'star' | 'manastar';", note: '心/星类碰触即消永不进包' },
+    { name: 'ItemDrop.pickup', file: 'src/entities/ItemDrop.ts', token: "pickup?: 'heart' | 'star' | 'manastar' | 'nebula';", note: '心/星类碰触即消永不进包;★BJ424 +nebula=3453-55 NebulaPickup 族(NebulaLevelup)' },
     { name: 'EntityManager', file: 'src/entities/Entity.ts', token: 'enemies: Entity[] = [];', note: 'g.entities 的桶:enemies/drops/npcs/projectiles/props/critters(全数组,length=0 清桶)' },
     { name: 'Enemy.fromVanilla', file: 'src/entities/Enemy.ts', token: 'static fromVanilla(id: number, x: number, y: number): Enemy | null {', note: '原版数据造怪;(x,y)=盒【中心】锚(ctor x−w/2/y−h/2,Enemy.ts:1984)——当左上算期望偏 w/2(坑表 I1);探针走 world.spawnEnemy/spawnTownNPC 包装' },
     { name: 'TOWN_NPC_IDS', file: 'src/data/vanillaNpcs.ts', token: 'export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {', note: '城镇 NPC 登记键→原版 vid(40 键含宠物/旅商);未登记键 ctor 静默兜底向导贴图(TownNPC.ts:1322)——spawnTownNPC 先验键防 vacuous' },

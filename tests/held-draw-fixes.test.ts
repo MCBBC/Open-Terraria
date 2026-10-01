@@ -90,18 +90,21 @@ describe('① useStyle 9 饮药手位 ×Lerp(1.5,1.2,t)（Player.cs:50145-50152�
 });
 
 describe('② useStyle 5 法杖持位 3476 距离特档（Player.cs:50376-50379）', () => {
-  it('3476 持位前伸 14px（其余法杖恒 6）', () => {
+  it('3476 持位前伸 14px+帧宽半 12（PlayerDrawLayers.cs:3341 vector6）（其余法杖恒 6）', () => {
+    // ★X2 重锚（2026-10-01）:BJ348b-2（beabdece,2026-09-25）case 3476 专支——
+    //  位置 = staff 14px 前伸 + (帧宽/2×dir, 0)=+12（PlayerDrawLayers.cs:3341
+    //  vector6）、origin=帧中心（:3343）、rot=aim 无 0.785 斜持（:3347）
     const prism = sampleUseItem(1, { t: 5, dur: 30, item: PRISM, useStyle: 5, aim: 0 });
-    expect(prism.offX).toBeCloseTo(14, 9);
+    expect(prism.offX).toBeCloseTo(14 + 12, 9);
     expect(prism.offY).toBeCloseTo(14 + 0, 9);            // p.h*0.5 + sin(0)×14 = 14+0
     const ctrl = sampleUseItem(1, { t: 5, dur: 30, item: STAFF_CTRL, useStyle: 5, aim: 0 });
     expect(ctrl.offX).toBeCloseTo(6, 9);
     expect(ctrl.offY).toBeCloseTo(14, 9);
   });
 
-  it('3476 斜指（aim=π/4）：偏移向量 = 瞄准向 ×14', () => {
+  it('3476 斜指（aim=π/4）：偏移向量 = 瞄准向 ×14 + 帧宽半 12', () => {
     const s = sampleUseItem(1, { t: 5, dur: 30, item: PRISM, useStyle: 5, aim: Math.PI / 4 });
-    expect(s.offX).toBeCloseTo(Math.cos(Math.PI / 4) * 14, 9);
+    expect(s.offX).toBeCloseTo(Math.cos(Math.PI / 4) * 14 + 12, 9);
     expect(s.offY).toBeCloseTo(14 + Math.sin(Math.PI / 4) * 14, 9);
   });
 });

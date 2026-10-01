@@ -10,6 +10,7 @@ import { TrapShot, Dart } from '../src/entities/Dart';
 import { FlyingKnifeProj, limitPointToPlayerReachableArea,
   MagicMissileProj } from '../src/entities/MissileProj';
 import { World } from '../src/world/World';
+import { pinGameTimeTicks } from '../src/core/GameTime';
 import type { GameHooks } from '../src/entities/types';
 
 const made: unknown[] = [];
@@ -298,8 +299,11 @@ describe('A6 飞刀 491 光标可达区钳制(Player.cs:45830-45858)', () => {
 });
 
 describe('C1 彩虹拖尾相位基准 GlobalTimeWrappedHourly(Main.cs:17014)', () => {
-  it('弹体色相钟读共享墙钟 %3600(消逐弹恒定相位差)', () => {
-    const base = (performance.now() / 1000) % 3600;
+  it('弹体色相钟读逻辑 tick 钟 %3600(消逐弹恒定相位差)', () => {
+    // ★X2 重锚（2026-10-01）:BJ330（eefcfd58,2026-09-24）色相钟换逻辑 tick 单源
+    //  （globalTimeWrappedHourly=totalGameTicks/60%3600;墙钟消费退役,"暂停期不
+    //  推进"=用户拍板语义）——判别面改 pinGameTimeTicks 钉钟关系断言（测试专用 API）
+    pinGameTimeTicks(7230);                                // 7230/60=120.5s
     const m = new MagicMissileProj(600, 600, 6, 0, {
       projId: 79, damage: 30, knockback: 6, useTime: 18,
       channelCb: () => false, aimCb: () => ({ x: 800, y: 600 }),
@@ -307,7 +311,6 @@ describe('C1 彩虹拖尾相位基准 GlobalTimeWrappedHourly(Main.cs:17014)', (
     });
     made.push(m);
     const t1 = (m as unknown as { globalT: number }).globalT;
-    expect(t1).toBeGreaterThanOrEqual(base);
-    expect(t1 - base).toBeLessThan(5);                     // 同帧起步
+    expect(t1).toBeCloseTo(7230 / 60 % 3600, 5);           // 出膛相位=钉钟值
   });
 });

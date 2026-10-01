@@ -1,25 +1,26 @@
-// ★K1 天塔柱滤镜链源折叠瘦身 A/B+parity+census 探针（2026-10-01）
-// 双臂（同构建、同冻结世界、同塔桩）：
-//   ON  = ?c10e=1            —— K1 开：P1/P2 门拓宽（滤镜待发帧合成 sky2D+glCanvas→HUD）,
-//                               链源直取 HUD（折叠 scratch 清屏+HUD 腿退役）
-//   OFF = ?c10e=1&c10ek1=0   —— K1 逃生门：链源恒走三画布折叠 scratch 原路径
+// ★K1 天塔柱滤镜链源折叠瘦身 单页 A/B+parity+census+perf 探针（2026-10-01）
+// 范式：单页运行时翻面（Renderer.c10eK1SetForTest——sfxPipeSetForTest 同款先例）。
+//   · 单页=零 boot RNG 残差/零跨页节流（v1-v2 双页范式两教训:gotoApp 洗参数污染尾参
+//     +后台页 rAF 节流读陈旧账;跨页 parity 还叠加 ab 探针 v5 同款 boot 残差=不可达）。
+//   · 世界出生即冻结（paused+freezeClock+天气/云/星/animTick 钉面=_c10e-ab.mjs 范式）。
+//   · 塔桩：_lunarTowerFilterTarget 桩定+_towerFilterOpacity=1（免 1/s 斜坡）。
+//   · uTime 钉面：链 pass time 字段统一钉常数（GTW=逻辑 tick 累计,暂停期各自冻结值
+//     不可跨臂等值——涡旋相位错开;钉面对 K1 on/off 等量施加=插桩中立）。
 // 判据：
-//   PA 纯帧∩滤镜 parity：ON vs OFF DOM 合成快照逐字节（空 HUD 帧 dest-over≡src-over,
-//      链输入同像素 → 期望 n=0）。
-//   PB xform∩滤镜 parity：重力翻转帧——OFF=P2 合成+折叠(HUD 腿把已合成 sky+gl 二次叠
-//      =旧 ±1LSB 登记债);ON=P2 合成+HUD 直取(无二次叠)→ 期望小 n、maxΔ≤2（债修复面）。
-//   PC census：ON 纯滤镜帧 fold 调用=0（composite>0）;OFF fold 调用>0。
-//   PD perf：单页序贯 render() 帧时长分布（p50/p90/max）×三态（无滤镜基线/ON 滤镜/OFF 滤镜）。
+//   PC census：K1-ON 滤镜帧 fold=0（composite>0）;K1-OFF fold>0（comp=0）。
+//   PA 纯帧∩滤镜 parity：ON vs OFF 单页逐字节（空 HUD 帧 dest-over≡src-over,链输入
+//      同像素 → 期望 n=0）。
+//   PB xform∩滤镜 parity：OFF=P2 合成+折叠(HUD 腿把已合成 sky+gl 二次叠=旧 ±1LSB
+//      登记债);ON=P2 合成+HUD 直取(无二次叠)→ 期望 n 小、maxΔ≤2（债修复面）。
+//   PD perf：同页序贯 render() 帧时长分布（基线无滤镜/ON/OFF）。
 // 运行:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=1200000 scripts/_k1-fold-ab.mjs
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
 const results = [];
 const chk = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  [' + detail + ']' : ''}`); };
-const md5 = (b64) => createHash('md5').update(Buffer.from(b64, 'base64')).digest('hex');
 const dec64 = (b64) => { const s = atob(b64); const u = new Uint8ClampedArray(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
 function diffB64(x, y) {
   const P = dec64(x), Q = dec64(y);
@@ -34,9 +35,7 @@ function diffB64(x, y) {
   return { n, maxd, bbox: [x0, y0, x1, y1] };
 }
 
-// 塔桩：_lunarTowerFilterTarget 桩定（pending 谓词与链 tow 同源消费,两臂一致）;
-// _towerFilterOpacity=1 免 1/s 斜坡等待。key='solar'（TOWER_FILTER_PRESETS 命中）。
-const ARM_TOWER = `
+const ARM_TOWER = `(() => {
   const r = window.__swGame.renderer;
   if (!window.__origTow) {
     window.__origTow = r._lunarTowerFilterTarget.bind(r);
@@ -46,14 +45,17 @@ const ARM_TOWER = `
     };
   }
   r._towerFilterOpacity = 1;
-`;
-const DISARM_TOWER = `
+  return 'armed';
+})()`;
+const DISARM_TOWER = `(() => {
   const r = window.__swGame.renderer;
   if (window.__origTow) { r._lunarTowerFilterTarget = window.__origTow; delete window.__origTow; }
   r._towerFilterOpacity = 0;
-`;
+  return 'disarmed';
+})()`;
+const K1 = (v) => `(() => { window.__swGame.renderer.constructor.c10eK1SetForTest(${v}); return 'k1=' + ${v}; })()`;
 
-async function arm(browser, url, tag, errs) {
+async function arm(url, tag, errs) {
   const page = await openPage(browser, {});
   page.on('pageerror', (e) => errs.push(`[${tag}] PAGEERROR ` + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`[${tag}] ` + m.text().slice(0, 160)); });
@@ -94,17 +96,44 @@ async function arm(browser, url, tag, errs) {
       for (let i = 0; i < d.length; i += CH) bin += String.fromCharCode.apply(null, d.subarray(i, Math.min(i + CH, d.length)));
       return btoa(bin);
     };
-    window.__resetCensus = () => { window.__foldCalls = 0; window.__comp0 = r._c10eCompositeStats || 0; window.__scratch0 = r._c10eChainScratchCount || 0; };
+    window.__resetCensus = () => { window.__foldCalls = 0; window.__comp0 = r._c10eCompositeStats || 0; window.__scratch0 = r._c10eChainScratchCount || 0; window.__foldMs = 0; window.__compMs = 0; };
     window.__census = () => ({
       fold: window.__foldCalls || 0,
       comp: (r._c10eCompositeStats || 0) - (window.__comp0 || 0),
       scratch: (r._c10eChainScratchCount || 0) - (window.__scratch0 || 0),
+      foldMs: window.__foldMs || 0,
+      compMs: window.__compMs || 0,
       path: r.sfxPathUsed, pending: r._c10eFilterPending, frame: r._c10eFrame,
     });
-    if (!window.__foldHooked) {
-      window.__foldHooked = true;
-      const origFold = r.c10eChainSource.bind(r);
-      r.c10eChainSource = (...a) => { window.__foldCalls = (window.__foldCalls || 0) + 1; return origFold(...a); };
+    window.__foldHooked = true;
+    const origFold = r.c10eChainSource.bind(r);
+    r.c10eChainSource = (...a) => {
+      window.__foldCalls = (window.__foldCalls || 0) + 1;
+      const t0 = performance.now();
+      const out = origFold(...a);
+      window.__foldMs = (window.__foldMs || 0) + (performance.now() - t0);
+      return out;
+    };
+    // ★微基准:合成腿直测（P1/P2 compositeIntoHud=K1 路径的 sky+gl 两腿落点）
+    const origComp = r.c10eCompositeIntoHud.bind(r);
+    r.c10eCompositeIntoHud = (...a) => {
+      const t0 = performance.now();
+      const out = origComp(...a);
+      window.__compMs = (window.__compMs || 0) + (performance.now() - t0);
+      return out;
+    };
+    // ★uTime 钉面（插桩中立:两态等量施加）——链 pass time 统一钉常数
+    if (r.screenFx) {
+      const sfx = r.screenFx;
+      const pin = (passes) => passes.map((p) => ({ ...p, time: 1234.5 }));
+      if (sfx.drawChainPipe) {
+        const o1 = sfx.drawChainPipe.bind(sfx);
+        sfx.drawChainPipe = (pipe, src, passes, tint) => o1(pipe, src, pin(passes), tint);
+      }
+      if (sfx.drawChain) {
+        const o2 = sfx.drawChain.bind(sfx);
+        sfx.drawChain = (src, passes, tint) => o2(src, pin(passes), tint);
+      }
     }
   });
   await freezeClock(page, { tod: 0.5 });
@@ -114,68 +143,62 @@ async function arm(browser, url, tag, errs) {
 
 const browser = await launchBrowser({});
 const errs = [];
-const pageOn = await arm(browser, ORIGIN + '/?c10e=1', 'ON', errs);
-const pageOff = await arm(browser, ORIGIN + '/?c10e=1&c10ek1=0', 'OFF', errs);
+const page = await arm(ORIGIN + '/?c10e=1', 'K1', errs);
 
-const rafWait = (ms) => new Promise((r) => setTimeout(r, ms));
+// 前台推进（单页恒前台;轮询 _paintedFrames 防节流伪红）
+async function waitFrames(frames, tag = '') {
+  const was = await page.evaluate(() => window.__swGame._paintedFrames);
+  const t0 = Date.now();
+  for (;;) {
+    const now = await page.evaluate(() => window.__swGame._paintedFrames);
+    if (now >= was + frames) return now;
+    if (Date.now() - t0 > 15000) throw new Error(`waitFrames timeout [${tag}] was=${was} now=${now}`);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+}
+const flip = async (v) => { await page.evaluate(K1(v)); };
 
-// ---- PA:纯帧∩滤镜 parity（昼/地表,塔桩开） ----
-await pageOn.evaluate(ARM_TOWER);
-await pageOff.evaluate(ARM_TOWER);
-await rafWait(800);
-const cOn = await pageOn.evaluate(() => window.__census());
-const cOff = await pageOff.evaluate(() => window.__census());
-chk('[PC] ON 纯滤镜帧:pending+合成闩+零折叠', cOn.pending === true && cOn.comp > 0 && cOn.fold === 0, JSON.stringify(cOn));
-chk('[PC] OFF 纯滤镜帧:零合成+折叠在', cOff.pending === false && cOff.comp === 0 && cOff.fold > 0, JSON.stringify(cOff));
-const A = await pageOn.evaluate(() => window.__snapB64());
-const B = await pageOff.evaluate(() => window.__snapB64());
-const dP = diffB64(A, B);
-chk('[PA] 纯帧∩滤镜 ON-vs-OFF 逐字节', dP.n === 0, `n=${dP.n} maxΔ=${dP.maxd} md5=${md5(A).slice(0, 8)}/${md5(B).slice(0, 8)}`);
-fs.writeFileSync('/tmp/k1-pure-on.png.b64', A.slice(0, 64));
+// ---- PA/PC:纯帧∩滤镜 ----
+await page.evaluate(ARM_TOWER);
+await flip(true);
+await page.evaluate(() => window.__resetCensus());
+await waitFrames(40, 'on-pure');
+const cOn = await page.evaluate(() => window.__census());
+chk('[PC] ON 滤镜帧:pending+合成闩+零折叠', cOn.pending === true && cOn.comp > 0 && cOn.fold === 0, JSON.stringify(cOn));
+const snapOnPure = await page.evaluate(() => window.__snapB64());
+await flip(false);
+await page.evaluate(() => window.__resetCensus());
+await waitFrames(40, 'off-pure');
+const cOff = await page.evaluate(() => window.__census());
+chk('[PC] OFF 滤镜帧:零合成+折叠在', cOff.pending === false && cOff.comp === 0 && cOff.fold > 0, JSON.stringify(cOff));
+const snapOffPure = await page.evaluate(() => window.__snapB64());
+const dP = diffB64(snapOnPure, snapOffPure);
+chk('[PA] 纯帧∩滤镜 ON-vs-OFF 逐字节', dP.n === 0, `n=${dP.n} maxΔ=${dP.maxd} bbox=${JSON.stringify(dP.bbox)}`);
+try { await page.screenshot({ path: '/tmp/k1-pure-on.png' }); } catch (e) { console.log('WARN shot ' + e.message); }
 
-// ---- PB:xform∩滤镜 parity（重力翻转） ----
-await pageOn.evaluate(() => {
+// ---- PB:xform∩滤镜（重力翻转） ----
+await page.evaluate(() => {
   const p = window.__swGame.player;
   Object.defineProperty(p, 'gravDir', { get: () => -1, set: () => {}, configurable: true });
 });
-await pageOff.evaluate(() => {
-  const p = window.__swGame.player;
-  Object.defineProperty(p, 'gravDir', { get: () => -1, set: () => {}, configurable: true });
-});
-await rafWait(800);
-const A2 = await pageOn.evaluate(() => window.__snapB64());
-const B2 = await pageOff.evaluate(() => window.__snapB64());
-const dX = diffB64(A2, B2);
-// 期望小差（OFF 折叠 HUD 腿把已合成 sky+gl 二次叠=旧 ±1LSB 登记债;ON 无二次叠）
+// OFF 态（fold 路径,旧 ±1LSB 二次叠面）
+await waitFrames(40, 'off-xform');
+const snapOffX = await page.evaluate(() => window.__snapB64());
+// ON 态（HUD 直取,无二次叠）
+await flip(true);
+await waitFrames(40, 'on-xform');
+const snapOnX = await page.evaluate(() => window.__snapB64());
+const dX = diffB64(snapOnX, snapOffX);
 chk('[PB] xform∩滤镜 ON-vs-OFF ≤±2LSB 有界差', dX.maxd <= 2, `n=${dX.n} maxΔ=${dX.maxd} bbox=${JSON.stringify(dX.bbox)}`);
 // ON 帧间确定
-const A3 = await pageOn.evaluate(() => window.__snapB64());
-await rafWait(120);
-const A4 = await pageOn.evaluate(() => window.__snapB64());
-chk('[PB] ON xform 帧间确定', diffB64(A3, A4).n === 0, '');
-// 截图目检（两臂）
-try {
-  await pageOn.screenshot({ path: '/tmp/k1-xform-on.png' });
-  await pageOff.screenshot({ path: '/tmp/k1-xform-off.png' });
-} catch (e) { console.log('WARN screenshot ' + e.message); }
+const s1 = await page.evaluate(() => window.__snapB64());
+await waitFrames(5, 'det');
+const s2 = await page.evaluate(() => window.__snapB64());
+chk('[PB] ON xform 帧间确定', diffB64(s1, s2).n === 0, '');
+try { await page.screenshot({ path: '/tmp/k1-xform-on.png' }); } catch (e) { console.log('WARN shot ' + e.message); }
 
-// ---- 纯帧截图目检（撤翻转） ----
-await pageOn.evaluate(() => {
-  const p = window.__swGame.player;
-  delete p.gravDir; p.gravDir = 1;
-});
-await pageOff.evaluate(() => {
-  const p = window.__swGame.player;
-  delete p.gravDir; p.gravDir = 1;
-});
-await rafWait(400);
-try {
-  await pageOn.screenshot({ path: '/tmp/k1-pure-on.png' });
-  await pageOff.screenshot({ path: '/tmp/k1-pure-off.png' });
-} catch (e) { console.log('WARN screenshot ' + e.message); }
-
-// ---- PD:perf（单页序贯——双页同渲互相争 CPU=分布污染） ----
-const INSTALL_TIMING = `
+// ---- PD:perf（同页序贯:基线/ON/OFF） ----
+const INSTALL_TIMING = `(() => {
   const r = window.__swGame.renderer;
   if (!window.__timingOn) {
     window.__timingOn = true;
@@ -188,12 +211,12 @@ const INSTALL_TIMING = `
       if (window.__durs.length > 400) window.__durs.shift();
     };
   }
-`;
-const pct = (arr, q) => { const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * s.length))] || 0; };
-async function measurePage(page, tag, frames = 300) {
+  return 'timing';
+})()`;
+async function measurePage(tag, frames = 300) {
   await page.evaluate(INSTALL_TIMING);
   await page.evaluate(() => { window.__durs.length = 0; window.__resetCensus(); });
-  await rafWait(Math.ceil(frames * 20) + 400);
+  await waitFrames(frames, tag);
   const m = await page.evaluate(() => {
     const d = window.__durs.slice(-300);
     const s = [...d].sort((a, b) => a - b);
@@ -211,25 +234,36 @@ async function measurePage(page, tag, frames = 300) {
   return m;
 }
 
-// 基线（ON 页撤塔桩=无滤镜帧）
-await pageOn.evaluate(DISARM_TOWER);
-await rafWait(300);
-const base = await measurePage(pageOn, '基线 无滤镜(ON页)');
-// ON 滤镜
-await pageOn.evaluate(ARM_TOWER);
-await rafWait(300);
-const on = await measurePage(pageOn, 'K1-ON 滤镜');
-chk('[PD] ON 滤镜帧折叠零调用', on.census.fold === 0 && on.census.comp > 0, JSON.stringify(on.census));
-// OFF 页撤测量期对照
-await pageOff.close();
-const pageOff2 = await arm(browser, ORIGIN + '/?c10e=1&c10ek1=0', 'OFF2', errs);
-await pageOff2.evaluate(ARM_TOWER);
-await rafWait(300);
-const off = await measurePage(pageOff2, 'K1-OFF 滤镜');
-chk('[PD] OFF 滤镜帧折叠在（腿账面=清屏1+3腿）', off.census.fold > 0 && off.census.comp === 0, JSON.stringify(off.census));
+// 基线（撤塔桩=无滤镜;撤翻转=纯帧）
+await page.evaluate(() => {
+  const p = window.__swGame.player;
+  delete p.gravDir; p.gravDir = 1;
+});
+await page.evaluate(DISARM_TOWER);
+await flip(true);
+await waitFrames(60, 'base');
+const base = await measurePage('基线 无滤镜');
+// ON/OFF 三轮交替（0.1-0.3ms 量级=单轮噪声底;交替取各轮 p50 中位=分布级判据）
+await page.evaluate(ARM_TOWER);
+const roundsOn = [], roundsOff = [];
+for (let i = 0; i < 3; i++) {
+  await flip(true);
+  await waitFrames(60, `on-r${i}`);
+  roundsOn.push(await measurePage(`K1-ON 滤镜 r${i}`));
+  await flip(false);
+  await waitFrames(60, `off-r${i}`);
+  roundsOff.push(await measurePage(`K1-OFF 滤镜 r${i}`));
+}
+const med = (arr) => [...arr].sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+const on = med(roundsOn), off = med(roundsOff);
+chk('[PD] ON 滤镜帧折叠零调用', roundsOn.every((m) => m.census.fold === 0 && m.census.comp > 0), JSON.stringify(on.census));
+chk('[PD] OFF 滤镜帧折叠在（腿账面=清屏1+3腿）', roundsOff.every((m) => m.census.fold > 0 && m.census.comp === 0), JSON.stringify(off.census));
 
-const dFold = (base.mean && on.mean) ? (1 - on.mean / Math.max(base.mean, 1e-9)) : 0;
-console.log(`\n_DELTA 滤镜帧相对基线: ON +${((on.mean - base.mean)).toFixed(2)}ms  OFF +${((off.mean - base.mean)).toFixed(2)}ms  （折叠省=${(off.mean - on.mean).toFixed(2)}ms/帧）`);
+console.log(`\n_DELTA 滤镜帧相对基线: ON +${((on.mean - base.mean)).toFixed(2)}ms  OFF +${((off.mean - base.mean)).toFixed(2)}ms  （折叠省=${(off.mean - on.mean).toFixed(2)}ms/帧,占 OFF 滤镜帧成本 ${(((off.mean - on.mean) / off.mean) * 100).toFixed(1)}%）`);
+// ★微基准主信号:折叠路径(scratch 清屏+3腿)vs 合成路径(sky+gl 两腿落 HUD)直测
+const offFoldMsFrame = off.census.foldMs / Math.max(off.census.fold, 1);
+const onCompMsFrame = on.census.compMs / Math.max(on.census.comp, 1);
+console.log(`_MICRO 折叠腿直测: OFF fold=${offFoldMsFrame.toFixed(3)}ms/次（清屏+3腿）  ON composite=${onCompMsFrame.toFixed(3)}ms/次（sky+gl 两腿落 HUD）  每帧净省≈${(offFoldMsFrame - onCompMsFrame).toFixed(3)}ms（1280×800 headless 档;实机 DPR2 大视口按像素数放大）`);
 
 const fails = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - fails}/${results.length} PASS${errs.length ? '  页错误:' + errs.slice(0, 3).join(' | ') : ''}`);

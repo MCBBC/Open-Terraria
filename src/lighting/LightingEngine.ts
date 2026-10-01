@@ -128,6 +128,10 @@ export class LightingEngine {
   // ~6px/tick≈0.38、冲刺/盾冲峰值 ~16px/tick=1.0、矿车 41mph≈8px/tick=0.5、加速
   // 轨道 ~20px/tick=1.25、终末坠落 10px/tick=0.625——峰值 ≤2 格/tick,padding 28
   // ⇒ 容忍 ≥14 tick 的结果滞后;本修复把公共面滞后钉在 ≤1 tick,余量 ≥28×)。
+  // ★W4 口径（2026-10-01）:锚相机后上列峰值按【相机移速】计——常态=玩家移速同族
+  // （follow 缓动 0.15×剩余）;跟拍链（高尔夫/无人机）首拍可达 ~30 格/拍、传送
+  // lerp 首拍 ~5.3 格/拍——超 24 格/拍的拍经 snapCoveredByPublic 大跳门落本地
+  // 同帧全周期（=vanilla 传送双 LightTiles 同款,无黑窗,一次性成本）。
   private snapRx = 0;
   private snapRy = 0;
   private snapRw = 0;
@@ -265,6 +269,10 @@ export class LightingEngine {
   /**
    * 区域 = 相机视口 ± AREA_PADDING(原版 GetAreaToLight 边界 1..2 + ProcessScan 膨胀 28 合并)。
    * camCX/camCY 为像素;viewW/viewH 为 tile 数(Game 现有调用约定)。
+   * ★W4（2026-10-01）锚定谳：参数名即语义——生产调用点（Game.tickLighting 三路）
+   * 传【相机中心】(camera.x/y,原版 GetAreaToLight Main.cs:64888-64899 相机域 1:1);
+   * 引擎本身锚无关（传什么锚什么,跳变由 regionMovedDirty/resultCoversViewport/
+   * snapCoveredByPublic 三门承载）。
    * ★C9d：本方法只写【快照面】(snapRx/snapRy/snapRw/snapRh)+dirty 判定——公共采样
    * 对 (rx,ry,rw,rh,r,g,b) 不在此触碰(三原子写点,见公共面头注)。rw/rh 变更的数组
    * 重分配随之迁到发布面(公共数组尺寸随结果走)。

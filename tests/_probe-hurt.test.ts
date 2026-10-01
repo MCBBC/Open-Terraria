@@ -12,6 +12,7 @@ describe('probe real Enemy.hurt return polarity', () => {
       addDamageNumber: () => {},
       playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
       spawnParticles: () => {}, spawnDrop: () => null, onEnemyKilled: () => {},
+      enemies: () => [], critters: () => [],   // ★X2 补桩:killBossFlag 链消费 game.enemies()
       dust: { spawn: () => ({}) },
       noSpawnCycleThisFrame: false,
     } as never;
@@ -21,6 +22,9 @@ describe('probe real Enemy.hurt return polarity', () => {
     console.log('non-fatal: hp', hp0, '->', e.hp, 'return', r1);
     expect(e.hp).toBeLessThan(hp0);
     // fatal hit
+    // ★X2 探针用法修正（2026-10-01）:普通命中落地即 iframes=10（Enemy.ts:14541）,
+    //  二击撞 iframes 头门（:14235）=假阴性;探针二连击前清 iframes。
+    (e as unknown as { iframes: number }).iframes = 0;
     const r2 = e.hurt(9999, 0, 0, game, 0, false, 0, true);
     console.log('fatal: return', r2, 'dead', e.dead);
     expect(r1).toBe(false);

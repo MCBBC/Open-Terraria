@@ -289,6 +289,10 @@ describe('BJ296 B. 批2 消费行为（掷序/短路/单掷/循环组交错）',
     const cap: DustCall[] = [];
     const g = makeHooks(w, cap);
     const e = spawn(636, 110, FLOOR - 4);
+    // ★X2 勘注（2026-10-01）:BJ385-④（9b217f01）636 SetDefaults 出生免伤
+    //  （:17234）——原版由 AI_120 首拍重算接管（:47431 dontTakeDamage=!flag6）,
+    //  死亡尘面在首拍后采集,故显式清旗模拟 AI 接管后态
+    e.dontTakeDamage = false;
     e.hurt(e.hp + 9999, -1, 0, g);
     expect(e.dead).toBe(true);
     expect(cap.length).toBe(50);

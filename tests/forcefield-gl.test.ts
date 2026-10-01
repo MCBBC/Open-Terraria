@@ -30,6 +30,7 @@ class FakeCtx2d {
     return { data, width: w, height: h };
   }
   drawImage(): void {}
+  fillRect(): void {}
   save(): void {}
   restore(): void {}
   setTransform(): void {}
@@ -92,12 +93,13 @@ afterEach(() => {
 });
 
 describe('★K2 ①GLSL 转录锁（px_ForceField 反汇编活跃常量逐字）', () => {
-  it('FS 活跃 def/preshader 常量逐字在场（死码 c8.x/c8.y 不移植）', () => {
-    // c9.z=1/(4π)、c9.w、c8.z、c10.x、c10.y、c6.x、c6.z、c7.x、c7.y、c5.y、c5.x、c6.w、c3.x=+5
+  it('FS 活跃 def/preshader 常量逐字在场（c8.x/c8.y=cmp 条件源,场值闸证伪死码初判）', () => {
+    // c9.z=1/(4π)、c9.w、c8.x、c8.y、c8.z、c10.x、c10.y、c6.x、c6.z、c7.x、c7.y、c5.y、c6.w、c3.x=+5
     for (const pin of [
       '0.0795774906873703', '-0.0000014980281548560015', '1.9999996423721313',
-      '6.2831854820251465', '-3.1415927410125732', '2.799999952316284',
-      '- 0.3', '0.75', '* 1.5', '30.0', '5.0', '-0.5',
+      '12.566368103027344', '- 6.283184051513672',
+      '6.2831854820251465', '3.1415927410125732', '2.799999952316284',
+      '- 0.3', '0.75', '* 1.5', '30.0', '* 5.0', '-0.5',
     ]) {
       expect(FFIELD_FS_SRC).toContain(pin);
     }
@@ -105,8 +107,9 @@ describe('★K2 ①GLSL 转录锁（px_ForceField 反汇编活跃常量逐字）
     expect(FFIELD_FS_SRC).toContain('x * x + y * y');
     // NaN 钳 0 语义复刻（inst41 1/pr=Inf 支）
     expect(FFIELD_FS_SRC).toContain('pr <= 0.0');
-    // 预乘输出式（2D 产物 source-over 直 alpha 等价）
-    expect(FFIELD_FS_SRC).toContain('vCol.rgb * w * w * vCol.a');
+    // 预乘输出式（2D 产物 source-over 直 alpha 等价+8bit 钳制复刻）
+    expect(FFIELD_FS_SRC).toContain('min(vCol.rgb * w, vec3(1.0))');
+    expect(FFIELD_FS_SRC).toContain('straight * w * vCol.a');
     expect(FFIELD_FS_SRC).toContain('precision highp float');   // c13c §5-2 mediump 漏入闸
   });
   it('VS 四属性面+源码锁:形状分派 54/quad 唯一判别（48/66 零交集）', () => {

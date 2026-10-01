@@ -263,8 +263,8 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
 
   it('德拉肯 571:一轮 60t 循环 6 连拍（40/35/29/23/17/11,重映射 :63637-63640）+ 呼吸气/射击音', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 130, y: 118 });
-    const e = spawn(h, 571, 100, 118);            // ~480px < 600
+    const h = makeHooks(w, { x: 110, y: 118 });
+    const e = spawn(h, 571, 100, 118);            // ★X2 重锚:~160px≤200 索敌门（NPCUtils.TargetClosestOldOnesInvasion :268 OnlyPlayersInCertainDistance=200f;旧 480px 布景=BJ356 前"全图咬玩家"误读,目标恒空）
     tick(h, 200, [e]);
     const shots = h.projectiles.length;
     expect(shots).toBeGreaterThanOrEqual(6);      // 一轮 6 发（671）
@@ -312,7 +312,11 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
   it('食人魔 577 远距(>430px)选招吐息:ai[1]=1,前摇倒数 ai[0]==35 涎 676 + 吐息音（:63587-63600）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 150, y: 118 });
-    const e = spawn(h, 577, 100, 118);            // ~800px > 430 → 吐息
+    const e = spawn(h, 577, 100, 118);
+    // ★X2 重锚（2026-10-01）:BJ356 勘误后玩家 >200px 不再恒成目标——远距吐息臂的
+    //  合法目标=以太水晶 548（TargetClosestOldOnesInvasion :268=200px 内玩家 ∪ 水晶,
+    //  水晶无距离限）。800px 水晶:dist>430 → ai[1]=1 吐息（:63538-63540 num35>num4+30）
+    spawn(h, 548, 150, 118);                      // 水晶=远距靶（800px）
     let sawSpit = false;
     for (let i = 0; i < 300 && !sawSpit; i++) {
       tick(h, 1, [e]);
