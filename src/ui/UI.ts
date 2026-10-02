@@ -2241,6 +2241,35 @@ export class UI {
     this.refreshAll();
   }
 
+  /** ★SW-BJ430（2026-10-02 用户拍板翻案 X4-债5）：制作列表站压拍两臂分派——
+   *  HoverOverCraftingItemButton (Main.cs:42971-43036) 的 if/else-if 结构 1:1：
+   *  ① :42988 合成支 `focusRecipe == recipeIndex && guideItem.IsAir`——焦点行∧无向导
+   *     件才进压拍合成（craftPressTick BJ391 面:压拍 1|10+30 拍冷却+上膛）；
+   *  ② :43020-43024 else-if(flag) 臂=【首击聚焦不合成】——focusRecipe=recipeIndex +
+   *     stackSplit=15（:43021,15 拍内 :42999 stackSplit≤1 门恒阻=重按前零合成）+
+   *     SoundEngine.PlaySound(12)（:43023）。_preventCraftingBecauseClickWasUsedTo
+   *     ChangeFocusedRecipe 旗面=本仓 mousedown 每压一发模型下【不上膛】承载：按住
+   *     期无合成拍（runCraftArm 无锚）≡原版旗恒阻支,松键重按走①=原版二击合成同相
+   *     （松键 :63422 归零面照跑,重按压拍=原版 stackSplit≤1 支同拍）。
+   *  count≤0 早退=防御门（vanilla availableRecipe 只含可合成行,本表不入列）。
+   *  hoverFocus=-1/returnCraftGrid=SW 材料格域语义（预览退场/格料归还,两臂同旧）。 */
+  private craftListPress(idx: number, rec: { r: VanillaRecipeLike; count: number },
+    shift: boolean, rowEl: HTMLElement): void {
+    if (rec.count <= 0) return;                              // 防御门（原版列表不含不可合成行）
+    this.hoverFocus = -1;                                    // 点击行即焦点,预览态退场（同旧）
+    this.returnCraftGrid();                                  // 格料先归还再统一扣料（同旧）
+    if (this.craftFocus === idx && !this.guidePlaced) {      // ① :42988 合成支
+      this.craftPressTick(rec.r, shift, rowEl, 'list');
+      this.refreshAll();
+      return;
+    }
+    // ② :43020-43024 聚焦支（首击聚焦不合成;guidePlaced 态点击同落本支=原版合成支死）
+    this.craftFocus = idx;
+    this.stackSplit = 15;                                    // :43021
+    this.game?.sfx.play('menuTick', 1);                      // :43023 Sound 12
+    this.refreshAll();
+  }
+
   /** ★SW-BJ157：stackSplit 计时面逐拍驱动（cb.onStackSplitTick,Game.frame 60Hz
    *  累加注入——暂停期照走=原版 Main.Update 面,autoPause 开包连取不冻结）。
    *  ① 加速梯（Main.cs:62728-62755 逐字）：stackSplit==0 全量复位;否则 stackCounter++
@@ -7328,13 +7357,10 @@ export class UI {
         // 满足度禁点,箱料齐的配方点不动（用户实报根因）。count<=0 行本表不会入列,
         // 门保留作防御。原注释「背包材料未齐,可经仓库合成」的禁点语义废弃。
         if (rec.count <= 0) return;
-        this.craftFocus = idx;      // 选中配方——仅点击设置，滚动不改
-        this.hoverFocus = -1;       // 点击行即焦点，预览态退场
-        // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）
-        this.returnCraftGrid();
-        // ★SW-BJ391：压拍合成+长按臂上膛（HoverOverCraftingItemButton 压拍面,成品跟随光标）
-        this.craftPressTick(rec.r, (ev as MouseEvent).shiftKey, row, 'list');
-        this.refreshAll();
+        // ★SW-BJ430：压拍两臂分派（HoverOverCraftingItemButton :42988 合成支/
+        //  :43020 聚焦支 1:1——首击聚焦不合成+二击起合成+长按加速梯连做,见 craftListPress;
+        //  旧单击即合成语义=X4-债5,2026-10-02 用户拍板按原版翻案）
+        this.craftListPress(idx, rec, (ev as MouseEvent).shiftKey, row);
       });
       cl.appendChild(row);
     }

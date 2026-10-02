@@ -1,13 +1,13 @@
-// ★BJ430 制作列表站长按批量复现/定谳探针（用户实报「制作栏里长按物品无法批量快速
+// ★BJ430 制作站长按批量复现/定谳探针（用户实报「制作栏里长按物品无法批量快速
 //  制作」）。只读+计数包裹,零 src 触碰。
 //
-// 场景：石台布景+工作台(dx+2)+背包 60 木 → 开 ESC（SW classic 列表站）：
-//   A 定位木平台行（create 93,1 木@工作台）→ 真实 CDP 压按（move+down,无后续
-//     mousemove=光标静止）按住 2.6s → 采样 vanillaCraft 调用数/木材存量/
-//     craftHold 锚的 matches(':hover')/元素身份 → 定谳「:hover 在行重建后死链」
-//     假说（BJ391 长按臂 runCraftArm 的悬停复核面）；
-//   B :hover 迁移微实验——压按触发重建后,新行（同几何位）matches(':hover') 直测；
-//   C 松键后单击二击面采样（压拍即合成=旧语义,首击聚焦=新语义,由落刀前后对比读）。
+// 场景：石台布景+工作台(dx+2)+背包 60 木 → 开 ESC（缺省 vanilla 布局=vinv 鱼眼格）：
+//   A 单击木平台行（create 93）→ 聚焦（首击聚焦面,vinvCraftFocusV=idx+吸附滑行）；
+//   B 吸附落位后重测行矩形 → 按住（真实 CDP:down,此后【无 mousemove】=光标静止）
+//     2.6s → 采样 vanillaCraft 次数/木材存量/craftHold 锚身份/isConnected/
+//     matches(':hover')/矩形 → 定谳长按死臂根因（锚随格池重建销亡 + :hover 静止
+//     光标不迁移,两案并列取证）；
+//   C 松键终态采样。
 // 运行:node tools/probe.mjs run scripts/_bj430-craft-hold-probe.mjs --vite=<PORT>
 import { launchBrowser, openPage, bootstrap, createGame, stage, sleep, ledger, savePageShot, front } from '../tools/probe/lib/index.mjs';
 
@@ -28,6 +28,18 @@ try {
   });
   L.chk('stage', st.ok, st.why ?? '');
 
+  // SW_LAYOUT=classic → 运行期切旧布局（options 单例经动态 import 取同实例,
+  // onChange 1047 行 watcher 重建面板;探针即用同法,免 bootstrap 查询串路径）
+  if (process.env.SW_LAYOUT) {
+    const flip = await page.evaluate(async (lay) => {
+      const mod = await import('/src/core/Options.ts');
+      const options = mod.options ?? mod.default;
+      await options.set('inventoryLayout', lay);
+      return { layout: options.data.inventoryLayout, built: window.__swUI._builtLayout };
+    }, process.env.SW_LAYOUT);
+    L.chk('layout-flip', flip.layout === process.env.SW_LAYOUT && flip.built === process.env.SW_LAYOUT, JSON.stringify(flip));
+  }
+
   // 材料 60 木 + vanillaCraft 计数包裹
   const inst = await page.evaluate(() => {
     const g = window.__swGame, ui = window.__swUI;
@@ -35,9 +47,8 @@ try {
     if (iid == null || iid < 0) return { ok: false, why: 'no-wood-item' };
     g.player.inv.slots[10] = { id: iid, stack: 60 };
     const P = window.__swBJ430 = {
-      n: { vanillaCraft: 0, timesSum: 0, rebuild: 0 },
+      n: { vanillaCraft: 0, timesSum: 0, refresh: 0, rebuild: 0 },
       woodId: iid,
-      hoverProbe: null,
     };
     const GP = Object.getPrototypeOf(g), UP = Object.getPrototypeOf(ui);
     const wrap = (o, name, tag, note) => {
@@ -51,7 +62,8 @@ try {
       return 'ok';
     };
     wrap(GP, 'vanillaCraft', 'vanillaCraft', 'craft');
-    wrap(UP, 'refreshVanillaCrafting', 'rebuild');
+    wrap(UP, 'refreshVanillaCrafting', 'refresh');
+    wrap(UP, 'vinvRebuildCraftCells', 'rebuild');
     return { ok: true };
   });
   L.chk('install', inst.ok, inst.why ?? '');
@@ -59,122 +71,129 @@ try {
   await front(page);
   await sleep(300);
 
-  // 开包（缺省 vanilla 布局:vinv 鱼眼格 vinvCraftAvailV/classic 旧布局=craftListEl 行）
+  // 开包（缺省 vanilla 布局=vinv 鱼眼格）
   await page.evaluate(() => window.__swUI.openInventory());
   await sleep(700);
 
-  // 布局面检测
-  const face = await page.evaluate(() => {
-    const ui = window.__swUI;
-    return {
-      builtLayout: ui._builtLayout,
-      craftAvailV: ui.vinvCraftAvailV?.length ?? -1,
-      pipsUseGrid: ui.vinvPipsUseGrid,
-      modernOpen: ui.vinvModernCraftOpen,
-      focusV: ui.vinvCraftFocusV,
-      classicRows: ui.craftListEl ? ui.craftListEl.children.length : -1,
-      classicAvail: ui.craftAvailRef?.length ?? -1,
-    };
-  });
-  L.say(`[face] ${JSON.stringify(face)}`);
-  L.chk('face-has-recipes', (face.craftAvailV ?? 0) > 0 || (face.classicAvail ?? 0) > 0, JSON.stringify(face));
+  // SW_STATION=modern → modern 网格窗（FX41,vinv 布局内 vinvOpenModernCraft）
+  if (process.env.SW_STATION === 'modern') {
+    const md = await page.evaluate(() => {
+      const ui = window.__swUI;
+      ui.vinvOpenModernCraft(null, false);
+      return { open: ui.vinvModernCraftOpen };
+    });
+    L.chk('modern-open', md.open === true, JSON.stringify(md));
+    await sleep(700);
+  }
 
-  // A:定位木平台行几何（vinv 鱼眼格=vinvCraftAvailV 池格;classic=craftListEl 行）
-  const rowInfo = await page.evaluate(() => {
-    const ui = window.__swUI, P = window.__swBJ430;
-    const isVinv = (ui.vinvCraftAvailV?.length ?? 0) > 0;
-    let idx, row;
-    if (isVinv) {
-      idx = ui.vinvCraftAvailV.findIndex((e) => e.r.create === 93);
-      if (idx < 0) return { ok: false, why: 'no-platform-row-vinv', rows: ui.vinvCraftAvailV.map((e) => e.r.create) };
-      row = ui.vinvCraftCellEls[idx]?.el;
-      if (!row) return { ok: false, why: 'no-cell-el', idx };
-    } else {
-      idx = ui.craftAvailRef.findIndex((e) => e.r.create === 93);
-      if (idx < 0) return { ok: false, why: 'no-platform-row', rows: ui.craftAvailRef.map((e) => e.r.create) };
-      row = ui.craftListEl.children[idx];
-      if (!row) return { ok: false, why: 'no-dom-row', idx };
+  const findCell = () => page.evaluate(() => {
+    const ui = window.__swUI;
+    if (ui.vinvModernCraftOpen) {
+      const idx = ui.vinvModernEntries.findIndex((e) => e.r.create === 93);
+      const cell = ui.vinvModernCellEls[idx];
+      if (!cell) return { mode: 'modern', idx, ok: false };
+      const r = cell.el.getBoundingClientRect();
+      return { mode: 'modern', idx, ok: true, x: r.x + r.width / 2, y: r.y + r.height / 2,
+               hover: cell.el.matches(':hover') };
     }
-    const r = row.getBoundingClientRect();
+    const classic = ui._builtLayout === 'classic';
+    const idx = classic
+      ? ui.craftAvailRef.findIndex((e) => e.r.create === 93)
+      : ui.vinvCraftAvailV.findIndex((e) => e.r.create === 93);
+    const el = classic ? ui.craftListEl?.children[idx] : ui.vinvCraftCellEls[idx]?.el;
+    if (!el) return { mode: classic ? 'classic' : 'vinv', idx, ok: false };
+    const r = el.getBoundingClientRect();
+    return { mode: classic ? 'classic' : 'vinv', idx, ok: true,
+             x: r.x + r.width / 2, y: r.y + r.height / 2, hover: el.matches(':hover') };
+  });
+
+  // A:单击聚焦（首击聚焦面）
+  let rc = await findCell();
+  L.chk('A-cell-found', rc.ok, JSON.stringify(rc));
+  await page.mouse.move(rc.x, rc.y);
+  await sleep(120);
+  await page.mouse.down();
+  await sleep(60);
+  await page.mouse.up();
+  await sleep(900);   // 吸附滑行落位
+  const focus1 = await page.evaluate(() => {
+    const ui = window.__swUI;
     return {
-      ok: true, idx, vinv: isVinv, rect: { x: r.x, y: r.y, w: r.width, h: r.height },
-      cx: r.x + r.width / 2, cy: r.y + r.height / 2,
-      sig: row.outerHTML.length,
-      hover0: row.matches(':hover'),
+      focusV: ui.vinvCraftFocusV,
+      focusCreate: ui.vinvCraftAvailV[ui.vinvCraftFocusV]?.r.create ?? null,
+      n: window.__swBJ430.n,
     };
   });
-  L.chk('A-locate-row', rowInfo.ok, JSON.stringify(rowInfo).slice(0, 200));
-  if (!rowInfo.ok) { process.exit(L.exitCode()); }
+  L.say(`[A-focus-click] ${JSON.stringify(focus1)}`);
 
-  // B:压按（真实 CDP:move→down,此后【无任何 mousemove】=光标静止按住 2.6s）
-  await page.mouse.move(rowInfo.cx, rowInfo.cy);
+  // B:吸附落位后重测矩形 → 按住 2.6s（无后续 mousemove）
+  rc = await findCell();
+  L.chk('B-cell-after-snap', rc.ok, JSON.stringify(rc));
+  await page.mouse.move(rc.x, rc.y);
   await sleep(120);
-  const hoverAfterMove = await page.evaluate(() => {
-    const ui = window.__swUI;
-    const isVinv = (ui.vinvCraftAvailV?.length ?? 0) > 0;
-    const row = isVinv
-      ? ui.vinvCraftCellEls[ui.vinvCraftAvailV.findIndex((e) => e.r.create === 93)]?.el
-      : ui.craftListEl.children[ui.craftAvailRef.findIndex((e) => e.r.create === 93)];
-    return { hover: row?.matches(':hover') ?? null, mouseX: ui.mouseX, mouseY: ui.mouseY };
-  });
-  await savePageShot(page, `${EV}/bj430-before-press.png`);
-  await page.mouse.down();                     // 按住起点（压拍=旧语义合成 1）
-  await sleep(400);
-
-  // C:按住中段采样（重建后新行 :hover 直测 + 锚身份 + 矩形）
-  const mid = await page.evaluate(() => {
+  await savePageShot(page, `${EV}/bj430-before-hold.png`);
+  await page.mouse.down();   // 二击起合成（压拍 1 件）+ 上膛
+  await sleep(450);
+  const mid1 = await page.evaluate(() => {
     const ui = window.__swUI, P = window.__swBJ430;
     const ch = ui.craftHold;
-    if (!ch) return { ch: null };
+    if (!ch) return { ch: null, n: P.n };
     const r = ch.el.getBoundingClientRect();
-    let sameEl = null;
-    if (ch.kind === 'fisheye') {
-      sameEl = ui.vinvCraftCellEls[ui.vinvCraftAvailV.findIndex((e) => e.r.create === 93)]?.el === ch.el;
-    } else if (ch.kind === 'list') {
-      sameEl = ui.craftListEl.children[ui.craftAvailRef.findIndex((e) => e.r.create === 93)] === ch.el;
+    let liveEl = null;
+    if (ui.vinvModernCraftOpen) {
+      liveEl = ui.vinvModernCellEls[ui.vinvModernEntries.findIndex((e) => e.r.create === 93)]?.el ?? null;
+    } else if (ui._builtLayout === 'classic') {
+      liveEl = ui.craftListEl?.children[ui.craftAvailRef.findIndex((e) => e.r.create === 93)] ?? null;
+    } else {
+      liveEl = ui.vinvCraftCellEls[ui.vinvCraftAvailV.findIndex((e) => e.r.create === 93)]?.el ?? null;
     }
     return {
       ch: { kind: ch.kind, connected: ch.el.isConnected, hover: ch.el.matches(':hover'),
-            rect: { x: r.x, y: r.y, w: r.width, h: r.height } },
-      sameEl, mouseX: ui.mouseX, mouseY: ui.mouseY,
+            isLiveCell: liveEl === ch.el,
+            rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } },
+      liveCellHover: liveEl ? liveEl.matches(':hover') : null,
+      mouseX: ui.mouseX, mouseY: ui.mouseY,
       stackSplit: ui.stackSplit, superFastStack: ui.superFastStack,
+      n: P.n,
     };
   });
-  await sleep(1100);
-  const mid2 = await page.evaluate(() => {
+  const woodCount = async () => page.evaluate((wid) => {
+    const g = window.__swGame;
+    let n = 0;
+    for (const s of g.player.inv.slots) if (s && s.id === wid) n += s.stack;
+    return n;
+  }, (await page.evaluate(() => window.__swBJ430.woodId)));
+  const wood = await woodCount();
+  L.say(`[B-t0.45s] wood=${wood} ${JSON.stringify(mid1)}`);
+
+  await sleep(1050);
+  const mid2 = await page.evaluate((wid) => {
     const ui = window.__swUI, P = window.__swBJ430;
     const ch = ui.craftHold;
+    let n = 0;
+    for (const s of window.__swGame.player.inv.slots) if (s && s.id === wid) n += s.stack;
     return {
-      hover: ch?.el.matches(':hover') ?? null,
-      connected: ch?.el.isConnected ?? null,
+      hold: ch ? { connected: ch.el.isConnected, hover: ch.el.matches(':hover') } : null,
       stackSplit: ui.stackSplit, superFastStack: ui.superFastStack,
+      wood: n, n: P.n,
     };
-  });
-  await sleep(1100);
+  }, (await page.evaluate(() => window.__swBJ430.woodId)));
+  L.say(`[B-t1.5s] ${JSON.stringify(mid2)}`);
+
+  await sleep(1150);
   await page.mouse.up();
   await sleep(300);
   await savePageShot(page, `${EV}/bj430-after-hold.png`);
+  const final = await page.evaluate((wid) => {
+    const ui = window.__swUI, P = window.__swBJ430;
+    let n = 0;
+    for (const s of window.__swGame.player.inv.slots) if (s && s.id === wid) n += s.stack;
+    return { wood: n, n: P.n, craftHold: ui.craftHold ? 'alive' : null };
+  }, (await page.evaluate(() => window.__swBJ430.woodId)));
+  L.say(`[C-final] ${JSON.stringify(final)}`);
 
-  const final = await page.evaluate(() => {
-    const g = window.__swGame, ui = window.__swUI, P = window.__swBJ430;
-    let wood = 0;
-    for (const s of g.player.inv.slots) if (s && s.id === P.woodId) wood += s.stack;
-    return {
-      n: P.n,
-      wood,
-      craftHold: ui.craftHold ? { kind: ui.craftHold.kind } : null,
-      stackSplit: ui.stackSplit, superFastStack: ui.superFastStack,
-    };
-  });
-  L.say(`[hold-2.6s] n=${JSON.stringify(final.n)} wood=${final.wood}`);
-  L.say(`[hover-after-move] ${JSON.stringify(hoverAfterMove)}`);
-  L.say(`[mid-0.4s] ${JSON.stringify(mid)}`);
-  L.say(`[mid-1.5s] ${JSON.stringify(mid2)}`);
-  L.say(`[final] ${JSON.stringify(final)}`);
-
-  // 定谳判据（探针自身不设红绿——落刀前后各跑一遍取证）：
-  //  旧语义预期:vanillaCraft 次数=1（压拍 1 次,:hover 死臂无连做）或 ≥2（hover 活）
-  L.chk('hold-produced-crafts', final.n.vanillaCraft >= 1, `crafts=${final.n.vanillaCraft}`);
+  // 定谳判据（落刀前后各跑一遍取证）：旧码预期=压拍 1 件后死臂
+  L.chk('press-crafted-once', final.n.vanillaCraft >= 1, `crafts=${final.n.vanillaCraft}`);
 } finally {
   await browser.close().catch(() => {});
 }

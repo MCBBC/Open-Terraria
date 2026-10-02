@@ -604,13 +604,19 @@ export class WhipProj extends Entity {
       //  Player.KillMe :39133-39137 队友臂）,非"鞭杀向导"——原版 OnKillNPC(ref
       //  attempt, 鞭) 体仅 item 5096 自buff+墓碑两支,鞭杀向导零效果=零修刀;
       //  墓碑侧已在 Tombstone.applyDamage 接线（FTW 面+onKill→notifyProgression
-      //  Event(36)）。残债（新登记）：随从/哨兵弹 vs 城镇 NPC 通道整缺（:13711
-      //  OnHit 消费半面/:12947 ModifyHit tag 乘区对城镇不可达）;WHIP_HIT_SIDEKICK
-      //  （917/1036）与 WHIP_HIT_BUFF（312/365）:13988-13997 城镇臂未接。
+      //  Event(36)）。残债（★清偿刀 Y2 2026-10-02 清偿）：随从/哨兵弹 vs 城镇 NPC
+      //  通道整缺（:13711 OnHit 消费半面/:12947 ModifyHit tag 乘区对城镇不可达）——
+      //  MinionProj.contactTown 等七环接 hitTownNpcs 闭环;WHIP_HIT_SIDEKICK（917/
+      //  1036）与 WHIP_HIT_BUFF（312/365）:13988-13997 城镇臂本文件 onAccept 内接。
       // ★清偿刀 X1 face 3（:13687-96 nano 乘区,城镇靶同面）：`ownedBySomeone &&
       //  (melee||IsAWhip) && meleeEnchant==6 → dmg=(int)(dmg×1.05f)`——鞭 SetDefaults
       //  无 melee 类旗,IsAWhip 臂即为此设（同敌怪环 F2 位）。nano 浸剂在身时受理
       //  命中伤 ×1.05（(int) 截断同式;不写回 dmgNow——衰减链独立管 dmgNow）。
+      // ★清偿刀 Y2：flat 穿甲透传（:13686-87 `ownedBySomeone && !hostile →
+      //  dmg += checkArmorPenetration(num6, pct)`——城镇靶同面;鞭 num6 =
+      //  GetArmorPenetration(melee=false)=玩家通用 armorPen,同敌怪环 :778 形）。
+      //  banner 乘区（:13387-91）在 hitTownNpcs 通道内施加（城镇 NPC 无 banner 档,
+      //  结构恒等值）。
       const townDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05) : this.dmgNow;
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, townDmg,
         Math.sign(p.x - this.x) * 2, 'playerProj', this.projId,
@@ -684,13 +690,50 @@ export class WhipProj extends Entity {
             tn as unknown as Parameters<typeof ghostHealProc>[3]);
           // face 5：proc 窗启用（:13976 {913,1031,1032} localAI[0]==0 首鞭门 /
           //  :14012 {847,1033,1035} 无条件——tag 消费机制半面,城镇靶同面;消费侧
-          //  = 随从弹命中被 tag 城镇 NPC 时的 OnProcHit,通道登记新债见上注）
+          //  = 随从弹命中被 tag 城镇 NPC 时的 OnProcHit,★Y2 已闭环见 MinionProj）
           if (owner && WHIP_PROC_ITEMS.has(this.itemId)
             && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {
             this.procEnabled = true;
             owner.tagEffectStack.tryEnableProcOnNPC(this.itemId, tn.id);
           }
-        });
+          // ---- ★清偿刀 Y2（2026-10-02）WHIP_HIT_* 城镇臂（X1 登记债清偿）----
+          //  原文 TryDoingOnHitEffects switch（:13968-14013）对城镇靶【同 switch
+          //  同面】,与敌怪环（下方 :842-:871 同族）逐支 1:1：
+          //  · case 1034 星鞭星雨（:14001-14007）：localAI[0]==0 ∧ CanProcOnNPC
+          //    （5479,靶）→ localAI0=1 + RemoveAllProcs + ConstellationWhip
+          //    _SpawnConstellationStarsTowards（伤=(int)((int)(damage×2)×0.22)/颗,
+          //    damage=衰减后鞭伤——城镇受理拍 dmgNow 衰减【后】值同敌怪环序）
+          //  · case 912/1028 玩家 buff（:13987/:13997 AddBuff(312/365,180)——
+          //    固定 180t 不 ×tagEffectDuration）
+          //  · case 912/1028 附属召唤（:13984/:13995 NewProjectile 917 伤 15 /
+          //    1036 伤 2 @ 靶 Center,速零 kb 零;coolWhipBuff/cobWhipBuff 在场
+          //    期不重复——spawnSidekick 同类在场门承载）
+          if (this.projId === 1034 && this.localAI0 === 0 && owner
+            && owner.tagEffectStack.canProcOnNPC(5479, tn.id)) {
+            this.localAI0 = 1;
+            owner.tagEffectStack.removeAllProcs(5479);                          // :14006
+            const starDmg = Math.max(1, Math.trunc(this.dmgNow * 2 * 0.22));    // :14005 + :15016-15017
+            for (let i = 2; i < pts.length - 1; i += 3) {
+              const a = pts[i], b = pts[i + 1];
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const dd = Math.hypot(dx, dy) || 1;
+              const f = owner.facing;
+              const s = (1 + (Math.random() * 2 - 1) * 3) * (f >= 0 ? 1 : -1);
+              game.spawnFriendlyProj?.(new Arrow(a.x, a.y, dy / dd * s, -dx / dd * s,
+                starDmg, this.knockback, 1039, { grav: 0, life: 240 }));
+            }
+          }
+          const hb = WHIP_HIT_BUFF[this.itemId];
+          if (hb && owner) owner.whipBuffs[hb] = 180;    // :13987/:13997（固定 180t）
+          if (WHIP_HIT_SIDEKICK[this.itemId] && owner) {
+            this.spawnSidekick(game, owner, this.itemId,
+              v2(tn.x + tn.w / 2, tn.y + tn.h / 2));     // :13984/:13995 靶 Center
+          }
+        },
+        // ★Y2 settle：flat 穿甲透传（:13686-87——鞭 num6 = 玩家通用 armorPen,
+        //  同敌怪环 :778;banner 在通道内施加,勿在此预套）
+        (n) => ({ flatPen: owner ? ((owner as unknown as { equipStats?: { armorPen?: number } })
+          .equipStats?.armorPen ?? 0) : 0 }));
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
         //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）

@@ -27,7 +27,7 @@ import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
 import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）
 import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
-import { hitCritters, applyBannerDamageDealt } from './projTargets';
+import { hitCritters, hitTownNpcs, townVoodooGateOpen, applyBannerDamageDealt, type TownHitSettle } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
@@ -592,6 +592,18 @@ interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
   hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+}
+
+/** ★清偿刀 Y2：城镇 NPC 命中靶最小形状（鸭子类型,TownNPC 满足）——
+ *  hurt 十参形与 Enemy.hurt 语义错位（TownNPC.ts:1403 参数序警示）:
+ *  (dmg,kbx,kby,game,penPercent,flatPen,crit,force,fromPlayer,srcProjId)。 */
+interface TownNpcHitTarget {
+  cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
+  vanillaId?: number; iframes?: number; vx?: number; vy?: number; realLife?: number | null;
+  hurt: (dmg: number, kbx: number, kby: number, g: GameHooks, penPercent?: number,
+    flatPen?: number, crit?: boolean, force?: boolean, fromPlayer?: boolean,
+    srcProjId?: number) => boolean;
+  hurtFx?: (d: number) => void;
 }
 
 /** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
@@ -2880,6 +2892,26 @@ export class MinionProj extends Entity {
       en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
         game, pen, crit);
     }
+    // ★清偿刀 Y2：城镇臂（946 体触走 Damage() 管线——CanDealDamage :12468 例外
+    //  `(type!=946||ai[0]==0f)` → Damage_PVE_Inner 城镇同链;tHit 60t 每靶每轮一次,
+    //  StartAttack 清）。体触无 tag 结算面（同敌怪环）;4% 暴击掷逐靶独立。
+    hitTownNpcs({ x: this.x, y: this.y, w: this.w, h: this.h }, game, dmg0, 0,
+      'playerProj', this.projId, undefined, undefined,
+      (n) => {
+        if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+        return this.tHit.has(n.id);   // 60t 局部表读门
+      },
+      (n) => { this.tHit.set(n.id, 60); (n as TownNpcHitTarget).iframes = 0; },   // 局部表占位+usesLocal 清窗（受理拍）
+      (n) => {
+        const tn = n as TownNpcHitTarget;
+        const crit = Math.random() < 0.04;
+        const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
+        return {
+          dmg: crit ? Math.round(dmg0 * 2) : dmg0,   // 敌怪环预倍习语（Enemy.hurt crit=染色参）
+          flatPen: owner?.equipStats?.armorPen ?? 0,
+          kb: this.facing * this.knockback,
+        };
+      });
   }
 
   /** AI_156_GetIdlePosition 946 支（:52551-52565）：肩上一字排开 + miscCounter 椭圆微摆 */
@@ -4162,6 +4194,45 @@ export class MinionProj extends Entity {
             game,
             { minion: true, sentry: this.sentry });
         }
+        // ★清偿刀 Y2：城镇臂（Damage_CanDealDamage :12468 例外 `(type!=623||ai[0]!=2f)`
+        // → Damage() → Damage_PVE_Inner 城镇同链;拳盒 Colliding :15611-15621
+        // 80×40 @ Center+direction×40 对城镇靶同面）。cd=5（:6433）;巫毒窄门先置
+        // 同 contactTown;usesLocal=私表族 → 受理拍清窗;916 直伤延迟汇出（contactTown
+        // 同式,:13711 OnHit 位）。
+        {
+          let punchDirect: number[] | null = null;
+          hitTownNpcs({ x: this.cx + this.facing * 40 - 40, y: this.cy - 20, w: 80, h: 40 },
+            game, dmg0, 0, 'playerProj', this.projId, undefined, undefined,
+            (n) => {
+              if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+              return !this.hitCd.ready(n.id, 5);   // localNPCHitCooldown=5（:6433）
+            },
+            (n) => {
+              this.townAcceptLadder(game, n, true);   // 私表族=usesLocal 主支清窗（:14175-14179）
+              this.attackFlash = 24;
+              const tn = n as TownNpcHitTarget;
+              if (punchDirect) {
+                for (const d of punchDirect) {
+                  tn.hurt(applyBannerDamageDealt(game, tn, d), Math.sign(tn.cx - this.cx), 0, game,
+                    0, 0, false, false, true, 0);
+                }
+                punchDirect = null;
+              }
+            },
+            (n) => {
+              const tn = n as TownNpcHitTarget;
+              const direct: number[] = [];
+              tn.hurtFx = (d: number) => { direct.push(d); };
+              const res = resolveWhipTagHit(tn, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1,
+                tn.cx, tn.cy, this.ownerRef());
+              punchDirect = direct;
+              return {
+                dmg: res.dmg,
+                kb: Math.sign(tn.cx - this.cx) * this.knockback,
+                // 敌怪环 punch 面 armorPen=0（:4145 第五参）→ 城镇同形
+              };
+            });
+        }
       }
       return;
     }
@@ -4397,7 +4468,105 @@ export class MinionProj extends Entity {
       this.attackFlash = 24;
       anyHit = true;
     }
+    anyHit = this.contactTown(game, dmg, cdIn, pad, add) || anyHit;
     return anyHit;
+  }
+
+  /** ★清偿刀 Y2（2026-10-02）随从/哨兵弹 vs 城镇 NPC 通道（X1 登记债清偿:
+   *  face 5 消费真通道 + flat 穿甲/banner 透传 + WHIP_HIT_* 闭环的随从侧）。
+   *  定谳锚（Terarria1457/Terraria/Projectile.cs 亲读）：Damage() →
+   *  Damage_CanDealDamage projPet 例外族（:12468）放行的各随从本体 →
+   *  Damage_PVE :12523 → Damage_PVE_Inner 对城镇靶【同链同面】——voodoo 窄门
+   *  :12618-12625 flag 臂（22 killGuide/54 killClothier/318 例外）放行后,
+   *  tag ModifyHit(:12947)/banner(:13387-91)/穿甲(:13686-87)/StrikeNPC(:13702)/
+   *  TagEffectStack.OnHit(:13711) 全段照跑（原版单 Main.npc 数组遍历,本仓
+   *  敌怪/城镇双桶拆分等价形——敌怪环见 contact() 主环）。
+   *  门序：巫毒窄门先置（skip 内,vanilla flag(:12620-12631)→immune(:12636) 同序,
+   *  防「无 doll 探针」污染接触冷却私表）→ 接触冷却三态门（敌怪环 :4361 同式:
+   *  -2 缺省族=玩家全局窗 iframes 门;私表/idStatic 族=ready() 探针——写位在
+   *  onAccept 受理拍,:14179 写梯同位）→ AABB（pad 外扩盒同 critter 环形）。
+   *  settle = 逐靶结算（tag 乘区/crit/kb 逐靶依赖 tag 态与靶位;banner 在
+   *  hitTownNpcs 通道内统一施加,勿在此预套;crit 语义=TownNPC.hurt 防后双精度
+   *  ×2,与敌怪环「调用侧预倍」不同形——golemCrit 6176 沿敌怪环预倍习语,crit
+   *  参恒 false=暴击色省略登记）。onAccept = 受理拍写梯:usesLocal 主支
+   *  （:14175-14179 私表/idStatic 族=immune[owner]=0 清全局窗不开窗,鞭 W1 同式;
+   *  -2 缺省族=TownNPC.hurt 通用档 iframes=10 即 :14182 档,不动）+StatusNPC
+   *  （:13634）/SpawnHitVisuals（:13633）/attackFlash。 */
+  private contactTown(game: GameHooks, dmg: number, cdIn: ContactCd | undefined, pad: number,
+    add: (e: unknown, b: string) => void): boolean {
+    const townList = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
+    if (!townList.length) return false;
+    const owner0 = this.ownerRef();
+    const o0 = owner0 as unknown as { equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;
+    const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
+    const pen0 = (o0?.equipStats?.armorPen ?? 0)
+      + (projectileData(this.projId)?.armorPenetration ?? 0);   // :13686-87 num6 两源（同敌怪环 :4383）
+    const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
+    const box = pad
+      ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2 }
+      : { x: this.x, y: this.y, w: this.w, h: this.h };
+    let anyHit = false;
+    // ★黑收成 916 直伤延迟汇出（原版序 :13711 OnHit 在 StrikeNPC :13702【后】——
+    //  直伤须待主命中受理+写梯清窗后落地;同步直调会自置 iframes=10 反噬主命中,
+    //  敌怪环反序缺陷探针实证=主伤整丢,见 Y2 报告登记债,-2 缺省族直伤被窗拒=
+    //  原版同相 :12636 门）。face 5 消费真通道主体在 settle（ModifyHit+OnHit 消费）。
+    let pendingDirect: number[] | null = null;
+    hitTownNpcs(box, game, dmg, 0, 'playerProj', this.projId, undefined, undefined,
+      (n) => {
+        // 巫毒窄门先置（:12618-12631 flag 臂;探针零污染）——318 臭鸡蛋例外在谓词内
+        if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+        // 接触冷却三态门（敌怪环 :4361-4367 同式;town id 与敌 id 同 Entity 全局序列不撞）
+        if (spec === CONTACT_PLAYER_WINDOW) return (n as { iframes?: number }).iframes !== undefined
+          && (n as { iframes?: number }).iframes! > 0;   // -2 缺省族:城镇全局窗内不重击
+        if (typeof spec === 'object') return !this.idStaticBucket(this.projId).ready(n.id, spec.cd);
+        return !this.hitCd.ready(n.id, spec);
+      },
+      (n) => {
+        this.townAcceptLadder(game, n, spec !== CONTACT_PLAYER_WINDOW);
+        this.attackFlash = 24;
+        anyHit = true;
+        const tn = n as TownNpcHitTarget;
+        if (pendingDirect) {
+          for (const d of pendingDirect) {   // OnHit :13711 位（写梯后）
+            tn.hurt(applyBannerDamageDealt(game, tn, d), Math.sign(tn.cx - this.cx), 0, game,
+              0, 0, false, false, true, 0);
+          }
+          pendingDirect = null;
+        }
+      },
+      (n) => {
+        const tn = n as TownNpcHitTarget;
+        const direct: number[] = [];
+        tn.hurtFx = (d: number) => { direct.push(d); };
+        const res = resolveWhipTagHit(tn, dmg, game, (el) => add(el, 'projectiles'),
+          SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, owner0);   // face 5 消费真通道：tag 乘区 + OnHit proc 消费
+        pendingDirect = direct;
+        const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 6176（:12962-12965）
+        const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
+          ? (owner0.cx < tn.cx ? 1 : -1)
+          : Math.sign(tn.cx - this.cx);   // 方向表族同敌怪环 :4386-4392
+        const settle: TownHitSettle = {
+          dmg: golemCrit ? res.dmg * 2 : res.dmg,
+          flatPen: pen0,
+          kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477,同敌怪环）
+        };
+        return settle;
+      });
+    return anyHit;
+  }
+
+  /** ★清偿刀 Y2：城镇受理拍通用写梯 + StatusNPC + 命中编排。
+   *  写梯（:14175-14179）：usesLocal 主支（私表/idStatic 族,鞭 W1 同式）=
+   *  `immune[owner]=0`【清全局窗不开窗】;clearWindow=false（-2 缺省族）=
+   *  TownNPC.hurt 通用档 iframes=10 即 :14182 `penetrate!=1` 档,原版同相不动。
+   *  StatusNPC（:13634 门后无条件段,城镇靶同面;6185 催化指环 398）+
+   *  SpawnHitVisuals（:13633 免疫门后每靶一发,B11——城镇靶同面）。 */
+  private townAcceptLadder(game: GameHooks, n: { iframes?: number }, clearWindow: boolean): void {
+    const tn = n as TownNpcHitTarget;
+    if (clearWindow) tn.iframes = 0;
+    applyProjStatus(this.projId, tn as unknown as Record<string, number>,
+      { catalystBand: this.ownerRef()?.equipStats.catalystBand });
+    this.emitSpawnHitVisuals(game);
   }
 
   /** 同类计数（计数器/本体伤害档位用：831 宝石数 / 970 阿比盖尔数） */
@@ -5226,6 +5395,56 @@ export class MinionProj extends Entity {
               0, 0, game, 0, golemCritAura, 1, true, penPctAura);
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
+          // ★清偿刀 Y2：城镇臂（aura 场伤走 Damage() 管线 —CanDealDamage :12468
+          //  `(aiStyle==137 && ai[0]!=0f)` 唯一闸 → Damage_PVE_Inner 城镇同链;
+          //  场盒 Colliding :14537-14553 对城镇靶同面）。门序同敌怪环：场盒 AABB
+          //  （hitTownNpcs 缺省几何）→ skip=距离+LOS+cd3 → 巫毒窄门（通道内）。
+          //  penPercent :13266-69——城镇防御=VANILLA_NPCS 基值+进度加算（TownNPC.hurt
+          //  :1475-1476 同式）结构 <999 且城镇族无 68 → 门恒放行（基值 15 代入谓词）。
+          {
+            let auraDirect: number[] | null = null;
+            hitTownNpcs({ x: this.cx - side / 2, y: fieldCy - side / 2, w: side, h: side },
+              game, dmgOf(), 0, 'playerProj', this.projId, undefined, undefined,
+              (n) => {
+                const tn = n as TownNpcHitTarget;
+                if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                // targetRect.Distance(Center) < height/2-20（:14540,城镇 AABB 最近点距）
+                const nx = Math.max(tn.x, Math.min(tn.x + tn.w, this.cx));
+                const ny = Math.max(tn.y, Math.min(tn.y + tn.h, fieldCy));
+                if (Math.hypot(this.cx - nx, fieldCy - ny) >= side / 2 - 20) return true;
+                // AI_137_CanHit 视线门（同敌怪环 :5333-5335 双点任一）
+                if (!lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, tn.cx, tn.cy)
+                  && !lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, tn.x + tn.w / 2, tn.y)) return true;
+                return !this.hitCd.ready(tn.id, 3);   // localNPCHitCooldown=3（:7055）
+              },
+              (n) => {
+                this.townAcceptLadder(game, n, true);   // cd=3 私表族=usesLocal 主支清窗
+                const tn = n as TownNpcHitTarget;
+                if (auraDirect) {
+                  for (const d of auraDirect) {
+                    tn.hurt(applyBannerDamageDealt(game, tn, d), 0, 0, game, 0, 0, false, false, true, 0);
+                  }
+                  auraDirect = null;
+                }
+              },
+              (n) => {
+                const tn = n as TownNpcHitTarget;
+                const direct: number[] = [];
+                tn.hurtFx = (d: number) => { direct.push(d); };
+                const res = resolveWhipTagHit(tn, dmgOf(), game,
+                  (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+                  SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, this.ownerRef());
+                auraDirect = direct;
+                const golemCritAura = rollGolemSentryCrit(game, this.projId, true);   // 6176（:12962-12965）
+                zapped = true;
+                return {
+                  dmg: res.dmg,             // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——golemCrit 走 crit 参
+                  crit: golemCritAura,
+                  penPercent: lightningAuraPenPercent(tn.vanillaId, 15),
+                  kb: 0,                    // 光环场伤零击退（同敌怪环 :5355 kx=ky=0）
+                };
+              });
+          }
           // ★台账批 C-3472（2026-08-31）：电弧声密度对齐原版 ai[0] 循环（AI_137
           //  :69955-69979：ai[0]++ %num3==0 时扫场，场内有敌才 PlayTrackedSound——
           //  num3=30/僧侣T2 -5→25、T3 不改字面）。旧"每直伤 tick 一声"密度 ×30。
@@ -5290,6 +5509,35 @@ export class MinionProj extends Entity {
                 boom++;
               }
             }
+            // ★清偿刀 Y2：城镇臂——塔体 691/692/693 生成爆炸弹 694/695/696
+            //  （AI_138 :66063-66073），其 Damage() 管线对城镇靶同链（CanDealDamage
+            //  :12468 aiStyle==138 只闸塔体本体）。AoE 半径含靶半宽（非纯 AABB）
+            //  → 几何外置 skip、collide 恒真（与敌怪环 :5448 同式）。
+            hitTownNpcs({ x: ecx, y: ecy, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', boomProj,
+              () => true, undefined,
+              (n) => {
+                const tn = n as TownNpcHitTarget;
+                if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                return !(Math.abs(tn.cx - ecx) < 72 + tn.w / 2 && Math.abs(tn.cy - ecy) < 72 + tn.h / 2);
+              },
+              (n) => {
+                const tn = n as TownNpcHitTarget;
+                // StatusNPC 双源同敌怪环（:5454-5457）：塔型 + 爆炸弹 694 族（Oiled 门
+                //  :10786 setHuntressT2）;城镇通用档 iframes=10 保留（=写梯 :14182 档）
+                applyProjStatus(this.projId, tn as unknown as Record<string, number>,
+                  { catalystBand: this.ownerRef()?.equipStats.catalystBand });
+                applyProjStatus(boomProj, tn as unknown as Record<string, number>,
+                  { setHuntressT2: ownerH, catalystBand: this.ownerRef()?.equipStats.catalystBand });
+              },
+              (n) => {
+                const tn = n as TownNpcHitTarget;
+                const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);   // 6176（:12962-12965,爆炸弹面）
+                return {
+                  dmg: dmgOf(),          // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——勿预倍
+                  crit: golemCritBoom,
+                  kb: Math.sign(tn.cx - this.cx) * this.knockback,
+                };
+              });
             void boom;
             game.spawnParticles(ecx, ecy, '#FFB040', 18, 4, { life: 36 });
             game.playSfx('explosion', 1, this.cx, this.cy);
@@ -5468,6 +5716,26 @@ export class MinionProj extends Entity {
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }
+              // ★清偿刀 Y2：城镇臂——爆裂弹 644 的 Damage() 管线对城镇靶同链（643 本体
+              //  aiStyle 123 不伤,伤面=644 爆裂弹,SentryShot）。AoE 半径含靶半宽 →
+              //  几何外置 skip、collide 恒真（同爆炸弹臂）。
+              hitTownNpcs({ x: px, y: py, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', ss.shot,
+                () => true, undefined,
+                (n) => {
+                  const tn = n as TownNpcHitTarget;
+                  if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                  return !(Math.abs(tn.cx - px) < 14 + tn.w / 2 && Math.abs(tn.cy - py) < 14 + tn.h / 2);
+                },
+                (n) => this.townAcceptLadder(game, n, false),   // 城镇通用档 iframes=10（:14182 档）保留
+                (n) => {
+                  const tn = n as TownNpcHitTarget;
+                  const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);   // 6176（爆裂弹面）
+                  return {
+                    dmg: dmgOf(),        // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——勿预倍
+                    crit: golemCritVolley,
+                    kb: Math.sign(tn.cx - px) * this.knockback,
+                  };
+                });
               game.spawnParticles(px, py, `hsl(${Math.floor(Math.random() * 360)},90%,65%)`, 8, 2.4, { life: 26 });
             }
           } else {
@@ -6873,6 +7141,38 @@ export class TigerPounce extends Entity {
       //  双门（NPC.cs:82144）整段不进——击退/冲量归零。旧 (0,-1) 冲量是自造位移，
       //  与 Enemy.hurt 武器支 :12366 的同式双门不一致，归零对齐。
       en.hurt(res.dmg, 0, 0, game, 0, false, 0, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+    }
+    // ★清偿刀 Y2：城镇臂（扑击弹 818 Damage 全程可伤——CanDealDamage :12468 仅
+    //  `(818 && ai[0]<1)` 闸 → Damage_PVE_Inner 城镇同链;localNPCHitCooldown=-1
+    //  每靶一次,usesLocal 主支=受理拍清窗,hitSet 写位=受理拍 :14179 同位）。
+    {
+      let pounceDirect: number[] | null = null;
+      hitTownNpcs({ x: this.x, y: this.y, w: this.w, h: this.h }, game,
+        Math.max(1, Math.round(this.damage * mul)), 0, 'playerProj', 818, undefined, undefined,
+        (n) => {
+          if (!townVoodooGateOpen(game, n.vanillaId, 818)) return true;
+          return this.hitSet.has(n.id);   // localNPCHitCooldown=-1 每靶一次（读门）
+        },
+        (n) => {
+          this.hitSet.add(n.id);            // 局部表占位（:14179,受理拍）;usesLocal 主支清窗
+          const tn = n as TownNpcHitTarget;
+          tn.iframes = 0;
+          if (pounceDirect) {
+            for (const d of pounceDirect) {
+              tn.hurt(applyBannerDamageDealt(game, tn, d), 0, 0, game, 0, 0, false, false, true, 0);
+            }
+            pounceDirect = null;
+          }
+        },
+        (n) => {
+          const tn = n as TownNpcHitTarget;
+          const direct: number[] = [];
+          tn.hurtFx = (d: number) => { direct.push(d); };
+          const res = resolveWhipTagHit(tn, Math.max(1, Math.round(this.damage * mul)), game,
+            add, SUMMON_TAG_MUL[818] ?? 1, tn.cx, tn.cy, this.ownerRef());
+          pounceDirect = direct;
+          return { dmg: res.dmg, kb: 0 };   // kb=0 ⇒ StrikeNPC 双门不进（:82144,同敌怪环 F10）
+        });
     }
     void this.ownerRef;
   }

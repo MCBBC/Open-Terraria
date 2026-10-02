@@ -1000,6 +1000,15 @@ export const PROJ_ALPHA0: Record<number, number> = {
   //   ——可见面只有 AI 影焰尘 27 拖尾,496 AI 支已接）。usesLocalNPCImmunity/
   //   localNPCHitCooldown=-1 数据面 = vanillaProjectiles.ts DATA_PATCH（登记项①）
   265: 255, 355: 255, 376: 255, 660: 255, 712: 255, 496: 255,
+  // ★BJ431（2026-10-01,用户实报「火花魔棒弹幕不对」）：火花族 504/954/979（SetDefaults
+  //  :5759-5769/:9004-9014/:9227-9237 alpha=255 + noEnchantmentVisuals=true；AI :23766
+  //  每子步钉 255——GetAlpha 缺省路径 :81507 num14=(255−α)/255=0 → 弹体贴图【恒隐】,
+  //  同 376 案）。可见面=AI 尘尾迹（504/954 尘 6 火、979 尘 135 霜;:23785-23796 掷率梯
+  //  10%→100%→衰减,noGravity/scale×1.6/vel×2+弹速）。原版 Projectile_954.png 本体=
+  //  魔杖占位图（与 Item_3069 同图,md5 6ec57d61 双库核等）从未出画;本仓此前 α≡0=
+  //  40×40 魔杖贴图满显飞行=实报主病灶。GA case 共组 return 0 配对（dust-visual 族
+  //  同 294-296/376 式）
+  504: 255, 954: 255, 979: 255,
 };
 
 /** AI_001 顶层 per-type fade 恒率表（★2026-09-01 批五收官批；表驱动单支替代按率
@@ -1881,6 +1890,10 @@ export class Arrow extends Entity {
   chloAi1 = 0;
   /** localAI[0] 初速（首次 AI 取 |v|，此后恒为转向基准速度——转向不清速） */
   chloSpeed = 0;
+  // ---- ★BJ431 火花族 504/954/979（aiStyle 2 type 共支,Projectile.cs:23764-23803）----
+  /** vanilla ai[0] 计寿钟（AI 每子步 ++；命中快进 = Damage_PVE_Inner :13051-13055
+   *  `ai[0] += (60−ai[0])/2` 同槽消费——float 域,首中即 ≈30） */
+  sparkAi0 = 0;
   // ---- aiStyle 36 蜂族（AI() 派发器 :27683-27862）----
   /** ai[0] 索敌延迟计数（>30 后每 update 重搜最近敌，:27762-27764 钳 30） */
   private bee36Delay = 0;
@@ -2321,6 +2334,15 @@ export class Arrow extends Entity {
       this.grav = spec0.grav;
       this.gravDelay = opts?.gravDelay ?? spec0.delay;
     }
+    // ★BJ431：火花族 504/954/979（aiStyle 2 非投掷族——Projectile.cs:23764-23803 的
+    //  type==504||954||979 支无通用重力,下坠只由 ai[0]≥20 后 AI 支内 vy+0.1 自管）。
+    //  projGravSpec 的 aiStyle2 兜底档 0.3 是手里剑投掷族语义（AI_THROWN）,对魔法弹
+    //  错位=出膛即 0.3/t 抛物坠弧（实报探针:954 age3 vy=0.69）；出生覆写 0,原版重力档
+    //  在 subStepAI 火花族支内 1:1 重建
+    if (projId === 504 || projId === 954 || projId === 979) {
+      this.grav = 0;
+      this.gravDelay = -1;
+    }
     // 寿命表（修复2）：opts 显式优先 → SetDefaults timeLeft（vanilla-projectiles.json
     // 提取自 Projectile.cs SetDefaults）→ 缺省 3600（P.cs:789 复位;★R5 锚纠 1456→1457:
     // 5=120(:851)/478=300(:1779)/94=600(:5531)/639=90(:6884)）。逐型覆写：小丑箭
@@ -2676,6 +2698,11 @@ export class Arrow extends Entity {
       //   红队 R28 §1/§2）/ 535 美杜莎之首（挂首模型由 MedusaHeadProj 承载,
       //   转换前的通用 Arrow 帧不显示）
       case 294: case 295: case 296: case 535: return 0;
+      // ★BJ431 火花族 504/954/979（SetDefaults alpha=255 :5764/:9011/:9234 + AI
+      //  :23766 每子步钉 255 → GetAlpha 缺省路径 (255−α)/255=0 恒隐;可视本体=AI
+      //  火尘 6 / 霜尘 135 尾迹,同 294-296/376 dust-visual 族式——本仓曾 40×40
+      //  魔杖占位贴图满显飞行=实报病灶）
+      case 504: case 954: case 979: return 0;
       // ★2026-08-26（用户实报蓝晶/宝石法珠弹观感批）：宝石法珠 121-126/597 与 1120
       // SetDefaults alpha=255（Projectile.cs:2107-2160/:6466-6471/:10485-10491,
       // 1458），AI 不衰减——GetAlpha 缺省路径（:81503-81519）num14=(255−255)/255=0、
@@ -4956,6 +4983,14 @@ export class Arrow extends Entity {
           this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
         },
       });
+  }
+
+  /** ★BJ431 火花 954 命中快进（Damage_PVE_Inner :13051-13055 type 504||954||979 共支,
+   *  本类承载域只 954）：`ai[0] += (60f − ai[0]) / 2f` float 直加——计寿钟向 60 折半
+   *  逼近（首中 ≈30）,尾迹衰减段提前+约 0.5s 内自灭。主环调用位=免疫门后/Strike 前
+   *  （vanilla :12636→:13051→:13702 位序同相）。 */
+  private sparkHitFastForward(): void {
+    this.sparkAi0 += (60 - this.sparkAi0) / 2;
   }
 
   /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
@@ -7333,6 +7368,55 @@ export class Arrow extends Entity {
       if (this.age >= 5) this.alpha = 0;
       if (this.age >= 20) this.vy += 0.5;
       game.addLightAt?.(this.cx, this.cy, 0.6, 0.4, 0.3);
+    } else if (this.projId === 504 || this.projId === 954 || this.projId === 979) {
+      // ---- ★BJ431 火花族（aiStyle 2 type==504||954||979 共支,Projectile.cs:23764-23803;
+      //      1458 对该支零变更）——954 火花魔棒 3069 / 979 结霜魔棒 5147（3069+99 冰火把
+      //      合成,Recipe.cs:6765-6770）/ 504 Spark（屠夫链锯 509 命中喷溅 :13219-13231,
+      //      本仓发射面未接线=随支 dormant）。三型 SetDefaults 同构（10×10 aiStyle2
+      //      α255 penetrate2 noEnchantmentVisuals;979 +coldDamage;504 melee+IDStatic
+      //      免疫 10t）→ 弹体恒隐（AI :23766 每子步钉 255,GA case 共组=0）→ 可视本体
+      //      =尘尾迹：
+      //  ① alpha 每子步钉 255（:23766 原版 AI 直写）；
+      //  ② sparkAi0++（vanilla ai[0]）>3 起掷尘（α150,NewDust 内建掷速）——504/954
+      //    尘 6 火、979 尘 135 霜（:23787 三元式）。掷率梯（:23768-23785）：ai0≤10 →
+      //    ai0×10% 线性爬升;11..20 → 100% 平台;>20 → trunc(100×(1−(ai0−20)/40)) 衰减,
+      //    ai0−20≥40（=ai0≥60）Kill。
+      //    尘后处理（:23788-23795）：position=(尘位+弹心)/2 向心聚拢 + noGravity +
+      //    velocity×2 + scale×1.6 + velocity+=弹速（尘随弹前飞成尾迹）；
+      //  ③ ai0≥20：vx×0.99 + vy+0.1 拖坠（:23798-23802）+ aiStyle2 尾 vy 钳 32
+      //    （:23929-23932）。重力在本类 ctor 出生覆写 0（projGravSpec aiStyle2
+      //    0.3 兜底=投掷族语义,见 ctor 注）。
+      //  命中面：debuff 走 projStatus 表（954→OnFire24/979→Frostburn44/504→OnFire3(323)
+      //  各 50% 双档 mut 因式分解）;ai[0] 快进在主环 504||954||979 支。
+      //  未移植：windPhysics 风档（:23420-23423,本仓弹幕域全族未建模=登记债）与
+      //  rotation 翻滚（:23470 ±(|vx|+|vy|)×0.03×dir——本体恒隐零消费面,不移植）。
+      this.alpha = 255;
+      this.sparkAi0++;
+      if (this.sparkAi0 > 3) {
+        let dustP = 100;                                        // num19（:23770）
+        if (this.sparkAi0 > 20) {
+          dustP = Math.trunc(100 * (1 - (this.sparkAi0 - 20) / 40));
+          if (this.sparkAi0 - 20 >= 40) { this.killNow(game); return; }   //（:23776-23779）
+        }
+        if (this.sparkAi0 <= 10) dustP = Math.trunc(this.sparkAi0) * 10;  //（:23781-23784）
+        if (Math.floor(Math.random() * 100) < dustP) {          //（:23785 Next(100)<num19）
+          const dustT = this.projId === 979 ? 135 : 6;          //（:23787 三元式）
+          const d954 = game.spawnDust?.(this.x, this.y, this.w, this.h, dustT, 0, 0, 150);
+          if (d954) {
+            d954.x = (d954.x + this.cx) / 2;                    //（:23788）
+            d954.y = (d954.y + this.cy) / 2;
+            d954.noGravity = true;                              //（:23789）
+            d954.vx *= 2; d954.vy *= 2;                         //（:23790-91）
+            d954.scale *= 1.6;                                  //（:23793）
+            d954.vx += this.vx; d954.vy += this.vy;             //（:23795）
+          }
+        }
+      }
+      if (this.sparkAi0 >= 20) {                                //（:23798-23802）
+        this.vx *= 0.99;
+        this.vy += 0.1;
+      }
+      if (this.vy > 32) this.vy = 32;                           //（:23929-23932）
     }
     // ---- alpha 通道 AI 侧（修复4：Projectile.alpha 逐型衰减）----
     if (this.projId === 521) {
@@ -9370,6 +9454,13 @@ export class Arrow extends Entity {
         // ★审计原文"蚀地怪 Eater of Segments"系误记：1456 反编译 NPCID.cs:11273
         //   `public const short Werewolf = 104`，银弹克狼人是 1.4.5 主题机制）
         if (this.projId === 981 && (e as { vanillaId?: number | null }).vanillaId === 104) dmg *= 3;
+        // ★BJ431 火花族 504/954/979 命中快进（Damage_PVE_Inner :13051-13055 三型共支）：
+        //  每次受理命中 `ai[0] += (60f − ai[0]) / 2f`（float 直加）——计寿钟向 60 折半
+        //  逼近（首中 ≈30）,尾迹衰减段提前+约 0.5s 内自灭;penetrate=2 仍可再跳（窗口
+        //  ~30t）。原版位序=免疫门 :12636 之后/StrikeNPC :13702 之前=本仓主环受理段同相
+        if (this.projId === 504 || this.projId === 954 || this.projId === 979) {
+          this.sparkHitFastForward();
+        }
         let crit: boolean;
         if (this.whipTagShot) {
           const en2 = e as unknown as import('./WhipTag').WhipTagged;

@@ -43,6 +43,17 @@ export function projOverlap(ax: number, ay: number, aw: number, ah: number, e: {
   return ax < e.x + e.w && ax + aw > e.x && ay < e.y + e.h && ay + ah > e.y;
 }
 
+/** ★清偿刀 Y2（2026-10-02）城镇命中逐靶结算面（hitTownNpcs settle 参载荷）——
+ *  全字段可选;未提供的字段保持通道缺省（dmg=入参/penPercent=0/flatPen=0/crit=false/
+ *  kb=自动方位 ×2）。 */
+export interface TownHitSettle {
+  dmg?: number;
+  penPercent?: number;
+  flatPen?: number;
+  crit?: boolean;
+  kb?: number;
+}
+
 /** 命中小动物:一击致死。返回是否命中(调用方按各自语义消耗穿透/销毁弹体) */
 /** 城镇 NPC 受击判定(玩家弹幕/敌怪弹幕共用)。门禁照原版两分支:
  *  - 'playerProj'(friendly 弹):Projectile.Damage_PVE_Inner :11970-11976 巫毒窄门——
@@ -73,8 +84,19 @@ export function hitTownNpcs(
    *    免疫窗写/局部表占位/tag/minionTarget/衰减/numHits 全在门后;调用方
    *    （WhipProj W1）在此做写梯对齐,TownNPC.hurt 通用档 iframes=10 不动
    *    （= 原版弹幕通用尾档 :14197-14199,非鞭弹照写）。 */
-  skip?: (n: { id: number }) => boolean,
+  skip?: (n: { id: number; vanillaId?: number }) => boolean,
   onAccept?: (n: { id: number; iframes?: number; vanillaId?: number }) => void,
+  /** ★清偿刀 Y2（2026-10-02）逐靶结算扩展（X1 登记债「城镇命中 flat 穿甲/banner
+   *  乘区未透传」清偿）——Damage_PVE_Inner 对城镇靶【同链同面】:banner :13387-13391
+   *  （ownedBySomeone→GetBannerBuffEffect 乘区）/穿甲 :13686-87（ownedBySomeone &&
+   *  !hostile → dmg += checkArmorPenetration(num6, pct)）均不因 friendly/townNPC
+   *  短路。返回 {dmg?, penPercent?, flatPen?, crit?, kb?} 覆盖对应入参（逐靶依赖
+   *  tag 态/靶位的随从环用;dmg 提供时覆盖 dmg 入参——banner 在通道内统一施加,
+   *  调用方勿预套。crit 语义 = TownNPC.hurt 防后双精度 ×2（NPC.cs:82067 原序）,
+   *  与 Enemy.hurt「调用侧预倍+参仅染色」约定不同——传 crit=true 时 dmg 勿预倍）。
+   *  调用位 = 巫毒窄门后/hurt 前（vanilla flag(:12631)→…→:12947 ModifyHit→StrikeNPC
+   *  同位;settle 内的 tag 结算含 OnHit 消费副作用=敌怪环既有同形,见 resolveWhipTagHit）。 */
+  settle?: (n: { id: number; vanillaId?: number }) => TownHitSettle,
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -105,6 +127,13 @@ export function hitTownNpcs(
       if (!doll && projId !== 318) continue;
     }
     const kb = kbx !== 0 ? kbx : Math.sign(n.x + n.w / 2 - (self.x + self.w / 2)) * 2 || 1;
+    // ★清偿刀 Y2：逐靶结算（巫毒窄门后/hurt 前=vanilla :12947 ModifyHit 位）——
+    //   banner 攻端乘区 :13387-13391 于通道内统一施加（playerProj 面=ownedBySomeone 档;
+    //   hostile 弹 owner=255 无此面）。城镇 NPC 无 banner 档（BannerSystem 无城镇族键）
+    //   → applyBannerDamageDealt 结构恒等值,面位照原版占位（判据经 bannerOfNpc 空档早退）。
+    const st = settle?.(n);
+    const rawDmg = st?.dmg ?? dmg;
+    const outDmg = source === 'playerProj' ? applyBannerDamageDealt(game, n, rawDmg) : rawDmg;
     // ★BJ395（2026-09-28,BJ393 同族债五处清偿⑤）锚备案【原版同相,不落刀】：本站
     //   消费对象=TownNPC.hurt（非 Enemy.hurt）——其返值契约=受理（TownNPC.ts:1535
     //   单一受理返真点,普通命中与击杀同点;返假仅门拒两族 dead :1404/帧窗∧微光上升
@@ -117,8 +146,11 @@ export function hitTownNpcs(
     //   Damage_PVE_Inner :13640 ownedBySomeone 臂——hostile 弹 owner=255 走不到
     //   TryDoingOnHitEffects）+ srcProjId（TryDoingOnHitEffects :15210-15220 来源
     //   排除表 {221,227,614,729,908,977}）透传 TownNPC.hurt 第 9/10 参。
-    //   penPercent/flatPen/crit/force 恒缺省（本通道无穿甲/暴击入参面,既有形态）。
-    if (n.hurt(dmg, kb, 0, game, 0, 0, false, false, source === 'playerProj', projId)) {
+    //   ★Y2：penPercent/flatPen/crit/kb 经 settle 逐靶透传（:13686-87 穿甲/crit
+    //   :82067 对城镇靶同面）;缺省 0/0/false = X1 旧形态（W1 鞭面零回退,仅 banner
+    //   新增=:13387-91 面位）。
+    if (n.hurt(outDmg, st?.kb ?? kb, 0, game, st?.penPercent ?? 0, st?.flatPen ?? 0,
+      st?.crit ?? false, false, source === 'playerProj', projId)) {
       if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
       // ★W1：受理拍回调 = 写梯位（:14031-14179 immune[owner]=0+局部表/:14263
       //   numHits/:14321-14327 minionTarget——原文序在 OnKillNPC 之后,同拍序保持）
@@ -127,6 +159,24 @@ export function hitTownNpcs(
     }
   }
   return any;
+}
+
+/** ★清偿刀 Y2（2026-10-02）巫毒窄门谓词（hitTownNpcs 内部门的调用方可读形）——
+ *  Damage_PVE_Inner :12618-12625 flag 臂 1:1：`type==22 && owner<255 && killGuide`
+ *  （向导）/ `type==54 && … && killClothier`（裁缝师）/ 318 臭鸡蛋无条件例外（:12619）。
+ *  MinionProj 城镇环 skip 门先置位用：vanilla 门序 = flag(:12620-12631) 先于
+ *  immune[owner](:12636)——窄门先闭可防「无 doll 探针」污染随从接触冷却私表
+ *  （读源 = projScanEq 桶窗快照 ?? equipStats 活读,与 hitTownNpcs 内部门同源）。 */
+export function townVoodooGateOpen(
+  game: GameHooks,
+  vanillaId: number | null | undefined,
+  projId: number,
+): boolean {
+  if (projId === 318) return true;
+  const vid = vanillaId ?? -1;
+  const eq = projScanEq(game);
+  return vid === 22 ? eq?.killGuide === true
+    : vid === 54 ? eq?.killClothier === true : false;
 }
 
 // ================= ★α-H1/H3 projClass 类别通道（终局扫尾·战斗缝合批） =================

@@ -36322,13 +36322,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'mechanic':
         return !!this.world.flags['savedMech'];
       case 'stylist':
-        // ★IIIII224（Main.cs:66840-66843 townNPCCanSpawn[178]）：门 = (tenth && !getGood)
-        //  || downedMechBossAny——十周年世界无需机械 Boss 理发师即可入驻；
-        //  savedStylist（蜘蛛洞 354 解救链）为永久重生臂
-        return (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld)
-          || !!(this.world.flags['downed_125'] || this.world.flags['downed_126']
-            || this.world.flags['downed_127'] || this.world.flags['downed_134'])
-          || !!this.world.flags['savedStylist'];
+        // ★BJ432（2026-10-02 用户实报「还没救发型师就自动入住」）：唯一到达门 =
+        //  savedStylist（Main.cs:66804-66806 `if (NPC.savedStylist && num22 < 1)
+        //  townNPCCanSpawn[353]`；优先链同门 Main.cs:67005）。savedStylist 置位面
+        //  仅两处：解救 Transform 链 AI_007_TownEntities_UpdateSavedStates case 353
+        //  （NPC.cs:53503-53505）+ noSpiderCaves 变体（WorldGen.cs:688-691，本仓
+        //  SecretSeedDoEndsPass 同键已接）——除此之外【无任何】无解救到达路。
+        //  ★旧门误并 178 蒸汽朋克人到达门 ((tenth&&!getGood)||downedMechBossAny,
+        //  Main.cs:66837-66840 `townNPCCanSpawn[178]`——178=Steampunker
+        //  NPCID.cs:11427；注释自引 [178] 却接给理发师，IIIII224 章号亦系误标：
+        //  该批实为 ddual 座2 世界生成定谳）→ 杀任一机械 Boss 未救即自动入住。
+        //  蒸汽朋克人的同款门在本文件 'steampunker' case 原位保留，勿回移。
+        return !!this.world.flags['savedStylist'];
       case 'tax_collector':
         return !!this.world.flags['savedTaxCollector'];
       case 'golfer':

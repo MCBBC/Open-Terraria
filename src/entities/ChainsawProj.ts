@@ -18,6 +18,12 @@
 // :42891-42899 照常结算）并行完成，弹体只承载接触伤害。本仓同构承接：Game
 // 工具分支 tryMine 并行挖掘（1262 tool.useTime=7 节奏 / 3098 axe30 经
 // itemFuncTool 桥接），弹体侧无 CutTiles/KillTile 逻辑（原版同构，非债）。
+// ★BJ431 登记债（2026-10-01）：509 屠夫链锯命中喷溅弹未接线——Damage_PVE_Inner
+// type==509 支（Projectile.cs:13219-13231）每次命中敌怪掷 2..5 枚 504 Spark
+// （伤=damage×0.5 (int)、kb×0.2、方向=随机圆盘 ±100 + 弹速×3 归一 ×rand(35,81)×0.1）。
+// 本仓命中管线未挂该喷溅 → 504 在本仓暂无出生面（dormant）。504 弹体行为侧
+// （AI 共支尘尾/恒隐/60t 计寿/命中快进）已随 BJ431 火花族支在 Arrow.ts 落位,
+// 接线发射面时无需再动弹体侧。
 // ★通用湿段接入（2026-09-06 溅花缺口杂项批）：509 屠夫链锯（SetDefaults :5790-5797）
 // 与 252 叶绿插孔锤（:3354-3359）走 DefaultToDrillOrChainsaw()（:10734-10744：
 // aiStyle20/friendly/penetrate −1/tileCollide=false/ownerHitCheck…）【无 ignoreWater
