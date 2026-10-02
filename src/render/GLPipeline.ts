@@ -308,19 +308,37 @@ export class GLPipeline {
   present(src: PipelineFbo, over = false): void {
     const gl = this.gll();
     if (!gl || !src.tex || !this.presentProg?.prog) return;
-    this.bindTarget(null);
-    if (over && this.screenStackMode) {
-      this.setBlend('premul');
-      this.screenStack.push(src);
-    } else {
-      this.setBlend('off');
-    }
+    // 语义逐位保持原实现:premul+入栈【仅】over∧screenStackMode;over 真而栈机制
+    // 关（revive 窗/旗关）=blend off 直写（原 if/else 档,字节路径零变化）
+    const stackOver = over && this.screenStackMode;
+    if (stackOver) this.screenStack.push(src);
+    this.presentTexTo(null, src.tex, stackOver, 1);
+  }
+
+  /** ★K1-2（2026-10-02）present 同款语义落指定目标（屏栈 FBO 直入滤镜链的组装
+   *  口——屏栈重放/基底直写,【不入屏栈】不改「glCanvas=屏栈折叠」不变式）。
+   *  target=null=默认帧缓冲（≙present 本体）;over=true=premul source-over 叠合
+   *  （同 present over 档）;flipY 透传 drawQuad（1=texel 恒等映射——屏栈 FBO 全为
+   *  GLSpriteLayer VERT 产物 G 朝向「图像顶=v1」,present flipY=1 恒等重放逐位同
+   *  restackScreen 语义;0=行反转映射）。uniform-in-useProgram 纪律同 present
+   *  （2026-09-23 全黑案判例）。 */
+  presentTexTo(target: PipelineFbo | null, tex: WebGLTexture, over: boolean, flipY: number): void {
+    const gl = this.gll();
+    if (!gl || !this.presentProg?.prog) return;
+    this.bindTarget(target);
+    this.setBlend(over ? 'premul' : 'off');
     gl.useProgram(this.presentProg.prog);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(this.uni(this.presentProg, 'uTex'), 0);
-    this.drawQuad(this.presentProg, [0, 0, this.frameW, this.frameH], 1);
+    this.drawQuad(this.presentProg, [0, 0, this.frameW, this.frameH], flipY);
     registerFence(this.statName, gl);
+  }
+
+  /** ★K1-2：屏栈只读暴露（drawChainPipeStack 逐层 premul-over 重放用——消费方
+   *  禁改栈;入栈唯一写点=present over 档,清栈唯一写点=clearScreenForStack） */
+  get screenStackView(): readonly PipelineFbo[] {
+    return this.screenStack;
   }
 
   /** ★C10e 帧首屏面清透明+屏栈清零（本帧首个会话 begin 经此闯入——pipe 帧头可能

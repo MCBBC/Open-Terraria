@@ -812,6 +812,26 @@ export const KITE_ITEM_PROJ: Readonly<Record<number, number>> = {
   4683: 852, 4684: 853, // :38540-38543
 };
 
+/**
+ * TELeashedEntityAnchorWithItem.FitsItem（TELeashedEntityAnchorWithItem.cs:47 抽象 +
+ * 两子类实现）——★Z4/BJ426 载入侧判据（respawnAll OnWorldLoaded 门消费）：
+ *  · TEKiteAnchor.FitsItem（TEKiteAnchor.cs:46-49）= ItemID.Sets.IsAKite[itemType]
+ *    （ItemID.cs:157 布尔集 24 件——与 KITE_ITEM_PROJ 键域逐值全等,q4-kite-critter-domain
+ *    钉面）；
+ *  · TECritterAnchor.FitsItem（TECritterAnchor.cs:48-51）= ContentSamples.ItemsByType
+ *    [itemType].makeNPC > 0（= ITEM_MAKE_NPC 键域,DefaultToCapturedCritter 全表）。
+ * 消费位：OnWorldLoaded（TELeashedEntityAnchorWithItem.cs:38-45）`!FitsItem → itemType=0`
+ * ——损坏/外源档非风筝/非捕获件在重生前清型（不掉物不警告）；kind 非锚桩 = true
+ * （门不辖）。
+ */
+export function leashedAnchorFitsItem(
+  kind: 'critter_anchor' | 'kite_anchor', vid: number,
+): boolean {
+  return kind === 'critter_anchor'
+    ? ITEM_MAKE_NPC[vid] !== undefined
+    : KITE_ITEM_PROJ[vid] !== undefined;
+}
+
 // ============================================================================
 // 运行时环境（Game 每帧注入；netMode!=2 的视觉分支全部走这里）
 // ============================================================================
@@ -2693,9 +2713,16 @@ export class LeashedEntityManager {
     return removed;
   }
 
-  /** OnWorldLoaded → RespawnLeashedEntity（TELeashedEntityAnchor.cs:35-40）：全量重生 */
+  /** OnWorldLoaded → RespawnLeashedEntity（TELeashedEntityAnchor.cs:35-40）：全量重生。
+   *  ★Z4/BJ426（2026-10-02 审计 D3 漏修#1）：OnWorldLoaded 前半 = FitsItem 校验
+   *  （TELeashedEntityAnchorWithItem.OnWorldLoaded :38-45 `!FitsItem(itemType) →
+   *  itemType=0`——原版对损坏/外源档在重生【前】清型,不弹警告不掉物）。
+   *  本仓此前只防实体错生（kite 走 KITE_ITEM_PROJ 门/critter 走 makeNPC 门）但
+   *  记录槽不清 → 走私件滞留记录,取回/破坏可捞出（D3 定谳）。此处补 1:1 清除：
+   *  判据不及格 → 槽位清 null（=原版 itemType=0 的记录形态;桩仍存=空桩,取回
+   *  零产出/破坏零掉物）,实体不生。 */
   respawnAll(
-    records: ReadonlyArray<{ x: number; y: number; kind: string; slots: ReadonlyArray<{ id: number } | null | undefined> }>,
+    records: ReadonlyArray<{ x: number; y: number; kind: string; slots: Array<{ id: number } | null | undefined> }>,
     resolveVid: (internalItemId: number) => number,
     env: LeashedEnv,
   ): void {
@@ -2704,7 +2731,16 @@ export class LeashedEntityManager {
       const slot = rec.slots[0];
       if (!slot) continue;
       const vid = resolveVid(slot.id);
-      if (vid <= 0) continue;
+      // ★Z4/BJ426：FitsItem 门只辖两类锚桩（其余 kind 不入原版 OnWorldLoaded 面,
+      //  槽位语义各异——物品框可挂任意件,清槽=走私件误伤面）
+      if (rec.kind === 'critter_anchor' || rec.kind === 'kite_anchor') {
+        if (vid <= 0 || !leashedAnchorFitsItem(rec.kind, vid)) {
+          rec.slots[0] = null;                               // OnWorldLoaded :40-43 itemType=0
+          continue;
+        }
+      } else if (vid <= 0) {
+        continue;
+      }
       if (rec.kind === 'critter_anchor') this.spawnCritter(rec.x, rec.y, vid);
       else if (rec.kind === 'kite_anchor') {
         const proj = KITE_ITEM_PROJ[vid];

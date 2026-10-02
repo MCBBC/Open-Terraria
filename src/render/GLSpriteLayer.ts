@@ -146,7 +146,9 @@ void main() {
 //  aTile = 像素的世界 tile 连续坐标（world px/16,VS 线性插值逐像素精确——world→device
 //  仿射(b=c=0 门)复合线性插值仍精确=场世界锚定）;aNoise = CPU 逐节点 noise-sin
 //  （§2.2 定谳:uint hash→float 高位损失 256 ⇒ sin 相位差 25.6rad 位等不可达 ⇒ hash+sin
-//  留 CPU 经属性上传;FS 侧 glitter(§2.5)消费位=三期 sparkle 段,本刀基体主式(§2.4)不读）。 */
+//  留 CPU 经属性上传;FS 侧 glitter(§2.5)消费位=三期 sparkle 段——★三期（2026-10-02）
+//  已接通:uSpark=1 段（liqspark: 键族）main 内 glitter(vTile,vNoise) 逐像素调制;
+//  基体主式(§2.4)不读）。 */
 const LIQSHIM_VS = `#version 300 es
 uniform vec2 uCanvas;
 layout(location=0) in vec2 aPos;   // 设备 px（顶点已含世界变换,VanillaLiquidRenderer 构建）
@@ -164,19 +166,25 @@ void main() {
   vUv = aUv; vCol = aCol; vTile = aTile; vNoise = aNoise;
 }`;
 
-// 【FS】逐像素场合成（设计案 §2.1/§2.3/§2.4 逐条翻译;§2.5 glitter 纯函数随附——
-//  三期 sparkle 段消费位,本刀基体主式不调用=编译器消除无害）:
+// 【FS】逐像素场合成（设计案 §2.1/§2.3/§2.4 逐条翻译;§2.5 glitter 三期消费位）:
 //   shimmerWave = GetShimmerWave(LiquidRenderer.cs:761-763) 1:1
 //   field       = GetShimmerBaseColor(:803-807) 端点常量预析（SHIM_A/SHIM_DV 与 JS 侧
 //                 SHIM_A_*/SHIM_D_* 同源 f32 编译期常量）
 //   glitter     = GetShimmerGlitterOpacity 体部式(:773-790) remap×remap
-//  out = (tex_p.rgb × field × vCol.a, tex_p.a × vCol.a)——顶点 rgb 不再进乘链（§2.4
-//  "乘 vCol.rgb 退役"）,环数据仍写 rgb===a 保持预乘恒等式（§3.3 测试锁域）。
+//  双模式（段级 uniform 分派——基体段/亮纹段纹理互异=永不分批同段,uniform 每发射
+//  单点写入=逐 draw 生效）:
+//   uSpark=0（liqshim: 基体段）out = (tex_p.rgb × field × vCol.a, tex_p.a × vCol.a)
+//     ——顶点 rgb 不进乘链（§2.4"乘 vCol.rgb 退役"）,环数据 rgb===a 预乘恒等（§3.3）。
+//   uSpark=1（liqspark: 三期亮纹段,2026-10-02）out = (tex_p.rgb × vCol.rgb × g,
+//     tex_p.a × vCol.a × g),g=glitter(vTile,vNoise)——亮纹透明度逐像素化（替换 CPU
+//     sparkGa 四角均值近似;顶点 rgb=hue×α 预乘族,a 只载 opacity;保留域=flag 表层
+//     照旧 CPU ADD 段）。
 //  ★precision highp float 强制（§5 风险2:mediump 漏入=离线场值 readback 闸抓）。 */
 const LIQSHIM_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
 uniform float uTVis;   // visEffectFrames()（渲染段内不变;批发射点单点写入）
+uniform float uSpark;  // ★三期段模式:0=基体场段(liqshim:) 1=sparkle 亮纹段(liqspark:)
 in vec2 vUv;
 in vec4 vCol;
 in vec2 vTile;
@@ -196,9 +204,17 @@ float glitter(vec2 tile, float noiseSinV) {
 }
 void main() {
   vec4 c = texture(uTex, vUv);
-  float w = shimmerWave(vTile);
-  vec3 field = SHIM_A + SHIM_DV * (0.1 + w * 0.4);
-  outColor = vec4(c.rgb * field * vCol.a, c.a * vCol.a);
+  if (uSpark > 0.5) {
+    // ★三期 sparkle 亮纹透明度逐像素化（§2.5 逐式）:g 消费 vTile（波场逐像素）
+    //  ×vNoise（CPU 逐节点 aNoise 顶点插值,方案 H §3.2——两三角逐线性=GPU varying
+    //  语义≙原版 SpriteBatch 顶点插值域）
+    float g = glitter(vTile, vNoise);
+    outColor = vec4(c.rgb * vCol.rgb * g, c.a * vCol.a * g);
+  } else {
+    float w = shimmerWave(vTile);
+    vec3 field = SHIM_A + SHIM_DV * (0.1 + w * 0.4);
+    outColor = vec4(c.rgb * field * vCol.a, c.a * vCol.a);
+  }
 }`;
 
 /** ★C13c 着色器源导出（离线场值 readback 闸 §4.1 直采同源——探针编译本常量,
@@ -1561,7 +1577,7 @@ export class GLSpriteLayer {
       if (!p.prog) { this.shimFail = true; return false; }
       this.shimProgHandle = p;
       this.shimProg = p.prog;
-      for (const n of ['uCanvas', 'uTex', 'uTVis']) this.shimUni[n] = this.pipe.uni(p, n);
+      for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = this.pipe.uni(p, n);
     } else {
       const mk = (type: number, src: string): WebGLShader | null => {
         const sh = gl.createShader(type)!;
@@ -1586,7 +1602,7 @@ export class GLSpriteLayer {
         return false;
       }
       this.shimProg = prog;
-      for (const n of ['uCanvas', 'uTex', 'uTVis']) this.shimUni[n] = gl.getUniformLocation(prog, n);
+      for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = gl.getUniformLocation(prog, n);
     }
     this.shimVao = gl.createVertexArray()!;
     gl.bindVertexArray(this.shimVao);
@@ -1688,7 +1704,10 @@ export class GLSpriteLayer {
 
   /** ★C13c 微光波场批发射口（quadBatchRgba 同族;stride 11=x,y,u,v,r,g,b,a,tileX,tileY,
    *  noise——方案 H:波场 FS 逐像素解析,aNoise=CPU 逐节点 noise-sin 顶点属性）。
-   *  NEAREST 采样;blend/纹理参数不在本方法设（SO 基态由 begin 约定）;uTVis 读模块态
+   *  ★三期（2026-10-02）双模式:uSpark 按段键族分派——liqspark: 前缀=亮纹段（FS
+   *  glitter(vTile,vNoise) 逐像素调制;ADD blend 由 pushLiquidAddBatch tier-1 rec
+   *  驱动 flushAcc 换档链,本方法不设 blend）,其余=基体场段（rgb===a 预乘恒等域）。
+   *  NEAREST 采样;纹理参数不在本方法设（SO 基态由 begin 约定）;uTVis 读模块态
    *  （setLiqShimmerTVis——批发射点单点写入,帧界错拍风险 §5-6 处置）;离场还原程序态/
    *  VAO（quadBatch 判例同款）。 */
   quadBatchLiqShimmer(e: TexEntry, data: Float32Array, quads: number): boolean {
@@ -1698,6 +1717,7 @@ export class GLSpriteLayer {
     gl.useProgram(this.shimProg);
     gl.uniform2f(this.shimUni.uCanvas, this.canvas.width, this.canvas.height);
     gl.uniform1f(this.shimUni.uTVis, _liqShimTVis);
+    if (this.shimUni.uSpark) gl.uniform1f(this.shimUni.uSpark, (e.key ?? '').startsWith('liqspark:') ? 1 : 0);
     gl.uniform1i(this.shimUni.uTex, 0);
     gl.bindVertexArray(this.shimVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.shimVbo);

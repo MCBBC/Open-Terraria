@@ -34,19 +34,32 @@ function makeStore(): TileStore {
   for (let x = 0; x < W; x++) for (let y = 110; y < H; y++) store.setTile(x, y, 1);
   return store;
 }
-/** α1 agent Enemy 用例：hurt 模拟 Enemy.hurt pierce=0 的玩家窗语义（命中置 iframes=10） */
+/** α1 agent Enemy 用例：hurt 模拟 Enemy.hurt 写梯语义（★Z1 2026-10-02 oracle 重产——
+ *  旧 mock 恒写 iframes=10 系 pierce=0 世界模型,BJ436 落刀后 local/idStatic 族走
+ *  pierce=-3【清窗档】（:14175-14179 immune[owner]=0）,-2 缺省族/无局部旗才开 10t 窗
+ *  （:14182）;flag3 单发弹（pierce=1）无写面）。若再退回恒写 10,本批③三发的
+ *  「跨实例一致拒/≥cd 解封」判别位会被 :12636 共门整段拦截=私表永不解封（金标陈旧
+ *  须 oracle 重产判例,禁在途金标强冻） */
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number; dead: boolean;
   cx: number; cy: number; hp: number; vx?: number; vy?: number;
   iframes?: number;
   hits: number[];
-  hurt: (d: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: unknown, pen: number, crit: boolean,
+    pierce: number, fromPlayer: boolean) => boolean;
 }
 function mkEnemy(id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy {
   const e: MockEnemy = {
     id, x: cx - w / 2, y: cy - h / 2, w, h, dead: false, cx, cy, hp: 100000,
     hits: [],
-    hurt: (d: number) => { e.hp -= d; e.hits.push(d); e.iframes = 10; return true; },
+    hurt: (d: number, _kx: number, _ky: number, _g: unknown, _pen: number, _crit: boolean,
+      pierce: number, _fromPlayer: boolean) => {
+      if ((e.iframes ?? 0) > 0) return false;               // Enemy.hurt 头门（:13972 同面）
+      e.hp -= d; e.hits.push(d);
+      if (pierce === -3) e.iframes = 0;                     // local/idStatic 清窗档（:14175-14179）
+      else if (pierce !== 1) e.iframes = 10;                // -2 缺省族开窗（:14182）;flag3 无写面
+      return true;
+    },
   };
   return e;
 }
@@ -93,8 +106,14 @@ function makeHooks(enemies: MockEnemy[] = []) {
 const mk = (projId: number, owner: Player, x?: number, y?: number, sentry = false): MinionProj =>
   new MinionProj(x ?? owner.cx, y ?? owner.cy - 40, projId, 10, 2, sentry, 0, false, () => owner);
 const priv = (m: MinionProj): Record<string, unknown> => m as unknown as Record<string, unknown>;
-const bite = (m: MinionProj, g: GameHooks, d = 10): boolean =>
-  (m as unknown as { contact(g: GameHooks, dmg: number): boolean }).contact(g, d);
+/** 一咬=一拍：敌怪免工件窗逐拍衰减（NPC.Update immune-- 等价,mock 无 Update 面——
+ *  ★Z1 oracle 重产:窗衰减与 :12636 共门前置/私表受理写共同构成 BJ436 后世界模型） */
+const bite = (m: MinionProj, g: GameHooks, d = 10): boolean => {
+  for (const en of g.enemies() as MockEnemy[]) {
+    if (typeof en.iframes === 'number' && en.iframes > 0) en.iframes--;
+  }
+  return (m as unknown as { contact(g: GameHooks, dmg: number): boolean }).contact(g, d);
+};
 
 describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () => {
   // ★终零波 M1 清偿注记：ai[0]=5 追离态触发源之「目标脚下 15 格虚空扫描」
@@ -243,7 +262,7 @@ describe('台账批② 海盗 393-395 步行链正轨（AI_067 flag 支）', () 
   });
 });
 
-describe('台账批③ 接触冷却三态（P.cs:466/-2 全局窗;local;idStatic）', () => {
+describe('台账批③ 接触冷却三态（P.cs:466/-2 全局窗;local;idStatic）★Z1 oracle 重产（mock 按 BJ436 写梯语义建模:pierce=-3 清窗/私表受理写/窗逐拍衰减）', () => {
   it('191 俾格米=-2 全局窗：窗清即透（私表族此刻仍受 cd 封）;窗置 10t 即拒', () => {
     const e = mkEnemy(10, 60 * 16, 96 * 16);
     const { hooks } = makeHooks([e]);

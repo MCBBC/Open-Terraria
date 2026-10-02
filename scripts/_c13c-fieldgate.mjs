@@ -1,12 +1,17 @@
-// ★C13c 离线场值 readback 闸（2026-10-01;设计案 §4.1 第 1 步——纯 GL 侧,不动游戏管线）。
-// 小 FBO(256×256) 渲染 sprite:liqshimmer 真源（LIQSHIM_FS_SRC 导出直采,禁转录漂移）
-// 的逐像素基色场 field×255,readPixels 对照 JS 参照（GetShimmerBaseColor :803-807 逐式）。
-// 网格:x∈[0,256) × tVis∈{0..3570,步 30} × tile.y∈[0,8)（行混编覆盖 y 域）。
-// 验收线（设计案 §4.1）:maxd ≤ 2/255（highp sin vs f64 sin 域;超域=mediump 漏入或常量错）。
-// 运行:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs scripts/_c13c-fieldgate.mjs
+// ★C13c 离线场值 readback 闸（2026-10-01 二期;2026-10-02 三期扩 glitter 亮纹场。
+//  设计案 §4.1 第 1 步——纯 GL 侧,不动游戏管线）。
+//  小 FBO(256×256) 渲染 sprite:liqshimmer 真源（LIQSHIM_FS_SRC 导出直采,禁转录漂移）
+//  的逐像素场 readPixels 对照 JS 参照（LiquidRenderer.cs 逐式）。两模式:
+//   ①uSpark=0 基体场 field×255 ↔ GetShimmerBaseColor :803-807（验收 maxd ≤ 2/255）;
+//   ②uSpark=1 glitter 亮纹场 ↔ GetShimmerGlitterOpacity 体部式 :773-790（三期刀,
+//     验收 maxd ≤ 2/255;aNoise 四角独立——参照必须按【两三角逐线性】建模,GPU varying
+//     插值≙原版 SpriteBatch 顶点插值域;双线性≠两三角:cross 项 |Δ|≤0.5 噪声域,经
+//     remap 链最大 ~89/255,参照若用双线性必爆假红）。
+//  网格:x∈[0,256) × tVis∈{0..3570,步 30} × tile.y∈[0,8)（行混编覆盖 y 域）。
+//  运行:SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs scripts/_c13c-fieldgate.mjs
 import { launchBrowser, openPage, bootstrap } from '../tools/probe/lib/index.mjs';
 
-const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
+const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
 const results = [];
 const chk = (name, ok, detail = '') => {
   results.push({ name, ok, detail });
@@ -45,7 +50,9 @@ const out = await page.evaluate(async () => {
   gl.uniform2f(gl.getUniformLocation(prog, 'uCanvas'), W, H);
   gl.uniform1i(gl.getUniformLocation(prog, 'uTex'), 0);
   const uTVis = gl.getUniformLocation(prog, 'uTVis');
-  // 白 1×1 纹理（RGB=255,A=255=预乘恒等;tex_p.rgb=1 → out=field×vCol.a）
+  const uSpark = gl.getUniformLocation(prog, 'uSpark');
+  if (!uSpark) return { why: 'no uSpark uniform' };
+  // 白 1×1 纹理（RGB=255,A=255=预乘恒等;tex_p.rgb=1 → out=调制项×vCol）
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
@@ -64,61 +71,119 @@ const out = await page.evaluate(async () => {
   gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, 44, 40);
   gl.viewport(0, 0, W, H);
   const px = new Float32Array(6 * 11);
-  const rows = [];
+  const put = (i, x, y, u, v, tx, tyy, n) => {
+    const o = i * 11;
+    px[o] = x; px[o + 1] = y; px[o + 2] = u; px[o + 3] = v;
+    px[o + 4] = 1; px[o + 5] = 1; px[o + 6] = 1; px[o + 7] = 1;
+    px[o + 8] = tx; px[o + 9] = tyy; px[o + 10] = n;
+  };
+  const draw = () => {
+    gl.bufferData(gl.ARRAY_BUFFER, px, gl.STREAM_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  };
+  const read = () => {
+    const buf = new Uint8Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    return buf;
+  };
+  // JS 参照共用:uint 混淆白噪声（SimpleWhiteNoise :793-797 1:1）
+  const refNoise = (x, y) => {
+    let ux = Math.abs(Math.floor(x)) >>> 0, uy = Math.abs(Math.floor(y)) >>> 0;
+    ux = (36469 * (ux & 0xffff) + (ux >>> 16)) >>> 0;
+    uy = (18012 * (uy & 0xffff) + (uy >>> 16)) >>> 0;
+    return (((ux << 16) >>> 0) + uy) >>> 0;
+  };
+  // ---- 模式①:uSpark=0 基体场（§4.1 既有闸;tile.y 恒定行=场只随 x 变,参照同构）----
+  gl.uniform1f(uSpark, 0);
   for (let r = 0; r < ROWS; r++) {
     const ty = r % 8, tVis = r * 30;
     gl.uniform1f(uTVis, tVis);
-    // 设备行 r..r+1;两三角 (TL,TR,BR)+(TL,BR,BL)——与 shimQuad 顶点序同构
-    const put = (i, x, y, u, v, tx, tyy) => {
-      const o = i * 11;
-      px[o] = x; px[o + 1] = y; px[o + 2] = u; px[o + 3] = v;
-      px[o + 4] = 1; px[o + 5] = 1; px[o + 6] = 1; px[o + 7] = 1;
-      px[o + 8] = tx; px[o + 9] = tyy; px[o + 10] = 0;
-    };
-    put(0, 0, r, 0, 0, 0, ty);           // TL
-    put(1, W, r, 1, 0, W, ty);           // TR
-    put(2, W, r + 1, 1, 1, W, ty);       // BR
-    put(3, 0, r, 0, 0, 0, ty);           // TL'
-    put(4, W, r + 1, 1, 1, W, ty);       // BR'
-    put(5, 0, r + 1, 0, 1, 0, ty);       // BL
-    gl.bufferData(gl.ARRAY_BUFFER, px, gl.STREAM_DRAW);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    put(0, 0, r, 0, 0, 0, ty, 0);           // TL
+    put(1, W, r, 1, 0, W, ty, 0);           // TR
+    put(2, W, r + 1, 1, 1, W, ty, 0);       // BR
+    put(3, 0, r, 0, 0, 0, ty, 0);           // TL'
+    put(4, W, r + 1, 1, 1, W, ty, 0);       // BR'
+    put(5, 0, r + 1, 0, 1, 0, ty, 0);       // BL
+    draw();
   }
-  const buf = new Uint8Array(W * H * 4);
-  gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-  // JS 参照（GetShimmerBaseColor :803-807 f64;与 VanillaLiquidRenderer SHIM_* 常量同源）
+  const buf0 = read();
+  // JS 参照（GetShimmerBaseColor :803-807 f64;★参照=像素中心 c+0.5——曾用 c 差半像素
+  //  =相位差 0.314rad≈场差 9.3/255 伪影,判例注）
   const A = [0.64705884, 26 / 51, 14 / 15], D = [41 / 51, 41 / 51, 1];
-  let maxd = 0, worst = null;
+  let baseMaxd = 0, baseWorst = null;
   for (let r = 0; r < ROWS; r++) {
     const ty = r % 8, tVis = r * 30;
-    let rowMax = 0;
     for (let c = 0; c < W; c++) {
-      // ★参照=像素中心 c+0.5（FS 在像素中心求值;vTile.x=设备 c+0.5 线性映射——
-      //  曾用 c 差半像素=相位差 0.314rad≈场差 9.3/255,恰为 maxd 9.7 伪影源）
       const w = Math.sin(((c + 0.5 + ty / 6) / 10 - tVis / 360) * Math.PI * 2);
       const k = 0.1 + w * 0.4;
       const glRow = H - 1 - r;   // readPixels 底起
       const o = (glRow * W + c) * 4;
       for (let ch = 0; ch < 3; ch++) {
         const ref = 255 * (A[ch] + (D[ch] - A[ch]) * k);
-        const d = Math.abs(buf[o + ch] - ref);
-        if (d > rowMax) rowMax = d;
-        if (d > maxd) { maxd = d; worst = { c, r, ty, tVis, ch, got: buf[o + ch], ref }; }
+        const d = Math.abs(buf0[o + ch] - ref);
+        if (d > baseMaxd) { baseMaxd = d; baseWorst = { c, r, ty, tVis, ch, got: buf0[o + ch], ref }; }
       }
-      const da = Math.abs(buf[o + 3] - 255);
-      if (da > rowMax) rowMax = da;
     }
-    rows.push(rowMax);
   }
-  return { maxd, worst, rowMaxWorst: Math.max(...rows), rowsGT2: rows.filter((m) => m > 2).length };
+  // ---- 模式②:uSpark=1 glitter 亮纹场（三期刀）----
+  // ★探针教训（2026-10-02 readback 判谳）: glitter 场参照必须用【全幅 quad】+
+  //  逐 tVis readback——1px 高薄条 quad 的对角线与像素行近平行,本机 GPU 薄片
+  //  栅格化的 varying 插值偏离两三角模型（实测段内跳变 maxd 38,全幅 quad 同模型
+  //  maxd 0.004 噪声域——_c13c-noisediag.mjs 判谳）;基体场①不受此扰（aTile.y
+  //  行恒定=场对薄片内常数）。全幅 quad:aTile=(0,0)-(256,256) 平面精确,四角噪声
+  //  独立 → 参照=两三角逐线性（GPU varying 语义≙原版 SpriteBatch 顶点插值域;
+  //  双线性≠两三角:cross 项 |Δ|≤0.5 噪声域 → 经 remap 链最大 ~89/255,参照若用
+  //  双线性必爆假红）。
+  gl.uniform1f(uSpark, 1);
+  let gmaxd = 0, gworst = null, gTri1 = 0, gTri2 = 0;
+  const buf1 = new Uint8Array(W * H * 4);
+  for (let r = 0; r < ROWS; r++) {
+    const tVis = r * 30;
+    gl.uniform1f(uTVis, tVis);
+    const n00 = Math.sin(refNoise(0, 0) / 10 + tVis / 180);        // TL 节点 (0,0)
+    const n10 = Math.sin(refNoise(W, 0) / 10 + tVis / 180);        // TR 节点 (256,0)
+    const n11 = Math.sin(refNoise(W, H) / 10 + tVis / 180);        // BR 节点 (256,256)
+    const n01 = Math.sin(refNoise(0, H) / 10 + tVis / 180);        // BL 节点 (0,256)
+    put(0, 0, 0, 0, 0, 0, 0, n00);        // TL
+    put(1, W, 0, 1, 0, W, 0, n10);        // TR
+    put(2, W, H, 1, 1, W, H, n11);        // BR
+    put(3, 0, 0, 0, 0, 0, 0, n00);        // TL'
+    put(4, W, H, 1, 1, W, H, n11);        // BR'
+    put(5, 0, H, 0, 1, 0, H, n01);        // BL
+    draw();
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf1);
+    // JS 参照:两三角逐线性（对角线 TL-BR=v=u;三角1=(TL,TR,BR) 覆 v≤u,三角2=
+    //  (TL,BR,BL) 覆 v≥u）× GetShimmerGlitterOpacity 体部式 remap×remap。
+    for (let y = 0; y < H; y++) {
+      const glRow = H - 1 - y;   // readPixels 底起
+      for (let c = 0; c < W; c++) {
+        const u = (c + 0.5) / W, v = (y + 0.5) / H;
+        const n = v >= u
+          ? n00 + (n11 - n01) * u + (n01 - n00) * v   // 三角2 (TL,BR,BL)
+          : n00 + (n10 - n00) * u + (n11 - n10) * v;  // 三角1 (TL,TR,BR)
+        const w = Math.sin((((c + 0.5) + (y + 0.5) / 6) / 10 - tVis / 360) * Math.PI * 2);
+        const n1 = Math.max(0, Math.min(1, (w + 0.5) / 1.5)) * 0.35;   // remap(w,-0.5,1,0,0.35)
+        const g = Math.max(0, Math.min(1, (n1 * n) / 0.5));            // remap(·,0,0.5,0,1)
+        const ref = g * 255;
+        const o = (glRow * W + c) * 4;
+        const d = Math.abs(buf1[o] - ref);
+        if (v >= u) gTri2++; else gTri1++;
+        if (d > gmaxd) { gmaxd = d; gworst = { c, y, tVis, u: +u.toFixed(3), v: +v.toFixed(3), got: buf1[o], ref: +ref.toFixed(2) }; }
+      }
+    }
+  }
+  return { baseMaxd, baseWorst, gmaxd, gworst, gTri1, gTri2 };
 });
 
 if (out.why) {
   chk('着色器真源编译/链接', false, JSON.stringify(out).slice(0, 300));
 } else {
-  chk('离线场值 readback 闸:maxd ≤ 2/255（§4.1 验收线;超域=mediump 漏入或常量错）',
-    out.maxd <= 2,
-    `maxd=${out.maxd.toFixed(3)} worst=${JSON.stringify(out.worst)} 行超域数=${out.rowsGT2}/${out.rowMaxWorst.toFixed(2)}`);
+  chk('①基体场 readback 闸:maxd ≤ 2/255（§4.1 验收线;超域=mediump 漏入或常量错）',
+    out.baseMaxd <= 2,
+    `maxd=${out.baseMaxd.toFixed(3)} worst=${JSON.stringify(out.baseWorst)}`);
+  chk('②glitter 亮纹场 readback 闸（三期）:maxd ≤ 2/255（两三角逐线性参照×remap 链）',
+    out.gmaxd <= 2,
+    `maxd=${out.gmaxd.toFixed(3)} worst=${JSON.stringify(out.gworst)} 三角覆盖 ${out.gTri1}/${out.gTri2}`);
 }
 chk('页面零错误', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 

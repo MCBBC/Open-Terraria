@@ -5,15 +5,17 @@
 // 像素对拍=scripts/_liqgl-ab.mjs（node 无 GL/canvas,该面探针锁）。
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterEach } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 import type { GLSpriteLayer } from '../src/render/GLSpriteLayer';
 import {
   drawVanillaLiquids, emitVanillaLiquidGate, resetLiquidBatchForFrame,
   shimmerCornerColorsForTest, liqgl, liqglSetForTest,
+  liqC13cSetForTest,
   type LiqBatchEmit,
 } from '../src/render/VanillaLiquidRenderer';
+import { liqpolishSetForTest } from '../src/render/perfFlags';
 import { texId } from '../src/render/texId';
 import { TILE_DEFS } from '../src/data/tiles';
 
@@ -395,6 +397,13 @@ function makeWaterStore(): TileStore {
 }
 
 describe('★liqgl rgb 预乘锁（quadBatchRgba 着色器契约=顶点 rgb 已预乘 quad α）', () => {
+  afterEach(() => {
+    // 旗复位（c13c 臂点亮测试后回逃生门域;node 惯例 perfFlags 恒关）
+    liqC13cSetForTest(false);
+    liqpolishSetForTest(false);
+    resetLiquidBatchForFrame(-1);
+  });
+
   it('普通水 quad:12 个颜色分量逐位 === α（预乘恒等式;α<1 时 rgb 必须随 α 缩）', () => {
     resetLiquidBatchForFrame(-1);
     const { caps } = drawWithBatch(makeWaterStore(), false, false);
@@ -419,7 +428,12 @@ describe('★liqgl rgb 预乘锁（quadBatchRgba 着色器契约=顶点 rgb 已�
     expect(alphaLt1).toBeGreaterThan(0);   // 前景水 α=0.5——旧病（rgb=1 恒等）必爆红的判别面
   });
 
-  it('微光 quad:rgb = 顶点色×gaT（预乘,R<G<B<α 域;非调制 quad 的 rgb===α 判别不串）', () => {
+  it('微光 quad（?c13c=0 回退臂域,liqgl 刀2 顶点色调制）:rgb = 顶点色×gaT（预乘,R<G<B<α 域）', () => {
+    // ★C13c 转正（2026-10-02）域标注:本锁=回退臂（c13c off→liqgl 刀2 顶点色 quad,
+    //  stride 48）原判别面原样保留;c13c 臂（缺省）的微光段域已迁移到下例 liqshim
+    //  键族 rgb===a 恒等锁（环数据 rgb===a 预乘恒等,域不同——B1 灰度期登记的收尾债）。
+    liqC13cSetForTest(false);
+    liqpolishSetForTest(false);
     resetLiquidBatchForFrame(-1);
     const { caps } = drawWithBatch(makeStore(), false, false);   // makeStore=微光池(lt=4→vt 3)
     let quads = 0;
@@ -434,6 +448,36 @@ describe('★liqgl rgb 预乘锁（quadBatchRgba 着色器契约=顶点 rgb 已�
           expect(r).toBeGreaterThan(0); expect(r).toBeLessThanOrEqual(a);
           expect(g).toBeLessThanOrEqual(a);
           expect(b).toBeLessThanOrEqual(a + 1e-6);   // B 分量基色可近 1（f32 舍入容差）
+        }
+        quads++;
+      }
+    }
+    expect(quads).toBeGreaterThan(10);
+  });
+
+  it('微光 quad（c13c 臂缺省域）:liqshim 键族 stride 66,rgb===a 预乘恒等（场调制全进 FS）', () => {
+    // ★C13c 转正收尾迁移锁（2026-10-02）:c13c 环数据 rgb===a（§3.3 锁域——vCol.rgb
+    //  不进乘链,基色场 FS 逐像素解析）;上例 R<G<B<α 域只对回退臂成立,两域不串。
+    liqC13cSetForTest(true);
+    liqpolishSetForTest(true);   // c13cOn=liqC13c∧polish（臂域基座）
+    resetLiquidBatchForFrame(-1);
+    const { caps } = drawWithBatch(makeStore(), false, false);
+    const shimRuns = caps.filter((c) => c.key.startsWith('liqshim:'));
+    expect(shimRuns.length).toBeGreaterThanOrEqual(1);
+    expect(caps.some((c) => c.key.startsWith('liq:'))).toBe(false);   // 微光不进主环
+    let quads = 0;
+    for (const c of shimRuns) {
+      expect(c.data.length).toBe(c.quads * 66);   // stride 11
+      for (let q = 0; q < c.quads; q++) {
+        const o = q * 66;
+        const a = c.data[o + 7];
+        expect(a).toBeGreaterThan(0); expect(a).toBeLessThanOrEqual(1);
+        for (let v = 0; v < 6; v++) {
+          const vo = o + v * 11;
+          // 预乘恒等式:12 个颜色分量与 α 同一 f32 值（逐位,非近似）
+          expect(c.data[vo + 4]).toBe(a);
+          expect(c.data[vo + 5]).toBe(a);
+          expect(c.data[vo + 6]).toBe(a);
         }
         quads++;
       }

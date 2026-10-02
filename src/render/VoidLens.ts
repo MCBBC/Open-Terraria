@@ -20,6 +20,28 @@ export const VOID_LENS_FH = 48;
 /** 40 tick 循环 = 8 帧 × 5t（Main.cs:19410-19412 计数器回卷 40;:31 ÷5） */
 export const VOID_LENS_FRAME_WRAP = 40;
 
+/**
+ * 本体白化补差色（★Z4/BJ429-D4 漏修半项,2026-10-02;VoidLensHelper.cs:82-84 亲读）：
+ * 原版本体顶点色 = `color = Lighting.GetColor(...); color = Color.Lerp(color,
+ * Color.White, 0.5f); color *= _opacity`——XNA Lerp 逐通道 c' = c + (255−c)×0.5,
+ * 【半项向白】不随光照归零（纯黑环境恒半亮=自发光透镜语义）。
+ * 本仓管线无逐精灵顶点色通道：世界层统一 compositeLight 乘光 = ×light（BJ429 终态
+ * 曾判「白化项由世界层合成乘光承载」——×light 在暗处 → 0,与 Lerp 半项不等,D4 判
+ * 真漏修）。落刀 = applyMoonLordLightFloor 同判例（月总 0.3 白斜坡 7b′ 注）的
+ * 「合成后加性补差」：世界层本体照画（×light）,compositeLight 后以 'lighter' 叠
+ * sprite×0.5×(255−light)/255——合成代数 light + 0.5×(255−light) ≡ Lerp(light,
+ * White, 0.5)。本函数 = 补差色纯算面（Renderer 收集/回_FLUSH 消费）。
+ * opacity 项：tile 锚路径 ctor（:26-31）恒 1f=无乘;proj 734 路径另乘 proj.Opacity
+ * （DrawProjDirect Main.cs:28346）——本仓仅 tile 锚面,不建模 opacity。
+ */
+export function voidLensComplementTint(light: readonly [number, number, number]): [number, number, number] {
+  return [
+    Math.round(0.5 * (255 - light[0])),
+    Math.round(0.5 * (255 - light[1])),
+    Math.round(0.5 * (255 - light[2])),
+  ];
+}
+
 /** 透镜心 = 中心格 ToWorldCoordinates(+8,+8) 再 Y−2（VoidLensHelper.cs ctor :28）。
  *  3×3 库体的几何中心=中心格心 (tx*16+8, ty*16+8),Y−2 后=上移 2px。 */
 export function voidLensCenterOf(tx: number, ty: number): [number, number] {

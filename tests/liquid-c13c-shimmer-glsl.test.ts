@@ -14,7 +14,7 @@ import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 import type { GLSpriteLayer } from '../src/render/GLSpriteLayer';
 import {
   drawVanillaLiquids, emitVanillaLiquidGate, resetLiquidBatchForFrame,
-  liqC13cSetForTest, liqC13c,
+  liqC13cSetForTest, liqC13c, shimmerSparkBandForTest,
   type LiqBatchEmit,
 } from '../src/render/VanillaLiquidRenderer';
 import { visEffectFrames, stepVisEffectTick } from '../src/entities/Enemy';
@@ -23,6 +23,10 @@ import { TILE_DEFS } from '../src/data/tiles';
 
 const VL = readFileSync(join(__dirname, '../src/render/VanillaLiquidRenderer.ts'), 'utf8');
 const GS = readFileSync(join(__dirname, '../src/render/GLSpriteLayer.ts'), 'utf8');
+
+/** 旗 init 快照（模块加载期取值=location 缺省域;afterEach 复位后的运行期值不可作
+ *  init 判据——liquid-gl-batch 的 liqglDefault 判例同构） */
+const liqC13cInit = liqC13c;
 
 // ---------- 桩面（liquid-gl-batch 同族） ----------
 const fakeAtlas = {
@@ -81,6 +85,21 @@ function makeShimmerPool(): TileStore {
   return st;
 }
 
+/** 开顶微光池（地表开放式:空气上表面 → 表层 flag=true 保留域在池;实测 diag 面:
+ *  top/edge 亮面≈89 ADD quad + body 亮面≈256 shim quad） */
+function makeOpenPool(): TileStore {
+  const st = new TileStore(140, 100);
+  const dirt = TILE_DEFS.findIndex((d) => d?.key === 'dirt');
+  const set = (x: number, y: number, t: number, liquid = 0, lt = 1) => {
+    const i = st.idx(x, y);
+    st.type[i] = t; st.flags[i] = t ? 1 : 0;
+    st.liquid[i] = liquid; st.liquidType[i] = lt;
+  };
+  for (let x = 0; x < 140; x++) set(x, 45, dirt);            // 地面
+  for (let x = 20; x <= 80; x++) for (let y = 30; y <= 44; y++) set(x, y, 0, 255, 4);  // 开顶微光池
+  return st;
+}
+
 /** SimpleWhiteNoise 参照实现（与 VanillaLiquidRenderer.shimmerWhiteNoise 零共享,防同源盲区;
  *  LiquidRenderer.cs:793-797 uint 乘加混淆 1:1） */
 function refNoise(x: number, y: number): number {
@@ -104,8 +123,9 @@ beforeAll(() => {
 });
 
 afterEach(() => {
-  liqC13cSetForTest(false);   // 旗复位（灰度缺省关）
+  liqC13cSetForTest(false);   // 旗复位（=?c13c=0 逃生门域;init 缺省开由 liqC13cInit 快照锁）
   liqpolishSetForTest(false); // node 惯例复位（perfFlags 族测试环境恒关）
+  shimmerSparkBandForTest(undefined);   // ★三期带钩清面（生产路径恢复）
   resetLiquidBatchForFrame(-1);
 });
 
@@ -359,13 +379,182 @@ describe('★C13c fg 复用 + gate 重发射（stride 11 同步面）', () => {
   });
 });
 
-// ---------- 逃生门/灰度域 ----------
-describe('★C13c 逃生门与灰度缺省', () => {
-  it('缺省关（灰度;?c13c=1 激活）:node 无 location → liqC13c=false', () => {
-    expect(liqC13c).toBe(false);
+// ---------- ★三期 sparkle 亮纹逐像素化（2026-10-02） ----------
+describe('★C13c 三期 sparkle 亮纹段（body 域 FS glitter 逐像素;top 域照旧 CPU）', () => {
+  const FAKE_BAND = { width: 96, height: 1360 } as HTMLCanvasElement;
+
+  it('body 域（flag=false 奇偶亮面）→ liqspark: 亮纹段 stride 66;顶点 α 只载 opacity,rgb=hue×α 预乘族', () => {
+    c13cArm(true);
+    shimmerSparkBandForTest(FAKE_BAND);
+    const st = makeShimmerPool();
+    const so: BatCap[] = [];
+    const ao: BatCap[] = [];
+    const { ctx } = makeCtx();
+    resetLiquidBatchForFrame(131);
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+      undefined, false, undefined, 131, null, mkBat(so, ao), false);
+    const sparkShim = ao.filter((c) => c.key.startsWith('liqspark:') && c.data.length === c.quads * 66);
+    expect(sparkShim.length).toBeGreaterThanOrEqual(1);   // 内域 58×10 格奇偶亮面在场
+    let quads = 0;
+    for (const c of sparkShim) {
+      for (let q = 0; q < c.quads; q++) {
+        const o = q * 66;
+        const a = c.data[o + 7];
+        expect(a).toBeGreaterThan(0); expect(a).toBeLessThanOrEqual(1);
+        for (let v = 0; v < 6; v++) {
+          const vo = o + v * 11;
+          const r = c.data[vo + 4], g = c.data[vo + 5], b = c.data[vo + 6];
+          // rgb=hue×α 预乘族（≤α;hue 16 档表值可含 0 分量——hslToRgb(0,1,0.5)=(1,0,0)）
+          expect(r).toBeGreaterThanOrEqual(0); expect(r).toBeLessThanOrEqual(a + 1e-6);
+          expect(g).toBeGreaterThanOrEqual(0); expect(g).toBeLessThanOrEqual(a + 1e-6);
+          expect(b).toBeGreaterThanOrEqual(0); expect(b).toBeLessThanOrEqual(a + 1e-6);
+          expect(r + g + b).toBeGreaterThan(0);   // hue 表恒有非零通道（l=0.5）
+          expect(Number.isFinite(c.data[vo + 8])).toBe(true);
+          expect(Number.isFinite(c.data[vo + 9])).toBe(true);
+          const n = c.data[vo + 10];
+          expect(n).toBeGreaterThanOrEqual(-1); expect(n).toBeLessThanOrEqual(1);
+        }
+        quads++;
+      }
+    }
+    expect(quads).toBeGreaterThan(20);
   });
 
-  it('?c13c 关:无 liqshim 段;现行 liq: 微光段（顶点色调制域）原样', () => {
+  it('top/edge 保留域照旧 ADD 段（stride 48,α=0.5 常驻）;发射 tile 集不变:开=48+66 关=48 计数恒等', () => {
+    const st = makeOpenPool();
+    const runArm = (on: boolean, token: number): { n48: number; n66: number } => {
+      c13cArm(on);
+      shimmerSparkBandForTest(FAKE_BAND);
+      const so: BatCap[] = [];
+      const ao: BatCap[] = [];
+      const { ctx } = makeCtx();
+      resetLiquidBatchForFrame(token);
+      drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+        undefined, false, undefined, token, null, mkBat(so, ao), false);
+      let n48 = 0, n66 = 0;
+      for (const c of ao) {
+        if (!c.key.startsWith('liqspark:')) continue;
+        if (c.data.length === c.quads * 66) n66 += c.quads;
+        else if (c.data.length === c.quads * 48) n48 += c.quads;
+      }
+      return { n48, n66 };
+    };
+    const off = runArm(false, 141);
+    const on = runArm(true, 142);
+    expect(off.n48).toBeGreaterThan(0);   // 全 sparkle 走 ADD 段
+    expect(off.n66).toBe(0);
+    expect(on.n66).toBeGreaterThan(0);    // body 域改亮纹段
+    expect(on.n48).toBeGreaterThan(0);    // top/edge 保留域仍在 ADD 段
+    expect(on.n48 + on.n66).toBe(off.n48);   // doSpark 门不变=发射 tile 集不变
+  });
+
+  it('aNoise=节点 noise-sin 对照参照;aTile 整角 quad=节点 (x,y)..(x+1,y+1) 精确', () => {
+    c13cArm(true);
+    shimmerSparkBandForTest(FAKE_BAND);
+    const st = makeShimmerPool();
+    const so: BatCap[] = [];
+    const ao: BatCap[] = [];
+    const { ctx } = makeCtx();
+    const tVis = visEffectFrames();
+    resetLiquidBatchForFrame(151);
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+      undefined, false, undefined, 151, null, mkBat(so, ao), false);
+    const sparkShim = ao.filter((c) => c.key.startsWith('liqspark:') && c.data.length === c.quads * 66);
+    expect(sparkShim.length).toBeGreaterThanOrEqual(1);
+    // 扫任一整角 quad（body 域满格无裁剪无 bob→aTile 角=整数节点;均值门逐 tVis 波动
+    //  会剔除特定 tile——固定 (40,34) 判据会随相位漂,故扫全集取首个）
+    let checked = 0;
+    for (const c of sparkShim) {
+      for (let q = 0; q < c.quads && checked < 8; q++) {
+        const o = q * 66;
+        const x0 = c.data[o + 8], y0 = c.data[o + 9];
+        if (c.data[o + 19] !== x0 + 1 || c.data[o + 64] !== y0 + 1) continue;   // 非整角
+        if (!Number.isInteger(x0) || !Number.isInteger(y0)) continue;
+        // 角序 TL,TR,BR,BL=节点 (x,y),(x+1,y),(x+1,y+1),(x,y+1)（sparkleShimQuad 写序）
+        const nodes: Array<[number, number, number]> = [
+          [x0, y0, o + 10], [x0 + 1, y0, o + 21], [x0 + 1, y0 + 1, o + 32], [x0, y0 + 1, o + 65],
+        ];
+        for (const [nx, ny, off] of nodes) {
+          const ref = Math.sin(refNoise(nx, ny) / 10 + tVis / 180);
+          expect(c.data[off]).toBe(Math.fround(ref));   // f64 sin→f32 环写
+        }
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('2D 降级重放:lighter+2×2 子块 glitter α（白闪退化域）;基体 multiply 面不串', () => {
+    c13cArm(true);
+    shimmerSparkBandForTest(FAKE_BAND);
+    const st = makeShimmerPool();
+    const so: BatCap[] = [];
+    const ao: BatCap[] = [];
+    const { ctx } = makeCtx();
+    resetLiquidBatchForFrame(161);
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+      undefined, false, undefined, 161, null, mkBat(so, ao), false);
+    const sparkShim = ao.find((c) => c.key.startsWith('liqspark:') && c.data.length === c.quads * 66);
+    expect(sparkShim).toBeDefined();
+    const rctx = makeCtx();
+    (sparkShim!.replay as (c: CanvasRenderingContext2D) => void)(rctx.ctx);
+    expect(rctx.calls[0].op).toBe('save');
+    expect(rctx.calls[rctx.calls.length - 1].op).toBe('restore');
+    expect(rctx.setLog.some((s) => s.k === 'globalCompositeOperation' && s.v === 'lighter')).toBe(true);
+    expect(rctx.setLog.some((s) => s.k === 'globalCompositeOperation' && s.v === 'multiply')).toBe(false);
+    const draws = rctx.calls.filter((c) => c.op === 'drawImage');
+    expect(draws.length).toBeGreaterThanOrEqual(1);
+    expect(draws.length).toBeLessThanOrEqual(sparkShim!.quads * 4);   // 2×2 子块,g=0 子块跳过
+    // 子块 α=ga×g ∈ (0,1]（globalAlpha 赋值域）
+    for (const s of rctx.setLog) {
+      if (s.k === 'globalAlpha' && typeof s.v === 'number') {
+        expect(s.v).toBeGreaterThan(0);
+        expect(s.v).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('fg 复用:亮纹段逐位重发射（α 双 pass 同值=不缩放;_bgSparkShim 账）', () => {
+    c13cArm(true);
+    shimmerSparkBandForTest(FAKE_BAND);
+    const st = makeShimmerPool();
+    const bgCaps: BatCap[] = [];
+    const fgCaps: BatCap[] = [];
+    const mk = (sink: BatCap[]): LiqBatchEmit => ({
+      emit(img, key, data, quads, replay) {
+        sink.push({ img, key, data: data.slice(), quads, replay });
+        return true;
+      },
+      emitAdd(img, key, data, quads, replay) {
+        sink.push({ img, key, data: data.slice(), quads, replay });
+        return true;
+      },
+    });
+    const { ctx } = makeCtx();
+    resetLiquidBatchForFrame(171);
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+      undefined, false, undefined, 171, null, mk(bgCaps), false);   // bg:录账
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, false, 0, 0,
+      undefined, false, undefined, 171, null, mk(fgCaps), false);   // fg:复用重发射
+    const bgSpark = bgCaps.filter((c) => c.key.startsWith('liqspark:') && c.data.length === c.quads * 66);
+    const fgSpark = fgCaps.filter((c) => c.key.startsWith('liqspark:') && c.data.length === c.quads * 66);
+    expect(bgSpark.length).toBeGreaterThanOrEqual(1);
+    expect(fgSpark.length).toBe(bgSpark.length);
+    for (let i = 0; i < fgSpark.length; i++) {
+      expect(fgSpark[i].quads).toBe(bgSpark[i].quads);
+      expect(fgSpark[i].data).toEqual(bgSpark[i].data);   // 逐位（Float32Array 同值）
+      expect(fgSpark[i].img).toBe(bgSpark[i].img);        // 同一带纹理实例
+    }
+  });
+});
+
+// ---------- 逃生门/转正缺省域 ----------
+describe('★C13c 逃生门与转正缺省', () => {
+  it('缺省开（2026-10-02 转正;?c13c=0 逃生门）:node 无 location → init true（liqgl/liqC13b 族形态）', () => {
+    expect(liqC13cInit).toBe(true);
+  });
+
+  it('?c13c=0 逃生门:无 liqshim 段;现行 liq: 微光段（顶点色调制域）原样（回退臂逐位保留锁）', () => {
     const st = makeShimmerPool();
     const caps: BatCap[] = [];
     const { ctx } = makeCtx();
@@ -387,7 +576,7 @@ describe('★C13c 逃生门与灰度缺省', () => {
 // ---------- 结构锁（源码锚;防并行会话漂移） ----------
 describe('★C13c 结构锁', () => {
   it('VanillaLiquidRenderer:旗/stride-11 环/shimQuad/段收口/复用/gate/带臂锚', () => {
-    expect(VL).toContain("get('c13c') === '1'");
+    expect(VL).toContain("get('c13c') !== '0'");   // ★转正（2026-10-02）:?c13c=0 逃生门形态
     expect(VL).toContain('export function liqC13cSetForTest(');
     expect(VL).toContain('const LIQ_SHIM_STRIDE = 11');
     expect(VL).toContain('const LIQ_SHIM_QUAD_FLOATS = 6 * LIQ_SHIM_STRIDE');
@@ -417,6 +606,39 @@ describe('★C13c 结构锁', () => {
     expect(VL).toContain('const S = _shimRing!, D = _fgReuseShimRing!;');
     expect(VL).toContain('if (!ok) replayLiqShimRun2D(ctx, s0, nQ, img);');
     expect(VL).toContain('shim: true });');
+  });
+
+  it('★三期 sparkle 亮纹段锚（2026-10-02）:环/quad/重放/收口/复用/uSpark 分派/带钩', () => {
+    expect(VL).toContain('let _spShimRing: Float32Array | null = null;');
+    expect(VL).toContain('let _spShimMeta: Float32Array | null = null;');
+    expect(VL).toContain('let _spShimN = 0;');
+    expect(VL).toContain('function sparkleShimQuad(');
+    expect(VL).toContain('function replayLiqSparkShimRun2D(');
+    expect(VL).toContain('_spShimRing = new Float32Array(LIQ_RING_CAP * LIQ_SHIM_QUAD_FLOATS);');
+    expect(VL).toContain("_spShimKey = `liqspark:${texId(band)}`;");
+    expect(VL).toContain('if (c13cOn && !flag && batOn && !_addOverflow) {');
+    expect(VL).toContain('sparkleShimQuad(sx, sSrcY, sw, sh, band.width, band.height,');
+    expect(VL).toContain('_spShimQuads++;');
+    expect(VL).toContain('if (_spShimOn) {');
+    expect(VL).toContain('else if (record) _bgSparkShim = { start: s0, quads: nQ, img, key: k };');
+    expect(VL).toContain('if (_bgSparkShim && bat.emitAdd) {');
+    expect(VL).toContain('_spShimN = 0; _spShimOn = false; _spShimQuads = 0; _spShimImg = null; _spShimKey = \'\';');
+    expect(VL).toContain('_bgSparkShim = null;');
+    expect(VL).toContain('export function shimmerSparkBandForTest(');
+    // 保留域照旧 CPU（top/edge 常驻 ADD 段+均值 α 载体支不删）
+    expect(VL).toContain('} else if (polish && batOn && !_addOverflow) {');
+    expect(VL).toContain('const gaS = Math.min(1, opacity[i] * sparkGa);');
+  });
+
+  it('★三期 GLSpriteLayer:uSpark uniform/段键分派/亮纹 FS 消费锚', () => {
+    expect(GS).toContain('uniform float uSpark;');
+    expect(GS).toContain("for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = this.pipe.uni(p, n);");
+    expect(GS).toContain("for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = gl.getUniformLocation(prog, n);");
+    expect(GS).toContain("e.key ?? '').startsWith('liqspark:') ? 1 : 0");
+    expect(GS).toContain('float g = glitter(vTile, vNoise);');
+    expect(GS).toContain('outColor = vec4(c.rgb * vCol.rgb * g, c.a * vCol.a * g);');
+    // 基体主式不动（rgb===a 预乘恒等域 §3.3）
+    expect(GS).toContain('outColor = vec4(c.rgb * field * vCol.a, c.a * vCol.a);');
   });
 
   it('GLSpriteLayer:程序常量/惰性装配/发射口/分派/失败面/dispose 锚', () => {

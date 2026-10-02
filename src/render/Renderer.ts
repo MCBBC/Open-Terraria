@@ -250,6 +250,7 @@ import {
   VOID_LENS_FW, VOID_LENS_FH, VOID_LENS_ECHO_PHASES,
   voidLensCenterOf, voidLensFrameOf, voidLensEchoPulse,
   voidLensEchoAlpha, voidLensEchoRadius, voidLensEchoAngle, voidLensDustSpec,
+  voidLensComplementTint,
 } from './VoidLens';   // ★BJ429 虚空保险库悬浮透镜纯算面（VoidLensHelper.cs 1:1）
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
@@ -976,7 +977,7 @@ import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { whiteK811 } from '../entities/Dart';   // ★BJ245：811 光地板 k 单源（Dart 白化同式）
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
 import { Bobber, hackHoldStyleActive } from '../entities/Bobber';
-import { TOWER_KEY, TOWER_SHIELD_COLOR, TOWER_ZONE_RADIUS, isTowerId, shieldMax } from '../world/LunarEvent';
+import { TOWER_KEY, TOWER_KEYS, TOWER_SHIELD_COLOR, TOWER_ZONE_RADIUS, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
 import { drawFakeFishSchool } from '../entities/FakeFish';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
@@ -3394,14 +3395,11 @@ export class Renderer {
   /** 本帧已做「sky2D+glCanvas→HUD 全帧合成」（幂等闩——死亡灰化/重力翻转等
    *  全帧自拷消费者各有一个触发点,先到先得） */
   private _c10eComposited = false;
-  /** ★K1（2026-10-01）滤镜待发预测：P1/P2 全帧合成门拓宽臂。滤镜链活动帧把
-   *  「sky2D+glCanvas→HUD」合成提前到 7x 直绘覆盖层（尘/拖尾/翼光/智能光标…）
-   *  落笔之前跑,链输入直取 HUD——省折叠 scratch 清屏+HUD 腿两次全幅搬运
-   *  （trace 定谳 15% 墙钟主炸点;原版采集界=Main.cs:63050 BeginCapture(天空)→
-   *  :63279 EndCapture(Dust/Obstruction 后、UI 前)→HUD 侧覆盖层恒在滤镜输入内,
-   *  语义同原）。谓词=drawScreenFilterChain 块门保守超集（?c10ek1=0 逃生门）,
-   *  render() 帧分类下半每帧一次。误真帧（预测后链未跑）多付一次合成=边界帧
-   *  登记;误假帧=链输入缺 HUD 覆盖层=禁止。 */
+  /** ★K1（2026-10-01）滤镜待发预测;★K1-2（2026-10-02）起为诊断面（P1/P2 合成
+   *  门的滤镜待发臂已随屏栈 FBO 直入链摘除——滤镜帧不再合成,本旗保留作探针/
+   *  F5 帧分类归因:滤镜帧 pending=true+composite=0+fold=0+path='pipe-stack'）。
+   *  谓词=drawScreenFilterChain 块门保守超集（?c10ek1=0 逃生门）,render() 帧分类
+   *  下半每帧一次。 */
   private _c10eFilterPending = false;
   /** 滤镜链输入合成 scratch（懒建;仅未合成帧的链调用使用,链头三 blit 合成全帧;
    *  ★K1 后合成闩在帧（xform∨滤镜待发）走 HUD 直取,不再进本路径） */
@@ -3427,8 +3425,9 @@ export class Renderer {
     const mono = this.monoFilters;
     if (mono.anyInUse || mono.heatInUse) return true;
     if (world.lunarEvent && world.lunarEvent.moonLordCountdown > 0) return true;
-    if (this._towerFilterOpacity > 0) return true;
-    return this._lunarTowerFilterTarget(this._frameEntities, player.cx, player.cy, world) != null;
+    if (TOWER_KEYS.some((k) => this._towerFilterOpacity[k] > 0)) return true;
+    const tows = this._lunarTowerFilterTargets(this._frameEntities, player.cx, player.cy, world);
+    return TOWER_KEYS.some((k) => tows[k] != null);
   }
   /** sky2D 画布（C10e 底层;旗关=null 零创建） */
   skyCanvas: HTMLCanvasElement | null = null;
@@ -5006,8 +5005,11 @@ export class Renderer {
       // （CloseEnoughTo*Tower 四者析取，SceneMetrics.cs:276-282 ≤4000px 无事件门）
       // ——旧 stub 恒 false → 塔旁独石滤镜不被压制（错升 Monolith* 支）；
       // 同时为 FilterTower 染色产位（最近塔，drawScreenFilterChain 同源扫描）
-      lunarTowersNear: this._lunarTowerFilterTarget(
-        entities, player.cx, player.cy, world) != null,
+      lunarTowersNear: (() => {
+        // ★多柱串柱定谳：flag4=四族近距析取（SceneState.cs:110），per-type 四槽任一非空
+        const tows = this._lunarTowerFilterTargets(entities, player.cx, player.cy, world);
+        return TOWER_KEYS.some((k) => tows[k] != null);
+      })(),
       // ★SW-BJ41 2026-09-09：以太域驱动位（SceneState.UpdateShimmer :331
       // `metrics.ZoneShimmer` 项——SceneMetrics.cs:712 ZoneShimmer 判定链产位）。
       // 此前 env 漏喂该位 → flag 恒只剩独石支 → shimmerAlpha 恒 0 →
@@ -5326,11 +5328,12 @@ export class Renderer {
       //  翻转）→ 在夹层族落笔前把 sky2D+glCanvas 合成进 HUD——此后 HUD=完整画面
       //  （夹层族→世界 blit→自拷全链在单画布上,自拷语义与原单画布逐位同）。
       //  纯帧的合成点在 compositeLight 后（P2）——幂等闩防双份。
-      // ★K1（2026-10-01）:门拓宽——滤镜待发帧（含非 xform）也在此合成（P1 位=
-      //  夹层族/世界 blit 落笔前;合成 destination-over 垫底,既有 HUD 覆盖层保序）。
-      //  合成后 HUD=全帧,滤镜链输入直取主画布（drawScreenFilterChain K1 分档）。
+      // ★K1-2（2026-10-02）:K1-1 的「滤镜待发臂」摘除——滤镜帧链输入改屏栈 FBO
+      //  直入组装（drawChainPipeStack,sky 单腿上传+屏栈 premul 重放+HUD 单腿上传,
+      //  全 GPU 侧）,不再需要 P1/P2 全帧合成垫底（省 2 次 2D 全幅腿）;合成回归
+      //  xform 专属（?c10ek1=0 同——K1-1 预测臂本就 gated on c10eK1）。
       if (this._c10eFrame && this._c10eWorldToHud && !this._c10eComposited
-        && (this.c10eFullXformCond(player, world) || this._c10eFilterPending)) {
+        && this.c10eFullXformCond(player, world)) {
         this.c10eCompositeIntoHud();
       }
       // 灯笼夜 near 带 + 派对气球（DrawRemainingDepth :59055 = 全部背景层【含群系
@@ -6134,13 +6137,14 @@ export class Renderer {
     //  （死亡灰化/重力翻转）→ 世界 present 已进 glCanvas（over 栈），此处把
     //  sky2D+glCanvas 合成进 HUD=完整画面，其后自拷/滤镜链输入语义与原单画布
     //  逐位同。夹层帧在 P1（bg 段）已合成——幂等闩防双份。
-    // ★K1（2026-10-01）:门拓宽——纯帧滤镜待发（含非 xform）也在此合成。位=7x
-    //  直绘覆盖层（尘/拖尾/翼光/智能光标/标尺/遮屏孔…）落笔之前,覆盖层全部落在
-    //  合成内容之上 → 滤镜链输入=完整采集帧（原版采集界 Main.cs:63050
-    //  BeginCapture(天空)→:63279 EndCapture(Dust/ScreenObstruction 后、UI 前)）。
-    //  xform 帧原门已覆盖;夹层帧在 P1（幂等闩防双份）。
+    // ★K1-2（2026-10-02）:K1-1 的「滤镜待发臂」摘除（P1 同刀）——滤镜帧链输入
+    //  改屏栈 FBO 直入组装（drawChainPipeStack）,合成回归 xform 专属;7x 直绘
+    //  覆盖层（尘/拖尾/翼光/智能光标/标尺/遮屏孔…）落透明 HUD,链组装经 HUD 腿
+    //  收入输入（层序=覆盖层恒在 sky/gl 之上,原版采集界 Main.cs:63050
+    //  BeginCapture(天空)→:63279 EndCapture(Dust/ScreenObstruction 后、UI 前)
+    //  语义同）。
     if (this._c10eFrame && !this._c10eComposited
-      && (this.c10eFullXformCond(player, world) || this._c10eFilterPending)) {
+      && this.c10eFullXformCond(player, world)) {
       this.c10eCompositeIntoHud();
     }
 
@@ -6173,6 +6177,15 @@ export class Renderer {
     if (this.atlas) {
       drawTileShineAdditive(ctx, world, chunks, cam, viewW, viewH, z, this._worldLowK || 1);
     }
+
+    // 7b0. 虚空透镜白化补差（★Z4/BJ429-D4,VoidLensHelper.cs:82-84）——世界层本体
+    //      画 ×light 基底（2c'.0 收集 _voidLensComps）,此处 'lighter' 叠
+    //      sprite×0.5×(255−light)/255：合成代数 light+0.5×(255−light) ≡
+    //      Lerp(light,White,0.5)=原版本体顶点色（applyMoonLordLightFloor 同判例
+    //      ——原版逐精灵顶点色通道本仓不存在,乘光面=compositeLight 全屏光照图;
+    //      月总 0.3 白斜坡同形）。加性补差不破 z 序（本体仍在实体/水之下,
+    //      溢出照亮遮挡格与 7b′ 备案同口径）;全亮 → 补差 0 自然零开销。
+    this.flushVoidLensComplements();
 
     // 7b'. 月总 30% 白斜坡（Main.cs:24345/24417/24479/24486
     //      GetAlpha(Color.Lerp(Lighting.GetColor, White, 0.3f))——原版月总四部件
@@ -18958,16 +18971,20 @@ export class Renderer {
     // ★BJ109-I：塔邻接 FilterTower 染色产位（SceneState.cs:107-110）+ Filter.Opacity
     // 1/s 斜坡（FilterManager.cs:95-101）。★BJ109-D 拆 crystalDeath：旧「天柱死亡
     // 水晶 tint+vortex」产位已随假锚拆除（该屏效实为 DD2 弹 672 aiStyle 132 专有）
-    const tow = world ? this._lunarTowerFilterTarget(this._frameEntities, player.cx, player.cy, world) : null;
+    const tows = world ? this._lunarTowerFilterTargets(this._frameEntities, player.cx, player.cy, world) : {};
     {
       const nowMs = performance.now();
       const dt = Math.min(0.25, Math.max(0, (nowMs - this._towerFilterLastMs) / 1000));
       this._towerFilterLastMs = nowMs;
-      this._towerFilterOpacity = tow
-        ? Math.min(this._towerFilterOpacity + dt, 1)
-        : Math.max(this._towerFilterOpacity - dt, 0);
+      // ★多柱串柱定谳：per-Filter 斜坡（原版四塔滤镜=四个独立 Filter 实例，
+      //  FilterManager.cs:95-101 每实例独立 1/s——双柱同 Zone 双槽各自渐显/渐隐）
+      for (const k of TOWER_KEYS) {
+        this._towerFilterOpacity[k] = tows[k]
+          ? Math.min(this._towerFilterOpacity[k] + dt, 1)
+          : Math.max(this._towerFilterOpacity[k] - dt, 0);
+      }
     }
-    const towVisible = tow != null && this._towerFilterOpacity > 0;
+    const towVisible = TOWER_KEYS.some((k) => tows[k] != null && this._towerFilterOpacity[k] > 0);
     if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible) { this.sfxPathUsed = '-'; return; }
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
@@ -18999,13 +19016,17 @@ export class Renderer {
       //  ★BJ346 勘误：targetPx=塔心【世界】px（ScreenShaderData.Apply 里
       //  uTargetPosition 与 uScreenPosition 同减 offScreenRange(200)，差量恒世界系；
       //  旧传屏幕系（tow−screenPos）致 frag rel 场被相机坐标污染=涡旋中心甩出屏外）
-      if (tow && towVisible) {
-        const preset = TOWER_FILTER_PRESETS[tow.key];
+      // ★多柱串柱定谳：原版 SceneState.cs:108-111 四行=四族滤镜各自激活、
+      //  各自目标位/颜色/斜坡,双柱同 Zone 时两 pass 叠加（颜色永不跨族切换）
+      for (const k of TOWER_KEYS) {
+        const tow = tows[k];
+        if (!tow || !towVisible || this._towerFilterOpacity[k] <= 0) continue;
+        const preset = TOWER_FILTER_PRESETS[k];
         // ★BJ346：盾态三支驱动抽纯函数 towerFilterDrive（Main.cs:24564/24573/24581）
         const drive = towerFilterDrive(tow.shieldUp, tow.ai3);
         passes.push({
           kind: 'FilterTower', color: preset.color,
-          opacity: preset.useOpacity * this._towerFilterOpacity,
+          opacity: preset.useOpacity * this._towerFilterOpacity[k],
           screenRes, screenPos,
           targetPx: [tow.x, tow.y],
           intensity: drive.intensity, progress: drive.progress,
@@ -19055,22 +19076,50 @@ export class Renderer {
         if (Renderer.sfxPipe && this._worldLowK === 1) {
           const pipe = this.acquireSwPipe();
           if (pipe && !pipe.unavailable) {
-            // ★K1（2026-10-01）:链输入源分档——合成闩在（P1/P2 门拓宽:xform∨滤镜
-            //  待发帧）→ HUD 已含 sky2D+glCanvas 全帧+7x 直绘覆盖层=链源直取主画布,
-            //  省折叠 scratch 清屏+HUD 腿两次全幅搬运（trace 定谳 15% 墙钟主炸点;
-            //  xform∩滤镜帧另消「sky+gl 二次叠 ±1LSB」登记债）。未合成帧（sfxgl=0/
-            //  c10ek1=0/低清/预测漏/管线帧中暴毙）=原三画布折叠 scratch 原路径。
-            //  采集界=原版 BeginCapture(天空)→EndCapture(Dust/Obstruction 后、UI 前)
-            //  （Main.cs:63050/:63279）——两档语义同。
-            const chainSrc = (Renderer.c10eK1 && this._c10eFrame && this._c10eComposited)
-              ? this.canvas : this.c10eChainSource();
-            chainOk = gl.drawChainPipe(pipe, chainSrc, passes, [
-              this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
-            ]);
+            // ★K1/K1-2（2026-10-01/02）:链输入源三档——
+            //  ① ?c10ek1=0 逃生门=K1-前全旧行为:三画布折叠 scratch（含 xform 帧
+            //    的折叠二次叠 ±1LSB 登记债——旧行为原样回放）。
+            //  ② K1 合成帧（xform 全帧自拷已把 sky2D+glCanvas 合成进 HUD,P1/P2 门
+            //    xform 专属）:链源直取主画布（HUD 已含全帧+7x 直绘覆盖层;Stack
+            //    变体会把 sky/屏栈二次计入=禁走）。xform∩滤镜帧消「二次叠 ±1LSB」
+            //    登记债（K1-1 收益保留）。
+            //  ③ ★K1-2 屏栈 FBO 直入（滤镜帧主路径）:链输入 GPU 侧组装（sky 单腿
+            //    上传+屏栈 premul 重放+HUD 单腿上传）——省 K1-1 的 P1/P2 合成 2 次
+            //    2D 全幅腿+折叠 scratch 的跨上下文 glCanvas 腿。等价性论证/
+            //    失败回退见 GLScreenFilters ★K1-2 段头注。采集界=原版
+            //    BeginCapture(天空)→EndCapture(Dust/Obstruction 后、UI 前)
+            //    （Main.cs:63050/:63279）——三档语义同。
+            let stackPath = false;   // ★本帧实际走的链源档（诊断面按档落账,防陈旧 Sticky 错归因）
+            if (!Renderer.c10eK1) {
+              chainOk = gl.drawChainPipe(pipe, this.c10eChainSource(), passes, [
+                this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
+              ]);
+            } else if (this._c10eFrame && this._c10eComposited) {
+              chainOk = gl.drawChainPipe(pipe, this.canvas, passes, [
+                this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
+              ]);
+            } else if (this._c10eFrame && this.skyCanvas && pipe.screenStackMode) {
+              stackPath = true;
+              chainOk = gl.drawChainPipeStack(pipe, { sky: this.skyCanvas, hud: this.canvas, useHud: true }, passes, [
+                this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
+              ]);
+            } else {
+              // 非分体帧（拍照/CPU/低清上游已滤）与防御窗（sky 缺/栈关/管线帧中
+              // 暴毙）=折叠 scratch 原路径（c10eChainSource 对 !_c10eFrame 恒返
+              // 主画布,零折叠成本）
+              chainOk = gl.drawChainPipe(pipe, this.c10eChainSource(), passes, [
+                this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
+              ]);
+            }
             if (chainOk) {
               ctx.drawImage(pipe.canvas, 0, 0);
-              this.sfxPathUsed = 'pipe';
-              this.sfxPathStats['pipe'] = (this.sfxPathStats['pipe'] || 0) + 1;
+              if (stackPath) {
+                this.sfxPathUsed = 'pipe-stack';
+                this.sfxPathStats['pipe-stack'] = (this.sfxPathStats['pipe-stack'] || 0) + 1;
+              } else {
+                this.sfxPathUsed = 'pipe';
+                this.sfxPathStats['pipe'] = (this.sfxPathStats['pipe'] || 0) + 1;
+              }
             }
           }
         }
@@ -19123,39 +19172,54 @@ export class Renderer {
 
   /** 本帧实体列表快照（_moonLordFilterTarget 消费用；render() 每帧刷新） */
   private _frameEntities: Entity[] = [];
-  /** FilterTower 染色产位（★BJ109-I，SceneState.cs:107-110）：4000px Zone 内最近
-   *  存活塔（SceneMetrics.ScanNPCPositions :738-749 全表扫最近,CloseEnoughTo*Tower
-   *  无事件门）。返回塔心（ManageSpecialBiomeVisuals 尾参 ClosestNPCPosition[id]−
-   *  (0,10) 的 −10px 由组装端加）+ 盾态（Main.cs:24565/:24584 驱动 uIntensity/
-   *  uProgress）。null=Zone 无塔 */
-  private _lunarTowerFilterTarget(
+  /** FilterTower 染色产位（★BJ109-I，SceneState.cs:107-110；★多柱串柱定谳 2026-09-25
+   *  重构为 per-type 四槽）：原版 ManageSpecialBiomeVisuals 每塔族各调一行
+   *  （SceneState.cs:108-111），激活门 = CloseEnoughToXxxTower = WithinRangeOfNPC(id,4000)
+   *  用【per-type】ClosestNPCPosition[type]（SceneMetrics.ScanNPCPositions :738-749
+   *  按 nPC.type 独立记最近，SceneMetrics.cs:917 DistanceSquared<=range²）——
+   *  双柱同 Zone 时【两族滤镜同时激活、各自独立斜坡叠加】，不存在跨族换色。
+   *  旧单产位「全局最近塔」在双柱交叠区随距离序翻转 1 帧内换色/换目标位
+   *  （染色强度不衰减）= 用户实报「上下飞突闪洋红冲屏」病灶，本函数对齐原版。
+   *  返回塔心（ManageSpecialBiomeVisuals 尾参 ClosestNPCPosition[id]−(0,10) 的
+   *  −10px 由组装端加）+ 盾态（Main.cs:24565/:24584 驱动 uIntensity/uProgress）。
+   *  槽缺省=该族 Zone 无塔 */
+  private _lunarTowerFilterTargets(
     entities: Entity[], px: number, py: number, world?: World | null,
-  ): { key: 'solar' | 'vortex' | 'nebula' | 'stardust'; x: number; y: number; ai3: number; shieldUp: boolean } | null {
-    let best: Enemy | null = null;
-    let bestD2 = Infinity;
+  ): Partial<Record<'solar' | 'vortex' | 'nebula' | 'stardust',
+    { x: number; y: number; ai3: number; shieldUp: boolean }>> {
+    const bestD2: Partial<Record<'solar' | 'vortex' | 'nebula' | 'stardust', number>> = {};
+    const best: Partial<Record<'solar' | 'vortex' | 'nebula' | 'stardust', Enemy>> = {};
     for (const e of entities) {
       const en = e as Entity & { vanillaId?: number | null; dead?: boolean };
       if (en.dead || !isTowerId(en.vanillaId)) continue;
+      const key = TOWER_KEY[en.vanillaId ?? -1];
+      if (!key) continue;
       const t = e as Enemy;
       const dx = t.cx - px, dy = t.cy - py;
       const d2 = dx * dx + dy * dy;   // ≤4000（SceneMetrics.cs:917 DistanceSquared<=range²）
-      if (d2 <= TOWER_ZONE_RADIUS * TOWER_ZONE_RADIUS && d2 < bestD2) {
-        best = t;
-        bestD2 = d2;
+      if (d2 <= TOWER_ZONE_RADIUS * TOWER_ZONE_RADIUS && d2 < (bestD2[key] ?? Infinity)) {
+        best[key] = t;
+        bestD2[key] = d2;
       }
     }
-    if (!best) return null;
-    const key = TOWER_KEY[best.vanillaId ?? -1];
-    if (!key) return null;
-    return {
-      key,
-      x: best.cx, y: best.cy - 10,   // SceneState.cs:107-110 −(0,10)
-      ai3: best.ai3,
-      shieldUp: !!world && key != null && (world.lunarEvent.shield[key] ?? 0) > 0,
-    };
+    const out: Partial<Record<'solar' | 'vortex' | 'nebula' | 'stardust',
+      { x: number; y: number; ai3: number; shieldUp: boolean }>> = {};
+    for (const key of TOWER_KEYS) {
+      const t = best[key];
+      if (!t) continue;
+      out[key] = {
+        x: t.cx, y: t.cy - 10,   // SceneState.cs:107-110 −(0,10)
+        ai3: t.ai3,
+        shieldUp: !!world && (world.lunarEvent.shield[key] ?? 0) > 0,
+      };
+    }
+    return out;
   }
-  /** FilterTower 的 Filter.Opacity 斜坡（FilterManager.cs:95-101 1/s,与柱族同速率） */
-  private _towerFilterOpacity = 0;
+  /** FilterTower 的 Filter.Opacity 斜坡（FilterManager.cs:95-101 1/s,与柱族同速率）。
+   *  ★多柱串柱定谳：原版四塔滤镜是四个独立 Filter 实例（ScreenEffectInitializer.cs:14-17
+   *  各自注册）,斜坡 per-Filter——per-type 表承载,双柱同 Zone 双槽各自渐显 */
+  private _towerFilterOpacity: Record<'solar' | 'vortex' | 'nebula' | 'stardust', number> =
+    { solar: 0, vortex: 0, nebula: 0, stardust: 0 };
   private _towerFilterLastMs = 0;
   /** Moon Lord 滤镜目标位（MoonLordScreenShaderData.UpdateMoonLordIndex
    *  MoonLordScreenShaderData.cs:24-66,1457 重写——蓝队 R1-07a 补):
@@ -19304,8 +19368,12 @@ export class Renderer {
    *  · 帧 = (int)((tileFrameCounter[491]+_position.X+_position.Y)%40)/5（:31;计数器
    *    Main.cs:19410 每 tick+1 回卷 40=8 帧×5t;含世界像素坐标 ⇒ 逐库错相;
    *    tileAnim.tick 同拍等价）；
-   *  · 本体 = proj734 帧×1,色 = Lerp(光照,White,0.5)（:82-83）——白化项由世界层合成
-   *    乘光承载（pylon 水晶同判例,不自乘 lightAt 防双重受光）；库体双灯:tile 光
+   *  · 本体 = proj734 帧×1,色 = Lerp(光照,White,0.5)×opacity（:82-84,opacity=1f）——
+   *    ★Z4/BJ429-D4 勘误：旧判读（白化项由世界层乘光承载）不成立（世界层合成
+   *    = ×light,暗处 → 0;Lerp 半项 = 暗处恒半亮,两者不等）。终态 = 世界层 ×light
+   *    基底 + compositeLight 后 'lighter' 加性补差 0.5×(255−light)（7b0 段,
+   *    applyMoonLordLightFloor 同判例——月总 0.3 白斜坡同形）;pylon 水晶不适用本
+   *    判例（其原版顶点色即 GetColor 裸光照,×light 恰等）。库体双灯:tile 光
    *    0.5/0.4/0.7（TileLightScanner.cs:427-433,def.light 已接）+ Helper.Update 点光
    *    0.4/0.2/0.9（:36,渲染端 addLight 次帧生效,坐骑灯惯例）；
    *  · 回声×3 = A=0 纯加法惯式（Color(127,50,127,0) :88 → 'lighter';XNA 预乘 α0=纯加）,
@@ -19331,6 +19399,7 @@ export class Renderer {
     if (!tex) return;
     const vaultTile = TILE_BY_KEY['v_491_void_vault'];
     if (vaultTile === undefined) return;
+    this._voidLensComps.length = 0;               // ★Z4/BJ429-D4：补差表逐帧重建
     const store = world.store;
     const FW = VOID_LENS_FW, FH = VOID_LENS_FH;   // proj734 帧 34×48（34×384 ÷ 8）
     const t = this.lighting?.clock?.globalTimeWrappedHourly ?? 0;   // GlobalTimeWrappedHourly
@@ -19369,8 +19438,18 @@ export class Renderer {
           const yd = oy + Math.round((cy - camRY) * zz) - dh / 2;
           // 点光 0.4/0.2/0.9（Helper.Update :36;!gamePaused 门 :429;渲染端次帧生效）
           if (!this._worldPaused) this.lighting?.addLight(tx, ty, 0.4, 0.2, 0.9);
-          // 本体（scale 1;光照白化 Lerp(光照,White,0.5) :83 由世界层合成乘光承载）
+          // 本体（scale 1;世界层 ×light 基底）——★Z4/BJ429-D4：原版本体顶点色 =
+          // Lerp(光照,White,0.5)（VoidLensHelper.cs:82-84）,世界层合成乘光只承载
+          // ×light 半项;白化半项由收集表在 compositeLight 后加性补差（7b0 段,
+          // applyMoonLordLightFloor 同判例;纯算面 = voidLensComplementTint）
           ctx.drawImage(tex.img, tex.sx, tex.sy + frameNum * FH, FW, FH, xd, yd, dw, dh);
+          {
+            const [lr, lg, lb] = this.lighting?.lightAt(tx, ty) ?? [255, 255, 255];
+            this._voidLensComps.push({
+              img: tex.img, sx: tex.sx, sy: tex.sy + frameNum * FH,
+              xd, yd, dw, dh, lr, lg, lb,
+            });
+          }
           // 回声×3（:87-97）：纯加法 tint(127,50,127)、scale×1.1、绕心轨道 1..3px
           if (scr && sc) {
             if (scr.width !== FW || scr.height !== FH) { scr.width = FW; scr.height = FH; }
@@ -19450,6 +19529,59 @@ export class Renderer {
       }
     } finally {
       ctx.restore();
+    }
+  }
+
+  /**
+   * ★Z4/BJ429-D4 透镜白化补差回放（render 7b0 段调用,compositeLight 之后）。
+   * 逐库三步刮擦烘焙:①帧图入布 ②multiply 补差色 0.5×(255−light)/255
+   * ③destination-in 源 α 恢复——'lighter' 叠回主画布后与世界层 ×light 基底合成 =
+   * Lerp(light,White,0.5)。补差色全 0（全亮环境）跳过;表逐帧清空（收集位 2c'.0
+   * 头部重建）。
+   * ★刮擦布纪律（2026-10-03 实机判别定谳）:必须用【独立、从未入 world shim 登记】
+   * 的刮擦布（本 _voidLensCompScratch）——HUD 相位的 drawImage(canvas) 对已被
+   * markDynamic/uploadScratchNow 登记为 world 动态源的画布会被桥接成 world-GL
+   * quad（落世界 FBO,HUD 不可见;_lensScr 即因回声路径/此前 uploadScratchBake
+   * 登记而整绘蒸发,实机 getImageData 前后对拍 (0,0,0)→(0,0,0) 实证;换独立布后
+   * 同点 →(51,62,19)=tint 落画布）。故此处【不得】走 uploadScratchBake。
+   */
+  private flushVoidLensComplements(): void {
+    const comps = this._voidLensComps;
+    if (!comps.length) return;
+    const ctx = this.ctx;
+    const scr = this._voidLensCompScratch ??= (typeof document !== 'undefined'
+      ? document.createElement('canvas') : null);
+    const sc = scr?.getContext('2d') ?? null;
+    if (!scr || !sc) { comps.length = 0; return; }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    try {
+      for (const c of comps) {
+        const [cr, cg, cb] = voidLensComplementTint([c.lr, c.lg, c.lb]);
+        if (cr + cg + cb === 0) continue;
+        if (scr.width !== c.dw || scr.height !== c.dh) {
+          scr.width = c.dw; scr.height = c.dh;
+        } else {
+          sc.globalCompositeOperation = 'source-over';
+          sc.clearRect(0, 0, c.dw, c.dh);
+        }
+        sc.imageSmoothingEnabled = false;
+        sc.globalCompositeOperation = 'source-over';
+        sc.drawImage(c.img, c.sx, c.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, c.dw, c.dh);
+        sc.globalCompositeOperation = 'multiply';
+        sc.fillStyle = `rgb(${cr},${cg},${cb})`;
+        sc.fillRect(0, 0, c.dw, c.dh);
+        sc.globalCompositeOperation = 'destination-in';
+        sc.drawImage(c.img, c.sx, c.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, c.dw, c.dh);
+        sc.globalCompositeOperation = 'source-over';
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(scr, c.xd, c.yd);
+      }
+    } finally {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+      comps.length = 0;
     }
   }
 
@@ -19587,6 +19719,19 @@ export class Renderer {
   /** 晶塔水晶乘色 scratch（30×46,drawPylonCrystals 每帧复用） */
   private _lensScr: HTMLCanvasElement | null = null;    // BJ429 虚空透镜 tint 刮擦布（34×48）
   private _pylonScr: HTMLCanvasElement | null = null;
+  /** ★Z4/BJ429-D4 补差刮擦布——独立于 _lensScr:后者被世界层回声路径消费（bgl 下
+   *  会进 world shim 动态源登记）,HUD 相位 drawImage 已登记画布=被桥接成 world-GL
+   *  quad 蒸发（flushVoidLensComplements 注实机对拍）;本布【永不登记】故 HUD 直绘
+   *  恒落画布。 */
+  private _voidLensCompScratch: HTMLCanvasElement | null = null;
+  /** ★Z4/BJ429-D4 透镜白化补差收集表（drawVoidLenses 2c'.0 收集 → render 7b0 段
+   *  compositeLight 后 'lighter' 补差回放,逐帧重建）。img 引用 = atlas vmisc 页,
+   *  帧内稳定;回放侧仅 drawImage+乘布,不触碰 atlas 生命周期 */
+  private _voidLensComps: Array<{
+    img: CanvasImageSource; sx: number; sy: number;
+    xd: number; yd: number; dw: number; dh: number;
+    lr: number; lg: number; lb: number;
+  }> = [];
 
   /** 荧光涂层叠层（render 7-涂层钩子）：把各 chunk 的 pair.glow（荧光涂层格 16×16
    *  拷贝，ChunkCache.bakeChunkInto 烘焙）在光照合成【后】按整数设备矩形叠回主画布

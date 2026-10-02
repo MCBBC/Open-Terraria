@@ -238,6 +238,17 @@
 //   rare 面零变更（value 键 5344→5346,rare 3632 不变）。
 //   守卫:tests/s1-itemrare-five-faces.test.ts（② 扩锚+变异二发源）+
 //   tests/v1-itemrare-nested-value.test.ts（⑤ 缺键锚翻正为兑现锚）。
+//
+// ★清偿刀 Z2（2026-10-02,S1① 食物尾式钉面;红蓝 D2 揭出的中低危潜伏面）:
+//   S1① 尾段公式原为硬编码（基值 12/8/3+÷14400+trunc(÷4)）,源行 Item.cs:48392-48395
+//   从不被解析或钉文本——M-F 实证（本刀开工复核）:源码 /4f→/5f 后旧实现 exit 0、输出
+//   零漂移、全绿,未来版本改尾式全工具链不可见。落刀=尾式四行【文本钉面】（SetFoodDefaults
+//   收口前 2-tab 尾段,位置锚在 region 平衡收口上=行漂移不破锚;1456:48004-48007 行漂文本
+//   逐字节全等,1458 Item.cs 全文件 sha256 同 1457）+基值/除数常量【机械解析】（==207→12/
+//   !=206→3/==206→8 三支+buffTime/14400 整除+trunc(num/4) 全部从源文本解析,非硬编码;
+//   解析值≡定谳钉值对拍,漂移即 throw 逼定谳）+rare 计算改用解析常量（钉面通过后语义
+//   不变=零漂移）。判别测试:tests/s1-itemrare-five-faces.test.ts 变异⑧⑨⑩（尾式文本
+//   漂移/基值漂移/buffTime 除数漂移→fail-loud;源变异走沙箱副本,原树 sha256 零接触）。
 
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
@@ -646,13 +657,45 @@ const S1_FOOD = (() => {
   for (const id of args.keys()) {
     if (!ids.includes(id)) throw new Error(`[extract-itemrare] S1① SetFoodDefaults case ${id} 不在 IsFood 集（死 case,源漂移）`);
   }
-  // num 语义（:48390-48394 亲读）:饱食档→基值（207 三档=12/206 两档=8/其余含 26 一档与
-  // 无 buff=3）+ buffTime/14400 整除（14400 帧=4 分钟=1 档位）;rare=(int)(num/4f) 截断。
+  // ★清偿刀 Z2（2026-10-02,S1① 食物尾式钉面;头注 Z2 节）:旧实现基值 12/8/3+÷14400+
+  //   trunc(÷4) 全硬编码,源行 :48392-48395 从不被解析或钉文本（M-F 实证 /4f→/5f 全绿
+  //   不可见）。落刀=①尾式四行文本钉面（方法收口前 2-tab 尾段,位置锚=region 平衡收口,
+  //   行漂移不破锚;1456:48004-48007 文本逐字节全等）②基值/除数机械解析（三支+14400+4
+  //   从源文本解析,解析值≡定谳钉值对拍,漂移即 throw 逼定谳）③rare 计算改用解析常量
+  //   （钉面通过后语义不变=零漂移）。
+  const TAIL_PINS = [
+    '\t\tfloat num = 0f;',
+    '\t\tnum = ((buffType == 207) ? (num + 12f) : ((buffType != 206) ? (num + 3f) : (num + 8f)));',
+    '\t\tnum += (float)(buffTime / 14400);',
+    '\t\trare = (int)(num / 4f);',
+  ];
+  for (let k = 0; k < TAIL_PINS.length; k++) {
+    const at = fTo - TAIL_PINS.length + k;
+    if (LINES[at] !== TAIL_PINS[k]) {
+      throw new Error(`[extract-itemrare] Z2/S1① 食物尾式文本漂移(:${at + 1}):${JSON.stringify(LINES[at])}（expected ${JSON.stringify(TAIL_PINS[k])}）——尾式改版全工具链不可见面,须重定谳`);
+    }
+  }
+  const bm = TAIL_PINS[1].match(/^\t\tnum = \(\(buffType == (\d+)\) \? \(num \+ (\d+)f\) : \(\(buffType != (\d+)\) \? \(num \+ (\d+)f\) : \(num \+ (\d+)f\)\)\);$/);
+  if (!bm) throw new Error('[extract-itemrare] Z2/S1① 尾式基值三支不可解析（形态漂移,须重定谳）');
+  const tm = TAIL_PINS[2].match(/^\t\tnum \+= \(float\)\(buffTime \/ (\d+)\);$/);
+  if (!tm) throw new Error('[extract-itemrare] Z2/S1① buffTime 除数不可解析（形态漂移,须重定谳）');
+  const rz = TAIL_PINS[3].match(/^\t\trare = \(int\)\(num \/ (\d+)f\);$/);
+  if (!rz) throw new Error('[extract-itemrare] Z2/S1① rare 除数不可解析（形态漂移,须重定谳）');
+  const tail = { posId: +bm[1], posVal: +bm[2], negId: +bm[3], neqVal: +bm[4], eqVal: +bm[5], timeDiv: +tm[1], rareDiv: +rz[1] };
+  if (tail.posId === tail.negId) throw new Error(`[extract-itemrare] Z2/S1① 尾式三支 id 退化(posId==negId=${tail.posId})——分支语义矛盾,须重定谳`);
+  // 定谳钉值对拍（1457 亲读终值;源改基值/除数→解析≠钉=fail-loud,改口径须先定谳再改钉值）
+  const Z2_TAIL_TRUTH = { posId: 207, posVal: 12, negId: 206, neqVal: 3, eqVal: 8, timeDiv: 14400, rareDiv: 4 };
+  for (const [k, v] of Object.entries(Z2_TAIL_TRUTH)) {
+    if (tail[k] !== v) throw new Error(`[extract-itemrare] Z2/S1① 尾式基值/除数漂移:${k}=${tail[k]}（expected ${v}）——新基值/新除数现形须先定谳`);
+  }
+  // num 语义（:48392-48395 亲读,常量已由上方解析）:饱食档→基值（207 三档=12/206 两档=8/
+  // 其余含 26 一档与无 buff=3）+ buffTime 整除档位（14400 帧=4 分钟）;rare=(int)(num/4f)
+  // 截断。C# int/int 整除+float 除后 (int) 强转 ≡ Math.trunc。
   const rare = {};
   for (const id of ids) {
     const [buff, time] = args.get(id) ?? [0, 0];
-    const base = buff === 207 ? 12 : buff === 206 ? 8 : 3;
-    rare[id] = Math.trunc((base + Math.trunc(time / 14400)) / 4);
+    const base = buff === tail.posId ? tail.posVal : buff !== tail.negId ? tail.neqVal : tail.eqVal;
+    rare[id] = Math.trunc((base + Math.trunc(time / tail.timeDiv)) / tail.rareDiv);
   }
   return { ids, rare };
 })();

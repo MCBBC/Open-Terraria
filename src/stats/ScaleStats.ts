@@ -438,13 +438,16 @@ export function scaleStatsWorldOf(
 //     图鉴图标实例以原版体型呈现）。488 训练假人本身不入图鉴
 //     （NPCBestiaryDrawOffset[488].Hide=true，NPCID.cs:10429-10435 → 本仓
 //     BESTIARY_HIDE_IDS）。
-//   ②canDisplayBuffs——NPC 字段（:6124 默认 true / :8423 SetDefaults 复位）；
+//   ②canDisplayBuffs——NPC 字段（★Z4/行号勘误 2026-10-02 审计 D6：:6206 默认 true /
+//     :8519 SetDefaults 复位——旧引 :6124/:8423 系漂移号）；
 //     FTW 245/246/247/248 石巨人族置 false（★清偿刀 P4 锚勘误 2026-09-30：旧引
 //     :17945/:17950/:17955 系 1456 行号——1457 实锚 :18042/:18047/:18052,亲读复核；
 //     249 无此项）。
-//     原版仅两处消费：GetNPCColorTintedByBuffs 染色门（:92026，Main.cs:22797）、
-//     UpdateNPC_BuffApplyVFX 鞭标闪电粒子门（:92135）——两消费者本仓均未移植
-//     （debuff 自发光段 :92181+ 原版不受此门）；BuffID.Sets 无图标显隐集
+//     原版仅两处消费：GetNPCColorTintedByBuffs 染色门（NPC.cs:92142,早退 :92144；
+//     经 Main.cs:23170 调用——旧引 :92026/Main.cs:22797 系漂移号）、
+//     UpdateNPC_BuffApplyVFX（NPC.cs:92263,非 Main.cs）函数头早退门 :92265
+//     （鞭标闪电粒子 :92270-92277 在其内——旧引 :92135 系漂移号）——两消费者本仓
+//     均未移植（debuff 自发光段 :92181+ 原版不受此门）；BuffID.Sets 无图标显隐集
 //     （玩家侧 buff 图标恒画，仅时长文字被 TryGetBuffTime 门控 Main.cs:42688-42703），
 //     字段先行落地保数据链一致（Enemy.canDisplayBuffs）。
 //   ③sizeScaleOverride 膨胀+二次盒——见 netIdSpawnScale 头注。

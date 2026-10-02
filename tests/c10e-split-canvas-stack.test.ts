@@ -116,12 +116,15 @@ describe('C10e 帧分类与路由（帧头定谳——状态全 settle）', () =
 });
 
 describe('C10e GLPipeline 屏直出栈', () => {
-  it('screenStackMode/screenCleared/屏栈 API 齐备;over=premul 叠合入栈,off=直写不入栈', () => {
+  it('screenStackMode/screenCleared/屏栈 API 齐备;over=premul 叠合入栈,off=直写不入栈（★K1-2:present 委托 presentTexTo——premul+入栈仅 over∧screenStackMode,栈关 over=off 直写语义逐位保持;screenStackView 只读暴露）', () => {
     expect(PIPE).toContain('screenStackMode = false;');
     expect(PIPE).not.toContain('screenCleared');   // ★实机拖影定谳:帧首清屏闩废除（显式帧头清屏替代）
     expect(PIPE).toContain('clearScreenForStack(): void');
     expect(PIPE).toContain('restackScreen(): void');
-    expect(PIPE).toMatch(/present\(src: PipelineFbo, over = false\): void \{[\s\S]{0,400}if \(over && this\.screenStackMode\) \{\s*\n\s*this\.setBlend\('premul'\);\s*\n\s*this\.screenStack\.push\(src\);\s*\n\s*\} else \{\s*\n\s*this\.setBlend\('off'\);\s*\n\s*\}/);
+    expect(PIPE).toMatch(/present\(src: PipelineFbo, over = false\): void \{[\s\S]{0,400}const stackOver = over && this\.screenStackMode;\s*\n\s*if \(stackOver\) this\.screenStack\.push\(src\);\s*\n\s*this\.presentTexTo\(null, src\.tex, stackOver, 1\);/);
+    // presentTexTo=组装口（屏栈重放/基底直写;不入屏栈——不变式唯一写点仍在 present）
+    expect(PIPE).toMatch(/presentTexTo\(target: PipelineFbo \| null, tex: WebGLTexture, over: boolean, flipY: number\): void \{[\s\S]{0,400}this\.setBlend\(over \? 'premul' : 'off'\);[\s\S]{0,300}this\.drawQuad\(this\.presentProg, \[0, 0, this\.frameW, this\.frameH\], flipY\);/);
+    expect(PIPE).toMatch(/get screenStackView\(\): readonly PipelineFbo\[\] \{\s*\n\s*return this\.screenStack;\s*\n\s*\}/);
     // restack 先快照再清（clear 清栈——重放源须保序）
     expect(PIPE).toMatch(/restackScreen\(\): void \{[\s\S]{0,200}const stack = this\.screenStack\.slice\(\);[\s\S]{0,200}for \(const f of stack\) this\.present\(f, true\);/);
   });
@@ -166,18 +169,21 @@ describe('C10e present 位处置（设计文档 §二 P1-P14）', () => {
     expect(RDR).toMatch(/wctx\.drawImage\(glw\.canvas, 0, 0, lw, lh\);\s*\n\s*wctx\.restore\(\);\s*\n\s*\/\/ ★C10e[\s\S]{0,200}if \(this\._c10eFrame && glw\.pipeBackend\) glw\.pipeBackend\.restackScreen\(\);/);
   });
 
-  it('P14 滤镜链输入=全帧合成 scratch（三画布折叠;旗关=主画布原路径）;★K1 分档:合成闩在帧链源直取 HUD（省折叠 scratch 清屏+HUD 腿）,未合成帧/2D 回退链=折叠 scratch 原路径', () => {
-    expect(RDR).toContain('const chainSrc = (Renderer.c10eK1 && this._c10eFrame && this._c10eComposited)');
-    expect(RDR).toContain('? this.canvas : this.c10eChainSource();');
-    expect(RDR).toContain('chainOk = gl.drawChainPipe(pipe, chainSrc, passes, [');
+  it('P14 滤镜链输入三档（★K1-2 2026-10-02）:?c10ek1=0=三画布折叠 scratch（K1-前全旧行为）;xform 合成帧=HUD 直取（K1-1 收益保留）;其余 c10e 滤镜帧=屏栈 FBO 直入 drawChainPipeStack（链输入组装全 GPU 侧——省 P1/P2 合成 2 次 2D 全幅腿+折叠跨上下文腿）;防御窗/2D 回退链=折叠 scratch 原路径', () => {
+    expect(RDR).toMatch(/if \(!Renderer\.c10eK1\) \{\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, this\.c10eChainSource\(\), passes,/);
+    expect(RDR).toMatch(/\} else if \(this\._c10eFrame && this\._c10eComposited\) \{\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, this\.canvas, passes,/);
+    expect(RDR).toContain('gl.drawChainPipeStack(pipe, { sky: this.skyCanvas, hud: this.canvas, useHud: true }, passes, [');
+    expect(RDR).toContain("this.sfxPathStats['pipe-stack']");
     expect(RDR).toContain('if (!chainOk && gl.drawChain(this.c10eChainSource(), passes,');
     expect(RDR).toContain('private c10eChainSource(): HTMLCanvasElement {');
   });
 
-  it('P1/P2 全帧合成（死亡灰化/重力翻转自拷消费者前置）;幂等闩;★K1 门拓宽（xform∨滤镜待发——合成产物即滤镜链输入）', () => {
+  it('P1/P2 全帧合成（死亡灰化/重力翻转自拷消费者前置）;幂等闩;★K1-2 门收窄（合成回归 xform 专属——K1-1 滤镜待发臂摘除,滤镜帧链输入改屏栈组装不再需要全帧合成垫底）', () => {
     expect(RDR).toMatch(/private c10eCompositeIntoHud\(\): void \{[\s\S]{0,200}if \(this\._c10eComposited \|\| !this\._c10eFrame\) return;\s*\n\s*this\._c10eComposited = true;/);
-    expect(RDR).toMatch(/if \(this\._c10eFrame && this\._c10eWorldToHud && !this\._c10eComposited\s*\n\s*&& \(this\.c10eFullXformCond\(player, world\) \|\| this\._c10eFilterPending\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
-    expect(RDR).toMatch(/if \(this\._c10eFrame && !this\._c10eComposited\s*\n\s*&& \(this\.c10eFullXformCond\(player, world\) \|\| this\._c10eFilterPending\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    expect(RDR).toMatch(/if \(this\._c10eFrame && this\._c10eWorldToHud && !this\._c10eComposited\s*\n\s*&& this\.c10eFullXformCond\(player, world\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    expect(RDR).toMatch(/if \(this\._c10eFrame && !this\._c10eComposited\s*\n\s*&& this\.c10eFullXformCond\(player, world\)\) \{\s*\n\s*this\.c10eCompositeIntoHud\(\);\s*\n\s*\}/);
+    // ★K1-2:P1/P2 合成门零滤镜待发臂（pending 残留=回归面——滤镜帧必须走 Stack 档）
+    expect(RDR.match(/c10eFullXformCond\(player, world\) \|\| this\._c10eFilterPending/g)?.length ?? 0).toBe(0);
     // ★K1:合成 destination-over 落既有 HUD 覆盖层之下+gl→sky 逆序垫底
     //  （空 HUD 帧与 source-over sky→gl 逐位同;气球/credits/2D 回退类不透明天空埋层消除）
     expect(RDR).toMatch(/ctx\.globalCompositeOperation = 'destination-over';[\s\S]{0,200}ctx\.drawImage\(this\.glCanvasEl, 0, 0\);\s*\n\s*if \(this\.skyCanvas\) ctx\.drawImage\(this\.skyCanvas, 0, 0\);/);
@@ -190,7 +196,7 @@ describe('C10e present 位处置（设计文档 §二 P1-P14）', () => {
 
   it('★K1 滤镜待发预测单源（2026-10-01）:谓词=块门保守超集（sfxPipe×c10eK1 门/anyInUse∨heatInUse/月总倒计时/塔斜坡双臂）;帧分类下半 P1 前计算一次', () => {
     expect(RDR).toContain('private c10eFilterPending(world: World, player: Player): boolean {');
-    expect(RDR).toMatch(/if \(!Renderer\.sfxPipe \|\| !Renderer\.c10eK1\) return false;\s*\n\s*const mono = this\.monoFilters;\s*\n\s*if \(mono\.anyInUse \|\| mono\.heatInUse\) return true;\s*\n\s*if \(world\.lunarEvent && world\.lunarEvent\.moonLordCountdown > 0\) return true;\s*\n\s*if \(this\._towerFilterOpacity > 0\) return true;\s*\n\s*return this\._lunarTowerFilterTarget\(this\._frameEntities, player\.cx, player\.cy, world\) != null;/);
+    expect(RDR).toMatch(/if \(!Renderer\.sfxPipe \|\| !Renderer\.c10eK1\) return false;\s*\n\s*const mono = this\.monoFilters;\s*\n\s*if \(mono\.anyInUse \|\| mono\.heatInUse\) return true;\s*\n\s*if \(world\.lunarEvent && world\.lunarEvent\.moonLordCountdown > 0\) return true;\s*\n\s*if \(TOWER_KEYS\.some\(\(k\) => this\._towerFilterOpacity\[k\] > 0\)\) return true;\s*\n\s*const tows = this\._lunarTowerFilterTargets\(this\._frameEntities, player\.cx, player\.cy, world\);\s*\n\s*return TOWER_KEYS\.some\(\(k\) => tows\[k\] != null\);/);
     expect(RDR).toMatch(/this\._c10eFilterPending = this\._c10eFrame\s*\n\s*&& this\.c10eFilterPending\(world, player\);/);
     // 逃生门:static c10eK1（?c10ek1=0 逐项回 K1 前行为）
     expect(RDR).toMatch(/private static _c10eK1 = \(\(\) => \{[\s\S]{0,200}get\('c10ek1'\) !== '0';/);

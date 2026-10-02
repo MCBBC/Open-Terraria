@@ -2001,11 +2001,15 @@ export class Enemy extends Entity {
    *  `!justHit && velocity.X != oldVelocity.X`（:29469-29472）消费 = 上一拍碰撞是否改变
    *  了 vx（撞墙停/反向 → 折返）。tortoiseAI 每 tick 移动积分前写（与原版每拍写同相） */
   tortoiseOldVx = 0;
-  /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true / :8423 SetDefaults 复位）。
-   *  FTW 世界 245-248 石巨人族置 false（getGoodAdjustments :17945/:17950/:17955，
-   *  249 不置）。原版门控消费两处：GetNPCColorTintedByBuffs 染色（:92026，经
-   *  Main.cs:22797）与 UpdateNPC_BuffApplyVFX 鞭标闪电粒子（:92135）——两消费者
-   *  本仓未移植（debuff 自发光 :92181+ 段不受此门），字段落地保数据链一致（批次B） */
+  /** NPC.canDisplayBuffs（★Z4/行号勘误 2026-10-02 审计 D6:NPC.cs:6206 默认 true /
+   *  :8519 SetDefaults 复位——旧引 :6124/:8423 系漂移号）。
+   *  FTW 世界 245-248 石巨人族置 false（getGoodAdjustments :18042/:18047/:18052，
+   *  249 不置）。原版门控消费两处：GetNPCColorTintedByBuffs 染色门（NPC.cs:92142,
+   *  早退 :92144;经 Main.cs:23170 DrawNPC 链调用）与 UpdateNPC_BuffApplyVFX
+   *  （NPC.cs:92263）鞭标闪电粒子——后者即函数头 canDisplayBuffs 早退门 :92265
+   *  （markedByEelWhip 鞭标蓝闪 :92270-92277 等粒子全谱在其内;旧引「:92026/
+   *  Main.cs:22797/:92135」均系漂移号+函数错挂 Main.cs）——两消费者本仓未移植
+   *  （debuff 自发光 :92181+ 段不受此门），字段落地保数据链一致（批次B） */
   canDisplayBuffs = true;
   /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
   vanillaNetId = 0;
@@ -2550,6 +2554,12 @@ export class Enemy extends Entity {
     // :92733 FTW 豁免门:onFire && (type != 1 || ai[1] != 8 || !getGoodWorld) 才
     // AddFlamable(8)——getGood 下 type 1 且变体 ai[1]==8 的蓝史莱姆免着火 DoT
     // (1456 :92616 同款;蓝队 R1-10 补,1456/1457 两版皆有非新改)
+    // ★BJ437 流程备案（诚实注;2026-10-02 审计 D6 判「注缺失」后 Z4 补记）：
+    //  BJ437 曾试把下方 onFireT 倒数提出本豁免门（重构）,经定谳为行为等价——
+    //  FTW 火把史莱姆本就是永燃设计（AI_001_Slimes 每拍 AddBuff(24,216000) 续 3600,
+    //  NPC.cs:61442-61450;不因倒数出门产生残账）,且原注释「火不灭残账」论据不成立,
+    //  已逐字节回退——豁免门结构维持蓝队 R1-10 原判。本区终态 = 单遍直生移植
+    //  （燃烧族 debuff VFX 见 :2689 区）,勿再动门结构。
     const ftwSlimeFireExempt = !!game.world.seedFlags?.getGoodWorld
       && this.vanillaId === 1 && this.ai1 === 8;
     if (this.onFireT > 0 && !ftwSlimeFireExempt) {
@@ -2563,8 +2573,8 @@ export class Enemy extends Entity {
       }
       // ★BJ437（2026-10-02）：火尘粒子已迁下方「燃烧族 debuff VFX」区真尘直生——
       //  旧泛色方块近似曾挂在本豁免门内 = FTW 火把史莱姆（ai1=8 永燃,
-      //  :61239-61247 AddBuff(24,216000) 每拍续 3600）被门误杀零粒子;非 FTW 面
-      //  色方块画在光照合成前被乘光+形态非火（用户实报「只发红没有火粒子」）。
+      //  NPC.cs:61442-61450 AddBuff(24,216000) :61445 每拍续 3600）被门误杀零粒子;
+      //  非 FTW 面色方块画在光照合成前被乘光+形态非火（用户实报「只发红没有火粒子」）。
       //  原版粒子/点光在 UpdateNPC_BuffApplyVFX :92353（旗位驱动,与 DoT 豁免无涉）。
     }
 
@@ -3903,29 +3913,32 @@ export class Enemy extends Entity {
             stL.setTile(wx, wy, TILE_BY_KEY['v_51_cobweb'] ?? 0);
           }
         }
-      } else if (a1 === 3086) {                                   // :61222-61226 花岗岩 防御+16 kb0
+      } else if (a1 === 3086) {                                   // :61425-61430 花岗岩 防御+16 kb0
         this.def.defense = base.def + 16;
         this.def.knockbackResist = 0;
-      } else if (a1 === 3081) {                                   // :61228-61232 大理岩 同款
+      } else if (a1 === 3081) {                                   // :61431-61436 大理岩 同款
         this.def.defense = base.def + 16;
         this.def.knockbackResist = 0;
       } else if (a1 === 147) {
-        this.def.damage = base.dmg * 2;                           // :61234-61237 棘刺史莱姆 伤害×2
+        this.def.damage = base.dmg * 2;                           // :61437-61441 棘刺史莱姆 伤害×2
       } else if (a1 === 8 && sf.getGoodWorld) {
-        // :61239-61247 火把史莱姆（ftw 专属）：AddBuff(24, 216000) 永燃（火尘/光
-        //  (1,0.3,0.1) 均已由 onFireT 管线承担）+ buffImmune[323/44/324/39]（OnFire3/
-        //  Frostburn/Frostburn2/CursedInferno）。本仓无实例级 buff 免疫表——梯段每
-        //  tick 清四计时位等效免疫（梯先于 debuff tick 跑，零漏帧）
+        // ★Z4/行号勘误（审计 D6,2026-10-02）：火把史莱姆（ftw 专属）实锚 =
+        //  NPC.cs:61442-61450（AddBuff(24, 216000) :61445 永燃（火尘/光 (1,0.3,0.1)
+        //  均已由 onFireT 管线承担）+ buffImmune[323/44/324/39]（OnFire3/Frostburn/
+        //  Frostburn2/CursedInferno）:61446-61449——旧引 61239-61247 系同函数
+        //  slime 染色块（color Lerp 带 :61215-61287）的错位撞号,非本块）。
+        //  本仓无实例级 buff 免疫表——梯段每 tick 清四计时位等效免疫（梯先于
+        //  debuff tick 跑，零漏帧）
         this.onFireT = 3600;
         this.onFire3T = 0; this.frostburnT = 0; this.frostburn2T = 0; this.cursedT = 0;
       } else if (a1 === 5395) {
-        // :61248-61259 屎史莱姆：1/30 PooFly 粒子编排（ParticleOrchestrator，
-        //  clientOnly）——本仓无 ParticleOrchestrator 管线，纯视觉跳过（备案）
+        // :61451-61462 屎史莱姆：1/30 PooFly 粒子编排（ParticleOrchestrator，
+        //  clientOnly,掷门 :61454）——本仓无 ParticleOrchestrator 管线，纯视觉跳过（备案）
       } else if (a1 === 1124) {
-        // :61260-61277 蜂巢史莱姆：Next(60)==7 且目标存活视线可达 → NewNPC 蜂
-        //  210/211 @Center；初速 = (Next(−20,21)×0.1, −1) 归一 ×3；localAI[0]=60 /
-        //  ai[1]=60 蜂状态位随实体带入。CanBeReplacedByOtherNPCs（出怪池替换标记）
-        //  本仓 spawner 无对应位，登记
+        // :61463-61480 蜂巢史莱姆：Next(60)==7 且目标存活视线可达 → NewNPC 蜂
+        //  210/211 @Center（:61466-61469）；初速 = (Next(−20,21)×0.1, −1) 归一 ×3；
+        //  localAI[0]=60 / ai[1]=60 蜂状态位随实体带入。CanBeReplacedByOtherNPCs
+        //  （出怪池替换标记 :61470）本仓 spawner 无对应位，登记
         if (roll(60) === 7 && player && !player.dead && this.canSeePlayer(stL, player)) {
           const bee = Enemy.fromVanilla(210 + roll(2), this.cx, this.cy);
           if (bee) {
@@ -15598,17 +15611,24 @@ bindEnemyCtor(Enemy);
  *  ——★BJ210 收编单源 data/tiles.ts:FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS（逐值对拍 17≡17,§6i） */
 const FAIRY_LURE_SHEETS = FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS;
 
-/** tileOreFinderPriority（Main.cs:6356-6391）：引导优先级——同优先级取最近，
- *  矿石族 3×3 计数 ≥40 才有效（大矿脉才算"宝藏"） */
+/** tileOreFinderPriority（Main.cs:6540-6571，短整型数组 Main.cs:1486 零填充→未列
+ *  tile 默认 0=有效候选）：引导优先级——同优先级取最近（NPC.cs:49280-49290）。
+ *  矿脉门见 fairyTreasureCoords（±3×±3 同类计数<40 → 剔除，NPC.cs:49258-49278）。
+ *  ★Z3 补 236 生命果/702 生命果复制品=810（全表最高，Main.cs:6570-6571）——
+ *  缺失时「生命果永不成为引路目标」（repo 旧 fallback −1 跳过式）。
+ *  656/701/751/752=760/770 同段缺但均不在 FriendlyFairyCanLureTo 集内（lure 集外
+ *  无消费面）=零实害，刻意不补（D5 定谳）。 */
 const FAIRY_LURE_PRIORITY: Record<number, number> = {
   28: 100, 407: 150, 404: 150, 7: 200, 166: 210, 6: 220, 167: 230, 9: 240,
   168: 250, 8: 260, 169: 270, 22: 300, 204: 310, 37: 400, 21: 500, 467: 500,
   441: 500, 468: 500, 12: 550, 665: 550, 639: 550, 107: 600, 221: 610,
   108: 620, 222: 630, 111: 640, 223: 650, 129: 675, 211: 700, 227: 750,
+  236: 810, 702: 810,
 };
 
-/** IsValidForOreFinder（SceneMetrics.cs:904-919）：227 生命果仅 272≤frameX≤374、
- *  129 宝箱仅 frameX≥324 才算 */
+/** IsValidForOreFinder（SceneMetrics.cs:895-907）：227 草药（DyePlants）仅成熟株
+ *  272≤frameX≤374、129 水晶碎晶（Crystals）仅大晶 frameX≥324 才算（旧注误标
+ *  「生命果/宝箱」，Z3 勘误） */
 function fairyOreFinderValid(sheet: number, frameX: number): boolean {
   if (sheet === 227) return frameX >= 272 && frameX <= 374;
   if (sheet === 129) return frameX >= 324;
@@ -15647,8 +15667,18 @@ function fairyBirdFlight(
   return { down, up };
 }
 
-/** 宝箱/引导目标搜索（GetFairyTreasureCoords :48794-48852）：中心 ±75×±50 窗
- *  （钳世界缘 40），按优先级取最高（同优先取最近）；矿石族 3×3 同类计数 ≥40 */
+/** 矿脉门矿种（TileID.cs:403 Ore ∩ TileID.cs:413 FriendlyFairyCanLureTo = 9 种）：
+ *  金 8/铂 169/钴 107/钯 221/秘银 108/山铜 222/精金 111/钛 223/叶绿 211。NPC.cs:49257
+ *  矿脉门只作用于 lure 预筛后的候选 ⇒ 门谓词 TileID.Sets.Ore[t] ≡ 此交集。
+ *  ★IDG-T2 内部域平移（勿直查 data/tiles 裸 sheet 键表；推导锁见 tests/fairy-treasure） */
+export const FAIRY_ORE_VEIN_SHEETS: ReadonlySet<number> = new Set([
+  8, 169, 107, 221, 108, 222, 111, 223, 211,
+]);
+
+/** 宝箱/引导目标搜索（GetFairyTreasureCoords NPC.cs:49236-49295）：中心 ±75×±50 窗
+ *  （钳世界缘 40，Main.maxTiles 四向 −40 收缩取交 :49245-49248），按优先级取最高
+ *  （同优先取最近 :49280-49290）；矿石族（TileID.Sets.Ore∩lure 集=金/铂/钴/钯/
+ *  秘银/山铜/精金/钛/叶绿 9 种）±3×±3 同类计数 ≥40 才有效（矿脉门 :49258-49278） */
 export function fairyTreasureCoords(
   st: import('../world/TileStore').TileStore, cx: number, cy: number,
 ): [number, number] | null {
@@ -15662,8 +15692,23 @@ export function fairyTreasureCoords(
       const sheet = st.flags[idx] ? (TILE_DEFS[st.type[idx]]?.vanilla?.sheet ?? 0) : 0;
       if (!sheet || !FAIRY_LURE_SHEETS.has(sheet)) continue;
       if (!fairyOreFinderValid(sheet, st.frameX[idx])) continue;
-      let prio = FAIRY_LURE_PRIORITY[sheet] ?? -1;
-      if (prio < 0) continue;
+      const prio = FAIRY_LURE_PRIORITY[sheet] ?? 0;   // 未列默认 0=有效候选（Main.cs:1486 零填充；旧 fallback −1 跳过式=偏离,Z3 修）
+      if (prio < 0) continue;   // 表内无负值,防御位（原版 return num2!=−1 同语义）
+      if (FAIRY_ORE_VEIN_SHEETS.has(sheet)) {
+        // 矿脉门（NPC.cs:49258-49278）：±3×±3（7×7=49 格）同类计数<40 → num4=−1。
+        // num2 初值 −1 ∧ 返回 num2!=−1 ⇒ num4=−1 等价移出候选（单块散矿不算宝藏,
+        // 亦不被任何实候选压过；此处 continue 与原版赋 −1 逐结果等价）。
+        // 搜索窗已钳世界缘 40 ⇒ 7×7 窗恒在界内,inBounds 守卫纯防御。
+        let vein = 0;
+        for (let k = i - 3; k <= i + 3; k++) {
+          for (let l = j - 3; l <= j + 3; l++) {
+            if (!st.inBounds(k, l)) continue;
+            const i2 = st.idx(k, l);
+            if (st.flags[i2] && (TILE_DEFS[st.type[i2]]?.vanilla?.sheet ?? 0) === sheet) vein++;
+          }
+        }
+        if (vein < 40) continue;
+      }
       if (bestPrio <= prio) {
         const d = Math.hypot(i * 16 + 8 - cx, j * 16 + 8 - cy);
         if (bestPrio !== prio || d < bestD) {

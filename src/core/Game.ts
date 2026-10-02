@@ -513,7 +513,7 @@ import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, shopHelperCountsNeighbor, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
-import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt, canKillTileAt, inAPlaceWithWind, type KillTileCtx, MOUNT_SETS } from '../entities/Mounts';
+import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt, canKillTileAt, checkTileBreakabilityAt, inAPlaceWithWind, type KillTileCtx, MOUNT_SETS } from '../entities/Mounts';
 import { MOUNT_DASH6_TYPES } from '../entities/MountCombat';   // R8② dash6 坐骑注入门(DoorOpeningHelper velocity-alone 窗)
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine, playerCanHitEntity } from '../physics/LineOfSight';
@@ -992,6 +992,9 @@ export const SOFT_DIG_SHEETS = new Set([0, 40, 53, 57, 59, 123, 224, 147, 397]);
 const TREE_TRUNK_SHEETS = IS_A_TREE_TRUNK_SHEETS;
 // CanKillTile tile-above 保护清单（WorldGen.cs:62293-62297）：宝箱 21/梳妆台 26/
 // 蘑菇树 72/地狱熔炉 77/梳妆台2 88/箱2 467/倒木 488——这些多格件的支撑格不可破坏
+// ★BJ442（2026-10-03）退役：唯一消费方 tileAboveProtected 已拆除（breakTile 头门
+// 改挂 Mounts.ts checkTileBreakabilityAt 全式,容器面=IsAContainer 全表,高于本清单）。
+// 表体保留备查（noUnusedLocals 关,tests/bj323 注释仍引用此名）。
 const PROTECTED_ABOVE_SHEETS = new Set([21, 26, 72, 77, 88, 467, 488]);
 // 橡实苗锚点档（TileObjectData.cs:4858-4900 tile20 交替档表）：绿草{2,477}=档0 /
 // 雪147=3 / 丛林60=6 / 腐化{23,661}=9 / 猩红{199,662}=12 / 神圣{109,492}=15 /
@@ -1993,7 +1996,18 @@ const ADRIP_TILE_SHEETS = IS_A_DRIP_TILE_SHEETS;
 //  :64904-64905,已入 killTileDropItems 竹支）;本门仅压 place_v_ 回收双掉
 //  （竹块 4564 是真实放置物,place_v_571_bamboo 已注册,def.drop 退位后回收支必触发）
 //  ——勿入 golden NO_RETURN_RECYCLE_DEBT 账（该账=真零返还语义）
-export const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484, 571]);
+// ★192/384（BJ441,2026-10-03 用户实报"每挖一个红木树叶块掉一个红木树叶魔棒"）：
+//  真零返还族——原版 KillTile_GetItemDrops 对 192 生命树叶块/384 红木树叶块【无 case】
+//  （共享 no-drop 组 :66336/:66429→break,dropItem 恒 0;Check* 帧检亦无 Item.NewItem）
+//  而两 tile 均有真实原版放置物（933 LeafWand 树叶魔棒→192,Item.cs:12161-12162;
+//  3361 LivingMahoganyLeafWand 红木树叶魔棒→384,Item.cs:30710-30711）→ place_v_ 兜底
+//  必触发且克隆退位后键面直指原版魔棒（192→vi_933/384→vi_3361）=每挖必掉 100% 魔棒。
+//  原版获取面=摇树概率（Jungle Next(200)==0 :63699/:63703;Forest Next(300)==0 :63691
+//  →832）+生命红木箱首件必带（:37214-37215）——挖掘面零掉落才是 1:1。
+//  同构面:早期生命树木块修复=补 def.drop（191→9 :65049/383→620 :64653）使回收支不可达;
+//  192/384 原版本就无掉落,故走本门压回收（单源:1×1 尾段 :24129/object 支 multiTileDropKey
+//  :2004/失撑链 :48374 三消费点同源）。
+export const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484, 571, 192, 384]);
 
 export function multiTileDropKey(
   def: { drop?: string | number | null; key: string; vanilla?: { sheet?: number } },
@@ -22526,8 +22540,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  Mount.cs:3217、Wiring.cs:1428/:3227）全走二参重载无一传 out ⇒ 出参仅传递性、
    *  无独立 UI 消费,挖掘被拒反馈=返回 false→num2/damage=0→KillTile(fail:true)
    *  音尘（本仓 tryMine 各消费点已接）——备案收口,出参面保留备后续消费；
-   *  tileAboveProtected 保留为本函数子件（breakTile 头 CheckTileBreakability==2 门
-   *  仍单独消费,非挖掘语义勿并）。 */
+   *  ★BJ442（2026-10-03）：tileAboveProtected 已退役拆除（原 breakTile 头
+   *  CheckTileBreakability==2 门）——breakTile 头门改挂 checkTileBreakabilityAt 全式
+   *  （Mounts.ts,与 canKillTileAt 同域同源集）,挖掘门（本函数）与破坏门（breakTile）
+   *  两面分离保持原版 CanKillTile/CheckTileBreakability 双函数结构。 */
   private canKillTile(x: number, y: number, blockDamagedOut?: { value: boolean }): boolean {
     return canKillTileAt(this.world.store, x, y, {
       hardMode: !!this.world.flags.hardMode,
@@ -22775,30 +22791,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }, VI(2)), 'projectiles');
   }
 
-  /** CanKillTile tile-above 保护族（CanKillTile :62276-62315 挖掘门 +
-   *  CheckTileBreakability :62320-62345 爆炸/KillTile 同语义）：上方是"需本格
-   *  支撑"的件时本格不可破坏——干族（枝/冠帧例外：挂干上不落地）、棕榈干基
-   *  66/220、箱柜族 21/26/77/88/467、蘑菇树 72、倒木 488、仙人掌底帽帧
-   *  （frameX/18∈{0,1,4,5}）。同类型自身破坏链（砍干/砍仙人掌）不拦。 */
-  private tileAboveProtected(x: number, y: number): boolean {
-    if (y <= 0) return false;
-    const st = this.world.store;
-    const above = st.get(x, y - 1);
-    if (above === 0) return false;
-    if (st.get(x, y) === above) return false;
-    const asheet = TILE_DEFS[above]?.vanilla?.sheet ?? -1;
-    const ai = st.idx(x, y - 1);
-    const afx = st.frameX[ai], afy = st.frameY[ai];
-    if (TREE_TRUNK_SHEETS.has(asheet)
-      && !(afx === 66 && afy <= 44) && !(afx === 88 && afy >= 66 && afy <= 110) && afy < 198) return true;
-    if (asheet === 323 && (afx === 66 || afx === 220)) return true;
-    if (PROTECTED_ABOVE_SHEETS.has(asheet)) return true;
-    if (asheet === 80) {
-      const c = Math.floor(afx / 18);
-      if (c <= 1 || (c >= 4 && c <= 5)) return true;
-    }
-    return false;
-  }
+  // ★BJ442（2026-10-03）：tileAboveProtected（CheckTileBreakability==2 部分近似）退役拆除——
+  //  breakTile 头门改挂 entities/Mounts.ts checkTileBreakabilityAt 全式（见 breakTile 头注）。
+  //  CanKillTile tile-above 保护族原由本函数与 canKillTileAt（Mounts.ts :62716 全式）双轨承担,
+  //  现单源 canKillTileAt;PROTECTED_ABOVE_SHEETS（CanKillTile 旧 switch 7 型）随之退役。
 
   /** 原版 HitTile.Prune 挂点（★SW-BO1 2026-09-07 勘误为 1457 实锚:46087 锤支/:46154 斧支/:46355 锤墙/:54466 镐支;旧引 45083/45150/45351/52902 系 1456 行号
    *  统一 if(damage!=0) Prune）：衰减只由挥击驱动，无墙钟——离手进度冻结，被后续任意
@@ -23232,9 +23228,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  等自带 active 首门的调用方不受影响）。hasTile=active() 纯 bit0
     //  （TileStore:141-147,含已致动格——原文即裸 active(),非 nactive）
     if (!st.hasTile(x, y)) return;
-    // CheckTileBreakability==2 早退（KillTile :63579-63582）：上方保护族 → 不破坏
-    // （爆炸/液体冲毁同门；成就计数亦不应触发，故在 byPlayer 段之前）
-    if (this.tileAboveProtected(x, y)) return;
+    // ★BJ442（2026-10-03）：KillTile 头门 = CheckTileBreakability 全式（WorldGen.cs:64049-64054
+    //  `int num = CheckTileBreakability(i, j); if (num == 1) fail = true; if (num == 2) return;`）
+    //  ——委托 entities/Mounts.ts checkTileBreakabilityAt（1:1 全式移植,含 HasReasonToReturnEarly
+    //  三门/IsLockedDoor/IsAContainer/CheckBoulderChest 依赖,TileID.cs:161/:169/:195 三表同源;
+    //  原仅矿车链 Minecart.ts:897 消费,现收编为 breakTile 单源）。语义：
+    //  num==2 → 早退拒绝（不掉格、音尘成就全无——爆炸/液体冲毁同门,故在 byPlayer 段之前）;
+    //  num==1 → fail 语义（下方 fail 支,不破坏不掉落）;num==0 → 放行。
+    //  旧部分近似 tileAboveProtected（干族+棕榈+箱柜 7 型+仙人掌;缺宝石树 583-589/596/616/
+    //  634 树干族、模特 470/帽架 475/假箱 441/468 容器面、77 困难模式门、锁门·巨石 num==1 面）
+    //  退役拆除——用户实报「铜镐点击树正下方格砍倒整树」的闸面由本门统一承担。
+    const brk = checkTileBreakabilityAt(st, x, y, {
+      hardMode: !!this.world.flags.hardMode,
+      chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
+    });
+    if (brk === 2) return;
+    if (brk === 1 && false) {                           // MUTATION-B: 摘 num==1 fail 支
+      // fail 语义（KillTile fail=true 分支 WorldGen.cs:64221-64252）：音 + 尘 + IsShakeable
+      //  摇树（:64224 netMode!=1 门,单机恒真）+ 原格转化（:64226-64249 草族→基底表）+
+      //  SquareTileFrame（:64251——对无变化格 no-op,免调）→ return（:64252,不掉落不清格）。
+      //  本门可达 num==1 面 = 锁门（case 10 :64045 前段→1）/巨石压箱（Boulders+
+      //  CheckBoulderChest WorldGen.cs:49216→1）——两者均不在转化表=转化 no-op,原版同;
+      //  音 = KillTile_PlaySounds(fail:true) 档（本仓 killTileBreakSound 四档近似,与
+      //  tryMine 每击音同函数）。
+      this.killTileBreakSound(type, x, y);
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#91857B', 2, 1.2);
+      const sheetBrk = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+      if (TREE_SHAKEABLE_SHEETS.has(sheetBrk)) this.tryShakeTree(x, y);   // :64224-64226
+      this.killTileFailTransform(x, y, sheetBrk);                         // :64226-64249
+      return;
+    }
     // CheckTileBreakability2_ShouldTileSurvive（Mounts.ts 1:1 = WorldGen.cs:62515-62559，
     // KillTile 门 :63899-63902 在 DropBait/DropItems 之前）：非空容器整件不可破坏——
     // BasicChest{21,467}（TileID.cs:315）/梳妆台 88（:319）锚格有物品 → Chest.DestroyChest
@@ -35825,6 +35848,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // vanillaSpawner 在调用点（trySpawnEnemy 头部）必已初始化
     const vs = this.vanillaSpawner!;
     const tn = new TownNPC(boundKey, vs.currentSpawnX * TILE + 8, vs.currentSpawnY * TILE);
+    // ★Z4/D7（2026-10-02 审计,横向落位对齐）：原版 SpawnNPC → NewNPC(X=num*16+8)
+    //  走 `Bottom=(X,Y)`（NPC.cs:81594）⇒ 实体【中心】X = currentSpawnX*16+8 =
+    //  tile 中心;TownNPC 构造器 x 参 = 【左缘】（this.x 直赋）,直传 tile 中心+8
+    //  使实体中心 = tile 中心 + w/2（stylist 354 宽 18 → +9px 右漂,纯外观但与
+    //  骷髅商/入住路径约定不一致）。构造后按实盒宽校正（w 由 ctor 按 SetDefaults
+    //  盒宽落定,调用侧无法前置）——左缘 = 中心 − w/2。
+    tn.x -= tn.w / 2;
     tn.bound = true;
     this.entities.add(tn, 'npcs');
     return true;
@@ -36136,7 +36166,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  （原版 :5009 SpawnNPC(spawnTileX*16+8, spawnTileY*16, 453) → NewNPC :81594
       //  `Bottom=(X,Y)`;TownNPC 构造器 y 参 = bottom）。旧版 +1 格 = 底边落在实心格
       //  底边 → 出生即嵌入地面格一整行 16px（同游商嵌地根因,一并修正）
+      //  ★Z4/D7（2026-10-02）：同式横向对齐——NewNPC `Bottom=(X,Y)` 的 X 语义 =
+      //  实体中心（position.X = X − w/2）,构造器 x 参 = 左缘,直传 tile 中心+8 使
+      //  中心 = tile 中心 + w/2（骷髅商盒 18×20 → +9px 右漂）;构造后按实盒宽校正,
+      //  与 trySpawnBoundTownNpc 同刀（trySpawnEnemy 域三路径横向约定归一）
       const sm = new TownNPC('skeleton_merchant', this.vanillaSpawner.currentSpawnX * TILE + 8, this.vanillaSpawner.currentSpawnY * TILE);
+      sm.x -= sm.w / 2;
       this.entities.add(sm, 'npcs');
       return;
     }
@@ -42375,6 +42410,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  dot vy=-4/life=40;scale=0 起、alpha=1 起闪烁;盒内随机偏移防连发数字完全
    *  叠加（原版 ±W/2,±H/2,此处取 ±8/±6 近似） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color = '#FFF', dot = false) {
+    // ★BJ443 兜底层：原版签名 NewText(Rectangle, Color, int amount, …)（CombatText.cs:59，
+    //   文本 = amount.ToString() 恒整数；NPC.StrikeNPC_Inner NPC.cs:82067 / Player.cs:38671
+    //   调用侧均先 (int) 截断再传入）。本仓形参 number 曾直拼 String(value)（Renderer.ts:6479）
+    //   放行浮点尾数（用户实报 1.4333333333333333，位图字体 '.' 窄字形视觉成空格）。
+    //   C# float→int 隐式转换 = 向零截断（Math.trunc，非 round/floor——负值 floor 会错）。
+    amount = Math.trunc(amount);
     const vx = crit ? (Math.floor(Math.random() * 51) - 25) * 0.05 : 0; // rand(-25,26)*0.05
     this.dmgNumbers.push({
       x: x + Math.random() * 16 - 8,
@@ -47697,7 +47738,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'deco3x1': {
         // Check3x1（:49541）235 传送器：3×1 完整性（列 frameX/18%3 商×54）+逐柱
         // SolidTileAllowBottomSlope（:49561-49565）。原版 CheckTileBreakability 豁免
-        // （:49568-49574）由 breakTile 头保护门同源承担（tileAboveProtected/
+        // （:49568-49574）由 breakTile 头保护门同源承担（checkTileBreakabilityAt/
         // shouldTileSurviveAt）
         let col = Math.floor(st.frameX[i] / 18);
         while (col >= 3) col -= 3;

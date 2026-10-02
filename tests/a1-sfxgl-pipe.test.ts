@@ -118,8 +118,12 @@ describe('A1 uniform 转录哨兵（禁改滤镜数学——与旧链逐式对�
 });
 
 describe('A1 逃生门双路（Renderer.drawScreenFilterChain）', () => {
-  it('管线链先行（sfxPipe 旗×wK===1 低清档门）,失败/旗关落旧 drawChain——次序锁定;★K1 链源分档（合成闩在=HUD 直取,未合成=折叠 scratch）', () => {
-    expect(RDR).toMatch(/if \(Renderer\.sfxPipe && this\._worldLowK === 1\) \{\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(pipe && !pipe\.unavailable\) \{\s*\n\s*\/\/ ★K1[\s\S]{0,700}const chainSrc = \(Renderer\.c10eK1 && this\._c10eFrame && this\._c10eComposited\)\s*\n\s*\? this\.canvas : this\.c10eChainSource\(\);\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, chainSrc, passes,/);
+  it('管线链先行（sfxPipe 旗×wK===1 低清档门）,失败/旗关落旧 drawChain——次序锁定;★K1/K1-2 链源三档（c10ek1=0=折叠 scratch/xform 合成帧=HUD 直取/其余 c10e 帧=屏栈 Stack 变体/防御窗=折叠）', () => {
+    expect(RDR).toMatch(/if \(Renderer\.sfxPipe && this\._worldLowK === 1\) \{\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(pipe && !pipe\.unavailable\) \{\s*\n\s*\/\/ ★K1\/K1-2[\s\S]{0,900}if \(!Renderer\.c10eK1\) \{\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, this\.c10eChainSource\(\), passes,/);
+    expect(RDR).toMatch(/\} else if \(this\._c10eFrame && this\._c10eComposited\) \{\s*\n\s*chainOk = gl\.drawChainPipe\(pipe, this\.canvas, passes,/);
+    expect(RDR).toMatch(/let stackPath = false;[\s\S]{0,1200}\} else if \(this\._c10eFrame && this\.skyCanvas && pipe\.screenStackMode\) \{\s*\n\s*stackPath = true;\s*\n\s*chainOk = gl\.drawChainPipeStack\(pipe, \{ sky: this\.skyCanvas, hud: this\.canvas, useHud: true \}, passes,/);
+    expect(RDR).toMatch(/if \(chainOk\) \{\s*\n\s*ctx\.drawImage\(pipe\.canvas, 0, 0\);\s*\n\s*if \(stackPath\) \{\s*\n\s*this\.sfxPathUsed = 'pipe-stack';\s*\n\s*this\.sfxPathStats\['pipe-stack'\] = \(this\.sfxPathStats\['pipe-stack'\] \|\| 0\) \+ 1;\s*\n\s*\} else \{\s*\n\s*this\.sfxPathUsed = 'pipe';\s*\n\s*this\.sfxPathStats\['pipe'\] = \(this\.sfxPathStats\['pipe'\] \|\| 0\) \+ 1;\s*\n\s*\}\s*\n\s*\}/);
+    expect(RDR).toMatch(/\} else \{\s*\n\s*\/\/ 非分体帧（拍照\/CPU\/低清上游已滤）与防御窗（sky 缺\/栈关\/管线帧中\s*\n\s*\/\/ 暴毙）=折叠 scratch 原路径[\s\S]{0,200}chainOk = gl\.drawChainPipe\(pipe, this\.c10eChainSource\(\), passes,/);
     expect(RDR).toMatch(/if \(!chainOk && gl\.drawChain\(this\.c10eChainSource\(\), passes,/);
     // 旧链体原样保留（逃生路径零改动——staging 乒乓仍在）
     expect(SFX).toContain('sctx.drawImage(this.canvas, 0, 0);');
@@ -145,11 +149,13 @@ describe('A1 A0 壳锁联动', () => {
     expect(A0).toContain("'GLScreenFilters.ts'");
   });
 
-  it('GLPipeline 门面零改动（复用 fbo/program/bindTarget/setBlend/drawQuad/present/beginFrame/uni,不另起炉灶）', () => {
+  it('GLPipeline 门面复用面（fbo/program/bindTarget/setBlend/drawQuad/present/beginFrame/uni 不另起炉灶;★K1-2 增 presentTexTo/screenStackView 最小暴露面）', () => {
     expect(PIPE).toContain('fbo(name: string, w: number, h: number)');
     expect(PIPE).toContain('present(src: PipelineFbo, over = false)');   // ★C10e:over 缺省参
+    expect(PIPE).toContain('presentTexTo(target: PipelineFbo | null, tex: WebGLTexture, over: boolean, flipY: number): void');
+    expect(PIPE).toContain('get screenStackView(): readonly PipelineFbo[]');
     expect(SFX).toContain('pipe.beginFrame(w, h);');
     expect(SFX).toContain('pipe.bindTarget(outFbo);');
-    expect(SFX).toContain('pipe.bindTarget(fboB);');
+    expect(SFX).toContain('pipe.bindTarget(to);');   // ★K1-2:直通 blit 抽取 pipeFlipTo（from→to）
   });
 });

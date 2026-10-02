@@ -22,8 +22,12 @@
 //   +钉面漂移一发（sweep≡pins 守卫 fail-loud exit≠0）+S1b break-exit apply 摘除一发
 //   （2203/2204 面唯一承载判别;源变异二发在 tests/v1-itemrare-nested-value.test.ts 变异⑥⑦）。
 //   原文件 sha256 前后全等=零接触。
+// ★清偿刀 Z2（2026-10-02,S1① 食物尾式钉面）:变异⑧⑨⑩源三发（尾式文本 /4f→/5f——即 D2
+//   M-F 实证旧实现静默的那一发——/基值 12f→13f/buffTime 除数 14400→14399 → 文本钉面
+//   fail-loud;红蓝 D2 潜伏面「改尾式全工具链不可见」就此闭合）+⑪脚本一发（解析值≡定谳
+//   钉值对拍漂移 fail-loud,证明机械解析层活体）。源变异走沙箱副本（v1 判例）,原树零接触。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -39,6 +43,7 @@ const ROOT = join(dirname(__dirname), '..');
 const SCRIPT = join(dirname(__dirname), 'tools', 'extract-itemrare.mjs');
 const SRC = () => readFileSync(SCRIPT, 'utf8');
 const TMP = realpathSync(tmpdir());
+const ITEM_CS = join(ROOT, 'Terarria1457', 'Terraria', 'Item.cs');
 
 const range = (lo: number, hi: number): number[] => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
 
@@ -234,10 +239,10 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     return { r, parsed: out ? (JSON.parse(out) as { RARE: Record<string, number>; VALUE: Record<string, number> }) : null };
   };
 
-  it('变异①摘食物尾式 compiler→rare[4022] 回落 1（证明 86 件面由尾式编译器唯一承载）', () => {
+  it('变异①摘食物尾式 compiler→rare[4022] 回落 1（证明 86 件面由尾式编译器唯一承载;★Z2 换锚=解析常量计算行）', () => {
     const before = shaOf();
     const { r, parsed } = runMutant((s) => s.replace(
-      'rare[id] = Math.trunc((base + Math.trunc(time / 14400)) / 4);',
+      'rare[id] = Math.trunc((base + Math.trunc(time / tail.timeDiv)) / tail.rareDiv);',
       'rare[id] = 1; // ★变异:尾式摘除',
     ));
     expect(r.status).toBe(0);
@@ -317,6 +322,96 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     expect(r.status).not.toBe(0);                       // fail-loud 拒产
     expect(parsed).toBeNull();                          // 零输出（不落盘不 dump）
     expect(r.stderr).toContain('S1③ 范围守卫 sweep≠钉表');
+    expect(shaOf()).toBe(before);
+  });
+
+  // ---- ★清偿刀 Z2（2026-10-02,S1① 食物尾式钉面）:定谳锚+尾式文本钉/基值解析判别 ----
+
+  it('Z2 定谳锚:尾式四行在 1457 Item.cs 在位（switch 收口+四语句+方法收口七行块唯一;1405 交叉参照同语义）', () => {
+    const src = readFileSync(ITEM_CS, 'utf8');
+    const pins = [
+      '\t\tfloat num = 0f;',
+      '\t\tnum = ((buffType == 207) ? (num + 12f) : ((buffType != 206) ? (num + 3f) : (num + 8f)));',
+      '\t\tnum += (float)(buffTime / 14400);',
+      '\t\trare = (int)(num / 4f);',
+    ];
+    // float num = 0f 全文 3 处（:524/:1090/:48392）非唯一——唯一性断言只对三式行;钉面
+    // 唯一性由【七行连续块】承载（switch 收口+尾段+方法收口,内含唯一三式行）
+    for (const p of pins.slice(1)) expect(src.split(p).length - 1, JSON.stringify(p)).toBe(1);
+    const block = '\t\t\tbreak;\n\t\t}\n' + pins.join('\n') + '\n\t}';
+    expect(src.split(block).length - 1).toBe(1);
+    // 三版对拍（1456:48004-48007 行漂文本逐字节全等;1458 Item.cs 全文件同 sha=与 1457 全等）
+    const s56 = readFileSync(join(ROOT, 'Terarria1456', 'Terraria', 'Item.cs'), 'utf8');
+    for (const p of pins) expect(s56).toContain(p);
+    expect(createHash('sha256').update(readFileSync(join(ROOT, 'Terarria1458', 'Terraria', 'Item.cs'))).digest('hex'))
+      .toBe(createHash('sha256').update(readFileSync(ITEM_CS)).digest('hex'));
+    // 1405 交叉参照（另一反编译器,同语义:207→12/206→8/缺省 3 + buffTime/14400 + ÷4 截断）
+    const s05 = readFileSync(join(ROOT, 'Terarria1405', 'Item.cs'), 'utf8');
+    expect(s05).toContain('(this.buffType != 207 ? (this.buffType != 206 ? num + 3f : num + 8f) : num + 12f)');
+    expect(s05).toContain('(this.buffTime / 14400)');
+    // 提取器钉面/解析锚在位（文本钉+机械解析+解析≡钉对拍三层）
+    const ex = SRC();
+    expect(ex).toContain('Z2_TAIL_TRUTH');
+    expect(ex).toContain('食物尾式文本漂移');
+    expect(ex).toContain('尾式基值/除数漂移');
+  });
+
+  /** Z2 源变异:cp Item.cs/ItemID.cs 到沙箱→变异副本;mutant 脚本读沙箱副本;原树零接触
+   *  （v1 判例同法;macOS /tmp 符号链接坑=临时目录一律 realpath,era-guard 测同注）。 */
+  const shaOfFile = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
+  const runItemSrcMutant = (itemMutation: (s: string) => string) => {
+    const dir = mkdtempSync(join(TMP, 's1a-srcmut-'));
+    const itemCopy = join(dir, 'Item.cs');
+    const itemidCopy = join(dir, 'ItemID.cs');
+    writeFileSync(itemCopy, itemMutation(readFileSync(ITEM_CS, 'utf8')));
+    writeFileSync(itemidCopy, readFileSync(join(ROOT, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8'));
+    const mutant = join(dir, 'extract-mutant.mjs');
+    const mutatedScript = 'const ITEM_COPY = ' + JSON.stringify(itemCopy) + ';\nconst ITEMID_COPY = ' + JSON.stringify(itemidCopy) + ';\n' + SRC()
+      .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8')", "readFileSync(ITEM_COPY, 'utf8')")
+      .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria.ID/ItemID.cs`, 'utf8')", "readFileSync(ITEMID_COPY, 'utf8')");
+    writeFileSync(mutant, mutatedScript);
+    const r = spawnSync('node', [mutant, '--dump'], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+      env: { ...process.env, SW_ITEM_VER: '1457' },
+    });
+    rmSync(dir, { recursive: true, force: true });
+    return { r, stderr: String(r.stderr) };
+  };
+
+  it('变异⑧源:/4f→/5f → Z2 尾式文本钉面 fail-loud exit≠0（=D2 M-F 实证旧实现静默的那一发,潜伏面就此闭合）', () => {
+    const before = shaOfFile(ITEM_CS);
+    const { r, stderr } = runItemSrcMutant((s) => s.replace('\t\trare = (int)(num / 4f);', '\t\trare = (int)(num / 5f);'));
+    expect(r.status).not.toBe(0);
+    expect(stderr).toContain('Z2/S1① 食物尾式文本漂移');
+    expect(stderr).toContain('rare = (int)(num / 5f);');
+    expect(shaOfFile(ITEM_CS)).toBe(before);   // 原树逐字节零接触
+  });
+
+  it('变异⑨源:基值 12f→13f → Z2 尾式文本钉面 fail-loud exit≠0（改基值必被拦）', () => {
+    const before = shaOfFile(ITEM_CS);
+    const { r, stderr } = runItemSrcMutant((s) => s.replace('(num + 12f)', '(num + 13f)'));
+    expect(r.status).not.toBe(0);
+    expect(stderr).toContain('Z2/S1① 食物尾式文本漂移');
+    expect(shaOfFile(ITEM_CS)).toBe(before);
+  });
+
+  it('变异⑩源:buffTime 除数 14400→14399 → Z2 尾式文本钉面 fail-loud exit≠0（改除数必被拦）', () => {
+    const before = shaOfFile(ITEM_CS);
+    const { r, stderr } = runItemSrcMutant((s) => s.replace('(float)(buffTime / 14400)', '(float)(buffTime / 14399)'));
+    expect(r.status).not.toBe(0);
+    expect(stderr).toContain('Z2/S1① 食物尾式文本漂移');
+    expect(shaOfFile(ITEM_CS)).toBe(before);
+  });
+
+  it('变异⑪脚本:定谳钉值 posVal 12→13 → 解析值≡钉值对拍 fail-loud exit≠0（证明机械解析层活体——钉表漂移被解析层拦,双源不漂移）', () => {
+    const before = shaOf();
+    const { r, parsed } = runMutant((s) => s.replace(
+      'const Z2_TAIL_TRUTH = { posId: 207, posVal: 12,',
+      'const Z2_TAIL_TRUTH = { posId: 207, posVal: 13,',
+    ));
+    expect(r.status).not.toBe(0);
+    expect(parsed).toBeNull();
+    expect(r.stderr).toContain('Z2/S1① 尾式基值/除数漂移:posVal=12（expected 13）');  // 解析值(源文本 12)≠漂移钉值
     expect(shaOf()).toBe(before);
   });
 });

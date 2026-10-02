@@ -2,7 +2,12 @@
 // vi_ 批次物品注册期无 armor/accessory 字段——槽位归属与防御值以本表为权威：
 //   s: 'h'|'b'|'l' 盔甲部位（headSlot/bodySlot/legSlot 赋值即归属，Item.cs SetDefaults）
 //   def: 防御值（defense = N 字面量）
-//   acc: 1 功能配饰 / 0 社交配饰（vanity=true；无功能效果）
+//   acc: 1 功能配饰 / 0 社交配饰——★R4 双旗定谳归一（2026-10-02 Z4 注释批,审计 D6）：
+//     acc 有定义（0 或 1）⟺ Item.accessory=true（35 件 acc:0 逐例核实=accessory+
+//     vanity 双旗,非「非配饰」）；0 档非「无功能效果」——原版功能/社交段共用
+//     accessory 单门、无 vanity 排除臂,双旗进功能段照给 benefits。消费面:
+//     槽位归属门读 acc!==undefined（Inventory.isAccessory :134）,功能独占门读
+//     acc===1（:152）,社交槽路由读 van===1（SwapEquip ArmorSwap :3289 面）
 import statsJson from './vanilla-itemstats.json';
 import { ITEM_DEFS } from './items';
 import { activeVariantStatsOfVid } from './vanillaItemVariants';

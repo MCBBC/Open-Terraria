@@ -4104,7 +4104,14 @@ export class Player extends Entity {
       // HurtLifeRegen 飘字（Player.cs:19207-19212）：DoT 分块伤害弹掉血数字,
       // LifeRegen 色 (255,60,70) + dot:true;原版 DoT 不触发受击闪烁/无敌帧/音效
       // ——故不进 damage(),死亡原因仍是 ByOther 默认包
-      const dot = this.buffs.consumeDotChunk();
+      // ★BJ443 根因层·显示面截断：dotChunkOut 唯一浮点源 = Buffs.tick 蜂蜜流率
+      //   对冲 cancel（Buffs.ts dotChunkOut -= cancel,accum=2×dt 浮点累加）——截断
+      //   须在 `dot > 0` 门【前】（C# int 语义=调用侧截断,门看截后值）,否则分数块
+      //   （0<x<1）过门后入口 trunc 出 "0" 飘字（原版蜂蜜对冲=延迟弹出,无弹无字）。
+      //   ★登记债（勿在此改）：同源浮点亦流入 heal → :4103 hp 真值面（净额与原版
+      //   一致但 hp 携分数,原版 lifeRegen/lifeRegenCount 全程整数）——修法=对冲改
+      //   整数位延迟弹出,牵动 Buffs.tick 金标,另刀。
+      const dot = Math.trunc(this.buffs.consumeDotChunk());
       if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
       // DoT 致死（:19142-19156 + :19186-19201）：suffocating→ByOther(7)；tongued 已在
       // 自身路径；其余按 :19187 链——vampireBurningInSunlight 优先 VampireBurningInDaylight

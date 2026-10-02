@@ -232,12 +232,14 @@ describe('BJ109-I：FilterTower 染色', () => {
   });
   it('Renderer 产位：lunarTowersNear 真喂数 + FilterTower pass 组装', () => {
     const src = rendererSrc();
-    expect(src).toContain('lunarTowersNear: this._lunarTowerFilterTarget(');
+    // ★多柱串柱定谳 2026-09-25：per-type 四槽（SceneState.cs:108-111 四行各管各槽）
+    expect(src).toContain('lunarTowersNear: (() => {');
+    expect(src).toContain('TOWER_KEYS.some((k) => tows[k] != null)');
     expect(src).toContain("kind: 'FilterTower'");
     // ★BJ346 勘误重产：targetPx=塔心世界系（ScreenShaderData.Apply 双端同减 offScreenRange）
     expect(src).toContain('targetPx: [tow.x, tow.y]');
     expect(src).not.toContain('targetPx: [tow.x - screenPos[0]');
-    expect(src).toContain('preset.useOpacity * this._towerFilterOpacity');
+    expect(src).toContain('preset.useOpacity * this._towerFilterOpacity[k]');
     // 盾态三支驱动抽纯函数（Main.cs:24564/24573/24581，★BJ346）
     expect(src).toContain('towerFilterDrive(tow.shieldUp, tow.ai3)');
     expect(src).not.toContain('intensity = Math.min(5, 15 * num320) + 1;');
@@ -245,11 +247,12 @@ describe('BJ109-I：FilterTower 染色', () => {
     const mono = readFileSync(new URL('../src/render/MonolithFilters.ts', import.meta.url), 'utf8');
     expect(mono).toContain('★BJ109-I 2026-09-16 已接真喂数');
   });
-  it('_lunarTowerFilterTarget：≤4000px 最近塔 + 塔心−(0,10)', () => {
+  it('_lunarTowerFilterTargets：per-type 四槽 ≤4000px 最近塔 + 塔心−(0,10)（多柱串柱定谳）', () => {
     const src = rendererSrc();
-    const fn = block(src, 'private _lunarTowerFilterTarget', 'FilterTower 的 Filter.Opacity 斜坡');
+    const fn = block(src, 'private _lunarTowerFilterTargets', 'FilterTower 的 Filter.Opacity 斜坡');
     expect(fn).toContain('d2 <= TOWER_ZONE_RADIUS * TOWER_ZONE_RADIUS');
-    expect(fn).toContain('x: best.cx, y: best.cy - 10');   // SceneState.cs:107-110 −(0,10)
+    expect(fn).toContain('bestD2[key] ?? Infinity');       // per-type 最近（ClosestNPCPosition[type] 逐型）
+    expect(fn).toContain('x: t.cx, y: t.cy - 10');         // SceneState.cs:107-110 −(0,10)
   });
 });
 

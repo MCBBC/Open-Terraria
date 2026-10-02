@@ -1468,6 +1468,12 @@ export class BuffState {
     // 对冲后钳回 ≤0）。原版按 tick 连续流量结算;本仓 DoT 分块弹出,按块发 +1 HP 会在
     // 块边界整 HP 漂移——改为【流率对冲】：2HP/s 计入累加账,直接抵减本 tick 已弹出
     // 的 DoT 分块（钳 ≤0 语义 = cancel ≤ -dots）,净值与原版逐 tick 精确一致
+    // ★BJ443 登记债（本块=全仓飘字/扣血链唯一浮点源,2026-10-03 定谳）：cancel 为
+    //   浮点（honeyOffsetAccum += 2×dt 逐 tick 计提）,经 heal → Player.ts buffHeal
+    //   流入 hp 真值面（净额与原版一致,但 hp 携分数——原版 lifeRegen/lifeRegenCount
+    //   全程整数,hp 恒整）;显示面截断已在 Player.ts consumeDotChunk 调用点 + Game.ts
+    //   addDamageNumber 入口双落（用户实报 1.4333333333333333 红字 = 2 块 − 17tick×
+    //   2/60 对冲)。修法候选=对冲改整数位延迟弹出（原版同构）,牵动 Buffs.tick 金标,另刀。
     if (this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)
       && (this.dotActiveTick || dots < 0)) {
       this.honeyOffsetAccum += 2 * dt;          // +4 lifeRegen 单位/tick,流量口径逐 tick 计提

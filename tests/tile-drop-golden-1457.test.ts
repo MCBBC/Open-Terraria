@@ -234,6 +234,10 @@ const NO_RETURN_RECYCLE_DEBT: Array<[number, string]> = [
   [595, '樱花树苗（VanityTreeSakuraSeed）'],
   [615, '黄柳树苗（VanityTreeYellowWillowSeed）'],
   [484, '滚石仙人掌（RollingCactus;破坏仅滚弹无物品）'],
+  // ★BJ441（2026-10-03 用户实报）入账=门已扩展（Game.ts NO_RETURN_RECYCLE_SHEETS
+  //  三消费点同源）;def.drop 保持 null=原版本相（no-drop 组 192/384）
+  [192, '生命树叶块（LeafWand 933 放置 Item.cs:12161-12162;挖掘零返还,回收=魔棒白嫖链）'],
+  [384, '红木树叶块（LivingMahoganyLeafWand 3361 放置 Item.cs:30710-30711;挖掘零返还,回收=魔棒白嫖链）'],
 ];
 
 const defsBySheet = (s: number) => TILE_DEFS.filter((d) => d?.vanilla?.sheet === s);

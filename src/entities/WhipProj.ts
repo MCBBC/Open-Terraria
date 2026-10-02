@@ -35,7 +35,7 @@
 // 旧 wetSnapshot 出生快照近似就此退役。
 import { Entity } from './Entity';
 import { applyProjStatus, applyBuffTicks, applyMeleeImbue, debuffWriteAllowed } from './projStatus';
-import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt, noteVanillaProjImmune } from './projTargets';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
@@ -626,6 +626,10 @@ export class WhipProj extends Entity {
           const tn = n as unknown as { id: number; iframes: number; vanillaId?: number;
             x: number; y: number; w: number; h: number; vx?: number; vy?: number };
           tn.iframes = 0;               // 写梯 :14175-14178 usesLocal 主支=清全局窗
+          // ★Z1/D1④ GC1 写方桥城镇臂（同敌怪环对称;原版单表 immune[owner] 读写域
+          //  不分敌怪/城镇,受理拍清零即同拍清近战域表——town id 与敌 id 同 Entity
+          //  全局序列不撞,Y2 敌怪环 :4361 同面）
+          noteVanillaProjImmune(game, this.projId, tn.id, { penetrate: -1, localFace: true });
           this.hitSet.add(tn.id);       // 写梯 :14179 immuneArray[victim]=-1 占位
           const preHits = this.pveNumHits;
           this.pveNumHits++;            // :14263（proc 读自增前值,同敌怪环习语）
@@ -819,6 +823,15 @@ export class WhipProj extends Entity {
         //  砍伤）;pierce=-3 档（Enemy.ts :14427/:14541 BJ398 约定）=门照走（:14235
         //  pierce!==1 臂,flag3=false 同鞭）+命中写清零。局部节流已由 hitSet 承载。
         e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, false, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）
+        // ★Z1/D1④（2026-10-02）GC1 写方桥对称补接线（BJ436 在 MinionProj 接桥,鞭两面
+        //  缺=近战域 immune 表单域记账不对称）。写梯真值=usesLocal 主支清零档
+        //  （:14175-14179 `immune[owner]=0`;DefaultToWhip usesLocal+cd=-1 penetrate=-1
+        //  → localFace）——桥消费面=Game.meleeNpcImmuneGateOf（近战三重门 immune 分量）,
+        //  原版单表语义下鞭受理命中同样清近战域窗。前置门（:12636 上位本环头 :765）已
+        //  拦拒收拍=此位恒受理拍（MinionProj contact `!mainGated` 同构）。正常流敌
+        //  iframes 已由 hurt pierce=-3 清零,桥写 0=幂等 no-op;非幂等面=近战域表独立
+        //  记账（鞭命中前若有近战武器窗,原版同拍清）——对称性即本刀目的。
+        noteVanillaProjImmune(game, this.projId, e.id, { penetrate: -1, localFace: true });
         ghostHealProc(game, this.projId, this.pveNumHits,
           e as unknown as Parameters<typeof ghostHealProc>[3]);
         this.pveNumHits++;

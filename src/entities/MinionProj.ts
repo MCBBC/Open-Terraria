@@ -36,6 +36,7 @@ import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11�
 import { GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ433 帮工意图枚举（GuessedPlayerIntention.cs 1:1）
 import { stepAxeCore, stepMineSolidsCore, heldSemantics, DEFAULT_SMART_CURSOR_SETTINGS, type SmartCursorEnv, type HeldSemantics, type Region } from '../player/SmartCursor';   // ★BJ433 帮工寻格（Step_Axe/Step_Pickaxe_MineSolids 导出核）
 import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit, noteVanillaProjImmune } from './projTargets';
+import { ghostHealProc } from './SpectreSoulProj';   // ★Z1/D1② 2026-10-02：随从域 ghostHeal 白耗/治疗单源补课（:13877-84 通用 on-hit 段）
 import { ITEM_DEFS } from '../data/items';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
@@ -903,6 +904,11 @@ export class MinionProj extends Entity {
     );
   }
   hitCd = new MinionHitCd(); // dragon 全链共用实例
+  /** ★Z1/D1②（2026-10-02）：Projectile.numHits 等位（Damage_PVE_Inner :14263 命中尾
+   *  自增;ghostHeal 率 0.2−numHits×0.05 读自增前值 :12080/:13879）——随从本体接触面
+   *  持续型计数（623 拳/688-690 光环/946 体触/contact 环共享;哨兵射击/扑击 818/
+   *  爆炸弹 694 族/爆裂弹 644 在原版是逐发瞬态弹,各自 numHits=0 起算,调用位直传 0） */
+  pveNumHits = 0;
   private shootCd = 0;
   /** 地面型重力 */
   private ground: boolean;
@@ -1439,9 +1445,15 @@ export class MinionProj extends Entity {
    *  整体未建模）。调用位：:51024（attackTarget>=0 ∧ IsInRangeOfMeOrMyOwner 段,本仓
    *  =findTargetInRangeDual 命中即等价）与 :51212（ai[0]==3 栖点段——本仓 ai[0]==3 态
    *  未折算=登记,仅接 :51024 面）。逐值：
-   *  · :52112 shouldFallThrough = toTarget.Y > 盒底——【域内死码】:decidesManualFallThrough
-   *    仅 379 置真（:4645）,AI_067 全族不在 → HandleMovement :17694 消费位不达,登记
-   *    不建模（以局部量承载判别式,不落字段）;
+   *  · :52112 shouldFallThrough = toTarget.Y > 盒底——★Z1/BJ433（2026-10-02）翻案
+   *    修正（旧注「仅 379 置真→AI_067 全族域内死码」与 BJ435 亲数直接矛盾,毒源清）：
+   *    vanilla decidesManualFallThrough=true 全集 = 12 处 SetDefaults（379 :4645/
+   *    393-395 :4769/758 :7827/833 :8094/834 :8108/835 :8122/951 :8982/1022 :9681/
+   *    1036 :9780/1093 :10209/1112 :10376/1118 :10464——【AI_067 全族均在列】）+
+   *    1 处动态（aiStyle 5 宠物 :24101,type 723）= 13 处;HandleMovement :17692-17694
+   *    `flag6 = shouldFallThrough` 平台下穿消费位对全族可达。本函数以局部量承载
+   *    :52112 判别式供 :52114 湿门读;【字段面】由各族 step 物化为 Entity.dropThrough
+   *    （:50454 玩家脚−12/:52112 目标盒底两写位,951 flinxStep BJ435 先落,余族随批补齐）;
    *  · :52113 flag = velocity.Y==0（AI 前段求值=上拍碰撞结果）;
    *  · :52114-52117 wet ∧ vy>0 ∧ !shouldFallThrough → flag=真（湿中下落视作贴地可跃）
    *    ——wet 读相=AI 先于湿段跑的【上子步段值】=wetAi 快照（2026-09-08 定谳批口径）;
@@ -1458,7 +1470,7 @@ export class MinionProj extends Entity {
    *  （梯/表/×2）与干态俯扑门（vy>2/vy>1）整段让位——原版 wet 中下落跃起走本尾、
    *  干态下落跃起走 :51027/:51084 专支,两支以 wet 相互排斥=原文设计。 */
   private ai67TryJumpingToTargetTail(toTargetY: number, flag2: boolean, num4 = 30): void {
-    const shouldFallThrough = toTargetY > this.y + this.h;             // :52112（域内死码,登记）
+    const shouldFallThrough = toTargetY > this.y + this.h;             // :52112（判别式本体,字段面见各族 step）
     let flag = this.vy === 0;                                          // :52113
     if (this.wetAi && this.vy > 0 && !shouldFallThrough) flag = true;  // :52114-52117
     if (((toTargetY < this.cy - num4) && flag) && !flag2) {            // :52154（num4 形参,:52151）
@@ -1565,6 +1577,11 @@ export class MinionProj extends Entity {
    *    补课=BJ245 2026-09-21,见 getter 注）、追离中兔跳与
    *    蓄力跳重叠窗未建模——索敌"单距简化"登记于终清波批销账 */
   private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
+    // ★Z1/BJ433 平台下穿链（decidesManualFallThrough=true :8094-8122 三档 → 每拍写
+    //  shouldFallThrough :50454「玩家脚−12 低于盒底」+ 有目标时 :52112 覆写 →
+    //  HandleMovement :17692-17694 消费=Entity.dropThrough/moveAndCollide 承载）——
+    //  本行=:50454 锚（AI_067 头位逐拍,覆盖 state4/5 早退拍;有目标拍由 :52112 锚覆写）
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     const gems = Math.max(1, this.peerCount(game, 831));
     const scale = 1 + 0.4 * (gems - 1);
     // ai[0]==4 等待态（:50296 起 flag3 特置；动画帧见 draw）
@@ -1601,6 +1618,7 @@ export class MinionProj extends Entity {
       // TryJumpingToTarget 共享尾（:51024 调用位;toTarget=敌心）——跃起后 vy<0 使
       // 兔跳门（:51181 velocity.Y>=0）与步行结算段让位（原版同序）
       this.ai67TryJumpingToTargetTail(tgt.cy, false);
+      this.dropThrough = tgt.cy > this.y + this.h;   // ★Z1/BJ433 :52112 锚（目标盒底低于盒底 → 下穿平台追敌）
       // 目标脚下 15 格虚空扫描（:51142-51156,flag3 支,IsInRangeOfMeOrMyOwner 域内
       // 每帧跑）：nPC3.Top（Entity.Top=CenterX :86-90）向下数 num5=15 行，遇
       // active() 或越界(null) 即截停；整窗无一格实心 → ai[0]=5 追离态+ai[1]=0
@@ -1792,6 +1810,9 @@ export class MinionProj extends Entity {
     }
   }
   private pirateStep(game: GameHooks, p: Player, dmg0: number): void {
+    // ★Z1/BJ433 平台下穿链（decidesManualFallThrough=true :4769 → :50454 每拍写 +
+    //  :52112 目标拍覆写 → :17692-17694 消费;承载=Entity.dropThrough,下同）
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     const st = game.world.store;
     // 湿旗=上拍段值快照 wetAi（vanilla AI_067 :51027 俯扑门读 Projectile.wet=AI 先于
     // 湿段跑读上一子步段值;2026-09-08 定谳批,见类字段块头注①②③）
@@ -1856,6 +1877,7 @@ export class MinionProj extends Entity {
       // ——跃起后 vy<0 使下方俯扑门 vy>2 与步行结算段让位（原版同序;wet 中下落跃起走
       // 本尾 :52114 支,干态下落走 :51027 俯扑专支=原文两支以 wet 互斥）
       this.ai67TryJumpingToTargetTail(tgtF.cy, false);
+      this.dropThrough = tgtF.cy > this.y + this.h;   // ★Z1/BJ433 :52112 锚
       // ---- flag && ai[1]==0 块（:51022-51082，终零波补全两触发源+先后关系）----
       // ① 高空俯扑（:51023-51076）：vy>2 ∧ !wet ∧ 敌 CenterY−我盒底 < −250 →
       //    ★position.Y%1<0.5 整分叉 quirk（:51027-51031）：满足即入 ai[0]=5（ai[1]=0）
@@ -1933,7 +1955,9 @@ export class MinionProj extends Entity {
    *  · 平台下穿（SetDefaults decidesManualFallThrough=true :8982 → HandleMovement
    *    :17692-17694 shouldFallThrough → TileCollision(fallThrough,fall2)）：无目标 =
    *    :50454 玩家脚−12 低于盒底;有目标 = :51024→:52112 目标心低于盒底（本仓
-   *    dropThrough 承载;★758/833-835/1022/1093 等同字段未建模 = 跨族登记债,本刀只落 951）
+   *    dropThrough 承载;★758/833-835/1022/1036/1093 跨族登记债随 Z1/BJ433
+   *    （2026-10-02）清偿——tigerBody/pirateStep/frogStep/mushBoiStep/palGroundStep
+   *    两写位实体化;1036 仓内未走 AI_067 步行链（悬停通道）不适用,登记在案）
    *  · 命中反跳（Damage_PVE_Inner :13115-13124）：对被击敌 vx=normalize(敌心−心).X
    *    + (rand−0.5)×13、vy=−5（SafeNormalize 零距=Zero → X=0）;锚定扫描首重叠敌
    *    （原版逐被击靶覆写取尾——idStatic cd=10 下多靶同拍罕见,净同相,登记近似）
@@ -2160,6 +2184,12 @@ export class MinionProj extends Entity {
   }
 
   private palGroundStep(game: GameHooks, p: Player, dmg0: number): void {
+    // ★Z1/BJ433 平台下穿链（decidesManualFallThrough=true :10209/:10376/:10464 三档 →
+    //  每拍写 shouldFallThrough :50454「玩家脚−12 低于盒底」+ 有目标/栖点拍 :52112 覆写 →
+    //  HandleMovement :17692-17694 消费=Entity.dropThrough/moveAndCollide 承载）——
+    //  用户实报「猫站平台不下穿」根因（原版站平台猫在主低于自身时穿平台归主/追敌）。
+    //  本行=:50454 锚（AI_067 头位逐拍,覆盖 state1/2 早退拍）
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     const flag8 = this.projId === 1093 || this.projId === 1112;   // :50024
     const num10 = flag8 ? 16 : 30;            // 扑击时长（:50490/:50499）
     const num2 = flag8 ? 800 : 500;           // 索敌射程（:50030/:50052）
@@ -2278,6 +2308,7 @@ export class MinionProj extends Entity {
       // ——跃起后 vy<0 使下方俯扑门 vy>1 与结算段让位（原版同序;湿中下落跃起走
       // :52114 支,干态下落走 :51084 专支=原文两支以 wet 互斥）
       this.ai67TryJumpingToTargetTail(ay, false);
+      this.dropThrough = ay > this.y + this.h;   // ★Z1/BJ433 :52112 锚（targetCenter=侧翼点）
       // 高差起跳（:51082-51101 flag8 专支,`flag8 && ai[1]==0` 块内——★2026-09-08
       // 续单两门补接：!wet 读相=wetAi（AI 先于湿段跑读上子步段值）;ai[1]==0=palA1
       // （扑击计时,:50954 出扑归零）——旧实现只接跳体漏两门。湿中下落已由共享尾
@@ -2318,6 +2349,7 @@ export class MinionProj extends Entity {
         ax = this.palA1 * 16 + 8;
         ay = this.palA2 * 16 + 8;
         this.ai67TryJumpingToTargetTail(ay, false, 16);
+        this.dropThrough = ay > this.y + this.h;   // ★Z1/BJ433 :52112 锚（:51212 栖点调用位,targetCenter=栖点）
         const nx = Math.max(this.x, Math.min(ax, this.x + this.w));
         const ny = Math.max(this.y, Math.min(ay, this.y + this.h));
         if (Math.hypot(ax - nx, ay - ny) < 20) {
@@ -2575,6 +2607,9 @@ export class MinionProj extends Entity {
    *  （:50713-50716）。jump/land 两音为原版孤儿（deadcells_mushroom_jump/land 全树
    *  零调用,DEAD_SLOTS 备案）不接。 */
   private mushBoiStep(game: GameHooks, p: Player, dmg0: number): void {
+    // ★Z1/BJ433 平台下穿链（decidesManualFallThrough=true :9681 → :50454/:52112 两写位
+    //  + :17692-17694 消费;承载=Entity.dropThrough）
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     const st = game.world.store;
     // 湿旗=上拍段值快照 wetAi（2026-09-08 定谳批:vanilla :51616 ×2 消费 Projectile.wet
     // =AI 读上一子步段值——probe 现场盒测读当拍位=提前 1 拍,随批退役归一,见类字段
@@ -2646,6 +2681,7 @@ export class MinionProj extends Entity {
       // 共享尾（:52154-52164）——toTarget.Y=敌心 Y（flag6 的 (num30+7)×dir 偏移为
       // X 轴 :51012,targetCenter.Y 同值）;跃起后 vy≠0 使结算段让位（原版同序）
       this.ai67TryJumpingToTargetTail(tgt.cy, jump1022Flag2);
+      this.dropThrough = tgt.cy > this.y + this.h;   // ★Z1/BJ433 :52112 锚
     } else {
       this.mbLai2 = 0;                                    // :51017-51019
     }
@@ -3193,6 +3229,12 @@ export class MinionProj extends Entity {
       const pen = owner?.equipStats?.armorPen ?? 0;
       en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
         game, pen, crit);
+      // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,946 体触同面）
+      if (!(en as { dontTakeDamage?: boolean }).dontTakeDamage) {
+        ghostHealProc(game, this.projId, this.pveNumHits,
+          en as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.pveNumHits++;   // :14263
+      }
     }
     // ★清偿刀 Y2：城镇臂（946 体触走 Damage() 管线——CanDealDamage :12468 例外
     //  `(type!=946||ai[0]==0f)` → Damage_PVE_Inner 城镇同链;tHit 60t 每靶每轮一次,
@@ -3203,7 +3245,14 @@ export class MinionProj extends Entity {
         if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
         return this.tHit.has(n.id);   // 60t 局部表读门
       },
-      (n) => { this.tHit.set(n.id, 60); (n as TownNpcHitTarget).iframes = 0; },   // 局部表占位+usesLocal 清窗（受理拍）
+      (n) => {
+        // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面,946 体触）
+        const preHits946 = this.pveNumHits;
+        this.pveNumHits++;
+        ghostHealProc(game, this.projId, preHits946,
+          n as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.tHit.set(n.id, 60); (n as TownNpcHitTarget).iframes = 0;   // 局部表占位+usesLocal 清窗（受理拍）
+      },
       (n) => {
         const tn = n as TownNpcHitTarget;
         const crit = Math.random() < 0.04;
@@ -4143,6 +4192,9 @@ export class MinionProj extends Entity {
    *  · 帧通道（遗留债,非本批四项）:待机 14-17（fc/3 :50808-50820,rotation=vx×0.15）、
    *    扑击 18-20/21-23（num26 五格乒乓 :50911-50931）——draw 侧仍走 age/8 兜底 */
   private frogStep(game: GameHooks, p: Player, dmg0: number): void {
+    // ★Z1/BJ433 平台下穿链（decidesManualFallThrough=true :7827 → :50454/:52112 两写位
+    //  + :17692-17694 消费;承载=Entity.dropThrough）
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     const st = game.world.store;
     this.stepUp = true;
     // 湿旗=上拍段值快照 wetAi（vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet=AI 先于
@@ -4202,6 +4254,7 @@ export class MinionProj extends Entity {
       // 过冲是 :51167 X 轴另段,Y 同值）;跃起后 vy<0 使步行结算段让位（原版同序;
       // 湿中下落跃起走 :52114 支）。扑击门在原版 :51132 后于共享尾,照此位序
       this.ai67TryJumpingToTargetTail(tgt.cy, false);
+      this.dropThrough = tgt.cy > this.y + this.h;   // ★Z1/BJ433 :52112 锚
       // 扑击门（:51155-51160）：距锚 <50 → ai[0]=2/ai[1]=num10=20
       if (Math.hypot(ax - this.cx, ay - this.cy) < 50) {
         this.frA0 = 2; this.frA1 = 20;
@@ -4465,6 +4518,14 @@ export class MinionProj extends Entity {
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
             this.ownerRef());
           en.hurt(applyBannerDamageDealt(game, en, res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
+          // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,拳盒 623 同面;
+          //  受理门=:12600/:12686 dontTakeDamage——拒收拍 num41=0 flag10 整段不可达）
+          if (!en.dead
+            && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+            ghostHealProc(game, this.projId, this.pveNumHits,
+              en as unknown as Parameters<typeof ghostHealProc>[3]);
+            this.pveNumHits++;   // :14263
+          }
           applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
           // ★2026-09-01 StardustPunch(7) 出手面（Projectile.cs:14331-14337,type==623
@@ -4510,6 +4571,11 @@ export class MinionProj extends Entity {
               return !this.hitCd.ready(n.id, 5);   // localNPCHitCooldown=5（:6433）
             },
             (n) => {
+              // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面,拳盒同源）
+              const preHits623 = this.pveNumHits;
+              this.pveNumHits++;
+              ghostHealProc(game, this.projId, preHits623,
+                n as unknown as Parameters<typeof ghostHealProc>[3]);
               this.townAcceptLadder(game, n, true);   // 私表族=usesLocal 主支清窗（:14175-14179）
               this.attackFlash = 24;
               const tn = n as TownNpcHitTarget;
@@ -4794,6 +4860,19 @@ export class MinionProj extends Entity {
       //  单表语义;ForbiddenSignProj 同式）：受理命中才写梯（!mainGated=dead/
       //  dontTakeDamage 已筛,iframes 窗已前置门）。local/idStatic=清零档（0）,
       //  -2 缺省族=数据面末档（penetrate=-1 → 10）。
+      // ★Z1/D1②（2026-10-02）ghostHeal 白耗/治疗面（Projectile.cs:13877-84 通用 on-hit
+      //  段——原版对【一切】可伤玩家弹照跑,调用点无类别门;原位=StrikeNPC(:13702)后/
+      //  写梯(:14031)前,受理段=免疫门/ dontTakeDamage 门后）。num41 等位=
+      //  Enemy.lastStrikeDealt（防后实扣）;numHits=自增前受理数（:14263 位 ++ 在后）;
+      //  isMagic 由 ghostHealProc 经 projectileData 忠实直传（随从族数据面均非 magic=
+      //  白耗面,:12090 lifeSteal 先扣/:12091-93 !magic return 预算照扣不出治疗球=原版
+      //  本相;治疗面同源单数据门,与 WeaponProj/PrismProj/WhipProj 既有接线同式）。
+      //  门拒拍（:12636 窗/私表 continue;dead/dontTakeDamage=mainGated）不达本位。
+      if (!mainGated) {
+        ghostHealProc(game, this.projId, this.pveNumHits,
+          en as unknown as Parameters<typeof ghostHealProc>[3]);
+        this.pveNumHits++;   // :14263（proc 读自增前值）
+      }
       if (!mainGated) {
         noteVanillaProjImmune(game, this.projId, en.id,
           spec === CONTACT_PLAYER_WINDOW
@@ -4870,6 +4949,15 @@ export class MinionProj extends Entity {
         return !this.hitCd.ready(n.id, spec);
       },
       (n) => {
+        // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 对城镇靶同面——原版单
+        //  Main.npc 数组遍历,受理段无敌怪/城镇分叉;canGhostHeal 缺省 true 城镇族无
+        //  false 置位。num41=TownNPC.lastStrikeDealt（hurt 内落值）;numHits=自增前值,
+        //  敌怪环/城镇臂共用一本体计数器（vanilla :14263 同一 Damage() 内逐靶自增）。
+        //  Y2 城镇受理拍=门过受理位,同 WhipProj face 4 城镇臂习语）
+        const preHits = this.pveNumHits;
+        this.pveNumHits++;
+        ghostHealProc(game, this.projId, preHits,
+          n as unknown as Parameters<typeof ghostHealProc>[3]);
         this.townAcceptLadder(game, n, spec !== CONTACT_PLAYER_WINDOW);
         this.attackFlash = 24;
         anyHit = true;
@@ -5740,6 +5828,14 @@ export class MinionProj extends Entity {
             const golemCritAura = rollGolemSentryCrit(game, this.projId, true);
             en.hurt(applyBannerDamageDealt(game, en, golemCritAura ? res.dmg * 2 : res.dmg),
               0, 0, game, 0, golemCritAura, 1, true, penPctAura);
+            // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,光环场伤载体=
+            //  塔本体 688/689/690 的 Damage()——numHits 累计在塔身 pveNumHits 上）
+            if (!en.dead
+              && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+              ghostHealProc(game, this.projId, this.pveNumHits,
+                en as unknown as Parameters<typeof ghostHealProc>[3]);
+              this.pveNumHits++;   // :14263
+            }
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
           // ★清偿刀 Y2：城镇臂（aura 场伤走 Damage() 管线 —CanDealDamage :12468
@@ -5765,6 +5861,11 @@ export class MinionProj extends Entity {
                 return !this.hitCd.ready(tn.id, 3);   // localNPCHitCooldown=3（:7055）
               },
               (n) => {
+                // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面,光环）
+                const preHitsAura = this.pveNumHits;
+                this.pveNumHits++;
+                ghostHealProc(game, this.projId, preHitsAura,
+                  n as unknown as Parameters<typeof ghostHealProc>[3]);
                 this.townAcceptLadder(game, n, true);   // cd=3 私表族=usesLocal 主支清窗
                 const tn = n as TownNpcHitTarget;
                 if (auraDirect) {
@@ -5849,6 +5950,14 @@ export class MinionProj extends Entity {
                 const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);
                 en.hurt(applyBannerDamageDealt(game, en, golemCritBoom ? dmgOf() * 2 : dmgOf()),
                   Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, golemCritBoom, 1, true);
+                // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
+                //  爆炸弹 694/695/696（AI_138 :66063-66073 生成的瞬态弹）→ projId 传
+                //  boomProj、numHits=0（原版每颗爆炸弹 numHits 独立起算,非塔身累计）
+                if (!en.dead
+                  && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+                  ghostHealProc(game, boomProj, 0,
+                    en as unknown as Parameters<typeof ghostHealProc>[3]);
+                }
                 applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
@@ -5869,6 +5978,10 @@ export class MinionProj extends Entity {
               },
               (n) => {
                 const tn = n as TownNpcHitTarget;
+                // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面;载体=
+                //  爆炸弹 694 族瞬态弹,numHits=0 同敌怪环）
+                ghostHealProc(game, boomProj, 0,
+                  n as unknown as Parameters<typeof ghostHealProc>[3]);
                 // StatusNPC 双源同敌怪环（:5454-5457）：塔型 + 爆炸弹 694 族（Oiled 门
                 //  :10786 setHuntressT2）;城镇通用档 iframes=10 保留（=写梯 :14182 档）
                 applyProjStatus(this.projId, tn as unknown as Record<string, number>,
@@ -6060,6 +6173,13 @@ export class MinionProj extends Entity {
                   const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);
                   en.hurt(applyBannerDamageDealt(game, en, golemCritVolley ? dmgOf() * 2 : dmgOf()),
                     Math.sign(en.cx - px) * this.knockback, -2, game, 0, golemCritVolley, 1, true);
+                  // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
+                  //  爆裂弹 644（原地引爆瞬态弹）→ projId 传 ss.shot、numHits=0
+                  if (!en.dead
+                    && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+                    ghostHealProc(game, ss.shot, 0,
+                      en as unknown as Parameters<typeof ghostHealProc>[3]);
+                  }
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }
@@ -6069,11 +6189,17 @@ export class MinionProj extends Entity {
               hitTownNpcs({ x: px, y: py, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', ss.shot,
                 () => true, undefined,
                 (n) => {
-                  const tn = n as TownNpcHitTarget;
+                  const tn0 = n as TownNpcHitTarget;
                   if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
-                  return !(Math.abs(tn.cx - px) < 14 + tn.w / 2 && Math.abs(tn.cy - py) < 14 + tn.h / 2);
+                  return !(Math.abs(tn0.cx - px) < 14 + tn0.w / 2 && Math.abs(tn0.cy - py) < 14 + tn0.h / 2);
                 },
-                (n) => this.townAcceptLadder(game, n, false),   // 城镇通用档 iframes=10（:14182 档）保留
+                (n) => {
+                  // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面;载体=
+                  //  爆裂弹 644 瞬态弹,numHits=0 同敌怪环）
+                  ghostHealProc(game, ss.shot, 0,
+                    n as unknown as Parameters<typeof ghostHealProc>[3]);
+                  return this.townAcceptLadder(game, n, false);   // 城镇通用档 iframes=10（:14182 档）保留
+                },
                 (n) => {
                   const tn = n as TownNpcHitTarget;
                   const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);   // 6176（爆裂弹面）
@@ -7511,6 +7637,11 @@ export class TigerPounce extends Entity {
       //  → 清窗档 pierce=-3（:14175-14179 immune[owner]=0）;旧 pierce=0 开 10t 窗
       //  =扑击每跳压武器 10t（同 BJ436 主病灶）。
       en.hurt(res.dmg, 0, 0, game, 0, false, -3, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——818 为逐段瞬态弹
+      //  （TigerSpecialAttack 每 hop NewProjectile）→ numHits=0 每轮独立
+      if (!pounceGated) {
+        ghostHealProc(game, 818, 0, en as unknown as Parameters<typeof ghostHealProc>[3]);
+      }
       // ★BJ436 GC1 桥（usesLocal 清零档;受理才写,同 ForbiddenSignProj 式）
       if (!pounceGated) {
         noteVanillaProjImmune(game, 818, en.id, { penetrate: -1, localFace: true });
@@ -7537,6 +7668,8 @@ export class TigerPounce extends Entity {
           this.hitSet.add(n.id);            // 局部表占位（:14179,受理拍）;usesLocal 主支清窗
           const tn = n as TownNpcHitTarget;
           tn.iframes = 0;
+          // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面;numHits=0 同敌怪环）
+          ghostHealProc(game, 818, 0, n as unknown as Parameters<typeof ghostHealProc>[3]);
           if (pounceDirect) {
             for (const d of pounceDirect) {   // OnHit :13711 位——★W5:916 链电
               darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);   // 链靶=CanBeChasedBy 敌,城镇 NPC 本体永免（:18）
