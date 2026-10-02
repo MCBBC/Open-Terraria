@@ -469,7 +469,8 @@ export function vanillaItemIdOf(def: ItemDef | null | undefined): number | null 
   return m ? Number(m[1]) : null;
 }
 
-interface HeldSemantics {
+/** ★BJ433 导出（帮工链合成 sem 用）：手持物语义画像 */
+export interface HeldSemantics {
   vid: number | null;
   pick: number; axe: number; hammer: number;
   createTileSheet: number | null;
@@ -481,7 +482,8 @@ interface HeldSemantics {
   coatingLookup: number;
 }
 
-function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0): HeldSemantics {
+/** ★BJ433 导出（帮工链合成 sem 用） */
+export function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0): HeldSemantics {
   const def = held.def;
   const tool = held.tool;
   return {
@@ -496,6 +498,184 @@ function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0
     paintLookup,
     coatingLookup,
   };
+}
+
+// ===================== BJ433 步核独立化（类方法逐字搬出，类内委托不变形） =====================
+//
+// 捣蛋猫帮工链（Projectile.cs:52226-52250 TryAssigningHelp）以 IntentionGuesser 陈值
+// 快照合成 SmartCursorUsageInfo 直调原版静态步 Step_Axe / Step_Pickaxe_MineSolids——
+// 本仓原为类私有方法（实体侧无 SmartCursor 实例可达），提取为导出核：函数体逐字
+// 搬移（只用模块级谓词/工具，零 this 消费已核实），类方法变纯委托，lookup 行为不变。
+
+/** :2582-2690 斧步核（类方法 stepAxe 委托 + 帮工链 TryAssigningHelp 共用） */
+export function stepAxeCore(
+  env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+  set: (x: number, y: number) => void, taken: () => boolean,
+): void {
+  if (sem.axe <= 0 || taken()) return; // :2590
+  const st = env.st;
+  let best = -1;
+  let bx = -1, by = -1;
+  for (let i = reach.x0; i <= reach.x1; i++) {
+    for (let j = reach.y0; j <= reach.y1; j++) {
+      if (!hasTileAt(st, i, j)) continue; // :2609 tile.active()
+      const type = st.get(i, j);
+      const sheet = sheetOf(type);
+      if (!tileAxeType(type) || IGNORE_SMART_AXE.has(sheet)) continue; // :2604
+      let num2 = i, k = j;
+      if (IS_A_TREE_TRUNK.has(sheet)) {
+        // :2611-2646 多格树干帧校正（左右子块归位到主干列）+ 沿 Y 下到底（树根）
+        if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          const i2 = st.idx(num2, k);
+          if (st.frameY[i2] >= 198 && st.frameX[i2] === 44) num2++;
+          if (st.frameX[i2] === 66 && st.frameY[i2] <= 44) num2++;
+          if (st.frameX[i2] === 44 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2++;
+        }
+        if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          const i2 = st.idx(num2, k);
+          if (st.frameY[i2] >= 198 && st.frameX[i2] === 66) num2--;
+          if (st.frameX[i2] === 88 && st.frameY[i2] >= 66 && st.frameY[i2] <= 110) num2--;
+          if (st.frameX[i2] === 22 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2--;
+        }
+        for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet // :2653 active()
+          && sheetOf(st.get(num2, k + 1)) === sheet
+          && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+      }
+      if (sheet === 80) {
+        // :2647-2674 仙人掌帧校正 + 下到底
+        if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          const i2 = st.idx(num2, k);
+          if (st.frameX[i2] === 54) num2++;
+          if (st.frameX[i2] === 108 && st.frameY[i2] === 36) num2++;
+        }
+        if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          const i2 = st.idx(num2, k);
+          if (st.frameX[i2] === 36) num2--;
+          if (st.frameX[i2] === 108 && st.frameY[i2] === 18) num2--;
+        }
+        for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80 // :2681 active()
+          && sheetOf(st.get(num2, k + 1)) === 80
+          && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+      }
+      if (sheet === 323 || sheet === 72) {
+        // :2675-2680 竹 / 棕榈干下到底
+        for (; hasTileAt(st, num2, k) // :2687 active()
+          && ((sheetOf(st.get(num2, k)) === 323 && sheetOf(st.get(num2, k + 1)) === 323)
+            || (sheetOf(st.get(num2, k)) === 72 && sheetOf(st.get(num2, k + 1)) === 72))
+          && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+      }
+      const w = toWorld({ x: num2, y: k });
+      const d = dist(w.x, w.y, env.mouse.x, env.mouse.y);
+      if (best === -1 || d < best) { best = d; bx = num2; by = k; } // :2681-2687
+    }
+  }
+  if (bx !== -1) set(bx, by);
+}
+
+/** :2350-2580 镐步核（类方法 stepMineSolids 委托 + 帮工链共用）。帮工侧 env.actor =
+ *  IntentionGuesser 陈值快照（LastPosition/LastWidth/LastCenter/LastDirection）+
+ *  现役 player.height/gravDir（:2362-2363 原文：height/gravDir 取自现役 player，
+ *  position/Center/width/direction 取自陈值——Projectile.cs:52247 调用形参同构）；
+ *  env.grappleAnchors = Projectile._miningHelperPointsToSkip（Projectile.cs:522 声明
+ *  后仅 :52247 传参、全树零写点 = 恒空表，帮工侧传 [] 逐字）。 */
+export function stepMineSolidsCore(
+  env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+  set: (x: number, y: number) => void, taken: () => boolean,
+): void {
+  if (sem.pick <= 0 || taken()) return; // :2355
+  const st = env.st;
+  const p = env.actor;
+  const gravDir = env.gravDir ?? 1;   // ★SW-FX27：env 实况（原钉 1；providedInfo.player.gravDir :2435/:2438）
+  let mouse = { ...env.mouse };
+  // :2369-2381 3:1 方向归约（|vx|>3|vy| 纯水平等）
+  let vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
+  let signX = Math.sign(vector.x);
+  let signY = Math.sign(vector.y);
+  if (Math.abs(vector.x) > Math.abs(vector.y) * 3) { signY = 0; mouse.y = p.cy; }
+  if (Math.abs(vector.y) > Math.abs(vector.x) * 3) { signX = 0; mouse.x = p.cx; }
+  void vector;
+  const points: Pt[] = [];
+  const endpoints: Pt[] = [];
+  const num3 = (signY === -1 && signX !== 0) ? -1 : 1; // :2386-2390
+  // :2391-2396 玩家前缘列 / 起始行
+  const num4 = Math.floor((p.x + (p.w / 2) + ((p.w / 2 - 1) * signX)) / 16);
+  let num5 = Math.floor((p.y + 0.1) / 16);
+  if (num3 === -1) num5 = Math.floor((p.y + p.h - 1) / 16);
+  const num6 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+  const num7 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+  // :2399-2418 起点集（前缘列 + 必要时底/顶行展开）
+  if (signX !== 0) {
+    for (let i = 0; i < num7; i++) {
+      if (st.inBounds(num4, num5 + i * num3)) points.push({ x: num4, y: num5 + i * num3 });
+    }
+  }
+  if (signY !== 0) {
+    for (let j = 0; j < num6; j++) {
+      const x = Math.floor(p.x / 16) + j;
+      if (st.inBounds(x, num5)) points.push({ x, y: num5 });
+    }
+  }
+  // :2419-2432 鼠标端点（假想玩家前缘/边缘展开）
+  const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
+  let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
+  if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
+  // :2435-2441 gravDir 档位修正（★SW-FX27 补 -1 支：倒挂时无水平向 → 端点行
+  //   再 +1——倒挂挂顶时假想前缘从盒顶改盒底的同向补偿）
+  if (gravDir === -1 && signY === 0) num9++;
+  if (gravDir === 1 && signX === 0) num9++;
+  if (num9 < 10) num9 = 10;
+  if (num9 > st.h - 10) num9 = st.h - 10;
+  const num10 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+  const num11 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+  if (num8 >= 40 && num9 >= 40 && num8 < st.w - 40 && num9 < st.h - 40) { // WorldGen.InWorld(,40)
+    if (signX !== 0) {
+      for (let k = 0; k < num11; k++) {
+        if (st.inBounds(num8, num9 + k * num3)) endpoints.push({ x: num8, y: num9 + k * num3 });
+      }
+    }
+    if (signY !== 0) {
+      for (let l = 0; l < num10; l++) {
+        const x = Math.floor((mouse.x - p.w / 2) / 16) + l;
+        if (st.inBounds(x, num9)) endpoints.push({ x, y: num9 });
+      }
+    }
+  }
+  // :2466-2488 逐对射线。钩爪锚点集合（SmartCursorHelper.cs:106-115：清表后遍历
+  // player.grappling，各锚 Center 取 tile 坐标入 _grappleTargets）——AI_007 实装后
+  // 由 Game 侧 env.grappleAnchors 收集；无锚时空集（与原版无钩爪态一致）。
+  const grappleTargets: Pt[] = env.grappleAnchors ?? [];
+  const targets: Pt[] = [];
+  let pi = 0;
+  while (pi < points.length && endpoints.length > 0) {
+    const item = points[pi];
+    const item2 = endpoints[0];
+    const r = hitLine(st, item.x, item.y, item2.x, item2.y, signX * gravDir, -signY * gravDir, grappleTargets);
+    if (!r.hit) { pi++; endpoints.shift(); continue; }
+    if (r.col.x !== item2.x || r.col.y !== item2.y) targets.push(r.col);
+    const t = st.get(r.col.x, r.col.y);
+    if (!inActiveAt(st, r.col.x, r.col.y) && activeAt(st, r.col.x, r.col.y)
+      && tileSolidType(t) && !tileSolidTopType(t)
+      && !grappleTargets.some((p) => p.x === r.col.x && p.y === r.col.y)) {
+      targets.push(r.col); // :2492-2495（尾臂 !grappleTargets.Contains(col)——红蓝对抗 F3 补）
+    }
+    pi++;
+    endpoints.shift();
+  }
+  // :2489-2501 CanKillTile 过滤（不查镐力）
+  const killable = targets.filter((t) => canKillTile(st.get(t.x, t.y)));
+  if (killable.length > 0) {
+    // :2502-2576 择近 = 格中心+8px 到玩家 Center（单人无联机偏移）
+    let best = -1;
+    let point = killable[0];
+    for (const t of killable) {
+      const w = toWorld(t);
+      const d = dist(w.x, w.y, p.cx, p.cy);
+      if (best === -1 || d < best) { best = d; point = t; }
+    }
+    if (inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);
+    }
+  }
 }
 
 // ===================== SmartCursor 状态机 + 策略链 =====================
@@ -655,69 +835,13 @@ export class SmartCursor {
 
   // ===================== 各策略 =====================
 
-  /** :2582-2690 斧：扫 tileAxe → 树干帧校正 → 沿 Y 走到根 → 离鼠标最近 */
+  /** :2582-2690 斧：扫 tileAxe → 树干帧校正 → 沿 Y 走到根 → 离鼠标最近
+   *  （★BJ433 函数体搬出为 stepAxeCore 导出核,本方法纯委托——lookup 行为不变） */
   private stepAxe(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
-    if (sem.axe <= 0 || taken()) return; // :2590
-    const st = env.st;
-    let best = -1;
-    let bx = -1, by = -1;
-    for (let i = reach.x0; i <= reach.x1; i++) {
-      for (let j = reach.y0; j <= reach.y1; j++) {
-        if (!hasTileAt(st, i, j)) continue; // :2609 tile.active()
-        const type = st.get(i, j);
-        const sheet = sheetOf(type);
-        if (!tileAxeType(type) || IGNORE_SMART_AXE.has(sheet)) continue; // :2604
-        let num2 = i, k = j;
-        if (IS_A_TREE_TRUNK.has(sheet)) {
-          // :2611-2646 多格树干帧校正（左右子块归位到主干列）+ 沿 Y 下到底（树根）
-          if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-            const i2 = st.idx(num2, k);
-            if (st.frameY[i2] >= 198 && st.frameX[i2] === 44) num2++;
-            if (st.frameX[i2] === 66 && st.frameY[i2] <= 44) num2++;
-            if (st.frameX[i2] === 44 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2++;
-          }
-          if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-            const i2 = st.idx(num2, k);
-            if (st.frameY[i2] >= 198 && st.frameX[i2] === 66) num2--;
-            if (st.frameX[i2] === 88 && st.frameY[i2] >= 66 && st.frameY[i2] <= 110) num2--;
-            if (st.frameX[i2] === 22 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2--;
-          }
-          for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet // :2653 active()
-            && sheetOf(st.get(num2, k + 1)) === sheet
-            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
-        }
-        if (sheet === 80) {
-          // :2647-2674 仙人掌帧校正 + 下到底
-          if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-            const i2 = st.idx(num2, k);
-            if (st.frameX[i2] === 54) num2++;
-            if (st.frameX[i2] === 108 && st.frameY[i2] === 36) num2++;
-          }
-          if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-            const i2 = st.idx(num2, k);
-            if (st.frameX[i2] === 36) num2--;
-            if (st.frameX[i2] === 108 && st.frameY[i2] === 18) num2--;
-          }
-          for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80 // :2681 active()
-            && sheetOf(st.get(num2, k + 1)) === 80
-            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
-        }
-        if (sheet === 323 || sheet === 72) {
-          // :2675-2680 竹 / 棕榈干下到底
-          for (; hasTileAt(st, num2, k) // :2687 active()
-            && ((sheetOf(st.get(num2, k)) === 323 && sheetOf(st.get(num2, k + 1)) === 323)
-              || (sheetOf(st.get(num2, k)) === 72 && sheetOf(st.get(num2, k + 1)) === 72))
-            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
-        }
-        const w = toWorld({ x: num2, y: k });
-        const d = dist(w.x, w.y, env.mouse.x, env.mouse.y);
-        if (best === -1 || d < best) { best = d; bx = num2; by = k; } // :2681-2687
-      }
-    }
-    if (bx !== -1) set(bx, by);
+    stepAxeCore(env, sem, reach, set, taken);
   }
 
   /** :2229-2268 ForceCursor：鼠标格自身可挖（非实心/平台）且工具门通过 → 钉鼠标格 */
@@ -762,105 +886,13 @@ export class SmartCursor {
     }
   }
 
-  /** :2350-2580 MineSolids：3:1 方向归约 → 玩家前缘列 ↔ 鼠标端点逐对射线 → 择近 */
+  /** :2350-2580 MineSolids：3:1 方向归约 → 玩家前缘列 ↔ 鼠标端点逐对射线 → 择近
+   *  （★BJ433 函数体搬出为 stepMineSolidsCore 导出核,本方法纯委托——lookup 行为不变） */
   private stepMineSolids(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
-    if (sem.pick <= 0 || taken()) return; // :2355
-    const st = env.st;
-    const p = env.actor;
-    const gravDir = env.gravDir ?? 1;   // ★SW-FX27：env 实况（原钉 1；providedInfo.player.gravDir :2435/:2438）
-    let mouse = { ...env.mouse };
-    // :2369-2381 3:1 方向归约（|vx|>3|vy| 纯水平等）
-    let vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
-    let signX = Math.sign(vector.x);
-    let signY = Math.sign(vector.y);
-    if (Math.abs(vector.x) > Math.abs(vector.y) * 3) { signY = 0; mouse.y = p.cy; }
-    if (Math.abs(vector.y) > Math.abs(vector.x) * 3) { signX = 0; mouse.x = p.cx; }
-    void vector;
-    const points: Pt[] = [];
-    const endpoints: Pt[] = [];
-    const num3 = (signY === -1 && signX !== 0) ? -1 : 1; // :2386-2390
-    // :2391-2396 玩家前缘列 / 起始行
-    const num4 = Math.floor((p.x + (p.w / 2) + ((p.w / 2 - 1) * signX)) / 16);
-    let num5 = Math.floor((p.y + 0.1) / 16);
-    if (num3 === -1) num5 = Math.floor((p.y + p.h - 1) / 16);
-    const num6 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
-    const num7 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
-    // :2399-2418 起点集（前缘列 + 必要时底/顶行展开）
-    if (signX !== 0) {
-      for (let i = 0; i < num7; i++) {
-        if (st.inBounds(num4, num5 + i * num3)) points.push({ x: num4, y: num5 + i * num3 });
-      }
-    }
-    if (signY !== 0) {
-      for (let j = 0; j < num6; j++) {
-        const x = Math.floor(p.x / 16) + j;
-        if (st.inBounds(x, num5)) points.push({ x, y: num5 });
-      }
-    }
-    // :2419-2432 鼠标端点（假想玩家前缘/边缘展开）
-    const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
-    let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
-    if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
-    // :2435-2441 gravDir 档位修正（★SW-FX27 补 -1 支：倒挂时无水平向 → 端点行
-    //   再 +1——倒挂挂顶时假想前缘从盒顶改盒底的同向补偿）
-    if (gravDir === -1 && signY === 0) num9++;
-    if (gravDir === 1 && signX === 0) num9++;
-    if (num9 < 10) num9 = 10;
-    if (num9 > st.h - 10) num9 = st.h - 10;
-    const num10 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
-    const num11 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
-    if (num8 >= 40 && num9 >= 40 && num8 < st.w - 40 && num9 < st.h - 40) { // WorldGen.InWorld(,40)
-      if (signX !== 0) {
-        for (let k = 0; k < num11; k++) {
-          if (st.inBounds(num8, num9 + k * num3)) endpoints.push({ x: num8, y: num9 + k * num3 });
-        }
-      }
-      if (signY !== 0) {
-        for (let l = 0; l < num10; l++) {
-          const x = Math.floor((mouse.x - p.w / 2) / 16) + l;
-          if (st.inBounds(x, num9)) endpoints.push({ x, y: num9 });
-        }
-      }
-    }
-    // :2466-2488 逐对射线。钩爪锚点集合（SmartCursorHelper.cs:106-115：清表后遍历
-    // player.grappling，各锚 Center 取 tile 坐标入 _grappleTargets）——AI_007 实装后
-    // 由 Game 侧 env.grappleAnchors 收集；无锚时空集（与原版无钩爪态一致）。
-    const grappleTargets: Pt[] = env.grappleAnchors ?? [];
-    const targets: Pt[] = [];
-    let pi = 0;
-    while (pi < points.length && endpoints.length > 0) {
-      const item = points[pi];
-      const item2 = endpoints[0];
-      const r = hitLine(st, item.x, item.y, item2.x, item2.y, signX * gravDir, -signY * gravDir, grappleTargets);
-      if (!r.hit) { pi++; endpoints.shift(); continue; }
-      if (r.col.x !== item2.x || r.col.y !== item2.y) targets.push(r.col);
-      const t = st.get(r.col.x, r.col.y);
-      if (!inActiveAt(st, r.col.x, r.col.y) && activeAt(st, r.col.x, r.col.y)
-        && tileSolidType(t) && !tileSolidTopType(t)
-        && !grappleTargets.some((p) => p.x === r.col.x && p.y === r.col.y)) {
-        targets.push(r.col); // :2492-2495（尾臂 !grappleTargets.Contains(col)——红蓝对抗 F3 补）
-      }
-      pi++;
-      endpoints.shift();
-    }
-    // :2489-2501 CanKillTile 过滤（不查镐力）
-    const killable = targets.filter((t) => canKillTile(st.get(t.x, t.y)));
-    if (killable.length > 0) {
-      // :2502-2576 择近 = 格中心+8px 到玩家 Center（单人无联机偏移）
-      let best = -1;
-      let point = killable[0];
-      for (const t of killable) {
-        const w = toWorld(t);
-        const d = dist(w.x, w.y, p.cx, p.cy);
-        if (best === -1 || d < best) { best = d; point = t; }
-      }
-      if (inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
-        set(point.x, point.y);
-      }
-    }
+    stepMineSolidsCore(env, sem, reach, set, taken);
   }
 
   /** :1879-2030 彩色扳手（红 509/蓝 850/绿 851/黄 3612）：延伸已有同色导线断点一格 */
@@ -2006,7 +2038,8 @@ export class SmartCursor {
 
 // ===================== 模块级工具 =====================
 
-interface Region { x0: number; y0: number; x1: number; y1: number }
+/** ★BJ433 导出（帮工链扫区用）：x0..x1 闭区间 */
+export interface Region { x0: number; y0: number; x1: number; y1: number }
 
 /** TileReachCheckSettings.GetTileRegion（TileReachCheckSettings.cs:53）+ clamp 世界 [10,max-10]（:100-103） */
 function tileRegion(p: SmartCursorActor, tb: number, st: TileStore): Region {

@@ -5,16 +5,20 @@
 //     :12618-12625 flag 臂（22 killGuide / 54 killClothier / 318 例外）放行后
 //     tag ModifyHit(:12947)/DamageVar/banner(:13387-91)/穿甲(:13686-87)/
 //     StrikeNPC(:13702)/TagEffectStack.OnHit(:13711) 全段照跑——原版无独立城镇支。
-//   · 黑收成 916 直伤（:13711 OnTaggedHit）位于 StrikeNPC【后】——直伤在主命中
-//     受理+写梯清窗后落地（同步直调会自置 iframes 反噬主命中:敌怪环反序缺陷
-//     探针实证=主伤整丢,登记债）。
+//   · 黑收成 916 链电（:13711 OnTaggedHit → SpawnBlackLightning）位于 StrikeNPC
+//     【后】——汇出值在主命中受理+写梯后落地（同步直调会自置 iframes 反噬主命中:
+//     敌怪环反序缺陷探针实证=主伤整丢,登记债）;★W5（2026-10-02）定谳补全目标面：
+//     916 出膛即对被命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs:18）,伤落
+//     【其他】敌（darkHarvestChain）,被命中者只吃主命中内的 tag 加伤——A5 oracle
+//     已按反编译重产（31→30）,A7=链电目标面。
 //   · WHIP_HIT_BUFF/SIDEKICK（:13987/:13997 case 912/1028）与 1034 星雨
 //     （:14001-14007）对城镇靶同 switch 同面（X1 登记债=Y2 落刀位）。
 //   · 穿甲 :13686-87 `ownedBySomeone && !hostile → dmg += checkArmorPenetration`
 //     对城镇靶同面（鞭 num6 = GetArmorPenetration(melee=false) = 玩家通用 armorPen）。
 //  判别力（旧码必红项）：§A1 通道整缺=零伤;§A3 tag 乘区不可达;§A4 proc 消费不可达;
-//  §A5 同步直伤反序=主伤丢（31≠1）;§A6 自造 10t 窗;§C1/C2 城镇臂缺=无 buff/无哨兵;
-//  §C4 穿甲不透传;§D1 星雨城镇臂缺。
+//  §A5 同步直伤反序=主伤丢（30≠1）/目标面反记=tag 伤双记（30≠31）;§A6 自造 10t 窗;
+//  §A7 链电目标面缺=链靶零伤;§C1/C2 城镇臂缺=无 buff/无哨兵;§C4 穿甲不透传;
+//  §D1 星雨城镇臂缺。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -130,7 +134,7 @@ describe('Y2-§A：contact() 主环城镇通道（contactTown）', () => {
     expect(player.tagEffectStack.canProcOnNPC(4912, g.id)).toBe(false);   // 消费
   });
 
-  it('A5 黑收成 916 直伤【延迟】落地（:13711 OnHit 在 StrikeNPC 后）：主 30 + 直 1 = 31', () => {
+  it('A5 黑收成 916 链电延迟落地（:13711 OnHit 在 StrikeNPC 后）+源敌永免（W5 定谳）：向导只吃主 30', () => {
     const list: Enemy[] = [], towns: TownNPC[] = [];
     const { hooks, player } = makeGame(list, towns);
     voodooOn(player);
@@ -138,8 +142,31 @@ describe('Y2-§A：contact() 主环城镇通道（contactTown）', () => {
     player.tagEffectStack.tryApplyTagToNPC(4680, g.id, 22, 0);   // darkharvest tagDamage 15
     const m = ravenAt(hooks, player, 400, 600);
     contactDirect(m, hooks);
-    // 主命中 (30+15)−15=30;916 直伤在写梯清窗后落地 15−15→钳 1;同步反序旧形=主伤整丢仅 1
-    expect(5000 - g.hp).toBe(31);      // ★主判别:反序必红（=1）
+    // ★W5 oracle 重产（2026-10-02,反编译=oracle）：_DarkHarvest.cs:18 出膛即
+    //  `localNPCImmunity[npcHit]=-1` 永免被命中敌（Items.json:8299 词条 "Dark energy
+    //  jumps from enemies hit by summons" 同证）→ 向导只吃主命中 (30+15)−15=30
+    //  （tag 加伤在主命中内,ModifyHit :12954,单记）;旧 Y2 档"主30+直1=31"系目标面
+    //  反记=tag 伤双记,已纠。同步反序旧形（直伤先落+窗拒主命中）=1 必红。
+    expect(5000 - g.hp).toBe(30);      // ★主判别:反序必红（=1）;目标面反记旧形必红（=31）
+  });
+
+  it('A7 黑收成 916 链电目标面（W5）：伤落 400px 内其他敌,向导本体零双记', () => {
+    const list: Enemy[] = [], towns: TownNPC[] = [];
+    const { hooks, player } = makeGame(list, towns);
+    voodooOn(player);
+    const g = guide(hooks, towns, 400, 600);
+    // 链靶桩（敌桶;canBeChasedBy 门面:dead/vanillaId/def.friendly/dontTakeDamage/maxHp）
+    const stub = {
+      id: 9001, dead: false, x: 500 - 19, y: 600 - 19, w: 38, h: 38, cx: 500, cy: 600,
+      iframes: 0, maxHp: 5000, hp: 10000, vanillaId: 0, realLife: -1,
+      hurt(d: number): boolean { this.hp -= d; return true; },
+    };
+    list.push(stub as unknown as Enemy);
+    player.tagEffectStack.tryApplyTagToNPC(4680, g.id, 22, 0);   // darkharvest tagDamage 15
+    const m = ravenAt(hooks, player, 400, 600);
+    contactDirect(m, hooks);
+    expect(5000 - g.hp).toBe(30);      // 源（城镇 NPC）永免（:18）,只吃主命中
+    expect(stub.hp).toBe(10000 - 15);  // ★主判别:链电单跳 15 落其他敌（桩零防）
   });
 
   it('A6 冷却三态门：受理后私表占位,5t 内不重击（敌怪环 :4367 同式）', () => {

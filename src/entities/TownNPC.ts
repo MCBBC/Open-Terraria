@@ -1672,12 +1672,12 @@ export class TownNPC extends Entity {
    *  = AddPoison/AddBloodLoss/AddFlamable 三族 = 毒(20/70/395)+六火系(24/39/323/324);
    *  裸 Add（362）不吃。Slimed(137) 六火系翻倍（AddFlamable :113-115）。扣血面 =
    *  裸 hp 减（DoT 不过防御/iframes——原版 lifeRegen 独立管线）,致死经 force hurt
-   *  走完整死亡链。视觉 = 六火系火焰尘（UpdateNPC_BuffApplyVFX 火尘近似,Enemy 同款
-   *  颜色/概率）+ DoT 飘值（LifeRegenNegative 小字档,'#FF8C28'）。 */
+   *  走完整死亡链。视觉 = 六火系火焰尘（★BJ437 起真尘直生——UpdateNPC_BuffApplyVFX
+   *  城镇同环逐系独立 75%/拍,尘型 6/6/75/135,见环尾）+ DoT 飘值（LifeRegenNegative
+   *  小字档,'#FF8C28'）。 */
   private tickDebuffs(dt: number, game: GameHooks): void {
     const slimedMul = this.slimedT > 0 ? 2 : 1;
     const accelMul = this.acceleratePoisonsT > 0 ? 2 : 1;
-    const fireOn = this.onFireT > 0 || this.onFire3T > 0 || this.cursedT > 0 || this.frostburn2T > 0;
     if (this.onFireT > 0) { this.onFireT -= dt; this.onFireDoT += 4 * slimedMul * accelMul * dt; }
     if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * slimedMul * accelMul * dt; }
     if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * slimedMul * accelMul * dt; }
@@ -1701,13 +1701,27 @@ export class TownNPC extends Entity {
         game.addDamageNumber?.(this.cx, this.y, n, false, '#FF8C28', true);
       }
     }
-    // 六火系火焰尘（Enemy 同款 0.75/拍）
-    if (fireOn && Math.random() < 0.75) {
-      game.spawnParticles?.(
-        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-        Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.8,
-        { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
-    }
+    // 六火系火焰尘（★BJ437 2026-10-02 改真尘直生——UpdateNPC_BuffApplyVFX 城镇同环
+    //  :91488 对全体 NPC 调用:逐系独立 Next(4)<3=75%/拍,同帧多系并存各发各的;
+    //  旧「fireOn 合并 75% 单掷泛色方块」近似退役。形态=Enemy 火焰族共形（盒 pos−2
+    //  +4、v=velocity×0.4、α100、scale3.5、noGravity→×1.8→Y−0.5→1/4 翻重力+×0.5）。
+    //  城镇可达四系：onFire 6(:92356)/onFire3 6(:92372)/cursed 75(:92621)/
+    //  frostburn2 135(:92605);frostburn(44) 载体未建=X1 台账债（尘随载体一并补）。
+    //  点光面（:92366 等 AddLight）城镇侧缺位=登记债。）
+    const flameDust = (dustId: number) => {
+      const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+        dustId, this.vx * 0.4, this.vy * 0.4, 100, null, 3.5);
+      if (d) {
+        d.noGravity = true;
+        d.vx *= 1.8; d.vy *= 1.8;
+        d.vy -= 0.5;
+        if (Math.floor(Math.random() * 4) === 0) { d.noGravity = false; d.scale *= 0.5; }
+      }
+    };
+    if (this.onFireT > 0 && Math.random() < 0.75) flameDust(6);
+    if (this.onFire3T > 0 && Math.random() < 0.75) flameDust(6);
+    if (this.cursedT > 0 && Math.random() < 0.75) flameDust(75);
+    if (this.frostburn2T > 0 && Math.random() < 0.75) flameDust(135);
   }
 
   /** DoT 裸扣（无防御/无 iframes——原版 lifeRegen 独立管线）+ 致死走 force hurt

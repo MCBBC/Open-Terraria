@@ -426,4 +426,9 @@ export interface GameHooks {
   /** Player.GetBestPickaxe（:40413 前 0-49 格最高 pick 镐的 pick 值；无镐 = null）。
    *  1123 钻地龟镐力档（max(26, bestPickaxe.pick) :39476-39480）数据源 */
   bestPickaxePower?(): number | null;
+  /** ★BJ433 帮工意图推断（PlayerIntentionGuesser.cs 全量移植 src/player/IntentionGuesser.ts
+   *  ——Game 单例持有,tryMine/petPickTile 写侧 + fixedUpdate 每拍 Update）。
+   *  AI_067_FreakingPirates_TryAssigningHelp（Projectile.cs:52208,1093/1112 捣蛋猫）
+   *  消费；缺省 = 无帮工链（测试 mock 兼容） */
+  intentionGuesser?: import('../player/IntentionGuesser').IntentionGuesser;
 }

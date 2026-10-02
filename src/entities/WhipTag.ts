@@ -14,7 +14,7 @@
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -157,7 +157,11 @@ export function whipTagDamageOf(itemId: number): number {
  *  916 黑闪电等价 + 敌 id 供栈查询） */
 export interface WhipTagged {
   id: number;
-  /** OnTaggedHit 直伤回调（黑收成 916 等价：伤害落在被命中敌身上,视觉走弹幕） */
+  /** OnTaggedHit 汇出回调（黑收成 916 等价）：★W5 定谳改约——d = 916 黑闪电单跳
+   *  伤值（TagDamage × SummonTagDamageMultiplier[触发弹],_DarkHarvest.cs:16）,
+   *  受理方在主命中受理+写梯后调 darkHarvestChain 落地【链电】——916 出膛即对被
+   *  命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs:18）,伤落【其他】敌
+   *  （原版序 :13711 OnHit 在 StrikeNPC :13702 后,弹体伤再后） */
   hurtFx?: (d: number) => void;
 }
 
@@ -346,10 +350,18 @@ export class TagEffectState {
     switch (d.kind) {
       case 'darkharvest':
         // WhipTagEffect_DarkHarvest :11-22（每次被 tag 敌被吃鞭 tag 的命中都触发）：
-        // 916 黑闪电,伤 = TagDamage × SummonTagDamageMultiplier[projType];命中粒子 =
-        // EmitBlackLightningParticles(:22 RequestParticleSpawn(clientOnly:false,
+        // 916 黑闪电,伤 = TagDamage × SummonTagDamageMultiplier[projType]（:16）;
+        // 命中粒子 = EmitBlackLightningParticles(:22 RequestParticleSpawn(clientOnly:false,
         // BlackLightningHit))——L5 长尾批收编真值本体 blackLightningHitFx(7 环帧条)
-        // + module8 上行;旧 Arrow 916 视觉占位退役（916 伤害面=hurtFx 直结）。
+        // + module8 上行;旧 Arrow 916 视觉占位退役。
+        // ★W5 定谳（Terarria1457 亲读三证）：①:18 `localNPCImmunity[npcHit]=-1`
+        // 出膛永免被命中敌（Damage_PVE :12595 usesLocal array[i]==0 门 + 减表
+        // :17380 只递减 >0 → -1 恒存;AI_176 索敌 :45881/:45925 同门排除）——916
+        // 伤【永不】落回被命中敌,原版物品词条 "Dark energy jumps from enemies hit
+        // by summons"（Items.json:8299）同证;②真正伤面 = 916 弹 AI_176 逐跳链电
+        // （darkHarvestChain 折算）,经 hurtFx 汇出到受理方【延迟】落地（:13711 OnHit
+        // 在 StrikeNPC :13702 后,弹体伤再后）——旧 hurtFx 直调被命中敌=目标面
+        // 反记+tag 伤双记（主命中 ModifyHit :12954 已并 TagDamage 一次）,一并纠正。
         ctx.hurtFx?.(Math.max(1, Math.trunc(d.tagDamage * (SUMMON_TAG_MUL[ctx.projId] ?? 1))));
         blackLightningHitFx(game, ctx.hx, ctx.hy);
         game.broadcastParticleOrchestra?.(ParticleOrchestraType.BlackLightningHit, ctx.hx, ctx.hy);
@@ -691,6 +703,64 @@ export class TagEffectStack {
   update(): void {
     this.limitActiveEffects(this.owner.maxTagEffects);
     for (let i = 0; i < this.count; i++) this.states[i]!.update();
+  }
+}
+
+/** 黑收成 916 黑闪电链（★W5,2026-10-02 定谳折算面）。
+ *  原版全链（Terarria1457 亲读）：WhipTagEffect_DarkHarvest.SpawnBlackLightning
+ *  （:14-20）= NewProjectile(916, dmg=TagDamage×SummonTagDamageMultiplier[触发弹],
+ *  kb=0f) @ npcHit.Center + 【:18 localNPCImmunity[npcHit]=-1 源敌永免】→ 弹体
+ *  AI_176_EdgyLightning（Projectile.cs:45878-45916）逐跳追击：
+ *  · 索敌 = FindTargetWithinRange(400)（:45918-45936）：NPC.CanBeChasedBy +
+ *    localNPCImmunity[i]==0（源敌/已跳敌永免）,最近者胜、同距先到先得（:45928
+ *    `!(num <= num2)` 严格小于）;无目标即 Kill（:45914）。
+ *  · 命中 = Damage_PVE 受理门（:11892 friendly 门 / :12600 dontTakeDamage /
+ *    :12636 immune[owner] 全局窗）→ StrikeNPC → 写梯 immuneArray[victim]=-1
+ *    （localNPCHitCooldown=-1 :8685 = 同敌至多一跳,减表 :17380 只递减 >0）+
+ *    immune[owner]=0（:14177 usesLocal 主支清窗）→ penetrate 3（:8684）耗尽即亡
+ *    = 至多 3 跳。
+ *  · 单跳伤面：伤值 d（出膛已含 SummonTagDamageMultiplier,:16）→ DamageVar luck
+ *    掷（:12970,仓内直伤通道平价免掷=登记,eel/火鞭同式）;crit 恒 false（916 无
+ *    类旗,P.cs:12870-12928 类三连掷不达）;kb=0（:17 第 5 参 0f）;
+ *    armorPenetration=50（:8686）;banner 乘区照跑（:13388-90）。
+ *  · 916 非 minion/MinionShot/SentryShot → CanRunHitEffects=false
+ *    （WhipTagEffect.cs:76-87）→ 自身不吃 tag 不递归。
+ *  仓内模型=瞬时三跳链（原版 10 速弹体飞行相位差=登记债,视觉面已在
+ *  blackLightningHitFx 命中拍粒子覆 EmitBlackLightningParticles）;链靶窗口门取
+ *  【跳时窗态】（seek 即筛 iframes>0——原版弹体会悬停候窗,瞬时模型跳过=登记偏差）。
+ *  受理方（MinionProj contact()/contactTown/拳盒城镇臂/闪电光环场城镇臂/扑击弹
+ *  818 双臂、Arrow whipTagShot 区）在主命中受理+写梯后调本函数落地（:13711 位次）。 */
+export function darkHarvestChain(
+  game: GameHooks, d: number, sx: number, sy: number, sourceId: number,
+): void {
+  const immune = new Set<number>([sourceId]);            // :18 源敌永免
+  let hx = sx, hy = sy;
+  for (let hop = 0; hop < 3; hop++) {                    // penetrate=3（:8684）
+    let best: {
+      id: number; cx: number; cy: number; iframes?: number;
+      hurt?: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+        pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+    } | null = null;
+    let bestD = 400;                                     // FindTargetWithinRange(400f)
+    for (const ent of game.enemies()) {
+      const en2 = ent as unknown as {
+        id: number; dead: boolean; cx: number; cy: number; x?: number; y?: number;
+        w?: number; h?: number; iframes?: number; maxHp?: number; vanillaId?: number | null;
+        def?: { friendly?: boolean; hp?: number }; dontTakeDamage?: boolean;
+        hurt?: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+          pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+      };
+      if (en2.dead || immune.has(en2.id)) continue;      // :45925 localNPCImmunity==0
+      if (!canBeChasedBy(ent)) continue;                 // :45925 CanBeChasedBy（索敌门）
+      if ((en2.iframes ?? 0) > 0) continue;              // :12636 immune[owner] 窗（瞬时模型跳时筛）
+      if (!playerCanHitEnemy(ent, game, 916)) continue;  // :11892 friendly 门（命中面）
+      const dist = Math.hypot(en2.cx - hx, en2.cy - hy);
+      if (dist < bestD) { bestD = dist; best = en2; }    // 最近者胜,同距先到（:45928 严格小于）
+    }
+    if (!best || !best.hurt) return;                     // :45914 Kill()
+    immune.add(best.id);                                 // :14179 immuneArray[victim]=-1 同敌一跳
+    best.hurt(applyBannerDamageDealt(game, best, d), 0, 0, game, 50, false, -3, true);   // kb=0/ap50/pierce=-3=usesLocal 主支清窗（:14177）;fromPlayer=DPS 计
+    hx = best.cx; hy = best.cy;                          // 逐跳自命中位重寻（:45899-45903）
   }
 }
 

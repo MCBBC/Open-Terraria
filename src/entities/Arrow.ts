@@ -12,7 +12,7 @@ import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
-import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk, ghostHealProc } from './SpectreSoulProj';
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
@@ -9462,13 +9462,22 @@ export class Arrow extends Entity {
           this.sparkHitFastForward();
         }
         let crit: boolean;
+        // ★清偿刀 W5（2026-10-02）黑收成 916 链电汇出（:13711 OnHit 形态对齐）：
+        //  旧形 hurtFx【同步直调】伤落被命中敌且先于主 hurt=反序反噬主命中;且 916
+        //  出膛即对被命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs:18,原版词条
+        //  "Dark energy jumps from enemies hit by summons" 同证）——直调源敌=目标面
+        //  反记+tag 伤双记（主命中 ModifyHit :12954 已并 TagDamage 一次）。现形态=
+        //  汇出收集,主命中受理（!vanillaGated,:12636 门拒整跳 return :13711 不可达）
+        //  +写梯后经 darkHarvestChain 落地链电（伤落其他敌,源敌永免）。
+        let pendingDirect916: number[] | null = null;
         if (this.whipTagShot) {
           const en2 = e as unknown as import('./WhipTag').WhipTagged;
-          // 黑收成 OnTaggedHit 直伤通道（916 等价：额外一跳落在被命中敌上）
-          en2.hurtFx = (d: number) => { e.hurt(applyBannerDamageDealt(game, e, d), Math.sign(this.vx) * 2, -2, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
+          const direct: number[] = [];   // :13711 汇出位（收集,受理后落地）
+          en2.hurtFx = (d: number) => { direct.push(d); };
           const res = resolveWhipTagHit(en2, dmg, game,
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
             SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
+          pendingDirect916 = direct;
           dmg = res.dmg;
           // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
           //   强制暴击掷在 tag 修正【之后】（原版序：changes.Crit.HasValue 覆写在前,
@@ -9636,6 +9645,14 @@ export class Arrow extends Entity {
         if (!vanillaGated) {
           noteVanillaProjImmune(game, this.projId, e.id,
             { penetrate: this.pierce, localFace: immFaceLocal, idStaticFace: immFaceIdStatic });
+        }
+        // ★W5 :13711 位落地（主命中受理+写梯后）——916 链电伤落其他敌（源敌永免,
+        //  _DarkHarvest.cs:18）;门拒跳（vanillaGated）原版 :13711 不可达=不落地
+        if (!vanillaGated && pendingDirect916) {
+          for (const d of pendingDirect916) {
+            darkHarvestChain(game, d, e.x + e.w / 2, e.y + e.h / 2, e.id);
+          }
+          pendingDirect916 = null;
         }
         // ★R29 幻象弓命中侧补刀（Projectile.cs:13935）：arrow 弹（type≠631）命中且
         // 630 载体在场（phantasmTime>0）→ 从玩家身体随机点补 3 枚 631 追踪矢。

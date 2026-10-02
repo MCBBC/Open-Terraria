@@ -395,6 +395,7 @@ import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
+import { IntentionGuesser, GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ433 捣蛋猫帮工意图推断（PlayerIntentionGuesser.cs 1:1）
 import { scanSmartInteractTiles, shouldBlockSmartInteract, clearSmartInteractTileFrame, smartInteractTileFrame } from './SmartInteractTiles';   // ★SW-BJ54：智能交互 tile 候选（TileSmartInteractCandidateProvider 1:1）
 import { craftingFilterForTile } from '../ui/craftingGrid';   // ★SW-FX30 刀⑦：合成站资格谓词（Player.cs:33567-33587 单源）
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';   // ★SW-BJ28：Main.tileSolid 代理（平台九件套并集）
@@ -3505,6 +3506,12 @@ export class Game implements GameHooks {
    *  !mouseHeld 每帧维护），锤整形挥击消费（TryPoundingTile），瞄准非锤目标复位。
    *  节拍 = 按住拆墙 / 松开整形（见 tryMine 锤段头注） */
   private hammerPoundRelease = false;
+  /** ★BJ433（2026-10-02）帮工意图推断（PlayerIntentionGuesser.cs 1:1，src/player/
+   *  IntentionGuesser.ts）：玩家挖掘击打 Track（tryMine 斧/镐支 Player.cs:46102/:46162）
+   *  + 破块 AllowTracking（:46142/:54412），fixedUpdate 每拍 Update（:24786）。
+   *  消费面 = 1093/1112 捣蛋猫 TryAssigningHelp（Projectile.cs:52208,MinionProj
+   *  cattivaTryAssigningHelp）——旧「勿造系统」登记随 SmartCursor 移植失效清偿 */
+  intentionGuesser = new IntentionGuesser();
   /** 摇树状态（WorldGen.treeShakeX/Y + numTreeShakes，WorldGen.cs:4353-4359）——
    *  每树每日一摇；黎明/换世界清空（Main.cs:64846 / WorldGen.cs:6896） */
   private treeShakes = new TreeShakeState();
@@ -9924,6 +9931,33 @@ export class Game implements GameHooks {
     this.sporeSacTick();
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // ★BJ433：IntentionGuesser.Update（Player.cs:24786 Player.Update 内每拍,1:1 原位
+    //  承接）——意图失效四门（离陈值心 >80 / 跳 / 使用中工具与意图族不符 / 480t 超时
+    //  / 死亡）。快照装配：UsingOrReusingItem≈itemAnimTicks>0（通道复用窗口差异备案,
+    //  见 IntentionGuesser.ts 头注）；heldPick/heldAxe = heldSemantics 同式（主工具
+    //  类型取 power + 副斧力 axePower 兜底,Drax 双力族同原版双 >0）
+    {
+      const hSlot = player.inv.heldItem();
+      const hDef = hSlot ? ITEM_DEFS[hSlot.id] : null;
+      const hVid = hDef?.vid ?? -1;
+      const hf = hVid >= 0 ? itemFuncOfVid(hVid) : null;
+      const hTool = hDef?.tool;
+      this.intentionGuesser.update({
+        position: { x: player.x, y: player.y },
+        center: { x: player.cx, y: player.cy },
+        width: player.w,
+        direction: player.facing,
+        mouse: (() => { const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY); return { x: mwx, y: mwy }; })(),
+        controlJump: player.inputJump,
+        usingOrReusing: player.itemAnimTicks > 0,
+        // HeldItem.pick/.axe 原版口径 = itemFunc 的 pick/axe（铜镐 3509 pick:35 /
+        // 铜斧 3506 axe:7——def.tool 无此二件,曾误读 def.tool → 恒 0 → 使用中
+        // 失效门把意图当拍清掉,猫永不入帮工态=探针实锤）；def.tool 兜底复刻件
+        heldPick: hf?.pick ?? (hTool?.type === 'pick' ? (hTool.power ?? 0) : 0),
+        heldAxe: hf?.axe ?? (hTool?.type === 'axe' ? (hTool.power ?? 0) : (hDef?.axePower ?? 0)),
+        dead: player.dead,
+      });
+    }
     // ★SW-FX27：呈现面翻转开关同步（GameViewMatrix.Effects=FlipVertically
     //  Main.cs:62944 `gravDir != 1f` 消费语义）——玩家 update 后（重力药水 Up 沿/
     //  克脑 forcedGravity 本 tick 内的翻转即刻生效）先于 updateSmartCursor/
@@ -18863,7 +18897,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             p.x, p.y, pid, summonDmg,
             cw.knockback, !!cw.sentry,
             slotIdx,
-            false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
+            false, // ground 旗仅通用兜底分支消费；地面步行族（951 等）由 MinionProj.fixedUpdate
+                   // 逐型 AI_026/067 分发接管（BJ435——统一飞行近似已逐批退役）
             () => owner,   // ★F5：AI_026/062/067 全程读 Main.player[owner] 不查 dead（dmgOf 同）
           );
           this.entities.add(m, 'projectiles');
@@ -21386,6 +21421,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.mining = { x: tx, y: ty, progress: totalD };
         if (totalD >= 100) {
           this.hitTiles.clear(tx, ty);
+          // ★BJ433：PickTile(:54412) 直调通道破块同开跟踪窗（钻头链同原版口径）
+          this.intentionGuesser.allowTracking();
           this.mining = null;
           this.smashAltar(tx, ty);                            // KillTile case 26 → SmashAltar
         } else {
@@ -21961,6 +21998,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★SW-FX5：镐支 itemTime = (int)(useTime×pickSpeed)（:46163-46166 直写,非 ApplyItemTime）
     //   ——共享 itemTime 域写值,hammer 段节流窗（lastMineItemTime）读同一值
     this.lastMineItemTime = cooldown;
+    // ★BJ433：IntentionGuesser.Track（:46102 斧支 / :46162 镐支——节拍窗内每击记录,
+    //  窗门在 Track 内部 PlayerActiveActionTimeLeft）。斧支条件 = Main.tileAxe∧sItem.axe>0
+    //  （toolType==='axe' 到此 ⟺ tileAxe 族∧axePower>0,toolMatchesTile 分派面同构）；
+    //  镐支 = sItem.pick>0 且非 tileAxe/tileHammer（同构）。drill 链 = Mount.UseDrill→
+    //  PickTile 直调不经 ItemCheck_UseMiningTools → 不 Track（:46033 分派前门）。
+    if (!opts?.drill) {
+      const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+      const it = toolType === 'axe' ? GuessedPlayerIntention.HarvestTrees
+        : toolType === 'pick' ? GuessedPlayerIntention.HarvestTreasure : GuessedPlayerIntention.None;
+      if (it !== GuessedPlayerIntention.None) {
+        this.intentionGuesser.track({
+          position: { x: this.player.x, y: this.player.y },
+          center: { x: this.player.cx, y: this.player.cy },
+          width: this.player.w,
+          direction: this.player.facing,
+          mouse: { x: mwx, y: mwy },
+        }, tx, ty, it);
+      }
+    }
     const d = TILE_DEFS[type];
     const sheet = d?.vanilla?.sheet ?? -1;
     // SW-D1 2026-09-03：镐支=PickTile(:54405) 语义 respectTransformingTiles:true（斧/锤支
@@ -21986,6 +22042,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
+      // ★BJ433：IntentionGuesser.AllowTracking（:46142 斧支破块 + :54412 PickTile 内
+      //  镐支/钻头链破块——开 60t 跟踪窗,下一击 Track 才生效 = 首击只开窗不记录）
+      this.intentionGuesser.allowTracking();
       const heldVid = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
       // 露西斧台词（Player.cs:45115-45130）：宝石树 583-589 / 仙人掌 80（420t 冷却）/
       // 其余干族 + 棕榈 → ChoppedTree；速度 (direction*7, -7)、锚玩家头顶
@@ -22257,6 +22316,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
+      // ★BJ433：PickTile 内破块 AllowTracking（Player.cs:54412,原版无条件——钻地龟
+      //  AI_204 与捣蛋猫帮工 HitIntention 两通道同原版口径）
+      this.intentionGuesser.allowTracking();
       // PickTile 直调（:54398）= 镐支窗（:54414-54453）→ pickHit=true（HandleMining）
       this.breakTile(tx, ty, true, false, true);
     } else {

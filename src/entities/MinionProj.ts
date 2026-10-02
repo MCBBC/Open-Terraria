@@ -22,7 +22,7 @@ import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect } from './Arrow';
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
-import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
 import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）
@@ -33,7 +33,9 @@ import { soundTrackFiles } from '../data/vanillaNpcs';
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
 import { ParticleOrchestraType } from '../net/syncModules';
 import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
-import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit } from './projTargets';
+import { GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ433 帮工意图枚举（GuessedPlayerIntention.cs 1:1）
+import { stepAxeCore, stepMineSolidsCore, heldSemantics, DEFAULT_SMART_CURSOR_SETTINGS, type SmartCursorEnv, type HeldSemantics, type Region } from '../player/SmartCursor';   // ★BJ433 帮工寻格（Step_Axe/Step_Pickaxe_MineSolids 导出核）
+import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit, noteVanillaProjImmune } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
@@ -50,6 +52,7 @@ const FLAMEBURST_TOWER = new Set([663, 665, 667]);
 const MINION_WET_IDS = new Set([
   1022, 1093, 1094, 1098, 1112, 1113, 1118, 1123,           // R3 八型
   317, 390, 391, 392, 393, 394, 395, 758, 833, 834, 835, 917, 1036,   // 旧受段族
+  951,   // 小雪怪（BJ435:8971-8986 SetDefaults 无 ignoreWater 行=受段——旧飞行近似时代漏注册）
 ]);
 /** 弩车三档（AI_134 :65584/1457 :69584）：帧 0 待机、帧 1-5 开火（每 5t）、
  *  开火第 6t（ai[1]==5）出弩箭 680（速 16，T2 套装 21;num2=num6=5,num2 的初值 12 已被
@@ -1066,10 +1069,16 @@ export class MinionProj extends Entity {
    *  0=不淡入） */
   alphaFade = 0;
   // ---- 帕鲁地面随从 1093/1112/1118（AI_067 flag8/flag9 态机，ai[0]/ai[1] 镜像）----
-  /** ai[0]：0 地面跟随/索敌 / 2 扑击（1 归位飞行与 5 Boss 追击见 palGroundStep 注） */
+  /** ai[0]：0 地面跟随/索敌 / 2 扑击 / 3 帮工采掘（★BJ433,Projectile.cs:52226-52250
+   *  TryAssigningHelp 置态,1093/1112 专属;1 归位飞行与 5 Boss 追击见 palGroundStep 注） */
   private palA0 = 0;
-  /** ai[1]：扑击剩余 tick（num10 初值 16/30，:50490/:50499） */
+  /** ai[1]：扑击剩余 tick（num10 初值 16/30，:50490/:50499）∧ ai[0]==3 时 = 栖点
+   *  tile X（:52234/:52244——进扑击拍被 num10 覆写,原版同构） */
   private palA1 = 0;
+  /** ai[2]：ai[0]==3 时 = 栖点 tile Y（:52235/:52245；其余态恒 0 清底） */
+  private palA2 = 0;
+  /** localAI[1]：帮工链死写槽（:52216/:52223/:52229 置 0——原文无读点,承载备案） */
+  private palHelpLai1 = 0;
   /** 帧（AI_067 flag8/flag9 原版帧机驱动，draw 消费——2026-08-24 用户报捣蛋猫
    *  攻击白团、2026-08-25 复发实锤双根因：①此前 1093 根本没进本态机（走通用飞行
    *  近似 + age/8%28 全帧循环,把表内 14-27 白姿 hurt 带也播出来）；②1112 的
@@ -1439,18 +1448,20 @@ export class MinionProj extends Entity {
    *  · :52119-52122 type 393-395 ∧ vy>2 ∧ !wet 支 = vanilla 死码（`_=` 丢弃,无动作）;
    *  · :52124-52150 1022 蘑菇蓄跃支 = mushBoiStep 既有独立实现（台账批⑤）,本函数以
    *    flag2 形参承接其"本拍已消费"语义（:52149 支体尾置真,leap 是否已发无关）;
-   *  · :52151 num4=30；（1093|1112|1118）∧ ai[0]==3 → 16——ai[0]==3 未折算=登记,恒 30;
+   *  · :52151 num4=30；（1093|1112|1118）∧ ai[0]==3 → 16——★BJ433 以 num4 形参承接
+   *    （帮工栖点支 :51209 传 16;1093|1112∧ai[0]==3 调用侧已按型档,1118 永不入
+   *    state 3 = 该型 16 档域内死码同原版）;
    *  · :52154-52164 共享尾：toTarget.Y < Center.Y−num4 ∧ flag ∧ !flag2 →
    *    velocity.Y = −min(26, sqrt((Center.Y−toTarget.Y)×2×0.4))（无 +1 尾数,与
    *    :51084 flag8 干态专支相区别）。
    *  ★位序契约：调用位在俯扑/扑击/虚空扫描与步行结算段【前】→ 跃起后 vy≠0 使结算段
    *  （梯/表/×2）与干态俯扑门（vy>2/vy>1）整段让位——原版 wet 中下落跃起走本尾、
    *  干态下落跃起走 :51027/:51084 专支,两支以 wet 相互排斥=原文设计。 */
-  private ai67TryJumpingToTargetTail(toTargetY: number, flag2: boolean): void {
+  private ai67TryJumpingToTargetTail(toTargetY: number, flag2: boolean, num4 = 30): void {
     const shouldFallThrough = toTargetY > this.y + this.h;             // :52112（域内死码,登记）
     let flag = this.vy === 0;                                          // :52113
     if (this.wetAi && this.vy > 0 && !shouldFallThrough) flag = true;  // :52114-52117
-    if (((toTargetY < this.cy - 30) && flag) && !flag2) {              // :52154（num4=30,:52151）
+    if (((toTargetY < this.cy - num4) && flag) && !flag2) {            // :52154（num4 形参,:52151）
       const num5 = (toTargetY - this.cy) * -1;                         // :52155
       const num7 = Math.sqrt(num5 * 2 * 0.4);                          // :52156-52158
       this.vy = -(num7 > 26 ? 26 : num7);                              // :52159-52162
@@ -1725,6 +1736,14 @@ export class MinionProj extends Entity {
   private pirLai0 = 0;
   /** 虎侧 state5 距离镜像（同上,虎的 localAI[0] 无其它消费者） */
   private tigerLai0 = 0;
+  /** 小雪怪 951 状态（AI_067 flag5,Projectile.cs:50014-52160）：ai[0] 仅两态——
+   *  0=地面跟随+索敌 / 1=归位飞行。flag14=false（:50475-50477）关掉 :51102 扑击门
+   *  （:51023 高空俯扑与 :51077 boss>600 追离亦为 flag 专支）⇒ 永不入 2/3/5 态。 */
+  private flinA0 = 0;
+  /** 小雪怪帧机状态（AI_067 flag5 帧段直写——地面 :51766-51790 立 0/走 2-11/空中 1;
+   *  飞行 :50761-50772 每 4t 走 2-11 循环。与海盗【飞行冻结】不同相） */
+  private flinFrame = 0;
+  private flinFrameCd = 0;
   /** AI_067 ai[0]==5 追离态共享核（Projectile.cs :50955-51001，终零波清偿）：
    *  orbit 点 = 敌 Center + rot(minionPos×2π/0.5862069)×min(w,h)/2×0.5（:50961-50966）；
    *  velocity = Vector2.Zero.MoveTowards(orbit−Center, num29=16)（:50969）；
@@ -1893,6 +1912,129 @@ export class MinionProj extends Entity {
     }
   }
 
+  /** 小雪怪随从 951（FlinxStaff 5069 → 弹 951、buff 325;aiStyle 67 = AI_067 flag5 支,
+   *  Projectile.cs:50014-52160）。★BJ435 定谳刀（用户实报「召唤出来的小雪怪浮空,怀疑
+   *  贴图没在碰撞盒」）：原版本体是【地面步行族】（num2=800 索敌 → 步行链两结算段 +
+   *  重力 0.4 封顶 10 + 跳梯 + 平台下穿）,本仓曾无 951 分发 = 落通用飞行悬停（Game.
+   *  spawnMinion ground 统一 false）→ 盒悬停玩家侧后 = 浮空根因——贴图锚（Main.cs:
+   *  :33942-33946 盒底−帧高/2+4,本仓 CENTER_ANCHOR_33703 支既有 1:1）一直正确,
+   *  错位在 AI 层（盒本身悬空）而非绘制层。
+   *  · 两态机：ai[0] 0=地面跟随+索敌 / 1=归位飞行——flag14=false + friendly=true
+   *    （:50475-50477）关掉 :51102 扑击门（:51023 高空俯扑与 :51077 boss>600 追离均为
+   *    flag 专支）⇒ 永不入 2/3/5 态,接触伤全态有效（usesIDStaticNPCImmunity
+   *    idStaticNPCHitCooldown=10 :8984-8986,CONTACT_CD_TABLE 既有同源条目）
+   *  · 索敌：Minion_FindTargetInRange(800, skipOwnBody)（num2=800 :50134-50137,
+   *    flag16=ai[0]==0 缺省 :50504-50505）;归位门 500/300（num3/num4 缺省 :50031-50033）
+   *  · 跟随锚（:50295-50299）：玩家中心 −(45+p.w/2)×dir − minionPos×30×dir + 接地扫描
+   *  · 移动档（:51274-51306）：无目标 0.5/4/4 缺省;有目标 flag5 档 0.65/5.5/5.5;
+   *    catch-up 同共轨（ai067WalkChase 内）
+   *  · 跳跃意图 flag20（:51438-51441,置于 |Δx|>5 意图门内）：attackTarget!=-1 ∧ 目标盒
+   *    相交本体盒 → 落地起跳（踩脸弹跳）——wallIntent 策略位承接（ai067WalkChase 同门）
+   *  · 平台下穿（SetDefaults decidesManualFallThrough=true :8982 → HandleMovement
+   *    :17692-17694 shouldFallThrough → TileCollision(fallThrough,fall2)）：无目标 =
+   *    :50454 玩家脚−12 低于盒底;有目标 = :51024→:52112 目标心低于盒底（本仓
+   *    dropThrough 承载;★758/833-835/1022/1093 等同字段未建模 = 跨族登记债,本刀只落 951）
+   *  · 命中反跳（Damage_PVE_Inner :13115-13124）：对被击敌 vx=normalize(敌心−心).X
+   *    + (rand−0.5)×13、vy=−5（SafeNormalize 零距=Zero → X=0）;锚定扫描首重叠敌
+   *    （原版逐被击靶覆写取尾——idStatic cd=10 下多靶同拍罕见,净同相,登记近似）
+   *  · 帧/旋转——地面段（:51766-51790）：立 0 / 走 2-11（fc+=⌊|vx|⌋+1>10 翻页,
+   *    域外回 2）/ 空中 1 + rotation=min(4,vy)×−0.1（spriteDirection=-1 时 −2π 照录
+   *    ≡同相）;落地 rotation AngleTowards(0,0.3)。飞行段（:50752-50772 共享尾 flag5
+   *    子块）：spriteDirection=sign(vx)、帧每 4t 走 2-11 循环、rotation+=0.25×spriteDir */
+  private flinxStep(game: GameHooks, p: Player, dmg0: number): void {
+    const st = game.world.store;
+    const wet = this.wetAi;
+    const tgtF = this.findTargetInRangeDual(game, 800);   // num2=800（:50134-50137）
+    // ---- ai[0]==1 归位飞行（:50638-50735 共享段,flag5 无家族门 = pirateStep 同式;
+    //      帧面 = :50752-50772 共享尾 flag5 子块——与海盗飞行【冻结帧】不同相）----
+    if (this.flinA0 === 1) {
+      this.tileCollide = false;
+      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const dl = Math.hypot(dx, dy);
+      if (dl > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }
+      else if (dl < 200 && p.vy === 0 && this.y + this.h <= p.y + p.h && !this.solidOverlap(st)) {
+        this.flinA0 = 0;
+        if (this.vy < -6) this.vy = -6;
+      } else {
+        const sp = Math.max(10, Math.abs(p.vx) + Math.abs(p.vy));
+        const l = dl || 1;
+        if (this.vx < dx / l * sp) { this.vx += 0.2; if (this.vx < 0) this.vx += 0.3; }
+        if (this.vx > dx / l * sp) { this.vx -= 0.2; if (this.vx > 0) this.vx -= 0.3; }
+        if (this.vy < dy / l * sp) { this.vy += 0.2; if (this.vy < 0) this.vy += 0.3; }
+        if (this.vy > dy / l * sp) { this.vy -= 0.2; if (this.vy > 0) this.vy -= 0.3; }
+        this.x += this.vx; this.y += this.vy;
+      }
+      if (this.vx !== 0) this.facing = this.vx > 0 ? 1 : -1;   // :50752-50754
+      this.flinFrameCd++;                                       // :50761-50769
+      if (this.flinFrameCd > 3) { this.flinFrameCd = 0; this.flinFrame++; }
+      if (this.flinFrame < 2 || this.flinFrame >= 12) this.flinFrame = 2;
+      this.rot = angleTowards(this.rot, this.rot + 0.25 * this.facing, 0.25);   // :50770-50772
+      return;
+    }
+    // ---- state0 归位门（:51162-51180 共享段;transition 拍无移动/重力 = 原版同相）----
+    if (!tgtF) {
+      const dP = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+      if (dP > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }
+      else if (dP > 500 || Math.abs(p.cy - this.cy) > 300) { this.flinA0 = 1; return; }
+    }
+    let ax: number, ay: number;
+    if (tgtF) {
+      ax = tgtF.cx; ay = tgtF.cy;
+      // TryJumpingToTarget 共享尾（:51024 调用位;flag2 恒 false——跃起后 vy≠0 使
+      // 结算段/flag20 落地起跳让位,原版同序）
+      this.ai67TryJumpingToTargetTail(tgtF.cy, false);
+      // :52112 shouldFallThrough 实体化（见方法注「平台下穿」）
+      this.dropThrough = tgtF.cy > this.y + this.h;
+    } else {
+      ax = p.cx - (45 + p.w / 2) * p.facing - 30 * this.slot * p.facing;   // :50295-50299
+      ay = p.cy;
+      const g = this.groundAnchorScan(st, p, ax, ay);
+      ax = g.x; ay = g.y;
+      // :50454 无目标缺省（玩家脚−12 低于盒底 → 下穿平台归主）
+      this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
+    }
+    // flag20（:51438-51441）：有目标 ∧ 目标盒相交本体盒
+    const jumpAtTarget = tgtF
+      ? this.x < tgtF.x + tgtF.w && this.x + this.w > tgtF.x
+        && this.y < tgtF.y + tgtF.h && this.y + this.h > tgtF.y
+      : false;
+    this.ai067WalkChase(game, p, ax, ay, tgtF ? [0.65, 5.5, 5.5] : null,   // flag5 档 :51302-51306
+      { wet, wallIntent: jumpAtTarget });
+    // 帧/旋转（:51766-51790 flag5 地面段）
+    if (this.vy === 0) {
+      this.rot = angleTowards(this.rot, 0, 0.3);              // :51767 AngleTowards(0,0.3)
+      if (this.vx === 0 || Math.abs(this.vx) < 0.5) {         // :51769/:51780 两支同帧 0（合并）
+        this.flinFrame = 0; this.flinFrameCd = 0;
+      } else {
+        this.flinFrameCd += Math.floor(Math.abs(this.vx)) + 1;   // :51773-51779
+        if (this.flinFrameCd > 10) { this.flinFrame++; this.flinFrameCd = 0; }
+        if (this.flinFrame < 2 || this.flinFrame >= 12) this.flinFrame = 2;
+      }
+    } else {
+      this.rot = Math.min(4, this.vy) * -0.1;                 // :51776-51779
+      if (this.facing === -1) this.rot -= Math.PI * 2;        // :51780-51782 照录（≡同相）
+      this.flinFrameCd = 0;
+      this.flinFrame = 1;
+    }
+    // 接触伤（friendly=true 全态 :50476;cd=idStatic 10 → contactResolve(951) 既有条目）
+    const hit = this.contact(game, dmg0);
+    if (hit) {
+      // 命中反跳（Damage_PVE_Inner :13115-13124）：锚定首个重叠敌
+      for (const e of game.enemies()) {
+        const en = e as EnemyLike;
+        if (en.dead) continue;
+        if (this.x < en.x + en.w && this.x + this.w > en.x
+          && this.y < en.y + en.h && this.y + this.h > en.y) {
+          const ddx = en.cx - this.cx, ddy = en.cy - this.cy;
+          const dl2 = Math.hypot(ddx, ddy);
+          this.vx = (dl2 > 0 ? ddx / dl2 : 0) + (-0.5 + Math.random()) * 13;   // :13116-13118
+          this.vy = -5;                                        // :13119
+          break;
+        }
+      }
+    }
+  }
+
   /** 帕鲁地面随从 1093 捣蛋猫 / 1112 可靠的捣蛋猫 / 1118 黏土蓓蕾（AI_067
    *  flag8/flag9 分支折算，Projectile.cs:50014-52160；flag8 = 1093||1112 :50024
    *  共用同一态机——1093（物品 5663 :44475）曾走通用飞行近似,默认帧扫描器
@@ -1919,10 +2061,14 @@ export class MinionProj extends Entity {
    *  · 帧（:51742-51840）：立 0（抚摸 13/16）/ 走 7-12|8-14（fc+=|vx|+1>10 翻页）/
    *    空中 1（下落 2）/ 扑击 3-6|3-7；接触伤冷却 9/30（localNPCHitCooldown
    *    :10375/:10483）
-   *  · 未折算：ai[0]=3 帮工意图（TryAssigningHelp :52208 依赖 IntentionGuesser
-   *    智能光标系统，本仓无——核实 src/ 零命中后维持登记,勿造系统）、HitIntention
-   *    采掘（:52167 同门）；抚摸 Joy 音/湿身 vy×2 已随 2026-08-23 Trusty 批接通
-   *    （palJoyTick / palGroundStep wet 支） */
+   *  · ai[0]=3 帮工采掘（★BJ433 2026-10-02 已折算）：TryAssigningHelp :52208
+   *    （cattivaTryAssigningHelp——IntentionGuesser 陈值快照合成扫区直调
+   *    stepAxeCore/stepMineSolidsCore）→ 栖点支 :51207-51221（side-switch 让位 +
+   *    栖点覆写 + num4=16 跳尾 + <20px 入扑击）→ HitIntention :52167（pickPower=41
+   *    经 petPickTile 采掘 + CattivaHit 编排 @栖点）。旧「IntentionGuesser 本仓无——
+   *    勿造系统」登记随 src/player/SmartCursor.ts 步核导出失效,清偿。
+   *    抚摸 Joy 音/湿身 vy×2 已随 2026-08-23 Trusty 批接通（palJoyTick /
+   *    palGroundStep wet 支） */
   /** 抚摸 Joy 音计时（帕鲁随从族五件通用，每 tick 在 AI 分派前调）：
    *  flag10 = player.petting.isPetting && petting.proj == whoAmI（:50053 AI_067 /
    *  :59101 AI_026——本仓等价 = p.petting.isPetting && this.beingPetted，Game 侧
@@ -2066,6 +2212,14 @@ export class MinionProj extends Entity {
       }
       return;
     }
+    // ---- ★BJ433 帮工分派（:50490-50494 flag8 支 num10=16 + DoPalAppearEffect +
+    //      TryAssigningHelp 每拍；原位在检索前——TryAssigningHelp 只置态不检索,
+    //      故 ai[0]==3 拍 flag16(=ai[0]==0||2 :50507-50509) 恒 false → 本拍 attackTarget
+    //      恒 -1（attackTarget 为 AI_067 局部量 :50458,检索态外不续值）——原版 :50524
+    //      `(flag8|flag9) && attackTarget>=0 && ai[0]==3` 重置支因此【死码】（检索门
+    //      与 ai[0]==3 互斥）,登记勿折算。DoPalAppearEffect = 出场淡入（alphaFade
+    //      既有承载,构造器 -15/t 同拍）----
+    if (flag8) this.cattivaTryAssigningHelp(game, p);
     // ---- 索敌（:50496-50508：ai[0]==0||2 才检索）——终清波批：
     //      Minion_FindTargetInRange(num2, skipIfCannotHitWithOwnBody) 双距归真 ----
     const tgt = this.palA0 === 0 || this.palA0 === 2 ? this.findTargetInRangeDual(game, num2) : null;
@@ -2074,6 +2228,16 @@ export class MinionProj extends Entity {
       // 扑击帧（flag9 :50909 / flag8 :50875 同式）：3 + (num10-ai1)/(num10/4)
       this.palFrame = Math.min(7,
         3 + Math.floor((num10 - this.palA1) / (num10 / 4)));
+      // ★BJ433：flag8 扑击尘（:50888-50897——(int)ai[1]%4==0 拍 ×3 粒 Dust 16 Cloud,
+      //  @Center+(direction·8,-4) 盒 8×8、vx=-direction·2、α=127；后置 velocity×0.5 /
+      //  scale×0.8 / vy-0.2。帮工采掘与攻击扑击同态同尘=原版逐字）
+      if (flag8 && this.palA1 % 4 === 0) {
+        for (let i = 0; i < 3; i++) {
+          const d = game.spawnDust?.(Math.floor(this.cx + this.facing * 8), Math.floor(this.cy - 4),
+            8, 8, 16, -this.facing * 2, 0, 127);
+          if (d) { d.vx *= 0.5; d.scale *= 0.8; d.vy -= 0.2; }
+        }
+      }
       this.palA1--;                           // :50953
       if (this.palA1 === num10 - 1) {
         if (this.onGround) this.vx *= 0.1;    // :50905-50907（velocity.Y==0=贴地语义，flag8/9 共有）
@@ -2138,6 +2302,33 @@ export class MinionProj extends Entity {
       const groupIdx = peers.indexOf(this);
       ax = p.cx - ((flag8 ? 30 : 24) + p.w / 2) * p.facing - groupIdx * 20 * p.facing;
       ay = p.cy;
+      // ★BJ433 侧翼换边让位（:51203-51206,ai[0]==0||3 ∧ attackTarget<0 共用）：主在
+      //  60px 外 ∧ 锚在 60px 外 ∧ 锚与自身异侧 → 锚=主心（防止猫横穿主人换边）
+      if (Math.hypot(this.cx - p.cx, this.cy - p.cy) > 60
+        && Math.hypot(this.cx - ax, this.cy - ay) > 60
+        && Math.sign(ax - p.cx) !== Math.sign(this.cx - p.cx)) {
+        ax = p.cx; ay = p.cy;
+      }
+      // ★BJ433 ai[0]==3 栖点支（:51207-51221）：锚覆写为 ai[1]/ai[2] 栖点格中心 →
+      //  TryJumpingToTarget（num4=16 档 :52151-52153）→ 盒内最近点距栖点 <20 →
+      //  速度钳 10 + 入扑击（ai[0]=2,ai[1]=num10）+ 朝向（>0?1:-1 原文极性）+
+      //  HitIntention（帮工采掘击）。不走 return——原版该拍继续落锚扫描/钳制/
+      //  运动积分（51201 块在置态前已入,扑击帧下拍由 state-2 支接管）
+      if (this.palA0 === 3) {
+        ax = this.palA1 * 16 + 8;
+        ay = this.palA2 * 16 + 8;
+        this.ai67TryJumpingToTargetTail(ay, false, 16);
+        const nx = Math.max(this.x, Math.min(ax, this.x + this.w));
+        const ny = Math.max(this.y, Math.min(ay, this.y + this.h));
+        if (Math.hypot(ax - nx, ay - ny) < 20) {
+          const vl = Math.hypot(this.vx, this.vy);
+          if (vl > 10) { this.vx /= vl / 10; this.vy /= vl / 10; }   // :51215-51218
+          this.palA0 = 2;
+          this.palA1 = num10;
+          this.facing = (ax - this.cx) > 0 ? 1 : -1;                 // :51227 原文极性（0 → -1）
+          this.cattivaHitIntention(game, ax, ay);                    // :51228
+        }
+      }
       // 落地扫描（:51204-51212 最多 20 格）+ 视线截断（:51214-51224 5% 步进近似）
       const st = game.world.store;
       for (let k = 0; k < 20; k++) {
@@ -2153,8 +2344,11 @@ export class MinionProj extends Entity {
       }
     }
     // 归位门（:51199-51211）：距主 >500（num3）或 |dy|>300（num4）→ ai[0]=1
+    // （★BJ433 勘补：原版门=ai[0]==0 专断（:51174 `ai[0]==0f && attackTarget<0` 头,
+    //  >2000px 瞬移同门 :51176-51178）——帮工态(3)/扑击态(2)不吃此门,曾缺 palA0 闸
+    //  （state 3 走猫会被远距拉去肩扛,原版无此路径））
     const dpx = p.cx - this.cx, dpy = p.cy - this.cy;
-    if (!tgt && (Math.hypot(dpx, dpy) > 500 || Math.abs(dpy) > 300)) {
+    if (this.palA0 === 0 && !tgt && (Math.hypot(dpx, dpy) > 500 || Math.abs(dpy) > 300)) {
       this.palA0 = 1;
       return;
     }
@@ -2249,6 +2443,114 @@ export class MinionProj extends Entity {
         this.palFrame = petting ? 16 : 0;                    // :51886-51891
         this.palFrameCd = 0;
       }
+    }
+  }
+
+  // ===================== ★BJ433 捣蛋猫帮工链（AI_067 flag8 专属,1093/1112） =====================
+
+  /** AI_067_FreakingPirates_TryAssigningHelp（Projectile.cs:52208-52268）1:1：
+   *  每拍窥探玩家意图（IntentionGuesser——Track 由玩家挖掘击打喂入,见 Game.tryMine/
+   *  petPickTile 接线），命中则入 ai[0]=3 帮工态寻格：
+   *  · 门（:52209）：ai[0]==1（现身）/2（扑击）早退；owner != Main.myPlayer 门 =
+   *    本仓随从 owner 权威模拟恒真,豁免。
+   *  · 帮工态意图失效（:52211-52219）：ai[0]==3 ∧ Intention==None → 三 ai 清零 +
+   *    localAI[0]/[1] 清（palJoyCd/palHelpLai1——localAI[1] 原文无读点=死写承载）。
+   *  · 意图分派（:52226-52250）：
+   *    - HarvestTrees → PrepareUsageProxy(player, 10 铁斧, 15, 5) → Step_Axe
+   *      （stepAxeCore,扫区=陈值格 ±15×±5..+1,斧格→树干帧校正→沿 Y 下到根→
+   *      离 LastMouse 最近）命中 → ai[0]=3,ai[1]=X,ai[2]=Y;
+   *    - HarvestTreasure → PrepareUsageProxy(player, 1 铁镐, 15, 15) →
+   *      Step_Pickaxe_MineSolids（stepMineSolidsCore,射线用陈值 position/Center/
+   *      width/direction + 现役 height/gravDir;skip 表 _miningHelperPointsToSkip
+   *      = Projectile.cs:522 声明后零写点恒空）命中 → 同上置态。
+   *  · 未命中不清态（原版同构——帮工态持旧栖点走到 HitIntention 处由 inactive
+   *    分支归零）;netUpdate 面（:52261-52268）本仓无联机差量,豁免。
+   *  · 新分派拍（ai[0] 0→3）∧ 动作窗在 → localAI[0]=60（:52263-52265——抚摸 Joy
+   *    计时槽复用,60t 内不重触发 Joy 音）+ localAI[1]=0。 */
+  private cattivaTryAssigningHelp(game: GameHooks, p: Player): void {
+    if (this.palA0 === 1 || this.palA0 === 2) return;                       // :52209
+    const ig = game.intentionGuesser;
+    if (!ig) return;
+    const prevA0 = this.palA0;
+    if (this.palA0 === 3 && ig.intention === GuessedPlayerIntention.None) { // :52211-52219
+      this.palA0 = 0; this.palA1 = 0; this.palA2 = 0;
+      this.palJoyCd = 0;          // localAI[0] = 0（:52215）
+      this.palHelpLai1 = 0;       // localAI[1] = 0（:52216,死写承载）
+      return;
+    }
+    const st = game.world.store;
+    // 合成 SmartCursorEnv（UsageProxy 等价）：actor = 陈值快照 position/Center/
+    // width/direction + 现役 player.height（:2363 height 取自现役）;mouse = LastMouse;
+    // grappleAnchors = _miningHelperPointsToSkip 恒空表（Projectile.cs:522 注）
+    const env: SmartCursorEnv = {
+      st,
+      mouse: { x: ig.lastMouse.x, y: ig.lastMouse.y },
+      actor: {
+        x: ig.lastPosition.x, y: ig.lastPosition.y, w: ig.lastWidth, h: p.h,
+        cx: ig.lastCenter.x, cy: ig.lastCenter.y, facing: ig.lastDirection,
+      },
+      held: { def: null, tool: null },
+      settings: DEFAULT_SMART_CURSOR_SETTINGS,
+      tileBoost: 0,
+      wireToolMode: 0,
+      occupants: [],
+      controlUseItem: false,
+      grappleAnchors: [],
+      gravDir: p.gravDir,
+    };
+    let fx = -1, fy = -1;
+    const setFound = (x: number, y: number): void => { fx = x; fy = y; };
+    const taken = (): boolean => fx !== -1;
+    switch (ig.intention) {
+      case GuessedPlayerIntention.HarvestTrees: {                        // :52226-52237
+        const reach = ig.prepareUsageProxy(15, 5, st.w, st.h);
+        const sem: HeldSemantics = heldSemantics({ def: null, tool: { type: 'axe', power: 40 } });   // 铁斧 10（>0 门）
+        stepAxeCore(env, sem, reach, setFound, taken);
+        break;
+      }
+      case GuessedPlayerIntention.HarvestTreasure: {                     // :52238-52250
+        const reach = ig.prepareUsageProxy(15, 15, st.w, st.h);
+        const sem: HeldSemantics = heldSemantics({ def: null, tool: { type: 'pick', power: 40 } });  // 铁镐 1（>0 门）
+        stepMineSolidsCore(env, sem, reach, setFound, taken);
+        break;
+      }
+      default:
+        return;
+    }
+    if (fx !== -1 && fy !== -1) {                                        // :52233-52236/:52244-52248
+      this.palA0 = 3;
+      this.palA1 = fx;
+      this.palA2 = fy;
+    }
+    if (prevA0 !== this.palA0 && ig.playerActiveActionTimeLeft > 0) {    // :52263-52265
+      this.palJoyCd = 60;        // localAI[0] = 60
+      this.palHelpLai1 = 0;      // localAI[1] = 0（死写承载）
+    }
+  }
+
+  /** AI_067_FreakingPirates_HitIntention（Projectile.cs:52167-52206）1:1：帮工采掘击。
+   *  · 栖点格 active 判定（:52171-52176 tileSafely.active()）——inactive → num=0 走
+   *    归零支;越界原版 GetTileSafely null → 裸 return【不清态】（:52173-52175）,
+   *    本仓 petPickTile 越界返回 false 会走归零支,域内不可达（栖点恒在界内）,备案。
+   *  · 镐力钉值 41（:52181）——DetermineDamage(false) >0 才 PickTile（:52184-52189,
+   *    dealDamageAsIfBaseNumberIs 缺省 -1 无比例钳 = petPickTile cap=pickPower 恒等式;
+   *    PickTile 内破块 AllowTracking :54412 由 petPickTile 承载）。
+   *  · CattivaHit 编排粒子 @栖点+Circular(4,4)/速度 CircularEdge(4,4)（:52193-52201,
+   *    cattivaHitFx 六芒簇 + module8 广播,与 SpawnHitVisuals 的 Center 锚不同位）。
+   *  · 无可伤格 → 三 ai 清零（:52202-52205,下拍 TryAssigningHelp 重寻格）。 */
+  private cattivaHitIntention(game: GameHooks, idealX: number, idealY: number): void {
+    const tx = Math.floor(idealX / 16);
+    const ty = Math.floor(idealY / 16);
+    const hit = game.petPickTile?.(tx, ty, 41, 41) ?? false;   // :52181-52189
+    if (hit) {
+      const px = idealX + (Math.random() * 2 - 1) * 4;         // +NextVector2Circular(4,4)
+      const py = idealY + (Math.random() * 2 - 1) * 4;
+      const ea = Math.random() * Math.PI * 2;                  // NextVector2CircularEdge(4,4)
+      const mvX = Math.cos(ea) * 4, mvY = Math.sin(ea) * 4;
+      cattivaHitFx(game, px, py, mvX, mvY);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.CattivaHit, px, py, mvX, mvY);
+    } else {
+      this.palA0 = 0; this.palA1 = 0; this.palA2 = 0;          // :52202-52205
     }
   }
 
@@ -4212,9 +4514,8 @@ export class MinionProj extends Entity {
               this.attackFlash = 24;
               const tn = n as TownNpcHitTarget;
               if (punchDirect) {
-                for (const d of punchDirect) {
-                  tn.hurt(applyBannerDamageDealt(game, tn, d), Math.sign(tn.cx - this.cx), 0, game,
-                    0, 0, false, false, true, 0);
+                for (const d of punchDirect) {   // OnHit :13711 位——★W5:916 链电
+                  darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);   // 链靶=CanBeChasedBy 敌,城镇 NPC 本体永免（:18）
                 }
                 punchDirect = null;
               }
@@ -4365,8 +4666,9 @@ export class MinionProj extends Entity {
   }
 
   /** 敌方玩家键免疫窗余值（NPC.immune[owner] 等价——单 player 世界即 NPC 单窗；
-   *  测试桩敌无该字段 → 恒视作 0 可打）。台账批③全局窗支的先验门 */
-  private static enemyImmune(en: unknown): boolean {
+   *  测试桩敌无该字段 → 恒视作 0 可打）。台账批③全局窗支的先验门。
+   *  ★BJ436 起 TigerPounce（818 扑击弹） :12636 共门同消费 → 去私有。 */
+  static enemyImmune(en: unknown): boolean {
     const iv = (en as { iframes?: number } | null)?.iframes;
     return typeof iv === 'number' && iv > 0;
   }
@@ -4378,9 +4680,10 @@ export class MinionProj extends Entity {
    *   PositionInWorld = Center + (direction·8, 0) + Circular(4,4)；
    *   MovementVector = CircularEdge(4,4)（Utils.cs:1306 单位圆 × 半径,落在椭圆边上）。
    *  载荷只采样一次——本地 fx 与广播共用同参（原版 settings 对象同构）。
-   *  ★镐力面 :52193（AI_067_FreakingPirates_HitIntention,ai[0]=3 帮工意图）本仓未折算
-   * （IntentionGuesser 智能光标系统未建模,"勿造系统"登记）；抚摸 Joy 音槽（palJoyTick/
-   *  心形气泡窗）与 CattivaHit 无关,勿在此误植。 */
+   *  ★镐力面 :52193（AI_067_FreakingPirates_HitIntention,ai[0]=3 帮工意图）★BJ433
+   *  2026-10-02 已折算（cattivaHitIntention,锚=栖点非拳面——与本法 Center+(dir·8,0)
+   *  锚不同位,勿混用）；抚摸 Joy 音槽（palJoyTick/心形气泡窗）与 CattivaHit 无关,
+   *  勿在此误植。 */
   private emitSpawnHitVisuals(game: GameHooks): void {
     if (this.projId !== 1093 && this.projId !== 1112) return;
     const px = this.cx + this.facing * 8 + (Math.random() * 2 - 1) * 4;   // +Circular(4,4)
@@ -4429,16 +4732,27 @@ export class MinionProj extends Entity {
         && this.y - pad < en.y + en.h && this.y + this.h + pad > en.y)) continue;
       // ★台账批③ 接触冷却三态门（原版 Damage_PVE flag2 :12595 + Damage_PVE_Inner
       //  immune[owner] 门 :12636 / localNPCHitCooldown 尾支 :14175-14186）
-      {
-        const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
-        if (spec === CONTACT_PLAYER_WINDOW) {
-          if (MinionProj.enemyImmune(en)) continue;   // -2 缺省族：玩家全局窗内不重击
-        } else if (typeof spec === 'object') {
-          if (!this.idStaticBucket(this.projId).ready(en.id, spec.cd)) continue;
-        } else if (!this.hitCd.ready(en.id, spec)) continue;
-      }
-      // 黑收成 OnTaggedHit 直伤通道（916 等价）
-      en.hurtFx = (d: number) => { en.hurt(applyBannerDamageDealt(game, en, d), Math.sign(en.cx - this.cx), -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
+      // ★BJ436（2026-10-02）：immune[owner] 门 = 三族【共门】且先于私表消费——原版
+      //  :12636 对 usesLocal/usesIDStatic 弹同样生效（flag3 只豁免单发非局部弹）,
+      //  且窗拒拍早退不达 :14179 写位=私表保持 0。旧码 local/idStatic 族不查窗、
+      //  先 ready() 消费私表再进 hurt 被窗拒 → 窗内空转白吃 cd,节拍漂移。
+      const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
+      if (MinionProj.enemyImmune(en)) continue;   // ★BJ436 :12636 三族共门（原 -2 族独占）
+      if (spec === CONTACT_PLAYER_WINDOW) {
+        // -2 缺省族：吃玩家全局窗（命中尾 :14182 写 10=hurt pierce=0 承载）
+      } else if (typeof spec === 'object') {
+        if (!this.idStaticBucket(this.projId).ready(en.id, spec.cd)) continue;
+      } else if (!this.hitCd.ready(en.id, spec)) continue;
+      // ★清偿刀 W5（2026-10-02）黑收成 916 链电汇出位（:13711 OnHit 形态对齐）：
+      //  resolveWhipTagHit 内 TagEffectStack.OnHit 触发 darkharvest hurtFx——旧形
+      //  【同步直调】伤落被命中敌且先于主 hurt=反序反噬主命中（Y2 探针实证主伤整丢,
+      //  登记债）;且 916 出膛即对被命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs
+      //  :18,原版词条 "Dark energy jumps from enemies hit by summons" 同证）——旧
+      //  直调源敌=目标面反记+tag 伤双记（主命中 ModifyHit :12954 已并 TagDamage 一
+      //  次）。现形态=hurtFx 汇出收集,主命中受理+写梯后经 darkHarvestChain 落地
+      //  链电（伤落【其他】敌,源敌永免）。
+      const pendingDirect: number[] = [];
+      en.hurtFx = (d: number) => { pendingDirect.push(d); };   // 鞭 tag 直伤汇出位
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
         this.ownerRef());
@@ -4461,11 +4775,42 @@ export class MinionProj extends Entity {
       const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
         ? (owner0.cx < en.cx ? 1 : -1)
         : Math.sign(en.cx - this.cx);
+      // 主命中受理预判（Enemy.hurt 头门残面 :14234 dead 已在环顶筛/:14241
+      //  dontTakeDamage——拒收跳原版 :13711 不可达=无 916,链电不落地）
+      const mainGated = en.dead
+        || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      // ★BJ436（2026-10-02）写梯档位按族分流（原版命中尾 :14031-14186）：
+      //  -2 缺省族 → pierce=0（尾支 :14182 写 10=开玩家全局窗,原版本相——373/375/
+      //    423/613 本体接触本就压武器 10t）;local/idStatic 族 → pierce=-3
+      //    （:14175-14179/:14031-14037 写 immune[owner]=0【清窗不开窗】,节流全归
+      //    私表）。旧 pierce=0 把史莱姆 266/乌鸦 317/双子 387/388/蜘蛛 390-392/
+      //    吸血蛙 758/雪原精怪 951/阿比盖尔 963 等全族每次命中都开 10t 窗,仆从
+      //    连续攻击=窗口近全覆盖 ⇒ 玩家其他武器被 hurt 免疫门整段拒收=BJ436
+      //    用户实报「仆从攻击时其他武器无法造成伤害」第一因。
       en.hurt(applyBannerDamageDealt(game, en, golemCrit ? res.dmg * 2 : res.dmg),
-        kbDir * (this.knockback + mkb), 0, game, pen0, false, 0, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
+        kbDir * (this.knockback + mkb), 0, game, pen0, false,
+        spec === CONTACT_PLAYER_WINDOW ? 0 : -3, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
+      // ★BJ436 GC1 写方桥接线（近战域 immune 表 npcImmuneByAttacker 同步,原版
+      //  单表语义;ForbiddenSignProj 同式）：受理命中才写梯（!mainGated=dead/
+      //  dontTakeDamage 已筛,iframes 窗已前置门）。local/idStatic=清零档（0）,
+      //  -2 缺省族=数据面末档（penetrate=-1 → 10）。
+      if (!mainGated) {
+        noteVanillaProjImmune(game, this.projId, en.id,
+          spec === CONTACT_PLAYER_WINDOW
+            ? undefined
+            : typeof spec === 'object' ? { penetrate: -1, idStaticFace: true }
+              : { penetrate: -1, localFace: true });
+      }
       applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
       this.emitSpawnHitVisuals(game);           // SpawnHitVisuals :13633（免疫门后每靶一发,B11）
       this.attackFlash = 24;
+      // ★W5 :13711 位落地（主命中受理+写梯后）——916 链电伤落其他敌（源敌永免,
+      //  :18 localNPCImmunity[npcHit]=-1）,源敌只吃主命中内的 tag 加伤
+      if (pendingDirect.length > 0 && !mainGated) {
+        for (const d of pendingDirect) {
+          darkHarvestChain(game, d, en.cx, en.cy, en.id);
+        }
+      }
       anyHit = true;
     }
     anyHit = this.contactTown(game, dmg, cdIn, pad, add) || anyHit;
@@ -4506,10 +4851,13 @@ export class MinionProj extends Entity {
       ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2 }
       : { x: this.x, y: this.y, w: this.w, h: this.h };
     let anyHit = false;
-    // ★黑收成 916 直伤延迟汇出（原版序 :13711 OnHit 在 StrikeNPC :13702【后】——
-    //  直伤须待主命中受理+写梯清窗后落地;同步直调会自置 iframes=10 反噬主命中,
-    //  敌怪环反序缺陷探针实证=主伤整丢,见 Y2 报告登记债,-2 缺省族直伤被窗拒=
-    //  原版同相 :12636 门）。face 5 消费真通道主体在 settle（ModifyHit+OnHit 消费）。
+    // ★黑收成 916 链电延迟汇出（原版序 :13711 OnHit 在 StrikeNPC :13702【后】——
+    //  待主命中受理+写梯后落地;同步直调会自置 iframes=10 反噬主命中,敌怪环反序
+    //  缺陷探针实证=主伤整丢,Y2 报告登记债）。★W5 定谳修正目标面：916 出膛即对
+    //  被命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs:18）——伤【永不】落回被
+    //  命中者,经 darkHarvestChain 链落【其他】敌（原版词条 "Dark energy jumps from
+    //  enemies hit by summons" 同证）;城镇靶同面（:13711 对城镇靶照跑,链自城镇 NPC
+    //  位寻 CanBeChasedBy 敌）。face 5 消费真通道主体在 settle（ModifyHit+OnHit 消费）。
     let pendingDirect: number[] | null = null;
     hitTownNpcs(box, game, dmg, 0, 'playerProj', this.projId, undefined, undefined,
       (n) => {
@@ -4527,9 +4875,8 @@ export class MinionProj extends Entity {
         anyHit = true;
         const tn = n as TownNpcHitTarget;
         if (pendingDirect) {
-          for (const d of pendingDirect) {   // OnHit :13711 位（写梯后）
-            tn.hurt(applyBannerDamageDealt(game, tn, d), Math.sign(tn.cx - this.cx), 0, game,
-              0, 0, false, false, true, 0);
+          for (const d of pendingDirect) {   // OnHit :13711 位（写梯后）——W5:916 链电
+            darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);   // 链靶=CanBeChasedBy 敌,城镇 NPC 本体永免（:18）
           }
           pendingDirect = null;
         }
@@ -5421,8 +5768,8 @@ export class MinionProj extends Entity {
                 this.townAcceptLadder(game, n, true);   // cd=3 私表族=usesLocal 主支清窗
                 const tn = n as TownNpcHitTarget;
                 if (auraDirect) {
-                  for (const d of auraDirect) {
-                    tn.hurt(applyBannerDamageDealt(game, tn, d), 0, 0, game, 0, 0, false, false, true, 0);
+                  for (const d of auraDirect) {   // OnHit :13711 位——★W5:916 链电
+                    darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);   // 链靶=CanBeChasedBy 敌,城镇 NPC 本体永免（:18）
                   }
                   auraDirect = null;
                 }
@@ -5806,6 +6153,9 @@ export class MinionProj extends Entity {
     // 海盗三变体（台账批②）：AI_067 flag 步行链正轨（原"统一飞行"近似退役）
     if (this.projId >= 393 && this.projId <= 395) { this.pirateStep(game, p, dmg0); return; }
     if (this.projId === 758) { this.frogStep(game, p, dmg0); return; }
+    // 小雪怪 951（BJ435 定谳刀）：AI_067 flag5 地面步行族正轨——原「统一飞行」近似
+    // 落通用悬停 = 用户实报「召唤浮空」根因（flying 分发于 2026-10-02 退役）
+    if (this.projId === 951) { this.flinxStep(game, p, dmg0); return; }
     if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
     if (this.projId === 317) { this.ravenBody(game, p, dmg0); return; }
     if (this.projId === 533) this.deadlySpherePhase(game, p, tgt); // AI_066 相位机（自旋门 :28874）
@@ -6351,6 +6701,11 @@ export class MinionProj extends Entity {
       // 扑击 4..6(+3 空中=7..9)；state1 归位飞行与 state5 追离不更新 = 冻结
       // （原版同语义——旧 age/8 匀速兜底扫遍 15 帧 = 扑击窗仍换跑图,M2 清偿）
       frame = Math.min(this.pirFrame, Math.max(0, frames - 1));
+    } else if (this.projId === 951) {
+      // 小雪怪（AI_067 flag5 帧段直写,BJ435）：地面 :51766-51790 立 0/走 2-11/空中 1;
+      // 飞行 :50761-50772 每 4t 走 2-11 循环（与海盗冻结不同相）。旧 age/8 匀速兜底
+      // 扫遍 12 帧 = 空中仍换跑图,随 AI 正轨退役
+      frame = Math.min(this.flinFrame, Math.max(0, frames - 1));
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,
@@ -7132,15 +7487,40 @@ export class TigerPounce extends Entity {
       if (en.dead || this.hitSet.has(en.id)) continue; // localNPCHitCooldown=-1 每敌一次
       if (this.x >= en.x + en.w || this.x + this.w <= en.x
         || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
+      // ★BJ436（2026-10-02）:12636 全局窗门在写梯前（usesLocal cd=-1 族同门）——
+      //  窗拒拍 hitSet 保持未记（原版 localNPCImmunity 不达 :14179 写位,下拍重试）;
+      //  旧码先记 hitSet 再进 hurt 被窗拒=该敌整轮扑击丢失。
+      if (MinionProj.enemyImmune(en)) continue;
       this.hitSet.add(en.id);
-      en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
+      // ★W5（2026-10-02）916 链电汇出位（contact() :4580 同式）：旧形同步直调
+      //  伤落被命中敌且先于主 hurt=反序反噬;916 出膛即对被命中敌永免（_DarkHarvest
+      //  .cs:18）——汇出收集,主命中受理后 darkHarvestChain 落地链电（伤落其他敌）。
+      const pounceDirect: number[] = [];
+      en.hurtFx = (d: number) => { pounceDirect.push(d); };
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
         add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
       // ★F10（2026-08-31 蓝队三批）：扑击弹 818 生成侧 knockBack=0（:46470
       //  NewProjectile 尾参 0f）→ 原版 StrikeNPC 的 `knockBack>0f && knockBackResist>0f`
       //  双门（NPC.cs:82144）整段不进——击退/冲量归零。旧 (0,-1) 冲量是自造位移，
       //  与 Enemy.hurt 武器支 :12366 的同式双门不一致，归零对齐。
-      en.hurt(res.dmg, 0, 0, game, 0, false, 0, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      // 主命中受理预判（Enemy.hurt 头门残面 :14234 dead/:14241 dontTakeDamage——
+      //  拒收跳原版 :13711 不可达=无 916）
+      const pounceGated = en.dead
+        || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      // ★BJ436（2026-10-02）写梯档位：818 = usesLocalNPCImmunity+cd=-1（:8016-8019）
+      //  → 清窗档 pierce=-3（:14175-14179 immune[owner]=0）;旧 pierce=0 开 10t 窗
+      //  =扑击每跳压武器 10t（同 BJ436 主病灶）。
+      en.hurt(res.dmg, 0, 0, game, 0, false, -3, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      // ★BJ436 GC1 桥（usesLocal 清零档;受理才写,同 ForbiddenSignProj 式）
+      if (!pounceGated) {
+        noteVanillaProjImmune(game, 818, en.id, { penetrate: -1, localFace: true });
+      }
+      // ★W5 :13711 位落地（主命中受理+写梯后）——916 链电伤落其他敌（源敌永免）
+      if (pounceDirect.length > 0 && !pounceGated) {
+        for (const d of pounceDirect) {
+          darkHarvestChain(game, d, en.cx, en.cy, en.id);
+        }
+      }
     }
     // ★清偿刀 Y2：城镇臂（扑击弹 818 Damage 全程可伤——CanDealDamage :12468 仅
     //  `(818 && ai[0]<1)` 闸 → Damage_PVE_Inner 城镇同链;localNPCHitCooldown=-1
@@ -7158,8 +7538,8 @@ export class TigerPounce extends Entity {
           const tn = n as TownNpcHitTarget;
           tn.iframes = 0;
           if (pounceDirect) {
-            for (const d of pounceDirect) {
-              tn.hurt(applyBannerDamageDealt(game, tn, d), 0, 0, game, 0, 0, false, false, true, 0);
+            for (const d of pounceDirect) {   // OnHit :13711 位——★W5:916 链电
+              darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);   // 链靶=CanBeChasedBy 敌,城镇 NPC 本体永免（:18）
             }
             pounceDirect = null;
           }

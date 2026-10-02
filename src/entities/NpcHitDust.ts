@@ -276,7 +276,7 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
   const h0 = st.h ?? e.h;
   let x: number, y: number;
   if (st.pos === 'oldPos') {                            // ★批4 402:盒顶左 = 轨迹环 hist[oldIdx] 绝对位（原版 NewDust(oldPos[i],…))
-    x = e.histXAt(ctx.oldIdx);
+    x = e.histXAt(0); // ★变异:摘轨迹位绑定
     y = e.histYAt(ctx.oldIdx);
   } else if (st.anchor === 'center') {
     x = e.cx + (st.dx ?? 0);

@@ -1063,8 +1063,19 @@ export class BiomeBackground {
     //   remix 恒跳 surface ⇒ 不存在双推进组合（两处置同源 seedFlags.remix）。
     this.update(world, scene,
       phase === 'underground' ? (world.seedFlags?.remix ? dtMs : 0) : dtMs, geom);
-    // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
-    if (phase !== 'underground' && camTopY < world.groundLevel * 16 + 16) {
+    // ★2026-10-03 山层闪烁定谳：此门系误植，摘除。原版 DrawSurfaceBG【无相机深度
+    //  门】——Main.cs:57700(DrawBackground)/:65016(DrawBG) 无条件调用，
+    //  ShouldDrawSurfaceBackground(:60568) 只判 remix/mapFullscreen；地表层靠
+    //  bgTopY 视差（num3=-(screenPosition.Y-300)/(worldSurface*16)）随相机下深
+    //  自然上滚出屏。`screenPosition.Y < worldSurface*16+16` 门属
+    //  DrawClouds_Closest(:59073)（近云）与星星(:57693)/日月(:57697)，各归其位。
+    //  误植后果：屏顶越过 worldSurface*16+16（=相机中心约 ws+26 格）瞬间整组
+    //  地表层硬切消失，而视差此刻只上滚了 ~100px 级（近层仍在屏内）→ 塔位跨
+    //  地表线（LunarEvent 落位=自 worldSurface 向上找 36 格空窗，塔战高度恰在
+    //  门线附近抖动）→ 山层有无逐帧交替=用户实报「星璇柱区背景山闪烁」
+    //  （#72/#73；高度相关；F9/光照无关——地表层不吃光照）。修=恒画（remix 门
+    //  仍在 Renderer 侧 remixSkipSurfaceBg），层内整层出屏 cull 补深度帧性能。
+    if (phase !== 'underground') {
       this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);
     }
     if (phase !== 'surface') {
@@ -1143,6 +1154,10 @@ export class BiomeBackground {
         + (opt.yoff ? (LAYER_YOFF[tex] ?? 0) : 0) + scAdj + pushHack;
       const dw = sw * scale + 1;   // +1px 保险重叠（浮点视差接缝,既有约定）
       const dh = sh * scale;
+      // ★整层出屏 cull（2026-10-03 随深度门摘除配套;纯性能无视觉差）:视差已把整层
+      //  滚出视口（topY≥viewH=层顶在屏底之下 / topY+dh≤0=层底在屏顶之上）时跳过
+      //  全部平铺 blit——原深度门时代深层帧零 blit 的成本面由此承接。
+      if (!(dh > 0) || topY >= viewH || topY + dh <= 0) return;
       // 帧动画子区经 opts.src 走 tint 烘焙路径的子区取样（GL 路径 quad 本就按源矩形采样）
       const sub = sx !== 0 || sy !== 0 || sw !== im.width || sh !== im.height;
       const opts = { alpha, tint: tintOn,

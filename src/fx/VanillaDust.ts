@@ -580,12 +580,12 @@ export class VanillaDust {
           chainLink = true;
           break;
         }
-        case 31: {  // :1336-1394（链 A 326-328/14/16/31/46/124/186/188/303 组链接）
-          d.vy *= 0.98; d.vx *= 0.98;                     // :1338-1339
-          if (d.noGravity) {                              // :1367-1377（customData=float/_NPC
-            d.vx *= 1.02; d.vy *= 1.02;                   //  两档本仓无消费方——备案不建）
-            d.scale += 0.02;
-            d.alpha += 4;
+        case 31: case 46: case 188: {  // :1336-1394（链 A 326-328/14/16/31/46/124/186/188/303
+          d.vy *= 0.98; d.vx *= 0.98;                     //  组链接;★BJ437 补成员 46/188——
+          if (d.type === 31 && d.noGravity) {            //  中毒泡/苍蝇尘发射方接入（成组同享
+            d.vx *= 1.02; d.vy *= 1.02;                   //  ×0.98 阻尼+跳通用重力）;31 专属 noGravity
+            d.scale += 0.02;                              //  臂(:1367-1377,1.02/+0.02/+4)按型守卫——
+            d.alpha += 4;                                 //  46 号 noGravity 尘不得误吃 31 号生长臂
             if (d.alpha > 255) { d.scale = 0.0001; d.alpha = 255; }
           }
           chainLink = true;
@@ -720,6 +720,28 @@ export class VanillaDust {
             d.vy = -0.5;
             if (d.type === 34) d.scale += 0.005;
           }
+          chainLink = true;
+          break;
+        }
+        case 27: case 45: {  // :1717-1775（链 A 27/45 组链接;★BJ437 补——咒火/恶魔镰刀
+          if (d.type === 27 && d.fadeIn >= 100) {         //  屑/暗影焰镖发射方,旧落链 B 兜底
+            if (d.scale >= 1.5) d.scale -= 0.01;          //  ×0.92+scale−0.04=双偏差）。fadeIn≥100
+            else d.scale -= 0.05;                         //  档(:1719-1734)本仓产尘恒不入,门随源码保留
+            if (d.scale <= 0.5) d.scale -= 0.05;
+            if (d.scale <= 0.25) d.scale -= 0.05;
+          }
+          d.vx *= 0.94; d.vy *= 0.94;                     // :1735
+          d.scale += 0.002;                               // :1736
+          let num97 = d.scale;
+          if (d.noLight) {                                // :1737-1755 noLight 档（跟随主角;
+            num97 *= 0.1;                                 //  湿档 ×0.5 无主角湿输入通道——备案）
+            d.scale -= 0.06;
+            if (d.scale < 1) d.scale -= 0.06;
+            d.x += playerDx; d.y += playerDy;
+          }
+          if (num97 > 1) num97 = 1;                       // :1756-1758
+          this.lights.push({ x: d.x, y: d.y,              // :1759 紫光 (0.6,0.2,1)×min(scale,1)
+            r: num97 * 0.6, g: num97 * 0.2, b: num97 });
           chainLink = true;
           break;
         }

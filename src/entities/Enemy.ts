@@ -2059,6 +2059,12 @@ export class Enemy extends Entity {
   /** AI_112 仙灵 localAI[1] 寿命计数（仅引导态 ai[2]>1 才累计,cs:48459-48473;
    *  与各状态复用的 ai3 计时器分离——曾共用导致寿命被状态转换反复清零） */
   fairyAge = 0;
+  /** AI_112 仙灵圆舞行进向快照（入态 3/5 时写=direction 语义）：原版圆舞期间
+   *  GetFairyCircleOffset 的 X 幅 6·−direction 与摆轴 ±π/8 全程读【行进向】,
+   *  而舞中只直写 spriteDirection（:48797/:49073）不改 direction——本仓 facing
+   *  双责（行进向+渲染面）,舞中被 danceFace 写覆写,故入态时快照分离
+   *  （2026-10-02 BJ434 全量重写随刀） */
+  fairyDanceDir = 1;
   /** AI_013 植物 stale target 偏移（玩家死亡时保持最后伸展目标——原版 :22655
    *  直读 target 槽位坐标,无 dead 门;曾缩回锚点发呆） */
   plantLastOx = 0;
@@ -2555,12 +2561,11 @@ export class Enemy extends Entity {
         this.applyDoT(n, game);
         game.addDamageNumber(this.cx, this.y, n, false, '#FF8C28', true);   // DoT 飘值(LifeRegenNegative :93070,dot 小字)
       }
-      if (Math.random() < 0.75) {
-        game.spawnParticles(
-          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-          Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.8,
-          { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
-      }
+      // ★BJ437（2026-10-02）：火尘粒子已迁下方「燃烧族 debuff VFX」区真尘直生——
+      //  旧泛色方块近似曾挂在本豁免门内 = FTW 火把史莱姆（ai1=8 永燃,
+      //  :61239-61247 AddBuff(24,216000) 每拍续 3600）被门误杀零粒子;非 FTW 面
+      //  色方块画在光照合成前被乘光+形态非火（用户实报「只发红没有火粒子」）。
+      //  原版粒子/点光在 UpdateNPC_BuffApplyVFX :92353（旗位驱动,与 DoT 豁免无涉）。
     }
 
     // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92703/92684 DoT 同 onFire 模式；
@@ -2674,6 +2679,97 @@ export class Enemy extends Entity {
       }
     }
     if (this.gelBalloonT > 0) this.gelBalloonT -= dt;   // 320 滴落展示位倒数（B1 批）
+    // ---- 燃烧族 debuff VFX（★BJ437 2026-10-02,UpdateNPC_BuffApplyVFX :92303-92440/
+    //      :92586-92634 1:1）——真尘直生（Dust.NewDustDirect 全链 1:1,盒扩/频率/尘型/
+    //      速度修型/重力翻转逐 buff 钉值;旧 onFire 泛色方块近似随本刀退役）。点光面
+    //      不在此重复:六火系/betsy (1,.3,.1)/(0.6,.1,.9) 与冰霜 (0.1,.6,1) 已由
+    //      updateNpcDebuffLights(:2402 调用)承担（原版同块 AddLight :92366/:92384/
+    //      :92400/:92415/:92600/:92616/:92633 并入该处=同帧等价）。canDisplayBuffs 门
+    //      = :92265 早退（FTW 245-248 石巨人族 false——旧 chlorophyteSpore 等批未挂门,
+    //      差异登记）。onFire3 customData=0 的实心格收缩档(:92382→Dust.cs:604-616)
+    //      引擎无消费面=登记债（发射面/运动学不受影响）。----
+    if (this.canDisplayBuffs) {
+      // 火焰族共形：盒(pos−2,+4)、v=velocity×0.4、α100、scale3.5、noGravity→
+      // velocity×mul→Y−add→1/4 概率翻重力+scale×0.5（onFire :92353-92367 形）
+      const flameDust = (dustId: number, mul: number, yAdd: number) => {
+        const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+          dustId, this.vx * 0.4, this.vy * 0.4, 100, null, 3.5);
+        if (d) {
+          d.noGravity = true;
+          d.vx *= mul; d.vy *= mul;
+          d.vy -= yAdd;
+          if (Math.floor(Math.random() * 4) === 0) { d.noGravity = false; d.scale *= 0.5; }
+        }
+        return d;
+      };
+      if (this.onFireT > 0 && Math.random() < 0.75) flameDust(6, 1.8, 0.5);            // 火尘 6(:92356)
+      if (this.onFire3T > 0 && Math.random() < 0.75) flameDust(6, 1.8, 0.5);           // 地狱火尘 6(:92372)
+      if (this.cursedT > 0 && Math.random() < 0.75) flameDust(75, 1.8, 0.5);           // 诅咒焰尘 75(:92621)
+      if (this.frostburnT > 0 && Math.random() < 0.75) flameDust(135, 1.8, 0.5);       // 冰焰尘 135(:92589)
+      if (this.frostburn2T > 0 && Math.random() < 0.75) flameDust(135, 1.8, 0.5);      // 冻伤尘 135(:92605)
+      if (this.daybreakT > 0 && Math.random() < 0.75) flameDust(158, 2.8, 0.5);        // 耀斑尘 158(:92389,×2.8)
+      if (this.betsysCurseT > 0 && Math.random() < 0.75) {
+        // 贝希摩斯诅咒尘 55（:92402-92416）：×2.8、Y−1.5 后【无条件】翻重力+scale=0.9
+        // +色(0,0,180,255)+velocity×0.2——无 1/4 翻转面
+        const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+          55, this.vx * 0.4, this.vy * 0.4, 100, null, 3.5);
+        if (d) {
+          d.noGravity = true;
+          d.vx *= 2.8; d.vy *= 2.8;
+          d.vy -= 1.5;
+          d.noGravity = false;
+          d.scale = 0.9;
+          d.color = { r: 0, g: 0, b: 180, a: 255 };
+          d.vx *= 0.2; d.vy *= 0.2;
+        }
+      }
+      if (this.shadowFlameT > 0 && Math.random() < 0.8) {
+        // 暗影焰尘 27（:92340-92352）：Next(5)<4=80%/拍、α180、scale1.95;
+        // velocity×0.75→X 再×0.75、Y−1；1/4 翻重力+scale×0.5（无点光——原版本块无 AddLight）
+        const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+          27, this.vx * 0.4, this.vy * 0.4, 180, null, 1.95);
+        if (d) {
+          d.noGravity = true;
+          d.vx *= 0.75; d.vy *= 0.75;
+          d.vx *= 0.75;
+          d.vy -= 1;
+          if (Math.floor(Math.random() * 4) === 0) { d.noGravity = false; d.scale *= 0.5; }
+        }
+      }
+      if (this.poisonT > 0 && Math.floor(Math.random() * 30) === 0) {
+        // 中毒泡尘 46（:92303-92308）：1/30、盒不扩、α120、scale0.2、noGravity+fadeIn1.9
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 46, 0, 0, 120, null, 0.2);
+        if (d) { d.noGravity = true; d.fadeIn = 1.9; }
+      }
+      if (this.venomT > 0 && Math.floor(Math.random() * 10) === 0) {
+        // 毒液泡尘 171（:92309-92314）：1/10、α100、scale0.5、noGravity+fadeIn1.5
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 171, 0, 0, 100, null, 0.5);
+        if (d) { d.noGravity = true; d.fadeIn = 1.5; }
+      }
+      if ((this.bleedT > 0 || this.hemorrhageT > 0) && Math.random() < 0.5) {
+        // 血尘 5（:92334-92339）：1/2、缺省参直生;Y+0.5 先于 ×0.35（原版语句序）
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 5);
+        if (d) { d.vy += 0.5; d.vx *= 0.35; d.vy *= 0.35; }
+      }
+      if (this.oiledT > 0 && Math.floor(Math.random() * 3) !== 0) {
+        // 油滴尘 4（:92417-92440）：外掷 Next(3)!=0=2/3、内 Next(2)==0 生效（净 1/3）;
+        // α175+两次 1/2 各+25、色(0,0,0,250)、noLight、v×0.2→Y+0.2→+=实体速度
+        if (Math.floor(Math.random() * 2) === 0) {
+          const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 2,
+            4, 0, 0, 175, { r: 0, g: 0, b: 0, a: 250 }, 1.4);
+          if (d) {
+            if (Math.random() < 0.5) d.alpha += 25;
+            if (Math.random() < 0.5) d.alpha += 25;
+            d.noLight = true;
+            d.vx *= 0.2;
+            d.vy *= 0.2;
+            d.vy += 0.2;
+            d.vx += this.vx;
+            d.vy += this.vy;
+          }
+        }
+      }
+    }
     // ---- 1457 新 debuff VFX（UpdateNPC_BuffApplyVFX :92263-92330 + A-5 孢子云
     //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles
     //      近似（颜色/概率/速率 1:1;粒子形态差异登记）----
@@ -11414,9 +11510,14 @@ export class Enemy extends Entity {
   }
 
   /** AI_112 仙灵 583-585（AI_112_FairyCritter cs:48453）：状态 0 绕出生点 20px 微漂、
-   *  玩家 250px 内 → 状态 1 追随飞（X 渐近 dir×4.5、前方 20×8 扫描定 Y、限 [-5,3]）；
-   *  存在 18000 帧（5 分钟）强制离场消失（cs:48457-48473）。
-   *  （状态 2-7 宝箱引导链需要宝箱搜索基建，未移植备案） */
+   *  玩家 250px 内 → 状态 1 逃离飞（X 渐近 dir×4.5、前方 20×8 扫描定 Y、限 [-5,3]）；
+   *  2 穿墙寻人 → 3 起舞（GetFairyCircleOffset 相对增量小圆舞）→ 4 穿墙带路 →
+   *  5 宝箱处终演消散（FairyEffects）/ 6 无宝重试 / 7 飞离（EncourageDespawn）；
+   *  引导态存活 18000 帧（5 分钟）→ 7（cs:48457-48473）。
+   *  ★BJ434（2026-10-02）：状态 2-7 全量 1:1 重写——旧「绕宝箱绝对点直写速度」
+   *  的圆舞近似（差值可达 ~1200px/tick,noTileCollide 直积分=逐帧跳位）即用户实报
+   *  「指路瞬移」根因;同时补 noTileCollide→物理直积分接线（旧置旗但 moveAndCollide
+   *  不读=引导态仍撞墙,穿墙引导名存实亡）。 */
   private fairyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     // 圆舞朝向门（cs:49134 尾写 flag 门）——状态 3 / 状态 4 等玩家臂 / 状态 5 圆舞段
@@ -11518,93 +11619,174 @@ export class Enemy extends Entity {
       if (highBlocked) this.vy -= 0.3;
       this.vy = Math.max(-5, Math.min(3, this.vy));
     } else if (this.ai2 === 2) {
-      // ---- 状态 2 玩家引导（:48602-48684）：飞向玩家锚盒；接触 → 宝箱搜索 →
-      //      命中 → 状态 3 绕目标，未命中 → 状态 6 找不到宝箱态 ----
+      // ---- 状态 2 玩家引导（cs:48753-48846 1:1）：noTileCollide=true 穿墙寻人；
+      //      锚盒（CenteredRect(player.Center,(W+60,H/2))）接触 → 宝箱搜索（命中→态 3
+      //      起舞 / 未中→态 6 寻箱）;飞行 = DirectionTo(锚盒最近点)×2（距>150 ×2 /
+      //      >80 ×1.5）lerp 0.07 + 鸟飞建议(6,3,vy 钳[−4,2],ai3<300 门) + 卡墙计数
+      //      （中心实心 ai3+=2 / 开放 −1,钳[0,400]）。旧实装缺鸟飞/卡墙计数,且锚盒
+      //      中心误上移 h/4（原版 GetTargetData 中心=玩家 Center 无偏移,BJ434 修）----
       this.noTileCollide = true;
-      if (player && player.dead) { this.ai2 = 1; this.ai3 = 0; }
-      else if (player) {
-        const rCx = player.cx, rCy = player.cy - player.h / 4;
+      if (player && player.dead) {
+        this.ai2 = 1; this.ai3 = 0;
+        this.facing = player.cx > this.cx ? -1 : 1;   // 背向玩家逃离（cs:48760 !(...>X)）
+        if (this.vx * this.facing < 0) this.vx = this.facing * 2;
+      } else if (player) {
         const rw = player.w + 60, rh = player.h / 2;
-        if (this.x < rCx + rw / 2 && this.x + this.w > rCx - rw / 2
-          && this.y < rCy + rh / 2 && this.y + this.h > rCy - rh / 2) {
+        if (this.x < player.cx + rw / 2 && this.x + this.w > player.cx - rw / 2
+          && this.y < player.cy + rh / 2 && this.y + this.h > player.cy - rh / 2) {
           const treasure = fairyTreasureCoords(st, this.cx, this.cy);
-          if (treasure) { this.ai0 = treasure[0]; this.ai1 = treasure[1]; this.ai2 = 3; this.ai3 = 0; }
+          if (treasure) {
+            this.ai0 = treasure[0]; this.ai1 = treasure[1];
+            this.ai2 = 3; this.ai3 = 0;
+            this.fairyDanceDir = this.facing;   // 圆舞 dir=入态时行进向（舞中 direction 不改写）
+          }
           else { this.ai2 = 6; this.ai3 = 0; }
         } else {
-          const dx = rCx - this.cx, dy = rCy - this.cy;
+          // 最近点（cs:48778 ClosestPointInRect=逐轴钳入）
+          const qx = Math.min(Math.max(this.cx, player.cx - rw / 2), player.cx + rw / 2);
+          const qy = Math.min(Math.max(this.cy, player.cy - rh / 2), player.cy + rh / 2);
+          const dx = qx - this.cx, dy = qy - this.cy;
           const d = Math.hypot(dx, dy) || 1;
           let spd = 2;
-          if (d > 150) spd = 4; else if (d > 80) spd = 3;
-          const tvx = dx / d * spd, tvy = dy / d * spd;
-          this.vx += (tvx - this.vx) * 0.07;
-          this.vy += (tvy - this.vy) * 0.07;
+          if (d > 150) spd = 4; else if (d > 80) spd = 3;   // :48786 value×2 / ×1.5
+          this.vx += (dx / d * spd - this.vx) * 0.07;   // Lerp(velocity, value, 0.07)
+          this.vy += (dy / d * spd - this.vy) * 0.07;
+          const txi = Math.floor(this.cx / TILE), tyi = Math.floor(this.cy / TILE);
+          if (this.ai3 < 300) {
+            const bf = fairyBirdFlight(st, this.facing, txi, tyi, 6, 3);
+            if (bf.down) this.vy += 0.05;
+            if (bf.up) this.vy -= 0.02;
+            if (this.vy > 2) this.vy = 2;
+            if (this.vy < -4) this.vy = -4;
+          }
+          if (st.inBounds(txi, tyi)) {
+            if (st.isSolid(txi, tyi)) this.ai3 = Math.min(this.ai3 + 2, 400);
+            else this.ai3 = Math.max(this.ai3 - 1, 0);
+          }
         }
       }
     } else if (this.ai2 === 3) {
-      // ---- 状态 3 绕目标宝箱圆舞（:48688-48742）：210t（音 27@15t 起）；
-      //      毕 → 状态 4 带路；目标失效 → 状态 1 ----
+      // ---- 状态 3 引导起舞（cs:48688-48742 1:1）：≤15t 减速收势（音 27@15）;
+      //      velocity = GetFairyCircleOffset(t+Δ)−GetFairyCircleOffset(t)——绕【入态身位】
+      //      小圆舞（X 幅 6·dir、Y 幅 14/18/22 三段摆 + 摆轴 ±π/8）。★BJ434 瞬移根因：
+      //      旧实装写「绕宝箱绝对点−当前位置」（寻箱窗 ±75×±50 格 → 单帧差值可达
+      //      ~1200px,noTileCollide 直积分=逐帧跳位）;原版圆舞纯相对增量 ≤2.2px/tick。
+      //      毕（210t）→ 状态 4 带路 ----
       this.noTileCollide = true;
       if (this.ai3 === 15) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48692 音27=Pixie(曾误 roar 近似)
       if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
       else {
-        // 简化圆舞：绕目标顺时针环绕（原版 GetFairyCircleOffset 三段摆）
-        const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
-        const ang = (this.ai3 - 15) / 65 * Math.PI;
-        const r2 = 18;
-        const nx = tx + Math.cos(ang) * r2, ny = ty + Math.sin(ang) * r2 - 14;
-        this.vx = nx - this.cx; this.vy = ny - this.cy;
-        if (player && !player.dead) { this.facing = player.cx > this.cx ? 1 : -1; danceFace = true; }   // cs:48852-48860
+        if (player && !player.dead) { this.facing = player.cx > this.cx ? 1 : -1; danceFace = true; }   // cs:48797-48801 spriteDirection 直写（仓内极性沿旧写法）
+        const num7 = this.ai3 - 15;
+        let rot = 0, circleHeight = 22;
+        if (num7 <= 65) { rot = Math.PI / 8; circleHeight = 14; }         // :48719-48721
+        else if (num7 <= 130) { rot = -Math.PI / 8; circleHeight = 18; }  // :48722-48724
+        rot *= this.fairyDanceDir;   // num6 *= direction
+        const o3 = fairyCircleOffset(num7 / 65, rot, circleHeight, this.fairyDanceDir);
+        const o4 = fairyCircleOffset(num7 / 65 + 1 / 65, rot, circleHeight, this.fairyDanceDir);
+        this.vx = o4[0] - o3[0];
+        this.vy = o4[1] - o3[1];
       }
       this.ai3 += 1;
       if (this.ai3 >= 210) { this.ai2 = 4; this.ai3 = 0; }
     } else if (this.ai2 === 4) {
-      // ---- 状态 4 带路（:48779-48925）：飞向宝箱；距玩家 >300 → 召唤脉冲等玩家；
-      //      到宝箱 5×5 盒 → 状态 5 终演；玩家死 → 状态 1 ----
+      // ---- 状态 4 带路（cs:48744-48925 1:1）：达宝箱 5×5px 盒 → 态 5 终演;
+      //      距玩家 >300 → 等待臂（>360 追人 DirectionFrom×−0.1 + Pixie 1/30 /
+      //      <330 回宝箱 DirectionTo×0.1;总速钳 1;开域落地窗 noTileCollide=false
+      //      + 上拍碰撞旗反弹——原版同拍读上拍旗,仓内同构）;≤300 → 直飞
+      //      （DirectionTo(盒最近点) ×3/>150 ×2/>80 lerp 0.07 + 鸟飞建议(4,2,
+      //      vy 钳[−1,1],ai3<300 门) + 卡墙计数）。旧实装=0.1 累加+总速钳 6（原版
+      //      等待臂钳 1/直飞臂 ≤3）+ 到达盒误 80×80（原版 5×5px,BJ434 修）----
       this.noTileCollide = true;
-      if (player && player.dead) { this.ai2 = 1; this.ai3 = 0; }
-      else {
+      if (player && player.dead) {
+        this.ai2 = 1; this.ai3 = 0;
+        this.facing = player.cx > this.cx ? -1 : 1;
+        if (this.vx * this.facing < 0) this.vx = this.facing * 2;
+      } else {
         const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
-        // 到达宝箱 5×5 盒 → 终演
-        if (Math.abs(this.cx - tx) < 40 && Math.abs(this.cy - ty) < 40) {
+        // 到达宝箱 5×5px 盒（cs:48774 CenteredRect(tile 中心,Vector2.One×5)）→ 终演
+        if (this.x < tx + 2.5 && this.x + this.w > tx - 2.5
+          && this.y < ty + 2.5 && this.y + this.h > ty - 2.5) {
           this.ai2 = 5; this.ai3 = 0;
+          this.fairyDanceDir = this.facing;
         } else if (player) {
           const dp = Math.hypot(player.cx - this.cx, player.cy - this.cy);
           if (dp > 300) {
-            // 等玩家（环形徘徊 + 召唤音 1/30,:48839 音27=Pixie）;面向玩家+尾写门
-            //（cs:48976-48984 flag=true + spriteDirection 直写）
-            if (Math.random() < 1 / 30) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);
-            const d2 = Math.hypot(this.cx - tx, this.cy - ty) || 1;
-            this.vx += (this.cx - tx) / d2 * 0.1;
-            this.vy += (this.cy - ty) / d2 * 0.1;
+            // 等待臂（cs:48777-48807）:开域落地窗（原版 :48779-48785）
+            if (dp < 400 && !solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
+              this.noTileCollide = false;
+              if (this.hitWall) this.vx *= -1;
+              if (this.collideY) this.vy *= -1;
+            }
             this.facing = player.cx > this.cx ? 1 : -1;
             danceFace = true;
+            const awayX = this.cx - player.cx, awayY = this.cy - player.cy;   // DirectionFrom(player)
+            const m = Math.hypot(awayX, awayY) || 1;
+            if (dp > 360) {
+              this.vx += -awayX / m * 0.1;   // DirectionFrom×−0.1 = 追向玩家（:48791-48794）
+              this.vy += -awayY / m * 0.1;
+              if (Math.random() < 1 / 30) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48798 音27=Pixie
+            } else if (dp < 330) {
+              // 回宝箱最近点（:48796-48800 DirectionTo(destination)×0.1）
+              const qx = Math.min(Math.max(this.cx, tx - 2.5), tx + 2.5);
+              const qy = Math.min(Math.max(this.cy, ty - 2.5), ty + 2.5);
+              const ddx = qx - this.cx, ddy = qy - this.cy;
+              const dd = Math.hypot(ddx, ddy) || 1;
+              this.vx += ddx / dd * 0.1;
+              this.vy += ddy / dd * 0.1;
+            }
+            const spd = Math.hypot(this.vx, this.vy);
+            if (spd > 1) { this.vx /= spd; this.vy /= spd; }   // :48805 总速钳 1
           } else {
-            const d2 = Math.hypot(tx - this.cx, ty - this.cy) || 1;
-            this.vx += (tx - this.cx) / d2 * 0.1;
-            this.vy += (ty - this.cy) / d2 * 0.1;
+            // 直飞臂（cs:48809-48925）
+            const qx = Math.min(Math.max(this.cx, tx - 2.5), tx + 2.5);
+            const qy = Math.min(Math.max(this.cy, ty - 2.5), ty + 2.5);
+            const dx = qx - this.cx, dy = qy - this.cy;
+            const d = Math.hypot(dx, dy) || 1;
+            let sx = dx / d, sy = dy / d;
+            if (d > 150) { sx *= 3; sy *= 3; }               // :48910 num11>150 ×3
+            else if (d > 80) { sx *= 2; sy *= 2; }           // :48912 >80 ×2
+            this.vx += (sx - this.vx) * 0.07;   // Lerp(velocity, value2, 0.07)
+            this.vy += (sy - this.vy) * 0.07;
+            const txi = Math.floor(this.cx / TILE), tyi = Math.floor(this.cy / TILE);
+            if (this.ai3 < 300) {
+              const bf = fairyBirdFlight(st, this.facing, txi, tyi, 4, 2);
+              if (bf.down) this.vy += 0.05;
+              if (bf.up) this.vy -= 0.05;
+              if (this.vy > 1) this.vy = 1;
+              if (this.vy < -1) this.vy = -1;
+            }
+            if (st.inBounds(txi, tyi)) {
+              if (st.isSolid(txi, tyi)) this.ai3 = Math.min(this.ai3 + 2, 400);
+              else this.ai3 = Math.max(this.ai3 - 1, 0);
+            }
           }
-          const spd = Math.hypot(this.vx, this.vy);
-          if (spd > 6) { this.vx *= 6 / spd; this.vy *= 6 / spd; }
         }
       }
     } else if (this.ai2 === 5) {
-      // ---- 状态 5 终演（:48897-48955）：目标格失效 → 提前毕；>200t →
-      //      消失 + FairyEffects（尘 278×40 爆散 + 音 Item4）----
+      // ---- 状态 5 终演（cs:48897-49005 1:1）：fairyAge=0 停寿龄;≤15t 收势（音 27@15）;
+      //      圆舞 50t 步（Δ=0.02）+ 摆轴/摆幅 50t 相位摆（cos(num5)·2π/16、
+      //      cos(2·num5)·10+8,range [−2,18]）;>200t → 消散 + FairyEffects
+      //      （尘 278×40 爆散 + 音 Item4）。原版 flag2 失效门（:48903-48907）为死码
+      //      ——无提前毕,旧仓提前毕=自造偏差（BJ434 撤,目标被挖时照舞满 200t）----
       this.noTileCollide = true;
-      const valid = fairyTreasureValidAt(st, this.ai0, this.ai1);
       this.fairyAge = 0;   // localAI[1]=0(cs:49058 逐 tick 清=终演期不累计寿龄)
       if (this.ai3 === 15) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48913 音27=Pixie
       if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
       else {
-        // 绕目标小圆舞（同状态 3 简化）;面向玩家+尾写门（cs:49073-49091）
-        const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
-        const ang = (this.ai3 - 15) / 65 * Math.PI;
-        const nx = tx + Math.cos(ang) * 18, ny = ty + Math.sin(ang) * 18 - 14;
-        this.vx = nx - this.cx; this.vy = ny - this.cy;
+        // 圆舞同态 3 但 50t 步 + 相位摆;面向玩家+尾写门（cs:49073-49091）
         if (player && !player.dead) { this.facing = player.cx > this.cx ? 1 : -1; danceFace = true; }
+        const num3 = this.ai3 - 15;
+        const num5 = Math.floor(num3 / 50);
+        let rot = Math.cos(num5) * (Math.PI * 2) / 16;      // :49048 num2
+        const h = Math.cos(num5 * 2) * 10 + 8;              // :49049 num4
+        rot *= this.fairyDanceDir;
+        const o1 = fairyCircleOffset(num3 / 50, rot, h, this.fairyDanceDir);
+        const o2 = fairyCircleOffset(num3 / 50 + 0.02, rot, h, this.fairyDanceDir);
+        this.vx = o2[0] - o1[0];
+        this.vy = o2[1] - o1[1];
       }
       this.ai3 += 1;
-      if (!valid) this.ai3 = Math.max(this.ai3, 201);   // 目标没了提前毕
       if (this.ai3 > 200) {
         // FairyEffects（:49021-49052）：尘 278×40 Lerp 主色/副色 0.65 scale 爆散
         const fairyCols: Record<number, [string, string]> = {
@@ -11619,31 +11801,43 @@ export class Enemy extends Entity {
         this.dead = true; return;
       }
     } else if (this.ai2 === 6) {
-      // ---- 状态 6 找不到宝箱（:48746-48790）：跟玩家 >100px → 回状态 2 重试 ----
+      // ---- 状态 6 找不到宝箱（cs:48746-48790 1:1）：>100px 回态 2 重试;开域落地窗
+      //      （同态 4）;>20px 逐轴 0.04 漂移（|vy|>2 ×0.95 阻尼,无总速钳——原版同式,
+      //      旧仓 vy ±2 硬钳=自造）;宝箱重搜【逐 tick】（原版 :48917-48923 无节流,
+      //      旧 150t 门=自造,BJ434 撤——节流会让仙灵漏看玩家身边新宝箱 2.5s）----
       this.noTileCollide = true;
       if (player) {
-        const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        const d = Math.hypot(dx, dy);
         if (d > 100) { this.ai2 = 2; this.ai3 = 0; }
-        else if (d > 20) {
-          const d2 = d || 1;
-          this.vx += Math.sign(player.cx - this.cx) * 0.04;
-          this.vy += Math.sign(player.cy - this.cy) * 0.04;
-          this.vy = Math.max(-2, Math.min(2, this.vy));
-        }
-        // 每 150t 重搜宝箱（原版 :48769）
-        if (this.ai3 % 150 === 0 && this.ai3 > 0) {
+        else {
+          if (!solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
+            this.noTileCollide = false;
+            if (this.hitWall) this.vx *= -1;
+            if (this.collideY) this.vy *= -1;
+          }
+          if (d > 20) {
+            this.vx += (dx > 0 ? 1 : -1) * 0.04;   // :48870-48872（>0?1:−1,非 Math.sign）
+            this.vy += (dy > 0 ? 1 : -1) * 0.04;
+            if (Math.abs(this.vy) > 2) this.vy *= 0.95;
+          }
           const treasure = fairyTreasureCoords(st, this.cx, this.cy);
-          if (treasure) { this.ai0 = treasure[0]; this.ai1 = treasure[1]; this.ai2 = 3; this.ai3 = 0; }
+          if (treasure) {
+            this.ai0 = treasure[0]; this.ai1 = treasure[1];
+            this.ai2 = 3; this.ai3 = 0;
+            this.fairyDanceDir = this.facing;
+          }
         }
-        this.ai3 += 1;
       }
     } else if (this.ai2 === 7) {
-      // ---- 状态 7 离场（:48950-48958）：加速飞离 + 提前消亡 ----
+      // ---- 状态 7 离场（cs:48950-48958 1:1）：加速飞离 + EncourageDespawn(10)
+      //      （曾缺=寿满飞离只能靠离屏自然倒数,原版封顶 10t 快速消散,BJ434 补）----
       this.noTileCollide = true;
       this.vx += 0.05 * this.facing;
       this.vx = Math.max(-10, Math.min(10, this.vx));
       this.vy -= 0.025;
       this.vy = Math.max(-5, Math.min(5, this.vy));
+      this.encourageDespawn(10);
     }
     // ---- 呼吸闪粉尘 278（cs:49139-49161）：每 2 视效 tick 一粒,8×8 盒 @Center−2、
     //      v=本速×0.3（spawn 自带 ±2 随机漂,后置覆写精确化）、scale 0.65、α 200、
@@ -11665,7 +11859,16 @@ export class Enemy extends Entity {
     }
     if (!danceFace) this.facing = this.vx > 0 ? 1 : -1;   // cs:49134-49138 flag 门
     this.preCollideVy = this.vy;   // oldVelocity 快照(:93739)——下一 tick 撞顶反向用
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.noTileCollide) {
+      // ★BJ434：原版 noTileCollide 直积分（ApplyTileCollision 穿墙支 position += velocity,
+      //  :93685+ 门）——旧实装置旗但 moveAndCollide 只读 tileCollide（本仓穿墙约定
+      //  通道）= 引导态仍撞墙,穿墙引导名存实亡。旗清零与 moveAndCollide
+      //  tileCollide=false 支同构
+      this.x += this.vx; this.y += this.vy;
+      this.onGround = false; this.hitWall = false; this.hitHead = false; this.collideY = false;
+    } else {
+      moveAndCollide(this, game.world, this.vx, this.vy);
+    }
   }
 
   /** AI_114 蜻蜓族 595-601（AI_114_Dragonflies cs:48080）：ai[0]=0 悬停/1 突进，
@@ -15410,6 +15613,38 @@ function fairyOreFinderValid(sheet: number, frameX: number): boolean {
   if (sheet === 227) return frameX >= 272 && frameX <= 374;
   if (sheet === 129) return frameX >= 324;
   return true;
+}
+
+/** GetFairyCircleOffset（NPC.cs:49231-49235）1:1：仙灵圆舞轨迹参数化——
+ *  (((2π·t + π/2).ToRotationVector2() + (0,−1)) × (6·−dir, h)).RotatedBy(rot)。
+ *  消费式 = velocity = P(t+Δ) − P(t)（纯相对增量,X 幅 6·dir、Y 幅 h,≤2.2px/tick）,
+ *  ★非绝对定位（BJ434：绝对点直写=瞬移根因） */
+function fairyCircleOffset(
+  t: number, rot: number, h: number, dir: number,
+): [number, number] {
+  const a = Math.PI * 2 * t + Math.PI / 2;
+  const x = Math.cos(a) * (6 * -dir);
+  const y = (Math.sin(a) - 1) * h;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return [x * c - y * s, x * s + y * c];   // RotatedBy（逆时针,屏幕 Y 向下=视觉顺时针）
+}
+
+/** GetBirdFlightRecommendation（NPC.cs:49206-49229）1:1：朝向列（tCoords.X += dir）
+ *  向下探 downScanRange 格,首个实心/液体格——在 upRange 行内 → 建议上浮,否则下沉 */
+function fairyBirdFlight(
+  st: import('../world/TileStore').TileStore, dir: number,
+  tx: number, ty: number, downRange: number, upRange: number,
+): { down: boolean; up: boolean } {
+  tx += dir;
+  let down = true, up = false;
+  for (let j = ty; j < ty + downRange && st.inBounds(tx, j); j++) {
+    if (st.isSolid(tx, j) || st.liquid[st.idx(tx, j)] > 0) {
+      if (j < ty + upRange) up = true;
+      down = false;
+      break;
+    }
+  }
+  return { down, up };
 }
 
 /** 宝箱/引导目标搜索（GetFairyTreasureCoords :48794-48852）：中心 ±75×±50 窗

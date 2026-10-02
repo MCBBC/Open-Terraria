@@ -360,14 +360,18 @@ describe('⑦ 抚摸 Joy 音计时（:50053-50113 AI_067 / :59101-59131 AI_026�
 });
 
 // ---------------------------------------------------------------------------
-// ⑧ ai[0]=3 帮工意图——维持登记（IntentionGuesser 本仓无,勿造系统）
+// ⑧ ai[0]=3 帮工意图——★BJ433（2026-10-02）登记清偿改判：旧判「IntentionGuesser
+//    本仓无,勿造系统」前提失效（src/player/SmartCursor.ts 已移植 Step_Axe/
+//    Step_Pickaxe_MineSolids），帮工链 1:1 闭合（IntentionGuesser 移植 + tryMine/
+//    petPickTile Track/AllowTracking 接线 + cattivaTryAssigningHelp/HitIntention）。
+//    判别测试 = tests/bj433-cattiva-helper.test.ts；本块改钉新态
 // ---------------------------------------------------------------------------
-describe('⑧ ai[0]=3 帮工意图维持登记（TryAssigningHelp :52208）', () => {
-  it('本仓无 IntentionGuesser 系统（grep 零命中）+ 登记注释在案', () => {
-    expect(GAME_TS.includes('IntentionGuesser')).toBe(false);
+describe('⑧ ai[0]=3 帮工意图已折算（BJ433 清偿,TryAssigningHelp :52208）', () => {
+  it('IntentionGuesser 移植在案 + Game/MinionProj 双侧接线在案', () => {
+    expect(GAME_TS).toContain('intentionGuesser = new IntentionGuesser()');
     const minionTs = readFileSync(join(ROOT, 'src/entities/MinionProj.ts'), 'utf8');
     expect(minionTs).toContain('IntentionGuesser');
     expect(minionTs).toContain('TryAssigningHelp :52208');
-    expect(minionTs).not.toMatch(/ai\[0\] = 3|palA0 = 3/);        // 帮工态未折算
+    expect(minionTs).toMatch(/palA0 = 3/);        // 帮工态置位面在案
   });
 });
