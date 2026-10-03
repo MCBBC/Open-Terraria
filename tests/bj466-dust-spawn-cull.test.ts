@@ -6,7 +6,9 @@
 //    return 6000——拒且零 RNG 消费（先于密度梯 :106-151 与全部初始化掷）。
 //  · UpdateDust 尾 :2470-2494：num119 对 maxDustToDraw 分位 {0.9,0.8,0.7,0.6,0.5,else}
 //    定 dCount ∈ {0.9,0.8,0.7,0.6,0.5,0}f。
-//  · NewDustPerfect :52-63 通道（BJ460③ 钉案）与 prettySparkle 载体豁免。
+//  · prettySparkle 载体豁免。NewDustPerfect :52-63【不】豁免（★BJ480 复裁推翻
+//    BJ460③ 钉案——Dust.cs:56 = Main.dust[NewDust(·,0,0,…)] 完整委托,照吃 :97-103
+//    裁剪;判别面见 tests/bj480-perfect-cull-reverify.test.ts 与本文件 ④）。
 //
 // ★BJ466 复核定谳（源码锚见 VanillaDust.ts 实现注）：
 //  · margin 六档 f32 实值 = {400,200,159,120,79,40}——非登记账理想值 {…160…80…}：
@@ -179,14 +181,21 @@ describe('BJ466 ③ dCount 阶梯六档 margin 钉值', () => {
   });
 });
 
-describe('BJ466 ④ NewDustPerfect / prettySparkle 载体豁免', () => {
-  it('perfect 通道屏外不裁（覆写面 position/velocity 精确）', () => {
+describe('BJ466 ④ perfect 照裁 / prettySparkle 载体豁免（★BJ480 复裁改面）', () => {
+  it('perfect 通道屏外照裁（★BJ480：Dust.cs:56 委托 NewDust,裁剪先于 :57-61 覆写）', () => {
     const vd = new VanillaDust();
     vd.update(VX, VY, VW, VH);
     Math.random = (() => 0.99) as never;
-    const p = vd.spawn(7200, 1300, 16, 16, 1, 3, 4, 0, null, 1, { perfect: true });
+    expect(vd.spawn(7200, 1300, 16, 16, 1, 3, 4, 0, null, 1, { perfect: true })).toBeNull();
+  });
+
+  it('perfect 通道屏内照常（覆写面 position/velocity 精确）', () => {
+    const vd = new VanillaDust();
+    vd.update(VX, VY, VW, VH);
+    Math.random = (() => 0.99) as never;
+    const p = vd.spawn(1200, 1300, 16, 16, 1, 3, 4, 0, null, 1, { perfect: true });
     expect(p).not.toBeNull();
-    expect(p!.x).toBe(7200);
+    expect(p!.x).toBe(1200);
     expect(p!.vx).toBe(3);
     expect(p!.vy).toBe(4);
   });

@@ -75,14 +75,15 @@ describe('dropScanCtx 帧快照', () => {
     expect(getDropScanCtx(p)).toBeNull();
   });
 
-  it('⑤数量级护栏：帧快照路由下 equipStatsKey 全量重建恒 ≤4 次/帧（旧路径=N掉落×2）', () => {
-    // 计数器挂原型——每次访问 get equipStats 都先全量重建内容键(equipStatsKey)
-    // 再做相等比较(trace 定罪的就是这个"命中也要先建键"的 O(全身装备+背包) 成本)
+  it('⑤数量级护栏：帧快照路由下 equipStats 结构段全量重建恒 ≤4 次/帧（旧路径=N掉落×2）', () => {
+    // 计数器挂原型——每次访问 get equipStats 都要过内容键（★IIIII251 键二分后,
+    // trace 定罪的「命中也要先建键」O(全身装备+背包) 成本落在结构段 equipStatsStructKey；
+    // 解除态（本测试不经 fixedUpdate）逐访问现算=旧路径成本面,计数语义不变）
     const p = mk();
     const proto = Object.getPrototypeOf(p) as Record<string, unknown>;
-    const orig = proto.equipStatsKey as () => string;
+    const orig = proto.equipStatsStructKey as () => number;
     let n = 0;
-    proto.equipStatsKey = function (this: Player) { n++; return orig.call(this); };
+    proto.equipStatsStructKey = function (this: Player) { n++; return orig.call(this); };
     try {
       p.equipStats;                                    // 预热基线
       const base = n;
@@ -104,8 +105,7 @@ describe('dropScanCtx 帧快照', () => {
       beginDropScanCtx(p);
       expect(n).toBeLessThanOrEqual(8);
     } finally {
-      delete proto.equipStatsKey;                       // 还原原型(guard 不泄漏给后续套件)
-      void orig;
+      proto.equipStatsStructKey = orig;                 // 还原原型(guard 不泄漏给后续套件)
     }
   });
 });

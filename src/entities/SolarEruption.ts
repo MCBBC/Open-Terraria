@@ -17,6 +17,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 /** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）；无 Buff 表直写计时 */
@@ -95,6 +96,8 @@ export class SolarFlare extends Entity {
 export class SolarEruptionWhip extends Entity {
   w = 16; h = 16;
   damage: number;
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 611 :6569 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 611;
   critChance = 0.04;
   armorPen = 0;
   /** ai[1] 出生抖动（(rand−0.5)×π/4，Player.cs:48060） */
@@ -152,7 +155,8 @@ export class SolarEruptionWhip extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; cx: number; cy: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,611 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）：链鞭 611 数据面 melee（SetDefaults :6399-6415）→
       // 焰爆石/拍击石双支（13439-46）；加伤随暴击并入实伤参

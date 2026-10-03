@@ -22,6 +22,8 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push('CE: ' + m.text(
 
 // ---- 注入存档（kv 快速存档槽）----
 await page.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+// 预种欢迎覆层 ack（未 ack=覆层堆叠,可能挡键入/暂停）
+await page.evaluate(() => { try { localStorage.setItem('sw.welcome.announce.acked', '1'); } catch { /* ignore */ } });
 const how = await page.evaluate(async (text) => {
   const m = await import('/src/save/KvStore.ts');
   await m.kvDelete('sandboxworld.worlds.index');
@@ -32,6 +34,27 @@ console.log('kvSet →', how);
 
 const qs = 'quickload=1&t=' + Date.now();
 await page.goto(ORIGIN + '/?' + qs, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+// 等 __swFlow 就绪（boot 序列早段建 flow;音频门/资产暖机不阻塞 flow 对象存在）
+let flowReady = false;
+for (let i = 0; i < 60; i++) {
+  flowReady = await page.evaluate(() => !!window.__swFlow).catch(() => false);
+  if (flowReady) break;
+  await new Promise((r) => setTimeout(r, 2000));
+}
+console.log('flowReady:', flowReady);
+// 直接手动 quickLoad（boot 旁路被音频门挡时仍可用）;120s 竞速防挂死
+const manual = await page.evaluate(() => new Promise((resolve) => {
+  const w = window;
+  if (w.__swGame?.world?.store) return resolve({ skip: true });
+  const flow = w.__swFlow;
+  if (!flow || typeof flow.quickLoad !== 'function') return resolve({ noFlow: true });
+  const to = setTimeout(() => resolve({ timeout: true }), 120000);
+  Promise.resolve(flow.quickLoad()).then(
+    () => { clearTimeout(to); resolve({ ok: true }); },
+    (e) => { clearTimeout(to); resolve({ err: String(e?.stack || e).slice(0, 600) }); },
+  );
+}));
+console.log('manual quickLoad:', JSON.stringify(manual));
 const t0 = Date.now(); let ok = false; let lastState = '';
 while (Date.now() - t0 < 300000) {
   const st = await page.evaluate(() => ({
@@ -45,9 +68,11 @@ while (Date.now() - t0 < 300000) {
   await new Promise((r) => setTimeout(r, 2000));
 }
 if (!ok) { console.log('stuck:', lastState, page.url()); throw new Error('quickload-timeout'); }
-await page.evaluate(() => {
-  for (const b of document.querySelectorAll('button')) if (/我知道了/.test(b.textContent || '')) b.click();
+const clearOverlays = () => page.evaluate(() => {
+  const re = /我知道了|我已知晓|确定|知道了/;
+  for (const b of document.querySelectorAll('button')) if (re.test(b.textContent || '')) b.click();
 });
+await clearOverlays();
 console.log('game loaded');
 
 // ---- 场景核实+双口钩子 ----
@@ -108,9 +133,10 @@ console.log('hooks:', JSON.stringify(hookRes));
 
 // ---- 传送+跑动复现 ----
 const runArm = async (label, useFire) => {
+  await clearOverlays();
   await page.evaluate((useFire) => {
-    const { g } = window.__bj474;
-    g.__bj474.rec.push({ t: g.tickCount, mark: 'arm-start', fire: useFire });
+    const { g, rec } = window.__bj474;
+    rec.push({ t: g.tickCount, mark: 'arm-start', fire: useFire });
     // 传送：洼坑左侧草台（tile 3111 顶,y=307 行 4912→player.y = 4912-42 = 4870）
     const p = g.player;
     p.x = 3111 * 16 + 8 - p.w / 2;
@@ -130,6 +156,7 @@ const runArm = async (label, useFire) => {
   }
   const summary = await page.evaluate((label) => {
     const { rec, g } = window.__bj474;
+    void label;
     const byKind = {};
     for (const e of rec) {
       if (e.mark) continue;

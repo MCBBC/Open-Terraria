@@ -32,6 +32,7 @@ import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
 import { cutTilesBox } from './ProjCutTiles';
 import { hitCritters } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 // L5 长尾批：真刃系挥弧命中编排（Projectile.Damage case972-985 收编池）
 import { nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -405,7 +406,12 @@ export class SwingArc extends Entity {
       if (!coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reach, num14, Math.PI / 4)
         && !(num15 > 0 && coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reach,
           num14 - Math.PI / 4 * this.ai0 * num15, Math.PI / 4))) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③（2026-10-03）掷率=owner 装配口径（rollVanillaHitCrit:12915-12927——
+      //  972/982/983/997/984 melee 旗,基 4+meleeCrit 聚合;旧 arcCrit 载体含武器
+      //  item.crit/词条 crt 的静态冻结载体退役;:25712 持械折入由 rollVanillaHitCrit
+      //  动态承载=命中拍现值,写位已摘）。
+      //  critChance≤0 关断钉保留（dealContacts :482 同族习语,测试置 0 禁暴击）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）①：锚弧（this.projId=972/982/983/997/984，数据面 melee）
       // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤在 banner 外随暴击并入
@@ -553,6 +559,10 @@ export class TrueNightsEdgeSlash extends Entity {
   private wallBlocked = false;
   private owner: ArcOwner;
   private hitCd = new Map<number, number>();
+  /** ★BJ486③ vanilla 弹 id（Projectile.cs SetDefaults 973 :9317 melee=true）——
+   *  命中面掷率改 rollVanillaHitCrit 类旗查询锚（原版 Damage 面=基 4+owner 装配,
+   *  静态冻结载体 arcCrit 退役;:25712 持械折入动态承载,BJ482②/BJ486③） */
+  readonly projId = 973;
   critChance = 0.04;
   armorPen = 0;
   /** oldPos 残影环（3 档 + 当前） */
@@ -632,7 +642,8 @@ export class TrueNightsEdgeSlash extends Entity {
         const cpy = Math.max(e.y, Math.min(e.y + e.h, this.cy));
         if (!(Math.hypot(cpx - this.cx, cpy - this.cy) < 100 * this.scaleCur)) continue;
         if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0, e.cx, e.cy, 0, 0)) continue;
-        const crit = Math.random() < this.critChance;
+        // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,973 melee 旗）。
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const dmg = crit ? this.damage * 2 : this.damage;
         // ★F3 接线（蓝队四轮）②：真永夜刃伸长斩 973（数据面 melee）——双支同序；
         // 排除面 = 本弹 local 免疫窗投影
@@ -706,6 +717,8 @@ export class NightsEdgeFly extends Entity {
   private scaleCur = 1;
   private dx: number; private dy: number;
   private hitCd = new Map<number, number>();
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 972 :9300 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 972;
   critChance = 0.04;
   armorPen = 0;
   dead = false;
@@ -788,7 +801,8 @@ export class NightsEdgeFly extends Entity {
       if (!coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reachF, num14F, Math.PI / 4)
         && !(num15F > 0 && coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reachF,
           num14F - Math.PI / 4 * this.ai0 * num15F, Math.PI / 4))) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,972 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）③：永夜刃飞斩变体 972（数据面 melee）——双支同序
       const snapBonusFly = projectileSnapStrikeBonus(game,
@@ -921,6 +935,8 @@ export class ZenithSword extends Entity {
   /** TrailingMode 4 玩家位移补偿（:15828-15841 numUpdates==0 时 oldPos += 玩家帧位移） */
   private lastOwnerX = 0;
   private lastOwnerY = 0;
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 933 :8859 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 933;
   critChance = 0.04;
   armorPen = 0;
   dead = false;
@@ -1083,7 +1099,8 @@ export class ZenithSword extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!this.bladeHits(e.x, e.y, e.w, e.h)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,933 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       // Main.DamageVar ±15% 浮动——★SW-T1 2026-09-04：单源 damageVarRoll（31 档离散
       //  +float32 域+ToEven+luck 重掷;原连续因子内联式退役）。消费面=933 终弹命中 →
       //  Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)` luck 正向。
@@ -1325,6 +1342,8 @@ export class LightsBaneSlash extends Entity {
   private rot = 0;
   private dirX: number; private dirY: number;
   private hitCd = new Map<number, number>();
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 974 :9239 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 974;
   critChance = 0.04;
   armorPen = 0;
   dead = false;
@@ -1365,7 +1384,10 @@ export class LightsBaneSlash extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,974 melee 旗）。
+      //  （出生拍 ai0 折叠掷在 Game.ts 974 分支——Player.cs:49369-49377 双掷面并存
+      //  =原版同相,勿合并。）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）⑤：魔光剑斩痕 974（数据面 melee）——双支同序
       const snapBonusLb = projectileSnapStrikeBonus(game,
@@ -1422,6 +1444,8 @@ export class GrassSlash extends Entity {
   private rot = 0;
   private first = true;
   private hitCd = new Map<number, number>();
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 976 :9272 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 976;
   critChance = 0.04;
   armorPen = 0;
   dead = false;
@@ -1469,7 +1493,8 @@ export class GrassSlash extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,976 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）⑥：草剑飞叶 976（数据面 melee）——双支同序
       const snapBonusGrass = projectileSnapStrikeBonus(game,
@@ -1537,6 +1562,8 @@ export class HorsemansPumpkin extends Entity {
   kb: number;
   /** ai[0] = 目标实体 id（原版 npcIndex） */
   ai0: number;
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 321 :9468 区 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 321;
   critChance = 0.04;
   armorPen = 0;
   dead = false;
@@ -1595,7 +1622,8 @@ export class HorsemansPumpkin extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,321 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）⑦：无头骑士南瓜弹 321（数据面 melee）——双支同序
       const snapBonusPumpkin = projectileSnapStrikeBonus(game,

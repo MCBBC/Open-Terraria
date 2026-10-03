@@ -251,6 +251,11 @@ const hslLocals = new Map();     // name → Map(typeId|0 → {div,sat,lum,mul})
 // ★BJ327 批4：Utils.SelectRandom<int>(Main.rand, a, b, c) 带权 id 局部（426/427 死亡环;
 //   daybreak 82577/519 83917 同形——id 得解但 pos/post 仍阻 → pending reason 相应变窄）
 const selectLocals = new Map();  // name → number[]（重复项=权重,SelectRandom=choices[Next(len)]）
+// ★BJ479（2026-10-03）：ai[3] 条件 id 局部（85/629 宝箱怪段位尘型 :89768-89784）——
+//   `int numN = A; if (ai[3] == Bf) { numN = C; } if (ai[3] == Df) { numN = E; }` 族 →
+//   { d: A, m: Map(B→C, D→E) }（0 掷,运行时读段位;三重赋值使全局唯一赋值还原/per-type 桶
+//   双双失效——typedLocal 桶尾值曾是静默错值源,85/629 未接线时被 rollout pending 掩盖）
+const ai3Locals = new Map();     // name → { d: number, m: Map<number, number> }
 // ★BJ304 批3：per-type 数值局部桶（组头初始化 + 型内覆写族,524-527 num205=0/75/170/67）——
 //   全局唯一赋值还原（locals.count==1）对「组头 `int numN = 0` + 各型帧内覆写」形失效
 //   （count≥2）,按 colorLocals 同款逐型桶挂帧栈最近单型 id（0=中性桶=组头初值）;
@@ -308,6 +313,35 @@ function noteAssign(text) {
     return;
   }
   if ((m = text.match(/^(num\d+)\s*=\s*(-?\d+(?:\.\d+)?)f?\s*(?:;|$)/))) {
+    const fr = frames[frames.length - 1];
+    const g = fr && fr.kind === 'if' && fr.cond && fr.cond.typeIds.size === 0 && fr.cond.ranges.length === 0
+      && fr.cond.gates.length === 1 ? fr.cond.gates[0] : null;
+    let m3;
+    // ★BJ479:ai[3] 条件 id 局部（85/629 段位尘型）——d=组头初值（首注册时捕获）,m=段位覆写
+    if (g && (m3 = g.match(/^ai\[3\] == (-?\d+(?:\.\d+)?)f$/))) {
+      const e = locals.get(m[1]) || { v: null, count: 0 };
+      if (e.v != null) {
+        if (!ai3Locals.has(m[1])) ai3Locals.set(m[1], { d: e.v, m: new Map() });
+        ai3Locals.get(m[1]).m.set(Number(m3[1]), Number(m[2]));
+      }
+      e.count++; e.v = Number(m[2]); locals.set(m[1], e);
+      noteTypedLocal(m[1], Number(m[2]));
+      return;
+    }
+    // ★BJ479:roll 条件 id 局部（23 流星头 :90573-90577/:90586-90590）——
+    //   `int numN = A; if (Main.rand.Next(2) == 0) { numN = C; }` → idPick=[C,A]
+    //   （choices[Next(2)]:roll0=门过→C/roll1=门败→A,1 掷同拍=批5 手工等价直译转正）;
+    //   空门帧由 rollIdLocal 标记→块关收口摘除无臂占位支（防 idPick+占位支双掷）
+    if (g === 'Main.rand.Next(2) == 0') {
+      const e = locals.get(m[1]) || { v: null, count: 0 };
+      if (e.v != null && !selectLocals.has(m[1])) {
+        selectLocals.set(m[1], [Number(m[2]), e.v]);
+        fr.rollIdLocal = m[1];
+      }
+      e.count++; e.v = Number(m[2]); locals.set(m[1], e);
+      noteTypedLocal(m[1], Number(m[2]));
+      return;
+    }
     const e = locals.get(m[1]) || { v: null, count: 0 };
     e.count++; e.v = Number(m[2]); locals.set(m[1], e);
     noteTypedLocal(m[1], Number(m[2]));   // ★BJ304:型帧内覆写→该型桶
@@ -421,6 +455,12 @@ function classifyDustId(e) {
     if (v != null && Number.isInteger(v)) return { ok: true, v };
     // ★BJ327 批4：SelectRandom 带权 id 局部（426/427 死亡环）——choices[Next(len)] 掷表
     if (selectLocals.has(s)) return { ok: true, v: 0, pick: selectLocals.get(s) };
+    // ★BJ479:ai[3] 条件 id 局部（85/629 宝箱怪段位尘型 :89768-89784）——
+    //   dust=ai[3]∈m ? m[ai3] : d（0 掷,运行时段位）;v=d（缺省尘型,materialize 直接用）
+    if (ai3Locals.has(s)) {
+      const a = ai3Locals.get(s);
+      return { ok: true, v: a.d, ai3: { m: Object.fromEntries([...a.m.entries()].sort((x, y) => x[0] - y[0])) } };
+    }
     // ★BJ304：全局唯一赋值还原失败 + 有 per-type 桶 → 延迟到 materialize 按 ctx.t 取
     //   （524-527 num205:525/526/527 桶=75/170/67,其余型回落桶0=0）
     if (typedLocals.has(s)) return { ok: false, typedLocal: s, v: s };
@@ -779,6 +819,14 @@ for (let i = 0; i < LOGICAL.length; i++) {
       if (frames[k].ind === L.ind) {
         const f = frames[k];
         frames.splice(k, frames.length - k);
+        // ★BJ479:roll 条件 id 局部空门帧收口——体=纯赋值（kidsMap 无 stmt/frame 事件）→
+        //   掷流已由 idPick 逐尘承载（1 掷同拍）→ 标记 rollIdConsumed 摘除无臂占位支（防双掷）;
+        //   体含语句/嵌套帧 → 撤销 idPick 登记（真实条件结构,保守回退占位支语义）
+        if (f.kind === 'if' && f.rollIdLocal) {
+          const kids = kidsMap.get(f.id);
+          if (!kids || kids.length === 0) f.rollIdConsumed = true;
+          else selectLocals.delete(f.rollIdLocal);
+        }
         // `if (life>0) { …; return; }` 落出段 = 反相位（hit 相 return 后的同层代码 = death 相）
         if (f.kind === 'if' && f.cond && f.cond.life && f.hadReturn && frames.length) {
           frames[frames.length - 1].phaseAfter = f.cond.life === 'hit' ? 'death' : 'hit';
@@ -905,6 +953,7 @@ function extractStmts(text, line, li) {
     e.alt = postR.alt || null;
     e.clone = postR.clone || null;          // ★BJ327 批4：CloneDust 回声
     e.idPick = idR.ok && idR.pick ? idR.pick : null;   // ★BJ327 批4：SelectRandom 带权 id 表
+    e.idAi3 = idR.ai3 ?? null;                         // ★BJ479:ai[3] 段位选尘（85/629,idR.v=d 缺省）
     e.phase = phase;
     e.pres = pres;
     e.inTypeScope = inTypeScope;
@@ -1015,7 +1064,30 @@ const BATCH3_TYPES = new Set([
 //     [d267 色=colorHsl, posCircular, velFromCenter, ng, fadeInR01(0.6|0.7+NextFloat×0.7|1.1),
 //     scaleSet0.35, clone]。
 const BATCH4_TYPES = new Set([402, 426, 427, 661]);
-const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES, ...BATCH3_TYPES, ...BATCH4_TYPES]);
+
+// ---------------- BJ479 批6 接入名单（宝箱怪受击/死亡尘族,2026-10-03 定谳） ----------------
+// 手核 NPC.cs :89766-89801 亲读 diff=0（1458 同区全等区）。根级 ai[3] 条件 id 局部首建模：
+//   `type == 85 || type == 629` 共支——`int num722 = 7; if (ai[3] == 2f) { num722 = 10; }
+//   if (ai[3] == 3f) { num722 = 37; }`（0 掷,运行时段位选尘）→ stmt.idAi3={m:{2:10,3:37}},
+//   dust=7（缺省=段 1）。段位语义=AI_025 生成时锁（NPC.cs:25684-25697:ai[3]==0 按生成深度
+//   自置 1（地表）/2（地下）/3（地狱）,341/629 每 tick 强制 =1 :25699-25701）→ 629 恒段 1
+//   恒尘 7（ interpreter 读 Enemy.ai3,mimicAI 已 1:1 移植 BJ464）。hit=hitK50 循环（
+//   ceil(dmg/lifeMax×50)）/death=n20;gore 61/62/63（×0.3 速度）由 extract-gore.mjs 承担。
+//   ★此前 85/629 在 byType 以 typedLocal 桶尾值 37 静默错解析（三重赋值使唯一赋值还原/
+//   per-type 桶双失效）,靠未接线（rollout pending）掩盖——ai3Locals 建模后转正。
+//   同支 23 流星头（批5 手工条目 BJ411）同刀转正：roll 条件 id 局部 `int numN=25;
+//   if (Next(2)==0) { numN=6; }` → idPick=[6,25]+空门帧 rollIdConsumed 摘除占位支
+//   （1 掷同拍,提取器原生复现=era guard 对拍复绿）。
+// ★BJ484（2026-10-03）名单扩 341/473-476（宝箱怪族同构支,BJ479 滚动清单出清）：手核
+//   NPC.cs 亲读定谳——①341 PresentMimic（:89741-:89765）`int num718 = 196;`【常量 id 支,
+//   无 ai[3] 门】hit=hitK50/death=n20 尘 196+gore 61/62/63（×0.3,vanilla-gore.json 已备
+//   L89756+）;②473-476 BigMimic{Corruption,Crimson,Hallow,Jungle} 共支（:89799-:89829）
+//   `int num726 = 31;`【同构常量 id 支,无 ai[3] 门】hit=hitK50/death=n20 尘 31+gore 同族
+//   （L89814+,base.Center 锚）。与 85/629 同形但纯数据（提取器 std 路径原生表达,探针
+//   逐型对拍=196/31 钉值）——无需 idAi3/解释器改动,纯名单接线。AI_087（:37845,473-476
+//   实战形态）零 Dust.NewDust=激活/俯冲链无尘专项;death 链无 NewNPC 等世界改写。
+const BATCH6_TYPES = new Set([85, 629, 23, 341, 473, 474, 475, 476]);
+const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES, ...BATCH3_TYPES, ...BATCH4_TYPES, ...BATCH6_TYPES]);
 
 // ---------------- BJ296 帧树逐型解析（汇总分组） ----------------
 // 树结构：kidsMap（frameId → 帧/语句源序）；SUCCESSOR（elseOfId → 后继臂）。
@@ -1140,6 +1212,7 @@ function withCount(el, n, hitK) {
     out.dust = el.dust;
     if (el.idRand !== undefined) out.idRand = el.idRand;
     if (el.idPick !== undefined) out.idPick = el.idPick;
+    if (el.idAi3 !== undefined) out.idAi3 = el.idAi3;
     if (n != null && n !== 1) out.n = n;
     if (hitK != null) out.hitK = hitK;
     for (const k of ['anchor', 'pos', 'dx', 'dy', 'w', 'h', 'sx', 'sy', 'alpha', 'color', 'colorHsl', 'scale', 'pre', 'gate', 'posts', 'clone', 'alt', 'line']) {
@@ -1185,6 +1258,7 @@ function materialize(e, out, ctx) {
   }
   // ★BJ327 批4：SelectRandom 带权 id 表（426/427 死亡环）——dust 字段=0 占位,id 全由 idPick 掷
   if (e.idPick != null) dustId = 0;
+  // ★BJ479:ai[3] 段位选尘（85/629）——dust 字段=d 缺省（段 1/未锁拍）,idAi3.m=覆写域（0 掷）
   // color local（newColorN）→ 逐型解析（63/64/103、333-336 per-type 条件色;
   //   ★批4:hslLocals 优先——661 彩虹色相环索循环 index,消费侧逐尘求值）
   let color = e.color;
@@ -1205,6 +1279,7 @@ function materialize(e, out, ctx) {
   stmt.dust = dustId;
   if (e.idRand != null) stmt.idRand = e.idRand;
   if (e.idPick != null) stmt.idPick = e.idPick;
+  if (e.idAi3 != null) stmt.idAi3 = e.idAi3;
   if (e.box && (e.box.anchor !== 'pos' || e.box.dx !== 0 || e.box.dy !== 0 || e.box.w !== 'npc' || e.box.h !== 'npc')) {
     if (e.box.anchor === 'center') stmt.anchor = 'center';
     // ★BJ327 批4：oldPos 轨迹盒——pos 引用必须 = 最近 over-oldPos for 帧计数器（parent 链回溯）
@@ -1313,6 +1388,10 @@ function resolveArmChain(head, S, out, ctx) {
   if (cur.kind === 'else') {              // else 臂 = 前臂全败后的无条件体（不收门）
     consumed.add(cur.id);
     resolveKids(cur.id, S, out, ctx);
+    return undefined;
+  }
+  if (cur.rollIdConsumed) {               // ★BJ479:roll 条件 id 局部空门帧——掷已由 idPick 承载,占位支摘除
+    consumed.add(cur.id);
     return undefined;
   }
   const gates = cur.cond ? cur.cond.gates : [];
@@ -1516,6 +1595,10 @@ for (const id of typeIds) {
   if (WIRED_TYPES.has(id)) data[String(id)] = byType.get(id);
   else pendings.set('batch:' + id, { key: 'batch:' + id, line: byType.get(id).hit[0]?.line ?? byType.get(id).death[0]?.line ?? 0, types: new Set([id]), phase: 'both', reason: 'batch3+:std-expressible（未接组滚动清单）', count: 1 });
 }
+// ★BJ487：接线规模自证——wiredTypes=表非 meta 键数（WIRED_TYPES∩typeIds）。测试侧规模断言
+//   （bj254/bj296/bj304/bj327）由此单点派生,后续接线批重产零手工 bump;手改表键不重产→
+//   与计数失配=防踩踏漂移闸。与 callTotal（调用站）/npcIds（全 std 型域含 pending）语义不同。
+const wiredTypeCount = typeIds.filter((id) => WIRED_TYPES.has(id)).length;
 data._meta = {
   source: `Terarria${VER}/Terraria/NPC.cs NPC.HitEffect (:${SIG_LINE}-:${endLine})`,
   crossVer: '1458 同区 (:82492-:90941) 与 1457 逐字节全等（2026-09-21 diff 实证）——SW_ITEM_VER=1458 重产同值',
@@ -1526,11 +1609,13 @@ data._meta = {
   unsupStmts,
   npcIds: typeIds.length,
   entryNpcIds: typeIds.length,
-  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:\'oldPos\',len,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos=\'oldPos\'）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
+  counts: { wiredTypes: wiredTypeCount },   // ★BJ487 规模派生单点（=表非 meta 键数）
+  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:\'oldPos\',len,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos=\'oldPos\'）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; idAi3={m:{2:10,3:37}} → dust=ai[3]∈m?m[ai3]:dust（段位选尘 0 掷,★BJ479 85/629,dust 字段=缺省=段1）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
   noGenericTail: '★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）',
   batch2: 'BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636',
   batch3: 'BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending）→ 已随 BJ327 批4 转正。仍排除（批4 后清零）：661（四缺口,批4 接）/402（oldPos,批4 接）',
-  batch4: 'BJ327 批4（2026-09-24）HitEffect 尘面收官批：①402 oldPos 轨迹盒 6 组——★Enemy 定谳=有轨迹环（histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7 逐拍推入）无需扩展;loop.over=\'oldPos\'（len=NPCID.cs:4809 环长）+stmt.pos=\'oldPos\'+brk 标记（oldPos[i]==Zero break,掷门后求值）+branch.skip（Next(4)!=0 continue）。②426/427 SelectRandom 带权 id 环——idPick=[…]=choices[Next(len)]（重复项=权重,426 [229,240,161] 均一/427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误:VDust.noLight 引擎光链 VanillaDust.ts :551 烟雾族 !noLight 门消费,240/161 原文本无光=no-op 同相）→ std 算子 noLight(true)。③661 四缺口一次接齐——hslToRgb 纯函数 std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环 index,Math.Round=ToEven;乘色走 float 域=LeashedCritter.ts:1577 White×0.5 同源判例）/posCircular（Center+NextVector2Circular(w,h),Utils.cs:1301-1303,2 掷角+幅）/velFromCenter（(position−Center)×k,0 掷派生）/CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 在位,GameHooks.cloneDust 钩子新建;clone.posts=[scaleDiv2,fadeInMul0.85,colorSet(127.5×4)]）。接入 4 型：402/426/427/661——尘面收官:_meta.pending 中型域组只剩 std-expressible 滚动清单+根级门组（daybreak/gold-critter/ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）',
+  batch4: 'BJ327 批4（2026-09-24）HitEffect 尘面收官批：①402 oldPos 轨迹盒 6 组——★Enemy 定谳=有轨迹环（histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7 逐拍推入）无需扩展;loop.over=\'oldPos\'（len=NPCID.cs:4809 环长）+stmt.pos=\'oldPos\'+brk 标记（oldPos[i]==Zero break,掷门后求值）+branch.skip（Next(4)!=0 continue）。②426/427 SelectRandom 带权 id 环——idPick=[…]=choices[Next(len)]（重复项=权重,426 [229,240,161] 均一/427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误:VDust.noLight 引擎光链 VanillaDust.ts :551 烟雾族 !noLight 门消费,240/161 原文本无光=no-op 同相）→ std 算子 noLight(true)。③661 四缺口一次接齐——hslToRgb 纯函数 std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环 index,Math.Round=ToEven;乘色走 float 域=LeashedCritter.ts:1577 White×0.5 同源判例）/posCircular（Center+NextVector2Circular(w,h),Utils.cs:1301-1303,2 掷角+幅）/velFromCenter（(position−Center)×k,0 掷派生）/CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 在位,GameHooks.cloneDust 钩子新建;clone.posts=[scaleDiv2,fadeInMul0.85,colorSet(127.5×4)]）。接入 4 型：402/426/427/661',
+  batch6: 'BJ479 批6（2026-10-03）宝箱怪受击/死亡尘族+批5 手工条目转正;★BJ484（2026-10-03）名单扩宝箱怪同构支出清滚动清单：①85/629 共支（NPC.cs :89766-89801 亲读,ai[3] 三段选尘 7/10/37,gore 61/62/63 由 extract-gore.mjs 承担）——根级 ai[3] 条件 id 局部首建模（ai3Locals:d=组头初值/m=段位覆写,0 掷运行时段位;段位=AI_025 生成时锁 :25684-25697,341/629 每 tick 强制 1 :25699-25701→629 恒段 1 恒尘 7）;★此前 byType 以 typedLocal 桶尾值 37 静默错解析（三重赋值使唯一赋值还原/per-type 桶双失效）,靠未接线掩盖。②23 流星头批5 手工条目（BJ411,_meta.batch5 已退役）同刀提取器原生转正——roll 条件 id 局部 `int numN=25;if(Next(2)==0){numN=6}` → idPick=[6,25]+空门帧 rollIdConsumed 摘除占位支（1 掷同拍;此前占位支+恒 6 桶尾值双错）,era guard 对拍复绿。③BJ484 扩 341（PresentMimic :89741-:89765,常量尘 196）+473-476（BigMimic 四系共支 :89799-:89829,常量尘 31）——【常量 id 支无 ai[3] 门】纯数据 std 路径原生表达（hit=hitK50/death=n20,gore 同族归 gore 表;AI_087 :37845 零尘=激活链无专项）,与 85/629 同族同形但无需 idAi3。接入 8 型：85/629/23/341/473/474/475/476——_meta.pending 中型域组剩根级门组（daybreak/gold-critter/ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）+零散 std 滚动清单',
   carveOuts: [
     '泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)',
     'gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）',

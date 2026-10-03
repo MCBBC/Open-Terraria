@@ -2,6 +2,7 @@
 // 全程纯计算（generateWorld/settleWorldLiquids/loadSaveData 均无 DOM 依赖），
 // 结果 packWorld 转移所有权回传。错误按请求 id 回传，绝不静默 pending。
 /// <reference lib="webworker" />
+import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
@@ -13,6 +14,8 @@ import { renderPreviewBitmap } from './previewBitmap';
 import { loadSaveData } from '../save/SaveFile';
 import { kvGetIdb } from '../save/KvStore';
 import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
+
+assertWorkerBootGate('worldGen.worker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 const ctx = self as unknown as {
   postMessage(msg: WorldWorkerEvent, transfer?: Transferable[]): void;

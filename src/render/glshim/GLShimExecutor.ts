@@ -266,6 +266,10 @@ export class GLShimExecutor {
   /** ★P1-B 子区上传逃生门（探针 A/B 面+回滚口;缺省开。StormLightning.BOLT_BAKE_OFF
    *  判例同款静态可扭面——探针页内 m.GLShimExecutor.P1B_REGION_OFF=true 切臂） */
   static P1B_REGION_OFF = false;
+  /** ★EoL 残影风暴定谳刀逃生门（2026-10-03）：源交集为空 no-op 直返支的回滚口
+   *  （缺省 false=no-op 门生效;置 true=恢复旧「全量 rawDrawImage+flush」链,
+   *  探针 A/B 对拍用——scripts/_eol-ghost-census.mjs 消费）。 */
+  static SRC_OOB_NOOP_OFF = false;
   private host: ShimHost;
   private raw: CanvasRenderingContext2D | null = null;
   private glw: GLSpriteLayer | null = null;
@@ -1058,6 +1062,22 @@ export class GLShimExecutor {
     else { sx = rest[0] as number; sy = rest[1] as number; sw = rest[2] as number; sh = rest[3] as number; dx = rest[4] as number; dy = rest[5] as number; dw = rest[6] as number; dh = rest[7] as number; }
     // 零尺寸=2D no-op（无落笔,无需 flush 保序）
     if (sw === 0 || sh === 0 || dw === 0 || dh === 0) return;
+    // ★EoL 残影风暴定谳刀（2026-10-03）:源矩形与图像交集为空 = 2D spec no-op
+    //  （canvas 有源裁剪语义:交集空→不落笔）——零像素输出、零序影响（不落笔=无序
+    //  可保）,直接返回【不 flush 不回退】,与上方零尺寸 no-op 同一原则。
+    //  触发面=873 光鞭残影 g873 帧行进负回绕（Main.cs:31358-31362,C# % 负模→
+    //  sy∈{−rh..−6rh},sy+sh<0 恒完全越界;探针 scripts/_eol-ghost-census.mjs 定谳:
+    //  光女战 719 帧 fallback 47290 次 100%=srcOOB-empty,贴图 72×72 sy∈{−12,−24}
+    //  sh=10,风暴帧 448 回退=7 弹×32 槽×2 笔逐值命中,presentBatch p95=83 次/帧
+    //  整幅回贴）——旧链逐 op rawDrawImage→flushForFallback→presentBatch×2=
+    //  战斗帧率崩塌主因。部分越界（交集非空,有真实裁剪输出）不在此门,仍走下方
+    //  rawDrawImage 保序回退。NaN/负 sw/sh 判据全 false→不入此门（落既有门）。
+    //  回滚口:GLShimExecutor.SRC_OOB_NOOP_OFF=true（探针 A/B 面,P1B_REGION_OFF 同族）。
+    if (!GLShimExecutor.SRC_OOB_NOOP_OFF && sw > 0 && sh > 0
+      && Number.isFinite(sx) && Number.isFinite(sy)
+      && (sx >= iw || sx + sw <= 0 || sy >= ih || sy + sh <= 0)) {
+      return;
+    }
     // 源越界=2D 有源裁剪+dst 补偿语义（spec）——不逐式复刻,回退
     if (!(sx >= 0 && sy >= 0 && sx + sw <= iw && sy + sh <= ih) || sw < 0 || sh < 0) {
       this.rawDrawImage(img, rest);

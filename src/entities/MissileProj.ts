@@ -54,6 +54,7 @@ import { drawStripTrail, type TrailPt, type TrailSpec } from '../fx/TrailShader'
 import type { Renderer } from '../render/Renderer';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 import type { VDust } from '../fx/VanillaDust';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -1841,7 +1842,8 @@ export class StarfuryStar extends Entity {
       const e = ent as MissileEnemyView;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,9 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
       // 老星怒落星 9 数据面 melee → 过 kind1 门即脉冲；返回 num14 加伤随暴击并入实伤参

@@ -418,8 +418,13 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
     d.scale = 0.05;
     vd.update(0, 0, 1920, 1080);
     expect(d.active).toBe(false);                    // 缩没（217 衰减档 −0.01，链 B 不命中 noGravity=false）
-    const d2 = vd.spawn(100, 2000, 5, 5, 55)!;
-    vd.update(0, 0, 1920, 1080);                     // 屏底 y>1080
+    // ★BJ480 修正探针点（2000→1300）：BJ466 spawn 裁剪（margin 400,底缘 1080+400=1480）
+    //  下 y=2000 的 spawn 直接被裁返 null（旧探针 null deref=BJ466 落地漏网既有红,A/B
+    //  定谳与 BJ480 无关）。屏底清除规则 Dust.cs:2415 `Y > screenY+screenHeight`(1080)
+    //  的 NewDust 可达窗 = (1080, 1470]——1300 在窗内:入池后一拍即被 :2415 清除,
+    //  探针意图（屏底清除）不变。
+    const d2 = vd.spawn(100, 1300, 5, 5, 55)!;
+    vd.update(0, 0, 1920, 1080);                     // 屏底 y>1080（:2415）
     expect(d2.active).toBe(false);
   });
   it('GetAlpha 消费表（:2469-2772）：261=(230,115)/6=(255,25)/182 透明/默认=(255−alpha)/255', () => {

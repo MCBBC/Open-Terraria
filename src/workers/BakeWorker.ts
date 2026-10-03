@@ -17,6 +17,7 @@
 // worker 上下文禁令家族:本文件及 import 链零 document 触点（画布经 canvasEnv
 // 工厂落 OffscreenCanvas;素材位图全部主线程 createImageBitmap 副本随包 transfer,
 // worker 内不发网络请求、不建 Image）。
+import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 闸（必须保持第一位;见该文件头注,x-ray 定谳防线）
 import { SpriteAtlas, type DrawRect } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
@@ -26,6 +27,8 @@ import { tileAnim } from '../render/TileAnim';
 import { renderEnv, plates428Pressed } from '../render/VanillaTiler';
 import { pinGameTimeTicks } from '../core/GameTime';
 import { BAKE_S, BakeSliceStore, type BakeWorkerRequest, type BakeWorkerResponse } from './BakeProtocol';
+
+assertWorkerBootGate('BakeWorker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 /** worker 侧 atlas：SpriteAtlas 子类——元数据全量复用（JSON 静态导入同源），
  *  位图表（vimages/images/sheets 视图）由主线程 ship 消息预置；ensureVImage/rect

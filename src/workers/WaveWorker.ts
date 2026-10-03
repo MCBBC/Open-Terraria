@@ -19,8 +19,11 @@
 //   （注入批先于 frame 应用=天然 F_prev 语义,与主线程版时序同构）。
 // 本 worker 导入 WaterWaves 模块本体=内核逐式同源（零转录）；模块级 DOM 触点
 //   （ensureWaveTextures 的 canvas）在 worker 内永不调用。
+import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 闸（必须保持第一位;见该文件头注,x-ray 定谳防线）
 import { waterWaves, queueRippleRaw, setWaveTextures, wwCameraJumpForceFull,
   type RippleShape, type WWFieldMsg } from '../render/WaterWaves';
+
+assertWorkerBootGate('WaveWorker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 type Inj =
   | { k: 'wash'; a: number[] }

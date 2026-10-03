@@ -37,6 +37,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
@@ -367,7 +368,12 @@ export class MonkSlam extends Entity {
       if (e.dead || this.hitDone.has(e.id)) continue;
       if (!rectHits({ x: ax, y: ay, w: aw, h: ah }, e)) continue;
       this.hitDone.add(e.id);
-      const crit = Math.random() < this.critChance;
+      // ★BJ486④（2026-10-03）掷率=owner 装配 + bonusCritChance=25 形参化（:12912-12914
+      //  num13 + :70581-70582 `Main.projectile[num11].bonusCritChance = 25`——697 砸地
+      //  震波 698 逐发硬写 25,melee 旗（SetDefaults 698 :7387-7400）→ 掷 = 基 4+
+      //  meleeCrit 聚合+:25712 持械折入 + 25。旧 critTotal+0.25 静态冻结载体建模退役,
+      //  写位已摘）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game, 25);
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退向 = 默认弹体相对向（698 不在 Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.vxSign;

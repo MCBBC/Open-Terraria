@@ -33,6 +33,7 @@
 //  GL 失败 → 2D 全量原链逐字节保留（桶缓存+原生 ring）;降级帧 replay 闭包按
 //  replayRainBatch2D 判例设备空间直画（产物走同桶缓存,冷跑仅在灾难帧）。
 import { getPass, runPassOnImageData, defaultUniforms } from './SM2Effect';
+import { ensureSm2Wasm, sm2WasmEnabled, sm2WasmReady, wasmRunPassOnImageData } from '../wasm/sm2Wasm';
 import type { Renderer } from '../render/Renderer';
 
 interface ImgData { data: Uint8ClampedArray; width: number; height: number }
@@ -74,9 +75,11 @@ const BUCKET_DT = 0.2;             // 200ms 桶（uTime 单位=秒,GTW 每 tick 
 const BUCKET_PHASE = 1 / BUCKET_DT;
 
 /** 测试/探针计数面：sm2Runs=解释器冷跑次数,cacheHits=桶内命中次数;
- *  ★K2 增 glEmits=GL 批发射成功数,glFails=发射口拒绝数（门拒/不可用/逃生门）。 */
+ *  ★K2 增 glEmits=GL 批发射成功数,glFails=发射口拒绝数（门拒/不可用/逃生门）。
+ *  ★SM2 WASM 试点（2026-10-03）增 wasmRuns=产物走 WASM VM 的冷跑数（sm2Runs 的
+ *  子集;旗 ?sm2wasm=1 缺省关,关闭时恒 0 与旧语义逐位一致）。 */
 export const __forceFieldBubbleStats = {
-  sm2Runs: 0, cacheHits: 0, glEmits: 0, glFails: 0,
+  sm2Runs: 0, cacheHits: 0, glEmits: 0, glFails: 0, wasmRuns: 0,
 };
 
 /** ★K2 GL 路径逃生门（?ffgl=0;探针 A/B 面+用户回退口,useGLClouds 判例同款静态） */
@@ -95,6 +98,7 @@ export function __resetForceFieldBubbleForTest(): void {
   __forceFieldBubbleStats.cacheHits = 0;
   __forceFieldBubbleStats.glEmits = 0;
   __forceFieldBubbleStats.glFails = 0;
+  __forceFieldBubbleStats.wasmRuns = 0;
 }
 
 function perlinData(renderer: Renderer): ImgData | null {
@@ -178,7 +182,16 @@ function productFor(uColor: [number, number, number], time: number): HTMLCanvasE
     u.uTime = bucket * BUCKET_DT;
     u.uSourceRect = [0, 0, SIZE, SIZE];
     u.uImageSize0 = [SIZE, SIZE];
-    runPassOnImageData(pass, frame.data, SIZE, SIZE, u);
+    // ★SM2 WASM 试点（2026-10-03）：旗 ?sm2wasm=1（缺省关）∧ wasm 就绪 → 产物走
+    // WASM VM（桶缓存键/桶宽/包络全不变）；拒/未就绪/失败一律静默落回 JS 引擎
+    // 原路径（逐位既有语义）。未就绪时点火加载（幂等;就绪后本帧起生效）。
+    if (sm2WasmEnabled()) void ensureSm2Wasm();
+    let wasmDone = false;
+    if (sm2WasmEnabled() && sm2WasmReady()) {
+      wasmDone = wasmRunPassOnImageData(pass, frame.data, SIZE, SIZE, u);
+      if (wasmDone) __forceFieldBubbleStats.wasmRuns++;
+    }
+    if (!wasmDone) runPassOnImageData(pass, frame.data, SIZE, SIZE, u);
     pcx.putImageData(frame, 0, 0);
     bubbleCache.set(key, product);
     __forceFieldBubbleStats.sm2Runs++;

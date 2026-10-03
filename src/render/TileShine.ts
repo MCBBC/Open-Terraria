@@ -290,11 +290,78 @@ export function setShineScratchSliceHook(
   shineScratchSliceHook = fn;
 }
 
-/** 模块装载期解析（?glband 先例：渲染模块直读 location；Node/vitest 无 location=0=缺省路径）。 */
+/** 模块装载期解析（?glband 先例：渲染模块直读 location；Node/vitest 无 location=0=缺省路径）。
+ *  ★滚屏降级旗面（2026-10-03 主刀,第 0 刀 A/B 定谳后）：`shineBudgetExplicit` =
+ *  URL 是否【显式】传 shinebudget——显式（含 0 逃生门 / N 任意档）=逐字尊重、
+ *  永不自适应（确定性仪器面,探针/独立复核可复现）；仅【缺省】（未传参,隐式
+ *  4ms）吃相机滚屏降级（adaptiveShineBudgetMs）。不立新旗的最小面：
+ *  `?shinebudget=4` 即「本刀前行为逐字」逃生门,`0`=计数预算路径,
+ *  `__SW_SHINE_OFF`=整通道秒关,全部原样保留。Node/vitest 无 location →
+ *  explicit=null 且 shineBudgetMs=0（计数路径,既有单测断言不变）。 */
+export const shineBudgetExplicit: number | null =
+  typeof location !== 'undefined' && typeof location.search === 'string'
+    ? parseShineBudget(location.search)
+    : null;
 export const shineBudgetMs: number =
   typeof location !== 'undefined' && typeof location.search === 'string'
-    ? parseShineBudget(location.search) ?? 4
+    ? shineBudgetExplicit ?? 4
     : 0;
+
+// ---- ★滚屏降级（2026-10-03 主刀;第 0 刀 A/B 定谳=scripts/_shine-ab-fall.mjs 三臂）----
+//
+// 【A/B 定谳】同种子同竖井（用户真实导出档 loadJson,seed 118606602,井筒 x∈[1614,1632]）
+//   自然下坠（vy 600px/s 与 x-ray 基线一致）,1280×800 dpr2,120Hz,慢帧阈 12.5ms,
+//   分段=player.y 带归属,腐化带（620-1150t,黑曜石墙=shine2 密集）vs 石带（无 shine2）：
+//   · 缺省(4ms 盒)     腐化带 33.0/s 均帧距 14.7ms(忙机 3 跑 12.8-33.0;闲机 10.1/s 9.26ms)
+//   · shinebudget=0    腐化带 11.5/s 均帧距 12.2ms p95 34.3ms——计数路径整 chunk 无盒
+//                      烘焙=10-30ms hitch,【不是干净逃生门】(石带 0.8/s 佐证)
+//   · __SW_SHINE_OFF   腐化带 2.3/s 均帧距 8.54ms ≈ 石带 1.9/s——群系差消失=主因闭环
+//   与 x-ray 报告（下坠慢帧主因=本通道 4ms 盒;stampShineCell→drawImage 占慢帧窗
+//   26.7%;石带骤降反证）机制一致。修正=【有盒降级】而非回计数路径。
+// 【方案 a（选定;弃 b/c 的证据面】b(与底图 bakeBudgetMs 共享):shineoff 臂显示滚屏态
+//   底图管线本身干净（8.54ms≈vsync 8.33）,无竞争证据——不立;c(滚动方向预烘提前量):
+//   1.5ms 盒吞吐已≈滚入需求,且 pendingQ 上限 128+静止 4ms 恢复排干——复杂度不值。
+// 【视觉容忍度】shine 层=提亮 delta;滚屏中视口每帧位移 5-10px,新 chunk 的 delta 晚到
+//   数帧不可感（ensureEntry 预算外语义=旧档顶替/跳过,既有 stale 面复用,零新机制）;
+//   静止即回 4ms,pendingQ 就地排干;烘焙产物与一次烘完逐位恒等（零随机备案
+//   TileShine.ts:240 + 行断点续烘恒等;_shine-ab-fall 探针 shineDebugChunkDigests
+//   逐位对拍实证,见 tests/shine-transit-degrade.test.ts 锁）。
+/** 滚屏速度阈（px/ms）。0.35≈350px/s：步行 ~264px/s 不触发（留 30% 裕度）,
+ *  下坠 ~600px/s 触发（40% 裕度）;坐骑/药水加速态照抄降级（transit 语义同域）。 */
+export const SHINE_TRANSIT_SPEED = 0.35;
+/** 滚屏态时间盒下限（ms）。任务域 1-2ms 取中：4ms×120fps=480ms/s(帧预算 48%) →
+ *  1.5ms×~118fps≈177ms/s(15%),为 bakeMs 记账与腐化带 <8/s 目标的定参。 */
+export const SHINE_TRANSIT_BUDGET_MS = 1.5;
+
+/** 滚屏降级预算（纯函数,单测面）。explicit!==null=逐字返回（含显式 0——上层以
+ *  `shineBudgetMs>0` 门住计数路径,本函数不管路径选择只管毫秒值）;否则速度超阈
+ *  → 盒压到 SHINE_TRANSIT_BUDGET_MS（baseMs 更小时取 baseMs,只降不升）。 */
+export function adaptiveShineBudgetMs(
+  explicit: number | null, speedPxPerMs: number, baseMs = 4,
+): number {
+  if (explicit !== null) return explicit;
+  return speedPxPerMs > SHINE_TRANSIT_SPEED ? Math.min(baseMs, SHINE_TRANSIT_BUDGET_MS) : baseMs;
+}
+
+/** 帧间相机速度状态（drawTileShineGrid 每帧恰一次;探针/单测经 reset() 复位）。 */
+export const shineCamSpeed = {
+  lastX: NaN, lastY: NaN, lastT: 0,
+  reset(): void { this.lastX = NaN; this.lastY = NaN; this.lastT = 0; },
+};
+
+/** 帧间相机位移速度（px/ms）。首帧（lastX=NaN）/dt≤0/长缝 dt≥250ms（暂停恢复/
+ *  长卡顿——慢速长缝≠滚屏）不计速=视静止 0;瞬移（大位移短 dt）=高速→触发降级,
+ *  语义正确（黑幕传送/回卷同为滚屏态）。写后即更新状态（纯推进,无重入）。 */
+export function cameraSpeedPxPerMs(camX: number, camY: number, now: number): number {
+  const dt = now - shineCamSpeed.lastT;
+  const first = !Number.isFinite(shineCamSpeed.lastX);
+  const prevX = shineCamSpeed.lastX, prevY = shineCamSpeed.lastY;
+  shineCamSpeed.lastT = now;
+  shineCamSpeed.lastX = camX;
+  shineCamSpeed.lastY = camY;
+  if (first || dt <= 0 || dt >= 250) return 0;
+  return Math.hypot(camX - prevX, camY - prevY) / dt;
+}
 
 /** 时间盒模式逐帧计数（仅 shineBudgetMs>0 的调度路径推进；缺省路径零成本零触碰）。
  *  探针消费面：bakes 停涨+hits 单调 = 缓存无重烘抖动；catchup* = chunk 出现→完成帧数。 */
@@ -1088,8 +1155,13 @@ export function drawTileShineGrid(
   //   (缺省「每帧 2 chunk」计数预算,逐位不变)。时间盒:调度相先按「先到先得+
   //   中心优先」尽预算烘/续,扫描循环只读缓存(SHINE_NO_BAKE:q 未命中→最近档
   //   旧帧顶替/无档→null 跳过,与计数预算 left=0 同语义)。
-  const tb = shineBudgetMs;
-  const timeBudget = tb > 0 ? { deadline: performance.now() + tb } : null;
+  // ★滚屏降级：仅缺省(隐式 4ms)吃相机速度门;显式 shinebudget=N 逐字(0=计数路径)。
+  //   speed 相位在盒构造前推进（cameraSpeedPxPerMs 写后即新——下一帧以此为基）。
+  const tbNow = shineBudgetMs > 0
+    ? adaptiveShineBudgetMs(shineBudgetExplicit,
+      cameraSpeedPxPerMs(cam.x, cam.y, performance.now()), shineBudgetMs)
+    : shineBudgetMs;
+  const timeBudget = tbNow > 0 ? { deadline: performance.now() + tbNow } : null;
   const countBudget: ShineBakeBudget | undefined = timeBudget ? undefined : { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)
   try {
     if (timeBudget) {

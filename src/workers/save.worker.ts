@@ -4,11 +4,14 @@
 // 导入域(2026-08-27 用户报「导入卡住 UI」):.wld 解析(parseWldToSave 是主线程
 // 同步重活,大图数秒)+存档 JSON.stringify 全搬本线程;buf transfer 零拷贝。
 // WldImport 无 DOM 依赖(纯数据表+SaveFile 纯函数),worker 可安全加载。
+import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★process 兜底首导入(见 procShim.ts;2026-09-02 worldGen 同款扩面)
 import { serializeSave } from '../save/serialize';
 import type { SaveData, SaveMeta, SaveStoreView } from '../save/serialize';
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
+
+assertWorkerBootGate('save.worker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 interface SaveRequest {
   type: 'save';

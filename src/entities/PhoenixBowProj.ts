@@ -37,6 +37,7 @@ import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
@@ -132,8 +133,9 @@ export class PhoenixChannel extends Entity {
   w = 22; h = 22;                                    // SetDefaults :6771-6772
   damage: number;
   knockback: number;
-  /** 载体本体不参与命中（SetDefaults 无 friendly），此二字段仅供 Game 注入、
-   *  出膛时转嫁给每发箭/凤凰弹（critTotal/arpenTotal 捕获口径同 SkyDragonSpin） */
+  /** 载体本体不参与命中（SetDefaults 无 friendly）。armorPen 仅供 Game 注入存档；
+   *  critChance 注入位已退役（★BJ486②：critTotal 百分点口径写入分数域载体=单位
+   *  错位死写,且无读者——凤凰弹掷率在 PhoenixBolt 面走 rollVanillaHitCrit(706)） */
   critChance = 0;
   armorPen = 0;
   dead = false;
@@ -450,7 +452,13 @@ export class PhoenixBolt extends Entity {
       if (e.dead || !this.hitCd.ready(e.id, 10)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486②普查件（2026-10-03）单位错位修复：旧写位 `bolt.critChance = critTotal`
+      //  （Game.ts Phoenix fire 支）喂的是 critTotal 【百分点】口径（rangedCrit 聚合
+      //  + bow.crit + ammo.crit + ps.crt,17132 定义）,本面 `random() < critChance`
+      //  分数域读 → random()<14 恒真 = 100% 暴击病。改 owner 装配口径（706 ranged 旗,
+      //  rollVanillaHitCrit:12915-12927——基 4+rangedCrit 聚合+:25712 持械折入
+      //  （命中拍动态;静态冻结载体退役）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? Math.round(this.damage) * 2 : Math.round(this.damage);
       // ★F3 接线（蓝队四轮）：凤凰弹 706 数据面 ranged（SetDefaults :7462-7473）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner

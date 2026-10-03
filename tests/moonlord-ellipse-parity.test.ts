@@ -304,19 +304,31 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
   }) {
     const mainOps: string[] = [];
     const scratchOps: string[] = [];
-    let scratchGco = 'source-over';
+    const maskOps: string[] = [];
     const sctx = {
       setTransform: () => scratchOps.push('xf'),
       clearRect: () => scratchOps.push('clear'),
       fillStyle: '',
-      fillRect: () => scratchOps.push('fill:' + String(sctx.fillStyle)),
-      globalCompositeOperation: scratchGco,
-      drawImage: () => scratchOps.push('draw@gco=' + scratchGco),
+      globalCompositeOperation: 'source-over',
+      fillRect(this: { fillStyle: string }) { scratchOps.push('fill:' + String(this.fillStyle)); },
+      drawImage(this: { globalCompositeOperation: string }) {
+        scratchOps.push('draw@gco=' + String(this.globalCompositeOperation));
+      },
     };
     const scratch = {
       width: 0, height: 0,
       getContext: () => sctx,
     };
+    // ★BJ481 掩膜快照布（三步烘焙第 3 步单 op 消费,治多精灵合成 destination-in 自擦除）
+    const mctx = {
+      setTransform: () => maskOps.push('xf'),
+      clearRect: () => maskOps.push('clear'),
+      globalCompositeOperation: 'source-over',
+      drawImage(this: { globalCompositeOperation: string }) {
+        maskOps.push('draw@gco=' + String(this.globalCompositeOperation));
+      },
+    };
+    const mask = { width: 0, height: 0, getContext: () => mctx };
     const mainCtx = {
       save: () => mainOps.push('save'),
       restore: () => mainOps.push('restore'),
@@ -328,7 +340,8 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
     const fake = {
       ctx: mainCtx,
       mlFloorScratch: scratch,
-      uploadScratchBake: () => {},   // ★刀I补桩(变体①终扫 6a1e0117:逐部件烘焙即刻上传;本测试断言 ctx op 序列,上传面 no-op)
+      mlFloorMaskScratch: mask,
+      uploadScratchBake: () => {},   // ★BJ481 定谳:补差面不走 uploadScratchBake（窗内零消费点）;本桩仅防旧签名残留误调
       fullbright: !!opts.fullbright,
       isBehindTilesEnemy: () => !!opts.behind,
       drawMoonLordCore: () => draws.push('398'),
@@ -343,7 +356,7 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
       worldToScreen: () => (opts.screen ?? [400, 300]),
     };
     const part = Enemy.fromVanilla(396, (lrx + 0.5) * TILE, (lry + 0.5) * TILE)!;
-    return { fake: fake as unknown as Renderer, mainOps, scratchOps, draws, sctx, light, lrx, lry, cam, part };
+    return { fake: fake as unknown as Renderer, mainOps, scratchOps, maskOps, draws, sctx, light, lrx, lry, cam, part };
   }
 
   it('零光照:差值色 = rgb(77,77,77)(0.3×255),三步乘色 + lighter 叠回', () => {
@@ -358,13 +371,17 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
       f.fake, [f.part], f.cam, 1512, 862,
       f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
     );
-    // scratch 序:resize 隐式清(首帧) → 绘(1st,桩不落 drawImage) → xf →
-    // multiply 填色 → xf → destination-in 绘(2nd);部件绘两次(乘色+α恢复)
+    // scratch 序（★BJ481 修后）:resize 隐式清(首帧) → 绘(1st,单次) → 掩膜快照
+    // (mask draw@source-over) → multiply 填色 → destination-in 单 drawImage(mask)
+    // （旧法=destination-in 下重放 drawPart → 多精灵合成逐 draw ∩ α 域自擦除,拆除）
     expect(f.scratchOps.filter(o => o.startsWith('fill:')).length).toBe(1);
     expect(f.scratchOps).toContain('fill:rgb(77,77,77)');
+    expect(f.scratchOps.filter(o => o.startsWith('draw@gco=')).length).toBe(1);
+    expect(f.scratchOps).toContain('draw@gco=destination-in');
+    expect(f.maskOps).toContain('draw@gco=source-over');
     // 主画布:lighter 叠回
     expect(f.mainOps).toContain('main:lighter');
-    expect(f.draws.filter(d => d === '396').length).toBe(2);
+    expect(f.draws.filter(d => d === '396').length).toBe(1);
   });
 
   it('部分光照 (100,200,50):差值色 = rgb(47,17,62)(0.3×(255−L) 四舍五入)', () => {
@@ -429,7 +446,7 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
       f.fake, [core], f.cam, 1512, 862,
       f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
     );
-    expect(f.draws.filter(d => d === '398').length).toBe(2);
+    expect(f.draws.filter(d => d === '398').length).toBe(1);   // ★BJ481:单次绘制
     expect(f.mainOps).toContain('main:lighter');
   });
 

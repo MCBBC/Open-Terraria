@@ -284,7 +284,11 @@ const REGISTRY: Record<string, 'marked' | 'playerSide' | 'nonProjBucket'> = {
   InfernoHostileBlast: 'marked',     // 292 hostile :3822（minion 借位退役）
   FallingStar: 'marked',             // 720/12 双相 getter（:7619 无 friendly / :54059 owner=myPlayer）
   // 玩家侧/同相照报（照报零回退豁免;多割登记债见 Entity.ts BJ294 注）
-  FirstFractalSlash: 'playerSide',   // 857 friendly
+  // ★BJ486③（2026-10-03）八键摘除：FirstFractalSlash/TrueNightsEdgeSlash/
+  //   NightsEdgeFly/ZenithSword/LightsBaneSlash/GrassSlash/HorsemansPumpkin/
+  //   SolarEruptionWhip 补挂 readonly projId（857/973/972/933/974/976/321/611,
+  //   弧子代弹掷率 rollVanillaHitCrit 锚）→ 出 vid=0 普查域走型录面,按 RainbowSegment
+  //   同款纪律（键摘+注记）不入册。
   XenoBubbleProj: 'playerSide',      // 444 friendly（:12461 豁免表另案登记）
   ElectroSphereProj: 'playerSide',   // 443 无 projId 字段（快照约束同族）;回收相由 getter 覆写
   RainbowBolt: 'playerSide',         // 250 无 friendly 行（照报偏差登记）
@@ -305,14 +309,7 @@ const REGISTRY: Record<string, 'marked' | 'playerSide' | 'nonProjBucket'> = {
   MuramasaSlashProj: 'playerSide',   // 村正斩击弹 friendly
   BladetongueGlobProj: 'playerSide', // 血舌投射弹 friendly
   TerraArc: 'playerSide',            // 984 friendly
-  TrueNightsEdgeSlash: 'playerSide', // 挥砍弧视觉面（近战割面=mowCutTiles 承载;弧体伴生照报=登记）
-  NightsEdgeFly: 'playerSide',
-  ZenithSword: 'playerSide',         // 天顶剑弧（子弹 955 走 Arrow 型录面）
-  LightsBaneSlash: 'playerSide',
-  GrassSlash: 'playerSide',
-  HorsemansPumpkin: 'playerSide',
   SolarFlare: 'playerSide',          // 614/636 族 friendly
-  SolarEruptionWhip: 'playerSide',
   // ★清偿刀 V（2026-09-29）BJ345 磁球独立实体化（vanillaProjAlpha.ts 注）后补登记：
   //   254 磁球悬停球 SetDefaults 无 friendly 行（P.cs:3369-3377 aiStyle47/magic/
   //   timeLeft900/light0.5）→ vanilla 割门 P.cs:18021 `owner==myPlayer &&
@@ -373,7 +370,9 @@ describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', ()
     expect(unregistered.map((c) => `${c.file} ${c.cls}`)).toEqual([]);
     // ★清偿刀 V（2026-09-29）净零换位对账：RainbowSegment 挂 projId=251 出域
     //   （12:48 并行 vid 穿线刀,RainbowProj.ts:39）+ MagnetSphereProj 入域,计数仍 46。
-    expect(census.length).toBe(46);   // 定性面冻结（增删类须同步改本表与 Entity.ts 注）
+    // ★BJ486③（2026-10-03）八类补挂 readonly projId（857/973/972/933/974/976/321/611,
+    //   弧子代弹掷率 rollVanillaHitCrit 类旗锚）→ 46−8=38。
+    expect(census.length).toBe(38);   // 定性面冻结（增删类须同步改本表与 Entity.ts 注）
   });
 
   it('marked 类类面必带 noVanillaCut（字段=true 或相位 getter）;292 minion 借位已退役', () => {
@@ -392,6 +391,9 @@ describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', ()
     // =vanilla 同相。若未来把它们当 vid=0 类登记进 REGISTRY=自造偏差,本面红。
     expect(REGISTRY['YoyoShotProj']).toBeUndefined();
     expect(REGISTRY['MLDeathray']).toBe('marked');        // 抽样守卫：REGISTRY 活体非空壳
-    expect(REGISTRY['FirstFractalSlash']).toBe('playerSide');
+    expect(REGISTRY['FirstFractalSlash']).toBeUndefined(); // ★BJ486③ 补 projId=857 出域（YoyoShotProj 同款）
+    for (const departed of ['TrueNightsEdgeSlash', 'NightsEdgeFly', 'ZenithSword', 'LightsBaneSlash', 'GrassSlash', 'HorsemansPumpkin', 'SolarEruptionWhip']) {
+      expect(REGISTRY[departed]).toBeUndefined();         // 八键摘除防回潮（出普查域不入册）
+    }
   });
 });

@@ -11,12 +11,15 @@
 //       {type:'files', names, bufs, mime}    分批(≤128 文件/条,ArrayBuffer 转移)
 //       {type:'partDone', file, failed}      per 片终态(失败=片内 missing 全计)
 //       {type:'done', failed}                全部跑完
+import { assertWorkerBootGate } from '../workers/workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import '../workers/procShim';   // ★process 兜底首导入(见 workers/procShim.ts;2026-09-02 扩面)
 import { unzipSync } from 'fflate';
 // ★CT 表单源化(2026-09-16 根修):旧本地表漏 opus → 863 条音效以
 //   application/octet-stream 落缓存,被 sw.js 会话清扫按 ^audio/ogg 判异整批删除
 //   → 每会话重拉 p4/p5(40MB)循环。表迁 assetMime.ts(与页面 put 侧同源)。
 import { mimeOf } from './assetMime';
+
+assertWorkerBootGate('asset-warm.worker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

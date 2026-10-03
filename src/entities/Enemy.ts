@@ -15652,12 +15652,19 @@ export class Enemy extends Entity {
   }
 
   /** AI 触发的标准死亡（EoW 断链自灭，NPC.cs:51876-51905 的 life=0 + HitEffect +
-   *  checkDead 语义）：清无敌帧后走 hurt 全管线（掉落/记账/音效/粒子）——
-   *  原版直改 life 不经 StrikeNPC，故 iframes 不应阻塞 */
+   *  checkDead 语义；毁灭者 AI_037 :50490-50502 同式）：清无敌帧后走 hurt 全管线
+   *  （掉落/记账/音效/粒子）——原版直改 life 不经 StrikeNPC，故 iframes 不应阻塞。
+   *  ★BJ476（2026-10-03 用户实报）：传参=9999 整（非 maxHp+9999）——原版级联死/
+   *  断链自灭【无伤害飘字无受击音】（checkDead 面非 StrikeNPC 面）;本仓 hurt 的
+   *  飘值门（:14685 rawDmg!==9999 + maxHp>1，锚原版 StrikeNPC_Inner :82063
+   *  flag=Damage>=9999&&owner==255 DoT 静默）对 9999 整天然静音——旧 maxHp+9999
+   *  （墓穴爬虫头 513 lifeMax 60+9999=10059）击穿门=每次断链自灭冒 ~10K 橙字
+   *  （伤害色 (255,160,80) 本就橙,非暴击）。致死性无涉：hp 已先置 0,any dmg≥1
+   *  即进死亡管线（applyDoT :4636 同款 9999 通道）。 */
   die(game: GameHooks): void {
     this.hp = 0;
     this.iframes = 0;
-    this.hurt(this.maxHp + 9999, 0, 0, game);
+    this.hurt(9999, 0, 0, game);
   }
 
   /** ★BJ246 岩浆族死亡泼岩浆写位面（NPC.cs:86563-86600/:86606-86644 try 域 1:1,

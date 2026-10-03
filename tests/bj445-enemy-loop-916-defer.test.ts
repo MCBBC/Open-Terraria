@@ -178,16 +178,22 @@ describe('BJ445-§A：contact() 敌怪环 916 双落+位次（Y2 探针同构,da
     expect(seq).toEqual(['SRC', 'E1']);                // ★位次:直伤不早于主 hurt 受理
   });
 
-  it('A2 主命中门拒（dontTakeDamage :14241）→ 链电不落地（:13711 不可达）', () => {
+  it('A2 主命中门拒（dontTakeDamage）→ 链电不落地（:13711 不可达）', () => {
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     src.dontTakeDamage = true;
     const { hooks, player } = makeHooks([src, e1]);
     player.tagEffectStack.tryApplyTagToNPC(4680, src.id, 0, 0);
     contactDirect(ravenAt(player, 600, 600), hooks, 11);
-    expect(src.calls.map((c) => c.d)).toEqual([26]);   // 主命中尝试照发（真 hurt 内部拒）
-    expect(e1.calls).toEqual([]);                      // ★门拒跳无 916（汇出延迟面）
-    expect(seq).toEqual(['SRC']);
+    // ★BJ475①（2026-10-03）形态升级:contact 环补 :12600 外环头门（BJ467⑥ 同构,
+    //  `flag2 && (!dontTakeDamage || ZappingJellyfish)` 先于 Inner 全链）——DTD 靶
+    //  整跳=StrikeNPC(:13702)/OnHit(:13711) 全不达,主命中【不达 hurt】（旧档=外环
+    //  无门+hurt 内部 :14241 拒收形,[26] 锁定的是彼时仓内相,与原版外环门偏差;
+    //  BJ467⑥ §6a-6d 已把「DTD 靶 hurt 0 调」定为同构正确相）。链电不落地主判据
+    //  保持：汇出位 en.hurtFx 在 hurt 前,环头整跳=hurtFx 不挂→916 恒不可达。
+    expect(src.calls.map((c) => c.d)).toEqual([]);     // ★外环整跳:主命中不达 hurt（旧 [26] 必红=旧相锁）
+    expect(e1.calls).toEqual([]);                      // ★门拒跳无 916（汇出延迟面,主判据保持）
+    expect(seq).toEqual([]);                           // hurtFx 不挂 → 无 SRC 入序（旧 ['SRC']）
   });
 });
 

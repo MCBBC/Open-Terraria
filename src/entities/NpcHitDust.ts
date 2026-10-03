@@ -31,17 +31,37 @@
 //   :90567-90605（1458 同行逐字节全等）——hit=for(hitK100){idPick[6,25]尘(hd,-1)+
 //   d6(vel×0.2,α100,s2,ng)}→return（原版无通用尾=表外型零尘同相）;death=50×idPick尘(2hd,-2)
 //   +50×d6(vel×0.2,α100,s2.5,vel×6,ng)。★idPick[6,25]=`int numN=25;if(Next(2)==0) numN=6`
-//   等价直译（idPick[roll]:0→6/1→25,1 掷同拍）——该局部 id 模式提取器未支持,本条目手工录入
-//   （_meta.batch5;extract 重产前须先扩提取器,否则 23 被抹=测试红）。FindFrame 火尾
+//   等价直译（idPick[roll]:0→6/1→25,1 掷同拍）——该局部 id 模式提取器当时未支持,条目曾
+//   手工录入（_meta.batch5,已退役）。FindFrame 火尾
 //   :74803-74809（每 tick dust 6 盒=position−velocity）不在本表——Enemy.swarmerAI 直刀。
+// BJ479（2026-10-03）批6 宝箱怪受击/死亡尘族接入 + 批5 手工条目提取器原生转正：
+//   ①85（Mimic）/629（Ice Mimic）共支 HitEffect :89766-89801 亲读——根级 ai[3] 门=段位选尘
+//   （num722=7,ai[3]==2→10/==3→37;hit=ceil(dmg/lifeMax×50),death=20;gore 61/62/63 归
+//   extract-gore.mjs）。段位=AI_025 生成时锁（NPC.cs:25684-25697:1 地表/2 地下/3 地狱;
+//   341/629 每 tick 强制 1 :25699-25701→629 恒段 1 恒尘 7）→ 新 stmt 字段 idAi3={m}：
+//   dust=ai[3]∈m?m[ai3]:dust（0 掷,读 Enemy.ai3=mimicAI BJ464 锁定值）。★提取器此前对
+//   num722 三重赋值以 typedLocal 桶尾值 37 静默错解析（未接线掩盖）——ai3Locals 建模转正。
+//   ②23 同刀转正：roll 条件 id 局部提取器原生复现（idPick=[6,25]+空门帧占位支摘除,
+//   1 掷同拍;era guard 对拍 3 红复绿,_meta.batch5→batch6）。
+// BJ484（2026-10-03）批6 名单扩宝箱怪同构支 341/473-476（BJ479 滚动清单出清）：亲读定谳
+//   341 PresentMimic（HitEffect :89741-:89765 `int num718 = 196`）与 473-476 BigMimic 四系
+//   共支（:89799-:89829 `int num726 = 31`）均为【常量 id 支,无 ai[3] 门】——hit=hitK50/
+//   death=n20,gore 61/62/63 归 extract-gore.mjs（vanilla-gore.json L89756+/L89814+ 已备）。
+//   纯数据走通用 emitStmt 路径（dust/hitK/n 全 std）,无需 idAi3/解释器新算子——★341 虽与
+//   85/629 同族（aiStyle 25,mimicAI 恒段 1）但其 HitEffect 不读 ai[3],ai3 任意值尘恒 196;
+//   473-476（aiStyle 87 bigMimicAI）同理恒 31。AI_087（:37845）零 Dust.NewDust=激活/俯冲
+//   链无尘专项。
 //
 // 数据源：tools/extract-npcdust.mjs（Terarria1457/Terraria/NPC.cs HitEffect
 // :82492-:90939 机械提取；1458 同区逐字节全等）。首批 = 78 门组 / 275 型（BJ254）；
 // 批2 = 概率门族 15 型（134-136/262-265/407/409/410/411/428/478/516/636,BJ296）；
 // 批3 = fadeIn 定谳翻案族 18 型（415-421/423-427/429/518/524-527,BJ304）；
 // 批4 = 尘面收官 4 型（402/426/427/661,BJ327）；
-// _meta.pending = 未接组滚动清单（std-expressible 滚动族+根级门组:daybreak/gold-critter/
-// ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）。
+// 批6 = 宝箱怪族 85/629（ai[3] 段位选尘）+23 手工条目转正（BJ479）+同构常量支
+// 341/473-476（BJ484 名单扩,尘 196/31 无 ai[3] 门）；
+// _meta.pending = 未接组滚动清单（根级门组:daybreak/gold-critter/ai[1]/netMode/
+// IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族;ai[3] 段位门已随批6 建模
+// 出清,宝箱怪同构常量支已随 BJ484 出清）。
 //
 // 语义（对齐 Dust.NewDust :75-196 执行语义 + HitEffect 源序）：
 //   · hit 相 count = ceil(dmg/lifeMax×hitK)（`for (num < dmg/(double)lifeMax*K)` 直译）；
@@ -103,6 +123,7 @@ export interface NpcDustStmt {
   dust: number;
   idRand?: number;         // dust = dust + Next(idRand) 逐尘掷 id（478：237/238）
   idPick?: number[];       // ★批4 426/427:dust = idPick[Next(len)] 带权掷表（Utils.SelectRandom 直译,重复项=权重;dust 字段=0 占位）
+  idAi3?: { m: Record<number, number> };   // ★批6 BJ479 85/629:dust = ai[3]∈m ? m[ai3] : dust（段位选尘 0 掷,HitEffect :89766-89801;dust 字段=缺省=段 1）
   n?: number;              // 固定计数（缺省 1）
   hitK?: number;           // ceil(dmg/lifeMax×K)——hit 相专用
   gate?: NpcDustPre[];     // 区域门（phaseAfterPre 早退面）：判负→整 stmt 跳过,不耗掷
@@ -301,9 +322,13 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
   if (!prePass(st.gate, e)) return;                     // 区域门：判负整 stmt 跳过（life==0 拍原版不出尘）
   for (let k = 0; k < n; k++) {
     // ★批4:idPick 带权掷表（Utils.SelectRandom<int> = choices[Next(len)],重复项=权重,逐尘 1 掷）
+    // ★批6 BJ479:idAi3 段位选尘（85/629 宝箱怪,HitEffect :89778-89784）——m=段位覆写域,
+    //   缺省 dust=段 1（ai[3]==1 或未锁拍;0 掷）。Enemy.ai3 由 mimicAI 生成时锁（BJ464,
+    //   AI_025 :25684-25697;341/629 每 tick 强制 1 :25699-25701→629 恒段 1 恒尘 7）
     const dustId = st.idPick != null
       ? st.idPick[Math.floor(Math.random() * st.idPick.length)]
-      : (st.idRand != null ? st.dust + Math.floor(Math.random() * st.idRand) : st.dust);
+      : (st.idRand != null ? st.dust + Math.floor(Math.random() * st.idRand)
+        : (st.dust));
     const d = game.spawnDust?.(x, y, w0, h0, dustId, sx, sy, alpha, color, scale);
     if (!d) continue;
     const dust = d as unknown as LiveDust;

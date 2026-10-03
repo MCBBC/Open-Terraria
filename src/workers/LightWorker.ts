@@ -15,6 +15,7 @@
 //                主线程切片池复用=稳态零分配）
 // 注意：module worker 的 self.location 是脚本 URL（无查询串）→ lightWorkerFlag 在
 // worker 内恒 false → 镜像引擎 _lw=null 走本地路径,无递归。
+import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 闸（必须保持第一位;见该文件头注,x-ray 定谳防线）
 import { LightingEngine, type LightingWorld } from '../lighting/LightingEngine';
 import type { TileStore } from '../world/TileStore';
 import {
@@ -22,6 +23,8 @@ import {
   TILE_CHAN_KEYS,
   type LightPoolMsg, type LightResyncMsg, type LightSnapshotMsg, type LightResultMsg,
 } from '../lighting/LightWorkerProtocol';
+
+assertWorkerBootGate('LightWorker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 const store = new SnapshotTileStore();
 const world = { store: store as unknown as TileStore, groundLevel: 0, lavaLine: 0, clock: { timeOfDay: 0.5, dayCount: 1 } };

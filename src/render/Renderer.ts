@@ -10842,6 +10842,14 @@ export class Renderer {
   private brightVineScratch: HTMLCanvasElement | null = null;
   /** 月总 30% 白斜坡补差 scratch（applyMoonLordLightFloor，Main.cs:24345 族） */
   private mlFloorScratch: HTMLCanvasElement | null = null;
+  /** ★BJ481 补差掩膜快照布（applyMoonLordLightFloor 三步烘焙第 3 步改单 op 消费）。
+   *  部件本体=多精灵合成（398=双臂×2+躯干半×2+胸甲+心帧 6+ drawImage;396/397 同族）,
+   *  destination-in 是【整画布】算子——旧法在 destination-in 下重放 drawPart=逐 draw
+   *  交∫各自 α 域→不相交精灵域互相擦除=补差整绘蒸发（实机+手工对判定谳
+   *  scripts/_bj481-manual-bake-ab.mjs:仅 step1=247k 不透明 px,全三步=0）。掩膜=step1
+   *  合成结果整幅快照,destination-in 单 drawImage 恢复合成 α。本布永不落主画布
+   *  （不进 shim 登记域,Z4/BJ429-D4 刮擦布纪律同款）。 */
+  private mlFloorMaskScratch: HTMLCanvasElement | null = null;
   /** 自发光弹光照地板账本（raiseSelfLuminousProjLight 抬亮过的格,四元组平铺
    *  idx,r,g,b——compositeLight 后 restoreSelfLuminousProjLight 按此还原原值） */
   private _lumFloorTouched: number[] = [];
@@ -11817,6 +11825,12 @@ export class Renderer {
       silCtx.globalCompositeOperation = 'source-over';
       // ★变体①终扫:逐层烘焙即刻上传——同帧多层（拖尾 17 段+本体族）共享
       //  _faelingSil 每层重画,markDynamic 的 flush 期刷新读末层字节=先行层全错
+      //  ★BJ485 销案锚（2026-10-03）:登记有效【保留】——缺省 acc 整层窗
+      //  （beginWorldLayer→compositeLight finishAccFrame 收口）内拴绳微光之灵
+      //  drawLeashedFaeling（render 3.8 段,整层窗内）逐层消费 pending 纹理,摘除
+      //  即拖尾错字节回归;敌怪 7d' drawFaeling/仙灵 7d'' drawFairyBright 窗外
+      //  调用经 uploadScratchNow !active 自判 no-op=零白付。BJ481 债面对本面的
+      //  「post-window 无效」摘要以本锚为准推翻（tests/bj485-dead-registration-sweep）。
       this.uploadScratchBake(silC, 'faelingSil', 256);
       ctx.globalAlpha = Math.max(0, Math.min(1, ma));
       ctx.drawImage(silC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
@@ -11834,7 +11848,7 @@ export class Renderer {
       tintCtx.globalCompositeOperation = 'destination-in';
       tintCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
       tintCtx.globalCompositeOperation = 'source-over';
-      this.uploadScratchBake(tintC, 'faelingTint', 256);   // ★变体①终扫:逐层烘焙即刻上传
+      this.uploadScratchBake(tintC, 'faelingTint', 256);   // ★变体①终扫:逐层烘焙即刻上传（★BJ485 销案锚:有效登记保留,见 silC 支锚注）
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(tintC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
     } else {
@@ -13491,7 +13505,14 @@ export class Renderer {
    *  （加性,不覆盖后画实体,z 序零影响）。光照采样 = 部件中心格单点,与原版
    *  Lighting.GetColor(point.X, point.Y) 同粒度;光图外按全亮(差值=0,不补)。
    *  已知边界(备案):与月总重叠的后画实体(玩家/弹幕)像素会吃到该加性补差,
-   *  暗处重叠区偏亮 ≤0.3×sprite——z 序保持优先于逐像素归属,白天零差零开销。 */
+   *  暗处重叠区偏亮 ≤0.3×sprite——z 序保持优先于逐像素归属,白天零差零开销。
+   *  ★BJ481 定谳（2026-10-03,Z4 同病嫌疑销案+真病落刀）:①本面非 VoidLens 刮擦布
+   *  桥接蒸发——补差 blit 在 7b'（finishAccFrame 收口后）恒 raw 主画布 2D,已登记
+   *  画布 raw-ctx 直绘正常落画布（探针 Arm C 实证）;②真病=旧三步烘焙第 3 步在
+   *  destination-in 下重放 drawPart——destination-in 是整画布算子,多精灵合成部件
+   *  逐 draw ∩ α 域不相交 → 互相擦除=补差自 G12 起整绘蒸发（GL/2D 两态同病,
+   *  与 shim 登记无关）。修=掩膜快照布单 op 恢复合成 α（tests/bj481-moonlord-
+   *  comp-scratch.test.ts 锁）;并删 uploadScratchBake 登记（窗内零消费点,纯白付）。 */
   private applyMoonLordLightFloor(
     entities: Entity[], cam: Camera, viewW: number, viewH: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -13507,6 +13528,10 @@ export class Renderer {
     const scratch = this.mlFloorScratch ??= document.createElement('canvas');
     const sctx = scratch.getContext('2d');
     if (!sctx) return;
+    // ★BJ481 掩膜快照布（字段注）：三步烘焙第 3 步改单 op 消费,治多精灵合成自擦除
+    const mask = this.mlFloorMaskScratch ??= document.createElement('canvas');
+    const mctx = mask.getContext('2d');
+    if (!mctx) return;
     const z = cam.zoom;
     // 各部件最大绘制外接半径（世界 px）:398 躯干±290/臂±316/y −278..+360;
     // 397 前臂旋转半径 ~426+手帧 −180..+92;396 头帧 y −130..+442+覆层 +214±28;
@@ -13539,10 +13564,14 @@ export class Renderer {
       if (bw <= 0 || bh <= 0) continue;
       if (scratch.width !== bw || scratch.height !== bh) {
         scratch.width = bw; scratch.height = bh;
+        mask.width = bw; mask.height = bh;
       } else {
         sctx.setTransform(1, 0, 0, 1, 0, 0);
         sctx.globalCompositeOperation = 'source-over';
         sctx.clearRect(0, 0, bw, bh);
+        mctx.setTransform(1, 0, 0, 1, 0, 0);
+        mctx.globalCompositeOperation = 'source-over';
+        mctx.clearRect(0, 0, bw, bh);
       }
       // 世界→scratch 变换（同实体 pass:translate(round(vw/2),round(vh/2))·scale(z)·
       // translate(-camRX,-camRY),平移再减 bbox 屏原点）
@@ -13559,20 +13588,31 @@ export class Renderer {
       const savedCtx = this.ctx;
       this.ctx = sctx;
       setWorldXf();
-      drawPart();                                              // 1st: 原样绘
+      drawPart();                                              // 1st: 原样绘（多精灵合成）
+      // ★BJ481 掩膜快照:destination-in 是【整画布】算子——旧法第 3 步在
+      //  destination-in 下重放 drawPart=逐 draw ∩ 各自 α 域 → 不相交精灵域互相擦除
+      //  （定谳:scripts/_bj481-manual-bake-ab.mjs F3a 仅 step1=247k 不透明 px,
+      //  F3d 全三步=0;实机 _bj481-scratch-forensics.mjs 8/8 blit scratch 全透明）。
+      //  快照整幅合成 α,第 3 步单 drawImage 恢复=与单精灵三步式（pylon 判例）逐位同。
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.drawImage(scratch, 0, 0);
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.globalCompositeOperation = 'multiply';
       sctx.fillStyle = `rgb(${cr},${cg},${cb})`;
       sctx.fillRect(0, 0, bw, bh);                             // 2nd: 乘差值色
-      setWorldXf();
       sctx.globalCompositeOperation = 'destination-in';
-      drawPart();                                              // 3rd: 源 α 恢复
+      sctx.drawImage(mask, 0, 0);                              // 3rd: 合成 α 恢复（单 op）
       this.ctx = savedCtx;
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.globalCompositeOperation = 'source-over';
-      // ★变体①终扫:逐部件烘焙即刻上传（scratch 每部件重烤+变尺寸,flush 期刷新
-      //  读末部件字节=先行部件补差全错;环形键窗 16 ≥ 单帧部件数 ≤4,窗内不复用）
-      this.uploadScratchBake(scratch, 'mlfloor', 16);
+      // ★BJ481 定谳（探针 _bj481-ml-compscratch-probe.mjs Arm C）:本面【不走】
+      //  uploadScratchBake——补差 blit 在 render 7b'（compositeLight finishAccFrame
+      //  收口之后）恒落 raw 主画布 2D,shim 窗内零消费点=登记零收益;bgl 会话反而
+      //  白付 4 部件×bbox 纹理上传/帧。已登记画布 raw-ctx 直绘正常落画布（Arm C
+      //  dReg=(200,100,50) 逐通道精确）——Z4 判例的「桥接蒸发」不适用于本面,
+      //  真病=上文 destination-in 自擦除（已修）;旧变体①注释所称「flush 期读末
+      //  部件字节」前提（blit 被桥接）不成立,删登记刀（2026-10-03）。
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
@@ -13790,9 +13830,14 @@ export class Renderer {
           sctx.fillStyle = `rgb(${cr},${cg},255)`;
           sctx.fillRect(0, 0, scratch.width, scratch.height);
           sctx.globalCompositeOperation = 'source-over';
-          // ★变体①终扫:逐段烘焙即刻上传（scratch 每段重画,flush 期刷新读末段
-          //  字节=先行段全错;键=(实体,段序) 帧内唯一/跨帧稳定=零纹理抖动）
-          this.uploadScratchBake(scratch, `bv:${e.id}`, 512);
+          // ★BJ485（2026-10-03 定谳摘除登记）:本面唯一调用方=render 7c（endWorldLayer
+          //  +compositeLight finishAccFrame 收口之后）恒 raw 主画布 2D——uploadScratchNow
+          //  窗关自判 no-op（GLShimExecutor !active 早退）,brightVineScratch 全仓亦无
+          //  shim 窗内 drawImage（markDynamic/dynKeys 零消费点）→ 登记零收益白付
+          //  （scratchBakeSeqs 环形账簿+假前提注释;旧「变体① flush 期读末段字节」
+          //  前提=blit 被桥接,不成立）。raw 2D drawImage 即时读当前字节,逐段烘焙
+          //  本就正确（BJ481 Arm C 判例:登记态不影响 raw 直绘）。
+          //  tests/bj485-dead-registration-sweep 锁;普查表见该文件头注。
           const [sxp, syp] = cam.worldToScreen(px, py);
           ctx.save();
           ctx.translate(sxp, syp);
@@ -16005,9 +16050,12 @@ export class Renderer {
           { sx, sy, sheetW: img.width, sheetH: img.height });
         c.putImageData(id, 0, 0);
       }
-      // ★变体①终扫:终内容烘焙即刻上传（tintSlice+染料折叠全落 wingTintScratch
-      //  共享面,同帧多次烘焙——markDynamic flush 期刷新读末次字节=先行层全错）
-      if (sc) this.uploadScratchBake(sc, 'wingTint', 128);
+      // ★BJ485（2026-10-03 定谳摘除登记）:drawWingOverlay 唯一调用方=flushWingGlow
+      //  （render 7e,compositeLight finishAccFrame 收口之后）恒 raw 主画布 2D——
+      //  uploadScratchNow 窗关自判 no-op,wingTintScratch 亦无 shim 窗内 drawImage
+      //  （:15052 翼案约束:本槽仅限窗外消费者）=登记零消费点零收益;raw 2D 烘→画
+      //  相邻,drawImage 即时读当前字节,本就正确。tests/bj485-dead-registration-sweep。
+      //  （旧「变体① flush 期读末次字节」前提=blit 被桥接,不成立——同 bv 判。）
       return sc;
     };
     /** 纯加色 scratch（Color(255³,0)·f 族——A=0 预乘 = 纯加色，StringLine.ts 同法）：
@@ -16027,7 +16075,7 @@ export class Renderer {
       if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
         { sx, sy, sheetW: img.width, sheetH: img.height });
       sctx.putImageData(id, 0, 0);
-      this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
+      // ★BJ485:登记摘除（窗外零消费点,判据见 dyeScratch 支锚注）
       return sc;
     };
     switch (ov.kind) {
@@ -16150,7 +16198,7 @@ export class Renderer {
             }
             c38.putImageData(id38, 0, 0);
           }
-          this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
+          // ★BJ485:登记摘除（窗外零消费点,判据见 dyeScratch 支锚注）
           ctx.save();
           ctx.globalAlpha = imA;
           ctx.drawImage(sc, -(s.sw - 2) / 2, -(s.sh - 2) / 2);
@@ -16216,7 +16264,7 @@ export class Renderer {
         if (dye) this.applyDyeToImageData(id.data, s.sw, s.sh, dye,
           { sx: 0, sy: s.sy, sheetW: img.width, sheetH: img.height });
         sctx.putImageData(id, 0, 0);
-        this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
+        // ★BJ485:登记摘除（窗外零消费点,判据见 dyeScratch 支锚注）
         ctx.save();
         ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
         ctx.restore();

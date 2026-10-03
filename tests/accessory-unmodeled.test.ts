@@ -83,9 +83,9 @@ describe('配饰未建模①：hideVisibleAccessory 字段与聚合门（Player.
   it('equipStats 记忆化键含隐藏段：翻转即失效重算（accDraw 聚合输入）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(532), stack: 1 };
-    const k1 = p['equipStatsKey']();
+    const k1 = p['equipStatsTailKey']();   // ★IIIII251 hide 位在标量尾段(每访问现算)
     p.hideVisibleAccessory[3] = true;
-    const k2 = p['equipStatsKey']();
+    const k2 = p['equipStatsTailKey']();
     expect(k1).not.toBe(k2);
     expect(p.equipStats.accDraw.back).toBe(0);
   });

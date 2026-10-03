@@ -98,6 +98,7 @@
 import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
 import { WorkerWatchdog, ladderDelayMs, newFallsBy, workerRetryEnabled,
   type WorkerFallReason } from '../workers/WorkerGovernance';   // ★看门狗治理(2026-09-28)
+import { wavesWasmEnabled, wavesWasmReady, ensureWavesWasm, wavesWasmStep } from '../wasm/wavesWasm';   // ★WASM 第三刀(2026-10-03;wavesWasm.ts 四约定,旗 ?wavewasm=1 缺省关)
 
 /** 档位门（WaterShaderData.cs:114-118）。q: 0..3 */
 export interface WaveSourceGates {
@@ -500,7 +501,18 @@ export class WaterWaveSystem {
    *  到达再切主。 */
   private _wwSpawnWorker(respawn: boolean): void {
     try {
-      this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url), { type: 'module' });
+      // ★WASM 第三刀(2026-10-03):?wavewasm=1 经 Worker options.name 注入 worker 域
+      //  (loader wavesWasm.ts 双域旗读取的 worker 半边——worker 无页面 URL,快照
+      //  协议不动)。★vite:worker-import-meta-url 约束=worker options 必须静态
+      //  字面量(动态三元=vite 500 实锤)——双静态分支构造(LightWorkerLink:241
+      //  判例同款);window.name 同名串不误伤(仅 document 缺席域读 name)。
+      if (wavesWasmEnabled()) {
+        this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url),
+          { type: 'module', name: 'sw-wavewasm=1' });
+      } else {
+        this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url),
+          { type: 'module', name: 'WaveWorker' });
+      }
       this._wwStartedAt = performance.now();
       this._wwLastField = 0;
       this._wwErrored = false;
@@ -1159,6 +1171,18 @@ export class WaterWaveSystem {
   private _step(dx: number, dy: number): void {
     const w = this._gW, h = this._gH;
     const R = this._R, G = this._G, R2 = this._R2, G2 = this._G2;
+    // ★WASM 第三刀(2026-10-03):旗开 → 惰性点火(幂等,fire-and-forget)+就绪走 WASM
+    //  推进核;未就绪/失败/拒 → 静默落回下方 JS 三路径(逐字保留,fail-closed)。
+    //  位级策略见 src/wasm/waves.as.ts 头注:内核纯 f64 零随机、AS Math.round=JS
+    //  精确语义、WATER_DAMP 形参传入灭 libm 面;三 JS 路径(bj78/bj270 锁)互为
+    //  逐位同值 → WASM 单核(快+泛形两支)复刻全部。
+    if (wavesWasmEnabled()) {
+      if (!wavesWasmReady()) void ensureWavesWasm();
+      else if (wavesWasmStep(R, G, R2, G2, w, h, dx, dy, WATER_DAMP)) {
+        this._R = R2; this._G = G2; this._R2 = R; this._G2 = G;
+        return;
+      }
+    }
     if (swPerf && dx === 0 && dy === 0) {
       // ★BJ78 W3(swPerf 快路径)：dx=dy=0（静止相机的每一步 + 任何相机下每帧
       //   的第二步 _step(0,0)）时外提不变式成立——

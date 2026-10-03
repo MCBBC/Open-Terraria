@@ -109,20 +109,22 @@ describe('BJ411 A：流星头 23 HitEffect 尘表（NPC.cs:90567-90605,1458 同�
     expect(rec.hit).toHaveLength(1);
     const loop = rec.hit![0] as { hitK: number; body: Array<Record<string, unknown>>; line: number };
     expect(loop.hitK).toBe(100);
-    expect(loop.line).toBe(90573);
+    // ★BJ479（2026-10-03）：批5 手工条目已提取器原生转正（roll 条件 id 局部建模+空门帧
+    //   占位支摘除,1 掷同拍;era guard 对拍复绿）——行号随重产由手写值改为提取器物理行
+    expect(loop.line).toBe(90578);
     expect(loop.body).toHaveLength(2);
-    expect(loop.body[0]).toMatchObject({ dust: 0, idPick: [6, 25], sx: 'hd', sy: -1, line: 90575 });
+    expect(loop.body[0]).toMatchObject({ dust: 0, idPick: [6, 25], sx: 'hd', sy: -1, line: 90578 });
     expect(loop.body[1]).toMatchObject({
       dust: 6, sx: 'velX*0.2', sy: 'velY*0.2', alpha: 100, scale: 2,
-      posts: [['ng', true]], line: 90576,
+      posts: [['ng', true]], line: 90579,
     });
     expect(rec.death).toHaveLength(2);
-    expect(rec.death![0]).toMatchObject({ dust: 0, idPick: [6, 25], n: 50, sx: '2hd', sy: -2, line: 90588 });
+    expect(rec.death![0]).toMatchObject({ dust: 0, idPick: [6, 25], n: 50, sx: '2hd', sy: -2, line: 90591 });
     expect(rec.death![1]).toMatchObject({
       dust: 6, n: 50, sx: 'velX*0.2', sy: 'velY*0.2', alpha: 100, scale: 2.5,
-      posts: [['velMul', 6], ['ng', true]], line: 90596,
+      posts: [['velMul', 6], ['ng', true]], line: 90595,
     });
-    expect(TABLE._meta.batch5).toBeDefined();   // 手工条目登记（提取器未支持局部 id 模式）
+    expect(TABLE._meta.batch6).toBeDefined();   // ★BJ479 批6:提取器原生（批5 手工 _meta.batch5 已退役）
   });
 
   it('【行为锁】受击相簇数=ceil(dmg/maxHp×100)×2：dmg=1/maxHp=26 → 4 迭代 8 发', () => {

@@ -4871,6 +4871,14 @@ export class MinionProj extends Entity {
       //  且窗拒拍早退不达 :14179 写位=私表保持 0。旧码 local/idStatic 族不查窗、
       //  先 ready() 消费私表再进 hurt 被窗拒 → 窗内空转白吃 cd,节拍漂移。
       const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
+      // ★BJ475① :12600 头门前置（Damage_PVE 循环门 `flag2 && (!dontTakeDamage ||
+      //  ZappingJellyfish[nPC.type])` 先于 Inner 全链;BJ467⑥ 拳/光环/爆弹/爆裂四臂
+      //  同构,contact 环与 818 扑击臂 BJ467⑥ 落刀时任务清单未含=同形漏网）——
+      //  dontTakeDamage 靶不达 TimerCrit/tag ModifyHit/私表 cd 消费（快照纪律:读
+      //  hurt 前状态）。随从弹非接触反噬族（:12680 zap 门=aiStyle 19/161/75/140 ∪
+      //  IsAWhip ∪ AllowsContactDamageFromJellyfish,随从面恒假）→ dontTakeDamage
+      //  水母亦无 zap 口,整跳=原版净语义（:12685 `if (dontTakeDamage) return` 拦伤）。
+      if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (MinionProj.enemyImmune(en)) continue;   // ★BJ436 :12636 三族共门（原 -2 族独占）
       if (spec === CONTACT_PLAYER_WINDOW) {
         // -2 缺省族：吃玩家全局窗（命中尾 :14182 写 10=hurt pierce=0 承载）
@@ -7900,6 +7908,11 @@ export class TigerPounce extends Entity {
       if (en.dead || this.hitSet.has(en.id)) continue; // localNPCHitCooldown=-1 每敌一次
       if (this.x >= en.x + en.w || this.x + this.w <= en.x
         || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
+      // ★BJ475① :12600 头门前置（contact 环同构,BJ467⑥ 同形;818 扑击臂 BJ467⑥
+      //  落刀时任务清单未含=同形漏网）——dontTakeDamage 靶不达 hitSet 记账/TimerCrit
+      //  /tag（快照纪律:读 hurt 前状态;随从弹非接触反噬族 → DTD 水母亦无 zap 口,
+      //  整跳=原版净语义 :12685）。
+      if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       // ★BJ436（2026-10-02）:12636 全局窗门在写梯前（usesLocal cd=-1 族同门）——
       //  窗拒拍 hitSet 保持未记（原版 localNPCImmunity 不达 :14179 写位,下拍重试）;
       //  旧码先记 hitSet 再进 hurt 被窗拒=该敌整轮扑击丢失。

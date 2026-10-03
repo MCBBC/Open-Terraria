@@ -13,10 +13,13 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projFrameImg } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 
 export class FirstFractalSlash extends Entity {
   w = 32; h = 32;
   damage: number;
+  /** ★BJ486③ vanilla 弹 id（SetDefaults 857 :8222 melee=true）——rollVanillaHitCrit 锚 */
+  readonly projId = 857;
   critChance = 0.04;
   armorPen = 0;
   /** ai[0] 每 tick 曲率（±π/120） */
@@ -67,7 +70,8 @@ export class FirstFractalSlash extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,857 melee 旗）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitSet.add(e.id);

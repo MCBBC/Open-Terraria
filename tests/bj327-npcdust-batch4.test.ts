@@ -54,6 +54,11 @@ const TABLE = npcDustJson as unknown as Record<string, {
   hit?: Array<Record<string, unknown>>; death?: Array<Record<string, unknown>>;
 }> & { _meta: Record<string, unknown> };
 
+// ★BJ487：接线规模单点——从表 _meta.counts.wiredTypes 派生（提取器重产时自带规模自证,
+//   与表键数同源）。后续接线批重产 json 后本文件零手工 bump;手改表键不重产→与计数
+//   失配=防踩踏漂移红（era guard 对拍同族）。
+const META_WIRED = (TABLE._meta as { counts: { wiredTypes: number } }).counts.wiredTypes;
+
 type DustCall = {
   x: number; y: number; w: number; h: number; type: number;
   sx: number; sy: number; alpha: number; scale: number;
@@ -416,7 +421,7 @@ describe('BJ327 C. 边界', () => {
   it('_meta：批4 四型入表（402/426/427/661）+ pending 型域出清（收官:滚动清单+根级门组外无登记）', () => {
     for (const vid of ['402', '426', '427', '661']) expect(TABLE[vid]).toBeDefined();
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(335);                      // 334 + BJ411 流星头 23
+    expect(ids.length).toBe(META_WIRED);               // ★BJ487 派生化:接线批重产零手工 bump（原钉 342=批4 收官 334+BJ411 流星头 23+BJ479 批6 宝箱怪 85/629+BJ484 同构支 341/473-476）
     const pend = TABLE._meta.pending as Array<{ types: number[]; reason: string }>;
     const pendIds = new Set(pend.filter((p) => p.types.length < 100).flatMap((p) => p.types));
     for (const vid of [402, 426, 427, 661]) {

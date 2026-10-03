@@ -211,6 +211,8 @@ const PS_SCALAR_BASE = 0xA000;
 
 export class SM2Pass {
   readonly name: string;
+  /** 原始 pass JSON(wasmRunPassOnImageData 上传通道;2026-10-03 WASM 试点) */
+  private src: FxPassJson;
   private prog: Inst[];
   private symbols: FxSymbol[];
   private pres: FxPassJson['preshader'];
@@ -218,10 +220,18 @@ export class SM2Pass {
   private sampOut = new Float64Array(4);
 
   constructor(json: FxPassJson) {
+    this.src = json;
     this.name = json.pass;
     this.prog = decodeProgram(json.tokens);
     this.symbols = json.symbols;
     this.pres = json.preshader;
+  }
+
+  /** WASM 试点(2026-10-03):原始 token 列表(src/wasm/sm2Wasm.ts 上传通道) */
+  get rawTokens(): readonly number[] { return this.src.tokens; }
+  /** WASM 试点:符号面是否仅 s0 单采样器(WASM VM 仅单贴图;s1/s2 pass 一律拒 → JS 原链) */
+  get singleSamplerS0Only(): boolean {
+    return this.symbols.every((s) => s.kind !== 'sampler' || s.reg === 's0');
   }
 
   /** 常量寄存器装配：def → CTAB 符号注入 → preshader 覆写（64×4 float） */

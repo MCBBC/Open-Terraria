@@ -17,6 +17,7 @@ import {
   type LightPoolMsg, type LightResyncMsg, type LightResultMsg, type LightSnapshotMsg, type TileSlicePack,
 } from './LightWorkerProtocol';
 import { WorkerWatchdog, newFallsBy, type WorkerFallReason } from '../workers/WorkerGovernance';
+import { lightWasmEnabled } from '../wasm/lightWasm';
 import type { TileStore } from '../world/TileStore';
 
 /** ★C9 转正（2026-09-24）：缺省开——逐字节对拍三场景全等+浏览器探针 1:1 零丢包
@@ -237,7 +238,18 @@ export class LightWorkerLink {
   send(msg: Omit<LightSnapshotMsg, 'op' | 'seq'>): void {
     if (this.worker === null) {
       try {
-        this.worker = new Worker(new URL('../workers/LightWorker.ts', import.meta.url), { type: 'module' });
+        // ★WASM 第二刀(2026-10-03):?lightwasm=1 经 Worker options.name 注入 worker 域
+        //  (loader lightWasm.ts 双域旗读取的 worker 半边——worker 无页面 URL,快照协议
+        //  不动)。★vite:worker-import-meta-url 约束=worker options 必须静态字面量
+        //  (动态三元=vite 500,实锤)——双静态分支构造,两支均可被 dev/build 变换。
+        //  页面 window.name 同名串不误伤:loader 仅 document 缺席域读 name。
+        if (lightWasmEnabled()) {
+          this.worker = new Worker(new URL('../workers/LightWorker.ts', import.meta.url),
+            { type: 'module', name: 'sw-lightwasm=1' });
+        } else {
+          this.worker = new Worker(new URL('../workers/LightWorker.ts', import.meta.url),
+            { type: 'module', name: 'LightWorker' });
+        }
         this.startedAt = performance.now();
         this.worker.onerror = (e) => {
           this.errored = true;

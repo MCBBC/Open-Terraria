@@ -6,6 +6,7 @@
 // 双缓冲由引擎层持有(本类单图);行主序布局(与导出面一致)。
 import { FastRandom } from './FastRandom';
 import { DEAD_THRESHOLD, DECAY_AIR, DECAY_CRACKED, DECAY_HONEY, DECAY_SOLID, DECAY_WATER } from './lightTables';
+import { ensureLightWasm, lightWasmBlur, lightWasmEnabled, lightWasmReady } from '../wasm/lightWasm';
 
 /** 遮挡类型(LightMaskMode.cs;注意 Water=2 Honey=3 CrackedBricks=4) */
 export const enum Mask { None = 0, Solid = 1, Water = 2, Honey = 3, CrackedBricks = 4 }
@@ -51,9 +52,27 @@ export class LightMap {
   }
 
   /** Blur()(L86-91):两遍 BlurPass + NextSeed(★NextSeed 在 passes 后=原版顺序;
-   *  LUT 预计算用【当前】seed=passes 实际消费的种子,位级等值) */
+   *  LUT 预计算用【当前】seed=passes 实际消费的种子,位级等值)。
+   *  ★WASM 第二刀(2026-10-03):blur 核 AS 化(src/wasm/light.as.ts,旗 ?lightwasm=1
+   *  缺省关)。调用点模式③(wasm∧旗 ? wasm : js):JS 支(下方)零改动逐位保留;
+   *  wasm 拒/失败/未就绪 → 静默落回 JS(fail-closed);未就绪时 fire-and-forget
+   *  预热(幂等),就绪后新帧自动切 WASM。位级锁 tests/light-wasm.test.ts。
+   *  旗关时零网络/零实例化/单次布尔短路零开销。 */
   blur(): void {
     this.buildWaterFlick();
+    if (lightWasmEnabled()) {
+      // pad 与 blurPass(L81)同式:JS 侧钳制后传入(AS 侧防御重查)
+      const pad = Math.min(this.nonVisiblePadding, Math.max(0, Math.min(this.w, this.h) >> 1));
+      if (lightWasmReady()
+        && lightWasmBlur(this.r, this.g, this.b, this.mask, this.flickLut, this.w, this.h, pad,
+          DECAY_AIR, DECAY_SOLID, DECAY_CRACKED,
+          DECAY_WATER[0], DECAY_WATER[1], DECAY_WATER[2],
+          DECAY_HONEY[0], DECAY_HONEY[1], DECAY_HONEY[2])) {
+        this.random = this.random.withModifier(++this.cycleIndex);
+        return;
+      }
+      ensureLightWasm();   // fire-and-forget 幂等预热(④:未就绪帧走 JS,就绪后自动切)
+    }
     this.blurPass();
     this.blurPass();
     this.random = this.random.withModifier(++this.cycleIndex);

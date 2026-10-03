@@ -230,10 +230,12 @@ export class VanillaDust {
 
   /** NewDust（:75-285）：位置/速度抖动、scale 抖动、type-6 烟雾初速特例、
    *  屏外裁剪（★BJ466 实装：margin=(int)(400×(1−dCount)) 外圈不生成,dCount 阶梯
-   *  =update 尾 :2470-2494;首帧 update 前与 perfect/prettySparkle 载体豁免,见实现注）。
+   *  =update 尾 :2470-2494;首帧 update 前与 prettySparkle 载体豁免（★BJ480 复裁:
+   *  perfect 不豁免——原版 NewDustPerfect 经 :56 委托照吃裁剪,见实现注）。
    *
    *  opts.perfect = NewDustPerfect 变体通道（Dust.cs:52-63）：内部仍走完整 NewDust
-   *  初始化链（含 0 宽盒抖动窗/rand ±2 初速/烟雾族特例），随后仅两个字段被完整
+   *  初始化链（含屏外裁剪 :97-103——★BJ480 复裁:不豁免;含 0 宽盒抖动窗/rand ±2
+   *  初速/烟雾族特例），随后仅两个字段被完整
    *  覆写——`dust.position = Position`（盒抖动消解）、Velocity.HasValue 时
    *  `dust.velocity = Velocity.Value`（本仓调用侧恒传具体向量）。由此：
    *  · 烟雾族特例（216-222 型表 242/75/169 等）的 vy 重掷与 vx×0.3 被覆写消解，
@@ -255,14 +257,22 @@ export class VanillaDust {
     // ★BJ466（2026-10-03）spawn 头屏外裁剪（Dust.NewDust :97-101）：margin=
     // (int)(400×(1−dCount))（dustCullMarginOf,dCount 阶梯=update 尾 :2470-2494）;
     // 视口=screenPosition 四向外扩 margin;spawn 盒=(Position,10,10) 恒定（w/h 形参
-    // 只决定盒内偏移分布 :191-193,不进裁剪式）;不相交→拒且零 RNG 消费——本早退位于
+    // 只决定盒内偏移分布 :155-173,不进裁剪式）;不相交→拒且零 RNG 消费——本早退位于
     // 槽搜索与密度门（:106-151）之前,被裁 spawn 不动任何 Math.random 掷=反伪影关键
     // （原版裁剪先于密度梯同序）。XNA Rectangle.Intersects=四向严格不等（贴边不相交）;
     // C# (int) 截断=trunc,且 (int)(screenPosition.X−num) 是对【差式】单次截断,
-    // 勿拆成 trunc(x)−margin（x<margin 时跨零语义不同）。豁免（BJ460③ 钉案）：
-    // opts.perfect（NewDustPerfect :52-63 通道）与 prettySparkle 载体
-    // （ParticlePool.cs:32-51 不入 Dust 池零门）。视口未暂存（首帧前）不裁。
-    if (this.viewValid && opts?.prettySparkle !== true && opts?.perfect !== true) {
+    // 勿拆成 trunc(x)−margin（x<margin 时跨零语义不同）。
+    // ★BJ480 复裁（2026-10-03）：豁免面只留 prettySparkle 载体（ParticlePool.cs:29-46
+    //  RequestParticle 零门零掷,与 Dust 池全异）;perfect 【不】豁免——BJ460③ 钉案被
+    //  BJ466 勘误推翻,定谳锚=Dust.cs:56 `Main.dust[NewDust(Position,0,0,…)]` 完整委托:
+    //  裁剪面 :97-103 先于 :57-61 位/速覆写执行,裁剪盒 :99=(Position,10,10) 恒定
+    //  （Width/Height 形参不进裁剪式,0,0 宽高不构成豁免）;被裁 NewDust 返 6000 →
+    //  Main.dust[6000]=inactive 哨兵槽（Main.cs:1692 容量 6001/:6824-6828 j<6001
+    //  初始化;UpdateDust :436 与绘制循环只走 <6000/<maxDustToDraw,哨兵永不更新/绘制）,
+    //  覆写落哨兵即蒸发=等价拒,调用侧链式后置写随写随没=原版同相（调用方普查:原版
+    //  NewDustPerfect 158 调用点全同吃裁剪;本仓 spawnDust 池满 null 契约同面,
+    //  守卫/直调两态安全）。视口未暂存（首帧前）不裁。
+    if (this.viewValid && opts?.prettySparkle !== true) {
       const margin = dustCullMarginOf(this.dCount);
       const vl = Math.trunc(this.viewX - margin);
       const vt = Math.trunc(this.viewY - margin);

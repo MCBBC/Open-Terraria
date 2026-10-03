@@ -299,7 +299,11 @@ describe('三批结构锚', () => {
 
   it('F10：扑击弹 818 击退冲量归零（kb=0 → 原版双门不进）', () => {
     const m = src('src/entities/MinionProj.ts');
-    expect(m.includes('en.hurt(res.dmg, 0, 0, game, 0, false, 0, true); // kb=0')).toBe(true);
+    // ★BJ482 会话 oracle 重产（2026-10-03）：旧引语 `en.hurt(res.dmg, 0, 0, game, 0,
+    //  false, 0, true); // kb=0` 已被 BJ436 写梯档位（818=usesLocal+cd=-1 → pierce=-3
+    //  清窗档 :14175-14179）+BJ452 N2 crit 色位+BJ455③ banner 乘区包入三刀改形
+    //  （MinionProj 818 臂现役行），引语随现役定谳面刷新——kb=0 双门不进意图不变。
+    expect(m.includes('en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? res.dmg * 2 : res.dmg), 0, 0, game, 0, critPounce, -3, true)')).toBe(true);
   });
 
   it('F14：PvP 两伴生支就位（血舌球 3211 ×0.7 / 蜂王 1123 num/3）', () => {

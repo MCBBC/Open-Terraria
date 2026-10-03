@@ -3534,7 +3534,7 @@ export class Game implements GameHooks {
      *  再射一发 933/1100（Player.cs flag4 = itemAnimation>0 && ItemTimeIsZero——
      *  与通用分支"reuseSpd<animSpd 即重启挥击"不同，原版 itemAnimation 不因
      *  itemTime 归零重置）。fired=已发数（首发 num164=0 于挥击开始时计入） */
-    zenith?: { useTime: number; fired: number; vid: number; dmg: number; crit: number; pen: number };
+    zenith?: { useTime: number; fired: number; vid: number; dmg: number; pen: number };
     /** ★J2 Volcano(type121 火之大剑)爆炸窗口面 ≡ _spawnVolcanoExplosion：
      *  置位 = ItemAnimationJustStarted && type==121（Player.cs:43809-43812）；
      *  清位 = Volcano_TrySpawningVolcano 消费点（:44498-44506，受理命中结算时
@@ -14731,7 +14731,9 @@ export class Game implements GameHooks {
           const twister = new BookStormTwister(this.player.cx, feetY - 100,
             this.player.facing * (bsData?.shootSpeed ?? 11), bsDmg,
             (bsData?.knockBack ?? 9) * (bsPs?.kb ?? 1));
-          twister.critChance = 0.04 + this.player.critChance('magic') / 100;   // 概率域 0-1（同 critTotal 口径）
+          // ★BJ486② 退役载体死写摘除（原 `twister.critChance = 0.04 +
+          //  critChance('magic')/100`）——704 命中面走 dealContacts→rollVanillaHitCrit,
+          //  载体值无读者（门读者=类字段默认 0.04）。
           twister.armorPen = (eq.armorPen ?? 0) + (bsPs?.arpen ?? 0);
           this.entities.add(twister, 'projectiles');
           this.useSwing(heldDef, undefined);
@@ -15041,8 +15043,9 @@ export class Game implements GameHooks {
       //    二三发由 updateSwingHits 按动画进度续发（flag4 只看 itemAnimation>0，
       //    松手后已起手的动画仍发完——:42818 的 3*useTime flag 门=每挥最多 3 发）
       if ((heldVid === 4956 || heldVid === 5669) && this.player.useTime === 0 && canChain && swingOver) {
-        const arcCritZ = 0.04 + (itemCombat(heldVid)?.crit ?? 0) / 100
-          + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
+        // ★BJ486③（2026-10-03）arcCritZ 退役载体死写摘除——天顶剑弹 933 melee 旗,
+        //  命中面掷=rollVanillaHitCrit（ZenithSword.projId=933,:25712 持械折入动态面）,
+        //  静态冻结载体无读者=可清。
         // GetWeaponDamage：物品伤害×词缀×近战全系乘区（NewProjectile Damage 实参）。
         // ★BJ343 件 2 两步链 1:1：①词缀步 Item.cs:577 `(int)Math.Round((float)damage
         //  ×dmg)`（f32+银行家——原版在 Prefix 期已烙入 item.damage,本仓不烙 def 逐用点
@@ -15050,7 +15053,7 @@ export class Game implements GameHooks {
         //  （截断+偏置,非 Math.Round——旧单步 Math.round 在小数部 ≥0.5 段整段+1）
         const zAff = roundCSf32Mul(cwMelee!.damage, ps?.dmg ?? 1);
         const zDmg = Math.max(1, truncCSf32MulBias(this.player.damageMult('melee'), zAff));
-        const zPayload = { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg, crit: arcCritZ,
+        const zPayload = { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg,
           pen: (eq.armorPen ?? 0) + this.player.meleeArmorPen };
         this.swing = {
           t: animSpd, dur: animSpd, item: held!.id,
@@ -15085,9 +15088,10 @@ export class Game implements GameHooks {
         // ★ 真刃系旋斩弧五剑（Player.cs:49353-49447 各专属出生链——★BJ206 2026-09-20
         // 重锚,旧注 :48265-48317 系 1456 代际——先于下方通用
         // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
-        const arcVid = heldDef?.vid ?? -1;
-        const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
-          + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
+        // ★BJ486③（2026-10-03）arcCrit 挥击面载体退役（原定义式=0.04+武器 crit/100
+        //  +meleeCrit 聚合/100+词条 crt/100 三项静态冻结）——弧子代弹命中面掷率统一改
+        //  rollVanillaHitCrit（:12915-12927 owner 装配+Player.cs:25712-25714 持械
+        //  item.crit 动态折入=命中拍现值,静态冻结载体退役）,本载体写位全数摘除。
         if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 974, 976].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
@@ -15107,7 +15111,8 @@ export class Game implements GameHooks {
           const arcAi0 = this.player.facing * this.player.gravDir;
           const mkArc = (projId: number, dmg: number) => {
             const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), arcAi0, scaleT);
-            arc.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `arc.critChance = arcCrit`）——掷率在
+            //  SwingArc 命中面走 rollVanillaHitCrit(this.projId)。
             arc.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             // 弹体击退（NewProjectile KnockBack 实参）——997 命中召 321 时透传
             // HorsemansBlade_SpawnPumpkin 的 kb 参（Player.cs:42444/:42462）
@@ -15120,7 +15125,8 @@ export class Game implements GameHooks {
               const fly = new NightsEdgeFly(this.player.cx, this.player.cy - 4,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 5), Math.sin(angT) * (cwMelee.shootSpeed ?? 5),
                 this.swing.dmg ?? cwMelee.damage, arcAi0, 30, scaleT);   // ai0=dir×gravDir×0.1（:49382）
-              fly.critChance = arcCrit;
+              // ★BJ486③ 退役载体死写摘除（原 `fly.critChance = arcCrit`）——掷率在
+              //  NightsEdgeFly 命中面走 rollVanillaHitCrit(972)。
               fly.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(fly, 'projectiles');
               break;
@@ -15130,7 +15136,8 @@ export class Game implements GameHooks {
               const slash = new TrueNightsEdgeSlash(this.player,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 14), Math.sin(angT) * (cwMelee.shootSpeed ?? 14),
                 (this.swing.dmg ?? cwMelee.damage) / 2, arcAi0, 32, scaleT);   // ai0=dir×gravDir（:49435-49436）
-              slash.critChance = arcCrit;
+              // ★BJ486③ 退役载体死写摘除（原 `slash.critChance = arcCrit`）——掷率在
+              //  TrueNightsEdgeSlash 命中面走 rollVanillaHitCrit(973)。
               slash.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(slash, 'projectiles');
               break;
@@ -15160,9 +15167,22 @@ export class Game implements GameHooks {
               else { sx974 += (Math.random() * 2 - 1) * 20; sy974 += (Math.random() * 2 - 1) * 20; }
               let ai0974 = 1;
               let dmg974 = (this.swing.dmg ?? cwMelee.damage) * 0.5;
-              if (Math.floor(Math.random() * 100) < this.player.critChance('melee') * 100 + 4) { ai0974 = 2; dmg974 *= 2; }
+              // ★BJ486③ 出生拍 crit 掷（Player.cs:49369-49377 1:1）：`Main.rand.Next(100)
+              //  < meleeCrit`（百分点=基 4+装备聚合）——旧式把百分点值再 ×100 当阈值
+              //  （≈1204 恒真）=100% 暴击病,按原版单位收敛为 `+ 4`。
+              //  随后 :49371 TryConsumingTimerCrit(CenteredRectangle(vector62,16,16),
+              //  ref crit)——满蓄/负窗消费并强制 crit（ai0=2+dmg×2 折进斩痕）。
+              let crit974 = Math.floor(Math.random() * 100) < this.player.critChance('melee') + 4;
+              if ((this.player as unknown as
+                { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+                | null)?.tryConsumingTimerCrit?.(this, sx974 - 8, sy974 - 8, 16, 16) ?? false) {
+                crit974 = true;
+              }
+              if (crit974) { ai0974 = 2; dmg974 *= 2; }
               const lb = new LightsBaneSlash(sx974, sy974, rdx, rdy, Math.round(dmg974), ai0974);
-              lb.critChance = arcCrit;
+              // ★BJ486③ 退役载体死写摘除（原 `lb.critChance = arcCrit`）——命中面掷=
+              //  rollVanillaHitCrit(974)（:12915-12927 Damage 面独立掷,与出生拍并存
+              //  =原版双掷面同相,勿合并）。
               lb.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(lb, 'projectiles');
               break;
@@ -15214,7 +15234,8 @@ export class Game implements GameHooks {
               }
               const gs = new GrassSlash(sx976, sy976, fvx, fvy,
                 Math.round((this.swing.dmg ?? cwMelee.damage) * 0.25), num180);
-              gs.critChance = arcCrit;
+              // ★BJ486③ 退役载体死写摘除（原 `gs.critChance = arcCrit`）——掷率在
+              //  GrassSlash 命中面走 rollVanillaHitCrit(976)。
               gs.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(gs, 'projectiles');
               break;
@@ -15251,7 +15272,8 @@ export class Game implements GameHooks {
             const blade = new ChloroClaymoreBlade(
               this.player.cx, this.player.cy - 4,
               cdir, cdvy, cDmg, cKb, animMax, ps?.size ?? 1);                // ai[2]=itemScale（:49422）
-            blade.critChance = arcCrit;
+            // ★BJ486② 退役载体死写摘除（原 `blade.critChance = arcCrit`）——1126 命中
+            //  面走 dealContacts→rollVanillaHitCrit,载体值无读者（门读者=类字段默认 0.04）。
             blade.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             // usesOwnerMeleeHitCD（Projectile.cs:10556→Damage_PVE :12596/:14343）：
             // 刃与玩家挥击弧共享同一套近战命中表——同一挥击内弧+刃对同敌不双跳字
@@ -15261,7 +15283,7 @@ export class Game implements GameHooks {
               // NewProjectile 1128（:42940-42941）：伤 ×0.75（:42927 num27）
               const spore = new ChloroSporeCloud(sx, sy, svx, svy,
                 Math.max(1, Math.round(cDmg * 0.75)), life);
-              spore.critChance = arcCrit;
+              // ★BJ486② 退役载体死写摘除（原 `spore.critChance = arcCrit`）——同 blade。
               spore.armorPen = blade.armorPen;
               this.entities.add(spore, 'projectiles');
             };
@@ -15275,13 +15297,13 @@ export class Game implements GameHooks {
                 {
                   spawnCloud: (sx, sy, svx, svy, dmg) => {
                     const cloud = new ChloroSporeCloud(sx, sy, svx, svy, dmg, 0);
-                    cloud.critChance = arcCrit;
+                    // ★BJ486② 退役载体死写摘除（原 `cloud.critChance = arcCrit`）——同 blade。
                     cloud.armorPen = blade.armorPen;
                     this.entities.add(cloud, 'projectiles');
                   },
                   spawnSlam: (sx, sy, dmg) => {
                     const slam = new ChloroBladeSlam(sx, sy, 128, 96, dmg);   // ai[1]=128/ai[2]=96（:42728）
-                    slam.critChance = arcCrit;
+                    // ★BJ486② 退役载体死写摘除（原 `slam.critChance = arcCrit`）——同 blade。
                     slam.armorPen = blade.armorPen;
                     this.entities.add(slam, 'projectiles');
                   },
@@ -15371,7 +15393,8 @@ export class Game implements GameHooks {
             }
             const ff = new FirstFractalSlash(tx857 - ax857, ty857 - ay857, vx857, vy857,
               this.swing.dmg ?? cwMelee.damage, curv);
-            ff.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `ff.critChance = arcCrit`）——掷率在
+            //  FirstFractalSlash 命中面走 rollVanillaHitCrit(857)。
             ff.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(ff, 'projectiles');
           }
@@ -15381,7 +15404,8 @@ export class Game implements GameHooks {
               Math.cos(ang2) * cwMelee.shootSpeed, Math.sin(ang2) * cwMelee.shootSpeed,
               this.swing.dmg ?? cwMelee.damage, cwMelee.knockback,
               Math.max(1, pd?.penetrate ?? 3));
-            tide.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `tide.critChance = arcCrit`）——掷率在
+            //  TideSlash 命中面走 rollVanillaHitCrit(451)。
             tide.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(tide, 'projectiles');
           }
@@ -15391,7 +15415,8 @@ export class Game implements GameHooks {
             const whip = new SolarEruptionWhip(
               Math.cos(ang2) * cwMelee.shootSpeed, Math.sin(ang2) * cwMelee.shootSpeed,
               this.swing.dmg ?? cwMelee.damage);
-            whip.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `whip.critChance = arcCrit`）——掷率在
+            //  SolarEruptionWhip 命中面走 rollVanillaHitCrit(611)。
             whip.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(whip, 'projectiles');
           }
@@ -15429,7 +15454,8 @@ export class Game implements GameHooks {
                 / this.player.attackSpeedMult)),
               // ★SW-FX31：757 链 984 弧 ai[0] = direction×gravDir（Player.cs:49443）
               Math.round((this.swing.dmg ?? 1)), this.player.facing * this.player.gravDir, (ps?.size ?? 1));
-            arc.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `arc.critChance = arcCrit`）——掷率在
+            //  SwingArc(984) 命中面走 rollVanillaHitCrit(984)。
             arc.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
             this.mining = null;
@@ -15465,7 +15491,8 @@ export class Game implements GameHooks {
               dvx9 / dvl9 * spd9, dvy9 / dvl9 * spd9,
               Math.trunc((this.swing.dmg ?? 1) * 1.5),   // :46624 Damage ×1.5
               Math.max(1, pd?.penetrate ?? 2), vy9);
-            star9.critChance = arcCrit;
+            // ★BJ486③ 退役载体死写摘除（原 `star9.critChance = arcCrit`）——掷率在
+            //  StarfuryStar 命中面走 rollVanillaHitCrit(9)。
             star9.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(star9, 'projectiles');
             this.mining = null;   // 与 503 分支同语义（提前 return 防下方通用单发补射）
@@ -17361,7 +17388,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               fire: (fpid, fx, fy, fvx, fvy, fdmg, fkb) => {
                 if (fpid === 706) {
                   const bolt = new PhoenixBolt(fx, fy, fvx, fvy, fdmg, fkb);
-                  bolt.critChance = critTotal;
+                  // ★BJ486② 普查件（原 `bolt.critChance = critTotal`）单位错位修复：
+                  //  critTotal 本域=百分点口径（:17132 rangedCrit 聚合+bow.crit+ammo.crit
+                  //  +ps.crt）,写入分数域载体后被 `random() < critChance` 读 → 恒真
+                  //  =100% 暴击病。掷率改 PhoenixBolt 面 rollVanillaHitCrit(706)（ranged
+                  //  旗,基 4+rangedCrit 聚合+:25712 持械折入=原版命中拍动态口径）。
                   bolt.armorPen = arpenTotal;
                   this.entities.add(bolt, 'projectiles');
                 } else {
@@ -17375,7 +17406,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 }
               },
             });
-          carrier.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `carrier.critChance = critTotal`）——705 通道
+          //  载体自身无伤害面/无读者,fire 回调已直喂 ar.critBonus（Arrow 百分点口径）。
           carrier.armorPen = arpenTotal;
           this.entities.add(carrier, 'projectiles');
           specialShots = 1;
@@ -18548,7 +18580,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           && flOwner.inv.heldItem()?.id === flItemId && !flOwner.dead,
         () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
         (cw as { useAnimation?: number }).useAnimation ?? 15);   // useAnim15（Item.cs:43084）
-      charge.critChance = critTotal;
+      // ★BJ486② 退役载体死写摘除（原 `charge.critChance = critTotal`）——1040 蓄力
+      //  载体无伤害面/无读者（尖刺/波的掷率各自携带,见 emitFlintSpikes/wave 写位）。
       charge.armorPen = flArpen;
       charge.spawnWave = (sx, sy, svx, svy, wdmg, wdir) => {
         void sx; void sy;                                  // 波锚玩家中心（AI_190 :42760 自取）
@@ -19453,7 +19486,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           });
           if (!spawn.noFloor) {
             const wall = new ClingerStaffWallProj(spawn.x, spawn.y, spawn.topY, spawn.hpx, cw.damage, cw.knockback);
-            wall.critChance = critTotal;
+            // ★BJ486② 退役载体死写摘除（原 `wall.critChance = critTotal`）——482 命中
+            //  面走 dealContacts→rollVanillaHitCrit,载体值无读者（BJ482 十三旗标外
+            //  全普查新发现）。
             wall.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(wall, 'projectiles');
           }
@@ -19862,7 +19897,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               },
               chargeRate: () => this.player.getSlowMagicUseRate(),   // GetSlowMagicUseRate :47434-47442（常态 1.0/空蓝 0.4）
             });
-          gf.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `gf.critChance = critTotal`）——1115 命中面
+          //  走 dealContacts→rollVanillaHitCrit,载体值无读者（BJ482 旗标外新发现）。
           gf.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(gf, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(10);   // SetDummyItemTime(10)（:37609）
@@ -19894,7 +19930,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const petal = new PetalstormShot(sx6154, sy6154,
               (ax + evx) * 2 + aimX6154, (ay + evy) * 2 + aimY6154,
               cw.damage, cw.knockback, phase);
-            petal.critChance = critTotal;
+            // ★BJ486② 退役载体死写摘除（原 `petal.critChance = critTotal`）——1116 命中
+            //  面走 dealContacts→rollVanillaHitCrit,载体值无读者。
             petal.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(petal, 'projectiles');
           }
@@ -19935,7 +19972,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const bolt6155 = new StormLightning(1117, sx6155, sy6155,
             Math.max(1, Math.round(cw.damage * 0.8)), cw.knockback);
           bolt6155.seed = (Math.random() * 0x80000000) | 0;   // ai2=rand(MaxFloatInt+1)（:49661）
-          bolt6155.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `bolt6155.critChance = critTotal`）——1117
+          //  命中面 gate=类字段默认 0.04,掷率=rollVanillaHitCrit(1117 magic 旗)。
           bolt6155.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           bolt6155.mouseWorld = () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; };
           this.entities.add(bolt6155, 'projectiles');
@@ -19966,7 +20004,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const drop6173 = (bx: number, by: number) => {
               const b = new StormLightning(1122, bx, by, cw.damage, cw.knockback);
               b.seed = (Math.random() * 0x80000000) | 0;   // ai2（:49678/:49692 每颗独立掷）
-              b.critChance = critTotal;
+              // ★BJ486② 退役载体死写摘除（原 `b.critChance = critTotal`）——1122 命中
+              //  面 gate=类字段默认 0.04,掷率=rollVanillaHitCrit(1122 magic 旗)。
               b.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
               this.entities.add(b, 'projectiles');
             };
@@ -20033,7 +20072,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const bolt731 = new ThunderBoltShot(mzX, mzY,
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback);
-          bolt731.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `bolt731.critChance = critTotal`）——731 命中
+          //  面走 dealContacts→rollVanillaHitCrit,载体值无读者。
           bolt731.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(bolt731, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -20058,12 +20098,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             scalar: () => this.player.getSlowMagicScalar(),          // ★消费点②③（:67212/:67223）
             fire: (fx, fy, fvx, fvy) => {
               const beam = new LaserMachinegunLaser(fx, fy, fvx, fvy, mg.damage, mg.knockback);
-              beam.critChance = critTotal;
+              // ★BJ486② 退役载体死写摘除（原 `beam.critChance = critTotal`）——440 命中
+              //  面走 dealContacts→rollVanillaHitCrit,载体值无读者。
               beam.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
               this.entities.add(beam, 'projectiles');
             },
           });
-          mg.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `mg.critChance = critTotal`）——439 载体本体
+          //  无伤害面（Damage_CanDealDamage :12461 排除表成员）,零读者。
           mg.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(mg, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 动画窗（channel 期 dummy item time 由实体侧续命近似）
@@ -20094,7 +20136,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
           }
           const circle = new PrincessMagicCircle(sx950, sy950, cw.damage, cw.knockback);
-          circle.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `circle.critChance = critTotal`）——950 命中
+          //  面走 dealContacts→rollVanillaHitCrit,载体值无读者。
           circle.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(circle, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -20634,7 +20677,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const len = Math.max(0.4, cw.shootSpeed - (Math.random() * 2 - 1) * 0.5);  // :47755（NextFloatDirection×0.5）
           const stab = new ChloroSaberStab(Math.cos(rot), Math.sin(rot), len, ms,
             cw.damage, cw.knockback);
-          stab.critChance = critTotal;
+          // ★BJ486② 退役载体死写摘除（原 `stab.critChance = critTotal`）——1127 命中
+          //  面走 dealContacts→rollVanillaHitCrit,载体值无读者。
           stab.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
           this.entities.add(stab, 'projectiles');
           this.player.useTime = cw.useTime;
@@ -20745,7 +20789,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  「左上角直传」系对 NewProjectile 中心语义误读）——75×200 大盒曾右下偏
             //  (37.5,100)px,爆箱正面整段错位
             placeAtShootSpawn(slam, sx, sy);
-            slam.critChance = critTotal + 0.25;                 // bonusCritChance=25（:70582）
+            // ★BJ486④ bonusCritChance=25 形参化接线（原 `slam.critChance = critTotal
+            //  + 0.25` 退役——挥击面 critTotal 载体混入 +0.25 建模=武器 item.crit/词条
+            //  crt 泄入弹面掷;现由 MonkSlam 面直传 rollVanillaHitCrit(698, game, 25),
+            //  掷=基 4+meleeCrit 聚合+25,:70581-70582 1:1）。
             slam.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(slam, 'projectiles');
           };
@@ -31969,8 +32016,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  全链对 friendly 受害集（flag2 :12626 支）同达 `if (ownedBySomeone)` crit 段,
         //  TryConsumingTimerCrit 无条件消费。门读 hurt 前状态=快照纪律（演出期窗拒拍
         //  已由上方 dontTakeDamageFromHostiles continue 承载=不达消费位）。
-        const crystalTimerCrit = this.player.tryConsumingTimerCrit(this,
-          en.x, en.y, en.w, en.h);
+        const crystalTimerCrit = (this.player as unknown as
+          { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(this, en.x, en.y, en.w, en.h) ?? false;   // 双?.形=测试桩无方法静默 false（house 习语,MinionProj tryConsumeTimerCritOf 同式）
         en.hurt(this.explodeFriendlyVictimDamage(40, en) * (crystalTimerCrit ? 2 : 1),
           kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
             : ((Math.sign((en.cx ?? px) - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1),
@@ -32094,8 +32142,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  三类掷面位本臂未掷=SW-AF1 explodeAt 同族缺口,登记;蓄能暴击为独立无条件
         //  消费面,先补）。门读 hurt 前状态=快照纪律;Enemy.hurt crit 参仅染色 →
         //  数值预倍 ×2 交调用侧（banner 乘区后=dealContacts :461 同序）。
-        const scarabTimerCrit = this.player.tryConsumingTimerCrit(this,
-          en.x, en.y, en.w, en.h);
+        const scarabTimerCrit = (this.player as unknown as
+          { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(this, en.x, en.y, en.w, en.h) ?? false;   // 双?.形=测试桩无方法静默 false（house 习语）
         en.hurt(eowFifth * (scarabTimerCrit ? 2 : 1), (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, scarabTimerCrit, 0, true);   // kb=8（P.cs:47644）;★BJ467④ crit 色位+×2
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
       }
@@ -32115,8 +32164,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  旗杀账/图鉴/计数器行（敌怪支 :27636 已带 true,同函数两支分裂）。
         // ★BJ467④（2026-10-03）TimerCrit :12928 同面补位（critter 与敌怪同链同 crit 段
         //  :12912-12943——SW-S1「一条链」判词延伸;快照纪律同敌怪支）
-        const critterTimerCrit = this.player.tryConsumingTimerCrit(this,
-          c.x, c.y, c.w, c.h);
+        const critterTimerCrit = (this.player as unknown as
+          { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(this, c.x, c.y, c.w, c.h) ?? false;   // 双?.形=测试桩习语
         c.hurt((this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
           ? Math.trunc(cdmg / 5) : cdmg) * (critterTimerCrit ? 2 : 1),
           (kbDir || (Math.sign(c.cx - exPx) || 1)) * 8, 0, this, pen, critterTimerCrit, 0, true);   // SW-AC1：方向同上=弹体朝向;SW-AF1 2026-09-04（蓝队 F2）：补 ×8——原版 Damage_PVE 全表遍历同式 StrikeNPC(100,8,num40)（PrepareBombToBlow :47644 kb=8f）,与同函数敌怪支(:24976)/城镇支口径统一;SW-RB10d：尾 fromPlayer=true（Projectile.cs:13382 并集）;★BJ467④ crit 色位+×2
@@ -32134,8 +32184,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (inBox(tn.cx, tn.cy, tn.w, tn.h)) {
         // ★BJ467④（2026-10-03）TimerCrit :12928 同面补位——城镇受害靶同达 crit 段;
         //  TownNPC.hurt crit 参=防后 ×2+色一体（NPC.cs:82067）→ 数值勿预倍,传参即翻倍
-        const townTimerCrit = this.player.tryConsumingTimerCrit(this,
-          tn.x, tn.y, tn.w, tn.h);
+        const townTimerCrit = (this.player as unknown as
+          { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(this, tn.x, tn.y, tn.w, tn.h) ?? false;   // 双?.形=测试桩习语
         tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
           (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this, 0, 0, townTimerCrit);   // SW-AC1：方向=弹体朝向（同敌怪支）;★BJ467④ crit 参（防后×2 交接收端）
       }
@@ -33858,7 +33909,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  优先，num164==2 恒散布、num164==1 无敌也散布）；档案：Zenith 首发恒 4956、
    *  后续 GetRandomProfileIndex（重掷 4956），5669 恒 3507；出生速度 =
    *  (目标−MountedCenter)/2（非归一——即轨道半径），ai[0]=rand(−100,101)。 */
-  private fireZenithSword(cycle: number, z: { useTime: number; fired: number; vid: number; dmg: number; crit: number; pen: number }): void {
+  private fireZenithSword(cycle: number, z: { useTime: number; fired: number; vid: number; dmg: number; pen: number }): void {
     const inp = this.input;
     const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     // LimitPointToPlayerReachableArea（Player.cs:49208 pointPosition4=原版调用真锚,
@@ -33895,7 +33946,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const profile = z.vid === 5669 ? 3507 : (cycle === 0 ? 4956 : randomFractalProfile());
     const zsword = new ZenithSword(this.player, tzx, tzy, z.dmg, profile, this.swing?.kb ?? 6.5);
-    zsword.critChance = z.crit;
+    // ★BJ486③ 退役载体死写摘除（原写位 zsword 载体=z.crit 静态冻结）——剑弹 933 命中
+    //  面掷=rollVanillaHitCrit（ZenithSword.projId=933）,冻结载体无读者。
     zsword.armorPen = z.pen;
     this.entities.add(zsword, 'projectiles');
     // 发射型面向鼠标（ItemCheck_Shoot :46578 ChangeDir 语义）

@@ -16,6 +16,7 @@ const ANCHORS = [
   "case 'fadeIn': d.fadeIn = op[1]; break;",   // BJ304 批3 fadeIn 算子
   "if (!prePass(el.pre, e)) {",                // BJ296 批2 pre 短路
   "case 'noLight': d.noLight = op[1]; break;", // BJ327 批4 noLight 算子（引擎光链消费面）
+  "st.idAi3 != null ? (st.idAi3.m[e.ai3 ?? 0] ?? st.dust) : st.dust",   // BJ479 批6 ai[3] 段位选尘（85/629）
 ];
 
 function stealIfStale(): boolean {

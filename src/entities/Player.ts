@@ -1804,16 +1804,32 @@ export class Player extends Entity {
   get equipStats(): PlayerEquipStats {
     // ★记忆化(2026-08-19 367s trace 剖析:207 个调用点大量逐帧访问,每次现建
     //   200+ 字段对象+遍历装备表 = 0.22% 自耗时 + MajorGC 每 5s 的分配 churn 主源)。
-    //   内容哈希键失效(输入清单见 equipStatsKey——★改 computeEquipStats 的输入
-    //   必须同步键 + tests/equip-stats-cache.test.ts 六路锁);返回对象冻结
-    //   (全仓零改写已审计,冻结把将来误写变成显式 TypeError)
+    //   内容哈希键失效(输入清单见 equipStatsStructKey/equipStatsTailKey——★改
+    //   computeEquipStats 的输入必须同步键 + tests/equip-stats-cache.test.ts 六路锁);
+    //   返回对象冻结(全仓零改写已审计,冻结把将来误写变成显式 TypeError)
     //   ★IIIII250(2026-09-14 用户雨天 trace 86.5MB 定谳):computeEquipStats 全程
     //   零样本=缓存恒命中,burn 全在【每访问重键】——字符串键 equipStatsKey
     //   self 381ms(30×getEffective+58 槽×2 遍 vid 解析+~100 段串接)+get
     //   equipStats self 161ms(长串 === 逐字符全等比较)。字符串键退役改双 32 位
     //   FNV 数值键:重建整数化零分配,比较变 number ===(输入清单逐字不变,仍
     //   内容键——对一切写入方天然免疫语义保持)。
-    const key = this.equipStatsKey();
+    //   ★IIIII251(2026-09-25 记忆化收口,x-ray:日曜柱 53 次/106ms 全是重键;
+    //   BakeWorker 场景 equipStatsKey 99.4% 烧满):双 FNV 后余量=【结构段每访问
+    //   全量重扫】(甲 20+染 10+空槽 loadout 扫+背包单遍 50-58 格+虚空袋)。
+    //   按帧级键缓存收口(dropScanCtx/projScanCtx 帧上下文同判例家族),键二分:
+    //   · 结构段(槽位/背包/虚空袋域)=武装窗内首读重建一次,窗内复用——窗=
+    //     fixedUpdate 函数体(head 武装/finally 解除,见 fixedUpdate 注);窗内
+    //     槽位零写面(projScanCtx 同论证)⇒ 与逐次重建逐位同。
+    //   · 标量尾段(恶魔心/软糖虫/世界旗/panic/controlDown/槽解锁+hide 位/
+    //     炽灼三态/夜相/expert·master 门)+buffs 键集合=每访问现算,任何时刻
+    //     (窗内窗外)变化立即失效,与逐次全量重建逐位同(战斗中 buff 增删=高频面)。
+    //   · 窗外读(entities 桶/render/UI/单测直调/MP 远端代理)=解除态=旧的逐访问
+    //     全量重建路径,直写槽位立即生效、行为逐位不变(六路锁/breath 族即此面)。
+    //     drops/projectiles 桶的每物放大面已由各自帧上下文快照收口。
+    const structKey = this._equipStatsArm
+      ? (this._equipStatsStructKeyCache ?? (this._equipStatsStructKeyCache = this.equipStatsStructKey()))
+      : this.equipStatsStructKey();
+    const key = this.combineEquipStatsKeys(structKey, this.equipStatsTailKey());
     if (this._equipStatsCache !== null && key === this._equipStatsKey) return this._equipStatsCache;
     this._equipStatsKey = key;
     const stats = this.computeEquipStats();
@@ -1824,19 +1840,29 @@ export class Player extends Entity {
     return stats;
   }
   private _equipStatsCache: PlayerEquipStats | null = null;
-  private _equipStatsKey = 0;   // ★IIIII250:双 FNV 数值键(原字符串键退役,见 equipStatsKey 注)
+  private _equipStatsKey = 0;   // ★IIIII250:双 FNV 数值键(原字符串键退役,见 getter 注)
+  // ★IIIII251:结构段帧级缓存——武装窗(fixedUpdate 函数体,head 置位/finally 解除)
+  //   内非 null 且只算一次;解除态恒 null(每访问现算=旧路径)
+  private _equipStatsStructKeyCache: number | null = null;
+  private _equipStatsArm = false;   // ★IIIII251:仅 fixedUpdate 壳内置位/finally 复位
   /** ★IIIII224：世界旗直读位（Game 每帧注入,computeEquipStats 巫师帽 238 十周年臂消费。
    *  不入 equipStats 缓存键——键内有独立 T/t 位,旗翻转帧即失效） */
   worldSeedFlags?: { tenthAnniversary?: boolean; remix?: boolean; theConstant?: boolean; everything?: boolean };
 
-  /** equipStats 内容键(输入清单 = computeEquipStats 读到的全部可变状态):
-   *  甲/饰品/社交 20 槽 + 染料 10 槽的【id+prefix】(★prefix 是槽条目字段——
-   *  2026-08-19 review 实证漏过:重铸换词缀不换 id = 键不变 = Warding→Arcane
-   *  数值陈旧,tests/equip-stats 的词缀用例当场红)+ extraAccessory(恶魔心→
-   *  第 6 饰品位)+ usedGummyWorm + panicTime>0(受击加速 300t 窗口,布尔)
-   *  + buffs.active 键集合(getter 对 buffs 的用法全是存在性判定 has()——
-   *  时长到期=键集合变化自然失效)+ 背包 I 档(2026-08-22 信息/机械饰品背包
-   *  生效域 :12494-12500——只记 INV_EFFECTIVE_VIDS 命中格,未命中格不影响输出)。
+  /** equipStats 内容键——★IIIII251 起【结构段/标量尾段】二分（输入清单 =
+   *  computeEquipStats 读到的全部可变状态,与旧单函数逐字同一清单,只是哪些段
+   *  进帧级缓存不同;段 tag 沿用旧编号）:
+   *  结构段(equipStatsStructKey,帧级缓存)=甲/饰品/社交 20 槽+染料 10 槽的
+   *  【id+prefix】(★prefix 是槽条目字段——2026-08-19 review 实证漏过:重铸换词缀
+   *  不换 id = 键不变 = Warding→Arcane 数值陈旧,tests/equip-stats 的词缀用例
+   *  当场红)+空槽 loadout 收藏候选+背包 I 档(2026-08-22 信息/机械饰品背包
+   *  生效域 :12494-12500——只记 INV_EFFECTIVE_VIDS 命中格,未命中格不影响输出)
+   *  +虚空袋 4131 在场位/vault 段。
+   *  标量尾段(equipStatsTailKey,每访问现算)=extraAccessory(恶魔心→第 6 饰品位)
+   *  +usedGummyWorm+世界旗(★IIIII224 巫师帽随从臂输入)+panicTime>0(受击加速
+   *  300t 窗口,布尔)+controlDownHold+槽解锁/hide 位+buffs.active 键集合(getter
+   *  对 buffs 的用法全是存在性判定 has()——时长到期=键集合变化自然失效)+炽灼
+   *  三态+夜相+expert/master 门。
    *  内容键对一切写入方(测试直写槽位/控制台/未来新代码)天然免疫,无事件式
    *  失效可漏。★审计输入时勿只 grep this.*——槽条目对象字段(s.prefix)也是输入!
    *  ★IIIII250(2026-09-14):键值由字符串改【双独立 32 位 FNV 族哈希】——
@@ -1846,9 +1872,9 @@ export class Player extends Entity {
    *  打包 (h1>>>0)*2^21+(h2>>>0 & 2^21-1)
    *  落在 [0,2^53-1] 精确整数域(=== 逐位比较,无浮点误差)。伪相等概率/对
    *  ≈2^-53,实际可达状态空间(换装/词缀/buff 组合远小于 2^53)期望碰撞≈0;
-   *  逐访问语义不变:任一输入位变化→h1/h2 全域雪崩→键必变(概率意义)→
-   *  下一访问立即重算,与旧字符串键的【精确失效】合同一致(六路锁测试为证)。 */
-  private equipStatsKey(): number {
+   *  失效合同:任一输入位变化→h1/h2 全域雪崩→键必变(概率意义)→【标量尾段
+   *  逐访问立即重算;结构段≤1 拍自愈】(帧级缓存语义见 getter 注,六路锁测试为证)。 */
+  private equipStatsStructKey(): number {
     const inv = this.inv;
     let h1 = 0x811c9dc5 | 0;
     let h2 = 0x9dc5811c | 0;
@@ -1888,23 +1914,6 @@ export class Player extends Entity {
         }
       }
     }
-    mix(3); mix(inv.extraAccessory ? 1 : 0);
-    mix(4); mix(this.usedGummyWorm ? 1 : 0);
-    mix(5); mix(this.worldSeedFlags?.tenthAnniversary ? 1 : 0);   // ★IIIII224 巫师帽随从臂输入
-    mix(6); mix(this.panicTime > 0 ? 1 : 0);
-    mix(7); mix(this.controlDownHold ? 1 : 0);   // shimmerImmune（5355 && !controlDownHold :15643）的输入
-    // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
-    // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..9。
-    // ★清偿刀 P：键面改逐槽解锁位(8/9)+解锁格 hide 位——锁槽的 hide 位与
-    // accSlotMax 界均不进输出面（绘制/效果被 :12669-12690 门拦）,不入键;
-    // 解锁位保证「大师无恶魔心」等开合翻转正确失效缓存）
-    mix(8);
-    mix(inv.isItemSlotUnlockedAndUsable(8) ? 1 : 0);
-    mix(inv.isItemSlotUnlockedAndUsable(9) ? 1 : 0);
-    for (let i = ACC_ARMOR_START; i < 10; i++) {
-      if (!inv.isItemSlotUnlockedAndUsable(i)) continue;
-      mix(this.hideVisibleAccessory[i] ? 1 : 0);
-    }
     // 背包生效域段（I 档,信息/机械饰品背包扫描 :12494-12500 的输入）+ 虚空袋
     // 4131 在场位探测（★F3）——★IIIII250 单遍合并：只记 INV_EFFECTIVE_VIDS
     // 命中格（vid+槽位）——未命中格不影响 computeEquipStats 输出，内容键对
@@ -1937,6 +1946,36 @@ export class Player extends Entity {
         }
       }
     }
+    // 打包：两独立 32 位字 → 2^53 精确整数（h1 无符号全宽 ×2^21 + h2 低 21 位）
+    return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 2097151);
+  }
+
+  /** ★IIIII251 标量尾段键（每访问现算,mid-frame 变化立即失效——不入帧级缓存,
+   *  战斗中 buff 增删/panic 窗/昼夜翻转=高频面）。段 tag 沿用旧编号。 */
+  private equipStatsTailKey(): number {
+    let h1 = 0x811c9dc5 | 0;
+    let h2 = 0x9dc5811c | 0;
+    const mix = (v: number): void => {
+      h1 = Math.imul(h1 ^ v, 0x01000193);
+      h2 = Math.imul(h2 ^ v, 0x27220a95);
+    };
+    mix(3); mix(this.inv.extraAccessory ? 1 : 0);
+    mix(4); mix(this.usedGummyWorm ? 1 : 0);
+    mix(5); mix(this.worldSeedFlags?.tenthAnniversary ? 1 : 0);
+    mix(6); mix(this.panicTime > 0 ? 1 : 0);
+    mix(7); mix(this.controlDownHold ? 1 : 0);   // shimmerImmune（5355 && !controlDownHold :15643）的输入
+    // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
+    // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..9。
+    // ★清偿刀 P：键面改逐槽解锁位(8/9)+解锁格 hide 位——锁槽的 hide 位与
+    // accSlotMax 界均不进输出面（绘制/效果被 :12669-12690 门拦）,不入键;
+    // 解锁位保证「大师无恶魔心」等开合翻转正确失效缓存）
+    mix(8);
+    mix(this.inv.isItemSlotUnlockedAndUsable(8) ? 1 : 0);
+    mix(this.inv.isItemSlotUnlockedAndUsable(9) ? 1 : 0);
+    for (let i = ACC_ARMOR_START; i < 10; i++) {
+      if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;
+      mix(this.hideVisibleAccessory[i] ? 1 : 0);
+    }
     // 吸血鬼炽灼三态（computeEquipStats 读 vampireBurningInSunlight/sunScorchCounter：
     // Molten buffImmune[24] 反门 :15883 + 120 档卸翅膀/火箭靴 :28186-28187——翻转帧
     // 必须失效缓存，否则 Molten 玩家点火帧拿着旧免疫把 AddBuff(24) 挡掉）
@@ -1951,7 +1990,24 @@ export class Player extends Entity {
     mix(this.inv.gateMaster ? 1 : 0);
     mix(15);
     for (const bt of this.buffs.active.keys()) mix(bt);
-    // 打包：两独立 32 位字 → 2^53 精确整数（h1 无符号全宽 ×2^21 + h2 低 21 位）
+    return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 2097151);
+  }
+
+  /** ★IIIII251 结构段×标量尾段合成全键：两段各为 2^53 精确整数,按打包的逆运算
+   *  精确拆半(floor//mod 2^21 对 <2^53 无浮点误差)后过一对 tag+同族 FNV 混合,
+   *  防两段值域跨段别名。键值仅供自比较,数值形状与旧单段键无关——失效合同
+   *  「任一输入位变→键必变」由两段各自雪崩+本合成混合保持。 */
+  private combineEquipStatsKeys(structKey: number, tailKey: number): number {
+    let h1 = 0x811c9dc5 | 0;
+    let h2 = 0x9dc5811c | 0;
+    const mix = (v: number): void => {
+      h1 = Math.imul(h1 ^ v, 0x01000193);
+      h2 = Math.imul(h2 ^ v, 0x27220a95);
+    };
+    mix(16);
+    mix(Math.floor(structKey / 2097152)); mix(structKey % 2097152);
+    mix(17);
+    mix(Math.floor(tailKey / 2097152)); mix(tailKey % 2097152);
     return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 2097151);
   }
 
@@ -3901,7 +3957,27 @@ export class Player extends Entity {
     }
   }
 
+  /** ★IIIII251 equipStats 结构段帧级缓存武装窗（语义合同见 getter 注）。
+   *  窗 = fixedUpdate 函数体（head 武装/finally 解除——体内各早退 return 支也被
+   *  finally 覆盖）。窗内不变式（projScanCtx 同论证域,本仓亲测函数体对 armor/dye/
+   *  loadouts/slots/banks 零写入面,仅两处读）：装备槽位在 fixedUpdate 全程零写
+   *  （装备变更只在输入处理 updateUse/存档装载边界,均窗外）⇒ 结构段窗内恒定;
+   *  标量尾段（buffs/panic/夜相/炽灼/gates/解锁·hide）仍逐访问现算=mid-tick 变化
+   *  立即失效。窗外读（entities 桶/render/UI/单测直调）=解除态=逐访问全量重建
+   *  旧路径,直写槽位立即生效（six-way 锁与 breath 族「settle 后直写盔甲立即 42」
+   *  即此面）。MP 远端代理不走 fixedUpdate=恒解除态。 */
   fixedUpdate(dt: number, game: GameHooks) {
+    this._equipStatsArm = true;
+    this._equipStatsStructKeyCache = null;
+    try {
+      this.fixedUpdateBody(dt, game);
+    } finally {
+      this._equipStatsArm = false;
+      this._equipStatsStructKeyCache = null;
+    }
+  }
+
+  fixedUpdateBody(dt: number, game: GameHooks) {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     // ★SW-BJ59 滚轴鞋弹性挡板输入反转（Player.cs:25199-25210 cartFlip 支——挡板
@@ -5124,7 +5200,16 @@ export class Player extends Entity {
     // 巨魔唾液 197 地面侧效（Player.cs:26133-26135：vy==0 且 |vx|>1 → vx 每帧减半
     // ——strongestSlow ×1/3 已由 buffs.strongestMoveSpeedDebuff 承担,此半支独立）
     if (this.buffs.has(BuffType.OgreSpit) && this.vy === 0 && Math.abs(this.vx) > 1) this.vx /= 2;
-    const speedMult = this.buffs.moveSpeedMult * eqM.moveMult * (this.inHoney ? 0.5 : 1)
+    // ★BJ474（2026-10-03）：`(inHoney ? 0.5 : 1)` 自造因子撤除——原版 maxRunSpeed/
+    // accRunSpeed 全链无任何 wet 因子（reset :24096-24099/moveSpeed 乘区 :25694-25695/
+    // 装备链 :26184-26300），蜜减速全在位移积分层 WetCollision movementSpeed（:28380
+    // 蜜 0.25/水 0.5——本仓 liqFactor 段 1:1 承载,见移动相尾）。残留因子曾把蜜中
+    // maxRun 半缩而 accRun 不缩 → spawnFastRunParticles 尘门带 (accRun+maxRun)/2 由
+    // 干地空带 [3,3) 张开为 (2.25,3) → 翼支 dust 186（用户 Red's Wings+绿染翼槽=
+    // 绿叶色）/靴支尘+脚步声在蜜中误触发=「蜂蜜中跑动绿叶尘」全案根因
+    // （真机探针 2026-10-03:用户存档+角色实录 1826/1826 全 inHoney 侧,干地零发）。
+    // 判别测试 tests/bj474-liquid-run-dust-third.test.ts
+    const speedMult = this.buffs.moveSpeedMult * eqM.moveMult
       * (this.vortexStealthActive ? 0.3 : 1)   // 星璇潜行移速 ×0.3（1457 Player.cs:26046-26047
                                               // vortexStealthActive 全程生效,无 stealth 门——
                                               // 旧 `&& stealth>0` 系 0/1 语义反写期产物,满潜行
@@ -5441,8 +5526,9 @@ export class Player extends Entity {
       }
       // D3（1457 :26206 runAcceleration *= moveSpeed）：步行支加速度也吃 moveSpeed
       // 乘区——构成 = moveSpeedMult×装备 moveMult×strongestSlow（含盾举,上方合成）。
-      // ★勿整乘 speedMult：inHoney 0.5/星璇潜行 0.3 是场景因子,原版不走 moveSpeed 链
-      // （蜜减速在位移积分层 WetCollision;潜行只乘 accRun/maxRunSpeed :26046-26047）。
+      // ★勿整乘 speedMult：星璇潜行 0.3 是场景因子,原版不走 moveSpeed 链
+      // （蜜减速在位移积分层 WetCollision;潜行只乘 accRun/maxRunSpeed :26046-26047。
+      //  ★BJ474：inHoney 0.5 已自 speedMult 撤除,见其定义处注——原版无 wet 因子）。
       // 坐骑支不乘（:26329-26331 mount.Acceleration 覆写在乘区之后,不吃减速）
       // ★滚轴鞋 additive 支（:26838-26840 同句 runAcceleration += mount.Acceleration
       //  ——加法作用于装备/减速链合成的基底之上；赋值支保持原覆写语义）

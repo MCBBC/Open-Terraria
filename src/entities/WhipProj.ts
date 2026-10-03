@@ -621,7 +621,12 @@ export class WhipProj extends Entity {
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, townDmg,
         Math.sign(p.x - this.x) * 2, 'playerProj', this.projId,
         undefined, undefined,
-        (n) => this.hitSet.has(n.id),   // 局部表门（:12596 flag2 usesLocal 臂）
+        (n) => this.hitSet.has(n.id)   // 局部表门（:12596 flag2 usesLocal 臂）
+          // ★BJ475② :12636 免疫窗门前置（Damage_PVE_Inner `immune[owner]==0` 门——
+          //  巫毒窄门(:12618-25)与窗门(:12636)在 AABB(:12668)前,两门合入 skip 谓词
+          //  =整靶跳过同相;窗拒拍不达 settle/TimerCrit/tag/hurt（skip 在窄门前读窗
+          //  态=纯谓词零观察差）。原版 :12636 对城镇靶同链（单 Main.npc 遍历）。
+          || (((n as unknown as { iframes?: number }).iframes ?? 0) > 0),
         (n) => {
           const tn = n as unknown as { id: number; iframes: number; vanillaId?: number;
             x: number; y: number; w: number; h: number; vx?: number; vy?: number };
@@ -736,8 +741,22 @@ export class WhipProj extends Entity {
         },
         // ★Y2 settle：flat 穿甲透传（:13686-87——鞭 num6 = 玩家通用 armorPen,
         //  同敌怪环 :778;banner 在通道内施加,勿在此预套）
-        (n) => ({ flatPen: owner ? ((owner as unknown as { equipStats?: { armorPen?: number } })
-          .equipStats?.armorPen ?? 0) : 0 }));
+        // ★BJ475② 城镇臂 TimerCrit :12928 消费补位（BJ467① 敌臂同源）——原版
+        //  Damage_PVE_Inner 单函数单遍历,crit 段(:12915-12943)无 friendly 门=
+        //  巫毒窄门放行的城镇受害靶同链同达（BJ453 定谳复核位:窄门(:12618-25)→
+        //  窗门(:12636)→AABB(:12668)→crit 段）;鞭 DefaultToWhip 无类旗=三类掷
+        //  不达,TimerCrit 无条件消费为城镇面唯一 crit 源。位次=settle 回调
+        //  （projTargets :134 巫毒窄门后/hurt 前=:12947 ModifyHit 原位）;窗前置门
+        //  已上位 skip 谓词（窗拒拍整跳零消费=:12636 同相）。TownNPC.hurt crit 参
+        //  =防后双精度 ×2+色一体（NPC.cs:82067 原序,BJ445② 城镇约定）→ 传
+        //  crit=true 勿预倍（与敌怪环「调用侧预倍」约定异形,projTargets :96 注）。
+        (n) => {
+          const tn = n as unknown as { x: number; y: number; w: number; h: number };
+          const timerCritTown = owner?.tryConsumingTimerCrit?.(game, tn.x, tn.y, tn.w, tn.h) ?? false;
+          const flatPen = owner ? ((owner as unknown as { equipStats?: { armorPen?: number } })
+            .equipStats?.armorPen ?? 0) : 0;
+          return timerCritTown ? { flatPen, crit: true } : { flatPen };
+        });
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
         //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）

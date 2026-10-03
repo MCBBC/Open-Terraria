@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "asc": "Version 0.28.20",
+  "modules": {
+    "sm2": {
+      "srcHash": "8a3543569f23b39b77d12437ee27386f4c9d17ba2e9a0bffebf1f1f2d644e1a0",
+      "abi": 1,
+      "src": "src/wasm/sm2.as.ts",
+      "builtAt": "2026-10-03T11:01:36.512Z",
+      "wasmSha256": "30577c1bddf02b9131f7d4fc8c7a996e21fdc27d1808349676654571fa63146f",
+      "wasmBytes": 30866
+    },
+    "light": {
+      "srcHash": "465e3a173d8e3c8a96cd18cd8759500694a196ac54dec0a8154edeb060cf8cee",
+      "abi": 1,
+      "src": "src/wasm/light.as.ts",
+      "builtAt": "2026-10-03T11:01:36.923Z",
+      "wasmSha256": "4ddec217aa225ba721dab757e9f9e1bc8c754adaf8d54cf8145d28714725f4da",
+      "wasmBytes": 2626
+    },
+    "waves": {
+      "srcHash": "4f93b95b0dfab053785f9177423eae0d47c016e04e690a90fa7066804c744c7a",
+      "abi": 1,
+      "src": "src/wasm/waves.as.ts",
+      "builtAt": "2026-10-03T12:51:39.357Z",
+      "wasmSha256": "3cd23ddc49121d5726d70cd1e6819b5ae0db989b440e145c95ff40b41a3a7e6c",
+      "wasmBytes": 3430
+    }
+  }
+}

@@ -35,7 +35,9 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { wetCollision } from './npcLiquid';
 import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
-import { ITEM_BY_KEY } from '../data/items';
+import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
+import { itemCombat } from '../data/vanillaItemCombat';
+import { prefixStat } from '../data/vanillaPrefixes';
 import { projSprite, projFrameImg } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
   type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
@@ -316,6 +318,47 @@ function ownerMeleeWeaponLOS(
   return (e) => playerCanHitEntity(st, game.player as never, e);
 }
 
+/** ★BJ482②（2026-10-03）原版受理 crit 掷 owner 装配查询（Projectile.cs:12915-12927）：
+ *  melee/ranged/magic 类旗 → `Main.rand.Next(1,101) <= owner.xxCrit + bonusCritChance`
+ *  三连掷（本面单类单旗,单掷等价）;无类旗（908 钛金碎片/226 花瓣/221/227 叶弹族/
+ *  567-568 孢子云/1091 世界雷——1091 且 trap=true → OwnedBySomeone=false :580-589
+ *  整 crit 块跳过）→ 零掷。基 4=原版字段初值（Player.cs:2413-2417/:18458-18460）;
+ *  owner 聚合=Player.critChance(kind)（装备/buff 面,不含基 4,基 4 调用侧补=
+ *  Game.ts critTotal 同口径）。bonusCritChance=第三形参（:12912-12914 num13——
+ *  ★BJ486④:698 武僧蓄爆 +25 通道已接线;2269 左轮/:11142 父继承=登记不接线,
+ *  详见函数体内注）。持械武器 item.crit+crt 经 :25712-25714 逐帧链入三系 crit=弹面
+ *  掷【含】之（命中拍动态折入,见体内 BJ486③ 注;静态冻结载体 critTotal/arcCrit 退役,
+ *  死写已于 BJ486② 全普查摘除——13 旗标+4 新发现）。桩面防御（player.critChance 缺
+ *  → 聚合 0,bj475 夹具同相=BJ175 ?? 习语）。 */
+export function rollVanillaHitCrit(projId: number, game: GameHooks, bonusCritChance = 0): boolean {
+  const pd = projectileData(projId);
+  const kind = pd?.melee ? 'melee' as const : pd?.ranged ? 'ranged' as const : pd?.magic ? 'magic' as const : null;
+  if (!kind) return false;
+  const player = game.player as unknown as
+    { critChance?: (k: 'melee' | 'ranged' | 'magic') => number;
+      inv?: { heldItem?: () => { id: number; prefix?: number } | null | undefined } } | null;
+  const agg = player?.critChance?.(kind) ?? 0;
+  // ★BJ486③ 定谳（2026-10-03,原版亲读翻转 BJ482 前提）：Player.cs:25712-25714 每帧
+  //  `meleeCrit/magicCrit/rangedCrit += inventory[selectedItem].crit`（三系无条件,
+  //  词缀 crt 已在重铸期折进 item.crit——Item.cs:585）→ GetWeaponCrit（:54009-54023
+  //  纯读类字段）与弹面掷 :12915-12927 同源 ⇒ 弹面掷【含】持械武器 item.crit+crt
+  //  （命中拍现值）。BJ482「弹面掷不含武器两档」前提就此证伪——但 spawn 位载体
+  //  写位仍是死写（读面不读该值,本函数动态折入=原版逐帧链同相,静态冻结退役）。
+  //  折入式=ownerMeleeCritBits（Game.ts GA4 ε#3）同款：itemCombat(vid).crit+词缀 crt。
+  const held = player?.inv?.heldItem?.() ?? null;
+  const heldBonus = held
+    ? (itemCombat(ITEM_DEFS[held.id]?.vid ?? -1)?.crit ?? 0)
+      + (held.prefix ? prefixStat(held.prefix).crt : 0)
+    : 0;
+  // ★BJ486④（2026-10-03）num13 形参化（:12912-12914——bonusCritChance>0 才入掷）：
+  //  698 武僧蓄爆通道已接线（MonkSlam 面传 25,Game.ts:20748 旧 +0.25 载体建模退役）;
+  //  2269 左轮 :11134（生产端 revolverCritChanceBonus 蓄转 ramp/decay/clamp Player.cs:
+  //  43009-43029 未建模=登记不接线）与 :11142 父弹继承（原版无可观测消费面——现役
+  //  带 bonus 生产者仅 698/2269 弹,均无子弹;仓内无 bonusCritChance 字段）=登记不接线。
+  const num13 = bonusCritChance > 0 ? bonusCritChance : 0;
+  return Math.random() < 0.04 + (agg + heldBonus + num13) / 100;
+}
+
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。
  *  cooldown<0 = 每敌一次（localNPCHitCooldown −1）；返回是否命中过。
  *  gate：ownerHitCheck 门（CanHitWithMeleeWeapon :12415 距离段——基准=弹体自身
@@ -444,8 +487,23 @@ export function dealContacts(
       continue;
     }
     // ★F11：蓄能暴击强制面（TryConsumingTimerCrit，Damage_PVE :12928 同位）
-    const crit = Math.random() < self.critChance
-      || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+    // ★BJ475③ 掷中照消费（原版序 :12915-12928 亲读）：三类掷在前 →
+    //  TryConsumingTimerCrit 【无条件】消费——前掷已 crit 照消费（charge>0 置
+    //  −15 :28568-71）;旧 `roll || consume` 短路=掷中拍【跳过】消费,
+    //  charge 残留满蓄（原版前掷照吃,蓄能节拍=独立于掷流）。
+    //  武僧掷 :12929-43 形位=本面弹族（1126-1129）非 688 族恒假,不设（proj1457
+    //  不引 MinionProj 单源,零 RNG 零依赖=同值形）。
+    // ★BJ482②（2026-10-03）掷率装配面落刀：rollCrit 由 `Math.random() <
+    //  self.critChance`（类字段固定 4% 档,BJ467② 遗留"掷率面不在本刀"）改
+    //  rollVanillaHitCrit=owner 装配查询（:12915-12927 三类掷,率=0.04+装备/buff
+    //  聚合/100,动态装备面;无类旗 908/226/221/227 归零;1126-1129=melee 旗、
+    //  482/704/731/439/440/950/1115/1116=magic 旗）。self.critChance≤0 关断语义
+    //  保留（旧掷式对 ≤0 本就恒假=确定性关断钉,r1/s2/bj420 测试锚同相）——
+    //  `>0` 门=既有语义显式化,非新发明;spawn 位 critTotal/arcCrit 组合载体
+    //  退为死写（登记 BJ482② 报告,勿再消费）。
+    const rollCrit = self.critChance > 0 && rollVanillaHitCrit(self.projId, game);
+    const timerCritF11 = ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+    const crit = rollCrit || timerCritF11;
     // ★F1（2026-08-31 蓝队三批）：Damage_PVE :13388 攻端旗乘区 + ★F9 DamageVar 单源
     //   （原版序：DamageVar(:12970;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12959) → …→ banner(:13388) → armorPen 弹侧 :13685
     //   `dmg += targetNPC.checkArmorPenetration(num6, armorPenetrationPercent)`（SW-AJ1 2026-09-05 校准,旧 :13679 系 type22 kb 向支）在
@@ -1746,7 +1804,25 @@ export class StormLightning extends Entity {
       const gateSnap = snapshotVanillaGate(e);
       if (vanillaGateRejected(gateSnap)) continue;                    // :12635 门拒全静默（D3 面）
       if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;  // 表行随受理写（D2 面）
-      const crit = Math.random() < this.critChance;
+      // ★BJ482②（2026-10-03）掷率装配面（:12915-12927 三类掷 owner 装配,与
+      //  dealContacts 同源 rollVanillaHitCrit）：1117/1122=magic 旗 → 率=0.04+
+      //  magicCrit 聚合/100;1091 无类旗+trap=true（SetDefaults :10178-10186 →
+      //  OwnedBySomeone=false :580-589 整 crit 块跳过）→ 零掷——旧固定 0.04 掷=
+      //  无中生有（4% 概率世界雷 dmg ×2=伤害面膨胀）。critChance≤0 关断钉保留
+      //  （旧掷式对 ≤0 恒假,同 dealContacts 语义显式化）。
+      let crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      // ★BJ486①（2026-10-03）TimerCrit :12928 受理位消费补位（BJ467②/475③ 自建直调面
+      //  同族）：1117/1122 ownedBySomeone=true → 三类掷后【无条件】TryConsumingTimerCrit
+      //  (targetNPC.Hitbox, ref crit)——6170 蓄能暴击满蓄/负窗照消费并强制 crit（掷率
+      //  不达也消费,「零掷≠跳消费」BJ482-2e 同谳）;1091 trap=true → OwnedBySomeone=false
+      //  （:580-589）整 crit 块（含本消费）不可达=正确缺位保持（亲读钉死,勿补）。
+      //  双 ?. 桩面习语同 dealContacts :483。位次=掷后/尘埃前（:12928 原序）。
+      if (this.projId !== 1091 &&
+        ((game.player as unknown as
+          { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) {
+        crit = true;
+      }
       let dmg = crit ? this.damage * 2 : this.damage;
       // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633,
       // 1457 :14632 同式）：×Remap(Main.Difficulty 浮点轴, Classic1, Master3, 1, 3)——
