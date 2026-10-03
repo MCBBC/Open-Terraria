@@ -89,6 +89,11 @@ describe('SugarRush(192)：挖掘冷却链 pickSpeed -= 0.2', () => {
     g.lastMineHitTick = -999;
     g.mining = null;
     g.hardnessCache = 0;
+    // ★BJ468：BJ433 Track 块（tryMine :22017-22028）需 camera/input/intentionGuesser——
+    //  BJ444 只补了 ghost-tile-mine-gate 夹具,本夹具同病漏补（screenToWorld TypeError）
+    g.camera = { screenToWorld: () => [0, 0] };
+    g.input = { mouseX: 0, mouseY: 0 };
+    g.intentionGuesser = { track: () => {}, allowTracking: () => {} };
     g.player = {
       buffs: { has, wellFedTier: 0, hungerPickSpeed: 0 },
       usedAmbrosia: false,

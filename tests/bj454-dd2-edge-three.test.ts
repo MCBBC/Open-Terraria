@@ -5,6 +5,10 @@
 //     GetHurtByOtherNPCs(AllNPCs)（:93555）。本仓 npcVsNpcContactUpdate 旧只有
 //     friendly 臂（注释自称 friendly||T-set=实现与注不符）——补 T-SET 表+
 //     门接线。松露虫被敌怪追杀=主打场景（索敌不读本表,接触伤害通道消费）。
+//     ★BJ468 翻案：vanilla 374 SetDefaults :13803 静态置位 dontTakeDamageFromHostiles
+//     →GetHurtByOtherNPCs 头门（:93557）先拒=通道开而净免疫（下方行为锁反向已改,
+//     摘旗对照保活 BJ454 通道判别;375/686 蜂通道同族翻案见
+//     tests/bj468-hostile-immunity-setdefaults.test.ts）。
 //   ②DD2BetsyFireball 水晶面：原版 686 弹（SetDefaults P.cs:7307-7316
 //     hostile/penetrate -1）经 Damage_PVE_Inner（P.cs:12626-12632）flag2 门
 //     （targetNPC.friendly ∧ !dontTakeDamageFromHostiles）伤 friendly 水晶 548;
@@ -64,7 +68,7 @@ describe('BJ454①：T-set 受害门（NPCID.cs:4783 表 + NPC.cs:91592 受害 t
     expect(Enemy.TAKES_DAMAGE_FROM_HOSTILES.has(37)).toBe(false);
   });
 
-  it('松露虫 374（T-set 非 friendly）被僵尸 3 接触互伤（NPC.cs:91592 门打开）', () => {
+  it('★BJ468 翻案：松露虫 374（T-set 非 friendly）敌怪接触【免疫】——SetDefaults :13803 静态旗头门先拒;摘旗对照=通道仍开', () => {
     const list: Enemy[] = [];
     const game = makeGame(list);
     const worm = Enemy.fromVanilla(374, 100 * TILE, 100 * TILE)!;
@@ -75,8 +79,12 @@ describe('BJ454①：T-set 受害门（NPCID.cs:4783 表 + NPC.cs:91592 受害 t
     expect(zombie.def.damage).toBeGreaterThan(0);     // 攻击者门 :93621
     list.push(zombie);
     worm.fixedUpdate(1 / 60, game);                   // 受害侧 tick → npcVsNpcContactUpdate
+    expect(worm.hp).toBeGreaterThan(0);               // ★BJ468 翻案：头门（:93557）先拒=净免疫
+    expect(worm.dead).toBe(false);
+    // 摘旗对照：T-set 通道仍开（BJ454 通道建模判别保活）——头门是唯一拒点
+    worm.dontTakeDamageFromHostiles = false;
+    worm.fixedUpdate(1 / 60, game);
     expect(worm.hp).toBeLessThanOrEqual(0);           // lifeMax 5 吃 14 伤=死
-    expect(worm.dead).toBe(true);
     // 免疫窗（BeHurtByOtherNPC :93663 immune[255]=30）
     expect(worm.npcImmune255).toBe(30);
   });

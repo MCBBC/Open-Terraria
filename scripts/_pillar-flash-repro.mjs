@@ -7,9 +7,13 @@
 //  · 场景修正:柱区锚 tile~180(surface-120),四柱+仆从 spawn 在界内。
 //  · 逐 rAF 状态行+fixedUpdate 步计数包装+缩略图逐帧像素差(帧尾一致态)。
 //  运行:SW_ORIGIN=http://localhost:5205 node tools/run-diag.mjs --timeout=280000 scripts/_pillar-flash-repro.mjs
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
+
+const PLR_PATH = process.env.SW_PLR || '/Users/vinlic/Downloads/Vinlic (1).plr';
+let plrB64 = '';
+try { plrB64 = readFileSync(PLR_PATH).toString('base64'); } catch { console.log('plr not found, fallback zenith-only'); }
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5205';
 const FLAGS = process.env.SW_FLAGS || '';
@@ -17,7 +21,7 @@ const RUN_MS = Number(process.env.SW_RUN_MS || 100000);
 const OUT = 'shots/pillarflash/';
 mkdirSync(OUT, { recursive: true });
 
-const browser = await launchBrowser({});
+const browser = await launchBrowser({ headed: true, extraArgs: ['--disable-gpu-vsync', '--disable-frame-rate-limit'] });
 console.log('browser up');
 const page = await openPage(browser, {});
 const errs = [];
@@ -86,9 +90,10 @@ cdp.on('Page.screencastFrame', (ev) => { void onFrame(ev); });
 await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1, maxWidth: W, maxHeight: 400 });
 
 // ---- 场景:用户原案复刻(seed 118606602 medium,groundLevel 493,柱位/飞行带 1:1) ----
-const setup = await page.evaluate(() => {
+const setup = await page.evaluate(async (plrB64) => {
   const g = window.__swGame;
   const out = {};
+  window.__plrB64 = plrB64;
   g.lighting.clock.timeOfDay = 0.5355555555554474;   // 用户案钟面(白昼 12:51)
   const surf = g.world.store.surfaceY ?? 493;
   g.player.debugGod = true;
@@ -106,6 +111,21 @@ const setup = await page.evaluate(() => {
   const iid = window.__swFlow.itemByVid(4956);
   g.player.inv.slots[0] = { id: iid, stack: 1 };
   g.player.inv.selected = 0;
+  // 载入用户 .plr(翅膀/配饰/盔甲/染料全套——飞行能力来自角色本体)
+  if (window.__plrB64) {
+    try {
+      const { parsePlr } = await import('/src/save/PlrImport.ts').catch(() => import('/src/save/PlrImport'));
+      const raw = Uint8Array.from(atob(window.__plrB64), (c) => c.charCodeAt(0));
+      const parsed = parsePlr(raw);
+      const ps = parsed.playerState;
+      if (ps.inventory) g.player.inv.slots = ps.inventory.map((s2) => s2 ? { id: s2.id, stack: s2.stack ?? 1, fav: false } : null);
+      if (ps.armor) g.player.inv.armor = ps.armor.map((s2) => s2 ? { id: s2.id, stack: s2.stack ?? 1, fav: false } : null);
+      if (ps.dye) g.player.inv.dye = ps.dye.map((s2) => s2 ? { id: s2.id, stack: s2.stack ?? 1, fav: false } : null);
+      if (typeof ps.selected === 'number' && ps.selected >= 0) g.player.inv.selected = Math.min(ps.selected, 9);
+      if (ps.hp) { g.player.statLife = ps.hp; g.player.statLifeMax2 = Math.max(g.player.statLifeMax2, ps.hp); }
+      out.plr = { name: parsed.appearance?.name ?? '?', ver: parsed.version, slots: ps.inventory?.length ?? 0, armor: ps.armor?.length ?? 0 };
+    } catch (e) { out.plr = 'ERR:' + String(e).slice(0, 90); }
+  }
   // fixedUpdate 步计数包装(逐帧步数)
   window.__fuCount = 0; window.__rCount = 0;
   const fu0 = g.fixedUpdate.bind(g);
@@ -116,9 +136,24 @@ const setup = await page.evaluate(() => {
   out.enemies = [...(g.entities?.enemies ?? [])].length;
   out.towers = (() => { try { const le = g.world.lunarEvent; return le ? Object.entries(le.shield ?? {}).map(([k, v]) => k + ':' + v).join(',') : 'none'; } catch { return 'ERR'; } })();
   return out;
-});
+}, plrB64);
 console.log('setup:', JSON.stringify(setup));
 await new Promise((r) => setTimeout(r, 800));
+// 翅膀验证:统计 wing 槽
+const wingCheck = await page.evaluate(() => {
+  const g = window.__swGame;
+  const arm = g.player.inv.armor ?? [];
+  const wingSlots = [];
+  for (let i = 0; i < arm.length; i++) {
+    const s = arm[i];
+    if (!s) continue;
+    const def = g.items?.def?.(s.id) ?? null;
+    if (def?.wingSlot > 0 || def?.wing > 0) wingSlots.push(i + ':' + (def.name || s.id));
+  }
+  const sel = g.player.inv.slots?.[g.player.inv.selected];
+  return { wingSlots, sel: sel?.id, armorN: arm.filter(Boolean).length };
+});
+console.log('wingCheck:', JSON.stringify(wingCheck));
 
 // ---- 逐 rAF 状态行 ----
 await page.evaluate(() => {

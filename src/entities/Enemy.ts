@@ -1523,6 +1523,10 @@ export class Enemy extends Entity {
     //  empressOfLightAI;SetDefaults 行在其前=原版 spawn 同拍语义）。657 史莱姆皇后
     //  SetDefaults :17342-17358【无】此行=无手补项,其无敌面纯 AI 重算
     if (id === 636) e.dontTakeDamage = true;
+    // ★BJ468：374/375/686 SetDefaults 静态置位 dontTakeDamageFromHostiles=true——
+    //  净效应/消费面见字段处静态表注;赋值形=原版「序章 :8529 复位+:13803/:13822/:17670
+    //  置位」净语义（同参线在 tryTransformTo）
+    e.dontTakeDamageFromHostiles = Enemy.DONT_TAKE_DAMAGE_FROM_HOSTILES_SETDEFAULTS.has(id);
     // SetDefaults immortal（NPC.cs:14630 假人 488/:17715 雕像宝箱怪 690——690 的
     // 显隐态由其 AI :43873 翻 false）。DoT 直扣路径以本位守卫（GetHurtByDebuff
     // :92995 同款）——DoT/血条曾绕过 488 守卫（2026-09-02 用户实报闪烁血条）
@@ -1575,6 +1579,7 @@ export class Enemy extends Entity {
   spinPhase = 0;         // 自旋段:0 加速 / 1 减速
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
+  mimicFrameT = 0;       // ★BJ464 AI_025 宝箱怪族帧累加器（FindFrame case 85 :74247-74252：腾空++/落地--，钳 0..12；伪装态清零。mimicAI 维护，vanillaFrameIdx 消费）
   justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
   /** StrikeNPC 返回值 num41 等价（2026-08-31 批⑥：本次命中防后实扣,hurt() 实扣路径写；
    *  弹幕调用方读走做 on-hit 门——Projectile.ghostHurt 的 dmg<=1 早退） */
@@ -1943,8 +1948,18 @@ export class Enemy extends Entity {
    *  同款「字段缺省+置位方每拍重写」惯例（与 dontTakeDamage 先例同构）。★BJ450
    *  （SetDefaults 静态置位型 374 松露虫/:375/:686 本仓无消费通道——375/686
    *  原版即不在该表=旗为摆置——登记不扩）。★BJ454 清偿 374 面：T-set 受害门
-   *  已建模（TAKES_DAMAGE_FROM_HOSTILES 表+互殴通道 :91592 门） */
+   *  已建模（TAKES_DAMAGE_FROM_HOSTILES 表+互殴通道 :91592 门）。★BJ468 翻案：
+   *  「摆置」判语只查 T-set 通道漏蜂通道（:91601 CanBeHurtByBees :4789
+   *  CreateBoolSet(true,210,211,222)=除 210/211/222 全真）——375/686 蜂通道开而
+   *  头门（:93557）闭=拒蜂蜇、374 双通道开=敌怪接触+蜂蜇全免疫,静态置位已补
+   *  （下方表,fromVanilla/tryTransformTo 双路同参;BJ454「374 被僵尸互伤」行为锁
+   *  同批翻案,见 tests/bj454-dd2-edge-three.test.ts 翻案腿） */
   dontTakeDamageFromHostiles = false;
+  /** ★BJ468：SetDefaults 静态置位型 dontTakeDamageFromHostiles（1457 NPC.cs:13803 374
+   *  藏匿松露虫/:13822 375 遁地松露虫/:17670 686 笨笨气球史莱姆;1456 同 :13707/
+   *  :13726/:17573;序章 :8529 复位,无每帧复位）。玩家/弹幕 Damage_PVE 通道不设此门
+   *  （照常可捕可杀）;判别测试 tests/bj468-hostile-immunity-setdefaults.test.ts */
+  private static readonly DONT_TAKE_DAMAGE_FROM_HOSTILES_SETDEFAULTS = new Set([374, 375, 686]);
   /** 击退抗性运行时覆写（游泳族专用）：461 wet→0 / dry→0.4（难度曲线，
    *  NPC.cs:56366/:56412 GetKnockbackMultiplier_ScaledByDifficulty）；null=用 def 值 */
   kbResistOverride: number | null = null;
@@ -6663,6 +6678,11 @@ export class Enemy extends Entity {
     //    谓词唯一读点），上一行换 id 即隐式复位（vanilla 31 处写点全在 SetDefaults
     //    主体块内=按型常量，表求值与字段复位同构；tests/transform-setdefaults-tail 有行为锁）。
     this.initSetDefaultsAlphaColor(id, v);
+    // ★BJ468：dontTakeDamageFromHostiles 复位+per-type 静态置位（Transform 全链重跑
+    //  SetDefaults 序章 :8529 复位+:13803/:13822/:17670 置位同构）——此前实例旗残留:
+    //  686 死亡 Transform(680)（Game.onEnemyKilled 686 支）会把旗带给骑手;374→375
+    //  变身（遁地松露虫主生产路）由本行承接置位
+    this.dontTakeDamageFromHostiles = Enemy.DONT_TAKE_DAMAGE_FROM_HOSTILES_SETDEFAULTS.has(id);
     //  - TargetClosest（:81926，SetDefaults ClearTarget 后重建）：变身即重索敌。本仓
     //    架构 targetClosest 每 AI tick 于 fixedUpdate 头刷新（:2069）且只选目标不抢
     //    朝向（facing 由各 AI 族 seekDirX 消费——鱼链 retarget 补的是朝向半边）；此处
@@ -7166,6 +7186,24 @@ export class Enemy extends Entity {
    *  （MoonEvent），索敌门按 world.moonEvent.kind===1（霜月）判定 */
   private mimicAI(game: GameHooks, player: Player | null) {
     if (this.ai0 < 0) this.ai0 = 0;
+    // ★BJ464 变体段一次性锁定（AI_025 NPC.cs:25684-25697）：ai[3]==0 时 position.X+=8f
+    //  并按生成深度锁段——地表=1（帧行 0-5 金箱）/ >worldSurface=2（+6 暗影箱）/
+    //  >UnderworldLayer=3（+12 黑曜石箱）。UnderworldLayer=maxTilesY-200（Main.cs:2863，
+    //  非 GenVars.lavaLine——SceneMetrics.ts:302 判例）。锁后 ai[3] 永不回 0=生成时锁定。
+    if (this.ai3 === 0) {
+      this.x += 8;                          // position.X += 8f（:25686，一次性）
+      const ty = this.y / TILE;             // position.Y/16f（顶左格浮点，:25687-25694 同式）
+      if (ty > game.world.h - 200) this.ai3 = 3;
+      else if (ty > game.world.groundLevel) this.ai3 = 2;
+      else this.ai3 = 1;
+    }
+    if (this.vanillaId === 341 || this.vanillaId === 629) this.ai3 = 1;   // :25699-25701 恒段 1
+    // ★BJ464 FindFrame case 85 frameCounter（:74247-74252）：腾空++/落地--钳 0..12、
+    //  伪装态清零（:74240-74243）。置于 AI 头=读上一拍终速度，与原版 FindFrame
+    //  （Update 尾）同值同相；mimicAI 三处 early-return 均已覆盖。渲染面 vanillaFrameIdx 消费。
+    if (this.ai0 === 0) this.mimicFrameT = 0;
+    else if (this.vy === 0) this.mimicFrameT = Math.max(0, this.mimicFrameT - 1);
+    else this.mimicFrameT = Math.min(12, this.mimicFrameT + 1);
     const flag36 = this.vanillaId === 341 && game.world.moonEvent.kind === 1;
     if (this.ai0 === 0) {
       // 同 AI_017：唤醒判定用重力前速度（站立态 vy==0 不误触发）

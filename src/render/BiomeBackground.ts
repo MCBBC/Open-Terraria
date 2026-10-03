@@ -441,7 +441,6 @@ export class BiomeBackground {
   /** 拍照重渲黑闪抑制（Renderer._capturePass 每帧同步；原版 DrawCapture 无切换黑闪层。
    *  常态 false；置 true 时 drawSurface 前景循环跳过 overlay 绘制,状态机照跑） */
   flashSuppressed = false;
-  private lastFlashStyle = -1;   // −1=未登记（首帧只登记不闪）
   /** 森林风格 → 该段 WorldGen 生成背景 ID（GetCurrentBackgroundOfStyle :8062
    *  的 treeBG1..4 = treeStyle[0..3]；等值 ⇒ 视觉相同 ⇒ 过渡可瞬切） */
   private forestBgId(world: World, style: number): number {
@@ -742,8 +741,8 @@ export class BiomeBackground {
     this.bgStyle = style;
     this.bgDelay = 0;
     this.instantBG = 0;
-    this.lastFlashStyle = style;   // ★快照不算"实变"——否则 flash[area]=1 全屏
-                                   //   黑闪遮罩盖满拍照分块 = 全黑出图(2026-08-25)
+    // （lastFlashStyle 已随 2026-10-03 触发链摘除——快照/槽切换本就不点火,
+    //   原版点火源=变体旗实变,见 update() 注与 setBiomeVariant）
     this.alphaFront.fill(0);
     this.alphaFar.fill(0);
     this.alphaFront[style] = 1;
@@ -858,17 +857,34 @@ export class BiomeBackground {
     const tableLen = this.variantTableLen(kind);
     let v = value;
     if (tableLen >= 0 && tableLen > 0) v = ((v % tableLen) + tableLen) % tableLen;
+    // ★原版点火链（2026-10-03 云山瞬闪案定谳刀）：变体旗【实变】才 flash[area]=1
+    //   （BackgroundChangeFlashInfo.UpdateVariation :25-33 `if (num != newVariationValue)
+    //   ValueChanged(areaId)`）。kind→area 同 UpdateCache :16-29 槽序（0-3=treeBG1-4、
+    //   4=corrupt…12=underworld）；遮罩画位 = drawSurface 逐槽内联（BJ372 判例）。
+    //   调用点 = 天柱死亡重掷（Game 869 链）——bgStyle 槽切换不再是点火源。
+    let changed = false;
     switch (kind) {
-      case 'corrupt': this.corruptStyle = v; break;
-      case 'crimson': this.crimsonStyle = v; break;
-      case 'jungle': this.jungleStyle = v; break;
-      case 'snow': this.snowStyle = v; break;
-      case 'hallow': this.hallowStyle = v; break;
-      case 'mushroom': this.mushroomStyle = v; break;
-      case 'desert': this.desertStyle = v; break;
-      case 'ocean': this.oceanStyle = v; break;
-      case 'underworld': this.underworldStyle = v; break;
-      default: this.forestStyles[kind === 'forest0' ? 0 : kind === 'forest1' ? 1 : kind === 'forest2' ? 2 : 3] = v; break;
+      case 'corrupt': changed = this.corruptStyle !== v; this.corruptStyle = v; break;
+      case 'crimson': changed = this.crimsonStyle !== v; this.crimsonStyle = v; break;
+      case 'jungle': changed = this.jungleStyle !== v; this.jungleStyle = v; break;
+      case 'snow': changed = this.snowStyle !== v; this.snowStyle = v; break;
+      case 'hallow': changed = this.hallowStyle !== v; this.hallowStyle = v; break;
+      case 'mushroom': changed = this.mushroomStyle !== v; this.mushroomStyle = v; break;
+      case 'desert': changed = this.desertStyle !== v; this.desertStyle = v; break;
+      case 'ocean': changed = this.oceanStyle !== v; this.oceanStyle = v; break;
+      case 'underworld': changed = this.underworldStyle !== v; this.underworldStyle = v; break;
+      default: {
+        const fi = kind === 'forest0' ? 0 : kind === 'forest1' ? 1 : kind === 'forest2' ? 2 : 3;
+        changed = this.forestStyles[fi] !== v; this.forestStyles[fi] = v; break;
+      }
+    }
+    if (changed) {
+      const areaOfKind: Record<typeof kind, number> = {
+        forest0: 0, forest1: 1, forest2: 2, forest3: 3,
+        corrupt: 4, jungle: 5, snow: 6, hallow: 7, crimson: 8,
+        desert: 9, ocean: 10, mushroom: 11, underworld: 12,
+      };
+      this.bgFlash[areaOfKind[kind]] = 1;
     }
     // 当前可见槽对应群系才预热（warmStyle 幂等,已载秒回）：
     // underworld 不属 bgStyle 槽系（随 pickUnderground/地下带走 ug 渠道）,跳过。
@@ -928,22 +944,21 @@ export class BiomeBackground {
       this.bgStyle = want;
       speed = 1;
     }
-    // BackgroundChangeFlashInfo（BackgroundChangeFlashInfo.cs 1:1）：样式落定即
-    // flash[area]=1（ValueChanged :36-40 的 !gameMenu 门——本类只服务游戏内），
-    // Renderer 于地表背景后画全屏黑闪遮罩（DrawSurfaceBG_DrawChangeOverlay
-    // :60533-60542）。★原版"过渡"= 交叉淡化（上）+ 黑闪遮罩双保险，非纯淡出。
-    // ★检测 bgStyle 实变（delayed/instant 两处赋值汇合点），非 want 变化时
-    { // （want 先变只进 bgDelay 计数，flash 须等真正落定）
-      for (let i = 0; i < this.bgFlash.length; i++) {
-        this.bgFlash[i] = Math.max(0, this.bgFlash[i] - 0.05 * frames);   // UpdateFlashValues :31-37
-      }
-      if (this.lastFlashStyle === -1) {
-        this.lastFlashStyle = this.bgStyle;   // 首帧只登记不闪（原版 flash 燒在生成期被加载屏盖住）
-      } else if (this.bgStyle !== this.lastFlashStyle) {
-        const area = STYLE_TO_AREA[this.bgStyle];
-        if (area !== undefined) this.bgFlash[area] = 1;
-        this.lastFlashStyle = this.bgStyle;
-      }
+    // BackgroundChangeFlashInfo（BackgroundChangeFlashInfo.cs）：黑闪点火源 =
+    // 【WorldGen 群系背景变体旗实变】（UpdateVariation :25-33 值变才 ValueChanged
+    // →flashPower[area]=1）。运行时唯一玩法内触发点 = 天柱死亡重掷
+    // （Projectile.cs:75125 type 869 → WorldGen.RandomizeBackgroundBasedOnPlayer
+    // :7742-7895 尾 UpdateCache）+ 世界生成期（被加载屏盖住）。
+    // bgStyle 槽切换（含高空飞行跨场景旗翻转）【不点火】——原版该处只有
+    // bgAlphaFrontLayer/alphaFar 交叉淡化（UpdateBGVisibility :65059/:65117）。
+    // 曾错接「样式落定即 flash」= 上下飞每跨一次地表↔天空场景旗界就全屏黑闪
+    // 覆写塔天/远景一组层（2026-10-03 用户实报「四柱区远景云山瞬闪消失露纯背景」
+    // 定谳刀：探针 _pillar-flash-repro.mjs 闪帧全量态实证 flash=1 帧(glCanvas
+    // 亮度 114.8→17.3)与 merged→split/farDeferGate→0 路径连翻同帧)。
+    // 衰减照旧（UpdateFlashValues :31-37）;点火点移 setBiomeVariant（变体旗写点,
+    // 与原版 UpdateVariation 同语义）。
+    for (let i = 0; i < this.bgFlash.length; i++) {
+      this.bgFlash[i] = Math.max(0, this.bgFlash[i] - 0.05 * frames);   // UpdateFlashValues :31-37
     }
     // 前景层 alpha（UpdateBGVisibility_FrontLayer :63534-63551）：升 0.05/帧；
     // 降侧有沙漠变体互换豁免（:63566-63582 IsDesertVariantSwap {2,5,13,14}）——

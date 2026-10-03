@@ -377,14 +377,14 @@ describe('刀G 消亡链', () => {
 // ⑥ 成就 owner 门（Projectile.cs:71981-71985）
 // ---------------------------------------------------------------------------
 describe('刀G 成就门：owner==Main.myPlayer 投影（onProjectileDeath flags.ownerLocal）', () => {
-  const call = (flags?: { ownerLocal?: boolean }) => {
+  const call = (flags?: { ownerLocal?: boolean }, y = 600, h = 12) => {
     const g = protGame();
     const done: string[] = [];
     g.achievements = { completeFlag: (k: string) => done.push(k) };
     g.sfx = { playFiles: () => false, play: () => {} };    // Item_62 音口（真实 Game 方法）
     (g as unknown as { onProjectileDeath: (p: number, x: number, y: number, w?: number, h?: number,
       ovx?: number, ovy?: number, dmg?: number, f?: { ownerLocal?: boolean }) => void })
-      .onProjectileDeath(1020, 100, 600, 12, 12, 0, 0, 0, flags);
+      .onProjectileDeath(1020, 100, y, 12, h, 0, 0, 0, flags);
     return done;
   };
 
@@ -405,6 +405,11 @@ describe('刀G 成就门：owner==Main.myPlayer 投影（onProjectileDeath flags
     (g as unknown as { onProjectileDeath: (p: number, x: number, y: number, w?: number, h?: number) => void })
       .onProjectileDeath(1105, 100, 600, 26, 26);
     expect(done).toEqual([]);
+  });
+
+  it('⑥d 640 门：y-h=640 边界照发;>640 吞（:71981 position.Y - height <= 640,★BJ468 销案锚）', () => {
+    expect(call(undefined, 652, 12)).toEqual(['TO_INFINITY_AND_BEYOND']);   // 652-12=640 边界
+    expect(call(undefined, 653, 12)).toEqual([]);                            // 641 > 640 吞（摘门→此腿红）
   });
 });
 
