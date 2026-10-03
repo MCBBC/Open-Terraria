@@ -4551,6 +4551,12 @@ export class MinionProj extends Entity {
           if (en.dead) continue;
           const bx = this.cx + this.facing * 40 - 40, by = this.cy - 20;
           if (en.x + en.w <= bx || en.x >= bx + 80 || en.y + en.h <= by || en.y >= by + 40) continue;
+          // ★BJ467⑥ :12686 头门前置（Damage_PVE 循环门 `flag2 && (!dontTakeDamage ||
+          //  ZappingJellyfish)` 先于 Inner 全链）——dontTakeDamage 靶不达 TimerCrit/tag
+          //  ModifyHit,也不白吃 hitCd 私表（快照纪律,读 hurt 前状态）。623 aiStyle 120
+          //  非接触反噬族（JELLY_ZAP_AI_STYLES={19,161,75,140}∪{972,982,984,997,1043}）
+          //  → dontTakeDamage 水母亦无 zap 口,整跳=原版净语义。
+          if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
           if (MinionProj.enemyImmune(en)) continue;   // ★BJ452 N5 :12636 三族共门（623 命中盒 Colliding :15611-15621 走 Damage_PVE_Inner 同链——窗拒拍不白吃私表 cd,contact() :4809 同构补）
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
           // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前）：
@@ -5865,7 +5871,15 @@ export class MinionProj extends Entity {
           const centerY = groundY * TILE; // result.ToWorldCoordinates(8f, num6)（半砖 +8 未实装）
           const topY = ceilY * TILE;      // result2.ToWorldCoordinates(8f, 0f)
           let side = centerY - topY;      // :65970 base.Size = (1, center.Y - top.Y)
-          side = Math.max(64, Math.min(160, side)); // :65972-65977 [num5×16, num×16]
+          // ★BJ467⑤ AI_137 T3 场盒档（Projectile.cs:69924-69938 亲读）：`int num = 10;
+          //  int num5 = 4; … if (setMonkT3) { num = 14; num5 = 8; }`（:69937-69938）→
+          //  场盒钳 [num5×16, num×16]（:69972-69977）——T3 档 [128,224]（×2 后
+          //  [256,448]），非 T3 恒 [64,160]（旧档=只落 T1/T2 形）。T2 臂只改 num3
+          //  zapPeriod（:69935 -5→25,zapCycle 档已接 :6035）不动盒。档位读落位拍
+          //  =localAI[0]==0 单次支（:69979）——vanilla 盒只算一次,落位后换装不变盒;
+          //  读 setMonkT3 经 dd2SetFlags 单源（同 monkAuraForcedCrit :151 装备门）。
+          const monkT3Field = dd2SetFlags(this.ownerRef()).monkT3;
+          side = Math.max(monkT3Field ? 128 : 64, Math.min(monkT3Field ? 224 : 160, side));
           side *= 2;                      // :65978 height *= 2（width=height，封顶 999）
           this.auraSide = Math.min(999, side);
           this.auraCy = centerY; // base.Center = center（:65980）
@@ -5903,6 +5917,10 @@ export class MinionProj extends Entity {
               && !lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, en.x + en.w / 2, en.y)) {
               continue;
             }
+            // ★BJ467⑥ :12686 头门前置（同拳盒臂——dontTakeDamage 靶不达 TimerCrit/
+            //  武僧掷/tag ModifyHit/golem 掷,不白吃 hitCd 私表;688-690 aiStyle 137 非
+            //  接触反噬族 → dontTakeDamage 水母亦无 zap 口,整跳=原版净语义）
+            if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
             if (MinionProj.enemyImmune(en)) continue;   // ★BJ452 N5 :12636 三族共门（光环场伤=Damage() 管线 aiStyle137 :12468 → Inner 同门——窗拒拍不白吃私表 cd,contact() :4809 同构补）
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
             zapped = true;
@@ -6075,6 +6093,10 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
+                // ★BJ467⑥ :12686 头门前置（同拳盒臂——dontTakeDamage 靶不达 TimerCrit/
+                //  tag ModifyHit/golem 掷;694-696 aiStyle 139 非接触反噬族 → 水母亦无
+                //  zap 口,整跳=原版净语义）
+                if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
                 // ★BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,先于 crit 掷/tag 消费
                 //  ——窗拒拍=写梯/tag 全不达,掷序纪律=拒拍不耗 RNG;BJ445③ 城镇臂 :5994 同式）
                 if (MinionProj.enemyImmune(en)) continue;
@@ -6364,6 +6386,10 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
+                  // ★BJ467⑥ :12686 头门前置（同拳盒臂——dontTakeDamage 靶不达 TimerCrit/
+                  //  tag ModifyHit/golem 掷;644 aiStyle 112 非接触反噬族 → 水母亦无
+                  //  zap 口,整跳=原版净语义）
+                  if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
                   // ★BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,先于 crit 掷/tag 消费
                   //  ——644 usesIDStatic 族 flag3 不豁免,窗拒拍=写梯/tag 全不达;BJ445③ 城镇臂 :6218 同式）
                   if (MinionProj.enemyImmune(en)) continue;

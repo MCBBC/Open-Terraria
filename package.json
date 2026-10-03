@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "assemblyscript": "^0.28.20",
     "javascript-obfuscator": "^5.6.0",
     "pngjs": "^7.0.0",
     "typescript": "^5.6.0",

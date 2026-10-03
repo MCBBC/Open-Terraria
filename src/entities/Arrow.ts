@@ -12,6 +12,7 @@ import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
+import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';   // ★BJ467⑦ flag3 usesIDStatic 排除面（SetDefaults 三旗提取表）
 import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk, ghostHealProc } from './SpectreSoulProj';
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
@@ -9222,6 +9223,12 @@ export class Arrow extends Entity {
           }
           : undefined)) {
       if (this.projId === 318) { this.killNow(game); return; }   // 臭蛋砸 NPC 即碎（penetrate 1）
+      // ★BJ467⑧（2026-10-03）城镇受理照耗 pierce（:14189-14196 penetrate-- 在写梯后
+      //  无条件段,对城镇受害靶同达）——本 face1=城镇受理面（唯一能受理的面,hurt 后
+      //  TownNPC.hurt iframes=10/localImmuneCd 写行使尾面恒拒/跳过）。旧档消费位在
+      //  尾面=窗拒/跳过拍 pierce 悬空不递减（BJ455④ 只修双调未动消费位）——箭族
+      //  pierce 1 砸巫毒靶不销毁=原版无的行为。318 臭蛋既有 killNow 分支保留其先。
+      if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
     }
     // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
     // ——不再伤小动物/敌怪，只走上方 hitPlayer 回打发射者
@@ -9413,6 +9420,13 @@ export class Arrow extends Entity {
         if (this.projId === 502) {
           immFaceLocal = true;      // ★GC1 face 记录（同 usesLocalNPCImmunity 形）
           if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
+          // ★BJ467⑨（2026-10-03）cd 检查前置——原版 flag2 私表门（:12585-12592
+          //  Damage_PVE 循环头 `usesLocalNPCImmunity && array[i]==0`）先于 Inner 全链
+          //  ⇒ cd 活跃靶连水母块（:12680）都不可达;旧序先 zap 后查 cd → 充能+cd 叠态
+          //  （先受击写表、后进充能态）多电一次。写位仍在水母块后（充能拍不落账=
+          //  S2-债2 判别保持,tests/s2-ghostheal-whitedrain-jellyzap §C）。
+          const cd = this.meowHitCd.get(e.id) ?? 0;
+          if (cd > 0) continue;
           // ★水母块（★S2-债2 清偿刀,2026-10-01——原 else 支 :9304 同面展开到 502/
           //  局部免疫支）：Damage_PVE_Inner :12686 `if (dontTakeDamage) return` 在写梯
           //  :14031-14183【之前】⇒ 充能水母重叠拍不落局部免疫账（旧档先写
@@ -9424,13 +9438,15 @@ export class Arrow extends Entity {
             }
             continue;
           }
-          const cd = this.meowHitCd.get(e.id) ?? 0;
-          if (cd > 0) continue;
           this.meowHitCd.set(e.id, 10);
         } else if (this.localImmune > 0) {
           // 1457: 通用局部免疫（usesLocalNPCImmunity+localNPCHitCooldown=N，数据列驱动）
           immFaceLocal = true;      // ★GC1 face 记录
           if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
+          // ★BJ467⑨ cd 检查前置（同 502 支——flag2 :12585-92 先于水母块 :12680,
+          //  充能+cd 叠态不多电）
+          const cd = this.localImmuneCd.get(e.id) ?? 0;
+          if (cd > 0) continue;
           // ★水母块（★S2-债2,同 502 支——本支接触族成员 611(aiStyle75)/697·707
           //  (aiStyle140) 充能水母重叠拍照电玩家;旧档先写 localImmuneCd=白写+漏电）
           if (zapJelly && jellyDontTake) {
@@ -9439,14 +9455,20 @@ export class Arrow extends Entity {
             }
             continue;
           }
-          const cd = this.localImmuneCd.get(e.id) ?? 0;
-          if (cd > 0) continue;
           this.localImmuneCd.set(e.id, this.localImmune);
         } else {
           // 全局 immune[owner] 门（Damage_PVE_Inner :12635-12637;★BJ344 勘误:旧锚 :11905 系 1456 世代,1457 该行为命中玩家 buff 支,非免疫门）：敌怪 iframes 内不命中、
           // 不耗穿透（曾缺 = 穿透弹穿过刚被别弹打中的敌白耗穿透数；piranhaStep
           // :1744 同门先例）。pierceInit 1 = 单发弹 flag3 豁免（Enemy.hurt :11457 同门）
-          if (this.pierceInit !== 1 && ((e as { iframes?: number }).iframes ?? 0) > 0) continue;
+          // ★BJ467⑦（2026-10-03）flag3 豁免收窄——原版 :12636 `flag3 = maxPenetrate == 1
+          //  && !usesLocalNPCImmunity && !usesIDStaticNPCImmunity`（usesLocal 已由本 else
+          //  支前两分支承载）——usesIDStatic 族【不】豁免（immune[owner]!=0 照拦）。
+          //  旧 pierceInit===1 无条件豁免=aiStyle 1 实弹 286（penetrate 1+usesIDStatic
+          //  +cd 60,SetDefaults :3743 区;vanillaProjImmuneFaces 表 idStatic 位）窗内照
+          //  命中=原版无的行为。usesIDStatic 判据=projImmuneFaceOf 单源（idStaticGroup
+          //  显式建模族 181/189/511-513/376/604 已在上方分支 continue,本位只兜数据面）。
+          if ((this.pierceInit !== 1 || projImmuneFaceOf(this.projId)?.idStatic === true)
+            && ((e as { iframes?: number }).iframes ?? 0) > 0) continue;
           // ★水母块（Damage_PVE_Inner :12676-12688 1:1,免疫窗后同位）：充能态
           //  （dontTakeDamage）水母不受伤——接触族弹幕命中 → TakeDamageFromJellyfish
           //  电玩家 → `if (dontTakeDamage) return` 拦本次伤害（最终清零补,GAP 销账）
@@ -9845,22 +9867,12 @@ export class Arrow extends Entity {
       }
     }
     }   // 钉 514 命中专管 else 收口
-    // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效——杀裁缝师
-    // 召骷髅王即此链);穿透/销毁语义与敌怪一致
-    // ★BJ455④ 同拍双调门（定谳:原版 Damage() 单 Main.npc 数组单趟 victim 循环
-    //  :12592——每靶每拍至多一次受理,无第二城镇面。本仓敌怪/城镇双桶拆分尾段
-    //  旧城镇面 + BJ452 N4 :9206 城镇面同拍双调:局部族 face1 受理拍清窗+写表 →
-    //  旧尾面无 skip 探针同拍再受理=642 场景双倍伤（vanilla 无此面）。修=尾面挂
-    //  同源局部表 skip（face1 受理拍已写 localImmuneCd → 尾面 flag2 臂同式拒跳,
-    //  与原版跨拍「表行未清不重受理」同语义）;非局部族 skip=undefined 零行为变,
-    //  穿透/销毁语义保持本面承载）。
-    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0,
-      undefined, undefined,
-      this.localImmune > 0
-        ? (n) => (this.spawnImmuneCd.get(n.id) ?? 0) > 0
-          || (this.localImmuneCd.get(n.id) ?? 0) > 0
-        : undefined)
-      && this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
+    // ★BJ467⑧（2026-10-03）尾段第二城镇面退役——原版 Damage() 单 Main.npc 数组单趟
+    //  victim 循环（:12592）=每靶每拍至多一次受理,无第二城镇面。BJ455④ 定谳后本面
+    //  已恒拒/跳过（face1 受理拍写 iframes=10/localImmuneCd → 本面 TownNPC.hurt
+    //  帧窗门/skip 必拒,无受理路径）,穿透消费悬空=BJ467⑧ 判谳的「城镇受理 pierce
+    //  缺位」根因。修=pierce 消费移位 face1 受理面（:9228）,本面整体摘除（与其留一个
+    //  零受理死探针,不如对齐原版单面）;双调门语义由 face1 单面天然承载。
   }
 
   /** 1457 :15079-15086（Damage_GetHitbox 1106 狐火分支,仅此 type 挂高速门）:

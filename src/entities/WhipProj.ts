@@ -775,6 +775,13 @@ export class WhipProj extends Entity {
           continue;
         }
         this.hitSet.add(e.id);
+        // ★BJ467①（2026-10-03）TimerCrit :12928 独立无条件消费——鞭走 DefaultToWhip
+        //  无类旗=三类掷（:12916-12927）不达,但 TryConsumingTimerCrit 对【一切】玩家弹
+        //  无条件消费（Projectile.cs:12928,`if (ownedBySomeone)` 段内;BJ453 定谳:前掷已
+        //  crit 照消费——鞭面恒无前掷,满蓄/负窗 → charge=−15+强制 crit）。位次=受理面
+        //  三类掷位（本环无三类掷）/StatusNPC 浸剂(:13634)前;Enemy.hurt crit 参仅染色
+        //  约定 → 数值预倍 ×2 交调用侧（BJ453 contact 敌臂 :4888 同式）。
+        const timerCritWhip = owner?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
         // ★F2 浸剂命中环（Projectile.cs:13687-96 门 `ownedBySomeone&&(melee||IsAWhip)`
         //  ——鞭 SetDefaults 全走 DefaultToWhip【无 melee 类旗】(:8145/:8668/:9739+,
         //  DefaultToWhip :10706-10718 只设 aiStyle165/friendly/penetrate−1),IsAWhip 臂
@@ -822,7 +829,7 @@ export class WhipProj extends Entity {
         //  全局窗（多鞭回声/蛇环补挥/后到他弹被自造窗拒 10t=鞭→随从连携核心机制反向
         //  砍伤）;pierce=-3 档（Enemy.ts :14427/:14541 BJ398 约定）=门照走（:14235
         //  pierce!==1 臂,flag3=false 同鞭）+命中写清零。局部节流已由 hitSet 承载。
-        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, false, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg) * (timerCritWhip ? 2 : 1), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, timerCritWhip, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）; ★BJ467① TimerCrit 强制 ×2+crit 色位
         // ★Z1/D1④（2026-10-02）GC1 写方桥对称补接线（BJ436 在 MinionProj 接桥,鞭两面
         //  缺=近战域 immune 表单域记账不对称）。写梯真值=usesLocal 主支清零档
         //  （:14175-14179 `immune[owner]=0`;DefaultToWhip usesLocal+cd=-1 penetrate=-1

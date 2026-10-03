@@ -138,6 +138,11 @@ export interface VDust {
  *  active 早退，draw 侧另有视口剔除（±1000/±1050）双重过滤。 */
 const POOL = 6000;
 
+/** Main.maxDustToDraw 缺省（Main.cs:1102 = 6000；:17244 gfxQuality 折减本仓不建模）
+ *  ——dCount 阶梯分母（Dust.cs:2471-2487）。与池容量 POOL 同值但概念分离
+ *  （★2026-09-02 定谳,见 POOL 注）,勿合并。 */
+const MAX_DUST_TO_DRAW = 6000;
+
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 
 /** 烟雾族光链 20 档专表（★R3 F1:Dust.cs:919-1097 逐支对拍;[r,g,b] 乘 num60,
@@ -175,6 +180,16 @@ export function dustFrameOf(type: number): { fx: number; fy: number } {
   return { fx, fy };
 }
 
+/** ★BJ466 spawn 屏外裁剪 margin（Dust.NewDust :97 `int num = (int)(400f * (1f - dCount))`）。
+ *  导出供回归测试钉值（同 dustFrameOf 体裁）。★f32 钉值（BJ466 复核定谳）：C# float
+ *  算术逐运算 f32——六档实值 {400,200,159,120,79,40},非理想实数域 {…160…80…}：
+ *  400f×(1f−0.6f)=159.99998→(int)159、400f×(1f−0.8f)=79.99999→(int)79（乘积落在整数
+ *  下方 0.625 ULP,f32 舍入后仍 <160/<80）;0.9 档 f64 直算反为 39（1−0.9f64=0.0999…×400
+ *  =39.999…）而 f32 40.00001→40——vanilla 恒 f32（BJ342 157 型同族判例）。 */
+export function dustCullMarginOf(dCount: number): number {
+  return Math.trunc(Math.fround(400 * Math.fround(1 - dCount)));
+}
+
 export class VanillaDust {
   /** 上帧湿碰探针（update 注入;spawn 侧 :246-253 气泡族生成时湿判复用） */
   wetProbe: ((px: number, py: number, w: number, h: number) => boolean) | null = null;
@@ -183,6 +198,21 @@ export class VanillaDust {
   /** 活跃尘计数（update 每帧全池遍历顺带重数——密度门 frac 的真负载源,见 spawn 门注）。
    *  首帧前=0（门低分位恒不触发=首帧批 spawn 零拒绝,与原版低负载行为同）。 */
   private activeCount = 0;
+  /** ★BJ466 spawn 屏外裁剪视口暂存（update 形参 screenX/Y/W/H,世界像素口径——
+   *  Game :10053 传 camera 视域,即 NewDust :98 的 Main.screenPosition/screenWidth
+   *  等价域）。★首帧 update 前不裁（viewValid=false）——与「update 前无视口」的
+   *  既有契约同相（dust-pool-gate 套件在 update 前 spawn 灌池）。
+   *  一帧滞后备案：spawn 发生在两帧 update 之间时用上帧视口——margin 400 域内
+   *  单帧相机位移无感。 */
+  private viewX = 0;
+  private viewY = 0;
+  private viewW = 0;
+  private viewH = 0;
+  private viewValid = false;
+  /** ★BJ466 dCount（Dust.cs:12 `public static float dCount`）——update 尾阶梯定值
+   *  （Dust.cs:2470-2494,activeN 驱动）,spawn 裁剪 margin 消费（:97）。恒为
+   *  {0,0.5,0.6,0.7,0.8,0.9} 的 f32 实值（fround）。 */
+  private dCount = 0;
   /** update 期收集的光照（Game 每帧推 LightingEngine 后清空） */
   lights: Array<{ x: number; y: number; r: number; g: number; b: number }> = [];
 
@@ -199,7 +229,8 @@ export class VanillaDust {
   }
 
   /** NewDust（:75-285）：位置/速度抖动、scale 抖动、type-6 烟雾初速特例、
-   *  屏外裁剪（±400·(1−dCount) 外圈不生成——满池启发式不建模，取 400 常量门）。
+   *  屏外裁剪（★BJ466 实装：margin=(int)(400×(1−dCount)) 外圈不生成,dCount 阶梯
+   *  =update 尾 :2470-2494;首帧 update 前与 perfect/prettySparkle 载体豁免,见实现注）。
    *
    *  opts.perfect = NewDustPerfect 变体通道（Dust.cs:52-63）：内部仍走完整 NewDust
    *  初始化链（含 0 宽盒抖动窗/rand ±2 初速/烟雾族特例），随后仅两个字段被完整
@@ -221,8 +252,28 @@ export class VanillaDust {
   spawn(x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0, color: DustColor | null = null, scale = 1,
     opts?: { perfect?: boolean; prettySparkle?: boolean }): VDust | null {
-    // 屏外裁剪需要视口信息——由 Game 侧 update 先暂存；spawn 时跳过（池小、
-    // 视口裁剪在 update/draw 双重兜底），此处仅密度池满兜底
+    // ★BJ466（2026-10-03）spawn 头屏外裁剪（Dust.NewDust :97-101）：margin=
+    // (int)(400×(1−dCount))（dustCullMarginOf,dCount 阶梯=update 尾 :2470-2494）;
+    // 视口=screenPosition 四向外扩 margin;spawn 盒=(Position,10,10) 恒定（w/h 形参
+    // 只决定盒内偏移分布 :191-193,不进裁剪式）;不相交→拒且零 RNG 消费——本早退位于
+    // 槽搜索与密度门（:106-151）之前,被裁 spawn 不动任何 Math.random 掷=反伪影关键
+    // （原版裁剪先于密度梯同序）。XNA Rectangle.Intersects=四向严格不等（贴边不相交）;
+    // C# (int) 截断=trunc,且 (int)(screenPosition.X−num) 是对【差式】单次截断,
+    // 勿拆成 trunc(x)−margin（x<margin 时跨零语义不同）。豁免（BJ460③ 钉案）：
+    // opts.perfect（NewDustPerfect :52-63 通道）与 prettySparkle 载体
+    // （ParticlePool.cs:32-51 不入 Dust 池零门）。视口未暂存（首帧前）不裁。
+    if (this.viewValid && opts?.prettySparkle !== true && opts?.perfect !== true) {
+      const margin = dustCullMarginOf(this.dCount);
+      const vl = Math.trunc(this.viewX - margin);
+      const vt = Math.trunc(this.viewY - margin);
+      const vr = vl + this.viewW + margin * 2;   // Main.screenWidth + num*2（int 域）
+      const vb = vt + this.viewH + margin * 2;
+      const bx = Math.trunc(x);
+      const by = Math.trunc(y);
+      // rectangle.Intersects(value)（rectangle=视口,value=spawn 盒,FNA Rectangle.Intersects
+      //  四向严格不等）：bx<vr && vl<bx+10 && by<vb && vt<by+10
+      if (!(bx < vr && vl < bx + 10 && by < vb && vt < by + 10)) return null;
+    }
     let d: VDust | null = null;
     let slot = -1;
     for (let i = 0; i < POOL; i++) {
@@ -412,6 +463,13 @@ export class VanillaDust {
     // ★气泡族(2026-09-13)：探针存字段——spawn() 侧 :246-253 生成时湿判复用
     //  （上帧探针,液体面 1 帧滞后无感;探针未注入=null=跳过生成时杀）
     this.wetProbe = wetBoxAt;
+    // ★BJ466 视口暂存（spawn 头裁剪 :97-101 消费——本帧视口对后续 spawn 可见,
+    //  一帧滞后备案见字段注）
+    this.viewX = screenX;
+    this.viewY = screenY;
+    this.viewW = screenW;
+    this.viewH = screenH;
+    this.viewValid = true;
     this.lights.length = 0;
     let activeN = 0;
     for (const d of this.pool) {
@@ -942,6 +1000,23 @@ export class VanillaDust {
       if (d.scale < 0.1) d.active = false;
     }
     this.activeCount = activeN;   // 密度门真负载（update 全池遍历顺带重数,见 spawn 门注）
+    // ★BJ466 UpdateDust 尾 dCount 阶梯（Dust.cs:2470-2494）：num119 对 maxDustToDraw
+    //  分位定 dCount——阈值比较原版为 (double) 强升（0.9 等 double 字面量,f64 乘积
+    //  5400.000000000001 等）,JS 同构 f64 直接写 `n > MAX_DUST_TO_DRAW * 0.9`;
+    //  赋值为 0.9f..0.5f float 字面量（fround）。
+    //  ★vanilla 运行时备案（BJ466 复核定谳,源码锚 Dust.cs:429/:2470 全词检索）：原版
+    //  尾段读 num119=num 而 num（:429 初始化 0）全程无写点 → 恒走 else dCount=0f
+    //  ——原版【运行时】margin 恒 400,本阶梯与 :2420-2459 缩没梯同为死支（循环内
+    //  dCount 为整数值恒≠0.5..0.9;dCount 全树无外部写点）。本仓按 BJ460③ 钉案将
+    //  阶梯按设计意图激活（activeN 驱动）：activeN≤3000 域 margin 恒 400=与原版
+    //  运行时无差;>3000 高压域为登记分歧（该域密度门本就以 activeCount 近似管辖,
+    //  见 spawn 门注）。
+    if (activeN > MAX_DUST_TO_DRAW * 0.9) this.dCount = Math.fround(0.9);
+    else if (activeN > MAX_DUST_TO_DRAW * 0.8) this.dCount = Math.fround(0.8);
+    else if (activeN > MAX_DUST_TO_DRAW * 0.7) this.dCount = Math.fround(0.7);
+    else if (activeN > MAX_DUST_TO_DRAW * 0.6) this.dCount = Math.fround(0.6);
+    else if (activeN > MAX_DUST_TO_DRAW * 0.5) this.dCount = Math.fround(0.5);
+    else this.dCount = 0;
   }
 
   /** 活动尘迭代（绘制用；fullbright=true 只取亮色族 {6,15,59-64}，false 取其余） */

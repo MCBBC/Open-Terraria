@@ -178,7 +178,20 @@ export class InsanityShadowFriendly extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y) {
         this.hitEnemies.add(e.id);
-        e.hurt(applyBannerDamageDealt(game, e, this.dmg), 0, 0, game, 20, false, 0, true);   // fromPlayer=DPS 计
+        // ★BJ467②（2026-10-03）TimerCrit :12928 消费补位——964 幻影受理面为自建直调
+        //  e.hurt（非 proj1457.dealContacts 通道,四件套 ChloroLeaf/SporeSac/OrichalcumPetal
+        //  三件走 dealContacts F11 既有接位,唯本件缺）。门读 hurt 前状态=快照纪律
+        //  （:12636 immune[owner] 门/dontTakeDamage :12686 前置——窗拒拍 vanilla 不达
+        //  :12928=零消费,本面既有 hurt 拒收形不变,仅消费位对齐）。三类掷不达（SetDefaults
+        //  :8842-8855 无类旗）,蓄能暴击为唯一 crit 源;Enemy.hurt crit 参仅染色 → 数值
+        //  预倍 ×2 交调用侧（banner 乘区后、crit 翻倍前=原版序）。
+        const shadowGate964 = e.dead
+          || ((e as { iframes?: number }).iframes ?? 0) > 0
+          || ((e as { dontTakeDamage?: boolean }).dontTakeDamage === true);
+        const crit964 = !shadowGate964 && (((game.player as unknown as
+          { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h)) ?? false);
+        e.hurt(applyBannerDamageDealt(game, e, this.dmg) * (crit964 ? 2 : 1), 0, 0, game, 20, crit964, 0, true);   // fromPlayer=DPS 计;★BJ467② crit 色位+×2
         if (--this.pierceLeft <= 0) {
           this.dead = true;
           game.onProjectileDeath?.(964, this.x, this.y);

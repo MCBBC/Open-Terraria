@@ -70,12 +70,14 @@ describe('BJ454①：T-set 受害门（NPCID.cs:4783 表 + NPC.cs:91592 受害 t
 
   it('★BJ468 翻案：松露虫 374（T-set 非 friendly）敌怪接触【免疫】——SetDefaults :13803 静态旗头门先拒;摘旗对照=通道仍开', () => {
     const list: Enemy[] = [];
-    const game = makeGame(list);
-    const worm = Enemy.fromVanilla(374, 100 * TILE, 100 * TILE)!;
+    // 近距玩家（320px）防 CheckActive 远 despawn 干扰免疫腿（critter 敏感;不进 160px 惊扰圈）
+    const game = makeGame(list, 150 * TILE, 100 * TILE);
+    const worm = Enemy.fromVanilla(374, 130 * TILE, 100 * TILE)!;
     expect(worm).toBeTruthy();
-    expect(worm.def.friendly).toBeFalsy();            // 非 friendly（旧门恒拒=病灶）
+    expect(worm.def.friendly).toBeFalsy();            // 非 friendly（通道门靠 T-set 臂开）
+    expect(worm.dontTakeDamageFromHostiles).toBe(true); // ★BJ468：SetDefaults :13803 静态置位
     list.push(worm);
-    const zombie = Enemy.fromVanilla(3, 100 * TILE + 4, 100 * TILE - 12)!;
+    const zombie = Enemy.fromVanilla(3, 130 * TILE + 4, 100 * TILE - 12)!;
     expect(zombie.def.damage).toBeGreaterThan(0);     // 攻击者门 :93621
     list.push(zombie);
     worm.fixedUpdate(1 / 60, game);                   // 受害侧 tick → npcVsNpcContactUpdate

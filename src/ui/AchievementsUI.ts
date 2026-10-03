@@ -11,6 +11,7 @@
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
 import { ACH_CATEGORY } from '../data/vanillaAchievements';
+import { tintedSliceDataUrl } from './vanillaKit';
 
 const CATEGORY_NAMES: Record<number, string> = {
   [ACH_CATEGORY.Slayer]: 'Achievements.SlayerCategory',
@@ -55,24 +56,36 @@ const CSS = `
 .sw-ach-bar { height:8px; background:#1a1f3a; border-radius:4px; margin-top:5px;
   border:1px solid #444c7a; overflow:hidden; }
 .sw-ach-bar .fill { height:100%; background:linear-gradient(90deg,#6a8ae0,#8ad0e0); }
-/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡近似）。
- *      2026-09-02 用户要求改竖式（图上文下,省宽度——挂在合成右侧竖列）；
- *      图标 32px 窗 = 0.5 倍图集缩放（此前不缩放,只裁出 64px 帧左上 1/4=填充残缺） ---- */
+/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡 1:1 框面,★BJ473）。
+ *      原版卡三层（AchievementAdvisor.cs:136-165,1457=1458 diff 全等）：
+ *      ① Achievements.png 暗变体帧（frame.X+=528 :158）→ ② Achievement_Borders
+ *      72² 金框 @(−4,−4)×s（金色烘在贴图,:160）→ ③ 悬停描边×OurFavoriteColor
+ *      (255,231,69)（Main.cs:886/:163）。未悬停 tint Color(220,220,220,220)(:147)
+ *      → 悬停 Color.White。2026-09-02 用户要求的竖式（图上文下）保留=登记偏差;
+ *      蓝底圆角盒废除（BJ473 用户实报+截图:入口应为金框方形钮）。
+ *      几何由 advisorFrameGeom() 单源写 inline 尺寸（本仓 0.5 档=32px 图标,
+ *      原版大卡 0.75/内联小卡 0.35=登记 QoL 偏差） ---- */
 .sw-ach-advisor { pointer-events:auto; display:flex; flex-direction:column; align-items:center; gap:4px;
-  background:rgba(33,43,79,0.75); border:1px solid #7d92d6; border-radius:6px;
-  padding:5px 6px 4px; cursor:pointer; }
-.sw-ach-advisor:hover { filter:brightness(1.2); }
-.sw-ach-advisor .glyph { width:32px; height:32px; flex:none;
+  cursor:pointer; }
+.sw-ach-advisor .card { position:relative; display:block; flex:none;
+  filter:brightness(0.8627); }   /* 220/255 未悬停灰调（:144-148） */
+.sw-ach-advisor .card .glyph { position:absolute;
   background-image:url(sprites/vanilla/Achievements.png);
   background-repeat:no-repeat; image-rendering:pixelated; }
+.sw-ach-advisor .card img.border { position:absolute; left:0; top:0; width:100%; height:100%;
+  image-rendering:pixelated; pointer-events:none; }
+.sw-ach-advisor .card .hov { position:absolute; display:none; background-repeat:no-repeat;
+  background-size:100% 100%; image-rendering:pixelated; pointer-events:none; }
+.sw-ach-advisor.sw-ach-hov .card { filter:none; }          /* 悬停 → Color.White */
+.sw-ach-advisor.sw-ach-hov .card .hov { display:block; }   /* 黄描边显形 */
 .sw-ach-advisor .tx { font-size:11px; color:#e8ecf8; text-align:center; line-height:1.3;
   max-width:72px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 /* ---- BJ416:sw<1000 装备列内联小卡(Main.cs:42129)——原版小卡=0.35 缩纯图标
  *      (DrawCard scale 0.35,边框 72→25px,无文字)。文字版卡 61px 高会压进下一行
- *      防御盾/设置钮带(行距 47.6)——窄屏分支摘文字+收 padding,32px 图标保留
+ *      防御盾/设置钮带(行距 47.6)——窄屏分支摘文字（金框盒 36px,连描边 38px,
+ *      42px 预算内余量更足）;32px 图标保留
  *      (≈原版 22.4px 的 QoL 放大=登记偏差,盒面同锚 advisorInlineXY) ---- */
 .sw-ach-inline .tx { display:none; }
-.sw-ach-inline .sw-ach-advisor { padding:2px 3px; }
 `;
 
 let cssInjected = false;
@@ -279,20 +292,89 @@ export function advisorHasCard(a: import('../core/Achievements').Achievements): 
   return false;
 }
 
+/** ★BJ473 advisor 卡框几何单源（AchievementAdvisor.DrawCard :136-165 对拍）：
+ *  图标 64² @原点、金框 72² @(−4,−4)×s、悬停描边 = scale>0.5 ? Thin(76²@−5s)
+ *  : Fat(80²@−8s)（:151-156）。本仓两落位均 0.5 档（32px 图标,BJ416 登记 QoL
+ *  偏差;原版背包大卡 0.75/内联小卡 0.35）→ Fat 支。悬停命中面 = 图标盒
+ *  64²×s（:139 Between(position, position+frame.Size()*s),框 4s 外圈不触发）。 */
+export const ADVISOR_SCALE = 0.5;
+export interface AdvisorFrameGeom {
+  card: number; icon: number; pad: number;
+  hover: { size: number; off: number; tex: 'Fat' | 'Thin' };
+}
+export function advisorFrameGeom(scale: number = ADVISOR_SCALE): AdvisorFrameGeom {
+  return {
+    card: 72 * scale,
+    icon: 64 * scale,
+    pad: 4 * scale,
+    hover: scale > 0.5
+      ? { size: 76 * scale, off: -5 * scale, tex: 'Thin' }
+      : { size: 80 * scale, off: -8 * scale, tex: 'Fat' },
+  };
+}
+
+/** 悬停描边白模（Achievement_Borders_MouseHover.png 80²,资源包 TSV:14730）——
+ *  ×OurFavoriteColor(255,231,69) 预烘 dataURL（tintedSliceDataUrl FX43 预乘管,
+ *  CharCreation 滑杆高亮/EmoteMenu 边框同技法）。 */
+const ADVISOR_HOVER_TEX = 'sprites/vanilla/Achievement_Borders_MouseHover.png';
+
 /** ★BJ318：getGame 动态解析——曾直捕 Game 实例,Advisor DOM 卡随 UI 单例跨局
  *  存活（teardownInventoryPanel 只在重建时清）,退世界后 card.update/mousedown
  *  闭包把死 Game 整图钉在 UI 上（forward-BFS 定谳锚之一）。动态解析零滞留。 */
 export function createAchievementAdvisor(getGame: () => Game | null): HTMLElement & { update(): void } {
   ensureCss();
   const card = el('div', 'sw-ach-advisor') as unknown as HTMLElement & { update(): void };
+  // 三层卡面（DrawCard :157-164 绘制序=叠层次序）：暗变体图标 → 金框 → 悬停描边
+  const g = advisorFrameGeom();
+  const box = el('div', 'card');
+  box.style.width = `${g.card}px`;
+  box.style.height = `${g.card}px`;
   const glyph = el('div', 'glyph');
+  glyph.style.left = `${g.pad}px`;
+  glyph.style.top = `${g.pad}px`;
+  glyph.style.width = `${g.icon}px`;
+  glyph.style.height = `${g.icon}px`;
+  const border = document.createElement('img') as HTMLImageElement;
+  border.className = 'border';
+  border.src = 'sprites/vanilla/Achievement_Borders.png';   // 金框=贴图自带（:41/:160）
+  border.draggable = false;
+  border.alt = '';
+  const hov = el('div', 'hov');
+  hov.style.width = `${g.hover.size}px`;
+  hov.style.height = `${g.hover.size}px`;
+  hov.style.left = `${g.pad + g.hover.off}px`;   // off 以图标原点计(:163) → 卡坐标 pad+off
+  hov.style.top = `${g.pad + g.hover.off}px`;
+  box.appendChild(glyph);
+  box.appendChild(border);
+  box.appendChild(hov);
   const tx = el('div', 'tx');
-  card.appendChild(glyph);
+  card.appendChild(box);
   card.appendChild(tx);
+  void tintedSliceDataUrl(ADVISOR_HOVER_TEX, 255, 231, 69, 1).then((url) => {
+    if (url) hov.style.backgroundImage = `url(${url})`;   // 烘失败退化=仅提亮无描边(登记)
+  });
+  // 悬停谓词 = 图标盒（:139 原版命中面;glyph 即 64²×s 内盒,框 4s 外圈不触发）——
+  // 类开关替代整卡 :hover 旧面 + 沿音（DoStatefulTickSound Main.cs:3333-3343）
+  glyph.addEventListener('mouseenter', () => {
+    card.classList.add('sw-ach-hov');
+    getGame()?.sfx.play('menuTick', 1);
+  });
+  glyph.addEventListener('mouseleave', () => {
+    card.classList.remove('sw-ach-hov');
+  });
   card.addEventListener('mousedown', (e) => {
     e.stopPropagation();
+    if (e.button !== 0) return;   // 原版仅左键（:68 mouseLeft && mouseLeftRelease）
     const game = getGame();
-    if (game) openAchievementsPanel(game);
+    if (!game) return;
+    // 原版点击 = OpenAchievementsAndGoto(_hoveredCard.achievement)（:71-72）——
+    // best=卡面成就,开面板+定位高亮（UI.Achievements goto 通道,音由面板入口自播）
+    const a = game.achievements;
+    let best: string | null = null;
+    for (const name of ADVISOR_ORDER) {
+      if (a.defOf(name) && !a.isCompleted(name)) { best = name; break; }
+    }
+    openAchievementsPanel(game, best ?? undefined);
   });
   card.update = () => {
     // Advisor 选择 = 原版 AchievementAdvisor.GetBestCards(1)（1458 同 1456）：
@@ -308,7 +390,7 @@ export function createAchievementAdvisor(getGame: () => Game | null): HTMLElemen
     }
     if (!best) { card.style.display = 'none'; return; }
     card.style.display = 'flex';
-    glyphStyle(glyph, a, best, 0.5);   // 32px 窗 = 图集 0.5 倍（整帧完整显示）
+    glyphStyle(glyph, a, best, ADVISOR_SCALE);   // 32px 窗 = 图集 0.5 倍（整帧完整显示）
     tx.textContent = Lang.text(`Achievements.${best}_Name`);
   };
   card.update();

@@ -12932,9 +12932,12 @@ export class Game implements GameHooks {
     this.recLog('use', { key: def.key, useStyle: us });
   }
 
-  /** 起手/连用转向光标侧（PlaceThing 与各挥击路径的 ChangeDir 家族合并口：
-   *  判据与 ItemCheck_Shoot :47614 Dot 门同向——目标格在右半屏即朝右。
-   *  曾散点缺失导致"站定朝左点右侧仍向身后使用",2026-08-31 集中补齐 */
+  /** 转向光标侧（判据与 ItemCheck_Shoot :47614 Dot 门同向——目标格在右半屏即朝右）。
+   *  ★BJ463（2026-10-03）收口：本口现仅剩 shoot>0 件消费（Dirt Rod 114，shoot=17，
+   *  ItemCheck_Shoot 调用门 OwnerOnlyCode :43902-43904 `(sItem.shoot>0)&flag4` 同相）。
+   *  shoot=0 面（工具起手/油漆/电路/铺墙/物块放置——原版 PlaceThing :39891-41100
+   *  与 ItemCheck_UseMiningTools :45971-46031 零 ChangeDir/零 direction 直写）的
+   *  四处 2026-08-31 误植调用已删：点击不转向，朝向由移动键 useTurn 门驱动。 */
   private faceCursor(tx: number, _ty: number): void {
     this.player.facing = (tx * TILE + 8) >= this.player.cx ? 1 : -1;
   }
@@ -14064,10 +14067,15 @@ export class Game implements GameHooks {
    *  读它决定跟鼠标/坠落（AI_010 :58921-58956 channel && ai[0]==0 支） */
   private _dirtRodChannel = false;
 
-  /** 按住鼠标期间的朝向跟随（原版 useTurn 家族语义的持续档；判据基座 =
-   *  ItemCheck_Shoot :47614 Dot 门的逐 tick 形态——按住期间光标跨过中心即翻面,
-   *  非"仅起手一次"。例外 = 非转向武器(近战大剑族 useTurn=false)挥动动画窗内
-   *  锁向(Player.cs :19546-19556 等价;本仓门在 Player 移动轴 + 本处双保险)。
+  /** 按住鼠标期间的朝向跟随（shoot>0 件专属——★BJ463（2026-10-03）定谳收口：
+   *  原版面向鼠标的唯一常规写位 = ItemCheck_Shoot :47625-47634 Dot 门，其调用门
+   *  OwnerOnlyCode :43902-43904 `(sItem.shoot > 0) & flag4`（flag4=:43848
+   *  itemAnimation>0 && ItemTimeIsZero）——shoot=0 的工具/放置/漆线/纯近战
+   *  （镐 3509/斧 3506/锤 3505/阔剑 3508/泥块 2 等）原版点击【零转向】，朝向
+   *  只归移动键 useTurn 门（HorizontalMovement :19962-19973）。旧 relevant 面
+   *  （tool/paintTool/wireTool/wallId/tile/melee/ranged/magic/summon 全纳入）
+   *  = 用户实报「工具点击转向」根因，定谳删除。登记债：shoot>0 的闲置跟随窗与
+   *  useTurn 锁与 flag4 门序（闲置不跟/动画窗 itemTime==0 才跟）细对齐另案。
    *  UI 面板悬停不跟(同 Input.isDomUiTarget 门);无鼠标输入零成本早退 */
   private tryFaceHeldAim(): void {
     const inp = this.input;
@@ -14076,10 +14084,8 @@ export class Game implements GameHooks {
     if (!def) return;
     const vid = def.vid ?? -1;
     const c = vid >= 0 ? itemCombat(vid) : null;
-    // 相关面：武器/工具/放置/漆线族 —— 药水与杂项静持不转身
-    const relevant = !!def.tool || !!def.paintTool || !!def.wireTool
-      || def.wallId != null || !!def.tile
-      || (c ? (!!c.melee || !!c.ranged || !!c.magic || !!c.summon || (c.shoot ?? 0) > 0) : false);
+    // 相关面：shoot>0 件专属（ItemCheck_Shoot 调用门同源）——其余零转向
+    const relevant = (c?.shoot ?? 0) > 0;
     if (!relevant) return;
     const p = this.player;
     // 非转向武器动画窗锁向（:19546-19556）
@@ -15014,11 +15020,16 @@ export class Game implements GameHooks {
       //   此前 !this.swing 硬门让每挥击周期漏出 1 帧 useTime==0——黄蜂 ai[1] 每周期清零,
       //   永远攒不到 130 → 战斗中黄蜂从不射毒刺(NPC.cs:51165 的 itemAnimation 门因此误判"待机")）
       const swingOver = !this.swing || this.swing.t <= 1;
-      // 挥击起手面向鼠标（ChangeDir 到光标侧;判据同 ItemCheck_Shoot :47614 Dot 门——
-      // 曾缺 = 站定朝左点右侧仍向身后挥,2026-08-31 用户报。useTurn 族动画窗内
-      // 持续跟随鼠标的完整语义另案,现由 Player 移动轴门 :19546 承担部分行为）
+      // 挥击起手面向鼠标（ChangeDir 到光标侧）——★BJ463（2026-10-03）定谳加门：
+      // 仅 shoot>0 件（短剑 3507→938 stab 弹族/魔光剑 46→974/草剑 190→976 等特弹剑
+      // =原版 ItemCheck_Shoot 调用门 OwnerOnlyCode :43902-43904 `(sItem.shoot>0)&flag4`
+      // 面向光标）。shoot=0 纯阔剑（铜阔剑 3508=SetDefaults1(4) 模板无 shoot）原版
+      // 点击零转向（ItemCheck_GetMeleeHitbox :45513 只读 direction 定命中盒侧），旧
+      // 无门面向=2026-08-31 批把 :47614 Dot 门误植全近战面，用户实报定谳收窄。
+      // useTurn 族动画窗内持续跟随的完整语义另案,现由 Player 移动轴门 :19546 承担部分行为）
       if (inp.mouseDown && !inp.rightDown && this.player.useTime === 0 && canChain
-        && (swingOver || reuseSpd < animSpd)) {
+        && (swingOver || reuseSpd < animSpd)
+        && (cwMelee?.shoot ?? 0) > 0) {
         const [fwx] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         this.player.facing = fwx >= this.player.cx ? 1 : -1;
       }
@@ -15517,9 +15528,15 @@ export class Game implements GameHooks {
       if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
-        // 使用转身（Player.cs:46561-46589：flag 对全物品默认 true——镐/斧/锤同样
-        // ChangeDir 向使用方向，仅 723/3611 例外；方向 = 目标格侧，武器族同款）
-        this.player.facing = tx * TILE + 8 >= this.player.cx ? 1 : -1;
+        // ★BJ463（2026-10-03）：镐/斧/锤（shoot=0，Item.cs SetDefaults1 模板 1/10/7，
+        // useTurn=true）原版【无点击面向】——ItemCheck_Shoot 调用门 OwnerOnlyCode
+        // :43902-43904 `(sItem.shoot > 0) & flag4`（shoot=0 恒不进），挖掘全路径
+        // ItemCheck_UseMiningTools :45971-46031 零 direction 写位。朝向仅由：
+        // ①移动键（HorizontalMovement :19962-19973 useTurn 门——挥动中可转）
+        // ②channel 弹工具的弹体 AI（下方 aiStyle20/75 支，AI_020 Projectile.cs
+        // :25875-25883 逐 tick ChangeDir）驱动。旧「起手转身向目标格」系 2026-08-31
+        // 批把 :47614 Dot 门误植到 shoot=0 全物品面（旧注引 1456 :46561-46589 即
+        // ItemCheck_Shoot 本体，非全物品面），用户实报 + 原版实机对拍定谳删除。
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
         // 挥击音 = 工具 UseSound（镐/斧/锤 SetDefaults UseSound=Item1，Player.cs
@@ -15607,7 +15624,8 @@ export class Game implements GameHooks {
     //  Paintbrush :41254 / PaintRoller :41236 / PaintScrapper :41152）。左键，
     //  目标格可被占用（与电路工具同权，且不进 noBuilding 门）
     if (heldDef?.paintTool && inp.mouseDown && !inp.rightDown) {
-      this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
+      // ★BJ463（2026-10-03）：原版 PlaceThing :39891-41100 全区零 ChangeDir/零
+      // direction 直写——放置路径点击不转向（旧 faceCursor 调用=shoot>0 门误植，删）
       // ★SW-FX12（2026-09-10）：摆动循环上移到分派口——ItemCheck_StartActualUse
       //  → ApplyItemAnimation(sItem)（:52314 无乘区档）+ autoReuse 归零重启（刷具
       //  useStyle 1/useAnimation 15/useTime 10,Item.cs:13374-13383/:18592-18603）。
@@ -15625,7 +15643,8 @@ export class Game implements GameHooks {
 
     // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
     if (heldDef?.wireTool && inp.mouseDown && !inp.rightDown) {
-      this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
+      // ★BJ463（2026-10-03）：原版 PlaceThing :39891-41100 全区零 ChangeDir/零
+      // direction 直写——放置路径点击不转向（旧 faceCursor 调用=shoot>0 门误植，删）
       // 电路工具余辉（1457 Player.cs:47152-47166:TB = sItem.tileBoost + blockRange；
       // 族内件 tileBoost 恒 20 = Item.cs SetDefaults,统一从 TILE_BOOST_BY_VID 出）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
@@ -15637,7 +15656,8 @@ export class Game implements GameHooks {
     // 可放置物品：左键放置
     // 墙面物品（Player.PlaceThing_Walls，Player.cs:38937）：左键铺墙
     if (heldDef?.wallId != null && inp.mouseDown && !inp.rightDown) {
-      this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
+      // ★BJ463（2026-10-03）：原版 PlaceThing :39891-41100 全区零 ChangeDir/零
+      // direction 直写——放置路径点击不转向（旧 faceCursor 调用=shoot>0 门误植，删）
       // 放置路径余辉（1457 Player.cs:39908-39919 PlaceThing_Walls:TB = item.tileBoost
       //  + blockRange——★原版此支只置 cursorItemIconEnabled 不调 ItemIconCacheUpdate，
       //  本调用为我方扩展余辉,登记于 ToolCursorIcon.ts 注）
@@ -15655,7 +15675,8 @@ export class Game implements GameHooks {
     // Player.cs:42842-42847 altFunctionUse==2 才 doPlacementAction）
     if (heldDef?.tile && !inp.rightDown
       && !PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
-      this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
+      // ★BJ463（2026-10-03）：原版 PlaceThing :39891-41100 全区零 ChangeDir/零
+      // direction 直写——放置路径点击不转向（旧 faceCursor 调用=shoot>0 门误植，删）
       // 放置路径余辉（1457 Player.cs:40033-40040 PlaceThing_Tiles:TB = item.tileBoost
       //  + blockRange——★原版此支只置 enabled 不进缓存,本调用同上为我方扩展登记）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
@@ -31944,10 +31965,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.vanillaId !== 548 || en.dead || en.dontTakeDamageFromHostiles) continue;
       if (Math.abs((en.cx ?? px) - px) < 64 + en.w / 2 && Math.abs((en.cy ?? py) - py) < 64 + en.h / 2) {
         // SW-AC1 2026-09-04：方向 = kbDir 弹体朝向（同城镇半边,:13652 num40=direction）
-        en.hurt(this.explodeFriendlyVictimDamage(40, en),
+        // ★BJ467④（2026-10-03）爆炸结算面 TimerCrit :12928 补位——102 Damage_PVE_Inner
+        //  全链对 friendly 受害集（flag2 :12626 支）同达 `if (ownedBySomeone)` crit 段,
+        //  TryConsumingTimerCrit 无条件消费。门读 hurt 前状态=快照纪律（演出期窗拒拍
+        //  已由上方 dontTakeDamageFromHostiles continue 承载=不达消费位）。
+        const crystalTimerCrit = this.player.tryConsumingTimerCrit(this,
+          en.x, en.y, en.w, en.h);
+        en.hurt(this.explodeFriendlyVictimDamage(40, en) * (crystalTimerCrit ? 2 : 1),
           kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
             : ((Math.sign((en.cx ?? px) - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1),
-          0, this, 0, false, 0, true);
+          0, this, 0, crystalTimerCrit, 0, true);
       }
     }
   }
@@ -32062,7 +32089,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（:13652 num40=direction,
         //  AI_016 自动面 sign(velocity.X) else 档 +1——773 贴附拍 vx=0 → 恒 +1;
         //  snap8 挖向只喂隧道几何/尘 :79955,与击退方向无关,旧"径向"近似退役）
-        en.hurt(eowFifth, (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, false, 0, true);   // kb=8（P.cs:47644）
+        // ★BJ467④（2026-10-03）爆炸结算面 TimerCrit :12928 补位——773 Kill 爆炸走
+        //  Damage_PVE_Inner 全链,TryConsumingTimerCrit 对一切玩家弹无条件消费（773
+        //  三类掷面位本臂未掷=SW-AF1 explodeAt 同族缺口,登记;蓄能暴击为独立无条件
+        //  消费面,先补）。门读 hurt 前状态=快照纪律;Enemy.hurt crit 参仅染色 →
+        //  数值预倍 ×2 交调用侧（banner 乘区后=dealContacts :461 同序）。
+        const scarabTimerCrit = this.player.tryConsumingTimerCrit(this,
+          en.x, en.y, en.w, en.h);
+        en.hurt(eowFifth * (scarabTimerCrit ? 2 : 1), (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, scarabTimerCrit, 0, true);   // kb=8（P.cs:47644）;★BJ467④ crit 色位+×2
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
       }
     }
@@ -32079,9 +32113,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  lastCreatureHit + :13712 addDPS + StrikeNPC :82097 owner==myPlayer →
         //  LocalPlayerInteraction（AnyInteractions）。旧缺参=玩家爆炸杀小动物不进
         //  旗杀账/图鉴/计数器行（敌怪支 :27636 已带 true,同函数两支分裂）。
-        c.hurt(this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
-          ? Math.trunc(cdmg / 5) : cdmg,
-          (kbDir || (Math.sign(c.cx - exPx) || 1)) * 8, 0, this, pen, false, 0, true);   // SW-AC1：方向同上=弹体朝向;SW-AF1 2026-09-04（蓝队 F2）：补 ×8——原版 Damage_PVE 全表遍历同式 StrikeNPC(100,8,num40)（PrepareBombToBlow :47644 kb=8f）,与同函数敌怪支(:24976)/城镇支口径统一;SW-RB10d：尾 fromPlayer=true（Projectile.cs:13382 并集）
+        // ★BJ467④（2026-10-03）TimerCrit :12928 同面补位（critter 与敌怪同链同 crit 段
+        //  :12912-12943——SW-S1「一条链」判词延伸;快照纪律同敌怪支）
+        const critterTimerCrit = this.player.tryConsumingTimerCrit(this,
+          c.x, c.y, c.w, c.h);
+        c.hurt((this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
+          ? Math.trunc(cdmg / 5) : cdmg) * (critterTimerCrit ? 2 : 1),
+          (kbDir || (Math.sign(c.cx - exPx) || 1)) * 8, 0, this, pen, critterTimerCrit, 0, true);   // SW-AC1：方向同上=弹体朝向;SW-AF1 2026-09-04（蓝队 F2）：补 ×8——原版 Damage_PVE 全表遍历同式 StrikeNPC(100,8,num40)（PrepareBombToBlow :47644 kb=8f）,与同函数敌怪支(:24976)/城镇支口径统一;SW-RB10d：尾 fromPlayer=true（Projectile.cs:13382 并集）;★BJ467④ crit 色位+×2
       }
     }
     for (const nent of this.entities.npcs) {
@@ -32094,8 +32132,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  （explodeFriendlyVictimDamage=DV(luck 正向)→旗乘区）;kb=8（P.cs:47644
       //  PrepareBombToBlow knockBack——旧 ×2 档为占位）
       if (inBox(tn.cx, tn.cy, tn.w, tn.h)) {
+        // ★BJ467④（2026-10-03）TimerCrit :12928 同面补位——城镇受害靶同达 crit 段;
+        //  TownNPC.hurt crit 参=防后 ×2+色一体（NPC.cs:82067）→ 数值勿预倍,传参即翻倍
+        const townTimerCrit = this.player.tryConsumingTimerCrit(this,
+          tn.x, tn.y, tn.w, tn.h);
         tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
-          (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this);   // SW-AC1：方向=弹体朝向（同敌怪支）
+          (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this, 0, 0, townTimerCrit);   // SW-AC1：方向=弹体朝向（同敌怪支）;★BJ467④ crit 参（防后×2 交接收端）
       }
     }
     // SelfHurtPlayers（:15104-15152）：FixedSelfDamageForPlayers 表无 773 → 自然伤害

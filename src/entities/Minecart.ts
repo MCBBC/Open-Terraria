@@ -760,9 +760,17 @@ export class Minecart extends Entity {
         vx: rx - src.x, vy: ry - src.y,
         dirX: Math.sign(this.vx), age: 0,
       });
-      // damage=60 → Damage()（无 melee/ranged/magic 旗 → 永不暴击；kb 0）
+      // damage=60 → Damage()（无 melee/ranged/magic 旗 → 三类掷不达；kb 0）
       // ★F1：Damage 面 → 攻端旗乘区（ApplyBannerDamageDealt 单源）
-      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG), 0, 0, game, 0, false, 0, true);   // 玩家矿车激光=DPS 计
+      // ★BJ467③（2026-10-03）TimerCrit :12928 补位——原版 CastSuperCartLaser（Mount.cs
+      //  :5264-5290）对每靶 NewProjectile(591) 直调 `Damage()`（:5282）= Damage_PVE_Inner
+      //  全管线,TryConsumingTimerCrit 对一切玩家弹无条件消费（三类掷不达但蓄能暴击照
+      //  强制,charge→−15）。快照纪律:门读 hurt 前状态——:12636 immune 门已由上方
+      //  `e.iframes > 0 continue` 承载、:12686 dontTakeDamage 门在 :745 承载,此处即受理位。
+      const cartTimerCrit = ((game.player as unknown as
+        { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+        | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h)) ?? false;
+      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG) * (cartTimerCrit ? 2 : 1), 0, 0, game, 0, cartTimerCrit, 0, true);   // 玩家矿车激光=DPS 计;★BJ467③ crit 色位+×2
     }
   }
 
