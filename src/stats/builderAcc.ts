@@ -137,6 +137,22 @@ export function rulerGridFade(dist: number): number {
   return 0.2 + 0.5 * Math.max(0, Math.min(1, 1 - dist / 6));
 }
 
+/** ★BJ448 网格 dst 衰减罩 α（=tint.a 通道;Main.cs:47162 color 第 4 通道）：
+ *  XNA Color(0.24,0.8,0.9,0.5)→byte(61,204,229,127)（(byte)(f·255) 截断）×0.4×num3
+ *  全通道乘 ⇒ a = floor(127·0.4·num3)/255（与 Renderer 侧 rgb 烘焙 floor(61·0.4·num3)
+ *  同一 byte 链约定;num3∈[0.2,0.7] ⇒ a∈[0.04,0.14]）。消费：tintedExtra 黑模
+ *  （α=模板 texA）× 本值 = 逐像素 αs=texA·a,multiply 黑罩给 dst×(1−texA·a)
+ *  ——BlendState.AlphaBlend(One/InvSrcAlpha) 衰减项。 */
+export function rulerGridMaskAlpha(num3: number): number {
+  return Math.floor(127 * 0.4 * num3) / 255;
+}
+
+/** ★BJ448 十字 dst 衰减罩 α（=color2.a;Main.cs:47163 (1,0.8,0.9,0.5)×0.5×num3）：
+ *  a = floor(127·0.5·num3)/255,num3∈[0.2,0.7] ⇒ a∈[0.05,0.175]。 */
+export function rulerCrossMaskAlpha(num3: number): number {
+  return Math.floor(127 * 0.5 * num3) / 255;
+}
+
 /** 标尺 W×H 计数文本（Main.cs:46189-46194 DrawInterface_33_MouseText）：
  *  (|rulerLineDisplayValues.X|+1)+"x"+(|Y|+1),`num>1||num2>1` 门 ⇒ 1×1 不显。
  *  值源 :47089-47091 = 玩家脚底格→鼠标格跨度（nudge 后）——与放置笔画/墙无关,

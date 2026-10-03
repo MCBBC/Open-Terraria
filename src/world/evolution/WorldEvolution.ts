@@ -202,6 +202,10 @@ export interface EvolutionHost {
    *  Game 侧 vid→物品键→spawnDrop,盒锚 (x*16,y*16)）。缺省 = 无掉落且整面跳过
    *  （离线测试零掷签零流差）。 */
   spawnKillDrop?: (vid: number, x: number, y: number, stack: number) => void;
+  /** ★BJ444（2026-10-03）：演化域 kill 位次的 KillTile 打碎尘出口（KillTile :64212-64216
+   *  fail=false 档——级联杀 CheckTree/CheckVines/PlantCheck 每格 KillTile 各出一粒组,
+   *  原版本相）。宿主实现 = Game.spawnTileDustAt(x, y, false)。缺省 = 静默（离线测试）。 */
+  spawnKillDust?: (x: number, y: number) => void;
   /** KillTile_GetTreeDrops :66744-66746 最近玩家选中物品 axe（:66745 单机=本地手持）。 */
   selectedAxePower?: () => number;
   /** SpecialSeedFeatures.ShouldDropExtraWood（SpecialSeedFeatures.cs:15-24 =
@@ -346,12 +350,22 @@ export class WorldEvolution {
     if (before !== type) this.frameDependents(x, y);
   }
   private kill(x: number, y: number): void {
+    this.killCore(x, y, true);
+  }
+
+  /** @param emitDust ★BJ444（2026-10-03）：KillTile 打碎尘开关——killTileCascadeAt
+   *   入口（玩家砍树面）传 false：该位次的原版 KillTile 尘已由 Game.breakTileBody 头
+   *   BJ444 面出过（同格一次;级联干格的尘仍由本域 killFlat 各自出）。 */
+  private killCore(x: number, y: number, emitDust: boolean): void {
     const st = this.host.store;
     // ★RD-F10（2026-09-04）：头门=原版字面 `if (!tile.active()) return;`（KillTile
     //   cs:64043-64045）——幽灵残型格（flags=0,type≠0）不可被 kill。现调用点全前置
     //   active 判（行为不变），此门防新增调用点误杀残型（此前以 type!==0 代 active 位,
     //   幽灵格会连残型一起清=KillTile 语义外的硬清）。
     if (!st.inBounds(x, y) || !st.hasTile(x, y)) return;
+    // ★BJ444（2026-10-03）：KillTile 打碎尘（cs:64212-64216,fail=false 档——尘位在
+    //   PlaySounds :64064 之后、Drops :64375 之前,故先于 killDropFace）
+    if (emitDust) this.host.spawnKillDust?.(x, y);
     // ★⑤（2026-09-04 掉落族批）：KillTile 掉落面——原版 DropBait/DropItems
     //   （cs:64375-64376）在清格（:64430 tile.type=0）前跑,帧/基座须读活格。
     this.killDropFace(x, y);
@@ -375,7 +389,9 @@ export class WorldEvolution {
   killTileCascadeAt(x: number, y: number): boolean {
     const st = this.host.store;
     if (!st.inBounds(x, y) || !st.hasTile(x, y)) return false;
-    this.kill(x, y);
+    // ★BJ444：被砍格的 KillTile 尘已由 Game.breakTileBody 头统一出（同格一次）——
+    //   本入口的级联干格尘由树 Check 链 killFlat 各自出
+    this.killCore(x, y, false);
     return true;
   }
 
@@ -757,6 +773,8 @@ export class WorldEvolution {
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
     if (!st.hasTile(x, y)) return false;
+    // ★BJ444（2026-10-03）：KillTile 打碎尘（cs:64212 fail=false 档,尘位在 Drops 前）
+    this.host.spawnKillDust?.(x, y);
     this.killDropFace(x, y);
     st.setTile(x, y, 0);
     return true;
@@ -771,6 +789,9 @@ export class WorldEvolution {
     const st = this.host.store;
     if (!st.inBounds(x, y)) return false;
     if (!st.hasTile(x, y)) return false;
+    // ★BJ444（2026-10-03）：noItem 只门掉落段（cs:64373）——尘位 cs:64212 在其前,
+    //   KillTile(noItem:true) 照出尘（原版本相）
+    this.host.spawnKillDust?.(x, y);
     st.setTile(x, y, 0);
     return true;
   }

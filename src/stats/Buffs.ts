@@ -1190,9 +1190,12 @@ export class BuffState {
   /** 本 tick ENV_DOTS 是否有 DoT 流量在账（含被星云免掉的——原版 DoT 段照写
    *  lifeRegenTime=0,星云只免伤害不清爬坡;Player 消费于 lifeRegenTime 复位门） */
   dotActiveTick = false;
-  /** 蜂蜜对冲流率账（:19212 lifeRegen+4 钳≤0 = 2HP/s——分块架构下的流量对冲账,
-   *  逐 tick 抵减已弹出的 DoT 分块;余量跨 tick 结转） */
-  private honeyOffsetAccum = 0;
+  /** 蜂蜜对冲整数位账（:19212-19214 lifeRegen+4 钳≤0 = 2HP/s——分块架构下的流量
+   *  对冲账,单位=原版 lifeRegen 单位（120 单位=1HP,Player.cs:1919/:1921 双 int）:
+   *  逐 tick 整数计提 +4,兑付按整 HP（120 单位）抵减已弹出的 DoT 分块;余数
+   *  （<120 单位）跨 tick 结转,蜂蜜/DoT 离栏即弃。★BJ447 整数化（原 lifeRegen
+   *  Accum 浮点 2×dt 计提携分数入 heal→hp 真值面,BJ443 登记债） */
+  private honeyOffsetUnits = 0;
   /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费） */
   nebulaLifeLevel = 0;
 
@@ -1466,27 +1469,29 @@ export class BuffState {
     }
     // 蜂蜜对冲（Player.cs:19212-19219：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
     // 对冲后钳回 ≤0）。原版按 tick 连续流量结算;本仓 DoT 分块弹出,按块发 +1 HP 会在
-    // 块边界整 HP 漂移——改为【流率对冲】：2HP/s 计入累加账,直接抵减本 tick 已弹出
-    // 的 DoT 分块（钳 ≤0 语义 = cancel ≤ -dots）,净值与原版逐 tick 精确一致
-    // ★BJ443 登记债（本块=全仓飘字/扣血链唯一浮点源,2026-10-03 定谳）：cancel 为
-    //   浮点（honeyOffsetAccum += 2×dt 逐 tick 计提）,经 heal → Player.ts buffHeal
-    //   流入 hp 真值面（净额与原版一致,但 hp 携分数——原版 lifeRegen/lifeRegenCount
-    //   全程整数,hp 恒整）;显示面截断已在 Player.ts consumeDotChunk 调用点 + Game.ts
-    //   addDamageNumber 入口双落（用户实报 1.4333333333333333 红字 = 2 块 − 17tick×
-    //   2/60 对冲)。修法候选=对冲改整数位延迟弹出（原版同构）,牵动 Buffs.tick 金标,另刀。
+    // 块边界整 HP 漂移——改为【整数位对冲账】（原版同构）：计提端逐 tick 整数
+    //   +4 lifeRegen 单位（:19214 原式;120 单位=1HP,:19478 弹出门同单位,原版
+    //   lifeRegen(:1919)/lifeRegenCount(:1921) 双 int 全程整数）,兑付端按账面折整 HP
+    //   抵减本 tick 已弹出的 DoT 分块（钳 ≤0 语义 = cancel ≤ -dots）,余数（<120 单位）
+    //   跨 tick 结转、蜂蜜/DoT 离栏即弃——长期对冲总量 2HP/s 与原版 :19384 净流率
+    //   精确一致,heal/dotChunkOut 全程整数
+    // ★BJ443 登记债清偿（BJ447,2026-10-03）：旧 cancel=honeyOffsetAccum（+= 2×dt
+    //   浮点计提）携分数经 heal → Player.ts buffHeal 流入 hp 真值面;现计提/兑付双端
+    //   整数化,分数源消除,Player.ts consumeDotChunk 调用点 + Game.ts addDamageNumber
+    //   入口双截断保留为兜底（对整数输入恒等）。
     if (this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)
       && (this.dotActiveTick || dots < 0)) {
-      this.honeyOffsetAccum += 2 * dt;          // +4 lifeRegen 单位/tick,流量口径逐 tick 计提
+      this.honeyOffsetUnits += 4;               // :19214 +4 lifeRegen 单位/tick（整数计提）
       if (dots < 0) {
-        const cancel = Math.min(-dots, this.honeyOffsetAccum);
-        this.honeyOffsetAccum -= cancel;
+        const cancel = Math.min(-dots, Math.floor(this.honeyOffsetUnits / 120));
+        this.honeyOffsetUnits -= 120 * cancel;  // 兑付按整 HP 折 120 单位,余数结转
         dots += cancel;
         heal += cancel;
         this.dotChunkOut -= cancel;
         if (heal > 0) heal = 0;
       }
     } else {
-      this.honeyOffsetAccum = 0;                // 蜂蜜离栏即清账（原版对冲无跨期结转）
+      this.honeyOffsetUnits = 0;                // 蜂蜜离栏即清账（原版对冲无跨期结转）
     }
     // 蜂蜜 flat 正项（UpdateLifeRegen :19250-19254：honey → lifeRegenTime+=2、
     // lifeRegen+=2 = 1 HP/s——位于 DoT/对冲段后不被清零,R5 蓝队勘误移出正项池）。

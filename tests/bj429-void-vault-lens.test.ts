@@ -21,7 +21,7 @@
 //   M2  帧式 %40 或 ÷5 破坏（如 %30、÷4）      → T-A1 红（钉值）
 //   M3  心位 Y−2 摘除（回 +8）                 → T-A2 红
 //   M4  尾序 pos+=v×10/v×−1 摘除或支互换       → T-A4 红（钉值）
-//   M5  回声 'lighter' 改 source-over/α 式破坏 → T-C1 红（echo 序列）
+//   M5  回声 'lighter' 改 source-over/α 式破坏 → T-C6 红（echo 序列;BJ449-D5 移 7b0）
 //   M6  tile 面 addFrX=54 回左半（BJ248 回退）  → T-B1+旧 bj248 T1 双红（防连带）
 //   M7  尘支方向向量 (0.5,1) 摘除/SafeNormalize 摘除 → T-A4 红
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
@@ -248,6 +248,9 @@ const draw = (world: { store: TileStore; w: number; h: number }, paused = false)
   (r as unknown as { drawVoidLenses(...args: unknown[]): void })
     .drawVoidLenses(CAM, world, 800, 600, 1);
 };
+const flush = () => {
+  (r as unknown as { flushVoidLensComplements(): void }).flushVoidLensComplements();
+};
 
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).Image = class {
@@ -308,7 +311,7 @@ afterEach(() => {
 });
 
 describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", () => {
-  it('T-C1 中心格触发：本体 sy=帧×48 落位心±半宽 + 点光 0.4/0.2/0.9 + 回声×3 lighter α0.4 + 尘', () => {
+  it("T-C1 中心格触发：本体 sy=帧×48 落位心±半宽 + 点光 0.4/0.2/0.9 + 尘（回声移 7b0 flush=T-C6）", () => {
     // 库体 3×3 @ (10,20)..(12,22),中心格 (11,21) fx=fy=18;tick=0 → 帧=(0+184+342)%40/5=1
     const world = makeVaultWorld([
       { x: 10, y: 20, fx: 0, fy: 0 }, { x: 11, y: 20, fx: 18, fy: 0 }, { x: 12, y: 20, fx: 36, fy: 0 },
@@ -323,9 +326,9 @@ describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", ()
     expect(rnd).toHaveBeenCalledTimes(6);
     // 点光（Helper.Update :36;tile 坐标=中心格）
     expect(lightCalls).toEqual([[11, 21, 0.4, 0.2, 0.9]]);
-    // 主画布 drawImage：1 本体（9 参）+ 3 回声（5 参）
+    // 主画布 drawImage：1 本体（9 参）——★BJ449-D5 回声已撤出世界层（防 ×light 乘暗）
     const draws = mainCtx.__calls.filter((c) => c.fn === 'drawImage');
-    expect(draws).toHaveLength(4);
+    expect(draws).toHaveLength(1);
     const b = draws[0]!.args as [unknown, number, number, number, number, number, number, number, number];
     expect(b[0]).toBe(IMG734);
     expect(b[1]).toBe(0);            // tex.sx
@@ -334,27 +337,7 @@ describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", ()
     expect(b[5]).toBe(400 + 0 - 17); // xd=ox+round((184−184)·1)−17（心位 M3 变异红）
     expect(b[6]).toBe(300 + 0 - 24); // yd=oy+round((342−342)·1)−24
     expect(b[7]).toBe(34); expect(b[8]).toBe(48);
-    // 回声×3（:87-97）：'lighter'、α=0.4（t=0 呼吸峰）、尺寸 ×1.1=37×53（M5 红）
-    for (let e = 1; e <= 3; e++) {
-      const args = draws[e]!.args as [unknown, number, number, number, number];
-      expect(args[0]).toBeTruthy();
-      expect(args[3]).toBe(37);
-      expect(args[4]).toBe(53);
-    }
-    const seq = mainCtx.__calls.map((c) => c.fn);
-    const bodyIdx = seq.indexOf('drawImage');
-    expect(seq.indexOf('set.globalCompositeOperation', 0)).toBeGreaterThanOrEqual(0);
-    // 本体后三次 'lighter' 置位 + α0.4 置位（按序）
-    const lighterSets = mainCtx.__calls
-      .map((c, i) => ({ c, i }))
-      .filter(({ c }) => c.fn === 'set.globalCompositeOperation' && c.args[0] === 'lighter')
-      .map(({ i }) => i);
-    expect(lighterSets).toHaveLength(1);   // 一段 lighter 批（3 连画共享一次置位）
-    expect(lighterSets[0]!).toBeGreaterThan(bodyIdx);
-    const alphas = mainCtx.__calls
-      .filter((c) => c.fn === 'set.globalAlpha')
-      .map((c) => c.args[0] as number);
-    expect(alphas).toContain(0.4);
+    // 回声×3 断言移 T-C6（★BJ449-D5：原版回声不吃 light,7b0 乘光后补画）
     // 尘：spawn(164,332,0,0,88) + 字段全覆写（T-A4 A 支钉值）
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0]!.args).toEqual([164, 332, 0, 0, 88]);
@@ -367,6 +350,41 @@ describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", ()
     expect(d.fadeIn).toBe(0.5);
     expect(d.noGravity).toBe(true);
     expect(d.noLightEmittance).toBe(true);
+  });
+
+  it("T-C6 回声×3 = 7b0 乘光后 'lighter' 补画（★BJ449-D5：原版回声零 GetColor 不吃 light,VoidLensHelper.cs:90/:93）", () => {
+    const world = makeVaultWorld([{ x: 11, y: 21, fx: 18, fy: 18 }]);
+    vi.spyOn(Math, 'random').mockReturnValue(0.9);   // ≥1/3 → 无尘
+    draw(world);
+    expect(mainCtx.__calls.filter((c) => c.fn === 'drawImage')).toHaveLength(1);   // 扫描期零回声直绘
+    flush();
+    const draws = mainCtx.__calls.filter((c) => c.fn === 'drawImage');
+    // flush 段 = 1 白化补差（lightAt 200 → 补差 28）+ 3 回声
+    expect(draws).toHaveLength(5);
+    for (let e = 2; e <= 4; e++) {
+      const args = draws[e]!.args as [unknown, number, number, number, number];
+      expect(args[0]).toBeTruthy();                  // = _voidLensCompScratch 布
+      expect(args[3]).toBe(37);                      // 尺寸 ×1.1=37×53（M5 红）
+      expect(args[4]).toBe(53);
+    }
+    // 回声 lighter 置位 + α0.4（t=0 呼吸峰,x=cos0=1 → 0.3+0.1）+ 尾置 1
+    const lighterSets = mainCtx.__calls
+      .filter((c) => c.fn === 'set.globalCompositeOperation' && c.args[0] === 'lighter');
+    expect(lighterSets.length).toBeGreaterThanOrEqual(2);   // 补差 1 + 回声批 1
+    const alphas = mainCtx.__calls
+      .filter((c) => c.fn === 'set.globalAlpha')
+      .map((c) => c.args[0] as number);
+    expect(alphas).toContain(0.4);
+    expect(alphas[alphas.length - 1]).toBe(1);
+    // 回声 tint 烘焙在 _voidLensCompScratch（补差 28 → 回声 127,50,127 序）
+    const scratch = created.find((c) =>
+      c.getContext().__calls.some((k) => k.fn === 'set.fillStyle' && k.args[0] === 'rgb(127,50,127)'));
+    expect(scratch).toBeTruthy();
+    const fills = scratch!.getContext().__calls
+      .filter((k) => k.fn === 'set.fillStyle')
+      .map((k) => k.args[0] as string);
+    expect(fills).toContain('rgb(28,28,28)');        // 补差先行（0.5×(255−200)）
+    expect(fills[fills.length - 1]).toBe('rgb(127,50,127)');
   });
 
   it('T-C2 非中心格/失活中心格零触发（TileDrawing.cs:701 frameX==18&&frameY==18 门）', () => {
@@ -384,6 +402,7 @@ describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", ()
     const world = makeVaultWorld([{ x: 11, y: 21, fx: 18, fy: 18 }]);
     const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);
     draw(world, true);
+    flush();                                  // 回声/补差在 7b0 段（BJ449-D5）
     expect(lightCalls).toHaveLength(0);
     expect(spawnCalls).toHaveLength(0);
     expect(rnd).not.toHaveBeenCalled();       // 尘掷在 spec 生成前被消费端门拦

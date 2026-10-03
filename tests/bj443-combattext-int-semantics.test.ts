@@ -15,6 +15,11 @@
 //   ② 根因层·显示面 Player.ts consumeDotChunk 调用点截断【在 dot>0 门之前】——
 //      C# 的截断发生在调用侧，门看到的是截后值；分数块（0<x<1）若过门后截断会
 //      冒出 "0" 飘字（原版蜂蜜对冲=延迟弹出，无弹无字）。
+// ★BJ447（2026-10-03）：真值面整数化收官——Buffs.tick 蜂蜜对冲改整数位账
+//   （honeyOffsetUnits,+4 单位/tick 整数计提 + 整 HP 差额延迟弹出,原版
+//   lifeRegen(:1919 int)/lifeRegenCount(:1921 int) 同构）,浮点源头消除,①②
+//   双截断保留为兜底（对整数输入恒等）。本文件 ② 的夹具探针已按新 oracle 重产
+//   （旧探针 `raws.some(!isInteger)` 锁的是浮点 dust 本身=病灶,非金标）。
 // 本测试①用 Game 原型壳直判入口截断；②用真实 Player.fixedUpdate + fakeHooks
 // 捕获调用点出参（绕开入口层，独立判别调用点截断）。
 import { describe, expect, it } from 'vitest';
@@ -97,7 +102,7 @@ describe('BJ443 根因层：Burning+Honey DoT 分块飘字恒整数（调用点�
     const w = new World(60, 60, 42, 'bj443');
     const p = new Player(20 * 16, 27 * 16, new Inventory());
     p.buffs.apply(BuffType.Burning, 30);   // −30 HP/s，块 5（DOT_CHUNK）——分数对冲可判别
-    p.buffs.apply(BuffType.Honey, 30);     // 流率对冲 2HP/s（浮点累加）+ flat 1HP/s
+    p.buffs.apply(BuffType.Honey, 30);     // 整数位对冲 2HP/s（BJ447）+ flat 1HP/s
 
     // 夹具有效性探针：包一层 consumeDotChunk 记录原始（未截断）分块值
     const raws: number[] = [];
@@ -111,8 +116,11 @@ describe('BJ443 根因层：Burning+Honey DoT 分块飘字恒整数（调用点�
     const captured: number[] = [];
     for (let i = 0; i < 300; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p, captured) as never);
 
-    // 夹具确实踩中了浮点路径（蜂蜜对冲 cancel=分数）：至少一个原始分块非整数
-    expect(raws.some((c) => !Number.isInteger(c))).toBe(true);
+    // 夹具确实踩中了蜂蜜对冲路径（★BJ447 后 oracle 重产）：对冲按原版 +4 单位/tick
+    // （Player.cs:19214,120 单位=1HP）延迟兑付——Burning 块 5 在兑付拍被抵减为 4,
+    // 且全流程原始分块恒整数（旧浮点 cancel=2×dt 携分数已被 BJ447 整数化消除）
+    expect(raws.some((c) => c < 5)).toBe(true);
+    for (const r of raws) expect(Number.isInteger(r)).toBe(true);
     // 至少有一块真实弹出（否则判别力为零）
     expect(captured.length).toBeGreaterThanOrEqual(1);
     // 判别面：调用点出参全部整数（修复前此处出 4.666666666666667 → 红）

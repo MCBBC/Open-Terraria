@@ -9202,8 +9202,25 @@ export class Arrow extends Entity {
     if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile', 0, trailCollide872);
     // ★红队 A-2 收口①：damage<=0 的友方弹不入城镇 NPC 窄门——原版 Damage_PVE 头
     //   `if (damage <= 0) return`（P.cs:12576）先于【一切】NPC 命中面,窄门也在段内
+    // ★BJ452 N4：局部免疫族城镇面补档（usesLocalNPCImmunity+localNPCHitCooldown 数据
+    //   驱动,642 月门弹 cd10 P.cs:6906-6916）——vanilla 单 localNPCImmunity 数组敌/城
+    //   两面共用:①skip=flag2 私表门（:12595,敌环 :9414 同源 localImmuneCd+出生预置表）；
+    //   ②受理拍写梯 usesLocal 主支（:14175-14179）immune[owner]=0【清窗】+写表——
+    //   TownNPC.hurt 通用档写的 10t（TownNPC.ts:1495）须清还原（MinionProj
+    //   .townAcceptLadder 同构）。窗查由 TownNPC.hurt :1422 内部门+受理 gated onAccept
+    //   承载（拒收拍不写表=表保持 0,原版同相）。非局部族两面不挂（零行为变）。
     else if (!this.reflected && this.damage > 0
-      && hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId)) {
+      && hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId, undefined, undefined,
+        this.localImmune > 0
+          ? (n) => (this.spawnImmuneCd.get(n.id) ?? 0) > 0
+            || (this.localImmuneCd.get(n.id) ?? 0) > 0
+          : undefined,
+        this.localImmune > 0
+          ? (n) => {
+            this.localImmuneCd.set(n.id, this.localImmune);   // immuneArray[victim]=cd（:14179）
+            (n as { iframes?: number }).iframes = 0;          // immune[owner]=0 清窗（:14177）
+          }
+          : undefined)) {
       if (this.projId === 318) { this.killNow(game); return; }   // 臭蛋砸 NPC 即碎（penetrate 1）
     }
     // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
@@ -9373,11 +9390,20 @@ export class Arrow extends Entity {
         // 全场同型一张表,多弹齐射不叠伤;蓝队 R7-24 曾走逐弹 hitSet）。
         // ★R28：511-513 毒云 UseGroupStaticImmunity(511) 同机制——三型共用键 511
         // （immunityIdentity :10686,idStaticNPCHitCooldown=10t）
-        if ((this.projId === 376 || this.projId === 604)
-          && !idStaticCheck(this.projId, e.id, this.projId === 376 ? 100 : 167)) continue;
+        // ★BJ455⑥ :12636 三族共门（原版 :12635-12637 `immune[owner]==0` 在写梯
+        //  :14031-14179 之前对 usesLocal/usesIDStatic 弹同样生效——flag3 只豁免单发
+        //  非局部弹 :12634,局部/idStatic 族【无】豁免,故本门只挂三支私表位内、
+        //  不挂 -2 缺省族共位;BJ436 敌怪环同判例。旧三支不查窗=窗拒拍白吃私表 cd,
+        //  节拍漂移;门读 hurt 前状态=快照纪律,原版门位先于水母块 :12676-12688
+        //  → 窗内水母不电同相）
+        if (this.projId === 376 || this.projId === 604) {
+          if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
+          if (!idStaticCheck(this.projId, e.id, this.projId === 376 ? 100 : 167)) continue;
+        }
         let immFaceIdStatic = false;
         if (this.idStaticGroup !== null) {
           immFaceIdStatic = true;   // ★GC1 写方桥 face 记录（命中尾统一写用）
+          if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
           if (!idStaticCheck(this.idStaticGroup, e.id, this.idStaticCdMs)) continue;
         }
         if ((this.projId === 376 || this.projId === 604)) immFaceIdStatic = true;
@@ -9386,6 +9412,7 @@ export class Arrow extends Entity {
         let immFaceLocal = false;
         if (this.projId === 502) {
           immFaceLocal = true;      // ★GC1 face 记录（同 usesLocalNPCImmunity 形）
+          if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
           // ★水母块（★S2-债2 清偿刀,2026-10-01——原 else 支 :9304 同面展开到 502/
           //  局部免疫支）：Damage_PVE_Inner :12686 `if (dontTakeDamage) return` 在写梯
           //  :14031-14183【之前】⇒ 充能水母重叠拍不落局部免疫账（旧档先写
@@ -9403,6 +9430,7 @@ export class Arrow extends Entity {
         } else if (this.localImmune > 0) {
           // 1457: 通用局部免疫（usesLocalNPCImmunity+localNPCHitCooldown=N，数据列驱动）
           immFaceLocal = true;      // ★GC1 face 记录
+          if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
           // ★水母块（★S2-债2,同 502 支——本支接触族成员 611(aiStyle75)/697·707
           //  (aiStyle140) 充能水母重叠拍照电玩家;旧档先写 localImmuneCd=白写+漏电）
           if (zapJelly && jellyDontTake) {
@@ -9819,7 +9847,19 @@ export class Arrow extends Entity {
     }   // 钉 514 命中专管 else 收口
     // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效——杀裁缝师
     // 召骷髅王即此链);穿透/销毁语义与敌怪一致
-    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)
+    // ★BJ455④ 同拍双调门（定谳:原版 Damage() 单 Main.npc 数组单趟 victim 循环
+    //  :12592——每靶每拍至多一次受理,无第二城镇面。本仓敌怪/城镇双桶拆分尾段
+    //  旧城镇面 + BJ452 N4 :9206 城镇面同拍双调:局部族 face1 受理拍清窗+写表 →
+    //  旧尾面无 skip 探针同拍再受理=642 场景双倍伤（vanilla 无此面）。修=尾面挂
+    //  同源局部表 skip（face1 受理拍已写 localImmuneCd → 尾面 flag2 臂同式拒跳,
+    //  与原版跨拍「表行未清不重受理」同语义）;非局部族 skip=undefined 零行为变,
+    //  穿透/销毁语义保持本面承载）。
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0,
+      undefined, undefined,
+      this.localImmune > 0
+        ? (n) => (this.spawnImmuneCd.get(n.id) ?? 0) > 0
+          || (this.localImmuneCd.get(n.id) ?? 0) > 0
+        : undefined)
       && this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
   }
 

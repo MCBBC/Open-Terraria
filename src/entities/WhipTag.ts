@@ -14,7 +14,7 @@
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
-import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -325,7 +325,10 @@ export class TagEffectState {
       const px = Math.max(en2.x, Math.min(en2.x + en2.w, ctx.hx));
       const py = Math.max(en2.y, Math.min(en2.y + en2.h, ctx.hy));
       if (Math.hypot(px - ctx.hx, py - ctx.hy) > 450) continue;
-      if (!playerCanHitEnemy(ent, g, ctx.projId || 5478)) continue; // CanBeChasedBy 门
+      if (!canBeChasedBy(ent)) continue;   // :41 CanBeChasedBy（索敌门;★BJ449 勘误:
+        //  旧读 playerCanHitEnemy 命中门系注释自称 CanBeChasedBy 而实现错挂——
+        //  immortal 488/690、chaseable=false {379,380,399,437,438,440,523}、
+        //  dontTakeDamage、lifeMax≤5 族在原版不耗链位;城镇 NPC 经 !friendly 同门排除）
       hits++;
       en2.hurt(applyBannerDamageDealt(g, en2, 20), 0, 0, g, 0, false, 0, true);               // TryHittingNPC(nPC, 20, 0, null, 5478);fromPlayer=DPS 计
       // BlueLightningSmallLong 链电（WhipTagEffect_ElectricEel.cs:46 RequestParticleSpawn
@@ -390,21 +393,32 @@ export class TagEffectState {
     let consumed = false;
     switch (d.kind) {
       case 'firecracker': {
-        // OnProcHit :14-18 → CreateExplosion :20-29：918 爆炸,伤 = calcDamage×2.75,
-        //  localNPCImmunity=-1（本仓 AoE 直结,friendly 门同 Game.explodeAt）
+        // OnProcHit :14-18 → CreateExplosion :20-24：原版 = NewProjectile(918)
+        //  （friendly 96×96 居中盒、kb=0f、usesLocalNPCImmunity+cd=-1 每靶一次）→
+        //  Damage_PVE 全 NPC 环结算（非直调 StrikeNPC）。★BJ449（2026-10-03 proc AoE
+        //  城镇面定谳）两刀：①源敌永免——:23 `localNPCImmunity[npcHit.whoAmI]=-1`,
+        //  被 proc 命中敌不吃本爆炸（曾漏=源敌双吃 主伤×2.75+爆伤×2.75）;
+        //  ②城镇靶面 = Damage_PVE_Inner :12618-12631 巫毒窄门（22+killGuide/54+
+        //  killClothier;918≠318 例外不达）→ 走 hitTownNpcs('playerProj') 单源同门;
+        //  kb=0f（:22 第 5 参）→ settle 压 0（敌怪侧 ×2/-2 冲量与盒锚 hx/hy≈
+        //  npcHit.Center 的差异=「AoE 直结」登记偏差面,本刀不动）。
         consumed = true;
         const boom = Math.max(1, Math.trunc(calcDamage * 2.75));
         const g = game;
         {
           for (const ent of g.enemies()) {
             const en2 = ent as unknown as {
-              dead: boolean; cx: number; cy: number; w: number; h: number;
+              id: number; dead: boolean; cx: number; cy: number; w: number; h: number;
               hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
             };
-            if (en2.dead || !playerCanHitEnemy(ent, g, 918)) continue;
+            if (en2.dead || en2.id === ctx.hurtNpcId) continue;   // ★BJ449① :23 源敌 -1 永免
+            if (!playerCanHitEnemy(ent, g, 918)) continue;
             if (Math.abs(en2.cx - ctx.hx) > 48 + en2.w / 2 || Math.abs(en2.cy - ctx.hy) > 48 + en2.h / 2) continue;
             en2.hurt(applyBannerDamageDealt(g, en2, boom), Math.sign(en2.cx - ctx.hx) * 2, -2, g, 0, false, 0, true);   // fromPlayer=DPS 计
           }
+          // ★BJ449②：城镇巫毒窄门面（918 全 NPC 环的 friendly 靶支;盒=96×96 心=命中锚）
+          hitTownNpcs({ x: ctx.hx - 48, y: ctx.hy - 48, w: 96, h: 96 }, g, boom, 0,
+            'playerProj', 918, undefined, undefined, undefined, undefined, () => ({ kb: 0 }));
           g.spawnParticles?.(ctx.hx, ctx.hy, '#FF7A28', 16, 4, { life: 26 });
         }
         break;

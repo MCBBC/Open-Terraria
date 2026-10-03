@@ -1657,6 +1657,7 @@ export class GLShimExecutor {
       if (!this.resolveTex(glw, p)) {
         if (additive) glw.blendAdditive(false);
         glw.end();
+        this.restackAfterBlitOff(glw);   // ★C10e 屏栈补偿（头注见本函数尾）
         this.replay2D();
         return;
       }
@@ -1682,6 +1683,7 @@ export class GLShimExecutor {
         if (!ok) {
           if (additive) glw.blendAdditive(false);
           glw.end();
+          this.restackAfterBlitOff(glw);   // ★C10e 屏栈补偿（头注见本函数尾）
           this.replay2D();
           return;
         }
@@ -1719,7 +1721,29 @@ export class GLShimExecutor {
     wctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
     wctx.drawImage(glw.canvas, 0, 0, w, h);
     wctx.restore();
+    // ★C10e 屏栈补偿（2026-10-03 用户实报「光标指向 NPC 旗帜远景全消失」定谳刀）：
+    //  本函数 glw.end() → GLSpriteLayer.end → pipeBackend.present(fboWorld, over=false)
+    //  =blend-off 直写管线画布。旗关/C10e 前=画布只是回贴 scratch 无害;C10e 屏栈
+    //  模式下管线画布=DOM glCanvas=屏栈折叠面——blend-off 直写把 bg+云+群系背景
+    //  整组栈内容【踩掉】,帧尾合成器采样到踩踏态=远景层集合整体消失（云+山+森林
+    //  bg 三层齐没,天空渐变+太阳从 sky2D 透出）。触发链=旗布悬停名板 measureText
+    //  （读值面支 →ensureBridged→degradeAcc 换桥,Renderer 侧该处 present 自带
+    //  restack 补偿）后本帧续走桥接 flush——本函数的 world:OFF present 无补偿
+    //  （degradeAcc/fullbright/lightFast 三处同型位均有,唯此处漏）→悬停期间
+    //  每帧帧尾恒踩踏=「持续消失」;鼠标移开名板不再触发降级=自然恢复。四柱区
+    //  高空间歇案=同族（其他实体的 measureText/getImageData/clip 读值面 op
+    //  触发整帧降级,机制同此）。readback（上方 drawImage）必须先于 restack
+    //  消费踩踏态画布=本补偿只能落调用侧,不能下沉 GLSpriteLayer.end。
+    this.restackAfterBlitOff(glw);
     this.stats.flushes++;
+  }
+
+  /** ★C10e 屏栈补偿（presentBatch 专用）：blend-off present 踩踏屏栈折叠后按栈
+   *  重放恢复「glCanvas=屏栈」不变式（restackScreen=clear+栈序 premul over 重放,
+   *  与 degradeAcc 尾/全亮快路径补偿同款语义）。旗关/非共管=零操作。 */
+  private restackAfterBlitOff(glw: GLSpriteLayer): void {
+    const pipe = glw.pipeBackend;
+    if (pipe && pipe.screenStackMode) pipe.restackScreen();
   }
 
   /** 纹理解析（flush 期逐 rec;LRU 逐出/动态源/尘对惰性建面都在此收口）。

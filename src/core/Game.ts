@@ -38,6 +38,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLocke
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
+import { getTileDustAmount, makeTileDust, makeTileDustCtx, type DustSpawn } from '../world/TileDust';   // ★BJ444 KillTile 统一尘系统（WorldGen.cs:67119-69696）
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
 import { housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
@@ -146,6 +147,7 @@ import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_S
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
+  getFurniture, furnitureContainsItems,   // ★BJ444：pop 面尘门只读查询（:64195-64211 早退在尘位前）
   furnitureSlotCount, fitsFurniture, critterAnchorPlace, critterAnchorBreakDrop,
   kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   // ★SW-BO1 2026-09-07（SW-BL1 P2）：模特姿态循环（TryChangePose 等价物）
@@ -923,8 +925,10 @@ export function grassParticleFold(sheet: number, swayInWind: boolean): number {
 // KillTile_GetTileDustAmount（WorldGen.cs:67119-67207）分型档——hitTilesFx 撞块尘量。
 // 原版签名 (bool fail, Tile tileCache);Collision.HitTiles 走 KillTile(fail:true,
 // effectOnly:true)（Collision.cs:3116）→ 尘量恒取 fail=true 档（:64212-64216）。
-// 逐档提取:!fail 档仅注释备查。fail=true 下 231 幼虫(6:3)/481-483 裂纹砖(3)/
-// 苔族 534/536/539/625/627(5:3) 均塌缩到缺省 3,不入表。
+// ★BJ444（2026-10-03）：本表退役为测试锚——全量两档表（含本表全部成员+fail=false
+// 档 10 缺省/231/481-483/苔石族 5/184 帧档）已 1:1 移植 src/world/TileDust.ts
+// getTileDustAmount（运行时消费全走彼处;旧 killTileBreakDustAmount 随 ReplaceTile
+// 色点近似面退役删除）。
 // ★R8 勘误:任务面"宝石族"实为原版表内 巨石+合成站+滴淌/灯器 零尘族——宝石
 // (63-68/169-171 等)不在本表,走缺省 3。
 const KILL_TILE_DUST: Record<number, number> = {
@@ -942,26 +946,12 @@ const KILL_TILE_DUST: Record<number, number> = {
   549: 2,                                  // Seaweed
 };
 /** KillTile_GetTileDustAmount(fail=true) 档值（WorldGen.cs:67119-67207;184 帧档
- *  :67196-67205 frameX/22≥5→5 与 fail 无关;缺省 fail 档 3 :67123-67128） */
+ *  :67196-67205 frameX/22≥5→5 与 fail 无关;缺省 fail 档 3 :67123-67128）。
+ *  ★BJ444 备案：运行时已单源至 TileDust.getTileDustAmount,本函数仅存测试锚
+ *  （tests/spawn-side-override-golden）。 */
 export function killTileHitDustAmount(sheet: number, frameX: number): number {
   if (sheet === 184) return Math.floor(frameX / 22) >= 5 ? 5 : 3;   // LongMoss
   return KILL_TILE_DUST[sheet] ?? 3;
-}
-
-/** ★SW-RB6a 2026-09-07：KillTile_GetTileDustAmount(fail=false) 档值（WorldGen.cs
- *  :67119-67207）——ReplaceTile 尘量（:63072）专用。与 fail=true 档
- *  （killTileHitDustAmount）差异：缺省 10（:67123-67128）/231 幼虫 6（:67129-67134）/
- *  481-483 裂纹砖 3（:67135-67140）/苔石族 534/536/539/625/627 5（:67189-67195，
- *  fail 档均塌缩 3 故不在 KILL_TILE_DUST）/184 长苔 frameX/22≥5→5 否则 10
- *  （:67196-67205,fail 档 10→3）；654/630/631/零尘族/541/549 两档同值=复用
- *  KILL_TILE_DUST。 */
-function killTileBreakDustAmount(sheet: number, frameX: number): number {
-  if (sheet === 184) return Math.floor(frameX / 22) >= 5 ? 5 : 10;  // LongMoss
-  if (sheet === 231) return 6;                                      // Larva
-  if (sheet === 481 || sheet === 482 || sheet === 483) return 3;    // CrackedBricks
-  if (sheet === 534 || sheet === 536 || sheet === 539
-    || sheet === 625 || sheet === 627) return 5;                    // 苔石族
-  return KILL_TILE_DUST[sheet] ?? 10;
 }
 // tileAxe/tileHammer（Main.cs:7347-7364/:7343-7346）——★BJ158②（2026-09-18）：本地
 // 副本拆除收编 data/tiles.ts 单源（本仓曾有 Game/SmartSelect/SmartCursor 三文件六本
@@ -7378,6 +7368,9 @@ export class Game implements GameHooks {
       //  → KillTile_GetTreeDrops（WorldEvolution.killDropFace 1:1,genRand 骰走蔓延流/
       //  Main.rand 骰走宿主全局流）。vid→本仓物品键映射在 spawnKillDropItem。
       spawnKillDrop: (vid, x, y, stack) => this.spawnKillDropItem(vid, x, y, stack),
+      // ★BJ444（2026-10-03）：演化域 kill 位次 KillTile 打碎尘出口（级联杀 CheckTree/
+      //  CheckVines/PlantCheck 每格各出——砍树整段倒下的逐干尘由此来）
+      spawnKillDust: (x, y) => this.spawnTileDustAt(x, y, false),
       selectedAxePower: () => this.heldAxePower(),
       // ★②（2026-09-05 kill 掉落面扩展批）：KillTile_GetItemDrops 玩家位门/骰出口
       //  （GetPlayerForTile 单机=本地玩家;口径同 killTileShouldDropSeeds/cordage 消费点
@@ -21438,9 +21431,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ★BJ433：PickTile(:54412) 直调通道破块同开跟踪窗（钻头链同原版口径）
           this.intentionGuesser.allowTracking();
           this.mining = null;
+          // ★BJ444：KillTile case 26 破坏尘（:64212 fail=false 档;case 26||695 →
+          //  :69500 frameX>=54?5:Next(2)?1:14——祭坛不走 breakTile 故本支显式出）
+          this.spawnTileDustAt(tx, ty, false);
           this.smashAltar(tx, ty);                            // KillTile case 26 → SmashAltar
         } else {
           this.killTileBreakSound(type, tx, ty);              // KillTile(fail:true) 每击音
+          this.spawnTileDustAt(tx, ty, true);                 // ★BJ444 fail 档尘（:64212）
         }
         if (totalD !== 0) this.pruneHitTiles();
         return;
@@ -21477,13 +21474,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const total = this.hitTiles.addDamage(tx, ty, num2);  // AddDamage(num,num2)
       this.hardnessCache = 100;
       this.mining = { x: tx, y: ty, progress: total };
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
       if (total >= 100) {
         this.hitTiles.clear(tx, ty);
         this.mining = null;
+        // ★BJ444：KillTile case 26 破坏尘（:64212 fail=false 档——祭坛不走 breakTile）
+        this.spawnTileDustAt(tx, ty, false);
         this.smashAltar(tx, ty);                            // KillTile case 26 → SmashAltar
       } else {
         this.killTileBreakSound(type, tx, ty);              // KillTile(fail:true) 每击音
+        this.spawnTileDustAt(tx, ty, true);                 // ★BJ444 fail 档尘（:64212）
       }
       if (num2 !== 0) this.pruneHitTiles();                 // Player.cs:46087 if(damage!=0) Prune（★SW-BO1 1456 行号勘误）
       return;
@@ -21519,13 +21518,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const total = this.hitTiles.addDamage(tx, ty, num2);        // AddDamage(num,num2)（:46068）
         this.hardnessCache = 100;
         this.mining = { x: tx, y: ty, progress: total };
-        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2); // 每击尘（KillTile fail 支同祭坛支）
         if (total >= 100) {
           this.hitTiles.clear(tx, ty);
           this.mining = null;
-          this.breakTile(tx, ty, true);                             // KillTile case 31 → smashOrbHeart
+          this.breakTile(tx, ty, true);                             // KillTile case 31 → smashOrbHeart（破坏尘=breakTile 头 BJ444 面）
         } else {
           this.killTileBreakSound(type, tx, ty);                    // KillTile(fail:true) 每击音
+          this.spawnTileDustAt(tx, ty, true);                       // ★BJ444 fail 档尘（:64212）
         }
         if (num2 !== 0) this.pruneHitTiles();                       // :46087 if(num2!=0) Prune
         return;
@@ -21592,8 +21591,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 神庙锁门侧壁敲半砖）。vanilla 消费序：此门先于 470/平台/314/137/424/442/尾段。
           if (isLockedDoor(st, tx, ty - 1) || isLockedDoor(st, tx, ty + 1)) {
             this.hammerPoundRelease = true;           // :46387 早退=闩未消费（留待非锁门目标）
-            this.spawnParticles(tx * TILE + 8, ty * TILE + 8,
-              TILE_DEFS[type]?.mapColor ?? '#8B7553', killTileHitDustAmount(shH, st.frameX[st.idx(tx, ty)]), 1.2);
+            this.spawnTileDustAt(tx, ty, true);       // ★BJ444：KillTile(fail,effectOnly) 效尘（:64212 fail 档,色点近似退役）
             this.sfx.play('dig', 1, tx * TILE, ty * TILE);   // PlaySound(0)
             this.mining = null;
             return;
@@ -22046,14 +22044,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // return → 无音无尘无积累（蓝队 F6：曾 dmg=0 但音尘照播）
     if (sheet !== 504) {
       this.killTileBreakSound(type, tx, ty);
-      // ★BJ411 陨石挖掘尘（KillTile fail 支 GetTileDustAmount 缺省档 3 粒 × MakeTileDust
-      //  :69470-69473 sheet 37 → Next(2)==0?6:23）：火尘替 mapColor 色点（用户实报定谳面）
-      if (sheet === 37) {
-        this.spawnMeteoriteBreakDust(tx, ty, 3);
-      } else {
-        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
-      }
     }
+    // ★BJ444 尘面两档分立（原版 PickTile :54429/:54442 与斧支 :46126/:46137 两支各调
+    //  KillTile 一次,尘随 KillTile 出）：
+    //  · 破坏档（≥100 → KillTile 默认参）→ fail=false 尘由 breakTile 头统一出;
+    //  · 敲击档（<100 → KillTile(fail:true)）→ 下方 else 支 spawnTileDustAt(fail:true)。
+    //  旧每击 2 粒 mapColor 色点近似 + BJ411 陨石 3 粒特支退役（37 = :69468-69471
+    //  Next(2)?23:6 真值已入 per-type 表,数量/形态随全表 1:1）。
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
       // ★BJ433：IntentionGuesser.AllowTracking（:46142 斧支破块 + :54412 PickTile 内
@@ -22078,6 +22075,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 破坏完成音不再在此分档——统一走 breakTile 内 KillTile_PlaySounds 四档
       //（WorldGen.cs:66483-66631，见 killTileBreakSound；爆炸/液体冲毁路径同源）
     } else {
+      // ★BJ444：KillTile(fail:true) 敲击尘（:64212-64216,fail 档数量 × per-type 表）——
+      //  504 神秘蛇绳例外同音面（PickTile :54400-54402 头部早退无音无尘）
+      if (sheet !== 504) this.spawnTileDustAt(tx, ty, true);
       // SW-D1 2026-09-03 KillTile fail 路径转化（WorldGen.cs:64222-64250）：镐击未破
       // （fail:true）时草/苔族【原格转化】为基底块——不掉落不清格（:64249 return 在
       // 掉落段前）、积累缓冲不清（原版 fail 支无 ClearMiningCacheAt）。转化族全为
@@ -22327,15 +22327,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const total = this.hitTiles.addDamage(tx, ty, dmg);
     this.killTileBreakSound(type, tx, ty);
-    this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
       // ★BJ433：PickTile 内破块 AllowTracking（Player.cs:54412,原版无条件——钻地龟
       //  AI_204 与捣蛋猫帮工 HitIntention 两通道同原版口径）
       this.intentionGuesser.allowTracking();
       // PickTile 直调（:54398）= 镐支窗（:54414-54453）→ pickHit=true（HandleMining）
-      this.breakTile(tx, ty, true, false, true);
+      this.breakTile(tx, ty, true, false, true);   // 破坏尘=breakTile 头 BJ444 面（fail=false 档）
     } else {
+      this.spawnTileDustAt(tx, ty, true);          // ★BJ444：KillTile(fail:true) 尘（:54442-54447 :64212）
       // SW-D1：PickTile else 支 KillTile(fail:true)（:54442-54447）→ fail 路径转化表
       this.killTileFailTransform(tx, ty, sheet);
     }
@@ -22569,22 +22569,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
     const target = mowedSheetOf(sheet);
     if (target === 0) return false;
-    // 尘（:20533-20539 循环 num2=GetTileDustAmount(fail:true)=default 3）
-    for (let k = 0; k < 3; k++) this.mowGrassTileDust(tx, ty, sheet);
+    // 尘（Player.cs:20523-20526 循环 num2=GetTileDustAmount(fail:true) × MakeTileDust,
+    //  在 tile.type 直写前）——★BJ444（2026-10-03）：全表 1:1 单源化（草 2/477→
+    //  Next(2)?2:0、神圣 109/492→Next(2)?47:0 同值并入 per-type 表,旧草族特写退役）
+    this.spawnTileDustAt(tx, ty, true);
     const newId = TILE_INTERNAL_BY_SHEET.get(target);
     if (newId === undefined) return false;
     st.setTile(tx, ty, newId, st.frameX[i], st.frameY[i]);
     this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
     return true;
-  }
-
-  /** KillTile_MakeTileDust 的草族映射（WorldGen.cs:68885-68890 / :68960-68963）：
-   *  草 2/修剪草 477 → Next(2) ? 2 : 0；神圣草 109/492 → Next(2) ? 47 : 0。
-   *  NewDust(i*16, j*16, 16, 16, num)（:67xxx 尾段标准盒） */
-  private mowGrassTileDust(tx: number, ty: number, sheet: number): void {
-    const dustId = (sheet === 2 || sheet === 477) ? (Math.random() < 0.5 ? 2 : 0)
-      : (Math.random() < 0.5 ? 47 : 0);
-    this.spawnDust(tx * TILE, ty * TILE, TILE, TILE, dustId);
   }
 
   /** CanKillTile(context) 门（包装本函数 canKillTile 同参 ctx；见 canKillTileMowingAt） */
@@ -23187,18 +23180,59 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** ★BJ411 陨石破坏/挖掘尘（KillTile_MakeTileDust WorldGen.cs:69470-69473,1458 同位
-   *  :69477-69480 逐字节全等）：sheet 37 → 尘 id = genRand.Next(2)!=0 ? 23 : 6
-   *  （1 掷/粒;23=陨石岩尘、6=火星）；盒 = (i*16,j*16,16,16) 缺省支直出
-   *  （:69692 NewDust(i*16,j*16,16,16,num),速/α/scale 全缺省）。
-   *  粒数 = KillTile_GetTileDustAmount(:67119) 缺省档：破坏 10 / fail 3（调用侧传）。
-   *  仅替换 mapColor 色点近似面（sheet 37 专属支）；镐/钻/爆炸/液体冲毁等一切破坏
-   *  路径共用 breakTile 尾=原版 KillTile 单源同面 */
-  private spawnMeteoriteBreakDust(tx: number, ty: number, n: number): void {
-    for (let k = 0; k < n; k++) {
-      this.spawnDust(tx * TILE, ty * TILE, TILE, TILE, Math.random() < 0.5 ? 6 : 23);
-    }
+  /** ★BJ444：尘发射环境适配（disco=活彩虹时钟 Main.DiscoR/G/B 等价;spawn=原版尘池）。 */
+  private tileDustCtx() {
+    return makeTileDustCtx(this.world.store, {
+      disco: () => {
+        const c = this.lighting?.clock;
+        return c ? [c.discoR, c.discoG, c.discoB] as [number, number, number] : [255, 0, 0];
+      },
+    });
   }
+
+  private tileDustSpawn(): DustSpawn {
+    return (px, py, w, h, type, sx, sy, alpha, color, scale) =>
+      this.vanillaDust.spawn(px, py, w, h, type, sx, sy, alpha, color, scale);
+  }
+
+  /** ★BJ444（2026-10-03）：KillTile 统一尘面（WorldGen.cs:64212-64216 主触发面 1:1——
+   *  GetTileDustAmount(fail 档,:67119-67208) 分型数量 × MakeTileDust per-type 表
+   *  (:67209-69696)。fail=true 敲击未碎（镐/斧/锤每击）;fail=false 打碎）。
+   *  门序（vanilla KillTile 头门→尘位,PlaySounds :64064 之后 Drops :64375 之前）：
+   *   ① active()（:64041,hasTile）;② CheckTileBreakability==2 保护格（:64051 tileAboveProtected,
+   *   BJ442 门同位）;③ CheckTileBreakability2_ShouldTileSurvive（:63899 非空箱整件不破不出尘——
+   *   与 breakTile 头门同判据）;④ 470/475 模特帽架 fail 档 `(ShouldTileSurvive|fail)` 恒 return
+   *   （:64198-64200——fail 击不出尘,破坏击由 furniture 'blocked' 分支与③承担）。
+   *  @param src 可选 tileCache 分离源（ReplaceTile :63075 原点击格语义,帧/型读 src）;
+   *  @param applyGates 默认 true;ReplaceTile 专用面无 KillTile 头门（:63073 直调）传 false。 */
+  spawnTileDustAt(x: number, y: number, fail: boolean,
+    src?: { x: number; y: number }, applyGates = true): void {
+    if (!this.vanillaDust) return;   // 测试桩可选尘池（与既有 spawnDust/vanillaDust 桩同款约定）
+    const st = this.world.store;
+    if (!st?.inBounds(x, y)) return;
+    const sIdx = (src && st.inBounds(src.x, src.y)) ? st.idx(src.x, src.y) : st.idx(x, y);
+    const srcTile = (src && st.inBounds(src.x, src.y)) ? src : undefined;
+    if (applyGates && !st.hasTile(x, y)) return;
+    const sheet = TILE_DEFS[st.type[sIdx]]?.vanilla?.sheet;
+    if (sheet == null) return;
+    if (applyGates) {
+      // ② CheckTileBreakability（BJ442 单源门）：num==2 早退无尘;num==1(fail) 尘照出
+      //   （vanilla 尘位 :64212 在门 :64049 之后,fail 只改档不拦尘;非空容器面同门承担）
+      if (checkTileBreakabilityAt(st, x, y, {
+        hardMode: !!this.world.flags.hardMode,
+        chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
+      }) === 2) return;
+      // ④ 470/475 模特帽架：`(ShouldTileSurvive|fail)` 恒 return（:64198-64200——
+      //   fail 击不出尘;破坏击空模特过门出尘、有物模特由 furniture 'blocked' 分支拦）
+      if (fail && (sheet === 470 || sheet === 475)) return;
+    }
+    const n = getTileDustAmount(fail, sheet, st.frameX[sIdx]);
+    for (let k = 0; k < n; k++) makeTileDust(st, x, y, this.tileDustCtx(), this.tileDustSpawn(), srcTile);
+  }
+
+  // ★BJ444（2026-10-03）：spawnMeteoriteBreakDust（BJ411 陨石尘近似面）退役——
+  //  sheet 37 的 fail 3 粒/破坏 10 粒与 6|23 掷已并入 src/world/TileDust.ts per-type
+  //  表（:69468-69471 1:1），挖掘/破坏/爆炸/液体冲毁一切位次经 spawnTileDustAt 单源。
 
   /**
    * ★byPlayer 语义（2026-09-04 成就触发面审计重定）= 原版 AchievementsHelper.
@@ -23243,7 +23277,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
     });
     if (brk === 2) return;
-    if (brk === 1 && false) {                           // MUTATION-B: 摘 num==1 fail 支
+    if (brk === 1) {
       // fail 语义（KillTile fail=true 分支 WorldGen.cs:64221-64252）：音 + 尘 + IsShakeable
       //  摇树（:64224 netMode!=1 门,单机恒真）+ 原格转化（:64226-64249 草族→基底表）+
       //  SquareTileFrame（:64251——对无变化格 no-op,免调）→ return（:64252,不掉落不清格）。
@@ -23252,7 +23286,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  音 = KillTile_PlaySounds(fail:true) 档（本仓 killTileBreakSound 四档近似,与
       //  tryMine 每击音同函数）。
       this.killTileBreakSound(type, x, y);
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#91857B', 2, 1.2);
+      this.spawnTileDustAt(x, y, true);   // ★BJ444：fail 档尘（:64212,num==1 只改档不拦尘）
       const sheetBrk = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
       if (TREE_SHAKEABLE_SHEETS.has(sheetBrk)) this.tryShakeTree(x, y);   // :64224-64226
       this.killTileFailTransform(x, y, sheetBrk);                         // :64226-64249
@@ -23299,6 +23333,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private breakTileBody(x: number, y: number, type: number, noItem: boolean): void {
     const st = this.world.store;
     const def = TILE_DEFS[type];
+
+    // ★BJ444（2026-10-03）：KillTile 打碎尘（WorldGen.cs:64212-64216——PlaySounds :64064
+    //  之后、Drops :64375 之前,GetTileDustAmount(fail=false) × MakeTileDust per-type 表
+    //  全量 1:1;爆炸/镐挖/剑割/液体冲毁等一切 breakTile 位次同出=原版 KillTile 单源）。
+    //  pop 早退门：挂物族 395/698/471/520【有物】首击 = TE DropItem+return（:64195-64211）
+    //  在尘位之前 → 有物不出尘;空物照发。723/724 存物随破同击无 return（:64205 尘照发）;
+    //  334 武器架掉存物无 return（:64147 尘照发）。保护格不出尘已由 breakTile 头
+    //  tileAboveProtected/shouldTileSurviveAt 门承担（:64049/:63899 同位）。
+    {
+      const sheetB = def?.vanilla?.sheet ?? -1;
+      let dustBlocked = false;
+      if (sheetB === 395 || sheetB === 698 || sheetB === 471 || sheetB === 520) {
+        const kindB = FURNITURE_TILE_KIND.get(type);
+        if (kindB) {
+          const [faxB, fayB] = furnitureAnchor(st, kindB, x, y);
+          const recB = getFurniture(this.world.furnitureItems, kindB, faxB, fayB);
+          if (recB && furnitureContainsItems(recB)) dustBlocked = true;
+        }
+      }
+      if (!dustBlocked) this.spawnTileDustAt(x, y, false);
+    }
 
     // 割植物/装饰组小动物掷骰（KillTile_DropBait WorldGen.cs:66304-66480，挂
     // KillTile 掉落段 :63910——**一切破坏路径**（剑割 tileCut/镐/爆炸/液体冲毁）
@@ -23516,7 +23571,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const ax = x - (Math.floor(st.frameX[i0] / 18) % 2), ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 2; dy++) {
-          if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) st.setTile(ax + dx, ay + dy, 0);
+          if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) {
+            // ★BJ460②（2026-10-03）：原版余格清=CheckJunglePlant 级联 KillTile
+            //  （WorldGen.cs:48452-48463 逐格 KillTile）——每格走 :64212 尘段
+            //  （238 表外=default 10 粒）；被击格尘已由 breakTileBody 头单源承担
+            //  （原版级联跳过已死被击格）。setTile 前出尘=原版尘位在格清前。
+            if (ax + dx !== x || ay + dy !== y) this.spawnTileDustAt(ax + dx, ay + dy, false);
+            st.setTile(ax + dx, ay + dy, 0);
+          }
         }
       }
       if (type === TILE_BY_KEY['v_238_plantera_s_bulb']) {
@@ -23534,7 +23596,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  中心锚,Game.ts:22715 约定）——旧用锚格半补偿,2×2 内右/下格被击时左/上漂
         this.spawnDrop(x * TILE + 16, y * TILE + 16, 'vi_1291_life_fruit', 1);
       }
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E180CE', 8, 1.8);
+      // ★BJ460②（2026-10-03）：旧 8 粒 '#E180CE' 单点装饰退役——原版花苞破坏尘=
+      //  被击格（breakTileBody 头 :64212 位,default 10 粒）+余格级联 KillTile 逐格尘
+      //  （上方清格循环已补）,无任何额外单点装饰面。
       return;
     }
     // 矿车轨道（KillTile 314）：清除 + 六邻重 framing（邻线自动改道）+ 按
@@ -23550,7 +23614,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       st.setTile(x, y, 0);
       frameTrackArea(st, x, y);
       this.spawnDrop(x * TILE + 8, y * TILE + 8, dropKey, 1);
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#B5A47D', 6, 1.5);
+      // ★BJ460②（2026-10-03）：旧 6 粒 '#B5A47D' 装饰退役——原版轨道破坏尘=仅被击格
+      //  走 KillTile :64212 尘段（314 表外=default 10 粒,breakTileBody 头已单源承担）;
+      //  邻轨只 reframe 不破坏（TileFrameImportant 轨道段无 KillTile）=无级联尘。
       this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
       return;
     }
@@ -23562,6 +23628,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const di = st.idx(x, y);
       const dfx = st.frameX[di], dfy = st.frameY[di];
       const doorOpen = st.get(x, y) === T.DOOR_OPEN;
+      // ★BJ460②（2026-10-03）：原版余格清=CheckDoorClosed/CheckDoorOpen 级联逐格
+      //  KillTile（:87774-87786 闭门 1×3 / :87673-87681 开门 2×3 扫描）——每格走
+      //  :64212 尘段（10/11 表外=default 10 粒）;被击格尘已由 breakTileBody 头单源
+      //  承担（原版级联跳过已死被击格）。clearDoorAt 直清不出级联尘,此处按同帧反推
+      //  锚格对余格逐格补尘（clearDoorAt 前出尘=格尚在,与原版尘位在格清前同相）。
+      {
+        const dw = doorOpen ? 2 : 1;
+        const dcol = Math.floor(dfx / 18) % dw, drow = Math.floor(dfy / 18) % 3;
+        const dax = x - dcol, day = y - drow;
+        const doorT = doorOpen ? T.DOOR_OPEN : T.DOOR_CLOSED;
+        for (let ddx = 0; ddx < dw; ddx++) {
+          for (let ddy = 0; ddy < 3; ddy++) {
+            const dcx = dax + ddx, dcy = day + ddy;
+            if ((dcx !== x || dcy !== y) && st.inBounds(dcx, dcy) && st.get(dcx, dcy) === doorT) {
+              this.spawnTileDustAt(dcx, dcy, false);
+            }
+          }
+        }
+      }
       const doorAnchor = clearDoorAt(st, x, y);
       if (doorAnchor) {
         // ★开式反推（❌3 复核 2026-08-23）：关门 style=fx/54*36+fy/54（CheckDoorClosed
@@ -23576,7 +23661,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE,
             VANILLA_ITEM_KEY_BY_ID[sv] ?? VI(25), 1);
         }
-        this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
+        // ★BJ460②（2026-10-03）：旧 8 粒单点装饰退役（原版门破坏尘=逐格 KillTile
+        //  :64212 尘段——被击格头位+余格上方级联补尘,无单点装饰面）。
         return;
       }
     }
@@ -23637,7 +23723,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       removeFurnitureAt(this.world.furnitureItems, x, y);
       st.setTile(x, y, 0);
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+      // ★BJ460②（2026-10-03）：旧 6 粒装饰退役——原版锚桩 723/724 破坏尘=仅被击格
+      //  KillTile :64212 尘段（表外=default 10 粒,breakTileBody 头已单源承担;
+      //  :64205 DropItemForTileBreak 无 return 尘照发）;1×1 无级联面=无额外尘。
       this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
       return;
     }
@@ -23660,7 +23748,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //    监听（scanBoulderFamilyNear→checkBoulderFamily）中途级联被闸吞,尾发单 Spawn;
       //  · 重入（Check2x2 destroy 循环 breakCell→breakTile 到达,_destroying=true）：
       //    只清格,Spawn 由外层 checkBoulderFamily convert 单发（=vanilla NewProjectile 位）。
-      //  掉落/声/尘沿用 object 支 654 尾段同参（dropKey='' no-drop :66114、尘 8×1.8）。
+      //  掉落/声沿用 object 支 654 尾段同参（dropKey='' no-drop :66114）。
+      //  ★BJ460②（2026-10-03）尘定谳勘误：原注「尘 8×1.8」系误记——原版 654 尘量=0
+      //  （KillTile_GetTileDustAmount :67130）,破坏全程零尘（下方装饰已退役）。
       if (bsheet === 654) {
         const ti0 = st.idx(x, y);
         const tax = x - (Math.floor(st.frameX[ti0] / 18) % 2);
@@ -23675,7 +23765,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (isBoulderDestroying()) clearPiece();
         else boulderDestroyGuard(clearPiece);
         this.killTileBreakSound(type, x, y);
-        this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
+        // ★BJ460②（2026-10-03）：旧 8 粒装饰退役——原版 654 尘量=0
+        //  （KillTile_GetTileDustAmount :67130 case 654 → return 0,判定测试锁
+        //  tests/bj460-ledger-sweep.test.ts）;Check2x2 级联逐格 KillTile 亦 0
+        //  → 原版巨石破坏全程零尘,旧注「尘 8×1.8 沿用 object 支」系误记。
         this.spawnBoulderFamilyRoll(tax, tay, 654);
         return;
       }
@@ -23701,7 +23794,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //    只清格,Spawn 由外层 checkBoulderFamily convert 单发。
         if (isBoulderDestroying()) clearPiece();
         else boulderDestroyGuard(clearPiece);
-        this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+        // ★BJ460②（2026-10-03）：旧 6 粒装饰退役——原版全 Boulders 集（TileID.cs:195
+        //  {138,484,664,665,711-716}=本仓 BOULDERS_SHEETS 同表）尘量=0
+        //  （KillTile_GetTileDustAmount 零尘族 :67144-67177）→ 巨石族破坏零尘。
         this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
         this.spawnBoulderFamilyRoll(bax, bay, bsheet);
         return;
@@ -24153,16 +24248,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && vanillaPlaceableTileKeys().has(def.key)) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     }
     this.killTileBreakSound(type, x, y);
-    // ★BJ411 陨石破坏尘（1×1 普通尾=陨石唯一破坏尾;多格支不涉 37）。破坏支
-    //  KillTile_GetTileDustAmount 缺省档 10 粒 × MakeTileDust（WorldGen.cs:69470-69473,
-    //  1458 同位 :69477-69480）sheet 37 → Next(2)!=0?23:6（1 掷/粒;23=陨石岩尘、6=火星）
-    //  → 火尘替 mapColor 色点；镐/钻/爆炸/液体冲毁一切破坏路径共用本尾=原版 KillTile
-    //  单源同面（尾位=deactivate/液体/419 段之后,尘序无相位消费,与原版 :64215 段同面）
-    if (def.vanilla?.sheet === 37) {
-      this.spawnMeteoriteBreakDust(x, y, 10);
-    } else {
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
-    }
+    // ★BJ444（2026-10-03）：破坏尘全表 1:1 已上移 breakTileBody 头（=原版 :64212 尘位,
+    //  PlaySounds :64064 后、Drops :64375 前）——旧尾段 6 粒 mapColor 色点近似与 BJ411
+    //  陨石 10 粒特支（37 → Next(2)?23:6 真值已入 src/world/TileDust.ts per-type 表,
+    //  数量=getTileDustAmount(false,37)=缺省 10）随单源化退役,防同击双发
   }
 
   /** 小堆饰 185 内容掉落（Check2x1 case 185 :47180-47232 逐条 Item.NewItem 1:1）：
@@ -24615,7 +24704,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     this.evolution.killTileCascadeAt(x, y);
-    this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
+    // ★BJ444（2026-10-03）：砍树尘 = 原版逐 KillTile 单源——被砍格由 breakTileBody 头
+    //  BJ444 面、级联干格由演化域 killFlat 各出一粒组（树干 5 → :68608 num=7,基座草族
+    //  变体 77/78/26/79/121/122;旧 14 粒自造绿色爆点=非原版面,退役）
     // 登记表：砍到基座（整棵倒）→ 移除；拦腰砍 → 收缩为残桩段（y=切口下格起）
     const t = this.world.trees.findIndex((tr) => tr.x === x && y >= tr.y && y < tr.y + tr.h);
     if (t >= 0) {
@@ -24720,7 +24811,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 旧实现手工整段清除+分支掉落账与演化域 killDropFace 双轨分叉（枝砍连带杀干/
     // 残桩不重帧/橡实掷面窄,见 fellTree 注）；现全委托演化域单源。
     this.evolution.killTileCascadeAt(x, y);
-    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
+    // ★BJ444：砍树尘 = 逐 KillTile 单源（同 fellTree 注——旧 14 粒自造爆点退役）
   }
 
   /** CheckCactus :54132 单格失撑判定（三规则忠实版）：
@@ -25664,6 +25755,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private replaceTileInPlace(x: number, y: number, newType: number, style: number): boolean {
     const st = this.world.store;
     const i0 = st.idx(x, y);
+    const srcX = x, srcY = y;                            // ★BJ444：tileSafely=原点击格（:63063 锚归一前）
     const oldType = st.type[i0];
     const oldDef = TILE_DEFS[oldType];
     const oldSheet = oldDef?.vanilla?.sheet ?? -1;
@@ -25674,8 +25766,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // :63073-63077 尘 = KillTile_GetTileDustAmount(fail:false)（:67119-67207 分型档；
     //  ★SW-RB6a 2026-09-07：曾写死 10——苔石族 5/回声块 1/幼虫 6 等档整缺;帧取锚
     //  归一前 i0（原版 tileSafely=原点击格,184 帧档读该格 frameX））
-    this.spawnParticles(x * TILE + 8, y * TILE + 8, oldDef?.mapColor ?? '#8a8a8a',
-      killTileBreakDustAmount(oldSheet, st.frameX[i0]), 1.5);
+    //  ★BJ444（2026-10-03）：全表 1:1（MakeTileDust :67209-69696——位置=锚 x,y,
+    //  型/帧=原点击格 tileSafely=src 分离源;旧 killTileBreakDustAmount 色点近似退役;
+    //  ReplaceTile 无 KillTile 头门直调,applyGates=false）
+    this.spawnTileDustAt(x, y, false, { x: srcX, y: srcY }, false);
     this.killTileBreakSound(oldType, x, y);              // :63078 KillTile_PlaySounds（无放置音）
     this.replaceTileDropOld(x, y, oldType);              // :63079 旧块物一次（includeLarge 面）
     const newSheet = TILE_DEFS[newType]?.vanilla?.sheet ?? -1;
@@ -25712,9 +25806,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.canPoundTile(x, y)) return false;              // :82046-82049
     st.setSlope(x, y, slope);                                // :82050-82051（含 halfBrick(false)）
     if (!noEffects) {                                        // :82053-82056
-      const d = TILE_DEFS[st.get(x, y)];
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, d?.mapColor ?? '#8B7553',
-        killTileHitDustAmount(d?.vanilla?.sheet ?? -1, st.frameX[st.idx(x, y)]), 1.2);
+      // ★BJ444：KillTile(fail:true, effectOnly:true) 效尘（:64212 fail 档 × per-type 表;
+      //  门序同 KillTile,尘数/形态全表 1:1,色点近似退役）
+      this.spawnTileDustAt(x, y, true);
     }
     this.sfx.play('dig', 1, x * TILE, y * TILE);             // :82057 PlaySound(0) 恒播
     this.checkDecorSquareFrame(x, y);                        // :82058 SquareTileFrame 等价面
@@ -26308,8 +26402,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               //  动画窗由调用方 useSwing 承载（approx,登记）;原版消耗品返还
               //  （:40198 stack++ + dontConsumeWand）本仓 N/A：消耗只在成功写面
               //  removeHeld,失败路径从未扣件。
-              this.spawnParticles(tx * TILE + 8, ty * TILE + 8,
-                tdef?.mapColor ?? '#8a8a8a', 3, 1.2, { life: 20 });
+              // ★BJ444：尘=GetTileDustAmount(fail:true)×MakeTileDust 全表（:40190-40193
+              //  显式循环,WorldGen.cs:67119/:67209 单源;旧 3 粒 mapColor 色点近似退役）
+              this.spawnTileDustAt(tx, ty, true);
               this.playSfxFile?.('hit', 1, tx * TILE + 8, ty * TILE + 8);
               // ★SW-RB11b F5：ApplyItemTime(sItem,pickSpeed)（:40201）val=(int)(useTime×
               //  pickSpeed) 后 max(val,1)——C# (int) 截断,非四舍五入
@@ -31834,8 +31929,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // SW-AA1 2026-09-04（F-1）：friendly 敌怪半边——受害集 `friendly &&
     //  !dontTakeDamageFromHostiles`（:12626 flag2）里【敌怪桶】的成员只有 DD2
     //  永恒水晶 548（NPC.cs:16026-16052 SetDefaults friendly=true,常态无
-    //  dontTakeDamageFromHostiles——仅胜利演出 ai[1]==1 置真 :41280/死亡
-    //  :78896,本仓映射 Enemy.dontTakeDamage,eterniaCrystalAI ai1==2/1 同款）。
+    //  dontTakeDamageFromHostiles——仅胜/败演出 :41170/:41280 与血尽转换
+    //  :78896 置真;★BJ450 起本仓映射 Enemy.dontTakeDamageFromHostiles 真名旗,
+    //  eterniaCrystalAI ai1==2/1 同款）。
     //  549 神秘传送门非 friendly（:16061-16081 无 friendly 置位+dontTakeDamage
     //  =true）→ 不在受害集,不扫。盒/伤链/kb 与城镇支同参（128² 盒,盒测试用
     //  敌怪实际盒;DV :12970 luck 正向——102 由 NPC 炮臂 NewProjectile 生成但
@@ -31844,7 +31940,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  Enemy.hurt 武器路径,水晶 knockBackResist=0f（:16035,friendly=:16036）→ 零位移）。
     for (const eent of this.entities.enemies) {
       const en = eent as Enemy;
-      if (en.vanillaId !== 548 || en.dead || en.dontTakeDamage) continue;
+      // ★BJ450:flag2 真名旗（:12626）——演出期（胜/败演出+血尽转换窗）爆伤照拒
+      if (en.vanillaId !== 548 || en.dead || en.dontTakeDamageFromHostiles) continue;
       if (Math.abs((en.cx ?? px) - px) < 64 + en.w / 2 && Math.abs((en.cy ?? py) - py) < 64 + en.h / 2) {
         // SW-AC1 2026-09-04：方向 = kbDir 弹体朝向（同城镇半边,:13652 num40=direction）
         en.hurt(this.explodeFriendlyVictimDamage(40, en),
@@ -35854,6 +35951,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  使实体中心 = tile 中心 + w/2（stylist 354 宽 18 → +9px 右漂,纯外观但与
     //  骷髅商/入住路径约定不一致）。构造后按实盒宽校正（w 由 ctor 按 SetDefaults
     //  盒宽落定,调用侧无法前置）——左缘 = 中心 − w/2。
+    //  ★BJ449 销案锚（2026-10-03）：本站与 homelessWanderPlacement（入住游走,中心=
+    //  格左缘）非双标准——原版被缚族 SpawnNPC 传 X=num*16+8（NPC.cs:2089 等 7 站,
+    //  中心=格中心）而 SpawnHomelessNPC 传 X=num8*16 无 +8（WorldGen.cs:5106,中心=
+    //  格左缘）,两站各自镜像各自原版调用点。
     tn.x -= tn.w / 2;
     tn.bound = true;
     this.entities.add(tn, 'npcs');
@@ -36906,6 +37007,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 生成（:5094-5115）：NewNPC Bottom=(num8*16, num9*16)——脚底=地面格【顶边】
       // （TownNPC(x=左缘,y=脚) → x=spawnX*TILE−w/2）;homeTile=(掷列 bestX,锚地行)
       // 快找锚=掷列非落位列（:5107-5108 quirk）;direction 按 num8 翻（:5111-5115）。
+      // ★BJ449 销案锚（2026-10-03 横向锚双约定定谳）：本站中心=格【左缘】num8*16
+      // （WorldGen.cs:5106 NewNPC 传 X 无 +8）与 trySpawnBoundTownNpc 的 Z4/D7
+      // 中心=格【中心】num*16+8（Spawner.SpawnNPC 传 X=spawnTileX*16+8,NPC.cs:
+      // 2089/2093/1660/1671/1695/2097/2658 被缚族全 +8）非双标准——原版两调用点
+      // X 值本就不同,两站各自 1:1,勿"统一"。
       const npc = new TownNPC(pick, placed.spawnX * TILE, placed.spawnY * TILE);
       npc.x = placed.spawnX * TILE - npc.w / 2;
       if (placed.dir !== 0) npc.facing = placed.dir;
@@ -43569,11 +43675,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  与 tile 矩形求交（半砖 y+8/h 8 :31069-31075）;命中格 = active ∧非致动 ∧
    *  （solid ∨ solidTop∧frameY==0——isSolid∪isPlatform 同语义,isPlatform 内建
    *  frameY==0 家具族门）。尘面 = WorldGen.KillTile(fail:true, effectOnly:true)
-   *  （WorldGen.cs:64212-64219——GetTileDustAmount(fail:true) 分型档 × MakeTile
-   *  Dust,只撒尘不毁块）→ 尘量按 killTileHitDustAmount 分型表（654/630/631=
-   *  0、541=1、549=2、巨石·合成站·滴淌族=0、184 长苔帧档、其余缺省 3;
-   *  tile 色系尘,无独立贴图尘池）;原版无音（KillTile_PlaySounds 只在
-   *  !effectOnly 时播,:64062 门） */
+   *  （:3116）→ ★BJ444（2026-10-03）spawnTileDustAt fail 档=GetTileDustAmount
+   *  (:67119) 分型数量 × MakeTileDust(:67209-69696) per-type 表全量 1:1,
+   *  只撒尘不毁块;原版无音（KillTile_PlaySounds 只在 !effectOnly 时播,:64062 门） */
   hitTilesFx(x: number, y: number, w: number, h: number, vx: number, vy: number): void {
     const st = this.world.store;
     const px = x + vx, py = y + vy;                        // vector = Position + Velocity
@@ -43592,16 +43696,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const plat = !st.isSolid(i, j) && st.isPlatform(i, j) && st.frameY[st.idx(i, j)] === 0;
         if (!st.isSolid(i, j) && !plat) continue;   // tileSolid ∨ solidTop∧top
         const ti = st.idx(i, j);
-        const def = TILE_DEFS[st.type[ti]];
-        if (!def?.mapColor) continue;
+        // ★BJ444：mapColor 门拆除（色点近似残留——原版 HitTiles 对任何实心格照调
+        //  KillTile 出尘,无色门）
         const half = st.half[ti] === 1;                    // halfBrick：矩形 y+8、h 8
         const ty0 = j * TILE + (half ? 8 : 0);
         const hn = half ? 8 : TILE;
         // 交叠判定（:31083-31087）：vector 盒 [px,px+w)×[py,py+h) vs tile 矩形
         if (!(px + w >= i * TILE && px <= i * TILE + TILE && py + h >= ty0 && py <= ty0 + hn)) continue;
-        const amt = killTileHitDustAmount(def.vanilla?.sheet ?? -1, st.frameX[ti]);
-        if (amt <= 0) continue;                            // 654/630/631+巨石·合成站族=0 尘(:67129-67133/:67148-67185)
-        this.spawnParticles(i * TILE + 8, j * TILE + 8, def.mapColor, amt, 1.2);
+        // ★BJ444（2026-10-03）：尘面全表 1:1 化——原文本格直调 KillTile(fail:true,
+        //  effectOnly:true)（:3116）→ :64212 fail 档数量 × MakeTileDust per-type 表。
+        //  旧 killTileHitDustAmount 色点近似退役（零尘族 654/630/631/巨石·合成站族
+        //  等数量面随全表;effectOnly 无音=PlaySounds :64062 门,spawnTileDustAt 只出尘同相）
+        this.spawnTileDustAt(i, j, true);
       }
     }
   }

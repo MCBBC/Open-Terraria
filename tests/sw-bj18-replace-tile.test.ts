@@ -14,6 +14,7 @@ import { ITEM_DEFS } from '../src/data/items';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 import { itemCombat } from '../src/data/vanillaItemCombat';
+import { VanillaDust } from '../src/fx/VanillaDust';
 
 const TITANIUM_PICK = 1202;   // pick 190 ut 7（一击积累 ≥100）
 const WOOD_V = 9;
@@ -279,13 +280,15 @@ describe('尘量分型档（fail:false 档）', () => {
     const w = mkWorld();
     const st = w.store;
     st.setTileSilent(9, 20, TILE_BY_KEY[tileKey]);
-    const seen: Array<number> = [];
     const g = shell(w, { heldDef: defByVid(WOOD_V), picks: [[TITANIUM_PICK, 5]] });
-    (g as unknown as { spawnParticles: (...a: unknown[]) => void }).spawnParticles
-      = (...a: unknown[]) => { seen.push(a[3] as number); };
+    // ★BJ444：ReplaceTile 尘面=vanillaDust 池（spawnTileDustAt src 分离源,1:1 全表）——
+    //  旧 spawnParticles 色点 spy 退役
+    (g as unknown as { vanillaDust: unknown }).vanillaDust = new VanillaDust();
     g.tryPlace(9, 20, defByVid(WOOD_V));
-    expect(seen.length).toBeGreaterThanOrEqual(1);
-    return Math.max(...seen);
+    const pool = ((g as unknown as { vanillaDust: { pool: Array<{ active: boolean }> } }).vanillaDust.pool);
+    const n = pool.filter((d) => d.active).length;
+    expect(n).toBeGreaterThanOrEqual(1);
+    return n;
   }
   it('普通块（泥土）缺省 10 粒（:67123-67128）', () => {
     expect(dustOf('dirt')).toBe(10);

@@ -20,21 +20,32 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { Game, killTileHitDustAmount } from '../src/core/Game';
+import { VanillaDust } from '../src/fx/VanillaDust';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
-/** hitTilesFx 行为桩（同 kill-tier-audit harness:原型方法绑最小 GameHooks,粒子源 spy） */
+/** hitTilesFx 行为桩（同 kill-tier-audit harness:原型方法绑最小 GameHooks,粒子源 spy）
+ *  ★BJ444（2026-10-03）：hitTilesFx 尘面升级为 spawnTileDustAt→vanillaDust 池
+ *  （KillTile(fail:true,effectOnly) 全表 1:1）——粒子 spy 改录原版尘池活粒。 */
 function fxHarness(): { w: World; parts: Array<[number, number, string, number]>;
-  fx: (...a: number[]) => void } {
+  fx: (...a: number[]) => void; dustTypes: () => number[] } {
   const w = new World(160, 200, 30, 'open');
   for (let x = 0; x < 160; x++) w.store.setTileSilent(x, 190, 1, 0, 0);
   const parts: Array<[number, number, string, number]> = [];
+  const vd = new VanillaDust();
+  const proto = Game.prototype as unknown as Record<string, unknown>;
   const game = {
     world: w,
+    vanillaDust: vd,
+    spawnTileDustAt: proto.spawnTileDustAt,   // ★BJ444：hitTilesFx 尘面委托的实方法（原型链绑桩）
+    tileDustCtx: proto.tileDustCtx,
+    tileDustSpawn: proto.tileDustSpawn,
     spawnParticles: (x: number, y: number, c: string, n: number) => { parts.push([x, y, c, n]); },
   } as unknown as Game;
   const fx = (Game.prototype.hitTilesFx as (...a: number[]) => void).bind(game);
-  return { w, parts, fx };
+  const dustTypes = () => (vd as unknown as { pool: Array<{ active: boolean; type: number }> })
+    .pool.filter((d) => d.active).map((d) => d.type);
+  return { w, parts, fx, dustTypes };
 }
 
 describe('发射点覆写金标（NewProjectile 内联表 + Modifiers）', () => {
@@ -97,19 +108,23 @@ describe('发射点覆写金标（NewProjectile 内联表 + Modifiers）', () =>
 
   it('D4: hitTilesFx 尘量=GetTileDustAmount(fail:true) 分型档——654 TNTBarrel→0 粒（WorldGen.cs:67129-67130）', () => {
     expect(killTileHitDustAmount(654, 0)).toBe(0);
-    const { w, parts, fx } = fxHarness();
+    const { w, parts, fx, dustTypes } = fxHarness();
     w.store.setTileSilent(25, 100, TILE_INTERNAL_BY_SHEET.get(654)!, 0, 0);
     fx(25 * TILE, 100 * TILE, 8, 8, 0, 4);
-    expect(parts).toHaveLength(0);   // 非实心（HitTiles 实心门）+分型档 0 双门
+    expect(parts).toHaveLength(0);     // 非实心（HitTiles 实心门）
+    expect(dustTypes()).toHaveLength(0);   // ★BJ444：分型档 0 → 原版尘池零粒
   });
 
   it('D5: 541 EchoBlock→1 粒（WorldGen.cs:67144-67145）——缺省 3 近似退役', () => {
     expect(killTileHitDustAmount(541, 0)).toBe(1);
     expect(killTileHitDustAmount(1, 0)).toBe(3);   // 表外缺省档仍在
-    const { w, parts, fx } = fxHarness();
+    const { w, fx, dustTypes } = fxHarness();
     w.store.setTileSilent(30, 100, TILE_INTERNAL_BY_SHEET.get(541)!, 0, 0);
     fx(30 * TILE, 100 * TILE, 8, 8, 0, 4);
-    expect(parts).toHaveLength(1);
-    expect(parts[0][3]).toBe(1);
+    // ★BJ444：尘面=原版尘池（MakeTileDust :67209 全表）——541 → 尘 226 ×1 粒
+    //（GetTileDustAmount fail 档 1 × :68019 case 541 num=226,标准盒缺省支）
+    const types = dustTypes();
+    expect(types).toHaveLength(1);
+    expect(types[0]).toBe(226);
   });
 });

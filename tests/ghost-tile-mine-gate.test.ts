@@ -24,6 +24,11 @@ function mkGame(store: World['store']) {
   g.mining = null;
   g.tickCount = 1000;
   g.lastMineHitTick = 0;
+  // ★BJ444（2026-10-03）：BJ433 Track 块（tryMine :46102/:46162 等价位）需 camera/input/
+  //  intentionGuesser——本桩此前缺三件=Track 位次整段 TypeError（挖/尘域回归发现补桩）
+  g.camera = { screenToWorld: () => [0, 0] };
+  g.input = { mouseX: 0, mouseY: 0 };
+  g.intentionGuesser = { track: () => {}, allowTracking: () => {} };
   g.sfx = { play: () => {}, playWavFile: () => {}, playSfxFile: (n: string) => { sfx.push(n); } };
   g.particles = [];
   g.spawnParticles = () => {};

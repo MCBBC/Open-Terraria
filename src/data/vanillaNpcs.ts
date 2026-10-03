@@ -265,6 +265,33 @@ export function bossHeadRotation(id: number, rotation: number, ai1 = 0, ai0 = 0)
   return 0;
 }
 
+/** ★BJ459（2026-10-03）Boss 头像朝向翻转（NPC.GetBossHeadSpriteEffects
+ *  NPC.cs:7661-7669 1:1——全族唯一例:仅 491(飞翔荷兰人) && spriteDirection==1 →
+ *  FlipHorizontally,其余恒 SpriteEffects.None）。facing 入参=本仓 spriteDirection
+ *  载体:491 的 AI 逐 t 末写 `facing = -sign(vx)`（flyingDutchmanAI
+ *  bossAI_dd2.ts:685 ←原版 AI_93 `spriteDirection = -Math.Sign(velocity.X)`
+ *  NPC.cs:39340 同构），与本体绘制 drawDutchman 的 `e.facing === 1` 消费同源
+ *  （Renderer.ts,头体恒同相）。返回 true=该翻(消费侧 ctx.scale(-1,1))。 */
+export function bossHeadSpriteEffects(vanillaId: number | null | undefined, facing: number): boolean {
+  return vanillaId === 491 && facing === 1;
+}
+
+/** ★BJ459（2026-10-03）Boss 头像悬停命中矩形（小地图 DrawNPCMapIcons2
+ *  Main.cs:57043-57058 / 全屏 DrawNPCMapIcons :57121-57127 双路同构 1:1）：
+ *  num11..14 = 绘制锚(num9/num10) ± 贴图实尺(Width/Height)×headScale 的一半,
+ *  鼠标 ∈ [num11,num13]×[num12,num14] 即命中。旋转(GetBossHeadRotation)与翻转
+ *  (SpriteEffects)不参与原版命中形——矩形按未旋转贴图实尺算。mouse=null=不检测
+ *  （本仓覆盖式地图路径不喂 mouse,与 BJ1 城镇面两路喂点同构）。 */
+export function bossHeadHoverHit(
+  mouse: { x: number; y: number } | null, hx: number, hy: number,
+  texW: number, texH: number, headScale: number,
+): boolean {
+  if (!mouse) return false;
+  const hw = (texW / 2) * headScale;
+  const hh = (texH / 2) * headScale;
+  return mouse.x >= hx - hw && mouse.x <= hx + hw && mouse.y >= hy - hh && mouse.y <= hy + hh;
+}
+
 /** NPC id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */
 export function townExtraFrames(id: number): number {
   return TOWN_EXTRA_BY_ID.get(id) ?? 2;

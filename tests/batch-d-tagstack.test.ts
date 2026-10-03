@@ -37,6 +37,22 @@ const mkEnemy = (id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy 
   };
   return e;
 };
+/** 城镇 NPC mock（★BJ449 巫毒窄门/索敌门判别用——hitTownNpcs 消费面） */
+const mkTownNpc = (id: number, cx: number, cy: number, vanillaId: number) => ({
+  id, x: cx - 8, y: cy - 12, w: 16, h: 24, dead: false, bound: false,
+  vanillaId, hp: 100000, hits: [] as number[],
+  hurt: function (this: { hp: number; hits: number[] }, d: number) {
+    this.hp -= d; this.hits.push(d); return true;
+  },
+});
+/** equipStats 冻结+只读 getter（Player.ts:1820/实例 getter）——实例影子覆写注入 killGuide */
+const withKillGuide = (p: Player): void => {
+  const frozen = p.equipStats as Record<string, unknown>;
+  Object.defineProperty(p, 'equipStats', {
+    configurable: true,
+    get: () => ({ ...frozen, killGuide: true }),
+  });
+};
 function makeHooks(enemies: MockEnemy[] = []) {
   const store = new TileStore(200, 120);
   for (let x = 0; x < 200; x++) for (let y = 100; y < 120; y++) store.setTile(x, y, 1);
@@ -170,6 +186,66 @@ describe('1457 数值大改', () => {
     const res = resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
     expect(res.dmg).toBe(Math.trunc(20 * 2.75));          // 乘区乘在含 tag 总伤上
     expect(player.tagEffectStack.canProcOnNPC(4912, e.id)).toBe(false);  // 恒消耗
+  });
+
+  it('★BJ449① 火鞭 918 爆炸源敌永免（_Firecracker.cs:23 localNPCImmunity[npcHit]=-1）：盒内旁邻吃爆伤,源敌不再叠', () => {
+    const e = mkEnemy(20, 0, 0);              // 源敌（被 proc 命中）
+    const near = mkEnemy(21, 30, 0);          // 96×96 爆炸盒内（|30| < 48+8）
+    const far = mkEnemy(22, 200, 0);          // 盒外
+    const { hooks, player } = makeHooks([e, near, far]);
+    player.tagEffectStack.tryApplyTagToNPC(4912, e.id);
+    player.tagEffectStack.tryEnableProcOnNPC(4912, e.id);
+    const res = resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
+    expect(res.dmg).toBe(Math.trunc(20 * 2.75));   // 主伤 = 55（乘区在主命中,调用侧落地）
+    expect(e.hits).toEqual([]);                    // ★源敌 -1 永免——不吃爆伤（曾漏=双吃 55+55）
+    expect(near.hits).toEqual([Math.trunc(20 * 2.75)]);   // 盒内旁邻 = 爆伤一跳
+    expect(far.hits).toEqual([]);                  // 盒外不波及
+  });
+
+  it('★BJ449② 火鞭 918 城镇面=巫毒窄门（Damage_PVE_Inner :12618-12631）：22+killGuide 吃爆伤,门闭不吃', () => {
+    const e = mkEnemy(23, 0, 0);
+    const tn = mkTownNpc(24, 0, 0, 22);       // 向导贴身（爆炸盒内）
+    const { hooks, player } = makeHooks([e]);
+    (hooks as unknown as { npcs: () => unknown[] }).npcs = () => [tn];
+    player.tagEffectStack.tryApplyTagToNPC(4912, e.id);
+    player.tagEffectStack.tryEnableProcOnNPC(4912, e.id);
+    resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
+    expect(tn.hits).toEqual([]);              // 巫毒窄门闭（killGuide 缺省 false）
+    withKillGuide(player);
+    player.tagEffectStack.tryEnableProcOnNPC(4912, e.id);   // 重开 proc 窗
+    resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
+    expect(tn.hits).toEqual([Math.trunc(20 * 2.75)]);       // 窄门开 → 爆伤落地（kb=0 settle 面）
+  });
+
+  it('★BJ449 销案锁：电鳗链电城镇面恒不达（ElectricEel.cs:41 CanBeChasedBy → NPC.cs:91141 !friendly）', () => {
+    const e = mkEnemy(25, 0, 0);
+    const near = mkEnemy(26, 30, 0);
+    const tn = mkTownNpc(27, 0, 0, 22);
+    const { hooks, player } = makeHooks([e, near]);
+    (hooks as unknown as { npcs: () => unknown[] }).npcs = () => [tn];
+    withKillGuide(player);                    // 巫毒门开也无效——索敌门在窄门之前
+    player.tagEffectStack.tryApplyTagToNPC(5478, e.id);
+    player.tagEffectStack.tryEnableProcOnNPC(5478, e.id);
+    const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 5478 crit 5% 不触发（播种）
+    resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
+    rvi.mockRestore();
+    expect(tn.hits).toEqual([]);              // 城镇不入链电靶集（原版同相=销案锚）
+    expect(near.hits).toEqual([20]);          // 链电单跳 20（TryHittingNPC num6=20）
+  });
+
+  it('★BJ449③ 电鳗链电索敌门=CanBeChasedBy（ElectricEel.cs:41 字面）：immortal/chaseable=false 族不耗链位', () => {
+    const e = mkEnemy(30, 0, 0);
+    const dummy = mkEnemy(31, 25, 0);         // 488 训练假人（immortal,:14630）
+    dummy.vanillaId = 488;
+    const real = mkEnemy(32, 60, 0);          // 盒内真敌
+    const { hooks, player } = makeHooks([e, dummy, real]);
+    player.tagEffectStack.tryApplyTagToNPC(5478, e.id);
+    player.tagEffectStack.tryEnableProcOnNPC(5478, e.id);
+    const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    resolveWhipTagHit(e, 20, hooks, () => {}, 1, e.cx, e.cy, player);
+    rvi.mockRestore();
+    expect(dummy.hits).toEqual([]);           // 假人不入索敌（旧 playerCanHitEnemy 门会耗链位+播链电）
+    expect(real.hits).toEqual([20]);          // 真敌吃链电单跳
   });
 
   it('星鞭 5479 星雨按 1457（Projectile.cs:14001-14007/:15013-15036）：CanProcOnNPC 门 + RemoveAllProcs、伤 ×2×0.22', () => {

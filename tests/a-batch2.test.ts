@@ -296,8 +296,11 @@ describe('MinionShot tag/proc 继承', () => {
       (hooks as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles');
     }, 1, e.cx, e.cy, player);
     expect(res.dmg).toBe(Math.trunc(10 * 2.75));  // TotalDamageMultiplier ×2.75（1456 1.75 加算已废）
-    // 918 爆炸（本实现直接 AoE 结算）：基数 num7=10 → 10×2.75 = 27
-    expect(e.hp).toBe(10000 - Math.trunc(10 * 2.75));
+    // ★BJ449① 勘误（2026-10-03,_Firecracker.cs:23 `localNPCImmunity[npcHit]=-1`）：
+    //  918 爆炸对【源敌】（被 proc 命中敌）永免——旧断言「源敌吃爆伤 27」系本仓
+    //  AoE 直结漏豁免的偏差锁,原版源敌只吃主命中 ×2.75（伤由调用侧落地,本夹具
+    //  未落 → hp 不动）;盒内旁邻吃爆伤判别 = batch-d-tagstack BJ449① 案。
+    expect(e.hp).toBe(10000);
     expect(player.tagEffectStack.canProcOnNPC(4912, e.id)).toBe(false);   // proc 恒消耗（:14-18）
     expect(added.some((a) => a instanceof Arrow && (a as Arrow).projId === 916)).toBe(false); // 非 4680 无 916
   });

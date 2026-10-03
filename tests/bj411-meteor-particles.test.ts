@@ -286,18 +286,24 @@ describe('BJ411 B：陨石块火星（TileDrawing.cs:7512-7518）+破坏尘（Wo
     expect(ng).toBe(s1 === 2);
   });
 
-  it('【源锚】Game.ts dustRaw 分支+陨石挖掘/破坏尘专属支逐锚在位', () => {
+  it('【源锚】Game.ts dustRaw 分支+陨石挖掘/破坏尘位次逐锚在位', () => {
     const src = readFileSync(join(process.cwd(), 'src', 'core', 'Game.ts'), 'utf8');
     // ① emitTileParticles dustRaw 分支（自然色/α0/不归零/scale 掷/scale>1 ng）
     expect(src).toContain('if (rule.dustRaw !== undefined) {');
     expect(src).toContain('Math.floor(Math.random() * rule.dustScaleRand)');
     expect(src).toContain('dd.scale > rule.dustNgGt');
-    // ② 挖掘 fail 支：sheet 37 → 3 粒（KillTile_GetTileDustAmount 缺省档）
-    expect(src).toContain('if (sheet === 37) {\n        this.spawnMeteoriteBreakDust(tx, ty, 3);');
-    // ③ 破坏支（1×1 普通尾=陨石唯一破坏尾）：sheet 37 → 10 粒
-    expect(src).toContain('if (def.vanilla?.sheet === 37) {\n      this.spawnMeteoriteBreakDust(x, y, 10);');
-    // ④ 尘型=Next(2)==0?6:23（1 掷/粒;23=陨石岩尘,区别于 NPC 面的 25）
-    expect(src).toContain('Math.random() < 0.5 ? 6 : 23');
+    // ★BJ444（2026-10-03）单源化：挖掘/破坏尘位次改挂 spawnTileDustAt（GetTileDustAmount
+    //  × MakeTileDust 全表 1:1,src/world/TileDust.ts）——BJ411 特写支（37 → 3/10 粒、
+    //  Math.random<0.5?6:23）退役;数量/掷形由全表承载（fail 缺省 3/破坏缺省 10,尘型
+    //  Next(2)?23:6 同值）。旧锚随近似面退役改钉新位次:
+    //  ② 挖掘 fail 支（tryMine KillTile(fail:true) 等价位）
+    expect(src).toContain('if (sheet !== 504) this.spawnTileDustAt(tx, ty, true);');
+    // ③ 破坏支 = breakTileBody 头（原版 :64212 尘位,一切破坏路径单源）
+    expect(src).toContain('if (!dustBlocked) this.spawnTileDustAt(x, y, false);');
+    // ④ 尘型=Next(2)?23:6（1 掷/粒;23=陨石岩尘,区别于 NPC 面的 25）——TileDust 表
+    const td = readFileSync(join(process.cwd(), 'src', 'world', 'TileDust.ts'), 'utf8');
+    expect(td).toContain('if (sheet === 37) {');
+    expect(td).toContain('nextN(rand, 2) !== 0 ? 23 : 6');
   });
 
   it('【源锚】Enemy.ts 火尾逐锚在位+紫尘支摘出 vid23', () => {

@@ -4098,21 +4098,12 @@ export class Player extends Entity {
         { life: 40, grav: -0.02, damp: 0.95 },
       );
     }
+    // 弹字门预写快照（:4104 写入可能归零——原版 :19513 弹字与 statLife 扣减同拍,
+    // 死亡拍照弹不丢）
+    const dotPopAlive = this.hp > 0;
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
       this.hp = Math.max(0, this.hp + buffHeal);
-      // HurtLifeRegen 飘字（Player.cs:19207-19212）：DoT 分块伤害弹掉血数字,
-      // LifeRegen 色 (255,60,70) + dot:true;原版 DoT 不触发受击闪烁/无敌帧/音效
-      // ——故不进 damage(),死亡原因仍是 ByOther 默认包
-      // ★BJ443 根因层·显示面截断：dotChunkOut 唯一浮点源 = Buffs.tick 蜂蜜流率
-      //   对冲 cancel（Buffs.ts dotChunkOut -= cancel,accum=2×dt 浮点累加）——截断
-      //   须在 `dot > 0` 门【前】（C# int 语义=调用侧截断,门看截后值）,否则分数块
-      //   （0<x<1）过门后入口 trunc 出 "0" 飘字（原版蜂蜜对冲=延迟弹出,无弹无字）。
-      //   ★登记债（勿在此改）：同源浮点亦流入 heal → :4103 hp 真值面（净额与原版
-      //   一致但 hp 携分数,原版 lifeRegen/lifeRegenCount 全程整数）——修法=对冲改
-      //   整数位延迟弹出,牵动 Buffs.tick 金标,另刀。
-      const dot = Math.trunc(this.buffs.consumeDotChunk());
-      if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
       // DoT 致死（:19142-19156 + :19186-19201）：suffocating→ByOther(7)；tongued 已在
       // 自身路径；其余按 :19187 链——vampireBurningInSunlight 优先 VampireBurningInDaylight
       // ByOther(22)（吸血鬼种子日光灼死文案），再 poisoned/venom→9、electrified→10、
@@ -4123,6 +4114,34 @@ export class Player extends Entity {
           ? { kind: 'starved' }   // PlayerDeathReason.ByOther(18)（:19175，饥饿链 2026-08-20）
           : this.buffs.has(BuffType.Suffocation)
             ? { kind: 'suffocated' } : { kind: 'burned' };
+    }
+    // ★BJ451 分块显示账结转（2026-10-03）：dotChunkOut 冲刷门 = 旧 `buffHeal < 0`
+    //   （当拍流量符号门）之外加「DoT 活跃即冲刷」支（dotActiveTick = Buffs.tick
+    //   「本 tick DoT 流量在账」谓词,Player.ts:4277 lifeRegenTime 复位门同款消费面）
+    //   ——原版定谳（1457 Player.cs 亲读）：负兑付 :19478 `while (lifeRegenCount <=
+    //   -120)` 每 tick 无条件查账,兑付条件=账面值跨门槛,与当拍 lifeRegen 流量符号
+    //   无关（:19436 灼烧 -600 环退出残账 ∈(-600,-120],灼烧熄灭后下一拍由 :19478
+    //   通用环即时兑付——可在正流量拍弹字,证伪「只在负 heal 拍弹」;:19384 全流量
+    //   合一本账,:19513 弹字与 statLife 扣减同拍）。残账结转仅存在于【低于兑付门槛】
+    //   的尘埃（<120 单位）;本仓 dotChunkOut 为整 HP 口径（rateAccum 整块弹出）,
+    //   >0 ⟺ 账面已跨门槛 → 旧符号门令整 HP 残块跨拍滞留（BJ447 整数化后确定性
+    //   可达：蜂蜜 flat 对冲拍与 DoT 分块拍对齐 → buffHeal 恰 0）= 原版账面不可能态。
+    //   冲刷块移出 heal 写入分支独立执行（覆盖 buffHeal≥0 的对齐拍/正流量拍;hp 写入
+    //   面零改动,净额守恒不变）。
+    //   HurtLifeRegen 飘字形态（Player.cs:19439/:19470/:19482 调用,:19509-19514 本体）：
+    //   DoT 分块伤害弹掉血数字,LifeRegen 色 (255,60,70) + dot:true;原版 DoT 不触发
+    //   受击闪烁/无敌帧/音效——故不进 damage(),死亡原因仍是 ByOther 默认包。
+    //   ★BJ443 根因层·显示面截断（★BJ447 真值面整数化后 dotChunkOut 恒整,截断
+    //   保留为兜底,对整数输入恒等）：旧唯一浮点源 = Buffs.tick 蜂蜜对冲 cancel
+    //   （accum=2×dt 浮点累加,BJ447 已改整数位账 honeyOffsetUnits）——截断
+    //   须在 `dot > 0` 门【前】（C# int 语义=调用侧截断,门看截后值）,否则分数块
+    //   （0<x<1）过门后入口 trunc 出 "0" 飘字（原版蜂蜜对冲=延迟弹出,无弹无字）。
+    //   ★BJ443 hp 真值面登记债已随 BJ447 清偿（对冲计提/兑付双端整数化,
+    //   heal 恒整 → hp 恒整,原版 lifeRegen(:1919)/lifeRegenCount(:1921)
+    //   双 int 同构）。
+    if ((buffHeal < 0 || this.buffs.dotActiveTick) && dotPopAlive) {
+      const dot = Math.trunc(this.buffs.consumeDotChunk());
+      if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
     }
     // 恐慌项链加速窗口倒计时（panicTime 单位=tick,dt 秒 ×60 折算——
     // 旧 `-= dt` 把 480t 窗口拉成 480 秒,R5-F26 连带修正）

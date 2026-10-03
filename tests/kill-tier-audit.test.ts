@@ -22,6 +22,7 @@ import { Arrow, BULLET_KILL_SFX } from '../src/entities/Arrow';
 import { Dart } from '../src/entities/Dart';
 import { GorePiece } from '../src/entities/GorePiece';
 import { Game } from '../src/core/Game';
+import { VanillaDust } from '../src/fx/VanillaDust';
 import type { GameHooks } from '../src/entities/types';
 
 interface DustRec {
@@ -82,6 +83,7 @@ function mkDeathGame(opts?: {
   g.player = { dead: false, cx: 0, cy: 0, x: -10, y: -21, w: 20, h: 42, equipStats: {} };
   g.entities = { enemies, critters: [], projectiles: [], add: () => {} };
   g.world = opts?.world ?? emptyWorld();
+  g.vanillaDust = new VanillaDust();   // ★BJ444：hitTilesFx 尘面=原版尘池（spawnTileDustAt 消费）
   g.sfx = { play: (name: string) => { sfx.push(name); } };
   g.playSfxFiles = (names: string[]) => { sfx.push(...names); };
   g.spawnDust = (_x: number, _y: number, _w: number, _h: number, type: number,
@@ -99,6 +101,12 @@ function mkDeathGame(opts?: {
 
 function kill(a: Arrow, game: GameHooks): void {
   (a as unknown as { killNow: (g: GameHooks) => void }).killNow(game);
+}
+
+/** ★BJ444：vanillaDust 池活粒读取（hitTilesFx 尘面 spy——旧 spawnParticles 色点近似退役） */
+function poolDusts(g: unknown): Array<{ type: number }> {
+  const pool = (g as { vanillaDust: { pool: Array<{ active: boolean; type: number }> } }).vanillaDust.pool;
+  return pool.filter((d) => d.active).map((d) => ({ type: d.type }));
 }
 
 describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
@@ -393,26 +401,21 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     expect(drops).toHaveLength(1);
   });
 
-  it('⑩ HitTiles 面（660 冒烟）：命中格撒 tile 色系尘 3 粒（mapColor、格心锚）；悬空消亡不撒', () => {
+  it('⑩ HitTiles 面（660 冒烟）：命中格撒原版尘池 3 粒（石→尘 1,MakeTileDust 全表）；悬空消亡不撒', () => {
     const w = emptyWorld();
     const stone = TILE_INTERNAL_BY_SHEET.get(1);
     expect(stone).toBeDefined();
     w.store.setTileSilent(25, 100, stone!, 0, 0);
-    const parts: Array<[number, number, string, number]> = [];
     const hit = mkDeathGame({ world: w });
-    (hit.g as unknown as Record<string, unknown>).spawnParticles =
-      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
     hit.g.onProjectileDeath(660, 25 * TILE, 100 * TILE - 10, 10, 10, 0, 4, 20, {});
-    expect(parts).toHaveLength(1);                           // 1 命中格 × GetTileDustAmount(fail)=3
-    expect(parts[0][3]).toBe(3);
-    expect(parts[0][0]).toBe(25 * TILE + 8);                 // 格心锚
-    expect(parts[0][1]).toBe(100 * TILE + 8);
+    // ★BJ444：尘面=vanillaDust 池（KillTile(fail:true,effectOnly) 1:1）——
+    //  1 命中格 × GetTileDustAmount(fail)=3（石缺省档）× 尘型 1（:67289 石族支）
+    const ds = poolDusts(hit.g);
+    expect(ds).toHaveLength(3);
+    expect(ds.every((d) => d.type === 1)).toBe(true);
     const miss = mkDeathGame({ world: w });
-    (miss.g as unknown as Record<string, unknown>).spawnParticles =
-      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
-    const n0 = parts.length;
     miss.g.onProjectileDeath(660, 60 * TILE, 60 * TILE, 10, 10, 0, 4, 20, {});   // 空域
-    expect(parts.length).toBe(n0);
+    expect(poolDusts(miss.g)).toHaveLength(0);
   });
 });
 
@@ -431,21 +434,16 @@ const VANILLA_HIT_TILES_24 = [14, 20, 88, 36, 83, 84, 389, 104, 279, 100, 110, 1
   207, 357, 242, 302, 257, 259, 285, 287, 576, 577, 876, 968];
 
 describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因矩阵金标 2026-09-03）', () => {
-  it('⑪ 14 步枪弹贴石格：spawnParticles 3 粒×命中格（格心锚/石 mapColor）+ Item_10 ×1（音面不重复）', () => {
+  it('⑪ 14 步枪弹贴石格：尘池 3 粒×命中格（石→尘 1）+ Item_10 ×1（音面不重复）', () => {
     const w = emptyWorld();
     const stone = TILE_INTERNAL_BY_SHEET.get(1);
     expect(stone).toBeDefined();
     w.store.setTileSilent(25, 100, stone!, 0, 0);
-    const parts: Array<[number, number, string, number]> = [];
     const hit = mkDeathGame({ world: w });
-    (hit.g as unknown as Record<string, unknown>).spawnParticles =
-      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
     hit.g.onProjectileDeath(14, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
-    expect(parts).toHaveLength(1);                          // 1 命中格 × GetTileDustAmount(fail)=3
-    expect(parts[0][3]).toBe(3);
-    expect(parts[0][0]).toBe(25 * TILE + 8);                 // 格心锚
-    expect(parts[0][1]).toBe(100 * TILE + 8);
-    expect(parts[0][2]).toBe(TILE_DEFS[stone!].mapColor);    // 砖屑色=tile mapColor
+    const ds = poolDusts(hit.g);
+    expect(ds).toHaveLength(3);                              // 1 命中格 × GetTileDustAmount(fail)=3
+    expect(ds.every((d) => d.type === 1)).toBe(true);        // 砖屑=石族尘 1（:67289）
     expect(hit.sfx.filter((s) => s === 'Item_10')).toHaveLength(1);
   });
 
@@ -455,19 +453,16 @@ describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因�
     for (const id of VANILLA_HIT_TILES_24) {
       const w = emptyWorld();
       w.store.setTileSilent(25, 100, TILE_INTERNAL_BY_SHEET.get(1)!, 0, 0);
-      const parts: Array<[number, number, string, number]> = [];
       const d = mkDeathGame({ world: w });
-      (d.g as unknown as Record<string, unknown>).spawnParticles =
-        (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
       d.g.onProjectileDeath(id, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
-      if (parts.length !== 1 || parts[0][3] !== 3) missing.push(id);
+      const ds = poolDusts(d.g);
+      if (ds.length !== 3) missing.push(id);
       if (d.sfx.filter((s) => s === 'Item_10').length !== 1) badSfx.push(id);
     }
     expect(missing).toEqual([]);                             // 24 型无一缺面
     expect(badSfx).toEqual([]);                              // 音面不重复
     // 非档对照：283 的 Kill 面在 Arrow.killNow（Game.onProjectileDeath 无分档,批①已钉）
     const ctl = mkDeathGame({ world: emptyWorld() });
-    (ctl.g as unknown as Record<string, unknown>).spawnParticles = () => {};
     ctl.g.onProjectileDeath(283, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
     expect(ctl.sfx.filter((s) => s === 'Item_10')).toHaveLength(0);
   });
@@ -506,16 +501,14 @@ describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因�
       .toEqual([...VANILLA_HIT_TILES_24].sort((x, y) => x - y));
   });
 
-  it('⑮ 357 脉冲矢 Kill 面=HitTiles 砖屑（砖色 particles）非 d206 尾尘（d206 属 AI 飞行拖尾 :57733-57748）', () => {
+  it('⑮ 357 脉冲矢 Kill 面=HitTiles 砖屑（原版尘池）非 d206 尾尘（d206 属 AI 飞行拖尾 :57733-57748）', () => {
     const w = emptyWorld();
     w.store.setTileSilent(25, 100, TILE_INTERNAL_BY_SHEET.get(1)!, 0, 0);
-    const parts: Array<[number, number, string, number]> = [];
     const d = mkDeathGame({ world: w });
-    (d.g as unknown as Record<string, unknown>).spawnParticles =
-      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
     d.g.onProjectileDeath(357, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 20, {});
-    expect(parts).toHaveLength(1);
-    expect(parts[0][3]).toBe(3);
+    const ds = poolDusts(d.g);
+    expect(ds).toHaveLength(3);
+    expect(ds.every((x) => x.type === 1)).toBe(true);
     expect(d.dusts.filter((x) => x.type === 206)).toHaveLength(0);   // Kill 口不撒拖尾尘
     expect(d.sfx.filter((s) => s === 'Item_10')).toHaveLength(1);
   });

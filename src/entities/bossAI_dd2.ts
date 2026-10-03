@@ -519,9 +519,14 @@ export function checkArenaScore(
 // DD2 索敌（NPCUtils.TargetClosestOldOnesInvasion :261 / TargetClosestBetsy :308）：
 // 场上有水晶 548 → 咬水晶;否则咬玩家
 // ---------------------------------------------------------------------------
-function findCrystal(game: GameHooks): Enemy | null {
+/** hittableOnly=true → NPCUtils.SearchFilters.OnlyCrystal（:16-21）语义：水晶候选须
+ *  !dontTakeDamageFromHostiles——胜/败演出期（:41170/:41280/:78896 置旗）水晶退出
+ *  索敌候选,DD2 态改咬玩家。lanePortalAI 的水晶在世判定（AnyNPCs(548) :41440）【不】
+ *  带此门（演出期门恒在世维持开门态）→ 分参。★BJ450 */
+function findCrystal(game: GameHooks, hittableOnly = false): Enemy | null {
   for (const n of game.enemies() as Enemy[]) {
-    if (!n.dead && n.vanillaId === 548) return n;
+    if (!n.dead && n.vanillaId === 548
+      && (!hittableOnly || !n.dontTakeDamageFromHostiles)) return n;
   }
   return null;
 }
@@ -532,8 +537,8 @@ function dd2Target(
   // 候选 = 水晶 548（OnlyCrystal :16-21）与玩家（玩家距离按 aggro 折扣 num5 = dist − aggro，
   // :229-231）；**近者胜**（nearestNPCDistance < adjustedTankDistance → NPC，否则玩家）。
   // TargetClosestOldOnesInvasion（:261-273）玩家滤 200px 内；TargetClosestBetsy（:308-318）
-  // 无距离门（noDistanceGate）。
-  const crystal = findCrystal(game);
+  // 无距离门（noDistanceGate）。★BJ450:水晶候选过 OnlyCrystal 门（演出期改咬玩家）。
+  const crystal = findCrystal(game, true);
   const pd = player && !player.dead ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
   const aggro = player && !player.dead
     ? ((player as unknown as { aggro?: number }).aggro ?? 0) : 0;
@@ -1134,7 +1139,10 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
   } else if (e.ai1 === 2) {
     // ---- 胜利演出（:42846-42958,依赖 DD2Event 置 ai[1]=2） ----
     // ★R23b 系统性修:iframes=2 近似改真旗标(pierce===1 单发弹绕过 iframes 免疫门)
-    e.dontTakeDamage = true;                       // dontTakeDamageFromHostiles + 满血
+    // ★BJ450:改真名旗——原版 :41170 置的是 dontTakeDamageFromHostiles（仅敌意来源
+    // 免伤;水晶 friendly=true → 玩家通道本就不入,敌意残部经互伤门 :93557/弹幕
+    // flag2 :12626 拒）,每拍重写维持
+    e.dontTakeDamageFromHostiles = true;           // :41170 + 满血（每拍重写）
     e.hp = e.maxHp;
     if (e.ai0 === 3) {
       // :42851 胜利演出音（DD2_WinScene）——曾缺
@@ -1210,7 +1218,10 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     }
   } else if (e.ai1 === 1) {
     // ---- 败北演出（:42959-43061,依赖 DD2Event.ReportLoss） ----
-    e.dontTakeDamage = true;   // ★同上:真旗标
+    // ★BJ450:真名旗（原版 :41280 每拍重写 dontTakeDamageFromHostiles;血尽转换
+    // checkDead :78896 同旗——入口已在 Enemy.ts hurt 级联 548 支接通,本支由死码
+    // 转可达）
+    e.dontTakeDamageFromHostiles = true;
     e.hp = e.maxHp;
     if (e.ai0 === 0) {
       // ★B1 接线批：败北演出音。原版首帧在水晶同拍生成效果弹 672（NPC.cs:41299，
@@ -1676,6 +1687,9 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
 //   不再漏检身后走廊（原版玩家体感"Betsy 火球判定极肥"即此尾迹面）。
 // · 伤害走 Damage_EVP（General 槽——686 不在 BossNoCheese 分槽表）难度乘区×2；
 //   实扣>0 才授 StatusPlayer debuff 链。
+// · ★BJ454 水晶面：hostile 弹经 Damage_PVE_Inner flag2 门伤 friendly 水晶 548
+//   （:12626-12632;immune[255]=10 免疫窗 :14182,尾迹扫掠同生效）——681/683 同族
+//   先例,BJ450 548 收端联动（演出期旗置位照拒）。
 // · Kill 视觉(:74101-74126 oldPos 环 d6/55/158)与飞行尘(:57485-57512)粒子近似承担。
 // 联机：不带 netProjMeta——快照链按 projId 桶落 kind1(tag='686')傀儡重建为 Arrow
 // 直飞档（两段重力经 projGravSpec 保持；oldPos 扫掠仅在权威端实装，登记）。
@@ -1754,6 +1768,27 @@ export class DD2BetsyFireball extends Entity {
     this.y = ny;
     const stx = Math.floor(this.cx / TILE), sty = Math.floor(this.cy / TILE);
     if (!game.world.store.inBounds(stx, sty)) { this.dead = true; return; }
+    // ---- ★BJ454 永恒水晶 548 命中面（Damage_PVE_Inner Projectile.cs:12626-12632
+    //      1:1）：hostile 弹伤 friendly NPC 门 = flag2（targetNPC.friendly ∧
+    //      !dontTakeDamageFromHostiles——演出期/血尽转换窗旗置位照拒,BJ450 链）；
+    //      非 friendly NPC（敌怪）不吃敌对弹（hostile & flag2 恒假）。
+    //      Colliding 尾迹扫掠（:16156-16172）对水晶同样生效 → 当前盒∪尾迹盒。
+    //      命中后 immune[255]=10（:14180-14183 owner=255 槽,penetrate=-1 不减不
+    //      Kill=火球穿过续飞）——与 NPC 互殴通道共用 immune[255] 槽（原版同槽）。
+    //      伤害 = Main.DamageVar(damage)（ownedBySomeone=false 无 luck 面）直用
+    //      damage;kb=num5=knockBack 缺省而 548 knockBackResist=0 → 0 等价
+    //      （681/683 水晶面同式）。玩家不在/已亡不早退水晶面（原版两通道独立）----
+    for (const n of game.enemies() as Enemy[]) {
+      if (n.dead || n.vanillaId !== 548 || n.dontTakeDamageFromHostiles) continue;
+      if (n.npcImmune255 > 0) continue;              // immune[255] 窗内拒再吃
+      let cHit = projTargetsOverlap(this.x, this.y, this.w, this.h, n);
+      for (const tr of this.trail) {
+        if ((tr.x !== 0 || tr.y !== 0) && projTargetsOverlap(tr.x, tr.y, this.w, this.h, n)) { cHit = true; break; }
+      }
+      if (!cHit) continue;
+      n.hurt(this.damage, 0, 0, game);
+      n.npcImmune255 = 10;                            // :14182 immune[255]=10
+    }
     // ---- Damage_EVP 命中面（player 盒 vs 当前盒∪尾迹盒;General 免疫帧内部去重）----
     // ★victim-settles：恒本地玩家（damagePlayer 只结算本地血）
     const p = game.player as { x: number; y: number; w: number; h: number; dead?: boolean } | null;
@@ -2702,7 +2737,9 @@ function w107Target(game: GameHooks, e: Enemy, player: Player | null): W107Targe
   // TargetClosestOldOnesInvasion（NPCUtils.cs:261-273）：水晶候选 + 200px 内玩家
   let crystal: Enemy | null = null;
   for (const n of game.enemies() as Enemy[]) {
-    if (!n.dead && n.vanillaId === 548 && !n.dontTakeDamage) { crystal = n; break; }
+    // OnlyCrystal（NPCUtils.cs:16-21）：!dontTakeDamageFromHostiles（★BJ450 真名旗——
+    // 旧档映射 dontTakeDamage,演出期水晶照旧被咬=索敌面偏离）
+    if (!n.dead && n.vanillaId === 548 && !n.dontTakeDamageFromHostiles) { crystal = n; break; }
   }
   const pd = player && !player.dead
     ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
@@ -3358,7 +3395,9 @@ export class DD2GoblinBomb extends Entity {
     }
     for (const n of game.enemies() as Enemy[]) {
       // 永恒水晶 548 吃敌对爆伤（DD2 敌怪对水晶的伤害通道）
-      if (n.dead || n.vanillaId !== 548 || n.dontTakeDamage) continue;
+      // ★BJ450:flag2 门（Projectile.cs:12626 friendly && !dontTakeDamageFromHostiles）
+      // ——演出期（旗置位）敌对爆伤照拒
+      if (n.dead || n.vanillaId !== 548 || n.dontTakeDamageFromHostiles) continue;
       if (n.x < bx + 80 && n.x + n.w > bx && n.y < by + 80 && n.y + n.h > by) {
         n.hurt(this.damage, 0, 0, game);
       }
@@ -3442,7 +3481,8 @@ export class DD2OgreSmash extends Entity {
       game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     for (const n of game.enemies() as Enemy[]) {
-      if (n.dead || n.vanillaId !== 548 || n.dontTakeDamage) continue;
+      // ★BJ450:flag2 门（Projectile.cs:12626）——演出期（旗置位）照拒
+      if (n.dead || n.vanillaId !== 548 || n.dontTakeDamageFromHostiles) continue;
       if (this.hitIds.has(n.id)) continue;
       if (n.x < this.x + this.w && n.x + n.w > this.x
         && n.y < this.y + this.h && n.y + n.h > this.y) {

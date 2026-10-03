@@ -120,6 +120,40 @@ export function dd2SetFlags(playerLike: unknown): Dd2SetFlags {
   };
 }
 
+/** ★BJ453（2026-10-03）① 弹幕受理面 TryConsumingTimerCrit 消费位形
+ *  （Projectile.cs:12928 1:1——`Main.player[owner].TryConsumingTimerCrit(
+ *  targetNPC.Hitbox, ref crit)` 在 Damage_PVE_Inner `if (ownedBySomeone)` 段内,
+ *  对【一切】玩家弹无条件消费:满蓄（≥1000）或负窗（<0）→ charge 置 −15 + 强制
+ *  crit + NightsEdge 编排/尘 228×20;本体 = Player.tryConsumingTimerCrit,近战面
+ *  Game.ts:34625/:34756 先例,弹幕面 F11 已接 WeaponProj.hitEnemies/
+ *  proj1457.dealContacts/Arrow whipTagShot/VolcanoBlast/meleeOnHitProjs——
+ *  随从/哨兵面（Damage_PVE_Inner 同链受理位）本批补齐）。返回 true=本次命中
+ *  强制暴击。双 `?.` 形=测试桩无该方法时静默 false（house 弹幕面习语）。 */
+function tryConsumeTimerCritOf(owner: Player | null | undefined, game: GameHooks,
+  x: number, y: number, w: number, h: number): boolean {
+  return (owner as unknown as
+    { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+    | null)?.tryConsumingTimerCrit?.(game, x, y, w, h) ?? false;
+}
+
+/** ★BJ453（2026-10-03）② 武僧 T2/T3 强制暴击掷（Projectile.cs:12929-12943 1:1）：
+ *  `int num14 = type; if ((uint)(num14 - 688) <= 2u) { if (setMonkT3)
+ *  { if (Main.rand.Next(4) == 0) crit = true; } else if (setMonkT2 &&
+ *  Main.rand.Next(6) == 0) crit = true; }` —— 688/689/690 = AI_137 闪电光环塔弹
+ *  （DD2 武僧杖 MonkStaffA/B/SetDefaults 无类别旗 → 三类掷 :12916-12927 轮不到,
+ *  唯一暴击源 = TimerCrit :12928 + 本掷 + 6176 背包 :12962）。(uint) 撇距=负数
+ *  回卷,JS 用 `(projId-688)>>>0` 复刻（projId<688 恒假）。装备门 = dd2SetFlags
+ *  （vanillaArmorSets '206|203|148'=MonkTier2 / '213|207|156'=MonkTier3 投影;
+ *  ArmorSetBonuses MonkTier3 同置 T3+T2(:115-116) → T3 分支先行,1/4 恒压 1/6）。
+ *  掷序位次 = 三类掷后 / tag ModifyHit(:12947) 前 / 6176 背包(:12962) 前。 */
+export function monkAuraForcedCrit(owner: Player | null | undefined, projId: number): boolean {
+  if (((projId - 688) >>> 0) > 2) return false;
+  const f = dd2SetFlags(owner);
+  if (f.monkT3) return Math.floor(Math.random() * 4) === 0;   // Main.rand.Next(4) == 0
+  if (f.monkT2) return Math.floor(Math.random() * 6) === 0;   // Main.rand.Next(6) == 0
+  return false;
+}
+
 /** GetBallistraShotDelay 1:1（1457 :69720-69736；1456 :65707 同体）：
  *  基础 160 → 侍从 T3 套装 100 → 弩车恐慌（ballistaPanic）60 → 双真 30。
  *  setSquireT3/ballistaPanic 经 dd2SetFlags 读（未穿套装恒 160 档,旗标位 GW 批补） */
@@ -353,6 +387,9 @@ const CONTACT_CD_TABLE: Record<number, ContactCd> = {
   688: 3,                              // 闪电光环（:7339,AURA 直伤通道专用表同值）
   689: 3,
   690: 3,
+  694: 30,                             // ★BJ445③ 爆炸机关爆炸弹三族（:7356-7367
+  695: 30,                              //   usesLocalNPCImmunity+localNPCHitCooldown=30,
+  696: 30,                              //   Y2 报告③误档核销——AI_138 城镇臂写梯归档）
   755: -1,                             // 血蝙蝠（:7792,localCD=-1=攻击轮次免疫,tHit/bHit 承载）
   758: { kind: 'idStatic', cd: 10 },   // 吸血蛙（:7825——旧误 30t → 正轨）
   833: 10,                             // 沙漠虎本体（:8095,A① 改链后仍传显式 10 存档）
@@ -4514,14 +4551,29 @@ export class MinionProj extends Entity {
           if (en.dead) continue;
           const bx = this.cx + this.facing * 40 - 40, by = this.cy - 20;
           if (en.x + en.w <= bx || en.x >= bx + 80 || en.y + en.h <= by || en.y >= by + 40) continue;
+          if (MinionProj.enemyImmune(en)) continue;   // ★BJ452 N5 :12636 三族共门（623 命中盒 Colliding :15611-15621 走 Damage_PVE_Inner 同链——窗拒拍不白吃私表 cd,contact() :4809 同构补）
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
+          // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前）：
+          //  TimerCrit :12928 + 武僧 688-690 强制掷 :12929-12943（623 恒假,形位保留）
+          const timerCritFist = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+          const monkCritFist = monkAuraForcedCrit(this.ownerRef(), this.projId);
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
             this.ownerRef());
-          en.hurt(applyBannerDamageDealt(game, en, res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
+          // ★BJ452 N2 crit 色位（res.crit=tag 掷率强制位 WhipTagEffect.cs:70-72——Enemy.hurt
+          //  纯染色,数值预倍已在 res.dmg 内,零数值风险;contact() :4864 同式先例）
+          //  ★BJ453 并链：crit 源 ‖ timerCritFist（:12928）‖ monkCritFist（:12929-12943）,
+          //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg——单一翻倍,原版序）
+          const critFist = res.crit || timerCritFist || monkCritFist;
+          // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
+          const guardGated = en.dead
+            || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+          en.hurt(applyBannerDamageDealt(game, en, critFist && !res.crit ? res.dmg * 2 : res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, critFist, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,拳盒 623 同面;
           //  受理门=:12600/:12686 dontTakeDamage——拒收拍 num41=0 flag10 整段不可达）
-          if (!en.dead
-            && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+          //  ★BJ455⑤ 门径统一（原版 :13712 `flag10 |= num41>0` 在 StrikeNPC :13702 后
+          //  无死亡复查,BJ405 'proc/numHits++ 在受理面无死亡复查'——击杀拍照回血;旧
+          //  post-hurt !en.dead 门=击杀拍断供,爆弹臂/光环臂同刀统一）
+          if (!guardGated) {
             ghostHealProc(game, this.projId, this.pveNumHits,
               en as unknown as Parameters<typeof ghostHealProc>[3]);
             this.pveNumHits++;   // :14263
@@ -4568,6 +4620,9 @@ export class MinionProj extends Entity {
             game, dmg0, 0, 'playerProj', this.projId, undefined, undefined,
             (n) => {
               if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+              // ★BJ455⑦ :12636 三族共门（contactTown :4958 同式——窗拒拍整跳,先于
+              //  ready() 消费=私表保持 0,窗清立即可命中;读 hurt 前状态=快照纪律）
+              if (MinionProj.enemyImmune(n)) return true;
               return !this.hitCd.ready(n.id, 5);   // localNPCHitCooldown=5（:6433）
             },
             (n) => {
@@ -4593,8 +4648,15 @@ export class MinionProj extends Entity {
               const res = resolveWhipTagHit(tn, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1,
                 tn.cx, tn.cy, this.ownerRef());
               punchDirect = direct;
+              // ★BJ455① settle 归位（BJ445② 同构,contactTown :4996 同式）：res.dmg 已含
+              //  tag-crit 预倍 ×2（resolveWhipTagHit 尾 WhipTag.ts:848 `if (crit) dmg *= 2`）
+              //  → 仅 res.crit 摘半还原防前值,crit=res.crit 传参（TownNPC.hurt 防后×2+色
+              //  一体,NPC.cs:82066;623=minion 非 sentry/SentryShot → 6176 golem 掷不达
+              //  :12962 门,crit 单源）。旧形 dmg=res.dmg+crit 缺=暴击色省略+倍序偏离
+              //  （(值×2−防)≠(值−防)×2）。
               return {
-                dmg: res.dmg,
+                dmg: res.crit ? res.dmg / 2 : res.dmg,
+                crit: res.crit,
                 kb: Math.sign(tn.cx - this.cx) * this.knockback,
                 // 敌怪环 punch 面 armorPen=0（:4145 第五参）→ 城镇同形
               };
@@ -4819,6 +4881,12 @@ export class MinionProj extends Entity {
       //  链电（伤落【其他】敌,源敌永免）。
       const pendingDirect: number[] = [];
       en.hurtFx = (d: number) => { pendingDirect.push(d); };   // 鞭 tag 直伤汇出位
+      // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit :12947 前）：
+      //  ① TimerCrit :12928——6170 蓄能暴击对一切玩家弹无条件消费（满蓄/负窗→
+      //     charge=-15+强制 crit;近战面 Game.ts:34625 先例）
+      //  ② 武僧 688-690 强制掷 :12929-12943（随从接触面非 688 族恒假,形位保留）
+      const timerCritContact = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+      const monkCritContact = monkAuraForcedCrit(this.ownerRef(), this.projId);
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
         this.ownerRef());
@@ -4853,8 +4921,16 @@ export class MinionProj extends Entity {
       //    吸血蛙 758/雪原精怪 951/阿比盖尔 963 等全族每次命中都开 10t 窗,仆从
       //    连续攻击=窗口近全覆盖 ⇒ 玩家其他武器被 hurt 免疫门整段拒收=BJ436
       //    用户实报「仆从攻击时其他武器无法造成伤害」第一因。
-      en.hurt(applyBannerDamageDealt(game, en, golemCrit ? res.dmg * 2 : res.dmg),
-        kbDir * (this.knockback + mkb), 0, game, pen0, false,
+      // ★BJ445② crit 色补齐（StrikeNPC :13702 第 4 参传 crit——染暴击色;防后 ×2 已由
+      //  调用侧预倍承载,Enemy.hurt crit 参仅染色 :14583 登记偏差）。crit 源 = res.crit
+      //  （tag 掷率强制位,WhipTagEffect.cs:70-72）‖ golemCrit（6176 背包 :12962-12965）
+      //  ——旧恒 false=暴击色省略（Y2 报告②）。Arrow.ts:9490 whipTagShot 支同式先例。
+      //  ★BJ453 并链：‖ timerCritContact（:12928）‖ monkCritContact（:12929-12943）——
+      //  原版 crit=单布尔单翻倍,新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg,
+      //  不重倍;旧 res.crit∧golemCrit 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）。
+      const critContact = res.crit || timerCritContact || monkCritContact || golemCrit;
+      en.hurt(applyBannerDamageDealt(game, en, critContact && !res.crit ? res.dmg * 2 : res.dmg),
+        kbDir * (this.knockback + mkb), 0, game, pen0, critContact,
         spec === CONTACT_PLAYER_WINDOW ? 0 : -3, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       // ★BJ436 GC1 写方桥接线（近战域 immune 表 npcImmuneByAttacker 同步,原版
       //  单表语义;ForbiddenSignProj 同式）：受理命中才写梯（!mainGated=dead/
@@ -4911,8 +4987,8 @@ export class MinionProj extends Entity {
    *  onAccept 受理拍,:14179 写梯同位）→ AABB（pad 外扩盒同 critter 环形）。
    *  settle = 逐靶结算（tag 乘区/crit/kb 逐靶依赖 tag 态与靶位;banner 在
    *  hitTownNpcs 通道内统一施加,勿在此预套;crit 语义=TownNPC.hurt 防后双精度
-   *  ×2,与敌怪环「调用侧预倍」不同形——golemCrit 6176 沿敌怪环预倍习语,crit
-   *  参恒 false=暴击色省略登记）。onAccept = 受理拍写梯:usesLocal 主支
+   *  ×2,与敌怪环「调用侧预倍」不同形——★BJ445②：res.crit 摘半+golemCrit 并入
+   *  crit 参防后重倍,暴击色/倍序双归位）。onAccept = 受理拍写梯:usesLocal 主支
    *  （:14175-14179 私表/idStatic 族=immune[owner]=0 清全局窗不开窗,鞭 W1 同式;
    *  -2 缺省族=TownNPC.hurt 通用档 iframes=10 即 :14182 档,不动）+StatusNPC
    *  （:13634）/SpawnHitVisuals（:13633）/attackFlash。 */
@@ -4942,9 +5018,12 @@ export class MinionProj extends Entity {
       (n) => {
         // 巫毒窄门先置（:12618-12631 flag 臂;探针零污染）——318 臭鸡蛋例外在谓词内
         if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+        // ★BJ452 N5 :12636 三族共门（immune[owner]>0 整跳,先于私表消费——窗拒拍早退
+        //  不达 :14179 写位=私表保持 0;原 local/idStatic 分支不查窗=窗内白吃 cd 节拍漂移。
+        //  BJ436 敌怪环 contact() 同构补,门读 hurt 前状态=vanillaGated 快照纪律）
+        if (MinionProj.enemyImmune(n)) return true;
         // 接触冷却三态门（敌怪环 :4361-4367 同式;town id 与敌 id 同 Entity 全局序列不撞）
-        if (spec === CONTACT_PLAYER_WINDOW) return (n as { iframes?: number }).iframes !== undefined
-          && (n as { iframes?: number }).iframes! > 0;   // -2 缺省族:城镇全局窗内不重击
+        if (spec === CONTACT_PLAYER_WINDOW) return false;   // -2 缺省族窗查已由 :12636 共门承载
         if (typeof spec === 'object') return !this.idStaticBucket(this.projId).ready(n.id, spec.cd);
         return !this.hitCd.ready(n.id, spec);
       },
@@ -4973,6 +5052,11 @@ export class MinionProj extends Entity {
         const tn = n as TownNpcHitTarget;
         const direct: number[] = [];
         tn.hurtFx = (d: number) => { direct.push(d); };
+        // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+        //  原版 crit 段在 Damage_PVE_Inner 敌/城共享段——城镇靶同链同消费）：
+        //  TimerCrit :12928 + 武僧 688-690 强制掷 :12929-12943（非 688 族恒假）
+        const timerCritTown = tryConsumeTimerCritOf(owner0, game, tn.x, tn.y, tn.w, tn.h);
+        const monkCritTown = monkAuraForcedCrit(owner0, this.projId);
         const res = resolveWhipTagHit(tn, dmg, game, (el) => add(el, 'projectiles'),
           SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, owner0);   // face 5 消费真通道：tag 乘区 + OnHit proc 消费
         pendingDirect = direct;
@@ -4980,8 +5064,18 @@ export class MinionProj extends Entity {
         const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
           ? (owner0.cx < tn.cx ? 1 : -1)
           : Math.sign(tn.cx - this.cx);   // 方向表族同敌怪环 :4386-4392
+        // ★BJ445② crit 色补齐 + 倍序归位：TownHitSettle.crit 语义=TownNPC.hurt 防后
+        //  ×2（NPC.cs:82066 原序;hitTownNpcs 约定「传 crit=true 时 dmg 勿预倍」）。
+        //  res.dmg 已含 tag 掷率暴击 ×2（resolveWhipTagHit 尾 :834,Enemy 环预倍习语）
+        //  → 城镇站摘半还原防前值再交 crit 参防后重倍（偶整数,整除精确）。旧形
+        //  golemCrit 防前预倍 + crit 参恒缺 = 暴击色省略 + 倍序偏离（(值×2−防)≠(值−防)×2,
+        //  Y2 报告②）。爆弹臂 :5996 同形先例（raw+crit 参）。
+        //  ★BJ453 并链：‖ timerCritTown（:12928）‖ monkCritTown（:12929-12943）——
+        //  crit 参单布尔承载防后单次 ×2,dmg 摘半面只系 res.crit 不动（新源不落 dmg）。
+        const critTown = res.crit || timerCritTown || monkCritTown || golemCrit;
         const settle: TownHitSettle = {
-          dmg: golemCrit ? res.dmg * 2 : res.dmg,
+          dmg: res.crit ? res.dmg / 2 : res.dmg,   // 摘 tag-crit ×2 → 防后重倍（vanilla 序）
+          crit: critTown,
           flatPen: pen0,
           kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477,同敌怪环）
         };
@@ -5809,8 +5903,16 @@ export class MinionProj extends Entity {
               && !lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, en.x + en.w / 2, en.y)) {
               continue;
             }
+            if (MinionProj.enemyImmune(en)) continue;   // ★BJ452 N5 :12636 三族共门（光环场伤=Damage() 管线 aiStyle137 :12468 → Inner 同门——窗拒拍不白吃私表 cd,contact() :4809 同构补）
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
             zapped = true;
+            // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit :12947 前）
+            //  ——光环塔 688/689/690 = 武僧强制暴击唯一可达弹面：
+            //  ① TimerCrit :12928——6170 蓄能暴击对一切玩家弹无条件消费;
+            //  ② 武僧 T2/T3 强制掷 :12929-12943——(uint)(type-688)<=2u ∧ setMonkT3 →
+            //     Next(4)==0 / else setMonkT2 → Next(6)==0（monkAuraForcedCrit 单源）。
+            const timerCritAura = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+            const monkCritAura = monkAuraForcedCrit(this.ownerRef(), this.projId);
             // 命中 armorPenetrationPercent 门（Projectile.cs:13266-13269）：
             //   `if ((type == 688||689||690) && targetNPC.type != 68 && targetNPC.defense < 999)`
             //   ⇒ 仅当受害者非 68（地牢守卫族）且防御 <999 才置 100% 护穿——高防/守卫豁免。
@@ -5826,12 +5928,22 @@ export class MinionProj extends Entity {
             // ★6176 圣殿骑士背包（:12962-12965,2026-09-03 收口）：光环场伤=塔本体
             //   （sentry）直伤面 → 10% 强制暴击（此前仅接触面掷,场伤面漏掷）
             const golemCritAura = rollGolemSentryCrit(game, this.projId, true);
-            en.hurt(applyBannerDamageDealt(game, en, golemCritAura ? res.dmg * 2 : res.dmg),
-              0, 0, game, 0, golemCritAura, 1, true, penPctAura);
+            // ★BJ452 N2 crit 色位（res.crit‖golemCritAura——Enemy.hurt 纯染色;
+            //  旧恒 golemCritAura=仅 tag crit 时色缺,contact() :4864 同式先例）
+            //  ★BJ453 并链：‖ timerCritAura ‖ monkCritAura——原版 crit=单布尔单翻倍,
+            //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg 不重倍;旧 res.crit∧
+            //  golemCrit 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）。
+            const critAura = res.crit || timerCritAura || monkCritAura || golemCritAura;
+            // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
+            const auraGated = en.dead
+              || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+            en.hurt(applyBannerDamageDealt(game, en, critAura && !res.crit ? res.dmg * 2 : res.dmg),
+              0, 0, game, 0, critAura, 1, true, penPctAura);
             // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,光环场伤载体=
             //  塔本体 688/689/690 的 Damage()——numHits 累计在塔身 pveNumHits 上）
-            if (!en.dead
-              && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+            //  ★BJ455⑤ 门径统一（:13712 flag10|=num41>0 在 StrikeNPC 后无死亡复查——
+            //  击杀拍照回血;旧 post-hurt !en.dead 门=击杀拍断供,爆弹臂/拳盒臂同刀统一）
+            if (!auraGated) {
               ghostHealProc(game, this.projId, this.pveNumHits,
                 en as unknown as Parameters<typeof ghostHealProc>[3]);
               this.pveNumHits++;   // :14263
@@ -5851,6 +5963,9 @@ export class MinionProj extends Entity {
               (n) => {
                 const tn = n as TownNpcHitTarget;
                 if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                // ★BJ455⑦ :12636 三族共门（contactTown :4958 同式——窗拒拍整跳,先于
+                //  距离/LOS/cd3 探测=私表保持 0,窗清立即可命中;读 hurt 前状态=快照纪律）
+                if (MinionProj.enemyImmune(n)) return true;
                 // targetRect.Distance(Center) < height/2-20（:14540,城镇 AABB 最近点距）
                 const nx = Math.max(tn.x, Math.min(tn.x + tn.w, this.cx));
                 const ny = Math.max(tn.y, Math.min(tn.y + tn.h, fieldCy));
@@ -5879,15 +5994,30 @@ export class MinionProj extends Entity {
                 const tn = n as TownNpcHitTarget;
                 const direct: number[] = [];
                 tn.hurtFx = (d: number) => { direct.push(d); };
+                // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+                //  原版 crit 段敌/城共享——城镇靶同消费）：TimerCrit :12928 + 武僧
+                //  688-690 强制掷 :12929-12943（光环塔=唯一可达弹面）。
+                const timerCritAuraT = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
+                const monkCritAuraT = monkAuraForcedCrit(this.ownerRef(), this.projId);
                 const res = resolveWhipTagHit(tn, dmgOf(), game,
                   (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
                   SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, this.ownerRef());
                 auraDirect = direct;
                 const golemCritAura = rollGolemSentryCrit(game, this.projId, true);   // 6176（:12962-12965）
                 zapped = true;
+                // ★BJ452 N1 倍序归位（×4→×2）+ 色位：res.dmg 已含 tag-crit 预倍 ×2
+                //  （resolveWhipTagHit 尾 WhipTag.ts:848 `if (crit) dmg *= 2`）——旧形
+                //  dmg=res.dmg + crit=golemCritAura,golem 掷中∧tag crit 同拍时 TownNPC.hurt
+                //  防后再倍 = ×4;仅 tag crit 时 crit 参缺=色缺。BJ445② 同构（contactTown
+                //  :4996-4999）：crit=res.crit‖golemCritAura 传参（TownNPC.hurt 防后×2+色
+                //  一体,NPC.cs:82066）;dmg 仅在 res.crit 时摘半还原防前值——golem 预倍本
+                //  就不经 dmg 承载,勿随 golemCritAura 摘（摘之则 golem-only 档腰斩）。
+                //  ★BJ453 并链：‖ timerCritAuraT ‖ monkCritAuraT——crit 参单布尔承载
+                //  防后单次 ×2,dmg 摘半面只系 res.crit 不动（新源不落 dmg）。
+                const critAuraTown = res.crit || timerCritAuraT || monkCritAuraT || golemCritAura;
                 return {
-                  dmg: res.dmg,             // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——golemCrit 走 crit 参
-                  crit: golemCritAura,
+                  dmg: res.crit ? res.dmg / 2 : res.dmg,
+                  crit: critAuraTown,
                   penPercent: lightningAuraPenPercent(tn.vanillaId, 15),
                   kb: 0,                    // 光环场伤零击退（同敌怪环 :5355 kx=ky=0）
                 };
@@ -5945,16 +6075,43 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
+                // ★BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,先于 crit 掷/tag 消费
+                //  ——窗拒拍=写梯/tag 全不达,掷序纪律=拒拍不耗 RNG;BJ445③ 城镇臂 :5994 同式）
+                if (MinionProj.enemyImmune(en)) continue;
+                // ★BJ452 N3② tag 面：694/695/696 ∈ SentryShot（ProjectileID.cs:293）→
+                //  WhipTagEffect.CanRunHitEffects（:76-87）达 → Damage 管线 ModifyHit+OnHit
+                //  照跑=完整 WhipTagEffect 栈（tag 加伤/TagCrit/proc 全生效）→ 挂单源
+                //  resolveWhipTagHit;916 直伤汇出收集,受理后落地（W5 :13711 位次纪律）。
+                const boomDirect: number[] = [];
+                (en as never as import('./WhipTag').WhipTagged).hurtFx = (d: number) => { boomDirect.push(d); };
+                // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+                //  伤害载体=爆炸弹 694/695/696 本体——timerCrit 消费 owner 态不变,
+                //  武僧 688-690 掷以载体 projId 判定=恒假,形位保留）
+                const timerCritBoom = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+                const monkCritBoom = monkAuraForcedCrit(this.ownerRef(), boomProj);
+                const resBoom = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
+                  dmgOf(), game,
+                  (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+                  SUMMON_TAG_MUL[boomProj] ?? 1, en.cx, en.cy, this.ownerRef(), 0, boomProj);
+                const boomGated = en.dead
+                  || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;   // 受理预判（contact :4849 同式）
                 // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
                 //   原版伤害面=爆炸弹 694/695/696 本体（SentryShot）→ 10% 强制暴击
                 const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);
-                en.hurt(applyBannerDamageDealt(game, en, golemCritBoom ? dmgOf() * 2 : dmgOf()),
-                  Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, golemCritBoom, 1, true);
+                // ★BJ453 并链：crit 源 ‖ timerCritBoom（:12928）‖ monkCritBoom（:12929-12943）,
+                //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg;res.crit∧golem 同拍
+                //  ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）
+                const critBoom = resBoom.crit || timerCritBoom || monkCritBoom || golemCritBoom;
+                en.hurt(applyBannerDamageDealt(game, en, critBoom && !resBoom.crit ? resBoom.dmg * 2 : resBoom.dmg),
+                  Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, critBoom, 1, true);   // ★N2 同式 crit 色位（res.crit‖golem）
                 // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
                 //  爆炸弹 694/695/696（AI_138 :66063-66073 生成的瞬态弹）→ projId 传
                 //  boomProj、numHits=0（原版每颗爆炸弹 numHits 独立起算,非塔身累计）
-                if (!en.dead
-                  && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+                //  ★BJ455⑤ 门径统一（定谳:原版 :13712 `flag10 |= num41>0` 位次在
+                //  StrikeNPC :13702 后、【无】死亡复查,BJ405 'proc/numHits++ 在受理面
+                //  无死亡复查' → 击杀拍照回血;contact() mainGated=受理前置快照对,旧
+                //  post-hurt !en.dead 门=击杀拍断供。818/拳盒/光环臂同刀统一）
+                if (!boomGated) {
                   ghostHealProc(game, boomProj, 0,
                     en as unknown as Parameters<typeof ghostHealProc>[3]);
                 }
@@ -5962,6 +6119,12 @@ export class MinionProj extends Entity {
                 // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
                   catalystBand: this.ownerRef()?.equipStats.catalystBand });
+                // ★BJ452 N3② W5 :13711 位落地（主命中受理后）——916 链电伤落其他敌（源敌永免 :18）
+                if (boomDirect.length > 0 && !boomGated) {
+                  for (const d of boomDirect) {
+                    darkHarvestChain(game, d, en.cx, en.cy, en.id);
+                  }
+                }
                 boom++;
               }
             }
@@ -5969,11 +6132,18 @@ export class MinionProj extends Entity {
             //  （AI_138 :66063-66073），其 Damage() 管线对城镇靶同链（CanDealDamage
             //  :12468 aiStyle==138 只闸塔体本体）。AoE 半径含靶半宽（非纯 AABB）
             //  → 几何外置 skip、collide 恒真（与敌怪环 :5448 同式）。
+            //  ★BJ452 N3② tag 面（城镇靶同链:SentryShot → :12947 ModifyHit/:13711 OnHit
+            //  照跑）——settle 挂单源 resolveWhipTagHit,916 汇出在受理拍（写梯后）落地。
+            let boomTownDirect: number[] | null = null;
             hitTownNpcs({ x: ecx, y: ecy, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', boomProj,
               () => true, undefined,
               (n) => {
                 const tn = n as TownNpcHitTarget;
                 if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                // ★BJ445③ :12636 三族共门（immune[owner]==0,flag3 不豁免——694 族
+                //  maxPenetrate=-1）先于几何,窗内靶整跳（敌怪环 :4806 同式）
+                if ((n as { iframes?: number }).iframes !== undefined
+                  && (n as { iframes?: number }).iframes! > 0) return true;
                 return !(Math.abs(tn.cx - ecx) < 72 + tn.w / 2 && Math.abs(tn.cy - ecy) < 72 + tn.h / 2);
               },
               (n) => {
@@ -5982,19 +6152,45 @@ export class MinionProj extends Entity {
                 //  爆炸弹 694 族瞬态弹,numHits=0 同敌怪环）
                 ghostHealProc(game, boomProj, 0,
                   n as unknown as Parameters<typeof ghostHealProc>[3]);
-                // StatusNPC 双源同敌怪环（:5454-5457）：塔型 + 爆炸弹 694 族（Oiled 门
-                //  :10786 setHuntressT2）;城镇通用档 iframes=10 保留（=写梯 :14182 档）
-                applyProjStatus(this.projId, tn as unknown as Record<string, number>,
-                  { catalystBand: this.ownerRef()?.equipStats.catalystBand });
+                // ★BJ445③ 写梯归档（:14175-14179）：694/695/696 = usesLocalNPCImmunity
+                //  +localNPCHitCooldown=30（Projectile.cs:7356-7367 SetDefaults 亲读）
+                //  → 受理拍写 immune[owner]=0【清窗不开窗】——TownNPC.hurt 通用档写的
+                //  10t 须清还原（旧「通用档 iframes=10 保留」系 :14182 档误档,Y2 报告③）。
+                //  ladder 内含 StatusNPC 塔型源（:5454-5457 同敌怪环）;爆炸弹 694 族
+                //  Oiled 门（:10786 setHuntressT2）单独保留。
+                this.townAcceptLadder(game, n, contactResolve(boomProj) !== CONTACT_PLAYER_WINDOW);
                 applyProjStatus(boomProj, tn as unknown as Record<string, number>,
                   { setHuntressT2: ownerH, catalystBand: this.ownerRef()?.equipStats.catalystBand });
+                // ★BJ452 N3② W5 :13711 位落地（写梯后）——916 链电自城镇靶位寻
+                //  CanBeChasedBy 敌,城镇 NPC 本体永免（_DarkHarvest.cs:18）
+                if (boomTownDirect) {
+                  for (const d of boomTownDirect) {
+                    darkHarvestChain(game, d, tn.cx, tn.cy, tn.id);
+                  }
+                  boomTownDirect = null;
+                }
               },
               (n) => {
                 const tn = n as TownNpcHitTarget;
+                const direct: number[] = [];
+                tn.hurtFx = (d: number) => { direct.push(d); };
+                // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+                //  原版 crit 段敌/城共享）：TimerCrit :12928 + 武僧 688-690 掷 :12929-12943
+                //  （载体=694/695/696 恒假,形位保留）
+                const timerCritBoomT = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
+                const monkCritBoomT = monkAuraForcedCrit(this.ownerRef(), boomProj);
+                const res = resolveWhipTagHit(tn, dmgOf(), game,
+                  (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+                  SUMMON_TAG_MUL[boomProj] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, boomProj);
+                boomTownDirect = direct;
                 const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);   // 6176（:12962-12965,爆炸弹面）
+                // ★BJ452 N3② BJ445② 同构 settle（crit 参=防后×2+色一体;dmg 仅 res.crit
+                //  摘半——tag-crit 预倍在 res.dmg,golem 预倍不经 dmg 承载勿摘）
+                //  ★BJ453 并链：crit 源 ‖ timerCritBoomT（:12928）‖ monkCritBoomT
+                //  （:12929-12943）——crit 参单布尔防后单次 ×2,dmg 面不动。
                 return {
-                  dmg: dmgOf(),          // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——勿预倍
-                  crit: golemCritBoom,
+                  dmg: res.crit ? res.dmg / 2 : res.dmg,
+                  crit: res.crit || timerCritBoomT || monkCritBoomT || golemCritBoom,
                   kb: Math.sign(tn.cx - this.cx) * this.knockback,
                 };
               });
@@ -6168,29 +6364,64 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
+                  // ★BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,先于 crit 掷/tag 消费
+                  //  ——644 usesIDStatic 族 flag3 不豁免,窗拒拍=写梯/tag 全不达;BJ445③ 城镇臂 :6218 同式）
+                  if (MinionProj.enemyImmune(en)) continue;
+                  // ★BJ452 N3② tag 面：644 ∈ SentryShot（ProjectileID.cs:293）→
+                  //  CanRunHitEffects 达 → ModifyHit+OnHit 照跑=完整栈,挂单源
+                  //  resolveWhipTagHit;916 汇出收集,受理后落地（W5 :13711 位次纪律）。
+                  const volleyDirect: number[] = [];
+                  (en as never as import('./WhipTag').WhipTagged).hurtFx = (d: number) => { volleyDirect.push(d); };
+                  // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+                  //  伤害载体=爆裂弹 644 本体——timerCrit 消费 owner 态,武僧掷恒假形位保留）
+                  const timerCritVolley = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+                  const monkCritVolley = monkAuraForcedCrit(this.ownerRef(), ss.shot);
+                  const resVolley = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
+                    dmgOf(), game,
+                    (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+                    SUMMON_TAG_MUL[ss.shot] ?? 1, en.cx, en.cy, this.ownerRef(), 0, ss.shot);
+                  const volleyGated = en.dead
+                    || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;   // 受理预判（contact :4849 同式）
                   // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
                   //   原版伤害面=爆裂弹 644 本体（SentryShot）→ 10% 强制暴击
                   const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);
-                  en.hurt(applyBannerDamageDealt(game, en, golemCritVolley ? dmgOf() * 2 : dmgOf()),
-                    Math.sign(en.cx - px) * this.knockback, -2, game, 0, golemCritVolley, 1, true);
+                  // ★BJ453 并链：crit 源 ‖ timerCritVolley（:12928）‖ monkCritVolley
+                  //  （:12929-12943）,新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg;
+                  //  res.crit∧golem 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）
+                  const critVolley = resVolley.crit || timerCritVolley || monkCritVolley || golemCritVolley;
+                  en.hurt(applyBannerDamageDealt(game, en, critVolley && !resVolley.crit ? resVolley.dmg * 2 : resVolley.dmg),
+                    Math.sign(en.cx - px) * this.knockback, -2, game, 0, critVolley, 1, true);   // ★N2 同式 crit 色位（res.crit‖golem）
                   // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
                   //  爆裂弹 644（原地引爆瞬态弹）→ projId 传 ss.shot、numHits=0
-                  if (!en.dead
-                    && (en as { dontTakeDamage?: boolean }).dontTakeDamage !== true) {
+                  //  ★BJ455⑤ 门径统一（:13712 flag10 无死亡复查——击杀拍照回血,爆弹臂同刀）
+                  if (!volleyGated) {
                     ghostHealProc(game, ss.shot, 0,
                       en as unknown as Parameters<typeof ghostHealProc>[3]);
                   }
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
+                  // ★BJ452 N3② W5 :13711 位落地（主命中受理后）——916 链电伤落其他敌（源敌永免 :18）
+                  if (volleyDirect.length > 0 && !volleyGated) {
+                    for (const d of volleyDirect) {
+                      darkHarvestChain(game, d, en.cx, en.cy, en.id);
+                    }
+                  }
                 }
               }
               // ★清偿刀 Y2：城镇臂——爆裂弹 644 的 Damage() 管线对城镇靶同链（643 本体
               //  aiStyle 123 不伤,伤面=644 爆裂弹,SentryShot）。AoE 半径含靶半宽 →
               //  几何外置 skip、collide 恒真（同爆炸弹臂）。
+              //  ★BJ452 N3② tag 面（城镇靶同链:SentryShot → ModifyHit/OnHit 照跑）——
+              //  settle 挂单源 resolveWhipTagHit,916 汇出在受理拍（写梯后）落地。
+              let volleyTownDirect: number[] | null = null;
               hitTownNpcs({ x: px, y: py, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', ss.shot,
                 () => true, undefined,
                 (n) => {
                   const tn0 = n as TownNpcHitTarget;
                   if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
+                  // ★BJ445③ :12636 三族共门（644 usesIDStatic → flag3 不豁免）——
+                  //  窗内靶整跳（每 volley=独立瞬态 644,原版同相）
+                  if ((n as { iframes?: number }).iframes !== undefined
+                    && (n as { iframes?: number }).iframes! > 0) return true;
                   return !(Math.abs(tn0.cx - px) < 14 + tn0.w / 2 && Math.abs(tn0.cy - py) < 14 + tn0.h / 2);
                 },
                 (n) => {
@@ -6198,14 +6429,44 @@ export class MinionProj extends Entity {
                   //  爆裂弹 644 瞬态弹,numHits=0 同敌怪环）
                   ghostHealProc(game, ss.shot, 0,
                     n as unknown as Parameters<typeof ghostHealProc>[3]);
-                  return this.townAcceptLadder(game, n, false);   // 城镇通用档 iframes=10（:14182 档）保留
+                  // ★BJ445③ 写梯归档：644 = usesIDStaticNPCImmunity（Projectile.cs
+                  //  :6943-6953 SetDefaults 亲读）+ penetrate=1（:6946）→ 原版写梯
+                  //  usesIDStatic 外支命中但内支 `penetrate != 1` 不达 = immune[owner]
+                  //  【零写】保持门位 0——TownNPC.hurt 通用档写的 10t 须清还原（旧
+                  //  「通用档 iframes=10 保留」误档,Y2 报告③）。644 不入 CONTACT_CD_TABLE：
+                  //  idStatic 写位不可达=门恒开,cd 位不可表（登记）。
+                  this.townAcceptLadder(game, n, true);
+                  // ★BJ452 N3② W5 :13711 位落地（写梯后）——916 链电自城镇靶位寻
+                  //  CanBeChasedBy 敌,城镇 NPC 本体永免（_DarkHarvest.cs:18）
+                  const tnL = n as TownNpcHitTarget;
+                  if (volleyTownDirect) {
+                    for (const d of volleyTownDirect) {
+                      darkHarvestChain(game, d, tnL.cx, tnL.cy, tnL.id);
+                    }
+                    volleyTownDirect = null;
+                  }
                 },
                 (n) => {
                   const tn = n as TownNpcHitTarget;
+                  const direct: number[] = [];
+                  tn.hurtFx = (d: number) => { direct.push(d); };
+                  // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
+                  //  原版 crit 段敌/城共享）：TimerCrit :12928 + 武僧 688-690 掷 :12929-12943
+                  //  （载体=644 恒假,形位保留）
+                  const timerCritVolleyT = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
+                  const monkCritVolleyT = monkAuraForcedCrit(this.ownerRef(), ss.shot);
+                  const res = resolveWhipTagHit(tn, dmgOf(), game,
+                    (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+                    SUMMON_TAG_MUL[ss.shot] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, ss.shot);
+                  volleyTownDirect = direct;
                   const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);   // 6176（爆裂弹面）
+                  // ★BJ452 N3② BJ445② 同构 settle（crit 参=防后×2+色一体;dmg 仅 res.crit
+                  //  摘半——tag-crit 预倍在 res.dmg,golem 预倍不经 dmg 承载勿摘）
+                  //  ★BJ453 并链：crit 源 ‖ timerCritVolleyT ‖ monkCritVolleyT——crit 参
+                  //  单布尔防后单次 ×2,dmg 面不动。
                   return {
-                    dmg: dmgOf(),        // 城镇 crit=防后双精度 ×2（TownNPC.hurt）——勿预倍
-                    crit: golemCritVolley,
+                    dmg: res.crit ? res.dmg / 2 : res.dmg,
+                    crit: res.crit || timerCritVolleyT || monkCritVolleyT || golemCritVolley,
                     kb: Math.sign(tn.cx - px) * this.knockback,
                   };
                 });
@@ -7623,6 +7884,10 @@ export class TigerPounce extends Entity {
       //  .cs:18）——汇出收集,主命中受理后 darkHarvestChain 落地链电（伤落其他敌）。
       const pounceDirect: number[] = [];
       en.hurtFx = (d: number) => { pounceDirect.push(d); };
+      // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前）：
+      //  TimerCrit :12928 + 武僧 688-690 强制掷 :12929-12943（818 恒假,形位保留）
+      const timerCritPounce = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+      const monkCritPounce = monkAuraForcedCrit(this.ownerRef(), 818);
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
         add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
       // ★F10（2026-08-31 蓝队三批）：扑击弹 818 生成侧 knockBack=0（:46470
@@ -7636,7 +7901,13 @@ export class TigerPounce extends Entity {
       // ★BJ436（2026-10-02）写梯档位：818 = usesLocalNPCImmunity+cd=-1（:8016-8019）
       //  → 清窗档 pierce=-3（:14175-14179 immune[owner]=0）;旧 pierce=0 开 10t 窗
       //  =扑击每跳压武器 10t（同 BJ436 主病灶）。
-      en.hurt(res.dmg, 0, 0, game, 0, false, -3, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      // ★BJ455③ banner 乘区包入（定谳:818=标准 Damage() 管线——SetDefaults friendly
+      //  :8007-8019,AI_162 :44056-44123 无直伤旁路 → Damage_PVE :13387-91 banner 段
+      //  对其照跑;他臂 contact()/光环/爆弹/拳盒均包,本臂漏包=旗下伤 ×1.5 整缺）。
+      // ★BJ453 并链：crit 源 ‖ timerCritPounce（:12928）‖ monkCritPounce（:12929-12943）,
+      //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg——单一翻倍,原版序）
+      const critPounce = res.crit || timerCritPounce || monkCritPounce;
+      en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? res.dmg * 2 : res.dmg), 0, 0, game, 0, critPounce, -3, true); // ★BJ452 N2 crit 色位（tag 掷率强制位,Enemy.hurt 纯染色）;kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
       // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——818 为逐段瞬态弹
       //  （TigerSpecialAttack 每 hop NewProjectile）→ numHits=0 每轮独立
       if (!pounceGated) {
@@ -7662,6 +7933,9 @@ export class TigerPounce extends Entity {
         Math.max(1, Math.round(this.damage * mul)), 0, 'playerProj', 818, undefined, undefined,
         (n) => {
           if (!townVoodooGateOpen(game, n.vanillaId, 818)) return true;
+          // ★BJ455⑦ :12636 三族共门（contactTown :4958 同式——窗拒拍整跳先于 settle,
+          //  掷序纪律=拒拍不耗 RNG/不落 settle 副作用;读 hurt 前状态=快照纪律）
+          if (MinionProj.enemyImmune(n)) return true;
           return this.hitSet.has(n.id);   // localNPCHitCooldown=-1 每靶一次（读门）
         },
         (n) => {
@@ -7684,7 +7958,16 @@ export class TigerPounce extends Entity {
           const res = resolveWhipTagHit(tn, Math.max(1, Math.round(this.damage * mul)), game,
             add, SUMMON_TAG_MUL[818] ?? 1, tn.cx, tn.cy, this.ownerRef());
           pounceDirect = direct;
-          return { dmg: res.dmg, kb: 0 };   // kb=0 ⇒ StrikeNPC 双门不进（:82144,同敌怪环 F10）
+          // ★BJ455② settle 归位（BJ445② 同构,contactTown :4996 同式）：res.dmg 已含
+          //  tag-crit 预倍 ×2（WhipTag.ts:848）→ 仅 res.crit 摘半还原防前值,crit=res.crit
+          //  传参（TownNPC.hurt 防后×2+色一体 NPC.cs:82066;818=MinionShot 非
+          //  SentryShot → 6176 golem 掷不达 :12962 门,crit 单源）。旧形 crit 缺=色缺
+          //  +倍序偏离。kb=0 ⇒ StrikeNPC 双门不进（:82144,同敌怪环 F10）。
+          return {
+            dmg: res.crit ? res.dmg / 2 : res.dmg,
+            crit: res.crit,
+            kb: 0,
+          };
         });
     }
     void this.ownerRef;

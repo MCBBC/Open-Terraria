@@ -1,8 +1,11 @@
 // 1457 敌怪 debuff 染色链闸门(2026-08-21 补盲):Enemy.debuffTintRGB =
-// GetNPCColorTintedByBuffs(1457 NPC.cs:92142-92255)等价——debuff 逐项 RGB 乘区累乘,
+// GetNPCColorTintedByBuffs(1457 NPC.cs:92142-92261)等价——debuff 逐项 RGB 乘区累乘,
 // Renderer.drawEnemy(:4809)以 tintedSprite(multiply) 消费。本文件锁乘区数值与求值序;
-// 1457 新增两段:397 叶绿孢子(:92169-92174,中毒式 R×0.65 B×0.75)与
-// 395 强酸(:92176-92181,剧毒式 G×0.45 R×0.75)。
+// 1457 新增两段:397 叶绿孢子(:92171-92176,中毒式 R×0.65 B×0.75)与
+// 395 强酸(:92177-92182,剧毒式 G×0.45 R×0.75)。
+// ★BJ449 勘误（2026-10-03 Z4 引注复核）：本文件旧引 92155/92162/92169/92176/
+// 92142-92255/92246 系行号漂移+ichor 错挂,实际 = 92159-92164(中毒)/92165-92170
+// (剧毒)/92171-92176(孢子)/92177-92182(强酸)/92142-92261(函数全距)/92226-92229(ichor)。
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 
@@ -13,12 +16,12 @@ const rgb = (r: number, g: number, b: number): [number, number, number] =>
   [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 
 describe('1457 染色链: 新增两段', () => {
-  it('395 强酸 potentAcidT → R×0.75 G×0.45(剧毒式,:92176-92181)', () => {
+  it('395 强酸 potentAcidT → R×0.75 G×0.45(剧毒式,:92177-92182)', () => {
     const e = z();
     e.potentAcidT = 5;
     expect(e.debuffTintRGB).toEqual(rgb(0.75, 0.45, 1));
   });
-  it('397 叶绿孢子 chlorophyteSporeT → R×0.65 B×0.75(中毒式,:92169-92174)', () => {
+  it('397 叶绿孢子 chlorophyteSporeT → R×0.65 B×0.75(中毒式,:92171-92176)', () => {
     const e = z();
     e.chlorophyteSporeT = 5;
     expect(e.debuffTintRGB).toEqual(rgb(0.65, 1, 0.75));
@@ -32,7 +35,7 @@ describe('1457 染色链: 新增两段', () => {
 });
 
 describe('1457 染色链: 既有链抽样(回归保护)', () => {
-  it('中毒 20 → R×0.65 B×0.75(:92155-92160);剧毒 70 → G×0.45 R×0.75(:92162-92167)', () => {
+  it('中毒 20 → R×0.65 B×0.75(:92159-92164);剧毒 70 → G×0.45 R×0.75(:92165-92170)', () => {
     const p = z();
     p.poisonT = 5;
     expect(p.debuffTintRGB).toEqual(rgb(0.65, 1, 0.75));
@@ -51,7 +54,7 @@ describe('1457 染色链: 既有链抽样(回归保护)', () => {
     o.oiledT = 5;
     expect(o.debuffTintRGB).toEqual(rgb(0.4, 0.4, 0.4));
   });
-  it('ichor(69) 整色替换 (255,255,0) 非乘区(:92246-92248);叠加中毒仍整色替换', () => {
+  it('ichor(69) 整色替换 (255,255,0) 非乘区(:92226-92229);叠加中毒仍整色替换', () => {
     const e = z();
     e.ichorT = 5;
     expect(e.debuffTintRGB).toEqual([255, 255, 0]);

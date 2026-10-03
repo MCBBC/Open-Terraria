@@ -169,7 +169,11 @@ describe('BJ436 §E 818 扑击弹（usesLocal cd=-1）：窗拒拍 hitSet 不记
     const addIdx = enemyArm.indexOf('this.hitSet.add(en.id);');
     expect(gateIdx).toBeGreaterThan(-1);
     expect(addIdx).toBeGreaterThan(gateIdx);             // ★窗门先于记账
-    expect(enemyArm).toContain('en.hurt(res.dmg, 0, 0, game, 0, false, -3, true)');
+    // ★BJ452 N2（2026-10-03）：crit 参 false→res.crit（tag 掷率色位,Enemy.hurt 纯染色）
+    //   ——写梯 -3 档不变,金标串随刀更新（旧串 'en.hurt(res.dmg, 0, 0, game, 0, false, -3, true)'）
+    // ★BJ455③（2026-10-03）：banner 乘区包入 applyBannerDamageDealt（Damage_PVE :13387-91
+    //   对 818 标准管线照跑,他臂同式）;★BJ453 并链 critPounce 源保持
+    expect(enemyArm).toContain("en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? res.dmg * 2 : res.dmg), 0, 0, game, 0, critPounce, -3, true)");
     expect(enemyArm).toContain('noteVanillaProjImmune(game, 818, en.id, { penetrate: -1, localFace: true })');
   });
 });

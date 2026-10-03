@@ -64,6 +64,11 @@ describe('CanKillTile 全函数门（SW-G1 2026-09-03）', () => {
     //  toggleTrapdoor 关门件可毁检查 canKill 闭包（原版 :51990-51992）入账
     expect(src.match(/\bthis\.canKillTile\(/g)?.length).toBe(7);
     expect(src).not.toContain('this.tileAboveProtected(tx, ty)');   // 挖掘面门点全重锚
-    expect(src).toContain('this.tileAboveProtected(x, y)');         // breakTile 头 CheckTileBreakability 门保留
+    // ★BJ442（2026-10-03）：tileAboveProtected（部分近似）退役——breakTile 头门改挂
+    //  checkTileBreakabilityAt 全式（Mounts.ts，原矿车链专用收编为 KillTile 等价入口单源,
+    //  num==2 拒绝 / num==1 fail 语义 / num==0 放行）。锚点同步换钉，判别面不变：
+    //  挖掘面（canKillTile 门）与破坏面（breakTile 头门）双函数结构保持原版。
+    expect(src).not.toContain('tileAboveProtected(x, y)');            // 旧部分近似门已拆除
+    expect(src).toContain('checkTileBreakabilityAt(st, x, y');        // breakTile 头 CheckTileBreakability 全式门在位
   });
 });

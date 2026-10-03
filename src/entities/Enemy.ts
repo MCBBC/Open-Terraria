@@ -1692,7 +1692,7 @@ export class Enemy extends Entity {
    *  NPC 侧三消费支（2026-08-31 清偿，行号 1457=1458 同锚）：
    *   ①险情扫描当威胁(:54033 `!stinky` 子句+玩家支 :54081-54100)→ AI_007 小动物逃离;
    *   ②自身带味不休整(:54179-54182 ai[0]=0 段首强制起走);
-   *   ③整体变暗(GetNPCColorTintedByBuffs :92208-92214 R×0.7 B×0.55)+苍蝇尘 188
+   *   ③整体变暗(GetNPCColorTintedByBuffs :92208-92213 R×0.7 B×0.55)+苍蝇尘 188
    *     (UpdateNPC_BuffApplyVFX :92465-92475);
    *  附：液体即除(TryRemovingWaterPerishableEffects :94433,见 npcLiquid.ts)。
    *  B1 批新增授予源：恶臭药水弹 371 消亡 80px 圈（P.cs:78947-78956 → ThrowKillFx） */
@@ -1757,16 +1757,16 @@ export class Enemy extends Entity {
     let r = 1, g = 1, b = 1;
     let hit = false;
     const mul = (rr: number, gg: number, bb: number) => { r *= rr; g *= gg; b *= bb; hit = true; };
-    if (this.brokenArmorT > 0) mul(0.75, 0.75, 0.75);            // :92148-92153
-    if (this.poisonT > 0) mul(0.65, 1, 0.75);                    // :92155-92160
-    if (this.venomT > 0) mul(0.75, 0.45, 1);                     // :92162-92167
-    if (this.chlorophyteSporeT > 0) mul(0.65, 1, 0.75);          // :92169-92174（1457 新）
-    if (this.potentAcidT > 0) mul(0.75, 0.45, 1);                // :92176-92181（1457 新）
+    if (this.brokenArmorT > 0) mul(0.75, 0.75, 0.75);            // :92152-92158
+    if (this.poisonT > 0) mul(0.65, 1, 0.75);                    // :92159-92164
+    if (this.venomT > 0) mul(0.75, 0.45, 1);                     // :92165-92170
+    if (this.chlorophyteSporeT > 0) mul(0.65, 1, 0.75);          // :92171-92176（1457 新）
+    if (this.potentAcidT > 0) mul(0.75, 0.45, 1);                // :92177-92182（1457 新）
     if (this.bleedT > 0 || this.hemorrhageT > 0) mul(1, 0.85, 0.85);  // :92183-92188
-    if (this.midasT > 0) mul(0.85, 1, 0.3);                      // :92190-92195
-    if (this.betsysCurseT > 0) mul(0.8, 0.6, 1);                 // :92197-92202
-    if (this.oiledT > 0) mul(0.4, 0.4, 0.4);                     // :92204-92209
-    if (this.stinkyT > 0) mul(0.7, 1, 0.55);                     // :92208-92214 stinky(R×0.7 B×0.55)
+    if (this.midasT > 0) mul(0.85, 1, 0.3);                      // :92189-92194
+    if (this.betsysCurseT > 0) mul(0.8, 0.6, 1);                 // :92195-92200
+    if (this.oiledT > 0) mul(0.4, 0.4, 0.4);                     // :92201-92207
+    if (this.stinkyT > 0) mul(0.7, 1, 0.55);                     // :92208-92213 stinky(R×0.7 B×0.55)
     if (this.slimedT > 0) mul(0.8, 0.8, 1);                      // :92214-92219 drippingSlime
     if (this.gelBalloonT > 0) mul(1, 0.75, 0.85);                // :92220-92225 drippingSparkle(320) G×0.75 B×0.85
     if (this.ichorT > 0) return [255, 255, 0];                   // :92226-92229 整色替换（drip 两段后、hunter 钳底前）
@@ -1932,6 +1932,19 @@ export class Enemy extends Entity {
   /** 原版 NPC.dontTakeDamage（SetDefaults 静态置位，如 266 克脑 :12372 一阶段
    *  不可击；AI 段自行清除）。与 iframes 不同：持续态而非帧计数 */
   dontTakeDamage = false;
+  /** 原版 NPC.dontTakeDamageFromHostiles（NPC.cs:6284）：仅敌意来源免伤——玩家
+   *  伤害通道（StrikeNPC/弹幕 Damage_PVE friendly 链）【不】设此门。消费面=
+   *  GetHurtByOtherNPCs 头门（:93557 与 dontTakeDamage 并列）/敌对弹伤 friendly
+   *  门（Projectile.cs:12626 Damage_PVE_Inner flag2）/索敌水晶候选
+   *  （NPCUtils.SearchFilters.OnlyCrystal :16-21）。置位方=AI_105 胜/败演出
+   *  （:41170/:41280 每拍重写）、checkDead 548 血尽转换（:78896）、AI_112 仙灵
+   *  引导态（:49119 与 dontTakeDamage 同掷）。复位=SetDefaults 尾（:8529）——
+   *  1457 无 NPC.ResetEffects 调用位（grep 全文件零命中,原版无每帧复位）,本仓
+   *  同款「字段缺省+置位方每拍重写」惯例（与 dontTakeDamage 先例同构）。★BJ450
+   *  （SetDefaults 静态置位型 374 松露虫/:375/:686 本仓无消费通道——375/686
+   *  原版即不在该表=旗为摆置——登记不扩）。★BJ454 清偿 374 面：T-set 受害门
+   *  已建模（TAKES_DAMAGE_FROM_HOSTILES 表+互殴通道 :91592 门） */
+  dontTakeDamageFromHostiles = false;
   /** 击退抗性运行时覆写（游泳族专用）：461 wet→0 / dry→0.4（难度曲线，
    *  NPC.cs:56366/:56412 GetKnockbackMultiplier_ScaledByDifficulty）；null=用 def 值 */
   kbResistOverride: number | null = null;
@@ -2009,7 +2022,8 @@ export class Enemy extends Entity {
    *  （NPC.cs:92263）鞭标闪电粒子——后者即函数头 canDisplayBuffs 早退门 :92265
    *  （markedByEelWhip 鞭标蓝闪 :92270-92277 等粒子全谱在其内;旧引「:92026/
    *  Main.cs:22797/:92135」均系漂移号+函数错挂 Main.cs）——两消费者本仓未移植
-   *  （debuff 自发光 :92181+ 段不受此门），字段落地保数据链一致（批次B） */
+   *  （debuff 自发光 :92263+ 段 UpdateNPC_BuffApplyVFX 不受此门——★BJ449 勘误
+   *  2026-10-03:旧引 :92181+ 系 potentAcid 染色块行,漂移）,字段落地保数据链一致（批次B） */
   canDisplayBuffs = true;
   /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
   vanillaNetId = 0;
@@ -2484,7 +2498,8 @@ export class Enemy extends Entity {
     //      immune[255]=30。victim 门 = CanBeHurtByBees（除 210/211/222 全真）+
     //      type1 携蜂巢变体(ai1 1124/1125，:91540-91542)豁免 +
     //      CritterThatCanTurnOnPlayers∧aiStyle3（:93607-93611）。敌怪互殴主通道
-    //      （:91534-91538）只对 friendly NPC——Enemy 侧仅此蜂通道适用（TownNPC
+    //      （:91592）对 friendly ∥ T-set 96 型（★BJ454 松露虫 374 等；37 豁免）
+    //      ——Enemy 侧非 friendly 受害者唯 T-set 与蜂通道适用（TownNPC
     //      侧见 TownNPC.envHurtUpdate） ----
     this.npcVsNpcContactUpdate(game);
     updateNpcLiquid(this, game, game.world.store);
@@ -4665,7 +4680,11 @@ export class Enemy extends Entity {
     this.lightRGBAt = { x: this.x, y: this.y };
   }
 
-  /** debuff 自发光（NPC.cs:92181-92467，DrawNPC 前的 buff 视效段）：onFire/onFire3/
+  /** debuff 自发光（NPC.cs:92263-92667 UpdateNPC_BuffApplyVFX,DrawNPC 前的 buff 视效段
+   *  ——★BJ449 勘误 2026-10-03:旧引 :92181-92467 系 GetNPCColorTintedByBuffs 染色块
+   *  行号错挂 VFX 函数;AddLight 实位 onFire :92367/onFire3 :92384/daybreak :92400/
+   *  betsysCurse :92415/onFrostBurn :92600/onFrostBurn2 :92616/onFire2 :92632）：
+   *  onFire/onFire3/
    *  daybreak/onFire2(诅咒焰) (1,0.3,0.1)、betsysCurse (0.6,0.1,0.9)、onFrostBurn/
    *  onFrostBurn2 (0.1,0.6,1)。位置 = (position.x, position.y+16)。原版同帧可与
    *  type 光叠加；本仓单槽 → 逐通道 max 合并（AI 已写 lightRGBAt 时不挪光源位） */
@@ -11852,6 +11871,11 @@ export class Enemy extends Entity {
       this.vy = Math.max(-5, Math.min(5, this.vy));
       this.encourageDespawn(10);
     }
+    // ---- 免疫旗（cs:49119,状态机尾无条件重算）：引导/逃逸/圆舞/离场态（ai[2]>1）
+    //      双旗全置,微漂/潜伏态（ai[2]≤1）双旗全清——原版 dontTakeDamage 与
+    //      dontTakeDamageFromHostiles 一式同掷（状态机后、尘段前）。★BJ450 消费面
+    //      接线（旧档整缺=引导态仙灵可被磨死/接触伤）----
+    this.dontTakeDamage = this.dontTakeDamageFromHostiles = this.ai2 > 1;
     // ---- 呼吸闪粉尘 278（cs:49139-49161）：每 2 视效 tick 一粒,8×8 盒 @Center−2、
     //      v=本速×0.3（spawn 自带 ±2 随机漂,后置覆写精确化）、scale 0.65、α 200、
     //      noGravity/noLight;色 = Lerp(主色,副色,rand) ----
@@ -12368,16 +12392,32 @@ export class Enemy extends Entity {
    *  金龟 299）——GetHurtByOtherNPCs 门（:93607）排除项（∧aiStyle==3） */
   private static readonly CRITTER_CAN_TURN = new Set([645, 639, 644, 642, 643, 641, 640, 299, 539, 538]);
 
+  /** ★BJ454 NPCID.Sets.TakesDamageFromHostilesWithoutBeingFriendly（1457
+   *  NPCID.cs:4783 全表 96 项 1:1，序保真）——非 friendly NPC 的「敌意可伤」置表：
+   *  全版小动物族（兔 46/55/74、鸟 148/149/230/297/298/299、鼠 303、海鸥 355-367、
+   *  松露虫 374、金小动物 442-448、地狱/宝石/蝴蝶萤火 538-540/592-609/611-617/
+   *  625-627/639-655/669/671-677、末日前夕 687/688 等）。消费点全原版唯一：
+   *  受害 tick 门 NPC.cs:91592 `type != 37 && (friendly || T-set[type])` →
+   *  GetHurtByOtherNPCs(AllNPCs)（敌怪互殴通道对它们可设受害者位——松露虫被
+   *  敌怪追杀机制的数据面；敌怪【索敌】不读本表，接触伤害通道消费本表）。
+   *  tile 域 IDG 域哨兵同款判例：域键表单点建模+金标测试钉表。 */
+  static readonly TAKES_DAMAGE_FROM_HOSTILES = new Set([46, 55, 74, 148, 149, 230, 297, 298, 299, 303, 355, 356, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 377, 357, 374, 442, 443, 444, 445, 446, 448, 538, 539, 337, 540, 484, 485, 486, 487, 592, 593, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 611, 689, 612, 613, 614, 615, 616, 617, 625, 626, 627, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 583, 584, 585, 669, 671, 672, 673, 674, 675, 677, 687, 688]);
+
   /** NPC-vs-NPC 接触双通道（NPC.cs:91534-91542 两调用点 1:1）：
-   *  ① friendly 通道（:91534，AllNPCs）——本 NPC 为 friendly（Palworld 双宠等）
-   *    时任意敌怪接触皆可伤（攻击者门 :93620：!friendly ∧ damage>0 ∧ 非 624/690）；
+   *  ① friendly/T-set 通道（:91592，AllNPCs）——本 NPC 为 friendly（Palworld 双宠、
+   *    水晶 548 等）或 T-set 96 型（★BJ454，松露虫 374 等；37 老人豁免）时任意
+   *    敌怪接触皆可伤（攻击者门 :93620：!friendly ∧ damage>0 ∧ 非 624/690）；
    *  ② 蜂通道（:91540，HurtingBees）——场上有蜂时蜜蜂(210/211)可蜇任意
    *    CanBeHurtByBees 的 NPC（敌怪/双宠；TownNPC 侧在 TownNPC.envHurtUpdate）。
    *  共用 GetHurtByOtherNPCs 门（:93607：dontTakeDamage/变节小动物）与
    *  immune[255]=30；BeHurtByOtherNPC 蜂段（:93666-93696）：蜂攻击者另受
    *  【victim.damage】反蜇（kb6 反向）。DamageVar≈1（Classic）直用 def.damage。 */
   private npcVsNpcContactUpdate(game: GameHooks): void {
-    if (this.npcImmune255 !== 0 || this.dontTakeDamage || this.dead) return;
+    // GetHurtByOtherNPCs 头门（:93557）：dontTakeDamage ∥ dontTakeDamageFromHostiles
+    // ∥ immortal ∥（变节小动物∧aiStyle3）——★BJ450 补 FromHostiles 支（原版三旗
+    // 并列;548 演出期/仙灵引导态经此拒敌意接触伤）
+    if (this.npcImmune255 !== 0 || this.dontTakeDamage
+      || this.dontTakeDamageFromHostiles || this.dead) return;
     const id = this.vanillaId;
     if (id === null) return;
     // GetHurtByOtherNPCs 门（:93607-93611）：CritterThatCanTurnOnPlayers ∧ aiStyle3
@@ -12386,7 +12426,11 @@ export class Enemy extends Entity {
     // + type1 携蜂巢变体豁免
     const beeHurtable = id !== 210 && id !== 211 && id !== 222
       && !(id === 1 && (this.ai1 === 1124 || this.ai1 === 1125));
-    const friendlyChannel = !!this.def.friendly;    // :91534 friendly || TakesDamageFromHostiles
+    // 受害通道门（★BJ454 补 T-set 臂）：NPC.cs:91592 `type != 37 && (friendly ||
+    // TakesDamageFromHostilesWithoutBeingFriendly[type])`——37 老人（friendly=true）
+    // 显式豁免互殴通道；T-set 96 型（松露虫 374 等）非 friendly 也开 AllNPCs 通道
+    const friendlyChannel = id !== 37
+      && (!!this.def.friendly || Enemy.TAKES_DAMAGE_FROM_HOSTILES.has(id));
     if (!friendlyChannel && !beeHurtable) return;
     // npcsFoundForCheckActive 预门（:91540）：蜂通道需场上有蜂——懒扫等价（无蜂
     // 即无蜂攻击者，循环体自筛）；enemies 缺省 = 测试桩无实体桶，静默跳过
@@ -14911,6 +14955,22 @@ export class Enemy extends Entity {
         //   绕门再结算（2t 窄缝）;真旗=全通道闸,演出期由 towerAI 每 tick 重写
         //   （R23b-P1 形态）,本行=原版 checkDead 位（AI tick 前的窗闭合）。
         this.dontTakeDamage = true;
+        return false;
+      }
+      // 永恒水晶 548（NPC.cs:78891-78898）：血尽转败北演出——ai1=1/ai0=0/满血/
+      // dontTakeDamageFromHostiles=true（仅敌意来源免伤,非全免旗）;【不】调
+      // PrepareForDeathAnimation（无死亡动画/无掉落/无死亡音,return 存活）。
+      // 演出 600t 由 eterniaCrystalAI ai1==1 支接管（bossAI_dd2:起跑帧 ReportLoss+
+      // 效果弹 672、96t 上浮→渐隐、末帧 StopInvasion+life=0+checkDead——彼时
+      // ai[1]==1 守卫使本支跳过,且 StopInvasion 的 WipeEntities 已把水晶清场
+      // （Game.dd2WipeEntities en.dead=true≡原版 active=false）,死亡管线双兜底）。
+      // ★BJ450:此前全仓无 548 ai1=1 setter=败北演出支死码,水晶血尽走标准死。
+      // :78897 netUpdate=true 为联机同步位,本仓 netPuppet 域无此位（四塔支同款略）。
+      if (this.vanillaId === 548 && this.ai1 !== 1) {
+        this.ai1 = 1;
+        this.ai0 = 0;
+        this.hp = this.maxHp;
+        this.dontTakeDamageFromHostiles = true;
         return false;
       }
       this.dead = true;

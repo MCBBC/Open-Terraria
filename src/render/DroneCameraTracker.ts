@@ -11,6 +11,9 @@
 //   5451/5738 spawn 共用支以惯性 Arrow 承载），过渡期 Track 由该共用支出膛位代行
 //   （同型同主单实例语义下与逐帧 Track 观测等价：Track 幂等覆写，type/owner 出膛
 //   后不变；AI 批落地后由其逐帧 Track 接管，双写无害）。
+//   ★BJ456（2026-10-03）此过渡注已过期：AI 本体实装 entities/DroneProjs.ts+逐帧
+//   Track 接管（Game.droneCameraTrack 钩子）,出膛位代行退役（spawn 支零 Track）——
+//   锁=tests/bj456-drone-ai-body.test.ts + tests/drone-camera-tracker.test.ts ⑤。
 // WorldClear = WorldGen.cs:6950（clearWorld 家族，紧邻 LocalGolfState.WorldClear
 //   :6951）——本仓 Camera 每世界重建（Game.ts :7264 构造点,★清偿刀 P4 锚勘误
 //   2026-09-30:旧引 :7157 漂移,亲读复核）= 同相复位（BJ400 注
@@ -21,8 +24,10 @@
 //   ApplyEquipVanity（:13110-13115 循环 → case :14314-14316，虚荣槽亦授权）；
 //   两支槽位实取 GetEffectiveArmor（:5678）= 空槽收藏共享件同算（LoadoutShare 面）。
 // MP 面：原版 UpdateCameraPan 置 LocalPlayer.netCameraTarget=trackedPosition 并在
-//   位移 >160px 时发 msg13（Main.cs:63620-63628）——本仓 netCameraTarget 全域未建模
-//   （观战/高尔夫支同缺，同域登记债）。
+//   位移 >160px 时发 msg13（Main.cs:63620-63628）——★BJ460 定谳（2026-10-03）：本仓
+//   netCameraTarget 已由 X4 清偿刀 D 全链建模（Game.notifyCameraTarget 三域写位
+//   Game.ts:11923 → ClientNet msg13 flagBits[5]+尾随 Vector2 → room.ts entityAoiCenter
+//   AOI 过滤;锁=tests/mp-net-camera-target.test.ts）——旧「全域未建模」注陈旧销账。
 // ★清偿刀N（2026-09-29）：登记债「面部穿戴视觉未入 accDrawslots」判伪——face 槽四层
 //   路由 2026-09-03 已整链落地（face-layer-routing.test.ts），5452→face:21 提取器原生
 //   在位，Renderer base 支出 Acc_Face_21.png（裸锚零偏移=GetFaceDrawOffset 无 case 21）。
