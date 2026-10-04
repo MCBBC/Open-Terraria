@@ -205,7 +205,11 @@ describe('SW-FX39 ③差集审计终态锁(vinv 缺省态逐面在位)', () => {
 
   it('周边面:建筑配件图标列(FX19)/成就 Advisor/设置文字钮/住房页/网格切换钮(FX30)/就近箱钮', () => {
     expect(v()).toContain('this.vinvBuildBuilderAccToggles();');          // FX19
-    expect(v()).toContain('createAchievementAdvisor(() => this.game)');   // ★BJ318 动态解析改型(源钉随盘;2026-09-30 BJ417 补钉)
+    // ★BJ318 动态解析改型(源钉随盘;2026-09-30 BJ417 补钉);★BJ500 scaleOf 三档;
+    //   ★BJ501 用户明令分歧:恒大卡档(原版 sw<1000 内联 :42129 退役,回滚口见 UI.ts)
+    expect(v()).toContain('createAchievementAdvisor(() => this.game,');
+    expect(v()).toContain('createAchievementAdvisor(() => this.game, () => ADVISOR_SCALE_LARGE));');
+    expect(v()).not.toContain('vinvLayoutCtx?.sw ?? 9999');
     expect(v()).toContain("const settingsBtn = el('button', 'vinv-txt') as HTMLButtonElement;");
     expect(v()).toContain('private vinvRefreshHousing(): void {');        // 刀3 住房页
     expect(v()).toContain('private vinvBuildGridToggle(): void {');       // FX30

@@ -22,6 +22,9 @@
 //      地狱业火/暗影火焰每秒 5 同相），非本缺陷。
 // 修刀：die() 传 9999 整（走既有 DoT 静默门，applyDoT:4636 同款通道）——飘字+受击音
 //   双静音，死亡管线（掉落/死亡音/粒子/记账）不变；致死性无涉（hp 先置 0）。
+// ★BJ502（2026-10-04）：hurt 飘值门形态统一原版（rawDmg>=9999 且合成 owner255 位，
+//   锚 StrikeNPC_Inner :82065/:82081）——本件 die() 9999 修法保持且被门层面根治；
+//   旧"精确匹配 !==9999"签名测试已按新门改写（见 bj502-pillar-death-silent-gate.test.ts）。
 import { describe, expect, it } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
@@ -96,16 +99,18 @@ describe('BJ476 级联自灭零飘字（原版 checkDead 面，非 StrikeNPC 面
 });
 
 describe('BJ476 门判别力（rawDmg 9999 静默通道 = 原版 :82063 DoT 静默锚）', () => {
-  it('旧病灶签名：hurt(60+9999) 直调 = 冒 10059 橙字（伤害色非暴击色）——die() 回退即红', () => {
+  it('★BJ502 门形态统一后：合成 hurt(10059)（>=9999）同走静默门——die() 传值自由度由门兜底', () => {
+    // 原版门=Damage>=9999（:82065,非精确匹配）——合成 10059 在原版亦静默（owner==255）。
+    // 旧"冒 10059"签名系旧精确匹配门的非原版相,已随 BJ502 门统一改写;
+    // die() 回退 maxHp+9999 在新门下同样静音=该回归面已由门形态根治,
+    // 门形态判别力（9998/9999 边界+档位）由 bj502-pillar-death-silent-gate.test.ts 接管。
     const w = new World(64, 64, 7, 'bj476');
     const { game, spy } = makeGame(w);
     const e = Enemy.fromVanilla(513, 100, 100) as Enemy;
     e.hurt(60 + 9999, 0, 0, game);
-    expect(spy.numbers.length).toBe(1);
-    expect(spy.numbers[0].value).toBe(10059);   // 用户报值精确复现
-    expect(spy.numbers[0].crit).toBe(false);    // 橙=伤害色 (255,160,80)，非暴击
-    expect(spy.numbers[0].color).toBe('#FFA050');
-    expect(hitSounds(spy).length).toBe(1);      // StrikeNPC 面受击音在
+    expect(spy.numbers).toEqual([]);            // 原版 >=9999 合成门=静默（旧精确匹配门会冒 10059）
+    expect(hitSounds(spy)).toEqual([]);         // 静默块含受击音（同形双静音）
+    expect(e.dead).toBe(true);                  // 死亡管线照走
   });
 
   it('hurt(9999) 整 = 静默（GetHurtByDebuff :93036 致死 DoT 同通道），死亡照走', () => {

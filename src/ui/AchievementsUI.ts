@@ -9,9 +9,11 @@
 //    = 选中/未选中（UIToggleImage frame/off Point(34j,0)/(34j,34)，cs:92-95）
 //  - 列表序 = 注册序（CreateAchievementsList 同注册表原序）
 import type { Game } from '../core/Game';
+import { options } from '../core/Options';
 import { Lang } from '../i18n/Lang';
 import { ACH_CATEGORY } from '../data/vanillaAchievements';
 import { tintedSliceDataUrl } from './vanillaKit';
+import { mouseTextInnerColor } from '../render/Renderer';
 
 const CATEGORY_NAMES: Record<number, string> = {
   [ACH_CATEGORY.Slayer]: 'Achievements.SlayerCategory',
@@ -56,15 +58,17 @@ const CSS = `
 .sw-ach-bar { height:8px; background:#1a1f3a; border-radius:4px; margin-top:5px;
   border:1px solid #444c7a; overflow:hidden; }
 .sw-ach-bar .fill { height:100%; background:linear-gradient(90deg,#6a8ae0,#8ad0e0); }
-/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡 1:1 框面,★BJ473）。
+/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡 1:1 框面,★BJ473;
+ *      ★BJ500 2026-10-04 用户拍板:原版卡面零文字——DrawCard :136-165 仅三贴图层
+ *      无任何字体调用,文案只走 hover 气泡 tooltip（Main.DrawMouseHover :123-134）。
+ *      竖式文字卡（2026-09-02「保留」决定）废除;框尺寸对齐原版 scale 三档
+ *      （大卡 0.75 Main.cs:41762 / 内联 0.35 :42129 / 设置面板 0.5 :95/:103）。
+ *      蓝底圆角盒废除（BJ473 用户实报+截图:入口应为金框方形钮）。
  *      原版卡三层（AchievementAdvisor.cs:136-165,1457=1458 diff 全等）：
  *      ① Achievements.png 暗变体帧（frame.X+=528 :158）→ ② Achievement_Borders
  *      72² 金框 @(−4,−4)×s（金色烘在贴图,:160）→ ③ 悬停描边×OurFavoriteColor
  *      (255,231,69)（Main.cs:886/:163）。未悬停 tint Color(220,220,220,220)(:147)
- *      → 悬停 Color.White。2026-09-02 用户要求的竖式（图上文下）保留=登记偏差;
- *      蓝底圆角盒废除（BJ473 用户实报+截图:入口应为金框方形钮）。
- *      几何由 advisorFrameGeom() 单源写 inline 尺寸（本仓 0.5 档=32px 图标,
- *      原版大卡 0.75/内联小卡 0.35=登记 QoL 偏差） ---- */
+ *      → 悬停 Color.White。几何由 advisorFrameGeom() 单源写 inline 尺寸 ---- */
 .sw-ach-advisor { pointer-events:auto; display:flex; flex-direction:column; align-items:center; gap:4px;
   cursor:pointer; }
 .sw-ach-advisor .card { position:relative; display:block; flex:none;
@@ -78,14 +82,22 @@ const CSS = `
   background-size:100% 100%; image-rendering:pixelated; pointer-events:none; }
 .sw-ach-advisor.sw-ach-hov .card { filter:none; }          /* 悬停 → Color.White */
 .sw-ach-advisor.sw-ach-hov .card .hov { display:block; }   /* 黄描边显形 */
-.sw-ach-advisor .tx { font-size:11px; color:#e8ecf8; text-align:center; line-height:1.3;
-  max-width:72px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-/* ---- BJ416:sw<1000 装备列内联小卡(Main.cs:42129)——原版小卡=0.35 缩纯图标
- *      (DrawCard scale 0.35,边框 72→25px,无文字)。文字版卡 61px 高会压进下一行
- *      防御盾/设置钮带(行距 47.6)——窄屏分支摘文字（金框盒 36px,连描边 38px,
- *      42px 预算内余量更足）;32px 图标保留
- *      (≈原版 22.4px 的 QoL 放大=登记偏差,盒面同锚 advisorInlineXY) ---- */
-.sw-ach-inline .tx { display:none; }
+/* ---- ★BJ500 hover 气泡（原版形态:Main.DrawMouseHover AchievementAdvisor.cs:123-134
+ *      → DisplayAndGetFakeItem(StrongRed10) Main.cs:20326-20338 → MouseText("")
+ *      → MouseText_DrawItemTooltip :20509）：名称行=成就 FriendlyName,色=
+ *      GetItemNameColor(rare=10) rgb(255,40,100)（:20486-20489）;说明行=成就
+ *      Description（ToolTip 行,白×mouseTextColor :20539-20542;无统计行——fake item
+ *      SetDefaults(0) 全零域 → GetLinesInfo 零行）;底=Utils.DrawInvBG
+ *      ×(23,25,81)×0.925（:20585）;跟鼠标（:20379-20394+:20561-20578,JS 写位）。
+ *      形态语言（字号/字影/内距）与 UI .sw-tooltip 族同款=仓内 MouseText 家族约定。
+ *      body 级挂载:.sw-vinv root 有 transform:scale(K)（UI.layoutVanilla）,其内
+ *      fixed 定位会被缩放捕获——气泡必须活在缩放根之外走视口系 ---- */
+.sw-ach-tip { position:fixed; display:none; pointer-events:none; z-index:1300;
+  padding:9px 13px; font-size:13px; color:#e8e4f0; max-width:280px;
+  font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;
+  text-shadow:1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }
+.sw-ach-tip .lines { display:inline; }   /* 脉冲 brightness 只作用文字层（同 .sw-tooltip-lines） */
+.sw-ach-tip .ds { white-space:pre-line; }   /* 描述自带 \n 同色拆行（itemTooltip.ts:523 同判例） */
 `;
 
 let cssInjected = false;
@@ -294,10 +306,17 @@ export function advisorHasCard(a: import('../core/Achievements').Achievements): 
 
 /** ★BJ473 advisor 卡框几何单源（AchievementAdvisor.DrawCard :136-165 对拍）：
  *  图标 64² @原点、金框 72² @(−4,−4)×s、悬停描边 = scale>0.5 ? Thin(76²@−5s)
- *  : Fat(80²@−8s)（:151-156）。本仓两落位均 0.5 档（32px 图标,BJ416 登记 QoL
- *  偏差;原版背包大卡 0.75/内联小卡 0.35）→ Fat 支。悬停命中面 = 图标盒
- *  64²×s（:139 Between(position, position+frame.Size()*s),框 4s 外圈不触发）。 */
+ *  : Fat(80²@−8s)（:151-156）。悬停命中面 = 图标盒 64²×s（:139 Between(position,
+ *  position+frame.Size()*s),框 4s 外圈不触发）。
+ *  ★BJ500 尺寸三档对齐原版（旧「两落位均 0.5=QoL」登记偏差废除,2026-10-04 用户
+ *  拍板「框没那么小,尺寸对齐原版」）：大卡 0.75（Main.cs:41762 large:true →
+ *  AchievementAdvisor.cs:58-62 num=0.75f）、内联小卡 0.35（:42129 large:false —
+ *  亲读钉死:内联卡=72²×0.35≈25.2px 框/64²×0.35≈22.4px 图标,原版即如此之小）、
+ *  设置面板 0.5（AchievementAdvisor.DrawOptionsPanel :95/:103——本仓无此宿主位,
+ *  档位保留供未来接线）。 */
 export const ADVISOR_SCALE = 0.5;
+export const ADVISOR_SCALE_LARGE = 0.75;
+export const ADVISOR_SCALE_INLINE = 0.35;
 export interface AdvisorFrameGeom {
   card: number; icon: number; pad: number;
   hover: { size: number; off: number; tex: 'Fat' | 'Thin' };
@@ -313,57 +332,278 @@ export function advisorFrameGeom(scale: number = ADVISOR_SCALE): AdvisorFrameGeo
   };
 }
 
-/** 悬停描边白模（Achievement_Borders_MouseHover.png 80²,资源包 TSV:14730）——
- *  ×OurFavoriteColor(255,231,69) 预烘 dataURL（tintedSliceDataUrl FX43 预乘管,
- *  CharCreation 滑杆高亮/EmoteMenu 边框同技法）。 */
+/** 悬停描边白模双份（Achievement_Borders_MouseHover.png 80²/TSV:14730、
+ *  MouseHoverThin 76²/TSV:14731）——×OurFavoriteColor(255,231,69) 预烘 dataURL
+ *  （tintedSliceDataUrl FX43 预乘管,CharCreation 滑杆高亮/EmoteMenu 边框同技法）。
+ *  档位:scale>0.5 → Thin、≤0.5 → Fat（AchievementAdvisor.cs:151-156）——BJ500 起
+ *  大卡 0.75 走 Thin、内联 0.35 走 Fat,两份都要。 */
 const ADVISOR_HOVER_TEX = 'sprites/vanilla/Achievement_Borders_MouseHover.png';
+const ADVISOR_HOVER_TEX_THIN = 'sprites/vanilla/Achievement_Borders_MouseHoverThin.png';
+
+// ---- ★BJ500 hover 气泡（模块单例,原版 MouseText tooltip 同构=全局单绘态：
+//      Main.HoverItem/_mouseTextFakeItem Main.cs:2361/:67659。多宿主卡共用一份,
+//      body 级挂载=.sw-vinv root 有 transform:scale(K)（UI.layoutVanilla :8901）,
+//      其内 fixed 定位会被缩放坐标捕获——气泡活在缩放根之外走视口系零补偿） ----
+let achTipEl: HTMLElement | null = null;
+let achTipNameEl: HTMLElement | null = null;
+let achTipDescEl: HTMLElement | null = null;
+let achTipLinesEl: HTMLElement | null = null;
+let achTipVisible = false;
+let achTipMX = 0;
+let achTipMY = 0;
+let achTipHeldGet: (() => boolean) | null = null;   // ★BJ501:光标持物谓词（uiHeldItemRef=mouseItem 语义,非 HeldItem——见 achTipAnchorXY 详注）
+let achTipRaf = 0;
+
+/** 气泡底烘（Utils.DrawInvBG :2718-2742 ×(23,25,81)×0.925 Main.cs:20585,九宫 10px
+ *  角拉伸）——UI.tooltipBgDataUrl 同式移植（该函数 UI.ts 模块私有,导出委托会造
+ *  AchievementsUI↔UI.ts 循环加载,判例备案:同式另烤,公式锚一致）。 */
+let achTipBgImg: HTMLImageElement | null = null;
+let achTipBgTinted: HTMLCanvasElement | null = null;
+const achTipBgCache = new Map<string, string>();
+function achTipBgDataUrl(w: number, h: number): string | null {
+  if (typeof Image === 'undefined') return null;
+  if (!achTipBgImg) {
+    achTipBgImg = new Image();
+    achTipBgImg.src = 'sprites/vanilla/Inventory_Back13.png';
+  }
+  const img = achTipBgImg;
+  if (!img.complete || !(img.width > 0)) return null;   // 未就绪(首次悬停竞态)→兜底色,下次悬停现底
+  const key = `${Math.max(20, Math.round(w))}x${Math.max(20, Math.round(h))}`;
+  const hit = achTipBgCache.get(key);
+  if (hit) return hit;
+  if (!achTipBgTinted) {
+    const t = document.createElement('canvas');
+    t.width = img.width; t.height = img.height;
+    const tc = t.getContext('2d', { willReadFrequently: true })!;   // getImageData/toDataURL 烘焙,SHM 后备
+    tc.imageSmoothingEnabled = false;
+    tc.drawImage(img, 0, 0);
+    const d = tc.getImageData(0, 0, t.width, t.height);
+    const tmul = [23 / 255, 25 / 255, 81 / 255, 0.925];   // 原版真值（Main.cs:20585）
+    for (let i = 0; i < d.data.length; i += 4) {
+      d.data[i] = Math.round(d.data[i] * tmul[0]);
+      d.data[i + 1] = Math.round(d.data[i + 1] * tmul[1]);
+      d.data[i + 2] = Math.round(d.data[i + 2] * tmul[2]);
+      d.data[i + 3] = Math.round(d.data[i + 3] * tmul[3]);
+    }
+    tc.putImageData(d, 0, 0);
+    achTipBgTinted = t;
+  }
+  const t = achTipBgTinted, W = t.width, H = t.height;
+  const c = document.createElement('canvas');
+  c.width = Number(key.split('x')[0]); c.height = Number(key.split('x')[1]);
+  const x = c.getContext('2d', { willReadFrequently: true })!;
+  x.imageSmoothingEnabled = false;
+  x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
+  x.drawImage(t, W - 10, 0, 10, 10, c.width - 10, 0, 10, 10);
+  x.drawImage(t, 0, H - 10, 10, 10, 0, c.height - 10, 10, 10);
+  x.drawImage(t, W - 10, H - 10, 10, 10, c.width - 10, c.height - 10, 10, 10);
+  x.drawImage(t, 10, 0, 10, 10, 10, 0, c.width - 20, 10);
+  x.drawImage(t, 10, H - 10, 10, 10, 10, c.height - 10, c.width - 20, 10);
+  x.drawImage(t, 0, 10, 10, 10, 0, 10, 10, c.height - 20);
+  x.drawImage(t, W - 10, 10, 10, 10, c.width - 10, 10, 10, c.height - 20);
+  x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
+  const url = c.toDataURL('image/png');
+  achTipBgCache.set(key, url);
+  return url;
+}
+
+/** ★BJ501 锚算纯函数（两态判别测试单源;placeAchTip 唯一消费）。
+ *  原版 MouseText_DrawItemTooltip 锚,Main.cs:20379-20394+:20561-20578：
+ *  X=mouse+14(:20379)+6(ThickMouse 默认档——MouseBorderColor :276 非透明 → :2684
+ *  恒开;本仓无该设置建模)+34(光标持物 :20391-20394 !mouseItem.IsAir;★BJ501 定谳:
+ *  mouseItem=光标拖拽物≠Player.HeldItem,本仓谓词=uiHeldItemRef/UI.heldStack——
+ *  旧刀误喂 inv.heldItem()=HeldItem 语义,游玩期热栏恒有选中物 → +34 恒加,气泡
+ *  被推出 34px,用户截图物证)+6(toolTipDistance :411/:20561-20562)+8(悬停文本框
+ *  开 :20566);Y=mouse+…+2(:20567)。屏缘钳 margin 18(盒开)/4(关)（:20563/:20568）
+ *  在 placeAchTip 落。 */
+export function achTipAnchorXY(mx: number, my: number, cursorHeld: boolean, box: boolean): { x: number; y: number } {
+  return {
+    x: mx + 14 + 6 + (cursorHeld ? 34 : 0) + 6 + (box ? 8 : 0),
+    y: my + 14 + 6 + 6 + (box ? 2 : 0),
+  };
+}
+
+/** 气泡定位（achTipAnchorXY 纯算 + 屏缘钳）。量测先清旧 left/top（SW-TT1 同式:
+ *  shrink-to-fit 宽受残留 left 约束会挤窄）。 */
+function placeAchTip(): void {
+  if (!achTipVisible || !achTipEl) return;
+  achTipEl.style.left = '0px';
+  achTipEl.style.top = '0px';
+  const tw = achTipEl.offsetWidth, th = achTipEl.offsetHeight;
+  const box = !!options.data.opaqueBoxBehindTooltips;
+  const p = achTipAnchorXY(achTipMX, achTipMY, !!achTipHeldGet?.(), box);
+  let x = p.x;
+  let y = p.y;
+  const margin = box ? 18 : 4;
+  if (x + tw + margin > window.innerWidth) x = window.innerWidth - tw - margin;
+  if (y + th + margin > window.innerHeight) y = window.innerHeight - th - margin;
+  achTipEl.style.left = `${x}px`;
+  achTipEl.style.top = `${y}px`;
+}
+
+/** 气泡盒底（悬停文本框开关 Main.SettingsEnabled_OpaqueBoxBehindTooltips :249
+ *  默认 true,关=无底板纯文字 :20256 支;烘底=终布局后量测,SW-TT1 同序） */
+function applyAchTipBg(): void {
+  if (!achTipEl) return;
+  if (!options.data.opaqueBoxBehindTooltips) {
+    achTipEl.style.background = 'transparent';
+    return;
+  }
+  const w = Math.ceil(achTipEl.offsetWidth), h = Math.ceil(achTipEl.offsetHeight);
+  const bg = achTipBgDataUrl(w, h);
+  achTipEl.style.background = bg ? `url(${bg}) no-repeat` : 'rgba(21,23,75,0.93)';
+  // SW-TT1 硬闸:no-repeat 恒钉（宁露 1px 缝,禁默认 repeat 平铺成多块气泡）
+}
+
+/** mouseTextColor 文字层脉冲（DoUpdate_AnimateCursorColors :18064-18075,190↔255
+ *  三角波 +1/tick;只乘文字色,盒底恒定——UI.startTooltipPulse 同式） */
+function startAchTipPulse(): void {
+  if (!achTipLinesEl) return;
+  cancelAnimationFrame(achTipRaf);
+  achTipLinesEl.style.filter = '';
+  let last = performance.now();
+  let val = 255, dir = -1;
+  const step = (now: number): void => {
+    if (!achTipVisible) return;
+    for (let t = 0; t < Math.round((now - last) / 16.7); t++) {
+      val += dir;
+      if (val >= 255) { val = 255; dir = -1; }
+      if (val <= 190) { val = 190; dir = 1; }
+    }
+    last = now;
+    if (achTipLinesEl) achTipLinesEl.style.filter = `brightness(${(val / 255).toFixed(3)})`;
+    achTipRaf = requestAnimationFrame(step);
+  };
+  achTipRaf = requestAnimationFrame(step);
+}
+
+function ensureAchTip(): void {
+  if (achTipEl) return;
+  const tip = document.createElement('div');
+  tip.className = 'sw-ach-tip';
+  const lines = document.createElement('div');
+  lines.className = 'lines';
+  achTipNameEl = document.createElement('div');
+  achTipDescEl = document.createElement('div');
+  achTipDescEl.className = 'ds';
+  lines.appendChild(achTipNameEl);
+  lines.appendChild(achTipDescEl);
+  tip.appendChild(lines);
+  document.body.appendChild(tip);
+  achTipEl = tip;
+  achTipLinesEl = lines;
+}
+
+/** 显气泡（原版形态:名称行=Achievements.{name}_Name ×StrongRed10 色、说明行=
+ *  _Description;DrawMouseHover :123-134 每帧重设——本仓 DOM 显隐期一次落内容,
+ *  卡面成就变更走 update() 重设） */
+function showAchTip(achName: string, mx: number, my: number, heldGet: () => boolean): void {
+  ensureAchTip();
+  achTipMX = mx;
+  achTipMY = my;
+  achTipHeldGet = heldGet;
+  achTipNameEl!.textContent = Lang.text(`Achievements.${achName}_Name`);
+  achTipDescEl!.textContent = Lang.text(`Achievements.${achName}_Description`);
+  // 名称行色=GetItemNameColor(ItemRarityColor.StrongRed10=10) → rgb(255,40,100)
+  // （Main.cs:20486-20489;mt=255 → num3=1 原生无乘区语义,脉冲走层 filter——UI
+  //  .sw-tooltip rareEl 同约定）
+  achTipNameEl!.style.color = mouseTextInnerColor(10, 0, 255, null);
+  achTipEl!.style.display = 'block';
+  achTipVisible = true;
+  placeAchTip();
+  applyAchTipBg();
+  startAchTipPulse();
+}
+
+function hideAchTip(): void {
+  if (!achTipVisible) return;
+  achTipVisible = false;
+  achTipHeldGet = null;
+  cancelAnimationFrame(achTipRaf);
+  if (achTipEl) achTipEl.style.display = 'none';
+}
 
 /** ★BJ318：getGame 动态解析——曾直捕 Game 实例,Advisor DOM 卡随 UI 单例跨局
  *  存活（teardownInventoryPanel 只在重建时清）,退世界后 card.update/mousedown
- *  闭包把死 Game 整图钉在 UI 上（forward-BFS 定谳锚之一）。动态解析零滞留。 */
-export function createAchievementAdvisor(getGame: () => Game | null): HTMLElement & { update(): void } {
+ *  闭包把死 Game 整图钉在 UI 上（forward-BFS 定谳锚之一）。动态解析零滞留。
+ *  ★BJ500：scaleOf=宿主档单源(大卡 0.75/内联 0.35/缺省 0.5=设置面板档),update()
+ *  逐刷新重估（跨 sw=1000 缩放档随刷新切换,applyGeom 单源重写 inline 尺寸）;
+ *  卡面文字卡废除,文案走 hover 气泡（showAchTip,形态见上）。 */
+export function createAchievementAdvisor(getGame: () => Game | null, scaleOf?: () => number): HTMLElement & { update(): void } {
   ensureCss();
   const card = el('div', 'sw-ach-advisor') as unknown as HTMLElement & { update(): void };
-  // 三层卡面（DrawCard :157-164 绘制序=叠层次序）：暗变体图标 → 金框 → 悬停描边
-  const g = advisorFrameGeom();
+  // 三层卡面（DrawCard :157-164 绘制序=叠层次序）：暗变体图标 → 金框 → 悬停描边。
+  // inline 尺寸不写死——首帧 update() 按宿主档 applyGeom 定形（BJ500 几何单源）
   const box = el('div', 'card');
-  box.style.width = `${g.card}px`;
-  box.style.height = `${g.card}px`;
   const glyph = el('div', 'glyph');
-  glyph.style.left = `${g.pad}px`;
-  glyph.style.top = `${g.pad}px`;
-  glyph.style.width = `${g.icon}px`;
-  glyph.style.height = `${g.icon}px`;
   const border = document.createElement('img') as HTMLImageElement;
   border.className = 'border';
   border.src = 'sprites/vanilla/Achievement_Borders.png';   // 金框=贴图自带（:41/:160）
   border.draggable = false;
   border.alt = '';
   const hov = el('div', 'hov');
-  hov.style.width = `${g.hover.size}px`;
-  hov.style.height = `${g.hover.size}px`;
-  hov.style.left = `${g.pad + g.hover.off}px`;   // off 以图标原点计(:163) → 卡坐标 pad+off
-  hov.style.top = `${g.pad + g.hover.off}px`;
   box.appendChild(glyph);
   box.appendChild(border);
   box.appendChild(hov);
-  const tx = el('div', 'tx');
   card.appendChild(box);
-  card.appendChild(tx);
+  let curScale = -1;
+  const hoverUrls: { Fat?: string; Thin?: string } = {};
+  const applyGeom = (scale: number): void => {
+    const g = advisorFrameGeom(scale);
+    box.style.width = `${g.card}px`;
+    box.style.height = `${g.card}px`;
+    glyph.style.left = `${g.pad}px`;
+    glyph.style.top = `${g.pad}px`;
+    glyph.style.width = `${g.icon}px`;
+    glyph.style.height = `${g.icon}px`;
+    hov.style.width = `${g.hover.size}px`;
+    hov.style.height = `${g.hover.size}px`;
+    hov.style.left = `${g.pad + g.hover.off}px`;   // off 以图标原点计(:163) → 卡坐标 pad+off
+    hov.style.top = `${g.pad + g.hover.off}px`;
+    const u = hoverUrls[g.hover.tex];
+    if (u) hov.style.backgroundImage = `url(${u})`;
+  };
   void tintedSliceDataUrl(ADVISOR_HOVER_TEX, 255, 231, 69, 1).then((url) => {
-    if (url) hov.style.backgroundImage = `url(${url})`;   // 烘失败退化=仅提亮无描边(登记)
+    if (url) {   // 烘失败退化=仅提亮无描边(登记)
+      hoverUrls.Fat = url;
+      if (curScale >= 0 && advisorFrameGeom(curScale).hover.tex === 'Fat') applyGeom(curScale);   // 异步回填竞态
+    }
+  });
+  void tintedSliceDataUrl(ADVISOR_HOVER_TEX_THIN, 255, 231, 69, 1).then((url) => {
+    if (url) {
+      hoverUrls.Thin = url;
+      if (curScale >= 0 && advisorFrameGeom(curScale).hover.tex === 'Thin') applyGeom(curScale);
+    }
   });
   // 悬停谓词 = 图标盒（:139 原版命中面;glyph 即 64²×s 内盒,框 4s 外圈不触发）——
-  // 类开关替代整卡 :hover 旧面 + 沿音（DoStatefulTickSound Main.cs:3333-3343）
-  glyph.addEventListener('mouseenter', () => {
+  // 类开关替代整卡 :hover 旧面 + 沿音（DoStatefulTickSound Main.cs:3333-3343）。
+  // ★BJ500 气泡同谓词触发（原版 _hoveredCard 置位 ↔ DrawMouseHover 消费 :123-134）；
+  // mousemove 驱动跟鼠标（原版 MouseText 每帧重绘,DOM=move 事件重定位;气泡
+  // pointer-events:none 不截流——glyph 上的 move 连续可达）
+  glyph.addEventListener('mouseenter', (e) => {
     card.classList.add('sw-ach-hov');
     getGame()?.sfx.play('menuTick', 1);
+    if (lastBest) {
+      // ★BJ501:heldGet=光标持物谓词（Main.mouseItem.IsAir 取反 :20391-20394）=
+      //  Game.uiHeldItemRef（UI.heldStack 装配,UI.ts:1530）——旧 inv.heldItem()=
+      //  HeldItem 语义（热栏选中物,游玩期恒非空）致 +34 恒加（锚详注见 achTipAnchorXY）
+      showAchTip(lastBest, e.clientX, e.clientY,
+        () => !!getGame()?.uiHeldItemRef?.());
+    }
+  });
+  glyph.addEventListener('mousemove', (e) => {
+    if (!achTipVisible) return;
+    achTipMX = e.clientX;
+    achTipMY = e.clientY;
+    placeAchTip();
   });
   glyph.addEventListener('mouseleave', () => {
     card.classList.remove('sw-ach-hov');
+    hideAchTip();
   });
   card.addEventListener('mousedown', (e) => {
     e.stopPropagation();
+    hideAchTip();   // ★BJ500:点击=开面板,原版 tooltip 随 _hoveredCard 复位下帧消隐（:63/:68/:80）
     if (e.button !== 0) return;   // 原版仅左键（:68 mouseLeft && mouseLeftRelease）
     const game = getGame();
     if (!game) return;
@@ -376,22 +616,31 @@ export function createAchievementAdvisor(getGame: () => Game | null): HTMLElemen
     }
     openAchievementsPanel(game, best ?? undefined);
   });
+  let lastBest: string | null = null;
   card.update = () => {
     // Advisor 选择 = 原版 AchievementAdvisor.GetBestCards(1)（1458 同 1456）：
     // 精选序列（AchievementAdvisor.Initialize 36 项，序≠注册序）中首个未完成。
     // IsAchievableInWorld 未建模（原版检查世界进度门槛，本仓成就无条件可达）略。
+    if (!card.isConnected) { hideAchTip(); return; }   // 卡被重建/摘除 → 气泡随葬（body 级单例防孤儿）
+    const scale = scaleOf ? scaleOf() : ADVISOR_SCALE;   // ★BJ500 宿主档(大卡 0.75/内联 0.35)
+    if (scale !== curScale) { curScale = scale; applyGeom(scale); }
     const game = getGame();
-    if (!game) { card.style.display = 'none'; return; }
+    if (!game) { card.style.display = 'none'; hideAchTip(); return; }
     const a = game.achievements;
-    if (!advisorHasCard(a)) { card.style.display = 'none'; return; }
+    if (!advisorHasCard(a)) { card.style.display = 'none'; hideAchTip(); return; }
     let best: string | null = null;
     for (const name of ADVISOR_ORDER) {
       if (a.defOf(name) && !a.isCompleted(name)) { best = name; break; }
     }
-    if (!best) { card.style.display = 'none'; return; }
+    if (!best) { card.style.display = 'none'; hideAchTip(); return; }
     card.style.display = 'flex';
-    glyphStyle(glyph, a, best, ADVISOR_SCALE);   // 32px 窗 = 图集 0.5 倍（整帧完整显示）
-    tx.textContent = Lang.text(`Achievements.${best}_Name`);
+    glyphStyle(glyph, a, best, curScale);   // 暗变体帧（locked 列块 X+528,glyphStyle 单源）
+    // 悬停中卡面成就被完成 → 气泡文案随新卡刷新（原版 _hoveredCard 每帧重置 :63/:80）
+    if (achTipVisible && best !== lastBest) {
+      // ★BJ501:同上——光标持物谓词（mouseItem 语义,非 HeldItem）
+      showAchTip(best, achTipMX, achTipMY, () => !!game.uiHeldItemRef?.());
+    }
+    lastBest = best;
   };
   card.update();
   return card;

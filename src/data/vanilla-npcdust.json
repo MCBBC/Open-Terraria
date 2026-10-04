@@ -8759,6 +8759,80 @@
    }
   ]
  },
+ "519": {
+  "hit": [
+   {
+    "over": "oldPos",
+    "len": 20,
+    "stride": 3,
+    "body": [
+     {
+      "dust": 0,
+      "idPick": [
+       6,
+       259,
+       158
+      ],
+      "n": 5,
+      "pos": "oldPos",
+      "sx": "2.5hd",
+      "sy": -2.5,
+      "posts": [
+       [
+        "alpha",
+        200
+       ],
+       [
+        "velMul",
+        2.4
+       ],
+       [
+        "scaleAddR01"
+       ]
+      ],
+      "line": 83918
+     }
+    ],
+    "line": 83918
+   }
+  ],
+  "death": [
+   {
+    "over": "oldPos",
+    "len": 20,
+    "stride": 3,
+    "body": [
+     {
+      "dust": 0,
+      "idPick": [
+       6,
+       259,
+       158
+      ],
+      "n": 5,
+      "pos": "oldPos",
+      "sx": "2.5hd",
+      "sy": -2.5,
+      "posts": [
+       [
+        "alpha",
+        200
+       ],
+       [
+        "velMul",
+        2.4
+       ],
+       [
+        "scaleAddR01"
+       ]
+      ],
+      "line": 83918
+     }
+    ],
+    "line": 83918
+   }
+  ]
+ },
  "524": {
   "hit": [
    {
@@ -10005,19 +10079,20 @@
   "generatedBy": "tools/extract-npcdust.mjs",
   "callTotal": 629,
   "entryCount": 629,
-  "stdStmts": 1251,
-  "unsupStmts": 47,
-  "npcIds": 600,
-  "entryNpcIds": 600,
+  "stdStmts": 1254,
+  "unsupStmts": 44,
+  "npcIds": 602,
+  "entryNpcIds": 602,
   "counts": {
-   "wiredTypes": 342
+   "wiredTypes": 343
   },
-  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:'oldPos',len,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos='oldPos'）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; idAi3={m:{2:10,3:37}} → dust=ai[3]∈m?m[ai3]:dust（段位选尘 0 掷,★BJ479 85/629,dust 字段=缺省=段1）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
+  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:'oldPos',len,stride?,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos='oldPos';★BJ503 stride=步进 519=3→index 0,3,6,…）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; idAi3={m:{2:10,3:37}} → dust=ai[3]∈m?m[ai3]:dust（段位选尘 0 掷,★BJ479 85/629,dust 字段=缺省=段1）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
   "noGenericTail": "★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）",
   "batch2": "BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636",
   "batch3": "BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending）→ 已随 BJ327 批4 转正。仍排除（批4 后清零）：661（四缺口,批4 接）/402（oldPos,批4 接）",
   "batch4": "BJ327 批4（2026-09-24）HitEffect 尘面收官批：①402 oldPos 轨迹盒 6 组——★Enemy 定谳=有轨迹环（histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7 逐拍推入）无需扩展;loop.over='oldPos'（len=NPCID.cs:4809 环长）+stmt.pos='oldPos'+brk 标记（oldPos[i]==Zero break,掷门后求值）+branch.skip（Next(4)!=0 continue）。②426/427 SelectRandom 带权 id 环——idPick=[…]=choices[Next(len)]（重复项=权重,426 [229,240,161] 均一/427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误:VDust.noLight 引擎光链 VanillaDust.ts :551 烟雾族 !noLight 门消费,240/161 原文本无光=no-op 同相）→ std 算子 noLight(true)。③661 四缺口一次接齐——hslToRgb 纯函数 std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环 index,Math.Round=ToEven;乘色走 float 域=LeashedCritter.ts:1577 White×0.5 同源判例）/posCircular（Center+NextVector2Circular(w,h),Utils.cs:1301-1303,2 掷角+幅）/velFromCenter（(position−Center)×k,0 掷派生）/CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 在位,GameHooks.cloneDust 钩子新建;clone.posts=[scaleDiv2,fadeInMul0.85,colorSet(127.5×4)]）。接入 4 型：402/426/427/661",
   "batch6": "BJ479 批6（2026-10-03）宝箱怪受击/死亡尘族+批5 手工条目转正;★BJ484（2026-10-03）名单扩宝箱怪同构支出清滚动清单：①85/629 共支（NPC.cs :89766-89801 亲读,ai[3] 三段选尘 7/10/37,gore 61/62/63 由 extract-gore.mjs 承担）——根级 ai[3] 条件 id 局部首建模（ai3Locals:d=组头初值/m=段位覆写,0 掷运行时段位;段位=AI_025 生成时锁 :25684-25697,341/629 每 tick 强制 1 :25699-25701→629 恒段 1 恒尘 7）;★此前 byType 以 typedLocal 桶尾值 37 静默错解析（三重赋值使唯一赋值还原/per-type 桶双失效）,靠未接线掩盖。②23 流星头批5 手工条目（BJ411,_meta.batch5 已退役）同刀提取器原生转正——roll 条件 id 局部 `int numN=25;if(Next(2)==0){numN=6}` → idPick=[6,25]+空门帧 rollIdConsumed 摘除占位支（1 掷同拍;此前占位支+恒 6 桶尾值双错）,era guard 对拍复绿。③BJ484 扩 341（PresentMimic :89741-:89765,常量尘 196）+473-476（BigMimic 四系共支 :89799-:89829,常量尘 31）——【常量 id 支无 ai[3] 门】纯数据 std 路径原生表达（hit=hitK50/death=n20,gore 同族归 gore 表;AI_087 :37845 零尘=激活链无专项）,与 85/629 同族同形但无需 idAi3。接入 8 型：85/629/23/341/473/474/475/476——_meta.pending 中型域组剩根级门组（daybreak/gold-critter/ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）+零散 std 滚动清单",
+  "batch7": "BJ503 批7（2026-10-04）519 日耀黏液接入（用户实报「日耀柱发射的弹幕效果不对」定谳面之一）：HitEffect :83908-83929（1458 同区逐字节全等）——oldPos 轨迹环 len20(TrailCacheLength[519]=20 NPCID.cs:4809)×stride3(`num126 += 3`→index 0,3,…,18 共 7 组)×n5 粒=idPick[6,259,158] 带权尘(6 火/259 火焰簇/158 烟)+sx 2.5hd/sy −2.5+posts[alpha200,velMul2.4,scaleAddR01]；hit/death 两相同 body（块无 life 门=受击与死亡同喷;519 落地自爆 HitEffect(0,9999) 在 solarSlimeAI 显式调 spawnNpcDeathDust(hd=0)）。提取器三缺口同刀接齐：①forStep(oldPos 环 +=K 步进→loop.stride)②局部 Hitbox 拷贝盒 rectLocals（Rectangle hitboxN=base.Hitbox + X/Y 双字段同 counter 覆写 → hitboxN.TopLeft() 等价 oldPos[counter],复用 ref=最近 over-oldPos 环计数器一致性校验）③dz.alpha=N 后置直赋 post 算子（NewDust alpha 入参同面）",
   "carveOuts": [
    "泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)",
    "gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）",
@@ -10028,7 +10103,7 @@
     "types": [],
     "line": 82577,
     "phase": "death",
-    "reason": "pos:hitbox.TopLeft();postUnknown:dz.alpha = 200;",
+    "reason": "pos:hitbox.TopLeft()",
     "count": 1
    },
    {
@@ -10232,33 +10307,6 @@
     "line": 84366,
     "phase": "death",
     "reason": "pos:base.Center - Vector2.One * num170",
-    "count": 1
-   },
-   {
-    "types": [
-     472
-    ],
-    "line": 90736,
-    "phase": "hit",
-    "reason": "postUnknown:dz.alpha = 100;",
-    "count": 1
-   },
-   {
-    "types": [
-     472
-    ],
-    "line": 90747,
-    "phase": "death",
-    "reason": "postUnknown:dz.alpha = 100;",
-    "count": 1
-   },
-   {
-    "types": [
-     519
-    ],
-    "line": 83918,
-    "phase": "both",
-    "reason": "pos:hitbox2.TopLeft();postUnknown:dz.alpha = 200;",
     "count": 1
    },
    {
@@ -11848,6 +11896,15 @@
      471
     ],
     "line": 90716,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     472
+    ],
+    "line": 90736,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1

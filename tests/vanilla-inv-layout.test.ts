@@ -489,25 +489,31 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
     //   字面锁随扩展同步(缝隙点击不穿透语义不变,集合扩员)
     expect(s).toContain("'.sw-panel, .sw-eqdock, .sw-vinv, .sw-itemsearch'");
   });
-  it('★BJ416:顾问/防御盾/设置钮行族单源接线(srcMatch)', () => {
+  it('★BJ416:防御盾/设置钮行族单源接线;★BJ501 用户明令分歧:顾问恒大卡位(srcMatch)', () => {
     const s = ui();
     // pushed 前置算(pos 循环前;settings 钮注册序在顾问/盾之后)
     expect(s).toContain('this.vinvSettingsPushed = settingsAnchorOf(sw, sh, mH, visibleRows).pushed;');
-    // 顾问:sw<1000 内联 = num38 行 + HasSpace 门 + 页 0 门 + 图标化 class
-    expect(s).toContain("advWrap.classList.toggle('sw-ach-inline', c.sw < 1000);");
-    expect(s).toContain('hasSpaceForInlineAdvisor(hasCard, c.visibleRows - 8, infoN, this.vinvSettingsPushed)');
-    expect(s).toContain('advisorInlineXY(c.sw, c.num20, advisorRowOf(c.visibleRows, this.vinvSettingsPushed))');
+    // 顾问:★BJ501 用户明令分歧(2026-10-04)——sw<1000 恒大卡位,原版内联接线退役
+    //   （锁=用户明令分歧非原版相;原版=sw<1000 内联 num38 行+HasSpace 门+页 0 门+
+    //   sw-ach-inline 类开关(:42096-42129),回滚口注于 buildVanillaInventoryPanel;
+    //   内联几何单源留 vanillaInvLayout.ts,上方独立 it 锁内联几何原版值）
+    expect(s).toContain('pos(advWrap, () => ({ x: ADVISOR_XY.x, y: 20 }));');
+    expect(s).not.toContain("advWrap.classList.toggle('sw-ach-inline'");
+    expect(s).not.toContain('hasSpaceForInlineAdvisor(hasCard');
+    expect(s).toContain('★BJ501 用户明令分歧');
     // 防御盾行 = num37(挤碰再 -1)
     expect(s).toContain('defenseCenterXY(c.sw, c.num20, defenseRowOf(c.visibleRows, this.vinvSettingsPushed))');
     // 设置钮 = settingsAnchorOf 单源(旧 equipRowY+44.2 近似退役)
     expect(s).toContain('const a = settingsAnchorOf(c.sw, c.sh, c.mH, c.visibleRows);');
-    // 顾问可显卡门经 AchievementsUI 单源(非 UI.ts 内联重扫)
-    expect(s).toContain('advisorHasCard(this.game.achievements)');
-    expect(s).toContain('drawInfoAccCount(this.game.player.equipStats.infoAccs)');
+    // 顾问可显卡门=卡内 update 自隐（BJ501:内联门接线退役,UI 侧零重扫;
+    //   advisorHasCard/drawInfoAccCount 单源仍在 AchievementsUI/InfoAccs）
+    expect(s).not.toContain('advisorHasCard(this.game.achievements)');
   });
-  it('★BJ416:内联小卡 CSS(文字摘除)与 advisorHasCard/drawInfoAccCount 单源在场', () => {
-    expect(srcOf('src/ui/AchievementsUI.ts')).toContain('.sw-ach-inline .tx { display:none; }');
-    expect(srcOf('src/ui/AchievementsUI.ts')).toContain('export function advisorHasCard');
+  it('★BJ416:内联小卡=纯图标(★BJ500 文字卡废除,原版 0.35 档)与 advisorHasCard/drawInfoAccCount 单源在场', () => {
+    const a = srcOf('src/ui/AchievementsUI.ts');
+    expect(a).toContain('export const ADVISOR_SCALE_INLINE = 0.35;');   // BJ500 原版内联档(Main.cs:42129 large:false)
+    expect(a).not.toContain('.tx');                                     // 文字卡零残留(结构性)
+    expect(a).toContain('export function advisorHasCard');
     expect(srcOf('src/stats/InfoAccs.ts')).toContain('export function drawInfoAccCount');
   });
 });

@@ -14168,6 +14168,10 @@ export class Enemy extends Entity {
       if (this.ai1 >= 180) {
         // life=0 + HitEffect + checkDead（:41122-41127）→ 真死（碎片 3456-3459 + 塔灭公告）
         // 先清 dontTakeDamage 再走标准死亡管线（同 golem 先例，hurt 门会早退该旗）
+        // ★BJ502（2026-10-04）：1e9=合成致死值（原版本位=life=0 直落,无 StrikeNPC）
+        //   ——飘值门已统一原版形态（rawDmg>=9999 且合成 owner255 位,见 hurt 飘值块）
+        //   后恒静音;曾冒 999999990（1e9−塔防20×0.5,用户实报"9999990"）大字。
+        //   勿回改精确匹配门;勿改传 9999（hp 已满血重置,9999+0−10 不足致死）。
         this.iframes = 0;
         this.dontTakeDamage = false;
         this.hurt(1e9, 0, 0, game);
@@ -14335,12 +14339,25 @@ export class Enemy extends Entity {
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 700) {
         const flare = spawnPart(game, this, 519);
         if (flare) {
-          flare.x = this.x - this.w * 0.33 + Math.random() * this.w * 0.66 - flare.w / 2;
-          flare.y = this.y - 20;
-          const theta = (Math.random() * 2 - 1) * 0.7853981852531433;   // RotatedByRandom(0.785)
-          const sp = 7 + Math.random() * 5;
-          flare.vx = Math.sin(theta) * sp;      // -UnitY 旋转 θ：(sinθ, -cosθ)
-          flare.vy = -Math.cos(theta) * sp;
+          // ★BJ503 坐标面 1:1（:39747-39749）：NewNPC 的 X,Y = 519 中心锚（NPC.cs
+          //  NewNPC：position = (X−w/2, Y−h/2)）；vector195 = Top(顶部中点=x+w/2)
+          //  + (−w·0.33, −20) + (w·0.66, 20)·RandomVector2(0..1)——★旧码漏 Top 的
+          //  +w/2 基准 → 发射带整体左偏半塔宽 65px（519 从塔左肩外喷出=实报
+          //  「弹幕效果不对」主面之一），且 Y 漏 (−20..0) 随机带与 −h/2 中心换算。
+          //  (int) 截断照抄（:39749 NewNPC 实参强转 float→int 向零取整）。
+          const rx = Math.random();                       // RandomVector2 掷 X（:39747）
+          const ry = Math.random();                       // 掷 Y（同拍次序）
+          flare.x = Math.trunc(this.x + this.w / 2 - this.w * 0.33 + rx * this.w * 0.66) - flare.w / 2;
+          flare.y = Math.trunc(this.y - 20 + ry * 20) - flare.h / 2;
+          // ★BJ503 掷角面（:39748）：-UnitY.RotatedByRandom(π/4)——RotatedByRandom
+          //  = (NextDouble−NextDouble)×max = 对称【三角分布】（峰朝正上）,旧
+          //  (rand×2−1)×max 是 uniform=散布形态错（BJ112-④ 三角单源收编清单漏网,
+          //  本仓 516/415/428 三处已收编、519 出膛角漏）；方向恒等：unitY 旋转 a
+          //  = (−sin a, cos a) → 负号即原版 −UnitY 形 (sin a, −cos a)。
+          const sp = 7 + Math.random() * 5;               // :39748 NextFloat×5 + 7
+          const [ux, uy] = unitYRotatedByRandom(0.7853981852531433);
+          flare.vx = -ux * sp;
+          flare.vy = -uy * sp;
         }
         this.ai1 = 60;
       }
@@ -14682,15 +14699,26 @@ export class Enemy extends Entity {
     // ---- 伤害飘值 + 受击音：原版 StrikeNPC 内【单点】发射（:82006-82015 CombatText、
     // :82118 起 HitSound）——调用方零重复。曾调用方多点各发 + 假人分支再发 =
     // 一次打击双份飘值+音效双播（2026-08-23 用户报）。
-    // 门（:81998-82000）：(takenDamageMultiplier>1 || Damage!=9999) && lifeMax>1
-    // ——DOT 致死的 hurt(9999) 不出飘值；lifeMax≤1 不出。
+    // 门（★BJ502 2026-10-04 形态统一原版 StrikeNPC_Inner）：:82065
+    //   `flag = Damage >= 9999 && owner == 255` → :82081 `if (!flag && lifeMax>1)`
+    //   才发射 CombatText+受击音（本仓同形双静音）。旧形 `(takenDamageMultiplier>1 ||
+    //   rawDmg!==9999)` 两处偏离：①精确匹配!==9999——四塔死亡演出收刀 hurt(1e9)
+    //   （towerAI ai1>=180;原版本位=life=0 直落 :39456-39460,无 StrikeNPC 无飘字）
+    //   防后 1e9−20×0.5=999999990 击穿门 → 星云柱收刀冒 999999990 大字（用户实报
+    //   "9999990"）,系 BJ476 蠕虫 10059 同族第二发=精确匹配门窄化的系统性暴露;
+    //   ②takenDamageMultiplier>1 恒飘支系自造（原版门无此支,乘区只作用 num 值）。
+    //   owner==255 本仓承载=合成击杀位（!fromPlayer 且非远端访客——远端访客 hurt 前
+    //   被 netApplyStrike 置 pendingStrikeOwner,原版 fromNet 路径 owner=-1→myPlayer
+    //   门开照飘 Others 灰）。:81998-82000 旧行号锚已漂移（该区间实为
+    //   checkArmorPenetration 尾/KeyBrandStrike 头）。
     // 色（CombatText.cs:8-16 全表）：★附带④ 单源收口 fx/CombatTextColors.ts——
     // friendly/hostile 分档 + 远端访客 ×0.4 灰；旧 '#665A14' 系误值亲核勘正
     // （OthersDamagedHostileCrit=(255,100,30)×0.4=#66280C）。
     // 位置=受击 NPC 锚点（原版 position 矩阵）；数值=防后终值（原版 num 同）。
     {
       const remoteOwner = consumePendingStrikeOwner();
-      if ((this.takenDamageMultiplier > 1 || rawDmg !== 9999) && this.maxHp > 1) {
+      // ★BJ502：门条件=原版 flag 取反（rawDmg>=9999 且合成 owner255 位 → 静默）
+      if (!(rawDmg >= 9999 && !fromPlayer && remoteOwner === null) && this.maxHp > 1) {
         const friendly = this.def.friendly ?? false;
         const col = enemyHurtFloatColor({
           friendly,
@@ -15656,8 +15684,8 @@ export class Enemy extends Entity {
    *  （掉落/记账/音效/粒子）——原版直改 life 不经 StrikeNPC，故 iframes 不应阻塞。
    *  ★BJ476（2026-10-03 用户实报）：传参=9999 整（非 maxHp+9999）——原版级联死/
    *  断链自灭【无伤害飘字无受击音】（checkDead 面非 StrikeNPC 面）;本仓 hurt 的
-   *  飘值门（:14685 rawDmg!==9999 + maxHp>1，锚原版 StrikeNPC_Inner :82063
-   *  flag=Damage>=9999&&owner==255 DoT 静默）对 9999 整天然静音——旧 maxHp+9999
+   *  飘值门（hurt 飘值块 :14702 ★BJ502 2026-10-04 起原版形态 rawDmg>=9999 且合成
+   *  owner255 位,锚原版 StrikeNPC_Inner :82065/:82081 DoT 静默）对 9999 整天然静音——旧 maxHp+9999
    *  （墓穴爬虫头 513 lifeMax 60+9999=10059）击穿门=每次断链自灭冒 ~10K 橙字
    *  （伤害色 (255,160,80) 本就橙,非暴击）。致死性无涉：hp 已先置 0,any dmg≥1
    *  即进死亡管线（applyDoT :4636 同款 9999 通道）。 */

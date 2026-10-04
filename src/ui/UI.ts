@@ -207,7 +207,7 @@ import {
   shopSavingsLabelXY, shopSavingsCoinXY, shopSavingsCoinTextXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757);★BJ421 计数锚
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
-  settingsAnchorOf, defenseRowOf, advisorRowOf, advisorInlineXY, hasSpaceForInlineAdvisor,   // ★BJ416:设置钮锚/装备列尾行族单源(Main.cs:46254-46285/42091-42102)
+  settingsAnchorOf, defenseRowOf,   // ★BJ416:设置钮锚/装备列尾行族单源(Main.cs:46254-46285/42091-42102);★BJ501:advisorRowOf/advisorInlineXY/hasSpaceForInlineAdvisor 内联接线退役(用户明令恒大卡位,函数留 vanillaInvLayout.ts 备查)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool, buildItemSearchView } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源;★BJ207 view 构建单源
 import {
@@ -239,8 +239,7 @@ import {
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
 import { sortContainerItems } from '../stats/ItemSorting';   // ★SW-RB13c:chestSortChest 换 FX29 精确引擎（sortingLayerIndex 旧近似随旧实现退役）
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
-import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor, advisorHasCard } from './AchievementsUI';
-import { drawInfoAccCount } from '../stats/InfoAccs';   // ★BJ416:GetDrawInfoAccCount 等价(HasSpace 门入参)
+import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor, ADVISOR_SCALE_LARGE } from './AchievementsUI';   // ★BJ501:advisorHasCard/ADVISOR_SCALE_INLINE 接线退役(用户明令恒大卡,回滚口见 buildVanillaInventoryPanel)
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
 import { openPlayerListPanel } from './PlayerListPanel';
@@ -5270,7 +5269,7 @@ export class UI {
     // 同样移至 rightRail 之后、成就/杂项列之前（用户要求整体右迁）
     // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
     // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
-    this.achAdvisorEl = createAchievementAdvisor(() => this.game);   // ★BJ318 动态解析
+    this.achAdvisorEl = createAchievementAdvisor(() => this.game, () => ADVISOR_SCALE_LARGE);   // ★BJ318 动态解析;★BJ500 classic 侧列=大卡角色→原版 0.75 档
 
     // 背包 10×4（10-39）。★「背包」标签行已摘（2026-09-02 用户要求：去掉二字
     // 直接贴紧热键栏;道具搜索文字钮此前已图标化,向导反查钮 2026-08-14 摘）
@@ -8269,27 +8268,19 @@ export class UI {
     // 成就 Advisor(Main.cs:41758-41763 @(501,25))
     const advWrap = el('div');
     advWrap.style.cssText = 'position:absolute; pointer-events:auto;';
-    advWrap.appendChild(createAchievementAdvisor(() => this.game));   // ★BJ318 动态解析
+    // ★BJ501 用户明令分歧(2026-10-04):恒大卡档 0.75,不再随 sw<1000 切内联 0.35
+    //   （原版=窄屏内联 Main.cs:42129 large:false+CanDrawAboveCoins 门 :41758;
+    //   回滚口=恢复 BJ500② 的 scaleOf sw<1000 三元断点闭包——ADVISOR_SCALE_INLINE:
+    //   ADVISOR_SCALE_LARGE 逐 update 重估,写法见 BJ500② 判语/git 历史）
+    advWrap.appendChild(createAchievementAdvisor(() => this.game, () => ADVISOR_SCALE_LARGE));   // ★BJ318 动态解析
     this.achAdvisorEl = advWrap.firstChild as HTMLElement & { update(): void };
     root.appendChild(advWrap);
-    // ★红队 m8b 清偿:CanDrawAboveCoins 在 sw<1000 为 false(AchievementAdvisor.cs:26-36)
-    // → 改画装备列旁第二落位 (:42096-42100 sw-224, 末行y+8),非恒钉 (501,25)
-    // ★BJ416(2026-09-30 定谳重写):sw<1000 内联行=Main.cs:42098 num38=num37-1
-    //   (num37=末行:42091,设置钮挤碰再 -1:42094-42097)——旧刀钉 last(=num37)行
-    //   低 1-2 行,竖式卡体正压下一行防御盾+设置钮(用户实报"成就按钮跑到右下角
-    //   紧邻设置");HasSpace 门(:3019-3033,:42099-42102)不过或页≠0(:42083 else 支)
-    //   不画;窄屏卡体退纯图标(原版小卡 0.35 纯图标,CSS .sw-ach-inline 摘文字)
-    pos(advWrap, () => {
-      const c = this.vinvLayoutCtx!;
-      advWrap.classList.toggle('sw-ach-inline', c.sw < 1000);
-      // ★2026-09-13 用户要求:成就卡顶对齐背包格顶(y=20;vanilla 25 = 5px 差,偏差备案)
-      if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: 20 };
-      if (this.vinvPageCurrent !== 0) return null;
-      const hasCard = this.game ? advisorHasCard(this.game.achievements) : false;
-      const infoN = this.game ? drawInfoAccCount(this.game.player.equipStats.infoAccs) : 0;
-      if (!hasSpaceForInlineAdvisor(hasCard, c.visibleRows - 8, infoN, this.vinvSettingsPushed)) return null;
-      return advisorInlineXY(c.sw, c.num20, advisorRowOf(c.visibleRows, this.vinvSettingsPushed));
-    });
+    // ★BJ501 用户明令分歧(2026-10-04):sw<1000 不再移装备列内联位——恒大卡位恒画
+    //   （原版=窄屏内联 Main.cs:42096-42129 num38 行+HasSpace 门 :3019-3033;回滚口=
+    //   恢复 BJ416 内联支:sw-ach-inline 类开关+页 0 门+hasSpaceForInlineAdvisor 门+
+    //   advisorInlineXY 落位——几何单源仍留 vanillaInvLayout.ts 备查）
+    //   ★2026-09-13 用户要求:成就卡顶对齐背包格顶(y=20;vanilla 25 = 5px 差,偏差备案)
+    pos(advWrap, () => ({ x: ADVISOR_XY.x, y: 20 }));
     // ---- 钱币/弹药列(Main.cs:42460-42495:标签 (496,84)/(532,84),槽 x=497/534) ----
     const coinLbl = txt(Lang.text('LegacyInterface.26'));
     coinLbl.style.fontSize = '13px';

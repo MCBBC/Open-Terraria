@@ -26,8 +26,11 @@
 //     外圈）——本刀不动=不回归面。
 // ★落刀（src/ui/AchievementsUI.ts 单文件）：advisorFrameGeom() 几何单源 + 卡面
 //   重建（金框 img + 预烘黄描边覆盖层 tintedSliceDataUrl(…,255,231,69) + 220/255
-//   灰调↔White + 图标盒悬停谓词 + 左键 goto）。竖式文字卡（2026-09-02 用户要求）
-//   保留=登记偏差；.sw-ach-inline .tx 锚（vanilla-inv-layout.test.ts:509）不动。
+//   灰调↔White + 图标盒悬停谓词 + 左键 goto）。
+// ★BJ500（2026-10-04 用户拍板）：竖式文字卡废除（原版卡面零文字,文案走 hover
+//   气泡 tooltip=Main.DrawMouseHover :123-134）+ 尺寸三档对齐原版（大卡 0.75/
+//   内联 0.35/设置面板 0.5,旧「两落位均 0.5=QoL」偏差废除）——判语更新,详见
+//   tests/bj500-achievement-vanilla-card.test.ts。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -50,7 +53,7 @@ function px(p: PNG, x: number, y: number): [number, number, number, number] {
 }
 
 describe('BJ473 定谳面：advisor 卡框几何单源（AchievementAdvisor.DrawCard :136-165）', () => {
-  it('本仓档 0.5：框 36=72×s、图标 32=64×s、pad 2=4×s；s≤0.5 → Fat 描边(80²@−8s)', () => {
+  it('0.5 档(★BJ500=原版设置面板档 DrawOptionsPanel :95/:103;本仓无此宿主位,档保留)：框 36、图标 32、pad 2；s≤0.5 → Fat 描边(80²@−8s)', () => {
     expect(ADVISOR_SCALE).toBe(0.5);
     const g = advisorFrameGeom();
     expect(g.card).toBe(36);            // Achievement_Borders 72² × 0.5
@@ -141,7 +144,7 @@ describe('BJ473 落刀面：卡面重建源锚（src/ui/AchievementsUI.ts）', (
   });
 
   it('悬停谓词 = 图标盒（:139）非整卡：glyph 进出切类 + 沿音（DoStatefulTickSound :3333-3343）', () => {
-    expect(ACHTS).toContain("glyph.addEventListener('mouseenter', () => {");
+    expect(ACHTS).toContain("glyph.addEventListener('mouseenter', (e) => {");   // ★BJ500:e 供气泡锚(clientX/Y)
     expect(ACHTS).toContain("glyph.addEventListener('mouseleave', () => {");
     expect(ACHTS).toContain("card.classList.add('sw-ach-hov');");
     expect(ACHTS).toContain("card.classList.remove('sw-ach-hov');");
@@ -154,8 +157,8 @@ describe('BJ473 落刀面：卡面重建源锚（src/ui/AchievementsUI.ts）', (
     expect(ACHTS).toContain('openAchievementsPanel(game, best ?? undefined);');
   });
 
-  it('图标暗变体：advisor 走 glyphStyle locked 支（0.5 档单源 ADVISOR_SCALE）', () => {
-    expect(ACHTS).toContain('glyphStyle(glyph, a, best, ADVISOR_SCALE);');
+  it('图标暗变体：advisor 走 glyphStyle locked 支（★BJ500 宿主档 curScale 单源,update 逐刷新重估）', () => {
+    expect(ACHTS).toContain('glyphStyle(glyph, a, best, curScale);');
   });
 
   it('面板列表项金框不回归（UIAchievementListItem.cs:63-70 同源：72² 边框盖 64² 图标）', () => {
@@ -172,8 +175,10 @@ describe('BJ473 落刀面：卡面重建源锚（src/ui/AchievementsUI.ts）', (
     expect(ACHTS).toContain("border.className = 'border';\n      border.src = 'sprites/vanilla/Achievement_Borders.png';");
   });
 
-  it('BJ416 窄屏锚不动（vanilla-inv-layout.test.ts:509）+ 竖式文字卡保留（登记偏差）', () => {
-    expect(ACHTS).toContain('.sw-ach-inline .tx { display:none; }');
-    expect(ACHTS).toContain('.sw-ach-advisor .tx {');
+  it('BJ416 窄屏锚不动（vanilla-inv-layout.test.ts）+ 竖式文字卡废除（★BJ500 用户拍板,零残留）', () => {
+    expect(ACHTS).not.toContain('.tx');
+    expect(ACHTS).not.toContain("el('div', 'tx')");
+    expect(ACHTS).toContain('export const ADVISOR_SCALE_LARGE = 0.75;');    // Main.cs:41762 large:true
+    expect(ACHTS).toContain('export const ADVISOR_SCALE_INLINE = 0.35;');   // :42129 large:false
   });
 });

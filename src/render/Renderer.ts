@@ -19773,6 +19773,19 @@ export class Renderer {
       ? document.createElement('canvas') : null);
     const sc = scr?.getContext('2d') ?? null;
     if (!scr || !sc) { comps.length = 0; echoes.length = 0; return; }
+    // ★C10e 加算黑晕垫底（2026-10-04 用户实报"虚空保险库动画体四周暗晕/发黑,亮窗
+    //  背景";flushTrailShade 2026-10-03 彩虹杖同判例）:c10e 分体呈现（默认开）=
+    //  sky2D/glCanvas/HUD 三层 premul-over 叠合,本函数 'lighter' 直绘落【透明 HUD】
+    //  把源 α 折进层 α → 最终合成 dst×(1−α) 衰减下层亮画面:①回声环（α=0.2..0.4,
+    //  1.1× 同形栅格盖满本体缘外 1..3px）把亮背景衰减 20-40%=本体四周紫色暗晕
+    //  （实机探针 neg=102/102,G −40.8 均值/−78 峰,scripts/_bj482-*）;②本体补差
+    //  （α=255 二值栅格）整格替换 glCanvas 本体×light 项=白化半项单腿（暗场
+    //  L=(153,122,255) 实测本体误差 errAvg≈(99,155,163) vs 基底+补差+echo 精确式）。
+    //  XNA 加算 dst 因子恒 ONE 无衰减 → 修=绘制前 c10eCompositeIntoHud 把 sky+gl
+    //  垫进 HUD（幂等闩;非 c10e 帧 !this._c10eFrame 早退零开销）,加算落不透明基底
+    //  =复原 BJ278 不透明面语义。本面是帧内首个 post-composite 加算消费者（7b0 早
+    //  于 7b'/7d/7e'）,垫底后后续各 flush 落不透明面=同享修复;无库帧零开销。
+    this.c10eCompositeIntoHud();
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;

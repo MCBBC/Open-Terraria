@@ -56,6 +56,7 @@ import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
 import { MLDeathray, MoonLeechProj, type NetProjMeta } from './bossAI_duke_moonlord';
 import { tryReflectProjectile, type ReflectableProj } from './projTargets';
+import { spawnNpcDeathDust } from './NpcHitDust';   // ★BJ503:519 自爆 HitEffect 查表尘
 import { LightningBoltProj } from './LightningBoltProj';
 import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
@@ -1936,8 +1937,11 @@ export function nebulaFloaterAI(e: Enemy, game: GameHooks, player: Player | null
 }
 
 /** AI_099 日耀黏液 519(NPC.cs:40324-40390):自身重力 0.2(钳 12)坠落,贴图随速度
- *  转向;落地(vy==0)→ 5t 定格(每 tick 回退到 oldPosition)→ HitEffect 自爆消亡
- *  (active=false,不走掉落/扣盾)。519 专属火尘拖尾(6 号尘)。 */
+ *  转向;落地(vy==0)→ 5t 定格(每 tick 回退到 oldPosition)→ HitEffect(0,9999) 自爆
+ *  消亡(active=false,不走掉落/扣盾)。★BJ503:运行火尘与自爆尘全参 1:1——拖尾走
+ *  spawnDust 原版尘池(6 号尘 NewDust 全参+post 修型),自爆走 vanilla-npcdust.json
+ *  查表 death 相(oldPos 轨迹环×7 组×5 粒 idPick{6,259,158},hd=0);旧 spawnParticles
+ *  自造色块(26+18 粒 #FFB060/#FFE080+拖尾 #FF9A3C 近似)=实报「弹幕效果不对」面。 */
 export function solarSlimeAI(e: Enemy, game: GameHooks, _player: Player | null) {
   if (e.ai0 < 0) e.ai0 = 0;                           // Enemy 哨兵 -1120 归一,原版出生 0
   if (e.vy === 0 && e.ai0 === 0) {                    // :40326-40332 落地门
@@ -1950,21 +1954,51 @@ export function solarSlimeAI(e: Enemy, game: GameHooks, _player: Player | null) 
     e.x = e.prevX; e.y = e.prevY;                     // position=oldPosition
     e.ai1 += 1;
     if (e.ai1 >= 5) {
-      game.spawnParticles(e.cx, e.cy, '#FFB060', 26, 3.4, { life: 34, damp: 0.95 });
-      game.spawnParticles(e.cx, e.cy, '#FFE080', 18, 2.6, { life: 30, damp: 0.95 });
+      // HitEffect(0, 9999.0)(:40339)→ 519 特例轨迹爆散尘(NPC.cs:83908-83929,vanilla-npcdust
+      //  表 519 death 相,hitDirection=0 → sx=2.5×0=0 尘竖直上抛);无 gore/DeathSound(SetDefaults null)。
+      spawnNpcDeathDust(e, game, 0);
       e.dead = true;                                  // HitEffect(0,9999)+active=false
     }
     return;
   }
   e.vy = Math.min(e.vy + 0.2, 12);                    // :40345-40349
   e.visAngle = Math.atan2(e.vy, e.vx) - Math.PI / 2;  // rotation(:40350)
-  // 519 火尘(:40355-40389):首帧 13 粒爆发 + 每帧 3 粒 2/3 概率
+  // 519 火尘(:40355-40389)1:1:首帧 13 粒爆发 + 每帧 3 掷 2/3 概率——NewDust(position,w,h,6,
+  //  vel×0.5, α90, scale2.5) 后置修型照抄:
+  //  · 首帧组(:40357-40367):noGravity+fadeIn=1+velocity×4+noLight(高速无重力爆裂开场);
+  //  · 每帧组(:40369-40388):velocity×0.2+fadeIn=1;1/6 → velocity×30+noGravity=false+noLight
+  //    (快速受重力飞散),否则 velocity = DirectionFrom(dust.position)×|v|——Entity.cs:210
+  //    DirectionFrom(Source)=Normalize(Center−Source)=【从尘位指向 NPC 中心】→ 尘向火球
+  //    回吸(原版火焰聚拢观感),非径向外抛。
   if (lai0Of(e) === 0) {
     setLai0(e, 1);
-    game.spawnParticles(e.cx, e.cy, '#FF9A3C', 13, 2.2, { life: 40, damp: 0.94 });
+    for (let i = 0; i < 13; i++) {
+      const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 6, e.vx * 0.5, e.vy * 0.5, 90, null, 2.5);
+      if (!d) break;
+      d.noGravity = true;
+      d.fadeIn = 1;
+      d.vx *= 4; d.vy *= 4;
+      d.noLight = true;
+    }
   }
-  if (rnd(3) < 2) game.spawnParticles(e.cx, e.cy, Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A',
-    1, 1.4, { life: 30, damp: 0.94 });
+  for (let i = 0; i < 3; i++) {
+    if (Math.floor(Math.random() * 3) >= 2) continue;   // Main.rand.Next(3) < 2
+    const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 6, e.vx * 0.5, e.vy * 0.5, 90, null, 2.5);
+    if (!d) break;
+    d.noGravity = true;
+    d.vx *= 0.2; d.vy *= 0.2;
+    d.fadeIn = 1;
+    if (Math.floor(Math.random() * 6) === 0) {
+      d.vx *= 30; d.vy *= 30;
+      d.noGravity = false;
+      d.noLight = true;
+    } else {
+      const len = Math.hypot(d.vx, d.vy);
+      const dx = e.cx - d.x, dy = e.cy - d.y;           // DirectionFrom：指向 NPC 中心
+      const norm = Math.hypot(dx, dy);
+      if (norm > 0) { d.vx = (dx / norm) * len; d.vy = (dy / norm) * len; }
+    }
+  }
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
 

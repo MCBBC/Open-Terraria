@@ -108,7 +108,8 @@ type DustOp =
   | ['noLight', boolean]            // ★批4 426/427:noLight=b（引擎光链 VanillaDust.ts :551 消费;0 掷）
   | ['posCircular']                 // ★批4 661:position=Center+NextVector2Circular(w,h)（2 掷:角+幅）
   | ['velFromCenter', number]       // ★批4 661:velocity=(position−Center)×k（0 掷派生）
-  | ['colorSet', NpcDustColor];     // ★批4 661 clone 回声:color=new Color(...)×k（0 掷）
+  | ['colorSet', NpcDustColor]      // ★批4 661 clone 回声:color=new Color(...)×k（0 掷）
+  | ['alpha', number];              // ★BJ503 519:alpha=N 后置直赋（NewDust alpha 入参同面,0 掷）
 
 /** 谓词求值：pre=臂条件（判负→e 臂不掷）|gate=区域门（判负→整元素跳过）；均不耗掷 */
 export type NpcDustPre = 'lifeGtHalf' | 'lifeLt0';
@@ -159,6 +160,7 @@ export interface NpcDustLoop {
   n?: number; hitK?: number;
   over?: 'oldPos';         // ★批4 402:oldPos 轨迹环——len 拍逐 index 走 body（oldPos.Length=TrailCacheLength[型]）
   len?: number;            // 环长（NPCID.cs:4809,402=36;缺省 10）
+  stride?: number;         // ★BJ503 519:index 步进（`num126 += 3` → oldPos[0,3,6,…]，缺省 1）
   body: NpcDustEl[];
   line?: number;
 }
@@ -250,6 +252,7 @@ interface LiveDust {
   x: number; y: number;
   noGravity: boolean; vx: number; vy: number; scale: number; fadeIn: number;
   noLight: boolean; color: NpcDustColor | null;
+  alpha: number;           // ★BJ503 519:alpha post 算子（NewDust alpha 入参同面,VDust.alpha 在位 VanillaDust.ts:69）
 }
 
 /** post 算子应用（spawnDust/cloneDust 返回的活尘对象;池满 null 静默跳过=原版尘池语义） */
@@ -281,6 +284,7 @@ function applyOps(d: LiveDust, ops: DustOp[] | null | undefined, e: Enemy): void
         break;
       }
       case 'colorSet': d.color = { ...op[1] }; break;        // ★批4 661 clone 回声 `color = White×0.5`（float 域 127.5×4）
+      case 'alpha': d.alpha = op[1]; break;                  // ★BJ503 519:`dz.alpha = N` 后置直赋（NewDust alpha 入参同面——d.alpha=N 同值同相,无内建后读）
     }
   }
 }
@@ -360,8 +364,9 @@ function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: numbe
   if ('body' in el) {
     if (el.over === 'oldPos') {                         // ★批4 402:oldPos 轨迹环——len 拍逐 index 走 body
       const len = el.len ?? 10;                         // （原版 oldPos.Length=TrailCacheLength[型],NPCID.cs:4809）
+      const stride = el.stride ?? 1;                    // ★BJ503 519:`num126 += 3` 步进（index 0,3,6,…）
       const prevOld = ctx.oldIdx;
-      for (let i = 0; i < len; i++) {
+      for (let i = 0; i < len; i += stride) {
         ctx.oldIdx = i;
         ctx.brk = false; ctx.skip = false;
         for (const child of el.body) {
