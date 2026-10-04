@@ -2254,7 +2254,9 @@ export function registerModTile(d: Partial<TileDef> & { key: string }, stableId:
   TILE_DEFS.push({
     name: d.key, solid: false, platform: false, decor: false, framed: false,
     opacity: 0, pick: -1, axe: -1, mapColor: '#000', blend: false, ...d, id,
-    vanilla: { sheet: d.vanilla?.sheet ?? stableId, frame: d.vanilla?.frame ?? 'style',
+    // ★mod tile 恒等式:伪 sheet id≡stable id,无条件钉死(调用方传入的 sheet 忽略——
+    //   防 mod 数据误填原版 sheet 号造成渲染串表)
+    vanilla: { sheet: stableId, frame: d.vanilla?.frame ?? 'style',
                fw: d.vanilla?.fw, fh: d.vanilla?.fh },
   } as TileDef);
   TILE_BY_KEY[d.key] = id;
@@ -2270,4 +2272,38 @@ function ensureU16Capacity(prev: Uint16Array<ArrayBuffer>, minLen: number): Uint
   const next = new Uint16Array(minLen + 1);
   next.set(prev);
   return next;
+}
+
+/** ★worker 桥读面(2026-10-04):worker 上下文(无 def 本体)按 [internal,stable] 对补
+ *  双向映射——mod tile 不接此桥=读档解 RLE 后落空气(既有未知 stable→0 语义)。
+ *  主线程重复推送幂等(已注册且同值=skip)。供数链同 items.applyModItemIds。 */
+export function applyModTileStableMap(pairs: ReadonlyArray<readonly [number, number]>): void {
+  for (const [internal, stable] of pairs) {
+    if (!(stable >= 1030 && stable <= 2047) || !(internal >= 1)) continue;
+    if (TILE_DEFS[internal] !== undefined && TILE_STABLE_OF_INTERNAL[internal] === stable) continue;
+    if (internal >= TILE_STABLE_OF_INTERNAL.length) {
+      TILE_STABLE_OF_INTERNAL = ensureU16Capacity(TILE_STABLE_OF_INTERNAL, internal);
+    }
+    TILE_STABLE_OF_INTERNAL[internal] = stable;
+    TILE_INTERNAL_OF_STABLE[stable] = internal;
+  }
+}
+
+/** ★烘焙域桥读面(2026-10-04):BakeWorker 按 payload 顺序直落 mod tile def
+ *  (internal 下标对齐由「同序注册=同下标」保证——worker 与主线程模块初始化同源
+ *  同长,payload 保序)。幂等(已注册=skip)。与 applyModTileStableMap 双写不冲突
+ *  (同值幂等)。 */
+export function applyModTileDefs(
+  defs: ReadonlyArray<{ def: TileDef; internal: number; stable: number }>,
+): void {
+  for (const { def, internal, stable } of defs) {
+    if (internal < 1 || TILE_DEFS[internal] !== undefined) continue;
+    TILE_DEFS[internal] = def;
+    TILE_BY_KEY[def.key] = internal;
+    if (internal >= TILE_STABLE_OF_INTERNAL.length) {
+      TILE_STABLE_OF_INTERNAL = ensureU16Capacity(TILE_STABLE_OF_INTERNAL, internal);
+    }
+    TILE_STABLE_OF_INTERNAL[internal] = stable;
+    TILE_INTERNAL_OF_STABLE[stable] = internal;
+  }
 }

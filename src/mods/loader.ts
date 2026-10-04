@@ -4,15 +4,45 @@
 //   Phase2 applyModAssets(atlas) —— 贴图注入(atlas 构造后,mods/assets.ts)
 // 失败策略:单 mod 失败只登记 errors 不阻断启动(资源包同款"增强不是必需"哲学);
 // 零 mod 时本模块零副作用(不触任何数据表)。
-import type { ModLoadResult, ModPack, SaveModEntry } from './types';
+import type { ModLoadResult, ModPack } from './types';
 import { ModStore, type ModRow, type ModStorage } from './store';
 import { readModPack } from './pack';
 import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from './plan';
 import { applyRegistrationPlan } from './register';
-import { TILE_BY_KEY } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider } from './bridge';
+import { createModContext, type ModEntry } from './api';
+
+/** L2 入口装载:浏览器=blob URL 动态 import(求值后即 revoke)。
+ *  vite 生产构建对变量 URL 的动态 import 零转换(@vite-ignore)。
+ *  ★node(vite-node)会拦截 blob:/data: 动态 import(vitest 实测)——测试经
+ *  loadModsPhase1 的 opts.entryLoader 注入替代装载器。 */
+async function importModEntry(code: Uint8Array): Promise<unknown> {
+  if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+    && typeof window !== 'undefined') {
+    const url = URL.createObjectURL(new Blob([code.slice()], { type: 'text/javascript' }));
+    try {
+      return (await import(/* @vite-ignore */ url)).default;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  throw new Error('当前环境无 ESM 动态入口装载能力(浏览器外须经 opts.entryLoader 注入)');
+}
 
 export { ModStore } from './store';
 export type { ModRow } from './store';
+
+// 存档头/读档检测供数(装载成功后注册;未装载=null=存档键不落/读档检测跳过)
+setSaveModsProvider(() => currentResult?.loaded.length
+  ? currentResult.loaded.map(({ manifest, counts }) => ({
+      id: manifest.id, version: manifest.version,
+      items: counts.items, tiles: counts.tiles, npcs: counts.npcs,
+    }))
+  : null);
+setEnabledModsProvider(() => currentResult?.loaded.length
+  ? currentResult.loaded.map(({ manifest }) => manifest.id)
+  : null);
 
 /** 装载结果单例(UI 面板/资产阶段/存档头消费) */
 let currentResult: ModLoadResult | null = null;
@@ -22,18 +52,13 @@ const loadedPacks: ModPack[] = [];
 export function getModLoadResult(): ModLoadResult | null { return currentResult; }
 export function getLoadedPacks(): readonly ModPack[] { return loadedPacks; }
 
-/** 存档头 mod 清单(serialize SaveData.mods;无 mod 返回 undefined=键不写,零扰动) */
-export function saveModEntries(): SaveModEntry[] | undefined {
-  if (!currentResult || currentResult.loaded.length === 0) return undefined;
-  return currentResult.loaded.map(({ manifest, counts }) => ({
-    id: manifest.id, version: manifest.version,
-    items: counts.items, tiles: counts.tiles, npcs: counts.npcs,
-  }));
-}
-
-/** 装载器(测试可注入 storage) */
-export async function loadModsPhase1(storage?: ModStorage): Promise<ModLoadResult> {
+/** 装载器(测试可注入 storage 与 entry 装载器) */
+export async function loadModsPhase1(
+  storage?: ModStorage,
+  opts?: { entryLoader?: (code: Uint8Array) => Promise<unknown> },
+): Promise<ModLoadResult> {
   const result: ModLoadResult = { loaded: [], errors: [], allocation: null };
+  const entryLoader = opts?.entryLoader ?? importModEntry;
   setTileKeyProbe(() => TILE_BY_KEY);
   const store = new ModStore(storage);
   const rows = await store.listRows();
@@ -61,6 +86,40 @@ export async function loadModsPhase1(storage?: ModStorage): Promise<ModLoadResul
       applyRegistrationPlan(plan);
       result.allocation = plan.allocation;
       loadedPacks.push(...plan.mods.map((m) => m.pack));
+      // ---- L2 脚本相位(2026-10-04,P1):entry.js 在 L1 内容注册后逐 mod 执行
+      //      (拓扑序;键解析走分配表,跨 mod 顺序=依赖序)。行为钩挂进 hooks 注册表;
+      //      内容一律走 content/*.json 声明面(确定性 id 不受脚本影响)。装载失败
+      //      登记 errors 不阻断(其余 mod/L1 内容已注册保留)。 ----
+      for (const { manifest, pack } of plan.mods) {
+        const code = pack.files.get('scripts/main.js');
+        if (!code) continue;
+        try {
+          const entry = await entryLoader(code);
+          if (typeof entry !== 'function') {
+            throw new Error('scripts/main.js default export 须为函数 main(sw)');
+          }
+          (entry as ModEntry)(createModContext(manifest.id, plan.allocation));
+        } catch (e) {
+          result.errors.push({ modId: manifest.id, error: `脚本装载失败: ${(e as Error)?.message ?? String(e)}` });
+        }
+      }
+      // ★worker 桥供数注册(2026-10-04):SaveClient/WorldGenClient 每次 worker(重)建
+      //  时拉取推送——mod tile internal id 经 TILE_BY_KEY 反查(注册后即落表);
+      //  烘焙域另带 def 本体(保序直落,BakeProtocol ship 通道)
+      setModBridgeProvider(() => ({
+        itemStableIds: [...plan.allocation.items.values()],
+        tilePairs: plan.tileSpecs
+          .map((t) => [TILE_BY_KEY[t.fullKey], t.stableId] as [number, number])
+          .filter(([internal]) => internal !== undefined && internal > 0),
+        modTileDefs: plan.tileSpecs
+          .map((t) => {
+            const internal = TILE_BY_KEY[t.fullKey];
+            return internal !== undefined && internal > 0
+              ? { def: TILE_DEFS[internal]!, internal, stable: t.stableId }
+              : null;
+          })
+          .filter((e): e is { def: (typeof TILE_DEFS)[number]; internal: number; stable: number } => e !== null),
+      }));
       for (const { manifest } of plan.mods) {
         result.loaded.push({
           manifest,

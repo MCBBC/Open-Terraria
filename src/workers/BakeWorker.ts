@@ -21,7 +21,7 @@ import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 
 import { SpriteAtlas, type DrawRect } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
-import { TILE_BY_KEY } from '../data/tiles';
+import { TILE_BY_KEY, applyModTileDefs } from '../data/tiles';
 import { bakeChunkIntoEnv, type ChunkBakeEnv, type SheetEntryLike } from '../render/ChunkBake';
 import { tileAnim } from '../render/TileAnim';
 import { renderEnv, plates428Pressed } from '../render/VanillaTiler';
@@ -84,6 +84,8 @@ self.onmessage = (ev: MessageEvent<BakeWorkerRequest>) => {
       return;
     }
     if (msg.type === 'ship') {
+      // ★mod 桥(2026-10-04):mod tile def 先于贴图落表(保序直落,幂等)
+      if (msg.modTiles?.length) applyModTileDefs(msg.modTiles);
       for (const { file, bmp } of msg.vimages) atlas.vimages.set(file, bmp);
       for (const { file, bmp } of msg.maples) atlas.images.set(file, bmp);
       for (const s of msg.sheets) {

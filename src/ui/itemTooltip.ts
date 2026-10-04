@@ -93,6 +93,10 @@ export interface TooltipContext {
    *  （:21473-21517）后、研究行（:21521）前;旧实现置行族头部与原版不符。门由 UI 侧
    *  算好传入（装备/染料域 + 无共享来源 + 未收藏 + ShowLoadoutShareHint 持久化） */
   loadoutShareHint?: boolean;
+  /** ★BJ507 B2：图鉴掉落行 hover 的 BestiaryNotes 行族（Main.cs:21539-21547 逐行
+   *  追加,默认白;原版载体 = Item.BestiaryNotes,图鉴掉落行 SetBestiaryNotesOnItemCache
+   *  写入掉落条件描述）。行序 = 研究行后、商店价格行前 */
+  bestiaryNotes?: string[];
 }
 export type TooltipSlot = { id: number; stack: number; prefix?: number; favorited?: boolean };
 
@@ -578,6 +582,15 @@ export function assembleTooltipLines(
     out.push({ text: T('UI.ItemLoadoutShareHint'), color: 'rgba(255,231,69,0.75)', tag: 'loadouthint' });
   }
   if (body.researchLine) out.push(body.researchLine);
+  // ★BJ507 B2：BestiaryNotes 逐行（Main.cs:21539-21547——item.BestiaryNotes 非空白
+  //  时按 '\n' 拆行追加，lineColors 未设=默认白）。原版写入点 = 图鉴掉落行
+  //  UIBestiaryInfoItemLine.SetBestiaryNotesOnItemCache（掉落条件 GetConditionDescription
+  //  逐条 join '\n'）；行序位 = 研究行后、商店价格行前（:21539 在 GetLinesInfo 尾段/
+  //  AddShopLines 之前）。旧装配面注释标「BestiaryNotes(略)」=无消费方——图鉴掉落行
+  //  hover tooltip（BJ507）为首个真实消费面
+  if (ctx.bestiaryNotes?.length) {
+    for (const ln of ctx.bestiaryNotes) out.push({ text: ln, tag: 'bestiarynote' });
+  }
   // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；
   //  价格 0 → tip[51] 无价值 灰 120,120,120）

@@ -36,14 +36,16 @@ const main = async () => {
       const cr = (typeof inp.canvasRectLeft === 'number') ? inp : null;
       const cv = g.renderer?.canvas ?? document.querySelectorAll('canvas')[1];
       const rect = cv.getBoundingClientRect();
-      // 参照实现(旧算法逐行复刻;共享同一快照状态)
+      // 参照实现(与 Game.inpOverDomUi 同算法逐行复刻,仅无缓存;共享同一快照状态)
+      // ★EPF773(2026-10-04):随主实现同步——rect 预检四周扩 1px(Chromium 命中测试
+      //  像素对齐外扩,gBCR 浮点框欠 ~1px;见 Game.ts 预检注)
       const ref = (cx, cy) => {
         const rects = g['_domUiRects'];
         let near = false;
         if (Array.isArray(rects)) {
           for (let i = 0; i < rects.length; i++) {
             const q = rects[i];
-            if (cx >= q.l && cx <= q.r && cy >= q.t && cy <= q.b) { near = true; break; }
+            if (cx >= q.l - 1 && cx <= q.r + 1 && cy >= q.t - 1 && cy <= q.b + 1) { near = true; break; }
           }
         }
         if (!near) return false;

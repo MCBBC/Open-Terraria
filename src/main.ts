@@ -282,6 +282,18 @@ async function loadAssets() {
     }
     const w = window as unknown as { __swRemaster?: { runtime: RemasterRuntime; manager: RemasterManager } };
     w.__swRemaster = { runtime: remasterRuntime, manager: remasterManager }; // 调试/探针/面板句柄
+    // ★mod 贴图注入(2026-10-04):atlas 就绪后、任何 chunk 烘焙前(vimages 键注入,
+    //   remaster 同款;失败不阻断启动)。带超时护栏(mod 多/图大不卡启动幕)
+    try {
+      const { applyModAssets } = await import('./mods/assets');
+      await Promise.race([
+        applyModAssets(atlas),
+        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+      ]);
+      (window as unknown as { __swModsLoaded?: boolean }).__swModsLoaded = true;
+    } catch (err) {
+      console.warn('[mods] 贴图注入失败(已跳过):', err);
+    }
   }
 }
 
@@ -853,6 +865,27 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // options/语言先行（音频门文案需要 Lang；mainFlow 内 options.load() 幂等）
   await options.load();
   await Lang.init(options.data.lang);
+  // ★mod 装载（2026-10-04,docs/mod-loader-design.md §4）：内容注册+id 分配必须在
+  //   一切世界/UI 消费之前；贴图注入在 loadAssets 内 atlas 构造后（applyModAssets）。
+  //   失败只告警不阻断启动（资源包同款"增强不是必需"哲学；零 mod=零副作用）
+  try {
+    const { loadModsPhase1, getModLoadResult } = await import('./mods/loader');
+    await loadModsPhase1();
+    // ★mod 调试句柄（2026-10-04;__swAtlas/__swResourcePacks 同族先例）：
+    //   result()=装载结果;install(bytes)=装 .swmod zip 字节(重载生效)。探针用
+    ;(window as unknown as { __swMods?: unknown }).__swMods = {
+      result: () => getModLoadResult(),
+      install: async (bytes: Uint8Array) => {
+        const [{ ModStore }, { readModPack }] = await Promise.all([
+          import('./mods/store'), import('./mods/pack'),
+        ]);
+        const pack = readModPack(bytes);
+        return new ModStore().install(pack.manifest, bytes);
+      },
+    };
+  } catch (err) {
+    console.warn('[mods] 装载失败(已跳过):', err);
+  }
   const bootParams0 = new URLSearchParams(location.search);
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
   if (bypassBoot) removeStaticBoot();   // 旁路无启动幕,回调入口即摘(仅损失数 ms 黑帧差)

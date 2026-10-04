@@ -120,9 +120,9 @@ describe('SW-RB14d B：玩家落速字段终值 10.01（:24637;湿档 3/7/6/2 �
 describe('SW-RB14d D：图鉴登记面/选中面（FX37 F1/F2/F3/F4/F5/F7/F8）', () => {
   const row = (creditId: string, npcId: number, state: UnlockState): BestiaryRow => {
     const entry = bestiaryEntries().find((e) => e.creditId === creditId) ?? {
-      creditId, kind: 'enemy' as const, sources: [], goldGate: false,
+      id: 0, creditId, kind: 'enemy' as const, sources: [], goldGate: false,
     };
-    return { entry, npcId, state, name: 'x', kills: 0 };
+    return { entry, entryId: entry.id, npcId, state, name: 'x', kills: 0 };
   };
   it('D1 sweep 反查 first-wins（≡旧 working.find;旧 Map last-wins=变异红）', () => {
     const rows = [row('Zombie', 3, UnlockState.Stats), row('Zombie', 4, UnlockState.Stats)];
@@ -154,14 +154,16 @@ describe('SW-RB14d D：图鉴登记面/选中面（FX37 F1/F2/F3/F4/F5/F7/F8）'
     const s = SRC('ui/BestiaryPanel.ts');
     expect(s).toContain('bestiaryRows(this.flow.getTracker()).find((w) => w.entry.creditId === r.entry.creditId) ?? r');
   });
-  it('D7 源锁：选中标记全格（fillGrid 同式;旧 break 只亮首格）', () => {
+  it('D7 源锁：选中持久视觉拆除（★BJ506 定谳：原版 _selectedEntryButton 写后不读、网格无选中视觉——RB14d F4"全格标记"面随 .sel 外描一并退役；改锁无选中面 + 选中只填详情栏）', () => {
     const s = SRC('ui/BestiaryPanel.ts');
-    expect(s).toContain("if ((cell as HTMLElement).dataset.credit === credit) cell.classList.add('sel');\n    }");
-    expect(s).not.toContain("dataset.credit === credit) { cell.classList.add('sel'); break; }");
+    expect(s).not.toContain('.sw-bst-cell.sel');
+    expect(s).toContain('private selectRow(r: BestiaryRow): void');
+    expect(s).toContain('this.selected = fresh;');
   });
-  it('D8 源锁：重建即清选中（FillBestiarySpaceWithEntries→DeselectEntryButton :340-347）', () => {
+  it('D8 源锁：重建即清选中（FillBestiarySpaceWithEntries→DeselectEntryButton :340-347；★BJ506 重排后锚=refreshNow 头部序词复位——selectSeq>seq 的排队后选中保留）', () => {
     const s = SRC('ui/BestiaryPanel.ts');
-    expect(s).toContain('    this.selected = null;\n    const rows = bestiaryRows(this.flow.getTracker());');
+    const refreshNow = s.slice(s.indexOf('private refreshNow(seq'), s.indexOf('private progressPercent()'));
+    expect(refreshNow).toContain('this.selected = this.selectSeq > seq ? this.selected : null;');
   });
 });
 

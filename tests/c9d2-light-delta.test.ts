@@ -11,7 +11,7 @@ import {
   LIGHT_DELTA_JUMP_TILES, LIGHT_DELTA_LOG_CAP, LIGHT_DELTA_VERSION,
   type TileSlicePack,
 } from '../src/lighting/LightWorkerProtocol';
-import { LightWorkerLink } from '../src/lighting/LightWorkerLink';
+import { LightWorkerLink, lightWorkerStats } from '../src/lighting/LightWorkerLink';
 
 const W = 48, H = 40;
 
@@ -210,5 +210,76 @@ describe('C9d2 ④ 解码器防御面 + link plan 接线', () => {
     expect(st.tileWriteLog).not.toBeNull();
     st.setTile(3, 3, 7);
     expect(st.tileWriteLog!.length).toBe(1);
+  });
+});
+
+// ★transferable 化（2026-10-04）:全量锚帧 13 通道 transfer 发送（结构克隆退役）+
+// 解码器退役缓冲 'pool' 回池闭环。锁三面:
+//   ① 解码器退役队列（被换下旧 spare / 失配旧影子;drain 清空幂等）;
+//   ② link 'pool' 回传 → 池命中（poolHits++,同引用弹出=稳态零重分配）;
+//   ③ 编码器影子=纯几何记账（通道 detach 后 plan/编码行为不变——主线程 send 后
+//      弃权内容面是 transfer 的前提不变式）。
+describe('C9d2 ⑤ transferable 回池闭环', () => {
+  const KEYS = ['type', 'flags', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire', 'paint', 'paintWall', 'coat'] as const;
+  const fullMsg = (t: TileSlicePack): Parameters<LightDeltaDecoder['decode']>[0] =>
+    ({ op: 'frame', seq: 0, enc: 'full', rx: 0, ry: 0, rw: 0, rh: 0, tiles: t } as never);
+
+  it('① 解码器退役队列:首锚无退役;第 3 锚起旧 spare 退役;drain 清空', () => {
+    const dec = new LightDeltaDecoder();
+    const p1 = allocSliceChannels(40, 30), p2 = allocSliceChannels(40, 30), p3 = allocSliceChannels(40, 30);
+    dec.decode(fullMsg(p1));
+    expect(dec.drainRetired()).toEqual([]);              // 首锚:无退役
+    dec.decode(fullMsg(p2));
+    expect(dec.drainRetired()).toEqual([]);              // p1 → spare(下帧解码目标),无退役
+    dec.decode(fullMsg(p3));
+    const r = dec.drainRetired();
+    expect(r.length).toBe(1);
+    expect(r[0]).toBe(p1);                               // 旧 spare 退役（非 store 内容）
+    expect(dec.drainRetired()).toEqual([]);              // drain 幂等清空
+    // 尺寸失配 'full':旧影子同帧退役
+    const q = allocSliceChannels(20, 14);
+    const old = allocSliceChannels(40, 30);
+    dec.decode(fullMsg(old));
+    dec.decode(fullMsg(q));                              // 40×30 影子 ≠ 20×14 收包
+    const r2 = dec.drainRetired();
+    expect(r2.some((t) => t === old)).toBe(true);
+  });
+
+  it('② link 池闭环:worker 回传包入池 → buildSlice 同引用弹出命中（poolHits++）', () => {
+    const st = buildStore();
+    const link = new LightWorkerLink(new LightDeltaEncoder());
+    link.bindStore(st);
+    const s0 = lightWorkerStats();
+    const a = link.buildSlice(st, 14, 12, 20, 14);       // 池空 → miss
+    const s1 = lightWorkerStats();
+    expect(s1.poolMisses - s0.poolMisses).toBe(1);
+    // 模拟 worker 'pool' 回传（退役包/legacy 直回统一走 recycleSlice）
+    (link as unknown as { recycleSlice(t: TileSlicePack): void }).recycleSlice(a);
+    const b = link.buildSlice(st, 14, 12, 20, 14);       // 命中:同引用弹出
+    const s2 = lightWorkerStats();
+    expect(b).toBe(a);
+    expect(s2.poolHits - s1.poolHits).toBe(1);
+    expect(s2.poolMisses - s1.poolMisses).toBe(0);
+  });
+
+  it('③ 编码器影子=纯几何:通道 detach（transfer 语义）后 plan/编码不变', () => {
+    const st = new TileStore(120, 120);                  // 大世界:容纳同尺寸窗平移
+    const enc = new LightDeltaEncoder();
+    const link = new LightWorkerLink(enc);
+    link.bindStore(st);
+    const t0 = link.buildSlice(st, 30, 30, 20, 14);
+    enc.adoptFull(t0);
+    // 模拟 postMessage(transfer):通道 buffer 移交 worker → 主线程视图 detach(长度 0)
+    for (const k of KEYS) {
+      const Ctor = (t0[k] as Uint16Array).constructor as new (n: number) => Uint16Array;
+      (t0 as unknown as Record<string, Uint16Array | Uint8Array>)[k] = new Ctor(0);
+    }
+    expect(enc.hasShadow(t0.sw, t0.sh)).toBe(true);
+    // 平移 4 格同尺寸窗 → 不触发全量（几何记账唯一依据）;空日志 → 暴露带跨度照常发射
+    const g1 = sliceGeometry(st, 34, 30, 20, 14);
+    expect(g1.sw).toBe(t0.sw); expect(g1.sh).toBe(t0.sh);
+    expect(enc.planFull(g1, 0, false)).toBe(false);
+    const out = enc.encodeDelta(st, g1, []);
+    expect(out.meta[0]).toBeGreaterThan(0);              // 暴露带跨度发射（值读世界真值,不读影子）
   });
 });

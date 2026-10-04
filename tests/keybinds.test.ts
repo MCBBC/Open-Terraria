@@ -10,8 +10,8 @@ import {
 import { options } from '../src/core/Options';
 
 describe('M5 键位绑定表', () => {
-  it('31 action 落地：移动 5 + 功能 8 + 热键栏 12 + 地图 6 = 31（另有视角 2/配装 5/杂项 2，全表 40）', () => {
-    expect(KEYBIND_ACTIONS.length).toBe(40);
+  it('31 action 落地：移动 5 + 功能 8 + 热键栏 12 + 地图 6 = 31（另有视角 2/配装 5/杂项 2/Dash 1，全表 41）', () => {
+    expect(KEYBIND_ACTIONS.length).toBe(41);
     const core31 = [
       'Up', 'Down', 'Left', 'Right', 'Jump',
       'Inventory', 'Grapple', 'SmartSelect', 'SmartCursor', 'QuickMount',

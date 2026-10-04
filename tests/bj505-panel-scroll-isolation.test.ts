@@ -141,9 +141,11 @@ describe('BJ505 结构面', () => {
     expect(body).not.toContain('instanceof Element');   // node 测试桩环境兼容锁
   });
 
-  it('面板自滚面在(独占=面板消费+游戏域让路,双向各自成立)', () => {
-    expect(bstSrc).toMatch(/gridWrap\.addEventListener\('wheel', this\.wheelHandler, \{ passive: false \}\)/);   // 图鉴换页滚
-    expect(achSrc).toMatch(/\.sw-ach-list \{ overflow-y:auto/);                                                  // 成就原生滚
+  it('面板自滚面在(独占=面板消费+游戏域让路,双向各自成立)（★BJ506 改判：图鉴滚轮面由自创"换页滚"改判为原版 ScrollWheel(:850-854)=详情栏滚动——面板仍独占 wheel+preventDefault，隔离意图不变）', () => {
+    expect(bstSrc).toMatch(/this\.panel\.addEventListener\('wheel', \(e\) => \{/);   // 图鉴滚轮 = 详情栏滚
+    expect(bstSrc).toMatch(/\{ passive: false \}\);/);                                // 面板消费（不透游戏域）
+    expect(bstSrc).toMatch(/infoEl\.scrollTop \+= e\.deltaY/);                        // 原版 UpdateScrollbar 语义
+    expect(achSrc).toMatch(/\.sw-ach-list \{ overflow-y:auto/);                       // 成就原生滚
   });
 
   it('两面板关闭路径=DOM remove(④恢复语义的机制锚)', () => {

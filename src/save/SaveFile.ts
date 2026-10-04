@@ -6,6 +6,7 @@ import { World as WorldClass, CHEST_MAX_ITEMS } from '../world/World';
 import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
+import { getSaveModEntries, getEnabledModIds } from '../mods/bridge';
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
@@ -122,6 +123,8 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     wldSnap: world.wldSnap,
     teSnap: world.teSnap,
     townRooms: world.townRooms,
+    // ★mod 清单（2026-10-04 P1）：三处 meta 装配之一（主线程同步回退路径;BJ71 防漏喂）
+    mods: getSaveModEntries() ?? undefined,
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
@@ -256,6 +259,8 @@ export function buildSaveParts(world: World): {
     wldSnap: world.wldSnap,
     teSnap: world.teSnap,
     townRooms: world.townRooms,
+    // ★mod 清单（2026-10-04 P1）：三处 meta 装配之一（服务器/件路径;BJ71 防漏喂）
+    mods: getSaveModEntries() ?? undefined,
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
   };
@@ -321,6 +326,16 @@ export function playerFromDiskForm(p: SaveData['player']): SaveData['player'] {
 }
 
 export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => void): { world: World; player: SaveData['player']; data: SaveData } {
+  // ★mod 清单缺失检测（2026-10-04 P1）：存档记录 mod vs 当前启用集对账。缺失=
+  //  mod 内容读档静默降级（stable id ?? 0 兜底语义）——只告警不阻断（占位物语义
+  //  的告警面;显式占位物显示=P2）。worker 态 enabled=null=跳过检测
+  const enabledModIds = getEnabledModIds();
+  if (data.mods?.length && enabledModIds) {
+    const missing = data.mods.filter((m) => !enabledModIds.includes(m.id));
+    if (missing.length > 0) {
+      console.warn(`[mods] 存档依赖缺失 mod（内容将静默降级）: ${missing.map((m) => `${m.id}@${m.version}`).join(', ')}`);
+    }
+  }
   // ★二进制兼容(2026-09-06):binary 存档的通道以 Uint8Array 直出(免 base64 解码),
   //  旧 JSON 档的通道以 base64 string 存放(走 b64ToBytes 解码)。统一由此入口转换。
   const asBytes = (v: string | Uint8Array | undefined): Uint8Array =>

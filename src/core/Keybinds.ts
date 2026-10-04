@@ -1,7 +1,11 @@
-// 键位绑定表（M5）：Terraria.GameInput/PlayerInput.cs:214 KnownTriggers 的键盘子集。
+// 键位绑定表（M5）：Terraria.GameInput/PlayerInput.cs:229-237 KnownTriggers 的键盘子集。
 // 手柄 Trigger（DpadRadial1-4/DpadSnap1-4/RadialHotbar/RadialQuickbar/LockOn/
-// MenuUp-Right/ArmorSetAbility/Dash）与鼠标键（MouseLeft/MouseRight=Input 硬编码）
+// MenuUp-Right/ArmorSetAbility）与鼠标键（MouseLeft/MouseRight=Input 硬编码）
 // Web 版不做（声明）；Throw 原版 1.4 键盘档无默认绑定且行为已由背包拖出承担，不入表。
+// ★BJ508（2026-10-04）：Dash 补入——原版键盘控制页本就有 Dash 可绑行
+//（UIManageControls.AssembleBindPanels :277-281 键盘页序列 ToggleCameraMode→
+// ArmorSetAbility→Dash→sp20），仅缺省无键（PlayerInput.cs:2069-2108 Redigit
+// Keyboard 档无 Dash 条目,重绑面板自绑）；旧头注「手柄 Trigger 不做」含 Dash 系误判。
 //
 // 默认值 = 原版 Redigit 预设 Keyboard 档（PlayerInput.cs:2062-2140；SW-BN2 2026-09-07
 // 起逐项对齐,含 Inventory=Escape / Grapple=E 回原版——旧默认迁出卫门见
@@ -35,9 +39,11 @@ export type KeybindAction =
   | 'MapFull' | 'MapStyle' | 'MapZoomIn' | 'MapZoomOut' | 'MapAlphaUp' | 'MapAlphaDown'
   | 'ViewZoomIn' | 'ViewZoomOut'
   | 'Loadout1' | 'Loadout2' | 'Loadout3' | 'PreviousLoadout' | 'NextLoadout'
-  | 'ToggleCreativeMenu' | 'ToggleCameraMode';
+  | 'ToggleCreativeMenu' | 'ToggleCameraMode' | 'Dash';
 
-/** 设置面板"控制"页行序（原版 UIManageControls 分组序：移动→功能→热键栏→地图→视角→配装→杂项） */
+/** 设置面板"控制"页行序（原版 UIManageControls 分组序：移动→功能→热键栏→地图→视角→配装→杂项；
+ *  ★BJ508：Dash 尾位 = 原版键盘页 :277-281 序 ToggleCameraMode→ArmorSetAbility→Dash——
+ *  ArmorSetAbility 手柄 trigger 本仓不入表,Dash 顶其尾位） */
 export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
   'Up', 'Down', 'Left', 'Right', 'Jump',
   'Inventory', 'Grapple', 'SmartSelect', 'SmartCursor', 'QuickMount',
@@ -47,7 +53,7 @@ export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
   'MapFull', 'MapStyle', 'MapZoomIn', 'MapZoomOut', 'MapAlphaUp', 'MapAlphaDown',
   'ViewZoomIn', 'ViewZoomOut',
   'Loadout1', 'Loadout2', 'Loadout3', 'PreviousLoadout', 'NextLoadout',
-  'ToggleCreativeMenu', 'ToggleCameraMode',
+  'ToggleCreativeMenu', 'ToggleCameraMode', 'Dash',
 ];
 
 /**
@@ -106,6 +112,10 @@ export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
   NextLoadout: [],
   ToggleCreativeMenu: ['KeyC'],
   ToggleCameraMode: ['F4'],
+  // ★BJ508：Dash 缺省空表 = 原版 Keyboard 档不绑（PlayerInput.cs:2069-2108 Redigit
+  //   Keyboard 无 Dash 条目,四预设全输入档均无 :2062-2450）——玩家在控制页自绑后
+  //   经 controlDash/releaseDash 键面参与冲刺（DoCommonDashHandle :21738-21747）
+  Dash: [],
 };
 
 const ACTION_SET: ReadonlySet<string> = new Set(KEYBIND_ACTIONS);
@@ -254,6 +264,8 @@ export function keybindActionLabel(action: KeybindAction): string {
     Loadout1: 'UI.Loadout1', Loadout2: 'UI.Loadout2', Loadout3: 'UI.Loadout3',
     NextLoadout: 'UI.NextLoadout', PreviousLoadout: 'UI.PreviousLoadout',
     ToggleCameraMode: 'UI.ToggleCameraMode',
+    Dash: 'UI.Dash',   // ★BJ508：原版键位名官译（en "Dash"/zh-Hans "冲刺",Terraria
+                       //   Localization.Content.*.json:419 UI 段——l10n-custom 已补 12 语言）
   };
   if (menuIdx[action] != null) return Lang.menu(menuIdx[action]!);
   if (uiKey[action]) return Lang.text(uiKey[action]!);

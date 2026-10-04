@@ -3279,8 +3279,8 @@ export class UI {
   private buildTooltipHtml(
     s: { id: number; stack: number; favorited?: boolean; prefix?: number },
     where: SlotWhere, i: number,
-    /** override 透传（本装配面只消费 shopCell;slot/anchor 由调用方定位面持有） */
-    override?: { shopCell?: { price: number; medal?: number } },
+    /** override 透传（本装配面消费 shopCell + bestiaryNotes;slot/anchor 由调用方定位面持有） */
+    override?: { shopCell?: { price: number; medal?: number }; bestiaryNotes?: string[] },
   ): string {
     const def = ITEM_DEFS[s.id];
     // ★SW-BJ116-b（2026-09-18,债刀-3）：稀有度判定链单源委托 tooltipRareOf
@@ -3380,6 +3380,10 @@ export class UI {
       //  染料槽 context 12（:42233）不在置位 switch 内。旧 dye/miscDye 臂=BJ224 登记
       //  债的伪锚定（tip0/tip1 三版反编译零消费=死键）,定谳后摘除）
       socialSlot: where === 'armor' && i >= 10,
+      // ★BJ507 B2：图鉴掉落行 hover 的 BestiaryNotes 行族（原版 = HoverItem 载体上的
+      //  Item.BestiaryNotes,Main.cs:21539-21547 渲染期逐行追加;override 只在图鉴
+      //  悬停桥传入,其余消费面 undefined=零变化）
+      bestiaryNotes: override?.bestiaryNotes,
       // ★BJ224 套装奖励行门数据（Main.cs:21473-21517）：worn = 悬停位 ∈ 功能甲槽
       //  armor[0-2]（ItemSlot.MouseHover context 8 → HoverItem.wornArmor=true,
       //  ItemSlot.cs:3190-3193;时装甲 10-12 = context 9 social、背包/箱/时装槽=无旗）
@@ -3464,8 +3468,9 @@ export class UI {
 
   /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
    *  合成槽内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素；shopCell = 商店
-   *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价） */
-  private showTooltipFor(i: number, where: SlotWhere, override?: { slot?: { id: number; stack: number; prefix?: number }; anchor?: HTMLElement; shopCell?: { price: number; medal?: number } }) {
+   *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价）；
+   *  bestiaryNotes = 图鉴掉落行悬停的条件描述行族（★BJ507 B2） */
+  private showTooltipFor(i: number, where: SlotWhere, override?: { slot?: { id: number; stack: number; prefix?: number }; anchor?: HTMLElement; shopCell?: { price: number; medal?: number }; bestiaryNotes?: string[] }) {
     let s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
     // LoadoutShare 空槽悬停（ItemSlot.MouseHover IS57:3174-3178）：装备/染料格空槽
     // 悬停时共享件代打（GetSharedLoadoutItem → GetEffectiveArmor/Dye）——tooltip
@@ -3503,6 +3508,25 @@ export class UI {
       this.tooltip.style.top = `${top}px`;
     }
     this.applyTooltipBg();   // ★终布局后量测烘底（原在定位前 = 旧约束宽）
+  }
+
+  /** ★BJ507 B2 图鉴掉落行悬停桥（Main.HoverItem 面 1:1）：原版
+   *  UIBestiaryInfoItemLine.DrawMouseOver（UIBestiaryInfoItemLine.cs:130-134）=
+   *  `Main.HoverItem = _infoDisplayItem; Main.instance.MouseText("", 0, 0);
+   *  Main.mouseText = true;` → MouseText 走 item tooltip 全载荷管线
+   *  （MouseTextDrawItemTooltip）。_infoDisplayItem = SetDefaults(itemId) 的
+   *  fresh item（无词缀/stack 1/未收藏）→ 本仓与道具搜索行悬停同形（非槽位
+   *  锚点 slot 合成 + anchor 定位,showTooltipFor :4016 先例）；notes = 掉落
+   *  条件描述行族（SetBestiaryNotesOnItemCache → Item.BestiaryNotes）。
+   *  消费方 = BestiaryPanel（flow 桥,mainFlow openBestiary 接线） */
+  showFloatingItemTooltip(itemId: number, anchor: HTMLElement, notes?: string[]): void {
+    this.showTooltipFor(itemId, 'inv', { slot: { id: itemId, stack: 1 }, anchor, bestiaryNotes: notes });
+  }
+
+  /** ★BJ507 B2 悬停离开（原版 mouseText 管线每帧重算,离开=HoverItem 空气自然消失;
+   *  DOM 遗留态须显式撤泡） */
+  hideFloatingItemTooltip(): void {
+    this.tooltip.style.display = 'none';
   }
 
   /** 商店悬停上下文（MouseText_DrawItemTooltip_AddShopLines Main.cs:20632-20402，

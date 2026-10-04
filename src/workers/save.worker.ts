@@ -7,6 +7,8 @@
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★process 兜底首导入(见 procShim.ts;2026-09-02 worldGen 同款扩面)
 import { serializeSave } from '../save/serialize';
+import { applyModItemIds } from '../data/items';
+import { applyModTileStableMap } from '../data/tiles';
 import type { SaveData, SaveMeta, SaveStoreView } from '../save/serialize';
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
@@ -44,10 +46,19 @@ type SaveWorkerRequest = SaveRequest
   | { type: 'inspectSave'; id: number; text: string }
   // ★导出 worker 化(2026-09-07 用户报「导出卡一下主线程」):存档 json 的
   //  JSON.parse(大档数十 ms)+ 全图 tile 编码全搬本线程;产物 ArrayBuffer transfer
-  | { type: 'exportWld'; id: number; json: string };
+  | { type: 'exportWld'; id: number; json: string }
+  // ★mod 桥(2026-10-04,fire-and-forget 幂等):mod 物品/tile 稳定 id 增量——
+  //  序列化(RLE 稳定 id 翻译)在本线程表上完成,不接桥=mod 内容存档静默归 0
+  | { type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]> } };
 
 self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   const req = e.data;
+  // ★mod 桥(2026-10-04):先于其余分支(无 pending 语义,直接消费)
+  if (req.type === 'applyModIds') {
+    applyModItemIds(req.payload.itemStableIds);
+    applyModTileStableMap(req.payload.tilePairs);
+    return;
+  }
   // ---- 导入:.wld → SaveData(json) + 槽位元数据（世界列表「导入」,不进世界）----
   if (req.type === 'importWld') {
     try {

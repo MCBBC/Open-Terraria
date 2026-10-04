@@ -122,6 +122,10 @@ type Source =
   | { t: 'chat'; credit: string };
 
 export interface BestiaryEntryDef {
+  /** 条目自身 netId（★BJ506：NPCNetIdBestiaryInfoElement.NetId——图鉴编号
+   *  BestiaryDisplayIndex = NpcBestiarySortingId[本 id]；重复 creditId 归并行
+   *  （Nymph×2/Scarecrow1×10）各自持独立 id → 每行编号唯一，与原版一致） */
+  id: number;
   creditId: string;
   kind: 'enemy' | 'town' | 'critter';
   sources: Source[];
@@ -188,7 +192,7 @@ export function bestiaryEntries(): BestiaryEntryDef[] {
     } else {
       sources = [killSource(id, isQuick(id))];
     }
-    out.push({ creditId: bestiaryCreditId(id), kind, sources, goldGate });
+    out.push({ id, creditId: bestiaryCreditId(id), kind, sources, goldGate });
   }
   entryCache = out;
   return out;

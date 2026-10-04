@@ -893,6 +893,12 @@ export class SettingsPanel {
       // ---- 键位重映射（M5：UIKeybindingListItem 模式——点击监听下一键；
       //      已绑定键反选解绑；Esc 取消；↺ 单项回默认）----
       for (const a of KEYBIND_ACTIONS) this.content.append(this.keybindRow(a));
+      // ★BJ508 双击冲刺档（原版 UIManageControls.cs:653-663 case "sp20"——键盘控制页
+      //   序在 Dash 绑定行后一位；切 DashControl AllowDoubleTap↔OnlyThroughHotkeys。
+      //   消费：DoCommonDashHandle :21737 flag 只门双击支,Quick Dash 键面不受门）
+      this.toggle(Lang.text('UI.DoubleTapDash'),
+        () => options.data.doubleTapDash,
+        (v) => { void options.set('doubleTapDash', v); });
       const btns = document.createElement('div');
       btns.className = 'sw-set-btns';
       const b = document.createElement('button');

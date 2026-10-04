@@ -179,6 +179,16 @@ export interface OptionsData {
    *  三档走 LegacyLighting 引擎（Lighting.cs:40-54）——legacy 引擎族未移植，
    *  本仓三档暂与 Color 同渲（依赖：照明引擎族移植，登记债） */
   lightMode: 'color' | 'white' | 'retro' | 'trippy';
+  // ---- ★BJ508 2026-10-04 冲刺控制档（Player.Settings.DashControl）----
+  /** 双击冲刺（Player.Settings.DashControl == DashPreference.AllowDoubleTap；
+   *  枚举 Player.cs:347-351 AllowDoubleTap/OnlyThroughHotkeys，静态缺省
+   *  AllowDoubleTap = Player.cs:365；config.json 键 "DashControlMode"
+   *  Main.cs:4294/:4639；设置页开关 = UIManageControls.cs:653-663 case "sp20"
+   *  键盘控制页 Dash 行后一位，文案 UI.DoubleTapDash）。消费：DoCommonDashHandle
+   *  :21737 `flag = DashControl == AllowDoubleTap` ——只门双击支（:21749/:21764
+   *  `(controlRight && releaseRight) & flag`），Quick Dash 键面（num 支）无此门。
+   *  true=AllowDoubleTap（缺省）/false=OnlyThroughHotkeys（只认热键） */
+  doubleTapDash: boolean;
   // ---- S 级：自动保存/自动暂停（IngameOptions.cs:619/628）----
   /** 自动保存（Main.autoSave，Main.cs:1196 默认 true）——DoUpdate_AutoSave :19589
    *  墙钟 600000ms 触发 WorldGen.saveAndPlay */
@@ -385,6 +395,7 @@ export class OptionsStore {
     manualSeen: false,                      // 说明书未读=红点气泡闪烁
     manualHidden: false,                    // 说明书按钮显示中
     showLoadoutShareHint: true,             // Player.Settings.ShowLoadoutShareHint 默认 true（Player.cs:367）
+    doubleTapDash: true,                    // ★BJ508 DashControl 缺省 AllowDoubleTap（Player.cs:365）
     // 触屏组(mobile-adaptation-plan 模块⑤;SC 默认开=2026-08-28 用户定案)
     touchJoystickFloat: false,              // 固定罗盘摇杆=2026-08-29 官方截图定案;浮动转可选档
     touchButtonAlpha: 0.82,
@@ -519,6 +530,8 @@ export class OptionsStore {
       if (typeof this.data.builderAutoPaintDisabled !== 'boolean') this.data.builderAutoPaintDisabled = false;
       // LoadoutShare 首用提示（R4-14 清偿）：坏值回默认「显示」
       if (typeof this.data.showLoadoutShareHint !== 'boolean') this.data.showLoadoutShareHint = true;
+      // ★BJ508 双击冲刺档（DashControl）：坏值回缺省 AllowDoubleTap（Player.cs:365）
+      if (typeof this.data.doubleTapDash !== 'boolean') this.data.doubleTapDash = true;
       // 失焦播放（Main.cs:268 默认 false=失焦暂停+全静；坏值回原版默认）
       if (typeof this.data.playWhenUnfocused !== 'boolean') this.data.playWhenUnfocused = false;
       // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----

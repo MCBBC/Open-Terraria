@@ -220,8 +220,8 @@ describe('掉落表展平（ItemDropBestiaryInfoElement 近似）', () => {
     }
   });
 
-  it('expert 分支带 IsExpert 标签（DropBasedOnExpertMode 双列）', () => {
-    const drops = flattenDropsForNpc(4); // 克苏鲁之眼：BossBag 双分支
+  it('expert 分支带 IsExpert 标签（DropBasedOnExpertMode 双列；★BJ506：默认 difficulty 0=经典门隐专家行——CanShowItemDropInUI 语义，须专家档可见）', () => {
+    const drops = flattenDropsForNpc(4, 1); // 克苏鲁之眼：BossBag 双分支（专家档）
     expect(drops.some((d) => d.tag === 'IsExpert')).toBe(true);
     expect(drops.some((d) => d.tag === null)).toBe(true);
   });

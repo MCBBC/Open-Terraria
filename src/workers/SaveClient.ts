@@ -11,6 +11,7 @@ import { saveGame, loadSave } from '../save/SaveFile';
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
 import { weatherToSave } from '../world/weather/Weather';
+import { getModBridgePayload, getSaveModEntries } from '../mods/bridge';
 
 const HANDSHAKE_MS = 2000;
 const SAVE_TIMEOUT_MS = 20000;
@@ -121,6 +122,8 @@ export class SaveClient {
       wldSnap: world.wldSnap,
       teSnap: world.teSnap,
       townRooms: world.townRooms,
+      // ★mod 清单（2026-10-04 P1）：三处 meta 装配之一（worker 主路径;BJ71 防漏喂）
+      mods: getSaveModEntries() ?? undefined,
       // 挂物族存放物：内部 id 直传（worker 侧 serializeSave 统一过稳定 id 表）
       furniture: world.furnitureItems,
     };
@@ -347,9 +350,19 @@ export class SaveClient {
         this.worker = null;
       };
       this.worker = w;
+      // ★mod 桥(2026-10-04):worker(重)建即推 mod id 增量(fire-and-forget;worker
+      //  模块态随 terminate 丢失,BJ328 懒重建范式下每次 ensure 都要补推)
+      this.pushModBridge(w);
     } catch {
       this.broken = true;
     }
+  }
+
+  /** mod id 增量推送(mods/bridge.ts 供数;零 mod=null 不推) */
+  private pushModBridge(w: Worker): void {
+    const payload = getModBridgePayload();
+    if (!payload) return;
+    try { w.postMessage({ type: 'applyModIds', payload }); } catch { /* 构建期 worker 未就绪忽略 */ }
   }
 }
 

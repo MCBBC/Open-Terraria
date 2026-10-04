@@ -122,16 +122,18 @@ export interface LightSnapshotMsg {
   per: number[][];
   tiles: TileSlicePack;
   /** ★C9d2 二期差量（?lightdelta=1 灰度）:undefined=legacy 全量（非灰度模式,
-   *  tile 通道走 transferable+回池）; 'full'=灰度全量锚帧（结构克隆,主线程留影子）;
-   *  'delta'=差量帧（tiles 仅几何字段,通道零长;载荷在 delta） */
+   *  tile 通道走 transferable+回池）; 'full'=灰度全量锚帧（★2026-10-04 起同款
+   *  transferable+回池,主线程不留内容影子）; 'delta'=差量帧（tiles 仅几何字段,
+   *  通道零长;载荷在 delta） */
   enc?: 'full' | 'delta';
   /** enc='delta' 载荷:meta=[跨度数,(y',x0',len)…]（u32,切片内局部坐标）,
    *  data=每跨度逐格 17B（type/flags/frameX/frameY/wall 各 LE 2B,其余 9 通道各 1B） */
   delta?: { dv: number; meta: Uint32Array; data: Uint8Array };
 }
 
-/** ★C9d2 worker→main tile 缓冲回池（仅 legacy 非灰度模式;transfer 往返使主线程
- *  buildSlice 零重分配。compute 完毕后 worker 不再读 tile 通道,回传安全） */
+/** ★C9d2 worker→main tile 缓冲回池（legacy 全量帧直回;★2026-10-04 起 'full' 锚帧
+ *  解码器退役缓冲同通道回传——transfer 往返使主线程 buildSlice 零重分配。compute
+ *  完毕后 worker 不再读 tile 通道（退役包恒非 store 当前内容）,回传安全） */
 export interface LightPoolMsg { op: 'pool'; seq: number; tiles: TileSlicePack }
 
 /** ★C9d2 worker 侧影子缺失/尺寸失配（防御面:正常由 planFull 保证不触发）→
@@ -403,10 +405,14 @@ export function allocSliceChannels(sw: number, sh: number): TileSlicePack {
 }
 
 /** ★C9d2 主线程差量编码器（LightWorkerLink 持有;灰度模式专用）。
- *  影子窗=上一发送帧;encodeDelta 内先 rebase（copyWithin 行平移到新窗布局）,
- *  再标暴露带+日志格 → 行扫跨度 RLE → 逐格 17B 发射（读世界真值,同步写影子）。 */
+ *  ★transferable 化（2026-10-04）:全量锚帧 13 通道 transfer 给 worker（结构克隆退役,
+ *  见 LightWorkerLink.send）——主线程不再留存帧内容,影子降级为【纯几何记账】
+ *  （sx/sy/sw/sh）。位等价论证:跨度格集=暴露带∪写日志格（几何+日志决定）,跨度值
+ *  恒读世界真值——影子【内容】在全链路只有写（旧 rebase copyWithin=同数组内搬运、
+ *  跨度回写=写世界值）而无任何读点（planFull/encodeDelta/hasShadow 全部只读几何）,
+ *  删除内容面 = 线上字节零变化（tests/light-worker-parity 差量场景逐位锁）。 */
 export class LightDeltaEncoder {
-  private shadow: TileSlicePack | null = null;   // 所有权:adoptFull 后持有调用方数组
+  private shadow: { sx: number; sy: number; sw: number; sh: number } | null = null;
   private frame = 0;                              // 距上次全量锚帧的 delta 帧数
   private forceFull = true;                       // 首帧/resync 请求
   private mark: Uint8Array = new Uint8Array(0);   // 跨度标记 scratch（窗尺寸）
@@ -432,9 +438,10 @@ export class LightDeltaEncoder {
     return reason !== null;
   }
 
-  /** 全量锚帧:切片数组所有权移交影子（主线程侧结构克隆发送,数组留主线程） */
+  /** 全量锚帧:记录窗口几何（★transferable 化后内容随 transfer 移交 worker,主线程
+   *  不再持有——旧语义「数组所有权移交影子」退役,发送改走 transferable+回池） */
   adoptFull(t: TileSlicePack): void {
-    this.shadow = t;
+    this.shadow = { sx: t.sx, sy: t.sy, sw: t.sw, sh: t.sh };
     this.frame = 0;
     this.forceFull = false;
     if (this.mark.length < t.sw * t.sh) this.mark = new Uint8Array(t.sw * t.sh);
@@ -447,8 +454,10 @@ export class LightDeltaEncoder {
   hasShadow(sw: number, sh: number): boolean { return this.shadow !== null && this.shadow.sw === sw && this.shadow.sh === sh; }
 
   /** 差量编码:读世界真值（st）+ 写日志（log=世界索引 y*w+x,调用后由调用方清空）,
-   *  影子同步推进到本帧窗。返回精确尺寸载荷（postMessage transfer）。
-   *  前置:planFull=false（几何匹配/日志未溢出/contentDirty 门已过）。 */
+   *  影子几何推进到本帧窗。返回精确尺寸载荷（postMessage transfer）。
+   *  前置:planFull=false（几何匹配/日志未溢出/contentDirty 门已过）。
+   *  ★transferable 化:旧「影子 rebase（copyWithin 行平移）+跨度回写影子」两段删除
+   *  ——影子内容全链路无读点（见类注位等价论证）,只留几何推进。 */
   encodeDelta(st: { w: number; type: Uint16Array; flags: Uint8Array; frameX: Uint16Array; frameY: Uint16Array;
     wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array;
     wire: Uint8Array; paint: Uint8Array; paintWall: Uint8Array; coat: Uint8Array },
@@ -456,18 +465,9 @@ export class LightDeltaEncoder {
     const s = this.shadow!;
     const sw = g.sw, shH = g.sh, n = sw * shH;
     const worldW = st.w;
-    // ① 影子 rebase:行平移到新窗布局（同 stride,copyWithin 行段互不相交;
-    //    暴露带区被移入陈旧值,必被跨度覆写——编码器保证)
+    // ① 重叠矩形（旧影子窗 ∩ 本帧窗;只供暴露带标记,内容 rebase 已随内容影子退役）
     const cx0 = Math.max(s.sx, g.sx), cx1 = Math.min(s.sx + s.sw, g.sx + sw);
     const cy0 = Math.max(s.sy, g.sy), cy1 = Math.min(s.sy + s.sh, g.sy + shH);
-    if (cx1 > cx0 && cy1 > cy0 && (s.sx !== g.sx || s.sy !== g.sy)) {
-      const len = cx1 - cx0;
-      for (let wy = cy0; wy < cy1; wy++) {
-        const dstOff = (wy - g.sy) * sw + (cx0 - g.sx);
-        const srcOff = (wy - s.sy) * s.sw + (cx0 - s.sx);
-        for (const k of TILE_CHAN_KEYS) (s[k] as Uint16Array | Uint8Array).copyWithin(dstOff, srcOff, srcOff + len);
-      }
-    }
     // ② 标记:暴露带=重叠矩形外全部格;日志格=窗内记账格
     const mark = this.mark.length >= n ? this.mark : (this.mark = new Uint8Array(n));
     mark.fill(0, 0, n);
@@ -483,7 +483,7 @@ export class LightDeltaEncoder {
       const lx = idx % worldW - g.sx, ly = (idx / worldW | 0) - g.sy;
       if (lx >= 0 && ly >= 0 && lx < sw && ly < shH) mark[ly * sw + lx] = 1;
     }
-    // ③ 行扫跨度 + 逐格 17B 发射（读世界真值;同步写影子=跨度格新值）
+    // ③ 行扫跨度 + 逐格 17B 发射（读世界真值;★transferable 化后不再回写影子内容）
     let mOff = 1, dOff = 0, spans = 0;
     const capMeta = 1 + 3 * spansMax(sw, shH);   // 数学硬上界（1 格跨度与空格交替）
     if (this.metaBuf.length < capMeta) this.metaBuf = new Uint32Array(capMeta);
@@ -492,9 +492,6 @@ export class LightDeltaEncoder {
     const stT = st.type, stF = st.flags, stFX = st.frameX, stFY = st.frameY, stW2 = st.wall;
     const stL = st.liquid, stLT = st.liquidType, stH = st.half, stSl = st.slope, stWr = st.wire;
     const stP = st.paint, stPW = st.paintWall, stC = st.coat;
-    const sT = s.type, sF = s.flags, sFX = s.frameX, sFY = s.frameY, sW2 = s.wall;
-    const sL = s.liquid, sLT = s.liquidType, sH = s.half, sSl = s.slope, sWr = s.wire;
-    const sP = s.paint, sPW = s.paintWall, sC = s.coat;
     for (let y = 0; y < shH; y++) {
       const row = y * sw;
       for (let x = 0; x < sw;) {
@@ -506,29 +503,27 @@ export class LightDeltaEncoder {
         if (mOff + 3 > meta.length || dOff + len * TILE_CHAN_BYTES_PER_CELL > data.length) return this.escalateFull();
         meta[mOff] = y; meta[mOff + 1] = x0; meta[mOff + 2] = len; mOff += 3;
         for (let t2 = 0; t2 < len; t2++) {
-          const si = row + x0 + t2;
           const wi = (g.sy + y) * worldW + (g.sx + x0 + t2);
-          const vT = stT[wi]; data[dOff++] = vT & 255; data[dOff++] = vT >>> 8; sT[si] = vT;
-          const vF = stF[wi]; data[dOff++] = vF; sF[si] = vF;
-          const vFX = stFX[wi]; data[dOff++] = vFX & 255; data[dOff++] = vFX >>> 8; sFX[si] = vFX;
-          const vFY = stFY[wi]; data[dOff++] = vFY & 255; data[dOff++] = vFY >>> 8; sFY[si] = vFY;
-          const vW = stW2[wi]; data[dOff++] = vW & 255; data[dOff++] = vW >>> 8; sW2[si] = vW;
-          const vL = stL[wi]; data[dOff++] = vL; sL[si] = vL;
-          const vLT = stLT[wi]; data[dOff++] = vLT; sLT[si] = vLT;
-          const vH = stH[wi]; data[dOff++] = vH; sH[si] = vH;
-          const vSl = stSl[wi]; data[dOff++] = vSl; sSl[si] = vSl;
-          const vWr = stWr[wi]; data[dOff++] = vWr; sWr[si] = vWr;
-          const vP = stP[wi]; data[dOff++] = vP; sP[si] = vP;
-          const vPW = stPW[wi]; data[dOff++] = vPW; sPW[si] = vPW;
-          const vC = stC[wi]; data[dOff++] = vC; sC[si] = vC;
+          const vT = stT[wi]; data[dOff++] = vT & 255; data[dOff++] = vT >>> 8;
+          const vF = stF[wi]; data[dOff++] = vF;
+          const vFX = stFX[wi]; data[dOff++] = vFX & 255; data[dOff++] = vFX >>> 8;
+          const vFY = stFY[wi]; data[dOff++] = vFY & 255; data[dOff++] = vFY >>> 8;
+          const vW = stW2[wi]; data[dOff++] = vW & 255; data[dOff++] = vW >>> 8;
+          const vL = stL[wi]; data[dOff++] = vL;
+          const vLT = stLT[wi]; data[dOff++] = vLT;
+          const vH = stH[wi]; data[dOff++] = vH;
+          const vSl = stSl[wi]; data[dOff++] = vSl;
+          const vWr = stWr[wi]; data[dOff++] = vWr;
+          const vP = stP[wi]; data[dOff++] = vP;
+          const vPW = stPW[wi]; data[dOff++] = vPW;
+          const vC = stC[wi]; data[dOff++] = vC;
         }
         spans++;
       }
     }
     meta[0] = spans;
-    // ④ 影子几何推进（未标记格=rebase 后重叠区原值=世界同值,记账完备前提）
-    s.sx = g.sx; s.sy = g.sy; s.sw = sw; s.sh = shH; s.px = g.px; s.py = g.py;
-    s.showInvisibleBlocks = g.showInvisibleBlocks;
+    // ④ 影子几何推进（跨度值恒读世界真值,几何=plan/暴露带唯一消费面）
+    s.sx = g.sx; s.sy = g.sy; s.sw = sw; s.sh = shH;
     this.frame++;
     return { meta: meta.slice(0, mOff), data: data.slice(0, dOff) };
   }
@@ -546,10 +541,18 @@ function spansMax(sw: number, sh: number): number { return sh * ((sw >> 1) + 1);
 
 /** ★C9d2 worker 侧差量解码器（WorkerDriveState 持有,影子/spare 乒乓零稳态分配）。
  *  full/legacy 帧 adopt-through（legacy 不维护影子——tile 缓冲将回池 detached）;
- *  delta 帧:重叠区自影子 .set 复制 + 跨度覆写（暴露带由跨度覆盖,编码器保证）。 */
+ *  delta 帧:重叠区自影子 .set 复制 + 跨度覆写（暴露带由跨度覆盖,编码器保证）。
+ *  ★transferable 化（2026-10-04）:'full' 锚帧数组经 transfer 进场即新影子——被换下
+ *  的旧 spare/尺寸失配旧影子进【退役队列】,worker 壳 drainRetired 后逐包 'pool'
+ *  transfer 回主线程入池（与 Layer 1 legacy 回池同通道,稳态零分配闭环）。退役包
+ *  恒非当前 store 内容（store.adopt 只取 decode 返回值=新影子）。 */
 export class LightDeltaDecoder {
   private shadow: TileSlicePack | null = null;
   private spare: TileSlicePack | null = null;
+  private retired: TileSlicePack[] = [];
+
+  /** 退役缓冲出队（worker 壳每帧 compute 后调用;主线程 recycleSlice 入池） */
+  drainRetired(): TileSlicePack[] { const r = this.retired; this.retired = []; return r; }
 
   /** delta 帧可解码判据（worker 壳 resync 门:影子缺失/尺寸失配 → 请求全量） */
   readyFor(m: LightSnapshotMsg): boolean {
@@ -561,8 +564,11 @@ export class LightDeltaDecoder {
     if (m.enc !== 'delta') {
       if (m.enc !== 'full') return m.tiles;   // legacy:纯 adopt-through（缓冲回池,不维护影子）
       const t = m.tiles;
-      this.spare = this.shadow !== null && this.shadow.sw === t.sw && this.shadow.sh === t.sh ? this.shadow : null;
-      this.shadow = t;                        // 灰度全量锚:克隆产物即新影子
+      if (this.spare !== null) this.retired.push(this.spare);   // ★transferable:旧 spare 退役回池
+      const old = this.shadow;
+      this.spare = old !== null && old.sw === t.sw && old.sh === t.sh ? old : null;
+      if (old !== null && this.spare === null) this.retired.push(old);   // 尺寸失配旧影子退役
+      this.shadow = t;                        // 全量锚（transfer 进场,活缓冲）即新影子
       return t;
     }
     const g = m.tiles;
@@ -570,7 +576,10 @@ export class LightDeltaDecoder {
     const s = this.shadow!;
     const sw = g.sw, shH = g.sh;
     let t = this.spare;
-    if (t === null || t.sw !== sw || t.sh !== shH) { t = allocSliceChannels(sw, shH); this.spare = t; }
+    if (t === null || t.sw !== sw || t.sh !== shH) {
+      if (t !== null) this.retired.push(t);   // 失配 spare 退役回池（防御面,常规不可达）
+      t = allocSliceChannels(sw, shH); this.spare = t;
+    }
     // ① 重叠区自影子复制（跨数组按行 .set;暴露带陈旧值必被跨度覆写）
     const cx0 = Math.max(s.sx, g.sx), cx1 = Math.min(s.sx + s.sw, g.sx + sw);
     const cy0 = Math.max(s.sy, g.sy), cy1 = Math.min(s.sy + s.sh, g.sy + shH);
@@ -611,6 +620,7 @@ export class LightDeltaDecoder {
     const old = this.shadow;
     this.shadow = t;
     this.spare = old !== null && old.sw === sw && old.sh === shH ? old : null;
+    if (old !== null && this.spare === null) this.retired.push(old);   // 失配旧影子退役
     return t;
   }
 }

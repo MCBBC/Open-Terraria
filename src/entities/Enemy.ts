@@ -138,6 +138,8 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
+import { takeModNpcAi } from '../mods/hooks';
+import type { Game } from '../core/Game';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
@@ -2236,7 +2238,15 @@ export class Enemy extends Entity {
       this.critterWanderAI(game, hasPlayer ? player : null);
     } else if (this.vanilla && !wormBody) {
       const p = hasPlayer ? player : null;
-      switch (this.vanilla.aiStyle) {
+      // ★mod AI 派发（2026-10-04,docs/mod-loader-design.md §2.3）：mod NPC（800+）
+      //  经 entry.js 的 sw.npcAi 注册了自定义 AI 时整支接管（不走原版 switch），
+      //  共享尾段（接触伤害/击退/掉落）照走——与 critter/wormBody 前置分支同构。
+      //  空注册/原版域=Map size 短路零成本，行为逐位恒等（中立性金标锁）。
+      const modAi = takeModNpcAi(this.vanillaId);
+      if (modAi !== null) {
+        // GameHooks→Game:本实参运行时恒为全量 Game 实例(Enemy 形参窄化仅类型面)
+        modAi(this, game as unknown as Game, p);
+      } else switch (this.vanilla.aiStyle) {
         case 92: this.dummyAI(game); break;                            // AI_092 训练假人（NPC 488）
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）

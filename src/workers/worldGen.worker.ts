@@ -4,7 +4,8 @@
 /// <reference lib="webworker" />
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
-import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
+import { applyModTileStableMap } from '../data/tiles';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
@@ -74,6 +75,14 @@ ctx.onmessage = async (e) => {
     //   fire-and-forget:无作业在跑时置位无害(下次 generateWorld 头部清零)。
     if (req.type === 'abortGen') {
       requestWorldGenAbort();
+      return;
+    }
+    // ★mod 桥(2026-10-04)：mod 物品/tile 稳定 id 增量——读档路径(saveParse→loadSaveData)
+    //   的 stable→internal 翻译在本线程表上完成,不接桥=mod 内容解档静默归 0。
+    //   fire-and-forget 幂等(重复推送 skip;applyMod* 内自守卫)。
+    if (req.type === 'applyModIds') {
+      applyModItemIds(req.payload.itemStableIds);
+      applyModTileStableMap(req.payload.tilePairs);
       return;
     }
     if (req.type === 'generate') {

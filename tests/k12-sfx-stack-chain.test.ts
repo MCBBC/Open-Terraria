@@ -46,17 +46,17 @@ describe('K1-2 GLScreenFilters 组装面（drawChainPipeStack）', () => {
     expect(SFX.match(/this\.pipeRunPasses\(gl, pipe, w, h, chain, tint,/g)?.length).toBe(2);
   });
 
-  it('组装序锁:①sky 基底上传（premultiply=true+UNPACK_FLIP_Y=true=G 朝向纯行重排）→ blend-off 直写 sfxA → ②屏栈逐层 presentTexTo premul-over flipY=1（栈序=折叠序）→ ③HUD 上传 over（useHud 门）→ ④pipeFlipTo 归还恒等布局 → ⑤共用 pipeRunPasses 输入 sfxB', () => {
-    expect(SFX).toMatch(/gl\.pixelStorei\(gl\.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true\);\s*\n\s*gl\.pixelStorei\(gl\.UNPACK_FLIP_Y_WEBGL, true\);\s*\n\s*gl\.texImage2D\(gl\.TEXTURE_2D, 0, gl\.RGBA, gl\.RGBA, gl\.UNSIGNED_BYTE, src\.sky\);/);
-    expect(SFX).toMatch(/pipe\.presentTexTo\(fboA, this\.pipeTexScreen, false, 1\);\s*\n\s*\/\/ ---- ② 屏栈逐层 premul-over 重放[\s\S]{0,200}for \(const layer of pipe\.screenStackView\) \{\s*\n\s*if \(!layer\.tex\) continue;\s*\n\s*pipe\.presentTexTo\(fboA, layer\.tex, true, 1\);\s*\n\s*\}/);
-    expect(SFX).toMatch(/gl\.texImage2D\(gl\.TEXTURE_2D, 0, gl\.RGBA, gl\.RGBA, gl\.UNSIGNED_BYTE, src\.hud\);[\s\S]{0,120}pipe\.presentTexTo\(fboA, this\.pipeTexHud, true, 1\);/);
+  it('组装序锁:①sky 基底上传（★K1-2b 持久槽 pipeStackLegUpload 单源;premultiply=true+UNPACK_FLIP_Y=true=G 朝向纯行重排）→ blend-off 直写 sfxA → ②屏栈逐层 presentTexTo premul-over flipY=1（栈序=折叠序）→ ③HUD 上传 over（useHud 门）→ ④pipeFlipTo 归还恒等布局 → ⑤共用 pipeRunPasses 输入 sfxB', () => {
+    expect(SFX).toMatch(/this\.pipeStackLegUpload\(gl, pipe\.statName, 'sky', src\.sky\);\s*\n\s*\/\/ 基底 blend off 直写 sfxA（全幅替换陈旧帧内容;flipY=1 恒等 texel 映射）\s*\n\s*(\/\/[^\n]*\n\s*)?pipe\.presentTexTo\(fboA, this\.pipeTexStackSky!, false, 1\);/);
+    expect(SFX).toMatch(/pipe\.presentTexTo\(fboA, this\.pipeTexStackSky!, false, 1\);\s*\n\s*\/\/ ---- ② 屏栈逐层 premul-over 重放[\s\S]{0,200}for \(const layer of pipe\.screenStackView\) \{\s*\n\s*if \(!layer\.tex\) continue;\s*\n\s*pipe\.presentTexTo\(fboA, layer\.tex, true, 1\);\s*\n\s*\}/);
+    expect(SFX).toMatch(/this\.pipeStackLegUpload\(gl, pipe\.statName, 'hud', src\.hud\);\s*\n\s*(\/\/[^\n]*\n\s*)?pipe\.presentTexTo\(fboA, this\.pipeTexHud!, true, 1\);/);
     expect(SFX).toMatch(/if \(!this\.pipeFlipTo\(gl, pipe, w, h, fboA, fboB\)\) return false;\s*\n\s*ok = this\.pipeRunPasses\(gl, pipe, w, h, chain, tint, fboB\.tex!, fboA, fboB\);/);
   });
 
-  it('HUD 腿独立上传槽 pipeTexHud（同参 LINEAR+CLAMP;pipeDrop 随指纹重生齐清）;useHud=false 免腿（预留位）', () => {
+  it('HUD 腿独立上传槽 pipeTexHud（★K1-2b 持久化:同参 LINEAR+CLAMP+尺寸账;pipeDrop 随指纹重生齐清）;useHud=false 免腿（预留位）', () => {
     expect(SFX).toContain('private pipeTexHud: WebGLTexture | null = null;');
-    expect(SFX).toMatch(/if \(src\.useHud\) \{[\s\S]{0,1200}pipe\.presentTexTo\(fboA, this\.pipeTexHud, true, 1\);\s*\n\s*\}/);
-    expect(SFX).toMatch(/private pipeDrop\(\): void \{[\s\S]{0,200}this\.pipeTexHud = null;/);
+    expect(SFX).toMatch(/if \(src\.useHud\) \{[\s\S]{0,1200}pipe\.presentTexTo\(fboA, this\.pipeTexHud!, true, 1\);\s*\n\s*\}/);
+    expect(SFX).toMatch(/private pipeDrop\(\): void \{[\s\S]{0,400}this\.pipeTexHud = null;/);
   });
 
   it('守卫面:hud 界为零/sky 界不等/screenStackMode 关/空链→返 false 落折叠（宁回退不产错帧）;finally 还原 premul+FLIP_Y 收口', () => {

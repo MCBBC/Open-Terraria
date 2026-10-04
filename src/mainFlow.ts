@@ -1431,6 +1431,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // CanShowItemDropInUI 的 NotExpert/IsExpert/IsMasterMode 条件语义）
       isExpert: () => g.world.isExpert,
       isMaster: () => g.world.isMaster,
+      // ★BJ507 B2：掉落行悬停全量 item tooltip（原版 Main.HoverItem 面——
+      //  UIBestiaryInfoItemLine.DrawMouseOver → MouseText item 管线;复用
+      //  UI.buildTooltipHtml 单源 BJ407,notes = 掉落条件描述行族）
+      showItemTooltip: (itemId, anchor, notes) => ui.showFloatingItemTooltip(itemId, anchor, notes),
+      hideItemTooltip: () => ui.hideFloatingItemTooltip(),
       onBack: () => {
         if (!wasPaused) g.paused = false;
         if (!wasBlocking) g.input.uiBlocking = false;

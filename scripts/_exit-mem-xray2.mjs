@@ -58,7 +58,8 @@ scanTrace(TRACE, (e) => {
   const sm = cp.samples || [];
   const w = winOf(e.ts);
   if (!w) return;
-  const self = P.self.get(w), busy = P.busy.get(w), gcS = P.gcSelf.get(w);
+  const self = P.self.get(w);
+  let busy = P.busy.get(w), gcS = P.gcSelf.get(w);
   for (let i = 0; i < sm.length; i++) {
     const delta = td[i];
     if (!(delta > 0)) continue;

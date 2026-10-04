@@ -2518,3 +2518,21 @@ export function registerModItem(d: Partial<ItemDef> & { key: string; name: strin
   ITEM_INTERNAL_OF_STABLE.set(stableId, stableId);
   return stableId;
 }
+
+/** ★worker 桥读面(2026-10-04):worker 上下文(无 def 本体)只按 id 接长恒等域+填双向
+ *  映射——存档/读档的稳定 id 翻译在 save.worker/worldGen.worker 内完成,mod 物品
+ *  不接此桥=存读静默归 0(空槽/空气,既有 ?? 0 兜底语义)。主线程重复推送幂等
+ *  (已注册=skip)。供数链:mods/bridge.ts → SaveClient/WorldGenClient 握手后推送。 */
+export function applyModItemIds(ids: readonly number[]): void {
+  for (const s of ids) {
+    if (!(s >= 30000 && s <= 65535)) continue;
+    if (ITEM_DEFS[s] !== undefined) continue;   // 主线程已注册=幂等 skip
+    if (s >= ITEM_STABLE_OF_INTERNAL.length) {
+      const next = new Uint16Array(s + 1);
+      next.set(ITEM_STABLE_OF_INTERNAL);
+      for (let i = ITEM_STABLE_OF_INTERNAL.length; i <= s; i++) next[i] = i;
+      ITEM_STABLE_OF_INTERNAL = next;
+    }
+    ITEM_INTERNAL_OF_STABLE.set(s, s);
+  }
+}

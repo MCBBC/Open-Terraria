@@ -155,6 +155,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse } from '../mods/hooks';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
@@ -5095,7 +5096,9 @@ export class Game implements GameHooks {
    *  controlCreativeMenu=OpenCreativePowersMenu（本仓 ToggleCreativeMenu）、
    *  ★controlHook=Grapple（SW-BN2 2026-09-07 补——缺省表对齐后 Grapple 有缺省键 E,
    *  原版观战按钩爪键同退;旧缺省空表时本支不可达故从未暴露）；
-   *  Throw/Dash/ArmorSetAbility 本仓无 action（Keybinds.ts:3-4 手柄 trigger/
+   *  ★controlDash=Dash（BJ508 2026-10-04 补——键位入表后退出族补齐;缺省空表
+   *  未绑定时本支照旧不可达,自绑后观战按键同退=原文 :17200 controlDash 项）；
+   *  Throw/ArmorSetAbility 本仓无 action（Keybinds.ts:3-5 手柄 trigger/
    *  拖出承担声明）→ 跳过；滚轮走 tick 半边（handleSpectatingControls）。
    *  ★QuickBuff 不在退出族——:16940-16945 是虫洞药水传送（CanWormholeTo
    *  Spectating 门，quickBuff() 内已接） */
@@ -5105,6 +5108,7 @@ export class Game implements GameHooks {
       || isBound('QuickMount', code) || isBound('QuickHeal', code)
       || isBound('QuickMana', code) || isBound('ToggleCreativeMenu', code)
       || isBound('Grapple', code)   // SW-BN2：controlHook（Player.cs:17200）
+      || isBound('Dash', code)      // BJ508：controlDash（Player.cs:17200 退出族）
       || SPECTATE_EXIT_HOTBAR.some((a) => isBound(a, code));
   }
 
@@ -8320,6 +8324,7 @@ export class Game implements GameHooks {
   }
 
   destroy() {
+    runModOnWorldUnload(this);   // ★mod 系统 onWorldUnload（2026-10-04：拆实例最先调,钩子见完整世界态）
     // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
     this.net?.disconnect();
     this.net = null;
@@ -8690,6 +8695,7 @@ export class Game implements GameHooks {
     if (this.running) return;
     this.running = true;
     this.lastTime = performance.now();
+    runModOnWorldLoad(this);   // ★mod 系统 onWorldLoad（2026-10-04：世界全链就绪、主循环起跑前唯一汇点）
     const loop = (now: number) => {
       if (!this.running) return;
       try {
@@ -9260,6 +9266,7 @@ export class Game implements GameHooks {
     advanceGameTimeTick();   // ★BJ330（2026-09-24）GTW 钟源推进：与 tickCount 同拍同门（!paused）——暂停/失焦冻结、游玩/菜单推进（Main.TotalGameTime 等价,Main.cs:17014）
     this.updateChestFrames();   // ★SW-BJ17 2026-09-07 宝箱盖动画帧（Chest.cs:3599,Main.cs:17993 60Hz 同拍）
     this.reactivateDummies();   // 训练假人再激活(TETrainingDummy.Update 节流)
+    runModPreUpdate(this, dt);   // ★mod 系统 preUpdate（2026-10-04：一切系统之前;空注册零成本短路）
     // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
     if (this.tickCount % 60 === 0) {
       const p = this.player;
@@ -9806,6 +9813,7 @@ export class Game implements GameHooks {
       player.inputUp = false;
       player.inputLeft = false;
       player.inputRight = false;
+      player.inputDash = false;   // ★BJ508：观战态键面清零（releaseDash 置位臂照常重臂）
     } else {
       // M5：移动/跳经键位表（Up/Down/Left/Right/Jump action；默认=WASD+方向键+Space）
       player.inputX = (inp.downAction('Left') ? -1 : 0) + (inp.downAction('Right') ? 1 : 0);
@@ -9816,6 +9824,11 @@ export class Game implements GameHooks {
       //  if(controlLeft)/else if(controlRight) 同按左优先——inputX 合值丢双按信息）
       player.inputLeft = inp.downAction('Left');
       player.inputRight = inp.downAction('Right');
+      // ★BJ508 Quick Dash 键面（TriggersSet.cs:825-826 逐拍同序）：controlDash 电平 +
+      //   releaseDash 置位臂 `|= !controlDash`（清位臂在 Player 冲刺发起面
+      //   :21779-21782）——语义=发起后按住不重触,任一拍松键即重臂
+      player.inputDash = inp.downAction('Dash');
+      player.releaseDash ||= !player.inputDash;
       // ★Forbidden 指令面光标世界坐标（组C 终盘 2026-09-18）——Player.MinionRestTargetAim
       // （Player.cs:57599 Main.MouseWorld）入参;Player 无相机,screenToWorld 单源供给
       {
@@ -10560,6 +10573,7 @@ export class Game implements GameHooks {
     // Main.timeForVisualEffects 逐 tick 推进（1458 Main.cs:17340-17343 每固定步 +1）
     stepVisEffectTick();
     this.entities.update(dt, this);
+    runModPostEntities(this, dt);   // ★mod 系统 postEntities（2026-10-04：实体桶全步进完;空注册零成本短路）
     // 行走遥测:城镇 NPC 每 30t 采样一次(决策链卡点取证,2026-08-30)
     if (this.tickCount % 30 === 0) {
       for (const n of this.entities.npcs) {
@@ -14141,12 +14155,66 @@ export class Game implements GameHooks {
     const cx = inp.canvasRectLeft + inp.mouseX;
     const cy = inp.canvasRectTop + inp.mouseY;
     // bbox 快照 30 tick 刷新(面板开合最迟 0.5s 收录;开合沿可调 refreshDomUiRects)
+    // ★EPF773(2026-10-04) 快照只收【可命中】rect:旧实现把 .sw-root(fixed inset:0
+    //  全视口 PE:none 根)的 rect 也收进 ⇒ 预检 near 恒真 ⇒ 光标每动一格(键失配)
+    //  就活 elementFromPoint 强制布局(实测战斗态 ~41-60 次/s × ~0.1-0.2ms 单次
+    //  ≈ exit trace 773ms/90s 归因;活机计数 scripts/_epf773-verdict.mjs)。
+    //  可命中判定 = 有效 pointer-events(继承语义):
+    //  ① selector 成员 PE≠none → 自身可被 elementFromPoint 返回,收自身 rect;
+    //  ② selector 成员 PE=none(.sw-root/.sw-vinv/.sw-tooltip/.sw-drag-ghost/
+    //    .sw-mobile 等 none 根)→ 自身永不命中,但子树可有显式 auto 的未登记散件
+    //    (.sw-manual-btn/HousingPanel 图标/EmoteMenu 覆层族)——isDomUiTarget 经
+    //    closest('.sw-root') 兜底仍判真,快照漏收会把悬停误判为世界输入 ⇒ walk
+    //    display 非 none 的 none 根子树收散件 rect(实测战斗态 590 节点/0.65ms,
+    //    开包态 1131 节点/1.1ms,每 30 tick 一次 ≪ 病灶 8.6ms/s)。
+    //  健全性:点落全部已收 rect 之外 ⇒ elementFromPoint 必返非 UI 元素(命中区⊆
+    //  border-box;已登记 auto 成员的溢出 auto 子元素普查为 0——BJ414 buff 时长
+    //  span 已显式 none,_epf773-walkcost.mjs 实证);over-approx 只多走活查询,
+    //  欠 approx 才改行为,此处宁可多收。
     if (this.tickCount - this._domUiRectsTick > 30 || !this._domUiRects.length) {
       this._domUiRectsTick = this.tickCount;
       const list: Array<{ l: number; t: number; r: number; b: number }> = [];
       const els = document.querySelectorAll(DOM_UI_TARGET_SELECTOR);
       for (let i = 0; i < els.length; i++) {
-        const rc = (els[i] as HTMLElement).getBoundingClientRect();
+        const e = els[i] as HTMLElement;
+        if (getComputedStyle(e).pointerEvents === 'none') {
+          // none 根:display:none 整支不可命中免 walk;可见 none 根才扫子树散件
+          if (getComputedStyle(e).display === 'none') continue;
+          const sub = e.querySelectorAll('*');
+          // 裁剪祖先 overflow 缓存(walk 内复用;命中测试沿 overflow 非 visible 链裁剪,
+          // 散件 rect 须与裁剪盒求交——否则成就 toast 的 img.sheet 整张图集 gBCR
+          // (K≈0.33 → 346×389)会以中屏过近似带污染战斗扫掠面,_epf773-band.mjs 实证)
+          const ovfCache = new Map<HTMLElement, boolean>();
+          for (let j = 0; j < sub.length; j++) {
+            const d = sub[j] as HTMLElement;
+            if (getComputedStyle(d).pointerEvents !== 'auto') continue;
+            const rc = d.getBoundingClientRect();
+            if (rc.width <= 0 || rc.height <= 0) continue;
+            let l = rc.left, t = rc.top, r = rc.right, b = rc.bottom;
+            // 与祖先链上 overflow 非 visible 盒(border box ⊇ padding 裁剪盒)求交:
+            // 交后仍 ⊇ 真实命中区 = 欠近似方向被排除(过近似无害,near 后活 epf 精判)
+            let a = d.parentElement;
+            while (a && a !== e.parentElement) {
+              let clipped = ovfCache.get(a);
+              if (clipped === undefined) {
+                clipped = getComputedStyle(a).overflow !== 'visible';
+                ovfCache.set(a, clipped);
+              }
+              if (clipped) {
+                const ar = a.getBoundingClientRect();
+                if (l < ar.left) l = ar.left;
+                if (t < ar.top) t = ar.top;
+                if (r > ar.right) r = ar.right;
+                if (b > ar.bottom) b = ar.bottom;
+              }
+              a = a.parentElement;
+            }
+            if (r - l <= 0 || b - t <= 0) continue;   // 裁剪后不可见
+            list.push({ l, t, r, b });
+          }
+          continue;
+        }
+        const rc = e.getBoundingClientRect();
         if (rc.width <= 0 || rc.height <= 0) continue;   // display:none/空层
         list.push({ l: rc.left, t: rc.top, r: rc.right, b: rc.bottom });
       }
@@ -14158,11 +14226,15 @@ export class Game implements GameHooks {
       && this._domUiRectsTick === this._domUiHitRectsTick) {
       return this._domUiHitResult;
     }
-    // 纯数学预检:不落在任何 UI 矩形 → 必不命中(免 elementFromPoint 强制布局)
+    // 纯数学预检:不落在任何 UI 矩形 → 必不命中(免 elementFromPoint 强制布局)。
+    // ★EPF773:rect 四周扩 1px——Chromium 命中测试用像素对齐框,elementFromPoint
+    //  的命中区可比 gBCR 浮点框外扩 ~1px(实测 .sw-slot gBCR 左缘 67,点 66.2 仍
+    //  命中,scripts/_epf773-subpixel.mjs);欠 1px 会把贴边悬停误判为世界。
+    //  过近似无害:near 后仍由活 elementFromPoint 精判。
     let near = false;
     for (let i = 0; i < this._domUiRects.length; i++) {
       const q = this._domUiRects[i];
-      if (cx >= q.l && cx <= q.r && cy >= q.t && cy <= q.b) { near = true; break; }
+      if (cx >= q.l - 1 && cx <= q.r + 1 && cy >= q.t - 1 && cy <= q.b + 1) { near = true; break; }
     }
     if (!near) {
       this._domUiHitCx = cx; this._domUiHitCy = cy;
@@ -14823,6 +14895,12 @@ export class Game implements GameHooks {
       this.mining = null;
       return;
     }
+
+    // ★mod item use 分流（2026-10-04,docs/mod-loader-design.md §2.3）：mod 物品
+    //  （vid≡30000+）经 entry.js 的 sw.itemUse 注册了处理器时最优先接管——原版
+    //  专支（帕鲁钻地龟/无人机等）同位先例；返回 true=已消费（useTime 节奏由
+    //  handler 自管）。空注册=Map size 短路一次，行为逐位恒等（中立性金标锁）。
+    if (runModItemUse(this, heldDef, held, tx, ty)) return;
 
     // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速倍率 =
     // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）。
@@ -40174,7 +40252,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const pct = this.world.bestiary.completion().percent;
           const seen = (npcId: number) => this.world.bestiary.unlockState(
             bestiaryEntries().find((e) => e.creditId === bestiaryCreditId(npcId))
-              ?? { creditId: '', kind: 'enemy', sources: [], goldGate: false }) > 0;
+              ?? { id: 0, creditId: '', kind: 'enemy', sources: [], goldGate: false }) > 0;   // id=BJ506 条目自持 netId 面新增（垃圾条目 0）
           // 仙灵火把（:3244/:3524-3544：三仙灵 583/584/585 图鉴均 > NotKnown）
           if (seen(583) && seen(584) && seen(585)) add([4776]);
           add([4767]);                                                    // 勿伤小动物书 :3248
@@ -51301,6 +51379,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
 
   /** 每逻辑帧后处理挥舞命中（在 fixedUpdate 实体更新后调用） */
   postUpdate() {
+    runModPostUpdate(this);   // ★mod 系统 postUpdate（2026-10-04：联机 pump 前;空注册零成本短路）
     // 联机 pump：tile 上报冲洗 + 玩家状态节流发送（docs §4.2）
     if (this.net?.active) {
       this.net.tick();

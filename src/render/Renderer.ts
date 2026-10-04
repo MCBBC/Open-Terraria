@@ -1926,6 +1926,291 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   return Math.floor(t / 6) % frames;
 }
 
+// ============ ★BJ507 B3：图鉴 dummy 域帧选择器（UnlockableNPCEntryIcon 1:1） ============
+// 原版图鉴 NPC 图标 = 独立 NPC dummy（UnlockableNPCEntryIcon.cs:17-21：new NPC +
+// IsABestiaryIconDummy=true + SetDefaults + ai[0..3]=SetDefaults 后被清/保持 0 +
+// SimulateFirstHover :180-191（首次 Update：SetFrameSize + velocity.X=direction*velocity
+// + FindFrame ×1）→ 每帧主动画分支 :99-109：无 Frame 偏移且 (IsPortrait||IsHovered)
+// → velocity.X=direction*velocity + FindFrame()；有 Frame 偏移 → FindFrame 后
+// frame.Y = frame.Height*Frame 钉死帧）。即 dummy 的 FindFrame 输入恒定：
+// vy=0 / onGround / ai[0..3]=0 / localAI=0 / 满血 / wet=DrawOffset.IsWet（13 条）
+// / vx=direction*velocity（317 条 velocity=1）。本函数 = vanillaFrameIdx 全分支在
+// 该恒定输入下的折叠（分支同序防截胡漂移；Set 常量共享本文件）：
+//   t = FindFrame 累计调用次数（调用侧 60Hz 门闸步进；含 SimulateFirstHover 的首帧）；
+//   vx = direction * velocity（DrawOffset 数据；direction 只改 vx 符号,|vx| 恒定 →
+//        帧序无关,取绝对值折叠）；frames = 母体表竖行数（Main.npcFrameCount）。
+// 行走族的 fc 累计 = t*|vx| 纯函数化（原版 frameCounter 每调 +=|vx|,恒速累计≡t*|vx|）；
+// 活体近似式中的渲染拍内预支项（zombie +|vx|*8 等）不带入——dummy 无渲染/逻辑拍差。
+// 调整特例面（AdjustSpecialSpawnRulesForVisuals :125-178）登记差异：244 彩虹史莱姆
+// 色相掷/299 族 Portrait 强帧 1（被 FindFrame case 299 站定支清 0=每帧重演,净视觉
+// =帧 0,与本折叠一致）/636 case 帧=二相门（AI_120 常态 0 相=帧 0）/330 等alpha=0
+// =可见化非帧面/356 ai[2]=1（蝶带 0=与 ai2=0 折叠同带）。
+export function bestiaryDummyFrameIdx(
+  npcId: number, aiStyle: number, t: number, vx: number, frames: number, wet: boolean,
+): number {
+  const id = npcId;
+  const walking = Math.abs(vx) > 0.05;
+  const V = Math.abs(vx);   // dummy 恒速（direction 只改符号）
+  // 僵尸族（case 3,cs:77048-77087）：vy=0 → 地面支；vx=0 → fc=0 帧0；行走 fc+=|vx|
+  if (ZOMBIE_FRAME_TYPES.has(id)) {
+    if (!walking) return 0;
+    const phase = (t * V) % 32;
+    return phase < 8 ? 0 : phase < 16 ? 1 : phase < 24 ? 2 : 1;
+  }
+  // 武装僵尸族（case 430-436/591,cs:71651-71716；494/495,cs:70437-70518）：ai2=0 无扑咬
+  if ((id >= 430 && id <= 436) || id === 591 || id === 494 || id === 495) {
+    if (id === 494 || id === 495) {
+      if (!walking) return 0;
+      const c = (t * V) % 39;
+      return c < 8 ? 0 : c < 16 ? 1 : c < 24 ? 2 : c < 32 ? 3 : 4;
+    }
+    if (!walking) return 0;
+    const c = (t * V) % 32;
+    return c < 8 ? 0 : c < 16 ? 1 : c < 24 ? 2 : 1;
+  }
+  // 栖息态（aiStyle 17,case 61,cs:74235-74255）：vx=vy=0 → 帧0；飞行帧每 5t
+  if (aiStyle === 17) {
+    if (vx === 0) return 0;
+    return frames > 1 ? 1 + (Math.floor(t / 5) % (frames - 1)) : 0;
+  }
+  // 宝箱怪族（aiStyle 25,case 85/341/629,cs:74239-74320）：ai0=0 伪装 → 段首帧（ai3=0→off 0）
+  if (aiStyle === 25) return 0;
+  // 珍稀宝箱怪 473-476（case 473,cs:71831-72000）：ai0=0 → 伪装帧 0
+  if (id >= 473 && id <= 476) return 0;
+  // 爬墙蜘蛛族（aiStyle 40,cs:73795-73817）：fc += (|vx|+|vy|)×0.5（vy=0）
+  if (aiStyle === 40) return Math.floor((t * V * 0.5) / 6) % frames;
+  // 蜘蛛地面形态（case 164/236/239/530,cs:73766-73783）：vy=0 → 地面支
+  if (id === 164 || id === 236 || id === 239 || id === 530) {
+    if (!walking) return 0;
+    return Math.floor((t * V * 1.1) / 6) % 4;
+  }
+  // 黄蜂族（case 42,cs:75607-75633）：2t 一换 [0,1,2,1]
+  if (id === 42 || (id >= 231 && id <= 235)) return [0, 1, 2, 1][Math.floor(t / 2) % 4];
+  // 蝙蝠族（aiStyle 14,case 49 块,cs:75523-75585）：每 6t 推进
+  if (aiStyle === 14) {
+    const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
+    return Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap));
+  }
+  // 史莱姆（aiStyle 1,case 1,L71506）：每 8t 全循环
+  if (aiStyle === 1) return Math.floor(t / 8) % frames;
+  // 骷髅王头/手（aiStyle 11/12）：ai3=0 → 帧 0（RedHat 变体支不可达）
+  if (aiStyle === 11 || aiStyle === 12) return 0;
+  // 兔/地面小动物族（case 46,cs:77553-77600）：站定=0；行走 fc+=|vx|+1、>6 进帧
+  if (id === 46 || id === 47 || id === 303 || id === 337 || id === 443 || id === 464
+    || id === 540 || id === 614 || (id >= 646 && id <= 652)) {
+    if (!walking) return 0;
+    return Math.floor((t * (V + 1)) / 7) % frames;
+  }
+  // 行走金鱼 230/593（cs:76584-76649）：站定/腾空=0；行走 fc+=|vx|*2+1、>10 进帧
+  if (id === 230 || id === 593) {
+    if (!walking) return 0;
+    return Math.floor((t * (2 * V + 1)) / 11) % frames;
+  }
+  // 企鹅 148/149/168/470（cs:77094-77152）：fc+=|vx|、相位制 <6:0 <12:1 :2
+  if (id === 148 || id === 149 || id === 168 || id === 470) {
+    if (!walking) return 0;
+    const ph = (t * V) % 15;
+    return ph < 6 ? 0 : ph < 12 ? 1 : 2;
+  }
+  // 松鼠族 299/538/539/639-645（cs:77160-77214）：行走 fc+=|vx|*0.5+1、>6 进帧、回卷帧 1
+  if (id === 299 || id === 538 || id === 539 || (id >= 639 && id <= 645)) {
+    if (!walking) return 0;
+    return 1 + (Math.floor((t * (0.5 * V + 1)) / 7) % Math.max(1, frames - 1));
+  }
+  // 鼠族 300/447/610（cs:77215-77316）：站定=嗅探帧 0/1（>8 进帧）；行走回卷帧 2
+  if (id === 300 || id === 447 || id === 610) {
+    if (!walking) return Math.floor(t / 9) % 2;
+    return 2 + (Math.floor((t * (0.5 * V + 1)) / 7) % Math.max(1, frames - 2));
+  }
+  // 蛙族 361/445/687（cs:77320-77378）：dummy wet=false → 陆上；站定 0..5（7t/帧）
+  if (id === 361 || id === 445 || id === 687) {
+    if (!walking) return Math.floor(t / 7) % Math.min(6, frames);
+    return Math.min(frames - 1, [0, 6, 8, 9][Math.floor(t / 6) % 4]);
+  }
+  // 行走鸟 362/364/602/608（cs:74445-74546）：站定=0；行走 fc+1、≥4 进帧、带 3..9
+  if (id === 362 || id === 364 || id === 602 || id === 608) {
+    if (!walking) return 0;
+    return Math.min(frames - 1, 3 + (Math.floor(t / 4) % 7));
+  }
+  // 龟 616/617（cs:77379-77432）：wet=false → 陆上 0..7（9t/帧）
+  if (id === 616 || id === 617) {
+    if (!walking) return 0;
+    return Math.floor(t / 9) % Math.min(8, frames);
+  }
+  // 龟 625（cs:77434-77473）：wet=false → 陆上 0..5（8t/帧）
+  if (id === 625) {
+    if (!walking) return 0;
+    return Math.floor(t / 8) % Math.min(6, frames);
+  }
+  // 城镇 NPC（aiStyle 7,cs:70159-70240）：站定帧 / 行走 fc+=|vx|*2+1（489 异档）
+  if (aiStyle === 7) {
+    if (!walking) {
+      if (id === 638) return Math.min(7, Math.floor(t / 4) % Math.min(8, frames));
+      if (id === 140 || id === 489) return Math.min(1, frames - 1);
+      return 0;
+    }
+    const extra = townExtraFrames(id);
+    const len = Math.max(1, frames - extra - 2);
+    if (id === 489) return 2 + (Math.floor((t * (V + 0.5)) / 8) % len);
+    const step = id === 632 || id === 534 || id === 638 || id === 656 ? 12 : 6;
+    return 2 + (Math.floor((t * (2 * V + 1)) / step) % len);
+  }
+  // ---- 火星/月事件/Betsy 批（386 走 ai3 档）----
+  // 393 飞碟炮塔（cs:72481-72494）：ai2=0 → ax=cos0=1,ay=0 → 帧 8（右向）
+  if (id === 393) return Math.min(frames - 1, 8);
+  // 394 飞碟火炮（cs:72495-72518）：ai3=0 → n=-300 → 帧 4
+  if (id === 394) return 4;
+  // 395 母碟（cs:72520-72541）：lai0=0 → 帧 0；392 炮体（cs:72543-72560）→ 0
+  if (id === 395 || id === 392) return 0;
+  // 399 火星探测器（cs:72562-72565）：ai0=0 → counter+0.25/t 四帧扫描
+  if (id === 399) return Math.min(frames - 1, Math.floor((t * 0.25) % 4));
+  // 387 特斯拉炮塔（cs:72335-72368）：ai0=0 → 待机 15 单位/帧两帧闪切
+  if (id === 387) return Math.min(frames - 1, Math.floor(t / 15) % 2);
+  // 325 哀木（cs:73172-73201）：站定带 0-4 / 移动带 5-9（counter 恒 +1/t）
+  if (id === 325) return Math.min(frames - 1, !walking ? Math.floor(t / 5) % 5 : 5 + (Math.floor(t / 5) % 5));
+  // 344 常世吼（cs:73144-73170）：lai1=0 → 帧 0；345 冰雪女王（cs:73106-73143）：
+  // ai0=0 滑翔、ai3=0 ≥0 → 定帧 0
+  if (id === 344 || id === 345) return 0;
+  // 551 Betsy（cs:67913-68107）：ai0=0（悬停态）→ 恒帧 0
+  if (id === 551) return 0;
+  // 圣骑士 290（cs:76763-76786）：ai2=0 → 瞄准支不触发；行走带 2..8
+  if (id === 290) {
+    if (!walking) return 0;
+    return 2 + (Math.floor((t * V) / 6) % 7);
+  }
+  // 战士族（L70155-70252）：站定=0；行走 fc+=|vx|*2+1、>6 进帧、帧 2 起循环
+  if (aiStyle === 3 || aiStyle === 26 || aiStyle === 107) {
+    if (!walking) return 0;
+    const cycLen = Math.max(1, frames - 2);
+    return 2 + (Math.floor((t * (2 * V + 1)) / 6) % cycLen);
+  }
+  // 蝶族（case 356/444/653/661,cs:73419-73455）：[0,1,2,1] 7t 档（356 ai2=0=带 0）
+  if (aiStyle === 65) return Math.min(frames - 1, [0, 1, 2, 1][Math.floor(t / 7) % 4]);
+  // 海豚 615（cs:74925-74938）：!wet 且 ai2≠1 → 离水 2 速全帧循环
+  if (id === 615) return Math.floor((wet ? t : t * 2) / 7) % frames;
+  // 鱼族 case 55（cs:74879-74924）：wet=0..3@6t 游姿 / !wet=4/5 离水折腾
+  if (id === 55 || id === 57 || id === 58 || id === 102 || id === 241
+    || id === 465 || id === 592 || id === 607) {
+    if (!wet) return Math.min(frames - 1, 4 + (Math.floor(t / 6) % 2));
+    return Math.floor(t / 6) % Math.min(4, frames);
+  }
+  // 河鲀 688（cs:74944-74984）：ai2=0；!wet=4/5@12t / wet=0..3@8t
+  if (id === 688) {
+    if (!wet) return Math.min(frames - 1, 4 + (Math.floor(t / 12) % 2));
+    return Math.floor(t / 8) % Math.min(4, frames);
+  }
+  // 虎鲸 692（cs:75392-75440）：wet 半表轮换（ai0=0 → 5t）/ 离水 vy=0 → 帧 1
+  if (id === 692) {
+    if (wet) return Math.floor(t / 5) % Math.max(1, Math.floor(frames / 2));
+    return 1;
+  }
+  // 鲨鱼 65（cs:75352-75377）：wet 0..3@6t / 离水冻结帧 3
+  if (id === 65) return wet ? Math.floor(t / 6) % Math.min(4, frames) : Math.min(3, frames - 1);
+  // 沙鲨 542-545（cs:75380-75388）：4t 一帧 4 帧循环
+  if (id >= 542 && id <= 545) return Math.floor(t / 4) % 4;
+  // 游泳族兜底（aiStyle 16）：6t 全帧
+  if (aiStyle === 16) return Math.floor(t / 6) % frames;
+  // 水母族（aiStyle 18,cs:74614-74650）：ai1=0 → 23t 循环四相
+  if (aiStyle === 18) {
+    const ph = t % 23;
+    return Math.min(frames - 1, ph < 6 ? 0 : ph < 12 ? 1 : ph < 18 ? 2 : 3);
+  }
+  // EoC/双子（case 4/125/126,cs:77607-77631）：ai0=0 → 7t 三帧眨眼
+  if (id === 4 || id === 125 || id === 126) return Math.min(frames - 1, Math.floor(t / 7) % 3);
+  // 蜂后 222（cs:73737-73760）：lai0=0 → 悬停带 4-11 每 5t
+  if (id === 222) return 4 + (Math.floor(t / 5) % Math.min(8, frames - 4));
+  // 世纪之花 262（cs:73239-73258）：dummy 满血 → 一相带 0-3 每 7t
+  if (id === 262) return Math.floor(t / 7) % Math.min(4, frames);
+  // 克苏鲁之脑 266（cs:73215-73237）：ai0=0,lai2=0 → 一相 0..3 循环
+  if (id === 266) return Math.min(3, Math.floor(t / 7) % 8);
+  // 克眼仆从 5（cs:77633-77643）：每 8t 全循环
+  if (id === 5) return Math.floor(t / 8) % frames;
+  // 训练假人 488：dummyHitDir=0 → 摇晃 idx=0
+  if (id === 488) return 0;
+  // 血肉墙 113/114（cs:74214-74233）：ai2=0 → 每 12t 推进（帧数钳 2）
+  if (id === 113 || id === 114) return Math.floor(t / 12) % Math.max(1, Math.min(2, frames));
+  // 饥饿者 115（cs:75695-75712）：counter 1..15 乒乓嚼动
+  if (id === 115) {
+    const p = (Math.floor(t) % 15) + 1;
+    return p < 3 ? 0 : p < 6 ? 1 : p < 12 ? 2 : 1;
+  }
+  // 饥饿者 II 116（cs:74789-74808）：每 5t 全循环
+  if (id === 116) return Math.floor(t / 5) % Math.max(1, frames);
+  // 腐化者 133（cs:74761-74788）：满血无狂暴 → 16t 两相
+  if (id === 133) {
+    const p = (Math.floor(t) % 16) + 1;
+    return Math.min(frames - 1, p >= 8 && p < 16 ? 1 : 0);
+  }
+  // 机械骷髅王头 127（cs:75196-75231）：非合体态 ai1=0 → 悬浮 12t 眨眼
+  if (id === 127) {
+    if (mechQueenUp()) return Math.min(frames - 1, Math.floor(t / 12) % 2);
+    return Math.floor(t / 12) % 2;
+  }
+  // Prime 锯臂 129 / 激光臂 130（cs:75235-75264）
+  if (id === 129) return Math.floor(t / 2) % Math.max(1, frames);
+  if (id === 130) return Math.floor(t / 8) % Math.max(1, frames);
+  // 法师族三态（cs:77721-77743）：vy=0,ai1=0,lai3=0 → 待机帧 0
+  if (CASTER_STATE_FRAME_TYPES.has(id)) return 0;
+  // 火妖 24（cs:77681-77719）：ai1=0 → 待机带 0-3 每 6t
+  if (id === 24) return Math.floor(t / 6) % 4;
+  // 沙漠幽魂 533（cs:70647-70661）：ai1=0 → counter 0-48 循环帧 floor(c/6)
+  if (id === 533) return Math.floor((t % 48) / 6);
+  // 鸟族 74/297/298/442（cs:74326-74350）：站定=帧 4 收翅；移动=0..frames-2 每 4t
+  if (id === 74 || id === 297 || id === 298 || id === 442) {
+    if (!walking) return Math.min(4, frames - 1);
+    return Math.floor(t / 4) % Math.max(1, frames - 1);
+  }
+  // 丛林鸟族 671-675（cs:74352-74377）：站定=0；移动=1..frames-1 每 4t
+  if (id >= 671 && id <= 675) {
+    if (!walking) return 0;
+    return 1 + (Math.floor(t / 4) % Math.max(1, frames - 1));
+  }
+  // 鸮族 611/689（cs:74379-74443）：站定=8 帧转头待机（band 顺序轮播=活体随机 band
+  // 的 dummy 折叠近似,差异登记）；移动=8..frames-1 每 5t
+  if (id === 611 || id === 689) {
+    if (!walking) {
+      const seq = [[0, 1, 2, 1], [0, 3, 4, 3], [0, 5, 6, 7]][Math.floor(t / 40) % 3];
+      return seq[Math.floor((t % 40) / 10)];
+    }
+    return 8 + (Math.floor(t / 5) % Math.max(1, frames - 8));
+  }
+  // 萤火虫族 355/358/654（cs:73369-73390）：lai1=0 → 暗带 +2（4t 亮 3t 闪）
+  if (id === 355 || id === 358 || id === 654) {
+    return Math.min(frames - 1, ((t % 7) < 4 ? 0 : 1) + 2);
+  }
+  // 精灵萤 677（cs:73391-73402）：每 3t 一帧 5 帧
+  if (id === 677) return Math.floor(t / 3) % 5;
+  // 蜻蜓族 595-601（cs:73403-73419）：每 3t 全循环
+  if (id >= 595 && id <= 601) return Math.floor(t / 3) % Math.max(1, frames);
+  // 蚯蚓族 357/448/484/606（cs:73455-73509）：地面静止=帧 1；爬行 0↔1 每 12t
+  if (id === 357 || id === 448 || id === 484 || id === 606) {
+    if (!walking) return Math.min(1, frames - 1);
+    return Math.floor(t / 12) % Math.min(2, frames);
+  }
+  // 蛆虫族 485/486/487（cs:73511-73565）：地面静止=帧 1；爬行 fc+=|vx|*5 >10 进帧
+  if (id === 485 || id === 486 || id === 487) {
+    if (!walking) return Math.min(1, frames - 1);
+    return Math.min(frames - 1, Math.floor((t * V * 5) / 10) % 4);
+  }
+  // 瓢虫 604/605 + 椿象 669（cs:67616-67652）：地面循环 0-3 每 2t（vy=0 支）
+  if (id === 604 || id === 605 || id === 669) return Math.floor(t / 2) % 4;
+  // 水鸟族 363/365/603/609（cs:74470-74545）：!wet；站定=帧 1；移动=11.. 每 4t
+  if (id === 363 || id === 365 || id === 603 || id === 609) {
+    if (!walking) return Math.min(1, frames - 1);
+    return Math.min(frames - 1, 11 + (Math.floor(t / 4) % Math.max(1, frames - 11)));
+  }
+  // 月总头 396（cs:72628-72642）：counter/t → 0-7 八帧循环
+  if (id === 396) return Math.floor(t / 4) % 8;
+  // 月总游离眼 400（cs:72650-72664）：ai0=0 → 2t 一帧 0-3
+  if (id === 400) return Math.floor(t / 2) % 4;
+  // 仙灵三色 583-585（cs:70617-70630）：4t 全循环
+  if (id === 583 || id === 584 || id === 585) return Math.floor(t / 4) % frames;
+  // 毁灭者体节 135：ai2=0 → 恒亮帧 0（1457 灭帧支不可达,BJ244 普查同谳）
+  if (id === 135) return 0;
+  // 兜底（眼/蜂群/幽灵/蠕虫段等）：每 6t 全循环
+  return Math.floor(t / 6) % frames;
+}
+
 // ---- 光标图标 GetItemLight 特殊物品（ItemSlot.cs:3475-3507）----
 /** 迪斯科族（:3475-3490）:662/663 彩虹砖块系 + 5444/5450/5643 + 5128 → Main.Disco */
 const CURSOR_DISCO_ITEMS = new Set([662, 663, 5444, 5450, 5643, 5128]);

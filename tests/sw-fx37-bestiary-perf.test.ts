@@ -18,9 +18,9 @@ import { BestiaryTracker, UnlockState, bestiaryEntries } from '../src/data/Besti
 
 function makeRow(creditId: string, npcId: number, state: UnlockState): BestiaryRow {
   const entry = bestiaryEntries().find((e) => e.creditId === creditId) ?? {
-    creditId, kind: 'enemy' as const, sources: [], goldGate: false,
+    id: 0, creditId, kind: 'enemy' as const, sources: [], goldGate: false,
   };
-  return { entry, npcId, state, name: 'x', kills: 0 };
+  return { entry, entryId: entry.id, npcId, state, name: 'x', kills: 0 };
 }
 
 describe('SW-FX37 Fix A: 自愈补画目标（painted 登记面）', () => {

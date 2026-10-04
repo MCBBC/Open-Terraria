@@ -952,10 +952,30 @@ export class GLScreenFilters {
   // 失败面:返回 false → 调用方落旧 drawChain（双路径并存,逃生门 ?sfxgl=0）。
   private pipeGlId: WebGL2RenderingContext | null = null;
   private pipeProgHandles = new Map<string, PipelineProgram>();
+  /** drawChainPipe（非 Stack 变体）链源槽：每帧 texImage2D 全量重传（A1 原语义,
+   *  ★K1-2b 起 Stack 变体不再借本槽——sky 腿改专用持久槽 pipeTexStackSky） */
   private pipeTexScreen: WebGLTexture | null = null;
-  /** ★K1-2：Stack 变体 HUD 腿上传槽（与 pipeTexScreen 同参 LINEAR+CLAMP;两变体
-   *  各帧独占重传,跨帧无驻留语义） */
+  private pipeTexScreenW = 0;
+  private pipeTexScreenH = 0;
+  // ★持久化 treatment（2026-10-04,exit trace texImage2D top1 的可达路径补刀——
+  //  K1-2 Stack 档同款）:尺寸账+同尺寸帧 texSubImage2D 原位更新（免 realloc/orphan
+  //  churn）;尺寸变/首用/pipeDrop 后=texImage2D 全量重分配（字节逐位同）。
+  /** ★K1-2b（2026-10-04）：Stack 变体两腿持久上传槽（persist 槽范式=pipeTexHud
+   *  判例扩展）。sky 腿=专用新槽（不与 drawChainPipe 的 pipeTexScreen 共率,不撞
+   *  sfxA/sfxB FBO 纹理与 hud 槽）;hud 腿=原 pipeTexHud 判例槽续用。同参
+   *  LINEAR+CLAMP_TO_EDGE,按视口尺寸惰性分配+尺寸账（W/H）:首用/尺寸变化/
+   *  pipeDrop 槽重建 → texImage2D 全量重分配（=旧路径逐字面）;尺寸不变帧 →
+   *  texSubImage2D 原位更新（同源画布/同 pixelStorei 态=纹理字节逐位同,省驱动端
+   *  texImage2D realloc churn——exit trace texImage2D 主线程自耗 top1 的 K1-2 收益面）。
+   *  失效面:pipeDrop（上下文指纹变更）齐清两槽+尺寸账;GLStats 双口径:分配算驻留
+   *  （texCreate 仅 !tex 分支）、逐帧刷新只算带宽（upload 两支同记,worldLight/water
+   *  判例同款——t1036 教训:对既有纹理重传勿走 texCreate 入口）。 */
+  private pipeTexStackSky: WebGLTexture | null = null;
+  private pipeTexStackSkyW = 0;
+  private pipeTexStackSkyH = 0;
   private pipeTexHud: WebGLTexture | null = null;
+  private pipeTexHudW = 0;
+  private pipeTexHudH = 0;
   private pipeTexNoise: WebGLTexture | null = null;
   private pipeNoiseReady = false;
   private pipeNoiseW = 256;
@@ -970,7 +990,13 @@ export class GLScreenFilters {
   private pipeDrop(): void {
     this.pipeProgHandles.clear();
     this.pipeTexScreen = null;
+    // ★K1-2b:两腿持久槽+尺寸账齐清（pipeTexHud 判例面——清后首用走 texImage2D 重建）
+    this.pipeTexStackSky = null;
+    this.pipeTexStackSkyW = 0;
+    this.pipeTexStackSkyH = 0;
     this.pipeTexHud = null;
+    this.pipeTexHudW = 0;
+    this.pipeTexHudH = 0;
     this.pipeTexNoise = null;
     this.pipeNoiseReady = false;
     this.pipeKindTex = {};
@@ -1096,8 +1122,10 @@ export class GLScreenFilters {
     try {
       // ---- 源纹理上传（首 pass 输入=主画布全幅;语义与旧链一致。旧链 texScreen
       //      参数 init 一次:LINEAR+CLAMP_TO_EDGE——此处建时同参,驻留复用）----
-      if (!this.pipeTexScreen) {
+      const sizeChanged = this.pipeTexScreenW !== w || this.pipeTexScreenH !== h;
+      if (!this.pipeTexScreen || sizeChanged) {
         this.pipeTexScreen = gl.createTexture();
+        this.pipeTexScreenW = w; this.pipeTexScreenH = h;
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -1110,7 +1138,12 @@ export class GLScreenFilters {
       gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 旧链未设=缺省 false 直拷
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      if (sizeChanged) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      } else {
+        // ★持久化:同尺寸原位更新（免 realloc/orphan churn——exit trace texImage2D top1 的可达路径补刀）
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      }
       glStatUpload(pipe.statName, w * h * 4);
       // ---- 逐 pass（★K1-2 起为共用执行面 pipeRunPasses——drawChainPipe 输入=
       //      上传源纹理（恒等布局）,drawChainPipeStack 输入=屏栈组装折返 sfxB;
@@ -1134,6 +1167,14 @@ export class GLScreenFilters {
   //   → HUD 一次上传（G 朝向）premul-over 叠加（最顶层）
   //   → sfx:flip 直通 blit sfxA(G)→sfxB(恒等布局) 归还链输入契约
   //   → pipeRunPasses 照常（复用 A1 pass 执行面）→ 末 pass present 回 pipe.canvas。
+  //
+  // ★K1-2b（2026-10-04）上传腿持久纹理化:sky/HUD 两腿原每帧 texImage2D 全幅重
+  //  分配（exit trace texImage2D 主线程自耗 top1=9194ms/12.3%）→ 两专用持久槽
+  //  （sky=pipeTexStackSky 专槽/hud=pipeTexHud 判例槽）+尺寸账,稳态帧
+  //  texSubImage2D 原位更新（同源同参数=字节逐位同;分配/resize/pipeDrop 重建=
+  //  旧路径 texImage2D 逐字面）。单源=pipeStackLegUpload（防双腿漂移）;GLStats
+  //  双口径不变（分配=驻留、刷新=带宽）。对拍锁 scripts/_k12-persist-ab.mjs
+  //  （纹理读回逐位）+ tests/k12-stack-persist-tex.test.ts。
   //
   // 等价性论证（对拍锁 scripts/_k12-stack-ab.mjs 冻结态整帧逐字节）:
   // ① 层序:porter-duff over 结合律——栈不变式「任意时点 glCanvas 内容 ≙ 屏栈 FBO
@@ -1313,6 +1354,54 @@ export class GLScreenFilters {
     return true;
   }
 
+  /** ★K1-2b Stack 腿持久纹理上传（sky/HUD 两腿单源——防双腿漂移）。槽按视口尺寸
+   *  惰性分配:首用/尺寸变化/pipeDrop 槽重建 → texImage2D 全量重分配（与旧路径逐
+   *  字面同——同 canvas 源/同 target/level/format/type/同 pixelStorei 态）;尺寸
+   *  不变帧 → texSubImage2D 原位更新——DOM 源拷贝管线与 texImage2D 同一
+   *  （pixelStorei premultiply+FLIP_Y 同态施加,WebGL 规范两态对 texSubImage2D
+   *  同样生效）,存储尺寸恰等时全幅覆盖=纹理字节逐位同,唯一差异=不重定义存储
+   *  （省驱动端 realloc churn=K1-2 收益面）。
+   *  失效面:pipeDrop（上下文指纹变更）齐清两槽+尺寸账=pipeTexHud 判例;resize 走
+   *  尺寸账失配自动重分配。pixelStorei 逐笔显式（GLPipeline init 收口 premul=true/
+   *  FLIP_Y=false——本腿临时翻 FLIP_Y=true,链尾 finally 统一还原）。 */
+  private pipeStackLegUpload(gl: WebGL2RenderingContext, stat: string, leg: 'sky' | 'hud',
+    src: HTMLCanvasElement): void {
+    const w = src.width, h = src.height;
+    const isSky = leg === 'sky';
+    let tex = isSky ? this.pipeTexStackSky : this.pipeTexHud;
+    const hadTex = !!tex;
+    if (!tex) {
+      tex = gl.createTexture();
+      if (isSky) this.pipeTexStackSky = tex; else this.pipeTexHud = tex;
+    }
+    const tw = isSky ? this.pipeTexStackSkyW : this.pipeTexHudW;
+    const th = isSky ? this.pipeTexStackSkyH : this.pipeTexHudH;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (!hadTex) {
+      // 首用：采样参数+驻留账（=旧槽创建块逐字面;后续 texImage2D 重定义存储不改参数）
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      glStatTexCreate(stat, w * h * 4);
+    }
+    // 画布预乘背板恒等拷贝+G 朝向纯行重排（K1-2①原语义——texSubImage2D 同受两态约束）
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    if (tw !== w || th !== h) {
+      // 分配/重分配（=旧路径 texImage2D 全幅上传逐字面）
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    } else {
+      // 稳态：原位更新（同源同参数=字节逐位同）
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    }
+    glStatUpload(stat, w * h * 4);
+    // 尺寸账回写（稳态判据;pipeDrop 归零→下帧走重分配）
+    if (isSky) { this.pipeTexStackSkyW = w; this.pipeTexStackSkyH = h; }
+    else { this.pipeTexHudW = w; this.pipeTexHudH = h; }
+  }
+
   /**
    * ★K1-2 屏栈 FBO 直入滤镜链（等价性论证见上方 ★K1-2 段头注）。pipe=Renderer
    * 共管 GLPipeline（须 screenStackMode 在=屏栈内容有效）;src.sky=sky2D 基底
@@ -1342,50 +1431,25 @@ export class GLScreenFilters {
     try {
       // ---- ① sky2D 基底上传（G 朝向:UNPACK_FLIP_Y=true 纯行重排与屏栈 FBO 同
       //      朝向;premultiply=true=画布预乘背板恒等拷贝——基底不透明域
-      //      premul≡straight。上传槽=pipeTexScreen 链源位,两变体各帧独占重传）----
-      if (!this.pipeTexScreen) {
-        this.pipeTexScreen = gl.createTexture();
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        glStatTexCreate(pipe.statName, w * h * 4);
-      }
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src.sky);
-      glStatUpload(pipe.statName, w * h * 4);
+      //      premul≡straight。★K1-2b 持久槽 pipeTexStackSky（专用新槽,不与
+      //      drawChainPipe 的 pipeTexScreen 共率）——texImage2D 分配/texSubImage2D
+      //      原位更新语义见 pipeStackLegUpload 注;首帧/重建=旧路径逐字面）----
+      this.pipeStackLegUpload(gl, pipe.statName, 'sky', src.sky);
       // 基底 blend off 直写 sfxA（全幅替换陈旧帧内容;flipY=1 恒等 texel 映射）
-      pipe.presentTexTo(fboA, this.pipeTexScreen, false, 1);
+      // !:helper 已保证槽在（drawChainPipe pipeTexScreen! 同款）
+      pipe.presentTexTo(fboA, this.pipeTexStackSky!, false, 1);
       // ---- ② 屏栈逐层 premul-over 重放（flipY=1 恒等映射=restackScreen 重放同款
       //      语义;栈序=折叠序;presentTexTo 不入栈——「glCanvas=屏栈」不变式不动）----
       for (const layer of pipe.screenStackView) {
         if (!layer.tex) continue;
         pipe.presentTexTo(fboA, layer.tex, true, 1);
       }
-      // ---- ③ HUD-so-far 一次上传 over 叠加（最顶层;useHud 门）----
+      // ---- ③ HUD-so-far 一次上传 over 叠加（最顶层;useHud 门;★K1-2b 持久槽
+      //      pipeTexHud 判例槽续用——语义见 pipeStackLegUpload 注）----
       if (src.useHud) {
-        if (!this.pipeTexHud) {
-          this.pipeTexHud = gl.createTexture();
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, this.pipeTexHud);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          glStatTexCreate(pipe.statName, w * h * 4);
-        }
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.pipeTexHud);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src.hud);
-        glStatUpload(pipe.statName, w * h * 4);
-        pipe.presentTexTo(fboA, this.pipeTexHud, true, 1);
+        this.pipeStackLegUpload(gl, pipe.statName, 'hud', src.hud);
+        // !:helper 已保证槽在
+        pipe.presentTexTo(fboA, this.pipeTexHud!, true, 1);
       }
       // ---- ④ 朝向归还:组装积 sfxA(G 朝向) 直通 blit→sfxB(恒等布局)——链输入
       //      契约闭合（A1③）;⑤ passes 照常复用执行面 ----

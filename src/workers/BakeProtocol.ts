@@ -50,13 +50,16 @@ export interface BakeSnapshot {
 }
 
 /** worker 消息（主线程 → worker）。ship:烘焙素材随包（ImageBitmap transfer——
- *  createImageBitmap 副本,主线程持有原件不受 detach 影响） */
+ *  createImageBitmap 副本,主线程持有原件不受 detach 影响）。
+ *  ★mod 桥（2026-10-04）：modTiles 随首波 ship 直落（applyModTileDefs 保序注册,
+ *  与主线程 internal 下标对齐;缺省=零 mod 零变化） */
 export type BakeWorkerRequest =
   | { type: 'init'; id: number }
   | { type: 'ship'; id: number;
       vimages: Array<{ file: string; bmp: ImageBitmap }>;
       maples: Array<{ file: string; bmp: ImageBitmap }>;
-      sheets: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }> }
+      sheets: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }>;
+      modTiles?: Array<{ def: import('../data/tiles').TileDef; internal: number; stable: number }> }
   | { type: 'bake'; id: number; snap: BakeSnapshot };
 
 /** worker 回包（worker → 主线程）。baked 的位图与快照通道全部 transfer。 */

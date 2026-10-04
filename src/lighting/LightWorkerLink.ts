@@ -35,7 +35,8 @@ export const lightWorkerFlag = (() => {
  *  逐位）+快照 24.4MB/s→0.6MB/s（41×）+主线程残部 200µs→~0.01ms。?lightdelta=0=
  *  逃生门（回全量切片 transferable 链,Layer 1 仍生效）。仅 lightworker 开时有消费方;
  *  旗关时引擎无链路,本旗无效果。关:全量切片 transferable+回池（Layer 1）;
- *  开:差量帧免 416KB 切片（写日志+暴露带编码,全量锚帧结构克隆留影子）。
+ *  开:差量帧免 416KB 切片（写日志+暴露带编码）;★全量锚帧亦 transferable+回池
+ *  （2026-10-04,结构克隆退役——内容影子降级几何记账,见 LightDeltaEncoder 类注）。
  *  设计/判据链见 LightWorkerProtocol「C9 二期」段与探针 _c9d2-light-residual-probe。
  *  node/worker 上下文恒关（document 判死,fork bomb 判例家族）。 */
 export const lightDeltaFlag = (() => {
@@ -100,7 +101,8 @@ export class LightWorkerLink {
   constructor(enc: LightDeltaEncoder | null = lightDeltaFlag ? new LightDeltaEncoder() : null) {
     this._enc = enc;
   }
-  /** 切片通道池（Layer 1:全量帧 transfer 走后由 worker 回池复用;深度 4 封顶） */
+  /** 切片通道池（全量帧 transfer 走后由 worker 回池复用——Layer 1 legacy 帧每帧直回,
+   *  Layer 2 'full' 锚帧经解码器退役队列回;深度 4 封顶） */
   private _pool: TileSlicePack[] = [];
   /** 最近一次 buildWorkerTiles 的区域（escalate 防御面回退全量时复用） */
   private _lastReg = { rx: 0, ry: 0, rw: 0, rh: 0 };
@@ -225,16 +227,34 @@ export class LightWorkerLink {
     return pack;
   }
 
-  /** 切片回池（Layer 1 'pool' 消息 / 灰度 delta 帧发送后;深度 4 封顶防滞留） */
+  /** 切片回池（Layer 1 legacy 帧回传 / ★transferable 化（2026-10-04）后 'full' 锚帧
+   *  解码器退役缓冲回传同通道;深度 4 封顶防滞留） */
   private recycleSlice(t: TileSlicePack): void {
     if (this._pool.length < 4 && t.type.length > 0) this._pool.push(t);
+  }
+
+  /** ★transferable 化（2026-10-04）:13 通道 buffer transfer 发送（全量帧统一口——
+   *  Layer 1 legacy 全量 / Layer 2 'full' 锚帧同款）。所有权移交 worker:主线程
+   *  send 返回后【不得再触碰】通道数组;worker compute 完经 'pool' 消息回传
+   *  （legacy 直回 m.tiles;'full' 走解码器退役队列 drainRetired）入池复用。
+   *  池深纪律:回传包进 recycleSlice（≤4、type.length>0）,buildSlice 按
+   *  type.length===n 精确配对弹出——两形态共用一个池,命中/未命中账同口径。 */
+  private postFrameWithTiles(m: object, t: TileSlicePack): void {
+    const transfer: ArrayBuffer[] = [];
+    for (const k of TILE_CHAN_KEYS) {
+      const buf = (t[k] as Uint16Array | Uint8Array).buffer as ArrayBuffer;
+      if (buf.byteLength > 0) transfer.push(buf);
+    }
+    this.worker!.postMessage(m, transfer);
   }
 
   /** 惰性生成 + 发送。
    *  ★C9d2 Layer 1（非灰度,常开）:tile 13 通道 transferable 零拷贝过境（杀结构克隆
    *  ~24-29MB/s）,worker compute 后 'pool' 回池复用。
-   *  ★C9d2 Layer 2（?lightdelta=1 灰度）:全量锚帧结构克隆发送（数组留主线程作影子）;
-   *  delta 帧编码 写日志格∪暴露带（免切片帧,载荷 KB 级 transferable）。 */
+   *  ★C9d2 Layer 2（?lightdelta=1 灰度,2026-10-04 transferable 化）:全量锚帧同款
+   *  transferable+'pool' 回池（结构克隆退役——主线程内容影子无读点,影子降级几何
+   *  记账,见 LightDeltaEncoder 类注）;delta 帧编码 写日志格∪暴露带（免切片帧,
+   *  载荷 KB 级 transferable）。 */
   send(msg: Omit<LightSnapshotMsg, 'op' | 'seq'>): void {
     if (this.worker === null) {
       try {
@@ -289,16 +309,19 @@ export class LightWorkerLink {
     if (this._enc !== null && this._st !== null) {
       const t = msg.tiles;
       if (t.type.length > 0) {
-        // 全量锚帧:结构克隆发送（无 transfer——数组留主线程,所有权移交影子）
+        // ★transferable 化（2026-10-04）:全量锚帧 13 通道 transfer 发送（结构克隆退役
+        //  ——旧语义「数组留主线程作内容影子」随编码器影子降级为几何记账一并退役,
+        //  见 LightDeltaEncoder 类注位等价论证）;worker 侧解码器以收包为新影子,
+        //  被换下缓冲经 'pool' 回传入池（稳态零分配闭环,杀 ~416KB/锚帧 克隆+双端 GC churn）
         this._enc.adoptFull(t);
         lwStat.fmt.full++;
         lwStat.lastFullReason = this._enc.lastFullReason;
         lwStat.tileBytes += t.type.length * TILE_CHAN_BYTES_PER_CELL;
         this._log.length = 0;
-        this.worker.postMessage({ ...msg, op: 'frame', seq, enc: 'full' as const });
+        this.postFrameWithTiles({ ...msg, op: 'frame', seq, enc: 'full' as const }, t);
         return;
       }
-      // delta 帧:编码 写日志格∪暴露带（读世界真值,影子同步推进）
+      // delta 帧:编码 写日志格∪暴露带（读世界真值,影子几何同步推进）
       const out = this._enc.encodeDelta(this._st, t, this._log);
       this._log.length = 0;
       if (out.meta.length === 0) {
@@ -309,7 +332,7 @@ export class LightWorkerLink {
         lwStat.fmt.full++;
         lwStat.lastFullReason = 'escalate';
         lwStat.tileBytes += full.type.length * TILE_CHAN_BYTES_PER_CELL;
-        this.worker.postMessage({ ...msg, tiles: full, op: 'frame', seq, enc: 'full' as const });
+        this.postFrameWithTiles({ ...msg, tiles: full, op: 'frame', seq, enc: 'full' as const }, full);
         return;
       }
       lwStat.fmt.delta++;
@@ -322,12 +345,7 @@ export class LightWorkerLink {
     }
     // ---- Layer 1（非灰度,常开）:13 通道 transferable ----
     const t = msg.tiles;
-    const transfer: ArrayBuffer[] = [];
-    for (const k of TILE_CHAN_KEYS) {
-      const buf = (t[k] as Uint16Array | Uint8Array).buffer as ArrayBuffer;
-      if (buf.byteLength > 0) transfer.push(buf);
-    }
-    this.worker.postMessage({ ...msg, op: 'frame', seq }, transfer);
+    this.postFrameWithTiles({ ...msg, op: 'frame', seq }, t);
   }
 
   /** 回填引擎公共面（引擎 compute 内调用——渲染与 lightAt 全消费面读成对一致值）。

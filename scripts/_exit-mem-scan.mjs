@@ -27,11 +27,15 @@ export function scanTrace(path, onEvent) {
       return;
     }
     if (s.endsWith(',')) s = s.slice(0, -1);
+    let ev;
     if (acc === null) {
-      try { onEvent(JSON.parse(s), n++); return; } catch (e) { acc = s; return; }
+      try { ev = JSON.parse(s); } catch (e) { acc = s; return; }
+    } else {
+      acc += '\n' + s;
+      try { ev = JSON.parse(acc); } catch (e) { return; }
+      acc = null;
     }
-    acc += '\n' + s;
-    try { onEvent(JSON.parse(acc), n++); acc = null; } catch (e) { /* 继续累积 */ }
+    try { onEvent(ev, n++); } catch (err) { console.error('[CB-THROW]', err && err.stack ? err.stack.split('\n').slice(0,3).join(' | ') : err); }
   };
 
   while (pos < size && !done) {

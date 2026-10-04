@@ -43,14 +43,18 @@
 //   掉落行序、网格卡形态、详情类目序、图鉴编号位、锚点规则（重力 NPC 底锚 -8）。
 // 键位：Inventory 键位表动作关闭（默认 Esc+E；capture 阶段拦截防 main.ts 暂停键二次消费）；
 //   搜索框聚焦时首按 Esc 仅失焦（UISearchBar ToggleTakingText 语义）。
-// 登记债（后续批次）：B2 掉落行悬停全量 item tooltip（Main.HoverItem 面，UI.ts tooltip 栈
-//   在途）；B3 悬停 NPC 待机动画（UnlockableNPCEntryIcon.Update SimulateFirstHover/FindFrame）。
+// 登记债（后续批次）：B2/B3 已于 BJ507 闭合——B2 掉落行悬停全量 item tooltip
+//   （Main.HoverItem 面：flow 桥 → UI.showFloatingItemTooltip → buildTooltipHtml
+//   BJ407 单源；BestiaryNotes 条件行 Main.cs:21539-21547 随行）；B3 dummy 动画
+//   （UnlockableNPCEntryIcon.Update：SimulateFirstHover 首帧 + IsPortrait||IsHovered
+//   每帧 FindFrame——详情 Portrait 常驻播放（亲读定谳,非悬停门控）/网格卡悬停播放
+//   移开冻结;帧域 = Renderer.bestiaryDummyFrameIdx 折叠引擎）。
 import { upgradeToBitmap, USE_BITMAP } from '../assets/SpriteAtlas';
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
-import { NPC_TINT_KA } from '../render/Renderer';
+import { NPC_TINT_KA, bestiaryDummyFrameIdx } from '../render/Renderer';
 // 负 netID 变体的 color/scale/alpha（SetDefaultsFromNetId L7633-7820；
 // public/sprites/vanilla-npcnetid.json，与 VanillaSpawner 同源数据）
 import vanillaNetIdJson from '../data/vanilla-npcnetid.json';
@@ -63,9 +67,11 @@ import bstDrawOffsetJson from '../data/vanilla-npcbestiaryoffset.json';
 const BST_DRAW_OFFSET: Record<string, {
   scale?: number; portraitScale?: number; position?: number[];
   portraitX?: number; portraitY?: number; rotation?: number; frame?: number; customTexture?: string;
+  velocity?: number; wet?: boolean;
 }> = bstDrawOffsetJson as Record<string, {
   scale?: number; portraitScale?: number; position?: number[];
   portraitX?: number; portraitY?: number; rotation?: number; frame?: number; customTexture?: string;
+  velocity?: number; wet?: boolean;
 }>;
 
 /** 图鉴 NPC 染色帧缓存（key = sheet|npcId|帧高——负 id 变体各自成键） */
@@ -246,6 +252,8 @@ export const DEFAULT_BESTIARY_FILTER: BestiaryFilter = { search: '', kind: 'all'
 
 export interface BestiaryRow {
   entry: BestiaryEntryDef;
+  /** 条目自身 netId（图鉴编号取 bestiarySortingId(entryId)；重复 creditId 归并行各自唯一） */
+  entryId: number;
   /** 条目代表 NPC id（图标/属性取自它；归并族取母体） */
   npcId: number;
   state: UnlockState;
@@ -308,7 +316,7 @@ export function bestiaryRows(tracker: BestiaryTracker): BestiaryRow[] {
     const npcId = bestiaryRepNpcId(entry.creditId);
     const state = tracker.unlockState(entry);
     out.push({
-      entry, npcId, kills, state,
+      entry, entryId: entry.id, npcId, kills, state,
       // 未解锁不显示名（原版图标 hover "???"）
       name: state > UnlockState.NotKnown ? npcDisplayName(npcId, entry.creditId) : '???',
     });
@@ -556,12 +564,14 @@ export function dropRateText(chance: number): string {
 }
 
 function dropTagText(tag: string): string {
-  const key = `Bestiary.ItemDropConditions.${tag}`;
+  // ★BJ507 B2 键名勘正：产物类别 = Bestiary_ItemDropConditions（嵌套两层压一层,
+  //  build-l10n 规则）——旧拼 Bestiary.ItemDropConditions 永不命中 = 文案面死键
+  const key = `Bestiary_ItemDropConditions.${tag}`;
   const t = Lang.has(key) ? Lang.text(key) : '';
   return t || tag;
 }
 function dropCondText(cond: string): string {
-  const key = `Bestiary.ItemDropConditions.${cond}`;
+  const key = `Bestiary_ItemDropConditions.${cond}`;
   const t = Lang.has(key) ? Lang.text(key) : '';
   return t; // 原版空串条件（NotExpert 等）不显示
 }
@@ -1018,76 +1028,85 @@ const CSS = `
 .sw-bst-idx { position:absolute; left:10px; top:10px; font-size:12px; color:#fff; z-index:6;
   pointer-events:none; text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000; }
 /* 详情栏（UIBestiaryEntryInfoPage :28-57）：230 宽，UIPanel chrome (73,94,171)/(89,116,213)，
- * 高 +12 下垂；列表 padding 2/上下 4、项距 4；滚轮 = 本栏滚动 */
-.sw-bst-info { position:absolute; right:0; top:0; bottom:-12px; width:230px; overflow-y:auto;
-  overflow-x:hidden; padding:4px 2px; }
-.sw-bst-info::-webkit-scrollbar { width:12px; }
-.sw-bst-info::-webkit-scrollbar-track { background:transparent; }
-.sw-bst-info::-webkit-scrollbar-thumb { background:var(--bst-scrollbar) 50% 50%/12px 20px no-repeat; }
-.sw-bst-info::before { content:''; position:absolute; inset:0; pointer-events:none; z-index:9;
+ * 高 +12 下垂；chrome 走 ::before/::after（滚动在内容视内层——chrome 恒定不随滚）；
+ * 列表 padding 2/上下 4、项距 4；滚轮 = 内容视滚动 */
+.sw-bst-info { position:absolute; right:0; top:0; bottom:-12px; width:230px; overflow:hidden; }
+.sw-bst-info::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-infobg) 12 fill stretch; }
-.sw-bst-info::after { content:''; position:absolute; inset:0; pointer-events:none; z-index:9;
+.sw-bst-info::after { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-infoborder) 12 fill stretch; }
-.sw-bst-irow { position:relative; margin:0 2px 4px; }
+.sw-bst-infoview { position:absolute; inset:4px 2px; overflow-y:auto; overflow-x:hidden; }
+.sw-bst-infoview::-webkit-scrollbar { width:12px; }
+.sw-bst-infoview::-webkit-scrollbar-track { background:transparent; }
+.sw-bst-infoview::-webkit-scrollbar-thumb { background:var(--bst-scrollbar) 50% 50%/12px 20px no-repeat; }
 /* Nameplate（NamePlateInfoElement :19-31）：24 高行居中 */
 .sw-bst-nameplate { height:24px; display:flex; align-items:center; justify-content:center;
   font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; word-break:break-all; }
 /* Portrait（NPCPortraitInfoElement :21-96）：193×112 左 4；内盒 189×108 OverflowHidden；
  * 星面板 Stat_Panel 56² @(10,6)，5×Icon_Rank 14²（亮 Icon_Rank_Light/暗 Icon_Rank_Dim） */
 .sw-bst-portrait { position:relative; width:197px; height:112px; }
-.sw-bst-portraitin { position:absolute; left:4px; top:2px; width:193px; height:112px; }
+.sw-bst-portraitin { position:absolute; left:4px; top:0; width:193px; height:112px; }
 .sw-bst-portraitbox { position:absolute; left:2px; top:2px; width:189px; height:108px; overflow:hidden; }
 .sw-bst-portraitbox canvas { position:absolute; left:0; top:0; image-rendering:pixelated; }
 .sw-bst-pfront { position:absolute; left:0; top:0; width:193px; height:112px; image-rendering:pixelated;
   pointer-events:none; z-index:2; }
-.sw-bst-stars { position:absolute; left:10px; top:6px; width:56px; height:56px; z-index:3;
+.sw-bst-stars { position:absolute; left:10px; top:6px; width:56px; height:56px; z-index:3; }
+.sw-bst-stars::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
 .sw-bst-stars img { position:absolute; width:14px; height:14px; image-rendering:pixelated; }
-/* Stat_Panel 九宫块（角 12 条 7；底 (43,56,101)）：风味/属性/击杀/出没/掉落通用底 */
-.sw-bst-spblock { position:relative; margin:0 7px 4px 8px; padding:2px 5px 2px 4px;
+/* Stat_Panel 九宫块（角 12 条 7；底 (43,56,101)）：风味/击杀/出没通用底——chrome 走
+ * ::before（子元素绝对定位以盒左上为原点 = 原版 UIElement 坐标系，无 border 位移） */
+.sw-bst-spblock { position:relative; margin:0 8px 4px 3px; padding:2px 5px 2px 4px; }
+.sw-bst-spblock::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
 .sw-bst-flavor { font-size:11px; line-height:1.5; color:#fff; word-break:break-all; }
-/* 属性卡（NPCStatsReportInfoElement :65-259）：图标 96×31 @(3,0)(102,0)(3,35)(102,35) */
-.sw-bst-stats { position:relative; height:70px; margin:0 2px 4px; }
+/* 属性卡（NPCStatsReportInfoElement :65-259）：图标 96×31 @(3,0)(102,0)(3,35)(102,35)，
+ * 值右对 Left=-10（HAlign 1）→ right 10px；金币行 y78 x3/52/100/149 值 right 7px */
+.sw-bst-stats { position:relative; height:70px; margin:0 0 4px; }
 .sw-bst-stats.hascoins { height:108px; }
 .sw-bst-stat { position:absolute; width:96px; height:31px; image-rendering:pixelated; }
-.sw-bst-stat span { position:absolute; right:7px; top:0; height:31px; display:flex; align-items:center;
+.sw-bst-stat span { position:absolute; right:10px; top:0; height:31px; display:flex; align-items:center;
   font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
 .sw-bst-stat-hp { left:3px; top:0; background:var(--bst-stathp); }
 .sw-bst-stat-kb { left:102px; top:0; background:var(--bst-statkb); }
 .sw-bst-stat-atk { left:3px; top:35px; background:var(--bst-statatk); }
 .sw-bst-stat-def { left:102px; top:35px; background:var(--bst-statdef); }
 .sw-bst-statcoin { position:absolute; top:78px; width:47px; height:31px; image-rendering:pixelated; }
-.sw-bst-statcoin span { position:absolute; right:3px; top:0; height:31px; display:flex; align-items:center;
+.sw-bst-statcoin span { position:absolute; right:7px; top:0; height:31px; display:flex; align-items:center;
   font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
-/* 击杀计数（NPCKillCounterInfoElement :23-89）：Stat_Panel 块 30 高右贴，旗图+数右对 */
-.sw-bst-kills { position:relative; height:30px; margin:0 2px 4px 8px;
+/* 击杀计数（NPCKillCounterInfoElement :23-89）：Stat_Panel 块 30 高右贴（Left -8 HAlign 1
+ * → x 3..W-8），旗图+数右对 */
+.sw-bst-kills { position:relative; height:30px; margin:0 8px 4px 3px; }
+.sw-bst-kills::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
 .sw-bst-kills canvas { position:absolute; left:0; top:2px; width:22px; height:22px; image-rendering:pixelated; }
 .sw-bst-kills span { position:absolute; right:5px; top:0; height:30px; display:flex; align-items:center;
   font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
-/* 出没环境行（FilterProviderInfoElement.ProvideUIElement :42-77）：Stat_Panel 块 34 高，
- * 图标 30² 左 5、文字 padding-left 38 scale0.8，悬停 MouseText 名称 */
-.sw-bst-cond { position:relative; height:34px; margin:0 7px 4px 5px;
+/* 出没环境行（FilterProviderInfoElement.ProvideUIElement :42-77）：Stat_Panel 块 34 高
+ * （Width -14 Left 5 → x 5..W-9），图标 30² 左 5 垂中、文字左 38 scale0.8，悬停 MouseText */
+.sw-bst-cond { position:relative; height:34px; margin:0 9px 4px 5px; }
+.sw-bst-cond::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
-.sw-bst-cond img { position:absolute; left:5px; top:1px; width:30px; height:30px; image-rendering:pixelated; }
+.sw-bst-cond img { position:absolute; left:5px; top:2px; width:30px; height:30px; image-rendering:pixelated; }
 .sw-bst-cond span { position:absolute; left:38px; right:5px; top:0; height:34px; display:flex;
   align-items:center; font-size:11px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
-/* 掉落行（UIBestiaryInfoItemLine :24-56）：32 高 UIPanel((89,116,213) 框) 图标左 4 + 右对掉率 */
-.sw-bst-drop { position:relative; height:32px; margin:0 7px 4px 5px;
+/* 掉落行（UIBestiaryInfoItemLine :24-56）：32 高 UIPanel 图标框 (89,116,213)（悬停金框
+ * :119-125），尺寸同出没行；图标左 4（PaddingLeft 10 合成）、右对掉率 */
+.sw-bst-drop { position:relative; height:32px; margin:0 9px 4px 5px; }
+.sw-bst-drop::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-dropblock) 12 fill stretch; }
-.sw-bst-drop:hover { border-image:var(--bst-drophover) 12 fill stretch; }
+.sw-bst-drop:hover::before { border-image:var(--bst-drophover) 12 fill stretch; }
 .sw-bst-drop canvas { position:absolute; left:6px; top:4px; width:24px; height:24px; image-rendering:pixelated; }
 .sw-bst-drop .rt { position:absolute; right:10px; top:-4px; height:32px; display:flex; align-items:center;
   font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
-.sw-bst-drop .lock { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
-.sw-bst-drop .lock img { width:24px; height:24px; image-rendering:pixelated; opacity:0.55; }
 /* 分隔线（UIHorizontalSeparator：Separator1 6×4 × (89,116,213)*0.9） */
 .sw-bst-sep { height:4px; margin:0 2px 4px; background:var(--bst-sep); background-size:100% 4px; }
-/* 底栏（FillProgressBottomBar :159-181）：ColorBar 滑条 15 高 + 文本 0.8 叠左下 */
+/* 底栏（FillProgressBottomBar :159-181）：ColorBar 滑条 15 高（splice 左5右4上下4）+
+ * 文本 0.8 叠左下（VAlign 1 / TextOrigin 0,0） */
 .sw-bst-bottom { position:absolute; left:12px; right:12px; bottom:8px; height:20px; }
-.sw-bst-bar { position:absolute; left:0; right:0; bottom:0; height:15px;
+.sw-bst-bar { position:absolute; left:0; right:0; bottom:0; height:15px; }
+.sw-bst-bar::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:4px solid transparent; border-image:var(--bst-colorbar) 4 4 4 5 fill stretch; }
 .sw-bst-bar i { position:absolute; left:5px; right:4px; top:4px; bottom:4px; background:rgb(35,43,81); }
 .sw-bst-bar i b { position:absolute; left:0; top:0; bottom:0; width:0%; background:rgb(51,137,255); }
@@ -1097,16 +1116,20 @@ const CSS = `
  * 悬停 FadedMouseOver：底 (73,94,171) 框 (255,231,69) */
 .sw-bst-exit { position:absolute; left:50%; transform:translateX(-50%); bottom:25px;
   width:calc(50% - 10px); height:50px; padding:0; margin:0; cursor:pointer; color:#fff;
-  font-family:inherit; font-size:14px;
+  font-family:inherit; font-size:14px; display:flex; align-items:center; justify-content:center;
   border:12px solid transparent; border-image:var(--bst-exitbg) 12 fill stretch; }
 .sw-bst-exit:hover { border-image:var(--bst-exithover) 12 fill stretch; }
-/* 弹层（OpenOrCloseSorting/FilteringGrid :398-420）：bestiarySpace 整域遮罩 (35,40,83)*0.5 */
+/* 弹层（OpenOrCloseSorting/FilteringGrid :398-420）：bestiarySpace 整域遮罩 (35,40,83)*0.5；
+ * 内面板 chrome 走 ::before/::after（子钮以面板左上为原点：Top 5+28i / 6+34格） */
 .sw-bst-pop { position:absolute; inset:0; background:rgba(35,40,83,0.5); z-index:10; }
-.sw-bst-pop-panel { position:absolute; top:0; right:118px; width:126px;
+.sw-bst-pop-panel { position:absolute; top:0; right:118px; width:126px; }
+.sw-bst-pop-panel::before { content:''; position:absolute; inset:0; pointer-events:none;
   border:12px solid transparent; border-image:var(--bst-popbg) 12 fill stretch; }
+.sw-bst-pop-panel::after { content:''; position:absolute; inset:0; pointer-events:none;
+  border:12px solid transparent; border-image:var(--bst-popborder) 12 fill stretch; }
 .sw-bst-pop-filter { right:0; width:418px; }
-.sw-bst-opt { position:relative; display:block; width:114px; height:26px; padding:0; margin:0 0 0 6px;
-  border:none; cursor:pointer; color:#fff; font-family:inherit; font-size:11px;
+.sw-bst-opt { position:absolute; display:block; width:114px; height:26px; padding:0; margin:0;
+  left:6px; border:none; cursor:pointer; color:#fff; font-family:inherit; font-size:11px;
   background:transparent; }
 .sw-bst-opt .bg { position:absolute; inset:0; border:10px solid transparent;
   border-image:var(--bst-optun) 10 fill stretch; }
@@ -1117,7 +1140,7 @@ const CSS = `
 .sw-bst-opt:hover .hborder { opacity:1; }
 .sw-bst-opt span { position:absolute; inset:0 5px; display:flex; align-items:center;
   justify-content:center; pointer-events:none; white-space:nowrap; overflow:hidden; }
-.sw-bst-fcell { position:relative; width:32px; height:32px; padding:0; margin:0; border:none; cursor:pointer;
+.sw-bst-fcell { position:absolute; width:32px; height:32px; padding:0; margin:0; border:none; cursor:pointer;
   background:transparent; }
 .sw-bst-fcell .bg { position:absolute; inset:0; border:10px solid transparent;
   border-image:var(--bst-optun) 10 fill stretch; }
@@ -1127,7 +1150,7 @@ const CSS = `
 .sw-bst-fcell .hborder { position:absolute; inset:0; opacity:0; pointer-events:none;
   border:10px solid transparent; border-image:var(--bst-opthover) 10 fill stretch; }
 .sw-bst-fcell:not(.dim):hover .hborder { opacity:1; }
-.sw-bst-fcell img { position:absolute; left:1px; top:1px; width:30px; height:30px; image-rendering:pixelated;
+.sw-bst-fcell img { position:absolute; width:30px; height:30px; image-rendering:pixelated;
   pointer-events:none; }
 .sw-bst-fcell.dim img { opacity:0.2; }
 /* MouseText 替代悬浮提示（Main.instance.MouseText 名字/完成度/属性名） */
@@ -1144,6 +1167,14 @@ export interface BestiaryPanelFlow {
   /** 世界难度（掉落行 CanShowItemDropInUI 门：专家/大师行按档显隐） */
   isExpert?(): boolean;
   isMaster?(): boolean;
+  /** ★BJ507 B2：掉落行悬停全量 item tooltip（Main.HoverItem 面——
+   *  UIBestiaryInfoItemLine.DrawMouseOver :130-134 `Main.HoverItem = _infoDisplayItem;
+   *  Main.instance.MouseText("", 0, 0); Main.mouseText = true;` → MouseText 走
+   *  item tooltip 全载荷管线。本仓复用 UI.buildTooltipHtml 单源（BJ407）；
+   *  notes = 掉落条件描述行族（SetBestiaryNotesOnItemCache :136-151 →
+   *  Item.BestiaryNotes → Main.cs:21539-21547 tooltip 末尾逐行追加） */
+  showItemTooltip?(itemId: number, anchor: HTMLElement, notes?: string[]): void;
+  hideItemTooltip?(): void;
   onBack(): void;
 }
 
@@ -1272,7 +1303,7 @@ export class BestiaryPanel {
           </div>
           <div class="sw-bst-body">
             <div class="sw-bst-gridwrap"><div class="sw-bst-grid"></div></div>
-            <div class="sw-bst-info"></div>
+            <div class="sw-bst-info"><div class="sw-bst-infoview"></div></div>
           </div>
           <div class="sw-bst-bottom">
             <div class="sw-bst-bar"><i><b style="width:0%"></b></i></div>
@@ -1286,7 +1317,7 @@ export class BestiaryPanel {
     this.gridWrap = this.panel.querySelector('.sw-bst-gridwrap')!;
     this.gridEl = this.panel.querySelector('.sw-bst-grid')!;
     this.rangeEl = this.panel.querySelector('.sw-bst-range')!;
-    this.infoEl = this.panel.querySelector('.sw-bst-info')!;
+    this.infoEl = this.panel.querySelector('.sw-bst-infoview')!;
     this.pctEl = this.panel.querySelector('.sw-bst-pct')!;
     this.barFillEl = this.panel.querySelector('.sw-bst-bar b') as HTMLElement;
     this.searchEl = this.panel.querySelector('[data-search]') as HTMLInputElement;
@@ -1306,7 +1337,7 @@ export class BestiaryPanel {
       this.updateSearchCancel();
       this.refresh();
     });
-    const box = this.panel.querySelector('[data-searchbox') as HTMLElement;
+    const box = this.panel.querySelector('[data-searchbox]') as HTMLElement;
     this.searchEl.addEventListener('focus', () => box.classList.add('focus'));    // OnStartTakingInput :208-210
     this.searchEl.addEventListener('blur', () => box.classList.remove('focus'));  // OnEndTakingInput :213-218
     const cancel = this.panel.querySelector('[data-searchcancel]') as HTMLButtonElement;
@@ -1419,6 +1450,7 @@ export class BestiaryPanel {
   private closePops(): void {
     this.sortPopEl?.remove(); this.sortPopEl = null;
     this.filterPopEl?.remove(); this.filterPopEl = null;
+    this.hideTip();   // 弹层内钮的悬停提示随层消亡（探针实锤：撤层后 tip 残留）
   }
 
   private toggleSortPop(): void {
@@ -1433,16 +1465,17 @@ export class BestiaryPanel {
     panelEl.style.height = `${BESTIARY_SORT_OPTIONS.length * 28 + 8}px`;
     pop.appendChild(panelEl);
     BESTIARY_SORT_OPTIONS.forEach((key, i) => {
-      // GroupOptionButton<int>(j=Steps 索引)：OptionValue = 注册序真索引
+      // GroupOptionButton<int>(j=Steps 索引)：OptionValue = 注册序真索引；
+      // Top = 5 + (26+2)*i（BuildGrid :73），Left 6（Width 114 HAlign 0.5 于 126 面板）
       const stepIndex = BESTIARY_SORT_KEYS.indexOf(key);
       const b = document.createElement('button');
       b.className = 'sw-bst-opt' + (this.sortSelected === stepIndex ? ' sel' : '');
+      b.style.top = `${5 + 28 * i}px`;
       b.innerHTML = '<i class="bg"></i><i class="hborder"></i><span></span>';
       (b.querySelector('span') as HTMLElement).textContent = sortLabel(key);
       b.addEventListener('click', (e) => { e.stopPropagation(); this.clickSortOption(stepIndex); });   // ClickOption :89-115（音 12 由 bindHoverSound+click）
       b.addEventListener('mouseenter', () => UISfx.hover());
       panelEl.appendChild(b);
-      void i;
     });
     this.gridWrap.appendChild(pop);
     this.sortPopEl = pop;
@@ -1521,7 +1554,21 @@ export class BestiaryPanel {
         }
         b.appendChild(this.filterIconImg(-1));   // 帧(0,4) = Icon_Tags_Shadow 末行首帧（:135-141）
       } else {
-        b.appendChild(this.filterIconImg(def.frame));
+        // GetImage（Filters.cs:44-52/:75-83/:107-116/:139-147）：ByRareCreature =
+        // Icon_Rank_Light 单帧 14² 居中（HAlign/VAlign 0.5 + Left/Top -1 → x 8）；
+        // 其余 = Icon_Tags_Shadow 帧 30² @(0,0)（Left/Top -1 + 0.5 对中合成）
+        if (def.key === 'rare') {
+          const star = document.createElement('img');
+          star.alt = '';
+          star.src = `${UI_BASE}UI_Bestiary_Icon_Rank_Light.png`;
+          star.style.left = '8px';
+          star.style.top = '8px';
+          star.style.width = '14px';
+          star.style.height = '14px';
+          b.appendChild(star);
+        } else {
+          b.appendChild(this.filterIconImg(def.frame));
+        }
         this.bindTip(b, () => (Lang.has(def.nameKey) ? Lang.text(def.nameKey) : def.nameKey));   // ShowButtonName :218-225
         b.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1535,19 +1582,19 @@ export class BestiaryPanel {
     });
   }
 
-  /** Icon_Tags_Shadow 16×5 帧表 30² 帧裁剪（frame<0 = 不可用灰帧(0,4)；ByRareCreature
-   *  走 Icon_Rank_Light 单帧由调用方给 frame=-1 前特判——此处 frame=-1 语义=灰帧） */
+  /** Icon_Tags_Shadow 16×5 帧表 30² 帧裁剪（frame<0 = 不可用灰帧(0,4)；
+   *  Info 页出没行同用本裁剪，FilterProviderInfoElement.GetFilterImage :20-34） */
   private filterIconImg(frame: number): HTMLElement {
     const img = document.createElement('img');
     img.alt = '';
-    img.src = `${UI_BASE}UI_Bestiary_Icon_Tags_Shadow.png`;
     const fx = frame < 0 ? 0 : frame % 16;
     const fy = frame < 0 ? 4 : Math.floor(frame / 16);
-    img.style.backgroundImage = `url(${img.src})`;
+    img.style.left = '1px';
+    img.style.top = '1px';
+    img.style.backgroundImage = `url(${UI_BASE}UI_Bestiary_Icon_Tags_Shadow.png)`;
     img.style.backgroundSize = '480px 150px';
     img.style.backgroundPosition = `${-30 * fx}px ${-30 * fy}px`;
     img.style.backgroundRepeat = 'no-repeat';
-    img.removeAttribute('src');
     return img;
   }
 
@@ -1561,24 +1608,34 @@ export class BestiaryPanel {
   /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度）。
    *  ★rAF 合并(2026-08-13):滚轮/RO/点击风暴每帧至多重建一次——此前每个 wheel
    *  tick 一次全量重建×每格自取解码 = 渲染进程崩溃(用户报"滚动翻两页就崩")
-   *  ★BJ506：筛选/排序/搜索变更不重置页偏移（原版 FixBestiaryRange(+0) 只钳制） */
+   *  ★BJ506：筛选/排序/搜索变更不重置页偏移（原版 FixBestiaryRange(+0) 只钳制）。
+   *  ★BJ506 序词闸：原版 UpdateBestiaryContents 同步执行（关弹层→清选中→重填），
+   *  其后发生的格点击必然落在重填之后；rAF 推迟制造"排队后选中被抹"窗口
+   *  （探针实锤：关筛选弹层同帧点格 → selectRow 渲染后 rAF 清空）。selectSeq/
+   *  refreshSeq 对序——排队之后发生的选中在 refreshNow 中保留（原版终态=新网格
+   *  +该选中；点击行已不在新工作集的边角态 = 详情栏仍显示该条目，与原版
+   *  SelectEntryButton 直填语义同）。 */
   private refreshQueued = false;
+  private refreshSeq = 0;
+  private selectSeq = 0;
   refresh() {
     if (this.refreshQueued) return;
     this.refreshQueued = true;
+    const seq = ++this.refreshSeq;
     requestAnimationFrame(() => {
       this.refreshQueued = false;
-      this.refreshNow();
+      this.refreshNow(seq);
     });
   }
 
-  private refreshNow() {
+  private refreshNow(seq: number) {
     // ★SW-RB14d（FX37-F5）：网格重建=原版 FillBestiarySpaceWithEntries
     //  （UIBestiaryTest.cs:340-347 `DeselectEntryButton()` 先行——筛选/排序/翻页
     //  全部经此重填,OffsetLibrary :111-115 翻页同）⇒ 重建即清选中,详情栏回空白态
     //  （renderInfo 的 !selected 分支=FillInfoForEntry(null) 同位）。旧刀保旧选中,
     //  筛选后详情栏仍显示已不在工作集的条目 = 1:1 偏差（登记 FX37-F5,本刀清偿）。
-    this.selected = null;
+    //  ★BJ506 序词闸：排队后发生的选中（selectSeq > seq）保留不抹（见 refresh 注）。
+    this.selected = this.selectSeq > seq ? this.selected : null;
     this.updateBestiaryTexts();
     const rows = bestiaryRows(this.flow.getTracker());
     sortBestiaryRows(rows, this.sortKey);
@@ -1670,10 +1727,12 @@ export class BestiaryPanel {
           <img class="sw-bst-lyr sw-bst-lyr-glow" alt="" src="${UI_BASE}UI_Bestiary_Slot_Selection.png" />
         `;
         // 编号（TryGettingDisplayIndex :132-141 → NPCNetIdBestiaryInfoElement.
-        // BestiaryDisplayIndex = ContentSamples.NpcBestiarySortingId[NetId]）
+        // BestiaryDisplayIndex = ContentSamples.NpcBestiarySortingId[NetId]——
+        // ★取条目自身 netId（entryId）：重复 creditId 归并行（Nymph×2/Scarecrow1×10）
+        // 各持独立 NetId → 每行编号唯一，与原版 546 全唯一一致）
         const idx = document.createElement('span');
         idx.className = 'sw-bst-idx';
-        idx.textContent = String(bestiarySortingId(r.npcId));
+        idx.textContent = String(bestiarySortingId(r.entryId));
         cell.appendChild(idx);
         const canvas = cell.querySelector('.sw-bst-ico') as HTMLCanvasElement;
         // contextlost 韧性(2026-08-14,用户报"resize 后头像全消失"):canvas 2D
@@ -1687,7 +1746,14 @@ export class BestiaryPanel {
           this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
         });
         // 悬停：音 12 + MouseText(名字/??? )（DrawSelf :143-149 + MouseOver :151-160）
-        cell.addEventListener('mouseenter', () => UISfx.hover());
+        //  ★BJ507 B3：悬停播动画（UIBestiaryEntryIcon.Update :102-109 网格卡
+        //  isPortrait:false → IsHovered 门控）；移开帧冻结（NPC 对象持久,重 hover
+        //  从上次帧继续——animT WeakMap 持久）
+        cell.addEventListener('mouseenter', () => {
+          UISfx.hover();
+          this.animAttach(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
+        });
+        cell.addEventListener('mouseleave', () => this.animDetach(canvas));
         this.bindTip(cell, () => (r.state > UnlockState.NotKnown ? r.name : '???'));
         cell.addEventListener('click', () => this.selectRow(r));   // Click_SelectEntryButton :477-484（无音）
         this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
@@ -1708,8 +1774,12 @@ export class BestiaryPanel {
    *  详情 = 盒满拉伸（UIBestiaryNPCEntryPortrait :32-40 ScaleToFit）+ bgColor 乘算。
    *  未解锁（NotKnown）：R24 修复——只画 Icon_Locked 锁形图 ×alpha0.15
    *  （UIBestiaryEntryIcon.DrawSelf :52-70 `Color.White*0.15f`），完全不画 NPC 表；
-   *  曾画黑影剪影 = 泄露轮廓（brightness0 剪影仍暴露体型/姿态）。 */
-  private drawPortrait(canvas: HTMLCanvasElement, npcId: number, bgMode: 'grid' | 'portrait', unlocked: boolean) {
+   *  曾画黑影剪影 = 泄露轮廓（brightness0 剪影仍暴露体型/姿态）。
+   *  ★BJ507 B3：animFrame = 动画帧（dummy FindFrame 累计次数 t →
+   *  bestiaryDummyFrameIdx）——缺省 undefined 落 ov?.frame ?? 0 静态帧（sweep/
+   *  contextrestored 补画同静态）。钉帧 NPC（DrawOffset.frame 3 条）调用侧不入
+   *  动画集（原版主动画分支 :105-108 else-if 每帧 FindFrame 后覆写回钉帧=静止）。 */
+  private drawPortrait(canvas: HTMLCanvasElement, npcId: number, bgMode: 'grid' | 'portrait', unlocked: boolean, animFrame?: number) {
     if (!unlocked) { this.drawLockedIcon(canvas); return; }
     const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
     const crimson = this.flow.isCrimson?.() ?? false;
@@ -1738,7 +1808,8 @@ export class BestiaryPanel {
       if (ov?.scale != null) scale = ov.scale;
       if (bgMode === 'portrait' && ov?.portraitScale != null) scale = ov.portraitScale;
       const alphaBase = netOv?.alpha ?? 255;
-      const frameIdx = ov?.frame ?? 0;
+      // ★BJ507 B3：动画帧优先（调用侧已保证钉帧/单帧 NPC 不传）；缺省静态 = 旧形
+      const frameIdx = animFrame ?? ov?.frame ?? 0;
       const cx = canvas.getContext('2d');
       if (!cx || !iw) return;
       cx.imageSmoothingEnabled = false;
@@ -1865,6 +1936,85 @@ export class BestiaryPanel {
     });
   }
 
+  // ── ★BJ507 B3：图鉴 dummy 动画引擎（UnlockableNPCEntryIcon 1:1）────────────
+  //  原版形态（UnlockableNPCEntryIcon.cs + UIBestiaryEntryIcon.cs 亲读定谳）：
+  //  • 构造 = 独立 NPC dummy（IsABestiaryIconDummy=true，ai 全 0）；首次 Update
+  //    SimulateFirstHover（:180-191）无条件 FindFrame ×1 → 静态帧 = F(1)（全折叠族 ≡ 帧 0,
+  //    与旧静态帧 0 形一致=零回归）。
+  //  • 每帧主动画门（:102-109）：`!Frame偏移 && (IsPortrait || IsHovered)` → FindFrame。
+  //    ★详情页 Portrait（isPortrait:true）= IsPortrait 恒真 → **动画常驻播放**（打开
+  //    详情页即播,非悬停门控——登记定谳与任务书"悬停时播放"假设的差异）；网格卡
+  //    （isPortrait:false）= 悬停才播、移开帧冻结（NPC 对象持久 → 重 hover 从上次帧继续）。
+  //  • FindFrame 推进速率 = UI Update 每主循环帧（60Hz）——本仓 rAF 走 60Hz 门闸
+  //    步进（tickClockSteps 判例：120Hz 屏不加速;长停滞追赶钳 3 步）。
+  //  • 钉帧 NPC（DrawOffset.Frame 3 条：4/177/266）走 :105-108 else-if 支 = 每帧
+  //    FindFrame 后覆写回钉帧 → 净静止,不入动画集;CustomTexture 单张手绘同静。
+  /** 该 NPC 是否可动画（多帧 && 非钉帧 && 非手绘图——钉帧在原版每帧被覆写=净静止） */
+  private canAnimateNpc(npcId: number): boolean {
+    const ov = BST_DRAW_OFFSET[String(npcId)];
+    if (ov?.frame != null || ov?.customTexture) return false;
+    const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
+    return (VANILLA_NPCS[String(sheetId)]?.frames ?? 1) > 1;
+  }
+  /** FindFrame 累计次数（WeakMap 持久 = 网格卡重 hover 从上次帧继续,原版 NPC
+   *  对象持久语义 :103-107）——初值 1 = SimulateFirstHover 的首帧 */
+  private animT = new WeakMap<HTMLCanvasElement, number>();
+  /** 本帧需 FindFrame 的画布集（Portrait 恒在 = IsPortrait;网格卡 hover 中 = IsHovered） */
+  private animLive = new Set<HTMLCanvasElement>();
+  private animMeta = new WeakMap<HTMLCanvasElement, { npcId: number; mode: 'grid' | 'portrait'; unlocked: boolean }>();
+  private animRaf = 0;
+  private animLastTs = 0;
+  private animAcc = 0;
+  /** 注册进动画集（详情 Portrait 常驻 / 网格卡 mouseenter）。帧冻结复挂 = t 不重置 */
+  private animAttach(canvas: HTMLCanvasElement, npcId: number, mode: 'grid' | 'portrait', unlocked: boolean): void {
+    if (!unlocked || !this.canAnimateNpc(npcId)) return;
+    if (!this.animT.has(canvas)) this.animT.set(canvas, 1);   // SimulateFirstHover 首帧
+    this.animMeta.set(canvas, { npcId, mode, unlocked });
+    this.animLive.add(canvas);
+    this.ensureAnimLoop();
+  }
+  /** 移出动画集（网格卡 mouseleave——帧冻结在离开时值,画布不清 = 原版 DrawSelf 恒画冻结帧） */
+  private animDetach(canvas: HTMLCanvasElement): void {
+    this.animLive.delete(canvas);
+  }
+  private ensureAnimLoop(): void {
+    if (this.animRaf) return;
+    this.animLastTs = 0;
+    this.animAcc = 0;
+    const step = (ts: number) => {
+      this.animRaf = 0;
+      if (!this.panel.isConnected) { this.animLive.clear(); return; }
+      if (!this.animLastTs) this.animLastTs = ts;
+      this.animAcc += ts - this.animLastTs;
+      this.animLastTs = ts;
+      let steps = Math.floor(this.animAcc / 16.6667);   // 60Hz 门闸（原版 UI Update = 主循环帧）
+      if (steps > 0) this.animAcc -= steps * 16.6667;
+      if (steps > 3) steps = 3;   // 长停滞追赶钳 3（tickClockSteps 判例同款）
+      if (steps > 0) {
+        for (const canvas of this.animLive) {
+          if (!canvas.isConnected) { this.animLive.delete(canvas); continue; }
+          const meta = this.animMeta.get(canvas);
+          if (!meta) { this.animLive.delete(canvas); continue; }
+          const t = (this.animT.get(canvas) ?? 1) + steps;
+          this.animT.set(canvas, t);
+          // 帧参数（bestiaryDummyFrameIdx 折叠域）：aiStyle/vx/wet 全自 DrawOffset+NPC 表
+          const ov = BST_DRAW_OFFSET[String(meta.npcId)];
+          const sheetId = meta.npcId > 0 ? meta.npcId : (meta.npcId >= -10 ? 1 : 14);
+          const frames = VANILLA_NPCS[String(sheetId)]?.frames ?? 1;
+          const ai = meta.npcId > 0
+            ? VANILLA_NPCS[String(meta.npcId)]?.aiStyle ?? VANILLA_NPCS[String(sheetId)]?.aiStyle ?? 0
+            : VANILLA_NPCS[String(sheetId)]?.aiStyle ?? 0;
+          const vx = ov?.velocity ?? 0;   // direction 只改 vx 符号（帧序折叠 |vx|）
+          const wet = ov?.wet ?? false;
+          const f = bestiaryDummyFrameIdx(meta.npcId, ai, t, vx, frames, wet);
+          this.drawPortrait(canvas, meta.npcId, meta.mode, meta.unlocked, Math.min(frames - 1, f));
+        }
+      }
+      if (this.animLive.size > 0) this.animRaf = requestAnimationFrame(step);
+    };
+    this.animRaf = requestAnimationFrame(step);
+  }
+
   /** 未解锁占位：Icon_Locked 锁形图居中 ×alpha0.15（UIBestiaryEntryIcon.DrawSelf
    *  :64-69 `spriteBatch.Draw(_notUnlockedTexture, dimensions.Center(), null,
    *  Color.White * 0.15f, ...)` 1:1——零轮廓泄露；原生尺寸 24×34 scale=1）。
@@ -1955,6 +2105,10 @@ export class BestiaryPanel {
       });
       this.infoDraw = { canvas, npcId: r.npcId, st };
       this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
+      // ★BJ507 B3：详情 Portrait = IsPortrait 恒真（UIBestiaryEntryIcon.Update :102-109
+      //  `IsPortrait || IsHovered`）→ 动画常驻播放（非悬停门控）；切换选中时旧画布
+      //  断连由循环自清（!isConnected 出集）
+      this.animAttach(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
       if (st > UnlockState.NotKnown) {
         // 五角星（CreateStarsContainer :108-148）：Stat_Panel 56² @(10,6)，
         // 星 14² x=1+10i，亮 = i < NpcBestiaryRarityStars
@@ -2053,7 +2207,6 @@ export class BestiaryPanel {
       const drops = flattenDropsForNpc(r.npcId, difficulty);
       for (const d of drops) {
         const line = mk('sw-bst-drop');
-        if (st < UnlockState.Stats) void d;
         const icon = this.itemIcon(d.item, 24);
         if (icon) line.appendChild(icon);
         const rt = document.createElement('span');
@@ -2061,25 +2214,35 @@ export class BestiaryPanel {
         const rangeTxt = d.min !== d.max ? ` (${d.min}-${d.max})` : d.min > 1 ? ` (${d.min})` : '';
         rt.textContent = `${rangeTxt} ${st >= UnlockState.DropsWithRates && d.chance !== null ? dropRateText(d.chance) : '???'}`;
         line.appendChild(rt);
-        // 悬停 = 轻量 MouseText 名字（原版 = 全量 item tooltip，登记债 B2）
-        this.bindTip(line, () => Lang.itemName(d.item) ?? `#${d.item}`);
-        void dropCondText; void dropTagText;   // 条件/档位文案随 B2 全量 tooltip 复用
+        // ★BJ507 B2：悬停 = 全量 item tooltip（原版 DrawMouseOver :130-134：
+        //  Main.HoverItem = _infoDisplayItem（SetDefaults(itemId) fresh item）+
+        //  MouseText("",0,0)+mouseText=true → item tooltip 全载荷管线）——
+        //  本仓走 flow 桥 → UI.showFloatingItemTooltip（buildTooltipHtml BJ407 单源,
+        //  非槽位锚点 slot 合成 stack1 无词缀 = fresh item 同相）。
+        //  notes = 掉落条件描述（SetBestiaryNotesOnItemCache :136-151：每条件
+        //  GetConditionDescription 一行 join——本仓 cond/tag 两值域各一行；
+        //  ★键名勘正:产物类别 = Bestiary_ItemDropConditions（两层压一层）,旧拼
+        //  Bestiary.ItemDropConditions 永不命中 = 文案面死键）。空串条件
+        //  （NotExpert 等）不落行 = 原版同相（IsNullOrWhiteSpace 过滤 :141-147）。
+        //  MouseOver 音 12（:127-129）+ 金框 = CSS :hover 既有（BJ506）。
+        //  本行恒 st≥DropsNoRates = icon+率形 → _hideMouseOver 支（<3 锁形行）不可达。
+        const notes: string[] = [];
+        const condTxt = d.cond ? dropCondText(d.cond) : '';
+        if (condTxt) notes.push(condTxt);
+        const tagTxt = d.tag ? dropTagText(d.tag) : '';
+        if (tagTxt) notes.push(tagTxt);
+        line.addEventListener('mouseenter', () => {
+          UISfx.hover();   // MouseOver :127-129（SoundEngine.PlaySound(12)）
+          this.flow.showItemTooltip?.(d.item, line, notes.length ? notes : undefined);
+        });
+        line.addEventListener('mouseleave', () => this.flow.hideItemTooltip?.());
       }
     }
     // ── Misc（SpawnConditionBestiaryInfoElement 族 :42-77）：注册序 Stat_Panel 行 ──
     if (st > UnlockState.NotKnown) {
       for (const c of bestiarySpawnConditions(r.npcId)) {
         const cond = mk('sw-bst-cond');
-        const img = document.createElement('img');
-        img.alt = '';
-        img.src = `${UI_BASE}UI_Bestiary_Icon_Tags_Shadow.png`;
-        const fx = c.priority % 16, fy = Math.floor(c.priority / 16);
-        img.style.backgroundImage = `url(${img.src})`;
-        img.style.backgroundSize = '480px 150px';
-        img.style.backgroundPosition = `${-30 * fx}px ${-30 * fy}px`;
-        img.style.backgroundRepeat = 'no-repeat';
-        img.removeAttribute('src');
-        cond.appendChild(img);
+        cond.appendChild(this.filterIconImg(c.priority));
         const sp = document.createElement('span');
         sp.textContent = c.label;
         cond.appendChild(sp);
@@ -2126,7 +2289,9 @@ export class BestiaryPanel {
     //  refreshNow 的快照,面板开着时击杀/解锁推进后点击,详情栏会显示旧 kills/
     //  NotKnown 态（原版 FillInfoForEntry 的信息元素 Update 每帧重读 tracker）。
     //  重建网格的刷新路径本就传新行,现取对它们等价。
+    //  ★BJ506：selectSeq 推进——排队中 refreshNow 的清选中序词闸据此放行本选中。
     const fresh = bestiaryRows(this.flow.getTracker()).find((w) => w.entry.creditId === r.entry.creditId) ?? r;
+    this.selectSeq++;
     this.selected = fresh;
     this.renderInfo();
     this.scheduleBlankSweep();
@@ -2136,6 +2301,10 @@ export class BestiaryPanel {
     window.removeEventListener('keydown', this.escHandler, true);
     this.closePops();
     this.hideTip();
+    // ★BJ507：动画 rAF 停摆 + 掉落行 tooltip 撤泡（面板关后 tooltip 残留防）
+    if (this.animRaf) { cancelAnimationFrame(this.animRaf); this.animRaf = 0; }
+    this.animLive.clear();
+    this.flow.hideItemTooltip?.();
     if (this.roTimer) { clearTimeout(this.roTimer); this.roTimer = 0; }
     this.ro?.disconnect();
     this.ro = null;

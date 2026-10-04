@@ -296,6 +296,9 @@ export interface SaveData {
    *  原值(键=WldHeaderFields 台账 name,含本仓暂不建模的字段)——导出回写零漂移;
    *  自建世界缺省=无(走台账映射/缺省)。WldHeaderFields.fieldValue 快照优先 */
   wldSnap?: Record<string, number | boolean | string>;
+  /** ★mod 清单（2026-10-04 P1,与 SaveMeta.mods 同构;serializeSave 从 meta 携行）。
+   *  旧档缺省 undefined=零迁移;读档缺失检测在 loadSaveData(mods/bridge 供数) */
+  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number }>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -347,6 +350,11 @@ export interface SaveMeta {
   timeOfDay: number; dayCount: number;
   bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number; moonType?: number;
   seedFlags?: Record<string, boolean>;
+  /** ★mod 清单（2026-10-04 P1）：保存时启用的 mod（name/version/内容计数）。
+   *  三处 meta 装配（SaveFile saveGame/buildSaveParts + SaveClient doSave）经
+   *  mods/bridge 供数——缺一处=worker/主线程路径落盘无键（BJ71 同族防漏喂）。
+   *  旧档缺省 undefined=键不落零迁移；读档缺失检测见 loadSaveData */
+  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number }>;
   /** ★IIIII20b：StarterNPC 换人一次性迁移标记（见 SaveData.header 同名注释） */
   starterSwapMigrated?: boolean;
   /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */
@@ -596,6 +604,8 @@ export function serializeSave(
     //  townRooms → loadSaveData 回填 World → SaveMeta → 此处落 JSON → exportWld
     //  消费。空值不落键=JSON.stringify 丢弃,旧档/自建世界零迁移）
     wldSnap: meta.wldSnap && Object.keys(meta.wldSnap).length ? meta.wldSnap : undefined,
+    // ★mod 清单（2026-10-04 P1）：空=null 不落键（JSON.stringify 丢弃,零 mod 零迁移）
+    mods: meta.mods?.length ? meta.mods : undefined,
     teSnap: meta.teSnap?.length ? meta.teSnap : undefined,
     townRooms: meta.townRooms?.length ? meta.townRooms : undefined,
     idScheme: 'sheet',

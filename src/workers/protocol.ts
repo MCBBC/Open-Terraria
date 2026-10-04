@@ -125,7 +125,10 @@ export type WorldWorkerRequest =
   /** ★IIIII229 ①：Esc 中止请求（fire-and-forget,无 pending）——worker 侧置位
    *  WorldGen.requestWorldGenAbort(),生成 pass 环边界消费（WorldGenerator.QueuedAbort
    *  WorldBuilding.cs:435-439 镜像） */
-  | { id: number; type: 'abortGen' };
+  | { id: number; type: 'abortGen' }
+  /** ★mod 桥(2026-10-04,fire-and-forget 无回执;幂等可重推)——mod 物品/tile 稳定
+   *  id 增量,worker 侧接长恒等域+补双向映射(mods/bridge.ts 供数,Client 握手后推) */
+  | { id: number; type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]> } };
 
 export type WorldWorkerEvent =
   | { id: number; type: 'ready' }

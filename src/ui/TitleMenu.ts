@@ -24,6 +24,7 @@ import { menuTimeInfo } from '../render/MenuBackground';
 import { decayCelestialModY } from '../render/SkyRenderer';
 import { openAssetDiagPanel } from './AssetDownloadUI';
 import { achievementsPanelOpen } from './AchievementsUI';
+import { openModsPanel } from '../mods/modsPanel';
 import type { GenScreenSeedFlags } from '../vui/states/UIWorldLoadState';
 
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
@@ -310,6 +311,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="sp">${Lang.text('LegacyMenu.12')}</div>
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
         ${this.flow.onAchievements ? `<div class="sw-title-btn" data-act="ach">${Lang.text('LegacyMenu.131')}</div>` : ''}
+        <div class="sw-title-btn" data-act="mods">${Lang.text('Mods.SandboxWorld.Menu.Mods')}</div>
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div>
@@ -383,6 +385,7 @@ export class TitleMenu {
     on('sp', () => flow.onSinglePlayer());
     on('mp', () => flow.onMultiplayer());
     on('ach', () => flow.onAchievements?.());   // ★SW-FX18 成就页（menu[131] 同位）
+    on('mods', () => openModsPanel());          // ★mod loader(2026-10-04):mods 管理面板
     on('set', () => flow.onSettings());
     on('buy', () => window.open('https://store.steampowered.com/app/105600/Terraria', '_blank', 'noopener'));
     on('replog', () => window.open('https://github.com/Vinlic/terraria-replica-build-notes', '_blank', 'noopener'));

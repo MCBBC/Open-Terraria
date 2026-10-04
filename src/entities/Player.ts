@@ -6616,9 +6616,36 @@ export class Player extends Entity {
         // releaseDash`）——冻结/结网/石化不能冲刺
         if (this.dashT > 0) this.dashT--;   // :21268-21271 每帧向 0 收敛
         else if (this.dashT < 0) this.dashT++;
-        if (!this.cced && this.inputX !== 0 && this.prevInputX === 0) {
-          const dir = this.inputX;
-          if (dir > 0 ? this.dashT > 0 : this.dashT < 0) {
+        // ★BJ508（2026-10-04）Quick Dash 键面（DoCommonDashHandle :21738-21747）：
+        //   `controlDash && !CCed && releaseDash` → num = direction（facing），持反向
+        //   时改持向（num3 = controlRight−controlLeft == −num2 → num4 = num3）。
+        //   本路径不受双击冲刺设置门（:21737 flag 只门双击支 :21749/:21764）；
+        //   releaseDash 闩 = :21779-21782 `dashing && controlDash → releaseDash=false`
+        //   （按住不重触），Game 注入面 `releaseDash ||= !inputDash`（TriggersSet.cs
+        //   :826 同序）任一拍松键即重臂。inputX === −facing ⟺ num3 == −num2
+        //   （inputX 合值与 num3 同源同值；keyNum≠0 ⟹ inputX∈{0,±keyNum}）。
+        const dashKeyNum = this.inputDash && !this.cced && this.releaseDash
+          ? (this.inputX === -this.facing ? this.inputX : this.facing)
+          : 0;                                  // num（:21736 初值 0=键面不触发）
+        let dashed = false;                     // DoCommonDashHandle dashing 出参（:21727）
+        // 入支序 = 原版右支（:21749 `(controlRight && releaseRight) & flag) || num == 1`）
+        // 先、左支（:21764）后——双击沿带 flag 门（双击冲刺设置），num 支无 flag 门。
+        // keyNum≠0 时 inputX∈{0,±keyNum} ⇒ 双击沿与键面同拍必同向,两支可并单块。
+        const dblTap = options.data.doubleTapDash && !this.cced
+          && this.inputX !== 0 && this.prevInputX === 0;   // 双击沿（release 语义）+ flag 门
+        const dashEntryDir =
+          dashKeyNum === 1 || (dblTap && this.inputX > 0) ? 1
+            : dashKeyNum === -1 || (dblTap && this.inputX < 0) ? -1
+            : 0;
+        const dashDir = dashKeyNum !== 0 ? dashKeyNum : this.inputX;   // 冲向（键面优先）
+        if (dashEntryDir !== 0) {
+          const dir = dashDir;
+          // 执行门（:21751 `dashTime > 0 || num == 1` / :21766 `dashTime < 0 || num == -1`
+          //  ——键面即触不等窗,双击沿须窗活）
+          const dashExecute = dashEntryDir === 1
+            ? (this.dashT > 0 || dashKeyNum === 1)
+            : (this.dashT < 0 || dashKeyNum === -1);
+          if (dashExecute) {
             // 骑乘门（:21579 `dash <= 0 || (mount.Active && !MountID.Sets.CanDash[
             // mount.Type]) → return`——表={56..65}，MountID.cs:11 字面）。★治理批
             // B6②（2026-08-31）：旧 F5① 落地只放行 dash==6 的 Chillet 族 62-65，
@@ -6633,6 +6660,7 @@ export class Player extends Entity {
               this.dashT = 0;
             } else if (MOUNT_DASH6_TYPES.has(this.mount.type)) {
               // dash==6 就绪分支（DoCommonDashHandle 尾 :21710-21731 dashing 支）
+              dashed = true;              // ★BJ508 dashing 出参（闩清位臂消费）
               this.dashT = 0;
               this.mountDash6Active = true;                       // dashType=6 生效位（:21211-21213）
               this.facing = dir;                                  // direction 随冲向（sign 判定用）
@@ -6642,6 +6670,7 @@ export class Player extends Entity {
               if (this.dashWallAhead(dir)) this.vx /= 2;          // :11720-11727 头部撞墙减半
               this.dashDelay = -1;                                // :21728 进入滑行态
             } else {
+            dashed = true;                // ★BJ508 dashing 出参（闩清位臂消费）
             this.dashT = 0;               // :21305 触发即清双击窗
             this.mountDash6Active = false;   // 配饰冲刺取代 dash6 语境
             this.dashDir = dir;
@@ -6666,9 +6695,12 @@ export class Player extends Entity {
             // 门集 = MountID.Sets.CanDash {56..65}（MountID.cs:11 字面）。
             this.dashT = 0;
           } else {
-            this.dashT = dir * 15;        // :21316-21321 首击登记双击窗（dashTime ±15）
+            this.dashT = dir * 15;        // :21761/:21776 首击登记双击窗（右 15/左 −15）
           }
         }
+        // ★BJ508 releaseDash 闩清位臂（:21779-21782 `if (dashing && controlDash)
+        //   releaseDash = false`）——发起后按住不重触;置位臂在 Game 注入面（:826）
+        if (dashed && this.inputDash) this.releaseDash = false;
       }
       // 日曜冲撞命中（DashMovement :21293-21352：solarDashing && dashDelay<0 逐帧
       // 扫敌——【不反弹不结束滑行】,滑行期每帧可多目标;命中置 nPC.immune[whoAmI]=6
@@ -9187,6 +9219,15 @@ export class Player extends Entity {
   eocDash = 0;
   eocHitId = -1;
   prevInputX = 0;
+  /** ★BJ508 Quick Dash 键电平（controlDash，TriggersSet.cs:825 `p.controlDash = Dash`
+   *  ——PlayerInput KeyStatus["Dash"] 同源，Game 注入面写）。缺省无绑定 = 原版
+   *  Keyboard 档（PlayerInput.cs:2069-2108 Redigit 预设无 Dash 条目），设置页自绑 */
+  inputDash = false;
+  /** releaseDash 闩（★BJ508）——置位臂 TriggersSet.cs:826 `p.releaseDash |=
+   *  !p.controlDash`（Game 注入面逐拍同序执行）；清位臂 DoCommonDashHandle
+   *  :21779-21782 `if (dashing && controlDash) releaseDash = false`。语义 = 冲刺
+   *  发起后按住键不重触，任意一拍松键即重臂 */
+  releaseDash = false;
   /** 水面行走状态（水上漂靴族：站在液面，按 ↓ 下潜） */
   onWaterSurface = false;
   /** 所在沙漠区（Game 每帧同步 scene.zoneDesert） */

@@ -17,6 +17,7 @@ import { tileAnim } from '../render/TileAnim';
 import { renderEnv, plates428Pressed } from '../render/VanillaTiler';
 import { gameTickCount } from '../core/GameTime';
 import { buildBakeSnapshot, snapshotBuffers, type BakeWorkerResponse } from './BakeProtocol';
+import { getModBridgePayload } from '../mods/bridge';
 
 // createImageBitmap 为浏览器全局（worker/主线程均可用;node 测试环境 undefined
 // → attach 探测失败=降级主线程路径）。
@@ -124,7 +125,7 @@ export class BakeClient {
       pushImg(f, src, maples);
     }
     for (const f of this.atlas.vimages.keys()) {
-      if (!/^vanilla\/(Tiles|Wall)_/.test(f)) continue;
+      if (!/^vanilla\/(Tiles|Wall)_/.test(f) && !f.startsWith('mod/')) continue;
       const src = this.atlas.vimages.get(f)!;
       pushImg(f, src, vimg);
     }
@@ -135,7 +136,9 @@ export class BakeClient {
         .catch(() => { /* 同上 */ }));
     }
     await Promise.all(jobs);
-    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList },
+    // ★mod 桥(2026-10-04):mod tile defs 随首波 ship 直落(零 mod=undefined,worker 侧零变化)
+    const modTiles = getModBridgePayload()?.modTileDefs;
+    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles },
       [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp), ...sheetList.map((s) => s.bmp)]);
   }
 
