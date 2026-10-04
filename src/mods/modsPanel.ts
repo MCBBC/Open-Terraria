@@ -5,6 +5,7 @@
 import { ModStore, type ModRow } from './store';
 import { readModPack } from './pack';
 import { getModLoadResult } from './loader';
+import { loadModConfigValues, type ModConfigState } from './config';
 import { Lang } from '../i18n/Lang';
 
 let panel: HTMLElement | null = null;
@@ -33,6 +34,12 @@ export function openModsPanel(): void {
       #sw-mods-panel .errs { margin-top: 10px; font-size: 12px; color: #ff9a9a;
         white-space: pre-wrap; }
       #sw-mods-panel .hint { margin-top: 8px; font-size: 12px; color: #8fd08f; }
+      #sw-mods-panel .cfg { padding: 6px 10px; background: #26263a; border-radius: 4px; margin: 6px 0; }
+      #sw-mods-panel .cfgrow { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+      #sw-mods-panel .cfgrow label { flex: 1; font-size: 12px; color: #b8b8cc; }
+      #sw-mods-panel .cfgrow input[type=text], #sw-mods-panel .cfgrow input[type=number] {
+        width: 90px; background: #15151f; color: #e8e8f0; border: 1px solid #44445a;
+        border-radius: 3px; padding: 2px 6px; }
       #sw-mods-panel .empty { color: #9a9ab0; padding: 14px 0; text-align: center; }
       #sw-mods-panel .close { position: absolute; top: 8px; right: 12px; cursor: pointer;
         font-size: 20px; color: #c9c9dd; }
@@ -86,6 +93,49 @@ export function openModsPanel(): void {
     for (const row of rows) listEl.appendChild(rowEl(row));
   };
 
+  // ---- 配置编辑(P2):声明式 config 表 → 内联控件;变更即持久化(重载后生效面
+  //      由 mod 自身读取语义决定——sw.config.get 恒读最新值) ----
+  const configStates = new Map<string, ModConfigState>();
+  const attachConfig = (root: HTMLElement, row: ModRow): void => {
+    const manifest = getModLoadResult()?.loaded.find((l) => l.manifest.id === row.id)?.manifest;
+    const cfg = manifest?.config;
+    if (!cfg || Object.keys(cfg).length === 0) return;
+    void loadModConfigValues(row.id, cfg).then((state) => {
+      configStates.set(row.id, state);
+      const block = document.createElement('div');
+      block.className = 'cfg';
+      for (const [k, e] of Object.entries(cfg)) {
+        const line = document.createElement('div');
+        line.className = 'cfgrow';
+        const label = document.createElement('label');
+        label.textContent = e.label ?? k;
+        let input: HTMLInputElement;
+        if (e.type === 'bool') {
+          input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = state.get(k) === true;
+          input.addEventListener('change', () => state.set(k, input.checked));
+        } else if (e.type === 'number') {
+          input = document.createElement('input');
+          input.type = 'number';
+          input.value = String(state.get(k));
+          if (e.min !== undefined) input.min = String(e.min);
+          if (e.max !== undefined) input.max = String(e.max);
+          input.addEventListener('change', () => state.set(k, Number(input.value)));
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+          input.value = String(state.get(k));
+          input.addEventListener('change', () => state.set(k, input.value));
+        }
+        line.appendChild(label);
+        line.appendChild(input);
+        block.appendChild(line);
+      }
+      root.appendChild(block);
+    }).catch(() => { /* 配置读坏=跳过编辑区 */ });
+  };
+
   const rowEl = (row: ModRow): HTMLElement => {
     const div = document.createElement('div');
     div.className = 'row';
@@ -105,6 +155,7 @@ export function openModsPanel(): void {
       await store.setEnabled(row.id, (e.target as HTMLInputElement).checked);
       hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
     });
+    attachConfig(div, row);
     div.querySelector('[data-act=uninstall]')?.addEventListener('click', async () => {
       await store.remove(row.id);
       hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');

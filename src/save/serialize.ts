@@ -432,7 +432,10 @@ export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: U
   let i = 0;
   while (i < n) {
     const raw = st.type[i];
-    const t = stableMap ? (raw === 0 ? 0 : stableMap[raw]) : raw;
+    // ★P4 红蓝修正(C2 写侧对称):未映射 internal id(mod 缺桥/整批拒载会话)→
+    //   stable 0=空气且不写 fx/fy——旧实现 t=undefined 时 varint 落 0 但 `t!==0`
+    //   仍写 fx/fy,与读侧(tRaw=0 跳帧)失步=全图错位
+    const t = stableMap ? (raw === 0 ? 0 : stableMap[raw] ?? 0) : raw;
     const fx = st.frameX[i], fy = st.frameY[i];
     let run = 1;
     // 游程比较必须 raw 对 raw（t 是映射后的稳定 id，与原始 id 比较恒不等 →

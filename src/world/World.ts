@@ -231,6 +231,10 @@ export class World {
   /** ★IIIII20b：StarterNPC 换人一次性迁移标记（SaveData.header.starterSwapMigrated；
    *  旧档缺省=undefined 未迁移——换人族世界首载修复客户端时把历史伪影向导顶替并打标） */
   starterSwapMigrated?: boolean;
+  /** ★mod 清单随档（2026-10-04 P3）：存档头 mods 的 id/version 投影（loadSaveData
+   *  从 data.mods 落）——mainFlow enterGame 对账启用集弹缺失 toast（占位物语义
+   *  的用户可见面）。自建世界/旧档=undefined */
+  saveMods?: Array<{ id: string; version: string }>;
   /** FTW 克脑重力倒置锚（原版 NPC.brainOfGravity 静态槽）：克脑 266 二阶段每 tick
    *  写实体 id（NPC.cs:32650-32653，bossAI.brainOfCthulhuAI）；消费端 Player.fixedUpdate
    *  距脑 <4000px → gravDir=-1（Player.cs:26489-26496 forcedGravity）；锚失效/非 266

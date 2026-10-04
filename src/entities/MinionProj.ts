@@ -393,7 +393,14 @@ const CONTACT_CD_TABLE: Record<number, ContactCd> = {
   696: 30,                              //   Y2 报告③误档核销——AI_138 城镇臂写梯归档）
   755: -1,                             // 血蝙蝠（:7792,localCD=-1=攻击轮次免疫,tHit/bHit 承载）
   758: { kind: 'idStatic', cd: 10 },   // 吸血蛙（:7825——旧误 30t → 正轨）
+  759: 15,                             // ★BJ511 雀杖（:7843-7844 usesLocalNPCImmunity+
+                                       //   localNPCHitCooldown=15）——表缺曾落 -2 全局窗族,
+                                       //   攻击窗每命中开 10t 窗锁荆鞭/冰雪回旋镖（用户复报）
   833: 10,                             // 沙漠虎本体（:8095,A① 改链后仍传显式 10 存档）
+  864: 10,                             // ★BJ511 刃杖（Smolstar :8286-8299 usesLocalNPCImmunity+
+                                       //   localNPCHitCooldown=10;原版写梯更显式 864 支
+                                       //   :14131-14140 immune[owner]=0 清窗）——表缺曾落 -2
+                                       //   全局窗族,同 759 病形（普查第二发）
   834: 10,
   835: 10,
   946: -1,                             // 泰拉棱镜（:8941,同 755 轮次免疫语义）

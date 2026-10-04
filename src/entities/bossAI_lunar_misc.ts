@@ -2096,6 +2096,12 @@ export function drakomireBreathAI(e: Enemy, game: GameHooks, player: Player | nu
 // ---------------------------------------------------------------------------
 export function solarFlareAI(e: Enemy, game: GameHooks, player: Player | null): void {
   if (e.spawnAlpha < 220) e.spawnAlpha = Math.min(220, e.spawnAlpha + 40);   // :21465-21469
+  // ★BJ510：rotation += 0.1×direction（NPC.cs:21584）——direction 字段默认 +1
+  // （Entity.cs:20）且 AI_009 516 段无 direction 写面 → 恒 +0.1/tick 自旋；
+  // spriteDirection 字段默认 -1 恒不翻（NPC.cs:6522）= 本仓 rotationDriven
+  // （aiStyle 9 ∈ Renderer 旋转族）已禁 facing 镜像同相。visAngle 承载本体旋转
+  // （render 侧 ctx.rotate）+ 残影 gRot + BJ510 队列 rot 三面单源。
+  e.visAngle += 0.1;
   const p = player && !player.dead ? player : null;
   if (e.ai0 === 0) {
     e.ai0 = 1;                                      // :21470-21472

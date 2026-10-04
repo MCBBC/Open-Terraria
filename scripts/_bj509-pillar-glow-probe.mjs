@@ -123,6 +123,6 @@ const snap = await page.evaluate(() => {
 });
 console.log('SNAP:', JSON.stringify(snap));
 const img = await page.screenshot({ type: 'png' });
-writeFileSync('/tmp/bj509-night3.png', img);
-console.log('saved /tmp/bj509-night3.png');
+writeFileSync('/tmp/bj509-after.png', img);
+console.log('saved /tmp/bj509-after.png');
 await browser.close();

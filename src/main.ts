@@ -59,6 +59,7 @@ import { assetVersion } from './net/AssetCache';
 import { RemasterManager } from './remaster/RemasterManager';
 import { initResourcePacks, type ResourcePackManager } from './resources/ResourcePackManager';
 import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
+import { modBuffIconUrl } from './mods/buffs';
 
 // canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
@@ -250,12 +251,18 @@ async function loadAssets() {
     remasterRuntime = new RemasterRuntime(atlas);
     remasterManager = new RemasterManager(remasterRuntime, () => assetVersion());
     const rt = remasterRuntime;
+    // ★mod buff 图标链直挂(P2):无条件初挂(否则零 remaster 包时 mod buff 图标永不
+    //  解析;onApplied 重入也走同组合=幂等)。mod 伪 id(9000+)→mod objectURL,
+    //  miss 落 remaster/原版
+    setRemasterBuffIcon((id) => modBuffIconUrl(id) ?? rt.buffIconUrl(id));
     remasterRuntime.onApplied = (info) => {
       // UI 派生缓存:物品图标 dataURL 缓存按物品 id 键不自动失效(Atlas 替换须清);
       // buff 栏直链 <img src> 经钩子取 runtime 的 objectURL 覆盖。
       // 资源包物品图(vanilla/Item_N.png,M13)同须清——vicon 整图直取后旧 dataURL 钉死
       if (info.hasItemAtlas || info.files.some((f) => /^vanilla\/Item_\d+\.png$/.test(f))) clearIconCache();
-      setRemasterBuffIcon((id) => rt.buffIconUrl(id));
+      // ★mod buff 图标覆盖链(P2):mod 伪 vanillaBuff(9000+)优先命中 objectURL,
+      //   miss 落 remaster/原版——原版域零扰动(mod id 不相交)
+      setRemasterBuffIcon((id) => modBuffIconUrl(id) ?? rt.buffIconUrl(id));
     };
     try {
       // ★超时保护:IDB v2 升级遇旧标签页持有 v1 连接不让路时 openDb 永久 pending
@@ -870,6 +877,31 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //   失败只告警不阻断启动（资源包同款"增强不是必需"哲学；零 mod=零副作用）
   try {
     const { loadModsPhase1, getModLoadResult } = await import('./mods/loader');
+    // ★桌面 mods 目录发现(P3):<userData>/mods/*.swmod 经 /mods/index.json 同源
+    //   发现→自动安装/版本覆盖/启用(目录=安装真相源;web 版走面板 zip 导入)。
+    //   失败静默跳过(目录同步是增强不是必需)
+    if ((window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell) {
+      try {
+        const idx = await fetch('mods/index.json').then((r) => r.json()) as { mods?: string[] };
+        const { ModStore } = await import('./mods/store');
+        const { readModPack } = await import('./mods/pack');
+        const store = new ModStore();
+        for (const file of idx.mods ?? []) {
+          const buf = await fetch(`mods/${encodeURIComponent(file)}`).then((r) => r.arrayBuffer());
+          const bytes = new Uint8Array(buf);
+          const pack = readModPack(bytes);
+          const rows = await store.listRows();
+          const existing = rows.find((r) => r.id === pack.manifest.id);
+          if (!existing || existing.version !== pack.manifest.version) {
+            await store.install(pack.manifest, bytes);
+          } else if (!existing.enabled) {
+            await store.setEnabled(pack.manifest.id, true);
+          }
+        }
+      } catch (err) {
+        console.warn('[mods] 桌面目录同步失败(跳过):', err);
+      }
+    }
     await loadModsPhase1();
     // ★mod 调试句柄（2026-10-04;__swAtlas/__swResourcePacks 同族先例）：
     //   result()=装载结果;install(bytes)=装 .swmod zip 字节(重载生效)。探针用

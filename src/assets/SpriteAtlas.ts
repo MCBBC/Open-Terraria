@@ -326,7 +326,11 @@ export class SpriteAtlas {
         const sheet = `vanilla/NPC_${npcId}.png`;
         const img = this.ensureVImage(sheet); // 懒加载+去重+失败负缓存(2026-08-13 前手动 new Image 无 onerror:404 时每次调用重发请求)
         if (!img) return null;
-        const frames = (vanillaNpcFrames as Record<string, number>)[key] ?? 1;
+        // 帧数权威链:静态提取表 → 运行时注册表(mod NPC 的 frames 落在
+        // VANILLA_NPCS;★GLM娘实验批 G1——此前只读静态表,mod NPC 整条竖带当
+        // 一帧画)。vanilla id 两源同数据,零漂移。
+        const frames = (vanillaNpcFrames as Record<string, number>)[key]
+          ?? vanillaNpc(npcId)?.frames ?? 1;
         const fh = Math.max(1, Math.floor(img.height / frames));
         const meta: VanillaNpcMeta = { sheet, frameW: img.width, frameH: fh, count: frames };
         this.lazyNpcMeta.set(key, meta);
@@ -806,6 +810,7 @@ export class SpriteAtlas {
 
 // ---- 物品图标：一律原版 Item_N（旧 Maples UI/ 图标层已整体移除） ----
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { vanillaNpc } from '../data/vanillaNpcs';   // mod NPC frames 运行时权威(G1 补链)
 
 /** DrawAnimationVertical(int.MaxValue, 3) 的静态等价(IsFood 全表) */
 const FOOD = { dur: Number.MAX_SAFE_INTEGER, n: 3, static: true };

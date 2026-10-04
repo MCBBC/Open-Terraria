@@ -74,7 +74,9 @@ const fakeHooks = (w: World, p?: Player, enemies: unknown[] = []) => ({
   scene: {},
 });
 
-const mkPlayer = (w: World): Player => new Player(40 * 16, 27 * 16, new Inventory());
+// 出生点 tile 80（世界中部）——40*16=640 恰压 bordersMovement 左界 B=640 钳制线，
+// 左向冲刺会被 `x<B → x=B; vx=0`（Player.ts:9707）边界钳清速，与被测面无关。
+const mkPlayer = (w: World): Player => new Player(80 * 16, 27 * 16, new Inventory());
 
 const tick = (p: Player, w: World): void => { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); };
 
@@ -172,11 +174,15 @@ describe('BJ508② 装备冲刺配饰 + 按键 → 冲刺（触发链）', () =>
     const p = mkPlayer(w);
     p.inv.armor[3] = { id: iid(3097), stack: 1 };
     p.facing = 1;
-    p.inputX = -1;                                       // 按住左（反向）
-    armDash(p, w);
+    armDash(p, w);                                       // inputX=0 臂位（facing 不翻转）
+    // 朝向锁定期（挥砍 animBusy && !itemUseTurn → 5442 翻转门闭）+ 本拍置反向：
+    // facing 恒 1 而持向为左 = 原版「持反向改持向」唯一可达语境
+    p.itemAnimTicks = 20;
+    p.itemUseTurn = false;
+    p.inputX = -1;
     injectDash(p, true);
     tick(p, w);
-    expect(p.vx).toBeCloseTo(-14.5, 5);                  // 冲向 = 持向（左）
+    expect(p.vx).toBeCloseTo(-14.5, 5);                  // 冲向 = 持向（左，反向）
   });
 
   it('持同向按键 → 朝 facing 冲（num3 == num2 不翻向）', () => {
@@ -278,6 +284,7 @@ describe('BJ508④ 与双击面协同（原版语义）', () => {
     expect(p.releaseDash).toBe(false);
     for (let i = 0; i < 120; i++) { injectDash(p, false); tick(p, w); }   // 松键走完滑行+冷却
     expect(p.dashDelay).toBe(0);
+    p.x = 80 * 16;                                       // 回中（滑行漂移近 bordersMovement 右界,B=640 钳制与被测面无关）
     injectDash(p, true); tick(p, w);                     // 再按 → 重臂发起
     expect(p.vx).toBeCloseTo(16.9, 5);
     expect(p.releaseDash).toBe(false);

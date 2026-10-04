@@ -70,7 +70,7 @@ async function openDetailAndSample(creditIdx) {
     if (!c) return null;
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
     let sum = 0;
-    for (let i = 3; i < d.length; i += 4) sum += d[i];
+    for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];   // RGB 和（portrait 底图全不透明,α 盲）
     return { w: c.width, h: c.height, alphaSum: sum };
   });
 }
@@ -81,7 +81,7 @@ const s2 = await page.evaluate(() => {
   const c = document.querySelector('.sw-bst-portraitbox canvas');
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let sum = 0;
-  for (let i = 3; i < d.length; i += 4) sum += d[i];
+  for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
   return sum;
 });
 await wait(450);
@@ -89,31 +89,56 @@ const s3 = await page.evaluate(() => {
   const c = document.querySelector('.sw-bst-portraitbox canvas');
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let sum = 0;
-  for (let i = 3; i < d.length; i += 4) sum += d[i];
+  for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
   return sum;
 });
 ok(`B3 详情 Portrait 动画帧推进（α和采样 ${s1?.alphaSum}→${s2}→${s3}）`, s1 && (s1.alphaSum !== s2 || s2 !== s3));
 await page.screenshot({ path: '/tmp/bj507-detail.png' });
 
-// 找单帧 NPC 对照（frames=1 → 详情静态）——遍历卡片逐个点开采样两拍
-let staticVerified = false;
-for (let i = 0; i < Math.min(12, targets.length) && !staticVerified; i++) {
-  const a = await openDetailAndSample(i);
-  await wait(500);
-  const b = await page.evaluate(() => {
+// 找单帧 NPC 对照（frames=1 → 详情静态）：蠕虫段卡（DevourerHead）在城镇 NPC 序之后——
+// 跨页查找（▶ = .sw-bst-imgbtn 第二枚）→ 点卡采样两拍
+let staticOk = { found: false, equal: false };
+for (let pg = 0; pg < 15 && !staticOk.found; pg++) {
+  staticOk = await page.evaluate(async () => {
+    const cells = [...document.querySelectorAll('.sw-bst-cell')];
+    const idx = cells.findIndex((c) => c.dataset.credit === 'DevourerHead');
+    if (idx < 0) return { found: false };
+    cells[idx].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
     const c = document.querySelector('.sw-bst-portraitbox canvas');
-    if (!c) return null;
-    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-    let sum = 0;
-    for (let k = 3; k < d.length; k += 4) sum += d[k];
-    return sum;
+    if (!c) return { found: true, equal: false };
+    const sample = () => {
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let sum = 0;
+      for (let k = 0; k < d.length; k += 4) sum += d[k] + d[k + 1] + d[k + 2];
+      return sum;
+    };
+    const a = sample();
+    await new Promise((r) => setTimeout(r, 600));
+    return { found: true, equal: a === sample() };
   });
-  if (a && a.alphaSum === b) staticVerified = true;
+  if (!staticOk.found) {
+    const nav = await page.evaluate(() => {
+      const btns = document.querySelectorAll('.sw-bst-imgbtn');
+      (btns[1] ?? null)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return btns.length;
+    });
+    if (!nav) break;
+    await wait(700);
+  }
 }
-ok(`B3 单帧 NPC 详情静态对照（存在两拍相等的卡=${staticVerified}）`, staticVerified);
+ok(`B3 单帧 NPC 详情静态对照（找到=${staticOk.found}, 两拍相等=${staticOk.equal}）`, staticOk.found && staticOk.equal);
 
-// 网格卡 hover 动画（回到第一页第一卡：若其为多帧 NPC → hover 期间 canvas 变化）
-await page.evaluate(() => window.__bj507Panel && window.__bj507Panel.refreshNow?.());
+// 网格卡 hover 动画（◀ 回第一页：第一卡=向导 22,velocity=1 → hover 行走动画）
+for (let pg = 0; pg < 16; pg++) {
+  const has = await page.evaluate(() => !!document.querySelector('.sw-bst-cell[data-credit="Guide"]'));
+  if (has) break;
+  await page.evaluate(() => {
+    const btns = document.querySelectorAll('.sw-bst-imgbtn');
+    (btns[0] ?? null)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await wait(450);
+}
 await wait(600);
 const gridHover = await page.evaluate(() => {
   const cell = document.querySelector('.sw-bst-cell');
@@ -156,7 +181,12 @@ const h3 = await page.evaluate(() => {
 ok(`B3 网格卡移开帧冻结（${h2}→${h3} 相等）`, h2 === h3);
 
 // ── B2：掉落行 hover 全量 tooltip ──
-// 第一卡详情开着（多帧史莱姆族=凝胶 100% 掉率行）
+// 翻页对照后详情仍是蠕虫段（无掉落行）——重开第一卡（向导=城镇 seq 掉落行）
+await page.evaluate(() => {
+  const cell = document.querySelector('.sw-bst-cell[data-credit="Guide"]');
+  cell?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+});
+await wait(700);
 const dropRow = await page.evaluate(() => {
   const line = document.querySelector('.sw-bst-drop');
   if (!line) return null;

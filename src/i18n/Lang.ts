@@ -8,6 +8,7 @@ import { languageManager } from './LanguageManager';
 import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET, TILE_NAME_ZH_BY_ID, TILE_NAME_EN_BY_ID, ITEM_NAME_ZH_BY_ID, ITEM_NAME_EN_BY_ID, WALL_NAME_ITEM_BY_WALL, WALL_NAME_ZH_BY_ID, WALL_NAME_EN_BY_ID } from './idNames.generated';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { modNpcName } from '../data/vanillaNpcs';
 import { worldgenProgressKey, worldgenProgressStringKey } from './worldgenKeys';
 
 // ---- ★BJ334(2026-09-24)负 netID 名字表（Lang.cs:520-539 1:1） ----
@@ -172,6 +173,9 @@ export const Lang = {
    * 越界(<-65)=原版 LocalizedText.Empty → null。
    */
   npcName(netId: number): string | null {
+    // ★mod NPC 名（2026-10-04 P3）：id≥800 段经注册表 def.name 直取（NPC_NAME_BY_ID
+    //   无 mod 行）——图鉴/对话框/名牌等 Lang.npcName 消费面零改贯通
+    if (netId >= 800) return modNpcName(netId);
     let internal: string | undefined;
     if (netId < 0) {
       const idx = -netId - 1;                                       // Lang.cs:525 负表下标

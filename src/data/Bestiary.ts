@@ -19,6 +19,7 @@
 // 排序/稀有度/出没环境三张静态表见文件尾部（vanilla-bestiary.json /
 // vanilla-bestiary-spawn.json，tools/extract-bestiary*.mjs 生成）。
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
+import { VANILLA_NPCS } from './vanillaNpcs';
 import {
   BESTIARY_HIDE_IDS,
   BESTIARY_CREDIT_REDIRECT,
@@ -193,6 +194,22 @@ export function bestiaryEntries(): BestiaryEntryDef[] {
       sources = [killSource(id, isQuick(id))];
     }
     out.push({ id, creditId: bestiaryCreditId(id), kind, sources, goldGate });
+  }
+  // ★mod NPC 条目（2026-10-04 P3）：mod 段（id≥800）敌怪走击杀解锁（50 杀全解锁/
+  //   10 杀缩略,原版 Enemy 家族同门）——creditId=String(id)（NPC_NAME_BY_ID 无
+  //   mod 行,bestiaryCreditId 回退分支同值）;缓存构建于首次调用（启动链 mod 注册
+  //   先于菜单,时序安全）。城 NPC=chat 解锁。
+  for (const key of Object.keys(VANILLA_NPCS)) {
+    const id = Number(key);
+    if (!(id >= 800)) continue;
+    const v = VANILLA_NPCS[key]!;
+    out.push({
+      id,
+      creditId: String(id),
+      kind: v.townNPC ? 'town' : 'enemy',
+      sources: [v.townNPC ? chatSource(id) : killSource(id, false)],
+      goldGate: false,
+    });
   }
   entryCache = out;
   return out;

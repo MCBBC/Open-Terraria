@@ -60,6 +60,36 @@ export function parseModManifest(jsonText: string): ModManifest {
     }
   }
   if (deps[id] !== undefined) throw new ModManifestError(`mod ${id} 自依赖`);
+  // 配置表校验(P2):type ∈ {bool,number,string};default 与 type 同型;number 可带 min/max
+  let config: ModManifest['config'];
+  if (o.config !== undefined) {
+    if (typeof o.config !== 'object' || o.config === null || Array.isArray(o.config)) {
+      throw new ModManifestError(`mod ${id} config 须对象表`);
+    }
+    config = {};
+    for (const [ck, cv] of Object.entries(o.config as Record<string, unknown>)) {
+      if (typeof cv !== 'object' || cv === null) throw new ModManifestError(`mod ${id} config.${ck} 须对象`);
+      const c = cv as Record<string, unknown>;
+      const ctype = c.type;
+      if (ctype !== 'bool' && ctype !== 'number' && ctype !== 'string') {
+        throw new ModManifestError(`mod ${id} config.${ck}.type 非法: ${String(ctype)}`);
+      }
+      const def = c.default;
+      if (ctype === 'bool' && typeof def !== 'boolean') throw new ModManifestError(`mod ${id} config.${ck}.default 须 bool`);
+      if (ctype === 'number' && (typeof def !== 'number' || !Number.isFinite(def))) throw new ModManifestError(`mod ${id} config.${ck}.default 须 number`);
+      if (ctype === 'string' && typeof def !== 'string') throw new ModManifestError(`mod ${id} config.${ck}.default 须 string`);
+      if ((c.min !== undefined && typeof c.min !== 'number') || (c.max !== undefined && typeof c.max !== 'number')) {
+        throw new ModManifestError(`mod ${id} config.${ck}.min/max 须 number`);
+      }
+      config[ck] = {
+        type: ctype,
+        default: def as boolean | number | string,
+        label: typeof c.label === 'string' ? c.label : undefined,
+        min: typeof c.min === 'number' ? c.min : undefined,
+        max: typeof c.max === 'number' ? c.max : undefined,
+      };
+    }
+  }
   return {
     id,
     name,
@@ -69,6 +99,7 @@ export function parseModManifest(jsonText: string): ModManifest {
     api,
     side: sideRaw as ModManifest['side'],
     dependencies: Object.keys(deps).length > 0 ? deps : undefined,
+    config: config && Object.keys(config).length > 0 ? config : undefined,
   };
 }
 

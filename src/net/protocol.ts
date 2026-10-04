@@ -222,6 +222,11 @@ export const enum Msg {
                        //    0..63）、不携 bit6/bit7（damage=0 无结算面）。降级矩阵同 9/10=
                        //    新端发→旧 server（白名单>10）剥条/旧 client switch 落空该弹不
                        //    显影零崩溃;旧端发→无此 kind 不产出）
+                       //    12=ModProj（★2026-10-04 P4 mod 通道：tag=projId——确定性分配
+                       //    （拓扑序+键字典序）双端同 mod 集合恒同 id→spec 在册重建傀儡
+                       //    （快照跟随+寿命+spec.update 视觉钩,伤害/tile host 权威不本地
+                       //    结算）;缺 mod/未注册=null 剥条降级（零崩溃）。中继白名单
+                       //    (kind&0x3f)>12 剥条——server/room.ts 同批放宽 11→12）
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
                        //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP；
                        //    bit6(0x40)=pvp——v7 玩家 PvP 弹：pvpAllowed 房内 hostile 玩家的

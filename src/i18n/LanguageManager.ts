@@ -213,6 +213,10 @@ class LanguageManager {
   private packCache = new Map<string, LoadedPack>(); // name → LoadedPack,Map 序即 LRU 序
   private listeners: Array<() => void> = [];
   private warned = new Set<string>();
+  /** mod 语言包(2026-10-04 GLM娘实验批 G5):每项 = {lang: {类目:{键:值}}},类目已由
+   *  loader 预加 Mods.<modId>. 前缀。装载后即时 overlay 进激活包,并在此后每次
+   *  setLanguage/fetchPack 重新 overlay(缓存表原地 overlay,LRU 复用不丢)。 */
+  private modLangPacks: Array<Record<string, Record<string, Record<string, string>>>> = [];
   loaded = false;
 
   /**
@@ -264,6 +268,9 @@ class LanguageManager {
       if (!r.ok) return null;
       const pack = (await r.json()) as Pack;
       const tables = buildTables(pack);
+      for (const dicts of this.modLangPacks) {           // mod 键面 overlay(每次取表都补)
+        if (dicts[name]) this.overlayModPackInto(tables, dicts[name]);
+      }
       this.packCache.set(name, tables);
       while (this.packCache.size > MAX_PACK_CACHE) {
         const oldest = this.packCache.keys().next().value as string;
@@ -304,9 +311,38 @@ class LanguageManager {
     this.loaded = false;
     this.warned.clear();
     this.packCache.clear();
+    this.modLangPacks.length = 0;
     npcNameResolver = null;
     subCtx = null;
     substitutionTable = null;
+  }
+
+  // ================= mod 语言包合并(G5,2026-10-04) =================
+  /** 注入一个 mod 的多语言包(dicts[lang] = {类目:{键:值}},类目须已带 Mods.<modId>.
+   *  前缀——loader 装配)。装载晚于 Lang.init 的常态下立即 overlay 激活包;
+  *   亦覆盖 packCache 中已缓存表,语言切换经 fetchPack 重取时同样补齐。 */
+  mergeModLangPack(dicts: Record<string, Record<string, Record<string, string>>>): void {
+    this.modLangPacks.push(dicts);
+    const active = this.activeCulture?.name;
+    if (active && dicts[active]) {
+      this.overlayModPackInto(this.pack, dicts[active]);
+      const cached = this.packCache.get(active);
+      if (cached) this.overlayModPackInto(cached, dicts[active]);
+    }
+  }
+
+  /** mod 类目表 overlay 进 LoadedPack(同 loadPackJson 语义:texts 覆盖、
+   *  groupedKeys 首插防重;★$变体键 mod v1 不支持,登记) */
+  private overlayModPackInto(tables: LoadedPack, cats: Record<string, Record<string, string>>): void {
+    for (const [cat, entries] of Object.entries(cats)) {
+      const list = tables.groupedKeys.get(cat) ?? [];
+      for (const [key, value] of Object.entries(entries)) {
+        const fullKey = `${cat}.${key}`;
+        if (!tables.texts.has(fullKey)) list.push(fullKey);
+        tables.texts.set(fullKey, value);
+      }
+      tables.groupedKeys.set(cat, list);
+    }
   }
 
   exists(key: string): boolean {

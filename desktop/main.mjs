@@ -14,7 +14,7 @@
 
 import { app, BrowserWindow, Menu, shell, powerSaveBlocker, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
-import { statSync, existsSync } from 'node:fs';
+import { statSync, existsSync, readdirSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, normalize as pathNormalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
@@ -289,6 +289,33 @@ async function startEmbeddedDist() {
       urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
     } catch { res.writeHead(400).end(); return; }
     if (urlPath === '/') urlPath = '/index.html';
+
+    // ---- ★mods 目录路由（2026-10-04 P3）：GET /mods/index.json 列 *.swmod；
+    //      GET /mods/<file>.swmod 回包字节。目录=<userData>/mods（用户拖入即装，
+    //      引擎启动链自动发现启用;只读服务,写面归用户/CLI）。preload 零升级——
+    //      网页端同源 fetch,与 web 版 zip 导入通道天然合流。 ----
+    if (urlPath === '/mods/index.json' || urlPath.startsWith('/mods/')) {
+      const modsDir = pathNormalize(join(app.getPath('userData'), 'mods'));
+      try { mkdirSync(modsDir, { recursive: true }); } catch { /* 只读盘也放行空列表 */ }
+      if (urlPath === '/mods/index.json') {
+        let list = [];
+        try {
+          list = readdirSync(modsDir).filter((f) => f.toLowerCase().endsWith('.swmod')).sort();
+        } catch { /* 目录不可读=空列表 */ }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify({ mods: list }));
+        return;
+      }
+      const name = urlPath.slice('/mods/'.length);
+      if (!/^[A-Za-z0-9._-]+\.swmod$/i.test(name)) { res.writeHead(403).end(); return; }  // 文件名白名单(防穿越)
+      const filePath = pathNormalize(join(modsDir, name));
+      if (!filePath.startsWith(modsDir + sep)) { res.writeHead(403).end(); return; }
+      let data;
+      try { data = readFileSync(filePath); } catch { res.writeHead(404).end('404'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-cache' });
+      res.end(data);
+      return;
+    }
 
     // 守卫②路径穿越:归一化后必须仍落在 root 内
     const filePath = pathNormalize(join(root, urlPath));

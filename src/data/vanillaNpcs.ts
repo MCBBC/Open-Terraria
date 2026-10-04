@@ -175,6 +175,12 @@ export function registerModNpc(npcId: number, def: VanillaNpc): void {
   VANILLA_NPCS[k] = def;
 }
 
+/** ★mod NPC 名访问器(P3):Lang.npcName 的 mod 段回退(原版域恒 null=零扰动) */
+export function modNpcName(npcId: number): string | null {
+  if (npcId < 800) return null;
+  return (VANILLA_NPCS[String(npcId)] as VanillaNpc | undefined)?.name ?? null;
+}
+
 // ================= 城镇 NPC（TownNPC 实体用） =================
 // key → 原版 NPCID（Terarria1456/Terraria.ID/NPCID.cs:11099+）；
 // extra = NPCID.Sets.ExtraFramesCount（NPCID.cs:4831）——
@@ -238,6 +244,52 @@ export const TOWN_NPC_HEAD_INDEX: Record<number, number> = {
   637: 27, 638: 33, 656: 39, 670: 46, 678: 47, 679: 48, 680: 49, 681: 50,
   682: 51, 683: 52, 684: 53,
 };
+
+// ================= mod 城镇NPC运行时注册面(2026-10-04 GLM娘实验批) =================
+// 缺口定谳:mod 声明 townNPC:true 的 NPC 原本只落在 VANILLA_NPCS(元数据消费),
+// TownNPC 实体化/入驻/头贴三链全断——TownNPC ctor 只认 TOWN_NPC_IDS 静态 key、
+// 入驻 prio 链硬编码 vanilla key、HousingPanel/地图只认 TOWN_NPC_HEAD_INDEX。
+// 本面 = 追加式补链(零 mod 恒等;禁止模块顶层调用——npc-frame-golden L1 会对账
+// VANILLA_NPCS 全表,运行时注册在测试进程外,模块顶层注册会爆金标)。
+/** mod NPC id → mod id(对话池命名空间 Mods.<modId>.* 用;register.ts 装配) */
+export const MOD_NPC_OWNER = new Map<number, string>();
+/** mod 头贴索引自增游标(原版全表最大 53;顺延不回收) */
+let modTownHeadCursor = 54;
+
+/**
+ * 运行时注册一个 mod 城镇 NPC 的实体化三链(幂等覆盖):
+ *  ① TOWN_NPC_IDS[key] = {id, extra} —— TownNPC ctor/debugSpawnNpc/存档重建按 key 解析
+ *  ② TOWN_EXTRA_BY_ID —— 行走帧回卷上界反查(FindFrame)
+ *  ③ TOWN_NPC_HEAD_INDEX[id] —— 头贴自增索引(住房UI行/地图图标/旗帜;贴图经
+ *     mods/assets.ts 注入 vanilla/NPC_Head_{idx}.png)
+ * @returns 分配的头贴索引
+ */
+export function registerModTownNpc(key: string, id: number, extra: number, modId: string): number {
+  TOWN_NPC_IDS[key] = { id, extra };
+  TOWN_EXTRA_BY_ID.set(id, extra);
+  MOD_NPC_OWNER.set(id, modId);
+  const headIdx = modTownHeadCursor++;
+  TOWN_NPC_HEAD_INDEX[id] = headIdx;
+  return headIdx;
+}
+
+/** mod 城镇 NPC 的头贴索引(未注册 = -1) */
+export function modTownNpcHeadIndex(id: number): number {
+  return TOWN_NPC_HEAD_INDEX[id] ?? -1;
+}
+
+/**
+ * mod 城镇 NPC 入驻候选(prio 链垫底用)。
+ * ★本仓分歧(登记):原版 num42 优先链(Main.cs:65458-65570)无 mod 段——本面把
+ * 已注册的 mod 城镇 key 以「不在场即候选」垫在链尾,vanilla 链全空缺时才轮到
+ * (vanilla 优先序零扰动)。条件面(解锁旗/人数门)mod v1 不接,后续经
+ * spec 声明扩展。
+ */
+export function modTownArrivalEntries(has: (key: string) => boolean): Array<[string, boolean]> {
+  return Object.keys(TOWN_NPC_IDS)
+    .filter((k) => k.startsWith('mod_'))
+    .map((k) => [k, !has(k)] as [string, boolean]);
+}
 
 /** Boss 头像贴图索引(NPCID.Sets.BossHeadTextures,NPCID.cs:4861;默认 -1 = 无地图头像)。
  *  地图绘制(Main.cs DrawNPCMapIcons3/2)+ 顶部 Boss 血条(BigProgressBar)共用;

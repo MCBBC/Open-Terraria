@@ -16,6 +16,14 @@ export interface ModManifest {
   side: 'both' | 'client' | 'server';
   /** 依赖:modId → 版本约束(^1.2.3 前缀式或精确 x.y.z) */
   dependencies?: Record<string, string>;
+  /** ★P2:声明式配置表(键→类型+缺省;entry 经 sw.config 读写;面板内联编辑) */
+  config?: Record<string, {
+    type: 'bool' | 'number' | 'string';
+    default: boolean | number | string;
+    label?: string;
+    min?: number;
+    max?: number;
+  }>;
 }
 
 /** L1 物品内容(content/items/*.json)。字段面=ItemDef/itemfunc/itemcombat/itemstats
@@ -27,10 +35,11 @@ export interface ModItemContent {
   rare?: number;
   value?: number;
   maxStack?: number;
-  /** 战斗面(vanilla-itemcombat 语义)。shoot 只可引用原版弹 vid(P0 边界) */
+  /** 战斗面(vanilla-itemcombat 语义)。shoot:数字=原版弹 vid;字符串 `proj:<key>`=
+   *  本 mod 声明弹幕(P2,plan 期换算 allocated projId) */
   combat?: {
     damage?: number; knockBack?: number; useTime?: number; useAnimation?: number;
-    shoot?: number; shootSpeed?: number; mana?: number;
+    shoot?: number | string; shootSpeed?: number; mana?: number;
     melee?: boolean; ranged?: boolean; magic?: boolean; summon?: boolean;
     noMelee?: boolean; autoReuse?: boolean; useTurn?: boolean; crit?: number;
   };
@@ -45,6 +54,8 @@ export interface ModItemContent {
   };
   /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交 */
   stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1 };
+  /** P4:旅程研究所需献祭数(缺省=不可研究) */
+  research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
   placeTile?: string;
   /** 贴图(textures/ 下相对路径);缺省=无名占位(灰格) */
@@ -83,6 +94,10 @@ export interface ModNpcContent {
   knockBackResist?: number;
   width?: number; height?: number;
   frames?: number;
+  /** 行走帧回卷上界 extra(ExtraFramesCount 语义;仅 townNPC 消费)。
+   *  缺省启发式 max(2, frames−16)——人形族 14 帧行走区(2..frames−extra−1)惯例;
+   *  自制帧表请显式声明(frames=26 → 10) */
+  extraFrames?: number;
   scale?: number;
   friendly?: boolean; townNPC?: boolean;
   noGravity?: boolean; noTileCollide?: boolean;
@@ -95,6 +110,32 @@ export interface ModNpcContent {
   drops?: Array<{ item: string; min?: number; max?: number; chance?: number }>;
   /** 贴图(textures/ 相对路径;NPC_<id>.png 语义) */
   texture?: string;
+  /** 头贴(textures/ 相对路径;24×24,NPC_Head_{idx} 语义——住房UI行/地图图标/旗帜)。
+   *  仅 townNPC 消费;索引由注册面自增分配 */
+  head?: string;
+}
+
+/** P2 弹幕内容(content/projectiles/*.json)。数据 spec=ModProj 内置缺省行为参数;
+ *  代码钩(update/onHit 族)经 entry 的 sw.projectileHook 追加。projId 2000+ 段。 */
+export interface ModProjContent {
+  key: string;
+  /** 贴图 textures/ 相对路径(Projectile_<projId>.png 语义) */
+  texture: string;
+  gravity?: number;
+  lifetime?: number;
+  /** 穿透次数(缺省 1;≤0=无限) */
+  pierce?: number;
+  tileCollide?: boolean;
+  width?: number;
+  height?: number;
+  rotateToVelocity?: boolean;
+}
+
+/** P3 商店上架(content/shops.json)。npcId=原版 NPC id(城镇商);price 缺省=物品
+ *  value(与原版 shopstock price:null→value 语义同相)。 */
+export interface ModShopContent {
+  npcId: number;
+  items: Array<{ item: string | number; price?: number }>;
 }
 
 /** L1 配方(content/recipes.json)。VanillaRecipe 形(vid 域=本 mod 物品 stable id/
@@ -117,6 +158,12 @@ export const MOD_ITEM_STABLE_BASE = 30000;
 export const MOD_TILE_STABLE_BASE = 1030;
 /** mod NPC id 段基址(原版 Count=697;成就门 vanillaId<697=原版域边界) */
 export const MOD_NPC_ID_BASE = 800;
+/** mod 弹幕 projId 段基址(原版 1457 至 1135;2000+ 留缓冲;弹域无硬表上限——
+ *  Arrow/碰撞/绘制全按值查表,缺表=默认行为) */
+export const MOD_PROJ_ID_BASE = 2000;
+/** mod buff 伪 vanillaBuff 段基址(BuffType 运行时另配;图标键 Buff_<伪id> 走
+ *  mods/buffs.ts 的 objectURL 覆盖,不落 /sprites/vanilla) */
+export const MOD_BUFF_VANILLA_BASE = 9000;
 
 /** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
 export interface ModIdAllocation {
@@ -126,6 +173,8 @@ export interface ModIdAllocation {
   tiles: Map<string, number>;
   /** 全 NPC 键 `mod_<modid>_<key>` → npc id */
   npcs: Map<string, number>;
+  /** 全弹幕键 `mod_<modid>_<key>` → projId(P2;2000+ 段) */
+  projs: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -137,6 +186,8 @@ export interface RegistrationPlan {
   itemSpecs: Array<{ modId: string; spec: ModItemContent; stableId: number; fullKey: string }>;
   tileSpecs: Array<{ modId: string; spec: ModTileContent; stableId: number; fullKey: string }>;
   npcSpecs: Array<{ modId: string; spec: ModNpcContent; npcId: number; fullKey: string }>;
+  projSpecs: Array<{ modId: string; spec: ModProjContent; projId: number; fullKey: string }>;
+  shops: Array<{ modId: string; spec: ModShopContent }>;
   recipes: Array<{ modId: string; spec: ModRecipeContent }>;
 }
 
@@ -149,7 +200,7 @@ export interface ModPack {
 
 /** 装载结果(UI 面板/日志/存档头消费) */
 export interface ModLoadResult {
-  loaded: Array<{ manifest: ModManifest; counts: { items: number; tiles: number; npcs: number; recipes: number } }>;
+  loaded: Array<{ manifest: ModManifest; counts: { items: number; tiles: number; npcs: number; projs: number; recipes: number } }>;
   errors: Array<{ modId: string; error: string }>;
   allocation: ModIdAllocation | null;
 }

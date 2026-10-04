@@ -10,6 +10,9 @@
 // 同窗)。失败静默不阻断启动(单图坏只缺该图)。
 import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
+import { modProjRegs } from './hooks';
+import { modBuffRegs, registerModBuffIcon } from './buffs';
+import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import type { VanillaTileMeta } from '../assets/SpriteAtlas';
 import type { ModItemContent, ModNpcContent, ModTileContent } from './types';
 
@@ -80,6 +83,17 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         inject(atlas, `vanilla/NPC_${npcs.get(fullKeyOf(modId, spec.key))}.png`,
           await decodePngOrWarn(pack, modId, spec.texture));
       }
+      // ★G2③ 头贴注入(GLM娘实验批):townNPC 注册面已自增分配 head 索引,
+      //   贴图落 vanilla/NPC_Head_{idx}.png(住房UI行/地图图标/旗帜消费)
+      if (spec?.head && npcs.has(fullKeyOf(modId, spec.key))) {
+        const npcId = npcs.get(fullKeyOf(modId, spec.key))!;
+        const headIdx = modTownNpcHeadIndex(npcId);
+        if (headIdx >= 0) {
+          referenced.add(spec.head);
+          inject(atlas, `vanilla/NPC_Head_${headIdx}.png`,
+            await decodePngOrWarn(pack, modId, spec.head));
+        }
+      }
     }
     for (const path of discoverPackJsonPaths(pack, 'tiles')) {
       const spec = readPackJson<ModTileContent>(pack, path);
@@ -95,6 +109,19 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       // 写元数据(vanilla.json 运行时对象;伪 sheet 键 = stable id=registerModTile 落的 vanilla.sheet)
       tileMetaTable[String(stableId)] = meta;
       inject(atlas, fileKey, bmp);
+    }
+    // —— mod 弹幕贴图(P2):vanilla/Projectile_<projId>.png 覆盖键(ModProj 自绘消费) ——
+    for (const reg of modProjRegs()) {
+      if (reg.modId !== modId) continue;
+      inject(atlas, `vanilla/Projectile_${reg.projId}.png`,
+        await decodePngOrWarn(pack, modId, reg.spec.texture));
+    }
+    // —— mod buff 图标(P2):objectURL 登记(buff 栏 remasterBuffIcon 覆盖链消费) ——
+    for (const reg of modBuffRegs()) {
+      if (reg.modId !== modId) continue;
+      const bytes = packTexBytes(pack, reg.texture);
+      if (!bytes) { console.warn(`[mods] ${modId} buff 图标缺失: ${reg.texture}`); continue; }
+      registerModBuffIcon(reg.modId, reg.key, bytes, (png) => URL.createObjectURL(new Blob([png], { type: 'image/png' })));
     }
     void referenced;   // 预留:未引用贴图懒注入(P1)
   }

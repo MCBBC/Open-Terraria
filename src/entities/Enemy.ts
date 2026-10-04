@@ -14133,6 +14133,16 @@ export class Enemy extends Entity {
     const w = game.world;
     const key = TOWER_KEY[this.vanillaId ?? -1];
     if (!key || this.dead) return;   // 真死后不再跑（防死亡管线重复触发）
+    // ★BJ510（2026-10-04 用户复报"四柱晚上依然暗"定谳面）：原版塔 spriteDirection =
+    // 字段默认 -1（NPC.cs:6522）且 AI_094 全程无 spriteDirection 写面 → DrawNPC
+    // :23357-23361 `spriteDirection==1 → FlipHorizontally` 判否 = 塔【恒不镜像】。
+    // 本仓 facing 缺省 1（Enemy:1552）≙ spriteDirection=1 → 通用镜像门（Renderer
+    // drawEnemy `e.facing>0 → scale(-1,1)`）误翻本体，且 BJ509 vel4 收集侧 `!mirror`
+    // 守卫恒假 → towerGlowQueue 永不入队（探针实锤：四塔在场 queueLen=0/facing=1）
+    // → 7d''' 光照合成后消费层永不生效，残影留在实体层被 compositeLight 压暗 =
+    // 用户实报夜间塔身暗。钉 -1 = spriteDirection 恒默认语义（towerAI 无 gameplay
+    // 消费面；贴图近对称此前未显形）。
+    this.facing = -1;
     const le = w.lunarEvent;
     const st = w.store;
     const count = (id: number): number => {

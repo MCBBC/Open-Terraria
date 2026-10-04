@@ -94,12 +94,28 @@ async function hashArm(url) {
   const warns = [];
   page.on('pageerror', (e) => warns.push('[pageerror]' + String(e?.message ?? e).slice(0, 140)));
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  let boot = await bootstrap(page, ORIGIN);
-  if (!boot.ok) boot = await bootstrap(page, ORIGIN);
-  const gen = await createGame(page, { mode: 'direct', seed: '05162020', size: 'small' });
-  if (!gen.ok) { console.log(JSON.stringify({ ok: false, why: 'createGame' })); await page.close(); return null; }
+  // 精简启动（绕 bootstrap/createGame 的桥闪失敏感段）:轮询桥 → 直接 newWorld → 轮询 __swGame
+  let bridged = false;
+  for (let i = 0; i < 40 && !bridged; i++) {
+    bridged = await page.evaluate(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld).catch(() => false);
+    if (!bridged) await new Promise((r) => setTimeout(r, 2000));
+  }
+  console.error('[probe-hash] bridge:', bridged);
+  if (!bridged) { console.log(JSON.stringify({ ok: false, why: 'no-bridge' })); await page.close(); return null; }
+  await page.evaluate(({ seed, w, h }) => { void window.__swFlow.newWorld(seed, w, h); }, { seed: '05162020', w: 4200, h: 1200 });
+  let ingame = false;
+  for (let i = 0; i < 120 && !ingame; i++) {
+    ingame = await page.evaluate(() => { const g = window.__swGame; return !!(g && g.player && g.world); }).catch(() => false);
+    if (!ingame) await new Promise((r) => setTimeout(r, 1500));
+  }
+  console.error('[probe-hash] ingame:', ingame);
+  if (!ingame) { console.log(JSON.stringify({ ok: false, why: 'no-game' })); await page.close(); return null; }
+  await page.evaluate((ms) => new Promise((r) => setTimeout(r, ms)), 800);
+  await page.evaluate(() => { try { localStorage.setItem('sw.welcome.announce.acked', '1'); document.getElementById('sw-welcome-announce')?.remove(); } catch { /* 隐私模式 */ } });
   await freezeClock(page, {});
+  console.error('[probe-hash] frozen, warmup');
   for (let i = 0; i < 90; i++) await nextFrame(page);   // warmup→live+首锚
+  console.error('[probe-hash] warmup done, script start');
   const hashes = [];
   // 脚本:30 静置 → 60 下坠（每帧 vy 置满, god 防死）→ 30 写面 → 20 远跳
   await page.evaluate(() => { const g = window.__swGame; g.player.debugGod = true; });
@@ -107,13 +123,13 @@ async function hashArm(url) {
   const H = await page.evaluate(() => window.__swGame.world.h);
   const startX = Math.floor(W / 2) * 16, startY = Math.floor(H * 0.35) * 16;
   await page.evaluate(({ x, y }) => { const g = window.__swGame; g.player.x = x; g.player.y = y; g.player.vx = 0; g.player.vy = 0; const c = g.camera; c.x = g.player.cx; c.y = g.player.cy; }, { x: startX, y: startY });
-  for (let i = 0; i < 30; i++) { hashes.push(await snapLightHash(page)); await nextFrame(page); }
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 20; i++) { hashes.push(await snapLightHash(page)); await nextFrame(page); }
+  for (let i = 0; i < 40; i++) {
     await page.evaluate(() => { const g = window.__swGame; g.player.vy = 1200; });
     hashes.push(await snapLightHash(page));
     await nextFrame(page);
   }
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 20; i++) {
     await page.evaluate((k) => {
       const g = window.__swGame; const st = g.world.store;
       const px = Math.floor(g.player.x / 16) + 4, py = Math.floor(g.player.y / 16) - 2 + (k % 3);
@@ -122,7 +138,7 @@ async function hashArm(url) {
     hashes.push(await snapLightHash(page));
     await nextFrame(page);
   }
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 16; i++) {
     await page.evaluate(({ x, y, k }) => {
       const g = window.__swGame;
       const nx = x + (k % 2 === 0 ? 90 : -90) * 16, ny = y + (k % 2 === 0 ? -80 : 80) * 16;
@@ -133,6 +149,7 @@ async function hashArm(url) {
     hashes.push(await snapLightHash(page));
     await nextFrame(page);
   }
+  console.error('[probe-hash] script done');
   const st = await stats(page);
   await page.close();
   return { hashes, stats: { posted: st.posted, results: st.results, falls: st.falls, skipped: st.skipped, fmt: st.fmt, poolHits: st.poolHits, poolMisses: st.poolMisses } };

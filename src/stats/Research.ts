@@ -50,6 +50,13 @@ export interface ResearchData {
 type Json = typeof raw;
 const DATA = raw as Json as unknown as ResearchData;
 
+/** ★mod 物品研究注册面（2026-10-04 P4）：need 表运行时追加（键=mod 物品 stable id
+ *  30000+ 段,与 getNeed 的内部 id 求值域天然一致）。重复注册=覆写（mod 重载幂等）。 */
+export function registerModResearch(vid: number, need: number): void {
+  if (!(vid >= 30000) || !(need > 0)) return;
+  DATA.need[String(vid)] = need;
+}
+
 export const RESEARCH_STORE_KEY = 'sbw.research.v1';
 
 /** 玩家档案键（原版 creativeTracker 随 .plr；本仓随角色槽位 id 分键） */

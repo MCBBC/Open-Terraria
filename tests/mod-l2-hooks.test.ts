@@ -6,6 +6,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { loadModsPhase1, getModLoadResult, _resetModLoaderForTests } from '../src/mods/loader';
 import { _resetModHooksForTests, takeModNpcAi, runModItemUse, runModPreUpdate, runModOnWorldLoad } from '../src/mods/hooks';
 import { setEnabledModsProvider } from '../src/mods/bridge';
+import { ModConfigState } from '../src/mods/config';
 import type { ModStorage } from '../src/mods/store';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 import { World } from '../src/world/World';
@@ -130,8 +131,8 @@ describe('L2 entry.js 装载与钩子', () => {
     const { registerNpcAi } = await import('../src/mods/hooks');
     expect(() => registerNpcAi(800, () => {})).toThrow(/重复/);
     const { createModContext } = await import('../src/mods/api');
-    const alloc = { items: new Map(), npcs: new Map(), tiles: new Map() };
-    const sw = createModContext('demo', alloc);
+    const alloc = { items: new Map(), npcs: new Map(), tiles: new Map(), projs: new Map() };
+    const sw = createModContext('demo', alloc, new ModConfigState('demo', {}, null));
     expect(() => sw.npcAi('ghost', () => {})).toThrow(/未注册/);
   });
 });

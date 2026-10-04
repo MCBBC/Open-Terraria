@@ -12,6 +12,8 @@ import { applyRegistrationPlan } from './register';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider } from './bridge';
 import { createModContext, type ModEntry } from './api';
+import { loadModConfigValues } from './config';
+import { modBuffTypeOf } from './buffs';
 
 /** L2 入口装载:浏览器=blob URL 动态 import(求值后即 revoke)。
  *  vite 生产构建对变量 URL 的动态 import 零转换(@vite-ignore)。
@@ -86,19 +88,53 @@ export async function loadModsPhase1(
       applyRegistrationPlan(plan);
       result.allocation = plan.allocation;
       loadedPacks.push(...plan.mods.map((m) => m.pack));
-      // ---- L2 脚本相位(2026-10-04,P1):entry.js 在 L1 内容注册后逐 mod 执行
+      // ★G5 mod i18n 合并(2026-10-04 GLM娘实验批):i18n/<lang>.json → Mods.<modId>.*
+      //   运行时 overlay(languageManager.mergeModLangPack)。坏文件静默跳过
+      //   (增强不是必需;文本键缺失=键名裸显,同原版缺键语义)。
+      for (const { manifest, pack } of plan.mods) {
+        const dicts: Record<string, Record<string, Record<string, string>>> = {};
+        for (const [path, bytes] of pack.files) {
+          if (!path.startsWith('i18n/') || !path.endsWith('.json')) continue;
+          const lang = path.slice(5, -5);
+          if (!lang) continue;
+          try {
+            const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, Record<string, string>>;
+            const prefixed: Record<string, Record<string, string>> = {};
+            for (const [cat, entries] of Object.entries(raw)) {
+              prefixed[`Mods.${manifest.id}.${cat}`] = entries;
+            }
+            dicts[lang] = prefixed;
+          } catch { /* 坏 i18n 文件跳过 */ }
+        }
+        if (Object.keys(dicts).length > 0) {
+          const { languageManager } = await import('../i18n/LanguageManager');
+          languageManager.mergeModLangPack(dicts);
+        }
+      }
+      // ---- L2 脚本相位(2026-10-04,P1/P2):entry.js 在 L1 内容注册后逐 mod 执行
       //      (拓扑序;键解析走分配表,跨 mod 顺序=依赖序)。行为钩挂进 hooks 注册表;
-      //      内容一律走 content/*.json 声明面(确定性 id 不受脚本影响)。装载失败
-      //      登记 errors 不阻断(其余 mod/L1 内容已注册保留)。 ----
+      //      内容一律走 content/*.json 声明面(确定性 id 不受脚本影响)。
+      //      ★P2:config 先行加载(kv 持久化值并默认),sw.config 读写面注入;
+      //      itemUse 上下文注入 applyBuff(mod buff 键→BuffType 解析)。
+      //      装载失败登记 errors 不阻断(其余 mod/L1 内容已注册保留)。 ----
       for (const { manifest, pack } of plan.mods) {
         const code = pack.files.get('scripts/main.js');
         if (!code) continue;
         try {
+          const configState = await loadModConfigValues(manifest.id, manifest.config ?? {});
+          const modBuffKey = (bkey: string): number => modBuffTypeOf(manifest.id, bkey);
           const entry = await entryLoader(code);
           if (typeof entry !== 'function') {
             throw new Error('scripts/main.js default export 须为函数 main(sw)');
           }
-          (entry as ModEntry)(createModContext(manifest.id, plan.allocation));
+          (entry as ModEntry)(createModContext(manifest.id, plan.allocation, configState, {
+            decorateUseCtx: (ctx) => ({
+              ...ctx,
+              applyBuff: (bkey: string, seconds: number) => {
+                ctx.player.buffs.apply(modBuffKey(bkey), seconds);
+              },
+            }),
+          }));
         } catch (e) {
           result.errors.push({ modId: manifest.id, error: `脚本装载失败: ${(e as Error)?.message ?? String(e)}` });
         }
@@ -127,6 +163,7 @@ export async function loadModsPhase1(
             items: plan.itemSpecs.filter((s) => s.modId === manifest.id).length,
             tiles: plan.tileSpecs.filter((s) => s.modId === manifest.id).length,
             npcs: plan.npcSpecs.filter((s) => s.modId === manifest.id).length,
+            projs: plan.projSpecs.filter((s) => s.modId === manifest.id).length,
             recipes: plan.recipes.filter((s) => s.modId === manifest.id).length,
           },
         });

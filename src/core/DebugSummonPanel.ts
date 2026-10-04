@@ -14,9 +14,13 @@ export interface SummonEntry {
   critter: boolean;
   town: boolean;
   lifeMax: number;
+  /** mod 注册条目（registerModNpc 运行时追加；空查询视图插在 Boss 段后保证可见） */
+  mod?: boolean;
 }
 
-/** 全量列表（模块级一次构建） */
+/** 全量列表（模块级一次构建；mod NPC 经 appendModSummonEntries 运行时追加——
+ *  ★GLM娘实验批 2026-10-04：本表原是 VANILLA_NPCS 模块载入期快照，运行期
+ *  registerModNpc 的 mod NPC 永远赶不上 → F6 面板看不到 mod NPC） */
 export const SUMMON_ENTRIES: SummonEntry[] = (() => {
   const townIds = new Map<number, string>();
   for (const [key, v] of Object.entries(TOWN_NPC_IDS)) townIds.set(v.id, key);
@@ -34,6 +38,18 @@ export const SUMMON_ENTRIES: SummonEntry[] = (() => {
   return out.sort((a, b) => a.id - b.id);
 })();
 
+/** mod NPC 条目运行时追加（mods/register.ts 装载期逐条调；同 id 幂等覆盖）。
+ *  town 旗由调用方给（spec.townNPC；G2 注册面已把 mod town id 挂进 TOWN_NPC_IDS，
+ *  debugSpawnNpc 反查 townKey 的既有链对 mod id 自动生效） */
+export function appendModSummonEntries(entries: SummonEntry[]): void {
+  for (const e of entries) {
+    const i = SUMMON_ENTRIES.findIndex((x) => x.id === e.id);
+    if (i >= 0) SUMMON_ENTRIES.splice(i, 1);
+    SUMMON_ENTRIES.push({ ...e, mod: true });
+  }
+  SUMMON_ENTRIES.sort((a, b) => a.id - b.id);
+}
+
 /** 纯过滤（单测对象）：数字/英文名/本地化名（nameOf 可空——面板传 Lang.npcName，
  *  单测省略）三路匹配；命中 id 优先排前。★Boss 行恒置顶（2026-08-19 修复：
  *  693 条按 id 排序默认截 240——石巨人(排位 245)/世纪之花(262)/猪鲨/拜月教主/
@@ -45,7 +61,15 @@ export function filterSummonEntries(
   const s = q.trim().toLowerCase();
   const bossesFirst = (list: SummonEntry[]): SummonEntry[] =>
     [...list.filter((e) => e.boss), ...list.filter((e) => !e.boss)];
-  if (!s) return bossesFirst(SUMMON_ENTRIES).slice(0, limit);
+  // 空查询 = Boss 段 → mod 段 → 其余（mod 条目 id 800+ 恒在 240 截断线外，
+  // 不插队则空查询永远看不到；无 mod 条目时序 = bossesFirst 原序零漂移）
+  if (!s) {
+    return [
+      ...SUMMON_ENTRIES.filter((e) => e.boss),
+      ...SUMMON_ENTRIES.filter((e) => e.mod),
+      ...SUMMON_ENTRIES.filter((e) => !e.boss && !e.mod),
+    ].slice(0, limit);
+  }
   const hit: SummonEntry[] = [];
   for (const e of SUMMON_ENTRIES) {
     const local = nameOf ? (nameOf(e.id) ?? '') : '';

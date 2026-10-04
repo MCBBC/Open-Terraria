@@ -5250,6 +5250,7 @@ export class Renderer {
     if (sKeys.length > nSort) sKeys.length = nSort;
     if (sIdx.length > nSort) sIdx.length = nSort;
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
+    this.towerGlowQueue.length = 0;   // ★BJ509 四塔 GlowMask 残影队列逐帧重建（drawNpcGlow vel4 收集,7d''' 消费）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
@@ -6608,6 +6609,63 @@ export class Renderer {
       }
       ctx.restore();
     };
+
+    // 7d'''. 四塔 GlowMask 残影（vel4）光照合成后消费（★BJ509 2026-10-04，同 7d'
+    //   判例域）：原版塔残影顶点色 Color(64,64,64,0)×Opacity 不经 GetAlpha=不吃
+    //   光照（Main.cs:24483-24520），夜里恒亮=塔身自发光观感主体；旧实现在实体
+    //   层原位画 → compositeLight 全屏乘光压暗（塔位夜光≈0.1-0.3）≈不可见=用户
+    //   实报"四柱晚上很暗"。num 光照项/517 xoff/64-255 α/4 向偏移参数面 BJ109-H
+    //   三修账原样（收集侧已折算,此处纯重放）;相机变换同 7d'（round 吸附式）。
+    //   层序登记：原版残影在塔本体之上（NPC 绘制序列内）,此处在 7d' 自发光域=
+    //   亦在玩家之上——与 677/668 既有偏差惯例同槽。
+    if (this.towerGlowQueue.length) {
+      const camRX3 = Math.round(cam.x * z) / z;
+      const camRY3 = Math.round(cam.y * z) / z;
+      ctx.save();
+      ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+      ctx.scale(z, z);
+      ctx.translate(-camRX3, -camRY3);
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalCompositeOperation = 'lighter';
+      for (const q of this.towerGlowQueue) {
+        const img2 = this.atlas?.ensureVImage(q.tex);
+        if (!img2) continue;
+        // ★BJ510 516 本体白罩（Color(255-α,…):26601——α 因子,塔无此层）
+        if (q.overlay) {
+          ctx.globalAlpha = Math.max(0, Math.min(1, q.overlay));
+          if (q.rot !== undefined) {
+            ctx.save();
+            ctx.translate(q.cx!, q.cy!);
+            ctx.rotate(q.rot);
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+          }
+        }
+        ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+        // ★BJ509：四向偏移走 npcGlowVel4Offsets 纯函数（与 vel4 收集侧单源）
+        const offs = Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff);
+        if (q.rot !== undefined) {
+          // ★BJ510 旋转承载：本体同枢（实体中心）重放——translate(中心)·rotate·
+          // draw(bx·scale+世界偏移)；世界偏移不随 scale（原版 velocity 项=世界 px）
+          ctx.save();
+          ctx.translate(q.cx!, q.cy!);
+          ctx.rotate(q.rot);
+          for (let k = 0; k < 4; k++) {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
+              q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
+              q.sw * q.scale!, q.sh * q.scale!);
+          }
+          ctx.restore();
+        } else {
+          for (let k = 0; k < 4; k++) {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+          }
+        }
+      }
+      ctx.restore();
+    }
 
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
@@ -10538,7 +10596,7 @@ export class Renderer {
         else if (stR === 39) ctx.rotate(e.visAngle);   // AI_039 陆龟族 153/154/417:弹射态恒速自旋(ai[2]=0.3/t)、下落态衰减、复位归零(cs:29562-29645);spriteDirection 仍镜像
         else if (stR === 9) ctx.rotate(e.visAngle);    // AI_009 弹跳球族:rotation += 0.1/0.4×direction(bouncingBallAI 已写 cs:21473/:21549);spriteDirection 恒默认→禁镜像(rotationDriven)
         else if (stR === 60 || stR === 62 || stR === 63) ctx.rotate(e.visAngle);  // AI_060/062/063 冰雪女王/玩具直升机/弗洛科——AI 已写(冰后 vx×0.05/0.01/+=0.2 cs:33601-33853;直升机 |vx|×dir×0.1 :34158;弗洛科 +=dir×0.3 与 vx×0.15 :34239/:34254)曾无消费门=半断链;spriteDirection 仍镜像
-        else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 通用镜像(422 反翻见 revFlipMirror :39900)
+        else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 通用镜像(★BJ510 勘误:97=420 非旧注 422,反翻见 revFlipMirror :39900)
         else if (stR === 85) ctx.rotate(e.visAngle);   // AI_085 星细胞/星云头蟹/致命球:0 态 +=dir×0.3 自旋、2/3/4 态 vx×0.1(cs:39030/:39076/:39096/:39121);spriteDirection 仍镜像
         else if (idR === 301) ctx.rotate(e.visAngle);  // 渡鸦(FindFrame :74287 vx×0.1;aiStyle1 战士族逐 id 接)
         else if (stR === 14 && (idR === 156 || idR === 226)) ctx.rotate(e.visAngle);  // 红恶魔/飞蛇(FindFrame :74604/:75510 vx×0.1;蝙蝠族逐 id)
@@ -10615,8 +10673,13 @@ export class Renderer {
         const fairyMirror = idR === 583 || idR === 584 || idR === 585;
         // 反翻族补遗（2026-09-02 遗留批审计:-direction 写点全量扫）:
         // 618 血鹦鹉螺 AI_117 头段 spriteDirection=-direction(:47700,曾注"仍镜像"=错);
-        // 422 aiStyle 97 专属支 spriteDirection=-direction(:39900,同族 493/507/517 通用)
-        const revFlipMirror = idR === 618 || idR === 422;
+        // ★BJ510 勘误：旧式 `idR===422` 系笔误——:39900 `spriteDirection=-direction`
+        // 属 aiStyle 97 =【420 星云浮怪】（SetDefaults NPC.cs:15185-15196,aiStyle=97 唯一
+        // 成员）,422 星旋塔是 aiStyle 94（AI_094 全程无 spriteDirection 写面=字段默认
+        // -1 恒不翻,见 Enemy.towerAI facing 钉面）。420 本身在 rotationDriven（stR 97
+        // 旋转族:10599）→ 反翻门被 !rotationDriven 短路,镜像缺面仍登记;422 摘出后
+        // 恒不翻=原版同相（此前经通用门 facing>0 恒误翻,贴图近对称未显形）。
+        const revFlipMirror = idR === 618 || idR === 420;
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
         // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
         const sdirNeg = e.vanillaId === 546;
@@ -10970,7 +11033,8 @@ export class Renderer {
         // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
         // ——与基础精灵同变换叠加（原版同一 position/origin 二次 Draw）
         // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
-        this.drawNpcGlow(e, r, -r.sw / 2, anchorY);
+        // mirror（★BJ509）= gMirror 传入——vel4 收集侧镜像守卫用
+        this.drawNpcGlow(e, r, -r.sw / 2, anchorY, gMirror);
         // 546 怒滚草亮核（Main.cs:26156-26158,rotation 台账附带登记本批清偿）：
         // Extra_76 专属 glow 叠画——rotation=Clamp(vx×0.1,±π/8) 瞬时式,与本体
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
@@ -11209,7 +11273,7 @@ export class Renderer {
   //   sparkle        425 星璇枪手枪口星芒（DrawPrettyStarSparkle :25631-25633/:34734-34750）
   //   spinner        520 火星行者旋转指示灯（Extra_56+Glow_165，:25425-25443）
   private static readonly NPC_GLOW: Record<number, {
-    tex: string; mode: 'frame' | 'frame4' | 'vel4' | 'trail' | 'orbit';
+    tex: string; mode: 'frame' | 'frame4' | 'vel4' | 'trail' | 'orbit' | 'flare';
     /** vel4 速度偏移倍率（四塔 4；416 骑手 :24538 为 0.5 + 光照项） */
     velMult?: number;
     /** frame4 固定四向偏移（UnitX.RotatedBy(k*π/2)×n，:25736/:25746）替代速度偏移 */
@@ -11242,10 +11306,11 @@ export class Renderer {
     565: { tex: 'vanilla/Glow_225.png', mode: 'frame' },  // 暗黑魔法师 T2
     548: { tex: 'vanilla/Glow_239.png', mode: 'frame' },  // 永恒水晶（:23594 呼吸脉冲底层）
     402: { tex: 'vanilla/Glow_135.png', mode: 'frame' },  // 银河织带头（:23886 白 A=255-num291）
-    422: { tex: 'vanilla/Glow_149.png', mode: 'vel4' },   // 太阳塔（:23766）
-    493: { tex: 'vanilla/Glow_132.png', mode: 'vel4' },   // 星尘塔（:23746）
-    507: { tex: 'vanilla/Glow_143.png', mode: 'vel4' },   // 星云塔（:23756）
-    517: { tex: 'vanilla/Glow_162.png', mode: 'vel4' },   // 星璇塔（:23776，+UnitX*2 偏移）
+    422: { tex: 'vanilla/Glow_149.png', mode: 'vel4' },   // 星旋塔 Vortex（:23766;★BJ510 勘误旧注"太阳塔"）
+    493: { tex: 'vanilla/Glow_132.png', mode: 'vel4' },   // 星尘塔 Stardust（:23746）
+    507: { tex: 'vanilla/Glow_143.png', mode: 'vel4' },   // 星云塔 Nebula（:23756）
+    517: { tex: 'vanilla/Glow_162.png', mode: 'vel4' },   // 日耀塔 Solar（:23776，+UnitX*2 偏移;★BJ510 勘误旧注"星璇塔"）
+    516: { tex: 'vanilla/NPC_516.png', mode: 'flare' },   // 日耀耀斑（★BJ510 :26600-26612 白罩+vel4 本体贴图,非 GlowMask）
     // ---- 第二批（底锚/拖尾族）----
     399: { tex: 'vanilla/Glow_100.png', mode: 'frame',   // 火星探测器：本体罩 A=127-α/2（:24564）
       lamp: { tex: 'vanilla/Extra_20.png', glow: 'vanilla/Glow_101.png', dy: 24 } },
@@ -11497,6 +11562,38 @@ export class Renderer {
     return { rgb: [inv, n, n], a: inv };
   }
 
+  /** ★BJ509（2026-10-04）vel4 残影半径项（Main.cs:24509/:24486/:24482 亲读）：
+   *  num = base + |GetAlpha(npcColor)−(0.5,0.5,0.5)|·mult —— 493 GlowMask132/
+   *  507[143]/422[149] = 4+|·|·4；517[162] = 2+|·|·9（:24509 满光档/黑光档
+   *  length 恒 0.866、偏色档 0.5-0.87 连续）；★BJ510 516 日耀耀斑 = 0.5+|·|·0.5
+   *  （:26604 num288,Main.cs:26600-26612 亲读）。GetAlpha = 格光色 ×(255−α)/255
+   *  （NPC.cs:94549-94556;塔 SetDefaults 无 alpha 行=0 → ×1;516 alpha 恒 220 →
+   *  ×0.137 必须进模——★BJ510 alphaRaw 形参）。本仓 alpha 获取面 =
+   *  lighting.lightAt（塔心格,0-255 归一）。light=null → base（光照未就绪保守档）。 */
+  static npcGlowVel4Num(vid: number, light: readonly [number, number, number] | null, alphaRaw = 0): number {
+    const base = vid === 517 ? 2 : vid === 516 ? 0.5 : 4;
+    const mult = vid === 517 ? 9 : vid === 516 ? 0.5 : 4;
+    if (!light) return base;
+    const f = (255 - Math.min(255, Math.max(alphaRaw, 0))) / 255;
+    const dr = light[0] * f / 255 - 0.5, dg = light[1] * f / 255 - 0.5, db = light[2] * f / 255 - 0.5;
+    return base + Math.sqrt(dr * dr + dg * dg + db * db) * mult;
+  }
+
+  /** ★BJ509 vel4 四向偏移（Main.cs:24483-24520：velocity.RotatedBy(k·π/2)×num；
+   *  517 恒定 +Vector2.UnitX×2 = :24518 挂 X 不挂 Y）。纯函数——vel4 收集侧与
+   *  7d''' 光照合成后消费侧共源（判别测试单源锁定）。 */
+  static npcGlowVel4Offsets(vx: number, vy: number, num: number, xoff = 0): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    for (let k = 0; k < 4; k++) {
+      const a = (k * Math.PI) / 2;
+      out.push([
+        (vx * Math.cos(a) - vy * Math.sin(a)) * num + xoff,
+        (vx * Math.sin(a) + vy * Math.cos(a)) * num,
+      ]);
+    }
+    return out;
+  }
+
   /** 387 特斯拉炮塔充能白化（Main.cs:25451-25458）：color32 = White×0.75（RGB=A=191）；
    *  ai0>0 时 amount7=(ai0+1)/60 → RGB Lerp(0.75,1)、A Lerp(191,0)，再整体 ×Opacity。
    *  bright=加色亮度（RGB/255），fadeA=背景衰减（A/255，静止 191/255 显著）。
@@ -11589,12 +11686,15 @@ export class Renderer {
   /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内）。
    *  bx/by = 基础精灵在本变换内的目标左上（与本体严格同锚——地面型底锚/飞行型
    *  中心锚由调用方传入，各层不再自行假设锚点）。
+   *  mirror = 本体镜像位（gMirror,★BJ509 vel4 收集侧守卫——镜像实体不走世界
+   *  坐标收集,回退原位画）。
    *  additive（XNA 默认 AlphaBlend + 贴图自带发光色的语义，用 lighter 还原
    *  "叠加提亮"观感） */
   private drawNpcGlow(
     e: Enemy,
     r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
     bx: number, by: number,
+    mirror = false,
   ) {
     if (!this.atlas) return;
     const g = Renderer.NPC_GLOW[e.vanillaId ?? -1];
@@ -11872,15 +11972,10 @@ export class Renderer {
       //    本仓 alpha 获取面 = lighting.lightAt（塔心格,0-255 归一）
       //  ③净半径对齐：塔悬浮速度 vy=sin(2π·ai0/300)×0.5（AI_094 :39519,towerAI 同源）
       //    ×num → max |offset| = 0.5×(4+0.866×4) ≈ 3.73px ≈ 原版 ~3.7px 呼吸半径
-      let base = 4;
-      let mult = 4;
-      if (e.vanillaId === 517) { base = 2; mult = 9; }
-      let num = base;
       const lt = this.lighting?.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
-      if (lt) {
-        const dr = lt[0] / 255 - 0.5, dg = lt[1] / 255 - 0.5, db = lt[2] / 255 - 0.5;
-        num = base + Math.sqrt(dr * dr + dg * dg + db * db) * mult;
-      }
+      // ★BJ509：num 光照项/xoff 收编静态纯函数 npcGlowVel4Num（收集/消费/测试单源）
+      // ★BJ510：alphaRaw 入模（GetAlpha 的 (255−α)/255 因子；塔恒 0=原状,516 用）
+      const num = Renderer.npcGlowVel4Num(e.vanillaId ?? -1, lt ? [lt[0], lt[1], lt[2]] : null, alphaRaw);
       // ②517 恒定偏移 = +Vector2.UnitX×2（:24518）——旧实现错挂在 dy
       const xoff = e.vanillaId === 517 ? 2 : 0;
       // 416 骑手速度恒 0（AI_075 吸附零速）——原版此处取坐骑 415 的速度
@@ -11888,13 +11983,51 @@ export class Renderer {
       const svx = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vx : e.vx;
       const svy = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vy : e.vy;
       ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
-      for (let k = 0; k < 4; k++) {
-        const a = k * Math.PI / 2;
-        // 世界坐标偏移 → 本变换局部（当前原点=精灵锚点，除 scale 还原）
-        const dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale + xoff / scale;
-        const dy = ((svx * Math.sin(a) + svy * Math.cos(a)) * num) / scale;
-        ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
+      // ★BJ509（2026-10-04 用户实报"四柱晚上很暗"）：原版残影顶点色 Color(64,64,64,0)
+      //  ×Opacity 恒定不经 GetAlpha = 不吃光照（Main.cs:24483-24520 直读）——夜里恒亮
+      //  是塔身自发光观感主体。旧实现原位画进实体层 → compositeLight 全屏乘光按塔位
+      //  光压暗（塔位夜光≈0.1-0.3 → 残影 0.25×0.2≈0.05 不可见）。挪 7d''' 光照合成
+      //  后消费（7d' 677/668/583 同域判例）；★BJ510 勘误：原版塔 spriteDirection 恒
+      //  【-1】=字段默认（NPC.cs:6522,AI_094 无写面）=SpriteEffects.None 恒不翻
+      //  （旧注"恒 1"读反了 :23357 判向）——facing 钉 -1 见 Enemy.towerAI；收集侧
+      //  预折算世界帧左上（=盒心+bx·scale）；带旋转/镜像实体回退原位画（保底）。
+      if (Math.abs(e.visAngle ?? 0) < 1e-6 && !mirror) {
+        this.towerGlowQueue.push({
+          vid: e.vanillaId ?? -1, tex: g.tex, iw: img.width, sy, gh,
+          sw: r.sw, sh: r.sh, wx: e.cx + bx * scale, wy: e.cy + by * scale,
+          vx: svx, vy: svy, num, xoff, opacity,
+        });
+      } else {
+        for (let k = 0; k < 4; k++) {
+          const a = k * Math.PI / 2;
+          // 世界坐标偏移 → 本变换局部（当前原点=精灵锚点，除 scale 还原）
+          const dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale + xoff / scale;
+          const dy = ((svx * Math.sin(a) + svy * Math.cos(a)) * num) / scale;
+          ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
+        }
       }
+    } else if (g.mode === 'flare') {
+      // ★BJ510（2026-10-04 用户实报"日耀柱下落弹比原版暗"）：516 日耀耀斑发光层
+      //  （Main.cs:26600-26612 Bottom 锚定 vel4 族 case 516 亲读）——①本体白罩
+      //  Color(255-α,…,255-α)（本体 SetDefaults alpha+=40→220 恒,NPC.cs:15427-15429/
+      //  :21466-21469 → 罩 35/255≈0.137）;②本体贴图 vel4 四份 Color(64,64,64,0)
+      //  （恒定不经 GetAlpha/Opacity）×0.25 ≈ 全亮加算本体 = 耀斑可见亮度主体
+      //  （本体仅 13.7% 近隐,缺此层=只剩残影拖尾,用户观感"暗"）。半径 num288 =
+      //  0.5+|GetAlpha(npcColor)−0.5|·0.5（GetAlpha 含 (255−α)/255=0.137 因子,
+      //  npcGlowVel4Num alphaRaw 入模）。旋转 = rCurrentNPC.rotation（AI 侧 visAngle
+      //  承载,solarFlareAI +0.1/tick）→ 队列 rot 路径消费（本体同枢=实体中心,
+      //  bx/by/scale 原样进变换）;固定色层 → 7d''' 光照合成后消费（BJ509 判例域）。
+      //  贴图 = 本体 NPC_516.png（非 GlowMask,38×152 4 帧）;残影拖尾已由
+      //  drawPreBodySpecialGhosts 516 支承载（:25567-25586）。
+      const ltF = this.lighting?.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
+      const numF = Renderer.npcGlowVel4Num(e.vanillaId ?? -1, ltF ? [ltF[0], ltF[1], ltF[2]] : null, alphaRaw);
+      this.towerGlowQueue.push({
+        vid: e.vanillaId ?? -1, tex: g.tex, iw: img.width, sy, gh,
+        sw: r.sw, sh: r.sh, wx: e.cx + bx * scale, wy: e.cy + by * scale,
+        vx: e.vx, vy: e.vy, num: numF, xoff: 0, opacity,
+        overlay: (255 - alphaRaw) / 255, noOpac: true,
+        rot: e.visAngle || 0, cx: e.cx, cy: e.cy, bx, by, scale,
+      });
     } else {
       // trail：419 火月怪（:25677-25696 本体罩 + 分支四向残影；:24610-24645 拖尾）
       // 本体罩 Color(255-α,…) → 全亮白×Opacity
@@ -15377,6 +15510,25 @@ export class Renderer {
     pts: Array<{ x: number; y: number }>;
     tex: CanvasImageSource & { width: number; height: number };
     color: [number, number, number, number];
+  }> = [];
+  /** ★BJ509（2026-10-04 用户实报"四柱晚上很暗"）四塔 GlowMask 残影队列：原版
+   *  塔残影色 Color(64,64,64,0)×Opacity 不经 GetAlpha=不吃光照（Main.cs:24483-24520
+   *  的 Draw 顶点色恒定），夜里恒亮=塔身自发光观感主体；旧实现 vel4 在实体层原位
+   *  画 → compositeLight 全屏乘光按塔位光压暗（塔位夜光≈0.1-0.3 → 残影 0.25×0.2≈
+   *  0.05 不可见）。挪 7d''' 光照合成后消费（7d' 677/668/583 同域判例）。参数面
+   *  （num 光照项/517 xoff/64-255 α/4 向偏移）BJ109-H 三修账原样保留。★BJ510：
+   *  塔无旋转无镜像=原版 spriteDirection 恒【-1】字段默认（NPC.cs:6522,AI_094 无
+   *  写面,旧注"恒 1"系读反 :23357 判向）→ 收集侧预折算世界帧左上；带旋转/镜像
+   *  实体回退原位画（保底）。★BJ510 扩 516 日耀耀斑（:26600-26612）：overlay=
+   *  本体白罩 α（(255-α)/255）、noOpac=vel4 不乘 Opacity（原版恒定色）、rot/bx/by/
+   *  scale=旋转承载（消费侧本体同枢重放）。tex 存名消费侧 ensureVImage 懒加载
+   *  （零跨拍 img 持有,wingGlowQueue 同款）。 */
+  private towerGlowQueue: Array<{
+    vid: number; tex: string; iw: number; sy: number; gh: number;
+    sw: number; sh: number; wx: number; wy: number;
+    vx: number; vy: number; num: number; xoff: number; opacity: number;
+    overlay?: number; noOpac?: boolean;
+    rot?: number; cx?: number; cy?: number; bx?: number; by?: number; scale?: number;
   }> = [];
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α

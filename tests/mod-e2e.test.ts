@@ -96,11 +96,11 @@ beforeAll(async () => {
 });
 
 describe('demo mod 全链', () => {
-  it('装载结果:1 mod 零错误,计数 3 物品/1 tile/1 npc/1 配方', () => {
+  it('装载结果:1 mod 零错误,计数 3 物品/1 tile/1 npc/0 弹/1 配方', () => {
     const r = getModLoadResult();
     expect(r!.errors).toEqual([]);
     expect(r!.loaded).toHaveLength(1);
-    expect(r!.loaded[0]!.counts).toEqual({ items: 3, tiles: 1, npcs: 1, recipes: 1 });
+    expect(r!.loaded[0]!.counts).toEqual({ items: 3, tiles: 1, npcs: 1, projs: 0, recipes: 1 });
   });
 
   it('分配确定性:字典序 demo_ore<demo_ore_item<demo_sword → 30000/30001/30002', () => {

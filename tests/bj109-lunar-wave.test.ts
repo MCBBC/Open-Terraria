@@ -186,21 +186,53 @@ describe('BJ109-G：塔护盾泡泡渲染', () => {
 });
 
 // ---------------------------------------------------------------------------
-// H. glow 脉动三修（Main.cs:24483-24520）
+// H. glow 脉动三修（Main.cs:24483-24520）——★BJ509 锚更新（2026-10-04）：num/xoff/
+//    四向偏移等价收编静态纯函数 npcGlowVel4Num/npcGlowVel4Offsets（收集/消费/测试
+//    单源），判别力逐项保留（517 base/mult 钉值/逐通道 GetAlpha−0.5/UnitX 偏移/
+//    旋转偏移式）；vel4 分支保留收集面锚（BJ509 落刀=残影挪 7d''' 光照合成后）。
 // ---------------------------------------------------------------------------
 describe('BJ109-H：四塔 glow 光照脉动', () => {
-  it('vel4 分支补光照脉动（4+|GetAlpha−0.5|·4；517=2+|·|·9）与 UnitX 偏移', () => {
+  it('npcGlowVel4Num 纯函数：base/mult 钉值（4+|GetAlpha−0.5|·4；517=2+|·|·9）', async () => {
+    const { Renderer } = await import('../src/render/Renderer');
+    const R = Renderer as unknown as { npcGlowVel4Num: (vid: number, l: readonly number[] | null) => number };
+    // 493/422/507 = 4 + |light−127.5|·4；517 = 2 + |·|·9
+    expect(R.npcGlowVel4Num(493, [0, 0, 0])).toBeCloseTo(4 + Math.sqrt(3 * 0.25) * 4, 5);
+    expect(R.npcGlowVel4Num(422, [0, 0, 0])).toBeCloseTo(4 + Math.sqrt(3 * 0.25) * 4, 5);
+    expect(R.npcGlowVel4Num(507, [0, 0, 0])).toBeCloseTo(4 + Math.sqrt(3 * 0.25) * 4, 5);
+    expect(R.npcGlowVel4Num(517, [0, 0, 0])).toBeCloseTo(2 + Math.sqrt(3 * 0.25) * 9, 5);
+    // 偏色档（:24509 连续域）：[128,0,0] → (0.00196,−0.5,−0.5) length≈0.70724
+    expect(R.npcGlowVel4Num(493, [128, 0, 0])).toBeCloseTo(4 + Math.sqrt(0.0019607 * 0.0019607 + 0.5) * 4, 4);
+    // 满光/黑光同 length（灰光色距 0.5 恒 √0.75）——原版 GetAlpha 域同式
+    expect(R.npcGlowVel4Num(493, [255, 255, 255])).toBeCloseTo(4 + Math.sqrt(3 * 0.25) * 4, 5);
+    // 光照未就绪 → base 保守档
+    expect(R.npcGlowVel4Num(493, null)).toBe(4);
+    expect(R.npcGlowVel4Num(517, null)).toBe(2);
+  });
+  it('npcGlowVel4Offsets 纯函数：velocity.RotatedBy(k·π/2)×num + 517 +UnitX×2（:24518 挂 X 不挂 Y）', async () => {
+    const { Renderer } = await import('../src/render/Renderer');
+    const R = Renderer as unknown as { npcGlowVel4Offsets: (vx: number, vy: number, num: number, xoff?: number) => Array<[number, number]> };
+    // vy=0.5 悬停摆、num=4+√0.75·4、xoff=0（493）——k=0 无旋转：dx=vx·num=0、dy=vy·num
+    const num = 4 + Math.sqrt(3 * 0.25) * 4;
+    const o = R.npcGlowVel4Offsets(0, 0.5, num, 0);
+    expect(o.length).toBe(4);
+    expect(o[0][0]).toBeCloseTo(0, 9);
+    expect(o[0][1]).toBeCloseTo(0.5 * num, 9);
+    expect(o[1][0]).toBeCloseTo(-0.5 * num, 9);   // k=1：90° 旋转 (vx·0−vy·1)·num
+    expect(o[1][1]).toBeCloseTo(0, 9);
+    expect(o[2][1]).toBeCloseTo(-0.5 * num, 9);
+    // 517 xoff 恒 +2 挂 X（k=0 档）：dx = vx·num + 2
+    const o2 = R.npcGlowVel4Offsets(0, 0.5, num, 2);
+    expect(o2[0][0]).toBeCloseTo(2, 9);
+    expect(o2[0][1]).toBeCloseTo(0.5 * num, 9);   // Y 无 xoff（旧错位回归锁）
+  });
+  it('vel4 分支收集面（BJ509）：num/xoff 走纯函数单源 + lightAt 读点', () => {
     const fn = block(rendererSrc(), "g.mode === 'vel4'", 'trail：419 火月怪');
-    expect(fn).toContain('if (e.vanillaId === 517) { base = 2; mult = 9; }');
-    expect(fn).toContain('lt[0] / 255 - 0.5');                     // GetAlpha−0.5 逐通道
+    expect(fn).toContain('Renderer.npcGlowVel4Num(e.vanillaId ?? -1,');
     expect(fn).toContain('const xoff = e.vanillaId === 517 ? 2 : 0;');   // +UnitX×2
-    expect(fn).toContain('dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale + xoff / scale');
+    expect(fn).toContain('this.lighting?.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE))');
+    expect(fn).toContain('this.towerGlowQueue.push({');   // ★BJ509 收集面（7d''' 消费）
     // 旧错位（+2 挂 dy）不得残留
     expect(fn).not.toContain('+ (e.vanillaId === 517 ? 2 : 0);\n');
-  });
-  it('脉动读点=lighting.lightAt（本仓 GetAlpha 获取面）', () => {
-    const fn = block(rendererSrc(), "g.mode === 'vel4'", 'trail：419 火月怪');
-    expect(fn).toContain('this.lighting?.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE))');
   });
 });
 

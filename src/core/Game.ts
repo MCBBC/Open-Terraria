@@ -155,11 +155,14 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse } from '../mods/hooks';
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, modProjSpecOf } from '../mods/hooks';
+import { modShopStockOf } from '../mods/shops';
+import { MOD_PROJ_ID_BASE } from '../mods/types';
+import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf, modTownArrivalEntries, MOD_NPC_OWNER } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
 import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
@@ -3910,6 +3913,12 @@ export class Game implements GameHooks {
         // 不消费该 aux = 旧行为不变，零降级面
         aux = Math.max(0, Math.min(1000, Math.round(tuneShot.phase01 * 1000)));
       }
+      // ★mod 弹幕（2026-10-04 P4）：kind12 专用通道——tag=projId（确定性分配，
+      // 双端同 mod 集合恒同 id）；收端 spec 在册→ModProj 傀儡（快照跟随+寿命+视觉
+      // 钩，不结算伤害=host 权威），缺 mod/旧端=剥条降级（null/白名单剥条,零崩溃）
+      else if (p instanceof ModProj) {
+        kind = 12; tag = String(p.projId);
+      }
       else if (p instanceof Arrow) {
         kind = 0; tag = String(p.projId ?? 1);
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
@@ -4567,6 +4576,16 @@ export class Game implements GameHooks {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1, { hostile });
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
       case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
+      case 12: {
+        // ★mod 弹幕傀儡重建（2026-10-04 P4）：tag=projId——双端同 mod 集合=确定性
+        // 分配恒同 id→spec 在册即重建（傀儡面=快照跟随+寿命+spec.update 视觉钩,
+        // 伤害/tile 结算 host 权威不本地跑）；缺 mod/未注册=null 剥条（未知 kind
+        // 降级矩阵同款,零崩溃）。hostile 位不用于 mod 弹（P4 边界:敌对 mod 弹
+        // 的访客本地结算面未开放）
+        const modPid = parseInt(s.tag, 10);
+        if (!modProjSpecOf(modPid)) return null;
+        return new ModProj(s.x, s.y, s.vx, s.vy, s.dmg, 0, modPid, false);
+      }
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
       case 9: {
@@ -21095,6 +21114,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const arcanumSpawn = critVid === 3476;
         const spawnX = arcanumSpawn ? this.player.cx : shotTip.x;
         const spawnY = arcanumSpawn ? this.player.cy : shotTip.y;
+        // ★mod 弹幕分流（2026-10-04 P2,docs/mod-loader-design.md §2.3）：mod 弹
+        //  （projId≥2000）经 ModProj 实体承载（spec 钩子+内置直线/tile/命中缺省），
+        //  与 Arrow 并列——原版弹域（<2000）零改动。使用节奏与原版 shot 支同式。
+        if (cw.shoot >= MOD_PROJ_ID_BASE && modProjSpecOf(cw.shoot)) {
+          const mp = new ModProj(spawnX, spawnY,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            cw.damage, cw.knockback, cw.shoot, dmgKind !== 'magic');
+          placeAtShootSpawn(mp, spawnX, spawnY);
+          this.entities.add(mp, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.playUseSound(critVid, 'bowShoot');
+          this.input.mouseDown = false;
+          break;
+        }
         const shotArrow = new Arrow(spawnX, spawnY,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot,
@@ -37142,6 +37175,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       ['town_bunny', !has('town_bunny') && !!this.world.flags.boughtBunny],
       ['town_cat', !has('town_cat') && !!this.world.flags.boughtCat],
       ['town_dog', !has('town_dog') && !!this.world.flags.boughtDog],
+      // ---- mod 城镇NPC（GLM娘实验批 2026-10-04）——★本仓分歧（mod 内容面）：
+      //  原版 num42 链无 mod 段；mod 候选垫在链尾（vanilla 全空缺时才轮到，
+      //  vanilla 优先序零扰动），条件面 = 不在场即候选（modTownArrivalEntries）----
+      ...modTownArrivalEntries(has),
     ];
     const pick = prio.find(([, ok]) => ok)?.[0];
     if (!pick) return;
@@ -39015,6 +39052,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const rN = (n: number) => Math.floor(Math.random() * n);
     const r3 = () => rN(3);
     const r2 = () => (Math.random() < 0.5 ? 0 : 1);
+    // ---- mod 城镇NPC（GLM娘实验批 2026-10-04 G4）：台词池 = mod i18n 的
+    //  Mods.<modId>.TownChat.<n>（1..n 连续编号,Lang.has 探测池界;见 G5 合并面）。
+    //  池空（mod 未带 TownChat 键）→ '……' 与未注册类型兜底同形。vanilla id
+    //  全 < 800,本分支对 vanilla 零扰动。 ----
+    if (npc.vanillaId >= 800) {
+      const owner = MOD_NPC_OWNER.get(npc.vanillaId);
+      if (owner) {
+        const pool: string[] = [];
+        for (let i = 1; Lang.has(`Mods.${owner}.TownChat.${i}`); i++) {
+          pool.push(Lang.text(`Mods.${owner}.TownChat.${i}`));
+        }
+        if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+      }
+      return '……';
+    }
     // GetChat 在场旗标(cs:94996-95046):其他城镇 NPC 是否在场
     const present = (id: number) =>
       this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.vanillaId === id);
@@ -40078,9 +40130,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // id 物（playerHasVanillaItem），其余槽面不建模=登记债）
       if ([...Game.PALWORLD_VENDOR_TRIGGER_IDS].some((vid) => this.playerHasVanillaItem(vid))) {
         return [[5735, ITEM_VALUES['5735'] ?? 0], [5736, ITEM_VALUES['5736'] ?? 0],
-          ...this.travelStock];
+          ...this.travelStock, ...modShopStockOf(368)];
       }
-      return this.travelStock.slice();  // 动态股票
+      return [...this.travelStock.slice(), ...modShopStockOf(368)];  // 动态股票+mod 货架(P3/P4)
     }
     const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
     if (!stock) return [];
@@ -40369,6 +40421,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (npc.vanillaId === 633 && vs && !inf) add([8]);
     }
+    // ★mod 货架追加（2026-10-04 P3）：mod 货恒上架（remix 抑制/cond 过滤只作用于
+    //  原版段）;条目=[内部 id, 价]（mod 物品内部 id≡stable id 30000+ 段）
+    out.push(...modShopStockOf(npc.vanillaId));
     return out;
   }
 

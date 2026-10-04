@@ -7,7 +7,7 @@
 // 组匹配 = RecipeGroup（id 假偏移 1000000，Recipe.cs:20）——组计数 = 组内所有物品持有数之和。
 import recipesJson from './vanilla-recipes.json';
 import { itemCombat } from './vanillaItemCombat';
-import { TILE_DEFS, TILE_BY_KEY } from './tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_INTERNAL_OF_STABLE } from './tiles';
 import { ITEM_DEFS } from './items';
 import type { Inventory } from '../items/Inventory';
 import type { ChestData } from '../world/World';
@@ -369,7 +369,10 @@ export function craftableCount(r: VanillaRecipe, owned: Map<number, number>): nu
   return min === Infinity ? 0 : min;
 }
 
-/** 站点 TileID → 本仓库内部 tile id（TILE_BY_KEY 反查 v_<id>_ key 不稳定，按 vanilla.sheet 扫 TILE_DEFS） */
+/** 站点 TileID → 本仓库内部 tile id（TILE_BY_KEY 反查 v_<id>_ key 不稳定，按 vanilla.sheet 扫 TILE_DEFS）
+ *  ★P4 红蓝修正：mod tile（internal≥注册期快照长度,伪 sheet≡stable 1030-2047）不在
+ *  载入期快照内——envOk 查表补 live 回退 TILE_INTERNAL_OF_STABLE[t]（恒等式下 mod
+ *  tile 的 stable→internal 与原版 sheet 域同构;原版域查表先命中,零扰动） */
 const SHEET_TO_INTERNAL = (() => {
   const m = new Map<number, number>();
   for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -378,6 +381,16 @@ const SHEET_TO_INTERNAL = (() => {
   }
   return m;
 })();
+
+function sheetToInternalLive(sheet: number): number | undefined {
+  const hit = SHEET_TO_INTERNAL.get(sheet);
+  if (hit !== undefined) return hit;
+  if (sheet >= 1030) {
+    const internal = TILE_INTERNAL_OF_STABLE[sheet];
+    if (internal !== 0) return internal;
+  }
+  return undefined;
+}
 
 export interface VanillaCraftCtx {
   /** 附近站点（内部 tile id 集合——Game.stationsNearby 扫描结果） */
@@ -407,7 +420,7 @@ export function envOk(r: VanillaRecipe, ctx: VanillaCraftCtx): boolean {
     // 铁砧(16)配方、近营火(215)反而误解锁熔炉配方（2026-09 用户实报+FX36 探针定谳）
     let ok = false;
     for (const t of stationSatisfierTiles(r.tile)) {
-      const internal = SHEET_TO_INTERNAL.get(t);
+      const internal = sheetToInternalLive(t);
       if (internal !== undefined && ctx.nearbyInternal.has(internal)) {
         ok = true;
         break;
@@ -438,7 +451,16 @@ const VID_TO_KEY = (() => {
 })();
 
 export function vanillaItemKey(vid: number): string | undefined {
-  return VID_TO_KEY.get(vid);
+  const hit = VID_TO_KEY.get(vid);
+  if (hit !== undefined) return hit;
+  // ★P4 红蓝修正：mod 物品（vid≡stable 30000+，注册晚于本快照）live 回退——
+  //  vanillaCraft 扣料前的成品键解析/UI 材料名/guide 行渲染全走本函数，
+  //  无回退 = mod 配方「行在列表但点击无效/无图标」（红队 A-M1）
+  if (vid >= 30000) {
+    const d = ITEM_DEFS[vid];
+    if (d?.key.startsWith('mod_')) return d.key;
+  }
+  return undefined;
 }
 
 /** 材料原版 id → 显示名用的本仓库 key（组内物品可能部分缺，取第一个存在的） */

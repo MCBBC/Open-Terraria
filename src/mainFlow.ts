@@ -14,6 +14,7 @@ import { isOomLoadError } from './save/LoadErrors';   // ★BJ318：读档 OOM �
 import { builderAccDefaults } from './stats/builderAcc';   // ★SW-FX19:builderAccStatus 回填缺省形
 import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
+import { getEnabledModIds } from './mods/bridge';
 import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
@@ -456,6 +457,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             keybindHintLabel('Inventory'),
             isBound('Inventory', 'Escape') ? keybindCodeLabel('Escape')
               : Lang.text('Mods.SandboxWorld.UI.ManualUnbound')));
+          // ★缺失 mod 提示（2026-10-04 P3）：存档头 mods vs 当前启用集对账——
+          //  缺失=内容已静默降级（stable id ?? 0 兜底），此处给用户可见 toast
+          const saveMods = g.world?.saveMods;
+          const enabled = getEnabledModIds();
+          if (saveMods?.length && enabled) {
+            const missing = saveMods.filter((m) => !enabled.includes(m.id));
+            if (missing.length > 0) {
+              ui.toast(Lang.text('Mods.SandboxWorld.ModsPanel.SaveMissing',
+                missing.map((m) => `${m.id} v${m.version}`).join(', ')));
+            }
+          }
           maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce();
         });
       },

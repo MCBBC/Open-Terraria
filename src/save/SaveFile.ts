@@ -364,6 +364,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     data.player = remapPlayerSlots(data.player, v3, v4);
   }
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
+  // ★mod 清单随档（2026-10-04 P3）：data.mods → world.saveMods（enterGame 对账弹缺失 toast）
+  world.saveMods = data.mods?.map((m) => ({ id: m.id, version: m.version })) ?? undefined;
   world.spawnX = data.header.spawn[0];
   world.spawnY = data.header.spawn[1];
   // 原始出生点：旧档无 spawn0 → 回退当前 spawn（床移除重生点后第一次存档前的近似）
@@ -537,9 +539,17 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       let tRaw = 0; s = 0;
       for (;;) { const b = u8[p++]; tRaw |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
-      const t = v3 ? (tRaw === 0 ? 0 : TILE_INTERNAL_OF_STABLE[tRaw]) : tRaw;
+      // ★P4 红蓝修正(C2 读侧失步):fx/fy 消费门改为 tRaw!==0(与写侧「stable≠0
+      //   必写帧」对齐)——旧实现按【解码值】t!==0 跳帧,未知 stable(缺 mod/缺桥)
+      //   经 Uint16Array 读出 0 → 跳过 fx/fy → 自首个未知 tile 起整流错位=全图损坏,
+      //   且 BJ280 worldDirty 语义下自动存档把损坏解码回写覆盖好档(不可逆)。
+      //   未知槽落空气(占位语义),流零损伤。
+      let t: number;
+      if (!v3) t = tRaw;
+      else if (tRaw === 0) t = 0;
+      else t = TILE_INTERNAL_OF_STABLE[tRaw] || 0;   // 未映射(0)→空气,帧照消费
       let fx = 0, fy = 0;
-      if (t !== 0) {
+      if (tRaw !== 0) {
         s = 0;
         for (;;) { const b = u8[p++]; fx |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
         s = 0;
