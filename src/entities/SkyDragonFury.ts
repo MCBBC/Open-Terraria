@@ -31,6 +31,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import type { VDust } from '../fx/VanillaDust';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 
 /** 玩家侧挂点（RotatedRelativePoint(MountedCenter) ≈ 中心；ChainsawProj 同口径） */
 export interface DragonOwner {
@@ -239,7 +240,10 @@ export class SkyDragonSpin extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
       if (!segHitsRect(x0, y0, x1, y1, 23, e)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：707 掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+:25712
+      //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      //  （★BJ492②：708/709/1110 右键三型已收编同式,swCrit 出生拍冻结载体退役）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
@@ -376,7 +380,12 @@ export class SkyDragonSwing extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ492②（2026-10-04）静态载体退役→rollVanillaHitCrit 单源（BJ491① 衔接判语
+      //  兑现;BJ486② 惯例）——708 SetDefaults（:7493-7501 亲读）melee=true → 三类掷
+      //  :12916 达=owner.meleeCrit（:25712-14 逐帧折入=基4+持械 item.crit+crt+装备/buff
+      //  聚合,命中拍动态;与左键 707 面 BJ489 迁移同形,时序差收口）。critChance 字段
+      //  保留=关断钉（critChance≤0 门,sun 站 skydragon.test.ts 同相）;伤害面不动。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx) || this.owner.facing, this.armorPen, this);
@@ -461,7 +470,9 @@ export class SkyDragonShot extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ492②（2026-10-04）静态载体退役→rollVanillaHitCrit 单源（709 SetDefaults
+      //  :7510-7518 亲读 melee=true → 三类掷 :12916 达,命中拍动态;关断钉保留,伤害面不动）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback, Math.sign(this.vx) || 1, this.armorPen, this);
       this.explode(game);                            // penetrate 1 → 命中即 Kill
@@ -602,7 +613,11 @@ export class SkyDragonCircle extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 8)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ492②（2026-10-04）静态载体退役→rollVanillaHitCrit 单源（1110 SetDefaults
+      //  :10342-10351 亲读 melee=true → 三类掷 :12916 达,命中拍动态;旧 :13670
+      //  `circle.critChance=shot.critChance` 沿载体写位随刀摘除——圈面自掷同单源;
+      //  关断钉保留,伤害面不动）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx0) || 1, this.armorPen, this);

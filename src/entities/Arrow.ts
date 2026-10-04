@@ -158,6 +158,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
 /** 网格切片表（Main.cs 逐型特判——竖条 projFrames 模型装不下的多列网格图；
@@ -531,6 +532,17 @@ export { PROJ_ROT_DIAG };
  *  行覆盖 629/631 两型）但本仓 0 消费面且贴图空,登记不入集。 */
 const PROJ_ROT_DOWN = new Set([631]);
 export { PROJ_ROT_DOWN };
+
+/** ★BJ489 def-3（2026-10-04）通用环掷率路由集：Game.ts spawn 位 `X.critChance =
+ *  critTotal` 冻结载体退役的 Arrow 载体（190 食人鱼枪/304 吸血鬼飞刀/424-426 异星
+ *  探针/459 充能爆破炮小弹）→ 命中拍 rollVanillaHitCrit（:12915-12927 owner 装配 +
+ *  :25712 持械折入动态;类旗=190 ranged/304·459 magic 定谳见 vanilla-projectiles.json;
+ *  spawn 位仅置 0.04 路由门）。★BJ493②③（2026-10-04）扩面：ranged critBonus 族
+ *  （弓/枪/投掷 13 spawn 位）同式迁移——路由信号=spawn 位 `critChance = 0.04` 门
+ *  （中支 critChance>0),本集仅保留 def-3 支零 RNG 关断钉形（critChance≤0 零掷零
+ *  RNG）。未迁移族（magic/melee critBonus 写位与 :20980 兜底面）走旧 `??` 路径
+ *  =登记债（BJ493 报告 §新债;★BJ496①②/BJ497① 已清偿,BJ498① 传播写位 13 位全摘）。 */
+const DEF3_VANILLA_ROLL_PROJS = new Set([190, 304, 424, 425, 426, 459]);
 
 /** 恒旋族（AI_001 尾链 :54741-54749/:54822-54825：rotation 每帧累加、不对齐速度）：
  *  312 南瓜灯 += vx*0.02；772 晶洞 += sign(vx)·(|vx|+|vy|)·0.05；
@@ -1265,9 +1277,21 @@ export class Arrow extends Entity {
    *  于 ignite/igniteHellfire 消费 */
   onFireHit?: { buff: 24 | 323; minT: number; maxT: number };
   /** 暴击加成（百分点，spawn 侧注入：player.critChance(kind)+item.crit；基 4% 另计。
-   *  审计 §6：此前硬编码 4% 导致远程/魔法/投掷吃不到装备/套装/词缀/item.crit */
+   *  审计 §6：此前硬编码 4% 导致远程/魔法/投掷吃不到装备/套装/词缀/item.crit。
+   *  ★BJ493②③（2026-10-04）：主环旧 `??` 兜底对本字段【零读者】（类缺省 0,?? 不认
+   *  0 为未设——旧注「未设=按 critBonus+4%」自BJ489 路由化起即不可达形）——ranged
+   *  族 spawn 位已改写 critChance=0.04 路由门+rollVanillaHitCrit 动态。
+   *  ★BJ496①（2026-10-04）magic 域收编后：617/659 爆面亦迁移（旧 `||` 面退役）。
+   *  ★BJ497①（2026-10-04）五遗留面全数收编（:1848 1023 barrel[休眠销案锚]/:5372 631/
+   *  :7337+:9309 514 双面/:10424 190）→ 本字段读者=零（主环 `??` 兜底不可达形不变）。
+   *  ★BJ498①（2026-10-04）传播链写位全摘销案：普查=13 位（BJ497 定谳 14 位含
+   *  MagnetSphereProj bolt 位,该位 BJ497② 已摘）——各写位抄 this.critBonus=恒类缺省 0
+   *  （spawn 写位 BJ493②③/BJ496①② 全退役）,唯一读面（主环 `??` 兜底）不可达
+   *  ⇒ 链上零读者死值,摘除零漂移。字段保留=hellwing-cast 契约测试写位（存续读写面）。 */
   critBonus = 0;
-  /** 暴击总概率阈值（0-1，spawn 侧一次性算好；未设=按 critBonus+4%） */
+  /** 暴击总概率阈值（0-1，spawn 侧一次性算好;★BJ493 起 0.04=通用环动态掷路由门
+   *  （非掷率）,≤0=关断钉（零 RNG）;旧「未设=按 critBonus+4%」兜底仅对 undefined
+   *  可达=实际不可达形,见 critBonus 注） */
   critChance = 0;
   /** 护甲穿透（玩家侧：spawn 注入 equipStats.armorPen+词缀 arpen，=原版
    *  GetArmorPenetration(melee)（Player.cs:4170-4177）；弹幕自带份见 settlePen） */
@@ -1593,7 +1617,11 @@ export class Arrow extends Entity {
         //   递减（:17380-17384）= 本仓 localImmuneCd（:8371 同拍递减）
         if (this.localImmune > 0
           && (this.localImmuneCd.get((e as unknown as { id?: number }).id ?? -1) ?? 0) > 0) continue;
-        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ496①（2026-10-04）爆面掷率收编（BJ493③ 661 先例）：旧 `||` 面把 spawn 位
+        //  0.04 路由门误当 4% 平率消费（shotArrow 兜底迁移后 617 经该路出生）——暴击掷
+        //  =Damage() 面 :12915-12927 magic 臂（617 数据面 magic）owner 装配+:25712 持械
+        //  折入,命中拍动态;critChance≤0 关断钉保留。
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -1710,7 +1738,10 @@ export class Arrow extends Entity {
       if (e.dead || !e.hurt) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
-        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ496①（2026-10-04）爆面掷率收编（同 arcanumDeathBurst 锚）：旧 `||` 面
+        //  把 0.04 路由门误当 4% 平率（659 经 shotArrow 兜底出生）→ rollVanillaHitCrit
+        //  命中拍动态（659 数据面 magic,:12915-12927 magic 臂）。
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -1751,7 +1782,11 @@ export class Arrow extends Entity {
       if (e.dead || !e.hurt) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R661 + e.w / 2 && Math.abs(ecy - this.cy) < R661 + e.h / 2) {
-        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ493③（2026-10-04）：spawnFanArrow critBonus 冻结写位摘除后本爆面失 readers
+        //  → 掷率迁移 rollVanillaHitCrit（661 ranged 旗,:12915-12927 命中拍动态——
+        //  爆=Damage() AoE 同面;critChance>0 门=0.04 路由门/测试 -1 钳同相,旧 `||`
+        //  面把 critChance 当全率读、0.04 门值会被误当 4% 平率消费）。
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -1813,7 +1848,13 @@ export class Arrow extends Entity {
       if (e.dead || !e.hurt) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R23 + e.w / 2 && Math.abs(ecy - this.cy) < R23 + e.h / 2) {
-        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ497①（2026-10-04）掷率收编（BJ493② 主环改形先例）：旧 `||` 面把 critChance
+        //  当全率读（0.04 路由门误作 4% 平率）+丢 owner 聚合/:25712 持械折入。1023 数据面
+        //  ranged（SetDefaults :9690）。★销案锚：本弹现无出生面=休眠（发射器 5460 仅存
+        //  数据面 vanilla-itemfunc/vanilla-itemcombat,items.ts 未注册 vi_5460,
+        //  legacyItemIndex 5460→vi_4286_Cherry 非发射器,全库无 1023 spawn 支）——面随族
+        //  收编;未来建模发射器时 spawn 位须置 critChance=0.04 路由门（族约定）。
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -3780,7 +3821,7 @@ export class Arrow extends Entity {
           this.damage, 1, 511 + Math.floor(Math.random() * 3),
           { grav: 0, life: 3600, pierce: -1 });
         cloud.critChance = this.critChance;
-        cloud.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         cloud.armorPen = this.armorPen;
         entsC.add(cloud, 'projectiles');
       }
@@ -3819,7 +3860,7 @@ export class Arrow extends Entity {
           Math.max(1, Math.trunc(this.damage * 0.75)), this.knockback, 296,
           { grav: 0, pierce: -1 });
         pillar.critChance = this.critChance;
-        pillar.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         pillar.armorPen = this.armorPen;
         const ents = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
         ents?.add?.(pillar, 'projectiles');
@@ -3859,7 +3900,7 @@ export class Arrow extends Entity {
           Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.8, 522,
           { grav: 0, life: 40, pierce: 1 });
         snake.critChance = this.critChance;
-        snake.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         snake.armorPen = this.armorPen;
         entsS.add(snake, 'projectiles');
       }
@@ -4364,7 +4405,7 @@ export class Arrow extends Entity {
       //   case 'magic' 1155 支，无坑位遗留。
       bee.projClass = 'ranged';             // 运行时旗覆写（:78077-79 本站）
       bee.critChance = this.critChance;
-      bee.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       bee.armorPen = this.armorPen;
       ents.add(bee, 'projectiles');
     }
@@ -4413,7 +4454,7 @@ export class Arrow extends Entity {
         (Math.floor(Math.random() * 71) - 35) * 0.02,
         dmg, kb, strong ? 566 : 181, {});
       bee.critChance = this.critChance;
-      bee.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       bee.armorPen = this.armorPen;
       ents.add(bee, 'projectiles');
     }
@@ -4433,7 +4474,7 @@ export class Arrow extends Entity {
       s.abShard = true;                                     // ai[1] = -1（:51086 尾参）
       s.frostEligible = true;
       s.critChance = this.critChance;
-      s.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       s.armorPen = this.armorPen;
       ents.add(s, 'projectiles');
     }
@@ -4459,7 +4500,7 @@ export class Arrow extends Entity {
       c.ph631Tgt = target.id;
       c.ph631Delay = delay;
       c.critChance = this.critChance;
-      c.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       c.armorPen = this.armorPen;
       ents.add(c, 'projectiles');
     }
@@ -4606,7 +4647,7 @@ export class Arrow extends Entity {
           this.damage, this.knockback, 336,
           { grav: 0.5, gravDelay: Math.max(1, 50 - Math.floor(Math.random() * 10 * (i + 1))) });
         pin.critChance = this.critChance;
-        pin.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         pin.armorPen = this.armorPen;
         ents.add(pin, 'projectiles');
       }
@@ -4658,7 +4699,7 @@ export class Arrow extends Entity {
           this.damage, this.knockback, 337, {});
         cone1.pinFrame = Math.floor(Math.random() * 5);     // ai[1]=rand.Next(5) :48118
         cone1.critChance = this.critChance;
-        cone1.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         cone1.armorPen = this.armorPen;
         ents?.add?.(cone1, 'projectiles');                  // 桶缺 add 口=静默跳过
       } finally { Arrow.birthLock = false; }
@@ -4681,7 +4722,7 @@ export class Arrow extends Entity {
           this.damage, this.knockback, 316,
           { grav: 0, life: 600, pierce: 1 });
         b.critChance = this.critChance;
-        b.critBonus = this.critBonus;
+        // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
         b.armorPen = this.armorPen;
         ents.add(b, 'projectiles');
       }
@@ -4711,8 +4752,10 @@ export class Arrow extends Entity {
     // MedusaHeadProj 专用实体并退还本次误扣魔（ShouldSkipManaUse :53329-53331
     // 语义,R26 落地分流后随 MEDUSA_REFUND_LEGACY_CHARGE 关闭）
     if (this.projId === 535) {
+      // ★BJ497③（2026-10-04）：MedusaHeadProj ctor critBonus 死形参摘除（BJ494⑥ 钉死
+      //  面、BJ496① 登记清偿）——调用形同步摘实参（critBonus 本字段零读者,BJ497① 后同）。
       const m = new MedusaHeadProj(game.player, this.damage, this.knockback,
-        this.critChance, this.critBonus, this.armorPen);
+        this.critChance, this.armorPen);
       if (ents?.add) ents.add(m, 'projectiles');
       this.dead = true;                                     // 静默让位（无尘无声）
     }
@@ -5294,7 +5337,7 @@ export class Arrow extends Entity {
             res630.dmg, res630.kb, res630.pid, {});
           a630.frostEligible = true;
           a630.critChance = this.critChance;
-          a630.critBonus = this.critBonus;
+          // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
           a630.armorPen = this.armorPen;
           a630.noDropItem = true;               // :68277（volley 逐矢原版置位;箭族无回收语义,见类字段注）
           ents630.add(a630, 'projectiles');
@@ -5337,7 +5380,12 @@ export class Arrow extends Entity {
         && this.x < tgt631.x + tgt631.w && this.x + this.w > tgt631.x
         && this.y < tgt631.y + tgt631.h && this.y + this.h > tgt631.y) {
         // 盒交叠 → Kill()+Damage()（:35564-35569——直伤 kb 0,暴击按弹体阈值）
-        const crit631 = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ497①（2026-10-04）掷率收编（BJ493② 改形先例）：旧 `||` 面把父弹传播的
+        //  0.04 路由门误当 4% 平率+丢 owner 聚合/:25712 持械折入——spawnPhantasmChase
+        //  :4493 继承父弹 critChance,父代全族已 BJ493③ 迁 0.04 门（spawn 侧逐位亲读:
+        //  :17212/:17362/:17382/:17446/:17556/:17589/:21039）。631 数据面 ranged
+        //  （SetDefaults :6788）→ 命中拍 rollVanillaHitCrit 动态。
+        const crit631 = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const rec631 = tgt631 as unknown as { hurt?: (...a: unknown[]) => boolean };
         rec631.hurt?.(Math.max(1, Math.trunc(this.damage)) * (crit631 ? 2 : 1),
           0, 0, game, this.settlePen, crit631, this.pierceInit, true);
@@ -7302,7 +7350,11 @@ export class Arrow extends Entity {
             // 敌形窄化只声明了 cx/cy;x/y 兜底位可选读（运行期敌实体恒有 x/y）
             const tXY = tgt as unknown as { x?: number; y?: number };
             if (rec.hurt && !(tgt as unknown as { dead?: boolean }).dead) {
-              const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+              // ★BJ497①（2026-10-04）掷率收编（514 双读者单源刀②）：DoT=Damage() 整段
+              //  重入（aiStyle93 :13368-13376）,每 tick 独立掷=原版同构——旧 `||` 面把
+              //  0.04 路由门误当 4% 平率+丢 owner 聚合。514 数据面 ranged（SetDefaults
+              //  :5850;spawn 位=通用 ranged :17556 0.04 门,亲读）→ 命中拍动态。
+              const critN = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
               const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
               // ★F3 接线（蓝队四轮）：刺入 DoT 每隔拍一击 = Damage() 整段重入
               // （aiStyle93 :13368-13376 + immune 写 1 档 :14060-14062 → 隔拍再刺面，
@@ -9274,7 +9326,10 @@ export class Arrow extends Entity {
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // immune[owner] 门
-        const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ497①（2026-10-04）掷率收编（514 双读者单源刀①）：首击面与刺入 DoT 面
+        //  （AI 侧 :7337 位）同 rollVanillaHitCrit 单源——旧 `||` 面把 0.04 路由门误当
+        //  4% 平率+丢 owner 聚合/:25712 持械折入。514 数据面 ranged（SetDefaults :5850）。
+        const critN = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
         // ★F3 接线（蓝队四轮）：钉首击走 Damage() 全管线（aiStyle93 :13368-13376 段同
         //  在 Damage_PVE_Inner 内）→ 焰爆石/拍击石双支（:13439-13446）一并生效；
@@ -9516,6 +9571,21 @@ export class Arrow extends Entity {
           this.sparkHitFastForward();
         }
         let crit: boolean;
+        // ★BJ496③（2026-10-04）whipTagShot 支 BJ475③ 处方落位（BJ453 注勘误:本支旧
+        //  注自称「TimerCrit 既有接位」但实现【零】TimerCrit 面=注释与实现不符）——
+        //  原版序亲读（Projectile.cs :12909 ownedBySomeone 块单函数单遍历,对 MinionShot/
+        //  SentryShot 弹【同链同达】）:三类掷(:12915-12927)→TryConsumingTimerCrit
+        //  (:12928 无条件)→武僧 688-690(:12929-43)→tag ModifyHit(:12947)→golem 掷
+        //  (:12962-65 独立无条件)。本支旧形 `res.crit || golem` 双病:①TimerCrit 整缺
+        //  （6170 蓄能暴击对随从弹永不消费/不强制）;②golem 掷被 res.crit 短路——原版
+        //  独立无条件掷,短路即漏抽 Next(10) 掷流（反伪影:掷流纪律）。
+        //  拆形（F11/BJ493④ 先例）:roll/timerCrit/res/golem 各自独立求值后 ||；
+        //  roll=rollVanillaHitCrit（MinionShot/SentryShot 全系 SetDefaults 无三类旗——
+        //  逐 id 数据面亲读,kind=null 捷径返假【零 RNG】零行为漂移;未来带旗成员自动
+        //  生效,classOverride=projClass 显式覆写通道）;武僧掷 688-690 非 MinionShot/
+        //  SentryShot 族恒假不设（dealContacts :502 同惯例）;golem 掷中∧res.crit 假时
+        //  补一次 ×2（tag crit ×2 已嵌 res.dmg,原版 crit=单布尔单翻倍——旧形 golem
+        //  单独掷中只染 crit 色【零翻倍】=同刀补齐,MinionProj contact :4983 同式）。
         // ★清偿刀 W5（2026-10-02）黑收成 916 链电汇出（:13711 OnHit 形态对齐）：
         //  旧形 hurtFx【同步直调】伤落被命中敌且先于主 hurt=反序反噬主命中;且 916
         //  出膛即对被命中敌 localNPCImmunity=-1 永免（_DarkHarvest.cs:18,原版词条
@@ -9528,6 +9598,12 @@ export class Arrow extends Entity {
           const en2 = e as unknown as import('./WhipTag').WhipTagged;
           const direct: number[] = [];   // :13711 汇出位（收集,受理后落地）
           en2.hurtFx = (d: number) => { direct.push(d); };
+          // ★BJ496③ 原版序:三类掷(:12915-12927)→TimerCrit(:12928)【无条件消费,掷中
+          //  照吃】→(武僧不设)→tag ModifyHit(:12947)→golem(:12962-65)——分立求值后 ||。
+          const rollCritTag = rollVanillaHitCrit(this.projId, game, 0, this.projClass);
+          const timerCritTag = ((game.player as unknown as
+            { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+            | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
           const res = resolveWhipTagHit(en2, dmg, game,
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
             SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
@@ -9536,8 +9612,14 @@ export class Arrow extends Entity {
           // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
           //   强制暴击掷在 tag 修正【之后】（原版序：changes.Crit.HasValue 覆写在前,
           //   golem 掷在后仍可强制）——塔射弹全走本 tag 支（whipTagShot 置标）,掷面
-          //   与 else 支互补
-          crit = res.crit || rollGolemSentryCrit(game, this.projId, false);
+          //   与 else 支互补。★BJ496③:golem 掷改【无条件】独立求值（Next(10) 掷流
+          //   恢复;门闭时零 RNG 与原版整段跳过同相）
+          const golemCritTag = rollGolemSentryCrit(game, this.projId, false);
+          crit = res.crit || rollCritTag || timerCritTag || golemCritTag;
+          // ★BJ496③ 翻倍归位：tag crit ×2 已嵌 res.dmg——roll/TimerCrit/golem 源强制
+          //  时补一次 ×2（原版 crit 单布尔单翻倍,MinionProj contact :4983 同式;旧形
+          //  golem 单独掷中=染 crit 色【零翻倍】缺口随刀闭合）
+          if (crit && !res.crit) dmg *= 2;
         } else {
           // 暴击：基 4% + spawn 注入的系暴击/item.crit（P:2300-2304/P:25230-25232）
           // ★Notes（蓝队四轮，2026-08-31）：TryConsumingTimerCrit 并入（Projectile.cs
@@ -9545,15 +9627,44 @@ export class Arrow extends Entity {
           //  蓄能暴击 6170 满蓄/负窗 → 强制 crit。脉冲弹 1121/1131/1132 出射后同样
           //  在本环结算 ⇒ 注入面即此处；与 WeaponProj.hitEnemies :303 先例同式）。
           //  仓内已有先例：VolcanoBlastProj/MountCombat/meleeOnHitProjs(977/524)。
-          crit = Math.random() < (this.critChance ?? (4 + this.critBonus) / 100)
-            || ((game.player as unknown as
-              { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
-              | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)
-            // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
-            //   SentryShot 飞弹命中 10% 强制暴击（非哨兵弹掷恒 false,零扰面）——
-            //   此前仅 MinionProj 塔接触面掷,塔射弹（664/666/668/680/642/309/378/967/1026）
-            //   全漏
-            || rollGolemSentryCrit(game, this.projId, false);
+          //  ★BJ489 def-3：路由集成员（190/304/424-426/459）掷率=rollVanillaHitCrit
+          //  （命中拍 owner 装配+:25712 持械折入动态,critTotal 冻结载体退役;0.04=
+          //  路由门非掷率,置 0 关断钉保留）;非成员旧路径零漂移。
+          //  ★BJ493②③（2026-10-04）ranged critBonus 族收编：Game.ts spawn 拍
+          //  `X.critBonus = <rangedCrit 冻结>`（弓/枪主弹/扇/泡/暮夕/投掷/434 续发
+          //  13 位）→ spawn 位 `critChance = 0.04` 路由门 + 命中拍 rollVanillaHitCrit
+          //  动态（路由信号=spawn 位 `critChance=0.04` 门,critChance>0 即入动态支）。
+          //  定谳（原版亲读）：①旧 `??` 兜底对类缺省
+          //  critChance=0 恒不可达（?? 不认 0 为未设）⇒ critBonus 族经主环【永不暴击】
+          //  =字段注释「未设=按 critBonus+4%」矛盾即病根;②弹药无一带 crit（1457
+          //  Item.SetDefaults 34 处 crit 赋值全为武器,弹药 crit 恒 0）⇒ 原版掷面=
+          //  基 4+:2417 owner 聚合+:25712 持械折入（bow/gun item.crit+词缀 crt,
+          //  逐帧链入）,rollVanillaHitCrit 单源同算式;③无类旗成员（196 烟雾/370/371
+          //  /936/996/868/869/171/475/505/506）原版零掷——rollVanillaHitCrit kind=null
+          //  捷径返假零 RNG 同相。裸实例（critChance=0 直构,测试 -1 钳同相）走旧
+          //  `??` 路径零漂移;DEF3 支保留=critChance≤0 零 RNG 钉形不变（单调用点,
+          //  BJ489 1d 计数锁 2=主面+661 爆面）。
+          //  ★BJ496③（2026-10-04）主面拆形（BJ475③ 处方,F11/BJ493④ 先例）：旧
+          //  `roll || timerCrit || golem` 懒惰链双病——①掷中拍 TryConsumingTimerCrit
+          //  被短路跳过（原版 :12928 无条件消费,前掷已 crit 照吃 charge 置 −15
+          //  :28568-71）;②golem 掷 :12962-65 原版=独立无条件 if（gates 闭=零 RNG,
+          //  gates 开=Next(10) 必抽）,短路漏抽 Next(10) 掷流。拆形=三源分立求值后
+          //  ||（RNG 流与原版同序同量）。★BJ496①:classOverride=this.projClass——
+          //  181/566 蜂族数据面零旗、spawn 位显式覆写（Player.cs:48805 magic=true/
+          //  :43976 族 melee=true/:78077 ranged=true）,原版三连掷读【实旗】;
+          //  覆写缺省 undefined=纯数据面（既有路由族零漂移）。
+          const rollCritMain = (DEF3_VANILLA_ROLL_PROJS.has(this.projId) || this.critChance > 0)
+            ? this.critChance > 0 && rollVanillaHitCrit(this.projId, game, 0, this.projClass)
+            : Math.random() < (this.critChance ?? (4 + this.critBonus) / 100);
+          const timerCritMain = ((game.player as unknown as
+            { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+            | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+          // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
+          //   SentryShot 飞弹命中 10% 强制暴击（非哨兵弹掷恒 false,零扰面）——
+          //   此前仅 MinionProj 塔接触面掷,塔射弹（664/666/668/680/642/309/378/967/1026）
+          //   全漏。★BJ496③:独立无条件求值（掷流恢复）
+          const golemCritMain = rollGolemSentryCrit(game, this.projId, false);
+          crit = rollCritMain || timerCritMain || golemCritMain;
           if (crit) dmg *= 2;
         }
         if (this.onFireHit) {
@@ -10066,8 +10177,14 @@ export class Arrow extends Entity {
     if (this.piranha?.channel()) this.pTopUp(game);
   }
 
-  /** 回收补弹（ItemCheck_Shoot 1156 专支 Player.cs:47768-47786：生成
-   *  3−在场数 条；速度分量各 +Next(−40,41)×0.05 扰动；出生点=玩家枪口。
+  /** 回收补弹（ItemCheck_Shoot 1156 专支 1457 Player.cs:48846-48862〔1456 世代
+   *  :47768-47786〕：生成 3−在场数 条；速度分量各 +Next(−40,41)×0.05 扰动。
+   *  ★BJ499（2026-10-04）出生点定谳=pointPosition=玩家中心（:47588 RotatedRelativePoint(
+   *  MountedCenter) + NewProjectile 传位=盒心 Projectile.cs:10878-10879）——补射门
+   *  :43878-43892 与首发同走专支,补射与首发【同点】,原版无"枪口偏移";曾用中心前
+   *  14px/y−4 自创枪口（Game.ts :18554 批注已拆族的 px/py 残留）,现出生/瞄准均回
+   *  玩家中心,盒心回正内联（WeaponProj 反向 import Arrow 禁回环,同式
+   *  placeAtShootSpawn 语义）。
    *  无重播 UseSound——原版 channel 期 itemTime 恒被 SetDummyItemTime(5) 顶住，
    *  无第二次 use 起手声） */
   private pTopUp(game: GameHooks): void {
@@ -10079,15 +10196,19 @@ export class Arrow extends Entity {
     const alive = (ents.projectiles ?? []).filter(
       (o) => (o as { projId?: number }).projId === PIRANHA_PROJ && !(o as { dead?: boolean }).dead).length;
     const aim = this.piranha!.aim();
-    const a = Math.atan2(aim.y - p.cy, aim.x - p.cx);
+    const a = Math.atan2(aim.y - p.cy, aim.x - p.cx);   // 瞄准原点=玩家中心（:47743-47744 num4/num5 起算=pointPosition）
     for (let i = 0; i < 3 - alive; i++) {
-      const np = new Arrow(p.cx + Math.cos(a) * 14, p.cy - 4 + Math.sin(a) * 14,
+      // ★BJ499 出生点=玩家中心（ctor 收盒左上 → 下方盒心回正,同首发位 Game.ts :20757
+      //  placeAtShootSpawn 同式;曾用 中心前14px/y−4 自创枪口=非原版）
+      const np = new Arrow(p.cx, p.cy,
         Math.cos(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
         Math.sin(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
         this.damage, this.knockback, PIRANHA_PROJ,
         { grav: 0, life: PIRANHA_LIFE, piranha: this.piranha! });
+      np.x = p.cx - np.w / 2;   // ★BJ499 盒心回正（placeAtShootSpawn 同式,盒心=玩家中心）
+      np.y = p.cy - np.h / 2;
       np.critChance = this.critChance;
-      np.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       np.armorPen = this.armorPen;
       np.frostEligible = this.frostEligible;
       np.pShootSpeed = this.pShootSpeed;
@@ -10162,7 +10283,7 @@ export class Arrow extends Entity {
         this.vx, this.vy, childDmg, childKb, childType,
         { thornChainAi1: this.thornAi1 + 1 });
       child.critChance = this.critChance;
-      child.critBonus = this.critBonus;
+      // ★BJ498①：critBonus 传播写位摘除（链上死值零读者——源恒类缺省 0,锚=字段注 BJ498①）
       child.armorPen = this.armorPen;
       ents.add(child, 'projectiles');
       return;
@@ -10332,8 +10453,11 @@ export class Arrow extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (this.pHitCd.has(e.id)) continue;                   // :12595 localNPCImmunity 门
       if ((e.iframes ?? 0) > 0) continue;                    // :12635-12637 npc.immune[owner] 门（★BJ344 勘误:旧锚 :11905 系 1456 世代）
-      // StrikeNPC :12811（暴击链同通用弹：基 4% + spawn 注入系暴击）
-      const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+      // StrikeNPC :12811——★BJ497①（2026-10-04）掷率收编（BJ493② 改形先例）：旧 `||`
+      //  面把 BJ489 路由门 0.04 误当 4% 平率（190 spawn 双位 :20760 首发/:29359 补射
+      //  spawn 侧逐位亲读）+丢 owner 聚合/:25712 持械折入=BJ489 路由化时本环漏迁的
+      //  现役退化。190 数据面 ranged（SetDefaults :2789）→ 命中拍 rollVanillaHitCrit 动态。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // StatusNPC :10622-10625：命中必挂 Hemorrhage(375) 240-360t（表驱动）
       applyProjStatus(PIRANHA_PROJ, e as unknown as Record<string, number>);

@@ -69,6 +69,7 @@ import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters }
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源（★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 import { TILE } from '../core/constants';
 
 /** 悬停球 254（ProjectileID.MagnetSphereBall） */
@@ -110,9 +111,10 @@ export class BeamBoltProj extends Entity {
   vy: number;
   damage: number;
   knockback: number;
-  /** 暴击链（spawn 注入;基 4% 魔法缺省,Arrow 同式） */
-  critBonus = 0;
-  critChance = 0;
+  /** ★BJ489 def-3：值不作掷率消费（掷率=rollVanillaHitCrit 动态掷——255/260 magic 旗
+   *  命中拍动态;磁球/充能爆破炮传播链类缺省 0.04=路由门,HeatRay 直出生同门）,仅作
+   *  >0 路由门+关断钉载体（测试置 0 习语）。旧 `critChance||critBonus 缺省` 面退役 */
+  critChance = 0.04;
   armorPen = 0;
   /** 本机拥有（owner==myPlayer 门：发束广播/伤害结算仅拥有者端） */
   local = true;
@@ -216,7 +218,9 @@ export class BeamBoltProj extends Entity {
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        // ★BJ489 def-3：掷率=rollVanillaHitCrit（255/260 magic 旗,命中拍 owner 装配+
+        //  :25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         // ★BJ395（2026-09-28,BJ393 同族债五处清偿④）：受理面谓词 vanillaGated。
         //   pierce=1 单发 flag3（:12635）免疫门豁免 → hurt 内 iframes 拒收不可达;
         //   dead 已 :206 前置 → 可达门拒仅 dontTakeDamage（:13978;原版外层
@@ -284,9 +288,12 @@ export class MagnetSphereProj extends Entity {
   vy: number;
   damage: number;
   knockback: number;
-  /** 暴击链（spawn 注入 → 透传给 255 弹） */
-  critBonus = 0;
-  critChance = 0;
+  /** ★BJ489 def-3：值不作掷率消费（本体无伤面;掷率=255 弹 BeamBoltProj 面
+   *  rollVanillaHitCrit 命中拍动态）,0.04=透传路由门（>0）+关断钉载体。
+   *  ★BJ497②（2026-10-04）critBonus 死值位摘除：spawn 位无写者（Game.ts :19587
+   *  BJ489 载体退役）→ 恒 0;:400 传播写位与 BeamBoltProj 读位全无=链上三层全死。
+   *  critChance 透传保留（magnet-sphere.test :228 契约）。 */
+  critChance = 0.04;
   armorPen = 0;
   /** 本机拥有（owner==myPlayer 门 = TryAttacking 发弹权;远端傀儡/同步球不发） */
   local = true;
@@ -389,7 +396,7 @@ export class MagnetSphereProj extends Entity {
           this.damage, this.knockback, MAGNET_SPHERE_BOLT);
         bolt.local = true;
         bolt.critChance = this.critChance;
-        bolt.critBonus = this.critBonus;
+        // ★BJ497②：bolt.critBonus 传播写位摘除（链上死值,255 读位 BJ489 已迁 rollVanillaHitCrit）
         bolt.armorPen = this.armorPen;
         // NewProjectile 内联 SendData(27) 短命弹即时上线（Z-F4 通道）
         game.spawnFriendlyProj?.(bolt, { netSync: true });

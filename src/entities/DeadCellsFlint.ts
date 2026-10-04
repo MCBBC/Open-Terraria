@@ -45,6 +45,7 @@ import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStat
 // Spawn_DeadCellsFlint 编排本体（收编池;L5 批 2026-08-31——本地直生 + broadcast 上行同用）
 import { deadCellsFlintFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 
 /** 玩家侧挂点（MonkOwner 同口径；cx/cy/facing 实时引用） */
 export interface FlintOwner {
@@ -362,7 +363,9 @@ export class FlintWaveProj extends Entity {
       if (!inArc) continue;
       this.hitDone.add(e.id);
       this.hits++;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：1043 斩击波掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+
+      //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退=远离玩家中心（:13664-13666 aiStyle 188-191 特列）
       const kdir = this.owner.cx < ecx ? 1 : -1;
@@ -502,7 +505,9 @@ export class FlintSpikeProj extends Entity {
       if (d2 > halfW * halfW) continue;
       this.hitCd.set(e.id, 25);
       this.hits++;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：1041 尖刺掷率=rollVanillaHitCrit（melee 旗,命中拍动态;
+      //  emitFlintSpikes 入参载体退为关断钉传播面,值不作掷率消费）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退=远离玩家中心（1041 属 AI_190 特列? 否——1041 走默认弹体向;
       // 但 EmitSpikes 弹速自带出手向,原版 num40 缺省=弹体速度向投影。取速度 x 向）

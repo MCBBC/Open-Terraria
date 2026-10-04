@@ -283,7 +283,9 @@ export class MonkStaffSpin extends Entity {
       if (e.dead || !this.hitCd.ready(e.id, 12)) continue;
       const d2 = distPtRectSq(this.owner.cx, this.owner.cy, e);
       if (d2 > 73 * 73) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：697 掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+:25712
+      //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退向远离【玩家】中心（Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || this.dir;
@@ -524,7 +526,8 @@ export class GhastlyGlaiveProj extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       if (e.dead || !this.hitCd.ready(e.id, 10)) continue;   // idStaticNPCHitCooldown=10（:7415；★原版为 ID 静态共享表，此处实例级近似）
       if (!segHitsRect(this.cx, this.cy, hx, hy, 23, e)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：699 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || facing;   // 远离玩家（:13652-13661）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
@@ -667,7 +670,8 @@ export class MonkGhast extends Entity {
       if (e.dead || this.hitDone.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       this.hitDone.add(e.id);
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：700 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign(this.vx) || 1;          // 默认弹体方向（700 不在 num40 特列）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);

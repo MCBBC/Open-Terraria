@@ -51,6 +51,7 @@ import { cutTilesBox } from './ProjCutTiles';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 import { ParticleOrchestraType } from '../net/syncModules';
 
 /** ★三轮蓝队 F6：immune[owner] 读门（:12636-12641）。原版 flag3 单发族
@@ -121,7 +122,19 @@ function stellarStrike(
   //   血尽级联（:14369 族）/普通未致命尾档（:15037）原版仍受理（proc/numHits++ 无
   //   死亡复查）→ 受理面谓词=调用侧 !vanillaGated（读门位 iframes/dontTakeDamage）,
   //   本返回值不再消费（击杀位契约退役）。
-  const critGuitar = Math.random() < critChance;
+  // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（旧 `Math.random()<critChance`
+  //  静态掷退役;Game.ts 出生位 stellarTuneCritChance=(4+装备链+武器crit+词缀crt)/100 冻结
+  //  载体随之摘除——组件面同值,时序差=原版 :25712-14 逐帧折入命中拍现值）：856 SetDefaults
+  //  （P.cs:8208-8220 magic=true 亲读）→ 三类掷 :12924 magic 臂达=owner.magicCrit（含持械
+  //  item.crit+crt 折入）。ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费照达
+  //  （直击+Kill 爆裂两站共用本口=原版两轮 Damage() 各自掷）。critChance 形参=关断钉
+  //  （≤0 掷门关死,类缺省 0.04=路由门;spectre-stellar 测试置 0 禁掷）。武僧 688-690 强制
+  //  掷 :12929-43 形位=856 非 688 族恒假,不设。
+  const rollCrit = critChance > 0 && rollVanillaHitCrit(proj?.projId ?? 856, game);
+  const timerCrit = (game.player as unknown as
+    { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+    | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+  const critGuitar = rollCrit || timerCrit;
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
@@ -129,7 +142,11 @@ function stellarStrike(
   //  :14297——门 :13991 照走,受理写 immune[owner]=0 ≡ :14175-14178 usesLocal 支）。
   //  旧 pierce=0 通用尾档写 10t=背靠背二奏 10t 内被头门整拒（写面偏差;节流本就
   //  由 hitOnce〔localNPCHitCooldown=-1 每敌终生一跳〕承载,10t 全局窗纯多余）。
-  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
+  // ★BJ494（2026-10-04）crit ×2 预倍补位（同站相邻面,定谳=Enemy.hurt 零内倍（:14665
+  //  「仓内调用侧预倍」习语）+原版 StrikeNPC crit ×2（:81990）——旧 stellar crit 掷中
+  //  仅翻 kb（:82179 ×1.4）伤值恒 ×1=真缺口,本刀随掷率收编一并落位;BJ492① MinionProj
+  //  预倍同形）。snap 加伤随暴击并入（既有）。
+  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage) * (critGuitar ? 2 : 1))
     + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
     kx, 0, game, armorPen,
     critGuitar, -3, true);          // StrikeNPC 单点（Enemy.hurt 同构）
@@ -261,6 +278,10 @@ export class SparkleGuitarProj extends Entity {
   magic = true;
   tileCollide = false;
   ignoreWater = true;
+  // ★BJ494（2026-10-04）缺省 0 保留=关断钉（直构测试确定性依赖,掷臂对 ≤0 关死;
+  //  TimerCrit :12928 臂无条件不受门限=原版 ownedBySomeone 语义）。生产出生位
+  //  Game.ts 写 0.04=路由门（写位仅开门,掷率本体=rollVanillaHitCrit 命中拍动态;
+  //  旧 stellarTuneCritChance 冻结率载体已退役）。
   critChance = 0;
   armorPen = 0;
   knockback = 0;

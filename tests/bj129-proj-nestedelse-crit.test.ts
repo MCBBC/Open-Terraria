@@ -68,11 +68,19 @@ describe('BJ129④ 运行时 crit 补面+1093 勘误钉', () => {
 
   it('crit 消费链接线锁：useCombatWeapon critTotal 含 itemCombat().crit + 悠悠球支/远程主路径双消费位', () => {
     const game = read('../src/core/Game.ts');
-    // useCombatWeapon（:17003 GetWeaponCrit 链）——3291 经 case 'yoyo' :17583 消费
+    // useCombatWeapon（:17003 GetWeaponCrit 链）——3291 经 case 'yoyo' 消费
     expect(game).toContain('const critTotal = 0.04 + (itemCombat(critVid)?.crit ?? 0) / 100');
-    expect(game).toContain('yoyo.critChance = critTotal;');
-    // 远程主路径（:15651）——1784/1835 弹 312/323 经 useAmmo 通用尾支消费
-    expect(game).toContain('(itemCombat(bowVid2)?.crit ?? 0)');
+    // ★BJ489 def-3 勘误（2026-10-04）：`yoyo.critChance = critTotal` 冻结载体已退役
+    // （掷率=hitEnemies 注入支 rollVanillaHitCrit 命中拍动态,见 bj489 结构锁）——
+    // 本位翻转为「冻结载体零残留」断言
+    expect(game).not.toContain('yoyo.critChance = critTotal;');
+    // 远程主路径（:15651）——1784/1835 弹 312/323 经 useAmmo 通用尾支消费。
+    // ★BJ493③ 勘误（2026-10-04）：远程域 critTotal 冻结载体（bowVid2 算式+13 位
+    // critBonus 写位）整批退役——掷率=Arrow 通用环 rollVanillaHitCrit 命中拍动态
+    // （bow item.crit 经 :25712 持械折入,ammoC.crit 恒 0=原版弹药无 crit,同值形）。
+    // 本位翻转为「冻结算式零残留+0.04 路由门」断言。
+    expect(game).not.toContain('(itemCombat(bowVid2)?.crit ?? 0)');
+    expect(game).toContain('bowArrow.critChance = 0.04;');
   });
 
   it('1093 免疫冷却双面同值锁：json 数据面=9（1457 P.cs:10207）+ MinionProj 行为面=9', () => {

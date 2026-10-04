@@ -36,6 +36,7 @@ import { noteVanillaProjImmune } from './projTargets';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
+import { heldItemCritBonus, rollVanillaHitCrit } from './proj1457';   // ★BJ488③ :25712 持械折入算式单源（rollVanillaHitCrit 同源;函数声明环=运行时调用安全）;★BJ489 def-3 注入支掷率单源
 import { canHit } from '../physics/LineOfSight';
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
@@ -428,15 +429,37 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     // ★α-H1/A3①：缺省阈值改按 projClass 投影（Projectile.Damage :12898-12912 三连掷
     // 只列 melee/ranged/magic 三类各对 owner 侧统计；**无类弹与 summon 不掷**——此前
     // `?? 0.04` 把 4% 兜给了所有无类弹=登记偏差）。发射端显式注入仍最优先。
+    // ★BJ488③（2026-10-04）兜底支补 :25712-25714 持械折入（BJ486③ 定谳口径——原版每帧
+    // `meleeCrit/magicCrit/rangedCrit += inventory[selectedItem].crit` 三系无条件链入,
+    // 弹面掷阈值含持械 item.crit+词缀 crt;命中拍动态读 heldItem 现值=逐帧链同相）。
+    // heldItemCritBonus 单源=rollVanillaHitCrit 同款算式（proj1457 BJ488③④ 注）;
+    // 桩面 player 无 inv/critChance 时 heldItem 可选链+空持返 0=阈值与旧档同值。
+    const heldBonus = heldItemCritBonus((pl as unknown as
+      { inv?: { heldItem?: () => { id: number; prefix?: number } | null } }).inv?.heldItem?.() ?? null);
     const autoCritPct = me.critChance !== undefined ? undefined
-      : cls === 'melee' ? (4 + playerPct('melee')) / 100
-        : cls === 'ranged' ? (4 + playerPct('ranged')) / 100
-          : cls === 'magic' ? (4 + playerPct('magic')) / 100
+      : cls === 'melee' ? (4 + playerPct('melee') + heldBonus) / 100
+        : cls === 'ranged' ? (4 + playerPct('ranged') + heldBonus) / 100
+          : cls === 'magic' ? (4 + playerPct('magic') + heldBonus) / 100
             : 0;
     // ★F11（2026-08-31 蓝队三批）：TryConsumingTimerCrit（Damage_PVE :12928——
     //   蓄能暴击 6170 对一切玩家弹结算的强制 crit 面，食 target Hitbox）。
-    const crit = Math.random() < (me.critChance ?? autoCritPct ?? 0)
-      || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+    // ★BJ489 def-3（2026-10-04）注入支掷率迁移：spawn 拍冻结载体（X.critChance=
+    //   critTotal,:18542 GetWeaponCrit 三件=基4+owner 聚合+持械 item.crit/词缀 crt）
+    //   退役 → 掷率=rollVanillaHitCrit（:12915-12927 owner 装配 + :25712-25714 持械
+    //   折入,命中拍动态;projId 类旗定谳=vanilla SetDefaults 数据面）;critChance≤0
+    //   关断钉保留（r1/s2/bj420/bj388/bj393 测试置 0 习语,旧掷式 ≤0 恒假同相）。
+    //   无注入载体（undefined）走 autoCritPct 动态投影（α-H1/BJ488③ 口径,零漂移）。
+    // ★BJ493④（2026-10-04）掷中照消费（BJ475③ F11 拆形接入,proj1457 dealContacts
+    //   :512 同形）：原版序=三类掷(:12915-27)→TryConsumingTimerCrit(:12928)【无条件】
+    //   消费——前掷已 crit 照吃（charge>0 置 −15 :28568-71）。旧 `roll || consume`
+    //   短路=掷中拍跳过消费,charge 残留满蓄（掷中照消费判别=tests/bj493 §4a）。
+    //   分立求值后 ||；tryConsumingTimerCrit 内含 20×尘 RNG,消费拍 RNG 流变化=
+    //   原版 TryConsumingTimerCrit 尘掷同相。
+    const rollCrit = (me.critChance !== undefined
+      ? me.critChance > 0 && rollVanillaHitCrit(me.projId ?? 0, game)
+      : Math.random() < (autoCritPct ?? 0));
+    const timerCritF11 = ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+    const crit = rollCrit || timerCritF11;
     // ★α-H3③④（A3 弹幕侧消费面）：parryDamageBuff ×5 与 Nano ×1.05——原位
     // Projectile.cs:13631-36（门 melee && !DontApplyParryDamageBuff[type]，apply 在
     // DamageVar 之后、StrikeNPC 前逐敌生效）/:13688-96（门 melee||IsAWhip——nano 乘
@@ -4140,7 +4163,17 @@ export class YoyoShotProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const effCd = this.sharedCd ? cd : this.ownCd;         // IDStatic 型走共享表
       if (!effCd.ready(e.id, this.sharedCd ? (this.projId === 1134 ? 20 : 10) : 9999)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（旧 `Math.random()<critChance`
+      //  静态掷退役）：1125/1130/1134/1135 SetDefaults（P.cs:10530-10545/:10599-10612/
+      //  :10638-10670 melee=true 亲读）→ 三类掷 :12916 melee 臂达=owner.meleeCrit（:25712-14
+      //  逐帧折入持械 item.crit+crt,命中拍动态;YoyoShotSpec 无 crit 载体,类缺省 0.04=路由门）。
+      //  ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费照达。武僧 688-690 强制掷
+      //  :12929-43 形位=悠悠球伴生非 688 族恒假,不设。
+      const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      const timerCrit = (game.player as unknown as
+        { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+        | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+      const crit = rollCrit || timerCrit;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
       // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序,
@@ -5802,7 +5835,10 @@ export class GrenadeProj extends Entity {
    *  (2026-08-23 用户报"火箭打不了假人/蝙蝠身边爆了没伤害") */
   contactPen = 0;
   contactKb = 0;
-  critChance = 0;
+  /** ★BJ489 def-3：值不作掷率消费（掷率=接触环 rollVanillaHitCrit 动态掷——
+   *  30/397/517/588/681 手雷族 ranged 旗;28/29/37 等炸弹族 SetDefaults 无类旗
+   *  :1108-1131=原版零掷）,本字段仅作 >0 路由门+关断钉载体（测试置 0 习语） */
+  critChance = 0.04;
   /** 引信 timeLeft 1:1（SetDefaults :10348-10408）：炸弹/手雷族 180、炸药棍族
    *  {29,470,637}=300——此前误写 150/135/180 */
   fuse: number;
@@ -6192,7 +6228,10 @@ export class GrenadeProj extends Entity {
           // 3t 后的爆炸被免疫帧挡住不双击）。曾只钳引信不结算 = 火箭以 ~10-15px/t
           // 再飞 3t（30-45px）穿过目标才爆,接触目标零伤（假人/蝙蝠双症状根因）
           const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
-          const crit = Math.random() < (this.critChance || 0.04);
+          // ★BJ489 def-3：掷率=rollVanillaHitCrit（:12915-12927 owner 装配+:25712 持械
+          // 折入,命中拍动态）——手雷族 30/397/517/588/681 ranged 旗;28/29/37 等炸弹族
+          // SetDefaults 无类旗（:1108-1131）=原版零掷;critTotal 出生拍冻结载体退役
+          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
           // ★F3 接线（蓝队四轮）：接触伤害走标准 Damage_PVE 全管线 → 焰爆石/拍击石
           // 双支（Projectile.cs:13439-13446）随接触生效；手雷族数据面 ranged。
           // 加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）。
@@ -6641,7 +6680,8 @@ export class GrenadeProj extends Entity {
           // 接触伤害同发射支（Damage_PVE 标准流程先于 aiStyle16 钳引信——曾只钳不结算
           // = 投掷炸弹穿体后爆,接触目标零伤,同火箭双症状）
           const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
-          const crit = Math.random() < (this.critChance || 0.04);
+          // ★BJ489 def-3：投掷支接触环掷率同发射支——rollVanillaHitCrit 命中拍动态
+          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
           // ★F3 接线（蓝队四轮）：投掷支接触环 = 第二处引爆面（发射支 3906 同款）——
           // 焰爆石/拍击石双支随标准 Damage_PVE 生效,加伤随暴击并入实伤参
           const snapBonusGrenadeThrow = projectileSnapStrikeBonus(game, this,
@@ -7948,7 +7988,9 @@ export class DaybreakFlare extends Entity {
       const sy = e.w > 8 && e.h > 8 ? Math.floor(e.h / 8) : 0;
       const rx = e.x + sx, rw = e.w - sx * 2, ry = e.y + sy, rh = e.h - sy * 2;
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：掷率=rollVanillaHitCrit（636 melee 旗 :6565;命中拍 owner 装配+
+      // 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       // ★近战乘区+浸剂链镜像（Damage_PVE :13631-36 parry×5 / :13688-96 nano×1.05；
       //   StatusNPC 段 applyMeleeImbue(:10559 melee 门)/霜燃(:93712)/岩浆石(:10866)
       //   /party confetti(:13693-96)——与 hitEnemies 同序,"浸剂链未接"登记偏差清偿）

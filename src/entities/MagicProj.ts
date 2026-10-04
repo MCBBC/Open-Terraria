@@ -176,6 +176,14 @@ export class MagicProj extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; dead: boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        // ★BJ494（2026-10-04）定谳 C=死面（判据三锚,勿收编勿摘除）：①本类现役唯一活构造
+        //  点=net kind4 傀儡重建（Game.netMakeProj case4→netProjPuppets,netPuppet=true）
+        //  → fixedUpdate :147 netPuppet 早退,本命中环生产拓扑不可达;②projId 缺省 0=vanilla
+        //  无 type 0 出生面（projectileData(0) 缺行）→ rollVanillaHitCrit kind=null 捷径零掷,
+        //  即便未来接活线也零 RNG;③phantom 登记 hurt 第 6 参硬编码 false（crit 只折伤害
+        //  倍率不进 crit 旗=暴击飘字/:14876 face 双缺）——死面内不动刀,接活线时按
+        //  rollVanillaHitCrit+TimerCrit 口径整体收编（BJ494 报告登记）。静态掷=旧 GetWeaponCrit
+        //  合并值注入时代的残留（P:52512 注=历史锚）,生产无读者。
         const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
         // 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):manaCloak 装备
         // + 冷却 300t → 法力星 723(ai2=1)落地掉 4143 法力斗篷之星

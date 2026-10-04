@@ -363,6 +363,43 @@ export function cameraSpeedPxPerMs(camX: number, camY: number, now: number): num
   return Math.hypot(camX - prevX, camY - prevY) / dt;
 }
 
+// ---- ★挖掘相首曝重烘单帧钳制（2026-10-04 主刀;WASM 双旗 trace x-ray 定谳）----
+//
+// 【定谳（机制级,逐支核对 ensureEntry 六条烘焙支）】首曝冷烘焙在缺省浏览器路径
+//   走 scheduleShineBakes 的 deadline 盒（bakeShineChunk 收死线,行首断行）——
+//   【严格意义上盒是接上的,并非无盒裸烘】;观测爆发由三个盒上/盒外成分构成:
+//   ①盒值：挖掘相相机基本静止 → 速度门（SHINE_TRANSIT_SPEED）不触发 → 缺省盒
+//     恒 4ms/帧,持续挖掘每帧烧满（36s 单秒爆发 176ms/s=32 慢帧直接成因;滚屏
+//     降级刀只覆盖相机移动域,挖掘相在其门外）。
+//   ②行粒度过冲：bakeShineChunk 死线只在行首检查（:735）,一行 16 格 stamp 链
+//     （每格 ~7 次画布操作）在 shine2 密集地形（黑曜石/雪/宝石矿）单行可达
+//     ~2ms+ —— x-ray「drawImage 单帧可达 ~2ms+」的构成是一行而非单格;超线后
+//     剩余 chunk 入 pendingQ 顺延=既有机制在。
+//   ③指纹 mix2 盒外：shineChunkFingerprint 在 budgetExhausted 判定【之前】执行
+//     （schedule memo 门 :945 先于 :959;首曝 memo 门 :1001 先于 :1014）,且每个
+//     pending-needy chunk 每帧至多 2 次（schedule 循环一次 + 扫描循环
+//     SHINE_NO_BAKE 跳过路径同样先过指纹门）,冷烘焙另有烘后重算（:1029 存 memo）
+//     → mix2 435ms/36s。
+// 【修】①爆发闩（本节）：上一帧发生过首曝冷烘焙（bakes）或冷跳过（skips）⇒
+//   本帧缺省盒压到 SHINE_TRANSIT_BUDGET_MS（与滚屏态盒一致;显式 shinebudget
+//   逐字语义不吃闩=确定性仪器面;计数路径 Node/vitest/explicit=0 无 schedule
+//   不触闩）。挖掘停止 → 无冷工作 → 闩自清 → 静止恢复排干回 base 盒（滚屏 A/B
+//   方案 a 的「静止 4ms 恢复」语义零变——resume 不计 bakes/skips）。超线 chunk
+//   入 pendingQ 顺延=既有机制（partial→needy→pendingQ;skipped→null→pendingQ）。
+//   延迟烘焙不改产物（零随机备案 :240 + 行断点续烘逐位恒等锁 shine-transit-degrade）。
+//   ②指纹脏标缓存（shineFpCache,见 shineChunkFingerprintCached 注）。
+export const shineBurstLatch = { active: false, reset(): void { this.active = false; } };
+
+/** 爆发闩钳制（纯函数,单测面）。闩 active 且缺省（explicit=null）⇒ 压到
+ *  SHINE_TRANSIT_BUDGET_MS（只降不升,tbNow 更小时取 tbNow）;显式传参逐字
+ *  （确定性仪器面永不自适应,与 adaptiveShineBudgetMs 同纪律）。 */
+export function shineBurstClamp(
+  tbNow: number, explicit: number | null = shineBudgetExplicit,
+): number {
+  if (explicit !== null || !shineBurstLatch.active) return tbNow;
+  return Math.min(tbNow, SHINE_TRANSIT_BUDGET_MS);
+}
+
 /** 时间盒模式逐帧计数（仅 shineBudgetMs>0 的调度路径推进；缺省路径零成本零触碰）。
  *  探针消费面：bakes 停涨+hits 单调 = 缓存无重烘抖动；catchup* = chunk 出现→完成帧数。 */
 export const shineStats = {
@@ -498,6 +535,43 @@ function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: n
   mix2(shimmerQ * 255);
   if (hasChest) mix2(chestDigestOf(world));
   return h >>> 0;
+}
+
+// ---- ★挖掘相指纹脏标缓存（2026-10-04 主刀;x-ray mix2 435ms/36s 定谳）----
+//
+// 【键 = (pair 身份, q)】pair 身份 = 底图重烘信号（文件头注 :44-47「ChunkCache
+//   重烘焙恒新建 pair 对象,pair 身份变更 = 底图重烘信号」——ChunkCache 每烘恒
+//   new pair）⇒ fp 输入面（±1 环带 type/flags/frameX/frameY/paint/wire/coat +
+//   showInvisibleBlocks + 箱盖摘要）的任何游戏内变更都伴随底图重烘 = pair 换代：
+//   · 格编辑 setTile/setPaint/setCoat/setActuated 全发 listeners → markDirtyAround
+//     → 底图重烘（TileStore.ts 各 setter 已核）；±1 环带的邻格编辑按
+//     markDirtyAround 边界规则同样标脏本 chunk（环带格恒邻 chunk 边界）。
+//   · 箱盖态：Game.updateChestFrames frame 变化 → markDirtyArea → 换代（已核）。
+//   · showInvisibleBlocks 翻转 → invalidateAll → 全换代。
+//   · 普通 setWire 不发监听,但 wire 仅以致动位（WIRE_ACTUATED）进烘焙门（:755）,
+//     致动位变化走 setActuated → 发监听 → 换代——非致动位 wire 变更不换代时
+//     缓存复用旧 fp = 烘焙产物本就不变（多余重烘被省,正向收益）。
+//   · LRU 淘汰重进视野（内容不变换新 pair）→ 缓存 miss 重算一次 = 旧行为。
+// 【收益】待烘积压 K 帧 = 1 次计算（旧 = schedule+扫描各一次 = 2K 次）;冷烘焙的
+//   烘后重算（:1029 存 memo 前的第二次全表混入）同被缓存吃掉。
+const shineFpCache = new WeakMap<ChunkPair, Map<number, number>>();
+
+/** 导出面 = 单测/取证（生产调用点恒 ensureEntry 三处）。 */
+export function shineChunkFingerprintCached(
+  world: World, pair: ChunkPair, cx: number, cy: number, shimmerQ: number,
+): number {
+  let m = shineFpCache.get(pair);
+  if (!m) { m = new Map<number, number>(); shineFpCache.set(pair, m); }
+  const hit = m.get(shimmerQ);
+  if (hit !== undefined) return hit;
+  const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+  m.set(shimmerQ, fp);
+  return fp;
+}
+
+/** 取证导出（单测/探针）：pair 的 fp 缓存槽位数（undefined = 无缓存条目）。 */
+export function shineFpCacheSlotsForTest(pair: ChunkPair): number | undefined {
+  return shineFpCache.get(pair)?.size;
 }
 
 let scratch: HTMLCanvasElement | null = null;
@@ -869,7 +943,7 @@ function ensureEntry(
     //   且语义 = 缓存未换代时本应命中的那份）。指纹不等 = 真改了格 → 落回重烘。
     if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
       const key = ChunkCache.key(cx, cy);
-      const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+      const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
       const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
       if (mSlot) {
         shineStats.memoHits++;
@@ -925,7 +999,7 @@ function ensureEntry(
   // ★IIIII252 首次(无 slots)同样先过 memo 指纹门(LRU 驱逐重进视野 = 全量重烘主源)
   if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
     const key = ChunkCache.key(cx, cy);
-    const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+    const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
     const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
     if (mSlot) {
       shineStats.memoHits++;
@@ -953,7 +1027,7 @@ function ensureEntry(
   shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
   if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
     const key = ChunkCache.key(cx, cy);
-    const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+    const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
     shineMemo.delete(key);
     shineMemo.set(key, [{ q: shimmerQ, fp, e: ne }]);
     if (shineMemo.size > SHINE_MEMO_MAX) {
@@ -1157,15 +1231,23 @@ export function drawTileShineGrid(
   //   旧帧顶替/无档→null 跳过,与计数预算 left=0 同语义)。
   // ★滚屏降级：仅缺省(隐式 4ms)吃相机速度门;显式 shinebudget=N 逐字(0=计数路径)。
   //   speed 相位在盒构造前推进（cameraSpeedPxPerMs 写后即新——下一帧以此为基）。
+  //   ★爆发闩（2026-10-04 挖掘相首曝重烘钳制,见 shineBurstLatch 注）内嵌在
+  //   adaptive 外层——同点只降不升,显式逐字语义零触碰。
   const tbNow = shineBudgetMs > 0
-    ? adaptiveShineBudgetMs(shineBudgetExplicit,
-      cameraSpeedPxPerMs(cam.x, cam.y, performance.now()), shineBudgetMs)
+    ? shineBurstClamp(adaptiveShineBudgetMs(shineBudgetExplicit,
+      cameraSpeedPxPerMs(cam.x, cam.y, performance.now()), shineBudgetMs))
     : shineBudgetMs;
   const timeBudget = tbNow > 0 ? { deadline: performance.now() + tbNow } : null;
   const countBudget: ShineBakeBudget | undefined = timeBudget ? undefined : { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)
   try {
     if (timeBudget) {
+      const bakes0 = shineStats.bakes, skips0 = shineStats.skips;
       scheduleShineBakes(atlas, world, chunks, cam, bx0, bx1, by0, by1, shimmerQ, timeBudget);
+      // ★爆发闩收账:本帧发生过首曝冷烘焙(bakes)或冷跳过(skips) ⇒ 下帧缺省盒钳
+      //   1.5ms（resume 不计入——挖掘停止后的静止恢复排干保持 base 盒,A/B 方案 a
+      //   语义零变;显式/计数路径无条件 false = 零触碰）。
+      shineBurstLatch.active = shineBudgetExplicit === null &&
+        (shineStats.bakes > bakes0 || shineStats.skips > skips0);
     }
     const scanBudget: ShineBakeBudget | undefined = timeBudget ? SHINE_NO_BAKE : countBudget;
     for (let cy = by0; cy <= by1; cy++) {

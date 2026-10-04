@@ -235,11 +235,11 @@ let _wwCapture: { k: string; a: number[] }[] | null = null;
  *  ★看门狗治理(2026-09-28)追加:fallsBy=回落指纹三分类(onerror/no-result-dead/
  *  pickup-timeout)、respawns=阶梯重生执行次数（F5 驾驶舱扩展）。 */
 const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0,
-  bytes: 0, resyncs: 0, fallsBy: newFallsBy(), respawns: 0,
+  bytes: 0, resyncs: 0, fallsBy: newFallsBy(), respawns: 0, quietSkips: 0,
   fmt: { full: 0, delta: 0, f32: 0 } };
 export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number;
   posted: number; fields: number; falls: number; bytes: number; resyncs: number;
-  fallsBy: Record<WorkerFallReason, number>; respawns: number;
+  fallsBy: Record<WorkerFallReason, number>; respawns: number; quietSkips: number;
   fmt: { full: number; delta: number; f32: number } } {
   return { on: waterWaves.wwActive(), ..._wwStat, fallsBy: { ..._wwStat.fallsBy }, fmt: { ..._wwStat.fmt } };
 }
@@ -277,6 +277,10 @@ export const WW_FULL_ANCHOR_EVERY = 120;
 /** ★R3b-3 sticky f32 逃生探针帧距（escape 激活期每 N 帧试恢复 delta;
  *  N 帧内 f32 全量=带宽代价上界 8B/格×N,恢复后回 delta 模式） */
 export const WW_ESCAPE_PROBE_EVERY = 120;
+/** ★MSG-FREQ 静默窗心跳帧距（2026-10-04 消息面降频）：连续跳发 N 帧后强制发
+ *  一帧（worker 重步进重导出,重新验证静默判定）。自愈面：若未来场变得时间
+ *  相关（0 跨度≠不动点前提被破坏），心跳帧的 delta 必带跨度 → 静默自动解除。 */
+export const WW_QUIET_HEARTBEAT_FRAMES = 600;
 export const WW_JUMP_TEXELS = 8;
 /** 字节 k → 场值 k/256 精确 LUT（k/256 在 float32 精确可表:k≤256=2^8,尾数≤9 位）*/
 const WW_B2F = (() => { const t = new Float32Array(257); for (let k = 0; k <= 256; k++) t[k] = k / 256; return t; })();
@@ -442,6 +446,15 @@ const wwWorkerFlag = (() => {
   } catch { return false; }
 })();
 
+/** ★MSG-FREQ 静默窗跳发总闸（2026-10-04;?wwquiet=0 逃生门=旧行为逐帧发,回滚口
+ *  +A/B 对拍基线臂;仅主线程 frame() 消费,worker 上下文恒 true 不参与） */
+const wwQuietFlag = (() => {
+  try {
+    if (typeof document === 'undefined') return true;
+    return typeof location === 'undefined' || new URLSearchParams(location.search).get('wwquiet') !== '0';
+  } catch { return true; }
+})();
+
 export class WaterWaveSystem {
   quality = 3;
   gates = waveSourceGates(3);
@@ -487,6 +500,18 @@ export class WaterWaveSystem {
   private _wwFallCount = 0;
   private _wwRespawnAt = 0;
   private _wwShadow = false;
+  /** ★MSG-FREQ 消息面降频（2026-10-04；今日 WASM 双旗 trace x-ray 定谳：WaveWorker
+   *  每帧双向 postMessage 118/s×0.26ms=_step 之外最大项）。静默窗三态：
+   *  _wwQuietRun=连续零跨度 delta 场消息数（>0=worker 场处内核不动点——确定性
+   *  内核下 0 跨度步 ⇒ 场恒冻结,数学证明见 frame() 跳发注）;_wwQuietFrames=
+   *  本窗已跳发帧数（心跳判据）;_wwQuietVW/VH=最后发帧视口（resize 侦测）。
+   *  跳发=主线程不 post frame → worker 无从回执 → 双向 postMessage 归零;
+   *  watchdog outstanding=0 恒 healthy（WorkerGovernance healthy :103 语义,
+   *  「无在途请求=无证据」）——1:1 回执约定不破（worker 只对实收帧回执）。 */
+  private _wwQuietRun = 0;
+  private _wwQuietFrames = 0;
+  private _wwQuietVW = -1;
+  private _wwQuietVH = -1;
 
   private _wwEnsure(): void {
     if (this._wwSpawned) return;
@@ -538,6 +563,10 @@ export class WaterWaveSystem {
       //  噪声在，全部实体注入被吞=交互波纹无）。旗开即切换 capture 模式。
       this._wwOn = true;
       this._wwTexSent = false;
+      // ★MSG-FREQ：新实例静默态全零（首场 forceFull 必发;重生后若残留静默判定
+      //  会跳发 frame → 新 worker 永收不到首帧 → 首场永不到达=死锁,必须复位）。
+      this._wwQuietRun = 0; this._wwQuietFrames = 0;
+      this._wwQuietVW = -1; this._wwQuietVH = -1;
       this._wwTrySendTex();
       if (respawn) { this._wwShadow = true; _wwStat.respawns++; }
     } catch {
@@ -562,6 +591,18 @@ export class WaterWaveSystem {
         this.setCamera(x, y, z);
       }
     }
+  }
+
+  /** ★MSG-FREQ（2026-10-04）：稳态 worker 模式下 progress/intensity 本地推进——
+   *  逐式复制 frame() 本地路径的两行（intensity 先赋值、progress 后推进,同序;
+   *  waterDistortionIntensity 纯函数 + inp 数值结构化克隆逐位同源 ⇒ 与 worker
+   *  链逐位同）。非静默帧同样执行（替代旧「消息喂 progress」的一帧滞后相位,
+   *  回归原版主线程模拟的同步推进语义）。 */
+  private _wwLocalAdvance(inp: WaveFrameInput): void {
+    this.intensity = waterDistortionIntensity(
+      inp.windAbs, inp.rain, inp.tileX, inp.tileY,
+      inp.maxTilesX, inp.maxTilesY, inp.worldSurface, inp.rockLayer);
+    this.progress = (this.progress + inp.dt * this.intensity * 0.75) % 86400;
   }
 
   /** ★C8：Ripples 形状纹理下发（worker 模块实例无 document，ensureWaveTextures
@@ -611,11 +652,17 @@ export class WaterWaveSystem {
           R[i] = WW_B2F[data[c]]; G[i] = WW_B2F[data[c + 1]]; c += 2;
         }
       }
-      this.progress = m.progress; this.intensity = m.intensity;
+      // ★MSG-FREQ：稳态 worker 模式 progress/intensity 本地所有（_wwLocalAdvance
+      //  同式链;静默窗后 worker 链落后本地链,回写=噪声动画倒跳）——shadow/非
+      //  worker 模式（含测试直喂臂）保留消息喂（旧行为）。
+      if (!(this._wwOn && !this._wwShadow)) { this.progress = m.progress; this.intensity = m.intensity; }
       this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
       this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
       _wwStat.fmt.delta++;
       _wwStat.bytes += meta.length * 4 + data.length;
+      // ★MSG-FREQ：静默窗判定入账——零跨度 delta=场步进不动点（确定性内核下恒
+      //  冻结）;带跨度 delta（脏标）立即解除静默（下一帧恢复发帧）。
+      this._wwQuietRun = spans === 0 ? this._wwQuietRun + 1 : 0;
       return;
     }
     if (m.fmt === 'full') {
@@ -633,9 +680,12 @@ export class WaterWaveSystem {
         this._G2 = new Float32Array(n).fill(0.5);
       }
       this._gW = m.gW; this._gH = m.gH;
-      this.progress = m.progress; this.intensity = m.intensity;
+      // ★MSG-FREQ：progress/intensity 守卫同 delta 支（稳态 worker 模式本地所有）;
+      // 全量锚帧=保底重同步面,保守解除静默（下帧重新判定）。
+      if (!(this._wwOn && !this._wwShadow)) { this.progress = m.progress; this.intensity = m.intensity; }
       this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
       this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+      this._wwQuietRun = 0;
       _wwStat.fmt.full++;
       _wwStat.bytes += n * 2;
       return;
@@ -648,9 +698,11 @@ export class WaterWaveSystem {
       this._G2 = new Float32Array(m.G.length).fill(0.5);
     }
     this._gW = m.gW; this._gH = m.gH;
-    this.progress = m.progress; this.intensity = m.intensity;
+    // ★MSG-FREQ：progress/intensity 守卫同 delta 支;f32 逃生面保守解除静默。
+    if (!(this._wwOn && !this._wwShadow)) { this.progress = m.progress; this.intensity = m.intensity; }
     this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
     this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+    this._wwQuietRun = 0;
     _wwStat.fmt.f32++;
     _wwStat.bytes += m.R.length * 8;
   }
@@ -659,6 +711,7 @@ export class WaterWaveSystem {
    *  强制全量。worker 已死时静默——看门狗回落兜底） */
   private _wwRequestResync(): void {
     _wwStat.resyncs++;
+    this._wwQuietRun = 0; this._wwQuietFrames = 0;   // ★MSG-FREQ：重锚=保底面,保守解除静默
     try { this._ww?.postMessage({ op: 'resync' }); } catch { /* 死 worker,看门狗兜底 */ }
   }
 
@@ -826,7 +879,11 @@ export class WaterWaveSystem {
   setQuality(q: number): void {
     const clamped = Math.min(3, Math.max(0, Math.round(q)));   // Main.cs:4466-4473 钳 [0,3]
     if (clamped === this.quality) return;
-    if (this._wwOn) { this._ww!.postMessage({ op: 'quality', q: clamped }); }   // ★C8：worker 侧同步换档
+    if (this._wwOn) {
+      this._ww!.postMessage({ op: 'quality', q: clamped });   // ★C8：worker 侧同步换档
+      // ★MSG-FREQ：换档=活性信号（worker forceFull 待发,须有 frame 才能材料化）
+      this._wwQuietRun = 0; this._wwQuietFrames = 0;
+    }
     this.quality = clamped;
     this.gates = waveSourceGates(this.quality);
     // 降档/升档横跳时缓冲回到中性（原版档位变化 → 滤镜重激活 → _clearNextFrame）
@@ -880,6 +937,7 @@ export class WaterWaveSystem {
         this._ww = null;
         this._wwWd = null;
         this._wwErrored = false;
+        this._wwQuietRun = 0; this._wwQuietFrames = 0;   // ★MSG-FREQ：回落=本地模拟接管,静默态作废
         this._replayInj(pending);
         // ★去永久化：阶梯重生（5s/10s/20s;?wwretry=0 逃生门=旧终态语义）
         if (workerRetryEnabled()) this._wwRespawnAt = now + ladderDelayMs(this._wwFallCount++);
@@ -888,10 +946,41 @@ export class WaterWaveSystem {
         this._wwTrySendTex();   // ★C8：纹理未就绪时随帧补发（一次性）
         const inj = _wwCapture || [];
         _wwCapture = [];
-        _wwStat.posted++;
-        this._wwWd!.onSend(now);
-        this._ww!.postMessage({ op: 'frame', inp, inj });
-        if (!this._wwShadow) return;
+        // ★MSG-FREQ 静默窗跳发（2026-10-04）：worker 侧场已处内核不动点（连续
+        //  零跨度 delta 证得：确定性内核 f(F)=F 与 dx=dy=0 下 f(F_n)=F_{n-1} ⇒
+        //  F_{n+1}=f(F_n)=F_n 恒冻结）且本帧无实体注入（camera 注入项值与最后
+        //  应用态全等=冗余可弃）、相机/视口与最后发帧态全等 → 跳过 frame post。
+        //  worker 无帧可步=场保持冻结（与「照常步进不动点」逐位同）;双向
+        //  postMessage 归零。心跳：WW_QUIET_HEARTBEAT_FRAMES 帧强制发一帧重验
+        //  （对未来「场变得时间相关」类改动自愈）。任一活性信号（非 camera 注入/
+        //  相机移动/视口 resize/换档/shadow/重生/首帧）即恢复逐帧发送——
+        //  「首帧/脏标强制发」由静默判定自动失效承担（_wwQuietRun 清零点全覆盖）。
+        const quietSkip = wwQuietFlag && !this._wwShadow
+          && this._wwQuietRun > 0 && this._wwQuietFrames < WW_QUIET_HEARTBEAT_FRAMES
+          && inp.camX === this._camX && inp.camY === this._camY && inp.zoom === this._zoom
+          && inp.viewW === this._wwQuietVW && inp.viewH === this._wwQuietVH
+          && inj.every((e) => e.k === 'camera'
+            && e.a[0] === inp.camX && e.a[1] === inp.camY && e.a[2] === inp.zoom);
+        if (quietSkip) {
+          _wwStat.quietSkips++;
+          this._wwQuietFrames++;
+        } else {
+          _wwStat.posted++;
+          this._wwWd!.onSend(now);
+          this._ww!.postMessage({ op: 'frame', inp, inj });
+          this._wwQuietVW = inp.viewW; this._wwQuietVH = inp.viewH;
+          this._wwQuietFrames = 0;
+        }
+        if (!this._wwShadow) {
+          // ★MSG-FREQ：progress/intensity 本地推进（静默窗内无场消息,环境噪声
+          //  动画消费面 sampleDisplace/GLWorldCompose progress 不能冻结）——
+          //  与 worker frame() 同式同序同输入（结构化克隆数值逐位同源+纯函数+
+          //  IEEE double 确定性 ⇒ 与 worker 链逐位同,且同步前进语义=原版主线程
+          //  模拟的原样;稳态 worker 模式下消息侧 progress/intensity 不再回写,
+          //  见 _wwApplyField 守卫——静默窗后 worker 链落后本地链,回写=倒跳）。
+          this._wwLocalAdvance(inp);
+          return;
+        }
         // ★shadow 双轨（重生预热期）：已发 worker,本地模拟照跑——先把本批注入
         //  本地重放（摘态→重放→再武装,与回落帧同款防再入语义）,随后走本地路径。
         _wwCapture = null;
@@ -1363,6 +1452,9 @@ export class WaterWaveSystem {
     // 串态会让新场景首场消息误判 delta（消费者空场 → resync 丢帧=假红）。
     this._dShR = new Float32Array(0); this._dShG = new Float32Array(0);
     this._dFrame = 0; this._dF32Escape = false;
+    // ★MSG-FREQ:静默窗态一并归零（单例跨测试串态防线）
+    this._wwQuietRun = 0; this._wwQuietFrames = 0;
+    this._wwQuietVW = -1; this._wwQuietVH = -1;
   }
 }
 

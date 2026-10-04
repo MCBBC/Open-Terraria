@@ -24,6 +24,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 /** 敌怪桶最小形状（Enemy.hurt 单点结算） */
 type EnemyLike = {
@@ -111,7 +112,17 @@ export class MushroomBoiExplosionProj extends Entity {
         if (!(this.cx - box / 2 < e.x + e.w && this.cx + box / 2 > e.x
           && this.cy - box / 2 < e.y + e.h && this.cy + box / 2 > e.y)) continue;
         this.hitDone.add(e.id);
-        const crit = Math.random() < this.critChance;
+        // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（定谳=原站 Math.random()<0.04
+        //  静态掷=幻影）：1044 SetDefaults（P.cs:9877-9891 亲读）无 melee/ranged/magic 类旗
+        //  → Damage_PVE_Inner :12916-12927 三类掷整段不存在=原版零掷（crit 恒假）; ownedBy-
+        //  Someone=非 trap=true（:580-589）→ TimerCrit :12928 无条件消费照达（零掷≠跳消费,
+        //  BJ492① 946/755 同谳）。critChance 字段保留=关断钉（deadcells-flint 测试置 0 禁掷,
+        //  对 flagless 掷臂本就恒假,门=既有语义显式化）。
+        const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        const timerCrit = (game.player as unknown as
+          { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+        const crit = rollCrit || timerCrit;
         const dmg = crit ? this.damage * 2 : this.damage;
         const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;   // 默认弹体相对向（1044 不在 num40 特列）
         e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);

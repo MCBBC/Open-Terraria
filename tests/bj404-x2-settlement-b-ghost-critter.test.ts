@@ -294,7 +294,7 @@ describe('X2-D1 MedusaHead 536 受理族（hurt 返假无门位照 proc）+ D3 �
     const e = enemySpy(1, 81, 100);
     e.hurt = () => false;                                 // 无门位返假=受理形态
     const game = makeGame(log, [e], [], p);
-    const m = new MedusaHeadProj(p, 130, 2, 0, -4, 0);
+    const m = new MedusaHeadProj(p, 130, 2, 0, 0);
     m.fixedUpdate(1 / 60, game);
     expect(log.length).toBe(1);                           // 非门拒=受理 → proc 照达
     expect(log[0].kind).toBe('ghost');
@@ -309,7 +309,7 @@ describe('X2-D1 MedusaHead 536 受理族（hurt 返假无门位照 proc）+ D3 �
     p.mana = 200;
     const c = mkCritter(1, 81 * TILE, 100 * TILE);        // 距手 17px < 320,maxHp=5
     const game = makeGame(log, [], [c], p);
-    const m = new MedusaHeadProj(p, 130, 2, 0, -4, 0);
+    const m = new MedusaHeadProj(p, 130, 2, 0, 0);
     m.fixedUpdate(1 / 60, game);
     expect(c.calls.length).toBe(0);                       // volley 索敌排除 critter
     expect(log.length).toBe(0);

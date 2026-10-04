@@ -426,7 +426,7 @@ describe('R28 §15 Medusa Head', () => {
     const { e, log } = enemyIn();
     (g as unknown as { player: unknown; enemies: () => unknown[] }).player = p;
     (g as unknown as { enemies: () => unknown[] }).enemies = () => [e];
-    const m = new MedusaHeadProj(p as never, 40, 2, 0, 0, 0);
+    const m = new MedusaHeadProj(p as never, 40, 2, 0, 0);
     const ticksPerVolley = 15;                                 // scalar=1 → num=15
     for (let i = 0; i < ticksPerVolley + 5; i++) m.fixedUpdate(1 / 60, g);
     expect(log.length).toBe(2);                                // 两轮 volley
@@ -445,8 +445,8 @@ describe('R28 §15 Medusa Head', () => {
     const { e } = enemyIn();
     (g as unknown as { player: unknown; enemies: () => unknown[] }).player = p;
     (g as unknown as { enemies: () => unknown[] }).enemies = () => [e];
-    const first = new MedusaHeadProj(p as never, 40, 2, 0, 0, 0);
-    const second = new MedusaHeadProj(p as never, 40, 2, 0, 0, 0);
+    const first = new MedusaHeadProj(p as never, 40, 2, 0, 0);
+    const second = new MedusaHeadProj(p as never, 40, 2, 0, 0);
     expect((second as unknown as { dead: boolean }).dead).toBe(true);   // 让位自杀
     expect((first as unknown as { dead: boolean }).dead).toBe(false);
     expect(p.mana).toBe(100);                                  // 上游 medusaFree 分流不扣蓝→无退款语义

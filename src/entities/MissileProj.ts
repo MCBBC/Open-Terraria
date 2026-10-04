@@ -854,7 +854,9 @@ export class MagicMissileProj extends Entity {
         if (cd > 0) continue;
         this.hitCd.set(e.id, 12);   // localNPCHitCooldown=12（SetDefaults 34/79）
       }
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：16/34/79 掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+
+      //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
@@ -971,7 +973,8 @@ export class MagicMissileProj extends Entity {
         const ecx = (e.cx ?? e.x + e.w / 2), ecy = (e.cy ?? e.y + e.h / 2);
         if (!(Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2)) continue;
         if (!playerCanHitEnemy(e, game, this.projId)) continue;
-        const crit = Math.random() < this.critChance;
+        // ★BJ489 def-3：Kill 死亡爆掷率=rollVanillaHitCrit（命中拍动态,冻结载体退役）
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         // ★F3 对账收口（蓝队四轮）：Kill 死亡爆 = Resize 后 Damage()
         // 二次结算面 → 双支单源站位（79/16 数据面 magic ⇒ 恒拒=原版同真值,翻旗自动生效）
         const snapBonusRainbow = projectileSnapStrikeBonus(game,
@@ -1674,7 +1677,8 @@ export class FlyingKnifeProj extends Entity {
       const cd = this.hitCd.get(e.id) ?? 0;
       if (cd > 0) continue;
       this.hitCd.set(e.id, 10);
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：491 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,

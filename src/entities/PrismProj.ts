@@ -32,6 +32,7 @@ import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 
 // ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
 //  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
@@ -219,7 +220,9 @@ export class PrismProng extends Entity {
           if (d > this.beamLen) break;
           const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
           if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
-          const crit = Math.random() < this.critChance;
+          // ★BJ489 def-3：632 光棱掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+
+          //  :25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
           let dmg = crit ? this.damage * 2 : this.damage;
           if (charge >= 180) dmg *= 3;                     // 满充 ×3（:30379-30381）
           // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
@@ -690,7 +693,8 @@ export class BlasterBeam extends Entity {
         if (d > this.beamLen) break;
         const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
-        const crit = Math.random() < this.critChance;
+        // ★BJ489 def-3：461 光束掷率=rollVanillaHitCrit（magic 旗,命中拍动态;冻结载体退役）
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const dmg = crit ? this.damage * 2 : this.damage;
         // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
         //  461 数据面 magic ⇒ 原版充能爆破炮光束本就吸血,本仓漏接）——受理位挂接,

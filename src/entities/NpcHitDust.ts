@@ -328,7 +328,7 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
     const dustId = st.idPick != null
       ? st.idPick[Math.floor(Math.random() * st.idPick.length)]
       : (st.idRand != null ? st.dust + Math.floor(Math.random() * st.idRand)
-        : (st.dust));
+        : (st.idAi3 != null ? (st.idAi3.m[e.ai3 ?? 0] ?? st.dust) : st.dust));
     const d = game.spawnDust?.(x, y, w0, h0, dustId, sx, sy, alpha, color, scale);
     if (!d) continue;
     const dust = d as unknown as LiveDust;

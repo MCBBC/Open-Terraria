@@ -318,6 +318,18 @@ function ownerMeleeWeaponLOS(
   return (e) => playerCanHitEntity(st, game.player as never, e);
 }
 
+/** ★BJ488③④（2026-10-04）:25712-25714 持械折入算式单源——held={id,prefix}（InvItem
+ *  形态,Inventory.heldItem() 载体）→ item.crit + 词缀 crt（Item.Prefix Item.cs:585
+ *  `crit += crt` 重铸期已折进 item.crit 字段,原版 :25712-14 读字段即含词缀;本式按
+ *  现值+词缀表动态合成=同值形）。消费面：rollVanillaHitCrit（BJ486③ 掷率）/
+ *  WeaponProj.hitEnemies autoCritPct 兜底支（BJ488③）/ Game.netProjBroadcast crit
+ *  快照（BJ488④——ownerMeleeCritBits 内 {vid,prefix} 形态同式,位段压缩前同源算术）。 */
+export function heldItemCritBonus(held: { id: number; prefix?: number } | null | undefined): number {
+  if (!held) return 0;
+  return (itemCombat(ITEM_DEFS[held.id]?.vid ?? -1)?.crit ?? 0)
+    + (held.prefix ? prefixStat(held.prefix).crt : 0);
+}
+
 /** ★BJ482②（2026-10-03）原版受理 crit 掷 owner 装配查询（Projectile.cs:12915-12927）：
  *  melee/ranged/magic 类旗 → `Main.rand.Next(1,101) <= owner.xxCrit + bonusCritChance`
  *  三连掷（本面单类单旗,单掷等价）;无类旗（908 钛金碎片/226 花瓣/221/227 叶弹族/
@@ -330,10 +342,25 @@ function ownerMeleeWeaponLOS(
  *  掷【含】之（命中拍动态折入,见体内 BJ486③ 注;静态冻结载体 critTotal/arcCrit 退役,
  *  死写已于 BJ486② 全普查摘除——13 旗标+4 新发现）。桩面防御（player.critChance 缺
  *  → 聚合 0,bj475 夹具同相=BJ175 ?? 习语）。 */
-export function rollVanillaHitCrit(projId: number, game: GameHooks, bonusCritChance = 0): boolean {
+export function rollVanillaHitCrit(
+  projId: number,
+  game: GameHooks,
+  bonusCritChance = 0,
+  /** ★BJ496①（2026-10-04）spawn 位类别旗覆写通道：原版三连掷（:12915-12927）读的是
+   *  弹体【实旗】=SetDefaults 数据面 ∪ spawn 位显式覆写（Player.cs:48805 蜂枪发蜂
+   *  `magic=true`、:43976/:44478/:44872/:13758 `.melee=true`、:13959/:78077
+   *  `.ranged=true`——仓内形态=Arrow.projClass 实例字段,projTargets Z-F1 槽）。
+   *  数据面缺失族（181/566）此前经本函数 kind=null 捷径返假=掷面整缺（BJ493 主环
+   *  路由化后 critChance>0 也只到本函数即断）。显式覆写优先于数据面（resolveProjClass
+   *  同序）;传 'summon'/未知值=不掷（零 RNG）,undefined=纯数据面（既有调用零漂移）。 */
+  classOverride?: 'melee' | 'ranged' | 'magic' | 'summon',
+): boolean {
   const pd = projectileData(projId);
-  const kind = pd?.melee ? 'melee' as const : pd?.ranged ? 'ranged' as const : pd?.magic ? 'magic' as const : null;
-  if (!kind) return false;
+  const kind = classOverride === 'melee' ? 'melee' as const
+    : classOverride === 'ranged' ? 'ranged' as const
+      : classOverride === 'magic' ? 'magic' as const
+        : pd?.melee ? 'melee' as const : pd?.ranged ? 'ranged' as const : pd?.magic ? 'magic' as const : null;
+  if (kind !== 'melee' && kind !== 'ranged' && kind !== 'magic') return false;
   const player = game.player as unknown as
     { critChance?: (k: 'melee' | 'ranged' | 'magic') => number;
       inv?: { heldItem?: () => { id: number; prefix?: number } | null | undefined } } | null;
@@ -345,11 +372,7 @@ export function rollVanillaHitCrit(projId: number, game: GameHooks, bonusCritCha
   //  （命中拍现值）。BJ482「弹面掷不含武器两档」前提就此证伪——但 spawn 位载体
   //  写位仍是死写（读面不读该值,本函数动态折入=原版逐帧链同相,静态冻结退役）。
   //  折入式=ownerMeleeCritBits（Game.ts GA4 ε#3）同款：itemCombat(vid).crit+词缀 crt。
-  const held = player?.inv?.heldItem?.() ?? null;
-  const heldBonus = held
-    ? (itemCombat(ITEM_DEFS[held.id]?.vid ?? -1)?.crit ?? 0)
-      + (held.prefix ? prefixStat(held.prefix).crt : 0)
-    : 0;
+  const heldBonus = heldItemCritBonus(player?.inv?.heldItem?.() ?? null);
   // ★BJ486④（2026-10-03）num13 形参化（:12912-12914——bonusCritChance>0 才入掷）：
   //  698 武僧蓄爆通道已接线（MonkSlam 面传 25,Game.ts:20748 旧 +0.25 载体建模退役）;
   //  2269 左轮 :11134（生产端 revolverCritChanceBonus 蓄转 ramp/decay/clamp Player.cs:

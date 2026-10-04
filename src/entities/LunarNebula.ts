@@ -30,6 +30,7 @@ import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -313,7 +314,9 @@ export class NebulaBlazeBolt extends Entity {
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：掷率=rollVanillaHitCrit（634/635 magic 旗,命中拍 owner 装配+
+      //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       // ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词=读门位非 hurt 返真——返假
       //  三族=门拒（dead:13971/iframes:13972/dontTakeDamage:13978）+血尽级联（:14369
       //  族,伤害已实扣=原版受理）+普通未致命尾档（:15037）。原版 proc（:13877-79）/
@@ -394,7 +397,8 @@ export class NebulaBlazeBolt extends Entity {
       const e = ent as unknown as EnemyLike;
       if (e.dead || e.id === skipId) continue;
       if (!(ex - 25 < e.x + e.w && ex + 25 > e.x && ey - 25 < e.y + e.h && ey + 25 > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：Kill 内 Damage()（:73251）同链掷率=rollVanillaHitCrit（命中拍动态）
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       // ★X2-D1（同飞行盒站注）：受理面谓词 !vanillaGated——Kill 内 Damage()（:73251）
       //  同链,门拒不 proc 不计数,血尽级联/普通未致命返假照 proc 照计数
       //  ★清偿刀 R（2026-09-29,X4-债11）：AoE 写支档位归正——Kill :73265-73269 先置
@@ -621,7 +625,8 @@ export class LunarFlareStar extends Entity {
         const e = ent as unknown as EnemyLike;
         if (e.dead || this.hitSet.has(e.id)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-        const crit = Math.random() < this.critChance;
+        // ★BJ489 def-3：645 掷率=rollVanillaHitCrit（magic 旗,命中拍动态;冻结载体退役）
+        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         // ★X2-D1（同 634 飞行盒站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
         //  血尽级联（:14369 族）/普通未致命尾档（:15037）返假照 proc 照计数
         //  ★清偿刀 L（2026-09-29）：pierce=-3（usesLocal 族清零档,BJ398 现役梯）——

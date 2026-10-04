@@ -192,7 +192,11 @@ describe('GrenadeProj 接触引爆（Damage_PVE_Inner aiStyle16 :12330-12340）'
       (x, y, d) => { booms.push([x, y, d]); });
     r.contactPen = 7;
     r.contactKb = 5.5;
-    r.critChance = 1;   // 必暴击（采样断言用）
+    // ★BJ489 def-3：critChance=路由门非掷率（旧 `critChance=1 必暴` 采样杠杆退役）——
+    // 必暴改由 owner 聚合承载（rollVanillaHitCrit 阈值 0.04+agg/100,134 ranged 旗）
+    (game as unknown as { player: unknown }).player = {
+      critChance: () => 100, inv: { heldItem: () => null },
+    };
     r.fired = true;
     // 飞向目标:10px/t,起点 26*16=416 → 目标左缘 480:~6t 接触
     let guard = 0;

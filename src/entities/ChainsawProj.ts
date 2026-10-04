@@ -42,6 +42,7 @@ import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { damageVar } from '../stats/ScaleStats';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 /** 玩家侧挂点状态（RotatedRelativePoint 消费，Player.cs:4063-4089）：
  *  cx/cy = MountedCenter（:3189-3194；本仓不建模坐骑挂点偏移，恒等玩家中心）；
@@ -253,7 +254,18 @@ export class ChainsawProj extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（旧 `Math.random()<critChance`
+      //  静态掷退役;Game.ts 出生位 `0.04+meleeCrit/100+词缀crt/100` 冻结载体随之摘除）：
+      //  509/252 DefaultToDrillOrChainsaw（P.cs:10734-10744 melee=true 亲读）/445 激光钻
+      //  （:5165-5177 melee=true）→ 三类掷 :12916 melee 臂达=owner.meleeCrit（:25712-14
+      //  逐帧折入持械 item.crit+crt,命中拍动态）。ownedBySomeone=非 trap=true → TimerCrit
+      //  :12928 无条件消费照达。critChance 字段保留=关断钉（≤0 掷门关死,dealContacts :482
+      //  同族习语）。武僧 688-690 强制掷 :12929-43 形位=本族非 688 恒假,不设。
+      const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      const timerCrit = (game.player as unknown as
+        { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+        | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+      const crit = rollCrit || timerCrit;
       // ★DamageVar ±15%+luck 重掷（r33-④；Damage_PVE :14719 num=Main.DamageVar(damage,
       // luck)）→ StrikeNPC 内 crit ×2（:82118 区段）——方差在基伤上掷、暴击翻倍在后,
       // 与挥击侧 Game.ts 同序

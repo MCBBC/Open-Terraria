@@ -37,6 +37,7 @@ import { GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ4
 import { stepAxeCore, stepMineSolidsCore, heldSemantics, DEFAULT_SMART_CURSOR_SETTINGS, type SmartCursorEnv, type HeldSemantics, type Region } from '../player/SmartCursor';   // ★BJ433 帮工寻格（Step_Axe/Step_Pickaxe_MineSolids 导出核）
 import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit, noteVanillaProjImmune } from './projTargets';
 import { ghostHealProc } from './SpectreSoulProj';   // ★Z1/D1② 2026-10-02：随从域 ghostHeal 白耗/治疗单源补课（:13877-84 通用 on-hit 段）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ492①（2026-10-04）掷率单源（函数声明环=运行时调用安全,BJ489 同惯例）
 import { ITEM_DEFS } from '../data/items';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
@@ -3261,7 +3262,17 @@ export class MinionProj extends Entity {
       if (this.tHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.tHit.set(en.id, 60);
-      const crit = Math.random() < 0.04;
+      // ★BJ492①（2026-10-04）掷率收编单源（BJ486/488/490/491 同域尾批）：原自造
+      //  `Math.random()<0.04` 基掷=原版偏离（幻影 4%）——946 EmpressBlade（Terraprisma
+      //  万花筒随从;SetDefaults :8924-8942 亲读,minion 旗）无 melee/ranged/magic 三类旗
+      //  → 三类掷 :12916-12927 整段不存在,本面掷率=rollVanillaHitCrit（kind=null 捷径
+      //  返假,零 RNG）+TimerCrit :12928（ref-crit 无条件消费,不短路）+武僧 688-690
+      //  强制掷 :12929-43（946 恒假,形位保留）——三段与 contact() :4916-4917 同构
+      //  （本面旧缺 TimerCrit/武僧消费,随刀补齐=Damage_PVE_Inner :12913-12943 全链）。
+      const rollCrit = rollVanillaHitCrit(this.projId, game);
+      const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+      const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
+      const crit = rollCrit || timerCrit || monkCrit;
       const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
       const pen = owner?.equipStats?.armorPen ?? 0;
       en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
@@ -3292,7 +3303,13 @@ export class MinionProj extends Entity {
       },
       (n) => {
         const tn = n as TownNpcHitTarget;
-        const crit = Math.random() < 0.04;
+        // ★BJ492①（2026-10-04）掷率收编单源（同敌怪臂;城镇靶 Damage_PVE_Inner 同链
+        //  :12913-12943——类掷零 RNG+TimerCrit/武僧消费照达,消费位=巫毒窄门后/settle
+        //  前=voodoo 门位同相,contactTown :5086-5087 同构）
+        const rollCrit = rollVanillaHitCrit(this.projId, game);
+        const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
+        const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
+        const crit = rollCrit || timerCrit || monkCrit;
         const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
         return {
           dmg: crit ? Math.round(dmg0 * 2) : dmg0,   // 敌怪环预倍习语（Enemy.hurt crit=染色参）
@@ -3425,7 +3442,13 @@ export class MinionProj extends Entity {
       if (this.bHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.bHit.set(en.id, 60);
-      const crit = Math.random() < 0.04;
+      // ★BJ492①（2026-10-04）掷率收编单源（同 946 双臂）：755 BatOfLight（血红蝙蝠杖,
+      //  SetDefaults :7779-7793 亲读,minion 旗,与 946 同 aiStyle156 族）无三类旗 →
+      //  零类掷+TimerCrit :12928+武僧 :12929-43 形位（755 恒假）——旧幻影 4% 摘除。
+      const rollCrit = rollVanillaHitCrit(this.projId, game);
+      const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+      const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
+      const crit = rollCrit || timerCrit || monkCrit;
       const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
       en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
         game, owner?.equipStats?.armorPen ?? 0, crit);
@@ -4610,8 +4633,13 @@ export class MinionProj extends Entity {
         // SentryShot) ⇒ 普通小动物不吃召唤伤（无需饰品）；黑化复权体在出口内放行。
         // 盒 = :14294-14300 状态2 拳盒（Center+direction×40，80×40））
         if ((game as unknown as { critters?: () => unknown[] }).critters?.().length) {
+          // ★BJ490③（2026-10-04）projId 穿线（BJ488① settleCritterHit 单源同构）：掷面走
+          //  rollVanillaHitCrit 口径——623 SetDefaults（Projectile.cs:6701-6718 亲读）无
+          //  melee/ranged/magic 类旗 → 三类掷=零掷（kind=null 捷径返假,零 RNG,与 projId
+          //  缺位时行为零差）,TimerCrit :12928 消费面照对;穿线=机制对齐单源（黑化
+          //  critter+随从弹极窄边的掷/消费全链由 settleCritterHit 自洽承载）。
           hitCritters(
-            { x: this.cx + this.facing * 40 - 40, y: this.cy - 20, w: 80, h: 40 },
+            { x: this.cx + this.facing * 40 - 40, y: this.cy - 20, w: 80, h: 40, projId: this.projId },
             game,
             { minion: true, sentry: this.sentry });
         }
@@ -4845,9 +4873,18 @@ export class MinionProj extends Entity {
     // flag=true ⇒ 普通小动物免伤（饰品无关），唯一放行 = 黑化复权体（F2 运行时位）。
     // 命中返回值并入 anyHit（原版单数组遍历的仓内双桶拆分等价形）
     if ((game as unknown as { critters?: () => unknown[] }).critters?.().length) {
+      // ★BJ491②（2026-10-04）projId 穿线（BJ490③ 623 拳盒/BJ488① settleCritterHit 单源
+      //  同构）：projId 缺位 → settleCritterHit 掷面 `projId > 0` 门恒假=三类掷绕开单源
+      //  =机制缺口。途经 id 类旗定谳表（SetDefaults 亲读,数据面对拍同值）：
+      //  688/689/690（:7327-7339）=sentry 旗无三类旗;946（:8924-8939）=minion 旗无三类旗;
+      //  1093（:10197-10210）/1112（:10364-10377）=minion 旗无三类旗——全系零掷
+      //  （rollVanillaHitCrit kind=null 捷径返假,零 RNG,行为与缺 projId 零差）,
+      //  TimerCrit :12928/武僧 688-690 强制掷 :12929-12943 消费面照达（settleCritterHit
+      //  既有位承载）;全 MinionProj id 域（vanilla SetDefaults 逐支扫描）亦无三类旗,
+      //  穿线纯机制对齐。tests/bj491-critroll-tail2-three.test.ts §2 定谳表落锁。
       const hitbox = pad
-        ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2 }
-        : { x: this.x, y: this.y, w: this.w, h: this.h };
+        ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2, projId: this.projId }
+        : { x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId };
       // 小动物亦属原版 Main.npc 全表 → Damage 每中兽同样走 SpawnHitVisuals（此处整桶
       // 合一近似——多兽同帧合并为一发;Enemy 桶为逐靶直译）
       const critterHit = hitCritters(hitbox, game, { minion: true, sentry: this.sentry });

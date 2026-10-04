@@ -188,9 +188,12 @@ describe('SW-BJ47 ⑤ RB10d critter 命中写位收口（Projectile.cs:13382 并
 
   it('变异锁：critter 爆炸/近战/弹三支 fromPlayer=true 在位（旧缺参爆红）', () => {
     const s = readFileSync(fileURLToPath(new URL('../src/core/Game.ts', import.meta.url)), 'utf8');
-    // 773 贴附爆炸 critter 支（F-BJ47-A）——尾参 pen,false,0,true（敌怪支 en.hurt 同形
-    //  但变量名 en/c 可辨）
-    expect(s).toMatch(/c\.hurt\(this\.world\.isExpert[^]+?, this, pen, false, 0, true\)/);
+    // 773 贴附爆炸 critter 支（F-BJ47-A）——★BJ490①（2026-10-04）锁随 ★BJ467④ 演进
+    //  更新至现役定谳形（Game.ts 773 Kill 爆炸 critter 支）：dmg 臂 = EoW/5 尾臂 ×
+    //  (critterTimerCrit ? 2 : 1)（:12928 TimerCrit 消费,数值预倍交调用侧）,crit 位次 =
+    //  pen 后 critterTimerCrit（旧 pen,false 静态假位退役）。变异面保持判别力：摘
+    //  critterTimerCrit 消费/×2/crit 位次任一 → 红（敌怪支 en.hurt 同形但 en/c 可辨）。
+    expect(s).toMatch(/c\.hurt\(\(this\.world\.isExpert && \(c\.vanillaId \?\? 0\) >= 13 && \(c\.vanillaId \?\? 0\) <= 15\s*\?\s*Math\.trunc\(cdmg \/ 5\) : cdmg\) \* \(critterTimerCrit \? 2 : 1\),\s*\(kbDir \|\| \(Math\.sign\(c\.cx - exPx\) \|\| 1\)\) \* 8, 0, this, pen, critterTimerCrit, 0, true\)/);
     // settleKillExplosion 两支（F-BJ47-B）
     expect(s.match(/c\.hurt\(applyBannerDamageDealt\(this, c, Math\.max\(1, Math\.trunc\(dmg\)\)\), cx - c\.cx, 0, this, 0, false, 0, true\)/g)?.length).toBe(2);
     // 近战 critter 支（F-BJ47-C）

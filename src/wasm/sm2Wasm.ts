@@ -2,7 +2,7 @@
 // 架构总纲见 src/wasm/README.md;四约定:
 // ①特性检测:typeof WebAssembly==='object' + 异步实例化失败 → JS 回退(本文件所有
 //   出口 false/拒=回退信号,调用方必须实现 JS 原路径);
-// ②每模块独立 flag:本次 ?sm2wasm=1(缺省关,审查通过前不转正);测试钩
+// ②每模块独立 flag:★转正(2026-10-04 用户令「前两个先转正」)——缺省开,?sm2wasm=0 逃生门(灰度期 ?sm2wasm=1 显式开);测试钩
 //   __setSm2WasmFlagForTest;
 // ③调用点模式:`wasm可用∧旗开 ? wasmPath() : jsPath()` —— JS 路径零改动逐位保留;
 // ④线性内存布局/入参出参约定:见 README「ABI」节(sm2Version era guard=1)。
@@ -53,12 +53,12 @@ export const __sm2WasmStats = { runs: 0, refusals: 0, loadFail: 0 };
 // ★混合读取:import 期快照(真实游戏 boot 链在洗参前 import,FFGLOFF 判例同款)+
 //   每次调用现读(探针/运行期带旗重载;BJ95 gotoApp 洗参后现读会漏,快照兜底)。
 const QUERY_FLAG_AT_IMPORT = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('sm2wasm') === '1' : false;
+  ? new URLSearchParams(location.search).get('sm2wasm') !== '0' : true;
 let flagOverride: boolean | null = null;
 export function sm2WasmEnabled(): boolean {
   if (flagOverride != null) return flagOverride;
   if (typeof location !== 'undefined'
-    && new URLSearchParams(location.search).get('sm2wasm') === '1') return true;
+    && new URLSearchParams(location.search).get('sm2wasm') === '0') return false;
   return QUERY_FLAG_AT_IMPORT;
 }
 /** 测试钩:null=回归 URL 缺省 */

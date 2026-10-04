@@ -2,7 +2,7 @@
 // 架构总纲见 src/wasm/README.md;四约定:
 // ①特性检测:typeof WebAssembly==='object' + 异步实例化失败 → JS 回退(本文件所有
 //   出口 false/拒=回退信号,调用方必须实现 JS 原路径——LightMap.blur() 下方 JS 支);
-// ②每模块独立 flag:本次 ?lightwasm=1(缺省关,审查通过才转正);测试钩
+// ②每模块独立 flag:★转正(2026-10-04 用户令「前两个先转正」)——缺省开,?lightwasm=0 逃生门(灰度期 ?lightwasm=1 显式开;worker 域经 options.name 注入,转正后=禁用标记反转:worker 读 !includes('lightwasm=0'));测试钩
 //   __setLightWasmFlagForTest。★旗通道双域:主线程读页面 URL;worker 域(document
 //   缺席)读 Worker options.name(LightWorkerLink spawn 时注入 'lightwasm=1'——
 //   worker 无页面 URL,快照协议不动,name 通道对 vite dev/build 均零特化处理)。
@@ -51,28 +51,29 @@ let lutView: Uint8Array | null = null;
  *  loadFail=加载失败(特性缺失/实例化失败/ABI 错代)。 */
 export const __lightWasmStats = { runs: 0, refusals: 0, loadFail: 0 };
 
-// ---------------- flag(②约定:缺省关,审查通过才转正) ----------------
-// ★混合读取:import 期快照 + 每次调用现读(BJ95 gotoApp 洗参后现读会漏,快照兜底)。
+// ---------------- flag(★转正 2026-10-04:缺省开,?lightwasm=0 逃生门) ----------------
+// ★转正注:灰度期的「import 期快照 || 现读」混合式随转正退役——快照 OR 会击穿
+//   禁用标记(worker name 'sw-lightwasm=0' 时快照恒 true=逃生门失效,实测抓到);
+//   现读双域已覆盖洗参面(主线程=location.search 现读;worker=name 注入串)。
 // ★双域通道:主线程=location.search;worker 域(document 缺席)=Worker options.name
 //   (LightWorkerLink spawn 注入;worker location 是脚本 URL 无页面查询串,fork bomb
 //   判例家族禁 URL 探测——name 是 Worker 构造选项,dev/build 双态零特化)。
 function readFlag(): boolean {
   try {
     if (typeof document !== 'undefined' && typeof location !== 'undefined') {
-      return new URLSearchParams(location.search).get('lightwasm') === '1';
+      return new URLSearchParams(location.search).get('lightwasm') !== '0';
     }
     if (typeof document === 'undefined') {
       const n = (globalThis as { name?: string }).name ?? '';
-      return n.includes('lightwasm=1');
+      return !n.includes('lightwasm=0');   // ★转正:禁用标记反转(缺省开)
     }
   } catch { /* fallthrough */ }
   return false;
 }
-const QUERY_FLAG_AT_IMPORT = readFlag();
 let flagOverride: boolean | null = null;
 export function lightWasmEnabled(): boolean {
   if (flagOverride != null) return flagOverride;
-  return readFlag() || QUERY_FLAG_AT_IMPORT;
+  return readFlag();   // ★转正:纯现读(禁用标记语义不可被快照 OR 击穿)
 }
 /** 测试钩:null=回归 URL 缺省 */
 export function __setLightWasmFlagForTest(v: boolean | null): void { flagOverride = v; }

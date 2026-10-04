@@ -20,6 +20,7 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -98,7 +99,9 @@ export class RainbowSegment extends Entity {
       //  identity,victim]=UpdateCount+cd）在【受理支】内——免疫门 :12635-12637 拒收
       //  （他源 iframes 残窗）发生在任何写尾之前,门拒敌不落静态标 → 残窗期满后本段
       //  照吃;旧档 set 前置=残窗敌被整段 10t 静态窗吞（set 移入下方 !vanillaGated 支）。
-      const crit = Math.random() < this.critChance;
+      // ★BJ489 def-3：251 掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+:25712
+      //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★清偿刀 T（X4-债12,2026-09-29）：门位读【前置快照】（读侧单源
       //  snapshotVanillaGate,判据=「进 hurt 前状态」=原版免疫门 :12634-12637/:12686

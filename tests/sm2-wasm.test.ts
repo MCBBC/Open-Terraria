@@ -160,14 +160,14 @@ describe('①位级锁:WASM VM vs JS 引擎/JS VM(场值闸 maxd≤2/255)', () =
   }
 });
 
-describe('②flag 锁(缺省关;旗开才走 WASM)', () => {
-  it('缺省(node 无 location):即使 wasm 就绪,2D 产物链也走 JS(wasmRuns=0)', () => {
+describe('②flag 锁(★转正缺省开,2026-10-04;?sm2wasm=0 逃生门走 JS)', () => {
+  it('缺省(node 无 location):wasm 就绪即走 WASM(wasmRuns=1,sm2Runs 分账照计)', () => {
     expect(sm2WasmReady()).toBe(true);
-    expect(sm2WasmEnabled()).toBe(false);
+    expect(sm2WasmEnabled()).toBe(true);
     const ok = drawForceFieldBubble(fakeCtx(), fakeRenderer2D(), opts());
     expect(ok).toBe(true);
     expect(__forceFieldBubbleStats.sm2Runs).toBe(1);
-    expect(__forceFieldBubbleStats.wasmRuns).toBe(0);
+    expect(__forceFieldBubbleStats.wasmRuns).toBe(1);
   });
   it('?sm2wasm=1(测试钩):产物走 WASM(wasmRuns=1,sm2Runs 分账照计)', () => {
     __setSm2WasmFlagForTest(true);

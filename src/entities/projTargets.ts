@@ -15,6 +15,7 @@ import {
 } from '../player/HurtCooldownBuckets';
 import { getProjScanCtx } from './projScanCtx';
 import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★清偿刀 P1 门位快照单源（C5 定谳#3——ESM 函数声明环安全:两侧均仅运行时调用）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ488① critter 面三类掷（:12915-12927）——proj1457 彼侧 import 本模块（hitCritters 族）=函数声明环,两侧均运行时调用（P1 同习语）
 
 /** ★IIIII248 弹幕命中扫描 equip 取用面（projScanCtx.ts 头注全证明）：
  *  projectiles 桶步进窗内 = tick 级快照（六布尔字段与 equipStats 同名同义）;
@@ -453,6 +454,7 @@ function settleCritterHit(
   game: GameHooks,
   ctx: HitCritterCtx | undefined,
   flag: boolean,
+  projId: number,
   c: CritterLike,
   hitTest: (c: CritterLike) => boolean,
 ): boolean {
@@ -462,16 +464,33 @@ function settleCritterHit(
   if (flag && !isCritterThatIsHostileToPlayers(c)) return false;
   const victim = c as unknown as { iframes?: number; dontTakeDamage?: boolean };
   const gate = snapshotVanillaGate(victim);
+  // ★BJ488①（2026-10-04）critter 面 crit 掷 + TimerCrit 消费（Damage_PVE_Inner :12911-12928
+  //  亲读定谳：critter 【无特支】——victim 循环对 critter 与普通敌同链,三类掷 :12915-12927
+  //  与 TryConsumingTimerCrit :12928 照达;唯二差异门都在本函数既有位=①CanNPCBeHitBy
+  //  PlayerOrPlayerProjectile 拒收（:12622-12625→gate 处 return,上方 flag 支承载——拒收拍
+  //  掷/消费全不可达）②免疫窗门 :12635-37 在 crit 段【前】→ 门拒不掷不消费。ownedBySomeone
+  //  =!trap（Projectile.cs:580-589）→ trap 弹整 crit 块跳过=零掷零消费（1091 同判例）。
+  //  可观测面：critter 一击即死使 crit 伤面不可观测,但 TimerCrit 蓄能节拍（charge→−15
+  //  :28568-71）+NightsEdge 编排照发=消费实证;crit 位只进飘字色/击退 ×1.4（Enemy.hurt
+  //  消费位）——dmg 固定 5 shim（RB10d-D1 登记债）不预倍,债清偿时再接 crit ×2 面。 */
+  const rejected = vanillaGateRejected(gate);
+  let crit = false;
+  if (!rejected && ctx?.trap !== true) {
+    const rollCrit = projId > 0 && rollVanillaHitCrit(projId, game);
+    crit = rollCrit || ((game.player as unknown as
+      { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
+      ?.tryConsumingTimerCrit?.(game, c.x, c.y, c.w, c.h) ?? false);
+  }
   const landed = (c as unknown as {
     hurt: (d: number, kx: number, ky: number, g: GameHooks,
       armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
-  }).hurt(5, 0, 0, game, 0, false, 0, ctx?.trap !== true);
-  if (!landed && vanillaGateRejected(gate)) return false;   // 门拒（iframes 残窗/dontTakeDamage）=整体跳过
+  }).hurt(5, 0, 0, game, 0, crit, 0, ctx?.trap !== true);
+  if (!landed && rejected) return false;   // 门拒（iframes 残窗/dontTakeDamage）=整体跳过
   return true;
 }
 
 export function hitCritters(
-  self: { x: number; y: number; w: number; h: number },
+  self: { x: number; y: number; w: number; h: number; projId?: number },
   game: GameHooks,
   ctx?: HitCritterCtx,
 ): boolean {
@@ -479,7 +498,7 @@ export function hitCritters(
   if (critterHostileOnly(self as { projId?: number })) return false;
   const flag = critterRejectFlag(self as { projId?: number }, game, ctx);
   for (const ent of list) {
-    if (settleCritterHit(game, ctx, flag, ent as CritterLike,
+    if (settleCritterHit(game, ctx, flag, self.projId ?? 0, ent as CritterLike,
       (c) => projOverlap(self.x, self.y, self.w, self.h, c))) return true;
   }
   return false;
@@ -492,7 +511,7 @@ export function hitCritters(
  *  等价面），返回受理命中【数】（:14263 账;布尔出口 hitCritters 保持原签名零回退）。
  *  首靶即返语义（keepIterating=false 截断族:penetrate=1 单发）仍走 hitCritters。 */
 export function hitCrittersAll(
-  self: { x: number; y: number; w: number; h: number },
+  self: { x: number; y: number; w: number; h: number; projId?: number },
   game: GameHooks,
   ctx?: HitCritterCtx,
   hitTest?: (c: CritterLike) => boolean,
@@ -503,7 +522,7 @@ export function hitCrittersAll(
   const test = hitTest ?? ((c: CritterLike) => projOverlap(self.x, self.y, self.w, self.h, c));
   let n = 0;
   for (const ent of list) {
-    if (settleCritterHit(game, ctx, flag, ent as CritterLike, test)) n++;
+    if (settleCritterHit(game, ctx, flag, self.projId ?? 0, ent as CritterLike, test)) n++;
   }
   return n;
 }

@@ -307,7 +307,7 @@ describe('BJ382 美杜莎 volley 536 ghostHeal proc（每目标独立束,numHits
     p.mana = 200;
     const e = enemySpy(1, 81, 100);                       // 距手 17px < 320
     const game = makeGame(log, [e], p);
-    const m = new MedusaHeadProj(p, 130, 2, 0, -4, 0);    // crit 兜底 (4-4)/100=0
+    const m = new MedusaHeadProj(p, 130, 2, 0, 0);    // critChance=0 关断钉（BJ497③ 摘死形参后 5 参形）;掷面 rollVanillaHitCrit owner 聚合 0=不暴击
     m.fixedUpdate(1 / 60, game);
     expect(e.lastStrikeDealt).toBe(130 - DEFENSE);
     expect(log.length).toBe(1);                           // ← 旧码 0 = 漏接病灶
@@ -326,7 +326,7 @@ describe('BJ382 美杜莎 volley 536 ghostHeal proc（每目标独立束,numHits
     const b = enemySpy(2, 82, 100);
     const c = enemySpy(3, 83, 100);
     const game = makeGame(log, [a, b, c], p);
-    const m = new MedusaHeadProj(p, 130, 2, 0, -4, 0);
+    const m = new MedusaHeadProj(p, 130, 2, 0, 0);
     m.fixedUpdate(1 / 60, game);
     expect(log.map((x) => x.numHits)).toEqual([0, 0, 0]); // ← 与 634/656 的衰减面判别
     expect(a.lastStrikeDealt).toBe(130 - DEFENSE);

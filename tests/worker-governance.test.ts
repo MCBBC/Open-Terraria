@@ -248,14 +248,17 @@ describe('C WaterWaves 看门狗治理集成（红绿全链）', () => {
     h.waves.frame({ ...INP });
     expect(h.waves.progress).not.toBe(pShadow);
     expect(h.instances()[1].posted.some((m) => (m as { op?: string }).op === 'frame')).toBe(true);
-    // 首场到达 → 切主（纯 worker 模式,本地模拟退役=progress 冻结待场消息喂）
+    // 首场到达 → 切主（纯 worker 模式）。★MSG-FREQ（2026-10-04）语义更新：稳态
+    // worker 模式 progress/intensity 改本地逐位推进（_wwLocalAdvance,与 worker
+    // 链同式同输入;旧「冻结待场消息喂」会使 MSG-FREQ 静默窗内环境噪声动画冻结,
+    // 且消息喂本身带一帧到达竞态相位）——场消息只喂 R/G/cam/scroll。
     h.instances()[1].onmessage!({ data: fieldMsg(80, 60, 200) });
     vi.advanceTimersByTime(33);
     h.waves.frame({ ...INP });
     const pWorker = h.waves.progress;
     vi.advanceTimersByTime(33);
     h.waves.frame({ ...INP });
-    expect(h.waves.progress).toBe(pWorker);
+    expect(h.waves.progress).not.toBe(pWorker);      // 本地推进=动画不冻结
     expect(h.stats().falls).toBe(1);                 // 无新增回落
   });
 

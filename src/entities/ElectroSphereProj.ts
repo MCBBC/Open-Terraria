@@ -20,6 +20,7 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ497② 掷率单源（443 ranged 旗命中拍动态）
 
 export const ELECTROSPHERE_PROJ = 443;
 /** timeLeft（NewProjectile :11067-11070 钳 300 = 5s） */
@@ -32,7 +33,10 @@ export const ELECTROSPHERE_FADEOUT = 51;
 export class ElectroSphereProj extends Entity {
   w = 80; h = 80;                       // SetDefaults :5140-5141
   damage = 0;
-  critBonus = 0;
+  /** ★BJ497②（2026-10-04）旧 critBonus 孤儿字段摘除（全库无写者=恒 0 死值）。0.04=
+   *  掷率路由门（>0）非掷率,≤0 关断钉载体（测试置 0 习语,BeamBoltProj BJ489 同形）
+   *  ——443 数据面 ranged（SetDefaults :5146）,掷率=rollVanillaHitCrit 命中拍动态。 */
+  critChance = 0.04;
   armorPen = 0;
   /** ai[0]：脉冲/自旋相位（120t 循环 :31215-31219） */
   private ai0 = 0;
@@ -121,7 +125,11 @@ export class ElectroSphereProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if ((e.iframes ?? 0) > 0) continue;                // immune[owner] 门（:11869）
-      const crit = Math.random() < (4 + this.critBonus) / 100;
+      // ★BJ497②（2026-10-04）掷率收编：旧面 `Math.random() < (4 + this.critBonus)/100`
+      //  =critBonus 无写者的孤儿 4% 平率（owner 聚合/:25712 持械折入整缺）——443 数据面
+      //  ranged（SetDefaults :5146,亲读）→ rollVanillaHitCrit 命中拍动态（critChance>0
+      //  路由门,类缺省 0.04;442 导弹 Kill 出生位 Game.ts :42957 无写位=类缺省同门）。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(ELECTROSPHERE_PROJ, game);
       // ★F3 接线（蓝队四轮）：电球 443 数据面 ranged（SetDefaults :5139-5149）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -129,7 +137,9 @@ export class ElectroSphereProj extends Entity {
         { projId: ELECTROSPHERE_PROJ }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)))
+      // ★BJ497② 翻倍归位（BJ496③ 同族缺口）：原版 StrikeNPC :12811 crit → num×2——
+      //  旧面染 crit 色零翻倍（本仓 Enemy.hurt 不内部翻倍,调用侧负责=Arrow 主环同式）。
+      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)) * (crit ? 2 : 1))
         + (snapBonusSphere ? Math.trunc(snapBonusSphere * (crit ? 2 : 1)) : 0),
         0, 0, game, this.armorPen, crit, 2, true);
       e.iframes = ELECTROSPHERE_IFRAMES;                 //（:14072-14074，覆写通用档 10）

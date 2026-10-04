@@ -143,10 +143,10 @@ describe('light-wasm:加载与 ABI', () => {
   });
 });
 
-describe('light-wasm:flag 三态(缺省关)', () => {
-  it('缺省关:旗读 false(node 域 name 通道空串)', () => {
+describe('light-wasm:flag 三态(★转正缺省开,2026-10-04)', () => {
+  it('缺省开:旗读 true(node 域 name 通道空串=无禁用标记);?lightwasm=0 逃生门禁用', () => {
     __setLightWasmFlagForTest(null);
-    expect(lightWasmEnabled()).toBe(false);
+    expect(lightWasmEnabled()).toBe(true);
   });
 
   it('worker name 通道:document 缺席域读 globalThis.name(node 即此域)', () => {
@@ -155,11 +155,11 @@ describe('light-wasm:flag 三态(缺省关)', () => {
     __setLightWasmFlagForTest(null);
     try {
       g.name = 'LightWorker';
-      expect(lightWasmEnabled()).toBe(false);   // 缺省 spawn 名不含旗
-      g.name = 'sw-lightwasm=1';
-      expect(lightWasmEnabled()).toBe(true);    // LightWorkerLink 旗开注入串
-      g.name = 'xlightwasm=1y';
-      expect(lightWasmEnabled()).toBe(true);    // 子串匹配(注入格式演化容忍)
+      expect(lightWasmEnabled()).toBe(true);    // ★转正:缺省开(旧名无禁用标记)
+      g.name = 'sw-lightwasm=0';
+      expect(lightWasmEnabled()).toBe(false);   // 禁用标记(逃生门注入串)
+      g.name = 'xlightwasm=0y';
+      expect(lightWasmEnabled()).toBe(false);   // 子串匹配(注入格式演化容忍)
     } finally {
       g.name = saved;
     }

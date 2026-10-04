@@ -27,6 +27,7 @@ import type { Camera } from '../render/Camera';
 import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';
 import { canHitLine } from '../physics/LineOfSight';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
@@ -52,8 +53,8 @@ export class MedusaHeadProj extends Entity {
   knockback: number;
   critChance: number;
   armorPen: number;
-  /** 暴击加成百分点（critChance=0 时按 (4+critBonus)/100 兜底,同 Arrow 命中环） */
-  private critBonus: number;
+  // ★BJ497③（2026-10-04）ctor critBonus 死形参摘除（BJ496① 登记清偿,BJ494⑥ 钉死面）
+  //  ——volley 掷面已迁 rollVanillaHitCrit（:211）,形参/字段/`void critBonus` 三层全摘。
   dead = false;
   /** ★BJ382：PVE 受理命中计数形状（projPveNumHits PVP 读口对齐）。volley 的原版
    *  结算载体是逐目标独立生成的 536 凝视束（每弹 numHits SetDefaults :706 起始 0
@@ -87,13 +88,12 @@ export class MedusaHeadProj extends Entity {
   private beams: Array<{ x2: number; y2: number; age: number; mag: number }> = [];
 
   constructor(owner: Player, damage: number, knockback: number,
-    critChance: number, critBonus: number, armorPen: number) {
+    critChance: number, armorPen: number) {
     super();
     this.owner = owner;
     this.damage = damage;
     this.knockback = knockback;
     this.critChance = critChance;
-    this.critBonus = critBonus;
     this.armorPen = armorPen;
     if (activeMedusa && activeMedusa.owner !== owner) {
       activeMedusa = null;                           // 旧世界/旧主人残留 → 失效清位
@@ -108,7 +108,6 @@ export class MedusaHeadProj extends Entity {
     }
     activeMedusa = this;
     this.prepaidFirstVolley = MedusaHeadProj.MEDUSA_REFUND_LEGACY_CHARGE;
-    void critBonus;
   }
 
   /** 上游扣魔精确复算并退还（Game.ts :11243 同式：词缀 mcst(I:562 round) +
@@ -200,7 +199,12 @@ export class MedusaHeadProj extends Entity {
       const t = cands[k].e;
       const tcx = t.x + t.w / 2, tcy = t.y + t.h / 2;
       angSum += Math.atan2(tcy - hy, tcx - hx);
-      const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+      // ★BJ496①（2026-10-04）爆面掷率收编（BJ493③ 661 先例,箭域 617/659 同批）：旧
+      //  `||` 面把 0.04 路由门误当 4% 平率消费——volley 伤害载体=逐目标独立 536 凝视束
+      //  出生即 Damage()（:45420-45435）⇒ 掷=Damage_PVE :12915-12927 magic 臂（536 数
+      //  据面 magic;本实体 projId=535 同 magic 旗同掷面,同值形）,rollVanillaHitCrit
+      //  命中拍动态（owner 装配+:25712 持械折入）;critChance≤0 关断钉保留。
+      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
       // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79）——原版 volley 结算载体 =
       //  逐目标 NewProjectile(536) 后立即 Damage()（AI_100 :45420-45435,束为纯视觉
       //  载体 damage=0）;536 数据面 magic（vanilla-projectiles.json）⇒ 原版本就吸血,

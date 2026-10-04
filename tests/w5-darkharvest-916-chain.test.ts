@@ -199,17 +199,24 @@ describe('W5-§B：contact() 敌怪环（乌鸦 317 直驱）', () => {
     expect(seq).toEqual(['SRC', 'E1']);                  // ★序面钉值:主伤先于链电
   });
 
-  it('B2 主命中门拒（dontTakeDamage :14241）→ 链电不落地（:12600 门拒整跳,:13711 不可达）', () => {
+  it('B2 主命中门拒（dontTakeDamage :12600 头门前置）→ 整跳：主命中尝试/tag/链电全不达（BJ475① 现役定谳形）', () => {
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     src.dontTakeDamage = true;
     const { hooks, player } = makeHooks([src, e1]);
     player.tagEffectStack.tryApplyTagToNPC(4680, src.id, 0, 0);
     contactDirect(ravenAt(player, 600, 600), hooks);
-    // 主命中尝试照发（真 Enemy.hurt 内部拒）;旧形 hurtFx 直调=SRC 多记一跳 15。
-    expect(src.calls.map((c) => c.d)).toEqual([45]);
-    expect(e1.calls).toEqual([]);                        // ★门拒跳无 916（旧形旁落必红面）
-    expect(seq).toEqual(['SRC']);
+    // ★BJ493①（2026-10-04）B2 锁更新：旧 W5 提交态「主命中尝试照发 [45]（真
+    //  Enemy.hurt 内部拒）」与 BJ475① 落刀的 contact 环 :12600 DTD 前置门
+    //  （MinionProj.ts `if (dontTakeDamage) continue`,BJ475-tag-crit-batch3 §1a
+    //  同构——门先于 Inner 全链,hurt 调用/TimerCrit/tag ModifyHit/私表 cd 消费
+    //  全不可达）契约冲突=前在红。现役定谳形=整跳零 hurt 调用。
+    //  变异判别力保持：①摘 :12600 前置门 → contact 照发主命中 [45]/seq=['SRC']
+    //  （916 照旧被 mainGated 拦=E1 零伤）→ 三断言全红;②回退 W5 汇出收集为
+    //  同步直调（须连门同摘才可达 SRC）→ src 双记 [15,45] → 本测+B1 双红。
+    expect(src.calls).toEqual([]);                       // ★整跳:主命中尝试不达（旧 [45] 锁退役）
+    expect(e1.calls).toEqual([]);                        // ★门拒跳无 916（判别力保持）
+    expect(seq).toEqual([]);                             // ★零 hurt 调用（摘门=[45]/['SRC'] 必红）
   });
 
   it('B3 链靶窗态独立于源敌窗（-2 缺省族主命中置 10t 窗不拦链电）', () => {

@@ -40,6 +40,7 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ProjGhostRing, drawCeleb2Chain } from './projGhostTrail';   // ★BJ235 烟花链残影
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -350,7 +351,19 @@ export class Celeb2Rocket extends Entity {
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（旧 `Math.random()<critChance`
+      //  静态掷退役;Game.ts 出生位 `(rangedCrit+武器crit+弹药crit)/100` 小数冻结载体随之
+      //  摘除——BJ492「疑有意小数阈值档」假说证伪：714/615 出生位 P.cs:49500/:49505 亲读
+      //  =裸 NewProjectile 无任何 crit 特设,Projectile 亦无 crit 字段;小数档实为冻结载体
+      //  的单位约定非原版形态,且旧注入漏基 4）：715-718 SetDefaults（:7586-7611 ranged=true
+      //  亲读）→ 三类掷 :12920 ranged 臂达=owner.rangedCrit（:25712-14 逐帧折入,命中拍
+      //  动态）。ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费照达。
+      //  critChance 字段保留=关断钉（celeb2-mk2 测试置 0 禁掷）。
+      const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      const timerCrit = (game.player as unknown as
+        { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+        | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+      const crit = rollCrit || timerCrit;
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）：庆祝弹射器 MK2 族（714/615/715-718）数据面 ranged
       // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在

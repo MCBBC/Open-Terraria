@@ -325,7 +325,8 @@ export class VolcanoBlastProj extends Entity {
       if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate 计数耗尽
     }
     // 小动物面（原版 NPC 桶同在 Projectile.Damage 域——弹幕族统一既有通道）
-    hitCritters({ x: px, y: py, w: this.w, h: this.h }, game);
+    // ★BJ488① projId 随盒（978 melee 旗→critter 面三类掷 :12915-27 照达;TimerCrit :12928）
+    hitCritters({ x: px, y: py, w: this.w, h: this.h, projId: 978 }, game);
   }
 
   /** alpha 归一值（0..1）；draw 时换算 255 弹面不透明度 */

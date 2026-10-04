@@ -429,9 +429,11 @@ import { resetCageAnim } from '../render/CritterCage';
 import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample, bannerDamageDealtMultOf } from '../entities/projTargets';
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import { grantCollisionAttackImmunity } from '../entities/MountCombat';
+// ★BJ494：stellarTuneCritChance 生产调用面退役（冻结载体摘除）→ 移出 import;
+// 函数本体保留（口径文档+spectre-stellar 单测）。modifyStellarTuneDamage 仍供 :5312。
 import {
   SparkleGuitarProj, computeStellarTuneShot, sparkleGuitarTargetRect,
-  stellarTuneCritChance, modifyStellarTuneDamage,
+  modifyStellarTuneDamage,
   nextVector2Circular, collectStellarTargets,
 } from '../entities/SparkleGuitarProj';
 // 近战任务A/B 纯几何：ZappingJellyfish 族表 + 火之大剑(Volcano,type121;
@@ -3856,8 +3858,16 @@ export class Game implements GameHooks {
     // 携带 kind bit6——被击端傀儡过 InOpposingTeam 门禁后本地结算（victim-settles）
     const pvpOn = net.policy.pvpAllowed && this.player.hostile;
     // ★ε#3：持械 crit 快照源（广播拍现值——ownerMeleeCritBits 内消费,见彼处注）
+    // ★BJ488④（2026-10-04）：载体改携 prefix——旧 heldDefNow 为 def 载体（有 vid 位、
+    //  无 prefix 位）→ ownerMeleeCritBits 内 `heldItem.prefix ? prefixStat(prefix).crt`
+    //  词缀段恒短路整漏折（Item.Prefix Item.cs:585 `crit += crt` 重铸期折进 item.crit,
+    //  =ε#3 定谳口径的词缀半边;词缀暴击档 crt 至 +12~15pp）。{vid,prefix} 双源载体=
+    //  rollVanillaHitCrit 持械折入（BJ486③,proj1457.heldItemCritBonus 同款算式）,
+    //  快照端与命中端同值;vi_ 表缺 vid → itemCombat(-1) 段照旧安全返 0。
     const heldNow = this.player.inv.heldItem();
-    const heldDefNow = heldNow ? ITEM_DEFS[heldNow.id] : null;
+    const heldCritNow = heldNow
+      ? { vid: ITEM_DEFS[heldNow.id]?.vid, prefix: heldNow.prefix }
+      : null;
     let examined = 0;
     for (; examined < n && snaps.length < 24; examined++) {
       const p = list[(this.netProjCursor + examined) % n] as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
@@ -3906,8 +3916,8 @@ export class Game implements GameHooks {
         else {
           if (pvpOn) kind |= 0x40;   // v7：玩家 PvP 弹（友方 Arrow = 玩家射出）
           aux = meleeEnchantOf(this.player.buffs);  // StatusPvP 浸剂通道（aux 低 4 位）
-          // ★ε#3：终值含持械 item.crit（Player.Update :25712-14 每帧链）——heldDefNow 快照
-          aux |= ownerMeleeCritBits(this.player, heldDefNow);   // 高位段（结算端掷点上下文）
+          // ★ε#3：终值含持械 item.crit（Player.Update :25712-14 每帧链）——heldCritNow 快照
+          aux |= ownerMeleeCritBits(this.player, heldCritNow);   // 高位段（结算端掷点上下文;★BJ488④ 载体携 prefix=词缀 crt 折入）
         }
       }
       else if (p instanceof Dart) {
@@ -3979,7 +3989,7 @@ export class Game implements GameHooks {
         kind = 1; tag = String(p.projId);
         if (pvpOn) kind |= 0x40;   // v7：武器族弹幕（回旋镖/剑气等，恒玩家来源）
         aux = meleeEnchantOf(this.player.buffs);    // melee 族：浸剂/冰霜/熔岩石均生效
-        aux |= ownerMeleeCritBits(this.player, heldDefNow);   // ★ε#3 同上：含持械加成终值
+        aux |= ownerMeleeCritBits(this.player, heldCritNow);   // ★ε#3 同上：含持械加成终值（★BJ488④ 携 prefix=词缀 crt 折入）
       }
       else if (p.color !== undefined) {
         kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600));
@@ -13509,7 +13519,7 @@ export class Game implements GameHooks {
    *  不耗弹不重播音效（midSwing 语义同 R27 multishot） */
   private spawnClockworkBurstShot(
     x: number, y: number, pid: number, dmg: number, kb: number,
-    speedBase: number, crit: number, arpen: number,
+    speedBase: number, arpen: number,
     grav: { grav: number; gravDelay: number; grav2?: number; grav2At?: number },
     tier: number,
   ): void {
@@ -13525,7 +13535,10 @@ export class Game implements GameHooks {
     }
     const a = new Arrow(x, y, bvx, bvy, dmg, kb, pid, grav);
     a.frostEligible = true;
-    a.critBonus = crit;
+    // ★BJ493③（2026-10-04）critBonus 冻结写位摘除（critTotal 形参随迁退役）——
+    //  掷率走 Arrow 通用环 rollVanillaHitCrit 动态（critChance=0.04 路由门,主弹
+    //  :17533 同批;原 crit 形参=出生拍冻结,值与命中拍动态同源,读者退役=死写摘除）
+    a.critChance = 0.04;
     a.armorPen = arpen;
     this.entities.add(a, 'projectiles');
   }
@@ -13659,7 +13672,8 @@ export class Game implements GameHooks {
     };
     shot.spawnCircle = (x, y, dmg) => {
       const circle = new SkyDragonCircle(x, y, dmg, 30 * (2 + Math.floor(Math.random() * 4))); // Next(2,6)
-      circle.critChance = shot.critChance;
+      // ★BJ492②：旧 circle←shot 沿载体 critChance 写位摘除——三型掷率
+      //  已收编 rollVanillaHitCrit 单源命中拍动态,沿载体复制=冻结病复辟载体（写位无读者）
       circle.armorPen = shot.armorPen;
       this.entities.add(circle, 'projectiles');
       this.playSfxFiles(soundTrackFiles('dd2_sky_dragons_fury_circle'), 1, x, y); // :70287-70290
@@ -14651,19 +14665,34 @@ export class Game implements GameHooks {
         const swDmg = Math.max(1, Math.round((itemCombat(swVid)?.damage ?? 140)
           * (swPs?.dmg ?? 1) * this.player.damageMult('melee') * 0.5));
         const swKb = (itemCombat(swVid)?.knockBack ?? 5) * (swPs?.kb ?? 1) + 4;
-        const swCrit = 0.04 + (itemCombat(swVid)?.crit ?? 0) / 100;
+        // ★BJ490②（2026-10-04）词缀 crt 段折入（BJ488④ heldCritNow 双源载体同族注入端
+        //  漏折——swPs 此前只喂 dmg/kb）：原版掷面在 Projectile.Damage :12916 owner
+        //  .meleeCrit（含 Player.cs:25712-14 逐帧折入的持械 item.crit+词缀 crt,Item.cs
+        //  :585 重铸期 crit+=crt）→ 本面掷率消费链=SkyDragonFury 四型号
+        //  Math.random()<critChance 直消费出生拍静态冻结载体（不经 dealContacts/
+        //  rollVanillaHitCrit 动态面,亲读定谳）→ 注入端补 crt 段=最小面。709 弹/1110 圈
+        //  经 :14678/:13670 沿用同载体同步折入。
+        // ★BJ491①（2026-10-04）owner 聚合段折入（BJ490② 登记债清偿,双面对称收口）：
+        //  708/709/1110 SetDefaults（:7493/:7510/:10342 亲读）皆 melee=true → 原版两面
+        //  同走 Projectile.Damage :12916 owner.meleeCrit（:25712-14 逐帧折入=基 4+持械
+        //  item.crit+crt+装备/buff 聚合,Player.critChance('melee') 同口径）→ 左键 707 面
+        //  （现役=rollVanillaHitCrit 动态单源,BJ489 def-3 迁移）与右键面同链=对称;
+        //  右键面此前缺 agg 段（暴怒/狼人/穿刺项圈等装备/buff 档）=真债,本刀补入。
+        //  ★BJ492②（2026-10-04）衔接判语兑现：SkyDragonSwing/Shot/Circle 三型已收编
+        //  rollVanillaHitCrit 单源（SkyDragonFury 命中拍动态,critChance 字段=关断钉）,
+        //  本静态载体（swCrit 计算+三处写位 shot/swingP/:13670 circle 沿载体）随
+        //  BJ486② 惯例整体退役——写位无读者即摘;词缀 crt/owner agg 折入改由单源
+        //  heldItemCritBonus+Player.critChance 命中拍动态承载（BJ486③ 同式）。
         const swingP = new SkyDragonSwing(this.player,
           Math.cos(ang) * 24 * 1.5, Math.sin(ang) * 24 * 1.5,  // vector46 ×1.5（:48131/:48134）
           swDmg, swKb,
           () => this.swing?.t ?? 0,
           (sx, sy, svx, svy) => {
             const shot = new SkyDragonShot(sx, sy, svx, svy, swDmg);
-            shot.critChance = swCrit;
             shot.armorPen = (eq.armorPen ?? 0);
             this.hookSkyDragonCircle(shot);
             this.entities.add(shot, 'projectiles');
           });
-        swingP.critChance = swCrit;
         swingP.armorPen = (eq.armorPen ?? 0);
         this.entities.add(swingP, 'projectiles');
         this.useSwing(heldDef, ang);
@@ -15619,7 +15648,10 @@ export class Game implements GameHooks {
                 pick: tool.pickPower ?? (tool.type === 'pick' ? tool.power : 0),   // 音效分档 :23868
                 shootSpeed: cSaw?.shootSpeed,                             // 509=48 / 252=46 / 2798=36
                 laser: sawAi === 75 });
-            saw.critChance = 0.04 + this.player.critChance('melee') / 100 + (psSaw?.crt ?? 0) / 100;
+            // ★BJ494（2026-10-04）冻结载体退役（原 `saw.critChance = 0.04 + meleeCrit/100 +
+            //  psSaw.crt/100` 出生拍写位摘除,写位无读者）——掷率收编 ChainsawProj 命中拍
+            //  rollVanillaHitCrit（:12916 melee 臂 + :25712-14 持械折入,含武器基 crit 位,
+            //  旧注入漏该位且缺 :25712 逐帧时序）;类缺省 0.04=路由门/关断钉。
             saw.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(saw, 'projectiles');
           }
@@ -16168,10 +16200,13 @@ export class Game implements GameHooks {
               Math.max(1, Math.trunc((stTune?.damage ?? 85)
                 * p.damageMult('magic') * (psTune?.dmg ?? 1))),
               shot.aimX, shot.aimY);
-            // ★FR2-F（二轮蓝队）：crit 补 psTune 词缀位——原版 Item.Prefix(:585)把词缀
-            //  crt 折进 item.crit、随 :25713 计入 magicCrit；本仓 base/prefix 分账求和
-            // （同族近战链形制 `+ (ps?.crt ?? 0)` 对照 Game.arcCritZ 支）
-            orb.critChance = stellarTuneCritChance(p.critChance('magic'), stTune?.crit, psTune?.crt);
+            // ★BJ494（2026-10-04）冻结率载体退役（原 FR2-F `orb.critChance = stellarTuneCritChance(...)`
+            //  出生拍冻结率写位摘除）——掷率收编 stellarStrike 命中拍 rollVanillaHitCrit
+            //  （:12924 magic 臂,:25712-14 持械 item.crit+crt 逐帧折入=命中拍现值,组件面与
+            //  旧式同值）。现写 0.04=【路由门】非冻结率（>0 开掷门;直构缺省 0=关断钉,
+            //  测试确定性不动）。stellarTuneCritChance 函数保留（口径
+            //  文档+spectre-stellar 单测在册,生产调用面已退役）。
+            orb.critChance = 0.04;                            // ★BJ494 路由门（掷率=rollVanillaHitCrit 命中拍动态）
             orb.knockback = (stTune?.knockBack ?? 0) * (psTune?.kb ?? 1);
             orb.armorPen = (eq.armorPen ?? 0) + (psTune?.arpen ?? 0);
             this.entities.add(orb, 'projectiles');
@@ -16787,7 +16822,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                       (ex, ey, edmg, evx) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
                         edmg, er2, er2 > 0, 11, (eq.armorPen ?? 0) + (ps?.arpen ?? 0), pid2,
                         ex, ey, kb2, Game.explosionKbDir(evx)));   // SW-F1 2026-09-03 真像素爆心直穿（716/718=center 系,k=0）;SW-S1 2026-09-04 kb=发射 kb（715-718 不入 PrepareBombToBlow 表,Kill :75034-75049 直调 Damage() 不改 kb→原版击退=武器 kb）;SW-AC1 2026-09-04 kbDir=弹末 vx 符号（aiStyle147 不在自动面排除表,Update :17121-17132 同式;0 落 else 档+1）
-                    rk.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0)) / 100;   // 阈值=小数(Celeb2Rocket roll 直用;曾传百分点=恒暴击)
+                    // ★BJ494（2026-10-04）冻结载体退役（原 `(rangedCrit+bowC.crit+mC.crit)/100`
+                    //  小数写位摘除,写位无读者;「小数阈值档」=冻结载体单位约定非原版形态,
+                    //  旧注入且漏基 4）——掷率收编 Celeb2Rocket 命中拍 rollVanillaHitCrit
+                    //  （:12920 ranged 臂 + :25712-14 持械折入,命中拍动态）;类缺省 0.04=路由门。
                     rk.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
                     this.entities.add(rk, 'projectiles');
                   }
@@ -16795,7 +16833,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   // 派对机枪：弹药自定型（默认 14）+ 每 7 轮附赠 616 彩带（+20 伤/×1.25 kb/速 8）
                   const pid2 = mC?.shoot && mC.shoot > 0 ? mC.shoot : 14;
                   const b1 = new Arrow(fx, fy, fvx, fvy, dmg2, kb2, pid2, {});
-                  b1.critBonus = this.player.critChance('ranged') + (mC?.crit ?? 0);
+                  // ★BJ493③（2026-10-04）critBonus 冻结写位摘除→0.04 路由门（掷率=
+                  //  Arrow 通用环 rollVanillaHitCrit 命中拍动态;旧冻结漏 5095 武器
+                  //  item.crit=10——:25712 持械折入动态补齐=迁移副产修正）
+                  b1.critChance = 0.04;
                   b1.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
                   b1.frostEligible = true;
                   this.entities.add(b1, 'projectiles');
@@ -16811,7 +16852,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                       // timeLeft = 90×MaxUpdates = 270（:5157 表达式,提取器漏——
                       // extraUpdates 2 → 3 子步/帧 = 90 tick 实寿命）
                       { life: 270 });
-                    b2.critBonus = b1.critBonus;
+                    b2.critChance = 0.04;                     // ★BJ493③ 路由门（同 b1）
                     b2.armorPen = b1.armorPen;
                     this.entities.add(b2, 'projectiles');
                   }
@@ -17154,10 +17195,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             svx *= 1.1; svy *= 1.1;
           }
         }
-        // 暴击/穿甲终值提前（逐弓特例与单发主弹共用）：rangedCrit(装备/套装/词缀
-        // 67-68 配饰/buff) + 武器&弹药 item.crit + 词缀 crt（审计 §6/⑧）
-        const critTotal = this.player.critChance('ranged')
-          + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0) + (ps?.crt ?? 0);
+        // 暴击终值载体 critTotal 已退役（★BJ493③：全部落箭/枪弹掷率=命中拍
+        //  rollVanillaHitCrit 动态——rangedCrit 聚合+bow.crit+:25712 持械折入,
+        //  ammoC.crit 恒 0=原版弹药无 crit）;穿甲终值保留（逐弓特例与单发主弹共用）：
         const arpenTotal = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
         const gravOpts = { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At };
         /** 特例扇生成共用（★SW-FX9 2026-09-10 勘误:旧"noDropItem=dropKey null 仅木箭回收"
@@ -17166,7 +17206,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           pid3: number, dmg3: number): void => {
           const a3 = new Arrow(fx3, fy3, vx3, vy3, dmg3, knockback, pid3, gravOpts);
           a3.frostEligible = true;
-          a3.critBonus = critTotal;
+          // ★BJ493③（2026-10-04）critBonus 冻结写位摘除→0.04 路由门（掷率=Arrow
+          //  通用环 rollVanillaHitCrit 命中拍动态;661 消费者=blackBolt661Burst 爆面
+          //  同批迁移 rollVanillaHitCrit）
+          a3.critChance = 0.04;
           a3.armorPen = arpenTotal;
           this.entities.add(a3, 'projectiles');
         };
@@ -17298,7 +17341,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const by0 = probeClear ? probeY : ay;
           const bubblePid = projId;      // projToShoot（PickAmmo 解析的弹药弹型）
           const bubbleSpd = speed;       // localAI[1]（gunProj 链 speed 终值）
-          const bubbleCrit = critTotal, bubbleArpen = arpenTotal;
+          const bubbleArpen = arpenTotal;   // ★BJ493③：bubbleCrit 摘除（bb 掷率走通用环动态）
           const n2797 = xenoBubbleCount(Math.random());
           for (let m = 0; m < n2797; m++) {
             const bv = xenoBubbleVelocity(svx, svy, Math.random(), Math.random());
@@ -17316,7 +17359,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   bdmg, bkb, bubblePid,
                   { grav: gsb.grav, gravDelay: gsb.delay, grav2: gsb.grav2, grav2At: gsb.grav2At });
                 bb.frostEligible = true;          // ranged 弹（冰霜盔甲引擎门）
-                bb.critBonus = bubbleCrit;
+                bb.critChance = 0.04;             // ★BJ493③ 路由门（爆裂箭掷率=通用环动态）
                 bb.armorPen = bubbleArpen;
                 this.entities.add(bb, 'projectiles');
               });
@@ -17336,7 +17379,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const carrier = new Arrow(ax, ay, svx, svy, damage, knockback, 630,
               { grav: 0 });
             carrier.frostEligible = true;
-            carrier.critBonus = critTotal;
+            carrier.critChance = 0.04;          // ★BJ493③ 路由门（630 载体掷率=通用环动态）
             carrier.armorPen = arpenTotal;
             carrier.ph630Ctl = {
               channel: () => this.input.mouseHeld && !this.input.uiBlocking && !this.player.dead
@@ -17400,14 +17443,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   const ar = new Arrow(fx, fy, fvx, fvy, fdmg, fkb, fpid,
                     { grav: gsP.grav, gravDelay: gsP.delay, grav2: gsP.grav2, grav2At: gsP.grav2At });
                   ar.frostEligible = true;            // ranged 弹（冰霜盔甲引擎门）
-                  ar.critBonus = critTotal;
+                  ar.critChance = 0.04;               // ★BJ493③ 路由门（掷率=通用环动态）
                   ar.armorPen = arpenTotal;
                   this.entities.add(ar, 'projectiles');
                 }
               },
             });
           // ★BJ486② 退役载体死写摘除（原 `carrier.critChance = critTotal`）——705 通道
-          //  载体自身无伤害面/无读者,fire 回调已直喂 ar.critBonus（Arrow 百分点口径）。
+          //  载体自身无伤害面/无读者（★BJ493③：fire 回调箭改 0.04 路由门,掷率走通用环动态）。
           carrier.armorPen = arpenTotal;
           this.entities.add(carrier, 'projectiles');
           specialShots = 1;
@@ -17506,7 +17549,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const bowArrow = new Arrow(ax, ay, svx, svy,
           damage, knockback, projId, gravOpts);
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
-        bowArrow.critBonus = critTotal;
+        // ★BJ493③（2026-10-04）critBonus 冻结写位摘除→0.04 路由门——弓/枪主弹掷率
+        //  走 Arrow 通用环 rollVanillaHitCrit 命中拍动态（:12915-12927 owner 装配+
+        //  :25712 持械折入;旧冻结值 ammoC.crit 恒 0=原版弹药无 crit,动态式同值;
+        //  旧 `??` 兜底对类缺省 0 不可达=主弹面永不暴击病根,BJ493 报告定谳）
+        bowArrow.critChance = 0.04;
         bowArrow.armorPen = arpenTotal;
         // 电圈发射器 2796 → 导弹 442 锁定格（Player.cs:49905-49908 ai12/ai13 =
         // tileTargetX/Y = 发射时刻鼠标格；:25586-25604 钳 [5, maxTiles−5]）——
@@ -17539,7 +17586,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               const pvx = svx + nrand(sg[3]) * sg[2];
               const pvy = svy + nrand(sg[3]) * sg[2];
               const pa = new Arrow(ax, ay, pvx, pvy, damage, knockback, projId, gravOpts);
-              pa.critBonus = bowArrow.critBonus;
+              pa.critChance = 0.04;                 // ★BJ493③ 路由门（同主弹）
               this.entities.add(pa, 'projectiles');
             }
           }
@@ -17605,7 +17652,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const ut434 = Math.max(1, Math.round((bowC?.useTime ?? 4) * (ps?.spd ?? 1)));
           const fx434 = ax, fy434 = ay;
           const pid434 = projId, dmg434 = damage, kb434 = knockback;
-          const crit434 = critTotal, arpen434 = arpenTotal;
+          const arpen434 = arpenTotal;            // ★BJ493③：crit434 随 critBonus 退役
           const spd434 = speed;
           const go434 = gravOpts;
           const burst434 = { n: 1 };   // 点射内序号（0=首发已出膛；fire 递增）
@@ -17614,7 +17661,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             fire: () => {
               burst434.n++;
               this.spawnClockworkBurstShot(fx434, fy434, pid434, dmg434, kb434,
-                spd434, crit434, arpen434, go434, burst434.n - 1);
+                spd434, arpen434, go434, burst434.n - 1);
             },
           };
         }
@@ -17733,7 +17780,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               //  嵌套 if 末支吞并,数据面债另账登记,接线读 e.w/h 勘正后自动跟随）
               placeAtShootSpawn(fire, fx, fy);
               fire.ignite = true; // 命中 OnFire rand(3,7)s（:10850——Arrow.ignite 5s 档）
-              fire.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
+              // ★BJ493③ critBonus→0.04 路由门（400-402 ranged 旗,掷率=通用环动态;
+              //  旧冻结漏持械燃烧瓶 item.crit——:25712 动态折入补齐）
+              fire.critChance = 0.04;
               fire.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0);
               this.entities.add(fire, 'projectiles');
             });
@@ -17766,7 +17815,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  NewProjectile(pointPosition)（盒心,:10878-10879）——196 盒 16×16,ctor 收
           //  盒左上,曾直传 = 弹盒右下偏 (8,8)px（px/py=玩家中心锚——+14/y−4 前移已拆除）
           placeAtShootSpawn(smk, px, py);
-          smk.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
+          // ★BJ493③：196 原版 SetDefaults :2825-2831 无类旗 → 原版零掷——路由门照置
+          // （rollVanillaHitCrit kind=null 捷径返假零 RNG=原版同相）;critBonus 冻结写位摘除
+          smk.critChance = 0.04;
           this.entities.add(smk, 'projectiles');
           this.player.inv.removeHeld(1);
           this.player.useTime = c?.useTime ?? 15;
@@ -17784,7 +17835,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
             tc.shoot, dmgT, (c?.knockBack ?? 3) * (psT?.kb ?? 1),
             (convType, ci, cj, size) => this.evolution.convertArea(ci, cj, convType, size));
-          water.critChance = (this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0)) / 100;
+          // ★BJ494（2026-10-04）幻影率注入退役（原 `(rangedCrit+c.crit+psT.crt)/100` 写位
+          //  摘除,写位无读者）——69/70/621 SetDefaults（P.cs:1490-1513）无三类旗=原版零掷
+          //  （旧注入给 flagless 弹喂远程率=无中生有）;TimerCrit :12928 照达在命中面
+          //  （WaterSplashProj 命中环）,类缺省 0=关断钉。
           water.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0);
           // ★R9 批四（2026-09-03）：圣/邪/血水 422/423/3477 无专支 → 通用尾支 :49957
           //  盒心语义（:10878-10879）——69/70/621 盒 14×14(P.cs:1490-1512),ctor 收
@@ -17807,7 +17861,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //（px/py=玩家中心锚——+14/y−4 前移已拆除,只回正「锚点→弹盒」这一步）
         placeAtShootSpawn(thrownArrow, px, py);
         thrownArrow.frostEligible = true; // 投掷并入 melee(:93712 门含 melee)
-        thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
+        // ★BJ493③ critBonus→0.04 路由门（掷率=通用环 rollVanillaHitCrit 命中拍动态：
+        //  3/48/54 ranged 旗掷;93/370/371/936/996/868/869/171/475/505/506/196 无类旗
+        //  =原版零掷 kind=null 同相;持械投掷件 c.crit+psT.crt 经 :25712 动态折入,
+        //  1457 投掷件 crit 恒 0=旧冻结同值;审计 §6 + ⑧ crt；投掷=ranged 族（§5））
+        thrownArrow.critChance = 0.04;
         thrownArrow.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0); // ⑥+⑧
         this.entities.add(thrownArrow, 'projectiles');
         }
@@ -18586,7 +18644,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       charge.spawnWave = (sx, sy, svx, svy, wdmg, wdir) => {
         void sx; void sy;                                  // 波锚玩家中心（AI_190 :42760 自取）
         const wave = new FlintWaveProj(flOwner, svx, svy, wdmg, cw.knockback, wdir);
-        wave.critChance = critTotal;
+        // ★BJ489 def-3：wave 掷率=FlintWaveProj 面 rollVanillaHitCrit(1043)——critTotal
+        //  出生拍冻结载体退役（1043 melee 旗,命中拍 owner 装配+:25712 持械折入动态）
         wave.armorPen = flArpen;
         this.entities.add(wave, 'projectiles');
       };
@@ -18704,7 +18763,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  （knockback 已词缀乘区;crit 走 critTotal 中心化式,见 :10575 起）
         thrownBomb.contactPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
         thrownBomb.contactKb = cw.knockback;
-        thrownBomb.critChance = critTotal;
+        // ★BJ489 def-3：thrownBomb 掷率=GrenadeProj 接触环 rollVanillaHitCrit(projId)
+        //  ——critTotal 冻结载体退役（28/29/37 等炸弹族 SetDefaults 无类旗 :1108-1131
+        //  =原版零掷;30/397/517/588/681 手雷族 ranged 旗命中拍动态掷）
         this.entities.add(thrownBomb, 'projectiles'); // ⑥+⑧
         consume();
         this.player.useTime = cw.useTime;
@@ -18817,7 +18878,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           cw.damage, cw.knockback, cw.shoot, this.player.facing);
         placeAtShootSpawn(bom, this.player.cx, this.player.cy);
 
-        bom.critChance = critTotal;
+        // ★BJ489 def-3：bom 掷率=hitEnemies 注入支 rollVanillaHitCrit（ai3 全族 melee
+        //  旗,命中拍动态）——critTotal 冻结载体退役
         bom.armorPen = (eq.armorPen ?? 0); // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
         if (cw.shoot === 301) bom.channel = () => this.input.mouseHeld && !this.input.uiBlocking;
@@ -18831,7 +18893,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // AI_019：随角色前刺——伸缩包络按型号参数表(AI_019_Spears_GetSpearOffset),位移=offset×shootSpeed
         const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed * (ps?.size ?? 1), cw.useTime, // P:46431 num13=shootSpeed×scale(词缀 size)
           cw.damage, cw.knockback, cw.shoot);
-        spear.critChance = critTotal;
+        // ★BJ489 def-3：spear 掷率=hitEnemies 注入支 rollVanillaHitCrit（ai19 全族
+        //  melee 旗,命中拍动态）——critTotal 冻结载体退役
         spear.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
         // AI_019 伴生弹接线（Projectile.cs:46726-46746,R30 §3.2 落点清单 #8）：
         // 130 蘑菇矛→131 孢子云七连（damage/3,kb0）/ 730 风暴矛→732 首拍气旋
@@ -18860,7 +18923,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const anchored = new AnchoredProj(Math.cos(ang), Math.sin(ang), throwSpd,
           cw.damage, cw.knockback, cw.shoot);
         placeAtShootSpawn(anchored, this.player.cx, this.player.cy);   // 盒心=玩家中心(:47588/:10878)
-        anchored.critChance = critTotal;
+        // ★BJ489 def-3：anchored 掷率=hitEnemies 注入支 rollVanillaHitCrit（23 鱼叉
+        //  ranged 旗/262/271/273 melee 旗,按 projId 定谳,命中拍动态）——冻结载体退役
         anchored.armorPen = (eq.armorPen ?? 0) + (dmgKind === 'melee' ? this.player.meleeArmorPen : 0);
         this.entities.add(anchored, 'projectiles');
         this.player.useTime = cw.useTime;
@@ -19080,7 +19144,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         placeAtShootSpawn(flailP, flSpawn.x, flSpawn.y);   // 盒心=偏移后 pointPosition（:47655+:10878-10879）
-        flailP.critChance = critTotal;
+        // ★BJ489 def-3：flailP 掷率=hitEnemies 注入支 rollVanillaHitCrit（ai15 全族
+        //  melee 旗,命中拍动态）——critTotal 冻结载体退役
         // AI_015 特例子弹生成回调(247/757/1058;entities.add 不在 GameHooks)。
         // ★sDmg 源自 FlailProj.damage=cw.damage(已含词缀乘区)——再乘 ps?.dmg
         //  = 双乘前缀(review 实锤,2026-08-13);原版 248/928/405 伤=出手时武器伤。
@@ -19142,7 +19207,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           hdl > 0 ? hdy / hdl * headSpd : 0,
           cw.damage, cw.knockback);
         placeAtShootSpawn(head, headSpawn.x, headSpawn.y);   // 盒心=偏移后 pointPosition（:47655+:10878-10879）
-        head.critChance = critTotal;
+        // ★BJ489 def-3：head(404) 掷率=hitEnemies 注入支 rollVanillaHitCrit（melee 旗,
+        //  命中拍动态）——critTotal 冻结载体退役
         head.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
         head.pinUse = () => this.refreshChannelItem();   // SetDummyItemTime(10)（:30739→Player.cs:4417-4426）——单实例门唯一承载
         head.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
@@ -19151,7 +19217,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //（R4×R9 交点:2611 支伴生 405 直接盒心出生;5526 链的 405 支已随 R9 批三同式清偿）
           const bub = new FlaironSpike(sx - 7, sy - 7, svx, svy,
             Math.max(1, Math.round(sDmg)), sKb);
-          bub.critChance = critTotal;   // GetWeaponCrit 合并值（5526 链未接=登记面,本支先行）
+          // ★BJ489 def-3：bub(405) 掷率=hitEnemies 注入支 rollVanillaHitCrit（melee 旗,
+          //  命中拍动态;5526 链旧登记面随本迁移闭合）——critTotal 冻结载体退役
+          //  （原 `bub.critChance = critTotal` 摘除,FlaironSpike 类缺省 0.04=路由门）
           this.entities.add(bub, 'projectiles');
         };
         this.entities.add(head, 'projectiles');
@@ -19184,7 +19252,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
           meleeThrowSpeed(16, this.player.attackSpeedMult));
         placeAtShootSpawn(yoyo, this.player.cx, this.player.cy);   // 盒心=玩家中心（:47588/:10878-10879,见链锤支注）
-        yoyo.critChance = critTotal;
+        // ★BJ489 def-3：yoyo 掷率=hitEnemies 注入支 rollVanillaHitCrit（ai99 全族 melee
+        //  旗,命中拍动态;克隆/二号球/配重球传播链随源值退役=类缺省 0.04 路由门）——
+        //  critTotal 冻结载体退役
         yoyo.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥
         // 悠悠球袋族回调接线（Player.Counterweight 命中链/手套二号球/魔法线克隆/寿命广播）
         this.wireYoyoCallbacks(yoyo, cw.shoot, itemId);
@@ -19351,7 +19421,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // （Player.cs:48805——1121 BeeGun 专支）——SetDefaults 零旗但 spawn 位覆写；
             // 仓内形态 = projClass 显式字段（数据面表保持 SetDefaults 直写真值）
             bee.projClass = 'magic';     // 运行时旗覆写（Player.cs:48805 本站）
-            bee.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496①（2026-10-04）critBonus 冻结写位摘除→0.04 路由门（掷率=主环
+            //  rollVanillaHitCrit 命中拍动态;181/566 数据面零旗,经 projClass 覆写通道
+            //  入 magic 臂 :12915-12927+:25712 持械折入）
+            bee.critChance = 0.04;
             bee.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(bee, 'projectiles');
           }
@@ -19404,7 +19477,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             wasp.frostEligible = false;   // magic=true 弹（SetDefaults 189 :2779）不吃冰霜引擎
             // 类别通道走数据面（vanilla-projectiles.json 189 magic=true = SetDefaults
             // 直写 → projClassOfProjId(189)='magic'，无需 1121 那样的 spawn 位覆写）
-            wasp.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（189 数据面 magic,掷率=
+            //  主环 rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            wasp.critChance = 0.04;
             wasp.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0) + hiveWasp.pen;
             this.entities.add(wasp, 'projectiles');
           }
@@ -19443,7 +19518,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               { grav: gVs.grav, gravDelay: gVs.delay, grav2: gVs.grav2, grav2At: gVs.grav2At,
                 dragAlways: gVs.drag });
             placeAtShootSpawn(fang, mzX, mzY);                     // NewProjectile 盒心落点（:48573/:10878-10879）
-            fang.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（355/265 数据面 magic,掷率=
+            //  主环 rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            fang.critChance = 0.04;
             fang.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             fang.frostEligible = false;                            // magic=true 弹不吃冰霜引擎
             this.entities.add(fang, 'projectiles');
@@ -19511,7 +19588,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback);
           placeAtShootSpawn(sphere, mzX, mzY);                   // NewProjectile 盒心落点（:10878-10879）
-          sphere.critChance = critTotal;                         // 透传 255 弹暴击链
+          // ★BJ489 def-3：sphere 掷率=磁球激光弹 255 BeamBoltProj 面 rollVanillaHitCrit
+          //  （magic 旗,命中拍动态;传播链 BoltBoltProj 类缺省 0.04 路由门）——critTotal
+          //  冻结载体退役（原 `sphere.critChance = critTotal` 摘除）
           sphere.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(sphere, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -19529,7 +19608,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback, HEAT_RAY_BOLT);
           placeAtShootSpawn(bolt260, mzX, mzY);
-          bolt260.critChance = critTotal;
+          // ★BJ489 def-3：bolt260(260 HeatRay) 掷率=BeamBoltProj 面 rollVanillaHitCrit
+          //  （magic 旗,命中拍动态;类缺省 0.04 路由门）——critTotal 冻结载体退役
           bolt260.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(bolt260, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -19601,8 +19681,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  收盒左上,曾直传中心 = 弹盒右下偏 (20,20)px
             placeAtShootSpawn(sfArrow, sfAnchor.x, sfAnchor.y);
             sfArrow.frostEligible = false;                // magic=true 弹（Projectile.cs:5701）
-            sfArrow.critBonus = this.player.critChance('magic')
-              + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);      // GetWeaponCrit(:42531 族)
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（496 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712 持械折入）
+            sfArrow.critChance = 0.04;
             sfArrow.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             // ★R2 已接面（2026-09-03）：aiStyle91 弹体 AI 全量落地 Arrow.ts 496 支——
             //  摆动 v+=ai×1.5、ai×1.05/子步、帽 16（:33118-33124）;缩径 scale=1−localAI、
@@ -19677,7 +19758,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  专支三泡【同点】NewProjectile(pointPosition) + :10878-10879 position=X−w/2）
             //  ——Arrow ctor 收盒左上,曾直传锚点 = 泡盒右下偏 (7,7)px（散布在速度不在出生点）
             placeAtShootSpawn(bub, mzX, mzY);
-            bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（410 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            bub.critChance = 0.04;
             bub.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             bub.frostEligible = false;                    // magic 弹不吃冰霜引擎
             this.entities.add(bub, 'projectiles');
@@ -19724,7 +19807,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const shard = new Arrow(sx9, sy9, fvx, fvy, cw.damage, cw.knockback, 660,
               { grav: 0, pierce: 1 });
             placeAtShootSpawn(shard, sx9, sy9);             // NewProjectile 盒心落点（:10878-10879）
-            shard.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（660 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            shard.critChance = 0.04;
             shard.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             shard.frostEligible = false;
             this.entities.add(shard, 'projectiles');
@@ -19769,7 +19854,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  killingCardFireType 四相位全部 NewProjectile(pointPosition) + :10878-10879）
             //  ——Arrow ctor 收盒左上,曾直传锚点 = 牌盒右下偏 (8,8)px
             placeAtShootSpawn(card, mzX, mzY);
-            card.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（1024 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            card.critChance = 0.04;
             card.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             card.frostEligible = false;
             card.cardSpin = spin;                         // ai[2]=±0.4（NewProjectile 尾参）
@@ -19831,7 +19918,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bvy = (Math.cos(fa6152) * cw.shootSpeed) * js + (Math.sin(fa6152) * cw.shootSpeed) * jc;
             const bloom = new Arrow(mzX + jx, mzY + jy, bvx, bvy, cw.damage, cw.knockback, 1114,
               { grav: 0, dragAlways: 0.985, life: 146, pierce: 1, bounce: true });
-            bloom.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（1114 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            bloom.critChance = 0.04;
             bloom.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             bloom.frostEligible = false;   // magic 弹不吃冰霜引擎
             this.entities.add(bloom, 'projectiles');
@@ -20153,7 +20242,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback);
           bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
-          bolt.critChance = critTotal;
+          // ★BJ489 def-3：250 本体无伤面,掷率=251 彩虹段 rollVanillaHitCrit（magic 旗,
+          //  命中拍动态;段传播链 RainbowProj 类缺省 0.04 路由门）——critTotal 冻结载体退役
           this.entities.add(bolt, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
@@ -20180,7 +20270,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng + spreadA634) * vsc634, Math.sin(mzAng + spreadA634) * vsc634,
             mega ? Math.round(cw.damage * 3) : cw.damage, cw.knockback,
             mega ? 635 : 634);
-          bolt.critChance = critTotal;
+          // ★BJ489 def-3：634/635 掷率=NebulaBlazeBolt 面 rollVanillaHitCrit（magic 旗,
+          //  命中拍动态）——critTotal 冻结载体退役
           bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(bolt, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -20207,7 +20298,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const spd = cw.shootSpeed / len / 2;      // 单位化 ×speed ÷2
             const star = new LunarFlareStar(sx, sy, dx * spd, ady * spd,
               cw.damage, cw.knockback, lineY);
-            star.critChance = critTotal;
+            // ★BJ489 def-3：645 掷率=LunarFlareStar 面 rollVanillaHitCrit（magic 旗,
+            //  命中拍动态）——critTotal 冻结载体退役
             star.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(star, 'projectiles');
           }
@@ -20248,8 +20340,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Player.cs:49280 直传
             //  pointPosition[可+40px 探针] + :10878-10879）——曾直传 = 弹盒右下偏 (15,15)px
             placeAtShootSpawn(bolt, muzzleX, muzzleY);
-            bolt.critBonus = this.player.critChance('magic')
-              + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（711 数据面 magic,掷率=主环
+            //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+            bolt.critChance = 0.04;
             bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             // ★BJ424：星云 booster 触发链单源化——旧 nebulaCb 回调（仅 4 个专支
             // 接线+私有数组无渲染）退役,触发统一走 Arrow/MissileProj 命中环的
@@ -20294,7 +20387,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ★NewProjectile 传位=盒心(Projectile.cs:10878-10879;天降点 sx/sy 即盒心)——
           //  Arrow ctor 收盒左上,曾直传中心 = 探针右下偏 (12,12)px(24×24 盒)
           placeAtShootSpawn(probe2, sx, sy);
-          probe2.critChance = critTotal;
+          // ★BJ489 def-3：probe2(424-426 magic 旗) 掷率=Arrow 通用环 rollVanillaHitCrit
+          //  路由集（命中拍动态）——critTotal 冻结载体退役;0.04=路由门（>0）非掷率,
+          //  关断钉载体（测试置 0 习语;Arrow 类缺省 0=未设走 critBonus 旧路,须显式置门）
+          probe2.critChance = 0.04;
           probe2.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(probe2, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -20315,7 +20411,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  RainCloudProj ctor 收盒左上(类内 Kill 钩/雨滴出生皆自减半盒),曾直传
           //  杖尖中心 = 云体右下偏 (14,14)px
           placeAtShootSpawn(cloud, mzX, mzY);
-          cloud.critChance = critTotal;
+          // ★BJ489 def-3：cloud(237/243) 本体无伤面,掷率=雨滴相 239/245 hitEnemies 注入支
+          //  rollVanillaHitCrit（magic 旗,命中拍动态;类缺省 0.04 路由门）——critTotal
+          //  冻结载体退役
           cloud.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(cloud, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -20336,8 +20434,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  右下偏 (16,17)px（261 盒 32×34）
           placeAtShootSpawn(b261, mzX, mzY);
           b261.frostEligible = false;   // magic 弹
-          b261.critBonus = this.player.critChance('magic')
-            + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+          // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（261 数据面 magic,掷率=主环
+          //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+          b261.critChance = 0.04;
           b261.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(b261, 'projectiles');   // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit）
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -20365,7 +20464,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               return this.player.checkMana(cost);
             });
           bl.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
-          bl.critChance = critTotal;
+          // ★BJ489 def-3：bl(460) 本体无伤面,掷率=459 小弹（Arrow 通用环路由集）+461 光束
+          //  BlasterBeam 面 rollVanillaHitCrit（magic 旗,命中拍动态;传播链类缺省 0.04
+          //  路由门）——critTotal 冻结载体退役
           this.entities.add(bl, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
@@ -20400,7 +20501,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 装备+MagicPower/魔力眩晕/魔力过热/食物/星云），channel 期 buff 变动即时生效
             () => Math.trunc(Math.round(cwIn.damage * (ps?.dmg ?? 1)) * this.player.damageMult('magic')));
           prism.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
-          prism.critChance = critTotal;
+          // ★BJ489 def-3：prism(633) 挂手晶体无伤面,掷率=632 光棱 PrismProng 面
+          //  rollVanillaHitCrit（magic 旗,命中拍动态;传播链类缺省 0.04 路由门）——
+          //  critTotal 冻结载体退役
           this.entities.add(prism, 'projectiles');
           // R26 GAP-07：3541 最后的棱镜 rd=5（case 3541 :31750-31752,channel 件松手后
           // 的再起手阻塞）——收招后摇收口（slowMagic ×2.5 同前）
@@ -20465,7 +20568,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  fireExtra 杖头锚已随 BJ279 回正=玩家盒中心,首发/续发同锚）
             placeAtShootSpawn(m, mx, my);
             m.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
-            m.critChance = critTotal;
+            // ★BJ489 def-3：m(16/34/79) 掷率=MagicMissileProj 面 rollVanillaHitCrit
+            //  （magic 旗,命中拍动态）——critTotal 冻结载体退役
             this.entities.add(m, 'projectiles');   // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit）
           };
           spawnMissile(mzX, mzY, Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed);
@@ -20651,7 +20755,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  22×22,Arrow ctor 收盒左上,曾直传 = 弹盒右下偏 (11,11)px
             placeAtShootSpawn(pg, this.player.cx, this.player.cy);
             pg.pShootSpeed = cw.shootSpeed;                        // 精确 shootSpeed（14）供补弹
-            pg.critChance = critTotal;
+            // ★BJ489 def-3：pg(190 ranged 旗) 掷率=Arrow 通用环 rollVanillaHitCrit 路由集
+            //  （命中拍动态）——critTotal 冻结载体退役;0.04=路由门（>0）非掷率,关断钉载体
+            pg.critChance = 0.04;
             pg.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             pg.frostEligible = dmgKind !== 'magic';                // ranged 弹吃冰霜引擎
             this.entities.add(pg, 'projectiles');
@@ -20707,7 +20813,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  NewProjectile(pointPosition)（盒心,:10878-10879）——491 盒 26×26,ctor 收
           //  盒左上,曾直传 = 弹盒右下偏 (13,13)px
           placeAtShootSpawn(knife, this.player.cx, this.player.cy);
-          knife.critChance = critTotal;
+          // ★BJ489 def-3：knife(491 melee 旗) 掷率=FlyingKnifeProj 面 rollVanillaHitCrit
+          //  （命中拍动态）——critTotal 冻结载体退役
           knife.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(knife, 'projectiles');
           this.player.useTime = cw.useTime;
@@ -20727,7 +20834,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  :10878-10879）——636 盒 16×16,ctor 收盒左上,曾直传 = 弹盒右下偏 (8,8)px
           //（3543 的 pointPosition.Y=height/3 锚点偏移 :47635 属锚面登记,本批不动）
           placeAtShootSpawn(flare, this.player.cx, this.player.cy);
-          flare.critChance = critTotal;
+          // ★BJ489 def-3：flare(636 melee 旗) 掷率=DaybreakFlare 面 rollVanillaHitCrit
+          //  （命中拍动态）——critTotal 冻结载体退役
           flare.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(flare, 'projectiles');
           this.player.useTime = cw.useTime;
@@ -20755,7 +20863,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               && sdOwner.inv.heldItem()?.id === sdItemId && !sdOwner.dead,
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => { if (this.player.useTime > 2) this.player.useTime = 2; });
-          spin.critChance = critTotal;
+          // ★BJ489 def-3：spin(707 melee 旗) 掷率=SkyDragonSpin 面 rollVanillaHitCrit
+          //  （命中拍动态）——critTotal 冻结载体退役
           spin.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(spin, 'projectiles');
           this.useSwing(def, ang);
@@ -20780,7 +20889,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => this.input.mouseHeld && !this.input.uiBlocking && msOwner.inv.heldItem()?.id === msItemId && !msOwner.dead,
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => { if (this.player.useTime > 10) this.player.useTime = 10; });   // reuseDelay=10（:70572）
-          spin.critChance = critTotal;
+          // ★BJ489 def-3：spin(697 melee 旗) 掷率=MonkStaffSpin 面 rollVanillaHitCrit
+          //  （命中拍动态）——critTotal 冻结载体退役
           spin.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           spin.spawnSlam = (sx, sy, svx, svy, slamDmg) => {
             const slam = new MonkSlam(sx, sy, svx, svy, slamDmg);
@@ -20815,14 +20925,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.random() * cw.shootSpeed * 0.75 * (Math.cos(ang) > 0 ? 1 : -1),   // ai0（Player.cs:49231-49234）
             () => this.swing?.t ?? 0, cw.useAnimation ?? 27,
             () => { if (this.player.useTime > 2) this.player.useTime = 2; });      // reuseDelay=2（:71052）
-          glaive.critChance = critTotal;
+          // ★BJ489 def-3：glaive(699 melee 旗) 掷率=GhastlyGlaiveProj 面 rollVanillaHitCrit
+          //  （命中拍动态）——critTotal 冻结载体退役
           glaive.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           glaive.spawnGhast = (gx, gy, gvx, gvy, gdmg) => {
             const ghast = new MonkGhast(gx, gy, gvx, gvy, gdmg);
             // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:15254-15257
             //  直传 targetCenter+(−num×120,0) + :10878-10879）——40×40 盒曾右下偏 (20,20)px
             placeAtShootSpawn(ghast, gx, gy);
-            ghast.critChance = critTotal;
+            // ★BJ489 def-3：ghast(700 melee 旗) 掷率=MonkGhast 面 rollVanillaHitCrit
+            //  （命中拍动态）——critTotal 冻结载体退役
             ghast.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(ghast, 'projectiles');
           };
@@ -20844,8 +20956,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             cw.damage, cw.knockback, cw.shoot,
             { grav: 0, life: pd?.timeLeft ?? 600, pierce: pd?.penetrate ?? 3 });
           zap.frostEligible = false;   // magic 弹不吃冰霜引擎
-          zap.critBonus = this.player.critChance('magic')
-            + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+          // ★BJ496① critBonus 冻结写位摘除→0.04 路由门（20/88 数据面 magic,掷率=主环
+          //  rollVanillaHitCrit 命中拍动态 :12915-12927+:25712）
+          zap.critChance = 0.04;
           zap.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           zap.lightRGB = [0.75, 0.75, 0.75];   // SetDefaults light=0.75
           this.entities.add(zap, 'projectiles');
@@ -20873,7 +20986,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               { grav: gVK.grav, gravDelay: gVK.delay, grav2: gVK.grav2, grav2At: gVK.grav2At,
                 dragAlways: gVK.drag });
             placeAtShootSpawn(knife, this.player.cx, this.player.cy);   // :10878-10879 盒心落点
-            knife.critChance = critTotal;
+            // ★BJ489 def-3：knife(304 melee 旗) 掷率=Arrow 通用环 rollVanillaHitCrit 路由集
+            //  （命中拍动态）——critTotal 冻结载体退役;0.04=路由门（>0）非掷率,关断钉载体
+            knife.critChance = 0.04;
             knife.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(knife, 'projectiles');
           }
@@ -20915,8 +21030,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         placeAtShootSpawn(shotArrow, spawnX, spawnY);
         shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
-        shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
-          + (itemCombat(critVid)?.crit ?? 0);
+        // ★BJ496②（2026-10-04）dmgKind 三域冻结式退役→0.04 路由门（掷率=主环
+        //  rollVanillaHitCrit 命中拍动态）——定谳：本兜底件全域（HOMING_FAMILY_PIERCE
+        //  659/617/297/409/316=数据面 magic、306 腐化者=数据面 melee、磁球外通用投掷）
+        //  类别恒由弹 id 数据面承载,原版 :12915-12927 读弹体实旗+dmgKind 无关;旧式把
+        //  dmgKind 池冻结在出生拍=命中拍装备/buff 变化零感知（+25712 持械折入整缺）。
+        //  spawn 拍单点路由门,数据面旗分流=三域一式。
+        shotArrow.critChance = 0.04;
         this.entities.add(shotArrow, 'projectiles');
         this.player.useTime = cw.useTime;
         this.playUseSound(critVid, 'bowShoot');
@@ -29219,7 +29339,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!cw || cw.shoot !== PIRANHA_PROJ || cw.shootSpeed == null) { this.piranhaChanItemId = -1; return; }
     const pgSpd = cw.shootSpeed;
     const pgDmg = cw.damage ?? 40;      // ItemCombat 可选字段（食人鱼枪表值 40）
-    const px = this.player.cx, py = this.player.cy - 4;
+    // ★BJ499（2026-10-04）补射出生点盒心修正（R9 同族,与首发位 :20757 R9 批二同谳同构）：
+    //  原版补射门 :43878-43892 只置 flag4,与首发同走 1156 专支（:48846-48862 逐发
+    //  NewProjectile(pointPosition)）→ 出生点=pointPosition（:47588 RotatedRelativePoint(
+    //  MountedCenter),站立恒等玩家中心;NewProjectile 传位=盒心 Projectile.cs:10878-10879),
+    //  瞄准原点=num4/num5 起算点=同 pointPosition（:47743-47744）→ 出生/瞄准均=玩家中心。
+    //  曾用 py=cy−4（:18554 批注已拆族的"枪口 y−4"残留）直传 ctor（收盒左上）→ 弹盒心
+    //  (+11,+7)px 系统偏 + 瞄准原点上偏 4px。
+    const px = this.player.cx, py = this.player.cy;
     const [wx, wy] = this.camera.screenToWorld(inp?.mouseX ?? 0, inp?.mouseY ?? 0);
     const ang = Math.atan2(wy - py, wx - px);
     for (let i = 0; i < 3; i++) {
@@ -29235,9 +29362,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             return { x: ax, y: ay };
           },
         } });
+      placeAtShootSpawn(pg, px, py);   // ★BJ499 盒心回正=玩家中心（同首发 :20757 R9 批二式;ctor 收盒左上）
       pg.pShootSpeed = pgSpd;
-      pg.critChance = 0.04 + (cw.crit ?? 0) / 100 + this.player.critChance('ranged') / 100;
-      pg.armorPen = (this.player.equipStats.armorPen ?? 0);
+      // ★BJ497①（2026-10-04）冻结载体退役→0.04 路由门（与首发位 :20760 同形,BJ489 同判）
+      //  ——掷率=命中拍 rollVanillaHitCrit 动态（190 ranged 旗 :12915-12927 owner 聚合+
+      //  :25712 持械折入,命中拍现值）;旧式把聚合冻结在补射拍且被旧 `||` 面当全率读。
+      pg.critChance = 0.04;
+      // ★BJ498②（2026-10-04）armorPen 同源化：补词缀份,与首发位 :20761 同式
+      //  （heldPrefixStat=Item.Prefix 烘入 item.armorPenetration 的词缀份额,Item.cs:587
+      //  `armorPenetration += arpen`）。原版定谳（1457 亲读）=【逐发重算】非首发定值继承：
+      //  补射门 Player.cs:43878 `type==1156 && channel && num<3` 置 flag4 → 与首发同走
+      //  1156 专支（:48847-48862）逐发 NewProjectile(EntitySource_ItemUse) →
+      //  Projectile.ApplyStatsFromSource :11130 逐发 `armorPenetration += item.armorPenetration`;
+      //  owner 装备份=命中拍 GetArmorPenetration（Projectile.cs:12852）——仓内 spawn 冻结
+      //  注入=BJ491③ 登记口径,本刀只补齐词缀份同源（Arrow.pTopUp 继承链随之同源）。
+      pg.armorPen = (this.player.equipStats.armorPen ?? 0) + (this.heldPrefixStat()?.arpen ?? 0);
       pg.frostEligible = true;
       this.entities.add(pg, 'projectiles');
     }
@@ -33982,8 +34121,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const gsM = projGravSpec(cw.shoot);
     const life = projectileData(cw.shoot)?.timeLeft ?? 3600;
     const arpen = (this.player.equipStats.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
-    const critBonus = this.player.critChance('magic')
-      + (itemCombat(def.vid ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
+    // ★BJ496①（2026-10-04）critBonus 冻结载体退役（审计 §6+⑧ 式随迁）——宝石法珠
+    //  全域掷率=主环 rollVanillaHitCrit 命中拍动态（121-126/597/27/94/42/45 等数据面
+    //  magic,:12915-12927 owner 装配+:25712 持械折入动态折入）;传播链（510→511-513
+    //  毒云/295→296 火柱/521→522 蛇/316 蝠/535→美杜莎首）继承 critChance=0.04 路由门。
+    //  item.crit 词缀 crt 不再经冻结载体——rollVanillaHitCrit 内 heldItemCritBonus
+    //  命中拍折入=同算式（Item.cs:585 词缀已折 item.crit）。
     // 出手参数（:49796-49812，仅宝石弹）：FastThenSlow 出速 ×5、CanBounce ×1.25、
     // ArPenSpread 出手点 NextVector2CircularEdge(12,12) 环形偏移
     let gvx = Math.cos(ang) * cw.shootSpeed, gvy = Math.sin(ang) * cw.shootSpeed;
@@ -34017,7 +34160,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  水矢 27 16×16=+8、水晶风暴 94 8×8、恶魔镰 42 10×10、彩虹杖/珊瑚杖…全族）
       placeAtShootSpawn(b, bx, by);
       b.armorPen = arpen;
-      b.critBonus = critBonus;
+      b.critChance = 0.04;   // ★BJ496① 路由门（掷率=主环 rollVanillaHitCrit 命中拍动态）
       // ★BJ424 nebulaCb 退役（触发单源 nebulaBoosterOnHit——全 magic 弹面命中环接线）
       this.entities.add(b, 'projectiles');
     };
@@ -43062,7 +43205,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const eater = new Arrow(cx, cy, vx307, vy307,
             Math.max(1, Math.trunc(dmg * 0.75)), Math.trunc((flags?.kb ?? 0) * 0.35),
             307, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
-          eater.critBonus = this.player.critChance('melee');
+          // ★BJ496②（2026-10-04）melee 混合兜底收编：critBonus 冻结写位（307=数据面
+          //  melee 旗 P.cs SetDefaults :7729 区,亲读+数据面对拍同值）→ 0.04 路由门——
+          //  掷率=主环 rollVanillaHitCrit :12916 melee 臂 owner 装配+:25712 持械折入
+          //  命中拍动态;旧式冻结出生拍 meleeCrit 池且【缺】item.crit 折入（原版
+          //  :25712-14 逐帧链入持械武器 crit,冻结面无从承载）
+          eater.critChance = 0.04;
           eater.armorPen = (this.player.equipStats.armorPen ?? 0);
           this.entities.add(eater, 'projectiles');
         }
@@ -44929,7 +45077,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       { grav: 0.2, bounce: true });                      // AI_014 共享档（见上注）
       // 寿命/盒体走 SetDefaults 面值（timeLeft 180 / 14×22），不覆写
     beeGrenade.frostEligible = true;                     // ranged 弹（同通用投掷面）
-    beeGrenade.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6+⑧
+    // ★BJ493③ critBonus→0.04 路由门（183 ranged 旗 P.cs:2699-2708,掷率=通用环动态;
+    //  审计 §6+⑧）
+    beeGrenade.critChance = 0.04;
     beeGrenade.armorPen = (this.player.equipStats.armorPen ?? 0) + (psT?.arpen ?? 0); // ⑥+⑧
     this.entities.add(beeGrenade, 'projectiles');
     this.useSwing(heldDef);                              // noUseGraphic → 不画持物

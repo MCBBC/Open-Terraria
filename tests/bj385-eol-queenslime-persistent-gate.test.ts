@@ -173,7 +173,7 @@ describe('BJ385-② 535 本体零接触面（Damage_CanDealDamage :12463 排除 
       entities: { nextId: 1, add: () => {}, projectiles: [] as unknown[] },
       spawnParticles: () => {}, spawnDust: () => ({ vx: 0, vy: 0, scale: 1 }),
     } as unknown as GameHooks;
-    const m = new MedusaHeadProj(p as never, 40, 2, 0, 0, 0);
+    const m = new MedusaHeadProj(p as never, 40, 2, 0, 0);
     // scalar=1 → num=15:volley 在 ai0=0（拍 1）与 ai0%15==0（拍 16）各一轮
     for (let i = 0; i < 20; i++) m.fixedUpdate(1 / 60, g);
     expect(log.length).toBe(2);                // 纯 volley 结算面

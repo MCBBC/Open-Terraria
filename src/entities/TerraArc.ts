@@ -1,3 +1,11 @@
+// ★BJ494（2026-10-04）定谳 C=死类整面（勿收编勿摘除,本标记即判词）：984 现役载体=
+//   SwingArc（原 TerraArc 泛化并入 SwingArc.ts:SWING_STYLE[984],Game.ts 唯一 import
+//   SwingArc;本文件类零生产引用）——984 命中拍掷率已按 rollVanillaHitCrit owner 装配
+//   口径在 SwingArc BJ486③ 落位（SwingArc.ts `critChance>0 && rollVanillaHitCrit` 三站）。
+//   本文件 :73 `Math.random() < this.critChance` 为死代码残留,生产无读者; tests/bj494
+//   结构锁钉「死类零 import+现役面单源在 SwingArc」。若未来复活本类,掷率必须重走
+//   rollVanillaHitCrit+TimerCrit 口径（984 SetDefaults P.cs:9390-9399 melee=true 亲读,
+//   原版掷面=:12916 melee 臂+:12928 TimerCrit）。
 // 泰拉刃伴生旋斩弧（Projectile 984，aiStyle 190 AI_190_NightsEdge）：
 //   Player.cs:48313 出生：MountedCenter、velocity=(direction,0)、ai[0]=朝向、
 //   ai[1]=itemAnimationMax、ai[2]=调整 scale。锚定玩家（Center=MountedCenter−velocity）、

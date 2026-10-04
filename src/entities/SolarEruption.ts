@@ -28,7 +28,6 @@ function applyDaybreak(e: Record<string, number>): void {
 export class SolarFlare extends Entity {
   w = 8; h = 8;
   damage: number;
-  critChance = 0.04;
   armorPen = 0;
   /** ai[1] 缩放基（出生 0.85+rand×1.15） */
   private sc: number;
@@ -63,7 +62,16 @@ export class SolarFlare extends Entity {
       if (e.dead || this.hitCd.has(e.id)) continue;
       const reach = 40 * this.sc;                      // 爆焰视觉半径命中盒近似
       if (!(this.cx - reach < e.x + e.w && this.cx + reach > e.x && this.cy - reach < e.y + e.h && this.cy + reach > e.y)) continue;
-      const crit = Math.random() < this.critChance;
+      // ★BJ488②（2026-10-04）612 零掷定谳（1091 零掷判例族）：SetDefaults :6586-6596
+      //  对 612 【不写】melee/ranged/magic 类旗（611 才有 melee :6575）→ 三类掷 :12915-27
+      //  逐臂 `if (melee && …)` 全不达=零掷零 RNG;旧 `Math.random() < critChance` 固定
+      //  4% 档=幻影掷（BJ482② 同族病,自造伤害膨胀+掷流污染,摘除）。TimerCrit 到达性
+      //  亲读：:12928 TryConsumingTimerCrit 在 `if (ownedBySomeone)` 块【内】、三类掷臂
+      //  【外】=无条件消费段——612 无类旗只关三类掷,消费照达（player proj ⇒ !trap ⇒
+      //  ownedBySomeone=true）。crit=消费返值单源（无前掷可并）。
+      const crit = ((game.player as unknown as
+        { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
+        ?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）：爆焰 612 ——vanilla SetDefaults :6586-96 对其【不写】
       // 类旗（611 才有 melee :6575）⇒ 双类门对其恒拒 = 原版同真值；本站仍统一走
@@ -172,7 +180,8 @@ export class SolarEruptionWhip extends Entity {
       if (this.lai1 <= 0) {                            // 612 节流（:13229-13236）
         this.lai1 = 4;
         const flare = new SolarFlare(e.cx, e.cy, this.damage, 0.85 + Math.random() * 1.15);
-        flare.critChance = this.critChance;
+        // ★BJ488② flare.critChance 写位随 612 零掷摘除（612 无类旗,掷面不存在;
+        //   TimerCrit 由 SolarFlare 命中位动态消费,无需出生拍载体）
         flare.armorPen = this.armorPen;
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(flare, 'projectiles');
       }

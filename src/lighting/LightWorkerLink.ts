@@ -238,17 +238,17 @@ export class LightWorkerLink {
   send(msg: Omit<LightSnapshotMsg, 'op' | 'seq'>): void {
     if (this.worker === null) {
       try {
-        // ★WASM 第二刀(2026-10-03):?lightwasm=1 经 Worker options.name 注入 worker 域
+        // ★WASM 第二刀(2026-10-03)+转正(2026-10-04):lightwasm 经 Worker options.name 注入 worker 域(转正后=禁用标记 'sw-lightwasm=0' 走 else 支,worker 读 !includes 反转)
         //  (loader lightWasm.ts 双域旗读取的 worker 半边——worker 无页面 URL,快照协议
         //  不动)。★vite:worker-import-meta-url 约束=worker options 必须静态字面量
         //  (动态三元=vite 500,实锤)——双静态分支构造,两支均可被 dev/build 变换。
         //  页面 window.name 同名串不误伤:loader 仅 document 缺席域读 name。
         if (lightWasmEnabled()) {
           this.worker = new Worker(new URL('../workers/LightWorker.ts', import.meta.url),
-            { type: 'module', name: 'sw-lightwasm=1' });
+            { type: 'module', name: 'sw-lightwasm' });
         } else {
           this.worker = new Worker(new URL('../workers/LightWorker.ts', import.meta.url),
-            { type: 'module', name: 'LightWorker' });
+            { type: 'module', name: 'sw-lightwasm=0' });
         }
         this.startedAt = performance.now();
         this.worker.onerror = (e) => {

@@ -37,7 +37,19 @@
 // 不覆盖（登记）：Game.ts 90 站埋在武器使用管线深处（全仓 0 处 new Game()，
 // BJ175 同款边界）——逐站判别力由①静态闸承担，行为面由②同类站点代表。
 // 已护免刀站（闸内以 ?? 形在册）：Game.ts :27935/:39233（原 ?? 0，本批统一
-// 加括号）；MinionProj :2826/:2958/:4330（BJ 前批已护）；MountCombat :646。
+// 加括号）；MinionProj :2826/:2958/:4330（BJ 前批已护）;MountCombat :646。
+// ★BJ491③（2026-10-04）站数钉过期复绿（HEAD 先在红,守卫断言本就全绿=仅钉陈旧）：
+//   WhipProj 1→2——新增站 = :756 Y2 settle 城镇臂 flatPen 透传（原版 Damage_PVE_Inner
+//   :12852 `num6 = GetArmorPenetration(melee) + armorPenetration` 玩家分量,:13686
+//   `checkArmorPenetration(num6,…)` 消费;鞭 GetArmorPenetration(melee=false)=通用档,
+//   敌怪环 :851 同形——原 :626 三元臂行漂至 :851,身份未变）。
+//   MinionProj 3→5——:3266（946 泰拉棱镜体触敌臂）/:3299（946 城镇臂 flatPen）/
+//   :3431（阿比盖尔 833-835 臂 hurt 参）=BJ453-467 域主清偿连带落盘（原 :2826/:2958/
+//   :4330 三站同批迁移重位,旧锚行号退役）+ :4921/:5021（StrikeNPC :12068 玩家 AP+
+//   弹幕 AP 两源,`+ projectileData().armorPenetration` 伴读不匹配 READ 闸=每站仅记
+//   equipStats 源 1 次）。逐站亲读复核=合法 armorPen 读位（各喂 hurt armorPen 参/
+//   flatPen 通道,非误报）;守卫面（unguarded/unparened 断言）零改动。
+//   总站数 102→105（97+2+1+5+0）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
@@ -49,9 +61,9 @@ import { npcCheckArmorPenetration } from '../src/entities/projStatus';
  *  data/vanilla* 为生产面、其余实体文件为弹幕自身字段面（类缺省 0+汇截断），不在闸内） */
 const FILES: Array<[string, number]> = [
   ['src/core/Game.ts', 97],      // 87 eq 形 + 10 this.player.equipStats 直读形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2,见头注逐站清单）
-  ['src/entities/WhipProj.ts', 1],   // :626 三元臂（本批归一 ?? 0）
+  ['src/entities/WhipProj.ts', 2],   // ★BJ491③ 1→2：:756 Y2 城镇 settle flatPen（:13686 num6 玩家通用 armorPen 透传）+ :851 敌怪环 hurt 参（原 :626 三元臂,行漂）
   ['src/entities/MountCombat.ts', 1], // :646 playerArmorPenOf 唯一桶
-  ['src/entities/MinionProj.ts', 3],  // :2826/:2958/:4330
+  ['src/entities/MinionProj.ts', 5],  // ★BJ491③ 3→5：:3266/:3299/:3431（946 体触+城镇+阿比盖尔臂,BJ453-467 域主清偿连带）+ :4921/:5021（StrikeNPC :12068/:12852 玩家 AP+弹幕 AP 两源）
   ['src/entities/Arrow.ts', 0],       // 仅注释提及；读面=弹幕自身字段（缺省 0）
 ];
 
@@ -100,7 +112,7 @@ function scan(): ScanResult {
 }
 
 describe('BJ184 armorPen 桩面 NaN 防御判别网', () => {
-  it('①静态站闸：102 站全防御（?? 紧随）、Game.ts 95 刀站全括号习语、站数钉死', () => {
+  it('①静态站闸：105 站全防御（?? 紧随）、Game.ts 97 刀站全括号习语、站数钉死', () => {
     const res = scan();
     expect(res.unguarded).toEqual([]);
     expect(res.unparened).toEqual([]);

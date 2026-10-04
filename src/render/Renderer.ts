@@ -2421,6 +2421,14 @@ const TILE_SHEET_OF: Readonly<Int16Array> = (() => {
   return a;
 })();
 
+/** ★HUD blit 缓存签名键（2026-10-04 双面节流刀；纯函数=单测可锁判别面）：
+ *  任一分量变 → 键变（漏分量=陈旧 blit 回潮）。winSerial=窗域地图内容串号
+ *  （窗内 chunk 实画/全量重绘才 +1）；fogKey=-1 表无迷雾缓冲。 */
+export function mmHudSigKey(uid: number, sx: number, sy: number, viewTiles: number,
+  sizeI: number, winSerial: number, fogKey: number): string {
+  return `${uid}|${sx}|${sy}|${viewTiles}|${sizeI}|${winSerial}|${fogKey}`;
+}
+
 export class Minimap {
   /** 实例序号(GL 全屏地图纹理键;切世界换实例即换键自动重传) */
   private static uidGen = 0;
@@ -2456,6 +2464,14 @@ export class Minimap {
    *  洪峰期「+N 脏区/帧 ≈ −N 消化」可使 size 连续同值 → 2D 地图冻结
    *  （用户实报"小地图缓慢一点点更新+残缺"的第二病灶,2026-09-03）。 */
   mapVersion = 0;
+  /** ★HUD blit 窗域脏 chunk 侧账（2026-10-04 双面节流刀）：flushDirty 实画 chunk
+   *  键累计（不碰 flushedPixelRects/GL 上传链），mmHudBlit 在 blit 时查「∩小地图
+   *  窗口」后才消费清空（消费方清空惯例）。活机实测 90 帧归因：ambient 重画
+   *  （远处液体沉降族）25% 帧率跳 mapVersion 但脏 chunk 全在窗外——全局版本键
+   *  会被窗外事击穿,窗域判定后静止窗零重铺。上限 256：溢出清集置 overflow 旗
+   *  （消费时仍按窗域脏计=强制重铺,保守正确；小地图隐藏期不消费防无界增长）。 */
+  recentRepaintChunks = new Set<number>();
+  recentRepaintOverflow = false;
   constructor(public world: World, deferBuild = false) {
     this.w = world.w;
     this.h = world.h;
@@ -2475,6 +2491,8 @@ export class Minimap {
     this.image = null;
     this.dirtyChunks.clear();
     this.flushedPixelRects.length = 0;
+    this.recentRepaintChunks.clear();
+    this.recentRepaintOverflow = false;
   }
 
   /** 回声涂层双门（单源：colorFor 增量路径 / fillBand 全量带共用，勿复制第二份）。
@@ -2615,6 +2633,7 @@ export class Minimap {
     this.ensureLUT();
     this.fillBand(0, this.world.h);
     this.dirtyChunks.clear();
+    this.recentRepaintOverflow = true;   // ★全量重绘 → HUD blit 缓存强制击穿一次
   }
 
   /** 大世界首次全量构建的分行版(带间 MessageChannel 让路,详见旧注释沿革):
@@ -2632,6 +2651,7 @@ export class Minimap {
     });
     for (let y0 = 0; y0 < this.world.h; y0 += BAND) {
       this.fillBand(y0, Math.min(y0 + BAND, this.world.h));
+      this.recentRepaintOverflow = true;   // ★拆带期逐带标记 → HUD blit 逐帧重铺(=修前逐帧行为,构建完自然停)
       onProgress?.(Math.min(y0 + BAND, this.world.h) / this.world.h);
       await yieldToEventLoop();
     }
@@ -2818,6 +2838,11 @@ export class Minimap {
       const cx = (k & 0xffff) << 16 >> 16, cy = (k >> 16) << 16 >> 16;
       const x0 = cx * CHUNK, y0 = cy * CHUNK;
       this.flushedPixelRects.push([x0, y0, CHUNK, CHUNK]);   // GL 地图纹理增量上传
+      this.recentRepaintChunks.add(k);                        // ★窗域脏侧账（mmHudBlit 消费）
+      if (this.recentRepaintChunks.size > 256) {
+        this.recentRepaintChunks.clear();
+        this.recentRepaintOverflow = true;
+      }
       for (let y = y0; y < y0 + CHUNK; y++) {
         for (let x = x0; x < x0 + CHUNK; x++) {
           if (!st.inBounds(x, y)) continue;
@@ -8132,8 +8157,6 @@ export class Renderer {
   /** Main.netMode != 0（Game 每帧注入 net?.active）——队伍发色剂单机恒取 teamColor[0]
    *  （DyeInitializer.cs:334 `Main.netMode != 0 ? player.team : 0`） */
   netActive = false;
-  /** 地图头像发色剂头带 scratch（40×32，每帧重画） */
-  private headStripScratch: HTMLCanvasElement | null = null;
   /** 主角引用（Game.render 每帧注入；克脑四镜像 Main.cs:24799-24843 取玩家中心） */
   mainPlayer: Player | null = null;
   /** 高尔夫蓄力显示（Game 注入：力度条 + 预测线；Main.cs:30690-30721/:42933-42966） */
@@ -20793,6 +20816,17 @@ export class Renderer {
   private _mmHudCanvas: HTMLCanvasElement | null = null;
   private _mmHudCtx: CanvasRenderingContext2D | null = null;
   private _mmHudImg: ImageData | null = null;
+  /** HUD blit 缓存签名（上帧实际重铺时的键；'' = 无效）。合成输出仅依赖键分量,
+   *  全等 ⟺ 画布像素恒等 → 直接复用上帧画布（位级零漂移） */
+  private _mmHudSig = '';
+  /** 窗域地图内容串号（小地图窗内 chunk 被 flushDirty 实画/全量重绘/拆带期才
+   *  +1——签名键地图分量,全局 mapVersion 会被窗外 ambient 重画击穿,勿回退） */
+  private _mmWinSerial = 0;
+  /** ★双面节流计数（2026-10-04 WASM trace 定谳：mmHudBlit 恒 ~14ms/s=52k 像素循环
+   *  +putImageData 逐帧全量重铺,与场景无关）：hudRuns=实际重铺/hudHits=签名命中
+   *  复用；silBakes/silHits=头像剪影烘焙/命中;stripBakes/stripHits=染发头带合成/
+   *  命中。探针/诊断消费（fogIncrUpdates 同款常驻计数惯例） */
+  mmThrottle = { hudRuns: 0, hudHits: 0, silBakes: 0, silHits: 0, stripBakes: 0, stripHits: 0 };
   private mmHudBlit(world: World, sx: number, sy: number, viewTiles: number): HTMLCanvasElement | null {
     const mm = this.minimap;
     if (!mm?.pix || !mm.p32) return null;
@@ -20805,11 +20839,41 @@ export class Renderer {
       this._mmHudCanvas = document.createElement('canvas');
       this._mmHudCtx = this._mmHudCanvas.getContext('2d')!;
     }
-    if (this._mmHudCanvas.width !== sizeI) {
+    if (this._mmHudCanvas.width !== sizeI || !this._mmHudImg) {
+      // ★顺修潜在空指针：画布默认宽 300 恰等 sizeI（viewTiles=300）时旧码跳过
+      //  建图分支 → _mmHudImg 恒 null → 下方解引用炸（首帧小地图缩放 0.8 命中面）
       this._mmHudCanvas.width = sizeI;
       this._mmHudCanvas.height = sizeI;
       this._mmHudImg = this._mmHudCtx!.createImageData(sizeI, sizeI);
+      this._mmHudSig = '';               // 画布/缓冲换尺寸 → 上帧内容作废
     }
+    // ★窗域脏判定（2026-10-04）：本帧 flushDirty 实画 chunk 若与小地图窗口相交
+    //  → 串号 +1（击穿重铺）；纯窗外重画（远处液体/环境块变化）不击穿。
+    //  消费即清（与 flushedPixelRects「消费方清空」同惯例）；overflow 旗=洪峰/
+    //  全量重绘/拆带期 → 无条件击穿（保守正确）。
+    if (mm.recentRepaintOverflow) { this._mmWinSerial++; mm.recentRepaintOverflow = false; }
+    if (mm.recentRepaintChunks.size) {
+      for (const k of mm.recentRepaintChunks) {
+        const cx = (k & 0xffff) << 16 >> 16, cy = (k >> 16) << 16 >> 16;
+        const x0 = cx * CHUNK, y0 = cy * CHUNK;
+        if (x0 < sx + viewTiles && x0 + CHUNK > sx && y0 < sy + viewTiles && y0 + CHUNK > sy) {
+          this._mmWinSerial++;
+          break;
+        }
+      }
+      mm.recentRepaintChunks.clear();
+    }
+    // ★签名门（2026-10-04）：键分量=实例 uid（换世界换实例）+窗口几何（sx/sy/
+    //  viewTiles/sizeI——玩家跨格移动/边缘钳移窗/缩放）+窗域地图内容串号
+    //  （_mmWinSerial:窗内 chunk 实画/全量重绘/拆带期才 +1）+迷雾缓冲序号
+    //  （fogBufSerial:ensureFogData 实写才 +1,带重建期逐帧升=重建窗零陈旧）。
+    //  头像层不在本画布（NPC/玩家移动由 drawMapHeads 逐帧位画,不经此缓存）——
+    //  minimap 开合（mapStyle 门）在调用点上游,重开即再对键。
+    const sig = mmHudSigKey(mm.uid, sx, sy, viewTiles, sizeI, this._mmWinSerial,
+      this.fogP32 ? this.fogBufSerial : -1);
+    if (sig === this._mmHudSig) { this.mmThrottle.hudHits++; return this._mmHudCanvas; }
+    this._mmHudSig = sig;
+    this.mmThrottle.hudRuns++;
     const dst = new Uint32Array(this._mmHudImg!.data.buffer);
     const src = mm.p32;
     const fog = this.fogP32;               // 迷雾 CPU 缓冲(可能 null=无探索数据)
@@ -21145,6 +21209,9 @@ export class Renderer {
   private fogW = 0;
   private fogH = 0;
   private fogVersion = -1;
+  /** 迷雾缓冲写入序号（单调；ensureFogData 实际改写像素才 +1——mmHudBlit 缓存键
+   *  迷雾分量,mapVersion 同构。分带重建期逐帧行带推进亦逐帧升=重建窗零陈旧） */
+  private fogBufSerial = 0;
   /** GL 迷雾纹理已上传到的行带游标(稳定键增量上传) */
   private _mapFogRowSeen = -1;
   /** 2D 回退全屏地图的临时整幅画布(开图期持有,关图释放) */
@@ -21211,6 +21278,7 @@ export class Renderer {
       if (applyDirty()) {
         world.exploredDirty = null;   // 吃掉脏盒：只留未消费的新标记（防盒随探索无限增长）
         this.fogVersion = world.exploredVersion;
+        this.fogBufSerial++;          // 实写像素 → HUD blit 缓存键失效
         this.fogIncrUpdates++;
         return this.fogImage;
       }
@@ -21226,9 +21294,10 @@ export class Renderer {
     //   全亮一闪再 5 帧扫回(20s 看门狗误清 fogPix 时周期触发)。分带循环改
     //   双向写(seen?0:FOG),扫到哪改哪——新缓冲天然全 0,旧缓冲逐带纠正,
     //   重建期无全亮帧
+    const rowStart = this.fogRebuildRow;
     const ROWS = 120;
-    const yEnd = Math.min(h, this.fogRebuildRow + ROWS);
-    for (let by = this.fogRebuildRow; by < yEnd; by++) {
+    const yEnd = Math.min(h, rowStart + ROWS);
+    for (let by = rowStart; by < yEnd; by++) {
       const rowOff = by * w;
       for (let bx = 0; bx < w; bx++) {
         const x0 = bx * 2, y0 = by * 2;
@@ -21240,6 +21309,7 @@ export class Renderer {
         buf[rowOff + bx] = seen ? 0 : FOG;   // 双向写:探索清雾/未探索上雾
       }
     }
+    if (yEnd > rowStart) this.fogBufSerial++;   // 本帧行带实写 → HUD blit 缓存键失效
     this.fogRebuildRow = yEnd;
     if (yEnd >= h) {
       // ★完成兜底重扫（2026-08-19 用户实报"刚进世界视野未开，要走动才更新"根因）：
@@ -21302,8 +21372,8 @@ export class Renderer {
         // 输出不变——每个 blit 时点的剪影内容与旧序一致。烘焙单张(12 blit→1)因
         // a<1 叠印语义与原版 HandleUseRequest(不透明 ring)/LegacyCreateOutlines(a²
         // 逐帧)三方互异,缓行另案。
-        const silB = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, '#000000', 0);
-        const silC = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, opts.border, 1);
+        const silB = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, '#000000');
+        const silC = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, opts.border);
         for (const [dx, dy] of [[-4, 0], [-2, -2], [0, -4], [2, -2], [4, 0], [2, 2], [0, 4], [-2, 2]]) {
           ctx.drawImage(silB, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
         }
@@ -21515,31 +21585,58 @@ export class Renderer {
     return pair;
   }
 
-  /** 头像描边纯色剪影 scratch ×2 槽（source-in 填色；当帧即用勿存）。
-   *  ★双槽=黑环/队色环剪影同帧并存（hoist 后每帧各生成一次，单槽会相互覆盖）；
-   *  每次生成 = 一次 scratch flush+纹理重上传，12 次/帧 → 2 次/帧（2026-09-07 trace） */
-  private mapHeadSilScratch: (HTMLCanvasElement | null)[] = [null, null];
-  private mapHeadSilhouette(img: CanvasImageSource, sw: number, sh: number, color: string, slot = 0): CanvasImageSource {
-    const sc = this.mapHeadSilScratch[slot] ??= document.createElement('canvas');
-    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+  /** 头像描边纯色剪影持久缓存（WeakMap(img 身份)→Map(`${sw}x${sh}|${color}`)→剪影
+   *  画布；boss 头 bossHeadSilPair 同构=原版 OutlinedTextureRenderer._contents 逐贴
+   *  图烘焙目标缓存语义）。★双面节流刀（2026-10-04）：旧双槽 scratch 每帧
+   *  clearRect+drawImage+fillRect 重制 → 剪影画布逐帧被弄脏 = 12 环 blit 每帧触发
+   *  源画布 flush+纹理重上传（2026-09-07 trace 机制面残留）；键全等帧零重制零重传,
+   *  12 环 blit 的位输出不变（同烘焙序,像素恒等）。
+   *  键含 img 身份：PaperDoll 内容键缓存（appearanceKey+equip+opts 全在 composite
+   *  键内）/atlas 表 bitmapize 升级换对象即换身份 → 自动重烘恒正确。内容变而身份
+   *  不变的源（旧 playerHeadStrip scratch）已一并改 headStripCache 持久缓存——
+   *  两缓存配对落地,禁单独回滚其一（strip 仍 scratch 会让染发换色吃到陈旧剪影）。 */
+  private mapHeadSilCache = new WeakMap<object, Map<string, HTMLCanvasElement>>();
+  private mapHeadSilhouette(img: CanvasImageSource, sw: number, sh: number, color: string): CanvasImageSource {
+    let bucket = this.mapHeadSilCache.get(img);
+    if (!bucket) { bucket = new Map(); this.mapHeadSilCache.set(img, bucket); }
+    const key = `${sw}x${sh}|${color}`;
+    const hit = bucket.get(key);
+    if (hit) { this.mmThrottle.silHits++; return hit; }
+    const sc = document.createElement('canvas');
+    sc.width = sw;
+    sc.height = sh;
     const c = sc.getContext('2d')!;
-    c.clearRect(0, 0, sw, sh);
     c.drawImage(img, 0, 0, sw, sh, 0, 0, sw, sh);
     c.globalCompositeOperation = 'source-in';
     c.fillStyle = color;
     c.fillRect(0, 0, sw, sh);
     c.globalCompositeOperation = 'source-over';
+    bucket.set(key, sc);
+    this.mmThrottle.silBakes++;
     return sc;
   }
 
-  /** 发色剂激活的头带合成（后发→本体→前发→头甲，40×32；drawMapHeads 本地/远端共用） */
+  /** 发色剂激活的头带合成持久缓存（后发→本体→前发→头甲，40×32；drawMapHeads
+   *  本地/远端共用）。键= doll 身份（内容键：appearanceKey 含发型/发色/肤色全套
+   *  +equip+skipHair 全在 PaperDoll composite 键内）+headIdx+dye RGB——三者全等
+   *  ⟺ 合成像素恒等。★配对刀（2026-10-04）：旧 scratch 画布身份恒定而内容随
+   *  dye/appearance 变——若仅 mapHeadSilCache 支持久缓存而此处仍 scratch,染发
+   *  换色/换发型会以同身份命中陈旧剪影（身份键失明）；本缓存落地后 strip 身份
+   *  ⟹ 内容不变,silhouette 键无盲区。doll 被 PaperDoll LRU 淘汰重烘=新画布对象
+   *  → 新键自然重烘,WeakMap 随 doll GC 释放。 */
+  private headStripCache = new WeakMap<object, Map<string, HTMLCanvasElement>>();
   private playerHeadStrip(doll: CanvasImageSource, appearance: Appearance,
     headIdx: number, dyeColor: { r: number; g: number; b: number }): HTMLCanvasElement | null {
-    const strip = this.headStripScratch ??= document.createElement('canvas');
-    if (strip.width !== 40 || strip.height !== 32) { strip.width = 40; strip.height = 32; }
+    let bucket = this.headStripCache.get(doll);
+    if (!bucket) { bucket = new Map(); this.headStripCache.set(doll, bucket); }
+    const key = `${headIdx}|${dyeColor.r},${dyeColor.g},${dyeColor.b}`;
+    const hit = bucket.get(key);
+    if (hit) { this.mmThrottle.stripHits++; return hit; }
+    const strip = document.createElement('canvas');
+    strip.width = 40;
+    strip.height = 32;
     const sctx = strip.getContext('2d')!;
     sctx.imageSmoothingEnabled = false;
-    sctx.clearRect(0, 0, 40, 32);
     const layer = dollHairLayer(appearance, headIdx);
     const tinted = layer ? hairFrameTinted(layer, 0, dyeColor) : null;
     if (tinted && layer?.back) sctx.drawImage(tinted, 0, 0, 40, 32, 0, 0, 40, 32);
@@ -21547,6 +21644,8 @@ export class Renderer {
     if (tinted) sctx.drawImage(tinted, 0, 0, 40, 26, 0, 0, 40, 26);
     const head = headArmorImage(headIdx);
     if (head) sctx.drawImage(head, 0, 0, 40, 32, 0, 0, 40, 32);
+    bucket.set(key, strip);
+    this.mmThrottle.stripBakes++;
     return strip;
   }
 

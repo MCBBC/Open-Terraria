@@ -32,6 +32,7 @@ import { projSprite } from './Arrow';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 /** 溶液弹型号表（AI_031 switch，1457 Projectile.cs:27165-27199）：projId → [conv, dust]。
  *  conv = BiomeConversionID（:27208 Convert 第三参）；dust = NewDust 型号 */
@@ -276,7 +277,17 @@ export class WaterSplashProj extends Entity {
       if (e.dead) continue;
       if (!playerCanHitEnemy(e, game, this.projId)) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
-        const crit = Math.random() < this.critChance;
+        // ★BJ494（2026-10-04）掷率收编 rollVanillaHitCrit 单源（旧 `Math.random()<critChance`
+        //  静态掷退役;Game.ts 出生位 `(rangedCrit+武器crit+词缀crt)/100` 注入随之摘除=幻影
+        //  远程率）：69/70/621 SetDefaults（P.cs:1490-1513 亲读）无三类旗 → 三类掷 :12916-27
+        //  整段不存在=原版零掷;ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费
+        //  照达（零掷≠跳消费,BJ492① 同谳）。critChance 字段缺省 0 保留=关断钉（掷臂对
+        //  flagless 本就恒假;solution-family 直接构造测试依赖 0 缺省确定性,零改动）。
+        const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        const timerCrit = (game.player as unknown as
+          { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+          | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
+        const crit = rollCrit || timerCrit;
         const dmg = crit ? this.damage * 2 : this.damage;
         e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
         this.splash(game);
