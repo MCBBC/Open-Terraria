@@ -104,6 +104,16 @@ export function statOfInternal(id: number): VanillaItemStat | null {
   return vid === undefined ? s : overlayVariantDefense(vid, s);
 }
 
+/** ★Mod 盔甲/配饰注册面(2026-10-04):三表直写——STATS(vid 域查表)+STAT_BY_IID/
+ *  VID_BY_IID(模块期构建的缓存 Map,mod 条目运行时直写补位;armorSlotIndexOfInternal/
+ *  isFunctionalAccessory/isAnyAccessory 消费面零改即通)。 */
+export function registerModStats(vid: number, stat: VanillaItemStat, internalId: number): void {
+  if (vid < 30000) throw new Error(`[mod-stats] vid 须 ≥30000(mod 段): ${vid}`);
+  STATS[String(vid)] = stat;
+  STAT_BY_IID.set(internalId, stat);
+  VID_BY_IID.set(internalId, vid);
+}
+
 /** 盔甲部位槽序（0 头 / 1 身 / 2 腿；非盔甲 -1） */
 export function armorSlotIndexOfInternal(id: number): number {
   const s = STAT_BY_IID.get(id)?.s;

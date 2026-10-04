@@ -241,6 +241,15 @@ for (const k of Object.keys(EXTRACT_PATCH)) {
   TABLE[k] = { ...(RAW[k] ?? {}), ...EXTRACT_PATCH[k] } as ItemCombat;
 }
 
+/** ★Mod 物品战斗数据注册面(2026-10-04):vid=mod stable id(30000+),写 TABLE 同表
+ *  ——itemCombat(vid) 访问器零改即通(combatWeapon 经 def.vid 门进,items.ts
+ *  registerModItem 已回填 vid=stable id)。变体叠层 activeVariantStatsOfVid 对
+ *  mod vid 恒 null=无覆写,语义安全。 */
+export function registerModCombat(vid: number, combat: ItemCombat): void {
+  if (vid < 30000) throw new Error(`[mod-combat] vid 须 ≥30000(mod 段): ${vid}`);
+  TABLE[String(vid)] = { ...combat };
+}
+
 /** 原版 item id → 战斗数据（无条目返回 null）。
  *  世界态变体叠层（Item.cs SetDefaults 各 Variant 分支的运行时等价物）：
  *  remix/getGood/mechdusa 秘密种子世界取变体参数，普通世界取常规值——

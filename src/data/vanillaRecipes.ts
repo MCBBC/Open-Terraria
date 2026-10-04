@@ -45,6 +45,17 @@ export const RECIPE_GROUPS = DOC.groups;
 export const RECIPE_GROUP_ITEMS = DOC.groupItems;
 export const TILE_COUNTS_AS = DOC.tileCountsAs;
 
+/** ★Mod 配方注册面(2026-10-04):追加进 VANILLA_RECIPES 尾(消费方 UI.ts 运行时遍历
+ *  =注册序天然生效)。★decraft 索引表(IS_CRAFTED 族)在模块加载期构建——mod 配方
+ *  注册晚于该时点,恒不在索引内,故强制 notDecraftable=true(与已知限制一致,
+ *  docs/mod-loader-design.md §6)。 */
+export function registerModRecipes(list: VanillaRecipe[]): void {
+  for (const r of list) {
+    r.notDecraftable = true;
+    VANILLA_RECIPES.push(r);
+  }
+}
+
 /** 站点继承递归展开（Player.SetAdjTile :35192-35208）：tile 本身 + CountsAs 链全部置位 */
 // ================= decraft 索引表（Recipe.UpdateWhichItemsAreCrafted :15110-15127 1:1） =================
 // 注册序遍历后写 = last-wins（原版同款）; notDecraftable 跳过 IsCrafted;

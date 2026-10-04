@@ -103,17 +103,19 @@ describe('详情头像装饰叠层（AddNPCBiomeRelationships_AddDecorations_Aut
 });
 
 describe('标签筛选注册表（RegisterFilters + GetCommonInfoElementsForFilters）', () => {
-  it('全集 = ByRareCreature + 57 条 ByInfoElement（populator :495-502）', () => {
+  it('全集 = ByUnlockState + ByBoss + ByRareCreature + 57 条 ByInfoElement（populator :493-503 注册序；★BJ506：旧表 58 项缺 ByUnlockState/ByBoss——原版它们就是图标格第 1/2 钮）', () => {
     const common = (spawnData as unknown as { commonFilters: string[] }).commonFilters;
     expect(common).toHaveLength(57);
-    expect(BESTIARY_FILTER_DEFS).toHaveLength(58);
-    expect(BESTIARY_FILTER_DEFS[0]).toMatchObject({ key: 'rare', nameKey: 'BestiaryInfo.IsRare', frame: -1 });
-    expect(BESTIARY_FILTER_DEFS.slice(1).map((d) => d.key)).toEqual(common);
+    expect(BESTIARY_FILTER_DEFS).toHaveLength(60);
+    expect(BESTIARY_FILTER_DEFS[0]).toMatchObject({ key: 'unlocked', nameKey: 'BestiaryInfo.IfUnlocked', frame: 62 });
+    expect(BESTIARY_FILTER_DEFS[1]).toMatchObject({ key: 'boss', nameKey: 'BestiaryInfo.IsBoss', frame: 63 });
+    expect(BESTIARY_FILTER_DEFS[2]).toMatchObject({ key: 'rare', nameKey: 'BestiaryInfo.IsRare', frame: -1 });
+    expect(BESTIARY_FILTER_DEFS.slice(3).map((d) => d.key)).toEqual(common);
   });
 
   it('图标帧号 = populator 各元素第 2 构造参数（提取表 priority；FilterProviderInfoElement :24-29 帧 16×5）', () => {
     const conds = (spawnData as unknown as { conditions: Record<string, { priority: number; key: string }> }).conditions;
-    for (const d of BESTIARY_FILTER_DEFS.slice(1)) {
+    for (const d of BESTIARY_FILTER_DEFS.slice(3)) {
       expect(d.frame).toBe(conds[d.key].priority);
       expect(d.nameKey).toBe(conds[d.key].key);
       expect(d.frame).toBeGreaterThanOrEqual(0);
@@ -133,8 +135,8 @@ describe('标签筛选注册表（RegisterFilters + GetCommonInfoElementsForFilt
     expect(byKey.get('Biomes.Surface')?.frame).toBe(0);
     expect(byKey.get('Events.Sandstorm')?.frame).toBe(43);
     expect(byKey.get('Biomes.StardustPillar')?.frame).toBe(59);
-    expect(BESTIARY_FILTER_DEFS[1].key).toBe('Biomes.Surface');          // 列表首
-    expect(BESTIARY_FILTER_DEFS[2].key).toBe('Times.DayTime');           // :253 DayTime 第二
+    expect(BESTIARY_FILTER_DEFS[3].key).toBe('Biomes.Surface');          // 列表首
+    expect(BESTIARY_FILTER_DEFS[4].key).toBe('Times.DayTime');           // :253 DayTime 第二
     expect(BESTIARY_FILTER_DEFS[BESTIARY_FILTER_DEFS.length - 1].key).toBe('Biomes.StardustPillar');
   });
 });

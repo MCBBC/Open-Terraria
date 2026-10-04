@@ -115,3 +115,10 @@ export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);
   return m ? FUNC[m[1]] ?? null : null;
 }
+
+/** ★Mod 物品功能画像注册面(2026-10-04):vid=mod stable id(30000+),写 FUNC 同表
+ *  ——itemFuncOfVid(vid) 派发面零改即通(手填补丁先例同款,SW-E1/K1/R32 同机制)。 */
+export function registerModItemFunc(vid: number, func: ItemFunc): void {
+  if (vid < 30000) throw new Error(`[mod-itemfunc] vid 须 ≥30000(mod 段): ${vid}`);
+  FUNC[String(vid)] = { ...func };
+}

@@ -27,7 +27,9 @@ let skipped = 0;
 
 const shortUrl = (u) => !u ? '' : u.split('/').slice(-1)[0].split('?')[0];
 
+let _hbN = 0; const _hbT = Date.now();
 scanTrace(TRACE, (e) => {
+  if ((++_hbN & 0x3ffff) === 0) console.error(`[hb] ${((Date.now() - _hbT) / 1000).toFixed(1)}s ev=${_hbN}`);
   const nm = e.name;
   if (e.pid === 84464) {
     if (nm === 'FireAnimationFrame' && e.tid === 27036070) { rafTs.push(e.ts); return; }
@@ -40,9 +42,16 @@ scanTrace(TRACE, (e) => {
   const P = profs.get(e.id) || (profs.set(e.id, { nodes: new Map(), parent: new Map(), self: new Map(WIN.map(([w]) => [w, new Map()])), busy: new Map(WIN.map(([w]) => [w, 0])), gcSelf: new Map(WIN.map(([w]) => [w, 0])), tid: e.tid }), profs.get(e.id));
   for (const n of cp.nodes || []) {
     if (!P.nodes.has(n.id)) {
-      P.nodes.set(n.id, n.callFrame || {});
+      const cf = n.callFrame || {};
+      const fn = cf.functionName || '(anon)';
       const p = n.parent;
       if (p != null) P.parent.set(n.id, typeof p === 'object' ? p.id : p);
+      P.nodes.set(n.id, {
+        cf,
+        k: fn + '@' + shortUrl(cf.url) + ':' + (cf.lineNumber ?? '?'),
+        gc: fn === '(garbage collector)',
+        idle: fn === '(idle)' || fn === '(program)',
+      });
     }
   }
   const td = d.timeDeltas || cp.timeDeltas || [];
@@ -53,14 +62,13 @@ scanTrace(TRACE, (e) => {
   for (let i = 0; i < sm.length; i++) {
     const delta = td[i];
     if (!(delta > 0)) continue;
+    const nd = P.nodes.get(sm[i]);
+    if (!nd) { skipped++; continue; }
+    if (nd.idle) continue;
     busy += delta;
-    const cf = P.nodes.get(sm[i]);
-    if (!cf) { skipped++; continue; }
-    const fn = cf.functionName || '(anon)';
-    if (fn === '(garbage collector)') { gcS += delta; continue; }
-    if (fn === '(idle)' || fn === '(program)' && delta > 100000) continue;
-    const key = fn + '@' + shortUrl(cf.url) + ':' + (cf.lineNumber ?? '?');
-    self.set(key, (self.get(key) || 0) + delta);
+    if (nd.gc) { gcS += delta; continue; }
+    const k = nd.k;
+    self.set(k, (self.get(k) || 0) + delta);
   }
   P.busy.set(w, busy); P.gcSelf.set(w, gcS);
 });
@@ -84,8 +92,9 @@ const MP = profs.get('0xf');
 const jsAncestor = (P, nid) => {
   let cur = P.parent.get(nid), g = 0;
   while (cur != null && g++ < 20) {
-    const c = P.nodes.get(cur);
-    if (!c) return null;
+    const nd = P.nodes.get(cur);
+    if (!nd) return null;
+    const c = nd.cf;
     if (c.url) return (c.functionName || '?') + '@' + shortUrl(c.url) + ':' + (c.lineNumber ?? '?');
     cur = P.parent.get(cur);
   }

@@ -196,9 +196,9 @@ describe('NpcBestiarySortingId 排序 + NpcBestiaryRarityStars 稀有度（2026-
     expect(bestiaryRarityStars(46)).toBe(1);      // 公式：rarity0 + 战力 1 档
   });
 
-  it('排序步注册序含 BestiaryID/Rarity 两新步（原登记缺口闭合）', () => {
+  it('排序步注册序 = RegisterSortSteps 反编译序（★BJ506 勘正：旧表与 1457 :472-488 / 1456 :476-486 均不符——id/bestiaryId 倒置、rarity 错位中部；本表 = EntrySorter 兜底链序）', () => {
     expect(BESTIARY_SORT_KEYS).toEqual(
-      ['unlocks', 'id', 'bestiaryId', 'alpha', 'rarity', 'attack', 'defense', 'coins', 'hp']);
+      ['unlocks', 'bestiaryId', 'alpha', 'id', 'attack', 'defense', 'coins', 'hp', 'rarity']);
     expect(sortLabel('bestiaryId')).toBeTruthy();
     expect(sortLabel('rarity')).toBeTruthy();
   });

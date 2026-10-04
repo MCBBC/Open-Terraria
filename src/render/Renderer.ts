@@ -6208,7 +6208,13 @@ export class Renderer {
     //    Color.White；:4425-4427 GetTileLight 同；9/4-slice 档 _glowPaintColorSlices
     //    :160-172 全 1 同效）——涂层格在乘光后原样叠回 = "无视光照全亮"。
     //    开灯模式（this.fullbright）全屏已原色，叠层无意义跳过
-    if (!this.fullbright) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
+    // ★C10e 加算垫底扫尾（2026-10-03,虚空透镜案同族判语）:7x 段全部 'lighter'
+    //    直绘面落透明 HUD 会 dst×(1−α) 衰减下层画面（BJ278/虚空透镜同病）——
+    //    各面头部经幂等闩垫底（首面生效,后续零开销）;开灯模式全屏已原色跳过。
+    if (!this.fullbright) {
+      this.c10eCompositeIntoHud();
+      this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
+    }
 
     // 7-shine. tileShine +0.39 加法支（Main.shine case 262-268 Gemspark：原版加在
     //    顶点色(光)上、与光照 L 无关 → 乘光合成后平加 sprite×0.39；设备矩形与
@@ -6230,6 +6236,7 @@ export class Renderer {
     //      GetAlpha(Color.Lerp(Lighting.GetColor, White, 0.3f))——原版月总四部件
     //      以「光照色向白 30%」为顶点色,暗处恒保 30% 亮度;本仓光照=合成期全屏
     //      乘光,实体级顶点色通道不存在 → 合成后补差(见方法注)
+    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
     this.applyMoonLordLightFloor(entities, cam, viewW, viewH,
       lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
@@ -6274,10 +6281,12 @@ export class Renderer {
 
     // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
     //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉
+    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
     this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
     // 7d. 原版 Dust 全亮 pass（type 6/15/59-64 强制 White :38406——不受光照，
     //     合成后直画 = GetColor(White) 等价）
+    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
     this.drawVanillaDustPass(true, cam, player);
 
     // 7d''. FadingParticle 层（ParticleSystem_World_OverPlayers,Main.cs:63208——

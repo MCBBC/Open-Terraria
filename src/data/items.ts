@@ -2490,3 +2490,31 @@ for (let i = 0; i < ITEM_DEFS.length; i++) {
     }
   }
 }
+
+// ===================== Mod 物品注册面（2026-10-04,docs/mod-loader-design.md §1） =====================
+// mod 物品 = plan-A 恒等域的 30000+ 扩展段:internal≡stable≡vid 语义原样成立
+// （combatWeapon 的 `def.vid ?? -1` 门、itemFuncOfVid/itemCombat 按 vid 查表全链白嫖）。
+// 纪律：
+//   ① key 必须 mod_ 前缀（与 vi_/place_v_ 稳定 id 派生正则不相交——plan-A ① 同源铁律）；
+//   ② stableId 由 ModLoader 确定性分配后显式传入（拓扑序+键字典序,design.md §2）,
+//     重复/越段 fail-fast（对齐 plan-A ② 双射纪律）；
+//   ③ 恒等表重建仅在本函数被调用时执行 = 零 mod 时与现状逐字节恒等（中立性）；
+//   ④ 本函数只许运行时调用（plan-A 尾段之后）——源文件内禁止出现 mod_ 键。
+//   ⑤ 稀疏洞纪律不变：20754..stableId-1 为洞,消费端 !d 守卫全仓既有（洞已存在 13898 个）。
+export function registerModItem(d: Partial<ItemDef> & { key: string; name: string }, stableId: number): number {
+  if (!d.key.startsWith('mod_')) throw new Error(`[mod-item] key 须 mod_ 前缀: ${d.key}`);
+  if (byKey[d.key] !== undefined) throw new Error(`[mod-item] 重复注册: ${d.key}`);
+  if (!(stableId >= 30000 && stableId <= 65535)) throw new Error(`[mod-item] stableId 越段: ${stableId}`);
+  if (ITEM_DEFS[stableId] !== undefined) throw new Error(`[mod-item] stableId 冲突: ${stableId}`);
+  ITEM_DEFS[stableId] = { ...d, vid: stableId, maxStack: d.maxStack ?? 999 } as ItemDef;
+  byKey[d.key] = stableId;
+  // 恒等表扩展（plan-A ⑤ 同式：重建恒等 Uint16Array 并接长——live binding 消费纪律见 :2348）
+  if (stableId >= ITEM_STABLE_OF_INTERNAL.length) {
+    const next = new Uint16Array(stableId + 1);
+    next.set(ITEM_STABLE_OF_INTERNAL);
+    for (let i = ITEM_STABLE_OF_INTERNAL.length; i <= stableId; i++) next[i] = i;
+    ITEM_STABLE_OF_INTERNAL = next;
+  }
+  ITEM_INTERNAL_OF_STABLE.set(stableId, stableId);
+  return stableId;
+}

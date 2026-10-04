@@ -705,6 +705,17 @@ export function resolveDrops(ctx: NpcDropCtx): NpcDropOutcome {
   return out;
 }
 
+/** ★Mod NPC 掉落注册面(2026-10-04):构造原版 Rule 形追加进 rulesByNpc——与提取器
+ *  规则同池同语义(evalRule 求值器零改)。mod 侧只用 {k:'common', item, min, max,
+ *  denom, num, noLuck:true}(确定性掷,不吃幸运——mod 掉落率跨世界恒定)。
+ *  item 域=物品 stable id(mod 物品传 30000+ 段 id,与 drop 面其他消费方同域)。 */
+export function registerModNpcRules(npcId: number, rules: Array<Record<string, unknown>>): void {
+  if (npcId < 800) throw new Error(`[mod-drops] npcId 须 ≥800(mod 段): ${npcId}`);
+  let l = rulesByNpc.get(npcId);
+  if (!l) rulesByNpc.set(npcId, l = [] as Rule[]);
+  for (const r of rules) l.push(r as Rule);
+}
+
 // ============ 钱币管线（NPCLoot_DropMoney :80412 1:1） ============
 export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false,
   extraValue = 0): ResolvedDrop[] {

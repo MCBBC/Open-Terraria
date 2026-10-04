@@ -20,7 +20,7 @@
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
 import vanillaDataJson from '../../public/sprites/vanilla.json';
 import soundTracksJson from './vanilla-soundtracks.json';
-import { ITEM_BY_KEY } from './items';
+import { ITEM_BY_KEY, ITEM_DEFS } from './items';
 import { TILE_DEFS } from './tiles';
 
 /** tile id → key 反查（biomeAt 群系判定用） */
@@ -30,7 +30,10 @@ const TILE_KEY_NAME: string[] = TILE_DEFS.map((d) => d.key);
 //  tools/extract-npcdrops.mjs 结构化提取 ItemDropDatabase.cs，含专家/大师/条件/链语义）
 
 /** 原版物品 id → 本仓库 item key（vanilla.json 的 key 是 PascalCase，ITEM_BY_KEY 多为 snake_case；
- *  未注册的返回 null 跳过） */
+ *  未注册的返回 null 跳过）。
+ *  ★2026-10-04 mod 段回退：vid≥30000 时 ITEM_DEFS[vid].key 直取（internal≡stable≡vid
+ *  恒等域,registerModItem 已落表）——配方管线（vanillaItemKey→invIndexOfVanilla）对
+ *  mod 物品原样贯通。仅回退 mod_ 键,原版 id 缺 vanilla.json 行为不变（零扰动）。 */
 export const vanillaItemKey = (() => {
   const map = new Map<number, string | null>();
   const items = (vanillaDataJson as unknown as { items: Record<string, { key?: string }> }).items ?? {};
@@ -45,6 +48,9 @@ export const vanillaItemKey = (() => {
       // vi_NNN 导入物品（items.ts 的全量原版物品命名）：vi_<id> 或 vi_<id>_<snake>
       else if (ITEM_BY_KEY[`vi_${itemId}`] != null) key = `vi_${itemId}`;
       else if (ITEM_BY_KEY[`vi_${itemId}_${snake}`] != null) key = `vi_${itemId}_${snake}`;
+    } else if (itemId >= 30000) {
+      const d = ITEM_DEFS[itemId];
+      if (d?.key.startsWith('mod_')) key = d.key;
     }
     map.set(itemId, key);
     return key;
@@ -157,6 +163,16 @@ export function getGemBunnyToSpawn(rand: () => number): number {
 
 export function vanillaNpc(id: number): VanillaNpc | null {
   return VANILLA_NPCS[String(id)] ?? null;
+}
+
+/** ★Mod NPC 注册面(2026-10-04):id 走 800+ 段(原版 Count=697,成就门 vanillaId<697
+ *  即原版域边界——mod id 天然落成就门外)。写注册表对象本体=零改访问器/消费面
+ *  （Enemy.fromVanilla→vanillaNpc(id) 全链白嫖原版 AI 派发）。重复/越段 fail-fast。 */
+export function registerModNpc(npcId: number, def: VanillaNpc): void {
+  if (!(npcId >= 800 && npcId <= 4095)) throw new Error(`[mod-npc] id 越段: ${npcId}`);
+  const k = String(npcId);
+  if (VANILLA_NPCS[k] !== undefined) throw new Error(`[mod-npc] id 冲突: ${npcId}`);
+  VANILLA_NPCS[k] = def;
 }
 
 // ================= 城镇 NPC（TownNPC 实体用） =================

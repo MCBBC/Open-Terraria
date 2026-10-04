@@ -1,0 +1,162 @@
+// Mod 类型面(2026-10-04,P0 L1 数据 mod)。
+// 设计锚:game/docs/mod-loader-design.md;基线=session-13 规划(2026-08-11)。
+// 能力分层:L1 纯数据(本文件全部类型)/L2 脚本(P1)/L3 白名单补丁(P2+)。
+
+/** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
+export interface ModManifest {
+  /** ^[a-z][a-z0-9_]{1,31}$;存档/联机 key 与 l10n 命名空间 Mods.<id>.* 由此派生 */
+  id: string;
+  name: string;
+  /** semver x.y.z(解析为数字三元组比较) */
+  version: string;
+  author?: string;
+  description?: string;
+  /** mod API 版本(当前 1);引擎不认的 api 拒载 */
+  api: number;
+  side: 'both' | 'client' | 'server';
+  /** 依赖:modId → 版本约束(^1.2.3 前缀式或精确 x.y.z) */
+  dependencies?: Record<string, string>;
+}
+
+/** L1 物品内容(content/items/*.json)。字段面=ItemDef/itemfunc/itemcombat/itemstats
+ *  三表的 mod 子集——注册时拆写到各运行时表,白嫖原版派发面(updateUse/combatWeapon)。 */
+export interface ModItemContent {
+  /** mod 内唯一键;运行时全键 = `mod_<modid>_<key>` */
+  key: string;
+  name: string;
+  rare?: number;
+  value?: number;
+  maxStack?: number;
+  /** 战斗面(vanilla-itemcombat 语义)。shoot 只可引用原版弹 vid(P0 边界) */
+  combat?: {
+    damage?: number; knockBack?: number; useTime?: number; useAnimation?: number;
+    shoot?: number; shootSpeed?: number; mana?: number;
+    melee?: boolean; ranged?: boolean; magic?: boolean; summon?: boolean;
+    noMelee?: boolean; autoReuse?: boolean; useTurn?: boolean; crit?: number;
+  };
+  /** 功能面(vanilla-itemfunc 语义):工具力/放置/药水/弹药 */
+  func?: {
+    useStyle?: number; pick?: number; axe?: number; hammer?: number;
+    createTile?: number; placeStyle?: number;
+    consumable?: number; potion?: number;
+    healLife?: number; healMana?: number; buffType?: number; buffTime?: number;
+    ammo?: number; useAmmo?: number;
+    autoReuse?: number; useTime?: number; useTurn?: number;
+  };
+  /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交 */
+  stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1 };
+  /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
+  placeTile?: string;
+  /** 贴图(textures/ 下相对路径);缺省=无名占位(灰格) */
+  texture?: string;
+}
+
+/** L1 tile 内容(content/tiles/*.json)。稳定 id 走 1030-2047 空闲区(append-only)。 */
+export interface ModTileContent {
+  key: string;
+  name?: string;
+  solid?: boolean; platform?: boolean; decor?: boolean;
+  opacity?: number;
+  pick?: number; axe?: number;
+  mapColor?: string;
+  /** 帧模式:'auto'=8 向融合(需整表),'style'=逐 style 竖帧,'blend'=独立块。缺省 style */
+  frame?: 'auto' | 'style' | 'blend';
+  /** 贴图表(textures/ 相对路径,Tiles_N.png 同构整表) */
+  texture: string;
+  /** 单帧尺寸(px);缺省 16×16 */
+  frameWidth?: number; frameHeight?: number;
+  /** style 数(帧表竖向/横向 style 槽数;缺省 1) */
+  styles?: number;
+  /** 破坏掉落:本 mod 物品键;缺省=不掉落 */
+  dropItem?: string;
+}
+
+/** L1 NPC 内容(content/npcs/*.json)。原版 VanillaNpc 形子集;id 走 800+。
+ *  aiStyle 复用原版已移植 AI 核(Enemy.ts switch);自定义 AI=L2。 */
+export interface ModNpcContent {
+  key: string;
+  name: string;
+  aiStyle: number;
+  lifeMax: number;
+  damage: number;
+  defense: number;
+  knockBackResist?: number;
+  width?: number; height?: number;
+  frames?: number;
+  scale?: number;
+  friendly?: boolean; townNPC?: boolean;
+  noGravity?: boolean; noTileCollide?: boolean;
+  critter?: boolean;
+  HitSound?: string;
+  DeathSound?: string | null;
+  /** 价值(金币掷,原版 npcvalue 语义) */
+  value?: number;
+  /** 简单掉落表(chance 0-1;缺省 1) */
+  drops?: Array<{ item: string; min?: number; max?: number; chance?: number }>;
+  /** 贴图(textures/ 相对路径;NPC_<id>.png 语义) */
+  texture?: string;
+}
+
+/** L1 配方(content/recipes.json)。VanillaRecipe 形(vid 域=本 mod 物品 stable id/
+ *  原版 vid 混用——配方消费面按内部 id 求值,mod stable id 天然同域)。 */
+export interface ModRecipeContent {
+  create: string;            // 本 mod 物品键
+  createStack?: number;
+  /** 站点:原版 TileID(-1=徒手);或本 mod tile 键 */
+  tile?: number | string;
+  items?: Array<{ item: string; stack: number }>;   // item=本 mod 键或原版 vid 数字串
+  /** 原版物品材料:vid 数字(与 mod 键混用) */
+  vanillaItems?: Array<{ id: number; stack: number }>;
+  water?: boolean; honey?: boolean; lava?: boolean;
+}
+
+// ================= ID 分配域(design.md §2) =================
+/** mod 物品 stable 段基址(plan-A 恒等域扩展段;硬顶 65535=Uint16Array 上限) */
+export const MOD_ITEM_STABLE_BASE = 30000;
+/** mod tile stable 段基址(PRIV_TILE_STABLE 表尾 1029 之后;硬顶 2047) */
+export const MOD_TILE_STABLE_BASE = 1030;
+/** mod NPC id 段基址(原版 Count=697;成就门 vanillaId<697=原版域边界) */
+export const MOD_NPC_ID_BASE = 800;
+
+/** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
+export interface ModIdAllocation {
+  /** 全物品键 `mod_<modid>_<key>` → stable id */
+  items: Map<string, number>;
+  /** 全 tile 键 `mod_<modid>_<key>` → stable id */
+  tiles: Map<string, number>;
+  /** 全 NPC 键 `mod_<modid>_<key>` → npc id */
+  npcs: Map<string, number>;
+}
+
+/** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
+export interface RegistrationPlan {
+  mods: Array<{ manifest: ModManifest; pack: ModPack }>;
+  /** 拓扑序(依赖在前) */
+  order: string[];
+  allocation: ModIdAllocation;
+  itemSpecs: Array<{ modId: string; spec: ModItemContent; stableId: number; fullKey: string }>;
+  tileSpecs: Array<{ modId: string; spec: ModTileContent; stableId: number; fullKey: string }>;
+  npcSpecs: Array<{ modId: string; spec: ModNpcContent; npcId: number; fullKey: string }>;
+  recipes: Array<{ modId: string; spec: ModRecipeContent }>;
+}
+
+/** 解析后的 mod 包(zip 展开) */
+export interface ModPack {
+  manifest: ModManifest;
+  /** 相对路径(如 'content/items/sword.json'/'textures/x.png')→ 字节 */
+  files: Map<string, Uint8Array>;
+}
+
+/** 装载结果(UI 面板/日志/存档头消费) */
+export interface ModLoadResult {
+  loaded: Array<{ manifest: ModManifest; counts: { items: number; tiles: number; npcs: number; recipes: number } }>;
+  errors: Array<{ modId: string; error: string }>;
+  allocation: ModIdAllocation | null;
+}
+
+/** 存档头 mod 清单项(serialize SaveData.mods 可选键) */
+export interface SaveModEntry {
+  id: string;
+  version: string;
+  items: number; tiles: number; npcs: number;
+}

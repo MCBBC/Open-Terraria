@@ -1,38 +1,50 @@
-// 图鉴 UI 面板（DOM，M-补齐清单 #2）——对照 Terraria.GameContent.UI.States/
-// UIBestiaryTest.cs（1.4.5.6）+ UI.Elements/UIBestiaryEntryGrid.cs：
-//   网格 72×72 单元（GetEntriesToShow：cols=floor(w/72) rows=floor(h/72)，分页按页偏移）
-//   范围文本 "{first}-{last} ({total})"（GetRangeText）；FixBestiaryRange 钳制
-//   顶栏：◀ ▶ + 范围 + 排序 + 筛选 + 搜索（UIWrappedSearchBar）
-//   底栏：完成度百分比 + 进度条（FillPercent；填充 rgb(51,137,255) 底 rgb(35,43,81)）
-//   面板底色 rgb(33,43,79)*0.8（BuildPage UIPanel.BackgroundColor）
-//   条目卡：头像（NPC 表首帧）+ 名字；未解锁剪影（UnlockableNPCEntryIcon 语义）
-//   详情栏（右侧，UIBestiaryEntryInfoPage 位置）：
-//     解锁档 UnlockState 1 头像/2 +属性/3 +掉落/4 +掉落率（Bestiary.ts unlockState）
-//     掉落表 = vanilla-npcdrops.json 规则树展平（ItemDropBestiaryInfoElement 近似）
-// 打开入口：背包面板图鉴按钮（原版 BestiaryMenuButton Main.cs:41905）+ 暂停菜单。
-// 键位：Inventory 键位表动作关闭（默认 Esc+E；capture 阶段拦截防 main.ts 暂停键二次消费）。
-// 已闭合登记（数据层 → UI 消费）：
-//   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId 九键链全键提取，
-//     含 GetLowestBiomeGroupIndex）/ Sort_Rarity（NpcBestiaryRarityStars，npcStats 投影）
-//   - 头像背景：IBestiaryBackgroundImagePathAndColorProvider（MapBG1-42 按出没环境
-//     推导，偏好 AddTags/世界恶双路/月总特例；网格=首个带图条件，详情=末个+bgColor 着色）
-//   - 详情头像装饰叠层（2026-09-03 闭合）：IBestiaryBackgroundOverlayAndColorProvider
-//     （NPCPortraitInfoElement.cs:77-84 + UIBestiaryNPCEntryPortrait.cs:43-54）——
-//     Visuals.* 八装饰（SpawnConditionDecorativeOverlayInfoElement，MapBGOverlay2-9）
-//     按 populator AddNPCBiomeRelationships_AddDecorations_Automated(:1942-1987) 分支
-//     推导挂载 + Events.Sandstorm（MapBGOverlay1，SpawnConditionBestiaryOverlayInfoElement）；
-//     仅详情大头像绘制（网格 TryGettingBackgroundImageProvider :105-127 无叠层），
-//     偏好命中（flag2）时整批不画，DisplayPriority 升序（Sandstorm 0 < Visuals 1），
-//     与底图同一目标盒拉伸、色 = overlayColor ?? Lerp(White, portraitColor, 0.5)
-//   - 标签筛选（2026-09-03 闭合）：Filters.ByRareCreature + Filters.ByInfoElement×57
-//     （CommonTags.GetCommonInfoElementsForFilters，populator RegisterFilters :493-503），
-//     UI = 图标格弹层（UIBestiaryFilteringOptionsGrid：32² 钮/perRow 12/Icon_Tags_Shadow
-//     帧 16×5/可用性=存在已解锁命中条目/激活钮 rgb(152,175,235)、未激活
-//     InventoryDefaultColor×0.7）；EntryFilterer.FitsFilter 语义 = 激活筛选 OR 合取
-//   - 网格小图 Portrait_Front/Slot_* 前后框层与右上分页序号未画（纯装饰贴图层，
-//     与解锁态/数据无关——原 UI 保留项，非本次登记缺口）
-// 登记缺口（后续批次）：
-//   - 无
+// 图鉴 UI 面板（DOM）——BJ506 大域对齐刀（2026-10-04）：对照 Terraria.GameContent.UI.States/
+// UIBestiaryTest.cs（1457 :1-860 全文亲读定谳；1456 同文件交叉参照）+ UI.Elements/Bestiary/
+// 各元素类逐面 1:1（锚号随行）。前一版（M-补齐清单 #2）骨架在、形态自创——本刀按原版栈重排：
+//   布局（BuildPage :69-157）：外宽 87.5% max900 min700 / Top180 / 高-220；主 UIPanel 高-90
+//   底色 (33,43,79)*0.8 黑框；顶栏 24px=[◀28][▶28][范围面板135 (35,40,83)]…[排序钮114×28]
+//   [3][筛选钮114×28][17][搜索栏230]（贴图钮+Wide_Border 悬停框+文字标签）；出口钮 = UI.Back
+//   UITextPanel 50%×50 底部居中（MakeExitButton :368-383）；网格区宽 -242 高-4 VAlign1；
+//   详情栏 230 宽右侧（高 +12 下垂）；底栏 20px=进度文本(0.8) 叠 ColorBar 滑条 15px
+//   （填充 (51,137,255)/底 (35,43,81)，悬停 MouseText 完成度 :183-190）。
+//   网格（EntryGrid :37-86 + EntryButton :24-103）：72² 格扇区居中排布；格 = 68² 内盒
+//   (OverflowHidden)[Slot_Back→网格底图(原生尺寸居中)→NPC 图标]+左上编号(Top10 Left10
+//   scale0.9)+[Slot_Overlay×0.6→Slot_Front]，悬停=[Slot_Selection+Slot_Front 重排+音12
+//   :151-170]+MouseText(名字/??? )；锁定=Icon_Locked×0.15（EntryIcon :52-70）。
+//   详情页（EntryInfoPage :128-163）：类目序 Nameplate→Portrait→FlavorText→Stats→
+//   ItemsFromCatchingNPC→ItemsFromDrops→Misc（GetBestiaryInfoCategory :174-201 枚举序；
+//   1457 populator 零 ItemFromCatchingNPC 注册 = 该类目恒空），每类目后 Separator
+//   ((89,116,213)*0.9)、末分隔线移除（:151-162）；Stat_Panel(31²,角12条7) 九宫块；
+//   头像 193×112（底图 ScaleToFit 拉伸+叠层+Portrait_Front+左上五角星 Stat_Panel 56²，
+//   NPCPortraitInfoElement :108-148）；属性卡 = Stat_HP/Knockback/Attack/Defense 四图标
+//   (3,0)/(102,0)/(3,35)/(102,35) 值右对齐 + 金币行（value>0 才有：分隔线 y70 + 四币图标
+//   y78，NPCStatsReportInfoElement :58-260）；击杀计数 = 旗图(item 321)+数右对齐 30 高块
+//   （NPCKillCounterInfoElement :23-89）；掉落行 = 图标+右对掉率（无名字行内文！名字走
+//   悬停 item tooltip——本仓以轻量 MouseText 名字近似，全量 tooltip 登记债 B2）。
+//   排序弹层（SortingOptionsGrid :37-87）：126 宽右侧列表，可见 7 步，GroupOptionButton
+//   114×26 scale0.8，选中 (152,175,235)/未选 InventoryDefaultColor(63,65,151)×0.7，
+//   再点同项回退默认步 0=ByUnlockState（:89-115，无高亮、文案"解锁"）。
+//   筛选弹层（FilteringOptionsGrid :43-174）：60 钮（ByUnlockState→ByBoss→ByRareCreature→
+//   57 环境标签，RegisterFilters populator :493-503 注册序）12/行 32² 间距 2 内边 6；
+//   可用性 = ForcedDisplay ?? 存在已解锁命中条目（:193-208），不可用 = Icon_Tags_Shadow
+//   帧(0,4)×0.2 且从激活集除名；悬停 MouseText 名称（:210-225）。
+//   搜索（UIWrappedSearchBar :44-118 + UISearchBar）：[22²钮+边框悬停][框面板 (35,40,83)
+//   +输入+SearchCancel]；空态灰字占位 = UI.PlayerNameSlot（未传 emptyText 的原版默认）；
+//   聚焦框变金 (255,231,69)（OnStartTakingInput）。
+//   交互：滚轮 = 详情栏滚动（UIBestiaryTest.ScrollWheel :850-854 → UpdateScrollbar；
+//   ★原版无滚轮翻页——旧自创面拆除，翻页只走 ◀▶）；筛选/排序/搜索变更【不重置】页偏移
+//   （FillBestiarySpaceWithEntries → FixBestiaryRange(+0) 只钳制 :37-46）；选中条目无
+//   持久视觉（_selectedEntryButton 写后不读）；详情未选 = 空面板（FillInfoForEntry(null)）。
+//   排序链（EntrySorter.Compare）：优先步 → 其余步按注册序兜底（DataStructures/EntrySorter.cs
+//   :17-36）；注册序 = UnlockState→BestiaryID→Alphabetical→NetId→Attack→Defense→Coins→
+//   HP→Rarity（populator RegisterSortSteps :472-488；1456 :476-486 同序——旧表序错，本刀勘正）。
+// 已闭合登记（数据层 → UI 消费，前批）：解锁档/杀数门/creditId 归并/排序 ID 九键/稀有度星/
+//   头像背景偏好/装饰叠层/出没环境——语义未动；本刀动：筛选全集 60、排序链、百分比文案、
+//   掉落行序、网格卡形态、详情类目序、图鉴编号位、锚点规则（重力 NPC 底锚 -8）。
+// 键位：Inventory 键位表动作关闭（默认 Esc+E；capture 阶段拦截防 main.ts 暂停键二次消费）；
+//   搜索框聚焦时首按 Esc 仅失焦（UISearchBar ToggleTakingText 语义）。
+// 登记债（后续批次）：B2 掉落行悬停全量 item tooltip（Main.HoverItem 面，UI.ts tooltip 栈
+//   在途）；B3 悬停 NPC 待机动画（UnlockableNPCEntryIcon.Update SimulateFirstHover/FindFrame）。
 import { upgradeToBitmap, USE_BITMAP } from '../assets/SpriteAtlas';
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
@@ -183,9 +195,14 @@ export function bestiaryPageCount(total: number, perPage: number): number {
 }
 
 export type BestiarySortKey = 'unlocks' | 'id' | 'bestiaryId' | 'alpha' | 'rarity' | 'attack' | 'defense' | 'coins' | 'hp';
-/** SortingSteps 注册序（UIBestiaryEntry.SortingSteps RegisterSortSteps：Unlocks → ID →
- *  BestiaryID → Alphabetical → Rarity → Attack → Defense → Coins → HitPoints） */
-export const BESTIARY_SORT_KEYS: BestiarySortKey[] = ['unlocks', 'id', 'bestiaryId', 'alpha', 'rarity', 'attack', 'defense', 'coins', 'hp'];
+/** SortingSteps 注册序（populator RegisterSortSteps :472-488，1457 与 1456 :476-486 同序）：
+ *  Unlocks → BestiaryID → Alphabetical → NetId → Attack → Defense → Coins → HitPoints →
+ *  Rarity。★BJ506 勘正：旧表 ['unlocks','id','bestiaryId','alpha','rarity',…] 与两版反编译
+ *  均不符（id/bestiaryId 倒置、rarity 错位中部）——本表即 EntrySorter 兜底链顺序 */
+export const BESTIARY_SORT_KEYS: BestiarySortKey[] = ['unlocks', 'bestiaryId', 'alpha', 'id', 'attack', 'defense', 'coins', 'hp', 'rarity'];
+/** 弹层可见步（HiddenFromSortOptions=false 的 7 步，注册序剔除 unlocks/id 两个隐藏步）；
+ *  UI 排序钮右侧文案恒显当前步名（EntrySorter.GetDisplayName，初始 = Steps[0] "解锁"） */
+export const BESTIARY_SORT_OPTIONS: BestiarySortKey[] = ['bestiaryId', 'alpha', 'attack', 'defense', 'coins', 'hp', 'rarity'];
 
 export function sortLabel(key: BestiarySortKey): string {
   switch (key) {
@@ -201,17 +218,27 @@ export function sortLabel(key: BestiarySortKey): string {
   }
 }
 
+/** Utils.PrettifyPercentDisplay（Utils.cs:1140）1:1：ToString("P{n}") →
+ *  TrimEnd('0','%',' ') → TrimEnd('.',' ') → TrimStart('0',' ') → +"%"。
+ *  （0.5→"50%"；1→"100%"；0→"%"——尾零/前导零全剥的原版习癖，机械照抄） */
+export function prettifyPercentDisplay(v: number, digits = 2): string {
+  let s = (v * 100).toFixed(digits);
+  s = s.replace(/0+$/, '').replace(/\.$/, '');
+  s = s.replace(/^[0 ]+/, '');
+  return `${s}%`;
+}
+
 export interface BestiaryFilter {
   search: string;
-  /** 条目类别（本仓自有维度，无原版键） */
+  /** 条目类别（本仓自有维度，无原版键；UI 面已按 1:1 拆除，数据层保留供单测/后续批） */
   kind: 'all' | 'enemy' | 'town' | 'critter';
-  /** Filters.ByBoss（BestiaryInfo.IsBoss） */
+  /** Filters.ByBoss（BestiaryInfo.IsBoss）；UI 走 tags 'boss' 同语义 */
   boss: boolean;
   /** Filters.ByUnlockState（BestiaryInfo.IfUnlocked）；'no' 为反向（本仓补充） */
   unlocked: 'all' | 'yes' | 'no';
-  /** 标签筛选激活集（Filters.ByRareCreature 的 'rare' + Filters.ByInfoElement 的
-   *  出没环境路径键；EntryFilterer.FitsFilter :37-56 语义 = 激活筛选【OR】合取——
-   *  命中任一激活筛选即通过，其余维度（search/kind/boss/unlocked）仍 AND） */
+  /** 标签筛选激活集（Filters 集身份：'unlocked'/'boss'/'rare' + 出没环境路径键；
+   *  EntryFilterer.FitsFilter :37-56 语义 = 激活筛选【OR】合取——命中任一激活筛选即通过，
+   *  其余维度（search/kind/boss/unlocked）仍 AND） */
   tags: string[];
 }
 
@@ -298,31 +325,60 @@ export function npcDisplayName(npcId: number, fallback: string): string {
   return fallback;
 }
 
-/** 排序（SortingSteps 各 Compare 的数据层等价；无数据步缺省，平手按 npcId 升序） */
-export function sortBestiaryRows(rows: BestiaryRow[], key: BestiarySortKey): void {
-  const stat = (r: BestiaryRow, f: 'lifeMax' | 'damage' | 'defense'): number =>
-    VANILLA_NPCS[String(r.npcId)]?.[f] ?? -1;
-  const cmp: Record<BestiarySortKey, (a: BestiaryRow, b: BestiaryRow) => number> = {
-    // ByUnlockState：解锁档降序（已解锁在前）
-    unlocks: (a, b) => b.state - a.state || a.npcId - b.npcId,
-    // ByNetId 升序
-    id: (a, b) => a.npcId - b.npcId,
-    // ByBestiaryId：ContentSamples.NpcBestiarySortingId（九键 orderby 链序号）升序
-    bestiaryId: (a, b) => bestiarySortingId(a.npcId) - bestiarySortingId(b.npcId),
-    // ByRarity：NpcBestiaryRarityStars 降序
-    rarity: (a, b) => bestiaryRarityStars(b.npcId) - bestiaryRarityStars(a.npcId) || a.npcId - b.npcId,
-    // Alphabetical：显示名升序
-    alpha: (a, b) => a.name.localeCompare(b.name, 'zh') || a.npcId - b.npcId,
-    // ByStat 族：降序（无数据条目沉底）
-    attack: (a, b) => stat(b, 'damage') - stat(a, 'damage') || a.npcId - b.npcId,
-    defense: (a, b) => stat(b, 'defense') - stat(a, 'defense') || a.npcId - b.npcId,
-    coins: (a, b) => npcValueOf(b.npcId) - npcValueOf(a.npcId) || a.npcId - b.npcId,
-    hp: (a, b) => stat(b, 'lifeMax') - stat(a, 'lifeMax') || a.npcId - b.npcId,
-  };
-  rows.sort(cmp[key]);
+// ---- 排序（EntrySorter 全链 1:1，DataStructures/EntrySorter.cs :17-36）----
+// 优先步 Compare 非零即决；否则其余步按【注册序】逐位兜底（含排在优先步之前的步）。
+// ByStat 族经 NPCStatsReportInfoElement 卡读数：城镇/小动物条目（TownNPC/Critter 工厂
+// 不挂 stats 卡，BestiaryEntry.cs:61-109）无卡沉底（:155-170 null 分支），敌怪缺表数据按 0。
+
+type StatField = 'lifeMax' | 'damage' | 'defense';
+function statCardOf(r: BestiaryRow, f: StatField): number | null {
+  // 有卡 = 敌怪条目（Enemy() 工厂 :31 恒 Add stats 卡）；值缺表（37 条无 SetDefaults 提取）记 0
+  if (r.entry.kind !== 'enemy') return null;
+  const v = VANILLA_NPCS[String(r.npcId)]?.[f];
+  return v == null ? 0 : v;
 }
 
-/** 筛选（Filters.BySearch/ByUnlockState/ByBoss/ByRareCreature/ByInfoElement + 本仓 kind 维度） */
+function stepCompare(key: BestiarySortKey, a: BestiaryRow, b: BestiaryRow): number {
+  switch (key) {
+    case 'unlocks':   // ByUnlockState :40-55：解锁态降序（已解锁在前）
+      return b.state - a.state;
+    case 'bestiaryId': // ByBestiarySortingId :57-86：NpcBestiarySortingId 升序
+      return bestiarySortingId(a.npcId) - bestiarySortingId(b.npcId);
+    case 'alpha':      // Alphabetical :118-147：本地化名升序
+      return a.name.localeCompare(b.name, 'zh');
+    case 'id':         // ByNetId :11-38：netId 升序
+      return a.npcId - b.npcId;
+    case 'attack': case 'defense': case 'hp': case 'coins': {
+      // ByStat 族 :149-236：值降序；无卡沉底（x 无卡 y 有 → x 排后）
+      const fa: StatField | 'coins' = key === 'attack' ? 'damage' : key === 'defense' ? 'defense' : key === 'hp' ? 'lifeMax' : 'coins';
+      const va = fa === 'coins' ? (a.entry.kind === 'enemy' ? npcValueOf(a.npcId) : null) : statCardOf(a, fa);
+      const vb = fa === 'coins' ? (b.entry.kind === 'enemy' ? npcValueOf(b.npcId) : null) : statCardOf(b, fa);
+      if (va === null && vb === null) return 0;
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      return vb - va;
+    }
+    case 'rarity':     // ByBestiaryRarity :88-116：星数降序
+      return bestiaryRarityStars(b.npcId) - bestiaryRarityStars(a.npcId);
+  }
+}
+
+/** 排序（EntrySorter.Compare 1:1：优先步 → 注册序其余步兜底；List.Sort 稳定序由
+ *  尾键 id 缺位时的注册序近似——原版全键平手保持注册序，本表注册序 = 全库序） */
+export function sortBestiaryRows(rows: BestiaryRow[], key: BestiarySortKey): void {
+  const chain = [key, ...BESTIARY_SORT_KEYS.filter((k) => k !== key)];
+  rows.sort((a, b) => {
+    for (const k of chain) {
+      const c = stepCompare(k, a, b);
+      if (c !== 0) return c;
+    }
+    return a.npcId - b.npcId;
+  });
+}
+
+/** 筛选（Filters.BySearch/ByUnlockState/ByBoss/ByRareCreature/ByInfoElement；
+ *  tags 现含 'unlocked'（ByUnlockState :60-84：解锁>NotKnown）与 'boss'（ByBoss
+ *  :118-148：Boss 元素挂载）两种原版键，UI 图标格直接承载） */
 export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): BestiaryRow[] {
   const q = f.search.trim().toLowerCase();
   return rows.filter((r) => {
@@ -331,13 +387,15 @@ export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): Best
     if (f.unlocked === 'yes' && r.state === UnlockState.NotKnown) return false;
     if (f.unlocked === 'no' && r.state > UnlockState.NotKnown) return false;
     // 标签筛选（EntryFilterer.FitsFilter Terraria.DataStructures/EntryFilterer.cs:37-56：
-    // ActiveFilters 逐个 FitsFilter，任一命中即过——OR 合取；'rare'=Filters.ByRareCreature，
-    // 其余=Filters.ByInfoElement 的 `entry.Info.Contains(element)`，即出没环境注册表含该路径）
+    // ActiveFilters 逐个 FitsFilter，任一命中即过——OR 合取；'unlocked'/'boss'/'rare' =
+    // Filters 三专用类，其余=Filters.ByInfoElement 的 `entry.Info.Contains(element)`，
+    // 即出没环境注册表含该路径）
     if (f.tags.length) {
-      const paths = SPAWN_BY_NPC[String(r.npcId)];
-      const hit = f.tags.some((t) => t === 'rare'
-        ? isRareSpawnForBestiary(r.npcId)
-        : !!paths?.includes(t));
+      const hit = f.tags.some((t) =>
+        t === 'unlocked' ? r.state > UnlockState.NotKnown
+          : t === 'boss' ? isBossCredit(r.entry.creditId)
+            : t === 'rare' ? isRareSpawnForBestiary(r.npcId)
+              : !!SPAWN_BY_NPC[String(r.npcId)]?.includes(t));
       if (!hit) return false;
     }
     // BySearch：未解锁条目不提供搜索串（原版 NamePlate 隐藏）
@@ -350,7 +408,9 @@ export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): Best
  *  boss 隶属敌怪维度——与 critter/town 互斥：
  *  - 选 boss 时 kind 归一到 enemy（从 小动物/城镇 切入即自动跳敌怪）
  *  - 选 小动物/城镇 时清 boss（不存在 boss 城镇/boss 小动物）
- *  kind all/enemy 与 boss 自由组合（结果集非空：全部→boss 25 条 / 敌怪→boss 25 条） */
+ *  kind all/enemy 与 boss 自由组合（结果集非空：全部→boss 25 条 / 敌怪→boss 25 条）
+ *  ★BJ506：UI 面已拆除 kind/未解锁 chip（原版无此二筛选面），本函数保留 = 数据层
+ *  语义桩（bestiary-ui.test.ts 回归面）。 */
 export function applyBestiaryChip(
   f: BestiaryFilter,
   chip: 'kind' | 'boss' | 'unlocked' | 'unlockedNo' | 'tag',
@@ -376,7 +436,7 @@ export function applyBestiaryChip(
   return nf;
 }
 
-// ============ 掉落表展平（ItemDropBestiaryInfoElement 近似） ============
+// ============ 掉落表展平（ItemDropBestiaryInfoElement） ============
 
 export interface DropLine {
   item: number;
@@ -386,7 +446,7 @@ export interface DropLine {
   max: number;
   /** 条件名（Bestiary.ItemDropConditions.<name> 取文案） */
   cond: string | null;
-  /** 专家/大师分支标签 */
+  /** 专家/大师分支标签（世界难度门：CanShowItemDropInUI 语义） */
   tag: string | null;
 }
 
@@ -466,8 +526,12 @@ function walkDrop(rule: Rule, out: DropLine[], gate: number, tag: string | null,
   for (const ch of rule.chain ?? []) walkDrop(ch.rule, out, gate, tag, cond);
 }
 
-/** 展平某 NPC 的掉落规则树 → 展示行（去重 + 按掉率降序） */
-export function flattenDropsForNpc(npcId: number): DropLine[] {
+/** 展平某 NPC 的掉落规则树 → 展示行。
+ *  ★BJ506 两刀：①行序 = 规则注册序（原版逐规则一线，UIBestiaryInfoItemLine 无重排——
+ *  旧 chance 降序排序为自创面拆除）；②difficulty 门（0 经典/1 专家/2 大师）：
+ *  NotExpert/IsExpert/IsMasterMode 条件的 CanShowItemDropInUI 语义——专家/大师行仅
+ *  在对应世界档可见（ItemDropBestiaryInfoElement.ShouldShowItem :31-46） */
+export function flattenDropsForNpc(npcId: number, difficulty = 0): DropLine[] {
   const rules = dropRulesByNpc.get(npcId);
   if (!rules) return [];
   const out: DropLine[] = [];
@@ -479,14 +543,16 @@ export function flattenDropsForNpc(npcId: number): DropLine[] {
     seen.add(k);
     return true;
   });
-  deduped.sort((a, b) => (b.chance ?? -1) - (a.chance ?? -1) || a.item - b.item);
-  return deduped;
+  const gated = deduped.filter((d) =>
+    d.tag !== 'IsExpert' || difficulty >= 1);
+  return gated.filter((d) => d.tag !== 'IsMasterMode' || difficulty >= 2);
 }
 
+/** GetDropInfo 掉率文案（UIBestiaryInfoItemLine :77-101）："P"（=2 位），
+ *  <0.001 用 P4；恒 1 → "100%"（PrettifyPercentDisplay 习癖全保留） */
 export function dropRateText(chance: number): string {
-  const pct = chance * 100;
-  const s = pct >= 100 ? '100' : String(Math.round(pct * 100) / 100);
-  return `${s}%`;
+  if (chance === 1) return '100%';
+  return prettifyPercentDisplay(chance, chance < 0.001 ? 4 : 2);
 }
 
 function dropTagText(tag: string): string {
@@ -695,23 +761,28 @@ export function bestiaryPortraitOverlays(npcId: number): BestiaryPortraitOverlay
 
 // ============ 标签筛选注册表（Filters + UIBestiaryFilteringOptionsGrid） ============
 //  RegisterFilters（populator :493-503）注册序：ByUnlockState → ByBoss → ByRareCreature →
-//  CommonTags.GetCommonInfoElementsForFilters（:252-311，57 条 ByInfoElement）。
-//  ByUnlockState/ByBoss 由本仓 chip 行承载（同 Filters 语义），图标格从 ByRareCreature 起。
+//  CommonTags.GetCommonInfoElementsForFilters（:252-311，57 条 ByInfoElement）＝ 60 钮。
+//  ★BJ506：旧表 58 项缺 ByUnlockState/ByBoss（被挪去自创 chip 行）——原版它们就是
+//  图标格第 1/2 钮（Icon_Tags_Shadow 帧 Frame(16,5,14,3)=62 / (16,5,15,3)=63，
+//  Filters.cs:75-83/:139-147）；kind chip 行（全部/敌人/城镇/小动物）与"未解锁"为
+//  自创面，原版无此筛选项，UI 已拆除。
 
 export interface BestiaryFilterDef {
-  /** 筛选键：'rare' = Filters.ByRareCreature；其余 = 出没环境路径（Filters.ByInfoElement
-   *  的 `entry.Info.Contains(element)` 元素身份） */
+  /** 筛选键：'unlocked' = ByUnlockState；'boss' = ByBoss；'rare' = ByRareCreature；
+   *  其余 = 出没环境路径（ByInfoElement 的元素身份） */
   key: string;
   /** 悬停名/键名（FilterProviderInfoElement.GetDisplayNameKey / Filters.GetDisplayNameKey） */
   nameKey: string;
-  /** Icon_Tags_Shadow 帧号（16×5 帧表；FilterProviderInfoElement :24-29 X=frame%16,Y=frame/16）。
-   *  -1 = ByRareCreature 专图 Icon_Rank_Light（Filters.cs:105-116 单帧星形） */
+  /** Icon_Tags_Shadow 帧号（16×5 帧表；X=frame%16,Y=frame/16）。
+   *  -1 = ByRareCreature 专图 Icon_Rank_Light（Filters.cs:107-116 单帧星形） */
   frame: number;
 }
 
-/** 图标格筛选全集（ByRareCreature + 57 环境标签，注册序 1:1；帧号 = 提取表 priority
- *  字段，即 populator 各元素第 2 构造参数 filterIconFrame） */
+/** 筛选全集（Filters 注册序 1:1：ByUnlockState → ByBoss → ByRareCreature → 57 标签；
+ *  帧 62/63 = Icon_Tags_Shadow 第 4 行 14/15 列） */
 export const BESTIARY_FILTER_DEFS: BestiaryFilterDef[] = [
+  { key: 'unlocked', nameKey: 'BestiaryInfo.IfUnlocked', frame: 62 },
+  { key: 'boss', nameKey: 'BestiaryInfo.IsBoss', frame: 63 },
   { key: 'rare', nameKey: 'BestiaryInfo.IsRare', frame: -1 },
   ...(((spawnData as unknown as SpawnJson).commonFilters) as string[]).map((p) => ({
     key: p,
@@ -720,13 +791,15 @@ export const BESTIARY_FILTER_DEFS: BestiaryFilterDef[] = [
   })),
 ];
 
-/** 筛选可用性（UIBestiaryFilteringOptionsGrid.GetIsFilterAvailableForEntries :183-198）：
- *  ForcedDisplay 为 null 的筛选 = 存在【已解锁】命中条目才可用（不可用钮在原版
- *  灰显 Icon_Tags_Shadow 帧(0,4) 且移出 ActiveFilters） */
+/** 筛选可用性（UIBestiaryFilteringOptionsGrid.GetIsFilterAvailableForEntries :193-208）：
+ *  ForcedDisplay 有值直取（ByUnlockState/BySearch true = 恒可用）；null = 存在【已解锁】
+ *  命中条目才可用（不可用钮在原版灰显 Icon_Tags_Shadow 帧(0,4) 且移出 ActiveFilters） */
 export function bestiaryFilterAvailable(key: string, rows: BestiaryRow[]): boolean {
+  if (key === 'unlocked') return true;   // Filters.ByUnlockState.ForcedDisplay=true（Filters.cs:62）
   for (const r of rows) {
     if (r.state === UnlockState.NotKnown) continue;
     if (key === 'rare') { if (isRareSpawnForBestiary(r.npcId)) return true; continue; }
+    if (key === 'boss') { if (isBossCredit(r.entry.creditId)) return true; continue; }
     if (SPAWN_BY_NPC[String(r.npcId)]?.includes(key)) return true;
   }
   return false;
@@ -835,85 +908,232 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
   im.src = `sprites/${file}`;
 }
 
+// ---- 面板 chrome 九宫染色（UIPanel/Stat_Panel/GroupOptionButton/ColorBar 贴图 × 色）----
+//  CharCreation tintedDataUrl 同法：贴图乘色 → dataURL → CSS border-image 九宫。
+type Img = HTMLImageElement;
+const bstChromeCache = new Map<string, string>();
+function bstTintDataUrl(img: Img, r: number, g: number, b: number, aMul = 1): string {
+  const key = `${img.src}|${r},${g},${b},${aMul}`;
+  const hit = bstChromeCache.get(key);
+  if (hit) return hit;
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(img, 0, 0);
+  const d = c.getImageData(0, 0, cv.width, cv.height);
+  const dd = d.data;
+  for (let i = 0; i < dd.length; i += 4) {
+    dd[i] = Math.min(255, Math.round(dd[i] * (r / 255)));
+    dd[i + 1] = Math.min(255, Math.round(dd[i + 1] * (g / 255)));
+    dd[i + 2] = Math.min(255, Math.round(dd[i + 2] * (b / 255)));
+    dd[i + 3] = Math.min(255, Math.round(dd[i + 3] * aMul));
+  }
+  c.putImageData(d, 0, 0);
+  const url = cv.toDataURL();
+  bstChromeCache.set(key, url);
+  return url;
+}
+function bstLoadImg(src: string): Promise<Img> {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
 const CSS = `
-.sw-bst { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
-  width:min(1040px,96vw); height:min(740px,92vh); z-index:30; cursor:auto;
-  display:flex; flex-direction:column;
-  background:rgba(33,43,79,0.9); border:2px solid #7d92d6; border-radius:6px;
-  color:#e8ecf8; font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;
-  box-shadow:0 8px 40px rgba(0,0,0,.6); }
-.sw-bst-top { display:flex; align-items:center; gap:6px; padding:8px 10px 6px; flex:none; }
-.sw-bst-nav { width:30px; height:26px; flex:none; padding:0; margin:0; font-size:13px;
-  background:#3a4680; color:#e8e8f4; border:1px solid #7d92d6; border-radius:4px; cursor:pointer; }
-.sw-bst-nav:hover { background:#4a5aa0; }
-.sw-bst-range { min-width:118px; text-align:center; background:rgb(35,40,83); color:#cfd6f2;
-  border-radius:4px; padding:4px 8px; font-size:12px; flex:none; }
-.sw-bst-sel, .sw-bst-search { background:#232c52; color:#e8e8f4; border:1px solid #3a4680;
-  border-radius:4px; padding:4px 6px; font-family:inherit; font-size:12px; }
-.sw-bst-search { width:110px; flex:none; }
-.sw-bst-chips { display:flex; gap:4px; flex:1; flex-wrap:wrap; }
-.sw-bst-chip { padding:4px 8px; font-size:11px; background:#232c52; border:1px solid #3a4680;
-  border-radius:4px; cursor:pointer; color:#cfd6f2; font-family:inherit; }
-.sw-bst-chip.active { background:#5a6ac0; color:#fff; outline:1px solid #ffd76e; }
-.sw-bst-back { flex:none; width:auto; height:26px; padding:5px 14px; font-size:12px;
-  white-space:nowrap; }
-/* 标签筛选钮+计数（UIBestiaryTest.AddSortAndFilterButtons :261-283：Button_Filtering
- *  114×28 图标钮 + 右侧 _filteringText = BestiaryInfo.Filters 计数文案） */
-.sw-bst-fbtn { flex:none; width:30px; height:26px; padding:3px; background:#3a4680;
-  border:1px solid #7d92d6; border-radius:4px; cursor:pointer; }
-.sw-bst-fbtn:hover { background:#4a5aa0; }
-.sw-bst-fbtn img { width:100%; height:100%; image-rendering:pixelated; pointer-events:none; }
-.sw-bst-ftext { flex:none; font-size:11px; color:#cfd6f2; max-width:96px; overflow:hidden;
-  white-space:nowrap; text-overflow:ellipsis; }
-/* 图标格弹层（UIBestiaryFilteringOptionsGrid：30² 图标在 32² 钮内/perRow 12/间距 2/
- * 容器内边距 6；激活钮 SetColor(152,175,235)、未激活 InventoryDefaultColor(63,65,151)×0.7） */
-.sw-bst-fgrid { position:absolute; right:10px; top:42px; z-index:5; display:grid;
-  gap:2px; padding:6px; background:rgba(73,94,171,0.9); border:1px solid rgba(89,116,213,0.9);
-  border-radius:4px; grid-template-columns:repeat(12, 32px); }
-.sw-bst-fcell { width:32px; height:32px; padding:1px; border:none; border-radius:2px;
-  background:rgb(63,65,151); opacity:0.7; cursor:pointer; }
-.sw-bst-fcell:hover { opacity:1; }
-.sw-bst-fcell.active { background:rgb(152,175,235); opacity:1; }
-.sw-bst-fcell.dim { cursor:default; opacity:0.35; background:transparent; }
-.sw-bst-fcell img { width:30px; height:30px; object-fit:none; object-position:0 0;
-  image-rendering:pixelated; pointer-events:none; }
-.sw-bst-main { flex:1; display:flex; gap:8px; padding:0 10px; min-height:0; }
-.sw-bst-gridwrap { flex:1; min-width:0; position:relative; overflow:hidden; }
-.sw-bst-grid { display:grid; }
-.sw-bst-cell { width:72px; height:72px; position:relative; flex:none;
-  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
-  cursor:pointer; background:rgba(20,25,50,0.85); border-radius:3px; }
-.sw-bst-cell:hover { background:rgba(42,52,100,1); outline:1px solid #8fa0e0; }
-.sw-bst-cell.sel { outline:2px solid #ffd76e; }
-.sw-bst-cell canvas { width:44px; height:44px; image-rendering:pixelated; }
-/* R24：锁定格改画 Icon_Locked ×0.15（drawLockedIcon）——剪影滤镜退役（泄露轮廓） */
-.sw-bst-name { font-size:10px; line-height:1.1; max-width:68px; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; color:#cfd6f2; }
-.sw-bst-cell.sw-bst-lock .sw-bst-name { color:#586088; }
-.sw-bst-kills { position:absolute; right:3px; top:2px; font-size:9px; color:#ffe8a0; }
-.sw-bst-empty { position:absolute; inset:0; display:flex; align-items:center;
-  justify-content:center; color:#8a90b8; font-size:13px; }
-.sw-bst-info { width:296px; flex:none; overflow-y:auto; background:rgba(20,25,50,0.8);
-  border:1px solid #3a4680; border-radius:4px; padding:10px; font-size:12px; }
-.sw-bst-info h3 { margin:0 0 4px; font-size:15px; color:#ffe8a0; font-weight:normal;
-  text-shadow:1px 1px 0 #000; word-break:break-all; }
-.sw-bst-tags { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:6px; }
-.sw-bst-tag { font-size:10px; padding:1px 6px; border-radius:3px; background:#3a4680; color:#cfd6f2; }
-.sw-bst-tag.boss { background:#7a3a3a; }
-.sw-bst-info .row { display:flex; justify-content:space-between; gap:8px;
-  padding:2px 0; border-bottom:1px solid rgba(90,106,160,0.25); }
-.sw-bst-info .row span:first-child { color:#8a90b8; }
-.sw-bst-info .row span:last-child { color:#e8ecf8; }
-.sw-bst-sec { margin:8px 0 4px; color:#ffe8a0; font-size:12px; }
-.sw-bst-drop { display:flex; align-items:center; gap:6px; padding:2px 0; }
-.sw-bst-drop canvas { width:22px; height:22px; flex:none; image-rendering:pixelated; }
-.sw-bst-drop .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sw-bst-drop .rt { color:#9adf9a; flex:none; }
-.sw-bst-drop .cd { display:block; font-size:10px; color:#8a90b8; }
-.sw-bst-bottom { display:flex; align-items:center; gap:10px; padding:6px 10px 10px; flex:none; }
-.sw-bst-pct { flex:none; font-size:12px; color:#cfd6f2; }
-.sw-bst-bar { flex:1; height:15px; background:rgb(35,43,81); border-radius:3px; overflow:hidden; }
-.sw-bst-bar i { display:block; height:100%; background:rgb(51,137,255); }
+.sw-bst { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:30; cursor:auto;
+  background:rgba(0,0,0,0.6); color:#fff; font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif; }
+.sw-bst * { box-sizing:border-box; }
+/* 外容器（BuildPage :72-80）：宽 87.5% max900 min700 / Top180 / 高 100%-220 / 水平居中 */
+.sw-bst-outer { position:absolute; left:50%; transform:translateX(-50%); top:180px;
+  width:clamp(700px, 87.5vw, 900px); height:calc(100vh - 220px); }
+/* 主面板（UIPanel 高-90：底 (33,43,79)*0.8 黑框，角 12 条 4） */
+.sw-bst-panel { position:absolute; left:0; top:0; right:0; bottom:90px; }
+.sw-bst-panel::before, .sw-bst-panel::after { content:''; position:absolute; inset:0; pointer-events:none;
+  border:12px solid transparent; border-image:var(--bst-pbg) 12 fill stretch; }
+.sw-bst-panel::after { border-image:var(--bst-pborder) 12 fill stretch; }
+/* 顶栏 24px（uIElement2 :89-97） */
+.sw-bst-top { position:absolute; left:12px; right:12px; top:8px; height:24px; }
+.sw-bst-imgbtn { position:absolute; top:-2px; width:28px; height:28px; padding:0; margin:0;
+  border:none; background:transparent; background-repeat:no-repeat; background-size:28px 28px;
+  image-rendering:pixelated; cursor:pointer; }
+.sw-bst-imgbtn::after { content:''; position:absolute; inset:0; opacity:0; pointer-events:none;
+  background:var(--bst-btnborder); background-size:28px 28px; image-rendering:pixelated; }
+.sw-bst-imgbtn:hover::after { opacity:1; }
+.sw-bst-navback { left:0; background-image:var(--bst-btnback); }
+.sw-bst-navfwd { left:29px; background-image:var(--bst-btnfwd); }
+/* 范围面板（AddBackAndForwardButtons :240-257）：135 宽 (35,40,83)，文本 0.8 居中 */
+.sw-bst-range { position:absolute; left:60px; top:0; width:135px; height:24px;
+  border:12px solid transparent; border-image:var(--bst-dark) 12 fill stretch;
+  display:flex; align-items:center; justify-content:center; font-size:12px; color:#fff; }
+/* 排序/筛选宽钮（AddSortAndFilterButtons :260-303）：114×28 贴图 + Wide_Border 悬停 + 左 34 文字 */
+.sw-bst-widebtn { position:absolute; top:-2px; width:114px; height:28px; padding:0; margin:0;
+  border:none; background:transparent; background-repeat:no-repeat; background-size:114px 28px;
+  image-rendering:pixelated; cursor:pointer; color:#fff; }
+.sw-bst-widebtn::after { content:''; position:absolute; inset:0; opacity:0; pointer-events:none;
+  background:var(--bst-wideborder); background-size:114px 28px; image-rendering:pixelated; }
+.sw-bst-widebtn:hover::after { opacity:1; }
+.sw-bst-sortbtn { left:auto; right:364px; background-image:var(--bst-btnsort); }
+.sw-bst-filterbtn { right:247px; background-image:var(--bst-btnfilter); }
+.sw-bst-widebtn span { position:absolute; left:34px; top:2px; height:24px; display:flex;
+  align-items:center; font-size:12px; white-space:nowrap; pointer-events:none;
+  text-shadow:1px 1px 0 #3f3f3f; max-width:78px; overflow:hidden; }
+/* 搜索栏（UIWrappedSearchBar :104-113）：宽 230 右贴齐 = [22² 钮][框面板] */
+.sw-bst-search { position:absolute; right:0; top:0; width:230px; height:24px; }
+.sw-bst-searchbtn { position:absolute; right:208px; top:1px; width:22px; height:22px; padding:0;
+  border:none; background:var(--bst-btnsearch); background-size:22px 22px; background-repeat:no-repeat;
+  image-rendering:pixelated; cursor:pointer; }
+.sw-bst-searchbtn::after { content:''; position:absolute; inset:0; opacity:0; pointer-events:none;
+  background:var(--bst-btnsearchborder); background-size:22px 22px; image-rendering:pixelated; }
+.sw-bst-searchbtn:hover::after { opacity:1; }
+.sw-bst-searchbox { position:absolute; right:0; top:0; width:206px; height:24px;
+  border:12px solid transparent; border-image:var(--bst-dark) 12 fill stretch;
+  display:flex; align-items:center; }
+.sw-bst-searchbox.focus { border-image:var(--bst-darkgold) 12 fill stretch; }
+.sw-bst-searchbox input { flex:1; min-width:0; background:transparent; border:none; outline:none;
+  color:#fff; font-family:inherit; font-size:12px; padding:0 0 0 2px; }
+.sw-bst-searchbox input::placeholder { color:#999; }
+.sw-bst-searchcancel { flex:none; width:24px; height:24px; padding:0; border:none; cursor:pointer;
+  background:var(--bst-searchcancel) center/16px 16px no-repeat; image-rendering:pixelated;
+  display:none; }
+.sw-bst-searchcancel.on { display:block; }
+/* 主区（uIElement3 :114-123）：上 24+6 下 20 之间；网格区宽 -242 高 -4；详情 230 右贴 */
+.sw-bst-body { position:absolute; left:12px; right:12px; top:38px; bottom:20px; }
+.sw-bst-gridwrap { position:absolute; left:0; top:0; bottom:4px; right:242px; }
+.sw-bst-grid { position:absolute; inset:0; }
+.sw-bst-cell { position:absolute; width:72px; height:72px; transform:translate(-50%,-50%); cursor:pointer; }
+.sw-bst-slotin { position:absolute; left:2px; top:2px; width:68px; height:68px; overflow:hidden; }
+.sw-bst-lyr { position:absolute; left:-1px; top:-1px; width:70px; height:70px; image-rendering:pixelated; pointer-events:none; }
+.sw-bst-lyr-back { z-index:1; }
+.sw-bst-ico { position:absolute; left:0; top:0; width:68px; height:68px; z-index:2; }
+.sw-bst-lyr-ov { z-index:3; opacity:0.6; }
+.sw-bst-lyr-front { z-index:4; }
+.sw-bst-lyr-glow { z-index:5; display:none; }
+.sw-bst-cell:hover .sw-bst-lyr-ov { display:none; }
+.sw-bst-cell:hover .sw-bst-lyr-glow { display:block; }
+/* 编号（TryGettingDisplayIndex → UIText 0.9 @ Top10 Left10 :61-71）：左上白字黑描边 */
+.sw-bst-idx { position:absolute; left:10px; top:10px; font-size:12px; color:#fff; z-index:6;
+  pointer-events:none; text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000; }
+/* 详情栏（UIBestiaryEntryInfoPage :28-57）：230 宽，UIPanel chrome (73,94,171)/(89,116,213)，
+ * 高 +12 下垂；列表 padding 2/上下 4、项距 4；滚轮 = 本栏滚动 */
+.sw-bst-info { position:absolute; right:0; top:0; bottom:-12px; width:230px; overflow-y:auto;
+  overflow-x:hidden; padding:4px 2px; }
+.sw-bst-info::-webkit-scrollbar { width:12px; }
+.sw-bst-info::-webkit-scrollbar-track { background:transparent; }
+.sw-bst-info::-webkit-scrollbar-thumb { background:var(--bst-scrollbar) 50% 50%/12px 20px no-repeat; }
+.sw-bst-info::before { content:''; position:absolute; inset:0; pointer-events:none; z-index:9;
+  border:12px solid transparent; border-image:var(--bst-infobg) 12 fill stretch; }
+.sw-bst-info::after { content:''; position:absolute; inset:0; pointer-events:none; z-index:9;
+  border:12px solid transparent; border-image:var(--bst-infoborder) 12 fill stretch; }
+.sw-bst-irow { position:relative; margin:0 2px 4px; }
+/* Nameplate（NamePlateInfoElement :19-31）：24 高行居中 */
+.sw-bst-nameplate { height:24px; display:flex; align-items:center; justify-content:center;
+  font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; word-break:break-all; }
+/* Portrait（NPCPortraitInfoElement :21-96）：193×112 左 4；内盒 189×108 OverflowHidden；
+ * 星面板 Stat_Panel 56² @(10,6)，5×Icon_Rank 14²（亮 Icon_Rank_Light/暗 Icon_Rank_Dim） */
+.sw-bst-portrait { position:relative; width:197px; height:112px; }
+.sw-bst-portraitin { position:absolute; left:4px; top:2px; width:193px; height:112px; }
+.sw-bst-portraitbox { position:absolute; left:2px; top:2px; width:189px; height:108px; overflow:hidden; }
+.sw-bst-portraitbox canvas { position:absolute; left:0; top:0; image-rendering:pixelated; }
+.sw-bst-pfront { position:absolute; left:0; top:0; width:193px; height:112px; image-rendering:pixelated;
+  pointer-events:none; z-index:2; }
+.sw-bst-stars { position:absolute; left:10px; top:6px; width:56px; height:56px; z-index:3;
+  border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
+.sw-bst-stars img { position:absolute; width:14px; height:14px; image-rendering:pixelated; }
+/* Stat_Panel 九宫块（角 12 条 7；底 (43,56,101)）：风味/属性/击杀/出没/掉落通用底 */
+.sw-bst-spblock { position:relative; margin:0 7px 4px 8px; padding:2px 5px 2px 4px;
+  border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
+.sw-bst-flavor { font-size:11px; line-height:1.5; color:#fff; word-break:break-all; }
+/* 属性卡（NPCStatsReportInfoElement :65-259）：图标 96×31 @(3,0)(102,0)(3,35)(102,35) */
+.sw-bst-stats { position:relative; height:70px; margin:0 2px 4px; }
+.sw-bst-stats.hascoins { height:108px; }
+.sw-bst-stat { position:absolute; width:96px; height:31px; image-rendering:pixelated; }
+.sw-bst-stat span { position:absolute; right:7px; top:0; height:31px; display:flex; align-items:center;
+  font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
+.sw-bst-stat-hp { left:3px; top:0; background:var(--bst-stathp); }
+.sw-bst-stat-kb { left:102px; top:0; background:var(--bst-statkb); }
+.sw-bst-stat-atk { left:3px; top:35px; background:var(--bst-statatk); }
+.sw-bst-stat-def { left:102px; top:35px; background:var(--bst-statdef); }
+.sw-bst-statcoin { position:absolute; top:78px; width:47px; height:31px; image-rendering:pixelated; }
+.sw-bst-statcoin span { position:absolute; right:3px; top:0; height:31px; display:flex; align-items:center;
+  font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
+/* 击杀计数（NPCKillCounterInfoElement :23-89）：Stat_Panel 块 30 高右贴，旗图+数右对 */
+.sw-bst-kills { position:relative; height:30px; margin:0 2px 4px 8px;
+  border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
+.sw-bst-kills canvas { position:absolute; left:0; top:2px; width:22px; height:22px; image-rendering:pixelated; }
+.sw-bst-kills span { position:absolute; right:5px; top:0; height:30px; display:flex; align-items:center;
+  font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
+/* 出没环境行（FilterProviderInfoElement.ProvideUIElement :42-77）：Stat_Panel 块 34 高，
+ * 图标 30² 左 5、文字 padding-left 38 scale0.8，悬停 MouseText 名称 */
+.sw-bst-cond { position:relative; height:34px; margin:0 7px 4px 5px;
+  border:12px solid transparent; border-image:var(--bst-statpanel) 12 fill stretch; }
+.sw-bst-cond img { position:absolute; left:5px; top:1px; width:30px; height:30px; image-rendering:pixelated; }
+.sw-bst-cond span { position:absolute; left:38px; right:5px; top:0; height:34px; display:flex;
+  align-items:center; font-size:11px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+/* 掉落行（UIBestiaryInfoItemLine :24-56）：32 高 UIPanel((89,116,213) 框) 图标左 4 + 右对掉率 */
+.sw-bst-drop { position:relative; height:32px; margin:0 7px 4px 5px;
+  border:12px solid transparent; border-image:var(--bst-dropblock) 12 fill stretch; }
+.sw-bst-drop:hover { border-image:var(--bst-drophover) 12 fill stretch; }
+.sw-bst-drop canvas { position:absolute; left:6px; top:4px; width:24px; height:24px; image-rendering:pixelated; }
+.sw-bst-drop .rt { position:absolute; right:10px; top:-4px; height:32px; display:flex; align-items:center;
+  font-size:12px; color:#fff; text-shadow:1px 1px 0 #3f3f3f; }
+.sw-bst-drop .lock { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+.sw-bst-drop .lock img { width:24px; height:24px; image-rendering:pixelated; opacity:0.55; }
+/* 分隔线（UIHorizontalSeparator：Separator1 6×4 × (89,116,213)*0.9） */
+.sw-bst-sep { height:4px; margin:0 2px 4px; background:var(--bst-sep); background-size:100% 4px; }
+/* 底栏（FillProgressBottomBar :159-181）：ColorBar 滑条 15 高 + 文本 0.8 叠左下 */
+.sw-bst-bottom { position:absolute; left:12px; right:12px; bottom:8px; height:20px; }
+.sw-bst-bar { position:absolute; left:0; right:0; bottom:0; height:15px;
+  border:4px solid transparent; border-image:var(--bst-colorbar) 4 4 4 5 fill stretch; }
+.sw-bst-bar i { position:absolute; left:5px; right:4px; top:4px; bottom:4px; background:rgb(35,43,81); }
+.sw-bst-bar i b { position:absolute; left:0; top:0; bottom:0; width:0%; background:rgb(51,137,255); }
+.sw-bst-pct { position:absolute; left:0; bottom:0; font-size:11px; color:#fff; pointer-events:none;
+  text-shadow:1px 1px 0 #3f3f3f; }
+/* 出口钮（MakeExitButton :368-383）：UITextPanel UI.Back 50%×50 底部居中（Top -25），
+ * 悬停 FadedMouseOver：底 (73,94,171) 框 (255,231,69) */
+.sw-bst-exit { position:absolute; left:50%; transform:translateX(-50%); bottom:25px;
+  width:calc(50% - 10px); height:50px; padding:0; margin:0; cursor:pointer; color:#fff;
+  font-family:inherit; font-size:14px;
+  border:12px solid transparent; border-image:var(--bst-exitbg) 12 fill stretch; }
+.sw-bst-exit:hover { border-image:var(--bst-exithover) 12 fill stretch; }
+/* 弹层（OpenOrCloseSorting/FilteringGrid :398-420）：bestiarySpace 整域遮罩 (35,40,83)*0.5 */
+.sw-bst-pop { position:absolute; inset:0; background:rgba(35,40,83,0.5); z-index:10; }
+.sw-bst-pop-panel { position:absolute; top:0; right:118px; width:126px;
+  border:12px solid transparent; border-image:var(--bst-popbg) 12 fill stretch; }
+.sw-bst-pop-filter { right:0; width:418px; }
+.sw-bst-opt { position:relative; display:block; width:114px; height:26px; padding:0; margin:0 0 0 6px;
+  border:none; cursor:pointer; color:#fff; font-family:inherit; font-size:11px;
+  background:transparent; }
+.sw-bst-opt .bg { position:absolute; inset:0; border:10px solid transparent;
+  border-image:var(--bst-optun) 10 fill stretch; }
+.sw-bst-opt.sel .bg { border-image:var(--bst-optsel) 10 fill stretch; }
+.sw-bst-opt.dim .bg { border-image:var(--bst-optdim) 10 fill stretch; }
+.sw-bst-opt .hborder { position:absolute; inset:0; opacity:0; pointer-events:none;
+  border:10px solid transparent; border-image:var(--bst-opthover) 10 fill stretch; }
+.sw-bst-opt:hover .hborder { opacity:1; }
+.sw-bst-opt span { position:absolute; inset:0 5px; display:flex; align-items:center;
+  justify-content:center; pointer-events:none; white-space:nowrap; overflow:hidden; }
+.sw-bst-fcell { position:relative; width:32px; height:32px; padding:0; margin:0; border:none; cursor:pointer;
+  background:transparent; }
+.sw-bst-fcell .bg { position:absolute; inset:0; border:10px solid transparent;
+  border-image:var(--bst-optun) 10 fill stretch; }
+.sw-bst-fcell.sel .bg { border-image:var(--bst-optsel) 10 fill stretch; }
+.sw-bst-fcell.dim .bg { border-image:var(--bst-optdim) 10 fill stretch; }
+.sw-bst-fcell.dim { cursor:default; }
+.sw-bst-fcell .hborder { position:absolute; inset:0; opacity:0; pointer-events:none;
+  border:10px solid transparent; border-image:var(--bst-opthover) 10 fill stretch; }
+.sw-bst-fcell:not(.dim):hover .hborder { opacity:1; }
+.sw-bst-fcell img { position:absolute; left:1px; top:1px; width:30px; height:30px; image-rendering:pixelated;
+  pointer-events:none; }
+.sw-bst-fcell.dim img { opacity:0.2; }
+/* MouseText 替代悬浮提示（Main.instance.MouseText 名字/完成度/属性名） */
+.sw-bst-tip { position:fixed; z-index:99; pointer-events:none; font-size:12px; color:#fff;
+  text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;
+  white-space:nowrap; display:none; }
 `;
 
 export interface BestiaryPanelFlow {
@@ -921,26 +1141,88 @@ export interface BestiaryPanelFlow {
   atlas?: SpriteAtlas | null;
   /** 世界恶取向（BestiaryPortraitBackgroundBasedOnWorldEvil：crimson=true 取猩红路） */
   isCrimson?(): boolean;
+  /** 世界难度（掉落行 CanShowItemDropInUI 门：专家/大师行按档显隐） */
+  isExpert?(): boolean;
+  isMaster?(): boolean;
   onBack(): void;
 }
 
+const UI_BASE = 'sprites/vanilla-ui/';
+const VA_BASE = 'sprites/vanilla/';
+
+/** 面板 chrome 染色变量表（九宫贴图 × 原版色；逐项 = [变量名, 源图, 乘色 rgb, α乘]）。
+ *  色源：主面板 (33,43,79)*0.8（UIBestiaryTest :85）；范围/搜索框 (35,40,83)（:247-248）；
+ *  详情 (73,94,171)/(89,116,213)（:33-34）；Stat_Panel 块底 (43,56,101)（FlavorText :22）；
+ *  分隔线 (89,116,213)*0.9（:156）；选项钮 选中 (152,175,235)/未选 InventoryDefaultColor
+ *  (63,65,151)*0.7（SortingOptionsGrid :102-106）；不可用 Lerp(Black,un,0.5)*0.7；
+ *  进度条填充 (51,137,255)/底 (35,43,81)（:174-175）；滑条框贴图 vanilla/ColorBar；
+ *  出口钮 (63,82,151)*0.8 → 悬停 (73,94,171)/(255,231,69)（FadedMouseOver :464-475） */
+const CHROME_DEFS: Array<[string, string, string, number[], number?]> = [
+  ['--bst-pbg', 'UI_PanelBackground', UI_BASE, [26, 34, 63], 0.8],
+  ['--bst-pborder', 'UI_PanelBorder', UI_BASE, [0, 0, 0]],
+  ['--bst-infobg', 'UI_PanelBackground', UI_BASE, [73, 94, 171]],
+  ['--bst-infoborder', 'UI_PanelBorder', UI_BASE, [89, 116, 213]],
+  ['--bst-dark', 'UI_PanelBackground', UI_BASE, [35, 40, 83]],
+  ['--bst-darkgold', 'UI_PanelBackground', UI_BASE, [255, 231, 69]],
+  ['--bst-statpanel', 'UI_Bestiary_Stat_Panel', UI_BASE, [43, 56, 101]],
+  ['--bst-dropblock', 'UI_PanelBackground', UI_BASE, [63, 82, 151], 0.7],
+  ['--bst-drophover', 'UI_PanelBorder', UI_BASE, [255, 231, 69]],
+  ['--bst-sep', 'UI_CharCreation_Separator1', UI_BASE, [80, 104, 191], 0.9],
+  ['--bst-optsel', 'UI_CharCreation_PanelGrayscale', UI_BASE, [152, 175, 235]],
+  ['--bst-optun', 'UI_CharCreation_PanelGrayscale', UI_BASE, [44, 45, 105]],
+  ['--bst-optdim', 'UI_CharCreation_PanelGrayscale', UI_BASE, [22, 22, 52]],
+  ['--bst-opthover', 'UI_CharCreation_CategoryPanelBorder', UI_BASE, [255, 255, 255]],
+  ['--bst-exitbg', 'UI_PanelBackground', UI_BASE, [44, 57, 105], 0.8],
+  ['--bst-exithover', 'UI_PanelBackground', UI_BASE, [73, 94, 171]],
+  ['--bst-popbg', 'UI_PanelBackground', UI_BASE, [65, 84, 153], 0.9],
+  ['--bst-popborder', 'UI_PanelBorder', UI_BASE, [80, 104, 191], 0.9],
+  ['--bst-stathp', 'UI_Bestiary_Stat_HP', UI_BASE, [255, 255, 255]],
+  ['--bst-statkb', 'UI_Bestiary_Stat_Knockback', UI_BASE, [255, 255, 255]],
+  ['--bst-statatk', 'UI_Bestiary_Stat_Attack', UI_BASE, [255, 255, 255]],
+  ['--bst-statdef', 'UI_Bestiary_Stat_Defense', UI_BASE, [255, 255, 255]],
+  ['--bst-colorbar', 'ColorBar', VA_BASE, [255, 255, 255]],
+  ['--bst-scrollbar', 'UI_Scrollbar', UI_BASE, [255, 255, 255]],
+];
+/** <img>/background-image 直贴（不染色） */
+const SPRITE_VARS: Array<[string, string, string]> = [
+  ['--bst-btnback', 'UI_Bestiary_Button_Back', UI_BASE],
+  ['--bst-btnfwd', 'UI_Bestiary_Button_Forward', UI_BASE],
+  ['--bst-btnborder', 'UI_Bestiary_Button_Border', UI_BASE],
+  ['--bst-btnsort', 'UI_Bestiary_Button_Sorting', UI_BASE],
+  ['--bst-btnfilter', 'UI_Bestiary_Button_Filtering', UI_BASE],
+  ['--bst-wideborder', 'UI_Bestiary_Button_Wide_Border', UI_BASE],
+  ['--bst-btnsearch', 'UI_Bestiary_Button_Search', UI_BASE],
+  ['--bst-btnsearchborder', 'UI_Bestiary_Button_Search_Border', UI_BASE],
+  ['--bst-searchcancel', 'UI_SearchCancel', UI_BASE],
+  ['--bst-ranklight', 'UI_Bestiary_Icon_Rank_Light', UI_BASE],
+  ['--bst-rankdim', 'UI_Bestiary_Icon_Rank_Dim', UI_BASE],
+];
+
 export class BestiaryPanel {
   private panel: HTMLElement;
+  private outer!: HTMLElement;
   private gridWrap!: HTMLElement;
   private gridEl!: HTMLElement;
   private rangeEl!: HTMLElement;
   private infoEl!: HTMLElement;
   private pctEl!: HTMLElement;
-  private barEl!: HTMLElement;
+  private barFillEl!: HTMLElement;
   private searchEl!: HTMLInputElement;
-  private chipsEl!: HTMLElement;
+  private sortTextEl!: HTMLElement;
+  private filterTextEl!: HTMLElement;
   private ro: ResizeObserver | null = null;
   /** RO 稳定居抖定时器(close 时清,防面板关后补刷) */
   private roTimer: ReturnType<typeof setTimeout> | 0 = 0;
   /** 关闭键走键位表（Inventory 动作,与 main.ts 主链 isBound('Inventory') 同源;
    *  原版图鉴在物品栏 UI 链内,随 Inventory 键开合——重绑后跟随）。capture 阶段
-   *  拦截防 main.ts 暂停键二次消费。 */
+   *  拦截防 main.ts 暂停键二次消费。搜索框聚焦时首按 Esc 仅失焦。 */
   private escHandler = (e: KeyboardEvent) => {
+    if (document.activeElement === this.searchEl) {
+      this.searchEl.blur();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      return;
+    }
     if (isBound('Inventory', e.code)) {
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -948,26 +1230,19 @@ export class BestiaryPanel {
     }
   };
   private filter: BestiaryFilter = { ...DEFAULT_BESTIARY_FILTER, tags: [] };
+  /** 排序步 = EntrySorter._prioritizedStep（int 缺省 0 = Steps[0] = ByUnlockState） */
   private sortKey: BestiarySortKey = 'unlocks';
+  /** 弹层当前高亮（_currentSelected，-1 = 无）；再点同项回退默认步 0（_defaultStepIndex） */
+  private sortSelected = -1;
   private offset = 0;
   private perPage = 40;
   private working: BestiaryRow[] = [];
   private selected: BestiaryRow | null = null;
-  private sortSel: HTMLSelectElement | null = null;
-  /** 滚轮换页（UIBestiaryEntryGrid 同款交互）：下滚下一页/上滚上一页。
-   *  passive:false + preventDefault——面板打开时吞掉滚轮防页面背后滚动。
-   *  ★阈值门(2026-08-13,用户报"滚动翻两页就崩"):trackpad 惯性一滚=几十个
-   *  wheel 事件,每个全量 refresh 曾致贴图解码风暴;≥40 才翻页+refresh 已 rAF 合并 */
-  private wheelAcc = 0;
-  private wheelHandler = (e: WheelEvent) => {
-    if (e.deltaY === 0) return;
-    e.preventDefault();
-    this.wheelAcc += e.deltaY;
-    if (Math.abs(this.wheelAcc) < 40) return;
-    const dir = this.wheelAcc > 0 ? 1 : -1;
-    this.wheelAcc = 0;
-    this.page(dir);
-  };
+  /** 弹层（挂 gridWrap = _bestiarySpace；互斥开合 :398-420） */
+  private sortPopEl: HTMLElement | null = null;
+  private filterPopEl: HTMLElement | null = null;
+  /** MouseText 悬浮提示 */
+  private tipEl: HTMLElement | null = null;
 
   constructor(private parent: HTMLElement, private flow: BestiaryPanelFlow) {
     if (!document.getElementById('sw-bst-style')) {
@@ -979,57 +1254,88 @@ export class BestiaryPanel {
     this.panel = document.createElement('div');
     this.panel.className = 'sw-bst';
     this.panel.innerHTML = `
-      <div class="sw-bst-top">
-        <button class="sw-bst-nav" data-nav="-1">◀</button>
-        <button class="sw-bst-nav" data-nav="1">▶</button>
-        <div class="sw-bst-range">0-0 (0)</div>
-        <select class="sw-bst-sel" data-sort></select>
-        <div class="sw-bst-chips"></div>
-        <button class="sw-bst-fbtn" data-filter title=""><img alt="" src="sprites/vanilla-ui/UI_Bestiary_Button_Filtering.png" /></button>
-        <div class="sw-bst-ftext" data-filtertext></div>
-        <input class="sw-bst-search" type="text" placeholder="${Lang.text('Mods.SandboxWorld.Bestiary.Search')}" data-search />
-        <button class="sw-bst-nav sw-bst-back" data-close></button>
-      </div>
-      <div class="sw-bst-main">
-        <div class="sw-bst-gridwrap"><div class="sw-bst-grid"></div><div class="sw-bst-empty" hidden></div></div>
-        <div class="sw-bst-info"></div>
-      </div>
-      <div class="sw-bst-bottom">
-        <div class="sw-bst-pct"></div>
-        <div class="sw-bst-bar"><i style="width:0%"></i></div>
+      <div class="sw-bst-outer">
+        <div class="sw-bst-panel">
+          <div class="sw-bst-top">
+            <button class="sw-bst-imgbtn sw-bst-navback" data-nav="-1" title=""></button>
+            <button class="sw-bst-imgbtn sw-bst-navfwd" data-nav="1" title=""></button>
+            <div class="sw-bst-range">0-0 (0)</div>
+            <button class="sw-bst-widebtn sw-bst-sortbtn" data-sortbtn><span data-sorttext></span></button>
+            <button class="sw-bst-widebtn sw-bst-filterbtn" data-filterbtn><span data-filtertext></span></button>
+            <div class="sw-bst-search">
+              <button class="sw-bst-searchbtn" data-searchbtn title=""></button>
+              <div class="sw-bst-searchbox" data-searchbox>
+                <input type="text" data-search maxlength="50" />
+                <button class="sw-bst-searchcancel" data-searchcancel title=""></button>
+              </div>
+            </div>
+          </div>
+          <div class="sw-bst-body">
+            <div class="sw-bst-gridwrap"><div class="sw-bst-grid"></div></div>
+            <div class="sw-bst-info"></div>
+          </div>
+          <div class="sw-bst-bottom">
+            <div class="sw-bst-bar"><i><b style="width:0%"></b></i></div>
+            <div class="sw-bst-pct"></div>
+          </div>
+        </div>
+        <button class="sw-bst-exit"></button>
       </div>
     `;
+    this.outer = this.panel.querySelector('.sw-bst-outer')!;
     this.gridWrap = this.panel.querySelector('.sw-bst-gridwrap')!;
     this.gridEl = this.panel.querySelector('.sw-bst-grid')!;
     this.rangeEl = this.panel.querySelector('.sw-bst-range')!;
     this.infoEl = this.panel.querySelector('.sw-bst-info')!;
     this.pctEl = this.panel.querySelector('.sw-bst-pct')!;
-    this.barEl = this.panel.querySelector('.sw-bst-bar i') as HTMLElement;
+    this.barFillEl = this.panel.querySelector('.sw-bst-bar b') as HTMLElement;
     this.searchEl = this.panel.querySelector('[data-search]') as HTMLInputElement;
-    this.chipsEl = this.panel.querySelector('.sw-bst-chips')!;
-    this.filterTextEl = this.panel.querySelector('[data-filtertext]');
-    // 初始空文案（原版 _filteringText 空 StartText，首次筛选弹层开合后才 SetText）
-    this.sortSel = this.panel.querySelector('[data-sort]') as HTMLSelectElement;
-    this.buildSortSel();
-    this.buildChips();
-    this.panel.querySelector('[data-close]')!.textContent = Lang.text('UI.Back');
-    this.panel.querySelector('[data-close]')!.addEventListener('click', () => this.close());
+    this.sortTextEl = this.panel.querySelector('[data-sorttext]')!;
+    this.filterTextEl = this.panel.querySelector('[data-filtertext]')!;
+    const exit = this.panel.querySelector('.sw-bst-exit') as HTMLButtonElement;
+    exit.textContent = Lang.text('UI.Back');
+    exit.addEventListener('click', () => { UISfx.menuClose(); this.close(); });
     this.panel.querySelectorAll('[data-nav]').forEach((b) => {
       (b as HTMLElement).addEventListener('click', () => this.page(Number((b as HTMLElement).dataset.nav)));
+      this.bindTip(b as HTMLElement, () => '');
+      this.bindHoverSound(b as HTMLElement);
     });
-    this.gridWrap.addEventListener('wheel', this.wheelHandler, { passive: false });
-    this.searchEl.addEventListener('input', () => { this.filter.search = this.searchEl.value; this.offset = 0; this.refresh(); });
-    // 标签筛选弹层开关（UIBestiaryTest.OpenOrCloseFilteringGrid :410-420）：
-    // 点击图标钮开合；点格切换（ClickOption → ToggleFilter）；点弹层外关闭（:422-428）
-    this.panel.querySelector('[data-filter]')!.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleFilterGrid();
-    });
-    this.sortSel.addEventListener('change', () => {
-      this.sortKey = (this.sortSel!.value || 'unlocks') as BestiarySortKey;
-      this.offset = 0;
+    this.searchEl.placeholder = Lang.has('UI.PlayerNameSlot') ? Lang.text('UI.PlayerNameSlot') : '';
+    this.searchEl.addEventListener('input', () => {
+      this.filter.search = this.searchEl.value;
+      this.updateSearchCancel();
       this.refresh();
     });
+    const box = this.panel.querySelector('[data-searchbox') as HTMLElement;
+    this.searchEl.addEventListener('focus', () => box.classList.add('focus'));    // OnStartTakingInput :208-210
+    this.searchEl.addEventListener('blur', () => box.classList.remove('focus'));  // OnEndTakingInput :213-218
+    const cancel = this.panel.querySelector('[data-searchcancel]') as HTMLButtonElement;
+    cancel.addEventListener('click', () => {
+      if (this.searchEl.value) {   // searchCancelButton_OnClick :135-142：有内容=清+音11，无=音12
+        this.searchEl.value = '';
+        this.filter.search = '';
+        this.updateSearchCancel();
+        this.refresh();
+        UISfx.menuClose();
+      } else {
+        UISfx.click();
+      }
+    });
+    this.panel.querySelector('[data-sortbtn]')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSortPop();
+    });
+    this.panel.querySelector('[data-filterbtn]')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFilterPop();
+    });
+    // 滚轮 = 详情栏滚动（UIBestiaryTest.ScrollWheel :850-854 → _infoSpace.UpdateScrollbar；
+    // ★原版无滚轮翻页——旧自创面拆除，翻页只走 ◀▶ 钮）
+    this.panel.addEventListener('wheel', (e) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      this.infoEl.scrollTop += e.deltaY;
+    }, { passive: false });
     // capture 阶段拦截：防 main.ts 全局 Esc/E 处理器同时关暂停菜单/背包
     window.addEventListener('keydown', this.escHandler, true);
     if (typeof ResizeObserver !== 'undefined') {
@@ -1051,168 +1357,211 @@ export class BestiaryPanel {
       });
       this.ro.observe(this.gridWrap);
     }
+    this.panel.querySelectorAll('.sw-bst-imgbtn,.sw-bst-widebtn,.sw-bst-searchbtn').forEach((b) => this.bindHoverSound(b as HTMLElement));
+    this.bindTip(this.panel.querySelector('.sw-bst-bar')!, () =>
+      Lang.text('BestiaryInfo.PercentCollected').replace('{Percent}', prettifyPercentDisplay(this.progressPercent())));   // ShowStats_Completion :183-190
     parent.appendChild(this.panel);
+    this.applyChrome();
     this.refresh();
     UISfx.click();
   }
 
-  private buildSortSel() {
-    if (!this.sortSel) return;
-    for (const k of BESTIARY_SORT_KEYS) {
-      const o = document.createElement('option');
-      o.value = k;
-      o.textContent = sortLabel(k);
-      this.sortSel.appendChild(o);
-    }
-    this.sortSel.value = this.sortKey;
+  /** chrome 贴图异步染色 → CSS 变量（BJ506：PanelBackground/PanelBorder/Stat_Panel/
+   *  PanelGrayscale/CategoryPanelBorder/Separator1/ColorBar/Scrollbar × 原版色） */
+  private applyChrome(): void {
+    void (async () => {
+      const set = (name: string, url: string) => this.panel.style.setProperty(name, `url(${url})`);
+      for (const [name, file, base, rgb, aMul] of CHROME_DEFS) {
+        try {
+          const img = await bstLoadImg(base + file + '.png');
+          set(name, bstTintDataUrl(img, rgb[0], rgb[1], rgb[2], aMul ?? 1));
+        } catch { /* 贴图缺 = 底色兜底（CSS 已有面板底色） */ }
+      }
+      for (const [name, file, base] of SPRITE_VARS) {
+        set(name, `${base}${file}.png`);
+      }
+      this.panel.style.setProperty('--bst-wideborder', `url(${UI_BASE}UI_Bestiary_Button_Wide_Border.png)`);
+    })();
   }
 
-  private chip(label: string, active: boolean, fn: () => void): HTMLElement {
-    const b = document.createElement('button');
-    b.className = 'sw-bst-chip' + (active ? ' active' : '');
-    b.textContent = label;
-    b.addEventListener('click', () => { fn(); this.offset = 0; this.refresh(); });
-    return b;
+  private bindHoverSound(el: HTMLElement): void {
+    el.addEventListener('mouseenter', () => UISfx.hover());   // UIImageButton.MouseOver :61 / GroupOptionButton :255（音 12）
   }
 
-  private buildChips() {
-    const f = this.filter;
-    const kinds: Array<BestiaryFilter['kind']> = ['all', 'enemy', 'town', 'critter'];
-    const kindLabel: Record<string, string> = {
-      all: Lang.text('Mods.SandboxWorld.Bestiary.FilterAll'),
-      enemy: Lang.text('Mods.SandboxWorld.Bestiary.FilterEnemy'),
-      town: Lang.text('Mods.SandboxWorld.Bestiary.FilterTown'),
-      critter: Lang.text('Mods.SandboxWorld.Bestiary.FilterCritter'),
-    };
-    this.chipsEl.replaceChildren();
-    for (const k of kinds) {
-      this.chipsEl.appendChild(this.chip(kindLabel[k], f.kind === k, () => {
-        this.filter = applyBestiaryChip(f, 'kind', k);
-        this.buildChips();
-      }));
-    }
-    this.chipsEl.appendChild(this.chip(
-      Lang.text('BestiaryInfo.IsBoss'), f.boss, () => {
-        this.filter = applyBestiaryChip(f, 'boss');
-        this.buildChips();
-      }));
-    const ul = f.unlocked;
-    this.chipsEl.appendChild(this.chip(
-      Lang.text('BestiaryInfo.IfUnlocked'), ul === 'yes', () => {
-        this.filter = applyBestiaryChip(f, 'unlocked');
-        this.buildChips();
-      }));
-    this.chipsEl.appendChild(this.chip(
-      Lang.text('Mods.SandboxWorld.Bestiary.Locked'), ul === 'no', () => {
-        this.filter = applyBestiaryChip(f, 'unlockedNo');
-        this.buildChips();
-      }));
+  /** MouseText 悬浮提示（面板内轻量替身；随鼠标移动，离开即隐） */
+  private bindTip(el: HTMLElement, textFn: () => string): void {
+    el.addEventListener('mousemove', (e) => {
+      const t = textFn();
+      if (!t) { this.hideTip(); return; }
+      if (!this.tipEl) {
+        this.tipEl = document.createElement('div');
+        this.tipEl.className = 'sw-bst-tip';
+        document.body.appendChild(this.tipEl);
+      }
+      this.tipEl.textContent = t;
+      this.tipEl.style.display = 'block';
+      this.tipEl.style.left = `${e.clientX + 16}px`;
+      this.tipEl.style.top = `${e.clientY + 20}px`;
+    });
+    el.addEventListener('mouseleave', () => this.hideTip());
+  }
+  private hideTip(): void {
+    if (this.tipEl) { this.tipEl.remove(); this.tipEl = null; }
   }
 
-  // ---- 标签筛选图标格（UIBestiaryFilteringOptionsGrid + UIBestiaryTest 弹层链）----
+  private updateSearchCancel(): void {
+    (this.panel.querySelector('[data-searchcancel]') as HTMLElement)?.classList.toggle('on', !!this.searchEl.value);
+  }
 
-  private filterGridEl: HTMLElement | null = null;
-  private filterTextEl: HTMLElement | null = null;
-  /** 弹层开合（UIBestiaryTest.OpenOrCloseFilteringGrid :410-420 / CloseFilteringGrid
-   *  :430-441——关闭时 UpdateAvailability + 计数文案 + FilterEntries 重筛） */
-  private toggleFilterGrid(): void {
-    if (this.filterGridEl?.isConnected) {
-      this.closeFilterGrid();
-      return;
+  // ---- 弹层开合（UIBestiaryTest.OpenOrCloseSortingOptions/FilteringGrid :398-420：
+  //      互斥；再点同钮关闭；点遮罩关闭 :422-434/:450-462）----
+
+  private closePops(): void {
+    this.sortPopEl?.remove(); this.sortPopEl = null;
+    this.filterPopEl?.remove(); this.filterPopEl = null;
+  }
+
+  private toggleSortPop(): void {
+    if (this.sortPopEl) { this.closePops(); return; }
+    this.closePops();
+    const pop = document.createElement('div');
+    pop.className = 'sw-bst-pop';
+    pop.addEventListener('click', (e) => { if (e.target === pop) this.closeSortPop(); });   // Click_CloseSortingGrid :450-456
+    const panelEl = document.createElement('div');
+    panelEl.className = 'sw-bst-pop-panel';
+    // 高度 = 可见步数 × 28 + 8（BuildGrid :49-61：num2=26+2，+5+3）
+    panelEl.style.height = `${BESTIARY_SORT_OPTIONS.length * 28 + 8}px`;
+    pop.appendChild(panelEl);
+    BESTIARY_SORT_OPTIONS.forEach((key, i) => {
+      // GroupOptionButton<int>(j=Steps 索引)：OptionValue = 注册序真索引
+      const stepIndex = BESTIARY_SORT_KEYS.indexOf(key);
+      const b = document.createElement('button');
+      b.className = 'sw-bst-opt' + (this.sortSelected === stepIndex ? ' sel' : '');
+      b.innerHTML = '<i class="bg"></i><i class="hborder"></i><span></span>';
+      (b.querySelector('span') as HTMLElement).textContent = sortLabel(key);
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.clickSortOption(stepIndex); });   // ClickOption :89-115（音 12 由 bindHoverSound+click）
+      b.addEventListener('mouseenter', () => UISfx.hover());
+      panelEl.appendChild(b);
+      void i;
+    });
+    this.gridWrap.appendChild(pop);
+    this.sortPopEl = pop;
+    this.filterPopEl = null;
+    UISfx.click();
+  }
+  private closeSortPop(): void {
+    this.closePops();
+    this.updateBestiaryTexts();   // CloseSortingGrid :458-462 → UpdateBestiaryContents
+  }
+
+  private clickSortOption(stepIndex: number): void {
+    // ClickOption（UIBestiarySortingOptionsGrid :89-115）：再点同项 → 回退默认步 0
+    let num = stepIndex;
+    if (num === this.sortSelected) num = 0;   // _defaultStepIndex = 0（ByUnlockState，隐藏步）
+    this.sortSelected = num;
+    this.sortKey = BESTIARY_SORT_KEYS[num];
+    if (this.sortPopEl) {
+      for (const el of Array.from(this.sortPopEl.querySelectorAll('.sw-bst-opt'))) el.classList.remove('sel');
+      const selIndex = BESTIARY_SORT_OPTIONS.indexOf(this.sortKey);
+      if (selIndex >= 0) this.sortPopEl.querySelectorAll('.sw-bst-opt')[selIndex]?.classList.add('sel');
     }
-    const grid = document.createElement('div');
-    grid.className = 'sw-bst-fgrid';
-    grid.addEventListener('click', (e) => e.stopPropagation());
-    this.panel.appendChild(grid);
-    this.filterGridEl = grid;
-    // 点弹层/筛选钮以外关闭（:422-428 Click_CloseFilteringGrid 语义）
-    this.filterOutside = (e) => {
-      if (!this.filterGridEl?.isConnected) return;
-      const t = e.target as Node;
-      if (this.filterGridEl.contains(t) || (e.target as HTMLElement)?.closest?.('[data-filter]')) return;
-      this.closeFilterGrid();
-    };
-    document.addEventListener('click', this.filterOutside);
+    UISfx.click();
+    this.refresh();
+  }
+
+  private toggleFilterPop(): void {
+    if (this.filterPopEl) { this.closePops(); return; }
+    this.closePops();
+    const pop = document.createElement('div');
+    pop.className = 'sw-bst-pop';
+    pop.addEventListener('click', (e) => { if (e.target === pop) this.closeFilterPop(); });   // Click_CloseFilteringGrid :422-428
+    const panelEl = document.createElement('div');
+    panelEl.className = 'sw-bst-pop-panel sw-bst-pop-filter';
+    panelEl.style.height = `${Math.ceil(BESTIARY_FILTER_DEFS.length / 12) * 34 + 10}px`;   // BuildContainer :43-60
+    pop.appendChild(panelEl);
+    this.filterPopEl = pop;
+    this.sortPopEl = null;
+    this.gridWrap.appendChild(pop);
     this.buildFilterGrid();
     UISfx.click();
   }
-
-  private filterOutside: ((e: MouseEvent) => void) | null = null;
-
-  private closeFilterGrid(): void {
-    if (this.filterOutside) document.removeEventListener('click', this.filterOutside);
-    this.filterOutside = null;
-    this.filterGridEl?.remove();
-    this.filterGridEl = null;
-    this.updateFilterText();
+  private closeFilterPop(): void {
+    this.closePops();
+    this.refresh();   // CloseFilteringGrid :430-434 → UpdateBestiaryContents
   }
 
-  /** UpdateAvailability（UIBestiaryFilteringOptionsGrid.cs:62-122）1:1：
-   *  每筛选钮 32²/间距 2/perRow 12（GetDisplaySettings :144-157 钉死 perRow=12）、
-   *  可用性 = 存在已解锁命中条目（GetIsFilterAvailableForEntries :183-198，不可用钮
-   *  换 Icon_Tags_Shadow 帧(0,4)×0.2 且不可点）；选中态 UpdateButtonSelections :159-171 */
+  /** UpdateAvailability（UIBestiaryFilteringOptionsGrid.cs:80-150）1:1：
+   *  每筛选钮 32²/间距 2/perRow 12（GetDisplaySettings :160-174 钉死 perRow=12）、
+   *  图标 30² 左上偏 (1,1)（image Left/Top=-1 + HAlign/VAlign 0.5 合成）；可用性 =
+   *  ForcedDisplay ?? 存在已解锁命中条目（不可用钮换 Icon_Tags_Shadow 帧(0,4)×0.2 且
+   *  从激活集除名 :119-121）；选中态 UpdateButtonSelections :176-191 */
   private buildFilterGrid(): void {
-    const grid = this.filterGridEl;
-    if (!grid) return;
-    grid.replaceChildren();
+    const pop = this.filterPopEl;
+    if (!pop) return;
+    const panelEl = pop.querySelector('.sw-bst-pop-panel') as HTMLElement;
+    panelEl.replaceChildren();
     const unlockedRows = bestiaryRows(this.flow.getTracker());
-    for (const def of BESTIARY_FILTER_DEFS) {
+    BESTIARY_FILTER_DEFS.forEach((def, i) => {
+      const row = Math.floor(i / 12), col = i % 12;
       const available = bestiaryFilterAvailable(def.key, unlockedRows);
       const active = this.filter.tags.includes(def.key);
       const b = document.createElement('button');
-      b.className = 'sw-bst-fcell' + (active ? ' active' : '') + (available ? '' : ' dim');
-      b.title = Lang.has(def.nameKey) ? Lang.text(def.nameKey) : def.nameKey;   // ShowButtonName :186-194
-      const img = document.createElement('img');
-      img.alt = '';
+      b.className = 'sw-bst-fcell' + (active ? ' sel' : '') + (available ? '' : ' dim');
+      b.style.left = `${6 + col * 34}px`;
+      b.style.top = `${6 + row * 34}px`;
+      b.innerHTML = '<i class="bg"></i><i class="hborder"></i>';
       if (!available) {
         // UpdateAvailability 不可用臂（UIBestiaryFilteringOptionsGrid.cs:119-121）：
         // `_filterer.ActiveFilters.Remove(bestiaryEntryFilter)`——失效筛选即从激活集
         // 除名（红队R3⑦:曾仅置 disabled,激活 tag 幽灵残留 → 重筛恒吃死集）
-        if (this.filter.tags.includes(def.key)) {
+        if (active) {
           this.filter = { ...this.filter, tags: this.filter.tags.filter((t) => t !== def.key) };
-          this.updateFilterText();
-          this.offset = 0;
+          this.updateBestiaryTexts();
           this.refresh();
         }
-        img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Tags_Shadow.png';
-        img.style.objectPosition = '0 -120px';   // 帧(0,4)：30×30 帧表的末行首帧，Color.White*0.2
-        img.style.opacity = '0.2';
-        b.disabled = true;
+        b.appendChild(this.filterIconImg(-1));   // 帧(0,4) = Icon_Tags_Shadow 末行首帧（:135-141）
       } else {
-        if (def.frame >= 0) {
-          img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Tags_Shadow.png';
-          // GetFilterImage（FilterProviderInfoElement :31-39）：帧 X=frame%16，Y=frame/16
-          img.style.objectPosition = `${-30 * (def.frame % 16)}px ${-30 * Math.floor(def.frame / 16)}px`;
-        } else {
-          img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Rank_Light.png';   // ByRareCreature
-        }
-        b.addEventListener('click', () => {
-          this.filter = applyBestiaryChip(this.filter, 'tag', undefined, def.key);   // ClickOption :196-203
+        b.appendChild(this.filterIconImg(def.frame));
+        this.bindTip(b, () => (Lang.has(def.nameKey) ? Lang.text(def.nameKey) : def.nameKey));   // ShowButtonName :218-225
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.filter = applyBestiaryChip(this.filter, 'tag', undefined, def.key);   // ClickOption :227-236
           this.buildFilterGrid();
-          this.offset = 0;
+          UISfx.click();
           this.refresh();
         });
       }
-      b.appendChild(img);
-      grid.appendChild(b);
-    }
+      panelEl.appendChild(b);
+    });
   }
 
-  /** 计数文案（UIBestiaryTest :440 `_filteringText.SetText(_filterer.GetDisplayName())`，
-   *  EntryFilterer.GetDisplayName :91-95 = BestiaryInfo.Filters 套 {Count}） */
-  private updateFilterText(): void {
-    if (!this.filterTextEl) return;
+  /** Icon_Tags_Shadow 16×5 帧表 30² 帧裁剪（frame<0 = 不可用灰帧(0,4)；ByRareCreature
+   *  走 Icon_Rank_Light 单帧由调用方给 frame=-1 前特判——此处 frame=-1 语义=灰帧） */
+  private filterIconImg(frame: number): HTMLElement {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = `${UI_BASE}UI_Bestiary_Icon_Tags_Shadow.png`;
+    const fx = frame < 0 ? 0 : frame % 16;
+    const fy = frame < 0 ? 4 : Math.floor(frame / 16);
+    img.style.backgroundImage = `url(${img.src})`;
+    img.style.backgroundSize = '480px 150px';
+    img.style.backgroundPosition = `${-30 * fx}px ${-30 * fy}px`;
+    img.style.backgroundRepeat = 'no-repeat';
+    img.removeAttribute('src');
+    return img;
+  }
+
+  /** 文案（UpdateBestiaryContents :436-448 前段）：排序钮右 = 当前步名（EntrySorter
+   *  GetDisplayName 恒显，初始 Steps[0]="解锁"）；筛选钮右 = 筛选器（N个）恒显 */
+  private updateBestiaryTexts(): void {
+    this.sortTextEl.textContent = sortLabel(this.sortKey);
     this.filterTextEl.textContent = Lang.text('BestiaryInfo.Filters').replace('{Count}', String(this.filter.tags.length));
-    this.filterTextEl.title = this.filter.tags
-      .map((k) => BESTIARY_FILTER_DEFS.find((d) => d.key === k))
-      .map((d) => (d && Lang.has(d.nameKey) ? Lang.text(d.nameKey) : d?.nameKey ?? ''))
-      .filter(Boolean)
-      .join(', ');
   }
 
   /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度）。
    *  ★rAF 合并(2026-08-13):滚轮/RO/点击风暴每帧至多重建一次——此前每个 wheel
-   *  tick 一次全量重建×每格自取解码 = 渲染进程崩溃(用户报"滚动翻两页就崩") */
+   *  tick 一次全量重建×每格自取解码 = 渲染进程崩溃(用户报"滚动翻两页就崩")
+   *  ★BJ506：筛选/排序/搜索变更不重置页偏移（原版 FixBestiaryRange(+0) 只钳制） */
   private refreshQueued = false;
   refresh() {
     if (this.refreshQueued) return;
@@ -1230,12 +1579,12 @@ export class BestiaryPanel {
     //  （renderInfo 的 !selected 分支=FillInfoForEntry(null) 同位）。旧刀保旧选中,
     //  筛选后详情栏仍显示已不在工作集的条目 = 1:1 偏差（登记 FX37-F5,本刀清偿）。
     this.selected = null;
+    this.updateBestiaryTexts();
     const rows = bestiaryRows(this.flow.getTracker());
     sortBestiaryRows(rows, this.sortKey);
     this.working = filterBestiaryRows(rows, this.filter);
     const { cols, rows: gridRows, perPage } = bestiaryGridSize(this.gridWrap.clientWidth, this.gridWrap.clientHeight);
     this.perPage = perPage;
-    this.gridEl.style.gridTemplateColumns = `repeat(${cols}, 72px)`;
     this.offset = clampBestiaryOffset(this.offset, 0, this.working.length, perPage);
     this.rangeEl.textContent = bestiaryRangeText(this.offset, this.working.length, perPage);
     void gridRows;
@@ -1243,6 +1592,11 @@ export class BestiaryPanel {
     this.updateProgress();
     this.renderInfo();
     this.scheduleBlankSweep();
+    if (this.filterPopEl) this.buildFilterGrid();   // UpdateBestiaryContents → UpdateAvailability :438
+  }
+
+  private progressPercent(): number {
+    return this.flow.getTracker().completion().percent;   // GetUnlockProgress :501-517 口径（>NotKnown 计 1）
   }
 
   /** 自愈补画扫描(2026-08-14,用户报"resize 后头像全消失"):
@@ -1266,7 +1620,7 @@ export class BestiaryPanel {
       this.sweepTimer = 0;
       if (!this.panel.isConnected) return;
       const cells: BestiarySweepCell[] = [...this.gridEl.querySelectorAll('.sw-bst-cell')].map((cell) => ({
-        canvas: cell.querySelector('canvas') as HTMLCanvasElement | null,
+        canvas: cell.querySelector('.sw-bst-ico') as HTMLCanvasElement | null,
         creditId: (cell as HTMLElement).dataset.credit ?? null,
       }));
       for (const t of bestiarySweepTargets(cells, this.working, this.painted)) {
@@ -1280,86 +1634,78 @@ export class BestiaryPanel {
   }
 
   private page(dir: number) {
+    // OffsetLibraryByPages（UIBestiaryEntryGrid :97-115）
     const next = clampBestiaryOffset(this.offset, dir * this.perPage, this.working.length, this.perPage);
-    if (next === this.offset) return;  // 边界空滚:offset 不变不重建(防滚轮风暴)
+    if (next === this.offset) return;  // 边界空滚:offset 不变不重建
     this.offset = next;
     this.refresh();
   }
 
+  /** 网格重填（FillBestiarySpaceWithEntries :37-71 1:1）：72² 格在 (w/72)×(h/72) 扇区
+   *  内居中（Left/Top = (k+0.5)/cols、(j+0.5)/rows 百分比 + HAlign/VAlign 0.5）。 */
   private fillGrid() {
     this.gridEl.replaceChildren();
-    const empty = this.gridWrap.querySelector('.sw-bst-empty') as HTMLElement;
-    if (this.working.length === 0) {
-      empty.hidden = false;
-      return;
-    }
-    empty.hidden = true;
+    const { cols, rows } = bestiaryGridSize(this.gridWrap.clientWidth, this.gridWrap.clientHeight);
     const end = Math.min(this.working.length, this.offset + this.perPage);
-    for (let i = this.offset; i < end; i++) {
-      const r = this.working[i];
-      const cell = document.createElement('div');
-      cell.className = 'sw-bst-cell' + (r.state === UnlockState.NotKnown ? ' sw-bst-lock' : '');
-      if (this.selected && this.selected.entry.creditId === r.entry.creditId) cell.classList.add('sel');
-      cell.dataset.credit = r.entry.creditId;
-      const canvas = document.createElement('canvas');
-      canvas.width = 64; canvas.height = 64;
-      // contextlost 韧性(2026-08-14,用户报"resize 后头像全消失"):canvas 2D
-      // 内容在 context 丢失后不自动恢复,而本面板只在创建时画一次——preventDefault
-      // 允许恢复,restored 时按原参数重画
-      // ★SW-RB14d（FX37-F2）：contextlost 同时从登记面除名——preventDefault 只承诺
-      //  "可恢复",restore 可能永不来（GPU 压力/上下文配额）;旧刀 painted 恒含 ⇒
-      //  sweep 永跳 = 相比旧 getImageData 判空面的自愈力倒退。
-      canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
-      canvas.addEventListener('contextrestored', () => {
+    let n = 0;
+    for (let j = 0; j < rows; j++) {
+      for (let k = 0; k < cols; k++) {
+        if (n >= end - this.offset) return;
+        const r = this.working[this.offset + n];
+        n++;
+        const cell = document.createElement('div');
+        cell.className = 'sw-bst-cell';
+        cell.dataset.credit = r.entry.creditId;
+        cell.style.left = `${(100 * (k + 0.5)) / cols}%`;
+        cell.style.top = `${(100 * (j + 0.5)) / rows}%`;
+        // 内盒（EntryButton :30-39）：-4 居中 OverflowHidden；层序 Slot_Back→底图/图标→
+        // Slot_Overlay×0.6→Slot_Front，悬停 Swap（MouseOver/MouseOut :151-170）
+        cell.innerHTML = `
+          <div class="sw-bst-slotin">
+            <img class="sw-bst-lyr sw-bst-lyr-back" alt="" src="${UI_BASE}UI_Bestiary_Slot_Back.png" />
+            <canvas class="sw-bst-ico" width="68" height="68"></canvas>
+          </div>
+          <img class="sw-bst-lyr sw-bst-lyr-ov" alt="" src="${UI_BASE}UI_Bestiary_Slot_Overlay.png" />
+          <img class="sw-bst-lyr sw-bst-lyr-front" alt="" src="${UI_BASE}UI_Bestiary_Slot_Front.png" />
+          <img class="sw-bst-lyr sw-bst-lyr-glow" alt="" src="${UI_BASE}UI_Bestiary_Slot_Selection.png" />
+        `;
+        // 编号（TryGettingDisplayIndex :132-141 → NPCNetIdBestiaryInfoElement.
+        // BestiaryDisplayIndex = ContentSamples.NpcBestiarySortingId[NetId]）
+        const idx = document.createElement('span');
+        idx.className = 'sw-bst-idx';
+        idx.textContent = String(bestiarySortingId(r.npcId));
+        cell.appendChild(idx);
+        const canvas = cell.querySelector('.sw-bst-ico') as HTMLCanvasElement;
+        // contextlost 韧性(2026-08-14,用户报"resize 后头像全消失"):canvas 2D
+        // 内容在 context 丢失后不自动恢复,而本面板只在创建时画一次——preventDefault
+        // 允许恢复,restored 时按原参数重画
+        // ★SW-RB14d（FX37-F2）：contextlost 同时从登记面除名——preventDefault 只承诺
+        //  "可恢复",restore 可能永不来（GPU 压力/上下文配额）;旧刀 painted 恒含 ⇒
+        //  sweep 永跳 = 相比旧 getImageData 判空面的自愈力倒退。
+        canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
+        canvas.addEventListener('contextrestored', () => {
+          this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
+        });
+        // 悬停：音 12 + MouseText(名字/??? )（DrawSelf :143-149 + MouseOver :151-160）
+        cell.addEventListener('mouseenter', () => UISfx.hover());
+        this.bindTip(cell, () => (r.state > UnlockState.NotKnown ? r.name : '???'));
+        cell.addEventListener('click', () => this.selectRow(r));   // Click_SelectEntryButton :477-484（无音）
         this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
-      });
-      cell.appendChild(canvas);
-      const name = document.createElement('div');
-      name.className = 'sw-bst-name';
-      name.textContent = r.name;
-      cell.appendChild(name);
-      if (r.kills > 0 && r.state >= UnlockState.PortraitOnly) {
-        const kills = document.createElement('div');
-        kills.className = 'sw-bst-kills';
-        kills.textContent = String(r.kills);
-        cell.appendChild(kills);
+        this.gridEl.appendChild(cell);
       }
-      cell.addEventListener('click', () => this.selectRow(r));
-      this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
-      this.gridEl.appendChild(cell);
     }
-  }
-
-  /** 选中条目（Click_SelectEntryButton → SelectEntryButton，UIBestiaryTest.cs:486-495：
-   *  DeselectEntryButton + _infoSpace.FillInfoForEntry——**只重渲详情栏,网格不动**）。
-   *  ★FX37(2026-09-11):曾走 refresh() 全量重建——每选一次=81 格画布+~400 节点+
-   *  ~330 监听器整体重造(probe ΔNodes 4992/ΔListeners 3924 每 12 击),原版无此面 */
-  private selectRow(r: BestiaryRow): void {
-    // ★SW-RB14d（FX37-F3）：行按 creditId 从 tracker 现取——闭包行 r 是上次
-    //  refreshNow 的快照,面板开着时击杀/解锁推进后点击,详情栏会显示旧 kills/
-    //  NotKnown 态（原版 FillInfoForEntry 的信息元素 Update 每帧重读 tracker）。
-    //  重建网格的刷新路径本就传新行,现取对它们等价。
-    const fresh = bestiaryRows(this.flow.getTracker()).find((w) => w.entry.creditId === r.entry.creditId) ?? r;
-    this.selected = fresh;
-    const credit = fresh.entry.creditId;
-    for (const el of this.gridEl.querySelectorAll('.sw-bst-cell.sel')) el.classList.remove('sel');
-    // ★SW-RB14d（FX37-F4）：全部同 creditId 格标记（fillGrid :1279 重建路径即
-    //  全标记;旧 break 只亮首格=重复 creditId 行（Scarecrow1×10/Nymph×2）点击
-    //  第 2..n 格无反馈且余格丢 outline。原版无选中视觉（_selectedEntryButton
-    //  写后不读）,本仓自设面从内部一致性）
-    for (const cell of this.gridEl.querySelectorAll('.sw-bst-cell')) {
-      if ((cell as HTMLElement).dataset.credit === credit) cell.classList.add('sel');
-    }
-    this.renderInfo();
-    this.scheduleBlankSweep();
   }
 
   /** 头像 = NPC 表首帧（UnlockableNPCEntryIcon 用整表绘制；DOM 取 frame0 缩放）。
    *  负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）无独立贴图文件，
    *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。
-   *  已解锁条目先铺 MapBG 出没环境底图（UIBestiaryEntryButton 网格 / NPCPortraitInfoElement
-   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）；详情档再叠装饰层
-   *  （MapBGOverlay，bestiaryPortraitOverlays 推导 + 偏好命中短路——见该函数注记）。
+   *  ★BJ506 锚点规则 1:1（UnlockableNPCEntryIcon.UpdatePosition :112-123）：
+   *    noGravity → Center = 图标盒中心 + Position 偏移；
+   *    有重力   → Bottom = 图标盒底中 + (0,-8) + Position 偏移（视觉底=盒底-8）。
+   *  绘制中心 = 锚点（DrawNPCDirect 原点 = 碰撞半高，s=1 时视觉底=锚点）；偏移为
+   *  原生 px（不再按 size/72 缩放）；溢出交 OverflowHidden 裁剪（原版同，旧钳制拆除）。
+   *  底图：网格 = 原生尺寸居中（UIBestiaryEntryButton :40-55 UIImage 无 ScaleToFit）；
+   *  详情 = 盒满拉伸（UIBestiaryNPCEntryPortrait :32-40 ScaleToFit）+ bgColor 乘算。
    *  未解锁（NotKnown）：R24 修复——只画 Icon_Locked 锁形图 ×alpha0.15
    *  （UIBestiaryEntryIcon.DrawSelf :52-70 `Color.White*0.15f`），完全不画 NPC 表；
    *  曾画黑影剪影 = 泄露轮廓（brightness0 剪影仍暴露体型/姿态）。 */
@@ -1367,12 +1713,11 @@ export class BestiaryPanel {
     if (!unlocked) { this.drawLockedIcon(canvas); return; }
     const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
     const crimson = this.flow.isCrimson?.() ?? false;
-    const bg = unlocked
-      ? (bgMode === 'grid'
-        ? { image: bestiaryGridBackground(npcId, crimson), color: [255, 255, 255, 255] as number[] }
-        : bestiaryPortraitBackground(npcId, crimson))
-      : { image: null as string | null, color: [255, 255, 255, 255] };
+    const bg = bgMode === 'grid'
+      ? { image: bestiaryGridBackground(npcId, crimson), color: [255, 255, 255, 255] as number[] }
+      : bestiaryPortraitBackground(npcId, crimson);
     const size = canvas.width;
+    const boxH = canvas.height;
     const paint = (img: ImageBitmap | HTMLImageElement) => {
       if (!canvas.isConnected) return;  // 上代 refresh 已销毁的画布不画(解码风暴浪费源)
       const ov = BST_DRAW_OFFSET[String(npcId)];
@@ -1382,13 +1727,13 @@ export class BestiaryPanel {
       const frames = ov?.customTexture ? 1 : VANILLA_NPCS[String(sheetId)]?.frames ?? 1;
       const iw = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
       const ih = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
-      const fh = Math.max(1, Math.floor(ih / frames));
+      const fh = Math.max(1, Math.floor(ih / frames));   // 碰撞高（未乘 scale）
       // 负 id 变体：netid 表 color/scale/alpha（绿史莱姆 -3=(0,220,40,100) 等）；
       // 正 id：NPC 表自身 color（16 僵尸色等个别非 default）
       const netOv = npcId < 0 ? NETID_OV[String(npcId)] : undefined;
       const colorRGBA = ov?.customTexture ? undefined   // 手绘图不染色（原版 Color.White :199）
         : netOv?.color ?? (npcId > 0 ? VANILLA_NPCS[String(npcId)]?.color : undefined);
-      // scale 链（:55-58）：DrawOffset.Scale 覆盖 NPC 自身 → portrait 档 PortraitScale 再覆盖
+      // scale 链（:52-59）：DrawOffset.Scale 覆盖 NPC 自身 → portrait 档 PortraitScale 再覆盖
       let scale = netOv?.scale ?? 1;
       if (ov?.scale != null) scale = ov.scale;
       if (bgMode === 'portrait' && ov?.portraitScale != null) scale = ov.portraitScale;
@@ -1400,35 +1745,26 @@ export class BestiaryPanel {
       // ★不在此 clear（2026-09-03 探针实锤）：此 clearRect 会把 paintWithBg 刚铺的
       //   底图/装饰叠层在 NPC 表晚到重画时整层抹掉——grid/portrait 双档底图恒失。
       //   清底职责归 paintWithBg（合成链起点）；无底图路径在调用侧显式清。
-      // 原版图鉴（UnlockableNPCEntryIcon → DrawNPCDirect）按 NPC 原生帧尺寸×scale
-      // 直接画、不放大填框（僵尸帧 36×56 就是比绿史莱姆 40×48×0.9 高；巨怪靠
-      // NPCBestiaryDrawOffset 表逐个调）。只缩不放：超画布才等比缩（防溢出）
-      const s = Math.min(1, size / (iw * scale), size / (fh * scale));
-      const w = iw * s * scale, h = fh * s * scale;
-      let dx = (size - w) / 2, dy = (size - h) / 2;
-      // Position 偏移（原版 72px iconbox 口径，按画布比例换算；portrait 档 X/Y Override
-      // 覆盖对应分量 :66-72——Boss 巨怪下移出框/贴边修正靠它）
-      if (ov?.position || ov?.portraitX != null || ov?.portraitY != null) {
-        const k = size / 72;
-        const px = bgMode === 'portrait' && ov?.portraitX != null ? ov.portraitX : (ov?.position?.[0] ?? 0);
-        const py = bgMode === 'portrait' && ov?.portraitY != null ? ov.portraitY : (ov?.position?.[1] ?? 0);
-        dx += px * k; dy += py * k;
-        dx = Math.max(-w * 0.45, Math.min(size - w * 0.55, dx));   // 防整图移出画布
-        dy = Math.max(-h * 0.45, Math.min(size - h * 0.55, dy));
-      }
+      // ★BJ506 锚点：UpdatePosition :112-123（见函数头注）——偏移原生 px 直接加锚点
+      const ox = bgMode === 'portrait' && ov?.portraitX != null ? ov.portraitX : (ov?.position?.[0] ?? 0);
+      const oy = bgMode === 'portrait' && ov?.portraitY != null ? ov.portraitY : (ov?.position?.[1] ?? 0);
+      const noGrav = !!VANILLA_NPCS[String(npcId)]?.noGravity;
+      const w = iw * scale, h = fh * scale;
+      const centerX = size / 2 + ox;
+      const centerY = noGrav ? boxH / 2 + oy : boxH - 8 - fh / 2 + oy;
       cx.globalAlpha = alphaBase / 255;                // 负 id alpha 变体（-5 黑史莱姆 120）
       const composed = colorRGBA && (colorRGBA[3] ?? 255) > 0
         ? bstTintedFrame(img, sheetId, npcId, fh, colorRGBA, frameIdx)
         : null;
       if (ov?.rotation) {
         cx.save();
-        cx.translate(dx + w / 2, dy + h / 2);
+        cx.translate(centerX, centerY);
         cx.rotate(ov.rotation);
         if (composed) cx.drawImage(composed, -w / 2, -h / 2, w, h);
         else cx.drawImage(img, 0, frameIdx * fh, iw, fh, -w / 2, -h / 2, w, h);
         cx.restore();
-      } else if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
-      else cx.drawImage(img, 0, frameIdx * fh, iw, fh, dx, dy, w, h);
+      } else if (composed) cx.drawImage(composed, centerX - w / 2, centerY - h / 2, w, h);   // base+染色离屏合成
+      else cx.drawImage(img, 0, frameIdx * fh, iw, fh, centerX - w / 2, centerY - h / 2, w, h);
       cx.globalAlpha = 1;
       // ★SW-RB14d（FX37-F2）：丢_context_期（contextlost 已发、restore 未至）绘制
       //  是静默 no-op,登记=把空白格标"已画"锁死 sweep;守卫后 sweep 持续重试,
@@ -1449,29 +1785,31 @@ export class BestiaryPanel {
     ];
     // 统一走 bstLoadSheet 缓存(同表并发只取一次/结果回写/失败负终结;
     // 此前 loadBg 每格每次 refresh new Image 且不回写=滚轮风暴解码源)
+    // ★BJ506 底图几何：grid = 原生尺寸居中（UIImage 缺省，可被 68² 内盒 OverflowHidden
+    //   裁剪，115×65 恰溢出水平——原版同）；portrait = 盒满拉伸（ScaleToFit，色乘算
+    //   保留），叠层与底图同盒（:43-54）
     const paintWithBg = (bgImg: ImageBitmap | HTMLImageElement | null, ovs: HTMLCanvasElement[] = []) => {
       const cx = canvas.getContext('2d');
       if (!cx) return;
       cx.imageSmoothingEnabled = false;
       cx.clearRect(0, 0, canvas.width, canvas.height);
-      let bx = 0, by = 0, bw = size, bh = size;   // 无底图 = 叠层直接拉伸满盒（同原版 ScaleToFit）
-      if (bgImg) {
-        const bs = Math.max(size / bgImg.width, size / bgImg.height);
-        bw = bgImg.width * bs; bh = bgImg.height * bs;
-        bx = (size - bw) / 2; by = (size - bh) / 2;
-        cx.drawImage(bgImg, bx, by, bw, bh);
-        const [r, g, b, a] = bg.color;
-        if (r !== 255 || g !== 255 || b !== 255) {
-          cx.globalCompositeOperation = 'multiply';
-          cx.fillStyle = `rgb(${r},${g},${b})`;
-          cx.fillRect(0, 0, size, size);
-          cx.globalCompositeOperation = 'source-over';
-          void a;
+      if (bgMode === 'grid') {
+        if (bgImg) cx.drawImage(bgImg, (size - bgImg.width) / 2, (boxH - bgImg.height) / 2);
+      } else {
+        if (bgImg) {
+          cx.drawImage(bgImg, 0, 0, size, boxH);   // ScaleToFit = 盒满拉伸（可异形）
+          const [r, g, b, a] = bg.color;
+          if (r !== 255 || g !== 255 || b !== 255) {
+            cx.globalCompositeOperation = 'multiply';
+            cx.fillStyle = `rgba(${r},${g},${b},${(a ?? 255) / 255})`;
+            cx.fillRect(0, 0, size, boxH);
+            cx.globalCompositeOperation = 'source-over';
+          }
         }
       }
       // 叠层：与底图同一目标盒（原版同容器 ScaleToFit 拉伸——对位关系 1:1），
       // 色为预着色成品（bstTintedOverlay，声明色 ?? Lerp 回退）
-      for (const o of ovs) cx.drawImage(o, bx, by, bw, bh);
+      for (const o of ovs) cx.drawImage(o, 0, 0, size, boxH);
       // ★SW-RB14d（FX37-F1）：此处【不再】登记 painted——旧刀 bg/叠层落地即登记,
       //  若随后 NPC 表 cb(null)（404/负缓存 TTL 终结）成"半画格":底图在、NPC 缺,
       //  painted 恒含 ⇒ sweep 永跳,只能翻页/筛选重建自救。登记权移交终端落笔点
@@ -1529,8 +1867,7 @@ export class BestiaryPanel {
 
   /** 未解锁占位：Icon_Locked 锁形图居中 ×alpha0.15（UIBestiaryEntryIcon.DrawSelf
    *  :64-69 `spriteBatch.Draw(_notUnlockedTexture, dimensions.Center(), null,
-   *  Color.White * 0.15f, ...)` 1:1——零轮廓泄露）。贴图 = Images/UI/Bestiary/
-   *  Icon_Locked（本仓扁平化 UI_Bestiary_Icon_Locked.png）。
+   *  Color.White * 0.15f, ...)` 1:1——零轮廓泄露；原生尺寸 24×34 scale=1）。
    *  ★FX37(2026-09-11):贴图改走 bstLoadSheet 共享缓存——旧版每格 new Image+重发
    *  src,一页 81 锁格=81 个 Image 元素+81 次 decode 请求,翻页/筛选/选中每拍重发
    *  (fresh:details 段 GC 144ms 的主力);缓存命中=同步直画(原版 _notUnlockedTexture
@@ -1541,219 +1878,264 @@ export class BestiaryPanel {
     cx.imageSmoothingEnabled = false;
     cx.clearRect(0, 0, canvas.width, canvas.height);
     const size = canvas.width;
+    const boxH = canvas.height;
     bstLoadSheet(this.flow.atlas ?? null, BST_LOCKED_ICON_SHEET, (img) => {
       if (!img || !canvas.isConnected) return;
-      // 原版 scale=1 原尺寸画（锁图 44px 级）——超画布才等比缩
+      // 原版 scale=1 原尺寸画（锁图 24×34）——超画布才等比缩
       const iw = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
       const ih = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
-      const s = Math.min(1, size / iw, size / ih);
+      const s = Math.min(1, size / iw, boxH / ih);
       const w = iw * s, h = ih * s;
       cx.globalAlpha = 0.15;
-      cx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      cx.drawImage(img, (size - w) / 2, (boxH - h) / 2, w, h);
       cx.globalAlpha = 1;
       if (!(cx.isContextLost && cx.isContextLost())) this.painted.add(canvas);   // 落笔登记（★SW-RB14d F2 丢_context_守卫,同 paint 注）
     });
   }
 
-  /** 掉落行物品小图标（atlas.vicon 懒载未就绪时仅文字） */
-  private itemIcon(itemId: number): HTMLCanvasElement | null {
+  /** 掉落行/击杀旗物品小图标（atlas.vicon 懒载未就绪时仅文字） */
+  private itemIcon(itemId: number, size = 22): HTMLCanvasElement | null {
     const atlas = this.flow.atlas ?? null;
     if (!atlas) return null;
     const ar = atlas.vicon(itemId);
     if (!ar) return null;
     const c = document.createElement('canvas');
-    c.width = 22; c.height = 22;
+    c.width = size; c.height = size;
     const cx = c.getContext('2d')!;
     cx.imageSmoothingEnabled = false;
-    const s = Math.min(22 / ar.sw, 22 / ar.sh);
+    const s = Math.min(size / ar.sw, size / ar.sh);
     const w = ar.sw * s, h = ar.sh * s;
-    cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (22 - w) / 2, (22 - h) / 2, w, h);
+    cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (size - w) / 2, (size - h) / 2, w, h);
     return c;
   }
 
+  /** 底栏（FillProgressBottomBar :159-181 + UpdateBestiaryContents :444-447）：
+   *  文本 = PrettifyPercentDisplay(GetProgressPercent,"P2") 套 PercentCollected；
+   *  条填充 = FillPercent×宽（填充 (51,137,255)/底 (35,43,81) 在 CSS/变量层） */
   private updateProgress() {
-    const c = this.flow.getTracker().completion();
-    const pct = Math.round(c.percent * 10000) / 100;
-    const txt = Lang.text('BestiaryInfo.PercentCollected').replace('{Percent}', `${pct}%`);
-    this.pctEl.textContent = txt;
-    this.pctEl.title = `${c.unlocked}/${c.total}`;
-    this.barEl.style.width = `${c.percent * 100}%`;
+    const pct = this.progressPercent();
+    this.pctEl.textContent = Lang.text('BestiaryInfo.PercentCollected').replace('{Percent}', prettifyPercentDisplay(pct));
+    this.barFillEl.style.width = `${Math.min(1, Math.max(0, pct)) * 100}%`;
   }
 
-  /** 右侧详情栏（UIBestiaryEntryInfoPage.FillInfoForEntry；未选时空白态） */
+  /** 右侧详情栏（UIBestiaryEntryInfoPage 1:1）：未选 = 空面板（FillInfoForEntry(null)
+   *  :111-119 仅 _list.Clear()）；选中 = 类目序 Nameplate→Portrait→FlavorText→Stats→
+   *  ItemsFromCatchingNPC(1457 恒空)→ItemsFromDrops→Misc，每类目后 Separator、末线移除
+   *  （AddInfoToList :128-163）；类目内 IBestiaryPrioritizedElement 降序（:142 稳定）。
+   *  解锁门：NotKnown 名"???"；≥Stats 风味/属性真值；≥DropsNoRates 掉落行；
+   *  ≥DropsWithRates 真掉率（NPCStatsReportInfoElement :60/:125-129、ItemDrop :20-28） */
   private renderInfo() {
     const r = this.selected;
-    if (!r) {
-      this.infoEl.replaceChildren();
-      const hint = document.createElement('div');
-      hint.style.cssText = 'color:#8a90b8;text-align:center;margin-top:24px;';
-      hint.textContent = Lang.text('Mods.SandboxWorld.Bestiary.ClickHint');
-      this.infoEl.appendChild(hint);
-      return;
-    }
-    const st = r.state;
     this.infoEl.replaceChildren();
-    const h3 = document.createElement('h3');
-    h3.textContent = st > UnlockState.NotKnown ? r.name : '???';
-    this.infoEl.appendChild(h3);
-    const tags = document.createElement('div');
-    tags.className = 'sw-bst-tags';
-    const mkTag = (label: string, boss = false) => {
-      const t = document.createElement('span');
-      t.className = 'sw-bst-tag' + (boss ? ' boss' : '');
-      t.textContent = label;
-      tags.appendChild(t);
+    this.infoDraw = null;
+    if (!r) return;   // FillInfoForEntry(null) = 空面板（原版无占位提示）
+    const st = r.state;
+    const crimson = this.flow.isCrimson?.() ?? false;
+    const list: HTMLElement[] = [];
+    const mk = (cls: string): HTMLElement => {
+      const d = document.createElement('div');
+      d.className = cls;
+      list.push(d);
+      return d;
     };
-    mkTag(st > UnlockState.NotKnown ? Lang.text('BestiaryInfo.IfUnlocked') : Lang.text('Mods.SandboxWorld.Bestiary.Locked'));
-    if (isBossCredit(r.entry.creditId)) mkTag(Lang.text('BestiaryInfo.IsBoss'), true);
-    if (r.entry.kind === 'critter') mkTag(Lang.text('Mods.SandboxWorld.Bestiary.FilterCritter'));
-    if (r.entry.goldGate) mkTag(Lang.text('Mods.SandboxWorld.Bestiary.GoldCritter'));
-    this.infoEl.appendChild(tags);
-    // 出没环境（SpawnConditionBestiaryInfoElement 族，populator :802/:1661 注册序；
-    // 解锁门 = 非 NotKnown，FilterProviderInfoElement.cs:47-50——比属性更早可见）
-    if (st > UnlockState.NotKnown) {
-      const conds = bestiarySpawnConditions(r.npcId);
-      if (conds.length) {
-        const sec = document.createElement('div');
-        sec.className = 'sw-bst-sec';
-        sec.textContent = Lang.text('Mods.SandboxWorld.Bestiary.Environment'); // 原版信息页分区无独立 lang 键（与"掉落"同处理）
-        this.infoEl.appendChild(sec);
-        const wrap = document.createElement('div');
-        wrap.className = 'sw-bst-tags';
-        for (const c of conds) {
-          const t = document.createElement('span');
-          t.className = 'sw-bst-tag';
-          t.textContent = c.label;
-          wrap.appendChild(t);
-        }
-        this.infoEl.appendChild(wrap);
-      }
-    }
-    // 大头像（NotKnown = 原版 Icon_Locked ×0.15，drawPortrait 内分流；零轮廓泄露）
-    const canvas = document.createElement('canvas');
-    canvas.width = 96; canvas.height = 96;
-    canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
-    // ★SW-RB14d（FX37-F2）：除名登记面（同 grid 画布注——restore 永不来时 sweep 仍可重试）
-    canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
-    canvas.addEventListener('contextrestored', () => {
+    // ── Nameplate（NamePlateInfoElement :19-31）：NotKnown = "???"，24 高行居中 ──
+    mk('sw-bst-nameplate').textContent = st > UnlockState.NotKnown ? r.name : '???';
+    // ── Portrait（NPCPortraitInfoElement :21-97）：193×112；解锁才铺底图/叠层/星 ──
+    {
+      const wrapEl = mk('sw-bst-portrait');
+      wrapEl.innerHTML = `
+        <div class="sw-bst-portraitin"><div class="sw-bst-portraitbox">
+          <canvas width="189" height="108"></canvas>
+        </div>
+        <img class="sw-bst-pfront" alt="" src="${UI_BASE}UI_Bestiary_Portrait_Front.png" /></div>`;
+      const canvas = wrapEl.querySelector('canvas') as HTMLCanvasElement;
+      canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
+      canvas.addEventListener('contextrestored', () => {
+        this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
+      });
+      this.infoDraw = { canvas, npcId: r.npcId, st };
       this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
-    });
-    this.infoDraw = { canvas, npcId: r.npcId, st };
-    this.infoEl.appendChild(canvas);
-    this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
-    // 击杀数（NPCKillCounterInfoElement）
-    if (r.kills > 0 && st >= UnlockState.PortraitOnly) {
-      const row = this.infoRow(Lang.text('BestiaryInfo.Slain'), String(r.kills));
-      this.infoEl.appendChild(row);
-    }
-    // 风味文本（FlavorTextBestiaryInfoElement：解锁 ≥ Stats 才呈现，:21-24）：
-    // `Bestiary_FlavorText.npc_<名>` 直取，缺失回退最高优先出没环境的 biome 文本
-    if (st >= UnlockState.Stats) {
-      const flavor = bestiaryFlavorText(r.npcId, this.flow.isCrimson?.() ?? false);
-      if (flavor) {
-        const p = document.createElement('p');
-        p.style.cssText = 'margin:6px 0 2px;font-size:11px;line-height:1.5;color:#cfd6f2;'
-          + 'background:rgba(43,56,101,0.55);border-radius:4px;padding:6px;';
-        p.textContent = flavor;
-        this.infoEl.appendChild(p);
+      if (st > UnlockState.NotKnown) {
+        // 五角星（CreateStarsContainer :108-148）：Stat_Panel 56² @(10,6)，
+        // 星 14² x=1+10i，亮 = i < NpcBestiaryRarityStars
+        const stars = wrapEl.querySelector('.sw-bst-portraitin') as HTMLElement;
+        const sp = document.createElement('div');
+        sp.className = 'sw-bst-stars';
+        const v = bestiaryRarityStars(r.npcId);
+        for (let i = 0; i < 5; i++) {
+          const img = document.createElement('img');
+          img.alt = '';
+          img.style.left = `${1 + 10 * i}px`;
+          img.style.top = '1px';
+          img.src = `${UI_BASE}UI_Bestiary_Icon_Rank_${i < v ? 'Light' : 'Dim'}.png`;
+          sp.appendChild(img);
+        }
+        stars.appendChild(sp);
       }
     }
-    // 属性（NPCStatsReportInfoElement：UnlockState ≥ Stats 才可见）
+    // ── FlavorText（FlavorTextBestiaryInfoElement :16-33）：≥Stats，Stat_Panel 块 ──
     if (st >= UnlockState.Stats) {
-      // 稀有度星（ContentSamples.NpcBestiaryRarityStars：0-5；原版以星形图标列呈现，
-      // 此处以文本星近似并按星数着色 1-5 灰→金）
-      const stars = bestiaryRarityStars(r.npcId);
-      if (stars > 0) {
-        const starRow = this.infoRow(Lang.text('Mods.SandboxWorld.Bestiary.Rarity'), '★'.repeat(stars));
-        starRow.style.color = stars >= 4 ? '#e8c05a' : stars >= 2 ? '#b8c0d8' : '#8a90b8';
-        this.infoEl.appendChild(starRow);
+      const flavor = bestiaryFlavorText(r.npcId, crimson);
+      if (flavor) mk('sw-bst-spblock sw-bst-flavor').textContent = flavor;
+    }
+    // ── Stats（NPCStatsReportInfoElement :58-260 + NPCKillCounterInfoElement）────
+    if (st >= UnlockState.PortraitOnly) {
+      // 击杀计数（kills ≥ 1 才出，:27-30；无解锁门——kills>0 蕴含已解锁）
+      if (r.kills >= 1) {
+        const kEl = mk('sw-bst-kills');
+        const icon = this.itemIcon(321, 22);   // item 321 旗图（:74-80）
+        if (icon) kEl.appendChild(icon);
+        const sp = document.createElement('span');
+        sp.textContent = String(r.kills);
+        kEl.appendChild(sp);
+        this.bindTip(kEl, () => Lang.text('BestiaryInfo.Slain'));   // ShowDescription :91-97
       }
+      // 属性卡（NotKnown 整卡无；<Stats 值全 "?" :125-129）
       const v = VANILLA_NPCS[String(r.npcId)];
       if (v) {
-        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Life'), String(v.lifeMax)));
-        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Attack'), String(v.damage)));
-        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Defense'), String(v.defense)));
-        const kb = Math.round(v.knockBackResist * 100);
-        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Knockback'), `${kb}%`));
+        const hide = st < UnlockState.Stats;
+        const coins = npcValueOf(r.npcId);
+        const sEl = mk('sw-bst-stats' + (coins > 0 && !hide ? ' hascoins' : ''));
+        const coinTiers = hide ? null : this.coinTiers(coins);
+        if (coinTiers) {
+          const sepEl = document.createElement('div');   // 金币分隔线（:168-176）
+          sepEl.className = 'sw-bst-sep';
+          sepEl.style.position = 'absolute';
+          sepEl.style.left = '0';
+          sepEl.style.right = '0';
+          sepEl.style.top = '70px';
+          sEl.appendChild(sepEl);
+          const coinDefs: Array<[string, string, number, number]> = [
+            ['--bst-coinp', 'UI_Bestiary_Stat_Platinum', 3, 0],
+            ['--bst-coing', 'UI_Bestiary_Stat_Gold', 52, 0],
+            ['--bst-coins', 'UI_Bestiary_Stat_Silver', 100, 1],
+            ['--bst-coin1', 'UI_Bestiary_Stat_Copper', 149, 1],
+          ];
+          coinDefs.forEach(([vn, file, x], ci) => {
+            if (coinTiers[ci] === '-') return;   // 空档不画图标（:201-216）
+            const cEl = document.createElement('div');
+            cEl.className = 'sw-bst-statcoin';
+            cEl.style.left = `${x}px`;
+            cEl.style.background = `var(${vn}) center/47px 31px no-repeat`;
+            const sp = document.createElement('span');
+            sp.textContent = coinTiers[ci];
+            cEl.appendChild(sp);
+            sEl.appendChild(cEl);
+            void file;
+          });
+        }
+        const addStat = (cls: string, text: string, tipKey: string) => {
+          const s = document.createElement('div');
+          s.className = `sw-bst-stat ${cls}`;
+          const sp = document.createElement('span');
+          sp.textContent = text;
+          s.appendChild(sp);
+          this.bindTip(s, () => Lang.text(tipKey));   // ShowStats_* :262-292
+          sEl.appendChild(s);
+        };
+        // 击退分档（:124 KnockbackHigh>0.8 / Medium>0.4 / None≤0 / else Low）
+        const kbText = hide ? '???'
+          : v.knockBackResist > 0.8 ? Lang.text('BestiaryInfo.KnockbackHigh')
+            : v.knockBackResist > 0.4 ? Lang.text('BestiaryInfo.KnockbackMedium')
+              : !(v.knockBackResist > 0) ? Lang.text('BestiaryInfo.KnockbackNone')
+                : Lang.text('BestiaryInfo.KnockbackLow');
+        addStat('sw-bst-stat-hp', hide ? '???' : String(v.lifeMax), 'BestiaryInfo.Life');
+        addStat('sw-bst-stat-kb', kbText, 'BestiaryInfo.Knockback');
+        addStat('sw-bst-stat-atk', hide ? '???' : String(v.damage), 'BestiaryInfo.Attack');
+        addStat('sw-bst-stat-def', hide ? '???' : String(v.defense), 'BestiaryInfo.Defense');
       }
     }
-    // 掉落表（ItemDropBestiaryInfoElement：≥ DropsNoRates 列表，≥ DropsWithRates 带掉率）
+    // ── ItemsFromDrops（ItemDropBestiaryInfoElement :17-29 + UIBestiaryInfoItemLine）──
+    //  行序 = 规则注册序；世界难度门（专家/大师行 CanShowItemDropInUI）；
+    //  ≥DropsNoRates 才出（:20-22）；≥DropsWithRates 真掉率，否则 "???"（:95-99）
     if (st >= UnlockState.DropsNoRates) {
-      const sec = document.createElement('div');
-      sec.className = 'sw-bst-sec';
-      sec.textContent = Lang.text('Mods.SandboxWorld.Bestiary.Drops');
-      this.infoEl.appendChild(sec);
-      const drops = flattenDropsForNpc(r.npcId);
-      if (drops.length === 0) {
-        const none = document.createElement('div');
-        none.style.cssText = 'color:#8a90b8;';
-        none.textContent = Lang.text('Mods.SandboxWorld.Bestiary.NoDrops');
-        this.infoEl.appendChild(none);
-      }
-      const shown = drops.slice(0, 30);
-      for (const d of shown) {
-        const line = document.createElement('div');
-        line.className = 'sw-bst-drop';
-        const icon = this.itemIcon(d.item);
+      const difficulty = this.flow.isMaster?.() ? 2 : this.flow.isExpert?.() ? 1 : 0;
+      const drops = flattenDropsForNpc(r.npcId, difficulty);
+      for (const d of drops) {
+        const line = mk('sw-bst-drop');
+        if (st < UnlockState.Stats) void d;
+        const icon = this.itemIcon(d.item, 24);
         if (icon) line.appendChild(icon);
-        const nm = document.createElement('span');
-        nm.className = 'nm';
-        const iname = Lang.itemName(d.item) ?? String(d.item);
-        nm.textContent = iname + (d.min !== d.max ? ` ×${d.min}-${d.max}` : d.min > 1 ? ` ×${d.min}` : '');
-        const notes = [d.cond ? dropCondText(d.cond) : '', d.tag ? dropTagText(d.tag) : ''].filter(Boolean);
-        if (notes.length) {
-          const cd = document.createElement('span');
-          cd.className = 'cd';
-          cd.textContent = notes.join(' · ');
-          nm.appendChild(cd);
-        }
-        line.appendChild(nm);
-        if (st >= UnlockState.DropsWithRates && d.chance !== null) {
-          const rt = document.createElement('span');
-          rt.className = 'rt';
-          rt.textContent = dropRateText(d.chance);
-          line.appendChild(rt);
-        }
-        this.infoEl.appendChild(line);
+        const rt = document.createElement('span');
+        rt.className = 'rt';
+        const rangeTxt = d.min !== d.max ? ` (${d.min}-${d.max})` : d.min > 1 ? ` (${d.min})` : '';
+        rt.textContent = `${rangeTxt} ${st >= UnlockState.DropsWithRates && d.chance !== null ? dropRateText(d.chance) : '???'}`;
+        line.appendChild(rt);
+        // 悬停 = 轻量 MouseText 名字（原版 = 全量 item tooltip，登记债 B2）
+        this.bindTip(line, () => Lang.itemName(d.item) ?? `#${d.item}`);
+        void dropCondText; void dropTagText;   // 条件/档位文案随 B2 全量 tooltip 复用
       }
-      if (drops.length > shown.length) {
-        const more = document.createElement('div');
-        more.style.cssText = 'color:#8a90b8;';
-        more.textContent = Lang.text('Mods.SandboxWorld.Bestiary.MoreDrops', drops.length - shown.length);
-        this.infoEl.appendChild(more);
-      }
-    } else if (st === UnlockState.PortraitOnly) {
-      const hint = document.createElement('div');
-      hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
-      hint.textContent = r.entry.kind === 'town'
-        ? Lang.text('Mods.SandboxWorld.Bestiary.TalkToRecordMore')
-        : Lang.text('Mods.SandboxWorld.Bestiary.KillToRecordMore');
-      this.infoEl.appendChild(hint);
-    } else {
-      const hint = document.createElement('div');
-      hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
-      hint.textContent = r.entry.kind === 'town'
-        ? Lang.text('Mods.SandboxWorld.Bestiary.TalkToRecord')
-        : r.entry.kind === 'critter' ? Lang.text('Mods.SandboxWorld.Bestiary.DiscoverToRecord') : Lang.text('Mods.SandboxWorld.Bestiary.DefeatToRecord');
-      this.infoEl.appendChild(hint);
     }
+    // ── Misc（SpawnConditionBestiaryInfoElement 族 :42-77）：注册序 Stat_Panel 行 ──
+    if (st > UnlockState.NotKnown) {
+      for (const c of bestiarySpawnConditions(r.npcId)) {
+        const cond = mk('sw-bst-cond');
+        const img = document.createElement('img');
+        img.alt = '';
+        img.src = `${UI_BASE}UI_Bestiary_Icon_Tags_Shadow.png`;
+        const fx = c.priority % 16, fy = Math.floor(c.priority / 16);
+        img.style.backgroundImage = `url(${img.src})`;
+        img.style.backgroundSize = '480px 150px';
+        img.style.backgroundPosition = `${-30 * fx}px ${-30 * fy}px`;
+        img.style.backgroundRepeat = 'no-repeat';
+        img.removeAttribute('src');
+        cond.appendChild(img);
+        const sp = document.createElement('span');
+        sp.textContent = c.label;
+        cond.appendChild(sp);
+        this.bindTip(cond, () => c.label);
+      }
+    }
+    // 每类目后分隔线（:151-160），末类目线移除（:162 _list.Remove(item)）
+    const frag = document.createDocumentFragment();
+    let pendingSep = false;
+    for (const el of list) {
+      if (pendingSep) frag.appendChild(this.mkSep());
+      frag.appendChild(el);
+      pendingSep = true;
+    }
+    this.infoEl.appendChild(frag);
   }
 
-  private infoRow(label: string, value: string): HTMLElement {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const a = document.createElement('span');
-    a.textContent = label;
-    const b = document.createElement('span');
-    b.textContent = value;
-    row.append(a, b);
-    return row;
+  private mkSep(): HTMLElement {
+    const sep = document.createElement('div');
+    sep.className = 'sw-bst-sep';
+    return sep;
+  }
+
+  /** 金币四档（NPCStatsReportInfoElement :100-120）：铜计值 → 铂/金/银/铜，
+   *  空档 "-"（<1 即空，图标不画）；值钳 999/99/99/99 */
+  private coinTiers(value: number): string[] {
+    const v = Math.floor(value);
+    const clampN = (n: number, max: number) => String(Math.min(n, max));
+    const plat = v / 1_000_000 >= 1 ? clampN(Math.floor(v / 1_000_000), 999) : '-';
+    const gold = v / 10_000 >= 1 ? clampN(Math.floor((v % 1_000_000) / 10_000), 99) : '-';
+    const silver = v / 100 >= 1 ? clampN(Math.floor((v % 10_000) / 100), 99) : '-';
+    const copper = v >= 1 ? clampN(v % 100, 99) : '-';
+    return [plat, gold, silver, copper];
+  }
+
+  /** 选中条目（Click_SelectEntryButton → SelectEntryButton，UIBestiaryTest.cs:486-495：
+   *  DeselectEntryButton + _infoSpace.FillInfoForEntry——**只重渲详情栏,网格不动**）。
+   *  ★FX37(2026-09-11):曾走 refresh() 全量重建——每选一次=81 格画布+~400 节点+
+   *  ~330 监听器整体重造(probe ΔNodes 4992/ΔListeners 3924 每 12 击),原版无此面。
+   *  ★BJ506：原版无选中持久视觉（_selectedEntryButton 写后不读）——旧 .sel 外描
+   *  自创面拆除，选中只填详情栏。 */
+  private selectRow(r: BestiaryRow): void {
+    // ★SW-RB14d（FX37-F3）：行按 creditId 从 tracker 现取——闭包行 r 是上次
+    //  refreshNow 的快照,面板开着时击杀/解锁推进后点击,详情栏会显示旧 kills/
+    //  NotKnown 态（原版 FillInfoForEntry 的信息元素 Update 每帧重读 tracker）。
+    //  重建网格的刷新路径本就传新行,现取对它们等价。
+    const fresh = bestiaryRows(this.flow.getTracker()).find((w) => w.entry.creditId === r.entry.creditId) ?? r;
+    this.selected = fresh;
+    this.renderInfo();
+    this.scheduleBlankSweep();
   }
 
   close() {
     window.removeEventListener('keydown', this.escHandler, true);
-    this.gridWrap?.removeEventListener('wheel', this.wheelHandler);
-    this.closeFilterGrid();   // 弹层外点击监听挂 document——面板关时必须一并摘除
+    this.closePops();
+    this.hideTip();
     if (this.roTimer) { clearTimeout(this.roTimer); this.roTimer = 0; }
     this.ro?.disconnect();
     this.ro = null;

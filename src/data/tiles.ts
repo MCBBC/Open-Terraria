@@ -1014,8 +1014,11 @@ const PRIV_TILE_STABLE: Record<string, number> = {
   dirt: 1029,                                      // sheet=0 让位存档 air 哨兵(★曾误派 1028 与 pixel_block
                                                     //  冲突→pixel_block 双表被丢→图片方块群存档即变 air 丢失)
 };
-/** internal id → 稳定 id(保存方向;serialize 内联查表) */
-export const TILE_STABLE_OF_INTERNAL = new Uint16Array(TILE_DEFS.length);
+/** internal id → 稳定 id(保存方向;serialize 内联查表)。
+ *  ★2026-10-04 const→let(mod 注册面):registerModTile 运行时接长重建(plan-A 物品
+ *  恒等表同式;消费面 census=serialize/WldImport/WldExport/本文件 4 处全为下标读,
+ *  无 .length 消费——零 mod 时数组不重建,与现状恒等) */
+export let TILE_STABLE_OF_INTERNAL = new Uint16Array(TILE_DEFS.length);
 /** 稳定 id → internal id(加载方向;0=air 未映射) */
 export const TILE_INTERNAL_OF_STABLE = new Uint16Array(2048);
 for (let i = 1; i < TILE_DEFS.length; i++) {
@@ -2235,3 +2238,36 @@ wallDef({ id: 366, key: 'w366_boulderblockwall', name: '', mapColor: '#FF00FF', 
 
 // 墙 key→id 回填（id 即原版 wld 墙 id）
 WALL_DEFS.forEach((d) => { if (d) WALL_BY_KEY[d.key] = d.id; });
+
+// ===================== Mod tile 注册面（2026-10-04,docs/mod-loader-design.md §1） =====================
+// mod tile = TILE_DEFS 数组追加(运行时,internal id=当前长度)+ 稳定段 1030-2047 空闲区
+// （PRIV_TILE_STABLE 表尾 1029 之后,append-only 纪律;**不扩容**——联机 tile 通道 u16
+// 语义不动=零破坏决策）。渲染走 vanilla.sheet 伪 sheet id（=stable id,mod tile 恒等式）,
+// vmeta 由 mod 资产通道运行时注册（mods/assets.ts）。帧模式缺省 'style'
+// （tileframe-program 代码生成程序只覆盖原版——style/blend 旧路径为 mod 通道）。
+export function registerModTile(d: Partial<TileDef> & { key: string }, stableId: number): number {
+  if (!d.key.startsWith('mod_')) throw new Error(`[mod-tile] key 须 mod_ 前缀: ${d.key}`);
+  if (TILE_BY_KEY[d.key] !== undefined) throw new Error(`[mod-tile] 重复注册: ${d.key}`);
+  if (!(stableId >= 1030 && stableId <= 2047)) throw new Error(`[mod-tile] stableId 越段: ${stableId}`);
+  if (TILE_INTERNAL_OF_STABLE[stableId] !== 0) throw new Error(`[mod-tile] stableId 冲突: ${stableId}`);
+  const id = TILE_DEFS.length;
+  TILE_DEFS.push({
+    name: d.key, solid: false, platform: false, decor: false, framed: false,
+    opacity: 0, pick: -1, axe: -1, mapColor: '#000', blend: false, ...d, id,
+    vanilla: { sheet: d.vanilla?.sheet ?? stableId, frame: d.vanilla?.frame ?? 'style',
+               fw: d.vanilla?.fw, fh: d.vanilla?.fh },
+  } as TileDef);
+  TILE_BY_KEY[d.key] = id;
+  TILE_STABLE_OF_INTERNAL = ensureU16Capacity(TILE_STABLE_OF_INTERNAL, id);
+  TILE_STABLE_OF_INTERNAL[id] = stableId;
+  TILE_INTERNAL_OF_STABLE[stableId] = id;
+  return id;
+}
+/** Uint16Array 容量接长(拷旧段原值+新段补 0;vanilla 段是 internal→stable 非恒等映射,
+ *  必须整段拷贝保真——补 0=未映射语义,稳定 id 0=air 哨兵不冲突) */
+function ensureU16Capacity(prev: Uint16Array<ArrayBuffer>, minLen: number): Uint16Array<ArrayBuffer> {
+  if (minLen < prev.length) return prev;
+  const next = new Uint16Array(minLen + 1);
+  next.set(prev);
+  return next;
+}

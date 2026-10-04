@@ -1427,6 +1427,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       getTracker: () => g.world.bestiary,
       atlas,
       isCrimson: () => g.world.crimson,
+      // BJ506：掉落行世界难度门（ItemDropBestiaryInfoElement.ShouldShowItem →
+      // CanShowItemDropInUI 的 NotExpert/IsExpert/IsMasterMode 条件语义）
+      isExpert: () => g.world.isExpert,
+      isMaster: () => g.world.isMaster,
       onBack: () => {
         if (!wasPaused) g.paused = false;
         if (!wasBlocking) g.input.uiBlocking = false;

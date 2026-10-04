@@ -10491,6 +10491,17 @@ export class UI {
    *  → :17629-17632 ScrollCraftingList 同拍仍走 = 网格分页与列表焦点同滚(逐字)。
    *  窗口级监听:网格容器 pointer-events:none(空档不拦世界点击,原版空档不置
    *  mouseInterface 同相),wheel 事件不经容器冒泡,故挂 window 一次(重建守卫)。 */
+  /** ★BJ505 fancy 覆层面板滚轮独占域:事件 target 是否落在开启中的面板子树内。
+   *  判式=closest 根类命中(与 domTargets.isDomUiTarget 同式 duck-type:
+   *  typeof closest==='function' 桩语义——无 target/无 closest 的测试桩回 false
+   *  =不拦,bj103 桩事件流零扰);名单=滚轮独占面(成就面板/图鉴面板根类,
+   *  挂 body 顶层语境,closest 判定不依赖挂载点),后续覆层面板按需登记。 */
+  private vinvWheelInFancyPanel(e: WheelEvent): boolean {
+    const t = e.target as { closest?: (s: string) => unknown } | null;
+    return typeof t?.closest === 'function'
+      && t.closest('.sw-ach-panel, .sw-bst') != null;
+  }
+
   private vinvBindGridWheel(): void {
     if (this.vinvGridWheelBound) return;
     this.vinvGridWheelBound = true;
@@ -10510,6 +10521,23 @@ export class UI {
     //   游戏全暂停态总门——rb15d H4 禁门锁:autoPause∧背包开滚轮须保持活面）。
     if (this.game.focusPaused) return;
     if (this.invPanel.style.display !== 'block') return;   // playerInventory 门(:17547)
+    // ★BJ505（2026-10-04 用户实报「滚动成就/图鉴面板,左侧配方列表跟随滚动」）fancy
+    //   覆层面板滚轮独占门:事件 target 落在开启中的 fancy 面板子树内 → 游戏域两支
+    //   (Pips 网格分页/列表轮播)整体让路。原版锚:UserInterface.cs:219-222 滚轮只派发
+    //   hover 命中链(_currentState.GetElementAt(MousePosition)→UIElement.ScrollWheel
+    //   沿 Parent 冒泡,UIElement.cs:542-552),不在链上的配方列表收不到事件;
+    //   IngameFancyUI.Draw 悬停面板即 mouseInterface=true(IngameFancyUI.cs
+    //   IsElementUnderMouse 臂)=游戏域交互冻结 → 面板滚动区独占=用户可见语义
+    //   (原版 DoScrollingInInventory :17591 虽无 hover 门,但 fancy UI 全屏覆盖、
+    //   配方列表不可见=可观测面无 bleed)。本仓面板=DOM 覆层(document.body 直挂,
+    //   不遮背包——RB15d-②「fancy 面板不收背包」同相登记),面板滚动 wheel 冒泡至
+    //   window 级本监听=bleed 通道;面板自滚面各自已消费(成就 .sw-ach-list 原生
+    //   overflow 滚/图鉴 gridWrap wheelHandler preventDefault 换页,vinvModernScrollBy
+    //   stopPropagation 同判例)。指针轴门,不触暂停轴(RB15d-H4:autoPause∧背包开
+    //   滚轮活面保持——本门在 focusPaused 门之后);两面板关闭=DOM remove
+    //   (AchievementsUI.closeAchievementsPanel/BestiaryPanel.close),覆层外 target
+    //   closest 失配=配方滚轮自动恢复(BJ505 测试④)。
+    if (this.vinvWheelInFancyPanel(e)) return;
     const c = this.vinvLayoutCtx;
     if (!c) return;
     const avail = this.vinvCraftAvailV.length;

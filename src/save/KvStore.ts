@@ -173,6 +173,45 @@ export async function rpDeleteZip(id: string): Promise<void> {
   } catch { /* IDB 不可用忽略 */ }
 }
 
+// ---- mod 包 zip blob('mod:zip:' 前缀键;2026-10-04 mod loader,与 rp 同款零升级策略) ----
+
+export async function modPutZip(id: string, blob: Blob): Promise<boolean> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(blob, `mod:zip:${id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch { return false; }
+}
+
+export async function modGetZip(id: string): Promise<Blob | null> {
+  try {
+    const db = await openDb();
+    return await new Promise<Blob | null>((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(`mod:zip:${id}`);
+      req.onsuccess = () => resolve(req.result instanceof Blob ? req.result : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+export async function modDeleteZip(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(`mod:zip:${id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch { /* IDB 不可用忽略 */ }
+}
+
 // ---- remaster blob store(v2;素材包混合 sheet png 持久化) ----
 
 export interface RemasterPackRow {
