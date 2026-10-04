@@ -5,7 +5,7 @@
 import { ModStore, type ModRow } from './store';
 import { readModPack } from './pack';
 import { getModLoadResult } from './loader';
-import { loadModConfigValues, type ModConfigState } from './config';
+import { loadModConfigValues } from './config';
 import { Lang } from '../i18n/Lang';
 
 let panel: HTMLElement | null = null;
@@ -93,15 +93,14 @@ export function openModsPanel(): void {
     for (const row of rows) listEl.appendChild(rowEl(row));
   };
 
-  // ---- 配置编辑(P2):声明式 config 表 → 内联控件;变更即持久化(重载后生效面
-  //      由 mod 自身读取语义决定——sw.config.get 恒读最新值) ----
-  const configStates = new Map<string, ModConfigState>();
+  // ---- 配置编辑(P2/P4 红蓝修正 D-m4):声明式 config 表 → 内联控件;变更落 kv。
+  //      ★语义:本面板编辑的是独立实例,entry 已持有的 sw.config 实例【重载后才
+  //      感知新值】(与 ReloadToApply 哲学一致;旧注释"恒读最新值"系误导) ----
   const attachConfig = (root: HTMLElement, row: ModRow): void => {
     const manifest = getModLoadResult()?.loaded.find((l) => l.manifest.id === row.id)?.manifest;
     const cfg = manifest?.config;
     if (!cfg || Object.keys(cfg).length === 0) return;
     void loadModConfigValues(row.id, cfg).then((state) => {
-      configStates.set(row.id, state);
       const block = document.createElement('div');
       block.className = 'cfg';
       for (const [k, e] of Object.entries(cfg)) {

@@ -213,6 +213,46 @@ const f6 = await page2.evaluate(async () => {
 check('F6 面板三路可见(空查询/id/GLM)', f6.inEmpty === true && f6.byId === true && f6.byName === true,
   JSON.stringify(f6))
 
+// ---- ⑩ 登记债补齐三断言(G6 头像/入驻条件面/$变体键) ----
+const debts = await page2.evaluate(async (id) => {
+  const out = {}
+  // G6:Detailed 头像 blob url 已登记 + portraitForNpc 命中
+  const { portraitForNpc, modPortraitUrl } = await import('/src/data/npcPortraits.ts')
+  out.portraitUrl = modPortraitUrl(id)
+  out.portraitHit = portraitForNpc({ vanillaId: id }) === out.portraitUrl && !!out.portraitUrl
+    && String(out.portraitUrl).startsWith('blob:')
+  // 入驻条件面:合成注册一只带 minTownNpcs=99 的 mod 城镇 NPC(id 802 空段),
+  // 当前在场数 << 99 → 必 false;minTownNpcs=1 → true
+  const { registerModTownNpc, modTownArrivalEntries } = await import('/src/data/vanillaNpcs.ts')
+  registerModTownNpc('mod_testx_cond', 802, 10, 'testx', { minTownNpcs: 99 })
+  const g = window.__swGame
+  const n = g.entities.npcs.filter((e) => e.npcKey).length
+  const gate = modTownArrivalEntries(() => false, {
+    townNpcCount: n, hasKey: () => false, flag: () => false,
+  })
+  out.condBlocked = gate.find(([k]) => k === 'mod_testx_cond')?.[1] === false
+  registerModTownNpc('mod_testx_cond', 802, 10, 'testx', { minTownNpcs: 1 })
+  const gate2 = modTownArrivalEntries(() => false, {
+    townNpcCount: n, hasKey: () => false, flag: () => false,
+  })
+  out.condPassed = gate2.find(([k]) => k === 'mod_testx_cond')?.[1] === true
+  // 无条件候选(GLM娘)不受语境缺省影响
+  out.unconditional = gate.find(([k]) => k === 'mod_glmgirl_glm_girl')?.[1] === true
+  // $变体键:overlay 进 variations 后 tryGetVariation 可取
+  const { languageManager } = await import('/src/i18n/LanguageManager.ts')
+  languageManager.mergeModLangPack({
+    'zh-Hans': { 'Mods.testx.Var': { 'greet$1': '变体一号', 'greet$2': '变体二号' } },
+  })
+  out.var1 = languageManager.tryGetVariation('Mods.testx.Var.greet', '1') === '变体一号'
+  out.var2 = languageManager.tryGetVariation('Mods.testx.Var.greet', '2') === '变体二号'
+  return out
+}, NPC_ID).catch((e) => ({ evalFail: String(e).slice(0, 200) }))
+check('G6 对话头像 blob url 登记+命中', debts.portraitHit === true, String(debts.portraitUrl).slice(0, 60))
+check('入驻条件面门控(99阻断/1放行/无条件不受扰)',
+  debts.condBlocked === true && debts.condPassed === true && debts.unconditional === true,
+  JSON.stringify(debts))
+check('$变体键 overlay 可取', debts.var1 === true && debts.var2 === true, JSON.stringify(debts))
+
 await page2.screenshot({ path: 'shots/glmgirl-final.png' })
 console.log('screenshots: shots/glmgirl-idle.png / glmgirl-dialog.png / glmgirl-final.png')
 console.log(`\n${pass} passed, ${fail} failed`)

@@ -97,17 +97,23 @@ describe('集火槽失效清除（Player.cs:57682-57685 每 tick）', () => {
     player.fixedUpdate(1 / 60, hooks);
     expect(player.minionTargetId).toBe(-1);        // 旧实现无此清除 = 槽悬挂
   });
-  it('② 目标离玩家 >3000px → 清 -1;≤3000 保留', () => {
+  it('② 目标离玩家 Hitbox.Distance >3000px → 清 -1;≤3000 保留（★BJ512 盒距 oracle 重产:原版 :57684 读 npc.Hitbox.Distance(player.Center)=XNA Rectangle.Distance 盒外最近边/盒内 0——旧实现按【中心距】量=大体型敌窗内误清除偏差,已随 BJ512 修正,本测同步重产）', () => {
     const near = mkEnemy(31, 60 * 16, 90 * 16);
-    // 距离按【中心距】量（玩家 cx=x+10）——far.cx = player.cx + 3001
-    const far = mkEnemy(32, 60 * 16 + 10 + 3001, 90 * 16);
+    // 盒距量：far 盒左缘 = player.cx + 3001（玩家 cx=x+10,w=20 → 右缘 pcx+10）
+    const far = mkEnemy(32, 60 * 16 + 10 + 3001 + 8, 90 * 16);
     const { player, hooks } = makeHooks([near, far]);
     player.minionTargetId = 32;
     player.fixedUpdate(1 / 60, hooks);
-    expect(player.minionTargetId).toBe(-1);        // 超 3000
+    expect(player.minionTargetId).toBe(-1);        // 盒距 3001 超 3000
     player.minionTargetId = 31;
     player.fixedUpdate(1 / 60, hooks);
     expect(player.minionTargetId).toBe(31);        // 近距保留
+    // 判别面：中心距 3005>3000 但盒距 2997≤3000 → 保留（旧中心距实现在此必红）
+    const big = mkEnemy(33, 60 * 16 + 10 + 3005, 90 * 16);
+    const hooks2 = makeHooks([near, big]);
+    hooks2.player.minionTargetId = 33;
+    hooks2.player.fixedUpdate(1 / 60, hooks2.hooks);
+    expect(hooks2.player.minionTargetId).toBe(33);
   });
   it('③ 目标 !CanBeChasedBy（lifeMax≤5 critter 族 :91141）→ 清 -1', () => {
     const critter = mkEnemy(41, 60 * 16, 90 * 16);

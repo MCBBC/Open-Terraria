@@ -1,10 +1,9 @@
-// L2 mod 入口 API 门面(2026-10-04 P1/P2)。entry.js 形状(刻意贴 tML 概念,知识可迁移):
+// L2 mod 入口 API 门面(2026-10-04 P1/P2/P4)。entry.js 形状(刻意贴 tML 概念,知识可迁移):
 //
 //   export default function main(sw) {
 //     sw.npcAi('demo_slime', (e, game, player) => { /* 接管 AI;不注册=走 aiStyle 家族 */ });
 //     sw.itemUse('demo_sword', (ctx) => { ctx.applyBuff('my_buff', 120); return true; });
-//     sw.projectile('demo_bolt', { texture: 'textures/proj/bolt.png', gravity: 0.1,
-//       pierce: 3, rotateToVelocity: true });
+//     sw.projectileHook('demo_bolt', { update(p, game) {}, onHit(p, enemy, game) {} });
 //     sw.buff('my_buff', { name: '神力', texture: 'textures/buff/might.png',
 //       onTick(player) { /* 自管效果 */ } });
 //     sw.system({ preUpdate(g,dt){}, postEntities(g,dt){}, postUpdate(g){},
@@ -12,6 +11,8 @@
 //     sw.config.get('power'); sw.config.set('power', 2);
 //     sw.log('ready');
 //   }
+//  ★弹幕内容走 content/projectiles/*.json 声明面(plan 期确定性分配 projId);
+//    sw.projectileHook 只挂代码钩(P4 红蓝修正 C-MINOR-7:头注曾误载不存在的 sw.projectile)
 //
 // 内容(物品/NPC/tile 数据)一律走 content/*.json 声明面(L1 单管线=确定性 id);
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
@@ -46,6 +47,17 @@ export interface ModContext {
     get(key: string): boolean | number | string;
     set(key: string, value: boolean | number | string): void;
   };
+  /** mod 弹幕分配 id(GLM娘 rivals 批新增:entry.js 无 import 面,AI 态机拿数字 id
+   *  计数/自造用;fail-fast) */
+  projIdOf(key: string): number;
+  /** mod NPC 分配 id(同上) */
+  npcIdOf(key: string): number;
+  /** 生成 mod 弹幕(npcAi 闭包内持 game,回传本面构造 ModProj 并入桶——L2 唯一
+   *  弹幕生成通道;ownerIsPlayer=false=mod NPC 弹打玩家) */
+  spawnProj(game: unknown, key: string, x: number, y: number, vx: number, vy: number,
+    damage: number, knockback?: number, ownerIsPlayer?: boolean): void;
+  /** 生成 mod NPC(rivals 批新增:多段体节/护卫体由主 AI 按需派生;入 enemies 桶) */
+  spawnNpc(game: unknown, key: string, x: number, y: number): void;
   log(...args: unknown[]): void;
 }
 
@@ -82,6 +94,31 @@ export function createModContext(
     },
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },
+    projIdOf(key) { return idOf('projs' as 'items', key); },
+    npcIdOf(key) { return idOf('npcs', key); },
+    // ★异步构造:动态 import ModProj(与 loader 的 entry 动态装载同型);AI 每 tick
+    //  调用高频路径,import 缓存后 microtask 内落桶,同 tick 内稍后帧可见=可接受
+    spawnProj(game, key, x, y, vx, vy, damage, knockback = 2, ownerIsPlayer = false) {
+      const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
+      const pid = alloc.projs.get(full);
+      if (pid === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册弹幕: ${key}`);
+      const g = game as { entities: { add(e: unknown, bucket: string): void } };
+      void import('../entities/ModProj').then(({ ModProj }) => {
+        g.entities.add(new ModProj(x, y, vx, vy, damage, knockback, pid, ownerIsPlayer), 'projectiles');
+      });
+    },
+    // ★多段体节通道(rivals 批):key→分配 id→**Enemy.fromVanilla**(占位 ctor 不自载
+    //   def——'v_*' key 只是占位,必须 fromVanilla 覆写;与 debugSpawnNpc 同链);
+    //   主 AI 侧用唯一性旗防重复派生
+    spawnNpc(game, key, x, y) {
+      const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
+      const nid = alloc.npcs.get(full);
+      if (nid === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册 NPC: ${key}`);
+      const g = game as { entities: { add(e: unknown, bucket: string): void } };
+      void import('../entities/Enemy').then(({ Enemy }) => {
+        g.entities.add(Enemy.fromVanilla(nid, x, y), 'enemies');
+      });
+    },
     config: {
       get: (key) => config.get(key),
       set: (key, value) => config.set(key, value),

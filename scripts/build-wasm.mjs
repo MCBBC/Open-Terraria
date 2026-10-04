@@ -24,7 +24,7 @@ const STAMP = join(GEN, 'build-stamp.json');
  *  自检约定:每模块必须零 import(任意环境可实例化承诺)+ <versionExport>()===abi。 */
 const MODULES = [
   { id: 'sm2', src: 'src/wasm/sm2.as.ts', abi: 1, versionExport: 'sm2Version' },
-  { id: 'light', src: 'src/wasm/light.as.ts', abi: 1, versionExport: 'lightVersion' },
+  { id: 'light', src: 'src/wasm/light.as.ts', abi: 2, versionExport: 'lightVersion' },   // v2=scan 核扩入(2026-10-04)
   { id: 'waves', src: 'src/wasm/waves.as.ts', abi: 1, versionExport: 'wavesVersion' },
 ];
 

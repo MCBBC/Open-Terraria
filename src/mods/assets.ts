@@ -13,6 +13,7 @@ import { discoverPackJsonPaths, readPackJson } from './pack';
 import { modProjRegs } from './hooks';
 import { modBuffRegs, registerModBuffIcon } from './buffs';
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
+import { registerModPortraitUrl } from '../data/npcPortraits';
 import type { VanillaTileMeta } from '../assets/SpriteAtlas';
 import type { ModItemContent, ModNpcContent, ModTileContent } from './types';
 
@@ -92,6 +93,17 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
           referenced.add(spec.head);
           inject(atlas, `vanilla/NPC_Head_${headIdx}.png`,
             await decodePngOrWarn(pack, modId, spec.head));
+        }
+      }
+      // ★G6 对话头像注入(登记债补齐 2026-10-04):Detailed 模式走 url <img>,
+      //   mod 包内 png 转 blob objectURL 登记注册面(npcPortraits.portraitUrl
+      //   对 mod id 优先查表);非浏览器环境(测试)无 objectURL 时跳过。
+      if (spec?.portrait && npcs.has(fullKeyOf(modId, spec.key))) {
+        const bytes = packTexBytes(pack, spec.portrait);
+        if (bytes && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+          referenced.add(spec.portrait);
+          registerModPortraitUrl(npcs.get(fullKeyOf(modId, spec.key))!,
+            URL.createObjectURL(new Blob([bytes.slice()], { type: 'image/png' })));
         }
       }
     }

@@ -136,8 +136,9 @@ describe('C9d2 ③ 编码-解码往返位等价（多帧演化）', () => {
         const out = enc.encodeDelta(st, reg, log);
         log.length = 0;                                    // 生产 send() 清空语义
         if (fr.expectEmpty) expect(out.meta[0]).toBe(0);
+        // ★债2 池化:整块 scratch 过境,有效长度随消息携带
         decoded = dec.decode({ op: 'frame', seq: f, enc: 'delta', rx: 0, ry: 0, rw: 0, rh: 0,
-          tiles: reg, delta: { dv: LIGHT_DELTA_VERSION, meta: out.meta, data: out.data } } as unknown as Parameters<typeof dec.decode>[0]);
+          tiles: reg, delta: { dv: LIGHT_DELTA_VERSION, meta: out.meta, data: out.data, metaLen: out.metaLen, dataLen: out.dataLen } } as unknown as Parameters<typeof dec.decode>[0]);
       }
       expectChannelsEqual(fresh, decoded, `f${f}`);
     }
@@ -161,7 +162,7 @@ describe('C9d2 ③ 编码-解码往返位等价（多帧演化）', () => {
     const g1 = sliceGeometry(st, 14, 12, 20, 14);
     const out1 = enc.encodeDelta(st, g1, []);
     const dec1 = dec.decode({ op: 'frame', seq: 1, enc: 'delta', rx: 0, ry: 0, rw: 0, rh: 0,
-      tiles: g1, delta: { dv: 1, meta: out1.meta, data: out1.data } } as never);
+      tiles: g1, delta: { dv: 1, meta: out1.meta, data: out1.data, metaLen: out1.metaLen, dataLen: out1.dataLen } } as never);
     const idx1 = 16 * g1.sw + 15;                 // 局部格 (15,16) = 世界 (15,16)（窗原点 (0,0):ry=12<16 钳制）
     expect(dec1.type[idx1]).toBe(0);              // 重建=影子旧值（空气）
     expect(dec1.type[idx1]).not.toBe(8);          // 与世界分歧（漏记面,登记债语义）

@@ -14,6 +14,7 @@
 //   权限门（PowerPermissionLevel）非授权点击拒绝提示；房主面板附权限调节区。
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
+import { getModLoadResult } from '../mods/loader';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import {
   JourneyPowersState, targetTimeRate, timeRateSliderOf, strengthOfDifficultySlider,
@@ -610,8 +611,14 @@ function buildJourneyBrowser(game: Game, body: HTMLElement): void {
    *  原版 ForEachItemWithResearchProgress（ItemsSacrificedUnlocksTracker :48-57）
    *  只列已捐物品,圣种这类未到手道具永远搜不到;本仓面板语义=全部道具可搜可取,
    *  研究进度仍作徽标展示（partial 暗槽态保留）,点击授予不再受研究门约束。
-   *  原版纪律本身不动：世界内获取/掉落/商店照旧 1:1）。 */
-  const sourceVids = (): number[] => Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number);
+   *  原版纪律本身不动：世界内获取/掉落/商店照旧 1:1）。
+   *  ★P6:mod 物品(vid≡30000+ 恒等域)入池——授予链 internalIdOfVid 对 mod vid
+   *  identity 成立;名称渲染走既定文本回退。 */
+  const sourceVids = (): number[] => {
+    const base = Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number);
+    const alloc = getModLoadResult()?.allocation;
+    return alloc ? [...base, ...alloc.items.values()] : base;
+  };
 
   const rebuild = () => {
     list = runBrowserQuery(sourceVids(), {

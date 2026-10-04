@@ -66,11 +66,14 @@ export class ModStore {
     await this.storage.setRegistry(JSON.stringify(rows));
   }
 
-  /** 安装:zip 字节落库 + 注册表行写 manifest 冗余字段。同 id 覆盖重装。 */
+  /** 安装:zip 字节落库 + 注册表行写 manifest 冗余字段。同 id 覆盖重装。
+   *  ★P4 红蓝修正(D-m3):putZip 失败(IDB 不可用)即抛——旧实现注册表照写,
+   *  UI 报"已安装"但 zip 未落,下次启动变"数据缺失"行 */
   async install(manifest: ModManifest, bytes: Uint8Array): Promise<ModRow> {
     const copy = new Uint8Array(bytes.length);
     copy.set(bytes);
-    await this.storage.putZip(manifest.id, new Blob([copy], { type: 'application/zip' }));
+    const ok = await this.storage.putZip(manifest.id, new Blob([copy], { type: 'application/zip' }));
+    if (!ok) throw new Error('zip 落库失败(存储不可用)');
     const rows = (await this.listRows()).filter((r) => r.id !== manifest.id);
     const row: ModRow = {
       id: manifest.id,

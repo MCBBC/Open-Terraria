@@ -332,11 +332,20 @@ class LanguageManager {
   }
 
   /** mod 类目表 overlay 进 LoadedPack(同 loadPackJson 语义:texts 覆盖、
-   *  groupedKeys 首插防重;★$变体键 mod v1 不支持,登记) */
+   *  groupedKeys 首插防重、$变体键走 variations 表——2026-10-04 登记债③补齐,
+   *  语义与 loadPackJson 逐行同相) */
   private overlayModPackInto(tables: LoadedPack, cats: Record<string, Record<string, string>>): void {
     for (const [cat, entries] of Object.entries(cats)) {
       const list = tables.groupedKeys.get(cat) ?? [];
       for (const [key, value] of Object.entries(entries)) {
+        const dollar = key.indexOf('$');
+        if (dollar > 0) {
+          const base = `${cat}.${key.slice(0, dollar)}`;
+          let variants = tables.variations.get(base);
+          if (!variants) { variants = new Map(); tables.variations.set(base, variants); }
+          variants.set(key.slice(dollar + 1), value);
+          continue;
+        }
         const fullKey = `${cat}.${key}`;
         if (!tables.texts.has(fullKey)) list.push(fullKey);
         tables.texts.set(fullKey, value);

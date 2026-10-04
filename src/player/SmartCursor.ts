@@ -136,9 +136,13 @@ export const SMART_CURSOR_DIRECTION_LOCKS: ReadonlyArray<readonly [number, numbe
 const SHEET_OF: number[] = new Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) SHEET_OF[i] = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
 
-/** 我方 tile id → 原版 sheet（无映射 -1） */
+/** 我方 tile id → 原版 sheet（无映射 -1）。
+ *  ★P5 红蓝修正(A-m4):mod tile(注册期追加,越载入期快照长度)live 直读——
+ *  伪 sheet≡stable 恒等式使平台连通锁等 sheet 域判定对 mod 平台成立 */
 export function sheetOf(t: number): number {
-  return t >= 0 && t < SHEET_OF.length ? SHEET_OF[t] : -1;
+  if (t >= 0 && t < SHEET_OF.length) return SHEET_OF[t];
+  const d = TILE_DEFS[t];
+  return d?.vanilla?.sheet ?? -1;
 }
 
 /** SmartCursorHelper.cs:167-175 UsingSmartCursorWithContinuity：手持放置物

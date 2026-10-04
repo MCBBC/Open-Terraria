@@ -15,5 +15,6 @@
   "HitSound": "NPCHit1",
   "DeathSound": "NPCDeath1",
   "texture": "npc/glm_girl.png",
-  "head": "npc/head.png"
+  "head": "npc/head.png",
+  "portrait": "npc/portrait.png"
 }

@@ -300,7 +300,9 @@ async function startEmbeddedDist() {
       if (urlPath === '/mods/index.json') {
         let list = [];
         try {
-          list = readdirSync(modsDir).filter((f) => f.toLowerCase().endsWith('.swmod')).sort();
+          // ★P4 红蓝修正(D-M2):index 列表口径与 GET 白名单对齐(带空格/Unicode 名
+          //  会被 GET 403,列出即触发客户端中断链)
+          list = readdirSync(modsDir).filter((f) => /^[A-Za-z0-9._-]+\.swmod$/i.test(f)).sort();
         } catch { /* 目录不可读=空列表 */ }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
         res.end(JSON.stringify({ mods: list }));

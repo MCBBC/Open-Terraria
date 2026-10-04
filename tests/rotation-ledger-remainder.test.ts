@@ -83,6 +83,7 @@ function drawWithFake(e: Enemy, w: WorldT, rect = { sw: 8, sh: 8 }): Array<{ m: 
     assets: { enemySprites: new Map() },
     atlas: { vnpc: () => rectStub, ensureVImage: () => null, vmisc: () => null },
     drawNpcGlow: () => {},
+    npcWhiteLiftQueue: [] as unknown[],   // ★BJ504：395 入队面（本测只断言 rotate/scale,队列丢弃）
   };
   (Renderer.prototype as unknown as { drawEnemy: (this: unknown, e: Enemy, w: WorldT) => void })
     .drawEnemy.call(fake, e, w);

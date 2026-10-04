@@ -32,8 +32,26 @@ const SLIME_PORTRAITS: Record<number, string> = {
   682: 'SlimeSurly',    // 红(闷)
 };
 
-/** 头像 URL（无头像 NPC 返回 null——原版该字典不含全部类型） */
+// ================= mod NPC 头像运行时注册面（2026-10-04 G6 补链） =================
+// mod 头像资源在 zip 内,不落 public/sprites(零 vanilla 面写入)——mods/assets.ts
+// 注入阶段把包内 png 转 blob objectURL 登记此处;portraitUrl 对 mod id 优先查本表。
+// Detailed 模式(url <img>)直接可用;CloseUp/Retro 用本体表帧 0 现算,与本表无关。
+const MOD_PORTRAIT_URL = new Map<number, string>();
+
+/** 登记 mod NPC 头像 blob url（幂等覆盖;页面生命周期内存活,不 revoke） */
+export function registerModPortraitUrl(npcId: number, url: string): void {
+  MOD_PORTRAIT_URL.set(npcId, url);
+}
+
+/** mod NPC 头像 url（未登记 = null） */
+export function modPortraitUrl(npcId: number): string | null {
+  return MOD_PORTRAIT_URL.get(npcId) ?? null;
+}
+
+/** 头像 URL（无头像 NPC 返回 null——原版该字典不含全部类型;mod id 先查运行时表） */
 export function portraitUrl(vanillaId: number): string | null {
+  const mod = MOD_PORTRAIT_URL.get(vanillaId);
+  if (mod) return mod;
   const name = NPC_PORTRAITS[vanillaId];
   return name ? `sprites/portraits/Portrait_${name}.png` : null;
 }

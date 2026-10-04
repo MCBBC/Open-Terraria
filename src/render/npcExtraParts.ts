@@ -380,6 +380,28 @@ export function duke370GetAlphaBoost(e: Enemy): { num: number; num9: number } | 
   return { num, num9 };
 }
 
+// ---- ★BJ504 GetAlpha 白提亮 40%（NPC.cs:94679-94684,type 395/519 同族,BJ503 登记债）----
+// 原版逐字（1457 NPC.cs:94679-94684,1458 对拍同号）：
+//   if (type == 395 || type == 519) { newColor = Color.Lerp(newColor, Color.White, 0.4f); return newColor; }
+// 395=火星飞碟核心 MartianSaucerCore（NPCID.cs:11861）/519=日耀黏液 SolarGoop（:12109,
+// 游戏名 Solar Spore）。早退支【绕过】GetAlpha 缺省尾（rgb×num、A=num5 全不乘）:
+// tint.rgb=lerp(光照.rgb,255,0.4)、tint.A=光照.A（GetColor 恒 255）。两型 SetDefaults
+// alpha 均为 0（NPC.cs:15446-15456/无 395 alpha 写点）→ num=1,与缺省面的差=纯白提亮项。
+// 机制定谳：本仓光照=compositeLight 全屏事后乘,lerp(L,White,a)=a+(1−a)·L 含【加性白项】,
+// 非常数通道向量（m·L 可分离要求 m 恒定,duke370 预乘对=通道因子域不覆盖）→ 走【双绘】
+// drawFairyBright 判例（583-585 同形支 Lerp(·,White,0.5) :94662-94665,α 复绘精确等价式
+// a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a)）——本体位捕获变换入队,7d' 光照合成后
+// source-over α=0.4 复绘同帧（Renderer.drawEnemy 收集 / 7d' 段消费）。
+// 不涉面：519 拖影粉（Main.cs:24643-24649 直用 Color.Pink,不经 GetAlpha）、
+// 395 GlowMask[49]（Main.cs:24957 固定色 (200,200,200,0),不经 GetAlpha）——均无白提亮。
+
+/** 395/519 GetAlpha 白提亮因子（NPC.cs:94679-94684 逐字 type 门）。null=非同族
+ *  （392/393/394 飞碟部件、516/518 同柱邻型、583-585/681/636 等 lerp 族他档均不在门内）。 */
+export function npcWhiteLiftAlpha(vid: number): number | null {
+  if (vid === 395 || vid === 519) return 0.4;   // :94679 两型同档 0.4
+  return null;
+}
+
 /** 预乘对烘焙缓存（key=tag|rect|m 四字节）。dustPremulBake 纯函数尺寸无关,
  *  直接喂 NPC 帧级 ImageData;LRU 溢出逐最旧（dukeBake 同式,勿整表 clear）。
  *  上限 160×(2 面×202×162×4B)≈42MB 最坏,实际工作集（帧×α 桶×decay 档）远低。 */
@@ -712,6 +734,12 @@ export interface NpcGhostOpts {
   mirror: boolean;      // 本体朝向镜像（spriteEffects 翻转）
   frameIdx: number;     // 当前帧序（FindFrame 值）
   frames: number;       // 帧数
+  /** ★BJ510 516 日耀耀斑残影改道发射器：提供时 516 分支不再实体层直绘（实体层
+   *  会被 compositeLight 乘光压暗,而原版残影=White 基色恒定不吃光照 :25570-25586
+   *  直读）,改为逐份发射参数由 Renderer 收进 towerGlowQueue 光照合成后消费
+   *  （BJ509/BJ510 判例域）。x/y=世界 px（hist 中心）;row=残影帧行;gs=缩放档;
+   *  alpha=原版 α 式（(10−i)/20×(1−i/6),不乘 Opacity）。 */
+  emit516Ghost?: (g: { x: number; y: number; rot: number; s: number; gs: number; alpha: number; row: number; addY: number }) => void;
 }
 
 /** 通用大表族残影参数（Main.cs switch :23429-23589）：count=num52/stride=num53/div=num55，
@@ -962,7 +990,20 @@ export function drawPreBodySpecialGhosts(
     for (let i = 6; i >= 0; i--) {
       if (i >= depth) continue;
       const ghostIdx = mod(o.frameIdx - 4 - i, 4);   // (row−4−i) mod 4（:25572-25580）
-      const a = ((10 - i) / 20) * (1 - i / 6) * o.opacity;
+      // ★BJ510 勘误：原版残影色=White×((10−i)/20) 再 Lerp→Transparent(i/6)（:25570-25578
+      //  逐通道直读）——【不乘 Opacity/不乘 npc.alpha】（旧式 ×o.opacity 把耀斑
+      //  α=220 恒态下的残影压到 13.7%=用户实报"下落弹效果不对"的拖尾缺失面）。
+      const a = ((10 - i) / 20) * (1 - i / 6);
+      if (o.emit516Ghost) {
+        if (a <= 0) continue;   // i=6 α=0=原版空 Draw,发射面跳过（队列项省一笔）
+        // ★BJ510 改道：固定 White 基色残影 → towerGlowQueue 光照合成后消费
+        //  （实体层直绘会被 compositeLight 乘光压暗=夜间拖尾消失,同 BJ509 判例域）
+        o.emit516Ghost({
+          x: gx(i), y: gy(i), rot: o.rot, s: o.scale,
+          gs: 0.35 + (1.2 - 0.35) * ((10 - i) / 10), alpha: a, row: ghostIdx, addY: o.addY,
+        });
+        continue;
+      }
       drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
         gx(i), gy(i), o.rot, o.mirror, o.scale, a,
         0.35 + (1.2 - 0.35) * ((10 - i) / 10), o.addY);

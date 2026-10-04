@@ -162,7 +162,7 @@ import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf, modTownArrivalEntries, MOD_NPC_OWNER } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf, modTownArrivalEntries, MOD_NPC_OWNER, townNpcKeyRestorable } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
 import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
@@ -183,9 +183,11 @@ import { checkBoulderFamily, isBoulderDestroying, boulderDestroyGuard,
 import { RollingBoulder } from '../entities/RollingBoulder';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/PlayerVoice';
-/** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
-const BUFF_BY_VANILLA = new Map<number, BuffType>();
-for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
+/** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致）。
+ *  ★P5 红蓝修正(A-m3 快照族)：载入期 Map 快照对 mod buff（注册期直写
+ *  BUFF_TYPE_BY_VANILLA 的伪 vanillaBuff 9000+ 段）不可见——改 live 转发
+ *  buffTypeByVanilla（Buffs.ts 反查 Map,mod 注册面已直写）。原版域行为恒等。 */
+const BUFF_BY_VANILLA = (v: number): BuffType | undefined => buffTypeByVanilla(v);
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
@@ -3144,7 +3146,7 @@ export function maintainMinionBuffs(
     if (m instanceof MinionProj && !m.dead) owned.set(m.projId, (owned.get(m.projId) ?? 0) + 1);
   }
   for (const { buff, projs } of MINION_BUFFS) {
-    const bt = BUFF_BY_VANILLA.get(buff);
+    const bt = BUFF_BY_VANILLA(buff);
     if (bt === undefined) continue;
     // ★BJ405 槽位门：buff 槽不在（右键取消/尚未授予）= 原版维护支整体不进——
     // 在役随从失去活体凭证 → 同拍直杀（见函数注的 timeLeft 桥建模）
@@ -3370,6 +3372,8 @@ export class Game implements GameHooks {
   sfx = new Sfx();
 
   running = false;
+  /** ★P4 红蓝修正(C-MINOR-8):destroy 幂等卫(mod onWorldUnload 等首调副作用防重放) */
+  private destroyed = false;
   paused = false;
   private acc = 0;
   /** 环境 cue 斜坡独立累加器（60Hz;暂停不停——UpdateAudio Main.cs:17222 同语义） */
@@ -3916,8 +3920,12 @@ export class Game implements GameHooks {
       // ★mod 弹幕（2026-10-04 P4）：kind12 专用通道——tag=projId（确定性分配，
       // 双端同 mod 集合恒同 id）；收端 spec 在册→ModProj 傀儡（快照跟随+寿命+视觉
       // 钩，不结算伤害=host 权威），缺 mod/旧端=剥条降级（null/白名单剥条,零崩溃）
+      // ★P6:hostile 位(bit7)——mod NPC AI 弹(!ownerIsPlayer)访客端对己结算
+      //  (netPuppetProjContact EVP 支,与 kind0/2/3 同谱;server 剥非房主置位=
+      //  伪造面已由既有墙覆盖)
       else if (p instanceof ModProj) {
         kind = 12; tag = String(p.projId);
+        if (!p.ownerIsPlayer && p.damage > 0) kind |= 0x80;
       }
       else if (p instanceof Arrow) {
         kind = 0; tag = String(p.projId ?? 1);
@@ -4580,11 +4588,14 @@ export class Game implements GameHooks {
         // ★mod 弹幕傀儡重建（2026-10-04 P4）：tag=projId——双端同 mod 集合=确定性
         // 分配恒同 id→spec 在册即重建（傀儡面=快照跟随+寿命+spec.update 视觉钩,
         // 伤害/tile 结算 host 权威不本地跑）；缺 mod/未注册=null 剥条（未知 kind
-        // 降级矩阵同款,零崩溃）。hostile 位不用于 mod 弹（P4 边界:敌对 mod 弹
-        // 的访客本地结算面未开放）
+        // 降级矩阵同款,零崩溃）。
+        // ★P6:bit7=hostile(mod NPC AI 弹)——傀儡带位,netPuppetProjContact EVP 支
+        //  对己结算(victim-settles;hitPlayer/statusPlayer 通用面直接消费)。
         const modPid = parseInt(s.tag, 10);
         if (!modProjSpecOf(modPid)) return null;
-        return new ModProj(s.x, s.y, s.vx, s.vy, s.dmg, 0, modPid, false);
+        const mp = new ModProj(s.x, s.y, s.vx, s.vy, s.dmg, 0, modPid, false);
+        mp.hostile = hostile;
+        return mp;
       }
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
@@ -7638,8 +7649,17 @@ export class Game implements GameHooks {
     this.world.pendingTownNpcs = [];
     this.guideSpawned = true;
     let droppedOldMan = false;   // 老人条目在直加循环被丢弃(幽灵 home/门口特例) → 重建门必须知情
+    let droppedModNpc = 0;       // 缺 mod 的 mod NPC 丢弃计数(降级语义=tML 同款移除,见 townNpcKeyRestorable)
     if (savedNpcs.length > 0) {
       for (const n of savedNpcs) {
+        // ★GLM娘实验批修复(2026-10-04 用户实报):mod 卸载后存档遗留的 mod NPC
+        //   走 ctor 的 `?? 22` 兜底=静默变身向导(贴图/名字/对话全错位)。原版缺
+        //   内容降级语义=移除(tML: 卸载 mod 的 NPC 不再生成;物品同构=??0 空气)。
+        //   守卫=重建前查 key 是否已注册,未注册跳过(下次存档自然不再序列化)。
+        if (!townNpcKeyRestorable(n.key)) {
+          droppedModNpc++;
+          continue;
+        }
         const t = new TownNPC(n.key, n.x, n.y);
         t.bound = !!n.bound;
         if (n.givenName) t.givenName = n.givenName;
@@ -7684,6 +7704,9 @@ export class Game implements GameHooks {
           continue;
         }
         this.entities.add(t, 'npcs');
+      }
+      if (droppedModNpc > 0) {
+        console.info(`[mods] 读档丢弃 ${droppedModNpc} 个缺 mod 的城镇 NPC(降级语义=tML 同款移除;重装对应 mod 后重新入驻)`);
       }
       // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界
       // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）。
@@ -8343,6 +8366,10 @@ export class Game implements GameHooks {
   }
 
   destroy() {
+    // ★P4 红蓝修正(C-MINOR-8):幂等卫——mod onWorldUnload 钩子面不设防,二次 destroy
+    //  会二次派发(新增直达路径即翻车);现网唯一入口 mainFlow 已有 running 门,本卫纵深
+    if (this.destroyed) return;
+    this.destroyed = true;
     runModOnWorldUnload(this);   // ★mod 系统 onWorldUnload（2026-10-04：拆实例最先调,钩子见完整世界态）
     // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
     this.net?.disconnect();
@@ -9272,6 +9299,24 @@ export class Game implements GameHooks {
       this.player.itemAnimTicks = 0;                          // :22386 itemAnimation=0
       this.player.useTime = 0;                                // :22387 itemTime=0
     }
+  }
+
+  /** ★BJ512（2026-10-05）抽站：右键集火选靶（ItemCheck_MinionAltFeatureUse 右键边沿
+   *  → MinionNPCTargetAim Player.cs:57587-57605）——fixedUpdate 右键支调用;独立成站
+   *  供 shell 直驱判别测试（全仓 0 处 new Game() 判例）。逐 NPC 扫:CanBeChasedBy 门
+   *  （:57592 `Main.npc[i].CanBeChasedBy(this) &&` 原文链首——缺门=训练假人 488/
+   *  伪装雕像 690 等 immortal/exclude 族可被右键锁定,集火消费侧虽拒
+   *  （MinionProj focus 支同门）但标记贴图照画=可见伪影）∧ Hitbox.Distance(mouseWorld)
+   *  最近者胜（盒距,入盒=0,npcHitboxDistance）;同目标再右键取消 toggle（:57598-57605）。 */
+  selectMinionAttackTarget(wx: number, wy: number): void {
+    let bestId = -1, bestD = Infinity;
+    for (const e of this.entities.enemies) {
+      const en = e as Enemy;
+      if (en.dead || !canBeChasedBy(en)) continue;
+      const d = npcHitboxDistance(en, wx, wy);
+      if (d < bestD) { bestD = d; bestId = en.id; }
+    }
+    this.player.minionTargetId = this.player.minionTargetId === bestId ? -1 : bestId;
   }
 
   private fixedUpdate(dt: number) {
@@ -10206,14 +10251,7 @@ export class Game implements GameHooks {
       const cw0 = held0 ? combatWeapon(ITEM_DEFS[held0.id]) : null;
       if (cw0 && cw0.kind === 'summon') {
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-        let bestId = -1, bestD = Infinity;
-        for (const e of this.entities.enemies) {
-          const en = e as Enemy;
-          if (en.dead) continue;
-          const d = npcHitboxDistance(en, wx, wy);
-          if (d < bestD) { bestD = d; bestId = en.id; }
-        }
-        this.player.minionTargetId = this.player.minionTargetId === bestId ? -1 : bestId;
+        this.selectMinionAttackTarget(wx, wy);
       }
     }
     // ★SW-FX19：集火目标失效清除已归位 Player.fixedUpdate（updateMinionAttackTarget,
@@ -13392,7 +13430,7 @@ export class Game implements GameHooks {
           const r = Math.floor(Math.random() * 3);
           btype = r === 0 ? 27 : r === 1 ? 101 : 102;
         }
-        const bt2 = BUFF_BY_VANILLA.get(btype);
+        const bt2 = BUFF_BY_VANILLA(btype);
         if (bt2 !== undefined) {
           p.buffs.apply(bt2, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
         }
@@ -13421,7 +13459,7 @@ export class Game implements GameHooks {
     const f = vid >= 0 ? itemFuncOfVid(vid) : null;
     if (!s || !f) return -1;
     if (f.buffType! > 0) {
-      const bt = f.buffType !== undefined ? BUFF_BY_VANILLA.get(f.buffType) : undefined;
+      const bt = f.buffType !== undefined ? BUFF_BY_VANILLA(f.buffType) : undefined;
       if (bt !== undefined && bt !== BuffType.Resistance) {   // 21 是副作用不主动施加
         p.buffs.apply(bt, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
       }
@@ -16356,10 +16394,10 @@ export class Game implements GameHooks {
           this.useSwing(heldDef);
           const vb = fairyBellVariant(Math.random);
           for (const old of [27, 101, 102]) {           // :52267-52272 先 DelBuff 三色
-            const bt = BUFF_BY_VANILLA.get(old);
+            const bt = BUFF_BY_VANILLA(old);
             if (bt !== undefined) p.buffs.remove(bt);
           }
-          const nb = BUFF_BY_VANILLA.get(vb);
+          const nb = BUFF_BY_VANILLA(vb);
           if (nb !== undefined) p.buffs.apply(nb, 60);  // AddBuff(num,3600)（:52273）
           this.playUseSound(425, 'pickup');             // UseSound Item25（Item.cs:6312-6326）
           p.useTime = useTimeOf(425);   // 20（Item.cs:6322）
@@ -16557,12 +16595,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (this.world.seedFlags?.getGoodWorld) {
             for (let k = 0; k < 3; k++) {                       // :42214-42222 三掷
               const vb = GETGOOD_TABLE[Math.floor(Math.random() * 18)];   // Next(18)
-              const bt = BUFF_BY_VANILLA.get(vb);
+              const bt = BUFF_BY_VANILLA(vb);
               if (bt !== undefined) p.buffs.apply(bt, 1800);    // time=108000t
             }
           } else {
             for (const vb of RED_BUFFS) {
-              const bt = BUFF_BY_VANILLA.get(vb);
+              const bt = BUFF_BY_VANILLA(vb);
               if (bt !== undefined) p.buffs.apply(bt, 3600);    // time=216000t
             }
           }
@@ -16708,8 +16746,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && this.consumableFuncGate(heldDef)) {
       // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
       // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
+      // ★P5 红蓝修正(A-m3 药水桥半边)：mod 物品（vid≡30000+ 段,registerModItemFunc
+      //  已写 FUNC 同表）走 vid 直查——旧 vi_ 正则门把 mod 消耗品整族挡在桥外
       const fm = /^vi_(\d+)_/.exec(heldDef.key);
-      const ff = fm ? itemFuncOfVid(+fm[1]) : null;
+      const modVid = (heldDef.vid !== undefined && heldDef.vid >= 30000) ? heldDef.vid : -1;
+      const potionVid = fm ? +fm[1] : modVid;
+      const ff = potionVid >= 0 ? itemFuncOfVid(potionVid) : null;
       // ★ 无消耗品语义（水晶/果/弓族等）不得空占本 else-if 槽位——否则链条后续
       // 全部分支被饿死（else-if 匹配即终止）。命中才处理，否则落空交还链条
       if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
@@ -16720,10 +16762,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  本仓 healBlocked ⟺ 药水病 21 在栏）。曾按项目惯例 toast+useTime30
           //  （📋 微差登记,docs/audit/item-audit-2026-08-22.md D 节「使用门」）——本批收口
         } else {
-          const fvid = fm ? +fm[1] : -1;
+          const fvid = potionVid;   // ★P5:mod 消耗品 vid 直通(药水病分档/诡药特判按 vid,mod vid 落 default 档)
           // 原版 buff id → BuffType（BUFF_DEFS 反查；耐药性 21 是治疗副作用不主动施加）
           if (ff.buffType && ff.buffType > 0) {
-            const bt = BUFF_BY_VANILLA.get(ff.buffType);
+            const bt = BUFF_BY_VANILLA(ff.buffType);
             if (bt !== undefined && bt !== BuffType.Resistance) {
               // ★SW-FX2：缺省 7200→3600——原版通用补挂缺省 = `num = item.buffTime;
               //  if (num == 0) num = 3600`（ItemCheck_UsePotionStuff Player.cs:5518-5524;
@@ -19191,7 +19233,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         {
           const pb = PALWORLD_MINION_BUFFS.find((x) => x.proj === cw.shoot)
             ?? MINION_BUFFS.find((x) => x.projs.includes(cw.shoot));
-          const bt = pb ? BUFF_BY_VANILLA.get(pb.buff) : undefined;
+          const bt = pb ? BUFF_BY_VANILLA(pb.buff) : undefined;
           if (bt !== undefined) this.player.buffs.apply(bt, 300); // 18000t
         }
         // 成就：9+ 随从（Player.cs:51059 num+num2>=9 → event 6 YOU_AND_WHAT_ARMY；
@@ -21120,7 +21162,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot >= MOD_PROJ_ID_BASE && modProjSpecOf(cw.shoot)) {
           const mp = new ModProj(spawnX, spawnY,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-            cw.damage, cw.knockback, cw.shoot, dmgKind !== 'magic');
+            cw.damage, cw.knockback, cw.shoot, true);   // ownerIsPlayer 恒 true(旧 dmgKind!=='magic'=frostEligible 语义错位地雷,红队 C-MINOR-5)
           placeAtShootSpawn(mp, spawnX, spawnY);
           this.entities.add(mp, 'projectiles');
           this.player.useTime = cw.useTime;
@@ -37178,7 +37220,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ---- mod 城镇NPC（GLM娘实验批 2026-10-04）——★本仓分歧（mod 内容面）：
       //  原版 num42 链无 mod 段；mod 候选垫在链尾（vanilla 全空缺时才轮到，
       //  vanilla 优先序零扰动），条件面 = 不在场即候选（modTownArrivalEntries）----
-      ...modTownArrivalEntries(has),
+      ...modTownArrivalEntries(has, {
+        townNpcCount: n,                          // num40 口径(与链内 n 同源)
+        hasKey: has,
+        flag: (name) => !!(this.world.flags as Record<string, unknown>)[name],
+      }),
     ];
     const pick = prio.find(([, ok]) => ok)?.[0];
     if (!pick) return;
@@ -45293,7 +45339,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           && !this.player.buffs.has(BuffType.FairyRed) && !this.player.buffs.has(BuffType.FairyGreen)) {
           vb = [27, 102, 101][Math.floor(Math.random() * 3)];   // Utils.SelectRandom(27,102,101)
         }
-        const bt = BUFF_BY_VANILLA.get(vb);
+        const bt = BUFF_BY_VANILLA(vb);
         if (bt !== undefined && !this.player.buffs.has(bt)) {
           this.player.buffs.apply(bt, 60);                        // AddBuff(num, 3600t)
           this.playUseSound((ITEM_DEFS[item.id]?.vid ?? -1), 'tink');    // miscEquips.UseSound（:17422）
@@ -45338,11 +45384,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if ((slot === 0 && this.petHidden) || (slot === 1 && this.lightPetHidden)) {
       const eq = this.player.inv.miscEquips[slot]!;
       const vb = petInfoOfVid(ITEM_DEFS[eq.id]?.vid ?? -1)?.buff;
-      const bt = vb !== undefined ? BUFF_BY_VANILLA.get(vb) : undefined;
+      const bt = vb !== undefined ? BUFF_BY_VANILLA(vb) : undefined;
       if (bt !== undefined) this.player.buffs.remove(bt);
       if (slot === 1 && vb === 27) {
         for (const fv of [102, 101]) {
-          const ft = BUFF_BY_VANILLA.get(fv);
+          const ft = BUFF_BY_VANILLA(fv);
           if (ft !== undefined) this.player.buffs.remove(ft);
         }
       }
@@ -45459,7 +45505,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const s = p.inv.slots[slot]!;
     const ff = itemFuncOfVid(ITEM_DEFS[s.id]?.vid ?? -1)!;
     if (ff.buffType && ff.buffType > 0) {
-      const bt = BUFF_BY_VANILLA.get(ff.buffType);
+      const bt = BUFF_BY_VANILLA(ff.buffType);
       if (bt !== undefined && bt !== BuffType.Resistance) {
         // ★SW-FX2：缺省 7200→3600（ItemCheck_UsePotionStuff Player.cs:5518-5524,主链同批注）
         p.buffs.apply(bt, Math.round((ff.buffTime ?? 3600) / 60));

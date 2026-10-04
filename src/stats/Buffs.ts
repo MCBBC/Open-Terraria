@@ -964,6 +964,14 @@ export const BUFF_NO_SAVE = new Set([
 const BUFF_TYPE_BY_VANILLA = new Map<number, BuffType>(
   (Object.keys(BUFF_DEFS) as unknown as BuffType[]).map((t) => [BUFF_DEFS[t].vanillaBuff, Number(t)]),
 );
+
+/** ★mod buff 反查注册面（2026-10-04 P4 红蓝修正 A-m2）：mod buff 落伪 vanillaBuff
+ *  9000+ 段,注册期直写反查 Map——存档 toSave 写伪 id / 读档 applySaved 反解闭环
+ *  （旧实现反查 Map 载入期快照,mod buff 存档后读档静默消失）。缺 mod 读档=反查
+ *  miss 静默丢弃（与原版未知 id 同款占位语义）。 */
+export function registerBuffVanillaReverse(vanillaBuffId: number, type: number): void {
+  BUFF_TYPE_BY_VANILLA.set(vanillaBuffId, type as BuffType);
+}
 /** vanilla buff id → BuffType 反查（导出版）。消费方 = 按原版 buff id 表驱动的授予链：
  *  敌弹 StatusPlayer（projTargets.statusPlayer，data/vanilla-statusplayer.json 的 b 字段）。
  *  未实装 buff 返回 undefined，调用方静默跳过 */

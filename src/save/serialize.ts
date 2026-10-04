@@ -297,8 +297,10 @@ export interface SaveData {
    *  自建世界缺省=无(走台账映射/缺省)。WldHeaderFields.fieldValue 快照优先 */
   wldSnap?: Record<string, number | boolean | string>;
   /** ★mod 清单（2026-10-04 P1,与 SaveMeta.mods 同构;serializeSave 从 meta 携行）。
-   *  旧档缺省 undefined=零迁移;读档缺失检测在 loadSaveData(mods/bridge 供数) */
-  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number }>;
+   *  旧档缺省 undefined=零迁移;读档缺失检测在 loadSaveData(mods/bridge 供数)。
+   *  ★P5:itemIds/tileIds 随档(id 平移完整解,见 SaveMeta.mods 注) */
+  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number;
+    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]> }>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -353,8 +355,11 @@ export interface SaveMeta {
   /** ★mod 清单（2026-10-04 P1）：保存时启用的 mod（name/version/内容计数）。
    *  三处 meta 装配（SaveFile saveGame/buildSaveParts + SaveClient doSave）经
    *  mods/bridge 供数——缺一处=worker/主线程路径落盘无键（BJ71 同族防漏喂）。
-   *  旧档缺省 undefined=键不落零迁移；读档缺失检测见 loadSaveData */
-  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number }>;
+   *  旧档缺省 undefined=键不落零迁移；读档缺失检测见 loadSaveData。
+   *  ★P5：itemIds/tileIds=存档期分配映射（id 平移完整解——读档构建
+   *  savedStable→currentStable 重映射） */
+  mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number;
+    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]> }>;
   /** ★IIIII20b：StarterNPC 换人一次性迁移标记（见 SaveData.header 同名注释） */
   starterSwapMigrated?: boolean;
   /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */

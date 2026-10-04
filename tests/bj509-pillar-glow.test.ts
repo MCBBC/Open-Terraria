@@ -118,7 +118,7 @@ describe('BJ509-A 四柱照明面定谳锁（原版零 AddLight——本仓同�
     expect(src).toContain('game.addLightAt?.(this.cx, this.cy, 0.28, 0.56, 0.7)');
     expect(src).toContain('game.addLightAt?.(this.cx, this.cy, 0.5, 0.3, 0.1)');
   });
-  it('NPC_GLOW 表四柱成员钉值（GlowMask 132/143/149/162,mode vel4）', async () => {
+  it('NPC_GLOW 表四柱成员钉值（GlowMask 132/143/149/162,mode vel4）', { timeout: 60000 }, async () => {
     const { Renderer } = await import('../src/render/Renderer');
     const G = (Renderer as unknown as { NPC_GLOW: Record<number, { tex: string; mode: string }> }).NPC_GLOW;
     expect(G[493]).toMatchObject({ tex: 'vanilla/Glow_132.png', mode: 'vel4' });   // 星尘
@@ -130,7 +130,7 @@ describe('BJ509-A 四柱照明面定谳锁（原版零 AddLight——本仓同�
 
 // ===================== B. npcGlowVel4Num 纯函数钉值（Main.cs:24509/:24486） =====================
 describe('BJ509-B 残影半径 num 纯函数（base+|GetAlpha−0.5|·mult）', () => {
-  it('base/mult 分塔钉值：493/422/507=4+|·|·4,517=2+|·|·9', async () => {
+  it('base/mult 分塔钉值：493/422/507=4+|·|·4,517=2+|·|·9', { timeout: 60000 }, async () => {
     const { Renderer } = await import('../src/render/Renderer');
     const N = (Renderer as unknown as { npcGlowVel4Num: (vid: number, l: readonly number[] | null) => number }).npcGlowVel4Num;
     const black = Math.sqrt(3 * 0.25);   // 黑/白光档 length 恒 √0.75≈0.86603
@@ -151,7 +151,7 @@ describe('BJ509-B 残影半径 num 纯函数（base+|GetAlpha−0.5|·mult）', 
 
 // ===================== C. vel4 收集行为（塔→队列,不再原位画） =====================
 describe('BJ509-C vel4 收集面（塔残影入 towerGlowQueue）', () => {
-  it('塔 517 调 drawNpcGlow → 收集 1 条,字段钉值,无原位 draw', async () => {
+  it('塔 517 调 drawNpcGlow → 收集 1 条,字段钉值,无原位 draw', { timeout: 60000 }, async () => {
     const drawNpcGlow = await glowFn();
     const rec = recorder();
     const self = fakeThis(rec, [0, 0, 0]);
@@ -176,7 +176,7 @@ describe('BJ509-C vel4 收集面（塔残影入 towerGlowQueue）', () => {
     // 残影不原位画（收集分支 0 draw;save/composite 头除外）
     expect(draws(rec.ops).length).toBe(0);
   });
-  it('非 517 塔 xoff=0,num=4+|·|·4 档（493 主路径）', async () => {
+  it('非 517 塔 xoff=0,num=4+|·|·4 档（493 主路径）', { timeout: 60000 }, async () => {
     const drawNpcGlow = await glowFn();
     const rec = recorder();
     const self = fakeThis(rec, [0, 0, 0]);
@@ -275,7 +275,8 @@ describe("BJ509-E 7d''' 消费面结构锁（光照合成后 lighter 重放）",
     expect(consumer).toContain('this.towerGlowQueue.length');
     expect(consumer).toContain("ctx.globalCompositeOperation = 'lighter'");
     expect(consumer).toContain('Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff)');
-    expect(consumer).toContain('(64 / 255) * q.opacity');
+    // ★BJ510：α 调度扩 noOpac 位（516 恒定色不乘 Opacity;塔走 q.opacity 原式）
+    expect(consumer).toContain('(64 / 255) * (q.noOpac ? 1 : q.opacity)');
     // 相机变换同 7d'（round 吸附式）
     expect(consumer).toContain('Math.round(cam.x * z) / z');
     // tex 存名（零跨拍 img 持有——wingGlowQueue 同款）

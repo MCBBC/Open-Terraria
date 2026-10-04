@@ -1396,13 +1396,19 @@ export class Player extends Entity {
    *  （:57682-57685,!CanBeChasedBy ∨ 距玩家中心 >3000px）。 */
   minionTargetId = -1;
 
-  /** ★SW-FX19：MinionAttackTargetNPC 失效清除（Player.cs:57682-57685 1:1）。 */
+  /** ★SW-FX19：MinionAttackTargetNPC 失效清除（Player.cs:57682-57685 1:1）。
+   *  ★BJ512：距离面由中心距改 Hitbox.Distance 1:1——原版读
+   *  `npc.Hitbox.Distance(base.Center)`（XNA Rectangle.Distance:盒外=点到矩形
+   *  最近边欧氏距离,盒内=0）;大体型敌（蠕虫节链/克眼等）中心距 >3000 而盒距
+   *  ≤3000 的窗内误清除面即此。语义同 Game.npcHitboxDistance（Game.ts 定义,
+   *  此处内联避免 entities→Game 环）。 */
   updateMinionAttackTarget(game: GameHooks): void {
     if (this.minionTargetId === -1) return;
-    const t = (game.enemies() as Array<{ id: number; dead: boolean; cx: number; cy: number }>)
+    const t = (game.enemies() as Array<{ id: number; dead: boolean; x: number; y: number; w: number; h: number }>)
       .find((e) => e.id === this.minionTargetId);
-    if (!t || t.dead || !canBeChasedBy(t)
-      || Math.hypot(t.cx - this.cx, t.cy - this.cy) > 3000) {
+    const dx = t ? Math.max(t.x - this.cx, 0, this.cx - (t.x + t.w)) : 0;
+    const dy = t ? Math.max(t.y - this.cy, 0, this.cy - (t.y + t.h)) : 0;
+    if (!t || t.dead || !canBeChasedBy(t) || Math.hypot(dx, dy) > 3000) {
       this.minionTargetId = -1;
     }
   }

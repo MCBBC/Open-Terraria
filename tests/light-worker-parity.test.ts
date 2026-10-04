@@ -295,8 +295,9 @@ describe('C9 光照 Worker 快照对拍（worker 驱动路径 ≡ 本地路径,�
         const out = enc.encodeDelta(worldA.store, tiles, log);
         log.length = 0;
         if (fr.expectEmptyDelta) expect(out.meta[0]).toBe(0);
-        else expect(out.meta.byteLength + out.data.byteLength).toBeLessThan(fullBytesOf(tiles));
-        msg = { ...buildEngineSnapshot(cap, tiles, f), enc: 'delta', delta: { dv: 1, meta: out.meta, data: out.data } };
+        else expect(out.metaLen * 4 + out.dataLen).toBeLessThan(fullBytesOf(tiles));
+        // ★债2 池化:meta/data=整块 scratch 过境,有效长度随消息携带（生产 send 同构）
+        msg = { ...buildEngineSnapshot(cap, tiles, f), enc: 'delta', delta: { dv: 1, meta: out.meta, data: out.data, metaLen: out.metaLen, dataLen: out.dataLen } };
         deltas++;
       }
       A.dirty = true;                                     // 本地路径每帧全周期（与 worker 同拍）

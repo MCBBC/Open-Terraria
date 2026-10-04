@@ -538,7 +538,8 @@ export class Enemy extends Entity {
   // 鞭 tag 态已于 1457 批 D 迁出（原 1456 单例 whipTagT/whipTagDmg/whipTagCrit/
   // whipTagItem/whipProcT/whipProcItem 六字段 + tick 递减退役）——1457 TagEffectStack
   // 挂玩家（Player.tagEffectStack,per-NPC 双表在栈内 Map）,查询走
-  // owner.tagEffectStack.anyTagged(id)/canProcOnNPC(type,id)。 WhipProj 命中侧写入、
+  // owner.tagEffectStack.isNPCTagged(id)/canProcOnNPC(type,id)（★BJ514：anyTagged
+  // 聚合查询退役——原版无此消费面）。 WhipProj 命中侧写入、
   // MinionProj/Arrow 命中侧消费。
   /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
   stepUp = true;
@@ -2234,7 +2235,9 @@ export class Enemy extends Entity {
     const eowSeg = this.vanillaId !== null && this.vanillaId >= 13 && this.vanillaId <= 15;
     const wormBody = this.wormFollow && !eowSeg;
     // 小动物（critter）优先走被动游荡，绝不落入 default 的追击 fallback
-    if (this.vanilla && !wormBody && this.vanilla.critter) {
+    if (this.vanilla && !wormBody && this.vanilla.critter && takeModNpcAi(this.vanillaId) === null) {
+      // ★P4 红蓝修正(C-MINOR-6):mod AI 已注册的 critter 不走被动游荡(旧序 npcAi
+      //  注册被 critter 前置支静默吞掉);原版 critter 域 takeModNpcAi 恒 null 零扰动
       this.critterWanderAI(game, hasPlayer ? player : null);
     } else if (this.vanilla && !wormBody) {
       const p = hasPlayer ? player : null;
@@ -15453,7 +15456,10 @@ export class Enemy extends Entity {
           if (!UNMAPPED_WARNED.has(id)) { UNMAPPED_WARNED.add(id); console.warn(`[NpcDrops] 物品 ${id} 无 key 映射，跳过`); }
         };
         const spawn = (id: number, n: number, px?: number, py?: number, vx0?: number, vy0?: number): ItemDrop | null => {
-          const key = VANILLA_ITEM_KEY_BY_ID[id];
+          // ★GLM娘 rivals 批修复:mod 物品(30000+ 段)不在原版 id→key 映射,掉落被
+          //   unmapped 静默吞。plan-A 后 internal≡stable≡vid,ITEM_DEFS[id].key 直接可查
+          //   (原版 id 两源同键,零漂移)。
+          const key = VANILLA_ITEM_KEY_BY_ID[id] ?? ITEM_DEFS[id]?.key;
           if (!key) { unmapped(id); return null; }
           // ★BJ390（2026-09-28）掉落词缀自然掷：CommonCode 三投掷口（DropItemFromNPC
           //  :20 / DropItemLocalPerClientAndSetNPCMoneyTo0 :29 / DropItemForEachInteracting

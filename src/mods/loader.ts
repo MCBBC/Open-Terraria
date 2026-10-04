@@ -10,7 +10,7 @@ import { readModPack } from './pack';
 import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from './plan';
 import { applyRegistrationPlan } from './register';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider } from './bridge';
+import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc } from './bridge';
 import { createModContext, type ModEntry } from './api';
 import { loadModConfigValues } from './config';
 import { modBuffTypeOf } from './buffs';
@@ -36,15 +36,25 @@ export { ModStore } from './store';
 export type { ModRow } from './store';
 
 // 存档头/读档检测供数(装载成功后注册;未装载=null=存档键不落/读档检测跳过)
-setSaveModsProvider(() => currentResult?.loaded.length
-  ? currentResult.loaded.map(({ manifest, counts }) => ({
-      id: manifest.id, version: manifest.version,
-      items: counts.items, tiles: counts.tiles, npcs: counts.npcs,
-    }))
-  : null);
-setEnabledModsProvider(() => currentResult?.loaded.length
+// ★P5:id 平移完整解——存档头携带每 mod 的分配映射(itemIds/tileIds,lastPlan 供数)
+let lastPlan: import('./types').RegistrationPlan | null = null;
+setSaveModsProvider(() => {
+  if (!currentResult?.loaded.length || !lastPlan) return null;
+  return currentResult.loaded.map(({ manifest, counts }) => ({
+    id: manifest.id, version: manifest.version,
+    items: counts.items, tiles: counts.tiles, npcs: counts.npcs,
+    itemIds: lastPlan!.itemSpecs
+      .filter((s) => s.modId === manifest.id)
+      .map((s) => [s.fullKey, s.stableId] as [string, number]),
+    tileIds: lastPlan!.tileSpecs
+      .filter((s) => s.modId === manifest.id)
+      .map((s) => [s.fullKey, s.stableId] as [string, number]),
+  }));
+});
+setEnabledModsProvider(() => currentResult
   ? currentResult.loaded.map(({ manifest }) => manifest.id)
-  : null);
+  : null);   // ★P4 红蓝修正(B-m1/D-M4):装载过(即使 0 mod)返空数组——全禁场景
+             // 缺失 toast 门(old: loaded.length===0 → null → 门恒 false)
 
 /** 装载结果单例(UI 面板/资产阶段/存档头消费) */
 let currentResult: ModLoadResult | null = null;
@@ -84,6 +94,7 @@ export async function loadModsPhase1(
   if (packs.length > 0) {
     try {
       const plan = buildRegistrationPlan(packs);
+      lastPlan = plan;
       validatePlanReferences(plan);
       applyRegistrationPlan(plan);
       result.allocation = plan.allocation;
@@ -141,7 +152,8 @@ export async function loadModsPhase1(
       }
       // ★worker 桥供数注册(2026-10-04):SaveClient/WorldGenClient 每次 worker(重)建
       //  时拉取推送——mod tile internal id 经 TILE_BY_KEY 反查(注册后即落表);
-      //  烘焙域另带 def 本体(保序直落,BakeProtocol ship 通道)
+      //  烘焙域另带 def 本体(保序直落,BakeProtocol ship 通道);
+      //  ★P5:itemKeys/tileKeys=当前分配映射(worker 读档重映射用)
       setModBridgeProvider(() => ({
         itemStableIds: [...plan.allocation.items.values()],
         tilePairs: plan.tileSpecs
@@ -155,7 +167,14 @@ export async function loadModsPhase1(
               : null;
           })
           .filter((e): e is { def: (typeof TILE_DEFS)[number]; internal: number; stable: number } => e !== null),
+        itemKeys: [...plan.allocation.items.entries()],
+        tileKeys: [...plan.allocation.tiles.entries()],
       }));
+      // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
+      setCurrentAlloc({
+        itemKeys: plan.allocation.items,
+        tileKeys: plan.allocation.tiles,
+      });
       for (const { manifest } of plan.mods) {
         result.loaded.push({
           manifest,
@@ -181,4 +200,5 @@ export async function loadModsPhase1(
 export function _resetModLoaderForTests(): void {
   currentResult = null;
   loadedPacks.length = 0;
+  lastPlan = null;
 }

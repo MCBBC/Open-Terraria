@@ -1,6 +1,7 @@
 // Mod 类型面(2026-10-04,P0 L1 数据 mod)。
 // 设计锚:game/docs/mod-loader-design.md;基线=session-13 规划(2026-08-11)。
 // 能力分层:L1 纯数据(本文件全部类型)/L2 脚本(P1)/L3 白名单补丁(P2+)。
+import type { ModTownArrivalSpec } from '../data/vanillaNpcs';
 
 /** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
 export interface ModManifest {
@@ -113,6 +114,11 @@ export interface ModNpcContent {
   /** 头贴(textures/ 相对路径;24×24,NPC_Head_{idx} 语义——住房UI行/地图图标/旗帜)。
    *  仅 townNPC 消费;索引由注册面自增分配 */
   head?: string;
+  /** 对话头像(textures/ 相对路径;Detailed 模式 <img> 用,mod 包内 png 走 blob
+   *  objectURL;CloseUp/Retro 用本体帧 0 现算,与本字段无关) */
+  portrait?: string;
+  /** 入驻条件(townNPC 消费;全缺省=不在场即候选;条件 AND) */
+  arrival?: ModTownArrivalSpec;
 }
 
 /** P2 弹幕内容(content/projectiles/*.json)。数据 spec=ModProj 内置缺省行为参数;
@@ -205,9 +211,14 @@ export interface ModLoadResult {
   allocation: ModIdAllocation | null;
 }
 
-/** 存档头 mod 清单项(serialize SaveData.mods 可选键) */
+/** 存档头 mod 清单项(serialize SaveData.mods 可选键)。
+ *  ★P5 id 平移完整解:itemIds/tileIds=存档期分配映射(fullKey→stableId)——读档
+ *  构建 savedStable→currentStable 重映射,卸/换前排位 mod 时后位 mod 内容不错位
+ *  (缺键=内容已移除→既有 ??0 占位语义)。 */
 export interface SaveModEntry {
   id: string;
   version: string;
   items: number; tiles: number; npcs: number;
+  itemIds?: Array<[string, number]>;
+  tileIds?: Array<[string, number]>;
 }

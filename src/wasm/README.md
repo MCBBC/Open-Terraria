@@ -256,3 +256,83 @@ ArmorGel=332 token)。超容量 → `sm2RunImage` 拒 0 → JS 回退。
   全量基线带宽,非 CPU 热核,登记;③node 域 JS 数字(2.5-2.9ms)仅作 V8 版本
   差记录,禁作为迁移判据(教训:**性能定谳必须在部署域测**,node 域基准会
   高估 JS 成本 4×)。
+
+## 11. 光照 scan 核刀(2026-10-04 第四刀;light 模块扩入,ABI v1→v2)
+
+- **移植源(唯一真值)**:`src/lighting/TileLightScanner.ts` 的 `exportTo` 主循环
+  (L898-1124)+ `surfaceSky`(L811-841)+ `hellSky`(L845-859)——逐语句 1:1
+  (行号锚);`lightExport()` 在 `light.as.ts`(与 blur 同模块:scan→blur 共享
+  r/g/b/mask 线性内存,省一次全量拷贝;`lightVersion()=2`,旧 v1 模块拒载)。
+- **★拆分定谳(本刀核心——exportTo=两段)**:
+  - **WASM 主循环**:GetTileMask/①天空·地狱·彩玻璃墙/②发光墙/③静态 tile 光/
+    ④液体光——纯算术+查表;产出 r/g/b/mask + **specialList(特例格索引)**。
+  - **JS 尾段**(`TileLightScanner.exportWasmTail`):③b `specialTileLight`
+    60-case 大 switch + ④特例格补支 + ⑤ perFrame 点光,位级 1:1 留 TS。
+  - **等价性论证**:③b/④ 均 max-merge(可交换);唯一例外 case 125
+    'gb-override'(G/B 直接覆写,序敏感)——WASM 对特例格【跳过 ④】,尾段按
+    JS 原序 ③b→④ 补跑 ⇒ 最终值逐位同。specialCell 密度=生产 <1% 格。
+- **三大耦合面定谳**(第二刀登记三问):
+  1. **FastRandom**:master 种子每 exportTo 恰推进 1 步(`reseed()`,TS 侧持链);
+     循环内所有局部掷=`localRandom(x,y)`≡`modifiedSeedOf((y*2654435761+x)|0,
+     masterSeed)` **纯函数**(无跨格链)⇒ 种子 f64 形参上传,AS 复刻
+     nextSeed48/modifiedSeedOf/nextBits/next/nextFloat(48 位整值 f64 精确;
+     nextBits 用 i64 右移=精确 floor 除 2 的幂,零 libm 依赖)。**RNG 链位级可达,
+     无需钉种子历史**。★哈希坐标=绝对世界坐标(worker 切片经 `hashOrigin`
+     平移还原,`runSnapshotOnEngine` 每帧注入;与 JS 尾段 localRandom shim 同锚)。
+  2. **FlickerClock**:scan 主循环=**纯读**(mouseTextColor/disco/demonTorch)
+     ——标量形参上传,无态机迁移;jellyfishCageMode(316-318)/shimmerBaseColor
+     (sin)/hslToRgb/timeForVisualEffects/globalTimeWrappedHourly 消费面全在
+     JS 尾段;hellV 的 sin 在 JS 侧预折算成 hellR/G/B 形参——**trig 零入 AS**。
+  3. **specialTileLight 60-case**:**非纯查表**(~20 case 动态:帧条件/局部 RNG/
+     邻格读/世界旗标)——整体留 TS 零移植风险;specialById 门表上传,AS 只路由。
+- **表上传**(模块一次;`getScanTablesPayload()` 与扫描器构造器逐项同源烘焙,
+  进程级缓存):per-type 表按 u16 全域 65536 sizing(blocks/noSun/cracked/
+  allowWater/mushroom/flicker/hasLight/special u8 + sheet i16 + lightR/G/B
+  **f32**[构造器同式舍入值域])+ wall 表 512(与 JS WN 同域)+ torch/glass/
+  paintColor f64 + LIGHT_TOGGLE axis/delta。★OOB type(≥TILE_DEFS.length)
+  生产不可达(setTile 只写注册表 id),全域 sizing 免逐格边界守卫;JS undefined
+  强制转换怪癖与 0 尾的微差=死路径偏差(登记)。
+- **窗口协议**:上传窗=store 内 [max(0,rx-1), min(st.w,rx+mw+1))×y 同式
+  (区域±1 邻格读域;13 通道行拷贝 ~17B/格)。InWorld(x,y,1) 折叠在窗口系
+  精确复现(证明:LightWorkerProtocol 头注同款数学,world-edge clamp 逐格同集合)。
+  主线程全量 store 与 worker 切片 store 走同一条上传路径。
+- **worker 旗通道**:沿用 `?lightwasm`(转正缺省开,`?lightwasm=0` 同时关两核);
+  快照协议仅增 `world.hashOrigin` 注入(3 行,位等价面——JS 支不经此)。
+- **验收闸**:`tests/light-wasm.test.ts`(31 测=blur 19 + scan 12:特征世界
+  全 case 类/FlickerClock 活跃三态/特例密集区含 gb-override×液体序敏感面/游戏形/
+  世界边缘折叠三态/微光域 dk<1/NaN 参数面[timeOfDay/mouseTextColor NaN——探针
+  曾抓出 ③ 合并 Math.max NaN 传播语义差,已修 maxJs]/worker 切片 rebase+hashOrigin
+  同锚/RNG 链 3 连拍等值/旗关·强置不可用·超容量三回退锁/性能 bench);
+  既有金标族(lighting-scan-blur-golden[旗开=自动锁 scan 位级]/light-worker-parity/
+  tile-light-specials/static-golden-1457/c9d 族)121/121 复绿。
+
+## 12. 第四刀实测数字(2026-10-04,M 系本机;node+活机双域)
+
+- **位级**:scan 12 测 + 全族 331/331 全绿(20 套件:light-wasm/scan-blur-golden/
+  worker-parity/tile-light-specials/static-golden-1457/fastrandom-golden/c9d 族/
+  redblue-r8/coating/tile-domain-sentinel 等);`lighting-scan-blur-golden` 在旗开
+  缺省态下自动成为 scan 核位级金标(day/night × scan/blur1/blur2 逐格 ===)。
+- **性能(node 域,min-of-40,JS vs WASM scan 全含[窗口上传+核+读回+JS 尾段])**:
+  | 口径 | JS | WASM | 比值 |
+  | --- | --- | --- | --- |
+  | 1080p 181×129(23.3k 格) | 0.81ms | 0.26ms | 3.2× |
+  | zoom-out 303×201(60.9k 格) | 2.14ms | 0.51ms | 4.2× |
+- **三段总账(node 域,WASM scan+WASM blur+present,min-of-40)**:
+  1080p **0.73ms**;zoom-out **1.64ms**——**≤2.5ms 目标达成**(第二刀后 ~3.9ms)。
+- **活机(worker 域 prof,探针 scripts/_lightwasm-scan-probe.mjs,私有 vite 5217,
+  direct seed 05162020,?lightworker=1 双臂)**:
+  | 场景 | exportTo A0(JS) | exportTo A1(WASM) | busy(compute) A0→A1 |
+  | --- | --- | --- | --- |
+  | 静置 | 0.408ms | 0.187ms | 0.941→0.555ms |
+  | 高空下坠 | 0.447ms | 0.195ms | 0.899→0.525ms |
+  | zoom-out 0.5 | 0.467ms | 0.185ms | 0.915→0.517ms |
+  | 雷雨 | 0.456ms | 0.192ms | 0.893→0.545ms |
+  **scanRuns=帧帧递增/scanRefusals=0/worker gate p50 ≈2.2ms 双臂持平(消息调度地板
+  非 compute)/零页面错误/下坠+雷雨截图零伪影**。worker busy 目标 ≤0.65 达成
+  (0.52-0.55);exportTo 目标 ≤0.1 未达(实测 ~0.19,固定成本[上传+读回+尾段]
+  主导,见债①)。
+- **已知债与后续**:①**scan→blur 非驻留**(读回 r/g/b/mask 后 blur 再拷入+JS 尾段
+  读写,exportTo 残 ~0.19ms 中固定成本主导)——若未来要压到 ≤0.1,二期做驻留
+  管线(blur 免拷入+尾段特例格读 WASM 内存);②OOB type 死路径偏差(见上);
+  ③RainbowCloud 719 对 hourly NaN 的 JS 侧 undefined 索引=既有不可入参面
+  (两臂同崩,与本次无关);④探针台架 bootstrap 冷桥 flake(预热臂模式保留)。

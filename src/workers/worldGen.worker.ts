@@ -6,6 +6,7 @@ import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导�
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
 import { applyModTileStableMap } from '../data/tiles';
+import { setCurrentAlloc } from '../mods/bridge';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
@@ -83,6 +84,11 @@ ctx.onmessage = async (e) => {
     if (req.type === 'applyModIds') {
       applyModItemIds(req.payload.itemStableIds);
       applyModTileStableMap(req.payload.tilePairs);
+      // ★P5 id 平移解:当前分配映射入 worker 域(loadSaveData 重映射消费)
+      setCurrentAlloc({
+        itemKeys: new Map(req.payload.itemKeys),
+        tileKeys: new Map(req.payload.tileKeys),
+      });
       return;
     }
     if (req.type === 'generate') {

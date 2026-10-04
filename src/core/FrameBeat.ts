@@ -134,6 +134,54 @@
  *   hitch(GC/IO ~200ms)滞时 ~186ms 仍不降=同语义(单 hitch 不定容量)。红判别器
  *   OldAlignedMissBeat 同步复刻旧降档门(missDowngradeDue 覆写),案①红→绿对照面
  *   保持完整。
+ * ★v9 估计器去回声(2026-10-04,B2 结构债清偿刀——回声债自本刀起销案,上文 v5/v7
+ *   「已立案/归档」注记就此结清):上面 v7 时代归档的理由是「处方被金标流反证」
+ *   (p10/min 统计使地板翻动)且「须先有双 regime 真流金标」。本刀新证据=定谳级
+ *   量化画像(Trace-20260929 回放 630 拍):rAF 迟交使 delta≈前帧 cost+1.69ms
+ *   (sd 0.51,corr=0.964)——回声族 8.5-21.8ms 占 94.8%,显示周期证据只存于
+ *   sub-8.33 低族(5.2%,min 7.2,与金标流"迟帧解堵余数"注记同构同占比)且饱和段
+ *   (前 495 拍)零现形=信息论不可恢复段;旧截尾均值被拖到 11.54(+38.6% vs 名义
+ *   8.33)。估计侧对 MISS_GRID_TOL 无对应物(全量样本入窗)——本刀补上:结构=
+ *   「famLo 锚定显示族收集+三重门+向下有界校正」:①显示族收集器(族最小值 famLo
+ *   锚定收录带 delta≤famLo×1.15;回声族在带外=间隙过滤,即任务候选①;对被
+ *   p10/min 反证的处方,本式不用低分位统计直取真值,而以族形态学过滤+中位数抗污,
+ *   即候选②;famLo/显示族分离即候选③双源假设的实现);②三重门=成熟度(≥12)/
+ *   双峰间隙(工作窗最大内隙≤0.18×work,v1 杀手流+活机节流脉冲防线——「截尾均值
+ *   对双峰恢复真值」的既有定谳不回退)/离散度(IQR≤0.35×中位);③候选=clamp
+ *   (显示族中位,[work×0.65, work]) 只许向下拉。回退姿态:无证据/门拒绝 ⇒ 与
+ *   B2 前逐位一致(busy 混合流 v5/v6 判据测试全绿即此保证)。
+ *   判别器数字(tests trace 回放):饱和段新估计骑回声低沿 9.50(旧 11.72);
+ *   证据段[560,630]收敛 7.80±0.3(旧 9.73;对名义 8.33 误差 −6.4% vs 旧 +16.8%);
+ *   洁净流偏差 ≤3%、金标健康机器语义流(7.93+5.2%余数)新旧逐位一致、v1 杀手流
+ *   双峰门拦截=与旧估计一致、并调流/锁定滑相流精确 8.33/16.67。收敛速度:洁净流
+ *   12 样本即成熟(快于旧 31 窗),饱和段保持工作周期跟踪(旧行为),证据现形后
+ *   ~65 回调收敛。红判别器 OldV4Beat 经 estimateVsync 钩钉旧估计式=红面完整性
+ *   (旧判据组+旧估计器整链复刻)。
+ * ★v9.1 famLo 护栏双刀(2026-10-05 同刀活机探针实锤后热修;活机=私有 vite 5218 +
+ *   headed Chrome,scripts/_framebeat-b2-echo.mjs):首版用「探索子=裸 min(delta)」
+ *   当收录带锚——活机 [beat] 记录仪实锤其被两类样本打穿:①busy 解堵余数(迟帧
+ *   解堵后到下一网格点的剩余,可低至 ~0.25×p)② headed 遮挡窗 rAF 节流脉冲
+ *   (5.2-6.0ms 与 8.0ms 混族)——估计塌到 5.5-7.1 ⇒ floor=minK 抬升级联
+ *   (k 2→3→4→5 迁移风暴,恰是本引擎要消灭的"升 120 被拉回 60"族形态)。
+ *   trace 流(min delta 7.2)暴露不了此形态=探针平台价值实证。修法:①锚从裸
+ *   min 换成族最小值 famLo(族空时 work×0.9 播种),成熟期启用远低于族拒绝
+ *   (d<famLo×0.85 不入族=余数/脉冲伪影面);②双峰间隙门 0.25→0.18(脉冲流
+ *   两族隙 ≈25% 贴边放行过一次,收紧后候选整门弃用=est 恒回退 work,族状态
+ *   任其 starve/reseed 冲洗,输出面永不塌)。重播种规则:work 跌破 famLo×0.8
+ *   (流整体下移切快屏)或长饥饿 90 回调(流整体上移切慢屏)→ 清族重播种,
+ *   切屏恢复 ≤~105 回调。回归锁:活机脉冲流 est p50 8.04/min 7.61(修前 5.5
+ *   风暴);busy 判据流 E/F/G 与旧估计器逐位一致。
+ * ★v9.2 回声签名 engagement key(2026-10-05 同日二轮活机实锤后终刀):遮挡节流
+ *   flag 修正后活机仍有 14.1% sub-7ms 连续伪族——定谳其形态=迟帧解堵余数对
+ *   (迟交付 delta+余数 delta 成对,和 ≈ k×p;与 8.0 主族交联成连续谱,族间隙
+ *   ≈6% ⇒ 双峰间隙门结构性失效),famLo 经 ≤15%/步的合法阶梯下行塌到 5.4-7.0
+ *   ⇒ floor↔upgrade 迁移风暴(in-world 33s 内 20 次拍迁移,恰是"升 120 被拉回
+ *   60"族形态)。根治:去回声校正改为【opt-in】——engagement key=「delta 与最近
+ *   渲染帧成本」的滚动 Pearson 相关(corr=回声的机制本体指纹:回声=渲染超支推迟
+ *   回调交付 ⇒ delta≈前帧成本+余量;trace 实测 0.964/红队账 0.952)≥0.6 才启动;
+ *   余数/节流流 delta 与成本不相关(corr≈0)⇒ 恒走旧截尾均值(该流上旧式本就稳,
+ *   风暴系 B2 新引=自己引入自己根治)。真实回声场景(渲染超支会话)corr≈0.9+ 恒开,
+ *   B2 目标不受损。成本零方差(轻载恒成本/冷启动无渲染)视为不可判=不启动。
  */
 
 /** 原版 present 网格常数(60Hz;improvedSubtle EndDraw 钳值 TARGET_FRAME_TIME×599/600)。
@@ -186,6 +234,82 @@ const VSYNC_MIN_MS = 2;
 const VSYNC_MAX_MS = 100;
 /** >此间隔的 vsync 样本视为断流(tab 隐藏/调试暂停),清窗不采样 */
 const VSYNC_GAP_RESET_MS = 250;
+// ── ★B2 去回声估计器(2026-10-04;估计器结构变更首刀,回声债立案于头注 v5/v7)──────
+//  定谳(Trace-20260929 回放流,630 拍):rAF 迟交使 delta≈前帧 cost+1.69ms
+//  (sd 0.51,corr=0.964)——回声族 8.5-21.8ms 占 94.8%;显示周期证据只存于 sub-8.33
+//  低族(5.2%,min 7.2,与金标流"迟帧解堵余数"同构)且前 495 拍(饱和段)零现形。
+//  旧截尾均值估计被拖到 11.54(+38.6% vs 名义 8.33,偏差 p95=+3.75ms,100% 样本污染)。
+//  机制:busyUntil 推迟回调交付 ⇒ 回调间隔含帧自身工作时长 ⇒「估计即节奏回声」;
+//  现有 MISS_GRID_TOL/对齐豁免只护失拍判定面,估计侧无任何对应物(全量样本入窗)。
+export const VSYNC_DISP_WIN = 31;
+/** 显示族成熟度(收集器样本数下限;低于此不作去回声校正,回退旧估计) */
+export const VSYNC_DISP_MIN = 12;
+/** 显示族收录带宽(相对族最小值 famLo):delta ≤ famLo×此系数 才入显示族收集器。
+ *  1.15 与 FLOOR_TOL(0.15)同宽:洁净流 ±10% 抖动下 famLo≈p×0.9 ⇒ 带宽恰好
+ *  覆盖至 p;回声流上回声族起点 ≥p+0.2ms 被此带排除 */
+export const VSYNC_ADMIT_REL = 1.15;
+/** 显示族离散度门(IQR/中位):超过此值=族内非单一节拍(混合/污染),弃候选回退 */
+export const VSYNC_IQR_MAX = 0.35;
+/** 双峰间隙门(v1 杀手流+活机节流脉冲防线):工作窗排序后最大内隙 >此系数×工作
+ *  估计 ⇒ 窗呈「超支时长/剩余节拍」或「正常/节流脉冲」双族(实测 60Hz 形态:20/13.3
+ *  交替,低族=余数伪影;活机 headed 遮挡窗 rAF 节流脉冲 5.2-6.0/8.0 混族)——显示族
+ *  候选不可信,回退旧估计(旧截尾均值对双峰恢复真值,头注有案)。0.18 定线:回声流
+ *  内隙/est≈8%放行;杀手流 13.3→20=40%、脉冲流两族隙≈25% 拦截(★0.25 首版定线
+ *  在脉冲流上贴边放行过一次,活机探针实锤后收紧) */
+export const VSYNC_BIMODAL_GAP = 0.18;
+/** 向下校正下界(相对工作估计):显示族候选不得低于工作估计×此系数——估计跌破
+ *  target×(1−FLOOR_TOL) 即 minK 抬升=假失拍/地板翻转,此钳保证校正幅度恒在
+ *  FLOOR_TOL 安全带内(0.65×1.4≈0.91:即使工作估计被回声抬到 1.4×真值,校正
+ *  结果仍 ≥0.91×真值) */
+export const VSYNC_SANITY_LO = 0.65;
+/** famLo 播种(相对工作估计):族空时收录带上界锚=famLo=work×此系数——回声流上
+ *  work 被抬高(11.5),播种带 0.9×work 仍吃进回声低沿族(9.0-10.4),估计骑回声低沿
+ *  (低于全族均值,方向正确);真显示证据(sub-p 族)现形后经 famLo 下行吸附接管 */
+export const VSYNC_FAM_SEED = 0.9;
+/** 远低于族拒绝(成熟期,相对 work):delta < work×SANITY_LO 不入族——低于输出钳
+ *  线的样本不可能产出合法候选(候选恒被钳回 work×SANITY_LO 之上),只会在 famLo
+ *  阶梯塌陷中当锚(活机余数/节流伪影 5.5ms vs work 8.2 ⇒ 钳线 5.3——corr 门已把
+ *  该类流整段挡在 engagement 外,此门为其后的第二道;余数伪影实测可低至 ~2ms,
+ *  远低于任何显示族下沿)。★勿锚 famLo(首版 0.85×famLo):回声族最小值偏高时
+ *  (合成流 famLo 9.84)floor 会高于显示族顶(8.1)=显示证据永久锁死(正控制
+ *  实锤),work 锚无此锁死 */
+export const VSYNC_FAM_GUARD = 0.65;
+/** 流下移重播种(相对 famLo):work 跌破 famLo×此系数=整个回调流已下移(切快屏
+ *  60→120Hz/回声骤轻),旧族全过期 → 清族按新 work 重播种。切快屏 work 31 回调内
+ *  到位 ⇒ 恢复 ≤31+12 回调;活机脉冲流 work 恒 ≈famLo 之上,不误触发 */
+export const VSYNC_RESEED = 0.8;
+/** 连续无收录回调数达此值 ⇒ 成熟显示族整族清空重建(流已永久上移切慢屏,旧族全过期)。
+ *  ★仅对成熟族生效:immature 族本就允许低频收集(回声流显示证据可稀至 5%,90 回调
+ *  饥饿 flush 会在成熟前反复清族=永不收敛,合成回声流实锤),成熟族遭 150 回调无
+ *  收录=流确实整体上移。150≫回声流最长 admit 间隔 11,不误清 */
+export const VSYNC_STARVE_FLUSH = 150;
+/** 回声签名相关阈(v9.2 engagement key):去回声校正只在「delta 与最近渲染帧成本」
+ *  的滚动 Pearson 相关 ≥ 此值时启动——corr 就是回声的机制指纹(定谳:回声流
+ *  delta≈前帧成本+1.69ms,corr=0.964/0.952 双源实证),无签名不校正。
+ *  ★活机实锤(v9.1):迟帧解堵余数对/遮挡节流可造 14.1% sub-p 连续伪族(5.5-7.0
+ *  与 8.0 主族交联=双峰间隙门失效)→ famLo 阶梯塌陷=floor 迁移风暴——该类流上
+ *  delta 与成本不相关(corr≈0),此门恒闭=估计恒走旧截尾均值(该流上旧式本就
+ *  稳,风暴系 B2 新引);真实回声(渲染超支)流 corr≈0.9+ 恒开。0.6 定线:全回声
+ *  流 0.96、半忙混合流实测 <0.4,带宽充分 */
+export const VSYNC_ECHO_CORR = 0.6;
+/** 回声签名最小配对样本(相关计算窗口下限;cost 零方差<0.5ms 视为不可判=不启动) */
+export const VSYNC_ECHO_MIN_PAIRS = 12;
+
+/** 旧估计器(截尾均值;B2 前唯一估计式)——模块级纯函数:红判别器旧侧复刻点+
+ *  去回声估计器的回退基(无显示族证据/任一门拒绝时用)。
+ *  ★截尾均值(非中位数):渲染超支时回调流呈【双峰】(超支时长/剩余节拍交替——
+ *  真实 Chrome 形态,busy 解堵即跑 rAF),中位数按窗奇偶在双峰间翻转=估计跳变
+ *  (首版实测 60Hz 假失拍级联/地板翻转);截尾均值对双峰恢复真值、对单峰抖动
+ *  ≈中位数、对罕见迟回调稳健 */
+export function trimmedMeanVsync(win: number[]): number {
+  if (win.length === 0) return GRID_MS;
+  const s = [...win].sort((a, b) => a - b);
+  // 截尾数须留 ≥1 样本(小窗 n=1/2 时 ceil(n×0.1) 会吃光窗口→除零/负分母)
+  const trim = Math.min(Math.ceil(s.length * 0.1), (s.length - 1) >> 1);
+  let sum = 0;
+  for (let i = trim; i < s.length - trim; i++) sum += s[i];
+  return Math.min(VSYNC_MAX_MS, Math.max(VSYNC_MIN_MS, sum / (s.length - 2 * trim)));
+}
 /** shouldRender 的时间护栏余量(vsync 估计失真时的兜底,吸收 rAF 时间戳抖动) */
 const TARGET_GUARD_MS = 2;
 /** 拍地板容差(相对):minK 折算容许 vsync 估计低于目标 15%——★v8 放宽(2026-09-30
@@ -215,6 +339,18 @@ export class FrameBeat {
 
   private vsyncDeltas: number[] = [];
   private lastVsyncTs = -1;
+  /** ★B2 显示族收集器(仅收录 ≤famLo×ADMIT_REL 的 delta;回声族不入) */
+  private dispWin: number[] = [];
+  /** ★B2 famLo=显示族最小值(显示周期下界锚;族空时由 work×FAM_SEED 播种)。
+   *  ★勿用裸 min(d) 当锚(首版探索子):busy 解堵余数/遮挡节流脉冲可低至
+   *  0.25×p,min 即刻塌陷=收录带塌缩+floor 级联(活机实锤,见头注 v9.1);
+   *  famLo 经成熟期远低于族拒绝(VSYNC_FAM_GUARD)护住 */
+  private famLo = Infinity;
+  /** ★B2 连续无收录回调计数(饥饿计;驱动流上移时的族重建) */
+  private sinceAdmit = 0;
+  /** ★B2 回声签名账本(每回调记 [最近渲染成本, delta] 对;corr 滚动计算) */
+  private echoCosts: number[] = [];
+  private echoDeltas: number[] = [];
   private costWin: number[] = [];
   private lastRenderAt = -1;
   /** 上次渲染帧距(beginRender 时记;endRender 作失拍判定) */
@@ -278,20 +414,16 @@ export class FrameBeat {
       d = now - this.lastVsyncTs;
       if (d > VSYNC_GAP_RESET_MS) {
         this.vsyncDeltas.length = 0;            // 断流(tab 隐藏恢复):清窗防大空洞污染估计
+        this.dispWin.length = 0;                // ★B2:显示族一并清(大空洞非显示证据)
+        this.famLo = Infinity;                  // ★B2:族锚复位(由 work 重播种)
+        this.sinceAdmit = 0;
+        this.echoCosts.length = 0;              // ★B2:回声签名账本一并清
+        this.echoDeltas.length = 0;
       } else {
         this.vsyncDeltas.push(d);
         if (this.vsyncDeltas.length > VSYNC_WIN) this.vsyncDeltas.shift();
-        // ★截尾均值(非中位数):渲染超支时回调流呈【双峰】(超支时长/剩余节拍交替——
-        //  真实 Chrome 形态,busy 解堵即跑 rAF),中位数按窗奇偶在双峰间翻转=估计跳变
-        //  (首版实测 60Hz 假失拍级联/地板翻转);截尾均值对双峰恢复真值、对单峰抖动
-        //  ≈中位数、对罕见迟回调稳健
-        const s = [...this.vsyncDeltas].sort((a, b) => a - b);
-        // 截尾数须留 ≥1 样本(小窗 n=1/2 时 ceil(n×0.1) 会吃光窗口→除零/负分母)
-        const trim = Math.min(Math.ceil(s.length * 0.1), (s.length - 1) >> 1);
-        let sum = 0;
-        for (let i = trim; i < s.length - trim; i++) sum += s[i];
-        const mean = sum / (s.length - 2 * trim);
-        this.vsyncPeriod = Math.min(VSYNC_MAX_MS, Math.max(VSYNC_MIN_MS, mean));
+        this.observeEchoLedger(d);              // ★B2:回声账本(探索子/显示族收录)
+        this.vsyncPeriod = this.estimateVsync();
       }
     }
     this.lastVsyncTs = now;
@@ -300,6 +432,109 @@ export class FrameBeat {
     // 按本回调间隔折算 vsync 数对合并鲁棒,对正常流(间隔≈估计值)恒 +1 同构
     if (d === undefined) this.ordinal++;
     else this.ordinal += Math.min(8, Math.max(1, Math.round(d / this.vsyncPeriod)));
+  }
+
+  /** ★B2 回声账本(每回调必经;famLo+显示族收录,与估计式解耦——红判别器旧侧
+   *  只覆写 estimateVsync,账本照跑=无害)。
+   *  收录带=famLo×ADMIT_REL(famLo 族空时由 work×FAM_SEED 播种):带内样本入显示族
+   *  (回声族形态学上在带外=间隙过滤,头注定谳的 94.8% 回声样本从此不入估计)。
+   *  famLo 下行吸附(真显示证据现形即接管)并触发 purge(收录带收紧即刻清洗高位
+   *  旧样本,不等 31 槽 FIFO 滚出);成熟期远低于族拒绝(FAM_GUARD)挡余数伪影/
+   *  节流脉冲;work 跌破 famLo×RESEED=流整体下移(切快屏)清族重播种;长饥饿=
+   *  流整体上移(切慢屏)整族清空。冷启动:工作窗 <8 样本不收族(播种锚未立)。 */
+  private observeEchoLedger(d: number): void {
+    // 回声签名账本:delta 与「最近一次渲染帧成本」配对(corr=回声机制指纹,v9.2)
+    const lastCost = this.costWin.length ? this.costWin[this.costWin.length - 1] : 0;
+    this.echoCosts.push(lastCost);
+    if (this.echoCosts.length > VSYNC_WIN) this.echoCosts.shift();
+    this.echoDeltas.push(d);
+    if (this.echoDeltas.length > VSYNC_WIN) this.echoDeltas.shift();
+    if (this.vsyncDeltas.length < 8) return;
+    const work = trimmedMeanVsync(this.vsyncDeltas);
+    if (this.famLo < Infinity && work < this.famLo * VSYNC_RESEED) {
+      this.dispWin.length = 0;                // 流整体下移:旧族全过期
+      this.famLo = Infinity;
+      this.sinceAdmit = 0;
+    }
+    if (this.sinceAdmit > VSYNC_STARVE_FLUSH && this.dispWin.length >= VSYNC_DISP_MIN) {
+      this.dispWin.length = 0;                // 流整体上移(成熟族长饥饿):整族清空重建
+      this.famLo = Infinity;
+    }
+    const seed = this.famLo < Infinity ? this.famLo : work * VSYNC_FAM_SEED;
+    const admitHi = seed * VSYNC_ADMIT_REL;
+    const mature = this.dispWin.length >= VSYNC_DISP_MIN;
+    if (d <= admitHi && (!mature || this.famLo === Infinity || d >= work * VSYNC_FAM_GUARD)) {
+      this.dispWin.push(d);
+      if (this.dispWin.length > VSYNC_DISP_WIN) this.dispWin.shift();
+      const prevLo = this.famLo;
+      this.famLo = Math.min(this.famLo, d);
+      if (this.famLo < prevLo && mature) {
+        const hi = this.famLo * VSYNC_ADMIT_REL;   // purge-on-tighten:带收紧即刻清洗高位旧样本
+        for (let i = this.dispWin.length - 1; i >= 0; i--) {
+          if (this.dispWin[i] > hi) this.dispWin.splice(i, 1);
+        }
+      }
+      this.sinceAdmit = 0;
+    } else {
+      this.sinceAdmit++;
+    }
+  }
+
+  /** vsync 估计式(protected hook=红判别器旧侧复刻点):回声签名成立时用去回声候选,
+   *  否则(及候选被门拒绝时)回退旧截尾均值。
+   *  回退基保证:无回声签名(余数/节流流,corr≈0)/无显示族证据(饱和段 0-494 拍
+   *  实证)/任一门拒绝 ⇒ 行为与 B2 前逐位一致(零回归姿态) */
+  protected estimateVsync(): number {
+    const work = this.legacyEstimate();
+    return this.echoEngaged() ? (this.displayCandidate(work) ?? work) : work;
+  }
+
+  /** ★v9.2 回声签名判定(protected hook=红判别器旧侧复刻点):滚动 Pearson corr
+   *  (delta, 最近渲染成本) ≥ VSYNC_ECHO_CORR 才允许去回声校正——corr 是回声的
+   *  机制指纹(回声=渲染超支推迟回调交付 ⇒ delta≈前帧成本+余量);余数伪影/
+   *  节流脉冲流上 delta 与成本不相关,此门恒闭=估计恒走旧式(活机风暴的根治面,
+   *  见头注 v9.1/v9.2)。成本零方差(轻载恒成本/无渲染)视为不可判=不启动 */
+  protected echoEngaged(): boolean {
+    const n = this.echoDeltas.length;
+    if (n < VSYNC_ECHO_MIN_PAIRS) return false;
+    const mc = this.echoCosts.reduce((a, b) => a + b, 0) / n;
+    const md = this.echoDeltas.reduce((a, b) => a + b, 0) / n;
+    let scc = 0, sdd = 0, scd = 0;
+    for (let i = 0; i < n; i++) {
+      const dc = this.echoCosts[i] - mc, dd = this.echoDeltas[i] - md;
+      scc += dc * dc; sdd += dd * dd; scd += dc * dd;
+    }
+    if (scc < 0.25 * n || sdd < 0.25 * n) return false;   // 零方差/近零方差=不可判
+    const r = scd / Math.sqrt(scc * sdd);
+    return r >= VSYNC_ECHO_CORR;
+  }
+
+  /** 旧估计式(截尾均值)——estimateVsync 的回退基+红判别器旧侧复刻点 */
+  protected legacyEstimate(): number {
+    return trimmedMeanVsync(this.vsyncDeltas);
+  }
+
+  /** ★B2 去回声候选(v9;protected hook=红判别器旧侧复刻点):显示族中位数对工作
+   *  估计做【向下有界】校正,三重门任一不过即 null(回退旧估计):
+   *  ①成熟度门 dispWin≥VSYNC_DISP_MIN——证据不足不动(饱和段姿态:信息论上不可
+   *    恢复时保持工作周期跟踪=旧行为,绝不猜);
+   *  ②双峰间隙门(工作窗排序最大内隙 ≤BIMODAL_GAP×work)——「超支/余数」双峰流
+   *    (v1 杀手形态)的低族是余数伪影,显示族候选必错,拦截;
+   *  ③离散度门(显示族 IQR ≤IQR_MAX×中位)——族内非单一节拍(混合/污染)不动。
+   *  通过则 est=clamp(显示族中位, [work×SANITY_LO, work]):只许向下拉(回声只抬高
+   *  估计),且下界钳保证恒在 FLOOR_TOL 安全带内(minK 不假抬=地板不翻转) */
+  protected displayCandidate(work: number): number | null {
+    if (this.dispWin.length < VSYNC_DISP_MIN) return null;
+    const ws = [...this.vsyncDeltas].sort((a, b) => a - b);
+    let mg = 0;
+    for (let i = 1; i < ws.length; i++) mg = Math.max(mg, ws[i] - ws[i - 1]);
+    if (mg > VSYNC_BIMODAL_GAP * work) return null;
+    const s = [...this.dispWin].sort((a, b) => a - b);
+    const med = s[Math.floor(0.5 * (s.length - 1))];
+    const q1 = s[Math.floor(0.25 * (s.length - 1))];
+    const q3 = s[Math.floor(0.75 * (s.length - 1))];
+    if (q3 - q1 > VSYNC_IQR_MAX * med) return null;
+    return Math.min(VSYNC_MAX_MS, Math.max(VSYNC_MIN_MS, Math.max(work * VSYNC_SANITY_LO, Math.min(work, med))));
   }
 
   /** 本回调是否落拍(渲染)。序数计满即拍;时间护栏仅在拍周期本身够不到目标时兜底

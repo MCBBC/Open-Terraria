@@ -127,9 +127,19 @@ export interface LightSnapshotMsg {
    *  通道零长;载荷在 delta） */
   enc?: 'full' | 'delta';
   /** enc='delta' 载荷:meta=[跨度数,(y',x0',len)…]（u32,切片内局部坐标）,
-   *  data=每跨度逐格 17B（type/flags/frameX/frameY/wall 各 LE 2B,其余 9 通道各 1B） */
-  delta?: { dv: number; meta: Uint32Array; data: Uint8Array };
+   *  data=每跨度逐格 17B（type/flags/frameX/frameY/wall 各 LE 2B,其余 9 通道各 1B）。
+   *  ★债2 池化（2026-10-04）:meta/data=编码器整块 scratch（transfer 过境,零 slice
+   *  拷贝零分配）,实际有效长度由 metaLen/dataLen 携带;缺省=数组全长（兼容精确
+   *  尺寸构造面——单测直接喂 exact 数组时行为与旧协议逐位同）。 */
+  delta?: { dv: number; meta: Uint32Array; data: Uint8Array; metaLen?: number; dataLen?: number };
+  /** ★债3 池化（2026-10-04）:主线程退役结果数组随帧回送 worker（transfer 零拷贝）。
+   *  仅在 retire 队列非空时在场——退役点恒为「引用替换后不再被公共面/pending 持有」
+   *  的数组,worker 侧入结果池供发布面取用（与 tile 'pool' 回传同范式的反向通道）。 */
+  ret?: ResultTriple[];
 }
+
+/** 结果数组三元组（worker 发布面分配/主线程退役回送共用形状） */
+export interface ResultTriple { R: Uint8Array; G: Uint8Array; B: Uint8Array }
 
 /** ★C9d2 worker→main tile 缓冲回池（legacy 全量帧直回;★2026-10-04 起 'full' 锚帧
  *  解码器退役缓冲同通道回传——transfer 往返使主线程 buildSlice 零重分配。compute
@@ -140,12 +150,16 @@ export interface LightPoolMsg { op: 'pool'; seq: number; tiles: TileSlicePack }
  *  主线程下帧强制全量 */
 export interface LightResyncMsg { op: 'resync' }
 
-/** worker→main 结果（R/G/B transferable;rx/ry 绝对区域,主线程整体回填公共面） */
+/** worker→main 结果（R/G/B transferable;rx/ry 绝对区域,主线程整体回填公共面）。
+ *  ★债2/债3 池化（2026-10-04）:retDelta=delta 帧解码完毕的 meta/data 缓冲原样回送
+ *  （transfer,主线程编码器 scratch 池复用）;rp=worker 结果池对账计数（累计 take/miss）。 */
 export interface LightResultMsg {
   op: 'light';
   seq: number;
   rx: number; ry: number; rw: number; rh: number;
   R: Uint8Array; G: Uint8Array; B: Uint8Array;
+  retDelta?: { meta: Uint32Array; data: Uint8Array };
+  rp?: { t: number; m: number };
 }
 
 /** worker 致命错误通知（主线程立即回落,不等 2s 看门狗） */
@@ -312,6 +326,11 @@ export function runSnapshotOnEngine(e: LightingEngine, m: LightSnapshotMsg, ds: 
   // ② 世界标量 rebase（行/列平移,见头注）
   e.world.groundLevel = m.groundLevel - m.tiles.sy;
   e.world.lavaLine = m.lavaLine - m.tiles.sy;
+  // ★scan 核 RNG 哈希锚(2026-10-04 WASM 第四刀):切片 store(0,0) 的绝对世界坐标
+  // ——localRandom 哈希 (y*2654435761+x)|0 非平移不变,AS 主循环(hashX0/Y0 形参)
+  // 与 JS 尾段(localRandom shim)必须同锚,否则每个闪烁随机元随 rebase 重掷
+  // （与既有 localRandom shim 同源同值;主线程世界 store 不设=0,0）。
+  (e.world as { hashOrigin?: { x: number; y: number } }).hashOrigin = { x: m.tiles.sx, y: m.tiles.sy };
   const clk: { timeOfDay: number; dayCount: number; eclipse?: boolean; bloodMoon?: boolean; moonPhase?: number; isDay?: boolean } = {
     timeOfDay: m.clock.timeOfDay, dayCount: m.clock.dayCount,
     eclipse: m.clock.eclipse, bloodMoon: m.clock.bloodMoon,
@@ -416,8 +435,35 @@ export class LightDeltaEncoder {
   private frame = 0;                              // 距上次全量锚帧的 delta 帧数
   private forceFull = true;                       // 首帧/resync 请求
   private mark: Uint8Array = new Uint8Array(0);   // 跨度标记 scratch（窗尺寸）
-  private metaBuf = new Uint32Array(1 + 3 * 1024);
-  private dataBuf = new Uint8Array(1 << 15);
+  private metaBuf: Uint32Array<ArrayBufferLike> = new Uint32Array(1 + 3 * 1024);
+  private dataBuf: Uint8Array<ArrayBufferLike> = new Uint8Array(1 << 15);
+  // ★债2 池化（2026-10-04）:meta/data 不再 slice 精确拷贝（每帧 2 分配+KB 拷贝,
+  //  worker 解码后成垃圾）——整块 scratch 所有权移交 transfer,worker 解码完毕经
+  //  LightResultMsg.retDelta 回送入池,下帧取回当 scratch（稳态零分配零拷贝闭环,
+  //  与 tile 切片池/结果池同范式）。metaLen/dataLen 随消息携带有效长度。
+  private static readonly EMPTY_U32 = new Uint32Array(0);
+  private static readonly EMPTY_U8 = new Uint8Array(0);
+  private scratchPool: Array<{ meta: Uint32Array; data: Uint8Array }> = [];
+  /** 池对账（link 每帧镜像进 lightWorkerStats.deltaPoolHits/Misses） */
+  poolHits = 0;
+  poolMisses = 0;
+
+  /** delta 缓冲回池（worker 解码完毕回送;容量对进入 scratch 轮转,深度 4 封顶） */
+  retireDelta(meta: Uint32Array, data: Uint8Array): void {
+    if (this.scratchPool.length < 4) this.scratchPool.push({ meta, data });
+  }
+
+  /** 池取:容量同时满足两 buffer 的最小对（无可行对=null,调用方走 grow/新分配） */
+  private takeScratch(capMeta: number, capData: number): { meta: Uint32Array; data: Uint8Array } | null {
+    let best = -1;
+    for (let i = 0; i < this.scratchPool.length; i++) {
+      const s = this.scratchPool[i];
+      if (s.meta.length >= capMeta && s.data.length >= capData) {
+        if (best < 0 || (s.meta.length + s.data.length) < (this.scratchPool[best].meta.length + this.scratchPool[best].data.length)) best = i;
+      }
+    }
+    return best >= 0 ? this.scratchPool.splice(best, 1)[0] : null;
+  }
 
   /** plan 期全量判定（引擎切片前调用——full=buildSlice 全量克隆,delta=免 416KB 切片）。
    *  contentDirty=引擎侧「非移动内容脏」（regionMoved 已扣除;日志空时才可信——
@@ -454,14 +500,16 @@ export class LightDeltaEncoder {
   hasShadow(sw: number, sh: number): boolean { return this.shadow !== null && this.shadow.sw === sw && this.shadow.sh === sh; }
 
   /** 差量编码:读世界真值（st）+ 写日志（log=世界索引 y*w+x,调用后由调用方清空）,
-   *  影子几何推进到本帧窗。返回精确尺寸载荷（postMessage transfer）。
+   *  影子几何推进到本帧窗。返回载荷（postMessage transfer）+有效长度 metaLen/dataLen。
    *  前置:planFull=false（几何匹配/日志未溢出/contentDirty 门已过）。
    *  ★transferable 化:旧「影子 rebase（copyWithin 行平移）+跨度回写影子」两段删除
-   *  ——影子内容全链路无读点（见类注位等价论证）,只留几何推进。 */
+   *  ——影子内容全链路无读点（见类注位等价论证）,只留几何推进。
+   *  ★债2 池化（2026-10-04）:返回整块 scratch（所有权移交——transfer 后 detached,
+   *  本侧引用立即置空）;scratch 自回池轮转取用,稳态零分配。meta[0]=跨度数语义不变。 */
   encodeDelta(st: { w: number; type: Uint16Array; flags: Uint8Array; frameX: Uint16Array; frameY: Uint16Array;
     wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array;
     wire: Uint8Array; paint: Uint8Array; paintWall: Uint8Array; coat: Uint8Array },
-    g: TileSlicePack, log: readonly number[]): { meta: Uint32Array; data: Uint8Array } {
+    g: TileSlicePack, log: readonly number[]): { meta: Uint32Array; data: Uint8Array; metaLen: number; dataLen: number } {
     const s = this.shadow!;
     const sw = g.sw, shH = g.sh, n = sw * shH;
     const worldW = st.w;
@@ -486,8 +534,14 @@ export class LightDeltaEncoder {
     // ③ 行扫跨度 + 逐格 17B 发射（读世界真值;★transferable 化后不再回写影子内容）
     let mOff = 1, dOff = 0, spans = 0;
     const capMeta = 1 + 3 * spansMax(sw, shH);   // 数学硬上界（1 格跨度与空格交替）
+    const capData = n * TILE_CHAN_BYTES_PER_CELL;
+    if (this.metaBuf.length < capMeta || this.dataBuf.length < capData) {
+      const s2 = this.takeScratch(capMeta, capData);
+      if (s2 !== null) { this.metaBuf = s2.meta; this.dataBuf = s2.data; this.poolHits++; }
+      else this.poolMisses++;
+    }
     if (this.metaBuf.length < capMeta) this.metaBuf = new Uint32Array(capMeta);
-    if (this.dataBuf.length < n * TILE_CHAN_BYTES_PER_CELL) this.dataBuf = new Uint8Array(n * TILE_CHAN_BYTES_PER_CELL);
+    if (this.dataBuf.length < capData) this.dataBuf = new Uint8Array(capData);
     const meta = this.metaBuf, data = this.dataBuf;
     const stT = st.type, stF = st.flags, stFX = st.frameX, stFY = st.frameY, stW2 = st.wall;
     const stL = st.liquid, stLT = st.liquidType, stH = st.half, stSl = st.slope, stWr = st.wire;
@@ -525,14 +579,21 @@ export class LightDeltaEncoder {
     // ④ 影子几何推进（跨度值恒读世界真值,几何=plan/暴露带唯一消费面）
     s.sx = g.sx; s.sy = g.sy; s.sw = sw; s.sh = shH;
     this.frame++;
-    return { meta: meta.slice(0, mOff), data: data.slice(0, dOff) };
+    // ⑤ 所有权移交（★债2 池化）:scratch 随 transfer 过境,本侧引用立即置空——
+    //  下帧自回池/新分配取用;worker 解码完毕经 retDelta 回送 retireDelta 入池。
+    const out = { meta, data, metaLen: mOff, dataLen: dOff };
+    this.metaBuf = LightDeltaEncoder.EMPTY_U32;
+    this.dataBuf = LightDeltaEncoder.EMPTY_U8;
+    return out;
   }
 
   /** 跨度发射中途异常 → 全量重锚（影子需完整数据,返回特殊标记由调用方走全量。
-   *  常规路径不可达:plan 期几何/日志封顶已保证容量;防御面保留） */
-  private escalateFull(): { meta: Uint32Array; data: Uint8Array } {
+   *  常规路径不可达:plan 期几何/日志封顶已保证容量;防御面保留。
+   *  scratch 不移交（中止点重入安全:下帧 delta 全量重写已消费位面,metaLen/dataLen
+   *  界外陈旧值无消费点） */
+  private escalateFull(): { meta: Uint32Array; data: Uint8Array; metaLen: number; dataLen: number } {
     this.forceFull = true;
-    return { meta: new Uint32Array(0), data: new Uint8Array(0) };
+    return { meta: LightDeltaEncoder.EMPTY_U32, data: LightDeltaEncoder.EMPTY_U8, metaLen: 0, dataLen: 0 };
   }
 }
 
@@ -592,8 +653,12 @@ export class LightDeltaDecoder {
       }
     }
     // ② 跨度覆写（meta=[spanCount,(y,x0,len)…],data 17B/格 LE）
+    //  ★债2 池化:有效长度由 metaLen/dataLen 携带（缺省=全长,兼容精确尺寸构造面）
     const meta = m.delta!.meta, data = m.delta!.data;
+    const metaLen = m.delta!.metaLen ?? meta.length;
+    const dataLen = m.delta!.dataLen ?? data.length;
     const spans = meta[0];
+    if (spans > 0 && 1 + spans * 3 > metaLen) throw new Error(`light delta meta underrun: spans=${spans} metaLen=${metaLen}`);
     let mOff = 1, dOff = 0;
     const tT = t.type, tF = t.flags, tFX = t.frameX, tFY = t.frameY, tW2 = t.wall;
     const tL = t.liquid, tLT = t.liquidType, tH = t.half, tSl = t.slope, tWr = t.wire;
@@ -613,7 +678,7 @@ export class LightDeltaDecoder {
         tP[si] = data[dOff++]; tPW[si] = data[dOff++]; tC[si] = data[dOff++];
       }
     }
-    if (dOff !== data.length) throw new Error(`light delta payload underrun: ${dOff}/${data.length}`);
+    if (dOff !== dataLen) throw new Error(`light delta payload underrun: ${dOff}/${dataLen}`);
     // ③ 几何/旗回填 + 乒乓轮转（旧影子 → spare=下帧解码目标）
     t.sx = g.sx; t.sy = g.sy; t.px = g.px; t.py = g.py;
     t.showInvisibleBlocks = g.showInvisibleBlocks;

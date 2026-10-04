@@ -7,7 +7,7 @@
 //     remasterBuffIcon(9000+n) → 本表 objectURL 命中(mods 优先),原版域永不入本表;
 //   ③ 效果面=onTick 钩(hooks.registerModBuffTick,并入 preUpdate 派发);
 //     原版 buff 数值效果(防御/攻速等)不开放=登记 P3。
-import { BUFF_DEFS } from '../stats/Buffs';
+import { BUFF_DEFS, registerBuffVanillaReverse } from '../stats/Buffs';
 import { MOD_BUFF_VANILLA_BASE } from './types';
 import { registerModBuffTick, registerModBuffNpcTick } from './hooks';
 import type { Player } from '../entities/Player';
@@ -65,6 +65,8 @@ export function registerModBuff(modId: string, key: string, spec: ModBuffSpec): 
     descKey,
     fallbackName: spec.name,
   };
+  // ★P4 红蓝修正(A-m2):反查 Map 直写——存档伪 id ↔ 读档恢复闭环
+  registerBuffVanillaReverse(pseudoVanilla, bt);
   // onTick 钩(玩家侧)+onNpcTick(P4:NPC 侧 debuff tick)
   if (spec.onTick) registerModBuffTick(bt, spec.onTick);
   if (spec.onNpcTick) registerModBuffNpcTick(bt, spec.onNpcTick);
@@ -77,12 +79,15 @@ export function modBuffRegs(): readonly Readonly<{ modId: string; key: string; t
   return modBuffRequests;
 }
 
-/** 图标 URL 登记(资产相位:mod PNG 解码后 objectURL;buffer 拷贝防 detach) */
+/** 图标 URL 登记(资产相位:mod PNG 解码后 objectURL;buffer 拷贝防 detach;
+ *  ★P4 红蓝修正 D-n4:重复登记 revoke 旧 objectURL 防泄漏) */
 export function registerModBuffIcon(modId: string, key: string, png: Uint8Array, buildIconUrl: (png: Uint8Array<ArrayBuffer>) => string): void {
   const bt = modBuffTypes.get(`mod_${modId}_${key}`);
   if (bt === undefined) return;
   const pseudoVanilla = (BUFF_DEFS as Record<number, { vanillaBuff: number }>)[bt]?.vanillaBuff;
   if (pseudoVanilla === undefined) return;
+  const prev = modBuffIconUrls.get(pseudoVanilla);
+  if (prev) { try { URL.revokeObjectURL(prev); } catch { /* 已释放 */ } }
   const copy = new Uint8Array(png.length);
   copy.set(png);
   modBuffIconUrls.set(pseudoVanilla, buildIconUrl(copy));

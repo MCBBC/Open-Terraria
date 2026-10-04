@@ -9,7 +9,8 @@
 //  1456 的"单例 tag 挂敌实体"模型（whipTagT 单值字段）已退役：1457 多 tag 全值
 //  叠加（Projectile.cs:12946-12962）+ proc 消费语义反转（OnProcHit 返 bool 才清,
 //  TagEffectState.cs:113-118）。敌侧不再存 tag 态——查询一律走
-//  owner.tagEffectStack（isNPCTagged/canProcOnNPC/anyTagged）。
+//  owner.tagEffectStack（isNPCTagged/canProcOnNPC;★BJ514：anyTagged 聚合查询已
+//  退役——原版无此消费面,随从索敌不吃 tag）。
 //  tag/proc 时长 = TagDuration × Player.tagEffectDuration（:62-66/:68-71;
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow, projFrameImg } from './Arrow';
@@ -658,11 +659,10 @@ export class TagEffectStack {
     return i >= 0 && this.states[i]!.isNPCTagged(npcId);
   }
 
-  /** 任一活跃 tag 标记该敌（随从索敌优先级用;原版逐 state 查 IsNPCTagged） */
-  anyTagged(npcId: number): boolean {
-    for (let i = 0; i < this.count; i++) if (this.states[i]!.isNPCTagged(npcId)) return true;
-    return false;
-  }
+  // ★BJ514（2026-10-05）：anyTagged（任一活跃 tag 查询）已退役——原版 TagEffectStack
+  //  无此聚合查询,且随从索敌不吃 tag（1457 无「tag 扫描式」索敌;鞭→随从优先完全走
+  //  单槽 MinionAttackTargetNPC,Projectile.cs:14321-14323 写槽 + 各 AI 第一桶消费）。
+  //  旧 MinionProj.nearestEnemy 的 anyTagged 扫描桶系先前批 eager 面,已同刀摘除。
 
   canProcOnNPC(tagType: number, npcId: number): boolean {          // :69-76
     const i = this.indexOf(tagType);

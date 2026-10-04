@@ -9,6 +9,7 @@ import './procShim';   // ★process 兜底首导入(见 procShim.ts;2026-09-02 
 import { serializeSave } from '../save/serialize';
 import { applyModItemIds } from '../data/items';
 import { applyModTileStableMap } from '../data/tiles';
+import { setCurrentAlloc } from '../mods/bridge';
 import type { SaveData, SaveMeta, SaveStoreView } from '../save/serialize';
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
@@ -49,7 +50,7 @@ type SaveWorkerRequest = SaveRequest
   | { type: 'exportWld'; id: number; json: string }
   // ★mod 桥(2026-10-04,fire-and-forget 幂等):mod 物品/tile 稳定 id 增量——
   //  序列化(RLE 稳定 id 翻译)在本线程表上完成,不接桥=mod 内容存档静默归 0
-  | { type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]> } };
+  | { type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]>; itemKeys: Array<[string, number]>; tileKeys: Array<[string, number]> } };
 
 self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   const req = e.data;
@@ -57,6 +58,11 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   if (req.type === 'applyModIds') {
     applyModItemIds(req.payload.itemStableIds);
     applyModTileStableMap(req.payload.tilePairs);
+    // ★P5 id 平移解:当前分配映射入 worker 域(loadSaveData 读档重映射消费)
+    setCurrentAlloc({
+      itemKeys: new Map(req.payload.itemKeys),
+      tileKeys: new Map(req.payload.tileKeys),
+    });
     return;
   }
   // ---- 导入:.wld → SaveData(json) + 槽位元数据（世界列表「导入」,不进世界）----

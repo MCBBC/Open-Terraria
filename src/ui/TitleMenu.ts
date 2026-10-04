@@ -314,7 +314,9 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="mods">${Lang.text('Mods.SandboxWorld.Menu.Mods')}</div>
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
-        <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div>
+        <!-- ★2026-10-04 用户令:主菜单摘除「复刻笔记」入口按钮(仅去按钮,功能链
+             保留:on('replog') 外链打开 + :498 l10n 刷新原样在位,恢复=回贴本行
+             <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div> ) -->
         ${(window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell
           ? `<div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>`
           : ''}

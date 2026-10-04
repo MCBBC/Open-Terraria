@@ -629,7 +629,7 @@ export class WhipProj extends Entity {
           || (((n as unknown as { iframes?: number }).iframes ?? 0) > 0),
         (n) => {
           const tn = n as unknown as { id: number; iframes: number; vanillaId?: number;
-            x: number; y: number; w: number; h: number; vx?: number; vy?: number };
+            x: number; y: number; w: number; h: number; vx?: number; vy?: number; dead?: boolean };
           tn.iframes = 0;               // 写梯 :14175-14178 usesLocal 主支=清全局窗
           // ★Z1/D1④ GC1 写方桥城镇臂（同敌怪环对称;原版单表 immune[owner] 读写域
           //  不分敌怪/城镇,受理拍清零即同拍清近战域表——town id 与敌 id 同 Entity
@@ -680,8 +680,9 @@ export class WhipProj extends Entity {
                 ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
             // tag（TryApplyTagToNPC :13635-13638）——ImmuneToWhips 门在栈内
             //  （城镇 NPC 不在表）;minionTarget（:14321-14327 aiStyle165 支,无 friendly 门）
+            //  ★BJ512：:14322 `if (targetNPC.active)` 门同链（本击致死不写槽）
             owner.tagEffectStack.tryApplyTagToNPC(this.itemId, tn.id, tn.vanillaId ?? 0, this.bonusTagDmg);
-            owner.minionTargetId = tn.id;
+            if (!tn.dead) owner.minionTargetId = tn.id;
           }
           // face 3②：party 彩带伴生（:13693-95 meleeEnchant==7 → NewProjectile 289
           //  于目标 Center、速=目标速度——门 `ownedBySomeone && (melee||IsAWhip)`,
@@ -907,7 +908,8 @@ export class WhipProj extends Entity {
         //  `aiStyle==165 → MinionAttackTargetNPC = victimIndex`（单槽最新写胜出,
         //  approx-registry L5+④ 定谳:非"多 tag 争距",各随从消费自持距离/视线门
         //  :29043+:30314+:37836）。失效清除走 Player.cs:57682-57685 每 tick（Game 侧）
-        if (owner) owner.minionTargetId = e.id;
+        //  ★BJ512：:14322 外门 `if (targetNPC.active)`——本击致死（dead）不写槽
+        if (owner && !e.dead) owner.minionTargetId = e.id;
         // proc 启用（TryDoingOnHitEffects :13968-14013）：{913,1031,1032} 首鞭门
         //  localAI[0]==0（:13970-13977）；{847,1033,1035} 每鞭无条件（:14009-14013）
         if (WHIP_PROC_ITEMS.has(this.itemId) && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {

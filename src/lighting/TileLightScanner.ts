@@ -3,7 +3,7 @@
 // (天空 ApplySurfaceLight:3152 → 地狱 ApplyHellLight:3261 → 墙 :167 → tile :344 → 液体 :110)。
 // 洞穴(worldSurface..UnderworldLayer)零环境光。
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { lightIsOn } from '../world/wiring/devices';
+import { lightIsOn, LIGHT_TOGGLE } from '../world/wiring/devices';
 import { TileStore } from '../world/TileStore';
 import { FastRandom } from './FastRandom';
 import {
@@ -15,6 +15,10 @@ import { ALLOW_LIGHT_IN_WATER_SHEETS } from '../data/tiles';   // TileID.Sets.Al
 import { paintColor } from '../world/Paint';
 import { FlickerClock, skySeed } from './SkyColor';
 import { LightMap, Mask } from './LightMap';
+import {
+  lightWasmEnabled, lightWasmReady, lightWasmExportScan, ensureLightWasm,
+  type LightScanTables,
+} from '../wasm/lightWasm';
 
 /** 扫描器依赖的最小世界结构(引擎注入;World 满足该接口) */
 export interface ScannerWorld {
@@ -22,6 +26,11 @@ export interface ScannerWorld {
   groundLevel: number;  // 原版 worldSurface
   lavaLine: number;     // 原版 UnderworldLayer
   clock: { timeOfDay: number; dayCount: number; eclipse?: boolean };
+  /** ★scan 核 RNG 哈希锚(2026-10-04 WASM 第四刀):store(0,0) 的绝对世界坐标
+   *  (worker 切片 store=slice.sx/sy,经 LightWorkerProtocol.runSnapshotOnEngine
+   *  每帧注入;主线程世界 store 不设=0,0)。localRandom 哈希 (y*2654435761+x)|0
+   *  非平移不变——AS 主循环与 JS 尾段 localRandom shim 必须同锚(位级对拍前提)。 */
+  hashOrigin?: { x: number; y: number };
 }
 
 /** 动态点光(原版 Lighting.AddLight;0-1 RGB) */
@@ -654,6 +663,80 @@ export function restoreShimmerLiquidLightFloor(
   touched.length = 0;
 }
 
+// ---- ★scan 核 WASM 表上传载荷(2026-10-04 第四刀;进程级缓存) ----
+// 与 TileLightScanner 构造器(:744-763)逐项同源烘焙;TILE_DEFS 静态 → 全进程一份。
+// ★lightR/G/B 与 wallEmR/G/B 必须 Float32Array(构造器同式 f32 舍入值域——AS 侧
+// load<f32> promote 后与 JS 读值逐位同);torch/glass/paint 为 f64(JS 数组原值)。
+// ★blocks 表=静态 TILE_BLOCK_LIGHT_SHEETS(718 昼云动态覆写经 lightExport 形参,
+// 不烘进表——构造器的 blocksLight 实例字段会被每帧覆写,作上传源会带陈旧态)。
+let wasmTablesCache: LightScanTables | null = null;
+export function getScanTablesPayload(): LightScanTables {
+  if (wasmTablesCache) return wasmTablesCache;
+  const N = 65536;   // u16 type 全域(表尾 0=OOB type 生产不可达,见 light.as.ts 头注)
+  const sheet = new Int16Array(N).fill(-1);
+  const blocks = new Uint8Array(N), noSun = new Uint8Array(N), cracked = new Uint8Array(N);
+  const allowWater = new Uint8Array(N), mushroom = new Uint8Array(N), flicker = new Uint8Array(N);
+  const hasLight = new Uint8Array(N), special = new Uint8Array(N);
+  const lightR = new Float32Array(N), lightG = new Float32Array(N), lightB = new Float32Array(N);
+  let pixelBlockId = -1;
+  const pb = TILE_BY_KEY['pixel_block'] ?? -1;
+  if (pb >= 0) pixelBlockId = pb;
+  TILE_DEFS.forEach((d, i) => {
+    const sh = d?.vanilla?.sheet ?? -1;
+    if (sh >= 0) {
+      sheet[i] = sh;
+      if (TILE_BLOCK_LIGHT_SHEETS.has(sh)) blocks[i] = 1;
+      if (TILE_NO_SUN_LIGHT_SHEETS.has(sh)) noSun[i] = 1;
+      if (CRACKED_SHEETS.has(sh)) cracked[i] = 1;
+      if (ALLOW_LIGHT_IN_WATER_SHEETS.has(sh)) allowWater[i] = 1;
+      if (MUSHROOM_GLOW_SHEETS.has(sh)) mushroom[i] = 1;
+      if (FLICKER_SHEETS.has(sh)) flicker[i] = 1;
+      if (SPECIAL_LIGHT_SHEETS.has(sh)) special[i] = 1;
+    }
+    if (d?.light) {
+      hasLight[i] = 1;
+      lightR[i] = d.light[0] / 255;
+      lightG[i] = d.light[1] / 255;
+      lightB[i] = d.light[2] / 255;
+    }
+  });
+  const WN = 512;
+  const wallLight = new Uint8Array(WN), wallEmHas = new Uint8Array(WN), wallEmGated = new Uint8Array(WN);
+  const wallEmR = new Float32Array(WN), wallEmG = new Float32Array(WN), wallEmB = new Float32Array(WN);
+  for (const wl of WALL_LIGHT) if (wl >= 0 && wl < WN) wallLight[wl] = 1;
+  wallLight[73] = 1;
+  wallLight[227] = 1;
+  for (const [k, v] of Object.entries(WALL_EMISSIVE)) {
+    const wl = Number(k);
+    if (wl >= 0 && wl < WN) {
+      wallEmHas[wl] = 1;
+      wallEmR[wl] = v[0]; wallEmG[wl] = v[1]; wallEmB[wl] = v[2];
+    }
+  }
+  for (const wl of WALL_EMISSIVE_GATED) if (wl >= 0 && wl < WN) wallEmGated[wl] = 1;
+  const torch = new Float64Array(72);
+  TORCH_COLORS.forEach((c, s) => { torch[s * 3] = c[0]; torch[s * 3 + 1] = c[1]; torch[s * 3 + 2] = c[2]; });
+  const glass = new Float64Array(21);
+  GLASS_TINT.forEach((c, s) => { glass[s * 3] = c[0]; glass[s * 3 + 1] = c[1]; glass[s * 3 + 2] = c[2]; });
+  const paint = new Float64Array(768);   // 256 全域;0/31 与越界=White(paintColor default)
+  for (let p = 0; p < 256; p++) {
+    const pc = paintColor(p);
+    paint[p * 3] = pc[0]; paint[p * 3 + 1] = pc[1]; paint[p * 3 + 2] = pc[2];
+  }
+  const togAxis = new Uint8Array(N), togDelta = new Uint16Array(N);
+  for (const [k, v] of Object.entries(LIGHT_TOGGLE)) {
+    const s = Number(k);
+    if (s >= 0 && s < N) { togAxis[s] = v[0] === 'x' ? 0 : 1; togDelta[s] = v[1]; }
+  }
+  wasmTablesCache = {
+    pixelBlockId, sheet, blocks, noSun, cracked, allowWater, mushroom, flicker,
+    hasLight, special, lightR, lightG, lightB,
+    wallLight, wallEmHas, wallEmGated, wallEmR, wallEmG, wallEmB,
+    torch, glass, paint, togAxis, togDelta,
+  };
+  return wasmTablesCache;
+}
+
 export class TileLightScanner {
   /** 挡光表(Main.tileBlockLight,lightTables.TILE_BLOCK_LIGHT_SHEETS 按 sheet 展开;
    *  LightIsBlocked :154-165)——718 昼云为昼夜动态,每帧在 exportTo 覆写(Main.cs:66134-66141) */
@@ -858,14 +941,136 @@ export class TileLightScanner {
     return true;
   }
 
-  /** ExportTo(:17-43)+ GetTileLight(:89-108):向工作图播种 mask 与颜色 */
+  /** ExportTo(:17-43)+ GetTileLight(:89-108):向工作图播种 mask 与颜色。
+   *  ★WASM scan 核(2026-10-04 第四刀):主循环 AS 化(light.as.ts lightExport),
+   *  JS 残段=③b specialTileLight 60-case + ④特例格补支 + ⑤ perFrame
+   *  (exportWasmTail,位级 1:1)。旗 ?lightwasm 转正缺省开(与 blur 同旗同闸);
+   *  拒/未就绪/失败 → 落 exportToJs 原路径(fail-closed,位级同源)。 */
   exportTo(w: ScannerWorld, map: LightMap, rx: number, ry: number, perFrame: PerFrameLight[]): void {
-        this.random.reseed(); // Update() :58-61 每周期换种子（恢复真闪烁）
+        this.random.reseed(); // Update() :58-61 每周期换种子（恢复真闪烁）——TS 侧持链,
+                              // AS 循环内所有局部掷=f(masterSeed) 纯函数,经形参上传
     // 718 昼云挡光昼夜动态(Main.cs:66134-66141 UpdateTime:dayTime→false/夜→true;
-    // 静态 Initialize 无该项,布尔表默认 false)
+    // 静态 Initialize 无该项,布尔表默认 false)——JS 表覆写保留(JS 支消费;
+    // WASM 支经 cloudType/cloudDay 形参,不依赖实例表态)
     if (this.cloud718Id >= 0) {
       this.blocksLight[this.cloud718Id] = (w.clock as { isDay?: boolean }).isDay === false ? 1 : 0;
     }
+    if (lightWasmEnabled()) {
+      if (lightWasmReady()) {
+        const rc = this.exportScanWasm(w, map, rx, ry);
+        if (rc !== null) {
+          this.exportWasmTail(w, map, rx, ry, perFrame, rc.list, rc.count);
+          return;
+        }
+      } else {
+        ensureLightWasm();   // fire-and-forget 幂等预热(未就绪帧走 JS,就绪后自动切)
+      }
+    }
+    this.exportToJs(w, map, rx, ry, perFrame);
+  }
+
+  /** WASM scan 产物路径:帧标量折算(JS 侧:skySeed/hellV 的 sin/trig 全留 JS)→
+   *  lightWasmExportScan(窗口上传+lightExport+r/g/b/mask 读回+特例列表)。
+   *  返回 null=拒/失败(调用方落 JS 原路径;map 数组未被触碰)。 */
+  private exportScanWasm(w: ScannerWorld, map: LightMap, rx: number, ry: number): { count: number; list: Uint32Array } | null {
+    const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,
+      !!(w.clock as { bloodMoon?: boolean }).bloodMoon,
+      (w.clock as { moonPhase?: number }).moonPhase);
+    // 地狱脉动(ApplyHellLight:3266-3271:0.55 + Sin(GlobalTimeWrappedHourly×2f)×0.08
+    // ——sin 在 JS 侧折算成 hellR/G/B 形参,trig 零入 AS)
+    const hellV = 0.55 + Math.sin(this.flicker.globalTimeWrappedHourly * 2) * 0.08;
+    const dc = this.flicker.discoColor();
+    return lightWasmExportScan({
+      st: w.store,
+      map: { w: map.w, h: map.h, r: map.r, g: map.g, b: map.b, mask: map.mask },
+      rx, ry,
+      hashOriginX: w.hashOrigin?.x ?? 0,
+      hashOriginY: w.hashOrigin?.y ?? 0,
+      groundLevel: w.groundLevel, lavaLine: w.lavaLine,
+      seed: this.random.getSeed(),
+      skyR, skyG, skyB,
+      dk: 1 - shimmerDarken, swa: shimmerWaterAlpha,
+      hellR: hellV, hellG: hellV * 0.6, hellB: hellV * 0.2,
+      lavaV: 0.55 + (270 - this.flicker.mouseTextColor) / 900,
+      osc: this.flicker.mouseTextColor,
+      dr: dc[0], dg: dc[1], db: dc[2],
+      demon: this.flicker.demonTorch,
+      cloudType: this.cloud718Id,
+      cloudDay: (w.clock as { isDay?: boolean }).isDay === false ? 1 : 0,
+      tables: getScanTablesPayload(),
+    });
+  }
+
+  /** WASM scan JS 尾段(位级 = JS 主循环的 ③b→④→⑤ 残段,行号锚同 exportToJs):
+   *  特例格按扫描序逐格 ③b specialTileLight 合并(含 125 'gb-override' 赋值语义)
+   *  → ④ 液体光(WASM 侧特例格跳过的 ④ 按原序在此补跑——③b/④ 均 max-merge 可
+   *  交换,唯 gb-override 覆写序敏感,故必须保持 ③b→④ 顺序)→ ⑤ perFrame 点光。 */
+  private exportWasmTail(w: ScannerWorld, map: LightMap, rx: number, ry: number,
+    perFrame: PerFrameLight[], list: Uint32Array, count: number): void {
+    const st = w.store;
+    const mw = map.w, mh = map.h;
+    const rA = map.r, gA = map.g, bA = map.b;
+    const osc = this.flicker.mouseTextColor;
+    const lavaV = 0.55 + (270 - osc) / 900;
+    const sctx: SpecialLightCtx = {
+      x: 0, y: 0, st,
+      localRand: () => this.localRandom(sctx.x, sctx.y),
+      sundialCooldown: (w as { sundialCooldown?: number }).sundialCooldown,
+      moondialCooldown: (w as { moondialCooldown?: number }).moondialCooldown,
+      isDay: (w.clock as { isDay?: boolean }).isDay,
+      raining: !!(w as { weather?: { raining?: boolean } }).weather?.raining,
+      timeOfDay: w.clock.timeOfDay,
+    };
+    for (let k = 0; k < count; k++) {
+      const li = list[k];
+      const lx = li % mw;
+      const ly = (li / mw) | 0;
+      const tx = rx + lx, ty = ry + ly;
+      const i = st.idx(tx, ty);
+      let lr = rA[li], lg = gA[li], lb = bA[li];
+      // ③b(:1093-1105;sheet=sheetById[type],与 JS 支同源)
+      const fx = st.frameX[i], fy = st.frameY[i];
+      sctx.x = tx; sctx.y = ty;
+      const sp = specialTileLight(this.sheetById[st.type[i]], fx, fy, this.flicker, sctx);
+      if (sp) {
+        if (sp.length > 3) {
+          // 水晶球 125 赋值语义(:3065-3072):G/B 直接覆写(可压暗),R 走 max
+          lg = sp[1]; lb = sp[2];
+          if (sp[0] > lr) lr = sp[0];
+        } else {
+          lr = Math.max(lr, sp[0]); lg = Math.max(lg, sp[1]); lb = Math.max(lb, sp[2]);
+        }
+      }
+      // ④ 液体光(:1107-1122)
+      const liquid = st.liquid[i], liquidType = st.liquidType[i];
+      if (liquid > 0 && liquidType === 4) {
+        const n2 = 0.7 + (270 - osc) / 900;
+        const n3 = 0.7 + (270 - osc) / 125;
+        const er2 = n2 * 0.6, eg2 = n3 * 0.25, eb2 = n2 * 0.9;
+        if (er2 > lr) lr = er2;
+        if (eg2 > lg) lg = eg2;
+        if (eb2 > lb) lb = eb2;
+      } else if (liquid > 0 && liquidType === 2) {
+        if (lavaV > lr) lr = lavaV;
+        if (lavaV * 0.6 > lg) lg = lavaV * 0.6;
+        if (lavaV * 0.2 > lb) lb = lavaV * 0.2;
+      }
+      rA[li] = lr; gA[li] = lg; bA[li] = lb;
+    }
+    // ⑤ 动态点光(ApplyPerFrameLights:204-227;区域内 max 合并)
+    for (const l of perFrame) {
+      const lx = l.x - rx, ly = l.y - ry;
+      if (lx < 0 || ly < 0 || lx >= mw || ly >= mh) continue;
+      const li = ly * mw + lx;
+      if (l.r > rA[li]) rA[li] = l.r;
+      if (l.g > gA[li]) gA[li] = l.g;
+      if (l.b > bA[li]) bA[li] = l.b;
+    }
+  }
+
+  /** ExportTo JS 原路径(exportTo 主体,2026-08-24→2026-09-19 历代优化形态原样;
+   *  WASM 拒/未就绪/旗关时走此路径,位级金标 lighting-scan-blur-golden 锁定) */
+  private exportToJs(w: ScannerWorld, map: LightMap, rx: number, ry: number, perFrame: PerFrameLight[]): void {
     const st = w.store;
     map.clear();
     const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,

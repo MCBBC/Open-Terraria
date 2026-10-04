@@ -14,7 +14,7 @@
 import {
   SNAPSHOT_PAD, TILE_CHAN_KEYS, TILE_CHAN_BYTES_PER_CELL, LIGHT_DELTA_VERSION,
   LightDeltaEncoder, sliceGeometry, allocSliceChannels,
-  type LightPoolMsg, type LightResyncMsg, type LightResultMsg, type LightSnapshotMsg, type TileSlicePack,
+  type LightPoolMsg, type LightResyncMsg, type LightResultMsg, type LightSnapshotMsg, type ResultTriple, type TileSlicePack,
 } from './LightWorkerProtocol';
 import { WorkerWatchdog, newFallsBy, type WorkerFallReason } from '../workers/WorkerGovernance';
 import { lightWasmEnabled } from '../wasm/lightWasm';
@@ -64,6 +64,10 @@ export interface LightTarget {
 const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0, skipped: 0,
   tileBytes: 0, fmt: { full: 0, delta: 0 }, poolHits: 0, poolMisses: 0, resyncs: 0,
   lastFullReason: 'off' as string,
+  // ★债2/债3 池化（2026-10-04）对账面:retSent/retDropped=结果数组退役回送/容量弃;
+  //  resPoolTakes/resPoolMisses=worker 结果池取/未中（随 rp 回传的 worker 累计值）;
+  //  deltaPoolHits/deltaPoolMisses=编码器 delta scratch 池命中/未中（主线程本地）。
+  retSent: 0, retDropped: 0, resPoolTakes: 0, resPoolMisses: 0, deltaPoolHits: 0, deltaPoolMisses: 0,
   fallsBy: newFallsBy(), respawns: 0 };
 /** ★R1b-1:引擎侧世代校验丢弃一个晚到结果时登记（探针/F5 对账面） */
 export function noteLightResultSkipped(): void { lwStat.skipped++; }
@@ -72,6 +76,7 @@ export function noteLightWorkerRespawn(): void { lwStat.respawns++; }
 export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number; lagMs: number; skipped: number;
   tileBytes: number; fmt: { full: number; delta: number }; poolHits: number; poolMisses: number; resyncs: number;
   lastFullReason: string;
+  retSent: number; retDropped: number; resPoolTakes: number; resPoolMisses: number; deltaPoolHits: number; deltaPoolMisses: number;
   fallsBy: Record<WorkerFallReason, number>; respawns: number } {
   return { on: lightWorkerFlag, ...lwStat, fmt: { ...lwStat.fmt }, fallsBy: { ...lwStat.fallsBy } };
 }
@@ -84,6 +89,14 @@ export class LightWorkerLink {
   private errored = false;
   private dead = false;
   private pending: LightResultMsg | null = null;
+  /** ★债3 池化:pending 载荷已被应用（到达即应用/liveAuth 支,引擎 applyWorkerResult
+   *  成功经 noteResultApplied 登记）——此时 pending 数组=公共面活体,覆写/兜底拒绝
+   *  点【禁止】退役（否则回送在渲染读的活数组=detach 公共面）;false=数组仅 pending
+   *  持有,失去 pending 引用即孤儿 → 退役回池。 */
+  private pendingApplied = false;
+  /** ★债3 池化:退役结果数组队列（引用替换点收集,随下帧快照 transfer 回 worker
+   *  结果池;深度 8 封顶——传送风暴期在途 skipped 结果突发,溢出弃（GC,仅失回收） */
+  private _retired: ResultTriple[] = [];
   private seq = 0;
   private lastSentAt = 0;
   /** ★看门狗治理（2026-09-28）:outstanding-aware 心跳（旧「2s 无回传即杀」的墙钟
@@ -194,6 +207,7 @@ export class LightWorkerLink {
     // ★C9d2:摘写日志（回退本地/世界销毁后原语写面零开销;防悬挂引用）
     if (this._st !== null) { this._st.tileWriteLog = null; this._st = null; }
     this._pool.length = 0;
+    this._retired.length = 0;   // ★债3:worker 已终止,退役队列无回收意义
     this.dead = true;
   }
 
@@ -238,12 +252,22 @@ export class LightWorkerLink {
    *  send 返回后【不得再触碰】通道数组;worker compute 完经 'pool' 消息回传
    *  （legacy 直回 m.tiles;'full' 走解码器退役队列 drainRetired）入池复用。
    *  池深纪律:回传包进 recycleSlice（≤4、type.length>0）,buildSlice 按
-   *  type.length===n 精确配对弹出——两形态共用一个池,命中/未命中账同口径。 */
+   *  type.length===n 精确配对弹出——两形态共用一个池,命中/未命中账同口径。
+   *  ★债3 池化（2026-10-04）:消息可携带 ret（退役结果数组）——buffer 一并入
+   *  transfer 列表,worker 侧入结果池供发布面取用。 */
   private postFrameWithTiles(m: object, t: TileSlicePack): void {
     const transfer: ArrayBuffer[] = [];
     for (const k of TILE_CHAN_KEYS) {
       const buf = (t[k] as Uint16Array | Uint8Array).buffer as ArrayBuffer;
       if (buf.byteLength > 0) transfer.push(buf);
+    }
+    const ret = (m as { ret?: ResultTriple[] }).ret;
+    if (ret !== undefined) {
+      for (const r of ret) {
+        if (r.R.buffer.byteLength > 0) transfer.push(r.R.buffer as ArrayBuffer);
+        if (r.G.buffer.byteLength > 0) transfer.push(r.G.buffer as ArrayBuffer);
+        if (r.B.buffer.byteLength > 0) transfer.push(r.B.buffer as ArrayBuffer);
+      }
     }
     this.worker!.postMessage(m, transfer);
   }
@@ -284,16 +308,7 @@ export class LightWorkerLink {
             console.warn('[LightWorker] worker frame failed:', String((m as { message: string }).message).slice(0, 140));
             return;
           }
-          this.results++;
-          lwStat.results++;
-          this.lastResultAt = performance.now();
-          this.wd.onResult(this.lastResultAt);   // ★看门狗:回达冲账（应用/世代丢弃不影响心跳）
-          lwStat.lagMs = this.lastSentAt > 0 ? performance.now() - this.lastSentAt : 0;
-          this.lastLag = lwStat.lagMs;
-          this.pending = m;
-          // ★C9b 到达即应用（compute 的 applyPending 保留为兜底,已应用则 no-op）;
-          //  ★C9c 仅 live 态生效——warmup 期本地新鲜光优先,禁陈旧倒灌
-          if (this.liveAuth && this.onResult) this.onResult(m);
+          this.arriveResult(m);
         };
       } catch (err) {
         this.errored = true;
@@ -304,6 +319,11 @@ export class LightWorkerLink {
     lwStat.posted++;
     this.lastSentAt = performance.now();
     this.wd.onSend(this.lastSentAt);   // ★看门狗:在途请求钉账（outstanding 0→1 时锚最老年龄）
+    // ★债3 池化:退役结果数组随本帧快照回送 worker（transfer 零拷贝;空队=不带字段）
+    const ret = this._retired.length > 0 ? this._retired : undefined;
+    this._retired = [];
+    if (ret !== undefined) lwStat.retSent += ret.length;
+    if (this._enc !== null) { lwStat.deltaPoolHits = this._enc.poolHits; lwStat.deltaPoolMisses = this._enc.poolMisses; }
     const seq = ++this.seq;
     // ---- Layer 2（灰度）----
     if (this._enc !== null && this._st !== null) {
@@ -318,7 +338,7 @@ export class LightWorkerLink {
         lwStat.lastFullReason = this._enc.lastFullReason;
         lwStat.tileBytes += t.type.length * TILE_CHAN_BYTES_PER_CELL;
         this._log.length = 0;
-        this.postFrameWithTiles({ ...msg, op: 'frame', seq, enc: 'full' as const }, t);
+        this.postFrameWithTiles({ ...msg, ...(ret !== undefined ? { ret } : {}), op: 'frame', seq, enc: 'full' as const }, t);
         return;
       }
       // delta 帧:编码 写日志格∪暴露带（读世界真值,影子几何同步推进）
@@ -332,30 +352,84 @@ export class LightWorkerLink {
         lwStat.fmt.full++;
         lwStat.lastFullReason = 'escalate';
         lwStat.tileBytes += full.type.length * TILE_CHAN_BYTES_PER_CELL;
-        this.postFrameWithTiles({ ...msg, tiles: full, op: 'frame', seq, enc: 'full' as const }, full);
+        this.postFrameWithTiles({ ...msg, tiles: full, ...(ret !== undefined ? { ret } : {}), op: 'frame', seq, enc: 'full' as const }, full);
         return;
       }
       lwStat.fmt.delta++;
-      lwStat.tileBytes += out.meta.byteLength + out.data.byteLength;
-      this.worker.postMessage({ ...msg, op: 'frame', seq, enc: 'delta' as const,
-        delta: { dv: LIGHT_DELTA_VERSION, meta: out.meta, data: out.data } },
-        [out.meta.buffer, out.data.buffer]);
+      // ★债2 池化:载荷字节=有效长度口径（meta 整块 scratch 过境,byteLength=容量）
+      lwStat.tileBytes += out.metaLen * 4 + out.dataLen;
+      const retBufs: ArrayBuffer[] = [];
+      if (ret !== undefined) {
+        for (const r of ret) {
+          if (r.R.buffer.byteLength > 0) retBufs.push(r.R.buffer as ArrayBuffer);
+          if (r.G.buffer.byteLength > 0) retBufs.push(r.G.buffer as ArrayBuffer);
+          if (r.B.buffer.byteLength > 0) retBufs.push(r.B.buffer as ArrayBuffer);
+        }
+      }
+      this.worker.postMessage({ ...msg, ...(ret !== undefined ? { ret } : {}), op: 'frame', seq, enc: 'delta' as const,
+        delta: { dv: LIGHT_DELTA_VERSION, meta: out.meta, data: out.data, metaLen: out.metaLen, dataLen: out.dataLen } },
+        [out.meta.buffer, out.data.buffer, ...retBufs]);
       // delta 帧无全量切片,无需回池
       return;
     }
     // ---- Layer 1（非灰度,常开）:13 通道 transferable ----
     const t = msg.tiles;
-    this.postFrameWithTiles({ ...msg, op: 'frame', seq }, t);
+    this.postFrameWithTiles({ ...msg, ...(ret !== undefined ? { ret } : {}), op: 'frame', seq }, t);
+  }
+
+  /** 结果消息到达（onmessage 结果支;独立成法=测试可驱动,无 Worker 环境驱动链路）。
+   *  ★债3 池化收口:retDelta（delta scratch 回池）/rp（worker 结果池对账镜像）/
+   *  pending 生命周期门（覆写点退役未应用孤儿;已应用=公共面活体禁碰） */
+  private arriveResult(m: LightResultMsg): void {
+    if (m.retDelta !== undefined && this._enc !== null) this._enc.retireDelta(m.retDelta.meta, m.retDelta.data);
+    if (m.rp !== undefined) { lwStat.resPoolTakes = m.rp.t; lwStat.resPoolMisses = m.rp.m; }
+    this.results++;
+    lwStat.results++;
+    this.lastResultAt = performance.now();
+    this.wd.onResult(this.lastResultAt);   // ★看门狗:回达冲账（应用/世代丢弃不影响心跳）
+    lwStat.lagMs = this.lastSentAt > 0 ? performance.now() - this.lastSentAt : 0;
+    this.lastLag = lwStat.lagMs;
+    // 旧 pending 失去引用点:未应用（仅 pending 持有）→ 孤儿 → 退役回池;
+    // 已应用（pendingApplied）=数组是公共面活体——引擎在替换点已退役,此处禁重复
+    if (this.pending !== null && !this.pendingApplied) this.retireResult(this.pending.R, this.pending.G, this.pending.B);
+    this.pending = m;
+    this.pendingApplied = false;
+    // ★C9b 到达即应用（compute 的 applyPending 保留为兜底,已应用则 no-op）;
+    //  ★C9c 仅 live 态生效——warmup 期本地新鲜光优先,禁陈旧倒灌。
+    //  引擎 applyWorkerResult 成功经 noteResultApplied 同步登记 pendingApplied。
+    if (this.liveAuth && this.onResult) this.onResult(m);
+  }
+
+  /** ★债3 池化:结果数组退役入队（引擎在「引用替换后不再被公共面持有」点调用;
+   *  随下帧 send transfer 回 worker 结果池。深度 8 封顶,溢出弃=仅失回收,正确性无涉;
+   *  detached/零长防御=双保险——绝不让死缓冲进池污染 transfer 列表） */
+  retireResult(R: Uint8Array, G: Uint8Array, B: Uint8Array): void {
+    if (R.length === 0 || R.buffer.byteLength === 0) return;
+    if (this._retired.length >= 8) { lwStat.retDropped++; return; }
+    this._retired.push({ R, G, B });
+  }
+
+  /** ★债3 池化:引擎到达即应用成功登记（pending 载荷从此=公共面活体——覆写/
+   *  兜底拒绝点退役门闩,见 pendingApplied 注） */
+  noteResultApplied(m: LightResultMsg): void {
+    if (this.pending === m) this.pendingApplied = true;
   }
 
   /** 回填引擎公共面（引擎 compute 内调用——渲染与 lightAt 全消费面读成对一致值）。
    *  ★R1b-1:pendingFilter 在场时先过世代校验——不过=丢弃（不回填,计 skipped 由
-   *  引擎校验面统一登记;此处静默拒） */
+   *  引擎校验面统一登记;此处静默拒）。
+   *  ★债3 池化:拒绝的被丢数组退役回池——但仅限「未被到达即应用」者（pendingApplied
+   *  =数组已是公共面活体,禁退役;可达性:覆盖校验通过后 1 tick 内快照移 ≤2 格,
+   *  翻转需 >26 格/tick——防御面守卫,防活数组 detach） */
   applyPending(t: LightTarget): boolean {
     const m = this.pending;
     if (m === null) return false;
     this.pending = null;
-    if (this.pendingFilter && !this.pendingFilter(m)) { noteLightResultSkipped(); return false; }
+    if (this.pendingFilter && !this.pendingFilter(m)) {
+      noteLightResultSkipped();
+      if (!this.pendingApplied) this.retireResult(m.R, m.G, m.B);
+      return false;
+    }
     t.rx = m.rx; t.ry = m.ry; t.rw = m.rw; t.rh = m.rh;
     t.r = m.R; t.g = m.G; t.b = m.B;
     return true;

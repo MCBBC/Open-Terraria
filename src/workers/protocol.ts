@@ -66,6 +66,10 @@ export interface WorldPacket {
    *  补携,BJ71 登记①:曾缺=即使保存面写入,worker 读档包缝即丢,迁移标每次读档恒假复发;
    *  旧包缺省=未迁移） */
   starterSwapMigrated?: boolean;
+  /** ★mod 清单随包（2026-10-04 P4 红蓝修正 C1）：worker 读档 loadSaveData 落
+   *  world.saveMods → packWorld → 主线程（enterGame 对账弹缺失 toast）——
+   *  旧实现包缝丢失=生产 worker 读档路径提示永不触发 */
+  saveMods?: Array<{ id: string; version: string }>;
   /** 天气快照（读档路径回传;旧包缺省=晴） */
   weather?: WeatherSave;
   /** 图鉴三桶（读档路径回传;旧包缺省=空） */
@@ -128,7 +132,7 @@ export type WorldWorkerRequest =
   | { id: number; type: 'abortGen' }
   /** ★mod 桥(2026-10-04,fire-and-forget 无回执;幂等可重推)——mod 物品/tile 稳定
    *  id 增量,worker 侧接长恒等域+补双向映射(mods/bridge.ts 供数,Client 握手后推) */
-  | { id: number; type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]> } };
+  | { id: number; type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]>; itemKeys: Array<[string, number]>; tileKeys: Array<[string, number]> } };
 
 export type WorldWorkerEvent =
   | { id: number; type: 'ready' }

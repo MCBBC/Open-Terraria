@@ -235,6 +235,22 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
   for (const r of plan.recipes) {
     itemOf(r.modId, r.spec.create);
     for (const it of r.spec.items ?? []) itemOf(r.modId, it.item);
+    // ★P4 红蓝修正(A-m1):原版 tile 键拼错静默降级为徒手配方 → 校验期拦
+    const tile = r.spec.tile;
+    if (typeof tile === 'string' && !tile.startsWith('mod_')) {
+      if (tileKeyProbe()[tile] === undefined) {
+        throw new ModPlanError(`mod ${r.modId} 配方站点 tile 键不存在: ${tile}`);
+      }
+    } else if (typeof tile === 'string' && !plan.allocation.tiles.has(tile)) {
+      throw new ModPlanError(`mod ${r.modId} 配方站点 tile 未注册: ${tile}`);
+    }
+  }
+  // ★P4 红蓝修正(A-M3):shops 引用校验(旧在 apply 期抛=半装违反「不半装」声明)
+  for (const sh of plan.shops) {
+    for (const it of sh.spec.items) {
+      if (typeof it.item === 'number') continue;   // 原版 vid 直传
+      itemOf(sh.modId, it.item);
+    }
   }
   // 弹幕引用(P2):物品 combat.shoot 字符串 `proj:<key>`/mod 键 → 分配表
   for (const it of plan.itemSpecs) {
@@ -245,6 +261,11 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
         : `mod_${it.modId}_${sh}`;
     if (!plan.allocation.projs.has(full)) {
       throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key} 引用未注册弹幕: ${sh}`);
+    }
+    // ★P4 红蓝修正(C-MAJOR-4):magic/mana 类 + 声明弹 = fail-fast(useCombatWeapon
+    //  case 'magic' 通用尾支无 mod 分流,静默降级为原版 Arrow 载体行为)
+    if (it.spec.combat?.magic || it.spec.combat?.mana) {
+      throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key}: magic/mana 类暂不支持声明弹(P4 边界)——改用 noMelee+shoot 走 'shot' 分流`);
     }
   }
 }

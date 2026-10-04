@@ -270,7 +270,7 @@ import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
   drawMimicAfterimages, drawNpcTrailGhosts, drawNpcTrailGhostsOverBody,
   drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS,
-  duke370GetAlphaBoost, duke370PremulPair, drawDukePremulPair } from './npcExtraParts';
+  duke370GetAlphaBoost, duke370PremulPair, drawDukePremulPair, npcWhiteLiftAlpha } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { GLWorldCompose, type WorldTexSrc } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
@@ -494,7 +494,7 @@ class GLBgBlit implements BGBlit {
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { TOWN_HOLDOUT, ITEM_POS_NUM, TOWN_ATTACK_TYPE, TOWN_ATTACK_TIME, TOWN_SWING, TOWN_MAGIC_AURA_COLOR, townSwingStats } from '../data/vanillaTownAttack';
-import { itemCombat } from '../data/vanillaItemCombat';
+import { itemCombat, combatWeapon } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
@@ -2247,6 +2247,45 @@ function tintIconRect(
   ctx.drawImage(tintScratch, dst.x, dst.y);
 }
 
+// ---- ★BJ512（2026-10-05）：鞭 tag/召唤集火目标标记（Main.cs:47250-47284
+//      DrawInterface_1_2_DrawEntityMarkersInWorld 数据面）----
+// 贴图 = TextureAssets.Extra[199]（vanilla/Extra_199.png 16×72,竖排 4 帧）;
+// 帧矩形 = Utils.Frame(1,4,0,frameY,0,-2)（Utils.cs:1389-1396,sizeOffsetY=-2
+// → 每帧 16×18 去尾 2px = 16×16）;帧序 = (int)(GlobalTimeWrappedHourly×10)%4
+// （:47268,gtw≥0 截断=floor）;色 = Color.White×0.7 后 A/=2（:47272-47273）
+// = (178,178,178,89)——RGB 乘色离屏烘焙（multiply→destination-in 三步,同
+// tintIconRect 判例;主画布禁 source-atop）,α=89/255 走消费侧 globalAlpha。
+// 原版屏盒相交门(:47257)=纯性能门,canvas 世界变换域裁剪等价不建模;gravDir
+// Y 翻转(:47259-47261)由 cam.flipY 整幅镜像承载（同点映射）。
+export const WHIP_MARKER_TINT_RGB = 178;   // 255×0.7 截断（XNA Color.White*0.7f）
+export const WHIP_MARKER_ALPHA = 89 / 255; // A=178 → A/=2 = 89
+export function whipMarkerFrameIndex(gtw: number): number {
+  return Math.floor(gtw * 10) % 4;
+}
+export function whipMarkerFrameRect(frameY: number): { sx: number; sy: number; sw: number; sh: number } {
+  return { sx: 0, sy: frameY * 18, sw: 16, sh: 16 };
+}
+let _whipMarkerTinted: HTMLCanvasElement | null = null;
+function whipMarkerTintedSheet(src: CanvasImageSource & { width: number; height: number }): HTMLCanvasElement | null {
+  if (_whipMarkerTinted) return _whipMarkerTinted;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.imageSmoothingEnabled = false;
+  g.drawImage(src, 0, 0);
+  g.globalCompositeOperation = 'multiply';
+  g.fillStyle = `rgb(${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB})`;
+  g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(src, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  _whipMarkerTinted = c;
+  return c;
+}
+
 // ============ 2D 网格贴图 NPC 帧引擎（FindFrame 大 switch 专属 case，NPC.cs:67295+） ============
 // 这些 NPC 的贴图是【cols×rows 二维网格】而非纵向帧条，通用 vnpc 竖切会把整行画出来
 // （画错成多倍宽）。帧索引状态机按原版 FindFrame 逐 case 1:1，供 drawNpcGrid 切格。
@@ -3706,6 +3745,47 @@ export class Renderer {
       }
     }
     this.opresentStats['fallback'] = (this.opresentStats['fallback'] || 0) + 1;
+  }
+  /** ★K1-2（2026-10-05）opresent 回退窗层序收口（登记案「opresent 合并失败回退窗
+   *  层序错位」定谳面,探针 scripts/_opresent-fallback-order.mjs 修复前实证:纯帧
+   *  屏栈=['warped','bg'] + 回退帧 vs 合并基线 census n=1547746 maxΔ=244）：compose
+   *  返 true 但 pass3 合并未走（pOver 编译失败/FBO('opresent') 租借失败/帧界不一致）
+   *  时,compose 尾单 present 【先】把世界落屏、presentPendingSky 补贴【后】执行——
+   *  · 纯帧屏栈:栈序=[warped,bg]（bg 叠世界之上=登记倒挂;restack/滤镜链重放同序
+   *    传染,且不透明 bg 帧世界整体被盖）;
+   *  · 旗关/夹层竞态帧:补贴 present(f) 把管线画布从世界冲成天空,调用方随后
+   *    drawImage(pipeline.canvas) 画的是天空=世界丢失+天空双绘。
+   *  本口在补贴后把世界按「天空下/世界上」重放（候选①/②——补贴后重放恢复层序）：
+   *  · 纯帧屏栈=清屏+重建栈序（bg 入栈底→warped 入栈顶;glCanvas≙栈折叠=合并帧单
+   *    FBO 语义,后续 restack/滤镜链重放同序;GL blend 8bit vs pass3 float±1~2LSB=
+   *    porter-duff 结合律备案族）;
+   *  · 其余（旗关帧/夹层竞态帧/revive 窗）=warped blend off 重写管线画布（旗关帧
+   *    调用方随后的 drawImage 即=世界画在补贴天空之上=双 blit 基线层序;夹层帧既有
+   *    HUD blit+restackScreen 收口照达）。
+   *  仅回退窗调用（罕见帧;present 账=旧双 blit 基线同款 2 次）;合并帧零触碰。
+   *  天空重 present 恒借 FBO 同名租借（=补贴所绘同一 FBO,内容未变）。 */
+  private reorderFallbackSkyWorld(
+    sky: { fboName: string; w: number; h: number }, wc: GLWorldCompose, accFbo: PipelineFbo | null,
+  ): void {
+    const pipe = wc.pipeline;
+    if (!pipe || pipe.unavailable) return;
+    // warped 句柄:compose 帧界=世界入参界（acc 帧=FBO 界/worldCanvas 界,与 compose
+    // 头 w/h 派生式同源）——同名同界租借=compose 本帧所绘同一 FBO
+    const fw = pipe.fbo('warped',
+      accFbo?.tex ? accFbo.w : (this.worldCanvas?.width ?? 0),
+      accFbo?.tex ? accFbo.h : (this.worldCanvas?.height ?? 0));
+    if (!fw?.tex) return;
+    if (this._c10eFrame && !this._c10eWorldToHud && pipe.screenStackMode && pipe === this.swPipe) {
+      // 纯帧:清屏+依层序重建栈（bg 下/warped 上——补贴误栈的 [warped,bg] 整弃重放）
+      pipe.clearScreenForStack();
+      const fs = pipe.fbo(sky.fboName, sky.w, sky.h);
+      if (fs?.tex) pipe.present(fs, true);
+      pipe.present(fw, true);
+    } else {
+      // 屏栈关:世界 blend off 重写管线画布（调用方 drawImage/blit 的内容源=世界）
+      pipe.present(fw);
+    }
+    this.opresentStats['fallback-reorder'] = (this.opresentStats['fallback-reorder'] || 0) + 1;
   }
   // ---- ★C10e 分体画布帧态（2026-10-01;设计文档 docs/c10e-design.md §四）----
   /** 本帧走 C10e 呈现栈（帧头定谳;旗关/拍照/cpuRender/低清档/远云夹层帧=false=
@@ -5251,6 +5331,7 @@ export class Renderer {
     if (sIdx.length > nSort) sIdx.length = nSort;
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
     this.towerGlowQueue.length = 0;   // ★BJ509 四塔 GlowMask 残影队列逐帧重建（drawNpcGlow vel4 收集,7d''' 消费）
+    this.npcWhiteLiftQueue.length = 0;   // ★BJ504 白提亮 40% 复绘队列逐帧重建（drawEnemy 收集,7d' 消费）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
@@ -6284,6 +6365,41 @@ export class Renderer {
       const eb = this.emoteSheet();
       if (eb) drawEmotes(this.ctx, eb);
     }
+    // ★BJ512：集火/鞭 tag 目标实体标记——原版接口层 1_2,紧随 1_1 EmoteBubbles
+    //  （Main.cs:47250-47284 DrawInterface_1_2_DrawEntityMarkersInWorld 1:1：
+    //  帧矩形/帧序/色见 whipMarkerTintedSheet 注;绘制=世界坐标 NPC.Center、
+    //  原点帧中心（:47274 rectangle.Size()/2）、PointClamp、ZoomMatrix=本段
+    //  世界变换等价）。数据面 = minionTargetId 单槽:写源 = 鞭命中
+    //  （Projectile.cs:14321-14323 `aiStyle==165 → MinionAttackTargetNPC =
+    //  victimIndex`）+ 右键集火（MinionNPCTargetAim :57587-57605）;失效清除
+    //  :57682-57685 每 tick。门 = 本地玩家存活 ∧ 手持召唤武器（HeldItem.summon:
+    //  DefaultToWhip Item.cs:47822 置 summon=true——鞭族含内;DefaultToMinion/
+    //  Sentry 族同 flag——本仓 combatWeapon kind summon∪whip 等价面）。
+    //  目标 active 门(:47256 nPC.active)= !dead;屏盒相交门(:47257)=纯性能门
+    //  不建模;gravDir 翻转由 cam.flipY 整幅镜像承载。
+    if (!player.dead && player.minionTargetId >= 0) {
+      const heldMk = player.inv.heldItem();
+      const defMk = heldMk ? ITEM_DEFS[heldMk.id] : undefined;
+      const cwMk = defMk ? combatWeapon(defMk) : null;
+      if (cwMk && (cwMk.kind === 'summon' || cwMk.kind === 'whip')) {
+        const tgtMk = entities.find((x) => x.id === player.minionTargetId && !x.dead
+          && (x instanceof Enemy || x instanceof TownNPC));
+        const sheetMk = tgtMk ? this.atlas?.ensureVImage('vanilla/Extra_199.png') : null;
+        if (tgtMk && sheetMk) {
+          const tintedMk = whipMarkerTintedSheet(sheetMk);
+          if (tintedMk) {
+            const fr = whipMarkerFrameRect(whipMarkerFrameIndex(globalTimeWrappedHourly()));
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
+            ctx.globalAlpha = WHIP_MARKER_ALPHA;  // Color.White*0.7f → A/=2
+            ctx.drawImage(tintedMk, fr.sx, fr.sy, fr.sw, fr.sh,
+              tgtMk.cx - fr.sw / 2, tgtMk.cy - fr.sh / 2, fr.sw, fr.sh);
+            ctx.restore();
+          }
+        }
+      }
+    }
     // ---- 投射物 0 层族冲刷（★2026-09-02 分层修复：原版 DrawProjectiles
     //      Main.cs:63199 在 DrawPlayers_AfterProjectiles(:63204)【之前】——弹在
     //      玩家/武器【下层】,出生瞬间武器压住弹体,飞离后自然露出（1405/1456/
@@ -6607,6 +6723,24 @@ export class Renderer {
           else if (ent.vanillaId === 668) this.drawDeerclopsGlow(ent);
         }
       }
+      // ★BJ504 白提亮 40% 复绘消费（395 飞碟核心/519 日耀黏液——drawEnemy 收集侧
+      //   捕获变换,本体同枢重放）：source-over α=0.4 叠在已乘光画面上,
+      //   a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a) 精确（drawFairyBright 同构判例;
+      //   相机 round 吸附同上,变换值=当帧捕获零漂移）。层序登记：此槽在玩家之上
+      //   ——与 677/668 既有偏差惯例同槽（原版本体链内=同层,观感面仅重叠实体压盖差）。
+      for (const q of this.npcWhiteLiftQueue) {
+        const imgL = this.atlas?.ensureVImage(q.tex);
+        if (!imgL) continue;
+        ctx.save();
+        ctx.translate(q.cx, q.cy);
+        ctx.rotate(q.rot);
+        ctx.scale(q.scale, q.scale);
+        if (q.mirror) ctx.scale(-1, 1);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = npcWhiteLiftAlpha(q.vid) ?? 0.4;
+        ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+        ctx.restore();
+      }
       ctx.restore();
     };
 
@@ -6630,6 +6764,20 @@ export class Renderer {
       for (const q of this.towerGlowQueue) {
         const img2 = this.atlas?.ensureVImage(q.tex);
         if (!img2) continue;
+        // ★BJ510 516 残影单份（White 基色,本体同枢重放=drawGhostSprite 数学;塔无此支）
+        if (q.single !== undefined) {
+          ctx.globalAlpha = Math.max(0, Math.min(1, q.single));
+          if (q.rot !== undefined) {
+            ctx.save();
+            ctx.translate(q.cx!, q.cy!);
+            ctx.rotate(q.rot);
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+          }
+          continue;
+        }
         // ★BJ510 516 本体白罩（Color(255-α,…):26601——α 因子,塔无此层）
         if (q.overlay) {
           ctx.globalAlpha = Math.max(0, Math.min(1, q.overlay));
@@ -10884,6 +11032,19 @@ export class Renderer {
           drawNpcTrailGhosts(ctx, e, this.atlas, r, {
             scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
             rot: gRot, mirror: gMirror, frameIdx, frames,
+            // ★BJ510 516 日耀耀斑残影改道：White 基色恒定不吃光照（:25570-25586）→
+            //  towerGlowQueue 光照合成后消费（本体同枢重放,与 drawGhostSprite 数学
+            //  逐式同：translate(中心)·rotate·scale(s·gs)·draw(−半帧+addY)）。队列
+            //  push 序=残影先于 drawNpcGlow 主项（本体之下 z 序保持）。
+            emit516Ghost: e.vanillaId === 516 ? (gh) => {
+              this.towerGlowQueue.push({
+                vid: 516, tex: 'vanilla/NPC_516.png', iw: r.sw, sy: gh.row * r.sh, gh: r.sh,
+                sw: r.sw, sh: r.sh, wx: gh.x, wy: gh.y,
+                vx: 0, vy: 0, num: 0, xoff: 0, opacity: 1,
+                noOpac: true, single: gh.alpha,
+                rot: gh.rot, cx: gh.x, cy: gh.y, bx: -r.sw / 2, by: -r.sh / 2 + gh.addY, scale: gh.s * gh.gs,
+              });
+            } : undefined,
           });
           ctx.restore();
         }
@@ -11011,6 +11172,23 @@ export class Renderer {
               ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
             }
           }
+        }
+        // ★BJ504（2026-10-05）GetAlpha 白提亮 40% 收集（NPC.cs:94679-94684,type 395/519
+        //  同族,BJ503 登记债清偿）：原版两型 GetAlpha 早退支 tint=lerp(光照,White,0.4)
+        //  （绕过缺省尾 num/num5;两型 SetDefaults alpha=0 → 与缺省面仅差白提亮项）。
+        //  本仓光照=compositeLight 事后乘,白提亮的加性白项不可在层内预乘表达
+        //  （lerp(L,W,a)=a+(1−a)L 非常数通道向量,duke370 预乘对=通道因子域不覆盖）→
+        //  走【双绘】drawFairyBright 判例（583-585 同形支,α 复绘精确等价式
+        //  a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a)）:此处捕获当帧本体变换入队,7d'
+        //  光照合成后 source-over α=0.4 复绘同帧（本体同枢零漂移,gRot/gMirror=BJ237
+        //  残影同源单源）。原版 519 拖影粉（:24643-24649 直用 Pink）/395 GlowMask[49]
+        //  （:24957 固定色）不经 GetAlpha=不提亮,本仓两面已同相,不涉本刀。
+        if (npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null) {
+          this.npcWhiteLiftQueue.push({
+            vid: e.vanillaId ?? -1, tex: `vanilla/NPC_${e.vanillaId}.png`,
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+          });
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
         // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
@@ -15528,7 +15706,20 @@ export class Renderer {
     sw: number; sh: number; wx: number; wy: number;
     vx: number; vy: number; num: number; xoff: number; opacity: number;
     overlay?: number; noOpac?: boolean;
+    /** ★BJ510 516 残影单份直画 α（Color(255×(10−i)/20…)×(1−i/6)：25562-25586 逐份
+     *  White 基色——非 vel4 调度,消费侧只画一份后 continue） */
+    single?: number;
     rot?: number; cx?: number; cy?: number; bx?: number; by?: number; scale?: number;
+  }> = [];
+  /** ★BJ504（2026-10-05）GetAlpha 白提亮 40% 复绘队列（395 飞碟核心/519 日耀黏液,
+   *  NPC.cs:94679-94684,BJ503 登记债清偿）：本体位（drawEnemy 通用本体链尾）捕获
+   *  当帧变换（cx/cy/rot/mirror/scale/帧矩形/锚 bodyY）→ 7d' 光照合成后 source-over
+   *  α=0.4 复绘同帧。等价式 a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a)（drawFairyBright
+   *  583-585 同构判例,0.4 同式精确）。逐帧重建（5292 帧头清,同 towerGlowQueue 惯例）;
+   *  tex 存名消费侧 ensureVImage 懒加载（零跨拍 img 持有,wingGlowQueue 同款）。 */
+  private npcWhiteLiftQueue: Array<{
+    vid: number; tex: string; sy: number; sw: number; sh: number;
+    cx: number; cy: number; rot: number; mirror: boolean; scale: number; by: number;
   }> = [];
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
@@ -20603,6 +20794,9 @@ export class Renderer {
           } else {
             this._markPath('lrecon');
             if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
+            // ★K1-2 回退窗层序收口（登记案）:补贴后按「天空下/世界上」重放世界——
+            //  纯帧栈序修复/旗关帧画布世界还原,方法注=定谳全文
+            if (skyPend) this.reorderFallbackSkyWorld(skyPend, wcL, accFbo);
           }
           // ★C10e:纯帧=已 over 直出（无 blit）;夹层帧=blit→HUD（世界落夹层族上）
           //  +restack（present 踩踏屏栈→恢复 glCanvas=屏栈不变式）
@@ -20876,6 +21070,8 @@ export class Renderer {
             } else {
               this._markPath('a2');
               if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
+              // ★K1-2 回退窗层序收口（登记案）:同 lrecon 支——补贴后重放世界
+              if (skyPend) this.reorderFallbackSkyWorld(skyPend, wc, accFbo);
             }
             // ★C10e:纯帧=已 over 直出;夹层帧=blit→HUD+restack（同 lrecon 支）
             if (!(this._c10eFrame && !this._c10eWorldToHud)) {

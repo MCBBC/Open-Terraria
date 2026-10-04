@@ -24,6 +24,9 @@ export class ModProj extends Entity {
   ageTicks = 0;
   /** 发射方阵营(P2:玩家武器弹=true/mod NPC AI 弹=false;联机傀儡=P3) */
   ownerIsPlayer: boolean;
+  /** ★P6:hostile 位(原版 Projectile.hostile 语义)——mod NPC AI 弹=true 时,
+   *  msg27 kind12 携 bit7,访客端 netPuppetProjContact 对己结算(victim-settles) */
+  hostile = false;
   /** 命中过の敵怪 id 集(穿透去重;同怪一次) */
   private hitSet = new Set<number>();
   private spec: NonNullable<ReturnType<typeof modProjSpecOf>>;
@@ -133,19 +136,24 @@ export class ModProj extends Entity {
     // vanilla/Projectile_<projId>.png 覆盖键(mod 资产注入;资源包同键族)
     const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`) ?? null;
     if (!img) return;
-    const sx = Math.round(this.x - cam.x);
-    const sy = Math.round(this.y - cam.y);
-    if (sx < -32 || sy < -32 || sx > r.canvas.width + 32 || sy > r.canvas.height + 32) return;
     const c = r.ctx;
+    if (!c) return;
+    // ★rivals 批修复(用户实报"隔空伤害无贴图"):实体循环 ctx 已含相机变换
+    //   (Arrow.draw 同约定,世界坐标直绘)——旧实现做 this.x-cam.x 屏幕坐标换算
+    //   = 相机变换叠加双重偏移,弹体恒画到屏外。视口剔除改世界域粗判。
+    if (this.x + this.w < cam.x - 64 || this.x - this.w > cam.x + r.canvas.width + 64) return;
+    if (this.y + this.h < cam.y - 64 || this.y - this.h > cam.y + r.canvas.height + 64) return;
     if (this.spec.rotateToVelocity) {
       const ang = Math.atan2(this.vy, this.vx);
       c.save();
-      c.translate(sx + this.w / 2, sy + this.h / 2);
+      c.imageSmoothingEnabled = false;
+      c.translate(this.x + this.w / 2, this.y + this.h / 2);
       c.rotate(ang);
       c.drawImage(img as CanvasImageSource, -this.w / 2, -this.h / 2, this.w, this.h);
       c.restore();
     } else {
-      c.drawImage(img as CanvasImageSource, sx, sy, this.w, this.h);
+      c.imageSmoothingEnabled = false;
+      c.drawImage(img as CanvasImageSource, this.x, this.y, this.w, this.h);
     }
   }
 }

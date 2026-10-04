@@ -172,7 +172,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     //   extra 缺省 = max(2, frames−16)(人形族 14 帧行走区惯例;GLM娘 26→10)
     if (spec.townNPC) {
       const extra = spec.extraFrames ?? Math.max(2, (spec.frames ?? 2) - 16);
-      registerModTownNpc(n.fullKey, n.npcId, extra, n.modId);
+      registerModTownNpc(n.fullKey, n.npcId, extra, n.modId, spec.arrival);
     }
     modSummonAccum.push({
       id: n.npcId, name: spec.name,

@@ -3111,6 +3111,26 @@ export class MinionProj extends Entity {
    *  CanHit 整盒 ∪ 三组 CanHitLine 端点对）——旧 canHitLine 单形状近似退役
    *  （墙棱半贴/侧沿擦过场景差档,实机验收=弧刀段绕柱起手率一致） */
   private tTarget(game: GameHooks, pcx: number, pcy: number): EnemyLike | null {
+    // ★BJ514：集火支补（AI_156_TryAttackingNPCs :52772-52793——
+    //  OwnerMinionAttackTargetNPC 第一桶：CanBeChasedBy ∧ 距玩家心 ≤1000
+    //  （:52780 Distance>1000 拒）∧ CanHitWithOwnBody（:52784）→ 即退 :52790。
+    //  blackListedTargets 本仓未建模（野生支同缺,登记 BJ514 债②）——非 boss
+    //  黑名单支 `!boss && contains` 在空黑名单下恒假,不建模等价。）
+    const pOwn = this.ownerRef();
+    const focus = (pOwn as unknown as { minionTargetId?: number } | null)?.minionTargetId ?? -1;
+    if (focus >= 0) {
+      for (const e of game.enemies()) {
+        const en = e as never as EnemyLike & { dead: boolean };
+        if (!en || en.dead || en.id !== focus) continue;
+        if (canBeChasedBy(e)
+          && Math.hypot(en.cx - pcx, en.cy - pcy) <= 1000
+          && canHitWithOwnBodyBox(game.world.store, this.x, this.y, this.w, this.h, this.facing,
+            en.x, en.y, en.w, en.h)) {
+          return en;
+        }
+        break;                     // 原版单槽直查非全表扫
+      }
+    }
     let best: EnemyLike | null = null;
     let bestD = 1000;
     for (const e of game.enemies()) {
@@ -3473,7 +3493,8 @@ export class MinionProj extends Entity {
     const num4 = Math.max(5, 40 - num2 * 4);          // :66088
     const num5 = Math.min(1, 0.69 + num2 * 0.03);     // :66089
     // 索敌 700 + 视线门（:66330-66333 num12=700；:66435 963 走 Collision.CanHit 1×1）
-    const tgt = this.nearestEnemy(game, 700, 'point');
+    // ★BJ514：集火门距 = num12×3 = 2100（:66410 num18=num12×3,else 支 963 分档）
+    const tgt = this.nearestEnemy(game, 700, 'point', 'self', 2100);
     // 归位门（:66446-66453）：num21=800 → 有目标 1000
     const num21 = tgt ? 1000 : 800;
     if (this.a62A0 !== 1 && Math.hypot(p.cx - this.cx, p.cy - this.cy) > num21) this.a62A0 = 1;
@@ -4528,6 +4549,51 @@ export class MinionProj extends Entity {
    *  休眠支,测试经 ai[0] 直置驱动。
    *  命中仅状态 2：80×40 拳盒于 Center+direction×40（Colliding :14294-14300），
    *  localNPCHitCooldown=5（:6433）；伤害走 resolveWhipTagHit（623 是 minion） */
+  /** AI_120_StardustGuardian_FindTarget 1:1（1457 Projectile.cs:45785-45800 /
+   *  1456 :42301-42316）——★BJ514（2026-10-05,BJ512 登记债②清偿批①,锚例=星尘守卫者）：
+   *  专用择敌,不共用 nearestEnemy（dragonTarget AI_121 判例同款）。
+   *  原文本支【无】OwnerMinionAttackTargetNPC 集火桶——:45785 全函数只扫
+   *  CanBeChasedBy ∧ 玩家心距,三处调用（状态 0 :45526/状态 1 :45581/状态 2 重锁
+   *  :45716）同体;nearestEnemy 的集火支/鞭 tag 桶对 623 系先前批 eager 面,本刀摘除。
+   *  · 距锚 = Main.player[owner].Center（:45786-45788）——状态 0/重锁两处曾错挂
+   *    随从心（nearestEnemy 缺省 from:'self'）,一并归真;
+   *  · 语义 = 玩家心 Euclid < lookupRange 收缩最近（:45792-45795 num<lookupRange）,
+   *    lookupRange 初值 num2=500（:45466）;
+   *  · 原文本支无鞭 tag 支（同 AI_121 判例：nearestEnemy 通用 tag 层不建模）。 */
+  private ai120FindTarget(game: GameHooks, p: Player): EnemyLike | null {
+    let best: EnemyLike | null = null;
+    let bestD = 500;                                   // lookupRange=num2（:45466）
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean };
+      if (!en || en.dead) continue;
+      if (!canBeChasedBy(e)) continue;                 // :45790
+      const d = Math.hypot(en.cx - p.cx, en.cy - p.cy);  // center=player.Center（:45786-45788）
+      if (d < bestD) { bestD = d; best = en; }         // :45792-45795 收缩最近
+    }
+    return best;
+  }
+
+  /** AI_177（917 酷鞭雪花/1036 雾网蜘蛛）择敌 1:1 = Projectile.FindTargetWithinRange
+   *  （:45918-45931,实参 (400f, checkCanHit=false)——:46022/:46025,checkCanHit 唯
+   *  969 置 true,两型不消费）——★BJ514：原文本支无集火桶/无鞭 tag 桶（AI_177 全
+   *  函数不读 OwnerMinionAttackTargetNPC）,曾吃 nearestEnemy 通用集火(900)/tag 桶,
+   *  本刀摘除改专扫。
+   *  （FindTargetWithinRange 的 localNPCImmunity[i]==0 门 = 命中冷却内不重锁
+   *  （917 localNPCHitCooldown=20 :8713-8714）——本仓 hitCd 读位语义未对齐,登记
+   *  BJ514 债③,旧实现同缺零回归。） */
+  private ai177FindTarget(game: GameHooks): EnemyLike | null {
+    let best: EnemyLike | null = null;
+    let bestD = 400;                                   // maxRange=400（:46022）
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean };
+      if (!en || en.dead) continue;
+      if (!canBeChasedBy(e)) continue;                 // :45922
+      const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);  // Distance(nPC.Center)=随从心
+      if (best === null || d < bestD) { bestD = d; best = en; }  // :45926-45930 !(num<=num2)
+    }
+    return best;
+  }
+
   private guardianBody(game: GameHooks, p: Player, dmg0: number): void {
     const add = (e: unknown) =>
       (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
@@ -4564,10 +4630,11 @@ export class MinionProj extends Entity {
         else { this.vx = desX; this.vy = desY; }
         this.facing = dirX; // :42226
         this.x += this.vx; this.y += this.vy;
-        // 每 4t 重锁 500 内最近敌（:42227-42238）
+        // 每 4t 重锁 500 内最近敌（1457 :45710-45720 localAI[0]++>=3 →
+        //  AI_120_..._FindTarget(num2=500)——★BJ514：玩家心锚/无集火/无 tag 桶）
         if (++this.gRetarget >= 4) {
           this.gRetarget = 0;
-          const nt = this.nearestEnemy(game, 500);
+          const nt = this.ai120FindTarget(game, p);
           if (nt) this.gA1 = nt.id;
         }
         // 攻击帧 12-19（12/13 快速、14 后保持 :42173-42191）
@@ -4716,9 +4783,9 @@ export class MinionProj extends Entity {
         this.gA0 = 0;                                // :45567-45570（先置 0——本拍目标支仍可覆写 2,原版序）
       }
       // 索敌锚=玩家中心（AI_120_..._FindTarget :45786-45788 Main.player[owner].Center;
-      // |Δx-锚|>170 跳过 :45572-45581）——from:'player' 与原版同锚
+      // |Δx-锚|>170 跳过 :45572-45581）——★BJ514：ai120FindTarget 专用扫（无集火/tag）
       let tgt: EnemyLike | null = null;
-      if (Math.abs(this.cx - ax) <= 170) tgt = this.nearestEnemy(game, 500, 'none', 'player');
+      if (Math.abs(this.cx - ax) <= 170) tgt = this.ai120FindTarget(game, p);
       if (tgt) {
         const dirX = tgt.cx > this.cx ? 1 : -1;      // :45583
         this.facing = dirX;
@@ -4767,7 +4834,9 @@ export class MinionProj extends Entity {
       this.facing = p.facing;             // :42024
       if (++this.gFc >= 9) { this.gFc = 0; if (++this.gFrame >= 8) this.gFrame = 0; } // :42025-42032
       let tgt: EnemyLike | null = null;
-      if (Math.abs(this.cx - restX) <= 170) tgt = this.nearestEnemy(game, 500); // :42036-42043（num+20 门 / num2=500）
+      // ★BJ514：AI_120_..._FindTarget（:45526,num+20 门 :45520-45523/num2=500）
+      //  距锚=玩家心（曾 nearestEnemy 缺省随从心=锚偏差）——ai120FindTarget 专用扫
+      if (Math.abs(this.cx - restX) <= 170) tgt = this.ai120FindTarget(game, p);
       if (tgt) {
         const dirX = tgt.cx > this.cx ? 1 : -1; // :42047
         this.facing = dirX;
@@ -5455,10 +5524,7 @@ export class MinionProj extends Entity {
     // 门向量基点 = 距离测点同心（FindTarget 的 vector 自 shootingSpot 出发）
     let best: EnemyLike | null = null;
     let bestD = maxRange;
-    let tagged: EnemyLike | null = null;
-    let taggedD = maxRange;
-    // 鞭 tag 查询走玩家栈（1457 TagEffectStack——敌实体不再存 tag 态）
-    const stack = p.tagEffectStack;
+    // ★BJ514：tag 桶态（tagged/taggedD/stack）已摘除——1457 无 tag 扫描索敌（见下）
     // 'line' 形状分流（★F4 定案 2026-08-31 二轮蓝队）：锚定模式 = FindTarget 字面点对端
     //  ——CanHitLine(shootingSpot,0,0 → nPC.Center,0,0)（AI_130 :69434/:69456、AI_134
     //  :69481/:69503）；非锚定 AI_062 族 = 盒线——CanHitLine(position,width,height →
@@ -5483,7 +5549,11 @@ export class MinionProj extends Entity {
         if (sight === 'point' && !canHit(game.world.store, this.cx, this.cy, 0, 0, en.cx, en.cy, 0, 0)) continue;
         bestD = d; best = en;
       }
-      if (gated && stack.anyTagged(en.id) && d < taggedD) { taggedD = d; tagged = en; }
+      // ★BJ514（2026-10-05,BJ512 登记债①清偿）：鞭 tag 扫描桶摘除——1457 全站
+      //  无「tag 扫描式」索敌（TagEffectStack=伤害加成/proc 面 TagEffectStack.cs:1-139,
+      //  不参与择敌;鞭→随从优先完全走单槽 MinionAttackTargetNPC Projectile.cs:14321-14323
+      //  写槽 + 各 AI 第一桶消费）。本桶系先前批 eager 面,现役消费面仅此一处
+      //  （WhipTag.anyTagged 随刀退役,见该文件头注）。
     }
     // 右键集火优先（OwnerMinionAttackTargetNPC 模板 :27431：有效且距本随从 <900；
     //  AI_062 集火同样过视线门 :66375/:66413,门距 = num12×3——num12 已被 :66327
@@ -5514,7 +5584,7 @@ export class MinionProj extends Entity {
         }
       }
     }
-    return tagged ?? best;
+    return best;   // ★BJ514：tag 桶摘除后恒返回野生最近（原版无 tag 优先级面）
   }
 
   /** Minion_FindTargetInRange 1:1（1458 Projectile.cs:49884-49921;1457 :50581 同体）。
@@ -6416,9 +6486,10 @@ export class MinionProj extends Entity {
       if (ss) {
         // 索敌门 = AI_123_FloatingTurrets（Projectile.cs:37840/:37854）：最近敌选择
         // 内联 `Collision.CanHitLine(base.Center→NPC.Center)`（浮动炮台不隔墙开火）；
-        // 集火目标 OwnerMinionAttackTargetNPC 同门（:37840,本仓 minionTargetId 路径
-        // 未过此门——登记）
-        const tgt = this.nearestEnemy(game, 1000, 'line');
+        // 集火目标 OwnerMinionAttackTargetNPC 同门（:37840——本仓 focus 支 sight='line'
+        // 同过 CanHitLine 门）;★BJ514：集火门距 = num=1000（:37731,:37839 num4=num,
+        // 曾吃缺省 900）
+        const tgt = this.nearestEnemy(game, 1000, 'line', 'self', 1000);
         if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
         if (tgt && this.sCool <= 0) {
           this.sCool = ss.cd;
@@ -6597,8 +6668,11 @@ export class MinionProj extends Entity {
     const tgt = ai62
       ? this.nearestEnemy(game, 2000, 'line', AI62_PLAYER_TARGETING.has(this.projId) ? 'player' : 'self',
         6000)   // 集火门距 = num12×3 = 6000（:66327 num12=2000 + :66374 ×3;蓝队 R7-21）
-      : this.projId === 533
-        ? this.nearestEnemy(game, 2000, 'line')
+      : this.projId === 533 || this.projId === 387 || this.projId === 388
+        // ★BJ514：aiStyle 66 三型（533 致命球/387/388 双子 :30089-30103）——
+        //  集火门距 num526×3=6000（:30316 num539,:30105-30111 num526=2000;387/388
+        //  曾落通用 1000 档=range/视线/集火三重偏差,与 533 同刀归真）
+        ? this.nearestEnemy(game, 2000, 'line', 'self', 6000)
         : this.nearestEnemy(game, MINION_SHOOT[this.projId]?.search
           ?? (MINION_SHOOT[this.projId] ? 1000 : 700));
     // 基础伤害（每 tick 按当前装备 live 重算 = Projectile.cs:15368；+armorPen）
@@ -6728,7 +6802,9 @@ export class MinionProj extends Entity {
       if (!p.whipBuffs[this.projId === 917 ? 312 : 365]) { this.dead = true; return; }
       // 917 雪花 wobble：rotation = vx*0.0125（AI_177 :42571 旋转制不翻转）
       if (this.projId === 917) this.rot = this.vx * 0.0125;
-      const tgt = this.nearestEnemy(game, 400);
+      // ★BJ514：FindTargetWithinRange(400f)（:45918/:46022）——无集火/tag 桶
+      //  （AI_177 不读 OwnerMinionAttackTargetNPC;曾吃 nearestEnemy 通用面）
+      const tgt = this.ai177FindTarget(game);
       if (tgt) {
         const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
         this.vx = (tgt.cx - this.cx) / d * 5;

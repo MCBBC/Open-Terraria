@@ -1,0 +1,9 @@
+{
+  "name": "@sandboxworld/mod-api",
+  "version": "1.0.0",
+  "description": "SandboxWorld mod 开发类型包(sw 门面/ModProjSpec/ModBuffSpec/ModSystemHooks)",
+  "types": "mod-api.d.ts",
+  "files": ["mod-api.d.ts", "README.md"],
+  "license": "MIT",
+  "repository": "https://github.com/Vinlic/terraria-replica-build-notes"
+}

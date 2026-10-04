@@ -887,15 +887,22 @@ kvHas('sandboxworld.quicksave').then(async () => {
         const { readModPack } = await import('./mods/pack');
         const store = new ModStore();
         for (const file of idx.mods ?? []) {
-          const buf = await fetch(`mods/${encodeURIComponent(file)}`).then((r) => r.arrayBuffer());
-          const bytes = new Uint8Array(buf);
-          const pack = readModPack(bytes);
-          const rows = await store.listRows();
-          const existing = rows.find((r) => r.id === pack.manifest.id);
-          if (!existing || existing.version !== pack.manifest.version) {
-            await store.install(pack.manifest, bytes);
-          } else if (!existing.enabled) {
-            await store.setEnabled(pack.manifest.id, true);
+          // ★P4 红蓝修正(D-M2):逐文件 try——单个坏包不中断目录里其余 mod 的同步
+          try {
+            const buf = await fetch(`mods/${encodeURIComponent(file)}`).then((r) => r.arrayBuffer());
+            const bytes = new Uint8Array(buf);
+            const pack = readModPack(bytes);
+            const rows = await store.listRows();
+            const existing = rows.find((r) => r.id === pack.manifest.id);
+            if (!existing || existing.version !== pack.manifest.version) {
+              await store.install(pack.manifest, bytes);
+              // ★P4 红蓝修正(D-M3):版本覆盖重装保留用户启停态(install 缺省 enabled,
+              //  旧实现每次启动把面板停用强制翻回=目录压过注册表)
+              if (existing && !existing.enabled) await store.setEnabled(pack.manifest.id, false);
+            }
+            // 同版本已装:不动启停态(用户面板语义权威)
+          } catch (err) {
+            console.warn(`[mods] 桌面目录文件同步失败(跳过): ${file}`, err);
           }
         }
       } catch (err) {

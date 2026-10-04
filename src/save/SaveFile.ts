@@ -6,7 +6,7 @@ import { World as WorldClass, CHEST_MAX_ITEMS } from '../world/World';
 import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
-import { getSaveModEntries, getEnabledModIds } from '../mods/bridge';
+import { getSaveModEntries, getEnabledModIds, getCurrentAlloc } from '../mods/bridge';
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
@@ -336,6 +336,42 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       console.warn(`[mods] 存档依赖缺失 mod（内容将静默降级）: ${missing.map((m) => `${m.id}@${m.version}`).join(', ')}`);
     }
   }
+  // ★P5 id 平移完整解（2026-10-04）：存档头 itemIds/tileIds 分配映射 × 当前分配
+  //  （mods/bridge getCurrentAlloc——主线程 loader 直写/worker applyModIds 携带）
+  //  → savedStable→currentStable 重映射。卸/换前排位 mod 时后位 mod 的 id 平移
+  //  在此纠偏;映射缺键=内容已移除 → 落既有 ??0 占位。仅 mod 段有键,原版域零扰动。
+  let itemRemap: Map<number, number> | null = null;
+  let tileRemap: Map<number, number> | null = null;
+  const modCur = getCurrentAlloc();
+  if (data.mods?.length && modCur) {
+    for (const m of data.mods) {
+      for (const [fk, sid] of m.itemIds ?? []) {
+        const cur = modCur.itemKeys.get(fk);
+        if (cur !== undefined && cur !== sid) (itemRemap ??= new Map()).set(sid, cur);
+      }
+      for (const [fk, sid] of m.tileIds ?? []) {
+        const cur = modCur.tileKeys.get(fk);
+        if (cur !== undefined && cur !== sid) (tileRemap ??= new Map()).set(sid, cur);
+      }
+    }
+  }
+  const remapItemId = (id: number): number => (itemRemap ? itemRemap.get(id) ?? id : id);
+  if (itemRemap && data.player) {
+    // 就地纠偏读档侧全部物品槽(decode 既有链 stable→internal 零改):
+    // 背包/银行/盔甲/染料/垃圾/杂项/配装 + 箱子 + 挂物
+    const fix = (slots?: Array<{ id: number } | null> | null): void => {
+      if (!slots) return;
+      for (const s of slots) if (s && typeof s.id === 'number') s.id = remapItemId(s.id);
+    };
+    fix(data.player.inventory);
+    for (const b of data.player.banks ?? []) fix(b);
+    fix(data.player.armor); fix(data.player.dye);
+    if (data.player.trash) data.player.trash.id = remapItemId(data.player.trash.id);   // 单槽(serialize.ts:183)
+    fix(data.player.miscEquips); fix(data.player.miscDyes);
+    for (const l of data.player.loadouts ?? []) { fix(l.armor); fix(l.dye); }
+    for (const c of data.chests ?? []) fix(c.items);
+    for (const f of data.furniture ?? []) fix(f.slots);
+  }
   // ★二进制兼容(2026-09-06):binary 存档的通道以 Uint8Array 直出(免 base64 解码),
   //  旧 JSON 档的通道以 base64 string 存放(走 b64ToBytes 解码)。统一由此入口转换。
   const asBytes = (v: string | Uint8Array | undefined): Uint8Array =>
@@ -544,10 +580,12 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       //   经 Uint16Array 读出 0 → 跳过 fx/fy → 自首个未知 tile 起整流错位=全图损坏,
       //   且 BJ280 worldDirty 语义下自动存档把损坏解码回写覆盖好档(不可逆)。
       //   未知槽落空气(占位语义),流零损伤。
+      //   ★P5 id 平移解:先经 tileRemap(savedStable→currentStable)再查表。
+      const tS = v3 && tRaw !== 0 && tileRemap ? tileRemap.get(tRaw) ?? tRaw : tRaw;
       let t: number;
       if (!v3) t = tRaw;
-      else if (tRaw === 0) t = 0;
-      else t = TILE_INTERNAL_OF_STABLE[tRaw] || 0;   // 未映射(0)→空气,帧照消费
+      else if (tS === 0) t = 0;
+      else t = TILE_INTERNAL_OF_STABLE[tS] || 0;   // 未映射(0)→空气,帧照消费
       let fx = 0, fy = 0;
       if (tRaw !== 0) {
         s = 0;

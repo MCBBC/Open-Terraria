@@ -172,9 +172,41 @@ export interface ShimExecStats {
    *  'op:*'——b2b-acc-degraded 计数无归因面,本案 1473 次降级=原因黑箱;原因计数
    *  直连 F5 报告 render.acc.shim.accFails）。 */
   accFails: Record<string, number>;
+  /** ★b2b-acc-degraded 定谳仪（2026-10-05,清偿批）：acc 窗内触发整帧降级的 op
+   *  分类计数（每帧清;键='rv:measureText'/'tail:fillText'/'di:clip'/'fr:style'/
+   *  'fail:tex'/'sty:createRadialGradient'——前缀族见 noteDegradeTrigger 注）。
+   *  首触发归因（调用方栈）走静态 GLShimExecutor.degradeCallers（每帧首个触发
+   *  付一次 stack 采集,稳态零成本）。 */
+  degradeTriggers: Record<string, number>;
 }
 
 const fround = Math.fround;
+
+/** ★b2b-acc-degraded 定谳仪：压缩调用方栈（跳过 shim 内部帧,取前 3 个外部落笔帧,
+ *  `fn file.ts:line` 用 '<-' 连接）。只在每 acc 窗首触发调用一次（降级帧定谳税）。 */
+function degradeCallerSite(): string {
+  const st = new Error().stack;
+  if (!st) return '';
+  const out: string[] = [];
+  for (const line of st.split('\n')) {
+    const s = line.trim();
+    if (!s || s === 'Error') continue;
+    if (s.includes('GLShimExecutor.ts')) continue;   // shim 内部帧（含 Proxy 箭头）
+    out.push(shortStackFrame(s));
+    if (out.length >= 3) break;
+  }
+  return out.join('<-');
+}
+
+function shortStackFrame(s: string): string {
+  // "at fn (http://host/p/file.ts:12:34)" / "at http://…/file.ts:12:34" 两形
+  const m = /^at\s+(?:(.*?)\s+\()?(.*?):(\d+):\d+\)?$/.exec(s);
+  if (m) {
+    const file = (m[2] as string).split('/').pop() as string;
+    return `${m[1] ? m[1] + ' ' : ''}${file}:${m[3]}`;
+  }
+  return s.length > 80 ? s.slice(0, 80) : s;
+}
 
 /** ★R1-F1 tier→2D 算子全表（重放/直画面 gCO 单源;旧码二值表丢 tier-2/3 语义） */
 const TIER_GCO: readonly GlobalCompositeOperation[] = ['source-over', 'lighter', 'destination-out', 'multiply'];
@@ -334,13 +366,22 @@ export class GLShimExecutor {
   private dynKeySeq = 0;
   private dynKeys = new WeakMap<object, string>();
   stats: ShimExecStats = GLShimExecutor.blankStats();
+  /** ★b2b-acc-degraded 定谳仪：本窗（acc 窗）已做过首触发栈归因（每窗至多一次） */
+  private _degradeAttributed = false;
 
   /** ★闪屏定谳仪（2026-09-30）：accFail 会话级累计账（静态,不随 frameReset 每帧清;
    *  key=`why` 或 `why:失败纹理键`——F5 报告 render.acc.accFailLedger 消费） */
   static accFailLedger: Record<string, number> = {};
 
+  /** ★b2b-acc-degraded 定谳仪（2026-10-05 清偿批）会话级累计账（静态,不随帧清）：
+   *  ①degradeOps=每次触发都计（键=op 前缀族,见 noteDegradeTrigger 注）——per-op
+   *  频率账;②degradeCallers=每 acc 窗【首个】触发才计（键=`op <- 调用方栈3帧`,
+   *  栈采集每窗至多一次=降级帧才付的定谳税）——帧级元凶构成清单。探针/F5 消费。 */
+  static degradeOps: Record<string, number> = {};
+  static degradeCallers: Record<string, number> = {};
+
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0, accFails: {} };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0, accFails: {}, degradeTriggers: {} };
   }
 
   constructor(host: ShimHost) {
@@ -387,6 +428,7 @@ export class GLShimExecutor {
     this.lineCapV = (raw.lineCap ?? 'butt') as CanvasLineCap;
     this.lineJoinV = (raw.lineJoin ?? 'miter') as CanvasLineJoin;
     this.miterLimitV = typeof raw.miterLimit === 'number' ? raw.miterLimit : 10;
+    this._degradeAttributed = false;   // ★定谳仪:新窗重归因
     this.active = true;
     return this.wrap();
   }
@@ -424,6 +466,7 @@ export class GLShimExecutor {
     this.suppressAdd = null;
     this.bakedTexPending = null;   // ★R1b-7:acc 窗残 pending 同门（attach 孪生守卫,
     //  旧码只清 multi 不清单槽——上帧 bake 未消费的 pending 跨帧错配本帧首笔同 img 绘制）
+    this._degradeAttributed = false;   // ★定谳仪:新窗重归因
     this.active = true;
     return this.wrap();
   }
@@ -734,6 +777,7 @@ export class GLShimExecutor {
               return (...args: unknown[]) => {
                 const sc = self.styleCtx();
                 if (!sc) {
+                  self.noteDegradeTrigger(`sty:${prop}`);   // ★定谳仪
                   self.ensureBridged();
                   const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>;
                   return r[prop](...args);
@@ -744,8 +788,17 @@ export class GLShimExecutor {
             }
             if (prop === 'getImageData' || prop === 'measureText' || prop === 'isPointInPath'
               || prop === 'clip' || prop === 'drawFocusIfNeeded') {
-              // 读值面/真裁剪:acc 态无落笔/无读回语义,降级后委托（防御性）
-              return (...args: unknown[]) => { self.ensureBridged(); const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>; return r[prop](...args); };
+              // 读值面/真裁剪:acc 态无落笔/无读回语义,降级后委托（防御性）。
+              // ★定谳仪:闭包缓存进 bound（读 live 态,跨 acc/bridge 两相安全——
+              //  DRAWING_TAIL 双支同判例）;触发时 noteDegradeTrigger 归因。
+              const fn = (...args: unknown[]) => {
+                if (!self.raw && self.accMode) self.noteDegradeTrigger(`rv:${prop}`);
+                self.ensureBridged();
+                const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown> | null;
+                return r ? r[prop](...args) : undefined;
+              };
+              bound[prop] = fn;
+              return fn;
             }
             return undefined;
           }
@@ -819,6 +872,7 @@ export class GLShimExecutor {
       const ok = this.rasterizePathOp(op, args);
       if (ok) return;
     }
+    this.noteDegradeTrigger(`tail:${op}`);   // ★定谳仪:落笔长尾兜底=整帧降级源
     this.flushForFallback();
     if (!this.ensureBridgedNow()) return;
     const r = this.raw as unknown as Record<string, (...a: unknown[]) => unknown>;
@@ -940,6 +994,29 @@ export class GLShimExecutor {
     return !!this.raw;
   }
 
+  /** ★b2b-acc-degraded 定谳仪（2026-10-05 清偿批）：acc 窗内「将触发整帧降级」的
+   *  触发点计数+首触发调用方归因。键前缀族（noteDegradeTrigger 入参 op）：
+   *  `rv:*`=读值面 op（measureText/getImageData/isPointInPath/clip/drawFocusIfNeeded,
+   *  wrap 读值支）;`tail:*`=落笔长尾（fillText/strokeText/putImageData/clearRect…
+   *  accTailOp 兜底支,含 strokeRect/fill/stroke 栅格化失败支）;`di:*`=drawImage
+   *  回退（clip/filter/args/geo/srcoob/gco/dsto）;`fr:*`=fillRect 回退（clip/style）;
+   *  `fail:*`=flushAcc accFail（与 accFailLedger 同因,并入本账=统一口径）;
+   *  `sty:*`=样式工厂 ctx 不可达兜底。门=accMode && !raw（恰为 host.degradeAcc
+   *  将真降级的态——已降级帧/bridge 窗零成本直返）。 */
+  private noteDegradeTrigger(op: string): void {
+    if (!(this.accMode && !this.raw)) return;
+    this.stats.degradeTriggers[op] = (this.stats.degradeTriggers[op] ?? 0) + 1;
+    GLShimExecutor.degradeOps[op] = (GLShimExecutor.degradeOps[op] ?? 0) + 1;
+    if (!this._degradeAttributed) {
+      this._degradeAttributed = true;
+      const site = degradeCallerSite();
+      if (site) {
+        const k = `${op} <- ${site}`;
+        GLShimExecutor.degradeCallers[k] = (GLShimExecutor.degradeCallers[k] ?? 0) + 1;
+      }
+    }
+  }
+
   private observeSet(prop: PropertyKey, value: unknown): void {
     // ★R2-F5:2D 语义=非有限/越界 [0,1] 忽略保旧值（NaN 被 >=0/<=1 双比较排除）
     if (prop === 'globalAlpha') this.ga = typeof value === 'number' && value >= 0 && value <= 1 ? value : this.ga;
@@ -1051,7 +1128,7 @@ export class GLShimExecutor {
     this.suppressAdd = null;
     // 长尾形态/回退判:clip 活跃、filter 非 none、3/5/9 参以外
     if (this.clipped || n !== 2 && n !== 4 && n !== 8) {
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, this.clipped ? 'clip' : 'args');
       return;
     }
     // 源矩形（3 参=全图）
@@ -1080,7 +1157,7 @@ export class GLShimExecutor {
     }
     // 源越界=2D 有源裁剪+dst 补偿语义（spec）——不逐式复刻,回退
     if (!(sx >= 0 && sy >= 0 && sx + sw <= iw && sy + sh <= ih) || sw < 0 || sh < 0) {
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, 'srcoob');
       return;
     }
     // 负 dst = 翻转
@@ -1090,7 +1167,7 @@ export class GLShimExecutor {
     // 几何解码（CTM×dst 矩形）
     const geo = this.decode(dx, dy, dw, dh);
     if (!geo) {
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, 'geo');
       return;
     }
     // 尘预乘对面:destination-out 画 erase 面 → 合并 quad + 吞后随 add
@@ -1115,12 +1192,12 @@ export class GLShimExecutor {
           this.dynamicSrc.has(img), null);
         return;
       }
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, 'dsto');
       return;
     }
     const additive = this.gco === 'lighter';
     if (!additive && this.gco !== 'source-over') {
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, 'gco');
       return;
     }
     // ★B2b:ctx.filter 非 none（敌怪受击 brightness/水下 sepia 染色族）——quad
@@ -1129,7 +1206,7 @@ export class GLShimExecutor {
     //  非 source-over 滤镜面=不可隔离 → 降级。bridge 态保持 census 回退（B2 现状）。
     if (this.accMode && this.filterV !== 'none') {
       if (this.gco === 'source-over' && this.rasterizeDrawImage(img, rest)) return;
-      this.rawDrawImage(img, rest);
+      this.rawDrawImage(img, rest, 'filter');
       return;
     }
     const tier = additive ? 1 : 0;
@@ -1159,6 +1236,7 @@ export class GLShimExecutor {
       if (w !== 0 && h !== 0) {
         // ★B2b acc:渐变/图案 fillStyle 直译不出→隔离栅格化（像素恒等）;败→降级
         if (this.accMode && this.rasterizeFillRect(x, y, w, h)) return;
+        this.noteDegradeTrigger('fr:clip');   // ★定谳仪
         this.flushForFallback();
         if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
         (this.raw as CanvasRenderingContext2D).fillRect(x, y, w, h);
@@ -1187,6 +1265,7 @@ export class GLShimExecutor {
     }
     if (!col || !geo || (this.gco !== 'source-over' && this.gco !== 'lighter')) {
       if (this.accMode && this.rasterizeFillRect(x, y, w, h)) return;
+      this.noteDegradeTrigger('fr:style');   // ★定谳仪
       this.flushForFallback();
       if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
       (this.raw as CanvasRenderingContext2D).fillRect(x, y, w, h);
@@ -1201,8 +1280,10 @@ export class GLShimExecutor {
       geo.flipX, geo.flipY, false, false, null);
   }
 
-  /** 不可直译 drawImage 的统一回退口：flush 保序 + acc 态降级换桥 + raw 原参重放。 */
-  private rawDrawImage(img: CanvasImageSource, rest: unknown[]): void {
+  /** 不可直译 drawImage 的统一回退口：flush 保序 + acc 态降级换桥 + raw 原参重放。
+   *  ★定谳仪:why=回退因（clip/args/srcoob/geo/gco/dsto/filter）——归因账消费。 */
+  private rawDrawImage(img: CanvasImageSource, rest: unknown[], why: string): void {
+    this.noteDegradeTrigger(`di:${why}`);   // 门在内（bridge 态零成本直返）
     this.flushForFallback();
     if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
     const raw = this.raw;
@@ -1595,6 +1676,7 @@ export class GLShimExecutor {
     f[why] = (f[why] ?? 0) + 1;
     const lk = detail ? `${why}:${detail}` : why;
     GLShimExecutor.accFailLedger[lk] = (GLShimExecutor.accFailLedger[lk] ?? 0) + 1;
+    this.noteDegradeTrigger(`fail:${why}`);   // ★定谳仪:统一口径并入触发账
     const hadFbo = this.glw?.isAccumOpen('world') ?? false;
     if (this.host.degradeAcc && (hadFbo || why === 'nogl')) {
       if (this.host.degradeAcc()) { this.replay2D(); return; }

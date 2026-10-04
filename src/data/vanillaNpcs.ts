@@ -264,10 +264,27 @@ let modTownHeadCursor = 54;
  *     mods/assets.ts 注入 vanilla/NPC_Head_{idx}.png)
  * @returns 分配的头贴索引
  */
-export function registerModTownNpc(key: string, id: number, extra: number, modId: string): number {
+/** mod 城镇 NPC 入驻条件面(2026-10-04 登记债②补齐;全部缺省 = 不在场即候选)。
+ *  条件为 AND(与原版逐型门同构:染料商=人数门、护士=要求商人、史莱姆族=世界旗):
+ *  - minTownNpcs:在场城镇 NPC 数门槛(原版染料商 4/油漆工 8/派对女孩 20 语义)
+ *  - requiresNpc:要求在场的 NPC key 列表(vanilla shell key 如 'merchant' 或
+ *    mod 全键 `mod_<modid>_<key>`;原版护士要求商人在场同语义)
+ *  - worldFlag:world.flags 键须为真(原版 unlockedMerchantSpawn/boughtCat 语义) */
+export interface ModTownArrivalSpec {
+  minTownNpcs?: number;
+  requiresNpc?: string[];
+  worldFlag?: string;
+}
+
+/** key → 入驻条件(注册面写入;无 spec = {}) */
+const MOD_TOWN_ARRIVAL = new Map<string, ModTownArrivalSpec>();
+
+export function registerModTownNpc(key: string, id: number, extra: number, modId: string,
+  arrival?: ModTownArrivalSpec): number {
   TOWN_NPC_IDS[key] = { id, extra };
   TOWN_EXTRA_BY_ID.set(id, extra);
   MOD_NPC_OWNER.set(id, modId);
+  MOD_TOWN_ARRIVAL.set(key, arrival ?? {});
   const headIdx = modTownHeadCursor++;
   TOWN_NPC_HEAD_INDEX[id] = headIdx;
   return headIdx;
@@ -279,16 +296,46 @@ export function modTownNpcHeadIndex(id: number): number {
 }
 
 /**
+ * 城镇 NPC 存档条目可重建判定(读档链消费;GLM娘实验批 2026-10-04 用户实报修复)。
+ * mod 卸载后存档遗留的 mod NPC key 不在 TOWN_NPC_IDS —— 不守卫则走 ctor 的
+ * `?? 22` 兜底=静默变身向导(贴图/名字/对话全错位)。降级语义 = tML 同款移除
+ * (原版缺内容NPC不生成;物品域同构=??0 空气),重装 mod 后经入驻链重新入住。
+ * vanilla key(含 mod 卸载无关的原版全体)恒 true=零扰动。
+ */
+export function townNpcKeyRestorable(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(TOWN_NPC_IDS, key);
+}
+
+/** 入驻条件求值语境(Game 入驻轮注入;hasKey 匹配 shell key/mod 全键) */
+export interface ModTownArrivalCtx {
+  /** 在场城镇 NPC 总数(原版 num40 口径,含守卫老人) */
+  townNpcCount: number;
+  /** 某 NPC key 是否在场 */
+  hasKey: (key: string) => boolean;
+  /** 世界旗读取(world.flags[name] 为真) */
+  flag: (name: string) => boolean;
+}
+
+/**
  * mod 城镇 NPC 入驻候选(prio 链垫底用)。
  * ★本仓分歧(登记):原版 num42 优先链(Main.cs:65458-65570)无 mod 段——本面把
- * 已注册的 mod 城镇 key 以「不在场即候选」垫在链尾,vanilla 链全空缺时才轮到
- * (vanilla 优先序零扰动)。条件面(解锁旗/人数门)mod v1 不接,后续经
- * spec 声明扩展。
+ * 已注册的 mod 城镇 key 以「不在场 + 条件 spec 全过」垫在链尾,vanilla 链全空缺时
+ * 才轮到(vanilla 优先序零扰动)。条件 = ModTownArrivalSpec AND 链,无 spec = 不在场即候选。
  */
-export function modTownArrivalEntries(has: (key: string) => boolean): Array<[string, boolean]> {
+export function modTownArrivalEntries(has: (key: string) => boolean,
+  ctx?: ModTownArrivalCtx): Array<[string, boolean]> {
   return Object.keys(TOWN_NPC_IDS)
     .filter((k) => k.startsWith('mod_'))
-    .map((k) => [k, !has(k)] as [string, boolean]);
+    .map((k) => {
+      let ok = !has(k);
+      const c = ok ? MOD_TOWN_ARRIVAL.get(k) : undefined;
+      if (ok && c && ctx) {
+        if (c.minTownNpcs !== undefined && ctx.townNpcCount < c.minTownNpcs) ok = false;
+        if (ok && c.requiresNpc?.length && !c.requiresNpc.every((kk) => ctx.hasKey(kk))) ok = false;
+        if (ok && c.worldFlag && !ctx.flag(c.worldFlag)) ok = false;
+      }
+      return [k, ok] as [string, boolean];
+    });
 }
 
 /** Boss 头像贴图索引(NPCID.Sets.BossHeadTextures,NPCID.cs:4861;默认 -1 = 无地图头像)。

@@ -141,10 +141,20 @@ export class LightingEngine {
   private regionMovedDirty = false;
   /** 本地路径发布暂存(写满后才整体换装进公共面;仅尺寸变化时重分配。worker 镜像
    *  侧数组每帧 transfer 走 → detached 后 length=0 → 每帧自动重分配,与旧
-   *  runSnapshotOnEngine ⑤「每帧 new Uint8Array」分配面等价) */
+   *  runSnapshotOnEngine ⑤「每帧 new Uint8Array」分配面等价。
+   *  ★债3 池化（2026-10-04）:worker 壳可注入 pubPool——发布面尺寸失配时先池取
+   *  （主线程退役回送的结果数组）,池空/尺寸失配才新分配;主线程恒 null=本地路径
+   *  分配面零变化（位级金标 tests/light-worker-parity 兜底） */
   private pubR: Uint8Array = new Uint8Array(0);
   private pubG: Uint8Array = new Uint8Array(0);
   private pubB: Uint8Array = new Uint8Array(0);
+  /** ★债3 池化:发布面池取钩子（仅 worker 镜像侧注入;need=区域格数,取到=三数组
+   *  长度均 === need）。主线程恒 null——本地路径 pub 暂存复用语义不变。 */
+  pubPool: ((need: number) => [Uint8Array, Uint8Array, Uint8Array] | null) | null = null;
+  /** ★债3 池化:公共面当前数组是否 worker 结果（退役回送判据——仅 worker 产的数组
+   *  可回送 worker 池;本地 pubR 暂存复用必须留在引擎侧,回送=每帧重分配+所有权混乱）。
+   *  置位点=三原子写点①②（worker 结果应用）；清零点=③本地原子发布。 */
+  private publicFromWorker = false;
   dirty = true;
   liquidDirty = false;
   heldLight: { tx: number; ty: number; r: number; g: number; b: number } | null = null;
@@ -240,11 +250,24 @@ export class LightingEngine {
 
   /** ★C9d 公共采样对三原子写点①：worker 结果到达（区域+数组同锚整体替换——渲染与
    *  lightAt/lightAtTo 全消费面只会读到成对一致值;单值 1 tick 陈旧但恒稳定）。
-   *  ★R1b-1:世代校验不过=丢弃+skipped 指纹（不触碰公共对——三原子写点语义保持） */
+   *  ★R1b-1:世代校验不过=丢弃+skipped 指纹（不触碰公共对——三原子写点语义保持;
+   *  被丢数组仍由 link.pending 持有——link 在覆写/兜底拒绝点回池,引擎不重复退役）。
+   *  ★债3 池化:被替换的 worker 产旧公共数组 → retireResult 回送 worker 结果池
+   *  （引用替换点=数组停止被公共面持有的唯一时刻;re-apply 同引用由 !== 守卫跳过） */
   private applyWorkerResult(m: LightResultMsg): void {
     if (!this.resultCoversViewport(m)) { noteLightResultSkipped(); return; }
+    const oldR = this.r, oldG = this.g, oldB = this.b;
     this.rx = m.rx; this.ry = m.ry; this.rw = m.rw; this.rh = m.rh;
     this.r = m.R; this.g = m.G; this.b = m.B;
+    if (this.publicFromWorker && this.r !== oldR) this.retireWorkerArrays(oldR, oldG, oldB);
+    this.publicFromWorker = true;
+    this._lw?.noteResultApplied(m);
+  }
+
+  /** ★债3 池化:worker 产公共数组退役（回送 link 队列→下帧快照随 transfer 回 worker;
+   *  _lw 缺席（回落/销毁窗）=弃（GC），正确性无涉） */
+  private retireWorkerArrays(R: Uint8Array, G: Uint8Array, B: Uint8Array): void {
+    this._lw?.retireResult(R, G, B);
   }
 
   /** ★C9d 快照面直设（worker 镜像引擎 runSnapshotOnEngine / 对拍测试装配专用;
@@ -347,7 +370,14 @@ export class LightingEngine {
         // 帧成对结果（结果未达时不回拨/不直改,渲染读 (区域,数组) 恒成对一致,值恒
         // =1 tick 前计算——AREA_PADDING=28 完整覆盖尾随量,见快照面头注）。
         const reg = { rx: this.snapRx, ry: this.snapRy, rw: this.snapRw, rh: this.snapRh };
-        lw.applyPending(this);
+        // ★债3 池化:applyPending 兜底支被替换的 worker 产旧公共数组退役（读侧快照
+        //  —applyPending 内部先过世代校验,拒绝=公共面不动;成功且引用变化才退役）
+        const pR = this.r, pG = this.g, pB = this.b;
+        const pWasWorker = this.publicFromWorker;
+        if (lw.applyPending(this)) {
+          if (pWasWorker && this.r !== pR) this.retireWorkerArrays(pR, pG, pB);
+          this.publicFromWorker = true;
+        }
         lw.send(this.buildWorkerSnapshot(reg));
         if (live && this.snapCoveredByPublic()) {
           this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
@@ -496,11 +526,18 @@ export class LightingEngine {
     // 区域+数组整体换装——与 worker 结果同纪律,本地/worker 两路同原子语义。
     // 暂存复用仅尺寸变化重分配;worker 镜像侧每帧 transfer detached → length=0
     // → 每帧新分配（与旧 runSnapshotOnEngine ⑤ 分配面等价）。
+    // ★债3 池化（2026-10-04）:尺寸失配时先池取（worker 壳注入;主线程恒 null=
+    // 本地路径分配面零变化）——worker 镜像侧稳态零分配（池=主线程退役回送的结果数组）。
     const need = this.snapRw * this.snapRh;
     if (this.pubR.length !== need) {
-      this.pubR = new Uint8Array(need);
-      this.pubG = new Uint8Array(need);
-      this.pubB = new Uint8Array(need);
+      const pooled = this.pubPool !== null ? this.pubPool(need) : null;
+      if (pooled !== null) {
+        this.pubR = pooled[0]; this.pubG = pooled[1]; this.pubB = pooled[2];
+      } else {
+        this.pubR = new Uint8Array(need);
+        this.pubG = new Uint8Array(need);
+        this.pubB = new Uint8Array(need);
+      }
     }
     const outR = this.pubR, outG = this.pubG, outB = this.pubB;
     const ar = this.active.r, ag = this.active.g, ab = this.active.b;
@@ -515,10 +552,15 @@ export class LightingEngine {
       outG[i] = vg >= 255 ? 255 : vg | 0;
       outB[i] = vb >= 255 ? 255 : vb | 0;
     }
-    // 发布（★C9d 三写点③）:区域与数组同锚整体换装,渲染侧永不观察中间态
+    // 发布（★C9d 三写点③）:区域与数组同锚整体换装,渲染侧永不观察中间态。
+    // ★债3 池化:被本地发布替换的 worker 产旧公共数组退役回送（warmup 期/
+    //  传送大跳本地兜底路径——worker 数组被本地 pubR 覆写的唯一时刻）
+    const pubOldR = this.r, pubOldG = this.g, pubOldB = this.b;
     this.rx = this.snapRx; this.ry = this.snapRy;
     this.rw = this.snapRw; this.rh = this.snapRh;
     this.r = this.pubR; this.g = this.pubG; this.b = this.pubB;
+    if (this.publicFromWorker && this.r !== pubOldR) this.retireWorkerArrays(pubOldR, pubOldG, pubOldB);
+    this.publicFromWorker = false;
   }
 
   /** 取某 tile 光照(区域外返回 0;原版 GetColor 区域外语义) */
