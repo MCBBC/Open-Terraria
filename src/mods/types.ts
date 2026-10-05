@@ -54,6 +54,10 @@ export interface ModItemContent {
     healLife?: number; healMana?: number; buffType?: number; buffTime?: number;
     ammo?: number; useAmmo?: number;
     autoReuse?: number; useTime?: number; useTurn?: number;
+    /** B6:宝藏袋开包面(右键/使用消耗,AllOptionsAtOnce+保底语义;item=本 mod 键或
+     *  原版 vid 数字串;chance 0-1 缺省 1;全空掷=保底首条×1)。
+     *  coins=按 NPC 价值掷币(CoinsBasedOnNPCValue;值=本 mod 键或原版 npcId) */
+    bagLoot?: Array<{ item?: string | number; coins?: string | number; min?: number; max?: number; chance?: number }>;
   };
   /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交 */
   stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1; life?: number };
@@ -65,11 +69,18 @@ export interface ModItemContent {
   texture?: string;
 }
 
-/** L1 tile 内容(content/tiles/*.json)。稳定 id 走 1030-2047 空闲区(append-only)。 */
+/** mod tile 稳定段上限(B5 扩窗定谳:原 2047=保守帽;全仓审计零 11 位打包——
+ *  存档 RLE/联机 tile 通道均 u16(65535)语义,4095 留 4× 余量,u16 内零破坏) */
+export const MOD_TILE_STABLE_MAX = 4095;
+/** L1 tile 内容(content/tiles/*.json)。稳定 id 走 1030-4095 空闲区(append-only)。 */
 export interface ModTileContent {
   key: string;
   name?: string;
   solid?: boolean; platform?: boolean; decor?: boolean;
+  /** 多格框架物体(B5b 站点族):framed=true + w/h=占格数;渲染 fw/fh=w/h 同源 */
+  framed?: boolean; w?: number; h?: number;
+  /** B6:兼用原版站点(AdjTiles 语义;如 CosmicAnvil≈铁砧+秘银砧) */
+  adjTiles?: number[];
   opacity?: number;
   pick?: number; axe?: number;
   mapColor?: string;
@@ -155,6 +166,17 @@ export interface ModShopContent {
   items: Array<{ item: string | number; price?: number }>;
 }
 
+/** L1 buff 内容(content/buffs/*.json)。BuffType 运行时追加域(9000+ 伪 vanilla);
+ *  声明面=名称/贴图/debuff 位;Update 逻辑=代码钩(B6 OnHit/弹幕 debuff 连锁前置)。 */
+export interface ModBuffContent {
+  key: string;
+  name?: string;
+  /** 图标(textures/ 相对路径;必填——buff 栏全链依赖) */
+  texture: string;
+  /** B6 数据面:NPC 侧每秒伤害(dot;OnHit/弹幕 debuff 施加后的可见效果) */
+  npcDps?: number;
+}
+
 /** L1 配方(content/recipes.json)。VanillaRecipe 形(vid 域=本 mod 物品 stable id/
  *  原版 vid 混用——配方消费面按内部 id 求值,mod stable id 天然同域)。 */
 export interface ModRecipeContent {
@@ -192,6 +214,8 @@ export interface ModIdAllocation {
   npcs: Map<string, number>;
   /** 全弹幕键 `mod_<modid>_<key>` → projId(P2;2000+ 段) */
   projs: Map<string, number>;
+  /** 全 buff 键 `mod_<modid>_<key>` → 伪 vanilla id(B6 声明 buff;9000+ 段) */
+  buffs: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -206,6 +230,8 @@ export interface RegistrationPlan {
   projSpecs: Array<{ modId: string; spec: ModProjContent; projId: number; fullKey: string }>;
   shops: Array<{ modId: string; spec: ModShopContent }>;
   recipes: Array<{ modId: string; spec: ModRecipeContent }>;
+  /** B6:声明 buff 计划(确定性伪 vanilla id 已分配) */
+  buffSpecs: Array<{ modId: string; spec: ModBuffContent; pseudoVanilla: number; fullKey: string }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */
@@ -217,7 +243,7 @@ export interface ModPack {
 
 /** 装载结果(UI 面板/日志/存档头消费) */
 export interface ModLoadResult {
-  loaded: Array<{ manifest: ModManifest; counts: { items: number; tiles: number; npcs: number; projs: number; recipes: number } }>;
+  loaded: Array<{ manifest: ModManifest; counts: { items: number; tiles: number; npcs: number; projs: number; recipes: number; buffs: number } }>;
   errors: Array<{ modId: string; error: string }>;
   allocation: ModIdAllocation | null;
 }

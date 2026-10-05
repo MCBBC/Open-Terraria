@@ -42,7 +42,7 @@ setSaveModsProvider(() => {
   if (!currentResult?.loaded.length || !lastPlan) return null;
   return currentResult.loaded.map(({ manifest, counts }) => ({
     id: manifest.id, version: manifest.version,
-    items: counts.items, tiles: counts.tiles, npcs: counts.npcs,
+    items: counts.items, tiles: counts.tiles, npcs: counts.npcs, buffs: (counts as { buffs?: number }).buffs ?? 0,
     itemIds: lastPlan!.itemSpecs
       .filter((s) => s.modId === manifest.id)
       .map((s) => [s.fullKey, s.stableId] as [string, number]),
@@ -184,6 +184,7 @@ export async function loadModsPhase1(
             npcs: plan.npcSpecs.filter((s) => s.modId === manifest.id).length,
             projs: plan.projSpecs.filter((s) => s.modId === manifest.id).length,
             recipes: plan.recipes.filter((s) => s.modId === manifest.id).length,
+            buffs: (plan.buffSpecs ?? []).filter((s) => s.modId === manifest.id).length,
           },
         });
       }

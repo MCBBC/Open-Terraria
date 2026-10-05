@@ -9,6 +9,9 @@ import { petInfoOfVid } from './vanillaPets';
 
 export interface ItemCombat {
   damage?: number;
+  /** B6:命中施加 mod debuff(OnHitNPC 数据面;buff=mod buff 键,duration=秒,
+   *  chance=概率 0-1 缺省 1;经 melee 受理命中缝消费) */
+  hitBuff?: { buff: string; duration: number; chance?: number };
   crit?: number;           // Item.crit（武器自带暴击，GetWeaponCrit P:25230-25232 消费）
   knockBack?: number;
   useTime?: number;

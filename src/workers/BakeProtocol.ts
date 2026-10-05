@@ -59,7 +59,8 @@ export type BakeWorkerRequest =
       vimages: Array<{ file: string; bmp: ImageBitmap }>;
       maples: Array<{ file: string; bmp: ImageBitmap }>;
       sheets: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }>;
-      modTiles?: Array<{ def: import('../data/tiles').TileDef; internal: number; stable: number }> }
+      modTiles?: Array<{ def: import('../data/tiles').TileDef; internal: number; stable: number }>;
+      modTileMetas?: Array<{ stableId: number; meta: unknown }> }
   | { type: 'bake'; id: number; snap: BakeSnapshot };
 
 /** worker 回包（worker → 主线程）。baked 的位图与快照通道全部 transfer。 */

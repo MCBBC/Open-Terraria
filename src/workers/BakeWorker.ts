@@ -86,6 +86,13 @@ self.onmessage = (ev: MessageEvent<BakeWorkerRequest>) => {
     if (msg.type === 'ship') {
       // ★mod 桥(2026-10-04):mod tile def 先于贴图落表(保序直落,幂等)
       if (msg.modTiles?.length) applyModTileDefs(msg.modTiles);
+      // ★B5b:mod tile 运行时 meta 并入 worker 侧静态快照(vmeta 伪 sheet 注册;
+      //  主线程侧 assets.ts 直写同对象=live,worker 侧必须 ship 携带)
+      if (msg.modTileMetas?.length) {
+        for (const { stableId, meta } of msg.modTileMetas) {
+          (atlas.vanilla.tiles as Record<string, unknown>)[String(stableId)] = meta;
+        }
+      }
       for (const { file, bmp } of msg.vimages) atlas.vimages.set(file, bmp);
       for (const { file, bmp } of msg.maples) atlas.images.set(file, bmp);
       for (const s of msg.sheets) {

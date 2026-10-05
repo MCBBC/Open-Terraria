@@ -6,6 +6,7 @@ import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import { mkCanvas, ctx2d, type Ctx2D, type AnyCanvas } from './canvasEnv';   // ★C4:worker 同源烘焙（OffscreenCanvas 工厂+ctx 联合）
 import { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { MOD_TILE_STABLE_BASE } from '../mods/types';
 import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, NOT_REALLY_SOLID_SHEETS, DONT_DRAW_TILE_SLOPES_SHEETS, HAS_SLOPE_FRAMES_SHEETS, BLOCKS_STAIRS_SHEETS, IGNORES_NEARBY_HALFBRICKS_SHEETS, ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
 import { frameMergesWith, halfNeighborConnects, normalizedVidOf, vanillaIdOf } from './TileMergeFamily';
@@ -1108,6 +1109,22 @@ export function drawVanillaCell(  ctx: Ctx2D, atlas: SpriteAtlas,
   // 空邻边缘加深描边呈现"方块"质感。实心 framed → 可镐挖/进存档/联机上报全走既有链路。
   const PIX = TILE_BY_KEY['pixel_block'];
   if (PIX !== undefined && type === PIX) { drawPixelBlock(ctx, st, x, y, fx, fy, px, py); return; }
+  // ★B6 mod tile 直取支(2026-10-05 真机探针定谳:资产链 vimage/meta/vframe 全证可用,
+  //  但 autotiler 邻接取帧链供不出 mod 帧=分块烘天空)——mod sheet(≥1030=伪 sheet≡stable)
+  //  不进原版帧链:按格 frameX/frameY÷18 取格位,16px 切片直取(多格件=对象区左上
+  //  起算的格偏移;style 槽位=真机放置链落地后接锚点帧)。越界回退 (0,0) 首帧。
+  if (sheet >= MOD_TILE_STABLE_BASE) {
+    const meta = atlas.vmeta(sheet);
+    if (meta) {
+      const objW = Math.max(1, meta.frameSize?.[0]?.[0] ?? 1);
+      const objH = Math.max(1, meta.frameSize?.[0]?.[1] ?? 1);
+      const ld = ((Math.floor(fx / 18) % objW) + objW) % objW;
+      const ld2 = ((Math.floor(fy / 18) % objH) + objH) % objH;
+      const r = atlas.vframe(sheet, 0, 0);
+      if (r) ctx.drawImage(r.img, r.sx + ld * 16, r.sy + ld2 * 16, 16, 16, px, py, 16, 16);
+      return;
+    }
+  }
   // 751/752(睡着的掘地龟/啮龙蛋):仅锚点帧 (0,0) 绘制,非锚点格整格跳过(:1034-1048)
   // ---- 吊挂火盆（tile 592，Hanging Brazier）专用切片 ----
   // 原版：TileDrawing.cs:5585-5587 addFrY = Main.tileFrame[592]*54；素材是

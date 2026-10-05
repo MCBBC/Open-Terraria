@@ -33,10 +33,12 @@ function packTexBytes(pack: { files: Map<string, Uint8Array> }, texPath: string)
 
 /** 构造 mod tile 的 VanillaTileMeta(仅 style 模式;竖排 style 帧表)。
  *  grid/stride 遵循 vanilla 图集纪律(16px 格×占格数 + 2px gutter = 18 步长);
+ *  ★fw/fh=【占格数】(spec.w/h;B5b 真机探针定谳——曾误用 frameWidth(px)×16
+ *  =grid 256×256,整图当单格=vframe 区域全错=分块烘天空色)。
  *  cols 由位图宽反推;rows=声明 styles(缺省按位图高反推)。 */
 function buildModTileMeta(bmp: ImageBitmap, spec: ModTileContent): VanillaTileMeta {
-  const fw = spec.frameWidth ?? 1;
-  const fh = spec.frameHeight ?? 1;
+  const fw = spec.w ?? 1;
+  const fh = spec.h ?? 1;
   const gridW = fw * 16;
   const gridH = fh * 16;
   const cols = Math.max(1, Math.floor((bmp.width + 2) / (gridW + 2)));

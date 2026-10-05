@@ -138,7 +138,17 @@ export class BakeClient {
     await Promise.all(jobs);
     // ★mod 桥(2026-10-04):mod tile defs 随首波 ship 直落(零 mod=undefined,worker 侧零变化)
     const modTiles = getModBridgePayload()?.modTileDefs;
-    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles },
+    // ★B5b 真机探针定谳:worker 侧 vanilla.tiles=静态 JSON 快照——mod tile 运行时
+    //  meta(vmeta 伪 sheet 注册)不在其中=分块烘焙取不到 meta→mod tile 烘成空白。
+    //  metas 随 ship 下发(worker 并入自身 vanilla.tiles;主线程本侧是 live 同对象)
+    const modTileMetas = (modTiles ?? [])
+      .map(({ def }) => {
+        const stable = def.vanilla?.sheet;
+        const meta = stable !== undefined ? this.atlas.vanilla.tiles[String(stable)] : undefined;
+        return stable !== undefined && meta ? { stableId: stable, meta } : null;
+      })
+      .filter((x) => x !== null);
+    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles, modTileMetas },
       [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp), ...sheetList.map((s) => s.bmp)]);
   }
 

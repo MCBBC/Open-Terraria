@@ -2240,15 +2240,18 @@ wallDef({ id: 366, key: 'w366_boulderblockwall', name: '', mapColor: '#FF00FF', 
 WALL_DEFS.forEach((d) => { if (d) WALL_BY_KEY[d.key] = d.id; });
 
 // ===================== Mod tile 注册面（2026-10-04,docs/mod-loader-design.md §1） =====================
-// mod tile = TILE_DEFS 数组追加(运行时,internal id=当前长度)+ 稳定段 1030-2047 空闲区
-// （PRIV_TILE_STABLE 表尾 1029 之后,append-only 纪律;**不扩容**——联机 tile 通道 u16
-// 语义不动=零破坏决策）。渲染走 vanilla.sheet 伪 sheet id（=stable id,mod tile 恒等式）,
+// mod tile = TILE_DEFS 数组追加(运行时,internal id=当前长度)+ 稳定段 1030-4095 空闲区
+// （PRIV_TILE_STABLE 表尾 1029 之后,append-only 纪律;B5 扩窗 2047→4095——全仓审计
+//  零 11 位打包,存档 RLE/联机 tile 通道均 u16 语义=零破坏）。渲染走 vanilla.sheet 伪 sheet id（=stable id,mod tile 恒等式）,
 // vmeta 由 mod 资产通道运行时注册（mods/assets.ts）。帧模式缺省 'style'
 // （tileframe-program 代码生成程序只覆盖原版——style/blend 旧路径为 mod 通道）。
+// 与 mods/types.ts MOD_TILE_STABLE_MAX(4095)同值镜像——tiles.ts 为叶子数据模块,
+// 不 import mods/types(解耦缝);改值须两处同步(types.ts 是权威)
+const MOD_TILE_STABLE_MAX = 4095;
 export function registerModTile(d: Partial<TileDef> & { key: string }, stableId: number): number {
   if (!d.key.startsWith('mod_')) throw new Error(`[mod-tile] key 须 mod_ 前缀: ${d.key}`);
   if (TILE_BY_KEY[d.key] !== undefined) throw new Error(`[mod-tile] 重复注册: ${d.key}`);
-  if (!(stableId >= 1030 && stableId <= 2047)) throw new Error(`[mod-tile] stableId 越段: ${stableId}`);
+  if (!(stableId >= 1030 && stableId <= MOD_TILE_STABLE_MAX)) throw new Error(`[mod-tile] stableId 越段: ${stableId}`);
   if (TILE_INTERNAL_OF_STABLE[stableId] !== 0) throw new Error(`[mod-tile] stableId 冲突: ${stableId}`);
   const id = TILE_DEFS.length;
   TILE_DEFS.push({
@@ -2279,7 +2282,7 @@ function ensureU16Capacity(prev: Uint16Array<ArrayBuffer>, minLen: number): Uint
  *  主线程重复推送幂等(已注册且同值=skip)。供数链同 items.applyModItemIds。 */
 export function applyModTileStableMap(pairs: ReadonlyArray<readonly [number, number]>): void {
   for (const [internal, stable] of pairs) {
-    if (!(stable >= 1030 && stable <= 2047) || !(internal >= 1)) continue;
+    if (!(stable >= 1030 && stable <= MOD_TILE_STABLE_MAX) || !(internal >= 1)) continue;
     if (TILE_DEFS[internal] !== undefined && TILE_STABLE_OF_INTERNAL[internal] === stable) continue;
     if (internal >= TILE_STABLE_OF_INTERNAL.length) {
       TILE_STABLE_OF_INTERNAL = ensureU16Capacity(TILE_STABLE_OF_INTERNAL, internal);

@@ -44,6 +44,13 @@ export const VANILLA_RECIPES = DOC.recipes;
 export const RECIPE_GROUPS = DOC.groups;
 export const RECIPE_GROUP_ITEMS = DOC.groupItems;
 export const TILE_COUNTS_AS = DOC.tileCountsAs;
+/** B6:mod 站点兼用注册(AdjTiles 语义):mod tile internal → 视作的原版 TileID。
+ *  写入后 stationSatisfierTiles(原版 tile) 的后裔闭包自动含 mod 站点。 */
+export function registerModAdjTile(modInternal: number, countsAsVanillaTile: number): void {
+  (TILE_COUNTS_AS as Record<string, number>)[String(modInternal)] = countsAsVanillaTile;
+  // 闭包缓存失效(下一查询重算)
+  STATION_SATISFIERS.clear?.();
+}
 
 /** ★Mod 配方注册面(2026-10-04):追加进 VANILLA_RECIPES 尾(消费方 UI.ts 运行时遍历
  *  =注册序天然生效)。★decraft 索引表(IS_CRAFTED 族)在模块加载期构建——mod 配方

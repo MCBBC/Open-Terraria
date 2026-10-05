@@ -2,11 +2,12 @@
 // 拓扑排序(Kahn)+ 确定性 id 分配(拓扑序内 mod id 字典序;mod 内内容键字典序)
 // =联机双端一致性与存档 id 稳定性的根(design.md §2)。
 import type {
-  ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
+  ModBuffContent, ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
   ModRecipeContent, ModShopContent, ModTileContent, RegistrationPlan,
 } from './types';
 import {
-  MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE, MOD_TILE_STABLE_BASE,
+  MOD_BUFF_VANILLA_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
+  MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX,
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
@@ -45,6 +46,14 @@ function parseNpc(modId: string, raw: unknown): ModNpcContent {
     fail(modId, 'npc', key);
   }
   return o as unknown as ModNpcContent;
+}
+
+function parseBuff(modId: string, raw: unknown): ModBuffContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'buff', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'buff', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'buff', key);
+  return o as unknown as ModBuffContent;
 }
 
 function parseRecipe(modId: string, raw: unknown): ModRecipeContent {
@@ -112,13 +121,14 @@ export function topoSortMods(manifests: ModPack[]): string[] {
 export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const order = topoSortMods(packs);
   const byId = new Map(packs.map((p) => [p.manifest.id, p]));
-  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map() };
+  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map() };
   const itemSpecs: RegistrationPlan['itemSpecs'] = [];
   const tileSpecs: RegistrationPlan['tileSpecs'] = [];
   const npcSpecs: RegistrationPlan['npcSpecs'] = [];
   const projSpecs: RegistrationPlan['projSpecs'] = [];
   const shops: RegistrationPlan['shops'] = [];
   const recipes: RegistrationPlan['recipes'] = [];
+  const buffSpecs: RegistrationPlan['buffSpecs'] = [];
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
@@ -139,7 +149,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       allocation.items.set(fullKey, stableId);
       itemSpecs.push({ modId, spec, stableId, fullKey });
     }
-    // tiles:全键字典序分配 stable id(1030-2047 空闲区)
+    // tiles:全键字典序分配 stable id(1030-4095 空闲区,B5 扩窗)
     const tileSpecsOfPack: Array<{ spec: ModTileContent }> = [];
     for (const path of discoverPackJsonPaths(pack, 'tiles')) {
       tileSpecsOfPack.push({ spec: parseTile(modId, readPackJson(pack, path)) });
@@ -149,7 +159,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       const fullKey = modItemFullKey(modId, spec.key);
       if (allocation.tiles.has(fullKey)) throw new ModPlanError(`mod ${modId} tile 键重复: ${spec.key}`);
       const stableId = MOD_TILE_STABLE_BASE + allocation.tiles.size;
-      if (stableId > 2047) throw new ModPlanError(`mod tile 段溢出(>2047;扩容另批): ${fullKey}`);
+      if (stableId > MOD_TILE_STABLE_MAX) throw new ModPlanError(`mod tile 段溢出(>${MOD_TILE_STABLE_MAX}): ${fullKey}`);
       allocation.tiles.set(fullKey, stableId);
       tileSpecs.push({ modId, spec, stableId, fullKey });
     }
@@ -165,6 +175,19 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       const projId = MOD_PROJ_ID_BASE + allocation.projs.size;
       allocation.projs.set(fullKey, projId);
       projSpecs.push({ modId, spec, projId, fullKey });
+    }
+    // buffs:全键字典序分配伪 vanilla id(9000+;B6 声明 buff)
+    const buffSpecsOfPack: Array<{ spec: ModBuffContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'buffs')) {
+      buffSpecsOfPack.push({ spec: parseBuff(modId, readPackJson(pack, path)) });
+    }
+    buffSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of buffSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.buffs.has(fullKey)) throw new ModPlanError(`mod ${modId} buff 键重复: ${spec.key}`);
+      const pseudoVanilla = MOD_BUFF_VANILLA_BASE + allocation.buffs.size;
+      allocation.buffs.set(fullKey, pseudoVanilla);
+      buffSpecs.push({ modId, spec, pseudoVanilla, fullKey });
     }
     // npcs:全键字典序分配 npc id(800+)
     const npcSpecsOfPack: Array<{ spec: ModNpcContent }> = [];
@@ -197,7 +220,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       }
     }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----
@@ -274,11 +297,9 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
     if (!plan.allocation.projs.has(full)) {
       throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key} 引用未注册弹幕: ${sh}`);
     }
-    // ★P4 红蓝修正(C-MAJOR-4):magic/mana 类 + 声明弹 = fail-fast(useCombatWeapon
-    //  case 'magic' 通用尾支无 mod 分流,静默降级为原版 Arrow 载体行为)
-    if (it.spec.combat?.magic || it.spec.combat?.mana) {
-      throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key}: magic/mana 类暂不支持声明弹(P4 边界)——改用 noMelee+shoot 走 'shot' 分流`);
-    }
+    // ★P4 边界收口(2026-10-05 B4 全量提取驱动)：magic/mana 类 + 声明弹放行——
+    //  engine 侧 case 'magic' 通用尾支已插 mod 弹分流(付款/杖头锚/沉默门共享),
+    //  原 fail-fast(C-MAJOR-4)前提消除。summon 类=MinionProj 通用兜底(真召唤 AI=B6)。
   }
 }
 

@@ -187,6 +187,54 @@ export function registerSystem(hooks: ModSystemHooks): void {
   systems.push(hooks);
 }
 
+// ---- B6:OnHitNPC 代码钩(tModLoader ModItem.OnHitNPC 形;P7 GAPS 头号项) ----
+const onHitNpc = new Map<number, (e: Enemy, game: Game, ctx: { damage: number; crit: boolean; killed: boolean }) => void>();
+
+export function registerModOnHitNpc(
+  vid: number, fn: (e: Enemy, game: Game, ctx: { damage: number; crit: boolean; killed: boolean }) => void,
+): void {
+  if (!(vid >= MOD_ITEM_STABLE_BASE)) throw new Error(`[mod-hooks] onHitNpc vid 须 ≥${MOD_ITEM_STABLE_BASE}: ${vid}`);
+  if (onHitNpc.has(vid)) throw new Error(`[mod-hooks] onHitNpc 重复注册: ${vid}`);
+  onHitNpc.set(vid, fn);
+}
+
+/** B6:mod 音效通道(原版 SoundID 键;mod 音频装载=余段)。sink=main.ts 注入
+ *  (代理 game.playSfxFiles);Boss AI 钩内 sw.playSound(...) 即播。 */
+let modAudioSink: ((files: string[], volume: number, x?: number, y?: number) => void) | null = null;
+
+export function setModAudioSink(fn: (files: string[], volume: number, x?: number, y?: number) => void): void {
+  modAudioSink = fn;
+}
+
+export function playModSound(files: string[], volume = 1, x?: number, y?: number): void {
+  if (modAudioSink) modAudioSink(files, volume, x, y);
+}
+
+/** B6:NPC 死亡钩注册表(Hive Tumor→Boss 遭遇链面) */
+const onNpcDeath = new Map<number, (e: Enemy, game: Game) => void>();
+
+export function registerModNpcDeath(npcId: number, fn: (e: Enemy, game: Game) => void): void {
+  if (!(npcId >= MOD_NPC_ID_BASE)) throw new Error(`[mod-hooks] npcDeath id 须 ≥${MOD_NPC_ID_BASE}: ${npcId}`);
+  if (onNpcDeath.has(npcId)) throw new Error(`[mod-hooks] npcDeath 重复注册: ${npcId}`);
+  onNpcDeath.set(npcId, fn);
+}
+
+/** 击杀单口派发(onEnemyKilled 头):mod NPC 死亡钩;空表零成本。 */
+export function runModOnNpcDeath(vanillaId: number | null | undefined, e: Enemy, game: Game): void {
+  if (vanillaId === null || vanillaId === undefined || vanillaId < MOD_NPC_ID_BASE || onNpcDeath.size === 0) return;
+  const fn = onNpcDeath.get(vanillaId);
+  if (fn) fn(e, game);
+}
+
+/** 近战命中结算缝(受理命中后):mod 物品带 onHit 钩时调用;空表零成本。 */
+export function runModOnHitNpc(
+  vid: number | undefined, e: Enemy, game: Game, ctx: { damage: number; crit: boolean; killed: boolean },
+): void {
+  if (vid === undefined || vid < MOD_ITEM_STABLE_BASE || onHitNpc.size === 0) return;
+  const fn = onHitNpc.get(vid);
+  if (fn) fn(e, game, ctx);
+}
+
 /** Enemy.fixedUpdate AI 派发缝:mod NPC(800+)带自定义 ai 时返回处理器(接管整支,
  *  共享尾段照走);否则 null=原版 aiStyle switch 照旧。null vanillaId/原版域=零成本。 */
 export function takeModNpcAi(vanillaId: number | null): ((e: Enemy, game: Game, player: Player | null) => void) | null {
@@ -271,7 +319,8 @@ export function isModBuffVanilla(vanillaBuffId: number): boolean {
 
 /** 测试重置(模块态隔离;loader 单测同款纪律;WeakMap 存储随分代回收) */
 export function _resetModHooksForTests(): void {
-  npcAi.clear(); itemUse.clear(); systems.length = 0;
+  npcAi.clear(); itemUse.clear(); systems.length = 0; onNpcDeath.clear();
   projSpecs.clear(); projRegs.length = 0; modBuffTicks.clear();
   modBuffNpcTicks.clear();
+  onHitNpc.clear();
 }

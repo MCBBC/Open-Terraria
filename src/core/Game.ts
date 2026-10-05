@@ -155,7 +155,9 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, modProjSpecOf } from '../mods/hooks';
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf } from '../mods/hooks';
+import { getModLoadResult } from '../mods/loader';
+import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
 import { MOD_PROJ_ID_BASE } from '../mods/types';
 import { ModProj } from '../entities/ModProj';
@@ -533,7 +535,7 @@ import { AshBallProj } from '../entities/AshBallProj';     // FTW 灰烬连锁�
 import { MagicProj } from '../entities/MagicProj';
 import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
-import { type DropExtras, npcValueOf, dropVelocity } from '../drops/NpcDrops';
+import { type DropExtras, npcValueOf, dropVelocity, rollCoins } from '../drops/NpcDrops';
 import { holidayPickupSubstitute } from '../drops/SeasonalPickups';   // ★SW-BJ55 Item.cs:49670-49720
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
@@ -16815,6 +16817,61 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const modVid = (heldDef.vid !== undefined && heldDef.vid >= 30000) ? heldDef.vid : -1;
       const potionVid = fm ? +fm[1] : modVid;
       const ff = potionVid >= 0 ? itemFuncOfVid(potionVid) : null;
+      // ★B6 宝藏袋开包面(func.bagLoot):使用消耗+AllOptionsAtOnce 独立掷+保底首条
+      // (CalamityStyle=AllOptionsAtOnceWithPityDropRule 经典语义;掉物=spawnDrop 玩家位)
+      if (ff?.bagLoot && ff.bagLoot.length > 0) {
+        let any = false;
+        for (const entry of ff.bagLoot) {
+          // ★B6 CoinsBasedOnNPCValue(袋内金币掷):按 NPC 价值 rollCoins 拆币落地
+          if (entry.coins !== undefined && (entry.chance ?? 1) >= Math.random()) {
+            let npcId = -1;
+            if (typeof entry.coins === 'number') npcId = entry.coins;
+            else if (/^\d+$/.test(String(entry.coins))) npcId = Number(entry.coins);
+            else {
+              const modId3 = heldDef.key.slice(4, heldDef.key.indexOf('_', 4));
+              const full3 = String(entry.coins).startsWith('mod_') ? String(entry.coins)
+                : `mod_${modId3}_${entry.coins}`;
+              npcId = getModLoadResult()?.allocation?.npcs.get(full3) ?? -1;
+            }
+            if (npcId >= 0) {
+              const value = npcValueOf(npcId);
+              if (value > 0) {
+                const coinCtx = { rng: { next: Math.random, int: (a: number, b: number) => a + Math.floor(Math.random() * (b - a + 1)) }, luck: 0 };
+                for (const cd of rollCoins(value, coinCtx as never, false)) {
+                  const ck = ITEM_DEFS[cd.id]?.key;
+                  if (ck) { this.spawnDrop(this.player.cx, this.player.cy, ck, cd.n, (Math.random() - 0.5) * 3, -2); any = true; }
+                }
+              }
+            }
+            continue;
+          }
+          const ch = entry.chance ?? 1;
+          if (!(ch > 0) || !Number.isFinite(ch)) continue;
+          if (ch < 1 && Math.random() >= ch) continue;
+          const n = Math.floor(entry.min ?? 1 + Math.random() * ((entry.max ?? entry.min ?? 1) - (entry.min ?? 1) + 1));
+          let key: string;
+          if (typeof entry.item === 'number' || /^\d+$/.test(String(entry.item))) {
+            const vid2 = Number(entry.item);
+            key = ITEM_DEFS[vid2]?.key ?? '';
+          } else {
+            const full2 = String(entry.item).startsWith('mod_') ? String(entry.item)
+              : `mod_${heldDef.key.slice(4, heldDef.key.indexOf('_', 4))}_${entry.item}`;
+            key = ITEM_DEFS[ITEM_BY_KEY[full2] ?? -1]?.key ?? '';
+          }
+          if (key) { this.spawnDrop(this.player.cx, this.player.cy, key, Math.max(1, n), (Math.random() - 0.5) * 3, -2); any = true; }
+        }
+        if (!any) {
+          // 保底(CalamityStyle pity):全落空=首条×1
+          const first = ff.bagLoot[0]!;
+          const full2 = typeof first.item === 'number' || /^\d+$/.test(String(first.item))
+            ? (ITEM_DEFS[Number(first.item)]?.key ?? '')
+            : (ITEM_DEFS[ITEM_BY_KEY[`mod_${heldDef.key.slice(4, heldDef.key.indexOf('_', 4))}_${first.item}`] ?? -1]?.key ?? '');
+          if (full2) this.spawnDrop(this.player.cx, this.player.cy, full2, 1, 0, -2);
+        }
+        this.player.inv.removeHeld(1);
+        this.cb.onInventoryChanged();
+        this.player.useTime = 30;
+      }
       // ★ 无消耗品语义（水晶/果/弓族等）不得空占本 else-if 槽位——否则链条后续
       // 全部分支被饿死（else-if 匹配即终止）。命中才处理，否则落空交还链条
       if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
@@ -20880,6 +20937,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const u206 = Math.random(), a206 = Math.random() * Math.PI * 2;
           gmzX += Math.cos(a206) * 12 * u206 - Math.cos(mzAng) * cw.shootSpeed;
           gmzY += Math.sin(a206) * 12 * u206 - Math.sin(mzAng) * cw.shootSpeed;
+        }
+        // ★mod 声明弹分流（2026-10-05 B4 全量提取驱动,P4 边界收口）：magic/mana 类
+        //  + combat.shoot='proj:<key>' ——付款(上方 mana 段)/杖头锚(mzX/mzY/mzAng)/
+        //  沉默门全与本 case 共享,仅出生面分流 ModProj(与 case 'shot' P2 分流同构;
+        //  plan 侧 fail-fast 同批撤销)。原版弹域(<2000)零改动。
+        if (cw.shoot >= MOD_PROJ_ID_BASE && modProjSpecOf(cw.shoot)) {
+          const mp = new ModProj(gmzX, gmzY,
+            Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
+            cw.damage, cw.knockback, cw.shoot, true);
+          placeAtShootSpawn(mp, gmzX, gmzY);
+          this.entities.add(mp, 'projectiles');
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.player.useTime = cw.useTime;
+          this.input.mouseDown = false;
+          break;
         }
         this.fireGemStaffBolts(cw, def, ps, mzAng, gmzX, gmzY, critVid, pen, false);
         // ★useSwing 补漏（2026-08-31）：magic case 此前无 useSwing 调用 → swing.aim
@@ -35432,6 +35504,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★F8 加法形保持单行结构锚（weapon-melee-leftover 结构断言依赖序：kbGlove→Titan→3106）
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
       const killed = e.hurt(dmg, kdir * kb, 0, this, (eq.armorPen ?? 0) + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
+      // ★B6 mod OnHitNPC 钩(受理命中后;tModLoader ModItem.OnHitNPC 形,空表零成本):
+      //  mod 近战武器命中敌怪的任意逻辑面(damage=chainDmg 词缀后实扣值)
+      runModOnHitNpc(swingVid, e as Enemy, this, { damage: chainDmg, crit, killed });
+      // ★B6 hitBuff 数据面:mod 物品命中施加 mod debuff(chance 掷;modId 从全键解;
+      //   buff 键经 modBuffTypeOf→9000+ 域,npcDps dot tick 生效)
+      {
+        const hb = swingVid !== undefined ? itemCombat(swingVid)?.hitBuff : undefined;
+        if (hb && (hb.chance === undefined || Math.random() < hb.chance)) {
+          const dk = ITEM_DEFS[swingVid]?.key ?? '';
+          if (dk.startsWith('mod_')) {
+            const modId = dk.slice(4, dk.indexOf('_', 4));
+            applyModNpcBuff(e as Enemy, modBuffTypeOf(modId, hb.buff), hb.duration);
+          }
+        }
+      }
       // ================= ★R2-07(g) ApplyNPCOnHitEffects 五条 spawn 面 + 蓄能位
       // （Player.cs:44809-44906——受理命中【后】镜像区，依原文顺序排布；
       //   damage/knockBack/dmgRandomized 形参 = chainDmg / kb / dmgRandomized）=================
@@ -39868,9 +39955,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const key = VI(g.id);
       if (!key) continue;
       const id = ITEM_BY_KEY[key];
-      if (id === undefined) { this.spawnDrop(p.cx, p.cy, key, g.stack); continue; }  // 未注册键回退
+      if (id === undefined) { this.spawnDrop(this.player.cx, this.player.cy, key, g.stack); continue; }  // 未注册键回退
       const left = p.inv.add(id, g.stack);
-      if (left > 0) this.spawnDrop(p.cx, p.cy, key, left);
+      if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key, left);
       if (left < g.stack) this.showPickupLabel(key, g.stack - left);
     }
   }
@@ -42924,7 +43011,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  Next(-20,1)×0.2=vx[-4,4] 步 0.2 / ★BJ343 勘误:vy[-4.0,0.0] 步 0.2——
         //  Next(min,max) 上开界 [-20,0] 而非 [-4,-0.2]）——旧 (rand-0.5)×8/
         //  -2-rand×2 vy 分布不符（[-4,-2] 恒快坠）
-        this.spawnDrop(p.cx, p.cy, key, stack,
+        this.spawnDrop(this.player.cx, this.player.cy, key, stack,
           (Math.floor(Math.random() * 41) - 20) * 0.2, (Math.floor(Math.random() * 21) - 20) * 0.2);
       });
     }
@@ -44277,6 +44364,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  + NotifyNPCKilled/lastCreatureHit 反向多余信号摘除,图鉴 RegisterKill 两边
    *  无门维持（石化 :56458 有 IsNPCValidForBestiaryKillCredit 门,数据层同款） */
   onEnemyKilled(key: string, enemy?: Enemy, opts?: { petrifyBypassInteractionGate?: boolean }) {
+    // ★B6 mod NPC 死亡钩(击杀单口;空表零成本)
+    if (enemy) runModOnNpcDeath(enemy.vanillaId, enemy, this);
     // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);

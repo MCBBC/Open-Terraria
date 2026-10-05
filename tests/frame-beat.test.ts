@@ -33,7 +33,7 @@
 //  FrameBeat.ts 头注 v9。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, trimmedMeanVsync, VSYNC_DISP_WIN, VSYNC_DISP_MIN, VSYNC_ADMIT_REL, VSYNC_IQR_MAX, VSYNC_BIMODAL_GAP, VSYNC_SANITY_LO, VSYNC_FAM_SEED, VSYNC_FAM_GUARD, VSYNC_RESEED, VSYNC_STARVE_FLUSH, VSYNC_ECHO_CORR, VSYNC_ECHO_MIN_PAIRS } from '../src/core/FrameBeat';
+import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, trimmedMeanVsync, VSYNC_DISP_WIN, VSYNC_DISP_MIN, VSYNC_ADMIT_REL, VSYNC_IQR_MAX, VSYNC_BIMODAL_GAP, VSYNC_SANITY_LO, VSYNC_FAM_SEED, VSYNC_FAM_GUARD, VSYNC_RESEED, VSYNC_STARVE_FLUSH, VSYNC_ECHO_CORR, VSYNC_ECHO_MIN_PAIRS, VSYNC_ECHO_RESID, CAP_TOP_TOL_MS } from '../src/core/FrameBeat';
 
 const GAME = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 const BEAT = readFileSync(new URL('../src/core/FrameBeat.ts', import.meta.url), 'utf8');
@@ -963,10 +963,13 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
     expect(r.rendered).toBeGreaterThan(620);     // 每拍皆渲(回声预算容得下;修前 flap 只渲约半)
   });
 
-  // ── ★B2/v9 去回声估计器判别器(2026-10-04;定谳画像/门线/收敛数字见 FrameBeat.ts 头注 v9)──
+  // ── ★B2/v9 去回声估计器判别器(2026-10-04;v9.3 修正后语义刷新,见 FrameBeat.ts 头注 v9.3)──
   //  回声量化画像(DELTAS_X10 定谳):delta≈前帧 cost+1.69ms(sd 0.51,corr=0.964);
-  //  回声族 8.5-21.8ms 占 94.8%,显示周期证据只存于 sub-8.33 低族(5.2%,min 7.2)
-  //  且饱和段(前 495 拍)零现形。旧截尾均值估计被拖到 ≈11.5(+38.6% vs 名义 8.33)。
+  //  回声族 8.5-21.8ms 占 94.8%,sub-8.33 低族(5.2%,min 7.2)经 v9.3 配对结构定谳=
+  //  「轻帧解堵余数族」R=k×p−U∈(0,p)(对和 17.2-19.6 非 16.7 整数倍)——不是显示
+  //  周期证据,p 的信息只在族上尾(sup→p)。旧截尾均值估计被拖到 ≈11.5(+38.6%)。
+  //  v9.3 三刀:engagement 残差紧致门(VSYNC_ECHO_RESID)/候选统计量族中位→族
+  //  q85/饥饿清族不分级——判别器语义随修正刷新处逐条标明。
   describe('★B2 去回声估计器(红→绿;结构=famLo 锚定显示族收集+三重门+向下有界校正)', () => {
     const q = (arr: number[], p: number) => {
       const s = [...arr].sort((a, b) => a - b);
@@ -993,16 +996,19 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
     const FLOOR_SAFE = GRID_MS * (1 - 0.15) / 2;   // 120Hz 名义 vsync 的 FLOOR_TOL 安全线 ≈7.08
     const TRACE_DELTAS = DELTAS_X10.map((v) => v / 10);   // ×10 定点还原 ms
 
-    it('★红→绿(证据段[560,630]):旧估计被回声拖到 ≈9.7(漂移可测);新估计收敛 ≈7.8 且全程不破 FLOOR_TOL 安全线', () => {
+    it('★红→绿(证据段[560,630]):旧估计被回声拖到 ≈9.7(漂移可测);新估计收敛族上尾带(q85,≈8.0)且【双向】不破界——低于 7.9=余数族中位低估回潮(v9.3 反 undershoot 锁),高于 8.5=回声未除', () => {
+      // ★v9.3 语义刷新:候选统计量=族 q85(余数 sup→p),非 v9 首版族中位(7.6-7.8,
+      //   系统性低估 p=用户实报 7.7-7.8<8.33 回归的根)。下界 7.9 钉死反 undershoot。
       const traceCosts = COSTS_X10.map((v) => v / 10);
       const estOld = replayEstimate(() => new LegacyEstBeat(), TRACE_DELTAS, traceCosts);
       const estNew = replayEstimate(() => new FrameBeat(), TRACE_DELTAS, traceCosts);
       const seg = (a: number[]) => a.slice(560);
       // 红:旧估计器证据段仍骑工作周期(+16.8% vs 名义 8.33;饱和段更达 +38.6%)
       expect(q(seg(estOld), 0.5)).toBeGreaterThan(9.5);
-      // 绿:新估计器收敛进显示带(名义 −6% 带内)且不低于 FLOOR_TOL 安全线(minK 不假抬)
+      // 绿:新估计器收敛进显示带(族上尾统计)且双向不破界(minK 不假抬+不 undershoot)
       const p50N = q(seg(estNew), 0.5);
       expect(p50N).toBeLessThan(8.5);
+      expect(p50N).toBeGreaterThanOrEqual(7.9);
       expect(p50N).toBeGreaterThan(FLOOR_SAFE);
       expect(Math.min(...estNew)).toBeGreaterThanOrEqual(FLOOR_SAFE);   // 全程无地板级联深度
     });
@@ -1055,9 +1061,10 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
       expect(q(estFlat.slice(-400), 0.5)).toBeLessThan(8.7);
     });
 
-    it('★v9.2 corr 门正控制(合成回声流:delta=成本+1.7,真 8.33):签名成立 ⇒ 去回声启动,估计收敛显示族', () => {
+    it('★v9.2 corr 门正控制(合成回声流:delta=成本+1.7,真 8.33):签名成立 ⇒ 去回声启动,估计收敛显示族上尾(v9.3 反 undershoot:≥7.9,不再落中位低估带)', () => {
       // 回声机制本体:delta_i ≈ cost_{i-1} + 1.7(渲染超支推迟本回调交付;lag-1!)。
-      // 主族 delta 12.0±0.6(成本 10.3±0.6),5% 真显示证据 7.2-8.1(=渲染贴网格内完成)
+      // 主族 delta 12.0±0.6(成本 10.3±0.6),5% 真显示证据 7.2-8.1(=轻帧解堵余数族,
+      // v9.3 定谳:p 的信息在族上尾 sup→p,非族中位)
       const lcgC = lcgOf(77);
       const synthDeltas: number[] = [];
       const synthCosts: number[] = [];
@@ -1074,8 +1081,43 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
       const estNew = replayEstimate(() => new FrameBeat(), synthDeltas, synthCosts);
       const segN = estNew.slice(-400);
       expect(q(segN, 0.5)).toBeLessThan(8.6);                       // 收敛进显示带(旧式恒 ≈12)
-      expect(q(segN, 0.5)).toBeGreaterThan(FLOOR_SAFE);
+      expect(q(segN, 0.5)).toBeGreaterThanOrEqual(7.9);             // ★v9.3:不低于余数族上尾带(中位低估回潮即爆红)
       expect(Math.min(...estNew)).toBeGreaterThanOrEqual(FLOOR_SAFE);
+    });
+
+    it('★v9.3 残差紧致门负控制(松残差回声形:delta=成本+1.7±3 宽噪,corr 可达标但关系不成立):两门恒闭 ⇒ 估计与旧式逐位一致(混合会话保护面)', () => {
+      // 活机定谳(v9.3):corr 单门在混合会话泄漏(p50 0.538 贴线、入场簇 ≥0.6)——
+      // on-time 交付帧的 delta=p−相位与成本无关,混入即残差松。残差 sd>1.2 ⇒ 不校正。
+      const lcgR = lcgOf(91);
+      const looseDeltas: number[] = [];
+      const looseCosts: number[] = [];
+      let prevCost = 10;
+      for (let i = 0; i < 2500; i++) {
+        looseDeltas.push(prevCost + 1.7 + (lcgR() - 0.5) * 6);   // ±3 宽噪:corr 仍在但残差 sd≈1.7
+        looseCosts.push(10.3 + (lcgR() - 0.5) * 4.8);
+        prevCost = looseCosts[i];
+      }
+      const estNew = replayEstimate(() => new FrameBeat(), looseDeltas, looseCosts);
+      const estLegacy = replayEstimate(() => new LegacyEstBeat(), looseDeltas, looseCosts);
+      let maxDiff = 0;
+      for (let i = 0; i < estNew.length; i++) maxDiff = Math.max(maxDiff, Math.abs(estNew[i] - estLegacy[i]));
+      expect(maxDiff).toBeLessThan(1e-9);              // 残差门闭 ⇒ 与旧式逐位一致(负控制精确语义)
+    });
+
+    it('★v9.3 陈旧族饥饿清族不分级(单发深锚毒带·活机实锤形态):immature 族被单发 5.9ms 深样本锚死后收录带塌缩,旧豁免下永不清除=收集器死;新码 150 饥饿清族重播种 ⇒ 楼梯下行恢复,证据段照常收敛', () => {
+      // 活机定谳(_framebeat-b2-regress):famLo 被单发 5.8ms 伪影锚死(immature 期
+      // FAM_GUARD 不设防)→收录带 [5.8,6.67] 挡住主体样本→长饥饿。旧码豁免 immature
+      // 族=永不清除→楼梯下行永久阻塞→est 恒骑 work(回声不除);新码清族重播种→
+      // 恢复与无毒前奏相同的收敛面。
+      const poisonedDeltas = [300, 5.9, 5.9, 5.9, 5.9, 5.9, ...TRACE_DELTAS];   // 300ms=断流复位,随后 5 发深样本锚死 famLo
+      const poisonedCosts = [0, 4.2, 4.2, 4.2, 4.2, 4.2, ...COSTS_X10.map((v) => v / 10)];
+      const est = replayEstimate(() => new FrameBeat(), poisonedDeltas, poisonedCosts);
+      const seg = est.slice(560);
+      expect(q(seg, 0.5)).toBeLessThan(9);             // 恢复收敛(旧码恒骑 work≈11.5=红)
+      expect(q(seg, 0.5)).toBeGreaterThanOrEqual(7.9); // 反 undershoot(v9.3 统计量锁)
+      // 毒前奏段及过渡期(前 ~10 拍)流本身是 5.9ms,est=work=5.9 为诚实跟踪+截尾均值
+      // 对称修剪的过渡态,不属 undershoot——反安全线断言 scoped 到收敛稳态段
+      expect(Math.min(...est.slice(-400))).toBeGreaterThanOrEqual(FLOOR_SAFE);
     });
 
     it('★估计式不变性(洁净流):锁定 120Hz 网格=精确 8.33(判据算术面不受扰);全 2×vsync 并调流=16.67 与旧一致', () => {
@@ -1092,6 +1134,113 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
       const est = replayEstimate(() => new FrameBeat(), stream);
       expect(est[799]).toBeGreaterThanOrEqual(15);
     });
+  });
+});
+
+describe('★v9.4 cap 硬顶门(反馈环断点;机制/容差定谳见 FrameBeat.ts 头注 v9.4)', () => {
+  it('门咬合条件(单元):cap>0 且距上次渲染 < target−CAP_TOP_TOL_MS ⇒ 跳(计数);≥ ⇒ 落拍', () => {
+    const beat = new FrameBeat();
+    beat.observeVsync(0, 120);
+    beat.observeVsync(HZ120, 120);
+    beat.observeVsync(2 * HZ120, 120);        // est≈8.33 → minK(120)=1
+    beat.beginRender(2 * HZ120);              // lastRenderAt=16.67(上次真实渲染的 rAF 时间戳)
+    beat.observeVsync(2 * HZ120 + 6.3, 120);  // d=6.3(截尾均值抗污,est 恒 8.33)→序数=1≥k
+    expect(beat.shouldRender(2 * HZ120 + 6.3)).toBe(false);  // 6.3 < 8.33−2=6.33 ⇒ 门咬合
+    expect(beat.capSkips).toBe(1);
+    beat.observeVsync(2 * HZ120 + 12.7, 120); // 距上次渲染 6.4 ≥ 阈
+    expect(beat.shouldRender(2 * HZ120 + 12.7)).toBe(true);  // 落拍
+    expect(beat.capSkips).toBe(1);            // 落拍不计数(只记真咬合)
+  });
+
+  it('escape:cap=0(desktop UNCAPPED 判例)门恒死——超短帧距也放行、零计数', () => {
+    const beat = new FrameBeat();
+    beat.observeVsync(0, 0);
+    beat.observeVsync(HZ60, 0);               // est≈16.67;序数=2
+    beat.beginRender(HZ60);
+    beat.observeVsync(HZ60 + 3, 0);           // d=3 → 序数=1 ≥ k=1
+    expect(beat.shouldRender(HZ60 + 3)).toBe(true);   // cap=0:无顶门(gap 3ms 也放行)
+    expect(beat.capSkips).toBe(0);
+  });
+
+  it('k>1 档零变化(cap60/cap30:稳态 render gap ≥2×ticker 恒在阈外;冷启动瞬态咬合属正确钳速)', () => {
+    // 冷启动瞬态:初始 vsyncPeriod=16.67 → k=1 数 tick,期间 cap60 的 8.33 gap 属真超速,
+    // 门咬合 1 次(cap30 3 次)=正确钳速;est 收敛 → minK 地板接管 → 稳态零咬合=行为
+    // 逐位同 v9.3(稳态段 capSkips 零增量锁)。
+    let renders60 = 0, skipAtWarm60 = -1;
+    const r60 = runBeat({ vsync: HZ120, cap: 60, cost: 5, callbacks: 2400,
+      onRender: (b) => { if (++renders60 === 100) skipAtWarm60 = b.capSkips; } });
+    expect(r60.beat.k).toBe(2);
+    expect(r60.beat.capSkips).toBe(skipAtWarm60);   // 稳态段零咬合
+    const st60 = gapStats(r60.rendered.slice(40));
+    expect(st60.jumps).toBe(0);
+    expect(st60.p50).toBeGreaterThan(GRID_MS - 1);
+    let renders30 = 0, skipAtWarm30 = -1;
+    const r30 = runBeat({ vsync: HZ120, cap: 30, cost: 5, callbacks: 2400,
+      onRender: (b) => { if (++renders30 === 100) skipAtWarm30 = b.capSkips; } });
+    expect(r30.beat.k).toBe(4);
+    expect(r30.beat.capSkips).toBe(skipAtWarm30);
+    expect(gapStats(r30.rendered.slice(40)).jumps).toBe(0);
+  });
+
+  it('健康稳态零咬合(cap120@120Hz ±10% 抖动:帧距 ∈[7.5,9.17] 恒在阈 6.33 外;fps 语义不变)', () => {
+    // 容差定谳的回归锁:健康 cadence 上门必须静默(σ≈0.9 判例抖动带不触阈)
+    const { beat, rendered } = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400, jitter: 0.1 });
+    expect(beat.capSkips).toBe(0);
+    expect(beat.k).toBe(1);
+    const st = gapStats(rendered.slice(40));
+    expect(st.jumps).toBe(0);
+    expect(st.p50).toBeGreaterThan(HZ120 - 1);
+    expect(st.p50).toBeLessThan(HZ120 + 1);
+  });
+
+  it('★反馈环断点(用户场景确定性复刻):ticker 超速 125Hz(8.0±0.9ms,σ≈0.9 判例)⇒ 门咬掉多余 tick,渲染率自调节钉 cap 带、不塌半率', () => {
+    // Box-Muller(确定性 LCG)合成 ticker 抖动;恒成本 4ms(零方差 ⇒ corr 门恒闭,
+    // est=截尾均值≈8.0 ⇒ minK=1,k 恒 1=本门是唯一钳,前提锁死)。
+    // 概率调速器(头注 v9.4):咬合率 b=P(gap<6.33|N(8.0,0.9))≈3.2% → 渲染率 ≈121
+    // ∈(cap,cap+2);ticker 越超速咬合越紧(7.5→b 9.7%→渲染 ~120),自调节不塌半率。
+    const lcg = lcgOf(97);
+    const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-12, lcg()))) * Math.cos(2 * Math.PI * lcg());
+    const beat = new FrameBeat();
+    const rendered: number[] = [];
+    let t = 0;
+    for (let i = 0; i < 5000; i++) {
+      t += 8.0 + 0.9 * gauss();               // ticker 125Hz,超速于 cap120 的 8.33
+      beat.observeVsync(t, 120);
+      if (beat.shouldRender(t)) {
+        beat.beginRender(t);
+        rendered.push(t);
+        beat.endRender(t + 4);
+      }
+    }
+    expect(beat.k).toBe(1);                   // 前提:est≈8.0 ≥ 7.08 地板,门=唯一钳
+    expect(beat.capSkips).toBeGreaterThan(0); // 门确实咬合(超速被钳)
+    const st = gapStats(rendered.slice(200));
+    const fps = 1000 / st.mean;
+    expect(fps).toBeLessThan(125);            // 低于超速 ticker 原生率(钳在起作用)
+    expect(fps).toBeLessThanOrEqual(122);     // 调速器工作带:cap+2
+    expect(fps).toBeGreaterThan(105);         // 不塌半率(62.5)=无混叠
+  });
+
+  it('深超速(恒 5.5ms ticker=182Hz):k 地板(ceil(7.08/5.5)=2)先于门接管,渲染钳 ~91fps 半率对齐、帧距恒定——门与 minK 地板互锁面', () => {
+    const beat = new FrameBeat();
+    const rendered: number[] = [];
+    let t = 0;
+    let skipAtSteady = -1;
+    for (let i = 0; i < 3000; i++) {
+      t += 5.5;
+      beat.observeVsync(t, 120);
+      if (beat.shouldRender(t)) {
+        beat.beginRender(t);
+        rendered.push(t);
+        beat.endRender(t + 2);
+      }
+      if (i === 200) skipAtSteady = beat.capSkips;   // 收敛期后取账(冷启动瞬态咬合不计)
+    }
+    expect(beat.k).toBe(2);                   // est 5.5 < 7.08:地板抬 k=2(k=1 带外=门不参战)
+    expect(beat.capSkips).toBe(skipAtSteady); // 稳态段零咬合(咬合面全归 k 地板)
+    const st = gapStats(rendered.slice(200));
+    expect(1000 / st.mean).toBeLessThanOrEqual(92);
+    expect(st.jumps).toBe(0);
   });
 });
 
@@ -1156,9 +1305,23 @@ describe('三档语义锁(源锚)', () => {
     expect(MISS_STREAK_DOWNGRADE).toBe(4);
     expect(MISS_STALL_BUDGET_MS).toBe(200);
     expect(GRID_MS).toBeCloseTo(1000 / 60);
+    expect(CAP_TOP_TOL_MS).toBe(2);           // ★v9.4 cap 硬顶门容差(活机帧距分布定谳,头注 v9.4)
   });
 
-  it('★B2/v9.1 去回声估计器常数处方锁(2026-10-05;定谳/门线依据见 FrameBeat.ts 头注 v9/v9.1 与各常数注)', () => {
+  it('★v9.4 cap 硬顶门源锚(反馈环断点,防回改):门在序数落拍面之后、cap>0 守卫承重、机制注在头注', () => {
+    expect(BEAT).toContain('CAP_TOP_TOL_MS = 2');
+    expect(BEAT).toContain('capSkips++');
+    expect(BEAT).toContain('cap 硬顶门');
+    // 门必须在序数落拍面【之后】(序数<k 的常规跳拍不得误计门咬合=诊断面污染)
+    const iOrdinal = BEAT.indexOf('if (this.ordinal < this.k) return false;');
+    const iGate = BEAT.indexOf('this.capSkips++');
+    expect(iOrdinal).toBeGreaterThan(-1);
+    expect(iGate).toBeGreaterThan(iOrdinal);
+    // cap>0 守卫在门条件内(1000/0=Infinity 会吞全部帧=desktop UNCAPPED 判例的承重件)
+    expect(BEAT).toMatch(/if \(this\.cap > 0 && this\.lastRenderAt >= 0 &&/);
+  });
+
+  it('★B2/v9.1 去回声估计器常数处方锁(2026-10-05;★v9.3 刷新:饥饿清族不分级+残差紧致门;定谳/门线依据见 FrameBeat.ts 头注 v9/v9.1/v9.3 与各常数注)', () => {
     expect(VSYNC_DISP_WIN).toBe(31);        // 显示族窗=工作窗同宽(31 样本窗纪律)
     expect(VSYNC_DISP_MIN).toBe(12);        // 成熟度门:证据不足不动
     expect(VSYNC_ADMIT_REL).toBe(1.15);     // 收录带=famLo×1.15(FLOOR_TOL 同宽)
@@ -1168,8 +1331,9 @@ describe('三档语义锁(源锚)', () => {
     expect(VSYNC_FAM_SEED).toBe(0.9);       // famLo 播种锚(族空时=work×0.9)
     expect(VSYNC_FAM_GUARD).toBe(0.65);     // 成熟期远低于族拒绝(锚=work×0.65=输出钳线,防 famLo 锁死显示证据)
     expect(VSYNC_RESEED).toBe(0.8);         // 流整体下移重播种阈(切快屏恢复)
-    expect(VSYNC_STARVE_FLUSH).toBe(150);   // 饥饿族重建阈(仅成熟族;immature 族不清防稀疏证据永不收敛)
+    expect(VSYNC_STARVE_FLUSH).toBe(150);   // 饥饿族重建阈(★v9.3 不分级:150 对 5% 稀疏证据误清率 0.05%)
     expect(VSYNC_ECHO_CORR).toBe(0.6);      // ★v9.2 回声签名 engagement key(机制指纹阈)
     expect(VSYNC_ECHO_MIN_PAIRS).toBe(12);  // 相关计算最小配对样本
+    expect(VSYNC_ECHO_RESID).toBe(1.2);     // ★v9.3 回声残差紧致门(trace max 1.07 放行/活机混合流 1.5-2+ 恒拦)
   });
 });

@@ -5771,6 +5771,16 @@ export class Player extends Entity {
       // 攀爬速度链（Player.cs:26016-26125——见 ropeClimbVy 注）
       this.ropeClimbVy();
       this.fallStartY = null; // 绳上不计摔伤
+      // ★BJ527（2026-10-05）绳面冲刺状态机：原版 pulley 移动支 :26691 在支尾【无条件】
+      // 调用 DashMovement()（与主移动支 :26958 同形,1914 反编译行号系 1456 旧锚,行为
+      // 同一）——绳上可发起冲刺（就绪段 DoCommonDashHandle 键面/双击两源照跑）、冷却/
+      // 滑行三态照常推进。发起拍 X 仍钉绳列（原版块序：X 吸附→垂直链→DashMovement）,
+      // 发起置 vx=±16.9/14.5/21.9 后下一拍 :26475 `velocity.X != 0 → pulley=false`
+      // 落绳续滑——绳上冲刺=一拍挂绳+空中滑行,两引擎同构。本支与非 pulley 绳攀共用,
+      // 原版该面只属 pulley 态 → 门 this.pulley。ix 传 0：dashMovement 滑行支的输入
+      // 加速/制动块承载的是 HorizontalMovement Run 支（:26889 落主移动支 else-if 链,
+      // 绳索支整段不跑 :26366）——原版绳面滑行=纯阻尼,无输入贡献。
+      if (this.pulley) this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else if (this.pulley) {
       // 绳端悬挂支（:25985-26137）：头格列/行 num34/num36，上下邻格（:25998 flag17）
       const num34 = Math.floor((this.x + this.w / 2) / TILE);
@@ -5791,6 +5801,11 @@ export class Player extends Entity {
         this.y = num35 * TILE + 22;
       }
       this.fallStartY = null; // 绳上不计摔伤（:25987 fallStart）
+      // ★BJ527：绳端/浸水支同面补位（原版 :26691 同一调用位=pulley 块尾无条件——
+      // 含 :26644-26648 inputDown 穿落离绳拍,原版离绳拍块尾照跑 DashMovement;
+      // 中段浸水 pulley 也落本支=branch1 的 !inWater 门让位）。ix 同上传 0（绳面无
+      // Run 支,见上支注）。
+      this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else
     // 微光物理（Player.cs:24115-24127 else if (shimmerWet || shimmering) 分支）
     if (this.inShimmer && !this.shimmering) {

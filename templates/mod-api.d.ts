@@ -70,6 +70,8 @@ export declare interface ModContext {
   readonly id: string;
   npcAi(key: string, fn: (e: any, game: any, player: any) => void): void;
   itemUse(key: string, fn: (ctx: ModUseCtx) => boolean): void;
+  /** B6:本 mod 物品近战命中敌怪钩(受理命中后;ModItem.OnHitNPC 形) */
+  onHitNpc(key: string, fn: (e: unknown, game: unknown, ctx: { damage: number; crit: boolean; killed: boolean }) => void): void;
   projectileHook(key: string, hooks: {
     update?(p: ModProjLike, game: any): void;
     onHit?(p: ModProjLike, enemy: any, game: any): boolean | void;

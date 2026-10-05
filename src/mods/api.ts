@@ -18,7 +18,7 @@
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
 import {
-  registerNpcAi, registerItemUse, registerSystem, registerProjHooks,
+  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -30,6 +30,12 @@ export interface ModContext {
   npcAi(key: string, fn: (e: unknown, game: unknown, player: unknown) => void): void;
   /** 接管本 mod 物品的左键使用;返回 true=已消费(useTime 节奏自管) */
   itemUse(key: string, fn: (ctx: ModUseCtx) => boolean): void;
+  /** B6:本 mod 物品近战命中敌怪钩(受理命中后;ModItem.OnHitNPC 形) */
+  onHitNpc(key: string, fn: (e: unknown, game: unknown, ctx: { damage: number; crit: boolean; killed: boolean }) => void): void;
+  /** B6:本 mod NPC 死亡钩(击杀单口;Hive Tumor→Boss 遭遇链面) */
+  onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void): void;
+  /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
+  playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
    *  未注册键 fail-fast) */
   projectileHook(key: string, hooks: {
@@ -82,6 +88,15 @@ export function createModContext(
   return {
     id: modId,
     npcAi(key, fn) { registerNpcAi(idOf('npcs', key), fn as Parameters<typeof registerNpcAi>[1]); },
+    onHitNpc(key: string, fn: (e: unknown, game: unknown, ctx: { damage: number; crit: boolean; killed: boolean }) => void) {
+      registerModOnHitNpc(idOf('items', key), fn as Parameters<typeof registerModOnHitNpc>[1]);
+    },
+    onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void) {
+      registerModNpcDeath(idOf('npcs', key), fn as Parameters<typeof registerModNpcDeath>[1]);
+    },
+    playSound(files: string[], volume = 1, x?: number, y?: number) {
+      playModSound(files, volume, x, y);
+    },
     itemUse(key, fn) {
       const vid = idOf('items', key);
       registerItemUse(vid, (ctx) => fn(opts?.decorateUseCtx ? opts.decorateUseCtx(ctx) : ctx));

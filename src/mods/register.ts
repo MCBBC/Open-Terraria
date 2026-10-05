@@ -6,8 +6,9 @@ import { registerModItem, ITEM_DEFS } from '../data/items';
 import { registerModTile, TILE_BY_KEY, type TileDef } from '../data/tiles';
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
 import { registerModBoss, registerModWormChain } from '../entities/Enemy';
+import { registerModBuff } from './buffs';
 import { appendModSummonEntries, type SummonEntry } from '../core/DebugSummonPanel';
-import { registerModRecipes, type VanillaRecipe } from '../data/vanillaRecipes';
+import { registerModRecipes, registerModAdjTile, type VanillaRecipe } from '../data/vanillaRecipes';
 import { registerModItemFunc } from '../data/vanillaItemFunc';
 import { registerModCombat } from '../data/vanillaItemCombat';
 import { registerModStats } from '../data/vanillaItemStats';
@@ -57,7 +58,10 @@ function buildVanillaRecipe(plan: RegistrationPlan, modId: string, spec: Registr
     if (tk.startsWith('mod_')) {
       const stable = plan.allocation.tiles.get(tk);
       if (stable === undefined) throw new Error(`[mod-recipe] mod ${modId} 配方站点 tile 未注册: ${tk}`);
-      tile = stable;   // mod tile 伪 sheet≡stable id;站点门按 internal id——TILE_BY_KEY 同域映射
+      // ★B5b 真机探针定谳:站点门(stationSatisfierTiles/craftingGrid)按【internal id】
+      //  比对,mod tile internal=注册序数组下标 ≠ stable——曾误存 stable(伪 sheet)
+      //  =站点配方永不可合成(伪 sheet≡stable 恒等式只对渲染取图成立)
+      tile = TILE_BY_KEY[tk] ?? stable;
     } else {
       tile = TILE_BY_KEY[tk] ?? -1;
     }
@@ -124,6 +128,29 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     });
     projs++;
   }
+  // B6:声明 buff 注册(9000+ 伪 vanilla;键字典序=确定性,与 plan 分配序同源)
+  for (const b of plan.buffSpecs ?? []) {
+    // npcDps 通用 dot tick(1/60 逐拍累进,≥1 取整施伤;max 合并语义在 applyModNpcBuff)
+    const dps = b.spec.npcDps;
+    registerModBuff(b.modId, b.spec.key, {
+      name: b.spec.name ?? b.spec.key,
+      texture: b.spec.texture,
+      onNpcTick: dps
+        ? (enemy, game) => {
+            const t = enemy as unknown as { _modDotCarry?: number };
+            t._modDotCarry = (t._modDotCarry ?? 0) + dps / 60;
+            if (t._modDotCarry >= 1) {
+              const d = Math.floor(t._modDotCarry);
+              t._modDotCarry -= d;
+              (enemy as unknown as {
+                hurt: (dmg: number, kbx: number, kby: number, g: unknown,
+                  armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
+              }).hurt(d, 0, 0, game, undefined, false, 1, true);
+            }
+          }
+        : undefined,
+    });
+  }
   // tile 先注册(物品 placeTile 引用 tile 键)
   for (const t of plan.tileSpecs) {
     const spec = t.spec;
@@ -133,12 +160,15 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     if (spec.dropItem && dropId === undefined) {
       throw new Error(`[mod-tile] mod ${t.modId} tile ${spec.key} 掉落引用未注册物品: ${spec.dropItem}`);
     }
-    registerModTile({
+    const modTileInternal = registerModTile({
       key: t.fullKey,
       name: spec.name ?? spec.key,
       solid: spec.solid ?? false,
       platform: spec.platform ?? false,
       decor: spec.decor ?? false,
+      framed: spec.framed ?? false,
+      w: spec.w,
+      h: spec.h,
       opacity: spec.opacity ?? (spec.solid ? 1 : 0),
       pick: spec.pick ?? 0,
       axe: spec.axe ?? -1,
@@ -148,10 +178,14 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       vanilla: {
         sheet: t.stableId,                       // mod tile 恒等式:伪 sheet id≡stable id
         frame: spec.frame ?? 'style',
-        fw: spec.frameWidth ?? 1,
-        fh: spec.frameHeight ?? 1,
+        // ★B5b 修正:fw/fh=占格数(TEdit frameSize 语义,与原版 tile 一致)——
+        //  曾误用 frameWidth(px) → 1×1 块按 16×18 格渲染/放置=灾难性错位
+        fw: spec.w ?? 1,
+        fh: spec.h ?? 1,
       },
     }, t.stableId);
+    // ★B6:AdjTiles 兼用站点(闭包后裔=stationSatisfierTiles 自动含 mod 站点)
+    for (const adj of spec.adjTiles ?? []) registerModAdjTile(modTileInternal, adj);
     tiles++;
   }
   // npcs
