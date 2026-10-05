@@ -1065,9 +1065,46 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // ---- 菜单 ----
 
   /** 帧回调注入 VUI 自愈循环（VUI.startLoop 持有 rAF，HMR 杀不死） */
+  // ★债A（2026-10-05，「标题期 rAF 不封顶」登记债清偿）：标题态菜单背景 tick 网页端
+  //  钳 60fps。定谳=VUI 循环的 frameCap 门（2026-08-29）只在 cap>0 时生效且跟随用户
+  //  档——frameCap=0（解锁 vsync 桌面壳/逃生门档）实测标题期 menuBg.tick 585/s、
+  //  折算渲染 CPU 76% 单核（探针 _debtab-title-cap-baseline,--disable-frame-rate-limit
+  //  合成环境;云/星/菜单背景每拍 ~1.3ms 全在主线程）;cap=120 档同样 135/s 超菜单
+  //  所需。菜单动画 60fps 足够（原版本相=60fps 定帧）,钳制只节流步进频次。
+  //  平台区分=desktop-shell UNCAPPED rAF 判例：sandboxDesktop.isShell 恒不钳（桌面
+  //  壳行为逐字节不变）;?menutickcap=0 逃生门回旧自由步进。
+  //  语义=dt 累计器+墙钟门双轨：acc 逐拍累加（被跳帧的 dt 不丢）,墙钟距上次步进
+  //  ≥阈值才消费——门判据取墙钟而非 acc 阈值,对 VUI 侧 dt 块尺寸不变（cap=120 档
+  //  VUI dt≈7.3ms 块,acc 阈值判据会 3 块并 1 拍=45/s 错拍;墙钟门恒 ~70/s 上限）。
+  //  菜单时钟/坠星/云漂全按 dt 折算（tick 内 frames=min(8,dt/16.7)）,推进速度与
+  //  不封顶逐位同,仅步进节流;缺省 frameCap=60 档 VUI dt≈16.7ms 每拍必过=逐字节
+  //  零变化。acc 钳 150ms=隐藏页回前台大步防雪崩（tick 内 frames≤8 双保险）;
+  //  90Hz 解锁 vsync 环境节流到 45/s（dt 仍真,速度不变,cadence 均匀）。
+  //  ★阈值容差取 2.5ms（非 frameCap 门的 -1ms 惯例）：高 rAF 拍网格上 hook 调用
+  //  间距 ≈阈值/k,容差不足会拍频锁到 k+1 倍（实测 7.33ms 块×阈值15.17 → 14.8ms
+  //  二格差 0.37ms 落空 → 恒 3 格 22ms=45/s;14.17 → 恒 2 格 14.8ms≈68/s）——
+  //  离散拍网格上 60fps 只能逼近（45~70/s 带）,dt 恒真故速度无差,仅 cadence 抖动。
+  const menuTickCapOn = (() => {
+    try {
+      if ((window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell) return false;
+      return new URLSearchParams(location.search).get('menutickcap') !== '0';
+    } catch { return false; }
+  })();
+  const MENU_TICK_MIN_MS = 1000 / 60 - 2.5;
+  let menuTickAcc = 0;
+  let menuTickLastWall = 0;
   VUI.frameHook = (dt) => {
-    menuBg?.tick(dt);
-    if (menuBg) menuBg.lastDt = dt;
+    const bg = menuBg;
+    if (!bg) { menuTickAcc = 0; return; }
+    if (!menuTickCapOn) { bg.tick(dt); bg.lastDt = dt; return; }
+    const nowMs = performance.now();
+    menuTickAcc = Math.min(menuTickAcc + dt, 150);
+    if (nowMs - menuTickLastWall < MENU_TICK_MIN_MS) return;
+    menuTickLastWall = nowMs;
+    const consume = menuTickAcc;
+    menuTickAcc = 0;
+    bg.tick(consume);
+    bg.lastDt = consume;
   };
 
   function stopMenu() {

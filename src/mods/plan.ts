@@ -230,7 +230,19 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
     }
   }
   for (const n of plan.npcSpecs) {
-    for (const d of n.spec.drops ?? []) itemOf(n.modId, d.item);
+    for (const d of n.spec.drops ?? []) {
+      if (typeof d.item === 'number') continue;   // 原版 vid 直通(P7)
+      itemOf(n.modId, d.item);
+    }
+    // ★P8:蠕虫链段引用校验(body/tail 键必须已分配)
+    if (n.spec.worm) {
+      for (const segKey of [n.spec.worm.body, n.spec.worm.tail]) {
+        const full = segKey.startsWith('mod_') ? segKey : `mod_${n.modId}_${segKey}`;
+        if (!plan.allocation.npcs.has(full)) {
+          throw new ModPlanError(`mod ${n.modId} NPC ${n.spec.key} 蠕虫链引用未注册段: ${segKey}`);
+        }
+      }
+    }
   }
   for (const r of plan.recipes) {
     itemOf(r.modId, r.spec.create);

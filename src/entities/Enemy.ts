@@ -301,6 +301,23 @@ export const VANILLA_BOSS_IDS = new Set([
   4, 13, 35, 50, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 396, 397, 398,
   439, 578, 636, 657, 664, 668,
 ]);
+
+/** ★mod NPC boss 位注册面(2026-10-05 P8,红蓝 M5 GAPS-02):mod Boss(800+)直写
+ *  本集合——三处 `.has(id)` 消费点(fromVanilla/Transform/F6)零改即亮 boss 位
+ *  (血条/Boss 槽/掉落锚定)。原版域只读不改。 */
+export function registerModBoss(npcId: number): void {
+  if (npcId < 800) throw new Error(`[mod-boss] id 须 ≥800: ${npcId}`);
+  VANILLA_BOSS_IDS.add(npcId);
+}
+
+/** ★mod 蠕虫链规格注册面(2026-10-05 P8,红蓝 M5 GAPS-01):链头 id → 体/尾段 id 序
+ *  (头自身不含;体先尾后,与原版 87/454 spec 同构)。wormChainSpec 查完原版白名单
+ *  后查本表——自然生成/F6/召唤三条建链路全部贯通。缺注册=不建链(原语义)。 */
+const MOD_WORM_CHAINS = new Map<number, { count: number; segIds: number[] }>();
+export function registerModWormChain(headId: number, segIds: number[]): void {
+  if (segIds.length === 0) throw new Error(`[mod-worm] 空 segIds: head ${headId}`);
+  MOD_WORM_CHAINS.set(headId, { count: segIds.length, segIds });
+}
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -1275,6 +1292,10 @@ export class Enemy extends Entity {
    *  457/458/459——曾按仪式点 5 段 [455..459]=误读,2026-09-02 全面 review 纠)。
    *  非链头（段裸生/自建链族/无链族）返回 undefined=不建链 */
   static wormChainSpec(vid: number, rand: () => number): { count: number; segIds?: number[] } | undefined {
+    // ★P8 mod 链分支(2026-10-05):mod 蠕虫链注册表先于原版白名单——mod 头(800+)
+    //  不在 WORM_CHAIN_HEADS,旧实现恒 undefined=mod Boss 永远光杆。零 mod 零扰动。
+    const modSpec = MOD_WORM_CHAINS.get(vid);
+    if (modSpec) return { count: modSpec.count, segIds: modSpec.segIds };
     if (!Enemy.WORM_CHAIN_HEADS.has(vid)) return undefined;
     const next = (lo: number, hi: number) => lo + ((rand() * (hi - lo)) | 0);
     switch (vid) {

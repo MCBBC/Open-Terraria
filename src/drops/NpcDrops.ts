@@ -62,8 +62,16 @@ for (const e of ENTRIES) {
 }
 
 /** NPC.value（铜币）。传 netId：负 id 变体（史莱姆 -1..-10 等）有自己的 value 表，
- *  正 netID/无变体传 type 即可 */
+ *  正 netID/无变体传 type 即可。
+ *  ★P7 红蓝修正(M4 高优①):mod NPC(id≥800)金币价值经 registerModNpcValue
+ *  注册面直写(旧实现 ModNpcContent.value 声明被丢弃=mod 怪恒 0 金)。原版域查表先行,零扰动。 */
+const MOD_NPC_VALUE = new Map<number, number>();
+export function registerModNpcValue(npcId: number, value: number): void {
+  if (npcId < 800) return;
+  MOD_NPC_VALUE.set(npcId, Math.max(0, value));
+}
 export function npcValueOf(netIdOrType: number): number {
+  if (netIdOrType >= 800 && MOD_NPC_VALUE.has(netIdOrType)) return MOD_NPC_VALUE.get(netIdOrType)!;
   return NPC_VALUE[String(netIdOrType)] ?? 0;
 }
 

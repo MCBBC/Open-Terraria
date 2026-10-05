@@ -1,7 +1,7 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, noteStarveProbeFail, noteStarveProbeOk, offStarveTransition, onStarveTransition, starvedEver, starvedLock, starveSnapshot } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
-import { findBannerAnchorY, houseBannerVisible, npcHousingCategory } from '../world/Housing';
+import { findBannerAnchorY, houseBannerLightRow, houseBannerVisible, npcHousingCategory } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
 import { rulerLineAlpha, rulerGridFade, rulerReadoutText, rulerGridMaskAlpha, rulerCrossMaskAlpha } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源（★BJ448:+dst 衰减罩 α 两档）
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -4819,6 +4819,10 @@ export class Renderer {
   /** 本帧天塔柱扫描结果（SceneMetrics.ScanOnScreenTiles :524-583；render() 每帧刷新） */
   monoScan: MonolithSceneState = emptyMonolithScene();
   private _monoFrameMs = 0;
+  /** 本帧昼/夜缓存（render() 头 world.clock.isDay 刷新;drawEmpress 消费——
+   *  ★EoL2 修4 ShouldEmpressBeEnraged = Main.dayTime（NPC.cs:46423-46441 非 remix
+   *  档;remix empressRageMode 分支未建模 = bossAI_lategame dayEnrage 同先例） */
+  private _frameDayTime = true;
   scene: SceneFlags | null = null;
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
@@ -5361,6 +5365,7 @@ export class Renderer {
     // 0. 天塔柱族：视区扫描（Main.cs:61983-61990 GetAreaToLight+Inflate(28) →
     //    SceneMetrics.ScanOnScreenTiles :524-583）+ 滤镜状态机（SceneState.cs:105-128）
     const clock0 = world.clock;
+    this._frameDayTime = clock0 ? clock0.isDay : true;   // ★EoL2 修4 消费源（drawEmpress）
     this.monoScan = scanMonolithScene(world.store, visualScanRect(
       cam.x, cam.y, viewW, viewH, z, world.store.w, world.store.h));
     this.monoFilters.update(this._liquidNow - (this._monoFrameMs || this._liquidNow), this.monoScan, {
@@ -13698,6 +13703,29 @@ export class Renderer {
     return [left, right];
   }
 
+  /** ★刀2（2026-10-05）残影环剪帧基底缓存：(层,帧)→独立画布。shim 切片接管
+   *  （uploadShineSlice）只收整幅源,而残影层是精灵表单帧行——按 (层,帧) 剪出
+   *  一次,GL 纹理按稳定键幂等驻留（首见上传,稳态零传零烘）。上限保险丝 96 条,
+   *  超限/非浏览器走 tintedSprite 烘焙兜底。 */
+  private empGhostCuts = new Map<string, HTMLCanvasElement>();
+  private empGhostCut(key: string, img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number): HTMLCanvasElement | null {
+    const hit = this.empGhostCuts.get(key);
+    if (hit) return hit;
+    if (this.empGhostCuts.size >= 96 || typeof document === 'undefined') return null;
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, sw); cv.height = Math.max(1, sh);
+    const g = cv.getContext('2d');
+    if (!g) return null;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    this.empGhostCuts.set(key, cv);
+    return cv;
+  }
+  /** ★刀2 逃生门/A/B 旗：true=残影环加亮源回 tintedSprite 烘焙原链（?empslice=0
+   *  缺省置位;活机同会话对拍可运行时改写） */
+  static empGhostSliceOff = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('empslice') === '0' : false;
+
   /** 女皇绘制：背后大翼 Extra_159（1×11 帧按 localAI[0]/4 推进、scale×2）→ 着色器层
    *  Extra_157（原版 HallowBoss 像素着色器；此处直画贴图近似，登记）→ 本体 NPC_636
    *  帧（二阶段 ai3∈{1,3} → 帧 1，FindFrame cs:67678）→ 二阶段翅膀覆层 Extra_187
@@ -13741,8 +13769,42 @@ export class Renderer {
       ctx.translate(px, py);
       if (flip) ctx.scale(-1, 1);
       ctx.scale(scale, scale);
+      // ★刀2（2026-10-05）残影环 tint 批量化：加亮源三档解析——
+      //  ① tint=白（atk10 轮辐）：贴图区直画（×255 恒等;旧 tintedSprite 白键烘焙
+      //    =逐位同物退役;shim er: 区域纹理缓存=稳态零上传）;
+      //  ② shim 切片接管（markWorldDynamicScratch→uploadShineSlice→BakeSnap.tint→
+      //    quadSprite uTint,TileShine 转正判例）：剪帧基底画布按 (层,帧) 稳定键
+      //    首见上 GPU,逐 draw 顶点色乘法=连续 tint 零烘焙——atk8/9 轨道
+      //    lum=0.5+0.5·lv(90,0,ai1)（下文 lum 行）随 ai1 逐帧漂移 → 旧链 tintedSprite
+      //    步进8 量化键逐帧 churn（活机实测 ~12 次 TintAtlas 烘焙/帧）根治;
+      //    uTint 连续乘色较烘焙链免掉 step-8 键量化（渲染值本就取未量化真值,
+      //    视觉只更贴近原版连续 hsl）;
+      //  ③ 2D/降级（bgl 关/切片拒接/逃生门）：tintedSprite 烘焙原链逐位保留。
+      type GhostAddSrc =
+        | { kind: 'rect'; img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }
+        | { kind: 'cut'; cv: HTMLCanvasElement }
+        | { kind: 'tinted'; rect: TintRect }
+        | { kind: 'none' };
+      const white = tint[0] === 255 && tint[1] === 255 && tint[2] === 255;
+      // 剪帧键=(层,帧)【无 tint】——tint 走 uTint 顶点色不进键（tint 进键=逐帧
+      // 漂移刷爆剪帧缓存→保险丝熔断回落烘焙链,首版实测病,键域必须帧级稳定）
+      const ghostAdd = (
+        img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+        cutKey: string, fbKey: string,
+      ): GhostAddSrc => {
+        if (white) return { kind: 'rect', img, sx, sy, sw, sh };
+        if (!Renderer.empGhostSliceOff) {
+          const cut = this.empGhostCut(cutKey, img, sx, sy, sw, sh);
+          if (cut && this.markWorldDynamicScratch(cut, cutKey,
+            [tint[0] / 255, tint[1] / 255, tint[2] / 255])) {
+            return { kind: 'cut', cv: cut };
+          }
+        }
+        const tinted = this.tintedSprite(fbKey, { img, sx, sy, sw, sh }, tint);
+        return tinted ? { kind: 'tinted', rect: tinted } : { kind: 'none' };
+      };
       const twoPass = (src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
-        dx: number, dy: number, dw: number, dh: number, tinted: TintRect | null) => {
+        dx: number, dy: number, dw: number, dh: number, add: GhostAddSrc) => {
         // A/=3 预乘语义：destination-out 削底（fadeA=A/255）→ lighter 加色（tint×addA）
         if (fadeA > 0.01) {
           ctx.globalCompositeOperation = 'destination-out';
@@ -13750,36 +13812,46 @@ export class Renderer {
           ctx.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
         }
         ctx.globalCompositeOperation = 'lighter';
-        if (tinted) {
+        if (add.kind === 'rect') {
           ctx.globalAlpha = Math.max(0, Math.min(1, addA));
-          ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, dx, dy, dw, dh);
+          ctx.drawImage(add.img, add.sx, add.sy, add.sw, add.sh, dx, dy, dw, dh);
+        } else if (add.kind === 'cut') {
+          ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+          ctx.drawImage(add.cv, 0, 0, add.cv.width, add.cv.height, dx, dy, dw, dh);
+        } else if (add.kind === 'tinted') {
+          ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+          ctx.drawImage(add.rect.c, add.rect.x, add.rect.y, add.rect.w, add.rect.h, dx, dy, dw, dh);
         }
       };
       const tq = `${tint[0]},${tint[1]},${tint[2]}`;
       for (const L of ghostLayers) {
         const fh = Math.floor(L.src.sh / L.rows);
-        const tinted = this.tintedSprite(`emp|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}|${tq}`,
-          { img: L.src.img, sx: L.src.sx, sy: L.idx * fh, sw: L.src.sw, sh: fh }, tint);
-        twoPass(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh, -L.dw / 2, -L.dh / 2, L.dw, L.dh, tinted);
+        twoPass(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh, -L.dw / 2, -L.dh / 2, L.dw, L.dh,
+          ghostAdd(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh,
+            `empGhostCut|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}`,
+            `emp|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}|${tq}`));
       }
       if (body) {
-        const tinted = this.tintedSprite(`emp|body|${body.sx},${body.sy}|${tq}`,
-          { img: body.img, sx: body.sx, sy: body.sy, sw: body.sw, sh: body.sh }, tint);
-        twoPass(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh, tinted);
+        twoPass(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh,
+          ghostAdd(body.img, body.sx, body.sy, body.sw, body.sh,
+            `empGhostCut|body|${body.sx},${body.sy}`,
+            `emp|body|${body.sx},${body.sy}|${tq}`));
       }
       if (phase2 && wing2) {
         const f2 = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
-        const tinted = this.tintedSprite(`emp|187|${f2.idx * f2.fh}|${tq}`,
-          { img: f2.r.img, sx: f2.r.sx, sy: f2.idx * f2.fh, sw: f2.r.sw, sh: f2.fh }, tint);
-        twoPass(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh, -f2.r.sw / 2, -f2.fh / 2, f2.r.sw, f2.fh, tinted);
+        twoPass(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh, -f2.r.sw / 2, -f2.fh / 2, f2.r.sw, f2.fh,
+          ghostAdd(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh,
+            `empGhostCut|187|${f2.idx * f2.fh}`,
+            `emp|187|${f2.idx * f2.fh}|${tq}`));
       }
       // 帧 5 施法臂（j==num2/num3 → 臂帧==5 才入残影 :26378-26486）
       for (const [arm, frame] of [[armL, lf], [armR, rf]] as Array<[ReturnType<SpriteAtlas['vmisc']>, number]>) {
         if (!arm || frame !== 5) continue;
         const f = frameAt(arm, 7, frame);
-        const tinted = this.tintedSprite(`emp|arm|${f.idx * f.fh}|${tq}`,
-          { img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh }, tint);
-        twoPass(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh, tinted);
+        twoPass(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh,
+          ghostAdd(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
+            `empGhostCut|arm${arm === armL ? 'L' : 'R'}|${f.idx * f.fh}`,
+            `emp|arm|${f.idx * f.fh}|${tq}`));
       }
       ctx.restore();
       ctx.globalCompositeOperation = 'source-over';
@@ -13895,34 +13967,53 @@ export class Renderer {
     }
     // 本体（FindFrame：二阶段帧 1）
     if (body) paintMain(body, -body.sw / 2, -body.sh / 2, body.sw, body.sh, `body|${body.sy}`);
-    // 二阶段：翅膀覆层 + 4 向轨道残影（:26509-26524）
+    // 二阶段：翅膀覆层 + 4 向轨道残影（Main.cs:27000-27046）。★EoL2 修4（2026-10-05）
+    //  相位2色相环加算复原：原版 color3 = hsl((num14×0.08+0.6)%1,1,0.5) → A=0
+    //  （XNA 纯加法习语 dst 因子恒 One，Main.cs:27011-27013）→ ×0.6 → ×num4×Opacity
+    //  ——旧实现摊成 SO 半透暗影拷贝（暗处成黑影）且把位置脉冲 num14 误折进 alpha。
+    //  canvas 语义 = 'lighter' 直画（A=0 无 dst 衰减，无 destination-out 削底段），
+    //  globalAlpha 承载 0.6×num4×alpha、tint=hsl 真值乘色（tintedSprite 键量化 8 防漂移刷缓存）；
+    //  暴怒（ShouldEmpressBeEnraged = Main.dayTime，NPC.cs:46423-46441；remix 分支
+    //  未建模 = AI 侧 dayEnrage 同先例）→ OurFavoriteColor(255,231,69)（Main.cs:886）
+    //  且 0.6→0.3。wing2 底画原版走 color 链（=本体同色含 num4/白 num7）→ 改经
+    //  paintMain 同链。边界登记：加算环原版不读格光，本仓世界层乘光下随修1共享
+    //  地板 Lerp(L,White,.25) 乘——亮处恒等，真暗处环较原版欠亮（与攻击态 8/9/10
+    //  残影环 paintGhost 同族既有近似）。
     if (phase2 && wing2) {
       const f = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
-      const drawW2 = (dx: number, dy: number, a: number) => {
-        ctx.save();
-        ctx.globalAlpha = alpha * a;
-        ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
-          -f.r.sw / 2 + dx, -f.fh / 2 + dy, f.r.sw, f.fh);
-        ctx.restore();
-      };
-      drawW2(0, 0, 1);
-      const rad = 2 + 6 * pulse;
-      for (let k = 0; k < 4; k++) {
-        const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-        drawW2(Math.cos(a) * rad, Math.sin(a) * rad, 0.6 * (0.4 + 0.6 * pulse));
-      }
-      if (crown) {
-        const drawCr = (dx: number, dy: number, a: number) => {
-          ctx.save();
-          ctx.globalAlpha = alpha * a;
-          ctx.drawImage(crown.img, crown.sx, crown.sy, crown.sw, crown.sh,
-            -crown.sw / 2 + dx, -crown.sh / 2 + dy, crown.sw, crown.sh);
-          ctx.restore();
+      paintMain({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+        -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh, `w2|${f.idx}`);
+      const rad = 2 + 6 * pulse;                                // Lerp(2,8,num14)（:27029/:27040）
+      const enraged = this._frameDayTime;
+      const gTint: [number, number, number] = enraged ? [255, 231, 69]
+        : (() => {
+            const rgb = Renderer.glowHslToRgb((pulse * 0.08 + 0.6) % 1, 1, 0.5);
+            return [Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255)];
+          })();
+      const gA = (enraged ? 0.3 : 0.6) * dimA * alpha;          // color3 ×0.6(/0.3)×num4×Opacity
+      if (gA > 0.01) {
+        ctx.globalCompositeOperation = 'lighter';
+        const drawAdd = (src: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+          dx: number, dy: number, key: string) => {
+          const tinted = this.tintedSprite(`empG|${key}`, src, gTint);
+          if (!tinted) return;
+          ctx.globalAlpha = Math.min(1, gA);
+          ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
+            -src.sw / 2 + dx, -src.sh / 2 + dy, src.sw, src.sh);
         };
         for (let k = 0; k < 4; k++) {
           const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-          drawCr(Math.cos(a) * rad, Math.sin(a) * rad, 0.6 * (0.4 + 0.6 * pulse));
+          drawAdd({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+            Math.cos(a) * rad, Math.sin(a) * rad, `187|${f.idx}`);
         }
+        if (crown) {
+          for (let k = 0; k < 4; k++) {
+            const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+            drawAdd(crown, Math.cos(a) * rad, Math.sin(a) * rad, '188');
+          }
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
       }
     }
     // 双臂（帧表按攻击态）
@@ -14323,6 +14414,59 @@ export class Renderer {
     //  无出场渐显 → floor 恒 1,整 tile 白=既有 596/811 同面近似）;拖尾/幻影层经
     //  MinionProj.draw 946 专绘走 trailShadeQueue 全亮通道（合成后直绘）双保险。
     [946, () => ({ floor: 1, whiten: true })],
+    // ★EoL2 修2（2026-10-05）：光之女皇彩虹尾迹族补覆盖——原版全族【不读
+    //  Lighting.GetColor】（AI_171_GetColor :46398-46406 / AI_173_GetColor :46276-46284 /
+    //  GetFairyQueenWeaponsColor :21780-21787——色=自发光 hsl/白,与格光无关）,
+    //  本仓世界层 compositeLight 全乘 → 暗处全暗。地板 1.0 抬亮（946 判例同款）。
+    //  whiten 逐弹按反编译锚定（判别式=顶点色是否读格光:全族自色/白 → whiten=true,
+    //  ★I″ 消色差;A 通道语义逐弹登记如下）:
+    //  · 871 散弹核（SetDefaults :8382-8392 aiStyle172）：主绘 Main.cs:28768-28815
+    //    color8=White×Opacity(A/2) + color9=AI_171_GetColor()(A/2) 双画——白核+自色。
+    //    本仓 Arrow 载体不建模 AI_172 Opacity 窗（α≡0 恒显）→ floor=1 与本仓 draw 同相。
+    //  · 872 LastingRainbow 天光雨（aiStyle173）：:31551-31553 color48=(255,255,255,0)
+    //    ×Opacity【A=0 纯加法白】+ 79 槽 oldPos 拖尾——A=0 → 纯加法 → whiten=true。
+    //  · 873 RainbowStreak 光鞭（aiStyle171）：:31543-31545 color48=White×Opacity
+    //    (A/2) + :31406-31412 color41=AI_171_GetColor()×0.5(A=0 纯加法彩罩)+Extra_98
+    //    光晕四画——白核+自色罩 → whiten=true。
+    //  · 874 DeathAurora 天降极光：DrawMurderAurora Main.cs:36619-36654,15 层
+    //    hslToRgb((num12%1))×num3×amount【color.A/=4 ≈ 纯加法彩色】——自色 →
+    //    whiten=true。（本仓 Arrow 载体 α 台账缺 SetDefaults α=255 :8374 行=登记,
+    //    不扩面;floor=1 与本仓恒显 draw 同相。）
+    //  · 919 FairyQueenLance 光枪（aiStyle179）：DrawProj_FairyQueenLance
+    //    Main.cs:36492-36536——A=0 加性光带/彩尾 + A/2 半透白核,不读格光 →
+    //    whiten=true。floor=本仓 draw 出场窗包络 max(本体 GTLV(0,20,la0),
+    //    光带 GTLV(60,55,la0)×GTLV(0,10,la0))（bossAI_lategame FairyQueenLance.la0,
+    //    la0≥20 后恒 1——防出生无源白块,表头 <0.06 跳过规则同款）。
+    //  · 923 SunDance 太阳舞（aiStyle180）：DrawProj_FairyQueenSunDance
+    //    Main.cs:28706-28741 四画 ×num25(A/2),不读格光 → whiten=true。
+    //    floor=num25=GTLV(0,30,la0)×GTLV(180,150,la0)（本仓 draw 自身包络,la0=0
+    //    恒跳过）。
+    //  · 931 夜光魔弹（aiStyle171）：:31406-31412 931 支 color41=GetFairyQueenWeapons
+    //    Color(0)【A=0 纯加法彩罩】+ :31545-31546 color48 A/2 白核 → whiten=true。
+    //    本仓 Arrow 载体 α≡0 恒显 → floor=1 同相。
+    [871, () => ({ floor: 1, whiten: true })],
+    [872, () => ({ floor: 1, whiten: true })],
+    [873, () => ({ floor: 1, whiten: true })],
+    [874, () => ({ floor: 1, whiten: true })],
+    [919, (proj) => {
+      const la0 = (proj as { la0?: number }).la0 ?? 0;
+      return { floor: Math.max(
+        Renderer.glowLerpValue(0, 20, la0),
+        Renderer.glowLerpValue(60, 55, la0) * Renderer.glowLerpValue(0, 10, la0),
+      ), whiten: true };
+    }],
+    [923, (proj) => {
+      const la0 = (proj as { la0?: number }).la0 ?? 0;
+      return { floor: Renderer.glowLerpValue(0, 30, la0) * Renderer.glowLerpValue(180, 150, la0), whiten: true };
+    }],
+    [931, () => ({ floor: 1, whiten: true })],
+    // ★EoL2 修5（2026-10-05）：932 月总矢（暮夕 4953 第 3 发,DrawProj_FairyQueenRanged
+    //  ItemShot Main.cs:36528-36553）——本体 color=White×Opacity(A/2)、尾迹 6 步
+    //  GetFairyQueenWeaponsColor(0)（A=0 纯加法彩）、轨道晕 4 点 color(0.5)——全层
+    //  不读格光 → whiten=true。floor=(255−α)/255：AI_181（Projectile.cs:43979-43981）
+    //  alpha=Lerp(255,0,GTLV(0,10,ai0)) 出场 10t 渐显窗（本仓 subStepAI 932 支已接,
+    //  α≡age 派生同源）;netPuppet 按 selfLumEffAlpha 全显档。
+    [932, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
   ]);
 
   /** 弹自身 effAlpha（★F2:与 Dart.draw 消费式同源）——596 在 timeLeft<30 渐隐窗内
@@ -14353,14 +14497,34 @@ export class Renderer {
     for (const e of entities) {
       if (e.dead) continue;
       const pid = (e as { projId?: number }).projId;
-      if (pid === undefined) continue;
-      const lumOf = Renderer.SELF_LUMINOUS_PROJS.get(pid);
-      if (lumOf === undefined) continue;
-      // ★F2 逐弹求值地板：596=(255−α)/255（渐显/渐隐窗/穿墙钳三段）、
-      //    811/814=whiteLerp k×(255−α)/255（出场渐显）——近不可见窗（<0.06）
-      //    整体跳过,防"无源白块"
-      const { floor, whiten } = lumOf(e);
-      if (floor < 0.06) continue;
+      // ★EoL2 修1（2026-10-05）636 女皇本体 GetAlpha 补偿（NPC 载体,projId 无关）：
+      //  原版 NPC.GetAlpha case 636 = Lerp(格光,White,0.25)×Opacity（NPC.cs:94647-94651
+      //  ——真暗处本体仍 25% 可见）,本仓 drawEmpress 本体=纹理直画×compositeLight
+      //  全乘零补偿 → 暗处湮灭。同一 raise 窗内把本体 AABB 覆盖格光值逐通道
+      //  Lerp(l,255,0.25)（只升不降、保色相）→ 终像素 = 纹理×Lerp(光,White,.25)
+      //  ×Opacity（Opacity 由 drawEmpress globalAlpha 承载）= 原版逐字（格粒度近似,
+      //  596/946 同族）。出生渐显窗（Opacity<0.06）整体跳过防无源亮块。
+      //  边界登记：①同格地形/同格后画实体同吃 lerp 抬亮（原版只亮 NPC 本体,弹族
+      //  已知边界①同款）;②大翼/着色器层出 AABB 部分欠补偿;③相位2加算色环（修4）
+      //  原版不读格光,共享地板下随 0.75L+0.25 乘——暗处较原版欠亮,亮处恒等。
+      const vid = (e as { vanillaId?: number }).vanillaId;
+      const isEmpress = pid === undefined && vid === 636;
+      if (pid === undefined && !isEmpress) continue;
+      const empLerp = isEmpress ? 0.25 : 0;
+      if (isEmpress) {
+        const sa = (e as { spawnAlpha?: number }).spawnAlpha ?? 0;
+        if (1 - Math.min(255, Math.max(sa, 0)) / 255 < 0.06) continue;
+      }
+      let floor = 0, whiten = false;
+      if (!isEmpress) {
+        const lumOf = Renderer.SELF_LUMINOUS_PROJS.get(pid!);   // 守卫后 pid 必已定义
+        if (lumOf === undefined) continue;
+        // ★F2 逐弹求值地板：596=(255−α)/255（渐显/渐隐窗/穿墙钳三段）、
+        //    811/814=whiteLerp k×(255−α)/255（出场渐显）——近不可见窗（<0.06）
+        //    整体跳过,防"无源白块"
+        ({ floor, whiten } = lumOf(e));
+        if (floor < 0.06) continue;
+      }
       const fr = Math.round(255 * floor);
       // 弹 AABB 覆盖格（中心单点不够——大弹跨格,白剪影须整盒抬亮）
       const tx0 = Math.floor(e.x / TILE), tx1 = Math.floor((e.x + e.w) / TILE);
@@ -14380,10 +14544,19 @@ export class Renderer {
           //  · whiten=false（814,顶点色=Lerp(格光,White,0.35)【读格光】
           //    Main.cs:30068+:30855）→ 逐通道 max 旧形：保留 65% 光色相（全白白化
           //    会把熔岩红光区漂白成灰阶,红队确认旧形更近原版 Lerp）。
-          const w = Math.max(lightR[li], lightG[li], lightB[li], fr);
-          const r2 = whiten ? w : Math.max(lightR[li], fr);
-          const g2 = whiten ? w : Math.max(lightG[li], fr);
-          const b2 = whiten ? w : Math.max(lightB[li], fr);
+          //  · ★EoL2 修1 636 载体 → 逐通道 Lerp(l,255,0.25)（NPC.cs:94647-94651
+          //    GetAlpha case 636 直译,只升不降、保光色相）。
+          let r2: number, g2: number, b2: number;
+          if (empLerp > 0) {
+            r2 = Math.round(lightR[li] + (255 - lightR[li]) * empLerp);
+            g2 = Math.round(lightG[li] + (255 - lightG[li]) * empLerp);
+            b2 = Math.round(lightB[li] + (255 - lightB[li]) * empLerp);
+          } else {
+            const w = Math.max(lightR[li], lightG[li], lightB[li], fr);
+            r2 = whiten ? w : Math.max(lightR[li], fr);
+            g2 = whiten ? w : Math.max(lightG[li], fr);
+            b2 = whiten ? w : Math.max(lightB[li], fr);
+          }
           if (lightR[li] === r2 && lightG[li] === g2 && lightB[li] === b2) continue;
           if (!seen.has(li)) {
             seen.add(li);
@@ -14963,9 +15136,19 @@ export class Renderer {
       //  lightCanvas（GPU-backed，无 willReadFrequently）= Chrome
       //  "Multiple readback operations" 警告源 + 每次回读强制管线停顿；
       //  且 vanilla 语义本就是【格光照】而非屏幕合成图，纯数据查表反而更忠实。
-      //  越界/未就绪 → lightAt 回 [0,0,0] = 跳过染色（首帧全黑跳过语义同旧）。
-      const lt = this.lighting?.lightAt(n.home!.x, cy) ?? [0, 0, 0];
-      if (lt[0] + lt[1] + lt[2] > 0 && (lt[0] < 252 || lt[1] < 252 || lt[2] < 252)) {
+      //  ★2026-10-05 白背景定谳批（两处 1:1 偏差修正）：
+      //  ①取样行 = num3++ 后的【实心天花板下一行空气】（Main.cs:41467-41469：while
+      //    找到实心行后 num3++ 才取色；num11=num3*16 即旗布顶）——曾取样实心行
+      //    (cy) 本身：室内空气光入实心再衰减一档,昼染偏暗于原版。
+      //  ②染色门 = 「非纯白即乘」（GetColor 黑=旗没入黑暗,Main.cs 同式乘黑）——
+      //    曾带 sum>0 半门:纯黑时跳过染色=旗布全黑环境中反常全亮（夜间白背景
+      //    家族的另一半风险面；现引擎室内光不精确归零故未现症,语义仍按原版收）。
+      //  纯白(≥252 三通道)快路径保留 = multiply 恒等跳过（原版乘白亦恒等）。
+      //  越界/首帧未就绪 → lightAt 回 [0,0,0] = 乘黑 = 原版首帧同相。
+      //  （乘法矩形 acc-shim 路径 = tier-3 MULT quad 精确乘,09-24/09-25 B2b+普查
+      //  已修「实心色块盖旗」=用户报的夜间白背景本体,见 GLShimExecutor fillRect 注。）
+      const lt = this.lighting?.lightAt(n.home!.x, houseBannerLightRow(cy)) ?? [0, 0, 0];
+      if (lt[0] < 252 || lt[1] < 252 || lt[2] < 252) {
         ctx.save();
         ctx.globalCompositeOperation = 'multiply';
         ctx.fillStyle = `rgb(${lt[0]},${lt[1]},${lt[2]})`;

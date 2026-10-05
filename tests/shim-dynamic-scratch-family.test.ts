@@ -213,13 +213,32 @@ describe('★变体①修复锁 源级锁:各共享 scratch 烘焙点逐次上�
     expect(RDR).toContain("this.uploadScratchBake(tintC, 'faelingTint', 256);");
   });
 
-  it('月总光地板/亮度藤逐部件逐段上传', () => {
-    expect(RDR).toContain("this.uploadScratchBake(scratch, 'mlfloor', 16);");
-    expect(RDR).toContain("this.uploadScratchBake(scratch, `bv:${e.id}`, 512);");
+  it('月总光地板/亮度藤:登记面退役锁（★BJ515 债⑥锁改判 2026-10-05）', () => {
+    // ★锁改判定谳（BJ481/BJ485 三刀后的现役形,原「逐部件逐段上传」载体已全摘）：
+    //  · mlfloor（月总 30% 白补差,BJ481 删登记）——消费点在 render 7b'
+    //    （compositeLight finishAccFrame 收口后）恒 raw 主画布 2D,uploadScratchNow
+    //    窗关自判 no-op=登记零收益纯白付;真病=destination-in 多精灵自擦除,
+    //    修=掩膜快照布单 op 消费（bj481-moonlord-comp-scratch.test.ts 锁）。
+    //  · bv:（亮度藤 259/260,BJ485 摘登记）——唯一调用方 render 7c 同为窗外
+    //    raw 2D,逐段烘焙 drawImage 即时读当前字节本就正确。
+    //  ⇒ 判别目标从「登记在位」改判「退役态稳定」：重挂登记（倒退回白付形）或
+    //    掩膜快照布/退役锚被拆 → 恰红。登记载体的正向锁由 bj485-dead-registration-
+    //    sweep / bj481-moonlord-comp-scratch 两文件承接。
+    expect(RDR).not.toContain("'mlfloor'");                                  // 倒退=重挂登记 → 红
+    expect(RDR).not.toContain('uploadScratchBake(scratch, `bv:');            // 同上（bv 族）
+    expect(RDR).toContain('private mlFloorMaskScratch: HTMLCanvasElement | null = null;');   // BJ481 现役形
+    expect(RDR).toContain('★BJ481 补差掩膜快照布');
+    expect(RDR).toContain('★BJ485（2026-10-03 定谳摘除登记）:本面唯一调用方=render 7c');    // 亮度藤退役锚
   });
 
-  it('wingTintScratch 四烘焙口（dyeScratch/addScratch/extra38/arkhalis）终内容上传', () => {
-    expect(RDR.match(/this\.uploadScratchBake\(sc, 'wingTint', 128\);/g)?.length).toBe(4);
+  it('wingTintScratch 登记面退役锁（★BJ515 债⑥锁改判:dyeScratch/addScratch 等 4 口窗外零消费）', () => {
+    // ★锁改判定谳（BJ485）:drawWingOverlay 唯一调用方=flushWingGlow（render 7e,
+    //  finishAccFrame 收口之后）恒 raw 主画布 2D——uploadScratchNow 窗关 no-op,
+    //  wingTintScratch 全仓无 shim 窗内 drawImage（:15052 翼案约束:本槽仅限窗外
+    //  消费者）=四烘焙口（dyeScratch/addScratch/extra38/arkhalis）登记全摘。
+    //  ⇒ 判别目标改判「退役态稳定+退役锚在位」：重挂 wingTint 登记 → 红。
+    expect(RDR.match(/uploadScratchBake\([^)]*'wingTint'/g) ?? []).toHaveLength(0);
+    expect((RDR.match(/★BJ485:登记摘除/g) ?? []).length).toBe(3);   // dyeScratch/addScratch/nebula 轨道支三锚
   });
 
   it('mountTintScratch 三烘焙口（猪鲨崽液染/61增亮/61辉层）终内容上传', () => {

@@ -308,7 +308,8 @@ const REGISTRY: Record<string, 'marked' | 'playerSide' | 'nonProjBucket'> = {
   VolcanoBlastProj: 'playerSide',    // 978 friendly :9262（BJ285 死亡段自砍面另立）
   MuramasaSlashProj: 'playerSide',   // 村正斩击弹 friendly
   BladetongueGlobProj: 'playerSide', // 血舌投射弹 friendly
-  TerraArc: 'playerSide',            // 984 friendly
+  // TerraArc 键已摘（★BJ526 2026-10-05）：死类整档摘除（TerraArc.ts 零生产 import,
+  //   现役 984=SwingArc 单源）→ 出普查域不入册;复活=普查未登记面红（防回潮件 2 加钉）。
   SolarFlare: 'playerSide',          // 614/636 族 friendly
   // ★清偿刀 V（2026-09-29）BJ345 磁球独立实体化（vanillaProjAlpha.ts 注）后补登记：
   //   254 磁球悬停球 SetDefaults 无 friendly 行（P.cs:3369-3377 aiStyle47/magic/
@@ -361,7 +362,7 @@ function censusVid0Capable(): Array<{ file: string; cls: string; raw: string; bo
 }
 
 describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', () => {
-  it('普查面（46 类）全员已定性——新 vid=0 弹类未登记即红', () => {
+  it('普查面（37 类）全员已定性——新 vid=0 弹类未登记即红', () => {
     const census = censusVid0Capable();
     // 类名唯一性守卫（重复名会破坏 REGISTRY 键位语义）
     const names = census.map((c) => c.cls);
@@ -372,7 +373,9 @@ describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', ()
     //   （12:48 并行 vid 穿线刀,RainbowProj.ts:39）+ MagnetSphereProj 入域,计数仍 46。
     // ★BJ486③（2026-10-03）八类补挂 readonly projId（857/973/972/933/974/976/321/611,
     //   弧子代弹掷率 rollVanillaHitCrit 类旗锚）→ 46−8=38。
-    expect(census.length).toBe(38);   // 定性面冻结（增删类须同步改本表与 Entity.ts 注）
+    // ★BJ526（2026-10-05）TerraArc 死档整档摘除（零生产 import,现役 984=SwingArc
+    //   单源）→ 38−1=37。
+    expect(census.length).toBe(37);   // 定性面冻结（增删类须同步改本表与 Entity.ts 注）
   });
 
   it('marked 类类面必带 noVanillaCut（字段=true 或相位 getter）;292 minion 借位已退役', () => {
@@ -392,8 +395,8 @@ describe('BJ294：结构锁 tripwire（vid=0 能力类定性全量登记）', ()
     expect(REGISTRY['YoyoShotProj']).toBeUndefined();
     expect(REGISTRY['MLDeathray']).toBe('marked');        // 抽样守卫：REGISTRY 活体非空壳
     expect(REGISTRY['FirstFractalSlash']).toBeUndefined(); // ★BJ486③ 补 projId=857 出域（YoyoShotProj 同款）
-    for (const departed of ['TrueNightsEdgeSlash', 'NightsEdgeFly', 'ZenithSword', 'LightsBaneSlash', 'GrassSlash', 'HorsemansPumpkin', 'SolarEruptionWhip']) {
-      expect(REGISTRY[departed]).toBeUndefined();         // 八键摘除防回潮（出普查域不入册）
+    for (const departed of ['TrueNightsEdgeSlash', 'NightsEdgeFly', 'ZenithSword', 'LightsBaneSlash', 'GrassSlash', 'HorsemansPumpkin', 'SolarEruptionWhip', 'TerraArc']) {
+      expect(REGISTRY[departed]).toBeUndefined();         // 九键摘除防回潮（出普查域不入册;TerraArc=★BJ526）
     }
   });
 });

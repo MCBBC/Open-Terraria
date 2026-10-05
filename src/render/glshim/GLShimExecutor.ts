@@ -302,6 +302,19 @@ export class GLShimExecutor {
    *  （缺省 false=no-op 门生效;置 true=恢复旧「全量 rawDrawImage+flush」链,
    *  探针 A/B 对拍用——scripts/_eol-ghost-census.mjs 消费）。 */
   static SRC_OOB_NOOP_OFF = false;
+  /** ★b2b-acc-degraded 清偿①逃生门（2026-10-05）：acc 态 measureText 走专用度量
+   *  ctx 直读支的回滚口（缺省 false=度量支生效;置 true=恢复旧「读值面→整帧
+   *  降级」链,探针 A/B 对拍面,P1B_REGION_OFF 同族）。 */
+  static RV_MEASURE_OFF = false;
+  /** ★b2b-acc-degraded 清偿③逃生门（2026-10-05）：acc 态 fillText/strokeText 走
+   *  rasterizeText 隔离栅格化支的回滚口（缺省 false=栅格化支生效;置 true=恢复
+   *  旧「落笔长尾→整帧降级」链）。 */
+  static TEXT_RASTER_OFF = false;
+  /** ★清偿③文本栅格化每窗帽（P0-B 高频保险:逐 op 隔离栅格化=每 op 一次上传,
+   *  只可承载低频落笔——每窗 fillText/strokeText 超 32 笔=疑似逐字形风暴,超帽
+   *  笔回退降级原链）。窗界=attach/attachAcc（=每帧）。 */
+  private static readonly TEXT_RASTER_CAP = 32;
+  private textRasterCount = 0;
   private host: ShimHost;
   private raw: CanvasRenderingContext2D | null = null;
   private glw: GLSpriteLayer | null = null;
@@ -333,6 +346,10 @@ export class GLShimExecutor {
    *  又不回放 → 默认字体+左对齐错位渲染（undefined 传播面同 gCO 族病根）。 */
   private fontV = '10px sans-serif';
   private alignV: CanvasTextAlign = 'left';
+  /** ★b2b-acc-degraded 清偿②（2026-10-05）:textBaseline 镜像（旧码未镜像=acc 态
+   *  set 静默丢失+降级后 bridge 不回放=潜在错位;且 rasterizeText 墨盒度量/重放
+   *  需要基线值。canvas 缺省 'alphabetic'。） */
+  private baselineV: CanvasTextBaseline = 'alphabetic';
   /** ★B2b acc 隔离栅格化所需状态镜像（strokeStyle/lineWidth/filter 任意值原样保） */
   private strokeStyleV: string | CanvasGradient | CanvasPattern = '#000';
   private lineWidthV = 1;
@@ -350,7 +367,7 @@ export class GLShimExecutor {
   private miterLimitV = 10;
   /** ctx.filter 镜像（非 'none' 的 drawImage=源级滤镜——quad 不表达,走隔离栅格化） */
   private filterV = 'none';
-  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string | CanvasGradient | CanvasPattern; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string; font: string; align: CanvasTextAlign }> = [];
+  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string | CanvasGradient | CanvasPattern; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string; font: string; align: CanvasTextAlign; baseline: CanvasTextBaseline }> = [];
   /** 队列（单序表+tier 标签——重放保原序,SO/ADD 分批 present） */
   private head: QuadRec | null = null;
   private tail: QuadRec | null = null;
@@ -420,6 +437,7 @@ export class GLShimExecutor {
     this.filterV = String(raw.filter ?? 'none');
     this.fontV = String(raw.font ?? '10px sans-serif');
     this.alignV = (raw.textAlign ?? 'left') as CanvasTextAlign;
+    this.baselineV = (raw.textBaseline ?? 'alphabetic') as CanvasTextBaseline;   // ★清偿②
     this.clipped = false;
     // ★四柱掉帧批:路径镜像清窗（attach=窗开,模拟 ctx 路径从空起——raw 残路径
     //  不可读,与既有镜像态同口径）;描边样式收尾镜像从 raw 起步
@@ -429,6 +447,7 @@ export class GLShimExecutor {
     this.lineJoinV = (raw.lineJoin ?? 'miter') as CanvasLineJoin;
     this.miterLimitV = typeof raw.miterLimit === 'number' ? raw.miterLimit : 10;
     this._degradeAttributed = false;   // ★定谳仪:新窗重归因
+    this.textRasterCount = 0;          // ★清偿③:每窗文本栅格化帽计数（=每帧窗）
     this.active = true;
     return this.wrap();
   }
@@ -444,7 +463,7 @@ export class GLShimExecutor {
     if (!this.glw || this.glw.unavailable) { this.accMode = false; return null; }
     this.m.a = 1; this.m.b = 0; this.m.c = 0; this.m.d = 1; this.m.e = 0; this.m.f = 0;
     this.ga = 1; this.gco = 'source-over'; this.smooth = false; this.filterV = 'none';
-    this.fontV = '10px sans-serif'; this.alignV = 'left';
+    this.fontV = '10px sans-serif'; this.alignV = 'left'; this.baselineV = 'alphabetic';
     this.clipped = false;
     // ★四柱掉帧批:acc 窗开=路径镜像/描边样式收尾同步复位（canvas 缺省值）
     this.pathOps.length = 0;
@@ -467,6 +486,7 @@ export class GLShimExecutor {
     this.bakedTexPending = null;   // ★R1b-7:acc 窗残 pending 同门（attach 孪生守卫,
     //  旧码只清 multi 不清单槽——上帧 bake 未消费的 pending 跨帧错配本帧首笔同 img 绘制）
     this._degradeAttributed = false;   // ★定谳仪:新窗重归因
+    this.textRasterCount = 0;          // ★清偿③:每窗文本栅格化帽计数（=每帧窗）
     this.active = true;
     return this.wrap();
   }
@@ -512,6 +532,7 @@ export class GLShimExecutor {
       raw.filter = this.filterV;
       raw.font = this.fontV;        // ★普查案②:文本态回放（降级帧 fillText 用对字体）
       raw.textAlign = this.alignV;
+      try { raw.textBaseline = this.baselineV; } catch { /* 非法值保 raw 现状 */ }   // ★清偿②
       raw.lineCap = this.lineCapV;   // ★四柱掉帧批:描边样式收尾回放（降级帧 stroke 同态）
       raw.lineJoin = this.lineJoinV;
       raw.miterLimit = this.miterLimitV;
@@ -745,6 +766,7 @@ export class GLShimExecutor {
             // ★普查案②:font/textAlign 读回镜像值（undefined 传播面封口）
             if (prop === 'font') return self.fontV;
             if (prop === 'textAlign') return self.alignV;
+            if (prop === 'textBaseline') return self.baselineV;   // ★清偿②同门
             if (DRAWING_TAIL.has(prop)) {
               const fn = (...args: unknown[]) => { self.accTailOp(prop, args); return undefined; };
               bound[prop] = fn;
@@ -786,11 +808,45 @@ export class GLShimExecutor {
                 return f.apply(sc, args);
               };
             }
-            if (prop === 'getImageData' || prop === 'measureText' || prop === 'isPointInPath'
+            if (prop === 'measureText') {
+              // ★b2b-acc-degraded 清偿①（2026-10-05）:measureText=纯读 op（不落笔
+              //  不改面）——专用度量 ctx（font/align/baseline=镜像值,2D 语义同构）
+              //  上出 TextMetrics,零降级。旧链=acc 窗一次 measureText 即整帧降级+
+              //  全幅 present+restack（悬停名板案 restackAfterBlitOff 已修呈现面、
+              //  降级本身保留=本债;定谳仪 inj:measureText 99.5% 降级复现面）。
+              //  度量 ctx 不可达（node 桩无 measureText/RV_MEASURE_OFF）→ 回退旧
+              //  降级链（宁降级不丢读值;降级安全网保留）。
+              const fn = (...args: unknown[]) => {
+                // ★门=accMode && !raw（纯净 acc 态才走度量支;bridge/已降级态保持
+                //  旧 raw 委托链零变化——最小面）
+                if (!GLShimExecutor.RV_MEASURE_OFF && self.accMode && !self.raw) {
+                  const mc = self.measureCtx();
+                  if (mc && typeof mc.measureText === 'function') {
+                    try {
+                      mc.font = self.fontV;
+                      mc.textAlign = self.alignV;
+                      mc.textBaseline = self.baselineV;
+                    } catch { /* 非法值保旧（2D set 语义） */ }
+                    try {
+                      return (mc as unknown as Record<string, (...a: unknown[]) => unknown>).measureText(...args);
+                    } catch { /* 度量异常回退降级链 */ }
+                  }
+                }
+                if (!self.raw && self.accMode) self.noteDegradeTrigger(`rv:${prop}`);
+                self.ensureBridged();
+                const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown> | null;
+                return r ? r[prop](...args) : undefined;
+              };
+              bound[prop] = fn;
+              return fn;
+            }
+            if (prop === 'getImageData' || prop === 'isPointInPath'
               || prop === 'clip' || prop === 'drawFocusIfNeeded') {
               // 读值面/真裁剪:acc 态无落笔/无读回语义,降级后委托（防御性）。
               // ★定谳仪:闭包缓存进 bound（读 live 态,跨 acc/bridge 两相安全——
               //  DRAWING_TAIL 双支同判例）;触发时 noteDegradeTrigger 归因。
+              // ★清偿批定谳（2026-10-05）:全树世界段零调用点（inj 自检=唯一复现面）
+              //  ——保留降级原链=必要保留项（真裁剪/真读回语义需实面,无可等价路径）。
               const fn = (...args: unknown[]) => {
                 if (!self.raw && self.accMode) self.noteDegradeTrigger(`rv:${prop}`);
                 self.ensureBridged();
@@ -849,6 +905,24 @@ export class GLShimExecutor {
     return this._styleCtx2d;
   }
 
+  /** ★b2b-acc-degraded 清偿①（2026-10-05）：文本度量 ctx——acc 态 measureText 在此
+   *  出 TextMetrics（font/align/baseline 由调用方镜像置位=与降级后 raw 同值同源,
+   *  量宽/墨盒逐数一致）。惰性 1×1 离屏单例（度量无落笔,零 GPU 面）;node 桩
+   *  无 measureText → null（调用方回退旧降级链）。与 styleCtx 分离（样式工厂
+   *  可能被 host 注入,度量态 font 置位不得串味）。 */
+  private _measureCv: HTMLCanvasElement | null = null;
+  private _measureCtx2d: CanvasRenderingContext2D | null = null;
+  private measureCtx(): CanvasRenderingContext2D | null {
+    if (!this._measureCtx2d) {
+      if (typeof document === 'undefined') return null;
+      this._measureCv = document.createElement('canvas');
+      this._measureCv.width = 1;
+      this._measureCv.height = 1;
+      this._measureCtx2d = this._measureCv.getContext('2d');
+    }
+    return this._measureCtx2d;
+  }
+
   /** acc 态未知算子收口：优先降级换桥再委托真 ctx（宁降级不丢内容）。
    *  ★R1-F3:降级前必须全 tier flush——残队逐条落 FBO 后由降级 present 带走;
    *  不 flush 即降级=残队跨档,bridge flush 只发 tier 0/1（tier-2/3 曾静默弃）。
@@ -870,6 +944,13 @@ export class GLShimExecutor {
     }
     if ((op === 'stroke' || op === 'fill') && !this.clipped && !this.pathOverflow) {
       const ok = this.rasterizePathOp(op, args);
+      if (ok) return;
+    }
+    // ★b2b-acc-degraded 清偿③（2026-10-05）：fillText/strokeText 隔离栅格化直支
+    //  （悬停名板案=旗布 hover 名牌 measureText+fillText 同点位,定谳仪 inj:fillText
+    //  100% 降级复现面;文本墨盒一次栅格化+单 quad 发射=P0-B 低频落笔律内）。
+    if ((op === 'fillText' || op === 'strokeText') && !this.clipped) {
+      const ok = this.rasterizeText(op, args);
       if (ok) return;
     }
     this.noteDegradeTrigger(`tail:${op}`);   // ★定谳仪:落笔长尾兜底=整帧降级源
@@ -987,6 +1068,107 @@ export class GLShimExecutor {
     return true;
   }
 
+  /** ★b2b-acc-degraded 清偿③（2026-10-05）：acc 态 fillText/strokeText 隔离栅格化
+   *  （B2b strokeRect/四柱 rasterizePathOp 判例同款）——文本墨盒一次栅格化进
+   *  整数对齐 scratch（镜像 CTM+文本态原值重放,整数设备平移下字形覆盖率逐位同）,
+   *  单 quad 发射=零整帧降级。旧行为=每次 fillText 走「落笔长尾→ensureBridged→
+   *  整帧降级+全幅 present+restack」（定谳仪 inj:fillText 100% 降级复现面;登记债
+   *  「悬停名板」族的降级本体）。失败（gco 改面/度量不可达/超帽/超大墨盒）返
+   *  false → 调用方降级原链（安全网保留,宁降级不丢文本）。
+   *  ★P0-B 律:逐 op 栅格化=每 op 一次 texImage2D,只承载低频落笔——TEXT_RASTER_CAP
+   *  超帽支=高频风暴保险（超帽笔走降级,旧行为全保）。 */
+  private rasterizeText(op: 'fillText' | 'strokeText', args: unknown[]): boolean {
+    if (GLShimExecutor.TEXT_RASTER_OFF) return false;
+    if (this.clipped || (this.gco !== 'source-over' && this.gco !== 'lighter')) return false;
+    if (this.textRasterCount >= GLShimExecutor.TEXT_RASTER_CAP) return false;   // 每窗帽
+    const text = typeof args[0] === 'string' ? args[0] : String(args[0] ?? '');
+    const x = args[1] as number, y = args[2] as number;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const hasMaxW = typeof args[3] === 'number' && Number.isFinite(args[3] as number) && (args[3] as number) >= 0;
+    // 墨盒度量（度量 ctx:font/align/baseline=镜像值——与真 ctx 同态,actualBoundingBox
+    //  相对 (x,y) 对齐点,与 align 无关;缺该档=宽度+字号保守回退）
+    const mc = this.measureCtx();
+    if (!mc || typeof mc.measureText !== 'function') return false;
+    try {
+      mc.font = this.fontV;
+      mc.textAlign = this.alignV;
+      mc.textBaseline = this.baselineV;
+    } catch { /* 非法值保旧 */ }
+    let m: TextMetrics;
+    try { m = mc.measureText(text); } catch { return false; }
+    const fontPx = Math.abs(parseFloat(this.fontV)) || 10;
+    const abL = (m as { actualBoundingBoxLeft?: number }).actualBoundingBoxLeft;
+    const abR = (m as { actualBoundingBoxRight?: number }).actualBoundingBoxRight;
+    const abA = (m as { actualBoundingBoxAscent?: number }).actualBoundingBoxAscent;
+    const abD = (m as { actualBoundingBoxDescent?: number }).actualBoundingBoxDescent;
+    let ux0: number, ux1: number;
+    if (typeof abR === 'number' && typeof abL === 'number') {
+      ux0 = x - abL; ux1 = x + abR;
+    } else {
+      const w = Math.max(0, m.width || 0);
+      if (this.alignV === 'center') { ux0 = x - w / 2; ux1 = x + w / 2; }
+      else if (this.alignV === 'right' || this.alignV === 'end') { ux0 = x - w; ux1 = x; }
+      else { ux0 = x; ux1 = x + w; }
+    }
+    const uy0 = y - (typeof abA === 'number' ? abA : fontPx) - fontPx * 0.25;   // 顶垫=基线档语义差保险
+    const uy1 = y + (typeof abD === 'number' ? abD : fontPx * 0.3) + fontPx * 0.25;
+    if (hasMaxW) {
+      // maxWidth 压缩:真墨盒 ⊆ 按对齐锚定的 maxWidth 盒——并集保守（只多不小）
+      const wm = args[3] as number;
+      if (this.alignV === 'center') { ux0 = Math.min(ux0, x - wm / 2); ux1 = Math.max(ux1, x + wm / 2); }
+      else if (this.alignV === 'right' || this.alignV === 'end') { ux0 = Math.min(ux0, x - wm); ux1 = Math.max(ux1, x); }
+      else { ux0 = Math.min(ux0, x); ux1 = Math.max(ux1, x + wm); }
+    }
+    // 设备 bbox（四角 CTM 变换;strokeText 加【斜接感知】描边外扩+AA 2px 边——
+    // 描边 ink 超出 fill actualBoundingBox 达 lw/2×miterLimit（canvas spec 斜接
+    // 钉尖）+Skia AA 羽化,半宽估计曾削去描边左裙边（bit-AB 636 列 d=142 定谳面）;
+    // 低频文本 bbox 大几列=无感,宁大勿削）
+    const { a, b, c, d, e, f } = this.m;
+    const xs = [a * ux0 + c * uy0 + e, a * ux1 + c * uy0 + e, a * ux0 + c * uy1 + e, a * ux1 + c * uy1 + e];
+    const ys = [b * ux0 + d * uy0 + f, b * ux1 + d * uy0 + f, b * ux0 + d * uy1 + f, b * ux1 + d * uy1 + f];
+    const ms = Math.max(Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d));
+    const pad = (op === 'strokeText'
+      ? (this.lineWidthV / 2) * Math.max(1, Math.min(this.miterLimitV, 10)) * ms
+      : 0) + 2;
+    const bx0 = Math.min(...xs) - pad, bx1 = Math.max(...xs) + pad;
+    const by0 = Math.min(...ys) - pad, by1 = Math.max(...ys) + pad;
+    const fx = Math.floor(bx0), fy = Math.floor(by0);
+    const sx = Math.ceil(bx1) - fx, sy = Math.ceil(by1) - fy;
+    if (!(sx > 0 && sy > 0) || sx > 4096 || sy > 4096) return false;
+    const sc = accScratch(sx, sy);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d', { willReadFrequently: true });
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx, sy);
+    // 整数设备平移 (−fx,−fy) 后同 CTM 同文本态重放——字形覆盖率与原位逐位同（B2b 判例）
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = this.ga;
+    sctx.font = this.fontV;
+    sctx.textAlign = this.alignV;
+    sctx.textBaseline = this.baselineV;
+    if (op === 'strokeText') {
+      sctx.strokeStyle = this.strokeStyleV;
+      sctx.lineWidth = this.lineWidthV;
+      sctx.lineCap = this.lineCapV;
+      sctx.lineJoin = this.lineJoinV;
+      sctx.miterLimit = this.miterLimitV;
+      if (hasMaxW) sctx.strokeText(text, x, y, args[3] as number);
+      else sctx.strokeText(text, x, y);
+    } else {
+      try { sctx.fillStyle = this.fillStyleV as string | CanvasGradient | CanvasPattern; } catch { return false; }
+      if (hasMaxW) sctx.fillText(text, x, y, args[3] as number);
+      else sctx.fillText(text, x, y);
+    }
+    this.textRasterCount++;
+    // 发射:scratch=动态源,UV=整幅,设备矩形 1:1;gco='lighter'→ADD,SO→tier 0
+    this.markDynamic(sc);
+    this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
+      1, 1, 1, false, false, false, true, null);
+    this.flush();   // 即发即弃（保序+防 scratch 覆写,rasterizePathOp 同款）
+    return true;
+  }
+
   /** 降级同步版：调 host.degradeAcc;成功=raw 可用（bridge 已回放镜像态）。 */
   private ensureBridgedNow(): boolean {
     if (this.raw) return true;
@@ -1037,6 +1219,8 @@ export class GLShimExecutor {
     // ★普查案②:font/textAlign 镜像（acc 态 set 只落镜像,降级后 bridge 回放）
     else if (prop === 'font' && typeof value === 'string') this.fontV = value;
     else if (prop === 'textAlign' && typeof value === 'string') this.alignV = value as CanvasTextAlign;
+    // ★清偿②:baseline 镜像（acc 态读回+降级回放+rasterizeText 重放单源）
+    else if (prop === 'textBaseline' && typeof value === 'string') this.baselineV = value as CanvasTextBaseline;
   }
 
   // ================= 变换（镜像+委托,fround 复刻 Skia f32 拼接） =================
@@ -1046,7 +1230,7 @@ export class GLShimExecutor {
       m: { ...this.m }, ga: this.ga, gco: this.gco, smooth: this.smooth,
       fill: this.fillStyleV, clip: this.clipped,
       stroke: this.strokeStyleV, lw: this.lineWidthV, filter: this.filterV,
-      font: this.fontV, align: this.alignV,
+      font: this.fontV, align: this.alignV, baseline: this.baselineV,
     });
     if (this.raw) this.raw.save();
   }
@@ -1057,7 +1241,7 @@ export class GLShimExecutor {
       this.m = s.m; this.ga = s.ga; this.gco = s.gco; this.smooth = s.smooth;
       this.fillStyleV = s.fill; this.clipped = s.clip;
       this.strokeStyleV = s.stroke; this.lineWidthV = s.lw; this.filterV = s.filter;
-      this.fontV = s.font; this.alignV = s.align;
+      this.fontV = s.font; this.alignV = s.align; this.baselineV = s.baseline;
     }
     if (this.raw) this.raw.restore();
   }

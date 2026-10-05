@@ -1609,23 +1609,43 @@ export class SunDanceBeam extends Entity {
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rotation);
     // dest=origin 抵消式:origin=(.03·iw, 半帧行高) → 左偏 .03·destW、上偏 .5·destH
+    // ★修3（2026-10-05）原版两遍预乘习语（Main.cs:28702-28740 逐式核对）:
+    //  XNA SpriteBatch 预乘管线（content 贴图预乘+AlphaBlend(One,InvSrcAlpha)）下
+    //  Color 链 `×num25`/`A/=2`（:28721/:28729）= RGB 贡献 premult×C.rgb【不折 A】、
+    //  dst 衰减 ×(1−texA·C.A)。旧 4×source-over 把 A 折进 ga → draw1/2/3 的 rgb
+    //  贡献减半（弹幕偏暗根因之一;活机隔离画布实测对原版语义模型 mean|Δ|=18.1,
+    //  旧模型自检 1.8=仪表正确）。canvas 等价两遍式 = destination-out×(A/255) 削底
+    //  + lighter×(rgb 标量) 加亮（projGhostTrail cut+add 判例/drawEmpress twoPass
+    //  同构）。四画角色（cut=dst 削底系数,add=rgb 加亮系数）:
+    //  ① value4 行2 ×vector·1.2（:28727）——A/2 → cut=num25/2、rgb 全量 → add=num25
+    //  ② value5 行2 ×vector·1.1（:28733）——同上
+    //  ③ color5×0.5 行1（:28737）——XNA 标量四通道同乘 → cut=add=num25/2
+    //  ④ color5×lerpV 行2（:28739）——同乘 → cut=add=num25×lerpV
+    //  边界登记（既有近似延续）:Lerp(c,White,.1) 白项本仓折进 tint×ga（原版白项
+    //  不随 num25 缩,±10%@num25=.5）;A 面 Lerp→White 的 +25.5 未建模（原版
+    //  A=(255·num25·.9+25.5)/2 vs 本仓 num25/2,中包络 ±10%）。
     type Pass = {
-      tint: HTMLCanvasElement | null; band: 0 | 1; mul: number; alpha: number;
+      tint: HTMLCanvasElement | null; band: 0 | 1; mul: number; cutA: number; addA: number;
     };
-    const passes: Pass[] = [                           // :28727/:28733/:28737/:28739
-      { tint: t4, band: 1, mul: 1.2, alpha: num25 * 0.5 },          // value4 ×vector*1.2
-      { tint: tv5, band: 1, mul: 1.1, alpha: num25 * 0.5 },         // value5 ×vector*1.1
-      { tint: t5, band: 0, mul: 1, alpha: num25 * 0.5 },            // color5·0.5 行1
-      { tint: t5, band: 1, mul: 1, alpha: num25 * lerpV },          // color5·lerpV 行2
+    const passes: Pass[] = [
+      { tint: t4, band: 1, mul: 1.2, cutA: num25 * 0.5, addA: num25 },          // value4 ×vector*1.2
+      { tint: tv5, band: 1, mul: 1.1, cutA: num25 * 0.5, addA: num25 },         // value5 ×vector*1.1
+      { tint: t5, band: 0, mul: 1, cutA: num25 * 0.5, addA: num25 * 0.5 },      // color5·0.5 行1
+      { tint: t5, band: 1, mul: 1, cutA: num25 * lerpV, addA: num25 * lerpV },  // color5·lerpV 行2
     ];
     for (const p of passes) {
-      if (!p.tint || p.alpha <= 0) continue;
+      if (!p.tint || p.addA <= 0) continue;
       const dw = iw * this.scaleV * p.mul;
       const dh = bandH * sqY * this.scaleV * p.mul;
-      ctx.globalAlpha = Math.min(1, p.alpha);
-      ctx.drawImage(p.tint,
-        0, p.band * bandH, iw, bandH,
-        -0.03 * dw, -dh / 2, dw, dh);
+      const dx = -0.03 * dw, dy = -dh / 2;
+      if (p.cutA > 0.004) {                       // 削底（C.A 面;A=0 无衰减=原版同相）
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = Math.min(1, p.cutA);
+        ctx.drawImage(img, 0, p.band * bandH, iw, bandH, dx, dy, dw, dh);
+      }
+      ctx.globalCompositeOperation = 'lighter';   // 加亮（C.rgb 面,全量不折 A）
+      ctx.globalAlpha = Math.min(1, p.addA);
+      ctx.drawImage(p.tint, 0, p.band * bandH, iw, bandH, dx, dy, dw, dh);
     }
     ctx.restore();
   }

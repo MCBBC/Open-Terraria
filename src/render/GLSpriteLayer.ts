@@ -449,6 +449,35 @@ export interface CloudFx {
   vertColor: readonly [number, number, number, number];
 }
 
+/** ★30fps 刀1 texFromRegion 区域键归一（2026-10-05;闪屏案 2026-09-30 修自注
+ *  「键归一是上游刀」的兑现;纯函数=tests/gl-texregion-keynorm 锁 + 活机
+ *  scripts/_erkey-census.mjs /_erkey-semab.mjs 对拍仪共用口径）。
+ *  【病灶】er: 键坐标尾段含调用方原始小数（水面波相位条带/遮蔽比例切分等
+ *  分数源矩形）→ 同一逻辑区域每帧一个新键 = 每帧 miss+scratch 重绘+
+ *  texImage2D 上传+evictLRU 插入（LRU 满容时=逐帧换页级联,EoL 战 trace
+ *  慢帧 clearRect@texFromRegion 3.55ms/帧定谳面）。
+ *  【归一】裁剪窗整数化:锚=floor(起点)、端=ceil(终点)——「分数矩形 ⊆ 整数窗」
+ *  的最小覆盖超集（邻接子四边形拼回父矩形零漏;sh∈(0,1) 带恰映射单行
+ *  floor(sy),与闪屏案判例「亚像素源=采样首行,1px 纹理同语义」逐位同窗;
+ *  活机 A/B:真水贴图表面带 (0,0,34,0.52)/(0.48) 刀前刀后逐字节 0 差）。
+ *  键与窗同源:er: 族键坐标尾段（最后一个 ':' 之后）按窗重写,id/epoch 段
+ *  逐字保留（bumpTexEpoch 换键重传语义不变;无 epoch 段的三段式 er: 键同
+ *  兼容）。【scope=er: 族】其它命名空间（shineCell:<内容指纹> 等）尾段非
+ *  坐标,重写会摧毁指纹语义（同画布异内容键坍缩=内容永久冻结）——键原样
+ *  保留,窗照常整数化（其调用坐标本恒整数,行为零变化）。
+ *  @returns {key,sx,sy,sw,sh} 归一后的层键与裁剪窗（整数调用逐位恒等）。 */
+export function texRegionNormalize(
+  key: string, sx: number, sy: number, sw: number, sh: number,
+): { key: string; sx: number; sy: number; sw: number; sh: number } {
+  const isx = Math.floor(sx), isy = Math.floor(sy);
+  const rsw = Math.max(1, Math.ceil(sx + sw) - isx);
+  const rsh = Math.max(1, Math.ceil(sy + sh) - isy);
+  if (isx === sx && isy === sy && rsw === sw && rsh === sh) return { key, sx, sy, sw, sh };
+  if (!key.startsWith('er:')) return { key, sx: isx, sy: isy, sw: rsw, sh: rsh };
+  const ci = key.lastIndexOf(':');
+  return { key: `${key.slice(0, ci + 1)}${isx},${isy},${rsw},${rsh}`, sx: isx, sy: isy, sw: rsw, sh: rsh };
+}
+
 export class GLSpriteLayer {
   /** GPU 账本命名(glfx/menubg…)——所有方构造后赋值;同名实例共享账页。
    *  ★C10a 管线后端模式=构造期取 pipe.statName（GLStats 记账随上下文归属走管线账页） */
@@ -1036,24 +1065,26 @@ export class GLSpriteLayer {
   texFromRegion(key: string, img: TexImageSource, sx: number, sy: number, sw: number, sh: number): TexEntry | null {
     if (this.unavailable || !this.gl) return null;
     if (sw <= 0 || sh <= 0) return null;
-    const hit = this.texs.get(key);
-    if (hit) { hit.stamp = ++this.stamp; return hit; }
     // ★闪屏根因修复（2026-09-30）：亚像素区域（水面波纹相位使表面条带源高 sh∈(0,1)
     //  px——腐化群系水池锁定复现）此前 canvas.height=0.52 → IDL 无符号长整型截断
     //  为 0 → texFromImage !h 守卫 null → resolveTex null → accFail('tex') →
     //  整帧降级=闪屏本体（波相位进 (0,1) 带期间每帧唯一键+每帧失败,ledger 实锤
     //  273/273 全为本型）。修=区域钳 ≥1 整数像素（2D drawImage 亚像素源=采样首行,
-    //  1px 纹理同语义,视觉零差）;键含原始小数=每帧唯一 miss 照旧（34×1 纹理
-    //  ~136B,LRU 压力可忽略）——键归一是上游刀,不属本修。
-    const rsw = Math.max(1, Math.round(sw));
-    const rsh = Math.max(1, Math.round(sh));
+    //  1px 纹理同语义,视觉零差）。
+    // ★30fps 刀1 键归一（2026-10-05,该修自注「键归一是上游刀」的兑现）：
+    //  归一进 texRegionNormalize（模块级纯函数,tests/gl-texregion-keynorm 锁）——
+    //  键含原始小数=每帧唯一 miss+每帧唯一纹理（上传+evictLRU 插入→LRU 满容时
+    //  逐帧换页级联）从此整类消除。整数调用（sprite 帧面 99.9%+）逐位零改动。
+    const n = texRegionNormalize(key, sx, sy, sw, sh);
+    const hit = this.texs.get(n.key);
+    if (hit) { hit.stamp = ++this.stamp; return hit; }
     if (!this.regScratch) this.regScratch = document.createElement('canvas');
     const sc = this.regScratch;
-    if (sc.width !== rsw || sc.height !== rsh) { sc.width = rsw; sc.height = rsh; }
+    if (sc.width !== n.sw || sc.height !== n.sh) { sc.width = n.sw; sc.height = n.sh; }
     const scx = this.regScratchCtx ??= sc.getContext('2d', { willReadFrequently: true })!;
-    scx.clearRect(0, 0, rsw, rsh);
-    scx.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, rsw, rsh);
-    return this.texFromImage(key, sc, false, true);
+    scx.clearRect(0, 0, n.sw, n.sh);
+    scx.drawImage(img as CanvasImageSource, n.sx, n.sy, n.sw, n.sh, 0, 0, n.sw, n.sh);
+    return this.texFromImage(n.key, sc, false, true);
   }
   private regScratch: HTMLCanvasElement | null = null;
   private regScratchCtx: CanvasRenderingContext2D | null = null;

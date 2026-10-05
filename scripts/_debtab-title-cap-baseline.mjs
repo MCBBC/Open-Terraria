@@ -3,7 +3,7 @@
 // 每档重装干净插桩（orig 存全局,wrapper 每档重建——上一版 sticky patch bug 修复）。
 import { launchBrowser, openPage, waitForBridge } from '../tools/probe/lib/index.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const browser = await launchBrowser({});
+const browser = await launchBrowser({ extraArgs: ["--disable-frame-rate-limit", "--disable-gpu-vsync"] });
 const page = await openPage(browser, {});
 await page.goto(`${ORIGIN}/?t=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
 if (!(await waitForBridge(page, { timeout: 240000 }))) { console.log('bridge FAIL'); process.exit(1); }

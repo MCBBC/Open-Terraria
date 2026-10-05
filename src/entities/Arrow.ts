@@ -298,6 +298,42 @@ export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElemen
   return c;
 }
 
+/** ★EoL2 修5：932 彩虹乘色烘焙（GetFairyQueenWeaponsColor hsl 真值染色;
+ *  multiply+destination-in 两步染形,bossAI_lategame tintBake 同构本地副本——
+ *  entities 域无共享助手,Portal/FakeFish 本地烘焙先例同款）。键按 RGB 步进 8
+ *  量化防漂移刷缓存;半载图(width 0)拒烘不缓存。 */
+const fqwTintCache = new Map<string, HTMLCanvasElement>();
+function fqwTintBake(
+  src: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
+  rgb: readonly [number, number, number],
+): HTMLCanvasElement | null {
+  const w = (src as HTMLImageElement).width ?? (src as ImageBitmap).width;
+  const h = (src as HTMLImageElement).height ?? (src as ImageBitmap).height;
+  if (!w || !h || typeof document === 'undefined') return null;
+  const q = (v: number) => Math.round(v) & ~7;
+  const key = `${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
+  const hit = fqwTintCache.get(key);
+  if (hit) return hit;
+  if (fqwTintCache.size > 64) {
+    const k0 = fqwTintCache.keys().next().value;
+    if (k0 !== undefined) fqwTintCache.delete(k0);
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(src as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'multiply';             // RGB 乘目标色
+  cx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  cx.fillRect(0, 0, w, h);
+  cx.globalCompositeOperation = 'destination-in';       // 轮廓还原
+  cx.drawImage(src as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'source-over';
+  fqwTintCache.set(key, c);
+  return c;
+}
+
 /** R4-32：全白帧缓存（GetAlpha `Color.White*Opacity`,Projectile.cs:80604-80613——
  *  PhoenixQuivered/SeraphNecklaced 箭体纯白绘制）。key = `projId|frame`（-1=整图） */
 const whiteSpriteCache = new Map<string, HTMLCanvasElement>();
@@ -3102,6 +3138,63 @@ export class Arrow extends Entity {
       ctx.globalAlpha = 1;
       return;
     }
+    // 932 月总矢独占（★EoL2 修5,2026-10-05;DrawProj_FairyQueenRangedItemShot
+    // Main.cs:36528-36553,alpha/rotation 生命周期=AI_181 :43979-43991,见 subStepAI
+    // 932 支）：白核 White×Opacity(A/2) + 彩虹尾迹 6 步（GetFairyQueenWeaponsColor(0)
+    // ——GetColor 内部已 ×Opacity,P.cs:22057,调用侧再 ×opacity → Opacity² 档;
+    // A=0 纯加法 = 'lighter' 直画精确承载）+ 轨道晕 4 点（color(0.5)×opacity,
+    // A/2 → source-over g=Opacity²×0.5——straight 画布 A 档直承载,919 轨道环同款
+    // 近似档）;num = Lerp(.7,1,GTLV(0,5,ai0≡age))（:36537）;rotation =
+    // velocity.ToRotation()（无 +π/2、无 spriteDirection 镜像 :36550-36552）;
+    // hue=empressHue 通道（发射端 ai3 注入债,缺省 0=(0+.5)%1 青蓝档,同 subStepAI 注）。
+    // 全层自发光不读格光——格光抬亮见 SELF_LUMINOUS_PROJS[932]（暗处白核/彩虹恒亮）。
+    if (this.projId === 932) {
+      const img932 = projSprite(932);
+      if (img932 && img932.width > 0) {
+        const gl932 = (from: number, to: number, t: number): number => {
+          if (from < to) { if (t < from) return 0; if (t > to) return 1; }
+          else { if (t < to) return 1; if (t > from) return 0; }
+          return (t - from) / (to - from);
+        };                                                // Utils.GetLerpValue 1:1（Utils.cs:283）
+        const opacity = Math.max(0, Math.min(1, 1 - this.alpha / 255));   // P.Opacity
+        const num932 = 0.7 + 0.3 * gl932(0, 5, this.age);                 // :36537
+        const spd932 = gl932(0, 1, Math.hypot(this.vx, this.vy));         // :36540 尾长门
+        const ang932 = Math.atan2(this.vy, this.vx);                      // AI_181 rotation
+        const tinted932 = fqwTintBake(img932, empressHslRgb(((this.empressHue ?? 0) + 0.5) % 1));
+        const iw932 = img932.width, ih932 = img932.height;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        const put932 = (dx: number, dy: number, g: number,
+          source: CanvasImageSource, comp: GlobalCompositeOperation) => {
+          ctx.save();
+          ctx.globalCompositeOperation = comp;
+          ctx.globalAlpha = Math.max(0, Math.min(1, g));
+          ctx.translate(dx, dy);
+          ctx.rotate(ang932);
+          ctx.drawImage(source, -iw932 * num932 / 2, -ih932 * num932 / 2,
+            iw932 * num932, ih932 * num932);
+          ctx.restore();
+        };
+        if (tinted932) {
+          for (let k = 0; k < 6; k++) {                     // num2 = 0..5/6（:36541-36544）
+            const n2 = k / 6;
+            put932(this.cx + Math.cos(ang932) * -120 * n2 * spd932,
+              this.cy + Math.sin(ang932) * -120 * n2 * spd932,
+              opacity * opacity * (1 - n2), tinted932, 'lighter');
+          }
+          for (let k = 0; k < 4; k++) {                     // num3 = 0..0.75（:36545-36548）
+            const a = k * 0.25 * Math.PI * 2 + ang932;
+            put932(this.cx + Math.cos(a) * 4 * num932,
+              this.cy + Math.sin(a) * 4 * num932,
+              opacity * opacity * 0.5, tinted932, 'source-over');
+          }
+        }
+        put932(this.cx, this.cy, opacity * 0.5, img932, 'source-over');   // 本体 A/2（:36537/:36552）
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+      return;
+    }
     // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
     // 食人鱼姿态由 AI 侧维护（pRot/pFlip）：咬住时 velocity 清零（:26126-26129），
@@ -5234,6 +5327,37 @@ export class Arrow extends Entity {
         for (let m = 0; m < 2; m++) {
           const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 0, null, 1.2, true);
           if (d) { d.vx *= 0.3; if (Math.random() < 0.5) d.fadeIn = 1.4; }
+        }
+      }
+    }
+    // ---- 932 月总矢 AI_181（★EoL2 修5,2026-10-05;Projectile.cs:43979-43991）：
+    //      ai[0]++ → alpha = (int)Lerp(255,0,GTLV(0,10,ai0))（10t 渐显——SetDefaults
+    //      α=0 :8571 台账 PROJ_ALPHA0[932]=0 被首拍覆写 255 起步）;rotation=
+    //      velocity.ToRotation()（draw 侧 932 独占支同锚,通用 +π/2 缺省不适用）;
+    //      尘 267 1/6 拍（NewDustPerfect+fadeIn1/noGravity/α100/noLightEmittance/
+    //      scale×1.5,color=GetFairyQueenWeaponsColor(1,NextFloat×0.4) :43984-43990
+    //      =hsl((ai1+.5)%1,1,.5)×Opacity 再 Lerp(White,w)）。ai[0] ≡ age（EU=1 每子步
+    //      恰一增,SELF_LUMINOUS_PROJS 811 whiteK811(age) 判例同款）;hue=empressHue
+    //      通道（发射点 ai3=miscCounterNormalized×12%1,Player.cs:48391-48396——发射
+    //      端 Game.ts 域未接=登记债,缺省 0 → (0+.5)%1=青蓝档）
+    if (this.projId === 932) {
+      const t181 = Math.min(1, Math.max(0, this.age / 10));
+      this.alpha = Math.max(0, Math.floor(255 - 255 * t181));
+      if (Math.random() < 1 / 6) {
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267, 0, 0, 100, null, 1, false, true);
+        if (d) {
+          d.fadeIn = 1;
+          d.noGravity = true;
+          d.noLightEmittance = true;
+          d.scale *= 1.5;
+          const [hr, hg, hb] = empressHslRgb((this.empressHue + 0.5) % 1);
+          const wk = Math.random() * 0.4;                    // Lerp(c,White,NextFloat×0.4)
+          const op = 1 - this.alpha / 255;                   // GetColor 内部 ×Opacity
+          d.color = {
+            r: Math.round((hr * op) + (255 - hr * op) * wk),
+            g: Math.round((hg * op) + (255 - hg * op) * wk),
+            b: Math.round((hb * op) + (255 - hb * op) * wk), a: 255,
+          };
         }
       }
     }

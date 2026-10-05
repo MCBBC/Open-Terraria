@@ -225,14 +225,14 @@ describe('③ 黄蜂 373 射击冷却随机计数器（1457 :66963-66978）', ()
   });
 });
 
-describe('④ 俾格米掷矛 Y 抛物线预瞄（AI_026 :62713-62720）', () => {
-  it('水平 780px 目标：Δy 均值显著 <0（预瞄偏置 ≈-|Δx|×0.05×0.099×…≈-3.9,无预瞄 ≈0）', () => {
-    const e = mkEnemy(1, 60 * 16 + 780, 90 * 16);
+describe('④ 俾格米掷矛 Y 抛物线预瞄（AI_026 :62708-62716）', () => {
+  it('水平 400px 目标（≤num151=450 开火阈,BJ516④）：Δy 均值显著 <0（预瞄偏置 ≈-|Δx|×0.1×0.0495≈-2,无预瞄 ≈0）', () => {
+    const e = mkEnemy(1, 60 * 16 + 400, 90 * 16);
     const { hooks, player, added } = makeHooks([e]);
     const m = mkMinion(191, player, player.cx, e.cy - 8);
     const ys: number[] = [];
     for (let k = 0; k < 1000; k++) {
-      e.cx = m.cx + 780; e.x = e.cx - e.w / 2; e.cy = 90 * 16; e.y = e.cy - e.h / 2;  // 钉回 780px
+      e.cx = m.cx + 400; e.x = e.cx - e.w / 2; e.cy = 90 * 16; e.y = e.cy - e.h / 2;  // 钉回 400px
       (m as unknown as { shootCd: number }).shootCd = 0;                              // 每拍可出手
       m.fixedUpdate(1, hooks);
       const shot = added[added.length - 1];
@@ -241,8 +241,8 @@ describe('④ 俾格米掷矛 Y 抛物线预瞄（AI_026 :62713-62720）', () =>
       }
     }
     expect(ys.length).toBeGreaterThan(900);
-    // num155 = |Δx|×0.1×Next(0,100)×0.001 ∈ [0,7.7]、Δy 均值 ≈-3.9（jitter ±20 均值 0）
-    // → 弹速 11 归一后 vy 均值 ≈-3.9×11/780 ≈ -0.055（无预瞄 ≈0 ±0.005）
+    // num155 = |Δx|×0.1×Next(0,100)×0.001 ∈ [0,3.96]、Δy 均值 ≈-1.98（jitter ±20 均值 0）
+    // → 弹速 11 归一后 vy 均值 ≈-1.98×11/400 ≈ -0.054（无预瞄 ≈0 ±0.005）
     const mean = ys.reduce((s, v) => s + v, 0) / ys.length;
     expect(mean).toBeLessThan(-0.03);
     for (const a of added) {                             // num158=11/|v| 归一（:62721-62724）

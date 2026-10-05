@@ -10,6 +10,10 @@
 //    2026-08-23 订正：390-392 蜘蛛有赋值（共享 :63316-63323 `type != 313` + flag7
 //    专属 :65162 spriteDirection=-direction）→ 已移出 MINION_NO_FLIP（见
 //    weapon-minion-ai.test.ts 蜘蛛镜像断言）
+//    ★BJ517⑤（2026-10-05）再订正：266/191-194 同有共享赋值（1457 :63319-63329
+//    `if (type != 313)` 全族 sd=−direction + 266 地面 flag27 朝玩家 :65481-65487
+//    + 返程速度规则 :61628-61638）→ 已移出 MINION_NO_FLIP,绘制翻转走
+//    a026SpriteDir（facing=direction 保持）——「零赋值」判据系 2026-08-19 误读
 // ④ 963 阿比盖尔特判 ×-1（:62992）贴图朝右——常规 facing=sign(目标方向) 不变
 import { describe, expect, it } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
@@ -171,13 +175,15 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     }
   });
 
-  it('AI_026 族 266 宝宝史莱姆：恒不翻转（原版零 spriteDirection 赋值）', () => {
+  it('AI_026 族 266 宝宝史莱姆：右行翻转（★BJ517⑤ 翻案——1457 :63319-63329 共享赋值 sd=−direction,旧「零赋值」判据不成立,与蜘蛛 2026-08-23 同谳）', () => {
     const { hooks, player } = makeHooks([mkEnemy(1, 60 * 16 + 200, 90 * 16 - 16)]);
     const m = mkMinion(266, true, player);
     for (let i = 0; i < 30; i++) m.fixedUpdate(1, hooks);   // 走向右侧敌
-    expect(m.facing).toBe(1);                  // facing 值随移动方向（内部逻辑用）
+    expect(m.facing).toBe(1);                  // facing=direction（AI 侧,:12437 探针不反）
+    expect((m as unknown as { a026SpriteDir: number }).a026SpriteDir).toBe(-1);   // sd=−direction
     const rec = drawAndRecord(m);
-    expect(rec.scale).toHaveLength(0);          // 渲染恒不翻（MINION_NO_FLIP）
+    expect(rec.scale).toHaveLength(1);          // 右行（direction=1）→ sd=-1 → 翻转
+    expect(rec.scale[0]).toEqual([-1, 1]);
   });
 
   it('963 阿比盖尔：贴图朝右特判（:62992 ×-1）——常规朝向不受左贴图表影响', () => {

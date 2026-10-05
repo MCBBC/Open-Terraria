@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import { findBannerAnchorY, validateSavedHome, lastRoomCheckFail, queryRoom, dedupeHomes } from '../src/world/Housing';
+import { findBannerAnchorY, houseBannerLightRow, validateSavedHome, lastRoomCheckFail, queryRoom, dedupeHomes } from '../src/world/Housing';
 
 const S = TILE_BY_KEY['stone'];
 const PLAT = (() => { for (const d of TILE_DEFS) if (d?.vanilla?.sheet === 19) return TILE_DEFS.indexOf(d); return -1; })();
@@ -152,5 +152,29 @@ describe('dedupeHomes 共室双认领清理', () => {
     const r = dedupeHomes(st, [owner, pet]);
     expect(r.dropped).toHaveLength(0);
     expect(r.kept.map((k) => k.key).sort()).toEqual(['merchant', 'town_cat']);
+  });
+});
+
+// ================= ★2026-10-05 白背景定谳批:旗布光照取样行锁 =================
+// 原版 DrawNPCHousesInWorld(Main.cs:41467-41469):自 homeTileY-1 向上 while 找到
+// 实心天花板行后 **num3++** 才调 Lighting.GetColor(homeTileX, num3)——取色行 =
+// 实心行【下一行空气】(旗布附着行),不是实心行本身。曾取样实心行 → 染色偏暗一档;
+// 且染色门带 sum>0 半门 → 纯黑时跳过染色(旗布全黑中反常全亮=「夜间白背景」
+// 家族风险面;本体=acc-shim multiply 旧路径实心色块盖旗,09-24/09-25 B2b+普查已修)。
+describe('旗布光照取样行(Main.cs:41467-41469 num3++ 语义)', () => {
+  it('实心锚行 258 → 取色行 = 259(天花板下第一行空气,非实心行)', () => {
+    expect(houseBannerLightRow(258)).toBe(259);
+  });
+  it('与 findBannerAnchorY 复合:锚行+1 恒为取色行(平台锚同式)', () => {
+    const st = new TileStore(80, 80);
+    const put = (x: number, y: number, t = TILE_BY_KEY['stone']) => {
+      const i = st.idx(x, y); st.type[i] = t; st.flags[i] = 1;
+    };
+    // 石顶 32 / 木墙 30 列;home 站格 37
+    for (let x = 25; x <= 35; x++) put(x, 32);
+    for (let y = 33; y <= 38; y++) { put(24, y); put(36, y); }
+    const anchor = findBannerAnchorY(st, 30, 37);
+    expect(anchor).toBe(32);
+    expect(houseBannerLightRow(anchor!)).toBe(33);   // 空气行(原版 num3)
   });
 });

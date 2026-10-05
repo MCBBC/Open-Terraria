@@ -146,12 +146,16 @@ describe('④ 召唤入口分支（Game.ts case summon）', () => {
     expect(seg).toContain('spawned.vx');                     // 初速 = 朝鼠标 × shootSpeed
     expect(seg).toContain('cw.shootSpeed');
   });
-  it('召唤入口后置冷却：6149→30（:48945）/ 6164→45（:50115 case 6164）', () => {
-    expect(GAME_TS).toContain('if (cw.shoot === 1113) spawned?.armSpawnCooldown(30)');
+  it('召唤入口后置冷却：6149→localAI[0] 槽 30（:48944,★BJ522 载体归真）/ 6164→ai[0] 槽 45（:50115-50116 case 6164）', () => {
+    expect(GAME_TS).toContain('if (cw.shoot === 1113) spawned?.armLingerCooldown(30)');
     expect(GAME_TS).toContain('if (cw.shoot === 1119) spawned?.armSpawnCooldown(45)');
     const m = mk(1119);
     m.armSpawnCooldown(45);
     expect((m as unknown as { shootCd: number }).shootCd).toBe(45);
+    const f = mk(1113);
+    f.armLingerCooldown(30);
+    expect((f as unknown as { a026L0: number }).a026L0, '1113 召唤臂落 a026L0 槽（shootCd 不污染）').toBe(30);
+    expect((f as unknown as { shootCd: number }).shootCd).toBe(0);
   });
   it('6149/1113 喷火通道同型配对（:43105/:43679 normalFoxparks 门）', () => {
     expect(GAME_TS).toContain('fVid === 5664 && m.projId === 1094');
@@ -374,7 +378,12 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16);
     const { hooks, added } = makeHooks([e]);
     const m = new MinionProj(e.cx - 150, e.cy - 40, 1113, 40, 3, false, 0, false, () => player);
-    m.fixedUpdate(1, hooks);
+    // ★BJ516④：flag22 门（:62584-62586）——alpha=255（SetDefaults :10387）淡入期
+    //  不索敌（本仓 alphaFade 255/15t ≈ 17t）→ 循环驱动出弹（旧单拍直射=无门形）
+    for (let k = 0; k < 40 && !added.some((x) => x instanceof Arrow); k++) {
+      (m as unknown as { shootCd: number }).shootCd = 0;
+      m.fixedUpdate(1, hooks);
+    }
     const shot = added.find((x) => x instanceof Arrow) as Arrow | undefined;
     expect(shot).toBeDefined();
     expect(shot!.projId).toBe(1097);
@@ -397,8 +406,17 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16);
     const { hooks, added } = makeHooks([e]);
     const m = new MinionProj(e.cx - 150, e.cy - 40, 1094, 20, 3, false, 0, false, () => player);
+    // ★BJ517④（2026-10-05）：1094 补淡入档（SetDefaults alpha=255 :10221 + :59197
+    // DoPalAppearEffect）——淡入窗（17t,alpha>0）flag22=false 压制出手（:62584-62586
+    // 与 1113 同相）。旧「t1 即射」与原版淡入门相悖,改淡尽后出手
     m.fixedUpdate(1, hooks);
-    const shot = added.find((x) => x instanceof Arrow) as Arrow | undefined;
+    expect(m.alphaFade, '淡入首拍 240（原版 1094 有出场淡入）').toBe(240);
+    expect(added.find((x) => x instanceof Arrow), '淡入窗内 flag22 门压制（:62584-62586）').toBeUndefined();
+    let shot: Arrow | undefined;
+    for (let k = 1; k <= 25 && !shot; k++) {
+      m.fixedUpdate(1, hooks);
+      shot = added.find((x) => x instanceof Arrow) as Arrow | undefined;
+    }
     expect(shot?.projId).toBe(1097);
     const f1094 = (shot as unknown as { onFireHit?: { buff: number; minT: number; maxT: number } }).onFireHit;
     expect(f1094).toEqual({ buff: 24, minT: 300, maxT: 599 });   // OnFire 档 Next(300,600)
@@ -422,7 +440,11 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16);
     const { hooks, added } = makeHooks([e]);
     const m = new MinionProj(e.cx - 150, e.cy - 40, 1113, 40, 3, false, 0, false, () => player);
-    m.fixedUpdate(1, hooks);
+    // ★BJ516④：flag22 alpha 淡入门（:62584-62586）→ 循环驱动出弹
+    for (let k = 0; k < 40 && !added.some((x) => x instanceof Arrow); k++) {
+      (m as unknown as { shootCd: number }).shootCd = 0;
+      m.fixedUpdate(1, hooks);
+    }
     const shot = added.find((x) => x instanceof Arrow) as Arrow;
     // 弹飞行至敌盒内（150px / 11 速 ≈ 14t）
     for (let k = 0; k < 30 && e.hp >= 100000; k++) shot.fixedUpdate(1, hooks);
@@ -461,37 +483,58 @@ describe('⑦ 新弹命中盒真值（Projectile.cs SetDefaults width/height）'
 });
 
 // ---------------------------------------------------------------------------
-// ⑧ 火绒狐攻击叫声称（TryUsingFoxsparksAbility Player.cs:43694-43712：channeling
-//    期 projectile.soundDelay<=-320 → 重置 -21 + PalFoxparksAttack（SoundID.cs:1092
-//    WithVolume 0.18）——MinionProj.foxSoundCd 镜像,AI_026 首段 --soundDelay :59119）
+// ⑧ 火绒狐攻击叫声称（★BJ523 重锚：播点=TryUsingFoxsparksAbility 体内
+//    Player.cs:43691-43694（soundDelay<=-320 → 置 -21 + PalFoxparksAttack,
+//    SoundID.cs:1092 WithVolume 0.18）,调用面=:43064 起手门开拍=「按下沿 ∪ 岩浆
+//    持住重臂环」——狐杖 autoReuse=true（Item.cs:44503/:47377）→ :53519 逐拍强制
+//    releaseUseItem + :53524 fast-path（itemAnimation==1→0）;稳态喷火期 AI 续期
+//    :60068 针 itemAnimation=2 → 门闭=静默。MinionProj.foxSoundCd 镜像,AI_026
+//    首段 --soundDelay :59119;消费位=Game 喷火通道 foxAttackSoundGate。
+//    旧形「foxChannel 电平→320/619 拍重触发」系自造相,已退役（BJ523））
 // ---------------------------------------------------------------------------
-describe('⑧ 火绒狐攻击叫声称门（foxSoundCd 镜像 ≤-320 触发/重置 -21）', () => {
-  it('按住 channeling：出场第 320 拍首响,重置后第 619 拍第二响,窗口内不重复', () => {
+describe('⑧ 火绒狐攻击叫声称门（BJ523 调用面归真：调用沿查门/稳态静默/门值节拍）', () => {
+  it('稳态 channeling 电平静默：700 拍零攻击叫声（旧形 320/619 拍重触发=自造相）', () => {
     const { hooks } = makeHooks();
     const m = mk(1094);
     (m as { foxChannel: boolean }).foxChannel = true;
     const wav: string[] = [];
     (hooks as unknown as { playSfxWav: (f: string) => void }).playSfxWav =
       (f: string) => { wav.push(f); };
-    const firedAt: number[] = [];          // 绝对拍号（镜像自 0 每 tick --）
-    for (let k = 1; k <= 700; k++) {
-      m.fixedUpdate(1, hooks);
-      if (wav.length !== firedAt.length) firedAt.push(k);
-    }
-    expect(wav.every((f) => f === 'pal_foxparks_attack')).toBe(true);
-    expect(firedAt).toEqual([320, 619]);   // -21 起再走 299 拍回 -320
+    for (let k = 1; k <= 700; k++) m.fixedUpdate(1, hooks);
+    expect(wav, '稳态喷火期 :43064 门被 AI 续期针闭（:60068）→ 零调用 → 零声').toEqual([]);
   });
-  it('非 channeling 期只递减不发声；1113 同门（Player.cs:43679 normalFoxparks 双型）', () => {
+  it('非 channeling 期只递减不发声、门值持续下探不被重置（1113 同镜像 :59119）', () => {
     const { hooks } = makeHooks();
     const m = mk(1113);
     const wav: string[] = [];
     (hooks as unknown as { playSfxWav: (f: string) => void }).playSfxWav =
       (f: string) => { wav.push(f); };
     for (let k = 0; k < 400; k++) m.fixedUpdate(1, hooks);
-    expect(wav).toEqual([]);       // 未按住 → 门永不消费（原版门在用物品 tick 内）
-    // 已过 -320 后再开通道 → 立即一响
-    (m as { foxChannel: boolean }).foxChannel = true;
-    m.fixedUpdate(1, hooks);
-    expect(wav.filter((f) => f === 'pal_foxparks_attack').length).toBe(1);
+    expect(wav).toEqual([]);       // 无调用沿 → 永不查门
+    expect((m as unknown as { foxSoundCd: number }).foxSoundCd, '400 拍纯递减（无重置臂）').toBe(-400);
+  });
+  it('foxAttackSoundGate 门行为：≤-320 开门+置 -21;>-320 闭门原值（PC:43691-43693）', () => {
+    const m = mk(1094);
+    const p = m as unknown as { foxSoundCd: number };
+    p.foxSoundCd = -400;
+    expect(m.foxAttackSoundGate(), '门开（:43691 soundDelay<=-320）').toBe(true);
+    expect(p.foxSoundCd, '重置 -21（:43693）').toBe(-21);
+    p.foxSoundCd = -100;
+    expect(m.foxAttackSoundGate(), '门闭').toBe(false);
+    expect(p.foxSoundCd, '闭门不重置').toBe(-100);
+  });
+  it('节奏：-21 起每拍递减,第 299 拍回 -320 重开（调用沿每拍查门同相 :43691）', () => {
+    const { hooks } = makeHooks();
+    const m = mk(1094);
+    const p = m as unknown as { foxSoundCd: number };
+    p.foxSoundCd = -21;                              // :43693 重置值
+    for (let k = 0; k < 298; k++) {
+      m.fixedUpdate(1, hooks);
+      expect(m.foxAttackSoundGate(), `第 ${k + 1} 拍仍闭`).toBe(false);
+    }
+    m.fixedUpdate(1, hooks);                          // 第 299 拍：-21-299=-320
+    expect(p.foxSoundCd).toBe(-320);
+    expect(m.foxAttackSoundGate(), '299 拍后门重开').toBe(true);
+    expect(p.foxSoundCd, '重开即重置 -21（回卷窗）').toBe(-21);
   });
 });

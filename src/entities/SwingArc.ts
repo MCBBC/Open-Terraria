@@ -532,9 +532,6 @@ export class SwingArc extends Entity {
   }
 }
 
-/** 泰拉刃 984 兼容别名（Game.ts 旧引用） */
-export const TerraArc = SwingArc;
-
 /** 真永夜刃飞斩 973（AI_191 :39241-39332 + DrawProj_TrueNightsEdge :27574）：
  *  锚定伸长：Center=MountedCenter − vel + vel×num6²×77（最多前伸 76px）；
  *  rotation += ai0×2π×(4+4×Opacity)/90 旋进；scale=Remap(t,ai1+2,ai1+65,1.12,1)×ai2；

@@ -10344,21 +10344,83 @@ export class Game implements GameHooks {
       const fVid = fDef ? (fDef.vid ?? -1) : -1;
       const channeling = (fVid === 5664 || fVid === 6149) && inp.mouseDown && !inp.uiBlocking && !this.player.dead
         && !inp.delayUseItem;   // ★R4-22 电平化：channel 臂同吃 :853-859 压制（controlUseItem 等价面）
+      let foxAttackSfxDone = false;   // ★BJ523：每调用拍至多一声（原版 TryUsingFoxsparksAbility 首狐 return 形 PC:43697）
+      let foxArmed = false;           // ★BJ525(a)：首狐 return 形承载位——一次调用只武装扫描序第一同型狐
       for (const e of this.entities.projectiles) {
         const m = e as MinionProj;
         if (!(m instanceof MinionProj) || m.dead) continue;
-        if (!((fVid === 5664 && m.projId === 1094) || (fVid === 6149 && m.projId === 1113))) continue;
-        if (channeling) {
-          const [fwx, fwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          const fdx = fwx - this.player.cx, fdy = fwy - this.player.cy;
-          const fl = Math.hypot(fdx, fdy) || 1;
-          m.foxChannel = true;
-          m.foxAimX = fdx / fl; m.foxAimY = fdy / fl;
-          m.x = this.player.cx - m.w / 2; m.y = this.player.cy - m.h / 2; // position=MountedCenter-Size/2(:56120)
+        if (!((fVid === 5664 && m.projId === 1094) || (fVid === 6149 && m.projId === 1113))) {
+          // ★BJ525(a) 连带（flag13 跨型熄火面）：非本型狐走释放面——原版环出口
+          //  flag13（Projectile.cs:60135）读 HeldItem 配对（5664↔1094/6149↔1113）,
+          //  持有切换后不符 → ai[0]=0 ≤4t 熄火;旧形 type-filter 直 continue =
+          //  被切离狐 level 永真 = 永续喷火（自造相）。
+          if (m.foxChannel) {
+            m.foxChannel = false;
+            if (m.foxFlameRan) { m.foxFlameRan = false; m.lockAfterFoxChannel(); }
+          }
+          continue;
+        }
+        // ★BJ525(a)（2026-10-05,BJ523 登记债 a 清偿）：多狐同型武装面归真——
+        //  TryUsingFoxsparksAbility（PC:43679-43697）for i 0..999 扫 Main.projectile
+        //  槽位序,首个 active+owner+同型狐中：ai[0]=1000+ai[1]/localAI[0]/[1] 三清
+        //  +channel+SetDummyItemTime(2)+叫声门查 →【return true】(:43697)=一次调用
+        //  至多武装一只;余狐 ai[0] 不触=永不入喷火环（弹侧 ai[0]>=1000 门 :60014
+        //  只认武装写入;flag13 :60135 只自持【已入环】者）。武装调用集=按下沿 ∪
+        //  岩浆持住重臂环（BJ523 已钉）∪ autoReuse 门重开拍（itemAnimation==0——
+        //  召唤动画尾/持狐死亡排空后自动再武装;本仓 level 点火同拍提前 ≤2t=登记
+        //  边界）。本仓扫描序=entities.projectiles 插入序（槽位序近似;原版低槽
+        //  复用可改写「第一」归属=登记边界）。首狐=武装面（W0 沿 foxAbilityPress
+        //  +叫声门查+level+钉位/useTime）;余狐=释放面（ai[0]=0 idle 形,照走
+        //  ai026TailGround 地面态 1097 普通弹=原版余狐行为面）。
+        const foxIsFirst = !foxArmed;
+        foxArmed = true;
+        if (channeling && foxIsFirst) {
+          // ★BJ522 W0（清面）：调用沿清 ai[1]/localAI[0] 两槽（foxAbilityPress=
+          //  PC:43686-43689 同拍三写中 ai[0]=1000 以外的两面）——稳态喷火期不重清
+          //  （★BJ523 勘误：门闭真因=AI 续期 SetDummyItemTime(2) :60068 针
+          //  itemAnimation=2 → :43064 itemAnimation==0 不成立;releaseUseItem 对
+          //  autoReuse 件被 ItemCheck_AutoReuseLogic :53519 逐拍强制 true（狐杖
+          //  autoReuse=true Item.cs:44503/:47377）,「:43160 按住恒假」系漏读）。
+          //  召唤拍不误清:本块先于 updateUse 执行,召唤拍弹尚不存在,次拍无沿）
+          //  ★BJ523 W0 调用面扩形：TryUsingFoxsparksAbility 完整调用集=按下沿 ∪
+          //  岩浆持住重臂环——岩浆拍 AI 杀 ai[0](:59174) → 续期停(:60068 不达) →
+          //  itemAnimation 2→1→fast-path 归零(:53524) → :43064 门重开 → 每拍重调
+          //  （重写 ai[0]=1000 循环相位+清两槽+叫声门查）⇒ 本仓折算 foxLavaHold
+          //  持住拍重调 foxAbilityPress（foxT 归位 → 出岩浆首拍即出弹=原版同相;
+          //  bj521③ t3 自动复燃面=原版语义维持,BJ522 债①「须重按」前提证伪）
+          const foxW0 = (inp.mouseDown && !this._prevMouseDown) || m.foxLavaHold;
+          if (foxW0) m.foxAbilityPress();
+          // ★BJ523：攻击叫声归真——播点=TryUsingFoxsparksAbility 体内（PC:43691-43694:
+          //  soundDelay<=-320 → 置 -21 + PalFoxparksAttack,声源 base.Center=玩家中心）
+          //  ⇒ 调用面同上行;稳态喷火期门闭=静默（旧形挂 AI foxChannel 电平=每 ~300t
+          //  重触发=自造相,已自 MinionProj AI 首段退役）
+          if (foxW0 && !foxAttackSfxDone && m.foxAttackSoundGate()) {
+            foxAttackSfxDone = true;
+            this.playSfxWav('pal_foxparks_attack', 0.18, this.player.cx, this.player.cy);   // :43694
+          }
+          m.foxChannel = true;   // =玩家侧重臂等价面（PC:43686 ai[0]=1000f）,岩浆拍照发=压制面玩家半侧
+          // ★BJ521②（BJ520② 备案债清偿）：岩浆拍不钉位/不刷瞄——原版 position 锚与
+          //  velocity 写都在喷火块 ai[0]>=1000 内（:60014-60051）,flag10 门（:59170-59174）
+          //  先于喷火块覆写 ai[0]=1 → 该拍弹体自由（ai[0]=1 归位态）。foxLavaHold 读相
+          //  =lavaWetAi 上拍快照,与本拍 AI 门同源同值。
+          //  ★BJ523：useTime 钉保持无条件（勿改岩浆/重臂条件门）——原版重召压制=
+          //  flag4（TryUsingFoxsparksAbility 真 → 跳过 ItemCheck_StartActualUse :43129）
+          //  ;本仓 updateUse 无该沿,压制面=useTime>0（autoReuse+mouseHeld+useTime===0
+          //  会重入召唤 case）——岩浆持住拍若放任 useTime 归零=召唤连发（自造相）。
+          //  W0 调用沿的 SetDummyItemTime(2)（:43690,无岩浆检查）由本钉同拍承载
+          if (!m.foxLavaHold) {
+            const [fwx, fwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            const fdx = fwx - this.player.cx, fdy = fwy - this.player.cy;
+            const fl = Math.hypot(fdx, fdy) || 1;
+            m.foxAimX = fdx / fl; m.foxAimY = fdy / fl;
+            m.x = this.player.cx - m.w / 2; m.y = this.player.cy - m.h / 2; // position=MountedCenter-Size/2(:56120)
+          }
           this.player.useTime = Math.max(this.player.useTime, 2); // SetDummyItemTime(2)
         } else if (m.foxChannel) {
           m.foxChannel = false;
-          m.lockAfterFoxChannel(); // localAI[0]=30 喷火后攻击锁（:56155）
+          // ★BJ521②：喷火后锁按原版只在喷火块入过时落（:60093 localAI[0]=30 在
+          //  喷火块循环尾）——纯岩浆通道块未入 → 无锁（lavaWet 拍 ai[1] 已被门清 0）
+          if (m.foxFlameRan) { m.foxFlameRan = false; m.lockAfterFoxChannel(); }
         }
       }
     }
@@ -15587,7 +15649,8 @@ export class Game implements GameHooks {
           // 985 泰拉刃光束（Player.cs:49443-49444 出生注入,★BJ206 重锚,旧注
           // :48316-48317 系 1456 代际）：初速=瞄准向×shootSpeed×5
           // （=60；985 不吃 meleeSpeed 缩放）、ai[0]=朝向±1、ai[1]=18（寿命 43t）、
-          // ai[2]=物品 scale（×词缀 size）；同时伴生 984 旋斩弧（见下 TerraArc）
+          // ai[2]=物品 scale（×词缀 size）；同时伴生 984 旋斩弧（见下 SwingArc(984),
+          // ★BJ526（2026-10-05）死类 TerraArc 整档摘除,现役单源=SwingArc SWING_STYLE[984]）
           const terra = cwMelee.shoot === 985;
           if (terra) {
             const [twx, twy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -15608,7 +15671,7 @@ export class Game implements GameHooks {
                 terra: { ai0: this.player.facing * this.player.gravDir, ai1: 18, ai2: (ps?.size ?? 1) } }),
               'projectiles');
             // 984 旋斩弧（同链首行 NewProjectile 984：方向×重力、itemAnimationMax、
-            // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）。
+            // 调整 scale——Player 相对锚定的挥砍视觉，984 弧随 985 同生同灭）。
             // ★1457 ai[1] = itemAnimationMax = (int)(useAnimation×meleeSpeed)
             //（Player.cs:49443 757 链实参；:4438-4446 SetItemAnimation(base,mult) +
             // :4455-4458 melee 档；attackSpeedMult=1/meleeSpeed 倒数——Player.ts:1709）
@@ -19218,10 +19281,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         } else {
           spawned = spawnMinion(cw.shoot);
         }
-        // 召唤入口后置射击冷却（Player.cs 直写弹字段）：
-        //  6149→1113 localAI[0]=30（:48945）/ 6164→1119 ai[0]=45（SpawnMinionOnCursor
-        //  case 6164 :50115）——本仓 shootCd 为 ai[0]/localAI[0] 射击槽等价
-        if (cw.shoot === 1113) spawned?.armSpawnCooldown(30);
+        // 召唤入口后置冷却（Player.cs 直写弹字段,★BJ522 载体归真分槽）：
+        //  6149→1113 localAI[0]=30（:48944）→ a026L0 槽（armLingerCooldown——
+        //  误写 shootCd 会错触攻击帧/制动/转向三 ai[1] 消费面）;6164→1119
+        //  ai[0]=45（SpawnMinionOnCursor case 6164 :50115-50116,AI_206 开火循环）
+        //  → shootCd 槽（armSpawnCooldown）
+        if (cw.shoot === 1113) spawned?.armLingerCooldown(30);
         if (cw.shoot === 1119) spawned?.armSpawnCooldown(45);
         // 伴生 buff 初始授予（ItemCheck_ApplyPetBuffs Player.cs:52226-52440：1157/1309/
         // 1802/2364/2365 逐条 if + :52400-52420 switch 2535/2551/2584/2621/2749/3249/

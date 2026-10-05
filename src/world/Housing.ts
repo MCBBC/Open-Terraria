@@ -142,6 +142,15 @@ export function findBannerAnchorY(st: TileStore, x: number, fromY: number): numb
   return null;
 }
 
+/** 房旗【光照取样行】(★2026-10-05 白背景定谳批;Main.cs:41467-41469):
+ *  DrawNPCHousesInWorld 自 homeTileY-1 向上 while 找到实心天花板行后 **num3++**
+ *  才调 Lighting.GetColor(homeTileX, num3)——取色行 = 实心行【下一行空气】
+ *  (旗布附着/悬挂行,num11=num3*16 即旗布顶),不是实心行本身。
+ *  @param anchorY findBannerAnchorY 返回的实心锚行 */
+export function houseBannerLightRow(anchorY: number): number {
+  return anchorY + 1;
+}
+
 /** 读档 home 幽灵校验(副因B):home 格必须落在某真实房间的 tiles 集内。
  *  legacy 存档(站位直扫穿层时代)可能带房间外坐标,读档时逐 NPC 过滤。 */
 export function validateSavedHome(st: TileStore, x: number, y: number): boolean {

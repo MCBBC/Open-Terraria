@@ -335,12 +335,19 @@ describe('⑥ 乌鸦 317 归位门 500/1400（1456 :27422-27426）', () => {
 });
 
 describe('⑦ Foxparks 1094 翻转（1456 :56111-56120）', () => {
-  it('跟随态按 velocity.X 翻转（移出 MINION_NO_FLIP）：左行 facing=-1 → 渲染镜像', () => {
-    const e = mkEnemy(1, 60 * 16 - 300, 90 * 16 - 40);
+  it('跟随态按 velocity.X 翻转（移出 MINION_NO_FLIP）：左行 facing=-1 → 渲染镜像（★BJ516④：敌 500>num151=450 走近域）', () => {
+    const e = mkEnemy(1, 60 * 16 - 500, 90 * 16 - 40);
     const { hooks, player } = makeHooks([e]);
     const m = mkMinion(1094, player);
     m.fixedUpdate(1, hooks);
-    expect(m.vx).toBeLessThan(0);
+    // ★BJ517④（2026-10-05）：1094 补淡入档（:10221 alpha=255 + :59197 DoPalAppearEffect）
+    // ——淡入窗内 flag22=false 压制转向/出手（:62584-62586 与 1113 同相），
+    // 步行/翻转改在「淡尽当拍」（alpha 归 0 拍=intent 首拍）断言（原版出场同相）
+    expect(m.alphaFade).toBe(240);
+    expect(m.vx, '淡入窗内 num150/num151 转向面被 flag22 门跳过 → vx 不动').toBe(0);
+    for (let k = 1; k <= 17 && m.alphaFade > 0; k++) m.fixedUpdate(1, hooks);
+    expect(m.alphaFade, '17t 淡尽（255−15×17）').toBe(0);
+    expect(m.vx, '淡尽当拍 intent 生效：|Δx|=500>num151=450 → flag2 走近 vx=−0.4').toBeCloseTo(-0.4, 6);
     expect(m.facing).toBe(-1);
     expect(drawAndRecord(m).scale).toEqual([[-1, 1]]);   // 旧 NO_FLIP 恒不翻
   });

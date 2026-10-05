@@ -10,7 +10,8 @@
 //                               ——小数档=冻结载体单位约定,非原版形态,且旧注入漏基 4）
 //     ⑤ SolutionProj:279       69/70/621 圣/邪/血水 ——A（无三类旗=零掷,远程率注入=幻影）
 //     ⑥ TerraArc:73            984 泰拉刃弧     ——C 死类（现役=SwingArc 泛化并入,
-//                               BJ486③ 已 rollVanillaHitCrit 落位;本文件零生产 import）
+//                               BJ486③ 已 rollVanillaHitCrit 落位;零生产 import;
+//                               ★BJ526 整档摘除,§6 锁改「文件缺席+别名摘除」形态）
 //     ⑦ MagicProj:179          kind4 兜底圆点   ——C 死面（唯一活构造=net 傀儡重建,
 //                               netPuppet 早退命中环不可达;phantom 登记 hurt crit 参硬编码 false）
 //     ⑧ SparkleGuitarProj:124  856 星璇之音     ——A（magic 动态掷+stellarTuneCritChance
@@ -25,7 +26,7 @@
 //    §6a/§7a 死面结构锁（死类复活接线/死面被误收编必红;现役面单源钉）;
 //    §0 十四 id 类旗定谳表+flagless 零 RNG（误加类旗必红）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'path';
 import { World } from '../src/world/World';
@@ -386,11 +387,13 @@ describe('BJ494-§5：圣/邪/血水幻影远程率摘除→单源零掷+TimerCr
   });
 });
 
-// ============ §6 TerraArc:73（984）——C 死类结构锁（现役面=SwingArc 单源） ============
+// ============ §6 TerraArc（984）——C 死类结构锁（★BJ526 整档摘除;复活必红） ============
 
-describe('BJ494-§6：TerraArc 死类定谳（现役 984=SwingArc 已 rollVanillaHitCrit 落位）', () => {
-  it('6a 结构锁：死类零生产 import+判词标记在位+现役面单源钉（复活接线必红）', () => {
-    // ① 全 src 树零 `from '…/TerraArc'`（死类零引用;误 import 复活必红）
+describe('BJ494-§6：TerraArc 死类定谳（现役 984=SwingArc 已 rollVanillaHitCrit 落位;★BJ526 整档摘除）', () => {
+  it('6a 结构锁：整档缺席+零 import+别名摘除+现役面单源钉（复活接线必红）', () => {
+    // ① 整档缺席（★BJ526 摘除;文件重现=复活必红）
+    expect(existsSync(join(GAME, 'src', 'entities', 'TerraArc.ts'))).toBe(false);
+    // ② 全 src 树零 `from '…/TerraArc'`（旧名 import 复辟必红）
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((f) => {
         const p = join(dir, f);
@@ -398,17 +401,13 @@ describe('BJ494-§6：TerraArc 死类定谳（现役 984=SwingArc 已 rollVanill
       });
     const srcDir = join(GAME, 'src');
     for (const p of walk(srcDir)) {
-      if (p.endsWith(join('entities', 'TerraArc.ts'))) continue;
       const s = readFileSync(p, 'utf8');
       expect(s.match(/from '[^']*\/TerraArc'/), `${p} 误 import 死类`).toBeNull();
     }
-    // ② 判词标记+死代码原样保留（零行为改动钉）
-    const dead = SRC('entities/TerraArc.ts');
-    expect(dead).toContain('BJ494');
-    expect(dead).toContain('Math.random() < this.critChance');    // 死面残留原样（判词在位=勿收编）
-    // ③ 现役面单源：TerraArc 名字=SwingArc 别名;SWING_STYLE 984 在册;984 掷面=单源三站
+    // ③ 现役面单源：别名已摘（`export const TerraArc` 复辟必红）;SWING_STYLE 984 在册;
+    //    984 掷面=单源三站（BJ486③ rollVanillaHitCrit 口径,复活掷率必须重走此口径）
     const live = SRC('entities/SwingArc.ts');
-    expect(live).toContain('export const TerraArc = SwingArc');
+    expect(live).not.toContain('export const TerraArc');
     expect(live).toContain('984: {');
     expect(live.match(/const crit = this\.critChance > 0 && rollVanillaHitCrit\(this\.projId, game\);/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
   });

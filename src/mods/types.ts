@@ -41,6 +41,8 @@ export interface ModItemContent {
   combat?: {
     damage?: number; knockBack?: number; useTime?: number; useAnimation?: number;
     shoot?: number | string; shootSpeed?: number; mana?: number;
+    /** ★P7 红蓝补(M2):弹药流消费面——引擎 rangedAmmoWeapon 读 combat.useAmmo */
+    useAmmo?: number;
     melee?: boolean; ranged?: boolean; magic?: boolean; summon?: boolean;
     noMelee?: boolean; autoReuse?: boolean; useTurn?: boolean; crit?: number;
   };
@@ -54,7 +56,7 @@ export interface ModItemContent {
     autoReuse?: number; useTime?: number; useTurn?: number;
   };
   /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交 */
-  stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1 };
+  stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1; life?: number };
   /** P4:旅程研究所需献祭数(缺省=不可研究) */
   research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
@@ -107,8 +109,17 @@ export interface ModNpcContent {
   DeathSound?: string | null;
   /** 价值(金币掷,原版 npcvalue 语义) */
   value?: number;
-  /** 简单掉落表(chance 0-1;缺省 1) */
-  drops?: Array<{ item: string; min?: number; max?: number; chance?: number }>;
+  /** 简单掉落表(chance 0-1;缺省 1)。item:本 mod 物品键 或 原版 vid 数字串(P7) */
+  drops?: Array<{ item: string | number; min?: number; max?: number; chance?: number }>;
+  /** ★P8:Boss 位(血条/Boss 槽/掉落锚定;三消费点 VANILLA_BOSS_IDS.has 直亮) */
+  boss?: boolean;
+  /** ★P8:SetDefaults alpha 语义(出生透明度/渐显;透传 VanillaNpc.alpha) */
+  alpha?: number;
+  /** ★P8:behindTiles(钻地族被前景方块遮挡;透传 VanillaNpc.behindTiles) */
+  behindTiles?: boolean;
+  /** ★P8:蠕虫链声明(头条目专用;body×bodyCount + tail,原版 87/454 spec 同构)。
+   *  声明后自然生成/F6/召唤三条建链路自动建链(mod 头 800+) */
+  worm?: { body: string; tail: string; bodyCount: number };
   /** 贴图(textures/ 相对路径;NPC_<id>.png 语义) */
   texture?: string;
   /** 头贴(textures/ 相对路径;24×24,NPC_Head_{idx} 语义——住房UI行/地图图标/旗帜)。

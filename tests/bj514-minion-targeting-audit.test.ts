@@ -160,12 +160,14 @@ describe('① 逐型索敌语义表（原版形态 × 本仓形态钉值,变异�
   });
 
   it('AI_062 射手族 373/375/407/423/613：集火门距 6000（:66327 num12=2000+:66374 ×3）', () => {
-    const fn = slice('const tgt = ai62', 'if (this.projId >= 626');
+    // ★BJ515：链头锚改指现役（AI_026 尾族插队短路,ai62 支降为链中段;6000 门面零变化）
+    const fn = slice('const tgt = ai026Tail', 'if (this.projId >= 626');
     expect(fn).toContain('6000');
   });
 
   it('aiStyle 66 三型 533/387/388：集火门距 6000+CanHitLine 盒（:30316 num539=num526×3）——旧 900/双子通用档红', () => {
-    const fn = slice('const tgt = ai62', 'if (this.projId >= 626');
+    // ★BJ515：链头锚同上改指现役
+    const fn = slice('const tgt = ai026Tail', 'if (this.projId >= 626');
     expect(fn).toContain('this.projId === 533 || this.projId === 387 || this.projId === 388');
     expect(fn).toContain("'line', 'self', 6000");
   });
@@ -179,9 +181,14 @@ describe('① 逐型索敌语义表（原版形态 × 本仓形态钉值,变异�
     expect(fn).not.toContain('minionTargetId');
     expect(fn).not.toContain('anyTagged');
     expect(fn).toContain('bestD = 400');               // :46022 FindTargetWithinRange(400f)
-    const face = slice("if (this.projId === 917 || this.projId === 1036)", "if (!this.ground) {");
+    // ★BJ516①：1036 重路由 webStep（AI_067 flag7）——917 支单挂 ai177FindTarget,
+    // 1036 支走 webStep（respectOwnerTarget=false :50520-50523）
+    const face = slice("if (this.projId === 917) {", "if (!this.ground) {");
     expect(face).toContain('this.ai177FindTarget(game)');
     expect(face).not.toContain('nearestEnemy(');
+    const web = slice('private webStep(', '\n  }\n');
+    expect(web).toContain('respectOwnerTarget: false');
+    expect(web).not.toContain('nearestEnemy(');
   });
 
   it('无 tag 扫描式索敌（债①）：nearestEnemy 桶态/anyTagged 调用/WhipTag.anyTagged 全站清零', () => {
@@ -260,7 +267,9 @@ describe('③ AI_177 面判别（:45918 无集火/无 tag 桶）', () => {
     f.cx = g.cx - 350; f.x = f.cx - 8; f.cy = g.cy; f.y = f.cy - 12;
     player.minionTargetId = f.id;                      // 旧集火支（350<900）会追 F
     g.fixedUpdate(1, hooks);
-    expect(g.vx).toBe(5);                              // 追 W(+100) = 速度 +5;旧：-5 → 红
+    // ★BJ516③：Lerp(velocity, dir×min(18,dist), 0.1)（:46042）——静止首拍 vx=1.8
+    //  （旧直写 5 速退役;dist=100>18 → num3=18）
+    expect(g.vx).toBeCloseTo(1.8, 9);                  // 旧集火支：追 F(-350) = 负速 → 红
   });
 
   it('tag 桶摘除：近野生敌 100 右 / tag 敌 150 左 → 追近敌（旧 `tagged ?? best` 退化为红）', () => {
@@ -273,7 +282,8 @@ describe('③ AI_177 面判别（:45918 无集火/无 tag 桶）', () => {
     w.cx = g.cx + 100; w.x = w.cx - 8; w.cy = g.cy; w.y = w.cy - 12;
     t.cx = g.cx - 150; t.x = t.cx - 8; t.cy = g.cy; t.y = t.cy - 12;
     g.fixedUpdate(1, hooks);
-    expect(g.vx).toBe(5);                              // 旧桶：追 T(-150) = -5 → 红
+    // ★BJ516③：Lerp 曲线（:46042）——静止首拍 vx=1.8;旧桶：追 T(-150) = 负速 → 红
+    expect(g.vx).toBeCloseTo(1.8, 9);
   });
 });
 

@@ -1166,9 +1166,14 @@ describe('★R1b-5 样式工厂不降级 + lighter 渐变 fillRect ADD 档', () 
   it('结构锁:样式工厂支必须先于读值面支（清单重并=雷雨逐帧降级复演）', () => {
     const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
     const factory = EXEC.indexOf("if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createPattern')");
-    const readside = EXEC.indexOf("if (prop === 'getImageData' || prop === 'measureText'");
+    // ★b2b-acc-degraded 清偿①（2026-10-05）锚随盘刷新:读值面拆两支——measureText
+    //  前置（清偿①度量直读支,零降级）→ getImageData/isPointInPath/clip 残组;
+    //  不变量保持:工厂支先于两读值支（工厂命中不得吃读值面兜底）。
+    const measure = EXEC.indexOf("if (prop === 'measureText') {");
+    const readside = EXEC.indexOf("if (prop === 'getImageData' || prop === 'isPointInPath'");
     expect(factory).toBeGreaterThan(-1);
-    expect(readside).toBeGreaterThan(factory);
+    expect(measure).toBeGreaterThan(factory);
+    expect(readside).toBeGreaterThan(measure);
     // lighter 渐变 fillRect 可达栅格化 ADD 档（回退=orb 帧降级复演）
     expect(EXEC).toContain("if (this.clipped || (this.gco !== 'source-over' && this.gco !== 'lighter')) return false;");
     expect(EXEC).toContain("this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,");

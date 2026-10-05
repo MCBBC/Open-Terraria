@@ -219,7 +219,9 @@ describe('R3-F8 隔离栅格化 scratch willReadFrequently', () => {
   it('四栅格化消费点 getContext 全带 WRF（纯上传中转,SHM 后备不占 IOSurface）', () => {
     // ★四柱掉帧批（2026-09-25）+1：rasterizePathOp（acc 态 stroke/fill 录制路径
     //   隔离栅格化,drawForceFieldBubble 尾环消费面）同款 WRF 口径入列
-    expect((SHIM.match(/const sctx = sc\.getContext\('2d', \{ willReadFrequently: true \}\);/g) ?? []).length).toBe(4);
+    //   ★b2b-acc-degraded 清偿③（2026-10-05）+1：rasterizeText（fillText/strokeText
+    //   隔离栅格化）第五消费点同口径入列
+    expect((SHIM.match(/const sctx = sc\.getContext\('2d', \{ willReadFrequently: true \}\);/g) ?? []).length).toBe(5);
     expect(SHIM).not.toContain("const sctx = sc.getContext('2d');");
   });
 });

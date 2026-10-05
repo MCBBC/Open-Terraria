@@ -5,12 +5,13 @@ import type { RegistrationPlan } from './types';
 import { registerModItem, ITEM_DEFS } from '../data/items';
 import { registerModTile, TILE_BY_KEY, type TileDef } from '../data/tiles';
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
+import { registerModBoss, registerModWormChain } from '../entities/Enemy';
 import { appendModSummonEntries, type SummonEntry } from '../core/DebugSummonPanel';
 import { registerModRecipes, type VanillaRecipe } from '../data/vanillaRecipes';
 import { registerModItemFunc } from '../data/vanillaItemFunc';
 import { registerModCombat } from '../data/vanillaItemCombat';
 import { registerModStats } from '../data/vanillaItemStats';
-import { registerModNpcRules } from '../drops/NpcDrops';
+import { registerModNpcRules, registerModNpcValue } from '../drops/NpcDrops';
 import { registerModProj } from './hooks';
 import { registerModShopStock } from './shops';
 import { registerModResearch } from '../stats/Research';
@@ -74,15 +75,26 @@ function buildVanillaRecipe(plan: RegistrationPlan, modId: string, spec: Registr
 
 /** mod 简单掉落表 → 原版 Rule 形(chance→denom 取整;noLuck=确定性掷)。
  *  ★P4 红蓝修正：chance≤0/非有限 → 跳过该条(旧实现 1/0=Infinity→int 恒 0→必掉,
- *  0% 变 100%) */
+ *  0% 变 100%)。
+ *  ★P7 红蓝修正(M4 高优②):item 支持原版 vid 数字串(如 "Gel"→漏,但 "23"=Gel vid
+ *  经 validatePlanReferences 的 itemOf 数字支直通)——旧实现只查 mod 分配表,
+ *  掉 Gel/镜片等原版素材全被略。 */
 function buildDropRules(plan: RegistrationPlan, modId: string, spec: RegistrationPlan['npcSpecs'][number]['spec']): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   for (const d of spec.drops ?? []) {
     const chance = d.chance ?? 1;
     if (!(chance > 0) || !Number.isFinite(chance)) continue;   // 0%/坏值=不掉(声明语义)
-    const full = d.item.startsWith('mod_') ? d.item : `mod_${modId}_${d.item}`;
-    const id = plan.allocation.items.get(full);
-    if (id === undefined) throw new Error(`[mod-drops] mod ${modId} NPC ${spec.key} 掉落引用未注册物品: ${d.item}`);
+    let id: number;
+    if (typeof d.item === 'number') {
+      id = d.item;                                             // 原版 vid 直通
+    } else if (/^\d+$/.test(d.item)) {
+      id = Number(d.item);                                     // 原版 vid 直通
+    } else {
+      const full = d.item.startsWith('mod_') ? d.item : `mod_${modId}_${d.item}`;
+      const mapped = plan.allocation.items.get(full);
+      if (mapped === undefined) throw new Error(`[mod-drops] mod ${modId} NPC ${spec.key} 掉落引用未注册物品: ${d.item}`);
+      id = mapped;
+    }
     out.push({
       k: 'common', item: id, min: d.min ?? 1, max: d.max ?? 1,
       num: 1, denom: Math.max(1, Math.round(1 / Math.min(1, chance))), noLuck: true,
@@ -166,7 +178,23 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       DeathSound: spec.DeathSound ?? 'NPC_Killed_1',
       scale: spec.scale ?? 1,
       critter: spec.critter,
+      alpha: spec.alpha,
+      behindTiles: spec.behindTiles,
     } satisfies VanillaNpc);
+    // ★P8:Boss 位直亮(VANILLA_BOSS_IDS.add——血条/Boss 槽/掉落锚定三消费点)
+    if (spec.boss) registerModBoss(n.npcId);
+    // ★P8:蠕虫链声明(头条目;body×bodyCount + tail → segIds,键→id 经分配表)
+    if (spec.worm) {
+      const bodyId = plan.allocation.npcs.get(`mod_${n.modId}_${spec.worm.body}`);
+      const tailId = plan.allocation.npcs.get(`mod_${n.modId}_${spec.worm.tail}`);
+      if (bodyId === undefined || tailId === undefined) {
+        throw new Error(`[mod-worm] mod ${n.modId} NPC ${spec.key} 蠕虫链引用未注册段: ${spec.worm.body}/${spec.worm.tail}`);
+      }
+      const segIds: number[] = [];
+      for (let i = 0; i < spec.worm.bodyCount; i++) segIds.push(bodyId);
+      segIds.push(tailId);
+      registerModWormChain(n.npcId, segIds);
+    }
     // ★mod 城镇NPC实体化补链(2026-10-04 GLM娘实验批):townNPC 声明 → 运行时挂
     //   TOWN_NPC_IDS/extra/头贴索引三链(TownNPC ctor/入驻链/住房UI 全按此解析)。
     //   extra 缺省 = max(2, frames−16)(人形族 14 帧行走区惯例;GLM娘 26→10)
@@ -181,6 +209,9 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     });
     const dropRules = buildDropRules(plan, n.modId, spec);
     if (dropRules.length > 0) registerModNpcRules(n.npcId, dropRules);
+    // ★P7 红蓝修正(M4 高优①):mod NPC 金币价值接线(旧实现 ModNpcContent.value
+    //  声明被丢弃→mod 怪恒 0 金)
+    if (spec.value !== undefined) registerModNpcValue(n.npcId, spec.value);
     npcs++;
   }
   // F6 召唤面板追加面(mod 条目;零 mod 时 SUMMON_ENTRIES 零扰动)
@@ -215,7 +246,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       }
       registerModCombat(it.stableId, combat as unknown as Parameters<typeof registerModCombat>[1]);
     }
-    if (spec.stats) registerModStats(it.stableId, { def: spec.stats.def, s: spec.stats.s, acc: spec.stats.acc, van: spec.stats.van }, it.stableId);
+    if (spec.stats) registerModStats(it.stableId, { def: spec.stats.def, s: spec.stats.s, acc: spec.stats.acc, van: spec.stats.van, life: spec.stats.life }, it.stableId);
     items++;
   }
   // shops(P3):物品 id 解析(本 mod 键/原版 vid);price 缺省=物品 value(原版
