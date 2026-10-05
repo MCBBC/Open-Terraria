@@ -327,8 +327,26 @@ for (const f of csFiles) {
     if (drops.length) { raw.drops = drops; stats.lootDrops += drops.length; stats.lootNpcs++; }
   }
 
+  // ★B6 Texture 重定向解析(11 件无 pngByBase 命中的 npc):
+  //  源 override string Texture → "CalamityMod/..."(树内路径)或 "Terraria/Images/NPC_<vid>"(原版表)
+  let texOverride = null;
+  {
+    const tm = text.match(/override string Texture\s*=>\s*"([^"]+)"/);
+    if (tm) {
+      const tp = tm[1];
+      if (tp.startsWith('Terraria/Images/NPC_')) {
+        const vid = Number(tp.split('NPC_')[1]);
+        const src = join(ROOT, 'game', 'public', 'sprites', 'vanilla', `NPC_${vid}.png`);
+        if (existsSync(src)) texOverride = src;
+      } else {
+        const cand = join(SRC, tp.replace(/^CalamityMod\//, '') + '.png');
+        if (existsSync(cand)) texOverride = cand;
+      }
+    }
+  }
+  const png = pngByBase.get(cls) ?? texOverride;
   // 贴图(魔数校验)
-  const png = pngByBase.get(cls);
+
   let hasPng = false;
   if (png) {
     const head = readFileSync(png).subarray(0, 4);

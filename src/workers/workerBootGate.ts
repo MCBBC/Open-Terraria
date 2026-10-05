@@ -61,12 +61,11 @@ export function assertWorkerBootGate(entry: string): void {
           + '曾在本 worker 内执行(boot 残留)。功能 worker 禁止 boot 游戏,查 import 链。',
         );
       }
-      if (typeof (globalThis as unknown as { requestAnimationFrame?: unknown }).requestAnimationFrame === 'function') {
-        // 环境漂移提示（未来 worker-rAF 提案落地会让 boot 循环在 worker 内可行;
-        // 此时不 throw——本闸的拦截面在图闸与 tripwire,防误伤合法演化）
-        console.warn(`[worker-governance] ${entry}: worker 域出现 requestAnimationFrame——`
-          + 'boot 循环在 worker 内已可行,boot 游戏防线需升级(查 tests/worker-graph-isolation.test.ts)');
-      }
+      // ★rAF 探针退役（2026-10-05,用户实报菜单/世界期告警刷屏）:Chrome 153 已原生
+      //   在 dedicated worker 提供 requestAnimationFrame——「未来 worker-rAF 提案」
+      //   落地,本探针恒真=每次 boot 刷屏。boot 防御本体=上方 __swRenderLog canary
+      //   （Game 代码残留实锤）+构建期图闸（tests/worker-graph-isolation.test.ts）,
+      //   两者均在位;rAF 缺席不再是防线组成（Chrome 153+ 永真）。
     } catch (err) {
       // fail-loud:控制台明文 + 重抛为 worker 未捕获异常(宿主 onerror→回落链)
       console.error(err instanceof Error ? err.message : String(err));

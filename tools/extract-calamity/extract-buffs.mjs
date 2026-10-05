@@ -66,7 +66,7 @@ for (const f of csFiles) {
   const png = pngByBase.get(cls);
   let hasPng = false;
   if (png && readFileSync(png).subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) hasPng = true;
-  if (!hasPng) stats.noTexture++;
+  if (!hasPng) { stats.noTexture++; continue; }   // 无图标硬跳过(图标链硬依赖)
   if (WRITE) {
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, `${key}.json`), JSON.stringify(raw, null, 2) + '\n');

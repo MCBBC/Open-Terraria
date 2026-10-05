@@ -3057,6 +3057,113 @@ export class Arrow extends Entity {
         return;
       }
     }
+    // ★BJ529（2026-10-06 用户实报"骷髅王手被打掉后二阶段发射的骷髅头非常暗"定谳+落刀）：
+    //  270 髅骨（专家骷髅王 :21961-21999 发射,Arrow skullBone 载体）GetAlpha
+    //  :80722-80725 `type==270 → new Color(255,255,255,WrappedLerp(0,255,
+    //  (timeLeft%40)/40))`【RGB 恒白不读光照色=光照无关弹面】——Main.cs:30068
+    //  projectileColor=Lighting.GetColor → :31532 GetAlpha(projectileColor) 光色被
+    //  整体替换。本仓弹体原走通用路径画进实体层 → compositeLight 全屏乘光把白脉冲
+    //  压暗（探针 scripts/_bj529-skull-ab.mjs 暗腔实测弹体像素乘光系数 k=0.325,
+    //  深暗≈0.1 = 实报病灶;vanillaProjAlpha 头注"本仓弹幕 projectileColor 恒白"只对
+    //  GetAlpha 近似层成立,合成层乘光面=BJ504/509/510/7d' 同域定谳）。
+    //  承接 = 79 头部 projFullbrightQueue 判例（BJ278,7f flushTrailShade 光照合成后
+    //  主画布复绘）：本体不进实体层（capture→return,下省通用绘制段）,此处捕获当帧
+    //  绘制参数闭包入队,复绘 source-over s·t+bg·(1−s·t)=原版逐字（ga=GetAlpha A 通道
+    //  脉冲,pulse40 三角波单源自 drawTableAlpha）。层序登记：本槽在玩家/NPC 之上
+    //  （BJ504 npcWhiteLift/677 既有偏差惯例同槽）。
+    //  姿态两面同批对齐（原通用路径 270 落缺省支）：
+    //  · rotation：:58579-58590 `270||585||601||706||837` 同支 rotation=atan2(v),
+    //    spriteDirection=direction（AutomaticallyChangesDirection :17121/:17387 aiStyle1
+    //    不豁免 → direction=sign(vx) :17123-17129）→ vx<0 镜像+atan2(−v),镜像合成
+    //    R(π−ang)∘M（同支 837 已在 PROJ_ROT_RIGHT,270 漏员）;通用路径旧缺省支
+    //    ang+π/2 = 整差 90°。
+    //  · frame 拍速：:57651-57655 frame++ 逐 tick 循环 3 帧——通用路径 age/5 档
+    //    5 倍慢,本支 age%3 承载。
+    if (this.projId === 270) {
+      const img270 = projSprite(270);
+      if (img270 && img270.width > 0) {
+        const gaGA = this.drawGlobalAlpha();
+        let ga270: number;
+        if (gaGA !== null) ga270 = gaGA;
+        else {
+          const mod = this.drawTableAlpha();
+          ga270 = mod ? mod.ga : Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+        }
+        const ang270 = Math.atan2(this.vy, this.vx);
+        const flip270 = this.vx < 0;
+        const f270 = ((this.age % 3) + 3) % 3;
+        // 帧源矩形走 projFrameSrcRect（纯函数=无 document 依赖,闭包推迟到 flush 段
+        // 执行,不持 frameCache canvas——9 参 drawImage 直切原图=同像素）
+        const rect270 = projFrameSrcRect(270, f270);
+        if (rect270) {
+          const cx270 = this.x + this.w / 2, cy270 = this.y + this.h / 2;
+          const sc270 = this.drawScale;
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.((c) => {
+            c.save();
+            c.translate(cx270, cy270);
+            if (flip270) c.scale(-1, 1);
+            c.rotate(flip270 ? Math.PI - ang270 : ang270);
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = Math.max(0, Math.min(1, ga270));
+            c.drawImage(img270, rect270.sx, rect270.sy, rect270.sw, rect270.sh,
+              -rect270.sw * sc270 / 2, -rect270.sh * sc270 / 2,
+              rect270.sw * sc270, rect270.sh * sc270);
+            c.restore();
+          });
+        }
+      }
+      return;
+    }
+    // ★BJ530（2026-10-06,BJ529 同族普查收编第二刀）：45 恶魔镰刀 friendly 型
+    //  （item 272 恶魔镰书法典 Item.cs:4560-4575 mana14/damage35/shoot=45/shootSpeed
+    //  0.2,Game case 'magic' 通用尾 Arrow 载体）GetAlpha :81465-81468
+    //  `34||35||15||19||44||45 → Color.White`——A=255 恒定（无 270 式脉冲/无 fade,
+    //  SetDefaults α=100 :1285 死值不读）,RGB 恒白【不读光照色】=Main.cs:30068
+    //  projectileColor=格光被 GetAlpha 整体替换。α 面已修（drawGlobalAlpha case
+    //  44/45 return 1,F2 批,ga 链保持先 GA 后表）;光照面=弹体画进实体层被
+    //  compositeLight 全屏乘光压暗（BJ529 探针 _bj529-skull-ab 暗腔实测 k=0.325
+    //  同病）→ 承接=本文件 270 专属支同构：本体不进实体层（capture→return）,当帧
+    //  绘制参数闭包入队,flushTrailShade 光照合成后主画布 source-over 复绘=原版
+    //  EntitySpriteDraw color48=Color.White（:31532 取色/:31578 出画）逐字。层序=
+    //  玩家/NPC 之上（270/BJ504 同槽惯例）。姿态面零改：自旋已接 PROJ_SPIN[45]
+    //  （AI_018 :25781 rotation+=0.8×direction,update 尾 spinRot 累积）、scale=
+    //  pd 0.9（SetDefaults :1285-1292,drawScale ctor 消费）、单帧（Main.projFrames
+    //  无 44/45 赋值=1 帧=整图,frame 恒 0）。
+    if (this.projId === 45) {
+      const img45 = projSprite(45);
+      if (img45 && img45.width > 0) {
+        const gaGA45 = this.drawGlobalAlpha();
+        let ga45: number;
+        if (gaGA45 !== null) ga45 = gaGA45;
+        else {
+          const mod45 = this.drawTableAlpha();
+          ga45 = mod45 ? mod45.ga : Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+        }
+        const rot45 = this.spinRot;                       // PROJ_SPIN[45] 累积自旋
+        const cx45 = this.x + this.w / 2, cy45 = this.y + this.h / 2;
+        const sc45 = this.drawScale;
+        // 单帧整图 9 参直切原图（270 同式:闭包只持 img 引用+矩形数,不持 frameCache）
+        const rect45 = projFrameSrcRect(45, 0);
+        if (rect45) {
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.((c) => {
+            c.save();
+            c.translate(cx45, cy45);
+            c.rotate(rot45);
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = Math.max(0, Math.min(1, ga45));
+            c.drawImage(img45, rect45.sx, rect45.sy, rect45.sw, rect45.sh,
+              -rect45.sw * sc45 / 2, -rect45.sh * sc45 / 2,
+              rect45.sw * sc45, rect45.sh * sc45);
+            c.restore();
+          });
+        }
+      }
+      return;
+    }
     // 泰拉刃光束 985 独占（DrawProj_TerraBlade2Shot Main.cs:27670-27712）：
     // Frame(1,4) 四帧 170×170（帧 0 主体/帧 3 白芯）；多层镜像叠画：
     // 蓝(45,124,205)×2 对称 ±π/8 张开 + 绿白内芯 ×2 + 绿(34,177,76) ×2

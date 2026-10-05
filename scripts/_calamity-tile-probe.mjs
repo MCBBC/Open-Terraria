@@ -1,5 +1,5 @@
-// B5 真机 tile 探针(2026-10-05):装 calamity.swmod→boot→进世界→
-// mod tile 放置(1×1 矿石 + 4×2 站点分格)→读回→截图→零 console 错。
+// B5/B6 真机探针:tile 放置读回 + **mod NPC 贴图注入链定谳**(用户实报 NPC 全透明)——
+// vimages['vanilla/NPC_<id>.png'] 命中?vnpc 帧解析?drawEnemy 消费面?
 // ★page.evaluate import 必须带 .ts(vite dev 无扩展名=第二模块实例判例)。
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
@@ -126,6 +126,39 @@ const ingame = await page2.evaluate(async () => {
       metaKeys: atlas.vanilla?.tiles?.[String(stable)] ? Object.keys(atlas.vanilla.tiles[String(stable)]) : null,
     };
   } else out.asset = { fail: 'no __swAtlas' };
+  // ⑧ mod NPC 贴图链(用户实报 NPC 全透明定谳):aero_slime(800 段)三查
+  {
+    const npcIds = [...(window.__swMods?.result?.() ?? { loaded: [] }).loaded.flatMap(() => [])];
+    const alloc = window.__swMods?.result?.()?.allocation;
+    const slimeId = alloc?.npcs?.get('mod_calamity_aero_slime');
+    if (slimeId !== undefined && atlas) {
+      const sheetKey = `vanilla/NPC_${slimeId}.png`;
+      const img = atlas.vimages?.get?.(sheetKey) ?? null;
+      const fr = atlas.vnpc ? atlas.vnpc(slimeId, 0) : null;
+      out.npcTex = {
+        slimeId,
+        vimageHit: !!img,
+        imgSize: img ? [img.width, img.height] : null,
+        vframe: fr ? { sx: fr.sx, sy: fr.sy, sw: fr.sw, sh: fr.sh } : null,
+        frames: atlas.vanilla?.npcs?.[String(slimeId)]?.count ?? (window.__swNPCFrames?.[String(slimeId)] ?? 'lazy'),
+      };
+    } else out.npcTex = { fail: 'no atlas or no slime id' };
+    // ⑨ 真召唤 aero_slime → 读实体 spawnAlpha/vanillaId(绘制透明定谳)
+    try {
+      const g2 = window.__swGame;
+      const { Enemy: E3 } = await import('/src/entities/Enemy.ts');
+      const summoned = E3.fromVanilla(slimeId, g2.player.cx + 60, g2.player.cy);
+      g2.entities.add(summoned, 'enemies');
+      await new Promise((r) => setTimeout(r, 300));
+      out.npcDraw = {
+        vanillaId: summoned.vanillaId,
+        spawnAlpha: summoned.spawnAlpha,
+        alphaFade: summoned.alphaFade,
+        defAlpha: summoned.def?.alpha,
+        alive: !summoned.dead,
+      };
+    } catch (e9) { out.npcDraw = { fail: String(e9).slice(0, 150) }; }
+  }
   // ⑦ vframe 直取试画:区分 meta 形状问题(null) vs worker 烘焙问题(画得出但场景天)
   if (atlas && stable !== undefined) {
     try {

@@ -17,7 +17,8 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
-import { projFrameImg, projSprite } from './Arrow';
+import { projFrameImg, projSprite, projFrameSrcRect } from './Arrow';
+import { PROJ_ALPHA_MOD } from '../data/vanillaProjAlpha';   // ★BJ530：44 A 通道单源（Dart 侧无 Arrow.drawGlobalAlpha 可消费）
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
 import { applyProjStatus } from './projStatus';
@@ -1213,6 +1214,49 @@ export class Dart extends Entity {
     if (!ctx) return;
     // 537 观星者激光：三段束体独占绘制（Main.cs:32124-32156）
     if (this.projId === 537) { this.drawStargazerBeam(ctx); return; }
+    // ★BJ530（2026-10-06,BJ529 同族普查收编第二刀）：44 恶魔镰刀 hostile 型
+    //  （恶魔 62/66 NPC.cs:23533 → Enemy 射手表 proj:44 → spawnHostileProj 本载体）
+    //  GetAlpha :81465-81468 `34||35||15||19||44||45 → Color.White`——A=255 恒定
+    //  （SetDefaults α=100 :1277 死值不读）,RGB 恒白【不读光照色】（Main.cs:30068
+    //  格光被 GetAlpha 整体替换;:31532/:31578 EntitySpriteDraw color48=Color.White
+    //  标准本体绘）。本仓通用路径双病：ga=(255−α)/255≈0.61 半透（Dart 侧无
+    //  Arrow.drawGlobalAlpha case 44/45 F2 豁免可消费——该案只覆盖 Arrow 载体 45）
+    //  + 画进实体层被 compositeLight 全屏乘光压暗（BJ529 探针 _bj529-skull-ab
+    //  暗腔实测 k=0.325 同病）→ 承接=Arrow 270/45 先例同构：capture→return,A 通道
+    //  单源读 PROJ_ALPHA_MOD[44]（fixed White=1）,projFullbrightQueue 光照合成后
+    //  主画布 source-over 复绘=原版逐字。层序=玩家/NPC 之上（270/BJ504 同槽惯例）。
+    //  姿态面零改：rot 已接 DART_STYLE 'spin' 0.8×dir（AI_018 :25780）、scale=0.9、
+    //  单帧整图（Main.projFrames 无 44 赋值,frame 恒 0）;44 无残影记录
+    //  （PROJ_TRAILING_MODE 缺员=recordGhostTrail 置 null,早退零吞面）。
+    if (this.projId === 44) {
+      const img44 = projSprite(44);
+      if (img44 && img44.width > 0) {
+        const m44 = PROJ_ALPHA_MOD[44];
+        const ga44 = m44 && !m44.off && m44.kind === 'fixed'
+          ? (m44.rgba?.[3] ?? 255) / 255 : 1;
+        const rot44 = this.rot;                           // DART_STYLE 'spin' 累积自旋
+        const cx44 = this.x + this.w / 2, cy44 = this.y + this.h / 2;
+        const sc44 = this.scale;
+        // 单帧整图 9 参直切原图（Arrow 270/45 同式:闭包只持 img 引用+矩形数）
+        const rect44 = projFrameSrcRect(44, 0);
+        if (rect44) {
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.((c) => {
+            c.save();
+            c.translate(cx44, cy44);
+            c.rotate(rot44);
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = Math.max(0, Math.min(1, ga44));
+            c.drawImage(img44, rect44.sx, rect44.sy, rect44.sw, rect44.sh,
+              -rect44.sw * sc44 / 2, -rect44.sh * sc44 / 2,
+              rect44.sw * sc44, rect44.sh * sc44);
+            c.restore();
+          });
+        }
+      }
+      return;
+    }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (!st) {
       // 无表项回退:旧色块(0 = 通用 Dart,历史遗留调用)

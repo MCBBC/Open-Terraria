@@ -301,7 +301,7 @@ async function loadAssets() {
       const { applyModAssets } = await import('./mods/assets');
       await Promise.race([
         applyModAssets(atlas),
-        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 30000)),   // ★B6:8s→30s(全量包 5,700 张解码;并行后常规 3-6s,慢机兜底)
       ]);
       (window as unknown as { __swModsLoaded?: boolean }).__swModsLoaded = true;
     } catch (err) {

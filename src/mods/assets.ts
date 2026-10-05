@@ -61,6 +61,20 @@ function buildModTileMeta(bmp: ImageBitmap, spec: ModTileContent): VanillaTileMe
   };
 }
 
+/** ★B6 用户实报修复:5,700+ 张 PNG 串行 await 必超 8s 护栏 → boot 放行时 NPC 贴图
+ *  注入未完成 → ensureVImage 负缓存 404 = 召唤 NPC 永久隐形。改为【域内并行解码】
+ *  (Promise.all,解码吞吐 ×核数)+ 注入顺序 = npcs 优先(玩家最先看到的实体)。 */
+async function decodeBatch(
+  atlas: import('../assets/SpriteAtlas').SpriteAtlas,
+  pack: { files: Map<string, Uint8Array> }, modId: string,
+  jobs: Array<{ fileKey: string; texPath: string }>,
+): Promise<void> {
+  await Promise.all(jobs.map(async (j) => {
+    const bmp = await decodePngOrWarn(pack, modId, j.texPath);
+    if (bmp !== null) inject(atlas, j.fileKey, bmp);
+  }));
+}
+
 /** 注入全部已装载 mod 的贴图。幂等(重复调用覆盖同键)。 */
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
@@ -71,20 +85,21 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
     const modId = pack.manifest.id;
     // —— 解码 textures/ 全量(按需:只解被引用的) ——
     const referenced = new Set<string>();
+    const itemJobs: Array<{ fileKey: string; texPath: string }> = [];
     for (const path of discoverPackJsonPaths(pack, 'items')) {
       const spec = readPackJson<ModItemContent>(pack, path);
       if (spec?.texture && items.has(fullKeyOf(modId, spec.key))) {
         referenced.add(spec.texture);
-        inject(atlas, `vanilla/Item_${items.get(fullKeyOf(modId, spec.key))}.png`,
-          await decodePngOrWarn(pack, modId, spec.texture));
+        itemJobs.push({ fileKey: `vanilla/Item_${items.get(fullKeyOf(modId, spec.key))}.png`, texPath: spec.texture });
       }
     }
+    await decodeBatch(atlas, pack, modId, itemJobs);
+    const npcJobs: Array<{ fileKey: string; texPath: string }> = [];
     for (const path of discoverPackJsonPaths(pack, 'npcs')) {
       const spec = readPackJson<ModNpcContent>(pack, path);
       if (spec?.texture && npcs.has(fullKeyOf(modId, spec.key))) {
         referenced.add(spec.texture);
-        inject(atlas, `vanilla/NPC_${npcs.get(fullKeyOf(modId, spec.key))}.png`,
-          await decodePngOrWarn(pack, modId, spec.texture));
+        npcJobs.push({ fileKey: `vanilla/NPC_${npcs.get(fullKeyOf(modId, spec.key))}.png`, texPath: spec.texture });
       }
       // ★G2③ 头贴注入(GLM娘实验批):townNPC 注册面已自增分配 head 索引,
       //   贴图落 vanilla/NPC_Head_{idx}.png(住房UI行/地图图标/旗帜消费)
@@ -109,6 +124,7 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         }
       }
     }
+    await decodeBatch(atlas, pack, modId, npcJobs);   // ★NPC 贴图并行(实报隐形修复)
     for (const path of discoverPackJsonPaths(pack, 'tiles')) {
       const spec = readPackJson<ModTileContent>(pack, path);
       if (!spec?.texture) continue;
@@ -125,11 +141,12 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       inject(atlas, fileKey, bmp);
     }
     // —— mod 弹幕贴图(P2):vanilla/Projectile_<projId>.png 覆盖键(ModProj 自绘消费) ——
+    const projJobs: Array<{ fileKey: string; texPath: string }> = [];
     for (const reg of modProjRegs()) {
       if (reg.modId !== modId) continue;
-      inject(atlas, `vanilla/Projectile_${reg.projId}.png`,
-        await decodePngOrWarn(pack, modId, reg.spec.texture));
+      projJobs.push({ fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
     }
+    await decodeBatch(atlas, pack, modId, projJobs);
     // —— mod buff 图标(P2):objectURL 登记(buff 栏 remasterBuffIcon 覆盖链消费) ——
     for (const reg of modBuffRegs()) {
       if (reg.modId !== modId) continue;

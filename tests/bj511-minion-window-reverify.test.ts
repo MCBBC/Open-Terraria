@@ -108,6 +108,7 @@ describe('BJ511 §F 用户组合复现（雀杖 759 攻击窗内鞭/回旋镖伤
     const finch = new MinionProj(z.cx - 5, z.cy - 5, 759, 7, 4, false, 0, false, () => null);
     expect(contactDirect(finch, hooks)).toBe(true);      // 雀杖接触命中落地
     expect(5000 - z.hp).toBeGreaterThan(0);
+    expect(5000 - z.hp).toBe(27);                        // ★BJ528 数值钉（dmg=30+0−def6/2;断供钳 1 必红——可达性→数值缺口补上）
     expect(z.iframes).toBe(0);                           // ★主判别:usesLocal 主支清窗（原版 :14175-14179）
   });
 
@@ -160,6 +161,7 @@ describe('BJ511 §G 档位判别（local 族 per-proj 私表 + cd=15 钉值）',
     const z = zombie(hooks, 5113);
     const blade = new MinionProj(z.cx - 5, z.cy - 5, 864, 6, 2, false, 0, false, () => null);
     expect(contactDirect(blade, hooks, 20)).toBe(true);
+    expect(5000 - z.hp).toBe(20);                        // ★BJ528 数值钉（20+pen25 钳 def6/2=3−3;断供钳 1 必红）
     expect(z.iframes).toBe(0);                           // ★清窗档（旧码=10 必红）
     expect(whipShaped(z, hooks)).toBeGreaterThan(0);     // 窗内鞭形照伤
     const ledger = (blade as unknown as { hitCd: { map: Map<number, number> } }).hitCd.map;
