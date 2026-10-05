@@ -37,3 +37,4 @@ dist-analyze
 /tests/fixtures/worlds/*.wld.json.gz
 
 gl79/
+mods/
