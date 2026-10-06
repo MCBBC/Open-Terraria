@@ -18,8 +18,25 @@ type AnyUI = Record<string, any>;
 const WOOD = ITEM_BY_KEY['vi_9_Wood'];            // vid 9 木材（maxStack 9999 = 可连做）
 
 const woodRecipe = (): VanillaRecipeLike => ({ create: 9, createStack: 1, tile: -1, items: [], groups: [] });
-type HoverEl = { isConnected: boolean; matches: (s: string) => boolean };
-const hoverEl = (hover = true): HoverEl => ({ isConnected: true, matches: () => hover });
+// ★BJ535 桩面迁移：runCraftArm 悬停门改 hoverHitTest（每拍 elementFromPoint 坐标
+//  hit-test——matches(':hover') 的 mousemove 事件流依赖已废）。桩=锚 el（hit 可变）
+//  +elementFromPoint mock（命中↔最后注册桩的 hit）。matches/contains 只作同真值
+//  镜像保留（真浏览器 :hover 由事件流维护,桩面不再承载判定）。
+type HoverEl = {
+  isConnected: boolean;
+  matches: (s: string) => boolean;
+  contains: (n: unknown) => boolean;
+  hit: boolean;
+};
+let hitAnchor: HoverEl | null = null;
+const hoverEl = (hover = true): HoverEl => {
+  const el: HoverEl = { isConnected: true, matches: () => el.hit, contains: () => el.hit, hit: hover };
+  hitAnchor = el;
+  return el;
+};
+(globalThis as unknown as { document: unknown }).document = {
+  elementFromPoint: () => (hitAnchor?.hit ? hitAnchor : null),
+};
 
 function mkUi(): { ui: AnyUI; crafts: Array<{ r: VanillaRecipeLike; times: number }>; sounds: string[] } {
   const ui = Object.create(UI.prototype) as unknown as AnyUI;
@@ -42,6 +59,8 @@ function mkUi(): { ui: AnyUI; crafts: Array<{ r: VanillaRecipeLike; times: numbe
   ui.uiBtnRight = false;
   ui.uiBtnLeft = false;
   ui.uiBtnShift = false;
+  ui.mouseX = 100;                                       // ★BJ535 光标坐标缓存（hoverHitTest 读面）
+  ui.mouseY = 100;
   ui.guidePlaced = false;
   ui.craftFocus = -1;
   ui.hoverFocus = -1;
@@ -140,11 +159,12 @@ describe('BJ430 ② 二击起合成——vanilla :42988 合成支', () => {
     ui.uiBtnLeft = true;
     for (let t = 0; t < 29; t++) ui.tickStackSplitMain();
     expect(crafts).toHaveLength(2);
-    const off = hoverEl(false);                    // 移出行（:hover 失）
+    const off = hoverEl(false);                    // 移出行（坐标 hit-test 落空）
     ui.craftHold!.el = off;
     for (let t = 0; t < 40; t++) ui.tickStackSplitMain();
     expect(crafts).toHaveLength(2);                // 离行暂停
-    ui.craftHold!.el = el;                         // 回行
+    const back = hoverEl();                        // 回行（光标回到行上,hit-test 重新命中）
+    ui.craftHold!.el = back;
     ui.tickStackSplitMain();
     expect(crafts).toHaveLength(3);                // 回行续做
   });

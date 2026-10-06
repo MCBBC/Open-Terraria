@@ -547,6 +547,7 @@ import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJo
 import { framePlatformSweep } from '../world/gen/vanilla/FinalCleanupPass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
+import { setShineEntryBoost } from '../render/TileShine';   // ★幕布期预算批（案 b:shine 盒提升开关,见 ENTRY_BAKE_BUDGET_BOOST_MS 注）
 import { pumpGate, pumpAccumulate, BG_PUMP_MAX_TICKS } from './BackgroundPumpCore';   // ★后台 tick 泵纯核(2026-09-28;worker 条目=../workers/BackgroundPump.ts 零依赖纯泵)
 
 const FIXED_DT = 1 / 60;
@@ -8568,6 +8569,20 @@ export class Game implements GameHooks {
   //   _paintedFrames 达 begin 时 +4 帧（与 mainFlow 幕布覆盖门 whenFirstPaint(4)
   //   后链入完全同相）才生效;deadline 保险不受此限。
   private _entryFreeze: { deadline: number; armAt: number } | null = null;
+  /** ★幕布期预算批（2026-10-06,用户案 a/b;「进世界后长时间无法稳定帧率」保守子集）：
+   *  入场冻结窗（=幕布未撤,巨帧不可见窗）内 tile 烘焙预算 8→40ms（案 a）+shine 盒
+   *  4→15ms（案 b,TileShine.setShineEntryBoost）——视口烘焙/shine 积压在幕布下加速
+   *  排干,覆盖门提前满足=冻结窗（「正在渲染世界」步）缩短,掀幕残留更少;
+   *  endEntryFreeze 原值归还常态。零光照/worker 耦合（只动 ChunkCache.bakeBudgetMs
+   *  毫秒值与 TileShine 盒毫秒值,烘焙/光照/worker 链路本身零触碰）。
+   *  wbake 降级（beginEntryFreeze=false）不开窗=不提预算=现状逐位;显式 ?shinebudget
+   *  URL 档逐字语义不受影响（TileShine 侧 explicit 门）。诊断（2026-10-06 四臂探针
+   *  _entry-window-diag/_entry-window-trace）:本机不稳窗 1-1.5s 且预算面非饱和,
+   *  本批=慢机/大世界比例收缩,非本机体感主刀——诚实边界。 */
+  private static readonly ENTRY_BAKE_BUDGET_BOOST_MS = 40;
+  private static readonly ENTRY_SHINE_BUDGET_BOOST_MS = 15;
+  /** beginEntryFreeze 捕获的 boost 前值（endEntryFreeze 原值归还,防缺省值漂移钉死） */
+  private _entryBakeBudgetPrev: number | null = null;
   /** 探针/测试断言面：冻结窗是否活跃 */
   get entryFreezeActive(): boolean { return this._entryFreeze != null; }
   /** 开窗（mainFlow onWorldReady 进世界后调用）。返回是否真的开窗：
@@ -8577,6 +8592,10 @@ export class Game implements GameHooks {
     if (!this.world || !this.chunks || !this.chunks.bakeClient) return false;   // worker 路径未装配
     if (this._entryFreeze) return true;
     this._entryFreeze = { deadline: performance.now() + timeoutMs, armAt: this._paintedFrames + 4 };
+    // ★案 a/b:捕获现值→提预算（重复 begin 已被上守卫拦,捕获恰一次）
+    this._entryBakeBudgetPrev = this.chunks.bakeBudgetMs;
+    this.chunks.bakeBudgetMs = Game.ENTRY_BAKE_BUDGET_BOOST_MS;
+    setShineEntryBoost(Game.ENTRY_SHINE_BUDGET_BOOST_MS);
     this.cb.onEntryFreeze?.(true);
     return true;
   }
@@ -8586,6 +8605,13 @@ export class Game implements GameHooks {
     this._entryFreeze = null;
     this.lighting.dirty = true;
     this.cb.onEntryFreeze?.(false);
+    // ★案 a/b:预算归还常态（幂等;boost 未开=同值归还零变化。chunks 恒在——
+    //   begin 门已验,防御性判空防 dispose 后迟到 end。归置尾段=既有源锚切片不动）
+    if (this.chunks && this._entryBakeBudgetPrev != null) {
+      this.chunks.bakeBudgetMs = this._entryBakeBudgetPrev;
+    }
+    this._entryBakeBudgetPrev = null;
+    setShineEntryBoost(null);
   }
   /** 冻结帧维护（frame() 冻结分支调用,每渲染帧一次）：相机收敛+视域账本+烘焙
    *  派发+光照,末位复查解除。animView 必须先于 viewportCovered 复查置位
@@ -14405,19 +14431,56 @@ export class Game implements GameHooks {
   // 58 粘滞贯穿整个使用动画;:524 `selected>=10 && HeldItem.IsAir → selected=hotbar`
   // 消耗尽次拍回热栏）。本仓：UI.heldStack 活对象直挂 inv.cursorMirror（heldItem()
   // 优先返回它 → 全使用链/渲染/挥击所见即光标物）,消耗经 removeHeld() 回写光标物。
+  /** CanChangeSelectedItemImmediately（Player.cs:415-421）= !UsingOrReusingItem &&
+   *  ItemTimeIsZero——本仓 swing=itemAnimation、player.useTime=itemTime;
+   *  channel 臂同 SmartSelect canChangeImmediately 口径（A-F4,防挥砍半途易物）。
+   *  ★BJ536：伪选中 58 的换选/还原共用此门（SelectedItemState.Update :483-517
+   *  整体早退门）——换入（PickItemSelectionOverride→OverrideSelection :425）与
+   *  还原（:491-494 selected=overridden）都只在门开拍发生 */
+  private canChangeSelectionNow(): boolean {
+    return !this.usingOrReusingItem() && !this._dirtRodChannel && this.player.useTime === 0;
+  }
+
+  /** OnSelectionChanged（Player.cs:519-533）还原拍杀手面（★BJ536 落刀 B）：58 粘滞
+   *  耗尽还原热栏瞬间,controlUseItem 按住中 → Main.blockMouse=true
+   *  （TriggersSet.cs:837-847 电平压制——按住期 controlUseItem 不置位,松键复位）
+   *  = 按住的那一下不得在还原拍起挥新工具（镐 autoReuse → holdOk 恒真面,
+   *  tryMine 会命中刚放的块）。continueAutoReuseWithNewItem 支（:520-521,buffered
+   *  换选）与伪选中还原无关（overridden 臂 hasBufferedChange 恒 false）,releaseUseItem
+   *  支（:522-524）= 松过键则 controlUseItem 本就 false,两支在此不可达面由
+   *  controlUseItem 判式吞并（mouseHeld 电平 = controlUseItem 置位源等价）。 */
+  private restoreSelectionKill(): void {
+    const inp = this.input;
+    if (!inp) return;
+    const controlUseItem = !!inp.mouseHeld && !inp.uiBlocking && !this.inpOverDomUi()
+      && !this.annotateMode;
+    if (controlUseItem) armBlockMouse(inp);
+  }
+
   private syncCursorMirror(): void {
     const inv = this.player.inv;
     const cur = this.uiHeldItemObj?.() ?? null;
     const prev = inv.cursorMirror;
     if (prev) {
       // 已激活：粘滞跟随（Player.cs:450 OverrideSelection 早退只挡【换入】,不解除已
-      // 选中的 58）。光标物被 UI 换成别的对象（重新拾取/并入槽）→ 旧镜像失效;
-      // 消耗尽 → 清镜像+清 UI 光标（:524 空镜像回热栏支 + TurnToAir 同拍语义）
-      if (!cur || cur !== prev) { inv.cursorMirror = null; return; }
-      if (cur.stack <= 0) {
-        inv.cursorMirror = null;
-        this.uiHeldItemClear?.();
-      }
+      // 选中的 58）。UI 换持别的活物 → 即时重绑（vanilla dropItemCheck :5121-5123
+      // `inventory[58] = Main.mouseItem.Clone()` 每拍刷新,HeldItem 即时随光标物——
+      // OverrideSelection 早退只冻结 selected,不冻结槽内容）
+      if (cur && cur !== prev) { inv.cursorMirror = cur as unknown as InvItem; return; }
+      // 消耗尽（stack<=0,放置消耗 Player.cs:40011-40015 同拍 SetDefaults(0)）先清
+      // UI 光标（vanilla mouseItem TurnToAir 即刻）
+      if (cur && cur.stack <= 0) { this.uiHeldItemClear?.(); }
+      else if (cur) return;                                // 活光标物照常持有
+      // ★BJ536（2026-10-06）58 粘滞耗尽窗（本仓病灶第一环）：cur 归零/已撤 =
+      // mouseItem air → selected 粘 58 直至 CanChangeSelectedItemImmediately——
+      // 放置挥击动画在途时 heldItem()=null（inventory[58]=air 空手,无挖掘载体）,
+      // 【禁止】此刻清镜像回落热栏镐（旧码消耗即清 → 次拍镐 autoReuse holdOk
+      // 放行工具分支 → tryMine 命中刚放的块=「放下即被挖」用户实报）。动画走完
+      // （门开拍）= vanilla :491-494 `selected = overridden` 还原拍 → 清镜像 +
+      // OnSelectionChanged 杀手面（restoreSelectionKill,:519-533）
+      if (!this.canChangeSelectionNow()) return;
+      inv.cursorMirror = null;
+      this.restoreSelectionKill();
       return;
     }
     if (!cur || cur.stack <= 0) return;
@@ -14427,18 +14490,18 @@ export class Game implements GameHooks {
     const open = typeof window === 'undefined' ? false
       : ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false);
     if (!open) return;
-    // CanChangeSelectedItemImmediately（:415-421）= !UsingOrReusingItem && ItemTimeIsZero
-    // （channel 臂同 SmartSelect 门 A-F4 口径——使用中不换选,防挥砍半途易物）
-    if (this.usingOrReusingItem() || this._dirtRodChannel || this.player.useTime !== 0) return;
+    // CanChangeSelectedItemImmediately（:415-421）门——使用中不换选（:425 早退同相）
+    if (!this.canChangeSelectionNow()) return;
     inv.cursorMirror = cur as unknown as InvItem;
   }
 
   private commitCursorMirror(): void {
     const m = this.player.inv.cursorMirror;
-    if (m && m.stack <= 0) {
-      this.player.inv.cursorMirror = null;
-      this.uiHeldItemClear?.();
-    }
+    // ★BJ536（2026-10-06）：只清 UI 光标（归零即刻,vanilla mouseItem TurnToAir 同拍
+    // 语义）——镜像本体留守 58 粘滞耗尽窗,由 syncCursorMirror 在
+    // CanChangeSelectedItemImmediately 拍清+还原杀手面。此处提前清镜像 = 次拍
+    // HeldItem 即回落热栏镐 = 「放下即被挖」病灶（BJ536 判别测试钉死）
+    if (m && m.stack <= 0) this.uiHeldItemClear?.();
   }
 
   private updateUse(_dt: number) {

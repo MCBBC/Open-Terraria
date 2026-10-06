@@ -271,8 +271,17 @@ export class Inventory {
   cursorMirror: InvItem | null = null;
 
   heldItem(): InvItem | null {
-    // 伪选中支（PickItemSelectionOverride Player.cs:17528-17532）：镜像非空即 HeldItem
-    return this.cursorMirror ?? this.slots[this.selected];
+    const m = this.cursorMirror;
+    // 伪选中支（PickItemSelectionOverride Player.cs:17528-17532）：镜像非空即 HeldItem。
+    // ★BJ536（2026-10-06）：镜像 stack<=0 = inventory[58] 归零 air——放置消耗
+    // inventory[selectedItem].stack--（Player.cs:40011）`stack==0 → SetDefaults(0)`
+    // （:40013-40015）同拍归零,Item.IsAir（Item.cs:386-395）stack<=0 即 air。
+    // 58 粘滞耗尽窗（Player.cs:483-517 SelectedItemState.Update 被
+    // CanChangeSelectedItemImmediately :415-421 冻结,还原前 selected 粘 58）内
+    // HeldItem=inventory[58]=空手——【不得】回落热栏镐,否则镐在动画在途拍成为
+    // 挖掘载体（autoReuse holdOk 放行 tryMine）=「放下即被挖」病灶第一环
+    if (m) return m.stack > 0 ? m : null;
+    return this.slots[this.selected];
   }
 
   /** 手持消耗统一入口（removeAt(selected) 的 HeldItem 语义版，SW-AZ1 2026-09-06）：

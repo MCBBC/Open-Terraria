@@ -32,8 +32,26 @@ for (let i = 0; i < ITEM_DEFS.length; i++) {
 
 const woodRecipe = (): VanillaRecipeLike => ({ create: 9, createStack: 1, tile: -1, items: [], groups: [] });
 const swordRecipe = (): VanillaRecipeLike => ({ create: SWORD_VID, createStack: 1, tile: -1, items: [], groups: [] });
-type HoverEl = { isConnected: boolean; matches: (s: string) => boolean };
-const hoverEl = (hover = true): HoverEl => ({ isConnected: true, matches: () => hover });
+// ★BJ535 桩面迁移：runCraftArm 悬停门改 hoverHitTest（每拍 elementFromPoint 坐标
+//  hit-test——matches(':hover') 的 mousemove 事件流依赖已废）。桩=锚 el（hit 可变）
+//  +elementFromPoint mock（命中↔hit：hit=true=光标物理在行上（t===el 命中）;
+//  hit=false=光标物理离行,坐标 hit-test 落空）。matches/contains 只作同真值镜像
+//  保留（真浏览器 :hover 由事件流维护,桩面不再承载判定）。
+type HoverEl = {
+  isConnected: boolean;
+  matches: (s: string) => boolean;
+  contains: (n: unknown) => boolean;
+  hit: boolean;
+};
+let hitAnchor: HoverEl | null = null;
+const hoverEl = (hover = true): HoverEl => {
+  const el: HoverEl = { isConnected: true, matches: () => el.hit, contains: () => el.hit, hit: hover };
+  hitAnchor = el;
+  return el;
+};
+(globalThis as unknown as { document: unknown }).document = {
+  elementFromPoint: () => (hitAnchor?.hit ? hitAnchor : null),
+};
 
 function mkUi(): { ui: AnyUI; crafts: Array<{ r: VanillaRecipeLike; times: number }> } {
   const ui = Object.create(UI.prototype) as unknown as AnyUI;
@@ -55,6 +73,8 @@ function mkUi(): { ui: AnyUI; crafts: Array<{ r: VanillaRecipeLike; times: numbe
   ui.uiBtnRight = false;
   ui.uiBtnLeft = false;
   ui.uiBtnShift = false;
+  ui.mouseX = 100;                                       // ★BJ535 光标坐标缓存（hoverHitTest 读面）
+  ui.mouseY = 100;
   ui.guidePlaced = false;
   ui.invPanel = { style: { display: 'block' } };
   ui.refreshAll = () => {};
@@ -147,13 +167,13 @@ describe('BJ391 ③ 停止条件——松键落臂/元素销毁落臂/离行暂�
   it('离行暂停不清锚,回行续做（原版 Draw 逐帧仅悬停焦点行调用面）', () => {
     const { ui, crafts } = mkUi();
     const r = woodRecipe();
-    const el: HoverEl = { isConnected: true, matches: () => false };   // 按住中拖离行
+    const el = hoverEl(false);                    // 按住中拖离行（hit-test 落空）
     ui.craftPressTick(r, false, el, 'list');
     ui.uiBtnLeft = true;
     for (let t = 0; t < 40; t++) ui.tickStackSplitMain();
     expect(crafts).toHaveLength(1);               // 离行期不连做
     expect(ui.craftHold).not.toBeNull();          // 暂停不清锚
-    el.matches = () => true;                                           // 拖回行
+    el.hit = true;                                // 拖回行（坐标 hit-test 重新命中）
     ui.tickStackSplitMain();
     expect(crafts).toHaveLength(2);               // 回行续做
   });
@@ -161,7 +181,7 @@ describe('BJ391 ③ 停止条件——松键落臂/元素销毁落臂/离行暂�
   it('元素销毁落臂：面板关/池重建未及物化（isConnected=false）→ 落臂不再连做', () => {
     const { ui, crafts } = mkUi();
     const r = woodRecipe();
-    const el: HoverEl = { isConnected: true, matches: () => true };
+    const el = hoverEl();
     ui.craftPressTick(r, false, el, 'list');
     ui.uiBtnLeft = true;
     el.isConnected = false;                       // 行随刷新销亡

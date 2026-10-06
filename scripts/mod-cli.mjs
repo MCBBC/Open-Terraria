@@ -98,7 +98,7 @@ function cmdInit(dir) {
       include: ['mod-api.d.ts', 'scripts/**/*.ts'],
     }, null, 2) + '\n');
   } catch { /* 模板缺失=跳过(打包面不受影响) */ }
-  w(join(root, 'README.md'), `# ${TEMPLATE_MANIFEST.name}\n\nSandboxWorld mod 工程。\n\n\`\`\`sh\n# 打包(在 game/ 目录):\nnode scripts/mod-cli.mjs build ${basename(root)} -o ${basename(root)}.swmod\n\`\`\`\n`);
+  w(join(root, 'README.md'), `# ${TEMPLATE_MANIFEST.name}\n\nSandboxWorld mod 工程。\n\n\`\`\`sh\n# 打包(在 game/ 目录):\nnode scripts/mod-cli.mjs build ${basename(root)}   # 输出到 mods/dist/<id>.swmod\n\`\`\`\n`);
   console.log(`[sw-mod] 模板工程已生成: ${root}`);
   console.log('[sw-mod] 下一步: node scripts/mod-cli.mjs build ' + basename(root));
 }
@@ -124,7 +124,11 @@ function cmdBuild(dir, outPath) {
   for (const rel of files) entries[rel.split('\\').join('/')] = new Uint8Array(readFileSync(join(root, rel)));
   const manifest = JSON.parse(strFromU8(entries['mod.json']));
   if (!ID_RE.test(manifest.id ?? '')) die(`mod.json id 非法: ${manifest.id}`);
-  const out = outPath ?? `${manifest.id}.swmod`;
+  // ★默认输出=mods/dist/(用户拍板 2026-10-06:swmod 不落 game 根;探针等消费方
+  //  均按 game/mods/dist/calamity.swmod 取包)。-o 显式指定时原样尊重。
+  const defaultOut = resolve(dirname(root), 'dist', `${manifest.id}.swmod`);
+  mkdirSync(dirname(defaultOut), { recursive: true });
+  const out = outPath ?? defaultOut;
   const zip = zipSync(entries);
   writeFileSync(resolve(out), zip);
   console.log(`[sw-mod] 打包完成: ${resolve(out)} (${files.length} 文件, ${(zip.length / 1024).toFixed(1)} KB)`);

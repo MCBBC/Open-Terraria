@@ -12,9 +12,10 @@ import { queueRippleSized, RippleShape } from '../render/WaterWaves';   // ★�
 import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   mountHorizontalCharges, grantCollisionAttackImmunity, chilletDashCharge,
-  isConsideredASlimeMount, MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
+  isConsideredASlimeMount, MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES, ramRuneDownDashStomp,
+  playerArmorPenOf } from './MountCombat';
 import { playerHurtFloatColor } from '../fx/CombatTextColors';
-import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, playerProjectileCanHitNpcGate } from './projTargets';
 // ★Forbidden 禁戒套引擎面（组C 终盘 2026-09-18）——656 弹实体 + 几何/预览尘助手
 import { ForbiddenSignProj, canSpawnSandstormFriendly, aimingLaserScan, spawnStormPreviewDust } from './ForbiddenSignProj';
 import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldownBuckets';
@@ -588,6 +589,8 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
     autoPaint: boolean;    // 喷漆器族 2216/3061/5126：放置后自动上漆（:14720-14734）
     chiselSpeed: boolean;  // 古凿 4056/5126：pickSpeed-0.25（:12610-12612/:13981）
+    hasDeadCellsDownDash: boolean;   // ★BJ534：重锤符文 5465 下砸装备源（ApplyEquipFunctional case 5465 :14498-14501）——
+                                     //   消费 = JumpMovement flag13 触发腿（:20895-20898,干/湿两路由）
     toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
     flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
     stepStool: boolean;     // 折叠凳 4341/造物之手 5126（:14077-14080 HasAStool,HeightBoost 26）
@@ -2105,6 +2108,7 @@ export class Player extends Entity {
     let yoyoBag = false;   // 悠悠球袋(3366/5541):配重球颜色使用端掷(见类型注释)
     let yoyoGlove = false, magicString = false;
     let autoPaint = false, chiselSpeed = false, toolbelt = false;
+    let hasDeadCellsDownDash = false;   // ★BJ534：重锤符文 5465（ApplyEquipFunctional case 5465 :14498-14501 hasDeadCellsDownDash=true）
     let flowerBoots = false;
     let stepStool = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
@@ -2279,6 +2283,7 @@ export class Player extends Entity {
       // 984 老虎攀爬档【赋值】quirk（:15176-15181 blackBelt/dashType=1 走 accfx,
       // spikedBoots = 2 原文是赋值非 +=——覆盖此前 953/975/976 累积）
       if (accVid === 984) spikedBoots = 2;
+      if (accVid === 5465) hasDeadCellsDownDash = true;   // 重锤符文下砸链（★BJ534 :14498-14501——下砸触发谓词装备源）
       if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
       // 天界石复合门（1457 :15531-15535 / 1458 :15529-15533 双版同值）：太阳石 899
       // `Main.dayTime`（日食中 dayTime 仍真 → 日食期关闭）、月亮石 900
@@ -3033,6 +3038,7 @@ export class Player extends Entity {
       spaceGun,   // R27：陨石套无限蓝（Game case 'magic'/Player 回蓝豁免消费）
       wolfAcc, boc,
       tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, vanityCounterWeight, yoyoBag,
+      hasDeadCellsDownDash,   // ★BJ534：下砸装备源（触发腿干/湿两路由消费）
       yoyoGlove, magicString,   // 悠悠球袋族（UpdateEquips :14174-14226）
       flowerBoots, stepStool,
       manaMagnet, magicCuffs, manaFlower,
@@ -5140,6 +5146,10 @@ export class Player extends Entity {
       // ShimmerUnstuckHelper.Clear()（UpdateDead :17041——脱困保护随死亡清零）
       this.shimmerUnstuckIndefinite = false;
       this.shimmerUnstuckTimeLeft = 0;
+      // isPerformingJump_DownDash/downDashTime 随死亡清（UpdateDead :17040 + :24803 清零态
+      //   ——★BJ534：否则死亡期残留态=重生落地误炸冲击波）
+      this.isDownDashing = false;
+      this.downDashTime = 0;
       return;
     }
     // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行——
@@ -5903,6 +5913,12 @@ export class Player extends Entity {
     //      ——阻尼在 DashMovement :21424+ 才跑）。
     mountHorizontalCharges(this, game);
     mountJumpStomps(this, game);
+    // ★BJ534 B 支下砸踩踏接线（JumpMovement :20731-20765——isPerformingJump_DownDash &&
+    //   vy>0 脚底横带扫掠,同盒同值 40×minionDamage/kb5/immune10/GiveImmune6/sourceItem
+    //   5465,无弹跳）。A/C 支要求坐骑、下砸态要求非骑乘 ⇒ 三支互斥,调用位序等价原文
+    //   （:20731 在 A :20693 与 C :20768 之间——互斥域内先后不可观测）。触发帧本站先于
+    //   跳跃面 flag13 置位跑 = 与原文同拍序（触发帧不踩,次拍起 vy>0 逐帧扫）。
+    if (this.isDownDashing && this.vy > 0) ramRuneDownDashStomp(this, game);
     // 控跳清湿（JumpMovement controlJump 头部，1457 :20805-20818 / 1456 :20366-20379）：
     // 骑史莱姆族坐骑时按住跳键即清 wetSlime——★原版 gate 无液体位置要求：controlJump
     // 块内直接判 mount.Active/IsSlimeMount/wetSlime>0，陆上残余同样按跳即刻清除（旧版曾
@@ -5950,7 +5966,12 @@ export class Player extends Entity {
       // ★SW-RB14d：湿档 lMaxFall 补 :24637 无条件 `maxFallSpeed += 0.01f`——原版
       //  该加法在 wet/shimmer/传送门各分支之后逐档生效（3→3.01/7→7.01/6→6.01/
       //  2→2.01;水档 5.01 与干档 10.01 旧已含,同批补齐四档）
-      if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3.01; }
+      // ★BJ534 下砸湿态档（:24576-24580 else-if 链【首支】——`!shimmering && wet &&
+      //  isPerformingJump_DownDash` → gravity×0.85/maxFallSpeed×0.85 于【干基】
+      //  （0.4→0.34 / 10→8.5,+0.01 后置 :24631）——压过全部液体档（水下下砸照常快坠,
+      //  非游泳 0.2/5.01 档）；jumpSpeed/jumpHeight 不覆写=保持干档（原文该支无此二项）。
+      if (this.isDownDashing && !this.shimmering) { lGrav = GRAVITY * 0.85; lMaxFall = 10 * 0.85 + 0.01; }
+      else if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3.01; }
       else if (this.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7.01; }   // :24602 原文读 merman 变身态（非装备位）
       else if (trident && !this.inLava) {
         lGrav = GRAVITY * 0.625; lMaxFall = 6.01;
@@ -5988,6 +6009,7 @@ export class Player extends Entity {
         this.canCarpet = true; this.carpetTime = 300;
         this.performingJump = null;   // ★BJ533：湿态踩底清尾迹旗（干支 onGround 清同款 :6270——
           //  原版经 jump==0 → CancelAllJumpVisualEffects :26955-26956 同净效）
+        this.isDownDashing = false;   // ★BJ534：RefreshDoubleJumps(:23053-23055) 湿路由并入
       }
       // ---- 水中起跳门（JumpMovement :20405-20496 原版语义，2026-08-16 对齐）：
       //   vy==0（踩底 / 水行站立）或 脚蹼族湿态任意时刻（flag2&&flag3 :20407）；
@@ -6009,6 +6031,19 @@ export class Player extends Entity {
           this.y -= Player.STOOL_BOOST;
           this.h -= Player.STOOL_BOOST;
         }
+      } else if (jumpEdge && !this.onGround && this.vy !== 0 && this.jumpHold <= 0 && this.inputDown
+        && eqM.hasDeadCellsDownDash && !this.ridingMount && !this.ridingCart
+        && !flipperOn && !justClearedWetSlime && !this.isDownDashing) {
+        // ★BJ534 湿路由下砸触发腿（:20895 flag13 支——原版湿/干共块,Selection 前置门
+        //  `if (!flag2 && !flag)` :20873-20898 = !脚蹼湿(flag2)/!清湿帧(flag) 排除臂,
+        //  此处与 BJ533 水中多段跳同门形）。链位在瓶族前=按住↓时下砸优先于水中多段跳
+        //  （原文 :20895 else-if 序）。触发体与干支逐位同构（isPerformingJump_DownDash
+        //  :20934 + velocity.Y=16×gravDir :20958-20961 + canRocket/rocketRelease 清零
+        //  :20924-20925）。jumpHold<=0 = sustain 分支优先（干支注同源）。
+        this.isDownDashing = true;
+        this.vy = 16 * gd;
+        this.canRocket = false;
+        this.rocketRelease = false;
       } else if (jumpEdge && !this.onGround && !mnt2?.blockExtraJumps
         && !flipperJump && !justClearedWetSlime && this.extraJumps.length > 0) {
         // ★BJ533 水中多段跳（2026-09-23 定谳：用户实报「水中不能二段跳」=本仓自造门）：
@@ -6036,6 +6071,7 @@ export class Player extends Entity {
         this.vy = -lJSpd * gd;
         this.jumpHold = Math.round(lJT * hMult);
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
+        this.isDownDashing = false;                         // :20934 门帧写 flag13=false——双跳打断下砸（★BJ534,干支同款）
         if (opt === 'Fart') game.playSfxWav?.('Item_16', 1, this.cx, this.cy);
         else game.playSfxWav?.('Double_Jump', 1, this.cx, this.cy);
         const D = game.vanillaDust;
@@ -6097,9 +6133,10 @@ export class Player extends Entity {
       if ((this.gravDir === -1 ? this.vy < effJumpSpd : this.vy > -effJumpSpd) && this.vy !== 0) this.canRocket = true;
       flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
         || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
+      if (this.isDownDashing) flying = false;   // ★BJ534：flag20 → flag19=false（:26995-26998——下砸期扇动/滑翔全让位）
       if (flying) this.wingMovement(wingsW, this.tryingToHoverDown, effJumpSpd, eqWet.wing ? eqWet.wing.time : 0);   // ★SW-FX14 :22410 TryingToHoverDown + ★BJ216 wingMax 回满上限（湿链同吃徽章）
       if (wingsLogicW > 0) {
-        const glideW = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
+        const glideW = !flying && this.inputJump && this.vy > 0 && !this.isDownDashing;   // :26718 族 !downDash 门（★BJ534 落位）
         this.wingFrameScratch.frame = this.wingFrame;
         this.wingFrameScratch.counter = this.wingFrameCounter;
         // waterFloat/shouldDraw 门 = wet && ShouldFloatInWater（WingFrame :30456/
@@ -6115,7 +6152,7 @@ export class Player extends Entity {
           hoverDown: this.tryingToHoverDown, hoverUp: this.tryingToHoverUp,   // ★SW-FX14 :29714/:29792 取值门
           wingTime: this.wingTime,
           glide: glideW,
-          downDash: false,          // isPerformingJump_DownDash 未建模
+          downDash: this.isDownDashing,   // ★BJ534：⑤号债清偿（vanillaWingVisuals 台账——WingFrame 下砸帧态）
           waterFloat: wetVanilla && this.shouldFloatInWater,
           shouldDraw: this.vy !== 0 && !this.ridingMount
             && !this.grappleProjs.some((g) => g.latched)
@@ -6316,6 +6353,28 @@ export class Player extends Entity {
           mountJumpFired = true;   // 与装备多段跳同帧互斥（原版 :20935 else-if 单分支）
         }
       }
+      // ---- ★BJ534 重锤符文下砸触发腿（JumpMovement :20895-20898 flag13 支）----
+      //  门（原文）= hasDeadCellsDownDash(5465 装备链 ApplyEquipFunctional :14498-14501)
+      //  && controlDown && !isPerformingJump_DownDash && velocity.Y!=0 && !mount.Active,
+      //  链位在坐骑多段跳（flag12..9,Basilisk>WoFGoat>Santank>Unicorn）之后、瓶族
+      //  （flag5..8）之前；外门 = 跳键沿（releaseJump :20845——仓内 jumpEdge）。
+      //  jumpHold<=0 = 原文 `if (jump > 0)` sustain 分支优先（:20823——sustain 存续帧
+      //  整条链不跑）;jumpEdge（按 press 边沿）帧 sustain 必已归零/耗尽（原版松键
+      //  :21203 jump=0;本仓窗口耗尽同达 jumpHold=0）。湿∧脚蹼（flag2）/湿史莱姆清湿帧
+      //  （flag）排除臂由 `if (!flag2 && !flag)` 门承载——干支两 flag 恒假,湿支见下。
+      //  触发 = isPerformingJump_DownDash=true（:20934）+ velocity.Y=16×gravDir
+      //  （:20958-20961——同帧重力链钳回 maxFallSpeed,净效果=秒达终端速;快坠本体
+      //  = 下方第二竖向碰撞趟 :28424-28430）。canRocket/rocketRelease 清零 =
+      //  :20924-20925 门帧公共段（按下帧火箭不点火）。
+      let downDashFired = false;
+      if (!mountJumpFired && this.vy !== 0 && this.jumpHold <= 0 && jumpEdge && this.inputDown
+        && eqM.hasDeadCellsDownDash && !this.ridingMount && !this.isDownDashing) {
+        this.isDownDashing = true;
+        this.vy = 16 * gd;
+        this.canRocket = false;
+        this.rocketRelease = false;
+        downDashFired = true;
+      }
       // ---- 多段跳（JumpMovement :20899-21197）：高度表 1:1——沙暴 jumpHeight×3
       //      （:20970）/ 暴雪 (int)(×1.5)（:20980）/ 航行瓶 (int)(×1.25)（:20992）/
       //      屁瓶 ×2（:21023）/ 独角兽×2（:21048）/ 血肉山羊×2（:21076）/ 蜥蜴坐骑
@@ -6328,13 +6387,18 @@ export class Player extends Entity {
       //      屁瓶 10×尘188+3×gore435-437（:21024-21038）；航行瓶 30×尘253（:20993-21011）。
       //      持续尾迹见 doubleJumpVisuals（DoubleJumpVisuals :21615-21745） ----
       const eq = eqM;
-      if (this.onGround) { this.extraJumps = [...eq.jumpOpts]; this.performingJump = null; }
+      // RefreshDoubleJumps 落地段（:23053-23055 isPerformingJump_DownDash=false 同位并入）
+      if (this.onGround) { this.extraJumps = [...eq.jumpOpts]; this.performingJump = null; this.isDownDashing = false; }
       // 坐骑封段（Mount.BlockExtraJumps，Player.cs:25730）：大多数坐骑禁多段跳。
       // 触发门 = releaseJump（:20845 `(releaseJump || (autoJump && (vy==0||sliding)))`
       // ——空中档 autoJump 分支 vy==0 恒假,多段跳【必须松键再按】。R5-F11：旧 held 门
       // （inputJump+vy>-2+8t cd）按住跳键即自动连段,已废;坐骑跳与多段跳同帧互斥
-      // （原版 :20935 else-if 链单分支）由 mountJumpFired 旗保证）
-      if (!this.onGround && !mnt2?.blockExtraJumps && jumpEdge && this.extraJumps.length > 0 && !mountJumpFired) {
+      // （原版 :20935 else-if 链单分支）由 mountJumpFired 旗保证）。
+      // ★BJ534：下砸腿与多段跳同帧互斥（原文 else-if 链,flag13 在瓶族前）——
+      //   downDashFired 帧多段跳不消费；反向：多段跳消费帧 :20934 无条件写 flag13=false
+      //   （双跳打断下砸），此处随腿清。
+      if (!this.onGround && !mnt2?.blockExtraJumps && jumpEdge && this.extraJumps.length > 0
+        && !mountJumpFired && !downDashFired) {
         const opt = this.extraJumps.shift()!;
         const hMult = opt === 'Sandstorm' ? 3
           : opt === 'Blizzard' ? 1.5
@@ -6346,6 +6410,7 @@ export class Player extends Entity {
         this.vy = -mJumpSpd * gd;
         this.jumpHold = Math.round(mJumpTicks * hMult);
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
+        this.isDownDashing = false;                         // :20934 门帧写 flag13=false——双跳打断下砸（★BJ534）
         // 双跳音分流（Player.cs:20689/:20966 族 SoundEngine.PlaySound(16)=cue16
         //   DoubleJump（SoundID.cs:54）→ Sounds/Double_Jump.wav（LSP.cs:235 Load,
         //   :846-857 case16 Pitch±0.10 经 PITCH_CASE 生效）;屁瓶例外 :21019 用
@@ -6456,6 +6521,7 @@ export class Player extends Entity {
         flying =
           (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
           || (FLAP_HOVER_SET.has(wingsLogic) && this.inputJump && hoverDown && this.wingTime > 0);
+        if (this.isDownDashing) flying = false;   // ★BJ534：flag20 → flag19=false（:26995-26998——下砸期扇动/滑翔全让位）
         if (flying) {
           this.wingMovement(wings, hoverDown, JS, eq.wing ? eq.wing.time : 0);   // ★BJ216 wingMax（:22419 徽章回满上限）
           // ★ WingFrame 帧状态机已移至 if/else 之后每 tick 执行（原版 :26498
@@ -6533,7 +6599,7 @@ export class Player extends Entity {
       //      :26874-27010 滑翔帧覆盖，两段顺序执行；地面也跑——33/38 落地保持
       //      帧 2、generic 地面归 0 均在此位生效）----
       if (wingsLogic > 0) {
-        const glide = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
+        const glide = !flying && this.inputJump && this.vy > 0 && !this.isDownDashing;   // :26718 族 !downDash 门（★BJ534 落位）
         this.wingFrameScratch.frame = this.wingFrame;
         this.wingFrameScratch.counter = this.wingFrameCounter;
         stepWingFrame(wingsLogic, this.wingFrameScratch, {
@@ -6545,7 +6611,7 @@ export class Player extends Entity {
           hoverDown, hoverUp: this.tryingToHoverUp,   // ★SW-FX14 :29714/:29792 取值门
           wingTime: this.wingTime,
           glide,
-          downDash: false,          // isPerformingJump_DownDash 未建模
+          downDash: this.isDownDashing,   // ★BJ534：⑤号债清偿（vanillaWingVisuals 台账——WingFrame 下砸帧态）
           waterFloat: wetVanilla && this.shouldFloatInWater,   // WingFrame :30456/:30724/:30732 wet && ShouldFloatInWater
           // ShouldDrawWingsThatAreAlwaysAnimated :30969-30980（坐骑恒禁翼 → !ridingMount）
           shouldDraw: this.vy !== 0 && !this.ridingMount
@@ -7144,6 +7210,23 @@ export class Player extends Entity {
       const fallingFx = this.vy > (this.gField ?? GRAVITY) || this.vy < -(this.gField ?? GRAVITY);
       moveAndCollide(this, world, this.vx, this.vy);
       this.h = hKeep;
+      // ---- ★BJ534 下砸第二竖向碰撞趟（:28424-28430）：isPerformingJump_DownDash &&
+      //   velocity.Y!=0 → velocity.X=0 重跑 DryCollision 后还原——下砸期每拍双份竖向
+      //   位移 = 快坠承载体（史莱姆坐骑 hyper-jump 同构 :28409-28414,本仓未建模登记）。
+      //   原版该趟在湿/干选档 if/else【外】= 湿态照跑且为 DryCollision 全速（不缩液体
+      //   位移）→ 本仓第二趟 liqFactor 临时归一；dx=0 ⇒ StepUp/坡速辅助无横向意图,
+      //   stepUp 临时关断防探柱误抬升;dx=0 趟不可能新增撞墙 → hitWall 保守并集还原
+      //   （原版 hitWall 判据读还原后 velocity.X,同净效）。落地拍主趟已清 vy ⇒ 本趟
+      //   自然跳过（:28424 vy!=0 门）——落地语义零扰动。----
+      if (this.isDownDashing && this.vy !== 0) {
+        const suKeep = this.stepUp, lfKeep = this.liqFactor, hwKeep = this.hitWall;
+        this.stepUp = false;
+        this.liqFactor = 1;
+        moveAndCollide(this, world, 0, this.vy);
+        this.stepUp = suKeep;
+        this.liqFactor = lfKeep;
+        this.hitWall = hwKeep || this.hitWall;
+      }
       // ---- ★BJ227 液面钉位（vanilla DryCollision :23736-23740 有限元支/:23771-23777 单步支
       //      → Collision.WaterCollision :2793-2820,waterSurfacePinCrossed 1:1 移植）----
       //  干态运动路径专属：下坠跨越液面 → 位置回钉面顶（盒底=面顶）+ velocity.Y 替换为
@@ -7499,6 +7582,14 @@ export class Player extends Entity {
     // 荧光体 5107 手持光（PlotTileLine 光照臂,2026-09-03 接——登记销核）
     this.emitMagiluminescenceLight(game);
 
+    // ---- ★BJ534 下砸态维护（:24799-24810）：骑乘即清（下砸中上坐骑打断）+ 计时器
+    //      递增/清零。位次 = 跳跃面/碰撞之后、摔伤结算之前——原版 :24803 先于 :26945
+    //      触发（触发帧计 0）、落地拍次拍 :25516 结算（读数=下坠拍数）；本仓单拍折叠后
+    //      此位次使触发帧即计 1、落地拍当场结算读数 = 原版次拍读数,蓄力阈值零漂移。
+    if (this.isDownDashing && this.ridingMount) this.isDownDashing = false;   // :24799-24801
+    if (this.isDownDashing) this.downDashTime++;                               // :24803-24810
+    else this.downDashTime = 0;
+
     // 落地摔伤结算（Player.cs:25495-25580：velocity.Y==0 段逐 tick——num11 整数格距
     // 两端截断(:25503)、num10=25+extraFall(+mount.ExtraFall)；结算后无条件重置
     // fallStart(:25574)，本仓以单发后清 fallStartY 等价）。
@@ -7508,7 +7599,14 @@ export class Player extends Entity {
     //   格差【截断】后才 ×10）；石化 `(int)((num11*gravDir − 2f) * 20f)`（:25546，
     //   ×20 在截断窗内）。删旧 round + Math.max(1,…) 补底：半格落差原版不结伤
     //   （trunc→0 ⇒ num16/num17≤0 直接跳过），0 档补 1 点属越权。
-    if (this.onGround && this.fallStartY !== null) {
+    // ★BJ534 下砸落地支（:25516-25519）：isPerformingJump_DownDash → num11=0（全档
+    //   免摔伤——云床/落水/石化各支一并让位,原版 num11=0 后各支自然全假）+
+    //   DoDeadCellsGroundPoundEffect(:29004,冲击波本体见 deadCellsGroundPound)。
+    //   不入 fallStartY 门：原版落地块不要求 num11>0,原地/短距下砸落地照炸。
+    if (this.onGround && this.isDownDashing) {
+      this.fallStartY = null;             // num11=0 消费面（:25517）
+      this.deadCellsGroundPound(game);    // :25519
+    } else if (this.onGround && this.fallStartY !== null) {
       const startTileY = Math.trunc(this.fallStartY / TILE);
       const landTileY = Math.trunc(this.y / TILE);
       this.fallStartY = null;
@@ -8036,6 +8134,57 @@ export class Player extends Entity {
    *  矿车 bob = playerYOffsets（SetAsMinecart Mount.cs:2770-2776 填 8−vOff+pOff →
    *  默认 8;51/53 传 (−10,−8) → 10（:1102/:1110）——json 提取器缺该数组,硬补同
    *  anchorPlayerOffset 口径）,boost = cart.h−42（SetAsMinecart :2766 heightBoost=10）。 */
+  /** ★BJ534 DoDeadCellsGroundPoundEffect（Player.cs:29004-29040 1:1）：重锤符文下砸
+   *  落地冲击波。调用位 = 摔伤结算段落地拍（:25519）。门 = whoAmI==Main.myPlayer
+   *  （:29006——本仓本地玩家即 this,远端代理不走 fixedUpdate 同BJ508口径）。
+   *  蓄力档 = 32×downDashTime>300（:29014 ⇔ downDashTime≥10t）：半径 128→176、
+   *  kb 10→20、crit false→true。伤害 30 平值（无 DamageVar 掷、无 minionDamage 乘区）
+   *  ——crit 走本仓惯例【调用侧预倍 ×2】（Enemy.hurt 不内部翻倍,MountCombat 矿车/
+   *  踩踏同款偏差登记）。命中门 = active∧!friendly∧!dontTakeDamage∧
+   *  CanNPCBeHitByPlayerOrPlayerProjectile（:29030——enemy∪critter 双桶并扫,
+   *  CountsAsCritter∧dontHurtCritters 统一出口;无 LOS 门=原版设计）;半径判据 =
+   *  中心距 ≤num（:29033 字面 >num continue）;击退方向 = 目标在玩家哪侧（:29035）。
+   *  ★不落 npc.immune（原版本支无 immune 写面——单发结算无连击面）;ApplyDamageToNPC
+   *  通道旗加伤（DamageDealt :20599）与穿甲（GetArmorPenetration(melee:false)）同源链
+   *  照踩踏族接法。编排放大粒子 DeadCellsDownDashExplosion（clientOnly:false → owner
+   *  端广播,远端经 netApplyParticleOrchestra 复放 deadCellsDownDashExplosionFx——
+   *  producer 侧缺口就此闭合,fx/orchestraFx 台账注）：PositionInWorld=
+   *  Center+(0,height/2−4)×gravDir、UniqueInfoPiece=蓄力?1:0、MovementVector=(半径,gravDir)。 */
+  deadCellsGroundPound(game: GameHooks): void {
+    const charged = 32 * this.downDashTime > 300;          // :29014
+    const radius = charged ? 176 : 128;                    // :29010/:29018
+    const damage = charged ? 60 : 30;                      // :29011 平值 30;蓄力 crit 本仓预倍 ×2
+    const knockback = charged ? 20 : 10;                   // :29012/:29019
+    const crit = charged;                                  // :29013/:29017
+    const gd = this.gravDir === -1 ? -1 : 1;
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsDownDashExplosion,
+      this.cx, this.cy + (this.h / 2 - 4) * gd, radius, gd, charged ? 1 : 0);   // :29021-29026
+    // 原版 Main.npc 单数组并扫 = 本仓 enemies ∪ critters 双桶并扫（fromCritterBucket
+    // 注入 CountsAsCritter 成员源,MountCombat.npcHitTargets 同式）
+    const critterBucket = game.critters?.() ?? [];
+    const buckets: Array<[unknown[], boolean]> = [
+      [game.enemies() ?? [], false],
+      [critterBucket, true],
+    ];
+    for (const [bucket, fromCritter] of buckets) {
+      for (const ent of bucket) {
+        const e = ent as { x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
+          dead?: boolean; dontTakeDamage?: boolean; hurt?: (d: number, kx: number, ky: number,
+            g: GameHooks, ap?: number, crit?: boolean, pierce?: number, fp?: boolean) => boolean };
+        if (!e || e.dead || e.dontTakeDamage || !e.hurt) continue;              // :29030 active/dontTakeDamage
+        if (!playerCanHitEnemy(ent, game)) continue;                            // :29030 !friendly 同式
+        if (!playerProjectileCanHitNpcGate(game, ent, fromCritter)) continue;   // CanNPCBeHitByPlayerOrPlayerProjectile
+        const ex = e.cx ?? (e.x ?? 0) + (e.w ?? 16) / 2;
+        const ey = e.cy ?? (e.y ?? 0) + (e.h ?? 16) / 2;
+        const dx = ex - this.cx, dy = ey - this.cy;                             // :29032 nPC.Center - base.Center
+        if (Math.hypot(dx, dy) > radius) continue;                              // :29033 vector.Length() > num
+        const dir = dx > 0 ? 1 : -1;                                            // :29035
+        e.hurt(applyBannerDamageDealt(game, ent as never, damage), dir * knockback, 0,
+          game, playerArmorPenOf(game), crit, 0, true);                         // :29036 ApplyDamageToNPC
+      }
+    }
+  }
+
   deadCellsBeheadedStep(game: GameHooks): void {
     // ★F4③（2026-09-01）补 !stoned 门——仓内有真实石化态（BuffType.Stoned=156,
     // :3619 lastStoned 过渡同源）非"不可达态",原版门串 :24494 含 !stoned && !frozen
@@ -8633,6 +8782,16 @@ export class Player extends Entity {
   extraJumps: string[] = [];
   /** 当前进行中的多段跳型（isPerformingJump_* 等价；落地清除——上升尾迹分支门） */
   performingJump: string | null = null;
+  /** ★BJ534：isPerformingJump_DownDash（Player.cs:2643）——重锤符文 5465 下砸态机。
+   *  触发 = JumpMovement :20895-20898 flag13 支（空中+按住↓+跳键沿+装备 5465+非骑乘），
+   *  vy=16×gravDir（:20958-20961）；落地拍结算面见摔伤段 deadCellsGroundPound；
+   *  复位 = RefreshDoubleJumps 落地段(:23053-23055)/骑乘(:24799-24801)/死亡(:17040)。 */
+  isDownDashing = false;
+  /** downDashTime（Player.cs:2645）：下砸态逐 tick 递增、非下砸清零（:24803-24810）——
+   *  落地冲击波蓄力档判据 32×downDashTime>300（:29014 ⇔ ≥10t）。仓内递增位次 =
+   *  跳跃面/碰撞之后、摔伤结算之前（原版 :24803 先于 :26945 触发、落地拍次拍结算；
+   *  本仓单拍折叠后该位次使落地拍读数 ≡ 原版次拍读数,蓄力阈值零漂移）。 */
+  downDashTime = 0;
   /** 跑靴脚步声冷却（hermesStepSound.IntendedCooldown=9 :35519） */
   runSoundDelay = 0;
   /** 火箭靴 1:1（Player.cs:2612/26548-26628）：rocketTime 剩余脉冲次数（max=7）/

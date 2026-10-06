@@ -68,84 +68,101 @@ const mkWorld = (opts?: { chestAt?: [number, number] }): World => {
 };
 const partialEntry = (world: World, q: number, row: number, col: number): ShineChunkEntry =>
   ({ shimmerQ: q, _resumeRow: row, _resumeCol: col,
-    _resumeFp: shineFpPrefix(world, 0, 0, row, col, q) } as ShineChunkEntry);
+    _resumeFp: shineFpPrefix(world, null, 0, 0, row, col, q) } as ShineChunkEntry);
 
 beforeEach(() => { shineStats.reset(); });
 
 describe('债2 前缀指纹 shineFpPrefix — 依赖域演算（行 [-1,r] 全列 ∪ 行 r+1 列 [-1,c]）', () => {
   it('同内容同指纹（确定性——carry 收养的前提）', () => {
     const a = mkWorld(), b = mkWorld();
-    expect(shineFpPrefix(b, 0, 0, 5, 0, 0)).toBe(shineFpPrefix(a, 0, 0, 5, 0, 0));
-    expect(shineFpPrefix(b, 0, 0, 5, 7, 0)).toBe(shineFpPrefix(a, 0, 0, 5, 7, 0));
+    expect(shineFpPrefix(b, null, 0, 0, 5, 0, 0)).toBe(shineFpPrefix(a, null, 0, 0, 5, 0, 0));
+    expect(shineFpPrefix(b, null, 0, 0, 5, 7, 0)).toBe(shineFpPrefix(a, null, 0, 0, 5, 7, 0));
   });
   it('行首断点（c=0）：已烘行 [0,r) 的依赖=行 [-1,r] 全列——行 r 内编辑=域内（拒),行 r+1 编辑=域外（收）', () => {
     const a = mkWorld();
-    const fp0 = shineFpPrefix(a, 0, 0, 5, 0, 0);
+    const fp0 = shineFpPrefix(a, null, 0, 0, 5, 0, 0);
     // 行 5（=r）列 3 编辑：既被行 4 的 stamp 取帧读到（+1 行邻接）,也属已烘域边界 → 域内
     a.store.type[a.store.idx(3, 5)] = 1;
-    expect(shineFpPrefix(a, 0, 0, 5, 0, 0)).not.toBe(fp0);
+    expect(shineFpPrefix(a, null, 0, 0, 5, 0, 0)).not.toBe(fp0);
     // 行 6（=r+1）列 3 编辑：c=0 无行 r stamp → 不读 r+1 → 域外
     const b = mkWorld();
-    const fpB = shineFpPrefix(b, 0, 0, 5, 0, 0);
+    const fpB = shineFpPrefix(b, null, 0, 0, 5, 0, 0);
     b.store.type[b.store.idx(3, 6)] = 1;
-    expect(shineFpPrefix(b, 0, 0, 5, 0, 0)).toBe(fpB);
+    expect(shineFpPrefix(b, null, 0, 0, 5, 0, 0)).toBe(fpB);
   });
   it('格级断点（c>0）：行 r+1 的依赖列窗 [-1,c]——c 内编辑=域内,c 外=域外', () => {
     // c=7：stamp(5,6) 读行 6 列 [5,7] → 列 7 域内,列 8 域外
     const a = mkWorld();
-    const fp0 = shineFpPrefix(a, 0, 0, 5, 7, 0);
+    const fp0 = shineFpPrefix(a, null, 0, 0, 5, 7, 0);
     a.store.type[a.store.idx(7, 6)] = 1;   // 行 6 列 7（=c）→ 域内
-    expect(shineFpPrefix(a, 0, 0, 5, 7, 0)).not.toBe(fp0);
+    expect(shineFpPrefix(a, null, 0, 0, 5, 7, 0)).not.toBe(fp0);
     const b = mkWorld();
-    const fpB = shineFpPrefix(b, 0, 0, 5, 7, 0);
+    const fpB = shineFpPrefix(b, null, 0, 0, 5, 7, 0);
     b.store.type[b.store.idx(8, 6)] = 1;   // 行 6 列 8（>c）→ 域外
-    expect(shineFpPrefix(b, 0, 0, 5, 7, 0)).toBe(fpB);
+    expect(shineFpPrefix(b, null, 0, 0, 5, 7, 0)).toBe(fpB);
   });
   it('已烘域内（行 < r）编辑恒域内（=carry 必拒的正确性面）', () => {
     const a = mkWorld();
-    const fp0 = shineFpPrefix(a, 0, 0, 5, 0, 0);
+    const fp0 = shineFpPrefix(a, null, 0, 0, 5, 0, 0);
     a.store.type[a.store.idx(3, 2)] = 1;   // 行 2 < 5 → 已烘行
-    expect(shineFpPrefix(a, 0, 0, 5, 0, 0)).not.toBe(fp0);
+    expect(shineFpPrefix(a, null, 0, 0, 5, 0, 0)).not.toBe(fp0);
   });
   it('半砖/坡面位入配方面（drawVanillaCell 产物依赖形状;setHalfBrick/setSlope 发监听换代但原 fp 缺位=锤改后 memo 误复用首烘形状）', () => {
     const a = mkWorld();
-    const fp0 = shineFpPrefix(a, 0, 0, 5, 0, 0);
+    const fp0 = shineFpPrefix(a, null, 0, 0, 5, 0, 0);
     a.store.half[a.store.idx(3, 3)] = 1;   // half 变（type/flags/frame 不变）
-    expect(shineFpPrefix(a, 0, 0, 5, 0, 0)).not.toBe(fp0);
+    expect(shineFpPrefix(a, null, 0, 0, 5, 0, 0)).not.toBe(fp0);
     const b = mkWorld();
-    const fpB = shineFpPrefix(b, 0, 0, 5, 0, 0);
+    const fpB = shineFpPrefix(b, null, 0, 0, 5, 0, 0);
     b.store.slope[b.store.idx(3, 3)] = 2;  // slope 变
-    expect(shineFpPrefix(b, 0, 0, 5, 0, 0)).not.toBe(fpB);
+    expect(shineFpPrefix(b, null, 0, 0, 5, 0, 0)).not.toBe(fpB);
   });
   it('q 参与指纹（档位隔离）;chest 格入域 ⇒ 箱摘要参与（chestLidPoseAt 消费面）', () => {
     const a = mkWorld();
-    expect(shineFpPrefix(a, 0, 0, 5, 0, 0)).not.toBe(shineFpPrefix(a, 0, 0, 5, 0, 0.5));
+    expect(shineFpPrefix(a, null, 0, 0, 5, 0, 0)).not.toBe(shineFpPrefix(a, null, 0, 0, 5, 0, 0.5));
     const c1 = mkWorld({ chestAt: [3, 3] });      // 箱在已烘域内
     const c2 = mkWorld({ chestAt: [3, 3] });
-    const fp1 = shineFpPrefix(c1, 0, 0, 5, 0, 0);
+    const fp1 = shineFpPrefix(c1, null, 0, 0, 5, 0, 0);
     c2.chests![0].frame = 2;                       // 箱盖态变
-    expect(shineFpPrefix(c2, 0, 0, 5, 0, 0)).not.toBe(fp1);
+    expect(shineFpPrefix(c2, null, 0, 0, 5, 0, 0)).not.toBe(fp1);
   });
 });
 
 describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
-  it('凭证全等 ⇒ 收养：条目进新 pair slots、memo 槽删除（撤销场景混态条目防误复用）、carries/carriedRows 记账', () => {
+  it('凭证全等 ⇒ 收养：条目进新 pair slots、memo 槽【改签】为收养时点全量 fp（混态条目防按烘始 fp 误复用）、carries/carriedRows 记账', () => {
     const world = mkWorld();
     const p1 = fakePair(1), p2 = fakePair(2);
     const e = partialEntry(world, 0, 5, 0);
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e }]);
-    // 伪造 memo 槽（收养必须删它——否则「内容回到烘始态」场景按旧 fp 误复用混态条目）
+    // 伪造 memo 槽（收养必须改签——条目内容=前缀@暂停态+尾段@当前态,旧烘始 fp 不再
+    //   描述它;改签为收养时点全量 fp 后:内容再变 ⇒ 换代 fp 门 miss ⇒ 不误服）
     shineDebugMemoSeedForTest(ChunkCache.key(0, 0), [{ q: 0, fp: 12345, e }]);
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(true);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(true);
     const slots2 = shineDebugSlotsForTest(p2);
     expect(slots2?.length).toBe(1);
     expect(slots2?.[0].e).toBe(e);
     expect(slots2?.[0].q).toBe(0);
-    expect(shineDebugMemoPeekForTest(ChunkCache.key(0, 0))).toBeUndefined();
+    const memoSlot = shineDebugMemoPeekForTest(ChunkCache.key(0, 0));
+    expect(memoSlot?.length).toBe(1);
+    expect(memoSlot?.[0].e).toBe(e);
+    expect(memoSlot?.[0].fp).not.toBe(12345);   // 改签=当前全量 fp（非旧烘始值）
     expect(shineStats.carries).toBe(1);
     expect(shineStats.carriedRows).toBe(5);
     // 旧 pair 槽位不动（旧 pair 永不再 current,残留=WeakMap GC 面）
     expect(shineDebugSlotsForTest(p1)?.[0].e).toBe(e);
+  });
+  it('memo 改签换下的旧槽条目：不在当前 slots ⇒ 死点池化（债1×债2 联动:收养不孤儿化）', () => {
+    const world = mkWorld();
+    const p1 = fakePair(21), p2 = fakePair(22);
+    const e = partialEntry(world, 0, 5, 0);
+    shineDebugSeedSlotsForTest(p1, [{ q: 0, e }]);
+    const fakeC = () => ({ width: 256, height: 256 }) as unknown as HTMLCanvasElement;
+    const stale: ShineChunkEntry = { shimmerQ: 0, mul: fakeC(), add: fakeC() };   // 旧 memo 条目（≠收养条目）
+    shineDebugMemoSeedForTest(ChunkCache.key(0, 0), [{ q: 0, fp: 777, e: stale }]);
+    const depth0 = shinePoolDepthForTest();
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(true);
+    expect(shinePoolDepthForTest()).toBe(depth0 + 2);   // stale 的 mul/add 入池
+    expect(stale.mul).toBeUndefined();                   // 抽壳
   });
   it('凭证不匹配（真编辑落在已烘依赖域）⇒ 拒绝:carriesMiss 记账,新 pair 不被写', () => {
     const world = mkWorld();
@@ -154,7 +171,7 @@ describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e }]);
     // 收养前真编辑:行 2（<r,已烘域）
     world.store.type[world.store.idx(3, 2)] = 1;
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
     expect(shineStats.carriesMiss).toBe(1);
     expect(shineStats.carries).toBe(0);
     expect(shineDebugSlotsForTest(p2)).toBeUndefined();
@@ -163,12 +180,12 @@ describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
     const world = mkWorld();
     const p1 = fakePair(5), p2 = fakePair(6);
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e: { shimmerQ: 0, _resumeRow: 0, _resumeCol: 0,
-      _resumeFp: shineFpPrefix(world, 0, 0, 0, 0, 0) } as ShineChunkEntry }]);
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+      _resumeFp: shineFpPrefix(world, null, 0, 0, 0, 0, 0) } as ShineChunkEntry }]);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e: { shimmerQ: 0 } as ShineChunkEntry }]);   // 完成
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e: { shimmerQ: 0, _resumeRow: 5, _resumeCol: 0 } as ShineChunkEntry }]);
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);   // 无凭证
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);   // 无凭证
     expect(shineDebugSlotsForTest(p2)).toBeUndefined();
   });
   it('新 pair 已有本档槽位 ⇒ 不动（memo 命中先行/既有重烘接管）', () => {
@@ -178,7 +195,7 @@ describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e: e1 }]);
     const e2 = partialEntry(world, 0, 3, 0);
     shineDebugSeedSlotsForTest(p2, [{ q: 0, e: e2 }]);
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
     expect(shineDebugSlotsForTest(p2)?.[0].e).toBe(e2);
     expect(shineStats.carries).toBe(0);
   });
@@ -186,7 +203,7 @@ describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
     const world = mkWorld();
     const p1 = fakePair(9), p2 = fakePair(10);
     shineDebugSeedSlotsForTest(p1, [{ q: 0.5, e: partialEntry(world, 0.5, 5, 0) }]);
-    expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+    expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
     expect(shineDebugSlotsForTest(p2)).toBeUndefined();
   });
   it('__SW_SHINE_MEMO_OFF = 世代复用族总闸:carry 关（旧行为逐字）', () => {
@@ -195,7 +212,7 @@ describe('债2 tryCarryShineProgress — 换代收养/拒绝/一致性', () => {
     shineDebugSeedSlotsForTest(p1, [{ q: 0, e: partialEntry(world, 0, 5, 0) }]);
     (globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF = true;
     try {
-      expect(shineDebugTryCarryForTest(world, p1, p2, 0, 0, 0)).toBe(false);
+      expect(shineDebugTryCarryForTest(world, null, p1, p2, 0, 0, 0)).toBe(false);
       expect(shineDebugSlotsForTest(p2)).toBeUndefined();
     } finally {
       delete (globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF;
@@ -213,7 +230,7 @@ describe('债1 画布池 — 抽壳幂等/池纪律（Node 面;获取点接线�
     expect(e.add).toBeUndefined();
     expect(e._mulCtx).toBeUndefined();
     expect(e._addCtx).toBeUndefined();
-    expect(shinePoolDepthForTest()).toBe(2);
+    expect(shinePoolDepthForTest()).toBeGreaterThanOrEqual(2);   // 池为模块态,相对断言
   });
   it('抽壳幂等:空壳重复归还零操作（SITE-2 shift 与 memo 换代同条目双归还判例）', () => {
     const fakeC = () => ({ width: 256, height: 256 }) as unknown as HTMLCanvasElement;
@@ -254,17 +271,17 @@ describe('三债源级锁 — 接线在位（防静默拆除）', () => {
     expect(TSHINE).toContain('bumpTexEpoch(c);');
     expect(TSHINE).toContain("import { bumpTexEpoch } from './texId';");
   });
-  it('债1:死点归还四面在位（memo 命中 shift/烘焙 shift×2/memo 换代）', () => {
+  it('债1:死点归还五面在位（memo 命中 shift/烘焙 shift×2/memo 换代×2+carry 改签换下）', () => {
     expect(TSHINE.match(/releaseShineEntryCanvases\(dropped\.e\);/g)?.length).toBe(3);
-    expect(TSHINE.match(/releaseShineEntryCanvases\(om\.e\);/g)?.length).toBe(2);
+    expect(TSHINE.match(/releaseShineEntryCanvases\(om\.e\);/g)?.length).toBe(3);
   });
-  it('债2:schedule ① 换代支走 carry;凭证在暂停点写入;完成态清三标', () => {
-    expect(TSHINE).toContain('if (tryCarryShineProgress(world, it.pair, cur, it.cx, it.cy, shimmerQ)) {');
+  it('债2:schedule ① 换代支走 carry;凭证在暂停点写入;完成态清三标;memo 改签（非删除）', () => {
+    expect(TSHINE).toContain('if (tryCarryShineProgress(world, atlas, it.pair, cur, it.cx, it.cy, shimmerQ)) {');
     expect(TSHINE.match(/entry\._resumeFp = shineFpPrefix\(world, cx, cy, ly, lx, shimmerQ\);/g)?.length).toBe(1);
     expect(TSHINE).toContain('entry._resumeRow = undefined;');
     expect(TSHINE).toContain('entry._resumeCol = undefined;');
     expect(TSHINE).toContain('entry._resumeFp = undefined;');
-    expect(TSHINE).toContain('shineMemo.delete(ChunkCache.key(cx, cy));');
+    expect(TSHINE).toContain('shineMemo.set(mkey, [{ q: shimmerQ, fp: shineChunkFingerprintCached(world, cur, cx, cy, shimmerQ), e }]);');
   });
   it('债3:死线检查在格级 stamp 点(row,col 断点);行首退化=resumeCol=0;停滞判据双未动', () => {
     expect(TSHINE).toContain("if ((deadline !== undefined && performance.now() > deadline)\n        || ly * CHUNK + lx >= cellCap) {");
@@ -276,8 +293,8 @@ describe('三债源级锁 — 接线在位（防静默拆除）', () => {
   it('既有锁面未被拆除（timeBudget 构造/计数路径/逃生门/fp 缓存三调用点）', () => {
     expect(TSHINE).toContain('const timeBudget = tbNow > 0 ? { deadline: performance.now() + tbNow } : null;');
     expect(TSHINE).toContain('const countBudget: ShineBakeBudget | undefined = timeBudget ? undefined : { left: 2 };');
-    expect(TSHINE.match(/shineChunkFingerprintCached\(world, pair, cx, cy, shimmerQ\)/g)?.length).toBe(3);
-    expect(TSHINE.match(/shineChunkFingerprint\(world, cx, cy, shimmerQ\)/g)?.length).toBe(1);
+    expect(TSHINE.match(/shineChunkFingerprintCached\(world, atlas, pair, cx, cy, shimmerQ\)/g)?.length).toBe(3);
+    expect(TSHINE.match(/shineChunkFingerprint\(world, atlas, cx, cy, shimmerQ\)/g)?.length).toBe(1);
     expect(TSHINE).toContain("(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF");
   });
 });

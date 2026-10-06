@@ -2211,6 +2211,25 @@ export class UI {
       : null;
   }
 
+  /** ★SW-BJ535（2026-10-06）：tick 驱动悬停 hit-test——原版每拍形态。
+   *  HoverOverCraftingItemButton 的悬停复核在原版=Draw 逐帧基于 Main.mouseX/mouseY
+   *  坐标 hit-test（Main.cs:42971 由 Update/Draw 面逐拍调用,不依赖输入事件流）。
+   *  本仓曾用 el.matches(':hover')（CSS 伪类=浏览器 hit-test 缓存,其刷新由
+   *  mousemove 事件流驱动）——长按合成→refreshAll 整表重建→臂锚换新行,Windows
+   *  静止鼠标零 mousemove ⇒ 新行 hover 位永不建立 ⇒ 推进冻结,晃动鼠标补流才
+   *  恢复（用户实报;mac 触摸板微动持续供流掩盖）。修=elementFromPoint(mouseX,
+   *  mouseY) 每拍几何重算（坐标=最后已知光标位,静止期即精确位,与事件流解耦,
+   *  resolveDrop :3069 同习语）;t===el‖contains=子元素悬停传播,与 :hover 同义。
+   *  实证锚:Chrome 154 探针 scripts/_bj535-hover-maintenance.mjs——mousemove
+   *  正常派发 mouseenter（事件流注入健康）而 matches(':hover') 不随建立/
+   *  elementFromPoint 恒正确。 */
+  private hoverHitTest(el: HTMLElement): boolean {
+    if (!el.isConnected) return false;
+    const t = (typeof document !== 'undefined'
+      ? document.elementFromPoint?.(this.mouseX, this.mouseY) : null) as HTMLElement | null;
+    return !!t && (t === el || el.contains(t));
+  }
+
   /** ★SW-BJ391：快捷制作长按臂电平面（tickStackSplitMain ⑤,逐拍驱动）。
    *  门序 = HoverOverCraftingItemButton :42986-43018：
    *  ① flag2 电平（:42980 mouseLeft || mouseRight——本臂锚左键压面站,右键不制作）
@@ -2218,7 +2237,9 @@ export class UI {
    *  ② :42988 guideItem.IsAir 门（guidePlaced 反查态不合成）;
    *  ③ 悬停复核（原版=Draw 逐帧仅悬停焦点行调用本函数）——不悬停【暂停不清锚】,
    *     回行续做=原版按住中移出再移回续做同相（focusRecipe 不随悬停迁移,flag 臂
-   *     需 fresh click 而按住中恒 false）;matches(':hover') 含子元素悬停传播;
+   *     需 fresh click 而按住中恒 false）;★BJ535:判定走 hoverHitTest 每拍坐标
+   *     hit-test（含子元素传播）,曾用 matches(':hover') 依赖 mousemove 事件流
+   *     =Windows 静止长按推进冻结根因（见 hoverHitTest 注）;
    *  ④ :42999 `stackSplit <= 1` 门（冷却窗内不连做——梯/递减已先行,本臂见后相）;
    *  ⑤ 逐拍 num2=(superFastStack+1)×(ShiftInUse?10:1)（:42994-42996——Shift 电平
    *     逐拍读,长按中途按/松 Shift 即刻变档）→ vanillaCraft(times=num2)（逐轮双门
@@ -2231,7 +2252,7 @@ export class UI {
       return;
     }
     if (this.guidePlaced) return;                           // :42988 guideItem.IsAir 门
-    if (!ch.el.matches(':hover')) return;                   // 离行暂停,回行续做
+    if (!this.hoverHitTest(ch.el)) return;                  // 离行暂停,回行续做（★BJ535 坐标 hit-test,原 matches(':hover')=事件流依赖冻结根因）
     if (this.stackSplit > 1) return;                        // :42999 冷却门
     if (!this.game) return;
     const num2 = (this.superFastStack + 1) * (this.uiBtnShift ? 10 : 1);   // :42994-42996

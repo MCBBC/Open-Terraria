@@ -100,6 +100,12 @@ function parseNames() {
 }
 const NAMES = parseNames();
 
+// ★蠕虫链 sidecar(B6 五十四刀恢复刀):手补 worm 声明曾被 --write 覆写(desert_scourge
+//  aiStyle 6 幸存=提取器映射,worm=手补阵亡)——本表=蠕虫链权威,write 时合并进头 json。
+const WORM_CHAINS = existsSync(join(OUT, '..', '..', 'tools', 'extract-calamity', 'worm-chains.json'))
+  ? JSON.parse(readFileSync(join(OUT, '..', '..', 'tools', 'extract-calamity', 'worm-chains.json'), 'utf8'))
+  : {};
+
 const curatedNpcKeys = new Set(JSON.parse(readFileSync(join(OUT, '.curated-npcs.json'), 'utf8')));
 // loot 材料键解析(盘键+curated 归一别名;与 recipes resolveItemKey 同式)
 const diskItemKeysLoot = new Set(readdirSync(join(OUT, 'content', 'items')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, '')));
@@ -393,6 +399,8 @@ for (const f of csFiles) {
   if (!hasPng) stats.noTexture++;
 
   if (WRITE) {
+    // ★蠕虫链 sidecar 合并(五十四刀恢复刀):--write 不再覆写手补 worm 声明
+    if (WORM_CHAINS[key]) raw.worm = WORM_CHAINS[key];
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, `${key}.json`), JSON.stringify(raw, null, 2) + '\n');
     if (hasPng) { mkdirSync(texDir, { recursive: true }); copyFileSync(png, join(texDir, `${key}.png`)); }

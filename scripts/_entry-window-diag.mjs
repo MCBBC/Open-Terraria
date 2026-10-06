@@ -167,12 +167,14 @@ await page.evaluate(() => {
         wA: cc ? cc.workerAwaiting.size : -1,
         bA: cc ? cc.budgetAwaiting.size : -1,
         dq: cc ? cc.dirtyQueue.length : -1,
+        eb: window.__swEntryBoostGet ? window.__swEntryBoostGet() === true : false,
         fps: g.fps,
         pend: sh ? sh.pending : null,
         shBakes: sh ? sh.bakes : null,
         shMs: sh ? Math.round(sh.bakeMs * 10) / 10 : null,
         heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
         spent: typeof cc?._bakeSpent === 'number' ? cc._bakeSpent : null,
+        bb: cc ? cc.bakeBudgetMs : null,
       });
     } catch (e) { if (W.err.length < 20) W.err.push('poll:' + (e && e.message || e)); }
   }, 200);
@@ -183,12 +185,13 @@ const mark = (n) => page.evaluate((n) => window.__swInst?.marks.push({ n, t: per
 
 // TileShine shineStats 引用入页（快照泵消费）
 await page.evaluate(async () => {
-  const { shineStats } = await import('/src/render/TileShine.ts');
-  window.__swShine = shineStats;
-  window.__swCfg = { shineBudgetMs: (await import('/src/render/TileShine.ts')).shineBudgetMs, shineBudgetExplicit: (await import('/src/render/TileShine.ts')).shineBudgetExplicit };
+  const T = await import('/src/render/TileShine.ts');
+  window.__swShine = T.shineStats;
+  window.__swEntryBoostGet = () => T.shineEntryBoostActive();
+  window.__swCfg = { shineBudgetMs: T.shineBudgetMs, shineBudgetExplicit: T.shineBudgetExplicit };
 });
 
-// ---- 进世界（b2final 同款 UI 流;固定种子=可复现）----
+// ---- 进世界 ----
 // 用户态档位（B2 上下文）:cap120 + subtle——先置档再进世界,入场窗即处于该档
 const CAP = Number(process.env.SW_DIAG_CAP ?? '120');
 await page.evaluate(async (cap) => {
@@ -197,7 +200,20 @@ await page.evaluate(async (cap) => {
   await options.set('frameSkipMode', 'subtle');
 }, CAP);
 log(`frameCap=${CAP} subtle set`);
-await page.click('[data-act=sp]');
+// SW_DIAG_LOAD=1:走 loadJson 真实存档路径（public/debug-save.sbw.json=用户档代理）
+if (process.env.SW_DIAG_LOAD === '1') {
+  log('loadJson-begin (debug-save.sbw.json)');
+  await page.evaluate(async () => {
+    const res = await fetch('/debug-save.sbw.json');
+    const text = await res.text();
+    (window).__swLoadErr = null;
+    try { await (window).__swFlow.loadJson(text); }
+    catch (e) { (window).__swLoadErr = String(e && e.message || e); }
+  });
+  const lerr = await page.evaluate(() => window.__swLoadErr);
+  if (lerr) { console.log('loadJson 失败:', lerr); await browser.close(); process.exit(1); }
+} else {
+  await page.click('[data-act=sp]');
 await page.waitForSelector('.sw-vsel', { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
@@ -224,6 +240,7 @@ if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await new Promise((r) => setTimeout(r, 300));
   await page.click('[data-act=create]');
 }
+}
 await mark('worldgen-begin'); log('worldgen-begin');
 await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.player, { timeout: 240000, polling: 500 });
 await mark('inworld'); log('inworld — sampling ' + SAMPLE_S + 's');
@@ -231,6 +248,27 @@ const hooked = await page.evaluate(() => ({ hooked: window.__swInst.hooked === t
 console.log('hooks:', JSON.stringify(hooked));
 
 await new Promise((r) => setTimeout(r, SAMPLE_S * 1000));
+await mark('static-done'); log('static-done');
+// ---- 移动臂:按住 → 走 30s（真实游玩面=chunk 流式烘焙+shine+光照持续负载）----
+const WALK_S = Number(process.env.SW_DIAG_WALK ?? '30');
+if (WALK_S > 0) {
+  await page.keyboard.down('ArrowRight');
+  await mark('walk-begin'); log('walk-begin');
+  await new Promise((r) => setTimeout(r, WALK_S * 1000));
+  await page.keyboard.up('ArrowRight');
+  await mark('walk-done'); log('walk-done');
+}
+// ---- 二次进世界回归（SW_DIAG_REENTRY=1）:退回标题→quickLoad 重进——验证
+//  boost 归还常态后再次开窗重新提预算（begin 捕获 prev=常态值,end 归还）----
+if (process.env.SW_DIAG_REENTRY === '1') {
+  await mark('reentry-begin');
+  await page.evaluate(async () => { await window.__swFlow.quitToMenu(); });
+  await new Promise((r) => setTimeout(r, 4000));
+  await page.evaluate(async () => { await window.__swFlow.quickLoad(); });
+  log('reentry: quickLoad fired');
+  await new Promise((r) => setTimeout(r, 20000));
+  await mark('reentry-done'); log('reentry-done');
+}
 await mark('done'); log('done');
 
 const out = await page.evaluate(() => {
@@ -271,13 +309,15 @@ const shineDeltaSec = (s, a, b) => {
 };
 if (R.renderT?.length) {
   const inT0 = M['inworld'];
+  const walkS = M['walk-begin'] != null && M['walk-done'] != null ? { a: M['walk-begin'], b: M['walk-done'] } : null;
   const rel = R.renderT.filter(t => t >= inT0);
   console.log(`\n=== 入场窗逐秒分解（inworld 起 ${SAMPLE_S}s;seed=${SEED} cap=${CAP} subtle）===`);
   console.log('sec  n   p50    p95    p99   max  >13 | bake# bakeMs lightMs shineMs tex#  mmMs ltMs heap');
   const perSec = [];
-  let texPrev = { n: R.tex.n, sub: R.tex.sub_n };
-  for (let s = 0; s < SAMPLE_S; s++) {
+  const totalS = walkS ? Math.ceil((walkS.b - inT0) / 1000) : SAMPLE_S;
+  for (let s = 0; s < totalS; s++) {
     const a = inT0 + s * 1000, b = a + 1000;
+    const walking = walkS ? a >= walkS.a - 20 && b <= walkS.b + 20 : false;
     const fr = rel.filter(t => t >= a && t < b);
     const gaps = [];
     for (let i = 1; i < fr.length; i++) gaps.push(fr[i] - fr[i - 1]);
@@ -297,16 +337,28 @@ if (R.renderT?.length) {
       gt13: gaps.filter(g => g > 13).length,
     };
     perSec.push(row);
-    console.log(`${String(s).padStart(2)}  ${String(row.n).padStart(3)} ${(row.p50 ?? 0).toFixed(1).padStart(6)} ${(row.p95 ?? 0).toFixed(1).padStart(6)} ${(row.p99 ?? 0).toFixed(1).padStart(6)} ${(row.max ?? 0).toFixed(0).padStart(5)} ${String(row.gt13).padStart(4)} | ${String(bakeN).padStart(5)} ${bakeMs.toFixed(0).padStart(6)} ${lightMs.toFixed(0).padStart(7)} ${sh.ms.toFixed(1).padStart(7)} ${String(texN).padStart(4)} ${mmMs.toFixed(1).padStart(5)} ${ltMs.toFixed(0).padStart(4)} ${heap ?? '-'}`);
+    console.log(`${(walking ? 'W' : String(s)).padStart(2)}  ${String(row.n).padStart(3)} ${(row.p50 ?? 0).toFixed(1).padStart(6)} ${(row.p95 ?? 0).toFixed(1).padStart(6)} ${(row.p99 ?? 0).toFixed(1).padStart(6)} ${(row.max ?? 0).toFixed(0).padStart(5)} ${String(row.gt13).padStart(4)} | ${String(bakeN).padStart(5)} ${bakeMs.toFixed(0).padStart(6)} ${lightMs.toFixed(0).padStart(7)} ${sh.ms.toFixed(1).padStart(7)} ${String(texN).padStart(4)} ${mmMs.toFixed(1).padStart(5)} ${ltMs.toFixed(0).padStart(4)} ${heap ?? '-'}`);
   }
-  // 不稳窗量化:持续 5s p95<12.5
+  // 不稳窗量化:持续 5s p95<12.5（静止段内;W 行不参与窗口首达判定）
   let stableFrom = -1;
   for (let i = 0; i + 5 <= perSec.length; i++) {
     let ok = true;
-    for (let j = i; j < i + 5; j++) if (!(perSec[j].p95 < 12.5)) { ok = false; break; }
+    for (let j = i; j < i + 5; j++) { if (!(perSec[j].p95 < 12.5)) { ok = false; break; } if (walkS && j >= SAMPLE_S) { ok = false; break; } }
     if (ok) { stableFrom = i; break; }
   }
   console.log(`\n持续5s p95<12.5 首达秒: ${stableFrom < 0 ? '未达' : stableFrom + 's'}`);
+  if (walkS) {
+    // 走段聚合
+    const wFr = rel.filter(t => t >= walkS.a && t < walkS.b);
+    const wGaps = [];
+    for (let i = 1; i < wFr.length; i++) wGaps.push(wFr[i] - wFr[i - 1]);
+    const ws = [...wGaps].sort((x, y) => x - y);
+    console.log(`走段(${WALK_S}s): n=${wGaps.length} p50=${q(ws, .5).toFixed(2)} p95=${q(ws, .95).toFixed(2)} max=${ws[ws.length - 1]?.toFixed(1)} >13=${wGaps.filter(g => g > 13).length}`);
+    const wBake = R.bakeEvents.filter(e => e.t >= walkS.a && e.t < walkS.b);
+    const wLight = R.lightEvents.filter(e => e.t >= walkS.a && e.t < walkS.b);
+    const wMm = R.mmEvents.filter(e => e.t >= walkS.a && e.t < walkS.b);
+    console.log(`走段系统: bake=${wBake.length}次/${wBake.reduce((v, e) => v + e.ms, 0).toFixed(0)}ms light=${wLight.length}次/${wLight.reduce((v, e) => v + e.ms, 0).toFixed(0)}ms mm=${wMm.length}次/${wMm.reduce((v, e) => v + e.ms, 0).toFixed(0)}ms`);
+  }
   const allGaps = [];
   for (let i = 1; i < rel.length; i++) allGaps.push(rel[i] - rel[i - 1]);
   const ags = [...allGaps].sort((x, y) => x - y);
@@ -328,6 +380,23 @@ if (R.renderT?.length) {
   console.log(`shine 增量: ${JSON.stringify(R.shine)}`);
   console.log(`worker posts: ${JSON.stringify(R.posts)}  workers=${JSON.stringify(R.workers)}`);
   console.log(`cfg: bakeBudgetMs=${R.bakeBudgetMs} bakeClient=${R.bakeClientAlive} lightWorker=${R.lightWorkerAlive} shineCfg=${JSON.stringify(R.cfg)} world=${JSON.stringify(R.worldDims)} hooked=${R.hooked}`);
+  // 幕布期预算批验证面:冻结窗内 bakeBudgetMs 提升是否生效/掀后归还
+  if (R.samples?.length) {
+    const freezeSamples = R.samples.filter(x => x.ef);
+    const afterSamples = R.samples.filter(x => !x.ef && x.bb != null);
+    const boostSeen = R.samples.some(x => x.eb === true);
+    const bbDuring = freezeSamples.map(x => x.bb).filter(v => v != null);
+    const bbAfter = afterSamples.length ? afterSamples[afterSamples.length - 1].bb : null;
+    console.log(`预算批: 冻结窗样本 bb=${JSON.stringify([...new Set(bbDuring)])} boostSeen=${boostSeen} 终态 bb=${bbAfter}（常态=8）`);
+    // 掀幕首帧红线:endEntryFreeze 后 1s 内最大帧距
+    if (R.freezeAt?.end?.length && R.renderT?.length) {
+      const e0 = R.freezeAt.end[R.freezeAt.end.length - 1];
+      const rel2 = R.renderT.filter(t => t >= e0 && t < e0 + 1000);
+      const eg = [];
+      for (let i = 1; i < rel2.length; i++) eg.push(rel2[i] - rel2[i - 1]);
+      console.log(`掀幕首帧红线: endFreeze 后 1s 内 n=${eg.length} max=${eg.length ? Math.max(...eg).toFixed(1) : '-'}ms`);
+    }
+  }
   if (R.err?.length) console.log('inst err:', R.err.slice(0, 5));
 }
 await browser.close();

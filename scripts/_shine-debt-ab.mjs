@@ -43,6 +43,20 @@ const errs = [];
 try {
   const page = await openPage(browser, { errors: errs, maxErrors: 60 });
   installPinnedRandom(page, 118606602);
+  // ★硬冻结钩（digest 可比性的根）：拦 __swGame 赋值（mainFlow onWorldReady,世界
+  //   首帧前）即 no-op fixedUpdate——世界模拟零帧运行,终态内容 = 加载档 + 本探针
+  //   确定性编辑表,与帧时序/装载时长完全解耦。（实体清桶不再需要——模拟根本不跑）
+  await page.evaluateOnNewDocument(() => {
+    let frozen = null;
+    Object.defineProperty(window, '__swGame', {
+      configurable: true,
+      get() { return frozen; },
+      set(v) {
+        frozen = v;
+        try { v.__simFrozen = true; v.fixedUpdate = () => {}; } catch { /* null 赋值 */ }
+      },
+    });
+  });
   const boot = await bootstrap(page, ORIGIN);
   console.log('bootstrap:', JSON.stringify(boot));
   if (!boot.ok) process.exit(1);
@@ -62,21 +76,8 @@ try {
     const st = g.world.store;
     if (shineOff) globalThis.__SW_SHINE_OFF = true;
     if (memoOff) globalThis.__SW_SHINE_MEMO_OFF = true;
-    // ★确定性面:每 fixedUpdate 后清实体桶(敌怪/掉落/弹幕/生物/NPC/props/粒子)——
-    //   实体模拟随帧数演化,帧率差 ⇒ 模拟史差 ⇒ 终态内容差 ⇒ digest 不可比。
-    //   清桶后世界终态 = 初始档 + 确定性编辑表,与帧时序解耦。
-    if (!window.__simNeutral) {
-      window.__simNeutral = true;
-      const E = g.entities;
-      const fu0 = g.fixedUpdate.bind(g);
-      g.fixedUpdate = (...a) => {
-        const r = fu0(...a);
-        E.enemies.length = 0; E.drops.length = 0; E.projectiles.length = 0;
-        E.critters.length = 0; E.npcs.length = 0; E.props.length = 0;
-        g.particles.length = 0;
-        return r;
-      };
-    }
+    // ★硬冻结已在 __swGame setter 装好(fixedUpdate=no-op,世界零模拟帧)——此处只核验
+    const simFrozen = g.__simFrozen === true;
     const m = await import('/src/render/TileShine.ts');
     const tdefs = (await import('/src/data/tiles.ts')).TILE_DEFS;
     const sheetOf = (type) => tdefs[type]?.vanilla?.sheet ?? null;
@@ -152,7 +153,7 @@ try {
     };
     return {
       ok: true, solidNear: edits.length, edits, dens: best.dens, len,
-      pinX: shaftX, pinTileY: pinTile, densWindow: best,
+      pinX: shaftX, pinTileY: pinTile, densWindow: best, simFrozen,
       search: location.search.slice(0, 80),
     };
   }, { pinTile: PIN_TILE, shaftX: SHAFT_X, len: TUNNEL_LEN,
@@ -223,10 +224,29 @@ try {
   const digests = await page.evaluate(async (b) => {
     const g = window.__swGame;
     const m = await import('/src/render/TileShine.ts');
-    return m.shineDebugChunkDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
+    const rows = m.shineDebugChunkDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
+    // ★逐 16×16 格芯 byte-sum（差分定位面;mul+add 分面,格芯只读不含溢出带）
+    const cells = await m.shineDebugCellDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
+    return { rows, cells };
   }, { cx0, cx1, cy0, cy1 }).catch((e) => ({ err: String(e).slice(0, 200) }));
-  const nz = Array.isArray(digests) ? digests.filter((x) => x.sum > 0).length : 0;
-  console.log(`digests box cx[${cx0},${cx1}] cy[${cy0},${cy1}] entries=${Array.isArray(digests) ? digests.length : '-'} nz=${nz}`);
+  const nz = Array.isArray(digests?.rows) ? digests.rows.filter((x) => x.sum > 0).length : 0;
+  console.log(`digests box cx[${cx0},${cx1}] cy[${cy0},${cy1}] entries=${Array.isArray(digests?.rows) ? digests.rows.length : '-'} nz=${nz}`);
+
+  // ---- 债3 格级断行逐位恒等(直证):一次烘完 vs 格序数链断-续,像素校验和对拍 ----
+  const cellId = await page.evaluate(async (b) => {
+    const g = window.__swGame;
+    const m = await import('/src/render/TileShine.ts');
+    const cx = b.cx0 + 1, cy = b.cy0 + 1;   // 盒内首个非空 chunk
+    const out = m.shineDebugResumeIdentity(g.renderer.atlas, g.world, cx, cy, 0, [],
+      [[1, 1, 1, 1, 1], [1, 15, 1, 15], [3, 5, 7, 13], [16, 16, 16, 16], [64, 64], [255, 1]]);
+    return { cx, cy, rows: out };
+  }, { cx0, cy0 }).catch((e) => ({ err: String(e).slice(0, 200) }));
+  if (cellId && cellId.rows) {
+    const allEq = cellId.rows.every((r) => r.equal);
+    console.log(`cellSplits identity @(${cellId.cx},${cellId.cy}): ${cellId.rows.map((r) => `${r.split}=${r.equal ? 'EQ' : 'DIFF'}`).join(' ')} all=${allEq}`);
+  } else {
+    console.log('cellSplits identity: ERR', JSON.stringify(cellId));
+  }
 
   await page.screenshot({ path: `${OUT}/${TAG}-settled.png` });
   const rows = await page.evaluate(() => ({ rows: window.__rows, mineStart: window.__mineStart,

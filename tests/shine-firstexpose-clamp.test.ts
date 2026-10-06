@@ -78,43 +78,46 @@ describe('首曝钳制 ② shineFpCache — (pair,q) 键控指纹脏标缓存', 
   it('同 pair 同 q = 缓存命中（槽位 1,重复调用零新增）', () => {
     const world = mkWorld();
     const pair = fakePair(1);
-    const fp1 = shineChunkFingerprintCached(world, pair, 0, 0, 0);
+    const fp1 = shineChunkFingerprintCached(world, null, pair, 0, 0, 0);
     expect(fp1).toBeTypeOf('number');
     expect(shineFpCacheSlotsForTest(pair)).toBe(1);
-    expect(shineChunkFingerprintCached(world, pair, 0, 0, 0)).toBe(fp1);
+    expect(shineChunkFingerprintCached(world, null, pair, 0, 0, 0)).toBe(fp1);
     expect(shineFpCacheSlotsForTest(pair)).toBe(1);
   });
   it('★同 pair 内容变更 = 返回旧值（缓存跳 mix2 的直接证明;重算必得新值）', () => {
     const world = mkWorld();
     const pair = fakePair(2);
-    const fp0 = shineChunkFingerprintCached(world, pair, 0, 0, 0);
+    const fp0 = shineChunkFingerprintCached(world, null, pair, 0, 0, 0);
     world.store.type[world.store.idx(3, 3)] = 25;   // 挖出/填入 shine 格(±1 环带内)
-    expect(shineChunkFingerprintCached(world, pair, 0, 0, 0)).toBe(fp0);
+    expect(shineChunkFingerprintCached(world, null, pair, 0, 0, 0)).toBe(fp0);
     // 对照:换 pair（=底图重烘信号）后重算,值随内容变
-    const fpNewPair = shineChunkFingerprintCached(world, fakePair(3), 0, 0, 0);
+    const fpNewPair = shineChunkFingerprintCached(world, null, fakePair(3), 0, 0, 0);
     expect(fpNewPair).not.toBe(fp0);
   });
   it('pair 换代自然失忆 + 内容确定性:同内容异 pair = 同 fp（跨 pair memo 复用的前提）', () => {
     const worldA = mkWorld();
     const worldB = mkWorld();   // 同构建序列 = 同内容
-    const fpA = shineChunkFingerprintCached(worldA, fakePair(4), 0, 0, 0);
-    const fpB = shineChunkFingerprintCached(worldB, fakePair(5), 0, 0, 0);
+    const fpA = shineChunkFingerprintCached(worldA, null, fakePair(4), 0, 0, 0);
+    const fpB = shineChunkFingerprintCached(worldB, null, fakePair(5), 0, 0, 0);
     expect(fpB).toBe(fpA);
   });
   it('q 键控:shimmer 档位各占槽（8+1 档域,互不串档）', () => {
     const world = mkWorld();
     const pair = fakePair(6);
-    const fp0 = shineChunkFingerprintCached(world, pair, 0, 0, 0);
-    const fpHalf = shineChunkFingerprintCached(world, pair, 0, 0, 0.5);
+    const fp0 = shineChunkFingerprintCached(world, null, pair, 0, 0, 0);
+    const fpHalf = shineChunkFingerprintCached(world, null, pair, 0, 0, 0.5);
     expect(fpHalf).not.toBe(fp0);
     expect(shineFpCacheSlotsForTest(pair)).toBe(2);
-    expect(shineChunkFingerprintCached(world, pair, 0, 0, 0.5)).toBe(fpHalf);
+    expect(shineChunkFingerprintCached(world, null, pair, 0, 0, 0.5)).toBe(fpHalf);
   });
 });
 
 describe('首曝钳制 ③ 源级锁 — 接线在位（防静默拆除）', () => {
   it('爆发闩内嵌在 tbNow 构造（adaptive 外层,同点只降不升）', () => {
-    expect(TSHINE).toContain('? shineBurstClamp(adaptiveShineBudgetMs(shineBudgetExplicit,');
+    // ★2026-10-06 幕布期提升臂形演进:原 `? shineBurstClamp(` 改 `: shineBurstClamp(`
+    //   （boost 直通臂=新 `?` 支;闩仍内嵌 tbNow 构造/adaptive 外层/只降不升,本锚
+    //   意图不变——见 TileShine drawTileShineGrid 案 b 注与 tests/entry-freeze-budget-boost）。
+    expect(TSHINE).toContain(': shineBurstClamp(adaptiveShineBudgetMs(shineBudgetExplicit,');
     expect(TSHINE).toContain('export function shineBurstClamp(');
     expect(TSHINE).toContain('if (explicit !== null || !shineBurstLatch.active) return tbNow;');
     expect(TSHINE).toContain('return Math.min(tbNow, SHINE_TRANSIT_BUDGET_MS);');
@@ -133,8 +136,8 @@ describe('首曝钳制 ③ 源级锁 — 接线在位（防静默拆除）', () 
   });
   it('指纹缓存三调用点全换装（schedule memo 门/首曝 memo 门/烘后 memo 存）', () => {
     // 旧直调仅剩缓存函数体内部一处（唯一 mix2 执行点）;生产调用面零直调残留
-    expect(TSHINE.match(/shineChunkFingerprint\(world, cx, cy, shimmerQ\)/g)?.length).toBe(1);
-    expect(TSHINE.match(/shineChunkFingerprintCached\(world, pair, cx, cy, shimmerQ\)/g)?.length).toBe(3);
+    expect(TSHINE.match(/shineChunkFingerprint\(world, atlas, cx, cy, shimmerQ\)/g)?.length).toBe(1);   // ★atlas 装载代际入参(2026-10-06 memo 陈旧服洞)
+    expect(TSHINE.match(/shineChunkFingerprintCached\(world, atlas, pair, cx, cy, shimmerQ\)/g)?.length).toBe(3);
     expect(TSHINE).toContain('const shineFpCache = new WeakMap<ChunkPair, Map<number, number>>();');
   });
   it('逃生门未被拆除（显式逐字/计数路径/__SW_SHINE_OFF/__SW_SHINE_MEMO_OFF）', () => {

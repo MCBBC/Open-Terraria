@@ -39,8 +39,8 @@
 // 剩余（设置/跳跃系统级，默认态恒 false 与原版一致）：
 //   ④ tryKeepingHoveringUp/Down 锁存 = HoverControl Click 模式专属（Player.cs:361
 //      默认 Hold → :24985 恒清零）；Click 设置项未移植（设置系统级）；
-//   ⑤ isPerformingJump_DownDash（5465 手持下冲跳 :13978）未移植（跳跃系统级）
-//      → downDash 恒 false 与现状一致。
+//   ⑤ isPerformingJump_DownDash（5465 手持下冲跳 :13978）——★BJ534（2026-10-06）
+//      已清偿：下砸态机落位（Player.isDownDashing），WingFrame downDash 输入已接线。
 export interface WingDraw {
   /** 绘制切帧数（num14 / Frame(1,N) 的 N；28 用 miscCounter 动画帧率恒 4） */
   frames: number;

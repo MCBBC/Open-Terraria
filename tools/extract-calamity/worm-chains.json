@@ -1,0 +1,18 @@
+{
+  "desert_scourge_head": { "body": "desert_scourge_body", "tail": "desert_scourge_tail", "bodyCount": 15 },
+  "aquatic_scourge_head": { "body": "aquatic_scourge_body", "tail": "aquatic_scourge_tail", "bodyCount": 29 },
+  "astrum_deus_head": { "body": "astrum_deus_body", "tail": "astrum_deus_tail", "bodyCount": 49 },
+  "desert_nuisance_head": { "body": "desert_nuisance_body", "tail": "desert_nuisance_tail", "bodyCount": 7 },
+  "desert_nuisance_head_young": { "body": "desert_nuisance_body_young", "tail": "desert_nuisance_tail_young", "bodyCount": 7 },
+  "devourerof_gods_head": { "body": "devourerof_gods_body", "tail": "devourerof_gods_tail", "bodyCount": 100 },
+  "eidolon_wyrm_head": { "body": "eidolon_wyrm_body", "tail": "eidolon_wyrm_tail", "bodyCount": 40 },
+  "gulper_eel_head": { "body": "gulper_eel_body", "tail": "gulper_eel_tail", "bodyCount": 20 },
+  "oarfish_head": { "body": "oarfish_body", "tail": "oarfish_tail", "bodyCount": 40 },
+  "primordial_wyrm_head": { "body": "primordial_wyrm_body", "tail": "primordial_wyrm_tail", "bodyCount": 40 },
+  "perforator_head_small": { "body": "perforator_body_small", "tail": "perforator_tail_small", "bodyCount": 4 },
+  "perforator_head_medium": { "body": "perforator_body_medium", "tail": "perforator_tail_medium", "bodyCount": 14 },
+  "perforator_head_large": { "body": "perforator_body_large", "tail": "perforator_tail_large", "bodyCount": 14 },
+  "sepulcher_head": { "body": "sepulcher_body", "tail": "sepulcher_tail", "bodyCount": 50 },
+  "storm_weaver_head": { "body": "storm_weaver_body", "tail": "storm_weaver_tail", "bodyCount": 29 },
+  "thanatos_head": { "body": "thanatos_body1", "tail": "thanatos_tail", "bodyCount": 100 }
+}

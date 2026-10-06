@@ -573,7 +573,9 @@ function chestDigestOf(world: World): number {
   chestDigestCache.set(chests, { tick: tileAnim.tick, v });
   return v;
 }
-function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: number): number {
+function shineChunkFingerprint(
+  world: World, atlas: SpriteAtlas | null, cx: number, cy: number, shimmerQ: number,
+): number {
   const st = world.store;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
   let h = 0x811c9dc5 | 0;
@@ -614,6 +616,15 @@ function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: n
   mix2(st.showInvisibleBlocks ? 1 : 0);
   mix2(shimmerQ * 255);
   if (hasChest) mix2(chestDigestOf(world));
+  // ★atlas 装载代际入指纹（2026-10-06 三债定谳副产,IIIII252 memo 陈旧服正确性洞）:
+  //   bake 链 stampShineCell→drawVanillaCell 消费 atlas.vimages（懒取,未就位返回
+  //   null=画空/fallback）——memo fp 原不含 atlas 态 ⇒ 表晚到前烘的条目（缺表像素）
+  //   在晚到重烘（markDirty→pair 换代）后按内容 fp 【全等】被 memo 误复用=缺表
+  //   shine 钉死。零挖掘稳定性探针实证（scripts/_shine-stability-probe.mjs:同内容
+  //   fps 两跑 digest 不同）。vimages.size=单调装载进度代理:晚到 ⇒ size 变 ⇒ fp 变
+  //   ⇒ miss ⇒ 重烘取新表;settled 后恒定 ⇒ memo 稳态零开销。旧 memo 前时代该洞由
+  //   「pair 换代必 q-miss 重烘」天然掩盖,memo 化后暴露。
+  mix2(atlas ? atlas.vimages.size : 0);
   return h >>> 0;
 }
 
@@ -629,7 +640,8 @@ function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: n
 //   指纹全等 ⇒ bakeShineChunk 是这些输入的纯函数 ⇒ 前缀行画布产物逐位全等
 //   ⇒ 跨 pair 收养安全（tryCarryShineProgress 消费）。
 export function shineFpPrefix(
-  world: World, cx: number, cy: number, resumeRow: number, resumeCol: number, shimmerQ: number,
+  world: World, atlas: SpriteAtlas | null, cx: number, cy: number,
+  resumeRow: number, resumeCol: number, shimmerQ: number,
 ): number {
   const st = world.store;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
@@ -668,6 +680,7 @@ export function shineFpPrefix(
   mix2(st.showInvisibleBlocks ? 1 : 0);
   mix2(shimmerQ * 255);
   if (hasChest) mix2(chestDigestOf(world));
+  mix2(atlas ? atlas.vimages.size : 0);   // ★atlas 装载代际（全量 fp 同项,见其注）
   return h >>> 0;
 }
 
@@ -692,13 +705,13 @@ const shineFpCache = new WeakMap<ChunkPair, Map<number, number>>();
 
 /** 导出面 = 单测/取证（生产调用点恒 ensureEntry 三处）。 */
 export function shineChunkFingerprintCached(
-  world: World, pair: ChunkPair, cx: number, cy: number, shimmerQ: number,
+  world: World, atlas: SpriteAtlas | null, pair: ChunkPair, cx: number, cy: number, shimmerQ: number,
 ): number {
   let m = shineFpCache.get(pair);
   if (!m) { m = new Map<number, number>(); shineFpCache.set(pair, m); }
   const hit = m.get(shimmerQ);
   if (hit !== undefined) return hit;
-  const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+  const fp = shineChunkFingerprint(world, atlas, cx, cy, shimmerQ);
   m.set(shimmerQ, fp);
   return fp;
 }
@@ -732,8 +745,9 @@ export function shineDebugMemoSeedForTest(
 
 /** 单测：tryCarryShineProgress 包装（schedule ① 同源）。 */
 export function shineDebugTryCarryForTest(
-  world: World, oldPair: ChunkPair, cur: ChunkPair, cx: number, cy: number, shimmerQ: number,
-): boolean { return tryCarryShineProgress(world, oldPair, cur, cx, cy, shimmerQ); }
+  world: World, atlas: SpriteAtlas | null, oldPair: ChunkPair, cur: ChunkPair,
+  cx: number, cy: number, shimmerQ: number,
+): boolean { return tryCarryShineProgress(world, atlas, oldPair, cur, cx, cy, shimmerQ); }
 
 /** 探针：池深（债1 周转取证）。 */
 export function shinePoolDepthForTest(): number { return shineCanvasPool.length; }
@@ -983,6 +997,17 @@ function bakeShineChunk(
   // = resumeCol=0 特例,旧行为全覆盖。过冲上界从「死线+单密集行(~2ms+)」收紧为
   // 「死线+单密集格(~0.15-0.3ms)」。
   let lxStart = lc0;
+  // ★债1 定谳副产（2026-10-06）:条目画布「绘后续写」必须换代纹理键——acc 缺省链
+  //  (bgl+bglShim+b2b)下条目画布经 GLShimExecutor.drawImage→resolveTex 静态支
+  //  (er:texId:epoch:rect 键)缓存,而 GLSpriteLayer.texFromRegion 同键命中【不重传
+  //  内容】(texs.get 命中即返)⇒ partial 条目首绘后 resume 原地续写,epoch 恒 0 =
+  //  缓存命中首绘(部分)内容=后续行 GL 恒缺(texId.ts「生命水晶 tileShine 案同族
+  //  根病」在本文件的未处理面;TintAtlas.ts:68 回收页 bump 先例)。digest 通道只测
+  //  画布内容,不覆盖 GL 呈现层——本 bump 补齐该面。机制:凡本调用 stamp 过的层,
+  //  返回前 bump(内容可能已变);同帧 schedule 烘→扫描绘,绘制期 resolveTex 读新
+  //  epoch≠缓存 ⇒ 重传当前内容。新鲜画布首烘 bump=0→1 无害(首绘本就要上传);
+  //  池画布获取点已 bump 过,此处再 bump=键再换代,同样正确。
+  let stampedMul = false, stampedAdd = false;
   for (let ly = ly0; ly < rowLimit; ly++) {
     for (let lx = lxStart; lx < CHUNK; lx++) {
       if ((deadline !== undefined && performance.now() > deadline)
@@ -990,8 +1015,10 @@ function bakeShineChunk(
         entry._resumeRow = ly;   // 断点行号:本格未烘,下帧从此格续
         entry._resumeCol = lx;   // 断点列号(行首=0;续行从列 0)
         if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
-          entry._resumeFp = shineFpPrefix(world, cx, cy, ly, lx, shimmerQ);   // ★债2 carry 凭证
+          entry._resumeFp = shineFpPrefix(world, atlas, cx, cy, ly, lx, shimmerQ);   // ★债2 carry 凭证
         }
+        if (stampedMul && entry.mul) bumpTexEpoch(entry.mul);
+        if (stampedAdd && entry.add) bumpTexEpoch(entry.add);
         return entry;
       }
       const x = x0 + lx, y = y0 + ly;
@@ -1029,6 +1056,7 @@ function bakeShineChunk(
         stampShineCell(atlas, world, x, y, sheet, van.frame, van.fw ?? 1, van.fh ?? 1,
           type, st.frameX[i], st.frameY[i], [0, 0, 0],
           entry._addCtx!, lx * TILE - PAD, ly * TILE - PAD, SCR, SCR, true);
+        stampedAdd = true;
       } else if (delta) {
         if (!entry.mul) {
           entry.mul = acquireShineCanvas();   // ★债1 池化获取点=原 createElement 点
@@ -1039,6 +1067,7 @@ function bakeShineChunk(
         stampShineCell(atlas, world, x, y, sheet, van.frame, van.fw ?? 1, van.fh ?? 1,
           type, st.frameX[i], st.frameY[i], delta,
           entry._mulCtx!, lx * TILE - PAD, ly * TILE - PAD, SCR, SCR);
+        stampedMul = true;
       }
     }
     lxStart = 0;   // ★债3:断点列号只属断点行,续行恒从列 0
@@ -1047,10 +1076,14 @@ function bakeShineChunk(
     entry._resumeRow = rowLimit;   // 行数限制断行(测试面):同时间盒语义的部分标记
     entry._resumeCol = 0;
     if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
-      entry._resumeFp = shineFpPrefix(world, cx, cy, rowLimit, 0, shimmerQ);
+      entry._resumeFp = shineFpPrefix(world, atlas, cx, cy, rowLimit, 0, shimmerQ);
     }
+    if (stampedMul && entry.mul) bumpTexEpoch(entry.mul);
+    if (stampedAdd && entry.add) bumpTexEpoch(entry.add);
     return entry;
   }
+  if (stampedMul && entry.mul) bumpTexEpoch(entry.mul);     // 烘完亦可能相对首绘有新内容
+  if (stampedAdd && entry.add) bumpTexEpoch(entry.add);
   entry._resumeRow = undefined;   // ★IIIII249 烘完必须清断行标记——否则条目永远"部分",
   entry._resumeCol = undefined;   // 每帧被重续烘尾部行(steady 实测曾因此 100% stalled)
   entry._resumeFp = undefined;
@@ -1071,6 +1104,26 @@ export function budgetExhausted(budget: ShineBakeBudget | undefined): boolean {
 /** 预算扣减(仅计数形态;时间盒由死线自然耗尽)。导出面 = 单测。 */
 export function budgetConsume(budget: ShineBakeBudget | undefined): void {
   if (budget && 'left' in budget) budget.left--;
+}
+
+// ---- ★幕布期 shine 盒提升（2026-10-06 案 b;「进世界后长时间无法稳定帧率」保守子集）----
+// Game.beginEntryFreeze 置、endEntryFreeze 清（冻结窗=幕布未撤,巨帧不可见窗）：
+// 缺省 4ms→15ms 快排视口 pending。纪律：
+// · 显式 ?shinebudget URL 档【逐字】语义不受影响（explicit!=null 时提升不生效,
+//   含 0=计数路径;与滚屏降级同纪律）;
+// · 提升窗【旁路】爆发闩与相机速度门（入场首曝=合法爆发面,不钳 1.5ms;闩状态机
+//   照常记账,提升清后自恢复原语义——闩.active 每帧重算,无陈旧残留）;
+// · 零光照/worker 耦合：只改本帧盒毫秒值,烘焙链路/调度序零触碰。
+let entryBoostMs: number | null = null;
+/** 幕布期 shine 盒提升开关（Game 冻结窗开/关沿调用;null=常态）。测试直通面。 */
+export function setShineEntryBoost(ms: number | null): void { entryBoostMs = ms; }
+/** 幕布期提升是否在效（测试/诊断面） */
+export function shineEntryBoostActive(): boolean { return entryBoostMs != null; }
+/** 帧盒基值解析（纯函数,单测面）：显式 URL 档逐字优先（base 即其档值,boost 不生效）;
+ *  无显式时幕布期提升生效（boost!=null 取 boost,否则常态 base）。 */
+export function resolveShineBudgetMs(explicit: number | null, base: number, boost: number | null): number {
+  if (explicit !== null) return base;
+  return boost ?? base;
 }
 
 /** 工作清单项(调度/纯函数共用形)。 */
@@ -1134,7 +1187,7 @@ function ensureEntry(
     //   且语义 = 缓存未换代时本应命中的那份）。指纹不等 = 真改了格 → 落回重烘。
     if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
       const key = ChunkCache.key(cx, cy);
-      const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
+      const fp = shineChunkFingerprintCached(world, atlas, pair, cx, cy, shimmerQ);
       const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
       if (mSlot) {
         shineStats.memoHits++;
@@ -1215,7 +1268,7 @@ function ensureEntry(
   // ★IIIII252 首次(无 slots)同样先过 memo 指纹门(LRU 驱逐重进视野 = 全量重烘主源)
   if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
     const key = ChunkCache.key(cx, cy);
-    const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
+    const fp = shineChunkFingerprintCached(world, atlas, pair, cx, cy, shimmerQ);
     const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
     if (mSlot) {
       shineStats.memoHits++;
@@ -1243,7 +1296,7 @@ function ensureEntry(
   shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
   if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
     const key = ChunkCache.key(cx, cy);
-    const fp = shineChunkFingerprintCached(world, pair, cx, cy, shimmerQ);
+    const fp = shineChunkFingerprintCached(world, atlas, pair, cx, cy, shimmerQ);
     const oldMemo = shineMemo.get(key);
     shineMemo.delete(key);
     shineMemo.set(key, [{ q: shimmerQ, fp, e: ne }]);
@@ -1295,11 +1348,12 @@ function shineChunkNeedy(pair: ChunkPair, shimmerQ: number): boolean {
 //   正确性兜底）。逐次 resume 的暂停都重存凭证 ⇒ 链式 carry 归纳成立（见
 //   shineFpPrefix 注）。
 // 【memo 一致性】收养条目内容 = 前缀@暂停态 + 尾段@当前态,旧 memo 全量 fp（烘始态）
-//   已不描述它——不删则「内容回到烘始态」（撤销）场景按旧 fp 误复用混态条目
-//   ⇒ carry 时 shineMemo.delete(key)。
+//   已不描述它 ⇒ 收养时把 memo 槽【改签】为 (收养时点全量 fp, e)（健全性演算见
+//   函数体内注;一版曾用 memo.delete,实测令收养条目失-tracking=换代孤儿化绕过池化）。
 // 【逃生门】__SW_SHINE_MEMO_OFF 同关（世代复用族总闸 = 旧行为逐字）。
 function tryCarryShineProgress(
-  world: World, oldPair: ChunkPair, cur: ChunkPair, cx: number, cy: number, shimmerQ: number,
+  world: World, atlas: SpriteAtlas | null, oldPair: ChunkPair, cur: ChunkPair,
+  cx: number, cy: number, shimmerQ: number,
 ): boolean {
   if ((globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) return false;
   const e = shineCache.get(oldPair)?.find((s) => s.q === shimmerQ)?.e;
@@ -1307,7 +1361,7 @@ function tryCarryShineProgress(
   if (!e || r === undefined || r <= 0 || e._resumeFp === undefined) return false;
   // 新 pair 已有本档进度/完成（memo 命中先行/既有重烘接管）⇒ 不动
   if (shineCache.get(cur)?.some((s) => s.q === shimmerQ)) return false;
-  const fpNow = shineFpPrefix(world, cx, cy, r, e._resumeCol ?? 0, shimmerQ);
+  const fpNow = shineFpPrefix(world, atlas, cx, cy, r, e._resumeCol ?? 0, shimmerQ);
   if (fpNow !== e._resumeFp) { shineStats.carriesMiss++; return false; }
   const curSlots = shineCache.get(cur);
   if (curSlots) {
@@ -1316,7 +1370,24 @@ function tryCarryShineProgress(
   } else {
     shineCache.set(cur, [{ q: shimmerQ, e }]);
   }
-  shineMemo.delete(ChunkCache.key(cx, cy));   // ★memo 一致性（上注）
+  // ★memo 一致性（上注）：收养条目内容 = 前缀@暂停态 + 尾段@【当前态】,旧 memo 全量
+  //   fp（烘始态）已不描述它。修法（2026-10-06 二版）：不删 memo 而【改签】——把槽位
+  //   换成 (收养时点全量 fp, e)。健全性：memo 命中要求内容 ≡ fp@收养;此时前缀行
+  //   = product(暂停态前缀域) 且 carry 校验已证 暂停态 ≡ 当前态（前缀域）⇒ 前缀行
+  //   = product(当前前缀域) ✓;尾段未 stamp,将 stamp 于当前内容 ✓。此后内容若变 ⇒
+  //   换代 ⇒ fp 门 miss ⇒ 不误服;内容不变至烘完 ⇒ 条目 ≡ product(fp@收养 内容) ✓。
+  //   （一版的 memo.delete 会让收养条目失-tracking——下次换代孤儿化绕过池化,实测
+  //   frozen-on 池周转 7 次 vs 无 carry 场景 126 次,即此债。）被换下旧槽条目按
+  //   SITE-2 同款判死（不在当前 slots 才池化）。
+  const mkey = ChunkCache.key(cx, cy);
+  const oldMemo = shineMemo.get(mkey);
+  shineMemo.set(mkey, [{ q: shimmerQ, fp: shineChunkFingerprintCached(world, atlas, cur, cx, cy, shimmerQ), e }]);
+  if (oldMemo) {
+    const slotsNow = shineCache.get(cur)!;
+    for (const om of oldMemo) {
+      if (!slotsNow.some((s) => s.e === om.e)) releaseShineEntryCanvases(om.e);
+    }
+  }
   // 追赶账本随条目迁移（catchup 遥测保持「出现→完成」真实时长）
   const since = shinePendingSince.get(oldPair);
   if (since !== undefined) { shinePendingSince.delete(oldPair); shinePendingSince.set(cur, since); }
@@ -1374,7 +1445,10 @@ export function shineDebugResumeIdentity(
         e = bakeShineChunk(atlas, world, cx, cy, shimmerQ, undefined, e, undefined, split[k]);
         if (shineEntryComplete(e)) break;
       }
-      const b = digest(e ? bakeShineChunk(atlas, world, cx, cy, shimmerQ, undefined, e) : bakeShineChunk(atlas, world, cx, cy, shimmerQ));
+      if (e && !shineEntryComplete(e)) {   // 段链提前烘完 ⇒ 不再续(resume 完成条目=重踏)
+        e = bakeShineChunk(atlas, world, cx, cy, shimmerQ, undefined, e);
+      }
+      const b = digest(e!);
       out.push({ split: split.join('/'), sumA: a.sum, sumB: b.sum, sumXA: a.sumX, sumXB: b.sumX, equal: a.sum === b.sum && a.sumX === b.sumX });
     }
   }
@@ -1433,7 +1507,7 @@ function scheduleShineBakes(
     const cur = chunks.get(it.cx, it.cy);
     if (cur !== it.pair) {
       // ★债2:换代不即弃——前缀凭证校验通过则收养 partial 条目续烘（miss=落回旧行为）
-      if (tryCarryShineProgress(world, it.pair, cur, it.cx, it.cy, shimmerQ)) {
+      if (tryCarryShineProgress(world, atlas, it.pair, cur, it.cx, it.cy, shimmerQ)) {
         carry.push({ cx: it.cx, cy: it.cy, pair: cur, d: d2(it.cx, it.cy) });
       }
       continue;
@@ -1522,9 +1596,16 @@ export function drawTileShineGrid(
   //   speed 相位在盒构造前推进（cameraSpeedPxPerMs 写后即新——下一帧以此为基）。
   //   ★爆发闩（2026-10-04 挖掘相首曝重烘钳制,见 shineBurstLatch 注）内嵌在
   //   adaptive 外层——同点只降不升,显式逐字语义零触碰。
+  // ★案 b（幕布期提升,见 setShineEntryBoost 注）：提升窗内 15ms 直通（旁路爆发闩+
+  //   速度门——入场首曝=合法爆发面;explicit!=null 时 boostMs=null=原式逐位）。
+  //   既有源锚演进登记（2026-10-06）:firstexpose-clamp B 锚 `? shineBurstClamp` 随
+  //   本臂形改为 `: shineBurstClamp`（闩仍内嵌 tbNow 构造/adaptive 外层/只降不升,
+  //   意图不变;A 门锚与 C 消费锚 byte 逐字未动）。
+  const boostMs = shineBudgetExplicit === null ? entryBoostMs : null;
   const tbNow = shineBudgetMs > 0
-    ? shineBurstClamp(adaptiveShineBudgetMs(shineBudgetExplicit,
-      cameraSpeedPxPerMs(cam.x, cam.y, performance.now()), shineBudgetMs))
+    ? (boostMs != null ? boostMs
+      : shineBurstClamp(adaptiveShineBudgetMs(shineBudgetExplicit,
+        cameraSpeedPxPerMs(cam.x, cam.y, performance.now()), shineBudgetMs)))
     : shineBudgetMs;
   const timeBudget = tbNow > 0 ? { deadline: performance.now() + tbNow } : null;
   const countBudget: ShineBakeBudget | undefined = timeBudget ? undefined : { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)

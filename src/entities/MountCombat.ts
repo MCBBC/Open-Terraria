@@ -24,7 +24,8 @@
 //       GiveImmuneTimeForCollisionAttack(6) sourceItemId=2430(SlimySaddle)
 //     B 死亡细胞冲撞符文下砸：isPerformingJump_DownDash && vy>0（同盒同数值，
 //       无弹跳位移，immune=10 GiveImmune(6)，sourceItemId=5465 DeadCellsRamRune）
-//       ——本仓引擎尚无 DownDash 触发源，入口 ramRuneDownDashStomp 显式暴露不自动挂。
+//       ——★BJ534（2026-10-06）已接线：下砸态机落位（Player.isDownDashing），玩家
+//       fixedUpdate 踩踏段在 A/C 支后显式调用（三支坐骑门互斥=位序等价原文）。
 //     C 高尔夫球车（type 17）下压：vy>0 同盒，damage=40（**无 minionDamage 乘区**）
 //       kb=5 npc.immune=12 GiveImmune(12) sourceItemId=4264(GolfCart)、无弹跳。
 //   ★三循环 ApplyDamageToNPC 一律字面 crit:false（1457 :20722/:20760/:20797）——
@@ -422,8 +423,8 @@ export function mountJumpStomps(p: {
 }
 
 /** B 支死亡细胞冲撞符文下砸（isPerformingJump_DownDash && vy>0，:20731-20765）。
- *  引擎暂无 hasDeadCellsDownDash/isPerformingJump_DownDash 触发源（装备链未实装），
- *  本入口保持未接线——将来落 DeadCells 下砸态机时在 dash 期间显式调用即可。 */
+ *  ★BJ534（2026-10-06）已接线：Player.fixedUpdate 踩踏段按 isDownDashing && vy>0
+ *  调用（触发腿/态机/落地冲击波见 Player.ts BJ534 注）。 */
 export function ramRuneDownDashStomp(p: Parameters<typeof mountJumpStomps>[0],
   game: GameHooks): number {
   if (p.vy <= 0) return 0;

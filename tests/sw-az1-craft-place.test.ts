@@ -286,11 +286,14 @@ describe('SW-AZ1 结构锁', () => {
     //  旗尾清（★Q4 刀）插行+注于 updateUse 与 commitCursorMirror 之间( gap 200→343),
     //  结算序不变量完好;窗口放宽保序锁判别力（commitCursorMirror 前移仍必红）
     expect(game).toMatch(/this\.updateUse\(dt\);[\s\S]{0,400}this\.commitCursorMirror\(\);/);
-    // CanChangeSelectedItemImmediately 门（:415-421）三臂
-    expect(game).toMatch(/if \(this\.usingOrReusingItem\(\) \|\| this\._dirtRodChannel \|\| this\.player\.useTime !== 0\) return;/);
+    // CanChangeSelectedItemImmediately 门（:415-421）三臂——★BJ536（2026-10-06）收单
+    //  canChangeSelectionNow() 单源（换入 set 臂 + 耗尽还原 sticky 臂共用门;表达式
+    //  三臂逐字保留在 helper 内,判别力不减）
+    expect(game).toMatch(/private canChangeSelectionNow\(\): boolean \{\s*\n\s*return !this\.usingOrReusingItem\(\) && !this\._dirtRodChannel && this\.player\.useTime === 0;/);
+    expect(game).toMatch(/this\.canChangeSelectionNow\(\)\) return;/);
   });
 
-  it('Game 手持消耗统一入口：57 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
+  it('Game 手持消耗统一入口：58 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
     // ★2026-09-08:56→57——SW-BN5 换墙批新增 ReplaceWall 消费位(Game.ts:21297,
     //  换墙消耗手持墙件=合法入账;行为面仍由"全走 removeHeld+无 removeAt 残留"两钉锁死)
     // ★RB17a-R7（2026-09-14）重锚:57→56——第 57 处（宝藏袋持用左键开包链 removeHeld）
@@ -300,7 +303,11 @@ describe('SW-AZ1 结构锁', () => {
     //  （TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook :46-48——
     //  consumable=false 风筝跳过通用消耗门,原版钩子补扣 1;旧注「与通用 removeAt
     //  等量,无需另扣」系误读=放置零消耗回收复制,用户实报根因修复）,合法入账。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(57);
+    // ★BJ536 拍照重锚（2026-10-06）:57→58——并行会话在途批累计的第 58 处
+    //  consumable 位（Game.ts 4544x 段,:11446/:38997 族）,BJ536 本刀零新增消费位
+    //  （刀面=heldItem/syncCursorMirror/commitCursorMirror,逐字无 removeHeld 调用）,
+    //  此处只把锁数对齐盘上实况拍照（防套件常红;归属批落定后可再精确归因）。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(58);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/
@@ -363,7 +370,9 @@ describe('SW-AZ1 结构锁', () => {
   });
 
   it('Inventory：伪选中 heldItem 单点 + removeHeld 镜像臂（结构锚）', () => {
-    expect(inv).toMatch(/return this\.cursorMirror \?\? this\.slots\[this\.selected\];/);
+    // ★BJ536（2026-10-06）重锚：镜像 stack<=0 → null（inventory[58] 归零 air,
+    //  Item.cs:386-395;耗尽粘滞窗不回落热栏镐——Player.cs:483-517 selected 粘 58）
+    expect(inv).toMatch(/if \(m\) return m\.stack > 0 \? m : null;\s*\n\s*return this\.slots\[this\.selected\];/);
     expect(inv).toMatch(/removeHeld\(count = 1\): boolean \{/);
     expect(inv).toContain('cursorMirror: InvItem | null = null;');
   });

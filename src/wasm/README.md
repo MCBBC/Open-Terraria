@@ -336,3 +336,41 @@ ArmorGel=332 token)。超容量 → `sm2RunImage` 拒 0 → JS 回退。
   管线(blur 免拷入+尾段特例格读 WASM 内存);②OOB type 死路径偏差(见上);
   ③RainbowCloud 719 对 hourly NaN 的 JS 侧 undefined 索引=既有不可入参面
   (两臂同崩,与本次无关);④探针台架 bootstrap 冷桥 flake(预热臂模式保留)。
+
+## 13. 光照二期·驻留管线定谳+上传布局刀(2026-10-06;零 ABI 变更,lightVersion()=2 不动)
+
+- **定谳(段账分解;node 微账+活机段账台架 `scripts/_lw-resident-verdict-probe.mjs` 双域)**:
+  exportTo-WASM 并非「拷贝主导」——**内核主导**(1080p 活机段账:kernelWin
+  0.207ms vs 上传 0.075/读回 0.004/壳+尾段 ~0.02)。已登记二期处方三刀的
+  **实测收益全部低于停刀线 0.05ms/帧**:免读回(CutA)0.004ms、blur 免拷入
+  (CutB)0.004ms、blur 免拷出(CutC)0.003ms(合计 ~0.011ms)——**诚实停刀,
+  不落地**(读回/拷出同时是金标链的观察点,杀之需引入「JS 数组陈旧窗」戳记
+  纪律,复杂度>收益)。blurKernel 0.43ms=blur 段 98%(位级 f64 链禁 SIMD,
+  不可再压)。
+- **真凶=窗口上传的 1703 段行拷贝**(每调 subarray 分配+set 调用开销,非字节
+  量:407KB 行拷 0.075-0.095ms vs 572KB 整片 13 段 0.011-0.014ms)。**落地刀=
+  上传布局双态**:`lightWasmExportScan` 在 st.w×st.h ≤ 容量时(worker 切片恒真)
+  走 **bulk 整片上传**(13 通道各一次 set,内核 ww=st.wh=st.h 原点=(rx,ry) 直读
+  切片布局);切片超容量(主线程全量世界 store)保留窗口行拷贝旧行为逐位。
+  折叠公式与 JS 路径逐式同源(stW/stH 形态),邻格读域=全切片⊆上传域,hash/gl/
+  lava rebase=减 store 原点(0,0)——worker 切片已 rebase/主线程原点即 0,0 两
+  调用方语义恒同。**零跨帧状态**(无驻留失效面:region 跳行/enc 三态全无关,
+  每帧从 store 全量重传)。
+- **位级**:bulk vs window 布局产物逐位全等(同内容双 store×世界边缘/内部区域
+  三臂对拍 tests/light-wasm「二期上传布局对拍」;浏览器 A/B bulkVsWinBitDiff=-1
+  同证)。既有 12 scan 位级测试自动转锁 bulk 支。
+- **实测(M 系,同日同机,活机 worker 域 direct seed 05162020)**:
+  | 场景 | exportTo 前(行拷) | 后(bulk) | busy(compute) 前→后 |
+  | --- | --- | --- | --- |
+  | 静置 | 0.220ms | **0.131ms** | 0.653→0.433ms |
+  | 高空下坠 | 0.248ms | **0.179ms** | 0.674→0.568ms |
+  | zoom-out 0.5 | 0.248ms | **0.222ms** | 0.673→0.695ms(噪声域) |
+  产线时序账(上传→内核紧邻,同批):flowWin 0.256 vs flowBulk 0.155(净
+  −0.101ms);node 域同法 −0.039/zoom −0.026。A0 臂(?lightwasm=0)全 JS 恒
+  零变化;scanRefusals=0;零页面错误。
+- **≤0.1 目标定谳**:静置 0.131 仍高于 0.1——残段=scan 内核(~0.09-0.1 活机)
+  +读回+尾段,均为位级锚定面(内核 f64 链禁 SIMD/免读回需陈旧窗戳记),
+  **拷贝侧已无 ≥0.05ms/帧的可合规收益,登记终态**。
+- **验收集**:tests/light-wasm 33/33(含新布局对拍);金标族 8 套件 50/50;
+  邻域 14 套件 104/104;sm2/waves/worker-graph 49/49;tsc 干净(shine-debt
+  报错系并行会话 TileShine 在途面,与本刀无关)。
