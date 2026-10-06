@@ -23,6 +23,7 @@ import {
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
+import { registerGenPass } from '../world/gen/WorldGen';
 import type { ModConfigState } from './config';
 
 export interface ModContext {
@@ -64,6 +65,8 @@ export interface ModContext {
    *  undefined=不改;仅 mod NPC 进攻面进入) */
   /** playerHook 双 kind:modifyHurtByNpc=承伤修正链 / modifyHitNpc=命中伤害增幅链 */
   playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc', fn: (ctx: Record<string, unknown>) => number | void): void;
+  /** ★一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
+  registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void;
   /** 生成 mod 弹幕(npcAi 闭包内持 game,回传本面构造 ModProj 并入桶——L2 唯一
    *  弹幕生成通道;ownerIsPlayer=false=mod NPC 弹打玩家) */
   spawnProj(game: unknown, key: string, x: number, y: number, vx: number, vy: number,
@@ -124,6 +127,10 @@ export function createModContext(
       } else if (kind === 'modifyHitNpc') {
         registerModModifyHitNpc(modId, fn as Parameters<typeof registerModModifyHitNpc>[1]);
       } else throw new Error(`[mod-api] 未知 playerHook: ${kind}`);
+    },
+    /** ★B7 一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
+    registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void {
+      registerGenPass({ name, fn });
     },
     // ★异步构造:动态 import ModProj(与 loader 的 entry 动态装载同型);AI 每 tick
     //  调用高频路径,import 缓存后 microtask 内落桶,同 tick 内稍后帧可见=可接受

@@ -297,13 +297,16 @@ describe('BJ524④ 水中再冲刺：BJ508 键面 + 双击两触发源协同', (
     for (let i = 0; i < 10; i++) tick(p, w);
     expect(p.inWater).toBe(true);
     p.facing = 1;
-    p.inputX = 0; tick(p, w);
-    p.inputX = 1; tick(p, w);                          // 首击右向 → 登记窗
+    // ★MV3（2026-10-07）：双击沿改单键承载（prevInputRight，原版 releaseRight 同源
+    //   :27827-27845）后，注入须走 Game 同式全键面（Game.ts:9923 inputX 由
+    //   inputLeft/Right 派生,单写 inputX=不可达态）。语义不变：水中照登记/消费。
+    p.inputX = 0; p.inputRight = false; tick(p, w);
+    p.inputX = 1; p.inputRight = true; tick(p, w);     // 首击右向 → 登记窗
     expect(p.dashT).toBe(15);                          // :21761 dashTime=15（湿态照登记）
-    p.inputX = 0; tick(p, w);
-    p.inputX = 1; tick(p, w);                          // 二击 → 消费
+    p.inputX = 0; p.inputRight = false; tick(p, w);
+    p.inputX = 1; p.inputRight = true; tick(p, w);     // 二击 → 消费
     expect(p.vx).toBeCloseTo(14.5, 5);                 // dash2 触发
     expect(p.dashDelay).toBe(-1);
-    p.inputX = 0;
+    p.inputX = 0; p.inputRight = false;
   });
 });

@@ -99,6 +99,20 @@ describe('MV3 基线 R0：单键域逐位不变（合值沿 ≙ 单键沿的既�
     expect(Math.sign(p.vx)).toBe(-1);
   });
 
+  it('按住不松：沿非电平——首拍登记后续拍不再发沿（主尾拍单键沿快照判据）', () => {
+    const w = plainWorld();
+    const p = mkPlayer(w);
+    for (let i = 0; i < 10; i++) { none(p); tick(p, w); }
+    onlyR(p); tick(p, w);                     // 首拍：登记 +15
+    expect(p.dashT).toBe(15);
+    onlyR(p); tick(p, w);                     // 按住第 2 拍：prevR=true → 无沿 → 只衰减
+    expect(p.dashT, '按住不得重发沿（修前缺尾拍快照=沿退化电平→第 2 拍即误冲）').toBe(14);
+    expect(p.dashDelay).toBe(0);
+    onlyR(p); tick(p, w);
+    expect(p.dashT).toBe(13);
+    expect(p.dashDelay).toBe(0);
+  });
+
   it('窗过期（>15t）二按只重登记不冲刺（:21760 else 档）', () => {
     const w = plainWorld();
     const p = mkPlayer(w);

@@ -141,9 +141,11 @@ async function phase(label, url, extraSetup) {
   return r;
 }
 
-const openInv = () => { window.__swGame.ui.openInventory(true); };
+const openInv = () => { window.__swUI.openInventory(true); };
 
-await phase('相1 2D会话(?bgl=0) fallback=常驻主链', '/?bgl=0');
-await phase('相2 GL缺省 刀B主流(cut+uTint)', '/');
-await phase('相3 GL+开背包 降级窗fallback', '/', openInv);
+// ★相隔离:GPU/GL 资源连续 launchBrowser 偶发桥超时(实测)——每进程只跑一相,PHASE 环境变量选相。
+const P = process.env.E51B_PHASE || '1';
+if (P === '1') await phase('相1 2D会话(?bgl=0) fallback=常驻主链', '/?bgl=0');
+else if (P === '2') await phase('相2 GL缺省 刀B主流(cut+uTint)', '/');
+else await phase('相3 GL+开背包 降级窗fallback', '/', openInv);
 process.exit(0);

@@ -494,8 +494,18 @@ function acquireShineCanvas(): HTMLCanvasElement {
   const c = shineCanvasPool.pop();
   if (!c) {
     shineStats.canvasesCreated++;
-    return document.createElement('canvas');
+    // ★池化回归修复（2026-10-07 用户实报「跑满 120 场景行走突发掉 80fps」）：池 miss
+    //  新建漏设 S² 尺寸（旧 createElement 点的 .width=S/.height=S 赋值随池化收编丢失）
+    //  → 画布=缺省 300×150 → chunk blit 源矩形 (0,0,S,S) 部分越界（sy+sh=256>150）
+    //  → shim srcoob 门逐次 flushForFallback+presentBatch 全幅回贴（每帧 15-18 次）+
+    //  shine 下 106px 源裁剪缺失。活机抓捕 scripts/_fps-srcoob-hunt.mjs 定谳。
+    const nc = document.createElement('canvas');
+    nc.width = S; nc.height = S;
+    return nc;
   }
+  // ★池污染归一（同案防御）：早期污染画布（300×150）可能已在池内——重设尺寸即清空
+  //  全域（含 256² 外的残留域），语义 ⊇ 下方 clearRect(0,0,S,S)。
+  if (c.width !== S || c.height !== S) { c.width = S; c.height = S; }
   const g = c.getContext('2d')!;
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.globalCompositeOperation = 'source-over';

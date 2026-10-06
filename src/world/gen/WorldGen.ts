@@ -192,6 +192,14 @@ export class WorldGenAbortedError extends Error {
 }
 
 /** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
+/** ★mod 生成 pass 通用注册面(mod 装载期注册,Beaches 后依序执行;引擎零 mod 知识) */
+export interface ModGenPass { name: string; fn: (store: unknown, rng: unknown, gs: unknown) => void; }
+const genPasses: ModGenPass[] = [];
+export function registerGenPass(p: ModGenPass): void {
+  if (genPasses.some((x) => x.name === p.name)) throw new Error(`[gen] genPass 重复注册: ${p.name}`);
+  genPasses.push(p);
+}
+
 export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress): Promise<World> {
   genAbortRequested = false;   // ★IIIII229 ①：陈旧请求清零（vanilla 每次生成新建 Controller 同效）
   // ★IIIII88：dotted 秘种子配方路由先行（TryApplyingCopiedSeed cs:232-289）——
@@ -1443,6 +1451,18 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
   i87Cap(); // @BEACHHEAD
   rng.reseed(gs.seed); prog?.beginVan('Beaches');             // ▶BeachesAndOceanCleanup cs:14947
   runBeachesPass(store, rng, gs);
+  // ★mod 生成 pass 通用消费面(mod 装载期经 sw.registerGenPass 注册;零 mod 知识):
+  //  Beaches 后=海盆就位;gs.mods.tileIdByKey=mod tile 键→内部 id(pass 解析用)。
+  (gs as { mods?: { tileIdByKey: Record<string, number> } }).mods = {
+    tileIdByKey: Object.fromEntries(
+      Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
+        .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
+  };
+  for (const pass of genPasses) {
+    rng.reseed(gs.seed);
+    prog?.beginVan(pass.name);
+    pass.fn(store, rng, gs);
+  }
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
   for (let x = 0; x < store.w; x++) {
     for (let y = 0; y < store.h; y++) {
