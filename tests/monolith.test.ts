@@ -172,6 +172,29 @@ describe('SceneMetrics 视区扫描（SceneMetrics.cs:524-583）', () => {
     expect(mid.x0).toBe(Math.floor((100 * 16 - 320) / 16) - 1 + 28);
     expect(mid.x1).toBe(Math.floor((100 * 16 + 320) / 16) + 2 + 28);
   });
+
+  it('★扫描序 = 列主序（SceneMetrics.cs:456-458 外 X 内 Y）——后扫到者覆盖赢家=最右列;'
+    + '旧行主序实现赢家=最下行（多柱串柱刀登记债清偿,2026-10-06）', () => {
+    const { world } = freshWorld();
+    const w = new Wiring(world.store);
+    // 判别力构造：两根激活 410 柱异型,使「行主序赢家」≠「列主序赢家」——
+    //  A=星璇(style1) 放【左下】,B=星尘(style2) 放【右上】：
+    //  列主序（原版）B 列(60-61) 后扫 → 赢家 B=2;行主序 A 行(120-122) 后扫 → 赢家 A=1
+    placeMonolith(w, 20, 120, 410, 1, 1);           // A 左下（列 20-21,行 120-122）
+    placeMonolith(w, 60, 30, 410, 2, 1);            // B 右上（列 60-61,行 30-32）
+    const s = scanMonolithScene(world.store, FULL);
+    expect(s.activeMonolithType).toBe(2);           // 最右列胜（行主序会给 1=红）
+    // 658 三态柱同面（无条件赋值,赢家序同判）：A state1 右上、B state2 左下
+    //  → 列主序 B(30-31) 先扫、A(50-51) 后扫 → 赢家 A=1（行主序给 2=红）
+    placeMonolith(w, 50, 40, 658, 0, 1);
+    placeMonolith(w, 30, 60, 658, 0, 2);
+    const s2 = scanMonolithScene(world.store, FULL);
+    expect(s2.shimmerMonolithState).toBe(1);
+    // 同型布尔族（480 血月柱两根异位）幂等恒真,赢家序无观察面——不回归即可
+    placeMonolith(w, 10, 50, 480, 0, 1);
+    placeMonolith(w, 90, 150, 480, 0, 1);
+    expect(scanMonolithScene(world.store, FULL).bloodMoonMonolith).toBe(true);
+  });
 });
 
 describe('滤镜状态机（SceneState.cs:105-128 + FilterManager.cs）', () => {

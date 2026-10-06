@@ -210,6 +210,11 @@ export function playModSound(files: string[], volume = 1, x?: number, y?: number
   if (modAudioSink) modAudioSink(files, volume, x, y);
 }
 
+/** B6:mod 音频注册表(key→ArrayBuffer)——main.ts 在 game 创建后注入 Sfx.buffers */
+const modWavData = new Map<string, ArrayBuffer>();
+export function registerModWavData(key: string, data: ArrayBuffer): void { modWavData.set(key, data); }
+export function getModWavData(): ReadonlyMap<string, ArrayBuffer> { return modWavData; }
+
 /** B6:NPC 死亡钩注册表(Hive Tumor→Boss 遭遇链面) */
 const onNpcDeath = new Map<number, (e: Enemy, game: Game) => void>();
 

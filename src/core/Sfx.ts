@@ -633,6 +633,8 @@ export function musicPackOverrideKeys(): string[] { return [...packMusicOverride
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
+  /** B6:mod 音频注入口(applyModAssets 后 main.ts 调)——key=自定义键,value=解码缓冲 */
+  registerModAudio(key: string, buf: AudioBuffer): void { this.buffers.set(key, buf); }
 
   /** 音效事件追踪（2026-09-03 用户需求：F5 长按录制窗记录音效播放序列）。
    *  静态钩覆盖本仓全部 Sfx 实例（Game.sfx + UISfx 共享单例——游戏内的对话

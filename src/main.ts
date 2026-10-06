@@ -60,7 +60,7 @@ import { RemasterManager } from './remaster/RemasterManager';
 import { initResourcePacks, type ResourcePackManager } from './resources/ResourcePackManager';
 import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 import { modBuffIconUrl } from './mods/buffs';
-import { setModAudioSink } from './mods/hooks';
+import { setModAudioSink, getModWavData } from './mods/hooks';
 
 // canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
@@ -258,8 +258,23 @@ async function loadAssets() {
     setRemasterBuffIcon((id) => modBuffIconUrl(id) ?? rt.buffIconUrl(id));
     // ★B6 mod 音效通道 sink(原版 SoundID 键;mod 音频装载=余段)
     setModAudioSink((files, volume, x, y) => {
-      const g = (window as unknown as { __swGame?: { playSfxFiles?: (f: string[], v: number, x?: number, y?: number) => void } }).__swGame;
-      g?.playSfxFiles?.(files, volume, x, y);
+      const g = (window as unknown as { __swGame?: { playSfxFiles?: (f: string[], v: number, x?: number, y?: number) => void; sfx?: { buffers: Map<string, AudioBuffer>; ensure: () => AudioContext | null; registerModAudio?: (f: string, b: AudioBuffer) => void } } }).__swGame;
+      if (!g) return;
+      // ★B6 mod 音频:files[0] 在 modWavData 中→decodeAudioData→Sfx.buffers→playFiles
+      //  否则透传原版键
+      const audioCtx = g.sfx?.ensure?.() ?? null;
+      if (audioCtx && files.length > 0) {
+        const wavData = getModWavData();
+        for (const f of files) {
+          const raw = wavData.get(f);
+          if (raw !== undefined && !g.sfx!.buffers.has(f)) {
+            audioCtx.decodeAudioData(raw.slice()).then((decoded) => {
+              g.sfx!.registerModAudio?.(f, decoded);
+            }).catch(() => {});
+          }
+        }
+      }
+      g.playSfxFiles?.(files, volume, x, y);
     });
     remasterRuntime.onApplied = (info) => {
       // UI 派生缓存:物品图标 dataURL 缓存按物品 id 键不自动失效(Atlas 替换须清);

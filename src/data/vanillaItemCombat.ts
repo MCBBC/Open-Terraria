@@ -12,6 +12,10 @@ export interface ItemCombat {
   /** B6:命中施加 mod debuff(OnHitNPC 数据面;buff=mod buff 键,duration=秒,
    *  chance=概率 0-1 缺省 1;经 melee 受理命中缝消费) */
   hitBuff?: { buff: string; duration: number; chance?: number };
+  /** B6:命中点静置生成 mod 弹(OnHitNPC 数据面;NewProjectile(target.Center,
+   *  Vector2.Zero, …) 形;proj=mod 弹幕键,dmg='item'=武器基伤/数字=定点伤;
+   *  经 melee 受理命中缝消费) */
+  hitProj?: { proj: string; dmg?: number | 'item' };
   crit?: number;           // Item.crit（武器自带暴击，GetWeaponCrit P:25230-25232 消费）
   knockBack?: number;
   useTime?: number;
@@ -798,6 +802,23 @@ export function eventideShotSpec(shotIdx: number, projId: number, damage: number
   if (shotIdx === 2) { pid = 932; dmg = damage * 2; }
   if (pid === 932) spd = speed * 2;
   return { pid, dmg, spd };
+}
+
+/** ★EoL2 登记债清偿（2026-10-06）：932 月总矢发射点 hue（原版发射面=暮夕 4953
+ *  第 3 发——Player.cs:48391-48396 `float ai3 = miscCounterNormalized * 12f % 1f`
+ *  → NewProjectile(..., 0f, ai3) 落 proj.ai[1]（:48397,aiArgs[1]）→ 绘制侧
+ *  GetFairyQueenWeaponsColor hueRaw=ai[1]（Projectile.cs:21782）→ (hue+0.5)%1
+ *  入 hslToRgb(h,1,0.5)（:21770/GetFairyQueenWeaponsColorFull :21790）。
+ *  miscCounterNormalized = miscCounter/300f（Player.cs:3373），miscCounter 每
+ *  tick +1、满 300 归零（UpdateMiscCounter :29527-29533，Player.Update :24788
+ *  每 tick 调用）→ hue 锯齿步进 0.04/t、周期 25t。
+ *  本仓 Player.miscCounter 无 300 回卷（Player.ts 并行领地未动）→ 此处先 %300
+ *  取归零后同相位（≡ 原版周期语义）；float 链逐级 fround 镜像 XNA f32（÷300 →
+ *  ×12 → %1 三级,与 BJ92 f32 判例同口径）。载体注入通道 = ArrowOpts.empressHue
+ *  （873 同通道先例；缺省 0 档 = (0+.5)%1 青蓝档——登记债病灶）。 */
+export function fairyQueenShotHue(miscCounter: number): number {
+  const m = ((miscCounter % 300) + 300) % 300;   // 归一相位（原版满 300 归零）
+  return Math.fround(Math.fround(Math.fround(m / 300) * 12) % 1);
 }
 
 /** 逐枪弹型强制/转换（Player.cs ItemCheck_Shoot 弹型段，无视 PickAmmo 解析结果）：

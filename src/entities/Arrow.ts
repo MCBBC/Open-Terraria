@@ -853,6 +853,17 @@ const LASER_FADE15_PROJS = new Set([
   36, 84, 110, 158, 159, 160, 161, 180, 389]);
 export const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
+  // ★登记债3 清偿（2026-10-06,光女发暗刀）：874 DeathAurora 天降极光 SetDefaults
+  //  alpha=255（Projectile.cs:8369-8380 :8374,1458 同值）——★休眠键（同 188/631
+  //  先例）:本仓现无 874 载体（光女 AI_120 攻击 3「天降极光」= expert 专属拍,
+  //  bossAI_lategame.ts 台账明记跳过;全仓无 spawn/draw 面,Renderer 仅
+  //  SELF_LUMINOUS_PROJS[874] floor1+whiten 预注册,eol2-empress-bright.test 锁）。
+  //  ★原版 α 语义定谳:874 绘制 = DrawMurderAurora 专属支（Main.cs:28764→:36619）
+  //  【不读 proj.alpha】——15 层极光带色 = hslToRgb(num12%1,1,0.5)×num3×amount,
+  //  A/=4（:36652）,num3=timeLeft 双 GetLerpValue 包络;SetDefaults α=255 在原版
+  //  通用绘制路径永不可达（专属支先 return）。本键作用 = 未来接发射面时防缺省
+  //  α≡0 兜底把整张 aurora 底图全亮画出（原版本相=无通用弹体）。
+  874: 255,
   640: 255,                                    // 月总箭衍生体（SetDefaults :6902 alpha=255；
                                                 //  AI −25/substep 渐显并入 639 支,Kill 批 2026-09-02）
   207: 255, 837: 255,
@@ -3122,7 +3133,8 @@ export class Arrow extends Entity {
     //  `34||35||15||19||44||45 → Color.White`——A=255 恒定（无 270 式脉冲/无 fade,
     //  SetDefaults α=100 :1285 死值不读）,RGB 恒白【不读光照色】=Main.cs:30068
     //  projectileColor=格光被 GetAlpha 整体替换。α 面已修（drawGlobalAlpha case
-    //  44/45 return 1,F2 批,ga 链保持先 GA 后表）;光照面=弹体画进实体层被
+    //  44/45 return 1,F2 批硬档——vanillaProjAlpha 表不加项=300 census 锁不动）;
+    //  光照面=弹体画进实体层被
     //  compositeLight 全屏乘光压暗（BJ529 探针 _bj529-skull-ab 暗腔实测 k=0.325
     //  同病）→ 承接=本文件 270 专属支同构：本体不进实体层（capture→return）,当帧
     //  绘制参数闭包入队,flushTrailShade 光照合成后主画布 source-over 复绘=原版
@@ -3253,7 +3265,8 @@ export class Arrow extends Entity {
     // A/2 → source-over g=Opacity²×0.5——straight 画布 A 档直承载,919 轨道环同款
     // 近似档）;num = Lerp(.7,1,GTLV(0,5,ai0≡age))（:36537）;rotation =
     // velocity.ToRotation()（无 +π/2、无 spriteDirection 镜像 :36550-36552）;
-    // hue=empressHue 通道（发射端 ai3 注入债,缺省 0=(0+.5)%1 青蓝档,同 subStepAI 注）。
+    // hue=empressHue 通道（★2026-10-06 登记债已接：发射端 Game.ts 4953 支
+    //  fairyQueenShotHue(this.player.miscCounter) 注入——未接弹缺省 0 档）。
     // 全层自发光不读格光——格光抬亮见 SELF_LUMINOUS_PROJS[932]（暗处白核/彩虹恒亮）。
     if (this.projId === 932) {
       const img932 = projSprite(932);
@@ -5445,8 +5458,9 @@ export class Arrow extends Entity {
     //      scale×1.5,color=GetFairyQueenWeaponsColor(1,NextFloat×0.4) :43984-43990
     //      =hsl((ai1+.5)%1,1,.5)×Opacity 再 Lerp(White,w)）。ai[0] ≡ age（EU=1 每子步
     //      恰一增,SELF_LUMINOUS_PROJS 811 whiteK811(age) 判例同款）;hue=empressHue
-    //      通道（发射点 ai3=miscCounterNormalized×12%1,Player.cs:48391-48396——发射
-    //      端 Game.ts 域未接=登记债,缺省 0 → (0+.5)%1=青蓝档）
+    //      通道（★2026-10-06 登记债已接:发射点 ai3=miscCounterNormalized×12%1,
+    //      Player.cs:48391-48396 → Game.ts 4953 支 fairyQueenShotHue 注入;
+    //      未接弹缺省 0 → (0+.5)%1=青蓝档）
     if (this.projId === 932) {
       const t181 = Math.min(1, Math.max(0, this.age / 10));
       this.alpha = Math.max(0, Math.floor(255 - 255 * t181));

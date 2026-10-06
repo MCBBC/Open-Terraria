@@ -520,6 +520,34 @@ export class WaterWaveSystem {
     this._wwSpawnWorker(false);
   }
 
+  /** ★WaveWorker release（标题/worker 清理刀,2026-10-06 登记债清偿）：terminate +
+   *  worker 域状态全复位，挂 Game.destroy。waterWaves 是模块单例、世界生命周期
+   *  之外存活——只 terminate 不复位 = 下世界「波场静默永失」双重机制：
+   *  ①_wwSpawned 会话闩不复位 → _wwEnsure :517 永久短路,下世界永不重建;
+   *  ②_wwOn 不复位 → frame() 走 worker 分支向已死 worker postMessage（静默丢弃,
+   *  注入批/帧输入全吞）,且 outstanding 语义下看门狗永远等不到新证据面。
+   *  复位集 = 看门狗回落支（:934-943）的超集 + 阶梯重生态清零——下世界按
+   *  「首建」语义重建（不继承回落计数/shadow/重生排程）。_lighting.dispose
+   *  （LightWorkerLink）同范式。下世界 Renderer 首帧 frame() → _wwEnsure 惰性
+   *  重建（~10-20MB isolate 归还）。幂等：未 spawn 态调用零副作用。 */
+  release(): void {
+    if (this._ww) {
+      try { this._ww.terminate(); } catch { /* 已死 */ }
+      this._ww = null;
+    }
+    this._wwOn = false;
+    this._wwSpawned = false;    // ★会话闩复位——_wwEnsure 重建的唯一钥匙
+    this._wwShadow = false;
+    this._wwRespawnAt = 0;
+    this._wwFallCount = 0;
+    this._wwErrored = false;
+    this._wwWd = null;
+    this._wwTexSent = false;
+    this._wwQuietRun = 0; this._wwQuietFrames = 0;   // ★MSG-FREQ 静默态作废（_wwSpawnWorker 亦复位,双保险）
+    this._wwQuietVW = -1; this._wwQuietVH = -1;
+    _wwCapture = null;          // 旧世界在途注入批随世界丢弃（不重放——回落支才重放,世界已拆无接收面）
+  }
+
   /** 创建 worker 实例并进入 worker 模式。respawn=false=首建（会话开局,原 C8 语义:
    *  worker 模式即启,冷取窗口静态水——现已由音频门 prefetch 预热缓解）;true=看门狗
    *  回落后的阶梯重生——shadow 双轨:本地模拟保持连续（水不静止）,worker 预热至首场

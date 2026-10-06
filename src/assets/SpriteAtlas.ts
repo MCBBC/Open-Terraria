@@ -324,34 +324,37 @@ export class SpriteAtlas {
       m = this.lazyNpcMeta.get(key);
       if (!m) {
         const sheet = `vanilla/NPC_${npcId}.png`;
-        const img = this.ensureVImage(sheet); // 懒加载+去重+失败负缓存(2026-08-13 前手动 new Image 无 onerror:404 时每次调用重发请求)
-        if (!img) return null;
-        // 帧数权威链:静态提取表 → 运行时注册表(mod NPC 的 frames 落在
-        // VANILLA_NPCS;★GLM娘实验批 G1——此前只读静态表,mod NPC 整条竖带当
-        // 一帧画)。vanilla id 两源同数据,零漂移。
-        const frames = (vanillaNpcFrames as Record<string, number>)[key]
-          ?? vanillaNpc(npcId)?.frames ?? 1;
-        const fh = Math.max(1, Math.floor(img.height / frames));
-        const meta: VanillaNpcMeta = { sheet, frameW: img.width, frameH: fh, count: frames };
-        this.lazyNpcMeta.set(key, meta);
-        m = meta;
+        // ★B6 用户实报定谳:mod NPC(id≥800)不走 ensureVImage 的网络 fetch——
+        //  mod 贴图由 applyModAssets 注入 vimages(异步);护栏期间 vimages 可能
+        //  尚未注入 → fetch 404 → 负缓存 → 永久隐形。改为直查 vimages,
+        //  命中即构 meta,未命中返回 null(下一帧自愈,注入完成后自然可见)。
+        if (npcId >= 800) {
+          const img0 = this.vimages.get(sheet);
+          if (!img0) return null;
+          const frames0 = (vanillaNpcFrames as Record<string, number>)[key]
+            ?? vanillaNpc(npcId)?.frames ?? 1;
+          const fh0 = Math.max(1, Math.floor(img0.height / frames0));
+          m = { sheet, frameW: img0.width, frameH: fh0, count: frames0 };
+          this.lazyNpcMeta.set(key, m);
+        } else {
+          const img = this.ensureVImage(sheet);
+          if (!img) return null;
+          const frames = (vanillaNpcFrames as Record<string, number>)[key]
+            ?? vanillaNpc(npcId)?.frames ?? 1;
+          const fh = Math.max(1, Math.floor(img.height / frames));
+          m = { sheet, frameW: img.width, frameH: fh, count: frames };
+          this.lazyNpcMeta.set(key, m);
+        }
       }
     }
-    // 已注册路径同样走 ensureVImage(2026-08-13 前直取):预载失败(onerror 静默)时
-    // NPC 永不显示——现在 miss 会触发重载,每帧活画自愈
     const img = this.ensureVImage(m.sheet);
     if (!img) return null;
     const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
-    // ★677 精灵萤特殊：原版 FindFrame case 677 的 frame.Y 0..4 循环没乘帧高
-    //   （帧号当像素用，NPC.cs:73504-73514——原版自身 bug），源矩形 Y = 帧号 0..4px
-    //   → 原版飞灵动画 = 贴图顶部 4px 的微小抖动。本仓同款：sy = idx（不乘 frameH）
     if (npcId === 677) {
       return { img, sx: 0, sy: Math.max(0, Math.min(4, frameIdx)), sw: m.frameW, sh: m.frameH };
     }
     return { img, sx: 0, sy: idx * m.frameH, sw: m.frameW, sh: m.frameH };
   }
-
-  /** 原版 tile/item 英文名（全量表，未白名单的也有） */
   vTileName(id: number): string | null { return this.vanilla.tileNames?.[String(id)] ?? null; }
   vItemName(id: number): string | null { return this.vanilla.itemNames?.[String(id)] ?? null; }
 

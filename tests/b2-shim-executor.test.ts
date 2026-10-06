@@ -1179,3 +1179,87 @@ describe('★R1b-5 样式工厂不降级 + lighter 渐变 fillRect ADD 档', () 
     expect(EXEC).toContain("this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,");
   });
 });
+
+describe('★债A accFail 弃队窗清偿（FBO 未开窗=首 flush 预解析门期,鸟妖定谳刀登记）', () => {
+  // 旧门 `(hadFbo || why==='nogl')` 在 FBO 未开且非 'nogl'（'tex' 预解析门/'begin'
+  //  失败窗）时直接 popAll=整队静默弃。定谳:该窗队列原封未动（预解析门先于
+  //  begin,零发射零 present）+ degradeAcc 无开会话安全（endAccumulate 返 null,
+  //  'nogl' 支既有路径）⇒ 修=门撤除,该窗与 'nogl' 收口同构（degrade→replay2D）。
+
+  it("预解析门 'tex' 失败（首 flush,FBO 未开）→ degradeAcc+全队列 2D 重放,不弃队", () => {
+    const { L } = mkFullAccLayer();
+    (L as unknown as { texFromRegion: () => null }).texFromRegion = () => null;   // 静态源解析失败（'tex' 生产态）
+    const raw2 = new FakeCtx();
+    let degraded = 0;
+    const p0 = GLShimExecutor.accFailPreopen;
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { degraded++; ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.drawImage(mkImg(1), 0, 0);
+    wrap.drawImage(mkImg(1), 16, 0);
+    ex.flush();
+    expect(degraded).toBe(1);
+    expect(ex.stats.replays).toBe(2);           // 旧码=0（整队弃）
+    expect(raw2.log.length).toBe(2);            // 重放全队列落降级面
+    expect(GLShimExecutor.accFailPreopen).toBe(p0 + 1);   // 定谳仪计数
+    expect(ex.stats.accFails['tex']).toBe(1);
+  });
+
+  it("'begin' 失败（FBO 未开）→ 同收口 degradeAcc+replay2D（旧码=弃队）", () => {
+    const { L } = mkFullAccLayer();
+    (L as { begin: () => void }).begin = () => { (L as { unavailable: boolean }).unavailable = true; };   // begin 即死,open 恒 false
+    const raw2 = new FakeCtx();
+    let degraded = 0;
+    const p0 = GLShimExecutor.accFailPreopen;
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { degraded++; ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.drawImage(mkImg(3), 0, 0);
+    ex.flush();
+    expect(degraded).toBe(1);
+    expect(ex.stats.accFails['begin']).toBe(1);
+    expect(ex.stats.replays).toBe(1);           // 旧码=0
+    expect(raw2.log.length).toBe(1);
+    expect(GLShimExecutor.accFailPreopen).toBe(p0 + 1);
+  });
+
+  it('回归锚:FBO 有量中途失败（tex2）路径不变——前缀弃+尾段重放,preopen 不计', () => {
+    const { L, quads } = mkFullAccLayer();
+    (L as unknown as { texRefresh: () => null }).texRefresh = () => null;   // 动态源发射期解析失败
+    const raw2 = new FakeCtx();
+    let degraded = 0;
+    const p0 = GLShimExecutor.accFailPreopen;
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { degraded++; ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const dynImg = mkImg(2);
+    ex.markDynamic(dynImg);                     // dynamic rec 跳过预解析门=发射期才解析
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.drawImage(mkImg(1), 0, 0);             // 静态 rec:预解析门过+发射=前缀
+    wrap.drawImage(dynImg, 16, 0);              // 该 rec 中途解析失败（'tex2'）
+    ex.flush();
+    expect(quads.length).toBe(1);               // 前缀已发射（dropEmittedPrefix 弃）
+    expect(degraded).toBe(1);
+    expect(ex.stats.accFails['tex2']).toBe(1);
+    expect(ex.stats.replays).toBe(1);           // 只补尾
+    expect(raw2.log.length).toBe(1);
+    expect(GLShimExecutor.accFailPreopen).toBe(p0);   // FBO 有量窗≠preopen
+  });
+
+  it('结构锁:hadFbo 门已撤除（红=门回潮→preopen 窗弃队复演）', () => {
+    const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
+    expect(EXEC).not.toContain("(hadFbo || why === 'nogl')");
+    expect(EXEC).toContain('if (!hadFbo && why !== \'nogl\') GLShimExecutor.accFailPreopen++;');
+  });
+});

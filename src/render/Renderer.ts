@@ -4538,6 +4538,7 @@ export class Renderer {
       stats: { ...this.bglPathStats },
       worldCanvasCreations: this.b2bWorldCanvasCreations,
       accFailLedger: { ...GLShimExecutor.accFailLedger },   // ★闪屏定谳仪:会话级降级原因累计（不随帧清）
+      accFailPreopen: GLShimExecutor.accFailPreopen,        // ★债A 定谳仪:首 flush 预解析门期窗触达计数
       shim: this.bglEntShim
         ? { fallback: this.bglEntShim.stats.fallback, replays: this.bglEntShim.stats.replays, draws: this.bglEntShim.stats.draws }
         : null,

@@ -166,7 +166,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf, modTownArrivalEntries, MOD_NPC_OWNER, townNpcKeyRestorable } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
-import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, fairyQueenShotHue, type CombatWeapon } from '../data/vanillaItemCombat';
 import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
 import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFoodColors';
 import {
@@ -550,8 +550,14 @@ import { canvasWatchStats } from '../render/CanvasWatch';
 import { pumpGate, pumpAccumulate, BG_PUMP_MAX_TICKS } from './BackgroundPumpCore';   // ★后台 tick 泵纯核(2026-09-28;worker 条目=../workers/BackgroundPump.ts 零依赖纯泵)
 
 const FIXED_DT = 1 / 60;
-/** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
-const AMMO_BULLET = 14;
+/** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，Terraria.ID/AmmoID.cs:122）。
+ *  ★BJ531（2026-10-06）：1.4.5 已把 AmmoID 编号并入物品 id 域（Bullet=97=火枪子弹
+ *  ItemID；Gel=23/Arrow=40/Coin=71 本就同域），旧钉 14=1.4.4 前值——与本仓
+ *  vanilla-itemcombat.json（Item.cs SetDefaults 终值：97 火枪子弹 ammo=97 / 98
+ *  迷你鲨 useAmmo=97，Item.cs:2516-2538）永不等 → 子弹扫描恒假，军火商永不入住。
+ *  消费：townNpcSpawnAllowed 'arms_dealer'（NPC.SpawnAllowed_ArmsDealer
+ *  NPC.cs:7119-7124） */
+const AMMO_BULLET = 97;
 
 /** 观战退出键族的热键栏子集（Player.cs:16933 退出条件里的 Hotbar1-10/Plus/Minus
  *  三个 Current 触发器——电平语义,keydown 边沿等价单发） */
@@ -8429,6 +8435,11 @@ export class Game implements GameHooks {
       this.pumpWorker = null;
     }
     this.input.destroy();
+    // ★WaveWorker release（2026-10-06 清理刀）：波场 worker terminate+会话闩全复位
+    //  （waterWaves 模块单例跨世界存活,只 terminate 不复位=下世界 _wwEnsure 永久
+    //  短路/_wwOn 残留=注入批喂死 worker 静默丢失——WaterWaves.release 头注定谳）,
+    //  下世界 Renderer 首帧 frame() 惰性重建（LightWorker dispose 同范式,下行）
+    waterWaves.release();
     this.lighting?.dispose();   // ★C9：光照 Worker 链拆除（?lightworker=1 时防跨世界 worker 泄漏双跑）
     this.chunks?.bakeClient?.dispose();   // ★C4:烘焙 worker 链拆除（防跨世界泄漏,C9 同款纪律）
     this.chunks?.dispose();
@@ -17462,7 +17473,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         /** 特例扇生成共用（★SW-FX9 2026-09-10 勘误:旧"noDropItem=dropKey null 仅木箭回收"
          *  注随回收链摘除退役——原版弓系扇/齐射本就恒消耗,无任何回收语义） */
         const spawnFanArrow = (fx3: number, fy3: number, vx3: number, vy3: number,
-          pid3: number, dmg3: number): void => {
+          pid3: number, dmg3: number, hue3?: number): void => {
           const a3 = new Arrow(fx3, fy3, vx3, vy3, dmg3, knockback, pid3, gravOpts);
           a3.frostEligible = true;
           // ★BJ493③（2026-10-04）critBonus 冻结写位摘除→0.04 路由门（掷率=Arrow
@@ -17470,6 +17481,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  同批迁移 rollVanillaHitCrit）
           a3.critChance = 0.04;
           a3.armorPen = arpenTotal;
+          // ★EoL2 登记债2 清偿（2026-10-06）：932 月总矢 hue=发射点 ai3（唯一发射
+          //  面=暮夕 4953 第 3 发,Player.cs:48391-48397 aiArgs[1] → proj.ai[1] →
+          //  GetFairyQueenWeaponsColor hueRaw :21782）——经 ArrowOpts.empressHue
+          //  通道注入（873 同通道先例）,绘制 :3271 与 AI_181 尘色两侧同时点亮
+          //  （此前缺省 0 档=恒青蓝）。
+          if (hue3 !== undefined) a3.empressHue = hue3;
           this.entities.add(a3, 'projectiles');
         };
         // ---- 逐弓特例（ItemCheck_Shoot 逐型段，各自 NewProjectile 后 return——
@@ -17583,7 +17600,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (ml3 > 0) { mx3 /= ml3; my3 /= ml3; }
             dirX3 = mx3; dirY3 = my3;
           }
-          spawnFanArrow(sx3, sy3, dirX3 * spec3.spd, dirY3 * spec3.spd, spec3.pid, spec3.dmg);
+          // ★EoL2 登记债2 清偿（2026-10-06）：ai3 仅 932 发计算（原版 if
+          //  (projToShoot == 932) 内 Player.cs:48392）——fairyQueenShotHue 见
+          //  vanillaItemCombat.ts 注（miscCounter/300×12%1 锯齿,周期 25t）
+          const fqHue = spec3.pid === 932
+            ? fairyQueenShotHue(this.player.miscCounter)
+            : undefined;
+          spawnFanArrow(sx3, sy3, dirX3 * spec3.spd, dirY3 * spec3.spd, spec3.pid, spec3.dmg, fqHue);
           specialShots = 1;
         } else if (bowVid2 === 2797) {
           // 异星泡泡枪 2797（Player.cs:46943-46968）：出生点 = 玩家中心沿瞄准向
@@ -35519,6 +35542,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
       }
+      // ★B6 hitProj 数据面:mod 物品命中点静置生成(OnHitNPC NewProjectile(target.Center,
+      //   Vector2.Zero, ProjectileType<X>(), dmg) 形;dmg='item'=武器基伤/数字=定点伤;
+      //   弹 id 经 allocation.projs 全键直查,未注册键静默跳过)
+      {
+        const hp = swingVid !== undefined ? itemCombat(swingVid)?.hitProj : undefined;
+        if (hp) {
+          const dk = ITEM_DEFS[swingVid]?.key ?? '';
+          if (dk.startsWith('mod_')) {
+            const modId = dk.slice(4, dk.indexOf('_', 4));
+            const pid = getModLoadResult()?.allocation?.projs.get(`mod_${modId}_${hp.proj}`);
+            if (pid !== undefined) {
+              const pdmg = (hp.dmg === undefined || hp.dmg === 'item')
+                ? Math.max(1, Math.round(itemCombat(swingVid)?.damage ?? 0))
+                : hp.dmg;
+              // 源传 Item.knockBack 原值(非击退链后 kb)——武器表直取
+              const pkb = itemCombat(swingVid)?.knockBack ?? 2;
+              this.entities.add(new ModProj(e.cx, e.cy, 0, 0, pdmg, pkb, pid, true), 'projectiles');
+            }
+          }
+        }
+      }
       // ================= ★R2-07(g) ApplyNPCOnHitEffects 五条 spawn 面 + 蓄能位
       // （Player.cs:44809-44906——受理命中【后】镜像区，依原文顺序排布；
       //   damage/knockBack/dmgRandomized 形参 = chainDmg / kb / dmgRandomized）=================
@@ -36964,10 +37008,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // SpawnAllowed_Nurse：unlockedNurseSpawn 或 statLifeMax/20 > 5（用过生命水晶）
         return !!uf.unlockedNurseSpawn || Math.floor(p.maxHp / 20) > 5;
       case 'arms_dealer': {
-        // SpawnAllowed_ArmsDealer：unlockedArmsDealerSpawn 或 背包有子弹系物品
+        // SpawnAllowed_ArmsDealer（NPC.cs:7119-7124）：unlockedArmsDealerSpawn 或
+        // 背包有子弹系物品（item.ammo==AmmoID.Bullet || item.useAmmo==AmmoID.Bullet，
+        // 1457 AmmoID.Bullet=97——★BJ531 旧 AMMO_BULLET=14 系 1.4.5 前陈值，定谳锚 :553）。
+        // 扫描面 inventory[0..57] = 本仓 slots 58 格（0-49 背包+50-53 钱币+54-57 弹药）
+        // 同域；★BJ531 补 stack>0 门（NPC.cs:7135 `item.stack > 0`，空壳零叠格不计）
         if (uf.unlockedArmsDealerSpawn) return true;
         for (const s of p.inv.slots) {
-          if (!s) continue;
+          if (!s || s.stack <= 0) continue;   // ★BJ531：vanilla stack>0 门（NPC.cs:7135）
           const def = ITEM_DEFS[s.id];
           if (!def) continue;
           const vid = def.vid ?? -1;

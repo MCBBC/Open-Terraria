@@ -25,15 +25,18 @@
 //  回调锁定驱动器(诚实估计):busy 耦合的恒重载流呈"估计即节奏"回声(FrameBeat 头注
 //  饱和回声债),est→帧耗使 budget(k+1) 线被回声豁免——那是估计器债不是判据缺陷。
 //  ★B2/v9(2026-10-04)估计器去回声(结构债清偿刀):上句"估计器债"就此销案——
-//  新估计器=famLo 锚定显示族收集+三重门(成熟度/双峰间隙/离散度)+向下有界校正,
-//  回退姿态=无证据/门拒绝时与旧截尾均值逐位一致(故本文件所有 busy 耦合判据测试
-//  不受扰)。红判别器 LegacyEstBeat/OldV4Beat.estimateVsync 钉旧估计式=整链旧侧;
-//  判别器块(trace describe 内)锁:证据段收敛 ≈7.8(旧 9.7)、健康机器语义流不拖低、
-//  v1 杀手流双峰门拦截、锁定/并调流估计式不变、切屏 200 回调恢复。定谳画像见
-//  FrameBeat.ts 头注 v9。
+//  (★v9.5 终局裁决(2026-10-06)翻案:B2 全系清退——五次迭代期间用户实报只有两次
+//  体感回归(v9.3 fps 飘 120-130、v9.4 持续抖动),B2 目标偏差(饱和段估计)度量自
+//  off 档会话无 k 决策消费面,从未被体感兑现。Trace-20261006T033001 定谳:v9.4 cap
+//  门=278 skip 中 198 的咬合源+渲染率 117.2<cap+fps 读数 120 穿越 7.3 次/s=用户
+//  实报"低于或高于 120 跳+画面抖动"的直接机制;无门配置(任一估计器)回放同一流
+//  零 skip+读数稳 126.7+120 穿越 0.52/s=用户记忆"B2 前很稳"逐项吻合。裁决=A:
+//  估计器回旧截尾均值+cap 门拆除,v5-v8 判据面保留原样;本文件 B2 判别器锁随裁决
+//  刷新为「清退态回归锁」(真实 trace 流零 skip/估计器≡截尾均值逐位/超速 ticker
+//  跟满语义),B2 语义锁整体退役=实验轨史档,定谳原文见 FrameBeat.ts 头注 v9.5。)
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, trimmedMeanVsync, VSYNC_DISP_WIN, VSYNC_DISP_MIN, VSYNC_ADMIT_REL, VSYNC_IQR_MAX, VSYNC_BIMODAL_GAP, VSYNC_SANITY_LO, VSYNC_FAM_SEED, VSYNC_FAM_GUARD, VSYNC_RESEED, VSYNC_STARVE_FLUSH, VSYNC_ECHO_CORR, VSYNC_ECHO_MIN_PAIRS, VSYNC_ECHO_RESID, CAP_TOP_TOL_MS } from '../src/core/FrameBeat';
+import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, trimmedMeanVsync } from '../src/core/FrameBeat';
 
 const GAME = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 const BEAT = readFileSync(new URL('../src/core/FrameBeat.ts', import.meta.url), 'utf8');
@@ -932,6 +935,15 @@ describe('★真实 trace 回放(Trace-20260929T164816 @localhost:4173,主线程
 const DELTAS_X10 = [124,122,104,123,160,135,114,95,119,96,155,124,126,116,95,115,97,128,129,133,95,147,120,125,93,165,122,131,96,121,122,106,120,118,117,93,117,97,143,129,131,134,97,132,125,100,145,131,134,94,130,122,135,96,143,117,100,128,122,125,90,130,139,124,96,115,143,95,122,152,129,120,115,120,95,123,122,124,116,123,140,123,98,121,116,93,120,115,158,114,116,94,128,126,121,108,121,114,93,119,126,94,117,116,91,142,116,116,93,159,116,91,118,116,94,113,145,97,128,117,95,125,111,129,125,119,92,120,119,121,95,136,109,121,94,119,126,91,128,127,120,122,127,125,90,119,121,95,114,113,91,117,89,133,127,95,127,148,139,122,94,124,120,90,122,114,87,140,112,92,125,122,104,116,134,138,94,144,153,122,106,131,117,93,134,153,152,155,157,147,149,149,201,218,119,123,96,118,121,96,118,91,114,93,134,139,115,122,97,120,115,92,129,137,98,122,117,120,97,124,128,98,138,124,92,117,117,98,123,118,106,119,112,96,113,137,126,94,115,123,118,113,117,91,124,121,90,116,100,127,132,125,98,129,118,126,99,162,118,126,88,146,115,97,126,120,89,124,117,128,90,120,118,97,143,115,101,118,145,123,96,122,124,97,161,127,142,118,96,126,118,113,124,122,98,128,123,123,94,141,118,111,126,124,115,118,131,139,139,99,126,128,120,94,121,129,97,124,125,99,138,116,97,114,124,114,121,113,116,101,117,123,96,132,134,123,96,121,128,94,132,140,143,92,126,129,95,123,121,104,132,128,121,99,134,129,124,94,143,123,99,121,158,119,109,116,175,122,103,124,121,101,123,125,122,131,122,117,102,128,128,122,137,118,94,97,119,141,137,124,90,149,122,96,117,127,125,123,90,91,117,118,135,136,92,120,95,119,125,143,137,122,120,122,121,94,128,142,90,119,96,123,122,122,96,169,124,123,120,94,117,120,93,120,120,94,127,127,90,124,127,89,133,139,119,94,166,133,125,96,115,116,91,113,96,119,115,113,93,129,135,85,119,124,95,111,125,88,138,112,85,134,117,90,109,87,132,113,144,87,115,114,86,115,86,135,121,84,111,115,89,130,127,91,104,81,125,87,111,115,84,129,121,108,78,112,130,83,129,115,198,115,114,127,101,126,103,110,80,108,85,110,112,81,103,81,116,113,86,117,81,107,111,111,112,107,81,133,93,112,106,83,105,93,114,106,84,107,93,115,105,80,104,105,102,100,80,108,118,106,109,77,120,102,77,104,81,102,79,105,106,73,107,96,102,103,102,121,75,102,74,98,74,102,98,76,109,75,118,72,99,72,105,75,105,103,100,106,81,132,80,109,78,106,114,77,116,79,104,95,107,103,77,108,84,140,110,109,76,102,88,101,102,81,105,75,104,97,106,108];
 const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108,110,117,81,133,103,108,79,150,105,116,81,106,107,80,105,104,102,77,103,80,127,108,109,120,82,115,111,84,129,115,121,80,114,108,119,80,130,101,83,112,106,108,76,113,123,108,82,99,127,79,107,132,110,104,101,105,81,108,105,110,102,109,125,109,84,105,100,77,105,77,144,99,102,79,114,110,104,77,105,100,78,103,109,78,100,99,76,129,102,101,79,142,101,78,101,100,80,98,127,81,112,101,76,106,96,93,106,101,77,103,104,107,81,121,96,105,78,99,112,77,112,106,104,107,101,110,77,101,105,80,100,99,74,103,74,117,110,79,99,132,123,107,80,107,101,75,104,100,73,117,96,78,107,107,81,98,119,123,78,126,136,105,90,113,100,78,119,139,136,136,138,129,132,134,125,198,101,109,81,104,103,76,103,77,97,76,117,124,97,107,82,102,98,76,103,119,80,103,98,104,81,108,111,84,124,109,77,99,104,77,104,103,78,104,98,80,99,121,111,81,101,109,99,98,104,77,108,106,77,101,85,108,113,107,81,112,101,110,84,146,101,111,74,131,101,83,109,103,76,111,101,113,78,101,101,83,129,101,79,102,127,106,78,104,108,80,140,108,124,101,81,110,104,97,107,104,80,111,105,106,80,125,104,94,109,110,82,102,115,119,125,81,110,105,105,80,105,113,79,108,109,83,121,102,83,98,107,97,107,99,101,87,103,106,81,118,114,106,81,104,111,80,112,123,128,76,107,113,81,105,106,82,117,109,106,83,118,109,107,78,125,107,82,105,141,104,91,100,107,107,81,106,107,83,105,109,108,99,108,102,81,111,114,108,122,103,79,81,99,122,121,109,75,135,107,79,102,111,110,107,77,77,101,100,105,122,75,103,79,102,109,128,76,108,104,105,104,79,104,127,76,105,77,106,103,107,79,144,109,104,103,78,100,102,78,101,103,77,103,113,74,107,112,73,113,123,101,76,149,111,108,81,100,100,75,99,78,103,100,94,76,110,120,71,100,109,76,96,109,73,122,97,72,102,101,75,94,74,115,97,126,73,99,98,71,100,71,120,106,70,96,99,73,114,113,73,91,68,111,72,95,99,69,114,103,93,65,97,111,69,113,101,183,95,99,111,86,112,84,95,65,93,69,90,93,64,88,66,93,98,68,100,65,91,93,95,97,91,62,118,66,96,91,68,90,68,95,91,70,92,67,99,88,62,88,87,86,86,63,93,62,86,94,61,104,86,61,87,66,87,64,86,90,58,92,82,86,64,84,105,59,86,59,84,60,82,83,61,88,60,103,58,83,55,87,60,90,84,84,84,56,112,60,91,63,88,96,61,99,62,87,57,89,85,62,93,68,124,91,93,61,87,57,82,85,64,88,59,89,58,90,91,61];
 
+// ── ★真实实报流(Trace-20261006T033001,用户机 subtle+cap120,2026-10-05 19:30 UTC)──
+//  主循环链 rAF FunctionCall 实拍,s10-s13 在册稳态切片 360 回调(29.06s 窗内的
+//  10-14s 段;无 stall,max delta 13.5ms)。DELTAS=相邻回调间隔 ×10 定点(含 4.8-6.5ms
+//  busy-unlock 短回调=v9.4 门咬合带样本,36.8% 样本 <7.2);COSTS=渲染帧成本 ×10
+//  (0=原会话被 v9.4 门 skip 的 tick,该流上 skip 率 7.55%)。定谳消费面见 FrameBeat
+//  头注 v9.5 与本文件「v9.5 清退态回归锁」块。
+const LIVE_DELTAS_X10 = [65,72,81,88,87,86,75,81,88,78,84,90,77,81,67,81,68,83,48,91,127,83,103,105,95,74,77,81,84,79,87,86,79,81,83,85,91,82,58,68,80,87,53,70,74,79,81,86,79,87,84,68,78,90,57,61,83,76,80,74,83,83,85,76,66,81,59,85,69,78,79,83,78,79,78,84,91,63,80,76,65,73,87,82,66,76,78,89,75,89,63,79,68,91,65,76,79,75,69,89,76,82,89,77,84,92,94,70,79,91,82,77,83,86,87,76,92,90,68,85,90,83,63,88,71,54,80,79,68,91,80,115,48,82,73,82,86,90,76,82,70,88,54,84,76,87,56,85,79,75,83,84,80,71,73,65,99,130,78,55,97,95,135,61,58,83,90,79,84,82,82,65,83,60,84,87,54,68,73,86,89,79,87,83,75,88,84,80,85,92,82,75,91,86,81,84,60,85,129,82,65,80,85,89,78,84,79,86,86,88,79,81,83,81,69,63,75,93,49,79,77,77,75,82,86,90,75,84,100,77,77,84,80,70,81,64,77,94,51,66,90,81,86,73,84,89,80,79,94,79,86,85,64,86,65,84,63,67,73,85,72,85,79,88,86,86,86,82,75,83,83,91,85,75,87,80,84,77,71,71,92,62,82,82,110,92,97,79,94,76,83,89,87,74,84,77,73,66,81,91,39,85,74,80,87,79,84,83,91,83,74,94,82,79,66,90,56,94,75,65,63,77,80,92,73,87,80,75,86,51,90,61,81,87,67,82,72,82,84,87,65,89,60,84,70,77,81,67,75,89,79,85,75,76,62,75,89,63,73];
+const LIVE_COSTS_X10 = [0,48,43,52,45,63,40,52,41,50,40,52,44,59,38,66,38,60,40,0,50,59,40,83,43,51,47,48,42,53,44,55,42,49,38,47,41,51,43,0,51,53,37,45,61,43,50,40,63,45,56,45,54,40,49,37,42,53,42,49,38,54,41,56,40,50,40,0,49,43,53,39,51,39,63,39,60,51,0,64,0,53,44,53,44,65,41,60,40,51,39,0,51,55,41,64,42,44,57,46,66,45,65,44,52,46,69,44,64,45,54,43,53,45,55,42,61,44,51,40,49,42,46,0,62,0,41,61,43,49,41,50,39,49,38,45,41,61,40,59,38,48,39,0,52,43,48,0,60,41,56,40,54,37,49,36,46,40,59,42,0,50,48,51,0,43,48,41,59,43,56,39,45,37,0,57,0,47,42,49,38,55,39,48,37,49,42,50,43,50,41,47,39,53,40,47,43,0,51,59,56,0,42,46,40,47,37,48,43,47,40,48,38,48,38,55,0,49,39,42,50,40,49,38,60,39,50,40,46,38,59,41,60,38,50,40,0,51,0,51,42,50,47,53,42,63,45,53,42,61,40,48,42,0,54,0,54,43,53,42,50,39,48,41,55,39,49,43,47,40,61,42,48,41,60,40,53,41,50,38,71,40,57,39,53,39,49,40,50,46,50,44,53,43,61,41,49,39,49,51,0,52,43,46,42,48,41,51,41,50,44,50,44,50,39,52,42,0,64,52,37,40,47,39,57,42,60,40,77,41,0,51,41,50,44,47,39,55,39,65,40,53,38,0,47,58,39,46,53,40,67,42,51,41,54,0,52,44,40,55];
+
   function replayStream(make: () => FrameBeat) {
     const beat = make();
     let t = 0;
@@ -963,21 +975,17 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
     expect(r.rendered).toBeGreaterThan(620);     // 每拍皆渲(回声预算容得下;修前 flap 只渲约半)
   });
 
-  // ── ★B2/v9 去回声估计器判别器(2026-10-04;v9.3 修正后语义刷新,见 FrameBeat.ts 头注 v9.3)──
-  //  回声量化画像(DELTAS_X10 定谳):delta≈前帧 cost+1.69ms(sd 0.51,corr=0.964);
-  //  回声族 8.5-21.8ms 占 94.8%,sub-8.33 低族(5.2%,min 7.2)经 v9.3 配对结构定谳=
-  //  「轻帧解堵余数族」R=k×p−U∈(0,p)(对和 17.2-19.6 非 16.7 整数倍)——不是显示
-  //  周期证据,p 的信息只在族上尾(sup→p)。旧截尾均值估计被拖到 ≈11.5(+38.6%)。
-  //  v9.3 三刀:engagement 残差紧致门(VSYNC_ECHO_RESID)/候选统计量族中位→族
-  //  q85/饥饿清族不分级——判别器语义随修正刷新处逐条标明。
-  describe('★B2 去回声估计器(红→绿;结构=famLo 锚定显示族收集+三重门+向下有界校正)', () => {
+  // ── ★v9.5 终局裁决回归锁(2026-10-06,Trace-20261006T033001 定谳;B2 全系清退)──
+  //  原 B2 判别器锁(famLo 显示族/双峰间隙/corr-resid 门/q85 候选/饥饿清族)整体退役
+  //  =实验轨史档(git 历史+本文件历史可考,复活须新证据另立项)。清退态语义:
+  //  估计器≡旧截尾均值(任何流逐位一致);超速 ticker 跟满(零 skip);用户机实报
+  //  会话的真实流回放零 skip+读数稳。定谳原文见 FrameBeat.ts 头注 v9.5。
+  describe('★v9.5 清退态回归锁(估计器≡截尾均值;真实实报流零 skip)', () => {
     const q = (arr: number[], p: number) => {
       const s = [...arr].sort((a, b) => a - b);
       return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))];
     };
-    /** 估计器 A/B 驱动器:delta 流喂引擎,逐回调记录 vsyncPeriod(拍状态机不动,纯估计面)。
-     *  costs:可选渲染成本流——回声签名账本(corr 门)靠 endRender 记账,真实回声场景
-     *  必须喂(否则 corr 不可判=估计恒走旧式);不喂=模拟「无渲染负载的纯回调流」 */
+    /** 估计器驱动器:delta 流喂引擎,逐回调记录 vsyncPeriod(拍状态机不动,纯估计面) */
     const replayEstimate = (make: () => FrameBeat, deltas: number[], costs?: number[]) => {
       const beat = make();
       const est: number[] = [];
@@ -993,134 +1001,82 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
       });
       return est;
     };
-    const FLOOR_SAFE = GRID_MS * (1 - 0.15) / 2;   // 120Hz 名义 vsync 的 FLOOR_TOL 安全线 ≈7.08
     const TRACE_DELTAS = DELTAS_X10.map((v) => v / 10);   // ×10 定点还原 ms
 
-    it('★红→绿(证据段[560,630]):旧估计被回声拖到 ≈9.7(漂移可测);新估计收敛族上尾带(q85,≈8.0)且【双向】不破界——低于 7.9=余数族中位低估回潮(v9.3 反 undershoot 锁),高于 8.5=回声未除', () => {
-      // ★v9.3 语义刷新:候选统计量=族 q85(余数 sup→p),非 v9 首版族中位(7.6-7.8,
-      //   系统性低估 p=用户实报 7.7-7.8<8.33 回归的根)。下界 7.9 钉死反 undershoot。
+    it('★清退态:估计器与截尾均值逐位一致(回声真实流带成本/健康流/杀手流三流;任何估计器结构变更自此须新证据另立项)', () => {
       const traceCosts = COSTS_X10.map((v) => v / 10);
-      const estOld = replayEstimate(() => new LegacyEstBeat(), TRACE_DELTAS, traceCosts);
-      const estNew = replayEstimate(() => new FrameBeat(), TRACE_DELTAS, traceCosts);
-      const seg = (a: number[]) => a.slice(560);
-      // 红:旧估计器证据段仍骑工作周期(+16.8% vs 名义 8.33;饱和段更达 +38.6%)
-      expect(q(seg(estOld), 0.5)).toBeGreaterThan(9.5);
-      // 绿:新估计器收敛进显示带(族上尾统计)且双向不破界(minK 不假抬+不 undershoot)
-      const p50N = q(seg(estNew), 0.5);
-      expect(p50N).toBeLessThan(8.5);
-      expect(p50N).toBeGreaterThanOrEqual(7.9);
-      expect(p50N).toBeGreaterThan(FLOOR_SAFE);
-      expect(Math.min(...estNew)).toBeGreaterThanOrEqual(FLOOR_SAFE);   // 全程无地板级联深度
-    });
-
-    it('★饱和段姿态(前 400 拍零显示证据,信息论不可恢复):新估计器不猜——回退工作估计,minK(cap120) 恒 1 零 floor 迁移', () => {
-      const beat = new FrameBeat();
-      let t = 0;
-      const minKs = new Set<number>();
-      for (let i = 0; i < 400; i++) {
-        t += TRACE_DELTAS[i];
-        beat.observeVsync(t, 120);
-        beat.beginRender(t);
-        beat.endRender(t + COSTS_X10[i] / 10);   // 喂成本:回声签名在案,校正启动但无低族证据
-        minKs.add(beat.minK());
-        expect(beat.vsyncPeriod).toBeGreaterThanOrEqual(FLOOR_SAFE);  // 任何时刻不跌破安全线
-      }
-      expect(minKs).toEqual(new Set([1]));
-    });
-
-    it('★金标健康流(机器时间戳语义 7.93±0.07 + 5.2% 余数 7.2-7.95):新估计不拖低健康读数(|Δ旧|<0.1ms)——p10/min 证伪处方的回归锁', () => {
       const lcg = lcgOf(21);
       const healthy = Array.from({ length: 2000 }, () => (lcg() < 0.052 ? 7.2 + lcg() * 0.75 : 7.93 + lcg() * 0.14));
-      const estOld = replayEstimate(() => new LegacyEstBeat(), healthy);
-      const estNew = replayEstimate(() => new FrameBeat(), healthy);
-      const seg = (a: number[]) => a.slice(-400);
-      expect(Math.abs(q(seg(estNew), 0.5) - q(seg(estOld), 0.5))).toBeLessThan(0.1);
-      expect(q(seg(estNew), 0.5)).toBeLessThan(8.1);   // 保持机器语义读数(不被名义 8.33 拉高)
-    });
-
-    it('★v1 杀手流(60Hz 双峰 20/13.3 交替,真 16.67):双峰间隙门拦截低族余数伪影——新估计=旧估计,地板级联不复发', () => {
       const killer = Array.from({ length: 2000 }, (_, i) => (i % 2 === 0 ? 20 : 13.3));
-      const estOld = replayEstimate(() => new LegacyEstBeat(), killer);
-      const estNew = replayEstimate(() => new FrameBeat(), killer);
-      const seg = (a: number[]) => a.slice(-400);
-      expect(Math.abs(q(seg(estNew), 0.5) - q(seg(estOld), 0.5))).toBeLessThan(0.05);
-      expect(q(seg(estNew), 0.5)).toBeGreaterThan(15); // cap60@60Hz 地板 k=1 语义(≥14.17)保住
+      const streams: { deltas: number[]; costs?: number[] }[] = [
+        { deltas: TRACE_DELTAS, costs: traceCosts }, { deltas: healthy }, { deltas: killer },
+      ];
+      for (const { deltas, costs } of streams) {
+        const est = replayEstimate(() => new FrameBeat(), deltas, costs);
+        const ref = replayEstimate(() => new LegacyEstBeat(), deltas, costs);
+        expect(est).toEqual(ref);                // 逐位一致(清退态=B2 前唯一估计式)
+      }
     });
 
-    it('★v9.2 corr 门负控制(活机迟帧余数伪影流,真 8.1):伪族与成本不相关 ⇒ 校正不启动,est=work 稳定无 floor 风暴(活机实锤回归锁)', () => {
-      const lcgB = lcgOf(31);
-      const burst = Array.from({ length: 2000 }, () => (lcgB() < 0.15 ? 5.2 + lcgB() * 0.8 : 8.0 + lcgB() * 0.3));
-      // 成本恒 2ms(轻载,零方差=不可判)——活机风暴场景的机制面
-      const estFlat = replayEstimate(() => new FrameBeat(), burst, burst.map(() => 2));
-      const estLegacy = replayEstimate(() => new LegacyEstBeat(), burst, burst.map(() => 2));
-      // corr 门关闭 ⇒ 估计与旧式【逐位一致】(负控制的精确语义;修前 v9.1 在此流塌 5.4 风暴)
-      let maxDiff = 0;
-      for (let i = 0; i < estFlat.length; i++) maxDiff = Math.max(maxDiff, Math.abs(estFlat[i] - estLegacy[i]));
-      expect(maxDiff).toBeLessThan(1e-9);
-      expect(q(estFlat.slice(-400), 0.5)).toBeGreaterThan(7.5);     // 稳在主族(真 8.1)
-      expect(q(estFlat.slice(-400), 0.5)).toBeLessThan(8.7);
-    });
-
-    it('★v9.2 corr 门正控制(合成回声流:delta=成本+1.7,真 8.33):签名成立 ⇒ 去回声启动,估计收敛显示族上尾(v9.3 反 undershoot:≥7.9,不再落中位低估带)', () => {
-      // 回声机制本体:delta_i ≈ cost_{i-1} + 1.7(渲染超支推迟本回调交付;lag-1!)。
-      // 主族 delta 12.0±0.6(成本 10.3±0.6),5% 真显示证据 7.2-8.1(=轻帧解堵余数族,
-      // v9.3 定谳:p 的信息在族上尾 sup→p,非族中位)
-      const lcgC = lcgOf(77);
-      const synthDeltas: number[] = [];
-      const synthCosts: number[] = [];
-      let prevCost = 10;
-      for (let i = 0; i < 2500; i++) {
-        if (lcgC() < 0.05) {
-          synthDeltas.push(7.2 + lcgC() * 0.9);          // 显示证据(余数族,脱离回声关系)
-        } else {
-          synthDeltas.push(prevCost + 1.7 + (lcgC() - 0.5) * 0.4);
+    it('★真实实报流零 skip(Trace-20261006T033001 用户机 subtle+cap120 会话 s10-s13 切片 360 回调;原会话 v9.4 门咬 7.55% skip+读数 120 穿越 7.3 次/s,清退态回放=零 skip+读数稳 125 带+零 120 穿越)', () => {
+      // LIVE 流:DELTAS=相邻主循环回调间隔(含 4.8-6.5ms busy-unlock 短回调=v9.4 门
+      // 咬合带样本);COSTS=渲染帧成本(0=原会话被门 skip 的 tick,清退态下照渲)。
+      const beat = new FrameBeat();
+      let t = 0;
+      const rendered: number[] = [];
+      const minKs = new Set<number>();
+      for (let i = 0; i < LIVE_DELTAS_X10.length; i++) {
+        t += LIVE_DELTAS_X10[i] / 10;
+        beat.observeVsync(t, 120);
+        minKs.add(beat.minK());
+        if (beat.shouldRender(t)) {
+          beat.beginRender(t);
+          rendered.push(t);
+          beat.endRender(t + LIVE_COSTS_X10[i] / 10);
         }
-        synthCosts.push(10.3 + (lcgC() - 0.5) * 4.8); // 成本谱 ±2.4(sd≈2.4 与真实回声流同貌;真流 31 窗 corr 实测全程 ≥0.81)
-        prevCost = synthCosts[i];
       }
-      const estNew = replayEstimate(() => new FrameBeat(), synthDeltas, synthCosts);
-      const segN = estNew.slice(-400);
-      expect(q(segN, 0.5)).toBeLessThan(8.6);                       // 收敛进显示带(旧式恒 ≈12)
-      expect(q(segN, 0.5)).toBeGreaterThanOrEqual(7.9);             // ★v9.3:不低于余数族上尾带(中位低估回潮即爆红)
-      expect(Math.min(...estNew)).toBeGreaterThanOrEqual(FLOOR_SAFE);
-    });
-
-    it('★v9.3 残差紧致门负控制(松残差回声形:delta=成本+1.7±3 宽噪,corr 可达标但关系不成立):两门恒闭 ⇒ 估计与旧式逐位一致(混合会话保护面)', () => {
-      // 活机定谳(v9.3):corr 单门在混合会话泄漏(p50 0.538 贴线、入场簇 ≥0.6)——
-      // on-time 交付帧的 delta=p−相位与成本无关,混入即残差松。残差 sd>1.2 ⇒ 不校正。
-      const lcgR = lcgOf(91);
-      const looseDeltas: number[] = [];
-      const looseCosts: number[] = [];
-      let prevCost = 10;
-      for (let i = 0; i < 2500; i++) {
-        looseDeltas.push(prevCost + 1.7 + (lcgR() - 0.5) * 6);   // ±3 宽噪:corr 仍在但残差 sd≈1.7
-        looseCosts.push(10.3 + (lcgR() - 0.5) * 4.8);
-        prevCost = looseCosts[i];
+      expect(rendered.length).toBe(LIVE_DELTAS_X10.length);   // 零 skip(逐回调全渲)
+      expect(minKs).toEqual(new Set([1]));                    // 地板零迁移(est 不跌破 7.08)
+      expect(beat.k).toBe(1);
+      expect(beat.lastReason).not.toBe('capacity');
+      const gaps: number[] = [];
+      for (let i = 1; i < rendered.length; i++) gaps.push(rendered[i] - rendered[i - 1]);
+      expect(Math.max(...gaps)).toBeLessThan(14);             // 无门自造的 ~14-16.5ms 长帧距
+      const fps: number[] = [];
+      for (let j = 60; j < gaps.length; j++) {
+        let sum = 0;
+        for (let k2 = j - 60; k2 < j; k2++) sum += gaps[k2];
+        fps.push(1000 / (sum / 60));
       }
-      const estNew = replayEstimate(() => new FrameBeat(), looseDeltas, looseCosts);
-      const estLegacy = replayEstimate(() => new LegacyEstBeat(), looseDeltas, looseCosts);
-      let maxDiff = 0;
-      for (let i = 0; i < estNew.length; i++) maxDiff = Math.max(maxDiff, Math.abs(estNew[i] - estLegacy[i]));
-      expect(maxDiff).toBeLessThan(1e-9);              // 残差门闭 ⇒ 与旧式逐位一致(负控制精确语义)
+      const fs2 = fps.slice().sort((a, b) => a - b);
+      expect(q(fs2, 0.5)).toBeGreaterThan(122);               // 读数稳在 ticker 率带(~125)
+      expect(q(fs2, 0.05)).toBeGreaterThan(120);              // 零 120 下穿(原会话 7.3 次/s)
+      let cross = 0;
+      for (let i = 1; i < fps.length; i++) if ((fps[i - 1] < 120) !== (fps[i] < 120)) cross++;
+      expect(cross).toBe(0);
     });
 
-    it('★v9.3 陈旧族饥饿清族不分级(单发深锚毒带·活机实锤形态):immature 族被单发 5.9ms 深样本锚死后收录带塌缩,旧豁免下永不清除=收集器死;新码 150 饥饿清族重播种 ⇒ 楼梯下行恢复,证据段照常收敛', () => {
-      // 活机定谳(_framebeat-b2-regress):famLo 被单发 5.8ms 伪影锚死(immature 期
-      // FAM_GUARD 不设防)→收录带 [5.8,6.67] 挡住主体样本→长饥饿。旧码豁免 immature
-      // 族=永不清除→楼梯下行永久阻塞→est 恒骑 work(回声不除);新码清族重播种→
-      // 恢复与无毒前奏相同的收敛面。
-      const poisonedDeltas = [300, 5.9, 5.9, 5.9, 5.9, 5.9, ...TRACE_DELTAS];   // 300ms=断流复位,随后 5 发深样本锚死 famLo
-      const poisonedCosts = [0, 4.2, 4.2, 4.2, 4.2, 4.2, ...COSTS_X10.map((v) => v / 10)];
-      const est = replayEstimate(() => new FrameBeat(), poisonedDeltas, poisonedCosts);
-      const seg = est.slice(560);
-      expect(q(seg, 0.5)).toBeLessThan(9);             // 恢复收敛(旧码恒骑 work≈11.5=红)
-      expect(q(seg, 0.5)).toBeGreaterThanOrEqual(7.9); // 反 undershoot(v9.3 统计量锁)
-      // 毒前奏段及过渡期(前 ~10 拍)流本身是 5.9ms,est=work=5.9 为诚实跟踪+截尾均值
-      // 对称修剪的过渡态,不属 undershoot——反安全线断言 scoped 到收敛稳态段
-      expect(Math.min(...est.slice(-400))).toBeGreaterThanOrEqual(FLOOR_SAFE);
+    it('★金标健康流(机器时间戳语义 7.93±0.07 + 5.2% 余数 7.2-7.95):截尾均值保持机器语义读数(不被名义 8.33 拉高)——v8 时代既有定谳,清退后为本机健康读数的现行语义', () => {
+      const lcg = lcgOf(21);
+      const healthy = Array.from({ length: 2000 }, () => (lcg() < 0.052 ? 7.2 + lcg() * 0.75 : 7.93 + lcg() * 0.14));
+      const est = replayEstimate(() => new FrameBeat(), healthy);
+      const seg = (a: number[]) => a.slice(-400);
+      expect(q(seg(est), 0.5)).toBeLessThan(8.1);   // 保持机器语义读数(不被名义 8.33 拉高)
     });
 
-    it('★估计式不变性(洁净流):锁定 120Hz 网格=精确 8.33(判据算术面不受扰);全 2×vsync 并调流=16.67 与旧一致', () => {
+    it('★v1 杀手流(60Hz 双峰 20/13.3 交替,真 16.67):截尾均值对双峰恢复真值(文件头注既有定谳)——地板级联不复发', () => {
+      const killer = Array.from({ length: 2000 }, (_, i) => (i % 2 === 0 ? 20 : 13.3));
+      const est = replayEstimate(() => new FrameBeat(), killer);
+      const seg = (a: number[]) => a.slice(-400);
+      expect(q(seg(est), 0.5)).toBeGreaterThan(15); // cap60@60Hz 地板 k=1 语义(≥14.17)保住
+    });
+
+    // ★v9.2 corr 门负/正控制、v9.3 残差紧致门、陈旧族饥饿清族四测随 B2 机制清退整体
+    //  退役(实验轨史档=git 历史+本文件历史;活机实锤数字见 FrameBeat.ts 头注
+    //  v9.1/v9.2/v9.3 史档注)。清退后「corr≈0 流恒走截尾均值」不再是判据而是恒等式
+    //  (上面三流逐位一致锁已覆盖其不变面)。
+
+    it('★估计式不变性(洁净流):锁定 120Hz 网格=精确 8.33(判据算术面不受扰);全 2×vsync 并调流=16.67', () => {
       const locked = Array.from({ length: 600 }, () => HZ120);
       const estLocked = replayEstimate(() => new FrameBeat(), locked);
       expect(estLocked[estLocked.length - 1]).toBeCloseTo(HZ120, 2);
@@ -1129,7 +1085,7 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
       expect(estMerged[estMerged.length - 1]).toBeCloseTo(2 * HZ120, 2);
     });
 
-    it('★切屏恢复(120→60):长饥饿族重建+work 重播种,200 回调内估计回到 60Hz 带(≥15)', () => {
+    it('★切屏恢复(120→60):截尾均值随流重建,200 回调内估计回到 60Hz 带(≥15)', () => {
       const stream = [...Array.from({ length: 600 }, () => HZ120), ...Array.from({ length: 300 }, () => HZ60)];
       const est = replayEstimate(() => new FrameBeat(), stream);
       expect(est[799]).toBeGreaterThanOrEqual(15);
@@ -1137,95 +1093,64 @@ const COSTS_X10 = [107,88,107,143,118,98,80,105,83,132,107,110,102,81,101,77,108
   });
 });
 
-describe('★v9.4 cap 硬顶门(反馈环断点;机制/容差定谳见 FrameBeat.ts 头注 v9.4)', () => {
-  it('门咬合条件(单元):cap>0 且距上次渲染 < target−CAP_TOP_TOL_MS ⇒ 跳(计数);≥ ⇒ 落拍', () => {
+describe("★v9.5 cap 门拆除后的语义锁(2026-10-06 终局裁决;超速 ticker 跟满=B2 前稳态,判据随裁决刷新——v9.4 断环测试整体退役)", () => {
+  it("超速 ticker 125Hz(8.0±0.9ms)跟满:零 skip、k=1、渲染率≈ticker 率(读数稳 125 带零 120 穿越)——B2 前已知稳态语义(v9.4 概率咬合面被 Trace-20261006T033001 定谳为纯害:7.55% skip+读数震荡,见头注 v9.5)", () => {
+    // Box-Muller(确定性 LCG)合成 ticker 抖动;恒成本 4ms。v9.4 时代此流被门咬
+    // ~3-7%(capSkips>0 断言,已随门退役);裁决后语义=跟满,渲染率=ticker 率。
+    const lcg = lcgOf(97);
+    const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-12, lcg()))) * Math.cos(2 * Math.PI * lcg());
     const beat = new FrameBeat();
-    beat.observeVsync(0, 120);
-    beat.observeVsync(HZ120, 120);
-    beat.observeVsync(2 * HZ120, 120);        // est≈8.33 → minK(120)=1
-    beat.beginRender(2 * HZ120);              // lastRenderAt=16.67(上次真实渲染的 rAF 时间戳)
-    beat.observeVsync(2 * HZ120 + 6.3, 120);  // d=6.3(截尾均值抗污,est 恒 8.33)→序数=1≥k
-    expect(beat.shouldRender(2 * HZ120 + 6.3)).toBe(false);  // 6.3 < 8.33−2=6.33 ⇒ 门咬合
-    expect(beat.capSkips).toBe(1);
-    beat.observeVsync(2 * HZ120 + 12.7, 120); // 距上次渲染 6.4 ≥ 阈
-    expect(beat.shouldRender(2 * HZ120 + 12.7)).toBe(true);  // 落拍
-    expect(beat.capSkips).toBe(1);            // 落拍不计数(只记真咬合)
+    const rendered: number[] = [];
+    let t = 0;
+    let skipAfterWarm = 0;
+    for (let i = 0; i < 5000; i++) {
+      t += 8.0 + 0.9 * gauss();               // ticker 125Hz,超速于 cap120 的 8.33
+      beat.observeVsync(t, 120);
+      const go = beat.shouldRender(t);
+      // 冷启动瞬态(既知形态,文件头注):估计预热期 est<7.08 → floor 2,滞回升拍梯
+      // 60 渲染帧(每两拍一渲 ≈120 回调)排空至 ~i≈250;i≥400 后必为稳态
+      if (!go && i >= 400) skipAfterWarm++;
+      if (go) {
+        beat.beginRender(t);
+        rendered.push(t);
+        beat.endRender(t + 4);
+      }
+    }
+    expect(beat.k).toBe(1);                   // est≈8.0 ≥ 7.08 地板
+    expect(skipAfterWarm).toBe(0);            // 稳态零 skip(逐 tick 全渲=B2 前稳态)
+    const st = gapStats(rendered.slice(400)); // 统计面同避冷启动梯(i≥400 后全稳态)
+    const fps = 1000 / st.mean;
+    expect(fps).toBeGreaterThan(123);         // 跟满 ticker 原生率(≈125)
+    // 无门自造长帧距(门咬合签名=skip 后 ~14-16.5ms 空档;|Δgap|>4ms 的少量跳变
+    // =σ0.9 合成 ticker 抖动本相,4600 样本期望 ~7 次,非机制面,不断言)
+    expect(Math.max(...st.gaps)).toBeLessThan(13);
   });
 
-  it('escape:cap=0(desktop UNCAPPED 判例)门恒死——超短帧距也放行、零计数', () => {
-    const beat = new FrameBeat();
-    beat.observeVsync(0, 0);
-    beat.observeVsync(HZ60, 0);               // est≈16.67;序数=2
-    beat.beginRender(HZ60);
-    beat.observeVsync(HZ60 + 3, 0);           // d=3 → 序数=1 ≥ k=1
-    expect(beat.shouldRender(HZ60 + 3)).toBe(true);   // cap=0:无顶门(gap 3ms 也放行)
-    expect(beat.capSkips).toBe(0);
-  });
-
-  it('k>1 档零变化(cap60/cap30:稳态 render gap ≥2×ticker 恒在阈外;冷启动瞬态咬合属正确钳速)', () => {
-    // 冷启动瞬态:初始 vsyncPeriod=16.67 → k=1 数 tick,期间 cap60 的 8.33 gap 属真超速,
-    // 门咬合 1 次(cap30 3 次)=正确钳速;est 收敛 → minK 地板接管 → 稳态零咬合=行为
-    // 逐位同 v9.3(稳态段 capSkips 零增量锁)。
-    let renders60 = 0, skipAtWarm60 = -1;
-    const r60 = runBeat({ vsync: HZ120, cap: 60, cost: 5, callbacks: 2400,
-      onRender: (b) => { if (++renders60 === 100) skipAtWarm60 = b.capSkips; } });
+  it("k>1 档(cap60/cap30):minK 地板照常工作,稳态帧距恒定零跳变(门拆除后行为与 v8 一致)", () => {
+    const r60 = runBeat({ vsync: HZ120, cap: 60, cost: 5, callbacks: 2400 });
     expect(r60.beat.k).toBe(2);
-    expect(r60.beat.capSkips).toBe(skipAtWarm60);   // 稳态段零咬合
     const st60 = gapStats(r60.rendered.slice(40));
     expect(st60.jumps).toBe(0);
     expect(st60.p50).toBeGreaterThan(GRID_MS - 1);
-    let renders30 = 0, skipAtWarm30 = -1;
-    const r30 = runBeat({ vsync: HZ120, cap: 30, cost: 5, callbacks: 2400,
-      onRender: (b) => { if (++renders30 === 100) skipAtWarm30 = b.capSkips; } });
+    const r30 = runBeat({ vsync: HZ120, cap: 30, cost: 5, callbacks: 2400 });
     expect(r30.beat.k).toBe(4);
-    expect(r30.beat.capSkips).toBe(skipAtWarm30);
     expect(gapStats(r30.rendered.slice(40)).jumps).toBe(0);
   });
 
-  it('健康稳态零咬合(cap120@120Hz ±10% 抖动:帧距 ∈[7.5,9.17] 恒在阈 6.33 外;fps 语义不变)', () => {
-    // 容差定谳的回归锁:健康 cadence 上门必须静默(σ≈0.9 判例抖动带不触阈)
+  it("健康稳态零 skip(cap120@120Hz ±10% 抖动):逐回调全渲,fps 语义不变", () => {
     const { beat, rendered } = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400, jitter: 0.1 });
-    expect(beat.capSkips).toBe(0);
     expect(beat.k).toBe(1);
+    expect(rendered.length).toBe(2400);       // 零 skip
     const st = gapStats(rendered.slice(40));
     expect(st.jumps).toBe(0);
     expect(st.p50).toBeGreaterThan(HZ120 - 1);
     expect(st.p50).toBeLessThan(HZ120 + 1);
   });
 
-  it('★反馈环断点(用户场景确定性复刻):ticker 超速 125Hz(8.0±0.9ms,σ≈0.9 判例)⇒ 门咬掉多余 tick,渲染率自调节钉 cap 带、不塌半率', () => {
-    // Box-Muller(确定性 LCG)合成 ticker 抖动;恒成本 4ms(零方差 ⇒ corr 门恒闭,
-    // est=截尾均值≈8.0 ⇒ minK=1,k 恒 1=本门是唯一钳,前提锁死)。
-    // 概率调速器(头注 v9.4):咬合率 b=P(gap<6.33|N(8.0,0.9))≈3.2% → 渲染率 ≈121
-    // ∈(cap,cap+2);ticker 越超速咬合越紧(7.5→b 9.7%→渲染 ~120),自调节不塌半率。
-    const lcg = lcgOf(97);
-    const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-12, lcg()))) * Math.cos(2 * Math.PI * lcg());
+  it("深超速(恒 5.5ms ticker=182Hz):minK 地板(ceil(7.08/5.5)=2)接管,渲染钳 ~91fps 半率对齐、帧距恒定——cap 带外钳速走 k 地板,与门无关(v8 既有语义)", () => {
     const beat = new FrameBeat();
     const rendered: number[] = [];
     let t = 0;
-    for (let i = 0; i < 5000; i++) {
-      t += 8.0 + 0.9 * gauss();               // ticker 125Hz,超速于 cap120 的 8.33
-      beat.observeVsync(t, 120);
-      if (beat.shouldRender(t)) {
-        beat.beginRender(t);
-        rendered.push(t);
-        beat.endRender(t + 4);
-      }
-    }
-    expect(beat.k).toBe(1);                   // 前提:est≈8.0 ≥ 7.08 地板,门=唯一钳
-    expect(beat.capSkips).toBeGreaterThan(0); // 门确实咬合(超速被钳)
-    const st = gapStats(rendered.slice(200));
-    const fps = 1000 / st.mean;
-    expect(fps).toBeLessThan(125);            // 低于超速 ticker 原生率(钳在起作用)
-    expect(fps).toBeLessThanOrEqual(122);     // 调速器工作带:cap+2
-    expect(fps).toBeGreaterThan(105);         // 不塌半率(62.5)=无混叠
-  });
-
-  it('深超速(恒 5.5ms ticker=182Hz):k 地板(ceil(7.08/5.5)=2)先于门接管,渲染钳 ~91fps 半率对齐、帧距恒定——门与 minK 地板互锁面', () => {
-    const beat = new FrameBeat();
-    const rendered: number[] = [];
-    let t = 0;
-    let skipAtSteady = -1;
     for (let i = 0; i < 3000; i++) {
       t += 5.5;
       beat.observeVsync(t, 120);
@@ -1234,10 +1159,8 @@ describe('★v9.4 cap 硬顶门(反馈环断点;机制/容差定谳见 FrameBeat
         rendered.push(t);
         beat.endRender(t + 2);
       }
-      if (i === 200) skipAtSteady = beat.capSkips;   // 收敛期后取账(冷启动瞬态咬合不计)
     }
-    expect(beat.k).toBe(2);                   // est 5.5 < 7.08:地板抬 k=2(k=1 带外=门不参战)
-    expect(beat.capSkips).toBe(skipAtSteady); // 稳态段零咬合(咬合面全归 k 地板)
+    expect(beat.k).toBe(2);                   // est 5.5 < 7.08:地板抬 k=2
     const st = gapStats(rendered.slice(200));
     expect(1000 / st.mean).toBeLessThanOrEqual(92);
     expect(st.jumps).toBe(0);
@@ -1305,35 +1228,25 @@ describe('三档语义锁(源锚)', () => {
     expect(MISS_STREAK_DOWNGRADE).toBe(4);
     expect(MISS_STALL_BUDGET_MS).toBe(200);
     expect(GRID_MS).toBeCloseTo(1000 / 60);
-    expect(CAP_TOP_TOL_MS).toBe(2);           // ★v9.4 cap 硬顶门容差(活机帧距分布定谳,头注 v9.4)
   });
 
-  it('★v9.4 cap 硬顶门源锚(反馈环断点,防回改):门在序数落拍面之后、cap>0 守卫承重、机制注在头注', () => {
-    expect(BEAT).toContain('CAP_TOP_TOL_MS = 2');
-    expect(BEAT).toContain('capSkips++');
-    expect(BEAT).toContain('cap 硬顶门');
-    // 门必须在序数落拍面【之后】(序数<k 的常规跳拍不得误计门咬合=诊断面污染)
-    const iOrdinal = BEAT.indexOf('if (this.ordinal < this.k) return false;');
-    const iGate = BEAT.indexOf('this.capSkips++');
-    expect(iOrdinal).toBeGreaterThan(-1);
-    expect(iGate).toBeGreaterThan(iOrdinal);
-    // cap>0 守卫在门条件内(1000/0=Infinity 会吞全部帧=desktop UNCAPPED 判例的承重件)
-    expect(BEAT).toMatch(/if \(this\.cap > 0 && this\.lastRenderAt >= 0 &&/);
-  });
-
-  it('★B2/v9.1 去回声估计器常数处方锁(2026-10-05;★v9.3 刷新:饥饿清族不分级+残差紧致门;定谳/门线依据见 FrameBeat.ts 头注 v9/v9.1/v9.3 与各常数注)', () => {
-    expect(VSYNC_DISP_WIN).toBe(31);        // 显示族窗=工作窗同宽(31 样本窗纪律)
-    expect(VSYNC_DISP_MIN).toBe(12);        // 成熟度门:证据不足不动
-    expect(VSYNC_ADMIT_REL).toBe(1.15);     // 收录带=famLo×1.15(FLOOR_TOL 同宽)
-    expect(VSYNC_IQR_MAX).toBe(0.35);       // 显示族离散度门
-    expect(VSYNC_BIMODAL_GAP).toBe(0.18);   // 双峰间隙门(v1 杀手流+活机节流脉冲防线)
-    expect(VSYNC_SANITY_LO).toBe(0.65);     // 向下校正下界(FLOOR_TOL 安全带保证)
-    expect(VSYNC_FAM_SEED).toBe(0.9);       // famLo 播种锚(族空时=work×0.9)
-    expect(VSYNC_FAM_GUARD).toBe(0.65);     // 成熟期远低于族拒绝(锚=work×0.65=输出钳线,防 famLo 锁死显示证据)
-    expect(VSYNC_RESEED).toBe(0.8);         // 流整体下移重播种阈(切快屏恢复)
-    expect(VSYNC_STARVE_FLUSH).toBe(150);   // 饥饿族重建阈(★v9.3 不分级:150 对 5% 稀疏证据误清率 0.05%)
-    expect(VSYNC_ECHO_CORR).toBe(0.6);      // ★v9.2 回声签名 engagement key(机制指纹阈)
-    expect(VSYNC_ECHO_MIN_PAIRS).toBe(12);  // 相关计算最小配对样本
-    expect(VSYNC_ECHO_RESID).toBe(1.2);     // ★v9.3 回声残差紧致门(trace max 1.07 放行/活机混合流 1.5-2+ 恒拦)
+  it('★v9.5 清退态源锚(2026-10-06 终局裁决,防回改):cap 硬顶门已拆除(shouldRender 无门块/无 capSkips 面)、估计器≡截尾均值;B2 语义锁退役=实验轨史档(头注 v9.5 定谳原文)', () => {
+    // shouldRender 函数体内无门:序数落拍面后直接时间护栏,无 cap>0 咬合块
+    const iShould = BEAT.indexOf('shouldRender(now: number): boolean');
+    const iCapacity = BEAT.indexOf('protected capacityBreach');
+    expect(iShould).toBeGreaterThan(-1);
+    expect(iCapacity).toBeGreaterThan(iShould);
+    const shouldSrc = BEAT.slice(iShould, iCapacity);
+    expect(shouldSrc).not.toContain('capSkips');
+    expect(shouldSrc).not.toContain('this.cap > 0');
+    expect(shouldSrc).toContain('if (this.ordinal < this.k) return false;');
+    // 估计式=截尾均值(estimateVsync 钩保留=红判别器复刻点,本体恒走 legacy)
+    const iEst = BEAT.indexOf('protected estimateVsync');
+    const iLegacy = BEAT.indexOf('protected legacyEstimate');
+    expect(iEst).toBeGreaterThan(-1);
+    expect(iLegacy).toBeGreaterThan(iEst);
+    expect(BEAT.slice(iEst, iLegacy)).toContain('return this.legacyEstimate()');
+    // 快照面无 capSkips(门拆除后诊断面随之退役)
+    expect(BEAT).not.toMatch(/capSkips: this\./);
   });
 });

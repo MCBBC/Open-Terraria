@@ -397,6 +397,13 @@ export class GLShimExecutor {
   static degradeOps: Record<string, number> = {};
   static degradeCallers: Record<string, number> = {};
 
+  /** ★债A 定谳仪（accFail 弃队窗,鸟妖定谳刀登记）：accFail 时 FBO 未开
+   *  （!isAccumOpen('world')）且 why!=='nogl' 的触达次数——即「每帧首 flush
+   *  预解析门期（'tex'）/'begin' 失败窗」计数。会话级静态累计（同 accFailLedger
+   *  口径,不随帧清）;accDiag 消费。清偿后语义=该窗降级+2D 重放次数（弃队→回退
+   *  翻面,计数含义见 accFail 尾注）。 */
+  static accFailPreopen = 0;
+
   static blankStats(): ShimExecStats {
     return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0, accFails: {}, degradeTriggers: {} };
   }
@@ -1850,7 +1857,17 @@ export class GLShimExecutor {
    *  ★R1b-3:中途失败（发射点之后）调用前先 dropEmittedPrefix——队列只余未发射
    *  尾段,degrade present 的 FBO 已含前缀,replay 只补尾=前缀不二次落画
    *  （旧码 replay 全队列=SO 变浓/ADD 双亮）;入口失败（'nogl'/'tex' 预解析门/
-   *  'begin'）无前缀,全队列重放语义不变。 */
+   *  'begin'）无前缀,全队列重放语义不变。
+   *  ★债A 清偿（accFail 弃队窗,鸟妖定谳刀登记→本刀）：旧门
+   *  `(hadFbo || why==='nogl')` 在 FBO 未开且非 'nogl'（=每帧首 flush 的预解析
+   *  门 'tex'/'begin' 失败窗）时直接 popAll=整队静默弃,违背「宁回退不丢精灵」。
+   *  定谳：①该窗队列原封未动——flushAcc 预解析门先于 begin,零发射零 present,
+   *  FBO 本帧零内容;②degradeAcc 在 FBO 未开态安全且有既有路径实证（'nogl' 支
+   *  同状态已走此链:endAccumulate 无开会话返 null→present 跳过,仅惰性建
+   *  worldCanvas+换桥,replay2D 全队列 2D 重放落新面）。修=门撤除,无条件尝试
+   *  degradeAcc（自守卫 _accMode!=='acc'→false,拒绝仍落 popAll 兜底）;hadFbo
+   *  仅存续为定谳仪计数判据（accFailPreopen=该窗降级+重放次数）。健康会话探针
+   *  9 场景 preopen=0（窗为潜伏态,修=健康路径零行为面变化的加固）。 */
   private accFail(why: string, detail?: string): void {
     // ★闪屏定谳仪（2026-09-30）：原因入账——stats.accFails 随 frameReset 每帧清
     //  （本案 1473 次降级的重放账曾被每帧清零吞掉=报告全零假象）,定谳账走
@@ -1862,7 +1879,11 @@ export class GLShimExecutor {
     GLShimExecutor.accFailLedger[lk] = (GLShimExecutor.accFailLedger[lk] ?? 0) + 1;
     this.noteDegradeTrigger(`fail:${why}`);   // ★定谳仪:统一口径并入触发账
     const hadFbo = this.glw?.isAccumOpen('world') ?? false;
-    if (this.host.degradeAcc && (hadFbo || why === 'nogl')) {
+    // ★债A 定谳仪:首 flush 预解析门期窗触达计数（清偿后=该窗降级+2D 重放次数）
+    if (!hadFbo && why !== 'nogl') GLShimExecutor.accFailPreopen++;
+    // ★债A:hadFbo 门撤除——无条件尝试降级（degradeAcc 自守卫,false=帧不可救
+    //  → popAll 兜底保留）。
+    if (this.host.degradeAcc) {
       if (this.host.degradeAcc()) { this.replay2D(); return; }
     }
     this.popAll();

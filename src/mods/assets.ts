@@ -10,7 +10,7 @@
 // 同窗)。失败静默不阻断启动(单图坏只缺该图)。
 import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
-import { modProjRegs } from './hooks';
+import { registerModWavData, modProjRegs } from './hooks';
 import { modBuffRegs, registerModBuffIcon } from './buffs';
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import { registerModPortraitUrl } from '../data/npcPortraits';
@@ -147,6 +147,13 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       projJobs.push({ fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
     }
     await decodeBatch(atlas, pack, modId, projJobs);
+    // —— mod 音频(B6):pack sounds/*.ogg → decodeAudioData → Sfx.buffers ——
+    for (const path of discoverPackJsonPaths(pack, 'sounds') ?? []) { /* ogg 不走 json */ }
+    // mod 音频(B6):pack sounds/*.ogg → modWavData(main.ts 在 game 创建后 decodeAudioData 注入 Sfx.buffers)
+    for (const sf of Array.from(pack.files.keys()).filter((k) => k.startsWith('sounds/') && k.endsWith('.ogg'))) {
+      const key = sf.replace('sounds/', '').replace(/\.ogg$/, '');
+      registerModWavData(key, pack.files.get(sf)!.slice().buffer);
+    }
     // —— mod buff 图标(P2):objectURL 登记(buff 栏 remasterBuffIcon 覆盖链消费) ——
     for (const reg of modBuffRegs()) {
       if (reg.modId !== modId) continue;

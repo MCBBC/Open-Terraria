@@ -18,7 +18,6 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
 import { projFrameImg, projSprite, projFrameSrcRect } from './Arrow';
-import { PROJ_ALPHA_MOD } from '../data/vanillaProjAlpha';   // ★BJ530：44 A 通道单源（Dart 侧无 Arrow.drawGlobalAlpha 可消费）
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
 import { applyProjStatus } from './projStatus';
@@ -1222,18 +1221,17 @@ export class Dart extends Entity {
     //  标准本体绘）。本仓通用路径双病：ga=(255−α)/255≈0.61 半透（Dart 侧无
     //  Arrow.drawGlobalAlpha case 44/45 F2 豁免可消费——该案只覆盖 Arrow 载体 45）
     //  + 画进实体层被 compositeLight 全屏乘光压暗（BJ529 探针 _bj529-skull-ab
-    //  暗腔实测 k=0.325 同病）→ 承接=Arrow 270/45 先例同构：capture→return,A 通道
-    //  单源读 PROJ_ALPHA_MOD[44]（fixed White=1）,projFullbrightQueue 光照合成后
-    //  主画布 source-over 复绘=原版逐字。层序=玩家/NPC 之上（270/BJ504 同槽惯例）。
-    //  姿态面零改：rot 已接 DART_STYLE 'spin' 0.8×dir（AI_018 :25780）、scale=0.9、
-    //  单帧整图（Main.projFrames 无 44 赋值,frame 恒 0）;44 无残影记录
+    //  暗腔实测 k=0.325 同病）→ 承接=Arrow 270/45 先例同构：capture→return,ga=1
+    //  硬档（:81465 Color.White A=255 恒定——同 Arrow.drawGlobalAlpha case 44/45
+    //  F2 硬档先例;vanillaProjAlpha 表不加项=300 census 锁不动）,projFullbrightQueue
+    //  光照合成后主画布 source-over 复绘=原版逐字。层序=玩家/NPC 之上（270/BJ504
+    //  同槽惯例）。姿态面零改：rot 已接 DART_STYLE 'spin' 0.8×dir（AI_018 :25780）、
+    //  scale=0.9、单帧整图（Main.projFrames 无 44 赋值,frame 恒 0）;44 无残影记录
     //  （PROJ_TRAILING_MODE 缺员=recordGhostTrail 置 null,早退零吞面）。
     if (this.projId === 44) {
       const img44 = projSprite(44);
       if (img44 && img44.width > 0) {
-        const m44 = PROJ_ALPHA_MOD[44];
-        const ga44 = m44 && !m44.off && m44.kind === 'fixed'
-          ? (m44.rgba?.[3] ?? 255) / 255 : 1;
+        const ga44 = 1;                                   // GetAlpha :81465 Color.White A=255 恒定（硬档,F2 先例）
         const rot44 = this.rot;                           // DART_STYLE 'spin' 累积自旋
         const cx44 = this.x + this.w / 2, cy44 = this.y + this.h / 2;
         const sc44 = this.scale;

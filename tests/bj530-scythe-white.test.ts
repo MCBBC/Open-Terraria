@@ -56,40 +56,35 @@ function drawCaptured(e: Arrow | Dart): {
 const BOX = 48;        // SetDefaults 44/45 width=height=48（P.cs:1273-1292）
 const SCALE = 0.9;     // SetDefaults scale=0.9（json vanilla-projectiles 双型在账）
 
-describe('BJ530 ① A 通道形态钉值：fixed White（恒 255,不读 α/无脉冲）', () => {
-  it('表身份：44/45 = fixed [255,255,255,255]（GetAlpha :81465 恒 Color.White）', () => {
+describe('BJ530 ① A 通道形态钉值：Color.White A=255 恒定（不读 α/无脉冲）', () => {
+  it('表不加项锁：44/45 不入 PROJ_ALPHA_MOD（300 census 锁不动,F2 硬档先例）', () => {
     for (const id of [44, 45]) {
-      const m = PROJ_ALPHA_MOD[id];
-      expect(m).toBeDefined();
-      expect(m.kind).toBe('fixed');
-      expect(m.off).toBeUndefined();
-      expect(m.rgba).toEqual([255, 255, 255, 255]);
+      expect(PROJ_ALPHA_MOD[id]).toBeUndefined();
     }
   });
 
-  it('A 通道恒定：α 全域扫描 ga≡1（SetDefaults α=100 死值不读——F2 案钉值延续）', () => {
+  it('A 通道恒定：α 全域扫描闭包 ga≡1（SetDefaults α=100 死值不读——F2 案钉值延续）', () => {
     setProjSpriteOverride(45, { width: BOX, height: BOX } as unknown as HTMLImageElement);
     try {
-      const a = new Arrow(80 * 16, 100 * 16, 3, 0, 20, 0, 45, { grav: 0 });
-      const fn = (a as unknown as { drawTableAlpha(): { ga: number; filter: string | null } | null }).drawTableAlpha.bind(a);
-      const gaGA = (a as unknown as { drawGlobalAlpha(): number | null }).drawGlobalAlpha.bind(a);
-      expect(gaGA()).toBe(1);                        // F2 豁免先于表消费（45 载体链）
+      const a45 = new Arrow(80 * 16, 100 * 16, 3, 0, 20, 0, 45, { grav: 0 });
+      const gaGA = (a45 as unknown as { drawGlobalAlpha(): number | null }).drawGlobalAlpha.bind(a45);
+      expect(gaGA()).toBe(1);                        // F2 硬档（GetAlpha :81465 A=255 恒定）
       for (const al of [0, 50, 100, 128, 200, 255]) {
+        const a = new Arrow(80 * 16, 100 * 16, 3, 0, 20, 0, 45, { grav: 0 });
         (a as unknown as { alpha: number }).alpha = al;
-        const got = fn();
-        expect(got?.ga).toBe(1);                     // A=255 恒定,非 (255−α)/255
-        expect(got?.filter ?? null).toBeNull();      // 纯白=零滤镜
+        const { queued } = drawCaptured(a);
+        const rc = recordingCtx();
+        queued[0](rc.ctx);
+        expect((rc.ctx as unknown as { globalAlpha: number }).globalAlpha).toBe(1);
       }
     } finally {
       setProjSpriteOverride(45, { width: 0, height: 0 } as unknown as HTMLImageElement);
     }
   });
 
-  it('形态异族对照：270=pulse40 三角脉冲/444=fade（非 fixed 族,不收编）', () => {
+  it('形态异族对照：270=pulse40 三角脉冲/444=fade（非恒 White 族,不收编）', () => {
     expect(PROJ_ALPHA_MOD[270].kind).toBe('pulse40');
     expect(PROJ_ALPHA_MOD[444].kind).toBe('fade');
-    expect(PROJ_ALPHA_MOD[44].kind).not.toBe('pulse40');
-    expect(PROJ_ALPHA_MOD[45].kind).not.toBe('fade');
   });
 });
 
@@ -197,11 +192,15 @@ describe('BJ530 ② 44 hostile 面（Dart 载体,Enemy 射手表 proj:44）captu
     expect(dh).toBeCloseTo(BOX * SCALE, 4);
   });
 
-  it('A 通道单源读表：PROJ_ALPHA_MOD[44].rgba[3] 变 → 闭包 ga 随变（台账=Dart 侧唯一真相）', () => {
+  it('ga 硬档钉值：α=100 在账闭包仍 ga=1（旧通用路径 (255−100)/255≈0.61 半透病退役）', () => {
     const d = new Dart(80 * 16, 100 * 16, 2, 0, 21, 44);
-    const m = PROJ_ALPHA_MOD[44];
-    expect(m.kind).toBe('fixed');
-    expect(((m.rgba?.[3] ?? 255) / 255)).toBe(1);          // 恒 White=1（非 (255−α)/255≈0.61 半透）
+    (d as unknown as { alpha: number }).alpha = 100;       // DART_STYLE 44 alpha0=100 在账
+    const { queued } = drawCaptured(d);
+    const rc = recordingCtx();
+    queued[0](rc.ctx);
+    expect((rc.ctx as unknown as { globalAlpha: number }).globalAlpha).toBe(1);
+    expect((rc.ctx as unknown as { globalAlpha: number }).globalAlpha)
+      .not.toBeCloseTo((255 - 100) / 255, 3);              // 反证:非半透缺省路径
   });
 
   it('sprite 未就绪（width 0）→ 不入队不绘（P0-B 同律）', () => {

@@ -150,6 +150,9 @@ export function __setLightWasmFlagForTest(v: boolean | null): void { flagOverrid
 let unavailableOverride: boolean | null = null;
 export function __setLightWasmUnavailableForTest(v: boolean | null): void { unavailableOverride = v; }
 
+/** 测试钩:原始 exports(段账 bench 直呼内核用;生产代码禁用——一律走包装出口) */
+export function __lightWasmExportsForTest(): LightExports | null { return ex; }
+
 /** 测试钩:重置加载状态机(node 无 wasm 环境回退锁用;卸载实例视图) */
 export function __resetLightWasmForTest(): void {
   loadState = 'idle';
@@ -373,7 +376,17 @@ function uploadTables(t: LightScanTables, e: LightExports): void {
 
 /** scan WASM 产物路径。返回 null=拒/不可用 → 调用方必须落 JS 原路径(fail-closed:
  *  本函数不抛错、JS map 数组在失败路径未被触碰)。成功:map.r/g/b/mask 已被
- *  WASM 产物覆写(前 n 格),list=特例格索引(map 系 li,扫描序)。 */
+ *  WASM 产物覆写(前 n 格),list=特例格索引(map 系 li,扫描序)。
+ *
+ *  ★二期上传布局双态(2026-10-06 定谳刀;位级对拍 tests/light-wasm bulk-layout):
+ *  · bulk(整片):st.w×st.h ≤ 容量时(=worker 切片 store 恒真)13 通道各一次整片
+ *    set——1703 段行拷贝 → 13 段整拷,活机段账 upload 0.095→0.014ms(6.8×)。
+ *    内核以 ww=st.w/wh=st.h/原点=(rx,ry) 直读切片布局:InWorld(x,y,1) 折叠公式
+ *    与 JS 路径(exportToJs 用 stW/stH)逐式同源,邻格读域=全切片(⊆上传域);
+ *    hash/gl/lava 的 rebase=减 store 原点(0,0)——两调用方(worker 切片已 rebase/
+ *    主线程世界 store 原点即 0,0)语义恒同。产物与行拷贝布局位级全等(内核同参
+ *    同集合,浏览器 A/B + node 测试双域锁定)。
+ *  · 窗口(行拷贝):切片超容量(主线程全量世界 store)时旧行为逐位保留。 */
 export function lightWasmExportScan(c: LightScanCall): LightScanResult | null {
   if (!lightWasmReady()) return null;
   try {
@@ -387,28 +400,38 @@ export function lightWasmExportScan(c: LightScanCall): LightScanResult | null {
     if (ww <= 0 || wh <= 0 || mw <= 0 || mh <= 0) { __lightWasmStats.scanRefusals++; return null; }
     const nWin = ww * wh, nMap = mw * mh;
     if (nWin > CAP_CELLS || nMap > CAP_CELLS) { __lightWasmStats.scanRefusals++; return null; }
+    // 布局选择:切片 ≤ 容量 → 整片 bulk(窗口 ⊆ 切片 ⟹ nWin 达标被蕴含);
+    // 切片超容量(主线程全量世界 store)→ 窗口行拷贝(其自身容量门已在上)。
+    const bulk = c.st.w * c.st.h <= CAP_CELLS;
     if (!tablesUploaded) uploadTables(c.tables, e);
-    // 窗口行拷贝上传(13 通道;主线程全量 store/worker 切片 store 同一条路径)
-    const rows = [ww, wh];
-    void rows;
-    const chans: Array<[Uint16Array | Uint8Array, Uint16Array | Uint8Array]> = [
-      [c.st.type, typeView!], [c.st.flags, flagsView!], [c.st.frameX, fxView!],
-      [c.st.frameY, fyView!], [c.st.wall, wallView!], [c.st.liquid, liqView!],
-      [c.st.liquidType, liqTView!], [c.st.half, halfView!], [c.st.slope, slopeView!],
-      [c.st.wire, wireView!], [c.st.paint, paintView!], [c.st.paintWall, paintWallView!],
-      [c.st.coat, coatView!],
+    const srcs: Array<Uint16Array | Uint8Array> = [
+      c.st.type, c.st.flags, c.st.frameX, c.st.frameY, c.st.wall, c.st.liquid,
+      c.st.liquidType, c.st.half, c.st.slope, c.st.wire, c.st.paint, c.st.paintWall, c.st.coat,
     ];
-    for (let ci = 0; ci < chans.length; ci++) {
-      const src = chans[ci][0], dst = chans[ci][1];
-      for (let y = 0; y < wh; y++) {
-        const s = (wy0 + y) * c.st.w + wx0;
-        dst.set(src.subarray(s, s + ww), y * ww);
+    const dsts: Array<Uint16Array | Uint8Array> = [
+      typeView!, flagsView!, fxView!, fyView!, wallView!, liqView!,
+      liqTView!, halfView!, slopeView!, wireView!, paintView!, paintWallView!, coatView!,
+    ];
+    if (bulk) {
+      // 整片上传(13 段 set;上传域=切片=内核读域,零陈旧读)
+      for (let ci = 0; ci < 13; ci++) dsts[ci].set(srcs[ci]);
+    } else {
+      // 窗口行拷贝上传(13 通道;主线程全量 store 降级路径,旧行为逐位保留)
+      for (let ci = 0; ci < 13; ci++) {
+        const src = srcs[ci], dst = dsts[ci];
+        for (let y = 0; y < wh; y++) {
+          const s = (wy0 + y) * c.st.w + wx0;
+          dst.set(src.subarray(s, s + ww), y * ww);
+        }
       }
     }
     const rc = e.lightExport(
-      ww, wh, c.rx - wx0, c.ry - wy0, mw, mh,
-      c.groundLevel - wy0, c.lavaLine - wy0,
-      wx0 + c.hashOriginX, wy0 + c.hashOriginY,
+      bulk ? c.st.w : ww, bulk ? c.st.h : wh,
+      bulk ? c.rx : c.rx - wx0, bulk ? c.ry : c.ry - wy0, mw, mh,
+      bulk ? c.groundLevel : c.groundLevel - wy0,
+      bulk ? c.lavaLine : c.lavaLine - wy0,
+      bulk ? c.hashOriginX : wx0 + c.hashOriginX,
+      bulk ? c.hashOriginY : wy0 + c.hashOriginY,
       c.seed, c.skyR, c.skyG, c.skyB, c.dk, c.swa,
       c.hellR, c.hellG, c.hellB, c.lavaV, c.osc,
       c.dr, c.dg, c.db, c.demon,

@@ -121,6 +121,7 @@ for (const p of pngs) { const b = basename(p, '.png'); if (!pngByBase.has(b)) pn
 // 支持形:npcLoot.Add(TYPE, d) 简单形 / DropHelper.NormalVsExpertQuantity(...)(经典=normal 支)/
 //        ItemDropRule.Common(TYPE, d, min, max)。其余(条件/OneFromOptions/池)=保守跳过计数。
 const lootSkips = new Map();
+let lootSkipSamples = [];
 function parseLootBody(body, resolveItemKey, pascalToSnake) {
   const drops = [];
   let idx = 0;
@@ -140,8 +141,13 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
     const nveq = arg.match(/^\s*DropHelper\.NormalVsExpertQuantity\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/);
     const common = arg.match(/^\s*ItemDropRule\.Common\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\)\s*$/);
     const vidCommon = arg.match(/^\s*ItemDropRule\.Common\(\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\)\s*$/);
-    const simple = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+))?\s*$/);
-    const vidSimple = arg.match(/^\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+))?\s*$/);
+    const simple = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
+    const vidSimple = arg.match(/^\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
+    // 前缀两形:Calamity 自有 DropHelper.NormalvsExpert + tML 内建 ItemDropRule.NormalvsExpert
+    // (tML 1.4.4 ItemDropRules/TerrariaHooks;签名 (itemID, denom, min=1, max=1, …),经典=1/denom 掷 min..max)
+    const nvsE = arg.match(/^\s*(?:DropHelper|ItemDropRule)\.NormalvsExpert\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?\s*\)\s*$/);
+    const nvsE_v = arg.match(/^\s*(?:DropHelper|ItemDropRule)\.NormalvsExpert\(\s*ItemID\.([A-Za-z0-9_]+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?\s*\)\s*$/);
+    const oneOpt = arg.match(/^ItemDropRule\.OneFromOptions(?:WithLuckDelta)?\(\s*(\d+)\s*,\s*([\s\S]+)\)$/);
     const push = (item, denom, min, max) => {
       if (item === null) { lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1); return; }
       const rec = { item };
@@ -153,6 +159,9 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
       // NormalVsExpertQuantity → 经典=normal 支(min/max 第 3/4 参)
       const key = resolveItemKey(nveq[1].split('.').pop());
       push(key, Number(nveq[2]), Number(nveq[3]), Number(nveq[4]));
+    } else if (nvsE) {
+      // NormalvsExpert(ItemType<X>(), denom[, min[, max]]) → 经典=1/denom 掷 min..max
+      push(resolveItemKey(nvsE[1].split('.').pop()), Number(nvsE[2]), Number(nvsE[3] ?? 1), Number(nvsE[4] ?? nvsE[3] ?? 1));
     } else if (common) {
       const key = resolveItemKey(common[1].split('.').pop());
       push(key, common[2] ? Number(common[2]) : 1, common[3] ? Number(common[3]) : 1, common[4] ? Number(common[4]) : (common[3] ? Number(common[3]) : 1));
@@ -161,10 +170,39 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
     } else if (simple) {
       const key = resolveItemKey(simple[1].split('.').pop());
       push(key, simple[2] ? Number(simple[2]) : 1, 1, 1);
+    } else if (nvsE_v) {
+      // NormalvsExpert(ItemID.X, denom[, min[, max]]) → 经典=1/denom 掷 min..max
+      push(ENUM_ITEM_ID[nvsE_v[1]] ?? null, Number(nvsE_v[2]), Number(nvsE_v[3] ?? 1), Number(nvsE_v[4] ?? nvsE_v[3] ?? 1));
     } else if (vidSimple) {
-      push(ENUM_ITEM_ID[vidSimple[1]] ?? null, vidSimple[2] ? Number(vidSimple[2]) : 1, 1, 1);
+      // vidSimple(1-4 group):ItemID.X[, denom[, min[, max]]]
+      const den = vidSimple[2] ? Number(vidSimple[2]) : 1;
+      const mn = vidSimple[3] ? Number(vidSimple[3]) : 1;
+      const mx = vidSimple[4] ? Number(vidSimple[4]) : mn;
+      push(ENUM_ITEM_ID[vidSimple[1]] ?? null, den, mn, mx);
+    } else if (oneOpt) {
+      // OneFromOptions(denom, id1, id2, ...) → 每项独立 chance=1/(denom×N)(近似:期望同)
+      const denom = Number(oneOpt[1]);
+      const idRe = /(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)|ItemID\.([A-Za-z0-9_]+)/g;
+      let m6;
+      const opts = [];
+      while ((m6 = idRe.exec(oneOpt[2])) !== null) {
+        if (m6[1]) { const rk = resolveItemKey(m6[1].split('.').pop()); if (rk) opts.push(rk); }
+        else if (ENUM_ITEM_ID[m6[2]] !== undefined) opts.push(ENUM_ITEM_ID[m6[2]]);
+      }
+      if (opts.length > 0) {
+        const eff = denom * opts.length;
+        for (const o of opts) push(o, eff, 1, 1);
+      }
+    } else if (/^ItemDropRule\.BossBag(ByCondition)?\(/.test(arg)) {
+      // BossBag=DropBasedOnExpertMode(DropNothing(), 1×bag)——经典档不落袋(1457
+      //   ItemDropRule.cs:10-13 直读);难度档(余段)接入时随 re-extract 激活
+      lootSkips.set('expertOnlyBossBag', (lootSkips.get('expertOnlyBossBag') ?? 0) + 1);
+    } else if (/^ItemDropRule\.ByCondition\(/.test(arg)) {
+      lootSkips.set('conditionGate', (lootSkips.get('conditionGate') ?? 0) + 1);
     } else {
       lootSkips.set('unsupportedShape', (lootSkips.get('unsupportedShape') ?? 0) + 1);
+      if (!lootSkipSamples) lootSkipSamples = [];
+      if (lootSkipSamples.length < 8) lootSkipSamples.push(arg.slice(0, 120));
     }
   }
   return drops;
@@ -185,7 +223,7 @@ const ENUM_ITEM_ID = (() => {
 // 沿 class 继承链上溯解析基类 SetDefaults 体(Calamity 基类公开源码可机械解;
 // 实证:SlimeGodCore 等的 lifeMax/damage 全在基类)。上限 6 层防环。
 const csByClass = new Map();
-for (const f of walkFiles(npcDir, '.cs')) csByClass.set(basename(f, '.cs').trim(), f);   // 全 .cs(含被内容过滤排除的基类)
+for (const f of walkFiles(SRC, '.cs')) csByClass.set(basename(f, '.cs').trim(), f);   // 全树索引(基类可能在任何目录)   // 全 .cs(含被内容过滤排除的基类)
 function findBaseSetDefaults(className, depth = 0) {
   if (depth > 6) return null;
   const f = csByClass.get(className);
@@ -362,4 +400,4 @@ for (const f of csFiles) {
   stats.emitted++;
 }
 
-console.log(JSON.stringify({ ...stats, lootSkips: Object.fromEntries([...lootSkips.entries()].sort((a, b) => b[1] - a[1])) }, null, 2));
+console.log(JSON.stringify({ ...stats, lootSkips: Object.fromEntries([...lootSkips.entries()].sort((a, b) => b[1] - a[1])), lootSkipSamples }, null, 2));

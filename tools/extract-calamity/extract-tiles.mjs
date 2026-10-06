@@ -110,7 +110,39 @@ function resolveTileDrop(cls) {
   }
   return null;
 }
-const stats = { total: 0, emitted: 0, ore: 0, bar: 0, direct: 0, furniture: 0, station: 0, skipFurniture: 0, noTexture: 0, noDrop: 0, curated: 0, placeTileWired: 0 };
+const stats = { total: 0, emitted: 0, ore: 0, bar: 0, direct: 0, furniture: 0, station: 0, helperFurniture: 0, skipFurniture: 0, noTexture: 0, noDrop: 0, curated: 0, placeTileWired: 0 };
+
+// ★B6 卅九刀:SetUp* 家具助手几何表(FurnitureCommon.cs 直读)——
+//  `internal static void SetUp<X>(this ModTile mt, int itemDropID, …)` 体含
+//  CopyFrom(StyleAxB)/Width=/Height= → 助手名→{w,h} 机械提取,调用点逐 tile 解。
+const HELPER_GEO = (() => {
+  const map = new Map();
+  try {
+    const common = readFileSync(join(SRC, 'Tiles', 'FurnitureCommon.cs'), 'utf8');
+    for (const m of common.matchAll(/(?:static\s+)?void\s+SetUp([A-Za-z0-9_]+)\(([^)]*)\)/g)) {
+      const name = m[1];
+      // 形参表含 bool/mapColor 等的只取首 int/ItemType 形语义——体提取
+      const open = common.indexOf('{', m.index + m[0].length - 1);
+      let depth = 0, end = -1;
+      for (let i = open; i < common.length; i++) {
+        if (common[i] === '{') depth++;
+        else if (common[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      if (end < 0) continue;
+      const hbody = common.slice(open + 1, end);
+      const styleM = hbody.match(/CopyFrom\(TileObjectData\.Style(\d+)x(\d+)\)/);
+      let w = styleM ? Number(styleM[1]) : 1;
+      let h = styleM ? Number(styleM[2]) : 1;
+      const wm = hbody.match(/TileObjectData\.newTile\.Width\s*=\s*(\d+)/);
+      const hm = hbody.match(/TileObjectData\.newTile\.Height\s*=\s*(\d+)/);
+      if (wm) w = Number(wm[1]);
+      if (hm) h = Number(hm[1]);
+      const wall = /Style\d+x\d+Wall/.test(hbody);
+      if (!map.has(name) || map.get(name).w * map.get(name).h < w * h) map.set(name, { w, h, wall });
+    }
+  } catch { /* FurnitureCommon 缺=空表 */ }
+  return map;
+})();
 const emittedTileKeys = new Set();
 const skips = new Map();
 const outDir = join(OUT, 'content', 'tiles');
@@ -130,6 +162,16 @@ for (const f of csFiles) {
   const idx = text.indexOf('public override void SetStaticDefaults()');
   const body = (() => {
     if (idx < 0) return null;
+    // ★表达式体判例(卅九刀探针实锤):`SetStaticDefaults() => this.SetUpBed(…);`
+    //  无块括号——原花括号配平抓到下一方法体=SetUp 调用静默丢失。箭头先于
+    //  花括号=表达式体,取至 ';'
+    const probe = text.slice(idx, idx + 600);
+    const arrow = probe.indexOf('=>');
+    const open0 = probe.indexOf('{');
+    if (arrow >= 0 && (open0 < 0 || arrow < open0)) {
+      const semi = text.indexOf(';', idx + arrow);
+      return text.slice(idx + arrow + 2, semi > 0 ? semi : idx + arrow + 580);
+    }
     const open = text.indexOf('{', idx);
     let depth = 0;
     for (let i = open; i < text.length; i++) {
@@ -143,6 +185,52 @@ for (const f of csFiles) {
   // 家具族=TileObjectData 直接newTile/CopyFrom 非平凡几何 → B5b(粗判:助手名表)
   const furnitureRe = /this\.SetUp(Bathtub|Bed|Bookcase|Candelabra|Candle|Chair|Chandelier|Chest|Clock|DoorClosed|DoorOpen|Dresser|Furnace|Anvil|Lamp|Lantern|Piano|Platform|Sink|Table|Table2x1|Toilet|Torch|Workbench|WaterFaucet|WineGlass|Armchair|Barstool|Bench|Bowl|ClockPendulum|Painting\d+x\d|Pillar|Trampoline|Wrench|CookingPot|Cauldron|Loom|Keg|BoneWelder|FleshCloningVat|GlassKiln|HellForge|IceMachine|LivingLoom|SkyMill|SlimeExtractor|StaticButcherKnife|Teapot|WaterFilter)/;
   const isStation = stationClasses.has(cls);
+  // ★B6 卅九刀:SetUp* 助手族清偿——几何=HELPER_GEO(FurnitureCommon 直读),
+  //  掉落=调用点首参 ItemType<>;解析成立则直发(不再整族 skip)
+  const helperM = !isStation ? body.match(/(?:this\.)?SetUp([A-Za-z0-9_]+)\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)/) : null;
+  // ★SetUpBar 排除:bar 专路(barM)有 solid/mapColor 第二参语义,helper 泛支会降级
+  if (helperM && helperM[1] !== 'Bar' && HELPER_GEO.has(helperM[1])) {
+    const geo = HELPER_GEO.get(helperM[1]);
+    const dropH = resolveItemKey(helperM[2].split('.').pop()) ?? resolveTileDrop(cls);
+    const pngH = pngByBase.get(cls);
+    const hasPngH = pngH && readFileSync(pngH).subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    if (!hasPngH) {
+      // ★无贴图硬跳过(B5c 判例:图标/烘焙/validate 硬依赖,发缺图=validate 拒包)
+      stats.noTexture++;
+      skips.set('noTexture', (skips.get('noTexture') ?? 0) + 1);
+      continue;
+    }
+    const meH = body.match(/AddMapEntry\(\s*new Color\((\d+),\s*(\d+),\s*(\d+)\)/);
+    const mcH = meH ? `#${[meH[1], meH[2], meH[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}` : undefined;
+    let stylesH = 1;
+    if (hasPngH) {
+      const bH = readFileSync(pngH);
+      const twH = bH.readUInt32BE(16), thH = bH.readUInt32BE(20);
+      stylesH = Math.max(1, Math.floor(geo.wall ? (twH / (geo.w * 16)) : (twH / (geo.w * 16))));
+    }
+    const rawH = {
+      key,
+      framed: true, w: geo.w, h: geo.h,
+      solid: false, decor: false, pick: 0,
+      ...(mcH ? { mapColor: mcH } : {}),
+      frame: 'style',
+      frameWidth: 16, frameHeight: 16,
+      styles: stylesH,
+      texture: `textures/tiles/${key}.png`,
+    };
+    if (typeof dropH === 'string') rawH.dropItem = dropH;
+    if (dropH === null || dropH === undefined) {
+      stats.skipFurniture++; skips.set('dropMissing', (skips.get('dropMissing') ?? 0) + 1); continue;
+    }
+    stats.emitted++; stats.helperFurniture++;
+    emittedTileKeys.add(key);
+    if (WRITE) {
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, `${key}.json`), JSON.stringify(rawH, null, 2) + '\n');
+      if (hasPngH) { mkdirSync(texDir, { recursive: true }); copyFileSync(pngH, join(texDir, `${key}.png`)); }
+    }
+    continue;
+  }
   if (!isStation && furnitureRe.test(body)) { stats.skipFurniture++; skips.set('furniture', (skips.get('furniture') ?? 0) + 1); continue; }
 
   let drop; let mapColor; let kind = null;

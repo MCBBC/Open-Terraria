@@ -651,6 +651,57 @@ describe('light-wasm:scan 核位级金标(JS 核 vs WASM 核+JS 尾段)', () => 
       { groundLevel: 40, lavaLine: 70 }, 17, 13, 'mid');
   });
 
+  it('二期上传布局对拍:bulk(切片≤容量,整片 set)vs window(切片>容量,行拷贝)产物位级全等(各含世界边缘/内部区域;双臂再各对 JS 臂)', async () => {
+    for (let k = 0; k < 6; k++) updateLightDecay(13, false);
+    const W = 64, H = 48, GROUND = 30, LAVA = 70;
+    // 双 store 同内容同坐标:A=96×80(7,680 格 ≤2^18 → bulk 整片)/B=660×400(264,000 格
+    // >2^18 → window 行拷贝;660×400 同内容重叠面)。窗口几何两 store 同式(rx+mw+1<96)。
+    const dims: Array<[number, number]> = [[96, 80], [660, 400]];
+    const regions: Array<[number, number, string]> = [[17, 13, '内部'], [0, 0, '左上角']];
+    for (const [rx, ry, rtag] of regions) {
+      const arms = dims.map(([bw, bh]) => {
+        const st = buildGameWorld(bw, bh, GROUND, LAVA);
+        const sc = new TileLightScanner(makeScanFlicker('mid'));
+        (sc as unknown as { random: FastRandom }).random = new FastRandom(0x9e3779b9);
+        const map = new LightMap(); map.setSize(W, H); map.nonVisiblePadding = 18;
+        return { sc, map, w: makeScanWorld(st, { groundLevel: GROUND, lavaLine: LAVA }) };
+      });
+      // JS 臂(同内容 96×80 store;oracle)
+      __setLightWasmFlagForTest(false);
+      const jsArm = (() => {
+        const st = buildGameWorld(96, 80, GROUND, LAVA);
+        const sc = new TileLightScanner(makeScanFlicker('mid'));
+        (sc as unknown as { random: FastRandom }).random = new FastRandom(0x9e3779b9);
+        const map = new LightMap(); map.setSize(W, H); map.nonVisiblePadding = 18;
+        sc.exportTo(makeScanWorld(st, { groundLevel: GROUND, lavaLine: LAVA }), map, rx, ry, SCAN_PER_FRAME.map((l) => ({ ...l })));
+        return map;
+      })();
+      __setLightWasmFlagForTest(true);
+      const runsBefore = __lightWasmStats.scanRuns;
+      arms[0].sc.exportTo(arms[0].w, arms[0].map, rx, ry, SCAN_PER_FRAME.map((l) => ({ ...l })));
+      arms[1].sc.exportTo(arms[1].w, arms[1].map, rx, ry, SCAN_PER_FRAME.map((l) => ({ ...l })));
+      expect(__lightWasmStats.scanRuns, `${rtag}: wasm scan 双臂未接通`).toBe(runsBefore + 2);
+      __setLightWasmFlagForTest(null);
+      // bulk ≡ window(本刀新面:同内容异布局同集合)
+      expectBitEqual(arms[0].map.r, arms[1].map.r, `${rtag} 布局A/B R`);
+      expectBitEqual(arms[0].map.g, arms[1].map.g, `${rtag} 布局A/B G`);
+      expectBitEqual(arms[0].map.b, arms[1].map.b, `${rtag} 布局A/B B`);
+      expectMaskEqual(arms[0].map.mask, arms[1].map.mask, `${rtag} 布局A/B mask`);
+      // 各臂 ≡ JS(布局对拍的 oracle 锚)
+      expectBitEqual(arms[0].map.r, jsArm.r, `${rtag} bulk/JS R`);
+      expectBitEqual(arms[0].map.g, jsArm.g, `${rtag} bulk/JS G`);
+      expectBitEqual(arms[0].map.b, jsArm.b, `${rtag} bulk/JS B`);
+      expectMaskEqual(arms[0].map.mask, jsArm.mask, `${rtag} bulk/JS mask`);
+      expectBitEqual(arms[1].map.r, jsArm.r, `${rtag} window/JS R`);
+      expectBitEqual(arms[1].map.g, jsArm.g, `${rtag} window/JS G`);
+      expectBitEqual(arms[1].map.b, jsArm.b, `${rtag} window/JS B`);
+      expectMaskEqual(arms[1].map.mask, jsArm.mask, `${rtag} window/JS mask`);
+      // RNG 链推进等值(每 exportTo 恰一步;三臂同相)
+      const seedOf = (s: TileLightScanner) => (s as unknown as { random: FastRandom }).random.getSeed();
+      expect(seedOf(arms[0].sc)).toBe(seedOf(arms[1].sc));
+    }
+  });
+
   it('微光域态(shimmerDarken>0 → dk<1 天光渐灭乘区)', async () => {
     for (let k = 0; k < 60; k++) updateLightDecay(13, false, false, false, { inShimmer: true });
     await abScan('微光域', SW, SH, buildScanFeatureWorld, {}, 0, 0, 'night');

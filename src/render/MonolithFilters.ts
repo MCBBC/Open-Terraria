@@ -79,14 +79,21 @@ export function visualScanRect(
   };
 }
 
-/** 天塔柱子集扫描（SceneMetrics.cs:524-583 1:1）。语义要点：
+/** 天塔柱子集扫描（SceneMetrics.cs:453-583 1:1）。语义要点：
  *  - 只有"激活帧"才赋值（关帧不回写 -1）——与 Reset()+仅激活赋值的原版链路一致，
  *    同屏多柱时后扫到者覆盖（原版逐格直接赋值 :529-530/:536）；
- *  - 658 无条件赋 frameY/54（三态柱，关态也是有效状态）。 */
+ *  - 658 无条件赋 frameY/54（三态柱，关态也是有效状态）；
+ *  - ★扫描序 = 【列主序】（2026-10-06 多柱串柱刀登记债清偿）：原版外层
+ *    `for (i = Left..Right)`（X）、内层 `for (j = Top..Bottom)`（Y）——
+ *    SceneMetrics.cs:456-458（1456 同位 :456-458 双锚）。后扫到者覆盖的赢家序 =
+ *    最右列优先（同列取最下）。旧实现行主序（Y 外 X 内）→ 同屏 ≥2 激活态柱
+ *    （410 异型 / 658 异态）时 ActiveMonolithType / ShimmerMonolithState 的
+ *    赢家 = 最下行,与原版不符；布尔族字段（480/657/720/721/725/733）赋 true
+ *    幂等零观察面。 */
 export function scanMonolithScene(st: TileStore, r: TileRect): MonolithSceneState {
   const out = emptyMonolithScene();
-  for (let y = r.y0; y < r.y1; y++) {
-    for (let x = r.x0; x < r.x1; x++) {
+  for (let x = r.x0; x < r.x1; x++) {
+    for (let y = r.y0; y < r.y1; y++) {
       const i = y * st.w + x;
       if (!st.flags[i]) continue;
       const t = st.type[i];

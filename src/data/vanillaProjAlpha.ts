@@ -76,12 +76,9 @@
  *  · fade2（White*Opacity 后缺省尾,newColor 已被替换=常量）：933/1001/1100
  *  · pulse40：270（★本批判例首接线）/ alphaLt：242 / random：1099 / disco：1089
  *    （载体 GlowstickProj）
- *  活跃度未逐 id 普查=登记低优先;命中实报再派刀（判别式：载体是否 Arrow 通用路径+
- *  姿态面是否免修）。★BJ530（2026-10-06）44/45 恶魔镰刀已接线（同族第二刀,收编
- *  上述登记）：45=Arrow 'magic' 通用尾载体 → Arrow.draw 45 专属支复绘;44=Dart
- *  载体（Enemy 射手表 proj:44）→ Dart.draw 44 专属支复绘+α 面双修（Dart 侧无
- *  drawGlobalAlpha,表项 44/45 fixed White=其 A 通道单源）。两支同构 BJ529 270
- *  先例（capture→return + projFullbrightQueue 光照合成后主画布 source-over）。 */
+ *  活跃度未逐 id 普查=登记低优先;命中实报再派刀。★BJ530（2026-10-06）44/45 恶魔镰刀已接线
+ *  （同族第二刀,BJ529 270 先例同构 capture→return+projFullbrightQueue）：45=Arrow magic-case
+ *  通用尾→Arrow.draw 45 专属支;44=Dart 载体→Dart.draw 44 专属支+α 面双修（ga=1 硬档钉 :81465,表不加项=300 census 锁不动,F2 同款硬档）。 */
 export interface ProjAlphaMod {
   kind: 'invisible' | 'fade' | 'fade2' | 'fixed' | 'fixedfade' | 'afade' | 'lerp' | 'lerpkeep'
     | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alpha0additive' | 'alphaLt'
@@ -117,8 +114,6 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   18: { kind: 'fixed', rgba: [255,255,255,130] },   // :76813 | (255,255,255,130) 恒
   20: { kind: 'invisible', off: 1 },   // α≤150→(255,255,255,0) A=0 加算白 / α>150→(0,0,0,0) 真零——前支非隐形;★BJ228 已接线（2026-09-21）:GA case 20 return 1+'lighter'（SetDefaults α≡0 恒走前支=恒满强）,本 off 档转存档;勿再按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）
   34: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },   // :76082 | White*Opacity；SKIP: MissileProj 专属类消费
-  44: { kind: 'fixed', rgba: [255,255,255,255] },   // ★BJ530（2026-10-06,BJ529 同族普查收编）1457 :81465-81468 `type==34||35||15||19||44||45 → Color.White`（本支实际生效面=35/19/44/45,15/34 被更早分支截走=Arrow.drawGlobalAlpha F2 批 T2 勘误同谳）——A=255 恒定（无 270 式脉冲/无 fade,SetDefaults α=100 :1277 死值不读）,RGB 恒白【不读光照色】=Main.cs:30068 格光被 GetAlpha 整体替换 | hostile 面=Dart 载体（恶魔 62/66 NPC.cs:23533→Enemy 射手表 proj:44→spawnHostileProj）,Dart.draw 44 专属支 projFullbrightQueue 复绘（Dart 侧无 drawGlobalAlpha,本表即其 A 通道单源）;45 同支见下行
-  45: { kind: 'fixed', rgba: [255,255,255,255] },   // ★BJ530 同 44 支（:81465 同句）| friendly 面=Arrow 载体（item 272 恶魔镰书法典 Item.cs :4560-4575 mana14/shoot=45/shootSpeed0.2,Game case 'magic' 通用尾 new Arrow）,Arrow.draw 45 专属支 projFullbrightQueue 复绘（BJ529 270 先例同构 capture→return,flushTrailShade 光照合成后主画布 source-over）;α 面已修（Arrow.drawGlobalAlpha case 44/45 return 1,F2 批,先于表消费=本表条目为台账孪生+Dart 侧单源）
   47: { kind: 'fade', off: 1 },   // :75950 | gate Main.player[owner].wet→Color.White 未建模（湿身白化登记忽略）；非湿落缺省 fade；SKIP: 门控条件未建模（登记忽略）。★白光约定零观感差钉死（BJ236 复核 2026-09-21）：SetDefaults（:1305-1310）无 alpha 行 α≡0 → 湿支 White ≡ 缺省路径 (255−0)/255×白（本仓光色恒白）=两支逐像素等值,勿"补齐"湿门——补了也是同值死码
   50: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
   53: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费

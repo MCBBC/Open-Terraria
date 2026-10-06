@@ -264,6 +264,9 @@ const BUFF_KEYS = new Set(existsSync(join(OUT, 'content', 'buffs'))
   ? readdirSync(join(OUT, 'content', 'buffs')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''))
   : []);
 const diskItemKeysBag = new Set(readdirSync(join(OUT, 'content', 'items')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, '')));
+const PROJ_KEYS = new Set(existsSync(join(OUT, 'content', 'projectiles'))
+  ? readdirSync(join(OUT, 'content', 'projectiles')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''))
+  : []);
 const normCuratedBag = new Map(JSON.parse(readFileSync(join(OUT, '.curated-items.json'), 'utf8')).map((k) => [k.replace(/_/g, ''), k]));
 function resolveItemKeySafe(cls) {
   const key = pascalToSnake(cls);
@@ -442,6 +445,28 @@ for (const f of itemCsFiles) {
           raw.combat = raw.combat ?? {};
           raw.combat.hitBuff = { buff: buffKey, duration: Number(bm[2]) / 60, ...(chance !== undefined && chance < 1 ? { chance } : {}) };
           if (!BUFF_KEYS.has(buffKey)) (raw.combat.hitBuff)._unresolved = buffKey;
+        }
+        // —— hitProj 数据面(B6):NewProjectile(source, target.Center, Vector2.Zero,
+        //    ProjectileType<X>(), dmg, …) 形——命中点静置生成(爆裂/召唤系近战武器);
+        //    dmg 仅收 Item.damage(='item'=武器基伤)与数字面;其余表达式保守跳过 ——
+        const npRe = /NewProjectile\(/g;
+        let nm2;
+        while ((nm2 = npRe.exec(ohBody)) !== null) {
+          let dep = 0, npEnd = -1;
+          for (let i5 = nm2.index + 'NewProjectile'.length; i5 < ohBody.length; i5++) {
+            if (ohBody[i5] === '(') dep++;
+            else if (ohBody[i5] === ')') { dep--; if (dep === 0) { npEnd = i5; break; } }
+          }
+          if (npEnd < 0) break;
+          npRe.lastIndex = npEnd + 1;
+          const npArg = ohBody.slice(nm2.index + 'NewProjectile('.length, npEnd).trim();
+          const hm = npArg.match(/^\s*(?:\w+(?:\.\w+)*\(\)|source)\s*,\s*\w+(?:\.\w+)*\.Center\s*,\s*Vector2\.Zero\s*,\s*(?:ModContent\.)?ProjectileType<([A-Za-z0-9_.]+)>\(\)\s*,\s*(Item\.damage|\d+)\s*,/);
+          if (hm && raw.combat?.hitProj === undefined) {
+            const projKey = pascalToSnake(hm[1].split('.').pop());
+            raw.combat = raw.combat ?? {};
+            raw.combat.hitProj = { proj: projKey, dmg: hm[2] === 'Item.damage' ? 'item' : Number(hm[2]) };
+            if (!PROJ_KEYS.has(projKey)) (raw.combat.hitProj)._unresolved = projKey;
+          }
         }
       }
     }

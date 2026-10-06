@@ -5986,6 +5986,8 @@ export class Player extends Entity {
         this.wingTime = eqM.wing ? eqM.wing.time : 0;
         this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
         this.canCarpet = true; this.carpetTime = 300;
+        this.performingJump = null;   // ★BJ533：湿态踩底清尾迹旗（干支 onGround 清同款 :6270——
+          //  原版经 jump==0 → CancelAllJumpVisualEffects :26955-26956 同净效）
       }
       // ---- 水中起跳门（JumpMovement :20405-20496 原版语义，2026-08-16 对齐）：
       //   vy==0（踩底 / 水行站立）或 脚蹼族湿态任意时刻（flag2&&flag3 :20407）；
@@ -6007,7 +6009,66 @@ export class Player extends Entity {
           this.y -= Player.STOOL_BOOST;
           this.h -= Player.STOOL_BOOST;
         }
+      } else if (jumpEdge && !this.onGround && !mnt2?.blockExtraJumps
+        && !flipperJump && !justClearedWetSlime && this.extraJumps.length > 0) {
+        // ★BJ533 水中多段跳（2026-09-23 定谳：用户实报「水中不能二段跳」=本仓自造门）：
+        //  原版 JumpMovement 是【单块】无干湿分裂（:26948 无条件调用）——外门 :20845 的
+        //  canJumpAgain_* 臂湿态照常放行；selection :20849 `if (!flag2 && !flag)`
+        //  （flag2=wet&&accFlipper :20795,flag=湿史莱姆清零 :20816）消费一瓶 → 支选择
+        //  :20945 `((vy==0)|flag4)||sliding|flag` 恒假（水下悬空 vy≠0、flag4=脚蹼位假）
+        //  → 落瓶支（云 :21167-21196 兜底）。湿态跳参=液体档（:24622-24624 水档
+        //  jumpHeight 30/jumpSpeed 6.01）→ 水中云跳=(int)(30×0.75)=22t 钉 -6.01 上升
+        //  =强力上浮跳。脚蹼湿态 flag2 令 selection 整段跳过=泳跳优先且【不消费】瓶
+        //  （本臂 !flipperJump 门）；踩底 vy==0 走上支+上方回满=不实耗（原版
+        //  RefreshDoubleJumps :20931 同净效）。旧仓此臂整缺（多段跳块只嵌干支 else
+        //  :6276）→ 水中按跳无响应（且 :6110 飞毯 extraJumps==0 门在水中恒闭=同债面）。
+        //  高度表/优先序/起跳帧特效与干支逐位同构——两处镜像维护（湿/干镜像先例：
+        //  湿态翅膀核心 :6011）。jumpHold 用干支同款 Math.round（原版 (int) 截断在
+        //  ×1.5/×1.25 半值档差 1t——干湿同款保家族一致,登记不单侧改）。
+        const opt = this.extraJumps.shift()!;
+        const hMult = opt === 'Sandstorm' ? 3
+          : opt === 'Blizzard' ? 1.5
+          : opt === 'Fart' ? 2
+          : opt === 'Sail' ? 1.25
+          : opt === 'Cloud' ? 0.75
+          : opt === 'Basilisk' ? 0.75
+          : 2;   // Unicorn / WallOfFleshGoat / Santank ×2（:21048/:21076/:21134）
+        this.vy = -lJSpd * gd;
+        this.jumpHold = Math.round(lJT * hMult);
+        this.performingJump = opt;                          // isPerformingJump_* 等价标记
+        if (opt === 'Fart') game.playSfxWav?.('Item_16', 1, this.cx, this.cy);
+        else game.playSfxWav?.('Double_Jump', 1, this.cx, this.cy);
+        const D = game.vanillaDust;
+        const mk = (x: number, y: number, w: number, h: number, type: number,
+          alpha: number, scale: number, vx = 0, vy = 0) => D ? D.spawn(x, y, w, h, type, vx, vy, alpha, null, scale) : null;
+        if (opt === 'Fart') {
+          const fy = gd === 1 ? this.y + this.h - 16 : this.y - 16;
+          for (let m = 0; m < 10; m++) {
+            const d = mk(this.x - 34, fy, 102, 32, 188, 100, 1.5, -this.vx * 0.5, this.vy * 0.5);
+            if (d) { d.vx = d.vx * 0.5 - this.vx * 0.1; d.vy = d.vy * 0.5 - this.vy * 0.3; }
+          }
+          for (let gi = 0; gi < 3; gi++) {
+            const gx = gi === 0 ? this.x + this.w / 2 - 16 : gi === 1 ? this.x - 36 : this.x + this.w + 4;
+            const g = GorePiece.newGore(435 + (Math.random() * 3 | 0), gx, fy, -this.vx, -this.vy, 1, false);
+            if (g) { g.vx = g.vx * 0.1 - this.vx * 0.1; g.vy = g.vy * 0.1 - this.vy * 0.05; }
+          }
+        } else if (opt === 'Sail') {
+          const sy = gd === 1 ? this.y + this.h : this.y;
+          for (let l = 0; l < 30; l++) {
+            const d = mk(this.x, sy, this.w, 12, 253, 100, 1.5, this.vx * 0.3, this.vy * 0.3);
+            if (!d) continue;
+            if (l % 2 === 0) d.vx += (30 + Math.random() * 41 | 0) * 0.1;
+            else d.vx -= (30 + Math.random() * 41 | 0) * 0.1;
+            d.vy += (Math.floor(Math.random() * 41) - 10) * 0.1;   // O3 漏网核销同干支
+            d.noGravity = true;
+            d.scale += (Math.floor(Math.random() * 51) - 10) * 0.01;
+            d.vx *= d.scale * 0.7; d.vy *= d.scale * 0.7;
+          }
+        }
       }
+      // 多段跳上升尾迹（DoubleJumpVisuals :26971 每帧无条件调用——原版无 wet 门,
+      //  旧湿支整缺=水中尾迹随臂一并补齐；干支同款调用位 :6328）
+      this.doubleJumpVisuals(game);
       // ---- ★湿态翅膀核心（2026-09-03 翻案）：位序按原文 :26945 JumpMovement →
       //      canRocket :26973 → :26987 flag19 → WingMovement → WingFrame →
       //      火箭合并 :27024 → 火箭靴 :27069 → 推力 :27126 → 悬浮 :27083 →
