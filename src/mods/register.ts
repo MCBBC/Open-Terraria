@@ -3,7 +3,7 @@
 // 全部走各数据模块的 registerMod* 追加面(零改原版面;零 mod 时整文件无副作用)。
 import type { RegistrationPlan } from './types';
 import { registerModItem, ITEM_DEFS } from '../data/items';
-import { registerModTile, TILE_BY_KEY, type TileDef } from '../data/tiles';
+import { registerModTile, TILE_BY_KEY, TILE_DEFS, type TileDef } from '../data/tiles';
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
 import { registerModBoss, registerModWormChain } from '../entities/Enemy';
 import { registerModBuff, modBuffTypeOf } from './buffs';
@@ -134,6 +134,9 @@ function buildDropRules(plan: RegistrationPlan, modId: string, spec: Registratio
  */
 export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationApplied {
   let items = 0, tiles = 0, npcs = 0, recipes = 0, projs = 0;
+  // ★一百一十刀:TILE_DEFS 活引用绑定 gen pass sheet 消费面(RemoveStupidTiles 白名单;
+  //  mod tile 伪 sheet≡stable id 恒不在原版白名单=天然免疫,数组为活引用后续追加自动可见)
+  (globalThis as unknown as { __calamityTileDefs?: unknown }).__calamityTileDefs = TILE_DEFS;
   // projectiles(P2):数据 spec → ModProj 注册簿(代码钩由 entry 的 sw.projectileHook 追加)
   for (const pr of plan.projSpecs) {
     const s = pr.spec;

@@ -171,19 +171,23 @@ for (const f of csFiles) {
   const text = readFileSync(f, 'utf8');
   // SetStaticDefaults 体(SetUp* 助手都在此)
   const idx = text.indexOf('public override void SetStaticDefaults()');
+  // ★一百一十一刀:SetupStatic 回退(GlowMaskTile 基类钩族 36 件——Voidstone/
+  //   ScoriaOre/PyreMantleMolten 等在基类 SetStaticDefaults 调 this.SetupStatic();
+  //   本体在 SetupStatic,同形解析)
+  const idxSS = idx < 0 ? text.indexOf('public override void SetupStatic()') : idx;
   const body = (() => {
-    if (idx < 0) return null;
+    if (idxSS < 0) return null;
     // ★表达式体判例(卅九刀探针实锤):`SetStaticDefaults() => this.SetUpBed(…);`
     //  无块括号——原花括号配平抓到下一方法体=SetUp 调用静默丢失。箭头先于
     //  花括号=表达式体,取至 ';'
-    const probe = text.slice(idx, idx + 600);
+    const probe = text.slice(idxSS, idxSS + 600);
     const arrow = probe.indexOf('=>');
     const open0 = probe.indexOf('{');
     if (arrow >= 0 && (open0 < 0 || arrow < open0)) {
-      const semi = text.indexOf(';', idx + arrow);
-      return text.slice(idx + arrow + 2, semi > 0 ? semi : idx + arrow + 580);
+      const semi = text.indexOf(';', idxSS + arrow);
+      return text.slice(idxSS + arrow + 2, semi > 0 ? semi : idxSS + arrow + 580);
     }
-    const open = text.indexOf('{', idx);
+    const open = text.indexOf('{', idxSS);
     let depth = 0;
     for (let i = open; i < text.length; i++) {
       if (text[i] === '{') depth++;
@@ -259,7 +263,7 @@ for (const f of csFiles) {
     const hm = body.match(/TileObjectData\.newTile\.Height\s*=\s*(\d+)/);
     if (wm) w = Number(wm[1]);
     if (hm) h = Number(hm[1]);
-    const itemDropM = body.match(/(?:RegisterItemDrop|ItemDrop\s*=)\s*(?:ModContent\.ItemType<([A-Za-z0-9_.]+)>\(\)|(\d+))/);
+    const itemDropM = body.match(/(?:RegisterItemDrop\s*\(\s*|ItemDrop\s*=)\s*(?:(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)|(\d+))/);
     drop = itemDropM
       ? (itemDropM[1] ? resolveItemKey(itemDropM[1].split('.').pop()) : Number(itemDropM[2]))
       : (dropItemFromSidecar ?? null);
@@ -315,7 +319,7 @@ for (const f of csFiles) {
     const hm2 = body.match(/TileObjectData\.newTile\.Height\s*=\s*(\d+)/);
     if (wm2) w2 = Number(wm2[1]);
     if (hm2) h2 = Number(hm2[1]);
-    const dropM2 = body.match(/(?:RegisterItemDrop|ItemDrop\s*=)\s*(?:ModContent\.ItemType<([A-Za-z0-9_.]+)>\(\)|(\d+))/);
+    const dropM2 = body.match(/(?:RegisterItemDrop\s*\(\s*|ItemDrop\s*=)\s*(?:(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)|(\d+))/);
     drop = dropM2
       ? (dropM2[1] ? resolveItemKey(dropM2[1].split('.').pop()) : Number(dropM2[2]))
       : (dropItemFromSidecar ?? null);

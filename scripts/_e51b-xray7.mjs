@@ -121,13 +121,28 @@ const INSTR = async () => {
 };
 
 async function phase(label, url, extraSetup) {
-  const browser = await launchBrowser({ headless: true });
-  const page = await openPage(browser, ORIGIN, { width: 1280, height: 800 });
-  await page.goto(ORIGIN + url, { waitUntil: 'domcontentloaded' });
-  const boot = await bootstrap(page, ORIGIN, { log: () => {} });
-  if (!boot?.ok) { console.error(label, 'boot fail', boot); await browser.close(); return null; }
-  const made = await createGame(page, { mode: 'direct', seed: 'e51b', size: 'small', pinRandom: 20261007, log: () => {} });
-  if (!made?.ok) { console.error(label, 'createGame fail'); await browser.close(); return null; }
+  // ★机器负载重试(并行会话 vite build 会拖长 splash 链):boot+createGame 整体重试
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const browser = await launchBrowser({ headless: true });
+    try {
+      const page = await openPage(browser, ORIGIN, { width: 1280, height: 800 });
+      await page.goto(ORIGIN + url, { waitUntil: 'domcontentloaded' });
+      const boot = await bootstrap(page, ORIGIN, { log: () => {}, timeout: 120000 });
+      if (!boot?.ok) throw new Error('boot fail ' + JSON.stringify(boot));
+      const made = await createGame(page, { mode: 'direct', seed: 'e51b', size: 'small', pinRandom: 20261007, log: () => {} });
+      if (!made?.ok) throw new Error('createGame fail');
+      return await runPhase(label, page, extraSetup);
+    } catch (e) {
+      console.error(`${label} 尝试${attempt} 失败:`, String(e).slice(0, 160));
+      if (attempt === 3) return null;
+      await new Promise((r) => setTimeout(r, 5000));
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
+async function runPhase(label, page, extraSetup) {
   await sleep(1200);
   await page.evaluate(INSTR);
   if (extraSetup) await page.evaluate(extraSetup);
@@ -137,7 +152,6 @@ async function phase(label, url, extraSetup) {
   const r = await page.evaluate((n) => globalThis.__e51bSample(n), N);
   console.log(`\n== ${label} ==`);
   console.log(JSON.stringify(r, null, 1));
-  await browser.close();
   return r;
 }
 
