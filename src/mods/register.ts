@@ -6,14 +6,30 @@ import { registerModItem, ITEM_DEFS } from '../data/items';
 import { registerModTile, TILE_BY_KEY, type TileDef } from '../data/tiles';
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
 import { registerModBoss, registerModWormChain } from '../entities/Enemy';
-import { registerModBuff } from './buffs';
+import { registerModBuff, modBuffTypeOf } from './buffs';
 import { appendModSummonEntries, type SummonEntry } from '../core/DebugSummonPanel';
 import { registerModRecipes, registerModAdjTile, type VanillaRecipe } from '../data/vanillaRecipes';
 import { registerModItemFunc } from '../data/vanillaItemFunc';
 import { registerModCombat } from '../data/vanillaItemCombat';
 import { registerModStats } from '../data/vanillaItemStats';
 import { registerModNpcRules, registerModNpcValue } from '../drops/NpcDrops';
-import { registerModProj } from './hooks';
+import { registerModProj, registerModNpcOnHitPlayerBuff } from './hooks';
+import { MOD_SPAWN_RULES } from '../world/spawn/VanillaSpawner';
+import { registerModBiomeFlag } from '../world/SceneMetrics';
+
+const PENDING_BIOME_FLAGS: Array<{ flag: string; tileId: number }> = [];
+
+/** 装载完成后由 loader 调:注册 mod 群系旗(SceneMetrics 通用面;threshold 40) */
+export function bindModBiomeFlags(): void {
+  for (const { flag, tileIds } of groupBiomeFlags()) registerModBiomeFlag({ flag, tileIds, threshold: 40 });
+}
+function groupBiomeFlags(): Array<{ flag: string; tileIds: number[] }> {
+  const m = new Map<string, number[]>();
+  for (const { flag, tileId } of PENDING_BIOME_FLAGS) {
+    const arr = m.get(flag) ?? []; arr.push(tileId); m.set(flag, arr);
+  }
+  return [...m].map(([flag, tileIds]) => ({ flag, tileIds }));
+}
 import { registerModShopStock } from './shops';
 import { registerModResearch } from '../stats/Research';
 
@@ -99,6 +115,11 @@ function buildDropRules(plan: RegistrationPlan, modId: string, spec: Registratio
       if (mapped === undefined) throw new Error(`[mod-drops] mod ${modId} NPC ${spec.key} 掉落引用未注册物品: ${d.item}`);
       id = mapped;
     }
+    // ★六十刀难度档:bossBag 声明(专家档掉袋+zeroValue,经典不掉)=原版 BossBag 语义
+    if (d.bossBag) {
+      out.push({ k: 'bossBag', item: id });
+      continue;
+    }
     out.push({
       k: 'common', item: id, min: d.min ?? 1, max: d.max ?? 1,
       num: 1, denom: Math.max(1, Math.round(1 / Math.min(1, chance))), noLuck: true,
@@ -173,6 +194,9 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       pick: spec.pick ?? 0,
       axe: spec.axe ?? -1,
       mapColor: spec.mapColor ?? '#808080',
+      // ★B7 八十一刀:树数据面透传(growsOn/sapling→MOD_TREE_IDS/MOD_SAPLING 载体)
+      growsOn: spec.growsOn ?? null,
+      sapling: spec.sapling ?? null,
       blend: spec.frame === 'blend' || spec.frame === 'auto' ? true : false,
       drop: dropId,
       vanilla: {
@@ -243,6 +267,21 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     });
     const dropRules = buildDropRules(plan, n.modId, spec);
     if (dropRules.length > 0) registerModNpcRules(n.npcId, dropRules);
+    // ★B7 一百零八刀:自然生成行注册(spec.spawn:{zone,water,mult};无声明=不自然刷)
+    if (spec.spawn) {
+      MOD_SPAWN_RULES.push({
+        npcId: n.npcId, zone: spec.spawn.zone ?? null,
+        water: spec.spawn.water ?? false, mult: spec.spawn.mult ?? 1,
+      });
+    }
+    // ★CalPlayer 基建(六十四刀):接触命中玩家施加声明面 debuff(OnHitPlayer 形)
+    if (spec.onHitPlayer) {
+      const buffId = modBuffTypeOf(n.modId, spec.onHitPlayer.buff);
+      if (!buffId) throw new Error(`[mod-npc] mod ${n.modId} NPC ${spec.key} onHitPlayer buff 未注册: ${spec.onHitPlayer.buff}`);
+      registerModNpcOnHitPlayerBuff(n.npcId, {
+        buffId, duration: spec.onHitPlayer.duration, chance: spec.onHitPlayer.chance,
+      });
+    }
     // ★P7 红蓝修正(M4 高优①):mod NPC 金币价值接线(旧实现 ModNpcContent.value
     //  声明被丢弃→mod 怪恒 0 金)
     if (spec.value !== undefined) registerModNpcValue(n.npcId, spec.value);
@@ -280,7 +319,13 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       }
       registerModCombat(it.stableId, combat as unknown as Parameters<typeof registerModCombat>[1]);
     }
-    if (spec.stats) registerModStats(it.stableId, { def: spec.stats.def, s: spec.stats.s, acc: spec.stats.acc, van: spec.stats.van, life: spec.stats.life }, it.stableId);
+    if (spec.stats) registerModStats(it.stableId, {
+      def: spec.stats.def, s: spec.stats.s, acc: spec.stats.acc, van: spec.stats.van, life: spec.stats.life,
+      // ★六十六刀:UpdateEquip 加法面透传(读侧=聚合器配饰环,余段登记)
+      dmgMelee: spec.stats.dmgMelee, dmgRanged: spec.stats.dmgRanged, dmgMagic: spec.stats.dmgMagic, dmgAll: spec.stats.dmgAll,
+      critMelee: spec.stats.critMelee, critRanged: spec.stats.critRanged, critMagic: spec.stats.critMagic,
+      moveMult: spec.stats.moveMult, endurance: spec.stats.endurance,
+    }, it.stableId);
     items++;
   }
   // shops(P3):物品 id 解析(本 mod 键/原版 vid);price 缺省=物品 value(原版

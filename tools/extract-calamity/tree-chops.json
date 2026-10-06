@@ -1,0 +1,32 @@
+{
+  "acid_wood_tree": {
+    "dropItem": "acidwood",
+    "growsOn": "sulphurous_sand",
+    "sapling": "acid_wood_tree_sapling"
+  },
+  "astral_tree": {
+    "dropItem": null,
+    "growsOn": "astral_grass",
+    "sapling": "astral_tree_sapling"
+  },
+  "astral_palm_tree": {
+    "dropItem": null,
+    "growsOn": "astral_sand",
+    "sapling": null
+  },
+  "sulphurous_cactus": {
+    "dropItem": "acidwood",
+    "growsOn": "sulphurous_sand",
+    "sapling": null
+  },
+  "astral_cactus": {
+    "dropItem": null,
+    "growsOn": "astral_sand",
+    "sapling": null
+  },
+  "spine_tree": {
+    "dropItem": null,
+    "growsOn": null,
+    "sapling": "spine_sapling"
+  }
+}

@@ -1260,25 +1260,34 @@ export class ZenithSword extends Entity {
     // ---- 贴图绘制原语（:29945-29953：LoadItem(ai[1])、Frame() 全幅、origin=中心、
     // 基角 −π/4×【当前】spriteDir 加进旋转；镜像=局部系 scale(−1,1)（XNA Flip源
     // 矩形后旋转 = canvas 先 rotate 后镜像），刀尖恒指 (rot−π/2) 向）----
-    const drawIcon = (x: number, y: number, rot: number, mirror: boolean, scale: number, alpha: number, additive = false) => {
+    // ★BJ-C1 F3：目标 ctx 参数化（本体面 ②③④⑤ 按常量色族改道全亮队列重放）
+    const drawIcon = (c: CanvasRenderingContext2D, x: number, y: number, rot: number, mirror: boolean, scale: number, alpha: number, additive = false) => {
       if (alpha <= 0.01) return;
-      ctx.save();
-      ctx.imageSmoothingEnabled = false;
-      if (additive) ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.translate(x, y);
-      ctx.rotate(rot);
-      if (mirror) ctx.scale(-1, 1);
+      c.save();
+      c.imageSmoothingEnabled = false;
+      if (additive) c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = Math.max(0, Math.min(1, alpha));
+      c.translate(x, y);
+      c.rotate(rot);
+      if (mirror) c.scale(-1, 1);
       if (icon) {
         const dw = icon.sw * scale, dh = icon.sh * scale;
-        ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, -dw / 2, -dh / 2, dw, dh);
+        c.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, -dw / 2, -dh / 2, dw, dh);
       } else {
-        ctx.fillStyle = `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`;
-        ctx.fillRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
+        c.fillStyle = `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`;
+        c.fillRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
       }
-      ctx.restore();
+      c.restore();
     };
 
+    // ★BJ-C1 F3（2026-10-06,代表判别站）：933 天顶剑弹面=fade2 常量族
+    //  （GetAlpha :80718-80721 `933||1001||1100 → newColor=Color.White*Opacity` 落
+    //  缺省尾,newColor 已被替换=不读格光色;①彩带已走 queueTrailShade 全亮域）——
+    //  ②③④⑤ 本体/残影/叠绘/星芒旧画实体层被 compositeLight 全屏乘光压暗（暗处
+    //  剑身消失,BJ529 探针 k=0.325 同病域）→ 封包 paint 改道 projFullbrightQueue
+    //  （7f 光照合成后主画布 source-over/'lighter' 逐式重放=原版逐字）。层序=
+    //  玩家之上（270/45/BJ504 同槽惯例,登记）。无队列环境（测试）直画原路径。
+    const paint = (c: CanvasRenderingContext2D): void => {
     // ---- ② 白残影 ×3（:30381 循环 + :30174-30181 933 档：num156=60、num154=0、
     // num155=−15 → num159∈{60,45,30,15}；60 ≥ oldPos.Length=60 越界跳过 :30383）。
     // 色（:30606-30611，替换通用乘子）：White × GetLerpValue(0,60,60−num159) ×
@@ -1289,22 +1298,22 @@ export class ZenithSword extends Entity {
       if (num159 >= 60) continue;
       const j = n - 1 - num159;
       if (j < 0) continue;
-      drawIcon(this.trail[j * 3], this.trail[j * 3 + 1],
+      drawIcon(c, this.trail[j * 3], this.trail[j * 3 + 1],
         this.trail[j * 3 + 2] - Math.PI / 4 * this.spriteDir,
         (this.trailDirs[j] === -1) !== (this.spriteDir === -1), 1,
         fractalGhostAlpha(this.counter, num159, this.opacity));
     }
     // ---- ③ 本体（:30761-30803）：GetAlpha(:76047-76050)=White×Opacity ×num182
     // （rgb:alpha=1:1 → 单 pass source-over，不受场景光照染色的全亮白）----
-    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+    drawIcon(c, this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
       1, this.opacity * num182);
     // ---- ④ 1.25× 白叠绘（:30839-30841）：色 (255,255,255,127)×Opacity×num186——
     // 预乘 rgb:alpha = 255:127 → 两 pass：source-over α=(127/255)·ov（覆盖）
     // + lighter α=(128/255)·ov（加色）＝ rgb×ov 全量、背景衰减仅 (127/255)·ov ----
     const ov = this.opacity * num182;
-    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+    drawIcon(c, this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
       1.25, 127 / 255 * ov);
-    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+    drawIcon(c, this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
       1.25, 128 / 255 * ov, true);
     // ---- ⑤ 刃尖星芒（1457 Main.cs:31620）：DrawPrettyStarSparkle(Opacity, dir, Center+
     // (rot−π/2)向×trailWidth, White×num197, trailColor(A/2)×num197, localAI[0],
@@ -1312,12 +1321,18 @@ export class ZenithSword extends Entity {
     // （num197 = GetLerpValue(0,20,t)×GetLerpValue(68,60,t) = 本档 num182，draw=White/
     //   shine=trailColor 与原版实参序一致——2026-09-02 黑十字案复核勘误,原注 num186 系笔误）----
     if (this.opacity > 0.01 && num182 > 0.01) {
-      prettyStarSparkle(ctx, this.opacity,
+      prettyStarSparkle(c, this.opacity,
         this.cx + Math.cos(this.rot - Math.PI / 2) * tw,
         this.cy + Math.sin(this.rot - Math.PI / 2) * tw,
         [255, 255, 255], prof.color, this.counter,
         15, 30, 30, 45, 0, [5, 2], [1, 1], num182, num182);
     }
+    };
+    const fbSink = (r as unknown as {
+      queueProjFullbright?: (fn: (fn2: CanvasRenderingContext2D) => void) => void;
+    }).queueProjFullbright;
+    if (typeof fbSink === 'function') { fbSink(paint); return; }
+    paint(ctx);
   }
 }
 

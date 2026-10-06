@@ -78,7 +78,15 @@
  *    （载体 GlowstickProj）
  *  活跃度未逐 id 普查=登记低优先;命中实报再派刀。★BJ530（2026-10-06）44/45 恶魔镰刀已接线
  *  （同族第二刀,BJ529 270 先例同构 capture→return+projFullbrightQueue）：45=Arrow magic-case
- *  通用尾→Arrow.draw 45 专属支;44=Dart 载体→Dart.draw 44 专属支+α 面双修（ga=1 硬档钉 :81465,表不加项=300 census 锁不动,F2 同款硬档）。 */
+ *  通用尾→Arrow.draw 45 专属支;44=Dart 载体→Dart.draw 44 专属支+α 面双修（ga=1 硬档钉 :81465,表不加项=300 census 锁不动,F2 同款硬档）。
+ *  ★BJ-C1 F2（2026-10-06）同支 19 Flamarang/35 Sunfury 收编（第三刀,BJ530 同构）：
+ *  19=Boomerang 载体（aiStyle3 回旋镖族）/35=FlailProj 载体（AI_015 连枷,
+ *  WeaponProj.ts 尘支实证;α 面 SetDefaults α=100 死值 → 旧式 ga=(255−100)/255≈0.61
+ *  半透同病同修=ga 1 硬档）——drawProj capture 槽单源复绘。★F6 注勘误：1059-1076
+ *  =IsAPhaseblade 光刃投掷弹（Boomerang aiStyle3 载体,:10008-10060 微光湿段三区间块
+ *  实证），非剑挥砍弹;GetAlpha 活支=:80613-80616 `IsAPhaseblade[type] → Color.White`
+ *  （1457 锚,旧注 :75942 系 1456 退役行号）;1039 活支=:80753-80756 `White*Opacity`
+ *  （旧注 :76082 同系退役锚,与 872/873/931/913/34 同支）。 */
 export interface ProjAlphaMod {
   kind: 'invisible' | 'fade' | 'fade2' | 'fixed' | 'fixedfade' | 'afade' | 'lerp' | 'lerpkeep'
     | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alpha0additive' | 'alphaLt'
@@ -105,6 +113,25 @@ export interface ProjAlphaMod {
   note?: string;
 }
 
+/** ★BJ-C1 F3（2026-10-06）常量色族通用全亮通道分类器（表驱动纯函数,单源）：
+ *  BJ529 定谳的【常量色族】（GetAlpha RGB 为常量不读 newColor 格光=光照无关弹面,
+ *  头注②族清单）的机械判定面——kind ∈ fixed/fixedfade/afade/fade2/pulse40
+ *  ∧ 白 rgb（无 rgba=White 源直通,或 rgb 三通道全 ≥250 近白）∧ 非 off。
+ *  白 rgb 门=彩色/灰阶固定色不收（复绘通道无色相建模,各自载体派刀,登记）。
+ *  消费面=Arrow.draw 本体段通用 capture（recording-ctx 重放→projFullbrightQueue
+ *  7f 光照合成后 source-over 复绘,BJ529 270/B J530 44·45 判例的通用化）；
+ *  判别代表站=502 Meowmere/633 Prism(PrismProj)/933 Zenith(ZenithSword)。 */
+export const PROJ_CONST_FULLBRIGHT_KINDS: ReadonlySet<string> =
+  new Set(['fixed', 'fixedfade', 'afade', 'fade2', 'pulse40']);
+
+export function projConstFullbright(id: number): boolean {
+  const m = PROJ_ALPHA_MOD[id];
+  if (!m || m.off) return false;
+  if (!PROJ_CONST_FULLBRIGHT_KINDS.has(m.kind)) return false;
+  const rgb = m.rgba;
+  return !rgb || (rgb[0] >= 250 && rgb[1] >= 250 && rgb[2] >= 250);
+}
+
 export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   5: { kind: 'invisible', off: 1 },    // :76569 | 恒 (255,255,255,0) 纯加算白（XNA 预乘；1457 锚 :81240-81242），GA case 5 return 1+lighter 承接；charm 态走 :80609 White×Opacity 分支（★M-4 勘误 2026-09-02）
   9: { kind: 'invisible', off: 1 },    // (255,255,255,0)*Opacity A=0 纯加算白×Opacity（A 仍 0,乘子只降 rgb 强度=E2 Opacity 债）;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
@@ -113,7 +140,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   16: { kind: 'invisible', off: 1 },   // :76535 | (255,255,255,0) A=0 隐形；SKIP: MissileProj 专属类消费
   18: { kind: 'fixed', rgba: [255,255,255,130] },   // :76813 | (255,255,255,130) 恒
   20: { kind: 'invisible', off: 1 },   // α≤150→(255,255,255,0) A=0 加算白 / α>150→(0,0,0,0) 真零——前支非隐形;★BJ228 已接线（2026-09-21）:GA case 20 return 1+'lighter'（SetDefaults α≡0 恒走前支=恒满强）,本 off 档转存档;勿再按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）
-  34: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },   // :76082 | White*Opacity；SKIP: MissileProj 专属类消费
+  34: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },   // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）；SKIP: MissileProj 专属类消费
   47: { kind: 'fade', off: 1 },   // :75950 | gate Main.player[owner].wet→Color.White 未建模（湿身白化登记忽略）；非湿落缺省 fade；SKIP: 门控条件未建模（登记忽略）。★白光约定零观感差钉死（BJ236 复核 2026-09-21）：SetDefaults（:1305-1310）无 alpha 行 α≡0 → 湿支 White ≡ 缺省路径 (255−0)/255×白（本仓光色恒白）=两支逐像素等值,勿"补齐"湿门——补了也是同值死码
   50: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
   53: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
@@ -341,20 +368,20 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   857: { kind: 'fixed', rgba: [255,255,255,255] },  // :76078 | Color.White
   864: { kind: 'fixed', rgba: [255,255,255,255] },  // :76078 | Color.White
   870: { kind: 'invisible', off: 1 },  // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
-  872: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :76082 | White*Opacity
-  873: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :76082 | White*Opacity
+  872: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）
+  873: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）
   876: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   880: { kind: 'afade', rgba: [255,255,255,128], slope: 1 },  // :75990 | A/2 后落缺省（A=127.5−α）
   893: { kind: 'fixed', rgba: [255,255,255,150] },  // :76102 | (255,255,255,150) 恒
   895: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :76098 | White*Opacity
   907: { kind: 'fixed', rgba: [255,255,255,150] },  // :76102 | (255,255,255,150) 恒
   912: { kind: 'lerp', k: 0.25, off: 1 },  // :76106 | Lerp(White,0.25)；SKIP: WhipProj 专属类消费
-  913: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },  // :76082 | White*Opacity；SKIP: WhipProj 专属类消费
+  913: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },  // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）；SKIP: WhipProj 专属类消费
   920: { kind: 'lerp', k: 0.4 },  // :75946 | Lerp(newColor,White,0.4)*Opacity
   921: { kind: 'lerp', k: 0.4 },  // :75946 | Lerp(newColor,White,0.4)*Opacity
   926: { kind: 'lerp', k: 0.4 },  // :75946 | Lerp(newColor,White,0.4)*Opacity
   929: { kind: 'afade', rgba: [255,255,255,128], slope: 1 },  // :75990 | A/2 后落缺省（A=127.5−α）
-  931: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :76082 | White*Opacity
+  931: { kind: 'fixedfade', rgba: [255,255,255,255] },  // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）
   933: { kind: 'fade2' },  // :76047 | White*Opacity 后落缺省（(1−α/255)² 双重衰减）
   937: { kind: 'afade', rgba: [255,255,255,191], slope: 1 },  // :75986 | A×0.75 后落缺省（A=255×0.75−α）
   948: { kind: 'fixed', rgba: [255,255,255,255], off: 1 },  // :76143 | Color.White；SKIP: WeaponProj 专属类消费
@@ -373,35 +400,35 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   1006: { kind: 'fixed', rgba: [255,255,255,255] }, // :76009 | Color.White
   1021: { kind: 'fixed', rgba: [255,255,255,255] }, // :76005 | Color.White
   1024: { kind: 'fixedfade', rgba: [255,255,255,255] }, // :76320 | (255,255,255)*Opacity
-  1039: { kind: 'fixedfade', rgba: [255,255,255,255] }, // :76082 | White*Opacity
+  1039: { kind: 'fixedfade', rgba: [255,255,255,255] }, // :80753 | White*Opacity（★F6 勘误:旧锚 :76082 系 1456 退役行号）
   1041: { kind: 'alpha255hide' }, // :76090 | α==255→Transparent else White
   1045: { kind: 'fixedfade', rgba: [255,255,255,200] }, // :76670 | (255,255,255,200)*Opacity
   1047: { kind: 'fixed', rgba: [255,255,255,255] }, // :76296 | (255,255,255,255) 恒
   1055: { kind: 'fade', off: 1 }, // :75968 | gate localAI[0]（A=255−localAI[0]）本仓未跟踪→登记忽略；SKIP: 门控条件未建模（登记忽略）
-  1059: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1060: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1061: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1062: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1063: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1064: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1065: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1066: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1067: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1068: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1069: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1070: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1071: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1072: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1074: { kind: 'fixed', rgba: [255,255,255,255], off: 1 }, // :75942 | IsAPhaseblade 族 Color.White；SKIP: WeaponProj 专属类消费
-  1075: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1076: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
+  1059: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1060: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1061: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1062: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1063: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1064: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1065: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1066: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1067: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1068: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1069: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1070: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1071: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1072: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1074: { kind: 'fixed', rgba: [255,255,255,255], off: 1 }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）；SKIP: WeaponProj 专属类消费
+  1075: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1076: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
   1089: { kind: 'disco' }, // :76316 | (DiscoR,DiscoG,DiscoB,70) 彩虹闪烁 a=70/255——★BJ236 已 1:1 化（2026-09-21）:载体=GlowstickProj 专属类（本表 Arrow 侧档=防御 dormant）,基色=FlickerClock.discoColor() 同源钟直读+离屏乘色缓存+source-over×70/255（GetAlpha :80987-80989/AlphaBlend 直译;旧 hue-rotate 周期近似=灰阶贴图恒等零观感,已退役）
   1090: { kind: 'lerp', k: 0, off: 1 }, // :75972 | gate localAI[2]：0→直通/1→White/else Lerp(k) 本仓未跟踪→登记忽略；SKIP: 门控条件未建模（登记忽略）
   1097: { kind: 'fixedfade', rgba: [255,255,255,128] }, // :76428 | (255,255,255,128)×(1−α/255)
   1099: { kind: 'random' }, // :75957 | α>0→(0,0,0,0)；α=0→随机 rgb a=200（星尘珠闪烁近似 ga=200/255）
   1100: { kind: 'fade2' }, // :76047 | White*Opacity 后落缺省（(1−α/255)² 双重衰减）
-  1101: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
-  1102: { kind: 'fixed', rgba: [255,255,255,255] }, // :75942 | IsAPhaseblade 族 Color.White
+  1101: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
+  1102: { kind: 'fixed', rgba: [255,255,255,255] }, // :80613 | IsAPhaseblade 光刃投掷弹 Color.White（★F6 勘误:旧锚 :75942 系 1456 退役行号;载体=Boomerang aiStyle3 非剑挥砍）
   1107: { kind: 'invisible', off: 1 }, // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   1108: { kind: 'invisible', off: 1 }, // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   1109: { kind: 'invisible', off: 1 }, // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）

@@ -1,6 +1,6 @@
 // B6 mod OnHitNPC 钩(受理命中缝):注册 fail-fast + 派发命中/未注册 miss + 域外零调。
 import { describe, it, expect, beforeEach } from 'vitest';
-import { registerModOnHitNpc, runModOnHitNpc, registerModNpcDeath, runModOnNpcDeath, setModAudioSink, playModSound, _resetModHooksForTests } from '../src/mods/hooks';
+import { registerModOnHitNpc, runModOnHitNpc, registerModNpcDeath, runModOnNpcDeath, setModAudioSink, playModSound, registerModModifyHurtByNpc, runModModifyHurtByNpc, _resetModHooksForTests } from '../src/mods/hooks';
 
 describe('mod OnHitNPC 钩(P7 GAPS #1 收口)', () => {
   beforeEach(() => _resetModHooksForTests());
@@ -43,6 +43,26 @@ describe('mod OnNpcDeath 钩(Hive Tumor→Boss 遭遇链面)', () => {
     runModOnNpcDeath(null, { vid: 3 } as never, {} as never);
     expect(seen).toEqual([7]);
     expect(() => registerModNpcDeath(800, () => {})).toThrow(/重复注册/);   // fail-fast
+  });
+});
+
+describe('CalPlayer 基建:modifyHurtByNpc 承伤修正链(六十三刀)', () => {
+  beforeEach(() => _resetModHooksForTests());
+
+  it('注册+修正:mod NPC 进攻面逐钩折减;原版域/空表零扰动', () => {
+    registerModModifyHurtByNpc('calamity', (ctx) => ctx.dmg * 0.5);
+    // mod 域(800+):逐钩修正
+    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 900, 40, true)).toBe(20);
+    // 原版域:零调用原伤透传
+    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 42, 40, true)).toBe(40);
+    // 多钩链序:第二钩吃第一钩产物
+    registerModModifyHurtByNpc('other', (ctx) => ctx.dmg - 5);
+    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 900, 40, true)).toBe(15);
+    // 吞伤(0)+负值钳 0
+    registerModModifyHurtByNpc('third', () => 0);
+    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 900, 40, true)).toBe(0);
+    // 重复注册 fail-fast
+    expect(() => registerModModifyHurtByNpc('calamity', () => 1)).toThrow(/重复注册/);
   });
 });
 

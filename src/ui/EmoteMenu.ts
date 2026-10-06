@@ -15,6 +15,7 @@
 // Esc 关闭（capture 阶段拦截,防暂停键二次消费）。
 import { Lang } from '../i18n/Lang';
 import { EMOTE_NAMES } from '../data/vanillaEmotes';
+import { bindMouseTextTip } from './MouseTextTip';   // ★BJ-C4-F5
 
 /** 世界旗标视图（解锁门输入;hardMode 与 downed_* 双键并集见各门注释） */
 export interface EmoteGateFlags extends Record<string, boolean | undefined> {
@@ -313,8 +314,12 @@ function makeEmoteButton(emoteIndex: number, flow: EmoteMenuFlow, closeMenu: () 
   border.className = 'border';
   btn.append(bubble, icon, border);
   // 悬停：tooltip "/{EmojiName}"（DrawSelf :79-84）+ SoundID 12（MouseOver :68-73）
+  // ★BJ-C4-F5（2026-10-06）：原生 browser title（OS 延迟气泡）→ 自绘 MouseText
+  //   气泡族（MouseTextTip 单源）——原版面 = DrawSelf hovered 臂
+  //   `Main.instance.MouseText("/" + EmojiName, 0, 0)`（EmoteButton.cs:79-84）,
+  //   悬停即现/随动 = MouseText 家族语义,非 OS tooltip。
   const emojiName = Lang.has(`EmojiName.${nameKey}`) ? Lang.text(`EmojiName.${nameKey}`) : nameKey;
-  btn.title = `/${emojiName}`;
+  bindMouseTextTip(btn, () => `/${emojiName}`);
   btn.addEventListener('mouseenter', () => flow.playTick());
   // 左键 = MakeLocalPlayerEmote + 关窗（LeftClick :90-95 + IngameFancyUI.Close）
   btn.addEventListener('click', () => {

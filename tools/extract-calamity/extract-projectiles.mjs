@@ -127,6 +127,31 @@ for (const f of csFiles) {
 
   // 贴图(魔数校验)
   const png = pngByBase.get(cls) ?? pngByBase.get(cls.replace(/\s+/g, ''));
+  // ★B7 一百零七刀:AI 行为 census(C# AI() 信号 → 通用行为字段)
+  {
+    const aiIdx = text.indexOf('public override void AI()');
+    if (aiIdx >= 0) {
+      const ao = text.indexOf('{', aiIdx);
+      let ad = 0, ae = -1;
+      for (let ai2 = ao; ai2 < text.length; ai2++) {
+        if (text[ai2] === '{') ad++;
+        else if (text[ai2] === '}') { ad--; if (ad === 0) { ae = ai2; break; } }
+      }
+      if (ae > 0) {
+        const aiBody = text.slice(ao + 1, ae);
+        // homing:朝目标归一化推进(velocity += normalize(Δ)*v)
+        if (/velocity \+= (Vector2\.)?Normalize\(/.test(aiBody) || /MoveTowards\(/.test(aiBody)) raw.homing = 6;
+        // accelerate:沿速度向推进
+        if (/velocity \*= 1\.0[2-9]f?/.test(aiBody)) raw.accelerate = 0.15;
+        // gravity:显式 Y 重力
+        const gm = aiBody.match(/velocity\.Y \+= (0\.[0-9]+f?)/);
+        if (gm) raw.gravity = Number(gm[1].replace('f', ''));
+      }
+    }
+    // boomerang:回返信号(AI 或 SetDefaults)
+    if (/boomerang|Boomerang|returnHome/i.test(text)) raw.boomerang = { returnTicks: 30, accel: 0.5 };
+  }
+
   let hasPng = false;
   if (png) {
     const head = readFileSync(png).subarray(0, 4);

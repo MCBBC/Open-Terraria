@@ -79,6 +79,9 @@ export declare interface ModContext {
     onTileHit?(p: ModProjLike, game: any): boolean | void;
   }): void;
   buff(key: string, spec: ModBuffSpec): void;
+  /** B6:玩家侧钩;kind='modifyHurtByNpc'=承伤修正链(仅 mod NPC 进攻面;
+   *  fn(ctx:{player,game,attackerVid,dmg,contact}) → number=修正后伤/undefined=不改) */
+  playerHook(kind: string, fn: (ctx: { player: unknown; game: unknown; attackerVid: number; dmg: number; contact: boolean }) => number | void): void;
   system(hooks: ModSystemHooks): void;
   config: {
     get(key: string): boolean | number | string;

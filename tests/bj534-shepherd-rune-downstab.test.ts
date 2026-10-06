@@ -226,6 +226,27 @@ describe('BJ534 ②触发链（空中+按住↓+跳键沿+装备 5465）', () =>
     expect(p.extraJumps.length).toBe(1);           // 瓶未被消费
   }, 30000);
 
+  it('跳跃上升中松跳再按（↓+跳沿,sustain 窗口残余）：下砸夺帧（:21203 松键 jump=0 净效,jumpHold 清）', async () => {
+    const w = makeWorld();
+    const game = makeHooks(w);
+    const p = await makePlayer();
+    p.inv.armor[3] = { id: RAM_RUNE, stack: 1 };
+    settle(p, game);
+    // 原地跳 6 拍（进 sustain 窗口,vy<0 上升中;升幅 ~30px 保证下砸首拍不落地）
+    p.inputJump = true; p.jumpEdgePrev = false;
+    for (let i = 0; i < 6; i++) p.fixedUpdate(1 / 60, game);
+    expect(p.jumpHold).toBeGreaterThan(0);        // sustain 窗口存续
+    expect(p.vy).toBeLessThan(0);
+    // 松跳一拍（仓内窗口不清零 :6807 判例）→ 按住↓再按跳
+    p.inputJump = false; p.inputDown = true;
+    p.fixedUpdate(1 / 60, game);
+    p.inputJump = true; p.jumpEdgePrev = false;
+    p.fixedUpdate(1 / 60, game);
+    expect(p.isDownDashing).toBe(true);
+    expect(p.jumpHold).toBe(0);                   // sustain 停（:20823 分支不可达净效）
+    expect(p.vy).toBeGreaterThan(0);              // 上升翻转为下砸
+  }, 30000);
+
   it('家族不回归：不按↓时云瓶二段跳照常消费 + 消费帧打断下砸（:20934 写 flag13=false）', async () => {
     const w = makeWorld();
     const game = makeHooks(w);

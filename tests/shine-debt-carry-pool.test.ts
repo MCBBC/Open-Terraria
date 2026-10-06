@@ -277,11 +277,11 @@ describe('三债源级锁 — 接线在位（防静默拆除）', () => {
   });
   it('债2:schedule ① 换代支走 carry;凭证在暂停点写入;完成态清三标;memo 改签（非删除）', () => {
     expect(TSHINE).toContain('if (tryCarryShineProgress(world, atlas, it.pair, cur, it.cx, it.cy, shimmerQ)) {');
-    expect(TSHINE.match(/entry\._resumeFp = shineFpPrefix\(world, cx, cy, ly, lx, shimmerQ\);/g)?.length).toBe(1);
+    expect(TSHINE.match(/entry\._resumeFp = shineFpPrefix\(world, atlas, cx, cy, ly, lx, shimmerQ\);/g)?.length).toBe(1);
     expect(TSHINE).toContain('entry._resumeRow = undefined;');
     expect(TSHINE).toContain('entry._resumeCol = undefined;');
     expect(TSHINE).toContain('entry._resumeFp = undefined;');
-    expect(TSHINE).toContain('shineMemo.set(mkey, [{ q: shimmerQ, fp: shineChunkFingerprintCached(world, cur, cx, cy, shimmerQ), e }]);');
+    expect(TSHINE).toContain('shineMemo.set(mkey, [{ q: shimmerQ, fp: shineChunkFingerprintCached(world, atlas, cur, cx, cy, shimmerQ), e }]);');
   });
   it('债3:死线检查在格级 stamp 点(row,col 断点);行首退化=resumeCol=0;停滞判据双未动', () => {
     expect(TSHINE).toContain("if ((deadline !== undefined && performance.now() > deadline)\n        || ly * CHUNK + lx >= cellCap) {");

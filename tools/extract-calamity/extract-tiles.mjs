@@ -110,7 +110,18 @@ function resolveTileDrop(cls) {
   }
   return null;
 }
-const stats = { total: 0, emitted: 0, ore: 0, bar: 0, direct: 0, furniture: 0, station: 0, helperFurniture: 0, skipFurniture: 0, noTexture: 0, noDrop: 0, curated: 0, placeTileWired: 0 };
+const stats = { total: 0, emitted: 0, ore: 0, bar: 0, direct: 0, furniture: 0, station: 0, helperFurniture: 0, decor: 0, trees: 0, skipFurniture: 0, noTexture: 0, noDrop: 0, curated: 0, placeTileWired: 0 };
+
+// ★B7 九十五刀:tile 掉落 sidecar(直接族无 RegisterItemDrop 且物品未 createTile
+//  反链时的人工映射;四层 Abyss tile 用)
+const TILE_DROPS = existsSync(join(dirname(fileURLToPath(import.meta.url)), 'tile-drops.json'))
+  ? JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'tile-drops.json'), 'utf8'))
+  : {};
+
+// ★B7 七十八刀:树 sidecar(GrowsOnTileId 数据面;引擎树砍链接=下窗)
+const TREE_CHOPS = existsSync(join(dirname(fileURLToPath(import.meta.url)), 'tree-chops.json'))
+  ? JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'tree-chops.json'), 'utf8'))
+  : {};
 
 // ★B6 卅九刀:SetUp* 家具助手几何表(FurnitureCommon.cs 直读)——
 //  `internal static void SetUp<X>(this ModTile mt, int itemDropID, …)` 体含
@@ -338,12 +349,90 @@ for (const f of csFiles) {
     // 复用主流的落盘/贴图段:借用 raw 覆写
     rawEmittedOverride = raw2;
   } else {
-    // 直声明族:Main.tileSolid[Type]=true 且无 TileObjectData(矿石/砖块/ slag 族)
+    // ★B6 六十二刀:decor 族(frameImportant 非实心装饰:小件堆/石笋/水晶/植物)
+    //  ——显式掉落(RegisterItemDrop/ItemDrop=)在册即发:1×1 framed,decor:true,
+    //  styles=贴图高÷16(帧表近似);树木/藤蔓/仙人掌(GrowsOnTileId 族)=无掉落
+    //  声明自然落入 other 继续跳(树系统=余段)。
+    if (!/Main\.tileSolid\[Type\]\s*=\s*true/.test(body) && /Main\.tileFrameImportant\[Type\]\s*=\s*true/.test(body)) {
+      const decM = body.match(/(?:RegisterItemDrop\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)|ItemDrop\s*=\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\))/);
+      const decDrop = decM ? resolveItemKey((decM[1] ?? decM[2]).split('.').pop()) : (resolveTileDrop(cls) ?? null);
+      const pngD = pngByBase.get(cls);
+      const hasPngD = pngD && readFileSync(pngD).subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      if (decDrop && hasPngD) {
+        const bD = readFileSync(pngD);
+        const thD = bD.readUInt32BE(20);
+        const rawD = {
+          key,
+          framed: true, w: 1, h: 1,
+          solid: false, decor: true, pick: 0,
+          frame: 'style', frameWidth: 16, frameHeight: 16,
+          styles: Math.max(1, Math.floor(thD / 16)),
+          texture: `textures/tiles/${key}.png`,
+          dropItem: decDrop,
+        };
+        stats.emitted++; stats.decor++;
+        emittedTileKeys.add(key);
+        if (WRITE) {
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(join(outDir, `${key}.json`), JSON.stringify(rawD, null, 2) + '\n');
+          mkdirSync(texDir, { recursive: true });
+          copyFileSync(pngD, join(texDir, `${key}.png`));
+        }
+        continue;
+      }
+    }
+    if (TREE_CHOPS[key]) {
+      // ★七十八刀:树瓦片发出(sidecar dropItem+growsOn 数据面;引擎树砍链接=下窗)
+      const tc = TREE_CHOPS[key];
+      const pngT = pngByBase.get(cls);
+      const hasPngT = pngT && readFileSync(pngT).subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      if (hasPngT) {
+        const rawT = {
+          key,
+          solid: false, decor: true, pick: 0, axe: 0,
+          frame: 'style', frameWidth: 16, frameHeight: 16, styles: 1,
+          texture: `textures/tiles/${key}.png`,
+          ...(tc.dropItem ? { dropItem: tc.dropItem } : {}),
+          growsOn: tc.growsOn ?? null,
+          sapling: tc.sapling ?? null,
+        };
+        stats.emitted++; stats.trees++;
+        emittedTileKeys.add(key);
+        if (WRITE) {
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(join(outDir, `${key}.json`), JSON.stringify(rawT, null, 2) + '\n');
+          mkdirSync(texDir, { recursive: true });
+          copyFileSync(pngT, join(texDir, `${key}.png`));
+        }
+        // ★八十刀:树苗 tile 同发(sapling 键=同名 png;GrowsOnTileId 生长触发的载体)
+        if (tc.sapling && !emittedTileKeys.has(tc.sapling)) {
+          const sapCls = tc.sapling.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+          const sapPng = pngByBase.get(sapCls);
+          if (sapPng && readFileSync(sapPng).subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) {
+            const rawS = {
+              key: tc.sapling,
+              solid: false, decor: true, pick: 0, axe: 0,
+              frame: 'style', frameWidth: 16, frameHeight: 16, styles: 1,
+              texture: `textures/tiles/${tc.sapling}.png`,
+              growsOn: tc.growsOn ?? null,
+              sapling: null,
+            };
+            stats.emitted++; stats.trees++;
+            emittedTileKeys.add(tc.sapling);
+            if (WRITE) {
+              writeFileSync(join(outDir, `${tc.sapling}.json`), JSON.stringify(rawS, null, 2) + '\n');
+              copyFileSync(sapPng, join(texDir, `${tc.sapling}.png`));
+            }
+          }
+        }
+        continue;
+      }
+    }
     if (!/Main\.tileSolid\[Type\]\s*=\s*true/.test(body)) {
       stats.skipFurniture++; skips.set('other', (skips.get('other') ?? 0) + 1); continue;
     }
     kind = /TileID\.Sets\.Ore\[Type\]\s*=\s*true/.test(body) ? 'ore' : 'direct';
-    drop = dropItemFromSidecar ?? null;
+    drop = dropItemFromSidecar ?? TILE_DROPS[key] ?? null;
   }
   if (drop === null || drop === undefined) {
     stats.skipFurniture++; skips.set('dropMissing', (skips.get('dropMissing') ?? 0) + 1); continue;

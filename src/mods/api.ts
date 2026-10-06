@@ -19,6 +19,7 @@
 import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
+  registerModModifyHurtByNpc, registerModModifyHitNpc,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -58,6 +59,11 @@ export interface ModContext {
   projIdOf(key: string): number;
   /** mod NPC 分配 id(同上) */
   npcIdOf(key: string): number;
+  /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
+   *  (fn(ctx: {player, game, attackerVid, dmg, contact}) → number=修正后伤/
+   *  undefined=不改;仅 mod NPC 进攻面进入) */
+  /** playerHook 双 kind:modifyHurtByNpc=承伤修正链 / modifyHitNpc=命中伤害增幅链 */
+  playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc', fn: (ctx: Record<string, unknown>) => number | void): void;
   /** 生成 mod 弹幕(npcAi 闭包内持 game,回传本面构造 ModProj 并入桶——L2 唯一
    *  弹幕生成通道;ownerIsPlayer=false=mod NPC 弹打玩家) */
   spawnProj(game: unknown, key: string, x: number, y: number, vx: number, vy: number,
@@ -111,6 +117,14 @@ export function createModContext(
     system(hooks) { registerSystem(hooks); },
     projIdOf(key) { return idOf('projs' as 'items', key); },
     npcIdOf(key) { return idOf('npcs', key); },
+    // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)
+    playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void) {
+      if (kind === 'modifyHurtByNpc') {
+        registerModModifyHurtByNpc(modId, fn as Parameters<typeof registerModModifyHurtByNpc>[1]);
+      } else if (kind === 'modifyHitNpc') {
+        registerModModifyHitNpc(modId, fn as Parameters<typeof registerModModifyHitNpc>[1]);
+      } else throw new Error(`[mod-api] 未知 playerHook: ${kind}`);
+    },
     // ★异步构造:动态 import ModProj(与 loader 的 entry 动态装载同型);AI 每 tick
     //  调用高频路径,import 缓存后 microtask 内落桶,同 tick 内稍后帧可见=可接受
     spawnProj(game, key, x, y, vx, vy, damage, knockback = 2, ownerIsPlayer = false) {

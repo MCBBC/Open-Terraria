@@ -127,6 +127,7 @@ describe('F1 dash==6 滑行阻尼恒基础档 0.992（骑乘不落配饰档污�
     (p.mount as unknown as { type: number }).type = 62;
     p.facing = 1;
     p.mountDash6Active = true;                            // dash==6 滑行态直接构造
+    p.dashLatched = 6;                                    // ★C5-B5 闩锁位同步构造（dash 字段=6 的窗口,与 mountDash6Active 同源——C5-B6 :21221 dash==0 清冷却门不可见此态）
     p.dashDelay = -1;
     p.vx = 12; p.vy = 1;
     p.mount.active = false;                               // 中途脱鞍
@@ -169,7 +170,7 @@ describe('F2 移动相三段时序：坐骑双通道先于 DashMovement 结算�
     } else {
       // 触发未发生的兜底序列直接驱动一次滑行态 tick 再验 D6 面
       order.length = 0;
-      p.mountDash6Active = true; p.dashDelay = -1; p.vx = 12; p.vy = 1; p.facing = 1;
+      p.mountDash6Active = true; p.dashLatched = 6; p.dashDelay = -1; p.vx = 12; p.vy = 1; p.facing = 1;   // ★C5-B5 闩锁位同步
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
       expect(order).toContain('D6');
       expect(order.indexOf('D6')).toBeGreaterThan(order.indexOf('V'));

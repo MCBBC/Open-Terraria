@@ -109,6 +109,10 @@ const WORM_CHAINS = existsSync(join(OUT, '..', '..', 'tools', 'extract-calamity'
 const curatedNpcKeys = new Set(JSON.parse(readFileSync(join(OUT, '.curated-npcs.json'), 'utf8')));
 // loot 材料键解析(盘键+curated 归一别名;与 recipes resolveItemKey 同式)
 const diskItemKeysLoot = new Set(readdirSync(join(OUT, 'content', 'items')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, '')));
+// buff 声明键集(OnHitPlayer/OnHitNPC 解析面;六十四刀)
+const BUFF_KEYS_NPC = new Set(existsSync(join(OUT, 'content', 'buffs'))
+  ? readdirSync(join(OUT, 'content', 'buffs')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''))
+  : []);
 const normCuratedLoot = new Map(JSON.parse(readFileSync(join(OUT, '.curated-items.json'), 'utf8')).map((k) => [k.replace(/_/g, ''), k]));
 
 const npcDir = join(SRC, 'NPCs');
@@ -199,9 +203,15 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
         const eff = denom * opts.length;
         for (const o of opts) push(o, eff, 1, 1);
       }
+    } else if (/^ItemDropRule\.BossBag\(ModContent\.ItemType<([A-Za-z0-9_.]+)>\(\)\)/.test(arg)) {
+      // ★BossBag 落地(六十刀难度档):{item, bossBag:1} → register → {k:'bossBag'}
+      //  规则(专家档掉袋+zeroValue,经典不掉——1457 ItemDropRule.cs:10-13 语义)
+      const bagM = arg.match(/^ItemDropRule\.BossBag\(ModContent\.ItemType<([A-Za-z0-9_.]+)>\(\)\)/);
+      const bagKey = resolveItemKey(bagM[1].split('.').pop());
+      if (bagKey && !drops.some((d) => d.item === bagKey && d.bossBag)) {
+        drops.push({ item: bagKey, bossBag: 1 });
+      } else lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1);
     } else if (/^ItemDropRule\.BossBag(ByCondition)?\(/.test(arg)) {
-      // BossBag=DropBasedOnExpertMode(DropNothing(), 1×bag)——经典档不落袋(1457
-      //   ItemDropRule.cs:10-13 直读);难度档(余段)接入时随 re-extract 激活
       lootSkips.set('expertOnlyBossBag', (lootSkips.get('expertOnlyBossBag') ?? 0) + 1);
     } else if (/^ItemDropRule\.ByCondition\(/.test(arg)) {
       lootSkips.set('conditionGate', (lootSkips.get('conditionGate') ?? 0) + 1);
@@ -369,6 +379,31 @@ for (const f of csFiles) {
       return normCuratedLoot.get(key.replace(/_/g, '')) ?? null;
     }, pascalToSnake);
     if (drops.length) { raw.drops = drops; stats.lootDrops += drops.length; stats.lootNpcs++; }
+  }
+
+  // —— OnHitPlayer → onHitPlayer 声明面(六十四刀 CalPlayer 基建):AddBuff(BuffType<X>(), T) ——
+  {
+    const ohIdx = text.indexOf('public override void OnHitPlayer');
+    if (ohIdx >= 0) {
+      const ohOpen = text.indexOf('{', ohIdx);
+      let d2 = 0, ohEnd = -1;
+      for (let i2 = ohOpen; i2 < text.length; i2++) {
+        if (text[i2] === '{') d2++;
+        else if (text[i2] === '}') { d2--; if (d2 === 0) { ohEnd = i2; break; } }
+      }
+      if (ohEnd > 0) {
+        const ohBody = text.slice(ohOpen + 1, ohEnd);
+        const bm = ohBody.match(/AddBuff\(\s*(?:ModContent\.)?BuffType<([A-Za-z0-9_.]+)>\(\)\s*,\s*([0-9]+)\s*(?:,|\))/);
+        if (bm && BUFF_KEYS_NPC.has(pascalToSnake(bm[1].split('.').pop()))) {
+          const gm = ohBody.match(/hurt(?:Info)?\.Damage\s*>\s*0/);
+          raw.onHitPlayer = {
+            buff: pascalToSnake(bm[1].split('.').pop()),
+            duration: Number(bm[2]) / 60,
+            ...(gm ? {} : {}),
+          };
+        }
+      }
+    }
   }
 
   // ★B6 Texture 重定向解析(11 件无 pngByBase 命中的 npc):

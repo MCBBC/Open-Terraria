@@ -257,6 +257,7 @@ import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
 import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
+import { setTintAtlasInvalidateRect } from './TintAtlas';   // ★E51 刀A:回收矩形精确失效注入
 import { texId, texEpoch } from './texId';   // ★F-gore 批段纹理幂等键（er: 同族）
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
@@ -1974,7 +1975,11 @@ export function bestiaryDummyFrameIdx(
     return frames > 1 ? 1 + (Math.floor(t / 5) % (frames - 1)) : 0;
   }
   // 宝箱怪族（aiStyle 25,case 85/341/629,cs:74239-74320）：ai0=0 伪装 → 段首帧（ai3=0→off 0）
-  if (aiStyle === 25) return 0;
+  // ★BJ-C6/F5（2026-10-06）：图鉴 dummy 段位特例（:74303
+  //   `ai[3]==2f || (IsABestiaryIconDummy && type==85)` → frame.Y += num*6）——
+  //   本函数恒在 IsABestiaryIconDummy 域,故 type 85 dummy = 基帧 0 + 6 = 暗影箱段
+  //   （frames=18 表内合法;纯视觉,341/629 无此特例照旧段首帧 0）。旧恒 0=金箱段。
+  if (aiStyle === 25) return id === 85 ? 6 : 0;   // ★BJ-C6/F5
   // 珍稀宝箱怪 473-476（case 473,cs:71831-72000）：ai0=0 → 伪装帧 0
   if (id >= 473 && id <= 476) return 0;
   // 爬墙蜘蛛族（aiStyle 40,cs:73795-73817）：fc += (|vx|+|vy|)×0.5（vy=0）
@@ -4961,6 +4966,12 @@ export class Renderer {
   private onResize = () => this.resize();
 
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
+    // ★E51 刀A（2026-10-06）TintAtlas 回收失效精确化注入:bglEntShim 惰性创建（?bgl
+    //  族旗门）,回调内 ?. 空转=2D/无 shim 会话零触碰;TintAtlas 侧钩子缺省 null 时
+    //  回退页级 bumpTexEpoch（fail-closed 兜底,TintAtlas.ts 粒度两档注）。
+    setTintAtlasInvalidateRect((cv, x, y, w, h) => {
+      this.bglEntShim?.invalidateTintRect(cv, x, y, w, h);
+    });
     // ★P0 去毒（2026-09-25）:原此处把 ChunkCache 页画布 WRF 旗随 bgl 置位的写点已删——
     //   页画布背板不再随 bgl 旗降 CPU/SHM（耦合=GL 路径死亡时回退 blit 7-12× 慢 op
     //   的凶器,见 ChunkCache 页画布去毒注）;页恒 GPU 后备。
@@ -6734,21 +6745,11 @@ export class Renderer {
       //   a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a) 精确（drawFairyBright 同构判例;
       //   相机 round 吸附同上,变换值=当帧捕获零漂移）。层序登记：此槽在玩家之上
       //   ——与 677/668 既有偏差惯例同槽（原版本体链内=同层,观感面仅重叠实体压盖差）。
-      for (const q of this.npcWhiteLiftQueue) {
-        const imgL = this.atlas?.ensureVImage(q.tex);
-        if (!imgL) continue;
-        ctx.save();
-        ctx.translate(q.cx, q.cy);
-        ctx.rotate(q.rot);
-        ctx.scale(q.scale, q.scale);
-        if (q.mirror) ctx.scale(-1, 1);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = npcWhiteLiftAlpha(q.vid) ?? 0.4;
-        ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
-        ctx.restore();
-      }
+      //   ★BJ-C1 F4：消费循环抽方法 flushNpcWhiteLift（下方同序位调用）——
+      //   相机变换在方法内自建（与本块逐式同式）,行为零变;重放锁体裁直调。
       ctx.restore();
     };
+    this.flushNpcWhiteLift(cam, z, viewW, viewH);
 
     // 7d'''. 四塔 GlowMask 残影（vel4）光照合成后消费（★BJ509 2026-10-04，同 7d'
     //   判例域）：原版塔残影顶点色 Color(64,64,64,0)×Opacity 不经 GetAlpha=不吃
@@ -6758,68 +6759,9 @@ export class Renderer {
     //   三修账原样（收集侧已折算,此处纯重放）;相机变换同 7d'（round 吸附式）。
     //   层序登记：原版残影在塔本体之上（NPC 绘制序列内）,此处在 7d' 自发光域=
     //   亦在玩家之上——与 677/668 既有偏差惯例同槽。
-    if (this.towerGlowQueue.length) {
-      const camRX3 = Math.round(cam.x * z) / z;
-      const camRY3 = Math.round(cam.y * z) / z;
-      ctx.save();
-      ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
-      ctx.scale(z, z);
-      ctx.translate(-camRX3, -camRY3);
-      ctx.imageSmoothingEnabled = false;
-      ctx.globalCompositeOperation = 'lighter';
-      for (const q of this.towerGlowQueue) {
-        const img2 = this.atlas?.ensureVImage(q.tex);
-        if (!img2) continue;
-        // ★BJ510 516 残影单份（White 基色,本体同枢重放=drawGhostSprite 数学;塔无此支）
-        if (q.single !== undefined) {
-          ctx.globalAlpha = Math.max(0, Math.min(1, q.single));
-          if (q.rot !== undefined) {
-            ctx.save();
-            ctx.translate(q.cx!, q.cy!);
-            ctx.rotate(q.rot);
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
-            ctx.restore();
-          } else {
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
-          }
-          continue;
-        }
-        // ★BJ510 516 本体白罩（Color(255-α,…):26601——α 因子,塔无此层）
-        if (q.overlay) {
-          ctx.globalAlpha = Math.max(0, Math.min(1, q.overlay));
-          if (q.rot !== undefined) {
-            ctx.save();
-            ctx.translate(q.cx!, q.cy!);
-            ctx.rotate(q.rot);
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
-            ctx.restore();
-          } else {
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
-          }
-        }
-        ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
-        // ★BJ509：四向偏移走 npcGlowVel4Offsets 纯函数（与 vel4 收集侧单源）
-        const offs = Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff);
-        if (q.rot !== undefined) {
-          // ★BJ510 旋转承载：本体同枢（实体中心）重放——translate(中心)·rotate·
-          // draw(bx·scale+世界偏移)；世界偏移不随 scale（原版 velocity 项=世界 px）
-          ctx.save();
-          ctx.translate(q.cx!, q.cy!);
-          ctx.rotate(q.rot);
-          for (let k = 0; k < 4; k++) {
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
-              q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
-              q.sw * q.scale!, q.sh * q.scale!);
-          }
-          ctx.restore();
-        } else {
-          for (let k = 0; k < 4; k++) {
-            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
-          }
-        }
-      }
-      ctx.restore();
-    }
+    //   ★BJ-C1 F4：整段抽方法 flushTowerGlow（行为零变;recording-ctx 重放锁
+    //   体裁直调——M3 禁用整段全绿实锤的本刀补锁）。
+    this.flushTowerGlow(cam, z, viewW, viewH);
 
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
@@ -10939,7 +10881,14 @@ export class Renderer {
           ? this.xnaCombined(`npc${e.vanillaId}`, r, drawColor,
               Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)  // ★用户校准态 ka=alpha/255（0.686）——原版推导值 1−alpha/255 待肉眼二选一
           : null;
-        ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+        // ★BJ-C1 F5（2026-10-06）：454-459 沙虫族本体半透面——原版 :94640-94646
+        //  `Lerp(newColor,White,0.4)+A=150+×num5/255`——tint A=150×(255−α)/255
+        //  （GetColor A 恒 255 → num5=255−α）=本体 ga ×150/255（幻影半透定义面,
+        //  白提亮 0.4 档由 npcWhiteLiftAlpha 7d' 复绘承接）。仅缺省直绘位收编
+        //  （color/tint 预乘支=染面族,沙虫无 NPC color 不可达）。
+        ctx.globalAlpha = (e.vanillaId != null && e.vanillaId >= 454 && e.vanillaId <= 459
+          ? 150 / 255 : 1)
+          * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255);
         // EoC 锚点:NPC_4 每帧 110×166,眼球质心帧内 y≈106(帧中心 83)——
         // 原版 DrawNPC 的 halfSize=(55,107) 覆写（Main.cs:23280-23285）在
         // "position−frameHalf+halfSize" 与 "origin=halfSize" 之间【完全抵消】
@@ -11080,11 +11029,25 @@ export class Renderer {
                 ? witherBeastLocal(e)[1] : e.lai3,
             });
         }
-        // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
-        // ★BJ310：370 相位染色（bodyTint370）同走本门——直绘跳过、tintedSprite 承担
-        // ★BJ325：d370 蓝增亮支活 → 预乘对两步（cRGB=(num,num,num9)/cA=num,XNA 精确）;
-        //  缺省支维持 source-over 直绘（=cRGB=(num,num,num) 恒等式,零行为面）
-        if (!xnaColor && !bodyTint370) {
+        // ★BJ-C1 F1（2026-10-06）：516 日耀耀斑本体恒量支重建模（判谳级）——原版
+        //  GetAlpha 在 NPC.cs:94667-94670 恒量支早退 `type==516 → new Color(alpha,
+        //  alpha,alpha,alpha)`（alpha=0-255 字节域,AI_009 alpha+=40 封顶 220 :21466/
+        //  SetDefaults 0 :15436）→ 本体=tex×(α/255) 恒量不吃光（缺省尾 (255−α)/255
+        //  淡出与格光乘全不达）。旧实现按缺省族 ga=(1−α/255)=恒态 0.137（透底 6.3 倍:
+        //  0.86275/0.137）且画进实体层被 compositeLight 乘光（暗处核心欠亮）——双病
+        //  同根。修=本体不进实体层（capture→return,270/45 判例同构）,当帧变换捕获
+        //  入 npcWhiteLiftQueue（ga=spawnAlpha/255 恒量档,7d' 光照合成后 source-over
+        //  复绘 s·t+bg·(1−s·t)=原版逐字）;出生 ramp 期 ga=α/255 随 AI 逐拍上升
+        //  （原版本体即 0→0.863 淡入）。层序=7d' 槽在玩家之上（BJ504/270 既有偏差
+        //  惯例同槽,登记）。罩/vel4 加算层仍走 flare 收集（7d''' 消费,不变）。
+        if (e.vanillaId === 516) {
+          this.npcWhiteLiftQueue.push({
+            vid: 516, tex: 'vanilla/NPC_516.png',
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            ga: Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
+          });
+        } else if (!xnaColor && !bodyTint370) {
           if (boost370) {
             const mR = Math.round(255 * boost370.num);
             const mB = Math.round(255 * boost370.num9);
@@ -11118,7 +11081,10 @@ export class Renderer {
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）。
         // debuff 染色乘区（GetNPCColorTintedByBuffs,1457 :92142）已在上方并入 drawColor
-        if (drawColor && drawColor[3] > 0) {
+        // ★BJ-C1 F1：516 不进本链——原版染色在 GetAlpha【之前】并入 npcColor
+        //  （Main.cs:23170）,而 516 GetAlpha 恒量支整体弃用输入色 → debuff 染色
+        //  对本体无效（恒量不吃光定义面）。
+        if (e.vanillaId !== 516 && drawColor && drawColor[3] > 0) {
           if (xnaColor) {
             // ★单张合成（base+color 两遍恒等,见 xnaCombined 长注）——α=occ 使
             //   空气背景 0.417 透出保留（三步 lighter 方案 α 钳 1 丢失它=过暗残因）
@@ -11750,13 +11716,26 @@ export class Renderer {
    *  num = base + |GetAlpha(npcColor)−(0.5,0.5,0.5)|·mult —— 493 GlowMask132/
    *  507[143]/422[149] = 4+|·|·4；517[162] = 2+|·|·9（:24509 满光档/黑光档
    *  length 恒 0.866、偏色档 0.5-0.87 连续）；★BJ510 516 日耀耀斑 = 0.5+|·|·0.5
-   *  （:26604 num288,Main.cs:26600-26612 亲读）。GetAlpha = 格光色 ×(255−α)/255
-   *  （NPC.cs:94549-94556;塔 SetDefaults 无 alpha 行=0 → ×1;516 alpha 恒 220 →
-   *  ×0.137 必须进模——★BJ510 alphaRaw 形参）。本仓 alpha 获取面 =
-   *  lighting.lightAt（塔心格,0-255 归一）。light=null → base（光照未就绪保守档）。 */
+   *  （:26604 num288,Main.cs:26600-26612 亲读）。
+   *  ★BJ-C1 F1（2026-10-06 判谳勘误，推翻本函数 BJ510 旧注）：516 的 GetAlpha
+   *  在 NPC.cs:94667-94670 【恒量支早退】`type==516 → new Color(alpha,alpha,
+   *  alpha,alpha)`——alpha 为 NPC 实例字段（0-255 字节域,AI_009 alpha+=40 封顶
+   *  220 :21466-21469/SetDefaults alpha=0 :15436），根本走不到缺省尾 (255−α)/255
+   *  淡出式（BJ510 旧注"516 alpha 恒 220 → ×0.137 必须进模"系把缺省族公式误套
+   *  到早退支=缺省族误建模）。恒量 tint=(α,α,α,α)/255 与格光【无关】→ num288
+   *  只随 alphaRaw：恒态 220 → 0.5+|0.86275−0.5|·√3·0.5 = 0.81412 恒值（原版
+   *  恒 0.814——旧式随光照摆动 0.681~0.75=包络反向/欠半径）。塔族（493/507/
+   *  422/517）仍走缺省族=格光色 ×(255−α)/255（SetDefaults 无 alpha 行=0 → ×1;
+   *  本仓 alpha 获取面 = lighting.lightAt 塔心格 0-255 归一）。light=null →
+   *  base（光照未就绪保守档）。 */
   static npcGlowVel4Num(vid: number, light: readonly [number, number, number] | null, alphaRaw = 0): number {
     const base = vid === 517 ? 2 : vid === 516 ? 0.5 : 4;
     const mult = vid === 517 ? 9 : vid === 516 ? 0.5 : 4;
+    if (vid === 516) {
+      // ★BJ-C1 F1 恒量支：tint=alphaRaw/255 恒量（不读 light,原版 GetAlpha 早退）
+      const a = Math.min(255, Math.max(alphaRaw, 0)) / 255;
+      return base + Math.sqrt(3) * Math.abs(a - 0.5) * mult;
+    }
     if (!light) return base;
     const f = (255 - Math.min(255, Math.max(alphaRaw, 0))) / 255;
     const dr = light[0] * f / 255 - 0.5, dg = light[1] * f / 255 - 0.5, db = light[2] * f / 255 - 0.5;
@@ -12195,10 +12174,13 @@ export class Renderer {
       //  （Main.cs:26600-26612 Bottom 锚定 vel4 族 case 516 亲读）——①本体白罩
       //  Color(255-α,…,255-α)（本体 SetDefaults alpha+=40→220 恒,NPC.cs:15427-15429/
       //  :21466-21469 → 罩 35/255≈0.137）;②本体贴图 vel4 四份 Color(64,64,64,0)
-      //  （恒定不经 GetAlpha/Opacity）×0.25 ≈ 全亮加算本体 = 耀斑可见亮度主体
-      //  （本体仅 13.7% 近隐,缺此层=只剩残影拖尾,用户观感"暗"）。半径 num288 =
-      //  0.5+|GetAlpha(npcColor)−0.5|·0.5（GetAlpha 含 (255−α)/255=0.137 因子,
-      //  npcGlowVel4Num alphaRaw 入模）。旋转 = rCurrentNPC.rotation（AI 侧 visAngle
+      //  （恒定不经 GetAlpha/Opacity）×0.25 ≈ 全亮加算本体 = 耀斑可见亮度主体。
+      //  ★BJ-C1 F1 勘误：本体非"13.7% 近隐"——GetAlpha 恒量支（NPC.cs:94667 早退,
+      //  不走缺省尾）= tex×(α/255)=恒态 0.86275 恒量不吃光;本体复绘已移 7d' 队列
+      //  （ga=spawnAlpha/255,capture→return 判例）,此层只剩罩+vel4 加算面。
+      //  半径 num288 = 0.5+|GetAlpha(npcColor)−0.5|·0.5（GetAlpha=恒量 (α,α,α,α),
+      //  与格光无关 → num 恒 0.81412;npcGlowVel4Num 516 恒量支,light 不读）。
+      //  旋转 = rCurrentNPC.rotation（AI 侧 visAngle
       //  承载,solarFlareAI +0.1/tick）→ 队列 rot 路径消费（本体同枢=实体中心,
       //  bx/by/scale 原样进变换）;固定色层 → 7d''' 光照合成后消费（BJ509 判例域）。
       //  贴图 = 本体 NPC_516.png（非 GlowMask,38×152 4 帧）;残影拖尾已由
@@ -13996,6 +13978,24 @@ export class Renderer {
         ctx.globalCompositeOperation = 'lighter';
         const drawAdd = (src: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
           dx: number, dy: number, key: string) => {
+          // ★E51 刀B（2026-10-06）相位环加亮源与残影环 ghostAdd 同构:GL 会话
+          //  cut+uTint 顶点色乘法（gTint 不进键——hue 漂移零烘焙,旧链 tintedSprite
+          //  键=量化 hue 档持续跨档=E51 定谳的页 churn 主源,1200 帧 323 新键把
+          //  empW 热键集挤出页=结构性 thrash）。cut 画布按 (层,帧) 稳定键幂等驻留
+          //  （empGhostCut 判例）;切片拒接/逃生门 fallback tintedSprite 烘焙原链
+          //  逐位保留（2D 语义）。uTint 连续乘色较烘焙免量化（渲染值取真值,与
+          //  atk8/9 残影环同通道同判例;±1LSB 有界=TileShine 刀2 转正同款登记）。
+          if (!Renderer.empGhostSliceOff) {
+            const cutKey = `empGhostCut|G|${key}`;
+            const cut = this.empGhostCut(cutKey, src.img, src.sx, src.sy, src.sw, src.sh);
+            if (cut && this.markWorldDynamicScratch(cut, cutKey,
+              [gTint[0] / 255, gTint[1] / 255, gTint[2] / 255])) {
+              ctx.globalAlpha = Math.min(1, gA);
+              ctx.drawImage(cut, 0, 0, cut.width, cut.height,
+                -src.sw / 2 + dx, -src.sh / 2 + dy, src.sw, src.sh);
+              return;
+            }
+          }
           const tinted = this.tintedSprite(`empG|${key}`, src, gTint);
           if (!tinted) return;
           ctx.globalAlpha = Math.min(1, gA);
@@ -15904,6 +15904,10 @@ export class Renderer {
   private npcWhiteLiftQueue: Array<{
     vid: number; tex: string; sy: number; sw: number; sh: number;
     cx: number; cy: number; rot: number; mirror: boolean; scale: number; by: number;
+    /** ★BJ-C1 F1：显式复绘 α——缺省走 npcWhiteLiftAlpha(vid)（lerp 白提亮档）,
+     *  恒量支（516 等 GetAlpha 常量覆写早退型）传 ga=alpha/255（220 恒态=0.86275）
+     *  直读,不走 lerp 档。 */
+    ga?: number;
   }> = [];
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
@@ -15982,6 +15986,108 @@ export class Renderer {
   /** 条带拖尾收集（实体段 Arrow/MissileProj 调用——主循环 flushTrailShade 消费） */
   queueTrailShade(spec: TrailSpec): void {
     this.trailShadeQueue.push(spec);
+  }
+
+  /** ★BJ-C1 F4（2026-10-06）7d' 白提亮/恒量复绘消费段方法化（render 内联循环抽出,
+   *  行为零变）：★BJ504 白提亮 40% 复绘消费（395 飞碟核心/519 日耀黏液——
+   *  drawEnemy 收集侧捕获变换,本体同枢重放）source-over α 叠在已乘光画面上,
+   *  a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a) 精确（drawFairyBright 同构判例;相机
+   *  round 吸附,变换值=当帧捕获零漂移）。层序登记：此槽在玩家之上——与 677/668
+   *  既有偏差惯例同槽（原版本体链内=同层,观感面仅重叠实体压盖差）。
+   *  ★BJ-C1 F1：q.ga 显式档=恒量支复绘（516 本体 ga=alpha/255 直读,不走 lerp）。
+   *  队列不清空（帧头 5346 逐帧重建,原语义保持）——recording-ctx 重放锁体裁
+   *  （bj510-reverify.test F4 段）直调本方法断言变换数学。 */
+  private flushNpcWhiteLift(cam: Camera, z: number, viewW: number, viewH: number): void {
+    if (!this.npcWhiteLiftQueue.length) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    ctx.save();
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
+    ctx.imageSmoothingEnabled = false;
+    for (const q of this.npcWhiteLiftQueue) {
+      const imgL = this.atlas?.ensureVImage(q.tex);
+      if (!imgL) continue;
+      ctx.save();
+      ctx.translate(q.cx, q.cy);
+      ctx.rotate(q.rot);
+      ctx.scale(q.scale, q.scale);
+      if (q.mirror) ctx.scale(-1, 1);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
+      ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ-C1 F4（2026-10-06）7d''' 四塔 vel4 残影消费段方法化（render 内联段抽出,
+   *  行为零变；★BJ509 判例域=Color(64,64,64,0)×Opacity 恒定不吃光照,光照合成后
+   *  'lighter' 直绘主画布）。单份（516 残影）/白罩（516 本体）α 因子/旋转承载/
+   *  517 xoff 参数面 BJ109-H/BJ510 账原样纯重放。recording-ctx 重放锁体裁直调。 */
+  private flushTowerGlow(cam: Camera, z: number, viewW: number, viewH: number): void {
+    if (!this.towerGlowQueue.length) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    ctx.save();
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = 'lighter';
+    for (const q of this.towerGlowQueue) {
+      const img2 = this.atlas?.ensureVImage(q.tex);
+      if (!img2) continue;
+      // ★BJ510 516 残影单份（White 基色,本体同枢重放=drawGhostSprite 数学;塔无此支）
+      if (q.single !== undefined) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, q.single));
+        if (q.rot !== undefined) {
+          ctx.save();
+          ctx.translate(q.cx!, q.cy!);
+          ctx.rotate(q.rot);
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+        }
+        continue;
+      }
+      // ★BJ510 516 本体白罩（Color(255-α,…):26601——α 因子,塔无此层）
+      if (q.overlay) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, q.overlay));
+        if (q.rot !== undefined) {
+          ctx.save();
+          ctx.translate(q.cx!, q.cy!);
+          ctx.rotate(q.rot);
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+        }
+      }
+      ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+      // ★BJ509：四向偏移走 npcGlowVel4Offsets 纯函数（与 vel4 收集侧单源）
+      const offs = Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff);
+      if (q.rot !== undefined) {
+        // ★BJ510 旋转承载：本体同枢（实体中心）重放——translate(中心)·rotate·
+        // draw(bx·scale+世界偏移)；世界偏移不随 scale（原版 velocity 项=世界 px）
+        ctx.save();
+        ctx.translate(q.cx!, q.cy!);
+        ctx.rotate(q.rot);
+        for (let k = 0; k < 4; k++) {
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
+            q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
+            q.sw * q.scale!, q.sh * q.scale!);
+        }
+        ctx.restore();
+      } else {
+        for (let k = 0; k < 4; k++) {
+          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+        }
+      }
+    }
+    ctx.restore();
   }
 
   /** ★条带拖尾全亮 flush（2026-09-03 黑椭圆止血/F2 正修,字段注）：

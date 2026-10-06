@@ -1,0 +1,31 @@
+// 调试：绳 tile 213 setTile 是否生效 + 玩家身位行
+import puppeteer from 'puppeteer-core';
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const URL = (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small&swperf=0&dbg2=' + Date.now();
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
+const page = await browser.newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForFunction(() => { const g = window.__swGame; return g && g.player && g.world?.store?.w > 0; }, { timeout: 300000, polling: 500 });
+await new Promise((r) => setTimeout(r, 1200));
+const r = await page.evaluate(() => {
+  const st = window.__swGame.world.store;
+  const out = {};
+  st.setTile(205, 298, 1);
+  out.dirt = st.type[st.idx(205, 298)];
+  st.setTile(205, 298, 213);
+  out.rope = st.type[st.idx(205, 298)];
+  st.setTile(205, 298, 213);
+  out.rope2 = st.type[st.idx(205, 298)];
+  out.inB = st.inBounds(205, 298);
+  out.w = st.w, out.h = st.h;
+  const p = window.__swGame.player;
+  out.tileH = p.h; out.y0 = p.y;
+  out.txAt = Math.floor((p.x + p.w / 2) / 16); out.tyAt = Math.floor((p.y + p.h / 2) / 16);
+  return out;
+});
+console.log(JSON.stringify(r));
+console.log('errors', JSON.stringify(errors.slice(0, 3)));
+await browser.close();
+process.exit(0);

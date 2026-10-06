@@ -37,8 +37,28 @@ export const T = {
 } as const;
 
 export const TILE_DEFS: TileDef[] = [];
-function def(d: Partial<TileDef> & { key: string }): number {
+function def(d: Partial<TileDef> & { key: string; growsOn?: string | null; sapling?: string | null }): number {
   const id = TILE_DEFS.length;
+  if (d.growsOn) MOD_TREE_IDS.add(id);
+  // ★八十一刀:树/苗双向挂(树=sapling 指针;苗=自挂,后注册苗时经 KEY 回查亲树)
+  if (d.growsOn && d.key.startsWith('mod_')) {
+    const growId = TILE_BY_KEY[`mod_${d.key.slice(4).split('_')[0]}_${d.growsOn}`] ?? TILE_BY_KEY[d.growsOn] ?? -1;
+    if (growId >= 0) MOD_TREE_BASE.set(id, growId);
+    if (d.sapling) {
+      const sapId = TILE_BY_KEY[`mod_${d.key.slice(4, d.key.indexOf('_', 4))}_${d.sapling}`];
+      if (sapId !== undefined) MOD_SAPLING_TO_TREE.set(sapId, id);
+    } else {
+      // 自身=苗:回查亲树(sapling 指针指向本键者)
+      const parentKey = Object.keys(TILE_BY_KEY).find((k) => {
+        const td = TILE_DEFS[TILE_BY_KEY[k]];
+        return td && (td as { sapling?: string | null }).sapling === d.key.replace(/^(mod_[a-z0-9]+_)/, '');
+      });
+      if (parentKey) {
+        const pid = TILE_BY_KEY[parentKey];
+        if (pid !== undefined) MOD_SAPLING_TO_TREE.set(id, pid);
+      }
+    }
+  }
   TILE_DEFS.push({
     name: d.key, solid: false, platform: false, decor: false, framed: false,
     opacity: 0, pick: -1, axe: -1, mapColor: '#000', blend: false, ...d, id,
@@ -2248,12 +2268,40 @@ WALL_DEFS.forEach((d) => { if (d) WALL_BY_KEY[d.key] = d.id; });
 // 与 mods/types.ts MOD_TILE_STABLE_MAX(4095)同值镜像——tiles.ts 为叶子数据模块,
 // 不 import mods/types(解耦缝);改值须两处同步(types.ts 是权威)
 const MOD_TILE_STABLE_MAX = 4095;
-export function registerModTile(d: Partial<TileDef> & { key: string }, stableId: number): number {
+/** ★B7 七十九刀:mod 树 id 集(growsOn 声明即树;Game.ts axe 砍伐级联消费) */
+export const MOD_TREE_IDS = new Set<number>();
+
+/** ★B7 八十一刀:mod 树苗→亲树 id 映射(生长触发;registerModTile 双向挂,
+ *  惰性解析防注册序问题——树先苗后按字典序,双挂兜底) */
+export const MOD_SAPLING_TO_TREE = new Map<number, number>();
+export const MOD_TREE_BASE = new Map<number, number>();   // treeId → growsOn tile id
+
+export function registerModTile(d: Partial<TileDef> & { key: string; growsOn?: string | null; sapling?: string | null }, stableId: number): number {
   if (!d.key.startsWith('mod_')) throw new Error(`[mod-tile] key 须 mod_ 前缀: ${d.key}`);
   if (TILE_BY_KEY[d.key] !== undefined) throw new Error(`[mod-tile] 重复注册: ${d.key}`);
   if (!(stableId >= 1030 && stableId <= MOD_TILE_STABLE_MAX)) throw new Error(`[mod-tile] stableId 越段: ${stableId}`);
   if (TILE_INTERNAL_OF_STABLE[stableId] !== 0) throw new Error(`[mod-tile] stableId 冲突: ${stableId}`);
   const id = TILE_DEFS.length;
+  if (d.growsOn) MOD_TREE_IDS.add(id);
+  // ★八十一刀:树/苗双向挂(树=sapling 指针;苗=自挂,后注册苗时经 KEY 回查亲树)
+  if (d.growsOn && d.key.startsWith('mod_')) {
+    const growId = TILE_BY_KEY[`mod_${d.key.slice(4).split('_')[0]}_${d.growsOn}`] ?? TILE_BY_KEY[d.growsOn] ?? -1;
+    if (growId >= 0) MOD_TREE_BASE.set(id, growId);
+    if (d.sapling) {
+      const sapId = TILE_BY_KEY[`mod_${d.key.slice(4, d.key.indexOf('_', 4))}_${d.sapling}`];
+      if (sapId !== undefined) MOD_SAPLING_TO_TREE.set(sapId, id);
+    } else {
+      // 自身=苗:回查亲树(sapling 指针指向本键者)
+      const parentKey = Object.keys(TILE_BY_KEY).find((k) => {
+        const td = TILE_DEFS[TILE_BY_KEY[k]];
+        return td && (td as { sapling?: string | null }).sapling === d.key.replace(/^(mod_[a-z0-9]+_)/, '');
+      });
+      if (parentKey) {
+        const pid = TILE_BY_KEY[parentKey];
+        if (pid !== undefined) MOD_SAPLING_TO_TREE.set(id, pid);
+      }
+    }
+  }
   TILE_DEFS.push({
     name: d.key, solid: false, platform: false, decor: false, framed: false,
     opacity: 0, pick: -1, axe: -1, mapColor: '#000', blend: false, ...d, id,

@@ -221,15 +221,19 @@ try {
   const LEN = setup.len;
   const cx0 = Math.floor(MX / 16) - 1, cx1 = Math.floor((MX + LEN) / 16) + 1;
   const cy0 = Math.floor(MY / 16) - 1, cy1 = Math.floor(MY / 16) + 1;
+  // ★digest 双取协议（2026-10-06 定谳）:首个 full-box digest 的逐 coord chunks.get 会
+  //   对「视口外 ring chunk」兑现 placeholder/底图重建（新 pair 代际）——首取读到的是
+  //   **上一代条目**（游戏不绘,死代际）;第二取才是settled终态（解剖面实证:直读画布
+  //   跨跑逐位稳定,首取不稳）。跨版对拍一律用【第二取】。
   const digests = await page.evaluate(async (b) => {
     const g = window.__swGame;
     const m = await import('/src/render/TileShine.ts');
+    const first = m.shineDebugChunkDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
     const rows = m.shineDebugChunkDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
-    // ★逐 16×16 格芯 byte-sum（差分定位面;mul+add 分面,格芯只读不含溢出带）
-    const cells = await m.shineDebugCellDigests(g.chunks, b.cx0, b.cx1, b.cy0, b.cy1);
-    return { rows, cells };
+    return { first, rows };
   }, { cx0, cx1, cy0, cy1 }).catch((e) => ({ err: String(e).slice(0, 200) }));
   const nz = Array.isArray(digests?.rows) ? digests.rows.filter((x) => x.sum > 0).length : 0;
+  const nzFirst = Array.isArray(digests?.first) ? digests.first.filter((x) => x.sum > 0).length : 0;
   console.log(`digests box cx[${cx0},${cx1}] cy[${cy0},${cy1}] entries=${Array.isArray(digests?.rows) ? digests.rows.length : '-'} nz=${nz}`);
 
   // ---- 债3 格级断行逐位恒等(直证):一次烘完 vs 格序数链断-续,像素校验和对拍 ----
@@ -251,7 +255,7 @@ try {
   await page.screenshot({ path: `${OUT}/${TAG}-settled.png` });
   const rows = await page.evaluate(() => ({ rows: window.__rows, mineStart: window.__mineStart,
     mineDone: window.__mineDone, t0: window.__t0 })).catch(() => null);
-  writeFileSync(`${OUT}/${TAG}.json`, JSON.stringify({ tag: TAG, setup: { ...setup, edits: setup.edits.length }, pre, during, post, settled2, drained, digests, nz, errs: errs.slice(0, 10) }));
+  writeFileSync(`${OUT}/${TAG}.json`, JSON.stringify({ tag: TAG, setup: { ...setup, edits: setup.edits.length }, pre, during, post, settled2, drained, digests, nz, nzFirst, errs: errs.slice(0, 10) }));
   writeFileSync(`${OUT}/${TAG}-digests.json`, JSON.stringify(digests));
   writeFileSync(`${OUT}/${TAG}-rows.json`, JSON.stringify(rows));
 

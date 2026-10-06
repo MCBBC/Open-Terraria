@@ -304,6 +304,11 @@ export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: numb
  *  tileSolid 消费位（净空窗/落地面扫描/旅行商站立柱/螺旋净空）统一走本谓词：
  *  isSolid（已带 flags+致动门）∪ isActive&&TILE_SOLID_TOP_FAMILY（致动平台
  *  nactive=false 原版放行 ✓）。 */
+/** ★B7 一百零八刀:mod 自然生成行(npcId/zone 群系门/water 水门/mult 权重倍)。
+ *  注册=mod 装载期 spawn-chances 数据;消费=Game.trySpawnModEnemy(vanilla 选怪前)。 */
+export interface ModSpawnRule { npcId: number; zone: string | null; water: boolean; mult: number; }
+export const MOD_SPAWN_RULES: ModSpawnRule[] = [];
+
 export function spawnTileSolid(st: TileStore, x: number, y: number): boolean {
   if (st.isSolid(x, y)) return true;
   return st.isActive(x, y) && TILE_SOLID_TOP_FAMILY.has(st.type[st.idx(x, y)]);

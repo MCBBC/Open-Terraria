@@ -43,6 +43,16 @@ export interface ModSystemHooks {
   onWorldUnload?: (game: Game) => void;
 }
 
+/** ★一百零八刀R2:mod 世界生成 pass 注册面(引擎 WorldGen 在 Beaches 后依序执行;
+ *  fn 收 (store, rng, gs),gs.mods.tileIdByKey 供 tile 键解析;引擎零 mod 知识) */
+export interface ModGenPass { name: string; fn: (store: unknown, rng: unknown, gs: unknown) => void; }
+const modGenPasses: ModGenPass[] = [];
+export function registerModGenPass(p: ModGenPass): void {
+  if (modGenPasses.some((x) => x.name === p.name)) throw new Error(`[mod-hooks] genPass 重复注册: ${p.name}`);
+  modGenPasses.push(p);
+}
+export function modGenPassesSnapshot(): readonly ModGenPass[] { return modGenPasses; }
+
 const npcAi = new Map<number, (e: Enemy, game: Game, player: Player | null) => void>();
 const itemUse = new Map<number, (ctx: ModUseCtx) => boolean>();
 const systems: ModSystemHooks[] = [];
@@ -65,6 +75,14 @@ export interface ModProjSpec {
   npcDebuff?: { buff: string; duration: number; chance?: number };
   /** 重力/tick(缺省 0=直线) */
   gravity?: number;
+  /** ★B7 一百零五刀:追踪加速度(向最近敌怪 accel/拍,800px 门,钳速;缺省无) */
+  homing?: number;
+  /** ★B7 一百零六刀:推进加速(沿初速向 accel/拍,钳 maxSpeed) */
+  accelerate?: number;
+  /** 回旋镖:飞行 maxTicks 后返程(向 owner 加速),拾取消亡 */
+  boomerang?: { returnTicks: number; accel: number };
+  /** 环绕:绕出生点半径 r 角速 w(t) 旋转 */
+  orbit?: { radius: number; omega: number };
   /** 寿命 tick(缺省 3600) */
   lifetime?: number;
   /** 穿透次数(缺省 1;≤0=无限穿透) */
@@ -218,6 +236,32 @@ export function getModWavData(): ReadonlyMap<string, ArrayBuffer> { return modWa
 /** B6:NPC 死亡钩注册表(Hive Tumor→Boss 遭遇链面) */
 const onNpcDeath = new Map<number, (e: Enemy, game: Game) => void>();
 
+/** CalPlayer 基建(六十三刀):玩家承伤修正链(仅 mod NPC 进攻面;ModifyHitByNPC 形)。
+ *  fn(ctx) → number=修正后伤(可 0=吞)/undefined=不改。空表零成本。 */
+const modifyHurtByNpc = new Map<string, (ctx: {
+  player: unknown; game: Game; attackerVid: number; dmg: number;
+  contact: boolean;
+}) => number | void>();
+
+export function registerModModifyHurtByNpc(modId: string, fn: (ctx: {
+  player: unknown; game: Game; attackerVid: number; dmg: number; contact: boolean;
+}) => number | void): void {
+  if (modifyHurtByNpc.has(modId)) throw new Error(`[mod-hooks] modifyHurtByNpc 重复注册: ${modId}`);
+  modifyHurtByNpc.set(modId, fn);
+}
+
+export function runModModifyHurtByNpc(
+  player: unknown, game: Game, attackerVid: number, dmg: number, contact: boolean,
+): number {
+  if (attackerVid < MOD_NPC_ID_BASE || modifyHurtByNpc.size === 0) return dmg;
+  let cur = dmg;
+  for (const fn of modifyHurtByNpc.values()) {
+    const r = fn({ player, game, attackerVid, dmg: cur, contact });
+    if (typeof r === 'number' && Number.isFinite(r)) cur = Math.max(0, Math.round(r));
+  }
+  return cur;
+}
+
 export function registerModNpcDeath(npcId: number, fn: (e: Enemy, game: Game) => void): void {
   if (!(npcId >= MOD_NPC_ID_BASE)) throw new Error(`[mod-hooks] npcDeath id 须 ≥${MOD_NPC_ID_BASE}: ${npcId}`);
   if (onNpcDeath.has(npcId)) throw new Error(`[mod-hooks] npcDeath 重复注册: ${npcId}`);
@@ -231,7 +275,52 @@ export function runModOnNpcDeath(vanillaId: number | null | undefined, e: Enemy,
   if (fn) fn(e, game);
 }
 
+/** CalPlayer 基建(六十四刀):mod NPC 接触命中玩家 → 施加声明面 debuff
+ *  (OnHitPlayer AddBuff 形;buff=注册期已解析的 9000+ 域 id;chance 掷)。 */
+const npcOnHitPlayerBuff = new Map<number, { buffId: number; duration: number; chance?: number }>();
+
+export function registerModNpcOnHitPlayerBuff(
+  npcId: number, spec: { buffId: number; duration: number; chance?: number },
+): void {
+  if (npcId < MOD_NPC_ID_BASE) throw new Error(`[mod-hooks] onHitPlayer npcId 须 ≥${MOD_NPC_ID_BASE}: ${npcId}`);
+  if (npcOnHitPlayerBuff.has(npcId)) throw new Error(`[mod-hooks] onHitPlayer 重复注册: ${npcId}`);
+  npcOnHitPlayerBuff.set(npcId, spec);
+}
+
+export function runModOnHitPlayerBuff(
+  vanillaId: number | null | undefined, player: { buffs: { apply(id: number, seconds: number): void } }, game: unknown,
+): void {
+  if (vanillaId === null || vanillaId === undefined || vanillaId < MOD_NPC_ID_BASE || npcOnHitPlayerBuff.size === 0) return;
+  const spec = npcOnHitPlayerBuff.get(vanillaId);
+  if (!spec) return;
+  if (spec.chance !== undefined && Math.random() >= spec.chance) return;
+  player.buffs.apply(spec.buffId, spec.duration);
+}
+
 /** 近战命中结算缝(受理命中后):mod 物品带 onHit 钩时调用;空表零成本。 */
+/** CalPlayer 基建(一百零四刀):玩家命中敌怪伤害修正链(ModifyHitNPC 形;资源增幅消费)。
+ *  fn(ctx) → number=倍率(1=不变);多钩连乘。空表=1。 */
+const modifyHitNpc = new Map<string, (ctx: {
+  player: unknown; game: Game; vid: number; dmg: number;
+}) => number | void>();
+
+export function registerModModifyHitNpc(modId: string, fn: (ctx: {
+  player: unknown; game: Game; vid: number; dmg: number;
+}) => number | void): void {
+  if (modifyHitNpc.has(modId)) throw new Error(`[mod-hooks] modifyHitNpc 重复注册: ${modId}`);
+  modifyHitNpc.set(modId, fn);
+}
+
+export function runModModifyHitNpc(player: unknown, game: Game, vid: number, dmg: number): number {
+  if (modifyHitNpc.size === 0) return dmg;
+  let mult = 1;
+  for (const fn of modifyHitNpc.values()) {
+    const r = fn({ player, game, vid, dmg });
+    if (typeof r === 'number' && Number.isFinite(r)) mult *= r;
+  }
+  return dmg * mult;
+}
+
 export function runModOnHitNpc(
   vid: number | undefined, e: Enemy, game: Game, ctx: { damage: number; crit: boolean; killed: boolean },
 ): void {
@@ -328,4 +417,8 @@ export function _resetModHooksForTests(): void {
   projSpecs.clear(); projRegs.length = 0; modBuffTicks.clear();
   modBuffNpcTicks.clear();
   onHitNpc.clear();
+  modifyHurtByNpc.clear();
+  npcOnHitPlayerBuff.clear();
+  modifyHitNpc.clear();
+  modGenPasses.length = 0;
 }

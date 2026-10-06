@@ -24,6 +24,11 @@ export interface VanillaItemStat {
 
   str?: number;    // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
 
+  // ★B6 六十六刀:mod 配饰 UpdateEquip 加法面(引擎 PlayerEquipStats 同名域;
+  //  dmgX=加法 +0.05 形(:2386 实锤);读侧=聚合器配饰环,余段登记)
+  dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
+  critMelee?: number; critRanged?: number; critMagic?: number;
+  moveMult?: number; endurance?: number;
 }
 
 const STATS = statsJson as Record<string, VanillaItemStat>;

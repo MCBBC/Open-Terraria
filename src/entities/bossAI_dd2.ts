@@ -1,5 +1,6 @@
 // DD2/旧日军团 + 沙漠族 AI 家族 1:1 移植（Terarria1456, 1.4.5.6）：
-//   aiStyle 93  荷兰飞盗船 491            NPC.cs:40918-41028（首帧生成 4×荷兰大炮 492
+//   aiStyle 93  荷兰飞盗船 491            NPC.cs:39245-39355（★BJ-C6/F4 1457 值,1456 树
+//                                          为 :40918-41028;首帧生成 4×荷兰大炮 492
 //                                          （ai[0..3]=炮位,出生间隔 ai[3]=60*i）;炮全灭 →
 //                                          StrikeNPCNoInteraction(9999) 自毁;1/300t 船口
 //                                          跳海盗 212-215(vy-8.01);贴地巡航保持离地 350-450px;
@@ -105,7 +106,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 // 682 电弧 4 帧竖条(projFrames=4,Main.cs:8482)仍按整条绘制。
 /** 原版 localAI[0..3]（Enemy 只有 ai0-ai3 对应 ai[],localAI 独立 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
-/** 491 渲染帧源（localAI[3] 0..63 循环，:40971-40974）——渲染侧只读访问 */
+/** 491 渲染帧源（localAI[3] 0..63 循环，1457 :39287-39290;1456 树 :40971-40974）——渲染侧只读访问 */
 export const dutchmanAnim = (e: Enemy): number => localAI.get(e)?.[3] ?? 0;
 /** 568/569 枯萎兽渲染态只读（渲染侧不落 localAI 字段 → 同 dutchmanAnim 出口）：
  *  [0]=localAI[0] 灵气计数（死亡紫魂环驱动，Main.cs:26130 num322；
@@ -578,11 +579,12 @@ function simpleFlyMove(e: Enemy, dvx: number, dvy: number, acc: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// AI_093 荷兰飞盗船 491（NPC.cs:40918-41028）
+// AI_093 荷兰飞盗船 491（1457 NPC.cs:39245-39355；★BJ-C6/F4 勘正——曾锚 1456 树
+// :40918-41028,1457 重排后整块前移 1673 行）
 // ---------------------------------------------------------------------------
 export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = dd2LocalAI(e);
-  // ---- 首帧生成 4 炮（:40920-40936）：ai[0..3]=炮位 ai[3]=60*i 出生错峰 ----
+  // ---- 首帧生成 4 炮（1457 :39247-39259）：ai[0..3]=炮位 ai[3]=60*i 出生错峰 ----
   if (!e.bInit) {
     e.bInit = true;
     e.ai0 = -1; e.ai1 = -1; e.ai2 = -1; e.ai3 = -1;
@@ -593,7 +595,7 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
         c.ai0 = e.id;      // 原版 ai[0] = 船 whoAmI（锚定引用）
         c.ai1 = i;         // 槽位 0-3（决定船体偏移 -122+68*i）
         c.ai2 = 0;
-        c.ai3 = 60 * i;    // 装填错峰（:40928 60*num1464）
+        c.ai3 = 60 * i;    // 装填错峰（1457 :39252 60*num1355）
         c.despawnTimer = 600; // timeLeft = 600
         if (i === 0) e.ai0 = c.id;
         else if (i === 1) e.ai1 = c.id;
@@ -603,7 +605,7 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
     }
   }
   e.despawnTimer = 750;    // netAlways：不入 CheckActive 消退（入侵旗舰）
-  // ---- 炮位存活盘点（:40938-40957）：全灭 → 自毁 ----
+  // ---- 炮位存活盘点（1457 :39260-39277,自毁 :39275 StrikeNPCNoInteraction(9999)）：全灭 → 自毁 ----
   const slots = [e.ai0, e.ai1, e.ai2, e.ai3];
   const enemies = game.enemies() as Enemy[];
   let anyAlive = false;
@@ -627,7 +629,7 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
   // ★R23b 系统性修:iframes=2 近似改真旗标(SetDefaults :14581→1458 :14676,
   // pierce===1 单发弹曾可直伤「恒无敌」船体)
   e.dontTakeDamage = true;   // 炮在世恒无敌
-  // ---- 海盗跳舱（:40951-40958）：1/300t 从船口弹射 212-215。
+  // ---- 海盗跳舱（1457 :39278-39286）：1/300t 从船口弹射 212-215。
   //      出生位 = Center + ((rand−0.5)×(w−70), (rand−0.5)×20 − h/2 − 20) 随船 rotation 旋转
   //      （曾直接落船心 = 视觉瞬移）;速度 = ((rand−0.5)×5, −8.01) + 船速 ----
   if (rnd(300) === 0) {
@@ -645,14 +647,14 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
       p.despawnTimer = 600;
     }
   }
-  // ---- 动画计数（:40971-40974 localAI[3] 64t 循环,渲染帧源） ----
+  // ---- 动画计数（1457 :39287-39290 localAI[3] 64t 循环,渲染帧源） ----
   x[3] += 1;
   if (x[3] >= 64) x[3] = 0;
-  // ---- 索敌（:40975 TargetClosest） ----
+  // ---- 索敌（1457 :39291 TargetClosest） ----
   const tx = player && !player.dead ? player.cx : e.cx;
   const ty = player && !player.dead ? player.cy : e.cy;
   if (player && !player.dead) e.facing = tx > e.cx ? 1 : -1;
-  // ---- 贴地巡航（:40976-41005）：前方 10 格列扫描地面,保持离地 350-450px ----
+  // ---- 贴地巡航（1457 :39292-39333）：前方 10 格列扫描地面,保持离地 350-450px ----
   const st = game.world.store;
   const colX = clamp(Math.floor(e.cx / TILE) + sign(e.vx) * 10, 1, st.w - 2);
   const colY = Math.floor((e.y + e.h) / TILE);
@@ -676,13 +678,13 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
   } else {
     e.vy *= 0.95;
   }
-  // ---- 水平逼近（:41006-41010）：距 ≥300px 且未达 6 速 → 朝向 +0.06 ----
+  // ---- 水平逼近（1457 :39334-39338）：距 ≥300px 且未达 6 速 → 朝向 +0.06 ----
   const dxp = tx - e.cx;
   if (Math.abs(dxp) >= 300 && (Math.abs(e.vx) < 6 || sign(e.vx) !== e.facing)) {
     e.vx += e.facing * 0.06;
   }
-  e.visAngle = e.vx * 0.025;                    // rotation = vx*0.025（:41011）
-  e.facing = e.vx === 0 ? e.facing : -sign(e.vx); // spriteDirection = -sign(vx)（:41012）
+  e.visAngle = e.vx * 0.025;                    // rotation = vx*0.025（1457 :39339）
+  e.facing = e.vx === 0 ? e.facing : -sign(e.vx); // spriteDirection = -sign(vx)（1457 :39340）
   // ---- 船底烟尘（:39343-39356 dust 228）:每 t 循环 2 次、各 50% 概率
   //      （期望 1/t;曾 1 次×50%=量减半,烟迹稀薄） ----
   for (let i = 0; i < 2; i++) {

@@ -58,6 +58,17 @@ try {
     return { animCells: found, tick: anim.tileAnim.tick };
   });
   console.log('setup:', JSON.stringify(setup));
+  // ★atlas 静止门:vimages.size 连续 3s 不变 = 装载完成(fps 含装载代际,digest 必须在
+  //   静止后取——否则测到的是「装载中」的合法瞬态,不是产品不稳定性)
+  await page.evaluate(() => new Promise((res) => {
+    const g = window.__swGame;
+    let last = -1, stable = 0;
+    const iv = setInterval(() => {
+      const sz = g.renderer.atlas.vimages.size;
+      if (sz === last) { stable++; if (stable >= 20) { clearInterval(iv); res(null); } }   // 10s 静止
+      else { stable = 0; last = sz; }
+    }, 500);
+  }));
   await page.evaluate(() => new Promise((res) => {
     let k = 0;
     function tick() { if (++k >= 120) { res(null); return; } requestAnimationFrame(tick); }
@@ -66,6 +77,15 @@ try {
   const out = await page.evaluate(async () => {
     const g = window.__swGame;
     const m = await import('/src/render/TileShine.ts');
+    // 晚到重烘排干:pending==0 且 bakes 连续 2s 不涨
+    await new Promise((res) => {
+      let lastB = -1, stable = 0;
+      const iv = setInterval(() => {
+        const s2 = m.shineStats;
+        if (s2.pending === 0 && s2.bakes === lastB) { stable++; if (stable >= 4) { clearInterval(iv); res(null); } }
+        else { stable = 0; lastB = s2.bakes; }
+      }, 500);
+    });
     const anim = await import('/src/render/TileAnim.ts');
     // 相机 chunk ±2 环(与 _shine-debt-ab 盒同域)
     const bx = Math.floor(g.camera.x / 256), by = Math.floor(g.camera.y / 256);
@@ -74,10 +94,100 @@ try {
     const fps = [];
     for (let cy = by - 2; cy <= by + 2; cy++) {
       for (let cx = bx - 2; cx <= bx + 2; cx++) {
-        fps.push(m.shineFpPrefix(g.world, cx, cy, 16, 0, 0));
+        fps.push(m.shineFpPrefix(g.world, g.renderer.atlas, cx, cy, 16, 0, 0));
       }
     }
-    return { digests, fps, tick: anim.tileAnim.tick, frames: m.shineStats.frames };
+    // ★digest 解剖面:25 chunk 逐画布拆解(mul sum/add sum/身份/slotsLen),跑两遍
+    const anatomy = [];
+    const anatomyPass = (tag) => {
+      const rows2 = [];
+      for (let cy = by - 2; cy <= by + 2; cy++) {
+        for (let cx = bx - 2; cx <= bx + 2; cx++) {
+          const pair = g.chunks.get(cx, cy);
+          const slots = m.shineDebugSlotsForTest(pair);
+          if (!slots) { rows2.push({ cx, cy, tag, empty: true }); continue; }
+          for (const s of slots) {
+            const e = s.e;
+            const same = e.mul !== undefined && e.mul === e.add;
+            const sumOf = (c) => {
+              if (!c) return -1;
+              const d = c.getContext('2d').getImageData(0, 0, 256, 256).data;
+              let t = 0; for (let i = 0; i < d.length; i++) t += d[i];
+              return t;
+            };
+            rows2.push({ cx, cy, tag, q: s.q, slotsLen: slots.length, mulSum: sumOf(e.mul),
+              addSum: e.add ? sumOf(e.add) : -1, sameMulAdd: same, done: e._resumeRow === undefined });
+          }
+        }
+      }
+      return rows2;
+    };
+    anatomy.push(anatomyPass('p1'));
+    // 中间隔一次官方 digest(其 chunks.get 副作用受检)
+    const midDigest = m.shineDebugChunkDigests(g.chunks, bx - 2, bx + 2, by - 2, by + 2);
+    anatomy.push(anatomyPass('p2'));
+    // ★外科面:两个差异 chunk 的逐格(16×16 tile)印迹 byte-sum + store 内容快照
+    const surgical = {};
+    for (const [scx, scy] of [[97, 44], [98, 44]]) {
+      const slotsKey = scx + ',' + scy;
+      // 经 shineDebugChunkDigests 拿不到画布本体——直接走内部不便;改从
+      // shineCache 经 chunk pair 取 entry 画布读格芯
+      const st = g.world.store;
+      const pair = g.chunks.get(scx, scy);
+      const cache = await import('/src/render/TileShine.ts');
+      const slots = cache.shineDebugSlotsForTest(pair);
+      const cells = [];
+      if (slots && slots[0]) {
+        const cv = slots[0].e.mul;
+        if (cv) {
+          const d = cv.getContext('2d').getImageData(0, 0, 256, 256).data;
+          for (let ty = 0; ty < 16; ty++) {
+            for (let tx = 0; tx < 16; tx++) {
+              let s2 = 0;
+              for (let py = 0; py < 16; py++) {
+                for (let px = 0; px < 16; px++) {
+                  const o = ((ty * 16 + py) * 256 + tx * 16 + px) * 4;
+                  s2 += d[o] + d[o + 1] + d[o + 2] + d[o + 3];
+                }
+              }
+              const i = st.idx(scx * 16 + tx, scy * 16 + ty);
+              cells.push([s2, st.type[i], st.frameX[i], st.frameY[i], st.paint[i], st.half[i], st.slope[i], st.wire[i], st.coat[i]]);
+            }
+          }
+        }
+      }
+      // 全画布 256 行 byte-sum（溢出带定位面）+ add 层同读
+      const rowSums = [], rowSumsAdd = [];
+      if (slots && slots[0]) {
+        for (const cv of [slots[0].e.mul, slots[0].e.add]) {
+          const tgt = cv === slots[0].e.mul ? rowSums : rowSumsAdd;
+          if (!cv) { tgt.push(-1); continue; }
+          const d = cv.getContext('2d').getImageData(0, 0, 256, 256).data;
+          for (let ry = 0; ry < 256; ry++) {
+            let s2 = 0;
+            for (let rx = 0; rx < 256; rx++) {
+              const o = (ry * 256 + rx) * 4;
+              s2 += d[o] + d[o + 1] + d[o + 2] + d[o + 3];
+            }
+            tgt.push(s2);
+          }
+        }
+      }
+      // 对账:同一 evaluate 内重算 slots[0] 全画布 sum + pair 身份,与 digest 行对拍
+      let localSum = null, slotsLen = slots ? slots.length : -1, pairTag = pair ? pair.cell : null;
+      if (slots && slots[0] && slots[0].e.mul) {
+        const d = slots[0].e.mul.getContext('2d').getImageData(0, 0, 256, 256).data;
+        localSum = 0;
+        for (let i = 0; i < d.length; i++) localSum += d[i];
+      }
+      // 微实验:同 evaluate 内 fresh digest(单 chunk) vs 直读;pair 身份一致性
+      const pairAgain = g.chunks.get(scx, scy);
+      const fresh = m.shineDebugChunkDigests(g.chunks, scx, scx, scy, scy);
+      surgical[slotsKey] = { hasEntry: !!(slots && slots[0]), hasMul: !!(slots && slots[0] && slots[0].e.mul),
+        cells, rowSums, rowSumsAdd, localSum, slotsLen, pairTag,
+        pairSameAsReGet: pairAgain === pair, freshRow: fresh[0] };
+    }
+    return { digests, midDigest, anatomy, fps, tick: anim.tileAnim.tick, frames: m.shineStats.frames, surgical };
   });
   writeFileSync(`${OUT}/${TAG}.json`, JSON.stringify({ setup, ...out }));
   console.log('digest rows:', out.digests.length, 'tick:', out.tick, 'frames:', out.frames);

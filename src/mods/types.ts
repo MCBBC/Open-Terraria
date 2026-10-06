@@ -59,8 +59,13 @@ export interface ModItemContent {
      *  coins=按 NPC 价值掷币(CoinsBasedOnNPCValue;值=本 mod 键或原版 npcId) */
     bagLoot?: Array<{ item?: string | number; coins?: string | number; min?: number; max?: number; chance?: number }>;
   };
-  /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交 */
-  stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1; life?: number };
+  /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交;
+   *  life=生命回复(hpPerSec=life/2);dmg 各系/crit 各系/moveMult/endurance=UpdateEquip
+   *  加法形(六十六刀;引擎 PlayerEquipStats 同名面,读侧=聚合器环) */
+  stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1; life?: number;
+    dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
+    critMelee?: number; critRanged?: number; critMagic?: number;
+    moveMult?: number; endurance?: number };
   /** P4:旅程研究所需献祭数(缺省=不可研究) */
   research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
@@ -94,6 +99,12 @@ export interface ModTileContent {
   styles?: number;
   /** 破坏掉落:本 mod 物品键;缺省=不掉落 */
   dropItem?: string;
+  /** ★B7 七十八刀:树数据面(GrowsOnTileId 生长锚/树苗 tile 键;引擎树砍链接=余段) */
+  growsOn?: string | null;
+  sapling?: string | null;
+  /** ★一百零八审计修:群系旗声明(键→'astral'/'sulphurous' 等;装载期注册
+   *  registerModBiomeFlag,SceneMetrics 派生 modBiomes 旗) */
+  biomeFlag?: string;
 }
 
 /** L1 NPC 内容(content/npcs/*.json)。原版 VanillaNpc 形子集;id 走 800+。
@@ -120,8 +131,15 @@ export interface ModNpcContent {
   DeathSound?: string | null;
   /** 价值(金币掷,原版 npcvalue 语义) */
   value?: number;
-  /** 简单掉落表(chance 0-1;缺省 1)。item:本 mod 物品键 或 原版 vid 数字串(P7) */
-  drops?: Array<{ item: string | number; min?: number; max?: number; chance?: number }>;
+  /** 简单掉落表(chance 0-1;缺省 1)。item:本 mod 物品键 或 原版 vid 数字串(P7)。
+   *  bossBag:1=专家档掉袋(BossBag=DropBasedOnExpertMode(DropNothing,1×bag);零值袋) */
+  drops?: Array<{ item: string | number; min?: number; max?: number; chance?: number; bossBag?: number }>;
+  /** ★CalPlayer 基建(六十四刀):接触命中玩家施加 debuff(OnHitPlayer AddBuff 形;
+   *  buff=本 mod sw.buff 键,duration=秒,chance 0-1 缺省 1;实扣>0 才授) */
+  onHitPlayer?: { buff: string; duration: number; chance?: number };
+  /** ★B7 一百零八刀:自然生成行(zone=vanilla 群系键;water=水域门;mult=权重倍;
+   *  无声明=不自然刷。灾厄群系门件=世界生成接入后启用) */
+  spawn?: { zone?: string; water?: boolean; mult?: number };
   /** ★P8:Boss 位(血条/Boss 槽/掉落锚定;三消费点 VANILLA_BOSS_IDS.has 直亮) */
   boss?: boolean;
   /** ★P8:SetDefaults alpha 语义(出生透明度/渐显;透传 VanillaNpc.alpha) */

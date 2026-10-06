@@ -555,9 +555,9 @@ export class PrismProj extends Entity {
     //   位置插入 DrawHeldProj）= 身体【前】。实体循环先于 drawPlayer，直画会被纸娃娃
     //   盖住（2026-08-24 用户报"身上没棱镜"）→ 登记 Renderer.prismCrystalQueue，
     //   drawPlayer 后冲刷（世界变换仍活，闭包世界坐标直画）；无队列环境（测试）直画
-    const paint = () => {
+    const paint = (ctxOverride?: CanvasRenderingContext2D) => {
       const img = projSprite(633);
-      const ctx = r.ctx;
+      const ctx = ctxOverride ?? r.ctx;
       if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
       const fh = img.height / 5;
       const f = this.crystalFrame;
@@ -573,14 +573,30 @@ export class PrismProj extends Entity {
       const dx = this.cx + this.dirX / al * 16;
       const dy = this.cy + this.dirY / al * 16;
       ctx.save();
+      // ★BJ-C1 F3：α 面=GetAlpha :80834-80837 `603||633 → Color(255,255,255,200)`
+      //  恒 A=200（PROJ_ALPHA_MOD[633] fixed 档同源）→ ga=200/255（旧直画无 α 面
+      //  =满显偏差,随刀对齐）;RGB 恒白不读格光=光照无关复绘域。
+      ctx.globalAlpha = 200 / 255;
       ctx.translate(dx, dy);
       ctx.rotate(rot);
       ctx.drawImage(img, 0, Math.round(f * fh), img.width, Math.round(fh),
         -img.width / 2, -fh / 2, img.width, fh);
       ctx.restore();
     };
+    // ★BJ-C1 F3（2026-10-06,代表判别站）：633 晶体 GetAlpha :80834-80837
+    //  `603||633 → new Color(255,255,255,200)`（PROJ_ALPHA_MOD[633] fixed 档）——
+    //  RGB 恒白【不读格光色】=光照无关。旧位 prismCrystalQueue 冲刷在 drawPlayer 后/
+    //  compositeLight（Renderer.ts :6587）【前】=晶体被全屏乘光压暗（暗腔同病,
+    //  BJ529 探针 k=0.325 域）→ 改道 projFullbrightQueue（7f 光照合成后主画布
+    //  source-over 复绘=原版逐字）。层序=玩家之上（270/45/BJ504 同槽惯例,登记;
+    //  持物层"身体前"语义由先于 7f 的 drawPlayer 保序）。无全亮队列环境
+    //  （测试/旧宿主）回退 prismCrystalQueue→直画原路径。
+    const fbSink = (r as unknown as {
+      queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+    }).queueProjFullbright;
+    if (typeof fbSink === 'function') { fbSink((c) => paint(c)); return; }
     const queue = (r as unknown as { prismCrystalQueue?: Array<() => void> }).prismCrystalQueue;
-    if (queue) { queue.push(paint); return; }
+    if (queue) { queue.push(() => paint()); return; }
     paint();
   }
 }

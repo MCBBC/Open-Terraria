@@ -53,6 +53,7 @@
 //  971/975 飞行段原版本体即零伤害结算面（vanilla Damage() 无 971/975 特案,两弹型
 //  也不在本仓任何结算站出现）⇒ "无可接面"判定维持留档,不接线。
 import type { GameHooks } from '../entities/types';
+import { heldItemCritBonus } from '../entities/proj1457';   // ★BJ-C2/F13 持械折入单源（函数声明环,运行时调用安全）
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
 import { debuffWriteAllowed } from '../entities/projStatus';
@@ -177,14 +178,20 @@ export function trySnapStrike(
   //  （<0 阈值 → rand<threshold 恒假,Math.random() 抽取次数不变）。
   let strikeClass: ProjClass | null = null;
   let strikeCritPct = -0.01;                    // 负百分点 = 原版无掷档（1132）
+  // ★BJ-C2/F13（2026-10-06）持械折入补位：掷面 meleeCrit/rangedCrit 含 Player.cs
+  //  :25712-14 逐帧链入的持械 item.crit+crt（三系无条件,BJ486③ 同源定谳）——
+  //  owner.critChance(kind) 只载装备/buff 面,补 heldItemCritBonus（proj1457 单源）。
+  //  现消费面=pulse.critChance>0 路由门+rollVanillaHitCrit 命中拍动态（折入已在
+  //  掷面动态承载）,本值补齐=判别面阈值同源（测试/调试读数不再缺词缀半边）。
+  const heldFold = heldItemCritBonus(owner.inv.heldItem());
   if (kind === 0) {
     strikeClass = 'ranged';                     // 1121 数据面同值（static ranged）
-    strikeCritPct = 4 + owner.critChance('ranged');
+    strikeCritPct = 4 + owner.critChance('ranged') + heldFold;
   } else if (kind === 1) {
     const mC = owner.critChance('melee'), rC = owner.critChance('ranged');
     const meleeWin = mC > rC;                   // flag4（:14410）
     strikeClass = meleeWin ? 'melee' : 'ranged';
-    strikeCritPct = 4 + (meleeWin ? mC : rC);
+    strikeCritPct = 4 + (meleeWin ? mC : rC) + heldFold;
   }
   const add = (e: unknown) =>
     (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');

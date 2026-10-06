@@ -145,7 +145,12 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   // SW-I1 2026-09-03：帧通道（Main.cs:34923 projFrames>1 通支）——source=(0,帧高×frame,
   // 贴图宽,帧高−1)（SW-L1 2026-09-03 I-4：:35047 Rectangle num482−1 底行 shave）、
   // dest 高=帧高−1 保纵横、origin/锚点公式不变。frames=Main.projFrames[id]。
-  frame = -1, frames = 0): void {
+  frame = -1, frames = 0,
+  // ★BJ-C1 F2（2026-10-06）：capture 槽（270/45 BJ529/530 判例同构）——提供时本函数
+  // 不落实体层,把同一绘制序列打包成闭包交调用方（projFullbrightQueue 光照合成后
+  // source-over 复绘=常量色弹面;单源=变换数学仍在本函数,零复制）。19 Flamarang/
+  // 35 Sunfury 恒白面（Projectile.cs:81465-81468 Color.White）经此收编。
+  capture?: (fn: (ctx: CanvasRenderingContext2D) => void) => void): void {
   // drawSize=绘制尺寸(0/-1=贴图原生尺寸×scale——F1/RB28 前缺省 0 曾取碰撞盒 w;
   // -1 为历史显式写法,与缺省 0 同义——原版投射物绘制语义,爆炸族雷管 10×32 竖条
   // 等非方贴图必须走原生尺寸否则被拉方)
@@ -165,6 +170,9 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
       : e.w;
   const ctx = r.ctx;
   if (!ctx) return;
+  // ★BJ-C1 F2：绘制序列封包（形参 ctx 遮蔽外层 const——绘制数学逐字原位,零复制）;
+  // 无 capture 时行为与旧版逐位同相（直接 paint(ctx)）。
+  const paint = (ctx: CanvasRenderingContext2D): void => {
   const img = img0;
   const hasImg = !!(img && (img.width > 0) && img.width > 0);
   const W = hasImg ? img!.width : dw;
@@ -221,6 +229,9 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
     ctx.fillRect(-dwS / 2, -dwS / 2, dwS, dwS);
   }
   ctx.restore();
+  };
+  if (capture) { capture(paint); return; }
+  paint(ctx);
 }
 
 /** 同敌命中去重 + 冷却的通用伤害结算。
@@ -1006,6 +1017,22 @@ export class Boomerang extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
+    // ★BJ-C1 F2（2026-10-06,BJ529/530 同族普查收编）：19 火焰回旋镖 Flamarang——
+    //  GetAlpha :81465-81468 `34||35||15||19||44||45 → Color.White` 恒满亮【不读
+    //  alpha/光照色】（本仓 alpha 恒传 1=α 面本已同相;光照面=画进实体层被
+    //  compositeLight 全屏乘光压暗,BJ529 探针 _bj529-skull-ab 暗腔 k=0.325 同病）。
+    //  承接=BJ530 判例同构：capture→本体不进实体层,projFullbrightQueue 光照合成
+    //  后 source-over 复绘=原版逐字（drawProj capture 槽=变换数学单源）。层序=
+    //  玩家/NPC 之上（270/45/BJ504 同槽惯例,登记）。
+    if (this.projId === 19) {
+      drawProj(r, cam, this, this.projId, this.rot, '#C0A060', 1, 0, false, false, this.visScale,
+        -1, 0, (fn) => {
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.(fn);
+        });
+      return;
+    }
     drawProj(r, cam, this, this.projId, this.rot, '#C0A060', 1, 0, false, false, this.visScale);
   }
 
@@ -4503,6 +4530,25 @@ export class FlailProj extends Entity {
     //  系件4 落刀前状态,判别面锁 tests/bj393-weaponproj-anchor-accept.test.ts。
     // spriteDirection=-1 → 水平翻转（M.cs:29827-29831 FlipHorizontally;:41479-41483
     // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale
+    // ★BJ-C1 F2（2026-10-06,BJ529/530 同族普查收编）：35 太阳怒 Sunfury——
+    //  GetAlpha :81465-81468 `34||35||15||19||44||45 → Color.White` 恒满亮【不读
+    //  alpha】（SetDefaults α=100 :1285 死值——旧式 ga=(255−100)/255≈0.61 半透=病）,
+    //  【不读光照色】=光照无关弹面（实体层乘光同病,BJ529 探针 _bj529-skull-ab）。
+    //  承接=BJ530 判例同构：capture→球体不进实体层,projFullbrightQueue 光照合成
+    //  后 source-over 复绘 ga=1（Color.White A=255 恒定）=原版逐字;链节面
+    //  （drawChain）原版逐节取光（:35901-35990）维持实体层不动。层序=玩家/NPC
+    //  之上（270/45/BJ504 同槽惯例,登记）。
+    if (this.projId === 35) {
+      drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
+        1, 0, this.spriteDir === -1,
+        FLAIL_CENTER_ANCHOR.has(this.projId), this.texScale,
+        -1, 0, (fn) => {
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.(fn);
+        });
+      return;
+    }
     drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
       Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1,
       FLAIL_CENTER_ANCHOR.has(this.projId), this.texScale);

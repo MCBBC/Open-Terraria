@@ -14,6 +14,7 @@ import type { Game } from '../core/Game';
 import { TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
+import { showMouseTextTip, hideMouseTextTip } from './MouseTextTip';   // ★BJ-C4-F5
 
 /** NPCHeadID.Sets.HeadListOrder(Terraria.ID/NPCHeadID.cs:11-22)——住房 UI 显示序 */
 export const HEAD_LIST_ORDER: readonly number[] = [
@@ -140,12 +141,17 @@ export class HousingPanel {
     });
     this.canvas.addEventListener('mousemove', (e) => {
       this.hoverIdx = this.hitTest(e.offsetX, e.offsetY);
-      // tooltip(:41498):NPC 槽=FullName,查询槽=inter[8]"房屋询问"
+      // tooltip(:41498 命中域 → :41513 MouseText):NPC 槽=FullName,查询槽=inter[8]
+      // "房屋询问"。★BJ-C4-F5（2026-10-06）：原生 browser title（OS 延迟气泡）→
+      // 自绘 MouseText 气泡族（MouseTextTip 单源）——原版面 =
+      // `MouseText(GetNPCHouseBannerText(nPC, num2), 0, 0)`（Main.cs:41513）,
+      // 悬停即现/随动,非 OS tooltip。
       const title = this.hoverIdx === 0 ? Lang.inter(8)
         : this.hoverIdx > 0 && this.rows[this.hoverIdx - 1] ? this.rows[this.hoverIdx - 1].name : null;
-      this.canvas.title = title ?? '';
+      if (title) showMouseTextTip(title, e.clientX, e.clientY);
+      else hideMouseTextTip();
     });
-    this.canvas.addEventListener('mouseleave', () => { this.hoverIdx = -1; this.canvas.title = ''; });
+    this.canvas.addEventListener('mouseleave', () => { this.hoverIdx = -1; hideMouseTextTip(); });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -252,6 +258,7 @@ export class HousingPanel {
     if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    hideMouseTextTip();   // ★BJ-C4-F5：悬停中销毁 → 气泡随面板消亡（canvas 摘除 mouseleave 不达）
     this.onCursor(null);
     this.canvas.remove();
     this.closeBtn.remove();

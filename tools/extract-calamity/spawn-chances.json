@@ -1,0 +1,11 @@
+{
+ "plaguebringer_miniboss": {
+  "rules": [
+   {
+    "zone": "jungle",
+    "water": false,
+    "mult": 0.02
+   }
+  ]
+ }
+}

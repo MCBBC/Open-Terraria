@@ -396,9 +396,19 @@ export function duke370GetAlphaBoost(e: Enemy): { num: number; num9: number } | 
 // 395 GlowMask[49]（Main.cs:24957 固定色 (200,200,200,0),不经 GetAlpha）——均无白提亮。
 
 /** 395/519 GetAlpha 白提亮因子（NPC.cs:94679-94684 逐字 type 门）。null=非同族
- *  （392/393/394 飞碟部件、516/518 同柱邻型、583-585/681/636 等 lerp 族他档均不在门内）。 */
+ *  （392/393/394 飞碟部件、516/518 同柱邻型、681/636 等 lerp 族他档均不在门内）。
+ *  ★BJ-C1 F5（2026-10-06）扩门（先定谳后收编：R1 报告 ~20 站估列表经本仓活体普查
+ *  +反编译亲读逐型定档,死型不收——583-585 走 drawFairyBright 独占（:94662-94665
+ *  Lerp 0.5 档已承接,入本门=双绘）、681/658-660/636/549/521/440 等本仓无生成面）：
+ *  · 454-459 沙虫族 :94640-94646 `Lerp(newColor,White,0.4)+A=150+×num5/255`——
+ *    白提亮 0.4 档（本门）；A=150 半透面=本体 ga ×150/255（Renderer 本体位）；
+ *    活体=蠕虫白名单 Enemy.ts:896 `vidW>=454&&vidW<=459`（头 454+节 455-458+尾 459）
+ *  · 402 :94569-94571 恒 `Color(255,255,255,255)`——全白覆绘=a=1 恒等式极限档
+ *    （复绘全覆盖即原版 tint 逐字,兼修旧 spawnAlpha 淡出误乘面——原版常量支不读 α） */
 export function npcWhiteLiftAlpha(vid: number): number | null {
   if (vid === 395 || vid === 519) return 0.4;   // :94679 两型同档 0.4
+  if (vid >= 454 && vid <= 459) return 0.4;     // :94640 沙虫族白提亮档（★BJ-C1 F5）
+  if (vid === 402) return 1;                    // :94569 恒全白=a=1 极限档（★BJ-C1 F5）
   return null;
 }
 

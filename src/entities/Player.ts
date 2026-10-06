@@ -33,6 +33,7 @@ import { surviveHardcoreDeath } from '../world/gen/SeedEasterEggs';   // Main.su
 import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { MOD_ITEM_STABLE_BASE } from '../mods/types';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { options } from '../core/Options';   // ★SW-FX14：hoverControl 档读数（Player.Settings.HoverControl 镜像）
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
@@ -216,6 +217,7 @@ import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中
 import { shimmerBlockFx } from '../fx/orchestraFx';   // ★SW-FX47：MakeFloorDust 微光块 659/667 编排粒子（Player.cs:24002）
 import { playerAccessoryVidEquipped } from '../stats/builderAcc';   // ★SW-FX19:重力地球仪 1131 装备判定（gravControl2）
 import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
+import { heldItemCritBonus } from './proj1457';   // ★BJ-C2/F11 持械折入单源（proj1457 无反向 Player 依赖,无环）
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -249,6 +251,16 @@ const CLOUD_SHEETS = CLOUDS_SHEETS;   // ★BJ210 收编单源 data/tiles.ts:CLO
  *  :10114-10116）。TryBouncingBlocks（Player.cs:35102）触碰扫描消费；本仓
  *  sheet 域直比（消费者先经 TILE_DEFS[].vanilla?.sheet 归一,同 CLOUD_SHEETS 口径） */
 const TILE_BOUNCY_SHEETS = new Set([371, 446, 447, 448]);
+
+/** ★C5-B7（2026-10-06）多段跳高度乘数单源（JumpMovement :20899-21197——旧湿/干
+ *  两支各持一份字面镜像表,BJ533 定谳镜面漂移零判别=静默错高类债,收编单源根断）：
+ *  沙暴 ×3（:20970）/ 暴雪 ×1.5（:20980）/ 航行瓶 ×1.25（:20992）/ 屁瓶 ×2
+ *  （:21023）/ 蜥蜴坐骑 ×0.75（:21104）/ 云朵 ×0.75（:21181）；缺省档 ×2 =
+ *  独角兽（:21048）/ 血肉山羊（:21076）/ 圣诞坦克（:21134）。干/湿两消费支共用。 */
+const BOTTLE_JUMP_HMULT: Record<string, number> = {
+  Sandstorm: 3, Blizzard: 1.5, Fart: 2, Sail: 1.25, Cloud: 0.75, Basilisk: 0.75,
+};
+const jumpHMultOf = (opt: string): number => BOTTLE_JUMP_HMULT[opt] ?? 2;
 
 // ---- 绳锚几何系统常量（绳锚批 2026-08-19：pulley 悬挂 + 线起点链）----
 /** ItemID.Sets.Yoyo（ItemID.cs:1166）——悠悠球物品 vid 集
@@ -927,6 +939,16 @@ export class Player extends Entity {
    *  dash=dashType 的仓内承载）：Chillet 坐骑（62-65，MOUNT_DASH6_TYPES）触发帧置真、
    *  滑行反向收敛/冷却/被配饰冲刺取代时清零 */
   mountDash6Active = false;
+  /** ★C5-B5（2026-10-06）原版 dash 字段闩锁镜像（Player.cs:21217
+   *  `if (dashDelay == 0) dash = dashType;`——:21211 mount∈{62..65}→dashType=6 在前）：
+   *  仅 dashDelay==0 拍从活值（eq.dash/mountDashing6）重推导，滑行/冷却期冻结在
+   *  发起拍档位。消费面=eoc 扫敌门（:21225 dash==2）、滑行阻尼参数档（:21434-21499
+   *  num13-17 各 dash 覆写）、出口冷却档（:21567）——中途换装不漂移（旧式滑行读
+   *  活 eq.dash=阻尼档中途换装即变,原版不可能路径）。dash==0 清双击窗面（:21221）
+   *  同源。ResetEffects 清 dashType（:18775）+UpdateBuffs 结网置 0（:11966）+
+   *  UpdateEquips 装备重推导（:15166-15181/:16552）的仓内净效=本字段每
+   *  dashDelay==0 拍直读活值。 */
+  dashLatched = 0;
   /** dash==6 语境判定：骑乘中且坐骑属 Chillet 冲刺族 */
   private mountDashing6(): boolean {
     return this.ridingMount && this.mount.active && MOUNT_DASH6_TYPES.has(this.mount.type);
@@ -2252,6 +2274,25 @@ export class Player extends Entity {
       //  原版两门逐槽合取的最短路径。
       if (ITEM_DEFS[s.id]?.expertOnly && !(this.inv.gateExpert || this.inv.gateMaster)) continue;
       const fx = accFxOfInternal(s.id);
+      // ★B6 六十七刀:mod 配饰 UpdateEquip 加法面读侧(STATS 表→equipStats 同名域;
+      //  dmgX=加法 +0.05 形(:2386 同构)/life=lifeRegen 语义)。mod 段守卫=vanilla
+      //  件 life 已走 fx.life(:2429),不守卫=vanilla 再生系双计。
+      const mvid = ITEM_DEFS[s.id]?.vid ?? -1;
+      if (mvid >= MOD_ITEM_STABLE_BASE) {
+        const mst = statOfInternal(s.id);
+        if (mst) {
+          if (mst.life) life += mst.life;
+          if (mst.dmgMelee) dmgMelee += mst.dmgMelee;
+          if (mst.dmgRanged) dmgRanged += mst.dmgRanged;
+          if (mst.dmgMagic) dmgMagic += mst.dmgMagic;
+          if (mst.dmgAll) { dmgMelee += mst.dmgAll; dmgRanged += mst.dmgAll; dmgMagic += mst.dmgAll; }
+          if (mst.critMelee) critMelee += mst.critMelee;
+          if (mst.critRanged) critRanged += mst.critRanged;
+          if (mst.critMagic) critMagic += mst.critMagic;
+          if (mst.moveMult) move += mst.moveMult;
+          if (mst.endurance) setEndurance += mst.endurance;
+        }
+      }
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
       const accVid = (ITEM_DEFS[s.id]?.vid ?? -1);
@@ -4792,7 +4833,19 @@ export class Player extends Entity {
     //      :28060/:28073 刷新之后≡本拍 num86;本仓调用位在湿流程后,wetSticky 后值
     //      ≡wetNow 同构——旧三桶并集=幻影姿态家族,见 MountCombat.ts 段注）。
     //      踩踏循环 A 的 wetSlime==0 门消费此值（MountCombat.mountJumpStomps）----
-    tickSlimeWetState(this);
+    // ★C5-B1（2026-10-06）wet switch 下坐臂承接（:28177-28207）：返回 true = 原版
+    //      本拍 Mount.TryDismount（蜜蜂5/飞碟7/可爱飞鱼56 湿拍 + 56 dripping 干拍）。
+    //      执行面走 :5389 冻结下坐同款惯例：petting 终止（Mount.Dismount :6219-6222）
+    //      + 伴生 buff 清偿（ClearBuff :6214,id 先于 dismount 捕获）+ tryDismount
+    //      空间门（失败=原版 :28183 忽略返回值,无尘无重试——QuickMount 计数链是
+    //      主动下坐键路径 :5738-5753 专属,此处不挂）。
+    if (tickSlimeWetState(this, this.buffs.has(BuffType.Wet))) {
+      if (this.petting.mount) this.stopPettingAnimal();
+      const prevBuffVanilla = this.mount.data?.buff ?? -1;
+      this.mount.tryDismount(this);
+      const mbt = buffTypeByVanilla(prevBuffVanilla);
+      if (mbt !== undefined) this.buffs.remove(mbt);
+    }
     this.shimmerUnstuckHelperUpdate(game);   // ShimmerUnstuckHelper.Update :23-45（Player.cs:25843 每 tick,先于 AddBuff(353) 门）
     // 微光浸入（Player.cs:27938-27953）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
     // shimmerImmune = 5355 幻彩斗篷在身且未按住下（:15643-46,已实装 equipStats 段）
@@ -5150,6 +5203,10 @@ export class Player extends Entity {
       //   ——★BJ534：否则死亡期残留态=重生落地误炸冲击波）
       this.isDownDashing = false;
       this.downDashTime = 0;
+      // ★MV2（2026-10-06）债④：死亡相沿刷新照走——原版 UpdateDead :17185-17195 逐拍
+      //   `releaseRight=!controlRight`（双击沿真值源不因死亡冻结;重生后沿相位与原版同）
+      this.prevInputX = this.inputX;
+      this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
       return;
     }
     // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行——
@@ -5238,10 +5295,19 @@ export class Player extends Entity {
     // ★必须在水平积分（下方 const ix = this.inputX 消费点）之前执行：矿车/装备聚合
     // 重写曾把清零挪进 else-if 链的 shimmering 物理分支（位于积分之后）——清零形同
     // 虚设,微光中仍可自由行走（2026-08 回归）
-    if (this.buffs.has(BuffType.Frozen) || this.shimmering || this.buffs.has(BuffType.Stoned)) {
+    // ★MV2（2026-10-06）债②清偿：补 webbed 腿——原版 CCed（:3361-3372 frozen∨webbed∨
+    //    stoned）在本段（:25432-25446）清全控制面并强制 gravDir=1f。旧缺 webbed 腿
+    //    （jump/移动键残留）且漏 controlLeft/Right 两布尔（滑行火花/门助手读它们）。
+    //    shimmering 腿=原版 buff 353 置 frozen 旗经 CCed 生效（SW-FX52 判例同源）。
+    //    gravDir=1f 位次在重力总闸 updateGravityControls（:26892 forcedGravity 支）
+    //    之前=FTW 克脑仍可覆写 -1,与原版 :25445→:26894 同序。
+    if (this.buffs.has(BuffType.Frozen) || this.shimmering || this.buffs.has(BuffType.Stoned)
+      || this.buffs.has(BuffType.Webbed)) {
       // 石化(156)与冰冻同段清输入（:24942 control* 清零——石化还额外清 useItem/useTile,
       // 我们输入模型只有四键,同 frozen 处理）
       this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
+      this.inputLeft = false; this.inputRight = false;      // :25434-25435 controlLeft/Right
+      this.gravDir = 1;                                     // :25445 gravDir = 1f
     } else if (this.buffs.has(BuffType.Confused)) {
       // 困惑(31)：控制轮换（Player.cs:24683-24690 字面复刻,含原版 Up←交换后Right 的
       // 怪癖——flag2=L,flag3=Up; L=R; R=flag2; **Up=R(新)**; Down=flag3）
@@ -5251,6 +5317,14 @@ export class Player extends Entity {
       this.inputX = wasRight ? -1 : newRight ? 1 : 0;   // L←R / R←L
       this.inputUp = newRight;                          // Up←R(新)（原版怪癖同款）
       this.inputDown = wasUp;                           // Down←Up
+      // ★MV3（2026-10-07）债⑤配套：布尔面同轮换（1457 :25190-25196 `controlLeft =
+      //   controlRight; controlRight = flag2`——仓内注释旧引 :24683-24690 为 1456 行号）
+      //   ——inputLeft/inputRight 是 controlLeft/Right 同源位（MV2③ 出口臂、MV3 双击
+      //   沿、滑行回弹臂 :21287-21289 均读布尔），缺轮换=困惑期布尔面与合值面分叉
+      //   （旧布尔恒物理键，困惑期读布尔的消费面与原版读轮换后 control 面反向）。
+      const flMV3 = this.inputLeft;
+      this.inputLeft = this.inputRight;
+      this.inputRight = flMV3;                          // L↔R 布尔轮换（:25193-25194）
     }
     // ★SW-RB11f F1/F2：重力倒置总闸调用点迁入（原版位序 = CCed 清输入 :25436 →
     //   hover 锁存 :25452 → 翻转门 :26892 → UpdateControlHolds 末拍快照 :29324-29331；
@@ -5314,6 +5388,10 @@ export class Player extends Entity {
       // → 起身次拍即触发自动放风筝」（原文坐/睡不步进两计数且 kite 计数逐拍归零）。
       // afkCounter 坐/睡冻结 vs 原文照步（站立即步）= 本仓早退结构既有偏差,登记不接。
       this.afkCounterForKiting = 0;
+      // ★MV2（2026-10-06）债④：坐/睡拍沿刷新照走——原版坐睡不早退 Update（:25708/
+      //   :26326 处理后直落 :27827-27855 releaseLeft/Right 无条件刷新）
+      this.prevInputX = this.inputX;
+      this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
       return;
     }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
@@ -5331,12 +5409,19 @@ export class Player extends Entity {
         this.x += this.vx;
         this.y += this.vy;
         this.fallStartY = null;
+        this.prevInputX = this.inputX;   // ★MV2 债④：矿车拍沿刷新照走（:27827 无条件）
+        this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
         return;
       }
       this.onGround = true;
       this.fallStartY = null;
       this.pulley = false;   // mount.Active → pulley=false（:25815-25818——早退路径
                              // 跳过下方维护段，此处直清防下车残留悬挂态）
+      // ★MV2（2026-10-06）债④：矿车拍沿刷新照走——原版矿车 TrackCollision 段后仍直落
+      //   :27827-27855（releaseLeft/Right 无条件刷新）;旧冻结=车拍按压→下车后幽灵双击沿
+      //  （原版沿已在车拍被 :21579 早退消费+dashTime 清零）。
+      this.prevInputX = this.inputX;
+      this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
       return;
     }
     // ---- 非矿车坐骑每 tick 维护（Mount.cs 1:1）----
@@ -5786,11 +5871,14 @@ export class Player extends Entity {
       // 同一）——绳上可发起冲刺（就绪段 DoCommonDashHandle 键面/双击两源照跑）、冷却/
       // 滑行三态照常推进。发起拍 X 仍钉绳列（原版块序：X 吸附→垂直链→DashMovement）,
       // 发起置 vx=±16.9/14.5/21.9 后下一拍 :26475 `velocity.X != 0 → pulley=false`
-      // 落绳续滑——绳上冲刺=一拍挂绳+空中滑行,两引擎同构。本支与非 pulley 绳攀共用,
-      // 原版该面只属 pulley 态 → 门 this.pulley。ix 传 0：dashMovement 滑行支的输入
+      // 落绳续滑——绳上冲刺=一拍挂绳+空中滑行,两引擎同构。本支与非 pulley 绳攀共用。
+      // ★MV1（2026-10-06）撤 this.pulley 门：非 pulley 绳攀（身体中心落绳）同样每拍
+      // 调 DashMovement——原版无此分支重定向（:26958 主移动支无条件）,门把「滑行中
+      // 穿过绳格」的拍全部漏掉 = dashDelay 冻结 -1、阻尼不跑（定谳:滑行穿 11 格绳带
+      // vx 恒 14.5 漂 +180px,绳场越宽漂越远）。ix 传 0：dashMovement 滑行支的输入
       // 加速/制动块承载的是 HorizontalMovement Run 支（:26889 落主移动支 else-if 链,
       // 绳索支整段不跑 :26366）——原版绳面滑行=纯阻尼,无输入贡献。
-      if (this.pulley) this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
+      this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else if (this.pulley) {
       // 绳端悬挂支（:25985-26137）：头格列/行 num34/num36，上下邻格（:25998 flag17）
       const num34 = Math.floor((this.x + this.w / 2) / TILE);
@@ -5825,6 +5913,11 @@ export class Player extends Entity {
       this.vy += GRAVITY * 0.15;
       this.vy = Math.max(-5.5, Math.min(3.0, this.vy));
       this.fallStartY = null;
+      // ★MV1（2026-10-06）冲刺状态机补位：原版 shimmerWet 不重定向移动支（:24581 只
+      // 改重力参数,:26958 DashMovement 无条件照跑）——本独占支此前整漏 = 滑行中入池
+      // dashDelay 冻结 -1、vx 恒速漂移（定谳:入池段 vx 冻 10.53px/t ×53t）。输入原版
+      // 不封（非 CCed）→ 传实 ix（滑行反向制动照常）。
+      this.dashMovement(game, eqM, ix, speedMult, duneBoost, strongestSlow);
     } else if (this.shimmering) {
       // buff 353（:11381-11388）：frozen 封输入（输入清零在上方移动积分前的
       // Frozen∪Shimmering 段执行——此处只做物理）+ fallStart 重置（免摔伤）；
@@ -5832,6 +5925,10 @@ export class Player extends Entity {
       // :27868 的 velocity×0.375 穿墙下坠（绕过 tile collision）
       this.vy = Math.min(this.vy + GRAVITY * 0.9, PLAYER_MAX_FALL_SPEED * 0.9);
       this.fallStartY = null;
+      // ★MV1（2026-10-06）冲刺状态机补位：原版 shimmering 亦不重定向移动支（CCed 只
+      // 封输入 :25436,:26958 照跑）——本支此前整漏 = 微光化期 vx 恒速漂移。输入已被
+      // 上方 Frozen∪Shimmering 段清零 → ix 恒 0（纯阻尼,与原版 CCed+阻尼同相）。
+      this.dashMovement(game, eqM, ix, speedMult, duneBoost, strongestSlow);
     } else if (this.buffs.has(BuffType.Webbed)) {
       // 结网(149)（Player.cs:11459-11476）：本帧 velocity 清零（下落中留 1e-6 缓降）、
       // gravity=0、jumpHeight=0、moveSpeed=0（已走 moveSpeedMult）、dash 归零、
@@ -5840,11 +5937,36 @@ export class Player extends Entity {
       this.vy = this.vy !== 0 ? 0.000001 : 0;
       this.fallStartY = null;
       this.removeAllGrapplingHooks();
+      // ★C5-B3（2026-10-06）dash 归零落地（:11965-11966 `dash = 0; dashType = 0;`
+      //  ——旧注释自称"dash 归零"但从未落码=伪注）。dashType=0 的原版净效仅到同拍
+      //  UpdateEquips（:25830 晚于 UpdateBuffs :25763）重推导=瞬态;dash=0 的净效：
+      //  本拍 DashMovement derive（:21217 dashDelay==0 才推导）在滑行/冷却态
+      //  （dashDelay≠0）被跳过 → dash 保持 0 → :21221 `dash==0 → dashTime=0;
+      //  dashDelay=0` = 滑行/冷却拍内清零即时就绪（无 20/30t 虚假冷却;若结网拍本已
+      //  就绪,derive 同拍重推导装备档=:21221 不触发,窗自然衰减=原版同相）。
+      //  dashLatched=0 同时关 eoc/日曜/dash6 扫敌门（:21225/:21293/:21354 dash 位）。
+      //  结网期不可再发起（CCed 键面闸在 dashKeyNum/dblTap 双门）。
+      this.dashLatched = 0;
+      this.mountDash6Active = false;
+      // ★MV1（2026-10-06）冲刺状态机补位：原版 webbed=CCed（:3365 CCed 定义 frozen∨
+      // webbed∨stoned）——输入封零但 :26958 DashMovement 照跑（在 :27000 CCed 块之前
+      // = 不受其闸）→ 结网拍滑行态照常收敛退出（vx=0 → |vx|≤num15 → dashDelay=20）。
+      // ★C5-B3 起本支已先行清 dashDelay（:11965 dash=0 净效）→ 本调用走就绪支
+      // （dashLatched 0/derive 相）,旧"滑行收敛落冷却"面退役（MV1④ 期望已翻正）。
+      // ix 传 0=CCed 封控制等价（原版控制已清,滑行制动块/出口 vx==0 择向键臂均不可达;
+      // ★MV2（2026-10-06）债②起本仓 webbed 在 :5261 CCed 块清全控制面——出口臂改读
+      // 已清的 inputLeft/Right,与原版恒保持 0 同相;此处传 0 仍为滑行制动臂承载位）。
+      this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else if (this.buffs.has(BuffType.VortexDebuff)) {
       // 星旋减益(164)：gravity=0（:24162-24164）+ vy 摆动（:27854-27857：
       // vy×0.8 + cos(cx%120/120×2π)×5×0.2——按世界 X 相位正弦悬浮）
       this.vy = this.vy * 0.8 + Math.cos((this.cx % 120) / 120 * Math.PI * 2) * 5 * 0.2;
       this.fallStartY = null;
+      // ★MV1（2026-10-06）冲刺状态机补位：原版 vortexDebuff 不重定向移动支（:24627 只
+      // 改 gravity,:28374 只摆 vy——:26958 无条件照跑）——本支此前整漏 = 用户实报主面:
+      // 星旋敌持续在场期间 dashDelay 冻结 -1、vx 恒 14.5px/t 漂移 120t=+1740px,松键/
+      // 反向键/再按键全部无效。输入原版不封（非 CCed）→ 传实 ix（滑行反向制动照常）。
+      this.dashMovement(game, eqM, ix, speedMult, duneBoost, strongestSlow);
     } else
     // ---- 跳跃参数链（每帧先于物理求值：UpdateJumpHeight :19301-19341 + 坐骑档
     //      Mount.JumpHeight/JumpSpeed :19307-19308——原版 jumpHeight/jumpSpeed 是
@@ -5943,6 +6065,11 @@ export class Player extends Entity {
     // 当 wet 位——勘误退役。消费：flipperOn 湿授予（:13115-18）、翼帧 waterFloat
     // （WingFrame :30456/:30724/:30732）、ShouldDrawWingsThatAreAlwaysAnimated :30971
     const wetVanilla = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+    // ★BJ534：门帧入口 vy 快照（=JumpMovement 被调时点 velocity.Y——:20935 分支选择/
+    //   :20873-20898 flag13 选择全用该时点值）。本仓起跳腿会当帧改写 this.vy（站立起跳
+    //   vy≠0、多段跳翻负）,下砸腿的 vy!=0 门必须读【腿前】值 ≙ 原文——站立帧入口 vy=0
+    //   （上拍碰撞清零,重力在跳跃面后）= 下砸拒绝;空中帧任意 vy=下砸可达。
+    const vyAtJumpGate = this.vy;
     // 跳跃 / 游泳
     // 游泳族坐骑（海龟 131/猪鲨崽 168/熔岩鲨 305：坐骑 buff 的 ignoreWater，Player.cs:9972-9999——旧注 :9592-9608 系 1456 期锚）
     // 浸水走干燥分支——水下不降速（Run 段本就无水因子；位移层 liqFactor 由积分段
@@ -6031,7 +6158,7 @@ export class Player extends Entity {
           this.y -= Player.STOOL_BOOST;
           this.h -= Player.STOOL_BOOST;
         }
-      } else if (jumpEdge && !this.onGround && this.vy !== 0 && this.jumpHold <= 0 && this.inputDown
+      } else if (jumpEdge && !this.onGround && vyAtJumpGate !== 0 && this.inputDown
         && eqM.hasDeadCellsDownDash && !this.ridingMount && !this.ridingCart
         && !flipperOn && !justClearedWetSlime && !this.isDownDashing) {
         // ★BJ534 湿路由下砸触发腿（:20895 flag13 支——原版湿/干共块,Selection 前置门
@@ -6039,9 +6166,10 @@ export class Player extends Entity {
         //  此处与 BJ533 水中多段跳同门形）。链位在瓶族前=按住↓时下砸优先于水中多段跳
         //  （原文 :20895 else-if 序）。触发体与干支逐位同构（isPerformingJump_DownDash
         //  :20934 + velocity.Y=16×gravDir :20958-20961 + canRocket/rocketRelease 清零
-        //  :20924-20925）。jumpHold<=0 = sustain 分支优先（干支注同源）。
+        //  :20924-20925 + jumpHold=0 sustain 停——干支注同源）。
         this.isDownDashing = true;
         this.vy = 16 * gd;
+        this.jumpHold = 0;
         this.canRocket = false;
         this.rocketRelease = false;
       } else if (jumpEdge && !this.onGround && !mnt2?.blockExtraJumps
@@ -6057,17 +6185,12 @@ export class Player extends Entity {
         //  （本臂 !flipperJump 门）；踩底 vy==0 走上支+上方回满=不实耗（原版
         //  RefreshDoubleJumps :20931 同净效）。旧仓此臂整缺（多段跳块只嵌干支 else
         //  :6276）→ 水中按跳无响应（且 :6110 飞毯 extraJumps==0 门在水中恒闭=同债面）。
-        //  高度表/优先序/起跳帧特效与干支逐位同构——两处镜像维护（湿/干镜像先例：
-        //  湿态翅膀核心 :6011）。jumpHold 用干支同款 Math.round（原版 (int) 截断在
-        //  ×1.5/×1.25 半值档差 1t——干湿同款保家族一致,登记不单侧改）。
+        //  高度表/优先序/起跳帧特效与干支逐位同构——★C5-B7 起收编模块单源
+        //  BOTTLE_JUMP_HMULT（jumpHMultOf）,镜像漂移类债根断。jumpHold 用干支同款
+        //  Math.round（原版 (int) 截断在 ×1.5/×1.25 半值档差 1t——干湿同款保家族
+        //  一致,登记不单侧改）。
         const opt = this.extraJumps.shift()!;
-        const hMult = opt === 'Sandstorm' ? 3
-          : opt === 'Blizzard' ? 1.5
-          : opt === 'Fart' ? 2
-          : opt === 'Sail' ? 1.25
-          : opt === 'Cloud' ? 0.75
-          : opt === 'Basilisk' ? 0.75
-          : 2;   // Unicorn / WallOfFleshGoat / Santank ×2（:21048/:21076/:21134）
+        const hMult = jumpHMultOf(opt);   // ★C5-B7 单源（:20899-21197 各档）
         this.vy = -lJSpd * gd;
         this.jumpHold = Math.round(lJT * hMult);
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
@@ -6365,12 +6488,15 @@ export class Player extends Entity {
       //  触发 = isPerformingJump_DownDash=true（:20934）+ velocity.Y=16×gravDir
       //  （:20958-20961——同帧重力链钳回 maxFallSpeed,净效果=秒达终端速;快坠本体
       //  = 下方第二竖向碰撞趟 :28424-28430）。canRocket/rocketRelease 清零 =
-      //  :20924-20925 门帧公共段（按下帧火箭不点火）。
+      //  :20924-20925 门帧公共段（按下帧火箭不点火）;jumpHold=0 = 原文本帧 sustain
+      //  分支不跑（:20823 `if (jump > 0)` 假——原文松键 :21203 即 jump=0,仓内窗口
+      //  残余态（:6807 判例不清零）由本行显式归零=同净效）。
       let downDashFired = false;
-      if (!mountJumpFired && this.vy !== 0 && this.jumpHold <= 0 && jumpEdge && this.inputDown
+      if (!mountJumpFired && vyAtJumpGate !== 0 && jumpEdge && this.inputDown
         && eqM.hasDeadCellsDownDash && !this.ridingMount && !this.isDownDashing) {
         this.isDownDashing = true;
         this.vy = 16 * gd;
+        this.jumpHold = 0;
         this.canRocket = false;
         this.rocketRelease = false;
         downDashFired = true;
@@ -6400,13 +6526,7 @@ export class Player extends Entity {
       if (!this.onGround && !mnt2?.blockExtraJumps && jumpEdge && this.extraJumps.length > 0
         && !mountJumpFired && !downDashFired) {
         const opt = this.extraJumps.shift()!;
-        const hMult = opt === 'Sandstorm' ? 3
-          : opt === 'Blizzard' ? 1.5
-          : opt === 'Fart' ? 2
-          : opt === 'Sail' ? 1.25
-          : opt === 'Cloud' ? 0.75
-          : opt === 'Basilisk' ? 0.75
-          : 2;   // Unicorn / WallOfFleshGoat / Santank ×2（:21048/:21076/:21134）
+        const hMult = jumpHMultOf(opt);   // ★C5-B7 单源（:20899-21197 各档,湿支同表）
         this.vy = -mJumpSpd * gd;
         this.jumpHold = Math.round(mJumpTicks * hMult);
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
@@ -7750,6 +7870,7 @@ export class Player extends Entity {
       }
     }
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
+    this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新（:27827-27845 releaseLeft/Right=!control 逐拍尾刷新同址）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
     this.wofTongue(game, world, dt);
@@ -7774,6 +7895,26 @@ export class Player extends Entity {
     ix: number, speedMult: number, duneBoost: boolean, strongestSlow: number,
   ): void {
     const eq = eqM;   // 旧干支局部别名（extraJumps 段 const eq = eqM）随段迁入
+    // ★C5-B2（2026-10-06）移动支门（Player.cs:26691/:26695/:27598）：原版
+    //  DashMovement 只在绳索支（:26691）与正常移动支（:26695
+    //  `else if (grappling[0] == -1 && !tongued)`）调用；挂钩/舌缚支（:27598 else）
+    //  只调 UpdateControlHolds —— 冲刺状态机【整支不可达】：就绪不发起、滑行不
+    //  阻尼、冷却不倒数、eoc/日曜/dash6 扫敌全停。旧式挂钩期照跑 = 就绪段可发起 +
+    //  eocDash=15 恒冻逐帧扫敌（原版不可能路径）。冻结≠清零：松钩后滑行/冷却原样
+    //  续跑（绳攀非 pulley 支已并入正常移动支=MV1②,门统一承载于此,勿散布调用点）。
+    if (this.grappling[0] || this.buffs.has(BuffType.TheTongue)) return;
+    // ★C5-B5 dash 字段闩锁（:21211-21217：mount∈{62..65}→dashType=6 在前,
+    //  dashDelay==0 拍才从活值重推导——滑行/冷却期冻结在发起拍档位）
+    // ★C5-B6 双击窗清（:21221-21223：dash==0 → dashTime=0 + dashDelay=0——摘装备
+    //  窗冻结→重装后单击即冲=原版不可能路径。dashDelay=0 承载写非恒 no-op：
+    //  结网支 dash=0×滑行/冷却态（C5-B3）正靠本写拍内清零即时就绪）
+    if (this.dashDelay === 0) {
+      this.dashLatched = this.mountDashing6() ? 6 : eq.dash;
+    }
+    if (this.dashLatched === 0) {
+      this.dashT = 0;
+      this.dashDelay = 0;
+    }
     // ---- 冲刺 1:1（DashMovement :20769-21265 + DoCommonDashHandle :21267-21323）----
     // 1=忍者足具/水晶刺客（纯位移） 2=克苏鲁护盾（冲撞 30+反弹）。
     // dashDelay 三态（:20775-20782）：0=就绪 / -1=滑行中（阻尼衰减） / >0=冷却倒计时。
@@ -7785,57 +7926,72 @@ export class Player extends Entity {
     // 位置 + 速度×0.5 外扩 4px（:20786）；伤害 30×meleeDamage 可暴击、击退 9
     // （kbGlove ×2 / 泰坦 kbBuff ×1.5，:20800-20808）；命中 → eocDash=10、30t 冷却、
     // 反弹 vx=-dir×9 vy=-4（:20825-20840）
-    if (eq.dash === 2 && this.eocDash > 0 && this.eocHitId < 0) {
-      let eocHitFlag = false;         // :21270/:21281 eocHit>=0 本轮快照
-      const parkourArm = eq.oldStyleParkour === true;   // ★F5③ 6190 两臂开关
-      const bhx = this.x + this.vx * 0.5 - 4, bhy = this.y + this.vy * 0.5 - 4;
-      const bhw = this.w + 8, bhh = this.h + 8;
-      for (const e of game.enemies()) {
-        const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
-          dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
-        if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
-        // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
-        if (!playerCanHitEnemy(e, game)) continue;
-        // ★AI_112 仙灵免疫门（B 扫尾补账：原式 :21275 冲撞扫敌门禁串
-        //  `(nPC.aiStyle == 112 && !(nPC.ai[2] <= 1f))` → continue——充能态
-        //  （虫网释放后态 2+）仙灵免伤克盾冲撞）。SetDefaults（NPC.cs:16608
-        //  type==583||584||585）下 aiStyle=112 全集恰为仙灵三型 ⇒ 三型 vanillaId
-        //  判定与原式等价（chilletDashCharge 同款落法）；ai[2]≤1 前态照常可打。
-        const dashFairy = en as unknown as { vanillaId?: number; ai2?: number };
-        if ((dashFairy.vanillaId === 583 || dashFairy.vanillaId === 584
-          || dashFairy.vanillaId === 585) && (dashFairy.ai2 ?? 0) > 1) continue;
-        const ex = en.x ?? en.cx - 8, ey = en.y ?? en.cy - 8, ew = en.w ?? 16, eh = en.h ?? 16;
-        if (!(bhx < ex + ew && bhx + bhw > ex && bhy < ey + eh && bhy + bhh > ey)) continue;
-        const dir = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing; // :20809-20815
-        const crit = Math.random() * 100 < this.critChance('melee');  // :20811-20813
-        const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')) * (crit ? 2 : 1));
-        const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
-        en.hurt(dmg, dir * kb, -4, game, 0, false, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
-        // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（受击音+飘值同点，
-        // 见 Enemy.hurt 内 :82006-82015 收口注）；免疫早返 false 时本行曾仍弹
-        // 「幻影伤害」（2026-08-31 二轮红队同案复核）。色走单源敌方族表
-        // （fx/CombatTextColors.enemyHurtFloatColor），勿在调用方重设
-        // ★D3 玩家侧碰撞攻击免疫统一时钟（克盾冲撞 GiveImmune(4)——vanilla
-        //  DashMovement 冲撞段 :21277 GiveImmuneTimeForCollisionAttack(4) 同位）
-        grantCollisionAttackImmunity(this, 4);
-        this.eocDash = 10;            // :20833
-        eocHitFlag = true;
-        this.eocHitId = en.id ?? -2;  // :20840（后续帧不再对同一敌结算）
-        this.dashDelay = 30;          // :20834 反弹并结束滑行
-        // ★F5③ inline 臂（:21272-21276）：跑酷书 6190 在场 → 命中迭代内即翻速
-        if (parkourArm) {
-          this.vx = -dir * 9;
+    // ★C5-B4/B5（2026-10-06）外门改 dash 闩锁位（:21225 `if (dash == 2 && eocDash
+    //  > 0)`——dash 字段冻结在发起拍档位,中途卸盾滑行期扫敌照续=原版相;旧式读活
+    //  eq.dash 且把 eocHitId<0 折入外门 → 回弹臂整支不可达）。
+    if (this.dashLatched === 2 && this.eocDash > 0) {
+      // ★C5-B4 内门劈两支（:21227-21289）：eocHit<0 逐帧扫敌；else（已命中,
+      //  eocDash 10t 冷却窗内）无同向输入 → vx×0.95 回弹衰减——持同向键=「接住」
+      //  反弹不衰减（原版 `(!controlLeft || !(velocity.X < 0f)) && (!controlRight
+      //  || !(velocity.X > 0f))` De Morgan 直译）。旧式回弹全程 -9 无衰减。
+      if (this.eocHitId < 0) {
+        let eocHitFlag = false;         // :21270/:21281 eocHit>=0 本轮快照
+        const parkourArm = eq.oldStyleParkour === true;   // ★F5③ 6190 两臂开关
+        const bhx = this.x + this.vx * 0.5 - 4, bhy = this.y + this.vy * 0.5 - 4;
+        const bhw = this.w + 8, bhh = this.h + 8;
+        for (const e of game.enemies()) {
+          const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
+            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
+          if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
+          // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
+          if (!playerCanHitEnemy(e, game)) continue;
+          // ★AI_112 仙灵免疫门（B 扫尾补账：原式 :21275 冲撞扫敌门禁串
+          //  `(nPC.aiStyle == 112 && !(nPC.ai[2] <= 1f))` → continue——充能态
+          //  （虫网释放后态 2+）仙灵免伤克盾冲撞）。SetDefaults（NPC.cs:16608
+          //  type==583||584||585）下 aiStyle=112 全集恰为仙灵三型 ⇒ 三型 vanillaId
+          //  判定与原式等价（chilletDashCharge 同款落法）；ai[2]≤1 前态照常可打。
+          const dashFairy = en as unknown as { vanillaId?: number; ai2?: number };
+          if ((dashFairy.vanillaId === 583 || dashFairy.vanillaId === 584
+            || dashFairy.vanillaId === 585) && (dashFairy.ai2 ?? 0) > 1) continue;
+          const ex = en.x ?? en.cx - 8, ey = en.y ?? en.cy - 8, ew = en.w ?? 16, eh = en.h ?? 16;
+          if (!(bhx < ex + ew && bhx + bhw > ex && bhy < ey + eh && bhy + bhh > ey)) continue;
+          const dir = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing; // :20809-20815
+          // ★BJ-C2/F11（2026-10-06）：原版掷面 = meleeCrit 字段值（:21260 `Main.rand.Next
+          //  (100) < meleeCrit`）——含基 4（:2413 字段初值）与 :25712-14 逐帧链入的持械
+          //  item.crit+crt；this.critChance('melee') 只载装备/buff 面 ⇒ 补 4+heldItemCritBonus。
+          const crit = Math.random() * 100 < 4 + this.critChance('melee')
+            + heldItemCritBonus(this.inv.heldItem());   // :20811-20813
+          const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')) * (crit ? 2 : 1));
+          const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
+          en.hurt(dmg, dir * kb, -4, game, 0, false, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
+          // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（受击音+飘值同点，
+          // 见 Enemy.hurt 内 :82006-82015 收口注）；免疫早返 false 时本行曾仍弹
+          // 「幻影伤害」（2026-08-31 二轮红队同案复核）。色走单源敌方族表
+          // （fx/CombatTextColors.enemyHurtFloatColor），勿在调用方重设
+          // ★D3 玩家侧碰撞攻击免疫统一时钟（克盾冲撞 GiveImmune(4)——vanilla
+          //  DashMovement 冲撞段 :21277 GiveImmuneTimeForCollisionAttack(4) 同位）
+          grantCollisionAttackImmunity(this, 4);
+          this.eocDash = 10;            // :20833
+          eocHitFlag = true;
+          this.eocHitId = en.id ?? -2;  // :20840（后续帧不再对同一敌结算）
+          this.dashDelay = 30;          // :20834 反弹并结束滑行
+          // ★F5③ inline 臂（:21272-21276）：跑酷书 6190 在场 → 命中迭代内即翻速
+          if (parkourArm) {
+            this.vx = -dir * 9;
+            this.vy = -4;
+          }
+          break;
+        }
+        // ★F5③ post-loop 臂（:21281-21286）：非跑酷书走循环尾统一反弹，num4 取
+        // 【整轮终态】vx 符号或朝向——单命中 break 模型下终态 vx=±14.5（本帧无人写）
+        // ⇒ num4=dir 与 inline 同值；接通多命中续扫时两臂差异在此兑现。
+        if (eocHitFlag && !parkourArm) {
+          const num4 = this.vx !== 0 ? Math.sign(this.vx) : this.facing;   // :21283 num4
+          this.vx = -num4 * 9;
           this.vy = -4;
         }
-        break;
-      }
-      // ★F5③ post-loop 臂（:21281-21286）：非跑酷书走循环尾统一反弹，num4 取
-      // 【整轮终态】vx 符号或朝向——单命中 break 模型下终态 vx=±14.5（本帧无人写）
-      // ⇒ num4=dir 与 inline 同值；接通多命中续扫时两臂差异在此兑现。
-      if (eocHitFlag && !parkourArm) {
-        const num4 = this.vx !== 0 ? Math.sign(this.vx) : this.facing;   // :21283 num4
-        this.vx = -num4 * 9;
-        this.vy = -4;
+      } else if (!(this.inputLeft && this.vx < 0) && !(this.inputRight && this.vx > 0)) {
+        this.vx *= 0.95;              // :21287-21289 回弹臂（★C5-B4 补）
       }
     }
     if (this.dashDelay > 0) {
@@ -7893,11 +8049,15 @@ export class Player extends Entity {
       // dash 字段值 :21434-21499）——dash6 发起的滑行 dash==6 无任何条目=恒基础档
       // 12/0.992/0.96/20；骑乘期 eq.dash 不得污染。配饰档（eq.dash∈{1,2,3}）只在
       // 配饰发起的滑行生效（含骑 CanDash 非 6 型坐骑 56-61 场景,dash 保持装备值）。
-      const accOverridden = !m6Glide && (eq.dash === 2 || eq.dash === 3 || eq.dash === 4);
-      const dashNum13 = (!m6Glide && eq.dash === 3) ? 14 : 12;
+      // ★C5-B5（2026-10-06）：档位读 dashLatched（dash 字段闩锁位,:21434-21499 原文
+      //  num13-17 只认 dash 字段值）——旧式读活 eq.dash=滑行中途卸/换装备阻尼档
+      //  即漂移（原版不可能路径）。m6Glide 期 dashLatched===6 不落任何装备档,门保
+      //  留（!m6Glide）作 F1 结构锚。
+      const accOverridden = !m6Glide && (this.dashLatched === 2 || this.dashLatched === 3 || this.dashLatched === 4);
+      const dashNum13 = (!m6Glide && this.dashLatched === 3) ? 14 : 12;
       const dashNum14 = accOverridden ? 0.985 : 0.992;
       const dashNum16 = accOverridden ? 0.94 : 0.96;
-      const dashNum17 = m6Ended ? 30 : (!m6Glide && eq.dash === 2 ? 30 : 20);   // :21523 num17=(dashDelay)=30（反向收敛特例）;其余按各档
+      const dashNum17 = m6Ended ? 30 : (!m6Glide && this.dashLatched === 2 ? 30 : 20);   // :21523 num17=(dashDelay)=30（反向收敛特例）;其余按各档
       if (m6Ended) { this.dashDelay = 30; this.mountDash6Active = false; }   // dashTime=0 无独立窗建模
       // num15（:21429 出口钳速）= max(accRunSpeed, maxRunSpeed)，maxRunSpeed 已吃
       // Update :26204-26210 moveSpeed 乘区（buffs.moveSpeedMult × strongestSlow——
@@ -7910,7 +8070,17 @@ export class Player extends Entity {
         this.vx *= dashNum16;
       } else {
         this.dashDelay = dashNum17;      // :21567 dashDelay = num17
-        this.vx = this.vx < 0 ? -num15 : num15;   // :21570-21575 钳回 ±num15
+        // :21570-21575 钳回 ±num15——符号保持；★MV1（2026-10-06）补 vx==0 档原版语义:
+        // 原版 `if (velocity.X < 0 || (velocity.X == 0f && controlLeft)) -num15;
+        // else if (> 0 || (==0 && controlRight)) +num15;`——vx==0 时按当前左右键择向,
+        // 【无键则保持 0】（旧式三目把 vx==0 恒踢 +num15=自造右向蹬出）。
+        // ★MV2（2026-10-06）债③清偿：vx==0 择向臂直读 inputLeft/inputRight（=原版
+        // controlLeft/Right 同源位,CCed 拍已被 :5261 清零=恒保持 0 与原版同相;双键
+        // 同按原版 controlLeft 优先臂=−num15,旧经 ix 承载时 inputX=0 两臂皆不落,
+        // 1 拍 ±num15 级边缘）。滑行制动/加速臂（上方 ix!==0 块）仍读 ix=HorizontalMovement
+        // Run 支承载,不动（mv1 定谳）。
+        if (this.vx < 0 || (this.vx === 0 && this.inputLeft)) this.vx = -num15;
+        else if (this.vx > 0 || (this.vx === 0 && this.inputRight)) this.vx = num15;
       }
     } else if (eq.dash > 0 || this.mountDashing6()) {
       // 就绪段（:21128 else）：DoCommonDashHandle（:21267-21323）——双击窗收敛 +
@@ -7933,14 +8103,27 @@ export class Player extends Entity {
       let dashed = false;                     // DoCommonDashHandle dashing 出参（:21727）
       // 入支序 = 原版右支（:21749 `(controlRight && releaseRight) & flag) || num == 1`）
       // 先、左支（:21764）后——双击沿带 flag 门（双击冲刺设置），num 支无 flag 门。
-      // keyNum≠0 时 inputX∈{0,±keyNum} ⇒ 双击沿与键面同拍必同向,两支可并单块。
-      const dblTap = options.data.doubleTapDash && !this.cced
-        && this.inputX !== 0 && this.prevInputX === 0;   // 双击沿（release 语义）+ flag 门
+      // ★MV3（2026-10-07）债⑤清偿：双击沿改单键按下沿承载。原版 releaseRight/Left
+      //   逐拍尾刷新（:27827-27845 `releaseRight = !controlRight`，位次晚于 DashMovement
+      //   调用 :26691/:26958 ⇒ 消费面读到上一拍键态）⟺ 消费面 `controlRight ∧
+      //   ¬controlRight(前拍)` = 单键按下沿——双键同按时另一键的按/放不产生本键沿。
+      //   旧 inputX 合值沿（≠0 ∧ prev=0）在双键同按面丢真沿（本键重按 inputX 归 0，
+      //   原版 :21760/:21775 照登记 ±15 窗）+发假沿（松本键 inputX 0→±1，反向窗提前
+      //   1 拍登记，二次松键即反向冲刺=与原版方向相反）。
+      const tapRight = options.data.doubleTapDash && !this.cced
+        && this.inputRight && !this.prevInputRight;      // controlRight ∧ releaseRight（:21749）
+      const tapLeft = options.data.doubleTapDash && !this.cced
+        && this.inputLeft && !this.prevInputLeft;        // controlLeft ∧ releaseLeft（:21764）
       const dashEntryDir =
-        dashKeyNum === 1 || (dblTap && this.inputX > 0) ? 1
-          : dashKeyNum === -1 || (dblTap && this.inputX < 0) ? -1
+        dashKeyNum === 1 || tapRight ? 1
+          : dashKeyNum === -1 || tapLeft ? -1
           : 0;
-      const dashDir = dashKeyNum !== 0 ? dashKeyNum : this.inputX;   // 冲向（键面优先）
+      // 原版 dir=分支向硬编码（:21755 dir=1 / :21769 dir=-1；调用方 :21588
+      //   `velocity.X = 16.9f * dir` 等按支消费）——右支含 num==1、左支含 num==-1，
+      //   故 dir ≡ dashEntryDir（num=±1 落同号支；单键沿与 num 异号时沿支优先=原版
+      //   分支序）。旧 `keyNum ?: inputX` 在单键域逐位同值；双键同按 inputX=0 时丢窗
+      //  （原版按支记 ±15）。
+      const dashDir = dashEntryDir;
       if (dashEntryDir !== 0) {
         const dir = dashDir;
         // 执行门（:21751 `dashTime > 0 || num == 1` / :21766 `dashTime < 0 || num == -1`
@@ -8036,7 +8219,10 @@ export class Player extends Entity {
           this.solarCounter = 0;
         }
         const dir3 = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing;
-        const crit3 = Math.random() * 100 < this.critChance('melee');
+        // ★BJ-C2/F11（2026-10-06）：同克盾冲撞——原版 :21328 `Main.rand.Next(100) <
+        //  meleeCrit` 含基 4+:25712-14 持械折入,补 4+heldItemCritBonus（F11 同式）。
+        const crit3 = Math.random() * 100 < 4 + this.critChance('melee')
+          + heldItemCritBonus(this.inv.heldItem());
         const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')) * (crit3 ? 2 : 1));  // :21317
         const kb3 = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);        // :21318-21327
         en.hurt(dmg3, dir3 * kb3, -4, game, 0, false, 0, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317)
@@ -9485,6 +9671,15 @@ export class Player extends Entity {
   eocDash = 0;
   eocHitId = -1;
   prevInputX = 0;
+  /** ★MV3（2026-10-07）单键沿真值源——原版 releaseLeft/releaseRight（:27827-27845
+   *  逐拍尾刷新 `releaseLeft = !controlLeft`，位次晚于 DashMovement 调用 :26691/
+   *  :26958 ⇒ 消费面读到上一拍键态；死亡相 :17192-17193 同源刷新）≙ 上一拍
+   *  control 电平。双击冲刺消费面 :21749 `controlRight && releaseRight` /
+   *  :21764 `controlLeft && releaseLeft` = 单键按下沿——双键同按时另一键的按/放
+   *  不产生本键沿（inputX 合值沿在该面丢真沿+发假沿=债⑤）。快照点与 prevInputX
+   *  同址五站（死亡/坐睡/矿车×2/主尾拍），困惑轮换后快照（=原版轮换面）。 */
+  prevInputLeft = false;
+  prevInputRight = false;
   /** ★BJ508 Quick Dash 键电平（controlDash，TriggersSet.cs:825 `p.controlDash = Dash`
    *  ——PlayerInput KeyStatus["Dash"] 同源，Game 注入面写）。缺省无绑定 = 原版
    *  Keyboard 档（PlayerInput.cs:2069-2108 Redigit 预设无 Dash 条目），设置页自绑 */

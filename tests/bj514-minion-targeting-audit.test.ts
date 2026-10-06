@@ -176,7 +176,7 @@ describe('① 逐型索敌语义表（原版形态 × 本仓形态钉值,变异�
     expect(src).toContain("nearestEnemy(game, 1000, 'line', 'self', 1000)");
   });
 
-  it('AI_177 酷鞭雪花/雾网蜘蛛 917/1036：无集火/无 tag（FindTargetWithinRange :45918）——旧通用段红', () => {
+  it('AI_177 酷鞭雪花 917：无集火/无 tag（FindTargetWithinRange :45918）——旧通用段红（★BJ-C3/F5：1036 已重路由 webStep,标题残留同步）', () => {
     const fn = slice('private ai177FindTarget(', '\n  }\n');
     expect(fn).not.toContain('minionTargetId');
     expect(fn).not.toContain('anyTagged');

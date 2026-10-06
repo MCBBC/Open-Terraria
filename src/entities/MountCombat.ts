@@ -57,6 +57,7 @@ import { damageVar } from '../stats/ScaleStats';
 import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy as _playerCanHitEnemy, playerProjectileCanHitNpcGate, applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';
+import { heldItemCritBonus } from './proj1457';   // ★BJ-C2/F12 持械折入单源（proj1457 无反向依赖,无环）
 
 /** IsConsideredASlimeMount（Mount.cs:522-533）：type==3 SlimySaddle ∪ type==50 QueenSlime */
 export function isConsideredASlimeMount(mountType: number): boolean {
@@ -177,6 +178,7 @@ export function minecartNpcRampage(cart: {
   const p = game.player as unknown as {
     cx: number; cy: number; luck: number;
     critChance(k: 'melee' | 'ranged' | 'magic'): number;
+    inv?: { heldItem?: () => { id: number; prefix?: number } | null | undefined };
     tryConsumingTimerCrit?(g: GameHooks, rx: number, ry: number, rw: number, rh: number): boolean;
     dead?: boolean;
   } | null;
@@ -189,7 +191,13 @@ export function minecartNpcRampage(cart: {
   const dir = cart.vx < 0 ? -1 : 1;                               // :27802-27806
   // 暴击 = max(melee,ranged,magic) 三择大掷骰（:27777-27792：rand.Next(1,101)<=crit
   // ⇔ floor(rand*100)+1<=crit 整数均匀分布）；后接 TryConsumingTimerCrit 强暴 OR 进。
-  const critChanceMax = Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'));
+  // ★BJ-C2/F12（2026-10-06）：原版 num80 起点 = meleeCrit 字段值——含基 4
+  //  （Player.cs:2413/:18458 字段初值）与 :25712-14 逐帧链入的持械 item.crit+crt
+  //  （三系同值,对 max 可外提）；p.critChance(kind) 只载装备/buff 面 ⇒ 补
+  //  4+heldItemCritBonus（proj1457 单源,rollVanillaHitCrit 同式）。
+  const critChanceMax = 4
+    + Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'))
+    + heldItemCritBonus(p.inv?.heldItem?.() ?? null);
   const ctx: MinecartDamageCtx = {
     mountType: cart.mountId,
     superCart: cart.superCart,
@@ -658,19 +666,34 @@ export function playerArmorPenOf(game: GameHooks): number {
  *  wetSticky（≙ vanilla wet 粘滞位,Player.cs:28192 `if (wet)`——原版该读点在
  *  :28060/:28073 分支【后】,wet 已被本拍 num86 刷新≡num86;本仓调用位 Player.ts
  *  湿流程后,wetSticky 后值≡wetNow 同构）。三桶并集混入全盒 LavaCollision 幻影
- *  =BJ89 定谳家族（探针干+全盒岩浆擦过时原版 wet 假→坐骑不入浮力档,并集真→幻影档）。 */
+ *  =BJ89 定谳家族（探针干+全盒岩浆擦过时原版 wet 假→坐骑不入浮力档,并集真→幻影档）。
+ *  ★C5-B1（2026-10-06）补 wet switch 下坐臂（Player.cs:28177-28207）：
+ *    ① :28181-28185 `dripping && mount.Type==56` → TryDismount——Wet(103) buff 位
+ *      【wet 外门】（上岸残湿期坐可爱飞鱼照样逼下）;② :28188-28191 wet switch
+ *      `case 5/7/56`（蜜蜂/飞碟/可爱飞鱼）→ TryDismount（不落 wetSlime 档）。
+ *    返回 true = 原版本拍会调 Mount.TryDismount；执行（空间门+伴生 buff 清偿+
+ *    petting 终止,同 :5389 冻结下坐惯例）在调用方 Player.ts 湿流程——本函数保持
+ *    纯查询面（无 buffs/dismount 视图;dripping=Wet(103) buff 位由调用方显式传入,
+ *    Player 无实例级 dripping 字段——buffs.has(BuffType.Wet) 直读）。重复判定幂等
+ *    （dripping×56 湿拍两臂同真 ≡ 原版 TryDismount 调两次,第二次 CanDismount 空转）。 */
 export function tickSlimeWetState(p: {
   wetSticky?: boolean; vy: number; wetSlime?: number;
   mount: { active: boolean; type: number };
-}): void {
+}, dripping = false): boolean {
   if ((p.wetSlime ?? 0) > 0) p.wetSlime = (p.wetSlime ?? 0) - 1;   // :28173-28175
-  if (!p.mount.active) return;
-  if (!p.wetSticky) return;
-  if (!isConsideredASlimeMount(p.mount.type)) return;
+  if (!p.mount.active) return false;
+  let dismount = false;
+  if (dripping && p.mount.type === 56) dismount = true;            // ★C5-B1 :28181-28185
+  if (!p.wetSticky) return dismount;
+  if (p.mount.type === 5 || p.mount.type === 7 || p.mount.type === 56) {
+    return true;                                                   // ★C5-B1 :28188-28191
+  }
+  if (!isConsideredASlimeMount(p.mount.type)) return dismount;
   p.wetSlime = 30;                                                // :28196-28197
   if (p.vy > 2) p.vy *= 0.9;                                      // :28198-28200
   p.vy -= 0.5;                                                    // :28202
   if (p.vy < -4) p.vy = -4;                                       // :28203-28205
+  return dismount;
 }
 
 /** JumpMovement controlJump 头部的湿清除（1457 :20805-20818——门 :20815-20817 /

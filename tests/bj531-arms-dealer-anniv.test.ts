@@ -91,7 +91,10 @@ describe('BJ531 到达门功能面：SpawnAllowed_ArmsDealer（NPC.cs:7119-7124 
     expect(spawnAllowedWith([{ vid: 534, stack: 1 }])('arms_dealer')).toBe(true);
   });
 
-  it('T4 反例：凝胶(23 ammo=23)/木箭(51 ammo=40) 非子弹域 → false；空背包 → false', () => {
+  // ★C5-B8（2026-10-06）标注勘误：vid 51 = Jester's Arrow 小丑之箭（ItemID.cs:1648;
+  //  WoodenArrow=40 :1626）——ammo=40 是 AmmoID.Arrow（AmmoID.cs:116）弹种域,
+  //  与木箭物品 id 40 数值巧合,旧注"木箭(51)"系误读。
+  it('T4 反例：凝胶(23 ammo=23)/小丑之箭(51 ammo=40) 非子弹域 → false；空背包 → false', () => {
     expect(spawnAllowedWith([{ vid: 23, stack: 99 }])('arms_dealer')).toBe(false);
     expect(spawnAllowedWith([{ vid: 51, stack: 999 }])('arms_dealer')).toBe(false);
     expect(spawnAllowedWith([])('arms_dealer')).toBe(false);
@@ -127,7 +130,7 @@ describe('BJ531 数据表钉值：vanilla-itemcombat.json = Item.cs SetDefaults 
     expect(itemCombat(534)?.useAmmo).toBe(97);
   });
 
-  it('子弹域全集族：278 银子弹 ammo=97；异域 23 凝胶 ammo=23 / 51 木箭 ammo=40 不串', () => {
+  it('子弹域全集族：278 银子弹 ammo=97；异域 23 凝胶 ammo=23 / 51 小丑之箭 ammo=40 不串（★C5-B8 勘误：51=Jester Arrow 小丑之箭 非木箭）', () => {
     expect(itemCombat(278)?.ammo).toBe(97);
     expect(itemCombat(23)?.ammo).toBe(23);
     expect(itemCombat(51)?.ammo).toBe(40);

@@ -140,7 +140,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -155,11 +155,11 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf } from '../mods/hooks';
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
-import { MOD_PROJ_ID_BASE } from '../mods/types';
+import { MOD_PROJ_ID_BASE, MOD_NPC_ID_BASE } from '../mods/types';
 import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
@@ -191,7 +191,7 @@ import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/Player
  *  buffTypeByVanilla（Buffs.ts 反查 Map,mod 注册面已直写）。原版域行为恒等。 */
 const BUFF_BY_VANILLA = (v: number): BuffType | undefined => buffTypeByVanilla(v);
 import { projectileData } from '../data/vanillaProjectiles';
-import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
+import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, MOD_SPAWN_RULES, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla, craftListSignature } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
@@ -468,6 +468,7 @@ import { TitaniumStormShard,
   PetalstormShot, StormLightning, GlacierFangShot,
   ThunderBoltShot, LaserMachinegunHolder, LaserMachinegunLaser, BookStormTwister, PrincessMagicCircle,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
+import { heldItemCritBonus } from '../entities/proj1457';   // ★BJ-C2/F2/F7/F10/F14 持械折入单源（BJ486③ :25712-14 同算式）
 // 叶绿水晶叶套装弹族（台账 L3 清偿批 2026-08-31——锚体 226 + 隐藏叶弹 227；
 // canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
 import { ChloroLeafCrystalAnchor, ChloroLeafShot,
@@ -14156,7 +14157,10 @@ export class Game implements GameHooks {
       canChangeImmediately: (this.usingOrReusingItem() || this._dirtRodChannel)
         ? false : p.useTime === 0,
       isSlotEmpty: (i) => !p.inv.slots[i],
-      onSelectionChanged: () => this.cb.onInventoryChanged(),
+      // ★BJ-C4-F1：OnSelectionChanged 全量=UI 刷新（cb.onInventoryChanged）+杀手面
+      //   （selectionChangedKill,itemTime 归零+按住中 blockMouse 压制——换选/还原两拍
+      //   同吃,1457 Player.cs:519-533,:529 唯一调用位=SmartSelect.update :301）
+      onSelectionChanged: () => { this.cb.onInventoryChanged(); this.selectionChangedKill(); },
     };
     this.smartSelect.update(env, host);
     p.inv.selected = host.selected;
@@ -14457,6 +14461,38 @@ export class Game implements GameHooks {
     if (controlUseItem) armBlockMouse(inp);
   }
 
+  /** OnSelectionChanged（1457 Player.cs:519-533）杀手面全量（★BJ-C4-F1 2026-10-06
+   *  R4 UI 批清偿）：SmartSelect 换选/还原（OverrideSelection :424-434 ∪ overridden
+   *  还原 :491-494）任一拍 selected 变化即走本面——消费位=SmartSelect.update :301
+   *  host.onSelectionChanged（原版 Player.cs:529 唯一调用位同构,与 BJ536 还原拍
+   *  restoreSelectionKill 同族）。三件逐项:
+   *  ①itemTime=(itemTimeMax=0)——:484 CanChangeSelectedItemImmediately 整体早退门
+   *    后恒已 0（ItemTimeIsZero 是门合取支）,写点=1:1 保形;本仓单计时器模型
+   *    useTime 代 itemTime/itemTimeMax（后者未建模,单计时器塌缩,canChangeImmediately
+   *    注同口径）→ 现网 no-op;
+   *  ②lastItemUseAttemptSuccess=true——本地单人零消费点（消费面=:43077-43085 远端
+   *    臂 flag2&=…、MP 同步 :488/:1050/:6901/:55109、useStyle5 远端重施门 :53525
+   *    whoAmI≠myPlayer）,本仓无该字段=不移植（登记面,非缺刀）;
+   *  ③controlUseItem 按住中压制（:526-531 else-if !releaseUseItem 臂）→
+   *    Main.blockMouse=true+controlUseItem=false。本仓=armBlockMouse 电平面
+   *    （SW-AF1:置位压掉【余下按住期】controlUseItem 置位,松键复位,下次点击不受
+   *    影响;本帧 updateUse 早退门 inp.blockMouse 即吞=原版 controlUseItem=false
+   *    同拍序——SelectedItemState.Update 先于 ItemCheck 消费,本仓 updateSmartSelect
+   *    :10694 先于 updateUse :10701 同序）。continueAutoReuseWithNewItem 支
+   *    （:526-528,buffered 换选续发）不可达:host 无 buffered（数字键直写 selected,
+   *    Select 债注释族同口径）;releaseUseItem=!controlUseItem 每拍覆写（:43160）
+   *    → 按住中恒 false=压制门恒开,松过键则 controlUseItem 本就 false。
+   *    判式=controlUseItem 电平全项（TriggersSet.cs:835-847 置位源+R4-22
+   *    delayUseItem 压制+mouseInterface 等价面两站+annotateMode,与 :13977 同式）。 */
+  private selectionChangedKill(): void {
+    this.player.useTime = 0;   // ①itemTime=(itemTimeMax=0)——门后 no-op,1:1 保形
+    const inp = this.input;
+    if (!inp) return;
+    const controlUseItem = !!inp.mouseHeld && !inp.blockMouse && !inp.delayUseItem
+      && !inp.uiBlocking && !this.inpOverDomUi() && !this.annotateMode;
+    if (controlUseItem) armBlockMouse(inp);   // ③blockMouse=true+controlUseItem=false
+  }
+
   private syncCursorMirror(): void {
     const inv = this.player.inv;
     const cur = this.uiHeldItemObj?.() ?? null;
@@ -14608,8 +14644,10 @@ export class Game implements GameHooks {
     // ★SW-FX52（2026-09-16）：补微光化腿（原版 ItemCheck 头 :42924-42930 CCed 早退 +
     // :25432-25442 controlUseItem 清零——buff 353 置 frozen=true :11872-11876 ⇒ 微光态
     // 全物品禁用;旧缺腿=微光下沉中可左键发射钩爪,牵引拖玩家入岩层卡死）
+    // ★MV2（2026-10-06）债②：补 webbed 腿——CCed 三件套含结网（:3361-3372）,
+    // controlUseItem/UseTile 同段清零 ⇒ 结网拍物品整链禁用（与 Frozen 同门）。
     if (this.player.buffs.has(BuffType.Stoned) || this.player.buffs.has(BuffType.Frozen)
-      || this.player.shimmering) return;
+      || this.player.buffs.has(BuffType.Webbed) || this.player.shimmering) return;
     // 诅咒(23)：noItems（:11326-11330）→ TryUsingItem 整链禁用（:5757/:5964/:52017）
     if (this.player.buffs.has(BuffType.Cursed)) return;
     // ---- 传送族引导 tick(先于 uiBlocking 早退:引导中开背包不中断,原版同语义) ----
@@ -15815,12 +15853,17 @@ export class Game implements GameHooks {
               let dy503 = Math.abs(mwy - sy503);
               if (dy503 < 20) dy503 = 20;
               const dl503 = Math.hypot(dx503, dy503) || 1;
-              this.entities.add(new Arrow(sx503, sy503,
+              const star503 = new Arrow(sx503, sy503,
                 dx503 / dl503 * spd503,
                 dy503 / dl503 * spd503 + (Math.random() * 80 - 40) * 0.02,
                 this.swing.dmg ?? 1, this.swing.kb ?? 3, 503,
-                { grav: 0, life: 900, pierce: Math.max(1, pd?.penetrate ?? 2), star: { targetY } }),
-                'projectiles');
+                { grav: 0, life: 900, pierce: Math.max(1, pd?.penetrate ?? 2), star: { targetY } });
+              // ★BJ-C2/F3（2026-10-06）：503 数据面 melee（vanilla-projectiles.json
+              // SetDefaults melee=true 亲读）→ 原版 Damage() :12916 melee 臂掷（≥基 4%）；
+              // Arrow 类缺省 critChance=0=门闭 → 天降三剑此前永不暴击。置 0.04 路由门
+              // → 命中拍 rollVanillaHitCrit 动态掷（含 owner 聚合+:25712-14 持械折入）。
+              star503.critChance = 0.04;
+              this.entities.add(star503, 'projectiles');
             }
             this.mining = null;   // 与分支尾段语义一致（提前 return 防漏）
             return;  // 本击只出天降剑，不再走下方通用单发
@@ -17300,7 +17343,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const fw = new Arrow(ax + frx / frl * 6, ay + fry / frl * 6, fwVx, fwVy,
               damage, knockback, 167 + Math.floor(Math.random() * 4),
               { grav: 0, life: 45, pierce: 1 });
-            fw.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
+            // ★BJ-C2/F1（2026-10-06）：0.04 路由门（BJ493②③ 同式）——旧冻结值
+            //  `crit('ranged')+bowC?.crit ?? 0` 可算 0 → Arrow 主环门闭=烟花永不
+            //  暴击;167 数据面 ranged（vanilla-projectiles.json aiStyle34 亲读）→
+            //  命中拍 rollVanillaHitCrit 动态掷（含 owner 聚合+:25712-14 持械折入）。
+            fw.critChance = 0.04;
             fw.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             fw.launcherFirework = 1;                    // ai[1]=1（AI_034 发射器档）
             this.entities.add(fw, 'projectiles');
@@ -17382,14 +17429,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                     Math.trunc(edmg / 2), fragId, 31 + Math.floor(Math.random() * 30),
                     (fx, fy, fdmg, fvx) => {
                       // pen=0：裂片经 NewProjectile 生成（:79821 七参重载无 armorPen
-                      // 位,不吃武器穿甲）;crit=父弹发射玩家面板（ClusterFragmentProj.critChance）
+                      // 位,不吃武器穿甲）;★BJ-C2/F6：crit 掷=ClusterFragmentProj 命中拍
+                      // rollVanillaHitCrit 动态（ranged 面,:12920 臂）,spawn 位只置路由门
                       // SW-S1 2026-09-04：kb=PrepareBombToBlow :47674-47678（779/783/862/863）knockBack 8
                       // SW-AC1 2026-09-04：kbDir=裂片弹末 vx 符号（aiStyle16 自动面同式）
                       this.explodeAt(Math.floor(fx / TILE), Math.floor(fy / TILE), fdmg,
                         fragR, fragR > 0, 24, 0, fragId, fx, fy, PREPARE_BOMB_KB[fragId],
                         Game.explosionKbDir(fvx));
                     });
-                  frag.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
+                  // ★BJ-C2/F6（2026-10-06）：0.04 路由门（F1 同式）——旧冻结值可算 0
+                  // 且旧 `||0.04` 平率直读丢 owner 聚合/持械折入（779/783/862/863
+                  // SetDefaults ranged=true 数据面亲读）。
+                  frag.critChance = 0.04;
                   this.entities.add(frag, 'projectiles');
                 }
               }
@@ -17403,7 +17454,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ——火箭炮 5.5,Projectile.cs:1966 无 knockBack 行=默认 0 再被发射侧覆盖）
           rocket.contactPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           rocket.contactKb = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
-          rocket.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
+          // ★BJ-C2/F1（2026-10-06）：0.04 路由门（BJ493②③ 同式）——旧冻结值
+          //  `crit('ranged')+bowC?.crit ?? 0` 在无装备/无词缀玩家身上恒算 0 →
+          //  GrenadeProj 接触环 `critChance > 0` 路由门闭=火箭/榴弹族（30/134/397/517/
+          //  588/681 数据面 ranged,vanilla-projectiles.json 亲读）永不暴击;原版
+          //  Projectile.Damage :12920 ranged 臂掷=≥基 4%。命中拍 rollVanillaHitCrit
+          //  动态掷（含 owner 聚合+:25712-14 持械折入）。
+          rocket.critChance = 0.04;
           rocket.fired = true;
           // ★出生锚回正（2026-09-02 用户实报"右朝向垂直向上弹体出生点偏离盒中心"）：
           //  ax/ay=resolveShotAnchor 中心语义（y 已上抬 projH/2=14/2）——构造器首参
@@ -23956,6 +24013,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 树：砍树干 → 整棵树倒下（自有树 + 导入的原版树族）
     if (type === T.TREE) {
       this.fellTree(x, y);
+      return;
+    }
+    // ★B7 七十九刀：mod 树砍伐链接（GrowsOnTileId 数据面消费）——同列向上级联
+    //  逐格 killTile（dropItem=木材账,acidwood 等）;无原版 CheckTree 重帧面=登记。
+    if (MOD_TREE_IDS.has(type)) {
+      const st = this.world.store;
+      let ty = y;
+      while (ty > 0 && st.get(x, ty - 1) === type) ty--;
+      for (let cy = ty; cy <= y; cy++) this.breakTile(x, cy, true, false, false);
       return;
     }
     // 暗影之球/恶魔之心：整体破碎（原版 WorldGen.CheckOrb 移植）
@@ -31705,10 +31771,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** SW-AF1 2026-09-04（F-4）：玩家 ranged 暴击面板（百分点,:12920
-   *  `Main.player[owner].rangedCrit` 消费源=本仓 critChance('ranged') 惯例）。
-   *  缺法回落 4 = Player.rangedCrit 原版基线（裸 stub 兼容,实机恒有该方法）。 */
+   *  `Main.player[owner].rangedCrit` 消费源）。
+   *  ★BJ-C2/F2（2026-10-06）口径收口：原版 rangedCrit 字段值 = 基 4（Player.cs:2417
+   *  初值）+ 装备/buff 面 + :25712-14 逐帧链入的持械 item.crit+crt——旧式只回
+   *  critChance('ranged')（装备/buff 面,缺基 4 缺折入）⇒ 爆炸掷与同弹接触掷
+   *  （rollVanillaHitCrit=0.04+agg+折入）口径分裂,无装备玩家爆炸 0% 暴击。
+   *  缺法回落同相：critChance 缺 → 4+0+0=4（裸 stub 兼容,实机恒有该方法）。 */
   private rangedCritPct(): number {
-    return this.player.critChance?.('ranged') ?? 4;
+    return 4 + (this.player.critChance?.('ranged') ?? 0)
+      + heldItemCritBonus(this.player.inv?.heldItem?.() ?? null);
   }
 
   /** SW-AC1 2026-09-04（F-4 半边清偿）：SelfHurtPlayers Dead Man's Sweater 分支
@@ -35273,8 +35344,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // TimerCrit 消费（:44656 Rectangle.Intersect(itemRectangle, npcRect)）一并接：
       // 蓄能暴击对城镇 NPC 命中同判同消费。接收端 = TownNPC.hurt 第 7 形参 crit
       // （ζ 已建：防后 ×2，StrikeNPC_Inner NPC.cs:82067 口径——见 hurt 内 F6 注）。
+      // ★BJ-C2/F10（2026-10-06）：持械折入改 heldItemCritBonus 单源——原版 :25712-14
+      //  折入的是 inventory[selectedItem].crit 字段值（词缀 crt 重铸期已折进字段,
+      //  Item.cs:585）；旧式 itemCombat(vid).crit 只载 def 数据面半边,词缀 crt
+      //  半边整漏。掷面=持械现值（inv.heldItem()）=原版读位同源。
       let tnCrit = Math.random() < 0.04 + this.player.critChance('melee') / 100
-        + (itemCombat(heldVidFly)?.crit ?? 0) / 100;
+        + heldItemCritBonus(this.player.inv.heldItem()) / 100;
       if (this.player.tryConsumingTimerCrit(this,
         Math.max(mHX, Math.trunc(tn.x)), Math.max(mHY, Math.trunc(tn.y)),
         Math.min(mHX + mHW, Math.trunc(tn.x) + tn.w) - Math.max(mHX, Math.trunc(tn.x)),
@@ -35398,10 +35473,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && !this.meleeCanHitLOS(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
       // 受击音=Enemy.hurt 单点（StrikeNPC :82118 HitSound + :82255 宠物史莱姆语音族）
+      // ★BJ-C2/F10（2026-10-06）：折入改 heldItemCritBonus 单源（同城镇 NPC 支注）——
+      // 补词缀 crt 半边,掷面=持械现值（:25712-14 inventory[selectedItem].crit 同源）。
       let crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
         // ★武器 item.crit(GetWeaponCrit:4 基础+武器+装备)——vi_ 数据驱动近战武器 crit
         // 字段此前未入链(挥砍侧全族只有装备 crit)
-        + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1)?.crit ?? 0) / 100;
+        + heldItemCritBonus(this.player.inv.heldItem()) / 100;
       // 1457 蓄能暴击 6170（TryConsumingTimerCrit :28564-28595,近战命中调用点
       // :44657 ItemCheck）：满蓄(≥1000)/负冷却窗(<0) → 强制暴击并消费(−15)。
       // 传入盒 = itemRectangle∩npcRect（:44656 Rectangle.Intersect——仅粒子定位面；
@@ -35589,6 +35666,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 1=无潜行 → ×1，仓内 Player.stealth 同语义）
       // ★F8 加法形保持单行结构锚（weapon-melee-leftover 结构断言依赖序：kbGlove→Titan→3106）
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
+      // ★CalPlayer 基建(一百零四刀):玩家命中伤害修正链(Rage/Adrenaline 增幅消费)
+      dmg = runModModifyHitNpc(this.player, this, swingVid ?? -1, dmg);
       const killed = e.hurt(dmg, kdir * kb, 0, this, (eq.armorPen ?? 0) + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
       // ★B6 mod OnHitNPC 钩(受理命中后;tModLoader ModItem.OnHitNPC 形,空表零成本):
       //  mod 近战武器命中敌怪的任意逻辑面(damage=chainDmg 词缀后实扣值)
@@ -35647,7 +35726,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.fround((sxp + e.cx * 2) / 3), Math.fround((syp + e.cy * 2) / 3),
             gvx, gvy,
             Math.max(1, Math.trunc(chainDmg * 0.5)), kb * 0.7);
-          glob.critChanceFn = (): number => Math.min(1, 0.04 + this.player.critChance('melee') / 100);
+          // ★BJ-C2/F14（2026-10-06）：524 melee 面（SetDefaults :5941-54 亲读）掷面
+          //  meleeCrit 含 :25712-14 持械折入（「不吃武器暴击」旧谳证伪）——补折入。
+          glob.critChanceFn = (): number =>
+            Math.min(1, 0.04 + (this.player.critChance('melee')
+              + heldItemCritBonus(this.player.inv.heldItem())) / 100);
           glob.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
           this.entities.add(glob, 'projectiles');
         }
@@ -35811,8 +35894,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             wx += Math.fround(e.vx * 5); wy += Math.fround(e.vy * 5);
             const cut = new MuramasaSlashProj(wx, wy, spx, spy,
               Math.max(1, Math.trunc(dmgRandomized * 0.5)), 0, num6);
-            // ★α-H1：弹 155 SetDefaults（:2855-2862 netImportant/44×44/aiStyle32/
-            // friendly）【无任何类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
+            // ★BJ-C2/F7（2026-10-06）重定谳：旧注「弹 155 无任何类别旗=原版不掷 crit」
+            // 定谳错——原版 NewProjectile 生成的是【977】（Player.cs:44904,弹 155=村正
+            // 物品 id 非弹 id）,977 SetDefaults melee=true（vanilla-projectiles.json
+            // aiStyle152 面亲读）→ Damage() :12916 melee 臂掷,meleeCrit 含 :25712-14
+            // 持械 item.crit+crt 折入（BJ486③ 同源）。critChanceFn live 注入含折入
+            // （VolcanoBlastProj/Bladetongue 同式);meleeOnHitProjs 消费位白抽已同步消除。
+            cut.critChanceFn = (): number =>
+              Math.min(1, 0.04 + (this.player.critChance('melee')
+                + heldItemCritBonus(this.player.inv.heldItem())) / 100);
             cut.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(cut, 'projectiles');
           }
@@ -35829,8 +35919,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ×0.75 截断；knockBack = num4 调后值（glove×2/Titan×1.5/
       // 3106 潜行链 ≡ 主命中 kb）；出生点=受害者 center；velocity=(0,-gravDir)。
       // 弹本体 SetDefaults/AI_189/StatusNPC(24,180) 见 entities/VolcanoBlastProj.ts。
-      // ★R2-04：暴击面改 live 注入（Strike 时点实时取玩家近战 crit；原版该 proc
-      // 不吃武器 item.crit——旧式冻结注入+武器 crit 双偏已废）。
+      // ★R2-04：暴击面改 live 注入（Strike 时点实时取玩家近战 crit）。
+      // ★BJ-C2/F14（2026-10-06）重定谳：旧注「原版该 proc 不吃武器 item.crit」证伪
+      // ——Player.cs:25712-25714 每帧无条件三系折入 `meleeCrit +=
+      // inventory[selectedItem].crit` → :12898 掷面 meleeCrit【含】持械
+      // item.crit+crt（BJ486③ 同源定谳）;978 数据面 melee（vanilla-projectiles.json
+      // aiStyle189 亲读）掷面可达。补 heldItemCritBonus（与 977/524 产生位同式）。
       // ★ζ#4：窗口消费门旧裸读 `!e.def.critter && immortal!==true` 改走统一出口
       // 谓词 hittableForOnHitRewards（NPC.cs:91152 同式,含桶位源）。
       if (this.swing?.volcanoWindow === true && hittableForOnHitRewards(e)) {
@@ -35838,7 +35932,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           0, -1 * (p.gravDir ?? 1),
           Math.max(1, Math.trunc(chainDmg * 0.75)), kb, p.facing);
         blast.critChanceFn = (): number =>
-          Math.min(1, 0.04 + this.player.critChance('melee') / 100);
+          Math.min(1, 0.04 + (this.player.critChance('melee')
+            + heldItemCritBonus(this.player.inv.heldItem())) / 100);
         blast.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
         this.entities.add(blast, 'projectiles');
         this.swing.volcanoWindow = false;
@@ -36014,7 +36109,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             (this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)
               * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) // ★F8 num4 加法形
               * 0.7);
-          glob.critChanceFn = (): number => Math.min(1, (4 + this.player.critChance('melee')) / 100);
+          // ★BJ-C2/F14（2026-10-06）：PvP 面同 PvE 支——补 :25712-14 持械折入。
+          glob.critChanceFn = (): number =>
+            Math.min(1, (4 + this.player.critChance('melee')
+              + heldItemCritBonus(this.player.inv.heldItem())) / 100);
           glob.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
           this.spawnFriendlyProj(glob, { netSync: true });   // 伴生弹照走即时上线通道
         }
@@ -36629,6 +36727,42 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return sp;
   }
 
+  /** ★B7 一百零八刀:mod 自然生成 v1(MOD_SAPAWN_RULES→rename MOD_SPAWN_RULES)。
+   *  行={npcId, zone('snow'|'jungle'|...|null), water, mult}(mult=基准 spawnChance 权重);
+   *  命中=spawnNPC 同型落格(取 vanilla spawn 判定面简化:屏外+非实心+基座)。 */
+  private trySpawnModEnemy(p: Player, rng: RNG, viewHalfW: number, viewHalfH: number): boolean {
+    const rules = MOD_SPAWN_RULES;
+    if (rules.length === 0) return false;
+    const zoneNow = ((): string | null => {
+      const sc = this.scene;
+      if (!sc) return null;
+      if (sc.zoneSnow) return 'snow';
+      if (sc.zoneJungle) return 'jungle';
+      if (sc.zoneDesert) return 'desert';
+      if (sc.zoneCorrupt) return 'corrupt';
+      if (sc.zoneCrimson) return 'crimson';
+      if (sc.zoneHallow) return 'hallow';
+      if (sc.zoneDungeon) return 'dungeon';
+      if (sc.zoneGlowshroom) return 'glowshroom';
+      return null;
+    })();
+    for (const r of rules) {
+      if (r.zone && r.zone !== zoneNow) continue;
+      const chance = 1 / (600 / r.mult);   // spawnRate 600 基准:mult 倍权重
+      if (Math.random() >= Math.min(0.5, chance)) continue;
+      const vx = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
+      const vy = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
+      const tx = Math.floor(p.cx / TILE + (Math.random() * 2 - 1) * vx);
+      const ty = Math.floor(p.cy / TILE + (Math.random() * 2 - 1) * vy);
+      if (tx < 10 || tx >= this.world.store.w - 10 || ty < 5 || ty >= this.world.store.h - 5) continue;
+      if (this.world.store.hasTile(tx, ty)) continue;
+      if (this.world.store.get(tx, ty + 1) === 0) continue;   // 需基座
+      this.spawnNpcByVanilla(r.npcId, tx * TILE, ty * TILE);
+      return true;
+    }
+    return false;
+  }
+
   private trySpawnEnemy() {
     // NPC.noSpawnCycle 消费（MINOR-2,原版 SpawnNPC 头 :80991-80995）：本帧有怪经
     // CheckActive 消散（runDespawnFx 置位）→ 跳过本次刷怪并清零（同帧零生成;
@@ -36907,6 +37041,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const viewHalfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
     const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);
+    // ★B7 一百零八刀:mod 自然生成 v1 注入面——vanilla 选怪前先掷 mod 生成行
+    //  (MOD_SPAWN_RULES:zone/water/mult 门;scene 群系旗直读;命中即 spawnNpc)
+    const modPicked = this.trySpawnModEnemy(p, rng, viewHalfW, viewHalfH);
+    if (modPicked) return;
     const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
     if (!picked) return;
     // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
@@ -42730,6 +42868,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number {
     const p = this.player;
     if (p.dead) return 0;
+    // ★CalPlayer 基建(六十三刀):mod NPC 进攻面承伤修正链(ModifyHitByNPC 形;
+    //  仅 attacker≥MOD_NPC_ID_BASE 走钩,原版面零扰动;空表零成本)
+    const modAttackerVid = attacker?.vanillaId ?? -1;
+    if (modAttackerVid >= MOD_NPC_ID_BASE) {
+      dmg = runModModifyHurtByNpc(p, this, modAttackerVid, dmg, contactOnly);
+    }
     const eq = p.equipStats;   // ★IIIII250 受击路径快照(4 直读;所读 armorPen/longInvince/starCloak/bees 全装备派生,panicTime/buff 受击写面不影响其值)
     // 本次受击生效冷却桶 id（★A2：环境站经瞬态通道注入 Lava/TileContactDamage 等；
     // General=-1 时与旧语义同）。Counter/TeamDamageShare/Retaliate 三集合读它——
@@ -43003,9 +43147,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // (:24247);此前传 null=星体全程穿墙提前撞块/尾段不减亮
           // starY 目标线复用星怒 503 同构通道(:22139-22143 Center.Y>ai[1]→tileCollide;
           // ai[1]=出生 sy=position.Y :38783)
-          const star = new Arrow(sx, sy, n15, n16, starDmg, 5, 503,
+          // ★BJ-C2/F9（2026-10-06）：弹型改 star.projType（726→725→724→723→1133
+          // override 链,starCloakStarInfo 既有产出位）——旧式硬钉 503=星怒星弹型
+          // 越权（贴图/尘/弹域全套错挂 503）。★勿补掷门：723-726/1133 SetDefaults
+          // 无任何类别旗（vanilla-projectiles.json 亲读）→ 原版 Damage :12915-27
+          // 零掷（rollVanillaHitCrit kind=null 捷径返假同相），补门=造二次偏离。
+          const starProj = new Arrow(sx, sy, n15, n16, starDmg, 5, star.projType,
             { star: { targetY: sy } });
-          this.entities.add(star, 'projectiles');
+          this.entities.add(starProj, 'projectiles');
         }
       }
       // 蜂蜜斗篷/蜂巢族受击反击（Player.cs:37871-37907）：
@@ -43776,6 +43925,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const star = new Arrow(sx, sy, dvx, dvy, starDmg, flags?.kb ?? 0, 92,
           { starFall: { lineY: y, gen: projId === 91 ? 1 : 0 } });
         star.frostEligible = true;   // ranged 弹（SetDefaults ranged :1487）
+        // ★BJ-C2/F4（2026-10-06）：92 数据面 ranged（vanilla-projectiles.json 亲读）
+        // → 原版 Damage :12920 ranged 臂掷（≥基 4%）；Arrow 类缺省 critChance=0=门闭
+        // → 坠星此前永不暴击。置 0.04 路由门 → 命中拍 rollVanillaHitCrit 动态掷。
+        star.critChance = 0.04;
         this.entities.add(star, 'projectiles');
       }
       return;
@@ -43800,6 +43953,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const shard = new Arrow(x + nvx, y + nvy, nvx, nvy,
             Math.max(1, Math.trunc(dmg * 0.5)), 0, 90, {});
           shard.frostEligible = true;
+          // ★BJ-C2/F5（2026-10-06）：90 数据面 ranged（vanilla-projectiles.json 亲读,
+          // aiStyle24）→ 原版 Damage :12920 ranged 臂掷（≥基 4%）；类缺省门闭=碎块
+          // 永不暴击。置 0.04 路由门（F4 同式）。
+          shard.critChance = 0.04;
           this.entities.add(shard, 'projectiles');
         }
       }
@@ -46499,8 +46656,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
+    // ★B7 八十一刀R2:mod 树苗生长触发(树系统③;GrowsOnTileId 消费)——
+    //  同切片 sapP 采样;基座=growsOn id;成树=向上 6-10 格树干柱(近似,登记)。
+    if (MOD_SAPLING_TO_TREE.size > 0) {
+      for (let x = plan.x0; x < plan.x1; x++) {
+        for (let y = plan.underY0; y < plan.underY1; y++) {
+          const tid = st.get(x, y);
+          const mtree = MOD_SAPLING_TO_TREE.get(tid);
+          if (mtree === undefined || !st.hasTile(x, y)) continue;
+          if (Math.random() >= sapP) continue;
+          const baseId = MOD_TREE_BASE.get(mtree) ?? -1;
+          if (baseId >= 0 && st.get(x, y + 1) !== baseId) continue;
+          const h = 6 + Math.floor(Math.random() * 5);
+          let clear = true;
+          for (let k = 1; k <= h; k++) if (st.get(x, y - k) !== 0) { clear = false; break; }
+          if (!clear) continue;
+          for (let k = 1; k <= h; k++) st.setTile(x, y - k, mtree);
+          st.setTile(x, y, 0);
+          this.chunks.markDirtyArea(x - 3, y - h - 2, x + 3, y + 2);
+        }
+      }
+    }
   }
-
   /** TreeGrowFXCheck（:29501-29540 + PlayerLOS 门）：视野内成树 → 绿叶爆散近似
    *  （原版 msg112→TreeGrowFX 叶粒子效果；色按树族） */
   private treeGrowFX(x: number, y: number, style: number): void {

@@ -75,22 +75,25 @@ describe('BJ510-B 516 日耀耀斑发光层（Main.cs:26600-26612 case 516）', 
     const G = (Renderer as unknown as { NPC_GLOW: Record<number, { tex: string; mode: string }> }).NPC_GLOW;
     expect(G[516]).toMatchObject({ tex: 'vanilla/NPC_516.png', mode: 'flare' });
   }, 60000);
-  it('npcGlowVel4Num 516 档：base/mult=0.5/0.5 + alphaRaw 因子入模（GetAlpha (255−α)/255）', async () => {
+  it('npcGlowVel4Num：516 恒量支（★BJ-C1 F1 判谳重产——GetAlpha :94667 早退,tint=α/255 与格光无关）/塔缺省族原式回归', async () => {
     const { Renderer } = await import('../src/render/Renderer');
     const N = (Renderer as unknown as {
       npcGlowVel4Num: (vid: number, l: readonly number[] | null, a?: number) => number;
     }).npcGlowVel4Num;
     // α=0（塔,回归面——BJ509 钉值不动）
     expect(N(493, [0, 0, 0])).toBeCloseTo(4 + Math.sqrt(3 * 0.25) * 4, 5);
-    // 516: α=0 满光档 |(1,1,1)−.5|=0.866 → 0.5+0.866×0.5
-    expect(N(516, [255, 255, 255], 0)).toBeCloseTo(0.5 + Math.sqrt(3 * 0.25) * 0.5, 5);
-    // 516: α=220（耀斑恒态,原版 alpha+=40→220 :21466-21469）→ ×(255−220)/255=0.13725
-    //  满光每通道 |0.13725−0.5|=0.36275 → len=0.36275√3=0.62833 → num=0.81415
-    //  （判别位:因子必须进模——无因子=0.93303）
-    expect(N(516, [255, 255, 255], 220)).toBeCloseTo(0.5 + Math.sqrt(3) * 0.36275 * 0.5, 4);
-    // 塔 α 传 220 也只按 (255−α)/255 乘光色（493 满光同式）
+    // ★BJ-C1 F1 判别位①：516 num288 与光照【无关】——满光/暗腔/null 同值（旧式随光
+    //  摆动 0.681~0.75=包络反向）。恒态 α=220 → tint=(220,220,220,220)/255 →
+    //  |0.86275−0.5|·√3·0.5+0.5 = 0.81412（原版恒 0.814）
+    const vanilla516 = 0.5 + Math.sqrt(3) * Math.abs(220 / 255 - 0.5) * 0.5;
+    expect(N(516, [255, 255, 255], 220)).toBeCloseTo(vanilla516, 6);
+    expect(N(516, [0, 0, 0], 220)).toBeCloseTo(vanilla516, 6);
+    expect(N(516, null, 220)).toBeCloseTo(vanilla516, 6);
+    // ★判别位②：出生拍 α=0 → tint=(0,0,0,0) → |0−0.5|·√3·0.5+0.5=0.93301（旧式
+    //  null 档曾返 base=0.5=无 GetAlpha 项,非原版 num288 定义面）
+    expect(N(516, [255, 255, 255], 0)).toBeCloseTo(0.5 + Math.sqrt(3) * 0.25, 6);
+    // 塔 α 传 220 仍按缺省族 (255−α)/255 乘光色（493 满光同式,原式不动）
     expect(N(493, [255, 255, 255], 220)).toBeCloseTo(4 + Math.sqrt(3) * 0.36275 * 4, 4);
-    expect(N(516, null)).toBe(0.5);
   }, 60000);
 
   // ---- drawNpcGlow flare 收集面（假体直调 prototype 法,BJ509-C 同款具装） ----
@@ -164,10 +167,10 @@ describe('BJ510-B 516 日耀耀斑发光层（Main.cs:26600-26612 case 516）', 
     expect(q.vx).toBe(3); expect(q.vy).toBe(8);
     // 帧行=本体帧行（r.sy=38 → row=1 → 残影源 sy=38×1=38,gh=152/4=38）
     expect(q.sy).toBe(38); expect(q.gh).toBe(38);
-    // num=0.5+|GetAlpha([78,51,51]×0.137)−0.5|·0.5
-    const f = (255 - 220) / 255;
-    const dr = 78 * f / 255 - 0.5, dg = 51 * f / 255 - 0.5, db = 51 * f / 255 - 0.5;
-    expect(q.num).toBeCloseTo(0.5 + Math.sqrt(dr * dr + dg * dg + db * db) * 0.5, 5);
+    // ★BJ-C1 F1：num288=0.5+|(α,α,α,α)/255−0.5|·0.5 恒量（GetAlpha :94667 早退,
+    //  不读格光——旧式按 [78,51,51]×0.137 缺省族建模=包络反向误读,随刀重产）
+    //  220 恒态 → 0.5+|0.86275−0.5|·√3·0.5 = 0.81412（光照入参变值判别位）
+    expect(q.num).toBeCloseTo(0.5 + Math.sqrt(3) * Math.abs(220 / 255 - 0.5) * 0.5, 5);
     // 实体层零直绘（改道队列=判别位;实体层画=夜间被乘光压暗的旧病）
     expect(rec.ops.filter((o) => o.op === 'draw').length).toBe(0);
   });
@@ -254,15 +257,17 @@ describe('BJ510-D 旋转/消费结构锁', () => {
     expect(fn).toContain('e.visAngle += 0.1;');
     expect(fn).toContain('★BJ510');
   });
-  it("7d''' 消费面：single 单份支 + rot 路径 + overlay 白罩（塔路径原式不动）", () => {
+  it("7d''' 消费面（★BJ-C1 F4 方法化 flushTowerGlow）：single 单份支 + rot 路径 + overlay 白罩（塔路径原式不动）", () => {
     const src = rendererSrc();
-    const consumer = block(src, "7d'''. 四塔 GlowMask 残影", '7e. 全亮翅膀主纹理');
+    const consumer = block(src, 'private flushTowerGlow(', 'private flushTrailShade(');
     expect(consumer).toContain('if (q.single !== undefined)');
     expect(consumer).toContain('if (q.overlay)');
     expect(consumer).toContain('ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));');
     expect(consumer).toContain("ctx.globalCompositeOperation = 'lighter'");
     // 塔路径保留（ BJ509 原式）
     expect(consumer).toContain('q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh');
+    // render 内调用位保持（7d' 之后/7e 之前,同序位零行为差）
+    expect(src).toContain('this.flushTowerGlow(cam, z, viewW, viewH);');
   });
   it('vel4 塔收集面 alphaRaw 入模（GetAlpha 因子;塔 α=0 原值回归）', () => {
     const src = rendererSrc();

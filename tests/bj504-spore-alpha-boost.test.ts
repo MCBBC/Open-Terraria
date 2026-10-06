@@ -100,11 +100,14 @@ describe('BJ504 C. Renderer 接线', () => {
     expect(src.indexOf('const bodyY = anchorY')).toBeLessThan(
       src.indexOf('npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null'));
   });
-  it('消费在 7d\' 段（光照合成后 source-over α=0.4,本体同枢重放）', () => {
+  it('消费在 7d\' 段（光照合成后 source-over α=0.4,本体同枢重放;★BJ-C1 F4 方法化 flushNpcWhiteLift 重锚+F1 ga 恒量档）', () => {
     expect(src).toContain('for (const q of this.npcWhiteLiftQueue) {');
-    expect(src).toContain("ctx.globalAlpha = npcWhiteLiftAlpha(q.vid) ?? 0.4;");
+    // ★BJ-C1 F1：q.ga 显式档优先（516 恒量复绘）,缺省仍走 lerp 白提亮档
+    expect(src).toContain('ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;');
     expect(src).toContain("ctx.globalCompositeOperation = 'source-over';");
     expect(src).toContain('ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);');
+    // ★BJ-C1 F4：render 内调用位保持（方法化=行为零变）
+    expect(src).toContain('this.flushNpcWhiteLift(cam, z, viewW, viewH);');
   });
   it('槽序：先于 7d\'\'\' 四塔消费、晚于 drawFairyBright 判例行（同 7d\' 自发光域）', () => {
     const fairy = src.indexOf('this.drawFairyBright(ent);');

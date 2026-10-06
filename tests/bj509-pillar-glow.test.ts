@@ -269,9 +269,9 @@ describe('BJ509-D 非四柱 GlowMask 面不回归（收集仅 vel4 分支）', (
 
 // ===================== E. 消费面结构锁（7d''' 光照合成后） =====================
 describe("BJ509-E 7d''' 消费面结构锁（光照合成后 lighter 重放）", () => {
-  it("7d''' 块在 compositeLight 之后主画布消费队列（npcGlowVel4Offsets 单源+64/255 α）", () => {
+  it("7d''' 块在 compositeLight 之后主画布消费队列（npcGlowVel4Offsets 单源+64/255 α;★BJ-C1 F4 方法化 flushTowerGlow 重锚）", () => {
     const src = rendererSrc();
-    const consumer = block(src, "7d'''. 四塔 GlowMask 残影", '7e. 全亮翅膀主纹理');
+    const consumer = block(src, 'private flushTowerGlow(', 'private flushTrailShade(');
     expect(consumer).toContain('this.towerGlowQueue.length');
     expect(consumer).toContain("ctx.globalCompositeOperation = 'lighter'");
     expect(consumer).toContain('Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff)');
@@ -281,6 +281,8 @@ describe("BJ509-E 7d''' 消费面结构锁（光照合成后 lighter 重放）",
     expect(consumer).toContain('Math.round(cam.x * z) / z');
     // tex 存名（零跨拍 img 持有——wingGlowQueue 同款）
     expect(consumer).toContain('ensureVImage(q.tex)');
+    // ★BJ-C1 F4：render 内调用位保持（同序位零行为差）
+    expect(src).toContain('this.flushTowerGlow(cam, z, viewW, viewH);');
   });
   it('帧头清队列（逐帧重建,收集/消费跨帧零残留）', () => {
     const src = rendererSrc();

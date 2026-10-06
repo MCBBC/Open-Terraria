@@ -160,6 +160,7 @@ import dropData from '../data/vanilla-npcdrops.json';
 import spawnData from '../data/vanilla-bestiary-spawn.json';
 import { UISfx } from '../vui/UISfx';
 import { isBound } from '../core/Keybinds';
+import { bindMouseTextTip, hideMouseTextTip } from './MouseTextTip';   // ★BJ-C4-F3
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
@@ -1153,10 +1154,8 @@ const CSS = `
 .sw-bst-fcell img { position:absolute; width:30px; height:30px; image-rendering:pixelated;
   pointer-events:none; }
 .sw-bst-fcell.dim img { opacity:0.2; }
-/* MouseText 替代悬浮提示（Main.instance.MouseText 名字/完成度/属性名） */
-.sw-bst-tip { position:fixed; z-index:99; pointer-events:none; font-size:12px; color:#fff;
-  text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;
-  white-space:nowrap; display:none; }
+/* MouseText 替代悬浮提示（Main.instance.MouseText 名字/完成度/属性名）
+   ★BJ-C4-F3：.sw-bst-tip 面退役 → 共享族 .sw-mt-tip（src/ui/MouseTextTip.ts 单源） */
 `;
 
 export interface BestiaryPanelFlow {
@@ -1175,6 +1174,9 @@ export interface BestiaryPanelFlow {
    *  Item.BestiaryNotes → Main.cs:21539-21547 tooltip 末尾逐行追加） */
   showItemTooltip?(itemId: number, anchor: HTMLElement, notes?: string[]): void;
   hideItemTooltip?(): void;
+  /** ★BJ-C4-F3：光标持物谓词（mouseItem 语义,UI.heldStack——BJ501 定谳口径）。
+   *  MouseText 悬停名锚 X+34 臂（Main.cs:20390-20392 !mouseItem.IsAir）消费 */
+  uiHeldItemRef?(): boolean;
   onBack(): void;
 }
 
@@ -1272,8 +1274,7 @@ export class BestiaryPanel {
   /** 弹层（挂 gridWrap = _bestiarySpace；互斥开合 :398-420） */
   private sortPopEl: HTMLElement | null = null;
   private filterPopEl: HTMLElement | null = null;
-  /** MouseText 悬浮提示 */
-  private tipEl: HTMLElement | null = null;
+  // ★BJ-C4-F3：私有 tipEl 面退役（升格共享族 MouseTextTip 单源,字段随删）
 
   constructor(private parent: HTMLElement, private flow: BestiaryPanelFlow) {
     if (!document.getElementById('sw-bst-style')) {
@@ -1419,25 +1420,20 @@ export class BestiaryPanel {
     el.addEventListener('mouseenter', () => UISfx.hover());   // UIImageButton.MouseOver :61 / GroupOptionButton :255（音 12）
   }
 
-  /** MouseText 悬浮提示（面板内轻量替身；随鼠标移动，离开即隐） */
+  /** MouseText 悬浮提示（面板内轻量替身；随鼠标移动，离开即隐）。
+   *  ★BJ-C4-F3（2026-10-06 R4 UI 批清偿）：自创固定偏移（+16/+20,无持物臂、无
+   *  屏缘钳）退役 → 委托共享族 MouseTextTip 单源（Renderer.mouseTextAnchor 公式
+   *  = Main.MouseTextInner Main.cs:20379-20419 1:1：X=mouse+14+6[ThickMouse 默认档]
+   *  +34[光标持物]/Y=mouse+14+6 + 全串盒 40px 屏缘钳）。原版锚:图鉴悬停名/完成度/
+   *  属性名/筛选名全走 Main.instance.MouseText（UIBestiaryEntryButton.cs:147/
+   *  UIBestiaryFilteringOptionsGrid.cs:223 同面）；heldOnCursor 谓词=BJ501 定谳
+   *  mouseItem 语义（flow.uiHeldItemRef → UI.heldStack）。 */
   private bindTip(el: HTMLElement, textFn: () => string): void {
-    el.addEventListener('mousemove', (e) => {
-      const t = textFn();
-      if (!t) { this.hideTip(); return; }
-      if (!this.tipEl) {
-        this.tipEl = document.createElement('div');
-        this.tipEl.className = 'sw-bst-tip';
-        document.body.appendChild(this.tipEl);
-      }
-      this.tipEl.textContent = t;
-      this.tipEl.style.display = 'block';
-      this.tipEl.style.left = `${e.clientX + 16}px`;
-      this.tipEl.style.top = `${e.clientY + 20}px`;
-    });
-    el.addEventListener('mouseleave', () => this.hideTip());
+    bindMouseTextTip(el, () => textFn(),
+      { heldOnCursor: () => !!this.flow.uiHeldItemRef?.() });
   }
   private hideTip(): void {
-    if (this.tipEl) { this.tipEl.remove(); this.tipEl = null; }
+    hideMouseTextTip();
   }
 
   private updateSearchCancel(): void {

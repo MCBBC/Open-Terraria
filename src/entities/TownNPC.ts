@@ -1423,12 +1423,20 @@ export class TownNPC extends Entity {
     // ★IIIII223 F-8：owner=255∧Damage≥9999 静默判据——NPC.cs:82065
     //   `bool flag = Damage >= 9999 && owner == 255`。StrikeNPCNoInteraction 形参无
     //   owner 通道（:82012 缺省 255）→ JS 全部 StrikeNPCNoInteraction 调用面（毁灭
-    //   清算 Game.ts / 巫毒娃娃烧毁 ItemDrop.checkLavaDeath）恒 owner=255 同形,以
-    //   【入参原值】dmg≥9999 等价判（须在下方 dmg 被防御/暴击重算覆写前快照）。
+    //   清算 Game.ts:11731 / 圣诞自灭 :2017 / DoT 致死 / 出界面 F3 / 巫毒娃娃烧毁
+    //   ItemDrop.checkLavaDeath）恒 owner=255 同形,以【入参原值】dmg 判（须在下方
+    //   dmg 被防御/暴击重算覆写前快照）。
+    //   ★BJ-C6/F1（2026-10-06 随 BJ502 三谓词形态统一）：补 owner 维度——原版
+    //   玩家/远端来源走 Projectile.cs:13702 `ownedBySomeone ? owner : 255`（owner=
+    //   玩家位≠255 → 门开照飘）;hostile/陷阱弹 owner=255 → 门闭静默。本仓 owner 255
+    //   位承载 = !fromPlayer（hitTownNpcs source==='playerProj' 传 fromPlayer=true;
+    //   BJ502 的 pendingStrikeOwner 远端通道对 TownNPC 结构性缺位——netApplyStrike
+    //   只扫 enemies 桶,访客城镇 NPC=Enemy 傀儡）→ 静默 = dmg≥9999 ∧ !fromPlayer,
+    //   force 通道（调用面恒 fromPlayer=false）保持静默。
     //   flag 只憋两处：:82078 `if (!flag && lifeMax > 1)` CombatText 飘字、
     //   :82199 `if (netMode != 1 && !flag)` NPCDamageTracker（本仓无此记账面）——
     //   清算击杀不冒 9999 大字（原版系统致杀静默）;死亡/击退/ai 复位不受门影响
-    const strikeSilent = dmg >= 9999;
+    const strikeSilent = dmg >= 9999 && !fromPlayer;   // ★BJ-C6/F1
     this.lastStrikeDealt = 0;   // ★X1：入口清零（Enemy.hurt 习语——拒收路径不残留陈值）
     // ---- ★X1 face 2：TryDoingOnHitEffects（Projectile.cs:13640-43）城镇靶受理面 ----
     //  原文：`if (ownedBySomeone && targetNPC.life > 5) TryDoingOnHitEffects(targetNPC);`
@@ -2067,6 +2075,20 @@ export class TownNPC extends Entity {
     // ★BJ259：踢出冷却递减（NPC.UpdateNPC :91434-91437 `if (lookForHomeTimeout > 0)
     //  lookForHomeTimeout--;` 每 tick 字面）
     if (this.lookForHomeTimeout > 0) this.lookForHomeTimeout--;
+    // ★BJ-C6/F3（2026-10-06）：城镇 NPC 出界致死面（NPC.UpdateNPC :91439-91442）——
+    //   `aiStyle==7 && position.Y > Main.bottomWorld-640f+height && netMode!=1 →
+    //   StrikeNPCNoInteraction(9999,0,0)`。aiStyle==7 ⟺ 本类全成员（vanilla-npcs 表
+    //   townNPC 全员 aiStyle=7,含被缚/城镇宠物族）;netMode!=1=权威域——本仓城镇 NPC
+    //   fixedUpdate 不在访客端运行（TownNPC=Enemy 傀儡）,无需显式门。bottomWorld =
+    //   store.h×16（WldHeaderFields 同式）;position.Y+height = 盒顶+盒高。原版序位 =
+    //   UpdateNPC 头 lookForHomeTimeout 递减/TrySyncing 之后、AI 之前——读【上拍碰撞
+    //   后】位置,故置于本行后（此前 repo 无此面=出界恒坠落滞留）。StrikeNPCNoInteraction
+    //   同形 = force 直击通道（不查无敌帧/微光上升,dontTakeDamage 原版本就不查）+
+    //   owner=255 静默（strikeSilent=dmg≥9999∧!fromPlayer,BJ-C6/F1 同门）。
+    if (this.y > game.world.store.h * TILE - 640 + this.h) {
+      this.hurt(9999, 0, 0, game, 0, 0, false, true);   // :91441 (9999,0f,0)
+      if (this.dead) return;                            // 死亡链已走完,跳过本拍余下
+    }
     this.teleportedHome = false;
     const world = game.world;
     // 战斗书增益一次性套用（后入驻的 NPC 在首 tick 补；使用书时对在场者即时叠）

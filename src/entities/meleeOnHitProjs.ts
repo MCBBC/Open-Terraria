@@ -306,7 +306,11 @@ export class MuramasaSlashProj extends Entity {
       if (vanillaGateRejected(snapshotVanillaGate(e))) continue;
       if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
       // ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
-      let crit = (this.critChanceFn?.() ?? 0) > Math.random();
+      // ★BJ-C2/F7（2026-10-06）：白抽消除——critChanceFn 缺位时旧式 `?? 0 > Math.random()`
+      //  照吃一掷（无掷面假掷,RNG 流漂移）;现产生位恒注入（977 melee 面掷,见 Game.ts
+      //  村正支）,null 分支=零掷零 RNG 防御形（与 Arrow 关断钉习语同相）。
+      let crit = false;
+      if (this.critChanceFn) crit = this.critChanceFn() > Math.random();
       // ★F11：TryConsumingTimerCrit 强制暴击（Damage_PVE :12928，977 结算接入）
       if (((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) crit = true;
       let dmgVar = damageVarRoll(this.damage,
@@ -509,7 +513,9 @@ export class BladetongueGlobProj extends Entity {
         if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         // ★F9/F1：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区；命中回写 ai[0]+=50
         // （type==524 特例 :13261-63）
-        let crit = (this.critChanceFn?.() ?? 0) > Math.random();
+        // ★BJ-C2/F14（2026-10-06）：白抽消除（977 消费位同刀,F7）——fn 缺位零掷零 RNG
+        let crit = false;
+        if (this.critChanceFn) crit = this.critChanceFn() > Math.random();
         // ★F11：TryConsumingTimerCrit 强制暴击（Damage_PVE :12928，524 结算接入）
         if (((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) crit = true;
         let dmgVar = damageVarRoll(this.damage,

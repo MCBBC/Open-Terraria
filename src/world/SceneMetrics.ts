@@ -2,7 +2,7 @@
 // 玩家中心 169×124 tile 采样计数（ZoneScanSize = 1920/16+49 × 120/16+49, SceneMetrics.cs:12-16）
 // → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-708）。
 // BGM 选择链(Music.ts)与群系背景(BiomeBackground)共用本份结果。
-import { TILE_DEFS, WALL_DUNGEON_SHEETS, DUNGEON_UNION_CRACKED_IDS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, WALL_DUNGEON_SHEETS, DUNGEON_UNION_CRACKED_IDS } from '../data/tiles';
 import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
 import { sceneMetricDualOverride } from './DungeonDualZones';
@@ -49,6 +49,7 @@ const SUNFLOWER = SHEET_MAP.get(27) ?? -1;
 const GRAVEYARD_TILES = ids([85]);
 /** HoneyBlockCount / PartyMonolithCount 计数源 tile（AggregateTileCounts cs:601/621） */
 const HONEY_BLOCK = SHEET_MAP.get(229) ?? -1;
+const MOD_ZONE_TILE_IDS = new Map<string, number[]>();
 const PARTY_MONOLITH = SHEET_MAP.get(455) ?? -1;
 /** ShadowCandleCount 计数源 tile（SceneMetrics.cs:393-395 影烛 = tile 646 亮档扫描）。
  *  ★tile 域双域实害（2026-09-18 BJ154 同族普查第三案）：counts 键=内部 id
@@ -110,6 +111,14 @@ const UNDERGROUND_DESERT_WALLS = (() => {
  *  oceanDepths（WorldGen.cs:10978-10988）专用 */
 const BEACH_DISTANCE = 380;
 
+/** ★一百零八刀审计修:mod 群系旗通用注册面(引擎零群系名知识;
+ *  mod 装载期经 registerModBiomeFlag 注册 tileIds 集合+阈值,扫描时派生旗)。 */
+export interface ModBiomeFlag { flag: string; tileIds: readonly number[]; threshold: number; }
+const MOD_BIOME_FLAGS: ModBiomeFlag[] = [];
+export function registerModBiomeFlag(f: ModBiomeFlag): void {
+  MOD_BIOME_FLAGS.push(f);
+}
+
 export interface SceneFlags {
   tileX: number; tileY: number;
   belowSurface: boolean;
@@ -123,7 +132,9 @@ export interface SceneFlags {
   zoneHallow: boolean;
   zoneJungle: boolean;
   zoneSnow: boolean;
-  zoneDesert: boolean;
+  /** ★一百零八审计修:mod 群系旗经 registerModBiomeFlag 注册,通用 record */
+  modBiomes: Record<string, boolean>;
+    zoneDesert: boolean;
   /** 精确计数（SceneMetrics L604-665：视区扫描聚合计数，天气渲染/沙尘门用） */
   snowTileCount: number;
   /** JungleTileCount（:613 同源 zone 扫描；地下背景雪/丛林让位判定 :53476 用） */
@@ -233,7 +244,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneSkyHeight: false, zoneOverworldHeight: false, zoneDirtLayerHeight: false,
   zoneRockLayerHeight: false, zoneUnderworldHeight: false,
   zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false,
-  zoneSnow: false, zoneDesert: false, snowTileCount: 0, jungleTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
+  zoneSnow: false, zoneDesert: false, modBiomes: {}, snowTileCount: 0, jungleTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
   sandColorWeights: [0, 0, 0, 0],
   zoneGlowshroom: false, zoneMeteor: false,
   zoneGraveyard: false, zoneShadowCandle: false, hasClock: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
@@ -420,6 +431,23 @@ export function scanScene(
   // 墓碑族（L622-623）：GraveyardTileCount = _tileCounts[85] − _tileCounts[27]/2（下取整、负值钳 0）。
   // tile 85 = Tombstones 全部 6 种墓碑变体（同 tile 不同 style），无独立 tile——旧注疑 545 有误
   const graveyard = Math.max(0, countSet(counts, GRAVEYARD_TILES) - (sunflower >> 1));
+  // ★B7 七十三刀:灾厄 biome Zone 旗(ZoneAstral/ZoneSulphur)——mod tile 计数
+  //  (键名含 astral/sulphurous;阈值=40 同 DESERT_THRESHOLD 族)。世界生成未落
+  //  astral/硫海生物群系前由放置的 mod tile 累计(惰性阈值面,世界生成接入即活)。
+  const modZoneCount = (needle: string): number => {
+    let ids = MOD_ZONE_TILE_IDS.get(needle);
+    if (ids === undefined) {
+      ids = [];
+      for (const [key, iid] of Object.entries(TILE_BY_KEY)) {
+        if (key.startsWith('mod_') && key.includes(needle)) ids.push(iid);
+      }
+      MOD_ZONE_TILE_IDS.set(needle, ids);
+    }
+    let n = 0;
+    for (const iid of ids) n += counts.get(iid) ?? 0;
+    return n;
+  };
+  // (原硬编码 'astral'/'sulphurous' 已上提为通用注册面——引擎零 mod 群系知识)
   // HasSunflower（L626-631）：有向日葵 且 GraveyardTileCount ≤ GraveyardTileMin(16)——
   // 墓碑够多时向日葵的快乐 buff 被压制（比较在 <0 钳位之前，但 >16 必为正，顺序无差）
   const hasSunflower = sunflower > 0 && graveyard <= GRAVEYARD_TILE_MIN;
@@ -491,6 +519,15 @@ export function scanScene(
     zoneJungle: ddScan ? ddScan.ZoneJungle : jungle >= JUNGLE_THRESHOLD && !zoneUnderworldHeight,
     zoneSnow: ddScan ? ddScan.ZoneSnow : snow >= SNOW_THRESHOLD,
     zoneDesert,
+    modBiomes: (() => {
+      const out: Record<string, boolean> = {};
+      for (const mb of MOD_BIOME_FLAGS) {
+        let cnt = 0;
+        for (const iid of mb.tileIds) cnt += counts.get(iid) ?? 0;
+        out[mb.flag] = cnt >= mb.threshold;
+      }
+      return out;
+    })(),
     snowTileCount: snow,
     jungleTileCount: jungle,
     desertSandTileCount: desert, // DesertSandTileCount = max(0, SandTileCount - OceanSandTileCount)（L665，

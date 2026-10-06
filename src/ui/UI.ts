@@ -10540,11 +10540,16 @@ export class UI {
    *  判式=closest 根类命中(与 domTargets.isDomUiTarget 同式 duck-type:
    *  typeof closest==='function' 桩语义——无 target/无 closest 的测试桩回 false
    *  =不拦,bj103 桩事件流零扰);名单=滚轮独占面(成就面板/图鉴面板根类,
-   *  挂 body 顶层语境,closest 判定不依赖挂载点),后续覆层面板按需登记。 */
+   *  挂 body 顶层语境,closest 判定不依赖挂载点),后续覆层面板按需登记。
+   *  ★BJ-C4-F2（2026-10-06 R4 UI 批清偿）:名单补 `.sw-itemsearch`——道具搜索浮窗
+   *  强制开背包(openItemSearchPanel openInventory(true))+列表原生 overflow 滚,
+   *  wheel 冒泡至 window 级本监听 → 列表轮播 bleed(与 BJ505 成就/图鉴同构缺省可达);
+   *  面板登记先例 installDragListeners 两站(:2715/:3117)均已豁免 .sw-itemsearch,
+   *  本门为同族第三站。 */
   private vinvWheelInFancyPanel(e: WheelEvent): boolean {
     const t = e.target as { closest?: (s: string) => unknown } | null;
     return typeof t?.closest === 'function'
-      && t.closest('.sw-ach-panel, .sw-bst') != null;
+      && t.closest('.sw-ach-panel, .sw-bst, .sw-itemsearch') != null;
   }
 
   private vinvBindGridWheel(): void {

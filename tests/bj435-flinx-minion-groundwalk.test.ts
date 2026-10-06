@@ -211,7 +211,9 @@ describe('BJ435 小雪怪 951 地面步行族正轨（AI_067 flag5）', () => {
     // draw 帧通道：951 走 flinFrame 直写（AI_067 flag5 帧段）,非 age/8 匀速兜底
     expect(MINION_TS).toMatch(/else if \(this\.projId === 951\) \{[^}]*frame = Math\.min\(this\.flinFrame/);
     // 空中帧/旋转钉值路径存在：frame=1 + rot=min(4,vy)×−0.1
-    expect(MINION_TS).toMatch(/Math\.min\(4, this\.vy\) \* -0\.1/);
+    // ★BJ-C3/F2（2026-10-06）：读相改 lastWalkPreGravVy 快照（:51790 帧段读相=碰撞后
+    //  重力前;BJ516④ 重力落 walkChase 尾后 this.vy 直读带 +0.4 相偏）——旧钉随刀更新
+    expect(MINION_TS).toMatch(/Math\.min\(4, vyPhase\) \* -0\.1/);
     // 地面帧域回卷：flinFrame >= 12 → 2（projFrames[951]=12）
     expect(MINION_TS).toMatch(/this\.flinFrame < 2 \|\| this\.flinFrame >= 12\) this\.flinFrame = 2/);
   });

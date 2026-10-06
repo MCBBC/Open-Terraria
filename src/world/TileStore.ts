@@ -16,6 +16,8 @@ export const enum LIQUID_TYPE {
 }
 
 export class TileStore {
+  /** ★一百零八审计修:mod 注册的 tile 键→内部 id(装载期填充;生成 pass 解析用) */
+  mods: { tileIdByKey: Record<string, number> } = { tileIdByKey: {} };
   readonly w: number;
   readonly h: number;
   readonly type: Uint16Array;

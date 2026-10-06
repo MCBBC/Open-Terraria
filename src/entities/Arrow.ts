@@ -26,7 +26,7 @@ import { LCG32 } from '../fx/LightningGenerator';
 import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
+import { PROJ_ALPHA_MOD, projConstFullbright, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
 // （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
@@ -684,6 +684,48 @@ function splashPitch(style: number): number {
   return (style === 4 || style === 5
     ? Math.floor(Math.random() * 21) - 20
     : Math.floor(Math.random() * 21) - 10) * 0.01;
+}
+
+// ---- ★BJ-C1 F3（2026-10-06）常量色族通用全亮通道——recording-ctx 助手 ----
+/** 绘制序列记录器（bj529② recording-ctx 闭包重放锁体裁的生产化）：本体段逐位
+ *  执行但落笔进记录器——方法调用全量记序、状态写面（globalAlpha/filter/合成域/
+ *  平滑/填色）记序+取值面读记录态（xeno 支 baseGa=ctx.globalAlpha 读回同相）。
+ *  commit=按序重放到目标 ctx（7f flushTrailShade 相机系内执行）=单源零复制——
+ *  专支/帧选/镜像/滤链全部原位运行,只换落笔目标。 */
+type RecOp = { op: string; args: unknown[] };
+const REC_STATE_PROPS = new Set(['globalAlpha', 'globalCompositeOperation', 'filter',
+  'imageSmoothingEnabled', 'fillStyle', 'strokeStyle', 'lineWidth']);
+function createRecBodyCtx(rec: RecOp[]): { proxy: CanvasRenderingContext2D; commit: (c: CanvasRenderingContext2D) => void } {
+  const state: Record<string, unknown> = {
+    globalAlpha: 1, globalCompositeOperation: 'source-over', filter: 'none',
+    imageSmoothingEnabled: true, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+  };
+  const proxy = new Proxy({} as unknown as CanvasRenderingContext2D, {
+    get(_t, prop) {
+      if (typeof prop !== 'string') return undefined;
+      if (REC_STATE_PROPS.has(prop)) return state[prop];
+      return (...args: unknown[]) => { rec.push({ op: prop, args }); };
+    },
+    set(_t, prop, v) {
+      if (typeof prop === 'string') {
+        state[prop] = v;
+        rec.push({ op: `set:${prop}`, args: [v] });
+      }
+      return true;
+    },
+  });
+  return {
+    proxy,
+    commit(c: CanvasRenderingContext2D): void {
+      for (const r0 of rec) {
+        if (r0.op.startsWith('set:')) {
+          (c as unknown as Record<string, unknown>)[r0.op.slice(4)] = r0.args[0];
+        } else {
+          (c as unknown as Record<string, (...a: unknown[]) => void>)[r0.op]?.(...r0.args);
+        }
+      }
+    },
+  };
 }
 
 /** ★V3 溅花段共享体（Projectile.cs:16935-17102 producer 站=湿缓存刷新位,2026-09-03；
@@ -2875,6 +2917,13 @@ export class Arrow extends Entity {
       //  45 的 PROJ_ALPHA0[45]=100 系死值,此前落通用兜底 (255−100)/255≈0.61 被压暗;
       //  44 无键 α≡0 兜底碰巧=1——同支语义应显式豁免,GA return 1 = 兜底禁入
       //  （PROJ_ALPHA0[45] 死值保留台账,注释已升格"显式 GA 豁免,兜底禁止消费"）。
+      //  ★BJ-C1 F2 注勘误（2026-10-06,BJ529 定谳推翻旧判）：旧注隐含"GA return 1
+      //  即同支语义承接完畢"——BJ529 定谳 Color.White 常量弹面=【光照无关】
+      //  （Main.cs:30068 格光被 GetAlpha 整体替换）,GA=1 只修 α 面,乘光面仍病
+      //  （实体层 compositeLight 压暗,暗腔实测 k=0.325）。44/45 已由 BJ529/530
+      //  capture→return+projFullbrightQueue 复绘承接;同支 19 Flamarang
+      //  （Boomerang 载体）/35 Sunfury（FlailProj 载体,α 面 ga=(255−100)/255≈0.61
+      //  同病）由 BJ-C1 F2 收编（drawProj capture 槽,WeaponProj.ts）。
       case 44: case 45: return 1;
       // ★T2（R 类清账,2026-09-02 用户拍板）：34 火焰鞭——GetAlpha 活分支是 :80753
       //  `873||872||931||913||34||1039 → Color.White * Opacity`（:81007 里的 34 是
@@ -3033,8 +3082,20 @@ export class Arrow extends Entity {
     }
   }
 
+  /** ★BJ-C1 F3 常量色族通用全亮门（id/运行态谓词）：GA 专属档（44/45/34/20/76-78/
+   *  5/91/265/355…,drawGlobalAlpha case 集）与 A=0 加算族（ADDITIVE_GLOW_PROJS,
+   *  合成域自理）、charm 分流（:80609 White×Opacity=常规合成非常量族）不入门;
+   *  270 脉冲/45 镰刀等专属支在段前早退不达本门。其余按 projConstFullbright
+   *  表驱动判定（kind∈fixed/fixedfade/afade/fade2/pulse40 ∧ 白 rgb ∧ 非 off）。 */
+  private constFullbrightGate(): boolean {
+    if (this.phoenixQuivered || this.seraphNecklaced) return false;
+    if (ADDITIVE_GLOW_PROJS.has(this.projId)) return false;
+    if (this.drawGlobalAlpha() !== null) return false;
+    return projConstFullbright(this.projId);
+  }
+
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.ctx;
+    let ctx = r.ctx;
     if (!ctx) return;
     // ---- ★2026-09-02 幻象弓载体 630 姿态独占支（AI_075 尾 :68401-68403）：
     //      rotation = velocity.ToRotation() + num（num=0；spriteDirection==−1 → π）
@@ -3538,6 +3599,25 @@ export class Arrow extends Entity {
         spriteDirection: this.vx < 0 ? -1 : 1,
       });
     }
+    // ★BJ-C1 F3（2026-10-06）常量色族通用全亮通道（BJ529 270/BJ530 44·45 判例通用化,
+    //  vanillaProjAlpha kind 驱动+白 rgb 门,活体普查=R1 报 ≥52 站实体层乘光）：常量色
+    //  弹面 GetAlpha 不读格光色（Main.cs:30068 光色被整体替换）=光照无关——本体画进
+    //  实体层被 compositeLight 全屏乘光压暗（暗腔实测 k=0.325,BJ529 探针）。承接=
+    //  通用 capture：本段（本体 save→restore,含全部专支/帧选/镜像/滤链——逐位执行
+    //  只换落笔目标）经 recording-ctx 全量记录,flushTrailShade 7f 光照合成后
+    //  source-over 重放=原版逐字。ghost/trail 面（本段之前）不收编=原版残影逐位
+    //  取光同相;GA 专属档/加算族/charm 分流自理者不入门（constFullbrightGate）。
+    //  判别代表站=502 Meowmere（本门）/633 Prism（PrismProj）/933 Zenith
+    //  （ZenithSword）;其余=表驱动分类器结构锁（bj-c1 套件）。
+    let fbRec: RecOp[] | null = null;
+    let fbCommit: ((c: CanvasRenderingContext2D) => void) | null = null;
+    if (this.constFullbrightGate()) {
+      fbRec = [];
+      const rc = createRecBodyCtx(fbRec);
+      fbCommit = rc.commit;
+      ctx = rc.proxy;
+    }
+    try {
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     // alpha 通道（修复4）：GetAlpha 近似 → globalAlpha（present/phantasm/piranha 等
@@ -3757,6 +3837,16 @@ export class Arrow extends Entity {
     //  失败由 projSprite 10s TTL 对账自愈）;缺图诊断走 projSpriteHealth（F5 报告）,
     //  不再以逐帧路径 op 为代价。
     ctx.restore();
+    } finally {
+      // ★BJ-C1 F3：段内专支（gem/329）早退也照常提交（finally 兜底）——记录面
+      //  为空（如贴图未就绪整段零落笔）则不入队零开销。
+      if (fbCommit && fbRec && fbRec.length) {
+        const commit = fbCommit;
+        (r as unknown as {
+          queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+        }).queueProjFullbright?.((c) => commit(c));
+      }
+    }
   }
 
   /** 统一消亡出口（Projectile.Kill 语义钩子）：碎镜 1085 近身 150px 坏运等
@@ -4282,7 +4372,7 @@ export class Arrow extends Entity {
     // → 原版三连 Damage 对同敌可三跳;per-strike 免疫写 idStaticNPCHitCooldown=5 与
     // ResetStaticImmunityMatching 对未启用静态免疫的 283 为无消费死配置,不复刻;
     // active=false 防 Kill 级联由 !this.dead 门承担）。pierce=1 → Enemy.hurt 豁免
-    // 免疫帧同构（单发弹 flag3）;critter 走单参 shim（settleKillExplosion 同式）
+    // 免疫帧同构（单发弹 flag3）;critter 全参同构（★BJ-C6/F2,旧单参 shim 退役）
     if (this.projId === 283 && !this.dead) {
       game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
       for (let g283 = 0; g283 < 3; g283++) {
@@ -4329,7 +4419,12 @@ export class Arrow extends Entity {
           const ccx = c.x + c.w / 2, ccy = c.y + c.h / 2;
           for (const seg of segs283) {
             if (Math.abs(ccx - seg.cx) < R283 + c.w / 2 && Math.abs(ccy - seg.cy) < R283 + c.h / 2) {
-              c.hurt(Math.max(1, Math.trunc(this.damage)), Math.sign(ccx - seg.cx) * this.knockback, 0, game);
+              // ★BJ-C6/F2（2026-10-06）：小动物支补全参——原版三连 Damage() 单趟
+              //  victim 循环对小动物（=NPC）与敌怪【同链同参】（:13702 banner/穿甲/
+              //  fromPlayer DPS 计/Pierce=1 免疫窗豁免全同面）;旧单参 shim 漏
+              //  fromPlayer=true 与敌怪支(:4320 全参 true)不一致,一并同构。
+              c.hurt(applyBannerDamageDealt(game, cent, Math.max(1, Math.trunc(this.damage))),
+                Math.sign(ccx - seg.cx) * this.knockback, 0, game, this.settlePen, false, 1, true);
             }
           }
         }

@@ -2134,6 +2134,36 @@ export class GLShimExecutor {
     return e;
   }
 
+  /** ★E51 刀A（2026-10-06）TintAtlas 回收矩形【精确失效】口（Renderer 启动期经
+   *  setTintAtlasInvalidateRect 注入回调;TintAtlas.ts:11 粒度两档注）。页矩形被
+   *  回收覆写时只作废【该矩形】的缓存（texCache 条目+层内 dropTexture 纹理释放,
+   *  字节账同步回落）——下一绘 miss 走 texFromRegion 重传当前字节（内容真变,
+   *  合法上传）;页上其余矩形内容未变,零追新。替代旧「回收→bumpTexEpoch(页)」
+   *  的全页换代（E51 定谳:页级 bump 的受累重传=保险性追新税,atk8/9 活机
+   *  1200 帧 1381 bump→2023 笔 156MB 重传,内容未变;2D 降级窗回切=全页风暴）。
+   *  【正确性】覆写区∈回收矩形=free-list 块,与全部【活条目】矩形不重叠
+   *  （evictCold/drop 先删条目再入 free）;与已逐出条目旧键同 rect 的重问路径
+   *  =本删点（texCache+texs 同步摘除）→重传当前页字节,无陈旧窗。【时序】
+   *  bake 先 blit 新内容进页、后调本失效——同步单线程无消费穿插;失效后首次
+   *  resolveTex 走 texFromRegion 读页当前字节=新内容 ✓。【fail-closed】shim
+   *  不在场/GL 死/条目不存在=零操作;TintAtlas 侧钩子未注入仍走页级 bump 兜底。
+   *  texGen 语义:dropTexture 内已 ++（删表路径必 bump 判例）,批检窗照常失效。 */
+  invalidateTintRect(cv: HTMLCanvasElement, x: number, y: number, w: number, h: number): boolean {
+    // 返回值=「失效目的已达成」:true=缓存条目已摘（或本就未驻留=无陈旧面）,
+    // 调用方无需兜底;false=shim 不在场/GL 死——GL 恢复后旧缓存条目可能复现
+    // （texCache 跨窗保留）,调用方必须走页级 bumpTexEpoch 兜底（fail-closed,
+    // E51 2D/降级窗回切陈旧面堵口）。
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    const sub = this.texCache.get(texId(cv));
+    if (!sub) return true;   // 该页从未上过 GPU=无陈旧缓存
+    const packed = ((x * 8192 + y) * 4096 + w) * 4096 + h;   // resolveTex 同构数值键,零分配
+    const rec = sub.get(packed);
+    if (!rec) return true;   // 该矩形未驻留=无陈旧缓存
+    sub.delete(packed);
+    if (rec.e.key) this.glw.dropTexture(rec.e.key);   // texs 摘除+deleteTexture+字节数回落（texGen++）
+    return true;
+  }
+
   /** GL 失败逃生:全队列按原序 2D 重放。【设备空间重放】重放时 raw CTM 已非发射时
    *  语境——统一 setTransform(identity) 后按解码矩形重画（rot/flip 走中心锚变换），
    *  gCO 按 tier 重置;紧急路径（GL 中帧死亡）,视觉正确即可。

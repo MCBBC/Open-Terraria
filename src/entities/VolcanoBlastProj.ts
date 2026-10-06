@@ -44,8 +44,12 @@
 //     为参照而非弹心/相对符号。
 //   · 暴击面 live 化（Damage :12850 crit=false 起、:12898+ `melee &&
 //     Main.rand.Next(1,101)<=Main.player[owner].meleeCrit` 于 Strike 时点掷）：
-//     注入口 critChanceFn 由调用方接 0.04+player.critChance('melee')/100 实时闭包，
-//     弃用出生期冻结数值（旧式另叠武器 item.crit 为越权，proc 不吃武器暴击）。
+//     注入口 critChanceFn 由调用方接实时闭包，弃用出生期冻结数值。
+//     ★BJ-C2/F14（2026-10-06）重定谳：旧注「proc 不吃武器 item.crit 为越权」证伪——
+//     Player.cs:25712-25714 每帧 `meleeCrit/magicCrit/rangedCrit +=
+//     inventory[selectedItem].crit`（三系无条件,词缀 crt 重铸期已折进 item.crit,
+//     Item.cs:585）→ :12898 掷面 meleeCrit【含】持械 item.crit+crt（BJ486③ 同源
+//     定谳）。注入口算式 = 0.04+(player.critChance('melee')+heldItemCritBonus)/100。
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { applyProjStatus } from './projStatus';
@@ -93,8 +97,10 @@ export class VolcanoBlastProj extends Entity {
   w = 160; h = 160;
   damage: number;
   knockback: number;
-  /** ★R2-04：live 注入口（Strike 时点实时取玩家近战 crit；
-   *  = () => 0.04 + player.critChance('melee')/100，调用方注入）。 */
+  /** ★R2-04：live 注入口（Strike 时点实时取玩家近战 crit；★BJ-C2/F14 重定谳——
+   *  掷面 meleeCrit 含 :25712-14 持械 item.crit+crt 折入（原「不吃武器暴击」定谳
+   *  证伪,见文件头注）= () => 0.04 + (player.critChance('melee')
+   *  + heldItemCritBonus(held))/100，调用方注入）。 */
   critChanceFn: (() => number) | null = null;
   /** 兼容读面：旧测试/调试读取 .critChance 时折算 live 值。 */
   get critChance(): number {

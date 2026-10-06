@@ -11,10 +11,23 @@
 // ★纪元换键（2026-09-27 变体①终扫）:页矩形是回收复用的（evictCold/drop→free-list）
 //  ——回收矩形上的再烘焙=共享页画布【原地覆写】,GL shim 按 (texId,矩形) 身份
 //  缓存的区域纹理不换键就永远命中旧字节=生命水晶案同族（首帧内容冻结）。
-//  修复=回收矩形 blit 后 bumpTexEpoch(page.cv),shim er: 键携带纪元 → 该页全部
-//  矩形换键重传（首绘逐矩形区域上传,成本=受累矩形字节数,非整页）。shelf 新行/
-//  新页分配=纯新区,不覆写既有矩形,零 bump。
+//  修复=回收矩形 blit 后失效其 GL 缓存。失效粒度两档:
+//  ①【精确失效】（2026-10-06 E51 刀A,缺省）:Renderer 启动期注入 invalidateRect
+//    钩子→GLShimExecutor.invalidateTintRect 仅删除【被覆写矩形】的 texCache 条目
+//    +层内 dropTexture——该矩形下一绘 miss 重传（内容真变,合法）;页上其余矩形
+//    内容未变,键不变零重传。背景=E51 512² epoch 追新案定谳:页级 bump 使该页
+//    全部矩形换键,再绘时全部重传（内容未变=保险性追新税;活机 atk8/9 实测
+//    1200 帧 1381 次 bump→2023 笔受累重传 156MB,2D 降级窗回切时全页风暴）。
+//  ②【页级 bump 兜底】（fail-closed）:钩子未注入（测试/隔离 shim/早期帧）时仍
+//    bumpTexEpoch(page.cv)——保守正确,与 2026-09-27 原语义逐位同。2D/无 shim
+//    会话两者皆无消费方（无 er: 键）,行为零差。
 import { bumpTexEpoch } from './texId';
+
+/** ★E51 刀A:回收矩形精确失效钩子（Renderer 启动期注入;null=页级 bump 兜底）。 */
+let invalidateRect: ((cv: HTMLCanvasElement, x: number, y: number, w: number, h: number) => void) | null = null;
+export function setTintAtlasInvalidateRect(
+  fn: ((cv: HTMLCanvasElement, x: number, y: number, w: number, h: number) => void) | null,
+): void { invalidateRect = fn; }
 
 export interface TintRect { c: HTMLCanvasElement; x: number; y: number; w: number; h: number; }
 
@@ -63,9 +76,14 @@ export class TintAtlas {
     //  透出旧 tq 紫色帧残影)。目标矩形先 clearRect 再 blit 即根治(全 tint 族受益)。
     page.ctx.clearRect(x, y, w, h);
     page.ctx.drawImage(this.scratchCv, 0, 0, w, h, x, y, w, h);
-    // ★纪元换键:回收矩形=对既有矩形区的原地覆写——bump 页纪元令 shim er: 键
-    //  失效重传（FX24 clearRect 修复只清了页内残影,GL 缓存层此案由纪元键收口）
-    if (recycled) bumpTexEpoch(page.cv);
+    // ★纪元换键:回收矩形=对既有矩形区的原地覆写——必须失效其 GL 缓存
+    //  （FX24 clearRect 修复只清了页内残影,GL 缓存层此案由纪元键收口）。
+    //  ★E51 刀A（2026-10-06）:钩子在场走【精确失效】（仅被覆写矩形,页上其余
+    //  矩形零追新）;否则页级 bump 兜底（fail-closed,2026-09-27 原语义）。
+    if (recycled) {
+      if (invalidateRect) invalidateRect(page.cv, x, y, w, h);
+      else bumpTexEpoch(page.cv);
+    }
     const rect: TintRect = { c: page.cv, x, y, w, h };
     this.entries.set(key, { rect, page });
     return rect;

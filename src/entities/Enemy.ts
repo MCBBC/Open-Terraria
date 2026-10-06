@@ -138,7 +138,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
-import { takeModNpcAi } from '../mods/hooks';
+import { takeModNpcAi, runModOnHitPlayerBuff } from '../mods/hooks';
 import type { Game } from '../core/Game';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -3037,6 +3037,9 @@ export class Enemy extends Entity {
             // ★IIIII228：StatusFromNPC 全表 type 臂（Player.cs:22513-22771）——
             //  蜘蛛 Chill/木乃伊流血/猪龙 Rabies/脑专家九选一等 33 臂整表接线
             this.statusFromNpcTypeArms(game, localPlayer, oreRet);
+            // ★CalPlayer 基建(六十四刀):mod NPC 接触命中 → 声明面 debuff
+            //  (OnHitPlayer AddBuff 形;chance 掷+modBuffTypeOf 9000+ 域,hooks 内)
+            runModOnHitPlayerBuff(this.vanillaId, localPlayer, game);
           }
         } finally {
           if (inject) chan.__swNextHitBucket = undefined;

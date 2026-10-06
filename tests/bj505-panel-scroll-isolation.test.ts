@@ -17,6 +17,9 @@
 //   M1 摘门行(if (this.vinvWheelInFancyPanel(e)) return;)→ ①②④⑤a+结构面红(③绿);
 //   M2 门改恒真(if (true) return;)→ ③④⑤b+结构面红(①②⑤a 绿);
 //   M3 名单 .sw-bst → .sw-bstX → ②⑤a 红(.sw-bst token 两消费面,①③④绿)。
+// ★BJ-C4-F2（2026-10-06 R4 UI 批清偿）:名单补 .sw-itemsearch(道具搜索浮窗强制开
+//   背包+原生 overflow 滚,wheel 冒泡 bleed 缺省可达——UI.ts vinvWheelInFancyPanel
+//   名单第三 token);⑥测试=token 扩位判别,M6 变异 .sw-itemsearch→.sw-itemsearchX 杀⑥+结构面。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -112,6 +115,22 @@ describe('BJ505 功能面:vinvGridWheelTick fancy 面板独占门(vinvWheelInFan
     (ui2.vinvGridWheelTick as (e: WheelEvent) => void).call(ui2, evtIn(-120, 'sw-bst'));
     expect(calls2.n, '⑤a 暂停态∧悬停面板:独占门照拦(指针轴独立于暂停轴)').toBe(0);
   });
+
+  it('⑥★BJ-C4-F2 道具搜索浮窗滚轮=面板独占:target 落 .sw-itemsearch 子树 → 配方列表零接事件', () => {
+    // 面板先例:openItemSearchPanel 强制开背包(openInventory(true))——本件缺省可达
+    // (搜索开着物品栏必须在场可点=SW-BJ81 规格④),列表原生 overflow 滚 + wheel
+    // 冒泡 window 级监听 → 不补 token 即列表轮播 bleed(与 ①②同构)。
+    const calls = { n: 0 };
+    const ui = mkLiveUi({}, calls);
+    (ui.vinvGridWheelTick as (e: WheelEvent) => void).call(ui, evtIn(-120, 'sw-itemsearch'));
+    (ui.vinvGridWheelTick as (e: WheelEvent) => void).call(ui, evtIn(240, 'sw-itemsearch'));
+    expect(calls.n, '悬停道具搜索浮窗滚轮=浮窗自滚域独占,配方列表不接事件').toBe(0);
+    // token 精确性:近似 token(.sw-itemsearchX)不得命中(closest 逐 token 非子串)
+    const calls2 = { n: 0 };
+    const ui2 = mkLiveUi({}, calls2);
+    (ui2.vinvGridWheelTick as (e: WheelEvent) => void).call(ui2, evtIn(-120, 'sw-itemsearchX'));
+    expect(calls2.n, '近名 token 不误拦(名单逐字)').toBe(1);
+  });
 });
 
 // ============================================================
@@ -136,7 +155,7 @@ describe('BJ505 结构面', () => {
     expect(iFn).toBeGreaterThan(-1);
     expect(iNext).toBeGreaterThan(iFn);
     const body = uiSrc.slice(iFn, iNext);
-    expect(body).toContain(".sw-ach-panel, .sw-bst");
+    expect(body).toContain(".sw-ach-panel, .sw-bst, .sw-itemsearch");
     expect(body).toContain("typeof t?.closest === 'function'");
     expect(body).not.toContain('instanceof Element');   // node 测试桩环境兼容锁
   });

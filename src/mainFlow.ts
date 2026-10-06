@@ -1485,6 +1485,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       //  UI.buildTooltipHtml 单源 BJ407,notes = 掉落条件描述行族）
       showItemTooltip: (itemId, anchor, notes) => ui.showFloatingItemTooltip(itemId, anchor, notes),
       hideItemTooltip: () => ui.hideFloatingItemTooltip(),
+      // ★BJ-C4-F3：光标持物谓词（mouseItem 语义=UI.heldStack,BJ501 定谳口径）——
+      // 图鉴 MouseText 悬停名锚 X+34 臂（Main.cs:20390-20392）消费
+      uiHeldItemRef: () => !!ui.heldStack,
       onBack: () => {
         if (!wasPaused) g.paused = false;
         if (!wasBlocking) g.input.uiBlocking = false;

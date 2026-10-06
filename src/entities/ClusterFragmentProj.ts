@@ -45,6 +45,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { rollVanillaHitCrit } from './proj1457';   // ★BJ-C2/F6 掷率单源（proj1457 无反向依赖,无环）
 
 /** 父弹（集束火箭/榴弹/感应雷 I/II + 雪人炮集束 I/II）→ 裂片弹型
  *  （P.cs:79803-79814 num52 选择式） */
@@ -129,7 +130,12 @@ export class ClusterFragmentProj extends Entity {
         if (this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y) {
           const dir = (e.x + e.w / 2) < this.cx ? -1 : 1;
-          const crit = Math.random() < (this.critChance || 0.04);
+          // ★BJ-C2/F6（2026-10-06）：掷率收编 rollVanillaHitCrit（BJ494 同式）——旧
+          //  `||` 面把 spawn 位冻结值当平率直读（且 0.04 兜底掩盖门闭）,丢 owner 聚合
+          //  与 :25712-14 持械折入（Projectile.cs:12915-12927 ranged 臂,779/783/862/863
+          //  SetDefaults ranged=true 数据面亲读）;spawn 位 0.04 路由门 → 命中拍动态掷。
+          //  critChance≤0 关断钉保留（零 RNG）。
+          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
           const snap = projectileSnapStrikeBonus(game, this, e.cx, e.cy,
             (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });

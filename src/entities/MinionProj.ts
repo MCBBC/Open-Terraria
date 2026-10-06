@@ -1039,7 +1039,10 @@ export class MinionProj extends Entity {
   webFrame = 0;
   webFrameCd = 0;
   /** ★BJ516①：ai067WalkChase 重力前 velocity.Y 捕获（AI_067 帧段读相=碰撞后重力前
-   *  :51670 段序,:52049 重力在帧段后——capturePreGravVy 承载,缺省 null 零开销） */
+   *  :51670 段序,:52049 重力在帧段后——capturePreGravVy 承载,缺省 null 零开销）。
+   *  ★BJ-C3/F1-F3（2026-10-06）消费面扩：海盗 393-395/flinx 951 帧机（:51805/:51767）+
+   *  TryJumpingToTarget 跳尾 :52113（walkChase 四族全量 capturePreGravVy;独立形族
+   *  pal/mush/frog 从不调 walkChase 恒 null=消费端 ?? 直读回落,原相不动） */
   lastWalkPreGravVy: number | null = null;
   /** ★BJ516④（2026-10-05）：AI_026 尾族（191-194/266/1094/1113）ai[0]/localAI[0]
    *  状态槽——0 地面态（num150/num151 转向-开火面 :62677-62707）/1 归位飞行
@@ -1746,8 +1749,17 @@ export class MinionProj extends Entity {
    *  干态下落跃起走 :51027/:51084 专支,两支以 wet 相互排斥=原文设计。 */
   private ai67TryJumpingToTargetTail(toTargetY: number, flag2: boolean, num4 = 30): void {
     const shouldFallThrough = toTargetY > this.y + this.h;             // :52112（判别式本体,字段面见各族 step）
-    let flag = this.vy === 0;                                          // :52113
-    if (this.wetAi && this.vy > 0 && !shouldFallThrough) flag = true;  // :52114-52117
+    // ★BJ-C3/F3（2026-10-06）：:52113 读相=AI 前段=上拍 post-AI 碰撞解算值（vanilla
+    //  Update :16880 AI() 先行、:17585 tileCollide 积分碰撞后行零化落地 vy → AI 相
+    //  贴地恒 0;与 :51767/:51805 帧段同相,重力 :52051 在两段后）。BJ516④ 重力落
+    //  walkChase 尾（:1835）后拍首直读带 +0.4 残留 → 贴地恒假=追高敌平地不跳。
+    //  walkChase 四族（虎 833-835/海盗 393-395/flinx 951/雾网 1036）接
+    //  lastWalkPreGravVy 快照（BJ519① 先例,调用侧 capturePreGravVy 随批补齐）;
+    //  独立形族（pal/mush/frog）步内「先重力后碰撞」无残留、从不调 walkChase →
+    //  快照恒 null 走 ?? 直读回落=原相不动（首拍同理,spawn vy=0 即原版相）。
+    const vyRead = this.lastWalkPreGravVy ?? this.vy;                  // :52113（读相载体）
+    let flag = vyRead === 0;                                           // :52113
+    if (this.wetAi && vyRead > 0 && !shouldFallThrough) flag = true;   // :52114-52117
     if (((toTargetY < this.cy - num4) && flag) && !flag2) {            // :52154（num4 形参,:52151）
       const num5 = (toTargetY - this.cy) * -1;                         // :52155
       const num7 = Math.sqrt(num5 * 2 * 0.4);                          // :52156-52158
@@ -1925,8 +1937,9 @@ export class MinionProj extends Entity {
       const g = this.groundAnchorScan(st, p, ax, ay);
       ax = g.x; ay = g.y;
     }
+    // ★BJ-C3/F3：capturePreGravVy 补齐（跳尾 :52113 读相快照载体,四族同修）
     this.ai067WalkChase(game, p, ax, ay, tgt ? [1, 8, 8] : null,   // flag3 档 :51322-51325
-      { wet, wallIntent: -80 });
+      { wet, wallIntent: -80, capturePreGravVy: true });
     this.contact(game, dmg0 * scale, 10);
   }
 
@@ -2193,10 +2206,15 @@ export class MinionProj extends Entity {
       const g = this.groundAnchorScan(st, p, ax, ay);
       ax = g.x; ay = g.y;
     }
-    this.ai067WalkChase(game, p, ax, ay, tgtF ? [1, 8, 8] : null, { wet });   // flag 档 :51317
+    // ★BJ-C3/F1：capturePreGravVy 补齐（帧机 :51805 读相快照载体 + F3 跳尾同源）
+    this.ai067WalkChase(game, p, ax, ay, tgtF ? [1, 8, 8] : null,
+      { wet, capturePreGravVy: true });                  // flag 档 :51317
     // 走行帧机（:51802-51835 flag 支,移动段内逐帧）：立 0 / 空中(vy≠0) 14 /
     // 行走 fc+=⌊|vx|⌋+1>10 → frame++ 且 ≥4 回 0。仅 state0 走行段执行到此处
-    if (this.vy === 0) {
+    // ★BJ-C3/F1（2026-10-06）：:51805 读相=AI 相=贴地 0（重力 :52051 在帧段后、
+    //  post-AI 碰撞 :17585 再零化）——BJ516④ 重力落 walkChase 尾后直读恒 0.4 →
+    //  pirFrame=14 空中帧恒挂;改读 lastWalkPreGravVy 快照（=碰撞后重力前,BJ519① 先例）。
+    if ((this.lastWalkPreGravVy ?? this.vy) === 0) {
       if (this.vx === 0 || Math.abs(this.vx) < 0.5) {
         this.pirFrame = 0; this.pirFrameCd = 0;          // |vx|<0.5 静立档
       } else {
@@ -2301,10 +2319,16 @@ export class MinionProj extends Entity {
       ? this.x < tgtF.x + tgtF.w && this.x + this.w > tgtF.x
         && this.y < tgtF.y + tgtF.h && this.y + this.h > tgtF.y
       : false;
+    // ★BJ-C3/F2：capturePreGravVy 补齐（帧机 :51767 读相快照载体 + F3 跳尾同源）
     this.ai067WalkChase(game, p, ax, ay, tgtF ? [0.65, 5.5, 5.5] : null,   // flag5 档 :51302-51306
-      { wet, wallIntent: jumpAtTarget });
-    // 帧/旋转（:51766-51790 flag5 地面段）
-    if (this.vy === 0) {
+      { wet, wallIntent: jumpAtTarget, capturePreGravVy: true });
+    // 帧/旋转（:51766-51790 flag5 地面段）——★BJ-C3/F2（2026-10-06）：:51767/:51776
+    //  读相=AI 相=贴地 0（重力 :52051 在帧段后、post-AI 碰撞 :17585 再零化）,
+    //  BJ516④ 重力落尾后直读恒 0.4 → rot 归零支死（AngleTowards 不跑）+ 空中帧 1
+    //  恒挂;两支统一改读 lastWalkPreGravVy 快照（空中 rot 的 Math.min(4,vy) 同取
+    //  快照=原版帧段读相,原直读带 +0.4 相偏）。
+    const vyPhase = this.lastWalkPreGravVy ?? this.vy;
+    if (vyPhase === 0) {
       this.rot = angleTowards(this.rot, 0, 0.3);              // :51767 AngleTowards(0,0.3)
       if (this.vx === 0 || Math.abs(this.vx) < 0.5) {         // :51769/:51780 两支同帧 0（合并）
         this.flinFrame = 0; this.flinFrameCd = 0;
@@ -2314,7 +2338,7 @@ export class MinionProj extends Entity {
         if (this.flinFrame < 2 || this.flinFrame >= 12) this.flinFrame = 2;
       }
     } else {
-      this.rot = Math.min(4, this.vy) * -0.1;                 // :51776-51779
+      this.rot = Math.min(4, vyPhase) * -0.1;                 // :51776-51779（★BJ-C3/F2 同相取快照）
       if (this.facing === -1) this.rot -= Math.PI * 2;        // :51780-51782 照录（≡同相）
       this.flinFrameCd = 0;
       this.flinFrame = 1;
@@ -4882,7 +4906,8 @@ export class MinionProj extends Entity {
     return best;
   }
 
-  /** AI_177（917 酷鞭雪花/1036 雾网蜘蛛）择敌 1:1 = Projectile.FindTargetWithinRange
+  /** AI_177（917 酷鞭雪花;★BJ-C3/F5 2026-10-06：1036 雾网蜘蛛已重路由 webStep=BJ516①,
+   *  本函数唯一调用位=917 支,标题残留同步）择敌 1:1 = Projectile.FindTargetWithinRange
    *  （:45918-45931,实参 (400f, checkCanHit=false)——:46022/:46025,checkCanHit 唯
    *  969 置 true,两型不消费）——★BJ514：原文本支无集火桶/无鞭 tag 桶（AI_177 全
    *  函数不读 OwnerMinionAttackTargetNPC）,曾吃 nearestEnemy 通用集火(900)/tag 桶,
@@ -4906,7 +4931,7 @@ export class MinionProj extends Entity {
         this.ai177Lock = -1;                           // :46001-46004（ai[0]=0）
       }
     }
-    if (!gated || this.ai177Lock < 0) {
+    if (this.ai177Lock < 0) {   // ★BJ-C3/F5：!gated 死支摘除（gated≡true,唯一调用位=917 支）
       let best: EnemyLike | null = null;
       let bestD = 400;                                 // maxRange=400（:46022）
       for (const e of game.enemies()) {
@@ -4915,7 +4940,10 @@ export class MinionProj extends Entity {
         if (!canBeChasedBy(e)) continue;               // :45922
         if (gated && this.ai177Immunity!.peek(en.id) > 0) continue;  // :45925 门（★本刀）
         const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);  // Distance(nPC.Center)=随从心
-        if (best === null || d < bestD) { bestD = d; best = en; }  // :45926-45930 !(num<=num2)
+        // ★BJ-C3/F4（2026-10-06）：首敌豁免摘除——:45929 `!(num<=num2)` 严格小于且
+        //  num 初值=maxRange=400 即域门（d≥400 恒拒,原版无「首敌直纳」支）;旧
+        //  `best === null ||` 令域外首敌入桶=豁免偏差（域内近敌仍最者胜,序等价）。
+        if (d < bestD) { bestD = d; best = en; }                 // :45926-45930 !(num<=num2)
       }
       if (best && gated) this.ai177Lock = best.id;     // :46016-46017（ai[0]=whoAmI+1 等位）
       return best;

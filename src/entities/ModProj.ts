@@ -42,11 +42,14 @@ export class ModProj extends Entity {
     this.knockback = knockback;
     this.x = x; this.y = y; this.vx = vx; this.vy = vy;
     this.w = spec.width ?? 16; this.h = spec.height ?? 16;
+    if (ownerIsPlayer) { this.ownerX = x; this.ownerY = y; }   // boomerang 返程锚(构造时)
     this.pierce = spec.pierce ?? 1;
     this.ownerIsPlayer = ownerIsPlayer;
   }
 
   kill(): void { this.dead = true; }
+
+  ownerX = 0; ownerY = 0; orbitPhase = 0; orbitCx: number | null = null; orbitCy: number | null = null;
 
   fixedUpdate(dt: number, game: GameHooks): void {
     const like = this as unknown as ModProjLike;
@@ -64,6 +67,51 @@ export class ModProj extends Entity {
     this.ageTicks++;
     const life = this.spec.lifetime ?? 3600;
     if (this.ageTicks > life) { this.dead = true; return; }
+    // ★B7 一百零六刀:原语②accelerate(初速向推进)/③boomerang(返程)/④orbit(环绕)
+    if (this.spec.accelerate) {
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      this.vx += (this.vx / sp) * this.spec.accelerate;
+      this.vy += (this.vy / sp) * this.spec.accelerate;
+    }
+    if (this.spec.boomerang && this.ageTicks >= this.spec.boomerang.returnTicks) {
+      const ox = this.ownerX, oy = this.ownerY;
+      const dx = ox - this.cx, dy = oy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      this.vx += (dx / d) * this.spec.boomerang.accel;
+      this.vy += (dy / d) * this.spec.boomerang.accel;
+      if (d < 24) this.dead = true;   // 拾取消亡
+    }
+    if (this.spec.orbit) {
+      const o = this.spec.orbit;
+      const a = this.ageTicks * o.omega + (this.orbitPhase ?? 0);
+      this.orbitCx = this.orbitCx ?? this.cx;
+      this.orbitCy = this.orbitCy ?? this.cy;
+      this.x = this.orbitCx + Math.cos(a) * o.radius - this.w / 2;
+      this.y = this.orbitCy + Math.sin(a) * o.radius - this.h / 2;
+      this.vx = -Math.sin(a) * o.radius * o.omega;
+      this.vy = Math.cos(a) * o.radius * o.omega;
+    }
+    // ★B7 一百零五刀:弹幕 AI 通用面①homing(追踪:向最近敌怪加速 accel/拍)
+    //  ——ownerIsPlayer 弹才追敌(hostile 弹=登记);上限钳速
+    if (this.spec.homing && this.ownerIsPlayer) {
+      const accel = this.spec.homing;
+      let best: { cx: number; cy: number } | null = null;
+      let bestD = 1e9;
+      const enemies = (game as unknown as { entities?: { enemies?: Array<{ dead?: boolean; cx: number; cy: number }> } }).entities?.enemies;
+      for (const en of enemies ?? []) {
+        if (en.dead) continue;
+        const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);
+        if (d < bestD) { bestD = d; best = en; }
+      }
+      if (best && bestD < 800) {
+        const d = Math.hypot(best.cx - this.cx, best.cy - this.cy) || 1;
+        this.vx += ((best.cx - this.cx) / d) * accel;
+        this.vy += ((best.cy - this.cy) / d) * accel;
+        const sp = Math.hypot(this.vx, this.vy);
+        const cap = Math.max(8, accel * 12);
+        if (sp > cap) { this.vx = (this.vx / sp) * cap; this.vy = (this.vy / sp) * cap; }
+      }
+    }
     // —— 位移:重力+子步推进(★P4 红蓝修正:单步 |v|>14px 可整体跳过 16px 墙——
     //    按速度切子步,每子步做 tile 采样) ——
     this.vy += this.spec.gravity ?? 0;

@@ -410,6 +410,53 @@ for (const f of itemCsFiles) {
       else if (bodyS !== undefined) raw.stats.s = 'b';
       else if (legs !== undefined) raw.stats.s = 'l';
     }
+    // ★CalPlayer 基建(六十六刀):UpdateEquip/UpdateAccessory 数值形解析——
+    //  lifeRegen += N → stats.life(hpPerSec 语义);GetDamage<X>() += v →
+    //  stats.dmgMelee/Ranged/Magic(引擎 dmgX=加法 +0.05 形);crit/move/endurance 同构。
+    //  常量名解引用=文件头 `const <int|float> NAME = value;`。加法基形(Player.cs:2386)。
+    {
+      const ueIdx = text.indexOf('public override void UpdateEquip');
+      const uaIdx = text.indexOf('public override void UpdateAccessory');
+      const at = ueIdx >= 0 && (uaIdx < 0 || ueIdx < uaIdx) ? ueIdx : uaIdx;
+      if (at >= 0) {
+        const uo = text.indexOf('{', at);
+        let ud = 0, ue = -1;
+        for (let i6 = uo; i6 < text.length; i6++) {
+          if (text[i6] === '{') ud++;
+          else if (text[i6] === '}') { ud--; if (ud === 0) { ue = i6; break; } }
+        }
+        if (ue > 0) {
+          const ubody = text.slice(uo + 1, ue);
+          const consts = new Map();
+          for (const cm of text.matchAll(/\bconst\s+(?:int|float|double)\s+([A-Za-z0-9_]+)\s*=\s*([0-9.]+f?)\s*;/g)) {
+            consts.set(cm[1], Number(cm[2].replace(/f$/, '')));
+          }
+          const val = (raw2) => {
+            if (raw2 === undefined) return undefined;
+            const v = Number(String(raw2).replace(/f$/, ''));
+            return Number.isFinite(v) ? v : consts.get(String(raw2).trim());
+          };
+          const statFace = raw.stats ?? (raw.stats = {});
+          const acc2 = (re, field) => {
+            const m = ubody.match(re);
+            if (m) {
+              const v = val(m[1]);
+              if (v !== undefined) statFace[field] = v;
+            }
+          };
+          acc2(/lifeRegen\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'life');
+          acc2(/GetDamage<\s*MeleeDamageClass\s*>\(\)\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'dmgMelee');
+          acc2(/GetDamage<\s*RangedDamageClass\s*>\(\)\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'dmgRanged');
+          acc2(/GetDamage<\s*MagicDamageClass\s*>\(\)\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'dmgMagic');
+          acc2(/GetDamage<\s*(?:UniversalDamageClass|GenericDamageClass)\s*>\(\)\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'dmgAll');
+          acc2(/meleeCrit\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'critMelee');
+          acc2(/rangedCrit\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'critRanged');
+          acc2(/magicCrit\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'critMagic');
+          acc2(/moveSpeed\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'moveMult');
+          acc2(/endurance\s*\+=\s*([A-Za-z0-9_.]+f?)/, 'endurance');
+        }
+      }
+    }
     // 放置(显式 createTile;helper 版已处理)
     const ct = fields.createTile !== undefined ? resolveExpr(fields.createTile, fileConsts) : undefined;
     if (typeof ct === 'number') {
