@@ -296,11 +296,15 @@ for (const f of csFiles) {
   }
   for (const line of body.split('\n')) {
     const t = line.trim();
+    // ★二百七十九刀:行尾注释剥离——`NPC.damage = 40; // 64 (1.6x expert scaling)`
+    //  族行曾因 $ 锚不匹配整行静默回退缺省(damage 0/width 缺)→ Boss 接触伤全 0
+    //  根因。仅剥 ` // ` 起的注释(SetDefaults 内无字符串字面量含该序)。
+    const tc = /\s\/\//.test(t) ? t.replace(/\s\/\/.*$/, '') : t;
     // ★灾厄 LifeMaxNERB(N)=lifeMax 基值(方法调用形,不走赋值正则)
     // ★三元 lifeMax(cond ? A : B)——经典=else 支(B;A=BossRush/hardMode 特化)
-    const tern = t.match(/^NPC\.lifeMax\s*=\s*[^?]+\?\s*[-0-9.]+\s*:\s*([-0-9.]+)\s*;/);
+    const tern = tc.match(/^NPC\.lifeMax\s*=\s*[^?]+\?\s*[-0-9.]+\s*:\s*([-0-9.]+)\s*;/);
     if (tern) { raw.lifeMax = Math.max(1, Number(tern[1])); continue; }
-    const nm = t.match(/^NPC\.LifeMaxNERB\(([^)]*)\);/);
+    const nm = tc.match(/^NPC\.LifeMaxNERB\(([^)]*)\);/);
     if (nm) {
       // 三参形(classic, expert, revengeBase)——经典=首参;单参同式
       const first = nm[1].split(',')[0].trim();
@@ -308,7 +312,7 @@ for (const f of csFiles) {
       if (v !== undefined) raw.lifeMax = Math.max(1, v);
       continue;
     }
-    const fm = t.match(/^NPC\.([A-Za-z0-9_]+)\s*=\s*([^;]+);$/);
+    const fm = tc.match(/^NPC\.([A-Za-z0-9_]+)\s*=\s*([^;]+);$/);
     if (!fm) continue;
     const [, field, expr] = fm;
     const e = String(expr).trim();
@@ -436,6 +440,15 @@ for (const f of csFiles) {
   if (WRITE) {
     // ★蠕虫链 sidecar 合并(五十四刀恢复刀):--write 不再覆写手补 worm 声明
     if (WORM_CHAINS[key]) raw.worm = WORM_CHAINS[key];
+    // ★二百七十九刀:spawn 声明透传(SpawnChance 战役面=extract-spawn.mjs 权威;
+    //  本轮 --write 曾整批覆写 105 条=五十四刀判例族再现,透传后 --write 安全)
+    const prevPath = join(outDir, `${key}.json`);
+    if (existsSync(prevPath)) {
+      try {
+        const prev = JSON.parse(readFileSync(prevPath, 'utf8'));
+        if (prev.spawn !== undefined) raw.spawn = prev.spawn;
+      } catch { /* 损坏文件走全新 raw */ }
+    }
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, `${key}.json`), JSON.stringify(raw, null, 2) + '\n');
     if (hasPng) { mkdirSync(texDir, { recursive: true }); copyFileSync(png, join(texDir, `${key}.png`)); }

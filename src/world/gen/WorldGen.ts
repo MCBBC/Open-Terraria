@@ -1454,7 +1454,7 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
   runBeachesPass(store, rng, gs);
   // ★mod 生成 pass 通用消费面(mod 装载期经 sw.registerGenPass 注册;零 mod 知识):
   //  Beaches 后=海盆就位;gs.mods.tileIdByKey=mod tile 键→内部 id(pass 解析用)。
-  const gsMods = (gs as { mods?: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } }).mods = {
+  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
     tileIdByKey: Object.fromEntries(
       Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
         .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
@@ -1464,6 +1464,7 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
     // 生成期箱登记 sink(mod pass 写入;循环后转 world.chests=ChestData)
     chests: [],
   };
+  (gs as { mods?: typeof gsMods }).mods = gsMods;   // ★二百七十八刀:挂回 gs(mod pass 读取面不变;原 cast 表达式赋值改显式两步修 never[] 推断)
   for (const pass of genPasses) {
     rng.reseed(gs.seed);
     prog?.beginVan(pass.name);

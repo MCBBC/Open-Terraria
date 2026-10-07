@@ -17,6 +17,7 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { spawnPart, spawnVanillaEnemy, spawnWormChainFor, shoot, losClear } from './bossAI';
 import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
+import { applyModSpawnStats } from '../mods/hooks';   // ★二百七十八刀:rev/death HP 乘表(肉山×2)
 import { Lang } from '../i18n/Lang';
 
 // Main.wofDrawAreaTop/Bottom(NPC.cs Main 静态;单只血肉墙语义,墙初始化时复位 -1)
@@ -124,6 +125,7 @@ export function spawnWOF(game: GameHooks, px: number, py: number): Enemy | null 
   //（fromVanilla 已按 scale 1.2 放大碰撞盒，须用实体实际 w/h 而非数据原值）
   const wof = spawnVanillaEnemy(game, 113, num2, num3);
   if (wof) {
+    applyModSpawnStats(113, wof);   // ★二百七十八刀:rev/death HP 乘表(肉山×2,巫毒链)
     wof.x = num2 - wof.w / 2;
     wof.y = num3 - wof.h;
     wof.ai0 = num;   // 原版未传 ai[0]（定向走 AI 内 vx==0 分支）；登记推进方向备查

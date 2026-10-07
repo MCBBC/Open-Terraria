@@ -142,7 +142,8 @@ export interface ModNpcContent {
   onHitPlayer?: { buff: string; duration: number; chance?: number };
   /** ★B7 一百零八刀:自然生成行(zone=vanilla 群系键;water=水域门;mult=权重倍;
    *  无声明=不自然刷。灾厄群系门件=世界生成接入后启用) */
-  spawn?: { zone?: string; water?: boolean; mult?: number; maxCount?: number; depth?: { min: number; max: number }; requireFlags?: string[]; blockFlags?: string[] };
+  spawn?: { zone?: string; water?: boolean; mult?: number; maxCount?: number; depth?: { min: number; max: number }; requireFlags?: string[]; blockFlags?: string[] }
+    | Array<{ zone?: string; water?: boolean; mult?: number; maxCount?: number; depth?: { min: number; max: number }; requireFlags?: string[]; blockFlags?: string[] }>;   // ★二百八十八刀:多规则 OR 档(PerforatorCyst 三层血量门族)
   /** ★P8:Boss 位(血条/Boss 槽/掉落锚定;三消费点 VANILLA_BOSS_IDS.has 直亮) */
   boss?: boolean;
   /** ★P8:SetDefaults alpha 语义(出生透明度/渐显;透传 VanillaNpc.alpha) */

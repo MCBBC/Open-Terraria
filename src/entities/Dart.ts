@@ -1190,6 +1190,10 @@ export class Dart extends Entity {
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
     const st = projId ? DART_STYLE[projId] : undefined;
+    // ★二百九十二刀:无 DART_STYLE 项时回退 vanilla-projectiles.json 权威宽高
+    //  (1457 SetDefaults 全 1130 弹;旧缺省 8×4=本仓发明。rot/life 等 AI 语义面
+    //  仍以 DART_STYLE 为准——json 只有几何数据)
+    const vh = projId ? projectileData(projId) : undefined;
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
@@ -1203,6 +1207,8 @@ export class Dart extends Entity {
         ? Math.atan2(vy, vx) + (st.rot === 'a45' ? Math.PI / 4 : Math.PI / 2) : 0;
       this.dir = Math.sign(vx) || 1;
       if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
+    } else if (vh?.width !== undefined && vh?.height !== undefined) {
+      this.w = vh.width; this.h = vh.height;
     }
     this.hostile = false; // 默认非敌对——敌怪发射点（Enemy.shootDart 咽喉 + 直构处）显式置位
   }

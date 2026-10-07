@@ -19,6 +19,7 @@ import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore, LIQUID_TYPE } from '../TileStore';
 import { f32, mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
+import { applyModSpawnStats } from '../../mods/hooks';   // ★二百七十八刀:rev/death HP 乘表(自然刷怪漏斗)
 import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollOnlyBadLuck, rollBadLuck, rollLuck } from '../../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY } from '../../stats/TouchDamage';   // SW-BJ37：平台九件套=原版 tileSolid 补臂
@@ -702,6 +703,7 @@ export class VanillaSpawner {
     }
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
+    applyModSpawnStats(baseId, e);   // ★二百七十八刀:rev/death HP 乘表(fromVanilla 后覆写即同序)
     // 非默认落位（≠spawn 位 spawnTileX*16+8 / spawnTileY*16）：Game 侧放置段
     // （critters 找地面/water 水下扫描）不得覆写——香蒲顶蜻蜓/海滩干隙线水表等
     // 自定义坐标会被挪到玩家落点（review 批补）

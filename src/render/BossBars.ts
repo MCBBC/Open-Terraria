@@ -94,6 +94,8 @@ function cultistRitualInvisible(ai1: number): boolean {
  *  消费端：Common/Twins/四塔/鹿角怪条（各 .cs 经 nPC.GetBossHeadTextureIndex()）；
  *  EoW/克脑/石巨人/月总/碟子/海盗船条用静态基表值（直取 BossHeadTextures[x]）。 */
 export function bossHeadIndexOf(e: BossHeadNpc): number {
+  // ★两百七十七刀:mod Boss(800+)占位头像索引 0(General 条显示;mod 头像贴图注入=下窗)
+  if (e.type >= 800) return 0;
   const result = bossHeadTextureIndex(e.type);
   switch (e.type) {
     case 4:
@@ -175,6 +177,10 @@ export interface CollectInfo {
   lifeMax: number;
   shield?: { cur: number; max: number };
   headIndex: number;
+  /** ★二百八十四刀:mod Boss 真头像贴图路径(assets 注入
+   *  vanilla/NPC_Head_Boss_<npcId>.png;消费端优先于 headIndex,贴图未注入/
+   *  无头像素材时回退 headIndex 占位头) */
+  headTex?: string;
   /** 校验中换锚（EoW/Golem/月总/碟子/海盗船的 TryFindingAnotherPiece 链，
    *  对应原版 `info.npcIndexToAimAt = i`——系统据此更新跟踪目标） */
   retrack?: BarNpc;
@@ -241,6 +247,11 @@ export const COMMON_BAR: BigProgressBar = {
     if (!tracked.active) return null;
     const headIndex = bossHeadIndexOf(tracked);            // CommonBossBigProgressBar.cs:23
     if (headIndex === -1) return null;
+    // ★二百八十四刀:mod Boss(800+)真头像通道(贴图未就绪=drawBossBar 回退占位头)
+    if (tracked.type >= 800) {
+      return { life: tracked.life, lifeMax: tracked.lifeMax, headIndex,
+        headTex: `vanilla/NPC_Head_Boss_${tracked.type}.png` };
+    }
     return { life: tracked.life, lifeMax: tracked.lifeMax, headIndex };
   },
 };

@@ -20,6 +20,7 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
+  registerModSpawnPool,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -39,6 +40,9 @@ export interface ModContext {
   onHitNpc(key: string, fn: (e: unknown, game: unknown, ctx: { damage: number; crit: boolean; killed: boolean }) => void): void;
   /** B6:本 mod NPC 死亡钩(击杀单口;Hive Tumor→Boss 遭遇链面) */
   onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void): void;
+  /** ★二百八十七刀:mod 刷怪池独占面(pool.Clear 语义;返回规则表=本拍顶替
+   *  原版选怪池,只掷返回规则;null=不接管;酸雨事件消费) */
+  spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null): void;
   /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
   playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
@@ -122,6 +126,9 @@ export function createModContext(
     },
     onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void) {
       registerModNpcDeath(idOf('npcs', key), fn as Parameters<typeof registerModNpcDeath>[1]);
+    },
+    spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null) {
+      registerModSpawnPool(modId, fn as unknown as Parameters<typeof registerModSpawnPool>[1]);
     },
     playSound(files: string[], volume = 1, x?: number, y?: number) {
       playModSound(files, volume, x, y);

@@ -248,6 +248,8 @@ import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompos
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
 import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask, smartHighlightSampleLight, SMART_CURSOR_ARROW_COLOR } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门;SW-BJ61 用户分歧采样+箭头原版 White
 import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
+import { placePreviewFrame } from '../core/PlacePreview';   // ★BJ557：放置预览幽灵帧态（Game.updateUse 逐帧写）
+import { drawPlacePreview } from './PlacePreviewDraw';   // ★BJ557：TileObject.DrawPreview 1:1 绘制面
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset, tileAnim } from './TileAnim';
 import {
   VOID_LENS_FW, VOID_LENS_FH, VOID_LENS_ECHO_PHASES,
@@ -2264,10 +2266,22 @@ function tintIconRect(
 // （:47268,gtw≥0 截断=floor）;色 = Color.White×0.7 后 A/=2（:47272-47273）
 // = (178,178,178,89)——RGB 乘色离屏烘焙（multiply→destination-in 三步,同
 // tintIconRect 判例;主画布禁 source-atop）,α=89/255 走消费侧 globalAlpha。
+// ★BJ556（2026-10-07）：α 不再单笔消费——XNA AlphaBlend(One/InvSrcAlpha) 下 A 只
+// 削底不缩 RGB,canvas 单笔 source-over 强制 src.rgb×α=RGB 被双乘（白天亮底暗影
+// 根因）→ 消费侧两遍拆解（89/255 削底+166/255 'lighter' 补足,见 WHIP_MARKER_RGB_TOPUP）。
 // 原版屏盒相交门(:47257)=纯性能门,canvas 世界变换域裁剪等价不建模;gravDir
 // Y 翻转(:47259-47261)由 cam.flipY 整幅镜像承载（同点映射）。
 export const WHIP_MARKER_TINT_RGB = 178;   // 255×0.7 截断（XNA Color.White*0.7f）
 export const WHIP_MARKER_ALPHA = 89 / 255; // A=178 → A/=2 = 89
+/** ★BJ556（2026-10-07）：RGB 满强度补足因子（166/255;89+166=255）。XNA
+ *  BlendState.AlphaBlend =（SrcBlend=One, DstBlend=InverseSourceAlpha）预乘语义
+ *  （判例=本文件 Extra_N 段注）——color.A 只削底【不缩 RGB 贡献】：原版标记
+ *  final = tex.rgb×(178/255) + dst×(1−89/255)。canvas source-over 单笔强制
+ *  src.rgb×α（A 双乘 RGB）→ 两遍拆解：pass1 source-over α=89/255（削底）
+ *  + pass2 'lighter' α=166/255（RGB 补足,0.349+0.651=1 → 贡献=tex.rgb×0.698
+ *  精确）。曾单笔 globalAlpha=89/255（BJ553）=RGB 贡献减半成 tex.rgb×0.244——
+ *  亮底（雪 204-208 实测）Δ=−3..−9 暗影≈不可见=用户复报「白天非常暗」。 */
+export const WHIP_MARKER_RGB_TOPUP = 166 / 255;
 export function whipMarkerFrameIndex(gtw: number): number {
   return Math.floor(gtw * 10) % 4;
 }
@@ -6269,6 +6283,12 @@ export class Renderer {
     //     Main.cs:46721"系错位引用(:46721 实为毁灭者血条追踪代码)。现画在 4.5 前景
     //     水之后;手持电路工具或 F7 时可见）
 
+    // 2c-预览. 放置预览幽灵（★BJ557 2026-10-07：TileObject.DrawPreview——原版挂
+    //     TileDrawing.Draw 尾（TileDrawing.cs:742-747）= tile pass 最末、实体前;
+    //     帧态 placePreviewFrame 由 Game.updateUse 智能光标覆写点后逐帧写,
+    //     开关 = Main.placementPreview（设置面「放置预览」）。世界变换域直绘。）
+    this.drawPlacePreviewIfAny();
+
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
 
@@ -6796,6 +6816,14 @@ export class Renderer {
     //  flushWhipFullbright 无此行=其自身账,不随）。层内序=接口层 1_2<4 标尺
     //  （本位在 7a-pre 之前=同序）。绘制=屏空间 worldToScreen(NPC.Center)
     //  中心锚（:47274 rectangle.Size()/2 原点等价）,PointClamp（平滑关）。
+    //  ★BJ556（2026-10-07）续谳：层位无差（原版接口层=世界画面之上叠绘,亮底依赖
+    //  同本仓;_bj553l maxΔ=163 全来自冻结靶暗/中桶——亮桶未测=探针盲区,本仓
+    //  _bj556 复现 163 同值）,真根因=混合语义:canvas source-over 强制 src.rgb×α
+    //  (A 双乘 RGB) vs 原版 AlphaBlend One/InvSrcAlpha（A 只削底）——单笔
+    //  globalAlpha=89/255 把 RGB 贡献砍半（tex.rgb×0.244）,亮底(204-208 实测)
+    //  Δ=−3..−9.3 暗影≈不可见=用户复报「白天非常暗」;夜暗桶 +52..+58 可见=与
+    //  复报「夜晚明显」自洽。落刀=两遍拆解（source-over 89/255+'lighter' 166/255,
+    //  RGB 补足后贡献=tex.rgb×0.698 精确,钳位点同原版）+ c10e 透明 HUD 域幂等垫底。
     if (!player.dead && player.minionTargetId >= 0) {
       const heldMk = player.inv.heldItem();
       const defMk = heldMk ? ITEM_DEFS[heldMk.id] : undefined;
@@ -6811,10 +6839,26 @@ export class Renderer {
             const [smx, smy0] = cam.worldToScreen(tgtMk.cx, tgtMk.cy);
             const smy = cam.flipY ? viewH - smy0 : smy0;   // :47259-47261 1:1
             const zw = fr.sw * z, zh = fr.sh * z;
+            // ★BJ556：c10e 透明 HUD 域垫底（幂等闩——7-涂层扫尾在 fullbright 帧被
+            //  跳过且 flushTrailShade 空队列早退时 HUD 仍透明;标记非纯加色,须落
+            //  不透明基底两遍拆解才精确,同 flushTrailShade 2026-10-03 判语）。
+            this.c10eCompositeIntoHud();
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（7a-pre 同域）
             ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
-            ctx.globalAlpha = WHIP_MARKER_ALPHA;  // Color.White*0.7f → A/=2
+            // ★BJ556 两遍精确等价（XNA AlphaBlend=One/InverseSourceAlpha 预乘语义,
+            //   判例=Extra_N 段注+sparkleTintedTex 注;WHIP_MARKER_RGB_TOPUP 注含
+            //   探针 _bj556 亮桶 Δ 翻正数判据）:
+            //   pass1 source-over α=89/255 = InverseSourceAlpha 削底 dst×(1−A);
+            //   pass2 'lighter' α=166/255 = SrcBlend=One 的 RGB 满强度补足
+            //   （89+166=255 → 贡献=tex.rgb×178/255 精确;钳位点与原版一致）。
+            //   旧单笔 globalAlpha=89/255 = RGB 被 α 双乘（贡献 tex.rgb×0.244,
+            //   亮底暗影≈不可见=用户复报「白天非常暗」;探针亮桶均值 Δ −3..−9.3）。
+            ctx.globalAlpha = WHIP_MARKER_ALPHA;      // Color.White*0.7f → A/=2
+            ctx.drawImage(tintedMk, fr.sx, fr.sy, fr.sw, fr.sh,
+              smx - zw / 2, smy - zh / 2, zw, zh);
+            ctx.globalAlpha = WHIP_MARKER_RGB_TOPUP;  // SrcBlend=One RGB 补足
+            ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(tintedMk, fr.sx, fr.sy, fr.sw, fr.sh,
               smx - zw / 2, smy - zh / 2, zw, zh);
             ctx.restore();
@@ -8551,6 +8595,15 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(255,255,255,0.8)';
     ctx.lineWidth = 1;
     ctx.strokeRect(tx * ts + 0.5, ty * ts + 0.5, ts - 1, ts - 1);
+  }
+
+  /** ★BJ557（2026-10-07）放置预览幽灵消费位（TileObject.DrawPreview 1:1——
+   *  原版 TileDrawing.cs:742 tile pass 尾;状态面=placePreviewFrame（Game.updateUse
+   *  智能光标覆写点后逐帧写/updateUse 头清）。世界变换域直绘（同 drawWaterfalls）。 */
+  private drawPlacePreviewIfAny(): void {
+    const pv = placePreviewFrame.data;
+    if (!pv || !this.atlas) return;
+    drawPlacePreview(this.ctx, this.atlas, pv);
   }
 
   /** 瀑布贴图（tile 层后、实体前；扫描窗口外扩 100 格在内部，30 帧节流） */
@@ -22787,7 +22840,15 @@ export class Renderer {
       if (e.dead) continue;
       const vid = e.vanillaId;
       if (vid == null) continue;
-      const idx = BOSS_HEAD_INDEX[vid];
+      let idx = BOSS_HEAD_INDEX[vid];
+      // ★二百八十九:mod Boss 地图头(assets 注入 vanilla/NPC_Head_Boss_<npcId>.png;
+      //  表直查零请求——无素材=跳过=原版无头像同形)
+      let modHeadPath: string | null = null;
+      if (idx === undefined && vid >= 800) {
+        modHeadPath = `vanilla/NPC_Head_Boss_${vid}.png`;
+        if (!this.atlas.hasVImage(modHeadPath)) continue;
+        idx = vid;
+      }
       if (idx === undefined) continue;
       // RB16（2026-09-13）：旋转源改读 e.spin——本仓 rotId 家族的 npc.rotation 载体是
       // spin（68 守卫 Enemy.dungeonGuardianAI :8205、262 世纪之花 bossAI_queenbee_plantera:537），
@@ -22817,7 +22878,7 @@ export class Renderer {
       //   α=层 globalAlpha 直乘(=原版 Color(a,a,a,a) 整目标调色同构);剪影按
       //   idx+img 身份缓存=原版逐贴图烘焙目标缓存同构(OutlinedTextureRenderer
       //   ._contents[idx] 首烘恒复用,非当帧 scratch)。
-      const bimg = this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`);
+      const bimg = this.atlas.ensureVImage(modHeadPath ?? `vanilla/NPC_Head_Boss_${idx}.png`);
       if (bimg && bimg.width > 0 && bimg.height > 0) {
         // ★BJ459（2026-10-03）boss 地图头悬停名（小地图 DrawNPCMapIcons2
         //   Main.cs:57043-57058 / 全屏 DrawNPCMapIcons :57121-57127 双路同构）：
@@ -23915,10 +23976,15 @@ export class Renderer {
     ctx: CanvasRenderingContext2D, viewW: number, viewH: number, info: CollectInfo,
   ) {
     if (!this.atlas) return;
+    // ★二百八十四刀:mod Boss 真头像优先(headTex),未注入/无素材回退 headIndex
+    //  占位头(两百七十七刀行为);vanilla 域 headTex 恒 undefined=原路。
+    //  ★二百八十九:headTex 先 hasVImage 表直查(零请求)——无素材不发 404 探测
+    let head: ReturnType<SpriteAtlas['vmisc']> = null;
+    if (info.headTex && this.atlas.hasVImage(info.headTex)) head = this.atlas.vmisc(info.headTex);
+    if (!head && info.headIndex >= 0) head = this.atlas.vmisc(`vanilla/NPC_Head_Boss_${info.headIndex}.png`);
     drawBigProgressBar(ctx, {
       bar: this.atlas.vui('UI_UI_BossBar.png'),
-      head: info.headIndex >= 0
-        ? this.atlas.vmisc(`vanilla/NPC_Head_Boss_${info.headIndex}.png`) : null,
+      head,
     }, viewW, viewH, info, options.data.showBossBarHealthText);
   }
 

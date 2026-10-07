@@ -261,4 +261,34 @@ export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number
   }
   return null;
 }
+/** ★BJ557（2026-10-07）：放置预览幽灵【逐格】1/2 值（TileObject.CanPlace onlyCheck
+ *  占位循环 TileObject.cs:340-372 1:1——每格 num11=2（阻挡红）/1（可放白））。
+ *  判定域 = 足印（w×h）三谓词,与 validateAnchors 足印段逐谓词同源（:169-199）：
+ *  · 占位（:357 `tileSafely.active() && (!tileCut ∨ 484/654) && !BreakableWhenPlacing`）
+ *  · 液体（:342 flag3 = !LiquidPlace——liqStyles[style] 档,同 M-3b）
+ *  · 墙（:347-353 AnchorWall → isValidWallAnchor——本仓默认分支=任意非零墙）。
+ *  ★与 validateAnchors 的关系：本表全 1 是 validateAnchors 通过的【必要非充分】
+ *  条件（锚点带 :404-716 不在本判定;原版锚带格同样写 1/2 但 DrawPreview 绘制窗
+ *  只取 ObjectStart..+W/H（:936-938 continue 跳过）=锚带格【永不可见】——故预览
+ *  只需足印值;锚失败时原版幽灵仍显示白格（点击落空=原版本相,照抄）。 */
+export function previewCellValues(st: World['store'], ax: number, ay: number, rec: AnchorRec,
+  style = 0): Uint8Array {
+  const cells = new Uint8Array(rec.w * rec.h);
+  const liq = rec.liqStyles?.[String(style)] ?? rec.liq;
+  for (let j = 0; j < rec.h; j++) {
+    for (let i = 0; i < rec.w; i++) {
+      const x = ax + i, y = ay + j;
+      if (!st.inBounds(x, y)) { cells[j * rec.w + i] = 2; continue; }
+      const i2 = st.idx(x, y);
+      const shOc = defAt(st, x, y)?.vanilla?.sheet ?? -1;
+      const clearable = (shOc !== -1 && shOc !== 484 && shOc !== 654
+        && TILE_CUT_SHEETS.has(shOc)) || BREAKABLE_WHEN_PLACING_SHEETS.has(shOc);
+      if (st.hasTile(x, y) && !clearable) { cells[j * rec.w + i] = 2; continue; }
+      if (!liquidCellOk(st, x, y, liq)) { cells[j * rec.w + i] = 2; continue; }
+      if (rec.wall && st.wall[i2] === 0) { cells[j * rec.w + i] = 2; continue; }
+      cells[j * rec.w + i] = 1;
+    }
+  }
+  return cells;
+}
 export const ANCHOR_JSON_V = (anchorsJson as unknown as { v: string }).v;

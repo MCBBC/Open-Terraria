@@ -155,7 +155,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, runModModifyNpcSpawnStats,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -192,7 +192,7 @@ import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/Player
  *  buffTypeByVanilla（Buffs.ts 反查 Map,mod 注册面已直写）。原版域行为恒等。 */
 const BUFF_BY_VANILLA = (v: number): BuffType | undefined => buffTypeByVanilla(v);
 import { projectileData } from '../data/vanillaProjectiles';
-import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, MOD_SPAWN_RULES, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
+import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, MOD_SPAWN_RULES, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx, type ModSpawnRule } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla, craftListSignature } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
@@ -408,6 +408,7 @@ import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
 import { IntentionGuesser, GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ433 捣蛋猫帮工意图推断（PlayerIntentionGuesser.cs 1:1）
 import { scanSmartInteractTiles, shouldBlockSmartInteract, clearSmartInteractTileFrame, smartInteractTileFrame } from './SmartInteractTiles';   // ★SW-BJ54：智能交互 tile 候选（TileSmartInteractCandidateProvider 1:1）
+import { placePreviewFrame, clearPlacePreviewFrame, updatePlacePreviewFrame } from './PlacePreview';   // ★BJ557：放置预览幽灵状态面（TileObject.objectPreview 1:1）
 import { craftingFilterForTile } from '../ui/craftingGrid';   // ★SW-FX30 刀⑦：合成站资格谓词（Player.cs:33567-33587 单源）
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';   // ★SW-BJ28：Main.tileSolid 代理（平台九件套并集）
 import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION, WIRE_TOOL_VIDS } from '../player/ToolCursorIcon';
@@ -14559,6 +14560,7 @@ export class Game implements GameHooks {
   private updateUse(_dt: number) {
     const eq = this.player.equipStats;   // ★IIIII250 函数级快照:本函数 37 次直读每读一次键重建(雨天 trace 固定Update 231.8ms 调用权重);stats 冻结,装备变更下一访问即时反映语义不变
     const inp = this.input;
+    clearPlacePreviewFrame();            // ★BJ557：放置预览幽灵每帧重建（先清后写;下方各早退帧=隐藏,⟺原版 cursorItemIconEnabled 复位相）
     // pendingItemReuse 复位（ItemCheck :42921 函数头 `pendingItemReuse = false`）：
     // 该旗只在「归零拍 → 本函数下一拍」窗口为真（updateSwingHits 归零拍写真）
     this.player.pendingItemReuse = false;
@@ -15102,6 +15104,16 @@ export class Game implements GameHooks {
       tx = this.smartCursor.x;
       ty = this.smartCursor.y;
     }
+
+    // ★BJ557（2026-10-07）：放置预览幽灵状态面（Player.UpdatePlacementPreview
+    //  Player.cs:43734 + TileDrawing.cs:742 绘制门 1:1 移植）。开关 Main.placementPreview
+    //  的设置面早已在册（Options.ts:132/Settings.ts:764），效果面（objectPreview 状态
+    //  +DrawPreview 绘制）此前整链未移植=开关空转（用户实报「开了没有效果」根因）。
+    //  时序锚 = tileTarget 建立点（世界缘钳+智能光标覆写后）逐帧刷新——原版
+    //  UpdatePlacementPreview 挂 ItemCheck 尾(:42998)同相;此点后续各使用分支的
+    //  return 不影响本帧已写状态（原版 PlaceThing 分派同理,幽灵不随点击沿蒸发）。
+    //  绘制消费 = Renderer 世界 pass tile 层尾（render/PlacePreviewDraw.ts）。
+    this.tickPlacePreview(tx, ty, heldDef);
 
     // SW-K1 2026-09-03：割草机 4049 瞄准割草（Player.cs:47373 ItemCheck_UseLawnMower,
     // :43909 OwnerOnlyCode 逐 tick 调用——挂 OwnerOnlyCode 面,不受下方 mouseDown
@@ -36778,7 +36790,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  行={npcId, zone('snow'|'jungle'|...|null), water, mult}(mult=基准 spawnChance 权重);
    *  命中=spawnNPC 同型落格(取 vanilla spawn 判定面简化:屏外+非实心+基座)。 */
   private trySpawnModEnemy(p: Player, rng: RNG, viewHalfW: number, viewHalfH: number): boolean {
-    const rules = MOD_SPAWN_RULES;
+    return this.processSpawnRules(p, MOD_SPAWN_RULES);
+  }
+
+  /** ★二百八十七刀:刷怪规则循环(trySpawnModEnemy 抽体;mod 池独占面共用) */
+  private processSpawnRules(p: Player, rules: readonly ModSpawnRule[]): boolean {
     if (rules.length === 0) return false;
     const zoneNow = ((): string | null => {
       const sc = this.scene;
@@ -36800,7 +36816,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (sc.modBiomes) {
         for (const k of Object.keys(sc.modBiomes)) if (sc.modBiomes[k]) return k;
       }
-      return null;
+      // ★二百八十八刀:purity 档(Shroomble ZonePurity 族;biome/高度全不命中=
+      //  纯净地表近似;ZoneBeach 未剔除=登记)
+      return 'purity';
     })();
     for (const r of rules) {
       if (r.zone && r.zone !== zoneNow && !r.depth) continue;
@@ -37108,6 +37126,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const viewHalfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
     const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);
+    // ★二百八十七刀:mod 刷怪池独占面(pool.Clear 语义;hook 返回规则=本拍只掷
+    //  返回规则,原版选怪整体跳过——C# EditSpawnPool pool.Clear 同构)
+    const poolRules = takeModSpawnPool({ game: this, player: p });
+    if (poolRules) {
+      this.processSpawnRules(p, poolRules);
+      return;
+    }
     // ★B7 一百零八刀:mod 自然生成 v1 注入面——vanilla 选怪前先掷 mod 生成行
     //  (MOD_SPAWN_RULES:zone/water/mult 门;scene 群系旗直读;命中即 spawnNpc)
     const modPicked = this.trySpawnModEnemy(p, rng, viewHalfW, viewHalfH);
@@ -38051,6 +38076,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       smartInteractTileFrame.coords = scan.coords;
       smartInteractTileFrame.selected = new Set(scan.selected.map((c) => `${c.x},${c.y}`));
     }
+  }
+
+  /** ★BJ557（2026-10-07）：放置预览幽灵逐帧刷新（Player.UpdatePlacementPreview
+   *  Player.cs:43734 门序 1:1——itemAnimation==0（本仓 this.swing 衰减域）∧ 持可放件
+   *  ∧ 射程内（PlaceThing_Tiles :40035 IsInTileInteractionRange 先于
+   *  cursorItemIconEnabled=true 置位）。placeStyle 终值转换与 tryPlace :27134-27160
+   *  同源;死亡门=原版 ItemCheck 不跑（防御位）。 */
+  private tickPlacePreview(tx: number, ty: number, heldDef: (typeof ITEM_DEFS)[number] | null): void {
+    if (!options.data.placementPreview) return;            // Main.placementPreview（Main.cs:1316;:727 设置翻转）
+    if (!heldDef?.tile || this.player.dead) return;
+    if (this.swing && this.swing.t > 0) return;            // itemAnimation==0 门（:43737——连放挥动期隐藏=原版同相）
+    const tileId = TILE_BY_KEY[heldDef.tile];
+    const def = tileId !== undefined ? TILE_DEFS[tileId] : null;
+    const sheet = def?.vanilla?.sheet ?? -1;
+    if (!def || sheet < 0) return;
+    if (!this.inTileRange(tx, ty, this.blockRange())) return;
+    const heldInst = this.player.inv.heldItem();
+    let style = heldDef.placeStyle ?? 0;
+    if (heldInst?.placeStyle !== undefined) style = heldInst.placeStyle;   // 实例级覆盖（:27134-27137）
+    if (sheet === 4) {                                     // 火把 style 域（tryPlace :27596-27602 同源）
+      style = torchStyleOfItemKey(heldDef.key);
+      if (style === 0 && this.usingBiomeTorches()) style = biomeTorchPlaceStyle(this.biomeTorchZonesAt());
+    } else {
+      if (sheet === 91 && heldInst?.placeStyle !== undefined) style = bannerStyleOf(heldInst.placeStyle);   // 旗种逆写（:27152）
+      if (sheet === 215 && style === 0 && this.usingBiomeTorches()) style = biomeCampfirePlaceStyle(this.biomeTorchZonesAt());   // 营火群系转换（FX38b,:27164）
+    }
+    let pylonDuplicate = false;
+    if (sheet === 597) {                                   // HookCheckIfCanPlace（TileObjectData.cs:3421 badReturn=1→AllInvalid）
+      this.refreshPylons();
+      pylonDuplicate = hasPylonOfType(this.pylons, style);
+    }
+    updatePlacePreviewFrame({
+      st: this.world.store, tx, ty, sheet,
+      defFramed: !!def.framed, defW: def.w ?? 1, defH: def.h ?? 1,
+      style, pylonDuplicate,
+      hasSupport: (x, y, w, h, framed, onTable) => this.hasSupport(x, y, w, h, framed, onTable),
+      obstructionClearable: (typeId, sh) => placeObstructionClearable(typeId, sh),
+    });
   }
 
   private tickSmartInteractNpc(): void {
@@ -46245,6 +46308,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       const e = Enemy.fromVanilla(id, x, y);
       if (!e) return `${id} 无 vanilla-npcs 数据(如 473-476/686 台账)`;
+      applyModSpawnStats(id, e as unknown as { hp?: number; maxHp?: number });   // ★二百七十八刀:F6 面板同口径(测试 rev 血量一致性)
       e.y = y - e.h;                       // NewNPC 底锚(NPC.cs:46596-46597,同 spawnNPC)
       e.id = this.entities.nextId++;
       this.entities.add(e, 'enemies');
@@ -46422,6 +46486,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     const e = Enemy.fromVanilla(398, p.cx, p.cy - 150);  // NewNPC 入参=(int)Center.X, (int)Center.Y−150
     if (!e) return;
+    applyModSpawnStats(398, e);   // ★二百七十八刀:rev/death HP 乘表(教徒链召唤)
     e.x = p.cx - e.w / 2;                    // Bottom.x=Center.X → position.X=X−w/2
     e.y = p.cy - 150 - e.h;                  // Bottom.y=Center.Y−150 → position.Y=Y−h（★BJ110-a 半盒勘误）
     e.id = this.entities.nextId++;
@@ -46449,6 +46514,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!pt) return;   // 500×50 穷尽未得实心落点 = 原版静默失败（:81451 `if (flag)`）
     const e = Enemy.fromVanilla(668, pt.tx * TILE + 8, pt.ty * TILE);
     if (!e) return;
+    applyModSpawnStats(668, e);   // ★二百七十八刀:rev/death HP 乘表(雨天自然召唤)
     e.y = pt.ty * TILE - e.h;   // NewNPC Bottom=(X,Y)=落点格顶（:81594+:81453）
     e.despawnTimer = 18740;   // SpawnBoss:timeLeft=(int)(activeTime 750×1.25)=937 ×20（:81596+:81485）
     e.id = this.entities.nextId++;
@@ -46597,16 +46663,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const e = Enemy.fromVanilla(id, x, y);
     if (!e) return null;
-    {
-      // ★一百三十六刀:mod 出生 stats 修正(复仇/死亡 HP 乘表消费面)
-      const st = { lifeMaxScale: 1 };
-      runModModifyNpcSpawnStats(id, st);
-      const ev2 = e as unknown as { hp?: number; maxHp?: number };
-      if (st.lifeMaxScale !== 1 && ev2.maxHp) {
-        ev2.maxHp = Math.max(1, Math.round(ev2.maxHp * st.lifeMaxScale));
-        ev2.hp = Math.min(ev2.hp ?? ev2.maxHp, ev2.maxHp);
-      }
-    }
+    // ★二百七十八刀:mod 出生 stats 修正收敛到共享助手(复仇/死亡 HP 乘表;
+    //  召唤/自然刷怪漏斗同批接线,原 inline 块迁移)
+    applyModSpawnStats(id, e as unknown as { hp?: number; maxHp?: number });
     // ReleaseNPC case 356（NPC.cs:80916-80920）：蝴蝶 ai[2] = Style（八物种带,
     // 捕获物 1994-2001 → placeStyle=1+item-1994,Item.cs:21307-21318）；661 渐隐
     // 槽/其余族 Style 仅雕像语义不适用释放
@@ -50439,6 +50498,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!pt) return;   // 500×50 穷尽未得实心落点 = 静默失败（NPC.cs:81451）
     const head = Enemy.fromVanilla(vanillaId, pt.tx * TILE + 8, pt.ty * TILE);
     if (!head) return;
+    applyModSpawnStats(vanillaId, head);   // ★二百七十八刀:rev/death HP 乘表(自然召唤漏斗)
     head.y = pt.ty * TILE - head.h;   // NewNPC Bottom=(X,Y)=落点格顶（:81594+:81453）
     head.despawnTimer = 18740;   // SpawnBoss:timeLeft=(int)(activeTime 750×1.25)=937 ×20（:81596+:81485）
     this.entities.add(head, 'enemies');
@@ -50660,6 +50720,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
+        applyModSpawnStats(vanillaId, head);   // ★二百七十八刀:rev/death HP 乘表(物品召唤漏斗)
         // ★Bottom 锚（SpawnOnPlayer 通用支 :81452-81454 SpawnBoss(X=num10*16+8,
         //  Y=num11*16) → NewNPC Bottom=(X,Y)）:顶 = spawnY−h——旧中心锚半埋（BJ111 族）
         head.x = tx * TILE + 8 - head.w / 2;
@@ -50687,6 +50748,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           // 双子:同场生成第二只 126(原版机械魔眼双召;击败记账以 125 为准)
           // ——同 Bottom 锚换算（:81452-81454+:81594）+ timeLeft×20 同面
           const twin = Enemy.fromVanilla(126, (tx + 4) * TILE + 8, spawnY);
+          if (twin) applyModSpawnStats(126, twin);   // ★二百七十八刀:双子二体同乘
           if (twin) {
             twin.x = (tx + 4) * TILE + 8 - twin.w / 2;
             twin.y = spawnY - twin.h;

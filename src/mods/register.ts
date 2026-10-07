@@ -280,15 +280,19 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     const dropRules = buildDropRules(plan, n.modId, spec);
     if (dropRules.length > 0) registerModNpcRules(n.npcId, dropRules);
     // ★B7 一百零八刀:自然生成行注册(spec.spawn:{zone,water,mult};无声明=不自然刷)
+    //  ★二百八十八刀:数组=多规则 OR 档(PerforatorCyst 三层血量门族)
     if (spec.spawn) {
-      MOD_SPAWN_RULES.push({
-        npcId: n.npcId, zone: spec.spawn.zone ?? null,
-        water: spec.spawn.water ?? false, mult: spec.spawn.mult ?? 1,
-        ...(spec.spawn.maxCount !== undefined ? { maxCount: spec.spawn.maxCount } : {}),
-        ...(spec.spawn.depth ? { depth: spec.spawn.depth } : {}),
-        ...(spec.spawn.requireFlags ? { requireFlags: spec.spawn.requireFlags } : {}),
-        ...(spec.spawn.blockFlags ? { blockFlags: spec.spawn.blockFlags } : {}),
-      });
+      const spawnRules = Array.isArray(spec.spawn) ? spec.spawn : [spec.spawn];
+      for (const sr of spawnRules) {
+        MOD_SPAWN_RULES.push({
+          npcId: n.npcId, zone: sr.zone ?? null,
+          water: sr.water ?? false, mult: sr.mult ?? 1,
+          ...(sr.maxCount !== undefined ? { maxCount: sr.maxCount } : {}),
+          ...(sr.depth ? { depth: sr.depth } : {}),
+          ...(sr.requireFlags ? { requireFlags: sr.requireFlags } : {}),
+          ...(sr.blockFlags ? { blockFlags: sr.blockFlags } : {}),
+        });
+      }
     }
     // ★CalPlayer 基建(六十四刀):接触命中玩家施加声明面 debuff(OnHitPlayer 形)
     if (spec.onHitPlayer) {

@@ -366,6 +366,12 @@ export class SpriteAtlas {
   /** 杂项单图(旗帜头像/链条/Boss 部件/Glow 叠画等,全为每帧活画)——
    *  miss 走 ensureVImage 触发懒加载:未就绪返回 null,消费方下帧自愈
    *  (2026-08-13 前 vimages.get 直取——脱离 VANILLA_MISC 预载即永不出现) */
+  /** ★二百八十九:vimages 表直查(零请求零副作用)——mod 注入键存在性判定
+   *  (Boss 地图头/血条 mod 头像:无素材走兜底,不发 404 探测) */
+  hasVImage(file: string): boolean {
+    return this.vimages.has(file);
+  }
+
   vmisc(path: string): DrawRect | null {
     const hit = this.vimages.get(path); // 命中直接返回(node 测试环境的已注入项同样有效)
     if (hit) return { img: hit, sx: 0, sy: 0, sw: hit.width, sh: hit.height };

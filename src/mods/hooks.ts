@@ -11,6 +11,7 @@ import type { Player } from '../entities/Player';
 import type { ItemDef } from '../data/items';
 import type { InvItem } from '../items/Inventory';
 import { MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE, MOD_BUFF_VANILLA_BASE } from './types';
+import type { ModSpawnRule } from '../world/spawn/VanillaSpawner';
 
 /** mod 物品 use 上下文(updateUse 预分流点供给) */
 export interface ModUseCtx {
@@ -452,6 +453,41 @@ export function registerModNpcSpawnStats(modId: string, fn: (vanillaId: number, 
 export function runModModifyNpcSpawnStats(vanillaId: number, stats: { lifeMaxScale: number }): void {
   if (npcSpawnStats.size === 0) return;
   for (const fn of npcSpawnStats.values()) fn(vanillaId, stats);
+}
+
+/** ★二百七十八刀:rev/death HP 乘表统一消费点(R4 定谳「npcSpawnStats 死表」:
+ *  钩原只接 spawnNpcByVanilla,summonBossAtTx(物品召唤)/spawnBossOnPlayer(花苞等
+ *  自然 Boss 召唤)/VanillaSpawner(自然刷怪)全绕行=复仇模式 Boss 血量恒原版)。
+ *  C# 语义=SetDefaults 期对所有生成路径生效;本仓读档/联机傀儡不重过 NewNPC
+ *  故不接(同 VanillaSpawner「持久实体不重掷」口径)。 */
+export function applyModSpawnStats(vanillaId: number, e: { hp?: number; maxHp?: number }): void {
+  if (npcSpawnStats.size === 0) return;
+  const st = { lifeMaxScale: 1 };
+  runModModifyNpcSpawnStats(vanillaId, st);
+  if (st.lifeMaxScale !== 1 && e.maxHp) {
+    e.maxHp = Math.max(1, Math.round(e.maxHp * st.lifeMaxScale));
+    e.hp = Math.min(e.hp ?? e.maxHp, e.maxHp);
+  }
+}
+
+/** ★二百八十七刀:mod 刷怪池独占面(C# EditSpawnPool pool.Clear 同构;酸雨事件
+ *  消费:事件期硫海池整体顶替原版池)——hook 返回规则表=本拍 vanilla 选怪被
+ *  顶替,只掷返回的规则;返回 null=不接管。 */
+const modSpawnPools = new Map<string, (ctx: { game: Game; player: Player | null }) => ModSpawnRule[] | null>();
+
+export function registerModSpawnPool(modId: string, fn: (ctx: { game: Game; player: Player | null }) => ModSpawnRule[] | null): void {
+  if (modSpawnPools.has(modId)) throw new Error(`[mod-hooks] spawnPool 重复注册: ${modId}`);
+  modSpawnPools.set(modId, fn);
+}
+
+/** 首个接管池(无 hook=零成本;hook 全 null=原路) */
+export function takeModSpawnPool(ctx: { game: Game; player: Player | null }): ModSpawnRule[] | null {
+  if (modSpawnPools.size === 0) return null;
+  for (const fn of modSpawnPools.values()) {
+    const r = fn(ctx);
+    if (r) return r;
+  }
+  return null;
 }
 
 /** ★一百三十九刀:vanilla 敌怪 AI 覆盖钩(RevengeanceAndDeathAI 面;按 vanillaId

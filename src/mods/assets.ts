@@ -101,6 +101,20 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         referenced.add(spec.texture);
         npcJobs.push({ fileKey: `vanilla/NPC_${npcs.get(fullKeyOf(modId, spec.key))}.png`, texPath: spec.texture });
       }
+      // ★二百八十四刀:mod Boss 头像注入(<key>_head_boss.png 约定 →
+      //   vanilla/NPC_Head_Boss_<npcId>.png;Boss 血条 Common 条 headTex 消费;
+      //   62 张 1457 权威 _Head_Boss 贴图已落 textures/npcs/)
+      if (spec?.key && npcs.has(fullKeyOf(modId, spec.key))) {
+        const headTexPath = `textures/npcs/${spec.key}_head_boss.png`;
+        const headBytes = packTexBytes(pack, headTexPath);
+        if (headBytes) {
+          referenced.add(headTexPath);
+          const bmpHead = await decodePngOrWarn(pack, modId, headTexPath);
+          if (bmpHead) {
+            inject(atlas, `vanilla/NPC_Head_Boss_${npcs.get(fullKeyOf(modId, spec.key))}.png`, bmpHead);
+          }
+        }
+      }
       // ★G2③ 头贴注入(GLM娘实验批):townNPC 注册面已自增分配 head 索引,
       //   贴图落 vanilla/NPC_Head_{idx}.png(住房UI行/地图图标/旗帜消费)
       if (spec?.head && npcs.has(fullKeyOf(modId, spec.key))) {

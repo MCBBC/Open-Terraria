@@ -2,7 +2,7 @@
 // 玩家中心 169×124 tile 采样计数（ZoneScanSize = 1920/16+49 × 120/16+49, SceneMetrics.cs:12-16）
 // → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-708）。
 // BGM 选择链(Music.ts)与群系背景(BiomeBackground)共用本份结果。
-import { TILE_DEFS, TILE_BY_KEY, WALL_DUNGEON_SHEETS, DUNGEON_UNION_CRACKED_IDS } from '../data/tiles';
+import { TILE_DEFS, WALL_DUNGEON_SHEETS, DUNGEON_UNION_CRACKED_IDS } from '../data/tiles';
 import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
 import { sceneMetricDualOverride } from './DungeonDualZones';
@@ -49,7 +49,6 @@ const SUNFLOWER = SHEET_MAP.get(27) ?? -1;
 const GRAVEYARD_TILES = ids([85]);
 /** HoneyBlockCount / PartyMonolithCount 计数源 tile（AggregateTileCounts cs:601/621） */
 const HONEY_BLOCK = SHEET_MAP.get(229) ?? -1;
-const MOD_ZONE_TILE_IDS = new Map<string, number[]>();
 const PARTY_MONOLITH = SHEET_MAP.get(455) ?? -1;
 /** ShadowCandleCount 计数源 tile（SceneMetrics.cs:393-395 影烛 = tile 646 亮档扫描）。
  *  ★tile 域双域实害（2026-09-18 BJ154 同族普查第三案）：counts 键=内部 id
@@ -437,23 +436,7 @@ export function scanScene(
   // 墓碑族（L622-623）：GraveyardTileCount = _tileCounts[85] − _tileCounts[27]/2（下取整、负值钳 0）。
   // tile 85 = Tombstones 全部 6 种墓碑变体（同 tile 不同 style），无独立 tile——旧注疑 545 有误
   const graveyard = Math.max(0, countSet(counts, GRAVEYARD_TILES) - (sunflower >> 1));
-  // ★B7 七十三刀:灾厄 biome Zone 旗(ZoneAstral/ZoneSulphur)——mod tile 计数
-  //  (键名含 astral/sulphurous;阈值=40 同 DESERT_THRESHOLD 族)。世界生成未落
-  //  astral/硫海生物群系前由放置的 mod tile 累计(惰性阈值面,世界生成接入即活)。
-  const modZoneCount = (needle: string): number => {
-    let ids = MOD_ZONE_TILE_IDS.get(needle);
-    if (ids === undefined) {
-      ids = [];
-      for (const [key, iid] of Object.entries(TILE_BY_KEY)) {
-        if (key.startsWith('mod_') && key.includes(needle)) ids.push(iid);
-      }
-      MOD_ZONE_TILE_IDS.set(needle, ids);
-    }
-    let n = 0;
-    for (const iid of ids) n += counts.get(iid) ?? 0;
-    return n;
-  };
-  // (原硬编码 'astral'/'sulphurous' 已上提为通用注册面——引擎零 mod 群系知识)
+  // (mod 群系 Zone 旗=通用注册面 registerModBiomeFlag 一百零八刀;引擎零 mod 知识)
   // HasSunflower（L626-631）：有向日葵 且 GraveyardTileCount ≤ GraveyardTileMin(16)——
   // 墓碑够多时向日葵的快乐 buff 被压制（比较在 <0 钳位之前，但 >16 必为正，顺序无差）
   const hasSunflower = sunflower > 0 && graveyard <= GRAVEYARD_TILE_MIN;

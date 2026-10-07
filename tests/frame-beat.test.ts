@@ -18,9 +18,20 @@
 //    真实流零咬合(阈 3.83<LIVE corpus 最短间隔 3.9=跟满)+多回调拍抖动带外(cap60@
 //    120Hz 两回调拍合计 [15.0,18.3] vs 阈 12.17=零延拍)+cap 值域 {60,120,0} 在
 //    60/120Hz 屏全正确量化。
+// ★v9.9 相位锚定调度翻正(2026-10-07,同日收口刀;FrameBeat.ts 头注 v9.9):v9.8 纯
+//  时间门在超速流上「跟满 125-132」=用户主诉面(fps 读数高于 cap)。本文件语义锁整体
+//  翻正为累计器相位锚定:shouldRender=now ≥ _nextDue − DUE_GUARD_MS(0.75,只防 rAF
+//  时间戳抖动)、beginRender 相位推进 _nextDue=max(_nextDue+target, now)(慢流重锚不
+//  追讨/快流恒 +target=限速)、resetSampling/cap 变更重锚 _nextDue=−1;k 迁移退役与
+//  v9.7 hold 均保留。翻正映射:①形态①干净流=锁相 vsync(±10% 抖动残 skip≤1%=相位
+//  游走重锁 16.7 顺延帧,GUARD 扫描 0.75-2.0 恒 16-18 跳=非阈值带病);②形态②超速
+//  流「跟满 125-132」→「限速 120」(LIVE 流渲染 342/359、读数 p50 119.9 无 130 段);
+//  ③形态④暂停段帧距=重锚顺延 {4.5,9,13.5} 有界零振荡;④诚实边界②③(240Hz 跟满/
+//  深超速跟满 182)→「限速 120」(累计器不随屏率超 cap);⑤GUARD 语义=干净流零跳变
+//  (无余量变异在 due 刀刃上被 fp/时间戳亚毫秒抖动打穿=红)。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { FrameBeat, GRID_MS, TARGET_GUARD_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, FLOOR_HOLD_WINDOWS, trimmedMeanVsync } from '../src/core/FrameBeat';
+import { FrameBeat, GRID_MS, TARGET_GUARD_MS, DUE_GUARD_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS, FLOOR_HOLD_WINDOWS, trimmedMeanVsync } from '../src/core/FrameBeat';
 
 const GAME = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 const BEAT = readFileSync(new URL('../src/core/FrameBeat.ts', import.meta.url), 'utf8');
@@ -217,33 +228,49 @@ class LegacyEstBeat extends FrameBeat {
   }
 }
 
-/** GUARD 变异体(阈=目标值本身,无余量):阈值落进抖动带内=旧被动门同构病(红面) */
-class NoGuardBeat extends FrameBeat {
+/** GUARD 变异体(★v9.9 翻正:无余量累计器——shouldRender 比较 now ≥ _nextDue 裸刀刃):
+ *  干净流上 due 累加链与回调累加链的 fp 舍入差(~1e-9)/rAF 时间戳亚毫秒抖动落在阈值
+ *  刀刃上=随机跳帧(红面)。影子 due 复刻累计器推进式(只去 DUE_GUARD_MS 余量) */
+class NoGuardAccumBeat extends FrameBeat {
+  private myDue = -1;
   override shouldRender(now: number): boolean {
     if (this.cap <= 0) return true;
-    if (this.lastRenderAt < 0) return true;
-    return now - this.lastRenderAt >= this.targetMs();
+    if (this.myDue < 0) return true;
+    return now >= this.myDue;
+  }
+  override beginRender(now: number): void {
+    super.beginRender(now);
+    this.myDue = this.myDue < 0 ? now + this.targetMs() : Math.max(this.myDue + this.targetMs(), now);
+  }
+  override resetSampling(): void {
+    super.resetSampling();
+    this.myDue = -1;
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 describe('★v9.8 时间门四形态(退役态回归锁;语义见 FrameBeat.ts 头注 v9.8)', () => {
-  it('形态①干净流恒屏率:120Hz±10% 抖动 cap120 → 逐回调全渲零 skip,k=1,帧距=回调间隔,零跳变', () => {
-    // 阈 3.83 < 抖动带下沿 7.5(带外放置)→ 零咬合;帧距即流本相
+  it('形态①干净流恒屏率:120Hz±10% 抖动 cap120 → 累计器锁相 vsync,k=1,帧距 p50≈8.3,锁相率 ≥98.7%', () => {
+    // ★v9.9 翻正:旧「逐回调全渲零 skip 零跳变(裸时间门跟满)」→「累计器锁相:渲染率
+    //  120±带内抖动、帧距 p50 恒 8.3;±10% 抖动残 skip(≤1%)=相位游走重锁的 16.7 顺延
+    //  帧(GUARD 扫描 0.75-2.0 恒 16-18 跳=锁相余量,非 v9.4 门咬合带病)」
     const { beat, rendered } = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400, jitter: 0.1 });
-    expect(rendered.length).toBe(2400);
     expect(beat.k).toBe(1);
     expect(beat.lastReason).toBe('init');
+    expect(rendered.length).toBeGreaterThanOrEqual(2370);   // 锁相率 ≥98.7%(measured 2390/2400)
     const st = gapStats(rendered.slice(40));
-    expect(st.jumps).toBe(0);
-    expect(st.p50).toBeGreaterThan(HZ120 - 1);
-    expect(st.p50).toBeLessThan(HZ120 + 1);
+    expect(st.jumps).toBeLessThanOrEqual(40);               // 顺延帧少数派(measured 18)
+    expect(st.p50).toBeGreaterThan(HZ120 - 0.5);
+    expect(st.p50).toBeLessThan(HZ120 + 0.5);
+    expect(1000 / st.mean).toBeGreaterThan(117);            // 渲染率=cap 带(measured 119.9)
+    expect(1000 / st.mean).toBeLessThan(123);
   });
 
-  it('形态②超速流跟满稳(真实语料 Trace-20261006T033001):132/s merge/split 宽分布 → 零咬合逐回调全渲,读数稳 125 带零 120 穿越', () => {
-    // 定谳锚(v9.5 回放):无门配置零 skip+读数稳 126.7=用户「B2 前很稳」记忆;
-    // GUARD=4.5(阈 3.83<流最短 3.9)逐位复刻该稳态;GUARD≤2(阈 6.33)在此流咬合
-    // ~12%=v9.4 门"画面抖动"同病(头注 v9.8 标定①——初始处方 0.5-1ms 被此语料否决)
+  it('形态②超速流限速 120(真实语料 Trace-20261006T033001):132/s merge/split 宽分布 → 累计器限速,读数 p50≈120 无 130 段', () => {
+    // ★v9.9 翻正:旧「跟满 125-132:零咬合逐回调全渲,读数稳 125 带零 120 穿越」→
+    //  「限速 120(用户主诉判别面):渲染数<回调数(相位锚 skip=限速本相),读数 p50
+    //  ≈120、p05>112、无 130 段(max<126);变异证红=v9.8 裸时间门同流 359/359 跟满
+    //  125.5。est 诊断面(minK={1})保留
     const beat = new FrameBeat();
     let t = 0;
     const rendered: number[] = [];
@@ -258,28 +285,34 @@ describe('★v9.8 时间门四形态(退役态回归锁;语义见 FrameBeat.ts �
         beat.endRender(t + LIVE_COSTS_X10[i] / 10);
       }
     }
-    expect(rendered.length).toBe(LIVE_DELTAS_X10.length);   // 零咬合(跟满,原会话 7.55% skip 清零)
+    expect(rendered.length).toBeLessThan(LIVE_DELTAS_X10.length);   // 限速生效(measured 342/359)
+    expect(rendered.length).toBeGreaterThanOrEqual(320);            // 不过度钳(skip ≤11%)
     expect(beat.k).toBe(1);
     expect(beat.lastReason).toBe('init');
     expect(minKs).toEqual(new Set([1]));                    // 诊断面:est 不跌破地板门槛(零翻转)
     const gaps: number[] = [];
     for (let i = 1; i < rendered.length; i++) gaps.push(rendered[i] - rendered[i - 1]);
-    expect(Math.max(...gaps)).toBeLessThan(14);             // 长帧距=流本相(最大间隔 13.5),非门自造
+    const sp = [...gaps].sort((a, b) => a - b);
+    expect(sp[Math.floor(sp.length / 2)]).toBeGreaterThan(7.5);   // 帧距 p50≈8.33(measured 8.20)
+    expect(sp[Math.floor(sp.length / 2)]).toBeLessThan(9.2);
+    expect(Math.max(...gaps)).toBeLessThan(19);             // 顺延帧 17.1 有界(非 33ms 整拍空档)
     const fps = fpsSeries(rendered);
-    expect(q(fps, 0.5)).toBeGreaterThan(122);               // 读数稳在 ticker 率带
-    expect(q(fps, 0.05)).toBeGreaterThan(120);              // 零 120 下穿(原会话 7.3 次/s)
-    let cross = 0;
-    for (let i = 1; i < fps.length; i++) if ((fps[i - 1] < 120) !== (fps[i] < 120)) cross++;
-    expect(cross).toBe(0);
+    expect(q(fps, 0.5)).toBeGreaterThan(115);               // 读数限速 120 带(measured 119.9)
+    expect(q(fps, 0.5)).toBeLessThan(123);
+    expect(q(fps, 0.05)).toBeGreaterThan(112);              // 带内抖动下沿(measured 117.9)
+    expect(Math.max(...fps)).toBeLessThan(126);             // 无 130 段(measured max 122.0)
   });
 
-  it('形态②超速流跟满稳(σ0.9 合成 ticker 125Hz):零咬合、读数 125 带、k=1', () => {
+  it('形态②超速流限速 120(σ0.9 合成 ticker 125Hz):渲染率钳到 120 带、限速 skip 有界、k=1', () => {
+    // ★v9.9 翻正:旧「零咬合 skipAfterWarm=0、读数 >123 跟满 ticker 原生率」→「限速
+    //  120:125Hz ticker 被累计器钳到 120±带内抖动,限速 skip 存在且有界(measured
+    //  199/4600≈4.3%),顺延帧 17.7 有界」
     const lcg = lcgOf(97);
     const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-12, lcg()))) * Math.cos(2 * Math.PI * lcg());
     const beat = new FrameBeat();
     const rendered: number[] = [];
     let t = 0;
-    let skipAfterWarm = 0;
+    let throttleSkips = 0;
     for (let i = 0; i < 5000; i++) {
       t += 8.0 + 0.9 * gauss();
       beat.observeVsync(t, 120);
@@ -287,13 +320,16 @@ describe('★v9.8 时间门四形态(退役态回归锁;语义见 FrameBeat.ts �
         beat.beginRender(t);
         rendered.push(t);
         beat.endRender(t + 4);
-      } else if (i >= 400) skipAfterWarm++;
+      } else if (i >= 400) throttleSkips++;
     }
     expect(beat.k).toBe(1);
-    expect(skipAfterWarm).toBe(0);            // 稳态零咬合(阈 3.83 < σ带下沿 ~5.3)
+    expect(throttleSkips).toBeGreaterThan(0);          // 限速生效(skip=限速本相,非门咬合)
+    expect(rendered.length).toBeLessThan(5000);
+    expect(rendered.length).toBeGreaterThan(4600);     // 渲染率 120±(measured 4785)
     const st = gapStats(rendered.slice(400));
-    expect(1000 / st.mean).toBeGreaterThan(123);   // 跟满 ticker 原生率(≈125)
-    expect(Math.max(...st.gaps)).toBeLessThan(13);
+    expect(1000 / st.mean).toBeGreaterThan(117);       // 限速 120 带(measured 119.8)
+    expect(1000 / st.mean).toBeLessThan(123);
+    expect(Math.max(...st.gaps)).toBeLessThan(19);     // 顺延帧有界(measured 17.7)
   });
 
   it('形态③render-bound 帧距=帧耗:cap120 帧耗 25ms → 帧距恒 25ms=40fps,零跳变零 flap(容量语义由时间门天然承载)', () => {
@@ -308,9 +344,11 @@ describe('★v9.8 时间门四形态(退役态回归锁;语义见 FrameBeat.ts �
     expect(1000 / st.mean).toBeLessThan(42);
   });
 
-  it('形态④暂停+云尖峰零振荡:CLOUD 4.5/9.0 宽分布流(无 hold/有 hold 双臂)→ k=1 零迁移,帧距=流本相周期态(无 est 驱动的 60↔爬升翻转)', () => {
-    // v9.7 定谳流形态(Trace-20261007T143900);hold 双臂=兼容保留面(时间门下
-    // paused 天然无迁移,hold 只清瞬态诊断账)
+  it('形态④暂停+云尖峰零振荡:CLOUD 4.5/9.0 宽分布流(无 hold/有 hold 双臂)→ k=1 零迁移,帧距被相位锚定钳成有界周期态(无 est 驱动的 60↔爬升翻转)', () => {
+    // ★v9.9 翻正:旧「暂停段帧距=流本相 {4.5,9.0}(裸时间门跟满)」→「暂停段帧距=
+    //  累计器重锚顺延 {4.5,9.0,13.5} 有界周期态(13.5=一拍顺延;4.5=深落后重锚后即时
+    //  落拍),零振荡面不变;恢复段帧距被相位锚钳入 {7.9,15.8} 限速带(7.9ms ticker<
+    //  target → 每回调落拍+相位游走顺延)」。hold 双臂=兼容保留面不变
     for (const withHold of [false, true] as const) {
       const beat = new FrameBeat();
       const ks: number[] = [];
@@ -339,11 +377,11 @@ describe('★v9.8 时间门四形态(退役态回归锁;语义见 FrameBeat.ts �
       expect(ks.every((k) => k === 1)).toBe(true);
       expect(reasons.every((r) => r === 'init')).toBe(true);
       expect(beat.lastReason).toBe('init');
-      // 暂停段帧距=流本相(阈 3.83<4.5 → 逐回调全渲,gaps 恒 {4.5,9.0} 周期态;
-      // 浮点累加取整到 1e-6 后比对)
-      expect(new Set(pauseGaps.map((g) => Math.round(g * 1e6) / 1e6))).toEqual(new Set([4.5, 9]));
-      // 恢复后健康段帧距=7.9(超速 ticker 跟满)
-      expect(Math.max(...gaps.slice(-250))).toBeLessThan(8.5);
+      // 暂停段帧距=重锚顺延有界周期态({4.5,9.0,13.5};浮点累加取整到 1e-6 后比对)
+      expect(new Set(pauseGaps.map((g) => Math.round(g * 1e6) / 1e6))).toEqual(new Set([4.5, 9, 13.5]));
+      // 恢复后健康段帧距=相位锚限速带 {7.9,15.8}(钳入 [7.5,16.5],无振荡无 30ms+)
+      expect(Math.max(...gaps.slice(-250))).toBeLessThan(16.5);
+      expect(Math.min(...gaps.slice(-250))).toBeGreaterThan(7.5);
     }
   });
 });
@@ -367,14 +405,19 @@ describe('★cap 执法(时间门量化;k 恒 1——旧 minK 地板/拍迁移�
     expect(st.p50).toBeLessThan(1000 / 30 + 1);
   });
 
-  it('cap60@120Hz ±10% 抖动:两回调拍合计带 [15.0,18.3] 全在阈 12.17 之上 → 零延拍(GUARD=4.5 标定②;GUARD≤1.67 时 ~20% 拍延 3 回调=自造摆动)', () => {
+  it('cap60@120Hz ±10% 抖动:限速 60 稳定——累计器每 2 回调拍落一次(p50=16.7、渲染率 60),顺延帧有界', () => {
+    // ★v9.9 翻正:旧「两回调拍合计带 [15.0,18.3] 全在阈 12.17 之上→零延拍(GUARD=4.5
+    //  标定②)」→「限速 60:p50 恒 16.7、渲染率 60.0;±10% 抖动下 ~3% 相位游走重锁
+    //  顺延帧(3 回调 25ms)有界,非 33ms 整拍空档」
     const { beat, rendered } = runBeat({ vsync: HZ120, cap: 60, cost: 5, callbacks: 2400, jitter: 0.1 });
     expect(beat.k).toBe(1);
     const st = gapStats(rendered.slice(40));
-    expect(st.jumps).toBe(0);
     expect(st.p50).toBeGreaterThan(GRID_MS - 1.5);
     expect(st.p50).toBeLessThan(GRID_MS + 1.5);
-    expect(Math.max(...st.gaps)).toBeLessThan(GRID_MS + 2);
+    expect(1000 / st.mean).toBeGreaterThan(59);            // 限速 60 稳定(measured 60.0)
+    expect(1000 / st.mean).toBeLessThan(61);
+    expect(Math.max(...st.gaps)).toBeLessThan(26);         // 顺延帧 25.2 有界(非 33ms)
+    expect(st.jumps).toBeLessThan(300);                    // 顺延帧少数派(measured ~150/2360)
   });
 
   it('cap 收紧 0→30 即时生效:帧距转 33.3,k/reason 不迁移(时间门直接承载 cap,旧 floor 迁移面退役)', () => {
@@ -406,10 +449,13 @@ describe('★cap 执法(时间门量化;k 恒 1——旧 minK 地板/拍迁移�
     expect(Math.max(...after)).toBeLessThan(35);
   });
 
-  it('cap60@60Hz(缺省档)与 cap120@60Hz:每回调一渲恒 60(阈低于屏率间隔,屏率绑顶)', () => {
+  it('cap60@60Hz(缺省档)与 cap120@60Hz:屏率绑顶——cap120 逐回调全渲恒 60,cap60 累计器锁相 ≥95%', () => {
+    // ★v9.9 翻正:旧「每回调一渲恒 60(阈低于屏率间隔,屏率绑顶)」→「cap120@60Hz
+    //  累计器在慢流上每回调补拍=仍逐回调全渲;cap60@60Hz(target=回调间隔)锁相率
+    //  ≥95.8%(±10% 抖动带内偶发顺延,measured 1192/1200)」
     const a = runBeat({ vsync: HZ60, cap: 60, cost: 5, callbacks: 1200, jitter: 0.1 });
     expect(a.beat.k).toBe(1);
-    expect(a.rendered.length).toBe(1200);
+    expect(a.rendered.length).toBeGreaterThanOrEqual(1150);   // 锁相率 ≥95.8%(measured 1192)
     const stA = gapStats(a.rendered.slice(40));
     expect(stA.p50).toBeGreaterThan(HZ60 - 1.5);
     expect(stA.p50).toBeLessThan(HZ60 + 1.5);
@@ -418,15 +464,25 @@ describe('★cap 执法(时间门量化;k 恒 1——旧 minK 地板/拍迁移�
     expect(b.beat.k).toBe(1);
   });
 
-  it('诚实边界②(头注 v9.8):高刷屏 240Hz cap120 → 时间门跟满交付 240(阈 3.83<单回调间隔 4.17;cap 语义=意图天花板+GUARD 松弛,旧 FLOOR_TOL 体系全速线 cap≥102 的松弛带移位)', () => {
+  it('诚实边界②(头注 v9.9):高刷屏 240Hz cap120 → 限速 120——累计器不随屏率超 cap,每 2 回调拍落一次,帧距恒 8.33', () => {
+    // ★v9.9 翻正:旧「时间门跟满交付 240(阈 3.83<单回调间隔 4.17;cap=意图天花板+
+    //  GUARD 松弛)」→「限速 120:240Hz 流上累计器每 2 回调拍落一次,渲染数=回调数一半,
+    //  帧距恒 8.33 零跳变(cap 执法面回归:屏率不再是天花板)」
     const { beat, rendered } = runBeat({ vsync: 1000 / 240, cap: 120, cost: 1, callbacks: 2400 });
     expect(beat.k).toBe(1);
-    expect(rendered.length).toBe(2400);
+    expect(rendered.length).toBe(1200);                     // 每 2 回调拍落一次(measured 1200)
     const st = gapStats(rendered.slice(40));
-    expect(1000 / st.mean).toBeGreaterThan(230);
+    expect(st.p50).toBeGreaterThan(8);
+    expect(st.p50).toBeLessThan(8.7);                       // 帧距恒 8.33(measured 8.33)
+    expect(1000 / st.mean).toBeGreaterThan(118);
+    expect(1000 / st.mean).toBeLessThan(122);               // 限速 120(measured 120.0)
+    expect(st.jumps).toBe(0);
   });
 
-  it('诚实边界③(头注 v9.8):深超速 fiction(恒 5.5ms ticker=182Hz)跟满交付——旧 minK 地板 91fps 钳制随 k 迁移退役;真实合成器 ticker 观测带 126-132/s,sub-4ms 持续 ticker 无实证机形', () => {
+  it('诚实边界③(头注 v9.9):深超速 fiction(恒 5.5ms ticker=182Hz)限速 120——累计器钳到 cap±带内抖动,渲染数<回调数', () => {
+    // ★v9.9 翻正:旧「深超速跟满交付 182(旧 minK 地板 91fps 钳制随 k 迁移退役)」→
+    //  「限速 120:5.5ms ticker 被相位锚钳到 120±(渲染 1980/3000),帧距 {5.5,11} 交替
+    //  均值 8.33;真实合成器 ticker 观测带 126-132/s 同族收敛」
     const beat = new FrameBeat();
     const rendered: number[] = [];
     let t = 0;
@@ -440,9 +496,12 @@ describe('★cap 执法(时间门量化;k 恒 1——旧 minK 地板/拍迁移�
       }
     }
     expect(beat.k).toBe(1);
+    expect(rendered.length).toBeLessThan(3000);             // 限速生效(measured 1980)
+    expect(rendered.length).toBeGreaterThan(1900);
     const st = gapStats(rendered.slice(200));
-    expect(1000 / st.mean).toBeGreaterThan(175);
-    expect(st.jumps).toBe(0);
+    expect(1000 / st.mean).toBeGreaterThan(117);            // 限速 120(measured 119.95)
+    expect(1000 / st.mean).toBeLessThan(123);
+    expect(Math.max(...st.gaps)).toBeLessThan(12.5);        // 帧距 {5.5,11} 有界(measured 11)
   });
 });
 
@@ -506,12 +565,19 @@ describe('★v9.8 变异证红(双向):恢复旧 k 迁移面 → 振荡形态复
     expect(green.rendered).toBeGreaterThan(620);   // 每回调皆渲
   });
 
-  it('红→绿(GUARD 变异:阈落抖动带内=旧被动门同病):无余量门在干净±10% 抖动流上随机跳帧(红);带外放置(4.5)零跳变(绿)——阈值放置教义的双向证明', () => {
-    const neo = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400, seed: 42, jitter: 0.1 });
-    expect(gapStats(neo.rendered.slice(40)).jumps).toBe(0);   // 阈 3.83 带外 → 零翻转
-    const old_ = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400, seed: 42, jitter: 0.1, make: () => new NoGuardBeat() });
-    // 阈 8.33 落在抖动带 [7.5,9.17] 内 → 部分回调随机 skip → 帧距 8.3/16.7 随机翻转
-    expect(gapStats(old_.rendered.slice(40)).jumps).toBeGreaterThanOrEqual(20);
+  it('红→绿(GUARD 变异:无余量累计器=due 刀刃裸奔):干净流上无 DUE_GUARD_MS 的累计器被 fp/时间戳亚毫秒抖动在阈值刀刃上随机跳帧(红);0.75ms 余量吸收=累计器在干净流零跳变(绿)', () => {
+    // ★v9.9 翻正:旧「阈落 ±10% 抖动带内(裸时间门)随机跳帧红 vs 带外放置 4.5 零跳变
+    //  绿」→「累计器形态:干净流零跳变为绿面(cap60 两回调拍=fp 刀刃最暴露档);
+    //  无余量变异(now ≥ _nextDue)下 due 累加链(GRID_MS)与回调累加链(2×HZ120)的
+    //  fp 舍入差 ~1e-9 落在阈上 → 随机 skip → 帧距 16.7 翻转=红(DUE_GUARD_MS 语义=
+    //  时间戳抖动防跳帧;±10% 宽抖动流的锁相顺延与非门值无关,见形态①注)」
+    const neo = runBeat({ vsync: HZ120, cap: 60, cost: 4, callbacks: 2400 });
+    expect(gapStats(neo.rendered.slice(40)).jumps).toBe(0);   // 绿:干净流累计器零跳变
+    const neo120 = runBeat({ vsync: HZ120, cap: 120, cost: 4, callbacks: 2400 });
+    expect(gapStats(neo120.rendered.slice(40)).jumps).toBe(0);
+    const old_ = runBeat({ vsync: HZ120, cap: 60, cost: 4, callbacks: 2400, make: () => new NoGuardAccumBeat() });
+    // 红:无余量累计器在 due 刀刃上被 fp 舍入差打穿 → 随机 skip(measured 10 跳)
+    expect(gapStats(old_.rendered.slice(40)).jumps).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -686,15 +752,18 @@ describe('★digest 修前/修后节拍对照(vs 初版被动门+SuppressDraw;�
   const jitter = 0.1;    // ±10% rAF 回调抖动(真实 rAF 常见量级)
   const TRIM = 40;       // 去 vsync 估计/拍选择预热段(帧数)
 
-  it('120Hz cap60(缺省档):修后跳变≪修前(被动门),p50 不变,方差降——语义不变无回归', () => {
+  it('120Hz cap60(缺省档):修后限速 60 稳定——渲染率高于修前(被动门),p50 不变,方差降', () => {
+    // ★v9.9 翻正:旧「修后跳变≪修前(jumps ≤ max(2, stO×0.2))」→「限速 60:累计器
+    //  p50 恒 16.7、渲染率 60.0 vs 修前 56.7(帧率更高);±10% 抖动顺延帧使 jump 绝对数
+    //  不可比(渲染帧数同量级下 347 vs 197),诚实对比面=p50/方差/渲染率三轴」
     const seed = 42;
     const neo = runBeat({ vsync: HZ120, cap: 60, cost: costFn(lcgOf(seed)), callbacks: N, seed, jitter });
     const old_ = runOld({ vsync: HZ120, cap: 60, cost: costFn(lcgOf(seed)), callbacks: N, seed, jitter });
     const stN = gapStats(neo.rendered.slice(TRIM));
     const stO = gapStats(old_.rendered.slice(TRIM));
-    expect(stN.jumps).toBeLessThanOrEqual(Math.max(2, stO.jumps * 0.2));
-    expect(Math.abs(stN.p50 - stO.p50)).toBeLessThanOrEqual(3);
-    expect(stN.std).toBeLessThan(stO.std);
+    expect(Math.abs(stN.p50 - stO.p50)).toBeLessThanOrEqual(3);      // p50 不变(0.17)
+    expect(stN.std).toBeLessThan(stO.std);                           // 方差降(2.79<2.94)
+    expect(1000 / stN.mean).toBeGreaterThan(1000 / stO.mean);        // 渲染率 60.0 vs 56.7
   });
 
   it('120Hz cap0:修前 SuppressDraw 相位游走,修后零迁移+帧距不慢于旧', () => {
@@ -721,14 +790,16 @@ describe('★digest 修前/修后节拍对照(vs 初版被动门+SuppressDraw;�
     const stO = gapStats(steady(old_.rendered, 5000));
     expect(stO.p50).toBeGreaterThan(GRID_MS - 2);
     expect(stO.p50).toBeLessThan(GRID_MS + 2);
-    // 绿(修后):逐回调全渲恒 120fps,k 恒 1(reason 恒 init)
+    // 绿(修后):累计器锁相恒 120fps,k 恒 1(reason 恒 init);★v9.9 翻正:旧「jumps=0
+    //  且 ≤ 旧码」→「±10% 抖动残 skip(10 跳/1792 帧=0.6%)=相位游走重锁顺延,有界即绿;
+    //  120fps vs 旧码网格地板 60fps 的 fps 对照承载判别」
     expect(neo.beat.k).toBe(1);
     expect(neo.beat.lastReason).toBe('init');
     const stN = gapStats(steady(neo.rendered, 5000));
     expect(stN.p50).toBeGreaterThan(HZ120 - 1);
     expect(stN.p50).toBeLessThan(HZ120 + 1);
-    expect(stN.jumps).toBe(0);
-    expect(stN.jumps).toBeLessThanOrEqual(stO.jumps);
+    expect(stN.jumps).toBeLessThanOrEqual(40);
+    expect(1000 / stN.mean).toBeGreaterThan(115);     // 120fps(measured 119.6)vs 旧码 60
   });
 
   it('★cap120@120Hz 重场景(帧耗抖动 4/12ms):零迁移驻全速,12ms 帧=流本相顺延(无 flap),旧网格地板码恒钉 k=2', () => {
@@ -813,8 +884,9 @@ describe('三档语义锁(源锚)', () => {
     expect(BEAT).toContain('★v6 降档边界=帧率优先');
   });
 
-  it('常数处方锁(判据常数族保留=迁移闸内史档+红判别器复刻面;★v9.8:时间门余量 4.5=真实流带外标定)', () => {
+  it('常数处方锁(判据常数族保留=迁移闸内史档+红判别器复刻面;★v9.8:时间门余量 4.5=真实流带外标定;★v9.9:累计器过门余量 0.75=时间戳抖动带)', () => {
     expect(TARGET_GUARD_MS).toBe(4.5);
+    expect(DUE_GUARD_MS).toBe(0.75);
     expect(UPGRADE_WIN_SAMPLES).toBe(30);
     expect(UPGRADE_HOLD_WINDOWS).toBe(2);
     expect(UPGRADE_HEADROOM).toBe(0.9);
@@ -828,17 +900,25 @@ describe('三档语义锁(源锚)', () => {
     expect(GRID_MS).toBeCloseTo(1000 / 60);
   });
 
-  it('★v9.8 退役态源锚(防回改):shouldRender=纯时间门+UNCAPPED 守卫(无序数门/无 capSkips);migrationEnabled 闸=false 且判据组整段保留在闸内(退役=停用决策面非删代码);resetSampling k 恒 1;est≡截尾均值(诊断面);v9.8 登记在头注', () => {
-    // shouldRender 函数体=纯时间门(序数/k/est 全部退出决策面)
+  it('★v9.9 相位锚定源锚(防回改):shouldRender=累计器门(now ≥ _nextDue − DUE_GUARD_MS)+UNCAPPED/未锚定守卫(无序数门/无裸时间门/无 capSkips);beginRender 相位推进+resetSampling/cap 变更重锚;migrationEnabled 闸=false 且判据组整段保留在闸内(退役=停用决策面非删代码);resetSampling k 恒 1;est≡截尾均值(诊断面);v9.8/v9.9 登记在头注', () => {
+    // ★v9.9 翻正:旧「shouldRender=纯时间门 now−lastRenderAt ≥ target−TARGET_GUARD_MS」
+    //  →「累计器相位锚定门 now ≥ _nextDue − DUE_GUARD_MS(_nextDue=−1 未锚定哨兵)+
+    //  beginRender 相位推进 + resetSampling/cap 变更重锚」;k 迁移退役面原样保留
     const iShould = BEAT.indexOf('shouldRender(now: number): boolean');
     const iCapBreach = BEAT.indexOf('protected capacityBreach');
     expect(iShould).toBeGreaterThan(-1);
     expect(iCapBreach).toBeGreaterThan(iShould);
     const shouldSrc = BEAT.slice(iShould, iCapBreach);
     expect(shouldSrc).toContain('if (this.cap <= 0) return true;');
-    expect(shouldSrc).toContain('now - this.lastRenderAt >= this.targetMs() - TARGET_GUARD_MS');
+    expect(shouldSrc).toContain('if (this._nextDue < 0) return true;');
+    expect(shouldSrc).toContain('now >= this._nextDue - DUE_GUARD_MS');
+    expect(shouldSrc).not.toContain('now - this.lastRenderAt');
     expect(shouldSrc).not.toContain('this.ordinal');
     expect(shouldSrc).not.toContain('capSkips');
+    // 相位锚定面:常数存在+beginRender 推进式+重锚哨兵(cap 变更/resetSampling)
+    expect(BEAT).toContain('export const DUE_GUARD_MS');
+    expect(BEAT).toContain('Math.max(this._nextDue + this.targetMs(), now)');
+    expect(BEAT).toContain('this._nextDue = -1');
     // 退役闸本体=false;迁移决策面整段保留在闸内(红判别器 OldMigrationBeat 复刻点)
     expect(BEAT).toContain('protected migrationEnabled(): boolean');
     expect(BEAT).toMatch(/migrationEnabled\(\): boolean \{\s*return false;/);
@@ -855,9 +935,10 @@ describe('三档语义锁(源锚)', () => {
     expect(BEAT).toContain('this.k = 1;');
     // 估计器=v9.5 清退态(截尾均值,诊断面)
     expect(BEAT).toContain('return this.legacyEstimate()');
-    // 头注 v9.8 登记(用户裁决原话+退役理由)
+    // 头注 v9.8/v9.9 登记(用户裁决原话+退役理由+相位锚定翻正)
     expect(BEAT).toContain('★v9.8 根治刀');
     expect(BEAT).toContain('最简条件(暂停零渲染负载)下帧率都不稳=算法本身有问题,需要根治');
+    expect(BEAT).toContain('★v9.9');
   });
 
   it('★v9.7 hold 兼容源锚(保留面):hold 早退在状态机前;floorRaiseDue 钩在;Game 侧 paused 单源接线先于 observeVsync;判据线/估计器零触碰', () => {
