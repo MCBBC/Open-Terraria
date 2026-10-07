@@ -4,7 +4,7 @@ import type { GameHooks } from './types';
 import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS, ITEM_NO_GRAVITY_VIDS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
-import { coinIndexOf } from '../items/Inventory';
+import { coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inventory';
 import type { Player } from './Player';
 import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
 import { NEBULA_BOOSTER_VIDS, nebulaBoosterFamOf } from './NebulaBooster';   // ★BJ424 星云 booster 单源
@@ -18,6 +18,8 @@ import {
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { VANILLA_ITEM_COLOR, VANILLA_ITEM_ALPHA } from '../data/vanillaItemColor';
 import { vanillaItemDimsOfVid } from '../data/vanillaItemDims';
+import { canTakeToPersonalInventory, canMergeStack } from '../ui/SlotActions';   // ★BJ558 拉取满包门（ItemSpace 等价单源）
+import { canVoidVaultAccept } from './Player';   // ★BJ558 cofveve 臂（CanVoidVaultAccept :39735-39747）
 
 /** CantTakeLunchMoney（NPCID.cs:4468,39 型）——专家模式怪捡钱豁免表（R14-A3） */
 const CANT_TAKE_LUNCH_MONEY = new Set([394, 393, 392, 690, 492, 491, 662, 384, 478, 535,
@@ -380,7 +382,8 @@ export class ItemDrop extends Entity {
         // （人人可再捡 = 物品复制）。★仅在本次拾取真实改变余量时发（背包已满
         // 的持续重叠不得每拍一帧刷屏——2026-08-28 全面 review 收口） */
         if (left > 0 && left !== before && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
-      } else if (inGrabRange && canAccept) {   // ★F5① 拉取面同门（CanPullItem :39453）
+      } else if (inGrabRange && canAccept
+        && this.itemSpaceCanPull(player, vidThis)) {   // ★F5① 拉取面同门（CanPullItem :39453）+★BJ558 ItemSpace 满包门（:35220-35224）
         this.shimmered = false;
         beingGrabbed = true;
         this.grabbed = true;
@@ -994,4 +997,52 @@ export class ItemDrop extends Entity {
   }
 
   draw() { /* Renderer 统一绘制 */ }
+
+  /** ★BJ558（2026-10-08）拉取面满包门 = Player.ItemSpace(worldItem).CanTakeItem
+   *  （GrabItems :35220-35224 `status = ItemSpace(worldItem); if (!CanPullItem(
+   *  worldItem, status)) continue;` + CanPullItem :39449-39457 `status.CanTakeItem
+   *  ? CanAcceptItemIntoInventory(item) : false`）。原版满包且无堆叠/空格/袋位时
+   *  CanTakeItem=false → 物品【原地不动不吸】;本仓此前整缺此门=满包仍把不可堆叠
+   *  物吸到身上堆积（碰触拾取臂无此门同构,装不下留原地——原版 PickupItem :35383
+   *  →GetItem 装不下 ReplaceWith 留位,本仓 touching 支同相不接）。
+   *  臂结构（ItemSpace :39463-39507,canTakeToPersonalInventory 为其单源等价）：
+   *  ① IsAPickup 恒真（心/星/星云 booster——:39465-39468）;
+   *  ② 0-49 空格/可堆叠（:39473-39480,canItemSlotAcceptPickup :39530-39541）;
+   *  ③ 弹药 54-57（:39482-39500 FillAmmo 面+无条件第二扫）;
+   *  ④ cofveve 虚空袋臂（:39502-39505 → {CanTakeItem:true, ItemIsGoingToVoidVault
+   *     :true}）——canTakeToPersonalInventory 返回值按 ItemSpaceStatus :246-256
+   *     语义（CanTakeItemToPersonalInventory=CanTakeItem&&!VoidVault）剔除了该臂,
+   *     而【拉取门消费的是 CanTakeItem 原值】（吸向玩家后碰触经 PickupItem→GetItem
+   *     的 CanGoIntoVoidVault 支进 bank4,本仓 depositIntoVoidVault 兜底已接）→
+   *     此处显式补回（useVoidBag + CanVoidVaultAccept :39735-39747 + bank4 有
+   *     空位/可堆位,ItemSpaceForCofveve :39509-39528 逐槽扫描同构）。
+   *  uniqueStack 臂（:39469-39471）=原版死码不建模（SW-BP1 证据结案）。
+   *  桩宿主无背包面（inv.slots 缺席,如 BJ326 stub）→ 保守放行（拾取接线测试语义
+   *  与门无关）;真 Player 恒有 58 槽。每帧每物仅拉取范围物品走到（&& 短路惰性）,
+   *  常态有空格/可堆即首中早退,满包最坏 58 槽扫=原版 ItemSpace 同构开销。 */
+  private itemSpaceCanPull(player: Player, vid: number): boolean {
+    const slots = (player as unknown as { inv?: { slots?: (Record<string, unknown> | null)[] } })
+      .inv?.slots;
+    if (!slots) return true;
+    const def = ITEM_DEFS[this.itemId];
+    if (!def) return true;
+    const maxStack = def.maxStack;
+    if (canTakeToPersonalInventory(
+      slots as Parameters<typeof canTakeToPersonalInventory>[0],
+      this.itemId, maxStack,
+      coinIndexOf(this.itemId) >= 0,
+      ammoSlotAccepts(this.itemId),
+      this.prefix,
+      canFillEmptyAmmoSlot(this.itemId),
+    )) return true;
+    // cofveve 臂补回（CanTakeItem 原值面;canTakeToPersonalInventory 已剔除）
+    if (!(player as unknown as { useVoidBag?: () => boolean }).useVoidBag?.()) return false;
+    if (!canVoidVaultAccept(vid)) return false;
+    const bank4 = (player as unknown as {
+      banks?: Array<Array<{ id: number; stack: number; prefix?: number; placeStyle?: number } | null | undefined> | undefined>;
+    }).banks?.[3];
+    if (!Array.isArray(bank4)) return false;
+    return bank4.some((s) => !s || (s.stack < maxStack
+      && canMergeStack(s, { id: this.itemId, prefix: this.prefix })));
+  }
 }

@@ -343,7 +343,24 @@ export function collectOwnedItems(
     for (const it of items) sum += owned.get(it) ?? 0;
     if (sum > 0) add(1000000 + Number(gidS), sum);
   }
+  // ★三百零一:mod 组聚合环(gid=10000+;假 id=1010000+)
+  for (const [gidM, itemsM] of MOD_RECIPE_GROUP_ITEMS) {
+    let sumM = 0;
+    for (const it of itemsM) sumM += owned.get(it) ?? 0;
+    if (sumM > 0) add(1000000 + gidM, sumM);
+  }
   return owned;
+}
+
+/** ★三百零一:mod 配方组运行时注册面(RecipeGroup.RegisterGroup 同构)——gid 域
+ *  10000+(假 id=1010000+,与提取器 recipe-groups.json 排序同约定);消费=聚合器
+ *  追加环(下)。 */
+const MOD_RECIPE_GROUP_ITEMS = new Map<number, number[]>();
+let modRecipeGroupNext = 0;
+export function registerModRecipeGroupItems(items: number[]): number {
+  const gid = 10000 + modRecipeGroupNext++;
+  MOD_RECIPE_GROUP_ITEMS.set(gid, items);
+  return 1000000 + gid;
 }
 
 /** 材料槽 → 所属组（CreateRequiredItemQuickLookups :15043-15056：槽 id 命中本配方

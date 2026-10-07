@@ -64,6 +64,42 @@ function extractMethodBody(text, signature) {
 // 手批权威 create 键(.curated-items.json 与 curated recipes 的交集=4 件)
 // 手批权威=.curated-recipes.json 固定 4 键(不再以整个 recipes.json 为"curated"——
 // 上次输出混入 curated 集会让增量刷新失效)
+// ★三百零一:mod 配方组提取(RecipeSystem.cs RegisterGroup 36 组;AnyFood=
+// GetFoodItems() 函数形跳)→ recipe-groups.json(名称排序=引擎注册同序确定假 id)
+const MOD_RECIPE_GROUPS_SRC = join(ROOT, 'CalamityModPublic', 'Systems', 'Mechanic', 'RecipeSystem.cs');
+const MOD_GROUP_NAMES = [];
+const MOD_GROUP_ITEMS = new Map();
+{
+  const rtext = readFileSync(MOD_RECIPE_GROUPS_SRC, 'utf8');
+  for (const m of rtext.matchAll(/(\w+)\s*=\s*RecipeGroup\.RegisterGroup\("(\w+)",\s*group\)/g)) {
+    const gname = m[2];
+    // 组条目=RegisterGroup 调用前最近的 new int[] {...}(group 复用赋值模式)
+    const before = rtext.slice(0, m.index);
+    const arrAt = before.lastIndexOf('new int[]');
+    if (arrAt < 0) continue;
+    const open = rtext.indexOf('{', arrAt);
+    const close = rtext.indexOf('}', open);
+    if (open < 0 || close < 0) continue;
+    const body2 = rtext.slice(open + 1, close);
+    const items = [];
+    for (const im of body2.matchAll(/ItemID\.([A-Za-z0-9_]+)/g)) {
+      const vid = ITEM_IDS[im[1]];
+      if (vid !== undefined) items.push(vid);
+    }
+    for (const im of body2.matchAll(/ModContent\.ItemType<([A-Za-z0-9_.]+)>\(\)/g)) {
+      const k = pascalToSnake(im[1].split('.').pop());
+      if (diskItemKeys.has(k)) items.push(k);   // mod item 键(string;引擎侧解析)
+    }
+    if (items.length) { MOD_GROUP_NAMES.push(gname); MOD_GROUP_ITEMS.set(gname, items); }
+  }
+  MOD_GROUP_NAMES.sort();
+  const sorted = MOD_GROUP_NAMES.map((n) => ({ name: n, items: MOD_GROUP_ITEMS.get(n) }));
+  writeFileSync(join(OUT, 'recipe-groups.json'), JSON.stringify(sorted, null, 2) + '\n');
+}
+const MOD_GROUP_FAKE = new Map(MOD_GROUP_NAMES.map((n, i) => [n, 1010000 + i]));
+// vanilla 组名→假 id(vanilla doc groups)
+const VANILLA_GROUP_FAKE = new Map(Object.entries(JSON.parse(readFileSync(join(OUT, '..', '..', 'src', 'data', 'vanilla-recipes.json'), 'utf8')).groups ?? {}).map(([n, g]) => [n, 1000000 + g]));
+
 const CURATED_MANIFEST = new Set(JSON.parse(readFileSync(join(OUT, '.curated-recipes.json'), 'utf8')));
 const CURATED_RECIPES = JSON.parse(readFileSync(join(OUT, 'content', 'recipes.json'), 'utf8')).filter((r) => CURATED_MANIFEST.has(r.create));
 const curatedCreates = CURATED_MANIFEST;
@@ -164,7 +200,15 @@ for (const f of itemCs) {
         else if (/InLava/.test(c.args)) liquid.lava = true;
         else skip = 'condition';
       } else if (c.name === 'AddRecipeGroup') {
-        skip = 'group';
+        // ★三百零一:组槽落地——名字串(vanilla 组/Calamity 组)或组字段引用
+        const gm = c.args.match(/^\s*"?([A-Za-z0-9_]+)"?\s*(?:,\s*(\d+)\s*)?\)?\s*$/);
+        if (gm) {
+          const gname = gm[1];
+          const stack = Number(gm[2] ?? 1);
+          const fid = VANILLA_GROUP_FAKE.get(gname) ?? MOD_GROUP_FAKE.get(gname);
+          if (fid !== undefined) vanillaItems.push({ id: fid, stack });
+          else { skip = 'group'; }
+        } else skip = 'group';
       } else if (c.name === 'Register' || c.name === 'CreateRecipe') {
         // 已处理
       } else if (c.name === 'DisableDecraft' || c.name === 'AddDecraftCondition') {

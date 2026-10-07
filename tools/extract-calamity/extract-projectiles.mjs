@@ -90,7 +90,26 @@ for (const f of csFiles) {
   if (emittedKeys.has(key) || curatedProjKeys.has(key)) continue;
   stats.total++;
   const text = readFileSync(f, 'utf8');
-  const body = extractMethodBody(text, 'public override void SetDefaults()');
+  let body = extractMethodBody(text, 'public override void SetDefaults()');
+  if (body === null) {
+    // ★三百零二:基类链 SetDefaults 回溯(noSetDefaults 族——BaseGunHoldoutProjectile
+    // 等基类持 SetDefaults;沿 class X : Y 链上溯,上限 5 层)
+    const baseMap = new Map();
+    for (const f2 of walkFiles(projDir, '.cs')) {   // 未滤表(abstract 基类在链上)
+
+      const h2 = readFileSync(f2, 'utf8');
+      const m2 = h2.match(/class\s+(\w+)\s*:\s*([A-Za-z0-9_]+)/);
+      if (m2) baseMap.set(m2[1], { file: f2, base: m2[2] });
+    }
+    const mself = text.match(/class\s+\w+\s*:\s*([A-Za-z0-9_]+)/);
+    let base = mself ? mself[1] : null;
+    for (let hop = 0; hop < 5 && base && base !== 'ModProjectile' && body === null; hop++) {
+      const bk = baseMap.get(base);
+      if (!bk) break;
+      body = extractMethodBody(readFileSync(bk.file, 'utf8'), 'public override void SetDefaults()');
+      base = bk.base;
+    }
+  }
   if (body === null) { stats.noSetDefaults++; continue; }   // 未落盘键不进 emittedKeys(回填信任面)
   const fileConsts = loadFileConsts(text);
   const num = (expr) => {
@@ -174,6 +193,56 @@ for (const f of csFiles) {
     if (hasPng) { mkdirSync(texDir, { recursive: true }); copyFileSync(png, join(texDir, `${key}.png`)); }
   }
   stats.emitted++;
+}
+
+// ---------- ★三百零二:第二遍——物品文件内嵌套 ModProjectile 类 ----------
+// SpadefishThrown 等嵌套在 Items/*.cs 的弹类(37 projRef missing 族)——
+// 类切片提取最小声明面(width/height/aiStyle/damage/timeLeft/pierce/gravity),
+// 贴图=占位;AI=ModProj 原语/直线近似(登记)。
+{
+  const missingProjKeys = new Set();
+  if (existsSync(join(OUT, 'projref-missing.json'))) {
+    for (const entry of JSON.parse(readFileSync(join(OUT, 'projref-missing.json'), 'utf8'))) {
+      const at = entry.indexOf('→');
+      if (at > 0) missingProjKeys.add(entry.slice(at + 1));
+    }
+  }
+  const otherFiles = [];
+  for (const sub of ['Items', 'Projectiles/ScriptedDraw']) {
+    const dir = join(SRC, sub);
+    if (existsSync(dir)) otherFiles.push(...walkFiles(dir, '.cs'));
+  }
+  let nestedEmitted = 0;
+  for (const f of otherFiles) {
+    const text = readFileSync(f, 'utf8');
+    for (const cm of text.matchAll(/class\s+(\w+)\s*:\s*([A-Za-z0-9_<>]+)[^\n{]*\n?[\s\S]*?\{/g)) {
+      const cls = cm[1];
+      const key = pascalToSnake(cls);
+      if (!missingProjKeys.has(key) || emittedKeys.has(key)) continue;
+      // 类体切片(从此声明到下一 class 声明或文件尾)
+      const start = cm.index;
+      const nextClass = text.slice(start + 10).search(/\nclass\s+\w+/);
+      const slice = nextClass < 0 ? text.slice(start) : text.slice(start, start + 10 + nextClass);
+      const body = extractMethodBody(slice, 'public override void SetDefaults()') ?? '';
+      const raw = { key, name: cls };
+      const num = (re) => { const m2 = body.match(re); return m2 ? Number(m2[1]) : undefined; };
+      const wd = num(/Projectile\.width\s*=\s*(\d+)/); if (wd !== undefined) raw.width = wd;
+      const ht = num(/Projectile\.height\s*=\s*(\d+)/); if (ht !== undefined) raw.height = ht;
+      const dm = num(/Projectile\.damage\s*=\s*(\d+)/); if (dm !== undefined) raw.damage = dm;
+      const tl = num(/Projectile\.timeLeft\s*=\s*(\d+)/); if (tl !== undefined) raw.lifetime = tl;
+      const pi = num(/Projectile\.pierce\s*=\s*(\d+)/); if (pi !== undefined) raw.pierce = pi;
+      const ai = body.match(/Projectile\.aiStyle\s*=\s*(\d+)/);
+      if (ai) raw.aiStyle = Number(ai[1]);
+      raw.texture = 'textures/projectiles/_placeholder.png';
+      emittedKeys.add(key);
+      nestedEmitted++;
+      if (WRITE) {
+        mkdirSync(outDir, { recursive: true });
+        writeFileSync(join(outDir, `${key}.json`), JSON.stringify(raw, null, 2) + '\n');
+      }
+    }
+  }
+  stats.nestedEmitted = nestedEmitted;
 }
 
 // ---------- 回填物品 projRef ----------

@@ -12,13 +12,20 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '../../mods/calamity/s
 mkdirSync(OUT, { recursive: true });
 
 const parse = (buf) => {
-  const fmt144 = buf[1] === 0xca;   // 0x14=TML14(2 字节索引+无 brightness);0xca=1.4.4
+  // ★二百九十三刀:魔数三分派按 C# CalamitySchematicIO.cs:286-327 权威——
+  //  CA 44 5C=TML144(u32 索引+unique 带 bi)/1F 14 5C=Infernum14(u32 索引无 bi/
+  //  Crag 五件族)/CA 14 5C=TML14(u16 索引无 bi)。旧 `buf[1]===0xca` 判据对任何
+  //  文件均不成立(全 SKIP)=分派回归;buf[0]=0xCA/0x1F,buf[1]=0x44/0x14。
+  const magic44 = buf[0] === 0xca && buf[1] === 0x44;
+  const magicInfernum = buf[0] === 0x1f && buf[1] === 0x14;
+  const fmt144 = magic44;                       // bi 字节=144 专属
+  const use4 = magic44 || magicInfernum;        // 4 字节索引=144+Infernum14
   const g = gunzipSync(buf.subarray(4));
   let off = 0;
   const u16 = () => g.readUInt16LE((off += 2) - 2);
   const u32 = () => g.readUInt32LE((off += 4) - 4);
   const i16 = () => g.readInt16LE((off += 2) - 2);
-  const lenU = fmt144 ? u32 : u16;
+  const lenU = use4 ? u32 : u16;
   const str = () => {
     let len = 0, shift = 0, b;
     do { b = g[off++]; len |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
@@ -37,7 +44,7 @@ const parse = (buf) => {
     });
   }
   const tw = u16(), th = u16();
-  const readIdx = fmt144 ? u32 : u16;
+  const readIdx = use4 ? u32 : u16;
   const cells = new Uint32Array(tw * th);
   for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) cells[y * tw + x] = readIdx();
   if (off !== g.length) throw new Error(`流尾不对齐 ${off}/${g.length}`);

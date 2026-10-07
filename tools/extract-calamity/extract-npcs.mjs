@@ -158,6 +158,10 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
     const nvsE = arg.match(/^\s*(?:DropHelper|ItemDropRule)\.NormalvsExpert\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?\s*\)\s*$/);
     const nvsE_v = arg.match(/^\s*(?:DropHelper|ItemDropRule)\.NormalvsExpert\(\s*ItemID\.([A-Za-z0-9_]+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?\s*\)\s*$/);
     const oneOpt = arg.match(/^ItemDropRule\.OneFromOptions(?:WithLuckDelta)?\(\s*(\d+)\s*,\s*([\s\S]+)\)$/);
+    // ★三百:Fraction/三元栈/CalamityStyle 池三形
+    const frac = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*new Fraction\((\d+),\s*(\d+)\)\s*$/);
+    const tern = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*[^,]+\?\s*(\d+)\s*:\s*(\d+)\s*$/);
+    const calStyle = arg.match(/^\s*DropHelper\.CalamityStyle\(\s*(?:DropHelper\.)?(?:NormalWeaponDropRateFraction|new Fraction\((\d+),\s*(\d+)\))\s*,\s*([A-Za-z0-9_]+)\s*\)\s*$/);
     const push = (item, denom, min, max) => {
       if (item === null) { lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1); return; }
       const rec = { item };
@@ -211,6 +215,28 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
       if (bagKey && !drops.some((d) => d.item === bagKey && d.bossBag)) {
         drops.push({ item: bagKey, bossBag: 1 });
       } else lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1);
+    } else if (frac) {
+      // ★三百:Fraction 形——ItemType<X>(), new Fraction(a, b) → chance=a/b(denom=b/a)
+      push(resolveItemKey(frac[1].split('.').pop()), Math.max(1, Math.round(Number(frac[3]) / Number(frac[2]))), 1, 1);
+    } else if (tern) {
+      // ★三百:三元栈形——ItemType<X>(), <cond> ? a : b → 经典=else 支(条件=expert/日期等)
+      push(resolveItemKey(tern[1].split('.').pop()), Number(tern[2]), 1, 1);
+    } else if (calStyle) {
+      // ★三百:CalamityStyle 池(DropHelper.cs:1374=AllOptionsAtOnceWithPityDropRule
+      // =逐件独立 1/fraction 掷;NormalWeaponDropRateFraction=1/4(:84/:94); pity=登记)
+      const listVar = calStyle[3];
+      const lm = body.match(new RegExp(`List<int>\\s+${listVar}\\s*=\\s*new List<int>\\s*\\{([^}]*)\\}`));
+      if (lm) {
+        const idRe2 = /(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)|ItemID\.([A-Za-z0-9_]+)/g;
+        let m7;
+        const opts2 = [];
+        while ((m7 = idRe2.exec(lm[1])) !== null) {
+          if (m7[1]) { const rk = resolveItemKey(m7[1].split('.').pop()); if (rk) opts2.push(rk); }
+          else if (ENUM_ITEM_ID[m7[2]] !== undefined) opts2.push(ENUM_ITEM_ID[m7[2]]);
+        }
+        const fracDen = calStyle[2] ? Math.max(1, Math.round(Number(calStyle[2]) / Number(calStyle[1]))) : 4;
+        for (const o of opts2) push(o, fracDen, 1, 1);
+      } else lootSkips.set('unsupportedShape', (lootSkips.get('unsupportedShape') ?? 0) + 1);
     } else if (/^ItemDropRule\.BossBag(ByCondition)?\(/.test(arg)) {
       lootSkips.set('expertOnlyBossBag', (lootSkips.get('expertOnlyBossBag') ?? 0) + 1);
     } else if (/^ItemDropRule\.ByCondition\(/.test(arg)) {

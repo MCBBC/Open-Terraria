@@ -122,11 +122,42 @@ async function pageMeta(page) {
   });
 }
 
-async function gotoWorld(page, url, label) {
+async function gotoWorld(page, url, label, { heavy = false } = {}) {
+  const uiEntry = process.env.RAFB_ENTRY !== 'play';
   const g0 = Date.now();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-  console.log(`[${label}] goto done in ${((Date.now() - g0) / 1000).toFixed(1)}s, waiting world entry...`);
+  console.log(`[${label}] goto done in ${((Date.now() - g0) / 1000).toFixed(1)}s`);
   const t0 = Date.now();
+  if (uiEntry) {
+    // 真实入口:无参首页走完整 boot(非旁路路径 await 全量资源就绪+标题菜单揭示),
+    // 再页内 Game.newWorld(name,w,h)——等价用户点「新建世界」,杜绝旁路抢跑资源回退。
+    try {
+      await page.waitForFunction(() => !!document.querySelector('.sw-title-version'), { timeout: 300_000, polling: 500 });
+    } catch {
+      console.log(`ARM_FAIL ${label} title-menu timeout url=${url}`);
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+    const [w, h] = heavy ? [8400, 2400] : [4200, 1200];
+    const entry = await page.evaluate(([ww, hh]) => {
+      // 候选链:__swFlow.newWorld(mainFlow 门面=play 旁路同款,资源已就绪)→ __swGame.newWorld → 真实按钮兜底
+      if (window.__swFlow && typeof window.__swFlow.newWorld === 'function') { void window.__swFlow.newWorld('', ww, hh); return 'flow'; }
+      if (window.__swGame && typeof window.__swGame.newWorld === 'function') { void window.__swGame.newWorld('', ww, hh); return 'game'; }
+      const btn = [...document.querySelectorAll('button,[role=button]')].find((b) => /创建新世界|新建世界/.test(b.textContent ?? ''));
+      if (btn) { btn.click(); return 'button'; }
+      return null;
+    }, [w, h]);
+    if (!entry) {
+      const diag = await page.evaluate(() => ({
+        swGame: typeof window.__swGame,
+        keys: Object.keys(window).filter((k) => k.startsWith('__sw')),
+        buttons: [...document.querySelectorAll('button,[role=button]')].map((b) => b.textContent?.trim()).filter(Boolean).slice(0, 20),
+      }));
+      console.log(`ARM_FAIL ${label} no entry candidate at title; diag=${JSON.stringify(diag)}`);
+      return false;
+    }
+    console.log(`[${label}] title ready, world entry via ${entry} (newWorld('',${w},${h}))...`);
+  }
   try {
     await page.waitForFunction(() => !!(window.__swGame?.player && window.__swGame?.world), { timeout: 300_000, polling: 500 });
   } catch (e) {
@@ -184,16 +215,16 @@ async function sample(page, ms, { heavy = false, busy = false } = {}) {
     r.t0 = performance.now();
   });
   const deadline = Date.now() + ms;
-  let i = 0;
+  let i = 0, tpErr = 0;
   while (Date.now() < deadline) {
-    if (heavy) { try { await TELEPORT(page, i++); } catch { /* world gone */ } }
+    if (heavy) { try { await TELEPORT(page, i++); } catch { tpErr++; } }
     await new Promise((r) => setTimeout(r, heavy ? 600 : 500));
   }
   return await page.evaluate(() => {
     const r = window.__rafRec;
     r.t1 = performance.now();
     return { t: r.t.map((v) => +v.toFixed(3)), ts: r.ts.map((v) => +v.toFixed(3)), n: r.n, t0: r.t0, t1: r.t1, hidden: r.hidden, vis: document.visibilityState, focus: document.hasFocus(), busyIter: window.__busyIter ?? null };
-  });
+  }).then((rec) => (rec.tpErr = tpErr, rec));
 }
 
 const browser = await puppeteer.launch({
@@ -222,28 +253,48 @@ try {
     writeFileSync(join(OUT_DIR, `${TAG}-bare.json`), JSON.stringify({ arm: 'bare', meta, rec }, null, 1));
     await page.close();
   } else {
+    // 两段式入口:先开无参首页把 SW/资源链预热到标题菜单(旧部署 ?play 旁路会抢跑资源
+    // 初始化→世界进回退拓扑,2026-10-08 用户实报),再带参进世界。
+    if (process.env.RAFB_WARMUP !== '0') {
+      const wp = await browser.newPage();
+      try {
+        await wp.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+        await wp.waitForFunction(() => !!document.querySelector('.sw-title-version'), { timeout: 300_000, polling: 500 });
+        await new Promise((r) => setTimeout(r, 6000));
+        console.log(`WARMUP ${ORIGIN} done (title menu reached)`);
+      } catch (e) {
+        console.log(`WARMUP ${ORIGIN} FAILED:`, String(e).slice(0, 200));
+      }
+      await wp.close();
+    }
     for (const arm of ARMS) {
       const page = await browser.newPage();
-      await page.evaluateOnNewDocument(RECORDER);
-      page.on('pageerror', (e) => console.log(`[${arm}] PAGEERR:`, String(e).slice(0, 160)));
-      const heavy = arm === 'heavy';
-      const busy = arm === 'busy';
-      const url = arm === 'idle-c10e0'
-        ? `${ORIGIN}/?play=${IDLE_PLAY}&c10e=0`
-        : `${ORIGIN}/?play=${heavy ? HEAVY_PLAY : IDLE_PLAY}`;
-      const ok = await gotoWorld(page, url, arm);
-      if (!ok) { exitCode = 1; await page.close(); continue; }
-      await page.bringToFront();
-      const meta = await pageMeta(page);
-      console.log(`ARM ${arm} META:`, JSON.stringify({ ver: meta.ver, verSrc: meta.verSrc, canvases: meta.canvases, dpr: meta.dpr, screen: meta.screen, vis: meta.vis, focus: meta.focus, gameHook: meta.gameHook }));
-      const rec = await sample(page, DUR, { heavy, busy });
-      const st = statsFrom2(rec.t);
-      const stTs = statsFrom2(rec.ts);
-      const verdict = st.n > 1000 && st.ratePerSec > 130 && st.fracShortLt6_5 > 0.12
-        ? 'OVERSPEED-BIMODAL'
-        : st.ratePerSec > 130 ? 'OVERSPEED-OTHER' : 'NARROW-VSYNC';
-      console.log(`ARM_RESULT ${arm}:`, JSON.stringify({ url, stats: st, statsTs: stTs, verdict, hiddenEvents: rec.hidden.length, visEnd: rec.vis, focusEnd: rec.focus, busyIter: rec.busyIter }));
-      writeFileSync(join(OUT_DIR, `${TAG}-${arm}.json`), JSON.stringify({ arm, meta, stats: st, rec: { t: rec.t, ts: rec.ts, hidden: rec.hidden } }, null, 1));
+      try {
+        await page.evaluateOnNewDocument(RECORDER);
+        page.on('pageerror', (e) => console.log(`[${arm}] PAGEERR:`, String(e).slice(0, 160)));
+        const heavy = arm === 'heavy';
+        const busy = arm === 'busy';
+        // ui 入口(缺省):无参首页→资源全量就绪→标题菜单→页内 newWorld;play 入口为旁路对照
+        const url = process.env.RAFB_ENTRY === 'play'
+          ? `${ORIGIN}/?play=${heavy ? HEAVY_PLAY : IDLE_PLAY}${arm === 'idle-c10e0' ? '&c10e=0' : ''}`
+          : `${ORIGIN}/${arm === 'idle-c10e0' ? '?c10e=0' : ''}`;
+        const ok = await gotoWorld(page, url, arm, { heavy });
+        if (!ok) { exitCode = 1; await page.close(); continue; }
+        await page.bringToFront();
+        const meta = await pageMeta(page);
+        console.log(`ARM ${arm} META:`, JSON.stringify({ ver: meta.ver, verSrc: meta.verSrc, canvases: meta.canvases, dpr: meta.dpr, screen: meta.screen, vis: meta.vis, focus: meta.focus, gameHook: meta.gameHook }));
+        const rec = await sample(page, DUR, { heavy, busy });
+        const st = statsFrom2(rec.t);
+        const stTs = statsFrom2(rec.ts);
+        const verdict = st.n > 1000 && st.ratePerSec > 130 && st.fracShortLt6_5 > 0.12
+          ? 'OVERSPEED-BIMODAL'
+          : st.ratePerSec > 130 ? 'OVERSPEED-OTHER' : 'NARROW-VSYNC';
+        console.log(`ARM_RESULT ${arm}:`, JSON.stringify({ url, stats: st, statsTs: stTs, verdict, hiddenEvents: rec.hidden.length, visEnd: rec.vis, focusEnd: rec.focus, busyIter: rec.busyIter, tpErr: rec.tpErr }));
+        writeFileSync(join(OUT_DIR, `${TAG}-${arm}.json`), JSON.stringify({ arm, meta, stats: st, rec: { t: rec.t, ts: rec.ts, hidden: rec.hidden } }, null, 1));
+      } catch (e) {
+        console.log(`ARM_FAIL ${arm}:`, String(e).slice(0, 240));
+        exitCode = 1;
+      }
       await page.close();
     }
   }

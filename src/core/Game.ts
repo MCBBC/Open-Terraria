@@ -8821,22 +8821,29 @@ export class Game implements GameHooks {
           }
           this.beat.beginRender(now);
         } else {
-          // on/off 档(off=用户明令逃生门=旧自由渲染):原版 On=IsFixedTimeStep 每 Tick
-          // 一绘(Main.cs:17133-17137)、Off=累计器门但【不】SuppressDraw(:17182-17197
-          // ——SuppressDraw 仅 Subtle&&!improved 旧路径;其"落后跳帧"分支 num3=0 死代码),
-          // 本仓解耦架构(逻辑恒 60Hz 定步累计器)下两态同效=跟随 rAF 自由绘制。保留
-          // 2026-08-18 被动 frameCap 门原样(cap>0 且 1000/cap-1ms 未到即跳;-1ms 余量)
-          const cap = options.data.frameCap;
-          if (cap > 0 && now - this._lastCapTs < 1000 / cap - 1) {
+          // ★v9.9 三档节拍统一（2026-10-08 用户实报「on/off 都无法达到 120,只有隐蔽
+          //  能」定谳）:on/off 档旧被动门(阈 1000/cap-1)在超速双峰回调流(间隔 4-9ms
+          //  宽分布)上随机咬合(短间隔被跳/长间隔过门=渲染帧距混样)=v9.5 定谳的摆动
+          //  源本体——隐蔽档的累计器在同流上限速 120 稳。三档渲染节拍统一走 beat 累
+          //  计器(off=cap0 恒渲/on=cap 限速/subtle=同),frameSkipMode 残余差异=原版
+          //  语义文案面(本仓逻辑恒 60Hz 与渲染解耦,三档渲染面同构)。原版锚存档:
+          //  On=IsFixedTimeStep 每 Tick 一绘(Main.cs:17133-17137)、Off=累计器门【不】
+          //  SuppressDraw(:17182-17197,"落后跳帧"分支 num3=0 死代码)——旧被动门
+          //  (2026-08-18)随本刀退役。
+          this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
+          this.beat.observeVsync(now, options.data.frameCap);
+          if (!this.beat.shouldRender(now)) {
             requestAnimationFrame(loop);
             return;
           }
+          this.beat.beginRender(now);
         }
         this._lastCapTs = now;
         this.frame(now);
         // 节拍机记账:成本=渲染帧主线程占用(rAF 时间戳→frame 完成;与合成器 present
-        // 截止同源)——★v9.8 起仅作诊断面采样(F5/snapshot),k 迁移决策已退役
-        if (mode === 'subtle') this.beat.endRender(performance.now());
+        // 截止同源)——★v9.8 起仅作诊断面采样(F5/snapshot),k 迁移决策已退役;
+        // ★v9.9 起三档统一记账(累计器相位推进依赖 begin/endRender 成对)
+        this.beat.endRender(performance.now());
         this._paintedFrames++;
         if (this._paintWaits.length) {
           this._paintWaits = this._paintWaits.filter((w) => {

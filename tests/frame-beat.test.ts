@@ -840,18 +840,18 @@ describe('三档语义锁(源锚)', () => {
     expect(GAME).toContain('this.beat.observeVsync(now, options.data.frameCap)');
     expect(GAME).toContain('if (!this.beat.shouldRender(now))');
     expect(GAME).toContain('this.beat.beginRender(now)');
-    expect(GAME).toContain("if (mode === 'subtle') this.beat.endRender(performance.now())");
+    // ★v9.9 翻正:三档统一记账(累计器相位推进依赖 begin/endRender 成对)
+    expect(GAME).toContain('this.beat.endRender(performance.now())');
+    expect(GAME).not.toContain("if (mode === 'subtle') this.beat.endRender");
   });
 
   it('Game.start():被跳回调先于 _paintedFrames++ 早退(whenFirstPaint 只认真实渲染帧)', () => {
     const iSkip = GAME.indexOf('if (!this.beat.shouldRender(now))');
-    const iCapSkip = GAME.indexOf('now - this._lastCapTs < 1000 / cap - 1');
     const iPaint = GAME.indexOf('this._paintedFrames++');
     expect(iSkip).toBeGreaterThan(-1);
-    expect(iCapSkip).toBeGreaterThan(-1);
     expect(iPaint).toBeGreaterThan(-1);
     expect(iSkip).toBeLessThan(iPaint);
-    expect(iCapSkip).toBeLessThan(iPaint);
+    // ★v9.9 翻正:被动门退役(三档统一累计器)——旧 iCapSkip 断言随语义退役
   });
 
   it('SuppressDraw 旧分支已退役(0 步进帧照画,与 improved-subtle 同相)', () => {
@@ -859,8 +859,9 @@ describe('三档语义锁(源锚)', () => {
     expect(GAME).toContain('62624');   // 注释锚:EndDraw 忙等 present 网格
   });
 
-  it('on/off 逃生门:被动 frameCap 门原样保留(旧自由渲染)', () => {
-    expect(GAME).toContain('1000 / cap - 1');
+  it('★v9.9 翻正:on/off 档统一走 beat 累计器(旧被动门退役——阈 1000/cap-1 在超速双峰流上随机咬合=摆动源,用户实报 on/off 无法 120)', () => {
+    expect(GAME).toContain('this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil)');
+    expect(GAME).not.toContain('1000 / cap - 1');   // 旧被动门已退役
   });
 
   it('FrameBeat.ts vanilla 锚齐备(1457 亲读行号)', () => {

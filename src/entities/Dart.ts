@@ -1207,8 +1207,9 @@ export class Dart extends Entity {
         ? Math.atan2(vy, vx) + (st.rot === 'a45' ? Math.PI / 4 : Math.PI / 2) : 0;
       this.dir = Math.sign(vx) || 1;
       if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
-    } else if (vh?.width !== undefined && vh?.height !== undefined) {
-      this.w = vh.width; this.h = vh.height;
+    } else if (vh) {
+      if (vh.width !== undefined && vh.height !== undefined) { this.w = vh.width; this.h = vh.height; }
+      if (vh.timeLeft !== undefined) this.life = vh.timeLeft;   // ★二百九十九:life=SetDefaults timeLeft(旧恒 600=近似)
     }
     this.hostile = false; // 默认非敌对——敌怪发射点（Enemy.shootDart 咽喉 + 直构处）显式置位
   }
@@ -1416,6 +1417,17 @@ export class Dart extends Entity {
         this.dead = true;
       }
       return;
+    }
+    // ★二百九十九:PhantasmalSphere 454 attach(aiStyle83 :31874-31912)——
+    //  ai[0]<30 支:position=宿主 Center−velocity(通用积分 +v 后净=宿主中心);
+    //  此后 velocity ×0.96/t 衰减。ownerNpcId=NewProjectile 末参(宿主 whoAmI);
+    //  无宿主=直飞(旧路径)。
+    if (this.projId === 454 && this.ownerNpcId) {
+      this.age++;
+      if (this.age < 30) {
+        const owner = (game.enemies() as Array<{ id?: number; dead?: boolean; cx: number; cy: number }>).find((o) => o.id === this.ownerNpcId && !o.dead);
+        if (owner) { this.x = owner.cx - this.w / 2; this.y = owner.cy - this.h / 2; }
+      } else { this.vx *= 0.96; this.vy *= 0.96; }
     }
     if (!st) { this.legacyStep(game); return; }
     // 首更新发射音（AI_001 各型 ai[1]==0 分支:81/82→Item5 :52468 / 180→Item11 :52473 /

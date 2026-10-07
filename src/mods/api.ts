@@ -25,6 +25,7 @@ import {
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerGenPass } from '../world/gen/WorldGen';
+import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
 import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
 import { rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★一百二十二刀
 import { isPrefixableAccessory } from '../items/Inventory';
@@ -43,6 +44,9 @@ export interface ModContext {
   /** ★二百八十七刀:mod 刷怪池独占面(pool.Clear 语义;返回规则表=本拍顶替
    *  原版选怪池,只掷返回规则;null=不接管;酸雨事件消费) */
   spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null): void;
+  /** ★三百零一:mod 配方组注册(RecipeGroup.RegisterGroup 同构;假 id=1010000+ 注册序
+   *  ——提取器 recipe-groups.json 按名称排序同序;items=vid∪mod item 键) */
+  recipeGroups(defs: Array<{ name: string; items: Array<number | string> }>): void;
   /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
   playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
@@ -129,6 +133,12 @@ export function createModContext(
     },
     spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null) {
       registerModSpawnPool(modId, fn as unknown as Parameters<typeof registerModSpawnPool>[1]);
+    },
+    recipeGroups(defs: Array<{ name: string; items: Array<number | string> }>) {
+      for (const d of defs) {
+        const ids = d.items.map((r) => (typeof r === 'number' ? r : idOf('items', r)));
+        registerModRecipeGroupItems(ids);
+      }
     },
     playSound(files: string[], volume = 1, x?: number, y?: number) {
       playModSound(files, volume, x, y);
