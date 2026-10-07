@@ -19,11 +19,14 @@
 import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
-  registerModModifyHurtByNpc, registerModModifyHitNpc,
+  registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerGenPass } from '../world/gen/WorldGen';
+import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
+import { rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★一百二十二刀
+import { isPrefixableAccessory } from '../items/Inventory';
 import type { ModConfigState } from './config';
 
 export interface ModContext {
@@ -67,6 +70,23 @@ export interface ModContext {
   playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc', fn: (ctx: Record<string, unknown>) => number | void): void;
   /** ★一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
   registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void;
+  /** ★一百一十六刀:mod 功能箱解锁条件(chest.locked 消费面;fn(world)=true 可开) */
+  chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void;
+  /** ★一百一十七刀:mod 群系蔓延注册(tML ModBiomeConversion 形;spreads=mod tile
+   *  键数组,tileMap=vanilla sheet→mod tile 键;引擎 WorldEvolution 蔓延扫描消费) */
+  biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void;
+  /** ★一百二十刀:mod 群系旗注册(AbyssLayer 复合面;depth=(y−rock)/h 带,
+   *  xDist=边缘带绝对距;tiles=mod tile 键) */
+  biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number; depth?: { min: number; max: number }; xDist?: number }): void;
+  /** ★一百三十七刀:NPC 出生 stats 修正钩(复仇/死亡 HP 乘表消费) */
+  npcSpawnStats(fn: (vanillaId: number, stats: { lifeMaxScale: number }) => void): void;
+  /** ★一百三十九刀:vanilla 敌怪 AI 覆盖(ids=原版 id 集;整支接管,共享尾段照走) */
+  vanillaNpcAi(ids: number[], fn: (e: unknown, game: unknown, player: unknown) => void): void;
+  /** ★两百一十七刀:mod 侧物品掉落生成(ItemDrop 直构;entities.add drops 桶) */
+  spawnItem(game: unknown, itemId: number, x: number, y: number, stack?: number): void;
+  /** ★一百二十二刀:随机词缀掷(Item.Prefix(-1) 1:1 通道;vid=任意内部物品 id;
+   *  返回词缀 id(0=无)——mod loot/掉落面消费) */
+  rollPrefixFor(vid: number): number;
   /** 生成 mod 弹幕(npcAi 闭包内持 game,回传本面构造 ModProj 并入桶——L2 唯一
    *  弹幕生成通道;ownerIsPlayer=false=mod NPC 弹打玩家) */
   spawnProj(game: unknown, key: string, x: number, y: number, vx: number, vy: number,
@@ -131,6 +151,56 @@ export function createModContext(
     /** ★B7 一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
     registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void {
       registerGenPass({ name, fn });
+    },
+    // ★一百一十六刀:mod 箱解锁条件(tiles 域 id 解析)
+    chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void {
+      registerModChestUnlock(idOf('tiles', key), fn);
+    },
+    // ★一百一十七刀:mod 群系蔓延(键→内部 id 解析;tileMap 键=vanilla sheet)
+    biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void {
+      const tid = (k: string) => {
+        const full = k.startsWith('mod_') ? k : `mod_${modId}_${k}`;
+        const v = alloc.tiles.get(full);
+        if (v === undefined) throw new Error(`[mod-api] biomeConversion 引用未注册 tile: ${k}`);
+        return v;
+      };
+      const map: Record<number, number> = {};
+      for (const [sheet, key] of Object.entries(spec.tileMap)) map[Number(sheet)] = tid(key);
+      registerModConversion({ spreads: new Set(spec.spreads.map(tid)), tileMap: map });
+    },    // ★一百二十二刀:随机词缀掷(rollNaturalPrefixForVid 1:1 通道直通)
+    rollPrefixFor(vid: number): number {
+      return rollNaturalPrefixForVid(vid, isPrefixableAccessory(vid), () => Math.random());
+    },
+    // ★一百二十刀:mod 群系旗(AbyssLayer 复合面;键→内部 id)
+    biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number; depth?: { min: number; max: number }; xDist?: number }): void {
+      const tidF = (k: string) => {
+        const full = k.startsWith('mod_') ? k : `mod_${modId}_${k}`;
+        const v = alloc.tiles.get(full);
+        if (v === undefined) throw new Error(`[mod-api] biomeFlag 引用未注册 tile: ${k}`);
+        return v;
+      };
+      registerModBiomeFlag({
+        flag,
+        tileIds: spec.tiles.map(tidF),
+        threshold: spec.threshold ?? 40,
+        ...(spec.depth ? { depth: spec.depth } : {}),
+        ...(spec.xDist !== undefined ? { xDist: spec.xDist } : {}),
+      });
+    },
+    // ★一百三十七刀:NPC 出生 stats 修正(复仇/死亡 HP 乘表消费)
+    npcSpawnStats(fn: (vanillaId: number, stats: { lifeMaxScale: number }) => void): void {
+      registerModNpcSpawnStats(modId, fn);
+    },
+    // ★一百三十九刀:vanilla AI 覆盖(ids 集批量注册)
+    vanillaNpcAi(ids: number[], fn: (e: unknown, game: unknown, player: unknown) => void): void {
+      for (const id of ids) registerVanillaNpcAi(id, fn as Parameters<typeof registerVanillaNpcAi>[1]);
+    },
+    // ★两百一十七刀:mod 侧物品掉落生成
+    spawnItem(game: unknown, itemId: number, x: number, y: number, stack = 1): void {
+      void import('../entities/ItemDrop').then(({ ItemDrop }) => {
+        const g = game as { entities: { add(e: unknown, bucket: string): void } };
+        g.entities.add(new ItemDrop(x, y, itemId, stack), 'drops');
+      });
     },
     // ★异步构造:动态 import ModProj(与 loader 的 entry 动态装载同型);AI 每 tick
     //  调用高频路径,import 缓存后 microtask 内落桶,同 tick 内稍后帧可见=可接受

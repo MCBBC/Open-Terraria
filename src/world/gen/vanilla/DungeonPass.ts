@@ -427,6 +427,8 @@ interface DgInstBundle {
   /** 入口三掷/precalc 终值（失败回退支已含 data==null 支新 entSeed=HHHHHHH⑥ 口径） */
   entSeed: number; entKind: number; entX: number; entY: number; precalcOK: boolean;
   isDual: boolean;
+  /** ★一百一十四刀:oneDungeon 终界(DBnd L/R/B;runDungeonPass 尾回填 GenState) */
+  lastBounds?: { l: number; r: number; b: number };
 }
 
 /** #32 Dungeon pass（1456 1:1，与 caves-oracle.cs 同构）。snap 回调用于逐段检查点。 */
@@ -10027,6 +10029,9 @@ const snap: SnapFn = (name) => {
     };
   }
   snap('dungeon');
+    // ★一百一十四刀:地牢矩形界记录(DBnd L/R/B=GenVars.dMinX/dMaxX/dMaxY;
+    //  双地牢=后座覆盖 d0 视图,与 dungeonEntX 回填同取序)
+    b.lastBounds = { l: bounds.L, r: bounds.R, b: bounds.B };
     return { posX, posY, dungeonX, dungeonY };
   }
   // —— GenState 回填（消费端：Pyramids 回避带 / 刷怪门槛 / 老头锚；仅 d0 视图）——
@@ -10049,6 +10054,10 @@ const snap: SnapFn = (name) => {
   //   dungeonData.Clear() 之后、pass 委托结束前）——饥荒世界岩浆层隧道。同 pass 内
   //   调用（无重播）,流位紧接两座 MakeDungeon 序之后（cs:14849 循环+Clear 后）,全 pass 恰一次。
   runLavaLayerCaverer(st, rng, gs);
+  // ★一百一十四刀:地牢矩形界回填(bundle 终界=d0 视图,与 dungeonEntX 同序;
+  //  mod pass 窗口消费——AstralChestGeneration 落点=dMinX+25..dMaxX−25)
+  const d0b = dgBundles[0]?.lastBounds;
+  if (d0b) { gs.dungeonMinX = d0b.l; gs.dungeonMaxX = d0b.r; gs.dungeonMaxY = d0b.b; }
 }
 export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number, styleColW?: number): boolean {
   const def = TILE_DEFS[tile];

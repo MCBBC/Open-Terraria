@@ -4,5 +4,16 @@
  "sulphurous_shale": "sulphurous_shale",
  "voidstone": "voidstone",
  "scoria_ore": "scoria_ore",
- "pyre_mantle_molten": "pyre_mantle_molten"
+ "pyre_mantle_molten": "pyre_mantle_molten",
+ "astral_stone": "astral_stone",
+ "astral_grass": "astral_dirt",
+ "astral_dirt": "astral_dirt",
+ "astral_snow": "astral_snow",
+ "astral_ice": "astral_ice",
+ "astral_clay": "astral_clay",
+ "astral_monolith": "astral_monolith",
+ "novae_slag": "novae_slag",
+ "celestial_remains": "celestial_remains",
+ "hardened_astral_sand": "hardened_astral_sand",
+ "smooth_voidstone": "smooth_voidstone"
 }

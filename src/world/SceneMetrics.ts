@@ -113,7 +113,13 @@ const BEACH_DISTANCE = 380;
 
 /** ★一百零八刀审计修:mod 群系旗通用注册面(引擎零群系名知识;
  *  mod 装载期经 registerModBiomeFlag 注册 tileIds 集合+阈值,扫描时派生旗)。 */
-export interface ModBiomeFlag { flag: string; tileIds: readonly number[]; threshold: number; }
+/** ★一百二十刀:v2=depth/xDist 复合门(AbyssLayer 形;tML BiomeTileCounter 系)。
+ *  depth=(tileY−rockLevel)/h ∈ [min,max];xDist=任一边缘带(对侧无 tile 计数=自然滤除) */
+export interface ModBiomeFlag {
+  flag: string; tileIds: readonly number[]; threshold: number;
+  depth?: { min: number; max: number };
+  xDist?: number;
+}
 const MOD_BIOME_FLAGS: ModBiomeFlag[] = [];
 export function registerModBiomeFlag(f: ModBiomeFlag): void {
   MOD_BIOME_FLAGS.push(f);
@@ -524,7 +530,16 @@ export function scanScene(
       for (const mb of MOD_BIOME_FLAGS) {
         let cnt = 0;
         for (const iid of mb.tileIds) cnt += counts.get(iid) ?? 0;
-        out[mb.flag] = cnt >= mb.threshold;
+        let ok = cnt >= mb.threshold;
+        // ★一百二十刀:复合门(深度带=rockLevel+frac·h 语义;边缘带=对侧计数自然滤除)
+        if (ok && mb.depth) {
+          const m = (tileY - rockLevel) / h;
+          ok = m >= mb.depth.min && m <= mb.depth.max;
+        }
+        if (ok && mb.xDist !== undefined) {
+          ok = tileX < mb.xDist || tileX > w - mb.xDist;
+        }
+        out[mb.flag] = ok;
       }
       return out;
     })(),

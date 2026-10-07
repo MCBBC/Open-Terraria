@@ -411,6 +411,64 @@ export function isModBuffVanilla(vanillaBuffId: number): boolean {
   return vanillaBuffId >= MOD_BUFF_VANILLA_BASE;
 }
 
+/** ★一百一十六刀:mod 功能箱解锁条件链(chest.locked 消费;fn(world)=true 可开;
+ *  未注册条件=自由开(零条件箱);fail-fast 不包 try=mod 可信代码纪律) */
+const modChestUnlock = new Map<number, (world: unknown) => boolean>();
+
+export function registerModChestUnlock(tileId: number, fn: (world: unknown) => boolean): void {
+  if (!(tileId >= 0)) throw new Error(`[mod-hooks] chestUnlock tileId 非法: ${tileId}`);
+  if (modChestUnlock.has(tileId)) throw new Error(`[mod-hooks] chestUnlock 重复注册: ${tileId}`);
+  modChestUnlock.set(tileId, fn);
+}
+
+export function runModChestUnlock(tileId: number, world: unknown): boolean {
+  if (modChestUnlock.size === 0) return true;
+  const fn = modChestUnlock.get(tileId);
+  return fn ? !!fn(world) : true;
+}
+
+/** ★一百一十七刀:mod 群系蔓延 face(tML ModBiomeConversion+RegisterSimpleConversion 形;
+ *  WorldEvolution 蔓延扫描消费——spreads=源 tile 内部 id 集,tileMap=vanilla sheet→
+ *  mod tile 内部 id 转换表) */
+export interface ModBiomeConversion {
+  spreads: ReadonlySet<number>;
+  tileMap: Readonly<Record<number, number>>;
+}
+const modConversions: ModBiomeConversion[] = [];
+export function registerModConversion(c: ModBiomeConversion): void {
+  modConversions.push(c);
+}
+export function modConversionsSnapshot(): readonly ModBiomeConversion[] { return modConversions; }
+
+/** ★一百三十六刀:NPC 出生 stats 修正钩(RevDeathStatChanges 面;spawnNpcByVanilla
+ *  消费;fn(vanillaId, stats) 可改 lifeMaxScale=HP 乘) */
+const npcSpawnStats = new Map<string, (vanillaId: number, stats: { lifeMaxScale: number }) => void>();
+
+export function registerModNpcSpawnStats(modId: string, fn: (vanillaId: number, stats: { lifeMaxScale: number }) => void): void {
+  if (npcSpawnStats.has(modId)) throw new Error(`[mod-hooks] npcSpawnStats 重复注册: ${modId}`);
+  npcSpawnStats.set(modId, fn);
+}
+
+export function runModModifyNpcSpawnStats(vanillaId: number, stats: { lifeMaxScale: number }): void {
+  if (npcSpawnStats.size === 0) return;
+  for (const fn of npcSpawnStats.values()) fn(vanillaId, stats);
+}
+
+/** ★一百三十九刀:vanilla 敌怪 AI 覆盖钩(RevengeanceAndDeathAI 面;按 vanillaId
+ *  接管整支 AI,共享尾段照走;与 takeModNpcAi 同位派发=先 vanilla 覆盖) */
+const vanillaNpcAi = new Map<number, (e: Enemy, game: Game, player: Player | null) => void>();
+
+export function registerVanillaNpcAi(vanillaId: number, fn: (e: Enemy, game: Game, player: Player | null) => void): void {
+  if (!(vanillaId >= 0 && vanillaId < MOD_NPC_ID_BASE)) throw new Error(`[mod-hooks] vanillaNpcAi 仅原版 id 域: ${vanillaId}`);
+  if (vanillaNpcAi.has(vanillaId)) throw new Error(`[mod-hooks] vanillaNpcAi 重复注册: ${vanillaId}`);
+  vanillaNpcAi.set(vanillaId, fn);
+}
+
+export function takeVanillaNpcAiOverride(vanillaId: number): ((e: Enemy, game: Game, player: Player | null) => void) | null {
+  if (vanillaNpcAi.size === 0 || vanillaId < 0 || vanillaId >= MOD_NPC_ID_BASE) return null;
+  return vanillaNpcAi.get(vanillaId) ?? null;
+}
+
 /** 测试重置(模块态隔离;loader 单测同款纪律;WeakMap 存储随分代回收) */
 export function _resetModHooksForTests(): void {
   npcAi.clear(); itemUse.clear(); systems.length = 0; onNpcDeath.clear();
@@ -421,4 +479,8 @@ export function _resetModHooksForTests(): void {
   npcOnHitPlayerBuff.clear();
   modifyHitNpc.clear();
   modGenPasses.length = 0;
+  modChestUnlock.clear();
+  modConversions.length = 0;
+  npcSpawnStats.clear();
+  vanillaNpcAi.clear();
 }

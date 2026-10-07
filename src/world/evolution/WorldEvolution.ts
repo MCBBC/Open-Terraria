@@ -40,6 +40,7 @@
 import type { TileStore } from '../TileStore';
 import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
 import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, CONV_SNOW_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS, IS_VINE_SHEETS, SPREADS_CORRUPTION_SHEETS, SPREADS_CRIMSON_SHEETS, SPREADS_HALLOW_SHEETS, ICES_SNOW_SHEETS, SPREAD_OVERGROUND_SHEETS, SPREAD_UNDERGROUND_SHEETS, CAN_GROW_CRYSTAL_SHARDS_SHEETS, SLOWLY_DIES_IN_WATER_SHEETS } from '../../data/tiles';
+import { modConversionsSnapshot } from '../../mods/hooks';   // ★一百一十七刀:mod 群系蔓延消费面
 import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G①（2026-09-18）节日彩灯掉落单源
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
@@ -3351,6 +3352,50 @@ export class WorldEvolution {
     if (SPREADS_CORRUPTION.has(sheet)) this.evilSpread(i, j, 1);
     else if (SPREADS_CRIMSON.has(sheet)) this.evilSpread(i, j, 4);
     else if (SPREADS_HALLOW.has(sheet)) this.evilSpread(i, j, 2);
+    else this.modSpread(i, j, this.typeAt(i, j));   // ★一百一十七刀:mod 群系档
+  }
+
+  /** ★一百一十七刀:mod 群系蔓延(ModBiomeConversion 消费;±3 随机走 1/2 链=
+   *  evilSpread 同构近似;向日葵/叶绿守卫不移植=登记)。写面=active 门(convert
+   *  头门同构:幽灵残型掷骰续走、写面不落);tileMap 键=vanilla sheet。 */
+  private modSpread(i: number, j: number, ti: number): void {
+    if (!this.allowedToSpread) return;
+    const convs = modConversionsSnapshot();
+    if (convs.length === 0) return;
+    const st = this.host.store;
+    for (const conv of convs) {
+      if (!conv.spreads.has(ti)) continue;
+      let again = true;
+      while (again) {
+        again = false;
+        const x = i + Math.floor(this.rng() * 7) - 3;
+        const y = j + Math.floor(this.rng() * 7) - 3;
+        if (!st.inBounds(x, y)) continue;
+        // ★一百二十六刀:叶绿防御臂(evilSpread 同构:≥3 硬挡;>0 时 (n+1)/5 概率挡;
+        //  世界边 10 格内不判;挡=中止本次蔓延)。
+        if (!(x <= 10 || x >= st.w - 10 || y <= 10 || y >= st.h - 10)) {
+          let chlor = 0;
+          for (let k = x - 5; k <= x + 5; k++) for (let l = y - 5; l <= y + 5; l++) {
+            const s2 = sheetOf(this.typeAt(k, l));
+            if (this.active(k, l) && (s2 === 211 || s2 === 346)) chlor++;
+          }
+          if (chlor >= 3 || (chlor > 0 && this.rng() < (chlor + 1) / 5)) return;
+        }
+        // 向日葵 2 格内=中止本次候选(CountNearBlocksTypes 同构)
+        let sunflower = false;
+        for (let k = x - 2; k <= x + 2 && !sunflower; k++) for (let l = y - 2; l <= y + 2; l++) {
+          if (this.active(k, l) && sheetOf(this.typeAt(k, l)) === 27) { sunflower = true; break; }
+        }
+        if (sunflower) continue;
+        const s = sheetOf(this.typeAt(x, y));
+        const to = conv.tileMap[s];
+        if (to !== undefined) {
+          if (this.rng() < 1 / 2) again = true;
+          if (this.active(x, y)) this.setType(x, y, to);
+        }
+      }
+      return;   // 单源 tile 只吃一档
+    }
   }
 
   /** 邪恶/神圣蔓延主体（cs:69761+ 同构三分支合并）：±3 随机点，1/2 链式重试，

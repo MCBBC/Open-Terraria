@@ -5,7 +5,23 @@
 //  记账口径:TintAtlas 新键(=烘焙)按家族分账 + 逐帧新键序列(p50/p95/max)
 //  + 字节(w×h×4) + distinct 键域 + allocs/recycled(页churn) + bglPathStats。
 // 运行:SW_ORIGIN=http://localhost:5207 node tools/run-diag.mjs --timeout=560000 scripts/_e51b-xray7.mjs
-import { launchBrowser, openPage, bootstrap, createGame, sleep } from '../tools/probe/lib/index.mjs';
+import { launchBrowser, openPage, cleanStorage, ackWelcome, createGame, sleep } from '../tools/probe/lib/index.mjs';
+
+/** ★bootstrap 替身:bootstrap 原版在本机连跑 7 连 bridge-timeout(手动同序 100% 过,
+ *  步骤逐一对齐仍复现=玄学)——本探针改走手动同序流程(goto→cleanStorage→goto→轮询
+ *  →ackWelcome),语义逐位同。 */
+async function bootManual(page, origin, url) {
+  await page.goto(origin + url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await cleanStorage(page, { welcomeAck: true });
+  await page.goto(`${origin}${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const t0 = Date.now();
+  while (Date.now() - t0 < 120000) {
+    const ok = await page.evaluate(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld).catch(() => false);
+    if (ok) { await ackWelcome(page, true); return { ok: true }; }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return { ok: false, why: 'bridge-timeout' };
+}
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5207';
 const N = Number(process.env.E51B_FRAMES || 600);
@@ -126,8 +142,7 @@ async function phase(label, url, extraSetup) {
     const browser = await launchBrowser({ headless: true });
     try {
       const page = await openPage(browser, ORIGIN, { width: 1280, height: 800 });
-      await page.goto(ORIGIN + url, { waitUntil: 'domcontentloaded' });
-      const boot = await bootstrap(page, ORIGIN, { log: () => {}, timeout: 120000 });
+      const boot = await bootManual(page, ORIGIN, url);
       if (!boot?.ok) throw new Error('boot fail ' + JSON.stringify(boot));
       const made = await createGame(page, { mode: 'direct', seed: 'e51b', size: 'small', pinRandom: 20261007, log: () => {} });
       if (!made?.ok) throw new Error('createGame fail');

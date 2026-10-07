@@ -64,6 +64,11 @@ export interface GenState {
   savedOreTiers?: { copper: number; iron: number; silver: number; gold: number };
   /** 重置期锭 item id 终值（≡GenVars.copperBar/ironBar/silverBar/goldBar） */
   savedOreBars?: { copper: number; iron: number; silver: number; gold: number };
+  /** ★一百一十四刀:地牢矩形界(DungeonPass DBnd L/R/B 回填;C# GenVars.dMinX/
+   *  dMaxX/dMaxY 语义——mod 箱族/AstralChestGeneration 落点窗消费) */
+  dungeonMinX: number;
+  dungeonMaxX: number;
+  dungeonMaxY: number;
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
   dungeonLocation: number;    // 地牢入口实际位置（Reset 末掷）
@@ -321,7 +326,7 @@ export function newGenState(w: number, h: number): GenState {
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
     savedOreTiers: undefined, savedOreBars: undefined,   // WorldGen.ts 重置期填实（IIII71b）
     skyblockIslands: [],
-    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
+    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0, dungeonMinX: 0, dungeonMaxX: 0, dungeonMaxY: 0,
     tLeft: 0, tRight: 0, tTop: 0, tBottom: 0, tRooms: 0,    // C# GenVars 静态 int 默认 0
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,

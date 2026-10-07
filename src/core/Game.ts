@@ -140,7 +140,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, MOD_CHEST_TILES, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -155,7 +155,8 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc } from '../mods/hooks';
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, runModModifyNpcSpawnStats,
+} from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
@@ -28832,7 +28833,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   光标 tile 不在 tileRange 5/3 矩形内连交互都不进（超射程不消费 rightDown，
     //   RB7 面）。曾缺门=隔全图右键开箱
     const shC = this.wiring?.sheetOf(tx, ty) ?? -1;
-    const chestTile = (type === T.CHEST || shC === 21 || shC === 467) && this.inTileRange(tx, ty);
+    // ★一百一十三刀:mod 功能箱并入命中门(BASIC_CHEST 21/467 ∪ MOD_CHEST_TILES)
+    const chestTile = (type === T.CHEST || shC === 21 || shC === 467 || MOD_CHEST_TILES.has(type)) && this.inTileRange(tx, ty);
     const nearChest = chestTile ? this.findChest(tx, ty) : null;
     if (nearChest && !bubbleLatch) {
       // ★SW-RB10d（F-BJ52-A,2026-09-10）：原版箱分支入口序 = CloseSign()+SetTalkNPC(-1)
@@ -29843,6 +29845,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
           || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
         : sheet === 467 && style === 13;
+      // ★一百一十六刀:mod 功能箱锁面(MOD_CHEST_TILES+chest.locked→mod 解锁条件链;
+      //  未注册条件=自由开;拒开=静默+不消费右键=登记,原版无 mod 箱 toast 面)
+      if (chest.locked && MOD_CHEST_TILES.has(st.get(cxy0.x, cxy0.y))) {
+        if (!runModChestUnlock(st.get(cxy0.x, cxy0.y), this.world)) {
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ModChestLocked'));   // ★一百二十五刀:l10n 面
+          this.input.rightDown = false;
+          return;
+        }
+        chest.locked = false;
+      }
       if (!styleLocked && chest.locked) {
         // 陈旧数据旗标（导入存档脏数据）：样式不在锁定集 → 原版 IsLocked=false 视为
         // 未锁，清旗标直开（防误走解锁分支把金箱帧错转到木箱）
@@ -36744,10 +36756,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (sc.zoneHallow) return 'hallow';
       if (sc.zoneDungeon) return 'dungeon';
       if (sc.zoneGlowshroom) return 'glowshroom';
+      // ★一百一十八刀:mod 群系旗档(优先于 null;mod 刷怪行 zone=modBiomes 键)
+      if (sc.modBiomes) {
+        for (const k of Object.keys(sc.modBiomes)) if (sc.modBiomes[k]) return k;
+      }
       return null;
     })();
     for (const r of rules) {
-      if (r.zone && r.zone !== zoneNow) continue;
+      if (r.zone && r.zone !== zoneNow && !r.depth) continue;
+      // ★一百二十三刀:NPC.CountNPCS 同种存活上限闸(如 Bloatfish <3)
+      if (r.maxCount !== undefined) {
+        let alive = 0;
+        for (const e of this.entities.enemies) { const ev = e as unknown as { dead?: boolean; vanillaId?: number }; if (!ev.dead && ev.vanillaId === r.npcId) alive++; }
+        if (alive >= r.maxCount) continue;
+      }
       const chance = 1 / (600 / r.mult);   // spawnRate 600 基准:mult 倍权重
       if (Math.random() >= Math.min(0.5, chance)) continue;
       const vx = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
@@ -46530,6 +46552,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const e = Enemy.fromVanilla(id, x, y);
     if (!e) return null;
+    {
+      // ★一百三十六刀:mod 出生 stats 修正(复仇/死亡 HP 乘表消费面)
+      const st = { lifeMaxScale: 1 };
+      runModModifyNpcSpawnStats(id, st);
+      const ev2 = e as unknown as { hp?: number; maxHp?: number };
+      if (st.lifeMaxScale !== 1 && ev2.maxHp) {
+        ev2.maxHp = Math.max(1, Math.round(ev2.maxHp * st.lifeMaxScale));
+        ev2.hp = Math.min(ev2.hp ?? ev2.maxHp, ev2.maxHp);
+      }
+    }
     // ReleaseNPC case 356（NPC.cs:80916-80920）：蝴蝶 ai[2] = Style（八物种带,
     // 捕获物 1994-2001 → placeStyle=1+item-1994,Item.cs:21307-21318）；661 渐隐
     // 槽/其余族 Style 仅雕像语义不适用释放

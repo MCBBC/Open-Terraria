@@ -14,6 +14,7 @@ export interface TileDef {
   axe: number;           // 所需斧力
   mapColor: string;      // 小地图颜色
   drop?: string | number | null;   // 破坏掉落:数字=原版 item id(2026-08 本地物品退役后统一);
+  chest?: boolean;       // ★一百一十三刀:功能性宝箱 tile(开箱命中门/箱实体绑定;mod 箱族)
                                    // 字符串=place_v_ 派生等存量 key;null = 显式无掉落,原版装饰类
   rope?: boolean;        // 绳索类（攀爬判定）
   blend: boolean;        // 是否参与同类边缘融合
@@ -39,6 +40,7 @@ export const T = {
 export const TILE_DEFS: TileDef[] = [];
 function def(d: Partial<TileDef> & { key: string; growsOn?: string | null; sapling?: string | null }): number {
   const id = TILE_DEFS.length;
+  if (d.chest) (MOD_CHEST_TILES as Set<number>).add(id);
   if (d.growsOn) MOD_TREE_IDS.add(id);
   // ★八十一刀:树/苗双向挂(树=sapling 指针;苗=自挂,后注册苗时经 KEY 回查亲树)
   if (d.growsOn && d.key.startsWith('mod_')) {
@@ -1478,6 +1480,10 @@ export const FALLING_SHEETS: ReadonlySet<number> = new Set([53, 234, 112, 116, 2
 /** TileID.Sets.BasicChest（TileID.cs:315={21 木箱,467 死人箱}）——箱族判定共用
  *  （放置替换族/箱盖姿态带/房屋计分/破坏存活门/meteor 否决/陷阱杀箱锚） */
 export const BASIC_CHEST_SHEETS: ReadonlySet<number> = new Set([21, 467]);
+/** ★一百一十三刀:mod 功能箱 tile 内部 id 集(registerModTile chest 旗注册面;
+ *  开箱命中门 Game.chestTile 消费)——mod tile 装载期追加注册,故增量维护
+ *  (模块期一次性求值会冻结在空集=TILE_DEFS 后到) */
+export const MOD_CHEST_TILES: ReadonlySet<number> = new Set<number>();
 /** TileID.Sets.Conversion.Corrupt（TileID.cs:333 全 8 型） */
 export const CONV_CORRUPT_SHEETS: ReadonlySet<number> = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
 /** TileID.Sets.Conversion.Crimson（TileID.cs:351 全 8 型） */
@@ -2282,6 +2288,7 @@ export function registerModTile(d: Partial<TileDef> & { key: string; growsOn?: s
   if (!(stableId >= 1030 && stableId <= MOD_TILE_STABLE_MAX)) throw new Error(`[mod-tile] stableId 越段: ${stableId}`);
   if (TILE_INTERNAL_OF_STABLE[stableId] !== 0) throw new Error(`[mod-tile] stableId 冲突: ${stableId}`);
   const id = TILE_DEFS.length;
+  if (d.chest) (MOD_CHEST_TILES as Set<number>).add(id);
   if (d.growsOn) MOD_TREE_IDS.add(id);
   // ★八十一刀:树/苗双向挂(树=sapling 指针;苗=自挂,后注册苗时经 KEY 回查亲树)
   if (d.growsOn && d.key.startsWith('mod_')) {

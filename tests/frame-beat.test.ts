@@ -104,6 +104,12 @@ class OldV5Breach extends FrameBeat {
   override capacityBreach(): boolean {
     return this.costP50() > this.budget();           // v5 降档线:中位刚超当前拍预算即降
   }
+  /** ★v9.6 棘轮刀红面完整性:v5 旧升拍线=比较【上一档】预算(现役已改比较当前档)
+   *  ——红判别器须复刻旧升拍面,否则「升拍余量拦死」红面失真(继承新升拍线后
+   *  upgradesAfterK2 不再=0)。 */
+  override upgradeCleared(): boolean {
+    return this.costP50() < this.budget(this.k - 1) * UPGRADE_HEADROOM;
+  }
 }
 
 /** 修前(v7 案①=失拍判据无对齐豁免)复刻:红判别器旧侧——帧距超 (k+MISS_SLACK)×vsync
@@ -1248,5 +1254,46 @@ describe('三档语义锁(源锚)', () => {
     expect(BEAT.slice(iEst, iLegacy)).toContain('return this.legacyEstimate()');
     // 快照面无 capSkips(门拆除后诊断面随之退役)
     expect(BEAT).not.toMatch(/capSkips: this\./);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★v9.6 升拍棘轮死锁回归（2026-10-07 用户实报「偶现死亡螺旋一直降帧,重进就好」）：
+//   旧升拍线 p50<budget(k−1)×0.9 在 k=2 时=7.5ms(120Hz),低于用户机常态帧耗
+//   9-15ms → 数学上永不可达 → 任何一次降档(入场巨帧簇/黄昏负载簇)后永久锁死
+//   低档,重进世界(reset k=1)是唯一出口。新线=比较【当前档】预算(帧率优先政策
+//   对称化),帧耗装进当前档即逐级回升。
+describe('★v9.6 升拍棘轮死锁回归（死亡螺旋刀）', () => {
+  // 红判别器:【新】降档线(v6)+【旧】升拍线(比较上一档)=复刻用户机锁死形态
+  class OldRatchetBeat extends FrameBeat {
+    override upgradeCleared(): boolean {
+      return this.costP50() < this.budget(this.k - 1) * UPGRADE_HEADROOM;
+    }
+  }
+  it('降档后帧耗回落常态(9-15ms) → 新线逐级升回 k=1;旧线棘轮锁死 k=2(红)', () => {
+    // 分段成本(纯 i 确定性=A/B 两臂同流):i<1200=负载簇(持续 24ms→推过降档线
+    //   18.3 且卡在 budget(3)×1.1=27.5 内=落 k=2);i≥1200=常态回落 12ms(用户机
+    //   9-15 带内——旧升拍线 7.5ms 永不可达=棘轮;新线 12<budget(2)×0.9=15 升回)。
+    //   驱动=回调锁定(v6 测试先例,诚实估计口径)——busy 耦合下恒重载流呈「估计即
+    //   节奏」回声(est→帧耗,降档线被豁免=估计器债非判据面),锁死形态不可达。
+    const cost = (i: number) => (i < 1200 ? 24 : 12);
+    const drive = (make: () => FrameBeat) => {
+      const beat = make();
+      for (let i = 0; i < 3600; i++) {
+        const t = i * HZ120;
+        beat.observeVsync(t, 120);
+        if (beat.shouldRender(t)) {
+          beat.beginRender(t);
+          beat.endRender(t + cost(i));
+        }
+      }
+      return beat;
+    };
+    // 红面(旧升拍线):负载簇降档后常态回落,仍恒锁 k=2(升拍线 7.5ms 永不可达)
+    const old = drive(() => new OldRatchetBeat());
+    expect(old.k).toBe(2);                            // 锁死低档
+    // 绿面(新线):同场景逐级升回 k=1
+    const neo = drive(() => new FrameBeat());
+    expect(neo.k).toBe(1);
   });
 });

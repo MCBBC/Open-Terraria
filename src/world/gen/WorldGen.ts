@@ -89,6 +89,7 @@ export const SLOT_VANILLA_PASSES: Readonly<Record<string, readonly string[]>> = 
 };
 import type { TileStore } from '../TileStore';
 import { T, TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_SHEETS, ORE_SHEETS } from '../../data/tiles';
+import { ITEM_BY_KEY } from '../../data/items';   // ★一百一十三刀:mod 箱 loot 键解析
 import { World, worldSizeFor, type WorldSize } from '../World';
 import { Lang } from '../../i18n/Lang';   // ★IIIII214 墓园碑文 IndexedFromCategory（cs:25161 掷流面见 spawnGraveyardBiome）
 
@@ -1453,15 +1454,29 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
   runBeachesPass(store, rng, gs);
   // ★mod 生成 pass 通用消费面(mod 装载期经 sw.registerGenPass 注册;零 mod 知识):
   //  Beaches 后=海盆就位;gs.mods.tileIdByKey=mod tile 键→内部 id(pass 解析用)。
-  (gs as { mods?: { tileIdByKey: Record<string, number> } }).mods = {
+  const gsMods = (gs as { mods?: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } }).mods = {
     tileIdByKey: Object.fromEntries(
       Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
         .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
+    // ★一百一十三刀:item 键→vid(mod 箱 loot 解析;mod 键=mod_<mod>_ 前缀全键)
+    itemIdByKey: Object.fromEntries(
+      Object.entries(ITEM_BY_KEY).filter(([k]) => k.startsWith('mod_'))),
+    // 生成期箱登记 sink(mod pass 写入;循环后转 world.chests=ChestData)
+    chests: [],
   };
   for (const pass of genPasses) {
     rng.reseed(gs.seed);
     prog?.beginVan(pass.name);
     pass.fn(store, rng, gs);
+  }
+  // ★一百一十三刀:mod 生成箱转正(ChestData 40 槽;loot 依序落;locked 透传)
+  {
+    const wc = world.chests as Array<{ x: number; y: number; items: unknown[]; locked?: boolean }>;
+    for (const c of gsMods.chests) {
+      const items: unknown[] = Array(40).fill(null);
+      (c.items as Array<{ id: number; stack: number } | null>).forEach((it, i) => { if (it && i < 40) items[i] = it; });
+      wc.push({ x: c.x, y: c.y, items, locked: c.locked });
+    }
   }
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
   for (let x = 0; x < store.w; x++) {

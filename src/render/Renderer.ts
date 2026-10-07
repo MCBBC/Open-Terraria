@@ -2281,7 +2281,7 @@ function whipMarkerTintedSheet(src: CanvasImageSource & { width: number; height:
   if (!g) return null;
   g.imageSmoothingEnabled = false;
   g.drawImage(src, 0, 0);
-  g.globalCompositeOperation = 'multiply';
+  g.globalCompositeOperation = 'source-over';
   g.fillStyle = `rgb(${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB})`;
   g.fillRect(0, 0, c.width, c.height);
   g.globalCompositeOperation = 'destination-in';
@@ -13708,6 +13708,53 @@ export class Renderer {
    *  缺省置位;活机同会话对拍可运行时改写） */
   static empGhostSliceOff = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('empslice') === '0' : false;
+  /** ★E51b（2026-10-07）2D fallback 键域收界 A/B 旗：true=fallback 回旧「整 tint 单键
+   *  TintAtlas 烘焙」链（?empscratch=0;键带未量化 tq=无界键域,E51b 定谳 2D 600 帧
+   *  9277 新键/880MB 字节+全图集冲刷级联）。缺省 false=逐调 scratch 烘焙（零键）。 */
+  static empGhostScratchOff = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('empscratch') === '0' : false;
+  /** ★E51b 2D fallback 逐调 scratch 烘焙（共享单画布,tintedSprite 同配方同字节）：
+   *  旧链 fbKey 键带未量化 tq（ai1 相位真值,逐帧漂移）→ 键域无界（2D 600 帧 emp 族
+   *  3766 distinct 新键、15.5 新键/帧;4 页图集≈17-28 槽 99.7% 回收率整体冲刷,稳定键
+   *  empW/empG/hb 被逐出重烘=35% 级联税）。8 桶量化救不了此族（通道漂移 2.83/tick
+   *  ≈桶宽/3,键域仍数千 ≫ 槽容;且加色主部分解已被 A/B 证伪——'lighter' 连 α 通道
+   *  一起累加,Σw≠1 的凸分解 α 过冲 maxCh=49）。修=逐调私有 scratch 现烘现画
+   *  （tintedSprite 同 multiply+destination-in 配方=字节逐位同旧烘焙）→ 零键零图集
+   *  零 LRU 压力;GL 在场帧经 uploadScratchBake 环窗直传（bolt/尘族判例,环 64≥帧内
+   *  上限 36+）,降级窗重传字节与旧链 churn 同量级。GL 主流（cut+uTint）零改动。
+   *  ?empscratch=0=旧 TintAtlas 链逃生门（A/B 对拍臂）。 */
+  private empGhostTintScratchCv: HTMLCanvasElement | null = null;
+  private empGhostTinted(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+    tint: readonly [number, number, number]): HTMLCanvasElement | null {
+    const w = Math.max(1, sw), h = Math.max(1, sh);
+    if (typeof document === 'undefined') return null;
+    if (!this.empGhostTintScratchCv) this.empGhostTintScratchCv = document.createElement('canvas');
+    const cv = this.empGhostTintScratchCv;
+    // 只增不减 16 对齐（TintAtlas scratch 同式）;256 上限=原 tintedSprite MAX_ENTRY 同界
+    // （旧链 >256 区域本就 bake null → {kind:'none'},上界外行为不变）
+    if (cv.width < w || cv.height < h) {
+      cv.width = Math.min(256, Math.max(16, Math.ceil(w / 16) * 16));
+      cv.height = Math.min(256, Math.max(16, Math.ceil(h / 16) * 16));
+    }
+    // willReadFrequently:纯烘焙面（从不直接合成）,CPU 后备不占 IOSurface（TintAtlas
+    //  scratch 同判例）;GL 在场帧经 uploadScratchBake texSubImage2D 直传
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    g.clearRect(0, 0, w, h);
+    g.imageSmoothingEnabled = false;
+    // ↓↓↓ 与 tintedSprite paint 回调逐行同配方（字节恒等的根据）↓↓↓
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+    g.globalCompositeOperation = 'multiply';
+    g.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+    return cv;
+  }
 
   /** 女皇绘制：背后大翼 Extra_159（1×11 帧按 localAI[0]/4 推进、scale×2）→ 着色器层
    *  Extra_157（原版 HallowBoss 像素着色器；此处直画贴图近似，登记）→ 本体 NPC_636
@@ -13766,6 +13813,7 @@ export class Renderer {
       type GhostAddSrc =
         | { kind: 'rect'; img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }
         | { kind: 'cut'; cv: HTMLCanvasElement }
+        | { kind: 'scratch'; cv: HTMLCanvasElement; w: number; h: number }
         | { kind: 'tinted'; rect: TintRect }
         | { kind: 'none' };
       const white = tint[0] === 255 && tint[1] === 255 && tint[2] === 255;
@@ -13773,7 +13821,7 @@ export class Renderer {
       // 漂移刷爆剪帧缓存→保险丝熔断回落烘焙链,首版实测病,键域必须帧级稳定）
       const ghostAdd = (
         img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
-        cutKey: string, fbKey: string,
+        cutKey: string,
       ): GhostAddSrc => {
         if (white) return { kind: 'rect', img, sx, sy, sw, sh };
         if (!Renderer.empGhostSliceOff) {
@@ -13783,6 +13831,18 @@ export class Renderer {
             return { kind: 'cut', cv: cut };
           }
         }
+        // ★E51b（2026-10-07）2D fallback 键域收界（E51 诚实边界登记债）——缺省=
+        //  逐调 scratch 现烘现画（empGhostTinted:零键零图集,字节=旧烘焙逐位同;
+        //  GL 在场帧 uploadScratchBake 环窗直传=降级窗重传与旧 churn 同量级）。
+        //  ?empscratch=0=旧 TintAtlas 单键链逃生门（fbKey 未量化 tq 键域无界——
+        //  仅 A/B 对拍与回滚用,勿长期驻留）。
+        if (!Renderer.empGhostScratchOff) {
+          const cv = this.empGhostTinted(img, sx, sy, sw, sh, tint);
+          if (!cv) return { kind: 'none' };
+          this.uploadScratchBake(cv, 'empGhostTint', 64, sw, sh);
+          return { kind: 'scratch', cv, w: sw, h: sh };
+        }
+        const fbKey = `emp|${cutKey.replace(/^empGhostCut\|/, '')}|${tint[0]},${tint[1]},${tint[2]}`;
         const tinted = this.tintedSprite(fbKey, { img, sx, sy, sw, sh }, tint);
         return tinted ? { kind: 'tinted', rect: tinted } : { kind: 'none' };
       };
@@ -13801,31 +13861,33 @@ export class Renderer {
         } else if (add.kind === 'cut') {
           ctx.globalAlpha = Math.max(0, Math.min(1, addA));
           ctx.drawImage(add.cv, 0, 0, add.cv.width, add.cv.height, dx, dy, dw, dh);
+        } else if (add.kind === 'scratch') {
+          // ★E51b 逐调 scratch 消费面：单笔绘制=旧链单键烘焙逐位同（单 draw 语义,
+          //  α 通道累加量恒等）;只取 (0,0,w,h) 区（scratch 只增不减,区外=陈旧像素）
+          ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+          ctx.drawImage(add.cv, 0, 0, add.w, add.h, dx, dy, dw, dh);
         } else if (add.kind === 'tinted') {
+          // ?empscratch=0 逃生门链（旧 TintAtlas 单键烘焙;E51 前原语义）
           ctx.globalAlpha = Math.max(0, Math.min(1, addA));
           ctx.drawImage(add.rect.c, add.rect.x, add.rect.y, add.rect.w, add.rect.h, dx, dy, dw, dh);
         }
       };
-      const tq = `${tint[0]},${tint[1]},${tint[2]}`;
       for (const L of ghostLayers) {
         const fh = Math.floor(L.src.sh / L.rows);
         twoPass(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh, -L.dw / 2, -L.dh / 2, L.dw, L.dh,
           ghostAdd(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh,
-            `empGhostCut|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}`,
-            `emp|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}|${tq}`));
+            `empGhostCut|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}`));
       }
       if (body) {
         twoPass(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh,
           ghostAdd(body.img, body.sx, body.sy, body.sw, body.sh,
-            `empGhostCut|body|${body.sx},${body.sy}`,
-            `emp|body|${body.sx},${body.sy}|${tq}`));
+            `empGhostCut|body|${body.sx},${body.sy}`));
       }
       if (phase2 && wing2) {
         const f2 = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
         twoPass(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh, -f2.r.sw / 2, -f2.fh / 2, f2.r.sw, f2.fh,
           ghostAdd(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh,
-            `empGhostCut|187|${f2.idx * f2.fh}`,
-            `emp|187|${f2.idx * f2.fh}|${tq}`));
+            `empGhostCut|187|${f2.idx * f2.fh}`));
       }
       // 帧 5 施法臂（j==num2/num3 → 臂帧==5 才入残影 :26378-26486）
       for (const [arm, frame] of [[armL, lf], [armR, rf]] as Array<[ReturnType<SpriteAtlas['vmisc']>, number]>) {
@@ -13833,8 +13895,7 @@ export class Renderer {
         const f = frameAt(arm, 7, frame);
         twoPass(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh,
           ghostAdd(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
-            `empGhostCut|arm${arm === armL ? 'L' : 'R'}|${f.idx * f.fh}`,
-            `emp|arm|${f.idx * f.fh}|${tq}`));
+            `empGhostCut|arm${arm === armL ? 'L' : 'R'}|${f.idx * f.fh}`));
       }
       ctx.restore();
       ctx.globalCompositeOperation = 'source-over';

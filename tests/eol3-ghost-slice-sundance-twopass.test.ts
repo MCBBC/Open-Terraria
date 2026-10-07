@@ -2,7 +2,8 @@
 //   刀2 = 光女(636) atk8/9 彩虹残影环 tint 批量化——paintGhost 加亮源三档:
 //     ①白 tint 贴图区直画 ②shim 切片接管(markWorldDynamicScratch→uploadShineSlice
 //     →BakeSnap.tint→quadSprite uTint,TileShine 转正判例)剪帧基底 (层,帧) 稳定键
-//     首见上 GPU、逐 draw 顶点色乘法=零 TintAtlas 烘焙 ③2D/降级 tintedSprite 原链。
+//     首见上 GPU、逐 draw 顶点色乘法=零 TintAtlas 烘焙 ③2D/降级烘焙原链
+//     （★E51b 2026-10-07 收界:缺省=逐调 scratch 零键,旧 tq 单键链=?empscratch=0 门）。
 //     活机:环烘焙 11.9/帧→0,环窗帧距 5.41→1.76ms;OFF/ON 像素对拍 AB1 maxΔ=4
 //     (97%≤2)、AB2 98.7%≤2(残差=GPU float vs 8-bit 烘焙舍入域,低 α 边缘纹素
 //     premul 读回放大,非结构性)。
@@ -52,16 +53,21 @@ describe('★刀2 残影环 tint 批量化（Renderer.paintGhost）', () => {
     expect(RENDERER).toMatch(/if \(white\) return \{ kind: 'rect', img, sx, sy, sw, sh \};/);
   });
 
-  it('切片接管=uTint 顶点色乘法（tint 归一化 /255;TileShine 同量纲）,拒接回落 tintedSprite 原链（fbKey 含 tq 键域逐位保留）', () => {
+  it('切片接管=uTint 顶点色乘法（tint 归一化 /255;TileShine 同量纲）,拒接回落烘焙链（★E51b 收界:缺省=逐调 scratch 零键,?empscratch=0=旧 tq 链逃生门）', () => {
     expect(RENDERER).toMatch(/this\.markWorldDynamicScratch\(cut, cutKey,\s*\n\s*\[tint\[0\] \/ 255, tint\[1\] \/ 255, tint\[2\] \/ 255\]\)/);
+    // ★E51b（2026-10-07）fbKey 未量化 tq 键域收界（E51 诚实边界登记债）:旧链
+    //   `tintedSprite(fbKey,...)` 键域无界（2D 600 帧 9277 新键）→ 缺省改走
+    //   empGhostTinted 逐调 scratch 零键;旧整 tint 单键链保留在 empscratch=0 门后。
+    expect(RENDERER).toMatch(/if \(!Renderer\.empGhostScratchOff\) \{/);
     expect(RENDERER).toMatch(/const tinted = this\.tintedSprite\(fbKey, \{ img, sx, sy, sw, sh \}, tint\);/);
     expect(RENDERER).toMatch(/return tinted \? \{ kind: 'tinted', rect: tinted \} : \{ kind: 'none' \};/);
   });
 
-  it('twoPass 削底+加亮两遍结构不变（A/=3 预乘语义;加亮源三档分派）', () => {
+  it('twoPass 削底+加亮两遍结构不变（A/=3 预乘语义;加亮源三档分派;★E51b 新增 scratch 支=单 draw α 恒等）', () => {
     expect(RENDERER).toMatch(/globalCompositeOperation = 'destination-out';\s*\n\s*ctx\.globalAlpha = Math\.max\(0, Math\.min\(1, fadeA\)\);/);
     expect(RENDERER).toMatch(/globalCompositeOperation = 'lighter';\s*\n\s*if \(add\.kind === 'rect'\)/);
     expect(RENDERER).toContain("else if (add.kind === 'cut')");
+    expect(RENDERER).toContain("else if (add.kind === 'scratch')");
     expect(RENDERER).toContain("else if (add.kind === 'tinted')");
   });
 });

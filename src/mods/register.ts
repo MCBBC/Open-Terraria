@@ -137,6 +137,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
   // ★一百一十刀:TILE_DEFS 活引用绑定 gen pass sheet 消费面(RemoveStupidTiles 白名单;
   //  mod tile 伪 sheet≡stable id 恒不在原版白名单=天然免疫,数组为活引用后续追加自动可见)
   (globalThis as unknown as { __calamityTileDefs?: unknown }).__calamityTileDefs = TILE_DEFS;
+  // ★一百一十二刀:键→内部 id 全表(运行时事件链消费;TILE_BY_KEY 含 vanilla v_* 键)
+  (globalThis as unknown as { __calamityTileIdByKey?: unknown }).__calamityTileIdByKey = TILE_BY_KEY;
   // projectiles(P2):数据 spec → ModProj 注册簿(代码钩由 entry 的 sw.projectileHook 追加)
   for (const pr of plan.projSpecs) {
     const s = pr.spec;
@@ -184,12 +186,18 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     if (spec.dropItem && dropId === undefined) {
       throw new Error(`[mod-tile] mod ${t.modId} tile ${spec.key} 掉落引用未注册物品: ${spec.dropItem}`);
     }
+    // ★一百一十八刀:群系旗派生推入(修复 108R2 后 PENDING_BIOME_FLAGS 无推入
+    // =ZoneAstral/Sulphur 生产惰性)——tile 键族派生(键含 astral/sulphurous;
+    // 通用=spec.biomeFlag 声明面优先)
+    const biomeFlagName = spec.biomeFlag
+      ?? (t.fullKey.includes('astral') ? 'astral' : t.fullKey.includes('sulphurous') ? 'sulphur' : null);
     const modTileInternal = registerModTile({
       key: t.fullKey,
       name: spec.name ?? spec.key,
       solid: spec.solid ?? false,
       platform: spec.platform ?? false,
       decor: spec.decor ?? false,
+      chest: spec.chest ?? false,
       framed: spec.framed ?? false,
       w: spec.w,
       h: spec.h,
@@ -211,6 +219,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
         fh: spec.h ?? 1,
       },
     }, t.stableId);
+    if (biomeFlagName) PENDING_BIOME_FLAGS.push({ flag: biomeFlagName, tileId: modTileInternal });
     // ★B6:AdjTiles 兼用站点(闭包后裔=stationSatisfierTiles 自动含 mod 站点)
     for (const adj of spec.adjTiles ?? []) registerModAdjTile(modTileInternal, adj);
     tiles++;
@@ -275,6 +284,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       MOD_SPAWN_RULES.push({
         npcId: n.npcId, zone: spec.spawn.zone ?? null,
         water: spec.spawn.water ?? false, mult: spec.spawn.mult ?? 1,
+        ...(spec.spawn.maxCount !== undefined ? { maxCount: spec.spawn.maxCount } : {}),
+        ...(spec.spawn.depth ? { depth: spec.spawn.depth } : {}),
       });
     }
     // ★CalPlayer 基建(六十四刀):接触命中玩家施加声明面 debuff(OnHitPlayer 形)

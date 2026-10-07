@@ -8,7 +8,7 @@ import type { ModLoadResult, ModPack } from './types';
 import { ModStore, type ModRow, type ModStorage } from './store';
 import { readModPack } from './pack';
 import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from './plan';
-import { applyRegistrationPlan } from './register';
+import { applyRegistrationPlan, bindModBiomeFlags } from './register';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc } from './bridge';
 import { createModContext, type ModEntry } from './api';
@@ -97,6 +97,20 @@ export async function loadModsPhase1(
       lastPlan = plan;
       validatePlanReferences(plan);
       applyRegistrationPlan(plan);
+      bindModBiomeFlags();   // ★一百一十八刀:群系旗绑定(应用后依序;此前无调用端=惰性)
+      // ★一百二十九刀:schematics/*.json → 全局(生成 pass 消费;.csch 预转换件)
+      {
+        const sch: Record<string, unknown> = {};
+        const modData: Record<string, unknown> = {};
+        for (const [path, bytes] of plan.mods.flatMap((m) => [...m.pack.files])) {
+          const mt = /^schematics\/([A-Za-z0-9_]+)\.json$/.exec(path);
+          if (mt) { try { sch[mt[1]] = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* 坏件跳过 */ } }
+          const md = /^([A-Za-z0-9_-]+)\.json$/.exec(path);   // ★一百三十七刀:根域数据 json
+          if (md) { try { modData[md[1]] = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* 坏件跳过 */ } }
+        }
+        (globalThis as unknown as { __calamitySchematics?: unknown }).__calamitySchematics = sch;
+        (globalThis as unknown as { __calamityModData?: unknown }).__calamityModData = modData;
+      }
       result.allocation = plan.allocation;
       loadedPacks.push(...plan.mods.map((m) => m.pack));
       // ★G5 mod i18n 合并(2026-10-04 GLM娘实验批):i18n/<lang>.json → Mods.<modId>.*
