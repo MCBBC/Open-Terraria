@@ -1,12 +1,16 @@
-// ★C13c 离线场值 readback 闸（2026-10-01 二期;2026-10-02 三期扩 glitter 亮纹场。
+// ★C13c 离线场值 readback 闸（2026-10-01 二期;2026-10-02 三期扩 glitter 亮纹场;
+//  ★四期修正 2026-10-07:uSpark=1 支改验【四角 glitter 终值的 varying 插值域】——
+//  FS 内 remap 链逐像素式已废（插值后钳制≠原版钳制后插值=果冻感回归定谳面）,
+//  glitter 公式本体归 CPU（glitter4FromWaves,liqpolish-shimmer-field 位等锁+
+//  liquid-c13c-shimmer-glsl refGlitter 角值锁覆盖）,GPU 侧只剩插值消费。
 //  设计案 §4.1 第 1 步——纯 GL 侧,不动游戏管线）。
 //  小 FBO(256×256) 渲染 sprite:liqshimmer 真源（LIQSHIM_FS_SRC 导出直采,禁转录漂移）
 //  的逐像素场 readPixels 对照 JS 参照（LiquidRenderer.cs 逐式）。两模式:
 //   ①uSpark=0 基体场 field×255 ↔ GetShimmerBaseColor :803-807（验收 maxd ≤ 2/255）;
-//   ②uSpark=1 glitter 亮纹场 ↔ GetShimmerGlitterOpacity 体部式 :773-790（三期刀,
-//     验收 maxd ≤ 2/255;aNoise 四角独立——参照必须按【两三角逐线性】建模,GPU varying
-//     插值≙原版 SpriteBatch 顶点插值域;双线性≠两三角:cross 项 |Δ|≤0.5 噪声域,经
-//     remap 链最大 ~89/255,参照若用双线性必爆假红）。
+//   ②uSpark=1 亮纹段 ↔ 四角 glitter 终值（aNoise 槽喂四异值）的两三角逐线性插值
+//     （★四期:g=vNoise 硬件插值,参照=同一插值模型——参照必须按【两三角逐线性】
+//     建模,GPU varying 插值≙原版 TileBatch 顶点插值域（TileBatch.cs:175-187 对角线
+//     TL-BR）;双线性≠两三角:cross 项 |Δ|≤0.5×值域,参照若用双线性必爆假红）。
 //  网格:x∈[0,256) × tVis∈{0..3570,步 30} × tile.y∈[0,8)（行混编覆盖 y 域）。
 //  运行:SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs scripts/_c13c-fieldgate.mjs
 import { launchBrowser, openPage, bootstrap } from '../tools/probe/lib/index.mjs';
@@ -125,50 +129,39 @@ const out = await page.evaluate(async () => {
       }
     }
   }
-  // ---- 模式②:uSpark=1 glitter 亮纹场（三期刀）----
-  // ★探针教训（2026-10-02 readback 判谳）: glitter 场参照必须用【全幅 quad】+
-  //  逐 tVis readback——1px 高薄条 quad 的对角线与像素行近平行,本机 GPU 薄片
-  //  栅格化的 varying 插值偏离两三角模型（实测段内跳变 maxd 38,全幅 quad 同模型
-  //  maxd 0.004 噪声域——_c13c-noisediag.mjs 判谳）;基体场①不受此扰（aTile.y
-  //  行恒定=场对薄片内常数）。全幅 quad:aTile=(0,0)-(256,256) 平面精确,四角噪声
-  //  独立 → 参照=两三角逐线性（GPU varying 语义≙原版 SpriteBatch 顶点插值域;
-  //  双线性≠两三角:cross 项 |Δ|≤0.5 噪声域 → 经 remap 链最大 ~89/255,参照若用
-  //  双线性必爆假红）。
+  // ---- 模式②:uSpark=1 亮纹段（★四期 2026-10-07:g=vNoise=四角 glitter 终值插值域）----
+  // ★探针教训（2026-10-02 readback 判谳）: 场参照必须用【全幅 quad】——1px 高薄条
+  //  quad 的对角线与像素行近平行,本机 GPU 薄片栅格化的 varying 插值偏离两三角模型
+  //  （实测段内跳变 maxd 38,全幅 quad 同模型 maxd 0.004 噪声域——_c13c-noisediag.mjs
+  //  判谳）。全幅 quad 四角喂四异值（0.05/0.45/0.70/0.25—— glitter 终值可达域内)
+  //  → 参照=同一两三角逐线性模型（对角线 TL-BR=v=u;三角1=(TL,TR,BR) 覆 v≤u,
+  //  三角2=(TL,BR,BL) 覆 v≥u;GPU varying 语义≙原版 TileBatch 顶点插值域）。
   gl.uniform1f(uSpark, 1);
+  gl.uniform1f(uTVis, 0);
   let gmaxd = 0, gworst = null, gTri1 = 0, gTri2 = 0;
   const buf1 = new Uint8Array(W * H * 4);
-  for (let r = 0; r < ROWS; r++) {
-    const tVis = r * 30;
-    gl.uniform1f(uTVis, tVis);
-    const n00 = Math.sin(refNoise(0, 0) / 10 + tVis / 180);        // TL 节点 (0,0)
-    const n10 = Math.sin(refNoise(W, 0) / 10 + tVis / 180);        // TR 节点 (256,0)
-    const n11 = Math.sin(refNoise(W, H) / 10 + tVis / 180);        // BR 节点 (256,256)
-    const n01 = Math.sin(refNoise(0, H) / 10 + tVis / 180);        // BL 节点 (0,256)
-    put(0, 0, 0, 0, 0, 0, 0, n00);        // TL
-    put(1, W, 0, 1, 0, W, 0, n10);        // TR
-    put(2, W, H, 1, 1, W, H, n11);        // BR
-    put(3, 0, 0, 0, 0, 0, 0, n00);        // TL'
-    put(4, W, H, 1, 1, W, H, n11);        // BR'
-    put(5, 0, H, 0, 1, 0, H, n01);        // BL
+  {
+    const g00 = 0.05, g10 = 0.45, g11 = 0.7, g01 = 0.25;   // 四角 glitter 终值（aNoise 槽）
+    put(0, 0, 0, 0, 0, 0, 0, g00);        // TL
+    put(1, W, 0, 1, 0, W, 0, g10);        // TR
+    put(2, W, H, 1, 1, W, H, g11);        // BR
+    put(3, 0, 0, 0, 0, 0, 0, g00);        // TL'
+    put(4, W, H, 1, 1, W, H, g11);        // BR'
+    put(5, 0, H, 0, 1, 0, H, g01);        // BL
     draw();
     gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf1);
-    // JS 参照:两三角逐线性（对角线 TL-BR=v=u;三角1=(TL,TR,BR) 覆 v≤u,三角2=
-    //  (TL,BR,BL) 覆 v≥u）× GetShimmerGlitterOpacity 体部式 remap×remap。
     for (let y = 0; y < H; y++) {
       const glRow = H - 1 - y;   // readPixels 底起
       for (let c = 0; c < W; c++) {
         const u = (c + 0.5) / W, v = (y + 0.5) / H;
-        const n = v >= u
-          ? n00 + (n11 - n01) * u + (n01 - n00) * v   // 三角2 (TL,BR,BL)
-          : n00 + (n10 - n00) * u + (n11 - n10) * v;  // 三角1 (TL,TR,BR)
-        const w = Math.sin((((c + 0.5) + (y + 0.5) / 6) / 10 - tVis / 360) * Math.PI * 2);
-        const n1 = Math.max(0, Math.min(1, (w + 0.5) / 1.5)) * 0.35;   // remap(w,-0.5,1,0,0.35)
-        const g = Math.max(0, Math.min(1, (n1 * n) / 0.5));            // remap(·,0,0.5,0,1)
+        const g = v >= u
+          ? g00 + (g11 - g01) * u + (g01 - g00) * v   // 三角2 (TL,BR,BL)
+          : g00 + (g10 - g00) * u + (g11 - g10) * v;  // 三角1 (TL,TR,BR)
         const ref = g * 255;
         const o = (glRow * W + c) * 4;
         const d = Math.abs(buf1[o] - ref);
         if (v >= u) gTri2++; else gTri1++;
-        if (d > gmaxd) { gmaxd = d; gworst = { c, y, tVis, u: +u.toFixed(3), v: +v.toFixed(3), got: buf1[o], ref: +ref.toFixed(2) }; }
+        if (d > gmaxd) { gmaxd = d; gworst = { c, y, u: +u.toFixed(3), v: +v.toFixed(3), got: buf1[o], ref: +ref.toFixed(2) }; }
       }
     }
   }
@@ -181,7 +174,7 @@ if (out.why) {
   chk('①基体场 readback 闸:maxd ≤ 2/255（§4.1 验收线;超域=mediump 漏入或常量错）',
     out.baseMaxd <= 2,
     `maxd=${out.baseMaxd.toFixed(3)} worst=${JSON.stringify(out.baseWorst)}`);
-  chk('②glitter 亮纹场 readback 闸（三期）:maxd ≤ 2/255（两三角逐线性参照×remap 链）',
+  chk('②亮纹段 readback 闸（★四期:四角 glitter 终值两三角插值域）:maxd ≤ 2/255',
     out.gmaxd <= 2,
     `maxd=${out.gmaxd.toFixed(3)} worst=${JSON.stringify(out.gworst)} 三角覆盖 ${out.gTri1}/${out.gTri2}`);
 }

@@ -109,6 +109,20 @@ function refNoise(x: number, y: number): number {
   return (((ux << 16) >>> 0) + uy) >>> 0;
 }
 
+/** GetShimmerWave 参照（LiquidRenderer.cs:761-763 1:1,零共享） */
+function refWave(x: number, y: number, tVis: number): number {
+  return Math.sin(((x + y / 6) / 10 - tVis / 360) * Math.PI * 2);
+}
+
+/** GetShimmerGlitterOpacity 体部式参照（LiquidRenderer.cs:773-790 非 top 支 1:1,零共享;
+ *  ★四期修正（2026-10-07）:aNoise 槽载本值（四角终值,含钳制）,FS 消费硬件 varying
+ *  插值=原版 SetShimmerVertexColors_Sparkle 顶点色插值域） */
+function refGlitter(x: number, y: number, tVis: number): number {
+  const num = Math.max(0, Math.min(1, (refWave(x, y, tVis) + 0.5) / 1.5)) * 0.35;
+  const num2 = Math.sin(refNoise(x, y) / 10 + tVis / 180);
+  return Math.max(0, Math.min(1, (num * num2) / 0.5));
+}
+
 beforeAll(() => {
   if (!(globalThis as unknown as { Image?: unknown }).Image) {
     (globalThis as unknown as { Image: unknown }).Image = class {
@@ -412,7 +426,8 @@ describe('★C13c 三期 sparkle 亮纹段（body 域 FS glitter 逐像素;top �
           expect(Number.isFinite(c.data[vo + 8])).toBe(true);
           expect(Number.isFinite(c.data[vo + 9])).toBe(true);
           const n = c.data[vo + 10];
-          expect(n).toBeGreaterThanOrEqual(-1); expect(n).toBeLessThanOrEqual(1);
+          // ★四期（2026-10-07）:aNoise 槽=四角 glitter 终值（remap 输出域 [0,1]）
+          expect(n).toBeGreaterThanOrEqual(0); expect(n).toBeLessThanOrEqual(1);
         }
         quads++;
       }
@@ -448,7 +463,8 @@ describe('★C13c 三期 sparkle 亮纹段（body 域 FS glitter 逐像素;top �
     expect(on.n48 + on.n66).toBe(off.n48);   // doSpark 门不变=发射 tile 集不变
   });
 
-  it('aNoise=节点 noise-sin 对照参照;aTile 整角 quad=节点 (x,y)..(x+1,y+1) 精确', () => {
+  it('aNoise=四角 GetShimmerGlitterOpacity 终值对照参照（★四期 2026-10-07 钳制后插值语义）;\
+aTile 整角 quad=节点 (x,y)..(x+1,y+1) 精确', () => {
     c13cArm(true);
     shimmerSparkBandForTest(FAKE_BAND);
     const st = makeShimmerPool();
@@ -471,12 +487,15 @@ describe('★C13c 三期 sparkle 亮纹段（body 域 FS glitter 逐像素;top �
         if (c.data[o + 19] !== x0 + 1 || c.data[o + 64] !== y0 + 1) continue;   // 非整角
         if (!Number.isInteger(x0) || !Number.isInteger(y0)) continue;
         // 角序 TL,TR,BR,BL=节点 (x,y),(x+1,y),(x+1,y+1),(x,y+1)（sparkleShimQuad 写序）
+        // ★四期:值=GetShimmerGlitterOpacity 体部式逐角终值（remap(remap(w)×n,0,0.5,0,1),
+        //  含钳制——原版 SetShimmerVertexColors_Sparkle 置位 quad 角的值;FS 消费硬件
+        //  varying 插值=原版顶点色插值 1:1）
         const nodes: Array<[number, number, number]> = [
           [x0, y0, o + 10], [x0 + 1, y0, o + 21], [x0 + 1, y0 + 1, o + 32], [x0, y0 + 1, o + 65],
         ];
         for (const [nx, ny, off] of nodes) {
-          const ref = Math.sin(refNoise(nx, ny) / 10 + tVis / 180);
-          expect(c.data[off]).toBe(Math.fround(ref));   // f64 sin→f32 环写
+          const ref = refGlitter(nx, ny, tVis);
+          expect(c.data[off]).toBe(Math.fround(ref));   // f64 →f32 环写
         }
         checked++;
       }
@@ -635,7 +654,9 @@ describe('★C13c 结构锁', () => {
     expect(GS).toContain("for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = this.pipe.uni(p, n);");
     expect(GS).toContain("for (const n of ['uCanvas', 'uTex', 'uTVis', 'uSpark']) this.shimUni[n] = gl.getUniformLocation(prog, n);");
     expect(GS).toContain("e.key ?? '').startsWith('liqspark:') ? 1 : 0");
-    expect(GS).toContain('float g = glitter(vTile, vNoise);');
+    // ★四期（2026-10-07 果冻感回归定谳）:g=四角 glitter 终值硬件插值（原版钳制后插值
+    //  语义;旧 FS 内 remap(remap(w)×插值噪声)=插值后钳制=系统性变暗+折痕高频化已废）
+    expect(GS).toContain('float g = vNoise;');
     expect(GS).toContain('outColor = vec4(c.rgb * vCol.rgb * g, c.a * vCol.a * g);');
     // 基体主式不动（rgb===a 预乘恒等域 §3.3）
     expect(GS).toContain('outColor = vec4(c.rgb * field * vCol.a, c.a * vCol.a);');

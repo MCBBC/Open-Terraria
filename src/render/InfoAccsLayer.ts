@@ -61,6 +61,9 @@ export class InfoAccsLayer {
     accCritterGuideCounter: number;
     accThirdEyeNumber: number; accCritterGuideText: string | null; accCritterGuideVid: number | null;
     speedSlice: Float32Array; vx: number; vy: number;
+    /** ★BJ550：isPerformingJump_DownDash（Player.cs:2643）——秒表下坠速双计消费位
+     *  （可选:测试桩缺省 = undefined 恒假 ≙ 原版旗关档） */
+    isDownDashing?: boolean;
   }, enemies: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
     critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
     npcs: Array<{ cx: number; cy: number; dead: boolean; vanillaId: number | null; givenName?: string }>,
@@ -133,7 +136,10 @@ export class InfoAccsLayer {
     // 秒表 speedSlice(Main.cs:46466-46491):窗口长 = min(60, 1+|v|*6);窗口内右移
     // → 本帧速度入 [0] → 再对窗口求和(含本帧)→ 尾部 [n,60) 回填均值
     if (gates.accStopwatch) {
-      const v = speedOf(player.vx, player.vy);
+      // ★BJ550 下砸双计（Main.cs:47882-47884）：isPerformingJump_DownDash →
+      // vector.Y += velocity.Y——秒表 mph 读数把下坠速计两次（快坠仪表反馈面;
+      // 本仓 instantMovementAccumulatedThisFrame≈0 既有近似不变）。
+      const v = speedOf(player.vx, player.vy + (player.isDownDashing ? player.vy : 0));
       const n = Math.min(60, Math.floor(1 + Math.abs(v) * 6));
       const sl = player.speedSlice;
       for (let i = n - 1; i > 0; i--) sl[i] = sl[i - 1];

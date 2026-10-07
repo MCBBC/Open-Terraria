@@ -307,7 +307,8 @@ export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: numb
 /** ★B7 一百零八刀:mod 自然生成行(npcId/zone 群系门/water 水门/mult 权重倍)。
  *  注册=mod 装载期 spawn-chances 数据;消费=Game.trySpawnModEnemy(vanilla 选怪前)。 */
 /** ★一百二十三刀:maxCount=NPC.CountNPCS 同种存活上限闸(vanilla 选怪同形) */
-export interface ModSpawnRule { npcId: number; zone: string | null; water: boolean; mult: number; maxCount?: number; depth?: { min: number; max: number }; }
+/** ★两百四十九刀:requireFlags/blockFlags=world.flags 条件门((mod boss downed 旗/事件门) */
+export interface ModSpawnRule { npcId: number; zone: string | null; water: boolean; mult: number; maxCount?: number; depth?: { min: number; max: number }; requireFlags?: string[]; blockFlags?: string[]; }
 export const MOD_SPAWN_RULES: ModSpawnRule[] = [];
 
 export function spawnTileSolid(st: TileStore, x: number, y: number): boolean {

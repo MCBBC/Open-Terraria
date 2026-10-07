@@ -348,6 +348,33 @@ export function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: n
   }
   st.frameX[i] = fx;
 }
+
+/** ★BJ548（2026-10-07）：TileFrame case 380 种植箱连接帧（WorldGen.cs:86575-86646）1:1。
+ *  frameX = 左/右同型(380)连接档 4 态——双连 18 / 仅左连 36 / 仅右连 0 / 孤立 54
+ *  （原文 num7 三元链逐支对拍：`(L==T&&R==T)?18:(L==T&&R!=T)?36:(L==T||R!=T)?54:0`）；
+ *  frameY=18*style 材质行（PlaceTile case 380 :60718 写入）【不触】。邻居口径：
+ *  active()（flags bit0,含致动）→ sheet（tileStone 归一 1 对 ==380 比较无观测差,省略）
+ *  → 非生成期实心过滤（genSolidSheet=Main.tileSolid 代理;380 ∈ VAN_TILE_SOLID_EXTRA
+ *  =真）。GetTileMergeCulling 豁免备案：380 无 merge 家族（atlas mergeWith:null）,
+ *  CullLeft/Right 仅在吞掉 380 邻格时才影响 ==380 比较=永不为真 → 跳过等价。
+ *  无 KillTile 支（原文本支只重帧,失撑不拆=原版本相）。
+ *  消费：checkDecorSupport 'planterbox'（checkDecorSquareFrame 3×3 扫=SquareTileFrame
+ *  :81462 等价 + onTileChanged 家具链路由）+ replaceTileSingle 尾（ReplaceTile
+ *  :63150 SquareTileFrame 380 支等价）。 */
+export function framePlanterBoxSweep(st: TileStore, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const at = (dx: number): number => {
+    if (!st.inBounds(x + dx, y)) return -1;
+    const k = st.idx(x + dx, y);
+    if (!st.flags[k]) return -1;                       // tile.active()（:86587-86624 含致动位）
+    const sh = SWEEP_SHEET[st.type[k]] ?? -1;
+    if (sh >= 0 && !genSolidSheet(sh)) return -1;      // !Main.tileSolid（:86634-86641）
+    return sh;
+  };
+  const L = at(-1), R = at(1);                         // tile12 左/tile13 右（:86587-86624）
+  st.frameX[i] = L === 380 && R === 380 ? 18 : L === 380 ? 36 : R === 380 ? 0 : 54;
+}
+
 /** Check3x2 平台顶支族（cs:49234） */
 const C3X2_PLATFORM = new Set([285, 286, 298, 299, 310, 339, 538, 532, 544, 533, 555, 556, 582, 619, 629, 361, 362, 363, 364]);
 /** Check3x2 全 case 族（cs:86713 组） */

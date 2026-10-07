@@ -30,8 +30,10 @@
 //     （Player.ts:7297）同构。
 //   · MakeFloorDust 允许集（:24011-24013）不含草块 2——用户「脚下草块区域」跑动
 //     （干/浅/深蜜）行走地板尘零,原版本仓同（BJ457 锚复核成立）。
-//   · 着火 OnFire 粒子=渲染层火/自定义编排（本仓 Player.ts:4879 橙黄 #FF9A3C/#FFD24A
-//     0.8/tick）,非草族尘;熄火面无绿叶形（原版 DelBuff 静默）。
+//   · 着火 OnFire 粒子=PlayerDrawSet.cs 绘制路径尘族火焰（BJ549 重铸后 1:1:
+//     dust 6 尘引擎口,见 tests/bj549-lava-onfire-vfx.test.ts;BJ549 前为本仓
+//     Player.ts:4879 橙黄 #FF9A3C/#FFD24A 0.8/tick 自制方块）,非草族尘;
+//     熄火面无绿叶形（原版 DelBuff 静默）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

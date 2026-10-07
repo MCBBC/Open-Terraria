@@ -98,8 +98,11 @@ function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh:
 }
 /** 落脚豁免:独占绘制路径自带锚点(它们根本不走通用尾段,防御性登记) */
 const FOOT_FLUSH_EXEMPT = new Set<number>([393, 416,   // 416 骑手原点=掠兽 Bottom(B路R3备案)
-  583, 584, 585]);   // 仙灵悬浮族:原版帧中心锚(Main.cs:23400 无 num46/47 条目),
+  583, 584, 585,     // 仙灵悬浮族:原版帧中心锚(Main.cs:23400 无 num46/47 条目),
                      // "内容底贴盒底"对飞行体无意义,+2px 沉降=倒挂观感(2026-09-02 遗留批 D9)
+  548]);             // ★BJ546 永恒水晶:悬浮体,原版独占支 origin=帧中心+(−1,+38)
+                     // (Main.cs:24252-24253)→ 贴图底=盒底−16,"内容底贴盒底"会把
+                     // 水晶压低 16px 坐进座脚(addY 锚移由 DD2_CRYSTAL_STAND 承接)
 function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
@@ -266,6 +269,7 @@ import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
+import { ghostFrameEnd } from './GhostBlur';   // ★ghostblur（2026-10-07;?ghostblur=1 缺省关,Game 帧 tick 尾收口）
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
@@ -963,7 +967,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, bossHeadSpriteEffects, bossHeadHoverHit, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
-import { ICE_SLIP_IDS, FROZEN_SLIME_ID } from '../entities/Player';
+import { ICE_SLIP_IDS, FROZEN_SLIME_ID, downDashGhostStamps } from '../entities/Player';
 import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, MOUNT_PLAYER_SIZE, fairyQueenHslToRgb } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
@@ -4393,6 +4397,16 @@ export class Renderer {
   /** ★C10e 诊断面:全帧合成帧累计（F5/探针——正常游玩恒 0,死亡/重力/滤镜帧出现） */
   _c10eCompositeStats = 0;
 
+  /** ★ghostblur 帧尾收口（2026-10-07,GhostBlur.ts 头注=挂接点论证）：Game 帧 tick
+   *  在 renderer.render(...) 完整返回【之后】调用——此刻本帧对 glCanvas 的一切 GL
+   *  写入（bg/lantern/ambgl 桥、世界 compose present、opresent 合并、回退窗
+   *  reorder、滤镜链末 present、degrade+restack 补偿）已全部落定,且早退支
+   *  （全屏地图 9.5 return 等）亦被覆盖=全路径唯一必经收口点。旗关/非 c10e 帧/
+   *  管线不可用=完全旁路（GhostBlur 内部 fail-closed+状态复位）。 */
+  ghostFrameEnd(cam: Camera): void {
+    ghostFrameEnd(this.swPipe, cam.x, cam.y, Renderer.ghostBlur && this._c10eFrame);
+  }
+
   /** ★C10e 滤镜链输入源（2026-10-01,设计文档 §四 F-sfx）：滤镜链采「整个画面」
    *  ——c10e 下画面分居 sky2D/glCanvas/HUD 三画布，链头一次性折叠到 scratch
    *  （sky2D→scratch 2D、glCanvas→scratch【本帧唯一跨上下文拷贝,登记面】、
@@ -6330,7 +6344,14 @@ export class Renderer {
     const prePlayerDraws: Array<() => void> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
-        if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
+        if (this.isBehindTilesEnemy(e)) {
+          this.drawHealthBar(e, world.isExpert);
+          // ★BJ546：548 入 behindNonSolidTiles 层后在此补波间倒计时（原版倒计时
+          //  在逐 NPC 覆盖段 Main.cs:46866 与绘制层无关——behindTiles 早退若不补
+          //  调用会连带砍掉 BJ454 倒计时面）
+          this.drawDd2CrystalCountdown(e, world);
+          continue;
+        }
         // NPC.hide（Main.cs:22172 常规绘制跳过;月总水蛭块 401=纯紫尘拖尾体,终审补）
         if (e.vanilla?.hide) { this.drawHealthBar(e, world.isExpert); continue; }
         // ★四柱掉帧定谳批（2026-09-25）:原版视域剔除（Main.cs:22653 门在
@@ -6382,41 +6403,14 @@ export class Renderer {
       const eb = this.emoteSheet();
       if (eb) drawEmotes(this.ctx, eb);
     }
-    // ★BJ512：集火/鞭 tag 目标实体标记——原版接口层 1_2,紧随 1_1 EmoteBubbles
-    //  （Main.cs:47250-47284 DrawInterface_1_2_DrawEntityMarkersInWorld 1:1：
-    //  帧矩形/帧序/色见 whipMarkerTintedSheet 注;绘制=世界坐标 NPC.Center、
-    //  原点帧中心（:47274 rectangle.Size()/2）、PointClamp、ZoomMatrix=本段
-    //  世界变换等价）。数据面 = minionTargetId 单槽:写源 = 鞭命中
-    //  （Projectile.cs:14321-14323 `aiStyle==165 → MinionAttackTargetNPC =
-    //  victimIndex`）+ 右键集火（MinionNPCTargetAim :57587-57605）;失效清除
-    //  :57682-57685 每 tick。门 = 本地玩家存活 ∧ 手持召唤武器（HeldItem.summon:
-    //  DefaultToWhip Item.cs:47822 置 summon=true——鞭族含内;DefaultToMinion/
-    //  Sentry 族同 flag——本仓 combatWeapon kind summon∪whip 等价面）。
-    //  目标 active 门(:47256 nPC.active)= !dead;屏盒相交门(:47257)=纯性能门
-    //  不建模;gravDir 翻转由 cam.flipY 整幅镜像承载。
-    if (!player.dead && player.minionTargetId >= 0) {
-      const heldMk = player.inv.heldItem();
-      const defMk = heldMk ? ITEM_DEFS[heldMk.id] : undefined;
-      const cwMk = defMk ? combatWeapon(defMk) : null;
-      if (cwMk && (cwMk.kind === 'summon' || cwMk.kind === 'whip')) {
-        const tgtMk = entities.find((x) => x.id === player.minionTargetId && !x.dead
-          && (x instanceof Enemy || x instanceof TownNPC));
-        const sheetMk = tgtMk ? this.atlas?.ensureVImage('vanilla/Extra_199.png') : null;
-        if (tgtMk && sheetMk) {
-          const tintedMk = whipMarkerTintedSheet(sheetMk);
-          if (tintedMk) {
-            const fr = whipMarkerFrameRect(whipMarkerFrameIndex(globalTimeWrappedHourly()));
-            const ctx = this.ctx;
-            ctx.save();
-            ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
-            ctx.globalAlpha = WHIP_MARKER_ALPHA;  // Color.White*0.7f → A/=2
-            ctx.drawImage(tintedMk, fr.sx, fr.sy, fr.sw, fr.sh,
-              tgtMk.cx - fr.sw / 2, tgtMk.cy - fr.sh / 2, fr.sw, fr.sh);
-            ctx.restore();
-          }
-        }
-      }
-    }
+    // ★BJ512→BJ553（2026-10-07）：鞭 tag/召唤集火目标标记已挪至光照合成后全亮域
+    //  （7f flushTrailShade 之后、7a-pre 标尺之前——搜「★BJ553」）。定谳:本位
+    //  （实体层后、compositeLight :6612 前）标记吃全屏光照乘——夜晚/洞穴光≈0.1-0.3
+    //  被乘黑≈不可见（探针 _bj553l 昼夜对拍:正午 maxΔ=163/α=0.348 ↔ 午夜
+    //  maxΔ=14/α=0.023 ↔ 复照 maxΔ=163=确定性昼夜摆动,用户复报「tagDamage/集火
+    //  生效但视觉标记不显示」即此）。原版 DrawInterface_1_2_DrawEntityMarkersInWorld
+    //  （Main.cs:47250-47284）=接口层,世界渲染+光照之后无光直绘——数据面/写源/
+    //  失效清除锚注随绘制位迁移。
     // ---- 投射物 0 层族冲刷（★2026-09-02 分层修复：原版 DrawProjectiles
     //      Main.cs:63199 在 DrawPlayers_AfterProjectiles(:63204)【之前】——弹在
     //      玩家/武器【下层】,出生瞬间武器压住弹体,飞离后自然露出（1405/1456/
@@ -6778,6 +6772,56 @@ export class Renderer {
     //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
     //     MissileProj 实体段收集）
     this.flushTrailShade(cam, z, viewW, viewH);
+
+    // ★BJ553（2026-10-07）：鞭 tag/召唤集火目标标记（★BJ512 落,本刀自世界层
+    //  实体段后挪出至光照合成后=原版接口层语义。定谳:旧位在 compositeLight
+    //  （:6612）之前=标记吃全屏光照乘,夜晚/洞穴光≈0.1-0.3 被乘黑≈不可见
+    //  （探针 scripts/_bj553-l 昼夜对拍:正午 maxΔ=163/α=0.348 ↔ 午夜 maxΔ=14/
+    //  α=0.023 ↔ 复照 maxΔ=163=确定性昼夜摆动;用户复报「tagDamage/集火生效
+    //  但视觉标记不显示」即此）。原版 DrawInterface_1_2_DrawEntityMarkersInWorld
+    //  （Main.cs:47250-47284）=SetupDrawInterfaceLayers 接口层（:45499 表内,
+    //  1_1 EmoteBubbles :45496 之后）,在世界渲染+光照之后无光直绘——与 BJ509
+    //  四塔残影/BJ422 标尺同判例域。数据面（BJ512 锚沿用）:贴图 Extra_199
+    //  16×72 竖排 4 帧;帧矩形 Utils.Frame(1,4,0,frameY,0,-2)（Utils.cs:1389
+    //  =Frame(horizontalFrames,verticalFrames,frameX,frameY,dx,dy) 参数序亲读
+    //  钉死→16×18 去尾 2px）;帧序 (int)(GTW×10)%4（:47268）;色 White×0.7 后
+    //  A/=2（:47272-47273）=(178,178,178,89)。写源=鞭命中（Projectile.cs
+    //  :14321-14323 aiStyle==165→MinionAttackTargetNPC=victim,active 门）+
+    //  右键集火（:57587-57605）;失效清除 :57682-57685（!CanBeChasedBy ∨
+    //  Hitbox.Distance>3000）。门=玩家存活 ∧ HeldItem.summon（Item.cs:47822
+    //  DefaultToWhip 置 summon=true,鞭族含内;DefaultToMinion/Sentry 同 flag
+    //  ——本仓 combatWeapon kind summon∪whip 等价面,sentry⊂summon）。
+    //  gravDir 翻转（:47259-47261 vector.Y=screenHeight−vector.Y）=flipY 时
+    //  屏 Y 显式镜像（本域在呈现面镜像点之后,整幅镜像不覆盖,须自镜像——
+    //  flushWhipFullbright 无此行=其自身账,不随）。层内序=接口层 1_2<4 标尺
+    //  （本位在 7a-pre 之前=同序）。绘制=屏空间 worldToScreen(NPC.Center)
+    //  中心锚（:47274 rectangle.Size()/2 原点等价）,PointClamp（平滑关）。
+    if (!player.dead && player.minionTargetId >= 0) {
+      const heldMk = player.inv.heldItem();
+      const defMk = heldMk ? ITEM_DEFS[heldMk.id] : undefined;
+      const cwMk = defMk ? combatWeapon(defMk) : null;
+      if (cwMk && (cwMk.kind === 'summon' || cwMk.kind === 'whip')) {
+        const tgtMk = entities.find((x) => x.id === player.minionTargetId && !x.dead
+          && (x instanceof Enemy || x instanceof TownNPC));
+        const sheetMk = tgtMk ? this.atlas?.ensureVImage('vanilla/Extra_199.png') : null;
+        if (tgtMk && sheetMk) {
+          const tintedMk = whipMarkerTintedSheet(sheetMk);
+          if (tintedMk) {
+            const fr = whipMarkerFrameRect(whipMarkerFrameIndex(globalTimeWrappedHourly()));
+            const [smx, smy0] = cam.worldToScreen(tgtMk.cx, tgtMk.cy);
+            const smy = cam.flipY ? viewH - smy0 : smy0;   // :47259-47261 1:1
+            const zw = fr.sw * z, zh = fr.sh * z;
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（7a-pre 同域）
+            ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
+            ctx.globalAlpha = WHIP_MARKER_ALPHA;  // Color.White*0.7f → A/=2
+            ctx.drawImage(tintedMk, fr.sx, fr.sy, fr.sw, fr.sh,
+              smx - zw / 2, smy - zh / 2, zw, zh);
+            ctx.restore();
+          }
+        }
+      }
+    }
 
     // 7a-pre. 建筑配件标尺（★BJ422 2026-10-01：从世界层 4.56 挪出）：原版
     //     "Vanilla: Laser Ruler"/"Vanilla: Ruler" 接口层（SetupDrawInterfaceLayers
@@ -7625,6 +7669,17 @@ export class Renderer {
    *  sfxPipeSetForTest 同款先例）。 */
   static c10eK1SetForTest(v: boolean): void { this._c10eK1 = v; }
   static sfxPipeSetForTest(v: boolean): void { this._sfxPipe = v; }
+  /** ★ghostblur（2026-10-07,高速移动运动顺滑设计增强刀）——全屏 ghost/motion-blur
+   *  accumulation pass 总旗:?ghostblur=1 显式开,缺省关（灰度期;旗关=完全旁路
+   *  零改动,fail-closed 家族——GhostBlur.ts 头注=挂接点论证/数据流/字节语义）。
+   *  运行时翻面=页内 A/B 探针面（c10eK1SetForTest 同款先例）。 */
+  private static _ghostBlur = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('ghostblur') === '1';
+    } catch { return false; }
+  })();
+  static get ghostBlur() { return this._ghostBlur; }
+  static ghostBlurSetForTest(v: boolean): void { this._ghostBlur = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -9636,7 +9691,8 @@ export class Renderer {
    *  drawBakedMouseText anchor:'middle' 同位），文本 = 秒数（整除截断，
    *  Renderer.dd2CrystalCountdownSeconds 单源）。宿主面 = 实体循环 Enemy 支
    *  drawHealthBar 后（原版同在逐 NPC 覆盖段,!" 图标 Main.cs:46855-46865 的下一段）；
-   *  548 ∉ behindTiles/hide 族 → 单点调用语义完备（两 continue 早退路径不可达）。 */
+   *  ★BJ546：548 已入 behindTiles 通道（isBehindTilesEnemy 专支）→ 主循环两 continue
+   *  早退路径都会经本调用（behindTiles 分支内补调,见 6333 一带）。 */
   private drawDd2CrystalCountdown(e: Enemy, world: World | undefined): void {
     if (!this.ctx || e.vanillaId !== 548 || e.dead) return;
     if (e.dontTakeDamageFromHostiles) return;
@@ -10403,6 +10459,14 @@ export class Renderer {
   private isBehindTilesEnemy(e: Enemy): boolean {
     const id = e.vanillaId;
     if (id === 113 || id === 114 || id === 115) return false;
+    // ★BJ546 永恒水晶 548：原版层序不是 behindTiles 字段而是 hide=true
+    //  （NPC.cs:16038 SetDefaults）+ CacheNPCDraws 专缓（Main.cs:38802-38804
+    //  DrawCacheNPCsBehindNonSolidTiles）→ Main.cs:57817 在 DrawTiles(solidLayer:
+    //  false)（:57823 非实心 tile）【之前】绘制、常规 NPC pass 跳过（:22539 !hide）
+    //  ——水晶被永恒水晶座 466（非实心,Style5x4）压在下层=「嵌入座中」。本仓
+    //  tile 单一烘焙层 → 等价画在 tile 层之前（2b' 段,与钻地族同通道）。
+    //  座与水晶无实心 tile 重叠,"先于全部 tile"≡"先于非实心 tile"（偏差登记）。
+    if (id === 548) return true;
     return !!e.vanilla?.behindTiles;
   }
 
@@ -10607,6 +10671,7 @@ export class Renderer {
           : idA === 692 ? (e.wet ? 10 : 6)
           : (idA === 626 || idA === 627) ? (e.wet ? -2 : 2)
           : idA === 688 ? 10
+          : idA === 548 ? Renderer.DD2_CRYSTAL_STAND.bodyAddY   // ★BJ546 独占支锚（非 num46/47）
           : 0;
         if (idA === 477) addY = 22;                       // num47= 覆写（非 +=,:23278）
         else if (idA === 262) addY += 26;                 // switch 尾 += 档
@@ -11040,12 +11105,61 @@ export class Renderer {
         //  复绘 s·t+bg·(1−s·t)=原版逐字）;出生 ramp 期 ga=α/255 随 AI 逐拍上升
         //  （原版本体即 0→0.863 淡入）。层序=7d' 槽在玩家之上（BJ504/270 既有偏差
         //  惯例同槽,登记）。罩/vel4 加算层仍走 flare 收集（7d''' 消费,不变）。
+        // ★BJ547 永恒水晶内光环（Main.cs:24266-24282 → :24283 本体）：原版内环
+        //  4 份加算拷贝画在本体【之前】,本体不透明覆盖其中心——挂点必须在下方
+        //  本体 dispatch 之前（BJ546 旧挂点 drawNpcGlow=本体后槽,叠本体之上,
+        //  与光柱核心罩并凶打白本体;摘出归位见 draw548CrystalInnerHalo 组头注）。
+        if (e.vanillaId === 548) this.draw548CrystalInnerHalo(e, r, -r.sw / 2, bodyY, scale, gMirror);
         if (e.vanillaId === 516) {
           this.npcWhiteLiftQueue.push({
             vid: 516, tex: 'vanilla/NPC_516.png',
             sy: r.sy, sw: r.sw, sh: r.sh,
             cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
             ga: Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
+          });
+        } else if (e.vanillaId === 289) {
+          // ★BJ551（2026-10-07）巨型诅咒颅 289 GetAlpha 恒色支（NPC.cs:94755-94758
+          //  `if (type == 289) return new Color(250, 250, 250, 50);`——骷髅头怪分支,
+          //  与 288 地牢幽魂 :94751-94754 成对;用户实报"诅咒骷髅怪很暗"=BJ529 弹 270
+          //  同域第三刀）。恒色族:RGB=250 恒定【不读光照色】+A=50 半透——XNA 预乘
+          //  AlphaBlend 终像素=tex.rgb·(250/255)·tex.a·(50/255)+bg·(1−tex.a·50/255)。
+          //  本仓通用直绘=实体层 compositeLight 乘光+ga=1 实心——暗处 ≈×0.325(BJ529
+          //  实测 k)又暗又实=双病同根。修=本体不进实体层（capture→516/402 判例同构）
+          //  入 npcWhiteLiftQueue,7d' 光照合成后 tintedTex(rgb 250 保形)+ga=50/255
+          //  source-over 复绘:img.rgb·img.a·ga = tex.rgb·(250/255)·tex.a·(50/255)
+          //  ≡原版逐字节。特支不读 alpha 字段→出生 ramp 期亦恒 50/255（逐字）。
+          this.npcWhiteLiftQueue.push({
+            vid: 289, tex: 'vanilla/NPC_289.png',
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            ga: 50 / 255, tint: [250, 250, 250],
+          });
+        } else if (e.vanillaId === 694 && (e.ai3 ?? 0) === 4) {
+          // ★BJ551 水书宝箱怪 694 显形动画态（GetAlpha :94559-94568 ai[3]==4 支
+          //  `Lerp(newColor, White, clamp(frame.Y/40/17))`）：白化 ramp 含加性白项
+          //  （lerp 族）→ 双绘判例（BJ504 等价式 a·s+(1−a)·(s·L) ≡ s·lerp(L,White,a)）:
+          //  本体照画（乘光面;694 无 color/370 面=纯直绘,ctx.globalAlpha=出生 ramp
+          //  档已由上方 11076 位设定）+α=f 复绘。f = clamp(frame.Y/40/17)：694 帧高
+          //  40(46×1200/30 帧)→frame.Y=frameIdx·40 → f=clamp(frameIdx/17)。
+          //  特支不读 alpha 字段→复绘 ga 不乘 spawnAlpha（逐字;极端"出生即显形"
+          //  并发窗的本体面 spawnAlpha 差=本仓自造 ramp 近似域,登记）。
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+          this.npcWhiteLiftQueue.push({
+            vid: 694, tex: 'vanilla/NPC_694.png',
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            ga: Math.max(0, Math.min(1, (frameIdx * r.sh) / 40 / 17)),
+          });
+        } else if (e.vanillaId === 694) {
+          // ★BJ551 694 显形完成态（ai[3]∈{0,1,2}——:94569-94570 早退 `return
+          //  Color.White` 恒全白）：RGB 恒 255 不读光照=A=255 全白覆绘=402 档极限
+          //  （a=1 恒等式）。伪装书架态（ai[3]==3 → newColor 常规乘光）不走本支,
+          //  落下方通用直绘同相。capture→复绘 ga=1（不乘 spawnAlpha,特支逐字）。
+          this.npcWhiteLiftQueue.push({
+            vid: 694, tex: 'vanilla/NPC_694.png',
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            ga: 1,
           });
         } else if (!xnaColor && !bodyTint370) {
           if (boost370) {
@@ -11190,6 +11304,9 @@ export class Renderer {
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
         // ?. = drawEnemy 测试假体可缺省此方法,生产类恒有）
         if (e.vanillaId === 546) this.draw546GlowCore?.(e, r, -r.sw / 2, bodyY, scale, e.facing < 0);
+        // ★BJ546 永恒水晶本体后叠层（胜利罩/外光环/环/光柱——原版本体链 :24284-24366
+        //  的后半段;★BJ547 内光环已归位本体 dispatch 之前的 draw548CrystalInnerHalo）
+        if (e.vanillaId === 548) this.draw548CrystalOverlays(e, r, -r.sw / 2, bodyY, scale, gMirror);
         // Mech 族 oldPos 拖尾（Main.cs:25486-25498）→ ★BJ237 迁至本体前槽
         // drawNpcTrailGhosts（原版 :25486 在本体链之前=本体之下；原内联块在本体
         // 变换内用绝对历史坐标 translate=双重偏移屏外不可见，BJ209 迁出、BJ237
@@ -11454,7 +11571,9 @@ export class Renderer {
     551: { tex: 'vanilla/Glow_226.png', mode: 'frame' },  // Betsy（:23099 Lerp(color,White,0.6) A=66）
     564: { tex: 'vanilla/Glow_225.png', mode: 'frame' },  // 暗黑魔法师 T1（:23480 white×Opacity A/2）
     565: { tex: 'vanilla/Glow_225.png', mode: 'frame' },  // 暗黑魔法师 T2
-    548: { tex: 'vanilla/Glow_239.png', mode: 'frame' },  // 永恒水晶（:23594 呼吸脉冲底层）
+    // ★BJ547：548 表项退役——内光环 4 拷贝归位本体【前】槽 draw548CrystalInnerHalo
+    //   （原版 :24266-24282 内环 → :24283 本体覆盖;本体后槽加算叠印=过曝并凶）。
+    //   环/光柱/外光环/胜利罩仍在 draw548CrystalOverlays（本体后槽,原版本体链序）。
     402: { tex: 'vanilla/Glow_135.png', mode: 'frame' },  // 银河织带头（:23886 白 A=255-num291）
     422: { tex: 'vanilla/Glow_149.png', mode: 'vel4' },   // 星旋塔 Vortex（:23766;★BJ510 勘误旧注"太阳塔"）
     493: { tex: 'vanilla/Glow_132.png', mode: 'vel4' },   // 星尘塔 Stardust（:23746）
@@ -11779,6 +11898,72 @@ export class Renderer {
     return { opacity: o, num: Math.max(0, Math.min(1, num)) };
   }
 
+  /** ★BJ546 永恒水晶 548 绘制面单源常数（Main.cs:24247-24390 独占支 1:1 逆推）：
+   *  - bodyAddY：原版独占支 origin=帧中心+(−1,+38)（:24252-24253,贴图 58×44）→
+   *    贴图中心 = Bottom+(1,−38) = 盒中心+(1,−18)；本仓帧中心钉盒心 → addY=−18
+   *    （X 的 1px 右偏登记不接:环/光柱锚=Bottom.X 无 +1,本体近对称 1px 不可辨）。
+   *    贴图底 = 盒底−16（悬浮晶坐在座 466 顶碗位,座 tile 后绘压住下沿=嵌入观感）。
+   *  - ringDyWorld/beamDyWorld：环 Glow_239 @Bottom+(0,−40)（:24347）、光柱
+   *    Extra_89 @Bottom+(0,−46)（:24347+24364）。
+   *  - ringTexelScale：环原生 96×96 全帧 ×0.75（:24350）=72px（曾误压进本体
+   *    58×44 帧矩形=「光效弱」主诉面之一）。 */
+  static readonly DD2_CRYSTAL_STAND = {
+    npcId: 548,
+    standTileId: 466,
+    bodyAddY: -18,
+    ringDyWorld: -40,
+    beamDyWorld: -46,
+    ringTexelScale: 0.75,
+  };
+
+  /** ★BJ546 548 光效波形单源（Main.cs:24326-24342 + :24272/:24304 1:1，纯函数）：
+   *  n128=GTW%3/3、n129/n131=两相三角波、n122a/b=本体光环呼吸
+   *  （0.625+sin(GTW·2π·0.75[+π])·0.125）。波间/波中两态同式——唯一态门是
+   *  alpha<255（:24325,败北渐隐期光效随 α 熄灭）。 */
+  static dd2CrystalGlowWaves(gtw: number): {
+    n128: number; n129: number; n130: number; n131: number;
+    n122a: number; n122b: number;
+  } {
+    const n128 = gtw % 3 / 3;
+    let n129 = n128;
+    if (n129 > 0.5) n129 = 1 - n128;
+    if (n129 < 0) n129 = 0;
+    const n130 = (n128 + 0.5) % 1;
+    let n131 = n130;
+    if (n131 > 0.5) n131 = 1 - n130;
+    if (n131 < 0) n131 = 0;
+    const n122a = 0.625 + Math.sin(gtw * Math.PI * 2 * 0.75 + Math.PI) * 0.125;
+    const n122b = 0.625 + Math.sin(gtw * Math.PI * 2 * 0.75) * 0.125;
+    return { n128, n129, n130, n131, n122a, n122b };
+  }
+
+  /** ★BJ546 环 Glow_239 三笔规格（:24350/:24352/:24354 1:1，纯函数）：
+   *  底笔 ×0.75 恒 α0.6（色 (140,50,255,0)×0.6 不经 GetAlpha=不吃光照,登记：
+   *  本仓夹层全屏光照乘会以水晶自发光≈(1,0.5,1) 调制——z 序优先保「环/柱在座后」）；
+   *  两笔反相扩张脉冲 scale ×0.75×(1+n128/n130·0.75)、α ×0.6×n129/n131。 */
+  static dd2CrystalRingSpec(w: {
+    n128: number; n129: number; n130: number; n131: number;
+    n122a: number; n122b: number;
+  }): Array<{ scale: number; alpha: number }> {
+    return [
+      { scale: 0.75, alpha: 0.6 },
+      { scale: 0.75 * (1 + w.n128 * 0.75), alpha: 0.6 * w.n129 },
+      { scale: 0.75 * (1 + w.n130 * 0.75), alpha: 0.6 * w.n131 },
+    ];
+  }
+
+  /** ★BJ546 环/光柱可见门（:24325 `if (rCurrentNPC.alpha < 255)`——败北演出
+   *  alpha+=50/tick（NPC.cs:42999）满 255 熄灭;常态/波间/波中 α=0 恒亮。纯函数。 */
+  static dd2CrystalGlowVisible(alphaRaw: number): boolean {
+    return alphaRaw < 255;
+  }
+
+  /** ★BJ546 胜利白罩 α（:24285 `Math.Min(1f, ai[0]/120f)`——ai1==2 胜利演出
+   *  前 120t 白色加算爬满。纯函数。 */
+  static dd2CrystalWinOverlayAlpha(ai0: number): number {
+    return Math.min(1, ai0 / 120);
+  }
+
   /** ★BJ454 永恒水晶 548 光柱 Y 缩放（Main.cs:24359-24366 算式 1:1，纯函数=测试算式断言面）：
    *  num128 = GTW%3/3、num130 = (num128+0.5)%1；
    *  scale6 = (0.75, 1+(1+num130×0.75)) × 1.5 → sy = (2+num130×0.75)×1.5；
@@ -11843,6 +12028,133 @@ export class Renderer {
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 1;
     ctx.drawImage(tex.img, r.sx, r.sy, r.sw, r.sh, bx, by, r.sw, r.sh);
+    ctx.restore();
+  }
+
+  /** ★BJ547 永恒水晶内光环（Main.cs:24266-24282）：本体贴图 4 份拷贝绕锚旋转,
+   *  半径 = 4×n122a 世界 px（n122a ∈ [0.5,0.75] → 2-3px 呼吸晃影）,α=(1−n122a)×
+   *  Opacity,色 = GetAlpha(npcColor)(A=0) 纯加算 → 'lighter'（光照乘由
+   *  compositeLight 事后承担,XNA α=0 纯加法 idiom 同族判例）。
+   *  ★层序定谳：原版内环画在本体【之前】（:24266-24282 → :24283 本体不透明
+   *  AlphaBlend 覆盖其中心）——内环只在轮廓外 ±3px 露边。BJ546 曾挂 drawNpcGlow
+   *  （本体后槽）= 4 份加算拷贝叠在本体之上 ≈ +1.5×texel（摘内环探针不变=被
+   *  光柱核心罩饱和掩蔽;修 BJ547 核心笔后仍会洗白本体）→ 归位本体前槽
+   *  （drawEnemy 本体 dispatch 之前调用,同变换同锚 bx/by=bodyY）。 */
+  private draw548CrystalInnerHalo(
+    e: Enemy,
+    r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    bx: number, by: number, scale: number, mirror: boolean,
+  ): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const alphaRaw = Math.min(255, Math.max(e.spawnAlpha, 0));
+    const opacity = 1 - alphaRaw / 255;
+    const waves = Renderer.dd2CrystalGlowWaves(globalTimeWrappedHourly());
+    const rad = 4 * waves.n122a / scale;
+    const mxs = mirror ? -1 : 1;   // 镜像系 X 反折（4 份角度集镜像自对称,保式齐整）
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const ang = i / 4 * Math.PI * 2;
+      const dx = Math.cos(ang) * rad * mxs;
+      const dy = Math.sin(ang) * rad;
+      ctx.globalAlpha = Math.max(0, Math.min(1, (1 - waves.n122a) * opacity));
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, bx + dx, by + dy, r.sw, r.sh);
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ546 永恒水晶 548 本体后叠层（Main.cs:24283 本体链序的后半段 1:1）：
+   *  胜利白罩（:24284-24289）→ 外光环 4 份（:24302-24313,×0.3）→ 环 Glow_239
+   *  三笔（:24344-24354,原生 96×96 全帧 ×0.75 系,锚 Bottom+(0,−40)）→ 光柱
+   *  Extra_89 两笔（:24355-24366,锚 Bottom+(0,−46)）;环+柱共 α<255 门（:24325,
+   *  败北渐隐熄灭）。调用点 = drawEnemy 本体变换内（546 亮核同槽）,lighter 自理。
+   *  色 28 = (140,50,255,0)×0.6 不经 GetAlpha = 原版不吃光照——本仓夹层全屏
+   *  光照乘会以水晶自发光（AddLight 1.3/0.5/1.5,bossAI_dd2 lightRGB）调制,
+   *  绿通道 ≈×0.5 偏紫登记;z 序（环/柱在座 466 后）优先于色面保真。
+   *  第二笔白核旧 BJ454 画成纯白——本刀纠正为 Lerp(color28,White,.5)=(198,153,255)。 */
+  private draw548CrystalOverlays(
+    e: Enemy,
+    r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    bx: number, by: number, scale: number, mirror: boolean,
+  ): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const alphaRaw = Math.min(255, Math.max(e.spawnAlpha, 0));
+    const opacity = 1 - alphaRaw / 255;
+    const waves = Renderer.dd2CrystalGlowWaves(globalTimeWrappedHourly());
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // 胜利白罩（ai1==2 门,:24284）——White×min(1,ai0/120) 加算爬满
+    if (e.ai1 === 2) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, Renderer.dd2CrystalWinOverlayAlpha(e.ai0)));
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, bx, by, r.sw, r.sh);
+    }
+    // 外光环 4 份（:24302-24313）：同内光环,色 ×0.3、相位无 π（n122b）
+    const radB = 4 * waves.n122b / scale;
+    const mxs = mirror ? -1 : 1;
+    for (let i = 0; i < 4; i++) {
+      const ang = i / 4 * Math.PI * 2;
+      const dx = Math.cos(ang) * radB * mxs;
+      const dy = Math.sin(ang) * radB;
+      ctx.globalAlpha = Math.max(0, Math.min(1, 0.3 * (1 - waves.n122b) * opacity));
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, bx + dx, by + dy, r.sw, r.sh);
+    }
+    if (Renderer.dd2CrystalGlowVisible(alphaRaw)) {
+      // 环 Glow_239 三笔（:24344-24354）：锚 Bottom+(0,−40) → 局部 (0, h/2−40)/scale
+      const ring = this.atlas?.ensureVImage('vanilla/Glow_239.png');
+      if (ring) {
+        const purple = this.tintedSprite('ring548',
+          { img: ring, sx: 0, sy: 0, sw: ring.width, sh: ring.height }, [140, 50, 255]);
+        if (purple) {
+          const rcy = (e.h / (2 * scale)) + Renderer.DD2_CRYSTAL_STAND.ringDyWorld / scale;
+          for (const c of Renderer.dd2CrystalRingSpec(waves)) {
+            const w = ring.width * c.scale / scale, h = ring.height * c.scale / scale;
+            ctx.globalAlpha = Math.max(0, Math.min(1, c.alpha));
+            ctx.drawImage(purple.c, purple.x, purple.y, purple.w, purple.h, -w / 2, rcy - h / 2, w, h);
+          }
+        }
+      }
+      // 光柱 Extra_89 两笔（:24355-24366,BJ454 算式迁入零变+白核色纠正）：
+      // 锚 Bottom+(0,−46) → 局部 (0, h/2−46)/scale;旋转 rotation+π/2（548 rotation
+      // 恒 0;镜像系旋转差 π 对径向对称贴图无观察差,BJ454 简化备案沿袭）
+      const beam = this.atlas?.ensureVImage('vanilla/Extra_89.png');
+      if (beam) {
+        const bcy = (e.h / (2 * scale)) + Renderer.DD2_CRYSTAL_STAND.beamDyWorld / scale;
+        const sx = 0.75 * 1.5;                        // scale6.X（:24358）
+        const sy = Renderer.dd2CrystalBeamScaleY(globalTimeWrappedHourly(), e.dontTakeDamageFromHostiles);
+        const wA = beam.width * sx / scale, hA = beam.height * sy / scale;
+        ctx.save();
+        ctx.translate(0, bcy);
+        ctx.rotate((e.visAngle || 0) + Math.PI / 2);  // :24365 rotation+π/2
+        const purple = this.tintedSprite(`beam548|${Math.round(waves.n131 * 32)}`,
+          { img: beam, sx: 0, sy: 0, sw: beam.width, sh: beam.height }, [140, 50, 255]);
+        ctx.globalAlpha = Math.max(0, Math.min(1, 0.6 * waves.n131));
+        if (purple) ctx.drawImage(purple.c, purple.x, purple.y, purple.w, purple.h,
+          -wA / 2, -hA / 2, wA, hA);
+        const core = this.tintedSprite('beam548core',
+          { img: beam, sx: 0, sy: 0, sw: beam.width, sh: beam.height }, [198, 153, 255]);
+        // ★BJ547：核心笔色 = Lerp(color28,White,.5) —— XNA Color.Lerp 四通道【含 A】:
+        //   A = 0→255 半程 = 128（非 0!）。AlphaBlend(One,InvSrcAlpha) 语义 =
+        //   半削底 + 半加算（out = src.rgb + dst×(1−src.a),src.a = texel.a×128/255
+        //   逐像素随束图 α 加权）——本体在束下被衰减 ~50% 再添紫色辉光 = 紫细节
+        //   保留（原版相）。BJ546 误作 A=0 纯加算 α=1 → 72×72 径向辉光盘
+        //   （Extra_89 中心 α≈0.545）全额加算罩在 58×44 本体上 → 全通道饱和
+        //   全白（探针定谳:全层 blown 73.7% / 摘叠层 0% / mean RGB 231→122）。
+        //   实现两步式（draw546GlowCore 同构）：destination-out(束图,ga=128/255)
+        //   削底 → lighter 加算（tinted 预乘 RGB,α=1 全贡献）。
+        if (core) {
+          const cw = beam.width * 1.5 / scale, ch = beam.height * 1.5 / scale;
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = 128 / 255;
+          ctx.drawImage(core.c, core.x, core.y, core.w, core.h, -cw / 2, -ch / 2, cw, ch);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1;
+          ctx.drawImage(core.c, core.x, core.y, core.w, core.h, -cw / 2, -ch / 2, cw, ch);
+        }
+        ctx.restore();
+      }
+    }
     ctx.restore();
   }
 
@@ -11953,17 +12265,15 @@ export class Renderer {
           if (tc) ctx.drawImage(tc.c, tc.x, tc.y, tc.w, tc.h, ox + dx, oy + dy, r.sw, r.sh);
         }
       }
+    // ★BJ547：'crystal548' 模式退役——内光环归位本体【前】槽
+    //   draw548CrystalInnerHalo（层序定谳见其组头注,摘 drawNpcGlow 旧支）。
     } else if (g.mode === 'frame') {
       let alpha = 0.8;
-      let flashPulse = 1;
       if (e.vanillaId === 551) { alpha = (66 / 255) * 1.3; }              // :23099 A=66 ×(0.7+0.3*lerp)
       else if (e.vanillaId === 564 || e.vanillaId === 565) { alpha = 0.5 * opacity; } // :23484 white.A/2×Opacity
-      else if (e.vanillaId === 548) {
-        // :23590-23596 num63/65 三秒呼吸三角波 ×0.6 紫底（(140,50,255)）
-        const t3 = globalTimeWrappedHourly() % 3 / 3;   // ★BJ330 GTW 单源（num63/65 三秒呼吸=GTW%3）
-        flashPulse = t3 > 0.5 ? 1 - t3 : t3;
-        alpha = 0.6 * Math.max(0, flashPulse);
-      } else if (e.vanillaId === 399) { alpha = (127 - alphaRaw / 2) / 255; }  // :24568 Color(127-α/2,…)
+      // ★BJ546：548 旧「紫底呼吸压本体帧矩形」支退役（环=独立 96×96 锚 Bottom−40,
+      //   全链迁 draw548CrystalOverlays;★BJ547 内光环再迁本体前槽专法）
+      else if (e.vanillaId === 399) { alpha = (127 - alphaRaw / 2) / 255; }  // :24568 Color(127-α/2,…)
       else if (e.vanillaId === 421) { alpha = (128 - alphaRaw / 2) / 255; }    // :25622 Color(128-α/2,…)
       else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
       const ga = resolveAlpha();
@@ -12092,40 +12402,8 @@ export class Renderer {
           ctx.drawImage(lampGlow, 0, lrow * lh, lampGlow.width, lh, lx, ly, lamp.width, lh);
         }
       }
-      // ★BJ454 548 永恒水晶光柱（Main.cs:24332-24375 `alpha<255` 块尾两笔 Extra_89
-      //   1:1）：锚 = Bottom+(0,-40) 再 Y−6（:24335/:24366）→ 盒底上方 46px；旋转 =
-      //   rotation+π/2（水晶 rotation 恒 0 → 竖直光柱；spriteEffects^Flip 对称贴图
-      //   无观察差，简化备案）。第一笔 scale6=(0.75,1+num122)×1.5（num122=1+num130×
-      //   0.75，Renderer.dd2CrystalBeamScaleY 单源），dontTakeDamageFromHostiles 置位
-      //   （BJ450 胜/败演出窗）→ sy×0.6 收缩；色 = color28(140,50,255,A=0)×0.6×num131
-      //   ——XNA α=0 纯加法语义 → lighter 面贡献 = tex×tint×0.6×num131。第二笔恒
-      //   scale 1.5、色 Lerp(color28,White,.5)=(197.5,152.5,255)。num131 = 三秒呼吸
-      //   第二相（:24344-24351），GTW 单源同紫底层（本文件 548 底层支）。
-      if (e.vanillaId === 548 && alphaRaw < 255) {
-        const beam = this.atlas.ensureVImage('vanilla/Extra_89.png');
-        if (beam) {
-          const gtw = globalTimeWrappedHourly();
-          const t3 = gtw % 3 / 3;                       // num128（:24333）
-          const n130 = (t3 + 0.5) % 1;                  // num130（:24341）
-          const n131 = n130 > 0.5 ? 1 - n130 : n130;    // num131（:24342-24347）
-          const bcy = ((e.h / 2) - 46) / scale;         // 盒底(Bottom) 上方 46px（世界→局部）
-          const sx = 0.75 * 1.5;                        // scale6.X（:24358）
-          const sy = Renderer.dd2CrystalBeamScaleY(gtw, e.dontTakeDamageFromHostiles);
-          const wA = beam.width * sx / scale, hA = beam.height * sy / scale;
-          ctx.save();
-          ctx.translate(0, bcy);
-          ctx.rotate((e.visAngle || 0) + Math.PI / 2);  // :24367 rotation+π/2
-          const purple = this.tintedSprite(`beam548|${Math.round(n131 * 32)}`,
-            { img: beam, sx: 0, sy: 0, sw: beam.width, sh: beam.height }, [140, 50, 255]);
-          ctx.globalAlpha = Math.max(0, Math.min(1, 0.6 * n131));
-          if (purple) ctx.drawImage(purple.c, purple.x, purple.y, purple.w, purple.h,
-            -wA / 2, -hA / 2, wA, hA);
-          ctx.globalAlpha = 1;                          // Lerp(color28,White,.5) A=0 全贡献
-          ctx.drawImage(beam, -beam.width * 1.5 / scale / 2, -beam.height * 1.5 / scale / 2,
-            beam.width * 1.5 / scale, beam.height * 1.5 / scale);
-          ctx.restore();
-        }
-      }
+      // ★BJ546：548 光柱两笔迁 draw548CrystalOverlays（本体后槽,与环/外光环
+      //   同一 alpha<255 门块,:24325——旧 'frame' 支尾挂点层序与原版本体链不符）
     } else if (g.mode === 'vel4') {
       // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份灰 A=64（Main.cs:24483-24520）
       // ★BJ109-H 三修（2026-09-16）：
@@ -15969,6 +16247,11 @@ export class Renderer {
      *  恒量支（516 等 GetAlpha 常量覆写早退型）传 ga=alpha/255（220 恒态=0.86275）
      *  直读,不走 lerp 档。 */
     ga?: number;
+    /** ★BJ551（2026-10-07）恒色族 RGB 烘焙档（NPC.cs:94755 `type==289 → Color(250,
+     *  250,250,50)`——骷髅头怪分支,用户实报"诅咒骷髅怪很暗"=BJ529 弹 270 同域）：
+     *  tintedTex 保形染帧（img.rgb=tex.rgb·tint/255、img.a 不变）后 ga 折 tint.A,
+     *  复绘 img.rgb·img.a·ga ≡ XNA 预乘 tex.rgb·tint.rgb·tex.a·tint.a（逐字节）。 */
+    tint?: [number, number, number];
   }> = [];
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
@@ -16070,6 +16353,10 @@ export class Renderer {
     for (const q of this.npcWhiteLiftQueue) {
       const imgL = this.atlas?.ensureVImage(q.tex);
       if (!imgL) continue;
+      // ★BJ551 恒色族 tint 烘焙档（289 rgb 250 保形染帧;tintedTex WeakMap 缓存同键
+      //  零重烘;node 单测无 DOM 返 null=跳笔,与 whipFullbright 同守卫）
+      const imgT = q.tint ? tintedTex(imgL, q.tint, false) : imgL;
+      if (!imgT) continue;
       ctx.save();
       ctx.translate(q.cx, q.cy);
       ctx.rotate(q.rot);
@@ -16077,7 +16364,7 @@ export class Renderer {
       if (q.mirror) ctx.scale(-1, 1);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
-      ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+      ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
       ctx.restore();
     }
     ctx.restore();
@@ -17977,6 +18264,26 @@ export class Renderer {
         // `Position.Y+height−frameH+4f`——帧底透明边距一并沉入地面）
         const pad = 4;
         const hairCol = dyeColor ?? p.appearance.hairColor;   // 拆层回画用（无染料=原生发色）
+        // ---- ★BJ550 下砸过程残影（过程特效+绘制姿势面）：Player.cs:37354-37357
+        //      isPerformingJump_DownDash → armorEffectDrawShadow=true →
+        //      LegacyPlayerRenderer.cs:415-421 三张社交残影（shadowPos 环 3/6/9 拍
+        //      滞后 × k=0.5/0.3/0.1）。★定谳:原版下砸全程【零尘/零音】（发起
+        //      :20958-20961 与下坠无 Dust/SoundEngine——过程主视觉=本残影带;落地爆
+        //      含音已由 BJ534 deadCellsDownDashExplosionFx 落位）。canvas 等价 =
+        //      brightness(k)+globalAlpha(k)（GetImmuneAlpha Color.Multiply 全通道
+        //      乘 k 的逐值等价,习语同 drawGhostSprite 拖影）。残影=纸娃娃复合帧
+        //      （原版=全层组;翅膀/身后配饰/手持不入残影+层位在其上方——全组重画需
+        //      整函数参数化,登记）。stamp 数学单源 Player.downDashGhostStamps
+        //      （tests/bj550-downdash-vfx 直测）;下砸态不入联机同步,远端无残影（登记）。
+        if (p.isDownDashing) {
+          for (const g of downDashGhostStamps(p, p.shadowRing())) {
+            ctx.save();
+            ctx.filter = `brightness(${g.k})`;
+            ctx.globalAlpha *= g.k;
+            ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, g.lx - f.sw / 2, g.ly - f.sh + pad, f.sw, f.sh);
+            ctx.restore();
+          }
+        }
         if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, true);
         // ★BJ423 浮游圈管体·背半（DrawPlayer_12_Skin_Composite :1273-1280——后发后、
         //   躯干皮肤前；源=Extra_105 上半 (0,0,40,56)）。门 = hasFloatingTube（可见轮

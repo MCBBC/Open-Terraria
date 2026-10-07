@@ -190,7 +190,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     // =ZoneAstral/Sulphur 生产惰性)——tile 键族派生(键含 astral/sulphurous;
     // 通用=spec.biomeFlag 声明面优先)
     const biomeFlagName = spec.biomeFlag
-      ?? (t.fullKey.includes('astral') ? 'astral' : t.fullKey.includes('sulphurous') ? 'sulphur' : null);
+      ?? (t.fullKey.includes('astral') ? 'astral' : t.fullKey.includes('sulphurous') ? 'sulphur' : t.fullKey.includes('brimstone_slag') ? 'brimstone' : t.fullKey.includes('navystone') || t.fullKey.includes('eutrophic_sand') ? 'sunken' : null);
     const modTileInternal = registerModTile({
       key: t.fullKey,
       name: spec.name ?? spec.key,
@@ -286,6 +286,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
         water: spec.spawn.water ?? false, mult: spec.spawn.mult ?? 1,
         ...(spec.spawn.maxCount !== undefined ? { maxCount: spec.spawn.maxCount } : {}),
         ...(spec.spawn.depth ? { depth: spec.spawn.depth } : {}),
+        ...(spec.spawn.requireFlags ? { requireFlags: spec.spawn.requireFlags } : {}),
+        ...(spec.spawn.blockFlags ? { blockFlags: spec.spawn.blockFlags } : {}),
       });
     }
     // ★CalPlayer 基建(六十四刀):接触命中玩家施加声明面 debuff(OnHitPlayer 形)

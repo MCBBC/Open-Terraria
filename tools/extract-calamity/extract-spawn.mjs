@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../../../CalamityModPublic/NPCs');
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '../../mods/calamity/content/npcs');
 
+const ZT_MAP = { ZoneSulphur: 'sulphur', ZoneAstral: 'astral', ZoneBrimstoneCrag: 'brimstone', ZoneCalamity: 'brimstone', ZoneSunkenSea: 'sunken' };
 const ZONE_MAP = {
   ZoneSulphur: 'sulphur',
   ZoneAstral: 'astral',
@@ -97,6 +98,14 @@ for (const f of files) {
       if (zs.length > 0 && !gated) {
         zone = zs[0]; water = hasWater; mult = Number(tail[1]);
       }
+    }
+  }
+  // 形⑤:三元直返(`return ZoneX ? Nf : 0f;`;ZoneCalamity=陨石炼狱=brimstone 旗)
+  if (mult === null) {
+    const tern = body.match(/return\s+(?:spawnInfo\.Player\.Calamity\(\)\.)?(\w+)\s*\?\s*([0-9.]+)f?\s*:\s*0f?\s*;/);
+    if (tern) {
+      const zt = tern[1];
+      if (ZT_MAP[zt]) { zone = ZT_MAP[zt]; mult = Number(tern[2]); }
     }
   }
   // 形②b:bare Chance 分支(`return SpawnCondition.X.Chance;`=mult 1)

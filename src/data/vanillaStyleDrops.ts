@@ -81,6 +81,11 @@ const Toilet: T = [4096, 4097, 4098, 4099, 4100, 4101, 4102, 4103, 4104, 4105, 4
 /** 平台 19——GetItemDrop_Platforms（WorldGen.cs:42927 KillTile :65591 fy/18） */
 const Platforms: T = [94, 631, 632, 633, 634, 913, 1384, 1385, 1386, 1387, 1388, 1389, 1418, 1457, 1702, 1796, 1818, 2518, 2549, 2566, 2581, 2627, 2628, 2629, 2630, 2744, 2822, 3144, 3146, 3145, 3903, 3904, 3905, 3906, 3907, 3908, 3945, 3957, 4159, 4180, 4201, 4222, 4311, 4416, 4580, 5162, 5183, 5204, 5292, 5544, 5562, 5615, 5703, 5726, 5751, 5770, 5791, 5812, 5833, 5852, 5872, 5912, 5946, 5989, 6012, 6035, 6058, 6081, 6103, 6125];
 
+/** ★BJ548（2026-10-07）：种植箱 380——KillTile case 380（WorldGen.cs:65726-65729
+ *  `num = frameY/18; dropItem = 3215 + num`）。8 档=placeStyle 0-7（Item.cs:29720-29739
+ *  `placeStyle = type - 3215`；3217 腐化/3218 猩红 = 死亡草两族群,3222 火焰花）。 */
+const PlanterBoxes: T = [3215, 3216, 3217, 3218, 3219, 3220, 3221, 3222];
+
 /** 梳妆台 88——GetItemDrop_Dressers（WorldGen.cs:49870 Check3x2 :49709 fx/54） */
 const Dressers: T = [334, 647, 648, 649, 918, 2386, 2387, 2388, 2389, 2390, 2391, 2392, 2393, 2394, 2395, 2396, 2529, 2545, 2562, 2577, 2637, 2638, 2639, 2640, 2816, 3132, 3134, 3133, 3911, 3912, 3913, 3914, 3934, 3968, 4148, 4169, 4190, 4211, 4301, 4569, 5151, 5172, 5193, 5551, 5604, 5692, 5715, 5741, 5766, 5787, 5808, 5829, 5848, 5868, 5888, 5908, 5942, 5965, 5985, 6008, 6031, 6054, 6077, 6099, 6121];
 
@@ -472,6 +477,7 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   15: (_fx, fy) => Math.floor(fy / 40),
   18: (fx) => Math.floor(fx / 36),
   19: (_fx, fy) => Math.floor(fy / 18),
+  380: (_fx, fy) => Math.floor(fy / 18),                                // ★BJ548：种植箱（KillTile case 380 :65727 num=frameY/18 → 3215+num;材质行在 frameY,frameX=连接档勿读）
   21: (fx) => Math.floor(fx / 36),
   33: (_fx, fy) => Math.floor(fy / 22),
   34: (fx, fy) => Math.floor(fx / 108) * 37 + Math.floor(fy / 54),
@@ -542,6 +548,7 @@ export function styleDropVid(sheet: number, style: number): number {
     case 15: return pick(Chair, style);
     case 18: return pick(Workbenches, style);
     case 19: return pick(Platforms, style);
+    case 380: return pick(PlanterBoxes, style);   // ★BJ548：种植箱 8 材质档（KillTile case 380 :65726-65729）
     case 21: return pick(Chests, style);
     case 33: return pick(Candles, style);
     case 34: return pick(Chandeliers, style);

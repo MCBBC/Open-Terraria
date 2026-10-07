@@ -546,7 +546,7 @@ import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJo
 // ★SW-BJ10 2026-09-07：运行时平台帧重算复用生成期权威（TileFrameImportant 平台支镜像
 //  vanilla/FinalCleanupPass:293,IIIII190 已导出面；生成期/运行时同表单源防漂移——
 //  调用面见 squareTileFramePlatform）
-import { framePlatformSweep } from '../world/gen/vanilla/FinalCleanupPass';
+import { framePlatformSweep, framePlanterBoxSweep } from '../world/gen/vanilla/FinalCleanupPass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
 import { setShineEntryBoost } from '../render/TileShine';   // ★幕布期预算批（案 b:shine 盒提升开关,见 ENTRY_BAKE_BUDGET_BOOST_MS 注）
@@ -1119,7 +1119,11 @@ type DecorSupportKind =
   // —— ★BJ323（2026-09-24）：多向锚件 CheckAndAdjustMultiDirectionalTile（:60805）——
   //  129 水晶碎晶/149 节日灯（TileFrameImportant case 129/149 组 :86339-86400 唯一派发;
   //  原 129 缺席落家具 hasSupport 近似/149 走同近似,挖支撑悬空=用户实报）
-  | 'multidir';
+  | 'multidir'
+  // —— ★BJ548（2026-10-07）：TileFrame case 380 种植箱连接帧（WorldGen.cs:86575-86646,
+  //  frameX {0,18,36,54} 四态重帧、无失撑破坏支）——380 帧面整缺=材质行(placement
+  //  frameY) 写面+绘制面双失效,全 8 件种植盆放去都是太阳花盆（用户实报）
+  | 'planterbox';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -1336,6 +1340,10 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   //  曾 129 缺席（落家具 hasSupport 底行∨任一格墙近似——墙误活/旁侧锚误杀/
   //  上·侧锚变化不触发）、149 走同近似——挖支撑悬空=用户实报（水晶碎块）
   129: 'multidir', 149: 'multidir',
+  // ★BJ548（2026-10-07）：TileFrame case 380（WorldGen.cs:86575-86646）——种植箱连接帧
+  //  （frameX 四态,frameY=材质行不触;只重帧永不杀）。派发面=checkDecorSquareFrame 3×3 扫
+  //  （SquareTileFrame :81462-81473 等价：放置/破坏/邻变全触发）+ 家具链路由同款。
+  380: 'planterbox',
 };
 /** DECOR 3×3 邻域扫候选（SquareTileFrame→TileFrame→tileFrameImportant 派发面的
  *  DECOR 子集,内部 id 集）——'furniture' 族由家具近似链(checkFurnitureSupport)承担,
@@ -8788,16 +8796,23 @@ export class Game implements GameHooks {
       try {
         const mode = options.data.frameSkipMode;
         if (mode === 'subtle') {
-          // ★调度面修复刃(2026-09-28) subtle=确定性节拍对齐:vanilla improvedSubtleFrameSkip
-          // (1457 默认,Main.cs:67615-67616)EndDraw 忙等钳 60Hz present 网格
-          // (Main.cs:62624-62644)的 rAF 移植——每 k 个 vsync 渲一次(帧序计数落拍,
-          // 非忙等:present 由合成器掌控,只能选 vsync 整数倍,k 恒定=帧距恒定=节拍确定)。
-          // 拍 k 由容量(渲染帧成本 p95/预算)+frameCap 天花板选出,降快升慢滞回;
-          // 失拍帧序计数天然吸附下一拍不追赶中途。被跳过的回调不进 frame()(逻辑恒
-          // 60Hz——fixedUpdate 累计器在下个渲染帧补步,≤5 步钳内;_paintedFrames
-          // 只认真实渲染帧,whenFirstPaint 语义不变)。旧被动门(阈值 1000/cap-1 落在
-          // vsync 整数倍±抖动带内,跳 1/2 个 vsync 随机翻转)与旧 SuppressDraw(0 步进
-          // 帧跳绘=累计器相位随 rAF 抖动随机游走)是"高于 60fps 仍卡一下"的摆动源,故停用
+          // ★调度面修复刃(2026-09-28)→★v9.8 根治刀(2026-10-07):subtle 档渲染调度=
+          //  纯时间门(see FrameBeat.ts 头注 v9.8)——shouldRender=now-lastRenderAt ≥
+          //  1000/cap-GUARD,k 迁移机制(容量扫拍/minK 地板/滞回升拍/失拍降档)整体退役
+          //  (用户明令「最简条件下帧率都不稳=算法本身有问题,需要根治」;定谳:回调流
+          //  132/s 超 vsync 宽分布 → est 污染 → minK 门槛翻转 → k 1↔2=一切帧率不稳
+          //  实报公共根因,且 k 对齐语义与 v6 帧率优先政策自相矛盾)。四形态语义:
+          //  干净流恒屏率/超速流跟满稳/render-bound 帧距=帧耗/暂停+云尖峰零振荡。
+          //  被跳过的回调不进 frame()(逻辑恒 60Hz——fixedUpdate 累计器在下个渲染帧
+          //  补步,≤5 步钳内;_paintedFrames 只认真实渲染帧,whenFirstPaint 语义不变)。
+          //  旧被动门(阈值 1000/cap-1 落在 vsync 整数倍±抖动带内,跳 1/2 个 vsync 随机
+          //  翻转)与旧 SuppressDraw(0 步进帧跳绘=累计器相位随 rAF 抖动随机游走)是
+          //  "高于 60fps 仍卡一下"的摆动源,故停用。
+          // ★v9.7 hold 信号(保留面):画面静止(fixedUpdate 停)期间瞬态诊断账逐帧清零
+          //  ——时间门下 paused 天然无迁移,hold 兼容保留防回归。语义面宽覆盖:this.paused
+          //  单源(autoPause 开界面/失焦/暂停浮层/图鉴面板/保存退出全部置位点汇于此)
+          //  +入场冻结窗/传送幕帘两个同族 fixedUpdate 停态;恢复拍即解。
+          this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
           this.beat.observeVsync(now, options.data.frameCap);
           if (!this.beat.shouldRender(now)) {
             requestAnimationFrame(loop);
@@ -8819,7 +8834,7 @@ export class Game implements GameHooks {
         this._lastCapTs = now;
         this.frame(now);
         // 节拍机记账:成本=渲染帧主线程占用(rAF 时间戳→frame 完成;与合成器 present
-        // 截止同源),驱动容量降拍/滞回升拍/失拍判定(纯状态机,见 FrameBeat.ts)
+        // 截止同源)——★v9.8 起仅作诊断面采样(F5/snapshot),k 迁移决策已退役
         if (mode === 'subtle') this.beat.endRender(performance.now());
         this._paintedFrames++;
         if (this._paintWaits.length) {
@@ -24473,16 +24488,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         );
         if (trig) { dropX = trig.x; dropY = trig.y; }
       }
-      for (let dx = 0; dx < ow; dx++) {
-        for (let dy = 0; dy < oh; dy++) {
-          // ★同类型门（2026-08-20 用户实报"打掉沙上花草连沙块一起消失"）：锚点盒
-          // 只清本物格，外国格（如 529 海燕麦 def 1×2 但原版单格写入 cs:58333——
-          // 锚点即本格、盒 [y,y+1] 曾无差别清掉下方沙）一律不动。多格物全格同
-          // 类型不受影响；盒内空气格本就无可清。
-          if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) {
-            st.setTile(ax + dx, ay + dy, 0);
+      // ★BJ543（2026-10-07）：destroyObject 窗（见 _objectClearBox 注）——清环期间
+      //  本件成员格的 DECOR 嵌套杀照常走（尘/音/粒逐格=原版级联 KillTile 效应面），
+      //  唯其 object 支掉落被 _memberKillSuppressDrop 压制，掉落权归本层尾段单发
+      //  =原版 Check* 整件单掉（case 29 :47662 / CheckChest :58485）。盒置入/还原对
+      //  （重入 object 支会再设盒,还原保外层窗不丢）。
+      const prevClearBox = this._objectClearBox;
+      this._objectClearBox = { x0: ax, y0: ay, x1: ax + ow - 1, y1: ay + oh - 1 };
+      try {
+        for (let dx = 0; dx < ow; dx++) {
+          for (let dy = 0; dy < oh; dy++) {
+            // ★同类型门（2026-08-20 用户实报"打掉沙上花草连沙块一起消失"）：锚点盒
+            // 只清本物格，外国格（如 529 海燕麦 def 1×2 但原版单格写入 cs:58333——
+            // 锚点即本格、盒 [y,y+1] 曾无差别清掉下方沙）一律不动。多格物全格同
+            // 类型不受影响；盒内空气格本就无可清。
+            if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) {
+              st.setTile(ax + dx, ay + dy, 0);
+            }
           }
         }
+      } finally {
+        this._objectClearBox = prevClearBox;
       }
       // 掉落解析（multiTileDropKey 纯函数,tests/multi-tile-drop.test.ts 对拍）：
       // def.drop 数字/字符串=原版物品直掉；null/undefined=v_ 回收兜底（place_v_ 再放置）。
@@ -24597,7 +24623,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
       }
       // ★SW-BJ40：掉落坐标 = Check* 触发格（dropX/dropY，见上）——非锚格
-      if (dropKey) this.spawnDrop(dropX * TILE + 8, dropY * TILE, dropKey, dropCount, undefined, undefined, undefined, dropPrefix);
+      // ★BJ543：_memberKillSuppressDrop=本实例是清环窗内成员格重入（breakTile 由
+      //  killDecorTile 在 _objectClearBox 窗内代发,破坏权在外层整件事件）→ 掉落权
+      //  让位外层（原版级联 KillTile 零掉落,GetItemDrops case 29 空体组 :66280）;
+      //  顶层破坏（挖掘/失撑/爆炸——窗外）恒 false=照常单掉
+      if (dropKey && !this._memberKillSuppressDrop) this.spawnDrop(dropX * TILE + 8, dropY * TILE, dropKey, dropCount, undefined, undefined, undefined, dropPrefix);
       // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
       // 牌面文本登记（WorldGen.cs:43733 Sign.KillSign，帧检分支）
       if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
@@ -26342,6 +26372,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (PLATFORMS_SHEETS.has(oldSheet) && PLATFORMS_SHEETS.has(newSheet)) poundFail = false;
     if (poundFail && (st.slope[i] !== 0 || st.half[i] !== 0)) st.setSlope(x, y, 0);   // :63130-63134
     if (PLATFORMS_SHEETS.has(newSheet)) this.squareTileFramePlatform(x, y);           // :63150 平台面
+    else if (newSheet === 380) {   // ★BJ548：:63150 SquareTileFrame 380 支（TileFrame case 380
+      //  连接帧重算——块换入 380 时 fx 保留旧块残帧,原版经此支重定 {0,18,36,54}）
+      framePlanterBoxSweep(st, x, y);
+      this.chunks.markDirtyArea(x, y, x, y);
+    }
   }
 
   /** ReplaceTile_DoActualReplacement_Area（WorldGen.cs:63168-63188）——多格家族原位
@@ -36756,6 +36791,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (sc.zoneHallow) return 'hallow';
       if (sc.zoneDungeon) return 'dungeon';
       if (sc.zoneGlowshroom) return 'glowshroom';
+      if (sc.zoneSkyHeight) return 'sky';
+      if (sc.zoneRockLayerHeight) return 'cavern';
+      if (sc.zoneDirtLayerHeight) return 'underground';
+      if (sc.zoneTemple) return 'temple';
+      if (sc.zoneGemCave) return 'gemcave';
       // ★一百一十八刀:mod 群系旗档(优先于 null;mod 刷怪行 zone=modBiomes 键)
       if (sc.modBiomes) {
         for (const k of Object.keys(sc.modBiomes)) if (sc.modBiomes[k]) return k;
@@ -36764,6 +36804,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     })();
     for (const r of rules) {
       if (r.zone && r.zone !== zoneNow && !r.depth) continue;
+      // ★两百四十九刀:world.flags 条件门(require=全须/block=任一即拒)
+      if (r.requireFlags?.length && !r.requireFlags.every((f) => this.world.flags[f])) continue;
+      if (r.blockFlags?.length && r.blockFlags.some((f) => this.world.flags[f])) continue;
       // ★一百二十三刀:NPC.CountNPCS 同种存活上限闸(如 Bloatfish <3)
       if (r.maxCount !== undefined) {
         let alive = 0;
@@ -36778,6 +36821,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const ty = Math.floor(p.cy / TILE + (Math.random() * 2 - 1) * vy);
       if (tx < 10 || tx >= this.world.store.w - 10 || ty < 5 || ty >= this.world.store.h - 5) continue;
       if (this.world.store.hasTile(tx, ty)) continue;
+      // ★两百五十五刀:water 字段通电(R2 红队;目标格需液体)
+      if (r.water && this.world.store.liquid[this.world.store.idx(tx, ty)] === 0) continue;
       if (this.world.store.get(tx, ty + 1) === 0) continue;   // 需基座
       this.spawnNpcByVanilla(r.npcId, tx * TILE, ty * TILE);
       return true;
@@ -47717,6 +47762,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  入口早退（只抑制 DECOR 支;家具链"半件态不处理"自保护维持原样,沙/藤/
    *  巨石/火把监听一律不动），try/finally 保证必清 */
   private _decorPlaceBuilding = false;
+  // ★BJ543（2026-10-07）：destroyObject 窗（原版 Check* 权威单事件语义同构——
+  //  Check2x1 置位 WorldGen.cs:47507、CheckChest :58478、CheckPot 头门 :57276）。
+  //  object 锚点支清环期间记录被清物件盒;窗内成员格的 DECOR 级联杀（'table2x1'
+  //  29/103/462 杀向=活成员格,SW-RB11d F2）照常走 breakTile（尘/音/粒=原版级联
+  //  KillTile 逐格效应面保留）,但其 object 支掉落被 _memberKillSuppressDrop 压制
+  //  ——掉落权归外层单发（原版：级联余格 KillTile 零掉落,GetItemDrops case 29 ∈
+  //  :66280-66609 空体组,Item.NewItem 在 Check* 尾段一次 :47662）。修「挖存钱罐掉
+  //  两个」（用户实报 BJ543）：旧链=外层掉+重入掉各一——smashPot 注曾载「锚格先清
+  //  =嵌套杀向落空」的断言被 RB11d F2 的杀向改写作废（死格跳过守卫对活成员杀向
+  //  失效）。盒用置入/还原对（非覆写/置 null）：重入 breakTile 的 object 支会再设
+  //  盒,还原保证外层清环后续迭代的窗不丢。
+  private _objectClearBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  private _memberKillSuppressDrop = false;
+
   private killDecorTile(x: number, y: number): void {
     const q = (this._decorKillQueue ??= []);   // ??=：Object.create 壳测试实例无构造器字段（同 _tntPending）
     q.push([x, y]);
@@ -47727,7 +47786,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       while (q.length && budget-- > 0) {
         const [qx, qy] = q.shift()!;
         if (this.world.store.get(qx, qy) === 0) continue;   // 同件多格已被整件清掉
-        this.breakTile(qx, qy, false, false);
+        const box = this._objectClearBox;                    // ★BJ543：窗内成员=清环已认领,掉落权在外层
+        const inBox = !!box && qx >= box.x0 && qx <= box.x1 && qy >= box.y0 && qy <= box.y1;
+        if (inBox) this._memberKillSuppressDrop = true;
+        try {
+          this.breakTile(qx, qy, false, false);
+        } finally {
+          if (inBox) this._memberKillSuppressDrop = false;
+        }
       }
       q.length = 0;
     } finally {
@@ -49175,6 +49241,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  扫（SquareTileFrame :81462 等价——上/侧/下锚变化全覆盖,旧家具链只查
         //  变化格上方=悬顶·侧附碎块漏检根因）+ 家具监听路由（dKind≠'furniture'）
         if (!this.checkAndAdjustMultiDirAt(x, y)) this.killDecorTile(x, y);
+        return;
+      }
+      case 'planterbox': {
+        // ★BJ548（2026-10-07）：TileFrame case 380（WorldGen.cs:86575-86646）——连接帧
+        //  重算（frameX=左右同型 380 连接档,frameY=材质行不触）。原文本支【无】KillTile
+        //  （只重帧不判撑）→ 本仓同构零杀面。帧变才 markDirty（重跑幂等）。
+        const i380 = st.idx(x, y);
+        const oldFx380 = st.frameX[i380];
+        framePlanterBoxSweep(st, x, y);
+        if (st.frameX[i380] !== oldFx380) this.chunks.markDirtyArea(x, y, x, y);
         return;
       }
       default:
@@ -51366,6 +51442,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       // 拴绳实体（锚桩 724 小动物 / 风筝桩 723 风筝）——Renderer 3.8 段绘制
       this.leashed,
     );
+    // ★ghostblur（2026-10-07,?ghostblur=1 缺省关）:帧尾全屏 ghost/motion-blur
+    //  accumulation pass——render() 完整返回后=本帧 glCanvas 一切 GL 写入落定的
+    //  全路径唯一必经收口点（早退支覆盖;挂接点论证见 GhostBlur.ts 头注）。
+    this.renderer.ghostFrameEnd(cam);
     glStatFrame();   // #perf-gpulog:GPU 提交账本帧推进(唯一 tick 点)
   }
 

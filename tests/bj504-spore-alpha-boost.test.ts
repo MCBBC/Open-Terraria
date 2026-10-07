@@ -105,7 +105,9 @@ describe('BJ504 C. Renderer 接线', () => {
     // ★BJ-C1 F1：q.ga 显式档优先（516 恒量复绘）,缺省仍走 lerp 白提亮档
     expect(src).toContain('ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;');
     expect(src).toContain("ctx.globalCompositeOperation = 'source-over';");
-    expect(src).toContain('ctx.drawImage(imgL, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);');
+    // ★BJ551 重锚（2026-10-07）：imgL→imgT（消费扩 tint 烘焙档——恒色族 289/694
+    //  保形染帧;无 tint 项 imgT=imgL 恒等路径,BJ504 α 复绘行为零变）
+    expect(src).toContain('ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);');
     // ★BJ-C1 F4：render 内调用位保持（方法化=行为零变）
     expect(src).toContain('this.flushNpcWhiteLift(cam, z, viewW, viewH);');
   });

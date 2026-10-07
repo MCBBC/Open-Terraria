@@ -393,7 +393,7 @@ for (let k = 0; k < K; k++) {
   const c = await census(finA, finB, lakeBand);
   const cFull = await census(finA, finB, null);
   const cSurf = await census(finA, finB, bands.surf);
-  const cSp = await census(finA, finB, bands.spark, 48);   // thr=亮差像素计数域
+  const cSp = await census(finA, finB, bands.spark, 12);   // thr=亮差像素计数域（★四期 2026-10-07 收紧:48→12——顶点插值语义修正后两臂亮纹域大幅收敛,旧阈失配;相位移动判据阈值随实测域走）
   const cSpAll = await census(finA, finB, bands.spark);
   await page.evaluate((p) => window.__pairMin(p.a, p.b), { a: finA.b64, b: finB.b64 });
   if (k === 0 && !FB) await dumpDiffPng(finA, finB, 'pair0');
@@ -447,12 +447,14 @@ const worstSp = Math.max(...pairs.map((p) => p.cSpAll.maxd));
 chk('LA-SP 亮纹域 census 有界（FS glitter vs CPU 均值=§2.5 处方面非回归;maxd≤登记域 120,首轮实测 75）',
   worstSp <= 120,
   `逐对最差 maxd=${worstSp}（带=${JSON.stringify(bands.spark)}）`);
-// SP-PHASE:亮纹差图案随相位移动（亮差像素计数跨 pair 非恒等=逐像素调制真在动;
-//  恒等=B 臂伪装成均值近似=判死）
+// SP-PHASE:亮纹差图案随相位移动（亮差像素计数跨 pair 非恒等=顶点插值调制真在动;
+//  恒等=静态伪装判死。★四期 2026-10-07:thr 48→12——B 臂改四角 glitter 终值顶点插值
+//  （原版 SetShimmerVertexColors_Sparkle 钳制后插值语义）后与 A 臂均值近似差域大幅
+//  收敛,旧阈下 pair0 亮差=0 伪红;判据语义不变）
 const brightCounts = pairs.map((p) => p.cSp.nThr);
-chk('SP-PHASE 亮纹差随相位移动（跨 pair 亮差计数>0 且非恒等;恒等=均值近似伪装）',
+chk('SP-PHASE 亮纹差随相位移动（跨 pair 亮差计数>0 且非恒等;恒等=静态伪装）',
   brightCounts.every((n) => n > 0) && new Set(brightCounts).size > 1,
-  `bright counts=${JSON.stringify(brightCounts)}（thr=48;带=${JSON.stringify(bands.spark)}）`);
+  `bright counts=${JSON.stringify(brightCounts)}（thr=12;带=${JSON.stringify(bands.spark)}）`);
 const ledger = await page.evaluate(() => window.__gse?.GLShimExecutor?.accFailLedger ?? null);
 chk('LB2 accFailLedger 恒空（GLShimExecutor 静态累计账）',
   !!ledger && Object.keys(ledger).length === 0, JSON.stringify(ledger));

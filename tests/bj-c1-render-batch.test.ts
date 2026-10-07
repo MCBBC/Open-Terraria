@@ -103,7 +103,9 @@ function makeSink() {
 describe('BJ-C1 F1 516 日耀耀斑恒量支（NPC.cs:94667-94670 GetAlpha 早退）', () => {
   it('本体恒量复绘入 7d\' 队列：ga=spawnAlpha/255（非 1−α/255 缺省族,判别位=包络方向）', () => {
     const s = rendererSrc();
-    const cap = block(s, '★BJ-C1 F1（2026-10-06）：516 日耀耀斑本体恒量支重建模', '} else if (!xnaColor && !bodyTint370) {');
+    // ★BJ551 重锚（2026-10-07）：516 支块边界从通用直绘 else 前移至 BJ551 289 支
+    //  （drawEnemy 本体位支链扩为 516→289→694×2→通用,516 支内无直绘判据保持）
+    const cap = block(s, '★BJ-C1 F1（2026-10-06）：516 日耀耀斑本体恒量支重建模', '} else if (e.vanillaId === 289) {');
     expect(cap).toContain('if (e.vanillaId === 516) {');
     // 恒量档 ga=alpha/255（220 恒态=0.86275 淡入;缺省族 1−α/255=0.137 反向=旧病）
     expect(cap).toContain('ga: Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,');
@@ -397,7 +399,10 @@ describe('BJ-C1 F3 常量色族通用通道（projConstFullbright 分类器+通�
   it('933 路由结构锁：projFullbrightQueue 缺席环境回退实体直画（测试/旧宿主兜底）', () => {
     const s = zenithSrc();
     const blk = block(s, '★BJ-C1 F3（2026-10-06,代表判别站）：933 天顶剑弹面', 'paint(ctx);');
-    expect(blk).toContain("if (typeof fbSink === 'function') { fbSink(paint); return; }");
+    // ★重锚（2026-10-07 并行会话"天顶剑崩溃修"）：fbSink 裸调丢 this → 改经宿主对象
+    //  调用（(r as ...).queueProjFullbright(paint); return;）——路由语义不变,锚随原文重钉
+    expect(blk).toContain("if (typeof fbSink === 'function')");
+    expect(blk).toContain('queueProjFullbright(paint); return; }');
   });
 });
 

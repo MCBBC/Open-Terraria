@@ -299,6 +299,35 @@ export function stepAfkCounter(s: {
     && !s.inputJump && !s.inputTorch;
   return standingStill && animIdle && noCtrl ? s.afkCounter + 1 : 0;
 }
+/** ★BJ550 下砸过程残影 stamps（纯函数,tests/bj550-downdash-vfx 直测）——
+ *  Player.cs:37354-37357 isPerformingJump_DownDash → armorEffectDrawShadow=true →
+ *  LegacyPlayerRenderer.cs:415-421 三张社交残影（shadowPos[0..2] 环位,3/6/9 拍滞后）
+ *  × shadow=0.5+0.2i（GetImmuneAlpha/Pure Color.Multiply 全通道乘 (1−shadow)
+ *  Player.cs:54810-54840 → k=0.5/0.3/0.1,RGB 变暗+α 同降=暗剪影拖带）。
+ *  ring = Player.shadowRing()（SW-FX36 载体 spX/spY 快照,y 已含 gfxOffY 烘焙
+ *  :16722-16725）。lx/ly = 残影脚底锚在绘制镜像空间（scale(facing)·[gravDir 翻转]）
+ *  内的偏移：lx = facing·(shadow.x−p.x)+2.5（仓内精灵前移 −facing·2.5 于锚点自消）、
+ *  ly = gravDir·(shadow.y−p.y−stepRenderY)。下砸期 gfxOff/坐骑抬升/netOffset
+ *  结构性为 0（触发门 !mount.Active+骑乘清态 :24799-24801;netOffset 仅远端——
+ *  下砸态不入联机同步,远端无残影,登记）。★定谳:原版下砸过程【零尘/零音】
+ *  （发起 :20958-20961 与下坠全程无 Dust/SoundEngine 调用——过程视觉唯本残影带
+ *  + 秒表双计 Main.cs:47882-47884;落地爆含音已由 BJ534
+ *  deadCellsDownDashExplosionFx 落位）。 */
+export function downDashGhostStamps(p: {
+  facing: number; gravDir: number;
+  x: number; y: number; stepRenderY: number;
+}, ring: Array<{ x: number; y: number }>): Array<{ k: number; lx: number; ly: number }> {
+  const out: Array<{ k: number; lx: number; ly: number }> = [];
+  for (let i = 0; i < 3; i++) {
+    const sp = ring[i];
+    out.push({
+      k: 1 - (0.5 + 0.2 * i),                                        // :419 shadow=0.5+0.2i
+      lx: p.facing * (sp.x - p.x) + 2.5,
+      ly: p.gravDir * (sp.y - p.y - p.stepRenderY),
+    });
+  }
+  return out;
+}
 /** 绳索攀爬速度链（Player.cs:26016-26125）：上爬 -0.2/-0.02 下限 -8；
  *  下滑 +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7（|vy|<0.1 归 0 :26120-26124） */
 const ROPE_IDLE_ZERO = 0.1;
@@ -5020,15 +5049,67 @@ export class Player extends Entity {
       && !eqM.arcticDivingGear && this.environmentBuffImmunityTimer === 0) {
       this.buffs.apply(BuffType.Chilled, 2.5); // AddBuff(46,150)=2.5s max 合并 = 浸着恒挂
     }
-    // 着火/燃烧粒子（dust6 火尘族,每 tick 0.8 概率一枚上浮）
-    if (this.buffs.has(BuffType.OnFire) || this.buffs.has(BuffType.Burning)) {
-      if (Math.random() < 0.8) {
-        game.spawnParticles(
-          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-          Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.7,
-          { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
+    // ★BJ549（2026-10-07）着火尘 1:1 重铸（Terarria1457/Terraria.DataStructures/
+    //   PlayerDrawSet.cs DrawPlayerInner 尘段亲读——原版燃烧视觉【无独立 overlay
+    //   贴图】,= 玩家绘制路径的尘族火焰 + 色面两通道。旧自制 spawnParticles 橙黄
+    //   方块（0.8/t、2-4px、α 随寿命衰减、无光照、岩浆亮橙底上不可辨）非原版形态
+    //   =用户实报「只见扣血不见火焰」根因,退役。即 BJ465 注释所指 Player.ts:4879
+    //   块的替身,BJ457/465 域锚沿用）：
+    //   · onFire(24)（:1045-1083）：vampireSeed 特档（:1047-1066,shadow==0 无掷门,
+    //     每拍 5 粒 dust 6 scale3 盒+10、vel×2.3/vy−0.8,首粒 vx×0.5/vy−1.5/
+    //     noGravity=false/scale×0.4≡预传 1.2）;常规档（:1067-1078）Next(4)==0 掷门
+    //     → 1 粒 dust 6：盒 (Position−2,w+4,h+4)、vel=player.vel×0.4、α100、scale3,
+    //     后置 noGravity=true+vel×1.8+vy−0.5（:1074-1077）。
+    //   · onFire3(323)（:1084-1094）=onFire 常规档逐值同。burned(67)（:1239-1250）
+    //     【无】掷门（每拍恒 1 粒）scale2/vy−0.75（:1241-1246）。onFrostBurn(44)/
+    //     onFrostBurn2(324)（:1253-1274）dust 135 掷门同。onFire2(39)（:1279-1290）
+    //     dust 75 掷门同。原版掷序 onFire→onFire3→burned→onFrostBurn→onFrostBurn2→
+    //     onFire2 按此保序（未建模族跳过不掷）。
+    //   · DustCache.Add（:1078 等）唯一消费=PlayerDrawLayers.cs:4225 相机偏移补偿,
+    //     无前后层级语义,不入仓。shadow==0f 门=本仓玩家单 pass 绘制恒满足。
+    //   · 色面：onFire/onFire3/onFire2/onFrostBurn 族 :1448 走 GetImmuneAlpha 支
+    //     【不吃】buffColor 染色=本色;burned 不在支内（:1252 num15×0.6/num14×0.7
+    //     染红）——本仓玩家绘制无 buffColor 面,该单点差登记不扩（登记债）。
+    //     AddLight 面：玩家本体零 onFire AddLight（Player.cs 全量 grep 无锚）,发光
+    //     =dust 6 逐尘 AddLight+亮色族 {6,15,59-64} 光照合成后强白绘制（VanillaDust
+    //     引擎既有,update 链 A :885 组 noGravity 门+scale−0.04/t 衰减同相）。
+    //   · 尘引擎口=game.dust.spawn（Game.vanillaDust 池,NewDust 初始化链 1:1:盒内
+    //     位抖/速度抖/scale±0.2 抖/帧序）;返 null（池满/BJ466 屏外裁剪）=后置写
+    //     安全跳过（BJ480 哨兵蒸发同相）。离屏燃烧玩家原版不绘不尘,本仓 update 侧
+    //     恒掷（1/4 门掷流为 Math.random 非种子流,不入世界掷流）。
+    const burnDustSpawn = (type: number, scale: number, vyBias: number): void => {
+      const d = game.dust?.spawn(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+        type, this.vx * 0.4, this.vy * 0.4, 100, null, scale) as
+        { noGravity: boolean; vx: number; vy: number } | null | undefined;
+      if (d) {
+        d.noGravity = true;              // :1075/:1090/:1244/:1284
+        d.vx *= 1.8; d.vy *= 1.8;        // :1076/:1091/:1245/:1285（含 NewDust 抖动整体×1.8）
+        d.vy -= vyBias;                  // :1077/:1092 −0.5 / :1246 −0.75
+      }
+    };
+    if (this.buffs.has(BuffType.OnFire)) {
+      if (world.seedFlags.vampireSeed === true) {
+        // :1047-1066 vampireSeed 特档：每拍 5 粒（盒 +10）
+        for (let i = 0; i < 5; i++) {
+          const d = game.dust?.spawn(this.x - 2, this.y - 2, this.w + 10, this.h + 10,
+            6, this.vx * 0.4, this.vy * 0.4, 100, null, i === 0 ? 1.2 : 3) as
+            { noGravity: boolean; vx: number; vy: number } | null | undefined;
+          if (d) {
+            d.noGravity = true;          // :1055
+            d.vx *= 2.3; d.vy *= 2.3;    // :1056
+            d.vy -= 0.8;                 // :1057
+            if (i === 0) { d.vx *= 0.5; d.vy -= 1.5; d.noGravity = false; }  // :1058-1062
+          }
+        }
+      } else if (Math.random() < 0.25) {  // :1067 Main.rand.Next(4)==0
+        burnDustSpawn(6, 3, 0.5);
       }
     }
+    if (this.buffs.has(BuffType.OnFire3) && Math.random() < 0.25) burnDustSpawn(6, 3, 0.5);   // :1084-1094
+    if (this.buffs.has(BuffType.Burning)) burnDustSpawn(6, 2, 0.75);                          // :1239-1250 无掷门
+    if (this.buffs.has(BuffType.Frostburn) && Math.random() < 0.25) burnDustSpawn(135, 3, 0.5);      // :1253-1263
+    if (this.buffs.has(BuffType.Frostburn2) && Math.random() < 0.25) burnDustSpawn(135, 3, 0.5);     // :1266-1276
+    if (this.buffs.has(BuffType.CursedInferno) && Math.random() < 0.25) burnDustSpawn(75, 3, 0.5);  // :1279-1290
     // HurtTiles 接触伤害（Collision.cs:3128 + Player.cs:27296/28507）:
     // 尖刺/木尖刺/荆棘族直接伤害 + 流血,陨石/狱石族 Burning,沙族窒息,荆棘族触碰毁块。
     // 骑矿车时按坐骑盒采样（Mount.cs mounts[6]：玩家 hitbox 即车 20×52，
@@ -8369,6 +8450,15 @@ export class Player extends Entity {
           game, playerArmorPenOf(game), crit, 0, true);                         // :29036 ApplyDamageToNPC
       }
     }
+  }
+
+  /** ★BJ550 社交残影环采样出口（SW-FX36 载体 spX/spY 的只读快照）——
+   *  下砸过程残影（Renderer.drawPlayer → downDashGhostStamps）消费面。
+   *  环语义/相位归 SW-FX36 原位（updateSocialShadow :16699-16726,fixedUpdate
+   *  头 :4159 每 tick 调）;传送/spawn 冲洗不建模已由 SW-RB14d 勘误定谳
+   *  （差 ≤1 拍,原版本相）。分配面 = 仅下砸中每帧 3 对象（渲染路径既有量级）。 */
+  shadowRing(): Array<{ x: number; y: number }> {
+    return [{ x: this.spX[0], y: this.spY[0] }, { x: this.spX[1], y: this.spY[1] }, { x: this.spX[2], y: this.spY[2] }];
   }
 
   deadCellsBeheadedStep(game: GameHooks): void {

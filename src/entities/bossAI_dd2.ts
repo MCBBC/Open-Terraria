@@ -2554,11 +2554,13 @@ interface Walker107P {
   accel: number;                // num24（:63461）
   damp: number;                 // num25（:63462）
   noWalkAccel: boolean;         // flag24 远程族:走路加速改挂攻击块尾（:63632/:63950）
+  noRetarget: boolean;          // flag20 骷髅档:跳过嘶叫/重定向/静止折返块（:64264）
   aimAbove: number;             // flag15 阈值:ai[1] > 此值时持续重定向（各族字面量）
 }
 
-/** FighterUsesDD2PortalAppearEffect（NPCID.cs:4793）：出生 60t 渐显 + 30t 出世音 */
-const W107_PORTAL_FADE = new Set([552, 553, 554, 555, 556, 557, 561, 562, 563,
+/** FighterUsesDD2PortalAppearEffect（NPCID.cs:4793）：出生 60t 渐显 + 30t 出世音。
+ *  ★BJ542 导出仅供判别测试对账原版 19 键全集（NPCID.cs:4797 Factory.BoolSet 字面集） */
+export const W107_PORTAL_FADE = new Set([552, 553, 554, 555, 556, 557, 561, 562, 563,
   564, 565, 568, 569, 570, 571, 572, 573, 576, 577]);
 
 /** 穿墙相位标记（原版 noGravity+noTileCollide 静态位 → WeakSet 落盘;flag2 滞回） */
@@ -2580,7 +2582,7 @@ function walker107Params(e: Enemy, x: number[]): Walker107P {
     arc: 0.1, jitter: 0.5, shots: 1, speed: 11, startRange: 700,
     fireOnWindup: false, jump: false, jumpT: 32, jumpMinT: 15, jumpVy: 9,
     maxSpd: 1, accel: 0.07, damp: 0.8,
-    noWalkAccel: false, aimAbove: 0,
+    noWalkAccel: false, noRetarget: false, aimAbove: 0,
   };
   // 出生 60t 内移速爬坡（各族共通,cs:63624-63627/:63674-63678/:63842-63845/:63964-63967）
   const rampAccel = (): boolean => {
@@ -2628,6 +2630,10 @@ function walker107Params(e: Enemy, x: number[]): Walker107P {
       break;
     }
     case 566: case 567:                    // 旧日骷髅（cs:64042-64117）——无攻击,落地渐显
+      // ★BJ542 型别锚（cs:64263-64264）：flag24=true（不吃走路加速——落地后原地驻立）
+      // + flag20=true（跳过嘶叫/重定向/静止折返块——面朝出生向,卡位传送沿原向瞬移）。
+      // 曾缺两旗 → 骷髅落地后自行走向晶体 + 每拍重定向（型别面偏离原版）。
+      p.noWalkAccel = true; p.noRetarget = true;
       break;
     case 568: case 569: {                  // 枯萎兽（cs:63847-63936）——灵气态
       p.windup = 110; p.accel = 0.16; p.damp = 0.7; p.maxSpd = 1.4;
@@ -3030,8 +3036,8 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     }
   }
   // ---- 嘶叫 + 重定向 / 静止折返（1457 :64790-64836;flag20 刹车期整块跳过;
-  //      传送 tick 跳过余段 = 原版 :64689 return） ----
-  if (!windupBraking && !teleported) {
+  //      骷髅 566/567 flag20 恒真（:64264）→ 整块跳过;传送 tick 跳过余段 = 原版 :64689 return） ----
+  if (!windupBraking && !teleported && !p.noRetarget) {
     if (e.ai3 < 30) {
       // flag21 = DD2Event.EnemiesShouldChasePlayers（DD2Event.cs:115-123 恒真）
       if (p.scream && p.screamOneIn > 0 && rnd(p.screamOneIn) === 0) {
@@ -3102,6 +3108,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     }
     // 穿墙飞行（cs:64846-64918）：水平 Lerp 朝目标 + 三档垂直伺服
     if (W107_PORTAL_FADE.has(id) && e.spawnAlpha < 60) e.spawnAlpha += 20;   // :64852-64858
+    if (phase) x[3] = 40;   // ★BJ542 :65060 localAI[3]=40f 钉值——相位期间把出生爬坡计数
+                            // 钉回 40，出生渐显块（x[3]<60 门）保持活臂 → 相位结束后 α 以
+                            // 5/t 回落归零（原版相位幽灵态=暂态）；曾缺钉 → x[3] 爬过 60 后
+                            // 渐显块永久失活，首相位后 α 恒 60 微透明不复原（判别 tests/bj542）
     const wasGrounded = e.vy === 0;
     if (tgt && Math.abs(tgt.cx - e.cx) > 200) {
       e.facing = sign(tgt.cx - e.cx);

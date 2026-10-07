@@ -144,11 +144,12 @@ void main() {
 //  FS 需要 vTile/vNoise varying ⇒ VS 必须声明 out——pos/uv/col 三属性逐字同 PRECIP_VS,
 //  location 3=aTile(vec2)/4=aNoise(float),stride 44B（11 float,方案 H §3.2）。
 //  aTile = 像素的世界 tile 连续坐标（world px/16,VS 线性插值逐像素精确——world→device
-//  仿射(b=c=0 门)复合线性插值仍精确=场世界锚定）;aNoise = CPU 逐节点 noise-sin
-//  （§2.2 定谳:uint hash→float 高位损失 256 ⇒ sin 相位差 25.6rad 位等不可达 ⇒ hash+sin
-//  留 CPU 经属性上传;FS 侧 glitter(§2.5)消费位=三期 sparkle 段——★三期（2026-10-02）
-//  已接通:uSpark=1 段（liqspark: 键族）main 内 glitter(vTile,vNoise) 逐像素调制;
-//  基体主式(§2.4)不读）。 */
+//  仿射(b=c=0 门)复合线性插值仍精确=场世界锚定）;aNoise = sparkle 段（liqspark:）载
+//  【四角 glitter 终值】（★四期修正 2026-10-07:CPU GetShimmerGlitterOpacity 体部式
+//  逐角求值——含钳制——经属性上传,FS 只消费硬件 varying 插值=原版顶点色插值 1:1;
+//  旧「CPU 逐节点 noise-sin+FS 内 remap 链逐像素」=插值后钳制≠原版钳制后插值,
+//  角噪声异号格系统性变暗+折痕高频化=果冻感回归定谳面,见 LIQSHIM_FS uSpark 支注）;
+//  基体段(§2.4)不读本属性（槽位沿用,环布局零变更）。 */
 const LIQSHIM_VS = `#version 300 es
 uniform vec2 uCanvas;
 layout(location=0) in vec2 aPos;   // 设备 px（顶点已含世界变换,VanillaLiquidRenderer 构建）
@@ -175,10 +176,16 @@ void main() {
 //  单点写入=逐 draw 生效）:
 //   uSpark=0（liqshim: 基体段）out = (tex_p.rgb × field × vCol.a, tex_p.a × vCol.a)
 //     ——顶点 rgb 不进乘链（§2.4"乘 vCol.rgb 退役"）,环数据 rgb===a 预乘恒等（§3.3）。
-//   uSpark=1（liqspark: 三期亮纹段,2026-10-02）out = (tex_p.rgb × vCol.rgb × g,
-//     tex_p.a × vCol.a × g),g=glitter(vTile,vNoise)——亮纹透明度逐像素化（替换 CPU
-//     sparkGa 四角均值近似;顶点 rgb=hue×α 预乘族,a 只载 opacity;保留域=flag 表层
-//     照旧 CPU ADD 段）。
+//   uSpark=1（liqspark: 三期亮纹段,2026-10-02;★四期修正 2026-10-07 观感回归定谳）
+//     out = (tex_p.rgb × vCol.rgb × g, tex_p.a × vCol.a × g),g=vNoise=aNoise 槽
+//     （四角 glitter 终值,CPU GetShimmerGlitterOpacity 体部式逐角求值含钳制）的
+//     GPU varying 硬件插值 ≙ 原版 SetShimmerVertexColors_Sparkle（LiquidRenderer.cs
+//     :732-743）glitter 终值置位 quad 角 + TileBatch.cs:175-187 索引表（顶点
+//     TL,TR,BR,BL/两三角 (TL,TR,BR)+(TL,BR,BL)=对角线 TL-BR——本项目环同布局）顶点色
+//     插值 1:1。三期旧式 FS 内 remap(remap(w)×插值噪声) 逐像素=【插值后钳制】≠原版
+//     【钳制后插值】:四角噪声异号格（常态）E[max(Σw·n,0)] < Σw·E[max(n,0)]=插值均值
+//     幅值系统性折半+钳制零线折痕高频化=软斑破碎——用户实报「果冻感/下水波动变小」
+//     物理面（A/B 活机+冻结双定谳:基体场两臂逐像素等价 B/A≈1.03,差域全集中亮纹）。
 //  ★precision highp float 强制（§5 风险2:mediump 漏入=离线场值 readback 闸抓）。 */
 const LIQSHIM_FS = `#version 300 es
 precision highp float;
@@ -196,19 +203,11 @@ const vec3 SHIM_DV = vec3(0.80392158, 0.80392158, 1.0) - SHIM_A; // lerp 端点�
 float shimmerWave(vec2 tile) {
   return sin(((tile.x + tile.y / 6.0) / 10.0 - uTVis / 360.0) * TAU);
 }
-float remap(float v, float a, float b, float c, float d) {
-  return c + (d - c) * clamp((v - a) / (b - a), 0.0, 1.0);
-}
-float glitter(vec2 tile, float noiseSinV) {
-  return remap(remap(shimmerWave(tile), -0.5, 1.0, 0.0, 0.35) * noiseSinV, 0.0, 0.5, 0.0, 1.0);
-}
 void main() {
   vec4 c = texture(uTex, vUv);
   if (uSpark > 0.5) {
-    // ★三期 sparkle 亮纹透明度逐像素化（§2.5 逐式）:g 消费 vTile（波场逐像素）
-    //  ×vNoise（CPU 逐节点 aNoise 顶点插值,方案 H §3.2——两三角逐线性=GPU varying
-    //  语义≙原版 SpriteBatch 顶点插值域）
-    float g = glitter(vTile, vNoise);
+    // ★四期修正（2026-10-07 果冻感回归定谳,见类注）:g=四角 glitter 终值的硬件插值
+    float g = vNoise;
     outColor = vec4(c.rgb * vCol.rgb * g, c.a * vCol.a * g);
   } else {
     float w = shimmerWave(vTile);

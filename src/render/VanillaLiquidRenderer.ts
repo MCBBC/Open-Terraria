@@ -210,9 +210,13 @@ function ensureShimRings(): void {
   _spShimMeta = new Float32Array(LIQ_RING_CAP * 4);
 }
 let _shimN = 0;
-/** ★三期 sparkle 亮纹环（stride 11 同构独立环;2026-10-02 逐像素化刀）:
+/** ★三期 sparkle 亮纹环（stride 11 同构独立环;2026-10-02 逐像素化刀;★四期修正
+ *  2026-10-07:aNoise 槽改载四角 glitter 终值,FS uSpark=1 支消费硬件 varying 插值=
+ *  原版 SetShimmerVertexColors_Sparkle（LiquidRenderer.cs:732-743）顶点色插值 1:1
+ *  ——旧 FS 内 remap 链逐像素=插值后钳制≠原版钳制后插值,系统性变暗+折痕高频化=
+ *  果冻感回归定谳面）:
  *  body 域（c13cOn ∧ flag=false）sparkle ADD quad 改走 liqshimmer 程序 uSpark=1 段
- *  （FS glitter(vTile,vNoise) 逐像素调制）——与基体环分离的理由:①段纹理互异
+ *  （亮纹透明度=顶点插值域）——与基体环分离的理由:①段纹理互异
  *  （白度带 vs 水表）②收口时序互异（基体段随发射位收口,亮纹段随 ADD 族 pass 尾
  *  flushAddRuns2DAndEmit 收口——同环会互相打断=liqpolish 逐 sparkle 收口碎段病同型）。
  *  键族 liqspark:（与旧 _sp ADD 段同键=同一白度带纹理缓存条目复用）;uSpark 分派
@@ -701,20 +705,23 @@ function emitShimRun(bat: LiqBatchEmit, s0: number, nQ: number,
 }
 
 /** ★三期 sparkle 亮纹 quad 入环（shimQuad 同构 stride-11 版,目标=_spShimRing;
- *  2026-10-02 逐像素化刀）。与基体 shimQuad 的三点差:
+ *  2026-10-02 逐像素化刀;★四期修正 2026-10-07:aNoise 槽载 gl4=四角 glitter 终值
+ *  （glitter4FromWaves=GetShimmerGlitterOpacity 体部式逐角,含钳制——原版
+ *  SetShimmerVertexColors_Sparkle :732-743 置位 quad 角的值）,GPU varying 硬件插值
+ *  =原版 TileBatch 顶点色插值 1:1（TileBatch.cs:175-187 对角线 TL-BR=本环布局同））。
+ *  与基体 shimQuad 的三点差:
  *  ①rgb = hue×a（预乘族保持——ADD 段顶点色契约;hue=16 档量化表值,色相不迁移 §2.6）,
- *    a 只载 opacity（sparkGa 均值退役为纯发射门——亮纹调制进 FS glitter(vTile,vNoise)
- *    逐像素,§2.5 逐式）;
+ *    a 只载 opacity（sparkGa 均值退役为纯发射门——亮纹调制=四角终值顶点插值）;
  *  ②溢出置 _addOverflow（ADD 环族语义——fg 复用账重放本环,溢出即失效面一致）;
  *  ③aTile 角=基体 quad 同域（dst 矩形/16）——body 域（flag=false=满格内部态）恒
- *    整格无裁剪无 bob ⇒ aTile 角=原版节点 (x,y)..(x+1,y+1) 精确（逐像素波场=原版
- *    节点语义;ns 角序 TL,TR,BL,BR=shimQuad 同）。
+ *    整格无裁剪无 bob ⇒ aTile 角=原版节点 (x,y)..(x+1,y+1) 精确（gl4 角序
+ *    TL←gl[0]/TR←gl[1]/BR←gl[3]/BL←gl[2]=shimQuad 同映射=原版节点置位语义）。
  *  hue/hueOff=16 档色相表行（_spCols 同源 sparkHueRGB()）。 */
 function sparkleShimQuad(
   sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
   wX0: number, wY0: number, wW: number, wH: number,
   dx0: number, dy0: number, dw: number, dh: number, a: number,
-  ns: Float64Array, hue: Float32Array, hueOff: number,
+  gl4: Float64Array, hue: Float32Array, hueOff: number,
 ): boolean {
   if (_spShimN >= LIQ_RING_CAP) { _addOverflow = true; return false; }
   ensureShimRings();
@@ -729,27 +736,27 @@ function sparkleShimQuad(
   // v0 TL
   R[o] = dx0; R[o + 1] = dy0; R[o + 2] = ua; R[o + 3] = va;
   R[o + 4] = r0; R[o + 5] = g0; R[o + 6] = b0; R[o + 7] = a;
-  R[o + 8] = tx0; R[o + 9] = ty0; R[o + 10] = ns[0];
+  R[o + 8] = tx0; R[o + 9] = ty0; R[o + 10] = gl4[0];
   // v1 TR
   R[o + 11] = x1; R[o + 12] = dy0; R[o + 13] = ub; R[o + 14] = va;
   R[o + 15] = r0; R[o + 16] = g0; R[o + 17] = b0; R[o + 18] = a;
-  R[o + 19] = tx1; R[o + 20] = ty0; R[o + 21] = ns[1];
-  // v2 BR（ns[3]=节点 (x+1,y+1)——数组序 TL,TR,BL,BR）
+  R[o + 19] = tx1; R[o + 20] = ty0; R[o + 21] = gl4[1];
+  // v2 BR（gl4[3]=节点 (x+1,y+1)——数组序 TL,TR,BL,BR）
   R[o + 22] = x1; R[o + 23] = y1; R[o + 24] = ub; R[o + 25] = vb;
   R[o + 26] = r0; R[o + 27] = g0; R[o + 28] = b0; R[o + 29] = a;
-  R[o + 30] = tx1; R[o + 31] = ty1; R[o + 32] = ns[3];
+  R[o + 30] = tx1; R[o + 31] = ty1; R[o + 32] = gl4[3];
   // v0'（第二三角首顶点=复用 v0——TRIANGLES 无索引环,重写）
   R[o + 33] = dx0; R[o + 34] = dy0; R[o + 35] = ua; R[o + 36] = va;
   R[o + 37] = r0; R[o + 38] = g0; R[o + 39] = b0; R[o + 40] = a;
-  R[o + 41] = tx0; R[o + 42] = ty0; R[o + 43] = ns[0];
+  R[o + 41] = tx0; R[o + 42] = ty0; R[o + 43] = gl4[0];
   // v2'（复用 v2）
   R[o + 44] = x1; R[o + 45] = y1; R[o + 46] = ub; R[o + 47] = vb;
   R[o + 48] = r0; R[o + 49] = g0; R[o + 50] = b0; R[o + 51] = a;
-  R[o + 52] = tx1; R[o + 53] = ty1; R[o + 54] = ns[3];
-  // v3 BL（ns[2]=节点 (x,y+1)）
+  R[o + 52] = tx1; R[o + 53] = ty1; R[o + 54] = gl4[3];
+  // v3 BL（gl4[2]=节点 (x,y+1)）
   R[o + 55] = dx0; R[o + 56] = y1; R[o + 57] = ua; R[o + 58] = vb;
   R[o + 59] = r0; R[o + 60] = g0; R[o + 61] = b0; R[o + 62] = a;
-  R[o + 63] = tx0; R[o + 64] = ty1; R[o + 65] = ns[2];
+  R[o + 63] = tx0; R[o + 64] = ty1; R[o + 65] = gl4[2];
   const m = _spShimN * 4;
   M[m] = sx; M[m + 1] = sy; M[m + 2] = sw; M[m + 3] = shSrc;
   _spShimN++;
@@ -757,18 +764,18 @@ function sparkleShimQuad(
 }
 
 /** ★三期 sparkle 亮纹段 2D 降级重放（replayLiqShimRun2D 同构;宁回退不丢精灵）。
- *  'lighter' ADD 语义;亮纹 α=FS glitter 公式的 CPU 同式 2×2 子块中心求值
- *  （aTile 角线性插值→shimmerWave→remap×remap;aNoise 角双线性——顶点插值同域;
- *  tVis=visEffectFrames() 渲染段内不变判例）。降级帧色相失真登记:重放直画白度带
- *  （顶点色 hue 无法进 2D drawImage 调制链,染色带重造需 per-hue 缓存查表——灾难
- *  路径 census 有界,白闪 vs 彩闪偏差登记）。 */
+ *  'lighter' ADD 语义;亮纹 α=四角 glitter 终值（aNoise 槽,★四期修正 2026-10-07）
+ *  的 2×2 子块中心双线性——降级帧无 GPU varying,双线性=顶点插值的最优 2D 近似
+ *  （GPU 臂=两三角逐线性,亚 LSB 域登记同 shimCornerColors 判例）;tVis 不再消费
+ *  （终值已在发射时算定,相位冻结于发射帧=降级帧单帧域,登记）。降级帧色相失真
+ *  登记:重放直画白度带（顶点色 hue 无法进 2D drawImage 调制链,染色带重造需
+ *  per-hue 缓存查表——灾难路径 census 有界,白闪 vs 彩闪偏差登记）。 */
 function replayLiqSparkShimRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
   tex: CanvasImageSource): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = 'lighter';
-  const tVis = visEffectFrames();
   const D = _spShimRing!;
   for (let q = 0; q < quads; q++) {
     const o = (startQuad + q) * LIQ_SHIM_QUAD_FLOATS;
@@ -776,8 +783,8 @@ function replayLiqSparkShimRun2D(ctx: CanvasRenderingContext2D, startQuad: numbe
     const ga = D[o + 7];
     const dw = D[o + 11] - D[o], dh = D[o + 56] - D[o + 1];   // v1.x−v0.x / v3(BL).y−v0.y
     if (ga <= 0 || dw <= 0 || dh <= 0) continue;
-    const tx0 = D[o + 8], ty0 = D[o + 9], tx1 = D[o + 19], ty3 = D[o + 64];
-    // aNoise 角:v0=ns[0]/v1=ns[1]/v2(BR)=ns[3]/v3(BL)=ns[2]（sparkleShimQuad 写序）
+    // aNoise 槽=v0=gl[0]/v1=gl[1]/v2(BR)=gl[3]/v3(BL)=gl[2]（sparkleShimQuad 写序;
+    // ★四期:值=四角 glitter 终值,双线性即降级帧调制）
     const n00 = D[o + 10], n10 = D[o + 21], n01 = D[o + 65], n11 = D[o + 32];
     const sxT = _spShimMeta![m], syT = _spShimMeta![m + 1], swT = _spShimMeta![m + 2], shT = _spShimMeta![m + 3];
     const rx = swT / dw, ry = shT / dh;   // texel/设备 px 比（子块源矩形折算）
@@ -787,10 +794,7 @@ function replayLiqSparkShimRun2D(ctx: CanvasRenderingContext2D, startQuad: numbe
         const bw = Math.min(subW, dw - bx * subW), bh = Math.min(subH, dh - by * subH);
         if (bw <= 0 || bh <= 0) continue;
         const u = (bx * subW + bw / 2) / dw, v = (by * subH + bh / 2) / dh;
-        const tx = tx0 + (tx1 - tx0) * u, ty = ty0 + (ty3 - ty0) * v;
-        const nB = n00 * (1 - u) * (1 - v) + n10 * u * (1 - v) + n01 * (1 - u) * v + n11 * u * v;
-        const wv = Math.sin(((tx + ty / 6) / 10 - tVis / 360) * Math.PI * 2);
-        const g = remap(remap(wv, -0.5, 1, 0, 0.35) * nB, 0, 0.5, 0, 1);
+        const g = n00 * (1 - u) * (1 - v) + n10 * u * (1 - v) + n01 * (1 - u) * v + n11 * u * v;
         const a = ga * g;
         if (a <= 0) continue;
         ctx.globalAlpha = a;
@@ -2197,8 +2201,12 @@ export function drawVanillaLiquids(
           if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
         }
         if (doSpark) {
-          // ★三期（2026-10-02 逐像素化刀）body 域分流:c13cOn ∧ flag=false（满格内部态）
-          //  亮纹透明度改 FS glitter(vTile,vNoise) 逐像素（设计案 §2.5 逐式;uSpark=1 段）
+          // ★三期（2026-10-02）body 域分流+★四期修正（2026-10-07 果冻感回归定谳）:
+          //  c13cOn ∧ flag=false（满格内部态）亮纹透明度=uSpark=1 段顶点插值域
+          //  （四角 glitter 终值经 aNoise 槽上传,FS 消费硬件 varying=原版
+          //  SetShimmerVertexColors_Sparkle 顶点色插值 1:1;旧 FS 内 remap 链逐像素=
+          //  插值后钳制,角噪声异号格 E[max(Σw·n,0)]<Σw·E[max(n,0)] 系统性变暗+折痕
+          //  高频化=用户实报「果冻感/下水波动变小」物理面）
           //  ——sparkGa 四角均值在本域退役为【纯发射门】（doSpark 判据不变=发射 tile 集
           //  不变,顶点 α 只载 opacity）。保留域（不迁移,§0/§2.6）:flag=true 表层/边缘
           //  常驻域（原版 glitter≡0.5,均值即精确值）+色相 16 档量化/帧带选择（顶点色/
@@ -2222,9 +2230,13 @@ export function drawVanillaLiquids(
                     + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
                   // uTVis 段级单点（基体支本 tile 已写同值;此处防御性保单点契约）
                   setLiqShimmerTVis(tVis);
+                  // ★四期修正（2026-10-07）:_glit4=四角 glitter 终值（本支 wantSpark∧!flag
+                  //  域恰已求值）——aNoise 槽载终值,FS 消费硬件 varying 插值=原版
+                  //  SetShimmerVertexColors_Sparkle 顶点色插值 1:1（旧 _shimNs 噪声 sin
+                  //  上传+FS 内 remap 链=插值后钳制,系统性变暗定谳面）
                   if (sparkleShimQuad(sx, sSrcY, sw, sh, band.width, band.height,
                     dstX, dstY, sw, sh, dstX * devSX + devTE, dstY * devSY + devTF,
-                    sw * devSX, sh * devSY, gaO, _shimNs, sparkHueRGB(), hueIdx * 3)) {
+                    sw * devSX, sh * devSY, gaO, _glit4, sparkHueRGB(), hueIdx * 3)) {
                     _spShimQuads++;
                     sparkCpu = false;
                   }

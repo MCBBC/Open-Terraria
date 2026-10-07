@@ -75,8 +75,8 @@ export interface OptionsData {
    *  任何档位都不因渲染落后而跳绘制。★Subtle=确定性节拍对齐(2026-09-28 调度面修复刃
    *  重译):1457 默认 improvedSubtleFrameSkip=true 的真实语义 = EndDraw 忙等钳 60Hz
    *  present 网格(Main.cs:62624-62644),Update 每循环照跑、无绘制抑制——本仓以
-   *  帧序计数落拍移植(每 k 个 vsync 渲一次,容量+frameCap 选拍,滞回防震荡,
-   *  FrameBeat.ts);旧"0 步进帧 SuppressDraw"译法(:17182-17193,仅 Subtle&&
+   *  时间门移植(★v9.8 根治刀:shouldRender=now-lastRenderAt≥1000/cap-GUARD,k 迁移
+   *  退役,FrameBeat.ts 头注 v9.8);旧"0 步进帧 SuppressDraw"译法(:17182-17193,仅 Subtle&&
    *  !improved 旧路径)已退役。Off/On=跟随 rAF 自由渲染(off=逃生门;On 的 XNA
    *  固定时间步 :17133-17137 无 Web 对应物,两态同效)。默认 Subtle(原版同) */
   frameSkipMode: 'off' | 'on' | 'subtle';

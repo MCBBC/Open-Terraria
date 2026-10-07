@@ -262,7 +262,15 @@ def({ key: 'v_477_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0
 // drop:3215（2026-09-07 掉落全表对账 pin style0）：KillTile case 380 `3215+frameY/18`
 // （:65726-65729）八档 3215-3222（DayBloom..FireBlossomPlanterBox）——曾 drop:null 走
 // place_v_ 回收;逐档未建模=登记债（同 v_137_traps「只回填最常见档」先例）
-def({ platform: true, key: 'v_380_planter_boxes', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: 3215, vanilla: { sheet: 380, frame: 'auto' } });
+// ★BJ548（2026-10-07）：frame 'auto'→'style'——种植箱家族（19/239/427/435-439 同族全
+//  'style',380 系漏网孤例）。'auto'=TEdit blend 仿真忽略存储帧 → 放置写面（tryPlace
+//  generic 循环仅对 frame:'style' 走 framedCellFrame 消费 placeStyle）恒写 (0,0)+绘制
+//  恒采样 style0 行带 = 全 8 材质种植盆放去都是太阳花盆（用户实报）。原版语义：
+//  tileFrameImportant[380]=true（Main.cs:7771）存储帧直绘——frameX=连接档{0,18,36,54}
+//  （TileFrame case 380,WorldGen.cs:86575-86646）、frameY=18*style 材质行（PlaceTile
+//  case 380 :60717-60721;Tiles_380 4 列×8 行=frameFromFrame 同构）。挂
+//  furnitureStyleBase case 380=[0,style*18]（FurnitureStyle.ts:25 既有档,首次可达）。
+def({ platform: true, key: 'v_380_planter_boxes', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: 3215, vanilla: { sheet: 380, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_230_crispy_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#834F0D', blend: true, drop: 1127, vanilla: { sheet: 230, frame: 'auto' } });
 def({ key: 'v_562_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: 4564, vanilla: { sheet: 562, frame: 'auto' } });
 def({ key: 'v_371_pink_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F965BD', blend: true, drop: 3113, vanilla: { sheet: 371, frame: 'auto' } });

@@ -1331,7 +1331,9 @@ export class ZenithSword extends Entity {
     const fbSink = (r as unknown as {
       queueProjFullbright?: (fn: (fn2: CanvasRenderingContext2D) => void) => void;
     }).queueProjFullbright;
-    if (typeof fbSink === 'function') { fbSink(paint); return; }
+    // ★天顶剑崩溃修（2026-10-07 用户实报）：方法引用裸调丢 this（严格模式 undefined）
+    //  → this.projFullbrightQueue 抛错=帧循环停机。必须经宿主对象调用（this=r）。
+    if (typeof fbSink === 'function') { (r as unknown as { queueProjFullbright: (fn: (fn2: CanvasRenderingContext2D) => void) => void }).queueProjFullbright(paint); return; }
     paint(ctx);
   }
 }
