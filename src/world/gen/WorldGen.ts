@@ -8,6 +8,7 @@
 // i/passCount ⇒ 长 pass 内冻结、跨槽瞬跳（用户实报"中间态被跳过"）。
 // ★零 RNG 面：进度注入全是旁路观察（不掷骰不写 store），金标链不受扰。
 import { RNG, translateSeed } from '../../core/rng';
+import { resetKillTileGuard } from './vanilla/HalfBrickPass';
 import { GenProgress, makeThrottledSink } from './GenProgress';
 
 /** 进度回调签名：overall=加权总进度(0..1)；local=当前原版 pass 内部 Value(0..1)，
@@ -551,6 +552,13 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
     try {
       await passes[i].run(ctx, () => {});
     } catch (err) {
+      // ★三百十六:栈溢出优雅降级(mod 生成 pass 摆的物块与原版帧循环交互曾致
+      //  HalfBrickPass check2x2↔tileFrame 互递归溢出=整个世界生成失败;降级=
+      //  该 pass 余段跳过(该区少量未帧化块,仅观感),世界照常完成+err 留痕)
+      if (err instanceof RangeError) {
+        console.error(`[worldgen] pass ${passes[i].name} 栈溢出——余段跳过(优雅降级):`, (err as Error)?.message?.slice(0, 80));
+        continue;
+      }
       // pass 级错误包一层名字——worker 端最小化栈只有 "Maximum call stack size
       // exceeded" 时无从定位（2026-08-18 用户报 21% 栈溢出）；重抛保原栈
       const wrapped = new Error(`[pass ${i + 1}/${passes.length} ${passes[i].name}] ${(err as Error)?.message ?? err}`);
@@ -1465,6 +1473,7 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
     chests: [],
   };
   (gs as { mods?: typeof gsMods }).mods = gsMods;   // ★二百七十八刀:挂回 gs(mod pass 读取面不变;原 cast 表达式赋值改显式两步修 never[] 推断)
+  resetKillTileGuard();   // ★三百十六:级联护栏本局复位
   for (const pass of genPasses) {
     rng.reseed(gs.seed);
     prog?.beginVan(pass.name);

@@ -73,9 +73,11 @@ describe('JourneyBrowser 授予映射（vid→def 全量）', () => {
       expect(assortedPlaceOk(false, ct, 0, true)).toBe(false);
       expect(assortedPlaceOk(false, ct, -1, false)).toBe(false); // 泥土以外基座拒
     }
-    // 法杖二员:staff 特权含空格
+    // 法杖二员:促草净效应=活跃泥土（★BJ562 定谳:空格/石/灰砖 PlaceTile(2) 内门恒拒=no-op;
+    // 石/灰砖→苔藓=StaffOfRegrowthCheck 死代码 1457 零调用点）
     for (const vid of [213, 5295]) {
-      expect(assortedPlaceOk(true, vanillaItemCreateTile(vid), 0, true)).toBe(true);
+      expect(assortedPlaceOk(true, vanillaItemCreateTile(vid), 0, true)).toBe(false);
+      expect(assortedPlaceOk(true, vanillaItemCreateTile(vid), 0, false)).toBe(true);
     }
   });
 });

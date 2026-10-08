@@ -2,8 +2,9 @@
 //   根因 = vi_213 createTile=2（草 tile）走通用"铺空格"放置，而原版语义是
 //   【转化已有块】（BlockPlacementForAssortedThings :40379-40440）→ 指向泥土
 //   时目标格非空 → 通用路径静默 return = 无效果。
-//   修：草族转化放置（法杖可转泥土/石/灰砖；种子各族按表）+ 药草采收全链
-//   （case 83/84 掉落 1:1 + 法杖加成 + 盆栽补种 + 挥割加成）。
+//   修：草族转化放置（★BJ562 定谳 2026-10-08：法杖促草净效应=仅活跃泥土→草；
+//   石/灰砖→苔藓=StaffOfRegrowthCheck 死代码 1457 零调用点；种子各族按表）+
+//   药草采收全链（case 83/84 掉落 1:1 + 法杖加成 + 盆栽补种 + 挥割加成）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS, T } from '../src/data/tiles';
@@ -88,14 +89,19 @@ function col(w: World, sheet: number, x = 10, y = 20): World {
 }
 
 describe('再生法杖/草族转化放置（BlockPlacementForAssortedThings :40379-40440）', () => {
-  it('法杖 213：泥土/石头/灰砖 → 草（createTile=2 的"凭空种草"）', () => {
-    for (const sheet of [0, 1, 38]) {
+  it('法杖 213：泥土→草；石头/灰砖 no-op（★BJ562 定谳 2026-10-08：PlaceTile(2) 内门 :59876 只放行活跃泥土；石/灰砖→苔藓=StaffOfRegrowthCheck 死代码 1457 零调用点）', () => {
+    for (const sheet of [0]) {
       const drops: Array<[string, number]> = [];
       const w = col(new World(30, 40, 15, 'open'), sheet);
       const g = shell(w, drops, 213);
       g.tryPlace(10, 20, defOf(213));
       expect(w.store.get(10, 20), `sheet ${sheet}`).toBe(GRASS);
       expect(drops.length, '法杖非消耗无掉落').toBe(0);
+    }
+    for (const sheet of [1, 38]) {
+      const w = col(new World(30, 40, 15, 'open'), sheet);
+      shell(w, [], 213).tryPlace(10, 20, defOf(213));
+      expect(w.store.get(10, 20), `sheet ${sheet}`).not.toBe(GRASS);   // 原版净 no-op
     }
   });
 

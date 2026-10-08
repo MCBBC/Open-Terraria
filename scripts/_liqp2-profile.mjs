@@ -189,13 +189,17 @@ for (const arm of ARMS) {
     blocks[fnName] = { selfMs: selfUsTot / 1000, usPerTick, byOrig };
   }
 
-  // 块区间定义（TS 行,1-based → 0-based in gen2orig: origLine 是 0-based;2026-10-08 liqp2 后重钉）
+  // 块区间定义（TS 行,1-based → 0-based in gen2orig: origLine 是 0-based;
+  // 2026-10-08 液体核第三刀 liqp3 后重钉——liqp3 旗块/LUT 基建+主循环 LUT/at() 算术化
+  // 使行号整体后移~120;旧 liqp2 钉值已漂,本次按锚点（needsPrep(fills)结束/P1 结束/
+  // BJ77 守卫结束/bbox 结束/P2-P7 头注/texCache/fgReuse/liqp3 LUT 预析/flushRun 收尾/
+  // 斜面增强头注/浸润带调用）全量重对）
   const RANGES = [
-    ['resetFills', 1519, 1531], ['P1scan', 1611, 1673], ['rescan', 1674, 1737], ['bboxScan', 1738, 1760],
-    ['halfPrefill', 1761, 1776], ['P2vis', 1777, 1804], ['P3fall', 1805, 1836], ['P4walls', 1837, 1871],
-    ['P5smooth', 1872, 1889], ['P6fix', 1890, 1905], ['P7corner', 1906, 1926], ['texFor_setup', 1927, 1985],
-    ['wvCache', 1999, 2030], ['fgReuse', 2075, 2160], ['mainLoop', 2161, 2565],
-    ['slopeEnh', 2566, 2786], ['bandLoop', 2787, 3390],
+    ['resetFills', 1643, 1656], ['P1scan', 1690, 1754], ['rescan', 1759, 1819], ['bboxScan', 1821, 1842],
+    ['halfPrefill', 1846, 1857], ['P2vis', 1859, 1886], ['P3fall', 1888, 1918], ['P4walls', 1920, 1954],
+    ['P5smooth', 1956, 1973], ['P6fix', 1975, 1990], ['P7corner', 1992, 2012], ['texFor_setup', 2014, 2053],
+    ['wvCache', 2090, 2117], ['fgReuse', 2168, 2246], ['mainLoop', 2248, 2675],
+    ['slopeEnh', 2682, 2819], ['bandLoop', 2902, 3529],
   ];
   const sumRange = (blk, a, b) => {
     if (!blk) return 0;
@@ -228,7 +232,7 @@ for (const arm of ARMS) {
       if (v > 0.3) console.log(`  ${nm}: ${v.toFixed(1)} (${(v / ap.selfMs * 100).toFixed(0)}%)`);
     }
     // 块内 top 行
-    const topLines = Object.entries(ap.byOrig).filter(([ol]) => Number(ol) >= 1561 - 1 && Number(ol) <= 2442 - 1)
+    const topLines = Object.entries(ap.byOrig).filter(([ol]) => Number(ol) >= 2248 - 1 && Number(ol) <= 2675 - 1)
       .sort((x, y) => y[1] - x[1]).slice(0, 14)
       .map(([ol, t]) => `L${Number(ol) + 1}:${(t * ap.usPerTick / 1000).toFixed(1)}`);
     console.log(`[${arm}] aP topLines:`, topLines.join(' '));

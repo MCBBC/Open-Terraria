@@ -28,7 +28,8 @@ import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import {
-  quickStackToChests, moveCoinsIntoBank, nearbyBanksInRange, projectileBankHits,
+  quickStackToChests, quickStackIntoContainer, moveCoinsIntoBank,
+  nearbyBanksInRange, projectileBankHits,
 } from '../src/stats/QuickStacking';
 
 const iid = (vid: number): number => {
@@ -94,13 +95,12 @@ describe('BJ565-T1 弹幕段判别（GetBanksInRangeOf :44-58）', () => {
     const bank0 = Array<Slot>(40).fill(null);
     bank0[0] = { id: iid(8), stack: 1 };
     const banks: ReadonlyArray<Slot[] | null> = [bank0, null, null, null];
-    // 盒 (2303,470,30,24)：盒心格 ty=floor(482/16)=30 < 66-39=27? 否——盒心在界上方外,
-    // 但最近点 (2303, 470→y 钳到 470) 格 ty=29 < 27 出界……改用贴下缘场景：
-    // 玩家格 (105,66),盒下界 ty≤105。猪高抛在盒上方 y=700(格43<27?否,43∈[27,105] 在界内)——
-    // 直接钉：盒完全在界上外但底边 43 格贴界内 = 命中面与 petInRange 用户案同构
+    // 玩家中心 px(1680,1056)=格(105,66),盒 Y∈[27,105]。高抛猪悬停盒上方:
+    // 盒 (1665,700,30,24) 底缘 y=724 → 最近点 (1680,724) 格 ty=45 ∈ 盒 → 命中
+    // （盒心 ty=44 亦在界内——再抬高到最近点出界即不命中,判据=最近点非盒心）
     const highPig = [{ x: 1680 - 15, y: 700, w: 30, h: 24, bi: 0 }];
     expect(projectileBankHits(1680, 1056, highPig, banks, false)).toHaveLength(1);
-    // 底边再高 1 格（y=687→底 711 格 44 仍在界内）仍命中;顶到 ty=26（y=416,底 440 格 27>26? floor(440/16)=27… 取 y=400:底 424 格 26 <27 出界）
+    // 盒 (1665,400,30,24) 底缘 y=424 → 最近点格 ty=26 < 27 出界 → 不命中
     const tooHigh = [{ x: 1680 - 15, y: 400, w: 30, h: 24, bi: 0 }];
     expect(projectileBankHits(1680, 1056, tooHigh, banks, false)).toEqual([]);
   });
@@ -166,7 +166,6 @@ describe('BJ565-T3 透镜支与 5325 门', () => {
 // ===================== BJ565-T4 DepositAll/开箱面板对照面（ChestUI.cs:536/:657）=====================
 describe('BJ565-T4 DepositAll 面对照：开猪面板（chest=-2）路径本就覆盖,不回归', () => {
   it('quickStackIntoContainer(isBank) 对 banks[0] 实测入猪（开箱钮链）', () => {
-    const { quickStackIntoContainer } = await_import_quickest();
     const inv = new Inventory();
     const torch = iid(8);
     inv.slots[10] = { id: torch, stack: 5 };
@@ -176,11 +175,6 @@ describe('BJ565-T4 DepositAll 面对照：开猪面板（chest=-2）路径本就
     expect(bank0[0]!.stack).toBe(7);
     expect(inv.slots[10]).toBeNull();
   });
-
-  function await_import_quickest(): typeof import('../src/stats/QuickStacking') {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('../src/stats/QuickStacking');
-  }
 
   it('原版同款对照钉：空猪（无任何既有币）MoveCoins 净转 0（flag2 门 ChestUI.cs:1044-1047）', () => {
     const inv = new Inventory();

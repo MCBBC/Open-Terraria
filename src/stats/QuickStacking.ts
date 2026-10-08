@@ -9,6 +9,9 @@
 //   （:232 / 1456 :224）
 //   ① QuickStackToNearbyBanks：附近 bank（tile sheet 29 存钱罐 / 97 保险箱 /
 //      463 守护者熔炉 / 491 虚空vault，600px 盒扫 ×2num+1 方格,NearbyChests.cs:33-91）
+//      ★BJ565（2026-10-08）：GetBanksInRangeOf 弹幕段（:33-58）补齐——飞猪 525/
+//      Chester 960 → player.bank、透镜 734 → bank4（TryGetContainerIndex P.cs:80559）
+//      亦入目标集（projectileBankHits,弹段先、tile 段按 bi 续去重=共享 scratch 序）
 //      先 ChestUI.MoveCoins 合币 + VisualizeChestTransfer_CoinsBatch 可视化
 //      （:243-244 / 1456 :235-236），再走通用 Transfer（includeVoidBag=false；bank 径
 //      断言永零 blocked——bank 无 locked 面,:248）;
@@ -74,8 +77,10 @@ export type SlotArray = Array<{ id: number; stack: number; prefix?: number; favo
 export const ITEM_TRANSFER_PLAYER_TO_CHEST_BITS = 0b1111 << 24;
 
 /** bank 盒扫命中项：bi=槽位序（0 存钱罐/1 保险箱/2 守护者熔炉/3 虚空vault）、
- *  tx/ty=首遇锚格（Visualize* 的 item.position=(tx·16+16, ty·16+16) 取此）、items=bank 本体 */
-export interface BankScanHit { bi: number; tx: number; ty: number; items: SlotArray }
+ *  tx/ty=首遇锚格（Visualize* 的 item.position=(tx·16+16, ty·16+16) 取此）、items=bank 本体。
+ *  ★BJ565：弹幕段命中（projectileBankHits）另携 px/py=projectile.Center（PositionedChest
+ *  构造 :57 的 position 面原值）——fx 终点原版取弹心而非格锚,tile 段无此字段 */
+export interface BankScanHit { bi: number; tx: number; ty: number; items: SlotArray; px?: number; py?: number }
 
 /** NearbyChests.GetBanksInRangeOf tile 段（NearbyChests.cs:61-89 两版同文）1:1：
  *  num=(int)(range/16+2)=39（600px 缺省），玩家中心格 ±num 的 (2n+1)² 盒逐格；
@@ -118,6 +123,56 @@ export function nearbyBanksInRange(
       seen.add(hitBi);
       out.push({ bi: hitBi, tx: j, ty: k, items: bank });
     }
+  }
+  return out;
+}
+
+/** ★BJ565（2026-10-08 用户实报「钱币槽飞猪无法快速堆叠」）GetBanksInRangeOf 【弹幕段】
+ *  （NearbyChests.cs:33-58——原函数第一循环,tile 段 :61-89 之前）1:1：nearbyBanksInRange
+ *  只盖 tile 段,弹幕段缺席 = 飞猪存钱罐（525 FlyingPiggyBank,钱币槽 Item 3213 shoot）/
+ *  Chester（960）→ containerIndex -2 = player.bank、虚空透镜（734 VoidLens）→ -5 =
+ *  player.bank4（Projectile.TryGetContainerIndex Projectile.cs:80559-80566）从不进
+ *  Quick Stack 目标集（合成源侧 craftSources 同段已接线 = SW-AZ1 先例）。
+ *  1:1 面：射程盒 = tile 段同款 num=(int)(range/16+2)=39、Rectangle(point−num,…,2n+1)
+ *  Contains（判定点格闭盒 [X−num, X+num]）;判定点 = projectile.Hitbox.ClosestPointInRect
+ *  (player.Center)（:50-51——盒上最近点非盒心,与 Game.petInRange 同式）;bank 对象去重 =
+ *  !scratch.Contains(bank)（:52,弹段内同 bank 只入列一次、首见弹 Center 为准——tile 段
+ *  对弹段已入列 bank 的续去重由调用侧按 bi 过滤 = 原文共享 scratch 表语义）;
+ *  position = projectile.Center（PositionedChest 构造 :57——命中位携 px/py 供 fx 出站,
+ *  tile 段 position=(j·16+16,k·16+16) 走 tx/ty 锚）;5325 门 = ContainerIndexToPlayerBank
+ *  case -5（:119-130——背包 58 格持 ClosedVoidBag → bank4 不经弹段入列,与 tile 段
+ *  voidVaultHeld 同门）。原版无 owner 门（任意玩家的容器弹均把【自己的】bank 入列,
+ *  fx 飞向对方弹体）——1:1 不加过滤。
+ *  @param pets 调用侧解析好的容器弹幕探针（TryGetContainerIndex 的仓库等价映射在
+ *  Game 侧与 craftSources 同源：525/960→bi0、734→bi3） */
+export interface PetBankProbe { x: number; y: number; w: number; h: number; dead?: boolean; bi: number }
+
+export function projectileBankHits(
+  centerPxX: number, centerPxY: number,
+  pets: ReadonlyArray<PetBankProbe>,
+  banks: ReadonlyArray<SlotArray | null | undefined>,
+  voidVaultHeld: boolean,
+  rangePx = 600,
+): BankScanHit[] {
+  const num = Math.trunc(rangePx / 16 + 2);
+  const pcx = Math.floor(centerPxX / 16), pcy = Math.floor(centerPxY / 16);
+  const out: BankScanHit[] = [];
+  const seen = new Set<number>();
+  for (const pet of pets) {
+    if (pet.dead) continue;                                    // !projectile.active（:46-48）
+    if (pet.bi === 3 && voidVaultHeld) continue;               // case -5 门（:119-130）
+    const bank = banks[pet.bi];
+    if (!bank || seen.has(pet.bi)) continue;                   // !scratch.Contains(bank)（:52）
+    const qx = Math.min(Math.max(centerPxX, pet.x), pet.x + pet.w);   // ClosestPointInRect（:50）
+    const qy = Math.min(Math.max(centerPxY, pet.y), pet.y + pet.h);
+    const tx = Math.floor(qx / 16), ty = Math.floor(qy / 16);
+    if (tx < pcx - num || tx > pcx + num || ty < pcy - num || ty > pcy + num) continue;   // rectangle.Contains
+    seen.add(pet.bi);
+    out.push({
+      bi: pet.bi,
+      tx: Math.floor((pet.x + pet.w / 2) / 16), ty: Math.floor((pet.y + pet.h / 2) / 16),
+      items: bank, px: pet.x + pet.w / 2, py: pet.y + pet.h / 2,   // position=projectile.Center（:57）
+    });
   }
   return out;
 }

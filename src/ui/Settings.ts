@@ -198,9 +198,9 @@ export class SettingsPanel {
   }
 
   /** 双态枚举行（点击在两态间切换；智能光标 Toggle/Hold 模式用）。
-   *  ★opts.disabled（v9.11 退役保留面）：选项退役但 UI 保留（存档兼容）——按钮禁用+
-   *  hint 悬停文案（首例=frameCap：cap=意图非节拍，渲染恒跟满，上限不再钳制渲染率；
-   *  FrameBeat.ts 头注 v9.11）。既有调用不传 opts=行为零改动 */
+   *  ★opts.disabled（v9.11 引入的退役保留面）：选项退役但 UI 保留（存档兼容）——
+   *  按钮禁用。★v9.12：frameCap 行解除 disabled（锁帧档恢复），hint 悬停文案改为
+   *  可用于未禁用行（移出 disabled 分支——既有调用不传 opts=行为零改动） */
   private modeRow(label: string, _get: () => string, value: () => string, cycle: () => void,
     opts?: { disabled?: boolean; hint?: string }) {
     const row = document.createElement('div');
@@ -215,8 +215,8 @@ export class SettingsPanel {
       btn.disabled = true;
       btn.style.cursor = 'default';
       btn.style.opacity = '0.55';
-      if (opts.hint) { btn.title = opts.hint; span.title = opts.hint; }
     }
+    if (opts?.hint) { btn.title = opts.hint; span.title = opts.hint; }
     btn.addEventListener('click', () => { cycle(); btn.textContent = value(); });
     row.append(span, btn);
     return row;
@@ -525,18 +525,21 @@ export class SettingsPanel {
               : d.waveQuality === 2 ? 'GameUI.QualityMedium' : 'GameUI.QualityHigh'),
           () => void options.set('waveQuality', (d.waveQuality + 1) % 4),
         ),
-        // 渲染帧率上限(2026-08-18 原版对齐:原版锁 60fps;60/120/不锁 三档循环)
-        // ★v9.11 退役保留面(2026-10-08 用户裁决「cap=意图非节拍」,FrameBeat.ts 头注
-        //  v9.11):渲染恒跟满(帧距=回调流本距),上限不再钳制渲染率——选项保留
-        //  (Options 字段兼容存档)但 disabled+tooltip「渲染跟随显示器实际节拍」;
-        //  既有 l10n 键面(FrameCap/FrameCapOff)不动,新增提示键走 l10n-custom 通道。
+        // 渲染锁帧档(2026-08-18 原版对齐:原版锁 60fps)
+        // ★v9.12 恢复可用(2026-10-08 用户产品裁决「宁愿渲染减速也不应帧数反复抖动」,
+        //  FrameBeat.ts 头注 v9.12):cap=锁帧档选择{120,90,60,30,不限制},0=跟满档;
+        //  锁定档上帧距方差监控自动降档保平滑(std>0.22×档周期 连续 2 窗→逐级降,
+        //  升档 6 窗慢速回探,标定见 FrameBeat.ts 头注 v9.12)。v9.11 disabled 退役面
+        //  解除;hint 键沿用(l10n 文案已更新)。
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.FrameCap'),
           () => String(d.frameCap),
           () => d.frameCap === 0 ? Lang.text('Mods.SandboxWorld.Settings.FrameCapOff')
-            : d.frameCap === 120 ? '120 FPS' : '60 FPS',
-          () => void options.set('frameCap', d.frameCap === 60 ? 120 : d.frameCap === 120 ? 0 : 60),
-          { disabled: true, hint: Lang.text('Mods.SandboxWorld.Settings.FrameCapFollowHint') },
+            : `${d.frameCap} FPS`,
+          () => void options.set('frameCap',
+            d.frameCap === 120 ? 90 : d.frameCap === 90 ? 60 : d.frameCap === 60 ? 30
+              : d.frameCap === 30 ? 0 : 120),
+          { hint: Lang.text('Mods.SandboxWorld.Settings.FrameCapFollowHint') },
         ),
         // ★BJ305(2026-09-23 用户明令新功能,原版无对应物)帧率显示开关(缺省关)——
         //  开启后画面底部中央显示实时帧率(Renderer.drawFpsReadout;数据源 Game.fps

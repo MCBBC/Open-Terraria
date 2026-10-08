@@ -586,6 +586,10 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return; // cs:82069
   const i = st.idx(x, y);
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
+  // ★三百十六:mod tile(伪 sheet≥754)早退——mod 块自带完整帧/几何元数据,
+  //  不参与原版帧循环(与 tileframe-cosmetic 渲染面 mod 直取支同构);参与=
+  //  killTile 级联对无 tileTable 元数据的 mod 块不收敛(世界生成挂死根因)
+  if ((TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? 9999) >= 754) return;
   if (BOULDERS.has(st.type[i])) check2x2(st, rng, x, y);
   // ★IIIII99d：Check2x2 主组派发（cs(1458):87074-87）——Smooth World(#53) 在
   //   Dungeon(#32)/HellFort 之后,killTile→squareTileFrame 级联会帧到地牢家具；
@@ -1065,15 +1069,31 @@ const ICE_WATER_TAIL = idsByVanillaSheet(147, 224, 161, 200, 163, 164);
  *  ★PPPPP（2026-08-22）导出复用：WavyCaverer（cs:12335 KillTile）与
  *  LavaLayerCaverer（cs:74066 KillTile）的雕刻支同模型——尘掷流位+尾
  *  SquareTileFrame 级联必须一致，勿在新 pass 重写近似版。 */
+// ★三百十六:killTile 级联深度护栏(mod 世界生成 pass 摆的物块与 Smooth World
+//  悬空削除/补坡交互曾致 killTile↔tileFrame 互递归挂死;3000 层=原版最深层级
+//  两个数量级冗余)——护栏触发=限界跳过该击杀(优雅降级,世界生成完成),warn 留痕
+let _ktDepth = 0;
+let _ktDisabled = false;
+/** ★三百十六:级联护栏复位(generateWorld 头;跨局干净) */
+export function resetKillTileGuard(): void { _ktDepth = 0; _ktDisabled = false; }
 export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
+  // ★三百十六:mod tile 不可杀(元数据不在原版 killTile 表域)
+  if ((SHEET_OF[st.type[st.idx(x, y)]] ?? 9999) >= 754) return;
+  if (_ktDisabled) return;
+  if (++_ktDepth > 3000) {
+    _ktDisabled = true;   // 本局禁杀(优雅降级:地形保留,世界照常完成)
+    console.error(`[HalfBrickPass] killTile 级联深度溢出 (${x},${y}) type=${st.type[st.idx(x, y)]} —— 本局禁杀(优雅降级)`);
+    _ktDepth--;
+    return;
+  }
   const i = st.idx(x, y);
-  if (!st.flags[i]) return;                    // cs:63568 !active 早退（零掷零写）
+  if (!st.flags[i]) { _ktDepth--; return; }                    // cs:63568 !active 早退（零掷零写）
   const sheet = SHEET_OF[st.type[i]] ?? -1;
   // cs:63579-63581 CheckTileBreakability（TTTTTT 批 2026-08-23 补）：
   //   2=拒毁（零掷零写早退,尘段之前）;1=转 fail 支路（存活+转化+级联）
   const brk = checkTileBreakability(st, x, y);
   const fail = brk === 1;
-  if (brk === 2) return;
+  if (brk === 2) return (_ktDepth--, void 0);
   const n = killDustAmount(sheet);
   const amt = n === -1 ? (st.frameX[i] / 22 >= 5 ? 5 : 10) : n;
   const per = killDustRollsPer(sheet, st.frameX[i]);
@@ -1092,7 +1112,7 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
     //   10/Boulders 与转化表零交集,备案不移植;tileMoss/tileMossBrick 同）。
     //   存活语义=仅 SquareTileFrame 级联。
     squareTileFrame(st, rng, x, y);
-    return;
+    return (_ktDepth--, void 0);
   }
   // ★IIII67b（cs:64251/64259）：getGoodWorld 灰烬崩塌级联——见函数头注释。
   //   掷序 = 裂砖支之前；每活性邻格 1×Next(2)，命中需邻为活性灰烬且其下方非实心。
@@ -1153,7 +1173,7 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   }
   // cs:63900 CheckTileBreakability2_ShouldTileSurvive（TTTTTT 批 2026-08-23 补）：
   //   有物箱/梳妆台免毁（尘段之后——尘掷已耗,箱族尘 10 迭代零掷故流位不变）
-  if (shouldTileSurviveKT(st, x, y)) return;
+  if (shouldTileSurviveKT(st, x, y)) return (_ktDepth--, void 0);
   // 蛛网掷（1456 cs:63904 / 1457 cs:64369-64372;noItem 总门 1457 cs:64373-64377）：
   //   蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
   // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（掷位 > 尘环,1457 cs:64369 > 尘段）——
@@ -1180,8 +1200,7 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   }
   st.setTileSilent(x, y, 0);
   // cs:63947 尾 SquareTileFrame(i,j)：3×3 TileFrame 级联（见上 UUU 批注）
-  squareTileFrame(st, rng, x, y);
-}
+  squareTileFrame(st, rng, x, y);}
 
 /** WorldGen.SolidTile(i, j, false) 等价（WorldGen.cs:70155）：
  *  active && tileSolid && !tileSolidTop && !halfBrick && slope==0 && **!inActive()**

@@ -399,7 +399,7 @@ import { BuffType, BUFF_DEFS, wetFromBubbleContact, buffTypeByVanilla } from '..
 import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
-  ITEM_TRANSFER_PLAYER_TO_CHEST_BITS } from '../stats/QuickStacking';
+  projectileBankHits, ITEM_TRANSFER_PLAYER_TO_CHEST_BITS } from '../stats/QuickStacking';
 import { sortPlayerInventory, type SortFeedback } from '../stats/ItemSorting';   // ★SW-FX29:ItemSorting.SortInventory 整库移植
 import { bindsOf, isBound, keybindCodeLabel, hotbarSlotOfCode, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
@@ -2214,6 +2214,19 @@ export const ORPHAN_B1_BUFF_VIDS = new Set([1130]);
  *   :39207-39216/:41966-41975）→ 继续走通用 thrownCombat Arrow 分流,Kill 三重掷
  *   （Projectile.cs:75111-75131）经 onProjectileDeath 承载。 */
 export const ORPHAN_B3_VIDS = new Set([4131, 5325, 859, 4743]);
+/** ★BJ568（2026-10-08）：ItemID.Sets.SkipsInitialUseSound（ItemID.cs:151
+ *  `CreateBoolSet(false, 2350, 4870)`）——起手跳 UseSound（Player.cs:52315 flag2 门）。
+ *  2350 蠕虫药水/4870 回归药水=引导族（TELEPORT_ITEM_VIDS 支已按原文起手播 Item3
+ *  饮用音+触发拍 Item6,见 :18620 注）——本表在裸挥臂起手音门防御性并列,防未来
+ *  新增居民踩雷。 */
+const SKIPS_INITIAL_USE_SOUND = new Set<number>([2350, 4870]);
+/** ★BJ568：PERM 支（:16711）内自带起手音的档——裸挥臂起手音豁免（防双播）。
+ *  5337-5342 诸矿晶 Item92（:16725）/3335 恶魔之心 Item4（:16734）/5043 火把神
+ *  pickup synth（:16764）/2756 性转 'drink'（:16791）/678 红药 'drink'（:16825）/
+ *  4829/4830/4910 许可证 Item92（:16944）。1326/5335 传送杖（效果支无起手音——起手
+ *  音归裸挥臂=原版 StartActualUse 面,vanilla UseSound=Item8 非 SkipsInitial）与
+ *  1133/4988/3601（无 UseSound 数据）不豁免。 */
+const PERM_BARESOUND_EXEMPT = new Set<number>([3335, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 678, 4829, 4830, 4910]);
 // ★SW-FX9（2026-09-10）：THROWN_NO_RECOVERY_VIDS（949/2352/2353/4986/5577,2026-08-30
 //  蓝队 B1-3 恒消耗白名单）随 dropKey 回收链整体退役——原版投掷系【全族恒消耗】
 //  （各弹 Kill 段仅音/尘/gore/光环,无 Item.NewItem:949→166 P.cs:76268-76277、
@@ -8523,9 +8536,9 @@ export class Game implements GameHooks {
 
   /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
   private _lastCapTs = 0;
-  /** ★调度面修复刃(2026-09-28):subtle 档确定性节拍对齐引擎(每 k 个 vsync 渲一次;
-   *  vanilla improvedSubtleFrameSkip EndDraw present 网格 Main.cs:62624-62644 的
-   *  rAF 移植——帧序计数落拍非忙等;拍选择/滞回/失拍吸附纯状态机见 FrameBeat.ts) */
+  /** ★调度面修复刃(2026-09-28;★v9.12 刷新):锁帧档调度引擎(累计器锁帧档+帧距
+   *  方差自适应降档,用户裁决「宁愿渲染减速也不应帧数反复抖动」——档选择/滞回/
+   *  降升档纯状态机见 FrameBeat.ts 头注 v9.12) */
   private beat = new FrameBeat();
   private _paintedFrames = 0;
   /** ★SW-BJ157 stackSplit 计时面 60Hz 累加器（帧率无关;暂停期照走） */
@@ -8795,21 +8808,23 @@ export class Game implements GameHooks {
     const loop = (now: number) => {
       if (!this.running) return;
       try {
-        // ★v9.11 跟满回归(2026-10-08 终局刀;用户裁决原话「像是被什么奇怪的算法一直
-        //  压着,以前我们都可以上 120」定谳后,FrameBeat.ts 头注 v9.11):渲染调度=跟满
-        //  ——shouldRender 恒真(累计器/_nextDue/dEst/时间门全部退役),渲染帧距=回调
-        //  流本距(流匀则帧距匀,无论流是 120 还是 167),不做任何限速。cap=意图非节拍:
-        //  options.data.frameCap 只作诊断/minK 判据面,不再钳制渲染率(Settings 选项
-        //  disabled+tooltip)。三档渲染面自 v9.9 起已统一走 beat 门,节拍分支随之合并;
+        // ★v9.12 稳定锁帧档+方差自适应(2026-10-08 用户产品裁决「宁愿渲染减速也不应
+        //  帧数反复抖动」,推翻 v6 帧率优先政策与 v9.11 跟满回归,FrameBeat.ts 头注
+        //  v9.12):渲染调度=累计器锁帧档(cap>0 时 shouldRender=now ≥ _nextDue−
+        //  0.75,渲染帧距=档周期±贴档误差,与回调流本距解耦——双峰流(4-6/8-9)上
+        //  低档多回调组合误差收敛=帧距稳)+帧距方差监控自动降档(std>2ms 连续 2 窗
+        //  →120→90→60→30,升档 6 窗慢速回探)。cap=锁帧档选择,0=跟满档(恒渲);
+        //  调用面签名零改动,三档渲染面统一走 beat 门(节拍分支已合并)。
         //  原版锚存档:FrameSkipMode 三态 Main.cs:17129-17137(On=IsFixedTimeStep 每
         //  Tick 一绘 :17133-17137)、SuppressDraw 仅旧路径 :17182-17197("落后跳帧"分支
         //  num3=0 死代码)、improvedSubtleFrameSkip 默认 true :67615-67616、EndDraw 忙等
         //  present 网格 :62624——原版"钳 60 网格"是"逻辑=呈现同帧"架构下的速度保全,
         //  本仓逻辑恒 60Hz(fixedUpdate)与渲染解耦,该理由不存在;旧被动门(阈 1000/
         //  cap-1 在超速双峰流上随机咬合)与旧 SuppressDraw(0 步进帧跳绘)均已退役。
-        //  被跳回调分支保留=调用面签名兼容(现役恒不走);v9.7 hold 信号保留(no-op):
-        //  this.paused 单源(autoPause 开界面/失焦/暂停浮层/图鉴面板/保存退出全部置位
-        //  点汇于此)+入场冻结窗/传送幕帘两个同族 fixedUpdate 停态。
+        //  被跳回调分支保留=调用面签名兼容(cap=0 跟满档/累计器未到拍时走);v9.7
+        //  hold 信号保留:this.paused 单源(autoPause 开界面/失焦/暂停浮层/图鉴面板/
+        //  保存退出全部置位点汇于此)+入场冻结窗/传送幕帘两个同族 fixedUpdate 停态
+        //  ——hold 冻结档位迁移(方差账暂停期清零,头注 v9.12)。
         this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
         this.beat.observeVsync(now, options.data.frameCap);
         if (!this.beat.shouldRender(now)) {
@@ -16177,7 +16192,44 @@ export class Game implements GameHooks {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
       } else {
-        this.useSwing(heldDef, Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2));
+        // ★BJ566（2026-10-08）复用节拍门：裸挥臂此前对持续按住帧逐帧 useSwing 重启
+        //  ——mouseDown 电平存续+useTime 恒 0 ⇒ 每帧新 swing（探针:虫网按住 180t 重启
+        //  180 次、swing.t 钉在 dur−1,动画永走不完=用户实报"虫网不能自动挥舞"根因）。
+        //  原版语义=起用门 Player.cs:43064 `controlUseItem && releaseUseItem &&
+        //  itemAnimation==0`：①非 autoReuse 件 releaseUseItem=!controlUseItem（:43160）
+        //  ——松开再按才可重挥（本仓点击沿=mouseDown&&!prevSwingMouse,近战支 :15371
+        //  同式习语）;②autoReuse 件 AutoReuseLogic :53521-53529 强制 releaseUseItem=
+        //  true（按住连挥）且 itemAnimation==1 拍归零动画=同帧重启窗——本仓 swingOver
+        //  （t<=1,近战/工具/放置支同式,NPC ai[1] 永不见 0 帧）。虫网 1991/3183/4821
+        //  SetDefaults autoReuse=true（Item.cs :21306/:29542/:39491;数据面
+        //  vanilla-itemcombat.json 在案=本刀非数据漏）为本臂主居民（useStyle1,
+        //  damage=0 无 cw 分流）。手套/全局连用面（TryAllowingItemReuse :53542-53559
+        //  =melee/summon 旗或 damage>0）对裸挥臂件不可达（全列 damage=0）——原生
+        //  autoReuse 即唯一复用源。
+        const bareVid = heldDef.vid ?? -1;
+        const bareOver = !this.swing || this.swing.t <= 1;
+        const bareEdge = inp.mouseDown && !this.prevSwingMouse;
+        const bareHeld = itemCombat(bareVid)?.autoReuse === true && inp.mouseHeld;
+        if (bareOver && (bareEdge || bareHeld)) {
+          this.useSwing(heldDef, Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2));
+          // ★BJ568（2026-10-08）起手拍 UseSound（BJ566 登记债清偿）：原版 StartActualUse
+          //  （Player.cs:52291）在 ApplyItemAnimation(:52314) 后同拍播 UseSound
+          //  （:52316-52329）——每次起用必播（autoReuse 周期重启=新起用=逐周期重播）；
+          //  门仅 `UseSound != null && !SkipsInitialUseSound[type]`（:52315），flag3=
+          //  useStyle5/13||shoot>0 只分 MP 152 转发路（:52326 `whoAmI==myPlayer||!flag3`
+          //  本地恒播），NetUseSoundSync 1457 空集（ItemID.cs:153 `new object[0]`）=零
+          //  覆写。本臂（BJ566 复用节拍门）=裸挥居民唯一 StartActualUse 代表位，此前
+          //  只补动画面缺声音面——三网 1991/3183/4821（UseSound=Item1）等起手全程无声。
+          //  数据门=itemUseSoundWav 有表值才播/无表值静（≡原版 UseSound==null 同面，
+          //  召唤物/桶族/图腾类无表值照旧静）。专支认领面（药水/食物桥/染发剂/FUN/
+          //  PERM 发声档/TELEPORT/孤儿投掷/落星 75/泥棒 114/高尔夫哨 4095/战斗书/
+          //  史莱姆枪等）自带起手音，bareSoundClaimed 豁免防双播——全 vid exactly-
+          //  once 普测对账见 tests/bj568-bare-swing-usesound.test.ts。
+          if (itemUseSoundWav(bareVid) && !SKIPS_INITIAL_USE_SOUND.has(bareVid)
+            && !this.bareSoundClaimed(bareVid, heldDef)) {
+            this.playUseSound(bareVid, 'throw');
+          }
+        }
       }
     }
     // 发色剂族（Player.cs:42179-42186 `item.hairDye >= 0`：使用即 player.hairDye =
@@ -26049,11 +26101,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
    *  种子/再生法杖的放置目标是【已有可转化块】（非空格）——草种/圣种→泥土(0)、
    *  腐化/猩红种→泥土或泥(59)、丛林/蘑菇/661/662 种→泥(59)、灰烬草种→灰烬块(57)；
-   *  再生法杖 213/再生之斧 5295（createTile=2）额外可转石头(1)/灰砖(38)＝"凭空
-   *  种草"。八向暴露门（exposed8ForPlant）。转化走 setTile(active→active)：保
+   *  ★BJ562 定谳（2026-10-08）：再生法杖 213/再生之斧 5295（createTile=2）促草支净效应
+   *  =仅【活跃泥土→草】——AssortedThings staff 支 canPlace 读裸 type∈{0,1,38}（:41364-41370,
+   *  无 active 门）但后续 PlaceTile(2) 内门 `num==2 && (tile.type!=0 || !tile.active())`
+   *  （WorldGen.cs:59876）恒拒空格/石/灰砖 ⇒ 净 no-op；"石/灰砖→苔藓"只存在于
+   *  PlaceThing_Tiles_PlaceIt_StaffOfRegrowthCheck——1457 反编译零调用点=死代码
+   *  （1456 :40247 / 1458 :41222 同谳），旧注"凭空种草/石转草"系把 canPlace 面误当净效应。
+   *  ★BJ562 收获支（AssortedThings 尾臂 :41595-41614 1:1）：法杖左键对 tile 3/73/84
+   *  （或 83 且 IsAlchemyPlantHarvestable）→ KillTile（staffOfRegrowthBonus=true：
+   *  83/84 掉落 草 ×Next(1,3)+种子 ×Next(1,6)，WorldGen.cs:66205-66213）；
+   *  84/83 杀成后 TryReplantingHerbs（:46213，below∈{78,380,579}→回种 82）。
+   *  八向暴露门（exposed8ForPlant）。转化走 setTile(active→active)：保
    *  半砖/坡面/油漆（PlaceTile :59499 语义）。noCooldown=武器/工具并行路径
    *  （冷却由工具/近战分支统一设置，Player.cs 挥击与 PlaceThing 并行）。
-   *  返回 true=已转化（调用方据此终止通用放置链） */
+   *  返回 true=已转化/已收获（调用方据此终止通用放置链） */
   private tryGrassConvert(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number],
     gsheetIn?: number, opts?: { noCooldown?: boolean }): boolean {
     const st = this.world.store;
@@ -26067,11 +26128,47 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!opts?.noCooldown && this.player.useTime > 0) return false;
     const heldVid = (itemDef.vid ?? -1);
     const staff = heldVid === 213 || heldVid === 5295;
+    // ★BJ562：PlaceThing_Tiles 头射程门（:40034 IsInTileInteractionRange,Simple,
+    //   item.tileBoost+blockRange）——法杖活性面经 15339 并行路径（无射程门）进入,
+    //   在此按原式补门；种子族经 tryPlace 已有同门不重复加
+    if (staff && !this.inTileRange(tx, ty, tileBoostOfVid(heldVid) + this.blockRange())) return false;
     const target = st.get(tx, ty);
     // 空格 type 读作 0（vanilla AssortedThings 直接读 Main.tile.type，inactive/空格同为 0）
     const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : 0;
+    // ---- ★BJ562 收获支（AssortedThings 尾臂 :41595-41614 1:1）：flag（手持 213/5295）
+    //   且目标 plain active()（:41595 `Main.tile[num6,num7].active()`，含已致动格）——
+    //   type 3/73/84 → KillTile；83 仅 IsAlchemyPlantHarvestable(frameX/18, y) 才杀。
+    //   KillTile 前 staffOfRegrowthBonus=true（:41358）→ case 83/84 加成掉落
+    //   （草 ×Next(1,3)+种子 ×Next(1,6)，WorldGen.cs:66205-66213；breakTile TILE_CUT 支
+    //   消费后自清）→ AssortedThings 尾 :41678 无条件复位（防 breakTile 提前返泄露）。
+    //   杀成（格空）且 84/83 → TryReplantingHerbs（:46213：below∈{78,380,579} 活跃 →
+    //   PlaceTile(82,style)，本仓 placeAlchRuntime 单源）。收获与促草两支 tile 类型互斥
+    //   （3/73/82/83/84 ∌ {0,1,38}），先收获后转化与原版尾臂先于 PlaceIt 同相。 ----
+    if (staff && target !== 0 && st.hasTile(tx, ty)) {
+      const style = Math.floor(st.frameX[st.idx(tx, ty)] / 18);
+      const harvestOk = tsheet === 3 || tsheet === 73 || tsheet === 84
+        || (tsheet === 83 && this.isAlchemyPlantHarvestable(style, ty));
+      if (harvestOk) {
+        this._staffHarvestBonus = true;
+        this.breakTile(tx, ty);
+        this._staffHarvestBonus = false;
+        if (st.get(tx, ty) === 0 && (tsheet === 83 || tsheet === 84)) {
+          const below = st.get(tx, ty + 1);
+          const bSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
+          if (bSheet === 78 || bSheet === 380 || bSheet === 579) this.placeAlchRuntime(tx, ty, style);
+        }
+        return true;
+      }
+    }
+    // ★BJ562 促草支定谳收窄：AssortedThings staff 支 canPlace 读裸 type∈{0,1,38}，但
+    //   PlaceIt→PlaceTile(2) 内门 `num==2 && (tile.type!=0 || !tile.active())`（:59876）
+    //   只放行【plain-active 泥土】——空格/幽灵残型/石(1)/灰砖(38) canPlace 虽真，
+    //   PlaceTile 恒 false=净 no-op（石/灰砖→苔藓=StaffOfRegrowthCheck 死代码,见头注）。
+    //   本仓 hasTile=原版 active()（plain,含已致动格）,isActive=nactive() 多排致动位。
+    if (staff && (target === 0 || !st.hasTile(tx, ty) || tsheet !== 0)) return false;
     // ★原版 AssortedThings 门 → PlantRules.assortedPlaceOk 纯函数。empty 入参承载
-    //   nactive() 门：种子族空格恒 false（不放置不消耗）；staff 无此门可凭空种
+    //   nactive() 门：种子族空格恒 false（不放置不消耗）；staff 促草面已在上方
+    //   BJ562 前置门收窄为活跃泥土（PlantRules.staff 支=!empty && tsheet===0 同口径）
     if (!assortedPlaceOk(staff, gsheet, tsheet, target === 0) || !exposed8ForPlant(st, tx, ty)) return false;
     st.setTile(tx, ty, gt);
     this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
@@ -27818,7 +27915,49 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  KillTile 清格,尾 :64431 复位 inActive → setTile(0) 已同步清 WIRE_ACTUATED,
         //  见 TileStore）。曾用 isActive=nactive() → 致动格被当空位直铺且新块继承
         //  隐形态（原版无此态）。
-        if (st.hasTile(px, py)) {
+        // ★BJ567（2026-10-08 用户实报「已种位置重复种植仍消耗种子」）：种子族（isAlchPlace）
+        //  不吃 ObjectData 清格相——原版 createTile 82 被 TileObjectData.CustomPlace 显式
+        //  排除（Player.cs:40085 `&& tileToCreate != 82`）走 AssortedThings legacy 路,
+        //  TileObject.Place :79-93 清格相不在其链;占位裁决 = flag8 块（:41623-41651,
+        //  种子 :41614-41617 已强制 canPlace=true）。共享清格相曾对苗 82/株 83/84 无条件
+        //  KillTile → placeAlchRuntime 见空格恒成功 → 重复种植吞种子（自创覆盖面）。
+        //  ①同型拒绝（:41647-41650 `type == createTile → canPlace=false`）：苗 82 vs 种子
+        //    createTile 82（Item.cs:5075-5140/23744 七种全 82）恒同型 → 重复种植拒绝+零
+        //    消耗+苗保留（★本刀主诉;异种同拒——七种 createTile 同值,style 无关）。
+        //  ②异型杀格面（:41625-41645）：num9（下方非盆器 78/380/579,:41627）∨（flag3{3,73}
+        //    :41628∨IsVine :41629∨IsADripTile :41630∨165 :41631∨flag7 收获株 :41632——83 走
+        //    IsAlchemyPlantHarvestable 时辰门（WorldGen.cs:66663-66690）/84 恒可收/82 恒不
+        //    可收,IsHarvestableHerbWithSeed :66638-66656）& flag8(tileAlch[createTile] 恒真)
+        //    → KillTile（:41636 带掉落;杀格在 canPlace 相,后置 PlaceAlch 成败【不回滚】）
+        //    ;否则拒绝（:41642-41645 盆器域非杀格对象）。
+        //  ③外门（PlaceThing_Tiles :40058 → IsReplaceableBlock :40107-40113）：占位格非
+        //    tileCut∪BreakableWhenPlacing（484/711 除外）∪{373-375,461,709} → 拒。
+        //  同型/外门拒/非杀格对象落至此=占位格原样 → 下方 placeAlchRuntime hasTile 门
+        //  承接拒绝（PlaceAlch :45784 `!tile.active()` 占用恒 false → 零写零消耗,与原版
+        //  PlaceIt→PlaceTile false 空转同相）。回归:tests/bj567-herb-replant-deny.test.ts
+        if (isAlchPlace && st.hasTile(px, py)) {
+          const awt = st.get(px, py);
+          const aws = TILE_DEFS[awt]?.vanilla?.sheet ?? -1;
+          const alchReplaceable = (!TILE_CUT.has(awt) || aws === 484 || aws === 711)
+            && !(aws >= 373 && aws <= 375) && aws !== 461 && aws !== 709
+            ? TILE_BREAK_WHEN_PLACING.has(awt) : true;
+          if (!alchReplaceable) return;                        // ③外门拒（:40058/:40107-40113）
+          if ((TILE_CUT.has(awt) || TILE_BREAK_WHEN_PLACING.has(awt)
+            || ADRIP_TILE_SHEETS.has(aws)) && aws !== 82) {    // :41623 三元组 ∧ ①非同型
+            const bId = st.inBounds(px, py + 1) ? st.type[st.idx(px, py + 1)] : 0;
+            const bSheet = TILE_DEFS[bId]?.vanilla?.sheet ?? -1;
+            const num9 = bSheet !== 78 && bSheet !== 380 && bSheet !== 579;   // :41627
+            if (!num9) {
+              const hstyle = Math.floor(st.frameX[st.idx(px, py)] / 18);
+              const killable = aws === 3 || aws === 73 || IS_VINE_SHEETS.has(aws)   // flag3/4
+                || ADRIP_TILE_SHEETS.has(aws) || aws === 165                       // flag5/6
+                || ((aws === 83 || aws === 84)
+                  && (aws === 84 || this.isAlchemyPlantHarvestable(hstyle, py)));  // flag7
+              if (!killable) return;               // ②盆器域非杀格对象拒（:41642-41645）
+            }
+            this.breakTile(px, py, false);         // :41636 KillTile（带掉落,成败不回滚）
+          }
+        } else if (st.hasTile(px, py)) {
           // ★放置清格 = TileObject.Place cs:79-93 全量移植：占位格 = Main.tileCut ∪
           //  TileID.Sets.BreakableWhenPlacing 的活动格，写入前逐格 WorldGen.KillTile
           //  （默认参=带掉落/音效；CanPlace :357 同口径放行）。特例：484 滚石仙人掌 /
@@ -42258,11 +42397,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     // ① bank 段（QuickStackToNearbyBanks :238-250 / 1456 :230-242）——tile 段盒扫
     //   与合成侧同源（GetBanksInRangeOf :33-91）;bank 径源件不含袋臂（includeVoidBag:false）
+    //   ★BJ565（2026-10-08 用户实报「钱币槽飞猪无法快速堆叠」）：补 GetBanksInRangeOf
+    //   【弹幕段】（:33-58,tile 段之前的第一循环）——飞猪 525/Chester 960 → -2 = banks[0]、
+    //   透镜 734 → -5 = banks[3]（TryGetContainerIndex P.cs:80559-80566）进 Quick Stack
+    //   目标集（合成源侧 craftSources 同段 SW-AZ1 先例）。射程盒/最近点判定（:50-51）/
+    //   5325 门（:119-130）/弹段内同 bank 去重（:52）全在 projectileBankHits;tile 段结果
+    //   按 bi 续去重 = 原文 !scratch.Contains(bank) 共享 scratch 表语义（:83）。
     const cx = Math.floor(p.cx / TILE), cy = Math.floor(p.cy / TILE);
     const vaultHeld = p.inv.slots.some((s) => s && s.stack > 0 && (ITEM_DEFS[s.id]?.vid ?? -1) === 5325);
-    const bankHits = nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld);
+    const petProbes: Array<{ x: number; y: number; w: number; h: number; dead?: boolean; bi: number }> = [];
+    for (const e of this.entities.projectiles) {
+      if (e.dead) continue;
+      if (e instanceof FlyingPiggyBank) petProbes.push({ x: e.x, y: e.y, w: e.w, h: e.h, bi: 0 });
+      else if (e instanceof VoidLensProj) petProbes.push({ x: e.x, y: e.y, w: e.w, h: e.h, bi: 3 });
+    }
+    if (this.petFollower && this.petFollower.projId === 960 && !this.petFollower.dead) {
+      petProbes.push({ x: this.petFollower.x, y: this.petFollower.y,
+        w: this.petFollower.w, h: this.petFollower.h, bi: 0 });   // 960 Chester → 同 -2 = bank
+    }
+    const projBankHits = projectileBankHits(p.cx, p.cy, petProbes, p.banks, vaultHeld);
+    const seenBi = new Set(projBankHits.map((h) => h.bi));
+    const bankHits = [...projBankHits,
+      ...nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld).filter((h) => !seenBi.has(h.bi))];
     for (const b of bankHits) {
-      const bx = (b.tx + 1) * 16, by = (b.ty + 1) * 16;   // item.position=(j·16+16,k·16+16)
+      const bx = b.px ?? (b.tx + 1) * 16, by = b.py ?? (b.ty + 1) * 16;   // item.position：弹段=proj.Center（:57）/tile 段=(j·16+16,k·16+16)
       // MoveCoins + VisualizeChestTransfer_CoinsBatch(:243-244 / 1456 :235-236)：净转铜值
       //   四档拆分（Utils.CoinsSplit Chest.cs:325），每档 ≥1 发一枚 ItemTransfer(71+i)。
       //   ★①-F1：MoveCoins 仍为 per-bank 前置循环（原文 foreach 段在 Transfer 之前）,
@@ -42288,9 +42446,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   袋臂 voidVaultSource 与此无关（:252-268 仅宝箱路径含袋臂,核 Player.cs:23368
     //   QuickStackAllChests→:22904 链,本函数下方②段即原文形）。
     if (bankHits.length > 0) {
-      this.emitQuickStackResultFx(quickStackToChests(p.inv,
-        bankHits.map((b) => ({ x: b.tx, y: b.ty, items: b.items })),
-        false));
+      // ★BJ565：弹段命中的 fx 终点 = proj.Center（PositionedChest.position :57）——
+      //   tile 段缺省 (tx+1)·16 格锚（fxEnd 只收弹段 px/py 命中位）
+      const bankDests = bankHits.map((b) => ({ x: b.tx, y: b.ty, items: b.items }));
+      const fxEnd = new Map<ChestData, [number, number]>();
+      bankHits.forEach((b, i) => { if (b.px !== undefined) fxEnd.set(bankDests[i], [b.px, b.py!]); });
+      this.emitQuickStackResultFx(quickStackToChests(p.inv, bankDests, false), fxEnd);
     }
     // ② 宝箱段（QuickStackToNearbyChests :252-268 / 1456 :243-259）——持虚空透镜走
     //   includeVoidBag 臂（PackQuickStackableItems :384-386 的 useVoidBag() & true 门）：
@@ -42304,13 +42465,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** QuickStacking 结果的编排出站（Visualize 族 BroadcastOrRequest 面,QuickStacking.cs
    *  FillStack :533 / InsertIntoFreeSlot :564 每搬一件各发一帧带当次 type——Q-F5 从
-   *  「首件型单帧」升级为逐帧序列;touched/blocked 端点取 chest.position=箱锚像素面） */
-  private emitQuickStackResultFx(res: ReturnType<typeof quickStackToChests>): void {
+   *  「首件型单帧」升级为逐帧序列;touched/blocked 端点取 chest.position=箱锚像素面）。
+   *  ★BJ565：endpoints 臂 = 弹幕 bank 命中的终点覆盖表（PositionedChest.position=
+   *  projectile.Center :57——飞猪等容器弹 fx 飞向弹心）;tile 段不进表,缺省箱锚不变 */
+  private emitQuickStackResultFx(res: ReturnType<typeof quickStackToChests>,
+    endpoints?: ReadonlyMap<ChestData, readonly [number, number]>): void {
     const p = this.player;
     for (const ch of res.touched) {
       // ★Q-F3：端点 = 箱锚 (x·16+16, y·16+16)（NearbyChests.cs:23 的 PositionedChest.
       //   position）——曾传 ch.x+8 造成终点落格左上象限 8px 偏移
-      const ex = (ch.x + 1) * 16, ey = (ch.y + 1) * 16;
+      const ep = endpoints?.get(ch);
+      const ex = ep?.[0] ?? (ch.x + 1) * 16, ey = ep?.[1] ?? (ch.y + 1) * 16;
       for (const v of res.movedVids.get(ch) ?? []) {
         this.emitItemTransferFx(p.cx, p.cy, ex, ey, v);
       }
@@ -47262,6 +47427,45 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const v = vol ?? itemUseSoundPerceivedVol(vid) ?? undefined;
     if (wav) this.playSfxFile(wav, v);
     else this.sfx.play(fallback as 'throw', v);
+  }
+
+  /** ★BJ568（2026-10-08）裸挥臂起手音专支认领面（true=该 vid 的起用由后链专支自带
+   *  起手音/起手语义,裸挥臂豁免防双播）。仅落裸挥臂（updateUse 大 if 起用门→else 支）
+   *  的 vid 才会消费——前置专支（工具/放置/近战/接线/割草机 4049/坐骑/捕捉）useTime
+   *  先置或 return,本臂不可达,无需入列。判据=逐支亲读（行号锚就地）：
+   *  · consumableFuncGate 药水/食物/袋桥（:16964 foodUseSound）
+   *  · 染发剂族 hairDyeShaderOfItem（:16205 播 Item_3）
+   *  · FUN_USE_VIDS 乐器/趣味族（:16433 各 case 自播——425/856/5343 playUseSound,
+   *    508/507/4673/4057 等乐器音=使用音本体）
+   *  · PERM_BARESOUND_EXEMPT（PERM 支发声档,见该表注）
+   *  · TELEPORT_ITEM_VIDS 传送族（:18577——2350/4870 起手 Item3、余族 mirror≡Item6）
+   *  · 孤儿投掷族 ORPHAN_B1/B2/B3/THROW（处理器自带 playUseSound——throwBeenade
+   *    :45950/throwFertilizer :45975/打窝桶/天灯/晶洞/虚空透镜/沙滩球/橄榄球各支）
+   *  · 显式单件：43 可疑眼球/29 生命晶/109 魔晶/1291 生命果/5340 银河珍珠（各自
+   *    专支播 Item29/Item92 等）/2610 史莱姆枪（fireSlimeGun Item181）/75 落星
+   *    （:16416 Item_4）/114 泥棒（useDirtRod Item_8——拒绝面全静同原文,起手音
+   *    归专支）/4095 高尔夫哨（:18673 Item128）/4382·5336 战斗书（:18691 Item_92）
+   *  · 语音饰品 voiceSlotOfItem（:18717 playHurtVoice——vanilla UseSound=null
+   *    Item.cs:47786-47797,数据门本已静,并列防漏）。 */
+  private bareSoundClaimed(vid: number, def: (typeof ITEM_DEFS)[number]): boolean {
+    // 战斗武器全 kind（melee/magic/shot/whip/glowstick/grenade/kite/spear/summon/
+    // yoyo/flail/boomerang/anchored/flairon）——各 kind 分派（近战支 :15343 前置/
+    // cw 分派 :19052+）自带起手音或被 useTime 门挡在本臂之外
+    if (combatWeapon(def)) return true;
+    // 弓弩枪弹药体系（combatWeapon 对 useAmmo/ammo 提前返 null）——远程支 :17080
+    // 自带 UseSound 播放；shoot>0 无 kind 件（史莱姆枪/水枪族）亦有专支
+    const c0 = itemCombat(vid);
+    if (c0 && (c0.useAmmo || c0.ammo || c0.shoot)) return true;
+    if (vid === 43 || vid === 29 || vid === 109 || vid === 1291 || vid === 5340 || vid === 2610
+      || vid === 75 || vid === 114 || vid === 4095 || vid === 4382 || vid === 5336) return true;
+    if (hairDyeShaderOfItem(vid) >= 0) return true;
+    if (FUN_USE_VIDS.has(vid)) return true;
+    if (PERM_BARESOUND_EXEMPT.has(vid)) return true;
+    if (TELEPORT_ITEM_VIDS.has(vid)) return true;
+    if (ORPHAN_B1_BUFF_VIDS.has(vid) || ORPHAN_B2_VIDS.has(vid)
+      || ORPHAN_B3_VIDS.has(vid) || ORPHAN_THROW_VIDS.has(vid)) return true;
+    if (voiceSlotOfItem(vid) > 0) return true;
+    return this.consumableFuncGate(def);
   }
 
   /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）：

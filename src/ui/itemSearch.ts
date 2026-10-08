@@ -109,7 +109,8 @@ export function buildItemSearchPool(io: {
   // ★功能件豁免（2026-09-02 神圣种子第三案真凶）：覆盖去重的本意=滤掉「唯一职能
   //  就是铺那格 tile」的惰性 vi_ 死条目；但草种/法杖/苔藓族的 createTile 虽被
   //  place_v 面板块覆盖,它们在 AssortedThings 里是【转化/消耗】功能件（圣种转
-  //  泥土、法杖凭空种草、苔藓点石转化——PlantRules assortedPlaceOk/mossPlaceOk）
+  //  泥土、法杖促草（活跃泥土→草,BJ562 定谳）+收获支、苔藓点石转化——PlantRules
+  //  assortedPlaceOk/mossPlaceOk）
   //  ⇒ 曾被整族滤出搜索,用户搜「神圣种子」永远只剩面板块。豁免域=种子/法杖 vid
   //  集 ∪ 苔藓转化面。
   const seenVid = new Set<number>();

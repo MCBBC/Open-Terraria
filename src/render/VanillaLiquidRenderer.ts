@@ -178,6 +178,34 @@ export let liqP2 = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('liqp2') === '1' : false;
 export function liqP2SetForTest(v: boolean): void { liqP2 = v; }
 
+// ---- ★liqp3 主循环矩形数学批量向量化+at() 算术化（2026-10-08 液体核第三刀;?liqp3=1 激活,缺省关灰度）----
+// 【剖面定谳（liqp2 剖面余量;scripts/_liqp2-profile.mjs 同法）】aP self 残余构成:
+//  主循环块 28.0ms/300f(17%,含逐格 device 矩形数学)——每格 4 次缩放乘加
+//  (ex0/ex1/ey0/ey1)+主循环 at() 残留 3 次/格（本格/左邻/上邻）;P2-P7/bbox/
+//  halfBrick 预扫 at() ~5 次/格（liqp2 ⑤登记候选:i±ph 算术化,估 ~0.1ms/f）。
+// 【本刀】rowM 判例风格（waves.as.ts W3/BJ78:行共享项每行一算）:
+//  ① 行/列共享设备折算 LUT:ex0=dstX·devSX+devTE 的操作数 dstX=x·16+f2 是
+//    【整数封闭域】（f2=floor(n2·16)∈[0,12]——n2=min(0.75,·)≤0.75;f2+sw≤28,
+//    sw=ceil((n3−n2)·16)≤16——n3=max(0.25,·)≤1 数学界）⇒ colX[f]=(x·16+f)·devSX
+//    +devTE 每列一算（33 档）、rowEy[ly·33+f]=((py0+ly)·16+f)·devSY+devTF 调用前
+//    一次建全表（行不依赖 lx=循环序列外提）。【逐位论证】LUT 条目=与逐格式同表达
+//    式同操作数（x·16+f 与 dstX 整数精确恒等,f64 同值同积同加）;ey1 恒 LUT:bob
+//    情形 dstY+drawSh=topI+(bottom−topI) 整数精确恒等 bottom=y·16+f4+sh（f64 整数
+//    封闭运算零舍入）,非 bob 情形=dstY+sh 同值;bob 的 ey0（topI=Math.round(·+dWy)
+//    非格点值）保逐格直算臂。Float32Array 批处理评估结论:【不适用本面】——f32
+//    量化即破设备矩形逐位红线（配准不变式）,LUT 恒 f64;顶点环 _batRing f32=GL 域
+//    不归此限。
+//  ② at() 算术化:i±ph/i∓1 直接下标（列主序 i=lx·ph+ly ⇒ (lx∓1,ly)=i∓ph、
+//    (lx,ly∓1)=i∓1;主循环增量 ii 载体）——值=at 同式（at 即 lx·ph+ly 的单表达式）,
+//    off 臂保持 at() 调用原样 ⇒ 双臂序列直比对算术化有判别力（typo 即红）。
+// 【语义红线】bg 账终值（__liqPrepSnapshotForTest 23 数组逐位）+设备矩形逐位
+//  （记录桩调用序列全等;node 分数变换 T(1.3,0,0,0.9,7.3,−11.7) 臂 exercise
+//  ceil/floor 分区 rounding;活机冻结帧 A/B=scripts/_liqp3-ab.mjs）。
+//  ?liqp3=0/缺省=现行链逐位。审查通过后按用户惯例转正翻缺省。
+export let liqP3 = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('liqp3') === '1' : false;
+export function liqP3SetForTest(v: boolean): void { liqP3 = v; }
+
 const _lvlLut = new Float32Array(256);
 const _tovLut = new Uint8Array(256);
 for (let j = 0; j < 256; j++) { _lvlLut[j] = j / 255; _tovLut[j] = toVanillaType(j); }
@@ -209,6 +237,21 @@ export function __liqp2LutForTest(): {
     lvl: _lvlLut, tov: _tovLut, solid: _solidTy,
     atM, setPh: (ph: number) => { _atPh = ph; },
   };
+}
+
+// ---- ★liqp3 矩形数学 LUT 暂存（f64!——f32 量化破设备矩形逐位,旗头注①评估结论）----
+/** f 值域帽:ey0 的 f4∈[0,12]、ey1 的 f4+sh≤28、ex0 的 f2∈[0,12]、ex1 的 f2+sw≤28
+ *  （f=floor(n·16) 上界 12（n≤0.75）、+ceil 项上界 16（n3/n5≤1 数学界）;33 留余量） */
+const LIQ3_RC = 33;
+const _p3ColX = new Float64Array(LIQ3_RC);
+let _p3RowEy = new Float64Array(128 * LIQ3_RC);   // 行表（ph 超帽即长;只增不减）
+/** ★测试钩:liqp3 LUT 直访（node 代数锁 T5:rowEy 全表确定性重构比对——tests/
+ *  liquid-liqp3-rect-parity.test.ts;生产路径零触碰）。rowEy 走取引函数（增长
+ *  重分配后句柄不失效）。 */
+export function __liqp3LutForTest(): {
+  colX: Float64Array; rowEy: () => Float64Array; rc: number;
+} {
+  return { colX: _p3ColX, rowEy: () => _p3RowEy, rc: LIQ3_RC };
 }
 /** ★测试钩:P1-P7 账面快照（bg 账终值逐位红线机械闸——tests/liquid-liqp2-p1-parity
  *  .test.ts;23 数组全拷贝,同窗双臂逐位直比）。生产路径零触碰。 */
@@ -1622,6 +1665,7 @@ export function drawVanillaLiquids(
   const fx = _fx, fy = _fy;
   const at = liqP2 ? atM : (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
   _atPh = ph;   // ★liqp2:atM 单形函数的 ph 同步（闭包臂忽略;每调用一次置位=重入安全）
+  const p3 = liqP3;   // ★liqp3:本调用旗快照（灰度双臂选择子;off 臂全链 at()/逐格乘加原样）
   let bx0 = _boxL, bx1 = _boxR, by0 = _boxT, by1 = _boxB;   // 复用帧沿用本帧早前盒值
 
   // ---- ★C7 fg 复用臂前置判定（2026-10-08;?liqc7=1 激活,缺省关=全量链逐位）----
@@ -1780,7 +1824,7 @@ export function drawVanillaLiquids(
     const M = PAD + 1;
     for (let lx = PAD; lx < pw - PAD; lx++) {
       for (let ly = PAD; ly < ph - PAD; ly++) {
-        if (!hasLiquidA[at(lx, ly)]) continue;
+        if (!hasLiquidA[p3 ? lx * ph + ly : at(lx, ly)]) continue;   // ★liqp3②算术化
         hasAny = true;
         if (lx - M < bL) bL = lx - M;
         if (ly - M < bT) bT = ly - M;
@@ -1801,13 +1845,13 @@ export function drawVanillaLiquids(
   // 低清/包围盒裁剪(#perf-gpulog):需要 hasLiquidA[上] → 上格必在液面包围盒±1
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = Math.max(1, by0); ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (!st.inBounds(px0 + lx, py0 + ly)) continue;
       const si = st.idx(px0 + lx, py0 + ly);
       const d = TILE_DEFS[st.type[si]];
-      if (st.half[si] && hasLiquidA[at(lx, ly - 1)] && !(d && d.platform)) {
+      if (st.half[si] && hasLiquidA[p3 ? i - 1 : at(lx, ly - 1)] && !(d && d.platform)) {
         isHalfA[i] = 1;
-        if (!hasLiquidA[i]) typeA[i] = typeA[at(lx, ly - 1)];
+        if (!hasLiquidA[i]) typeA[i] = typeA[p3 ? i - 1 : at(lx, ly - 1)];
       }
     }
   }
@@ -1815,12 +1859,13 @@ export function drawVanillaLiquids(
   // ---- P2：可见液位(液体包围盒裁剪 #perf-gpulog:夹心格按定义在盒内,无损) ----
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       let v: number;
-      if (isHalfA[i] && hasLiquidA[at(lx, ly - 1)]) {
+      if (isHalfA[i] && hasLiquidA[p3 ? i - 1 : at(lx, ly - 1)]) {
         v = 1; // 半砖 + 上格有液体：可视液面拉满（LiquidRenderer.cs:121-122）
       } else if (!hasLiquidA[i]) {
-        const li = at(lx - 1, ly), ri = at(lx + 1, ly), ui = at(lx, ly - 1), di = at(lx, ly + 1);
+        const li = p3 ? i - ph : at(lx - 1, ly), ri = p3 ? i + ph : at(lx + 1, ly),
+          ui = p3 ? i - 1 : at(lx, ly - 1), di = p3 ? i + 1 : at(lx, ly + 1);
         let val = 0;
         // 原版先判 ptr[-1]/[+1]（上下），后判 ptr[-H]/[+H]（左右）→ 左右命中时 Type 覆盖（L129-138）
         if (hasLiquidA[ui] && hasLiquidA[di] && typeA[ui] === typeA[di] && !isSolidA[ui] && !isSolidA[di]) {
@@ -1844,7 +1889,7 @@ export function drawVanillaLiquids(
   // ★C7:fg 复用臂命中时整跳（死写入无消费者,见 fgReuseHit 块注;fg 不复用帧照旧重铺）
   if (!fgReuseHit) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= Math.min(by1, ph - 11); ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (hasVisA[i] && (!isSolidA[i] || isHalfA[i])) {
         opacity[i] = 1;
         visTypeA[i] = typeA[i];
@@ -1853,7 +1898,7 @@ export function drawVanillaLiquids(
         let k = 1;
         for (let s = 1; s <= len; s++) {
           k -= step;
-          const bi = at(lx, ly + s);
+          const bi = p3 ? i + s : at(lx, ly + s);   // ★liqp3②
           if (ly + s >= ph) break;
           if (!isSolidA[bi]) {
             visLevel[bi] = Math.max(visLevel[bi], visLevel[i] * k);
@@ -1875,9 +1920,10 @@ export function drawVanillaLiquids(
   // ---- P4：四壁插值 + 边存在 + 变体 FrameOffset(包围盒裁剪:P4 只读 ±1 邻居,盒含) ----
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (!hasVisA[i]) { hasLE[i] = hasRE[i] = hasTE[i] = hasBE[i] = 0; continue; }
-      const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
+      const ui = p3 ? i - 1 : at(lx, ly - 1), di = p3 ? i + 1 : at(lx, ly + 1),
+        li = p3 ? i - ph : at(lx - 1, ly), ri = p3 ? i + ph : at(lx + 1, ly);   // ★liqp3②算术化
       let nT = 0, nB = 1, nL = 0, nR = 1;
       const my = visLevel[i];
       if (!hasVisA[ui]) nT += visLevel[di] * (1 - my);
@@ -1910,9 +1956,10 @@ export function drawVanillaLiquids(
   // ---- P5：壁值平滑(包围盒裁剪) ----
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (!hasVisA[i]) continue;
-      const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
+      const ui = p3 ? i - 1 : at(lx, ly - 1), di = p3 ? i + 1 : at(lx, ly + 1),
+        li = p3 ? i - ph : at(lx - 1, ly), ri = p3 ? i + ph : at(lx + 1, ly);   // ★liqp3②算术化
       vlW[i] = lW[i]; vrW[i] = rW[i]; vtW[i] = tW[i]; vbW[i] = bW[i];
       if (hasVisA[ui] && hasVisA[di]) {
         if (hasLE[i]) vlW[i] = (lW[i] * 2 + lW[ui] + lW[di]) * 0.25;
@@ -1928,9 +1975,10 @@ export function drawVanillaLiquids(
   // ---- P6：瀑布侧/邻接修正(包围盒裁剪) ----
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (!hasLiquidA[i]) continue;
-      const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
+      const ui = p3 ? i - 1 : at(lx, ly - 1), di = p3 ? i + 1 : at(lx, ly + 1),
+        li = p3 ? i - ph : at(lx - 1, ly), ri = p3 ? i + ph : at(lx + 1, ly);   // ★liqp3②算术化
       if (hasTE[i] && !hasBE[i] && !!(hasLE[i] ^ hasRE[i])) {
         if (hasRE[i]) { vrW[i] = vrW[di]; vtW[i] = vtW[li]; }
         else { vlW[i] = vlW[di]; vtW[i] = vtW[ri]; }
@@ -1944,9 +1992,10 @@ export function drawVanillaLiquids(
   // ---- P7：内角填充(包围盒裁剪) ----
   if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= by1; ly++) {
-      const i = at(lx, ly);
+      const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
       if (!hasLiquidA[i]) continue;
-      const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
+      const ui = p3 ? i - 1 : at(lx, ly - 1), di = p3 ? i + 1 : at(lx, ly + 1),
+        li = p3 ? i - ph : at(lx - 1, ly), ri = p3 ? i + ph : at(lx + 1, ly);   // ★liqp3②算术化
       if (!hasBE[i] && !hasLE[i] && !hasTE[i] && !hasRE[i]) {
         // 原版 LiquidRenderer.cs:342-346：left.HasTopEdge && up.HasLeftEdge，墙面取 up.vlW / left.vtW
         if (hasTE[li] && hasLE[ui]) {
@@ -2196,11 +2245,27 @@ export function drawVanillaLiquids(
     ctx.globalAlpha = 1;
     return;
   }
+  // ★liqp3① 行共享 LUT 预析（rowM 判例）:行 y 的设备折算 (y·16+f)·devSY+devTF
+  //  每行一算——f 值域封闭（旗头注①）,全表调用前一次建（行不依赖 lx=列主序循环
+  //  的序列外提）;列共享 colX 每列一算（下方 lx 循环头）。f64 承载（f32 破逐位）。
+  if (p3) {
+    if (_p3RowEy.length < ph * LIQ3_RC) _p3RowEy = new Float64Array(ph * LIQ3_RC);
+    for (let ly2 = 0; ly2 < ph; ly2++) {
+      const y16 = (py0 + ly2) * 16;
+      const rb = ly2 * LIQ3_RC;
+      for (let f = 0; f < LIQ3_RC; f++) _p3RowEy[rb + f] = (y16 + f) * devSY + devTF;
+    }
+  }
   for (let lx = bx0; lx <= bx1; lx++) {
     const x = px0 + lx;
-    for (let ly = by0; ly <= by1; ly++) {
+    if (p3) {
+      const x16 = x * 16;   // ★liqp3① 列共享:x 侧折算只依赖 (x·16+f) 封闭域
+      for (let f = 0; f < LIQ3_RC; f++) _p3ColX[f] = (x16 + f) * devSX + devTE;
+    }
+    let ii = lx * ph + by0;   // ★liqp3② 增量下标载体（=at(lx,by0);off 臂弃用）
+    for (let ly = by0; ly <= by1; ly++, ii++) {
       const y = py0 + ly;
-      const i = at(lx, ly);
+      const i = p3 ? ii : at(lx, ly);
       if (!hasVisA[i]) continue;
       const vt = visTypeA[i];
       const tex = texFor(vt);
@@ -2225,6 +2290,7 @@ export function drawVanillaLiquids(
       let dstY = y * 16 + Math.floor(n4 * 16);
       let drawSh = sh;
       let waveSrcH = sh;   // 波动格的源窗高(钳带内容;目标高 drawSh 可拉伸)
+      let yBob = false;    // ★liqp3:dstY 被波位移覆写位（ey0 走直算臂;off 臂不读）
       if (waveOn && hasTE[i]) {
         waterWaves.sampleDisplace(x * 16 + 8, y * 16 + 8, _wdisp);
         // ±16 世界 px 钳（原版 ±9.6 屏幕px 量级；防极端值撕裂水线）
@@ -2238,6 +2304,7 @@ export function drawVanillaLiquids(
         const bottom = y * 16 + Math.floor(n4 * 16) + sh;   // 波前整数底边
         const topI = Math.round(dstY + dWy);
         dstY = topI;
+        yBob = true;
         drawSh = bottom - topI;
         if (drawSh < 1) { continue; }
         // ★源高钳带内容(≤sh):波把四边形拉高(dWy<0)时源窗不得越过带尾
@@ -2522,10 +2589,21 @@ export function drawVanillaLiquids(
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       // ★设备矩形共享边 ceil 分区（见循环前块注）：不重不漏，分数 zoom 零缝
-      const ex0 = dstX * devSX + devTE, ex1 = (dstX + sw) * devSX + devTE;
-      const ey0 = dstY * devSY + devTF, ey1 = (dstY + drawSh) * devSY + devTF;
-      const dx0 = hasVisA[at(lx - 1, ly)] ? Math.ceil(ex0) : Math.floor(ex0);
-      const dy0 = hasVisA[at(lx, ly - 1)] ? Math.ceil(ey0) : Math.floor(ey0);
+      // ★liqp3①:ex/ey 走列/行共享 LUT——LUT 条目=与逐格式同表达式同操作数（构造
+      //  即证逐位,论证见旗头注）;ey1 恒 LUT（bob 情形 dstY+drawSh 整数精确恒等
+      //  bottom=y·16+f4+sh）,bob 的 ey0 保直算臂;off 臂逐字原式。
+      let ex0: number, ex1: number, ey0: number, ey1: number;
+      if (p3) {
+        const f2 = Math.floor(n2 * 16), f4 = Math.floor(n4 * 16);
+        ex0 = _p3ColX[f2]; ex1 = _p3ColX[f2 + sw];
+        ey0 = yBob ? dstY * devSY + devTF : _p3RowEy[ly * LIQ3_RC + f4];
+        ey1 = _p3RowEy[ly * LIQ3_RC + f4 + sh];
+      } else {
+        ex0 = dstX * devSX + devTE; ex1 = (dstX + sw) * devSX + devTE;
+        ey0 = dstY * devSY + devTF; ey1 = (dstY + drawSh) * devSY + devTF;
+      }
+      const dx0 = hasVisA[p3 ? i - ph : at(lx - 1, ly)] ? Math.ceil(ex0) : Math.floor(ex0);
+      const dy0 = hasVisA[p3 ? i - 1 : at(lx, ly - 1)] ? Math.ceil(ey0) : Math.floor(ey0);
       const dw = Math.ceil(ex1) - dx0, dh = Math.ceil(ey1) - dy0;
       if (dw <= 0 || dh <= 0) continue;
       // 波光 tint（FilterWaterDistortion :106-111；仅表层 + 前景 pass，阈值 0.03 跳弱波）。
@@ -2647,7 +2725,7 @@ export function drawVanillaLiquids(
       for (let ly = PAD; ly < ph - PAD; ly++) {
         const y = py0 + ly;
         if (x < 0 || y < 0 || x >= st.w || y >= st.h) continue;   // st.idx 直读守卫
-        const i = at(lx, ly);
+        const i = p3 ? lx * ph + ly : at(lx, ly);   // ★liqp3②
         if (!isSolidA[i] || hasLiquidA[i]) continue;
         // ★st.slope 是 store 下标——此处 i 是局部 padding 网格下标(at(lx,ly)),
         //   直喂会错位读数 → slope 恒落在 1-4 之外 → 整块静默跳过(2026-08-21

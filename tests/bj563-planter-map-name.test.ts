@@ -104,8 +104,8 @@ describe('★BJ563 种植盆地图名随 style', () => {
     expect(mapHoverNameKey(88, 54)).toBe('LegacyDresserType.1');
     // 箱族仍走 mapHoverNameKey（frameY 传入也被忽略）
     expect(mapTileHoverName(21, 0, 999)).toBe(Lang.text('LegacyChestType.0'));
-    // 非 380 非 21 → tileName 图例面（tile 14 桌 MapObject.Table——①分支直证）
-    expect(mapTileHoverName(14, 0, 18)).toBe(Lang.text('MapObject.Table'));
+    // 非 380 非 21 → tileName 图例面恒等（tile 14 桌——文化域内透传 tileName 原值）
+    expect(mapTileHoverName(14, 0, 18)).toBe(Lang.tileName(14));
   });
 
   it('G en-US 面：同链走 ItemName 键（非 zh 硬编码）', () => {

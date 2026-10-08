@@ -25,11 +25,15 @@ describe('assortedPlaceOk（AssortedThings 门）', () => {
     expect(assortedPlaceOk(false, 633, 57, false)).toBe(true);
     expect(assortedPlaceOk(false, 633, 0, false)).toBe(false);
   });
-  it('法杖(213/5295)特权：空格(type 0)/石(1)/灰砖(38)均可——staff 无 nactive 门；泥(59)不可', () => {
-    expect(assortedPlaceOk(true, 2, 0, true)).toBe(true);    // 凭空种草
-    expect(assortedPlaceOk(true, 2, 1, false)).toBe(true);   // 石→草
-    expect(assortedPlaceOk(true, 2, 38, false)).toBe(true);  // 灰砖→草
-    expect(assortedPlaceOk(true, 2, 59, false)).toBe(false);
+  it('法杖(213/5295)促草面净效应（★BJ562 定谳 2026-10-08）：仅活跃泥土——空格/石/灰砖/泥均 no-op', () => {
+    // AssortedThings staff 支 canPlace 读裸 type∈{0,1,38}（:41364-41370），但 PlaceTile(2)
+    // 内门 `num==2 && (tile.type!=0 || !tile.active())`（WorldGen.cs:59876）恒拒——净 no-op。
+    // 石/灰砖→苔藓 = StaffOfRegrowthCheck 死代码（1457 零调用点，1456/1458 同谳）。
+    expect(assortedPlaceOk(true, 2, 0, false)).toBe(true);   // 活跃泥土 → 草（唯一可转面）
+    expect(assortedPlaceOk(true, 2, 0, true)).toBe(false);   // 空格 → no-op（症状②根因）
+    expect(assortedPlaceOk(true, 2, 1, false)).toBe(false);  // 石 → no-op
+    expect(assortedPlaceOk(true, 2, 38, false)).toBe(false); // 灰砖 → no-op
+    expect(assortedPlaceOk(true, 2, 59, false)).toBe(false); // 泥 → no-op（草不吃泥）
   });
 });
 

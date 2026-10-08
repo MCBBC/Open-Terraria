@@ -87,16 +87,22 @@ export const PLANT_CONVERT_KEY: Record<number, string> = {
 };
 
 /** 草族种子/法杖放置门（Player.cs:41362-41440 BlockPlacementForAssortedThings 纯函数化）。
- *  staff=手持 213/5295（含 Item.cs:4003-4016 的"凭空种草"特权：目标 type 0【含空格】/1/38）；
+ *  staff=手持 213/5295：★BJ562 定谳（2026-10-08）——AssortedThings staff 支 canPlace 读裸
+ *  type∈{0,1,38}（:41364-41370,无 nactive 门）,但后续 PlaceIt→PlaceTile(2) 内门
+ *  `num==2 && (tile.type!=0 || !tile.active())`（WorldGen.cs:59876）恒拒空格/石/灰砖
+ *  ⇒ 净效应=仅【活跃泥土→草】；"石/灰砖→苔藓"只存在于
+ *  PlaceThing_Tiles_PlaceIt_StaffOfRegrowthCheck——1457 反编译零调用点=死代码
+ *  （1456 :40247 / 1458 :41222 同谳）,旧注"凭空种草/石转草"系把 canPlace 面误当净效应。
  *  种子族只转对应基座——草种/圣种(2/109)→泥土(0)、腐化/猩红(23/199)→泥土或泥(59)、
  *  丛林(60)/蘑菇(70)/红蓝蘑菇苔(661/662)→泥、灰烬草种(633)→灰烬块(57)。
- *  命中=canPlace true（原位转化；staff 空格=新置）；未命中=false=原版整链终点
+ *  命中=canPlace true（原位转化）；未命中=false=原版整链终点
  *  （TileObjectData.CustomPlace 对草块族 legacy tile 恒 false ⇒ 绝无"铺进空格"回落）。
  *  调用方必须把族内物品的 false 当作"终止"而非"回落"（2026-09-01 神圣种子叠块 bug）。
- *  @param empty 目标格为空气（独立入参承载 nactive() 门语义；staff 无此门可凭空种） */
+ *  @param empty 目标格为空气（独立入参承载 nactive() 门语义；staff 促草净面另配
+ *    plain-active 门承载 PlaceTile 内门,Game.tryGrassConvert BJ562 前置门） */
 export function assortedPlaceOk(staff: boolean, gsheet: number, tsheet: number, empty: boolean): boolean {
-  // staff 分支只读 .type（Player.cs:41364-41370，无 nactive() 门）——空格=type 0 放行；
-  if (staff) return tsheet === 0 || tsheet === 1 || tsheet === 38;
+  // staff 净效应=活跃泥土（Game 侧 hasTile 门承载 PlaceTile plain-active 内门 :59876）
+  if (staff) return !empty && tsheet === 0;
   // 非法杖族全部分支带 nactive()（:41372/:41378/:41390/:41403/:41416）——空格恒 false
   if (empty) return false;
   switch (gsheet) {

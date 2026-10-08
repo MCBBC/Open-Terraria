@@ -1,9 +1,71 @@
 /**
- * ★确定性节拍对齐引擎(2026-09-28 调度面修复刃;同日热修刃:废除 60Hz 网格地板,
- * 目标周期=用户 frameCap——subtle 只对齐不钳速)——帧模式 subtle 档的渲染调度。
- * ★v9.11(2026-10-08)起渲染调度=跟满回归:shouldRender 恒真、渲染帧距=回调流本距
- * (不做任何限速);本文件余下面=诊断面(成本窗/est/失拍账)+k 迁移史档闸
- * (migrationEnabled=false)+v9.7 hold(no-op)。
+ * ★锁帧档调度引擎(v9.12,2026-10-08 用户产品裁决定谳)——渲染调度=累计器锁帧档
+ * +帧距方差自适应降档。
+ * ★v9.12 稳定锁帧档+方差自适应(2026-10-08,用户产品裁决【推翻 v6 帧率优先政策】;
+ *   v9.11 跟满回归自此整体退役为实验轨史档——下文 v9.11 注保留作归档):
+ *  - 案情(用户实测对照已钉):用户机器 Chrome 老会话回调流=双峰(4-6ms 主峰+8-9ms
+ *    次峰,瞬时率 110-128 漂移)。用户实测三对照:最新版抖、?c10e=0 同样抖(C10e
+ *    排除)、旧版也抖(80-90)——流不匀=抖动根源,页面无法让流变匀。用户裁决原话:
+ *    「正确的调制是锁在一个稳定帧率,30/60/90/120 都行,宁愿渲染减速也不应帧数反复
+ *    抖动」。v6 帧率优先政策(帧耗落两档预算之间时「不齐但高」优先=政策层明确接受
+ *    帧距不齐)与本裁决直接相悖,就此废除:产品目标从「帧率数值优先」改为「帧距
+ *    稳定性优先」。v9.11 跟满回归(流不匀=帧距不匀,跟满是唯一稳态)的隐含前提
+ *    「页面只能接受流的帧距」被本裁决推翻:页面改变不了流,但可以选一个贴档误差
+ *    小的周期去贴合它。
+ *  - 机理(双峰流的贴档数学,含标定改判——诚实登记):累计器锁档的两层效果,
+ *    【平均帧距=档周期(精确)】+【帧距抖动=流的过档超越量】。②的物理(更新过程
+ *    续新过量 E[d²]/2E[d]):渲染落点=相位线后首个回调,帧距=档周期+ε_{i+1}−ε_i,
+ *    ε=过线超越量,其散布由流自身间隔分布决定、与档周期无关——【绝对 std 不随
+ *    降档单调收敛】(标定实测,摘监控逐档锁定:双峰流 absStd p50 120 档 1.94/90 档
+ *    3.80/60 档 2.78/30 档 3.21;初处方
+ *    「16.7ms 有丰富多回调组合→大数定律收敛组合误差→低档绝对方差远小于高档」
+ *    的组合误差项被超越量项支配,判伪)。真实收益在两处:①fps 读数=平均帧距的
+ *    倒数,锁档后平均帧距=档周期精确值→读数钉死(用户实报「帧数反复抖动 80-90/
+ *    110-128」的直接机制=跟满时平均帧距=流平均间隔,随流漂移;流快于档=读数钉档,
+ *    流慢于档=累计器退化为逐回调渲=读数随流,须降档到流速之下才钉住);②相对
+ *    抖动 std/周期 随降档收窄(双峰流 rel 120 档 0.233→60 档 0.167→30 档 0.096;
+ *    T114436 0.374→0.310→0.166——同帧预算占比减半=感知更匀)。故方差判据取
+ *    【相对量纲】std>VAR_STD_RATIO×档周期(处方「绝对 2ms」经 tests 全档标定改判:
+ *    绝对阈会把 T114436 类宽流级联穿透所有档(全档 absStd 3-5ms),且量纲错位——
+ *    3ms 抖动占 120 档预算 36%(刺眼)而占 30 档预算 10%(无感);0.30×8.33=2.5ms
+ *    与处方同量级,量纲修正为感知占比;0.22 定线的判别面=双峰流@120(0.233,降)
+ *    vs LIVE@120(0.211,驻留),见 VAR_STD_RATIO 注)。【锁 120 可比跟满更抖】
+ *    (双峰流锁定 rel 0.233/跳变 656 vs 跟满 0.204/422——ε-walk 锯齿:{4,12}ms
+ *    追赶对),正是监控要在 120 档判不稳下降档的机理本体;低档(60/30)相对抖动
+ *    反超跟满=真收益。90 档(11.1ms)在 120Hz 网格(8.33)上 1.33 倍=物理性抖动
+ *    (标定 rel≈0.34-0.54):由监控判不稳自然降档穿过,不作特判(曾处方「est 可
+ *    达性过滤」被否:非网格流上 est 误判会把唯一稳定档逐出路径、卡死在不稳档)。
+ *  - 修法:①累计器回归+周期分档(shouldRender=now ≥ _nextDue−DUE_GUARD_MS(0.75,
+ *    v9.9 相位锚定语义复活);beginRender 相位推进 _nextDue=max(_nextDue+档周期,now)
+ *    (快流恒 +周期=限速,慢流重锚不追讨——v9.9 同式);档周期=1000/锁帧档,档值
+ *    {120,90,60,30}→{8.33,11.1,16.7,33.3}ms;cap=0=跟满档(v9.11 语义保留为「关」
+ *    档,恒渲不锁不监测)。②帧距方差监控+自动降档(用户裁决的算法化):非重叠窗
+ *    (VAR_WIN=60 渲染帧)帧距 std;std>VAR_STD_RATIO(0.22)×档周期 连续
+ *    VAR_DOWN_WINDOWS(2)窗→自动降一档(沿阶梯,30 底);升档=std<0.22×0.5
+ *    (=0.11)×档周期 连续 VAR_UP_WINDOWS(6)窗慢速回探,探序【最高优先】(候选
+ *    取最高档一试:成功一步到顶,失败降档自然落回);降/升档落地时 _nextDue 按
+ *    新档周期重锚(_nextDue=lastRenderAt+新周期)。「宁愿减速」=降档永远允许
+ *    (2 窗即降)、升档苛刻(6 窗才升);比值带 [0.11,0.22) 为驻留带(双向计程
+ *    清零;双峰流落 60 档 0.167、T114436 落 30 档 0.166 均在带内=稳定驻留)。
+ *    ③cap 语义重定义:cap=锁帧档选择(用户档=自动降档的起点与升档天花板,永不
+ *    越过);Settings 行恢复可用(v9.11 disabled 退役面解除,l10n 键更新)。
+ *  - hold(v9.7)保留:暂停期档位迁移冻结——方差窗/升降计程暂停期清零(暂停云尖峰
+ *    流形态不得污染档位证据,恢复拍重收集),渲染照常走当前档累计器。
+ *  - Game 调用面签名零改动(hold/observeVsync/shouldRender/beginRender/endRender/
+ *    resetSampling);k 迁移史档闸(migrationEnabled=false)与 v5-v8 判据组原样保留
+ *    (史档+红判别器复刻点);成本窗/est/失拍账诊断面照常。
+ *  - 变异证红:①摘方差监控(varianceMonitorEnabled→false)——宽抖动流上 120 档
+ *    抖动持续不降档=红;②摘累计器(恒渲跟满=v9.11 形态 FollowFullBeat)——读数
+ *    随流漂移(帧距=流本距不钉档)=红。
+ *  - 诚实边界:低档=帧率数值换稳定(60 档在匀质流上=60fps 恒定,视觉匀速但低于屏率
+ *    ——用户已明令接受「宁愿渲染减速」);帧距绝对 std 由流的超越量决定、锁档不
+ *    改变它(改变的是读数钉死+相对占比);流慢于档时读数随流(须降档到流速之下才
+ *    钉住);render-bound 会话(帧耗>档周期)累计器退化为逐回调渲(帧距=帧耗本相,
+ *    std=0 不降档);窄带回探循环窗:现役档 rel<0.11 且 120 档 rel>0.22 且降档落点
+ *    rel 又<0.11 的三条件流形上,升档失败→降回→再升档的慢循环理论可驻(实测四语
+ *    料未现形),登记为观察边界;暂停期读数仍随 ticker 超速走高(显示面,v9.5 裁决
+ *    语义承继)。
+ *  - 【史档】v9.11 终局刀=跟满回归(2026-10-08)
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
  *  - FrameSkipMode 三态:Main.cs:17129-17137——Off/Subtle=可变步+垂直同步;On=IsFixedTimeStep(60Hz)+垂直同步。
@@ -532,18 +594,54 @@ export function trimmedMeanVsync(win: number[]): number {
  *  击穿(60Hz 拍 ratio 1.02 处地板 1↔2 翻转=恒久 30fps,首版实测炸点) */
 const FLOOR_TOL = 0.15;
 
+// ★v9.12 锁帧档+方差自适应常数族(2026-10-08 用户产品裁决「宁愿渲染减速也不应帧数
+//  反复抖动」;v9.11 跟满回归退役,累计器面以锁帧档语义复活——DUE_GUARD_MS=v9.9
+//  同值 0.75,机理/裁决原话/三对照实测见头注 v9.12)
+/** 锁帧档阶梯(降序;cap>0 时有效档∈阶梯∪{cap},自动降档沿阶梯逐级向下,升档沿
+ *  阶梯逐级向上且永不越过用户档) */
+export const TIER_LADDER = [120, 90, 60, 30];
+/** 累计器过门余量(ms;v9.9 相位锚定同值复活):shouldRender=now ≥ _nextDue−此值,
+ *  只防 rAF 时间戳抖动(渲染落点可早于相位线 0.75ms) */
+export const DUE_GUARD_MS = 0.75;
+/** 方差窗(渲染帧距样本数;非重叠窗——集满即评一次 std 后清空,「连续 N 窗」以
+ *  非重叠窗计) */
+export const VAR_WIN = 60;
+/** 方差降档阈(相对量纲):窗内帧距 std > 此系数×现役档周期 = 帧距不稳。
+ *  ★标定改判(2026-10-08,tests 双峰流+真实语料全档实测;BJ250 处方证伪判例同款):
+ *  原处方「绝对 2ms」被证伪——更新过程续新过量(excess)物理决定宽间隔流上帧距
+ *  绝对 std 由流自身间隔分布决定、与档周期无关,绝对阈会把宽流级联穿透所有档。
+ *  感知量纲=抖动占帧预算比例(std/周期)。0.22 定线(标定):判别面=双峰流@120
+ *  锁定 rel p50 0.233【降】vs LIVE 语料@120 0.211(p50;窗序列 0.222/0.202/0.256
+ *  无两连超)【驻留】——跟满本相的相对抖动(双峰流 0.204)是「比锁 120 更匀」的
+ *  参照线,0.22 卡在两者之间:锁 120 比跟满更抖的双峰流降档(落 60 后 0.167 反超
+ *  跟满=真收益),LIVE 类窄带流驻留。窗下界实测:窄峰@60 max 0.171、双峰@60 max
+ *  0.198 均留有余量 */
+export const VAR_STD_RATIO = 0.22;
+/** 方差升档阈系数:std < VAR_STD_RATIO×此值(=0.11×档周期)连续 VAR_UP_WINDOWS
+ *  窗才升档——「宁愿减速」升档苛刻(慢速回探);比值带 [0.11,0.22) 为驻留带
+ *  (不升不降)。0.5 定线(标定):T114436 落 30 档 rel p50=0.166>0.11 不回探
+ *  (防 30↔60 慢循环);落档后流形态改善(如 T114436→洁净网格,30 档 rel≈0.01)
+ *  的爬档通路不受损。升档探序=【最高优先】(候选中取最高档一试:成功即一步到顶,
+ *  失败由降档自然落回——免 90 档中间驻留) */
+export const VAR_UP_RATIO = 0.5;
+/** 方差降档连续窗数:连续 2 窗超阈 → 降一档(「降档永远允许」) */
+export const VAR_DOWN_WINDOWS = 2;
+/** 方差升档连续窗数:连续 6 窗低于升档线 → 升一档(慢速回探防抖回) */
+export const VAR_UP_WINDOWS = 6;
+
 /** 拍变更原因(诊断/探针)。★v5:'overbudget'(v4 单帧立即降)已退役——成本驱动
  *  降拍统一 'capacity';类型保留该字面量仅为旧探针快照兼容,引擎不再发出 */
 export type BeatReason = 'init' | 'capacity' | 'overbudget' | 'miss-streak' | 'upgrade' | 'floor';
 
 export class FrameBeat {
-  /** 当前拍:每 k 个 vsync 渲染一次。★v9.8:k 迁移退役后恒 1(渲染决策=纯时间门,
-   *  见 shouldRender/头注 v9.8);字段与 snapshot 面保留=诊断/兼容 */
+  /** 当前拍:每 k 个 vsync 渲染一次。★v9.8:k 迁移退役后恒 1(v9.12 渲染决策=锁帧
+   *  档累计器+方差自适应,见 shouldRender/stepVariance);字段保留=史档/红判别器面 */
   k = 1;
   /** 自上次渲染起累计的 vsync 回调数(帧序计数;渲染后归零) */
   ordinal = 0;
-  /** 用户帧率上限(经 observeVsync 注入——引擎不读 options)。★v9.11:cap=意图非节拍,
-   *  不进渲染决策(恒渲跟满);仅存诊断面/minK 判据语义(闸内史档) */
+  /** 用户帧率上限(经 observeVsync 注入——引擎不读 options)。★v9.12:cap=锁帧档
+   *  选择(0=跟满档「关」;>0=档周期 1000/cap 的累计器锁+方差自适应降档天花板);
+   *  v9.11「cap=意图非节拍」面退役(史档见头注),v9.8 前「cap=意图天花板」面同退役 */
   protected cap = 0;
   /** vsync 周期估计(ms;rAF 回调间隔中位数) */
   vsyncPeriod = GRID_MS;
@@ -578,6 +676,21 @@ export class FrameBeat {
   /** 上次地板决策所见 cap(v9.7):与当前 cap 不同=用户明令收紧,地板抬升豁免滞回
    *  即时跟上(v8 既有语义);每 endRender 刷新 */
   private floorCapSeen = -1;
+  // ── ★v9.12 锁帧档状态面 ──
+  /** 现役锁帧档(有效帧率上限;cap>0 时∈TIER_LADDER∪{cap},随方差监控自动降/升;
+   *  cap=0=跟满档不锁)。用户档变更(effTier≠cap 的重锚)见 observeVsync/resetSampling */
+  private effTier = 0;
+  /** 上次见到的用户 cap(v9.12):变更即档位重锚回用户档(用户明令即时跟上,v9.7
+   *  cap 变更豁免同语义)+方差证据清零+累计器重锚 */
+  private tierSeen = -1;
+  /** 累计器相位:下次应渲时刻(v9.9 语义复活;−1=未锚定,首回调即渲) */
+  private nextDue = -1;
+  /** 当前方差窗(非重叠;渲染帧距样本,集满 VAR_WIN 评一次 std 后清空) */
+  private varWin: number[] = [];
+  /** 连续超阈窗数(降档计程;中带/低方差窗即清零) */
+  private varDownN = 0;
+  /** 连续达升档线窗数(升档计程;判据破即清零——防抖回) */
+  private varUpN = 0;
 
   /** 暂停态 hold 开关(v9.7 刀一;每 rAF 由 Game 侧喂——语义面见 holdOn 字段注):
    *  只冻结【迁移动作】不冻结【观测面】——vsync/成本采样照常,恢复时估计即时新鲜 */
@@ -591,6 +704,12 @@ export class FrameBeat {
    *  设置"一条实害(cap=120/0 被压回 60=用户实报);subtle 只对齐不钳速(否决注见头注) */
   targetMs(cap = this.cap): number {
     return cap > 0 ? 1000 / cap : this.vsyncPeriod;
+  }
+
+  /** 现役锁帧档周期(ms;v9.12 渲染决策面:累计器相位步进量)。cap≤0(跟满档)不进
+   *  渲染决策,此值仅诊断;cap>0 时=1000/effTier(effTier∈TIER_LADDER∪{cap}) */
+  tierPeriod(tier = this.effTier): number {
+    return 1000 / tier;
   }
 
   /** 拍地板:最小 k 使 k×vsync ≥ (1−容差)×目标周期(整数倍折算+估计噪声容差;
@@ -622,11 +741,22 @@ export class FrameBeat {
   }
 
   /**
-   * 每个 rAF 回调必经——喂 vsync 序列估计周期(★v9.11 起纯诊断面:est 只喂 F5/
-   * snapshot,不进渲染决策)。cap:当前用户帧率上限(0=不设限)——★v9.11 cap=意图
-   * 非节拍,只记字段(诊断/minK 判据),渲染决策面已退役。
+   * 每个 rAF 回调必经——喂 vsync 序列估计周期(est 为诊断面:只喂 F5/snapshot,
+   * 不进渲染决策)。cap:当前用户锁帧档(0=跟满档)——★v9.12 渲染决策面=累计器
+   * 锁帧档+方差自适应(见 shouldRender/stepVariance)。
    */
   observeVsync(now: number, cap: number): void {
+    // ★v9.12 用户档变更即时重锚(含暂停期——设置面打开即 paused 恒在 hold 域内,
+    //  v9.7「cap 变更即时豁免」同语义):档位回用户档、方差证据清零、累计器重锚
+    //  (未锚定态,首回调即渲再锚定)
+    if (cap !== this.tierSeen) {
+      this.tierSeen = cap;
+      this.effTier = cap;
+      this.nextDue = -1;
+      this.varWin.length = 0;
+      this.varDownN = 0;
+      this.varUpN = 0;
+    }
     this.cap = cap;
     let d: number | undefined;
     if (this.lastVsyncTs >= 0) {
@@ -670,16 +800,16 @@ export class FrameBeat {
   // ★v9.10 预测式提前量(dEst 钩+3 样本环形窗)已于 v9.11 随累计器整族退役
   //  (史档=头注 v9.9/v9.10+tests 历史)。
 
-  /** 本回调是否落拍(渲染)。★v9.11 跟满回归(终局刀,2026-10-08 用户裁决):恒渲——
-   *  cap≤0 既有支与 cap>0 支合流,渲染帧距=回调流本距(流匀则帧距匀,无论流是 120
-   *  还是 167),不做任何限速。单链数学:回调网格 5.27ms 与 cap 周期 8.33ms 非整数比
-   *  →任何相位限速给不出稳定 120(v9.9 帧距恒 10.54=95fps 上限/v9.10 5.3/10.5 交替
-   *  =「压着+抖」,用户裁决原话「像是被什么奇怪的算法一直压着,以前我们都可以上
-   *  120」——累计器/_nextDue/dEst 全部退役,头注 v9.11)。cap=意图非节拍(设置面
-   *  disabled);migrationEnabled 闸(k 迁移史档面)与 v9.7 hold(no-op)保留原样 */
+  /** 本回调是否落拍(渲染)。★v9.12 锁帧档累计器门(v9.9 相位锚定语义复活;v9.11
+   *  跟满恒渲面退役为史档):cap≤0=跟满档恒渲(v9.11 语义保留为「关」档);cap>0=
+   *  now ≥ _nextDue−DUE_GUARD_MS(0.75,只防时间戳抖动)——渲染帧距【均值】=档周期
+   *  精确值(fps 读数钉死),帧距抖动=流的过档超越量(流形决定;低档相对占比更小,
+   *  档位随方差监控自动降/升,见 stepVariance/头注 v9.12 标定改判)。Game 调用面
+   *  签名不动 */
   shouldRender(now: number): boolean {
-    void now;   // 签名保留(Game 调用面;时刻参数不再进决策)
-    return true;
+    if (this.cap <= 0) return true;          // 跟满档:恒渲(「关」档)
+    if (this.nextDue < 0) return true;       // 未锚定:首回调即渲
+    return now >= this.nextDue - DUE_GUARD_MS;
   }
 
   /** 降拍判据(v6 帧率优先制+ v7 案②结算护栏;protected hook=红判别器旧侧复刻点):
@@ -729,12 +859,18 @@ export class FrameBeat {
     return this.costP50() < this.budget(this.k) * UPGRADE_HEADROOM;
   }
 
-  /** 渲染开始(★v9.11 恒渲态下每回调调用):重置序数、记帧距锚。★v9.9 相位推进
-   *  (_nextDue 步进)已随累计器于 v9.11 退役——beginRender 只剩记账面 */
+  /** 渲染开始:重置序数、记帧距锚、累计器相位推进(★v9.12 v9.9 同式复活):
+   *  首渲锚定 now+档周期;此后 _nextDue=max(_nextDue+档周期, now)——快流恒 +周期
+   *  (限速=锁帧档),慢流重锚不追讨(档周期<流间隔=逐回调渲,render-bound 语义)。
+   *  cap≤0(跟满档)无相位面不推进 */
   beginRender(now: number): void {
     this.lastGap = this.lastRenderAt >= 0 ? now - this.lastRenderAt : 0;
     this.lastRenderAt = now;
     this.ordinal = 0;
+    if (this.cap > 0) {
+      const p = this.tierPeriod();
+      this.nextDue = this.nextDue < 0 ? now + p : Math.max(this.nextDue + p, now);
+    }
   }
 
   /** 失拍降档双门(v7.1 瞬态簇豁免;protected hook=红判别器旧侧复刻点):连续性
@@ -755,22 +891,92 @@ export class FrameBeat {
     return false;
   }
 
-  /** 渲染结束:now=渲染帧完成时刻(performance.now,与 rAF 时间戳同源)。★v9.8:
-   *  采样/记账面照常(成本窗/失拍账=诊断),k 迁移决策面经 migrationEnabled 闸停用 */
+  /** ★v9.12 方差监控闸(protected hook=红判别器复刻点):true(现役)=方差自适应
+   *  面启用。红判别器 NoVarMonitorBeat(tests)覆写为 false=「摘方差监控」机械变异
+   *  ——双峰流上 120 档抖动持续不降档(头注 v9.12 变异证红面①) */
+  protected varianceMonitorEnabled(): boolean {
+    return true;
+  }
+
+  // ── ★v9.12 方差自适应锁帧档(用户裁决「宁愿渲染减速也不应帧数反复抖动」的算法
+  //    化;现役决策面——k 迁移面已退役,见 migrationEnabled 史档闸)──
+  /** 方差自适应步进(endRender 每渲染帧调用;hold/settleGuard 护栏见头注 v9.12):
+   *  非重叠 VAR_WIN 帧距窗 → std;std>VAR_STD_RATIO×档周期 连续 VAR_DOWN_WINDOWS
+   *  窗=当前档抖动占帧预算比例超感知带 → 降一档(永远允许,沿 TIER_LADDER 逐级,
+   *  30 底);std<VAR_STD_RATIO×VAR_UP_RATIO×档周期 连续
+   *  VAR_UP_WINDOWS 窗 → 升一档(苛刻,慢速回探防抖回,永不越过用户档);中带驻留
+   *  (双向计程清零)。落地时累计器按新档周期重锚(reanchorTier)。窗口证据单档化:
+   *  档位落地即清窗(跨档帧距混样不得计入下一窗) */
+  private stepVariance(): void {
+    if (!this.varianceMonitorEnabled()) return;
+    if (this.cap <= 0) return;                 // 跟满档:无锁无监测
+    if (this.settleGuard > 0) return;          // v7 案②同语义:全窗证据门槛(入场簇不得驱动降档)
+    if (this.lastGap > 0) this.varWin.push(this.lastGap);
+    if (this.varWin.length < VAR_WIN) return;
+    const mean = this.varWin.reduce((a, b) => a + b, 0) / this.varWin.length;
+    const std = Math.sqrt(this.varWin.reduce((a, b) => a + (b - mean) ** 2, 0) / this.varWin.length);
+    this.varWin.length = 0;
+    const line = VAR_STD_RATIO * this.tierPeriod();
+    if (std > line) { this.varDownN++; this.varUpN = 0; }
+    else if (std < line * VAR_UP_RATIO) { this.varUpN++; this.varDownN = 0; }
+    else { this.varDownN = 0; this.varUpN = 0; }   // 驻留带:双向计程清零(防抖回核心)
+    if (this.varDownN >= VAR_DOWN_WINDOWS && this.tierDown()) {
+      this.lastReason = 'capacity';
+      this.reanchorTier();
+    } else if (this.varUpN >= VAR_UP_WINDOWS && this.tierUp()) {
+      this.lastReason = 'upgrade';
+      this.reanchorTier();
+    }
+  }
+
+  /** 降一档(沿 TIER_LADDER 降序取首个低于现役档者;已到 30 底=无动作返回 false)
+   *  ——「降档永远允许」 */
+  private tierDown(): boolean {
+    const next = TIER_LADDER.find((t) => t < this.effTier);
+    if (next === undefined) return false;
+    this.effTier = next;
+    return true;
+  }
+
+  /** 升一档(沿 TIER_LADDER 取高于现役档且 ≤ 用户档的【最高】者=最高优先回探:
+   *  成功即一步到顶,失败由降档自然落回,免不稳中间档驻留;到顶/无候选=无动作
+   *  返回 false)——「升档苛刻」 */
+  private tierUp(): boolean {
+    const cands = TIER_LADDER.filter((t) => t > this.effTier && t <= this.cap);
+    if (cands.length === 0) return false;
+    this.effTier = cands[0];                   // 降序阶梯:取首位=最高合格档(最高优先回探)
+    return true;
+  }
+
+  /** 档位落地重锚:累计器按新档周期从上一渲染帧起点重新锚定(下一帧距恰=新周期,
+   *  不追赶中途——旧档相位线对新档周期失义)+方差计程清零 */
+  private reanchorTier(): void {
+    this.nextDue = this.lastRenderAt + this.tierPeriod();
+    this.varDownN = 0;
+    this.varUpN = 0;
+  }
+
+  /** 渲染结束:now=渲染帧完成时刻(performance.now,与 rAF 时间戳同源)。采样/记账
+   *  面照常(成本窗/失拍账=诊断,k 迁移决策面经 migrationEnabled 闸停用=史档);
+   *  ★v9.12 现役决策面=方差自适应锁帧档(stepVariance),hold 期整面冻结 */
   endRender(now: number): void {
     const cost = this.lastRenderAt >= 0 ? now - this.lastRenderAt : 0;
     this.costWin.push(cost);
     if (this.costWin.length > COST_WIN) this.costWin.shift();
     if (this.settleGuard > 0) this.settleGuard--;   // v7 案②:全窗证据计数(costWin 满=护栏释放)
-    // ★v9.7 刀一 暂停态 hold:画面静止(fixedUpdate 停)期间降/升拍/地板迁移无观感
-    //  意义——k/minK 恒冻结不迁移(渲染照常走当前拍),瞬态记账逐帧清零(跨暂停的
-    //  陈旧失拍/升拍保持/滞回账不得在恢复拍爆伪迁移);成本/估计采样已照常完成
-    //  (上方),冻结的是【动作】不是【观测】。头注 v9.7
+    // ★v9.7 刀一 暂停态 hold:画面静止(fixedUpdate 停)期间降/升拍/地板迁移/方差
+    //  降升档无观感意义——k/档位恒冻结不迁移(渲染照常走当前拍累计器),瞬态记账
+    //  逐帧清零(跨暂停的陈旧失拍/升拍保持/滞回/方差账不得在恢复拍爆伪迁移——
+    //  暂停云尖峰流形态不得污染档位证据);成本/估计采样已照常完成(上方),冻结的
+    //  是【动作与档位证据】不是【成本/估计观测】。头注 v9.7/v9.12
     if (this.holdOn) {
       this.missStreak = 0;
       this.missStallMs = 0;
       this.upHoldN = 0;
       this.floorHoldN = 0;
+      this.varWin.length = 0;
+      this.varDownN = 0;
+      this.varUpN = 0;
       return;
     }
     const vsync = this.vsyncPeriod;
@@ -854,11 +1060,14 @@ export class FrameBeat {
         }
       }
     }
-    // ★拍迁移记录仪（2026-09-30 "升 120 被拉回 60"定谳仪）:任何拍变更即打印
-    //  完整降/升拍瞬间状态（work=帧 span/vsync 估计/p50/ breach 判定/失拍账/
-    //  地板/护栏）——三降档臂与观测数据对不上账的 Blackbox 一发定谳。
+    // ★v9.12 现役决策面:方差自适应锁帧档(降/升档落地改 effTier+lastReason 并重锚
+    //  累计器相位;k 不受影响——k 迁移面退役,史档见上闸内)
+    this.stepVariance();
+    // ★拍迁移记录仪（2026-09-30 "升 120 被拉回 60"定谳仪;v9.12 扩档位面）:任何拍/
+    //  档变更即打印完整降/升拍瞬间状态（work=帧 span/vsync 估计/p50/ breach 判定/
+    //  失拍账/地板/护栏/tier）——三降档臂与观测数据对不上账的 Blackbox 一发定谳。
     if (this.k !== prevK || this.lastReason !== prevReason) {
-      console.warn(`[beat] k:${prevK}→${this.k} reason=${this.lastReason} ` +
+      console.warn(`[beat] k:${prevK}→${this.k} tier=${this.effTier} reason=${this.lastReason} ` +
         `work=${preState.cost.toFixed(1)} gap=${preState.gap.toFixed(1)} vsync=${preState.vsync.toFixed(2)} ` +
         `p50=${preState.p50.toFixed(1)} p95=${preState.p95.toFixed(1)} breach=${preState.breach} ` +
         `miss=${preState.miss} stall=${preState.stallMs.toFixed(0)} floor=${preState.floor} guard=${preState.settle}`);
@@ -866,9 +1075,9 @@ export class FrameBeat {
   }
 
   /**
-   * 采样面复位(★v9.8:k 恒 1 不再归地板——渲染拍位由纯时间门承载;清成本/失拍/
-   * 相位记账;vsync 估计保留——它由 observeVsync 连续维护,与负载无关,现役仅作
-   * 诊断面)。
+   * 采样面复位(★v9.8:k 恒 1 不再归地板;★v9.12 渲染拍位由锁帧档累计器承载——
+   * 清成本/失拍/方差/相位记账,档位回用户档;vsync 估计保留——它由 observeVsync
+   * 连续维护,与负载无关,现役仅作诊断面)。
    * 调用点=进世界(afterWorldLoad)——世界生成/读档期的重载帧成本账均为过期证据,
    * 不得带进图后(实测污染面:生成页把成本窗填满重帧样本;模式切换经同一路径受益)
    */
@@ -884,13 +1093,22 @@ export class FrameBeat {
     this.floorHoldN = 0;           // v9.7:滞回账随采样面一并复位
     this.floorCapSeen = this.cap;  // v9.7:cap 基准重锚(reset 本身按当前 cap 定拍)
     this.k = 1;                    // ★v9.8:k 迁移退役,k 恒 1(拍位由纯时间门承载)
+    // ★v9.12:方差证据/累计器相位随采样面复位,档位回用户档(进世界=新证据期,
+    //  生成/读档期帧距不得驱动降档——settleGuard 全窗门槛双保险)
+    this.varWin.length = 0;
+    this.varDownN = 0;
+    this.varUpN = 0;
+    this.nextDue = -1;
+    this.effTier = this.cap;
+    this.tierSeen = this.cap;
     this.lastReason = 'init';
   }
 
-  /** 诊断快照(探针/调试面板) */
-  snapshot(): { k: number; vsync: number; p50: number; p95: number; target: number; reason: BeatReason; miss: number; hold: boolean } {
+  /** 诊断快照(探针/调试面板;★v9.12 增 tier=现役锁帧档) */
+  snapshot(): { k: number; tier: number; vsync: number; p50: number; p95: number; target: number; reason: BeatReason; miss: number; hold: boolean } {
     return {
       k: this.k,
+      tier: this.effTier,
       vsync: Math.round(this.vsyncPeriod * 100) / 100,
       p50: Math.round(this.costP50() * 100) / 100,
       p95: Math.round(this.costP95() * 100) / 100,
