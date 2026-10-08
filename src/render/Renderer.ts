@@ -3,6 +3,7 @@ import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, noteStarveP
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY, houseBannerLightRow, houseBannerVisible, npcHousingCategory } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
+import { styleDropVidOfFrames } from '../data/vanillaStyleDrops';   // ★BJ563：种植盆地图名随 style（与破坏掉落同一单源）
 import { rulerLineAlpha, rulerGridFade, rulerReadoutText, rulerGridMaskAlpha, rulerCrossMaskAlpha } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源（★BJ448:+dst 衰减罩 α 两档）
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
@@ -3281,11 +3282,26 @@ export function mapHoverNameKey(sheet: number, frameX: number): string | null {
 }
 
 /** 悬停格 → 显示名：箱族 = mapHoverNameKey（命名支经 mapChestHoverName，live 恒
- *  name=null——无重命名链）；其余 → 地图图例名（Lang.GetMapObjectName Lang.cs:77
- *  ≈ tileName）。返回 null = 无名可显。探索门（Map.Light>40 :55254）由调用侧迷雾判。 */
-export function mapTileHoverName(sheet: number, frameX: number): string | null {
+ *  name=null——无重命名链）；种植盆 380 → 材质名随 style（BJ563，见下）；其余 →
+ *  地图图例名（Lang.GetMapObjectName Lang.cs:77 ≈ tileName）。返回 null = 无名可显。
+ *  探索门（Map.Light>40 :55254）由调用侧迷雾判。 */
+export function mapTileHoverName(sheet: number, frameX: number, frameY = 0): string | null {
   const key = mapHoverNameKey(sheet, frameX);
   if (key) return Lang.has(key) ? Lang.text(key) : null;
+  if (sheet === 380) {
+    // ★BJ563（2026-10-08）：种植盆地图名随材质 style。style 反推+档表与破坏掉落同一
+    // 单源（vanillaStyleDrops.styleFromFrame[380]=fy/18 → PlanterBoxes 3215+k 钳回,
+    // KillTile case 380 WorldGen.cs:65726-65729）——地图名恒=该材质被挖出物品的名,
+    // 两面永不漂移。l10n 缺键回落旧 tileName 面。
+    // ★原版定谳分歧备案：原版 380 无图例名——Lang.BuildMapAtlas（Lang.cs:557-1052,
+    // MapHelper.cs:1789 调）无 380 条目、MapObject 分节（en-US.Game.json 80 键）无
+    // PlanterBox 键 → GetMapObjectName=LocalizedText.Empty 悬停显空；且 7+1 材质共一
+    // 色一 Type（MapHelper.Initialize array[380][0] 单档 :704,GetTileBaseOption 无
+    // case 380 → tileOptionCounts[380]=1）。本仓沿既有 tileName 放置物品名兜底面
+    // （Lang.ts tileName ③,此前恒打 3215 style0 名=用户复报病灶）显 per-style 名
+    // =登记明令分歧（同 BJ258 口径,回滚口=删本 380 支回落 tileName）。
+    return Lang.itemName(styleDropVidOfFrames(380, frameX, frameY)) ?? Lang.tileName(sheet);
+  }
   return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
 }
 
@@ -16866,6 +16882,42 @@ export class Renderer {
     }
   }
 
+  /** 滑轮贴图（★BJ559 2026-10-08：DrawPlayer_24_Pulley, PlayerDrawLayers.cs:3034-3056；
+   *  层序 = 23_MountFront 之后、32_FrontAcc_BackPart/25_Shield/27_HeldItem 之前——
+   *  LegacyPlayerRenderer.cs:228，本仓调用位 = drawPlayer 本体层后、drawAccFrontLayers 前）。
+   *  门 = pulley && itemAnimation==0（:3036——inUse 非空 ≙ itemAnimation>0）。
+   *  贴图 TextureAssets.Pulley = Images/PlayerPulley（AssetInitializer.cs:610）26×72
+   *  两帧竖排，源矩形 (0, 高/2·pulleyFrame, 宽, 高/2)=(0,36f,26,36)，origin (宽/2, 高/4)=(13,9)。
+   *  原版锚（世界系,Position=position+netOffset+(0,gfxOffY),PlayerDrawSet.cs:341+
+   *  LegacyPlayerRenderer.cs:475）：x = Center.X + (numX−9)·direction、
+   *  y = Position.Y + h/2 + (2+numY)·gravDir；侧挂档（pulleyDir==2）numX=0/numY=−25/
+   *  rot=0，居中档 numX=10/numY=−26/rot=0.35·−direction。
+   *  本仓镜像空间化简（外层 scale(facing,1) + 脚底锚 cx−facing·2.5）：
+   *  局部 x = numX−6.5（(numX−9+2.5)·facing÷facing）、局部 y = numY+2−h/2（h=42 →
+   *  侧挂 −44/居中 −45；stepRenderY/gfxOff(矿车·滚轴)/netOff/mOff 在脚底锚内对冲——
+   *  原版 Position 同含 gfxOffY/netOffset;本仓体绘不消费 pulley gfxOffY,滑轮随体锚=
+   *  登记偏差（同体绘既有约定,绳锚批 2026-08-19）。局部 rot 恒 −0.35：mirror∘rotate(θ)
+   *  = rotate(−θ)∘mirror 习语（facing·0.35·−facing=−0.35,朝向因子全被外层镜像吸收,
+   *  playerEffect 水平翻转同 absorption——同睡姿变换推导,Renderer:18112 区）。
+   *  染色 = colorArmorHead（PlayerDrawSet.cs:451 头位光照×免疫闪）——本仓玩家层走
+   *  全局光照合成（ent 窗 lit 批）无逐层采光（同盾球/翼层约定）;XNA 逐帧 (int) 屏幕取整
+   *  不仿（全玩家层 float 惯例）。
+   *  ★原版层序注：pulley 与 23_MountFront 相邻,但 pulley 门含 !mount.Active（物理面
+   *  :25815/:26481 清位）两态互斥不共存——坐骑变换隐身（mntHidden）由调用位外层门。 */
+  private drawPulleyLayer(ctx: CanvasRenderingContext2D, p: Player, inUse: boolean): void {
+    if (!p.pulley || inUse) return;                          // :3036 门
+    const tex = this.atlas ? this.atlas.ensureVImage('vanilla/PlayerPulley.png') : null;
+    if (!tex || tex.width <= 0 || tex.height < 2) return;    // 懒取未就绪/零域跳帧（terra-blink 判例:区域钳≥1px）,下帧自愈
+    const fw = tex.width;                                    // 26
+    const fh = tex.height / 2;                               // 36（两帧竖排,高/2）
+    const side = p.pulleyDir === 2;                          // :3038 侧挂档
+    ctx.save();
+    ctx.translate(side ? -6.5 : 3.5, (side ? -25 : -26) + 2 - p.h / 2);
+    if (!side) ctx.rotate(-0.35);                            // 0.35·−direction 镜像化简
+    ctx.drawImage(tex, 0, fh * p.pulleyFrame, fw, fh, -fw / 2, -fh / 4, fw, fh);
+    ctx.restore();
+  }
+
   /** 配饰身上贴图·身后族（DrawPlayer_10_BackAcc PlayerDrawLayers.cs:590-655——
    *  层序在翼后肤前 LegacyPlayerRenderer.cs:186-194 + DrawPlayer_11_Balloons :1140-1172）。
    *  身架族贴图 40×56/帧与 bodyFrame 同矩形:原版锚 Position+(w/2−20,h−56+4)
@@ -18513,6 +18565,12 @@ export class Renderer {
       const frame = p.frame;
       ctx.drawImage(sheet, frame * fw, 0, fw, fh, -fw / 2, -fh, fw, fh);
     }
+
+    // ---- 滑轮贴图（★BJ559 2026-10-08：DrawPlayer_24_Pulley,层序 = 23_MountFront
+    //      后/32_FrontAcc_BackPart 前（LegacyPlayerRenderer.cs:228）——本体层之上、
+    //      身前配饰之下。mntHidden（变身坐骑整玩家隐）与 pulley 物理门本互斥
+    //      （pulley 门含 !mount.Active,:25815/:26481）,此处防御性同门）----
+    if (!mntHidden) this.drawPulleyLayer(ctx, p, !!swing);
 
     // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
     // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
@@ -23347,7 +23405,7 @@ export class Renderer {
         const i = st.idx(tx, ty);
         if (st.flags[i]) {
           const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
-          const name = mapTileHoverName(sheet, st.frameX[i]);
+          const name = mapTileHoverName(sheet, st.frameX[i], st.frameY[i]);   // ★BJ563:frameY 随行（种植盆 style=frameY/18）
           if (name) {
             this.fullMapHoverName = sheet === 21 || sheet === 441 || sheet === 467
               || sheet === 468 || sheet === 88

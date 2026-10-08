@@ -134,6 +134,106 @@ export let liqC13c = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('c13c') !== '0' : true;
 export function liqC13cSetForTest(v: boolean): void { liqC13c = v; }
 
+// ---- ★C7 fg 复用臂死算跳水总闸（2026-10-08 液体渲染面 C7 刀;★已转正缺省开,?liqc7=0 逃生门）----
+// 【普查定谳（scripts/_c7-liq-census.mjs,活帧 5 臂）】液体渲染面 GL 化已由
+//  liqgl(09-27)/liqpolish(09-29)/C13b(09-30)/C13c(10-01) 四刀收编:活帧批量段
+//  74.5 段/3897 quad/帧、span 内原生 2D 直画=0（残 4 笔=LiquidSlope 懒载表首帧
+//  暖机）——台账「普通液体仍逐格 2D」条目已过时。aP 残余自耗=per-tile JS:
+//  P1 全窗 store 读+复位重扫（fg 全窗重读）+P3+主循环矩形数学。
+// 【本刀】fg pass(needsPrep=false) 复用臂命中路径上,复位重扫（下方 !swPerf||
+//  !needsPrep 块=整窗 store 重读）与 Unguarded P3 的全部写入【无消费者】——
+//  复用臂直读 _bgBaseRuns/_bgSpark/_bgGlint 重发射后 return,绘制循环整段跳过。
+//  判定四键在 fg 入口即定（bat/needsPrep/_batOverflow/_addOverflow/_bgRunsFrame
+//  =bg 终值,resetLiquidBatchForFrame 同帧幂等;CTM 自调用方起无人改动）⇒ 判定
+//  上提,命中即跳过两死算块（输出逐位同:死写入无观察面;活机量化见 _c7-ab）。
+//  ★转正（2026-10-08 用户令;证据=A/B 冻结帧 diff=0 双分辨率+变异证红+195 回归绿,
+//  语义零变化=无消费者死算移除）：缺省开,?liqc7=0 逃生门回全量链逐位。
+export let liqC7 = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('liqc7') !== '0' : true;
+export function liqC7SetForTest(v: boolean): void { liqC7 = v; }
+
+// ---- ★liqp2 P1 扫描承载面提速（2026-10-08 液体核第二刀;?liqp2=1 激活,缺省关灰度）----
+// 【剖面定谳（scripts/_liqp2-profile.mjs,Mac 大水体 300 活帧 @50µs,CDP positionTicks
+//  行级钉+sourcemap 映射——零源码插桩）】aP(drawVanillaLiquids) self 164.2ms/300f 拆解:
+//  P1 全窗 store 读 26.9ms(16%)+tileSolidLut(Map.get) 14.5ms+at() 闭包调用 13.9ms
+//  +主循环 28.0+P3 20.9+fg 复用重发射 14.6+slopeEnh 12.7…。P1 每格五次函数调用
+//  （inBounds/idx/toVanillaType/liquidCacheIsSolid/tileSolidLut）+lq/255 逐格除法。
+// 【本刀】P1 重排=【同表达式换承载机制】（值逐位同,构造即证——语义红线:bg 账终值
+//  与全窗重读逐位一致）:
+//  ① level LUT:_lvlLut[j]=j/255（同一 f64 除式逐 j 静态求值→同一 f32 舍入;值域
+//    Uint8 全域封闭 256,读表=逐格除法退役）
+//  ② type LUT:_tovLut[j]=toVanillaType(j)（同一纯函数逐 j 静态求值）
+//  ③ solid LUT:_solidTy[t]=tileSolidLut(t)?1:0——惰性 write-once+255 哨兵初值+
+//    越界增长,与 _solidLut Map 版 staleness 逐字同构（同表达式/同首查时机/
+//    同 write-once;mod 期改 TILE_DEFS 已缓存条目两版同为陈旧=语义等价）。
+//    热路=单次 Uint8Array 读,哨兵冷支才走 solidTy8
+//  ④ inBounds 外提:谓词 x>=0&&y>=0&&x<w&&y<h（TileStore.inBounds 同式）合取分解
+//    ——列有效每列一判+行有效表 _rowValid[ly] 每次扫描一建（pw×ph 次 4 比较+调用
+//    → pw+ph 次）
+//  ⑤ idx 外提:si=y·w+x 增量（si+=w/步）;at() 换模块单形函数（旧实现每次
+//    drawVanillaLiquids 新建闭包,调用点 IC 每帧失训=超态调用不内联;模块函数恒同
+//    一身份=单形内联。下标式 lx·ph+ly 逐字同,值逐位同）。
+//  ?liqp2=0/缺省=现行链逐位。审查通过后按用户惯例转正翻缺省。
+export let liqP2 = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('liqp2') === '1' : false;
+export function liqP2SetForTest(v: boolean): void { liqP2 = v; }
+
+const _lvlLut = new Float32Array(256);
+const _tovLut = new Uint8Array(256);
+for (let j = 0; j < 256; j++) { _lvlLut[j] = j / 255; _tovLut[j] = toVanillaType(j); }
+let _solidTy = new Uint8Array(1024).fill(255);   // 255=未解析哨兵（Map 版 undefined 同位）
+/** solid LUT 冷支（哨兵解析+越界增长;热路调用方直读 _solidTy 不经此） */
+function solidTy8(t: number): number {
+  let a = _solidTy;
+  if (t >= a.length) {
+    const cap = Math.min(65536, Math.max(a.length * 2, t + 1));   // st.type=Uint16Array 值域封顶
+    const nu = new Uint8Array(cap).fill(255);
+    nu.set(a);
+    a = _solidTy = nu;
+  }
+  return a[t] === 255 ? (a[t] = TILE_DEFS[t]?.solid === true ? 1 : 0) : a[t];
+}
+/** 行有效表（复用槽;每次 P1 扫描按 py0/ph 重建——同谓词 y>=0&&y<h 的预列） */
+let _rowValid = new Uint8Array(128);
+/** at() 模块单形函数（_atPh=本调用 ph;drawVanillaLiquids 入口同步——单线程渲染段
+ *  内无重入,消费点全在同一调用栈内） */
+let _atPh = 0;
+function atM(lx: number, ly: number): number { return lx * _atPh + ly; }
+/** ★测试钩:liqp2 LUT/atM 直访（node 单测判别力面——tests/liquid-liqp2-p1-parity.test.ts
+ *  T4 变异注错/T5 atM 数学锁;生产路径零触碰）。仅测试可用。 */
+export function __liqp2LutForTest(): {
+  lvl: Float32Array; tov: Uint8Array; solid: Uint8Array;
+  atM: (lx: number, ly: number) => number; setPh: (ph: number) => void;
+} {
+  return {
+    lvl: _lvlLut, tov: _tovLut, solid: _solidTy,
+    atM, setPh: (ph: number) => { _atPh = ph; },
+  };
+}
+/** ★测试钩:P1-P7 账面快照（bg 账终值逐位红线机械闸——tests/liquid-liqp2-p1-parity
+ *  .test.ts;23 数组全拷贝,同窗双臂逐位直比）。生产路径零触碰。 */
+export function __liqPrepSnapshotForTest(): {
+  n: number; level: Float32Array; visLevel: Float32Array; opacity: Float32Array;
+  isSolid: Uint8Array; hasLiquid: Uint8Array; hasWall: Uint8Array; hasVis: Uint8Array;
+  type: Uint8Array; visType: Uint8Array;
+  lW: Float32Array; rW: Float32Array; bW: Float32Array; tW: Float32Array;
+  vlW: Float32Array; vrW: Float32Array; vbW: Float32Array; vtW: Float32Array;
+  hasLE: Uint8Array; hasRE: Uint8Array; hasTE: Uint8Array; hasBE: Uint8Array;
+  isHalf: Uint8Array; fx: Int16Array; fy: Int16Array;
+} {
+  const n = _liqCap;
+  return {
+    n,
+    level: _level.slice(0, n), visLevel: _visLevel.slice(0, n), opacity: _opacity.slice(0, n),
+    isSolid: _isSolidA.slice(0, n), hasLiquid: _hasLiquidA.slice(0, n), hasWall: _hasWallA.slice(0, n),
+    hasVis: _hasVisA.slice(0, n), type: _typeA.slice(0, n), visType: _visTypeA.slice(0, n),
+    lW: _lW.slice(0, n), rW: _rW.slice(0, n), bW: _bW.slice(0, n), tW: _tW.slice(0, n),
+    vlW: _vlW.slice(0, n), vrW: _vrW.slice(0, n), vbW: _vbW.slice(0, n), vtW: _vtW.slice(0, n),
+    hasLE: _hasLE.slice(0, n), hasRE: _hasRE.slice(0, n), hasTE: _hasTE.slice(0, n), hasBE: _hasBE.slice(0, n),
+    isHalf: _isHalfA.slice(0, n), fx: _fx.slice(0, n), fy: _fy.slice(0, n),
+  };
+}
+
 /** 批发射钩（Renderer 中介→GLShimExecutor.pushQuadBatchRgba;emitPrecipQuadBatch 同构） */
 export interface LiqBatchEmit {
   emit(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
@@ -1520,11 +1620,68 @@ export function drawVanillaLiquids(
   const hasLE = _hasLE, hasRE = _hasRE, hasTE = _hasTE, hasBE = _hasBE;
   const isHalfA = _isHalfA;
   const fx = _fx, fy = _fy;
-  const at = (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
+  const at = liqP2 ? atM : (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
+  _atPh = ph;   // ★liqp2:atM 单形函数的 ph 同步（闭包臂忽略;每调用一次置位=重入安全）
   let bx0 = _boxL, bx1 = _boxR, by0 = _boxT, by1 = _boxB;   // 复用帧沿用本帧早前盒值
+
+  // ---- ★C7 fg 复用臂前置判定（2026-10-08;?liqc7=1 激活,缺省关=全量链逐位）----
+  // 【机制】fg pass(needsPrep=false) 的复位重扫（下方 !swPerf||!needsPrep 块,P1
+  //  全窗 store 重读）与 Unguarded P3 的全部写入,在 fg 复用臂命中路径上【无消费
+  //  者】:复用臂直读 _bgBaseRuns/_bgSpark/_bgGlint 账重发射后 return,主绘制循环
+  //  整段跳过,数组状态自此不再被读（census 活帧:复用命中=fg 零 draws 零直画）。
+  //  判定面在 fg 入口即已定:bg 终值 _batOverflow/_addOverflow/_bgRunsFrame（帧环
+  //  复位 resetLiquidBatchForFrame 同帧幂等,不动这三键）+ needsPrep + bat + CTM
+  //  轴对齐（调用方世界变换到此处无人改动,P1-P3 是纯数组数学）——与 :2036 原式
+  //  逐键同源（polish+batOn 展开）。命中 ⇒ 两死算块整跳（=位等:死写入无观察面）;
+  //  bg pass(needsPrep=true) 恒 false=现行链。wldT 捕获/identity 切换同步上提
+  //  （调用方到原 :1938 捕获位之间无 ctx 变换 op,值恒等;devSX 族常量随之）。
+  const wldT = ctx.getTransform();
+  const devSX = wldT.a, devSY = wldT.d, devTE = wldT.e, devTF = wldT.f;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const fgReuseHit = liqC7 && !needsPrep && liqpolish && !!bat
+    && frameToken !== undefined && !_batOverflow && !_addOverflow
+    && _bgRunsFrame === frameToken && wldT.b === 0 && wldT.c === 0;
 
   // ---- P1：原始缓存(同帧复用:仅 needsPrep 时执行) ----
   if (needsPrep) {
+  if (liqP2) {
+    // ★liqp2 P1 重排臂（头注 liqp2 块①-⑤;同表达式换承载机制,值逐位同）:
+    //  level/type 走封闭 LUT,solid 走惰性 typed LUT（Map 版 staleness 同构）,
+    //  inBounds 合取分解外提（列有效+行有效表）,idx/at 增量化。
+    //  评估序备案:旧支 tileSolidLut 即便 flags=0 也先求值（实参急切）;新支短路
+    //  跳过——差异仅 _solidTy/_solidLut 暖缓存内部状态,无观察面（谓词结果恒等）。
+    const w = st.w, h = st.h;
+    const liqA = st.liquid, wallA = st.wall, ltA = st.liquidType,
+      flA = st.flags, wireA = st.wire, tyA = st.type;
+    if (_rowValid.length < ph) _rowValid = new Uint8Array(ph + 64);
+    for (let ly = 0; ly < ph; ly++) {
+      const y = py0 + ly;
+      _rowValid[ly] = y >= 0 && y < h ? 1 : 0;
+    }
+    for (let lx = 0; lx < pw; lx++) {
+      const x = px0 + lx;
+      const colOk = x >= 0 && x < w;
+      let i = lx * ph;
+      for (let ly = 0, si = py0 * w + x; ly < ph; ly++, i++, si += w) {
+        if (!colOk || !_rowValid[ly]) { isSolidA[i] = 1; continue; }
+        const lq = liqA[si];
+        level[i] = _lvlLut[lq];
+        hasLiquidA[i] = lq > 0 ? 1 : 0;
+        hasWallA[i] = wallA[si] > 0 ? 1 : 0;
+        const vt = _tovLut[ltA[si]];
+        typeA[i] = vt;
+        visTypeA[i] = vt; // 同旧支:预填本格类型兜底（P3 只跑到底部 10 行外,原版 L152）
+        const fl = flA[si];
+        const ty = tyA[si];
+        let sol = _solidTy[ty];
+        // 哨兵 255=未解析;undefined=类型越当前表长（惰性增长冷支兜住——
+        // 直读 undefined 会把 >1024 的 mod 大 id 固体误判非实心,Map 版无此洞）
+        if (sol !== 0 && sol !== 1) sol = solidTy8(ty);
+        // 同 liquidCacheIsSolid 单源谓词:active ∧ !inActive(wire bit32) ∧ tileSolid
+        isSolidA[i] = fl !== 0 && (wireA[si] & 32) === 0 && sol === 1 ? 1 : 0;
+      }
+    }
+  } else {
   for (let lx = 0; lx < pw; lx++) {
     const x = px0 + lx;
     for (let ly = 0; ly < ph; ly++) {
@@ -1549,6 +1706,7 @@ export function drawVanillaLiquids(
         tileSolidLut(st.type[si])) ? 1 : 0;
     }
   }
+  }
   }   // P1 结束
   // ★BJ77(#swperf 2026-09-14)：下方是同帧复用失效路径(fg pass / needsPrep=false)
   //  的【状态复位重扫】——它把 bg 调用 P2/P3 已改写的 typeA/visTypeA 重置回 store
@@ -1556,7 +1714,39 @@ export function drawVanillaLiquids(
   //  必须保留。而 bg 调用(needsPrep=true)时它与上方守卫块【相邻】且为纯 store
   //  重读(两次写入值恒等)= 幂等白扫 → swPerf 下仅 bg 跳过(输出逐位不变;
   //  关=原行为恒跑,双支结构见 perfFlags.ts 契约)。
-  if (!swPerf || !needsPrep) {
+  // ★C7:fgReuseHit=复用臂命中,本块+下方 P3 的写入在复用路径无消费者 → 整跳（死算跳水）
+  if (!fgReuseHit && (!swPerf || !needsPrep)) {
+  if (liqP2) {
+    // ★liqp2 P1 重排臂（同帧复用失效重扫副本=首扫臂同式;值逐位同,备案同首扫）
+    const w = st.w, h = st.h;
+    const liqA = st.liquid, wallA = st.wall, ltA = st.liquidType,
+      flA = st.flags, wireA = st.wire, tyA = st.type;
+    if (_rowValid.length < ph) _rowValid = new Uint8Array(ph + 64);
+    for (let ly = 0; ly < ph; ly++) {
+      const y = py0 + ly;
+      _rowValid[ly] = y >= 0 && y < h ? 1 : 0;
+    }
+    for (let lx = 0; lx < pw; lx++) {
+      const x = px0 + lx;
+      const colOk = x >= 0 && x < w;
+      let i = lx * ph;
+      for (let ly = 0, si = py0 * w + x; ly < ph; ly++, i++, si += w) {
+        if (!colOk || !_rowValid[ly]) { isSolidA[i] = 1; continue; }
+        const lq = liqA[si];
+        level[i] = _lvlLut[lq];
+        hasLiquidA[i] = lq > 0 ? 1 : 0;
+        hasWallA[i] = wallA[si] > 0 ? 1 : 0;
+        const vt = _tovLut[ltA[si]];
+        typeA[i] = vt;
+        visTypeA[i] = vt;
+        const fl = flA[si];
+        const ty = tyA[si];
+        let sol = _solidTy[ty];
+        if (sol !== 0 && sol !== 1) sol = solidTy8(ty);   // 哨兵/越界冷支（备案同首扫臂）
+        isSolidA[i] = fl !== 0 && (wireA[si] & 32) === 0 && sol === 1 ? 1 : 0;
+      }
+    }
+  } else {
   for (let lx = 0; lx < pw; lx++) {
     const x = px0 + lx;
     for (let ly = 0; ly < ph; ly++) {
@@ -1580,6 +1770,7 @@ export function drawVanillaLiquids(
       isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],
         tileSolidLut(st.type[si])) ? 1 : 0;
     }
+  }
   }
   }   // ★BJ77 P1 复位扫守卫结束
   // 液体包围盒(P1 扫描产出,内区坐标):P2-P7 裁剪用。+1 余量覆盖夹心格邻域
@@ -1650,7 +1841,8 @@ export function drawVanillaLiquids(
   }
 
   // ---- P3：瀑布拖尾（向下传播） + 实心格处理(包围盒裁剪;拖尾 ≤10 行已计入盒底 +11) ----
-  for (let lx = bx0; lx <= bx1; lx++) {
+  // ★C7:fg 复用臂命中时整跳（死写入无消费者,见 fgReuseHit 块注;fg 不复用帧照旧重铺）
+  if (!fgReuseHit) for (let lx = bx0; lx <= bx1; lx++) {
     for (let ly = by0; ly <= Math.min(by1, ph - 11); ly++) {
       const i = at(lx, ly);
       if (hasVisA[i] && (!isSolidA[i] || isHalfA[i])) {
@@ -1827,9 +2019,8 @@ export function drawVanillaLiquids(
   //   双 pass（不透明背景 + 0.5 前景）均无缝且无重叠加倍变深。源矩形不动，
   //   ≤1 设备 px 拉伸不可感知（同 2026-08-18 chunk 整数设备矩形定案取舍）。
   //   微光分支以 x*16 为参照（applyShimmerBaseTint）→ 逐 tile 恢复世界变换绘制。
-  const wldT = ctx.getTransform();
-  const devSX = wldT.a, devSY = wldT.d, devTE = wldT.e, devTF = wldT.f;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  //   ★C7:wldT 捕获/identity 切换上提至 fgReuseHit 判定位（:1554,值恒等——调用方
+  //   到此处无 ctx 变换 op;devSX 族随迁,下方重复捕获已删）。
   // ---- ★liqgl 批通道（列→顶点批;pass 级 all-or-nothing——预检在 Renderer 侧,
   //  此处仅防御:帧环复位/帽溢出/非轴对齐 CTM 回 CPU 原链）----
   resetLiquidBatchForFrame(frameToken ?? -1);

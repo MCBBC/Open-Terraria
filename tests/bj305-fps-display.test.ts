@@ -21,6 +21,11 @@ vi.mock('../src/save/KvStore', () => ({
   kvGetIdb: vi.fn(async () => null),
   kvSetIdb: vi.fn(async () => 'fail' as const),
   kvDelete: vi.fn(async () => undefined),
+  // ★ModLoader 持久化族(src/mods/store 解构 modPutZip/modGetZip/modDeleteZip;本测导入
+  //  链经 Renderer→Enemy→Game→mods/loader 触达——不涉 mod 面,桩空实现防 collect 断)
+  modPutZip: vi.fn(async () => false),
+  modGetZip: vi.fn(async () => null),
+  modDeleteZip: vi.fn(async () => undefined),
 }));
 
 import { OptionsStore, options } from '../src/core/Options';

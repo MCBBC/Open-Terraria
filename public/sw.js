@@ -102,6 +102,11 @@ async function silentWarmMiss(req, path) {
 }
 
 const CACHE_PREFIX = 'sw-assets-v';
+// ★三百十二:mod 资源独立缓存(页侧暖存;与本体版本缓存解耦——本体换代 gc
+//  不触及、scrub/warm keys() 不并入;1.2 万 mod 条目曾暖进版本缓存=keys()
+//  'Operation too large' AbortError 事故根因)
+const MODS_CACHE = 'sw-mods-v1';
+const MODS_RE = /^\/sprites\/mods\//;
 let currentVersion = '';
 let cacheReady = null;
 let warmAbort = false;
@@ -259,6 +264,19 @@ self.addEventListener('fetch', (e) => {
   //  assetish(isDocPath)→SW 重启窗口走 serveAsset=资产 cache-first——文档被
   //  端出缓存旧 index.html→旧 chunk→整页旧代码;页面 init 带回版本号后刷新
   //  才落回 ② 网络优先。修=文档永不入本早退支,恒走 ② 网络优先(离线才回缓存)。
+  // ★三百十二:mod 资源路(mods 独立缓存 cache-first;miss 直通——资源只经
+  //  页侧暖存到库,网络本无此文件,回填只会缓存 404 毒丸)
+  if (MODS_RE.test(path)) {
+    e.respondWith((async () => {
+      try {
+        const modCache = await caches.open(MODS_CACHE);
+        const hit = await modCache.match(req, { ignoreVary: true }).catch(() => null);
+        if (hit) return hit;
+      } catch { /* 存储不可用:直通 */ }
+      return fetch(req);
+    })());
+    return;
+  }
   if (isDocPath(req, path)) {
     e.respondWith((async () => {
       const ver = await recoverVersion();

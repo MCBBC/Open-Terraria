@@ -506,7 +506,20 @@ export function takeVanillaNpcAiOverride(vanillaId: number): ((e: Enemy, game: G
 }
 
 /** 测试重置(模块态隔离;loader 单测同款纪律;WeakMap 存储随分代回收) */
+/** ★三百十五:菜单主题面(C# MainMenu 类同构;Calamity 主菜单消费)——logo/
+ *  background=SW 资源 URL(sprites/mods/...);TitleMenu/MenuBackground 消费 */
+export interface ModMenuThemeSpec { logo?: string; background?: string; cinderTex?: string }
+let menuThemeSpec: ModMenuThemeSpec | null = null;
+export function registerMenuTheme(modId: string, spec: ModMenuThemeSpec): void {
+  void modId;
+  menuThemeSpec = { ...spec };   // 单实例面(多 mod 后注册覆盖;菜单主题天然唯一)
+}
+export function menuThemeSnapshot(): ModMenuThemeSpec | null {
+  return menuThemeSpec;
+}
+
 export function _resetModHooksForTests(): void {
+  menuThemeSpec = null;
   npcAi.clear(); itemUse.clear(); systems.length = 0; onNpcDeath.clear();
   projSpecs.clear(); projRegs.length = 0; modBuffTicks.clear();
   modBuffNpcTicks.clear();

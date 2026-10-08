@@ -157,6 +157,11 @@ export function openModsPanel(): void {
     attachConfig(div, row);
     div.querySelector('[data-act=uninstall]')?.addEventListener('click', async () => {
       await store.remove(row.id);
+      // ★三百十二:SW mod 缓存前缀清理(资源随卸载出库;幂等 best-effort)
+      try {
+        const { purgeModAssetsCache } = await import('./assets');
+        await purgeModAssetsCache(row.id);
+      } catch { /* 清理失败不阻断卸载 */ }
       hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
       void refresh();
     });

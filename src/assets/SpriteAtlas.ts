@@ -329,7 +329,10 @@ export class SpriteAtlas {
         //  尚未注入 → fetch 404 → 负缓存 → 永久隐形。改为直查 vimages,
         //  命中即构 meta,未命中返回 null(下一帧自愈,注入完成后自然可见)。
         if (npcId >= 800) {
-          const img0 = this.vimages.get(sheet);
+          // ★三百十一/十二:miss 时——别名在册(=SW 暖存有此件)→ensureVImage
+          //  自然 fetch(SW mod 缓存路线);无别名(回退支/未暖存)→恒 null 等注入
+          //  (原语义;裸 fetch 原版路径=404 连环事故,三百十一首版教训)
+          const img0 = this.hasAssetAlias(sheet) ? this.ensureVImage(sheet) : null;
           if (!img0) return null;
           const frames0 = (vanillaNpcFrames as Record<string, number>)[key]
             ?? vanillaNpc(npcId)?.frames ?? 1;
@@ -367,9 +370,22 @@ export class SpriteAtlas {
    *  miss 走 ensureVImage 触发懒加载:未就绪返回 null,消费方下帧自愈
    *  (2026-08-13 前 vimages.get 直取——脱离 VANILLA_MISC 预载即永不出现) */
   /** ★二百八十九:vimages 表直查(零请求零副作用)——mod 注入键存在性判定
-   *  (Boss 地图头/血条 mod 头像:无素材走兜底,不发 404 探测) */
+   *  (Boss 地图头/血条 mod 头像:无素材走兜底,不发 404 探测)
+   *  ★三百十一:assetAlias 在册=该键必有 SW 缓存资源(mod 暖存登记过)=真 */
   hasVImage(file: string): boolean {
-    return this.vimages.has(file);
+    return this.vimages.has(file) || this.assetAlias.has(file);
+  }
+
+  // ---- ★三百十一:mod 资源 SW 同路线(mod 加载时资源暖进 SW 缓存,消费时经
+  //      ensureVImage 自然 fetch 命中;与本体 sprites/ 同源策略,零特判渲染面) ----
+  /** 别名表:消费键(vanilla/NPC_801.png 等)→ SW 缓存 URL(sprites/ 相对路径)。
+   *  ensureVImage fetch 时查表改源;落 vimages 仍用消费键(消费面零改) */
+  private assetAlias = new Map<string, string>();
+  setAssetAlias(key: string, url: string): void {
+    this.assetAlias.set(key, url);
+  }
+  hasAssetAlias(key: string): boolean {
+    return this.assetAlias.has(key);
   }
 
   vmisc(path: string): DrawRect | null {
@@ -453,7 +469,9 @@ export class SpriteAtlas {
         if (r.status === 404) this._uiFailUntil.set(file, Date.now() + SpriteAtlas.UI_FAIL_TTL_404);
       }).catch(() => { /* 探测失败维持短 TTL */ });
     };
-    im.src = `sprites/${encodeURI(file)}`;
+    // ★三百十一:mod SW 同路线——别名在册则 fetch 别名 URL(自然过 SW 缓存
+    //  cache-first);否则本键直取(原版路径语义不变)
+    im.src = `sprites/${encodeURI(this.assetAlias.get(file) ?? file)}`;
     return null;
   }
 
@@ -689,7 +707,9 @@ export class SpriteAtlas {
       };
       retry.src = im.src;
     };
-    im.src = `sprites/${encodeURI(file)}`;
+    // ★三百十一:mod SW 同路线——别名在册则 fetch 别名 URL(自然过 SW 缓存
+    //  cache-first);否则本键直取(原版路径语义不变)
+    im.src = `sprites/${encodeURI(this.assetAlias.get(file) ?? file)}`;
     return null;
   }
   /** 表是否处于失败冷却(10s 内视为失败,供消费方分级告警;过期自动可重试) */

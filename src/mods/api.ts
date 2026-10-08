@@ -20,7 +20,7 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool,
+  registerModSpawnPool, registerMenuTheme,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -47,6 +47,9 @@ export interface ModContext {
   /** ★三百零一:mod 配方组注册(RecipeGroup.RegisterGroup 同构;假 id=1010000+ 注册序
    *  ——提取器 recipe-groups.json 按名称排序同序;items=vid∪mod item 键) */
   recipeGroups(defs: Array<{ name: string; items: Array<number | string> }>): void;
+  /** ★三百十五:菜单主题面(logo/background=pack 相对路径→SW mod 缓存 URL;
+   *  TitleMenu logo 换图/MenuBackground 整幅替换+Cinders 粒子消费) */
+  menuTheme(spec: { logo?: string; background?: string; cinderTex?: string }): void;
   /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
   playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
@@ -139,6 +142,10 @@ export function createModContext(
         const ids = d.items.map((r) => (typeof r === 'number' ? r : idOf('items', r)));
         registerModRecipeGroupItems(ids);
       }
+    },
+    menuTheme(spec: { logo?: string; background?: string; cinderTex?: string }) {
+      const url = (p?: string) => (p ? `sprites/mods/${modId}/${p}` : undefined);
+      registerMenuTheme(modId, { logo: url(spec.logo), background: url(spec.background), cinderTex: url(spec.cinderTex) });
     },
     playSound(files: string[], volume = 1, x?: number, y?: number) {
       playModSound(files, volume, x, y);

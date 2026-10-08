@@ -7,7 +7,8 @@
 //     语义=任意 aiStyle160 弹在场 → TryStartUse 整体失败零副作用（不重放出膛）。
 //   ②PvP 剑帧制 1457 化（Frame(2,7) 38×38 整帧/悬停=行 6 覆盖帧;1456 4×6+36×37 裁已废）
 //   ③成就 Advisor 锚钉值（宽屏大卡=固定左锚 (501,25)=20+560×0.85+5,Main.cs:41755-41762;
-//     非右锚!窄屏内联 x=sw-224 已有 vanilla-inv-layout 钉值）
+//     非右锚!★BJ501 用户明令分歧(2026-10-04)：窄屏内联接线退役,恒大卡位恒画——
+//     ★BJ560 消费面断言按现役形重锚,旧 sw>=1000 门闭包断言随 BJ-C4 重构退役）
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -96,9 +97,19 @@ describe('BJ417 ③ 成就 Advisor 锚（Main.cs:41755-41762 固定左锚）', (
     expect(ADVISOR_XY).toEqual({ x: 501, y: 25 });
   });
 
-  it('消费面钉值：sw>=1000 → ADVISOR_XY.x（y=20 为 2026-09-13 用户拍板偏差备案,vanilla 25）', () => {
+  it('消费面钉值（★BJ560 重锚 BJ501 拍板面）：恒 (ADVISOR_XY.x, 20)——sw 门/窄屏内联已退役', () => {
     const src = readFileSync(resolve(ROOT, 'src/ui/UI.ts'), 'utf8');
-    expect(src).toContain('if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: 20 };');
+    // 现役形（BJ501 用户明令分歧 2026-10-04：恒大卡位恒画,无 sw<1000 断点）——
+    // 旧断言 `if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: 20 };` 随 BJ-C4 重构退役
+    expect(src).toContain('pos(advWrap, () => ({ x: ADVISOR_XY.x, y: 20 }));');  // 固定左锚消费位（无条件）
     expect(src).toContain('y=20;vanilla 25 = 5px 差,偏差备案');   // 偏差登记注释在位
+    // ★BJ501 退役面判别：旧 sw 门闭包/窄屏内联接线回滚复活即爆红
+    expect(src).not.toContain('return { x: ADVISOR_XY');
+    expect(src).not.toContain('if (c.sw >= 1000) return');
+    // 每一处 Advisor 实例化恒挂大卡 0.75 档（ADVISOR_SCALE_INLINE 断点回潮即爆红）
+    const calls = src.match(/createAchievementAdvisor\(/g)?.length ?? 0;
+    const fixedLarge = src.match(/createAchievementAdvisor\(\(\) => this\.game, \(\) => ADVISOR_SCALE_LARGE\)/g)?.length ?? 0;
+    expect(calls).toBeGreaterThan(0);
+    expect(fixedLarge).toBe(calls);
   });
 });

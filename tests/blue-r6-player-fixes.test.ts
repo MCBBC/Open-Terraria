@@ -60,18 +60,29 @@ const fakeHooks = (w: World, p?: Player, enemies: unknown[] = []) => ({
 
 const mkPlayer = (w: World): Player => new Player(40 * 16, 27 * 16, new Inventory());
 
-/** 双击触发冲刺：松-按-松-按 边沿序（DashMovement 就绪段的窗登记+消费） */
+/**
+ * 双击触发冲刺：松-按-松-按 边沿序（DashMovement 就绪段的窗登记+消费）。
+ * ★BJ560 键面重锚（MV3 债⑤清偿后现役形）：双击沿=单键按下沿
+ * `controlRight ∧ ¬releaseRight`（Player.ts :8207-8210 读 inputLeft/Right 布尔
+ * 同源位,非 inputX 合值沿）——与 Game 注入面同构并设（Game.ts :9947/:9953-9954
+ * inputX 合值与布尔同源自同一键态）。
+ */
 function doubleTap(p: Player, w: World): void {
   const tick = () => p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-  p.inputX = 0; tick();                       // 归零沿
-  p.inputX = 1; tick();                       // 第一击 → 登记窗
-  p.inputX = 0; tick();
-  p.inputX = 1; tick();                       // 第二击 → 消费触发
+  const key = (x: number): void => {
+    p.inputX = x;
+    p.inputRight = x > 0;                    // controlRight 同源位（MV3 单键沿承载）
+    p.inputLeft = x < 0;                     // controlLeft 同源位
+  };
+  key(0); tick();                            // 归零沿
+  key(1); tick();                            // 第一击 → 登记窗（inputRight 按下沿）
+  key(0); tick();
+  key(1); tick();                            // 第二击 → 消费触发
 }
 
 /** 滑行段阻尼采样：松输入滑 N 拍，取首两拍衰减比（|vx|>12 段 ×num14） */
 function glideRatio(p: Player, w: World, ticks = 2): number[] {
-  p.inputX = 0;
+  p.inputX = 0; p.inputLeft = false; p.inputRight = false;   // ★BJ560 键面并清
   const out: number[] = [];
   let prev = Math.abs(p.vx);
   for (let i = 0; i < ticks; i++) {
@@ -356,8 +367,10 @@ describe('Note② 非 CanDash 坐骑 :21579 早退连窗口都不登记', () => 
     p.inv.armor[3] = { id: iid(977), stack: 1 };                 // Tabi → eq.dash=1>0 进就绪支
     p.mount.active = true;
     (p.mount as unknown as { type: number }).type = 2;           // Pigron 非 CanDash 集{56..65}
-    p.inputX = 0; p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 1; p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 首击沿
+    p.inputX = 0; p.inputLeft = false; p.inputRight = false;   // ★BJ560 键面并设（单键沿承载）
+    p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    p.inputX = 1; p.inputRight = true; p.inputLeft = false;
+    p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 首击沿（inputRight 按下沿）
     expect(p.dashT).toBe(0);                                     // ★基线红=15
   });
 
@@ -365,8 +378,10 @@ describe('Note② 非 CanDash 坐骑 :21579 早退连窗口都不登记', () => 
     const w = mkWorld();
     const p = mkPlayer(w);
     p.inv.armor[3] = { id: iid(977), stack: 1 };
-    p.inputX = 0; p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 1; p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    p.inputX = 0; p.inputLeft = false; p.inputRight = false;   // ★BJ560 键面并设（单键沿承载）
+    p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    p.inputX = 1; p.inputRight = true; p.inputLeft = false;
+    p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     expect(p.dashT).toBe(15);                                    // 首击右向登记 ±15（:21316 dashTime=dir×15）
   });
 });

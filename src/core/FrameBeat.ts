@@ -1,6 +1,9 @@
 /**
  * ★确定性节拍对齐引擎(2026-09-28 调度面修复刃;同日热修刃:废除 60Hz 网格地板,
  * 目标周期=用户 frameCap——subtle 只对齐不钳速)——帧模式 subtle 档的渲染调度。
+ * ★v9.11(2026-10-08)起渲染调度=跟满回归:shouldRender 恒真、渲染帧距=回调流本距
+ * (不做任何限速);本文件余下面=诊断面(成本窗/est/失拍账)+k 迁移史档闸
+ * (migrationEnabled=false)+v9.7 hold(no-op)。
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
  *  - FrameSkipMode 三态:Main.cs:17129-17137——Off/Subtle=可变步+垂直同步;On=IsFixedTimeStep(60Hz)+垂直同步。
@@ -351,6 +354,73 @@
  *   0.75-2.0 恒 16-18 跳=与非门值无关)。翻正语义:形态②「跟满 125-132」→「限速
  *   120」;诚实边界②③(240Hz/深超速跟满)→「限速 120」;v9.8 诚实边界①②③④就此
  *   退役(读数≤cap/240Hz 交付/182Hz 交付均为裸时间门本相,累计器下不再成立)。
+ * ★v9.10 预测式提前量(2026-10-08,用户本机 dist-analyze trace Trace-20261008T114436
+ *   定谳后;v9.9 相位锚定语义保持,只动 shouldRender 的过门余量一处——门参数级变更):
+ *  - 案情(用户实报「很难跑稳 120」):回调流 184/s 超速双峰(间隔直方图 4ms:681/
+ *    5:1213/6:673/7:485/8:260/9:146——主峰 5.44+次峰 8-9 混合),回调网格与 target=8.33
+ *    非整数比(8.33/5.44≈1.53)→拍频抖动,帧距 7.5-10.9 跳变。根因=固定 0.75ms 提前量
+ *    在非均匀流上让渲染落点离相位线远:相位线落在两回调间时只能等下一个(晚 4-5ms)。
+ *  - 修法:shouldRender 过门余量 DUE_GUARD_MS(0.75)→dEst=最近 3 个回调间隔的中位
+ *    (observeVsync 维护 3 样本环形)。语义=「预计下一回调 dEst 后到来,若 now+dEst 越
+ *    过 _nextDue 则本回调渲」=now ≥ _nextDue − dEst:渲在离相位线最近的回调。守卫:
+ *    dEst 钳 [DUE_LEAD_MIN_MS(2), target×0.9](防异常间隔;>0.9×target 时提前量把帧距
+ *    下限拉到 <target×0.1);首 3 样本未成熟用 DUE_GUARD_MS=0.75 兜底(常数保留=兜底值
+ *    锁)。cap≤0/未锚定支不动;beginRender 相位推进/resetSampling/cap 变更重锚/v9.7
+ *    hold 全保留;Game 调用面签名零改动。
+ *  - ★与 B2 的区别(防混淆):dEst=3 样本快速反应量【非】窗估计器——不进 estimateVsync、
+ *    不碰 vsyncPeriod 诊断面、无成熟门/族形态学/回声账本(B2 全系已于 v9.5 终局清退,
+ *    本刀不复活任何估计器语义;估计器仍=截尾均值,只喂 F5/snapshot)。
+ *  - ★复现定谳(实现时五族流全量 A/B 回放,诚实登记——处方判别面部分证伪+改判,
+ *    BJ250 处方证伪判例同款):「帧距方差收窄」面未复现——iid 直方图流/merge-split
+ *    结构流/渲染后合并相关流/均匀 5.44 流/真实 T114436 回放流,帧距 std 前后差
+ *    ≤±3%(机理:渲染误差 e 的游走带宽度=局部回调间隔,提前量只平移游走带位置不改
+ *    变宽度,gap=target+e_i−e_{i+1} 的方差与带位无关——解析与仿真一致)。复现成立的
+ *    两面:①渲染落点对相位线的偏移收窄——真实 T114436 流(×10 定点语料,tests 锁同源)
+ *    实测均值 +6.45ms 晚(fixed 0.75)→ +3.96ms(dEst),落点离相位线近 2.5ms(「线落
+ *    两回调间只能等下一个=晚 4-5ms」面直接收窄);②真实 T114436 流
+ *    (cap=120)回放渲染数 2372→2438(+66,60 帧窗 fps 读数 p50 110.3→113.2)——窄
+ *    提前量在「短间隔跟长间隔」相位下整帧跳过(线落在两回调间→等下一回调=再吃一个
+ *    长间隔),预测式提前量把该回调渲掉=限速带内渲染率回收(直接对应用户「跑不到/
+ *    跑不稳 120」的读数面)。判别面据此改判:方差【不回归】锁+真实流渲染率回收
+ *    (红=回退固定 0.75:渲染数跌回+落点变晚;方差红面作废)+fps 带 [115,127]。
+ *  - ★处方代价登记(cap60 缺省档,诚实面):2×比率档(cap60@120Hz,target=2×局部间隔)
+ *    +重场景成本形态(25% 帧 12ms)上,全间隔提前量的阈值=相位线前整一回调(落点早
+ *    偏)+环形样本被 busy 延迟回调污染(12ms 帧吃掉一整个回调拍),帧距 std 较 v9.9
+ *    (2.79)升 ~0.7(3.49)、高于修前被动门基线(2.94);代价换超速/欠速混合流的渲染率
+ *    回收(v6 帧率优先政策的同族取舍)。lead 收敛候选(cap60 上实测 const 半间隔
+ *    std 2.35 优于 v9.9——「严格最近回调」语义=now ≥ _nextDue − dEst/2)登记为精化
+ *    候选,判据结构变更须新证据另立刀(v5 结构冻结令)。
+ *  - fp 刀刃容差 DUE_FP_EPS_MS(1e-6):dEst 提前量在整数比流(target=整数×回调间隔,
+ *    如 240Hz cap120/cap60@120Hz 干净流)上,阈值 _nextDue−dEst 恰落在回调位置上——
+ *    _nextDue 累加链与回调累加链的 fp 舍入差(~ulp)使等号随机翻转=随机跳帧(v9.9 的
+ *    DUE_GUARD_MS=0.75 把阈值压在两回调之间顺带吸收了这一面;提前量=整间隔时刀刃
+ *    暴露,NoGuardAccumBeat 同族刀刃)。等号语义=渲(下一回调必越线),阈值外扩此
+ *    微量吸收链差;真实流(ms 级时间戳抖动)不可见。
+ * ★v9.11 终局刀=跟满回归(2026-10-08,用户本机 dist-analyze trace(130909)定谳后用户
+ *   裁决;v9.9 相位锚定与 v9.10 预测式提前量自此整体退役为实验轨史档——上文 v9.9/
+ *   v9.10 两注保留作归档,其机制面(_nextDue 累计器/dEst 提前量/DUE_* 常数族/v9.8
+ *   TARGET_GUARD_MS 时间门)全部拆除):
+ *  - 案情(用户实报):游戏主循环回调流=167/s(间隔 p50=5.27ms,双峰 4-6/8-9)。cap=120
+ *    下 v9.9(累计器 lead 0.75)帧距恒 10.54ms=95fps 上限(「到不了 120」);v9.10
+ *    (lead=dEst≈5)帧距 5.3/10.5 交替=「压着+抖」。用户裁决原话:
+ *    「像是被什么奇怪的算法一直压着,以前我们都可以上 120」——累计器限速就是那只手。
+ *  - 单链数学(定谳):回调网格 5.27ms 与 cap 周期 8.33ms 非整数比(8.33/5.27≈1.58)→
+ *    任何相位限速都给不出稳定 120;而流本身帧距 5.27ms 恒定=最平滑(167fps)。对回调
+ *    流做限速=在匀滑流上人为制造两种帧距混样;历次实报归一:v9.9 的 95 上限/v9.10 的
+ *    压着抖/v9.5 时代的 130 波动,全部=「限速思想」的产物。
+ *  - 修法(跟满回归):shouldRender 恒真——渲染帧距=回调流本距,流匀则帧距匀(无论流
+ *    是 120 还是 167),不做任何限速。migrationEnabled=false 闸与 v5-v8 判据组原样
+ *    保留(史档+红判别器复刻点);v9.7 hold 保留为兼容 no-op;observeVsync/beginRender/
+ *    endRender 记账照跑(诊断面:帧距=流距的观测/成本窗/est)。变异证红:恢复累计器
+ *    任一形态(v9.9 相位锚/v9.10 dEst/v9.8 时间门/旧 k 迁移)→跟满语义测试红
+ *    (tests/frame-beat.test.ts 变异证红块,AccumulatorBeat/OldMigrationBeat)。
+ *  - 产品定谳:cap=意图非节拍——帧率上限不再钳制渲染率;Settings 面板 frameCap 选项
+ *    保留但 disabled+tooltip「渲染跟随显示器实际节拍」(Options 字段保留兼容存档;
+ *    既有 l10n 键面不动)。VUI 菜单壳循环的独立节流门(2026-08-29,防 930fps 空转
+ *    烧核)是 CPU 空转保护非游戏渲染率语义,不在本刀面。
+ *  - 诚实边界:读数=合成器实际节拍(当前用户会话 126-167 波动带),超速流读数>cap
+ *    名义值=显示面非病(v9.5 裁决语义承继);cap 设置不再钳制渲染率(UI disabled
+ *    说明);render-bound 会话帧距=帧耗本相(回调流被工作周期钉死,流距即帧距)。
  */
 
 /** 原版 present 网格常数(60Hz;improvedSubtle EndDraw 钳值 TARGET_FRAME_TIME×599/600)。
@@ -443,14 +513,11 @@ export function trimmedMeanVsync(win: number[]): number {
   for (let i = trim; i < s.length - trim; i++) sum += s[i];
   return Math.min(VSYNC_MAX_MS, Math.max(VSYNC_MIN_MS, sum / (s.length - 2 * trim)));
 }
-/** shouldRender 时间门余量(★v9.8 根治刀起=渲染主决策面常数;取值用测试/真实语料
- *  标定,初始处方 0.5-1ms 被标定否决——标定算术与理由见头注 v9.8):真实机 merge/
- *  split 流零咬合跟满(最短间隔 3.9 ⇒ GUARD≥4.43)+多回调拍 ±10% 抖动带外(cap60@
- *  120Hz 两回调拍最小合计 15.0 ⇒ 阈 12.17 带外)+cap 值域 {60,120,0}@60/120Hz 屏
- *  全正确量化。取 4.5=三面包络 */
-export const TARGET_GUARD_MS = 4.5;
-/** ★v9.9 相位锚定调度：累计器过门余量——只防 rAF 时间戳抖动（0.75ms 带）。 */
-export const DUE_GUARD_MS = 0.75;
+// ★v9.8 时间门余量(TARGET_GUARD_MS=4.5)与 v9.9/v9.10 累计器面(DUE_GUARD_MS 0.75/
+//  VSYNC_LEAD_RING/DUE_LEAD_MIN_MS/DUE_FP_EPS_MS/dEst 环形)已于 v9.11 跟满回归
+//  (2026-10-08)整族拆除:渲染决策=恒渲,时间/相位参数不再进渲染决策面。定谳链
+//  (回调网格 5.27 与 cap 周期 8.33 非整数比→任何相位限速给不出稳定 120)与用户
+//  裁决原话见头注 v9.11;实验轨史档=git 历史+tests 历史。
 // ★v9.4 cap 硬顶门(CAP_TOP_TOL_MS/capSkips/shouldRender 门块)已于 v9.5 终局裁决
 //  (2026-10-06)拆除:用户机 Trace-20261006T033001 定谳门=278 skip 中 198(71%)的
 //  咬合源、渲染率被压 117.2<cap 120(设计点 cap±1 证伪)、fps 读数 120 穿越 7.3 次/s
@@ -475,7 +542,8 @@ export class FrameBeat {
   k = 1;
   /** 自上次渲染起累计的 vsync 回调数(帧序计数;渲染后归零) */
   ordinal = 0;
-  /** 用户帧率上限(0=不设限;仅作天花板,经 observeVsync 注入——引擎不读 options) */
+  /** 用户帧率上限(经 observeVsync 注入——引擎不读 options)。★v9.11:cap=意图非节拍,
+   *  不进渲染决策(恒渲跟满);仅存诊断面/minK 判据语义(闸内史档) */
   protected cap = 0;
   /** vsync 周期估计(ms;rAF 回调间隔中位数) */
   vsyncPeriod = GRID_MS;
@@ -486,9 +554,6 @@ export class FrameBeat {
   private lastVsyncTs = -1;
   private costWin: number[] = [];
   protected lastRenderAt = -1;
-  /** ★v9.9 相位锚定调度：下次预定渲染时刻（n×target 序列）——-1=未锚定。正常流锁相
-   *  vsync；超速流预定不提前=限速 120 稳定；慢流累计补拍；掉帧重锚防追赶风暴。 */
-  private _nextDue = -1;
   /** 上次渲染帧距(beginRender 时记;endRender 作失拍判定) */
   private lastGap = 0;
   /** 升拍判据连续满足计数(渲染帧数;达 UPGRADE_WIN_SAMPLES×UPGRADE_HOLD_WINDOWS 即升一级;
@@ -557,11 +622,11 @@ export class FrameBeat {
   }
 
   /**
-   * 每个 rAF 回调必经(先于任何跳帧判定)——喂 vsync 序列估计周期。
-   * cap:当前用户帧率上限(0=不设限),变更即时生效。
+   * 每个 rAF 回调必经——喂 vsync 序列估计周期(★v9.11 起纯诊断面:est 只喂 F5/
+   * snapshot,不进渲染决策)。cap:当前用户帧率上限(0=不设限)——★v9.11 cap=意图
+   * 非节拍,只记字段(诊断/minK 判据),渲染决策面已退役。
    */
   observeVsync(now: number, cap: number): void {
-    if (this.cap !== cap) this._nextDue = -1;   // ★v9.9:cap 变更=相位按新 target 重排
     this.cap = cap;
     let d: number | undefined;
     if (this.lastVsyncTs >= 0) {
@@ -602,23 +667,19 @@ export class FrameBeat {
     return trimmedMeanVsync(this.vsyncDeltas);
   }
 
-  /** 本回调是否落拍(渲染)。★v9.8 根治刀=【纯时间门】:now−lastRenderAt ≥
-   *  targetMs(cap)−TARGET_GUARD_MS 即渲;序数/k/est 全部退出决策面(退役理由/定谳
-   *  链见头注 v9.8)。四形态语义:①干净流=逐回调全渲恒屏率(阈带外零咬合);②超速
-   *  流=跟满稳定(读数=流原生率,v9.5「无门配置读数稳 126.7」同相);③render-bound
-   *  =帧耗>阈每回调必渲,帧距被帧耗钉死(容量语义天然承载);④暂停+云尖峰宽分布流
-   *  =帧距=流本相零振荡(无 est 无 k 无迁移)。
-   *  cap≤0=UNCAPPED 判例恒渲(桌面跟满;est 不进决策,「估计即节奏」反馈环不成立)。
-   *  阈值放置教义:阈=target−4.5 严格落在真实流间隔带 [3.9,13.5] 与多回调拍合计带
-   *  之外(头注 v9.8 标定)——阈值不落抖动带内 ⇒ 零随机翻转=「取代旧被动门」条
-   *  的带外放置教义在时间门上的落实。
-   *  历史:v9.4 cap 硬顶门(同构时间门但以概率咬合断环为目的,阈 6.33)已被 v9.5
-   *  定谳拆除(7.55% skip=纯害);本门与之的语义差在 GUARD 处方与目的——门不追求
-   *  咬合(阈压在流间隔带下沿之外),只承载 cap 执法与 render-bound 容量语义 */
+  // ★v9.10 预测式提前量(dEst 钩+3 样本环形窗)已于 v9.11 随累计器整族退役
+  //  (史档=头注 v9.9/v9.10+tests 历史)。
+
+  /** 本回调是否落拍(渲染)。★v9.11 跟满回归(终局刀,2026-10-08 用户裁决):恒渲——
+   *  cap≤0 既有支与 cap>0 支合流,渲染帧距=回调流本距(流匀则帧距匀,无论流是 120
+   *  还是 167),不做任何限速。单链数学:回调网格 5.27ms 与 cap 周期 8.33ms 非整数比
+   *  →任何相位限速给不出稳定 120(v9.9 帧距恒 10.54=95fps 上限/v9.10 5.3/10.5 交替
+   *  =「压着+抖」,用户裁决原话「像是被什么奇怪的算法一直压着,以前我们都可以上
+   *  120」——累计器/_nextDue/dEst 全部退役,头注 v9.11)。cap=意图非节拍(设置面
+   *  disabled);migrationEnabled 闸(k 迁移史档面)与 v9.7 hold(no-op)保留原样 */
   shouldRender(now: number): boolean {
-    if (this.cap <= 0) return true;
-    if (this._nextDue < 0) return true;   // 首帧/resetSampling 后立即渲(-1 哨兵不得当 1ms elapsed 吞首帧)
-    return now >= this._nextDue - DUE_GUARD_MS;   // ★v9.9:相位锚定（n×target 序列,非渲完重置）;cap<=0/未锚定支见上
+    void now;   // 签名保留(Game 调用面;时刻参数不再进决策)
+    return true;
   }
 
   /** 降拍判据(v6 帧率优先制+ v7 案②结算护栏;protected hook=红判别器旧侧复刻点):
@@ -668,13 +729,12 @@ export class FrameBeat {
     return this.costP50() < this.budget(this.k) * UPGRADE_HEADROOM;
   }
 
-  /** 渲染开始(shouldRender 为真后调用):重置序数、记帧距锚 */
+  /** 渲染开始(★v9.11 恒渲态下每回调调用):重置序数、记帧距锚。★v9.9 相位推进
+   *  (_nextDue 步进)已随累计器于 v9.11 退役——beginRender 只剩记账面 */
   beginRender(now: number): void {
     this.lastGap = this.lastRenderAt >= 0 ? now - this.lastRenderAt : 0;
     this.lastRenderAt = now;
     this.ordinal = 0;
-    // ★v9.9 相位推进：+target 步进；慢流重锚到 now（落后不追讨）；快流恒 +target=限速。
-    this._nextDue = this._nextDue < 0 ? now + this.targetMs() : Math.max(this._nextDue + this.targetMs(), now);
   }
 
   /** 失拍降档双门(v7.1 瞬态簇豁免;protected hook=红判别器旧侧复刻点):连续性
@@ -819,7 +879,6 @@ export class FrameBeat {
     this.upHoldN = 0;
     this.lastGap = 0;
     this.lastRenderAt = -1;
-    this._nextDue = -1;   // ★v9.9:相位重锚
     this.ordinal = 0;
     this.settleGuard = COST_WIN;   // v7 案②:进世界首簇重帧是 reset 之后的证据,重挂全窗门槛
     this.floorHoldN = 0;           // v9.7:滞回账随采样面一并复位

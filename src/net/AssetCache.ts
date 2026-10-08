@@ -325,7 +325,7 @@ export function assetsCompleteFast(): boolean {
 }
 
 /** 与 public/sw.js 的 CACHE_PREFIX 手工同步(缓存名前缀;改须双侧) */
-const CACHE_PREFIX = 'sw-assets-v';
+export const CACHE_PREFIX = 'sw-assets-v';   // ★三百十一:导出(mod 资源暖存同缓存名)
 
 /** 懒加载 worker 预取钩子(2026-08-25):由 main 注入(main 持有两个客户端的
  *  prefetchWorker——spawn 点的 new Worker(new URL) 才会被 vite 构建,此处若用

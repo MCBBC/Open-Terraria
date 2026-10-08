@@ -8795,54 +8795,33 @@ export class Game implements GameHooks {
     const loop = (now: number) => {
       if (!this.running) return;
       try {
-        const mode = options.data.frameSkipMode;
-        if (mode === 'subtle') {
-          // ★调度面修复刃(2026-09-28)→★v9.8 根治刀(2026-10-07):subtle 档渲染调度=
-          //  纯时间门(see FrameBeat.ts 头注 v9.8)——shouldRender=now-lastRenderAt ≥
-          //  1000/cap-GUARD,k 迁移机制(容量扫拍/minK 地板/滞回升拍/失拍降档)整体退役
-          //  (用户明令「最简条件下帧率都不稳=算法本身有问题,需要根治」;定谳:回调流
-          //  132/s 超 vsync 宽分布 → est 污染 → minK 门槛翻转 → k 1↔2=一切帧率不稳
-          //  实报公共根因,且 k 对齐语义与 v6 帧率优先政策自相矛盾)。四形态语义:
-          //  干净流恒屏率/超速流跟满稳/render-bound 帧距=帧耗/暂停+云尖峰零振荡。
-          //  被跳过的回调不进 frame()(逻辑恒 60Hz——fixedUpdate 累计器在下个渲染帧
-          //  补步,≤5 步钳内;_paintedFrames 只认真实渲染帧,whenFirstPaint 语义不变)。
-          //  旧被动门(阈值 1000/cap-1 落在 vsync 整数倍±抖动带内,跳 1/2 个 vsync 随机
-          //  翻转)与旧 SuppressDraw(0 步进帧跳绘=累计器相位随 rAF 抖动随机游走)是
-          //  "高于 60fps 仍卡一下"的摆动源,故停用。
-          // ★v9.7 hold 信号(保留面):画面静止(fixedUpdate 停)期间瞬态诊断账逐帧清零
-          //  ——时间门下 paused 天然无迁移,hold 兼容保留防回归。语义面宽覆盖:this.paused
-          //  单源(autoPause 开界面/失焦/暂停浮层/图鉴面板/保存退出全部置位点汇于此)
-          //  +入场冻结窗/传送幕帘两个同族 fixedUpdate 停态;恢复拍即解。
-          this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
-          this.beat.observeVsync(now, options.data.frameCap);
-          if (!this.beat.shouldRender(now)) {
-            requestAnimationFrame(loop);
-            return;
-          }
-          this.beat.beginRender(now);
-        } else {
-          // ★v9.9 三档节拍统一（2026-10-08 用户实报「on/off 都无法达到 120,只有隐蔽
-          //  能」定谳）:on/off 档旧被动门(阈 1000/cap-1)在超速双峰回调流(间隔 4-9ms
-          //  宽分布)上随机咬合(短间隔被跳/长间隔过门=渲染帧距混样)=v9.5 定谳的摆动
-          //  源本体——隐蔽档的累计器在同流上限速 120 稳。三档渲染节拍统一走 beat 累
-          //  计器(off=cap0 恒渲/on=cap 限速/subtle=同),frameSkipMode 残余差异=原版
-          //  语义文案面(本仓逻辑恒 60Hz 与渲染解耦,三档渲染面同构)。原版锚存档:
-          //  On=IsFixedTimeStep 每 Tick 一绘(Main.cs:17133-17137)、Off=累计器门【不】
-          //  SuppressDraw(:17182-17197,"落后跳帧"分支 num3=0 死代码)——旧被动门
-          //  (2026-08-18)随本刀退役。
-          this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
-          this.beat.observeVsync(now, options.data.frameCap);
-          if (!this.beat.shouldRender(now)) {
-            requestAnimationFrame(loop);
-            return;
-          }
-          this.beat.beginRender(now);
+        // ★v9.11 跟满回归(2026-10-08 终局刀;用户裁决原话「像是被什么奇怪的算法一直
+        //  压着,以前我们都可以上 120」定谳后,FrameBeat.ts 头注 v9.11):渲染调度=跟满
+        //  ——shouldRender 恒真(累计器/_nextDue/dEst/时间门全部退役),渲染帧距=回调
+        //  流本距(流匀则帧距匀,无论流是 120 还是 167),不做任何限速。cap=意图非节拍:
+        //  options.data.frameCap 只作诊断/minK 判据面,不再钳制渲染率(Settings 选项
+        //  disabled+tooltip)。三档渲染面自 v9.9 起已统一走 beat 门,节拍分支随之合并;
+        //  原版锚存档:FrameSkipMode 三态 Main.cs:17129-17137(On=IsFixedTimeStep 每
+        //  Tick 一绘 :17133-17137)、SuppressDraw 仅旧路径 :17182-17197("落后跳帧"分支
+        //  num3=0 死代码)、improvedSubtleFrameSkip 默认 true :67615-67616、EndDraw 忙等
+        //  present 网格 :62624——原版"钳 60 网格"是"逻辑=呈现同帧"架构下的速度保全,
+        //  本仓逻辑恒 60Hz(fixedUpdate)与渲染解耦,该理由不存在;旧被动门(阈 1000/
+        //  cap-1 在超速双峰流上随机咬合)与旧 SuppressDraw(0 步进帧跳绘)均已退役。
+        //  被跳回调分支保留=调用面签名兼容(现役恒不走);v9.7 hold 信号保留(no-op):
+        //  this.paused 单源(autoPause 开界面/失焦/暂停浮层/图鉴面板/保存退出全部置位
+        //  点汇于此)+入场冻结窗/传送幕帘两个同族 fixedUpdate 停态。
+        this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
+        this.beat.observeVsync(now, options.data.frameCap);
+        if (!this.beat.shouldRender(now)) {
+          requestAnimationFrame(loop);
+          return;
         }
+        this.beat.beginRender(now);
         this._lastCapTs = now;
         this.frame(now);
         // 节拍机记账:成本=渲染帧主线程占用(rAF 时间戳→frame 完成;与合成器 present
         // 截止同源)——★v9.8 起仅作诊断面采样(F5/snapshot),k 迁移决策已退役;
-        // ★v9.9 起三档统一记账(累计器相位推进依赖 begin/endRender 成对)
+        // ★v9.11 跟满态下该记账=「帧距=流距」的观测面(诊断保留价值)
         this.beat.endRender(performance.now());
         this._paintedFrames++;
         if (this._paintWaits.length) {
@@ -28365,6 +28344,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *    （本仓 single-player 恒 active;dead/isGhostPhase 同 playerOverlapsRect 判据）;
    *  · NPC 臂 `Main.npc[l].active`（:1374-1380）——原版无分池,敌怪+城镇 NPC+小动物
    *    同在 Main.npc 一张表 → 本仓 enemies+npcs+critters 三桶全收;
+   *  · ★BJ564（2026-10-08）：npcs 桶内的 PetFollower 豁免——原版宠物/照明宠物＝
+   *    弹幕（Main.projectile Main.cs:1706 承载;旗面 Main.vanityPet/Main.lightPet
+   *    Main.cs:784/:786;AI 由 Projectile.cs:26766-26768 分派 AI_026）,不在 Main.npc
+   *    表 ⇒ EmptyTile 两臂咬不到 ⇒ 原版可在宠物/光宠所在格放实心块（弹幕不占位）。
+   *    本仓 updatePetSlot 曾把 PetFollower 塞进 npcs 桶（:45900）误吃 NPC 臂=用户
+   *    实报"宠物挡放置";修=实体臂内 instanceof 豁免（单源一处,四门族+放置近似全对齐）。
    *  · 【无】projectile/item 臂——弹幕不占门位（Collision.cs 全文无 Main.projectile
    *    查询）。tile 臂（`tile.active() && !ignoreTiles`）由各消费面自持（门族全走
    *    ignoreTiles:true=纯实体域）。
@@ -28378,7 +28363,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     if (!p.dead && !p.isGhostPhase(this.world) && hit(p)) return true;   // :1368
     for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters]) {   // :1374-1380
-      for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return true; }
+      for (const e of b) {
+        if (e instanceof PetFollower) continue;   // ★BJ564：宠物=原版弹幕,不占 EmptyTile（tests/bj564-pet-place-block）
+        if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return true;
+      }
     }
     return false;
   }

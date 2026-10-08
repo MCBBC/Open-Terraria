@@ -88,6 +88,10 @@ function isClosedDoorOrGate(t: number): boolean {
 
 export interface NpcHome { x: number; y: number; }
 
+/** NPCID.Sets.IsTownPet（NPCID.cs:4446）全表：猫 637/狗 638/兔 656/蓝城镇史莱姆
+ *  670/城镇史莱姆族 678-684——死亡公告走 "{0} has left!" 便（checkDead :78951-78955） */
+const NPC_IS_TOWN_PET = new Set([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
+
 // ===================== 坐姿（AI_007 ai[0]==5）纯函数 =====================
 // 可坐格族 = TileID.Sets.CanBeSatOnForNPCs（TileID.cs:211）恰好 {15 椅, 497 马桶}
 // ——王座(102)/长凳(89) 只在 CanBeSatOnFor*Players* 集，城镇 NPC 不坐；
@@ -1570,6 +1574,11 @@ export class TownNPC extends Entity {
     if (this.hp <= 0) {
       this.dead = true;
       game.recLog?.('death', { id: this.id, vid: this.vanillaId ?? null });   // 行为录制：城镇 NPC 死亡
+      // ★BJ561 死亡公告（NPC.checkDead townNPC 支 :78942-78974）：广播须在死亡
+      //   演出（音效 :78990/NPCLoot :78999/active=false :79029）之前——原版位次
+      //   = NPCLuck(:78944)→文本(:78949-78956)→墓碑(:78969)→广播(:78973)→
+      //   裁缝巫毒 Skeletron(:78975)→锁复位(:78986)→死亡音(:78990)
+      this.broadcastDeathMessage(game);
       // 死亡复位优先型锁（NPC.cs:78986-78989 `townNPC && netMode!=1 && homeless &&
       // WorldGen.prioritizedTownNPCType == type → =0`）——homeless 死者锁住的类型
       // 若不复位会滞留至下一轮首（UpdatePrioritizedTownNPC 只在有 homeless 者时改写,
@@ -1596,6 +1605,41 @@ export class TownNPC extends Entity {
       game.playSfxFiles?.(hitFiles, 1);
     }
     return true;
+  }
+
+  /** ★BJ561 城镇 NPC 死亡公告（NPC.checkDead townNPC 支 :78942-78974 → ChatHelper.
+   *  BroadcastChatMessage :78973 → DisplayMessage → Main.NewTextMultiline 左下角
+   *  消息列）。定谳面（1457 亲读）：
+   *  · 门 = `townNPC && type != 37 && type != 453`（:78942）——老人 37（骷髅王
+   *    诅咒傀儡）与骷髅商 453 死亡静默。本仓 37/453 都是 TownNPC 实体
+   *    （TOWN_NPC_IDS old_man/skeleton_merchant）→ 两排除位都是真消费。
+   *  · 文本 = NetworkText.FromKey(Lang.misc[num6].Key, fullNetName)（:78956）：
+   *    常规 = LegacyMisc.19 "{0} was slain..."（zh "{0}被杀死了……"）；
+   *    渔夫 369 / 公主 663 / 城镇宠物 = LegacyMisc.36 "{0} has left!"（zh
+   *    "{0}已离开！"）——num6=36 同支把墓碑旗 flag 置 false（:78951-78955）。
+   *    IsTownPet 全表 = 637 猫/638 狗/656 兔/670 蓝史莱姆/678-684 城镇史莱姆族
+   *    （NPCID.cs:4446）。
+   *  · fullNetName = GetFullNetName（:7376-7383，HasGivenName=_givenName.Length!=0
+   *    :6765）= 具名 ? NetworkText.FromKey("Game.NPCTitle", given, type) : 类型名；
+   *    en "{0} the {1}" / zh "{1}{0}"（Renderer.ts:15556 FullName 同式）。
+   *  · 颜色 = ChatColors.Death (255,25,25)（ChatColors.cs:15）恒色——血月/入侵
+   *    无变体（该支仅此一处着色；玩家死亡 (225,25,25) 是 Player.cs:39222 另一支）。
+   *  · 广播单口 = game.chatBroadcast（ChatHelper.BroadcastChatMessage 等价面：
+   *    本地消息列 + 联机 channel2 系统行中继——同玩家死亡 Game.ts:51029/
+   *    沙滩球踢次 BallProjs.ts:249 形）。
+   *  · 墓碑（DropTombstoneTownNPC :79082-79108,全员 hardcore 才落 :78957-78972）
+   *    与 NPCLuck（:78944 瓢虫运消算）未接=登记债。 */
+  private broadcastDeathMessage(game: GameHooks): void {
+    if (this.vanillaId === 37 || this.vanillaId === 453) return;      // :78942 排除
+    const petStyle = this.vanillaId === 369 || this.vanillaId === 663
+      || NPC_IS_TOWN_PET.has(this.vanillaId);                          // :78951-78955
+    const typeName = Lang.npcName(this.vanillaId) ?? this.npcKey;
+    const fullName = this.givenName
+      ? Lang.text('Game.NPCTitle', this.givenName, typeName)           // :7382
+      : typeName;                                                      // :7380
+    game.chatBroadcast?.(
+      Lang.text(petStyle ? 'LegacyMisc.36' : 'LegacyMisc.19', fullName),
+      255, 25, 25);                                                    // ChatColors.Death
   }
 
   /** 城镇 NPC 死亡掉落（NPC.checkDead → NPCLoot_DropItems :79653——vanilla-

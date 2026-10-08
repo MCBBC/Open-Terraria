@@ -18,6 +18,7 @@
 //   B2 拖动改时间：原版抓取即写 Main.time 使日/月跟手（Main.cs:62434-62446 反算）。
 //      MenuBackground.clock 私有无 setter——暴露 setClockT(t01) 并在 showTitle 的
 //      TitleMenu flow 里接 onSunMoonGrab 即原版般跟手；time01 已按原版公式反算好抛出。
+import { menuThemeSnapshot } from '../mods/hooks';
 import APP_VERSION, { BUILD_STAMP } from '../version';
 import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
@@ -264,6 +265,9 @@ export class TitleMenu {
     const [dayName, nightName] = this.boulderLogo ? ['Logo5', 'Logo6'] : ['Logo', 'Logo2'];
     day.src = `sprites/vanilla-ui/${dayName}.png`;
     night.src = `sprites/vanilla-ui/${nightName}.png`;
+    // ★三百十五:菜单主题 logo 换图(CalamityMainMenu Logo 覆盖同构;单图昼夜同源)
+    const mt = menuThemeSnapshot();
+    if (mt?.logo) { day.src = mt.logo; night.src = mt.logo; }
   }
 
   /** 一步 60fps 帧动效（Main.cs Update :17292 复位点 + DrawMenu :49060-49132 分支逐字，
@@ -340,6 +344,9 @@ export class TitleMenu {
     document.body.appendChild(this.chrome);
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
+    // ★三百十五:菜单主题 logo 换图(mount 首态;applyLogoImages 昼夜切换同覆盖)
+    const mtMount = menuThemeSnapshot();
+    if (mtMount?.logo) { this.logoDay.src = mtMount.logo; this.logoNight.src = mtMount.logo; }
     // ★资产诊断入口(2026-08-27):logo 连点 5 次(2.5s 内)弹出资产诊断面板
     //   (手机无 Console 的取证出口,swTrace 跨刷新持久)。调试工具,文案硬编码。
     //   ★监听挂 window 捕获阶段+按坐标命中 logo 矩形——logo 上方有日/月成就

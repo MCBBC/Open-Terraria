@@ -576,6 +576,11 @@ for (const f of csFiles) {
     if (head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) hasPng = true;
   }
   if (!hasPng) stats.noTexture++;
+  // ★三百十三:texture 字段发出(信任面=json 自描述)——PNG 在库(含重定向解析)
+  //  即写 `textures/npcs/<key>.png`;三百十二用户实报:286 件缺此字段=注入门
+  //  spec?.texture 全跳=贴图全裂(重定向修复刀曾写入,后续提取器编辑丢失=
+  //  五代债链模式)。
+  if (hasPng) raw.texture = `textures/npcs/${key}.png`;
 
   if (WRITE) {
     // ★蠕虫链 sidecar 合并(五十四刀恢复刀):--write 不再覆写手补 worm 声明

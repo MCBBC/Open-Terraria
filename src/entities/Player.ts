@@ -1126,6 +1126,12 @@ export class Player extends Entity {
   /** 悬挂侧向档（原版 pulleyDir，Player.cs:1026）：0=未定（状态机首帧归 1）、
    *  1=绳列中心、2=中心±6px（贴绳侧挂） */
   pulleyDir = 0;
+  /** 滑轮贴图帧（Player.cs:1057 pulleyFrame）：0/1 两帧循环，绳上滑动时推进
+   *  （advancePulleyFrame :26661-26681；渲染消费 = DrawPlayer_24_Pulley 帧行） */
+  pulleyFrame = 0;
+  /** 滑轮帧推进累加器（Player.cs:1059 pulleyFrameCounter）：每拍 += |vy|·0.75、
+   *  vy≠0 再 +0.75，>10 → pulleyFrame++ 归零（Player.cs:26661-26681） */
+  pulleyFrameCounter = 0;
   /** 视觉纵向偏移（Player.cs:1504 gfxOffY）：挂绳/上绳瞬间 position.Y 跳变时
    *  记录差值（=position.Y−新Y），渲染锚点（钓线/悠悠球线/持物）消费；
    *  每 tick 衰减回 0（:27695-27719），钳 ±32。矿车态另有 Minecart.gfxOffY
@@ -5959,6 +5965,10 @@ export class Player extends Entity {
       // vx 恒 14.5 漂 +180px,绳场越宽漂越远）。ix 传 0：dashMovement 滑行支的输入
       // 加速/制动块承载的是 HorizontalMovement Run 支（:26889 落主移动支 else-if 链,
       // 绳索支整段不跑 :26366）——原版绳面滑行=纯阻尼,无输入贡献。
+      // ★BJ559（2026-10-08）滑轮帧推进：原版 :26661-26681 在 pulley 块尾（X 吸附
+      // 后/DashMovement 前）无条件执行——本支按 pulley 门收窄（非 pulley 绳攀=
+      // 原版不存在的攀爬态,滑轮贴图门同为 pulley,不合帧）。
+      if (this.pulley) this.advancePulleyFrame();
       this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else if (this.pulley) {
       // 绳端悬挂支（:25985-26137）：头格列/行 num34/num36，上下邻格（:25998 flag17）
@@ -5984,6 +5994,9 @@ export class Player extends Entity {
       // 含 :26644-26648 inputDown 穿落离绳拍,原版离绳拍块尾照跑 DashMovement;
       // 中段浸水 pulley 也落本支=branch1 的 !inWater 门让位）。ix 同上传 0（绳面无
       // Run 支,见上支注）。
+      // ★BJ559：帧推进支尾无条件=原版 :26661 块序（穿落拍 pulley 已置假、vy=1
+      // 照推进——原版块内无 pulley 复查）。
+      this.advancePulleyFrame();
       this.dashMovement(game, eqM, 0, speedMult, duneBoost, strongestSlow);
     } else
     // 微光物理（Player.cs:24115-24127 else if (shimmerWet || shimmering) 分支）
@@ -9955,6 +9968,24 @@ export class Player extends Entity {
       this.vy *= 0.7;
       if (Math.abs(this.vy) < ROPE_IDLE_ZERO) this.vy = 0;
     }
+  }
+
+  /** 滑轮帧推进（Player.cs:26661-26681——pulley 垂直块（:26500）尾段：X 吸附
+   *  （:26644-26660）之后、RefreshDoubleJumps/DashMovement（:26683/:26691）之前，
+   *  块内无条件执行——含 inputDown 穿落离绳拍（该拍 pulley 已置假、vy=1 照推进）。
+   *  公式：counter += |vy|·0.75，vy≠0 再 +0.75；counter>10 → pulleyFrame++ 并归零
+   *  counter；pulleyFrame>1 归 0（PlayerPulley 26×72 两帧竖排循环）。
+   *  本仓调用位 = 移动相两支（中段 branch1 门 this.pulley / 绳端 branch2 支尾
+   *  无条件）的 dashMovement 之前——与原版「垂直链→X 吸附→帧推进→DashMovement」
+   *  块序同相（本仓 X 吸附在移动相前置段 :5570-5578）。 */
+  advancePulleyFrame(): void {
+    this.pulleyFrameCounter += Math.abs(this.vy) * 0.75;   // :26661
+    if (this.vy !== 0) this.pulleyFrameCounter += 0.75;    // :26663-26665
+    if (this.pulleyFrameCounter > 10) {                    // :26667-26671
+      this.pulleyFrame++;
+      this.pulleyFrameCounter = 0;
+    }
+    if (this.pulleyFrame > 1) this.pulleyFrame = 0;        // :26673-26675
   }
 
   // ===================== 绳锚几何（RotatedRelativePoint / 坐骑持物偏移 / 线起点） =====================

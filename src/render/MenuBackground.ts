@@ -20,6 +20,7 @@
 import { starvedLock, glStatFrame } from './GLStats';
 import { SkyRenderer } from './SkyRenderer';
 import { BiomeBackground } from './BiomeBackground';
+import { menuThemeSnapshot } from '../mods/hooks';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { Clock } from '../world/World';
 import {
@@ -82,6 +83,13 @@ export class MenuBackground {
    *  tint 烘焙全在其内——本类只写样式与昼夜旗（原版菜单零硬切：重掷保留
    *  可见槽由 randomizeMenuBG 的保槽逻辑承担，切换全走其 alphaFront 淡化） */
   private biomeBg = new BiomeBackground(true);
+  /** ★三百十五:菜单主题背景(Calamity MainMenu 同构)——主题图在册=整幅替换
+   *  并跳过视差;Cinders 火星粒子画于其上 */
+  private themeImg: HTMLImageElement | null = null;
+  private themeImgReady = false;
+  private themeCinderImg: HTMLImageElement | null = null;
+  private themeCinderReady = false;
+  private cinders: Array<{ lifetime: number; time: number; idx: number; scale: number; vx: number; vy: number; x: number; y: number; color: string }> = [];
 
   private camX = 0;
 
@@ -332,6 +340,86 @@ export class MenuBackground {
     this.applyGenCloudForce();
 
     const W = this.canvas.width, H = this.canvas.height;
+    // ★三百十五:菜单主题背景(CalamityMainMenu_Classic PreDrawLogo 同构)——
+    //  主题图在册=整幅 cover 画出并【整体跳过】视差背景(sky/biomeBg/云/光斑;
+    //  源注释「typical parallax background is skipped entirely」)+Cinders 火星
+    //  粒子(红/黄/灰烬,自底升+左右摆)。logo 属 DOM 层不受此支影响。
+    const theme = menuThemeSnapshot();
+    if (theme?.background) {
+      if (!this.themeImg || !this.themeImg.src.endsWith(theme.background)) {
+        this.themeImgReady = false;
+        const im = new Image();
+        im.onload = () => { this.themeImgReady = true; };
+        im.src = theme.background;
+        this.themeImg = im;
+      }
+      const ctx = this.ctx;
+      if (this.themeImgReady && this.themeImg!.naturalWidth > 0) {
+        const im = this.themeImg!;
+        const xScale = W / im.naturalWidth;
+        const yScale = H / im.naturalHeight;
+        const scale = Math.max(xScale, yScale);   // cover(源 xScale/yScale 择大)
+        const dx = xScale >= yScale ? 0 : -(im.naturalWidth * scale - W) * 0.5;
+        const dy = yScale > xScale ? -(im.naturalHeight * scale - H) * 0.5 : 0;
+        ctx.drawImage(im, dx, dy, im.naturalWidth * scale, im.naturalHeight * scale);
+      } else {
+        ctx.fillStyle = '#141018';
+        ctx.fillRect(0, 0, W, H);
+      }
+      // Cinders 火星粒子(源 :84-136;CalamitasCinder 贴图,主题 URL 同域)
+      if (theme.cinderTex) {
+        if (!this.themeCinderImg || !this.themeCinderImg.src.endsWith(theme.cinderTex)) {
+          this.themeCinderReady = false;
+          const im2 = new Image();
+          im2.onload = () => { this.themeCinderReady = true; };
+          im2.src = theme.cinderTex;
+          this.themeCinderImg = im2;
+        }
+      }
+      for (let f = 0; f < frames; f++) {
+        for (let i = 0; i < 5; i++) {
+          if (Math.random() >= 1 / 4) continue;
+          const gray = Math.random() < 1 / 3;
+          const color = gray
+            ? `rgb(${Math.round(105 + 90 * Math.random())},${Math.round(105 + 90 * Math.random())},${Math.round(105 + 90 * Math.random())})`
+            : (Math.random() < 0.5 ? 'rgb(178,34,34)' : 'rgb(255,236,139)');
+          const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
+          this.cinders.push({
+            lifetime: 200 + Math.floor(Math.random() * 100), time: 0, idx: this.cinders.length,
+            scale: 1, x: W * (Math.random() * 1.2 - 0.1), y: H * 1.05,
+            vx: Math.cos(ang) * 4, vy: Math.sin(ang) * 4, color,
+          });
+        }
+        for (const c of this.cinders) {
+          const tail01 = Math.min(1, Math.max(0, 1 - c.time / c.lifetime));
+          c.scale = cinderLerp(0.6, 0.9, (c.idx % 6) / 6) * tail01 * (c.idx % 13 === 12 ? 2 : 1);
+          const flySpeed = cinderLerp(3.2, 14, (c.idx % 21) / 21);
+          const sway = Math.sin(c.time / 16 + c.idx) * 0.5 + 0.5;
+          const ivA = -Math.PI / 2 + cinderLerp(-0.44, 0.44, sway);
+          const ivx = Math.cos(ivA) + 1, ivy = Math.sin(ivA);
+          const len = Math.hypot(ivx, ivy) || 1;
+          const tvx = (ivx / len) * flySpeed, tvy = (ivy / len) * flySpeed;
+          const interp = cinderLerp(0.01, 0.08, Math.min(1, Math.max(0, (c.time - 45) / 100)));
+          c.vx += (tvx - c.vx) * interp;
+          c.vy += (tvy - c.vy) * interp;
+          c.time++;
+          c.x += c.vx; c.y += c.vy;
+        }
+        for (let i = this.cinders.length - 1; i >= 0; i--) if (this.cinders[i].time >= this.cinders[i].lifetime) this.cinders.splice(i, 1);
+      }
+      for (const c of this.cinders) {
+        const s2 = Math.max(1, 8 * c.scale);
+        if (this.themeCinderReady && this.themeCinderImg!.naturalWidth > 0) {
+          ctx.globalAlpha = Math.min(1, c.scale);
+          ctx.drawImage(this.themeCinderImg!, c.x - s2 / 2, c.y - s2 / 2, s2, s2);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = c.color;
+          ctx.fillRect(c.x - s2 / 2, c.y - s2 / 2, s2, s2);
+        }
+      }
+      return;
+    }
     // 相机 Y = surface·16 − 屏高（DrawMenu :47620）——云 num3 视差/atmo 归位
     const camY = this.sky.vanillaMenuCamY(H);
     // 云 GL 层每帧注入(Renderer 帧路径同款;不可用/退避期 null = 2D 兜底)
@@ -393,3 +481,6 @@ export class MenuBackground {
     };
   }
 }
+
+
+const cinderLerp = (a: number, b: number, t: number): number => a + (b - a) * t;

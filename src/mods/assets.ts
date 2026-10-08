@@ -15,10 +15,77 @@ import { modBuffRegs, registerModBuffIcon } from './buffs';
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import { registerModPortraitUrl } from '../data/npcPortraits';
 import type { VanillaTileMeta } from '../assets/SpriteAtlas';
+
 import type { ModItemContent, ModNpcContent, ModTileContent } from './types';
+
+/** ★三百十一/十二:mod 资源 SW 同路线——pack 内文件 → 独立缓存 sw-mods-v1
+ *  (稳定 URL sprites/mods/<id>/<path>;SW fetch 早支 cache-first)。独立名与本体
+ *  版本缓存解耦:本体换代 gc 不触及、scrub/warm keys() 不并入(1.2 万条目曾暖进
+ *  版本缓存=Cache.keys 'Operation too large' AbortError 事故根因)。消费键经
+ *  SpriteAtlas 别名表改指此 URL,ensureVImage 自然 fetch 命中(零特判渲染面)。 */
+const MODS_CACHE = 'sw-mods-v1';
+/** 缓存键路径(页侧 put/删用,带 sprites/ 前缀;SW 早支 MODS_RE 按 /sprites/mods/ 命中) */
+const modCachePath = (modId: string, packPath: string): string => `sprites/mods/${modId}/${packPath}`;
+/** 别名值(ensureVImage 恒前置 `sprites/`——三百十三探针定谳:别名值再带 sprites/
+ *  = sprites/sprites/ 双前缀 404 负缓存,vnpc 恒 null 事故根因) */
+const modSpritePath = (modId: string, packPath: string): string => `mods/${modId}/${packPath}`;
+const CT_BY_EXT: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', mp3: 'audio/mpeg',
+  json: 'application/json', txt: 'text/plain',
+};
+
+/** pack 全量文件暖进 mod 独立缓存(页侧直 put——与 zip-warm :946 同款,页面与 SW
+ *  共用 CacheStorage)。幂等:marker(sprites/mods/<id>/__ver__.json)记版本,同
+ *  版本跳过;mod 更新=版本不符=重暖覆盖。失败(无 SW/配额)返回 false=调用方
+ *  回退内存解码路径。 */
+async function warmModAssetsCache(pack: import('./types').ModPack): Promise<boolean> {
+  try {
+    if (typeof caches === 'undefined') return false;
+    const cache = await caches.open(MODS_CACHE);
+    const markerPath = modCachePath(pack.manifest.id, '__ver__.json');
+    const marker = await cache.match(markerPath);
+    if (marker) {
+      const j = await marker.json().catch(() => null) as { version?: string } | null;
+      if (j?.version === pack.manifest.version) return true;
+    }
+    // 逐文件 put(CT 按扩展名;与 sw.js CT_BY_EXT 同族口径)
+    for (const [path, bytes] of pack.files) {
+      const ext = (/\.([a-z0-9]+)$/.exec(path)?.[1] ?? '').toLowerCase();
+      const ct = CT_BY_EXT[ext];
+      if (!ct) continue;   // 未登记类型不暖(仅资源文件)
+      const body = new Blob([bytes.slice()], { type: ct });
+      await cache.put(`/${modCachePath(pack.manifest.id, path)}`, new Response(body, { headers: { 'Content-Type': ct } }));
+    }
+    await cache.put(`/${markerPath}`, new Response(JSON.stringify({ version: pack.manifest.version }), { headers: { 'Content-Type': 'application/json' } }));
+    // ★三百十二善后:三百十一首版曾把本 mod 全量暖进【本体版本缓存】(keys()
+    // 'Operation too large' 事故)——按已知 URL 精确驱逐(免 keys() 全扫,同名
+    // 错误复现也不炸);本体换代 gc 会兜掉残余
+    try {
+      const version = (await import('../net/AssetCache')).assetCacheState().version;
+      if (version) {
+        const verCache = await caches.open('sw-assets-v' + version);
+        for (const path of pack.files.keys()) {
+          await verCache.delete(`/${modCachePath(pack.manifest.id, path)}`);
+        }
+        await verCache.delete(`/${modCachePath(pack.manifest.id, '__ver__.json')}`);
+      }
+    } catch { /* 版本缓存不可用/keys 事故=容缺(本体 gc 兜底) */ }
+    return true;
+  } catch { return false; }
+}
 
 /** mod 内容键 → 全键(与 register.ts 同式) */
 const fullKeyOf = (modId: string, key: string): string => (key.startsWith('mod_') ? key : `mod_${modId}_${key}`);
+
+/** 别名注册:消费键 → mod SW URL(替代原 decode+inject) */
+function aliasJob(atlas: import('../assets/SpriteAtlas').SpriteAtlas, modId: string, j: { fileKey: string; texPath: string }): void {
+  atlas.setAssetAlias(j.fileKey, modSpritePath(modId, j.texPath.startsWith('textures/') ? j.texPath : `textures/${j.texPath}`));
+}
+/** tile 键的 pack 路径(fileKey 逆向——mod/<modId>/textures/xxx.png) */
+function tilePackPath(fileKey: string): string {
+  return fileKey.replace(/^mod\/[a-z0-9]+\//, '');
+}
 
 async function decodePng(bytes: Uint8Array): Promise<ImageBitmap | null> {
   try {
@@ -29,6 +96,31 @@ async function decodePng(bytes: Uint8Array): Promise<ImageBitmap | null> {
 function packTexBytes(pack: { files: Map<string, Uint8Array> }, texPath: string): Uint8Array | null {
   return pack.files.get(texPath.startsWith('textures/') ? texPath : `textures/${texPath}`)
     ?? pack.files.get(texPath) ?? null;
+}
+
+/** 构造 mod tile 的 VanillaTileMeta(纯声明几何;SW 支零位图依赖——rows 依
+ *  声明 styles,缺省按 w/h 与贴图常规比例推 1;位图精确反推走回退支) */
+function buildModTileMetaSpec(spec: ModTileContent): VanillaTileMeta {
+  const fw = spec.w ?? 1;
+  const fh = spec.h ?? 1;
+  const gridW = fw * 16;
+  const gridH = fh * 16;
+  return {
+    name: spec.name ?? spec.key,
+    key: spec.key,
+    sheet: '',               // 由调用方回填 fileKey
+    solid: spec.solid ?? false,
+    blend: false,
+    framed: false,
+    light: false,
+    color: spec.mapColor ?? '#808080',
+    placement: null,
+    grid: [gridW, gridH],
+    stride: [gridW + 2, gridH + 2],
+    frameSize: [[fw, fh]],
+    cols: 1,
+    rows: spec.styles ?? 1,
+  };
 }
 
 /** 构造 mod tile 的 VanillaTileMeta(仅 style 模式;竖排 style 帧表)。
@@ -75,7 +167,10 @@ async function decodeBatch(
   }));
 }
 
-/** 注入全部已装载 mod 的贴图。幂等(重复调用覆盖同键)。 */
+/** 注入全部已装载 mod 的贴图。幂等(重复调用覆盖同键)。
+ *  ★三百十一:SW 同路线——先暖 pack 进 SW 缓存,成功→全部纹理 job 改别名注册
+ *  (消费键 ensureVImage 自然 fetch=与本体同管线,零解码);失败(无 SW/配额/
+ *  非浏览器)→回退原内存解码注入路径(本函数以下原实现整体保留)。 */
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
   if (!result || result.allocation === null) return;
@@ -83,6 +178,66 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
   const tileMetaTable = atlas.vanilla.tiles as unknown as Record<string, unknown>;
   for (const pack of getLoadedPacks()) {
     const modId = pack.manifest.id;
+    const swOk = await warmModAssetsCache(pack);
+    if (swOk) {
+      // ---- SW 别名支(主路线) ----
+      for (const path of discoverPackJsonPaths(pack, 'items')) {
+        const spec = readPackJson<ModItemContent>(pack, path);
+        if (spec?.texture && items.has(fullKeyOf(modId, spec.key))) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Item_${items.get(fullKeyOf(modId, spec.key))}.png`, texPath: spec.texture });
+        }
+      }
+      for (const path of discoverPackJsonPaths(pack, 'npcs')) {
+        const spec = readPackJson<ModNpcContent>(pack, path);
+        if (spec?.texture && npcs.has(fullKeyOf(modId, spec.key))) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/NPC_${npcs.get(fullKeyOf(modId, spec.key))}.png`, texPath: spec.texture });
+        }
+        if (spec?.key && npcs.has(fullKeyOf(modId, spec.key))) {
+          const headTexPath = `textures/npcs/${spec.key}_head_boss.png`;
+          if (packTexBytes(pack, headTexPath)) {
+            aliasJob(atlas, modId, { fileKey: `vanilla/NPC_Head_Boss_${npcs.get(fullKeyOf(modId, spec.key))}.png`, texPath: headTexPath });
+          }
+          if (spec.head) {
+            aliasJob(atlas, modId, { fileKey: `vanilla/NPC_Head_${modTownNpcHeadIndex(npcs.get(fullKeyOf(modId, spec.key)) ?? -1)}.png`, texPath: spec.head });
+          }
+        }
+      }
+      for (const path of discoverPackJsonPaths(pack, 'tiles')) {
+        const spec = readPackJson<ModTileContent>(pack, path);
+        if (!spec?.texture) continue;
+        const stableId = tiles.get(fullKeyOf(modId, spec.key));
+        if (stableId === undefined) continue;
+        const fileKey = `mod/${modId}/${spec.texture.replace(/^textures\//, '').replace(/\.png$/i, '')}.png`;
+        atlas.setAssetAlias(fileKey, modSpritePath(modId, spec.texture));
+        // ★三百十六:tile meta 恢复位图精确反推(decode-based)——SW 支省的是
+        //  【渲染位图注入】;tile 元数据的 cols/rows 必须与位图逐像素一致
+        //  (HalfBrickPass 帧循环消费;纯声明构造曾致帧循环不收敛=栈溢出)。
+        //  689 张 tile 位图解码 ~百 ms 级,成本可接受。
+        const bmp = await decodePngOrWarn(pack, modId, spec.texture);
+        if (bmp === null) continue;
+        const meta = buildModTileMeta(bmp, spec);
+        meta.sheet = fileKey;
+        tileMetaTable[String(stableId)] = meta;
+      }
+      for (const reg of modProjRegs()) {
+        if (reg.modId !== modId) continue;
+        aliasJob(atlas, modId, { fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
+      }
+      // 音频(B6):pack sounds/*.ogg 已在暖存;modWavData 字节路径保留
+      // (decodeAudioData 需 ArrayBuffer,字节已在 IDB=双份成本可接受,登记)
+      for (const sf of Array.from(pack.files.keys()).filter((k) => k.startsWith('sounds/') && k.endsWith('.ogg'))) {
+        const key = sf.replace('sounds/', '').replace(/\.ogg$/, '');
+        registerModWavData(key, pack.files.get(sf)!.slice().buffer);
+      }
+      for (const reg of modBuffRegs()) {
+        if (reg.modId !== modId) continue;
+        const bytes = packTexBytes(pack, reg.texture);
+        if (!bytes) { console.warn(`[mods] ${modId} buff 图标缺失: ${reg.texture}`); continue; }
+        registerModBuffIcon(reg.modId, reg.key, bytes, (png) => URL.createObjectURL(new Blob([png], { type: 'image/png' })));
+      }
+      continue;   // SW 支完成,跳过内存解码支
+    }
+    // ---- 回退:内存解码注入(无 SW/暖存失败;原路径不动) ----
     // —— 解码 textures/ 全量(按需:只解被引用的) ——
     const referenced = new Set<string>();
     const itemJobs: Array<{ fileKey: string; texPath: string }> = [];
@@ -177,6 +332,18 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
     }
     void referenced;   // 预留:未引用贴图懒注入(P1)
   }
+}
+
+/** mod 卸载资源清理(独立缓存前缀删;幂等 best-effort) */
+export async function purgeModAssetsCache(modId: string): Promise<void> {
+  try {
+    if (typeof caches === 'undefined') return;
+    const cache = await caches.open(MODS_CACHE);
+    const keys = await cache.keys().catch(() => []);
+    for (const req of keys) {
+      if (new URL(req.url).pathname.startsWith(`/sprites/mods/${modId}/`)) await cache.delete(req);
+    }
+  } catch { /* 清理失败不阻断卸载 */ }
 }
 
 async function decodePngOrWarn(
