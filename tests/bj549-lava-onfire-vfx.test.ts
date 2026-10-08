@@ -46,6 +46,8 @@
 //   M1 摘 onFire 常规档（掷门恒假）→ 「onFire 尘面钉值」红；
 //   M2 摘 burned 无掷门（并入 1/4 门）→ 「burned 每拍恒发」红；
 //   M3 摘后置速度修型（×1.8/vy−0.5）→ 「onFire 尘后置写钉值」红。
+//   ★BJ-C9 F7（2026-10-08）M4 补钉：vampireSeed 特档 vx×2.3（:1056）变异存活
+//   （旧 ②d 只钉 vy 面）→ ②d 补 post.vx 钉值（余粒 23/首粒 11.5）,M4 摘 ×2.3 → 红。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -231,10 +233,12 @@ describe('BJ549 岩浆→OnFire 视觉链（①buff 链 ②粒子面钉值 ③ov
       if (i % 5 === 0) {
         expect(r.scale, '首粒 scale=3×0.4（:1061）').toBe(1.2);
         expect(r.post.noGravity, '首粒 noGravity=false（:1060）').toBe(false);
+        expect(r.post.vx, '★BJ-C9 F7 首粒 vx=10×2.3×0.5（:1056×:1058 钉值,堵 vx×2.3 变异）').toBe(11.5);
         expect(r.post.vy, '首粒 10×2.3−0.8−1.5（:1056-57/:1059）').toBe(20.7);
       } else {
         expect(r.scale).toBe(3);
         expect(r.post.noGravity).toBe(true);
+        expect(r.post.vx, '★BJ-C9 F7 余粒 vx=10×2.3（:1056 钉值,堵 vx×2.3 变异）').toBe(23);
         expect(r.post.vy, '余粒 10×2.3−0.8').toBe(22.2);
       }
     }

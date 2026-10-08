@@ -160,6 +160,8 @@ import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoa
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
+import { modBossMusicFor } from '../mods/music';   // ★BGM 面:mod Boss 换曲绑定
+import { takeModBiomeMusic, takeModFrameMusic } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE, MOD_NPC_ID_BASE } from '../mods/types';
 import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
@@ -234,6 +236,7 @@ import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } f
 import { scanLuckScene, torchLuckCheckCenterBelowSurface, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
 import { playerVidCarried, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描（★FX36:装备改背包∪装备扫描）
+import { newWiresRadialState, flowerUpdate, lineOpacityUpdate, flowerSlots, flowerPick, wiresDrawToolModeUI, noteRadialHeld, radialActuatorAllowed } from '../stats/wiresRadial';   // ★BJ572 面②:径向工具模式菜单（WiresUI.cs 1:1 纯逻辑）
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld, roundCSf32Mul, truncCSf32Mul, truncCSf32MulBias } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）+★BJ343 件 2 舍入单源
 import { damageVarRoll } from '../stats/DamageVar';
 import {
@@ -5968,6 +5971,12 @@ export class Game implements GameHooks {
    *  （按下设锚,松开以裸鼠标格为终点执行 L 形;右键/CC/换手取消）。非空即引导期,
    *  预览消费 = Renderer.grandPreview 写入面。 */
   grandAnchor: [number, number] | null = null;
+  /** ★BJ572 面②（2026-10-08）WiresRadial 径向工具模式菜单状态（WiresUI.cs:656
+   *  radial 单例;tickWiresRadial 驱动/Renderer.wiresRadialUi 绘制） */
+  private wiresRadial = newWiresRadialState();
+  private _wiresRadialPrevRight = false;
+  private wiresRadialHover = false;
+  private _wiresRadialBlock = false;
   /** 测重板踩踏状态(原版 PressurePlateHelper 进/离双触发) */
   weightedLatch = new Set<number>();
   /** 触发源登记(idx):428 测重板 / 423 感应器（443 间歇泉注册表已随自创
@@ -6903,9 +6912,12 @@ export class Game implements GameHooks {
   }
 
   /** 全图液体沉降（薄封装 → settleWorldLiquids，主线程 fallback 与 worker 共用同一实现）。
-   *  mode 语义见 src/world/liquid/settle.ts 头注释 */
+   *  mode 语义见 src/world/liquid/settle.ts 头注释。
+   *  ★三百二十刀：gen 模式 + mod 在册 → 启用 killTouch 去重（mod 世界生成沉降
+   *  级联自激卡死门，与 WorldGen.liquidSettlePass 同判） */
   private settleLiquids(onProgress?: (p: number) => void, mode: 'gen' | 'load' = 'gen') {
-    return settleWorldLiquids(this.world, mode, onProgress);
+    return settleWorldLiquids(this.world, mode, onProgress, undefined, false,
+      mode === 'gen' && (getModLoadResult()?.loaded.length ?? 0) > 0);
   }
 
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean; playerAt?: { x: number; y: number } }) {
@@ -9638,9 +9650,12 @@ export class Game implements GameHooks {
       const drunkTow = !!sfMusic.drunkWorld && !sfMusic.remix && !sfMusic.getGoodWorld;
       const eventSlots = new Set<number>();
       const towEventSlots = new Set<number>();
+      let modEventMusic = 0;   // ★BGM 面：mod Boss 曲（first-wins 独占;0=无）
+      let anyDamnBoss = false;   // ★三百二十一刀：areThereAnyDamnBosses 同构（群系曲 boss 门）
       for (const e of this.entities.enemies) {
         const en = e as unknown as { cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number; dead?: boolean };
         if (en.dead || en.vanillaId == null) continue;
+        if (!anyDamnBoss && en.def?.boss) anyDamnBoss = true;
         const id = en.vanillaId;
         const ceremony = (id === 438 && en.ai1 === 1) || (id === 379 && (en.ai3 ?? 0) >= 0);
         let slot = id === 438 || id === 379 ? (ceremony ? 20 : 0) : MUSIC_SLOT[id] ?? 0;
@@ -9654,14 +9669,24 @@ export class Game implements GameHooks {
         if (isOldOnesArmy(id)) towSlot = 12;
         if (towSlot === 0 && !!en.def?.boss && id !== 578) towSlot = 1;
         if (mechdusaMusicWorld && (id === 125 || id === 126 || id === 127 || id === 134)) towSlot = 17;
-        if (slot === 0 && towSlot === 0) continue;   // ⑤
+        if (slot === 0 && towSlot === 0 && modBossMusicFor(id) == null) continue;   // ⑤
         const box = ceremony ? 1600 : 5000;
         if (Math.abs(en.cx - this.player.cx) < box && Math.abs(en.cy - this.player.cy) < box) {
-          if (slot !== 0) eventSlots.add(slot);
-          if (towSlot !== 0) towEventSlots.add(towSlot);
+          // ★BGM 面（2026-10-08）：mod Boss 换曲绑定——原版 first-wins 同序（数组序
+          //  首个盒命中者独占，Main.cs:12612 break 同构），mod 曲命中后原版槽位不再入表；
+          //  未绑定 mod boss 走 ③ Boss1 兜底（原版语义照旧）
+          const mm = modBossMusicFor(id);
+          if (mm != null && modEventMusic === 0 && eventSlots.size === 0 && towEventSlots.size === 0) {
+            modEventMusic = mm;
+          } else {
+            if (slot !== 0) eventSlots.add(slot);
+            if (towSlot !== 0) towEventSlots.add(towSlot);
+          }
         }
       }
-      const eventMusic = drunkTow ? resolveTowEventMusic(towEventSlots) : resolveEventMusic(eventSlots);
+      // ★BGM 面：mod Boss 曲覆盖两链（TOW/经典——mod 换曲无种子分域）；
+      //  月事件链尾覆写在 pickMusic 入参侧不受扰
+      const eventMusic = modEventMusic || (drunkTow ? resolveTowEventMusic(towEventSlots) : resolveEventMusic(eventSlots));
       // 月事件 BGM（Main.cs:12914-12921，链尾最高优先级）：相机在地表
       // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32。
       // ★IIIII224：门 = (screenY/16 < worldSurface+10 || remixWorld)（:13150/:13154）
@@ -9692,29 +9717,50 @@ export class Game implements GameHooks {
         },
       };
       const music = drunkTow ? pickTowMusic(musicInput) : pickMusic(musicInput);
+      // ★三百二十一刀：BGM 群系曲选曲面（CalamityMod.UpdateMusic override 同构，
+      //  2019 CalamityMod.cs:1749-1843——TML UpdateMusic 在 vanilla DecideOnNewMusic
+      //  之后以 priority 竞争）。裁决：bossMedium=无条件覆写（2019 Cultist/DoG
+      //  倒计时支同语义）；biomeHigh/environment=仅 !areThereAnyDamnBosses 时覆写
+      //  （2019 群系曲门原文；anyDamnBoss=全场 boss 存在，同构）；多旗命中按注册序
+      //  后者胜（2019 顺序覆写同构——ZoneSulphur 在 Abyss 后覆写）。月事件/八音盒
+      //  无豁免支（2019 无）。 musicBox 活动让位=登记（2019 语义未覆盖 musicBox）。
+      let modBiomeMusic = 0;
+      let modBiomeMusicBoss = false;
+      for (const mb of takeModBiomeMusic()) {
+        if (!this.scene.modBiomes[mb.flag]) continue;
+        modBiomeMusic = mb.musicId;
+        modBiomeMusicBoss = mb.priority === 'bossMedium';
+      }
+      if (modBiomeMusic !== 0 && !modBiomeMusicBoss && anyDamnBoss) modBiomeMusic = 0;
+      // ★三百二十二刀：AI 期直写槽（2019 SCal 逐相换曲=AI 裸写 Main.music 静态
+      //  字段同位）——压一切（boss 曲/群系曲/vanilla），本帧消费后清零
+      const modFrameMus = takeModFrameMusic();
+      const musicFinal = modFrameMus !== 0 ? modFrameMus
+        : modBiomeMusic !== 0 ? modBiomeMusic : music;
       // ★选曲滞回(2026-09-07 用户拍板「确保稳定,可偏离原版」):群系判定是
       //  15t 计数阈值域(ZoneGlowshroom 等),洞穴边缘格数波动 → 环境曲快速交替
       //  (蘑菇曲 29↔地下曲 31,2-3 秒一轮,bgm 环实录;原版边缘同样交替=交叉淡化
       //  掩盖,用户不能接受)。修=环境曲间切换需连续 MUSIC_HYSTERESIS_TICKS 次
       //  pickMusic 结果稳定才生效;事件曲( Boss/入侵/月/八音盒/火把神)即时切
       //  (战斗反馈不延迟);pending 期间 pickMusic 回到当前曲=波动平息,取消。
-      if (music !== this.lastMusic) {
+      if (musicFinal !== this.lastMusic) {
         const isEventMusic = !!eventMusic || !!moonMusicGated || (this.torchGod?.active ?? false)
           || creditsRoll.isEventOngoing
-          || (this.scene.musicBoxStyle ?? -1) >= 0;
+          || (this.scene.musicBoxStyle ?? -1) >= 0
+          || modFrameMus !== 0;   // ★三百二十二刀:AI 直写=事件曲域即时切(战斗反馈)
         if (isEventMusic) {
-          this.lastMusic = music;
+          this.lastMusic = musicFinal;
           this.musicPending = { k: 0, n: 0 };
-          this.cb.onMusic?.(music);
-        } else if (this.musicPending.k === music) {
+          this.cb.onMusic?.(musicFinal);
+        } else if (this.musicPending.k === musicFinal) {
           this.musicPending.n++;
           if (this.musicPending.n >= Game.MUSIC_HYSTERESIS_TICKS) {
-            this.lastMusic = music;
+            this.lastMusic = musicFinal;
             this.musicPending = { k: 0, n: 0 };
-            this.cb.onMusic?.(music);
+            this.cb.onMusic?.(musicFinal);
           }
         } else {
-          this.musicPending = { k: music, n: 1 };
+          this.musicPending = { k: musicFinal, n: 1 };
         }
       } else if (this.musicPending.k !== 0) {
         this.musicPending = { k: 0, n: 0 };   // 波动平息
@@ -11187,12 +11233,14 @@ export class Game implements GameHooks {
           // 月总核心 → Single + Enemies.MoonLord"月亮领主已被打败！"（不取
           // MoonLordCore 名）；其余 → Single + 本体名
           const defeatVid = this.boss.vanillaId ?? 0;
+          // ★BJ-C10 F1：击败公告单口 chatBroadcast（原版 DoDeathEvents_CelebrateBossDeath
+          //  ChatHelper.BroadcastChatMessage,NPC.cs:79840-79848）——曾 newText 只显本端
           if (defeatVid === 125 || defeatVid === 126) {
-            this.newText(Lang.text('Announcement.HasBeenDefeated_Plural', Lang.text('Enemies.TheTwins')), 175, 75, 255);
+            this.chatBroadcast(Lang.text('Announcement.HasBeenDefeated_Plural', Lang.text('Enemies.TheTwins')), 175, 75, 255);
           } else if (defeatVid === 398) {
-            this.newText(Lang.text('Announcement.HasBeenDefeated_Single', Lang.text('Enemies.MoonLord')), 175, 75, 255);
+            this.chatBroadcast(Lang.text('Announcement.HasBeenDefeated_Single', Lang.text('Enemies.MoonLord')), 175, 75, 255);
           } else {
-            this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
+            this.chatBroadcast(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           }
           // 双子 125/126 共写同一家族键（NPC.cs:80223-80229 case 125: case 126: 同写
           // downedMechBoss2）——曾按 vanillaId 裸写,后死之眼写 downed_126 会漏掉
@@ -11226,7 +11274,7 @@ export class Game implements GameHooks {
           // downedPlantBoss，首杀翻转 → BroadcastChatMessage(Lang.misc[33],
           // ChatColors.World)"地牢中回荡着尖叫声……"——此前缺）
           if (this.boss.vanillaId === 262 && !wasDowned) {
-            this.newText(Lang.misc(33), 50, 255, 130);
+            this.chatBroadcast(Lang.misc(33), 50, 255, 130);   // ★BJ-C10 F1 单口（原版 :80252 BroadcastChatMessage）
           }
           // NPC.downedPlantBoss → Wiring 死门接活（Wiring.cs:3216 蜥蜴砖致动 / :1554
           // 神庙传送器捕获：世纪之花前两处 return 拒绝）
@@ -11255,7 +11303,7 @@ export class Game implements GameHooks {
             // misc[32] "丛林变得焦躁不安"公告（与 :79670-79673 机械链同一文案）;
             // 原版序在本条 SetEventFlagCleared(19) 之前 → 置于灯笼夜/misc[15] 前
             if (!wasHard && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
-              this.newText(Lang.misc(32), 50, 255, 130);
+              this.chatBroadcast(Lang.misc(32), 50, 255, 130);   // ★BJ-C10 F1 单口（原版 :80304 BroadcastChatMessage）
             }
             if (!wasHard) {
               LanternNight.onGameEventCleared(19);
@@ -11265,7 +11313,7 @@ export class Game implements GameHooks {
               // ★PR-async：此全图剥漆扫描已并入 worldJobs 队列（Dungeon 档,首翻门同源），
               //   此处不再同步跑（其余 boss 事件剥漆同批入队,见 PR-async 收口①）
             }
-            this.newText(Lang.misc(15), 50, 255, 130);
+            this.chatBroadcast(Lang.misc(15), 50, 255, 130);   // ★BJ-C10 F1 单口（原版 WorldGen.cs:32000 BroadcastChatMessage）
             this.achievements.notifyProgressionEvent(9);
           }
           // 首胜灯笼夜预约（NPC.cs NPCLoot 各 case SetEventFlagCleared 实参 →
@@ -11302,7 +11350,7 @@ export class Game implements GameHooks {
               // downedMechBoss1&&2&&3 && hardMode → Lang.misc[32] 广播
               // "丛林变得焦躁不安……"——!wasDowned=本次击杀才翻转该旗；三旗各只
               // 翻一次 → 恰广播一次（旧档已齐三旗时 wasDowned 恒 true 不补发）
-              this.newText(Lang.misc(32), 50, 255, 130);
+              this.chatBroadcast(Lang.misc(32), 50, 255, 130);   // ★BJ-C10 F1 单口（原版 :79687 BroadcastChatMessage）
             }
           }
           // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
@@ -14661,6 +14709,7 @@ export class Game implements GameHooks {
     // ★BJ569（2026-10-08）宏伟蓝图路由 tick（原版载体=AI_125 通道弹 Projectile.cs:36349;
     //  前置于 CCed 族早退=石化/诅咒帧取消臂照结算,原版 Kill 臂同相）：
     //  tickGrandDesignRoute
+    this.tickWiresRadial();
     this.tickGrandDesignRoute();
     // 舌头禁道具（Player.cs:22032 controlUseItem=false——狂卷之舌期间不得使用物品）
     if (this.player.buffs.has(BuffType.TheTongue)) return;
@@ -25729,6 +25778,82 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *    （锚根本不落）;②两击协议不吞 mouseDown 边沿 → 按住第 2 拍以锚点=终点自耗执行。
    *  时序：updateUse 头部（CCed 族早退前）逐帧调用 —— 取消臂在 CC/换手帧照结算;
    *  引导期预览 = Renderer.grandPreview（:51574 写入面,既有消费 drawGrandPreview）。 */
+  /** ★BJ572 面②（2026-10-08）WiresRadial 径向工具模式菜单 tick——WiresUI.cs:165-202
+   *  FlowerUpdate + DrawFlower 交互臂（:449-456 左键图标 XOR ToolMode 位+吞沿;
+   *  左键空白=收）+ LineUpdate(:138-163) _lineOpacity 斜坡。原版本面走 Draw 相
+   *  （DrawInterface_9_WireSelection :46967-46974→HandleWiresUI）;本仓前移至
+   *  updateUse 头（左键沿消费时序:图标吞沿须先于世界分派）。调用序=先于
+   *  tickGrandDesignRoute——同一右键沿原版双臂同帧（AI_125 :36362 Kill 引导弹
+   *  +FlowerUpdate 翻转开合）。右键沿=rightDown&&!_wiresRadialPrevRight 电沿
+   *  （原版 mouseRight&&mouseRightRelease 靠世界分派消费防抖;本仓电沿天然单发,
+   *  可观察行为同相,登记注 W-R2）。 */
+  private tickWiresRadial(): void {
+    const held = this.player.inv.heldItem();
+    const vid = held ? ITEM_DEFS[held.id]?.vid ?? -1 : -1;
+    const p = this.player;
+    const inp = this.input;
+    const st = this.wiresRadial;
+    noteRadialHeld(vid);                // DrawToolAllowActuators 帧闩（WiresUI.cs:75-79）
+    const mx = inp.mouseX, my = inp.mouseY;
+    const rightEdge = inp.rightDown && !this._wiresRadialPrevRight;
+    this._wiresRadialPrevRight = inp.rightDown;
+    const mouseInterface = inp.uiBlocking || this.inpOverDomUi();
+    flowerUpdate(st, {
+      heldVid: vid,
+      dead: p.dead,
+      cursorItem: !!this.uiHeldItemRef?.(),
+      mouseInterface,
+      smartInteract: false,   // 本仓无 SmartInteractShowingGenuine 真互动态（登记 W-R3）
+      rightEdge,
+      mx, my,
+    });
+    // ---- DrawFlower 交互臂（悬停→吞左键沿+XOR 位;空白左键→收;悬停=mouseInterface）----
+    this.wiresRadialHover = false;
+    if (st.active) {
+      const actuatorAllowed = wiresDrawToolModeUI(vid) && radialActuatorAllowed();
+      const slots = flowerSlots(st, actuatorAllowed);
+      const hit = flowerPick(slots, mx, my);
+      if (hit) {
+        this.wiresRadialHover = true;
+        st.onWiresMenu = true;
+        if (inp.mouseDown) {
+          inp.mouseDown = false;            // 吞使用沿（原版 mouseLeftRelease 消费面）
+          this.wireToolMode ^= hit.bit;
+          this.sfx.play('menuTick', 1);     // SoundEngine.PlaySound(12)（:48203 族同款）
+        }
+      } else if (inp.mouseDown) {
+        st.active = false;                  // 左键空白收（:455-456;不吞沿=世界分派照走,原版同相）
+      }
+    }
+    // ---- 悬浮压制使用链（原版 mouseInterface=true :444/:454;电平经 blockMouse,
+    //      自记旗防踩他系统置位——SW-AF1 电平语义按住期压制同款）----
+    if (this.wiresRadialHover && inp.mouseHeld) {
+      inp.blockMouse = true;
+      this._wiresRadialBlock = true;
+    } else if (this._wiresRadialBlock) {
+      inp.blockMouse = false;
+      this._wiresRadialBlock = false;
+    }
+    // ---- LineUpdate 斜坡（迷你色点亮度）----
+    lineOpacityUpdate(st, {
+      heldVid: vid,
+      dead: p.dead,
+      cursorItem: !!this.uiHeldItemRef?.(),
+      cursorItemIcon: p.cursorItemIconEnabled && p.cursorItemIconID !== 0,
+      mouseInterface,
+    });
+    // 渲染注入（步骤 12b 前;原版 DrawInterface_9 层序<40 图标层）
+    this.renderer.wiresRadialUi = wiresDrawToolModeUI(vid) || st.active
+      ? {
+          st, heldVid: vid, toolMode: this.wireToolMode,
+          actuatorAllowed: radialActuatorAllowed(),
+          cursorItemIcon: p.cursorItemIconEnabled && p.cursorItemIconID !== 0,
+          mouseX: inp.mouseX, mouseY: inp.mouseY,
+          mouseInterface,
+        }
+      : null;
+  }
+
   private tickGrandDesignRoute(): void {
     const held = this.player.inv.heldItem();
     const def = held ? ITEM_DEFS[held.id] : undefined;
@@ -37761,7 +37886,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const r = unspawnHomelessSweep(views, [{ x: p.x, y: p.y, w: p.w, h: p.h }]);
     if (r.despawned) {
       const npc = r.despawned.ref as TownNPC;
-      this.newText(Lang.text('LegacyMisc.35', Lang.npcName(npc.vanillaId) ?? npc.npcKey), 50, 125, 255);
+      this.chatBroadcast(Lang.text('LegacyMisc.35', Lang.npcName(npc.vanillaId) ?? npc.npcKey), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5165 BroadcastChatMessage）
       npc.dead = true;
       this.behavioLog('homelessDespawn', { key: npc.npcKey, vid: npc.vanillaId });
     } else if (r.flagCleared) {
@@ -38018,7 +38143,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (ok) {
           const npc = new TownNPC(pick, ax * TILE + 8, ay * TILE);
           this.entities.add(npc, 'npcs');
-          this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
+          this.chatBroadcast(Lang.text('Announcement.HasArrived', name), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5327/:5497 BroadcastChatMessage）
         }
       }
       return;
@@ -38064,7 +38189,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       npc.home = { x: house.standX, y: house.standY };
       npc.leashHome = true;
       this.entities.add(npc, 'npcs');
-      this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
+      this.chatBroadcast(Lang.text('Announcement.HasArrived', name), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5327/:5497 BroadcastChatMessage）
       // 成就三连（WorldGen.SpawnTownNPC 成功支 :5498-5531 1:1，公告后）：
       //   prog 8 NO_HOBO（:5498）；
       //   prog 18 IT_CAN_TALK（:5501-5502 case 160 松露人 + unlockedTruffleSpawn 同支）；
@@ -38151,9 +38276,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const housed = this.runQuickFindHome(npc, placed.homeX, placed.homeY - 1);
       // 公告（:5116-5122）：`!homeless → Announcement.HasArrived`,否则 HomelessArrived_N
       if (housed && npc.home) {
-        this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
+        this.chatBroadcast(Lang.text('Announcement.HasArrived', name), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5327/:5497 BroadcastChatMessage）
       } else {
-        this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
+        this.chatBroadcast(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5124 BroadcastChatMessage）
       }
     }
     // ---- 分配收尾不变量（2026-08-30 增量#2）：本轮 ①''房况复核重锚 / ①QuickFindHome
@@ -39829,7 +39954,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  不受影响（dedupeHomes 同 vanilla CanNPCsLiveWithEachOther 口径豁免）。
     this.clearDuplicateHomes('assign');
     this.sfx.play('menuTick');    // SoundID 12（TryMovingNPC :44618）
-    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(npc.vanillaId) ?? npcKey), 50, 125, 255);
+    this.chatBroadcast(Lang.text('Announcement.HasArrived', Lang.npcName(npc.vanillaId) ?? npcKey), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :5497 BroadcastChatMessage）
     // 成就：手动分配安家 = QuickFindHome 分配成功面（prog 8 NO_HOBO，WorldGen.cs:5702
     // 同掷位——住房菜单分配与自动入住共用 QuickFindHome 成功支的成就面）
     this.achievements.notifyProgressionEvent(8);
@@ -42191,7 +42316,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!travelMerchantBoxHit(tm.cx, tm.cy, this.player.cx, this.player.cy,
           this.player.w, this.player.h)) {
           tm.dead = true;
-          this.newText(Lang.text('LegacyMisc.35', Lang.npcName(368) ?? ''), 50, 125, 255);
+          this.chatBroadcast(Lang.text('LegacyMisc.35', Lang.npcName(368) ?? ''), 50, 125, 255);   // ★BJ-C10 F1 单口（原版 :4949 BroadcastChatMessage）
         }
       }
       return;
@@ -42329,7 +42454,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (sx > bestX0) npc.facing = -1;
     this.entities.add(npc, 'npcs');
     this.travelStock = this.buildTravelStock();                   // SetupTravelShop :5185
-    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);  // :5327
+    this.chatBroadcast(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);   // ★BJ-C10 F1 单口（:5327 BroadcastChatMessage）
   }
 
   /** 旅行商人当期股票（Chest.SetupTravelShop :1241-1321 结构 1:1）：
@@ -45073,8 +45198,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 骷髅王红帽变体死亡调侃（NPC.checkDead :78835-78837：type 35 且 ai[3]==1 →
     // SkeletronText.Taunt1 红字广播，Chippy 彩蛋"<骷髅王>今天就到此为止…"）
+    // ★BJ-C10 F1：单口 chatBroadcast（原版 :78858 BroadcastChatMessage(255,0,0)）
     if (enemy?.vanillaId === 35 && enemy.ai3 === 1) {
-      this.newText(Lang.text('SkeletronText.Taunt1'), 255, 0, 0);
+      this.chatBroadcast(Lang.text('SkeletronText.Taunt1'), 255, 0, 0);
     }
     // FTW（getGoodWorld）骷髅王手死 → 3×32 号黑暗法师（checkDead :78889-78920：
     // 手 ±50 格随机列向下扫首个实心（下界 maxTilesY-200）退一格 Bottom 锚。
@@ -45326,7 +45452,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ks = this.summonBoss('king_slime', { roar: false });
         if (ks) {
           const text = Lang.text('Announcement.HasAwoken', Lang.npcName(50) ?? 'King Slime');
-          if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
+          // ★BJ-C10 F1：公告单口 chatBroadcast（原版 BroadcastChatMessage :81527 形）
+          if (this.cb.onChat) this.chatBroadcast(text, 175, 75, 255);
           else this.cb.onToast(text);
         }
       }
@@ -50891,7 +51018,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     prime.despawnTimer = 18740;   // SpawnBoss:timeLeft=(int)(activeTime 750×1.25)=937 ×20（:81596+:81485）
     this.boss = prime;
     // 公告（SpawnBoss :81492-81496：127 且 mechQueen 命中 → misc[107]，非 HasAwoken）
-    if (this.cb.onChat) this.cb.onChat(Lang.misc(107), 175, 75, 255);
+    // ★BJ-C10 F1：公告单口 chatBroadcast（原版 BroadcastChatMessage :81518 形）
+    if (this.cb.onChat) this.chatBroadcast(Lang.misc(107), 175, 75, 255);
     else this.cb.onToast(Lang.misc(107));
     return true;
   }
@@ -51155,8 +51283,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
    *  倒计时/光女踩虫）全部无声，唯一例外 Item173=蜂后蜜蜂分泌物(:43184)。
    *  故 roar=true 仅由物品召唤点传入。 */
   private announceBossSummon(vanillaId: number, roar = false): void {
+    // ★BJ-C10 F1：Boss 苏醒公告收敛 chatBroadcast 单口（原版 SpawnBoss 全走
+    //  ChatHelper.BroadcastChatMessage BossOrEvent,NPC.cs:81213-81527）——曾 cb.onChat
+    //  只显本端=联机访客收不到。onChat 缺席环境（onToast fallback）保持零变化
     const announce = (text: string) => {
-      if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
+      if (this.cb.onChat) this.chatBroadcast(text, 175, 75, 255);
       else this.cb.onToast(text);
     };
     const kind = Game.bossSummonAnnounceKind(vanillaId);
@@ -51353,9 +51484,13 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     this.net?.sendCommandLine(text, r, g, b);
   }
 
-  /** Announcement 类消息便捷封装(NPC.cs/WorldGen.cs BroadcastChatMessage 语义) */
+  /** Announcement 类消息便捷封装(NPC.cs/WorldGen.cs BroadcastChatMessage 语义)。
+   *  ★BJ-C10 F1：体走 chatBroadcast 单口（newText+联机 channel2 中继）——doc 注本就
+   *  写 BroadcastChatMessage 语义而体曾是本地 newText=注释与实现不符。消费面三件全为
+   *  原版 BroadcastChatMessage：肉山召唤（bossAI_wof.ts:135,:81352）、骷髅王召唤
+   *  （TownNPC.ts:1708,:81292）、骷髅王红帽旋冲嘲讽 Taunt2-5（bossAI.ts:163,:22137） */
   announce(key: string, who: string, r: number, g: number, b: number): void {
-    this.newText(Lang.text(key, who), r, g, b);
+    this.chatBroadcast(Lang.text(key, who), r, g, b);
   }
 
   // ================= 重生 =================

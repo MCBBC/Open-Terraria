@@ -2,13 +2,15 @@
 // 三环复验结论（亲读 1457 反编译 + 真机剥层探针 /tmp/probe-out/_bj547）：
 //  ①【主凶·光柱核心笔 α 语义】Main.cs:24377-24378 第二笔 Extra_89 色 =
 //    Color.Lerp(color28, White, 0.5f) —— XNA Color.Lerp 四通道【含 A】:
-//    color28.A=0 → A=0→255 半程 = 128（非 0!）。AlphaBlend(One,InvSrcAlpha)
-//    语义 = 半削底+半加算（out = src.rgb + dst×(1−src.a),src.a=texel.a×128/255
+//    color28.A=0 → A=0→255 半程 = 127.5→(int)127（★BJ-C9 F1 勘误:旧注"=128"系
+//    127.5 误上取整;color28 本体=(140,50,255,0)×0.6f=(84,30,153,0) :24348-24349,
+//    Lerp 色面=(169,142,204,127)=Renderer.BJ_C9_CORE_TINT）。AlphaBlend(One,InvSrcAlpha)
+//    语义 = 半削底+半加算（out = src.rgb + dst×(1−src.a),src.a=texel.a×127/255
 //    随束图 α 逐像素加权;Extra_89=72×72 径向辉光盘,中心 α≈0.545）——本体在束
 //    下被衰减 ~50% 再添紫辉光 = 紫细节保留（原版相「紫晶体+白高光」）。
 //    BJ546 误作 A=0 纯加算 α=1 全贡献 → 辉光盘全额加算罩在 58×44 本体上 =
 //    全通道饱和白（探针:全层 blown 73.7%/摘叠层 0%,mean RGB 231→122）。
-//    落刀=destination-out(束图,ga=128/255)→lighter 两步式（draw546GlowCore 同构）。
+//    落刀=destination-out(束图,ga=127/255)→lighter 两步式（draw546GlowCore 同构）。
 //  ②【次凶·内环层序】内环 4 拷贝（Main.cs:24266-24282）画在本体（:24283,不透明
 //    AlphaBlend 覆盖）【之前】= 只露轮廓外 ±3px 呼吸晃影;BJ546 挂 drawNpcGlow
 //    （本体后槽）= 叠印本体之上 +1.5×texel（修①后仍洗白本体;修①前被饱和掩蔽
@@ -23,7 +25,8 @@
 //    环境白光吞没）,且全屏乘光对「先加算后乘光」与原版「先乘光后加算」在
 //    乘法分配律下等价——光照非本次白化根因。
 //  判别力：核心笔退回纯加算（M1）→ ④红;内环挂回 NPC_GLOW/α 提到 1（M2/M3）→
-//  ②/③红;削底系数 128 改值 → ④逐位断言红;删前槽专法 → ②红。
+//  ②/③红;削底系数 127 改值 → ④逐位断言红;删前槽专法 → ②红;核心 tint 漏乘
+//  （169,142,204→[198,153,255]）→ ★BJ-C9 F1 tint 钉值红。
 import { describe, it, expect, beforeAll } from 'vitest';
 import { Renderer } from '../src/render/Renderer';
 import { npcWhiteLiftAlpha } from '../src/render/npcExtraParts';
@@ -46,7 +49,7 @@ beforeAll(async () => {
   (globalThis as Record<string, unknown>).window = { addEventListener: () => {}, removeEventListener: () => {} };
 });
 
-type Rec = { comp: string; alpha: number; w: number; h: number; dx: number; dy: number };
+type Rec = { comp: string; alpha: number; w: number; h: number; dx: number; dy: number; img?: unknown };
 
 const makeCtxStub = (ops: Rec[]) => {
   let comp = 'source-over';
@@ -58,9 +61,9 @@ const makeCtxStub = (ops: Rec[]) => {
     get globalCompositeOperation() { return comp; },
     set globalAlpha(v: number) { alpha = v; },
     get globalAlpha() { return alpha; },
-    drawImage(_img: unknown, _sx: number, _sy: number, _sw: number, _sh: number,
+    drawImage(img: unknown, _sx: number, _sy: number, _sw: number, _sh: number,
       dx: number, dy: number, w: number, h: number) {
-      ops.push({ comp, alpha, w, h, dx, dy });
+      ops.push({ comp, alpha, w, h, dx, dy, img });
     },
   };
 };
@@ -110,16 +113,34 @@ describe('BJ547①：内环 α 钉值（K3「α≈1」嫌疑证伪锁）', () =>
   });
 });
 
-describe('BJ547②：光柱核心笔 A=128 半削底+半加算（主凶定谳面）', () => {
+describe('BJ547②：光柱核心笔 A=127 半削底+半加算（主凶定谳面）', () => {
+  // ★BJ-C9 F1：tintedSprite stub 判别化（旧 stub 忽略 tint=盲区,R8 定谳面）——
+  //  每 tint 一枚独立矩形 marker,ops 记 img 身份 → 核心笔 tint 钉值可断言。
+  const TINT_MARKS = new Map<string, { c: { mark: string }; x: number; y: number; w: number; h: number }>();
+  const tintedStub = (_k: string, _r: unknown, tint: number[]) => {
+    const key = tint.join(',');
+    if (!TINT_MARKS.has(key)) {
+      TINT_MARKS.set(key, { c: { mark: key }, x: 0, y: 0, w: 72, h: 72 });
+    }
+    return TINT_MARKS.get(key)!;
+  };
+  const markOf = (o: Rec | undefined): string | undefined => {
+    const m = (o?.img as { mark?: string } | undefined)?.mark;
+    return m;
+  };
+
   const runOverlays = (ops: Rec[]) => {
     const ctx = makeCtxStub(ops);
     const beamTex = { width: 72, height: 72 };
-    const tintRect = { c: {}, x: 0, y: 0, w: 72, h: 72 };
+    const ringTex = { width: 96, height: 96 };   // Glow_239 原生 96×96（★BJ-C9 F1 环笔出图）
     const host = {
       ctx,
-      atlas: { ensureVImage: (name: string) => (name === 'vanilla/Extra_89.png' ? beamTex : null) },
-      tintedSprite: (_k: string, _r: unknown, tint: number[]) =>
-        tint[0] === 198 ? tintRect : tintRect,   // 环/柱/核心全部出图
+      atlas: {
+        ensureVImage: (name: string) =>
+          name === 'vanilla/Extra_89.png' ? beamTex
+            : name === 'vanilla/Glow_239.png' ? ringTex : null,
+      },
+      tintedSprite: tintedStub,   // 环/柱/核心全部出图,按 tint 判别
     };
     const r = new Renderer(null as never);
     const fn = (r as unknown as { draw548CrystalOverlays(...args: unknown[]): void })
@@ -128,13 +149,13 @@ describe('BJ547②：光柱核心笔 A=128 半削底+半加算（主凶定谳面
     fn.call(host, e0, { img: {}, sx: 0, sy: 0, sw: 58, sh: 44 }, -29, -40, 1, true);
   };
 
-  it('核心笔=两步式：destination-out(ga=128/255) → lighter(ga=1),同束矩形 108×108 收尾', () => {
+  it('核心笔=两步式：destination-out(ga=127/255) → lighter(ga=1),同束矩形 108×108 收尾', () => {
     const ops: Rec[] = [];
     runOverlays(ops);
     expect(ops.length).toBeGreaterThanOrEqual(2);
     const tail = ops.slice(-2);
     expect(tail[0]!.comp).toBe('destination-out');               // M1 退回纯加算 → 红
-    expect(tail[0]!.alpha).toBeCloseTo(128 / 255, 12);           // 削底系数改值 → 红
+    expect(tail[0]!.alpha).toBeCloseTo(127 / 255, 12);           // 削底系数改值 → 红（★BJ-C9 F1 128→127）
     expect(tail[1]!.comp).toBe('lighter');
     expect(tail[1]!.alpha).toBe(1);                              // RGB 全额（A 只承载削底）
     expect(tail[0]!.w).toBe(108); expect(tail[0]!.h).toBe(108);  // 72×1.5（scale=1）
@@ -142,6 +163,27 @@ describe('BJ547②：光柱核心笔 A=128 半削底+半加算（主凶定谳面
     // 两步同矩形（同锚同缩放=逐像素 src.a 加权语义）
     expect(tail[0]!.dx).toBe(tail[1]!.dx);
     expect(tail[0]!.dy).toBe(tail[1]!.dy);
+  });
+
+  it('★BJ-C9 F1 核心笔 tint 钉值 = (169,142,204)（=Lerp((140,50,255,0)×0.6f,White,.5);漏乘变异→红）', () => {
+    // 单源常数钉值：FNA Color.Lerp 四通道 (int) 截断 1:1（Main.cs:24348→:24349→:24366）
+    expect(Renderer.BJ_C9_CORE_TINT).toEqual([169, 142, 204]);
+    const ops: Rec[] = [];
+    runOverlays(ops);
+    const tail = ops.slice(-2);
+    // 两步笔同用 [169,142,204] 烘焙矩形（tint 标记一致=单源）
+    expect(markOf(tail[0])).toBe('169,142,204');                 // 旧 [198,153,255] 漏乘 → 红
+    expect(markOf(tail[1])).toBe('169,142,204');
+  });
+
+  it('★BJ-C9 F1 环/光柱底笔 tint 恒 (140,50,255)（×0.6 折 ga=0.6 系,不随核心笔勘误漂移）', () => {
+    const ops: Rec[] = [];
+    runOverlays(ops);
+    // 环 Glow_239 三笔 + 光柱首笔共 ≥4 笔同用 (140,50,255) 烘焙矩形
+    const pens = ops.filter((o) => markOf(o)?.startsWith('140,50,255'));
+    expect(pens.length).toBeGreaterThanOrEqual(4);
+    // 首笔恒 α=0.6（×0.6f 折面在 α 不在 tint,判据面）
+    expect(ops.some((o) => o.alpha === 0.6 && markOf(o)?.startsWith('140,50,255'))).toBe(true);
   });
 
   it('其余笔不受染：外环/环/首笔光柱恒纯加算（无 destination-out 混入）', () => {

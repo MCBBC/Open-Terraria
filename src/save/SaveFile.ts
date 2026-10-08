@@ -55,6 +55,82 @@ function readVarint(u8: Uint8Array, pos: { i: number }): number {
   return v;
 }
 
+/** ★BJ575（2026-10-08）：玩家段装配单源——saveGame（主线程同步路径/worker 回退）
+ *  与 SaveClient.doSave（worker 生产主路径）共用本函数。定谳：SaveClient 曾第二份
+ *  手抄 playerData 漏 permanentUpgrades（恶魔之心 3335 旗 extraAccessory 打头）等
+ *  14 键 → worker 生产存档 JSON 无键 → CharacterStore 随身态同步（mainFlow doSave→
+ *  setState JSON.parse(json).player）/世界槽位/快速保存三面全缺 → 重进游戏
+ *  applyPlayer（mainFlow.ts `pu.extraAccessory !== undefined` 门）不回灌 → 恶魔心
+ *  第 6 配饰槽（armor[8]/染料[18]）恒锁=用户实报「重进失效」；显隐占格臂
+ *  （Player.cs:4259-4281 CanDemonHeartAccessoryBeShown）只剩 armor/dye 占格显示=
+ *  「卸下饰品后槽位消失」。
+ *  原版锚：Player.cs:55430 fileIO.Write(newPlayer.extraAccessory)（SavePlayer,
+ *  序在 statLifeMax 系后/unlockedBiomeTorches·ateArtisanBread·usedAegisCrystal 前）
+ *  /:55891 读（release≥125）。键序即 PL:55404-55588 段序（R16-14 注同源）。
+ *  ⚠️BJ71 家族纪律：本函数是玩家段【唯一】装配点——新玩家字段在此加键,
+ *  严禁在 SaveClient 另抄一份。 */
+export function buildPlayerSaveData(world: World, player: Player): SaveData['player'] {
+  return {
+    hp: player.hp, x: player.x, y: player.y,
+    inventory: player.inv.slots, selected: player.inv.selected,
+    baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
+    banks: player.banks,
+    armor: player.inv.armor,
+    dye: player.inv.dye,
+    trash: player.inv.trash,
+    miscEquips: player.inv.miscEquips,
+    miscDyes: player.inv.miscDyes,
+    loadouts: player.inv.loadouts,
+    currentLoadout: player.inv.currentLoadout,
+    buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
+    taxMoney: player.taxMoney ?? 0,         // PL:53839
+    golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
+    deathsPve: player.deathsPve ?? 0,       // PL:53840
+    // ★R16-14（2026-08-24）：SavePlayer 缺失字段补落（PL57:55404-55588 序）
+    deathsPvp: player.deathsPvp ?? 0,       // numberOfDeathsPVP（PL:55444;msg16 尾段已在跑中继,存档侧曾只落 Pve）
+    team: player.team ?? 0,                 // PvP 队伍（PL:55411;0 无/1-5 队色）
+    dead: player.dead ?? false,             // 死亡态（PL:55558——死亡瞬存档曾=免死复活满状态）
+    respawnTimer: player.respawnTimer ?? 0, // PL:55559-55562
+    // 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:183-195
+    // SaveToPlayer 等价——单人共用 World.journeyPowers 存储，落盘拆到 player 段）
+    journeyPowers: {
+      godmode: world.journeyPowers.godmode,
+      farPlacementRange: world.journeyPowers.farPlacementRange,
+      spawnRateSlider: world.journeyPowers.spawnRateSlider,
+    },
+    permanentUpgrades: {
+      extraAccessory: player.inv.extraAccessory,   // ★BJ575 恶魔之心 3335 旗（PL:55430 写/:55891 读 v≥125）
+      usedAegisCrystal: player.usedAegisCrystal,
+      usedAegisFruit: player.usedAegisFruit,
+      usedArcaneCrystal: player.usedArcaneCrystal,
+      usedGalaxyPearl: player.luckState.usedGalaxyPearl,   // PL:53835/:54303（银河珍珠 5340）
+      usedGummyWorm: player.usedGummyWorm,
+      usedAmbrosia: player.usedAmbrosia,
+    },
+    anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
+    hideInfo: player.hideInfo ?? undefined,     // PL:776 hideInfo[13](DrawInfoAccs 行开关)
+    // PL:53813-53819 hideVisibleAccessory[10] 位打包（本仓布尔数组直存;仅配饰段
+    // 3-9 有效,全 false 时省略=旧档缺省语义）
+    hideVisibleAccessory: player.hideVisibleAccessory?.some(Boolean)
+      ? [...player.hideVisibleAccessory]
+      : undefined,
+    hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
+    hbLocked: player.hbLocked ?? false,         // SW-FX10 债⑪:PL:55543 hbLocked bool
+    enabledSuperCart: player.enabledSuperCart ?? true,  // SW-FX10 债⑩:PL:55572 位[1] enabledSuperCart
+    builderAccStatus: [...player.builderAccStatus],     // SW-FX19 债:PL:55553-55555 builderAccStatus[12]
+    // ★SW-FX38b：火把神恩宠解锁旗（Player.unlockedBiomeTorches,PL:55430 写/:55895 读）。
+    //  原版角色字段随身跨世界;本仓在-session 权威=world.flags（原版语义=Player 域,
+    //  但本仓 TorchGod/Game.usingBiomeTorches 消费面均挂 world.flags）——快照在此
+    //  回填,CharacterStore 同步（doSave→setState JSON.parse(json).player）与 .plr
+    //  导出（exportPlr）同吃该字段。旧档缺省 undefined=false
+    unlockedBiomeTorches: !!world.flags.unlockedBiomeTorches,
+    // ★BJ285-②：匠师面包吃旗（Player.ateArtisanBread,PL:55433 写/:55899 读）——
+    //  在-session 权威=world.flags（Game 用途支+旅商股票消费面）,快照在此回填,
+    //  applyPlayer 读档单调回灌;.plr 导出 exportPlr 同吃该字段（旧恒 false 债清偿）
+    ateArtisanBread: !!world.flags.ateArtisanBread,
+  };
+}
+
 /** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
 export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
   // ★SW-FX11（2026-09-10）：天界四塔 NPC 段（WF:1744-1755）+ 按压压力板段（WF:3374-3386）
@@ -129,65 +205,9 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
   };
-  const playerData: SaveData['player'] = {
-    hp: player.hp, x: player.x, y: player.y,
-    inventory: player.inv.slots, selected: player.inv.selected,
-    baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
-    banks: player.banks,
-    armor: player.inv.armor,
-    dye: player.inv.dye,
-    trash: player.inv.trash,
-    miscEquips: player.inv.miscEquips,
-    miscDyes: player.inv.miscDyes,
-    loadouts: player.inv.loadouts,
-    currentLoadout: player.inv.currentLoadout,
-    buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
-    taxMoney: player.taxMoney ?? 0,         // PL:53839
-    golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
-    deathsPve: player.deathsPve ?? 0,       // PL:53840
-    // ★R16-14（2026-08-24）：SavePlayer 缺失字段补落（PL57:55404-55588 序）
-    deathsPvp: player.deathsPvp ?? 0,       // numberOfDeathsPVP（PL:55444;msg16 尾段已在跑中继,存档侧曾只落 Pve）
-    team: player.team ?? 0,                 // PvP 队伍（PL:55411;0 无/1-5 队色）
-    dead: player.dead ?? false,             // 死亡态（PL:55558——死亡瞬存档曾=免死复活满状态）
-    respawnTimer: player.respawnTimer ?? 0, // PL:55559-55562
-    // 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:183-195
-    // SaveToPlayer 等价——单人共用 World.journeyPowers 存储，落盘拆到 player 段）
-    journeyPowers: {
-      godmode: world.journeyPowers.godmode,
-      farPlacementRange: world.journeyPowers.farPlacementRange,
-      spawnRateSlider: world.journeyPowers.spawnRateSlider,
-    },
-    permanentUpgrades: {
-      extraAccessory: player.inv.extraAccessory,
-      usedAegisCrystal: player.usedAegisCrystal,
-      usedAegisFruit: player.usedAegisFruit,
-      usedArcaneCrystal: player.usedArcaneCrystal,
-      usedGalaxyPearl: player.luckState.usedGalaxyPearl,   // PL:53835/:54303（银河珍珠 5340）
-      usedGummyWorm: player.usedGummyWorm,
-      usedAmbrosia: player.usedAmbrosia,
-    },
-    anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
-    hideInfo: player.hideInfo ?? undefined,     // PL:776 hideInfo[13](DrawInfoAccs 行开关)
-    // PL:53813-53819 hideVisibleAccessory[10] 位打包（本仓布尔数组直存;仅配饰段
-    // 3-9 有效,全 false 时省略=旧档缺省语义）
-    hideVisibleAccessory: player.hideVisibleAccessory?.some(Boolean)
-      ? [...player.hideVisibleAccessory]
-      : undefined,
-    hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
-    hbLocked: player.hbLocked ?? false,         // SW-FX10 债⑪:PL:55543 hbLocked bool
-    enabledSuperCart: player.enabledSuperCart ?? true,  // SW-FX10 债⑩:PL:55572 位[1] enabledSuperCart
-    builderAccStatus: [...player.builderAccStatus],     // SW-FX19 债:PL:55553-55555 builderAccStatus[12]
-    // ★SW-FX38b：火把神恩宠解锁旗（Player.unlockedBiomeTorches,PL:55430 写/:55895 读）。
-    //  原版角色字段随身跨世界;本仓在-session 权威=world.flags（原版语义=Player 域,
-    //  但本仓 TorchGod/Game.usingBiomeTorches 消费面均挂 world.flags）——快照在此
-    //  回填,CharacterStore 同步（doSave→setState JSON.parse(json).player）与 .plr
-    //  导出（exportPlr）同吃该字段。旧档缺省 undefined=false
-    unlockedBiomeTorches: !!world.flags.unlockedBiomeTorches,
-    // ★BJ285-②：匠师面包吃旗（Player.ateArtisanBread,PL:55433 写/:55899 读）——
-    //  在-session 权威=world.flags（Game 用途支+旅商股票消费面）,快照在此回填,
-    //  applyPlayer 读档单调回灌;.plr 导出 exportPlr 同吃该字段（旧恒 false 债清偿）
-    ateArtisanBread: !!world.flags.ateArtisanBread,
-  };
+  // ★BJ575（2026-10-08）：玩家段装配单源化——原内联块（R16-14 全字段）迁出为
+  //  buildPlayerSaveData，与 SaveClient.doSave（worker 生产主路径）共用。见该函数头注。
+  const playerData = buildPlayerSaveData(world, player);
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
 }
 

@@ -132,6 +132,32 @@ export function projConstFullbright(id: number): boolean {
   return !rgb || (rgb[0] >= 250 && rgb[1] >= 250 && rgb[2] >= 250);
 }
 
+/** ★BJ-C9 F4（2026-10-08）常量色族 tint 档（白 rgb 门外彩色/灰阶常量, BJ551 tint 档
+ *  同构扩通用复绘通道）：R8 红队 8 站活体普查——308 寒霜九头蛇 (:81218-81221
+ *  (200,200,255,125) 恒)/329 焰镰 (:81190-81193 (200,200,200,50))/348·349 寒潮波·
+ *  寒霜碎片 (:81152-81155 (200,200,200,α) A=α)/498 铁钉弹 (:80924-80927
+ *  (255,100,20,200))/518 金币传送门 (:80932-80936 (200n,200n,200n,100n) n=1−α/255;
+ *  :80937 第二 518 支=死码不可达)/553 地狱火悠悠球 (:80916-80919 (255,255,200,200))/
+ *  969 天候鞭弹 (:80692-80706 逐通道 min(newColor,210)×Opacity——本仓弹光色恒白
+ *  =常量 (210,210,210,185)×fade,表注既登记)——旧 rgbFilter 亮度近似（色相未建模,
+ *  drawTableAlpha :3023-3029）→ 收编通用全亮通道精确复绘。
+ *  返回 null = 不入 tint 档：白 rgb 门内（projConstFullbright=true,既有单笔通道
+ *  精确——cR=1 时单笔 ga=cA ≡ XNA,勿双入队）/ 非 fixed·fixedfade·afade kind /
+ *  off / 无 rgba。消费面 = Arrow.draw capture（recording-ctx）→ flush 双通道
+ *  replay：erase 全流 comp 强制 destination-out（ga 取流内值=GetAlpha A 折面）+
+ *  add 全流 comp 强制 lighter、img→tintedTex(flatten)、ga=addGa（fixed=1/
+ *  fixedfade=(1−α/255)/afade=1——addGa 承 rgb 侧 fade,erase ga 承 A 侧,XNA
+ *  One/InvSrcAlpha 两因子分离逐字节, BJ547 核心笔/dustPremulBake 判例域）。 */
+export function projConstTint(id: number): readonly [number, number, number, number] | null {
+  if (projConstFullbright(id)) return null;         // 白 rgb 门内=既有通道,防双入队
+  const m = PROJ_ALPHA_MOD[id];
+  if (!m || m.off) return null;
+  if (m.kind !== 'fixed' && m.kind !== 'fixedfade' && m.kind !== 'afade') return null;
+  const rgb = m.rgba;
+  if (!rgb) return null;
+  return rgb;
+}
+
 export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   5: { kind: 'invisible', off: 1 },    // :76569 | 恒 (255,255,255,0) 纯加算白（XNA 预乘；1457 锚 :81240-81242），GA case 5 return 1+lighter 承接；charm 态走 :80609 White×Opacity 分支（★M-4 勘误 2026-09-02）
   9: { kind: 'invisible', off: 1 },    // (255,255,255,0)*Opacity A=0 纯加算白×Opacity（A 仍 0,乘子只降 rgb 强度=E2 Opacity 债）;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）

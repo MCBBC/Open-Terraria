@@ -4,7 +4,8 @@ import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY, houseBannerLightRow, houseBannerVisible, npcHousingCategory } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
 import { styleDropVidOfFrames } from '../data/vanillaStyleDrops';   // ★BJ563：种植盆地图名随 style（与破坏掉落同一单源）
-import { rulerLineAlpha, rulerGridFade, rulerReadoutText, rulerGridMaskAlpha, rulerCrossMaskAlpha } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源（★BJ448:+dst 衰减罩 α 两档）
+import { rulerLineAlpha, rulerGridFade, rulerReadoutText, rulerGridMaskAlpha, rulerCrossMaskAlpha } from '../stats/builderAcc';
+import { flowerSlots, flowerPick, flowerSlotTextures, flowerSlotColors, cursorDots, dotDimColor, WIRES_TOOL_CUTTER } from '../stats/wiresRadial';   // ★BJ572 面②:径向工具模式菜单绘制   // ★SW-FX36:标尺族绘制纯公式单源（★BJ448:+dst 衰减罩 α 两档）
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
@@ -2290,6 +2291,14 @@ export function whipMarkerFrameRect(frameY: number): { sx: number; sy: number; s
   return { sx: 0, sy: frameY * 18, sw: 16, sh: 16 };
 }
 let _whipMarkerTinted: HTMLCanvasElement | null = null;
+/** ★BJ-C9 F2（2026-10-08）烘焙范式勘误：旧 source-over fillRect(178)+destination-in =
+ *  「填充+抠形」= 形状内平色 178（texel 235/210/143 → 全 178,贴图细节整幅抹平）——
+ *  组头注自称 multiply 三步但代码未 multiply。原版色面 = tex.rgb×(178/255)（XNA
+ *  SpriteBatch 乘色,BJ556 两遍拆解的 rgb 贡献判据本就按此式写）。修 = fill 改
+ *  'multiply'（W3C compositing:不透明 texel 出 cs×Cb=tex.rgb×178/255 直乘;透明
+ *  texel 出不透明黑,由后续 destination-in 回贴原 α 抠除）再 destination-in——
+ *  与 tintedTex（StringLine.ts multiply→destination-in 既有正确范式）单源同构。
+ *  texel 级判据：Extra_199 实测 texel (235,210,143) → (164,147,100)。 */
 function whipMarkerTintedSheet(src: CanvasImageSource & { width: number; height: number }): HTMLCanvasElement | null {
   if (_whipMarkerTinted) return _whipMarkerTinted;
   if (typeof document === 'undefined') return null;
@@ -2300,7 +2309,7 @@ function whipMarkerTintedSheet(src: CanvasImageSource & { width: number; height:
   if (!g) return null;
   g.imageSmoothingEnabled = false;
   g.drawImage(src, 0, 0);
-  g.globalCompositeOperation = 'source-over';
+  g.globalCompositeOperation = 'multiply';   // ★BJ-C9 F2：source-over→multiply（乘色非填充）
   g.fillStyle = `rgb(${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB},${WHIP_MARKER_TINT_RGB})`;
   g.fillRect(0, 0, c.width, c.height);
   g.globalCompositeOperation = 'destination-in';
@@ -7342,6 +7351,11 @@ export class Renderer {
     //      小地图 18【之上】;随本函数画在上述全部之上——亚层微差维持登记
     //      （正确拆分锚=列表位 [19 DiagnoseNet,21 HairWindow] 区间内、黑幕后资源条
     //      前落位,泡/文本/图标三体异层同函数拆分面独立刀,非黑幕轴刀）。
+    // 12a-bis. ★BJ572：WiresRadial 径向菜单+光标迷你色点（WiresUI.HandleWiresUI
+    //     :46973 DrawInterface_9_WireSelection 列表位<40 图标层;屏空间恒等变换,
+    //     UI 面=翻转点后（原版接口层不经 GameViewMatrix 翻转,同 12b 族））
+    this.drawWiresRadialUi(ctx);
+
     this.drawCursorItemIcon(ctx, player);
 
     // 13. MouseText 缓存层（DrawPendingMouseText Main.cs:45781-45788=DrawInterface
@@ -7518,6 +7532,10 @@ export class Renderer {
   })();
   static get wfbo() { return this._wfbo; }
   static wfboSetForTest(v: boolean): void { this._wfbo = v; }
+  /** ★BJ572：标尺网格条带批测试开关（drawBuilderRulers 门=Number.isInteger(z)&&!
+   *  本旗;BJ448 录制 ctx 测试钉回退逐格支=其 W3C 重放模型的既定受试面） */
+  private static _gridStripsOff = false;
+  static gridStripsSetForTest(v: boolean): void { this._gridStripsOff = v; }
   /** ?lrecon=1：A3 光照小图 GPU 重建（raw 直传+recon pass0;须 wfbo 同开）。
    *  首版默认关,对拍过翻缺省+逃生门改 lrecon=0。运行时可翻（wfbo 同款）。 */
   private static _lrecon = (() => {
@@ -8046,6 +8064,19 @@ export class Renderer {
     gridDist: number;                    // Distance(position,shadowPos[2])（:47152 网格淡出）
     gravDir: number;
   } | null = null;
+  /** ★BJ572 面②（2026-10-08）WiresRadial 径向菜单注入面（Game.tickWiresRadial
+   *  每帧写;消费=drawWiresRadialUi,步骤 12b 前=原版 DrawInterface_9_WireSelection
+   *  列表位<40 图标层序）。 */
+  wiresRadialUi: {
+    st: { active: boolean; px: number; py: number; opacity: number; onWiresMenu: boolean };
+    heldVid: number;
+    toolMode: number;
+    actuatorAllowed: boolean;
+    cursorItemIcon: boolean;
+    mouseX: number;
+    mouseY: number;
+    mouseInterface: boolean;
+  } | null = null;
   /** ★SW-FX36：标尺 W×H 计数控（Main.cs:47089-47091 rulerLineDisplayValues 由
    *  DrawInterface_4_Ruler 世界段写、:46187-46195 DrawInterface_33_MouseText 屏幕
    *  段消费——本仓拆同帧两段：drawBuilderRulers 置值,drawCursorItemIcon 前的屏幕
@@ -8387,6 +8418,38 @@ export class Renderer {
     return c;
   }
 
+  /** ★BJ572 网格条带烘焙缓存（LRU）：把模板格 (sx,sy,sw,sh) 沿 vert(竖)/横
+   *  方向按 16px 步距铺满条带画布——drawBuilderRulers 条带批的单源。键含字节
+   *  色桶（烘色 floor 分桶,num3 连续变化只在桶界触发重烘）;内容=源画布该格
+   *  1:1 复制（imageSmoothing off,无缩放——预乘往返逐位保真由
+   *  _bj572-pixel-evidence 探针整帧 md5 对拍锁定）。 */
+  private _gridStripCache = new Map<string, HTMLCanvasElement>();
+  private _gridStrip(key: string, w: number, h: number, src: HTMLCanvasElement,
+    sx: number, sy: number, sw: number, sh: number, vert: boolean): HTMLCanvasElement | null {
+    const hit = this._gridStripCache.get(key);
+    if (hit) return hit;
+    if (w <= 0 || h <= 0) return null;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const o = c.getContext('2d');
+    if (!o) return null;
+    o.imageSmoothingEnabled = false;
+    if (vert) {
+      const n = Math.ceil(h / 16);
+      for (let j = 0; j < n; j++) o.drawImage(src, sx, sy, sw, sh, 0, j * 16, sw, sh);
+    } else {
+      const n = Math.ceil(w / 16);
+      for (let i = 0; i < n; i++) o.drawImage(src, sx, sy, sw, sh, i * 16, 0, sw, sh);
+    }
+    this._gridStripCache.set(key, c);
+    if (this._gridStripCache.size > 24) {   // LRU（Map 插入序=最旧先出）
+      const k0 = this._gridStripCache.keys().next().value;
+      if (k0 !== undefined) this._gridStripCache.delete(k0);
+    }
+    return c;
+  }
+
   /** ★SW-FX19：建筑配件标尺覆盖层（世界空间——原版 Interface 层序
    *  DrawInterface_3_LaserRuler(:47146-47224 网格)/_4_Ruler(:47046-47140 标尺线)
    *  在世界之上;世界空间等价绘制,栅格 16px 对齐与原版逐像素同源）。
@@ -8457,30 +8520,135 @@ export class Renderer {
         const px = r.mouseTx - ox, py = r.mouseTy - oy;
         ctx.save();
         ctx.imageSmoothingEnabled = false;
-        // ★BJ448 pass A：dst 衰减罩（multiply 黑模 gA=tint.a,先罩后加序）
+        // ★BJ572（2026-10-08）条带批（实测定谳:逐格双 pass ≈8.8ms/帧@1080p=渲染
+        //   81%（_bj572-grid-fps-probe);原版同面=单纹理 sprite batch 一批 GPU 出,
+        //   微秒级——本仓 Canvas2D 逐格 drawImage 无批化）。刀法=把【同源 texel 的
+        //   连续格】预铺进条带画布,逐列/段一次 drawImage——每目标像素的源 texel/
+        //   GCO/gA/变换与旧逐格全同（条带=模板格 1:1 竖/横复制,nearest 采样同源),
+        //   唯一变化=op 粒度（≈18.7K→≈0.35K/帧）。BJ448 两遍语义与 pass A/B/C 序
+        //   逐像素原样保留;十字/inset/2×2 交叠块几何照旧。条带按字节色桶+尺寸
+        //   LRU 缓存（num3 连续但烘色 floor 分桶,行走期桶变更≈每 3 拍一次,
+        //   重烘成本 ny+nx 次小复制）。
+        //   ★门=_整数设备相位_（_bj572-samebase-ab 同底图 A/B 定谳:整数相位 n=0
+        //   逐字节;分数相位 n≈6.5万 maxd=45——per-cell 边缘 AA 覆盖在条带内焊死,
+        //   两者设备相位分数时不同）。设备相位 = 整数平移 + z·整数格 ⇒ 仅 z 非
+        //   整数时分数 ⇒ 门 = Number.isInteger(z)。滚轮复利档(1.3ⁿ)/平滑趋近期
+        //   自动回退 BJ448 逐格支（下 else）。
+        if (Number.isInteger(z) && !Renderer._gridStripsOff) {
+        const uR = Math.floor(61 * 0.4 * num3), uG = Math.floor(204 * 0.4 * num3), uB = Math.floor(229 * 0.4 * num3);
+        const hR = Math.floor(127.5 * num3), hG = Math.floor(102 * num3), hB = Math.floor(114.5 * num3);
+        const stripU = this._gridStrip(`U${uR},${uG},${uB}|${ny}`, 16, ny * 16, img, 0, 18, 16, 16, true);
+        const stripUM = this._gridStrip(`UM|${ny}`, 16, ny * 16, imgMask, 0, 18, 16, 16, true);
+        const stripCI = this._gridStrip(`CI${uR},${uG},${uB}|${ny}`, 14, ny * 16, img, 2, 18, 14, 16, true);
+        const stripCIM = this._gridStrip(`CIM|${ny}`, 14, ny * 16, imgMask, 2, 18, 14, 16, true);
+        const stripRI = this._gridStrip(`RI${uR},${uG},${uB}|${nx}`, nx * 16, 14, img, 0, 2, 16, 14, false);
+        const stripRIM = this._gridStrip(`RIM|${nx}`, nx * 16, 14, imgMask, 0, 2, 16, 14, false);
+        const stripCR = this._gridStrip(`CR${hR},${hG},${hB}|${nx}`, nx * 16, 18, imgHi, 0, 0, 16, 18, false);
+        const stripCRM = this._gridStrip(`CRM|${nx}`, nx * 16, 18, imgMask, 0, 0, 16, 18, false);
+        const stripCC = this._gridStrip(`CC${hR},${hG},${hB}|${ny}`, 18, ny * 16, imgHi, 0, 0, 18, 16, true);
+        const stripCCM = this._gridStrip(`CCM|${ny}`, 18, ny * 16, imgMask, 0, 0, 18, 16, true);
+        if (stripU && stripUM && stripCI && stripCIM && stripRI && stripRIM && stripCR && stripCRM && stripCC && stripCCM) {
+          // 段算术：uniform 列/行段 = 排除 px|px+1（py|py+1）;px/py 越界时原版
+          // 循环无跳格 ⇒ 段退化全宽/全高（与 `i===px` 永假一致）
+          const a = Math.min(Math.max(px, 0), nx), b = Math.max(Math.min(px + 2, nx), 0);
+          const c = Math.min(Math.max(py, 0), ny), d = Math.max(Math.min(py + 2, ny), 0);
+          const DY0 = oy * ts - 1;                          // cell j 目标 y = DY0 + j·ts
+          const DX0 = ox * ts - 1;                          // cell i 目标 x = DX0 + i·ts
+          const px1In = px >= -1 && px + 1 < nx;            // inset 列存在（i=px+1∈[0,nx)）
+          const py1In = py >= -1 && py + 1 < ny;            // inset 行存在
+          const drawVSeg = (strip: HTMLCanvasElement, sw: number, j0: number, j1: number, dx: number) => {
+            if (j1 > j0) ctx.drawImage(strip, 0, j0 * ts, sw, (j1 - j0) * ts, dx, DY0 + j0 * ts, sw, (j1 - j0) * ts);
+          };
+          const drawHSeg = (strip: HTMLCanvasElement, sh: number, i0: number, i1: number, dy: number) => {
+            if (i1 > i0) ctx.drawImage(strip, i0 * ts, 0, (i1 - i0) * ts, sh, DX0 + i0 * ts, dy, (i1 - i0) * ts, sh);
+          };
+          // 十字行/列 k=px|l=py 排除段（px/py 在界内才排除——与原版 k===px 分支同界）
+          const inRangePx = px >= 0 && px < nx, inRangePy = py >= 0 && py < ny;
+          const rowSegs: Array<[number, number]> = inRangePx ? [[0, px], [px + 1, nx]] : [[0, nx]];
+          const colSegsL: Array<[number, number]> = inRangePy ? [[0, py], [py + 1, ny]] : [[0, ny]];
+          // ★BJ448 pass A：dst 衰减罩（multiply 黑模 gA=tint.a,先罩后加序）
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = rulerGridMaskAlpha(num3);
+          // 普通格（:47231-47235 `if (i != point.X && j != point.Y) 画`——按列两段
+          for (let i = 0; i < nx; i++) {
+            if (i === px || i === px + 1) continue;
+            drawVSeg(stripUM, 16, 0, c, DX0 + i * ts);
+            drawVSeg(stripUM, 16, d, ny, DX0 + i * ts);
+          }
+          if (px1In) {                                       // h-inset 列（i=px+1, j∉{py,py+1}）
+            const dx = DX0 + (px + 1) * ts + 2;
+            drawVSeg(stripCIM, 14, 0, c, dx);
+            drawVSeg(stripCIM, 14, d, ny, dx);
+          }
+          if (py1In) {                                       // v-inset 行（j=py+1, i∉{px,px+1}）
+            const dy = DY0 + (py + 1) * ts + 2;
+            drawHSeg(stripRIM, 14, 0, a, dy);
+            drawHSeg(stripRIM, 14, b, nx, dy);
+          }
+          if (px1In && py1In) {                              // 双 inset 角格 (2,2,14,14)
+            ctx.drawImage(imgMask, 2, 2, 14, 14, DX0 + (px + 1) * ts + 2, DY0 + (py + 1) * ts + 2, 14, 14);
+          }
+          ctx.globalAlpha = rulerCrossMaskAlpha(num3);
+          // 横行罩（source 同 :47283-47293——端格 (0,0,16,16)/其余 (0,0,16,18)）
+          for (const [k0, k1] of rowSegs) drawHSeg(stripCRM, 18, k0, k1, DY0 + py * ts);
+          if (inRangePx) ctx.drawImage(imgMask, 0, 0, 16, 16, DX0 + px * ts, DY0 + py * ts, 16, 16);
+          // ★BJ448 pass B：预乘 rgb 加算（XNA src×1 项;罩已先行,src 不被二次衰减）
+          ctx.globalCompositeOperation = 'lighter';   // ★BJ422② 预乘 rgb 直加
+          ctx.globalAlpha = 1;
+          for (let i = 0; i < nx; i++) {
+            if (i === px || i === px + 1) continue;
+            drawVSeg(stripU, 16, 0, c, DX0 + i * ts);
+            drawVSeg(stripU, 16, d, ny, DX0 + i * ts);
+          }
+          if (px1In) {
+            const dx = DX0 + (px + 1) * ts + 2;
+            drawVSeg(stripCI, 14, 0, c, dx);
+            drawVSeg(stripCI, 14, d, ny, dx);
+          }
+          if (py1In) {
+            const dy = DY0 + (py + 1) * ts + 2;
+            drawHSeg(stripRI, 14, 0, a, dy);
+            drawHSeg(stripRI, 14, b, nx, dy);
+          }
+          if (px1In && py1In) {
+            ctx.drawImage(img, 2, 2, 14, 14, DX0 + (px + 1) * ts + 2, DY0 + (py + 1) * ts + 2, 14, 14);
+          }
+          // 十字加亮行（:47277-47302——point.Y 行横贯（x 向循环）;source (0,0,16,16)
+          // 端格 / (0,0,16,18) 其余（:47283-47293））
+          for (const [k0, k1] of rowSegs) drawHSeg(stripCR, 18, k0, k1, DY0 + py * ts);
+          if (inRangePx) ctx.drawImage(imgHi, 0, 0, 16, 16, DX0 + px * ts, DY0 + py * ts, 16, 16);
+          // ★BJ448 pass C：竖十字独立罩→加（:47296-47298 纵列 source (0,0,18,16),
+          // l != point.Y :47299）——竖列×横行 2×2 交叠块按原版逐绘序复刻
+          // （横支已加算完再罩竖支,块内 衰减/加算 交替序逐位;非交叠像素单覆盖不受分相影响）
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = rulerCrossMaskAlpha(num3);
+          for (const [l0, l1] of colSegsL) drawVSeg(stripCCM, 18, l0, l1, DX0 + px * ts);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1;
+          for (const [l0, l1] of colSegsL) drawVSeg(stripCC, 18, l0, l1, DX0 + px * ts);
+        }
+        } else {
+        // ★BJ448 逐格支（非整数 zoom 回退档;2026-10-08 BJ572 原样保留——
+        //   分数设备相位下 per-cell 边缘 AA 覆盖不可条带化,见上门注）
         ctx.globalCompositeOperation = 'multiply';
         ctx.globalAlpha = rulerGridMaskAlpha(num3);
-        // 普通格（:47231-47235 `if (i != point.X && j != point.Y) 画`——十字行/列
-        // 不画普通格,改由下方加亮线覆盖）
         for (let j = 0; j < ny; j++) {
           for (let i = 0; i < nx; i++) {
             if (i === px || j === py) continue;
             const insetX = i === px + 1, insetY = j === py + 1;
             const sx = insetX ? 2 : 0, sw = insetX ? 14 : 16;
             const sy = insetY ? 2 : 18, sh = insetY ? 14 : 16;
-            const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;  // vec -= One :47229
+            const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;
             const dy = (oy + j) * ts + (insetY ? 2 : 0) - 1;
             ctx.drawImage(imgMask, sx, sy, sw, sh, dx, dy, sw, sh);
           }
         }
         ctx.globalAlpha = rulerCrossMaskAlpha(num3);
-        // 横行罩（source 同 :47283-47293——端格 (0,0,16,16)/其余 (0,0,16,18)）
         for (let k = 0; k < nx; k++) {
           ctx.drawImage(imgMask, 0, 0, 16, k === px ? 16 : 18,
             (ox + k) * ts - 1, (oy + py) * ts - 1, 16, k === px ? 16 : 18);
         }
-        // ★BJ448 pass B：预乘 rgb 加算（XNA src×1 项;罩已先行,src 不被二次衰减）
-        ctx.globalCompositeOperation = 'lighter';   // ★BJ422② 预乘 rgb 直加
+        ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 1;
         for (let j = 0; j < ny; j++) {
           for (let i = 0; i < nx; i++) {
@@ -8488,33 +8656,29 @@ export class Renderer {
             const insetX = i === px + 1, insetY = j === py + 1;
             const sx = insetX ? 2 : 0, sw = insetX ? 14 : 16;
             const sy = insetY ? 2 : 18, sh = insetY ? 14 : 16;
-            const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;  // vec -= One :47229
+            const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;
             const dy = (oy + j) * ts + (insetY ? 2 : 0) - 1;
             ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
           }
         }
-        // 十字加亮行（:47277-47302——point.Y 行横贯（x 向循环）;source (0,0,16,16)
-        // 端格 / (0,0,16,18) 其余（:47283-47293））
         for (let k = 0; k < nx; k++) {
           ctx.drawImage(imgHi, 0, 0, 16, k === px ? 16 : 18,
             (ox + k) * ts - 1, (oy + py) * ts - 1, 16, k === px ? 16 : 18);
         }
-        // ★BJ448 pass C：竖十字独立罩→加（:47296-47298 纵列 source (0,0,18,16),
-        // l != point.Y :47299）——竖列×横行 2×2 交叠块按原版逐绘序复刻
-        // （横支已加算完再罩竖支,块内 衰减/加算 交替序逐位;非交叠像素单覆盖不受分相影响）
         ctx.globalCompositeOperation = 'multiply';
         ctx.globalAlpha = rulerCrossMaskAlpha(num3);
         for (let l = 0; l < ny; l++) {
-          if (l === py) continue;                             // :47299 l != point.Y
+          if (l === py) continue;
           ctx.drawImage(imgMask, 0, 0, 18, 16,
             (ox + px) * ts - 1, (oy + l) * ts - 1, 18, 16);
         }
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 1;
         for (let l = 0; l < ny; l++) {
-          if (l === py) continue;                             // :47299 l != point.Y
+          if (l === py) continue;
           ctx.drawImage(imgHi, 0, 0, 18, 16,
             (ox + px) * ts - 1, (oy + l) * ts - 1, 18, 16);
+        }
         }
         ctx.restore();
       }
@@ -11020,8 +11184,11 @@ export class Renderer {
         //  （GetColor A 恒 255 → num5=255−α）=本体 ga ×150/255（幻影半透定义面,
         //  白提亮 0.4 档由 npcWhiteLiftAlpha 7d' 复绘承接）。仅缺省直绘位收编
         //  （color/tint 预乘支=染面族,沙虫无 NPC color 不可达）。
-        ctx.globalAlpha = (e.vanillaId != null && e.vanillaId >= 454 && e.vanillaId <= 459
-          ? 150 / 255 : 1)
+        //  ★BJ-C9 F3（2026-10-08）：同支 521 远古教徒巨鱿（NPC.cs:94640 同支成员,
+        //  活体=bossAI_lategame.ts:283 无龙支）入半透门（R8 普查「门只盖 454-459
+        //  两面全漏」勘正）。
+        ctx.globalAlpha = (e.vanillaId != null && ((e.vanillaId >= 454 && e.vanillaId <= 459)
+          || e.vanillaId === 521) ? 150 / 255 : 1)
           * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255);
         // EoC 锚点:NPC_4 每帧 110×166,眼球质心帧内 y≈106(帧中心 83)——
         // 原版 DrawNPC 的 halfSize=(55,107) 覆写（Main.cs:23280-23285）在
@@ -11191,17 +11358,53 @@ export class Renderer {
           //  `if (type == 289) return new Color(250, 250, 250, 50);`——骷髅头怪分支,
           //  与 288 地牢幽魂 :94751-94754 成对;用户实报"诅咒骷髅怪很暗"=BJ529 弹 270
           //  同域第三刀）。恒色族:RGB=250 恒定【不读光照色】+A=50 半透——XNA 预乘
-          //  AlphaBlend 终像素=tex.rgb·(250/255)·tex.a·(50/255)+bg·(1−tex.a·50/255)。
-          //  本仓通用直绘=实体层 compositeLight 乘光+ga=1 实心——暗处 ≈×0.325(BJ529
-          //  实测 k)又暗又实=双病同根。修=本体不进实体层（capture→516/402 判例同构）
-          //  入 npcWhiteLiftQueue,7d' 光照合成后 tintedTex(rgb 250 保形)+ga=50/255
-          //  source-over 复绘:img.rgb·img.a·ga = tex.rgb·(250/255)·tex.a·(50/255)
-          //  ≡原版逐字节。特支不读 alpha 字段→出生 ramp 期亦恒 50/255（逐字）。
+          //  AlphaBlend(One,InvSrcAlpha) 终像素=tex.rgb·tex.a·(250/255)【cA 不缩 RGB】
+          //  +bg·(1−tex.a·50/255)。本仓通用直绘=实体层 compositeLight 乘光+ga=1 实心
+          //  ——暗处 ≈×0.325(BJ529 实测 k)又暗又实=双病同根。修=本体不进实体层
+          //  （capture→516/402 判例同构）入 npcWhiteLiftQueue,7d' 光照合成后复绘。
+          //  ★BJ-C9 F3（2026-10-08）混合语义勘误：旧单笔 tintedTex(rgb250)+ga=50/255
+          //  source-over 把 src.rgb 压成 tex.rgb·tex.a·(250/255)·(50/255)=原版
+          //  ×(50/255)（暗 5 倍,「很暗」病灶未真修;canvas 单笔强制 src.rgb×ga=A 双乘
+          //  RGB——BJ556 鞭标记同案判例）。落刀=两步式（BJ547 核心笔/dustPremulBake
+          //  判例域）：destination-out(ga=tintA/255) 削底 → lighter(tinted rgb,ga=1)
+          //  全额加算=逐字节。特支不读 alpha 字段→出生 ramp 期亦恒 50/255（逐字）。
           this.npcWhiteLiftQueue.push({
             vid: 289, tex: 'vanilla/NPC_289.png',
             sy: r.sy, sw: r.sw, sh: r.sh,
             cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
-            ga: 50 / 255, tint: [250, 250, 250],
+            tint: [250, 250, 250], tintA: 50,
+          });
+        } else if (e.vanillaId === 440 || e.vanillaId === 30 || e.vanillaId === 665
+          || e.vanillaId === 25 || e.vanillaId === 59 || e.vanillaId === 60) {
+          // ★BJ-C9 F3（2026-10-08）恒色族 NPC 收编（R8 红队活体普查面;BJ551 289 判例
+          //  同构,GetAlpha 早退支不读光照色=复绘域逐字）。逐支色面（NPC.cs:94693-94700/
+          //  :94652-94660 亲读）：
+          //  · 30/665 混沌球 :94693-94696 `Color(250,250,250,100)` 恒（早退截胡,
+          //    :94697 支内 30/665 成员=死码）→ tint [250,250,250] tintA=100;
+          //  · 25 燃烧球/59 岩浆史莱姆/60 地狱蝙蝠 :94697-94700 `Color(200,200,200,0)`
+          //    恒——A=0 纯加算（XNA src.a=0=零削底,tintA=0 → erase 免除,lighter 单面
+          //    =xnaCombined 兜底/弹域 91/321 加算判例同式）→ tint [200,200,200] tintA=0;
+          //  · 440 教徒克隆体 :94652-94660 `b=180(专家 210);b×num=(255−α)/255;
+          //    Color(b,b,b,b)`——四通道同值灰（rgb=a=b 逐字,×num 截断）→ tint/tintA=b
+          //    动态档（捕捉时算,b 为整数字节;Main.expertMode 单源=world.isExpert）。
+          //  恒色支不读 alpha 字段（出生/淡出 ramp 不折——289 同款逐字登记）;
+          //  活体生成面：440=bossAI_lategame.ts:635/30·665=混沌元素·Tim 弹/NPC 弹、
+          //  25=燃烧球（IMP 弹幕 NPC）、59/60=地狱常规刷（R8「无生成面」失实句勘正）。
+          const constTint = ((): { tint: [number, number, number]; tintA: number } => {
+            const vid = e.vanillaId;
+            if (vid === 440) {
+              const aRaw = Math.min(255, Math.max(e.spawnAlpha, 0));
+              const b = Math.floor((world.isExpert ? 210 : 180) * ((255 - aRaw) / 255));
+              return { tint: [b, b, b], tintA: b };
+            }
+            if (vid === 30 || vid === 665) return { tint: [250, 250, 250], tintA: 100 };
+            return { tint: [200, 200, 200], tintA: 0 };   // 25/59/60
+          })();
+          this.npcWhiteLiftQueue.push({
+            vid: e.vanillaId, tex: `vanilla/NPC_${e.vanillaId}.png`,
+            sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            tint: constTint.tint, tintA: constTint.tintA,
           });
         } else if (e.vanillaId === 694 && (e.ai3 ?? 0) === 4) {
           // ★BJ551 水书宝箱怪 694 显形动画态（GetAlpha :94559-94568 ai[3]==4 支
@@ -11224,6 +11427,15 @@ export class Renderer {
           //  Color.White` 恒全白）：RGB 恒 255 不读光照=A=255 全白覆绘=402 档极限
           //  （a=1 恒等式）。伪装书架态（ai[3]==3 → newColor 常规乘光）不走本支,
           //  落下方通用直绘同相。capture→复绘 ga=1（不乘 spawnAlpha,特支逐字）。
+          //  ★BJ-C9 F6（2026-10-08）不透明域边界登记（GetAlpha :94555-94570 三态域）：
+          //  ai3==3 伪装=乘光域（通用直绘,不入复绘）/ ai3==4 显形动画=lerp 域
+          //  （本体照画+α=f 双绘,加性白项=f∈(0,1) 连续带,两端点 f=0≡乘光域、
+          //  f=1≡不透明域）/ ai3∈{0,1,2} 完成态=不透明域（ga=1 全白覆绘,src.a=
+          //  tex.a·1=本体全遮）。「不透明域」的层序边界=7d' 槽 source-over ga=1
+          //  复绘盖过本体+其身后的实体层内容,与原版本体链内 AlphaBlend 覆绘同相
+          //  （本体后方图格经 src.a=tex.a 泄露,两面一致）;ai3 域值枚举外（>4）
+          //  不存在（原版 ai[3] 只写 0/1/2/3/4）。帧几何：帧高 40（46×1200/30 帧）
+          //  =f=clamp(frameIdx/17) 硬编码步距,17 帧后恒 ga=1=不透明域饱和。
           this.npcWhiteLiftQueue.push({
             vid: 694, tex: 'vanilla/NPC_694.png',
             sy: r.sy, sw: r.sw, sh: r.sh,
@@ -11248,6 +11460,23 @@ export class Renderer {
           } else {
             ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
           }
+        }
+        // ★BJ-C9 F3（2026-10-08）×1.5 提亮族本体位二次绘（NPC.cs:94791-94806 亲读：
+        //  63 蓝/64 粉/103 绿水母+75 仙灵+400 月总漂眼——GetAlpha rgb×1.5 钳 255 后落
+        //  缺省尾 A=num5）。光照依赖族（rgb=min(1.5·光,1) 非 lerp 非常量）→ lerp 复绘
+        //  通道不可表达（source-over 复绘=lerp(L,W,a) 曲线,a=0.5 仅 L=0.5 一点重合）
+        //  → 本体位实体层 'lighter' ga=0.5 二次绘：层内 rgb 翻倍后再过 compositeLight
+        //  全屏乘光 → s·L·1.5,画布逐通道钳 1 ≡ min(1.5L,1)（不透明 texel 逐字节;
+        //  XNA 数值钳位点同构）。登记偏差：①半透明 texel lighter 连 α 同加（A 侧
+        //  1.5·tex.a 钳 1 vs 原版 num5 不乘）——水母贴图铃缘半透域可见,登记;②63/64/103
+        //  SetDefaults α=20（NPC_STATIC_ALPHA）原版 rgb 不折 num5、本仓折（−7.8%）,
+        //  登记不扩（75/400 α=0 恒逐字）。
+        if (e.vanillaId === 63 || e.vanillaId === 64 || e.vanillaId === 103
+          || e.vanillaId === 75 || e.vanillaId === 400) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 0.5;
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+          ctx.globalCompositeOperation = 'source-over';
         }
         // 618 血月潜舰触腕叠加层（DrawNPC Extra_129 段：通用帧后追加同帧叠画）
         if (e.vanillaId === 618) {
@@ -11985,6 +12214,12 @@ export class Renderer {
     ringTexelScale: 0.75,
   };
 
+  /** ★BJ-C9 F1（2026-10-08）：548 光柱核心笔单源色 = Lerp((140,50,255,0)×0.6f,White,.5)
+   *  = (169,142,204,127)（Main.cs:24348→:24349×0.6f→:24366;FNA Color.Lerp 四通道含 A、
+   *  (int) 截断;A=127 由 destination-out ga=127/255 承载）。旧 [198,153,255]+128/255
+   *  系漏乘 ×0.6f 的色+127.5 误上取整,详见 draw548CrystalOverlays 内 BJ-C9 注。 */
+  static readonly BJ_C9_CORE_TINT: [number, number, number] = [169, 142, 204];
+
   /** ★BJ546 548 光效波形单源（Main.cs:24326-24342 + :24272/:24304 1:1，纯函数）：
    *  n128=GTW%3/3、n129/n131=两相三角波、n122a/b=本体光环呼吸
    *  （0.625+sin(GTW·2π·0.75[+π])·0.125）。波间/波中两态同式——唯一态门是
@@ -12141,7 +12376,9 @@ export class Renderer {
    *  色 28 = (140,50,255,0)×0.6 不经 GetAlpha = 原版不吃光照——本仓夹层全屏
    *  光照乘会以水晶自发光（AddLight 1.3/0.5/1.5,bossAI_dd2 lightRGB）调制,
    *  绿通道 ≈×0.5 偏紫登记;z 序（环/柱在座 466 后）优先于色面保真。
-   *  第二笔白核旧 BJ454 画成纯白——本刀纠正为 Lerp(color28,White,.5)=(198,153,255)。 */
+   *  第二笔白核旧 BJ454 画成纯白——BJ547 纠正为两步式;★BJ-C9 F1（2026-10-08）色值
+   *  再勘：color28 须先 ×0.6f（:24349）再 Lerp（:24366）→ (169,142,204,127),旧
+   *  (198,153,255) 系漏乘（详见本法内 BJ-C9 注;单源常数=Renderer.BJ_C9_CORE_TINT）。 */
   private draw548CrystalOverlays(
     e: Enemy,
     r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
@@ -12202,20 +12439,27 @@ export class Renderer {
         if (purple) ctx.drawImage(purple.c, purple.x, purple.y, purple.w, purple.h,
           -wA / 2, -hA / 2, wA, hA);
         const core = this.tintedSprite('beam548core',
-          { img: beam, sx: 0, sy: 0, sw: beam.width, sh: beam.height }, [198, 153, 255]);
-        // ★BJ547：核心笔色 = Lerp(color28,White,.5) —— XNA Color.Lerp 四通道【含 A】:
-        //   A = 0→255 半程 = 128（非 0!）。AlphaBlend(One,InvSrcAlpha) 语义 =
-        //   半削底 + 半加算（out = src.rgb + dst×(1−src.a),src.a = texel.a×128/255
-        //   逐像素随束图 α 加权）——本体在束下被衰减 ~50% 再添紫色辉光 = 紫细节
-        //   保留（原版相）。BJ546 误作 A=0 纯加算 α=1 → 72×72 径向辉光盘
-        //   （Extra_89 中心 α≈0.545）全额加算罩在 58×44 本体上 → 全通道饱和
-        //   全白（探针定谳:全层 blown 73.7% / 摘叠层 0% / mean RGB 231→122）。
-        //   实现两步式（draw546GlowCore 同构）：destination-out(束图,ga=128/255)
-        //   削底 → lighter 加算（tinted 预乘 RGB,α=1 全贡献）。
+          { img: beam, sx: 0, sy: 0, sw: beam.width, sh: beam.height }, Renderer.BJ_C9_CORE_TINT);
+        // ★BJ547：核心笔色 = Lerp(color28,White,.5) —— ★BJ-C9 F1（2026-10-08）勘误：
+        //   原版链（Main.cs:24348-24349/:24366）是 color28=(140,50,255,0) 先 ×0.6f
+        //   【再】Lerp——FNA Color operator* 逐通道 (byte)(scale×v):140×0.6=84/50×0.6=30/
+        //   255×0.6=153 精确 → color28=(84,30,153,0)。旧 tint[198,153,255] 系漏乘 0.6
+        //   （=Lerp((140,50,255),White,.5) 的截断上取整）——B+51/R+29/G+11 超亮。
+        //   正确核心色=FNA Color.Lerp 四通道【含 A、(int) 截断】:
+        //   R=84+171×.5=169.5→169/G=30+225×.5=142.5→142/B=153+102×.5=204/
+        //   A=0+255×.5=127.5→127 → (169,142,204,127)=BJ_C9_CORE_TINT。
+        //   AlphaBlend(One,InvSrcAlpha) 语义 = 半削底 + 半加算（out = src.rgb +
+        //   dst×(1−src.a),src.a = texel.a×127/255 逐像素随束图 α 加权）——本体在束
+        //   下被衰减 ~50% 再添紫色辉光 = 紫细节保留（原版相）。BJ546 误作 A=0 纯加算
+        //   α=1 → 72×72 径向辉光盘（Extra_89 中心 α≈0.545）全额加算罩在 58×44 本体
+        //   上 → 全通道饱和全白（探针定谳:全层 blown 73.7% / 摘叠层 0% / mean RGB
+        //   231→122）。实现两步式（draw546GlowCore 同构）：destination-out(束图,
+        //   ga=127/255) 削底 → lighter 加算（tinted 预乘 RGB,α=1 全贡献）。
+        //   （旧 ga=128/255 系 127.5 误上取整=1/255 截断残差,BJ-C9 勘正 127 逐字。）
         if (core) {
           const cw = beam.width * 1.5 / scale, ch = beam.height * 1.5 / scale;
           ctx.globalCompositeOperation = 'destination-out';
-          ctx.globalAlpha = 128 / 255;
+          ctx.globalAlpha = 127 / 255;
           ctx.drawImage(core.c, core.x, core.y, core.w, core.h, -cw / 2, -ch / 2, cw, ch);
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = 1;
@@ -16205,6 +16449,14 @@ export class Renderer {
     // ---- 身体链（:35874-36186，else-if 序 1:1）----
     let body: number;
     if (useRow >= 0) body = useRow;                       // useStyle 行（:35879-36018）
+    else if (p.pulley) body = p.pulleyDir === 2 ? 1 : 2;  // ★BJ576 绳攀姿势（:36727-36736——
+    //   侧挂档(pulleyDir==2)=行1、居中档=行2「上举抓绳」;原版序位=useStyle 支后/
+    //   holdStyle 支前（:36727 else-if 链位）→ 绳上静持火把(holdStyle 1)照钉攀爬行。
+    //   原版 pulley 态排除面:坐骑(:26481)/抓钩(:26488)/CC/倒挂全清位,行1/2 仅绳上可达;
+    //   腿链无 pulley 支（原版全文件唯一 bodyFrame pulley 写面=:36727）——攀爬(vy≠0)
+    //   腿行走上方 vy≠0 支行5、静悬行0,两侧本仓腿链已同相,免刀。复合臂格由
+    //   PaperDoll ARM_FRAME 行1→(3,0)/行2→(4,0)（CreateCompositeData :1995/:2002
+    //   同构已落）承接近举臂——本支是缺的最后一块）。
     else if (holdStyleRaw === 1 || holdStyleRaw === 3 || holdStyleRaw === 5) body = 3;   // :36025-36040
     else if (holdStyleRaw === 2) body = 2;                // :36036
     else if (holdStyleRaw === 4 && p.onGround && p.gravDir === 1) body = 0;             // :36042-36049
@@ -16318,9 +16570,16 @@ export class Renderer {
     ga?: number;
     /** ★BJ551（2026-10-07）恒色族 RGB 烘焙档（NPC.cs:94755 `type==289 → Color(250,
      *  250,250,50)`——骷髅头怪分支,用户实报"诅咒骷髅怪很暗"=BJ529 弹 270 同域）：
-     *  tintedTex 保形染帧（img.rgb=tex.rgb·tint/255、img.a 不变）后 ga 折 tint.A,
-     *  复绘 img.rgb·img.a·ga ≡ XNA 预乘 tex.rgb·tint.rgb·tex.a·tint.a（逐字节）。 */
+     *  tintedTex 保形染帧（img.rgb=tex.rgb·tint/255、img.a 不变）。
+     *  ★BJ-C9 F3（2026-10-08）混合语义勘误：XNA AlphaBlend(One/InvSrcAlpha) 预乘下
+     *  cA 不缩 RGB（src.rgb=tex.rgb·tex.a·cR、src.a=tex.a·cA）——旧单笔
+     *  ga 折 tint.A 把 src.rgb 压成 ×cA（暗 5 倍,BJ556 鞭标记同案判例）。
+     *  消费面改两步式（BJ547 核心笔/dustPremulBake 判例）：destination-out
+     *  (ga=tintA/255) 削底 → lighter(tinted rgb,ga=1) 全额加算=逐字节。 */
     tint?: [number, number, number];
+    /** ★BJ-C9 F3：恒色 A 通道（0-255）。undefined=旧 lerp 档（单笔 ga 复绘,BJ504
+     *  语义保持）;0=A=0 纯加算（erase 免除,lighter 单面）;>0=两步式。 */
+    tintA?: number;
   }> = [];
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
@@ -16431,9 +16690,28 @@ export class Renderer {
       ctx.rotate(q.rot);
       ctx.scale(q.scale, q.scale);
       if (q.mirror) ctx.scale(-1, 1);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
-      ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+      if (q.tintA !== undefined) {
+        // ★BJ-C9 F3（2026-10-08）恒色族两步式（BJ547 核心笔/dustPremulBake 判例域；
+        //  ★F5 域差登记：erase 面 destination-out 作用在【主画布已合成域】——本体
+        //  未进实体层（capture 支）时削底=bg(含图格/墙)×(1−tex.a·tintA/255),与 XNA
+        //  InvSrcAlpha 作用在 framebuffer 同域同相;但若本体改回实体层直绘而复绘仍在
+        //  7d' 槽,erase 会双削（实体层内已乘光面+主画布再削）=分层渲染器家族域差,
+        //  消费侧假设「capture→复绘」单源,任何槽位/层位改动须先复核本注）。
+        //  imgT（保形染帧）α=tex.a 不变 → erase/add 两面同 imgT,单源零复制。
+        ctx.globalCompositeOperation = 'destination-out';
+        if (q.tintA > 0) {
+          ctx.globalAlpha = q.tintA / 255;
+          ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+        }
+        // tintA=0（25/59/60 A=0 纯加算族）：src.a=0=零削底,erase 面恒等跳过
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
+        ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+      }
       ctx.restore();
     }
     ctx.restore();
@@ -16887,7 +17165,12 @@ export class Renderer {
    *  LegacyPlayerRenderer.cs:228，本仓调用位 = drawPlayer 本体层后、drawAccFrontLayers 前）。
    *  门 = pulley && itemAnimation==0（:3036——inUse 非空 ≙ itemAnimation>0）。
    *  贴图 TextureAssets.Pulley = Images/PlayerPulley（AssetInitializer.cs:610）26×72
-   *  两帧竖排，源矩形 (0, 高/2·pulleyFrame, 宽, 高/2)=(0,36f,26,36)，origin (宽/2, 高/4)=(13,9)。
+   *  两帧竖排，源矩形 (0, 高/2·pulleyFrame, 宽, 高/2)=(0,36f,26,36)。★BJ576（2026-10-09
+   *  用户复报"滑轮叠头前"）origin 勘误：原版 origin=(宽/2, 高/4)=(13,72/4=18)——XNA/FNA
+   *  SpriteBatch origin 相对【源矩形】左上（源矩形高=36 → 18=帧中心），非整图坐标；
+   *  旧注 (13,9) 系误用帧高 36/4 推导=帧上沿 1/4 处，滑轮整体低 9px（轮体密集带
+   *  落脸部 p.y+1..p.y+8=复报病灶；正确锚轮体带 p.y−8..p.y−1=头顶）。绘制 dest
+   *  上沿 = translate 点 −(13,18)（本仓 dest=(−fw/2,−fh/2) 两档同式）。
    *  原版锚（世界系,Position=position+netOffset+(0,gfxOffY),PlayerDrawSet.cs:341+
    *  LegacyPlayerRenderer.cs:475）：x = Center.X + (numX−9)·direction、
    *  y = Position.Y + h/2 + (2+numY)·gravDir；侧挂档（pulleyDir==2）numX=0/numY=−25/
@@ -16914,7 +17197,9 @@ export class Renderer {
     ctx.save();
     ctx.translate(side ? -6.5 : 3.5, (side ? -25 : -26) + 2 - p.h / 2);
     if (!side) ctx.rotate(-0.35);                            // 0.35·−direction 镜像化简
-    ctx.drawImage(tex, 0, fh * p.pulleyFrame, fw, fh, -fw / 2, -fh / 4, fw, fh);
+    // ★BJ576：dest 上沿 = 帧中心锚（origin(13,18) 帧——XNA origin 相对源矩形左上,
+    //   旧 −fh/4=帧上沿 1/4 处 → 滑轮低 9px 叠脸（用户复报）;−fh/2=帧中心=头顶）
+    ctx.drawImage(tex, 0, fh * p.pulleyFrame, fw, fh, -fw / 2, -fh / 2, fw, fh);
     ctx.restore();
   }
 
@@ -20000,6 +20285,123 @@ export class Renderer {
   private itemInternalOfVid(vid: number): number {
     const key = VANILLA_ITEM_KEY_BY_ID[vid];
     return key ? ITEM_BY_KEY[key] : -1;
+  }
+
+  /** ★BJ572 面②（2026-10-08）WiresRadial 径向菜单绘制——WiresUI.Draw(:184-187)
+   *  = DrawFlower（active 态：5 外圈图标+中心剪线钳,悬浮钮亮/位灭灰阶）+
+   *  DrawCursorArea（!active 态：光标旁迷你色点横排+剪线钳角标,_lineOpacity 亮度）。
+   *  屏空间（恒等变换）;贴图=sprites/vanilla-ui/UI_Wires_{0..11}.png（TextureAssets.
+   *  WireUi[12] 逐帧件）+UI_BuilderIcons.png（迷你点 (128,0,10,10)/(140,2,6,6)/
+   *  (148,2,6,6) 三矩形,DrawCursorArea :525-529）。原版 DrawInterface_9 层。 */
+  private drawWiresRadialUi(ctx: CanvasRenderingContext2D): void {
+    const ui = this.wiresRadialUi;
+    if (!ui) return;
+    const { st, toolMode, mouseX, mouseY, actuatorAllowed } = ui;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    if (st.active) {
+      // ---- DrawFlower（:337-455）----
+      const slots = flowerSlots(st, actuatorAllowed);
+      const hit = flowerPick(slots, mouseX, mouseY);
+      for (const slot of slots) {
+        const hovered = hit === slot;
+        const { base, overlay } = flowerSlotTextures(slot, hovered, toolMode);
+        const { button, icon } = flowerSlotColors(slot.bit, toolMode, hovered);
+        const baseImg = this.atlas?.vmisc(`vanilla-ui/UI_Wires_${base}.png`);
+        const ovImg = this.atlas?.vmisc(`vanilla-ui/UI_Wires_${overlay}.png`);
+        const bs = 40;   // 基钮 40×40（WireUi[0]/[8] 实测）;icon 32×32/16×16 中心锚
+        const bs2 = 32;
+        if (baseImg) {
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = 'source-over';
+          // tint=Color×SpriteBatch——白=原样;灰阶=乘色（值 byte 链,首帧烘焙替代——
+          //   灰支走 filter 兜底太贵,以 globalAlpha 模拟会偏——按原版直接乘,
+          //   本仓用离屏 tint 缓存（_uiTintCache 族同式;此三色量少,直接 drawImage
+          //   +multiply 微面渲染成本可忽略——见下 tintDraw））
+          this.tintUiDraw(ctx, baseImg, slot.x, slot.y, bs, button);
+        }
+        if (ovImg) {
+          const half = ovImg.sw / 2;
+          this.tintUiDraw(ctx, ovImg, slot.x, slot.y, ovImg.sw, icon);
+          void bs2; void half;
+        }
+      }
+    } else if (st.opacity > 0 && !ui.mouseInterface) {
+      // ---- DrawCursorArea（:517-690;!active && _lineOpacity>0）----
+      const dots = cursorDots(mouseX, mouseY, actuatorAllowed, toolMode);
+      const sheet = this.atlas?.vmisc('vanilla-ui/UI_BuilderIcons.png');
+      for (const d of dots) {
+        const lit = (ui.toolMode & d.bit) !== 0;
+        const [r, g, b] = lit ? [d.r, d.g, d.b] : dotDimColor([d.r, d.g, d.b]);
+        // 底 (128,0,10,10) 暗壳 color=(50,50,50)×opacity;色点 (140,2,6,6)×opacity
+        if (sheet) {
+          ctx.globalAlpha = st.opacity;
+          ctx.globalCompositeOperation = 'source-over';
+          this.tintUiDrawRaw(ctx, sheet, 128, 0, 10, 10, d.x, d.y, 10, [50, 50, 50]);
+          this.tintUiDrawRaw(ctx, sheet, 140, 2, 6, 6, d.x, d.y, 10, [r, g, b]);
+          if ((ui.toolMode & WIRES_TOOL_CUTTER) !== 0) {
+            this.tintUiDrawRaw(ctx, sheet, 148, 2, 6, 6, d.x, d.y, 10, [50, 50, 50]);
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /** 调色 UI 贴图中心锚绘制（DrawFlower spriteBatch.Draw origin=size/2 等价） */
+  private tintUiDraw(ctx: CanvasRenderingContext2D, img: { img: CanvasImageSource; sw: number }, cx: number, cy: number, size: number, tint: [number, number, number]): void {
+    const src = this._tintedUiCacheGet(img, tint, size);
+    if (!src) return;
+    ctx.drawImage(src, cx - size / 2, cy - size / 2);
+  }
+
+  private _tintedUiCacheGet(img: { img: CanvasImageSource; sw: number }, tint: [number, number, number], size: number): HTMLCanvasElement | null {
+    void size;
+    // img 从 vmisc 来,无路径——以弱映射按元素实例键缓存
+    let m = this._uiTintByElem.get(img.img);
+    if (!m) { m = new Map(); this._uiTintByElem.set(img.img, m); }
+    const key = `${tint[0]},${tint[1]},${tint[2]}`;
+    let c = m.get(key);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = img.sw; c.height = img.sw;
+    const o = c.getContext('2d');
+    if (!o) return null;
+    o.drawImage(img.img, 0, 0, img.sw, img.sw, 0, 0, img.sw, img.sw);
+    o.globalCompositeOperation = 'multiply';
+    o.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+    o.fillRect(0, 0, c.width, c.height);
+    o.globalCompositeOperation = 'destination-in';
+    o.drawImage(img.img, 0, 0, img.sw, img.sw, 0, 0, img.sw, img.sw);
+    o.globalCompositeOperation = 'source-over';
+    m.set(key, c);
+    return c;
+  }
+
+  private _uiTintByElem = new Map<CanvasImageSource, Map<string, HTMLCanvasElement>>();
+
+  /** 迷你点三矩形调色绘制（源矩形 (sx,sy,sw,sh)→中心锚 dst;10×10 盒内 6×6 点） */
+  private tintUiDrawRaw(ctx: CanvasRenderingContext2D, sheet: { img: CanvasImageSource; sw: number; sh: number }, sx: number, sy: number, sw: number, sh: number, cx: number, cy: number, box: number, tint: [number, number, number]): void {
+    let m = this._uiTintByElem.get(sheet.img);
+    if (!m) { m = new Map(); this._uiTintByElem.set(sheet.img, m); }
+    const key = `raw${sx},${sy},${sw},${sh}|${tint[0]},${tint[1]},${tint[2]}`;
+    let c = m.get(key);
+    if (!c) {
+      c = document.createElement('canvas');
+      c.width = sw; c.height = sh;
+      const o = c.getContext('2d');
+      if (!o) return;
+      o.drawImage(sheet.img, sx, sy, sw, sh, 0, 0, sw, sh);
+      o.globalCompositeOperation = 'multiply';
+      o.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+      o.fillRect(0, 0, sw, sh);
+      o.globalCompositeOperation = 'destination-in';
+      o.drawImage(sheet.img, sx, sy, sw, sh, 0, 0, sw, sh);
+      o.globalCompositeOperation = 'source-over';
+      m.set(key, c);
+    }
+    ctx.drawImage(c, cx - box / 2, cy - box / 2);
   }
 
   private drawCursorItemIcon(

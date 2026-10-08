@@ -28,10 +28,12 @@
 //   · 288 Dungeon Spirit:GetAlpha 恒 A=0=本体全透不可见（可见度全靠 AI_056
 //     AddLight :33036/33040+发尘）;本仓无生成面（死型,BJ-C1 F5 判例不收编）——
 //     登记债,未来补生成面时须先补 GetAlpha 支。
-// 落刀:Renderer.drawEnemy 本体位 516 支旁 289 capture 支（ga=50/255+tint[250,250,250],
-//   tintedTex 保形染帧→img.rgb·img.a·ga ≡ XNA 预乘逐字节）+694 双态支（显形动画
-//   =本体照画+α=f 双绘;完成态=capture ga=1）;npcWhiteLiftQueue 类型扩 tint 字段;
-//   flushNpcWhiteLift 消费扩 tint 烘焙档。npcWhiteLiftAlpha 不收 289（专属支承载,
+// 落刀:Renderer.drawEnemy 本体位 516 支旁 289 capture 支（tint[250,250,250]+tintA=50,
+//   ★BJ-C9 F3 勘误:旧单笔 ga=50/255 把 src.rgb 双乘 ×cA（XNA One/InvSrcAlpha 下 cA
+//   不缩 RGB,BJ556 判例）暗 5 倍=「很暗」未真修;现两步式 destination-out(tintA/255)
+//   削底→lighter(tinted rgb,ga=1) 全额=逐字节）+694 双态支（显形动画
+//   =本体照画+α=f 双绘;完成态=capture ga=1）;npcWhiteLiftQueue 类型扩 tint/tintA 字段;
+//   flushNpcWhiteLift 消费扩 tint 两步式档。npcWhiteLiftAlpha 不收 289（专属支承载,
 //   防通用门双重入队——单源）。
 // 断言面：
 //   A. 钉值——289 ga=50/255+tint[250,250,250];694 f=clamp(frameIdx/17) 端点;
@@ -53,10 +55,10 @@ const RENDERER = join(process.cwd(), 'src', 'render', 'Renderer.ts');
 
 // ===================== A. 钉值 =====================
 describe('BJ551 A. 恒色族钉值（GetAlpha 骷髅头怪分支 :94751-94758/:94555-94570）', () => {
-  it('289 capture 支原文：ga=50/255+tint[250,250,250]（:94755-94758 恒色逐字）', () => {
+  it('289 capture 支原文：tint[250,250,250]+tintA=50（:94755-94758 恒色逐字;★BJ-C9 两步式）', () => {
     const src = readFileSync(RENDERER, 'utf8');
     expect(src).toContain('vid: 289, tex: \'vanilla/NPC_289.png\',');
-    expect(src).toContain('ga: 50 / 255, tint: [250, 250, 250],');
+    expect(src).toContain('tint: [250, 250, 250], tintA: 50,');
   });
   it('694 双态支：显形动画 f=clamp(frameIdx/17)、完成态 ga=1（:94559-94570 逐字）', () => {
     const src = readFileSync(RENDERER, 'utf8');
@@ -87,20 +89,34 @@ describe('BJ551 A. 恒色族钉值（GetAlpha 骷髅头怪分支 :94751-94758/:9
 
 // ===================== B. 算式（等价性+病灶判别力） =====================
 describe('BJ551 B. 289 复绘≡XNA 预乘逐字节 + 694 双绘等价式', () => {
-  it('289：tinted(rgb250 保形)+ga(50/255) source-over ≡ XNA 预乘 AlphaBlend（逐字节）', () => {
+  // ★BJ-C9 F3（2026-10-08）模型勘误：XNA AlphaBlend(One/InvSrcAlpha) 预乘语义
+  //  src.rgb=tex.rgb·tex.a·cR【cA 不缩 RGB,BJ556 鞭标记用户实证判例】、
+  //  src.a=tex.a·cA。旧 B.1 两侧恒等表达式=同义反复（其"原版"模型把 cA 乘进
+  //  rgb=语义错案,BJ-C9 落刀两步式后本块按正确模型重写）。
+  it('289 两步式 ≡ XNA 预乘 AlphaBlend（erase ga=cA + lighter rgb=250 全额,逐字节）', () => {
     const cR = 250 / 255, cA = 50 / 255;
     for (const texRGB of [0, 17, 64, 128, 200, 255]) {
       for (const texA of [0, 0.25, 0.5, 0.75, 1]) {
         for (const bg of [0, 32, 96, 180, 255]) {
-          // 本仓：tinted 帧后 drawImage(imgT, ga=cA) source-over
-          //   img.rgb=texRGB·cR、img.a=texA → out = img.rgb·(img.a·cA) + bg·(1−img.a·cA)
-          const repo = texRGB * cR * (texA * cA) + bg * (1 - texA * cA);
-          // 原版：XNA SpriteBatch 预乘（premultiply 后 SrcBlend=One）
-          //   color.rgb=tex.rgb·tint.rgb、color.a=tex.a·tint.a、
-          //   premultiply out.rgb=color.rgb·color.a + bg·(1−color.a)
-          const vanilla = texRGB * cR * (texA * cA) + bg * (1 - texA * cA);
-          expect(Math.abs(repo - vanilla)).toBeLessThanOrEqual(1e-12);
+          // 本仓两步式（flushNpcWhiteLift tintA 档）：
+          //   erase: destination-out(ga=cA, imgT α=texA) → dst×(1−texA·cA)
+          //   add:   lighter(ga=1, imgT rgb=texRGB·cR) → += texRGB·cR·texA
+          const repo = texRGB * cR * texA + bg * (1 - texA * cA);
+          // 原版：XNA SpriteBatch 预乘（SrcBlend=One,InvSrcAlpha）
+          //   src.rgb=tex.rgb·tex.a·cR、src.a=tex.a·cA
+          const vanilla = texRGB * cR * texA + bg * (1 - texA * cA);
+          expect(repo).toBe(vanilla);
         }
+      }
+    }
+  });
+  it('★BJ-C9 旧单笔病灶判别力：单笔 ga=cA 面比原版暗 ×cA（5 倍域差>1,防回退）', () => {
+    const cR = 250 / 255, cA = 50 / 255;
+    for (const texRGB of [128, 200, 255]) {
+      for (const bg of [0, 32, 96, 180, 255]) {
+        const vanilla = texRGB * cR * 1 + bg * (1 - 1 * cA);      // texA=1 本体
+        const singlePass = texRGB * cR * (1 * cA) + bg * (1 - cA); // 旧单笔（rgb 被 cA 双乘）
+        expect(vanilla - singlePass).toBeGreaterThan(1);           // 视觉可辨差
       }
     }
   });
@@ -111,7 +127,7 @@ describe('BJ551 B. 289 复绘≡XNA 预乘逐字节 + 694 双绘等价式', () =
         for (const texA of [0.5, 1]) {
           const bg = 10;                                // 暗地牢背景
           const oldRepo = texRGB * L * texA + bg * (1 - texA);   // 旧面:乘光 ga=1 实心
-          const vanilla = texRGB * cR * (texA * cA) + bg * (1 - texA * cA);
+          const vanilla = texRGB * cR * texA + bg * (1 - texA * cA);  // ★BJ-C9 正模型
           expect(Math.abs(oldRepo - vanilla)).toBeGreaterThan(1);  // 视觉可辨差
         }
       }
@@ -157,6 +173,15 @@ describe('BJ551 C. Renderer 接线', () => {
     // BJ504 α 消费面不回归（ga 显式档优先语义保持）
     expect(src).toContain('ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;');
   });
+  it('★BJ-C9 F3 恒色族两步式消费（destination-out tintA 削底 → lighter 全额）', () => {
+    expect(src).toContain("ctx.globalCompositeOperation = 'destination-out';");
+    expect(src).toContain('ctx.globalAlpha = q.tintA / 255;');
+    expect(src).toContain('if (q.tintA !== undefined) {');
+    // tintA=0（A=0 纯加算族）erase 免除闩
+    expect(src).toContain('if (q.tintA > 0) {');
+    // lerp 档（无 tintA）单笔 source-over 语义保持
+    expect(src).toContain("ctx.globalCompositeOperation = 'source-over';");
+  });
 });
 
 // ===================== D. 同族普查/非同族不回归 =====================
@@ -198,15 +223,26 @@ describe.skipIf(process.env.SW_BJ551_MUT)('BJ551 E. 变异自证', () => {
       env: { ...process.env, SW_BJ551_MUT: '1' },   // ★子进程豁免变异面（对变异文件跑 A-D 面）
     });
   const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★BJ-C9（2026-10-08）自愈前置：上轮运行被 SIGKILL 中断在变异窗=盘上残留变异串
+  //  （exit 144 杀树跳过 finally 的泄漏位,实际事故=B J-C9 会话两起）——含变异标记而
+  //  缺触发串 → 先还原触发串再取 PRISTINE,保证各发可重入。
+  const heal = (FILE: string, TRIGGER: string, replacement: string): string => {
+    let cur = readFileSync(FILE, 'utf8');
+    if (!cur.includes(TRIGGER) && cur.includes(replacement)) {
+      writeFileSync(FILE, cur.replace(replacement, TRIGGER));
+      cur = readFileSync(FILE, 'utf8');
+    }
+    return cur;
+  };
 
-  it('M1 289 ga 50/255→1（A 恒量漂移=半透面丢失）→ 钉值断言红', () => {
+  it('M1 289 tintA 50→100（A 恒量漂移=半透面丢失）→ 钉值断言红', () => {
     const FILE = RENDERER;
-    const PRISTINE = readFileSync(FILE, 'utf8');
-    const TRIGGER = 'ga: 50 / 255, tint: [250, 250, 250],';
+    const TRIGGER = 'tint: [250, 250, 250], tintA: 50,';
+    const replacement = 'tint: [250, 250, 250], tintA: 100, // ★BJ551 变异:半透恒量漂移';
+    const PRISTINE = heal(FILE, TRIGGER, replacement);
     expect(PRISTINE).toContain(TRIGGER);
     try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER,
-        'ga: 1, tint: [250, 250, 250], // ★BJ551 变异:半透恒量漂移'));
+      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
       const r = spawnVitest('289 capture 支原文');
       expect(r.status).not.toBe(0);              // ★变异证红:ga 钉值
       expect(r.stdout).toContain('289 capture 支原文');
@@ -220,12 +256,12 @@ describe.skipIf(process.env.SW_BJ551_MUT)('BJ551 E. 变异自证', () => {
 
   it('M2 摘 289 capture 支（恒色支整缺→退回通用乘光实心）→ 接线断言红', () => {
     const FILE = RENDERER;
-    const PRISTINE = readFileSync(FILE, 'utf8');
     const TRIGGER = '} else if (e.vanillaId === 289) {';
+    const replacement = '} else if (e.vanillaId === 2890) { // ★BJ551 变异:289 支摘除(永不命中→退回通用直绘)';
+    const PRISTINE = heal(FILE, TRIGGER, replacement);
     expect(PRISTINE).toContain(TRIGGER);
     try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER,
-        '} else if (e.vanillaId === 2890) { // ★BJ551 变异:289 支摘除(永不命中→退回通用直绘)'));
+      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
       const r = spawnVitest('capture 支位序');
       expect(r.status).not.toBe(0);              // ★变异证红:位序钉原文
       expect(r.stdout).toContain('capture 支位序');
@@ -239,12 +275,12 @@ describe.skipIf(process.env.SW_BJ551_MUT)('BJ551 E. 变异自证', () => {
 
   it('M3 摘消费 tint 档（289 复绘缺 rgb 烘焙=亮度差 2%）→ 消费断言红', () => {
     const FILE = RENDERER;
-    const PRISTINE = readFileSync(FILE, 'utf8');
     const TRIGGER = 'const imgT = q.tint ? tintedTex(imgL, q.tint, false) : imgL;';
+    const replacement = 'const imgT = imgL; // ★BJ551 变异:tint 烘焙档摘除';
+    const PRISTINE = heal(FILE, TRIGGER, replacement);
     expect(PRISTINE).toContain(TRIGGER);
     try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER,
-        'const imgT = imgL; // ★BJ551 变异:tint 烘焙档摘除'));
+      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
       const r = spawnVitest('消费 tint 烘焙档');
       expect(r.status).not.toBe(0);              // ★变异证红:消费原文钉值
       expect(r.stdout).toContain('消费 tint 烘焙档');

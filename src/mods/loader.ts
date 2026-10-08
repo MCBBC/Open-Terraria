@@ -9,6 +9,7 @@ import { ModStore, type ModRow, type ModStorage } from './store';
 import { readModPack } from './pack';
 import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from './plan';
 import { applyRegistrationPlan, bindModBiomeFlags } from './register';
+import { resolveModBossMusic } from './music';   // ★BGM 面:boss 曲绑定解析(L2 后)
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc } from './bridge';
 import { createModContext, type ModEntry } from './api';
@@ -162,6 +163,15 @@ export async function loadModsPhase1(
           }));
         } catch (e) {
           result.errors.push({ modId: manifest.id, error: `脚本装载失败: ${(e as Error)?.message ?? String(e)}` });
+        }
+      }
+      // ★BGM 面:boss 曲绑定解析(L2 脚本相位后——sw.bossMusic 原始绑定在 main()
+      //  期入表,须在全部 mod 脚本跑完后统一解析;缺引用=该 mod 装载错误登记)
+      for (const { manifest } of plan.mods) {
+        try {
+          resolveModBossMusic(manifest.id, (fullKey) => plan.allocation.npcs.get(fullKey));
+        } catch (e) {
+          result.errors.push({ modId: manifest.id, error: (e as Error).message });
         }
       }
       // ★worker 桥供数注册(2026-10-04):SaveClient/WorldGenClient 每次 worker(重)建

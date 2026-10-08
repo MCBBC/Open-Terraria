@@ -130,7 +130,7 @@ function runBoth(
   drawVanillaLiquids(b.ctx, mkAtlas(), st, 40, tx0, ty0, tx1, ty1, 1000, false, 0, 0,
     undefined, false, undefined, 202);
   const snapB = __liqPrepSnapshotForTest();
-  liqP2SetForTest(false); liqP3SetForTest(false);   // 还原缺省关（他测不串旗）
+  liqP2SetForTest(false); liqP3SetForTest(false);   // 复位 off 臂（他测不串旗;转正后缺省=开,测试自管旗）
   return [snapA, snapB, a.calls, b.calls];
 }
 

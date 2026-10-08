@@ -169,11 +169,15 @@ describe('R5-F11/F12 跳跃松键门', () => {
 // ============ F13/F14/F15/F17 冲刺参数（DashMovement） ============
 describe('R5-F13/F14/F15/F17 冲刺', () => {
   const doubleTap = (p: Player, w: World): void => {
-    p.inputX = 1;
+    // ★BJ-C8 复核重钉（2026-10-08）：MV3 债⑤（2026-10-07）起冲刺双击沿=单键按下沿
+    // （Player.ts :21749 controlRight∧releaseRight ≙ inputRight∧!prevInputRight）——
+    // inputX 合值沿在该消费面不产沿（双键同按丢真沿+发假沿=债⑤病灶）。旧助手仅设
+    // inputX → 双击永不触发（5 红根因,与 R7-C8 无因果,C8OFF 中和实验实证）。
+    p.inputX = 1; p.inputRight = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 0;
+    p.inputX = 0; p.inputRight = false;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 1;
+    p.inputX = 1; p.inputRight = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
   };
 
@@ -683,9 +687,10 @@ describe('★B 冲撞面 AI_112 仙灵免疫门', () => {
     p.inv.armor[3] = { id: _iid(3097), stack: 1 };
     settle(p, w);
     const dash2tap = (pp: Player): void => {
-      pp.inputX = 1; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
-      pp.inputX = 0; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
-      pp.inputX = 1; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+      // ★BJ-C8 复核重钉：同 doubleTap——MV3 债⑤起双击沿=单键 inputRight 按下沿
+      pp.inputX = 1; pp.inputRight = true; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+      pp.inputX = 0; pp.inputRight = false; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+      pp.inputX = 1; pp.inputRight = true; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
     };
     dash2tap(p);                                       // 进入 dash==2 滑行（双击左）
     expect(p.vx).toBeCloseTo(14.5, 6);

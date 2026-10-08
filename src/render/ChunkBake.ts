@@ -8,6 +8,16 @@
 //
 // 画布触点纪律：worker 上下文无 document——本模块内画布创建一律走 render/canvasEnv
 // 工厂（主线程=HTMLCanvasElement 行为逐位不变；worker=OffscreenCanvas）。
+//
+// ★bakenoread 读回消除刀（2026-10-08）：x-ray 对拍 Trace-20261008T175748↔T212134 定谳
+// 烘焙链逐格读回 7.3ms/s、op 1806/烘、主头=bakeChunkInto——用途定谳=油漆 pass（本文件
+// bakeChunkBody 末段）经 TileTint.tintRegion 对 GPU 后备烘焙目标页逐漆格 16² 读回（烘焙
+// 调用树内其余 getImageData 全在 WRF CPU scratch 侧,非本刀对象）。修法=env.noRead 旗
+// （★已转正缺省开,?bakenoread=0 逃生门）切换「每漆层 1 次整 cell 快照 + CPU 行拷贝
+// tint」支路;快照=同一份 GPU 光栅产物 → 产物逐位结构性等价（单位烘焙工作读回税
+// −60%,Windows 实机）。证据链：scripts/_bake-noread-digest.mjs（双臂 md5+读回计数）、
+// scripts/_paint-bake-truth.mjs（重跑=真值逐像素）、tests/tint-data-shared-truth.test.ts
+// （tint 循环单源锚定）。
 import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, TILE_BY_KEY, WALL_DEFS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, drawCactusCell, tileDrawYOffsetOf, chestLidPoseAt, chestPoseSheet,
@@ -19,7 +29,7 @@ import { cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import { getTilePaintSettings } from '../world/Paint';
-import { tintRegion } from './TileTint';
+import { tintRegion, tintRegionData } from './TileTint';
 import { TileStore } from '../world/TileStore';
 import { mkCanvas, type AnyCanvas, type Ctx2D } from './canvasEnv';
 
@@ -68,6 +78,14 @@ export interface ChunkBakeEnv {
   autotiler: { atlas: import('../assets/SpriteAtlas').SpriteAtlas; saplingSprite(x: number, y: number): import('../assets/SpriteAtlas').DrawRect | null; weedSprite(x: number, y: number): import('../assets/SpriteAtlas').DrawRect | null; tile(ruleName: string, st: TileStore, x: number, y: number, tileType: number, layer?: 'tile' | 'wall'): import('../assets/SpriteAtlas').DrawRect | null } | null;
   wallTiler: VanillaWallTiler | null;
   truncatesWalls: number[];
+  /** ★bakenoread 灰度（2026-10-08;?bakenoread=1,缺省关=现状逐位）：油漆 pass 禁止
+   *  逐格 getImageData 读烘焙目标页（Windows GPU 驱动逐 op 读回管线同步放大,
+   *  trace Trace-202608T175748 定谳 31ms/s 主头=bakeChunkInto）——改走「每漆层至多
+   *  1 次整 cell 快照 + CPU 侧逐格行拷贝」支路（TileTint.tintRegionData）。快照=
+   *  同一时刻同一份 GPU 光栅产物的一次性读回 → tint 源字节与旧逐格读回逐位同源,
+   *  产物逐位结构性等价（非 CPU/GPU 光栅后端对拍假设）。主线程=ChunkCache.BAKE_NOREAD,
+   *  worker=init 消息 noRead 下发（BakeClient→BakeProtocol→BakeWorker）。 */
+  noRead?: boolean;
 }
 
 /** 邻居掩码（原 ChunkCache.neighborMask——blend 表用,位序 N E S W NE SE SW NW） */
@@ -430,6 +448,17 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
   // ★ 等价边界：原版按"绘制调用"着色（多格物件整张贴图随锚格上色）；
   //   本实现按 16×16 格区域着色——涂多格家具/树只有被涂格区域显色（登记）
   //   (atlas 化:src=页画布,区域坐标须用页内绝对 ox+lx*TILE)
+  // ★bakenoread（2026-10-08）：noRead 旗开时首漆格触发该层【一次】整 cell 快照
+  //  getImageData(ox,oy,256²)（旧路=每漆格一次 16² 页读回,Windows 逐 op 管线同步
+  //  放大=Trace-202608T175748 定谳 31ms/s 主头），逐格 tint 改从快照行拷贝
+  //  （TileTint.tintRegionData）。快照=同一份 GPU 光栅产物一次性读回 → tint 源
+  //  字节与逐格读回逐位同源,回写链（tintCanvas→drawImage）不变 → 产物逐位等价;
+  //  无漆 chunk 零快照零开销。旗关 = 旧逐格路径逐字不变。
+  //  （getImageData 不受 ctx transform/clip 影响 = 页绝对坐标,快照矩形与 cell 对齐）
+  const noRead = env.noRead === true;
+  const S = CHUNK * TILE;
+  let wallSnap: ImageData | null = null;
+  let tileSnap: ImageData | null = null;
   for (let ly = 0; ly < CHUNK; ly++) {
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0 + lx, y = y0 + ly;
@@ -437,7 +466,9 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       const i = st.idx(x, y);
       const pw = st.paintWall[i];
       if (pw > 0 && st.wall[i] !== 0) {
-        tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE, true);
+        if (noRead && !wallSnap) wallSnap = wctx.getImageData(ox, oy, S, S);
+        if (wallSnap) tintRegionData(wctx, wallSnap, lx * TILE, ly * TILE, pw, lx * TILE, ly * TILE, true);
+        else tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE, true);
       }
       const pt = st.paint[i];
       if (pt > 0 && st.flags[i] && st.type[i] !== 0) {
@@ -447,7 +478,9 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
         else if (vt === 323) style = palmTreePaintStyle(st, x, y, st.w);
         // 表外类型(null)或 paint 非 1-12(函数内守卫) → 普通组 applyPaintTint
         const special = pt >= 1 && pt <= 12 ? getTilePaintSettings(vt ?? -1, style) ?? undefined : undefined;
-        tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt, lx * TILE, ly * TILE, false, special);
+        if (noRead && !tileSnap) tileSnap = ctx.getImageData(ox, oy, S, S);
+        if (tileSnap) tintRegionData(ctx, tileSnap, lx * TILE, ly * TILE, pt, lx * TILE, ly * TILE, false, special);
+        else tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt, lx * TILE, ly * TILE, false, special);
       }
     }
   }

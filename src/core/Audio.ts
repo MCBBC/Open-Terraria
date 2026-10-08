@@ -4,6 +4,7 @@
 // musicFade[id] ±0.005/帧 逼近目标曲（:295 UpdateCommonTrack / :323 TowardStopping,1458 行号）。
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
+import { modMusicSource, menuMusicId } from '../mods/music';   // ★BGM 面:mod 槽位源/菜单曲
 import { Sfx, setMusicOverrideListener, musicPackOverride, applyLoopBounds } from './Sfx';
 import { options } from './Options';
 import { swTrace } from '../net/AssetCache';
@@ -226,10 +227,18 @@ export class AudioSystem {
     if (this.decoding.has(id)) return null; // 解码中：本帧跳过，就绪后 track() 会补建
     if (this.failedFresh(id)) return null;  // 负缓存窗口内：快速短路,过期自动放行重取
     const override = musicPackOverride(`Music_${id}`);
+    // ★BGM 面（2026-10-08）：mod 音乐槽位（src/mods/music.ts 5000+ 域）→ pack 文件
+    //  SW 同路缓存 URL（sprites/mods/...，warmModAssetsCache 已暖 .ogg）——与本体
+    //  Music_<id>.mp3 同一 fetch/decode/LRU 通道，仅源不同
+    const modSrc = modMusicSource(id);
     this.decoding.add(id);
     try {
       let raw: ArrayBuffer;
-      if (override) {
+      if (modSrc) {
+        const r = await fetch(modSrc);
+        if (!r.ok) throw new Error(String(r.status));
+        raw = await r.arrayBuffer();
+      } else if (override) {
         raw = override.slice().buffer;   // decodeAudioData 脱管 ArrayBuffer → 先拷贝（音效面同款）
       } else {
         const r = await fetch(`audios/music/Music_${id}.mp3`);
@@ -406,8 +415,9 @@ export class AudioSystem {
    *  环境选曲接管,同语义） */
   play(which: 'title' | 'main', titleMusicId?: number) {
     if (this.muted) return;
-    if (which === 'title') this.playMusic(titleMusicId ?? TITLE_ID);
-    else if (this.curMusic === TITLE_ID || SEED_MENU_MUSIC.has(this.curMusic)) this.playMusic(0);
+    if (which === 'title') this.playMusic(menuMusicId() ?? titleMusicId ?? TITLE_ID);   // ★BGM 面:菜单主题曲覆盖(CalamityMainMenu.GetMusicFromMusicMod 同构)
+    else if (this.curMusic === TITLE_ID || SEED_MENU_MUSIC.has(this.curMusic)
+      || (menuMusicId() != null && this.curMusic === menuMusicId())) this.playMusic(0);
   }
 
   /** 旧昼夜变奏钩子：曲目切换已由选曲链接管（昼/夜曲不同 id），无操作 */

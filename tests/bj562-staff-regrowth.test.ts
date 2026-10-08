@@ -191,3 +191,37 @@ describe('BJ562 促草支（定谳收窄：净效应=仅 plain-active 泥土；�
     expect(w.store.get(10, 20)).toBe(T.GRASS);
   });
 });
+
+// ★BJ-C7（2026-10-08 R9-F3 判别补锁）：法杖种子加成 Next(1,6)（Game 侧 1+⌊r×5⌋,
+// WorldGen.cs:66205-66213 KillTile_GetItemDrops case 83/84 staffOfRegrowthBonus 臂）
+// 旧用例仅界断言 [1,5]——"压成恒 1"变异存活。本组注入 Math.random 定值锁双侧极值：
+//  r=0.9999 → 草 ×Next(1,3)=2 / 种子 ×Next(1,6)=5；r=0 → 草 1 / 种子 1。
+//  定值注入对掷序/掷数不敏感（每掷独立取值），判别力锁乘数本身而非流位。
+describe('BJ562-C7 法杖加成掷面（注入 Math.random 锁 Next(1,3)/Next(1,6) 双侧极值）', () => {
+  function withRand(v: number, fn: () => void): void {
+    const orig = Math.random;
+    Math.random = () => v;
+    try { fn(); } finally { Math.random = orig; }
+  }
+
+  it('r=0.9999（上极值）：草=2、种子=5（恒 1 / 乘数缩水变异必红）', () => {
+    withRand(0.9999, () => {
+      const drops: Array<[string, number]> = [];
+      const w = col(new World(30, 40, 15, 'open'), HERB_B, 10, 20, 0);
+      shell(w, drops, 213).tryPlace(10, 20, defOf(213));
+      expect(w.store.get(10, 20)).toBe(0);
+      expect(totalOf(drops, 313)).toBe(2);                   // 1+⌊0.9999×2⌋=2（Next(1,3) 顶格）
+      expect(totalOf(drops, 307)).toBe(5);                   // 1+⌊0.9999×5⌋=5（Next(1,6) 顶格）
+    });
+  });
+
+  it('r=0（下极值）：草=1、种子=1（加成非空、下界钉死）', () => {
+    withRand(0, () => {
+      const drops: Array<[string, number]> = [];
+      const w = col(new World(30, 40, 15, 'open'), HERB_B, 10, 20, 0);
+      shell(w, drops, 213).tryPlace(10, 20, defOf(213));
+      expect(totalOf(drops, 313)).toBe(1);
+      expect(totalOf(drops, 307)).toBe(1);
+    });
+  });
+});

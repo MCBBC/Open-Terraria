@@ -11,6 +11,7 @@ import type { Player } from '../entities/Player';
 import type { ItemDef } from '../data/items';
 import type { InvItem } from '../items/Inventory';
 import { MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE, MOD_BUFF_VANILLA_BASE } from './types';
+import { _resetModMusicForTests, setMenuMusicKey } from './music';   // BGM 面:菜单主题音乐键载体
 import type { ModSpawnRule } from '../world/spawn/VanillaSpawner';
 
 /** mod 物品 use 上下文(updateUse 预分流点供给) */
@@ -505,14 +506,47 @@ export function takeVanillaNpcAiOverride(vanillaId: number): ((e: Enemy, game: G
   return vanillaNpcAi.get(vanillaId) ?? null;
 }
 
+/** ★三百二十一刀:BGM 群系曲选曲面(CalamityMod.UpdateMusic override 同构,2019
+ *  CalamityMod.cs:1749-1843)——mod 群系旗活跃期覆写环境曲。priority 三档:
+ *  bossMedium=无条件覆写(Cultist/DoG 倒计时支,2019 同);biomeHigh/environment=
+ *  仅 !areThereAnyDamnBosses 时覆写(2019 群系曲门原文)。多注册后命中者按注册序
+ *  后者胜(2019 顺序覆写语义同构)。 */
+export interface ModBiomeMusicSpec {
+  flag: string;
+  musicId: number;
+  priority: 'environment' | 'biomeHigh' | 'bossMedium';
+}
+const modBiomeMusicList: ModBiomeMusicSpec[] = [];
+
+export function registerModBiomeMusic(modId: string, spec: ModBiomeMusicSpec): void {
+  if (modBiomeMusicList.some((m) => m.flag === spec.flag)) {
+    throw new Error(`[mod-hooks] biomeMusic 重复注册旗: ${spec.flag} (mod ${modId})`);
+  }
+  modBiomeMusicList.push(spec);
+}
+
+export function takeModBiomeMusic(): readonly ModBiomeMusicSpec[] {
+  return modBiomeMusicList.length > 0 ? modBiomeMusicList : [];
+}
+
+/** ★三百二十二刀:BGM AI 期直写槽(2019 SCal 等逐相换曲=AI 内裸写 Main.music
+ *  静态导入字段;JS 面=AI 期每帧覆写请求,选曲链本帧消费后清零——压一切含
+ *  boss 曲/群系曲;不写=vanilla 接管) */
+let modFrameMusic = 0;
+export function requestModFrameMusic(id: number): void { modFrameMusic = id; }
+export function takeModFrameMusic(): number { const v = modFrameMusic; modFrameMusic = 0; return v; }
+
 /** 测试重置(模块态隔离;loader 单测同款纪律;WeakMap 存储随分代回收) */
 /** ★三百十五:菜单主题面(C# MainMenu 类同构;Calamity 主菜单消费)——logo/
- *  background=SW 资源 URL(sprites/mods/...);TitleMenu/MenuBackground 消费 */
-export interface ModMenuThemeSpec { logo?: string; background?: string; cinderTex?: string }
+ *  background=SW 资源 URL(sprites/mods/...);music=mod 曲目全键(sw.music 注册,
+ *  标题屏覆盖原版标题曲);TitleMenu/MenuBackground/Audio 消费 */
+export interface ModMenuThemeSpec { logo?: string; background?: string; cinderTex?: string; music?: string }
 let menuThemeSpec: ModMenuThemeSpec | null = null;
 export function registerMenuTheme(modId: string, spec: ModMenuThemeSpec): void {
   void modId;
   menuThemeSpec = { ...spec };   // 单实例面(多 mod 后注册覆盖;菜单主题天然唯一)
+  if (menuThemeSpec.music) setMenuMusicKey(menuThemeSpec.music);
+  else setMenuMusicKey(null);
 }
 export function menuThemeSnapshot(): ModMenuThemeSpec | null {
   return menuThemeSpec;
@@ -520,6 +554,9 @@ export function menuThemeSnapshot(): ModMenuThemeSpec | null {
 
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
+  _resetModMusicForTests();
+  modBiomeMusicList.length = 0;
+  modFrameMusic = 0;
   npcAi.clear(); itemUse.clear(); systems.length = 0; onNpcDeath.clear();
   projSpecs.clear(); projRegs.length = 0; modBuffTicks.clear();
   modBuffNpcTicks.clear();

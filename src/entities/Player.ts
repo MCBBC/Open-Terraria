@@ -406,8 +406,14 @@ export const IGNORES_ENCUMBERING_STONE_VIDS = new Set<number>([
   58, 184, 1734, 1735, 1867, 1868, 3453, 3454, 3455, 4143,
 ]);
 function refreshMechanicalAccsFromItemType(m: MechanicalAccFlags, vid: number): void {
-  if (vid === 3619) m.mechShowWires = true;                 // Mechanical Lens（:12920 档族）
-  else if (vid === 3624) m.autoActuator = true;             // Actuation Rod
+  // ★BJ572 面③（2026-10-08）：3611 宏伟蓝图补入 InfoAccMechShowWires 置位域
+  //  （Player.cs:12897-12901 `if (accType == 3619 || accType == 3611)`——蓝图
+  //  【背包在册】即全图显线,与手持无关;旧缺支=蓝图收起后电线整层消失,用户复报
+  //  「看不见电线」真凶）。反编译内部名 3611=WireKite（宏伟蓝图历史内部名,
+  //  ItemID.cs:8766;不在 IsAKite 集 :157=4367..4684 族）;3619=机械透镜
+  //  （任务面猜测的 3612 实为黄扳手 :8770）。
+  if (vid === 3619 || vid === 3611) m.mechShowWires = true; // Mechanical Lens/The Grand Design（:12897-12901）
+  else if (vid === 3624) m.autoActuator = true;             // Presserator（:12915 加压器）
   else if (vid === 2216 || vid === 3061 || vid === 5126) m.autoPaint = true;   // Paint Sprayer/Architect/Hand Of Creation
   else if (vid === 4767 || vid === 5323) m.dontHurtCritters = true;            // Guide To Critter Companionship/双件套
   else if (vid === 4346) m.preventAllItemPickups = true;    // Prevent All Item Pickups
@@ -5479,6 +5485,7 @@ export class Player extends Entity {
       //   :26326 处理后直落 :27827-27855 releaseLeft/Right 无条件刷新）
       this.prevInputX = this.inputX;
       this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
+      this.updateRopeKeyTimers();   // ★BJ-C8：坐/睡不早退原版 Update,直落 :27832-27862 timer 尾写
       return;
     }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
@@ -5498,6 +5505,7 @@ export class Player extends Entity {
         this.fallStartY = null;
         this.prevInputX = this.inputX;   // ★MV2 债④：矿车拍沿刷新照走（:27827 无条件）
         this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
+        this.updateRopeKeyTimers();   // ★BJ-C8：矿车拍 :27832-27862 timer 尾写照走
         return;
       }
       this.onGround = true;
@@ -5509,6 +5517,7 @@ export class Player extends Entity {
       //  （原版沿已在车拍被 :21579 早退消费+dashTime 清零）。
       this.prevInputX = this.inputX;
       this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新
+      this.updateRopeKeyTimers();   // ★BJ-C8：矿车拍 :27832-27862 timer 尾写照走
       return;
     }
     // ---- 非矿车坐骑每 tick 维护（Mount.cs 1:1）----
@@ -5558,28 +5567,88 @@ export class Player extends Entity {
       this.findPulley(world.store);                                      // :26320
     }
     if (this.pulley) {
-      if (this.mount.active) this.pulley = false;                        // :25815-25818 上坐骑即离绳
-      if (this.vx !== 0) this.pulley = false;                            // :25942-25945 击退/横移即离
-      const num29 = Math.floor((this.x + this.w / 2) / TILE);            // :25821 头心列
-      const num30 = Math.floor((this.y - 8) / TILE);                     // :25822 头格行
-      if (!this.isRopeAt(world.store, num29, num30)) this.pulley = false; // :25946-25953 头格脱绳
-      if (this.gravDir !== 1) this.pulley = false;                       // :25954-25957
-      if (ccPulley) this.pulley = false;                                 // :25958-25961
-      if (this.grappling[0]) this.pulley = false;                        // :25973-25976 抓钩优先
-      // 左右离绳（:25930-25941）：非上爬中 + 按左右 → pulley=false + vx=±1。
-      // 原版门要求按键边沿（releaseLeft/Right——本仓玩家无左右键边沿追踪，持键
-      // 即离；按住上爬期间不触发与原版一致）
-      if (this.pulley && !this.inputUp && this.inputX !== 0) {
-        this.pulley = false;
-        if (this.vx === 0) this.vx = Math.sign(this.inputX);
+      if (this.mount.active) this.pulley = false;                        // :26326-26328 上坐骑即离绳
+      const num29 = Math.floor((this.x + this.w / 2) / TILE);            // :26331 头心列（num31）
+      const num30 = Math.floor((this.y - 8) / TILE);                     // :26332 头格行（num32）
+      // ★BJ-C8（R7-F1）flag12 状态机（:26338-26392）+flag14 绳列滑行支（:26406-26444）
+      //   +离绳门收窄（:26445-26456）——旧「持左右键即离绳+inputX 翻面」整支退役。
+      //   沿/计时器真值源：releaseLeft/Right ≙ !prevInputLeft/Right（MV3 同源,
+      //   :27833-27845 逐拍尾刷新）、leftTimer/rightTimer=原版 8 拍再触发计时器
+      //   （updateRopeKeyTimers 同址尾写）。净语义：居中档（pulleyDir=1）横按=转身/
+      //   侧挂（flag12）不离绳；侧挂档（pulleyDir=2）同向持键=滑行（绳在前,flag14）
+      //   或静挂；离绳仅「侧挂档+朝向侧按下沿+前方无绳」可达（:26445 三重前置门）。
+      //   ★原版序：状态机/滑行/离绳先于 vx≠0/头格/gravDir/CC/抓钩各清除位。
+      if (this.pulleyDir === 0) this.pulleyDir = 1;                      // :26339-26341 首帧归一
+      let flag12 = false;
+      let flag14 = false;
+      if (this.pulleyDir === 1) {                                        // :26343
+        if (this.facing === -1 && this.inputLeft
+          && (!this.prevInputLeft || this.leftTimer === 0)) {
+          this.pulleyDir = 2; flag12 = true;                             // :26345-26349 左侧挂
+        } else if ((this.facing === 1 && this.inputRight && !this.prevInputRight)
+          || this.rightTimer === 0) {
+          this.pulleyDir = 2; flag12 = true;                             // :26350-26354 右侧挂（★timer==0 项无方向/按键门=原版不对称,照抄）
+        } else {
+          if (this.facing === 1 && this.inputLeft) { this.facing = -1; flag12 = true; }   // :26356-26360 转身
+          if (this.facing === -1 && this.inputRight) { this.facing = 1; flag12 = true; }  // :26361-26365 转身
+        }
+      } else if (this.pulleyDir === 2) {                                 // :26369
+        if (this.facing === 1 && this.inputLeft) {                       // :26370-26379 向绳侧回中
+          flag12 = true;
+          if (!this.solidCollision(world.store, num29 * TILE + 8 - this.w / 2, this.y)) {
+            this.pulleyDir = 1; this.facing = -1;
+          }
+        }
+        if (this.facing === -1 && this.inputRight) {                     // :26381-26390
+          flag12 = true;
+          if (!this.solidCollision(world.store, num29 * TILE + 8 - this.w / 2, this.y)) {
+            this.pulleyDir = 1; this.facing = 1;
+          }
+        }
       }
+      // num33/flag13（:26392-26405）：CanMoveForwardOnRope(:24439-24458) 只喂
+      //   instantMovementAccumulatedThisFrame（Main.cs:47870 秒表读数消费）——
+      //   本仓秒表无绳桥贡献,略（R7-C8 登记）。num33 语义照抄（左优先）。
+      if (!flag12 && ((this.inputLeft && (!this.prevInputLeft || this.leftTimer === 0))
+        || (this.inputRight && (!this.prevInputRight || this.rightTimer === 0)))) {
+        const num33 = this.inputLeft ? -1 : 1;                           // :26392-26396
+        const num34 = num29 + num33;                                     // :26409 前方格
+        if (this.isRopeAt(world.store, num34, num30)) {                  // :26410 前方为绳→滑行
+          this.pulleyDir = 1;                                            // :26412
+          this.facing = num33;                                           // :26413
+          let num35 = num34 * TILE + 8 - this.w / 2;                     // :26414 目标 x
+          const y2 = num30 * TILE + 22;                                  // :26416 y 钉（:26425-26428 条件重赋值=同值 no-op,略）
+          if (this.solidCollision(world.store, num35, y2)) {             // :26429-26434 碰撞回退
+            this.pulleyDir = 2;
+            this.facing = -num33;
+            num35 = num34 * TILE + 8 - this.w / 2 + (this.facing === 1 ? 6 : -6);
+          }
+          this.x = num35;                                                // :26439（cameraX 平滑本仓无载体,登记）
+          this.gfxOffY = this.y - y2;                                    // :26440
+          this.y = y2;                                                   // :26441
+          flag14 = true;
+        }
+      }
+      // 离绳支（:26445-26456）：!flag14∧!flag12∧!controlUp∧按下沿（releaseLeft/Right
+      //   单项,无 timer==0 项）——vx==0 才给 ±1 离绳推量
+      if (!flag14 && !flag12 && !this.inputUp
+        && ((this.inputLeft && !this.prevInputLeft)
+          || (this.inputRight && !this.prevInputRight))) {
+        this.pulley = false;
+        if (this.inputLeft && this.vx === 0) this.vx = -1;               // :26448-26451
+        if (this.inputRight && this.vx === 0) this.vx = 1;               // :26452-26455
+      }
+      if (this.vx !== 0) this.pulley = false;                            // :26457-26460 击退/横移即离（★位次=状态机后,原版序）
+      if (!this.isRopeAt(world.store, num29, num30)) this.pulley = false; // :26465-26468 头格脱绳
+      if (this.gravDir !== 1) this.pulley = false;                       // :26469-26472
+      if (ccPulley) this.pulley = false;                                 // :26473-26476
+      if (this.grappling[0]) this.pulley = false;                        // :26488-26491 抓钩优先
       if (this.pulley) {
-        // X 钉绳列（:26138-26152）：pulleyDir 0/1=列中心、2=中心+6·direction
-        //（:25824-25827 首帧归一 0→1）
-        if (this.pulleyDir === 0) this.pulleyDir = 1;
-        let num37 = num29 * TILE + 8 - this.w / 2;
-        if (this.pulleyDir === 2) num37 = num29 * TILE + 8 - this.w / 2 + 6 * this.facing;
-        this.x = num37;
+        // X 钉绳列（:26653-26661）：pulleyDir 1=列中心、2=中心+6·direction——
+        //   列号按【当前】x 复算（flag14 滑行已改 x,上方 num29 是滑前值）
+        let num39 = Math.floor((this.x + this.w / 2) / TILE) * TILE + 8 - this.w / 2;
+        if (this.pulleyDir === 2) num39 += 6 * this.facing;
+        this.x = num39;
       }
     }
     // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
@@ -5589,7 +5658,8 @@ export class Player extends Entity {
     // 声明在冲刺分支外——滑行段的改向门同样消费）
     const mountAllowDir = !this.ridingMount || this.mount.allowDirectionChange;
     // pulley 悬挂期 HorizontalMovement 整段不跑（Player.cs:26366 在 pulley else
-    // 分支内）——只保留朝向翻转（:25842-25851，pulleyDir 1 居中档按反方向键翻面）
+    // 分支内）——朝向翻转归 flag12 状态机（★BJ-C8 F1：转身 :26356-26365/侧挂回中
+    // :26369-26392,移动相 pulley 块内;下方空支仅承载分派）
     // ★SW-FX47（e）：jumpSpeed 字段前置快照（原版序 = UpdateJumpHeight :19714 经
     //  :26211 调用位【先于】HorizontalMovement :26889——弹跳臂 :19912 消费当拍
     //  值）。本仓跳参链原在物理相（:4853 写）=弹跳臂读上拍值,FX40-e 一拍滞后备案
@@ -5626,10 +5696,10 @@ export class Player extends Entity {
       pogoFired = true;                                               // :19921 return
     }
     if (this.pulley) {
-      if (this.pulleyDir === 1) {
-        if (this.facing === 1 && this.inputX < 0) this.facing = -1;
-        if (this.facing === -1 && this.inputX > 0) this.facing = 1;
-      }
+      // ★BJ-C8（R7-F1）：pulley 期朝向翻转整支迁 flag12 状态机（:26356-26365 转身支+
+      //   :26369-26392 侧挂回中支,移动相 pulley 块内）——旧 pulleyDir==1 inputX 翻面
+      //   退役（侧挂档按异向键翻面会瞬移到绳列另一侧=偏差面;转身/回中双支 1:1 落
+      //   状态机,本空支仅承载 else 链分派）
     } else
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
@@ -5960,8 +6030,14 @@ export class Player extends Entity {
     // 非 pulley 贴绳=未吸附正常穿落（:26320 门未过）；旧无门合流使 pulley=false 贴绳
     // 态可达（BJ570 病灶,判别 tests/bj559-rope-pulley-draw T8后半/T10/T11,M7 变异位）
     if (this.pulley && ropeHere && !this.inWater) {
-      // 攀爬速度链（Player.cs:26016-26125——见 ropeClimbVy 注）
-      this.ropeClimbVy();
+      // ★BJ-C8（R7-F2）flag15 收口门（:26521-26528）：(y−16) 行（num37）非绳 →
+      //   vy<0 钳 0（越顶拍收口）——攀爬臂本体另受 controlUp&flag15 门（:26531,
+      //   ropeClimbVy 形参）。旧无门=越顶弹飞+oscillation（探针 pulley 真 196/600）,
+      //   修后头格止于顶绳格 pulley 恒真静悬。
+      const flag15 = this.isRopeAt(st, ropeTx, Math.floor((this.y - 16) / TILE));
+      if (!flag15 && this.vy < 0) this.vy = 0;                         // :26523-26526
+      // 攀爬速度链（Player.cs:26016-26125——见 ropeClimbVy 注;flag15 门=:26531）
+      this.ropeClimbVy(flag15);
       this.fallStartY = null; // 绳上不计摔伤
       // ★BJ527（2026-10-05）绳面冲刺状态机：原版 pulley 移动支 :26691 在支尾【无条件】
       // 调用 DashMovement()（与主移动支 :26958 同形,1914 反编译行号系 1456 旧锚,行为
@@ -5987,8 +6063,12 @@ export class Player extends Entity {
       const num36 = Math.floor((this.y - 8) / TILE);         // :25995 头格行
       const midRope = this.isRopeAt(st, num34, num36 - 1) || this.isRopeAt(st, num34, num36 + 1);
       if (midRope) {
+        // ★BJ-C8（R7-F2）flag15 收口门（:26521-26528+:26531）——同 branch1：
+        //   (y−16) 行（=num35）非绳 → vy<0 钳 0+攀爬臂不可达
+        const flag15 = this.isRopeAt(st, num34, num35);
+        if (!flag15 && this.vy < 0) this.vy = 0;                       // :26523-26526
         // 中段绳但身体中心已顶出（攀到绳上端）：速度链照走（:26016-26125）
-        this.ropeClimbVy();
+        this.ropeClimbVy(flag15);
       } else if (this.inputDown) {
         // 孤立绳格按下 → 穿落（:26127-26132）：ropeCount=10 拦 FindPulley 十 tick
         this.ropeCount = 10;
@@ -7975,6 +8055,7 @@ export class Player extends Entity {
     }
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     this.prevInputLeft = this.inputLeft; this.prevInputRight = this.inputRight;   // ★MV3 单键沿同源刷新（:27827-27845 releaseLeft/Right=!control 逐拍尾刷新同址）
+    this.updateRopeKeyTimers();   // ★BJ-C8（R7-F1）：:27832-27862 leftTimer/rightTimer 逐拍尾写（松键置 7/持键递减/归 0 回充）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
     this.wofTongue(game, world, dt);
@@ -9793,6 +9874,15 @@ export class Player extends Entity {
    *  同址五站（死亡/坐睡/矿车×2/主尾拍），困惑轮换后快照（=原版轮换面）。 */
   prevInputLeft = false;
   prevInputRight = false;
+  /** ★BJ-C8（R7-F1）绳键 8 拍再触发计时器（Player.cs:1823/:1825 leftTimer/rightTimer，
+   *  尾写 :27847-27855）：松键拍置 7、持键逐拍递减、归 0 后持键回充 7——持键第 9 拍
+   *  movement 相读到 0=再触发沿（flag12 侧挂 :26345-26354 / flag14 滑行 :26407 的
+   *  `releaseLeft || leftTimer == 0` 后半支）。★字段初始化 7 而非原版 0：原版尾写
+   *  首拍即置 7 ⇒ 一切可达态（存活≥1 拍）恒 7，0 只在「出生当拍即抓绳」不可达配置
+   *  可见（R7-C8 登记差异）。死亡相不写计时器（UpdateDead :17195-17196 只刷
+   *  releaseLeft/Right）——刷新站见 updateRopeKeyTimers。 */
+  leftTimer = 7;
+  rightTimer = 7;
   /** ★BJ508 Quick Dash 键电平（controlDash，TriggersSet.cs:825 `p.controlDash = Dash`
    *  ——PlayerInput KeyStatus["Dash"] 同源，Game 注入面写）。缺省无绑定 = 原版
    *  Keyboard 档（PlayerInput.cs:2069-2108 Redigit 预设无 Dash 条目），设置页自绑 */
@@ -9964,9 +10054,11 @@ export class Player extends Entity {
 
   /** 绳上攀爬速度链（Player.cs:26016-26125）：上爬（W/Space 皆入攀爬键位模型）
    *  vy>0 阻尼×0.7 后 −0.2（>−3 档）/−0.02（≤−3 档），下限 −8；下滑镜像
-   *  +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7 且 |vy|<0.1 归 0（:26120-26124） */
-  ropeClimbVy(): void {
-    if (this.inputJump) {
+   *  +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7 且 |vy|<0.1 归 0（:26120-26124）。
+   *  ★BJ-C8（R7-F2）flag15 形参（:26531 `controlUp & flag15`）：(y−16) 行非绳时
+   *  攀爬臂不可达——原版该态落 idle 臂（:26633-26641 ×0.7 阻尼），非「无操作」 */
+  ropeClimbVy(flag15 = true): void {
+    if (this.inputJump && flag15) {
       if (this.vy > 0) this.vy *= 0.7;
       this.vy -= this.vy > -3 ? 0.2 : 0.02;
       if (this.vy < -8) this.vy = -8;
@@ -9996,6 +10088,20 @@ export class Player extends Entity {
       this.pulleyFrameCounter = 0;
     }
     if (this.pulleyFrame > 1) this.pulleyFrame = 0;        // :26673-26675
+  }
+
+  /** ★BJ-C8（R7-F1）绳键计时器尾写（Player.cs:27833-27855 无条件段 1:1）：松键拍
+   *  置 7（releaseLeft/Right 置真由 prevInputLeft/Right 承载,MV3 同址同相）、持键
+   *  递减至 0（movement 相次拍读 0=8 拍再触发沿）、归 0 后持键回充 7。调用站=
+   *  prevInput 五站中的四个（坐睡/矿车×2/主尾——原版这些路径不早退 Update 直落
+   *  :27833 尾）;死亡站除外（UpdateDead :17195-17196 只刷 release 不写 timer）。 */
+  updateRopeKeyTimers(): void {
+    if (!this.inputRight) this.rightTimer = 7;                       // :27832-27836
+    if (!this.inputLeft) this.leftTimer = 7;                         // :27837-27845
+    if (this.rightTimer > 0) this.rightTimer--;                      // :27847-27850
+    else if (this.inputRight) this.rightTimer = 7;                   // :27851-27854
+    if (this.leftTimer > 0) this.leftTimer--;                        // :27855-27858
+    else if (this.inputLeft) this.leftTimer = 7;                     // :27859-27862
   }
 
   // ===================== 绳锚几何（RotatedRelativePoint / 坐骑持物偏移 / 线起点） =====================

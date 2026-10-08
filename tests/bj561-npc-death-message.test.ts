@@ -16,7 +16,9 @@
 //      位次 = 广播 :78973 在死亡音 :78990 / NPCLoot :78999 / active=false :79029
 //        之前（NPCLuck :78944 → 文本 :78949-78956 → 墓碑 :78969 → 广播 :78973）。
 //  · 敌怪死亡无消息：checkDead 无 townNPC 支即无广播（敌怪侧仅 type 35 红帽变体
-//    Taunt1 :78856-78859 凋侃行,非死亡公告面;本仓该行已在 Game.ts:44765 接）。
+//    Taunt1 :78856-78859 凋侃行,非死亡公告面;本仓该行已在 Game.ts:45087-45089 接
+//    ——★BJ-C7/R10-F5 注漂移修正：旧注 44765 系 DrawInterface_35_YouDied 死亡 UI
+//    画面位,非 Taunt1 接线位）。
 //  · 本仓消费单口 = game.chatBroadcast（ChatHelper.BroadcastChatMessage 等价面,
 //    本地消息列 + 联机 channel2 中继——同玩家死亡 Game.ts:51029 形）。
 //  变异证红契约（≥2 发→恰红,逐字节还原+sha256 对拍）：

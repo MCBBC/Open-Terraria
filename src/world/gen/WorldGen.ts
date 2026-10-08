@@ -809,7 +809,7 @@ export async function liquidSettlePass({ world, rng, store, prog }: GenCtx, ocea
   flipGenSolid([379], true);
   setBoulderSolidity(false);
   flipGenSolid([546], false);
-  await settleWorldLiquids(world, 'gen', prog ? (p) => prog.set(p) : undefined, rng, false);
+  await settleWorldLiquids(world, 'gen', prog ? (p) => prog.set(p) : undefined, rng, false);   // ★判别期还原
   // ★SSSSSS：QuickWater 尾 tilesIgnoreWater(false) → SetBoulderSolidity(true)
   //   （Liquid.cs:74/141——巨石九族沉降毕回实心；noTraps 的 cs:111/141 条件支与
   //   tilesIgnoreWater 语义重合,冗余）。Piles 巨石段尾的 false 由此还原——普通种子

@@ -378,7 +378,7 @@ function ropeWorld(): World {
 const stepP = (p: Player, game: GameHooks) => p.fixedUpdate(1 / 60, game);
 
 describe('fixedUpdate 集成：pulley 悬挂（Player.cs:25801-26177）', () => {
-  it('按上键进态：X 吸附绳列中心、vx=0；松上键持横移 → 离绳 + vx=±1（:25930-25941）', () => {
+  it('按上键进态：X 吸附绳列中心、vx=0；★BJ-C8 重钉：居中档按右沿→侧挂档不离绳（:26350-26354/:26653-26661）', () => {
     const game = makeGame(ropeWorld());
     const p = new Player(800, 50 * 16, new Inventory());   // 中心列 50、头格行 49（绳）
     p.inputUp = true;
@@ -388,14 +388,18 @@ describe('fixedUpdate 集成：pulley 悬挂（Player.cs:25801-26177）', () => 
     expect(p.pulleyDir).toBe(1);
     expect(p.x).toBe(50 * 16 + 8 - 10);   // 列中心档（|800−798|=2 最近）
     expect(p.vx).toBe(0);
-    // 悬挂期持横移（不按上）→ 离绳 + vx=1，同 tick HorizontalMovement 照跑 +0.08
-    //（原版同构：:25930 置 1 后 :26366 当帧即跑）
+    // ★BJ-C8（R7-F1）旧伪锚「松上键持横移 → 离绳 + vx≈1.08（:25930-25941）」翻正：
+    //   居中档（pulleyDir=1）按下沿 = 侧挂档（:26350-26354 flag12）不离绳，X 钉
+    //   中心+6·direction（:26653-26661），vx 恒 0（HorizontalMovement 整段不跑 :26366）
     p.inputUp = false;
     p.inputJump = false;
     p.inputX = 1;
+    p.inputRight = true;
     stepP(p, game);
-    expect(p.pulley).toBe(false);
-    expect(p.vx).toBeCloseTo(1.08, 6);
+    expect(p.pulley).toBe(true);
+    expect(p.pulleyDir).toBe(2);
+    expect(p.x).toBe(50 * 16 + 8 - 10 + 6);
+    expect(p.vx).toBe(0);
   });
 
   it('孤立绳格：进态 y 落格顶+22 + gfxOffY 跳变差（同 tick 即衰减一次），随后回 0', () => {

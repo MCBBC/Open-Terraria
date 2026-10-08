@@ -411,14 +411,19 @@ describe('BJ-C1 F5 白提亮/恒量档扩门（活体普查逐型定谳）', () 
   it('454-459 沙虫族 0.4 档（:94640 Lerp White 0.4;活体=蠕虫白名单全 6 型）', () => {
     for (let v = 454; v <= 459; v++) expect(npcWhiteLiftAlpha(v)).toBe(0.4);
   });
-  it('402 恒全白 a=1 极限档（:94569 Color(255,255,255,255)——复绘全覆盖即原版 tint）', () => {
+  it('402 恒全白 a=1 极限档（:94590 Color(255,255,255,255)——复绘全覆盖即原版 tint;★BJ-C9 锚勘正）', () => {
     expect(npcWhiteLiftAlpha(402)).toBe(1);
   });
   it('回归面：395/519=0.4 不动;583-585 保持 null（drawFairyBright 独占,入本门=双绘）;死型 null', () => {
     expect(npcWhiteLiftAlpha(395)).toBe(0.4);
     expect(npcWhiteLiftAlpha(519)).toBe(0.4);
     for (const v of [583, 584, 585]) expect(npcWhiteLiftAlpha(v)).toBeNull();
-    for (const v of [681, 636, 549, 521, 440, 683, 687, 662, 655, 360]) {
+    // ★BJ-C9 F3（2026-10-08）再扩门勘正：549/521 活体生成面实证入 0.4 档（旧注
+    //  「本仓无生成面」失实,见 npcExtraParts BJ-C9 注）;440 恒灰走 Renderer 捕获支
+    //  （tintA 两步式,不入 lerp 门=单源）。
+    expect(npcWhiteLiftAlpha(549)).toBe(0.4);
+    expect(npcWhiteLiftAlpha(521)).toBe(0.4);
+    for (const v of [681, 636, 440, 683, 687, 662, 655, 360]) {
       expect(npcWhiteLiftAlpha(v)).toBeNull();
     }
   });

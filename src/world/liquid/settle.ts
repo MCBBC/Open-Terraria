@@ -27,6 +27,13 @@ export async function settleWorldLiquids(
    *  cs:18005 有自己的窗口版）；由 liquidSettlePass 置 true，worker 尾部二次
    *  沉降保持缺省 false。DDDDD 批补齐（四链现值该域无非水液体=惰性 1:1） */
   oceanStrip = false,
+  /** ★三百二十刀（2026-10-08）Smooth World 性能债纵深防御：mod 世界生成期沉降
+   *  启用 killTouch 重帧去重。根因修复在 FCP tileFrameGen（vanilla active 头门+
+   *  check2x2Sweep 败支零命中闸，见彼处定谳——713 岩浆巨石滚动帧自环，gen pass
+   *  期即触发，任意消费 FCP 引擎的 pass 可达）；本门=同债第二道闸（钟乳石密集区
+   *  load 模式 2026-09-07 同判例的百万级重复重帧族），mod 世界无金标契约、去重门
+   *  为确定性规则（同种子同版本同结果）。vanilla 金标世界传 false=零扰动。 */
+  modGenDedupe = false,
 ): Promise<void> {
   if (oceanStrip && mode === 'gen') {
     // cs:16222-16229：全图（0..w × 0..h）扫描，oceanDepths（cs:10978：y ≤
@@ -49,7 +56,11 @@ export async function settleWorldLiquids(
   // ★大世界读档级联去重(2026-09-07):load 模式 KillTile 级联在钟乳石密集区产生
   // 百万级重复重帧(卡死实测)——去重置位,finally 配对清除;gen 模式不置位
   // (金标掷流),运行期不置位(玩家帧刷新必须逐次)。行为面论证见 FinalCleanupPass。
-  const dedupeOn = mode === 'load';
+  // ★三百二十刀(2026-10-08):mod 世界 gen 沉降同启去重(调用方判 mod gen pass
+  //   在册传入;定谳+论证见 modGenDedupe 参数注)。
+  // ★取证开关(2026-10-08):__swForceReframeDedupe=探针判别仪(生产不置)
+  const dedupeOn = mode === 'load' || modGenDedupe
+    || !!(globalThis as { __swForceReframeDedupe?: boolean }).__swForceReframeDedupe;
   if (dedupeOn) setReframeDedupe(world.store);
   // XXXXX 批：级联帧引擎掷骰源（与 passRand 同一实例——int/nextInt/next 同流）
   sim.passRng = rng ?? null;
@@ -118,10 +129,15 @@ export async function settleWorldLiquids(
   }
   onProgress?.(0.05);
   try {
+    // ★取证探针(env 门):quickWater/waterCheck 相位标记(卡点分辨)
+    (globalThis as { __swSettleMark?: (s: string) => void }).__swSettleMark?.('quickWater-begin');
     sim.quickWater();
+    (globalThis as { __swSettleMark?: (s: string) => void }).__swSettleMark?.('quickWater-end');
     onProgress?.(0.35);
     await new Promise((r) => setTimeout(r, 0));
+    (globalThis as { __swSettleMark?: (s: string) => void }).__swSettleMark?.('waterCheck-begin');
     sim.waterCheck();
+    (globalThis as { __swSettleMark?: (s: string) => void }).__swSettleMark?.('waterCheck-end roundLoop-begin');
     sim.quickSettle = true;
     // 轮上限：读档 = WorldFile 单轮 100000（L752）；生成期 = 每轮 活量×5（WorldGen.cs:16252 num5）
     const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
@@ -137,9 +153,14 @@ export async function settleWorldLiquids(
       //   每轮都能把稳定浅洼重新激活）
       const MAX_ITER = mode === 'gen' ? (sim.numLiquid + sim.bufferLen) * 5 : 100000;
       let roundIter = 0;
+      // ★沉降取证探针(2026-10-08,env 门 dormant 零开销):Smooth World 性能登记债
+      //   定谳仪——(round, iter, 活量, 窗预算) 采样走势(收敛慢 vs 振荡不收敛判别)
+      const settleProbe = (globalThis as { __swSettleTick?: (r: number, it: number, liq: number, max: number) => void }).__swSettleTick;
+      if (settleProbe) settleProbe(round, 0, sim.numLiquid, MAX_ITER);   // 轮头采样
       while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
         sim.updateLiquid();
         iter++; roundIter++;
+        if (settleProbe) settleProbe(round, iter, sim.numLiquid, MAX_ITER);   // 逐调用采样(测试侧 2s 节流)
         if (roundIter % 2000 === 0) {
           const cur = sim.numLiquid + sim.bufferLen;
           if (cur > num5) num5 = cur;

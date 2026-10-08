@@ -45,6 +45,27 @@ export interface ChunkPair {
 // ---- 油漆逐像素着色：tintRegion 迁至共享模块 render/TileTint（2026-08-23：摆动件
 // 绘制时染色同源复用，防双实现漂移） ----
 
+/** ★bakenoread 整 cell 快照旗（2026-10-08 读回消除刀;★已转正缺省开,?bakenoread=0 逃生门）。
+ *  油漆 pass 走「每漆层 1 次整 cell 快照」支路（ChunkBake env.noRead）:Windows GPU
+ *  驱动逐 op 读回管线同步放大（x-ray 对拍 Trace-20261008T175748↔T212134:基线烘焙链
+ *  逐格读回 7.3ms/s、op 1806/烘 → 快照支路单位烘焙工作读回税 0.847→0.338,−60%）。
+ *  旗面只影响读回来源,烘焙产物逐位不变（结构性等价+双臂 md5 把门）。
+ *  ★转正（2026-10-08 用户令;证据=双臂 SHA-256 6 漆 chunk×墙/tile 全等+逐像素真值
+ *  双臂 PASS+主/worker parity 51/51+变异证红两起+chunk/wbake/tint 族回归全绿+
+ *  Windows 实机对拍 above;tintRegion 逐格读回面采样节点归零）。
+ *  node/测试环境恒关（构造期判死;油漆双臂 parity 经 env.noRead 显式控制）。
+ *  探针断言面：window.__swBakeNoRead（只读）。worker 侧经 init 消息下发同值。 */
+export const BAKE_NOREAD = (() => {
+  try {
+    if (typeof location === 'undefined') return false;   // node/测试环境恒关
+    const on = (new URLSearchParams(location.search).get('bakenoread') ?? '') !== '0';
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __swBakeNoRead?: boolean }).__swBakeNoRead = on;
+    }
+    return on;
+  } catch { return false; }
+})();
+
 
 export class ChunkCache {
   chunks = new Map<number, ChunkPair>();
@@ -130,9 +151,11 @@ export class ChunkCache {
    *  背板,反降 IOSurface 张数）」已废除——页画布背板耦合在旗上=「为 happy path
    *  优化毒杀回退路径」,违背分级回退承诺（用户实机 trace 定谳:GL 世界路径未
    *  介入的会话里,drawChunkGrid 逐块 blit SHM 页单 op 5.4µs→36-66µs（7-12×）,
-   *  渲染帧 5.1→26.7ms=20fps）。修=页画布恒 GPU 后备（WRF=false;页画布无
-   *  getImageData 读回面——消费方仅 bakeChunkInto 写入/drawChunkGrid 读绘/
-   *  worldPageTex texFromImage+texSubUpdate 上传,全不需要 WRF）,IOSurface 张数
+   *  渲染帧 5.1→26.7ms=20fps）。修=页画布恒 GPU 后备（WRF=false;页画布
+   *  getImageData 读回面仅油漆 pass——ChunkBake.bakeChunkBody 油漆段逐漆格 16²
+   *  读回（Windows 逐 op 成本放大→★bakenoread 整 cell 快照支路,2026-10-08）;
+   *  drawChunkGrid 读绘/worldPageTex texFromImage+texSubUpdate 上传全不需要
+   *  WRF）,IOSurface 张数
    *  回升（+12~24）显式备案:回退速度 > 张数优化。旗耦合删除点=Renderer 构造期
    *  与 bglSetForTest 两处。 */
   private wallPages: HTMLCanvasElement[] = [];
@@ -819,6 +842,7 @@ export class ChunkCache {
       autotiler: this.autotiler,
       wallTiler: this.wallTiler,
       truncatesWalls: this.truncatesWalls,
+      noRead: BAKE_NOREAD,
     };
   }
 

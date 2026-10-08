@@ -3102,12 +3102,20 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
   // ---- 位移（原版由公共碰撞步承载;此处按引擎惯例自理）。teleported → 本 tick
   //      穿墙位移（:64689 return 后公共步以 noTileCollide 移动）----
   if (phase || teleported) {
-    if (!phase && teleported && !W107_PORTAL_FADE.has(id)) {
-      fly(e);                              // 非 fade 型=单 tick 穿墙位移（下一 tick 退出相位）
+    // ★BJ-C10 F2（BJ542 残债）：传送 tick 原版 :64689 return——AI 余段（相位飞行
+    // 伺服/α 爬升/localAI[3] 钉值/wet 清位）整段跳过,仅公共步以 noTileCollide 穿墙
+    // 位移。fade 型下一 tick flag2 重估（:63491 noTileCollide 滞回位）才进相位飞行
+    // ——曾 fade 型传送 tick 即跑伺服+spawnAlpha+=20 = 相位早启动一拍
+    if (teleported) {
+      fly(e);
       return;
     }
-    // 穿墙飞行（cs:64846-64918）：水平 Lerp 朝目标 + 三档垂直伺服
-    if (W107_PORTAL_FADE.has(id) && e.spawnAlpha < 60) e.spawnAlpha += 20;   // :64852-64858
+    // ★BJ-C10 F3：相位支清湿（原版 :65053 wet=false,门 :65049-65052 之后）——AI 先于
+    // 液体碰撞步跑,浸水相位时同 tick WetCollision 重置湿位 → 每湿出入水去抖周期
+    // 重播溅花（原版本相）;曾漏写 = 相位中湿位钉死
+    e.wet = false;
+    // 穿墙飞行（原版 :65049 门后 :65062-65168）：水平 Lerp 朝目标 + 三档垂直伺服
+    if (W107_PORTAL_FADE.has(id) && e.spawnAlpha < 60) e.spawnAlpha += 20;   // :65054-65059
     if (phase) x[3] = 40;   // ★BJ542 :65060 localAI[3]=40f 钉值——相位期间把出生爬坡计数
                             // 钉回 40，出生渐显块（x[3]<60 门）保持活臂 → 相位结束后 α 以
                             // 5/t 回落归零（原版相位幽灵态=暂态）；曾缺钉 → x[3] 爬过 60 后

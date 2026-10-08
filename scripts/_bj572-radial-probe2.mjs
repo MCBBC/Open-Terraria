@@ -1,0 +1,36 @@
+import { launchBrowser, openPage, bootstrap, createGame, pump } from '../tools/probe/lib/index.mjs';
+const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
+const browser = await launchBrowser({});
+const page = await openPage(browser, {});
+await bootstrap(page, ORIGIN);
+await createGame(page, { mode: 'direct', seed: '05162020', size: 'small', pinRandom: 20260923 });
+await page.evaluate(() => {
+  const g = window.__swGame;
+  const byKey = window.__swItems ?? {};
+  const key = Object.keys(byKey).find((k) => /^vi_3611_/.test(k));
+  g.player.inv.slots[0] = { id: byKey[key], stack: 1 };
+  g.player.selected = 0;
+  window.__log = [];
+  const proto = Object.getPrototypeOf(g);
+  const orig = proto.tickWiresRadial;
+  proto.tickWiresRadial = function () {
+    const inp = this.input;
+    window.__log.push({ md: inp.mouseDown, mh: inp.mouseHeld, mx: inp.mouseX, my: inp.mouseY, act: this.wiresRadial.active, hover: this.wiresRadialHover, mode: this.wireToolMode });
+    return orig.call(this);
+  };
+});
+await pump(page, 30);
+await page.mouse.move(700, 400);
+await page.mouse.click(700, 400, { button: 'right' });
+await pump(page, 5);
+const ang = 3 * (Math.PI * 2) / 5 - Math.PI / 11;
+await page.mouse.move(700 + Math.cos(ang) * 45, 400 + Math.sin(ang) * 45);
+await page.mouse.down({ button: 'left' });
+await new Promise((r) => setTimeout(r, 120));
+await page.mouse.up({ button: 'left' });
+await pump(page, 5);
+const log = await page.evaluate(() => window.__log);
+console.log('LOG(head8):', JSON.stringify(log.slice(0, 8)));
+console.log('LOG(click-window):', JSON.stringify(log.filter((e) => e.md || e.mh).slice(0, 8)));
+console.log('LOG(tail6):', JSON.stringify(log.slice(-6)));
+await browser.close();

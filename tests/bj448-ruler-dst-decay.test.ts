@@ -109,7 +109,14 @@ function runGrid(dstFill: number): { rec: DrawRec[]; tints: TintMark[]; px: Floa
   const W = 960, H = 720;
   const px = new Float64Array(W * H).fill(dstFill);
   const r8 = Math.round;
+  // ★BJ572（2026-10-08）：网格条带批刀后,本套件的受试面=整数 zoom 下的
+  //   【回退逐格支】（门=Number.isInteger(z)&&!Renderer._gridStripsOff）——
+  //   W3C 重放模型既定锚在此支;条带支的等价性由 tests/bj572-grand-design-family
+  //   + _bj572-samebase-ab 实机探针（整数相位 n=0 逐字节）另行锁定。
+  Renderer.gridStripsSetForTest(true);
+  try {
   drawBuilderRulers.call(self, ctx, {}, { x: 455, y: 455 }, 800, 600, 1);
+  } finally { Renderer.gridStripsSetForTest(false); }
   for (const op of rec) {
     const m = op.img as TintMark;
     const [sx, sy, sw, sh, dx, dy] = op.a;
@@ -298,8 +305,11 @@ describe('★BJ448 罩/加双 pass 合成代数（XNA AlphaBlend=src×1+dst×(1�
     expect(body).toContain("this.tintedExtra('vanilla/Extra_68.png', 0, 0, 0, 2)");
     const setM = body.match(/globalCompositeOperation = 'multiply'/g) ?? [];
     const setL = body.match(/globalCompositeOperation = 'lighter'/g) ?? [];
-    expect(setM.length).toBe(2);                         // pass A + pass C 两罩段
-    expect(setL.length).toBe(2);                         // pass B + pass C 加段
+    // ★BJ572：条带批支并入同函数体（整数 zoom 门;同底图 A/B 定谳整数相位
+    //   逐字节等价）⇒ multiply/lighter 各 +2（条带 pass A/C 罩+BJ448 逐格回退
+    //   支各自成对;逐格支=非整数 zoom 回退档,门=_gridStripsOff 测试开关）
+    expect(setM.length).toBe(4);                         // 条带 A+C + 逐格 A+C 两罩段对
+    expect(setL.length).toBe(4);                         // 条带 B+C + 逐格 B+C 加段对
     expect(body.indexOf("globalCompositeOperation = 'multiply'"))
       .toBeLessThan(body.indexOf("globalCompositeOperation = 'lighter'"));   // 先罩后加
     expect(body).toContain('rulerGridMaskAlpha(num3)');

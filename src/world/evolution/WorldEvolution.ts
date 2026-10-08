@@ -3656,7 +3656,7 @@ export class WorldEvolution {
     const i = this.at(x, y);
     const fx = st.frameX[i];
     const herb = Math.floor(fx / 18); // 药草种（0-6）
-    // 淹死规则（cs:45796-45807）：岩浆除火冠花(5)、水除月光花(1)/水叶(4) 外死亡
+    // 淹死规则（cs:46182-46194）：岩浆除火冠花(5)、水除月光花(1)/水叶(4) 外死亡
     if (this.liquidAt(x, y) > 0) {
       const isLava = st.liquidType[i] === 2;
       const isWater = st.liquidType[i] === 1;
@@ -3665,38 +3665,52 @@ export class WorldEvolution {
         return;
       }
     }
+    // ★BJ-C7（2026-10-08 R9-F1）：状态机按 1457 GrowAlch（WorldGen.cs:46176-46293；
+    //  1456 逐字全等非版本差异）逐支重写，四处偏离清偿：
+    //  ① 82→84 直跳删除——vanilla 82 块全部分支终值=83；84 仅三来源（83+frameX==36 /
+    //     83+frameX==108 雪草 1/30 / CheckAlch case5 岩浆浸泡，见 alchCheckAt ★⑨）；
+    //  ② 83→84 bloom 新增支删除——成熟日耀/月光/水叶永驻 83（vanilla 无此路径）；
+    //  ③ bloom 条件按 frameX 锚定+门补齐（0 昼/18 夜/72 雨/36 闪根·地下 y>worldSurface/
+    //     90 火冠花·地狱 y>maxTilesY-200=st.h-200，UnderworldLayer Main.cs:2886）——
+    //     且它们是 82 芽的【加熟窗】（else-if 链，终值 83），非开花条件；
+    //  ④ 闪根 84→83 回落率 2/3（cs:46267 `Next(3)!=0` 在回落臂之前；旧 1/2 曾错）。
+    //  掷序逐支照抄：支1 恒掷（cs:46197）；支2-6 短路后掷（else-if 链）；雪草在支1 内
+    //  frameX==108 才掷 Next(2)（cs:46200-46210）；frameX==36 支 Next(3) 先掷、83 才掷
+    //  Next(2)、84 短路不掷 Next(5)（cs:46269-46287）。
     const sheet = sheetOf(st.type[i]);
     if (sheet === 82) {
-      // 芽 → 成熟（cs:45809-45867）：开花条件各自满足时 1/50 直跳 84
-      const bloom = (herb === 0 && this.host.isDay) || (herb === 1 && !this.host.isDay)
-        || (herb === 2) || (herb === 3) || (herb === 4 && this.host.raining)
-        || (herb === 5) || (herb === 6 && y > this.host.worldSurface);
-      if (bloom && this.rng() < 1 / 50) {
-        // 帧内已有花位的直接成花（帧 0/18/72/36/90 各条件段）；否则走 83
-        st.setTile(x, y, S(84), fx, 0);
-      } else if (this.rng() < 1 / 50) {
-        st.setTile(x, y, S(83), fx, 0);
+      // 芽 → 成熟（cs:46195-46266）：全支终值 83
+      if (this.rng() < 1 / 50) {
+        // :46200-46210 雪草（frameX==108）额外 1/2 门，余式直通
+        if (fx !== 108 || this.rng() < 1 / 2) st.setTile(x, y, S(83), fx, 0);
+      } else if (this.host.isDay && fx === 0 && this.rng() < 1 / 50) {
+        st.setTile(x, y, S(83), fx, 0);            // :46221 昼花白昼加熟
+      } else if (!this.host.isDay && fx === 18 && this.rng() < 1 / 50) {
+        st.setTile(x, y, S(83), fx, 0);            // :46230 夜花夜间加熟
+      } else if (this.host.raining && fx === 72 && this.rng() < 1 / 50) {
+        st.setTile(x, y, S(83), fx, 0);            // :46239 水叶雨天加熟
+      } else if (y > this.host.worldSurface && fx === 36 && this.rng() < 1 / 50) {
+        st.setTile(x, y, S(83), fx, 0);            // :46248 闪根地下（y>worldSurface）加熟
+      } else if (y > st.h - 200 && fx === 90 && this.rng() < 1 / 50) {
+        st.setTile(x, y, S(83), fx, 0);            // :46257 火冠花地狱（y>maxTilesY-200）加熟
       }
       return;
     }
-    if (sheet === 83) {
-      // 成熟 ⇌ 开花（cs:45870-45897）：帧 36 的 1/3 权重摆动
-      if (fx === 36 && this.rng() < 2 / 3) {
-        if (this.rng() < 1 / 2) st.setTile(x, y, S(84), fx, 0);
-      } else if (fx === 108 && this.rng() < 1 / 30) {
-        st.setTile(x, y, S(84), fx, 0);
-      } else {
-        // 满足开花条件 → 1/50 转 84（cs:45809 同构，成熟态沿用）
-        const herb2 = herb;
-        const bloom = (herb2 === 0 && this.host.isDay) || (herb2 === 1 && !this.host.isDay)
-          || (herb2 === 4 && this.host.raining) || (herb2 === 6 && y > this.host.worldSurface);
-        if (bloom && this.rng() < 1 / 50) st.setTile(x, y, S(84), fx, 0);
+    if (fx === 36) {
+      // 闪根摆动（cs:46267-46288）：Next(3)!=0（2/3）入支——83 开花再掷 Next(2)（1/2）、
+      // 84 回落 83（短路不掷）、余型 Next(5) 1/5 归 83（TILE_ALCH 域内仅 83/84 可达）
+      if (this.rng() >= 1 / 3) {
+        if (sheet === 83) {
+          if (this.rng() < 1 / 2) st.setTile(x, y, S(84), fx, 0);
+        } else if (sheet === 84 || this.rng() < 1 / 5) {
+          st.setTile(x, y, S(83), fx, 0);
+        }
       }
       return;
     }
-    if (sheet === 84 && fx === 36 && this.rng() < 1 / 2) {
-      // 开花 → 成熟回落（cs:45874-45885 else-if 链）
-      st.setTile(x, y, S(83), fx, 0);
+    if (fx === 108 && sheet === 83 && this.rng() < 1 / 30) {
+      // 雪草 1/30 成熟 → 开花（cs:46289-46293）
+      st.setTile(x, y, S(84), fx, 0);
     }
   }
 

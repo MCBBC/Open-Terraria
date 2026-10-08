@@ -152,7 +152,7 @@ export let liqC7 = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('liqc7') !== '0' : true;
 export function liqC7SetForTest(v: boolean): void { liqC7 = v; }
 
-// ---- ★liqp2 P1 扫描承载面提速（2026-10-08 液体核第二刀;?liqp2=1 激活,缺省关灰度）----
+// ---- ★liqp2 P1 扫描承载面提速（2026-10-08 液体核第二刀;★已转正缺省开,?liqp2=0 逃生门）----
 // 【剖面定谳（scripts/_liqp2-profile.mjs,Mac 大水体 300 活帧 @50µs,CDP positionTicks
 //  行级钉+sourcemap 映射——零源码插桩）】aP(drawVanillaLiquids) self 164.2ms/300f 拆解:
 //  P1 全窗 store 读 26.9ms(16%)+tileSolidLut(Map.get) 14.5ms+at() 闭包调用 13.9ms
@@ -173,12 +173,16 @@ export function liqC7SetForTest(v: boolean): void { liqC7 = v; }
 //  ⑤ idx 外提:si=y·w+x 增量（si+=w/步）;at() 换模块单形函数（旧实现每次
 //    drawVanillaLiquids 新建闭包,调用点 IC 每帧失训=超态调用不内联;模块函数恒同
 //    一身份=单形内联。下标式 lx·ph+ly 逐字同,值逐位同）。
-//  ?liqp2=0/缺省=现行链逐位。审查通过后按用户惯例转正翻缺省。
+//  ★转正（2026-10-08 用户令;证据=机械闸 tests/liquid-liqp2-p1-parity.test.ts 全绿
+//  （A/B 账面 23 数组逐位+LUT 变异判别力 T4 红）+Windows 实机三刀合账 液体核
+//  95→44-46ms/s、fps 79→105-108）：缺省开,?liqp2=0 逃生门回现行链逐位。
+//  node/测试环境 init true=liqc7 同族形态（本刀纯算术面无像素依赖,parity 测试
+//  显式 SetForTest 双臂控制不受缺省影响）。
 export let liqP2 = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('liqp2') === '1' : false;
+  ? new URLSearchParams(location.search).get('liqp2') !== '0' : true;
 export function liqP2SetForTest(v: boolean): void { liqP2 = v; }
 
-// ---- ★liqp3 主循环矩形数学批量向量化+at() 算术化（2026-10-08 液体核第三刀;?liqp3=1 激活,缺省关灰度）----
+// ---- ★liqp3 主循环矩形数学批量向量化+at() 算术化（2026-10-08 液体核第三刀;★已转正缺省开,?liqp3=0 逃生门）----
 // 【剖面定谳（liqp2 剖面余量;scripts/_liqp2-profile.mjs 同法）】aP self 残余构成:
 //  主循环块 28.0ms/300f(17%,含逐格 device 矩形数学)——每格 4 次缩放乘加
 //  (ex0/ex1/ey0/ey1)+主循环 at() 残留 3 次/格（本格/左邻/上邻）;P2-P7/bbox/
@@ -201,9 +205,12 @@ export function liqP2SetForTest(v: boolean): void { liqP2 = v; }
 // 【语义红线】bg 账终值（__liqPrepSnapshotForTest 23 数组逐位）+设备矩形逐位
 //  （记录桩调用序列全等;node 分数变换 T(1.3,0,0,0.9,7.3,−11.7) 臂 exercise
 //  ceil/floor 分区 rounding;活机冻结帧 A/B=scripts/_liqp3-ab.mjs）。
-//  ?liqp3=0/缺省=现行链逐位。审查通过后按用户惯例转正翻缺省。
+//  ★转正（2026-10-08 用户令;证据=机械闸 tests/liquid-liqp3-rect-parity.test.ts 全绿
+//  （四臂组合 T1-T4 设备矩形逐位+记录桩调用序列全等+node 分数变换 ceil/floor 分区臂
+//  +LUT 变异判别力）+活机冻结帧 A/B scripts/_liqp3-ab.mjs+Windows 实机三刀合账）：
+//  缺省开,?liqp3=0 逃生门回现行链逐位。node/测试环境 init true=liqp2 同族形态。
 export let liqP3 = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('liqp3') === '1' : false;
+  ? new URLSearchParams(location.search).get('liqp3') !== '0' : true;
 export function liqP3SetForTest(v: boolean): void { liqP3 = v; }
 
 const _lvlLut = new Float32Array(256);

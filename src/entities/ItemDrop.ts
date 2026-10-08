@@ -945,6 +945,11 @@ export class ItemDrop extends Entity {
    *    净效果 = 杀完全部向导再召）→ stack 余量随机处决城镇 NPC 直到扣完（:736-758）。
    *  - 其余物品（:697-702）：rare 门 :698——rare 0/-1 且不在 IsLavaImmuneRegardlessOfRarity → 烧毁。
    *  单人语义缺省：playerIndexTheItemIsReservedFor==myPlayer 恒真、netMode 门不适用。
+   *  ★BJ574（2026-10-08）：两处 hurt 补传 force=true（第 8 参）——原版
+   *  StrikeNPCNoInteraction=StrikeNPC(owner:255) 全链不查无敌帧（NPC.cs:82012→
+   *  :82017），本仓 TownNPC.hurt 的 iframes/shimmerRise 拒收窗若不 force 会在
+   *  向导刚受击时吞掉烧娃致死（IIIII223 F-8 既有登记域；判别面
+   *  tests/bj574-voodoo-lava-wof.test.ts ①⑥）。
    *  差异：原版 StrikeNPC 后 NPC 当 tick 仍 active（死亡在下一 Update 收口），余量
    *  随机池可能命中垂死向导；本仓 TownNPC.hurt 即时置 dead，池自然排除，净效果一致 */
   private checkLavaDeath(game: GameHooks): void {
@@ -972,7 +977,11 @@ export class ItemDrop extends Entity {
       for (const n of npcs) {
         if (n.vanillaId !== 22) continue;
         creditKill(n);                        // :722-724 RegisterKill 先于 StrikeNPC
-        n.hurt(9999, 10 * (n.facing || 1), 0, game);   // StrikeNPCNoInteraction(9999, 10f, -dir)
+        // ★BJ574（2026-10-08，IIIII223 F-8 清偿）：StrikeNPCNoInteraction =
+        // StrikeNPC(owner:255)（NPC.cs:82012→:82017）全链【不读】无敌帧——本仓
+        // TownNPC.hurt 的 iframes 拒收窗（TownNPC.ts `!force` 门）须以 force=true
+        // 打穿，否则向导刚受击（iframes>0）时烧娃致死当拍被吞（原版必杀）。
+        n.hurt(9999, 10 * (n.facing || 1), 0, game, 0, 0, false, true);   // StrikeNPCNoInteraction(9999, 10f, -dir)
         num--;
         flag = true;
         spawnWOF(game, this.x, this.y);       // :748 娃娃掉落位置（娃娃已烧，位置留用）
@@ -982,7 +991,7 @@ export class ItemDrop extends Entity {
         while (num > 0 && pool.length > 0) {
           const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
           creditKill(n);                      // :755-757 同上（余量随机处决支）
-          n.hurt(9999, 10 * (n.facing || 1), 0, game);
+          n.hurt(9999, 10 * (n.facing || 1), 0, game, 0, 0, false, true);   // ★BJ574 force：余量处决支同 owner=255 强制面（:82012）
           num--;
         }
       }

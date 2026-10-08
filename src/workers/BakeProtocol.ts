@@ -54,7 +54,11 @@ export interface BakeSnapshot {
  *  ★mod 桥（2026-10-04）：modTiles 随首波 ship 直落（applyModTileDefs 保序注册,
  *  与主线程 internal 下标对齐;缺省=零 mod 零变化） */
 export type BakeWorkerRequest =
-  | { type: 'init'; id: number }
+  | { type: 'init'; id: number;
+      /** ★bakenoread（2026-10-08 读回消除刀）:主线程 ?bakenoread=1 旗值下发
+       *  （worker 无页面 query,不能自读 location）——与主线程 BAKE_NOREAD 同值,
+       *  保内核（ChunkBakeEnv.noRead）主线程/worker 同旗同分支。缺省 false=现状。 */
+      noRead?: boolean }
   | { type: 'ship'; id: number;
       vimages: Array<{ file: string; bmp: ImageBitmap }>;
       maples: Array<{ file: string; bmp: ImageBitmap }>;

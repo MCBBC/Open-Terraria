@@ -21,6 +21,12 @@ const tintCanvas = mkCanvas(TILE, TILE) as AnyCanvas | null;
 // 故本警告在本场景为【误报】:300 个油漆格合计仅 ~0.9ms、800 格 ~2.2ms,深藏在
 // 世界加载烘焙洪峰内。微基准见 memory canvas-readback-flag-policy(含全屏过滤器
  // 与缓存画布两类形态的对照数据)。
+// ★bakenoread（2026-10-08）：上记 µs 口径是 Mac；Windows GPU 驱动逐 op 读回管线
+// 同步成本放大（x-ray 对拍 Trace-20261008T175748↔T212134:烘焙链逐格读回 7.3ms/s、
+// op 1806/烘 → 快照支路单位烘焙工作读回税 −60%）→ tintRegionData 整 cell 快照支路
+// （★2026-10-08 转正缺省开,?bakenoread=0 逃生门）:每漆层至多 1 次整 cell 读回,
+// 逐格 tint 全在 CPU 侧,读回字节与旧逐格读回同源（同一份 GPU 光栅产物）→ 产物
+// 逐位结构性等价。
 const tintCtx = tintCanvas ? tintCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D : null;  // 纯 CPU scratch:SHM 后备不占 IOSurface(第六场双开 16x16 失败的当事画布)
 
 /** 对 canvas 的 (readX,readY) 16×16 区域按 paint 逐像素着色,回写到 ctx 的 (writeX,writeY)。
@@ -37,7 +43,26 @@ export function tintRegion(ctx: import('./canvasEnv').Ctx2D, src: import('./canv
   writeX = readX, writeY = readY, isWall = false, special?: LeafPaintSettings): AnyCanvas | null {
   if (!tintCanvas || !tintCtx) return null;
   const img = (src.getContext('2d') as import('./canvasEnv').Ctx2D).getImageData(readX, readY, TILE, TILE);
-  const d = img.data;
+  tintImageDataInPlace(img.data, paint, isWall, special);
+  tintCtx!.putImageData(img, 0, 0);
+  // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
+  // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
+  ctx.drawImage(tintCanvas!, writeX, writeY);
+  return tintCanvas!;
+}
+
+// ---- ★bakenoread 整 cell 快照支路（2026-10-08）----
+// 读源从「每漆格一次 16² 页 getImageData」换为「每漆层一次 256² 整 cell 快照,
+// 逐格从 CPU 侧行拷贝」——快照 = 同一时刻同一份 GPU 光栅产物的一次性读回,
+// tint 源字节与旧逐格读回逐位同源（结构性等价,非光栅后端假设）。
+// ★只写 RGB 不动 alpha、透明像素跳过、putImageData→tintCanvas→drawImage 回写链
+// 全部与 tintRegion 同一路径——两支路产物逐位一致由 scripts/_bake-noread-digest.mjs
+// （双臂 md5）与 scripts/_paint-bake-truth.mjs（?bakenoread=1 重跑）把门。
+
+/** tint 循环单源（tintRegion/tintRegionData 共用;循环体逐字迁出,零语义差）。
+ *  node 可测（无 canvas 依赖）——tests/tint-data-shared-truth.test.ts 锚定。 */
+export function tintImageDataInPlace(d: Uint8ClampedArray, paint: number,
+  isWall = false, special?: LeafPaintSettings): void {
   if (special) {
     for (let p = 0; p < d.length; p += 4) {
       if (d[p + 3] === 0) continue;
@@ -51,11 +76,42 @@ export function tintRegion(ctx: import('./canvasEnv').Ctx2D, src: import('./canv
       d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
     }
   }
-  tintCtx!.putImageData(img, 0, 0);
-  // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
-  // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
-  ctx.drawImage(tintCanvas!, writeX, writeY);
-  return tintCanvas!;
+}
+
+/** 整 cell 快照的可复用 16² 格缓冲（惰性;node 无 ImageData 时 null=调用方早退） */
+let cellImg: ImageData | null | undefined;
+
+/** 快照行拷贝单源（tintRegionData 专用;node 可测——stride/offset 数学变异锚）。
+ *  从 snap（宽 snap.width 的整 cell 快照）的 (readX,readY) 起 16² 逐行拷入 out。 */
+export function copyRegionRows(snap: { data: Uint8ClampedArray; width: number },
+  readX: number, readY: number, out: Uint8ClampedArray): void {
+  const sd = snap.data;
+  const stride = snap.width * 4;
+  for (let r = 0; r < TILE; r++) {
+    const s0 = (readY + r) * stride + readX * 4;
+    out.set(sd.subarray(s0, s0 + TILE * 4), r * TILE * 4);
+  }
+}
+
+/** tintRegion 的 CPU 快照读源变体：从整 cell ImageData（宽 snap.width）的
+ *  (readX,readY) 起 16² 行拷贝 → 同一 tint 循环 → 同一 tintCanvas 回写链。
+ *  ctx 只作回写目标（写坐标 = cell 内局部,与 tintRegion 的 write 语义逐字一致）。
+ *  node/无画布环境静默返回（与 tintRegion 同形）。 */
+export function tintRegionData(ctx: import('./canvasEnv').Ctx2D, snap: ImageData, readX: number, readY: number, paint: number,
+  writeX = readX, writeY = readY, isWall = false, special?: LeafPaintSettings): AnyCanvas | null {
+  if (!tintCanvas || !tintCtx) return null;
+  if (cellImg === undefined) {
+    try { cellImg = typeof ImageData !== 'undefined' ? new ImageData(TILE, TILE) : null; }
+    catch { cellImg = null; }
+  }
+  const cell = cellImg;
+  if (!cell) return null;
+  copyRegionRows(snap, readX, readY, cell.data);
+  tintImageDataInPlace(cell.data, paint, isWall, special);
+  tintCtx.putImageData(cell, 0, 0);
+  // 与 tintRegion 同款：不 clearRect 直接覆盖回写（alpha 一致 source-over 即替换）
+  ctx.drawImage(tintCanvas, writeX, writeY);
+  return tintCanvas;
 }
 
 // ---- 任意尺寸源区域染色（★IIIII227 四涂装世界：树冠/树枝/棕榈冠等大精灵路径）----

@@ -396,19 +396,33 @@ export function duke370GetAlphaBoost(e: Enemy): { num: number; num9: number } | 
 // 395 GlowMask[49]（Main.cs:24957 固定色 (200,200,200,0),不经 GetAlpha）——均无白提亮。
 
 /** 395/519 GetAlpha 白提亮因子（NPC.cs:94679-94684 逐字 type 门）。null=非同族
- *  （392/393/394 飞碟部件、516/518 同柱邻型、681/636 等 lerp 族他档均不在门内）。
+ *  （392/393/394 飞碟部件、516/518 同柱邻型、636=0.25 档他档均不在门内）。
  *  ★BJ-C1 F5（2026-10-06）扩门（先定谳后收编：R1 报告 ~20 站估列表经本仓活体普查
  *  +反编译亲读逐型定档,死型不收——583-585 走 drawFairyBright 独占（:94662-94665
- *  Lerp 0.5 档已承接,入本门=双绘）、681/658-660/636/549/521/440 等本仓无生成面）：
- *  · 454-459 沙虫族 :94640-94646 `Lerp(newColor,White,0.4)+A=150+×num5/255`——
- *    白提亮 0.4 档（本门）；A=150 半透面=本体 ga ×150/255（Renderer 本体位）；
- *    活体=蠕虫白名单 Enemy.ts:896 `vidW>=454&&vidW<=459`（头 454+节 455-458+尾 459）
- *  · 402 :94569-94571 恒 `Color(255,255,255,255)`——全白覆绘=a=1 恒等式极限档
- *    （复绘全覆盖即原版 tint 逐字,兼修旧 spawnAlpha 淡出误乘面——原版常量支不读 α） */
+ *  Lerp 0.5 档已承接,入本门=双绘）。
+ *  ★BJ-C9 F3（2026-10-08）勘误+再扩门（R8 红队定谳:旧注「681/658-660/636/549/521/440
+ *  等本仓无生成面」系失实句——活体生成面逐型实证：636 光女=drawEmpress 专法
+ *  （Renderer.drawEnemy 10620 案位）/658-660 史后仆从=bossAI_lategame.ts:2082
+ *  QUEEN_MINION_VANILLA 直连真身/681 彩虹城镇史莱姆=TOWN_PET_VIDS（townPets.ts:4）
+ *  /549 DD2 传送门=AI_106 已接（Game.ts:46403）／521 远古教徒巨鱿=bossAI_lategame.ts:283
+ *  无龙支／440 教徒克隆体=bossAI_lategame.ts:635 spawnCultistClone。其中 549/521
+ *  为 Lerp(White,.4) 档本刀收编入本门;440/30/665/25/59/60 恒色族走 Renderer 捕获支
+ *  （tintA 两步式,BJ551 同构）;63/64/103/75/400 ×1.5 提亮族=本体位 lighter 二次绘;
+ *  681/658-660/636 各自有档（.4×Opacity/.4×Opacity/.25×Opacity）暂维持登记不入门
+ *  （Opacity 折面另笔,防本刀越界））：
+ *  · 454-459 沙虫族+521 远古教徒巨鱿 :94640-94646 `Lerp(newColor,White,0.4)+A=150+
+ *    ×num5/255`——白提亮 0.4 档（本门）；A=150 半透面=本体 ga ×150/255（Renderer
+ *    本体位,★BJ-C9 扩 521）；活体=蠕虫白名单 Enemy.ts:896（沙虫）+bossAI_lategame.ts:283（521）
+ *  · 402 :94590-94592 恒 `Color(255,255,255,255)`——全白覆绘=a=1 恒等式极限档
+ *    （复绘全覆盖即原版 tint 逐字,兼修旧 spawnAlpha 淡出误乘面——原版常量支不读 α;
+ *    ★BJ-C9 漂移锚勘正:旧注 :94569-94571 系 694 支行号,亲读钉 402=:94590-94592）
+ *  · 549 DD2 传送门 :94785-94790 `Lerp(newColor,White,0.4)+×num5/255` 早退——
+ *    白提亮 0.4 档（本门,无 A=150 面;num5 折本体 spawnAlpha ga 同 454 族模型） */
 export function npcWhiteLiftAlpha(vid: number): number | null {
   if (vid === 395 || vid === 519) return 0.4;   // :94679 两型同档 0.4
-  if (vid >= 454 && vid <= 459) return 0.4;     // :94640 沙虫族白提亮档（★BJ-C1 F5）
-  if (vid === 402) return 1;                    // :94569 恒全白=a=1 极限档（★BJ-C1 F5）
+  if ((vid >= 454 && vid <= 459) || vid === 521) return 0.4;   // :94640 同支（★BJ-C9 F3 扩 521）
+  if (vid === 402) return 1;                    // :94590 恒全白=a=1 极限档（★BJ-C9 锚勘正）
+  if (vid === 549) return 0.4;                  // :94785 DD2 传送门 Lerp(.4)×num5（★BJ-C9 F3）
   return null;
 }
 

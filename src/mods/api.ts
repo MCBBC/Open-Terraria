@@ -20,10 +20,11 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool, registerMenuTheme,
+  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
+import { registerModMusic, registerModBossMusic, modMusicIdOfFull } from './music';   // ★BGM 面
 import { registerGenPass } from '../world/gen/WorldGen';
 import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
 import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
@@ -49,7 +50,23 @@ export interface ModContext {
   recipeGroups(defs: Array<{ name: string; items: Array<number | string> }>): void;
   /** ★三百十五:菜单主题面(logo/background=pack 相对路径→SW mod 缓存 URL;
    *  TitleMenu logo 换图/MenuBackground 整幅替换+Cinders 粒子消费) */
-  menuTheme(spec: { logo?: string; background?: string; cinderTex?: string }): void;
+  menuTheme(spec: { logo?: string; background?: string; cinderTex?: string; music?: string }): void;
+  /** ★BGM 面:注册曲目(pack 相对路径;返回槽位 id 5000+;bossMusic/menuTheme.music
+   *  引用面用键即可) */
+  music(key: string, file: string): number;
+  /** ★BGM 面:Boss 换曲绑定(npc=本 mod npc 键或原版 id;music=sw.music 键/槽位
+   *  id/原版 MusicID——活动期事件曲覆盖) */
+  bossMusic(npc: number | string, music: string | number): void;
+  /** ★三百二十一刀:群系曲绑定(flag=sw.biomeFlag 注册的旗名;music=sw.music 键/
+   *  槽位 id/原版 MusicID 兜底;priority=环境/biomeHigh/bossMedium——2019
+   *  CalamityMod.UpdateMusic 三档同构) */
+  biomeMusic(flag: string, music: string | number,
+    opts?: { priority?: 'environment' | 'biomeHigh' | 'bossMedium' }): void;
+  /** ★三百二十二刀:AI 期音乐直写(每帧调=本帧覆写压一切;2019 Main.music 裸写
+   *  黑魔法同位;逐相换曲消费面) */
+  setMusic(id: number): void;
+  /** mod 曲键→槽位 id(fail-loud;AI 钩内解析用) */
+  musicIdOf(key: string): number;
   /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
   playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
@@ -143,9 +160,46 @@ export function createModContext(
         registerModRecipeGroupItems(ids);
       }
     },
-    menuTheme(spec: { logo?: string; background?: string; cinderTex?: string }) {
+    menuTheme(spec: { logo?: string; background?: string; cinderTex?: string; music?: string }) {
       const url = (p?: string) => (p ? `sprites/mods/${modId}/${p}` : undefined);
-      registerMenuTheme(modId, { logo: url(spec.logo), background: url(spec.background), cinderTex: url(spec.cinderTex) });
+      // music=mod 曲键 → 全键归一(须先经 sw.music 注册;未注册 fail-loud)
+      const musFull = spec.music
+        ? (spec.music.startsWith('mod_') ? spec.music : `mod_${modId}_${spec.music}`)
+        : undefined;
+      if (musFull && modMusicIdOfFull(musFull) == null) {
+        throw new Error(`[mod-api] menuTheme.music 引用未注册曲目: ${spec.music}`);
+      }
+      registerMenuTheme(modId, {
+        logo: url(spec.logo), background: url(spec.background), cinderTex: url(spec.cinderTex),
+        ...(musFull ? { music: musFull } : {}),
+      });
+    },
+    music(key: string, file: string): number {
+      return registerModMusic(modId, key, file);
+    },
+    bossMusic(npc: number | string, music: string | number): void {
+      registerModBossMusic(modId, npc, music);
+    },
+    biomeMusic(flag: string, music: string | number, opts?: { priority?: 'environment' | 'biomeHigh' | 'bossMedium' }): void {
+      // music 解析:数字=MusicID 原样(原版曲兜底支,2019 else 支同构);字符串=sw.music 键(fail-loud)
+      let musicId: number;
+      if (typeof music === 'number') musicId = music;
+      else {
+        const full = music.startsWith('mod_') ? music : `mod_${modId}_${music}`;
+        const v = modMusicIdOfFull(full);
+        if (v == null) throw new Error(`[mod-api] biomeMusic 引用未注册曲目: ${music}`);
+        musicId = v;
+      }
+      registerModBiomeMusic(modId, { flag, musicId, priority: opts?.priority ?? 'biomeHigh' });
+    },
+    setMusic(id: number): void {
+      requestModFrameMusic(id);
+    },
+    musicIdOf(key: string): number {
+      const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
+      const v = modMusicIdOfFull(full);
+      if (v == null) throw new Error(`[mod-api] musicIdOf 引用未注册曲目: ${key}`);
+      return v;
     },
     playSound(files: string[], volume = 1, x?: number, y?: number) {
       playModSound(files, volume, x, y);

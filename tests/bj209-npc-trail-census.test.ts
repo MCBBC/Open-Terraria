@@ -726,6 +726,7 @@ describe('BJ245-B 仪式环接线结构锁（残影:24879→环:24922→本体:2
         ensureVImage: () => GHOST,
         vmisc: () => null,
       },
+      npcWhiteLiftQueue: [],   // ★BJ-C9 F3：440 入恒色族捕获支（queue.push 消费面）
       drawNpcGlow: () => {},
       drawTwinsChain: () => {},
     };

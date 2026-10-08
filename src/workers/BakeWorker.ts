@@ -76,10 +76,17 @@ const TRUNCATES_WALLS = ['glass', 'v_328_confetti_block', 'v_459_snowfall_block'
 const scratchWall = new OffscreenCanvas(BAKE_S, BAKE_S);
 const scratchTile = new OffscreenCanvas(BAKE_S, BAKE_S);
 
+/** ★bakenoread 旗值（init 消息下发;缺省 false=逐格页读回现状。仅影响油漆 pass
+ *  读回来源,产物逐位不变——见 ChunkBake.bakeChunkBody 油漆段注） */
+let NO_READ = false;
+
 self.onmessage = (ev: MessageEvent<BakeWorkerRequest>) => {
   const msg = ev.data;
   try {
     if (msg.type === 'init') {
+      // ★bakenoread（2026-10-08）:主线程旗值下发落地（worker 无页面 query 不能自读;
+      //  与 ChunkCache.BAKE_NOREAD 同值 → 内核 env.noRead 双侧同分支）
+      NO_READ = msg.noRead === true;
       reply({ type: 'ready', id: msg.id });
       return;
     }
@@ -138,6 +145,7 @@ function bake(id: number, snap: import('./BakeProtocol').BakeSnapshot): void {
     autotiler,
     wallTiler,
     truncatesWalls: TRUNCATES_WALLS,
+    noRead: NO_READ,
   };
   const t0 = performance.now();
   const out = bakeChunkIntoEnv(env, snap.cx, snap.cy, scratchWall, scratchTile, -1);

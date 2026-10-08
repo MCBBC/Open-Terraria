@@ -25,7 +25,9 @@ page.on('pageerror', (e) => pageErrors.push('PAGEERROR: ' + e.message));
 // （bootstrap(origin+query) 会被 gotoApp 的 `origin/?t=` 拼接洗掉旗值,实测
 //   wbake=1 变 wbake=1/?t=… → get('wbake')!=='1'=旗假关）
 await bootstrap(page, ORIGIN);
-await gotoApp(page, ORIGIN, { extraQuery: '?wbake=1' });   // gotoApp extraQuery 约定含前导 ?
+// ★bakenoread（2026-10-08）:SW_EXTRA_QUERY 可追加旗（如 '&bakenoread=1'）——
+// 主/worker 双路在旗开时的同分支 parity 对拍用（worker noRead 经 init 下发）
+await gotoApp(page, ORIGIN, { extraQuery: '?wbake=1' + (process.env.SW_EXTRA_QUERY ?? '') });   // gotoApp extraQuery 约定含前导 ?
 await waitForBridge(page);
 const gen = await createGame(page, { mode: 'direct', seed: '05162020', size: 'small', pinRandom: 20260928 });
 chk('createGame', !!gen?.ok, gen?.why ?? '');

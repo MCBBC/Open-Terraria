@@ -26,7 +26,8 @@ import { LCG32 } from '../fx/LightningGenerator';
 import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { PROJ_ALPHA_MOD, projConstFullbright, type ProjAlphaMod } from '../data/vanillaProjAlpha';
+import { PROJ_ALPHA_MOD, projConstFullbright, projConstTint, type ProjAlphaMod } from '../data/vanillaProjAlpha';
+import { tintedTex } from '../render/StringLine';   // ★BJ-C9 F4：tint 档 add 面烘焙（flatten=true）
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
 // （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
@@ -726,6 +727,62 @@ function createRecBodyCtx(rec: RecOp[]): { proxy: CanvasRenderingContext2D; comm
       }
     },
   };
+}
+
+/** ★BJ-C9 F4（2026-10-08）常量色族 tint 档双通道 replay（recording-ctx 消费侧;
+ *  export=测试面直调体裁,生产消费=draw finally 段闭包）：
+ *  XNA AlphaBlend(One/InvSrcAlpha) 两因子分离——src.rgb=tex.rgb·tex.a·cR（cA 不缩
+ *  RGB,BJ556 鞭标记判例）/src.a=tex.a·cA。canvas 单笔强制 src.rgb×ga=A 双乘 RGB
+ *  =BJ551 289 旧案病灶 → 录制流双放：
+ *   pass1（erase 面）：逐 drawImage 前强制 comp='destination-out'——ga 取流内值
+ *     （drawTableAlpha 已把 GetAlpha A 通道折进 globalAlpha:fixed=cA/fixedfade=cA·fade/
+ *     afade=A 值）→ dst×(1−tex.a·A/255) 精确;
+ *   pass2（add 面）：逐 drawImage 前强制 comp='lighter'+ga=addGa、img 替换
+ *     tintedTex(img, cRGB, flatten=true)（透明 texel=不透明黑 lighter 加 0 无害,
+ *     StringLine 注既证）→ += tex.rgb·cR·tex.a·addGa 精确。
+ *  addGa（rgb 侧衰减因子,与 A 侧分离）：fixed/afade=1（rgb 恒定）;fixedfade=
+ *  (1−α/255)（518 n 双折/969 Opacity——rgb=A 同折,erase ga 已含,add 面补 rgb 侧）。
+ *  两放共同变换：set:globalCompositeOperation/set:filter 流内写面剔除（comp 强制/
+ *  亮度近似滤镜废除——bake 已承 rgb 面,双乘即错）,其余状态（save/rotate/globalAlpha/
+ *  imageSmoothing）逐位重放=专支/帧选/镜像单源零复制（createRecBodyCtx 同契）。
+ *  node 单测无 DOM：tintedTex 返 null → add 面跳笔（erase 面仍落=半透残影,与
+ *  whipFullbright 同守卫域登记）。 */
+export function replayTintedFullbright(
+  rec: RecOp[], c: CanvasRenderingContext2D,
+  tint: readonly [number, number, number, number], addGa: number,
+): void {
+  const rgb: [number, number, number] = [tint[0], tint[1], tint[2]];
+  const addImg = new Map<unknown, HTMLCanvasElement | null>();
+  const replayPass = (mode: 'erase' | 'add'): void => {
+    for (const r0 of rec) {
+      if (r0.op === 'set:globalCompositeOperation' || r0.op === 'set:filter') continue;
+      if (r0.op === 'drawImage') {
+        const args = [...r0.args];
+        if (mode === 'add') {
+          let baked = addImg.get(args[0]);
+          if (baked === undefined) {
+            baked = tintedTex(args[0] as Parameters<typeof tintedTex>[0], rgb, true);
+            addImg.set(args[0], baked);
+          }
+          if (!baked) continue;                 // node 无 DOM=烘焙缺,add 面跳笔
+          args[0] = baked;
+          c.globalCompositeOperation = 'lighter';
+          c.globalAlpha = addGa;
+        } else {
+          c.globalCompositeOperation = 'destination-out';
+        }
+        (c as unknown as Record<string, (...a: unknown[]) => void>).drawImage?.(...args);
+        continue;
+      }
+      if (r0.op.startsWith('set:')) {
+        (c as unknown as Record<string, unknown>)[r0.op.slice(4)] = r0.args[0];
+      } else {
+        (c as unknown as Record<string, (...a: unknown[]) => void>)[r0.op]?.(...r0.args);
+      }
+    }
+  };
+  replayPass('erase');
+  replayPass('add');
 }
 
 /** ★V3 溅花段共享体（Projectile.cs:16935-17102 producer 站=湿缓存刷新位,2026-09-03；
@@ -3086,7 +3143,11 @@ export class Arrow extends Entity {
    *  5/91/265/355…,drawGlobalAlpha case 集）与 A=0 加算族（ADDITIVE_GLOW_PROJS,
    *  合成域自理）、charm 分流（:80609 White×Opacity=常规合成非常量族）不入门;
    *  270 脉冲/45 镰刀等专属支在段前早退不达本门。其余按 projConstFullbright
-   *  表驱动判定（kind∈fixed/fixedfade/afade/fade2/pulse40 ∧ 白 rgb ∧ 非 off）。 */
+   *  表驱动判定（kind∈fixed/fixedfade/afade/fade2/pulse40 ∧ 白 rgb ∧ 非 off）。
+   *  ★BJ-C9 F4（2026-10-08）：白 rgb 门外彩色/灰阶常量族由 projConstTint 判定
+   *  （8 站:308/329/348/349/498/518/553/969）,同门捕获、消费侧双通道 replay
+   *  （replayTintedFullbright）——本谓词保持白 rgb 门单源（消费侧分流,tint 门
+   *  在 draw 捕获段并判定,防两谓词漂移）。 */
   private constFullbrightGate(): boolean {
     if (this.phoenixQuivered || this.seraphNecklaced) return false;
     if (ADDITIVE_GLOW_PROJS.has(this.projId)) return false;
@@ -3611,7 +3672,18 @@ export class Arrow extends Entity {
     //  （ZenithSword）;其余=表驱动分类器结构锁（bj-c1 套件）。
     let fbRec: RecOp[] | null = null;
     let fbCommit: ((c: CanvasRenderingContext2D) => void) | null = null;
-    if (this.constFullbrightGate()) {
+    // ★BJ-C9 F4（2026-10-08）：白 rgb 门（既有单笔通道）之外的彩色/灰阶常量族走
+    //  tint 档（projConstTint 表驱动,8 站=R8 红队普查面:308/329/348/349/498/518/
+    //  553/969）——同一 recording-ctx 捕获,消费侧双通道 replay（replayTintedFullbright）。
+    const gateFullbright = this.constFullbrightGate();
+    const tintRgba = gateFullbright ? null : projConstTint(this.projId);
+    // addGa（add 面 rgb 侧衰减）：fixed/afade rgb 恒定=1;fixedfade rgb=A 同折
+    // (1−α/255)（518/969）——erase 面 ga 已含流内 A 折,add 面补 rgb 侧折（分离式）。
+    const tintAddGa = tintRgba
+      ? (PROJ_ALPHA_MOD[this.projId]?.kind === 'fixedfade'
+        ? Math.max(0, 1 - this.alpha / 255) : 1)
+      : 1;
+    if (gateFullbright || tintRgba) {
       fbRec = [];
       const rc = createRecBodyCtx(fbRec);
       fbCommit = rc.commit;
@@ -3840,11 +3912,18 @@ export class Arrow extends Entity {
     } finally {
       // ★BJ-C1 F3：段内专支（gem/329）早退也照常提交（finally 兜底）——记录面
       //  为空（如贴图未就绪整段零落笔）则不入队零开销。
+      //  ★BJ-C9 F4：tint 档（彩色/灰阶常量族）走双通道 replay（erase+add,XNA
+      //  One/InvSrcAlpha 两因子分离精确）,白 rgb 门内维持单笔 commit。
       if (fbCommit && fbRec && fbRec.length) {
         const commit = fbCommit;
+        const tint = tintRgba;
+        const addGa = tintAddGa;
         (r as unknown as {
           queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
-        }).queueProjFullbright?.((c) => commit(c));
+        }).queueProjFullbright?.((c) => {
+          if (tint) replayTintedFullbright(fbRec!, c, tint, addGa);
+          else commit(c);
+        });
       }
     }
   }

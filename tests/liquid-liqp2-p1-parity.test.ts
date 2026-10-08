@@ -123,7 +123,7 @@ function runBoth(st: TileStore, win: [number, number, number, number], groundLev
   drawVanillaLiquids(b.ctx, mkAtlas(), st, groundLevel, tx0, ty0, tx1, ty1, 1000, false, 0, 0,
     undefined, false, undefined, 202);
   const snapB = __liqPrepSnapshotForTest();
-  liqP2SetForTest(false);   // 还原缺省关（他测不串旗）
+  liqP2SetForTest(false);   // 复位 off 臂（他测不串旗;转正后缺省=开,测试自管旗不受缺省影响）
   return [snapA, snapB, a.calls, b.calls];
 }
 

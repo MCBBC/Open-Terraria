@@ -65,6 +65,21 @@
  *    rel 又<0.11 的三条件流形上,升档失败→降回→再升档的慢循环理论可驻(实测四语
  *    料未现形),登记为观察边界;暂停期读数仍随 ticker 超速走高(显示面,v9.5 裁决
  *    语义承继)。
+ *  - 【v9.12.2 宽流适配双刀】(2026-10-08,Windows 双 trace 定谳后用户令开工;灰度旗
+ *    ?varadapt=1 缺省关,旗关=上注 v9.12 现役逐位——两刀纯窗数/落点门参数级,判据线
+ *    0.22/0.11 与 2 窗降档基准不动;常数/hooks/证据/变异证红面见 VAR_UP_WINDOWS_LOW/
+ *    VAR_DOWN_WINDOWS_BOTTOM/upWindows/downWindows 注):
+ *    ①刀1 升档窗数分层(≤60 档 3 窗,>60 档 6 窗不变)——治恢复滞后(实测 ~14s:流
+ *      干净后 60 档 std 迟迟不进 1.83 线+6 窗×60 帧墙钟膨胀;30 档逃逸 12s→6s);
+ *    ②刀2 入底档强化门(60→30 需 3 窗,其余降档步 2 窗不变)——治 marginal 相位坠 30
+ *      (语料 A 30@484→574、语料 B 30@640→739;真差相多等一窗照坠)。
+ *    ③刀3 底档降档线地板(2026-10-09 Mac Trace-20261008T235432 实报「?varadapt=1 仍粘
+ *      30」定谳后补刀):60→30 下行线=max(0.22p,6.0ms)——Mac 游戏链重放 60 档窗 std
+ *      带 3.8-6.2 贴线,旗下级联坠 30 粘死(93%)/旗开 30↔120 循环(64%);地板后止于 60
+ *      (30 档 0%/60 档 96%)。★判例改判:T114436 类(60 档 std 5.2)旗开止于 60 不再
+ *      落 30——用户明令「粘死 30」为病;旗关行为不变。
+ *    语料=两把 Windows trace 链[e] 切片(tests/frame-beat.test.ts v9.12.2 块);
+ *    Mac 四语料(T114436/LIVE/双峰/洁净)终态不变(线不动,仅时序)。
  *  - 【史档】v9.11 终局刀=跟满回归(2026-10-08)
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
@@ -629,6 +644,46 @@ export const VAR_DOWN_WINDOWS = 2;
 /** 方差升档连续窗数:连续 6 窗低于升档线 → 升一档(慢速回探防抖回) */
 export const VAR_UP_WINDOWS = 6;
 
+// ── ★v9.12.2 宽流适配双刀常数族(2026-10-08;?varadapt=1 灰度缺省关,旗关=v9.12 现役
+//    逐位;判据线 0.22/0.11 与 2 窗降档基准全部不动——纯窗数/纯落点门参数级)──
+/** 刀1 升档窗数分层:effTier≤60 档的升档窗数(>60 档保持 VAR_UP_WINDOWS=6)。
+ *  证据(Windows 双 trace 定谳,2026-10-08;按秒切片+钉档重放):恢复滞后实测 ~14s
+ *  (基线 Trace-20261008T175748:流 sec12 已干净(rate 117-124/s、>14ms 0-3%)→
+ *  60 档 std sec20 才进线(0.11×16.7=1.83)→ t≈26 才升回 120),其中窗数占 ~6s
+ *  (6 窗×60 渲染帧@60fps);≤60 档 3 窗把逃逸提速 2×(语料 A 套件实跑:升回 120
+ *  回调 i 2430→1617,提前 813 回调≈8s@~100/s 流率)。防 30↔60 慢循环靠升档【线】
+ *  (T114436@30 std 5.5>3.67 仍不回探)
+ *  非窗数;探针失败回落仍 2 窗,减窗不引入新 flap 面。 */
+export const VAR_UP_WINDOWS_LOW = 3;
+/** 刀2 入底档强化门:降档落点为底档 30(即 60→30 最后一级)时的降档窗数(其余降档步
+ *  保持 VAR_DOWN_WINDOWS=2「降档永远允许」)。证据(套件实跑):语料 A 旗关 30@484
+ *  (贴线带窗即坠)→ 旗开 30@574(推迟 90 回调);语料 B 30@640→739(真差相多等一窗
+ *  仍坠=降档面不锁死)。 */
+export const VAR_DOWN_WINDOWS_BOTTOM = 3;
+/** 刀3 底档降档线地板(2026-10-09 Mac Trace-20261008T235432 定谳后补刀):60→30 的
+ *  降档线=max(0.22×16.7, 此值)=6.0ms(rel 0.36)——【只】抬下行比较,升档路径
+ *  (line×0.5)与中带归零面照旧。证据:Mac 游戏链(loop)全程重放——60 档窗 std 带
+ *  3.8-6.2,旗下每次到 60 都坠 30(旗关 30 档 93% 永不升/旗开 64%+30↔120 循环);
+ *  地板 6.0 后级联止于 60(30 档 0%、60 档 96%),重载段流自紧(实测 t=34-65 真机
+ *  120fps 30s+)升档通路不受损。★判例改判(用户 2026-10-09 实报明令):T114436 类
+ *  流(60 档 std 5.2)旗开亦止于 60 驻留(不再落 30)——「粘死 30」比「粗糙 60」差,
+ *  v9.12 时代「T114436 必落 30 驻留」标定就此推翻;旗关行为不变(既有测试锁)。
+ *  Windows 双语料真差相坠底(std 7.9-10.2>6.0)不受损。
+ *  ★6.0 定值:T114436 60 档窗 std 分布 p50 4.63/p90 5.39/max 5.58(×1 语料 36 窗)
+ *  ——地板须越过 max 才能保长曝(×2 语料)永不再坠;WIN_B 真差相 7.87+ 留 2.4 判距。 */
+export const VAR_DOWN_LINE_FLOOR_BOTTOM = 6.0;
+
+/** ★v9.12.2 宽流适配总旗(?varadapt=1 激活,缺省关=三刀全旁路,v9.12 现役逐位;
+ *  node/测试环境恒关,测试经 varAdaptSetForTest 显式开启) */
+export let varAdapt = (() => {
+  try {
+    if (typeof location === 'undefined') return false;
+    return new URLSearchParams(location.search).get('varadapt') === '1';
+  } catch { return false; }
+})();
+/** 测试/对拍翻面(生产代码禁调——生产只读 URLSearchParams 一次) */
+export function varAdaptSetForTest(v: boolean): void { varAdapt = v; }
+
 /** 拍变更原因(诊断/探针)。★v5:'overbudget'(v4 单帧立即降)已退役——成本驱动
  *  降拍统一 'capacity';类型保留该字面量仅为旧探针快照兼容,引擎不再发出 */
 export type BeatReason = 'init' | 'capacity' | 'overbudget' | 'miss-streak' | 'upgrade' | 'floor';
@@ -898,6 +953,31 @@ export class FrameBeat {
     return true;
   }
 
+  // ── ★v9.12.2 宽流适配 hooks(protected=红判别器复刻点;旗关=常数原值,v9.12 逐位)──
+  /** 刀1:升档窗数(≤60 档 3 窗提速逃逸,>60 档 6 窗防抖回不变;证据/语义见
+   *  VAR_UP_WINDOWS_LOW 注)。红判别器 NoLowTierFastUpBeat 覆写为恒 VAR_UP_WINDOWS
+   *  =「摘分层」机械变异(语料 A 恢复滞后复现=证红) */
+  protected upWindows(): number {
+    return varAdapt && this.effTier <= 60 ? VAR_UP_WINDOWS_LOW : VAR_UP_WINDOWS;
+  }
+
+  /** 刀2:降档窗数(落点为底档 30 时 3 窗强化门,其余 2 窗不变;证据/语义见
+   *  VAR_DOWN_WINDOWS_BOTTOM 注)。红判别器 NoBottomGateBeat 覆写为恒
+   *  VAR_DOWN_WINDOWS=「摘入底档门」机械变异(语料 A marginal 坠 30 复现=证红) */
+  protected downWindows(): number {
+    if (!varAdapt) return VAR_DOWN_WINDOWS;
+    const next = TIER_LADDER.find((t) => t < this.effTier);
+    return next !== undefined && next <= TIER_LADDER[TIER_LADDER.length - 1]
+      ? VAR_DOWN_WINDOWS_BOTTOM : VAR_DOWN_WINDOWS;
+  }
+
+  /** 刀3:底档降档线地板(0=关;旗开=VAR_DOWN_LINE_FLOOR_BOTTOM,仅当降档落点为
+   *  底档 30 时由 stepVariance 并入下行比较;证据/判例改判见常数注)。红判别器
+   *  NoBottomFloorBeat 覆写为恒 0=「摘地板」机械变异(Mac 语料 60→30 坠落复现=证红) */
+  protected bottomDownLineFloor(): number {
+    return varAdapt ? VAR_DOWN_LINE_FLOOR_BOTTOM : 0;
+  }
+
   // ── ★v9.12 方差自适应锁帧档(用户裁决「宁愿渲染减速也不应帧数反复抖动」的算法
   //    化;现役决策面——k 迁移面已退役,见 migrationEnabled 史档闸)──
   /** 方差自适应步进(endRender 每渲染帧调用;hold/settleGuard 护栏见头注 v9.12):
@@ -917,13 +997,18 @@ export class FrameBeat {
     const std = Math.sqrt(this.varWin.reduce((a, b) => a + (b - mean) ** 2, 0) / this.varWin.length);
     this.varWin.length = 0;
     const line = VAR_STD_RATIO * this.tierPeriod();
-    if (std > line) { this.varDownN++; this.varUpN = 0; }
+    // ★v9.12.2 刀3:下行比较并入底档地板(仅降档落点为底档 30 时;升档线 line×0.5 与
+    //  中带归零面照旧——std 落 [line×0.5, downLine) = 驻留,双向计程清零)
+    const nextDown = TIER_LADDER.find((t) => t < this.effTier);
+    const downLine = nextDown !== undefined && nextDown <= TIER_LADDER[TIER_LADDER.length - 1]
+      ? Math.max(line, this.bottomDownLineFloor()) : line;
+    if (std > downLine) { this.varDownN++; this.varUpN = 0; }
     else if (std < line * VAR_UP_RATIO) { this.varUpN++; this.varDownN = 0; }
     else { this.varDownN = 0; this.varUpN = 0; }   // 驻留带:双向计程清零(防抖回核心)
-    if (this.varDownN >= VAR_DOWN_WINDOWS && this.tierDown()) {
+    if (this.varDownN >= this.downWindows() && this.tierDown()) {
       this.lastReason = 'capacity';
       this.reanchorTier();
-    } else if (this.varUpN >= VAR_UP_WINDOWS && this.tierUp()) {
+    } else if (this.varUpN >= this.upWindows() && this.tierUp()) {
       this.lastReason = 'upgrade';
       this.reanchorTier();
     }

@@ -6,8 +6,8 @@
 // 大档 JSON.parse 搬后台;主线程回退路径与旧同步实现逐位一致。
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
-import type { SaveData, SaveMeta } from '../save/serialize';
-import { saveGame, loadSave } from '../save/SaveFile';
+import type { SaveMeta } from '../save/serialize';   // ★BJ575:SaveData 随玩家段内联块单源化（buildPlayerSaveData）撤除
+import { saveGame, loadSave, buildPlayerSaveData } from '../save/SaveFile';   // ★BJ575:玩家段装配单源（buildPlayerSaveData）
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
 import { weatherToSave } from '../world/weather/Weather';
@@ -127,29 +127,12 @@ export class SaveClient {
       // 挂物族存放物：内部 id 直传（worker 侧 serializeSave 统一过稳定 id 表）
       furniture: world.furnitureItems,
     };
-    const playerData: SaveData['player'] = {
-      hp: player.hp, x: player.x, y: player.y,
-      inventory: player.inv.slots, selected: player.inv.selected,
-      baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
-      banks: player.banks,
-      armor: player.inv.armor,
-      dye: player.inv.dye,
-      trash: player.inv.trash,
-      miscEquips: player.inv.miscEquips,
-      miscDyes: player.inv.miscDyes,
-      loadouts: player.inv.loadouts,
-      currentLoadout: player.inv.currentLoadout,
-      buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
-      taxMoney: player.taxMoney ?? 0,         // PL:53839
-      deathsPve: player.deathsPve ?? 0,       // PL:53840
-      anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
-      // 旅程力量·玩家侧（IPersistentPerPlayerContent；与 saveGame 主线程路径同源）
-      journeyPowers: {
-        godmode: world.journeyPowers.godmode,
-        farPlacementRange: world.journeyPowers.farPlacementRange,
-        spawnRateSlider: world.journeyPowers.spawnRateSlider,
-      },
-    };
+    // ★BJ575（2026-10-08）：玩家段装配单源化——原内联手抄块漏 permanentUpgrades
+    //  （恶魔之心 3335 旗 extraAccessory 打头,PL:55430 写/:55891 读）等 14 键 →
+    //  worker 生产存档 JSON 无键 → 重进游戏恶魔心第 6 配饰槽丢失（用户实报）。
+    //  现共用 SaveFile.buildPlayerSaveData 单源（与 saveGame 主线程路径同构）。
+    //  ⚠️BJ71 家族纪律：玩家段新字段一律进 buildPlayerSaveData,严禁在此回抄。
+    const playerData = buildPlayerSaveData(world, player);
     // ★ 不 transfer:st.* 是活数组,transfer 会 detach 游戏状态;结构化克隆在发送线程
     // 完成(一次 memcpy),游戏内后续写入不影响已快照的副本
     const bufs = {

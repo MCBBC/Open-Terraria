@@ -3,7 +3,11 @@
 //   原版绘制面：DrawPlayer_24_Pulley（PlayerDrawLayers.cs:3034-3056）——
 //     门 = `drawPlayer.pulley && drawPlayer.itemAnimation == 0`（:3036）。
 //     贴图 = TextureAssets.Pulley = Images\PlayerPulley（AssetInitializer.cs:610），
-//     26×72 两帧竖排（帧 26×36），源矩形 (0, 高/2·pulleyFrame, 宽, 高/2)，origin (宽/2, 高/4)=(13,9)。
+//     26×72 两帧竖排（帧 26×36），源矩形 (0, 高/2·pulleyFrame, 宽, 高/2)。
+//     ★BJ576（2026-10-09 用户复报"滑轮叠头前"）origin 勘误：(宽/2, 高/4)=(13,72/4=18)
+//     ——XNA/FNA SpriteBatch origin 相对【源矩形】左上（源矩形高 36 → 18=帧中心），
+//     旧注 (13,9) 系误用帧高/4 推导=帧上沿 1/4 处，滑轮整体低 9px（轮体密集带落
+//     脸部 p.y+1..p.y+8=复报病灶；正确锚轮体带 p.y−8..p.y−1=头顶）。
 //     分档（:3038-3054）：
 //       侧挂档（pulleyDir==2，X 钉绳列 ±6px）：num=−25/num2=0/rotation=0 →
 //         世界位 x = Center.X + (0−9)·direction = centerX−9·dir，y = Position.Y + h/2 + 2 + (−25) = centerY−23（gravDir=1）；
@@ -128,13 +132,13 @@ describe('BJ559 T1-T5 drawPulleyLayer（DrawPlayer_24_Pulley :3034-3056 钉值�
     expect(ops[1].a).toBe(3.5);          // (numX=10)−9+2.5 镜像化简
     expect(ops[1].b).toBe(-45);          // numY=−26+2−42/2（gravDir=1 钉相）
     expect(ops[2].a).toBeCloseTo(-0.35, 10);   // 0.35·(−direction) 镜像化简（facing=±1 同值）
-    expect(ops[3].rest).toEqual([0, 0, 26, 36, -13, -9, 26, 36]);   // 源(0,36f,26,36) origin(13,9)
+    expect(ops[3].rest).toEqual([0, 0, 26, 36, -13, -18, 26, 36]);   // 源(0,36f,26,36) origin(13,18)=帧中心（BJ576 勘误）
     // 朝向镜像档同值（外层 scale(facing,1) 吸收 playerEffect 与方向因子）
     p.facing = -1;
     const flip = drawPulley(p, null);
     expect(flip.ops[1].a).toBe(3.5);
     expect(flip.ops[2].a).toBeCloseTo(-0.35, 10);
-    expect(flip.ops[3].rest).toEqual([0, 0, 26, 36, -13, -9, 26, 36]);
+    expect(flip.ops[3].rest).toEqual([0, 0, 26, 36, -13, -18, 26, 36]);
   });
 
   it('T2 侧挂档（pulleyDir=2）：translate(−6.5,−44)+无 rotate+源帧1——两档锚 1:1（:3040-3043）', () => {
@@ -147,7 +151,7 @@ describe('BJ559 T1-T5 drawPulleyLayer（DrawPlayer_24_Pulley :3034-3056 钉值�
     expect(ops.map((o) => o.op)).toEqual(['save', 'translate', 'drawImage', 'restore']);   // rot=0 无 rotate
     expect(ops[1].a).toBe(-6.5);         // (numX=0)−9+2.5
     expect(ops[1].b).toBe(-44);          // numY=−25+2−21
-    expect(ops[2].rest).toEqual([0, 36, 26, 36, -13, -9, 26, 36]);   // pulleyFrame=1 → sy=36
+    expect(ops[2].rest).toEqual([0, 36, 26, 36, -13, -18, 26, 36]);   // pulleyFrame=1 → sy=36（dest −18=帧中心锚,BJ576）
   });
 
   it('T3 帧选择 = pulleyFrame·高/2（Height()/2 动态公式,帧循环 0/1）', () => {
@@ -158,9 +162,9 @@ describe('BJ559 T1-T5 drawPulleyLayer（DrawPlayer_24_Pulley :3034-3056 钉值�
     expect((drawPulley(p, null).ops[3].rest as number[])[1]).toBe(0);
     p.pulleyFrame = 1;
     expect((drawPulley(p, null).ops[3].rest as number[])[1]).toBe(36);
-    // 非标准尺寸贴图仍走高/2 动态（40×80 → 帧高 40/origin y −10）——公式非硬编码 36
+    // 非标准尺寸贴图仍走高/2 动态（40×80 → 帧高 40/origin y 20=帧中心 → dest −20）——公式非硬编码 36
     const dyn = drawPulley(p, null, false, { width: 40, height: 80 });
-    expect(dyn.ops[3].rest).toEqual([0, 40, 40, 40, -20, -10, 40, 40]);
+    expect(dyn.ops[3].rest).toEqual([0, 40, 40, 40, -20, -20, 40, 40]);
   });
 
   it('T4 显示条件门（:3036）：非 pulley 态/使用中（itemAnimation>0 ≙ inUse）不画——非 pulley 不回归', () => {
@@ -312,9 +316,11 @@ describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸
 //   无钩&&!tongued&&!mount）按 ↑/↓ 且头格 (y−8)/16 为绳时【吸附当拍 pulley=true】
 //   （:19835/:19852/:19869 三连落位段）；:26328/:26500 两大块（状态机/清除/X 钉列/
 //   垂直链/帧推进/DashMovement :26691）全在 pulley 位内——非 pulley 身体贴绳无任何
-//   攀爬/悬浮态（正常重力穿落）。清除面：vx≠0（:26475）/头格脱绳（:26465）/gravDir
-//   （:26469）/CCed（:26472）/左右键释放离绳（:26455-26461）/controlJump 跳离（:26485，
-//   本仓键面登记差异由攀爬链承载）/grapCount>0（:26493）/inputDown 穿落（:26644-26648）。
+//   攀爬/悬浮态（正常重力穿落）。清除面：vx≠0（:26457-26460）/头格脱绳（:26465）/gravDir
+//   （:26469）/CCed（:26472）/★BJ-C8 重钉:左右键离绳=侧挂档+朝向侧按下沿+前方无绳
+//   （:26445-26456 三重前置门;旧「:26455-26461 持键即离」伪锚翻正）/controlJump 跳离
+//   （:26481-26486，本仓键面登记差异由攀爬链承载）/grapCount>0（:26488）/inputDown
+//   穿落（:26642-26647）。
 //   本仓病灶（BJ570）：branch1「身体中心格为绳」攀爬支旧无 pulley 门——跳上绳静悬浮/
 //   空格攀爬/孤格悬浮可达 pulley=false 贴绳态（原版不存在）,滑轮门（:3036 读 pulley）
 //   恒不画;按 W/S 触发 FindPulley 置位后才出现=用户实测「静止不显、按上下键才显」。
@@ -340,7 +346,7 @@ describe('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落�
     expect(ops.filter((o) => o.op === 'drawImage')).toHaveLength(1);   // ★静止滑轮绘制在场（BJ570 病灶反面）
   });
 
-  it('T11 离绳清除面（:26465 头格脱绳/:26455-26461 左右键;穿落=T9 另案）', () => {
+  it('T11 离绳清除面（:26465 头格脱绳/★BJ-C8 重钉:左右键三支链;穿落=T9 另案）', () => {
     // —— 头格脱绳：静挂中挖掉头格绳 → 下一拍 pulley=false ——
     const w = ropeWorld();
     const p = new Player(ROPE_COL * TILE + 8 - 10, 24 * TILE + 8, new Inventory());
@@ -352,8 +358,9 @@ describe('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落�
     w.store.setTileSilent(ROPE_COL, 24, 0, 0, 0);  // 挖头格绳（剑砍绳同效,496-wobble 空气惯例）
     tick(p, w);
     expect(p.pulley, '头格脱绳 → 清除（:26465）').toBe(false);
-    // —— 左右键离绳：静挂中按左 → pulley=false + 左向离绳推量（:26455-26461;
-    //      本仓持键即离=边沿近似,登记;末值断 <0 防下游走行加速扰动）——
+    // —— ★BJ-C8（R7-F1）重钉（旧伪锚「按左即离绳+vx<0」翻正）：居中档横按=
+    //      转身（flag12 :26356-26360）不离绳 → 朝向侧按沿=侧挂档（:26345-26349）
+    //      仍不离绳 → 侧挂档朝向侧再按沿+前方无绳=离绳+vx=−1（:26445-26456）——
     const w3 = ropeWorld();
     const p3 = new Player(ROPE_COL * TILE + 8 - 10, 24 * TILE + 8, new Inventory());
     p3.hp = 500;
@@ -364,7 +371,21 @@ describe('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落�
     p3.inputX = -1;
     p3.inputLeft = true;
     tick(p3, w3);
-    expect(p3.pulley, '按左右离绳（:26455-26461）').toBe(false);
-    expect(p3.vx).toBeLessThan(0);
+    expect(p3.pulley, '居中档横按=转身不离绳（:26356-26360 flag12）').toBe(true);
+    expect(p3.facing).toBe(-1);
+    expect(p3.vx).toBe(0);
+    p3.inputLeft = false; p3.inputX = 0;
+    tick(p3, w3);                                   // 松键拍（prevInput 刷新）
+    p3.inputLeft = true; p3.inputX = -1;
+    tick(p3, w3);
+    expect(p3.pulley, '居中档朝向侧按沿→侧挂档不离绳（:26345-26349）').toBe(true);
+    expect(p3.pulleyDir).toBe(2);
+    expect(p3.x).toBe(ROPE_COL * TILE + 8 - 10 - 6);   // X 钉中心+6·direction（:26653-26661）
+    p3.inputLeft = false; p3.inputX = 0;
+    tick(p3, w3);                                   // 松键拍
+    p3.inputLeft = true; p3.inputX = -1;
+    tick(p3, w3);
+    expect(p3.pulley, '侧挂+朝向侧按下沿+前方无绳→离绳（:26445-26456）').toBe(false);
+    expect(p3.vx, '离绳推量（:26448-26451,末值断 <0 防下游走行加速扰动）').toBeLessThan(0);
   });
 });

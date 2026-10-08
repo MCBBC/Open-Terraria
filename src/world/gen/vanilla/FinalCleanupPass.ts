@@ -919,6 +919,14 @@ export function markKillTouch(x: number, y: number): void {
 }
 
 function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
+  // ★三百二十刀勘误（2026-10-08）：本层曾误加 vanilla active 头门后撤销——
+  //   _tileFrameGenInner 头本就有 cs:82615-82623 同款门（非活性格清 half/slope/
+  //   paint/coat 后 return 不分派；G2 dump 链 cbt 3→2 金标锚依赖该清理），外层
+  //   加门=跳过清理=纯倒退。真根因=check2x2Sweep 败支零命中自环（见彼处）。
+  // ★取证钩(dormant,缺省零开销):沉降期 tileFrame 派发计数/热点格/调用栈采样(性能债仪)
+  const g = globalThis as unknown as { __swSettleCnt?: (k: string, x?: number, y?: number) => void; __swSettleStack?: () => void };
+  g.__swSettleCnt?.('tileFrameGen', x, y);
+  g.__swSettleStack?.();
   const seen = _seenOnce;
   if (seen !== null) {
     if (x < 0 || y < 0 || x >= _dedupeW) return;
@@ -1731,6 +1739,20 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       && !solidAllowBottom(st, num2 + 1, num6 + 2)) flag = true;
   }
   if (!flag) return;
+  // ★三百二十刀（2026-10-08）：败支零命中闸【金标判别期暂时摘除】——ghost-preserve
+  //   出口 type 哈希红（0d4adcce≠115f524f），零命中闸嫌疑待判别。观测面保留：
+  //   __sw2x2FailN=零命中败支发生计数（金标跑中读此数=可达性实证）。
+  {
+    let hits2x2 = 0;
+    for (let k = num2; k < num2 + 2; k++) for (let l = num6; l < num6 + 2; l++) {
+      if (inW(k, l) && st.flags[st.idx(k, l)] && SWEEP_SHEET[st.type[st.idx(k, l)]!] === sheet) hits2x2++;
+    }
+    if (hits2x2 === 0) {
+      // ★三百二十刀观测面(dormant):零命中败支可达性计数——本体金标种子 9293480
+      //   全管线实证 0 触发(2026-10-08 探针)=闸对本体零扰动;mod 世界为自环主态
+      (globalThis as unknown as { __sw2x2FailN?: number }).__sw2x2FailN = ((globalThis as { __sw2x2FailN?: number }).__sw2x2FailN ?? 0) + 1;
+    }
+  }
   ctx.destroyObject = true;                                                 // cs:48567
   for (let k = num2; k < num2 + 2; k++) {
     for (let l = num6; l < num6 + 2; l++) {

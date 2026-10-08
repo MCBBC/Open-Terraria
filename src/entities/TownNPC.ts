@@ -32,7 +32,7 @@ import { drownCollision } from '../stats/TouchDamage';
 // ★2026-08-31 治理批 B1：危险扫描候选记录门（NPC.cs:54042 flag19 = CanBeChasedBy）
 import { canBeChasedBy, ON_HIT_EXCLUDED_PROJS } from './projTargets';
 import { projSprite } from './Arrow';
-import { updateNpcLiquid, wetCollision } from './npcLiquid';
+import { updateNpcLiquid, wetCollision, lavaCollision } from './npcLiquid';
 import { spawnEmote } from '../render/EmoteBubble';
 import { pickNpcEmote } from '../world/EmotePick';
 import {
@@ -51,6 +51,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
+import { spawnWOF } from './bossAI_wof';   // ★BJ574：checkDead case 22 向导浸浆死召唤链
 import { newLovestruckHeart } from './GorePiece';   // ★清偿刀 F：Lovestruck 头爱心 331 单源（城镇/敌怪共用,GorePiece.ts 尾）
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
@@ -1599,6 +1600,12 @@ export class TownNPC extends Entity {
       // 4372 / Jim 画家 5290，1/1）+ 帽子族 1/8（207/227/441 帽 3349/3350/3351）+
       // 裁缝 260/公主 5065(hardMode) 等。钱币/心星管线跳过（城镇 NPC value=0）
       this.townNpcDeathDrops(game);
+      // ★BJ574（2026-10-08）checkDead case 22（NPC.cs:80176-80181）：向导(22)死亡时
+      // 本体盒 Collision.LavaCollision → SpawnWOF(自身位置)——浸浆烫死（岩浆
+      // StrikeNPCNoInteraction(50)/30t，NPC.cs:94528-94533）等「死于岩浆中」的一切
+      // 死法都召。巫毒链向导恰浸浆时与 ItemDrop.checkLavaDeath 的 SpawnWOF(物品位)
+      // 双调，由 spawnWOF 内 AnyNPCs(113)/已有墙门收口为一只（原版同相，:81114）。
+      this.wofLavaDeathCheck(game);
     } else {
       // StrikeNPC 受击音 = per-NPC HitSound 满响（曾硬编码 NPC_Hit_1 ×0.6）
       const hitFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.HitSound) ?? ['NPC_Hit_1'];
@@ -1683,6 +1690,19 @@ export class TownNPC extends Entity {
         game.spawnDrop(this.cx, this.cy, key, d.n, v.vx, v.vy);
       }
     }
+  }
+
+  /** ★BJ574（2026-10-08）checkDead case 22（NPC.cs:80176-80181）1:1：type 22 死亡时
+   *  `Collision.LavaCollision(position, width, height)` → SpawnWOF(position)。
+   *  盒相交判据用向导自身盒（原版同参），深度门 pos.Y/16<maxTilesY-205 与在场门
+   *  AnyNPCs(113)/Main.wofNPCIndex 都在 spawnWOF 内部（bossAI_wof :81114 同源）——
+   *  向导死于地表/洞穴浆池不召、已有墙在场不召、地狱岸上死（无岩浆相交）不召。
+   *  调用位 = 死亡块尾（原版 switch(type) 在 NPCLoot/active=false 之后同相）。
+   *  判别面 tests/bj574-voodoo-lava-wof.test.ts ⑤/⑤'。 */
+  private wofLavaDeathCheck(game: GameHooks): void {
+    if (this.vanillaId !== 22) return;
+    if (!lavaCollision(game.world.store, this.x, this.y, this.w, this.h)) return;
+    spawnWOF(game, this.x, this.y);
   }
 
   /** 裁缝巫毒娃娃 1307 死亡召唤（NPC.cs:78958-78967）：!day && type==54 &&

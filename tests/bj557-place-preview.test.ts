@@ -9,7 +9,10 @@
 //   C. 绘制面——drawPlacePreview（White×0.5 / Red×0.7×0.5;TileObject.cs:908-914）。
 import { describe, it, expect, afterEach } from 'vitest';
 import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
+import { World } from '../src/world/World';
+import { Game } from '../src/core/Game';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+import { ITEM_DEFS } from '../src/data/items';
 import { options } from '../src/core/Options';
 import { anchorSpecOf, validateAnchors, previewCellValues } from '../src/world/TileAnchorValidator';
 import { placePreviewFrame, clearPlacePreviewFrame, updatePlacePreviewFrame,
@@ -206,6 +209,72 @@ describe('B2. 逐格 1/2 值（CanPlace onlyCheck 足印三谓词 1:1）', () =>
         }
       }
     }
+  });
+});
+
+describe('D. tickPlacePreview 门层（★BJ-C7/R9-F2 判别补锁：itemAnimation==0 门,Player.cs:43734/:43737）', () => {
+  // 旧测试只锁 updatePlacePreviewFrame 纯函数层——Game.tickPlacePreview 的
+  // `swing && swing.t > 0` 早退门（itemAnimation==0,挥动期隐藏=原版同相）无锁定,
+  // 拆门变异存活。本组经 Game 原型壳直调 tickPlacePreview,锁门序四态。
+  function gateShell(w: import('../src/world/World').World, swing: { t: number; dur: number; item: number } | null,
+    dead = false) {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      tickPlacePreview: (tx: number, ty: number, def: unknown) => void;
+    };
+    g.world = w;
+    g.swing = swing;
+    g.player = {
+      dead,
+      x: 14 * 16 + 2, y: 12 * 16 - 6, w: 12, h: 28,   // 贴近点击格 (14,12) → 射程内
+      equipStats: {},
+      buffs: { has: () => false },
+      inv: { heldItem: () => null },                   // 实例级 placeStyle 覆盖缺省
+    };
+    return g;
+  }
+  function ghostFloor(w: import('../src/world/World').World): void {
+    const st = w.store;
+    for (let x = 5; x <= 30; x++) st.setTile(x, 13, TID.dirt);
+  }
+  const workbenchDef = ITEM_DEFS[ITEM_DEFS.findIndex((d) => d?.tile === 'workbench')];   // 入参=物品 def（tryPlace 同域）
+  const prevOpt = options.data.placementPreview;
+  afterEach(() => { options.data.placementPreview = prevOpt; clearPlacePreviewFrame(); });
+
+  it('对照态（swing=null）：同场景预览数据在册（证门后路径通,判别有效）', () => {
+    options.data.placementPreview = true;
+    const w = new World(48, 32, 15, 'pv');
+    ghostFloor(w);
+    clearPlacePreviewFrame();
+    gateShell(w, null).tickPlacePreview(14, 12, workbenchDef);
+    expect(placePreviewFrame.data).not.toBeNull();
+    expect(placePreviewFrame.data!.sheet).toBe(18);
+  });
+
+  it('★判别位：挥动在途（swing.t>0=itemAnimation≠0）→ 早退,数据恒 null（拆门变异必红）', () => {
+    options.data.placementPreview = true;
+    const w = new World(48, 32, 15, 'pv');
+    ghostFloor(w);
+    clearPlacePreviewFrame();
+    gateShell(w, { t: 5, dur: 10, item: 0 }).tickPlacePreview(14, 12, workbenchDef);
+    expect(placePreviewFrame.data).toBeNull();
+  });
+
+  it('边界态：swing.t===0（动画已衰减尽）→ 门放行,数据在册（:43737 `==0` 精确语义）', () => {
+    options.data.placementPreview = true;
+    const w = new World(48, 32, 15, 'pv');
+    ghostFloor(w);
+    clearPlacePreviewFrame();
+    gateShell(w, { t: 0, dur: 10, item: 0 }).tickPlacePreview(14, 12, workbenchDef);
+    expect(placePreviewFrame.data).not.toBeNull();
+  });
+
+  it('防御位：死亡玩家（ItemCheck 不跑）→ null（门序尾部,与挥动无关）', () => {
+    options.data.placementPreview = true;
+    const w = new World(48, 32, 15, 'pv');
+    ghostFloor(w);
+    clearPlacePreviewFrame();
+    gateShell(w, null, true).tickPlacePreview(14, 12, workbenchDef);
+    expect(placePreviewFrame.data).toBeNull();
   });
 });
 

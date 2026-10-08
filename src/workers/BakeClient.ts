@@ -10,7 +10,7 @@
 // 双路径纪律：旗关（缺省）时 Game 不装配本客户端 → ChunkCache 全部支路失效,
 // 主线程烘焙链零改动。两路产物一致性由 scripts/_wbake-digest.mjs（md5 对拍）
 // 与 tests/wbake-*.test.ts（协议/账本锁）把门。
-import { ChunkCache } from '../render/ChunkCache';
+import { ChunkCache, BAKE_NOREAD } from '../render/ChunkCache';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import { tileAnim } from '../render/TileAnim';
@@ -92,7 +92,9 @@ export class BakeClient {
     const ok = await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => resolve(false), HANDSHAKE_MS);
       this.handshakeResolve = (v) => { clearTimeout(timer); resolve(v); };
-      w.postMessage({ type: 'init', id: this.nextId++ });
+      // ★bakenoread（2026-10-08）:旗值随 init 下发（worker 无页面 query）——
+      // 与主线程 BAKE_NOREAD 同值,内核 env.noRead 双侧同分支（产物逐位一致前提）
+      w.postMessage({ type: 'init', id: this.nextId++, noRead: BAKE_NOREAD });
     });
     if (!ok || this.disposed) { this.fail('handshake timeout'); return false; }
     this.ready = true;

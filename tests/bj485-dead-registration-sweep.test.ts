@@ -152,7 +152,10 @@ describe('★BJ485 普查闭环:全仓 uploadScratchBake/markDynamic 位点白�
     expect(fams.has('bv'), 'bv:登记已摘（BJ485 N1）不得复活').toBe(false);
     expect(fams.has('wingTint'), 'wingTint:登记已摘（BJ485 N2）不得复活').toBe(false);
     // 未知新家族=未过普查（须先定谳窗内消费点再入表）
-    const known = ['dustTint', 'dustColor', 'dustDye', 'faelingSil', 'faelingTint', 'mountTint', 'boltBake'];
+    // ★BJ-C9（2026-10-08）机械登记：empGhostTint=E51b（2026-10-07）逐调 scratch
+    //  现烘现画族（Renderer empGhostTinted,?empscratch=0 逃生门;定谳注见 E51b 段）,
+    //  上批落刀漏登记白名单（域外补登记,非 C9 域内改动）。
+    const known = ['dustTint', 'dustColor', 'dustDye', 'faelingSil', 'faelingTint', 'mountTint', 'boltBake', 'empGhostTint'];
     const unknown = [...fams.keys()].filter((k) => !known.includes(k));
     expect(unknown, `未定谳登记家族: ${unknown.join(',')}`).toEqual([]);
   });
