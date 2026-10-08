@@ -5936,9 +5936,16 @@ export class Player extends Entity {
       if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
 
-    // 绳索攀爬 + pulley 悬挂（原版 Player.cs:25985-26177 pulley 段的本仓合流：
-    // 身体中心格为绳（Space/W/↑ 攀爬键位模型）走既有速度链；中心格脱绳但
-    // pulley 未离（绳端/孤立绳格——头格仍绳）走 :26118-26137 的绳端支）
+    // 绳索攀爬 + pulley 悬挂（原版 Player.cs:26366-26694 pulley 大块的本仓合流。
+    // ★BJ570（2026-10-08）支门补 this.pulley——原版绳上态=pulley 唯一（调用门 :26320
+    // +FindPulley :19776-19855 按↑/↓且头格绳吸附【当拍置位】+:26328/:26500 两大块
+    // 状态机/清除/X 钉列/垂直链/帧推进/DashMovement(:26691) 全在 pulley 位内）,非
+    // pulley 身体贴绳不存在攀爬/悬浮态=正常重力穿落。旧「身体中心格为绳即攀」无门
+    // 合流造出原版不存在的 pulley=false 贴绳态（跳上绳静悬浮/空格攀/孤格悬浮——滑轮
+    // 门 :3036 读 pulley 恒不画=用户复报「静止不显、按上下键吸附后才显」BJ570）,
+    // 整支退役落主移动支（重力/跳跃/冲刺照常,MV1② dashDelay 主路径照推进）。
+    // 中心格脱绳但 pulley 未离（绳端/孤立绳格——头格仍绳）走 :26503-26649 绳端支
+    // =branch2 不变；空格攀爬键面差异（pulley 态内 inputJump 攀爬,台账⑥ 登记）不变）
     // 坐骑飞行 vy 独占标记（本 tick 悬停/飞行接管时置 true）——下方"松键截断上升"
     // 手感段须让位：原版 Player 无此截断，且 Hover 接受 controlUp 单独爬升
     //（Mount.cs:3396-3424），截断会把不按跳的爬升当场掐死
@@ -5949,7 +5956,10 @@ export class Player extends Entity {
     const ropeHere = !!(st.inBounds(ropeTx, ropeTy) && st.flags[st.idx(ropeTx, ropeTy)]
       && TILE_DEFS[st.type[st.idx(ropeTx, ropeTy)]]?.rope);
     this.onRope = ropeHere;
-    if (ropeHere && !this.inWater) {
+    // ★BJ570（2026-10-08）：支门补 this.pulley——原版绳物理全在 pulley 位内（:26500）,
+    // 非 pulley 贴绳=未吸附正常穿落（:26320 门未过）；旧无门合流使 pulley=false 贴绳
+    // 态可达（BJ570 病灶,判别 tests/bj559-rope-pulley-draw T8后半/T10/T11,M7 变异位）
+    if (this.pulley && ropeHere && !this.inWater) {
       // 攀爬速度链（Player.cs:26016-26125——见 ropeClimbVy 注）
       this.ropeClimbVy();
       this.fallStartY = null; // 绳上不计摔伤

@@ -215,7 +215,8 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       const list = Array.isArray(shopRaw) ? shopRaw : shopRaw.shops;
       if (!Array.isArray(list)) throw new ModPlanError(`mod ${modId} shops.json 须数组`);
       for (const s of list) {
-        if (typeof s?.npcId !== 'number' || !Array.isArray(s.items)) fail(modId, 'shop', String(s?.npcId ?? ''));
+        // ★三百十七:npcId number=原版 vid | string=npcKey(mod townNPC 商店)
+        if (typeof s?.npcId !== 'number' && typeof s?.npcId !== 'string') fail(modId, 'shop', String(s?.npcId ?? ''));
         shops.push({ modId, spec: s });
       }
     }

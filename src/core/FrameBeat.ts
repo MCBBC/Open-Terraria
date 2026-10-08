@@ -685,8 +685,6 @@ export class FrameBeat {
   private tierSeen = -1;
   /** 累计器相位:下次应渲时刻(v9.9 语义复活;−1=未锚定,首回调即渲) */
   private nextDue = -1;
-  /** ★v9.13 网格测量环（5 样本回调间隔）——gridP50=锁相目标的网格周期 */
-  private gridRing: number[] = [];
   /** 当前方差窗(非重叠;渲染帧距样本,集满 VAR_WIN 评一次 std 后清空) */
   private varWin: number[] = [];
   /** 连续超阈窗数(降档计程;中带/低方差窗即清零) */
@@ -711,18 +709,7 @@ export class FrameBeat {
   /** 现役锁帧档周期(ms;v9.12 渲染决策面:累计器相位步进量)。cap≤0(跟满档)不进
    *  渲染决策,此值仅诊断;cap>0 时=1000/effTier(effTier∈TIER_LADDER∪{cap}) */
   tierPeriod(tier = this.effTier): number {
-    // ★v9.13 网格整数倍锁帧：周期=k×网格p50（k=round(网格率/tier) 四舍五入最贴近
-    //  用户档），后验钳「率>tier×1.15 → k++」（宁欠勿超）。网格未成熟(<3 样本)回退
-    //  绝对周期 1000/tier。锁相回调网格本身 ⇒ 帧距 std≈网格抖动(±1ms)，非组合误差。
-    const ring = this.gridRing;
-    if (ring.length < 3) return 1000 / tier;
-    const sorted = [...ring].sort((a, b) => a - b);
-    const g = sorted[Math.floor(sorted.length / 2)];
-    if (!(g > 1)) return 1000 / tier;
-    let k = Math.round(1000 / g / tier);
-    if (k < 1) k = 1;
-    while (k < 8 && 1000 / (k * g) > tier * 1.15) k++;
-    return k * g;
+    return 1000 / tier;
   }
 
   /** 拍地板:最小 k 使 k×vsync ≥ (1−容差)×目标周期(整数倍折算+估计噪声容差;
@@ -775,12 +762,9 @@ export class FrameBeat {
     if (this.lastVsyncTs >= 0) {
       d = now - this.lastVsyncTs;
       if (d > VSYNC_GAP_RESET_MS) {
-        this.vsyncDeltas.length = 0;
-        this.gridRing.length = 0;   // ★v9.13:断流清网格环            // 断流(tab 隐藏恢复):清窗防大空洞污染估计
+        this.vsyncDeltas.length = 0;            // 断流(tab 隐藏恢复):清窗防大空洞污染估计
       } else {
         this.vsyncDeltas.push(d);
-        this.gridRing.push(d);
-        if (this.gridRing.length > 5) this.gridRing.shift();
         if (this.vsyncDeltas.length > VSYNC_WIN) this.vsyncDeltas.shift();
         this.vsyncPeriod = this.estimateVsync();
       }
@@ -885,11 +869,7 @@ export class FrameBeat {
     this.ordinal = 0;
     if (this.cap > 0) {
       const p = this.tierPeriod();
-      if (this.nextDue < 0) this.nextDue = now + p;
-      // ★v9.13 modulo 相位保留重锚（tempus.ts:125/pixi8.js:6963 源码锚）：大 hitch 后
-      //  保留余数相位——下一帧距=period−余数(短一次)贴回网格；取模自带防追赶风暴。
-      else if (now > this.nextDue) this.nextDue = now - ((now - this.nextDue) % p) + p;
-      else this.nextDue += p;
+      this.nextDue = this.nextDue < 0 ? now + p : Math.max(this.nextDue + p, now);
     }
   }
 
@@ -915,11 +895,7 @@ export class FrameBeat {
    *  面启用。红判别器 NoVarMonitorBeat(tests)覆写为 false=「摘方差监控」机械变异
    *  ——双峰流上 120 档抖动持续不降档(头注 v9.12 变异证红面①) */
   protected varianceMonitorEnabled(): boolean {
-    // ★v9.13 停用（用户实报 cap90/60 连环降 30 不回升=判据「std>0.22×档周期」在
-    //  超速双峰流上高档必触发——帧距 std 由网格粒度决定、不随档周期等比缩放，
-    //  高档相对线必超）。网格锁相（tierPeriod 整数倍）已把帧距 std 压至物理下界；
-    //  兜底判据待「std/gridP50 网格归一」重接（登记）。
-    return false;
+    return true;
   }
 
   // ── ★v9.12 方差自适应锁帧档(用户裁决「宁愿渲染减速也不应帧数反复抖动」的算法

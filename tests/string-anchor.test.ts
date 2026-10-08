@@ -417,13 +417,17 @@ describe('fixedUpdate 集成：pulley 悬挂（Player.cs:25801-26177）', () => 
     expect(p.gfxOffY).toBe(0);              // −9.5 + 4×2.5 过零截断，第 5 tick 恒 0
   });
 
-  it('无上/下输入不进态：绳上 Space 单独攀爬（旧模型）不触发吸附', () => {
+  it('无上/下输入不进态：绳上 Space 单独不吸附、正常重力穿落（★BJ570 非 pulley 贴绳攀爬态退役）', () => {
     const game = makeGame(ropeWorld());
     const p = new Player(800, 50 * 16, new Inventory());
     p.inputJump = true;    // 仅 Space（攀爬键）——无 inputUp/inputDown
     stepP(p, game);
     expect(p.pulley).toBe(false);
     expect(p.x).toBe(800); // 无吸附
-    expect(p.vy).toBeLessThan(0);   // 攀爬链照跑（既有行为）
+    // ★BJ570（2026-10-08）：原版绳上态=pulley 唯一（:26320 门+:26500 全链 pulley 位内）,
+    // Space 单独既不吸附（jumpOnlyHeld 门,台账⑥ 登记）也无非 pulley 攀爬链（branch1
+    // 门补 this.pulley）——旧「Space 单独攀爬 vy<0」=原版不存在态,判例随 BJ570 翻正:
+    // 落主移动支重力穿落。攀爬入绳须 W/↑（吸附）,吸附后 Space 照常上爬（键面差异）。
+    expect(p.vy).toBeGreaterThan(0);
   });
 });

@@ -184,7 +184,7 @@ export interface ModProjContent {
 /** P3 商店上架(content/shops.json)。npcId=原版 NPC id(城镇商);price 缺省=物品
  *  value(与原版 shopstock price:null→value 语义同相)。 */
 export interface ModShopContent {
-  npcId: number;
+  npcId: number | string;   // ★三百十七:string=npcKey(解析走 allocation.npcs)
   items: Array<{ item: string | number; price?: number }>;
 }
 

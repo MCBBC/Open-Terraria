@@ -369,7 +369,23 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       const defValue = ITEM_DEFS[id]?.value;
       entries.push([id, it.price ?? (typeof defValue === 'number' ? defValue : 500)]);
     }
-    registerModShopStock(sh.spec.npcId, entries);
+    // ★三百十七:npcId string=npcKey → allocation.npcs 解析(mod townNPC 商店)
+    let nid: number;
+    if (typeof sh.spec.npcId === 'string') {
+      const full = sh.spec.npcId.startsWith('mod_') ? sh.spec.npcId : `mod_${sh.modId}_${sh.spec.npcId}`;
+      const resolved = plan.allocation.npcs.get(full);
+      if (resolved === undefined) throw new Error(`[mod-shop] mod ${sh.modId} 商店 npcKey 未注册: ${sh.spec.npcId}`);
+      nid = resolved;
+    } else {
+      nid = sh.spec.npcId;
+    }
+    // ★三百十八:requireFlags 条件门透传(shops.json item 级)
+    const rawSpec = sh.spec as unknown as { requireFlags?: string[] };
+    if (rawSpec.requireFlags?.length) {
+      registerModShopStock(nid, entries.map(([id, price]) => ({ id, price, requireFlags: rawSpec.requireFlags! })));
+    } else {
+      registerModShopStock(nid, entries);
+    }
   }
   // recipes
   const recipeList = plan.recipes.map((r) => buildVanillaRecipe(plan, r.modId, r.spec));
@@ -381,6 +397,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
 /** 商店条目物品解析:数字=原版 vid 直传;字符串=mod 物品键 → stable id */
 function itemRefOf(plan: RegistrationPlan, modId: string, raw: string | number): number {
   if (typeof raw === 'number') return raw;
+  if (/^\d+$/.test(raw)) return Number(raw);   // ★三百十七:数字串=原版 vid 直通(同 drops P7 判例)
   const full = raw.startsWith('mod_') ? raw : `mod_${modId}_${raw}`;
   const id = plan.allocation.items.get(full);
   if (id === undefined) throw new Error(`[mod-shop] mod ${modId} 引用未注册物品: ${raw}`);

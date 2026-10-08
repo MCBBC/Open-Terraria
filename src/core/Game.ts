@@ -5964,7 +5964,9 @@ export class Game implements GameHooks {
   private invasionProgressSnapshot = 0;
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
   wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
-  /** 宏伟蓝图拖拽锚点(tile 坐标) */
+  /** 宏伟蓝图路由起点锚(tile 坐标)——★BJ569 起 = tickGrandDesignRoute 状态机独占
+   *  （按下设锚,松开以裸鼠标格为终点执行 L 形;右键/CC/换手取消）。非空即引导期,
+   *  预览消费 = Renderer.grandPreview 写入面。 */
   grandAnchor: [number, number] | null = null;
   /** 测重板踩踏状态(原版 PressurePlateHelper 进/离双触发) */
   weightedLatch = new Set<number>();
@@ -14656,6 +14658,10 @@ export class Game implements GameHooks {
       this.input.mouseDown = false;   // 住房模式期间持续吞使用点击
       return;
     }
+    // ★BJ569（2026-10-08）宏伟蓝图路由 tick（原版载体=AI_125 通道弹 Projectile.cs:36349;
+    //  前置于 CCed 族早退=石化/诅咒帧取消臂照结算,原版 Kill 臂同相）：
+    //  tickGrandDesignRoute
+    this.tickGrandDesignRoute();
     // 舌头禁道具（Player.cs:22032 controlUseItem=false——狂卷之舌期间不得使用物品）
     if (this.player.buffs.has(BuffType.TheTongue)) return;
     // 石化/冰冻禁道具（:24942-24950 controlUseItem/UseTile 清零段——stoned 与
@@ -16046,7 +16052,9 @@ export class Game implements GameHooks {
       return;
     }
 
-    // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
+    // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手):左键,目标格可被占用
+    // （★BJ569:宏伟蓝图 3611 不在本分派——updateUse 头 tickGrandDesignRoute 逐帧驱动,
+    //  原版无 IsInTileInteractionRange 门,起手帧已吞 mouseDown 边沿,本支对其不可达）
     if (heldDef?.wireTool && inp.mouseDown && !inp.rightDown) {
       // ★BJ463（2026-10-03）：原版 PlaceThing :39891-41100 全区零 ChangeDir/零
       // direction 直写——放置路径点击不转向（旧 faceCursor 调用=shoot>0 门误植，删）
@@ -25651,25 +25659,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (done) { this.player.useTime = 5; this.sfx.play('dig'); }
       return;
     }
-    // 宏伟蓝图:按下记锚点,松开执行 L 形批量
-    if (wt.grand) {
-      if (!this.grandAnchor) { this.grandAnchor = [tx, ty]; return; }
-      const a = this.grandAnchor;
-      this.grandAnchor = null;
-      const mode = this.wireToolMode;
-      const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(530));
-      const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(849));
-      // ★R20-A11:dir = player.direction == 1（Wiring.cs:3259）——先垂直段与否随玩家朝向
-      const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators, this.player.facing === 1);
-      if (!(mode & TOOL_CUTTER)) {
-        if (res.wire > 0) inv.remove(VI_ID(530), res.wire);
-        if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);
-      }
-      this.player.useTime = 10;
-      this.sfx.play('place');
-      this.cb.onInventoryChanged();
-      return;
-    }
+    // 宏伟蓝图不走本分派——★BJ569（2026-10-08）整面迁 tickGrandDesignRoute
+    // （AI_125 通道弹等价状态机,updateUse 头部逐帧驱动）：原版 3611 不在
+    // ItemCheck_UseWiringTools 字面八件表（Player.cs:47158）,无
+    // IsInTileInteractionRange 射程门（旧共用门 tileBoostOfVid(3611)=0 → 5/3 格盒,
+    // 正常点击距离静默无效=用户实报「无法使用」根因）,且旧两击协议不吞 mouseDown
+    // 边沿=按住第 2 拍以锚点=终点自耗执行。起手/引导/释放/取消四臂全在 tick。
+    if (wt.grand) return;
     // 五彩扳手:单点,用当前模式
     const mode = (itemDef.vid ?? -1) === 3625 ? this.wireToolMode : (wt.place ?? 0);
     if (mode & TOOL_CUTTER) {
@@ -25711,6 +25707,110 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onInventoryChanged();
     }
     void dy;
+  }
+
+  /** ★BJ569（2026-10-08）宏伟蓝图使用链——AI_125 通道弹载体语义的等价状态机（无弹实体）。
+   *  原版定谳（Terarria1457 亲读）：
+   *   · SetDefaults（Item.cs:32515-32528）useStyle5/useTime=useAnimation=10/shoot 651/
+   *     channel=true/mech=true/UseSound=Item64/无 tileBoost(=0)。
+   *   · 使用 = 通用 channel-shoot 面（Player.cs:43901-43903 ItemCheck_Shoot）出弹 651
+   *     （Projectile.cs:6992 aiStyle 125;AI_125 :36349-36474 逐拍跟【裸鼠标】,无射程门;
+   *     Kill :73305 → Wiring.MassWireOperation :419）。3611 不在 ItemCheck_UseWiringTools
+   *     字面八件表（Player.cs:47158）——全屏操作面。
+   *   · 起手门（ItemCheck_CheckCanUse_Inner :52701/:52713）：ToolMode 无任一
+   *     红/绿/蓝/黄/致动器位=拒;wireOperationsCooldown>0=拒（仅联机 ack 清零,
+   *     MessageBuffer.cs:3820,无单机置位点=单机恒 0,本仓单机面不设字段）。
+   *   · 取消臂（AI_125 :36358-36367）：noItems||CCed||dead → Kill 无操作;右键 → Kill 无操作。
+   *   · 释放臂（:36368-36375 !channel → localAI[0]=1 → Kill）→ :73305 MassWireOperation
+   *     （L 形路由,段序随 player.direction :3259;Step :3342 逐格 ToolMode 执行,材质耗尽
+   *     中途止线 :3361-3363;逐格 CanDoWireStuffHere :3353 → Player.cs:47327-47350）。
+   *  旧实现断点（用户实报「宏伟蓝图无法使用」双因,探针实证）：
+   *   ①共用射程门 tileBoostOfVid(3611)+blockRange=0 → 5/3 格盒,正常点击距离静默无效
+   *    （锚根本不落）;②两击协议不吞 mouseDown 边沿 → 按住第 2 拍以锚点=终点自耗执行。
+   *  时序：updateUse 头部（CCed 族早退前）逐帧调用 —— 取消臂在 CC/换手帧照结算;
+   *  引导期预览 = Renderer.grandPreview（:51574 写入面,既有消费 drawGrandPreview）。 */
+  private tickGrandDesignRoute(): void {
+    const held = this.player.inv.heldItem();
+    const def = held ? ITEM_DEFS[held.id] : undefined;
+    const grand = !!def?.wireTool?.grand;
+    const p = this.player;
+    // ---- 取消臂①（:36358 noItems(Cursed) || CCed || dead → Kill 无操作）∪ 换手 ----
+    if (this.grandAnchor && (!grand || p.dead || p.cced || p.buffs.has(BuffType.Cursed))) {
+      this.grandAnchor = null;
+      return;
+    }
+    if (!grand) return;
+    const inp = this.input;
+    // ---- 取消臂②（:36362-36367 mouseRight&&mouseRightRelease → Kill 无操作;
+    //      原版并吞该帧右键=不落世界分派,本仓同效清 rightDown）----
+    if (this.grandAnchor && inp.rightDown) {
+      this.grandAnchor = null;
+      inp.rightDown = false;
+      return;
+    }
+    // ---- 引导期：释放臂=执行（:36368-36375 !channel → Kill → MassWireOperation）----
+    if (this.grandAnchor) {
+      if (!inp.mouseHeld) this.executeGrandDesignRoute();
+      return;
+    }
+    // ---- 起手臂（controlUseItem 沿 = mouseDown 边沿;门面镜 :52680-52716）----
+    if (!inp.mouseDown || inp.rightDown) return;
+    if (inp.uiBlocking || inp.blockMouse || inp.delayUseItem || this.inpOverDomUi()
+      || this.annotateMode || this.renderer.fullMap.open) return;
+    if (p.useTime > 0) return;                       // ItemTimeIsZero（:43877 flag4 面）
+    // ToolMode 位门（:52701——纯剪线模式同拒,与原版字面一致）
+    if ((this.wireToolMode & (TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW | TOOL_ACTUATOR)) === 0) return;
+    // 房规面（本仓联机策略;原版同位=CanDoWireStuffHere 墙 350/87,在步进内逐格结算）
+    if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
+    // 锚 = 裸鼠标格（:36389-36395 ai[0]/ai[1]=Center/16——无射程门,全屏可达）
+    const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
+    this.grandAnchor = [tx, ty];
+    inp.mouseDown = false;                           // 吞使用边沿（controlUseItem 单沿消费;
+                                                     //  否则右键取消/释放帧后按住期重起路由）
+    this.playUseSound(3611, 'tink');                 // UseSound=Item64（itemUseSound 表 3611）
+    p.useTime = itemCombat(3611)?.useTime ?? 10;     // ApplyItemTime（useTime=10 :32517-32518）
+  }
+
+  /** ★BJ569 释放臂执行（Projectile.cs:73305-73321 → Wiring.MassWireOperation :419-453）：
+   *  L 形批量（起点=按下锚,终点=释放帧裸鼠标格）;朝向段序 ★R20-A11 语义原样保留
+   *  （Wiring.cs:3259 dir=player.direction==1）;剪线模式不耗材;放置模式按实耗扣 530/849。 */
+  private executeGrandDesignRoute(): void {
+    const a = this.grandAnchor;
+    this.grandAnchor = null;
+    if (!a) return;
+    const w = this.wiring;
+    if (!w) return;
+    const [tx, ty] = this.camera.tileUnder(this.input.mouseX, this.input.mouseY);
+    const inv = this.player.inv;
+    const mode = this.wireToolMode;
+    const wires = mode & TOOL_CUTTER ? Infinity : inv.countOf(VI_ID(530));
+    const actuators = mode & TOOL_CUTTER ? Infinity : inv.countOf(VI_ID(849));
+    const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators,
+      this.player.facing === 1, this.canDoWireStuffHere());
+    if (!(mode & TOOL_CUTTER)) {
+      if (res.wire > 0) inv.remove(VI_ID(530), res.wire);
+      if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);
+    }
+    this.sfx.play('place');
+    this.cb.onInventoryChanged();
+  }
+
+  /** ★BJ569 CanDoWireStuffHere（Player.cs:47327-47350 1:1——MassWireOperationStep
+   *  :3353 逐格消费,拒=跳格不中断路由）。墙 350 不可拆（:47334）;未败石巨人拒
+   *  蜥蜴砖墙 87（:47344,downedGolemBoss=flags['downed_245']）。
+   *  登记债：dualDungeonsSeed && y>worldSurface && DungeonGenerationStyles.Temple.
+   *  WallIsInStyle(wall, includeWindows) 族面（:47340）——本仓无 Temple 墙样式表,
+   *  双地牢种子特面待表落地补。 */
+  private canDoWireStuffHere(): (x: number, y: number) => boolean {
+    const st = this.world.store;
+    const golemDown = !!this.world.flags['downed_245'];
+    return (x: number, y: number) => {
+      if (!st.inBounds(x, y)) return false;
+      const wall = st.wall[st.idx(x, y)];
+      if (wall === 350) return false;
+      if (!golemDown && wall === 87) return false;
+      return true;
+    };
   }
 
   /**
@@ -38533,7 +38633,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 双店：15=常规（同 :497）+ 25="GameUI.PainterDecor" 装饰墙纸专柜(:513)。
     // 旅行商(368)走动态股票 buildTravelStock，SHOPSTOCK 无 '368' 静态键——
     // 曾只按静态表判门=按钮永不出现死路（审计 2026-08-30 TOP1）
-    if (Game.SHOPSTOCK[String(npc.vanillaId)] || npc.npcKey === 'travelling_merchant') {
+    if (Game.SHOPSTOCK[String(npc.vanillaId)] || npc.npcKey === 'travelling_merchant'
+      || modShopStockOf(npc.vanillaId).length > 0) {   // ★三百十七:mod 商店按钮门
       buttons.push({ id: 'shop', label: Lang.inter(28) });
     }
     if (npc.vanillaId === 227) buttons.push({ id: 'shopDecor', label: Lang.text('GameUI.PainterDecor') });
@@ -39770,9 +39871,43 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (npc.vanillaId >= 800) {
       const owner = MOD_NPC_OWNER.get(npc.vanillaId);
       if (owner) {
+        // ★三百十七:per-NPC 池优先(TownChat.<npcKey>.<n>),回退共享池(TownChat.<n>)
+        const npcKey = npc.npcKey?.replace(/^mod_[a-z0-9]+_/, '') ?? '';
         const pool: string[] = [];
-        for (let i = 1; Lang.has(`Mods.${owner}.TownChat.${i}`); i++) {
-          pool.push(Lang.text(`Mods.${owner}.TownChat.${i}`));
+        for (const prefix of [`TownChat.${npcKey}.`, 'TownChat.']) {
+          for (let i = 1; Lang.has(`Mods.${owner}.${prefix}${i}`); i++) {
+            pool.push(Lang.text(`Mods.${owner}.${prefix}${i}`));
+          }
+          if (pool.length > 0) break;
+        }
+        // ★三百十九:条件注入行(CondChat.<npcKey>.<X>;在场 NPC 名 {0}/{1} 格式化)
+        const presentName = (vid: number): string | null => {
+          const other = this.entities.npcs.find((n) => n instanceof TownNPC && !n.dead && n.vanillaId === vid);
+          return other ? (other as TownNPC).givenName ?? `NPC${vid}` : null;
+        };
+        const vanillaPresent = (vid: number): string | null =>
+          this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.vanillaId === vid)
+            ? Lang.npcName(vid) ?? null : null;
+        const COND_CHAT: Array<{ cond: string; key: string; args: number[] }> = [
+          { cond: 'brimstone_witch', key: 'BrimstoneWitch', args: [] },   // mod id 需查
+          { cond: 'merchant', key: 'Merchant', args: [17] },
+          { cond: 'nurse+arms_dealer', key: 'NurseArmsDealer', args: [18, 19] },
+          { cond: 'angler', key: 'Angler', args: [369] },
+          { cond: 'party_girl', key: 'PartyGirl', args: [353] },
+        ];
+        for (const cc of COND_CHAT) {
+          const ck = `CondChat.${npcKey}.${cc.key}`;
+          if (!Lang.has(`Mods.${owner}.${ck}`)) continue;
+          if (cc.args.length === 2) {
+            const n0 = vanillaPresent(cc.args[0]!), n1 = vanillaPresent(cc.args[1]!);
+            if (n0 && n1) pool.push(Lang.text(`Mods.${owner}.${ck}`).replace('{0}', n0).replace('{1}', n1));
+          } else if (cc.args.length === 1) {
+            const n0 = vanillaPresent(cc.args[0]!);
+            if (n0) pool.push(Lang.text(`Mods.${owner}.${ck}`).replace('{0}', n0));
+          } else if (cc.cond === 'brimstone_witch') {
+            const modWitch = this.entities.npcs.find((n) => n instanceof TownNPC && !n.dead && npc.npcKey?.includes('brimstone_witch'));
+            if (modWitch) pool.push(Lang.text(`Mods.${owner}.${ck}`).replace('{0}', (modWitch as TownNPC).givenName ?? 'Brimstone Witch'));
+          }
         }
         if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
       }

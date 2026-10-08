@@ -759,11 +759,15 @@ export class Wiring {
    * 返回实际消耗 {wire, actuator}。
    * dirFirstVertical: 原版 `dir = player.direction == 1`（Wiring.cs:3259/:436）——
    * ★R20-A11:曾恒 true(先垂直段),玩家朝左时 L 形走向与原版相反
+   * canDo: ★BJ569（2026-10-08）逐格 CanDoWireStuffHere（Player.cs:47327-47350,
+   * MassWireOperationStep :3353-3356 消费——拒=跳格不中断路由,null 回程同相;
+   * 与界外 inBounds 拒同族）
    */
   massWireOperation(
     ps: [number, number], pe: [number, number], mode: number,
     wires: number, actuators: number,
     dirFirstVertical = true,
+    canDo?: (x: number, y: number) => boolean,
   ): { wire: number; actuator: number; aborted: boolean } {
     const dir = dirFirstVertical;
     let wireLeft = wires, actuatorLeft = actuators;
@@ -771,6 +775,7 @@ export class Wiring {
     const step = (x: number, y: number): boolean => {
       // 返回 false = 材料耗尽中止
       if (!this.st.inBounds(x, y)) return true;
+      if (canDo && !canDo(x, y)) return true;
       const i = this.st.idx(x, y);
       if (!(mode & TOOL_CUTTER)) {
         const order: Array<[number, number]> = [

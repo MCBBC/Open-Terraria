@@ -37,6 +37,10 @@
 //   M4 branch1 推进摘 this.pulley 门       → T8 红（非 pulley 绳攀误推进 counter=0.9）；
 //   M5 帧公式摘 +0.75（vy≠0 项）           → T6 红（counter 6.75→6.0 钉值）、T7 红（2 拍不翻帧）；
 //   M6 换贴图路径/资产                     → T0 红（sha256 对拍）。
+// ★BJ570（2026-10-08 用户复报：静止挂绳滑轮不显、按上下键才显）新增：
+//   M7 branch1 门摘 this.pulley（BJ570 落刀位）→ T8 后半红（非 pulley 贴绳复攀 vy<0）、
+//      T10/T11 仍绿（pulley 态不受影响）——恰红=判别面单腿；
+//   M8 pulleySnap 摘 pulley=true            → T8①/T9/T10/T11 红（吸附置位断链）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -247,7 +251,7 @@ describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸
     expect(p.pulleyFrame).toBe(0);
   });
 
-  it('T8 积分（BJ527 物理面）：pulley 攀爬推进帧（vy=−8 两拍翻帧）;非 pulley 绳攀不合帧（M4 判别位）', () => {
+  it('T8 积分（BJ527 物理面）：pulley 攀爬推进帧（vy=−8 两拍翻帧）;非 pulley 贴绳穿落退役（★BJ570 判别位,M7 变异位）', () => {
     // —— pulley 态：抓绳 → 注入攀爬稳态 vy=−8 → 每拍 6.75,两拍翻帧、四拍归 0 ——
     const w = ropeWorld();
     const p = new Player(ROPE_COL * TILE + 8 - 10, 25 * TILE + 8, new Inventory());
@@ -265,18 +269,21 @@ describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸
     tick(p, w);
     tick(p, w);
     expect(p.pulleyFrame).toBe(0);                 // 两帧循环
-    // —— 非 pulley 绳攀（repo 遗留合流支 branch1 无 pulley 位）：滑轮不合帧 ——
-    const w2 = new World(W, H, 11, 'bj559-nopulley');
+    // —— ★BJ570（2026-10-08）非 pulley 贴绳=原版不存在的攀爬态,branch1 门补
+    //    this.pulley 后整支退役：身体中心格为绳但未吸附（头格非绳,FindPulley :19776
+    //    早退）→ 落主移动支正常重力穿落（原版 :26320 门+:26500 全链均 pulley 内,无梯
+    //    爬）；攀爬链/滑轮帧对该态整支不可达（摘 this.pulley 门=M7 则此态复攀 vy<0）——
+    const w2 = new World(W, H, 11, 'bj570-nopulley');
     w2.store.setTileSilent(ROPE_COL, 26, ROPE_T);  // 孤立绳 @ 身体中心格（头格 24 非绳→FindPulley 早退）
     const p2 = new Player(ROPE_COL * TILE + 8 - 10, 400, new Inventory());   // 身体中心 y+21=421 → 格 26
     p2.hp = 500;
     p2.inputUp = true;
-    p2.inputJump = true;
+    p2.inputJump = true;                           // 空格/W 攀爬键位也救不了——非 pulley 无绳链
     for (let i = 0; i < 3; i++) tick(p2, w2);
     expect(p2.pulley).toBe(false);                 // 头格非绳 → 不入 pulley 态
-    expect(p2.vy).toBeLessThan(0);                 // 绳攀速度链照跑（branch1 支自证）
+    expect(p2.vy).toBeGreaterThan(0);              // ★BJ570 判别位：重力穿落（修前 branch1 攀爬 vy<0）
     expect(p2.pulleyFrame).toBe(0);
-    expect(p2.pulleyFrameCounter).toBe(0);         // ★M4 判别位：误推进则 ≥0.9
+    expect(p2.pulleyFrameCounter).toBe(0);         // 滑轮帧不可达（M7 变异位）
   });
 
   it('T9 穿落拍照推进（branch2 支尾无条件=:26661 块内无条件——pulley 已置假、vy=1 照累加 1.5）', () => {
@@ -295,5 +302,69 @@ describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸
     expect(p.pulley).toBe(false);
     expect(p.pulleyFrameCounter).toBeCloseTo(1.5, 10);   // |1|·0.75+0.75——块尾无条件（M5 变异位）
     expect(p.pulleyFrame).toBe(0);
+  });
+});
+
+// ================= T10-T11 ★BJ570 静止滑轮恒显+离绳清除（2026-10-08 用户复报） =================
+//
+//   定谳（亲读 1457）：原版绳上态 = pulley 唯一——FindPulley（Player.cs:19776-19855,
+//   调用门 :26320-26323 !pulley&&!CCed&&!controlJump&&gravDir==1&&ropeCount==0&&
+//   无钩&&!tongued&&!mount）按 ↑/↓ 且头格 (y−8)/16 为绳时【吸附当拍 pulley=true】
+//   （:19835/:19852/:19869 三连落位段）；:26328/:26500 两大块（状态机/清除/X 钉列/
+//   垂直链/帧推进/DashMovement :26691）全在 pulley 位内——非 pulley 身体贴绳无任何
+//   攀爬/悬浮态（正常重力穿落）。清除面：vx≠0（:26475）/头格脱绳（:26465）/gravDir
+//   （:26469）/CCed（:26472）/左右键释放离绳（:26455-26461）/controlJump 跳离（:26485，
+//   本仓键面登记差异由攀爬链承载）/grapCount>0（:26493）/inputDown 穿落（:26644-26648）。
+//   本仓病灶（BJ570）：branch1「身体中心格为绳」攀爬支旧无 pulley 门——跳上绳静悬浮/
+//   空格攀爬/孤格悬浮可达 pulley=false 贴绳态（原版不存在）,滑轮门（:3036 读 pulley）
+//   恒不画;按 W/S 触发 FindPulley 置位后才出现=用户实测「静止不显、按上下键才显」。
+//   落刀：Player.ts branch1 门补 this.pulley（绳物理=pulley 唯一,原版对齐）;吸附拍
+//   置位链（pulleySnap :9932）本就正确（BJ559 T8① 在案）,不动。
+describe('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落刀判别面）', () => {
+  it('T10 吸附→松键静挂 12 拍 pulley 钉 true+滑轮绘制在场（静止恒显主判别）', () => {
+    const w = ropeWorld();
+    // 头格行 24（绳柱 14..34 中段）：y=24·16+8=392,身体中心 y+21=413 → 格 25（绳→branch1）
+    const p = new Player(ROPE_COL * TILE + 8 - 10, 24 * TILE + 8, new Inventory());
+    p.hp = 500;
+    p.inputUp = true;
+    tick(p, w);
+    expect(p.pulley).toBe(true);                   // 吸附拍置位（:19835;BJ559 T8① 同面复验）
+    expect(p.pulleyDir).toBe(1);                   // X 居中档吸附（FindPulley num8==2）
+    p.inputUp = false;
+    p.inputJump = false;
+    for (let i = 0; i < 12; i++) tick(p, w);       // 松键静挂 12 拍（0.2s）
+    expect(p.pulley, '松键静挂 pulley 须保持（:26328 清除面全键控,无静挂清除支）').toBe(true);
+    expect(p.vy).toBe(0);                          // 静挂（:26120-26124 微速归零）
+    expect(p.pulleyFrameCounter).toBe(0);          // 静挂不合帧（|0|·0.75）
+    const { ops } = drawPulley(p, null);
+    expect(ops.filter((o) => o.op === 'drawImage')).toHaveLength(1);   // ★静止滑轮绘制在场（BJ570 病灶反面）
+  });
+
+  it('T11 离绳清除面（:26465 头格脱绳/:26455-26461 左右键;穿落=T9 另案）', () => {
+    // —— 头格脱绳：静挂中挖掉头格绳 → 下一拍 pulley=false ——
+    const w = ropeWorld();
+    const p = new Player(ROPE_COL * TILE + 8 - 10, 24 * TILE + 8, new Inventory());
+    p.hp = 500;
+    p.inputUp = true;
+    tick(p, w);
+    expect(p.pulley).toBe(true);
+    p.inputUp = false;
+    w.store.setTileSilent(ROPE_COL, 24, 0, 0, 0);  // 挖头格绳（剑砍绳同效,496-wobble 空气惯例）
+    tick(p, w);
+    expect(p.pulley, '头格脱绳 → 清除（:26465）').toBe(false);
+    // —— 左右键离绳：静挂中按左 → pulley=false + 左向离绳推量（:26455-26461;
+    //      本仓持键即离=边沿近似,登记;末值断 <0 防下游走行加速扰动）——
+    const w3 = ropeWorld();
+    const p3 = new Player(ROPE_COL * TILE + 8 - 10, 24 * TILE + 8, new Inventory());
+    p3.hp = 500;
+    p3.inputUp = true;
+    tick(p3, w3);
+    expect(p3.pulley).toBe(true);
+    p3.inputUp = false;
+    p3.inputX = -1;
+    p3.inputLeft = true;
+    tick(p3, w3);
+    expect(p3.pulley, '按左右离绳（:26455-26461）').toBe(false);
+    expect(p3.vx).toBeLessThan(0);
   });
 });
