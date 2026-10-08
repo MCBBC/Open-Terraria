@@ -20,7 +20,7 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic,
+  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -89,6 +89,8 @@ export interface ModContext {
   /** mod 弹幕分配 id(GLM娘 rivals 批新增:entry.js 无 import 面,AI 态机拿数字 id
    *  计数/自造用;fail-fast) */
   projIdOf(key: string): number;
+  /** ★三百三十三刀:使用条件门(fn 返回 false=本拍禁用;C# CanUseItem 同位) */
+  canUse(key: string, fn: (ctx: unknown) => boolean): void;
   /** mod NPC 分配 id(同上) */
   npcIdOf(key: string): number;
   /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
@@ -217,6 +219,9 @@ export function createModContext(
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },
     projIdOf(key) { return idOf('projs' as 'items', key); },
+    canUse(key, fn) {
+      registerModCanUse(idOf('items', key), fn as Parameters<typeof registerModCanUse>[1]);
+    },
     npcIdOf(key) { return idOf('npcs', key); },
     // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)
     playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void) {

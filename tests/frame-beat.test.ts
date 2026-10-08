@@ -740,7 +740,9 @@ describe('锁帧档语义锁(源锚)', () => {
     expect(cls).toContain('private effTier = 0');
     expect(cls).toContain('private varWin: number[] = []');
     expect(cls).toContain('protected varianceMonitorEnabled(): boolean');
-    expect(cls).toContain('private stepVariance(): void');
+    expect(cls).toContain('private stepTier(): void');                      // ★v9.14 旗分世界调度
+    expect(cls).toContain('private stepRealized(meanGap: number): void');   // 旗开=容量判据
+    expect(cls).toContain('private stepVarianceCore(std: number): void');   // 旗关=方差判据
     expect(cls).toContain('this.nextDue = this.nextDue < 0 ? now + p : Math.max(this.nextDue + p, now);');
     expect(cls).toContain('const line = VAR_STD_RATIO * this.tierPeriod();');
     expect(cls).toContain('this.nextDue = this.lastRenderAt + this.tierPeriod();');   // 落地重锚
@@ -771,7 +773,7 @@ describe('锁帧档语义锁(源锚)', () => {
 
   it('★v9.12 头注登记锚(用户裁决原话+三对照实测+v6 政策废除+标定改判;v9.8-v9.11 史档注保留)', () => {
     expect(BEAT).toContain('★v9.12 稳定锁帧档+方差自适应');
-    expect(BEAT).toContain('宁愿渲染减速也不应帧数反复抖动');
+    expect(BEAT.replace(/[\s*]+/g, '')).toContain('宁愿渲染减速也不应帧数反复抖动');   // 头注换行容忍(连同 * 前缀)
     expect(BEAT).toContain('正确的调制是锁在一个稳定帧率');
     expect(BEAT).toContain('?c10e=0 同样抖');                  // 三对照实测之一
     expect(BEAT).toContain('旧版也抖');
@@ -1591,72 +1593,107 @@ const lastUpgradeIdx = (tiers: { i: number; tier: number; reason: string }[]) =>
   for (let i = ch.length - 1; i >= 0; i--) if (ch[i].reason === 'upgrade') return ch[i].i;
   return -1;
 };
-
-describe('★v9.13 底档=60(30 档已除)+v9.12.2 刀1(?varadapt 灰度)', () => {
+describe('★v9.13 旗关世界锁(方差判据;底档=60)', () => {
   afterEach(() => { varAdaptSetForTest(false); });
 
-  it('旗关:语料 A 级联止于 60(轨迹无 30;底档本相)', () => {
+  it('旗关:语料 A 级联止于 60(轨迹无 30;底档本相;6 窗升档线在粗糙 60 段不可达)', () => {
     varAdaptSetForTest(false);
     const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
     const seq = tierSeq(r.tiers);
     expect(seq).toEqual(['90@178', '60@304']);   // 60 档粗糙段驻留(旧轨迹 30@484 坠底不再存在)
-    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 旗关 6 窗线在粗糙 60 段不可达(升不了=旧世界靠坠 30 才升)
+    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 旗关升不了=v9.12 时代靠坠 30 才升得上去
     expect(r.beat.snapshot().tier).toBe(60);
   });
 
-  it('旗开刀1:语料 A 升 120 回探能力恢复(3 窗可达 vs 6 窗永不;粗糙段回落后再探稳住)', () => {
-    varAdaptSetForTest(true);
-    const on = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
-    varAdaptSetForTest(false);
-    const off = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
-    expect(lastUpgradeIdx(on.tiers)).toBeGreaterThan(0);
-    expect(lastUpgradeIdx(on.tiers)).toBe(3110);   // 旗开:2457 首探→粗糙段回落→3110 再探稳住
-    expect(lastUpgradeIdx(off.tiers)).toBe(-1);
-    expect(lastUpgradeIdx(on.tiers)).toBeGreaterThan(0);
-    expect(lastUpgradeIdx(off.tiers)).toBe(-1);   // 刀1=升档能力差(不只是时序)
-  });
-
-  it('旗关+旗开:语料 B 粗糙段止于 60 驻留(无 upgrade=不虚升,诚实面)', () => {
+  it('旗关:语料 B 粗糙段止于 60 驻留(无 upgrade=不虚升,诚实面)', () => {
     varAdaptSetForTest(false);
     const off = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
     expect(tierSeq(off.tiers)).toEqual(['90@178', '60@452']);
     expect(lastUpgradeIdx(off.tiers)).toBe(-1);
-    varAdaptSetForTest(true);
-    const on = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierSeq(on.tiers)).toEqual(['90@178', '60@452']);   // 刀2/刀3 惰性=双臂同轨
-    expect(lastUpgradeIdx(on.tiers)).toBe(-1);
   });
 
-  it('旗关+旗开:Mac 语料(WIN_C)止于 60 驻留(v9.13 前 30 粘死 93%——阶梯结构化根除)', () => {
+  it('旗关:Mac 语料(WIN_C)止于 60 驻留(v9.13 前 30 粘死 93%——阶梯结构化根除)', () => {
     varAdaptSetForTest(false);
     const off = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
     expect(tierChanges(off.tiers).some((x) => x.tier === 30)).toBe(false);
     expect(off.beat.snapshot().tier).toBe(60);
-    varAdaptSetForTest(true);
-    const on = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierChanges(on.tiers).some((x) => x.tier === 30)).toBe(false);
-    expect(on.beat.snapshot().tier).toBe(60);
-  });
-
-  it('变异证红①:摘刀1(NoLowTierFastUpBeat 恒 6 窗)→ 语料 A 升 120 回探滞后复现', () => {
-    varAdaptSetForTest(true);
-    class NoLowTierFastUpBeat extends FrameBeat {
-      protected override upWindows(): number { return VAR_UP_WINDOWS; }
-    }
-    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoLowTierFastUpBeat() });
-    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 摘刀1=6 窗线同旗关,升档能力丧失
-    
-  });
-
-  it('Mac 语料旗开不变量:LIVE 驻留 120/双峰落 60/T114436 落 60(v9.13 底档)', () => {
-    varAdaptSetForTest(true);
-    const live = driveDeltas(LIVE_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierChanges(live.tiers).filter((x) => x.tier !== 120).length).toBe(0);
-    const bim = driveDeltas(makeBimodal(4800, 11), 120);
-    expect(bim.beat.snapshot().tier).toBe(60);
-    const corpus = T114436_DELTAS_X10.map((v) => v / 10);
-    const t114 = driveDeltas([...corpus, ...corpus], 120);
-    expect(t114.beat.snapshot().tier).toBe(60);
   });
 });
 
+describe('★v9.14 容量判据(?varadapt=1;用户明令「尽量贴近帧率上限;除非帧率压根跑不到上限才降档」)', () => {
+  afterEach(() => { varAdaptSetForTest(false); });
+
+  it('空转机贴上限:Mac WIN_C 全程驻留 120 零迁移;Windows WIN_A/WIN_B 入场重载段降档后探顶回升(终态 120)', () => {
+    varAdaptSetForTest(true);
+    const rc = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierChanges(rc.tiers).filter((x) => x.tier !== 120).length).toBe(0);   // 空转局零迁移
+    expect(rc.beat.snapshot().tier).toBe(120);
+    for (const [name, c] of [['WIN_A', WIN_A_DELTAS_X10], ['WIN_B', WIN_B_DELTAS_X10]] as const) {
+      const r = driveDeltas(c.map((v) => v / 10), 120);
+      expect(r.beat.snapshot().tier, name).toBe(120);                              // 终态=cap(入场真重载降过也回升)
+      expect(lastUpgradeIdx(r.tiers), name).toBeGreaterThan(0);                    // 回升=探顶成功
+    }
+  });
+
+  it('宽流同贴上限:T114436/LIVE/双峰 全程驻留 120(realized≥0.97 线)', () => {
+    varAdaptSetForTest(true);
+    const corpus = T114436_DELTAS_X10.map((v) => v / 10);
+    const t114 = driveDeltas([...corpus, ...corpus], 120);
+    expect(t114.beat.snapshot().tier).toBe(120);
+    expect(tierChanges(t114.tiers).filter((x) => x.tier !== 120).length).toBe(0);
+    const live = driveDeltas(LIVE_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierChanges(live.tiers).filter((x) => x.tier !== 120).length).toBe(0);
+    const bim = driveDeltas(makeBimodal(4800, 11), 120);
+    expect(bim.beat.snapshot().tier).toBe(120);
+    expect(tierChanges(bim.tiers).filter((x) => x.tier !== 120).length).toBe(0);
+  });
+
+  it('真容量不足降阶梯:render-bound 帧耗 25ms → [120,90,60] 落底(runBeat busy 模型)', () => {
+    varAdaptSetForTest(true);
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: 25, callbacks: 3000 });
+    expect(tierChanges(r.tiers).map((x) => x.tier)).toEqual([120, 90, 60]);
+    const st = gapStats(r.rendered.slice(-600));
+    expect(st.mean).toBeGreaterThan(24);                    // 落底后帧距=帧耗本相(读数诚实 ~40fps)
+  });
+
+  it('帧耗 10ms 机:驻留 120 交付 ~100fps([0.80,0.97) 中带=贴近上限本意)', () => {
+    varAdaptSetForTest(true);
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: 10, callbacks: 3000 });
+    expect(r.beat.snapshot().tier).toBe(120);
+    expect(tierChanges(r.tiers).filter((x) => x.tier !== 120).length).toBe(0);
+  });
+
+  it('帧耗 12ms 机:降 90 驻留(~83fps 读数诚实;0.97 线不可达=零探针循环)', () => {
+    varAdaptSetForTest(true);
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: 12, callbacks: 3000 });
+    expect(tierChanges(r.tiers).map((x) => x.tier)).toEqual([120, 90]);
+    expect(r.beat.snapshot().tier).toBe(90);
+  });
+
+  it('容量恢复探顶:前段帧耗 25ms 落 60 → 后段 3ms → 探回 120', () => {
+    varAdaptSetForTest(true);
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: (i) => (i < 900 ? 25 : 3), callbacks: 3600 });
+    const seq = tierChanges(r.tiers).map((x) => x.tier);
+    expect(seq[0]).toBe(120);
+    expect(seq).toContain(60);
+    expect(r.beat.snapshot().tier).toBe(120);
+  });
+
+  it('变异证红:摘容量降档(NoRealizedDownBeat)→ render-bound 滞留 120', () => {
+    varAdaptSetForTest(true);
+    class NoRealizedDownBeat extends FrameBeat {
+      protected override realizedDownRatio(): number { return 0; }
+    }
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: 25, callbacks: 3000, make: () => new NoRealizedDownBeat() });
+    expect(r.beat.snapshot().tier).toBe(120);
+  });
+
+  it('变异证红:摘升档探针(NoRealizedUpBeat)→ 容量恢复后滞留 60', () => {
+    varAdaptSetForTest(true);
+    class NoRealizedUpBeat extends FrameBeat {
+      protected override realizedUpRatio(): number { return 2; }
+    }
+    const r = runBeat({ vsync: HZ120, cap: 120, cost: (i) => (i < 900 ? 25 : 3), callbacks: 3600, make: () => new NoRealizedUpBeat() });
+    expect(r.beat.snapshot().tier).toBe(60);
+  });
+});

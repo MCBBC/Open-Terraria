@@ -55,6 +55,27 @@ export function registerModGenPass(p: ModGenPass): void {
 }
 export function modGenPassesSnapshot(): readonly ModGenPass[] { return modGenPasses; }
 
+/** ★三百三十三刀:mod 物品使用条件门(C# CanUseItem 同位;updateUse 预分流
+ *  点消费;false=本拍禁用) */
+const itemCanUse = new Map<number, (ctx: ModUseCtx) => boolean>();
+
+export function registerModCanUse(vid: number, fn: (ctx: ModUseCtx) => boolean): void {
+  if (itemCanUse.has(vid)) throw new Error(`[mod-hooks] canUse 重复注册: ${vid}`);
+  itemCanUse.set(vid, fn);
+}
+
+export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | null): boolean {
+  if (itemCanUse.size === 0 || !def || !item) return true;
+  const vid = def.vid;
+  if (vid === undefined || vid < MOD_ITEM_STABLE_BASE) return true;
+  const fn = itemCanUse.get(vid);
+  if (!fn) return true;
+  try {
+    return fn({ game, player: game.player, item, def, tileX: 0, tileY: 0,
+      mouseX: game.input.mouseX, mouseY: game.input.mouseY });
+  } catch { return true; }
+}
+
 const npcAi = new Map<number, (e: Enemy, game: Game, player: Player | null) => void>();
 const itemUse = new Map<number, (ctx: ModUseCtx) => boolean>();
 const systems: ModSystemHooks[] = [];
@@ -556,6 +577,7 @@ export function menuThemeSnapshot(): ModMenuThemeSpec | null {
 
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
+  itemCanUse.clear();
   _resetModMusicForTests();
   modBiomeMusicList.length = 0;
   modFrameMusic = 0;

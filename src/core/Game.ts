@@ -155,7 +155,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -15217,6 +15217,9 @@ export class Game implements GameHooks {
     //  （vid≡30000+）经 entry.js 的 sw.itemUse 注册了处理器时最优先接管——原版
     //  专支（帕鲁钻地龟/无人机等）同位先例；返回 true=已消费（useTime 节奏由
     //  handler 自管）。空注册=Map size 短路一次，行为逐位恒等（中立性金标锁）。
+    // ★三百三十三刀:mod canUse 条件门(C# CanUseItem 同位;false=本拍禁用,
+    //  召唤物共存量门/altFunctionUse 分型等消费;空注册=恒 true 零开销)
+    if (heldDef && !runModCanUse(this, heldDef, held)) return;
     if (runModItemUse(this, heldDef, held, tx, ty)) return;
 
     // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速倍率 =
