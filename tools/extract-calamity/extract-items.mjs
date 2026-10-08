@@ -627,5 +627,15 @@ if (WRITE) {
     stats: report,
     sidecar,
   }, null, 2));
+  // ★三百十:rogue 键表(伤害类=rogue 且有 shoot 弹;stealth 系统消费;
+  //  root data 域=__calamityModData 装载)
+  const rogueKeys = [];
+  for (const [k, v] of Object.entries(sidecar)) {
+    if (v && typeof v === 'object' && v.damageClass === 'rogue' && v.shootProj) {
+      rogueKeys.push({ item: k, proj: pascalToSnake(v.shootProj) });
+    }
+  }
+  writeFileSync(join(OUT, 'rogue-keys.json'), JSON.stringify(rogueKeys, null, 2) + '\n');
+  report.rogueKeys = rogueKeys.length;
 }
 console.log(JSON.stringify(report, null, 2));

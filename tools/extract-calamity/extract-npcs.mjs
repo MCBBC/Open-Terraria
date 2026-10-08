@@ -114,6 +114,13 @@ const BUFF_KEYS_NPC = new Set(existsSync(join(OUT, 'content', 'buffs'))
   ? readdirSync(join(OUT, 'content', 'buffs')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''))
   : []);
 const normCuratedLoot = new Map(JSON.parse(readFileSync(join(OUT, '.curated-items.json'), 'utf8')).map((k) => [k.replace(/_/g, ''), k]));
+// ★三百零五:盘键全量去下划线别名(名称切分歧义族 EssenceofHavoc→essence_of_havoc;
+//  冲突键取字典序最小=确定性)
+const normDiskLoot = new Map();
+for (const k of diskItemKeysLoot) {
+  const stripped = k.replace(/_/g, '');
+  if (!normDiskLoot.has(stripped) || k < normDiskLoot.get(stripped)) normDiskLoot.set(stripped, k);
+}
 
 const npcDir = join(SRC, 'NPCs');
 const csFiles = walkFiles(npcDir, '.cs').filter((f) => {
@@ -127,31 +134,94 @@ const pngs = walkFiles(npcDir, '.png').filter((p) => !/_Highlight|_Glow|_Bestiar
 const pngByBase = new Map();
 for (const p of pngs) { const b = basename(p, '.png'); if (!pngByBase.has(b)) pngByBase.set(b, p); }
 
+// ★三百零五:跨文件 const 表(public const int <Field> = N;<Class>.<Field> 消费)
+// ★三百零七:扩 Items 域(ThankYouPainting.DropInt 族)+DropHelper 已知常数
+const CLASS_CONSTS = {};
+{
+  const dh = readFileSync(join(SRC, 'Utilities', 'DropHelper.cs'), 'utf8').match(/NormalWeaponDropRateInt = (\d+)/);
+  if (dh) CLASS_CONSTS['NormalWeaponDropRateFraction'] = Number(dh[1]);
+}
+for (const f of [...csFiles, ...walkFiles(join(SRC, 'Items'), '.cs')]) {
+  const cm2 = readFileSync(f, 'utf8').match(/class\s+(\w+)/);
+  const cls = cm2 ? cm2[1] : null;
+  for (const km of readFileSync(f, 'utf8').matchAll(/public const int\s+(\w+)\s*=\s*(\d+)/g)) {
+    if (cls) CLASS_CONSTS[`${cls}.${km[1]}`] = Number(km[2]);
+    if (CLASS_CONSTS[km[1]] === undefined) CLASS_CONSTS[km[1]] = Number(km[2]);
+  }
+}
+
+// ★三百零八:DownedBossSystem 字段→world.flags 映射(穷举)
+const DOWNED_FLAG_MAP = {
+  downedProvidence: 'downed_providence',
+  downedPolterghast: 'downed_polterghast',
+  downedAquaticScourge: 'downed_aquatic_scourge',
+  downedOldDuke: 'downed_old_duke',
+  downedStormWeaver: 'downed_storm_weaver',
+  downedCeaselessVoid: 'downed_ceaseless_void',
+  downedSignus: 'downed_signus',
+  downedLeviathan: 'downed_leviathan',
+  downedAstrumDeus: 'downed_astrum_deus',
+  downedHiveMind: 'downed_hive_mind',
+  downedPerforatorHive: 'downed_perforator_hive',
+  downedCryogen: 'downed_cryogen',
+  downedCalamitasClone: 'downed_calamitas_clone',
+  downedDragonfolly: 'downed_dragonfolly',
+  downedBoomerDuke: 'downed_boomer_duke',
+};
+
 // —— ModifyNPCLoot 解析(B6):classic 曲线面 ——
 // 支持形:npcLoot.Add(TYPE, d) 简单形 / DropHelper.NormalVsExpertQuantity(...)(经典=normal 支)/
 //        ItemDropRule.Common(TYPE, d, min, max)。其余(条件/OneFromOptions/池)=保守跳过计数。
 const lootSkips = new Map();
 let lootSkipSamples = [];
-function parseLootBody(body, resolveItemKey, pascalToSnake) {
+function parseLootBody(body, resolveItemKey, pascalToSnake, CLASS_CONSTS) {
   const drops = [];
-  let idx = 0;
-  for (;;) {
-    const at = body.indexOf('npcLoot.Add(', idx);
-    if (at < 0) break;
-    // 平衡括号取实参串(嵌套泛型/调用安全)
-    let depth = 0, end = -1;
-    for (let i = at + 'npcLoot.Add'.length; i < body.length; i++) {
+  // ★三百零五:normalOnly/expertOnly 掉落集(DefineNormalOnlyDropSet=经典档专属
+  //  掉落=本提取器经典口径直接并入;ExpertOnly=跳;AddNormalOnly/AddExpertOnly
+  //  简写同义)
+  const normalSets = [];
+  const expertSets = [];
+  for (const sm of body.matchAll(/var\s+(\w+)\s*=\s*npcLoot\.Define(\w+)DropSet\(\)/g)) {
+    if (sm[2] === 'NormalOnly') normalSets.push(sm[1]);
+    else if (sm[2] === 'ExpertOnly') expertSets.push(sm[1]);
+  }
+  const recvAlt = ['npcLoot', ...normalSets, ...expertSets].join('|');
+  const callRe = new RegExp(`\\b(${recvAlt})\\.(AddNormalOnly|AddExpertOnly|Add)\\(`, 'g');
+  const calls = [];
+  let m0;
+  while ((m0 = callRe.exec(body)) !== null) {
+    const kind = (expertSets.includes(m0[1]) || m0[2] === 'AddExpertOnly') ? 'expert' : 'normal';
+    // ★三百零五:depth=1 起(m0[0] 已含调用自身左括号——原实现从括号前扫;漏计=
+    //  首闭括号即 depth -1=巨型切片,unsupportedShape 10→288 事故根因)
+    let depth = 1, end = -1;
+    for (let i = m0.index + m0[0].length; i < body.length; i++) {
       if (body[i] === '(') depth++;
       else if (body[i] === ')') { depth--; if (depth === 0) { end = i; break; } }
     }
     if (end < 0) break;
-    const arg = body.slice(at + 'npcLoot.Add('.length, end).trim();
-    idx = end + 1;
+    calls.push({ arg: body.slice(m0.index + m0[0].length, end).trim(), kind });
+    callRe.lastIndex = end;
+  }
+  for (const { arg, kind } of calls) {
+    if (body.includes('SulphurousShale(), 5, 10, 30')) {
+      const simpleM0 = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+|[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
+      console.error('DBG3 arg:', JSON.stringify(arg), '| kind:', kind, '| simpleM0:', simpleM0 ? `${simpleM0[1]},${simpleM0[2]},${simpleM0[3]},${simpleM0[4]}` : 'null');
+    }
+    if (kind === 'expert') {
+      lootSkips.set('expertOnlySet', (lootSkips.get('expertOnlySet') ?? 0) + 1);
+      continue;
+    }
     // 平衡括号取实参串——模式梯
     const nveq = arg.match(/^\s*DropHelper\.NormalVsExpertQuantity\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/);
     const common = arg.match(/^\s*ItemDropRule\.Common\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\)\s*$/);
     const vidCommon = arg.match(/^\s*ItemDropRule\.Common\(\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\)\s*$/);
-    const simple = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
+    const simpleM = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+|[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
+    // ★三百零五:数组下标对齐 match 语义(1=类名/2=尾/3,4=min,max——0=占位)
+    const simple = simpleM ? [null, simpleM[1], simpleM[2] !== undefined && /^\d+$/.test(simpleM[2]) ? simpleM[2] : undefined, simpleM[3], simpleM[4]] : null;
+    // ★三百零五:const 尾(<Class>.<CONST>/CONST)解析(ThankYouPainting.DropInt=100 族)
+    const constTail = simpleM && simple[2] === undefined && simpleM[2] !== undefined
+      ? CLASS_CONSTS?.[simpleM[2].replace(/^\w+\./, '')]
+      : undefined;
     const vidSimple = arg.match(/^\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*$/);
     // 前缀两形:Calamity 自有 DropHelper.NormalvsExpert + tML 内建 ItemDropRule.NormalvsExpert
     // (tML 1.4.4 ItemDropRules/TerrariaHooks;签名 (itemID, denom, min=1, max=1, …),经典=1/denom 掷 min..max)
@@ -162,13 +232,21 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
     const frac = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*new Fraction\((\d+),\s*(\d+)\)\s*$/);
     const tern = arg.match(/^\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*,\s*[^,]+\?\s*(\d+)\s*:\s*(\d+)\s*$/);
     const calStyle = arg.match(/^\s*DropHelper\.CalamityStyle\(\s*(?:DropHelper\.)?(?:NormalWeaponDropRateFraction|new Fraction\((\d+),\s*(\d+)\))\s*,\s*([A-Za-z0-9_]+)\s*\)\s*$/);
+    // ★三百零六:PerPlayer 双形(DropHelper.cs:1449=PerPlayerDropRule——掉落语义
+    //  与 Common 同(1/denom 掷 min..max,numerator=1),仅差掉落保护面=引擎无此域)
+    const ppItem = arg.match(/^\s*DropHelper\.PerPlayer\(\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+|[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*\)\s*$/);
+    const ppVid = arg.match(/^\s*DropHelper\.PerPlayer\(\s*ItemID\.([A-Za-z0-9_]+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+)\s*(?:,\s*(\d+))?)?)?\s*\)\s*$/);
     const push = (item, denom, min, max) => {
-      if (item === null) { lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1); return; }
+      if (item === null) { lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1); if (lootSkipSamples.length < 10) lootSkipSamples.push('item:' + (nveq?.[1] ?? nvsE?.[1] ?? common?.[1] ?? vidCommon?.[1] ?? simple?.[1] ?? vidSimple?.[1] ?? oneOpt?.[2]?.slice(0, 40) ?? '?')); return; }
       const rec = { item };
       if (denom && denom > 1) rec.chance = 1 / denom;
       if ((min ?? 1) !== 1 || (max ?? 1) !== 1) { rec.min = min ?? 1; rec.max = max ?? min ?? 1; }
       if (!drops.some((d) => d.item === item && (d.chance ?? 1) === (rec.chance ?? 1) && (d.min ?? 1) === (rec.min ?? 1))) drops.push(rec);
     };
+    if (arg.includes('SulphurousShale')) {
+      const k0 = resolveItemKey(simple[1].split('.').pop());
+      console.error('DBG5:', JSON.stringify({ arg: arg.slice(0, 70), name: simple[1], simple2: simple[2], key: k0 }));
+    }
     if (nveq) {
       // NormalVsExpertQuantity → 经典=normal 支(min/max 第 3/4 参)
       const key = resolveItemKey(nveq[1].split('.').pop());
@@ -181,9 +259,15 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
       push(key, common[2] ? Number(common[2]) : 1, common[3] ? Number(common[3]) : 1, common[4] ? Number(common[4]) : (common[3] ? Number(common[3]) : 1));
     } else if (vidCommon) {
       push(ENUM_ITEM_ID[vidCommon[1]] ?? null, vidCommon[2] ? Number(vidCommon[2]) : 1, vidCommon[3] ? Number(vidCommon[3]) : 1, vidCommon[4] ? Number(vidCommon[4]) : (vidCommon[3] ? Number(vidCommon[3]) : 1));
-    } else if (simple) {
+    } else if (simple && (simple[2] !== undefined || simpleM[2] === undefined || constTail !== undefined)) {
+      // ★三百零五:无尾=缺省分母 1(原 simple 形);数字尾/已解析 const 尾=min/max 全传
       const key = resolveItemKey(simple[1].split('.').pop());
-      push(key, simple[2] ? Number(simple[2]) : 1, 1, 1);
+      push(key, simple[2] ? Number(simple[2]) : (constTail ?? 1), simple[3] ?? 1, simple[4] ?? simple[3] ?? 1);
+    } else if (simpleM && simpleM[2] !== undefined && simple[2] === undefined && constTail === undefined) {
+      // 无 denom 且 const 未解析=跳(原 simple 支语义)
+      lootSkips.set('constMissing', (lootSkips.get('constMissing') ?? 0) + 1);
+      if (lootSkipSamples.length < 8) lootSkipSamples.push('const:' + arg.slice(0, 90));
+    } else if (simple && false) {
     } else if (nvsE_v) {
       // NormalvsExpert(ItemID.X, denom[, min[, max]]) → 经典=1/denom 掷 min..max
       push(ENUM_ITEM_ID[nvsE_v[1]] ?? null, Number(nvsE_v[2]), Number(nvsE_v[3] ?? 1), Number(nvsE_v[4] ?? nvsE_v[3] ?? 1));
@@ -237,16 +321,45 @@ function parseLootBody(body, resolveItemKey, pascalToSnake) {
         const fracDen = calStyle[2] ? Math.max(1, Math.round(Number(calStyle[2]) / Number(calStyle[1]))) : 4;
         for (const o of opts2) push(o, fracDen, 1, 1);
       } else lootSkips.set('unsupportedShape', (lootSkips.get('unsupportedShape') ?? 0) + 1);
+    } else if (ppItem) {
+      // ★三百零六:PerPlayer(ItemType<X>(), denom[, min[, max]])——Common 同义
+      const key = resolveItemKey(ppItem[1].split('.').pop());
+      const den = ppItem[2] !== undefined ? (/^\d+$/.test(ppItem[2]) ? Number(ppItem[2]) : (CLASS_CONSTS?.[ppItem[2].replace(/^\w+\./, '')] ?? 1)) : 1;
+      push(key, den, ppItem[3] ? Number(ppItem[3]) : 1, ppItem[4] ? Number(ppItem[4]) : (ppItem[3] ? Number(ppItem[3]) : 1));
+    } else if (ppVid) {
+      // PerPlayer(ItemID.X, denom[, min[, max]])
+      push(ENUM_ITEM_ID[ppVid[1]] ?? null, ppVid[2] ? Number(ppVid[2]) : 1, ppVid[3] ? Number(ppVid[3]) : 1, ppVid[4] ? Number(ppVid[4]) : (ppVid[3] ? Number(ppVid[3]) : 1));
     } else if (/^ItemDropRule\.BossBag(ByCondition)?\(/.test(arg)) {
       lootSkips.set('expertOnlyBossBag', (lootSkips.get('expertOnlyBossBag') ?? 0) + 1);
     } else if (/^ItemDropRule\.ByCondition\(/.test(arg)) {
-      lootSkips.set('conditionGate', (lootSkips.get('conditionGate') ?? 0) + 1);
+      // ★三百零八:ByCondition 条件门三形→{k:'flag'} 规则(引擎 drop face 扩):
+      //  ①KilledLast(该 NPC 死亡即真=恒真门→同 common)+Hardmode(=hardMode 旗)
+      //  ②downed 门(DownedBossSystem.downedX→world.flags 映射=穷举表)
+      //  其余 lambda 形=登记(引擎 flags 域不可表达)
+      const condKilled = arg.match(/^ItemDropRule\.ByCondition\(\s*KilledLast\s*,\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*(?:,\s*(\d+))??\s*\)\s*$/);
+      const condHard = arg.match(/^ItemDropRule\.ByCondition\(\s*(?:DropHelper\.)?Hardmode\(\)\s*,\s*ItemID\.([A-Za-z0-9_]+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/);
+      const condDowned = arg.match(/^ItemDropRule\.ByCondition\(\s*DropHelper\.If\(\(\)\s*=>\s*!DownedBossSystem\.(\w+)\)\s*,\s*(?:ModContent\.)?ItemType<([A-Za-z0-9_.]+)>\(\)\s*\)\s*$/);
+      if (condKilled) {
+        const key = resolveItemKey(condKilled[1].split('.').pop());
+        if (key) { const rec = { item: key, min: 1, max: 1 }; if (condKilled[2]) rec.max = Number(condKilled[2]); drops.push(rec); }
+        else lootSkips.set('itemMissing', (lootSkips.get('itemMissing') ?? 0) + 1);
+      } else if (condHard) {
+        drops.push({ item: ENUM_ITEM_ID[condHard[1]] ?? null, min: Number(condHard[2]), max: Number(condHard[3]), chance: 1 / Number(condHard[4]), flag: 'hardMode' });
+      } else if (condDowned) {
+        const key = resolveItemKey(condDowned[2].split('.').pop());
+        const flag = DOWNED_FLAG_MAP[condDowned[1]];
+        if (key && flag) drops.push({ item: key, min: 1, max: 1, flag });
+        else lootSkips.set('conditionGate', (lootSkips.get('conditionGate') ?? 0) + 1);
+      } else {
+        lootSkips.set('conditionGate', (lootSkips.get('conditionGate') ?? 0) + 1);
+      }
     } else {
       lootSkips.set('unsupportedShape', (lootSkips.get('unsupportedShape') ?? 0) + 1);
       if (!lootSkipSamples) lootSkipSamples = [];
       if (lootSkipSamples.length < 8) lootSkipSamples.push(arg.slice(0, 120));
     }
   }
+  if (body.includes('SulphurousShale')) console.error('DBG4 calls:', calls.length, JSON.stringify(calls.map((c) => [c.kind, c.arg.slice(0, 60)])));
   return drops;
 }
 // ItemID 名→vid(掉落 vidCommon/vidSimple 用)
@@ -406,8 +519,9 @@ for (const f of csFiles) {
     const drops = parseLootBody(lootBody, (cls2) => {
       const key = pascalToSnake(cls2);
       if (diskItemKeysLoot.has(key)) return key;
-      return normCuratedLoot.get(key.replace(/_/g, '')) ?? null;
-    }, pascalToSnake);
+      return normCuratedLoot.get(key.replace(/_/g, '')) ?? normDiskLoot.get(key.replace(/_/g, '')) ?? null;
+    }, pascalToSnake, CLASS_CONSTS);
+
     if (drops.length) { raw.drops = drops; stats.lootDrops += drops.length; stats.lootNpcs++; }
   }
 

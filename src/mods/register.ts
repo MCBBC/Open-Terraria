@@ -120,6 +120,18 @@ function buildDropRules(plan: RegistrationPlan, modId: string, spec: Registratio
       out.push({ k: 'bossBag', item: id });
       continue;
     }
+    // ★三百零八:flag 条件门(hardMode/downed_x)=引擎 cond 规则(evalCond 消费)
+    const dflag = (d as unknown as { flag?: string }).flag;
+    if (dflag) {
+      const fl = dflag;
+      out.push({
+        k: 'cond', item: id, min: d.min ?? 1, max: d.max ?? 1,
+        num: 1, denom: Math.max(1, Math.round(1 / Math.min(1, chance))),
+        cond: { name: fl === 'hardMode' ? 'IsHardmode' : 'WorldFlag', args: fl === 'hardMode' ? [] : [fl] },
+        noLuck: true,
+      });
+      continue;
+    }
     out.push({
       k: 'common', item: id, min: d.min ?? 1, max: d.max ?? 1,
       num: 1, denom: Math.max(1, Math.round(1 / Math.min(1, chance))), noLuck: true,

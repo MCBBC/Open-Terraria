@@ -63,7 +63,7 @@ const csFiles = walkFiles(projDir, '.cs').filter((f) => {
   const base = basename(f);
   if (/Global|CommonProjectileAI|PowderTransformations/.test(base)) return false;
   const head = readFileSync(f, 'utf8').slice(0, 2500);
-  if (!/class\s+\w+\s*:\s*\w*Projectile/.test(head)) return false;
+  if (!/class\s+\w+\s*:\s*\w*(Projectile|Cannon)\b/.test(head)) return false;   // ★三百零九:+Cannon 族(ExoskeletonCannon 抽象基)
   if (/abstract class/.test(head)) return false;
   return true;
 });
@@ -90,7 +90,10 @@ for (const f of csFiles) {
   if (emittedKeys.has(key) || curatedProjKeys.has(key)) continue;
   stats.total++;
   const text = readFileSync(f, 'utf8');
-  let body = extractMethodBody(text, 'public override void SetDefaults()');
+  // ★三百零三:Defaults() 虚方法形(holdout 族——基类 SetDefaults 调 Defaults() 覆写)
+  // ★三百零四:签名放宽——`sealed override`/其他修饰序用 'void SetDefaults()' 尾锚
+  let body = extractMethodBody(text, 'void SetDefaults()')
+    ?? extractMethodBody(text, 'void Defaults()');
   if (body === null) {
     // ★三百零二:基类链 SetDefaults 回溯(noSetDefaults 族——BaseGunHoldoutProjectile
     // 等基类持 SetDefaults;沿 class X : Y 链上溯,上限 5 层)
@@ -106,7 +109,9 @@ for (const f of csFiles) {
     for (let hop = 0; hop < 5 && base && base !== 'ModProjectile' && body === null; hop++) {
       const bk = baseMap.get(base);
       if (!bk) break;
-      body = extractMethodBody(readFileSync(bk.file, 'utf8'), 'public override void SetDefaults()');
+      const bt = readFileSync(bk.file, 'utf8');
+      body = extractMethodBody(bt, 'void SetDefaults()')
+        ?? extractMethodBody(bt, 'void Defaults()');
       base = bk.base;
     }
   }
@@ -201,10 +206,13 @@ for (const f of csFiles) {
 // 贴图=占位;AI=ModProj 原语/直线近似(登记)。
 {
   const missingProjKeys = new Set();
-  if (existsSync(join(OUT, 'projref-missing.json'))) {
-    for (const entry of JSON.parse(readFileSync(join(OUT, 'projref-missing.json'), 'utf8'))) {
-      const at = entry.indexOf('→');
-      if (at > 0) missingProjKeys.add(entry.slice(at + 1));
+  {   // ★三百零四:wanted=全量 sidecar shootProj(去上轮 missing 依赖=状态振荡根因)
+    const rp = join(OUT, 'items-extract-report.json');
+    if (existsSync(rp)) {
+      const side = JSON.parse(readFileSync(rp, 'utf8')).sidecar ?? {};
+      for (const [k, v] of Object.entries(side)) {
+        if (v && typeof v === 'object' && v.shootProj !== undefined) missingProjKeys.add(pascalToSnake(v.shootProj));
+      }
     }
   }
   const otherFiles = [];

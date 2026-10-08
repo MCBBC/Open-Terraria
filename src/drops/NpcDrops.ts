@@ -226,6 +226,8 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'NotRemixSeed': return !ctx.remixWorld;
     case 'NeverTrue': return false;
     case 'NotFromStatue': return !ctx.statueSpawned; // Conditions.NotFromStatue
+    // ★三百零八:mod loot flag 门(world.flags 直查;downed_x 族)
+    case 'WorldFlag': return !!(ctx.flags?.[String(args[0])]);
     case 'IsBloodMoonAndNotFromStatue': return !!ex?.bloodMoon && !ctx.statueSpawned;
     case 'IsCrimsonAndNotExpert': return ctx.crimson && !ctx.isExpert;
     case 'IsCorruptionAndNotExpert': return !ctx.crimson && !ctx.isExpert;
