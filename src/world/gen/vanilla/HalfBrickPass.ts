@@ -582,7 +582,14 @@ function checkWallDecorKT(st: TileStore, rng: RNG, x: number, y: number, kind: '
 /** TileFrame 生成期路径子集（cs:82067）：边界闸 + 非活性清 half/slope +
  *  巨石族 Check2x2。PaintClear 生成期无漆可清;液体/AddWater 段被
  *  !generatingWorld 门挡;基础块 TileFrameCosmetic 同门不跑。 */
+let _tfDepth = 0;
 function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (_tfDepth > 3000) return;   // ★三百十六:帧级联深度护栏(check2x2 尾 4×4 重帧互递归)
+  _tfDepth++;
+  tileFrameInner(st, rng, x, y);
+  _tfDepth--;
+}
+function tileFrameInner(st: TileStore, rng: RNG, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return; // cs:82069
   const i = st.idx(x, y);
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
