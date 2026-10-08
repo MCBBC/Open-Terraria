@@ -26387,7 +26387,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this._staffHarvestBonus = true;
         this.breakTile(tx, ty);
         this._staffHarvestBonus = false;
-        if (false && st.get(tx, ty) === 0 && (tsheet === 83 || tsheet === 84)) {
+        if (st.get(tx, ty) === 0 && (tsheet === 83 || tsheet === 84)) {
           const below = st.get(tx, ty + 1);
           const bSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
           if (bSheet === 78 || bSheet === 380 || bSheet === 579) this.placeAlchRuntime(tx, ty, style);
