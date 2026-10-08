@@ -179,6 +179,9 @@ export interface ModProjContent {
   width?: number;
   height?: number;
   rotateToVelocity?: boolean;
+  /** ★三百三十:追踪 profile(homing accel/距离门;分类器回填) */
+  homing?: number;
+  homingDist?: number;
 }
 
 /** P3 商店上架(content/shops.json)。npcId=原版 NPC id(城镇商);price 缺省=物品

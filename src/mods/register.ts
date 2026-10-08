@@ -163,6 +163,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       width: s.width,
       height: s.height,
       rotateToVelocity: s.rotateToVelocity,
+      homing: s.homing,
+      homingDist: s.homingDist,
     });
     projs++;
   }

@@ -103,7 +103,7 @@ export class ModProj extends Entity {
         const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);
         if (d < bestD) { bestD = d; best = en; }
       }
-      if (best && bestD < 800) {
+      if (best && bestD < (this.spec.homingDist ?? 800)) {
         const d = Math.hypot(best.cx - this.cx, best.cy - this.cy) || 1;
         this.vx += ((best.cx - this.cx) / d) * accel;
         this.vy += ((best.cy - this.cy) / d) * accel;

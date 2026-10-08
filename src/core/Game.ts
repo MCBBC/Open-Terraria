@@ -23425,7 +23425,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.swingTileCutSet.add(tk);
           this.smashPot(tx, ty);
         } else if ((TILE_CUT.has(t) || BONUS_CUT_TILES.has(t))
-          && !(natureGuard && CUT_IGNORE_NATURE.has(t))) {
+          // ★BJ577：MowTheLawn ignore 表 = GetTileCutIgnoreList(HeldItem)（Player.cs:20493
+          //  → :44992-45014）——held 213/5295 → allowRegrowth → TileCutIgnore.Regrowth
+          //  （TileID.cs:88 含 82/83/84 药草全阶+花草族）→ 持杖推割草机不割药草
+          //  （vanilla nature 支后置覆盖 staff 支,本仓 nature 语义维持现状,法杖支按
+          //  原式并入;判别测试 bj577-regrowth-replant 锁红）
+          && !((natureGuard && CUT_IGNORE_NATURE.has(t))
+            || ((heldVid === 213 || heldVid === 5295) && CUT_IGNORE_REGROWTH.has(t)))) {
           this.swingTileCutSet.add(tk);
           this.breakTile(tx, ty);
           this.sickleHayDropIfSickle(heldVid, t, tx, ty);   // ★BJ300（MowTheLawn :20494 传 HeldItem 面）
@@ -24794,10 +24800,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       st.setTile(x, y, 0);
       this.sfx.play('chop', 1, x * TILE + 8, y * TILE + 8);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
-      // 药草 83/84（KillTile_GetItemDrops case 83/84，:65726-65750）：style=
+      // 药草 83/84（KillTile_GetItemDrops case 83/84，:66194-66217）：style=
       // frameX/18 → 草药 313+style（6→2358 颠茄）×1；开花附种子 307+style
       // （6→2357）×Next(1,4)。84 恒开花；83 按 IsAlchemyPlantHarvestable 时辰门。
-      // 再生法杖/斧（staffOfRegrowthBonus :65740-65746）：草 ×Next(1,3)、种子 ×Next(1,6)
+      // 再生法杖/斧（staffOfRegrowthBonus :66206-66211）：bonus 臂【先于】harvestable
+      // else-if 且【无 flag 检查】→ 加成时 83/84 恒掉 草 ×Next(1,3)、种子 ×Next(1,6)
+      //（种子门=bonus ∨ 收获性,非 harvestable 单门——★BJ577 按原式对拍修,
+      //  WorldEvolution.ts:604-606 同构背书;现在位可达面=tryGrassConvert 场,
+      //  该场 harvestable 恒真故净行为不变,本修为逐字镜像+防未来置位点扩散）
       if (sheet === 83 || sheet === 84) {
         const style = Math.floor(fx / 18);
         const herbVid = style === 6 ? 2358 : 313 + style;
@@ -24808,7 +24818,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (herbKey && ITEM_BY_KEY[herbKey] !== undefined) {
           this.spawnDrop(x * TILE + 8, y * TILE + 8, herbKey, bonus ? 1 + Math.floor(Math.random() * 2) : 1);
         }
-        if (sheet === 84 || this.isAlchemyPlantHarvestable(style, y)) {
+        if (bonus || sheet === 84 || this.isAlchemyPlantHarvestable(style, y)) {
           const seedKey = VANILLA_ITEM_KEY_BY_ID[seedVid];
           if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
             const n = bonus ? 1 + Math.floor(Math.random() * 5) : 1 + Math.floor(Math.random() * 3);
@@ -26377,7 +26387,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this._staffHarvestBonus = true;
         this.breakTile(tx, ty);
         this._staffHarvestBonus = false;
-        if (st.get(tx, ty) === 0 && (tsheet === 83 || tsheet === 84)) {
+        if (false && st.get(tx, ty) === 0 && (tsheet === 83 || tsheet === 84)) {
           const below = st.get(tx, ty + 1);
           const bSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
           if (bSheet === 78 || bSheet === 380 || bSheet === 579) this.placeAlchRuntime(tx, ty, style);
@@ -43137,8 +43147,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile。
-   *  手持再生法杖 213/再生之斧 5295 挥割药草 → staffOfRegrowthBonus（:44013-44016，
-   *  ItemCheck_CutTiles 挥击期间置位，breakTile 掉落求值时消费）
+   *  ★BJ577（2026-10-09 定谳）：弹域【无】staffOfRegrowthBonus——原版置位点全 grep
+   *  仅 Player.cs:41360（PlaceThing_Tiles_BlockPlacementForAssortedThings 头,持杖）与
+   *  :45021（ItemCheck_CutTiles 体,213/5295 玩家挥割/MowTheLawn 面），复位
+   *  :18549/:41678/:45080；Projectile.CutTilesAt/Collision.CutTiles（弹域）全程不触
+   *  该旗（字段 Player.cs:875,消费 WorldGen.cs:66206）→ 弹割药草无论持杖与否均走
+   *  harvestable 臂（草×1+种子×Next(1,4)）。曾按「手持法杖」在此置位 = 弹割越权
+   *  加成（草×1-2+种子×1-5,判别测试 bj577 锁红）。
    *  ★SW-BJ67（2026-09-14）vid 逐型豁免面（P.cs:15391-15393;1458 :15392 同）：
    *  `type==1047 && tile.type==231 → flag=false`——彩虹巨石滚过幼虫（tileCut[231],
    *  Main.cs:7536）不割 → 不召蜂王。vanilla CutTilesAt 逐型 flag 表在弹侧,
@@ -43201,10 +43216,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && !canCutTile(st, x, y, 'AttackProjectile')) return;
     if (t === POT_TILE) this.smashPot(x, y);
     else if (TILE_CUT.has(t)) {
-      if (t === TILE_BY_KEY['v_83_herbs_mature'] || t === TILE_BY_KEY['v_84_herbs_bloom']) {
-        const hv = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
-        if (hv === 213 || hv === 5295) this._staffHarvestBonus = true;
-      }
+      // ★BJ577：此处【不】置 _staffHarvestBonus（见方法头定谳——弹域零加成面,
+      //  vanilla 置位点仅 PlaceThing :41360 与 ItemCheck_CutTiles :45021 两处,
+      //  弹域 Projectile.CutTilesAt 不经该函数）。掉落归 breakTile 83/84 臂。
       // byPlayer=true：弹体砍切 = Projectile.CutTiles（:15282-15351 CurrentlyMining 包络,
       // 本仓调用面 Arrow/ClusterFragmentProj 等弹体 = 该窗消费位）→ 计 tileDestroyed
       //（2026-09-04 审计补计）。★玩家近战挥割（mowCutTiles/AttackMelee :45017）不在

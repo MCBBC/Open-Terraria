@@ -79,6 +79,8 @@ export interface ModProjSpec {
   gravity?: number;
   /** ★B7 一百零五刀:追踪加速度(向最近敌怪 accel/拍,800px 门,钳速;缺省无) */
   homing?: number;
+  /** ★三百三十刀:追踪距离门(px;helper HomeInOnNPC distanceRequired 映射;缺省 800) */
+  homingDist?: number;
   /** ★B7 一百零六刀:推进加速(沿初速向 accel/拍,钳 maxSpeed) */
   accelerate?: number;
   /** 回旋镖:飞行 maxTicks 后返程(向 owner 加速),拾取消亡 */

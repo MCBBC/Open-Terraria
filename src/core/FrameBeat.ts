@@ -80,6 +80,28 @@
  *      落 30——用户明令「粘死 30」为病;旗关行为不变。
  *    语料=两把 Windows trace 链[e] 切片(tests/frame-beat.test.ts v9.12.2 块);
  *    Mac 四语料(T114436/LIVE/双峰/洁净)终态不变(线不动,仅时序)。
+ *  - 【v9.13 去除 30 档】(2026-10-09 用户明令「干脆去除30fps这个档位吧,理论上现在
+ *    大多机器都可以稳定60」):TIER_LADDER=[120,90,60],底档=60。机理三重:①「粘死
+ *    30」为病(用户两连实报+Mac WIN_C 语料 30 档 93% 永不升)——30 档一除病灶在结构
+ *    上不可能,刀2/刀3(底档强化门/地板)随之惰性化(钩/常数保留=史档,条件绑定
+ *    「落点<60」,阶梯重现 <60 档时自动复活);②真弱机(帧耗>16.7ms)render-bound
+ *    逐回调渲,帧距=帧耗本相 std≈0,30 档对它们只是无谓减速(v9.12 头注 render-bound
+ *    语义);③60 档贴线流(窗 std 3.8-6.2)60 驻留(粗糙但可用)优于 30 驻留——v9.12.2
+ *    判例改判的阶梯结构化。旗开仅刀1(低档 3 窗升档)保持活性。老 30 档行为史档=
+ *    本头注 v9.12「沿阶梯,30 底」句+git 历史。
+ *  - 【v9.14 容量判据世界】(2026-10-09,用户 Mac 实报「?varadapt=1 还老在 60 不愿升档,
+ *    明明很空闲」+明令「就不能尽量的贴近帧率上限?除非帧率压根跑不到上限才降档」;
+ *    ?varadapt=1 旗=本世界,旗关=v9.13 方差世界逐位):
+ *  - 定谳(Trace-20261009T005235 游戏链[loop] 158/s 双峰超速流):v9.12 方差判据把
+ *    回调流固有抖动(累计器转成 {4,12}ms 锯齿,均值仍=档周期)判不稳=空转机被钉死
+ *    60;「抖」≠「跑不到」。本刀把档位判据从【帧距方差】换【realized fps】(窗均值
+ *    倒数):≥0.97×档=贴上限驻留(锯齿可接受=用户明令),<0.80×档 连续 2 窗=真跑不到
+ *    才降;0.97 线连续 3 窗=探顶(无帧耗门——门被自证伪,见 REALIZED_UP_RATIO 注),
+ *    失败由降档自然落回(探针 fps 语义恒≥中性)。
+ *  - 效果(语料实跑):Mac WIN_C 空转局/Windows WIN_A/WIN_B/T114436/LIVE/双峰 全部
+ *    全程驻留 cap 零迁移;render-bound(帧耗 25ms)落 60 阶梯;帧耗 10ms 机驻留 120
+ *    交付 100fps(中带);帧耗 12ms 机落 90 驻留(83fps,读数诚实)。
+ *  - std 自此不进档位决策(诊断面);方差世界(旗关)保留=史档+红判别器复刻点。
  *  - 【史档】v9.11 终局刀=跟满回归(2026-10-08)
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
@@ -613,8 +635,12 @@ const FLOOR_TOL = 0.15;
 //  反复抖动」;v9.11 跟满回归退役,累计器面以锁帧档语义复活——DUE_GUARD_MS=v9.9
 //  同值 0.75,机理/裁决原话/三对照实测见头注 v9.12)
 /** 锁帧档阶梯(降序;cap>0 时有效档∈阶梯∪{cap},自动降档沿阶梯逐级向下,升档沿
- *  阶梯逐级向上且永不越过用户档) */
-export const TIER_LADDER = [120, 90, 60, 30];
+ *  阶梯逐级向上且永不越过用户档)。★v9.13(2026-10-09 用户明令)去除 30 档:底档=60。
+ *  依据:①粘死 30 为病(Mac WIN_C 语料 30 档 93% 永不升/用户两连实报)——30 档一除,
+ *  该病灶结构上不可能;②真弱机(帧耗>16.7ms)走 render-bound 逐回调渲,30 档对它们
+ *  只是无谓减速;③60 档贴线流(窗 std 3.8-6.2)在 60 驻留(粗糙但可用)优于 30 驻留。
+ *  刀2/刀3(底档 30 强化门/地板)随之惰性化(见 downWindows/bottomDownLineFloor 注)。 */
+export const TIER_LADDER = [120, 90, 60];
 /** 累计器过门余量(ms;v9.9 相位锚定同值复活):shouldRender=now ≥ _nextDue−此值,
  *  只防 rAF 时间戳抖动(渲染落点可早于相位线 0.75ms) */
 export const DUE_GUARD_MS = 0.75;
@@ -673,7 +699,27 @@ export const VAR_DOWN_WINDOWS_BOTTOM = 3;
  *  ——地板须越过 max 才能保长曝(×2 语料)永不再坠;WIN_B 真差相 7.87+ 留 2.4 判距。 */
 export const VAR_DOWN_LINE_FLOOR_BOTTOM = 6.0;
 
-/** ★v9.12.2 宽流适配总旗(?varadapt=1 激活,缺省关=三刀全旁路,v9.12 现役逐位;
+// ── ★v9.14 容量判据常数族(2026-10-09 用户明令「尽量贴近帧率上限;除非帧率压根跑不到
+//    上限才降档」的算法化;?varadapt=1 旗=本世界,旗关=v9.13 方差世界逐位)──
+/** 降档线:realized(窗内帧距均值倒数)< 此系数×档值 =「跑不到本档」连续 2 窗才降。
+ *  0.80 定值:Windows 流(102/s@120 档 realized 0.85)留驻留带不降=「贴近上限」本意;
+ *  帧耗 10ms 机(120 档 realized 100=0.83)同样驻留 120 交付 100fps;真容量不足
+ *  (render-bound 帧耗>档周期)realized≈帧耗倒数远低此线=照降。 */
+export const REALIZED_DOWN_RATIO = 0.80;
+/** 升档探针线:realized ≥ 此系数×档值(本档贴得轻松)连续 REALIZED_UP_WINDOWS 窗 →
+ *  一步探顶(失败由降档自然落回)。★无帧耗门(诚实登记其证伪):探针在 fps 语义上
+ *  恒 ≥ 中性——探顶失败期间交付的也是流/帧耗的真实速率(不低于低档),失败自动回落;
+ *  曾处方 costP50<0.85×cap 周期的帧耗门被自证伪:帧耗 10ms 机探顶后 realized 100
+ *  落 [0.80,0.97) 中带=驻留 120 交付 100fps(用户所要),门反把它按在 90 档(90 档
+ *  只交付 90fps)=门降 fps。 */
+export const REALIZED_UP_RATIO = 0.97;
+/** 升档探针确认窗数(3 窗;探针失败回落 2 窗,升难降易防抖)。 */
+export const REALIZED_UP_WINDOWS = 3;
+
+/** ★v9.12.2/v9.14 宽流适配总旗(?varadapt=1 激活,缺省关=v9.13 方差世界逐位)。
+ *  ★旗语义演化:v9.12.2 刀1-3(窗数/底档门)→ v9.14 起旗=【判据世界切换】——旗开=
+ *  容量判据(stepRealized:realized 贴上限驻留/跑不到才降),旗关=方差判据
+ *  (stepVarianceCore)。刀1/刀2/刀3 随 v9.13+本刀退役为史档(常数/钩保留)。
  *  node/测试环境恒关,测试经 varAdaptSetForTest 显式开启) */
 export let varAdapt = (() => {
   try {
@@ -946,11 +992,24 @@ export class FrameBeat {
     return false;
   }
 
-  /** ★v9.12 方差监控闸(protected hook=红判别器复刻点):true(现役)=方差自适应
-   *  面启用。红判别器 NoVarMonitorBeat(tests)覆写为 false=「摘方差监控」机械变异
-   *  ——双峰流上 120 档抖动持续不降档(头注 v9.12 变异证红面①) */
+  /** ★v9.12 方差监控闸(protected hook=红判别器复刻点):true(现役)=档位自适应面
+   *  启用(v9.14 两世界共用总闸)。红判别器 NoVarMonitorBeat(tests)覆写为 false=
+   *  「摘监控」机械变异——双峰流上 120 档抖动持续不降档(旗关世界)/容量不足不降档
+   *  (旗开世界) */
   protected varianceMonitorEnabled(): boolean {
     return true;
+  }
+
+  /** ★v9.14 降档容量线 hook(protected=红判别器复刻点)。NoRealizedDownBeat 覆写为
+   *  0=「摘容量降档」机械变异(render-bound 语料滞留 120=红) */
+  protected realizedDownRatio(): number {
+    return REALIZED_DOWN_RATIO;
+  }
+
+  /** ★v9.14 升档探针线 hook(protected=红判别器复刻点)。NoRealizedUpBeat 覆写为 2
+   *  (=realized 恒 < 2×档=永不探顶;容量恢复语料滞留低档=红) */
+  protected realizedUpRatio(): number {
+    return REALIZED_UP_RATIO;
   }
 
   // ── ★v9.12.2 宽流适配 hooks(protected=红判别器复刻点;旗关=常数原值,v9.12 逐位)──
@@ -962,45 +1021,75 @@ export class FrameBeat {
   }
 
   /** 刀2:降档窗数(落点为底档 30 时 3 窗强化门,其余 2 窗不变;证据/语义见
-   *  VAR_DOWN_WINDOWS_BOTTOM 注)。红判别器 NoBottomGateBeat 覆写为恒
-   *  VAR_DOWN_WINDOWS=「摘入底档门」机械变异(语料 A marginal 坠 30 复现=证红) */
+   *  VAR_DOWN_WINDOWS_BOTTOM 注)。★v9.13 30 档已除→本钩惰性(现阶梯无 <60 落点,
+   *  恒返基准值;钩与常数保留=史档,阶梯若重现 <60 档自动复活)。 */
   protected downWindows(): number {
     if (!varAdapt) return VAR_DOWN_WINDOWS;
     const next = TIER_LADDER.find((t) => t < this.effTier);
-    return next !== undefined && next <= TIER_LADDER[TIER_LADDER.length - 1]
+    return next !== undefined && next < 60
       ? VAR_DOWN_WINDOWS_BOTTOM : VAR_DOWN_WINDOWS;
   }
 
   /** 刀3:底档降档线地板(0=关;旗开=VAR_DOWN_LINE_FLOOR_BOTTOM,仅当降档落点为
-   *  底档 30 时由 stepVariance 并入下行比较;证据/判例改判见常数注)。红判别器
-   *  NoBottomFloorBeat 覆写为恒 0=「摘地板」机械变异(Mac 语料 60→30 坠落复现=证红) */
+   *  底档 30 时由 stepVariance 并入下行比较;证据/判例改判见常数注)。★v9.13 30 档
+   *  已除→本钩惰性(同上,史档保留)。 */
   protected bottomDownLineFloor(): number {
     return varAdapt ? VAR_DOWN_LINE_FLOOR_BOTTOM : 0;
   }
 
-  // ── ★v9.12 方差自适应锁帧档(用户裁决「宁愿渲染减速也不应帧数反复抖动」的算法
-  //    化;现役决策面——k 迁移面已退役,见 migrationEnabled 史档闸)──
-  /** 方差自适应步进(endRender 每渲染帧调用;hold/settleGuard 护栏见头注 v9.12):
-   *  非重叠 VAR_WIN 帧距窗 → std;std>VAR_STD_RATIO×档周期 连续 VAR_DOWN_WINDOWS
-   *  窗=当前档抖动占帧预算比例超感知带 → 降一档(永远允许,沿 TIER_LADDER 逐级,
-   *  30 底);std<VAR_STD_RATIO×VAR_UP_RATIO×档周期 连续
-   *  VAR_UP_WINDOWS 窗 → 升一档(苛刻,慢速回探防抖回,永不越过用户档);中带驻留
-   *  (双向计程清零)。落地时累计器按新档周期重锚(reanchorTier)。窗口证据单档化:
-   *  档位落地即清窗(跨档帧距混样不得计入下一窗) */
-  private stepVariance(): void {
+  // ── ★档位判据步进(v9.14 旗分世界)──
+  /** 判据步进(endRender 每渲染帧调用;总闸/护栏两世界共用):varAdapt=容量判据
+   *  (stepRealized,★v9.14 现役旗开面);旗关=方差判据(stepVarianceCore,v9.13
+   *  逐位)。非重叠 VAR_WIN 帧距窗集满评一次;落地重锚 reanchorTier;hold 期整面
+   *  冻结(endRender 上游) */
+  private stepTier(): void {
     if (!this.varianceMonitorEnabled()) return;
     if (this.cap <= 0) return;                 // 跟满档:无锁无监测
     if (this.settleGuard > 0) return;          // v7 案②同语义:全窗证据门槛(入场簇不得驱动降档)
     if (this.lastGap > 0) this.varWin.push(this.lastGap);
     if (this.varWin.length < VAR_WIN) return;
     const mean = this.varWin.reduce((a, b) => a + b, 0) / this.varWin.length;
+    if (varAdapt) {
+      this.varWin.length = 0;
+      this.stepRealized(mean);                 // ★v9.14 容量判据世界
+      return;
+    }
     const std = Math.sqrt(this.varWin.reduce((a, b) => a + (b - mean) ** 2, 0) / this.varWin.length);
     this.varWin.length = 0;
+    this.stepVarianceCore(std);
+  }
+
+  /** ★v9.14 容量判据(2026-10-09 用户明令「尽量贴近帧率上限;除非帧率压根跑不到上限
+   *  才降档」的算法化;varAdapt 旗=本世界):窗内帧距【均值】→realized fps,与档值比:
+   *  realized<realizedDownRatio()×档 连续 VAR_DOWN_WINDOWS 窗=「跑不到本档」→ 降一级
+   *  (阶梯,60 底);realized≥realizedUpRatio()×档 连续 REALIZED_UP_WINDOWS 窗 → 一步
+   *  探顶(失败由降档自然落回;无帧耗门——见 REALIZED_UP_RATIO 注证伪);中带驻留
+   *  (双向计程清零)。
+   *  机理(定谳):用户机回调流双峰/超速的固有抖动经累计器转成 {4,12}ms 锯齿,均值仍=
+   *  档周期——「抖」不等于「跑不到」;v9.12 方差判据把该锯齿判不稳=把空转机钉死 60
+   *  (用户实报 Trace-20261009T005235),本判据回归容量语义,std 退役为诊断面。 */
+  private stepRealized(meanGap: number): void {
+    const realized = 1000 / meanGap;
+    if (realized < this.effTier * this.realizedDownRatio()) { this.varDownN++; this.varUpN = 0; }
+    else if (realized >= this.effTier * this.realizedUpRatio()) { this.varUpN++; this.varDownN = 0; }
+    else { this.varDownN = 0; this.varUpN = 0; }   // 驻留带:双向计程清零
+    if (this.varDownN >= VAR_DOWN_WINDOWS && this.tierDown()) {
+      this.lastReason = 'capacity';
+      this.reanchorTier();
+    } else if (this.varUpN >= REALIZED_UP_WINDOWS && this.tierUp()) {
+      this.lastReason = 'upgrade';
+      this.reanchorTier();
+    }
+  }
+
+  /** 旗关世界:方差判据(v9.12/v9.13 语义原样;std 在 v9.14 世界不进决策=诊断面)。 */
+  private stepVarianceCore(std: number): void {
     const line = VAR_STD_RATIO * this.tierPeriod();
     // ★v9.12.2 刀3:下行比较并入底档地板(仅降档落点为底档 30 时;升档线 line×0.5 与
-    //  中带归零面照旧——std 落 [line×0.5, downLine) = 驻留,双向计程清零)
+    //  中带归零面照旧——std 落 [line×0.5, downLine) = 驻留,双向计程清零)。
+    //  ★v9.13:30 档已除→落点 <60 不存在→地板恒不并入(惰性史档)。
     const nextDown = TIER_LADDER.find((t) => t < this.effTier);
-    const downLine = nextDown !== undefined && nextDown <= TIER_LADDER[TIER_LADDER.length - 1]
+    const downLine = nextDown !== undefined && nextDown < 60
       ? Math.max(line, this.bottomDownLineFloor()) : line;
     if (std > downLine) { this.varDownN++; this.varUpN = 0; }
     else if (std < line * VAR_UP_RATIO) { this.varUpN++; this.varDownN = 0; }
@@ -1145,9 +1234,9 @@ export class FrameBeat {
         }
       }
     }
-    // ★v9.12 现役决策面:方差自适应锁帧档(降/升档落地改 effTier+lastReason 并重锚
-    //  累计器相位;k 不受影响——k 迁移面退役,史档见上闸内)
-    this.stepVariance();
+    // ★v9.14 现役决策面:旗分世界(varAdapt=容量判据/旗关=方差判据);降/升档落地改
+    //  effTier+lastReason 并重锚累计器相位;k 不受影响——k 迁移面退役,史档见上闸内
+    this.stepTier();
     // ★拍迁移记录仪（2026-09-30 "升 120 被拉回 60"定谳仪;v9.12 扩档位面）:任何拍/
     //  档变更即打印完整降/升拍瞬间状态（work=帧 span/vsync 估计/p50/ breach 判定/
     //  失拍账/地板/护栏/tier）——三降档臂与观测数据对不上账的 Blackbox 一发定谳。

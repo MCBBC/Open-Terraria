@@ -77,6 +77,7 @@ function runBeat(opts: {
   let prevT = -1;
   const rendered: number[] = [];
   const cbs: number[] = [];
+  const tiers: { i: number; tier: number; reason: string }[] = [];   // ★v9.14:档位史(容量判据面断言用)
   for (let i = 0; i < callbacks; i++) {
     while (grid <= prevT) grid += intervals[step++ % intervals.length];
     const t = Math.max(grid, busy);
@@ -89,9 +90,10 @@ function runBeat(opts: {
       const c = typeof cost === 'function' ? cost(i, t) : cost;
       busy = t + c;
       beat.endRender(t + c);
+      tiers.push({ i, tier: beat.snapshot().tier, reason: beat.lastReason });
     }
   }
-  return { beat, rendered, cbs };
+  return { beat, rendered, cbs, tiers };
 }
 
 /** 帧距序列指标:p50/均值/标准差/跳变次数(相邻帧距差>jumpMs);mean 供 realized fps 判读 */
@@ -353,27 +355,27 @@ describe('★v9.12 双峰流/真实语料判别面(读数钉死+方差自适应�
     expect(r2).toBeGreaterThan(7.0);                          // 红:段 2 均值=7.5(漂移面)
   });
 
-  it('真实语料 T114436(117.7/s 宽抖动)cap120:rel 0.374@120→0.349@90→0.310@60→0.166@30 → 降档轨迹 [120,90,60,30] 落底驻留', () => {
+  it('真实语料 T114436(117.7/s 宽抖动)cap120:rel 0.374@120→0.349@90→0.310@60 → 降档轨迹 [120,90,60] 落底驻留(★v9.13 30 档已除)', () => {
     const corpus = T114436_DELTAS_X10.map((v) => v / 10);
-    const r = driveDeltas([...corpus, ...corpus], 120);       // ×2:30 档驻留段足够长
+    const r = driveDeltas([...corpus, ...corpus], 120);       // ×2:60 档驻留段足够长
     const ch = tierChanges(r.tiers);
-    expect(ch.map((c) => c.tier)).toEqual([120, 90, 60, 30]); // 逐级降档
+    expect(ch.map((c) => c.tier)).toEqual([120, 90, 60]);     // 逐级降档,60 底(30 档已除)
     expect(ch.slice(1).every((c) => c.reason === 'capacity')).toBe(true);
-    expect(r.beat.snapshot().tier).toBe(30);
-    const tail = r.gaps.slice(-600);                          // 30 档驻留段
+    expect(r.beat.snapshot().tier).toBe(60);
+    const tail = r.gaps.slice(-600);                          // 60 档驻留段
     const mean = tail.reduce((a, b) => a + b, 0) / tail.length;
-    expect(mean).toBeGreaterThan(32.8);                       // 平均帧距=33.3(读数钉 30)
-    expect(mean).toBeLessThan(33.9);
+    expect(mean).toBeGreaterThan(16.0);                       // 平均帧距=16.7(读数钉 60)
+    expect(mean).toBeLessThan(17.4);
     const ws = winStds(tail);
-    expect(Math.max(...ws) / (1000 / 30)).toBeLessThan(0.2);  // rel 收敛(标定 0.166-0.171)
+    expect(Math.max(...ws) / (1000 / 60)).toBeLessThan(0.4);  // rel(标定 0.31-0.36:粗糙但驻留)
   });
 
-  it('升档慢速回探(最高优先):T114436 落 30 后转洁净网格 → 6 窗后一步回探 120 成功,尾段帧距恒 8.33', () => {
+  it('升档慢速回探(最高优先):T114436 落 60 后转洁净网格 → 6 窗后一步回探 120 成功,尾段帧距恒 8.33', () => {
     const deltas = [...T114436_DELTAS_X10.map((v) => v / 10), ...Array.from({ length: 5000 }, () => HZ120)];
     const r = driveDeltas(deltas, 120);
     const ch = tierChanges(r.tiers);
-    expect(ch.map((c) => c.tier)).toEqual([120, 90, 60, 30, 120]);  // 爬档一步到顶(无 90 中间驻留)
-    expect(ch[4].reason).toBe('upgrade');
+    expect(ch.map((c) => c.tier)).toEqual([120, 90, 60, 120]);  // 爬档一步到顶(无 90 中间驻留;30 档已除)
+    expect(ch[3].reason).toBe('upgrade');
     expect(r.beat.snapshot().tier).toBe(120);
     const st = gapStats(r.rendered.slice(-600));              // 爬满后洁净网格稳态
     expect(st.std).toBeLessThan(0.5);
@@ -467,7 +469,7 @@ describe('★v9.12 hold 冻结+瞬态豁免+cap 变更重锚', () => {
 
 // ═══════════════════════════════════════════════════════════════════════
 describe('★v9.12 变异证红:摘方差监控/摘累计器 → 判别面红;现役同流绿', () => {
-  it('红(摘方差监控 NoVarMonitorBeat,T114436):120 档抖动持续(rel std 稳超 0.22)零降档;绿:同流降档轨迹 [120,90,60,30]', () => {
+  it('红(摘方差监控 NoVarMonitorBeat,T114436):120 档抖动持续(rel std 稳超 0.22)零降档;绿:同流降档轨迹 [120,90,60]', () => {
     const corpus = T114436_DELTAS_X10.map((v) => v / 10);
     const deltas = [...corpus, ...corpus];
     const red = driveDeltas(deltas, 120, { make: () => new NoVarMonitorBeat() });
@@ -477,9 +479,9 @@ describe('★v9.12 变异证红:摘方差监控/摘累计器 → 判别面红;�
     const redWs = winStds(red.gaps.slice(-1200));
     expect(q(redWs, 0.5) / (1000 / 120)).toBeGreaterThan(VAR_STD_RATIO);       // 红:抖动占比稳超降档线
     expect(red.tiers.every((x) => x.tier === 120)).toBe(true);                 // 红:全程 120 不降
-    expect(green.beat.snapshot().tier).toBe(30);              // 绿:降档落底
+    expect(green.beat.snapshot().tier).toBe(60);              // 绿:降档落底(★v9.13 底档=60)
     const greenWs = winStds(green.gaps.slice(-600));
-    expect(Math.max(...greenWs) / (1000 / 30)).toBeLessThan(0.2);              // 绿:落底收敛
+    expect(Math.max(...greenWs) / (1000 / 60)).toBeLessThan(0.4);              // 绿:落底驻留(标定 0.31-0.36)
   });
 });
 
@@ -702,7 +704,7 @@ describe('锁帧档语义锁(源锚)', () => {
   });
 
   it('常数处方锁(v9.12 新族+迁移闸内史档族)', () => {
-    expect(TIER_LADDER).toEqual([120, 90, 60, 30]);
+    expect(TIER_LADDER).toEqual([120, 90, 60]);               // ★v9.13:30 档已除(用户明令)
     expect(DUE_GUARD_MS).toBe(0.75);
     expect(VAR_WIN).toBe(60);
     expect(VAR_STD_RATIO).toBeCloseTo(0.22, 10);
@@ -829,14 +831,15 @@ describe('锁帧档语义锁(源锚)', () => {
   });
 });
 
-// ── ★v9.12.2 宽流适配双刀回归锁(2026-10-08;?varadapt=1 灰度,tests 经 varAdaptSetForTest
-//    显式开;旗关=上方 v9.12 全部既有锁逐位不受影响)──
-// 语料=Windows 双 trace 链[e] rAF 回调 delta 实拍(×10 整数;提取口径与
+// ── ★v9.12.2/v9.13 回归锁(2026-10-09;?varadapt=1 灰度:旗开=刀1「≤60 档升档窗 3」。
+//    ★v9.13(用户明令)30 档已除→底档=60:刀2(底档 3 窗门)/刀3(底档线地板 6.0)随之
+//    惰性化(史档:其定谳面「语料 A 30@484→574/语料 B 30@640→932 入底档推迟+Mac WIN_C
+//    30 粘死 93%→0%」的病灶本体由阶梯结构化根除,钩/常数保留,阶梯重现 <60 档时复活)──
+// 语料=Windows 双 trace 链[e]+Mac 链[loop] rAF 回调 delta 实拍(×10 整数;提取口径与
 // tools/trace-single-chain 一致:rAF-leaf 样本 3.5ms 聚类=回调时刻):
-//  WIN_A=Trace-20261008T175748 t=0-30s(入场级联 120→90→60→30 + 干净流恢复滞后本相)
-//  WIN_B=Trace-20261008T212134 t=40-70s(粗糙段 60 锁 + 30 坠入面)
-// 断言索引=引擎真值(vitest 驱动器实跑标定;离线重放器与引擎 settleGuard/varWin 装填
-// 相位有微差,禁用离线数钉断言)。
+//  WIN_A=Trace-20261008T175748 t=0-30s(Windows 入场级联+恢复滞后)
+//  WIN_B=Trace-20261008T212134 t=40-70s(Windows 粗糙段)
+//  WIN_C=Trace-20261008T235432(Mac 用户机 ?varadapt=1 实报局)游戏链[loop] t=0-72s
 const WIN_A_DELTAS_X10 = [
 272,270,246,256,317,240,138,169,151,146,156,147,140,167,125,139,132,128,161,140,
 117,147,143,140,132,108,130,141,135,136,120,143,128,173,223,274,187,142,158,131,
@@ -1152,81 +1155,6 @@ const WIN_B_DELTAS_X10 = [
 53,123,46,120,46,97,63,114,57,109,54,109,59,114,52,108,57,123,45,116,
 50,106,60,108,58,105
 ];
-/** 轨迹序列(去 init;tier@callbackIndex) */
-const tierSeq = (tiers: { i: number; tier: number; reason: string }[]) =>
-  tierChanges(tiers).filter((x) => !(x.tier === 120 && x.reason === 'init')).map((x) => `${x.tier}@${x.i}`);
-/** 末次升档事件 index(无则 -1) */
-const lastUpgradeIdx = (tiers: { i: number; tier: number; reason: string }[]) => {
-  const ch = tierChanges(tiers);   // 扫去重轨迹(原始帧的 lastReason 事件后驻留,直扫会抓尾帧)
-  for (let i = ch.length - 1; i >= 0; i--) if (ch[i].reason === 'upgrade') return ch[i].i;
-  return -1;
-};
-
-describe('★v9.12.2 宽流适配双刀(?varadapt 灰度;刀1 升档窗数分层+刀2 入底档强化门)', () => {
-  afterEach(() => { varAdaptSetForTest(false); });
-
-  it('旗关回归:语料 A 轨迹=v9.12 现役(30@484 坠底、2430 才升回——恢复滞后病灶本相)', () => {
-    varAdaptSetForTest(false);
-    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierSeq(r.tiers)).toEqual(['90@178', '60@304', '30@484', '120@2430', '90@2554', '60@2720']);
-    expect(lastUpgradeIdx(r.tiers)).toBe(2430);
-  });
-
-  it('旗开:语料 A 刀2 挡 marginal 坠底(30@484→574)+刀1 提速恢复(升回 2430→1617)+刀3 尾段 60 不再坠', () => {
-    varAdaptSetForTest(true);
-    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierSeq(r.tiers)).toEqual(['90@178', '60@304', '30@574', '120@1617', '90@1737', '60@1894']);   // 刀3:尾段 60 档不再坠 30
-  });
-
-  it('旗开语料 B:入底档推迟(30@640→932,刀2+刀3);粗糙段无 upgrade 事件=不虚升(诚实面)', () => {
-    varAdaptSetForTest(true);
-    const r = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierSeq(r.tiers)).toEqual(['90@178', '60@452', '30@932']);
-    expect(lastUpgradeIdx(r.tiers)).toBe(-1);
-  });
-
-  it('旗关语料 B 对照:30@640(病灶本相锁定)', () => {
-    varAdaptSetForTest(false);
-    const r = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierSeq(r.tiers)).toEqual(['90@178', '60@452', '30@640']);
-  });
-
-  it('Mac 语料旗开不变量(★判例改判:T114436 类止于 60 不再落 30——用户 2026-10-09 实报明令「粘死 30」为病)/LIVE 仍驻留 120/双峰仍落 60 驻留', () => {
-    varAdaptSetForTest(true);
-    const corpus = T114436_DELTAS_X10.map((v) => v / 10);
-    const t114 = driveDeltas([...corpus, ...corpus], 120);
-    expect(t114.beat.snapshot().tier).toBe(60);
-    const live = driveDeltas(LIVE_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierChanges(live.tiers).filter((x) => x.tier !== 120).length).toBe(0);
-    const bim = driveDeltas(makeBimodal(4800, 11), 120);
-    expect(bim.beat.snapshot().tier).toBe(60);
-  });
-
-  it('变异证红①:摘刀1(NoLowTierFastUpBeat 恒 6 窗)→ 语料 A 恢复滞后复现(升回 2310 vs 旗开 1617)', () => {
-    varAdaptSetForTest(true);
-    class NoLowTierFastUpBeat extends FrameBeat {
-      protected override upWindows(): number { return VAR_UP_WINDOWS; }
-    }
-    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoLowTierFastUpBeat() });
-    expect(lastUpgradeIdx(r.tiers)).toBe(2310);
-  });
-
-  it('变异证红②:摘刀2(NoBottomGateBeat 恒 2 窗)→ 坠底提前复现(语料 A 30@484/语料 B 30@831 vs 三刀 932)', () => {
-    varAdaptSetForTest(true);
-    class NoBottomGateBeat extends FrameBeat {
-      protected override downWindows(): number { return VAR_DOWN_WINDOWS; }
-    }
-    const ra = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoBottomGateBeat() });
-    expect(tierSeq(ra.tiers)).toContain('30@484');
-    const rb = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoBottomGateBeat() });
-    expect(tierSeq(rb.tiers)).toContain('30@831');   // 摘刀2=2 窗(地板仍在)→831;三刀=932
-  });
-});
-
-
-
-//  WIN_C=Trace-20261008T235432(Mac 用户机,?varadapt=1 实报局)游戏链[loop] t=0-72s
-//   ——刀3 定谳语料:60 档窗 std 带 3.8-6.2 贴线,旗下级联坠 30 粘死(30 档 93%/永不升)
 const WIN_C_DELTAS_X10 = [
 150,202,203,36,185,36,104,35,83,35,80,82,75,85,91,90,57,81,49,81,
 64,56,75,51,77,61,73,100,52,78,68,78,80,80,79,78,88,80,101,87,
@@ -1654,33 +1582,81 @@ const WIN_C_DELTAS_X10 = [
 71,40,73,76,84,88,118,96,132,93,72,81,76,92,85,143,94,74,110,84,
 103,93,82,99,94,94,69,55,76,88,93,101,58,87,71,90
 ];
+/** 轨迹序列(去 init;tier@callbackIndex) */
+const tierSeq = (tiers: { i: number; tier: number; reason: string }[]) =>
+  tierChanges(tiers).filter((x) => !(x.tier === 120 && x.reason === 'init')).map((x) => `${x.tier}@${x.i}`);
+/** 末次升档事件 index(无则 -1) */
+const lastUpgradeIdx = (tiers: { i: number; tier: number; reason: string }[]) => {
+  const ch = tierChanges(tiers);   // 扫去重轨迹(原始帧的 lastReason 事件后驻留,直扫会抓尾帧)
+  for (let i = ch.length - 1; i >= 0; i--) if (ch[i].reason === 'upgrade') return ch[i].i;
+  return -1;
+};
 
-describe("★v9.12.2 刀3 底档降档线地板(2026-10-09 Mac 实报定谳;判例改判=T114436 类止于 60)", () => {
+describe('★v9.13 底档=60(30 档已除)+v9.12.2 刀1(?varadapt 灰度)', () => {
   afterEach(() => { varAdaptSetForTest(false); });
 
-  it("旗关 Mac 语料:60→30 坠底后永不升档(30 粘死病灶本相;30 档占比 >80%)", () => {
+  it('旗关:语料 A 级联止于 60(轨迹无 30;底档本相)', () => {
     varAdaptSetForTest(false);
-    const r = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
-    const ch = tierChanges(r.tiers);
-    expect(ch.some((x) => x.tier === 30 && x.reason === "capacity")).toBe(true);
-    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 永不升档=粘死本相
-    const share30 = r.tiers.filter((x) => x.tier === 30).length / r.tiers.length;
-    expect(share30).toBeGreaterThan(0.8);
-  });
-
-  it("旗开三刀:Mac 语料级联止于 60(轨迹无 30、60 档驻留;重载段升档通路不受损)", () => {
-    varAdaptSetForTest(true);
-    const r = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
-    expect(tierChanges(r.tiers).some((x) => x.tier === 30)).toBe(false);
+    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
+    const seq = tierSeq(r.tiers);
+    expect(seq).toEqual(['90@178', '60@304']);   // 60 档粗糙段驻留(旧轨迹 30@484 坠底不再存在)
+    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 旗关 6 窗线在粗糙 60 段不可达(升不了=旧世界靠坠 30 才升)
     expect(r.beat.snapshot().tier).toBe(60);
   });
 
-  it("变异证红③:摘刀3(NoBottomFloorBeat 地板→0)→ Mac 语料 60→30 坠落复现", () => {
+  it('旗开刀1:语料 A 升 120 回探能力恢复(3 窗可达 vs 6 窗永不;粗糙段回落后再探稳住)', () => {
     varAdaptSetForTest(true);
-    class NoBottomFloorBeat extends FrameBeat {
-      protected override bottomDownLineFloor(): number { return 0; }
+    const on = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
+    varAdaptSetForTest(false);
+    const off = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120);
+    expect(lastUpgradeIdx(on.tiers)).toBeGreaterThan(0);
+    expect(lastUpgradeIdx(on.tiers)).toBe(3110);   // 旗开:2457 首探→粗糙段回落→3110 再探稳住
+    expect(lastUpgradeIdx(off.tiers)).toBe(-1);
+    expect(lastUpgradeIdx(on.tiers)).toBeGreaterThan(0);
+    expect(lastUpgradeIdx(off.tiers)).toBe(-1);   // 刀1=升档能力差(不只是时序)
+  });
+
+  it('旗关+旗开:语料 B 粗糙段止于 60 驻留(无 upgrade=不虚升,诚实面)', () => {
+    varAdaptSetForTest(false);
+    const off = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierSeq(off.tiers)).toEqual(['90@178', '60@452']);
+    expect(lastUpgradeIdx(off.tiers)).toBe(-1);
+    varAdaptSetForTest(true);
+    const on = driveDeltas(WIN_B_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierSeq(on.tiers)).toEqual(['90@178', '60@452']);   // 刀2/刀3 惰性=双臂同轨
+    expect(lastUpgradeIdx(on.tiers)).toBe(-1);
+  });
+
+  it('旗关+旗开:Mac 语料(WIN_C)止于 60 驻留(v9.13 前 30 粘死 93%——阶梯结构化根除)', () => {
+    varAdaptSetForTest(false);
+    const off = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierChanges(off.tiers).some((x) => x.tier === 30)).toBe(false);
+    expect(off.beat.snapshot().tier).toBe(60);
+    varAdaptSetForTest(true);
+    const on = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierChanges(on.tiers).some((x) => x.tier === 30)).toBe(false);
+    expect(on.beat.snapshot().tier).toBe(60);
+  });
+
+  it('变异证红①:摘刀1(NoLowTierFastUpBeat 恒 6 窗)→ 语料 A 升 120 回探滞后复现', () => {
+    varAdaptSetForTest(true);
+    class NoLowTierFastUpBeat extends FrameBeat {
+      protected override upWindows(): number { return VAR_UP_WINDOWS; }
     }
-    const r = driveDeltas(WIN_C_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoBottomFloorBeat() });
-    expect(tierChanges(r.tiers).some((x) => x.tier === 30 && x.reason === "capacity")).toBe(true);
+    const r = driveDeltas(WIN_A_DELTAS_X10.map((v) => v / 10), 120, { make: () => new NoLowTierFastUpBeat() });
+    expect(lastUpgradeIdx(r.tiers)).toBe(-1);   // 摘刀1=6 窗线同旗关,升档能力丧失
+    
+  });
+
+  it('Mac 语料旗开不变量:LIVE 驻留 120/双峰落 60/T114436 落 60(v9.13 底档)', () => {
+    varAdaptSetForTest(true);
+    const live = driveDeltas(LIVE_DELTAS_X10.map((v) => v / 10), 120);
+    expect(tierChanges(live.tiers).filter((x) => x.tier !== 120).length).toBe(0);
+    const bim = driveDeltas(makeBimodal(4800, 11), 120);
+    expect(bim.beat.snapshot().tier).toBe(60);
+    const corpus = T114436_DELTAS_X10.map((v) => v / 10);
+    const t114 = driveDeltas([...corpus, ...corpus], 120);
+    expect(t114.beat.snapshot().tier).toBe(60);
   });
 });
+
