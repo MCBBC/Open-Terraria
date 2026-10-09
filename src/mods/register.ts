@@ -351,6 +351,13 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       const combat = { ...spec.combat };
       if (combat.shoot !== undefined) {
         combat.shoot = resolveShoot(plan, it.modId, combat.shoot);
+        // ★三百六十八:altShoot 右键换弹(resolveShoot 同通道;字面数字=原版 vid)
+        if ((it.spec as unknown as { altShoot?: string | number }).altShoot !== undefined) {
+          const rawAlt = (it.spec as unknown as { altShoot?: string | number }).altShoot;
+          const altResolved = typeof rawAlt === 'number' ? rawAlt
+            : resolveShoot(plan, it.modId, rawAlt as string | number) as number;
+        (ITEM_DEFS[it.stableId] as { altShoot?: number }).altShoot = altResolved;
+        }
       }
       registerModCombat(it.stableId, combat as unknown as Parameters<typeof registerModCombat>[1]);
     }

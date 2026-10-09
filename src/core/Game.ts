@@ -218,6 +218,7 @@ const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { AFK_TIME_NEEDED_FOR_AUTO_KITING } from '../entities/Player';   // ★Q4 刀：AFK 自动风筝阈值（Player.cs:977）
 import { insideUnbreakableWallsScan } from '../entities/Player';   // ★SW-BJ48 传送药水落点双地牢不可破墙重扫（UnbreakableWallScan.cs:47-66）
+import { emitPlayerHurtDust } from '../entities/Player';   // ★BJ595 受击尘爆纯函数臂（Player.cs:38825-38852）
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster, spawnVanillaEnemy } from '../entities/bossAI';
@@ -305,6 +306,7 @@ import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/Water
 import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure, tpMarkCoordText } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
+import { computeArmorLights } from '../lighting/ArmorLights';   // ★BJ598 件1:UpdateArmorLights 1:1
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, isPrefixableAccessory, type InvItem } from '../items/Inventory';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import vanillaExpertJson from '../data/vanilla-expert.json';
@@ -12679,6 +12681,29 @@ export class Game implements GameHooks {
         || prevLight.r !== heldRGB![0] || prevLight.g !== heldRGB![1] || prevLight.b !== heldRGB![2]))) {
       this.lighting.dirty = true;
     }
+    // ★BJ598 件1:UpdateArmorLights 整缺落刀（Player.cs:31381-31555,原版 Player.Update
+    //  :25881 每 tick 调用——位次在 :25818-25820 head/body/legs 基础槽赋值之后、
+    //  UpdateArmorSets :36047-36049 时装槽覆写之前,故光照读【基础三槽】inv.armor[0-2]
+    //  而非 displayArmor 时装优先）。十八站（head 9+body 5+legs 4,含 body190/legs130
+    //  写头位 quirk）+同槽同色 +0.5 聚焦档+vortexStealthActive 早退门全在
+    //  computeArmorLights 纯函数臂（../lighting/ArmorLights.ts,tests/bj598 直测）。
+    //  发射通道=实体点光同款 lighting.addLight（NPC lightRGB 链 Game:12891 同池,
+    //  引擎逐通道取最大——与原版 Lighting.AddLight 每 tick 独立发射同语义）。
+    //  fullRotation 旋移支原文本仓未建模从略（Player.ts:6162 坐骑旋转域同案）;
+    //  联机远端玩家甲光同 heldLight 单通道边界（SP 恒 1:1）。
+    {
+      const aLights = computeArmorLights(
+        statOfInternal(player.inv.armor[0]?.id ?? -1)?.hs ?? -1,
+        statOfInternal(player.inv.armor[1]?.id ?? -1)?.bs ?? -1,
+        statOfInternal(player.inv.armor[2]?.id ?? -1)?.ls ?? -1,
+        player.vortexStealthActive,
+        player.w, player.h, player.facing < 0 ? -1 : 1);
+      for (const al of aLights) {
+        const atx = Math.floor((player.x + al.ox) / TILE);
+        const aty = Math.floor((player.y + al.oy) / TILE);
+        this.lighting.addLight(atx, aty, al.r, al.g, al.b);
+      }
+    }
     // 弹幕动态点光 = Projectile.ProjLight() 1:1 全函数逐 case 转写（cs:14809-15309）。
     // 语义：final = light(SetDefaults) × 乘区表（缺省 [1,1,1]）；个别通道被原版
     // 【绝对赋值】（num=0.3f / num3=1f 等）——PROJ_LIGHT_ABS_CHAN 非 null 通道直接
@@ -19060,6 +19085,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
+    // ★三百六十八刀:altShoot 右键换弹(C# CanUseItem/UseItem 里 Item.shoot=
+    //  altFunctionUse==2 ? altProj : 默认 的声明面等价——声明 combat.altShoot
+    //  右键时覆写 shoot;音效/通道细账=逐件)
+    if (this.player.altFunctionUse === 2) {
+      const alt = (def as { altShoot?: number }).altShoot;
+      if (alt !== undefined) cwIn = { ...cwIn, shoot: alt } as typeof cwIn;
+    }
     const eq = this.player.equipStats;   // ★IIIII250 函数级快照(56 次直读;owner./mgOwner. 接收者不改)
     // ★回旋镖族【同型在场门】（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：
     //   列表型同 owner 已有同型活弹 ⇒ 本次使用静默拒绝。必须【最先执行】:原版
@@ -43821,7 +43853,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 受击语音走 PlayerVoice.playHurtVoice 全分派（Player.cs:38867-39011,
       // voiceOverride 语音饰品层 + variant 三档尾段）——与 Player.ts 各受击路径同源
       if (p.hp <= 0) playDeathVoice(this as unknown as GameHooks, p.voiceState);
-      else playHurtVoice(this as unknown as GameHooks, p.voiceState);
+      // ★BJ598 件2:受击音甲支旗——与尘爆站(:43864 原 emitPlayerHurtDust 同站同谓词)
+      //  同源:frost=equipStats.frostBurn 三元组承载(不另设旗,Player.ts:3649 备案)、
+      //  bone=Player.boneArmor。原版 PlayHurtSound 甲支 :38984-38991 在 override
+      //  switch 之后、dontStarve 门之前——位次由 PlayerVoice.hurtVoicePlan 承载。
+      else playHurtVoice(this as unknown as GameHooks, {
+        ...p.voiceState,
+        frostArmor: eq.frostBurn === true,
+        boneArmor: p.boneArmor,
+      });
       // 本地飘字单点（★A2）：noLocalFloat 抑制（虚空坠落等原版无 Hurt 飘字面的站点）；
       // floatDealt 由环境站以 damagePreview 预演回填终值（防双发且像素零漂移）——
       // ★BJ585（2026-10-09）：缺省支改用实扣值 ok——原版飘字与实扣同源
@@ -43846,6 +43886,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 修正随之落定：① 反射基准改用 num4 等价原值，删除二次 DamageVar 复掷（旧在
       // Enemy.ts 已掷一次后再 damageVar ⇒ 双重 ±15%）；② parry 提前到 Hurt 前，被
       // 格挡的接触命中不再先扣血再返 0；③ 攻端 DamageDealt 旗乘区统一包装。
+      // ★BJ595 存活受击尘爆（Player.Hurt 尾 :38825-38852，`if (statLife > 0)` 存活支
+      // ——致死支走 KillMe_DustExplosion（Player.initDeathParts））：粒数/选型/速度式
+      // 在 emitPlayerHurtDust 单源（Player.ts 纯函数臂,tests/bj595 直测）。hitDirection
+      // 取击退向（:38656 vel.X=4.5×hitDirection 同源;opts.hitDir=特殊桶显式覆盖面）。
+      if (p.hp > 0) {
+        emitPlayerHurtDust(this.vanillaDust, p, ok, p.maxHp,
+          opts?.hitDir ?? (Math.sign(p.cx - srcX) || 1),
+          p.buffs.has(BuffType.Stoned), eq.frostBurn === true, p.boneArmor,
+          p.armorSetDyeVid());
+      }
       if (p.hp <= 0) {
         p.dead = true;
         // ★F2（四轮蓝队）：死亡管线单点化——计数/DropItems/DropCoins/Hardcore 死亡

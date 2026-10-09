@@ -141,8 +141,11 @@ describe('BJ571-本仓⑦：被砸中实际听到的音=玩家受击语音 Playe
   it("Sfx hurt 表 = ['Player_Hit_0','Player_Hit_1','Player_Hit_2']（无爆炸项）", () => {
     expect(sfxSrc).toContain("hurt: ['Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2'],");
   });
-  it('damagePlayer 尾部接 playHurtVoice（受击面单口）', () => {
-    expect(gameSrc).toContain('playHurtVoice(this as unknown as GameHooks, p.voiceState);');
+  it('damagePlayer 尾部接 playHurtVoice（受击面单口;★BJ598 甲支旗随 voiceState 展开传入）', () => {
+    expect(gameSrc).toContain('playHurtVoice(this as unknown as GameHooks, {');
+    expect(gameSrc).toContain('...p.voiceState,');
+    expect(gameSrc).toContain('frostArmor: eq.frostBurn === true,');
+    expect(gameSrc).toContain('boneArmor: p.boneArmor,');
   });
   it('音源文件在库且与原版同源命名（Player_Hit_0/1/2）', () => {
     for (const f of ['Player_Hit_0.opus', 'Player_Hit_1.opus', 'Player_Hit_2.opus']) {

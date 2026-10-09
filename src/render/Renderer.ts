@@ -136,6 +136,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { blendItemColorTint } from '../data/vanillaItemColor';   // SW-BJ60 掉落物 Item.color 两遍合成（与 UI.iconUrl 单源）
+import { armorGlowOps, type ArmorGlowOp } from '../data/vanillaArmorGlow';   // ★BJ597 甲位 GlowMask 表（SetPassColors 数据化）
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
@@ -984,7 +985,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, bossHeadSpriteEffects, bossHeadHoverHit, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
-import { ICE_SLIP_IDS, FROZEN_SLIME_ID, downDashGhostStamps } from '../entities/Player';
+import { ICE_SLIP_IDS, FROZEN_SLIME_ID, downDashGhostStamps, isSolarFlareFullSet, solarOutlineStamps, advanceSolarGhostFade, solarShieldRotation, solarShieldTextureId, SOLAR_SHIELD_ALPHA, beetleOrbDrawPlan } from '../entities/Player';
 import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, MOUNT_PLAYER_SIZE, fairyQueenHslToRgb } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
@@ -4008,6 +4009,10 @@ export class Renderer {
   private solarDyeCachePruneAt = 0;
   /** 眼球伞云盖合成后逃逸队列（A4 终版 2026-09-03；drawPlayer 收集、flushEyebrellaCloud 消费） */
   private eyebrellaQueue: Array<{ wx: number; wy: number; num2: number; src: HTMLImageElement | HTMLCanvasElement | ImageBitmap; cw: number; ch: number }> = [];
+  /** ★BJ594 日曜盾球合成后逃逸队列（drawPlayer 收集、flushSolarShieldQueue 消费；
+   *  eyebrellaQueue 同族——原版 DrawData 恒色 Color(255,255,255,127) 免光照,
+   *  画在实体窗内会被 compositeLight 全屏乘光压暗=用户实报"半透的比较暗"） */
+  private solarShieldQueue: Array<{ wx: number; wy: number; rot: number; facing: number; src: HTMLImageElement | ImageBitmap | HTMLCanvasElement; tw: number; th: number }> = [];
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
@@ -5443,7 +5448,10 @@ export class Renderer {
     this.animTick++;
     this.iconOverlayFrameGate();   // 交互图标上浮层帧守恒（SW-BJ114,方法注）
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
+    this.armorGlowQueue.length = 0;   // ★BJ597 甲位 glow 队列逐帧重建（flush 亦自愈重置）
+    this.armorGlowCollected = new WeakSet();   // 同帧双绘去重随帧重置（早绘/主段双 pass）
     this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
+    this.solarShieldQueue.length = 0;   // ★BJ594 日曜盾球队列逐帧重建（drawPlayer 收集,7e 消费）
     this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
     // ★C2 单遍合并（2026-09-22）：bobber 扫描 + 绘制键预计算（原排序块内循环）
     //   并为一遍全实体扫（原两遍）。逐位同值论证：同枚举序、两侧均只读扫描、
@@ -6455,10 +6463,26 @@ export class Renderer {
     //   同帧消费 heldProj 指向,与本队列无耦合）
     const postPlayerDraws: Array<() => void> = [];
     const prePlayerDraws: Array<() => void> = [];
+    // ★BJ593（2026-10-09）血条收集面：原版血条 = DrawInterface_14_EntityHealthBars
+    //  （Main.cs:46574-46983）= SetupDrawInterfaceLayers 接口层（表序亲读 :45473+：
+    //  1_1 EmoteBubbles < 1_2 EntityMarkers < 4 Ruler < … < 13 < 14 HealthBars <
+    //  15 Invasion < 16 Map）——在世界渲染+光照+滤镜链【之后】无光直绘 = 恒在全部
+    //  世界内容（实体/弹幕/尘/gore/天气/植被）与标记层之上,永不被覆盖。
+    //  本仓旧位 = y 排序实体循环内 per-enemy 立即画 → 后绘实体（蜂群重叠/y 序靠后
+    //  怪)/postPlayerDraws 鞭弧(6573)/尘(6651)/落叶等全部盖条——苔藓黄蜂场景（群叠
+    //  +鞭弧反复扫过被标靶+尘粒）血条被撕成亮斑/断片 = 用户实报「血条错误镜像偏转」
+    //  （BJ593 探针 _bj593-hb-*.mjs:异常帧条内断片,fillL/fillR 本体恒正确=非镜像
+    //  非几何病,纯覆盖;fillLeft 锚/零朝向消费 BJ584 已谳维持）。落刀 = 收集面 +
+    //  全亮域单 pass（flushEntityHealthBars,drawScreenFilterChain 之后=原版 4<14
+    //  表序;BJ553 标记/BJ422 标尺同域判例）,血条屏空间直绘（flipY 锚镜像 :22129
+    //  原式）。同层登记不落刀：DD2 波间倒计时(:46866 同层)/镇民"!"图标(:46855
+    //  同层)仍在原位（低暴露,另立刀）；原版 ShowLife/shimmerTransparency==0 门
+    //  （:46605）本仓未建模,登记。
+    const hbPass: Array<{ e: Enemy | TownNPC; expert: boolean }> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) {
-          this.drawHealthBar(e, world.isExpert);
+          hbPass.push({ e, expert: world.isExpert });
           // ★BJ546：548 入 behindNonSolidTiles 层后在此补波间倒计时（原版倒计时
           //  在逐 NPC 覆盖段 Main.cs:46866 与绘制层无关——behindTiles 早退若不补
           //  调用会连带砍掉 BJ454 倒计时面）
@@ -6466,20 +6490,20 @@ export class Renderer {
           continue;
         }
         // NPC.hide（Main.cs:22172 常规绘制跳过;月总水蛭块 401=纯紫尘拖尾体,终审补）
-        if (e.vanilla?.hide) { this.drawHealthBar(e, world.isExpert); continue; }
+        if (e.vanilla?.hide) { hbPass.push({ e, expert: world.isExpert }); continue; }
         // ★四柱掉帧定谳批（2026-09-25）:原版视域剔除（Main.cs:22653 门在
         //   DrawNPCCheckAlt+DrawNPC 之前;血条不随门——屏外实体血条本不可见,
         //   drawEnemy 内唯一回写面 spriteBottomWorld 陈旧只喂屏外血条=零视觉差,
         //   副作用巡检表见批档案）。MustAlwaysDraw 族在 npcOffscreen 内恒画。
         if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
-        this.drawHealthBar(e, world.isExpert);
+        hbPass.push({ e, expert: world.isExpert });
         this.drawDd2CrystalCountdown(e, world);   // ★BJ454（548 波间倒计时,Main.cs:46866）
       }
       // ★r15 R15-5:掉落物摘出排序循环——原版 DrawItems(:63226)在
       //    DrawPlayers_AfterProjectiles(:63204)之后=物品盖玩家;移至 drawPlayer 后
       else if (!(e instanceof ItemDrop) && e instanceof TownNPC) {
         this.drawTownNPC(e, world);
-        this.drawHealthBar(e);
+        hbPass.push({ e, expert: false });
         // NPC 头顶任务"!"（Main.cs:46855-46865）：homeless NPC(CanShowHomelessText
         // :95986 无家且非 37/368/453)在 105px 内(名字 nameOver 350px 渐显范围内,
         // homeless 档额外 105px 门)→ 图标 @Top+(0,-10) worldSpace;
@@ -6876,6 +6900,15 @@ export class Renderer {
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
+    // 7e'''' 甲位 GlowMask（★BJ597 2026-10-10：SetPassColors 色面免光照=自发光
+    //      ——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。在翼光
+    //      后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族）
+    this.flushArmorGlow();
+    // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
+    //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
+    //      用户实报"半透的比较暗";drawPlayer 收集、此处消费。同槽判例=翼光/
+    //      眼球伞/四塔 GlowMask「原版硬编码色不受光照」合成后逃逸族）
+    this.flushSolarShieldQueue(cam, z);
     // 7e''. 眼球伞云盖（A4 终版：min(头顶光照,170) 一次性施加的合成后逃逸；
     //      drawPlayer 收集、此处消费；在翼后=原版 38 层>9 层）
     this.flushEyebrellaCloud(cam, z);
@@ -7141,6 +7174,13 @@ export class Renderer {
     }
 
     this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z, world);
+
+    // 7e'. 实体血条 pass（★BJ593 2026-10-09,见 hbPass 收集面注）：原版
+    //  DrawInterface_14_EntityHealthBars（Main.cs:46574-46983）接口层语义 =
+    //  世界+光照+滤镜链之后、标记(1_2)/标尺(4)之后（表序 4<14）、飘字/HUD 之前
+    //  无光直绘。本位在 drawScreenFilterChain 之后 ≙ 原版 EndCapture 后接口段；
+    //  BJ553 标记(6942 域)/7a-pre 标尺已在本位之前=表序同相。
+    this.flushEntityHealthBars(hbPass, cam);
 
     // 8. 飘字（受光照影响后画）。数字类 = 原版位图字体（Combat_Text/Combat_Crit
     //    xnb 提取,见 render/CombatTextFont）:5 层绘制（±targetScale 四向暗化影 +
@@ -10003,7 +10043,12 @@ export class Renderer {
    *  alpha（:45417 Brightness）。蠕虫段不画（头部血条代表全链）；毁灭者原版为
    *  全链共享一条（destroyerHB 平滑），此处近似画在头下。专家档克脑 266 不画
    *  （Main.cs:45321 `(!expertMode || type != 266)` 门——有四镜像在,血条会穿帮）。 */
-  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number }, expert = false) {
+  /** ★BJ593（2026-10-09）屏空间化：调用面=flushEntityHealthBars 全亮域单 pass
+   *  （原版 Interface_14 语义,见 hbPass 收集面注）。几何/染色/分段与 BJ584 谙面
+   *  逐位不变（填充恒左锚 e.cx-18·scale 起笔/零朝向消费/36px×比例）,唯 dest 换算
+   *  世界→屏（worldToScreen+zoom;flipY 锚镜像=原版 :22129-22132
+   *  `num4 = screenHeight - (num4 - screenY)` 原式,gd=1 恒等）。 */
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number }, expert: boolean, cam: Camera) {
     const hp = e.hp, maxHp = e.maxHp;
     if (hp <= 0 || hp >= maxHp) return;
     if (e.wormFollow) return;
@@ -10014,13 +10059,18 @@ export class Renderer {
     if (!hb1 || !hb2) return;
     const vid = e.vanillaId ?? 0;
     const scale = Renderer.HB_BIG_SCALE.has(vid) ? 1.5 : 1;
-    const x = e.cx - 18 * scale;
+    const wx = e.cx - 18 * scale;
     // 原版条位 = 盒底+10+NPCAddHeight（num47 已含该类型贴图下沉量,鸟妖 32/双子 30…
     // ——2026-08-24 中心锚勘误后贴图底=盒底+num47+帧半高,若仍对全体取 max(贴图底+6)
     // 会把条推到帧底透明边距之下=比原版低 20-40px）。max 兜底只服务【校准偏差族】
     // （EoC 4:+23/+30 用户校准下移,num47=0 原版公式够不着眼球底）
-    const y = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
+    const wy = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
       (vid === 4 && e.spriteBottomWorld) ? e.spriteBottomWorld + 6 : -Infinity);
+    // 屏空间换算（worldToScreen 内含 punch 位移;flipY = 原版 gravDir==-1 锚镜像）
+    const [sx, sy0] = cam.worldToScreen(wx, wy);
+    const x = sx;
+    const y = cam.flipY ? cam.viewH - sy0 : sy0;
+    const u = scale * cam.zoom;   // 段长/段高统一乘尺（世界 px→屏 px）
     const fill = Math.max(0, Math.min(36, Math.floor((36 * hp) / maxHp)));  // num2
     // 光照 alpha（Brightness = 中心格最大通道/255；8 档量化控 tint 缓存规模）
     let aQ = 1;
@@ -10045,17 +10095,34 @@ export class Renderer {
       // :21814-21828：背景两段（fill 处 2px 帽 + 余量）+ 填充两段（主体 + 末端 2px）
       const a = tint(hb2, '2', 2, 2), b = tint(hb2, '2', fill + 2, 36 - fill - 2),
         c1 = tint(hb1, '1', 0, fill - 2), d = tint(hb1, '1', 32, 2);
-      if (a) ctx.drawImage(a.c, a.x, a.y, a.w, a.h, x + fill * scale, y, 2 * scale, 12 * scale);
-      if (b) ctx.drawImage(b.c, b.x, b.y, b.w, b.h, x + (fill + 2) * scale, y, (36 - fill - 2) * scale, 12 * scale);
-      if (fill > 2 && c1) ctx.drawImage(c1.c, c1.x, c1.y, c1.w, c1.h, x, y, (fill - 2) * scale, 12 * scale);
-      if (d) ctx.drawImage(d.c, d.x, d.y, d.w, d.h, x + (fill - 2) * scale, y, 2 * scale, 12 * scale);
+      if (a) ctx.drawImage(a.c, a.x, a.y, a.w, a.h, x + fill * u, y, 2 * u, 12 * u);
+      if (b) ctx.drawImage(b.c, b.x, b.y, b.w, b.h, x + (fill + 2) * u, y, (36 - fill - 2) * u, 12 * u);
+      if (fill > 2 && c1) ctx.drawImage(c1.c, c1.x, c1.y, c1.w, c1.h, x, y, (fill - 2) * u, 12 * u);
+      if (d) ctx.drawImage(d.c, d.x, d.y, d.w, d.h, x + (fill - 2) * u, y, 2 * u, 12 * u);
     } else {
       // :21830-21836：fill≥34 全长填充 + 尾部背景
       const e2 = tint(hb2, '2', fill, 36 - fill), f = tint(hb1, '1', 0, fill);
-      if (e2) ctx.drawImage(e2.c, e2.x, e2.y, e2.w, e2.h, x + fill * scale, y, (36 - fill) * scale, 12 * scale);
-      if (f) ctx.drawImage(f.c, f.x, f.y, f.w, f.h, x, y, fill * scale, 12 * scale);
+      if (e2) ctx.drawImage(e2.c, e2.x, e2.y, e2.w, e2.h, x + fill * u, y, (36 - fill) * u, 12 * u);
+      if (f) ctx.drawImage(f.c, f.x, f.y, f.w, f.h, x, y, fill * u, 12 * u);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** ★BJ593 血条 pass（原版 DrawInterface_14_EntityHealthBars Main.cs:46574-46983
+   *  接口层语义）：恒等变换域（BJ553 标记同款 setTransform(1,0,0,1,0,0) 主画布域）
+   *  + PointClamp（原版接口层 SamplerState.PointClamp,:47251 同款）。
+   *  层序 = drawScreenFilterChain 之后（原版 EndCapture 后接口段）/ BJ553 标记与
+   *  7a-pre 标尺之后（表序 1_2<4<14）/ 8 飘字之前。恒最上：后绘实体/弹幕（鞭弧
+   *  postPlayerDraws :6573）/尘/落叶/天气不再覆盖血条 = 用户实报「血条错误镜像
+   *  偏转」（苔藓黄蜂群叠+鞭弧扫过被标靶场景）根治。 */
+  private flushEntityHealthBars(pass: Array<{ e: Enemy | TownNPC; expert: boolean }>, cam: Camera): void {
+    if (!pass.length || !this.ctx) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（BJ553 标记同款）
+    ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
+    for (const { e, expert } of pass) this.drawHealthBar(e, expert, cam);
+    ctx.restore();
   }
 
   /** ★BJ454 永恒水晶头顶波间倒计时（Main.cs:46866-46874 1:1）：
@@ -16680,6 +16747,21 @@ export class Renderer {
     return 0;
   }
 
+  /** ★BJ597 甲位 GlowMask 叠画队列（PlayerDrawSet.cs:459-811 SetPassColors 数据化
+   *  + 四甲位叠画站 :1478/:1556/:1950/:2357/:3659）。原版 glow 色不取光照（纯
+   *  GetImmuneAlphaPure 链 = 自发光）→ 合成后逃逸（BJ509 四塔/BJ594 盾球同判例
+   *  域）。收集 = drawPlayer 甲层画毕捕获当帧完整矩阵（shim 镜像 getTransform，
+   *  GLShimExecutor R3x 判例=坐标唯一真相）+ 纯 op 计划；冲刷 = setTransform 矩阵
+   *  重放 × worldLowK 归一（worldCanvas→页全幅原点合成 ×(1/k) 关系，compositeLight
+   *  :22270/:22701 drawImage(worldCanvas,0,0,viewW,viewH) 实证）。tex 存名 flush 侧
+   *  ensureVImage 懒加载（wingGlowQueue 同惯例，零跨拍 img 持有）。层序登记：本
+   *  flush 在 7e 翼光后=玩家之上（原版 glow 在本体链内、手持物/脸饰在其上——与
+   *  BJ504/677/668「此槽在玩家之上」既有偏差惯例同槽）。 */
+  private armorGlowQueue: Array<{ m: DOMMatrix; k: number; ops: ArmorGlowOp[] }> = [];
+  /** 同帧双绘去重（坐椅/睡床玩家 r15 先于 NPC 早绘 + 主段再绘=原版 RefreshPlayerDrawOrder
+   *  两档制,本仓双绘本体无害、glow 加算双份有害——首绘收集、次绘跳过;flush 期重置） */
+  private armorGlowCollected = new WeakSet<Player>();
+
   /** 全亮翅膀绘制队列（mainGlow 主纹理 + 全部叠画；光照合成后 flush） */
   private wingGlowQueue: Array<{
     p: Player; slot: number; fr: number; anchor: [number, number];
@@ -17122,6 +17204,81 @@ export class Renderer {
     }
     ctx.restore();
     this.wingGlowQueue.length = 0;
+  }
+
+  /** ★BJ597 甲位 GlowMask 冲刷（收集侧见 armorGlowQueue 注）：op 重放 = setTransform
+   *  矩阵 ×(1/k)（worldCanvas→页全幅原点合成关系）+ blend 'lighter'(A=0 纯加法)/
+   *  'source-over'(A>0)；1118 高贴图源行越界钳（与坐骑 glow 层同习语）；抖动档
+   *  Math.random（翼 jitter2 同习语,装饰面）；首绘去重 WeakSet 在此重置。 */
+  private flushArmorGlow(): void {
+    const q = this.armorGlowQueue;
+    this.armorGlowQueue = [];
+    this.armorGlowCollected = new WeakSet();
+    if (!q.length || !this.atlas) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of q) {
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      const m = e.m;
+      for (const op of e.ops) {
+        const img = this.atlas.ensureVImage(op.tex);
+        if (!img || img.width <= 0) continue;
+        // 源行/源条越界钳（Glow_199/256/367/378 等 40×1118 尾行 2px 差）
+        let sy = op.sy;
+        if (sy + op.sh > img.height) sy = Math.max(0, img.height - op.sh);
+        ctx.setTransform(m.a * invK, m.b * invK, m.c * invK, m.d * invK, m.e * invK, m.f * invK);
+        const copies = op.copies ?? 1;
+        for (let ci = 0; ci < copies; ci++) {
+          const jx = op.jx ? (Math.random() * (op.jx[1] - op.jx[0]) + op.jx[0]) : 0;
+          const jy = op.jy ? (Math.random() * (op.jy[1] - op.jy[0]) + op.jy[0]) : 0;
+          ctx.globalCompositeOperation = op.blend === 'add' ? 'lighter' : 'source-over';
+          ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
+          if (op.rot && op.pivot) {
+            ctx.save();
+            ctx.translate(op.pivot[0] + jx, op.pivot[1] + jy);
+            ctx.rotate(op.rot);
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx - op.pivot[0], op.dy - op.pivot[1], op.sw, op.sh);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx + jx, op.dy + jy, op.sw, op.sh);
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ594 日曜盾球合成后冲刷（2026-10-09）：DrawPlayer_26_SolarShield
+   *  （PlayerDrawLayers.cs:3128-3146）DrawData 色 = Color(255,255,255,127) 恒量支
+   *  免光照（R1-F1 判例域）——实体窗内绘制会被 compositeLight 全屏乘光压暗
+   *  （用户实报"半透的比较暗"）。本 flushed 在 7e 域直绘主画布=合成后坐标系,
+   *  globalAlpha=SOLAR_SHIELD_ALPHA(127/255) source-over ⇒ 盾像素 = tex×127/255、
+   *  背景透见量与原版逐式同（背景已在合成时乘过光=原版背景本相）。
+   *  变换 = worldToScreen(playerCenter+solarShieldPos[0]) → scale(z) → rotate
+   *  （atan2(y·0.5,x)+左向π+π/50·dir,Player.solarShieldRotation 单源）→ facing=−1
+   *  再 scale(−1,1)（playerEffect 水平翻转,纹理空间翻转后旋转=XNA flip-then-rotate）。
+   *  imageSmoothing 关（像素精灵;翼光同款）。层序登记：7e 槽在整玩家之上
+   *  （原版盾在 27_HeldItem 下层——与 BJ504/677/668 既有「此槽在玩家之上」
+   *  偏差惯例同槽）。 */
+  private flushSolarShieldQueue(cam: Camera, z: number): void {
+    if (!this.solarShieldQueue.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of this.solarShieldQueue) {
+      const [sx, sy] = cam.worldToScreen(e.wx, e.wy);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.scale(z, z);
+      ctx.rotate(e.rot);
+      if (e.facing === -1) ctx.scale(-1, 1);   // playerEffect 水平翻转（纹理空间）
+      ctx.globalAlpha = SOLAR_SHIELD_ALPHA;
+      ctx.drawImage(e.src, -e.tw / 2, -e.th / 2);
+      ctx.restore();
+    }
+    ctx.restore();
+    this.solarShieldQueue.length = 0;
   }
 
   /** 眼球伞云盖合成后冲刷（A4 终版 2026-09-03：v0=min(头顶光照,170) 已烘焙进
@@ -18855,6 +19012,51 @@ export class Renderer {
         // `Position.Y+height−frameH+4f`——帧底透明边距一并沉入地面）
         const pad = 4;
         const hairCol = dyeColor ?? p.appearance.hairColor;   // 拆层回画用（无染料=原生发色）
+        // ---- ★BJ594 日耀天闪套本体特效（用户实报"本体有特效"面,2026-10-09）：
+        //      Player.cs:37371-37375 SetArmorEffectVisuals——full set（head171+body177
+        //      +legs112）→ armorEffectDrawShadow+armorEffectDrawOutlines 双旗常开。
+        //      ① outline 四向脉冲描边（LegacyPlayerRenderer.cs:343-372,先于残影：
+        //      本体位 ±(ghostFade·5,0)/(0,±ghostFade·5) 四张全玩家复制,α=×(1−ghostFade)
+        //      ——DrawPlayer shadow=ghostFade → GetImmuneAlphaPure Color.Multiply
+        //      全通道乘（Player.cs:54834-54846）;ghostFade 渲染端振荡 0.1↔0.9 步
+        //      ±0.075（:346-360,Main.gamePaused 冻结=本仓 _worldPaused 镜像）。
+        //      四向偏移集 {(±d,0),(0,±d)} 对 facing/gravDir 镜像不变（集合恒等）,
+        //      镜像空间直接画。stamp 数学单源 Player.solarOutlineStamps/
+        //      advanceSolarGhostFade（tests/bj594 直测）。
+        //      ② 三张社交残影 = BJ550 同机制（shadow=0.5+0.2i → k=0.5/0.3/0.1,
+        //      LegacyPlayerRenderer.cs:415-421;ring=UpdateSocialShadow 3 拍轮转）
+        //      ——downDashGhostStamps 单源复用,门扩日耀套全身。
+        //      原版层序 outline(:343)→残影(:415)→本体(:493)。本仓两者=纸娃娃
+        //      复合帧（翅膀/身后配饰/手持不入,同 BJ550 登记偏差）;盾球不入残影
+        //      （原版 DrawPlayer_26 shadow!=0 门 :3132,本仓盾球独立绘同构）。
+        //      invis 清旗（:298-303）本仓无 invis 字段,登记。
+        //      ★BJ594 登记债（定谳不落刀,2026-10-09）：日耀甲件【自发光恒色】面——
+        //      PlayerDrawSet.cs SetPassColors 内 num4 计件后被 `num4 = 3` 钉满
+        //      （:498-501, vortex/nebula/solar/stardust 四族同构钉值）→ head==171
+        //      （:592-595 colorArmorHead）/body==177（:729-732 colorArmorBody）/
+        //      legs==112（:790-795 colorArmorLegs）= GetImmuneAlphaPure(new Color(
+        //      250,250,250,255),shadow)——【整件甲不取 Lighting.GetColorClamped,
+        //      覆写 :451-454 的采光基值】= 甲身暗处恒亮（250/255 自发光观感;日耀/
+        //      星旋/星云/星尘四月套全家同域,其余三族另有 GlowMask 加色叠层）。
+        //      本仓玩家层走全局光照合成（ent 窗 lit 批,无逐层采光）→ 该面无法在
+        //      现架构逐件表达：α=1 甲件重绘（7x 逃逸槽）会盖掉 lit 窗内手持物/
+        //      身前配饰（层序倒转,日光下也可见）; BJ504 式 lerp 补偿只适 L 相关
+        //      目标,恒色目标须 α=1。精确修复 = 逐层采光或免光实体窗（架构级）,
+        //      暂记债不落刀; heuristic 补偿（按光档混 α）属自造语义,反伪影纪律
+        //      禁止。stamps（本块）与盾球（7e''' 槽）不受此债影响已落。
+        const solarSetFull = isSolarFlareFullSet(
+          dollEquip.head ?? 0, dollEquip.body ?? 0, dollEquip.legs ?? 0);
+        if (solarSetFull) {
+          const gf = advanceSolarGhostFade(p.ghostFade, p.ghostDir, this._worldPaused);
+          p.ghostFade = gf.fade; p.ghostDir = gf.dir;
+          for (const s of solarOutlineStamps(p.ghostFade)) {
+            ctx.save();
+            ctx.filter = `brightness(${s.k})`;
+            ctx.globalAlpha *= s.k;
+            ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, s.ox - f.sw / 2, s.oy - f.sh + pad, f.sw, f.sh);
+            ctx.restore();
+          }
+        }
         // ---- ★BJ550 下砸过程残影（过程特效+绘制姿势面）：Player.cs:37354-37357
         //      isPerformingJump_DownDash → armorEffectDrawShadow=true →
         //      LegacyPlayerRenderer.cs:415-421 三张社交残影（shadowPos 环 3/6/9 拍
@@ -18866,7 +19068,9 @@ export class Renderer {
         //      （原版=全层组;翅膀/身后配饰/手持不入残影+层位在其上方——全组重画需
         //      整函数参数化,登记）。stamp 数学单源 Player.downDashGhostStamps
         //      （tests/bj550-downdash-vfx 直测）;下砸态不入联机同步,远端无残影（登记）。
-        if (p.isDownDashing) {
+        //      ★BJ594：门扩 isDownDashing ∪ 日耀套全身（armorEffectDrawShadow 第二
+        //      置位支 Player.cs:37371-37375——原版三张 shadowPos 残影同支同参）。
+        if (p.isDownDashing || solarSetFull) {
           for (const g of downDashGhostStamps(p, p.shadowRing())) {
             ctx.save();
             ctx.filter = `brightness(${g.k})`;
@@ -18937,6 +19141,26 @@ export class Renderer {
             ctx.drawImage(fa.img, fa.sx, fa.sy, fa.sw, fa.sh, -fa.sw / 2, -fa.sh + pad, fa.sw, fa.sh);
             ctx.globalAlpha = ga2;
           }
+        }
+        // ---- ★BJ597 甲位 GlowMask 收集（PlayerDrawSet.cs:459-811 SetPassColors
+        //      + 四甲位叠画站）：glow 色不取光照（自发光）→ 合成后冲刷。乘区 = 眨眼
+        //      /微光 bodyAlpha × stealth s'²（:1596/:1638/:1680 num25/27/29 平方后
+        //      = skinMul 同源）；色式/同变换同锚几何全在 armorGlowOps 纯计划。同帧
+        //      双绘（坐椅/睡床早绘+主段）以 WeakSet 首绘收集去重（glow 加算双份有害）。
+        if (!this.armorGlowCollected.has(p)) {
+          this.armorGlowCollected.add(p);
+          const agOps = armorGlowOps({
+            head: dollEquip.head ?? 0, body: dollEquip.body ?? 0, legs: dollEquip.legs ?? 0,
+            female: !MALE_VARIANTS.includes(p.appearance.skinVariant),
+            undershirt: p.appearance.undershirtColor,
+            rowsBody: rows.body, rowsLegs: rows.legs,
+            sit: (sitOpt as { sitting?: import('../player/PaperDoll').DollSitting }).sitting ?? null,
+            pet: petArm,
+            mt: this.lighting?.clock.mouseTextColor ?? 255,
+            miscCounter: p.miscCounter,
+            mul: bodyAlpha * stF.skinMul,
+          });
+          if (agOps.length) this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps });
         }
         // ★BJ423 浮游圈管体·前半（DrawPlayer_17_TorsoComposite :2037-2044——躯干甲/
         //   大衣后、OffhandAcc/Head 前；源=Extra_105 下半 (0,56,40,56)）。同锚帧盒,
@@ -19068,13 +19292,21 @@ export class Renderer {
     // Extra_61+shields-1 单贴图（1/2/3 层各一张,整簇）；锚 = 玩家中心+solarShieldPos[0]；
     // 旋转 = atan2(pos.y·0.5, pos.x)（(pos×(1,0.5)).ToRotation()）+ 左朝向 π + π/50·dir；
     // α 127/255；shader = cBody（身体染料,逐帧真跑 SM2 字节码——贴图仅 ~420px）
+    // ★BJ594（2026-10-09 用户实报"盾牌效果像是半透的比较暗"定谳+落刀）：原版此
+    // DrawData 色 = Color(255,255,255,127)【恒量支免光照】（R1-F1 判例域——:3135
+    // 直赋常色,不取 Lighting.GetColor）=暗处恒亮的自发光盾。本仓旧实现画在实体窗
+    // 内（compositeLight 全屏乘光前）→ 暗处被乘黑 ≈"半透的比较暗"。落刀 = 合成后
+    // 逃逸队列（eyebrellaQueue/wingGlowQueue 同族判例:drawPlayer 收集、7e 域
+    // flushSolarShieldQueue 消费,直绘主画布=免光乘坐标系）。变换数学不仿 XNA
+    // (int) 取整（全玩家层 float 惯例）;旋转/翻转/染面烘焙逐式原样。
+    // 层序登记：原版 26_SolarShield 在 27_HeldItem 之前（盾在手持物下层）;本仓
+    // 7e 槽在整玩家之上——与 BJ504/677/668/四塔 GlowMask「此槽在玩家之上」既有
+    // 偏差惯例同槽（50% 透盾下手持物仍透见,观感面仅挥摆重叠差）。
     if (p.solarShields > 0 && !p.dead && !mntHidden) {
-      const tex = this.atlas ? this.atlas.ensureVImage(`vanilla/Extra_${61 + p.solarShields - 1}.png`) : null;
+      const tex = this.atlas ? this.atlas.ensureVImage(`vanilla/Extra_${solarShieldTextureId(p.solarShields)}.png`) : null;
       if (tex) {
         const pos = p.solarShieldPos[0];
-        let rot = Math.atan2(pos.y * 0.5, pos.x);
-        if (p.facing === -1) rot += Math.PI;
-        rot += Math.PI / 50 * p.facing;
+        const rot = solarShieldRotation(pos, p.facing);
         const bodyDye = p.inv.dye[1];
         const dyeVid = bodyDye ? (ITEM_DEFS[bodyDye.id]?.vid ?? -1) : -1;
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
@@ -19082,13 +19314,10 @@ export class Renderer {
         if (emu) {
           src = this.bodyAccDyeBake(tex, emu, dyeVid, p.facing, `s:${p.solarShields}`);
         }
-        ctx.save();
-        ctx.translate(p.x + p.w / 2 + pos.x, p.y + p.h / 2 + pos.y);
-        ctx.rotate(rot);
-        if (p.facing === -1) ctx.scale(-1, 1);   // playerEffect 水平翻转（纹理空间）
-        ctx.globalAlpha = 127 / 255;
-        ctx.drawImage(src, -tex.width / 2, -tex.height / 2);
-        ctx.restore();
+        this.solarShieldQueue.push({
+          wx: p.x + p.w / 2 + pos.x, wy: p.y + p.h / 2 + pos.y,
+          rot, facing: p.facing, src, tw: tex.width, th: tex.height,
+        });
       }
     }
     // ---- 禁戒符号环（DrawPlayer_05_ForbiddenSetRing,PlayerDrawLayers.cs:280-326,
@@ -19225,6 +19454,45 @@ export class Renderer {
       this.drawUseItem(ctx, p, swing, flicker);
     }
     if (mrot) ctx.restore();
+    // ---- ★BJ596 甲虫 orb（DrawPlayer_37_BeetleBuff,PlayerDrawLayers.cs:4130-4155）----
+    //      层序 = 36_CTG 后/38_Eyebrella 前（LegacyPlayerRenderer.cs:255-257）=整玩家
+    //      之上、手持物(27)之上——本仓插眼球伞云盖块之前同域（worldLayer 世界空间）。
+    //      色 = colorArmorBody = GetImmuneAlphaPure(Lighting.GetColorClamped(玩家中心,
+    //      White),0)（PlayerDrawSet.cs:452）=光照×immune 淡出——光乘面走实体窗
+    //      compositeLight（禁戒符号环同判例;采样点差=orb 像素 vs 玩家中心,既有惯例）。
+    //      immune 淡出 = (255−immuneAlpha)/255 折算 globalAlpha（GetImmuneAlphaPure
+    //      无 >125 截断门,:54834-54842,与本体硬闪烁 GetImmuneAlpha 有别=平滑淡出）
+    //      ×(1−shimmerTransparency);RGB×k·A×k ≙ α_eff=k·immK(不透明底线性等价)。
+    //      每 orb = 5 残影(偏移 −vel×j、k=0.5−j·0.1)+本体(k=1,最后入缓存=最上),
+    //      参数面单源 beetleOrbDrawPlan（帧条 (0,H/3·frame+1,W,H/3−2)、origin(W/2,H/6)
+    //      C# 整除）。门 = beetleDefense||beetleOffense（:4131）+ shadow==0（:4131,
+    //      本仓单遍恒主遍）+ !dead（原版死亡相不进 DrawDataCache 层链）;无 stealth/
+    //      wet 门（原版无）。mntHidden=变身坐骑整玩家隐（禁戒环同防御门）。变换不仿
+    //      XNA (int) 截断（全玩家层 float 惯例,BJ594 登记）;playerEffect=facing 翻转。
+    //      贴图 vanilla/BeetleOrb.png（TextureAssets.Beetle 3 帧竖条,BJ595 判资产在库）。
+    if ((p.equipStats.beetleDef === true || p.equipStats.beetleOff === true) && !p.dead && !mntHidden) {
+      const orbTex = this.atlas?.ensureVImage('vanilla/BeetleOrb.png');
+      if (orbTex && orbTex.width > 0) {
+        const immK = ((255 - Math.min(255, p.immuneAlpha)) / 255) * (1 - Math.min(1, Math.max(0, p.shimmerTransparency)));
+        if (immK > 0) {
+          const cxp = p.x + p.w / 2, cyp = p.y + p.h / 2;
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          for (let i = 0; i < p.beetleOrbs; i++) {
+            const plan = beetleOrbDrawPlan(p.beetleVel[i], p.beetleFrame, orbTex.width, orbTex.height);
+            for (const s of plan) {
+              ctx.save();
+              ctx.globalAlpha = s.k * immK;
+              ctx.translate(cxp + p.beetlePos[i].x + s.ox, cyp + p.beetlePos[i].y + s.oy);
+              if (p.facing === -1) ctx.scale(-1, 1);             // playerEffect 水平翻转
+              ctx.drawImage(orbTex, 0, s.sy, orbTex.width, s.sh, -s.orgX, -s.orgY, orbTex.width, s.sh);
+              ctx.restore();
+            }
+          }
+          ctx.restore();
+        }
+      }
+    }
     // ---- 眼球伞云盖（DrawPlayer_38_EyebrellaCloud PlayerDrawLayers.cs:4139-4186）：
     //      Projectile_238 竖 6 帧条、frame = miscCounter%18/6；pos = MountedCenter −
     //      (0,h/2)+(0,−70)；两枚 ±3px 绕行拷贝（miscCounter%50/50×2π×±1）×0.65 +

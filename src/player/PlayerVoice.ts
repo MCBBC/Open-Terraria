@@ -6,9 +6,13 @@
 //      （DefaultToVoiceOverrideAccessory Item.cs:47786-47797；家族公式 7+type−5499
 //      :43355-43363 等）经 ApplyEquipFunctional/ApplyEquipVanity 装备置位
 //      （Player.cs:14489 带 !hideVisibleAccessory 门 / :14339 社交槽无门）。
-//   ② mount 52/54-56/61、狼人、霜甲、骨甲、dontStarveWorld 世界支（:38942-38995）
-//      未移植——挂 B3 待办;override 未命中时本仓直落 variant 段（原版这些支排在
-//      variant 段之前,命中即 return;未移植 = 该态回落普通语音,登记偏差）。
+//   ② 霜甲/骨甲受击音（:38984-38991）=★BJ598 件2 已落刀——frostArmor→SoundID.Item27
+//      （'Item_27'）/ boneArmor→legacy(3,style2)=NPCHit2（'NPC_Hit_2',逐 style 槽
+//      停旧播新=Sfx.SINGLE_SLOT_STOP NPC_Hit_1..56 族），甲支在 hurtVoicePlan
+//      （override 命中即先返;位次与原版序 override→甲支→dontStarve→variant 同序,
+//      甲旗由调用方传 frostArmor/boneArmor——Game.damagePlayer 与尘爆站同谓词
+//      eq.frostBurn/p.boneArmor）。mount 52/54-56/61、狼人（:38946-38982）仍未
+//      移植——挂 B3 待办;未移植态回落普通语音,登记偏差。
 //   ③ voiceVariant（ID/PlayerVoiceID.cs：1 男/2 女/3 其他,VariantOrder={1,2,3}）+
 //      voicePitchOffset（梳妆台滑杆 -1..1,Main.cs:45429-45451）尾段分派
 //      （:38996-39009）：pitch=Remap(offset,-1,1,-0.7,0.7) 显式直传（三 case 同式,
@@ -72,6 +76,11 @@ export interface VoiceState {
   voiceVariant?: number | null;      // PlayerVoiceID 1/2/3（Appearance 持久化 byte）
   voicePitchOffset?: number | null;  // -1..1（Appearance 持久化 float）
   voiceOverride?: number | null;     // PlayerVoiceOverrideID（equipStats 聚合）
+  /** ★BJ598 件2:甲支受击音旗（PlayHurtSound :38984-38991）——frost=frostArmor
+   *  （本仓由 equipStats.frostBurn 三元组承载）/ bone=boneArmor。命中即直播甲音
+   *  （override 之后、DST 世界门之前）;两旗同时为真按原版序 frost 先于 bone */
+  frostArmor?: boolean;
+  boneArmor?: boolean;
 }
 
 /** 受击分派计划（纯函数零 RNG;鸡稀有变体独立掷交播放侧执行） */
@@ -82,6 +91,9 @@ export interface HurtVoicePlan {
   pitch?: number;
   /** case6 鸡 1/5 稀有变体（PlayHurtSound case6 本体 :38899-38906,Next(5)==0） */
   rare?: { denom: number; files: string[]; vol: number };
+  /** ★BJ598:分派来源档——'override'=voiceOverride 直播;'armor'=甲支（frost/bone,
+   *  :38984-38991,原版先于 dontStarve 世界门,DST 门据此排除）;缺省='variant' 尾段 */
+  source?: 'override' | 'armor' | 'variant';
 }
 
 // —— voiceOverride 直播表（PlayHurtSound switch :38879-38996;vol=SoundID WithVolume;
@@ -125,9 +137,16 @@ export function hurtVoicePlan(state: VoiceState | number | null | undefined): Hu
   const hit = OVERRIDE_HURT[ov];
   if (hit) {
     return ov === 6
-      ? { ...hit, rare: { denom: 5, files: ['player_hit_chicken_rare'], vol: 0.5 } }
-      : { ...hit };
+      ? { ...hit, rare: { denom: 5, files: ['player_hit_chicken_rare'], vol: 0.5 }, source: 'override' as const }
+      : { ...hit, source: 'override' as const };
   }
+  // ★BJ598 件2:甲支（PlayHurtSound :38984-38991——override switch 之后、werewolf
+  //  支（未移植=头注②登记）与 dontStarve 世界门之前）:frostArmor→SoundID.Item27、
+  //  boneArmor→legacy(3,style2)=NPCHit2,vol 均缺省 1（legacy PlaySound 无音量实参）。
+  //  两旗同帧按原版序 frost 先于 bone（原版两支互斥 return;frost 套与骨甲三件不同
+  //  槽实际不可同穿,序仅锁语义）。
+  if (st.frostArmor) return { files: ['Item_27'], vol: 1, source: 'armor' };
+  if (st.boneArmor) return { files: ['NPC_Hit_2'], vol: 1, source: 'armor' };
   // 尾段 variant 分派（:38996-39009）：voiceVariant 缺省按外观性别推导
   // （建号初始化 Male?1:2,Player.cs:56393;旧存档/测试桩无字段的等价回退）
   const variant = st.voiceVariant
@@ -149,17 +168,19 @@ export function playerHurtFiles(skinVariant: number | null | undefined): string[
 /** 播一次玩家受击语音（=原版 PlayHurtSound 尾段/override 支的取一播放）。
  *  入参兼容旧裸 skinVariant 数字与新 VoiceState 聚合对象 */
 export function playHurtVoice(game: GameHooks, state: VoiceState | number | null | undefined): void {
-  // DST 世界门(:38993-38995,dontStarve&&!remix——override switch 后、variant 段前;
-  // 中间的 mount/狼人/霜甲/骨甲支未移植故直达此门,头注②登记的回落序与原版一致):
-  // Male ? DSTMaleHurt : DSTFemaleHurt,三变体随机,vol 0.1(SoundID.cs:1056/:1058)
   const st0 = typeof state === 'number' ? { skinVariant: state } : (state ?? {});
+  // ★BJ598:计划先行——甲支（plan.source==='armor'）原版位次在 dontStarve 门之前
+  const plan = hurtVoicePlan(state);
+  // DST 世界门(:38993-38995,dontStarve&&!remix——override switch 后、variant 段前;
+  // override 命中（voiceOverride 真值）与甲支命中（source==='armor'）均跳过本门;
+  // mount/狼人支未移植故 override 未命中直达此门,头注②登记的回落序与原版一致):
+  // Male ? DSTMaleHurt : DSTFemaleHurt,三变体随机,vol 0.1(SoundID.cs:1056/:1058)
   const sfH = (game as unknown as { world?: { seedFlags?: Record<string, boolean | undefined> } }).world?.seedFlags ?? {};
-  if (!st0.voiceOverride && sfH.theConstant && !sfH.remix) {
+  if (!st0.voiceOverride && plan.source !== 'armor' && sfH.theConstant && !sfH.remix) {
     const maleH = !FEMALE_VARIANTS.includes(st0.skinVariant ?? 0);
     game.playSfxWav?.(`${maleH ? 'dst_male_hit' : 'dst_female_hit'}_${Math.floor(Math.random() * 3)}`, 0.1);
     return;
   }
-  const plan = hurtVoicePlan(state);
   let files = plan.files;
   let vol = plan.vol;
   if (plan.rare && Math.floor(Math.random() * plan.rare.denom) === 0) {

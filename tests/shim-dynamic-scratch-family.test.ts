@@ -258,8 +258,15 @@ describe('★变体①修复锁 源级锁:各共享 scratch 烘焙点逐次上�
     expect(SHIM).toContain('const key = `er:${id}:${ep}:${p.sx},${p.sy},${p.sw},${p.sh}`;');
   });
 
-  it('TintAtlas:回收矩形 blit 后 bumpTexEpoch 在位', () => {
-    expect(TATLAS).toContain('if (recycled) bumpTexEpoch(page.cv);');
+  it('TintAtlas:回收矩形 blit 后 GL 缓存失效在位（E51 刀A 精确失效+页级兜底）', () => {
+    // ★oracle 重产（2026-10-10,BJ594 回归扫发现陈旧）:E51 刀A（2026-10-06 落盘）
+    //   把旧单支 `if (recycled) bumpTexEpoch(page.cv);` 重构为两支——钩子在场走
+    //   【精确失效】invalidateRect（仅被覆写矩形,页上其余矩形零追新）;否则页级
+    //   bump 兜底（fail-closed,2026-09-27 原语义逐位保留）。语义面（回收矩形
+    //   原地覆写必须失效 GL 缓存）未变,源锚随新两支形态重产。
+    expect(TATLAS).toContain('if (recycled) {');
+    expect(TATLAS).toContain('if (invalidateRect) invalidateRect(page.cv, x, y, w, h);');
+    expect(TATLAS).toContain('else bumpTexEpoch(page.cv);');
     expect(TATLAS).toContain('private alloc(w: number, h: number): [Page, number, number, boolean] | null {');
   });
 });

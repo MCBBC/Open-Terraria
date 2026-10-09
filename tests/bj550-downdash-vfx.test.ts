@@ -194,7 +194,12 @@ describe('BJ550 ③秒表下坠速双计（Main.cs:47882-47884 vector.Y += veloc
 
 describe('BJ550 ④渲染接线（Renderer.drawPlayer 盖章块,源锚）', () => {
   it('残影块 = isDownDashing 门 × downDashGhostStamps(p, p.shadowRing()) × brightness(k) 盖章', () => {
-    expect(RDR).toMatch(/if \(p\.isDownDashing\) \{\s*\n\s*for \(const g of downDashGhostStamps\(p, p\.shadowRing\(\)\)\)/);
+    // ★BJ594（2026-10-10）：门扩 isDownDashing ∪ 日耀套全身（isSolarFlareFullSet）
+    // ——原版 armorEffectDrawShadow 双置位支（Player.cs:37354-37357 下砸 ∪
+    // :37371-37375 日耀套 SetArmorEffectVisuals）,同一 LegacyPlayerRenderer.cs:415-421
+    // 三张残影支;本仓同块同参复用 = 门扩非改支。
+    expect(RDR).toMatch(/if \(p\.isDownDashing \|\| solarSetFull\) \{\s*\n\s*for \(const g of downDashGhostStamps\(p, p\.shadowRing\(\)\)\)/);
+    expect(RDR).toContain('const solarSetFull = isSolarFlareFullSet(');
     expect(RDR).toContain('ctx.filter = `brightness(${g.k})`');
     expect(RDR).toContain('g.lx - f.sw / 2, g.ly - f.sh + pad');   // 与本体同帧锚(−sw/2, −sh+pad)
   });

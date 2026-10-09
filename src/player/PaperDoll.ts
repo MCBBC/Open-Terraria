@@ -39,7 +39,8 @@ const VERTICAL_CHANNELS: Array<{ sheet: number; color: keyof Appearance | 'white
  * OffsetsPlayerHeadgear 行偏移(Main.cs:530,行7-9/14-16 → −2px,行走 bob)——
  * 头/眼/发/腿不吃此表,见 COMPOSITE_BOB_ROWS。
  */
-const ARM_FRAME: ReadonlyArray<readonly [number, number]> = [
+/** ★BJ597 导出：复合半幅 glow 逐部件计划与烘焙共用同一帧表单源（防副本漂移） */
+export const ARM_FRAME: ReadonlyArray<readonly [number, number]> = [
   [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [2, 1], [3, 1],
   [4, 1], [4, 1], [4, 1], [4, 1], [3, 1], [3, 1], [3, 1],
   [5, 1], [6, 1], [6, 1], [5, 1], [3, 1], [3, 1],
@@ -63,7 +64,7 @@ const HIDES_TOP_SKIN_BODIES = new Set([82, 83, 93, 21, 22]);
  *  PlayerDrawLayers.cs:1293-1295(Skin_Composite)/:1311-1314(BackArmShirt)/
  *  :1996-1999(TorsoComposite)/:3700-3703(ArmOverItemComposite)同一 vector。
  *  头/眼/发/腿各层不消费此表(SW-BJ11 2026-09-07 补齐) */
-const COMPOSITE_BOB_ROWS = new Set([7, 8, 9, 14, 15, 16]);
+export const COMPOSITE_BOB_ROWS = new Set([7, 8, 9, 14, 15, 16]);
 
 /** GetHairSettings（1456 Player.cs:16645-16760，switch(head) 精确提取）：
  *  fullHair 头盔露出完整发型 / hatHair 露出特制帽子发型(Player_HairAlt) / 其余完全隐藏 */
@@ -313,8 +314,10 @@ export const HIDES_HEAD = new Set([38, 135, 269, 282, 288]);
 /** DrawSittingLegs 切片计划（局部坐标 = 帧锚点左上、朝右空间；外层 translate 已含
  *  seatYOffset 的整体座位偏移，故 evY 中 -sY 的对冲项即恢复原版净偏移）。
  *  n 从 num3 降到 0：源条 = 帧 srcRow 起 y+2n+num2、高 (n==num3 ? 56-num2-2n : 2)；
- *  目标 = (xShift+num+num4·n+num6+(n?num7:0)+num8, evY+2+num2+num5+num9) */
-function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: number, srcRow: number):
+ *  目标 = (xShift+num+num4·n+num6+(n?num7:0)+num8, evY+2+num2+num5+num9)。
+ *  ★BJ597 导出：坐姿腿甲 glow 叠画（PlayerDrawLayers.cs:1478-1495 DrawSittingLegs
+ *  同表切片）与烘焙共用本单源——另立副本必漂移 */
+export function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: number, srcRow: number):
   Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> {
   // 默认档（PlayerDrawLayers.cs:1594-1602）：num=2/num2=42/num3=2/num4=2/num5=2
   let num = 2, num2 = 42, num3 = 2, num4 = 2, num5 = 2;

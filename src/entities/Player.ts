@@ -34,6 +34,7 @@ import { surviveHardcoreDeath } from '../world/gen/SeedEasterEggs';   // Main.su
 import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
+import type { VDust } from '../fx/VanillaDust';   // ★BJ595 尘池窄接口复用（纯函数臂）
 import { MOD_ITEM_STABLE_BASE } from '../mods/types';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { options } from '../core/Options';   // ★SW-FX14：hoverControl 档读数（Player.Settings.HoverControl 镜像）
@@ -329,6 +330,366 @@ export function downDashGhostStamps(p: {
   }
   return out;
 }
+/** ★BJ594 日耀天闪套全身判定（Player.cs:37371-37375 SetArmorEffectVisuals：
+ *  head==171 && body==177 && legs==112 → armorEffectDrawShadow+armorEffectDrawOutlines
+ *  双旗）。甲位 id = Item.cs SetDefaults 2763/2764/2765 → headSlot/bodySlot/legSlot
+ *  （2763 SolarFlareHelmet→171、2764 Breastplate→177、2765 Leggings→112）。 */
+export const SOLAR_FLARE_SET = { head: 171, body: 177, legs: 112 } as const;
+export function isSolarFlareFullSet(head: number, body: number, legs: number): boolean {
+  return head === SOLAR_FLARE_SET.head && body === SOLAR_FLARE_SET.body && legs === SOLAR_FLARE_SET.legs;
+}
+
+/** ★BJ594 armorEffectDrawOutlines 四向脉冲描边 stamps（纯函数,tests/bj594 直测）——
+ *  LegacyPlayerRenderer.cs:343-372：ghostFade 振荡体见 advanceSolarGhostFade；
+ *  四张全玩家复制 offset = (±ghostFade·5, 0) ∪ (0, ±ghostFade·5)（num2=ghostFade·5,
+ *  :361-372 switch 四向）、α = ×(1−ghostFade)（DrawPlayer shadow=ghostFade →
+ *  GetImmuneAlphaPure Color.Multiply 全通道乘 1−shadow,Player.cs:54834-54846）。
+ *  k/offset 单源此处（渲染端 brightness(k)+globalAlpha(k) 同 BJ550 习语）。
+ *  集合 {(±d,0),(0,±d)} 对 facing/gravDir 镜像不变（镜像双射=集合恒等）——
+ *  渲染端镜像空间直接画,无需乘向。 */
+export function solarOutlineStamps(ghostFade: number): Array<{ ox: number; oy: number; k: number }> {
+  const d = ghostFade * 5;                                       // :361 num2
+  const k = 1 - ghostFade;                                       // shadow=ghostFade 全通道乘
+  return [
+    { ox: d, oy: 0, k },                                         // default: (num2,0)
+    { ox: -d, oy: 0, k },                                        // case 1: (−num2,0)
+    { ox: 0, oy: d, k },                                         // case 2: (0,num2)
+    { ox: 0, oy: -d, k },                                        // case 3: (0,−num2)
+  ];
+}
+
+/** ★BJ594 ghostFade 振荡步进（纯函数,tests/bj594 直测）——LegacyPlayerRenderer.cs:346-360：
+ *  !gamePaused 时 fade += dir·0.075;<0.1 → dir=1/fade=0.1、>0.9 → dir=−1/fade=0.9
+ *  （呼吸回弹钳）。fade/dir = Player 持久字段（Player.cs:1487-1489,初值 0/1——
+ *  首帧 0.075<0.1 钳入 0.1）。paused=true 原样返回（:347 Main.gamePaused 门）。
+ *  armorEffectDrawOutlinesForbidden（禁戒套 :373-405）共享同字段步长 0.025——
+ *  本仓禁戒套未接此描边,登记（BJ594 只接日耀 0.075 档）。 */
+export function advanceSolarGhostFade(
+  fade: number, dir: number, paused: boolean,
+): { fade: number; dir: number } {
+  if (paused) return { fade, dir };
+  fade += dir * 0.075;
+  if (fade < 0.1) { dir = 1; fade = 0.1; }
+  else if (fade > 0.9) { dir = -1; fade = 0.9; }
+  return { fade, dir };
+}
+
+/** ★BJ594 日耀盾球旋转角（纯函数,tests/bj594 直测）——PlayerDrawLayers.cs:3136-3140：
+ *  num = (solarShieldPos[0] × (1,0.5)).ToRotation() = atan2(y·0.5, x)；
+ *  direction==−1 → += π（:3137-3139）；再 += π/50·direction（:3140 摆头微角）。 */
+export function solarShieldRotation(
+  pos: { x: number; y: number }, facing: number,
+): number {
+  let rot = Math.atan2(pos.y * 0.5, pos.x);
+  if (facing === -1) rot += Math.PI;
+  rot += (Math.PI / 50) * facing;
+  return rot;
+}
+
+/** ★BJ594 日曜盾球贴图选择（PlayerDrawLayers.cs:3134）：Extra[61 + shields − 1]
+ *  ——1/2/3 层各一张整簇贴图（14×30/18×36/22×42,簇内盾数随层递增）。 */
+export function solarShieldTextureId(shields: number): number {
+  return 61 + shields - 1;
+}
+
+/** ★BJ594 日耀盾球恒定色 α（PlayerDrawLayers.cs:3135 Color(255,255,255,127)——
+ *  恒量支免光照,R1-F1 判例域:此 DrawData 不取光=暗处恒亮;127/255 直配 globalAlpha） */
+export const SOLAR_SHIELD_ALPHA = 127 / 255;
+
+// ===================== ★BJ595 套装视效普查·纯函数臂（tests/bj595 直测） =====================
+// 落刀面四件：星璇潜行衰减环尘 / 忍者足具+水晶刺客冲刺拖尘·起爆尘 / 玩家受击尘爆
+// （寒霜 d135·骨甲 d26 选型支）/ 死亡尘爆。发射站内联调用,逐参锁在此单源。
+
+/** BJ595 尘池窄接口（VanillaDust.spawn 形状;测试以录制桩直喂） */
+export interface BJ595DustPool {
+  spawn(x: number, y: number, w: number, h: number, type: number,
+    speedX?: number, speedY?: number, alpha?: number,
+    color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
+    opts?: { perfect?: boolean }): VDust | null;
+}
+
+/** 受击/死亡尘选型（Player.cs:38830-38848 存活支与 :39336-39353 死亡支同构双链）：
+ *  stoned→d1 / frostArmor→d135 / boneArmor→d26 / 默认 d5。 */
+export function armorHurtDustType(stoned: boolean, frost: boolean, bone: boolean): number {
+  return stoned ? 1 : frost ? 135 : bone ? 26 : 5;
+}
+
+/** 受击尘粒数（Player.cs:38825-38827：num24 = num2/statLifeMax2×100 双精度循环界，
+ *  `for (num27 < num24)` ⇒ floor；<1% 最大生命的伤害零尘=原版相） */
+export function playerHurtDustCount(dmg: number, maxHp: number): number {
+  return Math.floor(dmg / maxHp * 100);
+}
+
+/** ★星璇套潜行衰减拍环尘（Player.cs:26059-26092 flag11 段）：每拍独立 1/2 掷两族。
+ *  d229：位=Center−v×Next(5,11)（单掷×整向量,v=(0,1).RotatedByRandom(2π)=(−sinθ,cosθ)、
+ *  θ=(rng−rng)×2π=Utils.cs:1785-87 三角化）、vel=v.RotatedBy(π/2)×4=(−v.y,v.x)×4、
+ *  scale=.5+rand、fadeIn=.5；d240：位=Center−v×12、vel=v.RotatedBy(−π/2)×2=(v.y,−v.x)×2、
+ *  同 scale/fadeIn。spawn 位参 (Center−v×30,0,0) 仅作 NewDust 裁剪盒,位随后覆写
+ *  （:26074/:26083 原序）。返回实发粒数（0-2）。 */
+export function emitVortexStealthFadeDust(
+  pool: BJ595DustPool | undefined, cx: number, cy: number, rand: () => number = Math.random,
+): number {
+  if (!pool) return 0;
+  let emitted = 0;
+  for (const kind of [0, 1]) {
+    if (Math.floor(rand() * 2) !== 0) continue;   // Next(2)==0 门（两族独立掷）
+    const th = (rand() - rand()) * 6.2831854820251465;
+    const v = { x: -Math.sin(th), y: Math.cos(th) };
+    if (kind === 0) {
+      const d = pool.spawn(cx - v.x * 30, cy - v.y * 30, 0, 0, 229);
+      if (d) {
+        d.noGravity = true;
+        const r511 = 5 + Math.floor(rand() * 6);   // Next(5,11) 单掷×整向量
+        d.x = cx - v.x * r511;
+        d.y = cy - v.y * r511;
+        d.vx = -v.y * 4; d.vy = v.x * 4;           // RotatedBy(π/2)×4
+        d.scale = 0.5 + rand();
+        d.fadeIn = 0.5;
+        emitted++;
+      }
+    } else {
+      const d = pool.spawn(cx - v.x * 30, cy - v.y * 30, 0, 0, 240);
+      if (d) {
+        d.noGravity = true;
+        d.x = cx - v.x * 12;
+        d.y = cy - v.y * 12;
+        d.vx = v.y * 2; d.vy = -v.x * 2;           // RotatedBy(−π/2)×2
+        d.scale = 0.5 + rand();
+        d.fadeIn = 0.5;
+        emitted++;
+      }
+    }
+  }
+  return emitted;
+}
+
+/** ★BJ596 甲虫 orb 单体步进（UpdateArmorSets_Always_Beetle 循环体 Player.cs:16579-16612
+ *  逐式纯函数;rand 可注入供判别测试,实机默认 Math.random=Main.rand 域）：
+ *  · pos+=vel（:16580）→ vel += Next(-100,101)×0.005 双轴（:16581-82,±0.5/t² 随机游走）
+ *  · 外环 |pos|>100 → 弹簧目标 -pos/|pos|×20、vel=vel×9/10+目标×1/10（:16587-16595）
+ *  · 内环 |pos|>30 → 同式目标半径 10、混合 19/20+1/20（:16596-16603）
+ *  · |vel|>2 → vel×0.9（:16604-16610——非硬钳,超 2 才衰减的渐近限速）
+ *  · pos -= playerVel×0.25（:16611——玩家移动球拖尾） */
+export function stepBeetleOrb(
+  pos: { x: number; y: number }, vel: { x: number; y: number },
+  pvx: number, pvy: number, rand: () => number = Math.random,
+): void {
+  pos.x += vel.x; pos.y += vel.y;                                    // :16580
+  vel.x += (Math.floor(rand() * 201) - 100) * 0.005;                 // :16581
+  vel.y += (Math.floor(rand() * 201) - 100) * 0.005;                 // :16582
+  let x = pos.x, y = pos.y;
+  let d = Math.sqrt(x * x + y * y);
+  if (d > 100) {                                                     // :16587-16595
+    const s = 20 / d;
+    x *= -s; y *= -s;
+    const n = 10;
+    vel.x = (vel.x * (n - 1) + x) / n;
+    vel.y = (vel.y * (n - 1) + y) / n;
+  } else if (d > 30) {                                               // :16596-16603
+    const s = 10 / d;
+    x *= -s; y *= -s;
+    const n = 20;
+    vel.x = (vel.x * (n - 1) + x) / n;
+    vel.y = (vel.y * (n - 1) + y) / n;
+  }
+  x = vel.x; y = vel.y;
+  d = Math.sqrt(x * x + y * y);
+  if (d > 2) { vel.x *= 0.9; vel.y *= 0.9; }                         // :16604-16610
+  pos.x -= pvx * 0.25; pos.y -= pvy * 0.25;                          // :16611
+}
+
+/** ★BJ596 甲虫 orb 绘制参数面（DrawPlayer_37_BeetleBuff PlayerDrawLayers.cs:4130-4155
+ *  逐式纯函数）：每 orb = 5 残影（j=0..4:偏移 -vel×j、色×(0.5-j·0.1)——R,G,B,A 全通道
+ *  字节截断乘）+ 本体（全色、零偏移、最后入缓存=画在最上）。帧条源矩形 =
+ *  (0, H/3·frame+1, W, H/3-2)（:4151,C# 整除）;origin=(W/2, H/6)（:4153,整除）。
+ *  k 因子供 canvas α 合成：RGB×k·A×k ≙ α_eff=k·A（不透明底线性等价,实体窗
+ *  compositeLight 域内成立）。 */
+export function beetleOrbDrawPlan(
+  vel: { x: number; y: number }, beetleFrame: number, texW: number, texH: number,
+): { ox: number; oy: number; k: number; main: boolean; sy: number; sh: number; orgX: number; orgY: number }[] {
+  const f3 = Math.floor(texH / 3);                                   // Height/3 整除
+  const sy = f3 * beetleFrame + 1;                                   // :4151
+  const sh = f3 - 2;                                                 // :4151
+  const orgX = Math.floor(texW / 2);                                 // :4153 Width/2
+  const orgY = Math.floor(texH / 6);                                 // :4153 Height/6 整除
+  const plan: { ox: number; oy: number; k: number; main: boolean; sy: number; sh: number; orgX: number; orgY: number }[] = [];
+  for (let j = 0; j < 5; j++) {
+    plan.push({ ox: -vel.x * j, oy: -vel.y * j, k: 0.5 - j * 0.1, main: false, sy, sh, orgX, orgY });
+  }
+  plan.push({ ox: 0, oy: 0, k: 1, main: true, sy, sh, orgX, orgY });
+  return plan;
+}
+
+/** ★冲刺滑行拖尘（DashMovement :21440-21452 dash1 / :21461-21478 dash3★BJ594 /
+ *  :21501-21515 dash5,滑行期每拍）：
+ *  dash1=2×d31（盒=(x, 空中?y+h/2−num19×2 : y+h−num19)×(w, num20|trunc(num20/2)),
+ *  num18=h/42、num19=4×num18、num20=trunc(16×num18)、vel×0.1、scale×(1+Next(20)×.01)、
+ *  α100 s1.4,无染料）；dash3=4×d6（盒=(x, y+4×num18)×(w, h−trunc(8×num18))——
+ *  无 vy 分支,s1.7、vel×0.1、scale×(1+Next(20)×.01)、noGravity、套染料、
+ *  50% fadeIn .5（Next(2)==0））；dash5=2×d68/69/70（num32/num33 同值、vel×0.2、
+ *  scale×(1+..)、fadeIn=.5+Next(20)×.01、noGravity、套染料）。
+ *  其余 dash 档零尘（dash2 循环 m<0/dash4 死支）。返回实发粒数。 */
+export function emitDashSlideDust(
+  pool: BJ595DustPool | undefined,
+  p: { x: number; y: number; w: number; h: number; vx: number; vy: number },
+  dash: number, dyeVid: number, rand: () => number = Math.random,
+): number {
+  if (!pool) return 0;
+  const num18 = p.h / 42;
+  if (dash === 3) {
+    const num25 = 4 * num18;
+    const num26 = Math.trunc(8 * num18);              // (int)(8f*num18)
+    let n = 0;
+    for (let i = 0; i < 4; i++) {
+      const d = pool.spawn(p.x, p.y + num25, p.w, p.h - num26, 6, 0, 0, 100, null, 1.7);
+      if (d) {
+        d.vx *= 0.1; d.vy *= 0.1;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+        d.noGravity = true;
+        d.dyeVid = dyeVid;
+        if (Math.floor(rand() * 2) === 0) d.fadeIn = 0.5;   // Next(2)==0 → fadeIn
+        n++;
+      }
+    }
+    return n;
+  }
+  if (dash === 1) {
+    const num19 = 4 * num18;
+    const num20 = Math.trunc(16 * num18);
+    let n = 0;
+    for (let l = 0; l < 2; l++) {
+      const d = pool.spawn(p.x, p.vy !== 0 ? p.y + p.h / 2 - num19 * 2 : p.y + p.h - num19,
+        p.w, p.vy !== 0 ? num20 : Math.trunc(num20 / 2), 31, 0, 0, 100, null, 1.4);
+      if (d) {
+        d.vx *= 0.1; d.vy *= 0.1;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+        n++;
+      }
+    }
+    return n;
+  }
+  if (dash === 5) {
+    const num32 = 4 * num18;
+    const num33 = Math.trunc(16 * num18);
+    let n = 0;
+    for (let i = 0; i < 2; i++) {
+      const t = [68, 69, 70][Math.floor(rand() * 3)];   // NextFromList
+      const d = pool.spawn(p.x, p.vy !== 0 ? p.y + p.h / 2 - num32 * 2 : p.y + p.h - num32,
+        p.w, p.vy !== 0 ? num33 : Math.trunc(num33 / 2), t, 0, 0, 100);
+      if (d) {
+        d.vx *= 0.2; d.vy *= 0.2;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+        d.fadeIn = 0.5 + Math.floor(rand() * 20) * 0.01;
+        d.noGravity = true;
+        d.dyeVid = dyeVid;
+        n++;
+      }
+    }
+    return n;
+  }
+  return 0;
+}
+
+/** BJ595 gore 窄接口（GorePiece.newGore 形状） */
+export interface BJ595GoreSpawner {
+  (type: number, x: number, y: number, vx: number, vy: number): { vx: number; vy: number } | null;
+}
+
+/** ★冲刺起爆尘爆（DoCommonDashHandle dashing 段）：dash1（:21583-21612）20×d31
+ *  （位=盒内点+Next(−5,6) 双轴抖、vel×0.2、scale×(1+Next(20)×.01)、α100 s2）
+ *  + gore 61-63×2（位=(x+w/2−24, y+h/2−34 / −14),vel=Next(−50,51)×.01 双轴后×0.4
+ *  ——NewGore 内建扰动被显式覆写同净效）；dash3（:21641-21652★BJ594）20×d6
+ *  （位抖同 dash1、vel×0.2、s2×(1+Next(20)×.01)、套染料、noGravity、fadeIn=.5
+ *  无条件——无 gore 支）；dash5（:21700-21715）20×d68/69/70（位抖
+ *  同上、vel=DirectionTo(dust.position)×2=尘位−Center 归一×2、scale/fadeIn 同滑行档、
+ *  noGravity、套染料）。dash2 起爆循环 m<0=死支零尘。返回实发粒数。 */
+export function emitDashLaunchBurst(
+  pool: BJ595DustPool | undefined, gore: BJ595GoreSpawner | null,
+  p: { x: number; y: number; w: number; h: number; cx: number; cy: number },
+  dash: number, dyeVid: number, rand: () => number = Math.random,
+): number {
+  if (!pool || (dash !== 1 && dash !== 3 && dash !== 5)) return 0;
+  let n = 0;
+  for (let i = 0; i < 20; i++) {
+    const t = dash === 1 ? 31 : dash === 3 ? 6 : [68, 69, 70][Math.floor(rand() * 3)];
+    const d = pool.spawn(p.x, p.y, p.w, p.h, t, 0, 0, 100, null, dash === 5 ? 1.5 : 2);
+    if (d) {
+      d.x += Math.floor(rand() * 11) - 5;   // Next(−5,6)
+      d.y += Math.floor(rand() * 11) - 5;
+      if (dash === 1) {
+        d.vx *= 0.2; d.vy *= 0.2;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+      } else if (dash === 3) {
+        // ★BJ594 dash3 日耀起爆（:21641-21652）：vel×0.2/scale×(1+Next(20)×.01)
+        // 同 dash1 核 + 套染料/noGravity/fadeIn=.5 无条件（dash5 fadeIn 带掷,此档不带）
+        d.vx *= 0.2; d.vy *= 0.2;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+        d.noGravity = true;
+        d.dyeVid = dyeVid;
+        d.fadeIn = 0.5;
+      } else {
+        const dx = d.x - p.cx, dy = d.y - p.cy;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const k = len > 0 ? 2 / len : 0;   // DirectionTo×2（len=0 原版 NaN 域不可达,防池污染）
+        d.vx = dx * k; d.vy = dy * k;
+        d.scale *= 1 + Math.floor(rand() * 20) * 0.01;
+        d.fadeIn = 0.5 + Math.floor(rand() * 20) * 0.01;
+        d.noGravity = true;
+        d.dyeVid = dyeVid;
+      }
+      n++;
+    }
+  }
+  if (dash === 1 && gore) {
+    for (const gy of [p.y + p.h / 2 - 34, p.y + p.h / 2 - 14]) {
+      const g = gore(61 + Math.floor(rand() * 3), p.x + p.w / 2 - 24, gy, 0, 0);
+      if (g) {
+        g.vx = (Math.floor(rand() * 101) - 50) * 0.01;   // Next(−50,51)×.01
+        g.vy = (Math.floor(rand() * 101) - 50) * 0.01;
+        g.vx *= 0.4; g.vy *= 0.4;
+      }
+    }
+  }
+  return n;
+}
+
+/** ★存活受击尘爆发射（Player.Hurt 尾 :38825-38852）：粒数=playerHurtDustCount、
+ *  选型=armorHurtDustType、vx=2×hitDirection、vy=−2（num25=2×hitDir;num26 反编译
+ *  恒 0 → 无第二叠加项）。frost/bone 支套染料（GetSecondaryShader(ArmorSetDye())）。 */
+export function emitPlayerHurtDust(
+  pool: BJ595DustPool | undefined,
+  box: { x: number; y: number; w: number; h: number },
+  dmg: number, maxHp: number, hitDir: number,
+  stoned: boolean, frost: boolean, bone: boolean, dyeVid: number,
+  rand: () => number = Math.random,
+): number {
+  const n = playerHurtDustCount(dmg, maxHp);
+  if (n <= 0 || !pool) return 0;
+  const type = armorHurtDustType(stoned, frost, bone);
+  for (let i = 0; i < n; i++) {
+    const d = pool.spawn(box.x, box.y, box.w, box.h, type, 2 * hitDir, -2);
+    if ((frost || bone) && d) d.dyeVid = dyeVid;
+  }
+  return n;
+}
+
+/** ★死亡尘爆（KillMe_DustExplosion Player.cs:39330-39360,KillMe :39208 调）：100×
+ *  盒内尘、vx=2×hitDirection、vy=−2、选型同 armorHurtDustType。尾支 velocity×1/
+ *  scale×1/fadeIn×0（反编译字面恒等量=纯 no-op 不落）。 */
+export function emitPlayerDeathDustExplosion(
+  pool: BJ595DustPool | undefined,
+  box: { x: number; y: number; w: number; h: number },
+  hitDir: number, stoned: boolean, frost: boolean, bone: boolean, dyeVid: number,
+): number {
+  if (!pool) return 0;
+  const type = armorHurtDustType(stoned, frost, bone);
+  for (let i = 0; i < 100; i++) {
+    const d = pool.spawn(box.x, box.y, box.w, box.h, type, 2 * hitDir, -2);
+    if ((frost || bone) && d) d.dyeVid = dyeVid;
+  }
+  return 100;
+}
+
 /** 绳索攀爬速度链（Player.cs:26016-26125）：上爬 -0.2/-0.02 下限 -8；
  *  下滑 +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7（|vy|<0.1 归 0 :26120-26124） */
 const ROPE_IDLE_ZERO = 0.1;
@@ -1273,6 +1634,20 @@ export class Player extends Entity {
    *  渲染 DrawPlayer_26_SolarShield——Extra_61+shields-1 单贴图含全簇） */
   solarShieldPos = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
   solarShieldVel = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
+  /** 甲虫 orb 环绕偏移/速度（Player.beetlePos/Vel :947/:949,3 槽=两族各 3 档上限;
+   *  轨道更新 UpdateArmorSets_Always_Beetle :16556-16612——随机游走+100/30 双环回拉
+   *  +>2 限速 ×0.9+玩家速度 0.25 反向漂移;渲染 DrawPlayer_37_BeetleBuff——★BJ596） */
+  beetlePos = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
+  beetleVel = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
+  /** 甲虫 orb 3 帧条动画帧（Player.beetleFrame/FrameCounter :951/:953——每 tick 步进
+   *  0→1→2 循环,frameCounter>=1 门恒真=反编译残迹式照抄;套离身冻结 :16558 早退） */
+  beetleFrame = 0;
+  private beetleFrameCounter = 0;
+  /** ★BJ594 armorEffectDrawOutlines 脉冲振荡载体（Player.ghostFade/ghostDir
+   *  :1487-1489,初值 0/1）——渲染端 advanceSolarGhostFade 步进（0.075/帧,
+   *  钳 0.1..0.9 呼吸回弹）;日耀套全身在身时消费（四向描边 stamps）。 */
+  ghostFade = 0;
+  ghostDir = 1;
   /** 自然回血爬坡计时（Player.lifeRegenTime：受击 :37784 / DoT :18781+ / 流血 :19000 清零，
    *  每 tick 基础 +1（:18930）、蜂蜜 +2（:18954）。★旧注"本仓自然回血为恒 1HP/s
    *  简化"已退役（2026-08-13 九档公式重写,消费段见 updateLifeRegen:
@@ -2143,7 +2518,7 @@ export class Player extends Entity {
     }
     let def = 0, mana = 0, life = 0;
     // ★三百三十五刀:mod 配饰效果累加器(sw.accEffect 闭包直改;return 合并)
-    const modAcc = { def: 0, mana: 0, life: 0, moveMult: 0 };
+    const modAcc = { def: 0, mana: 0, life: 0, moveMult: 0, fish: 0, wingTime: 0 };
     this.modAccLight = null;   // ★三百六十五刀:每帧重置(accEffect 闭包重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
@@ -2446,7 +2821,7 @@ export class Player extends Entity {
         // 记忆化键,只能在消费侧判）
         const wingHidden = this.hideVisibleAccessory[i] ?? false;
         if (!wingHidden || !wing) {
-          wing = { logic: wingSlot, slot: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover, hidden: wingHidden };
+          wing = { logic: wingSlot, slot: wingSlot, time: ws.time + modAcc.wingTime, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover, hidden: wingHidden };
         }
       }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
@@ -3169,7 +3544,7 @@ export class Player extends Entity {
       flowerBoots, stepStool,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
-      fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
+      fishingSkill: fish + (this.usedGummyWorm ? 3 : 0) + modAcc.fish,   // +软糖虫(:12451)
       fishingTackle, lavaFishing, fishingLine,   // 钓具箱族/防熔钓族/断线免疫（R14-E6）
       royalGel,                     // 皇家凝胶 23 类史莱姆不索敌（Enemy 索敌门消费）
       manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc,   // 耗魔加算折扣（:14040+:14561）
@@ -3257,6 +3632,25 @@ export class Player extends Entity {
    *  头槽 12 = 物品 237 太阳镜（Item.cs:4273 headSlot=12, vanity） */
   get headArmorSlot(): number {
     return statOfInternal(this.inv.displayArmor()[0] ?? -1)?.hs ?? -1;
+  }
+  /** player.body 语义（ApplyArmorSoundAndDustChanges num2 = GetEffectiveArmor(11)
+   *  .bodySlot 回落 armor[1].bodySlot，Player.cs:38454-38456）——BJ595 骨甲受击/死亡
+   *  尘选型消费（:38844/:39349 boneArmor 分支）。 */
+  get bodyArmorSlot(): number {
+    return statOfInternal(this.inv.displayArmor()[1] ?? -1)?.bs ?? -1;
+  }
+  /** player.legs 语义（同上 num3 = GetEffectiveArmor(12).legSlot 回落 armor[2]） */
+  get legsArmorSlot(): number {
+    return statOfInternal(this.inv.displayArmor()[2] ?? -1)?.ls ?? -1;
+  }
+  /** boneArmor（Player.cs:38461-38465：`(num == 75 || num == 7) && num2 == 7 &&
+   *  num3 == 7`——necro 骨甲三件,受击尘 26/受击音 case3 :38989/死亡尘 26 三面门）。
+   *  狼人覆写支（:38458-38460 三槽改 38/21/20）= 变身域,本仓变身渲染面未建模
+   *  （wereWolf 时装位）不承载=登记。frostArmor 同法检测（num2==27&&num==46&&num3==26
+   *  :38467-38469）由 equipStats.frostBurn 同三元组承载,不另设旗。 */
+  get boneArmor(): boolean {
+    const h = this.headArmorSlot, b = this.bodyArmorSlot, l = this.legsArmorSlot;
+    return (h === 75 || h === 7) && b === 7 && l === 7;
   }
   /** 近战攻速倍率（CapAttackSpeeds + TurnAttackSpeedToUseTimeMultiplier，Player.cs
    *  :28555-28574 1:1）：meleeSpeed 加法总和（装备 0.12 档 + 词缀 77-80 + 套装 + buff）
@@ -4461,6 +4855,31 @@ export class Player extends Entity {
         }
       }
     }
+    // ---- ★BJ596 甲虫 orb 视觉体物理（UpdateArmorSets_Always_Beetle,Player.cs:16556-16612）----
+    // 门 = beetleDefense||beetleOffense（:16558）——双套不在身整段早退（beetleCounter
+    // 清零在 BeetleMeter 计数域 :16560,本处不重复管账;pos/vel 冻结不归零=原版同款,
+    // 重穿 orbs=0 时未用槽全零 :16573-77=从中心重生）。无 stealth/wet 门（原版无）。
+    // !dead 门 = 原版 Player.Update `if (dead) {UpdateDead(); return;}`（:24943-24949）
+    // 先于 UpdateArmorSets（:25882）→ 死亡相物理冻结+不绘。
+    // 位次：原版 UpdateArmorSets 内 Always_Beetle 先于 Always_Solar（:16421-16423）
+    // → 本仓插盾球轨道块之前。
+    // ★序差登记：orb 数权威 = BeetleMeter.tick（Game.postUpdate→updateSwingHits）,
+    // 晚于本 fixedUpdate 步——档位切换当拍物理读上一拍 orb 数,视觉瞬态 ≤1 tick
+    // （原版 UpdateBuffs 球数同步与 Always_* 同拍）。
+    if (!this.dead && (eqM.beetleDef === true || eqM.beetleOff === true)) {
+      this.beetleFrameCounter++;                             // :16563（>=1 门恒真=反编译残迹式照抄）
+      if (this.beetleFrameCounter >= 1) {
+        this.beetleFrameCounter = 0;
+        this.beetleFrame++;
+        if (this.beetleFrame > 2) this.beetleFrame = 0;      // :16567-16570 3 帧条循环
+      }
+      for (let i = this.beetleOrbs; i < 3; i++) {            // :16573-16577 未用槽归零
+        this.beetlePos[i].x = 0; this.beetlePos[i].y = 0;
+      }
+      for (let j = 0; j < this.beetleOrbs; j++) {            // :16578-16612
+        stepBeetleOrb(this.beetlePos[j], this.beetleVel[j], this.vx, this.vy);
+      }
+    }
     // 盾球轨道（:16258-16283）+ buff 对账（:10044-10066：层数变即清多余档,
     // setSolar 在场持续续期 5t；卸套清零）
     {
@@ -5320,7 +5739,7 @@ export class Player extends Entity {
       }
       if (!this._deathPartsInit) {
         this._deathPartsInit = true;
-        this.initDeathParts();          // KillMe :38287-38298 三段初速
+        this.initDeathParts(game);      // KillMe :38287-38298 三段初速 + :39208 死亡尘爆（BJ595）
       } else {
         this.updateDeathParts(game);    // UpdateDead :16878-16888 翻滚解体
       }
@@ -7861,11 +8280,27 @@ export class Player extends Entity {
       if (downNow && !this.prevDown) this.downTapT = 15;
       else if (this.downTapT > 0) this.downTapT--;
       this.prevDown = downNow;
-      if (this.vortexStealthActive) this.stealth = Math.max(0, this.stealth - 0.04);
+      // ★BJ595 潜行衰减拍星璇环尘（Player.cs:26034-26092 flag11 面）：flag11=衰减拍
+      // 且减后仍 ≥0（`stealth -= 0.04; if (<0) =0; else flag11=true`——触底拍不掷）。
+      // 每拍独立 1/2 掷两族：d229 位=Center−v×Next(5,11)、v=(0,1).RotatedByRandom(2π)
+      // (式=(rng−rng)×2π,Utils.cs:1785-87)、vel=v.RotatedBy(π/2)×4=(−v.y,v.x)×4、
+      // scale .5+r、fadeIn .5；d240 位=Center−v×12、vel=v.RotatedBy(−π/2)×2=(v.y,−v.x)×2、
+      // 同 scale/fadeIn。两者 noGravity；NewDust 位参 (Center−v×30,0,0) 仅作裁剪盒,
+      // 位随后覆写（:26074/:26083 序）。骑乘置位 :26045-26047 在掷尘面之后=当拍照掷
+      //（本仓无骑乘强显分支,开关面双击门已有 !mount.active）
+      let vortexFadeDust = false;
+      if (this.vortexStealthActive) {
+        this.stealth -= 0.04;
+        if (this.stealth < 0) this.stealth = 0;
+        else vortexFadeDust = true;
+      }
       // 未潜行态回升 +0.04/t 至 1（1457 Player.cs:26052-26060 else 分支——缺此段则
       // 关潜行后 stealth 恒 0：渲染 settled=s'≈0.03 近似永久隐身 + (1−s)×0.8 伤/
       // ×20 暴恒满（:26043-26044）。2026-08-23 潜行语义统一批补）
       else this.stealth = Math.min(1, this.stealth + 0.04);
+      if (vortexFadeDust) {
+        emitVortexStealthFadeDust(game.vanillaDust, this.cx, this.cy);
+      }
     } else {
       this.stealth = 1;   // 无潜行装=无潜行（1457 Player.cs:26094-26097 else 分支 stealth=1f；初值同 :1545）
       this.vortexStealthActive = false;
@@ -8233,6 +8668,12 @@ export class Player extends Entity {
       if (this.eocDash === 0) this.eocHitId = -1;
       this.dashDelay--;
     } else if (this.dashDelay < 0) {
+      // ★BJ595 滑行拖尘（DashMovement :21434-21515 逐档段——dash3 日耀 4×尘6
+      // 已由 BJ594 落位（2026-10-10,emitDashSlideDust dash===3 支）、
+      // dash4=原版死支（dashType=4 无赋值面,1457 全树 grep）不落、dash2 循环 m<0 死支
+      // 不落）。逐参在 emitDashSlideDust 单源（tests/bj595+tests/bj594 直测）。
+      // adjustDashDustMethod（坐骑委托改尘位,:21439 等 6 站）本仓无委托面未建模=登记。
+      emitDashSlideDust(game.vanillaDust, this, this.dashLatched, this.armorSetDyeVid());
       // 滑行阻尼（:20970-21113）：|vx|>12 → ×0.985；否则 |vx|>max(accRunSpeed,
       // maxRunSpeed) → ×0.94；跌破档位即结束滑行（dashDelay=20）并把 vx 钳回
       // ±maxRunSpeed（:21108-21113）。num13 = max(accRunSpeed,maxRunSpeed)
@@ -8400,12 +8841,18 @@ export class Player extends Entity {
           // ★组B 批（2026-09-18）dash5 水晶刺客（套装 sb.dashType=5 → Math.max 链入位）
           //   落 16.9 else 档（:21666 与 dash1 同速）;阻尼/冷却走基础档（:21503 无
           //   num13-17 覆写,accOverridden 不含 5）;无冲撞伤害（仅 dash2/3/6 有伤害支）
-          //   ——水晶尘 68/69/70 视觉面未建模（dash1/2/3 尘同样未建模,登记同债）。
+          //   ——★BJ595 水晶尘 68/69/70 视觉面补齐（下块）;dash2 起爆尘循环 m<0=死支
+          //   不落;dash3 日耀尘已由 BJ594 落位（emitDashLaunchBurst dash===3 支）。
           // 头部将撞墙减半（:21132-21137）：身前半宽+2px 的头部点/身体中点格
           // SolidOrSlopedTile → velocity.X /= 2
           if (this.dashWallAhead(dir)) this.vx /= 2;
           if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
           if (eq.dash === 3) { this.solarDashing = true; this.solarDashConsumed = false; } // :21258-21260 SolarDashStart
+          // ★BJ595 起爆尘（DashMovement 起爆段——dash1 :21583-21612 / dash5
+          //   :21700-21715,逐参在 emitDashLaunchBurst 单源=tests/bj595 直测;
+          //   dash2 起爆循环 m<0=死支零尘、dash3 日耀尘=BJ594 在途）。
+          emitDashLaunchBurst(game.vanillaDust, GorePiece.newGore.bind(GorePiece),
+            this, eq.dash, this.armorSetDyeVid());
           }
         } else if (this.ridingMount && !MOUNT_CAN_DASH_TYPES.has(this.mount.type)) {
           // ★Note② 非 CanDash 坐骑：:21579 早退在 DoCommonDashHandle 前整体 return
@@ -11441,7 +11888,7 @@ export class Player extends Entity {
   /** KillMe 尾段（Player.cs:38287-38298）：头/身/腿三段散飞初速——
    *  Y = Next(-40,-10)×0.1（-4.0..-1.1 向上抛）、X = Next(-20,21)×0.1 + 2×hitDirection；
    *  stoned 时三段 Position 归零（初速照掷——原版门字面照抄） */
-  private initDeathParts(): void {
+  private initDeathParts(game: GameHooks): void {
     const hitDir = this.deathHitDir;
     for (const seg of [this.deadParts.head, this.deadParts.body, this.deadParts.legs]) {
       seg.px = 0; seg.py = 0; seg.rot = 0;
@@ -11454,6 +11901,12 @@ export class Player extends Entity {
         seg.px = 0; seg.py = 0;
       }
     }
+    // ★BJ595 死亡尘爆（KillMe_DustExplosion Player.cs:39330-39360，KillMe :39208 调）：
+    // 100×盒内尘,逐参在 emitPlayerDeathDustExplosion 单源（tests/bj595 直测）。
+    // 远端玩家死亡本仓不走本链=原版他端 KillMe 同相（登记）。
+    emitPlayerDeathDustExplosion(game.vanillaDust, this, hitDir,
+      this.buffs.has(BuffType.Stoned), this.equipStats.frostBurn === true,
+      this.boneArmor, this.armorSetDyeVid());
   }
 
   /** UpdateDead（Player.cs:16878-16888）：三段 pos += vel / rot += vel.X×0.1（翻滚）/

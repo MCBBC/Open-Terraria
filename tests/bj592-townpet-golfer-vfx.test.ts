@@ -235,7 +235,7 @@ describe('BJ592 本仓锚：件1 case 11 面四刀 + ③ 猫坐姿（TownNPC.ts�
 describe('BJ592 本仓锚：件2 bound golfer 链（TownNPC.ts + Renderer.ts）', () => {
   it('bound 块挂接位 + 链骨架（阈值/回卷/腾空/回弹门）', () => {
     expect(townSrc).toMatch(/if \(this\.npcKey === 'golfer'\) this\.boundGolferFindFrame\(game\);/);
-    expect(townSrc).toMatch(/const num27 = this\.frame;[^\n]*\n\s*this\.frameT\+\+;\s*if \(this\.vy !== 0\) \{\s*this\.frame = 0;\s*this\.frameT = 0;\s*\}/);
+    expect(townSrc).toMatch(/const num27 = this\.frame;[^\n]*\n\s*this\.frameT\+\+;[^\n]*\n\s*if \(this\.vy !== 0\) \{[^\n]*\n\s*this\.frame = 0;\s*this\.frameT = 0;\s*\}/);
     expect(townSrc).toMatch(/if \(num27 >= 12\) \{[\s\S]*?if \(fc > 6\) \{[\s\S]*?if \(this\.frame >= 13\) this\.frame = 0;/);
     expect(townSrc).toMatch(/else if \(num27 >= 11\) \{\s*if \(fc > roll\(40, 140\)\) \{/);
     expect(townSrc).toMatch(/else if \(num27 >= 8\) \{\s*if \(!\(fc > 3\)\) return;/);
@@ -450,6 +450,7 @@ describe('BJ592 行为级：件1 ② 舞面 danceDust（已同构销案锁——
 describe('BJ592 行为级：件1 ③ 坐姿帧（637 猫特例=判别刃）', () => {
   it('637 猫坐姿=绝对行 19（旧 base−3=25 红）;通用型仍 num60−3', () => {
     const cat = new TownNPC('town_cat', 500, 500);
+    cat.onGround = true;
     cat.sitting = true;
     const catFrames = vanillaNpc(637)!.frames;
     const catBase = townNpcBaseFrame(637, catFrames);
@@ -458,6 +459,7 @@ describe('BJ592 行为级：件1 ③ 坐姿帧（637 猫特例=判别刃）', ()
     expect((cat as unknown as { frame: number }).frame, '637 绝对行 19').toBe(19);
 
     const guide = new TownNPC('guide', 500, 500);
+    guide.onGround = true;
     guide.sitting = true;
     const gFrames = vanillaNpc(22)!.frames;
     const gBase = townNpcBaseFrame(22, gFrames);

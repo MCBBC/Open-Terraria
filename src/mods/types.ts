@@ -45,7 +45,9 @@ export interface ModItemContent {
     useAmmo?: number;
     melee?: boolean; ranged?: boolean; magic?: boolean; summon?: boolean;
     noMelee?: boolean; autoReuse?: boolean; useTurn?: boolean; crit?: number;
-  };
+    /** ★三百六十八:右键换弹(altFunctionUse==2 时覆写 combat.shoot) */
+  altShoot?: string | number;
+};
   /** 功能面(vanilla-itemfunc 语义):工具力/放置/药水/弹药 */
   func?: {
     useStyle?: number; pick?: number; axe?: number; hammer?: number;

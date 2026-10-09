@@ -82,7 +82,7 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
 /** ★三百三十五刀:mod 配饰效果钩(C# ModItem.UpdateAccessory 同位;Player
  *  配饰槽 3..9 每帧环内派发——装备期每 tick 调,卸下自然停调) */
 /** 配饰效果累加器（computeEquipStats return 合并;闭包直改） */
-export interface ModAccAccumulator { def?: number; mana?: number; life?: number; moveMult?: number }
+export interface ModAccAccumulator { def?: number; mana?: number; life?: number; moveMult?: number; fish?: number; wingTime?: number }
 const accEffects = new Map<number, (player: Player, game: unknown, acc: ModAccAccumulator) => void>();
 
 export function registerModAccEffect(vid: number, fn: (player: Player, game: unknown, acc: ModAccAccumulator) => void): void {
