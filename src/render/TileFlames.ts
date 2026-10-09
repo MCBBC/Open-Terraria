@@ -39,6 +39,7 @@ import { flameTileTop } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { campfireYOffset, animYOffset, tileAnim } from './TileAnim';
 import type { FlickerClock } from '../lighting/SkyColor';
+import { applyStealthToColor, type HeldStealthDim } from './heldItemStealthDim';   // ★BJ599 火苗 color5 潜行减色
 import { gameTickCount } from '../core/GameTime';
 
 /** 火苗族 tile → Flame_{n} 贴图索引（TileDrawing.cs:2857-2893 的 num9 switch 1:1；
@@ -765,11 +766,16 @@ function refreshItemFlamePos(): void {
 /** 手持火苗叠画。调用点 = Renderer 纸娃娃持握位（drawPlayer 静持）与 useItem
  *  持位（drawUseItem）——两处的 ctx 变换已与手持物同源（translate/scale(direction)/
  *  rotate），本函数只负责在【局部空间】按世界偏移镜像后叠画 dest 矩形。
- *  dest = 手持物的目标矩形（与本体 drawImage 同参）；direction = 玩家朝向（±1）。 */
+ *  dest = 手持物的目标矩形（与本体 drawImage 同参）；direction = 玩家朝向（±1）。
+ *  dim = ★BJ599 火苗 color5 潜行减色（PlayerDrawLayers.cs:3574 消费点之一）：
+ *  color5 基色（100,100,100 族/spec.tint/disco）按原分支精确重放（shroomite raw
+ *  直乘/vortex 字节乘——applyStealthToColor）后烘进 tintedFlameCell 染色缓存键,
+ *  运行时零新绘制面（BJ348b-3 同判例,零 ctx.filter 面）。 */
 export function drawHeldItemFlame(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, itemId: number, direction: number,
   dest: { x: number; y: number; w: number; h: number },
   flicker: FlickerClock | null,
+  dim?: HeldStealthDim | null,
 ): void {
   if (!FLAME_ITEMS.has(itemId)) return;
   const img = atlas.ensureVImage(`vanilla/ItemFlame_${itemId}.png`);
@@ -786,6 +792,13 @@ export function drawHeldItemFlame(
     } else {
       tint = [128, 128, 128];
     }
+  }
+  // ★BJ599：color5 先减色再烘（原版序 :3574——色5 赋值后 ApplyStealthToColor）；
+  //  tint=null ≙ color5 RGB 255（5353 白档,A 面本仓既有近似忽略）
+  if (dim) {
+    const [dr, dg, db] = applyStealthToColor(
+      [tint?.[0] ?? 255, tint?.[1] ?? 255, tint?.[2] ?? 255, 255], dim);
+    tint = [dr, dg, db];
   }
   const cell = tint ? tintedFlameCell(img, 0, 0, img.width, img.height, tint[0], tint[1], tint[2]) : null;
   ctx.save();

@@ -29,7 +29,7 @@ const RDR = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 
 
 // ===================== 台账（三档结构锁） =====================
 
-type Verdict = 'fixed-bj595' | 'fixed-bj596' | 'fixed-bj598' | 'registered-debt' | 'isomorphic' | 'dead-vanilla' | 'vanilla-none' | 'bj594-inflight';
+type Verdict = 'fixed-bj595' | 'fixed-bj596' | 'fixed-bj598' | 'fixed-bj599' | 'registered-debt' | 'isomorphic' | 'dead-vanilla' | 'vanilla-none' | 'bj594-inflight';
 interface LedgerEntry {
   id: string; set: string; face: string; verdict: Verdict;
   vanilla: string;   // 反编译锚
@@ -82,7 +82,7 @@ const LEDGER: LedgerEntry[] = [
   // ---- 蘑菇矿套（Shroomite） ----
   { id: 'M1', set: 'Shroomite', face: '潜行蓄放 stealth 链', verdict: 'isomorphic', vanilla: 'Player.cs:25982-26021', repo: 'src/entities/Player.ts shroomiteSet 支' },
   { id: 'M2', set: 'Shroomite', face: '甲体潜行减色（armor RGB×s/B×settled）', verdict: 'isomorphic', vanilla: 'PlayerDrawSet.cs:1525-1563', repo: 'src/data/vanillaWingVisuals.ts stealthFactors' },
-  { id: 'M3', set: 'Shroomite', face: '手持物潜行减色 ApplyStealthToColor', verdict: 'registered-debt', vanilla: 'PlayerDrawLayers.cs:3575-3605' },
+  { id: 'M3', set: 'Shroomite', face: '手持物潜行减色 ApplyStealthToColor', verdict: 'fixed-bj599', vanilla: 'PlayerDrawLayers.cs:3589-3605', repo: 'src/render/heldItemStealthDim.ts heldItemStealthDim/applyStealthToColor/dimmedHeldRegion + Renderer.ts 静持/挥舞/火苗三站' },
   // ---- 禁戒套（Forbidden） ----
   { id: 'G1', set: 'Forbidden', face: '常驻光照 0.8/0.7/0.2', verdict: 'isomorphic', vanilla: 'ArmorSetBonuses.cs:61-65', repo: 'src/entities/Player.ts addLightAt 支' },
   { id: 'G2', set: 'Forbidden', face: '符号环 DrawPlayer_05（Extra_74+Glow_217 四珠）', verdict: 'isomorphic', vanilla: 'PlayerDrawLayers.cs:280-326', repo: 'src/render/Renderer.ts:19094 段' },
@@ -105,11 +105,11 @@ const LEDGER: LedgerEntry[] = [
 
 describe('BJ595 台账三档结构锁', () => {
   it('每条目必有 verdict∈六档 + vanilla 锚；fixed/isomorphic 必有 repo 锚', () => {
-    const VERDICTS: Verdict[] = ['fixed-bj595', 'fixed-bj596', 'fixed-bj598', 'registered-debt', 'isomorphic', 'dead-vanilla', 'vanilla-none', 'bj594-inflight'];
+    const VERDICTS: Verdict[] = ['fixed-bj595', 'fixed-bj596', 'fixed-bj598', 'fixed-bj599', 'registered-debt', 'isomorphic', 'dead-vanilla', 'vanilla-none', 'bj594-inflight'];
     for (const e of LEDGER) {
       expect(VERDICTS, e.id).toContain(e.verdict);
       expect(e.vanilla.length > 4, e.id).toBe(true);
-      if (e.verdict === 'fixed-bj595' || e.verdict === 'isomorphic') {
+      if (e.verdict === 'fixed-bj595' || e.verdict === 'isomorphic' || e.verdict === 'fixed-bj599') {
         expect(e.repo, `${e.id} 缺本仓锚`).toBeTruthy();
       }
     }
@@ -467,10 +467,12 @@ describe('BJ595 登记大面（整缺子系统——锚与缺面双向锁）', (
     expect(GAME.includes('computeArmorLights(')).toBe(true);   // tickLighting 发射站
   });
 
-  it('M3 手持物潜行减色 ApplyStealthToColor 缺（PlayerDrawLayers.cs:3575-3605）', () => {
-    expect(RDR.includes('ApplyStealthToColor')).toBe(false);
-    // 修复形：drawUseItem/静持层挂 shroomite(RGB×s,B×(1+10s)/11)/vortex(RGB Lerp(0,.12,.16))
+  it('M3 手持物潜行减色 ApplyStealthToColor 已落刀（BJ599：三站接线在场——判别锁移交 bj599-held-item-stealth-dim）', () => {
+    expect(RDR.includes('ApplyStealthToColor')).toBe(true);
+    expect(RDR.includes('heldItemStealthDim')).toBe(true);
+    // 修复形兑现：drawUseItem/静持层挂 shroomite(RGB×s,B×(1+10s)/11)/vortex(RGB Lerp(0,.12,.16))
     // 色变换（entry-owned bake,勿走 ctx.filter——BJ348b-3 shim/acc 栅格化分叉判例）
+    expect(/\.filter\s*=/.test(readFileSync(new URL('../src/render/heldItemStealthDim.ts', import.meta.url), 'utf8'))).toBe(false);
   });
 
   it('F2/X3 受击音甲支已落刀（BJ598：frost→Item27/bone→NPCHit2 入 hurtVoicePlan 甲支——判别锁移交 bj598-armor-lights-hurtsfx）', () => {

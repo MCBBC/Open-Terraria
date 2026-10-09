@@ -118,6 +118,13 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  曾落 default X 向（style*36 无换行）→ style≥55（SW-FX3 补档的活木雕像 55-62、
     //  63-75 等 13 件）帧写到第 55 带外=渲染错档+掉落反推 (fy/54%3)*55 恒 0 错档。
     case 105: return [(style % 55) * 36, Math.floor(style / 55) * 54];
+    // ★BJ600（2026-10-10）：567 花园侏儒 frameX 步=CoordinateWidth 26+Padding 2=28
+    //  （TileObjectData.cs:4222-4227 addTile(567) Style1x2 横排;行帧 0/20 由
+    //  framedCellFrame PLACE_ROW_FY[567] 承担）。此前 default 步 18——placeStyle
+    //  恒 0 时两端同值无感;BJ600 wand style 注入（Game.tryPlace 回落通用链）后
+    //  style∈0-4,18 步=帧写错带（渲染错姿+与 .wld 原生 28 步不一致,CheckGnome
+    //  :54416 `frameX/28` 同域佐证）。
+    case 567: return [style * 28, 0];
     default: return [style * fw * 18, 0];
   }
 }

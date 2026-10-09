@@ -27161,28 +27161,63 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!opt) return;   // 背包无弹药 → 不可放（TryGetPlacementOption false → canUse false）
       const wandTile = TILE_INTERNAL_BY_SHEET.get(opt.tileSheet);
       if (wandTile === undefined) return;
-      if (st.get(tx, ty) !== 0) return;
-      // 落地锚（单件装饰族多 1×1；碎块族亦 1×1 帧 style 帧）：下方须桌面/实心支撑
-      //（桌面臂格 nactive() 门=WorldGen.cs:45747；isSolid 臂自带 active() 首门）
-      const belowOk = st.inBounds(tx, ty + 1)
-        && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
-          && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1)));
-      if (!belowOk) return;
-      st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
-      this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
-      this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
-      if (wand.consumesAmmo && opt.ammoVid > 0) {
-        const idx = slots.findIndex((s) => {
-          if (!s) return false;
-          const d = ITEM_DEFS[s.id];
-          return d != null && (d.vid ?? -1) === opt.ammoVid;
-        });
-        if (idx >= 0) this.player.inv.removeAt(idx, 1);
+      // ★BJ600（2026-10-10 用户实报「花园侏儒无法放置,放置即掉落新侏儒=无限刷」）：
+      //  单件装饰族（CreateSingleTileWand :55-77=WithoutAmmoConsumption,consumesAmmo
+      //  =false）原版放置 = ModifyFlexibleWandPlacementInfo（Player.cs:40105-40125）
+      //  ——wand【只覆写】tileType/tileStyle,放置本体仍走 TileObject.CanPlace/Place
+      //  全链（锚点/清格/多格写帧/消耗/级联,PlaceIt :40426-40437）。旧实现=1×1 裸写
+      //  （单格 frameX=18*style）,对多格件结构性残废：侏儒 567=1×2（Style1x2
+      //  heights{18,18}+pad2,行帧 0/20,TileObjectData.cs:4222-4227 addTile(567)）→
+      //  单格写入后 TileFrame→CheckGnome（WorldGen.cs:54400,底格缺失判坏）整件杀+
+      //  掉 4609（行为日志 2026-10-09 Starter_World t=1821-1825 物证:每拍 wand 写→
+      //  kill→drop 循环）;分支又零消耗=双重复制链。南瓜灯 35（2×2,CheckMB :51649）/
+      //  派对礼物 457（2×2）/沙堡桶 552（3×2）/火烈鸟 545（2×3）同病。
+      //  修=「单件族 × 多格 sheet（anchorRec 在册）」注入 tile+style 后【回落通用链】
+      //  （=原版覆写语义;锚点/清格/写帧/消耗由链承担）;1×1 sheet（书 50/珊瑚 81/
+      //  贝壳 324/礼物 36/炸药 141/宝石 178——直写与原版同相）保持原路;碎块魔杖
+      //  multi 族（consumesAmmo=true,弹药桶语义）原路不动（其 647/648=3×2 直写残废
+      //  另登记债）;241 地下墓穴（锚表缺 AnchorWall——TileObjectData.cs:4794
+      //  Style3x3Wall 系提取缺口）与 698 瓶（anchorTop 含 AlternateTile 特殊位→
+      //  anchorSpecOf 保守回落 null）暂留旧路=不引入新偏离。
+      const wSpec = anchorSpecOf(opt.tileSheet);
+      if (!wand.consumesAmmo && wSpec && (wSpec.w > 1 || wSpec.h > 1)
+        && opt.tileSheet !== 241) {
+        // tile+style 注入（CreateSingleTileWand 桶 tile≡createTile,域不符时兜底覆写;
+        // style 消费面=chooseAnchorFromClick/validateAnchors/framedCellFrame 全链同吃）
+        itemDef = { ...itemDef, placeStyle: opt.style };
+        if (TILE_BY_KEY[itemDef.tile ?? ''] !== wandTile) {
+          itemDef = { ...itemDef, tile: TILE_DEFS[wandTile]?.key };
+        }
+        // 不 return：继续走下方通用放置链（消耗/useTime/级联在链尾 :28671 域）
+      } else {
+        if (st.get(tx, ty) !== 0) return;
+        // 落地锚（单件装饰族多 1×1；碎块族亦 1×1 帧 style 帧）：下方须桌面/实心支撑
+        //（桌面臂格 nactive() 门=WorldGen.cs:45747；isSolid 臂自带 active() 首门）
+        const belowOk = st.inBounds(tx, ty + 1)
+          && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
+            && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1)));
+        if (!belowOk) return;
+        st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
+        this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
+        this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+        if (wand.consumesAmmo && opt.ammoVid > 0) {
+          const idx = slots.findIndex((s) => {
+            if (!s) return false;
+            const d = ITEM_DEFS[s.id];
+            return d != null && (d.vid ?? -1) === opt.ammoVid;
+          });
+          if (idx >= 0) this.player.inv.removeAt(idx, 1);
+        } else {
+          // ★BJ600 消耗面（同支同根）：held 本体消耗=原版 consumable 消耗拍
+          //（Player.cs:42602 域 `itemTime==itemTimeMax && item.consumable`）——
+          // 旧分支零消耗=书/珊瑚/贝壳/礼物/炸药/宝石白放（复制链另一面）
+          if (itemCombat(wandVid)?.consumable !== false) this.player.inv.removeHeld(1);
+        }
+        this.player.useTime = 14;
+        this.sfx.play('place');
+        this.cb.onInventoryChanged();
+        return;
       }
-      this.player.useTime = 14;
-      this.sfx.play('place');
-      this.cb.onInventoryChanged();
-      return;
     }
 
     // 草族"转化"放置（见 tryGrassConvert）。★族内物品【无论成败】都终止通用链：

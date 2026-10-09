@@ -276,6 +276,7 @@ import {
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
+import { heldItemStealthDim, dimmedHeldRegion, type HeldStealthDim } from './heldItemStealthDim';   // ★BJ599 手持物潜行减色（ApplyStealthToColor 移植）
 import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
 import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
 import { setTintAtlasInvalidateRect } from './TintAtlas';   // ★E51 刀A:回收矩形精确失效注入
@@ -19406,6 +19407,18 @@ export class Renderer {
       const arcanumHold0 = vid === 3476 && !!ar;
       const holdDX = arcanumHold0 ? -ar!.sw / 2 : 0;
       const holdDY = arcanumHold0 ? -ar!.sh / 2 : holdOYEff;
+      // ★BJ599 手持物潜行减色（ApplyStealthToColor :3589-3605）：静持 = flag2 支
+      //  （!drawUseStyle && drawHoldStyle——挥舞帧仅 ranged 支,由挥舞段承载）。
+      //  pulley 门 = 原版 flag2 因子（:3190）;减色面 = entry-owned bake
+      //  （dimmedHeldRegion,BJ348b-3 同判例零 ctx.filter 面）;dimF=null
+      //  （无套/未触发/恒等档）逐位走原路径。3476 在 arcanumDimTex 暗化面之上
+      //  再乘减色（原版 :3344 GetAlpha(itemColor) 先减色再 MultiplyRGBA(0.5),乘法可换序）
+      const dimF = heldItemStealthDim({
+        stealth: p.stealth,
+        shroomiteSet: stEq.shroomiteSet, vortexSet: stEq.vortexSet,
+        drawUseStyle: false, drawHoldStyle: !p.pulley,
+        ranged: vid >= 0 && itemCombat(vid)?.ranged === true,
+      });
       if (ar) {
         // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）
         //  ★BJ348b-3：暗化预烘焙进 canvas（arcanumDimTex）——ctx.filter 在
@@ -19415,12 +19428,28 @@ export class Renderer {
           ctx.save();
           ctx.globalAlpha = 0.8;
           if (dim) {
-            ctx.drawImage(dim, 0, heldDraw!.arcanumFrame * ARCANUM_HOLD_FRAME_PX,
-              ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, holdDX, holdDY, ar.sw, ar.sh);
+            const dimSrc = dimF
+              ? dimmedHeldRegion(dim, 0, heldDraw!.arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+                ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, dimF)
+              : null;
+            if (dimSrc) {
+              ctx.drawImage(dimSrc, 0, 0, ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX,
+                holdDX, holdDY, ar.sw, ar.sh);
+            } else {
+              ctx.drawImage(dim, 0, heldDraw!.arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+                ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, holdDX, holdDY, ar.sw, ar.sh);
+            }
           } else {
             ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
           }
           ctx.restore();
+        } else if (dimF) {
+          const src = dimmedHeldRegion(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, dimF);
+          if (src) {
+            ctx.drawImage(src, 0, 0, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+          } else {
+            ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+          }
         } else {
           ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
         }
@@ -19430,7 +19459,8 @@ export class Renderer {
       // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
       // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）
       if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
-        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: holdDX, y: holdDY, w: ar.sw, h: ar.sh }, flicker);
+        // ★BJ599：火苗 color5 同减（:3574 消费点）——tint 面预乘进染色缓存
+        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: holdDX, y: holdDY, w: ar.sw, h: ar.sh }, flicker, dimF);
       }
       // ★BJ348b-2 3476 发光层（PlayerDrawLayers.cs:3349-3352）：GlowMask[195] 同帧
       //  × Color(250,250,250, heldItem.alpha)×0.5 = (125,125,125,0) —— A=0 纯加算
@@ -20475,6 +20505,21 @@ export class Renderer {
       && (heldVid >= 0 ? itemCombat(heldVid)?.melee : false)) {
       ctx.scale(1.1, 1.1);
     }
+    // ★BJ599 手持物潜行减色（ApplyStealthToColor :3589-3605）：挥舞支 = flag =
+    //  drawUseStyle && ranged（:3592——挥舞中只减远程物,火把/工具挥动帧不减,
+    //  静持帧另由 drawPlayer 静持段 flag2 支承载）。drawUseStyle 用物品真实
+    //  useStyle（itemFunc 表,缺表回退挥舞载荷档）;us==0 挥摆载荷原版本就不画
+    //  （:3195 flag|flag2 全空早退）→ 不减。本仓无 us-0 挥摆面（Game.ts:16227 已收口）。
+    //  减色面 = entry-owned bake（dimmedHeldRegion,BJ348b-3 零 ctx.filter 面）;
+    //  dimF=null（无套/未触发/恒等档）逐位走原路径。
+    const itemUs = heldVid >= 0 ? (itemFuncOfVid(heldVid)?.useStyle ?? null) : null;
+    const dimF = heldItemStealthDim({
+      stealth: p.stealth,
+      shroomiteSet: p.equipStats.shroomiteSet, vortexSet: p.equipStats.vortexSet,
+      drawUseStyle: itemUs != null ? itemUs !== 0 : us !== 0,
+      drawHoldStyle: false,
+      ranged: heldVid >= 0 && itemCombat(heldVid)?.ranged === true,
+    });
     if (ar) {
       // 默认 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
@@ -20483,17 +20528,35 @@ export class Renderer {
       // ★BJ348b-2 3476 第一层 = GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)
       //  （:3344-3346）——RGB×0.5 + A×0.8（光照染色无逐物品管线,登记近似恒白）
       //  ★BJ348b-3：暗化预烘焙（arcanumDimTex）——去 ctx.filter 依赖（同静持段注）
+      //  ★BJ599：3476 在 arcanumDimTex 暗化面之上再乘减色（:3344 GetAlpha(itemColor)
+      //  先减色再 MultiplyRGBA(0.5),乘法可换序）
       if (heldVid === 3476) {
         const dim = arcanumDimTex(this.atlas!);
         ctx.save();
         ctx.globalAlpha = 0.8;
         if (dim) {
-          ctx.drawImage(dim, 0, arcanumFrame * ARCANUM_HOLD_FRAME_PX,
-            ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, drawOX, drawOYEff, ar.sw, ar.sh);
+          const dimSrc = dimF
+            ? dimmedHeldRegion(dim, 0, arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+              ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, dimF)
+            : null;
+          if (dimSrc) {
+            ctx.drawImage(dimSrc, 0, 0, ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX,
+              drawOX, drawOYEff, ar.sw, ar.sh);
+          } else {
+            ctx.drawImage(dim, 0, arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+              ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, drawOX, drawOYEff, ar.sw, ar.sh);
+          }
         } else {
           ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
         }
         ctx.restore();
+      } else if (dimF) {
+        const src = dimmedHeldRegion(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, dimF);
+        if (src) {
+          ctx.drawImage(src, 0, 0, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+        } else {
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+        }
       } else {
         ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
       }
@@ -20506,7 +20569,8 @@ export class Renderer {
     if (ar && this.atlas) {
       const fvid = (ITEM_DEFS[swing.item]?.vid ?? -1);
       if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
-        drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOYEff, w: ar.sw, h: ar.sh }, flicker);
+        // ★BJ599：火苗 color5 同减（:3574 消费点,挥舞支）——tint 面预乘进染色缓存
+        drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOYEff, w: ar.sw, h: ar.sh }, flicker, dimF);
       }
       // ★BJ348b-2 3476 发光层（PlayerDrawLayers.cs:3349-3352）：GlowMask[195] 同帧
       //  矩形 × Color(250,250,250, heldItem.alpha)×0.5 = (125,125,125,0) —— **A=0
