@@ -17,6 +17,19 @@ import { drawCreditsRollSky } from '../ui/CreditsRollOverlay';   // ★BJ409:名
 export function npcFootFlushOn(): boolean {
   return footCfg.flushOn;
 }
+/** ★BJ583（2026-10-09）导线可见度模式 → 绘制通道分派（1457 亲读 Main.cs:59162-59170
+ *  DrawWires 逐色 switch(builderAccStatus[4..7]/[9])）：
+ *  0 Bright → color=Color.White =【免光照全亮】（compositeLight 后 drawWiresBright 直绘
+ *  ——机械透镜 3619/宏伟蓝图 3611 装备后 builderAccStatus 缺省全 0 即此档,暗区恒亮=
+ *  原版「装备透视镜电线处处可见」本相）;1 Normal → Lighting.GetColor（世界层吃
+ *  compositeLight 乘光=亮处可见/暗处不可见——手持线材工具无透镜的原版相）;2 Faded →
+ *  光照色×0.5（世界层 ×0.5 α）;3 Hidden → Transparent 不画。非 0/3 值（含 undefined,
+ *  调用面 `?? 1` 沿革）归 light。 */
+export function wireDrawPass(mode: number | undefined): 'bright' | 'light' | 'hidden' {
+  if (mode === 0) return 'bright';
+  if (mode === 3) return 'hidden';
+  return 'light';
+}
 /** 全局微调旋钮(px,**正 = 整体向地面下沉**)。缺省 **+1** = 用户实玩定档(2026-08-30,
  *  浮点补偿基线上再提 1px 消除末位可见下沉)。控制台改键后 npcFootCfgReload() 重读 */
 function npcFootBiasExtra(): number {
@@ -982,6 +995,7 @@ import { MAP_SNOW_TYPES, mapSnowinessB, snowDirtBg, snowRockBg, sceneSnowinessB 
 import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
 import { visEffectFrames } from '../entities/Enemy';
+import { FF_VXSDIR_GROUP } from '../entities/Enemy';   // ★BJ588:FindFrame case 48..664 死区档 15 型族（单源表）
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { whiteK811 } from '../entities/Dart';   // ★BJ245：811 光地板 k 单源（Dart 白化同式）
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
@@ -1040,6 +1054,7 @@ import {
   type BarContext, type BarNpc, type CollectInfo,
 } from './BossBars';
 import { globalTimeWrappedHourly, gameTickCount } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
+import { drawInfernoRings, ensureFlameRingImage, type FlameRingPlayer } from './InfernoRing';   // ★BJ579 狱火药水火圈
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
@@ -1228,6 +1243,23 @@ export function mountTextureAnchorY(feetY: number, heightBoost: number | undefin
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
+// ★BJ590 组外 aiStyle14 专属 case 阈值/首拍偏移表（活面 5 型——本仓有生成路径;
+//  NPC.cs 亲读锚, THR=每帧 tick 数, OFF=首拍 frame.Y 偏移）：
+//  · 62 恶魔/66 巫毒恶魔（case 62/66 :74683-74698）：num6=num7=5（:74688-74689）,
+//    counter 循环 25t（:74691 ≥num6*num7 清零）,帧号=counter/5（:74693）→ 5t/帧×5 帧;
+//  · 156 红恶魔（case 156 :74699-74711）：counter ≥20 清零（:74705）,帧号=counter/4
+//    （:74708 num292）→ 4t/帧×5 帧（20t 一循环）;
+//  · 121 Slimer/660 史莱姆皇后紫仆从（case 2/23/121/…/660 组 :74790-74856）：
+//    num143=8f（:74841）/660 覆写 6f（:74842-74844）;首拍 localAI[0]==0 门
+//    （:74810）frame.Y=num*2（:74811-74813）→ 起始帧 2（一次）;
+//  · 死面不入表（IDG 纪律:禁死表条目）：158 吸血蝠原版无生成路径（日食 :3486-3489
+//    直出 159 吸血鬼,158 仅掉落注册 ItemDropDatabase.cs:188）且其 case 归
+//    150..226 组=6t 全帧档与缺省同形,零条目即零差异;
+//  · 150/151/152/226（case 150..226 组 :75582-75619）6t 回卷 num*4=npcFrameCount
+//    → 与组缺省档全同形,亦零条目。
+const FF_AI14_CASE_SPEC: Record<number, { thr: number; off?: number }> = {
+  62: { thr: 5 }, 66: { thr: 5 }, 156: { thr: 4 }, 121: { thr: 8, off: 2 }, 660: { thr: 6, off: 2 },
+};
 // 法师族三态帧（FindFrame case 29/32/45/172/281-286/693，cs:77721-77743）——
 // 非循环状态机：帧0 待机 / 帧1 蓄力(ai[1]>0 且 vy==0) / 帧2 腾空(vy≠0)；
 // 24 火妖 / 533 沙漠幽魂另有专属 case（下方分支）
@@ -1438,11 +1470,29 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   if (id === 42 || (id >= 231 && id <= 235)) {
     return [0, 1, 2, 1][Math.floor(t / 2) % 4];
   }
-  // 蝙蝠族（case 49 块 cs:75523-75585）：每 6 tick 推进、回卷含帧 0
-  // （cs:75577-75584 `if (frame.Y >= num*num305) frame.Y = 0`——此前 max(1,…) 跳过帧 0）
+  // ★BJ589 蜂 210/211 帧档（FindFrame case 48..664 组内 :75657-75661）：蜂支内
+  //  frameCounter++（:75658）+ 组尾再 ++（:75661）= 每 tick +2，推进阈值 num296=6
+  //  （:75663）→ 3t/帧（蜂支 6t 通用档的 2 倍速；此前落通用 6t 兜底=动画慢 2×）。
+  //  蜂 aiStyle=5（SetDefaults :11724-11744）不入下方 ai===14 档——专属 id 支置此
+  //  （蜂后 222/黄蜂 42 同域先例）；帧循环全帧含帧 0、不掐末帧（:75678 num297
+  //  对蜂不减）。
+  if (id === 210 || id === 211) return Math.floor(t / 3) % Math.max(1, frames);
+  // 蝙蝠族（case 48..664 组 :75620-75681）：每 6 tick 推进、回卷含帧 0
+  // （:75678-75681 `if (frame.Y >= num*num297) frame.Y = 0`——此前 max(1,…) 跳过帧 0）；
+  // ★BJ589 Harpy 48 专档 5t（:75670-75672 `if (type == 48) num296 = 5`，快 1.2×——
+  //  曾统一 /6）；组内其余档：49|51|60|634 末帧掐掉（:75665-75667）=BAT_SKIP_LAST、
+  //  93/137 全帧循环=组缺省，均 6t。★BJ590 组外 aiStyle14 专属 case 阈值收编
+  //  （BJ589 登记②定谳）：62/66 5t×5 帧（:74683-74698 num6*num7=25 循环÷5）、
+  //  156 4t×5 帧（:74699-74711 counter<20 循环÷4）、121 8t+首拍帧 2（:74790-74856
+  //  num143=8+localAI[0] 门 :74810）、660 6t+首拍帧 2（num143 覆写 :74842-74844）
+  //  =FF_AI14_CASE_SPEC 表驱动;150/151/152/158/226（case 150..226 组 :75582-75619）
+  //  6t 回卷 num*4=全帧与组缺省同形零条目。AI 侧零写点（AI_014 :22930-23520 亲读
+  //  无 frame 面）——FindFrame 为十型唯一帧写点,本档全量承接。
   if (ai === 14) {
     const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
-    return Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap));
+    const thr = id === 48 ? 5 : FF_AI14_CASE_SPEC[id]?.thr ?? 6;
+    const off = FF_AI14_CASE_SPEC[id]?.off ?? 0;
+    return Math.min(frames - 1, (off + Math.floor(t / thr)) % Math.max(1, cap));
   }
   // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
   if (ai === 1) return Math.floor(t / 8) % frames;
@@ -1931,7 +1981,7 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 不写 ai2 → 恒帧 0。此前落入通用 6t 全帧循环 = 亮/灭两帧间闪跳（用户实报）。
   // 头 134/尾 136 frames=1，任何循环都恒帧 0，无需分支。
   if (id === 135) return e.ai2 === 0 ? 0 : Math.min(1, frames - 1);
-  // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
+  // 其余（眼/幽灵/蠕虫段等；蜂 210/211 已拆 BJ589 3t 专档）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
 
@@ -1999,10 +2049,18 @@ export function bestiaryDummyFrameIdx(
   }
   // 黄蜂族（case 42,cs:75607-75633）：2t 一换 [0,1,2,1]
   if (id === 42 || (id >= 231 && id <= 235)) return [0, 1, 2, 1][Math.floor(t / 2) % 4];
-  // 蝙蝠族（aiStyle 14,case 49 块,cs:75523-75585）：每 6t 推进
+  // ★BJ589 蜂 210/211（FindFrame case 48..664 组 :75657-75661 frameCounter 双加
+  //  ÷阈值 6 → 3t/帧）：dummy 同跑真 FindFrame（UnlockableNPCEntryIcon :99-109）,
+  //  折叠与 vanillaFrameIdx 同步拆档
+  if (id === 210 || id === 211) return Math.floor(t / 3) % Math.max(1, frames);
+  // 蝙蝠族（aiStyle 14,case 48..664 组 :75620-75681）：每 6t 推进；★BJ589 Harpy 48
+  //  专档 5t（:75670-75672 num296=5,与 vanillaFrameIdx 同刀）;★BJ590 组外专属 case
+  //  阈值/首拍偏移同表（FF_AI14_CASE_SPEC——dummy 同跑真 FindFrame,折叠同步拆档）
   if (aiStyle === 14) {
     const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
-    return Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap));
+    const thr = id === 48 ? 5 : FF_AI14_CASE_SPEC[id]?.thr ?? 6;
+    const off = FF_AI14_CASE_SPEC[id]?.off ?? 0;
+    return Math.min(frames - 1, (off + Math.floor(t / thr)) % Math.max(1, cap));
   }
   // 史莱姆（aiStyle 1,case 1,L71506）：每 8t 全循环
   if (aiStyle === 1) return Math.floor(t / 8) % frames;
@@ -3310,6 +3368,16 @@ export function mapTileHoverName(sheet: number, frameX: number, frameY = 0): str
     // （Lang.ts tileName ③,此前恒打 3215 style0 名=用户复报病灶）显 per-style 名
     // =登记明令分歧（同 BJ258 口径,回滚口=删本 380 支回落 tileName）。
     return Lang.itemName(styleDropVidOfFrames(380, frameX, frameY)) ?? Lang.tileName(sheet);
+  }
+  // ★BJ586：图例名 baseOption 维（原版地图悬停 text = Lang.GetMapObjectName(Map[..].Type)，
+  //  Main.cs:56592/:56742——Map 格 Type 在建图时已含 GetTileBaseOption 变体
+  //  （MapHelper.cs:1976,:2806 case 129 fx>=324→1/:2802 case 227 fx/34），
+  //  legend=Lang.cs:725-726（129:0→502/129:1→4988）、:775-786（227:0-5→1107-1112、
+  //  227:8-11→3385-3388）。旧 tileName(sheet) 丢变体 → 悬停明胶水晶格恒显「水晶碎块」）
+  if (sheet === 129) return Lang.itemName(frameX >= 324 ? 4988 : 502) ?? Lang.tileName(sheet);
+  if (sheet === 227) {
+    const opt = Math.min(11, Math.max(0, Math.floor(frameX / 34)));
+    return Lang.itemName(opt >= 8 ? 3385 + (opt - 8) : 1107 + opt) ?? Lang.tileName(sheet);
   }
   return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
 }
@@ -6562,7 +6630,10 @@ export class Renderer {
     this.drawLiquids(world, cam, viewW, viewH, z, false);
 
     // 4.55 导线覆盖层 + 宏伟蓝图预览（★r15 R15-2：原版 DrawWires 唯二调用
-    //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上）
+    //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上。
+    //     ★BJ583：本位只画 Normal/Faded 档（吃 compositeLight 乘光=原版
+    //     Lighting.GetColor/×0.5 等效）;Bright 档（透镜缺省档,免光照）延后至 7g
+    //     drawWiresBright——见 drawWiresPass 注）
     this.drawWires(world, cam, viewW, viewH, z);
     this.drawGrandPreview();
     // 4.56 建筑配件标尺覆盖层——★BJ422（2026-10-01）挪至光照合成后 7a-pre：
@@ -6817,6 +6888,25 @@ export class Renderer {
     //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
     //     MissileProj 实体段收集）
     this.flushTrailShade(cam, z, viewW, viewH);
+
+    // 7g. 导线 Bright 档（★BJ583 2026-10-09）：DrawWires case 0=Color.White 免光照
+    //     （Main.cs:59216-59225）——机械透镜 3619/宏伟蓝图 3611 装备后 builderAccStatus
+    //     [4..7]/[9] 缺省全 0 即此档=【暗区恒亮】。旧单通道全塞世界层被 compositeLight
+    //     全屏乘光压黑 = 用户复报「大部分时候都看不到电线」（图 82 暗区全无/图 81 仅
+    //     亮段可见）。层序：原版 DrawWires（:63251）在 DrawDust（:63241）/水体（:63248）
+    //     之后、接口层（BJ553 标记 1_2/标尺 4）之前——本位在 7f 拖尾后、BJ553 标记块
+    //     前=同序;变换=7a-pre 同式（见 drawWiresBright 注）。
+    this.drawWiresBright(world, cam, viewW, viewH, z);
+
+    // 7h. 狱火药水火圈（★BJ579 2026-10-09,用户实报「狱火药水喝了后没有火圈」）：
+    //     DrawInfernoRings（Main.cs:65248-65297）1:1——三层 FlameRing(Images/FlameRing,
+    //     400×1200 三帧) 旋转火环包玩家;效果面（200px 光环烧敌）=Game.ts 狱火块
+    //     已在（★F1 门禁串对齐注）,此前视觉只近似 4 粒橙尘=缺失环。层序=原版
+    //     :63264 在 DrawWires(:63251)/尘(:63241)/前景水(:63248) 之后、接口层之前
+    //     → 本位 7g 导线后、BJ553 标记前同序;AlphaBlend 主批次不吃 tile 光照 →
+    //     全亮域（compositeLight 后,与 7d'/7e 判例域同）。相位推进在 Game
+    //     fixedUpdate（draw:Update 1:1@60 语义,InfernoRing.ts 头注）,此处纯消费。
+    this.drawInfernoRingPass(player, cam, z, viewW, viewH);
 
     // ★BJ553（2026-10-07）：鞭 tag/召唤集火目标标记（★BJ512 落,本刀自世界层
     //  实体段后挪出至光照合成后=原版接口层语义。定谳:旧位在 compositeLight
@@ -8317,7 +8407,46 @@ export class Renderer {
     if (devOn) ctx.restore();
   }
 
+  /** ★BJ583（2026-10-09）导线层序/光照两通道分派——定谳（Terarria1457 亲读）：
+   *  ① 层序：DrawWires 唯二调用 Main.cs:63251/:63259 在 DrawWaters 前景水之后
+   *     =tile/实体/水体之上（r15 R15-2 已对齐,本仓 4.55 位不变）。
+   *  ② 光照：wire 色逐格 switch(builderAccStatus[4..7]/[9])（Main.cs:59162-59170）——
+   *     case 0 → Color.White 免光照（缺省档!builderAccStatus 缺省全 0）;case 1 →
+   *     Lighting.GetColor;case 2 → ×0.5;case 3 → 不画。本仓乘光面=compositeLight
+   *     全屏光照图（BJ325 定谳）：Normal/Faded 档在世界层内吃乘光=原版等效,而
+   *     Bright 档（透镜装备后的缺省档）原版不吃光 ⇒ 旧单通道全塞世界层=暗区电线
+     *     被乘黑不可见（图 82 暗区全无/图 81 仅亮段可见=用户复报「大部分时候都
+     *     看不到电线」第二真凶;第一真凶 BJ572 置位链已落）。分派见 wireDrawPass：
+     *     light 档留世界层（本位）,bright 档延后至 7g（compositeLight 后
+     *     drawWiresBright,7d 全亮尘/7a-pre 标尺同判例域）。
+   *  ③ 逐色 α：红恒全 α（:59225 无 num7 除）;蓝绿黄 ×(1/num7)（:59294/:59395/:59496
+   *     ——num7=同格可见色数,Hidden 减量 :59289 同语义）。旧码红也吃 1/n=偏差,顺刀对齐。
+   *  ④ 致动器：独立支 num6=status[9]（:59530 段）——bright 档恒画（原版
+   *     Brightness>0||num6==0 门 :59533,num6==0 免光门）;light 档世界层乘光（原版
+   *     Brightness>0 门的乘光近似=不亮格画了也黑,登记偏差不变）。 */
   private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    this.drawWiresPass(world, cam, viewW, viewH, z, 'light');
+  }
+
+  /** ★BJ583：Bright 档（mode 0=Color.White）compositeLight 后直绘——免乘光恒亮。
+   *  相机变换=7a-pre 同式（round 吸附;低清档按全分辨率直绘=vanilla 接口层语义,
+   *  与 wld 内容亚像素偏差≤1 设备像素,同 7d' 既有惯例）。 */
+  private drawWiresBright(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    if (!this.showWires) return;
+    this.c10eCompositeIntoHud();   // ★C10e 透明 HUD 域幂等垫底（7x 直绘惯例）
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
+    this.drawWiresPass(world, cam, viewW, viewH, z, 'bright');
+    ctx.restore();
+  }
+
+  private drawWiresPass(world: World, cam: Camera, viewW: number, viewH: number, z: number,
+    pass: 'light' | 'bright') {
     if (!this.showWires || !this.atlas) return;
     const wires = this.atlas.ensureVImage('vanilla/WiresNew.png');
     const actuatorImg = this.atlas.ensureVImage('vanilla/Actuator.png');
@@ -8338,19 +8467,16 @@ export class Renderer {
         if (!colors && !(b & 16)) continue;
         let n = 0;
         for (let c = 0; c < 4; c++) {
-          // Hidden(3) 色不计入同格色数（vanilla num7-- :59172/:59175 同语义）
-          if ((colors & (1 << c)) && (this.wireModes[c] ?? 1) !== 3) n++;
+          // Hidden(3) 色不计入同格色数（vanilla num7-- :59289 同语义,两通道同账）
+          if ((colors & (1 << c)) && wireDrawPass(this.wireModes[c]) !== 'hidden') n++;
         }
-        let drawn = 0;
         for (let c = 0; c < 4; c++) {
           const bit = 1 << c; // 红0 蓝1 绿2 黄3(图集行序,Main.cs:43641 等)
           if (!(colors & bit)) continue;
-          // ★SW-FX19：逐色可见度模式（Main.cs:59162-59170——case 3 Transparent 不画
-          //  （num7-- 同步减,桥带按可见色数计）、case 2 ×0.5、case 0/1 本仓全亮）
-          const mode = this.wireModes[c] ?? 1;
-          if (mode === 3) continue;
-          const modeAlpha = mode === 2 ? 0.5 : 1;
-          drawn++;
+          // ★BJ583：逐色通道分派（Main.cs:59162-59170 case 0 White/1 GetColor/2 ×0.5/
+          //  3 不画）——本 pass 只画本通道色,bright 档由 drawWiresBright 于光照合成后补画
+          if (wireDrawPass(this.wireModes[c]) !== pass) continue;
+          const modeAlpha = this.wireModes[c] === 2 ? 0.5 : 1;
           // 行 Y = 色行*18;分线盒/像素盒额外行偏移(Main.cs:43596-43616)
           let rowY = c * 18;
           const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
@@ -8366,15 +8492,17 @@ export class Renderer {
           if (has(tx + 1, ty, bit)) mask += 36;
           if (has(tx, ty + 1, bit)) mask += 72;
           if (has(tx - 1, ty, bit)) mask += 144;
-          if (n > 1) ctx.globalAlpha = (1 / n) * modeAlpha; // 多色同格淡化(桥带略)×模式
-          else if (modeAlpha !== 1) ctx.globalAlpha = modeAlpha;
+          // ★BJ583：红恒全 α（:59225 无 num7 除）;蓝绿黄 ×(1/n)（:59294/:59395/:59496）
+          const fadeAlpha = c === 0 ? 1 : (n > 1 ? 1 / n : 1);
+          if (fadeAlpha !== 1 || modeAlpha !== 1) ctx.globalAlpha = fadeAlpha * modeAlpha;
           ctx.drawImage(wires, mask, rowY, 16, 16, tx * ts, ty * ts, ts, ts);
           ctx.globalAlpha = 1;
         }
         if ((b & 16) && actuatorImg) {
-          // ★SW-FX19：致动器模式（[9]，num6 :59126/:59135——同四态；Faded ×0.5,Hidden 不画）
-          const am = this.wireModes[4] ?? 1;
-          if (am !== 3) {
+          // ★SW-FX19/BJ583：致动器模式（[9]，num6 :59126/:59135——同四态,随通道分派;
+          //  Faded ×0.5,Hidden 不画;Bright 档原版免 Brightness 门恒画 :59533）
+          const am = this.wireModes[4];
+          if (wireDrawPass(am) === pass) {
             ctx.globalAlpha = am === 2 ? 0.5 : 1;
             ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
             ctx.globalAlpha = 1;
@@ -9828,6 +9956,20 @@ export class Renderer {
     245, 246, 247, 248, 249, 564, 565, 551, 576, 577, 87, 510, 454, 621, 439, 370,
   ]);
   /** NPCAddHeight（Main.cs:21840-22005）：血条在脚底 +10 之上的额外下沉（视觉修正） */
+  /** ★BJ584（2026-10-09）：原版 FindFrame【从不写 spriteDirection】的 AI_001 史莱姆全族
+   *  （NPC.cs:71583-71615 FindFrame case 组 1/16/59/71/81/138/147/183/184/204/225/
+   *  333/334/335/336/535/537/658/659/667/676——组内仅 302/304 写,不入本表）→ 字段恒
+   *  默认 -1 → DrawNPC 翻面门 Main.cs:23357-23361 `spriteDirection == 1` 永不成立
+   *  = 原版史莱姆贴图【从不镜像】（AI_001 全族 60936-62469 亦零写点）。本仓此前走
+   *  通用 facing>0 镜像 = AI 转身/玩家横越即左右翻——史莱姆贴图左右半 45-52% 不对称
+   *  （NPC_59/71/1 首帧逐像素对拍）,翻面实照可辨 =「怪物(血条)反复镜像调转方向」
+   *  用户实报（弹跳丛林史莱姆 204 丛林域 + 熔岩史莱姆 59 地狱域双域复现;行为日志
+   *  v_59 钉位期间 dir -1→+1 翻转即每次触发）。命中本表 = 禁通用镜像,恒原生朝向
+   *  （与原版 spriteDirection 字段默认 -1 同相）。 */
+  static readonly SLIME_NO_MIRROR: ReadonlySet<number> = new Set([
+    1, 16, 59, 71, 81, 138, 147, 183, 184, 204, 225,
+    333, 334, 335, 336, 535, 537, 658, 659, 667, 676,
+  ]);
   /** DrawNPC switch 内的绘制侧 num47 覆写（Main.cs:23445-23477,覆盖 NPCAddHeight 值;
    *  血条直接调 NPCAddHeight 不经过此段 → 只入绘制路径不入 HB_ADD_H） */
   private static readonly DRAW_NUM47_OVERRIDE: Record<number, number> = {
@@ -10940,10 +11082,19 @@ export class Renderer {
         // ★旋转驱动族总判定：朝向完全由 rotation 决定，原版这些家族不动 spriteDirection
         // （默认 -1 从不镜像）——渲染层禁止对其叠加 facing 镜像，否则"屁股朝前"
         // （噬魂怪 aiStyle5 实踩）。新增旋转族 AI 时必须登记在此，旋转与镜像共用本判定。
-        // 例外：AI_005 内的"仅倾斜"成员（黄蜂 42/231-235、孢子蝠 176/205、蜜蜂 210/211）
+        // 例外：AI_005 内的"仅倾斜"成员（黄蜂 42/231-235、苔藓黄蜂 176/飞蛾 205、蜜蜂 210/211）
         // 贴图横画、只 tilt 不转头——它们仍需镜像翻转朝向（原版同款 spriteDirection 翻转）。
         // 23 陨石头/139 探针为"转头+镜像"复合成员（AI 侧 visAngle=atan2(sy,sx)+π、
         // facing=sx 符号,cs:50962-51026）——留在 tiltOnly5 借用镜像通道,旋转走 visAngle。
+        // ★BJ581（2026-10-09）黄蜂族镜像销案锚：42/176/205/231-235 = 原版【随面镜像族】
+        // ——AI_005 每 tick spriteDirection=vx 符号三元（NPC.cs:51186-51189,1456 :51031
+        // 为 if/if 死区档;FindFrame case 42/231-235/205/176 零写点;DrawNPC :23357
+        // sdir==1 翻）。本仓 AI 侧 facing=vx 符号（Enemy.swarmerAI）经本 tiltOnly5 出
+        // rotationDriven → 通用 facing 门翻面,极性/节拍全等 = 用户复报苔藓黄蜂「反复
+        // 镜像调转」= 原版本相,禁入 SLIME_NO_MIRROR 类「从不镜像」表
+        // （tests/bj581-hornet-mirror.test.ts 活体钉值）。蜜蜂 210/211 同域缺 facing 写点
+        // （原版 FindFrame case 210/211 死区档写）= 已登记债——★BJ588 已收编：
+        // findFrameRotation FF_VXSDIR_GROUP 族支写 e.ffSdir+渲染 ffSdirMirror 门。
         const idR = e.vanillaId ?? -1;
         const stR = e.vanilla?.aiStyle ?? 0;
         const tiltOnly5 = stR === 5 && (idR === 23 || idR === 42 || idR === 139 || idR === 176 || idR === 205
@@ -10969,7 +11120,7 @@ export class Renderer {
         }
         else if (e.vanilla?.aiStyle === 5) {
           // AI_005 旋转按族分流（cs:51045-51054 + FindFrame 蜜蜂覆盖 L75553）：
-          // 黄蜂 42/231-235、孢子蝠 176、205 仅倾斜 vx*0.1（不随飞行方向转头）；
+          // 黄蜂 42/231-235、苔藓黄蜂 176、飞蛾 205 仅倾斜 vx*0.1（不随飞行方向转头）；
           // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
           // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
           const id5 = e.vanillaId;
@@ -10993,7 +11144,9 @@ export class Renderer {
         else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 通用镜像(★BJ510 勘误:97=420 非旧注 422,反翻见 revFlipMirror :39900)
         else if (stR === 85) ctx.rotate(e.visAngle);   // AI_085 星细胞/星云头蟹/致命球:0 态 +=dir×0.3 自旋、2/3/4 态 vx×0.1(cs:39030/:39076/:39096/:39121);spriteDirection 仍镜像
         else if (idR === 301) ctx.rotate(e.visAngle);  // 渡鸦(FindFrame :74287 vx×0.1;aiStyle1 战士族逐 id 接)
-        else if (stR === 14 && (idR === 156 || idR === 226)) ctx.rotate(e.visAngle);  // 红恶魔/飞蛇(FindFrame :74604/:75510 vx×0.1;蝙蝠族逐 id)
+        else if (stR === 14 && (idR === 156 || idR === 62 || idR === 66)) ctx.rotate(e.visAngle);  // ★BJ590 红恶魔/恶魔/巫毒恶魔(FindFrame :74699/:74683-74698 vx×0.1,sdir=direction→通用 facing 镜像;226 已并 FF_VXSDIR_GROUP 旋转门)
+        else if (stR === 14 && FF_VXSDIR_GROUP.has(idR)) ctx.rotate(e.visAngle);  // ★BJ588 蝙蝠/哈比族 7 型(48/49/51/60/93/137/634——FindFrame
+          // :75656 vx×0.1 组支,findFrameRotation 层喂值;曾无消费门=零倾斜,债本体之一)
         else if (stR === 115 && idR === 603) ctx.rotate(e.visAngle);  // 海鸥2(FindFrame :74550+ 空中 vx×0.1/水面与静止 0)
         else if (stR === 7 && (idR === 230 || idR === 593)) ctx.rotate(e.visAngle);  // 走路金鱼/金色走路金鱼(FindFrame :76585+ 高速下落 −=vy×0.01 抬头、落地归零)
         else if (stR === 3 && (idR === 461 || idR === 469)) ctx.rotate(e.visAngle);  // 深渊来客(空中 (rot×4+瞄准)/5 平滑+翻面取反 :76025+)/被附身者(冲刺态 atan2+π/2 :76365+)
@@ -11032,10 +11185,12 @@ export class Renderer {
           // 实为 AI_110_Betsy(cs:62640-62741)段误归属——546 真身无态机,仅此一行累积式+镜像取反。
           ctx.rotate(e.visAngle);
         }
-        else if (idR === 664) ctx.rotate(e.visAngle);  // 火把神(FindFrame :75558 rotation=vx×0.1,findFrameRotation 层喂值)。
+        else if (idR === 664) ctx.rotate(e.visAngle);  // 火把神(FindFrame :75656 rotation=vx×0.1,findFrameRotation FF_VXSDIR_GROUP 族支喂值)。
           // 原版/本仓均无 664 生成路径(事件本体=弹幕 949,664 仅图鉴记账 Player.cs:37109-37116)——
-          // 门为三件套完备性预置,若未来接事件实体生成即活。spriteDirection=sign(vx)(:75552-75556
-          // 双态档)→通用 facing 镜像语义,不进 rotationDriven。
+          // 门为三件套完备性预置,若未来接事件实体生成即活。spriteDirection=sign(vx) 死区档
+          // (:75648-75655)→★BJ588 起走 ffSdirMirror 门(facing=direction 语义,不随显示面)。
+        else if (stR === 122) ctx.rotate(e.visAngle);  // ★BJ588 海盗幽灵 662(FindFrame :75656 vx×0.1——AI_122
+          // :45329-45450 亲读零 rotation/spriteDirection 写点,旋显两面唯一来源=FindFrame 组支;曾无消费门=不倾斜)
         else if (stR === 67) {
           // AI_067 蜗牛(G4 批 2026-08-19):rotation 四象限 0.1/t 缓转(snailAI 维护
           // visAngle,:34763-34857)+ 象限 spriteDirection 局部翻面(Enemy.snailSdir,
@@ -11098,9 +11253,19 @@ export class Renderer {
         // → flip 门 facing>0。vx==0/dxC==0 原版保前值,此处静态近似(瞬态)。
         const wyrmMirror = stR === 6
           && ((idR >= 87 && idR <= 92) || (idR >= 454 && idR <= 459) || (idR >= 621 && idR <= 623));
-        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !revFlipMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
+        // ★BJ584:史莱姆全族原版从不镜像（FindFrame case 组零 spriteDirection 写点,
+        // 见 SLIME_NO_MIRROR 注）——通用 facing 门禁用,否则 AI 转身/玩家横越即翻面
+        const slimeNoMirror = Renderer.SLIME_NO_MIRROR.has(idR);
+        // ★BJ588:FindFrame case 48..664 死区档 15 型族（FF_VXSDIR_GROUP）——spriteDirection
+        // 有态写点已迁 Enemy.findFrameRotation（vx>0→1/vx<0→−1/vx==0 死区保前值→e.ffSdir,
+        // 缺省 -1 ≙ 原版 Entity 缺省 :6522）——此处只按 Main.cs:23357-23361 `spriteDirection==1`
+        // 镜像,禁通用 facing 门（batAI/ghostAI 的 facing=原版 direction≠显示面,随 AI 重瞄
+        // 逐帧翻转;蜂 210/211 此前全仓零写点+通用门缺省 1=恒镜像面,本门翻正）。
+        const ffSdirMirror = FF_VXSDIR_GROUP.has(idR);
+        if (!rotationDriven && !slimeNoMirror && !ffSdirMirror && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !revFlipMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg || fairyMirror || revFlipMirror) && e.facing < 0) ctx.scale(-1, 1);
         if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
+        if (ffSdirMirror && e.ffSdir === 1) ctx.scale(-1, 1);   // ★BJ588 15 型族:ffSdir==1 镜像（≙ Main.cs:23357-23361 sdir==1 翻）
         if (wyrmMirror && (e.wormFollow ? e.facing > 0 : e.facing < 0)) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 血肉墙三件套 113 嘴/114 之眼/115 饥饿者：AI 逐 tick 写 spriteDirection——
@@ -15879,7 +16044,9 @@ export class Renderer {
    *  NPCID.cs:11275 BoundGoblin=105 / 11277 BoundWizard=106 / 11311 BoundMechanic=123 /
    *  11773 WebbedStylist=354 / 12243 GolferRescue=589；税务官则是地狱敌怪
    *  DemonTaxCollector(酷刑者)=534（净化粉命中 Transform 441，Projectile.cs:13651））。
-   *  各表为单帧捆绑姿态（534 是 8 帧敌怪表、589 是 13 帧表），FindFrame 无专属 case → 恒帧 0 */
+   *  各表为单帧捆绑姿态（534 是 8 帧敌怪表、589 是 13 帧表），除 589 外 FindFrame
+   *  无专属 case → 恒帧 0；★BJ592：589 实有专属 case（NPC.cs:71804-71892 自主
+   *  挥杆链,TownNPC.boundGolferFindFrame 1:1 承接）→ 走真帧行 */
   /** NPCID.Sets.IsTownSlime（NPCID.cs:4448 Factory.CreateBoolSet）——坐姿 num47 再 −10 档 */
   private static readonly TOWN_SLIME_IDS = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
 
@@ -15892,7 +16059,8 @@ export class Renderer {
                        // 34×8 单帧躺姿表——缺此条目 fallback NPC_550 站姿，2026-08-19 补）
   };
 
-  /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）
+  /** bound NPC 姿态帧（各表帧 0;589 例外=真帧,见 boundNpcSheet 内注）。
+   *  589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）
    *  ——vnpc 懒加载会按 frames=1 把 62×624 整条画出，故此处显式帧数切片 */
 
   /** 派对变体贴图条 id 集（UpdateAltTexture NPC.cs:91250——441/453/633 永不 altTexture=1，
@@ -16037,7 +16205,11 @@ export class Renderer {
     if (!img) return null;
     const frames = id === 589 ? 13 : id === 534 ? 8 : id === 376 ? 2 : 1;
     const fh = Math.max(1, Math.floor(img.height / frames));
-    return { img, sx: 0, sy: 0, sw: img.width, sh: Math.min(fh, img.height) };
+    // ★BJ592 件2：589 被绑高尔夫球手走 FindFrame case 589（NPC.cs:71804-71892）
+    // 自主挥杆链真帧（TownNPC.boundGolferFindFrame 每 tick 推进）——其余被缚表
+    // 原版 FindFrame 无专属 case（帧恒 0）照旧
+    const row = id === 589 ? Math.min(Math.max(n.frame, 0), 12) : 0;
+    return { img, sx: 0, sy: row * fh, sw: img.width, sh: Math.min(fh, img.height) };
   }
 
   /** Utils.DrawNotificationIcon（Utils.cs:445-464）——NPC 任务"!"图标：
@@ -16669,6 +16841,35 @@ export class Renderer {
    *  ★BJ-C1 F1：q.ga 显式档=恒量支复绘（516 本体 ga=alpha/255 直读,不走 lerp）。
    *  队列不清空（帧头 5346 逐帧重建,原语义保持）——recording-ctx 重放锁体裁
    *  （bj510-reverify.test F4 段）直调本方法断言变换数学。 */
+  /** ★BJ579（2026-10-09）狱火药水火圈 pass（DrawInfernoRings Main.cs:65248-65297 1:1;
+   *  效果面=Game.ts 狱火块已在,本 pass 只补视觉面——用户实报「喝了后没有火圈」）。
+   *  玩家门（Main.cs:65252-65256 active && !outOfRange && inferno && !dead）：
+   *  active=渲染列表恒真面、outOfRange=屏外剔除位未移植（InfernoRing.ts 头注登记）、
+   *  dead/hasInferno 实读。远端玩家同画（原版遍历 Main.player 全员,Main.cs:65254）;
+   *  相位推进=Game fixedUpdate 本地单源（draw:Update 1:1@60 语义）——远端 proxy 无
+   *  update 管线相位静止=MP 债登记（环几何/混合面与本地同式,非缺环）。
+   *  贴图懒加载未就绪=整 pass 跳笔（推进照跑相位不错拍;原版 ImmediateLoad 无此态）。
+   *  混合语义/层几何/推进率钉面见 InfernoRing.ts 头注（BJ556 两遍拆解推广式）。 */
+  private drawInfernoRingPass(player: Player, cam: Camera, z: number, viewW: number, viewH: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    // 门=dead ∪ buff 116（Main.cs:65252-65256 的 active/outOfRange/inferno/dead 四门
+    // 中,前二为剔除/存在面,后二=实读门）
+    const gate = (p: Player): boolean => !p.dead && p.buffs.has(BuffType.Inferno);
+    let any = gate(player);
+    for (const rp of this.remotePlayers) if (gate(rp)) { any = true; break; }
+    if (!any) return;
+    const list: FlameRingPlayer[] = [];
+    if (gate(player)) list.push({ cx: player.cx, cy: player.cy, dead: player.dead,
+      hasInferno: true, flameRingRot: player.flameRingRot, flameRingScale: player.flameRingScale });
+    for (const rp of this.remotePlayers) {
+      if (!gate(rp)) continue;
+      list.push({ cx: rp.cx, cy: rp.cy, dead: rp.dead, hasInferno: true,
+        flameRingRot: rp.flameRingRot, flameRingScale: rp.flameRingScale });
+    }
+    drawInfernoRings(ctx, list, ensureFlameRingImage(), cam.x, cam.y, z, viewW, viewH);
+  }
+
   private flushNpcWhiteLift(cam: Camera, z: number, viewW: number, viewH: number): void {
     if (!this.npcWhiteLiftQueue.length) return;
     const ctx = this.ctx;

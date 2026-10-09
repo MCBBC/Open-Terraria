@@ -482,6 +482,12 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     // 原版取整行最高面（Collision.cs:1610-1631 num13 取最大盒顶），不能 break 在最左列——
     // 否则左列半砖/右列整砖时身体会嵌进整砖 8px
     let bestTop = Infinity;
+    // ★BJ-C9-SP（2026-10-09）越行平台补漏（哨兵杖 2366 实报「只能落实体物块」第二站）：
+    //  下方平台门只查【新边缘行】ty——落速一拍可跨行（vy 钳 10~16 ≥ 行内剩余深度），
+    //  单行平台在被越过行上不可检=穿落。此处补扫 oldBottom 行..ty−1 的越行平台格
+    //  （单向顶面语义不变：prevBottom ≤ top+1 主门;实心不在此列——原版实心下面行
+    //  连片,边缘行恒可检,保持既有语义零变）。dropThrough（按 ↓ 下穿）照旧豁免。
+    const bottomRowOld = Math.floor(((b.y + b.h) - dy - 0.01) / TILE);
     for (let tx = x0; tx <= x1; tx++) {
       const solid = world.store.isSolid(tx, ty);
       const span = solidSpan(world, tx, ty);
@@ -510,6 +516,22 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         const bottom = (ty + 1) * TILE;
         if (b.y >= bottom || b.y - dy < bottom - 0.01) continue;
         if (bottom < bestTop) bestTop = bottom;
+      }
+    }
+    // ★BJ-C9-SP 越行平台格检查（见上注）——只扫平台（实心语义零变）:
+    //  prevBottom ≤ top+1 = 从上来主门;prevBottom ∈ (top, top+16] = 放置嵌入驻留
+    //  面（PickSentryLandingSpot spawnY=i×16−24 对 h=50 的 377 盒底嵌平台格 10px,
+    //  原版哨兵对准平台可驻=用户实报基准;横移入格（vx≠0 行走穿越）不在此 door——
+    //  嵌入驻留仅 spawn 面可达,登记:原版本支嵌入解析源码位未钉,行为基准=用户实报）。
+    if (dir > 0 && !b.dropThrough) {
+      for (let tyy = bottomRowOld; tyy < ty; tyy++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          if (!world.store.isPlatform(tx, tyy)) continue;
+          const prevB = (b.y + b.h) - dy;
+          const topP = tyy * TILE;
+          if (prevB > topP + 1 && !(prevB > topP && prevB <= topP + TILE)) continue;
+          if (topP < bestTop) bestTop = topP;
+        }
       }
     }
     if (bestTop !== Infinity) {

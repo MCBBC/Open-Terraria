@@ -618,9 +618,17 @@ const FLOATING_SENTRIES = new Set<number>([641, 643]);
  *  R31 §C①——Game.ts case 'summon' 接线见落点清单;本导出先落可测实现）：
  *  非悬浮件从鼠标格向下扫到"本格及左右邻均非实心"终止的行 i,取 i−1;
  *  spawnX=鼠标世界 X、spawnY=i×16−24。悬浮三件(3571/3569/5463)免扫描直取鼠标格
- *  （5463 另在 Player.cs:48687 把 spawnY 覆写为裸 mouseY、vy=0）。 */
+ *  （5463 另在 Player.cs:48687 把 spawnY 覆写为裸 mouseY、vy=0）。
+ *  ★BJ-C9-SP（2026-10-09）实报定谳：扫描谓词 = **WorldGen.SolidTile2**（:50057
+ *  三列逐字;WorldGen.cs:70665-70680 = tileSolid【无 !tileSolidTop 排除,
+ *  Main.cs:8032 `tileSolid[19]=true`】∧ slope==0 ∧ !halfBrick ∧ active ∧ 未致动）
+ *  ——平台九件套（19/239/380/427/435-439,tileSolid∩tileSolidTop）【计入】实心:
+ *  原版哨杖对准平台=落点即平台面（蜘蛛女王杖 2366 实报「哨兵只能落实体物块」根因
+ *  =旧 isSolid 窄谓词漏平台）。承载=TileStore.isSolid2（SolidTile2 1:1,含
+ *  slope/halfBrick 两排除——isSolid 宽谓词含坡/半砖,SolidTile2 不含,借道补齐）。
+ *  gravDir==−1 的鼠标行翻转（:50052-50054）本仓未建模=登记（本仓无倒挂放置面）。 */
 export function pickSentryLandingSpot(
-  store: { inBounds(x: number, y: number): boolean; isSolid(x: number, y: number): boolean },
+  store: { inBounds(x: number, y: number): boolean; isSolid2(x: number, y: number): boolean },
   mouseWX: number, mouseWY: number, itemId: number, maxTilesY: number,
 ): { x: number; y: number } {
   const floating = itemId === 3571 || itemId === 3569 || itemId === 5463;
@@ -628,9 +636,7 @@ export function pickSentryLandingSpot(
   let ty = Math.floor(mouseWY / 16);
   if (!floating) {
     const solidRow = (row: number): boolean =>
-      store.inBounds(tx - 1, row) && store.isSolid(tx - 1, row)
-      || store.inBounds(tx, row) && store.isSolid(tx, row)
-      || store.inBounds(tx + 1, row) && store.isSolid(tx + 1, row);
+      store.isSolid2(tx - 1, row) || store.isSolid2(tx, row) || store.isSolid2(tx + 1, row);
     for (; ty < maxTilesY - 10 && !solidRow(ty); ty++) { }
     ty--;
   }
@@ -8720,6 +8726,58 @@ export class MinionProj extends Entity {
         ctx.restore();
         return;
       }
+    }
+    // ---- ★BJ582②（2026-10-09,用户实报「原版的贴图还有三个气球」定谳落刀）----
+    // 1025 藤堡专绘（Main.cs:34959-34999 1:1）——悬浮态（ai[0]==0 ⇔ sAttach==0
+    // 且非携行;携行支首拍 AI_197_HandleTileCollision 置 ai[0]=1 :41093-41095）
+    // 在本体上方绘【三气球】=NPC_594（WindyBalloon,Frame(8,1,·) 8 列×32px×76 高）：
+    // 列 2/5/7（:34972 `1 + switch{1→4,0→1,_→6}`）、锚 = 盒心+(0,−10+bob)
+    // （vector124 :34968）、origin=气球【底心】(16,76)（:34974,origin.Y=帧高+
+    // (num151−22),num151=22 :30097 → 净 (w/2,h)）、初始摆角 +π/9/0/−π/9
+    // （:34976-34978）+ 摆动 ±0.025rad（num484=misc%75/75 相位,中球 sin/侧球 cos
+    // :34979-34983）。bob = sin(misc%100/100·2π)·2（num483 :34962-34967）——气球锚
+    // 与本体同受（本体绘制位 Y +num483 :34996）。本体 = 帧切片全帧(0,y25,46,62)、
+    // 绘制位=(pos.X+num153+num152, pos.Y+h/2+num483)、origin=(num153, h/2+22)
+    // （:34996-34998;num153=(texW−w)/2+w/2=texW/2=23 :30303 与通用 num145 同值、
+    // num151=22 :30097 与通用 offset 表 [22,0] 同值——旧通用尾无 bob,本专绘替代）。
+    // rot/翻转/drawScale 变换序与通用尾同构（携行 rot=±π/2 :70190;悬浮恒 0）。
+    // 登记债：气球层未接弹幕染料通道（原版 EntitySpriteDraw×Armor.Apply 对气球
+    // 同染）——染料哨兵吹泡泡时气球保持原色,登记待哨兵染料消费面扩容时补。
+    if (this.projId === 1025 && img) {
+      const misc26 = this.ownerRef()?.miscCounter ?? 0;    // LocalPlayer.miscCounter
+      const num484 = (misc26 % 75) / 75;                   // :34962（摆动相位,75t 周期）
+      const num485 = (misc26 % 100) / 100;                 // :34963（bob 相位,100t 周期）
+      const bob26 = Math.sin(num485 * Math.PI * 2) * 2;    // num483（:34964-34967）
+      ctx.save();
+      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+      if (this.sAttach !== 1 && !this.carriedByBackpack) {   // ai[0]==0 悬浮态（:34961）
+        const bal = r.atlas?.ensureVImage('vanilla/NPC_594.png') ?? null;
+        if (bal) {
+          const cols26 = [2, 5, 7];                          // :34972（Frame 前列号）
+          for (let k = 0; k < 3; k++) {
+            const rot0 = k === 1 ? 0 : k === 0 ? Math.PI / 9 : -Math.PI / 9;   // :34976-34978
+            const wig26 = (k === 1 ? Math.sin(num484 * Math.PI * 2)
+              : Math.cos(num484 * Math.PI * 2)) * 0.025;                       // :34979-34982
+            ctx.save();
+            ctx.translate(this.cx, this.cy - 10 + bob26);    // :34967-34968（gfxOffY 恒 0）
+            ctx.rotate(rot0 + wig26);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(bal as CanvasImageSource, cols26[k] * 32, 0, 32, 76,
+              -16, -76, 32, 76);                             // origin=(16,76)=底心
+            ctx.restore();
+          }
+        }
+      }
+      // 本体（:34996-34998）：帧左上 = (盒左, 盒顶−22+bob)——与通用路 offset [22,0]
+      //  同位,唯一差 = bob 随动;变换序对齐通用尾（rotate→flip→scale）
+      ctx.translate(this.cx - this.w / 2 + img.width / 2, this.cy + bob26);
+      if (this.rot !== 0) ctx.rotate(this.rot);
+      if (this.facing < 0) ctx.scale(-1, 1);
+      if (this.drawScale !== 1) ctx.scale(this.drawScale, this.drawScale);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, -img.width / 2, -(this.h / 2 + 22), img.width, img.height);
+      ctx.restore();
+      return;
     }
     // ---- ★SW-BJ13 2026-09-07：帕鲁地面家族∪原版同支专绘（Main.cs:34788-34800 1:1）----
     // 原版本族（393-395/398/423/450/1022/1036/1093/1112/1118）不走通用 num143/144

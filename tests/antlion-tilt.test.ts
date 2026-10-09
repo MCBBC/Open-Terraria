@@ -119,6 +119,9 @@ function drawWithFake(e: Enemy, w: WorldT): Array<{ m: string; a: unknown[] }> {
     assets: { enemySprites: new Map() },
     atlas: { vnpc: () => rectStub, ensureVImage: () => null, vmisc: () => null },
     drawNpcGlow: () => {},
+    // ★BJ-C1（2026-10-06）后 drawEnemy 恒色支（25/59/60/30/665 等）push 白提亮队列
+    //  ——本假体滞后缺字段=TypeError（BJ581 回归扫出,预先债非本案）;收集面直补空队列。
+    npcWhiteLiftQueue: [] as unknown[],
   };
   (Renderer.prototype as unknown as { drawEnemy: (this: unknown, e: Enemy, w: WorldT) => void })
     .drawEnemy.call(fake, e, w);

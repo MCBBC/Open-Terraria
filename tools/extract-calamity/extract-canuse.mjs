@@ -49,6 +49,16 @@ for (const p of files) {
     const mm = /<\s*(\d+)/.exec(body);
     if (mm && Number(mm[1]) > 0) { op = 'lt'; n = Number(mm[1]); }
   }
+  // bossGate 支:NPC.AnyNPCs(ModContent.NPCType<X>()) → noBoss 规则(召唤期
+  //  boss 存活禁用;2019 恶魔海螺/深海掠夺者类)
+  if (projs.length === 0 || true) {
+    const bosses = [...body.matchAll(/AnyNPCs\(\s*(?:ModContent\.)?NPCType(?:<\s*(\w+)\s*>\(\)|\(\s*"(\w+)"\s*\))\s*\)/g)]
+      .map((m) => snake(m[1] ?? m[2]));
+    if (bosses.length > 0 && !/maxMinions/.test(body)) {
+      rows.push({ item: key, noBoss: bosses });
+      continue;
+    }
+  }
   rows.push({ item: key, projs, op, n });
 }
 writeFileSync(OUT, JSON.stringify(rows, null, 1));

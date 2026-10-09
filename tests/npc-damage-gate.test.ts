@@ -81,6 +81,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
       world: World; entities: { enemies: unknown[]; npcs: TownNPC[]; critters: unknown[] };
       player: unknown; spawnParticles: () => void; addDamageNumber: () => void;
       playSfxFiles: () => void; net?: unknown; remotePlayerProxies?: unknown[];
+      cb?: { onChat: () => void };
     };
     g.world = new World(40, 40, 20, 'boom');
     g.entities = { enemies: [], npcs, critters: [] };   // critters 桶 2026-08-21 并入爆炸扫描
@@ -88,6 +89,11 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     g.spawnParticles = () => {};
     g.addDamageNumber = () => {};   // 真方法碰未初始化 dmgNumbers → 'push' of undefined
     g.playSfxFiles = () => {};
+    // ★BJ589 夹具债：BJ562 死亡公告单源链 broadcastDeathMessage→chatBroadcast
+    //   →newText→this.cb.onChat——壳缺 cb 桩=巫毒杀向导两用例预存红（TypeError:
+    //   Cannot read properties of undefined (reading 'onChat')）。纯测试域补桩，
+    //   src 零改动（achievements-trigger-surface/bj112a 同款壳桩风格）。
+    g.cb = { onChat: () => {} };
     g.net = undefined;
     g.remotePlayerProxies = [];
     (g as unknown as { scene: unknown }).scene = {};   // dropContext 读 zone 旗标(M11 后)

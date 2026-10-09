@@ -229,6 +229,33 @@ export class LuckState {
     if (gold) t *= 2;
     this.ladyBugLuckTimeLeft = Math.max(this.ladyBugLuckTimeLeft, t);
   }
+
+  /** ★BJ562（2026-10-09）NPCLuck（NPC.cs:82466-82490——checkDead townNPC 支
+   *  :78944-78946 `if (Main.netMode != 2)` 调用=单机/客户端态,专写本地玩家
+   *  瓢虫运；本仓消费位 TownNPC.npcLuckOnDeath）：城镇 NPC 死亡的运面双支：
+   *  · 向导 22（:82468-82479）死亡延瓢虫好运——门 ladyBugLuckTimeLeft ≥ 0
+   *    （当前非负运才接,负运不抵消）+ 玩家 active 且未死；量 = 43200/3 = 14400t
+   *    （「1/3 昼」,取更优：num > timeLeft 才覆写）。
+   *  · 其余城镇 NPC（:82480-82489）死亡缓瓢虫厄运——护士 54 排除（:82481,type!=54,
+   *    医师照护不欠运）;量 = -10800/3 = -3600t（1 分钟）,仅比当前更坏才覆写
+   *    （num2 < timeLeft——已持更坏值不抬升）。
+   *  luckNeedsSync 置位（:82477/:82487）为联机同步旗,本仓单人态无独立面（登记）。
+   *  城镇宠物/渔夫/公主不在排除表——死亡同走厄运支（:78942 门只排 37/453）。 */
+  npcLuck(townNpcType: number, playerActive: boolean, playerDead: boolean): void {
+    if (townNpcType === 22) {
+      if (this.ladyBugLuckTimeLeft >= 0 && playerActive && !playerDead) {
+        const num = LADYBUG_GOOD_LUCK_TIME / 3;                    // 14400（:82473）
+        if (num > this.ladyBugLuckTimeLeft) {
+          this.ladyBugLuckTimeLeft = num;                          // :82475-82478
+        }
+      }
+    } else if (townNpcType !== 54 && playerActive && !playerDead) {
+      const num2 = LADYBUG_BAD_LUCK_TIME / 3;                      // -3600（:82483）
+      if (num2 < this.ladyBugLuckTimeLeft) {
+        this.ladyBugLuckTimeLeft = num2;                           // :82485-82488
+      }
+    }
+  }
 }
 
 // ============ 火炬幸运扫描（TryRecalculatingTorchLuck :17845-17909 窗口 +

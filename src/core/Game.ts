@@ -227,7 +227,7 @@ import { spawnStormLightningTick } from '../world/StormLightningSpawner';
 import { stormLightningGenerator } from '../fx/LightningGenerator';
 import { DontStarveDarkness } from '../player/DontStarveDarkness';
 import { SkyblockRuntime } from '../world/SkyblockRuntime';
-import { DUNGEON_WALL_IDS, scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
+import { DUNGEON_WALL_IDS, scanScene, EMPTY_SCENE, scanBiomeLightCounts, oreFinderDisplayName, type SceneFlags } from '../world/SceneMetrics';
 // ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
 import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 // ★SW-BC1 2026-09-06：Player.Spawn 出生落位扫位链 1:1 移植（Spawn_GetPositionAtSpawn
@@ -258,6 +258,7 @@ import { surviveHardcoreDeath } from '../world/gen/SeedEasterEggs';
 import type { GenState } from '../world/gen/vanilla/GenState';
 import { checkForGoodTeleportationSpot } from '../world/gen/vanilla/TeleportSpotCheck';   // ★SW-BJ48 传送药水随机落点（Utils.CheckForGoodTeleportationSpot 1:1 核,IIIII110b 建）
 import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlayerEmote } from '../render/EmoteBubble';
+import { advanceFlameRing } from '../render/InfernoRing';   // ★BJ579 狱火药水火圈相位
 // M3 聊天命令系统（Terraria.Chat.Commands 全目录）+ Boss 伤害统计（/boss伤害）
 import { createOutgoingMessage, executeCommand, chatColorOfDifficulty, type OutgoingChatMessage } from '../chat/ChatCommands';
 import {
@@ -12620,6 +12621,9 @@ export class Game implements GameHooks {
           if (torchId !== undefined) {
             const c = TORCH_LIGHT[torchId];
             if (c) heldRGB = c;
+            // ★三百四十八刀:mod holdItem 光源(player.modHeldLight)
+            const ml = (player as { modHeldLight?: [number, number, number] | null }).modHeldLight;
+            if (!heldRGB && ml) heldRGB = ml;
             // 三个动态火把档 = TorchID 同名 ITorchLightProvider 精确公式（TorchID.cs:
             //  DemonTorchLight :45-51 / DiscoTorchLight :66-72 / ShimmerTorchLight :28-42），
             // 与 TileLightScanner 火把 style 7/14/23 同源——曾为静态近似/六色跳变
@@ -12637,6 +12641,9 @@ export class Game implements GameHooks {
     // 旧实现 `!heldRGB &&` 优先链（持火把时药水不发光）已废
     const buffLights: Array<{ tx: number; ty: number; r: number; g: number; b: number }> = [];
     const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+    // ★三百六十五刀:mod 配饰光源(逐通道取最大语义=本链同池)
+    const modAL = (player as { modAccLight?: [number, number, number] | null }).modAccLight;
+    if (modAL) buffLights.push({ tx: ptx, ty: pty, r: modAL[0], g: modAL[1], b: modAL[2] });
     if (player.buffs.has(BuffType.Shine)) buffLights.push({ tx: ptx, ty: pty, r: 0.8, g: 0.95, b: 1 });
     if (player.buffs.has(BuffType.Inferno)) buffLights.push({ tx: ptx, ty: pty, r: 0.65, g: 0.4, b: 0.1 });
     // 手持光源落【手部位移格】（完整原版链）：
@@ -14609,6 +14616,9 @@ export class Game implements GameHooks {
   }
 
   private updateUse(_dt: number) {
+    // ★三百四十五刀:altFunctionUse 玩家态(C# Player.altFunctionUse 同名——
+    //  右键按住=2/否则 0;mod canUse/itemUse ctx 消费)
+    this.player.altFunctionUse = this.input.rightDown ? 2 : 0;
     const eq = this.player.equipStats;   // ★IIIII250 函数级快照:本函数 37 次直读每读一次键重建(雨天 trace 固定Update 231.8ms 调用权重);stats 冻结,装备变更下一访问即时反映语义不变
     const inp = this.input;
     clearPlacePreviewFrame();            // ★BJ557：放置预览幽灵每帧重建（先清后写;下方各早退帧=隐藏,⟺原版 cursorItemIconEnabled 复位相）
@@ -19590,7 +19600,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         } else if (SENTRY_WAND_VIDS.has(critVid)) {
           // 哨兵杖六件专支（R31 §C① 落点清单 #3；ItemCheck_Shoot :48716-48745）：
           // PickSentryLandingSpot（Player.cs:50043-50059，pickSentryLandingSpot 1:1）
-          // ——地面三件 {1572→308,2366→377,5119→966} 鼠标格起三列向下扫首个实心行，
+          // ——地面三件 {1572 冰霜九头蛇杖→308,2366 蜘蛛女王杖→377,5119 猎犬炮台→966}
+          // 鼠标格起三列向下扫首个 SolidTile2 行（★BJ-C9-SP:平台九件套计入=可落平台），
           // spawnY=i×16−24；悬浮三件 {3569→641,3571→643,5463→1025} 免扫描直取鼠标行
           // （全屏可放）。出生 = NewProjectile(spawnX,spawnY,0,15,...)（:48746-48755）
           // 定速下坠入场；5463 特例 spawnY=裸鼠标世界 Y+速 0（:48737-48739）。
@@ -23407,6 +23418,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 永不切割（红队 K-1，2026-09-03 修；惯例同近战 :25008-25011 natureGuard 后置覆盖）
     const accIds = accessoryVanillaIds(this.player);
     const natureGuard = accIds.includes(5309) || accIds.includes(5323);
+    // ★BJ578（2026-10-09 语义倒置定谳落刀）：ignore 谓词=GetTileCutIgnorance 原式——
+    //  nature 支返回 TileCutIgnore.IgnoreDontHurtNature（TileID.cs:86 CreateBoolSet(true,
+    //  13 例外)=「全真唯 13 例外」：SetFactory.cs:94-106 第二实参表逐项置 !defaultState,
+    //  消费位 :45032 `shouldIgnore[type]→continue`（真=忽略不割））→ dontHurtNature 佩戴
+    //  时保护面=候选 ∖ 13 例外表,13 例外表（陷阱/TNT 桶/幼虫/刺藤/蛛网/裂砖）反而照割。
+    //  旧式 `natureGuard && CUT_IGNORE_NATURE.has(t)` 把 13 集当保护表=语义倒置（割草机
+    //  佩戴书照割花草/陶盆、刺藤蛛网反受保护,与原版完全相反）,今改 ignoreAt 与 cutTile
+    //  单源（:43199 `!CUT_IGNORE_NATURE.has(t)`）对齐。staff 支=Regrowth 表;nature 支
+    //  后置覆盖 staff 支（:45010-45013 次序;nature 保护全集=候选∖13 ⊇ Regrowth 表,交集
+    //  =∅ → ternary ≡ 原式覆盖序）。陶盆 ∉ 13 → 佩戴时同受 ignore 门保护（vanilla
+    //  melee/mow 循环瓦罐本非候选:tileCut[78]=false Main.cs 41 项表,本仓瓦罐支为独立
+    //  受理面,补同向门=与 cutTile 瓦罐候选 :43199 同相）。
+    const ignoreAt = (tt: number) => natureGuard ? !CUT_IGNORE_NATURE.has(tt)
+      : (heldVid === 213 || heldVid === 5295) && CUT_IGNORE_REGROWTH.has(tt);
     // 扫描域=ItemCheck_CutTiles 同式（:45023-45026,右/下各 +1 格外沿——2026-09-03
     // 对齐批补齐,近战挥击循环同改）
     for (let ty = Math.floor(ry / TILE); ty <= Math.floor((ry + rh) / TILE); ty++) {
@@ -23424,17 +23449,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  陶盆支同吃此门：原版 78 亦在 tileCut 表,CanCutTile 是同一 continue 条件的
         //  末项,覆盖循环体全部 Kill 面（叠罐近战不可破/罐上香草不割=原版本相）
         if (!canCutTile(st, tx, ty, 'AttackMelee')) continue;
-        if (t === POT_TILE) {
+        if (t === POT_TILE && !ignoreAt(t)) {   // ★BJ578 陶盆同吃 ignore 门（方法头上注）
           this.swingTileCutSet.add(tk);
           this.smashPot(tx, ty);
         } else if ((TILE_CUT.has(t) || BONUS_CUT_TILES.has(t))
           // ★BJ577：MowTheLawn ignore 表 = GetTileCutIgnoreList(HeldItem)（Player.cs:20493
           //  → :44992-45014）——held 213/5295 → allowRegrowth → TileCutIgnore.Regrowth
-          //  （TileID.cs:88 含 82/83/84 药草全阶+花草族）→ 持杖推割草机不割药草
-          //  （vanilla nature 支后置覆盖 staff 支,本仓 nature 语义维持现状,法杖支按
-          //  原式并入;判别测试 bj577-regrowth-replant 锁红）
-          && !((natureGuard && CUT_IGNORE_NATURE.has(t))
-            || ((heldVid === 213 || heldVid === 5295) && CUT_IGNORE_REGROWTH.has(t)))) {
+          //  （TileID.cs:88 含 82/83/84 药草全阶+花草族）→ 持杖推割草机不割药草。
+          //  ★BJ578：ignore 谓词改 ignoreAt（方法头上注——全真唯 13 例外,旧式倒置已正）
+          && !ignoreAt(t)) {
           this.swingTileCutSet.add(tk);
           this.breakTile(tx, ty);
           this.sickleHayDropIfSickle(heldVid, t, tx, ty);   // ★BJ300（MowTheLawn :20494 传 HeldItem 面）
@@ -31544,6 +31567,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 内部链：20 平值【无玩家面板乘区】×旗 DamageDealt → +checkArmorPenetration
     // (GetArmorPenetration(melee:false))；AddBuff(323,120) 与直伤同受 buffImmune 门。
     if (this.player.buffs.has(BuffType.Inferno)) {
+      // ★BJ579 火圈相位推进（DrawInfernoRings :65262-65285 draw 侧内联;门
+      //   AllowPlayerToEmitEffects=!WorldUpdateStepper.DrawnThisUpdate=恒真等价;
+      //   draw:Update 1:1@60 → 语义=每 60t 一次 → 本仓 fixedUpdate 同拍推进,
+      //   渲染侧纯消费零漂移。屏外不推进=XNA 绘制剔除副产品不照抄,登记偏差;
+      //   原版推进门含 !dead——死亡清 buff 116 → has(Inferno)=false 不进本块,
+      //   门等价自洽）。视觉消费=Renderer drawInfernoRingPass（InfernoRing.ts）。
+      advanceFlameRing(this.player);
       this.infernoCounter++;
       const hitTick = this.infernoCounter % 60 === 0;
       if (hitTick) this.spawnParticles(this.player.cx, this.player.cy, '#FF8C2A', 4, 1.8, { life: 24, grav: -0.08 });
@@ -31855,12 +31885,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       },
       shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0, anchor?: [number, number]) => {
         this.entities.add(new TrapShot(px, py, vx, vy, damage, kind, form, anchor), 'projectiles');
-        // 发射音：陷阱族=敲石近似；炮弹族由 TrapShot 首帧按原版播 Item14（Projectile.cs:21542/26830）；
-        // 传送门弹 601 首帧无发射音（原版 AI 只有 alpha 段的门色拖尾尘）；
-        // 烟花族发射静音——爆花 Item14 在 Kill（Projectile.cs:73437），喷泉/马桶全程无声
-        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball' && kind !== 'portalbolt'
-          && kind !== 'fireworkRocket' && kind !== 'fireworksBoxRocket'
-          && kind !== 'fireworkFountain' && kind !== 'toiletPop') this.sfxAt('tink', px, py);
+        // ★BJ564（2026-10-09，BJ571 邻接债清偿）：发射面全 kind 静音=原版相。原版机关
+        // 发射全程零 PlaySound——case 137 六陷阱（Wiring.cs:1764-1986,spiky=:1829）、
+        // 巨石雕像 case 531（:1998-2016）、GeyserTrap 443（:3097-3126）、雪球 212
+        // （:1345-1418）、大炮 335（WorldGen.cs:50622-50770）发射处均仅
+        // Projectile.NewProjectile；Wiring.cs 全文仅有的 8 处 PlaySound=HitSwitch
+        // 开关叮（:267-375,SoundID 28）与 Hopper 拾取（:2778,SoundID 7）,无一在发射面。
+        // 曾播 'tink'（"陷阱族=敲石近似"）为自创偏差（0.07s 金属叮）,摘除。弹体自身音
+        // 由弹内按原版面自理：炮弹族首帧 Item14（Projectile.cs:21542/26830）、
+        // 烟花爆花 Item14 在 Kill（:73437）、传送门弹 601 首帧无音。
       },
       hasFountainAt: (tx: number, ty: number) => {
         // 喷泉去重（Wiring.cs:1529-1545：场上已存在 aiStyle73 且 ai[0]/ai[1] 同锚点的弹）
@@ -35620,10 +35653,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const regrowthStaff = swingVid === 213 || swingVid === 5295;
       const accIds = accessoryVanillaIds(p);
       const natureGuard = accIds.includes(5309) || accIds.includes(5323);
-      // GetTileCutIgnorance（Player.cs:44020-44030）：nature 支【后置覆盖】
-      // Regrowth 支——原式 if(!fromTrap&&dontHurtNature) result=Ignore…，次序照抄
-      const shouldIgnore = natureGuard ? CUT_IGNORE_NATURE
-        : regrowthStaff ? CUT_IGNORE_REGROWTH : null;   // shouldIgnore=TileCutIgnore.None
+      // GetTileCutIgnorance（Player.cs:45003-45014）：nature 支【后置覆盖】
+      // Regrowth 支——原式 if(!fromTrap&&dontHurtNature) result=Ignore…，次序照抄。
+      // ★BJ578（2026-10-09 语义倒置定谳落刀）：IgnoreDontHurtNature（TileID.cs:86
+      //  CreateBoolSet(true,13 例外)）=「全真唯 13 例外」——SetFactory.cs:94-106 第二
+      //  实参表逐项置反,消费位 :45032 `shouldIgnore[type]→continue`（真=不割）→ 佩戴时
+      //  保护面=候选 ∖ 13 例外表,13 例外表反而照割。旧 shouldIgnore=CUT_IGNORE_NATURE
+      //  把 13 集当保护表=语义倒置（挥剑照割花草/药草,刺藤/蛛网/幼虫反受保护,与原版
+      //  完全相反）,今改 ignoreAt 与 cutTile 单源（:43199 `!CUT_IGNORE_NATURE.has(t)`）
+      //  对齐;nature 保护全集=候选∖13 ⊇ Regrowth 表（交集=∅）,ternary ≡ 原式覆盖序。
+      //  233 bonusCutTiles 同吃此门（金/防火网 cutExtraTiles 面,:45031 同一 continue
+      //  条件——佩戴书挥网 233 亦受保护）。陶盆 ∉ 13 → 佩戴时同受保护（vanilla melee
+      //  循环瓦罐本非候选:tileCut[78]=false,本仓瓦罐支补同向门=cutTile :43199 同相）。
+      const ignoreAt = (tt: number) => natureGuard ? !CUT_IGNORE_NATURE.has(tt)
+        : regrowthStaff && CUT_IGNORE_REGROWTH.has(tt);
       // 扫描域（:45023-45026）：minX=X/16、maxX=(X+W)/16+1（exclusive）——右/下各多
       // 含一格外沿（弹侧 CutTilesAt :15454 同款 +1,ProjCutTiles 已 1:1;★2026-09-03
       // 补齐:曾用 (X+W-1)/16 严格内沿=少砍一格,金网/近战共此式）
@@ -35640,11 +35683,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  条件末项）——wall 350 / 下格∈{78,380,579} / 未熟南瓜(254 frameX<144) 拒切;
           //  陶盆支同吃（78∈tileCut,同一 continue 覆盖循环体全部 Kill 面）
           if (!canCutTile(this.world.store, tx, ty, 'AttackMelee')) continue;
-          if (t === POT_TILE) {
+          if (t === POT_TILE && !ignoreAt(t)) {   // ★BJ578 陶盆同吃 ignore 门（上注）
             this.swingTileCutSet.add(tk);
             this.smashPot(tx, ty);
           } else if ((TILE_CUT.has(t) || (goldFireNetCut && BONUS_CUT_TILES.has(t)))
-            && !(shouldIgnore?.has(t))) {
+            && !ignoreAt(t)) {   // ★BJ578 全真唯 13 例外（上注;旧 shouldIgnore?.has 倒置已正）
             this.swingTileCutSet.add(tk);
             this.breakTile(tx, ty);
             this.sickleHayDropIfSickle(swingVid, t, tx, ty);   // ★BJ300 镰刀干草（Player.cs:45033-45062;表外型零掷）
@@ -40862,10 +40905,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       p.displayedFishingInfo = '';
     }
     // 金属探测器(SceneMetrics.bestOre;渲染器持有 scene)
+    // ★BJ586：名面走 oreFinderDisplayName——原版显示名=GetMapObjectName(TileToLookup(
+    //  BestOreType, GetTileBaseOption(BestOrePosition 帧态)))(Main.cs:47757-47768)，
+    //  129(fx>=324)→明胶水晶/227(fx/34)→奇异植物;旧 tileName(sheet) 丢 baseOption 维
+    //  → 明胶水晶恒报「水晶碎块」(用户实报)。fx 重读 bestOre 格帧态=原版 GetTileSafely
+    //  (bestOrePosition) 同构（SceneMetrics.cs:152 BestOrePosition → Main.cs:47756）
     const scene = r.scene;
     let oreText: string | null = null;
     if (scene && scene.bestOreSheet >= 0) {
-      oreText = Lang.tileName(scene.bestOreSheet);
+      const oi = w.store.inBounds(scene.bestOreX, scene.bestOreY) ? w.store.idx(scene.bestOreX, scene.bestOreY) : -1;
+      oreText = oreFinderDisplayName(scene.bestOreSheet, oi >= 0 ? w.store.frameX[oi] : 0);
     }
     // 击杀数(Main.cs:47845-47853 1:1,SW-BJ47)：lastCreatureHit = 旗种 banner id 域
     // （Player.cs:2575;写位 Enemy.hurt 命中即写,原版三写位 :20609/:44769/:13382）——
@@ -43138,6 +43187,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(e, 'projectiles');
   }
 
+  /** ★BJ562（2026-10-09）城镇 NPC 死亡墓碑入 props 桶（GameHooks.spawnTownNpcTombstone;
+   *  TownNPC.dropTombstoneTownNpc 消费——NPC.DropTombstoneTownNPC NewProjectile 桶位,
+   *  玩家死亡墓碑 handlePlayerDeath 同桶先例） */
+  spawnTownNpcTombstone(t: import('../entities/Tombstone').Tombstone) {
+    this.entities.add(t, 'props');
+  }
+
   /** 小动物列表:弹幕命中用(GameHooks.critters) */
   critters() {
     return this.entities.critters;
@@ -43768,13 +43824,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       else playHurtVoice(this as unknown as GameHooks, p.voiceState);
       // 本地飘字单点（★A2）：noLocalFloat 抑制（虚空坠落等原版无 Hurt 飘字面的站点）；
       // floatDealt 由环境站以 damagePreview 预演回填终值（防双发且像素零漂移）——
-      // 缺省维持旧近似 max(1,dmg−def×0.5)，NPC 接触/弹幕既有调用方数字不变。
+      // ★BJ585（2026-10-09）：缺省支改用实扣值 ok——原版飘字与实扣同源
+      //   （Player.cs:38666-38672 `CombatText.NewText(…, (int)num2, …)` 与
+      //   `statLife -= (int)num2` 同一 num2）。旧近似 max(1,dmg−def×0.5) 与结算
+      //   口径分裂：缺 0.75 难度系数/endurance/solar，用户实测 51 防御下实扣 1
+      //   飘字 5、实扣 88 飘字 101（幽灵僵尸）。ok>0 分支内恒 ≥1（floor 已保证）。
+      //   Math.round 保留对 floatDealt 非整数输入的中立性（整输入幂等）。
       // FR4-F：曾 #FF5050（本地实扣位同 CombatText.DamagedFriendly）；floatColor 供
       // 岩浆站保留其专属橙红。
       if (!opts?.noLocalFloat) {
         const shown = opts?.floatDealt !== undefined
           ? opts.floatDealt
-          : Math.max(1, dmg - p.defense * 0.5);
+          : ok;
         this.addDamageNumber(p.cx, p.y, Math.round(shown), false,
           opts?.floatColor ?? playerHurtFloatColor(false));
       }

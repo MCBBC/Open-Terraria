@@ -165,7 +165,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       rotateToVelocity: s.rotateToVelocity,
       homing: s.homing,
       homingDist: s.homingDist,
-    });
+      holdout: s.holdout,
+    }, pr.fullKey);
     projs++;
   }
   // B6:声明 buff 注册(9000+ 伪 vanilla;键字典序=确定性,与 plan 分配序同源)

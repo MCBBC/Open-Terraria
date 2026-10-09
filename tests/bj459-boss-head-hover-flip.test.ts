@@ -182,8 +182,11 @@ describe('BJ459 ④与 BJ458 描边/缓存零冲突', () => {
     );
     expect(rendererSrc).toMatch(/this\.drawBossMapIcon\(ctx, headScale, mapX, mapY, e\.cx, e\.cy, rot, idx, bimg, flip\);/);
     // 双刀接线在 boss 循环内同块共存（悬停名先落、翻转后画=原版命中在 Draw 前独立算）
+    // ★BJ584 锚刷新（2026-10-09）：mod Boss 地图头批（★二百八十九）把 bimg 行改为
+    //   `modHeadPath ?? \`vanilla/NPC_Head_Boss_${idx}.png\``——锚随盘上现行形态刷新,
+    //   断言语义不变（该失败系并行批所致的纯锚漂移,与 BJ584 史莱姆镜像刀无关）。
     const block = rendererSrc.slice(
-      rendererSrc.indexOf('const bimg = this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`)'),
+      rendererSrc.indexOf('const bimg = this.atlas.ensureVImage(modHeadPath ?? `vanilla/NPC_Head_Boss_${idx}.png`);'),
       rendererSrc.indexOf('this.drawBossMapIcon(ctx, headScale, mapX, mapY, e.cx, e.cy, rot, idx, bimg, flip);'),
     );
     expect(block).toContain('bossHeadHoverHit(mouse,');

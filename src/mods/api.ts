@@ -20,7 +20,7 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse,
+  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, registerModHoldItem,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -91,6 +91,17 @@ export interface ModContext {
   projIdOf(key: string): number;
   /** ★三百三十三刀:使用条件门(fn 返回 false=本拍禁用;C# CanUseItem 同位) */
   canUse(key: string, fn: (ctx: unknown) => boolean): void;
+  /** ★三百三十五刀:配饰效果钩(装备期每 tick 调;C# UpdateAccessory 同位;
+   *  fn(player, game)) */
+  accEffect(key: string, fn: (player: unknown, game: unknown) => void): void;
+  /** ★三百三十九刀:手持效果钩(手持该物品每 tick 调;C# HoldItem 同位) */
+  holdItem(key: string, fn: (player: unknown, game: unknown) => void): void;
+  /** ★三百四十四刀:给玩家施加本 mod buff(npcAi/holdItem 闭包内用;
+   *  key=sw.buff 注册键;秒数,每帧重调=max 合并即持续) */
+  playerBuff(key: string, seconds: number, player: unknown): void;
+  /** ★三百六十四刀:mod buff 免疫(装备期每帧调=immuneMod 每帧 add;
+   *  key=sw.buff 注册键) */
+  playerImmune(key: string, player: unknown): void;
   /** mod NPC 分配 id(同上) */
   npcIdOf(key: string): number;
   /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
@@ -221,6 +232,21 @@ export function createModContext(
     projIdOf(key) { return idOf('projs' as 'items', key); },
     canUse(key, fn) {
       registerModCanUse(idOf('items', key), fn as Parameters<typeof registerModCanUse>[1]);
+    },
+    accEffect(key, fn) {
+      registerModAccEffect(idOf('items', key), fn as Parameters<typeof registerModAccEffect>[1]);
+    },
+    holdItem(key, fn) {
+      registerModHoldItem(idOf('items', key), fn as Parameters<typeof registerModHoldItem>[1]);
+    },
+    playerBuff(key, seconds, player) {
+      (player as { buffs: { apply(t: number, s: number): void } }).buffs.apply(
+        modBuffTypeOf(modId, key), seconds);
+    },
+    playerImmune(key, player) {
+      const bt = modBuffTypeOf(modId, key);
+      const im = (player as { buffs?: { immuneMod?: Set<number> } }).buffs?.immuneMod;
+      if (im) im.add(bt);
     },
     npcIdOf(key) { return idOf('npcs', key); },
     // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)

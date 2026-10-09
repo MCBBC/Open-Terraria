@@ -3,6 +3,7 @@
 // （NPC.cs:69152+）：地面站定=帧0；腾空=帧1；行走帧 2..frames-extra-1 循环
 // （frameCounter += |vx|*2+1 每 tick，>6 推进一帧，越界回卷帧2）
 import { Entity } from './Entity';
+import { Tombstone } from './Tombstone';   // ★BJ562（2026-10-09）城镇死亡墓碑弹面
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
@@ -52,7 +53,7 @@ import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
 import { spawnWOF } from './bossAI_wof';   // ★BJ574：checkDead case 22 向导浸浆死召唤链
-import { newLovestruckHeart } from './GorePiece';   // ★清偿刀 F：Lovestruck 头爱心 331 单源（城镇/敌怪共用,GorePiece.ts 尾）
+import { newLovestruckHeart, GorePiece } from './GorePiece';   // ★清偿刀 F：Lovestruck 头爱心 331 单源（城镇/敌怪共用,GorePiece.ts 尾）;★BJ592：case 11 困盹臭气团 580-582 发射面
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from '../fx/CombatTextColors';
@@ -1579,7 +1580,16 @@ export class TownNPC extends Entity {
       //   演出（音效 :78990/NPCLoot :78999/active=false :79029）之前——原版位次
       //   = NPCLuck(:78944)→文本(:78949-78956)→墓碑(:78969)→广播(:78973)→
       //   裁缝巫毒 Skeletron(:78975)→锁复位(:78986)→死亡音(:78990)
-      this.broadcastDeathMessage(game);
+      // ★BJ562（2026-10-09）BJ561 登记债清偿：NPCLuck + 城镇死亡墓碑按原版位次
+      //   补入（Luck→文本→墓碑→广播;文本单源 deathNetworkText 供碑文/公告共用）。
+      //   :78942 门 `townNPC && type != 37 && type != 453` 罩全支——老人/骷髅商
+      //   死亡无运算/无碑/无公告（broadcastDeathMessage 内部门 BJ561 既有,双保险）。
+      if (this.vanillaId !== 37 && this.vanillaId !== 453) {
+        this.npcLuckOnDeath(game);
+        const deathText = this.deathNetworkText();
+        this.dropTombstoneTownNpc(game, deathText);
+        this.broadcastDeathMessage(game, deathText);
+      }
       // 死亡复位优先型锁（NPC.cs:78986-78989 `townNPC && netMode!=1 && homeless &&
       // WorldGen.prioritizedTownNPCType == type → =0`）——homeless 死者锁住的类型
       // 若不复位会滞留至下一轮首（UpdatePrioritizedTownNPC 只在有 homeless 者时改写,
@@ -1634,19 +1644,61 @@ export class TownNPC extends Entity {
    *  · 广播单口 = game.chatBroadcast（ChatHelper.BroadcastChatMessage 等价面：
    *    本地消息列 + 联机 channel2 系统行中继——同玩家死亡 Game.ts:51029/
    *    沙滩球踢次 BallProjs.ts:249 形）。
-   *  · 墓碑（DropTombstoneTownNPC :79082-79108,全员 hardcore 才落 :78957-78972）
-   *    与 NPCLuck（:78944 瓢虫运消算）未接=登记债。 */
-  private broadcastDeathMessage(game: GameHooks): void {
+   *  · ★BJ562（2026-10-09）债面已清偿：墓碑（dropTombstoneTownNpc——
+   *    DropTombstoneTownNPC :79082-79108,全员 hardcore 才落 :78957-78972）与
+   *    NPCLuck（npcLuckOnDeath——:78944 瓢虫运消算,Luck.ts LuckState.npcLuck）
+   *    已按原版位次补入。 */
+  private broadcastDeathMessage(game: GameHooks, deathText?: string): void {
     if (this.vanillaId === 37 || this.vanillaId === 453) return;      // :78942 排除
-    const petStyle = this.vanillaId === 369 || this.vanillaId === 663
-      || NPC_IS_TOWN_PET.has(this.vanillaId);                          // :78951-78955
+    game.chatBroadcast?.(
+      deathText ?? this.deathNetworkText(),
+      255, 25, 25);                                                    // ChatColors.Death
+  }
+
+  /** ★BJ562 死亡文本单源（:78949-78956 NetworkText.FromKey(Lang.misc[num6].Key,
+   *  fullNetName) 等价串）——公告与墓碑碑文（miscText）共用：原版两处同一
+   *  NetworkText（:78956 构造 → :78971 传 DropTombstoneTownNPC → :79107
+   *  miscText=deathText.ToString();碑文无日期,与玩家面 :39455-39461 分野）。 */
+  private deathNetworkText(): string {
     const typeName = Lang.npcName(this.vanillaId) ?? this.npcKey;
     const fullName = this.givenName
       ? Lang.text('Game.NPCTitle', this.givenName, typeName)           // :7382
       : typeName;                                                      // :7380
-    game.chatBroadcast?.(
-      Lang.text(petStyle ? 'LegacyMisc.36' : 'LegacyMisc.19', fullName),
-      255, 25, 25);                                                    // ChatColors.Death
+    return Lang.text(this.petStyleDeath() ? 'LegacyMisc.36' : 'LegacyMisc.19', fullName);
+  }
+
+  /** num6=36 宠物便支谓词（:78951-78955）——同支把墓碑旗 flag 置 false（宠物不落碑） */
+  private petStyleDeath(): boolean {
+    return this.vanillaId === 369 || this.vanillaId === 663
+      || NPC_IS_TOWN_PET.has(this.vanillaId);
+  }
+
+  /** ★BJ562（2026-10-09）NPCLuck（NPC.cs:78944-78946 `if (Main.netMode != 2)` 门
+   *  ——单机/客户端态恒走,专写本地玩家）→ LuckState.npcLuck（Luck.ts 面 1:1：
+   *  向导 22 延瓢虫好运 43200/3=14400t、其余城镇死亡缓瓢虫厄运 -10800/3=-3600t、
+   *  护士 54 排除）。player.active 本仓单槽恒真（原版 Main.player[myPlayer].active）。 */
+  private npcLuckOnDeath(game: GameHooks): void {
+    game.player.luckState?.npcLuck(this.vanillaId, true, game.player.dead);
+  }
+
+  /** ★BJ562（2026-10-09）城镇 NPC 死亡墓碑（NPC.checkDead townNPC 支 :78957-78972
+   *  触发门 + DropTombstoneTownNPC :79082-79108 弹面）：
+   *  · 宠物便支（petStyleDeath,:78951-78955）flag=false 不落;
+   *  · 全员 hardcore 门（:78960-78970）：遍历存活玩家,任一 active 玩家
+   *    difficulty != 2 → 旗假（死亡玩家仍 active 仍计——原版循环无 dead 门）;
+   *    本仓玩家集 = candidatePlayers（本地+联机代理,M11 槽序）缺省单机单人;
+   *    空活人集旗保持真=落（原版同相,循环不中不翻旗）;
+   *  · 弹面 = Tombstone 城镇构造支（商人 17/税收官 441 恒金 527+rand(5),
+   *    余 43(1/6) 或 200+roll;damage 0 纯物理;碑文=死亡文本无日期）,
+   *    出射口 spawnTownNpcTombstone（props 桶,玩家死亡墓碑同桶）。 */
+  private dropTombstoneTownNpc(game: GameHooks, deathText: string): void {
+    if (this.petStyleDeath()) return;                       // :78951-78955 flag=false
+    const players = game.candidatePlayers?.() ?? [game.player];
+    for (const pl of players) {
+      if (pl.appearance?.difficulty !== 2) return;          // :78963-78969 任一非 hardcore
+    }
+    game.spawnTownNpcTombstone?.(
+      new Tombstone(this.cx, this.cy, 0, deathText, 0, false, this.vanillaId));
   }
 
   /** 城镇 NPC 死亡掉落（NPC.checkDead → NPCLoot_DropItems :79653——vanilla-
@@ -2003,6 +2055,74 @@ export class TownNPC extends Entity {
     }
   }
 
+  /** ★BJ592 件2（2026-10-09）：FindFrame case 589（NPC.cs:71804-71892）被绑高尔夫
+   *  球手自主练习挥杆链 1:1。原版 589=独立被缚型（aiStyle 0/18×34/13 帧表）,本仓
+   *  以 bound TownNPC（vanillaId 588/体 18×40）承载——尘锚式取「足上 6px」相对
+   *  语义（y+h−6;原版 height−6=34−6）。帧行链：row0 闲置 fc>Next(90,450) →
+   *  row1-3 蓄力 fc>4（推进落 row≥4 且 Next(3)!=0 = 2/3 概率回弹 row0）→
+   *  row4-6 fc>4 → row7 fc>Next(30,90) → row8-10 fc>3 快进（推进落 row【恰 9】拍
+   *  挥杆击地:尘 32×4（Sand,NewDust(vector,1,1,32) 缺省速=内部随机化 ±2.0,锚=
+   *  position.X+(dir==1?+30:−22), position.Y+height−6, :71839-71855）→ row11
+   *  fc>Next(40,140) → row12 fc>6 → 越帧表回卷 0。腾空（vy≠0）帧 0+计数清零
+   *  （:71808-71814;num27 先读后清=当拍仍按旧行走链,计数已归零故不推进——原版
+   *  同相）。阈值 Next(40,140)/Next(30,90)/Next(90,450) 每 tick 现掷（原版
+   *  Main.rand.Next 在比较式实参位逐拍求值）。 */
+  private boundGolferFindFrame(game?: GameHooks): void {
+    const num27 = this.frame;                                  // :71805 num27 = frame.Y/num
+    this.frameT++;                                             // :71806 frameCounter++
+    if (this.vy !== 0) {                                       // :71808-71814 腾空
+      this.frame = 0;
+      this.frameT = 0;
+    }
+    const fc = this.frameT;
+    const roll = (a: number, b: number) => a + Math.floor(this.rng() * (b - a));
+    if (num27 >= 12) {
+      if (fc > 6) {                                            // :71815-71824
+        this.frameT = 0;
+        this.frame++;
+        if (this.frame >= 13) this.frame = 0;                  // 越帧表（npcFrameCount[589]=13）
+      }
+    } else if (num27 >= 11) {
+      if (fc > roll(40, 140)) {                                // :71826-71831
+        this.frameT = 0;
+        this.frame++;
+      }
+    } else if (num27 >= 8) {
+      if (!(fc > 3)) return;                                   // :71833-71834 break
+      this.frameT = 0;
+      this.frame++;
+      if (this.frame === 9) {                                  // :71839-71855 帧 9 到位
+        const vd = game?.vanillaDust;
+        if (vd) {
+          const vx = this.x + (this.facing === 1 ? 30 : -22);
+          const vy = this.y + this.h - 6;
+          for (let j = 0; j < 4; j++) {
+            vd.spawn(vx, vy, 1, 1, 32);                        // NewDust(vector,1,1,32) 缺省速/α/scale
+          }
+        }
+      }
+    } else if (num27 >= 7) {
+      if (fc > roll(30, 90)) {                                 // :71856-71861
+        this.frameT = 0;
+        this.frame++;
+      }
+    } else if (num27 >= 4) {
+      if (fc > 4) {                                            // :71867-71874
+        this.frameT = 0;
+        this.frame++;
+      }
+    } else if (num27 >= 1) {
+      if (fc > 4) {                                            // :71875-71886
+        this.frameT = 0;
+        this.frame++;
+        if (this.frame >= 4 && this.rng() >= 1 / 3) this.frame = 0;   // Next(3)!=0
+      }
+    } else if (fc > roll(90, 450)) {                           // :71887-71891
+      this.frameT = 0;
+      this.frame++;
+    }
+  }
+
   /** 685 BoundTownSlimeOld 专属：AI_001_Slimes 跳跃机（1457 NPC.cs;BJ122 2026-09-18）。
    *  原版本体即 aiStyle 1 敌怪型（:17641-17655 aiStyle=1/friendly/非 townNPC）——
    *  本仓 685 生成=spawnBound(685)→bound TownNPC 承载,站桩系 BJ122 定谳偏差。
@@ -2265,6 +2385,10 @@ export class TownNPC extends Entity {
       // bound 照跑（[MAJOR-F4] 的完整承接:此前 bound 永远 wet=false,被缚者入水
       // 无浮力/溅落/岩浆伤害;685 AI_001 wet 段 :62080 也读本位）
       updateNpcLiquid(this, game, world.store);
+      // ★BJ592 件2：FindFrame case 589（NPC.cs:71804-71892）被绑高尔夫球手自主
+      // 练习挥杆链 1:1（原版 13 帧表,恒帧 0=缺链；Renderer boundNpcSheet 589 支
+      // 已接真帧行）——含帧 9 到位拍挥杆击地尘 32×4 落尘面（:71839-71855）
+      if (this.npcKey === 'golfer') this.boundGolferFindFrame(game);
       // CheckActive 四步（:78698-78810,UpdateNPC :91629 调）——被缚族非 townNPC
       // 且不在 DoesntDespawnToInactivity 名单（:78612-78678）→ 照走:出 activeRange
       // 盒即消/屏内续 timeLeft=750;归零强翻假 → noSpawnCycle+active=false。
@@ -3359,7 +3483,11 @@ export class TownNPC extends Entity {
       return;
     }
     if (this.sitting) {
-      this.frame = base - 3;                                // :69638-69644（637 例外不在本仓）
+      // ai[0]==5f（:69751-69758）：坐姿 = num60−3；637 猫特例 = 绝对行 19。
+      // ★BJ592 补：原版坐椅扫描排除面只有 638/656/史莱姆族（FindGoodRestingSpot
+      // :53363 `type == 638 || type == 656 || IsTownSlime || ai[0]==5`）——猫【可坐】
+      // 且坐姿走专帧（本仓 NO_SIT_NPC_IDS 同式不含 637 → 旧码落 base−3=25 行=错姿态）。
+      this.frame = this.vanillaId === 637 ? 19 : base - 3;
       this.frameT = 0;
       return;
     }
@@ -3529,22 +3657,43 @@ export class TownNPC extends Entity {
       case 11: {
         // 海盗闲坐拨弄（FindFrame ai[0]==11 :69709-69750）：帧 0 →(≥20t)→
         // num60−1 困盹帧 + NewBubble(89, self, 90)；困盹满 50t 的那一拍从背后撒
-        // dust 216 ×(3+Next(4))（vel=(−dir,1)、原式再各 ÷2）+ 1/30 gore 580-582
-        // （gore 无 API 不接，登记）；≥100t 且 Next(20)==0 回帧 0。
+        // dust 216 ×(3+Next(4))（:69719-69723 NewDust(…,−dir,1) 后整体 velocity /= 2
+        // ——★BJ592 拨正：÷2 施于【spawn 结果】（含 NewDust 内随机抖动 ±2.0），
+        // 旧码预折半 speed 形参=抖动未折半（幅度 2×发散））+ 1/30 gore 580-582
+        // （:69724-69731 NewGore(Center+UnitX*(-dir)*8, Zero, Next(580,583))，
+        // Spawn_Digestion 同款臭气团三变体（ParticleOrchestrator.cs:2350 同式）——
+        // NewGore 内随机化（vy−=Next(10,31)*0.1/vx+=Next(-20,21)*0.1, Gore.cs:1347-48）
+        // 后 /=2、Y=|Y|（转下坠）、X=−|X|×dir（背向漂）；Gore.cs:770-774 特例
+        // rotation=0+vx×0.95 在 GorePiece.fixedUpdate 承接）；≥100t 且 Next(20)==0
+        // 回帧 0。★BJ592 补 :69745-69749 恢复支（帧既非 0 又非困盹帧 → 拍回 0——
+        // 社交态入场残行走帧原直坠 t≥20 分支冒泡,原版先归位帧 0）。
         // 转身/退出口与发呆共段（socialUpdate A 区 {2,11} 族）
         if (this.frame === base - 1) {
-          if (t === 50 && game?.vanillaDust) {
-            const n67 = 3 + Math.floor(this.rng() * 4);            // Next(4)
-            for (let i = 0; i < n67; i++) {
-              const d = game.vanillaDust.spawn(
-                this.cx - this.facing * 8 - 5, this.cy + 3, 3, 6, 216,
-                -this.facing / 2, 0.5, 0, null, 0.8);
-              if (d) d.scale = 0.8;
+          if (t === 50) {
+            const n67 = 3 + Math.floor(this.rng() * 4);              // Next(4)（无条件耗骰）
+            if (game?.vanillaDust) {
+              for (let i = 0; i < n67; i++) {
+                const d = game.vanillaDust.spawn(
+                  this.cx - this.facing * 8 - 5, this.cy + 3, 3, 6, 216,
+                  -this.facing, 1, 0, null, 0.8);
+                if (d) { d.vx /= 2; d.vy /= 2; d.scale = 0.8; }
+              }
+            }
+            if (this.rng() < 1 / 30) {                               // Next(30)==0
+              const g = GorePiece.newGore(580 + Math.floor(this.rng() * 3),
+                this.cx - this.facing * 8, this.cy, 0, 0, 1);
+              if (g) {
+                g.vx /= 2; g.vy /= 2;
+                g.vy = Math.abs(g.vy);
+                g.vx = -Math.abs(g.vx) * this.facing;
+              }
             }
           }
           if (t >= 100 && this.rng() < 1 / 20) {                   // Next(20)==0
             this.frame = 0; s.frameT = 0;
           }
+        } else if (this.frame !== 0) {
+          this.frame = 0; s.frameT = 0;                            // :69745-69749 恢复支
         } else if (t >= 20) {
           this.frame = base - 1; s.frameT = 0;
           spawnEmote(this, 89, 90);                                // NewBubble(89,self,90)

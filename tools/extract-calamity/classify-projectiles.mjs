@@ -77,7 +77,7 @@ for (const p of files) {
 
 // 回填面:与我们的声明键对齐
 const matched = [];
-let numGravity = 0, numLifetime = 0, numHoming = 0;
+let numGravity = 0, numLifetime = 0, numHoming = 0, numBoom = 0;
 for (const r of rows) {
   const jp = join(CONTENT, `${r.key}.json`);
   if (!existsSync(jp)) continue;
@@ -101,6 +101,12 @@ for (const r of rows) {
     // ★三百三十刀:homing 数值层——helper HomeInOnNPC(projectile, ignoreTiles,
     //   distanceRequired, homingVelocity, inertia) 实参直提(176 弹 helper 族);
     //   homingVelocity→spec.homing(惯性插值稳态≈h 速度尺度,映射标注)
+    // ★三百四十二刀:boomerang 数值层——vanilla aiStyle 3 字面锚(ai[1]>=30f
+    //  返程门,Projectile.cs AI_003)=returnTicks 30;accel 缺省 0.5(引擎面)
+    if (r.feats.includes('boomerang') && !spec.boomerang && r.aiBody) {
+      spec.boomerang = { returnTicks: 30, accel: 0.5 };
+      numBoom++;
+    }
     if (r.feats.includes('homing') && spec.homing === undefined && r.aiBody) {
       const hm = /(?:CalamityUtils\.)?HomeInOnNPC\(\s*(?:Projectile|projectile|proj)\s*,\s*!?(?:\w+\.)?(?:tileCollide\w*)\s*,\s*([\d.]+)f\s*,\s*([\d.]+)f\s*,\s*([\d.]+)f/.exec(r.aiBody)
         ?? /(?:CalamityUtils\.)?HomeInOnNPC\(\s*(?:Projectile|projectile|proj)\s*,\s*(?:true|false)\s*,\s*([\d.]+)f\s*,\s*([\d.]+)f\s*,\s*([\d.]+)f/.exec(r.aiBody);
@@ -111,7 +117,9 @@ for (const r of rows) {
       }
     }
   }
-  if (WRITE && (spec.profile !== d.profile || spec.gravity !== undefined || spec.lifetime !== undefined)) {
+  if (WRITE && (spec.profile !== d.profile || spec.gravity !== undefined
+    || spec.lifetime !== undefined || spec.boomerang !== undefined || spec.homing !== undefined
+    || spec.homingDist !== undefined)) {
     writeFileSync(jp, JSON.stringify(d, null, 2) + '\n');
   }
 }
@@ -125,7 +133,7 @@ const summary = {
   dist,
   heavyAI: matched.filter((m) => m.aiLines > 120).length,
   lightAI: matched.filter((m) => m.aiLines <= 40).length,
-  numGravity, numLifetime, numHoming,
+  numGravity, numLifetime, numHoming, numBoom,
 };
 writeFileSync(OUT, JSON.stringify({ summary, matched }, null, 1));
 console.log(JSON.stringify(summary, null, 1));

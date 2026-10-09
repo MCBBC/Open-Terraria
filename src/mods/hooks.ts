@@ -27,6 +27,8 @@ export interface ModUseCtx {
   mouseY: number;
   /** 给本地玩家施加本 mod buff(ModContext 装配时注入;未注册键 fail-fast) */
   applyBuff?(key: string, seconds: number): void;
+  /** ★三百四十五刀:右键使用态(C# Player.altFunctionUse;0=左键/2=右键) */
+  altFunctionUse: number;
   /** 返回 true=已消费(updateUse 立即 return;useTime 节奏由 handler 自管,
    *  与 digtoise/无人机原版专支同语义) */
 }
@@ -72,8 +74,41 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
   if (!fn) return true;
   try {
     return fn({ game, player: game.player, item, def, tileX: 0, tileY: 0,
-      mouseX: game.input.mouseX, mouseY: game.input.mouseY });
+      mouseX: game.input.mouseX, mouseY: game.input.mouseY,
+      altFunctionUse: (game.player as unknown as { altFunctionUse?: number }).altFunctionUse ?? 0 });
   } catch { return true; }
+}
+
+/** ★三百三十五刀:mod 配饰效果钩(C# ModItem.UpdateAccessory 同位;Player
+ *  配饰槽 3..9 每帧环内派发——装备期每 tick 调,卸下自然停调) */
+/** 配饰效果累加器（computeEquipStats return 合并;闭包直改） */
+export interface ModAccAccumulator { def?: number; mana?: number; life?: number; moveMult?: number }
+const accEffects = new Map<number, (player: Player, game: unknown, acc: ModAccAccumulator) => void>();
+
+export function registerModAccEffect(vid: number, fn: (player: Player, game: unknown, acc: ModAccAccumulator) => void): void {
+  if (accEffects.has(vid)) throw new Error(`[mod-hooks] accEffect 重复注册: ${vid}`);
+  accEffects.set(vid, fn);
+}
+
+export function runModAccEffect(vid: number, player: Player, game: unknown, acc: ModAccAccumulator): boolean {
+  if (accEffects.size === 0 || vid < MOD_ITEM_STABLE_BASE) return false;
+  const fn = accEffects.get(vid);
+  if (!fn) return false;
+  fn(player, game, acc);
+  return true;
+}
+
+/** ★三百三十九刀:mod 手持效果钩(C# HoldItem 同位;手持该物品每 tick 调) */
+const holdItems = new Map<number, (player: Player, game: unknown) => void>();
+
+export function registerModHoldItem(vid: number, fn: (player: Player, game: unknown) => void): void {
+  if (holdItems.has(vid)) throw new Error(`[mod-hooks] holdItem 重复注册: ${vid}`);
+  holdItems.set(vid, fn);
+}
+
+export function runModHoldItem(vid: number, player: Player, game: unknown): void {
+  if (holdItems.size === 0 || vid < MOD_ITEM_STABLE_BASE) return;
+  holdItems.get(vid)?.(player, game);
 }
 
 const npcAi = new Map<number, (e: Enemy, game: Game, player: Player | null) => void>();
@@ -108,6 +143,14 @@ export interface ModProjSpec {
   boomerang?: { returnTicks: number; accel: number };
   /** 环绕:绕出生点半径 r 角速 w(t) 旋转 */
   orbit?: { radius: number; omega: number };
+  /** ★三百五十一刀:holdout(Calamity Holdout 弹范式:跟随玩家/channel 左键门/
+   *  魔耗节拍;RancorHoldout 同构) */
+  holdout?: {
+    manaRate?: number; manaCost?: number;
+    /** ★三百五十六刀:节拍射击面(每 every tick 自动发射;vel 缺省 8;
+     *  atMouse=true=目标弹在鼠标处生成)——节拍射击族 holdout 免写钩 */
+    shoot?: { proj: string; every: number; vel?: number; atMouse?: boolean };
+  };
   /** 寿命 tick(缺省 3600) */
   lifetime?: number;
   /** 穿透次数(缺省 1;≤0=无限穿透) */
@@ -140,13 +183,20 @@ export function allocateModProjId(): number {
   return MOD_PROJ_ID_BASE + projRegs.length;
 }
 
-export function registerModProj(projId: number, modId: string, spec: ModProjSpec): void {
+export function registerModProj(projId: number, modId: string, spec: ModProjSpec, fullKey?: string): void {
   if (!(projId >= MOD_PROJ_ID_BASE)) throw new Error(`[mod-hooks] projId 须 ≥${MOD_PROJ_ID_BASE}: ${projId}`);
   if (projSpecs.has(projId)) throw new Error(`[mod-hooks] projectile 重复注册: ${projId}`);
   if (!spec.texture) throw new Error(`[mod-hooks] projectile 缺 texture: ${projId}`);
   projSpecs.set(projId, spec);
   projRegs.push({ projId, modId, spec });
+  if (fullKey) projKeyIndex.set(fullKey, projId);   // ★三百五十六:键索引(holdout 节拍弹解析)
 }
+
+/** ★三百五十六:mod 弹全键→projId(引擎侧节拍弹生成;未注册 -1) */
+export function modProjIdOfKey(fullKey: string): number {
+  return projKeyIndex.get(fullKey) ?? -1;
+}
+const projKeyIndex = new Map<string, number>();
 
 export function modProjSpecOf(projId: number): ModProjSpec | null {
   if (projSpecs.size === 0 || projId < MOD_PROJ_ID_BASE) return null;
@@ -373,6 +423,7 @@ export function runModItemUse(
   return fn({
     game, player: game.player, item, def, tileX, tileY,
     mouseX: game.input.mouseX, mouseY: game.input.mouseY,
+    altFunctionUse: (game.player as unknown as { altFunctionUse?: number }).altFunctionUse ?? 0,
   });
 }
 
@@ -578,6 +629,8 @@ export function menuThemeSnapshot(): ModMenuThemeSpec | null {
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
   itemCanUse.clear();
+  accEffects.clear();
+  holdItems.clear();
   _resetModMusicForTests();
   modBiomeMusicList.length = 0;
   modFrameMusic = 0;

@@ -149,6 +149,11 @@ export interface GameHooks {
   cutTile(x: number, y: number, vid?: number, extraCutTreeCactus?: boolean): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
+  /** ★BJ562（2026-10-09）城镇 NPC 死亡墓碑出射口（NPC.checkDead townNPC 支
+   *  DropTombstoneTownNPC NPC.cs:78971/:79082-79108 → NewProjectile 桶位）。
+   *  Game 实现 = entities.add(t,'props')（玩家死亡墓碑 handlePlayerDeath 同桶）。
+   *  缺省（测试 mock）= 静默 */
+  spawnTownNpcTombstone?(t: import('./Tombstone').Tombstone): void;
   /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */
   breakTile?(x: number, y: number): void;
   /** ★SW-BJ93 债②（2026-09-16）滚石地形面薄委托：WorldGen.SlopeTile(i, j, 0, false,

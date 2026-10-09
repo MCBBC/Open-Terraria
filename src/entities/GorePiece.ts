@@ -548,6 +548,14 @@ export class GorePiece extends Entity {
       // 默认支（:760-764）：重力 0.2 + 随 vx 翻滚
       this.vy += 0.2;
       this.rotation += this.vx * 0.05;
+      // ★BJ592：580-582 臭气团尾块（Gore.cs:770-774）——滚转清零（覆写上行的
+      // vx 翻滚累加）+ 横速阻尼 ×0.95。城镇 NPC 打盹（NPC.cs:69726）/消化粒子
+      // （ParticleOrchestrator Spawn_Digestion :2350）/马桶弹 AI_153 ToiletPop
+      // :53149 同族发射面；SpecialAI 表无 580-582（GoreID.cs:9 缺省 0）
+      if (t >= 580 && t <= 582) {
+        this.rotation = 0;
+        this.vx *= 0.95;
+      }
     }
 
     // ---- 碰撞/时档尾段（:929-1042）----

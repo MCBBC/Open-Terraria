@@ -7,6 +7,7 @@ import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
 import { sceneMetricDualOverride } from './DungeonDualZones';
 import { musicBoxStyleOf, fountainColorOf, monolithTypeOf, bloodMoonMonolithOf } from './wiring/devices';
+import { Lang } from '../i18n/Lang';
 
 /** vanilla tile sheet id → 本仓库内部 tile id（TILE_DEFS 下标即内部 id；未注册的 sheet 缺席=计数 0） */
 const SHEET_MAP = new Map<number, number>();
@@ -297,6 +298,31 @@ function isValidForOreFinder(internalId: number, fx: number): boolean {
   if (internalId === ORE_FINDER_SHEET227) return fx >= 272 && fx <= 374;
   if (internalId === ORE_FINDER_SHEET129) return fx >= 324;
   return true;
+}
+
+// ★BJ586（2026-09，用户实报「金属探测器把明胶水晶显示为水晶碎块」）：名面 baseOption 维。
+//  原版显示链（Main.cs:47757-47768 DrawInfoAccs accOreFinder 支）：
+//    GetTileBaseOption(BestOrePosition 帧态)（MapHelper.cs:2085）→ 宝箱族清零门
+//    （Main.cs:47762 `baseOption >= 13 || BasicChest || BasicChestFake`，TileID.cs:315/317
+//    覆盖 21/467/441/468）→ GetMapObjectName(TileToLookup(type, baseOption))。
+//  优先级表（ORE_FINDER_PRIORITY_SHEET 36 sheet）∩ GetTileBaseOption 非零分流域仅两处：
+//    · 129 Crystals（MapHelper.cs:2806-2813）：fx>=324 → lookup(129,1) = itemNameCache[4988]
+//      （Gelatin Crystal 明胶水晶，Lang.cs:726）；否则 lookup(129,0) = item 502（水晶碎块）。
+//      ★探测谓词本就只放行 fx>=324（SceneMetrics.cs:912-914）→ 探测器命中的 129 必为明胶水晶。
+//    · 227 DyePlants（MapHelper.cs:2802-2804）：baseOption = fx/34；探测门 fx∈[272,374]
+//      （SceneMetrics.cs:905-908）→ 8..11 → lookup(227,8..11) = itemNameCache[3385..3388]
+//      （StrangePlant1-4 =「奇异植物」，Lang.cs:783-786）；lookup 0..5 = 1107..1112
+//      （小型染料植物各色，仅地图图例域，探测器不可达）。
+//  旧实现消费面 Lang.tileName(sheet) 丢 baseOption 维 → 明胶水晶恒报「水晶碎块」、
+//  大型奇异植物恒报「青绿蘑菇」（227 lookup0 名）。名域 = 官方 ItemName 译名
+//  （Lang.itemName = 原版 itemNameCache 域，与 GetMapObjectName 同源）。
+export function oreFinderDisplayName(sheet: number, fx: number): string | null {
+  if (sheet === 129) return Lang.itemName(fx >= 324 ? 4988 : 502);
+  if (sheet === 227) {
+    const opt = Math.min(11, Math.max(0, Math.floor(fx / 34)));
+    return Lang.itemName(opt >= 8 ? 3385 + (opt - 8) : 1107 + opt);
+  }
+  return Lang.tileName(sheet);
 }
 
 const countSet = (counts: Map<number, number>, set: ReadonlySet<number>): number => {

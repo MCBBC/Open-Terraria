@@ -228,6 +228,32 @@ export class TileStore {
     return this.half[i] === 0 && this.slope[i] === 0;
   }
 
+  /** SolidTile2∩平台九件套单源（Main.cs：19 :8031-8032 / 239 :9797-9798 /
+   *  380 :9799-9800 / 427 :10118-10119 / 435-439 循环 :10126-10136——整批
+   *  tileSolid=true∧tileSolidTop=true;isSolid 的 SOLID_LUT=defs.solid 把它们
+   *  排除在外,本表补差集）。消费面=isSolid2（WorldGen.SolidTile2 1:1）。 */
+  static readonly PLATFORM_SOLID2_SHEETS: ReadonlySet<number> = new Set([
+    19, 239, 380, 427, 435, 436, 437, 438, 439,
+  ]);
+
+  /** ★BJ-C9-SP（2026-10-09）WorldGen.SolidTile2（WorldGen.cs:70665-70680）1:1：
+   *  active ∧ **tileSolid【无 !tileSolidTop 排除——Main.cs:8032 `tileSolid[19]=true`,
+   *  平台九件套整批计入,与 SolidTile(:70642 检 `!tileSolidTop`) 的唯一差集】**
+   *  ∧ slope()==0 ∧ !halfBrick() ∧ !inActive()。消费面=PickSentryLandingSpot
+   *  （Player.cs:50057 三列扫——原版哨杖落点平台即止=哨兵可放平台,旧 isSolid
+   *  窄谓词漏平台=蜘蛛女王杖 2366 哨兵落不到平台实报根因）;其余 SolidTile2
+   *  域（家具支撑 :45602 等）各自锚定勿盲换。 */
+  isSolid2(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.idx(x, y);
+    if (this.flags[i] === 0) return false;                    // active()
+    if (this.wire[i] & TileStore.WIRE_ACTUATED) return false; // !inActive()
+    if (this.slope[i] !== 0 || this.half[i] !== 0) return false;  // slope==0 ∧ !halfBrick
+    if (TileStore.SOLID_LUT[this.type[i]] === 1) return true; // tileSolid∧!tileSolidTop 族
+    return TileStore.PLATFORM_SOLID2_SHEETS.has(
+      TILE_DEFS[this.type[i]]?.vanilla?.sheet ?? -1);         // 平台九件套补差集
+  }
+
   /** 实心 LUT(内部类型 id → 1/0;与 TILE_DEFS 同长,模块加载时构建一次) */
   static readonly SOLID_LUT = (() => {
     const lut = new Uint8Array(TILE_DEFS.length);

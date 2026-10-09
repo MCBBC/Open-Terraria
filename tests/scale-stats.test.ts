@@ -198,25 +198,29 @@ describe('克苏鲁之眼 type 4（Boss 不豁免，NPC.cs:18106-18447）', () =
 describe('ExpertHardmode 交叉（NPC.cs:18448-18497）', () => {
   const hm = { ...CLASSIC_SCALE_WORLD, difficulty: GDL.EXPERT, hardMode: true };
 
-  it('僵尸（强度水位 14+6+11=31 < 80）：先拉水位再乘难度 → hp 254 / damage 64 / defense 15', () => {
-    // 水位：num3=80/31=2.5806452 → damage=(int)(14×num3×0.9)=32、defense=(int)(6×num3)=15、
-    //       lifeMax=(int)((45×num3)×1.1)=127、value=(int)((60×num3)×0.8)=123
-    // 再 ByDifficulty：hp=(int)(127×2)=254、damage=(int)(32×2)=64、value=(int)(123×2.5)=307
+  it('僵尸（强度水位 14+6+11=31 < 80）：先拉水位再乘难度 → hp 198 / damage 50 / defense 12', () => {
+    // ★BJ585（2026-10-09）金标重产：原版 num3=num2/num 为 C# int 整数除（NPC.cs:18584）——
+    //   floor(80/31)=2（旧浮点商 2.5806452 系本仓病灶,已修）
+    // 水位：num3=2 → damage=(int)(14×2×0.9)=25、defense=(int)(6×2)=12、
+    //       lifeMax=(int)((45×2)×1.1)=99、value=(int)((60×2)×0.8)=96
+    // 再 ByDifficulty：hp=(int)(99×2)=198、damage=(int)(25×2)=50、value=(int)(96×2.5)=240
     const s = stat(3, { lifeMax: 45, damage: 14, defense: 6, knockBackResist: 0.5, value: 60 });
     scaleStats(s, hm);
-    expect(s.lifeMax).toBe(254);
-    expect(s.damage).toBe(64);
-    expect(s.defense).toBe(15);
-    expect(s.value).toBe(307);
+    expect(s.lifeMax).toBe(198);
+    expect(s.damage).toBe(50);
+    expect(s.defense).toBe(12);
+    expect(s.value).toBe(240);
   });
-  it('downedPlantBoss 阈值 80→100（:18481-18483）：hp 318 / damage 80 / defense 19', () => {
-    // num3=100/31=3.2258065 → damage=(int)(14×num3×0.9)=40、defense=(int)(6×num3)=19、
-    // lifeMax=(int)((45×num3)×1.1)=159 → ×2 → hp 318、damage 80
+  it('downedPlantBoss 阈值 80→100（:18481-18483）：hp 296 / damage 74 / defense 18', () => {
+    // ★BJ585 金标重产：floor(100/31)=3（旧浮点商 3.2258065）
+    // 水位：num3=3 → damage=(int)(14×3×0.9)=37、defense=(int)(6×3)=18、
+    //       lifeMax=(int)((45×3)×1.1)=148 → ×2 → hp 296、damage 74、value=(int)(144×2.5)=360
     const s = stat(3, { lifeMax: 45, damage: 14, defense: 6, knockBackResist: 0.5, value: 60 });
     scaleStats(s, { ...hm, downedPlantBoss: true });
-    expect(s.lifeMax).toBe(318);
-    expect(s.damage).toBe(80);
-    expect(s.defense).toBe(19);
+    expect(s.lifeMax).toBe(296);
+    expect(s.damage).toBe(74);
+    expect(s.defense).toBe(18);
+    expect(s.value).toBe(360);
   });
   it('Boss 与 ≥1000 血怪豁免水位增强（:18469-18474）：EoC 专家困难=纯专家 3640', () => {
     worldOf(1, { hardMode: true });
@@ -233,11 +237,12 @@ describe('ExpertHardmode 交叉（NPC.cs:18448-18497）', () => {
     expect(s.defense).toBe(16);
   });
   it('ProjectNPC 豁免水位段的防/血/钱（:18487-18492 只乘 damage）：25 号弹体', () => {
-    // 水位段：damage=(int)(30×(80/30)×0.9)=72，defense/lifeMax/value 不动（lifeMax 仍 1）；
-    // ByDifficulty：弹体不缩 life/value → damage=(int)(72×2)=144，lifeMax 不落 6 下限
+    // ★BJ585 金标重产：floor(80/30)=2（旧浮点商 80/30=2.6666667）
+    // 水位段：damage=(int)(30×2×0.9)=54，defense/lifeMax/value 不动（lifeMax 仍 1）；
+    // ByDifficulty：弹体不缩 life/value → damage=(int)(54×2)=108，lifeMax 不落 6 下限
     const s = stat(25, { lifeMax: 1, damage: 30, defense: 0, knockBackResist: 0 });
     scaleStats(s, hm);
-    expect(s.damage).toBe(144);
+    expect(s.damage).toBe(108);
     expect(s.lifeMax).toBe(1);     // ProjectileNPC → :18096 下限 6 也跳过
     expect(s.defense).toBe(0);
   });

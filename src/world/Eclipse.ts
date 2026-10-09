@@ -6,13 +6,13 @@
 // - stopEvents 门槛（黎明整段压掉）  Main.cs:64895-64898
 // - 入夜清除 + 成就 3（挺过日食）    Main.cs:64721-64725（UpdateTime_StartNight）
 // - 日耀碑牌 2767 使用/可用性门      Player.cs:43308-43328（使用体）/ 51431-51434（可用性门）
-// - 专属怪出怪表（else-if 全表）     NPC.cs:3459-3521（SpawnAnNPC 内，先于蘑菇地/天空怪段）
-// - 出怪段门（地表 && 白天 && 日食）  NPC.cs:3459
+// - 专属怪出怪表（else-if 全表）     NPC.cs:3552-3614（SpawnAnNPC 内，先于蘑菇地/天空怪段；BJ591 重锚）
+// - 出怪段门（地表 && 白天 && 日食）  NPC.cs:3552-3554
 // - 专属掉落注册                    ItemDropDatabase.cs:185-221（RegisterEclipse）
 // - 存档（世界头 bloodMoon 后一位）   WorldFile.cs:1277-1278（写）/ 2070-2072（读）
 // - BGM Eclipse 27                   MusicID.cs:66；选曲 Music.ts:158-159（相机在地表半屏带内）
 //
-// 出怪表执行在 VanillaSpawner.pickAnNPC（日食段，行内注释对照 NPC.cs:3459-3521）；
+// 出怪表执行在 VanillaSpawner.pickAnNPC（日食段，行内注释对照 NPC.cs:3552-3614）；
 // 本模块只做触发/持续/清除/门判定 + 表导出（测试 oracle 与文档对照）。
 import type { World } from './World';
 import { Lang } from '../i18n/Lang';
@@ -42,7 +42,7 @@ export function downedPlantera(w: World): boolean {
   return !!w.flags['downed_262'];
 }
 
-/** 三机械全杀（NPC.cs:3461-3465 flag14：downedMechBoss1 && 2 && 3 = 134/125|126/127） */
+/** 三机械全杀（NPC.cs:3554-3558 flag14：downedMechBoss1 && 2 && 3 = 134/125|126/127） */
 export function downedAllMechs(w: World): boolean {
   return !!(w.flags['downed_134'] && (w.flags['downed_125'] || w.flags['downed_126'])
     && w.flags['downed_127']);
@@ -112,7 +112,7 @@ export function endEclipseAtDusk(w: World, host: EclipseHost): boolean {
   return true;
 }
 
-/** 出怪表档门（NPC.cs:3461-3465 flag14 / downedPlantBoss :3466 等） */
+/** 出怪表档门（NPC.cs:3554-3558 flag14 / downedPlantBoss :3559 等；BJ591 随段重锚） */
 export type EclipseSpawnGate = 'none' | 'plantera' | 'allMech';
 
 export interface EclipseSpawnEntry {
@@ -129,25 +129,26 @@ export interface EclipseSpawnEntry {
 }
 
 /**
- * 日食专属出怪表（NPC.cs:3459-3521，else-if 链 1:1）。
- * 段门（:3459）：spawnTileY <= worldSurface（remix 深层支省略）&& dayTime && eclipse。
+ * 日食专属出怪表（NPC.cs:3552-3614，else-if 链 1:1；★BJ591 行号勘误——旧注
+ * 3459-3521 系 1456 代际锚,1457 全段 +93 漂移,逐条目 line 字段同步重锚）。
+ * 段门（:3552-3554）：spawnTileY <= worldSurface（remix 深层支省略）&& dayTime && eclipse。
  * 执行点 VanillaSpawner.pickAnNPC 日食段；本表为权威对照/测试 oracle。
  */
 export const ECLIPSE_SPAWN_TABLE: readonly EclipseSpawnEntry[] = [
-  { id: 477, denom: 80, gate: 'plantera', cap: 1, line: [3466, 3469] },   // 飞蛾魔 Mothron（唯一）
-  { id: 251, denom: 50, gate: 'none', cap: 1, line: [3470, 3473] },       // 独眼怪 Eyezor（唯一）
-  { id: 466, denom: 5, gate: 'plantera', cap: 1, line: [3474, 3477] },    // 精神病人 Psycho（唯一）
-  { id: 463, denom: 20, gate: 'plantera', cap: 1, line: [3478, 3481] },   // 钉头 Nailhead（唯一）
-  { id: 467, denom: 20, gate: 'plantera', cap: 2, line: [3482, 3485] },   // 致命球 Deadly Sphere（≤2）
-  { id: 159, denom: 15, gate: 'none', cap: null, line: [3486, 3489] },    // 吸血鬼 Vampire
-  { id: 253, denom: 13, gate: 'allMech', cap: null, line: [3490, 3493] }, // 死神 Reaper（三机械全杀）
-  { id: 469, denom: 8, gate: 'none', cap: null, line: [3494, 3497] },     // 被附身者 The Possessed
-  { id: 468, denom: 7, gate: 'plantera', cap: null, line: [3498, 3501] }, // 蝇博士 Dr. Man Fly
-  { id: 460, denom: 5, gate: 'plantera', cap: null, line: [3502, 3505] }, // 屠夫 Butcher
-  { id: 162, denom: 4, gate: 'none', cap: null, line: [3506, 3509] },     // 科学怪人 Frankenstein
-  { id: 461, denom: 3, gate: 'none', cap: null, line: [3510, 3513] },     // 深海怪形 Creature from the Deep
-  { id: 462, denom: 2, gate: 'none', cap: null, line: [3514, 3517] },     // 弗里茨 Fritz
-  { id: 166, denom: 1, gate: 'none', cap: null, line: [3518, 3521] },     // 沼泽怪 Swamp Thing（兜底）
+  { id: 477, denom: 80, gate: 'plantera', cap: 1, line: [3559, 3562] },   // 飞蛾魔 Mothron（唯一）
+  { id: 251, denom: 50, gate: 'none', cap: 1, line: [3563, 3566] },       // 独眼怪 Eyezor（唯一）
+  { id: 466, denom: 5, gate: 'plantera', cap: 1, line: [3567, 3570] },    // 精神病人 Psycho（唯一）
+  { id: 463, denom: 20, gate: 'plantera', cap: 1, line: [3571, 3574] },   // 钉头 Nailhead（唯一）
+  { id: 467, denom: 20, gate: 'plantera', cap: 2, line: [3575, 3578] },   // 致命球 Deadly Sphere（≤2）
+  { id: 159, denom: 15, gate: 'none', cap: null, line: [3579, 3582] },    // 吸血鬼 Vampire
+  { id: 253, denom: 13, gate: 'allMech', cap: null, line: [3583, 3586] }, // 死神 Reaper（三机械全杀）
+  { id: 469, denom: 8, gate: 'none', cap: null, line: [3587, 3590] },     // 被附身者 The Possessed
+  { id: 468, denom: 7, gate: 'plantera', cap: null, line: [3591, 3594] }, // 蝇博士 Dr. Man Fly
+  { id: 460, denom: 5, gate: 'plantera', cap: null, line: [3595, 3598] }, // 屠夫 Butcher
+  { id: 162, denom: 4, gate: 'none', cap: null, line: [3599, 3602] },     // 科学怪人 Frankenstein
+  { id: 461, denom: 3, gate: 'none', cap: null, line: [3603, 3606] },     // 深海怪形 Creature from the Deep
+  { id: 462, denom: 2, gate: 'none', cap: null, line: [3607, 3610] },     // 弗里茨 Fritz
+  { id: 166, denom: 1, gate: 'none', cap: null, line: [3611, 3614] },     // 沼泽怪 Swamp Thing（兜底）
 ];
 
 /**

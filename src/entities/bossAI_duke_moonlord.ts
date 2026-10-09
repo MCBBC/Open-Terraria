@@ -121,14 +121,18 @@ const headOf = (e: Enemy): HeadX => {
   return x;
 };
 
-/** 核心帧引擎(FindFrame case 398,NPC.cs:72599-72626 的 frameCounter 侧写):
- *  fc 每睁核 tick +1,≥30 回卷到 6(帧 0 仅首程出现,此后 1-4 循环);
- *  burst = 睁核瞬间(frame.Y 自 0 离开)的一次性 gore 619-622 + 尘 209×50 哨兵 */
-interface CoreX { fc: number; burst: boolean }
+/** 核心帧引擎(FindFrame case 398,1457 NPC.cs:72712-72740 的 frameCounter/frame.Y
+ *  侧写):fc 每睁核 tick +1,≥30 回卷到 6(帧号=fc%30/6,首程 fc∈{1..5} 帧号全 0,
+ *  此后 1-4 循环)。★BJ591 定谳:原版 burst 门=「上一拍算出的 frame.Y==0」而非
+ *  一次性——首程连爆 6 拍(睁核首拍吃 ≤0 期遗留 0 + fc∈{1..5} 五拍)+6×(4 gore
+ *  619-622 + 尘 209×50);fc≥6 后帧号恒 ≥1 不再爆;ai0 回 ≤0 期(:72714-72717)每拍
+ *  把 frame.Y 清 0 而 fc 不清 → 再睁核首拍恒再爆一拍(远距瞬移归位 ai0=-2 支可达)。
+ *  frameY0 ≙ 原版 frame.Y==0 态(初值 true ≙ Rectangle 缺省 0) */
+interface CoreX { fc: number; frameY0: boolean }
 const coreX = new WeakMap<Enemy, CoreX>();
 const coreOf = (e: Enemy): CoreX => {
   let x = coreX.get(e);
-  if (!x) { x = { fc: 0, burst: false }; coreX.set(e, x); }
+  if (!x) { x = { fc: 0, frameY0: true }; coreX.set(e, x); }
   return x;
 };
 
@@ -2052,27 +2056,31 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     e.ai0 = -2; e.ai1 = 0;
   }
 
-  // ---- 核心帧引擎(FindFrame case 398,NPC.cs:72599-72626)----
-  // ai0<=0 恒帧 0;ai0>0:frameCounter +1、≥30 回卷 6,帧 = fc%30/6(帧 0 仅首程
-  // 出现——睁核后 5t 即永久离开);frame.Y==0 的首 tick = gore 619-622 + 尘 209×50
-  // 爆开一次(哨兵标记 burst)。帧号写 customFrameIdx,Renderer.vanillaFrameIdx 直读。
+  // ---- 核心帧引擎(FindFrame case 398,1457 NPC.cs:72712-72740)----
+  // ai0<=0 恒帧 0(:72714-72717);ai0>0:frameCounter +1、≥30 回卷 6,帧 = fc%30/6
+  // (:72731-72738)。burst 门 = frame.Y==0(:72719)——旧刀「一次性哨兵」漏了 6 拍
+  // 重复窗与再睁核复爆(定谳见 CoreX 头注,判别测试 tests/bj591-lunar-core-kobold-vfx)。
+  // 帧号写 customFrameIdx,Renderer.vanillaFrameIdx 直读。
   const fx = coreOf(e);
   if (e.ai0 > 0) {
-    if (!fx.burst) {
-      fx.burst = true;
-      // :72606-72611 Gore.NewGore(position+(∓10,∓15), velocity, 619..622)
+    if (fx.frameY0) {
+      // :72721-72724 Gore.NewGore(position+(∓10,∓15), velocity, 619..622)
       GorePiece.newGore(619, e.x - 10, e.y - 15, e.vx, e.vy);
       GorePiece.newGore(620, e.x + 10, e.y - 15, e.vx, e.vy);
       GorePiece.newGore(621, e.x - 10, e.y + 15, e.vx, e.vy);
       GorePiece.newGore(622, e.x + 10, e.y + 15, e.vx, e.vy);
-      // :72612-72616 Dust 209(月总星尘,品红)×50 盒内随机
+      // :72725-72729 Dust 209(月总星尘,品红)×50 盒内随机——本仓粒子替身:
+      // VanillaDust 精植表无 209(贴图/物理近似在档),掷门/数量 1:1
       game.spawnParticles(e.cx, e.cy, '#E060D0', 50, 2.5, { life: 34 });
     }
     fx.fc += 1;
-    if (fx.fc >= 30) fx.fc = 6;                         // :72618-72622
-    e.customFrameIdx = Math.floor((fx.fc % 30) / 6);    // :72623-72625
+    if (fx.fc >= 30) fx.fc = 6;                         // :72732-72734
+    const idx = Math.floor((fx.fc % 30) / 6);           // :72736-72738
+    e.customFrameIdx = idx;
+    fx.frameY0 = idx === 0;                             // 下一拍 burst 门(:72719 frame.Y==0)
   } else {
-    e.customFrameIdx = 0;                               // :72601-72605
+    e.customFrameIdx = 0;                               // :72716
+    fx.frameY0 = true;                                  // :72716 frame.Y = 0(fc 不清,原版同)
   }
   e.x += e.vx;
   e.y += e.vy;

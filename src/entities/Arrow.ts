@@ -551,8 +551,10 @@ interface PiranhaTarget {
  *  34 Flamelash 火鞭（218，AI_020 族 ToRotation；48×384 八帧行按帧行切片）、
  *  190 食人鱼（aiStyle 39，1156 食人鱼枪；曾恒 +π/2 → 鱼 90° 侧翻）、
  *  837（AI_001 显式 MIRROR 分支 :54715，1313 骷髅头法书 shoot）、
- *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器） */
-const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485]);
+ *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器）、
+ *  1026 藤堡弹（★BJ582②：AI_028 :26943-26944 rotation=velocity 角+左移−π、
+ *    spriteDirection=sign(vx)——右向贴图镜像语义同族;旧缺省支 atan2+π/2=弹头恒偏 90°） */
+const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485, 1026]);
 
 /** aiStyle 27 剑气族（AI_027 尾部 :24858-24861：rotation = atan2(vy,vx) + 0.785
  *  = 速度角 + 45°，斜向剑气贴图）——曾走默认 +π/2 恒偏 45°（用户报"附魔剑
@@ -8643,17 +8645,18 @@ export class Arrow extends Entity {
         this.harpyCharmConsumed = true;                    // :58772-58776 无目标 → 位停引
       }
     }
-    // ---- 藤壶哨站弹 1026（aiStyle 28 default 支 :27095-27104 + 1026 视觉支
-    //      :26920-26944；★2026-09-01 producer 锚补齐批——原 AI_28 全链未建模,
+    // ---- 藤壶哨站弹 1026（aiStyle 28 1026 支 :26920-26944 + 出膛编排 :27033-27038；
+    //      ★2026-09-01 producer 锚补齐批——原 AI_28 全链未建模,
     //      哨站 1025 悬浮但零开火）:extraUpdates=2（SetDefaults :9719-9725）→ 本仓
     //      spawn 侧传 extraUpdates:2,本支逐【子步】执行：
     //      ①首子步 ai[1]==0 门 → DeadCellsBarnacleShotFiring 编排（:27033-27038,
     //        clientOnly:true → 本仓 owner 权威广播补远端,同 34 型口径）;
     //      ②拖尾：localAI[0]≥8（钳值）且 timeLeft%2==0 → d2 尾尘（位=position−
     //        vel 归一×5、vel×0.25、α50/fadeIn .5/noGravity、scale .7±.05）;
-    //      ③default 支：velocity ×0.8/子步 + alpha += 4 → ≥255 Kill（≈64 子步
-    //        ≈21t 寿命,GetAlpha=随 alpha 淡出同 drawGlobalAlpha 语义）。
-    //      （顺序=原版 AI 先于 UpdatePosition：衰减/杀在位移前）
+    //      ③★BJ582①（2026-10-09）恒速直飞（:26918-27045 全支零 velocity/alpha 写位
+    //        亲读）——旧「×0.8 衰减+α≥255 Kill」系 aiStyle 30 else 支（:27149-27158）
+    //        误套,射程被压到 ≈60px,见支尾 BJ582 注。消亡=命中/撞块 Kill 链。
+    //      （顺序=原版 AI 先于 UpdatePosition）
     if (this.projId === 1026) {
       if (this.age === 1) {
         deadCellsBarnacleShotFiringFx(game, this.cx, this.cy, this.vx, this.vy);
@@ -8671,10 +8674,14 @@ export class Arrow extends Entity {
           d26.vx = this.vx * 0.25; d26.vy = this.vy * 0.25;
         }
       }
-      this.vx *= 0.8;
-      this.vy *= 0.8;
-      this.alpha += 4;
-      if (this.alpha >= 255) { this.killNow(game); return; }
+      // ★BJ582①（2026-10-09,用户实报「藤壶法杖攻击距离只有这么一点」定谳落刀）：
+      //  旧「velocity ×0.8/子步 + alpha += 4 → ≥255 Kill」系【aiStyle 30 的 else 支
+      //  语义】（Projectile.cs:27149-27158——907 光球族衰减消隐）误套到 aiStyle 28
+      //  的 1026 上。1457 AI_028 全支（:26918-27045）亲读零 velocity 写位/零 alpha
+      //  写位——1026 恒速 12/子步（EU2=36px/拍）直飞至命中/撞块/timeLeft 3600 尽,
+      //  索敌域 1240px（MinionProj AI_197 出弹站）全程可达;旧形 64 子步衰减射程
+      //  ≈60px =「攻击距离只有这么一点」的实害根因。弹的消亡面=命中/撞块 Kill 链
+      //  （:76827-76836 Item_167+20×d2,本文件 1026 Kill 支已接）。
     }
     // ---- 496 暗影炎弓箭（aiStyle 91,Projectile.cs:33097-33148;3053 暗影炎弓载荷,
     //      红蓝台账 R2 批 2026-09-03）——逐【子步】（extraUpdates=2,MaxUpdates=3

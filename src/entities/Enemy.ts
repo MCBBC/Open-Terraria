@@ -449,6 +449,31 @@ const SLIME_FORCE_AGGRO = new Set([81, 183, 304, 667, 244, 184, 535, 658, 659, 2
 /** AI_014 第二段移动族（NPC.cs:23227-23372 通用 else 后再跑一遍 X/Y 步进）：
  *  恶魔 62/巫毒恶魔 66/地狱蝠 49?（表见下实现）——11 类双步进 */
 const AI014_DOUBLE_STEP = new Set([49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 634]);
+/** ★BJ588 FindFrame 死区档族（case 48..664 组 :75620-75681 连排 case 组;
+ *  1456 :75522-75577 同构零漂移——BJ581 同域普查案组收编）：该组 spriteDirection
+ *  =sign(vx) 死区档（vx>0→1/vx<0→−1/【vx==0 不写=保前值】,:75648-75655）+
+ *  rotation=vx×0.1（:75656;蜂 210/211 覆写 ×0.2 :75657-75660）。AI 侧零写点
+ *  （batAI/ghostAI/AI_122 亲读零 spriteDirection 写面——display 面唯一来源=本组），
+ *  故不可用 facing 代位（facing=原版 direction,AI 索敌/探针列消费）→ 独立字段
+ *  Enemy.ffSdir（缺省 -1 ≙ 原版 Entity 字段缺省 :6522）。帧节拍（num296=6/
+ *  Harpy 48=5/49|51|60|634 末帧跳过/蜂 counter 双加）在 Renderer 帧引擎
+ *  BAT_SKIP_LAST 档。渲染消费=drawEnemy ffSdirMirror 门（==1 镜像,Main.cs:23357）。
+ *  ★BJ590 族表扩容（+7 型,15→22）：原版另有两处 case 组的 sdir 写点【同形】
+ *  死区档（sign(vx) if/if+rotation=vx×0.1），逐型亲读并入——
+ *  · case 150/151/152/158/226 组（:75582-75619,冰蝠/熔岩蝠/巨狐蝠/吸血蝠/飞蛇;
+ *    151/150 组内尘见 findFrameRotation 尘支）：sdir if/if 死区档 :75600-75605、
+ *    rotation=vx×0.1 :75606、帧 6t 回卷 num*4（:75614-75618;五型 npcFrameCount
+ *    均 4,与帧引擎全帧档同形）。
+ *  · 121/660（case 2/23/121/169/190-194/317/318/660 组 :74790-74856 内的
+ *    `else if (type == 2 || type == 121 || type == 660)` 支 :74826-74834——Slimer/
+ *    史莱姆皇后紫仆从）：同 sign(vx) 死区档+rotation=vx×0.1;首拍 frame.Y=num*2
+ *    偏移（localAI[0] 门 :74810）与 121 8t/660 6t 阈在 Renderer FF_AI14_CASE_SPEC。
+ *    169/190-194/317/318（恶魔眼族 Atan2 支/冰雪元素）sdir 形态不同（另有专属
+ *    渲染门）不入;23 陨石头属 aiStyle5 tiltOnly5 通道不入。
+ *  · 62/66（恶魔/巫毒恶魔）与 156（红恶魔）sdir=direction【非】死区档
+ *    （:74684/:74687、:74701——=AI direction,通用 facing 镜像已是同值面）不入;
+ *    其 rotation=vx×0.1 写点在 findFrameRotation 156/62/66 支。 */
+export const FF_VXSDIR_GROUP = new Set([48, 49, 51, 60, 82, 93, 121, 137, 150, 151, 152, 158, 182, 210, 211, 226, 253, 316, 634, 660, 662, 664]);
 
 /** Collision.SolidCollision（Collision.cs:2713-2743）1:1：盒与全实心砖重叠判定
  *  （tileSolid && !tileSolidTop；半砖顶面 +8、厚度 8）。G5 落地嵌固回退
@@ -2156,6 +2181,24 @@ export class Enemy extends Entity {
    *  不翻（Entity 字段缺省 :6522，NewNPC 不复位）。渲染层 372/373 flip 消费
    *  （蓄力段读本字段，起扑后读 facing） */
   sharkronSdir = -1;
+  /** ★BJ591 DD2 滑翔怪 574/575 帧档态（FindFrame case 574/575,NPC.cs:68658-68751
+   *  的 frame.Y/frameCounter 侧写——有态机,renderer 通用 6t 档无法承接）:
+   *  koboldFrameY = 帧号 0..9（ai0!=0 滑翔支 2..9 每 4/8t 推进钳 9、落地支 0..1
+   *  每 6t 乒乓 :68741-68749）;koboldFC = frameCounter（帧推进重置、帧 9 钳住后
+   *  无界增长——拖尾 maxValue 阶梯 60/180/300/600 的驱动源 :68713-68727）。 */
+  koboldFrameY = 0;
+  koboldFC = 0;
+  /** ★BJ588 FindFrame case 48..664 死区档 15 型族（FF_VXSDIR_GROUP）的显示面
+   *  spriteDirection（NPC.cs:75648-75655 if/if 死区档——vx==0 不写=保前值）。
+   *  缺省 -1 ≙ 原版 Entity.spriteDirection 字段缺省（:6522,NewNPC 不复位）。
+   *  独立字段的缘由：这 15 型的 AI（batAI/ghostAI/AI_122）把 facing 当原版
+   *  direction 用（索敌/探针列/失靶滑行）,原版 direction 与 spriteDirection 是
+   *  两个字段——FindFrame 只写后者,代位会污染 AI。渲染层 drawEnemy
+   *  ffSdirMirror 门消费（==1 镜像,Main.cs:23357-23361）。写点=Enemy.
+   *  findFrameRotation 族支（AI 后同拍,≡原版 FindFrame 每 update :91626）。
+   *  此前债形态：蜂 210/211 无任何写点+渲染走通用 facing 门（缺省 1）=恒镜像面
+   *  （BJ581 案组登记,本刀收编） */
+  ffSdir = -1;
   inWater = false;       // 入水检测（溅落声用）
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
@@ -3215,7 +3258,7 @@ export class Enemy extends Entity {
       }
     }
     this.ambientSoundTick(game);   // 环境声三表（IdleSounds/闲话/Critter,2026-08-18 批）
-    this.findFrameRotation();      // FindFrame 旋转写点层（AI 后同序，2026-08-20 旋转审计）
+    this.findFrameRotation(game);  // FindFrame 旋转写点层+组内尘（AI 后同序，2026-08-20 旋转审计;★BJ589 传 game=组内尘位次）
     this.recordTrailHistory();   // 原版 UpdateNPC_UpdateTrails（TrailingMode 分派——
                                  // 473-476 mode 2 态门+清零,余族逐拍;拖尾族 419/125-131 读）
   }
@@ -3254,7 +3297,7 @@ export class Enemy extends Entity {
    *  原版 FindFrame 每 tick 在 AI 后跑，其中十余 case 写 rotation；本仓此前只搬了
    *  帧 logic 漏了旋转，2026-08-20 旋转三件套审计补齐。spriteDirection=direction
    *  的 case 全部保留通用 facing 镜像（不进 rotationDriven）。 */
-  private findFrameRotation(): void {
+  private findFrameRotation(game?: GameHooks): void {
     const vid = this.vanillaId ?? 0;
     if (vid === 75) this.visAngle = this.vx * 0.1;                    // 精灵 :74820
     else if (vid === 122) this.visAngle = this.vx * 0.05;             // 蜗牛怪 :74307
@@ -3269,7 +3312,7 @@ export class Enemy extends Entity {
       else if (this.vx < -0.5) this.ravenSdir = 1;
       this.visAngle = this.vx * 0.1;
     }
-    else if (vid === 156 || vid === 226) this.visAngle = this.vx * 0.1;  // 红魔/飞蛇 :74604/:75510
+    else if (vid === 156 || vid === 62 || vid === 66) this.visAngle = this.vx * 0.1;  // ★BJ590 红魔/恶魔/巫毒恶魔(FindFrame :74699/:74683-74698 vx×0.1,sdir=direction→通用 facing 镜像;226 已并 FF_VXSDIR_GROUP 族支)
     else if (vid === 509 || vid === 581) this.visAngle = this.vx * 0.1;  // 巨型飞蚁狮/飞蚁狮（AI 段 :31107/:31140）
     else if (vid === 224 || vid === 587) {                            // 飞鱼/眼球飞鱼 :75460-75468
       if (this.vx > 0) this.visAngle = this.vy * 0.2;
@@ -3299,10 +3342,149 @@ export class Enemy extends Entity {
     } else if (vid === 133) {                                         // 游荡眼 :74760-74769
       if (this.vx > 0) this.visAngle = Math.atan2(this.vy, this.vx);
       else if (this.vx < 0) this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI;
-    } else if (vid === 664) {                                         // 火把神 :75558
-      this.visAngle = this.vx * 0.1;                  // 纯 vx 函数;spriteDirection=sign(vx)
-      // （:75552-75556 双态档）→ 通用 facing 镜像语义。原版本体无生成路径
-      // （事件=弹幕 949,664 仅图鉴记账）——写点为三件套完备性预置。
+    } else if (vid === 574 || vid === 575) {
+      // ★BJ591 DD2 滑翔怪 FindFrame case 574/575（NPC.cs:68658-68751）——帧档+尘面
+      // 有态机（koboldFlyerFindFrame）。sdir/rotation 两写点已有在轨对映:AI_108 每
+      // tick 直写 facing=-sign(vx)（≙ :68661-68668 sdir=sign(vx) if/if 死区档,
+      // 取负系本仓 facing 语义）与 visAngle=±π 折叠速度角（:66120 rotation 直写+
+      // 本 case :68669-68674 AngleTowards 0.02 微推 ≤0.02rad,渲染端 108 旋转消费
+      // 已定谳）——本层只补帧机与尘面,不重复写旋转。
+      this.koboldFlyerFindFrame(game);
+    } else if (FF_VXSDIR_GROUP.has(vid)) {
+      // ★BJ588 FindFrame case 48..664 死区档 15 型族（NPC.cs:75620-75681;1456
+      //  :75522-75577 同构零漂移——BJ581 案组收编）。本层 ≙ 原版 FindFrame 每
+      //  update AI 后一调（:91626）：
+      //  · spriteDirection = sign(vx)【死区档】（:75648-75655 if/if——vx==0 不写
+      //    保前值,字段缺省 -1 ≙ Entity 缺省 :6522）→ ffSdir。蝙蝠/幽灵族 facing
+      //    =AI direction 双责（batAI 撞墙反弹/失靶滑行、ghostAI 探针列）,不可代位;
+      //    蜂 210/211 此前全仓零写点+渲染走通用 facing 门（缺省 1）=恒镜像面（债本体）。
+      //  · rotation = vx×0.1（:75656）;蜂 210/211 覆写 ×0.2（:75657-75660——渲染端
+      //    aiStyle5 支 rotate(e.vx*0.2) 同值消费, Bee rotation 债销案）。
+      //  · 帧节拍（num296=6/Harpy 48=5/49|51|60|634 末帧跳过/蜂 frameCounter 双加
+      //    :75657-75660+:75661,推进门 :75663-75671）在 Renderer 帧引擎 BAT_SKIP_LAST
+      //    档,不在本层。664 火把神原版本体无生成路径（事件=弹幕 949,664 仅图鉴记账
+      //    Player.cs:37109-37116）——本支为其三件套完备性预置（rotation-ledger 台账④）。
+      //  · ★BJ589 组内尘收编（原版 FindFrame 组内发尘=每 tick 一拍——:91626
+      //    FindFrame 在 Update AI/碰撞后、UpdateTrails 前跑,本层同拍同位次:尘在
+      //    sdir/rotation 写点【前】,同 tick 内两平面不互观,序仅按原文保持）：
+      //    60 地狱蝠尘 6 每 tick（:75636-75640 speed=v×0.2/α100/scale2/noGravity）；
+      //    634 孢子蝠尘 165 1/10 掷（:75641-75646 speed=v 生成、随后 ×0.1、α50/
+      //    缺省 scale/noGravity）。game 缺省（BJ588 直驱桩/傀儡早退）=静默跳过,
+      //    尘面 spawnDust 桩缺省同契约。
+      //  · ★BJ590 组内尘扩面（case 150..226 组 :75582-75619,五型中仅两型带尘,
+      //    152/158/226 纯帧档零尘面）：151 熔岩蝠尘 6 每 tick（:75587-75591
+      //    speed=v×0.2/α100/scale2/noGravity）;150 冰蝠尘 67 1/10 掷（:75592-75599
+      //    speed=v×0.5 生成、随后 ×0.2、α90/scale1.5/noGravity+noLight——150 尘
+      //    noLight 为该组独有参,光照面不再自发光）。位次同 60/634:尘在 sdir 写点前。
+      if (game) {
+        if (vid === 60) {
+          const d60 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            this.vx * 0.2, this.vy * 0.2, 100, null, 2);
+          if (d60) d60.noGravity = true;
+        } else if (vid === 634 && Math.floor(Math.random() * 10) === 0) {
+          const d634 = game.spawnDust?.(this.x, this.y, this.w, this.h, 165,
+            this.vx, this.vy, 50, null, 1);
+          if (d634) { d634.vx *= 0.1; d634.vy *= 0.1; d634.noGravity = true; }
+        } else if (vid === 151) {
+          const d151 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            this.vx * 0.2, this.vy * 0.2, 100, null, 2);
+          if (d151) d151.noGravity = true;
+        } else if (vid === 150 && Math.floor(Math.random() * 10) === 0) {
+          const d150 = game.spawnDust?.(this.x, this.y, this.w, this.h, 67,
+            this.vx * 0.5, this.vy * 0.5, 90, null, 1.5);
+          if (d150) { d150.noGravity = true; d150.vx *= 0.2; d150.vy *= 0.2; d150.noLight = true; }
+        }
+      }
+      if (this.vx > 0) this.ffSdir = 1;
+      else if (this.vx < 0) this.ffSdir = -1;
+      this.visAngle = this.vx * 0.1;
+      if (vid === 210 || vid === 211) this.visAngle = this.vx * 0.2;
+    }
+  }
+
+  /** ★BJ591 FindFrame case 574/575（DD2 小妖魔滑翔怪 574/575,1457 NPC.cs:68658-68751）
+   *  帧档+尘面。574 与 575 共用同一 case 块（:68658-68659 case 574: case 575:）——
+   *  FindFrame 域两型零差异（差异全在 AI_108 参数档,flyerParams 已 1:1）。
+   *  帧=帧高/10 帧表（vanilla-npcs.json frames=10）:
+   *  · ai0!=0（滑翔/瞄准/俯冲/回旋/自爆全部非 0 态）:帧钳 ≥2（进态清 frameCounter
+   *    :68677-68681）;推进延迟 = 帧<5 为 4t、≥5 为 8t（:68682-68686 读【推进前】帧号）;
+   *    钳 9（:68688 frame.Y<num*9 门）。**落到帧 9 的那拍**喷 8× 尘 6（火把火舌,
+   *    VanillaDust 精植在档）于口部 vector4=Center+(56·sdir,−30).RotatedBy(rotation)
+   *    （:68687）——NewDustDirect(α100) 后 velocity×3/scale 0.6/fadeIn 1.2/noGravity/
+   *    noLight（:68694-68703）。rotation 用 AI 直写的原始速度角 atan2(vy,vx)（原版
+   *    FindFrame 读到的 npc.rotation 即 AI_108 :66120 直写值,AngleTowards 微推
+   *    ≤0.02rad 不可辨;sdir=−facing ≙ sign(vx) 死区档,facing 本身即 AI 每 tick
+   *    按速度写的显示面闩）。
+   *  · 帧 9 钳住后 frameCounter 不再被推进支重置（推进门 frame.Y<num*9 恒假,
+   *    ++ 仍在条件位执行）→ 无界增长,拖尾密度阶梯 maxValue 5→4(>60)→3(>180)→
+   *    2(>300)→1(>600)（:68712-68728,严格大于）。拖尾门 = 帧≥9 且 ai0<3
+   *    （:68706——ai0==3 自爆/4 回旋不喷）;每拍 2 掷（n=0,1）,1/maxValue 中出
+   *    1 粒尘 6 @Lerp(value2,value,n/10+0.1)——value2=vector4+(oldPos[3]−position)
+   *    （:68710-68711,TrailingMode 7 逐拍后移 ≙ 本仓 histAt(3),recordTrailHistory
+   *    在 findFrameRotation 后一拍=原版 :91626→:91627 同序）;α50/scale 0.3/
+   *    fadeIn 1.5/noGravity+noLight（:68733-68737）。
+   *  · ai0==0 落地:++frameCounter≥6 → 帧推进 0↔1 乒乓（:68741-68749）。 */
+  private koboldFlyerFindFrame(game?: GameHooks): void {
+    if (this.ai0 !== 0) {
+      if (this.koboldFrameY < 2) { this.koboldFrameY = 2; this.koboldFC = 0; }
+      const delay = this.koboldFrameY >= 5 ? 8 : 4;      // :68682-68686（推进前帧号定档）
+      // 口部锚 vector4 = Center + (56*sdir, -30).RotatedBy(rotation)（:68687）
+      const sdir = -this.facing;                          // ≙ spriteDirection=sign(vx) 死区档
+      const rot = Math.atan2(this.vy, this.vx);           // ≙ npc.rotation（AI :66120 直写值）
+      const mx = 56 * sdir, my = -30;
+      const cosR = Math.cos(rot), sinR = Math.sin(rot);
+      const mouthX = this.cx + mx * cosR - my * sinR;
+      const mouthY = this.cy + mx * sinR + my * cosR;
+      this.koboldFC++;
+      if (this.koboldFC >= delay && this.koboldFrameY < 9) {
+        this.koboldFC = 0;
+        this.koboldFrameY++;
+        if (this.koboldFrameY === 9 && game) {
+          // :68692-68704 落帧 9 一次性 8× 火舌（推进支内——每轮滑翔恰一拍）
+          for (let m = 0; m < 8; m++) {
+            const d = game.spawnDust?.(mouthX, mouthY, 0, 0, 6, 0, 0, 100, null, 1);
+            if (d) {
+              d.vx *= 3; d.vy *= 3;                       // :68698 velocity *= 3f
+              d.scale = 0.6;                              // :68699
+              d.fadeIn = 1.2;                             // :68700
+              d.noGravity = true;                         // :68701
+              d.noLight = true;                           // :68702
+            }
+          }
+        }
+      }
+      if (this.koboldFrameY >= 9 && this.ai0 < 3 && game) {
+        // :68706-68739 帧钳住后的拖尾面
+        const ox = this.histXAt(3) - this.x;              // oldPos[3] − position（:68711）
+        const oy = this.histYAt(3) - this.y;
+        let maxValue = 5;
+        if (this.koboldFC > 60) maxValue = 4;             // :68713-68715
+        if (this.koboldFC > 180) maxValue = 3;            // :68717-68719
+        if (this.koboldFC > 300) maxValue = 2;            // :68721-68723
+        if (this.koboldFC > 600) maxValue = 1;            // :68725-68727
+        for (let n = 0; n < 2; n++) {
+          if (Math.floor(Math.random() * maxValue) === 0) {
+            const l = n / 10 + 0.1;
+            const d = game.spawnDust?.(mouthX + ox * (1 - l), mouthY + oy * (1 - l),
+              0, 0, 6, 0, 0, 50, null, 1);
+            if (d) {
+              d.scale = 0.3;                              // :68734
+              d.fadeIn = 1.5;                             // :68735
+              d.noGravity = true;                         // :68736
+              d.noLight = true;                           // :68737
+            }
+          }
+        }
+      }
+      this.customFrameIdx = this.koboldFrameY;
+    } else {
+      this.koboldFC++;                                    // :68741
+      if (this.koboldFC >= 6) {
+        this.koboldFC = 0;
+        this.koboldFrameY++;                              // :68743（先推进）
+        if (this.koboldFrameY >= 2) this.koboldFrameY = 0;  // :68745-68748（再钳——1→2→钳 0,周期 0↔1）
+      }
+      this.customFrameIdx = this.koboldFrameY;
     }
   }
 
@@ -8464,6 +8646,9 @@ export class Enemy extends Entity {
     } else if (vid === 6 || vid === 94 || vid === 173 || vid === 619) {
       this.visAngle = Math.atan2(sy, sx) - Math.PI * 0.5;
     } else if (isHornet || vid === 205) {
+      // ★BJ581：≡原版 AI_005 三元 spriteDirection（NPC.cs:51186-51189,vx==0 强制 -1;
+      //   1456 :51031-51042 为 if/if 死区档——按 1457 三元落）。黄蜂族=随面镜像族,
+      //   渲染端经 tiltOnly5+通用 facing 门翻面（极性/节拍全等,销案锚 tests/bj581）。
       this.facing = this.vx > 0 ? 1 : -1;
       this.visAngle = this.vx * 0.1;
     } else {
@@ -10374,6 +10559,12 @@ export class Enemy extends Entity {
         this.vy -= uy;
       }
     }
+    // ★BJ588 销案锚：原版 AI_122 方法体（NPC.cs:45329-45456 亲读）spriteDirection/
+    //  rotation/direction 全零写点——662 的显示面唯一来源=FindFrame case 662 组支
+    //  （:75648-75655 死区档）。本行为本仓自有的 direction 侧写（vx 符号死区档,
+    //  值恒等 FindFrame 写面）——渲染镜像已收编至 findFrameRotation FF_VXSDIR_GROUP
+    //  族支（e.ffSdir,AI 后一拍 ≙ 原版 FindFrame :91626 位置）,显示面以 ffSdir 为准,
+    //  本行仅存续 facing=direction 侧写（behaviorlog）。
     if (this.vx !== 0) this.facing = this.vx > 0 ? 1 : -1;
     this.x += this.vx;
     this.y += this.vy;

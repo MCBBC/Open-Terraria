@@ -179,7 +179,9 @@ describe('BJ326-④ 静态闸（缺省翻转钉死+固定面 keep-list census）
 
   it('固定面 keep-list:显式初速站恰为登记清单（多一少一即红=强制过闸复核）', () => {
     const lines = spawnDropLines(game);
-    expect(lines.filter((l) => /,\s*0,\s*-2\)/.test(l)).length).toBe(1);   // dumpChest（SW 兜底面）
+    // ★BJ-C9-SP（2026-10-09）登记 1→2：34324 DestroyChest 有物拒拆兜底（"保 12×12
+    //  旧缺省"站,BJ377 批落刀漏过闸;域外补登记,非 C9 域内改动）
+    expect(lines.filter((l) => /,\s*0,\s*-2\)/.test(l)).length).toBe(2);   // dumpChest + DestroyChest 兜底（SW 兜底面×2）
     expect(lines.filter((l) => /,\s*0,\s*0\)/.test(l)).length).toBe(1);    // 展示区溢出（SW 面）
     expect(lines.filter((l) => l.includes('0, -3, banner')).length).toBe(1); // 横幅（1.4.5 认领制近似）
     expect(lines.filter((l) => l.includes('coin.vx, coin.vy')).length).toBe(1); // LuckyCoin :44919

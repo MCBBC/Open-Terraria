@@ -2822,7 +2822,7 @@ export class VanillaSpawner {
       if (pick !== 0) return D(pick);
       return null;   // 波内全部分支落空（霜月 14 波 / 南瓜 19 波 bossCap 后）= 原版空过
     }
-    // ---- 日食（NPC.cs:3459-3525：地表 && dayTime && eclipse——1.4.5.6 重做后的全表）----
+    // ---- 日食（NPC.cs:3552-3614：地表 && dayTime && eclipse——1.4.5.6 重做后的全表;BJ591 行号重锚+93）----
     //  门 = spawnTileY <= worldSurface || (remix && Y > rockLayer)（★IIIII228 :3552
     //  remix 深岩层或支——remix 岩石层以下的日食池）；白天 && eclipse；
     //  flag14 = 三机械全杀（downedMechBoss1/2/3 = 134 / 125|126 / 127）

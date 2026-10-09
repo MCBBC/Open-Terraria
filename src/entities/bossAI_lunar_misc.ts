@@ -292,9 +292,11 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
   if (rnd(420) === 0) game.playSfxWav?.('Zombie_100', 1, e.cx, e.cy);
   // ---- 核心锚定(:42907-42912):ai[3]=核心 id,核心亡/失效 → life=0 + HitEffect +
   //      active=false。★HitEffect 对 400 是空操作(HitEffect 82492-90939 全链无
-  //      type==400 分支,末位 else 对 type!=156 直接 return;月总件 gore 619-622
-  //      属核心死亡演出 AI_077 ai0==-2 段:41915-41922,且该段清眼也是 active=false
-  //      直清:41926-41931)——本仓 dead 直写即 1:1,勿加 gore/死亡声(蓝队 R1-09 驳回) ----
+  //      type==400 分支,末位 else 对 type!=156 直接 return;★BJ591 勘误:AI_077
+  //      :41915-41931 是 ai[0]==3 残肢段的 gore 619-622【清除】面(deactivate 循环
+  //      +清眼直清),非喷发面——喷发在 FindFrame case 398 :72721-72729,已由
+  //      bossAI_duke_moonlord 核心帧引擎承接;本判语维持:眼 400 死亡=直清,
+  //      勿加 gore/死亡声(蓝队 R1-09 驳回) ----
   const core = enemies(game).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; }
   e.iframes = 2;                        // SetDefaults dontTakeDamage=true(1457:14183,400 块 14169-14186)

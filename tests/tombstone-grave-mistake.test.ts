@@ -52,11 +52,15 @@ describe('墓碑弹 DropTombstone 伤害参数（Player.cs:39429-39439）', () =
       expect(plain.vy).toBeLessThanOrEqual(-2 + 1e-9);
     }
   });
-  it('projId = style 反查 IsAGravestone 域（ProjectileID.cs:29）：0→43、3→203、8→530', () => {
+  it('projId = style 反查 IsAGravestone 域（ProjectileID.cs:29）：0→43、3→203、6→527、8→529、10→531', () => {
     const t = new Tombstone(100, 100, 0, 'x', 1, false);
     t.style = 0; expect(t.projId).toBe(43);
     t.style = 3; expect(t.projId).toBe(203);
-    t.style = 8; expect(t.projId).toBe(530);
+    // ★BJ562（2026-10-09）勘误：金档反查旧式 522+style 漂 +1（8→530/10→532 出域）——
+    //   正映射 style = type-527+6（Projectile.cs:25659-25667）的逆 = style+521
+    t.style = 6; expect(t.projId).toBe(527);
+    t.style = 8; expect(t.projId).toBe(529);
+    t.style = 10; expect(t.projId).toBe(531);
   });
 });
 

@@ -10,10 +10,11 @@
 //   ③ 487 蛆——FindFrame case 485-487（cs:73511-73561）四态：贴地 0 / 腾空 +=dir×0.1 /
 //     坡面钉 ±0.785。wormCritterAI spin 通道已并入（前批"补齐"）+ stR66 门 +
 //     wormMirror 豁免（485-487 spriteDirection=direction 保镜像）——本批以对拍锁死。
-//   ④ 664 火把神——FindFrame（cs:75558）rotation = vx×0.1 + spriteDirection=sign(vx)
-//     （:75552-75556 双态档）。原版/本仓均无 664 生成路径（事件本体=弹幕 949，
-//     664 仅图鉴记账 Player.cs:37109-37116）→ 写点走 findFrameRotation 层（纯 vx 函数），
-//     派发门按 id 预置，镜像走通用 facing 语义（不进 rotationDriven）。
+//   ④ 664 火把神——FindFrame（:75656）rotation = vx×0.1 + spriteDirection=sign(vx)
+//     （:75648-75655 死区档）。原版/本仓均无 664 生成路径（事件本体=弹幕 949，
+//     664 仅图鉴记账 Player.cs:37109-37116）→ 写点走 findFrameRotation 层（纯 vx 函数，
+//     ★BJ588 起并入 FF_VXSDIR_GROUP 15 型族支），派发门按 id 预置，
+//     镜像走 ffSdir 门（曾走通用 facing 门=收编前近似,BJ588 勘误）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -336,13 +337,21 @@ describe('664 火把神：vx 档旋转 + 派发 + 镜像归属', () => {
     expect(ff(664, 0)).toBe(0);
   });
 
-  it('派发门+镜像门：rotate(visAngle) 生效;spriteDirection=sign(vx)（:75552-75556）→ 通用镜像不进 rotationDriven', () => {
+  it('派发门+镜像门：rotate(visAngle) 生效;sdir=sign(vx) 死区档（:75648-75655）→ ★BJ588 起 ffSdir 门（不再走通用 facing 门）', () => {
     const w = makeWorld();
     const h = makeHooks(w, null);
     const e = spawn(h, 664, 40, FLOOR - 3);
     e.visAngle = 0.3; e.facing = 1;
     const calls = drawWithFake(e, w);
     expect((rotOf(calls)!.a as number[])[0], '664 按 id 门（aiStyle 0 无族门可挂）').toBeCloseTo(0.3, 5);
-    expect(flips(calls).length, 'facing=1（vx>0→spriteDirection=1）→ 翻,保留镜像语义').toBe(1);
+    // ★BJ588 勘误：旧断言「facing=1 → 通用门翻」钉的是收编前近似——原版 sdir 是
+    // FindFrame 死区档写（vx==0 不写=保前值,字段缺省 -1;direction 与 sdir 两字段）,
+    // facing=1 且 vx=0 时原版 sdir=-1 → 不翻。本仓现以 ffSdir 承载（缺省 -1 同相）。
+    expect(flips(calls).length, 'vx=0 死区档：ffSdir 缺省 -1 = 原生朝向不翻').toBe(0);
+    // vx>0 拍：findFrameRotation 写 ffSdir=1 → 翻（≙ 原版 sdir==1）
+    e.vx = 0.5;
+    (e as unknown as { findFrameRotation: () => void }).findFrameRotation();
+    const calls2 = drawWithFake(e, w);
+    expect(flips(calls2).length, 'vx>0 → ffSdir=1 → 翻（sdir==1 门）').toBe(1);
   });
 });

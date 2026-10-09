@@ -24,6 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
+import { runModHoldItem, runModAccEffect } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -351,8 +352,10 @@ const SAND_FLOOR_IDS = new Set<number>([
 /** 背包生效域 vid 集（UpdateEquips :12494-12500 消费集合 = RefreshInfoAccsFromItemType
  *  :12319-12400 全响应 vid ∪ RefreshMechanicalAccsFromItemType :12397-12430 本仓
  *  已建模三族）——equipStatsKey 背包段只对命中格记键：未命中格不进 computeEquipStats
- *  输出,内容键仍对全部实际输入完备（直写背包放取即失效） */
-const INV_EFFECTIVE_VIDS = new Set<number>([
+ *  输出,内容键仍对全部实际输入完备（直写背包放取即失效）。
+ *  export 仅为 BJ563 两表同步测试锁（tests/bj563-mech-acc-vids.test.ts）,消费单点
+ *  仍=equipStatsKey,禁外挂双抄 */
+export const INV_EFFECTIVE_VIDS = new Set<number>([
   // 信息族（RefreshInfoAccsFromItemType 逐 if 响应 vid）
   15, 707, 16, 708, 17, 709,          // 表三档+升级版
   393, 18, 395,                        // 罗盘/深度计/GPS
@@ -363,8 +366,12 @@ const INV_EFFECTIVE_VIDS = new Set<number>([
   3123, 3124, 5358, 5359, 5360, 5361,  // PDA/REK3000/手机/贝壳手机三态
   5574, 5575, 5576,                    // 幸运饰族（hasLuck_*）
   // 机械族（RefreshMechanicalAccsFromItemType 本仓建模面——★F3 补 4767/5323/
-  // 4346/5095：漏键=袋外背包放取相应饰品不失效缓存；★F5③ 补 6190）
-  3619, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095, 6190,
+  // 4346/5095：漏键=袋外背包放取相应饰品不失效缓存；★F5③ 补 6190；
+  // ★BJ583 补 3611：BJ572 只补了 compute 侧分支,漏键=宏伟蓝图入包/取出不失效
+  // equipStats 缓存 ⇒ mechShowWires 恒陈旧,电线整层不出（探针 _bj583 实证:
+  // 入包 40 拍后 equipStats.mechShowWires 仍 false=用户复报「大部分时候看不到电线」
+  // 第一真凶;光照面=第二真凶见 Renderer.drawWiresPass 注））
+  3619, 3611, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095, 6190,
 ]);
 
 /** ★IIIII250：vid 解析查表。equipStatsKey 旧逐槽内联
@@ -446,8 +453,15 @@ const AGGRO_ARMOR_PIECE: Record<number, number> = {
   2763: 300, 2764: 300, 2765: 300,
 };
 /** 机械族 vid 全集（equipStatsKey 虚空袋段用；与上方
- *  refreshMechanicalAccsFromItemType 的分支表一一对应，改其一必同步另一） */
-const MECH_ACC_VIDS = new Set<number>([3619, 3624, 2216, 3061, 5126, 4767, 5323]);
+ *  refreshMechanicalAccsFromItemType 的分支表一一对应，改其一必同步另一
+ *  （不变式锁=tests/bj563-mech-acc-vids.test.ts §2）。
+ *  ★BJ583 补 3611（同上 INV_EFFECTIVE_VIDS 注——虚空袋段同步,袋内蓝图放取失效）;
+ *  ★BJ563 补 4346/5095/6190（★F3/★F5③ 当年只补了 INV_EFFECTIVE_VIDS——虚空袋段
+ *  对三件同族 stale 债清偿,补齐后与 INV_EFFECTIVE_VIDS 机械族段恒等;4346/5095 虽
+ *  入本表,虚空袋段仍被 WORKS_IN_VOID_BAG_FALSE（ItemID.cs:82 例外=恰此二件,
+ *  Player.cs:13031-13034）先行挡掉,重放面不扩）。
+ *  导出仅为测试锁;消费单点=equipStatsKey,禁外挂双抄 */
+export const MECH_ACC_VIDS = new Set<number>([3619, 3611, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095, 6190]);
 
 /** Item.questItem 全集（1457 反编译枚举：Item.cs 全文仅 DefaultToQuestFish()
  *  :27653-27654 一处置 true——调用面 = 任务鱼区间 `type >= 2450 && type <= 2488`
@@ -898,6 +912,13 @@ export class Player extends Entity {
     Array(40).fill(null), Array(40).fill(null), Array(40).fill(null), Array(40).fill(null),
   ];
   buffs = new BuffState();
+  /** ★BJ579 狱火药水火圈状态（原版 Player.cs:931/:933 字段;推进=Game fixedUpdate
+   *  buff 116 块内 advanceFlameRing——DrawInfernoRings :65262-65285 draw:Update 1:1@60
+   *  → 每 60t 一次;渲染纯消费）。无重置面（原版 ResetEffects 零消费）=buff 消失
+   *  相位残留、重新喝药续相（照抄）。flameRingFrame/flameRingAlpha（:935/:937）
+   *  原版零消费死字段不抄。 */
+  flameRingRot = 0;
+  flameRingScale = 1;
   /** 角色外观（来自角色系统；渲染层 M7 切换 PaperDoll 时使用） */
   appearance?: import('../player/Appearance').Appearance;
   /** 语音分派入参聚合（PlayerVoice.VoiceState——PlayHurtSound :38867-39011/
@@ -1068,6 +1089,13 @@ export class Player extends Entity {
     return this.shimmerUnstuckIndefinite || this.shimmerUnstuckTimeLeft > 0;
   }
   /** Update（ShimmerUnstuckHelper.cs:23-45 字面，Player.cs:25843 每 tick 调） */
+  /** ★三百四十五刀:右键使用态(C# Player.altFunctionUse;右键按住=2) */
+  altFunctionUse = 0;
+  /** ★三百四十八刀:mod 手持光源(holdItem 钩设置;每帧 fixedUpdateBody 头重置) */
+  modHeldLight: [number, number, number] | null = null;
+  /** ★三百六十五刀:mod 配饰光源(accEffect 钩设置;每帧 computeEquipStats 重算域
+   *  重置——由 acc-immunes 同款 accEffect 闭包重设) */
+  modAccLight: [number, number, number] | null = null;
   private shimmerUnstuckHelperUpdate(game: GameHooks): void {
     const dry = !this.shimmering && !this.inShimmer;   // flag = !shimmering && !shimmerWet（:26）
     if (dry) this.shimmerUnstuckIndefinite = false;
@@ -1827,7 +1855,16 @@ export class Player extends Entity {
   get defense(): number {
     let d = this.buffs.defenseBonus + (this.equipStats.def ?? 0) + this.cartDefenseBonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
     if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
-    for (const id of this.inv.equippedArmor()) {
+    // ★BJ585（2026-10-09）：armor[0..2] 改走 GetEffectiveArmor——原版 statDefense 护甲段
+    //   在 GrantArmorBenefits（Player.cs:13220 `statDefense += armorPiece.defense`）内，
+    //   其调用面 k=0..9 【全走 GetEffectiveArmor(k)】（Player.cs:13014-13019）——
+    //   跨配装共享护甲（他页 favorited 件）参与基础防御。旧 equippedArmor() 只读裸
+    //   armor[0..2] = 共享装时基础防御漏算（用户实测 51→31；R4-19 消费面裁决
+    //   「属性聚合不存在走裸 armor[] 的例外」的漏网面）。共享准入由
+    //   getEffectiveArmor→canShareArmor（槽型门+低位配对扫）承担，0..2 槽原版
+    //   UpdateEquips_CanItemGrantBenefits 仅槽型校验（Player.cs:13061-13078）已被覆盖。
+    for (let slot = 0; slot < 3; slot++) {
+      const id = this.inv.getEffectiveArmor(slot)?.id ?? null;
       // ★armor.defense 死前腿已随 ItemDef.armor 死字段移除（2026-09-02,全仓零写入,
       //   真值源 = vanilla-itemstats.json,与配饰段同源）
       if (id == null) continue;
@@ -2105,6 +2142,9 @@ export class Player extends Entity {
         ?? ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|*`] ?? null;
     }
     let def = 0, mana = 0, life = 0;
+    // ★三百三十五刀:mod 配饰效果累加器(sw.accEffect 闭包直改;return 合并)
+    const modAcc = { def: 0, mana: 0, life: 0, moveMult: 0 };
+    this.modAccLight = null;   // ★三百六十五刀:每帧重置(accEffect 闭包重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
@@ -2336,6 +2376,9 @@ export class Player extends Entity {
       }
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
+      // ★三百三十五刀:mod 配饰效果钩(mod vid 域 30000+;零注册零开销;
+      //  game=__swGame 全局面——环宿主无 game 形参,窗面单例取)
+      runModAccEffect(s.id, this, (globalThis as { __swGame?: unknown }).__swGame, modAcc);
       const accVid = (ITEM_DEFS[s.id]?.vid ?? -1);
       // 语音饰品（ApplyEquipFunctional :14485-14491：currentItem.voiceSlot!=0 →
       // voiceOverride=voiceSlot,!hideVisibleAccessory[itemSlot] 门内——隐藏的语音
@@ -3077,7 +3120,8 @@ export class Player extends Entity {
     // 拆除;accRunSpeed 单独经 equipStats）
     const moveMult = 1 + move;
     return {
-      def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
+      def: def + modAcc.def, mana: mana + modAcc.mana,
+      hpPerSec: (life + modAcc.life) / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）;modAcc=三百三十五刀配饰钩累加器
       dmgMelee, dmgRanged, dmgMagic,   // 箭袋 arrowDmg 移入 arrowStack（仅箭吃，:3820）
       critMelee, critRanged, critMagic,
       moveMult, meleeSpeed,
@@ -4074,6 +4118,10 @@ export class Player extends Entity {
   fixedUpdateBody(dt: number, game: GameHooks) {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
+    this.modHeldLight = null;   // ★三百四十八刀:每帧重置(holdItem 钩重设)
+    // ★三百三十九刀:mod 手持效果钩(C# HoldItem 同位;手持 mod 物品每 tick 调)
+    runModHoldItem(this.inv.heldItem()?.id ?? -1, this, game);
+
     // ★SW-BJ59 滚轴鞋弹性挡板输入反转（Player.cs:25199-25210 cartFlip 支——挡板
     //  [1] 按向命中后左/右控制互换，直到松键才清除；movementX 由 control 派生，
     //  互换 ⇔ inputX 取反。本仓 fixedUpdate 在 Game 输入注入之后 = 原文同拍位）
@@ -11041,7 +11089,9 @@ export class Player extends Entity {
     // 日曜护盾层预览不模拟消耗（取决于 damage 实际扣减序）,登记
     const diff = scaleStatsWorld().difficulty;
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
-    return Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance)));
+    // ★BJ585（2026-10-09）：与 damage() 结算同步 (int) 截断（floor）——预演=实扣口径
+    //   （环境站 floatDealt 预演回填面随本刀自动与实扣对齐，不再现显示≠实扣）
+    return Math.max(1, Math.floor((dmg - this.defense * defF) * (1 - endurance)));
   }
 
   /** pvp=true 走 Hurt 的 pvp 语义（Player.cs:37592 Hurt pvp 参）：减伤链与 PvE 完全
@@ -11214,7 +11264,12 @@ export class Player extends Entity {
       this.solarCounter = 0;
     }
     const solarMul = solarConsumed ? 0.2 : 1;
-    const reduction = Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance) * solarMul));
+    // ★BJ585（2026-10-09）：取整改 (int) 截断语义（floor，正数域同构）——原版
+    //   Player.Hurt :38590 `num2 = (int)((double)(1f - endurance) * num2)`、
+    //   :38672 `statLife -= (int)num2`（CalculateDamagePlayersTake 返回 double 不含
+    //   取整）。旧 Math.round 在半点档向上多扣 1（用户实测 51 防 22.75 → 实扣 23，
+    //   原版 22；100 伤 → 62 vs 原版 61）。
+    const reduction = Math.max(1, Math.floor((dmg - this.defense * defF) * (1 - endurance) * solarMul));
     this.hp -= reduction;
     // 受击闭眼 20t（Player.Hurt :37916 eyeHelper.BlinkBecausePlayerGotHurt——
     // 与无敌帧同步的全闭眼优先档，仅对真正造成伤害的命中）

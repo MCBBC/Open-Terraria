@@ -102,6 +102,8 @@
  *    全程驻留 cap 零迁移;render-bound(帧耗 25ms)落 60 阶梯;帧耗 10ms 机驻留 120
  *    交付 100fps(中带);帧耗 12ms 机落 90 驻留(83fps,读数诚实)。
  *  - std 自此不进档位决策(诊断面);方差世界(旗关)保留=史档+红判别器复刻点。
+ *  - ★v9.14 转正(2026-10-09 用户令):?varadapt 缺省开=容量判据世界;?varadapt=0=
+ *    逃生门回方差世界。证据=Mac 实机体感「这次的体感非常好」+47 测双世界锁。
  *  - 【史档】v9.11 终局刀=跟满回归(2026-10-08)
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
@@ -716,15 +718,17 @@ export const REALIZED_UP_RATIO = 0.97;
 /** 升档探针确认窗数(3 窗;探针失败回落 2 窗,升难降易防抖)。 */
 export const REALIZED_UP_WINDOWS = 3;
 
-/** ★v9.12.2/v9.14 宽流适配总旗(?varadapt=1 激活,缺省关=v9.13 方差世界逐位)。
- *  ★旗语义演化:v9.12.2 刀1-3(窗数/底档门)→ v9.14 起旗=【判据世界切换】——旗开=
- *  容量判据(stepRealized:realized 贴上限驻留/跑不到才降),旗关=方差判据
- *  (stepVarianceCore)。刀1/刀2/刀3 随 v9.13+本刀退役为史档(常数/钩保留)。
- *  node/测试环境恒关,测试经 varAdaptSetForTest 显式开启) */
+/** ★v9.14 档位判据世界旗(★已转正缺省开=容量判据世界;?varadapt=0 逃生门回方差
+ *  世界=v9.13 逐位)。★旗语义演化史:v9.12.2 刀1-3(窗数/底档门,灰度)→ v9.14 起
+ *  旗=【判据世界切换】(容量 stepRealized/方差 stepVarianceCore)→ v9.14 转正。
+ *  ★转正(2026-10-09 用户令;证据=Mac 实机体感验证「这次的体感非常好」+47 测双世界
+ *  锁+六语料锚定:空转机贴上限零迁移/render-bound 落 60 阶梯/帧耗 10ms 机驻留 120
+ *  交付 100fps/帧耗 12ms 机落 90 诚实读数)。
+ *  node/测试环境恒关(两世界判据不同;测试经 varAdaptSetForTest 显式控制) */
 export let varAdapt = (() => {
   try {
-    if (typeof location === 'undefined') return false;
-    return new URLSearchParams(location.search).get('varadapt') === '1';
+    if (typeof location === 'undefined') return false;   // node/测试环境恒关
+    return new URLSearchParams(location.search).get('varadapt') !== '0';
   } catch { return false; }
 })();
 /** 测试/对拍翻面(生产代码禁调——生产只读 URLSearchParams 一次) */

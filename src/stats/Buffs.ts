@@ -1171,6 +1171,9 @@ export class BuffState {
    *  装备扫描（十字章族 885-904/1612/1613/1921/3781/5354）与 buff 驱动
    *  （黑曜石皮 1 → 免 24）每帧刷新；apply 门 = AddBuff :5052/:5068 */
   immuneVanilla = new Set<number>();
+  /** ★三百六十四刀:mod buff 免疫(active t=mod 伪 vanilla id 直查;
+   *  mod accEffect 通道 sw.playerImmune 每帧 add) */
+  immuneMod = new Set<number>();
   /** DeadCellsPotionStation 在场(:5206 buff 时长×1.2)。★BJ250 收口为 buff 驱动：
    *  原版唯一置位源 = buff 366 在栏（UpdateBuffs :10273-10276 else-if 读 buffType[j]，
    *  :18478 每帧先清）——此前由 699 tile 邻域扫描代供，右键 buff 落地后改读 buff 栏
@@ -1392,10 +1395,10 @@ export class BuffState {
     // ---- 免疫即除已有（Player.Update :26213-26218：每帧扫 buffImmune[type] →
     //      DelBuff）——R5-F19：旧 immuneVanilla 只挡新增（apply 门 :5057）,已挂
     //      OnFire 时装黑曜石头骨原版下帧熄火,我方烧满时长。递减后执行同原版序 ----
-    if (this.immuneVanilla.size > 0) {
+    if (this.immuneVanilla.size > 0 || this.immuneMod.size > 0) {
       for (const [t] of [...this.active]) {
         const v = BUFF_DEFS[t]?.vanillaBuff;
-        if (v !== undefined && this.immuneVanilla.has(v)) this.active.delete(t);
+        if ((v !== undefined && this.immuneVanilla.has(v)) || this.immuneMod.has(t)) this.active.delete(t);
       }
     }
     // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s,

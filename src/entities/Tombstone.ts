@@ -2,7 +2,9 @@
 //   段 / 1457 DropTombstone = Player.cs:39410-39462，aiStyle17 = 1457 Projectile.cs:25636-25690）。
 //   Player.cs:39410-39462  款式按身家：≤10 万铜币 → 43（1/6）或 200+rand(6)；
 //                           >10 万 → 527+rand(5)（金墓碑）；从玩家中心抛射
-//                           （vx = rand(10..30)*0.1*击退方向 + 随机游走修正；vy = rand(-40..-20)*0.1 上抛）
+//                           （vx = Next(10,30)*0.1*击退方向 + 随机游走修正；vy = Next(-40,-20)*0.1 上抛
+//                           ——★BJ587：整数半开界 10..29 / -40..-21（Player.cs:39437），
+//                           旧 *21 乘式两端溢出 30/-20 已清偿）
 //   ★FTW 伤害面（:39429-39439 + Projectile SetDefaults :1260-1271）：getGoodWorld →
 //     damage=70 / knockBack=10 / 弹速 ×1.5，且 SetDefaults 对 43/201-205/527-531 置
 //     friendly=true + hostile=true → Projectile.Damage（:12549-12580）三面全开：
@@ -54,6 +56,14 @@ export function getTombstoneCanvas(): HTMLCanvasElement {
   return tombstoneCanvas;
 }
 
+/** 弹型→style 换算（aiStyle17 落格段 Projectile.cs:25659-25667：43→0；
+ *  201-205→1-5；527-531→6-10——Tiles_85 偶数列样式块） */
+function graveTypeToStyle(type: number): number {
+  if (type === 43) return 0;
+  if (type >= 201 && type <= 205) return type - 200;
+  return type - 527 + 6; // 527-531 → 6-10
+}
+
 /** DropTombstone 款式选择 → 原版 style（0-10） */
 function pickStyle(coinsOwned: number): number {
   const roll = Math.floor(Math.random() * 6); // Main.rand.Next(6)
@@ -63,10 +73,7 @@ function pickStyle(coinsOwned: number): number {
   } else {
     type = 527 + Math.floor(Math.random() * 5);
   }
-  // Projectile.cs:23696-23700 的 type→style 换算
-  if (type === 43) return 0;
-  if (type >= 201 && type <= 205) return type - 200;
-  return type - 527 + 6; // 527-531 → 6-10
+  return graveTypeToStyle(type);
 }
 
 /** 原版长日期（en: "MMMM d, yyy"；zh culture: ToLongDate） */
@@ -116,29 +123,59 @@ export class Tombstone extends Entity {
   constructor(x: number, y: number, coinsOwned: number, deathText: string, hitDirection: number,
     /** FTW（getGoodWorld）伤害面：damage 70 / knockBack 10 / 弹速 ×1.5
      *  （DropTombstone :39429-39439；SetDefaults :1260-1271 friendly+hostile） */
-    getGood = false) {
+    getGood = false,
+    /** ★BJ562（2026-10-09）城镇 NPC 死亡墓碑面（NPC.DropTombstoneTownNPC
+     *  NPC.cs:79082-79108）：>0 = 死者城镇 NPC 型。与玩家面（前 6 参）五处分野：
+     *  ①款式门不看身家——商人 17/税收官 441 恒金墓碑 527+rand(5)（:79097-79102），
+     *    余 43(1/6) 或 200+roll(6)（:79093-79096）；②抛向掷 = Next(2) ±0.1 抛币
+     *    （:79086-79090 num=±0.1,玩家面用 hitDirection）；③弹速无 FTW ×1.5 支；
+     *    ④damage/knockBack 恒 0（NewProjectile 第 6/8 参直写 0,Projectile.cs:10920-10921
+     *    参数覆写在 SetDefaults 之后——SetDefaults FTW 70/10 面不适用,纯物理恒）；
+     *    ⑤miscText = 死亡文本（:79107 deathText.ToString(),无日期——玩家面
+     *    deathText+"\n"+ToLongDate :39455-39461）。掷序 1:1 = 抛币→游走→款式→vx→vy。 */
+    townNpcType = 0) {
     super();
-    this.style = pickStyle(coinsOwned);
-    this.epitaph = `${deathText}\n${longDate()}`;
+    this.epitaph = townNpcType > 0 ? deathText : `${deathText}\n${longDate()}`;
     // DropTombstone L38446-38449：随机游走修正直到 |num|≥2（范围 ±3.5）
     let num = (Math.floor(Math.random() * 71) - 35) * 0.1;
     while (num < 2 && num > -2) num += (Math.floor(Math.random() * 61) - 30) * 0.1;
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
-    // :39437-39439 非 FTW 抛射 / :39440-39442 getGood 分支 ×1.5
+    if (townNpcType > 0) {
+      // :79086-79090 抛向抛币（±0.1）→ :79092-79102 款式 → :79103-79105 弹速
+      const flip = (Math.floor(Math.random() * 2) === 0 ? -1 : 1) * 0.1;
+      const roll = Math.floor(Math.random() * 6);                // :79092 Next(6) 单掷同用
+      const type = (townNpcType === 17 || townNpcType === 441)
+        ? 527 + Math.floor(Math.random() * 5)                    // :79097-79102 恒金
+        : (roll !== 0 ? 200 + roll : 43);                        // :79093-79096 → 201-205/43
+      this.style = graveTypeToStyle(type);
+      // Next(10,30)*num + num2（Next 全 [min,max) 半开——上限取 rand*跨度）
+      this.vx = (Math.floor(Math.random() * 20) + 10) * flip + num;
+      this.vy = (Math.floor(Math.random() * 20) - 40) * 0.1;     // -4.0 .. -2.1 上抛
+      this.dmg = 0;
+      this.knockBack = 0;
+      return;
+    }
+    this.style = pickStyle(coinsOwned);
+    // :39437 非 FTW 抛射 / 同行三目 getGood 分支 ×1.5——Next(10,30)/Next(-40,-20) 整数
+    // 半开界 = 10..29 / -40..-21（各 20 值；★BJ587 玩家面 off-by-one 清偿：旧 *21 乘式
+    // 溢出 30/-20 两端点。城镇面 :79105 同界 *20 正确式已由 BJ562 落，玩家面对齐）
     const mul = getGood ? 1.5 : 1;
-    this.vx = ((Math.floor(Math.random() * 21) + 10) * 0.1 * hitDirection + num) * mul;
-    this.vy = (Math.floor(Math.random() * 21) - 40) * 0.1 * mul; // -2 .. -4 上抛
+    this.vx = ((Math.floor(Math.random() * 20) + 10) * 0.1 * hitDirection + num) * mul;
+    this.vy = (Math.floor(Math.random() * 20) - 40) * 0.1 * mul; // -4.0 .. -2.1 上抛
     this.dmg = getGood ? 70 : 0;      // :39430-39433（damage=0 → 三伤害面全早退）
     this.knockBack = getGood ? 10 : 0; // num3（:39431-39433;NewProjectile 第 8 参覆写 12f）
   }
 
   /** 墓碑弹型（ProjectileID.IsAGravestone 域：ProjectileID.cs:29）——style 反查
-   *  （:25681-25687 的正映射逆运算）：0→43、1-5→201-205、6-10→527-531 */
+   *  （aiStyle17 正映射 :25659-25667 的逆运算）：0→43、1-5→201-205、6-10→527-531。
+   *  ★BJ562（2026-10-09）勘误：金档反查旧式 `522+style` 漂 +1——6→528（应 527）、
+   *  10→532（应 531,且 532 出 IsAGravestone 域,湿段数据/成就归因域读空）。正逆运算
+   *  对拍：style = type-527+6 ⟺ type = style+521。 */
   get projId(): number {
     if (this.style === 0) return 43;
     if (this.style <= 5) return 200 + this.style;
-    return 522 + this.style;
+    return 521 + this.style;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -147,6 +184,16 @@ export class Tombstone extends Entity {
     this.angle += this.vx * 0.1;
     // aiStyle17 专用重力 0.2/帧（Projectile.cs:25641，非全局 GRAVITY 0.36）
     this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
+    // ★BJ587 FTW 慢速清伤（aiStyle17 Projectile.cs:25644-25648）：getGoodWorld &&
+    // |vx|+|vy| < 1 → damage=0 / knockBack=0——清弹自身字段恒久生效（原版无恢复支，
+    // 次拍起 Damage 首门 dmg<=0 全早退）。位次=重力/翻滚后、owner 门与安放判定前
+    // （本仓对应位=重力行后、applyDamage 前）。城镇面出射墓碑 damage 恒 0
+    // （DropTombstoneTownNPC :79105 第 6/8 参直写 0）→ 本支纯 no-op 零改动；
+    // 非 FTW 世界门恒假 → 普通世界零行为差。速度阈对重力后终值判定（原版同位）。
+    if (game.world.seedFlags?.getGoodWorld && Math.abs(this.vx) + Math.abs(this.vy) < 1) {
+      this.dmg = 0;
+      this.knockBack = 0;
+    }
     // ---- ★通用湿段（:16895-17113,共享体）——AI 后/位移前 = 原版 Update 同序;
     //  溅花尘/音由共享体 wetSplashStepShared 承载（水中墓碑入水/出水各溅 10 粒）;
     //  IsDestroyedByWater 域不含墓碑族（{85,15,188,34,1097,1106}）→ hooks 不接。

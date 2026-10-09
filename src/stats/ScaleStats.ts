@@ -928,7 +928,12 @@ function scaleStatsForExpertHardmode(s: ScalingStats, ctx: ScaleStatsWorld): voi
   let num2 = 80;                                              // :18480
   if (ctx.downedPlantBoss) num2 += 20;                        // :18481-18483
   if (num < num2) {                                           // :18484
-    const num3 = f32(num2 / num);
+    // ★BJ585（2026-10-09）：原版 `float num3 = num2 / num;`（NPC.cs:18584）——
+    //   num2/num 均 int，C# 整数除法天然截断（floor）后再隐式转 float。
+    //   旧式 f32(num2/num) 保留浮点商（80/46≈1.739）→ 专家困难杂兵伤害/血防全面虚高
+    //   （用户实报：哥布林侦察兵 51 防御扣血 30-41，修正后应为 1-2）。
+    //   侦察兵钉值：n=46<threshold 80 → num3=floor(80/46)=1（世花后 floor(100/46)=2）。
+    const num3 = f32(Math.floor(num2 / num));
     s.damage = Math.trunc(f32(f32(s.damage * num3) * 0.9));   // :18486
     if (!isProj) {                                            // :18487-18492
       s.defense = Math.trunc(f32(s.defense * num3));

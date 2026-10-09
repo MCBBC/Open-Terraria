@@ -12,7 +12,7 @@ import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { Entity } from './Entity';
 import { playerCanHitEnemy, hitPlayer } from './projTargets';
-import { modProjSpecOf, modProjModIdOf, applyModNpcBuff, type ModProjLike } from '../mods/hooks';
+import { modProjSpecOf, modProjModIdOf, applyModNpcBuff, modProjIdOfKey, type ModProjLike } from '../mods/hooks';
 import { modBuffTypeOf } from '../mods/buffs';
 import type { Enemy } from './Enemy';
 
@@ -50,6 +50,7 @@ export class ModProj extends Entity {
   kill(): void { this.dead = true; }
 
   ownerX = 0; ownerY = 0; orbitPhase = 0; orbitCx: number | null = null; orbitCy: number | null = null;
+  holdT = 0;   // ★三百五十一刀:holdout 节拍计数
 
   fixedUpdate(dt: number, game: GameHooks): void {
     const like = this as unknown as ModProjLike;
@@ -63,8 +64,44 @@ export class ModProj extends Entity {
       return;
     }
     if (this.dead) return;
-    // —— 寿命(缺省 3600) ——
     this.ageTicks++;
+    // ★三百五十一刀:holdout 原语(Calamity Holdout 弹范式——跟随玩家/channel
+    //  门/魔耗/timeLeft 续命;RancorHoldout.cs 等全系同构)
+    if (this.spec.holdout) {
+      const p = (game as unknown as { player?: { cx: number; cy: number; dead?: boolean; checkMana?(n: number): boolean } }).player;
+      const held = (game as unknown as { input?: { mouseHeld?: boolean } }).input?.mouseHeld;
+      const h = this.spec.holdout;
+      if (!p || p.dead || !held) { this.dead = true; return; }   // channel 门
+      this.x = p.cx - this.w / 2;                                 // 跟随(:35 Owner.Center+offset)
+      this.y = p.cy - this.h / 2;
+      this.vx = 0; this.vy = 0;
+      this.holdT = (this.holdT ?? 0) + 1;
+      if (h.manaCost && this.holdT % (h.manaRate ?? 12) === 0) {  // 魔耗节拍(:22 rate12)
+        if (!p.checkMana!(h.manaCost)) { this.dead = true; return; }
+      }
+      // ★三百五十六刀:节拍射击面(shoot.every tick 自动发射;atMouse=鼠标处生成;
+      //  proj=mod 弹全键,经 hooks.projKeyIndex 解析——节拍射击族 holdout 免写钩)
+      const sh = h.shoot;
+      if (sh && sh.proj && this.holdT % Math.max(1, sh.every) === 0) {
+        const pid = modProjIdOfKey(sh.proj);
+        if (pid >= 0) {
+          const gg = (globalThis as { __swGame?: { camera?: { screenToWorld?(x: number, y: number): [number, number] }; input?: { mouseX: number; mouseY: number } } }).__swGame;
+          const mwt = gg?.camera?.screenToWorld && gg.input
+            ? gg.camera.screenToWorld(gg.input.mouseX, gg.input.mouseY) : null;
+          const [mx, my] = mwt ?? [this.cx, this.cy - 100];
+          const dx = mx - this.cx, dy = my - this.cy;
+          const dd = Math.hypot(dx, dy) || 1;
+          const v = sh.vel ?? 8;
+          const px = sh.atMouse ? mx : this.cx;
+          const py = sh.atMouse ? my : this.cy;
+          (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(
+            new ModProj(px, py, (dx / dd) * v, (dy / dd) * v, this.damage, 0, pid, true));
+        }
+      }
+      this.spec.update?.(this as unknown as ModProjLike, game as never);   // 首帧附属/射击节拍=弹钩
+      return;                                                     // 寿命由 channel 门管(续命同义)
+    }
+    // —— 寿命(缺省 3600) ——
     const life = this.spec.lifetime ?? 3600;
     if (this.ageTicks > life) { this.dead = true; return; }
     // ★B7 一百零六刀:原语②accelerate(初速向推进)/③boomerang(返程)/④orbit(环绕)
@@ -77,8 +114,11 @@ export class ModProj extends Entity {
       const ox = this.ownerX, oy = this.ownerY;
       const dx = ox - this.cx, dy = oy - this.cy;
       const d = Math.hypot(dx, dy) || 1;
-      this.vx += (dx / d) * this.spec.boomerang.accel;
-      this.vy += (dy / d) * this.spec.boomerang.accel;
+      // ★三百四十二刀:accel 缺省 0.5(vanilla aiStyle 3 返程臂=向 owner 每帧加速,
+      //  1457 重构后字面待核=登记;实参可经声明面 boomerang.accel 覆写)
+      const accel = this.spec.boomerang.accel ?? 0.5;
+      this.vx += (dx / d) * accel;
+      this.vy += (dy / d) * accel;
       if (d < 24) this.dead = true;   // 拾取消亡
     }
     if (this.spec.orbit) {
