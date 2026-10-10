@@ -51,6 +51,10 @@ export class ModProj extends Entity {
 
   ownerX = 0; ownerY = 0; orbitPhase = 0; orbitCx: number | null = null; orbitCy: number | null = null;
   holdT = 0;   // ★三百五十一刀:holdout 节拍计数
+  /** ★五百八十二:holdout 释放存续态(onChannelEnd 返回 true 置位——channel 门解除,
+   *  update 钩自管转储/再装填并自行 kill;C# Condemnation 弹倾泻/M1Garand 装填弹体
+   *  存续面。mod 侧经 p.__swHoldoutReleased 读) */
+  __swHoldoutReleased = false;
 
   fixedUpdate(dt: number, game: GameHooks): void {
     const like = this as unknown as ModProjLike;
@@ -71,10 +75,21 @@ export class ModProj extends Entity {
       const p = (game as unknown as { player?: { cx: number; cy: number; dead?: boolean; checkMana?(n: number): boolean } }).player;
       const held = (game as unknown as { input?: { mouseHeld?: boolean } }).input?.mouseHeld;
       const h = this.spec.holdout;
+      // ★五百八十二:释放存续期——channel 门/魔耗/节拍射击全解除,只跑 update 钩
+      //  (mod 侧转储/再装填/kill 自管;寿命不受 3600 上限——存续弹自管消亡)
+      if (this.__swHoldoutReleased) {
+        this.spec.update?.(this as unknown as ModProjLike, game as never);
+        return;
+      }
       if (!p || p.dead || !held) {
-        // ★五百七十一:channel 结束钩(松开左键/死亡时调用=释放面;C# KillHoldoutLogic 同位)
-        h.onChannelEnd?.(this as any, game as any);
-        this.dead = true; return;
+        // ★五百七十一:channel 结束钩(松开左键/死亡时调用=释放面;C# KillHoldoutLogic
+        //  同位)——★五百八十二:返回 true=释放存续(C# Condemnation 转储至耗尽/
+        //  M1Garand 再装填中弹体不亡),置释放态后 update 钩接管;false/void=照旧消亡
+        const keep = h.onChannelEnd?.(this as any, game as any) === true;
+        if (!keep) { this.dead = true; return; }
+        this.__swHoldoutReleased = true;
+        this.spec.update?.(this as unknown as ModProjLike, game as never);
+        return;
       }   // channel 门
       this.x = p.cx - this.w / 2;                                 // 跟随(:35 Owner.Center+offset)
       this.y = p.cy - this.h / 2;

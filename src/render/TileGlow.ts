@@ -43,8 +43,8 @@ export interface TileGlowOp {
  *   · :1101-1118 finalColor 段 case 129：`finalColor = new Color(255,255,255,100)`（碎块域）
  *     /`fx>=324 → Color.Transparent`（凝胶域本体层不画）；**vector 抖动全域生效**：
  *     fy<36 → vector.Y += 2×(fy==0 ? +1 : -1)；else → vector.X += 2×(fy==36 ? +1 : -1)。
- *   · :1196-1341 glow 段（GlowMask 层,本体层之后?——否,:1196 段在 DrawBasicTile(:1527)
- *     本体主绘【之前】）case 129：碎块域 flag3=true 跳过；凝胶域 4×白模带
+ *   · :1196-1341 glow 段（GlowMask 层,在 DrawBasicTile(:1527) 本体主绘【之前】）case 129：
+ *     碎块域 flag3=true 跳过；凝胶域 4×白模带
  *     （src=(fx+addFrX, fy+addFrY+72),调制=hslToRgb(0.7+sin(2π·GTW·0.16+x·0.3+y·0.7)×0.16,1,0.5),
  *     A/=2×0.3=38,dest=vector±(2,0)/(0,2) 四向）→ 尾笔 color2=(255,255,255,100) 本体帧
  *     （src=(fx+addFrX, fy+addFrY),dest=vector）——**辉光先/本体后**（红蓝-G② 同序）。
@@ -54,17 +54,22 @@ export interface TileGlowOp {
  *     白100——**不含光照色**（GetFinalLight 结果被覆写）→ 全域自发光免光照。
  *  迁层真凶（BJ621）：BJ118① 曾把等价像素画进 drawVanillaCell（世界层）→ 本仓合成乘光
  *  管线吃暗 → 凝胶格「半透+暗」（用户实报原版不半透）。
- *  @param fx frameX（碎块域 0..306 / 凝胶域 324..414+addFr 动画）
- *  @param fy frameY 方向带 0(站)/18(垂)/36(右锚)/54(左锚)
- *  @param jx jy 抖动已含（调用方传 vector 抖动后世界像素——本函数收格基坐标×16+抖动） */
+ *  @param fx frameX（碎块域 0..306 / 凝胶域 324..414+addFr 动画在函数内消费）
+ *  @param fy frameY 方向带 0(站)/18(垂)/36(右锚)/54(左锚)——抖动由此内置
+ *  @param tileX tileY 格坐标（dest=格×16+抖动;129 无 tileTop 覆盖=0 锚注） */
 export function crystal129Ops(
-  fx: number, fy: number, dx: number, dy: number, clockSec: number, x: number, y: number,
+  fx: number, fy: number, tileX: number, tileY: number, clockSec: number,
 ): TileGlowOp[] {
   const isGel = fx >= 324;
+  // 抖动（:1105-1116 verbatim,全域生效）
+  const jx = fy >= 36 ? (fy === 36 ? 2 : -2) : 0;
+  const jy = fy < 36 ? (fy === 0 ? 2 : -2) : 0;
+  const dx = tileX * 16 + jx;
+  const dy = tileY * 16 + jy;                // tileTop=0（case 129 无 tileTop 改动,锚注）
   const ops: TileGlowOp[] = [];
   if (isGel) {
     const addFx = crystalShardAddFrX(fx);
-    const tint = shardGlowTint(clockSec, x, y);            // [r,g,b,38]（A/=2×0.3 verbatim）
+    const tint = shardGlowTint(clockSec, tileX, tileY);   // [r,g,b,38]（A/=2×0.3 verbatim）
     for (const [ox, oy] of [[2, 0], [0, 2], [-2, 0], [0, -2]] as const) {
       ops.push({
         tex: 'vanilla/Tiles_129.png', sx: fx + addFx, sy: fy + 72, sw: 16, sh: 16,
@@ -122,15 +127,11 @@ export function drawTileGlows(
       const fy = st.frameY[i];
       if (kind === 'crystal129') {
         // ★BJ621 迁层支（:1101-1118/:1276-1318 verbatim,语义见 crystal129Ops 注）：
-        // 全域自发光免光照;抖动全域生效（fy=0→+2y/18→-2y/36→+2x/54→-2x）;白模带越界防御
-        // （fy=54 时 sy+72+16=142≤144 恰满,fy 域外不画）。addFrX 横向动画钟同本体侧。
+        // 全域自发光免光照;抖动内置;白模带越界防御（fy=54 时 sy+72+16=142≤144 恰满）。
         const img = atlas.ensureVImage('vanilla/Tiles_129.png') ?? null;
         if (!img || img.width < 432 || img.height < 144) continue;
-        const top = tileDrawYOffsetOf(129, fx, fy);
-        const jx = fy >= 36 ? (fy === 36 ? 2 : -2) : 0;
-        const jy = fy < 36 ? (fy === 0 ? 2 : -2) : 0;
         if (fy + 72 + 16 > img.height) continue;                     // 白模带越界防御（方向带域外）
-        emit(crystal129Ops(fx, fy, x * TILE + jx, y * TILE + top + jy, shardGlowClock(), x, y));
+        emit(crystal129Ops(fx, fy, x, y, shardGlowClock()));
         continue;
       }
 

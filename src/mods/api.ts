@@ -20,7 +20,7 @@ import type { ModIdAllocation } from './types';
 import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem,
+  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { applyBuffTicks } from '../entities/projStatus';   // ★四百九十刀:敌侧原版 debuff
@@ -77,12 +77,14 @@ export interface ModContext {
   /** B6:播原版 SoundID 键音效(位置可选;mod 音频装载=余段) */
   playSound(files: string[], volume?: number, x?: number, y?: number): void;
   /** 给声明弹幕(content/projectiles/*.json)追加代码钩(update/onHit 族;
-   *  未注册键 fail-fast) */
+   *  未注册键 fail-fast;★五百八十二:onChannelEnd 仅 holdout 弹——返回 true=
+   *  释放存续,update 钩自管转储/装填/kill) */
   projectileHook(key: string, hooks: {
     update?: (p: unknown, game: unknown) => void;
     onHit?: (p: unknown, enemy: unknown, game: unknown) => boolean | void;
     onHitPlayer?: (p: unknown, game: unknown) => boolean | void;
     onTileHit?: (p: unknown, game: unknown) => boolean | void;
+    onChannelEnd?: (p: unknown, game: unknown) => boolean | void;
   }): void;
   /** 注册 mod buff(本地玩家;onTick 逐 tick;图标/名称/buff 栏全链) */
   buff(key: string, spec: ModBuffSpec): void;
@@ -392,7 +394,12 @@ export function createModContext(
       const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
       const pid = alloc.projs.get(full);
       if (pid === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册弹幕: ${key}`);
-      const g = game as { entities: { add(e: unknown, bucket: string): void } };
+      const g = game as { entities: { projectiles: Array<{ projId?: number; dead?: boolean }>; add(e: unknown, bucket: string): void } };
+      // ★五百八十二:holdout 同型独占(C# Player.CantUseHoldout 语义——channel 期
+      //  重入 itemUse 不叠弹;释放存续期同在册=同样拦)
+      if (ownerIsPlayer && modProjSpecOf(pid)?.holdout) {
+        if (g.entities.projectiles.some((q) => !q.dead && q.projId === pid)) return;
+      }
       void import('../entities/ModProj').then(({ ModProj }) => {
         g.entities.add(new ModProj(x, y, vx, vy, damage, knockback, pid, ownerIsPlayer), 'projectiles');
       });

@@ -88,7 +88,7 @@ export interface ModAccAccumulator {
    *  GetCritChance<系>/endurance;聚合显式合并) */
   dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
   critMelee?: number; critRanged?: number; critMagic?: number; critAll?: number;
-  endurance?: number;
+  endurance?: number; dmgMinion?: number;
   /** ★四百七十二刀:冲刺授予档(原版 dashType 1=忍者/盾冲族;聚合取 max) */
   dash?: number;
   /** ★四百七十二刀:vanilla-accfx 键形旗包(dashType/blackBelt/noFallDmg/accFlipper/
@@ -238,6 +238,9 @@ export function registerProjHooks(projId: number, hooks: {
   onHit?: ModProjSpec['onHit'];
   onHitPlayer?: ModProjSpec['onHitPlayer'];
   onTileHit?: ModProjSpec['onTileHit'];
+  /** ★五百八十二:channel 结束钩(仅 holdout 弹;返回 true=释放存续——C#
+   *  Condemnation 转储/M1Garand 装填弹体存续面;非 holdout 弹 fail-fast) */
+  onChannelEnd?: (p: any, game: any) => boolean | void;
 }): void {
   const spec = projSpecs.get(projId);
   if (!spec) throw new Error(`[mod-hooks] projectileHook 引用未注册弹: ${projId}`);
@@ -245,6 +248,10 @@ export function registerProjHooks(projId: number, hooks: {
   if (hooks.onHit) spec.onHit = hooks.onHit;
   if (hooks.onHitPlayer) spec.onHitPlayer = hooks.onHitPlayer;
   if (hooks.onTileHit) spec.onTileHit = hooks.onTileHit;
+  if (hooks.onChannelEnd) {
+    if (!spec.holdout) throw new Error(`[mod-hooks] onChannelEnd 仅 holdout 弹可挂: ${projId}`);
+    spec.holdout.onChannelEnd = hooks.onChannelEnd;
+  }
 }
 
 /** 资产相位:全部 mod 弹注册簿(注入 vanilla/Projectile_<id>.png 覆盖键用) */

@@ -51,6 +51,7 @@ import {
   TILE_ANIM_PITCH, TILE_ANIM_RATE, TILE_ANIM_FRAMES,
 } from '../src/render/TileAnim';
 import { drawAdjust } from '../src/render/VanillaTiler';
+import { crystal129Ops } from '../src/render/TileGlow';
 
 const SID = new Map<number, number>();
 for (let id = 0; id < TILE_DEFS.length; id++) {
@@ -176,7 +177,29 @@ describe('★BJ621 T3 凝胶域全相位源矩形恒在 Tiles_129 表界内（43
   });
 });
 
-// ============================================================ T4 帧域互斥全域锁（MV4）
+// ============================================================ T5 免光照迁层守卫（BJ621 半透定谳刀）
+describe('★BJ621 T5 迁层架构守卫：129 全域自发光走 TileGlow（免光照面）防回退', () => {
+  it('源码守卫：crystal129Ops 消费于 TileGlow / drawVanillaCell 无 case 129 专支 / 动态层 skip 129', () => {
+    const glow = readFileSync('src/render/TileGlow.ts', 'utf8');
+    expect(glow).toContain("kind === 'crystal129'");                 // 扫描支在位
+    expect(glow).toContain('crystal129Ops(fx, fy, x, y, shardGlowClock())');
+    const tiler = readFileSync('src/render/VanillaTiler.ts', 'utf8');
+    expect(tiler).not.toContain('drawShardCell(ctx');                // 世界层专支已摘（双画防线）
+    expect(tiler).toContain('129 专支');                            // 迁层注记在位
+    expect(tiler).toContain('已整段迁出');
+    const renderer = readFileSync('src/render/Renderer.ts', 'utf8');
+    expect(renderer).toContain('if (sheet === 129) continue;');      // 动态层 skip 防双画
+  });
+
+  it('op 面亮度锁：本体笔 alpha=100/255 免光照调制（白100 verbatim）——半透病复发即红', () => {
+    const ops = crystal129Ops(324, 0, 200, 91, 0);
+    const body = ops[ops.length - 1];
+    expect(body.alpha).toBeCloseTo(100 / 255, 12);                   // :1103/:1313 (255,255,255,100)
+    expect(body.blend).toBe('over');
+    // 免光照面锚：op 由 itemGlowQueue 合成后冲刷（TileGlow.ts R3 注）——架构面由 T5 源码守卫钉
+    for (const o of ops.slice(0, 4)) expect(o.sy).toBe(72);          // 白模带（素材灰白行,用户素材截图对应）
+  });
+});
 describe('★BJ621 T4 碎块域/凝胶域帧域互斥：全域 fx × 全相位扫描（TileDrawing.cs:4687-4694 verbatim）', () => {
   it('碎块域 fx 0..306（18 style）全 tick addFrX 恒 0;凝胶域 324..414 全 tick 恒带内', () => {
     for (let t = 0; t < 48; t++) {

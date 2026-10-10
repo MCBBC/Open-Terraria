@@ -33,8 +33,9 @@ import {
   TILE_ANIM_PITCH, TILE_ANIM_RATE, TILE_ANIM_FRAMES, volcanoFrame59x,
 } from '../src/render/TileAnim';
 import {
-  SHARD_BASE_ALPHA, shardGlowTint, shardHslToRgb, drawAdjust, drawShardCell,
+  SHARD_BASE_ALPHA, shardGlowTint, shardHslToRgb, drawAdjust,
 } from '../src/render/VanillaTiler';
+import { crystal129Ops } from '../src/render/TileGlow';
 import { genTileFrame } from '../src/world/gen/vanilla/FinalCleanupPass';
 
 const SID = new Map<number, number>();
@@ -204,14 +205,26 @@ describe('★G-129 运行时面：锚亡杀+掉落（TileFrameImportant case 129
   });
 });
 
-// ============================================================ ★BJ118① 质感层（2026-09-18）
+// ============================================================ ★BJ118① 质感层（2026-09-18 落,★BJ621 2026-10-10 迁层改锁）
+// ★BJ621 迁层定谳：原版 tile 129 绘制色固定覆写 GetFinalLight（:1103 白100/:1107 凝胶
+//   Transparent+:1276-1318 glow 段 color2 独立）=全域自发光【不吃光照】——BJ118① 曾把
+//   等价像素画进 drawVanillaCell（世界层）被合成乘光吃暗=用户实报「原版不是半透的」真凶。
+//   现绘制面=TileGlow crystal129 支（crystal129Ops→itemGlowQueue 合成后冲刷,免光照）,
+//   绘序金标改锁 op 面（序/α/抖动/带门同原版 verbatim）。
 // 变异证红映射：
 //   Mα  SHARD_BASE_ALPHA 100/255 → 1      → T-α 红（半透明基底丢失）
 //   Mhue shardGlowTint 0.16 → 0.32        → T-pulse 红（脉动周期 6.25s→3.125s）
 //   Mhsl hue2rgb 分支回归                  → T-hsl 红（(0.7,1,0.5)=(51,0,255) 权威值）
-describe('★BJ118① 碎块质感：半透明基底 + 大簇彩虹辉光（TileDrawing.cs:1101-1118/:1276-1293）', () => {
-  it('T-α：基底恒 α100（(255,255,255,100)→100/255;大簇 Transparent+glow 重画净效果同）', () => {
+//   MO1 op 序回滚（本体笔先于白模带）       → T-序 红
+//   MO2 白模带 sy 摘 +72 / 抖动摘          → T-序/T-抖 红
+describe('★BJ118①/BJ621 碎块质感 op 面：白模带 4 向+α100 本体笔（TileDrawing.cs:1101-1118/:1276-1318）', () => {
+  it('T-α：本体笔调制恒 (255,255,255,100)——alpha=100/255（SHARD_BASE_ALPHA 锁值）', () => {
     expect(SHARD_BASE_ALPHA).toBeCloseTo(100 / 255, 12);
+    const ops = crystal129Ops(324, 0, 200, 91, 0);
+    const body = ops[ops.length - 1];                       // 本体笔恒尾位（辉光先/本体后）
+    expect(body.blend).toBe('over');
+    expect(body.tint).toEqual([1, 1, 1]);
+    expect(body.alpha).toBeCloseTo(100 / 255, 12);
   });
 
   it('T-hsl：Main.hslToRgb(hue2rgb) verbatim——hsl(0.7,1,0.5)=(51,0,255)（hue 252° 蓝紫）', () => {
@@ -246,6 +259,65 @@ describe('★BJ118① 碎块质感：半透明基底 + 大簇彩虹辉光（Tile
     // 空间相位：同钟异坐标 → 色相错相（x·0.3+y·0.7 项）
     expect(shardGlowTint(0, 1, 0)).not.toEqual(shardGlowTint(0, 0, 0));
     expect(shardGlowTint(0, 0, 1)).not.toEqual(shardGlowTint(0, 0, 0));
+  });
+
+  it('T-序（BJ621 op 面）：凝胶域 5 笔=4 白模带先（sy=fy+72,α38,tint 脉动,±2 四向）+α100 本体笔尾位', () => {
+    tileAnim.tick = 0;                                     // 相位 0（钟为全局,钉相断言）
+    const ops = crystal129Ops(324, 0, 200, 91, 0);
+    expect(ops).toHaveLength(5);
+    // 白模带 4 笔：sy=fy+72=72、sx=fx+addFrX（相位 0 → 324）、四向 ±2、blend over、α=38/255
+    // dest=格×16+抖动（fy=0 → +2y）+四向偏移
+    const dirs = [[2, 0], [0, 2], [-2, 0], [0, -2]];
+    for (let k = 0; k < 4; k++) {
+      const o = ops[k];
+      expect(o.tex).toBe('vanilla/Tiles_129.png');
+      expect(o.sx).toBe(324);
+      expect(o.sy).toBe(72);
+      expect([o.dx - 3200, o.dy - 1456]).toEqual([dirs[k][0], dirs[k][1] + 2]);
+      expect(o.blend).toBe('over');                          // TileBatch AlphaBlend（非加色）
+      expect(o.alpha).toBeCloseTo(38 / 255, 12);
+      expect(o.tint).toEqual(shardGlowTint(0, 200, 91).slice(0, 3).map((v) => v / 255));
+    }
+    // 本体笔尾位盖顶：sx=324/sy=fy=0/抖动原位
+    const body = ops[4];
+    expect(body.sy).toBe(0);
+    expect([body.dx - 3200, body.dy - 1456]).toEqual([0, 2]);
+  });
+
+  it('T-抖（:1105-1116 verbatim）：fy=0→+2y / 18→-2y / 36→+2x / 54→-2x（全域本体笔同抖）', () => {
+    tileAnim.tick = 0;
+    const cases: Array<[number, number, number]> = [[0, 0, 2], [18, 0, -2], [36, 2, 0], [54, -2, 0]];
+    for (const [fy, jx, jy] of cases) {
+      const ops = crystal129Ops(306, fy, 100, 200, 0);       // 碎块域单笔
+      const body = ops[ops.length - 1];
+      expect([body.dx - 1600, body.dy - 3200]).toEqual([jx, jy]);
+    }
+    // 凝胶域同抖（vector 修改在辉光段之前=全域生效）：白模带首笔=抖动+四向
+    for (const [fy, jx, jy] of cases) {
+      const ops = crystal129Ops(324 + (fy / 18) * 18, fy, 100, 200, 0);
+      const dirs = [[2, 0], [0, 2], [-2, 0], [0, -2]];
+      expect([ops[0].dx - 1600 - dirs[0][0], ops[0].dy - 3200 - dirs[0][1]]).toEqual([jx, jy]);
+    }
+  });
+
+  it('T-小簇（BJ621 op 面）：fx<324 → 仅 1 笔本体（α100 白调制,无白模带,sx=fx 无 addFr）', () => {
+    const ops = crystal129Ops(306, 54, 100, 200, 0);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].sx).toBe(306);
+    expect(ops[0].sy).toBe(54);
+    expect(ops[0].alpha).toBeCloseTo(100 / 255, 12);
+  });
+
+  it('T-差：核心叠域绘序差 >0（op 序金标的解析直证——白模带先/本体后不可交换）', () => {
+    const ab = SHARD_BASE_ALPHA;
+    const ag = 38 / 255;
+    const B = [255, 255, 255];
+    const C = [15, 0, 76];
+    const w4 = 1 - Math.pow(1 - ag, 4);
+    const glowFirst = B.map((b, i) => ab * b + (1 - ab) * (w4 * C[i]));   // 原版序：白模带先、本体后
+    const bodyFirst = B.map((b, i) => w4 * C[i] + (1 - w4) * (ab * b));   // 反序：本体先、白模带后
+    const d = Math.max(...glowFirst.map((v, i) => Math.abs(v - bodyFirst[i])));
+    expect(d).toBeGreaterThan(0);
   });
 });
 
@@ -466,79 +538,5 @@ describe('★红蓝-G① 彩灯掉落面：killDropFace case 149 三色帧域（
   });
 });
 
-// ============================================================ ★红蓝-G② 碎块辉光绘序（2026-09-18）
-// 定谳：TileDrawing.cs glow 段「先」tileBatch 4×(band+72) 色副本（:1290-1295）、「后」
-// α100 基底（:1313 color2=(255,255,255,100) → !flag3 尾画）——16×18 核心叠域 4 副本
-// 互叠+基底盖顶 source-over 不可交换（Δ=αB·w4·(基底−tint),w4=1-(1-αg)^4>0）。本仓曾
-// 反序（先基底后副本）→ 核心域微弱色差,已按原版序调正（drawShardCell 副本先行）。
-// 变异证红映射：
-//   MO1 回滚绘序（基底先画）              → T-序 红（基底 drawImage 先于辉光副本）
-//   MO2 副本调用 α 记录非 1/基底非 100/255 → T-序 红（逐调用 α 语义同锁）
-describe('★红蓝-G② 碎块绘序：辉光副本先于 α100 基底（TileDrawing.cs:1290→:1313）', () => {
-  /** 记录桩 ctx + Node 无 DOM 下 shardTintedCopy 的最小画布件 */
-  function shardDrawRecs(fx: number): Array<{ tex: unknown; alpha: number; ex: number; fy: number }> {
-    (globalThis as unknown as { document: unknown }).document = {
-      createElement(): unknown {
-        const cv: Record<string, unknown> = { width: 0, height: 0 };
-        cv.getContext = () => ({
-          drawImage: () => undefined,
-          getImageData: (_x: number, _y: number, w: number, h: number) => {
-            const data = new Uint8ClampedArray(w * h * 4);
-            for (let p = 0; p < data.length; p += 4) { data[p] = 200; data[p + 1] = 180; data[p + 2] = 160; data[p + 3] = 255; }
-            return { data, width: w, height: h };
-          },
-          putImageData: () => undefined,
-        });
-        return cv;
-      },
-    };
-    try {
-      const img = { width: 512, height: 512 };
-      const recs: Array<{ tex: unknown; alpha: number; ex: number; fy: number }> = [];
-      const ctx = {
-        globalAlpha: 1,
-        drawImage(tex: unknown, _a: number, _b: number, _c: number, _d: number, e: number, f: number) {
-          recs.push({ tex, alpha: ctx.globalAlpha, ex: e, fy: f });
-        },
-      };
-      drawShardCell(ctx as unknown as CanvasRenderingContext2D,
-        { img: img as unknown as HTMLCanvasElement, sx: 36, sy: 0, sw: 16, sh: 18 },
-        36, 0, 100, 200, 9, 7, fx);
-      return recs;
-    } finally {
-      delete (globalThis as unknown as { document?: unknown }).document;
-    }
-  }
-
-  it('T-序：大簇 fx>=324 → 4 辉光副本先入（α=1,±2 四向）、α100 基底尾画盖顶', () => {
-    const recs = shardDrawRecs(324);
-    expect(recs).toHaveLength(5);
-    for (const r of recs.slice(0, 4)) {
-      expect(r.tex).not.toBe(recs[4].tex);           // 前四=染色副本画布
-      expect(r.alpha).toBe(1);                       // 副本 α 由 tint 像素承载
-    }
-    expect([recs[0].ex - 100, recs[0].fy - 200]).toEqual([2, 0]);   // ToRotationVector2 四向
-    expect([recs[1].ex - 100, recs[1].fy - 200]).toEqual([0, 2]);
-    expect([recs[2].ex - 100, recs[2].fy - 200]).toEqual([-2, 0]);
-    expect([recs[3].ex - 100, recs[3].fy - 200]).toEqual([0, -2]);
-    expect(recs[4].alpha).toBeCloseTo(SHARD_BASE_ALPHA, 12);        // 基底 (255,255,255,100)
-  });
-
-  it('T-小簇：fx<324 → 仅基底单画（无辉光副本,早退语义保持）', () => {
-    const recs = shardDrawRecs(18 * 17);             // 306 < 324
-    expect(recs).toHaveLength(1);
-    expect(recs[0].alpha).toBeCloseTo(SHARD_BASE_ALPHA, 12);
-  });
-
-  it('T-差：核心叠域调序前后像素差 >0（source-over 不可交换的直证;金标 α/tint 值）', () => {
-    const ab = SHARD_BASE_ALPHA;                     // 100/255（T-α 金标锁定）
-    const ag = 38 / 255;                             // tint α=38（T-glow 金标锁定）
-    const B = [255, 255, 255];                       // 基底核域白（不透明纹素）
-    const C = [15, 0, 76];                           // shardGlowTint(0,0,0) 金标值
-    const w4 = 1 - Math.pow(1 - ag, 4);              // 4 副本累计覆盖权
-    const copyFirst = B.map((b, i) => ab * b + (1 - ab) * (w4 * C[i]));   // 原版序：副本先、基底后
-    const baseFirst = B.map((b, i) => w4 * C[i] + (1 - w4) * (ab * b));   // 旧反序：基底先、副本后
-    const d = Math.max(...copyFirst.map((v, i) => Math.abs(v - baseFirst[i])));
-    expect(d).toBeGreaterThan(0);                    // 理论值 ≈ ab·w4·max|B-C| ≈ 47.6
-  });
-});
+// ★红蓝-G② 绘序金标已由上方 BJ118①/BJ621 op 面段（T-序/T-小簇/T-差）继承——drawShardCell
+// 桩随 BJ621 迁层（crystal129Ops→TileGlow）摘除,锁面换 op 序（免光照层语义同钉）。

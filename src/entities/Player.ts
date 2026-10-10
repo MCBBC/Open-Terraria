@@ -1489,6 +1489,13 @@ export class Player extends Entity {
    *  CalculatePower 战勋比例(postUpdate 消费器赋值);换算 C# statLifeMax/5/20×pct */
   modMaxLifePct = 0;
   modMaxLifePctDyn = 0;
+  /** ★五百七十九:mod 每帧 endurance 动态面(PSC 夜相 +0.05;C# :4174 endurance+=
+   *  PostUpdateMiscEffects 每帧位——equipStats.enduranceEq=cache-period 冻结面
+  *  承载不了昼夜翻转,走 dyn 台账赋值语义,消费与 enduranceEq 同口径双点) */
+  modEnduranceDyn = 0;
+  /** ★五百七十九:mod 随从上限动态面(PSC 守卫进攻加成 maxMinions+1;C# :1652
+   *  Player.maxMinions++——gate=profanedSoulBuffs mod 侧每帧算;赋值语义同上) */
+  modMinionAddDyn = 0;
   private shimmerUnstuckHelperUpdate(game: GameHooks): void {
     const dry = !this.shimmering && !this.inShimmer;   // flag = !shimmering && !shimmerWet（:26）
     if (dry) this.shimmerUnstuckIndefinite = false;
@@ -3668,7 +3675,8 @@ export class Player extends Entity {
   get maxMinions(): number {
     return 1 + (this.buffs.has(BuffType.Bewitched) ? 1 : 0)
       + (this.buffs.has(BuffType.Summoning) ? 1 : 0)
-      + (this.equipStats.minionSlots ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
+      + (this.equipStats.minionSlots ?? 0)   // ★BJ175 桩面 ?? 防御（缺省 0）
+      + this.modMinionAddDyn;   // ★五百七十九:mod 动态面(PSC 守卫 +1;postUpdate 赋值)
   }
   /** 哨兵上限（maxTurrets 链 :9863 War Table buff + 散件/套装——★终零波批注订正：
    *  旧注"War Table buff 未实装暂缺"系陈位,BuffType.WarTable(27,vanilla 348) 与
@@ -3770,6 +3778,7 @@ export class Player extends Entity {
       // 帕鲁坐骑 62-65（1457 Mount.cs UpdateEffects case 62/63/64/65 :4862-4867：
       // melee/ranged/magic/minion 四系各 += 0.1——疾旋鼬/疾旋火鼬及其 Trusty 版）
       if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
+      m += (this.equipStats as any).modDmgMinion ?? 0;   // ★五百七十七:mod dmgMinion
       return m;
     }
     let m = 1 + (kind === 'melee' ? (st.dmgMelee ?? 0) : kind === 'ranged' ? (st.dmgRanged ?? 0) : (st.dmgMagic ?? 0));   // ★BJ175 桩面 ?? 防御（缺省 0）
@@ -11625,6 +11634,8 @@ export class Player extends Entity {
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
       + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)
       + (this.equipStats.enduranceEq ?? 0)   // 日曜套 0.12（与 damage 同口径,2026-08-13 同步）
+      + this.modEnduranceDyn   // ★五百七十九:mod 每帧动态面(PSC 夜相;与 damage 同口径)
+      // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25
       // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25
       + (this.buffs.has(BuffType.IceBarrier) && this.hp <= this.maxHp / 2 ? 0.25 : 0);
     // 日曜护盾层预览不模拟消耗（取决于 damage 实际扣减序）,登记
@@ -11743,6 +11754,8 @@ export class Player extends Entity {
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
       + (eq.beetleDef ? 0.15 * this.beetleOrbs : 0)   // 甲虫壳每球 15%（buffs 95-97）
       + (eq.enduranceEq ?? 0)                           // 日曜套 0.12（:16224,2026-08-13 接）
+      + this.modEnduranceDyn   // ★五百七十九:mod 每帧动态面(PSC 夜相 +0.05;同口径)
+      // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25（蠕虫围巾 0.17 走 enduranceEq）
       // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25（蠕虫围巾 0.17 走 enduranceEq）
       + (this.buffs.has(BuffType.IceBarrier) && this.hp <= this.maxHp / 2 ? 0.25 : 0);
     // 玩家受伤防御难度系数（Main.cs:65646-65657 CalculateDamagePlayersTake：
