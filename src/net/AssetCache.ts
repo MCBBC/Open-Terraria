@@ -20,6 +20,7 @@ import { MUSIC } from '../data/Music';
 import { unzipSync } from 'fflate';   // zip 快路径页面直给解压(SW 不参与 warming)
 import { VANILLA_MISC } from '../assets/SpriteAtlas';
 import { mimeOf } from './assetMime';   // ★落库 CT 单源(2026-09-16 根修,见 assetMime.ts 头注)
+import { prefGet, prefRemove, prefSet } from '../save/PrefsStore';   // ★BJ627 trace/完成旗/hash 键迁 IDB 单写
 
 /** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动)。
  *  ★2(2026-08-21):public/sprites/vanilla/*.png 字节被并行会话 remaster 测试替换又
@@ -79,8 +80,10 @@ export function composeVersion(base: string, contentHash: string): string {
 }
 
 // ---- 诊断 trace(2026-08-27 手机无 Console 方案)----
-// 环形日志:内存(本轮)+ localStorage(跨刷新持久,pagehide 节流刷盘)。
+// 环形日志:内存(本轮)+ 持久份(★BJ627 迁 IDB 经 PrefsStore,pagehide 节流刷盘)。
 // 手机端经主菜单 logo 连点 5 次弹出 textarea 复制(readSwTrace)。
+// 登记注：pagehide 硬关闭(无 bfcache)窗口 IDB 事务可能不提交=末批 ≤120 条可能丢
+// ——诊断环可接受(导航/bfcache 路径正常提交;真机取证以 mid-session 刷盘批为主)。
 const TRACE_KEY = 'swAssetTrace';
 const TRACE_MAX = 300;
 let traceMem: string[] = [];
@@ -91,17 +94,17 @@ export function swTrace(msg: string): void {
   if (traceMem.length > 120) flushTrace();
 }
 function flushTrace(): void {
-  if (!traceMem.length || typeof localStorage === 'undefined') { traceMem = []; return; }
+  if (!traceMem.length) { traceMem = []; return; }
   try {
-    const prev = JSON.parse(localStorage.getItem(TRACE_KEY) ?? '[]') as string[];
-    localStorage.setItem(TRACE_KEY, JSON.stringify([...prev, ...traceMem].slice(-TRACE_MAX)));
+    const prev = JSON.parse(prefGet(TRACE_KEY) ?? '[]') as string[];
+    prefSet(TRACE_KEY, JSON.stringify([...prev, ...traceMem].slice(-TRACE_MAX)));
   } catch { /* 配额/隐私模式:丢持久份,内存份仍在 */ }
   traceMem = [];
   traceLastFlush = Date.now();
 }
 export function readSwTrace(): string[] {
   let persisted: string[] = [];
-  try { persisted = JSON.parse(localStorage.getItem(TRACE_KEY) ?? '[]') as string[]; } catch { /* */ }
+  try { persisted = JSON.parse(prefGet(TRACE_KEY) ?? '[]') as string[]; } catch { /* */ }
   return [...persisted, ...traceMem].slice(-TRACE_MAX);
 }
 if (typeof window !== 'undefined') {
@@ -304,16 +307,17 @@ export function assetsDownloadIdle(): boolean {
 /** 完成态本地标志(★2026-08-18 用户报"每次 build 后进单人游戏卡下载门槛"):
  *  门槛真正在等的是 SW status 回包——SW 冷启动 + cache.keys() 枚举万条缓存
  *  要 1-2s,期间 done=0 → 门槛误显示"正在下载 0%"(实际零下载,trace 实证
- *  仅 133 条正常懒载)。完成态落 localStorage:门槛先查标志秒开;SW 回包
- *  到达后若实测缓存被清,撤销标志回到真实门槛。版本随 key 走,新资产自然失效 */
+ *  仅 133 条正常懒载)。完成态落持久存储(★BJ627 迁 IDB 经 PrefsStore;同步读
+ *  走内存缓存):门槛先查标志秒开;SW 回包到达后若实测缓存被清,撤销标志回到
+ *  真实门槛。版本随 key 走,新资产自然失效 */
 const COMPLETE_FLAG = 'swAssetsComplete:';
 /** manifest contentHash 记忆(2026-08-27):成功会话落盘,失败会话沿用拼版本——
  *  保证缓存名跨会话稳定(否则失败会话换名触发 gc 误清成功会话的暖存) */
 const CONTENT_HASH_KEY = 'swContentHash:';
 function writeCompleteFlag(v: boolean): void {
   try {
-    if (v) localStorage.setItem(COMPLETE_FLAG + state.version, '1');
-    else localStorage.removeItem(COMPLETE_FLAG + state.version);
+    if (v) prefSet(COMPLETE_FLAG + state.version, '1');
+    else prefRemove(COMPLETE_FLAG + state.version);
   } catch { /* 隐私模式等 */
   }
 }
@@ -321,7 +325,7 @@ function writeCompleteFlag(v: boolean): void {
  *  罕见窗口里,懒载会走网络并由 SW 边下边补——自愈,可接受) */
 export function assetsCompleteFast(): boolean {
   if (assetsComplete()) return true;
-  try { return !!localStorage.getItem(COMPLETE_FLAG + state.version); } catch { return false; }
+  try { return !!prefGet(COMPLETE_FLAG + state.version); } catch { return false; }
 }
 
 /** 与 public/sw.js 的 CACHE_PREFIX 手工同步(缓存名前缀;改须双侧) */
@@ -417,7 +421,7 @@ async function fetchManifestInto(budgets: number[]): Promise<boolean> {
             const prevVer = state.version;
             state.version = composeVersion(state.version, m.contentHash);
             state.total = m.totalFiles;
-            try { localStorage.setItem(CONTENT_HASH_KEY, m.contentHash); } catch { /* */ }
+            try { prefSet(CONTENT_HASH_KEY, m.contentHash); } catch { /* */ }   // ★BJ627 IDB 单写
             swTrace(`manifest 试${a + 1} ok ${m.totalFiles}条 hash=${m.contentHash.slice(0, 8)} ${Date.now() - tA}ms ver ${prevVer}→${state.version}`);
           } else {
             state.total = m.totalFiles;
@@ -542,10 +546,10 @@ async function doInitAssetCache(): Promise<void> {
     // 拼版本 ⇒ 版本号恒定;本会话不 warm(下方门),缓存只读保命。
     if (!zipPlan) {
       try {
-        const prev = localStorage.getItem(CONTENT_HASH_KEY);
+        const prev = prefGet(CONTENT_HASH_KEY);   // ★BJ627:IDB(内存缓存)锚
         if (prev) {
           state.version = composeVersion(state.version, prev);
-          swTrace(`manifest失败锚定 localStorage hash=${prev.slice(0, 8)} → ver=${state.version}`);
+          swTrace(`manifest失败锚定 IDB hash=${prev.slice(0, 8)} → ver=${state.version}`);
         } else swTrace('manifest失败且无锚定 → ver=base');
       } catch { /* 隐私模式等:保底 base 形态 */ }
     }
@@ -746,10 +750,10 @@ export async function buildAssetDiagReport(): Promise<string> {
     if (est) line(`存储: 已用 ${DIAG_MB(est.usage ?? 0)}/配额 ${est.quota != null ? DIAG_MB(est.quota) : '?'}${persisted}`);
   } catch { /* */ }
   try {
-    const flag = localStorage.getItem(COMPLETE_FLAG + state.version);
-    const hash = localStorage.getItem(CONTENT_HASH_KEY);
+    const flag = prefGet(COMPLETE_FLAG + state.version);   // ★BJ627:IDB(内存缓存)口径
+    const hash = prefGet(CONTENT_HASH_KEY);
     line(`本地旗: 完成旗@${state.version}=${flag ? '在' : '无'}  contentHash=${hash ? hash.slice(0, 8) : '无'}`);
-  } catch { line('本地旗: localStorage 不可用'); }
+  } catch { line('本地旗: 存储不可用'); }
   line('');
   line('—— swTrace 最近 300 条 ——');
   for (const t of readSwTrace()) L.push(t);

@@ -635,7 +635,7 @@ export function holdForAssetsReady(opts: {
 
 // ---- 资产诊断面板(2026-08-27;手机无 Console 的取证出口) ----
 // 入口:主菜单 logo 连点 5 次(TitleMenu 绑定)。展示 swTrace 环形日志
-// (内存本轮 + localStorage 上轮,跨刷新可见),textarea 可全选复制。
+// (内存本轮 + IDB 上轮[★BJ627 经 PrefsStore],跨刷新可见),textarea 可全选复制。
 
 /** 追加一条到诊断日志(供 UI 层补充上下文,如"logo 连点"本身) */
 export function assetDiagNote(msg: string): void {

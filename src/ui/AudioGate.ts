@@ -41,6 +41,19 @@ export function showAudioGate(resume: () => Promise<boolean>): Promise<void> {
       <div class="tip">${Lang.text('Mods.SandboxWorld.AudioGate.Line1')}<br>${Lang.text('Mods.SandboxWorld.AudioGate.Line2')}</div>
     `;
     document.body.appendChild(root);
+    // ★BJ628 登记债（BJ631 件2,2026-10-10）：门渲染于 main.ts 门①（ensureReady 2500ms
+    //  短预算）之后、门②全预算之前——深失败窗 tip 文案一次性渲染,后台自愈成功
+    //  （loaded=true→emit）后不重绘,兜底/键名文案滞留到玩家点击。订阅 Lang.onChange
+    //  重绘 tip（TitleMenu.renderTexts 自愈消费面同习语）;放行即退订（监听器自捕环
+    //  预防——BJ328 判例:监听器持 DOM 引用须与宿主同生命周期）。
+    const tip = root.querySelector<HTMLElement>('.tip');
+    const renderTip = (): void => {
+      if (tip) {
+        tip.innerHTML = `${Lang.text('Mods.SandboxWorld.AudioGate.Line1')}<br>${Lang.text('Mods.SandboxWorld.AudioGate.Line2')}`;
+        swTrace('音频门: Lang 就绪重绘 tip');
+      }
+    };
+    const offLangChange = Lang.onChange(renderTip);
     let settled = false;
     const done = (e: Event) => {
       // ★只认真实用户手势(2026-08-27 手机实测"门显示1-2s自己消失但音乐没播"):
@@ -49,6 +62,7 @@ export function showAudioGate(resume: () => Promise<boolean>): Promise<void> {
       if (!e.isTrusted) { swTrace('音频门: 拒绝合成事件(非用户手势)'); return; }
       if (settled) return;
       settled = true;
+      offLangChange();
       window.removeEventListener('pointerdown', done, true);
       window.removeEventListener('keydown', done, true);
       void resume();

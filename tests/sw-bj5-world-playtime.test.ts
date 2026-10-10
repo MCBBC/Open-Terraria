@@ -17,6 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { installFakeIdb } from './fake-idb-util';
 
 const mem = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -27,6 +28,13 @@ const mem = new Map<string, string>();
   key: (i: number) => [...mem.keys()][i] ?? null,
   get length() { return mem.size; },
 } as Storage;
+
+// ★BJ626（2026-10-10）补 fake-IDB 垫（BJ618 登记债）：BJ615 起 kvSet 恒走
+//  IndexedDB（LS 摘写只读兜底）——node 测试环境无 indexedDB,WorldStore 写链
+//  （register/duplicate/importSlot/save → kvSet）恒 'fail' 抛 WorldSaveWriteError
+//  三红。垫=bj615 落的 tests/fake-idb-util.ts（bj618/620 同垫）;装垫先于被测
+//  模块动态导入（同 bj618 exemplar 序）。
+const idb = installFakeIdb();
 
 const { PlayTimeTracker } = await import('../src/save/PlayTime');
 const { WorldStore } = await import('../src/save/WorldStore');
@@ -102,7 +110,8 @@ describe('SW-BJ5 PlayTimeTracker（原版 PlayerFileData 语义）', () => {
 });
 
 describe('SW-BJ5 WorldStore 槽位面', () => {
-  beforeEach(() => mem.clear());
+  // IDB 垫 map 与 LS 同拍清零——槽位面各测互不读前测落库的 index/数据
+  beforeEach(() => { mem.clear(); idb.map.clear(); });
 
   it('新世界注册 playTimeMs=0（「新世界 0 分钟」正确面）', async () => {
     const s = new WorldStore();

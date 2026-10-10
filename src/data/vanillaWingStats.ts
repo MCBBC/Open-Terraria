@@ -20,7 +20,7 @@ export interface WingStat {
   hover: boolean;
   hoverSpeed: number;
   hoverAccelMult: number;
-}
+ }
 
 const DEFAULT: WingStat = { time: 150, accSpeed: 7, accelMult: 1, hover: false, hoverSpeed: -1, hoverAccelMult: 1 };
 
@@ -47,7 +47,19 @@ set([48, 49], 150, 7);
 // 默认族（Initializer :62-63 链式赋值 3/16-19/28/33-43/50/51；未列 slot 同默认）
 set([3, 16, 17, 18, 19, 28, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 50, 51], 150, 7);
 
+/** ★603:mod 翼表(wing slot 4000+ 段;C# WingStats 全字段——time/accSpeed/accelMult/
+ *  hover/hoverT/hoverS;registerModStats 期直写) */
+export interface ModWingStat { time: number; accSpeed: number; accelMult: number; hover?: boolean; hoverSpeed?: number; hoverAccelMult?: number; }
+const MOD_WING_STATS = new Map<number, ModWingStat>();
+export function registerModWingStats(slot: number, ws: ModWingStat): void {
+  if (slot < 4000) throw new Error(`[mod-wing] slot 须 ≥4000(mod 段): ${slot}`);
+  MOD_WING_STATS.set(slot, ws);
+}
+
 /** wing slot（=wingsLogic，Player.cs:12584 wingsLogic = armor.wingSlot）→ 属性 */
 export function wingStatOf(slot: number): WingStat {
+  const m = MOD_WING_STATS.get(slot);
+  if (m) return { time: m.time, accSpeed: m.accSpeed, accelMult: m.accelMult,
+    hover: m.hover ?? false, hoverSpeed: m.hoverSpeed ?? m.accSpeed, hoverAccelMult: m.hoverAccelMult ?? m.accelMult };
   return TABLE[slot] ?? DEFAULT;
 }

@@ -116,7 +116,9 @@ describe('BJ338-件1 静态闸（Game.ts/TorchGod.ts 掉落锚逐字钉死）', 
 
   it('件1.1 渔夫：逐 grant add+溢出玩家中心（旧 npc.cx,cy-8 直落缺席+签名 npc 参退役）', () => {
     expect(game).toContain('const left = p.inv.add(id, g.stack);');
-    expect(game).toContain('if (left > 0) this.spawnDrop(p.cx, p.cy, key, left);');
+    // ★BJ626（2026-10-10）：字面随 47141c26 刷新（p.cx→this.player.cx,纯字面——
+    //  函数头 const p = this.player 且体内不换手,语义面零变化）
+    expect(game).toContain('if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key, left);');
     expect(game).not.toContain('this.spawnDrop(npc.cx, npc.cy - 8, key, g.stack);');
     expect(game).toContain('private grantAnglerRewards(questItemType: number): void');
     expect(game).toContain('this.grantAnglerRewards(questId);');

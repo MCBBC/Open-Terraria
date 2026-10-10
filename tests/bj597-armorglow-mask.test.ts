@@ -57,8 +57,8 @@ function allMasks(): number[] {
 // §1 表结构锁（SetPassColors 1:1 收编 + 资产在库）
 // ================================================================
 describe('★BJ597 §1 GlowMask 表结构（PlayerDrawSet.cs:459-811）', () => {
-  it('表规模：头 21 / 身条 7 / 复合 7 / 腿 10（亲读逐案清点）', () => {
-    expect(Object.keys(HEAD_GLOW).length).toBe(21);
+  it('表规模：头 22 / 身条 7 / 复合 7 / 腿 10（亲读逐案清点;★BJ625 尾批 +271→22）', () => {
+    expect(Object.keys(HEAD_GLOW).length).toBe(22);
     expect(Object.keys(BODY_GLOW).length).toBe(7);
     expect(Object.keys(BODY_COMPOSITE_GLOW).length).toBe(7);
     expect(Object.keys(LEGS_GLOW).length).toBe(10);
@@ -143,10 +143,10 @@ describe('★BJ597 §1 GlowMask 表结构（PlayerDrawSet.cs:459-811）', () => 
     }
   });
 
-  it('尾批登记在案（271 TV 屏态机 / 269 前管 308）且不在活性表', () => {
-    expect(ARMOR_GLOW_DEFERRED).toContainEqual(expect.objectContaining({ slot: 'head', id: 271, mask: 309 }));
-    expect(ARMOR_GLOW_DEFERRED).toContainEqual(expect.objectContaining({ slot: 'head', id: 269, mask: 308 }));
-    expect(HEAD_GLOW[271]).toBeUndefined();
+  it('尾批两件已落刀（★BJ625）：271 TV 屏态机/269 前管 308 入活性表,登记表清空', () => {
+    expect(HEAD_GLOW[271]).toMatchObject({ mask: 309, tv: true, color: { k: 'const', r: 255, g: 255, b: 255, a: 255 } });
+    expect(HEAD_GLOW[269]).toMatchObject({ mask: 304, frontTube: 308 });
+    expect(ARMOR_GLOW_DEFERRED).toEqual([]);
   });
 });
 
@@ -352,7 +352,7 @@ describe('★BJ597 §6 销案面（翼光/星云奥秘 195/集成结构）', () 
     expect(RDR_SRC).toContain('armorGlowOps(');
     expect(RDR_SRC.indexOf('this.flushArmorGlow()')).toBeGreaterThan(RDR_SRC.indexOf('this.flushWingGlow(cam, z);'));
     expect(RDR_SRC).toContain('armorGlowCollected = new WeakSet()');
-    expect(RDR_SRC).toContain("import { armorGlowOps, type ArmorGlowOp } from '../data/vanillaArmorGlow'");
+    expect(RDR_SRC).toContain("import { armorGlowOps, tvScreenState, type ArmorGlowOp } from '../data/vanillaArmorGlow'");   // ★BJ625件1 +tvScreenState
   });
 
   it('坐姿切片单源：PaperDoll 导出 sittingSlicePlan（另立副本=漂移）', () => {

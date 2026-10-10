@@ -136,7 +136,8 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { blendItemColorTint } from '../data/vanillaItemColor';   // SW-BJ60 掉落物 Item.color 两遍合成（与 UI.iconUrl 单源）
-import { armorGlowOps, type ArmorGlowOp } from '../data/vanillaArmorGlow';   // ★BJ597 甲位 GlowMask 表（SetPassColors 数据化）
+import { armorGlowOps, tvScreenState, type ArmorGlowOp } from '../data/vanillaArmorGlow';   // ★BJ597 甲位 GlowMask 表（SetPassColors 数据化）+★BJ625件1 TV 屏态机
+import { LanternNight } from '../world/LanternNight';   // ★BJ625件1 TV 头 271 节庆态输入（LanternNight.LanternsUp）
 import {
   ITEM_GLOWMASK, DROP_GLOW_EXCLUDED, HAND_GLOW_SKIP, STAFF_GLOW_SPECIAL,
   heldGlowColors, dropGlowColors, dropGlowKind, xnaColorToOp, staticHoldDrawGate,
@@ -226,8 +227,17 @@ function setMatchLegs(legs: number, male: boolean): number {
  *  （s + hs/bs/ls,2026-08-14 起接管——此前只认 def.armor → vi_ 盔甲/面具全不渲染,
  *  "时装头不显示"根因;2026-09-02 def.armor 死字段及其 legacy 兜底分支整体移除）。
  *  app 传入时跑 SetMatch 三查（PlayerFrame :35336-35374：①身甲裙腿替 ②腿甲性别
- *  换装 ③头 201 女换 202——armor[10-12] 时装覆盖优先已由 displayArmor 处理 ✓） */
-export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
+ *  换装 ③头 201 女换 202——armor[10-12] 时装覆盖优先已由 displayArmor 处理 ✓）。
+ *  ★BJ631 件1（BJ625 登记债收口,2026-10-10）：返回值附带 armor dye 三槽 vid
+ *  （dyeHead/dyeBody/dyeLegs,null=无染料/无甲槽）——vanilla UpdateDyes
+ *  （Player.cs:9679-9684）cHead/cBody/cLegs = GetEffectiveDye(0/1/2).dye +
+ *  wearsRobe→cLegs=cBody;消费面 = PlayerDrawLayers 头甲 shader=drawinfo.cHead
+ *  （PlayerDrawLayers.cs:2173）等。本仓喂值链 = equip 随 compositePaperDoll 进
+ *  合成（缓存键含 dye=染色合成本体,PaperDoll.ts composite 键 dh/db/dl 段）——
+ *  BJ625 定谳 dyeHead 形参在位但零调用方喂值=头甲染料整缺,body/legs 同域同缺
+ *  （消费面在 PaperDoll.ts:498/:536/:541 而喂值恒缺）。 */
+export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null;
+  dyeHead?: number | null; dyeBody?: number | null; dyeLegs?: number | null } {
   const idx = (itemId: number | null | undefined, slot: 0 | 1 | 2): number | null => {
     if (itemId == null) return null;
     const def = ITEM_DEFS[itemId];
@@ -248,18 +258,36 @@ export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appeara
   };
   const disp = inv.displayArmor();
   let head = idx(disp[0], 0), body = idx(disp[1], 1), legs = idx(disp[2], 2);
+  // ★BJ631 件1：wearsRobe = SetMatch(ArmorSlotRequested=1) 换裙发生 且 body≠166
+  //  （Player.cs:37522-37525 case 166 flag=false——换裙但不置 wearsRobe,cLegs 仍走
+  //  dye[2]）。UpdateDyes :9682-9684 wearsRobe→cLegs=cBody（袍摆盖腿,身染料及腿）。
+  let wearsRobe = false;
   if (app) {
     const male = MALE_VARIANTS.includes(app.skinVariant);
     // ① body→legs 长袍腿替（:35334-35341——request.Legs 取换装前原值）
     const robe = setMatchBodyToLegs(body ?? 0, legs ?? 0, male);
-    if (robe >= 0) legs = robe;
+    if (robe >= 0) { wearsRobe = (body ?? 0) !== 166; legs = robe; }
     // ② legs 槽性别换装（:35342-35349）
     const swap = setMatchLegs(legs ?? 0, male);
     if (swap >= 0) legs = swap;
     // ③ head 201（狐狸套头）女换 202（:36755-36759；迅猛龙坐骑 54 上强制 201）
     if (head === 201) head = male || onVelociraptor ? 201 : 202;
   }
-  return { head, body, legs };
+  // ★BJ631 件1：染料 vid 解析——getEffectiveDye = 1457 GetEffectiveDye（Player.cs:5736,
+  //  Loadout 收藏染料共享随行）;vid>0 才出（与 PaperDoll 消费面 `dyeHead ?` 真值门同
+  //  口径,0/null 均不进 composite 缓存键=无染料玩家键面零漂移）。dye 只随甲槽在位
+  //  喂出（原版 shader 挂在甲层上,无甲层即无消费面;亦堵 dyeBakeArmorSprite 空图）。
+  const dyeVidOf = (slot: 0 | 1 | 2): number | null => {
+    const it = inv.getEffectiveDye(slot);
+    const vid = it ? (ITEM_DEFS[it.id]?.vid ?? -1) : -1;
+    return vid > 0 ? vid : null;
+  };
+  return {
+    head, body, legs,
+    dyeHead: head != null ? dyeVidOf(0) : null,
+    dyeBody: body != null ? dyeVidOf(1) : null,
+    dyeLegs: legs != null ? (wearsRobe ? dyeVidOf(1) : dyeVidOf(2)) : null,
+  };
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,
@@ -5020,6 +5048,10 @@ export class Renderer {
    *  档;remix empressRageMode 分支未建模 = bossAI_lategame dayEnrage 同先例） */
   private _frameDayTime = true;
   scene: SceneFlags | null = null;
+  /** ★BJ625件1 NPC.AnyDanger 每帧快照（Game.render 注入=Game.npcAnyDanger 单源;
+   *  消费=TV 头 271 屏态机 GetTVScreen 末旗 PlayerDrawLayers.cs:2518-2521）——
+   *  渲染侧不复制危险集判定（世吞体/四柱 vid 集单源防漂移）。缺省 false=无危险。 */
+  anyDangerSnapshot = false;
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
   fullMap = {
@@ -11819,7 +11851,7 @@ export class Renderer {
             vid: 289, tex: 'vanilla/NPC_289.png',
             sy: r.sy, sw: r.sw, sh: r.sh,
             cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
-            tint: [250, 250, 250], tintA: 50,
+            tint: [250, 250, 250], tintA: 100, // ★C9 变异:半透恒量漂移
           });
         } else if (e.vanillaId === 440 || e.vanillaId === 30 || e.vanillaId === 665
           || e.vanillaId === 25 || e.vanillaId === 59 || e.vanillaId === 60) {
@@ -17684,6 +17716,21 @@ export class Renderer {
     this.itemGlowQueue.push({ m, k: this._worldLowK, ops });
   }
 
+  /** ★BJ625件3（2026-10-10）专绘支 glow 叠画泛化口——pushProjGlow 的非
+   *  Projectile.glowMask 泛化（首消费=688-690 闪电光环哨兵专绘支,Main.cs:32498-
+   *  32504：color74=Lerp(GetAlpha(light),White,.5) 截 A=127 同矩形叠画）。op 序
+   *  直入 itemGlowQueue 合成后冲刷（flushItemGlow bake/boost 分解同域）——色
+   *  由调用方绘制侧解算（弹幕域无 per-proj 光照色通道,lightAt 取 proj 中心 tile
+   *  =:30068 projectileColor 原版语义）。m=本体当帧矩阵（translate/rotate 后取
+   *  =dest 局部坐标,rot 恒随本体同参——pushProjGlow 同式）。 */
+  pushGlowOps(ops: Array<{
+    tex: string; sx: number; sy: number; sw: number; sh: number;
+    dx: number; dy: number; blend: 'add' | 'over'; tint: [number, number, number]; alpha: number;
+  }>, m: DOMMatrix): void {
+    if (!ops.length) return;
+    this.itemGlowQueue.push({ m, k: this._worldLowK, ops });
+  }
+
   /** ★BJ594 日曜盾球合成后冲刷（2026-10-09）：DrawPlayer_26_SolarShield
    *  （PlayerDrawLayers.cs:3128-3146）DrawData 色 = Color(255,255,255,127) 恒量支
    *  免光照（R1-F1 判例域）——实体窗内绘制会被 compositeLight 全屏乘光压暗
@@ -18902,8 +18949,11 @@ export class Renderer {
       return;
     }
     let dollEquip = dollEquipFromInv(p.inv, a);
-    if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
-    if (p.merman) dollEquip = { head: 39, body: 22, legs: 21 };   // 人鱼强制三件（:35473-35494，死亡态同置）
+    // ★BJ631 件1：狼/人鱼强改只覆写三甲槽、染料随行（原版同序——PlayerFrame SetMatch
+    //  在前 :36054、狼/人鱼覆写在后 :36179-36205;染料层 shader=cHead 挂甲贴图无关槽位
+    //  PlayerDrawLayers.cs:2173 → 狼头 38 同染,Spread 保 dyeHead/dyeBody/dyeLegs）
+    if (p.buffs.has(BuffType.Werewolf)) dollEquip = { ...dollEquip, head: 38, body: 21, legs: 20 };
+    if (p.merman) dollEquip = { ...dollEquip, head: 39, body: 22, legs: 21 };   // 人鱼强制三件（:35473-35494，死亡态同置）
     const full = compositePaperDoll(a, dollEquip);
     if (!full) return;
     // 死亡帧行冻结（原版 UpdateDead 不跑 PlayerFrame——bodyFrame 停在死亡瞬间值；
@@ -19305,8 +19355,9 @@ export class Renderer {
     if (!mntHidden) {
       accDollEquip = p.appearance ? dollEquipFromInv(p.inv, p.appearance, mnt?.type === 54) : null;
       if (accDollEquip) {
-        if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { head: 38, body: 21, legs: 20 };
-        if (p.merman) accDollEquip = { head: 39, body: 22, legs: 21 };
+        // ★BJ631 件1：狼/人鱼覆写保染料（同 drawDeadPlayerParts 注——shader 挂甲无关槽位）
+        if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { ...accDollEquip, head: 38, body: 21, legs: 20 };
+        if (p.merman) accDollEquip = { ...accDollEquip, head: 39, body: 22, legs: 21 };
         facePlan = faceLayerSplitPlan(stEq.accDraw, accDollEquip.head ?? 0,
           p.buffs.has(BuffType.Werewolf) || p.merman);
         // OverrideHelmet 露脸装备（:36256-36259 head=-1）：头盔整件不画 + 发型全隐
@@ -19432,8 +19483,9 @@ export class Renderer {
     if (p.appearance && (!mntHidden || veloHead)) {
       if (veloHead) {
         let vh = dollEquipFromInv(p.inv, p.appearance, true);
-        if (p.buffs.has(BuffType.Werewolf)) vh = { head: 38, body: 21, legs: 20 };
-        if (p.merman) vh = { head: 39, body: 22, legs: 21 };
+        // ★BJ631 件1：狼/人鱼覆写保染料（同 drawDeadPlayerParts 注）
+        if (p.buffs.has(BuffType.Werewolf)) vh = { ...vh, head: 38, body: 21, legs: 20 };
+        if (p.merman) vh = { ...vh, head: 39, body: 22, legs: 21 };
         const vr = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, vh.legs ?? 0);
         const headDoll = vh.head ? compositePaperDoll(p.appearance, vh, { part: 'head' }) : null;
         if (headDoll) {
@@ -19639,8 +19691,52 @@ export class Renderer {
             mt: this.lighting?.clock.mouseTextColor ?? 255,
             miscCounter: p.miscCounter,
             mul: bodyAlpha * stF.skinMul,
+            // ★BJ625件1 TV 头 271 屏态输入（GetTVScreen :2516-2539 布尔映射）：
+            // 危险=Game 每帧快照（npcAnyDanger 单源）；低血=statLife≤statLifeMax2/4；
+            // 邪恶群系=腐蚀∪猩红∪墓地（scene 扫描窗=本地玩家同源）；湿=Player.wetSticky
+            // （原版 wet 唯一锚=WaterCheck 居中探针,BJ89 判例）；节庆=城镇NPC≥3
+            // （scene.townNPCCount=±1920×±1200 窗同源）∪ 派对 ∪ 灯笼夜。
+            tv: dollEquip.head === 271
+              ? {
+                  state: tvScreenState({
+                    anyDanger: this.anyDangerSnapshot,
+                    lowLife: p.hp <= p.maxHp / 4,
+                    evilZone: !!(this.scene?.zoneCorrupt || this.scene?.zoneCrimson || this.scene?.zoneGraveyard),
+                    wet: p.wetSticky,
+                    festive: (this.scene?.townNPCCount ?? 0) >= 3 || !!this.scene?.partyUp || LanternNight.lanternsUp,
+                  }),
+                  blink: p.eyeFrame > 0,   // PlayerEyeHelper.EyeFrameToShow>0（态5 眨眼行→2）
+                }
+              : null,
           });
           if (agOps.length) this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps });
+        }
+        // ---- ★BJ625件2：头 269 前管本体（FloretProtector 前伸探头管）----
+        //  原版两站同式（PlayerDrawLayers.cs:104-118 FrontShoulder 复合站 +
+        //  :3798-3810 非复合回退站）：pos=头盔锚、sourceRect=bodyFrame 全帧、
+        //  color=colorArmorHead+shader=cHead，前管=Extra_214（40×1120 20 行平行表,
+        //  资产在库=9-10 追加通道入库;vanilla.json 无清单键→Extra_N 直载通道
+        //  loadExtraSprite,Extra_105 浮游圈同式）。glow=Glow_308 走 armorGlowOps
+        //  frontTube 叠条（合成后冲刷）。本仓玩家甲无 cHead 染料通道（头甲本体
+        //  同域既有登记,不单件扩）→ 直绘;潜行=甲色族 armorMul（RGB×B/A×s' 与
+        //  甲层同式 :1596-1599 num29/num25 族）;坐姿 frameTop=−60（64 高帧,与
+        //  armorGlowOps 同式）。in-world 窗内=合成乘光自动同乘（colorArmorHead 面）。
+        if (dollEquip.head === 269) {
+          const ftex = loadExtraSprite(214);
+          if (ftex && ftex.width > 0 && ftex.height >= 56 * (row + 1)) {
+            const fTop = sitDraw ? -60 : -52;
+            const armorTint: [number, number, number] | null = stealthClamp < 1
+              ? (stEq.vortexSet
+                ? [vortexTint![0], vortexTint![1], vortexTint![2]]
+                : [stealthClamp, stealthClamp, stealthSettled])
+              : null;
+            const fs = armorTint ? this.tintSliceRGB(ftex, 0, row * 56, 40, 56, armorTint, 1) : null;
+            const ga = ctx.globalAlpha;
+            if (stealthClamp < 1) ctx.globalAlpha = ga * stealthClamp;   // A×s'（甲层同式）
+            if (fs) ctx.drawImage(fs, -20, fTop, 40, 56);
+            else ctx.drawImage(ftex, 0, row * 56, 40, 56, -20, fTop, 40, 56);
+            ctx.globalAlpha = ga;
+          }
         }
         // ★BJ423 浮游圈管体·前半（DrawPlayer_17_TorsoComposite :2037-2044——躯干甲/
         //   大衣后、OffhandAcc/Head 前；源=Extra_105 下半 (0,56,40,56)）。同锚帧盒,
@@ -24323,14 +24419,14 @@ export class Renderer {
     // 纸娃娃帧 0 顶部 40×32 裁头带(整宽+发冠带,24×22 会削发型——用户报"绘制不完整");
     // 无外观回退头贴图 0
     if (player.appearance) {
-      const equip = dollEquipFromInv(player.inv) as { head?: number | null };
+      const equip = dollEquipFromInv(player.inv) as { head?: number | null; dyeHead?: number | null };
       // 发色剂激活：地图头带同样拆发层（40×32 裁头带按 后发→本体→前发→头甲 合成）
       const dyeColor = world ? this.hairDyeRenderColor(player, world, null) : null;
       const doll = compositePaperDoll(player.appearance, equip, dyeColor ? { skipHair: true } : undefined);
       if (doll) {
         let img: CanvasImageSource = doll;
         if (dyeColor) {
-          const strip = this.playerHeadStrip(doll, player.appearance, equip?.head ?? 0, dyeColor);
+          const strip = this.playerHeadStrip(doll, player.appearance, equip?.head ?? 0, dyeColor, equip?.dyeHead ?? 0);
           if (strip) img = strip;
         }
         drawHead(img, player.cx, player.cy, player.facing < 0, 0, 0, 40, 32,
@@ -24348,13 +24444,13 @@ export class Renderer {
       if (rp.dead) continue;
       if (player.hostile && rp.hostile && !(player.team > 0 && player.team === rp.team)) continue;
       if (!rp.appearance) continue;
-      const equip = dollEquipFromInv(rp.inv) as { head?: number | null };
+      const equip = dollEquipFromInv(rp.inv) as { head?: number | null; dyeHead?: number | null };
       const dyeColor = world ? this.hairDyeRenderColor(rp, world, null) : null;
       const doll = compositePaperDoll(rp.appearance, equip, dyeColor ? { skipHair: true } : undefined);
       if (!doll) continue;
       let img: CanvasImageSource = doll;
       if (dyeColor) {
-        const strip = this.playerHeadStrip(doll, rp.appearance, equip?.head ?? 0, dyeColor);
+        const strip = this.playerHeadStrip(doll, rp.appearance, equip?.head ?? 0, dyeColor, equip?.dyeHead ?? 0);
         if (strip) img = strip;
       }
       const slot = (rp as unknown as { __netSlot?: number }).__netSlot ?? -1;
@@ -24548,10 +24644,11 @@ export class Renderer {
    *  → 新键自然重烘,WeakMap 随 doll GC 释放。 */
   private headStripCache = new WeakMap<object, Map<string, HTMLCanvasElement>>();
   private playerHeadStrip(doll: CanvasImageSource, appearance: Appearance,
-    headIdx: number, dyeColor: { r: number; g: number; b: number }): HTMLCanvasElement | null {
+    headIdx: number, dyeColor: { r: number; g: number; b: number },
+    headDyeVid = 0): HTMLCanvasElement | null {
     let bucket = this.headStripCache.get(doll);
     if (!bucket) { bucket = new Map(); this.headStripCache.set(doll, bucket); }
-    const key = `${headIdx}|${dyeColor.r},${dyeColor.g},${dyeColor.b}`;
+    const key = `${headIdx}|${headDyeVid}|${dyeColor.r},${dyeColor.g},${dyeColor.b}`;
     const hit = bucket.get(key);
     if (hit) { this.mmThrottle.stripHits++; return hit; }
     const strip = document.createElement('canvas');
@@ -24565,7 +24662,13 @@ export class Renderer {
     sctx.drawImage(doll, 0, 0, 40, 32, 0, 0, 40, 32);
     if (tinted) sctx.drawImage(tinted, 0, 0, 40, 26, 0, 0, 40, 26);
     const head = headArmorImage(headIdx);
-    if (head) sctx.drawImage(head, 0, 0, 40, 32, 0, 0, 40, 32);
+    if (head) {
+      // ★BJ631 件1（同域顺查）：发色剂拆层时头甲在本 strip 画出——armor dye 槽 0
+      //  同面补齐（drawDollHairOverlays 同式 armorDyeBake;200ms bucket 动画族逐桶活帧）
+      const emu = headDyeVid > 0 ? dyeApplyOf(headDyeVid) : null;
+      const dyed = emu ? this.armorDyeBake(head, emu, headDyeVid, 0, `hstrip:${headIdx}`) : null;
+      sctx.drawImage(dyed ?? head, 0, 0, 40, 32, 0, 0, 40, 32);
+    }
     bucket.set(key, strip);
     this.mmThrottle.stripBakes++;
     return strip;

@@ -12,6 +12,7 @@ import { registerModRecipes, registerModAdjTile, type VanillaRecipe } from '../d
 import { registerModItemFunc } from '../data/vanillaItemFunc';
 import { registerModCombat } from '../data/vanillaItemCombat';
 import { registerModStats } from '../data/vanillaItemStats';
+import { registerModWingStats } from '../data/vanillaWingStats';
 import { registerModNpcRules, registerModNpcValue } from '../drops/NpcDrops';
 import { registerModProj, registerModNpcOnHitPlayerBuff } from './hooks';
 import { MOD_SPAWN_RULES } from '../world/spawn/VanillaSpawner';
@@ -165,6 +166,8 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       rotateToVelocity: s.rotateToVelocity,
       homing: s.homing,
       homingDist: s.homingDist,
+      frames: s.frames,
+      hitRefresh: s.hitRefresh,
       holdout: s.holdout,
     }, pr.fullKey);
     projs++;
@@ -372,7 +375,13 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       dmgMelee: spec.stats.dmgMelee, dmgRanged: spec.stats.dmgRanged, dmgMagic: spec.stats.dmgMagic, dmgAll: spec.stats.dmgAll,
       critMelee: spec.stats.critMelee, critRanged: spec.stats.critRanged, critMagic: spec.stats.critMagic,
       moveMult: spec.stats.moveMult, endurance: spec.stats.endurance,
+      // ★603:mod 翼槽+翼属性(C# [AutoloadEquip(Wings)]+WingStats;slot=4000+ 段
+      //  按注册序=确定性;消费=wingStatOf mod 表回退)
+      ...(spec.stats.wing ? { wing: spec.stats.wing } : {}),
     }, it.stableId);
+    if (spec.stats?.wing && spec.stats?.wingStats) {
+      registerModWingStats(spec.stats.wing, spec.stats.wingStats);
+    }
     items++;
   }
   // shops(P3):物品 id 解析(本 mod 键/原版 vid);price 缺省=物品 value(原版

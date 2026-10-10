@@ -18,6 +18,8 @@
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
 import {
+  registerModDodgeRoll,
+  registerModPlayerHurt,
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
@@ -121,6 +123,12 @@ export interface ModContext {
   /** ★四百八十六刀:配饰效果追加链(同 vid 多闭包;主闭包后依注册序执行,
    *  累加器共享——数据族批与专属闭包结构性并置用) */
   accEffectAppend(key: string, fn: (player: unknown, game: unknown) => void): void;
+  /** ★593:mod 闪避掷门(DodgeEffects 消费品闪避族;fn→true=本拍闪避成立,
+   *  效果+冷却 mod 自管;单注册) */
+  dodgeRoll(fn: (player: unknown, game: unknown) => boolean): void;
+  /** ★594:mod 受击钩(C# OnHurt 同位;伤害落地后派发,ctx={player,game,dmg=实扣};
+   *  rBrain 墨云/墨炸弹族消费;单注册) */
+  playerHurt(fn: (ctx: { player: unknown; game: unknown; dmg: number }) => void): void;
   /** ★三百三十九刀:手持效果钩(手持该物品每 tick 调;C# HoldItem 同位) */
   holdItem(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★三百四十四刀:给玩家施加本 mod buff(npcAi/holdItem 闭包内用;
@@ -140,6 +148,9 @@ export interface ModContext {
   playerImmune(key: string, player: unknown): void;
   /** mod NPC 分配 id(同上) */
   npcIdOf(key: string): number;
+  /** ★五百八十五:本 mod 弹幕在场计数(C# Player.ownedProjectileCounts 同位;
+   *  召唤体「owned<N 才补生」门消费;未注册键 fail-fast) */
+  ownedProjCount(key: string): number;
   /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
    *  (fn(ctx: {player, game, attackerVid, dmg, contact}) → number=修正后伤/
    *  undefined=不改;仅 mod NPC 进攻面进入) */
@@ -287,6 +298,12 @@ export function createModContext(
       registerModTileInteract(idOf('tiles', key), fn as Parameters<typeof registerModTileInteract>[1]);
     },
     itemIdOf(key) { return idOf('items', key); },
+    dodgeRoll(fn) {
+      registerModDodgeRoll(modId, fn as Parameters<typeof registerModDodgeRoll>[1]);
+    },
+    playerHurt(fn) {
+      registerModPlayerHurt(modId, fn as Parameters<typeof registerModPlayerHurt>[1]);
+    },
     playerThorns(fn) {
       registerModPlayerThorns(modId, fn as unknown as Parameters<typeof registerModPlayerThorns>[1]);
     },
@@ -326,6 +343,15 @@ export function createModContext(
       if (im) im.add(bt);
     },
     npcIdOf(key) { return idOf('npcs', key); },
+    // ★五百八十五:本 mod 弹幕在场计数(ownedProjectileCounts 同位;
+    //  全局面 __swGame 实体桶直读——召唤体补生门消费)
+    ownedProjCount(key) {
+      const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
+      const pid = alloc.projs.get(full);
+      if (pid === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册弹幕: ${key}`);
+      const g = (globalThis as { __swGame?: { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } } }).__swGame;
+      return g?.entities?.projectiles?.filter((q) => !q.dead && q.projId === pid).length ?? 0;
+    },
     // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)
     playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void) {
       if (kind === 'modifyHurtByNpc') {

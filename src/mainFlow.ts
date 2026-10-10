@@ -44,6 +44,7 @@ import { WorldStore, WorldSaveWriteError, buildSaveBackupFilename, type WorldMet
 import { requestStoragePersistence, shouldShowPersistNotice, markPersistNoticeShown, evictNoticeFingerprint, shouldShowEvictNotice, markEvictNoticeShown, scanEvictedSaves, refreshStorageStatus } from './save/StoragePersistence';   // ★BJ611 持久存储申请/预警面/驱逐幽灵检测
 import { fsBackupSnapshot, fsBackupIndex, restoreFromBackup, fsBackupRestoreEvicted, fsBackupPurgeSnapshots, setFailToastHandler, resolveLoadText, backupTargetOfKey } from './save/FsBackup';   // ★BJ614 File System Access 本地目录自动备份（增强链）+读档自愈恢复链；★BJ617 件2：读档文本三段择源；★BJ618：quicksave 快照/恢复+删除组清理
 import { acquireSessionLock, worldLockKey, charLockKey, type SessionLock } from './save/SessionLock';   // ★BJ617 件1（用户拍板）：多标签页并发防线=Web Locks 会话锁（同世界/同角色已有会话拒载;不支持=降级放行）
+import { prefGet, prefLsLike, prefRemove, prefSet } from './save/PrefsStore';   // ★BJ627 偏好域 IDB 单写（LS 零新写）
 import { options } from './core/Options';
 import { UIScale } from './vui/draw/UIScale';
 import { Lang } from './i18n/Lang';
@@ -132,9 +133,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const w = window as unknown as { __swAchievements?: unknown };
     if (w.__swAchievements) return w.__swAchievements as import('./core/Achievements').Achievements;
     const { Achievements } = await import('./core/Achievements');
-    const inst = new Achievements(typeof localStorage !== 'undefined'
-      ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (x: string) => localStorage.setItem('sbw.achievements.v1', x) }
-      : null);
+    // ★BJ627：持久面迁 PrefsStore（IDB 单写+内存缓存;同步读接口零改——预载后内存权威）
+    const inst = new Achievements(
+      { load: () => prefGet('sbw.achievements.v1'), save: (x: string) => prefSet('sbw.achievements.v1', x) },
+    );
     w.__swAchievements = inst;
     return inst;
   })();
@@ -270,20 +272,20 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let selectedAppearance: Appearance | null = null;
   /** 当前角色槽位 id（硬核消亡时回写 CharacterStore 用；直载存档/无角色时为 null） */
   let selectedCharId: number | null = null;
-  /** 上次游玩角色 id（localStorage 持久;quickLoad/文件导入等无选角上下文的入口
-   *  以此续 .plr 语义——否则重载后 quickLoad 走世界内嵌玩家态,该会话存档不回写
-   *  随身态 → 箱子搬家+重进角色 = 物品双份(review 2026-08-18 抓出的复制窗) */
+  /** 上次游玩角色 id（★BJ627 迁 PrefsStore=IDB 持久;quickLoad/文件导入等无选角
+   *  上下文的入口以此续 .plr 语义——否则重载后 quickLoad 走世界内嵌玩家态,该会话
+   *  存档不回写随身态 → 箱子搬家+重进角色 = 物品双份(review 2026-08-18 抓出的复制窗) */
   const LAST_CHAR_KEY = 'sbw.lastCharId';
   function charContextId(): number | null {
     if (selectedCharId != null) return selectedCharId;
     try {
-      const v = localStorage.getItem(LAST_CHAR_KEY);
+      const v = prefGet(LAST_CHAR_KEY);
       return v != null && Number.isFinite(+v) ? +v : null;
     } catch { return null; }
   }
   function rememberCharId(id: number | null): void {
     if (id == null) return;
-    try { localStorage.setItem(LAST_CHAR_KEY, String(id)); } catch { /* 隐私模式等 */ }
+    try { prefSet(LAST_CHAR_KEY, String(id)); } catch { /* 隐私模式等 */ }
   }
   // ★BJ617 件1（用户拍板 2026-10-10「干脆就不应该有合并这个功能」）：多标签页并发
   //  防线=Web Locks 会话锁（src/save/SessionLock）——同世界/同角色已有会话拒载;
@@ -395,10 +397,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   void initStoragePersistenceWatch();
   async function initStoragePersistenceWatch(): Promise<void> {
     const state = await requestStoragePersistence();
-    // ② persisted=false 一次性提醒（localStorage 记忆跨会话只弹一次;文案含可操作
-    //    建议=安装为应用/收藏书签提高 Chrome 启发式授权率 + 定期导出备份闭环）
-    if (state !== 'granted' && shouldShowPersistNotice(localStorage)) {
-      markPersistNoticeShown(localStorage);
+    // ② persisted=false 一次性提醒（★BJ627 记忆面迁 PrefsStore=IDB,跨会话只弹
+    //    一次;文案含可操作建议=安装为应用/收藏书签提高 Chrome 启发式授权率 +
+    //    定期导出备份闭环）
+    if (state !== 'granted' && shouldShowPersistNotice(prefLsLike())) {
+      markPersistNoticeShown(prefLsLike());
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.StorageNotPersisted'));
     }
     // ③ 幽灵档扫描（驱逐后首启检测）:index 有 meta 而数据键 IDB 缺失且 localStorage
@@ -411,8 +414,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       //  用户授权后下次首启自动补齐;若在门内会被「已提醒过」一次性吞掉恢复链）。
       const rec = await fsBackupRestoreEvicted(scan.evicted);
       const fp = evictNoticeFingerprint(scan.evicted);
-      if (shouldShowEvictNotice(localStorage, fp)) {
-        markEvictNoticeShown(localStorage, fp);
+      if (shouldShowEvictNotice(prefLsLike(), fp)) {
+        markEvictNoticeShown(prefLsLike(), fp);
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNotice', scan.evicted.length));
         // ★BJ614 幽灵提示补「已尝试从本地备份恢复」（成功 N 个=诚实措辞带
         //  「可能落后于最后状态」;尝试无果=补未恢复说明,授权提示走读档链/设置页）
@@ -700,7 +703,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             await charStore.clearState(selectedCharId);
           } catch (e) { console.warn('[char] 硬核消亡回写失败', e); }
         }
-        try { localStorage.removeItem('sbw.lastCharId'); } catch { /* 隐私模式 */ }
+        try { prefRemove('sbw.lastCharId'); } catch { /* 隐私模式 */ }   // ★BJ627 三清（LS 同清防收编复活）
       },
       // 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568）：确认后回写角色档 +
       // 在线外观（原版外观随 .plr 档，CancelClothesWindow 取消则回退六色快照）

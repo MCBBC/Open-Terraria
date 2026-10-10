@@ -69,7 +69,12 @@ export interface ModItemContent {
     critMelee?: number; critRanged?: number; critMagic?: number;
     moveMult?: number; endurance?: number;
     /** ★四百八十二刀:盔甲绘制槽序号(套装匹配键;extract-armor 写入,3000+ 段) */
-    hs?: number; bs?: number; ls?: number; };
+    hs?: number; bs?: number; ls?: number;
+    /** ★603:mod 翼槽(4000+ 段;[AutoloadEquip(Wings)];wingStatOf mod 表回退) */
+    wing?: number;
+    /** ★603:mod 翼属性(C# WingStats 全字段;wing 槽声明时必附) */
+    wingStats?: { time: number; accSpeed: number; accelMult: number;
+      hover?: boolean; hoverT?: number; hoverS?: number; }; };
   /** P4:旅程研究所需献祭数(缺省=不可研究) */
   research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
@@ -186,6 +191,12 @@ export interface ModProjContent {
   /** ★三百三十:追踪 profile(homing accel/距离门;分类器回填) */
   homing?: number;
   homingDist?: number;
+  /** ★五百八十五:竖排帧数(贴图高=frames×单帧高;绘制按 (ageTicks/6)%frames 切行;
+   *  缺省 1=整图) */
+  frames?: number;
+  /** ★五百八十五:同敌重击窗(tick;命中记录按 ageTicks 过期=常驻召唤体可再命中;
+   *  缺省 0=永久去重) */
+  hitRefresh?: number;
   /** ★三百五十一:holdout(channel 魔耗面;声明面直通) */
   holdout?: { manaRate?: number; manaCost?: number };
 }

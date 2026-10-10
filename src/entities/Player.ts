@@ -24,7 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
-import { runModHoldItem, runModAccEffect } from '../mods/hooks';
+import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -1493,6 +1493,10 @@ export class Player extends Entity {
    *  PostUpdateMiscEffects 每帧位——equipStats.enduranceEq=cache-period 冻结面
   *  承载不了昼夜翻转,走 dyn 台账赋值语义,消费与 enduranceEq 同口径双点) */
   modEnduranceDyn = 0;
+  /** ★五百八十六:mod 岩浆完全豁免(van.lavaImmune;computeEquipStats 重置域) */
+  modLavaImmune = false;
+  /** ★596:mod 每帧 aggro 动态面(mirage_mirror -200;postUpdate 赋值语义) */
+  modAggroDyn = 0;
   /** ★五百七十九:mod 随从上限动态面(PSC 守卫进攻加成 maxMinions+1;C# :1652
    *  Player.maxMinions++——gate=profanedSoulBuffs mod 侧每帧算;赋值语义同上) */
   modMinionAddDyn = 0;
@@ -2563,6 +2567,7 @@ export class Player extends Entity {
     this.modIgnoreWater = false;   // ★四百七十二刀:同面重置(van 键形重设)
     this.modNoAggroTypes = null;   // ★四百七十四刀:同面重置(accEffect 整集重设)
     this.modLuckBonus = 0;   // ★五百零三刀:同面重置(accEffect 加算重设)
+    this.modLavaImmune = false;   // ★五百八十六:同面重置(van.lavaImmune 重设)
     this.modMaxLifePct = 0;   // ★四百七十八刀:同面重置(accEffect 加算重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
@@ -3556,6 +3561,8 @@ export class Player extends Entity {
     if (modAcc.critMagic) critMagic += modAcc.critMagic;
     if (modAcc.critAll) { critMelee += modAcc.critAll; critRanged += modAcc.critAll; critMagic += modAcc.critAll; }
     if (modAcc.endurance) setEndurance += modAcc.endurance;
+    if (modAcc.pickSpeedOff) pickSpeedOff += modAcc.pickSpeedOff;   // ★五百八十七:mod 挖掘折扣池
+    if (modAcc.minionSlots) minionSlots += modAcc.minionSlots;   // ★595:mod 随从上限加算池
     if (modAcc.dash) dash = Math.max(dash, modAcc.dash);
     if (modAcc.van) {
       const f = modAcc.van;
@@ -3570,6 +3577,12 @@ export class Player extends Entity {
       if (f.autoJump) autoJump = true;
       if (f.noKnockback) noKnockback = true;
       if (f.ignoreWater) this.modIgnoreWater = true;
+      // ★五百八十六:mod 岩浆完全豁免面(van 键形;C# UpdateAccessory lavaImmune=true
+      //  ——hydrothermic_armor/reaver_head_explore;消费=lavaTotalImmune 并集)
+      if (f.lavaImmune) this.modLavaImmune = true;
+      // ★五百九十二:长无敌帧(van 键形;C# longInvince=true——Regenerator;
+      //  消费=黑带/克脑闪避 SetImmuneTimeForAllTypes 120:80 档)
+      if (f.longInvince) longInvince = true;
     }
     const moveMult = 1 + move;
     return {
@@ -3869,6 +3882,7 @@ export class Player extends Entity {
     else if (eqA.vortexSet) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
     else a = 0;
     a += (eqA.aggroAcc ?? 0) + (eqA.aggroPiece ?? 0);   // 配饰轴+甲件轴（多源 +=,终零波批;★BJ175 桩面 ?? 防御,缺省 0）
+    a += this.modAggroDyn;   // ★596:mod 每帧 aggro 动态面(mirage_mirror -200 等;赋值语义)
     // 隐身药水(10)：aggro 钳位（Player.cs:25437-25445）——未挥击钳 -750（索敌距离
     // +750 曼哈顿 = 敌怪"看不见"），挥击中只钳 -250；只降不升（潜行套 -1200 不被抬回）
     if (this.buffs.has(BuffType.Invisibility)) {
@@ -5546,6 +5560,7 @@ export class Player extends Entity {
     // 黑曜石皮 buff:lavaImmune 完全豁免（Player.cs:9573）;★Notes④ 加第二完全豁免源
     // `lavaImmune |= ashWoodBonus && lavaRose`（:27885 字面）
     const lavaTotalImmune = this.buffs.obsidianSkin
+      || this.modLavaImmune === true   // ★五百八十六:mod van.lavaImmune 面
       || (eqM.ashWood === true && !!eqM.lavaRose);
     if (this.inLava && !lavaTotalImmune) {
       const lavaMax = eqM.lavaMax;
@@ -11716,6 +11731,12 @@ export class Player extends Entity {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
+    // ★593:mod 闪避掷门(灾厄 DodgeEffects 消费品闪避族——C# 消费品冷却=受伤量
+    //  缩放 lerp 面=登记,本仓 mod 侧自管窗;fn=true=已闪避[效果+冷却自管])
+    if (runModDodgeRoll(this, (globalThis as { __swGame?: unknown }).__swGame)) {
+      this.dodgeFullFill(eq.longInvince ? 120 : 80);
+      return 0;
+    }
     // 混乱之脑 3223 完整闪避（Player.Hurt :38511-38515：1/6 且 buff 321 不在栏 →
     // BrainOfConfusionDodge :38331-38340 = SetImmuneTimeForAllTypes(80/120) +
     // brainOfConfusionDodgeAnimationCounter=300 + AddBuff(321,240)【return 0 不掉血】。
@@ -11880,6 +11901,9 @@ export class Player extends Entity {
       // noKnockback 只清 velocity 不改 hitDirection 口径）
       this.deathHitDir = this.cx < srcX ? -1 : 1;
     }
+    // ★594:mod 受击钩(C# OnHurt face——rBrain 墨云/墨炸弹/百年魔典等受击响应面;
+    //  伤害落地后派发[与 C# Hurt 尾同位];reduction=实扣伤)
+    runModPlayerHurt(this, (globalThis as { __swGame?: unknown }).__swGame, reduction);
     return reduction;
   }
 

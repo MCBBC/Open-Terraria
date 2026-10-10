@@ -521,7 +521,17 @@ export function buildTooltipBody(
       const first = containing[0]!;
       const partVid = first.primary === 1 ? first.h : first.primary === 2 ? first.b : first.l;
       // ★四百九十九:mod 套 l10n 优先(T=原文本键回退英文 desc;getText 缺失=返键本身)
+      // ★五百八十三:tipName 即完整 mod l10n 键("Mods.CalamityMod.ArmorSetBonus.Astral",
+      //  G5 overlay 按 cat=Mods.<modId>.ArmorSetBonus 注册)——旧实现只查 ArmorSetBonus.<name>
+      //  =恒 miss(zh 表 7 键死码,恒英文回退);改三段:mod 全键→原版 lane→英文 desc
       const descOf = (name: string, fb: string | undefined): string => {
+        if (name.startsWith('Mods.')) {
+          const m = T(name);
+          if (m !== name) return m;
+          const seg = name.split('.').pop() ?? name;
+          const v = T(`ArmorSetBonus.${seg}`);
+          return v !== `ArmorSetBonus.${seg}` ? v : (fb ?? seg);
+        }
         if (!fb) return T(`ArmorSetBonus.${name}`);
         const l = T(`ArmorSetBonus.${name}`);
         return l !== `ArmorSetBonus.${name}` ? l : fb;
@@ -549,6 +559,14 @@ export function buildTooltipBody(
     const partVid = best.primary === 1 ? best.h : best.primary === 2 ? best.b : best.l;
     // ★四百九十九:mod 套 l10n 优先(同上;原版面 desc=undefined 走 T() 不变)
     const descOf2 = (name: string, fb: string | undefined): string => {
+      // ★五百八十三:同 descOf 三段(佩戴支)
+      if (name.startsWith('Mods.')) {
+        const m = T(name);
+        if (m !== name) return m;
+        const seg = name.split('.').pop() ?? name;
+        const v = T(`ArmorSetBonus.${seg}`);
+        return v !== `ArmorSetBonus.${seg}` ? v : (fb ?? seg);
+      }
       if (!fb) return T(`ArmorSetBonus.${name}`);
       const l = T(`ArmorSetBonus.${name}`);
       return l !== `ArmorSetBonus.${name}` ? l : fb;

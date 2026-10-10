@@ -1,6 +1,8 @@
 // 首次进世界公告(2026-08-25 用户要求):原版宣传介绍(纯文字版,表格已转文字)
-// + 复刻版免责声明 + 购买原版新标签链接 + 「我已知晓」永久关闭(localStorage)。
+// + 复刻版免责声明 + 购买原版新标签链接 + 「我已知晓」永久关闭。
 // 挂点 = mainFlow onWorldReady(单人新建/读档/联机加入共用的进世界回调)。
+// ★BJ627:ack 持久面迁 PrefsStore(IDB 单写;LS 只读兜底——启动收编序迁历史值)。
+import { prefGet, prefSet } from '../save/PrefsStore';
 const ACK_KEY = 'sw.welcome.announce.acked';
 
 const BODY = `🎮 花一份盒饭钱,换来一辈子都挖不完的世界——为什么《泰拉瑞亚》值得每个人试试
@@ -28,7 +30,7 @@ const BUY_URL = 'https://store.steampowered.com/app/105600/Terraria';
 
 export function maybeShowWelcomeAnnounce(): void {
   try {
-    if (localStorage.getItem(ACK_KEY)) return;
+    if (prefGet(ACK_KEY)) return;
   } catch { /* 隐私模式:每次进世界都显示 */ }
 
   // ★BJ344（件3,合成层 +3/轮清偿）：单例化——每次进世界 onWorldReady 都会走到这里,
@@ -65,7 +67,7 @@ export function maybeShowWelcomeAnnounce(): void {
   ack.textContent = '我已知晓';
   ack.style.cssText = 'flex:1; padding:10px 0; background:#3d4f9e; color:#fff; border:1px solid #6a7ad0; border-radius:4px; font-size:15px; cursor:pointer; font-family:inherit;';
   ack.onclick = () => {
-    try { localStorage.setItem(ACK_KEY, '1'); } catch { /* 隐私模式:本次会话内关闭 */ }
+    try { prefSet(ACK_KEY, '1'); } catch { /* 隐私模式:本次会话内关闭 */ }
     root.remove();
   };
   footer.appendChild(ack);

@@ -27,8 +27,9 @@ export class ModProj extends Entity {
   /** ★P6:hostile 位(原版 Projectile.hostile 语义)——mod NPC AI 弹=true 时,
    *  msg27 kind12 携 bit7,访客端 netPuppetProjContact 对己结算(victim-settles) */
   hostile = false;
-  /** 命中过の敵怪 id 集(穿透去重;同怪一次) */
-  private hitSet = new Set<number>();
+  /** 命中过の敵怪 id 集(穿透去重;★五百八十五 hitRefresh>0=按 ageTicks 过期窗,
+   *  常驻召唤体可周期性再命中;缺省 0=永久去重) */
+  private hitSet = new Map<number, number>();
   private spec: NonNullable<ReturnType<typeof modProjSpecOf>>;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
@@ -200,7 +201,14 @@ export class ModProj extends Entity {
     const entities = (game as unknown as { entities: { enemies: Enemy[] } }).entities;
     if (this.ownerIsPlayer && this.damage > 0) {
       for (const e of entities.enemies) {
-        if (e.dead || this.hitSet.has(e.id)) continue;
+        if (e.dead) continue;
+        const hitT = this.hitSet.get(e.id);
+        if (hitT !== undefined) {
+          // ★五百八十五:重击窗(hitRefresh>0=窗内去重,窗外过期可再命中)
+          const refresh = this.spec.hitRefresh ?? 0;
+          if (refresh <= 0 || this.ageTicks - hitT < refresh) continue;
+          this.hitSet.delete(e.id);
+        }
         if (!playerCanHitEnemy(e, game as never, this.projId)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -222,7 +230,7 @@ export class ModProj extends Entity {
             }
           }
         }
-        this.hitSet.add(e.id);
+        this.hitSet.set(e.id, this.ageTicks);
         if (this.pierce > 0) {           // ★≤0=无限穿透(文档统一;旧实现 0=即亡)
           this.pierce--;
           if (this.pierce === 0) { this.dead = true; return; }
@@ -250,17 +258,22 @@ export class ModProj extends Entity {
     //   = 相机变换叠加双重偏移,弹体恒画到屏外。视口剔除改世界域粗判。
     if (this.x + this.w < cam.x - 64 || this.x - this.w > cam.x + r.canvas.width + 64) return;
     if (this.y + this.h < cam.y - 64 || this.y - this.h > cam.y + r.canvas.height + 64) return;
+    // ★五百八十五:竖排帧切片(frames>1 时按 (ageTicks/6)%frames 取行;
+    //  贴图高=frames×单帧高,行高=img.height/frames)
+    const frames = this.spec.frames ?? 1;
+    const fh = frames > 1 ? img.height / frames : img.height;
+    const row = frames > 1 ? Math.floor(this.ageTicks / 6) % frames : 0;
     if (this.spec.rotateToVelocity) {
       const ang = Math.atan2(this.vy, this.vx);
       c.save();
       c.imageSmoothingEnabled = false;
       c.translate(this.x + this.w / 2, this.y + this.h / 2);
       c.rotate(ang);
-      c.drawImage(img as CanvasImageSource, -this.w / 2, -this.h / 2, this.w, this.h);
+      c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, -this.w / 2, -this.h / 2, this.w, this.h);
       c.restore();
     } else {
       c.imageSmoothingEnabled = false;
-      c.drawImage(img as CanvasImageSource, this.x, this.y, this.w, this.h);
+      c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, this.x, this.y, this.w, this.h);
     }
   }
 }

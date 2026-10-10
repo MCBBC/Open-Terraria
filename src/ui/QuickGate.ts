@@ -1,17 +1,20 @@
 // 功能首用确认门（2026-08-27 用户要求）：超游类功能（道具搜索/旅程时间天气/
-// 地图点击传送…）首次使用时明示风险，确认启用后 localStorage 持久放行、后续
-// 不再拦截。独立小模块——render↔ui 均可安全导入（无游戏态依赖）。
+// 地图点击传送…）首次使用时明示风险，确认启用后持久放行、后续不再拦截。
+// 独立小模块——render↔ui 均可安全导入（无游戏态依赖）。
+// ★BJ627：持久面迁 PrefsStore（IDB 单写+内存缓存;LS 只读兜底——历史 LS 值由
+// 启动收编序迁 IDB,旧探针/旧会话预置的 LS 旗仍生效）。
+import { prefGet, prefSet } from '../save/PrefsStore';
 
 const KEY = (kind: string) => `sbw.journeyQuick.${kind}`;
 
 /** 门查询：该功能是否已确认启用 */
 export function featureGateConfirmed(key: string): boolean {
-  try { return localStorage.getItem(KEY(key)) === '1'; } catch { return false; }
+  try { return prefGet(KEY(key)) === '1'; } catch { return false; }
 }
 
 /** 写入确认旗（确认启用时调） */
 export function confirmFeatureGate(key: string): void {
-  try { localStorage.setItem(KEY(key), '1'); } catch { /* 隐私模式静默 */ }
+  try { prefSet(KEY(key), '1'); } catch { /* 隐私模式静默 */ }
 }
 
 /** 旅程快捷键（时间/天气）便捷封装（Renderer 消费） */

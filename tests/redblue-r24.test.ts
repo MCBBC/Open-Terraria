@@ -212,10 +212,13 @@ describe('#2 附证：研究进度按玩家档案（Player.creativeTracker 语�
     expect(a.getSacrificeCount(2)).toBe(50);               // 角色 7 桶不受角色 8 影响
 
     // 回切无角色上下文 = 共享桶语义（直载存档路径），且不吞玩家桶
+    // ★BJ627：写回面迁 PrefsStore（IDB 单写）——断言改经偏好 bus 通道（判别力同构:
+    // 写回发生+分桶隔离），LS 侧仅存收编前旧值（只读兜底终态）
+    const { prefGet } = await import('../src/save/PrefsStore');
     a.usePlayerProfile(null);
     a.sacrifice(3, 1);
-    expect(mem.get('sbw.research.v1')).toContain('"3":1');
-    expect(JSON.parse(mem.get('sbw.research.v2.p8')!).c).not.toHaveProperty('3');
+    expect(prefGet('sbw.research.v1')).toContain('"3":1');
+    expect(JSON.parse(prefGet('sbw.research.v2.p8')!).c).not.toHaveProperty('3');
   });
 });
 

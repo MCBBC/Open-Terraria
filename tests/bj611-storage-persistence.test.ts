@@ -374,10 +374,11 @@ describe('BJ611 E组：接线结构锚（防回归退化）', () => {
     const s = codeOf('../src/mainFlow.ts');
     expect(s).toContain('void initStoragePersistenceWatch();');
     expect(s).toContain('await requestStoragePersistence()');
-    expect(s).toContain("state !== 'granted' && shouldShowPersistNotice(localStorage)");
+    // ★BJ627：提醒记忆面迁 PrefsStore——接线锚随调用面更新（prefLsLike 注入纯核）
+    expect(s).toContain("state !== 'granted' && shouldShowPersistNotice(prefLsLike())");
     expect(s).toContain("Lang.text('Mods.SandboxWorld.Toast.StorageNotPersisted')");
     expect(s).toContain('await scanEvictedSaves(worldStore.list(), charStore.list())');
-    expect(s).toContain('shouldShowEvictNotice(localStorage, fp)');
+    expect(s).toContain('shouldShowEvictNotice(prefLsLike(), fp)');
     expect(s).toContain("Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNotice', scan.evicted.length)");
     expect(s).toContain('void refreshStorageStatus();');
     // ★摘除回归闸（2026-10-10 用户实测+明令）：quota 骤降预警触发面不得复发

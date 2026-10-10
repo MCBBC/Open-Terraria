@@ -81,10 +81,15 @@ describe('BJ426 ① 位置门：锚桩五锚档判定（TileObject.CanPlace Tile
     expect(anchorTilePlacementStyle(st, 10, 10)).toBe(-1);
   });
 
-  it('档 0 底锚：AlternateTile {124,561,574-578} 可承（AnchorAlternateTiles :4489）', () => {
+  it('档 0 底锚：AlternateTile 位惰性——梁/柱 124 不承（★BJ624 翻正重锚）', () => {
+    // ★BJ624（2026-10-10 定谳翻正）：723/724 全表【无】AnchorAlternateTiles 赋值行
+    // （TileObjectData.cs:4508-4536/:4537-4560 亲读零命中）——旧用例引 :4489 系
+    // 630 臭虫箱基样式块行号误挂（:4449/:4470 才是 630/631 的成员表）。AlternateTile
+    // 位=isValidAlternateAnchor（:1969-1984）表空早退恒 false=惰性位 → 梁上不承。
+    // （梁上可承=臭虫箱 630/631 专属,见 tests/bj624-anchor-domain-finale.test.ts）
     const st = mkWorld();
     st.setTile(10, 11, internal(124), 0, 0);              // 木梁
-    expect(anchorTilePlacementStyle(st, 10, 10)).toBe(0);
+    expect(anchorTilePlacementStyle(st, 10, 10)).toBe(-1);
   });
 
   it('档 0 底锚：SolidTile 漏项反证——tileNoAttach 件不承（:459-462 !tileNoAttach）', () => {
@@ -152,9 +157,12 @@ describe('BJ426 ① 位置门：锚桩五锚档判定（TileObject.CanPlace Tile
     expect(anchorTilePlacementStyle(st, 10, 10)).toBe(-1);
   });
 
-  it('域钉：723/724 两表逐字同构（TileObjectData.cs:4485-4507 vs :4514-4536）——锚档集同源', () => {
-    // 结构锁：helper 以 723||724 同一门判定（tryPlace isAnchorTile 单源,无双轨）
-    expect(gameSrc).toMatch(/const isAnchorTile = anchorSheet === 723 \|\| anchorSheet === 724;/);
+  it('域钉：723/724 两表逐字同构（TileObjectData.cs:4508-4536 vs :4537-4560）——锚档集同源', () => {
+    // 结构锁：helper 以 723||724 同一 spec 判定（BJ624 门表驱动化——ANCHOR_GATE_723
+    // 共享 spec 对象=两 sheet 单源;成员表惰性翻正后 spec 为空集,见 BJ624 判语）
+    // ★BJ629 件1：isAnchorTile 成员 +136（拉杆四备档入链,TileObjectData.cs:4551-4577）
+    expect(gameSrc).toMatch(/723: ANCHOR_GATE_723,\s*\n\s*724: ANCHOR_GATE_723,/);
+    expect(gameSrc).toMatch(/const isAnchorTile = anchorSheet === 723 \|\| anchorSheet === 724\s*\n\s*\|\| anchorSheet === 630 \|\| anchorSheet === 631 \|\| anchorSheet === 442\s*\n\s*\|\| anchorSheet === 136;/);
   });
 });
 

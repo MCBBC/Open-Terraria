@@ -21,6 +21,7 @@ import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect } from './Arrow';
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
+import { auraGlowMaskOf, auraGlowTint, AURA_GLOW_ALPHA } from '../data/vanillaProjGlow';   // ★BJ625件3 闪电光环哨兵 glow 叠画色式
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { applyProjStatus } from './projStatus';
@@ -8815,27 +8816,80 @@ export class MinionProj extends Entity {
     //  origin=(宽/2,高−2)（:32516-32521 origin.Y-=2）,ai[2]==1（哨兵背包携行）不画。
     //  rotation 恒 0（AI_137 零写向）、spriteDirection 恒 +1（零赋值）=不翻转。
     //  projFrames 688/689=6、690=8（Main.cs:8603-8605）,帧机 8t 一翻（:70018-70024）
-    //  =通用 age/8 循环既恰。glow 叠画（Glow_228/229/230 同矩形 α=127）本仓弹幕
-    //  绘制无 per-proj 光照色通道=未接（登记债;663/677/691 族同未接）。
+    //  =通用 age/8 循环既恰。glow 叠画（Glow_228/229/230 同矩形 A=127）★BJ625件3
+    //  已接（上支,合成后逃逸+绘制侧取光）。★663/677/691 族逐型核（同登记域定谳,
+    //  2026-10-10）：三族专支（:34075-34086/:34097-34137/:34087-34096）只改锚/origin
+    //  +底座,色走公共尾 :34212 color106=proj.GetAlpha(projectileColor)【plain 光】
+    //  无白 lerp、无 glow 层 ⇒ 本仓世界层合成乘光=同构等价,零缺面（该「同未接」
+    //  记法指 per-proj 光照色通道,对本族=无歧义等价面,非债）。
     //  旧通用尾 off3=[0,0] 帧左上锚盒左上 ⇒ 盒挂贴图左上+球体陷地（用户实报）。
     if (this.sentry && AURA_TOWER.has(this.projId) && img) {
+      // ★BJ630件1（2026-10-10）本体/底座光照色通道（BJ625 定谳残面收口）：原版本支
+      //  三笔【同色】（Main.cs:32481-32527）——color73 = Color.Lerp(proj.GetAlpha(
+      //  projectileColor), White, 0.5)（:32497 本体/:32524 底座同式）、color74 =
+      //  color73 截 A=127（glow :32498-32499）;projectileColor = proj 中心 tile 光照
+      //  （:30068）。本仓世界层合成乘光管线下本体/底座吃 plain 光 → 暗处比原版暗
+      //  50%（暗处 net = light×1.0 vs vanilla light×0.5+0.5,BJ625 定谳;glow 半亮
+      //  自发光已落 → 反差更显）。落刀 = 三笔全数 op 化进 itemGlowQueue 同槽（BJ621
+      //  迁层习语：免世界层乘光目标进合成后逃逸队列;BJ625件3 glow 同槽判例）,绘制
+      //  色显式 = auraGlowTint(lightAt(中心 tile)) 逐值 1:1。queue 序 = 原版笔序
+      //  （本体 :32503 → glow :32505-32507 → 底座 :32522）;alphaFade 淡入淡出乘区
+      //  三笔同乘（旧 world 层 globalAlpha 面迁 op alpha）。染料面：688-690 哨兵
+      //  Shader 恒 0（BJ625件4 定谳）→ img 恒原片帧切片,op 直取 Projectile_N 平行
+      //  表同矩形（sy=frame×fh）等价。灯未就绪回退 [255,255,255]=全光档（tint=白
+      //  → flush needBake/needBoost 双免=直画）。仅 688-690 三型进通道（663/677/691
+      //  已判零缺面 plain 光同构等价,勿扩——见上支注）。
       ctx.save();
-      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
       ctx.imageSmoothingEnabled = false;
       ctx.translate(this.cx, this.y);                    // proj.Top（gfxOffY 恒 0 未建模）
       if (this.rot !== 0) ctx.rotate(this.rot);          // 守恒序（恒 0 不触发）
-      ctx.drawImage(img, -img.width / 2, 0);             // origin=(帧宽/2, 0)
+      const lt = r.lighting?.lightAt
+        ? r.lighting.lightAt(Math.trunc(this.cx / 16), Math.trunc(this.cy / 16))
+        : [255, 255, 255];
+      const fade = this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1;
+      const tint = auraGlowTint([lt[0], lt[1], lt[2]]);  // color73 RGB 面（三笔同式）
+      const gm = auraGlowMaskOf(this.projId);
+      const auraOps: Array<{
+        tex: string; sx: number; sy: number; sw: number; sh: number;
+        dx: number; dy: number; blend: 'add' | 'over'; tint: [number, number, number]; alpha: number;
+      }> = [
+        {
+          tex: `vanilla/Projectile_${this.projId}.png`,  // ① 本体帧（:32503 color73 A=255）
+          sx: 0, sy: frame * img.height, sw: img.width, sh: img.height,
+          dx: -img.width / 2, dy: 0,                     // origin=(帧宽/2, 0) 同旧绘
+          blend: 'over', tint, alpha: fade,
+        },
+      ];
+      if (gm !== null) {                                 // ② glow（:32505-32507 color74 A=127）
+        auraOps.push({
+          tex: `vanilla/Glow_${gm}.png`,
+          sx: 0, sy: frame * img.height, sw: img.width, sh: img.height,
+          dx: -img.width / 2, dy: 0,                     // origin=(帧宽/2, 0) 同本体
+          blend: 'over', tint, alpha: AURA_GLOW_ALPHA * fade,
+        });
+      }
+      r.pushGlowOps?.(auraOps, ctx.getTransform());      // 矩阵捕获=translate/rotate 后（rot 恒 0）
       ctx.restore();
+      // ★BJ625件4 翻案登记（2026-10-10,推翻 BJ606-R2「底座染料未接」登记）：原版
+      //  GetProjectileDesiredShader（Main.cs:22429-22463）只吃 minion/projHook/
+      //  projPet/LightPet+switch{623,1020,1105,818}——688-690 SetDefaults（Projectile.cs:
+      //  7327-7339）只有 sentry=true 无 minion=true（全 21 处 minion=true 站点逐一对读,
+      //  无一哨兵;projPet 表全量 90 id 无 688-690）⇒ 哨兵 Shader 恒 0=原版本就不染,
+      //  本仓底座 Extra_86/87/88 原色直绘=vanilla 同相（染=偏离）。本仓
+      //  minionDyeVid（minion=false 数据面）同构回 0=双面一致。
       if (!this.carriedByBackpack) {                     // ai[2]!=1f 门（:32514）
         const baseTex = r.atlas?.ensureVImage(
           `vanilla/Extra_${this.projId === 689 ? 87 : this.projId === 690 ? 88 : 86}.png`) ?? null;
         if (baseTex) {
           ctx.save();
-          if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
           ctx.imageSmoothingEnabled = false;
           ctx.translate(this.cx, this.cy);               // proj.Center（:32515）
-          ctx.drawImage(baseTex as CanvasImageSource,
-            -baseTex.width / 2, -(baseTex.height - 2));  // origin=(宽/2, 高−2)
+          r.pushGlowOps?.([{                             // ③ 底座（:32522 color73 A=255）
+            tex: `vanilla/Extra_${this.projId === 689 ? 87 : this.projId === 690 ? 88 : 86}.png`,
+            sx: 0, sy: 0, sw: baseTex.width, sh: baseTex.height,
+            dx: -baseTex.width / 2, dy: -(baseTex.height - 2),   // origin=(宽/2, 高−2)（:32521）
+            blend: 'over', tint, alpha: fade,
+          }], ctx.getTransform());
           ctx.restore();
         }
       }
@@ -9207,6 +9261,17 @@ export class MinionProj extends Entity {
     //  = 画 33/47px 断肢残躯（用户实报「只有一半贴图」病根,贴图已于 BJ612 换
     //  132/188 宽真身）。flip 沿用既有 facing 语义（AI_053 spriteDirection 按目标/
     //  携行方位覆写 :38002/:38052-38062,spriteDirection 可为 −1）。
+    //  ★BJ625件5 翻案登记（2026-10-10,推翻 BJ612「377/308 染料通道未接线」登记）：
+    //  BJ612 判例前提「原版 GetProjectileDesiredShader 对哨兵生效」不成立——
+    //  GetProjectileDesiredShader（Main.cs:22429-22463）只吃 minion/projHook/projPet/
+    //  LightPet+switch{623,1020,1105,818};308/377 SetDefaults（:4001-4010/:4619-4625）
+    //  只有 sentry=true 无 minion=true（全 21 处 minion=true 站点逐一对读无一哨兵,
+    //  projPet 表 90 id 亦无此二型）⇒ 哨兵 Shader 恒 0=原版本就不染。本仓
+    //  minionDyeVid（数据面 minion=false）同构回 0 ⇒ 半宽切片直用 projSprite 原片
+    //  =vanilla 同相,不接染料闭包（接=偏离）。BJ612 附记「接线时 projFrameSrcRect
+    //  sw=img.width 须半宽化（T0 相位）」随前提一并失效——现状 projFrameSrcRect
+    //  与 projFrameImg 同为竖条全宽切片式照录（二者自洽,零运行时消费差）;
+    //  若未来真有逐帧染料面,须以本支矩形 (x15,y25,halfW,fh-1) 直喂 t0Rect。
     if ((this.projId === 308 || this.projId === 377)) {
       const sheet = projSprite(this.projId);
       if (sheet) {

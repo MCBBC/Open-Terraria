@@ -24,8 +24,13 @@
 // 或无 TileObjectData）原版【本就无幽灵】,本移植同样不出（防止过预览发散）。
 //
 // 边界声明（登记债,均为原版有而本刀未做）：
-// · 82/83/84 草药、227 染料、20 橡实苗、3 等 exotic 锚族——anchorSpecOf 因
-//   AlternateTile/Tree 位回落 null → 无预览（原版有;专用放置支谓词未共享,另批）。
+// · 227 染料、20 橡实苗、3 等 exotic 锚族——anchorSpecOf 因 AlternateTile/Tree 位
+//   回落 null → 无预览（原版有;专用放置支谓词未共享,另批）。★BJ624（2026-10-10）
+//   复核：82/83/84 药草已随件2 白名单解禁（AnchorAlternateTiles={78} :4756）→
+//   幽灵恢复（足印三谓词面;盆基锚带不可见域=原版同款白格 doctrine）;753 同批入链。
+//   ★BJ629 件5：442/630/631/723/724 五锚档族幽灵接线（专用支,anchorSpecOf 仍 null
+//   不入表驱动族——帧带/AllInvalid 语义见分支注）;136 幽灵本就走通用族（基记录
+//   无 exotic 位）,帧带恒档0（原版显示命中档变体）=微差备案。
 // · HookCheckIfCanPlace 全红面仅建模 597 晶塔（hasPylonOfType 同源门）;21/467 箱/
 //   88 梳妆台 FindEmptyChest(-1=原箱占位) 与占用重叠红格等效不另建;442 压力板、
 //   PlantCheck 族（错误土壤全红）未建模。
@@ -35,7 +40,7 @@
 //   对 tile 放置恒 1,不移植零行为差。
 import { options } from './Options';
 import { TILE_DEFS } from '../data/tiles';
-import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, previewCellValues,
+import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, previewCellValues,
   type AnchorRec } from '../world/TileAnchorValidator';
 import { torchAnchorFrame, isWaterTorchStyle } from '../world/Torch';
 import type { World } from '../world/World';
@@ -62,6 +67,14 @@ export interface PlacePreviewData {
   /** 1×1 特例直供帧源（火把 22px 步长在 18px 网格 vframeAt 域外）——fx=锚档帧
    *  （torchAnchorFrame 0/22/44,失锚取 0=底档帧）、fy=style×22（tryPlace :27614 同式） */
   fx?: number; fy?: number;
+  /** ★BJ629 件5（2026-10-10）：五锚档族直供帧源（TileObject.DrawPreview :864-896 语义
+   *  ——op.Alternate → GetTileData(type,style,alternate) → CalculatePlacementStyle
+   *  帧带,幽灵显示【命中档】的方向变体 sprites）。fx/fy/sw/sh=原图切片矩形
+   *  （442 CoordinateWidth 20+heights 20 → 20×20;630/631/723/724 Style1x1 → 16×16）,
+   *  dx=帧宽居中偏移（DrawPreview :944 `num13=(CoordinateWidth-16)/2`——442=−2px）。
+   *  band 取自 ctx.anchorStyleAt（与实放同一门源）;门失（-1）回退档 0=原版
+   *  placementCache 首备档缓存相（:756-763 num4 初值 -1f 首档必入缓存）。 */
+  pvFrame?: { fx: number; fy: number; sw: number; sh: number; dx?: number };
 }
 
 export const placePreviewFrame: { data: PlacePreviewData | null } = { data: null };
@@ -80,6 +93,10 @@ export interface PlacePreviewCtx {
   pylonDuplicate: boolean;     // 597 HookCheckIfCanPlace badReturn=1 面（:3421→AllInvalid）
   hasSupport(x: number, y: number, w: number, h: number, framed: boolean, onTable: boolean): boolean;
   obstructionClearable(typeId: number, sheet: number): boolean;
+  /** ★BJ629 件5：五锚档门直读（Game 侧闭包=anchorTilePlacementStyle 同一 gate 源,
+   *  预览不说谎）。返回 -1=全档失（442 → HookCheckIfCanPlace badReturn=-1 →
+   *  AllInvalid 全红 :728-731;630/631/723/724 无 hook → 白格 doctrine 不变） */
+  anchorStyleAt?: (x: number, y: number) => number;
 }
 
 /** CanPlace :186-189 世界缘带（[5, maxTiles-5]）——足印出带=原版整帧不刷新（本仓=隐藏）。 */
@@ -174,6 +191,40 @@ export function updatePlacePreviewFrame(ctx: PlacePreviewCtx): void {
     placePreviewFrame.data = {
       sheet, fw: rec.w, style: ctx.style, ax, ay, w: rec.w, h: rec.h,
       cells: previewCellValues(st, ax, ay, rec, ctx.style),
+    };
+    return;
+  }
+  // ★BJ629 件5（2026-10-10）：五锚档路由族幽灵（442/630/631/723/724——anchorSpecOf
+  //  因 AlternateTile/ exotic 位恒 null,BJ557 登记债销案）。原版 onlyCheck 语义亲读
+  //  （TileObject.CanPlace :205-765 逐 alternate 满分制 + :831-842 best 备档回落）：
+  //  · 足印（1×1）三谓词 = 唯一可见域（锚带 :936-938 窗外永不可见）——占位/液体
+  //    逐格 1/2（previewCellValues 同谓词面,此处单格内联与火把支同构）;
+  //  · 442 HookCheckIfCanPlace=CanPlaceProjectilePressurePad（WorldGen.cs:87583,
+  //    badReturn=-1）→ 全向 viable 失 = 该备档 AllInvalid（:728-731 num24=num22=0）
+  //    → 四备档全灭 → 幽灵全红;有 viable 档 → 该档满分 → 白格+其帧带。
+  //    anchorStyleAt（=实放 gateTilePlacementStyle 同源）<0 ⟺ 全向 viable 失
+  //    （档0-3 每档 = 锚臂 ∧ hook 单向;hook 全向假 ⟹ 每档 hook 臂假 ⟹ -1）。
+  //  · 630/631/723/724 无 hook：备档全失时 best 备档缓存 = 首备档（:756-763 num4
+  //    初值 -1f）→ 足印白格（点击落空=原版本相,锚带窗外 doctrine 同 BJ557）;
+  //    命中档（含墙档 4）→ 白格+其帧带（wall>0 时 alt4 满分 break）。
+  //  · 帧带 = 命中 alternate 序（DrawPreview :864-896 op.Alternate → 帧;
+  //    630/631/723/724 步长 18（CoordinateFullWidth 16+2）/442 步长 22
+  //    （CoordinateWidth 20+pad2）+ num13 居中偏移 −2px（:944 (20−16)/2）。
+  if (sheet === 442 || sheet === 630 || sheet === 631 || sheet === 723 || sheet === 724) {
+    if (!footprintInBounds(st, tx, ty, 1, 1)) return;
+    let blocked = false;
+    if (st.inBounds(tx, ty) && st.hasTile(tx, ty)
+      && !ctx.obstructionClearable(st.get(tx, ty), occupantSheet(st, tx, ty))) blocked = true;
+    const liq5 = liquidSpecOf(sheet)?.liq;
+    if (!blocked && liq5 && st.inBounds(tx, ty) && !liquidCellOk(st, tx, ty, liq5)) blocked = true;
+    const band = ctx.anchorStyleAt ? ctx.anchorStyleAt(tx, ty) : -1;
+    if (sheet === 442 && band < 0) blocked = true;      // AllInvalid（:728-731 全红面）
+    placePreviewFrame.data = {
+      sheet, fw: 1, style: ctx.style, ax: tx, ay: ty, w: 1, h: 1,
+      cells: new Uint8Array([blocked ? 2 : 1]),
+      pvFrame: sheet === 442
+        ? { fx: Math.max(0, band) * 22, fy: 0, sw: 20, sh: 20, dx: -2 }
+        : { fx: Math.max(0, band) * 18, fy: 0, sw: 16, sh: 16 },
     };
     return;
   }

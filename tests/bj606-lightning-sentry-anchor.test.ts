@@ -141,7 +141,7 @@ describe('BJ606 ②：绘制对位锁（贴图顶心锚盒顶心+底座盒心—
     setProjSpriteOverride(688, undefined as never);
   });
 
-  function placeAndDraw(vid: 688 | 689 | 690, carried = false): { ops: RecOp[]; m: MinionProj; files: string[] } {
+  function placeAndDraw(vid: 688 | 689 | 690, carried = false): { ops: RecOp[]; m: MinionProj; files: string[]; glowOps: Array<Record<string, unknown>> } {
     const { hooks, player } = makeGame();
     const m = new MinionProj(50 * 16, 98 * 16 - 8, vid, 30, 0, true, 0, false, () => player);
     run(m, hooks, 3);
@@ -150,19 +150,29 @@ describe('BJ606 ②：绘制对位锁（贴图顶心锚盒顶心+底座盒心—
     setProjSpriteOverride(vid, img as never);
     const { ctx, ops } = recordingCtx();
     const files: string[] = [];
+    // ★BJ630件1：本体/glow/底座三笔随迁 itemGlowQueue op 面——draw 侧补 pushGlowOps
+    //  捕获（全亮档 lightAt,色面由 BJ630 锁件专测,此处只锚位姿/分派面）
+    const glowOps: Array<Record<string, unknown>> = [];
     const atlas = { ensureVImage: (f: string) => { files.push(f); return { width: 28, height: 10, __file: f }; } };
-    m.draw({ ctx, atlas } as never);
-    return { ops, m, files };
+    m.draw({
+      ctx, atlas,
+      lighting: { lightAt: () => [255, 255, 255] },
+      pushGlowOps: (o: Array<Record<string, unknown>>) => { glowOps.push(...o); },
+    } as never);
+    return { ops, m, files, glowOps };
   }
 
   it('A 688：本体帧顶心=盒顶心（draw 位=(cx,y)、dest=(−11,0)）——原版 proj.Top+origin(0.5,0)', () => {
-    const { ops, m } = placeAndDraw(688);
+    const { ops, glowOps, m } = placeAndDraw(688);
     const tr = ops.find((o) => o.m === 'translate');
     expect(tr?.a, '锚=proj.Top=(Center.X, 盒顶)（:32486）').toEqual([m.cx, m.y]);
-    const draw = ops.find((o) => o.m === 'drawImage' && (o.a.length === 3 || o.a.length === 5 || o.a.length === 9));
-    expect(draw, '本体帧出图（贴图 stub 在位）').toBeTruthy();
-    const a = draw!.a as number[];
-    expect(a.slice(1, 3), 'dest=(−帧宽/2, 0)=帧顶心 origin（:32497 Size×(0.5,0)）').toEqual([-11, 0]);
+    // ★BJ630件1：本体出图面随迁 op 化（itemGlowQueue 同槽,BJ621 迁层习语）——
+    //  矩阵捕获=translate(cx,y) 后 ⇒ 世界 dest = (cx+dx, y+dy),位姿面不变
+    const draw = glowOps.find((o) => o.tex === 'vanilla/Projectile_688.png');
+    expect(draw, '本体帧出图（op 面,贴图 stub 在位）').toBeTruthy();
+    expect(draw!.sy).toBe(0);
+    expect(draw!.sw).toBe(22); expect(draw!.sh).toBe(30);   // 帧 22×30（180/6）
+    expect(draw!.dx).toBe(-11); expect(draw!.dy).toBe(0);   // dest=(−帧宽/2,0)=帧顶心 origin（:32497 Size×(0.5,0)）
     // 几何合成：贴图顶=盒顶、贴图横心=盒横心（原版对位=悬空球体,非落地塔）
     const sprLeft = m.cx - 11, sprTop = m.y;
     expect(sprTop, '贴图顶=盒顶（球悬盒顶,H/2=160px=10 格——陷地病根消除）').toBe(m.y);
@@ -171,14 +181,14 @@ describe('BJ606 ②：绘制对位锁（贴图顶心锚盒顶心+底座盒心—
   });
 
   it('B 底座 Extra_86：锚=盒心、origin=(宽/2,高−2)（:32515-32521）;携行（ai[2]==1）不画', () => {
-    const { ops } = placeAndDraw(688);
-    const baseDraw = ops.find((o) => o.m === 'drawImage' && (o.a as number[])[1] === -14 && (o.a as number[])[2] === -8);
-    expect(baseDraw, '底座出图（atlas stub 28×10）').toBeTruthy();
-    expect((baseDraw!.a as number[]).slice(1, 3), 'dest=(−14,−(10−2))=origin(宽/2,高−2)').toEqual([-14, -8]);
+    const { ops, glowOps } = placeAndDraw(688);
+    const baseOp = glowOps.find((o) => o.tex === 'vanilla/Extra_86.png');
+    expect(baseOp, '底座出图（op 面,atlas stub 28×10）').toBeTruthy();
+    expect(baseOp!.dx).toBe(-14); expect(baseOp!.dy).toBe(-8);   // dest=(−14,−(10−2))=origin(宽/2,高−2)
     const baseTr = ops.filter((o) => o.m === 'translate').map((o) => o.a);
     expect(baseTr.some((a) => a[1] === GROUND_ROW * 16), '底座锚 Y=盒心 cy=地面顶（proj.Center）').toBe(true);
-    const { ops: opsCarried } = placeAndDraw(688, true);
-    expect(opsCarried.find((o) => o.m === 'drawImage' && (o.a as number[])[1] === -14),
+    const { glowOps: opsCarried } = placeAndDraw(688, true);
+    expect(opsCarried.find((o) => o.tex === 'vanilla/Extra_86.png'),
       'ai[2]==1 携行底座不画（:32514）').toBeUndefined();
   });
 
@@ -191,11 +201,10 @@ describe('BJ606 ②：绘制对位锁（贴图顶心锚盒顶心+底座盒心—
   });
 
   it('D 判别（旧通用尾回潮→红）：贴图左上≠盒左上（off3=[0,0] 形态=F3 物证病灶）', () => {
-    const { ops, m } = placeAndDraw(688);
-    const draw = ops.find((o) => o.m === 'drawImage')!;
-    const a = draw.a as number[];
+    const { ops, glowOps, m } = placeAndDraw(688);
+    const draw = glowOps.find((o) => o.tex === 'vanilla/Projectile_688.png')!;
     const trX = (ops.find((o) => o.m === 'translate')!.a as number[])[0];
-    const sprLeft = trX + (a[1] as number);
+    const sprLeft = trX + (draw.dx as number);
     expect(sprLeft, '旧通用尾=盒左（cx−w/2+num145−num145=cx−8）;新=帧顶心 cx−11——恒差 3px').not.toBeCloseTo(m.cx - m.w / 2, 5);
   });
 });

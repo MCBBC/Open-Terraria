@@ -206,6 +206,44 @@ function buildTables(pack: Pack): LoadedPack {
   return { texts, groupedKeys, variations };
 }
 
+// ===================== ★BJ628（2026-10-10,用户实报图 99）就绪前关键面内联兜底 =====================
+// 竞态窗定谳：l10n 包(zh-Hans 908KB)走 SW 网络优先+失败回退缓存(sw.js:357-371),
+// 首访缓存为空时弱网瞬断/后台大下载抢连接(P0 暖存并发最高 8 路) → fetch 抛错 →
+// fetchPack 静默 null → setLanguage false(旧链无重试无闸)→ main.ts 启动链两次
+// Lang.init(:900/:1039)全撞失败窗后不检查返回值照常 showTitle → TitleMenu 构造期
+// Lang.text 全量回退键名(截图 LegacyMenu.12/13/131/Mods.SandboxWorld.Menu.Mods 直出),
+// 刷新才好(网络空闲后 fetch 成功)。用户令②：就绪前关键面显示极少量本地内联 i18n,
+// 不裸显键名——本表 = 用户截图直出键的 zh/en 双语现值(提取自 public/l10n 现包),
+// 仅 !loaded 时生效(loaded 后缺键仍按原版回退键名+warn,防兜底表掩盖真缺译);
+// 漂移闸 = tests/bj628-l10n-ready-gate.test.ts 对包现值逐键全等。
+// zh/en 之外语言就绪前桥接显示英文(setLanguage 已记 pendingLang,zh 系取 zh)。
+export const CRITICAL_FALLBACK_ZH_EN: ReadonlyMap<string, [string, string]> = new Map([
+  ['LegacyMenu.12', ['单人模式', 'Single Player']],
+  ['LegacyMenu.13', ['多人模式', 'Multiplayer']],
+  ['LegacyMenu.14', ['设置', 'Settings']],
+  ['LegacyMenu.15', ['退出', 'Exit']],
+  ['LegacyMenu.131', ['成就', 'Achievements']],
+  ['Mods.SandboxWorld.Menu.Mods', ['模组', 'Mods']],
+  ['Mods.SandboxWorld.Menu.BuyTerraria', ['购买原版', 'Buy the Original']],
+  ['Mods.SandboxWorld.Menu.ReplicaNotes', ['复刻笔记', 'Replica Notes']],
+  ['Mods.SandboxWorld.Title.RemakeBaseline', ['复刻版本基准 1.4.5.8', 'Remake baseline 1.4.5.8']],
+  ['Mods.SandboxWorld.Credits.Line1', ['由{0}与{1}共同协作复刻', 'Co-created by {0} and {1}']],
+  ['Mods.SandboxWorld.Credits.Line2', ['仅用于AI学习研究禁止用于商业用途，原版请从官方渠道购买', 'For AI learning and research only — not for commercial use. Please purchase the original from official channels.']],
+  ['Mods.SandboxWorld.AudioGate.Line1', ['建议佩戴耳机以获得最佳体验', 'Please wear headphones for the best experience']],
+  ['Mods.SandboxWorld.AudioGate.Line2', ['点击任意位置或按任意键开始', 'Click anywhere to start']],
+  ['Mods.SandboxWorld.AssetDl.Loading', ['资源加载中 {0}', 'Loading resources · {0}']],
+  ['Mods.SandboxWorld.AssetDl.BadgeTitle', ['素材包下载', 'Game assets downloading in the background (single player waits for completion)']],
+]);
+
+/** 就绪门节奏(可测注入:tests/bj628 直接改字段,finally 复原) */
+export const L10N_RETRY = {
+  /** ensureReady 重试间隔序列(ms),越界取末值 */
+  delaysMs: [200, 500, 1000, 2000, 4000],
+  /** 预算耗尽后的后台自愈轮询间隔/总时长 */
+  healIntervalMs: 2500,
+  healMaxMs: 120_000,
+};
+
 class LanguageManager {
   activeCulture: LangCultureInfo | null = null;
   cultures: LangCultureInfo[] = [];            // 来自 public/l10n/index.json(设置面板数据源)
@@ -213,6 +251,11 @@ class LanguageManager {
   private packCache = new Map<string, LoadedPack>(); // name → LoadedPack,Map 序即 LRU 序
   private listeners: Array<() => void> = [];
   private warned = new Set<string>();
+  /** ★BJ628 setLanguage 在途目标语言(就绪前兜底表 zh/en 选边用) */
+  private pendingLang: string | null = null;
+  /** ★BJ628 后台自愈循环句柄(ensureReady 预算耗尽仍败时挂;成功即停) */
+  private healTimer: ReturnType<typeof setInterval> | null = null;
+  private healLang: string | number | null = null;
   /** mod 语言包(2026-10-04 GLM娘实验批 G5):每项 = {lang: {类目:{键:值}}},类目已由
    *  loader 预加 Mods.<modId>. 前缀。装载后即时 overlay 进激活包,并在此后每次
    *  setLanguage/fetchPack 重新 overlay(缓存表原地 overlay,LRU 复用不丢)。 */
@@ -226,6 +269,53 @@ class LanguageManager {
   async init(lang?: string | number): Promise<boolean> {
     await this.loadIndex();
     return this.setLanguage(lang ?? 'zh-Hans');
+  }
+
+  /**
+   * ★BJ628（2026-10-10）l10n 就绪门：启动链唯一权威入口。
+   * loaded 已真 = 幂等即时 true（健康启动零开销）；否则 setLanguage 首试 +
+   * 预算内按 L10N_RETRY.delaysMs 递进重试（in-flight fetch 不超时——与旧
+   * await init 同形，预算只约束重试节奏不砍单次尝试）。预算耗尽仍败 =
+   * 放行 false（不永久卡启动，TitleMenu 消费兜底表）并挂后台自愈循环
+   * （每 healIntervalMs 再试、healMaxMs 封顶；成功即 emit() → Lang.onChange
+   * 广播——TitleMenu.renderTexts/Settings rebuild/WorldSelect reload 等
+   * 既有订阅面自动重渲染，键名窗免刷新自愈）。
+   */
+  async ensureReady(lang?: string | number | LangCultureInfo, budgetMs = 8000): Promise<boolean> {
+    if (this.loaded) return true;
+    await this.loadIndex();                        // ★cultures 面(Settings 语言清单)与 init 同形——
+                                                   // 首发版漏此行被探针 fetches=1 实抓(离线清单缺位)
+    const name = typeof lang === 'object' && lang !== null ? lang.name : lang;
+    const t0 = Date.now();
+    let attempt = 0;
+    for (;;) {
+      if (await this.setLanguage(name ?? 'zh-Hans')) break;
+      const elapsed = Date.now() - t0;
+      if (elapsed >= budgetMs) break;
+      const delays = L10N_RETRY.delaysMs;
+      const wait = Math.min(delays[Math.min(attempt, delays.length - 1)], budgetMs - elapsed);
+      await new Promise((r) => setTimeout(r, wait));
+      attempt++;
+    }
+    if (this.loaded) { this.stopSelfHeal(); return true; }
+    this.startSelfHeal(name ?? 'zh-Hans');
+    return false;
+  }
+
+  /** 自愈循环： unloaded 期间低频续试 setLanguage；loaded/超时即拆（防定时器泄漏）。 */
+  private startSelfHeal(lang: string | number): void {
+    if (this.healTimer) return;                    // 已有自愈在跑（多次 ensureReady 失败不叠加）
+    this.healLang = lang;
+    const t0 = Date.now();
+    this.healTimer = setInterval(() => {
+      if (this.loaded || Date.now() - t0 >= L10N_RETRY.healMaxMs) { this.stopSelfHeal(); return; }
+      void this.setLanguage(this.healLang!);
+    }, L10N_RETRY.healIntervalMs);
+  }
+
+  private stopSelfHeal(): void {
+    if (this.healTimer) { clearInterval(this.healTimer); this.healTimer = null; }
+    this.healLang = null;
   }
 
   private async loadIndex() {
@@ -245,12 +335,14 @@ class LanguageManager {
   async setLanguage(culture: LangCultureInfo | string | number): Promise<boolean> {
     const name = typeof culture === 'object' ? culture.name : normalizeLang(culture);
     if (this.activeCulture?.name === name && this.loaded) return true;
+    this.pendingLang = name;                       // ★BJ628 兜底表选边（就绪前 zh 系取 zh）
     const tables = await this.fetchPack(name);
     if (!tables) return false;
     this.pack = tables;
     this.activeCulture = this.cultures.find((c) => c.name === name) ?? { name, legacyId: 0, displayNameKey: '' };
     this.loaded = true;
     this.warned.clear();
+    this.stopSelfHeal();                           // ★BJ628 任一路径就绪即收自愈
     this.emit();
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('sw:langchange'));
     return true;
@@ -312,6 +404,8 @@ class LanguageManager {
     this.warned.clear();
     this.packCache.clear();
     this.modLangPacks.length = 0;
+    this.pendingLang = null;
+    this.stopSelfHeal();                           // ★BJ628 自愈定时器一并拆（BJ328 泄漏族纪律）
     npcNameResolver = null;
     subCtx = null;
     substitutionTable = null;
@@ -358,10 +452,16 @@ class LanguageManager {
     return this.pack.texts.has(key);
   }
 
-  /** 取原文(不做 {0} 参数替换)。缺失返回 key 本身(LanguageManager.cs:446-453) */
+  /** 取原文(不做 {0} 参数替换)。缺失返回 key 本身(LanguageManager.cs:446-453)。
+   *  ★BJ628 唯一偏离：!loaded 窗口内关键面键先查内联兜底表（用户令——就绪前
+   *  不裸显键名）；loaded 后缺键仍回退键名+warn（原版语义,防兜底掩盖真缺译） */
   getText(key: string): string {
     const v = this.pack.texts.get(key);
     if (v === undefined) {
+      if (!this.loaded) {
+        const fb = CRITICAL_FALLBACK_ZH_EN.get(key);
+        if (fb) return (this.pendingLang ?? '').startsWith('zh') ? fb[0] : fb[1];
+      }
       if (!this.warned.has(key)) { this.warned.add(key); console.warn(`[Lang] 缺失 key: ${key}`); }
       return key;
     }

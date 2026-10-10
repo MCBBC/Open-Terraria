@@ -22,10 +22,12 @@
 //    glow = DrawCompositeArmorPiece（PlayerDrawLayers.cs:38-162）把【同甲复合贴图
 //    下半幅】（sourceRect.Y += 224）按 body/armGlowColor 逐部件叠画（5 部件：后肩/
 //    后臂/躯干/前肩/前臂）；body 251/259 整幅换专 glow 贴图 Glow_364/376（无偏移）。
-//  · 尾批登记（本表未收，见 ARMOR_GLOW_DEFERRED）：TV 头 271 屏态机、Floret 前管
-//    308（依附未画的 Extra_214）；手持物/掉落物 Item.glowMask 消费面
-//    （Main.cs:39410-39450 / PlayerDrawLayers.cs:3476-3526，67 件数据面）另账；
-//    UI 纸娃娃（DisplayDoll）glow 未接。
+//  · ★BJ625（2026-10-10）尾批两件落刀：TV 头 271 屏态机（HEAD_GLOW[271].tv=true,
+//    帧位=tvScreenState+tvScreenGlowFrame 纯函数,渲染侧喂 anyDanger/低血/邪恶群系/
+//    湿/节庆+眨眼输入）、Floret 前管 308（HEAD_GLOW[269].frontTube=308 同锚第二叠条,
+//    本体 Extra_214 渲染侧 drawPlayer 窗内 in-world 画——资产两件均在库）。
+//    手持物/掉落物 Item.glowMask 消费面（Main.cs:39410-39450 /
+//    PlayerDrawLayers.cs:3476-3526，67 件数据面）另账；UI 纸娃娃（DisplayDoll）glow 未接。
 import { ARM_FRAME, COMPOSITE_BOB_ROWS, sittingSlicePlan, type DollPetArm } from '../player/PaperDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
 
@@ -53,6 +55,14 @@ export interface ArmorGlowEntry {
    *  :1560-1568/DrawCompositeArmorPiece 227 支）；4 = 学徒火 4 拷贝（头 211/身 205
    *  独立站 :2410-2416/:3671-3680，区间见下方 APPRENTICE_JITTER_*） */
   jitter?: 2 | 4;
+  /** ★BJ625件2 前管第二叠条（head 269 Glow_308——FrontShoulder 站
+   *  PlayerDrawLayers.cs:104-118/:3798-3810，与头罩条同锚同源矩形同色双画;
+   *  本体 Extra_214 由渲染侧画,非 glow 域） */
+  frontTube?: number;
+  /** ★BJ625件1 TV 屏态机（head 271 Glow_309 6 列×4 行格机——:2359-2387 +
+   *  DrawPlayer_Head_GetTVScreen :2516-2539;帧位由 tvScreenState/tvScreenGlowFrame
+   *  派生,ctx.tv 喂屏态+眨眼;Glow_309 252×224 列距 42/帧行 56,帧 40×56） */
+  tv?: true;
 }
 
 /** 复合半幅族（bodyGlowColor/armGlowColor 经 DrawCompositeArmorPiece 消费；tex =
@@ -79,7 +89,8 @@ export const HEAD_GLOW: Readonly<Record<number, ArmorGlowEntry>> = {
   240: { mask: 273, color: { k: 'const', r: 230, g: 230, b: 230, a: 60 }, jitter: 2 },  // GroxTheGreatHelm :544-548
   267: { mask: 301, color: { k: 'const', r: 230, g: 230, b: 230, a: 60 } },   // RoninHat :549-553
   268: { mask: 302, color: { k: 'mtPulse' } },                                // TimelessTravelerHood :554-560
-  269: { mask: 304, color: { k: 'const', r: 200, g: 200, b: 200, a: 255 } },  // FloretProtectorHelmet :561-565
+  269: { mask: 304, color: { k: 'const', r: 200, g: 200, b: 200, a: 255 }, frontTube: 308 },  // FloretProtectorHelmet :561-565（308=前管 FrontShoulder 站 :104-118）
+  271: { mask: 309, color: { k: 'const', r: 255, g: 255, b: 255, a: 255 }, tv: true },        // TVHead :571-574（屏态机帧位见 tvScreenGlowFrame）
   270: { mask: 305, color: { k: 'const', r: 200, g: 200, b: 200, a: 150 } },  // CapricornMask :566-570
   282: { mask: 357, color: { k: 'mtPulseA0' } },                              // DeadCellsBeheadedHead :614-620
   284: { mask: 365, color: { k: 'chickenBones' } },                           // ChickenBonesHead :621-625
@@ -131,13 +142,41 @@ export const LEGS_GLOW: Readonly<Record<number, ArmorGlowEntry>> = {
   226: { mask: 307, color: { k: 'const', r: 200, g: 200, b: 200, a: 150 } },  // CapricornTail :779-783
 };
 
-/** 尾批登记（缺依赖不占位）：271 TV 屏 = 6×4 格态机（GetTVScreen + EyeFrameToShow
- *  联动 :2359-2387）未移植；269 前管 Glow_308 依附 Extra_214 头盔延伸贴图（本仓
- *  未画，:120-124 FrontShoulder 站）——glow 先行=无源发光，随 Extra_214 尾批同补。 */
-export const ARMOR_GLOW_DEFERRED: ReadonlyArray<{ slot: 'head' | 'body' | 'legs'; id: number; mask: number; reason: string }> = [
-  { slot: 'head', id: 271, mask: 309, reason: 'TV 屏 6×4 格态机（DrawPlayer_Head_GetTVScreen）未移植，尾批' },
-  { slot: 'head', id: 269, mask: 308, reason: '依附未画的 Extra_214 前管贴图（:120-124），随尾批同补' },
-];
+/** 尾批登记（缺依赖不占位）——★BJ625 两件已落刀清空：271 TV 屏态机（tvScreenState/
+ *  tvScreenGlowFrame+渲染侧 tv 输入）、269 前管 308（frontTube 叠条+渲染侧
+ *  Extra_214 本体画,资产在库 40×1120）。表保留=API 兼容（BJ597 消费面）。 */
+export const ARMOR_GLOW_DEFERRED: ReadonlyArray<{ slot: 'head' | 'body' | 'legs'; id: number; mask: number; reason: string }> = [];
+
+/** ★BJ625件1 TV 屏态机（DrawPlayer_Head_GetTVScreen PlayerDrawLayers.cs:2516-2539
+ *  1:1，优先序=原版 if 链）：危险（NPC.AnyDanger）→4 / 低血（statLife≤
+ *  statLifeMax2/4）→1 / 邪恶群系（ZoneCorrupt∪ZoneCrimson∪ZoneGraveyard）→0 静噪
+ *  / 湿（wet）→2 / 节庆（townNPCs≥3 ∪ BirthdayParty.PartyIsUp ∪ LanternNight.
+ *  LanternsUp）→5 / 缺省 3。输入布尔=渲染侧/Game 侧既有量映射（anyDanger=
+ *  Game.npcAnyDanger 每帧快照注入;湿=Player.wetSticky（原版 wet 唯一锚）;城镇数=
+ *  scene.townNPCCount（±1920×±1200 窗=原版 plr.townNPCs 同源））。 */
+export function tvScreenState(i: {
+  anyDanger: boolean; lowLife: boolean; evilZone: boolean; wet: boolean; festive: boolean;
+}): number {
+  if (i.anyDanger) return 4;
+  if (i.lowLife) return 1;
+  if (i.evilZone) return 0;
+  if (i.wet) return 2;
+  if (i.festive) return 5;
+  return 3;
+}
+
+/** Glow_309 帧位（PlayerDrawLayers.cs:2365-2386 1:1）：行=miscCounter%20/5（int 除）；
+ *  态 5 覆写 0、眨眼（PlayerEyeHelper.EyeFrameToShow>0）→2；态 0（静噪）=不画
+ *  （null——原版 `if (num19 != 0)` 门 :2362）。列=屏态 1..5,帧 40×56、列距 42
+ *  （Frame(6,4,·,·,-2)：252/6-2=40、224/4=56）。 */
+export function tvScreenGlowFrame(
+  miscCounter: number, state: number, blink: boolean,
+): { state: number; frameY: number } | null {
+  if (state === 0) return null;
+  let frameY = Math.floor((miscCounter % 20) / 5);
+  if (state === 5) frameY = blink ? 2 : 0;
+  return { state, frameY };
+}
 
 // ---- 色式解算（纯函数；tint/alpha 已含全部乘区）----
 export interface GlowColorInput { mt: number; miscCounter: number; undershirt: RGB }
@@ -220,6 +259,10 @@ export interface ArmorGlowCtx {
   sit: { legIndex: number; seatYOffset: number; body: number } | null;
   pet: DollPetArm | null;
   mt: number; miscCounter: number;
+  /** ★BJ625件1 TV 头 271 屏态输入（head==271 时必填;null=非 TV 头/未接线→
+   *  静噪同形不画——原版 GetTVScreen 返回 0 同门）。state=tvScreenState 产物、
+   *  blink=Player.eyeFrame>0（EyeFrameToShow）。 */
+  tv?: { state: number; blink: boolean } | null;
   /** 最终乘区（眨眼/微光 bodyAlpha × stealth s'²）——烘进 alpha */
   mul: number;
 }
@@ -365,16 +408,34 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
       ops.push(base);
     }
   }
-  // ---- 头（:2357-2401；309/308 特位=尾批未收）----
+  // ---- 头（:2357-2401；★BJ625 271 屏态机/269 前管 308 已收）----
   const head = c.head > 0 ? HEAD_GLOW[c.head] : undefined;
   if (head) {
     const rc = rcOf(head.color);
-    const jit = head.jitter === 2
-      ? { jitter: 2 as const, jx: JITTER_125, jy: JITTER_125 }
-      : head.jitter === 4
-        ? { jitter: 4 as const, jx: JITTER_APPR_HEAD[0], jy: JITTER_APPR_HEAD[1] }
-        : undefined;
-    ops.push(stripOp(head.mask, c.rowsBody, frameTop, rc, c.mul, jit));
+    if (head.tv) {
+      // ★BJ625件1：Glow_309 6 列×4 行格机（:2359-2387）——列=屏态、行=帧位
+      //（tvScreenGlowFrame 派生;静噪态 0=不画）。几何 = Frame(6,4,·,·,-2)：
+      // sx=42×state（列距 252/6）、sy=56×frameY、帧 40×56（42-2=40）。
+      const tv = tvScreenGlowFrame(c.miscCounter, c.tv?.state ?? 0, c.tv?.blink ?? false);
+      if (tv) {
+        ops.push({
+          tex: glowTex(head.mask), sx: 42 * tv.state, sy: 56 * tv.frameY, sw: 40, sh: 56,
+          dx: -FRAME_W / 2, dy: frameTop,
+          blend: rc.blend, tint: rc.tint, alpha: rc.alpha * c.mul,
+          ...armorGlowBakeBoost(rc, c.mul),
+        });
+      }
+    } else {
+      const jit = head.jitter === 2
+        ? { jitter: 2 as const, jx: JITTER_125, jy: JITTER_125 }
+        : head.jitter === 4
+          ? { jitter: 4 as const, jx: JITTER_APPR_HEAD[0], jy: JITTER_APPR_HEAD[1] }
+          : undefined;
+      ops.push(stripOp(head.mask, c.rowsBody, frameTop, rc, c.mul, jit));
+      // ★BJ625件2：前管第二叠条（head 269 Glow_308——FrontShoulder 站 :104-118/
+      //  :3798-3810 与头罩条同锚同源矩形同色双画;本体 Extra_214 渲染侧画）
+      if (head.frontTube) ops.push(stripOp(head.frontTube, c.rowsBody, frameTop, rc, c.mul));
+    }
   }
   return ops;
 }

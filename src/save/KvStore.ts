@@ -239,6 +239,50 @@ export async function kvDelete(key: string): Promise<void> {
   } catch { /* IDB 不可用则忽略 */ }
 }
 
+/** ★BJ627（2026-10-10 偏好域 LS→IDB 迁移）扫取：getAllKeys 只枚举键串（键是小
+ *  字符串——worlds/players 索引+zip 大值键混店也不入内存），命中 match 的键在
+ *  同一 readonly 事务内逐个 get（string 通道；非 string 值=静默跳过）。任意
+ *  失败=空表（调用方退 LS 收编序，自愈）。偏好域预载专用——绝不对全店取值。 */
+export async function kvSweepIdb(match: (key: string) => boolean): Promise<Map<string, string>> {
+  try {
+    const db = await openDb();
+    return await new Promise<Map<string, string>>((resolve) => {
+      const out = new Map<string, string>();
+      try {
+        const tx = db.transaction(STORE, 'readonly');
+        const store = tx.objectStore(STORE);
+        const keysReq = store.getAllKeys();
+        keysReq.onsuccess = () => {
+          const all = (keysReq.result ?? []) as IDBValidKey[];
+          for (const k of all) {
+            const ks = String(k);
+            if (!match(ks)) continue;
+            const g = store.get(ks);
+            g.onsuccess = () => { if (typeof g.result === 'string') out.set(ks, g.result); };
+          }
+        };
+        tx.oncomplete = () => resolve(out);
+        tx.onerror = () => resolve(out);
+        tx.onabort = () => resolve(out);
+      } catch { resolve(out); }
+    });
+  } catch { return new Map(); }
+}
+
+/** ★BJ627 只删 IndexedDB（localStorage 不动，LS 清理由调用方自管——prefRemove
+ *  需 try/catch 环境安全地清 LS）。kvDelete 的偏好域变体；IDB 不可用=静默。 */
+export async function kvDeleteIdb(key: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* IDB 不可用则忽略 */ }
+}
+
 // ---- 资源包 zip blob(kv store 复用,'rp:zip:' 前缀键;2026-08-20 M13) ----
 // ★不新开 object store(免 DB 版本升级 → 免多标签页 onblocked 阻塞窗口):
 // IDB object store 无模式,键上放 Blob 与字符串同存;kvGet/kvSet 只走字符串

@@ -8,6 +8,7 @@ import { mountInstallPrompt } from './ui/InstallPrompt';
 import { UI } from './ui/UI';
 import { resolveEscapeChain } from './ui/escapeChain';   // SW-BN2 2026-09-07
 import { kvHas } from './save/KvStore';
+import { preloadPrefs } from './save/PrefsStore';   // ★BJ627 偏好域 IDB 预载（候选 C:IDB 权威+内存缓存）
 import { saveGame } from './save/SaveFile';
 import { ITEM_BY_KEY , VANILLA_ITEM_KEY_BY_ID , ITEM_DEFS } from './data/items';
 import { combatWeapon } from './data/vanillaItemCombat';
@@ -66,6 +67,7 @@ import { setModAudioSink, getModWavData } from './mods/hooks';
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
 // 构造前装——模块加载期的单例画布不计入,可接受(一次性常量非泄漏面)
 installCanvasWatch();
+void preloadPrefs();    // ★BJ627 偏好域预载提前起跑（与模块初始化重叠;boot 链首行再 await 兜时序——单飞幂等）
 mountInstallPrompt();   // PWA 安装提示条(beforeinstallprompt 捕获;iOS 引导;7 天冷却)
 
 const root = document.getElementById('game-root')!;
@@ -890,9 +892,14 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // ② splash（原时序不变）：RE-LOGIC 字样烘在每组 Splash_N_2 前景层（透明底
   //    PNG，透出 back 场景）；vanilla-ui/logo_1..8.png 是死资产不使用。
   //    时序全程 ~10.3s 不快进；资源下载等待 = splashGate 迟解
+  // ★BJ627 偏好域预载（module 顶层已起跑,此处 await 兜时序——此后全部同步读
+  //    消费面走内存,零闪变;~1-5ms,IDB open+键枚举+命中取值单事务）
+  await preloadPrefs();
   // options/语言先行（音频门文案需要 Lang；mainFlow 内 options.load() 幂等）
   await options.load();
-  await Lang.init(options.data.lang);
+  // ★BJ628 l10n 就绪门①（短预算 2.5s）：音频门/资源徽标文案已消费 Lang——弱网
+  //  瞬断在此吸收；失败不阻断启动（资产预热期长,②号门在 showTitle 前兜底）
+  await Lang.ensureReady(options.data.lang, 2500);
   // ★mod 装载（2026-10-04,docs/mod-loader-design.md §4）：内容注册+id 分配必须在
   //   一切世界/UI 消费之前；贴图注入在 loadAssets 内 atlas 构造后（applyModAssets）。
   //   失败只告警不阻断启动（资源包同款"增强不是必需"哲学；零 mod=零副作用）
@@ -1031,7 +1038,10 @@ kvHas('sandboxworld.quicksave').then(async () => {
                               // 音频门/首次手势解锁已保 AC running）
   await assetsP;
   if (atlas) UITextures.setAtlas(atlas);
-  await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
+  // ★BJ628 l10n 就绪门②（全预算,showTitle 前唯一权威闸）：两次 init 全撞弱网瞬断
+  //  窗曾放键名直出菜单进主流程（用户实报图 99）；现预算内重试,仍败放行+挂后台
+  //  自愈（成功 emit→TitleMenu.renderTexts 等订阅面免刷新自愈）
+  await Promise.all([UIFont.load(), Lang.ensureReady(options.data.lang)]);
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
   flow = createFlow(root, atlas, ui, audio);

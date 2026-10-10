@@ -8,6 +8,7 @@ import { UITextures } from '../vui/assets/UITextures';
 import { noteVuiConsumer } from '../assets/SpriteAtlas';
 import { texReady } from '../render/texId';
 import { dyeApplyOf, applyDyePass } from '../data/vanillaDyes';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ631:染料烘焙 uTime 单源钟
 
 export const BODY_FRAMES = 20;     // 身体帧数
 export const FRAME_W = 40;
@@ -369,14 +370,19 @@ export function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: numbe
 
 
 /** ★五百七十:armor dye bake(composite 层;vanilla ApplyItemDye 面——
- *  染后 sprite 一次性生成在 composite 缓存 miss 时=非逐帧) */
+ *  染后 sprite 一次性生成在 composite 缓存 miss 时=非逐帧)。
+ *  ★BJ631 件1:uTime=GTW 现值(uTime 缺省 0=动画族恒冻 t0 帧;烘焙时刻现值更贴原版
+ *  逐帧活性——合成缓存冻结窗仍登记偏差,与 body/legs 既有冻结面同账);
+ *  img 空守卫(BJ631 喂值链上线后 dye 只随甲槽喂出,此处兜底防御非空约定破面) */
 function dyeBakeArmorSprite(img: any, dyeVid: number): HTMLCanvasElement {
+  if (!img) return img;
   const cv = document.createElement('canvas');
   cv.width = img.width; cv.height = img.height;
   const c2 = cv.getContext('2d', { willReadFrequently: true })!;
   c2.drawImage(img, 0, 0);
   const emu = dyeApplyOf(dyeVid);
   if (emu) {
+    emu.uniforms.uTime = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly 同源(★BJ330 单源)
     const id = c2.getImageData(0, 0, cv.width, cv.height);
     applyDyePass(id.data, cv.width, cv.height, emu);
     c2.putImageData(id, 0, 0);
@@ -529,16 +535,19 @@ export function compositePaperDoll(
     const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0);
     const skinLegsImg = showSkinUnderLegs ? sheetRect(a.skinVariant, 10) : null;
     const skinLegsTinted = skinLegsImg ? tint(skinLegsImg, a.skinColor) : null;
+    // ★BJ631 件1:染腿烘提出帧/切片循环（BJ625 喂值恒缺时不可达=冷码;喂值链上线后
+    //  逐切片逐帧重烘=病理性,一次烘出 20 帧整表后循环直用——body 侧 dyedBodyImg 同式）
+    const legsArmorImg = equip?.dyeLegs ? dyeBakeArmorSprite(legsArmor.img, equip.dyeLegs) : legsArmor.img;
     for (let i = 0; i < nFrames; i++) {
       const row = rowsMode ? rowsMode.legs : i;
       if (sit) {
         for (const s of sittingSlicePlan(equip?.legs ?? 0, false, equip?.body ?? 0, sit.seatYOffset, row)) {
-          ctx.drawImage(equip?.dyeLegs ? dyeBakeArmorSprite(legsArmor.img, equip.dyeLegs) : legsArmor.img, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
+          ctx.drawImage(legsArmorImg, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
         }
         continue;
       }
       if (skinLegsTinted) ctx.drawImage(skinLegsTinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
-      ctx.drawImage(equip?.dyeLegs ? dyeBakeArmorSprite(legsArmor.img, equip.dyeLegs) : legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
+      ctx.drawImage(legsArmorImg, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
 
@@ -671,12 +680,17 @@ export function compositePaperDoll(
 
   // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）。
   // skipHair 时一并让出（发色剂叠层路径由调用方在发层之后补画，保层序）
+  // ★BJ631 件1（BJ625 定谳收口）：头甲染料消费——dyeHead（armor dye 槽 0,vanilla
+  //  UpdateDyes Player.cs:9679 cHead=GetEffectiveDye(0).dye;头甲层 shader=
+  //  drawinfo.cHead,PlayerDrawLayers.cs:2173）。dyeBakeArmorSprite 同 body/legs
+  //  烘焙面（composite 缓存键 `|dh` 段此前就是死键——形参在位、消费与喂值双缺）。
   if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead' && wantHead) {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
+      const headArmorImg = equip?.dyeHead ? dyeBakeArmorSprite(headArmor.img, equip.dyeHead) : headArmor.img;
       for (let i = 0; i < nFrames; i++) {
         const row = rowsMode ? rowsMode.body : i;
-        ctx.drawImage(headArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
+        ctx.drawImage(headArmorImg, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
       }
     }
   }

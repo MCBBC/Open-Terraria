@@ -135,13 +135,14 @@ import {
   mysticLogs, type CultistHost, type FairyHost,
 } from '../world/evolution/RuntimeEvents';
 import type { SaveData } from '../save/serialize';
+import { prefGet, prefSet } from '../save/PrefsStore';   // ★BJ627 偏好域 IDB 单写（LS 零新写）
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
 import {
   rollExtractinatorDrop, extractinatorMode, extractinatorUseTime, mathRand,
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, MOD_CHEST_TILES, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, MOD_CHEST_TILES, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame, furnitureStyleBase } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -1110,6 +1111,10 @@ type DecorSupportKind =
   | 'jungleplant' | 'oasisplant' | 'wallhang' | 'stalactite' | 'moss'
   | 'pile' | 'deco3x2' | 'deco3x1' | 'dyeplant' | 'waterplant' | 'sandplant'
   | 'hangtop' | 'gnome' | 'treebase' | 'tree' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip'
+  // —— ★BJ624（2026-10-10）：CheckProjectilePressurePad（:87473-87500）442 弹幕压垫
+  //  幸存门——帧带 frameX/22 四向档（0下/1上/2左/3右）,档向失 viable 重定向首档,
+  //  全失杀;与放置门 padDirections 同源（:87501 移植单源）
+  | 'projpad'
   // —— 2026-09-01 三批：放置清格豁免面多格件 Check* 族（tileCut 免除件原版
   // KillTile 尾 SquareTileFrame→TileFrame 级联的整件裁决,探针 _pile-place.mjs 四场景）——
   | 'pumpkin' | 'super' | 'larva3x3'
@@ -1291,6 +1296,9 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // CheckStinkbugBlocker（:87207-87210 派发 630/631;函数 :54373——锚向失效重定向,
   // 全失效杀;ValidateOrAttemptReorientingAnchor :54299）
   630: 'stinkbug', 631: 'stinkbug',
+  // CheckProjectilePressurePad（:87473-87500 派发 case 442;函数 :87473——442 帧带
+  //  四向档 viable 重定向/杀,见 type 注;★放置门同源 padDirections=放置/幸存对称）
+  442: 'projpad',
   // CheckXmasTree（:87161-87164 派发 171;函数 :39998）：4×8 完整性+中两柱 SolidTile2
   // （破坏/失撑整树清+掉 1873,掉落走 breakTile breakXmasTree 既有链）
   171: 'xmas',
@@ -1552,13 +1560,129 @@ function placeObstructionClearable(typeId: number, sheet: number): boolean {
 //  WorldGen.CheckAnchor :54290 frameX/18 反推同域）。返回 -1 = 五档全失（原版拒置）。
 //  旧 hasSupport 近似（底实心∪墙）对锚桩两向偏差：漏顶/左/右/平台/SolidWithTop 档
 //  （严于原版——吊顶/侧挂/平台上放不下）+ SolidTile 漏 tileNoAttach 排除（松于原版
-//  ——可浮贴门/火把等 noAttach 件顶上）。723/724 两表逐字相同（:4485-4507 vs :4514-4536）。
+//  ——可浮贴门/火把等 noAttach 件顶上）。
 //  ★域纪律：入参一律 TileStore 坐标,内部经 TILE_DEFS[x].vanilla.sheet 反查 sheet 域
 //  集合（PLATFORMS/IS_A_TREE_TRUNK/NO_ATTACH/NOT_REALLY_SOLID/TILE_SOLID_TOP_FAMILY）。
+//  ★BJ624（2026-10-10 件1 先核定谳+翻正）：①723/724 全表【无】AnchorAlternateTiles
+//  赋值行（:4508-4536/:4537-4560 亲读零命中;:4489 系 630 基样式块行号误挂）→
+//  AlternateTile 位=原版恒 false 惰性位（isValidAlternateAnchor :1969-1984 表空早退）
+//  ——旧门 ANCHOR_ALTERNATE_SHEETS 臂（梁/柱上可承）=松于原版,翻正撤除（BJ426
+//  判别面「梁上可承」用例随批翻转重锚）。②630/631 臭虫箱/442 弹幕压垫同构五锚档
+//  入本门（ANCHOR_GATE_SPECS 表驱动）：630/631 成员表真值（:4449/:4470）+侧档序
+//  互换（alternate 2=AnchorRight/3=AnchorLeft,帧带=alternate 序;CheckStinkbugBlocker
+//  :54373 2↔3 互换比对同域）;442=四档无墙（HookCheckIfCanPlace=
+//  CanPlaceProjectilePressurePad :87583 四向 viable,WorldGen.cs:87501 移植）+档0
+//  Table 位（:4661 底锚 8 位含 Table）+帧带 ×22（CoordinateWidth 20+pad 2,
+//  CheckProjectilePressurePad frameX/22 反推同域 :87480）。
 // ============================================================================
 
-/** TileObjectData 723/724 AnchorAlternateTiles（TileObjectData.cs:4489）——sheet 域 */
+/** TileObjectData 630/631/442(侧档) AnchorAlternateTiles（:4449/:4470/:4652/:4658）
+ *  ——sheet 域。★723/724 不在其列（全表无赋值行=惰性位,BJ624 定谳）。 */
 export const ANCHOR_ALTERNATE_SHEETS: ReadonlySet<number> = new Set([124, 561, 574, 575, 576, 577, 578]);
+
+/** ★BJ624 五锚档规格表（anchorTilePlacementStyle 表驱动参数） */
+export interface AnchorGateSpec {
+  /** AnchorAlternateTiles 成员（sheet 域;723/724 惰性位=空集） */
+  members: ReadonlySet<number>;
+  /** 档0 附加 Table 臂（442 底锚 8 位含 Table;TileObject.cs:404-408 !Platforms∧tileTable∧bt0） */
+  bottomTable?: boolean;
+  /** 档2/3 左右互换（630/631 alternate 2=Right/3=Left;返回值=alternate 序帧带） */
+  sideSwap?: boolean;
+  /** 成员表只在侧档生效（442 基记录/alt1 无 AnchorAlternateTiles,:4652/:4658 仅 alt2/3） */
+  sideMembersOnly?: boolean;
+  /** 442 四向 viable 门（CanPlaceProjectilePressurePad :87583,档0-3 各配 down/up/left/right） */
+  projPad?: boolean;
+  /** 档4 墙锚（442 无墙挂档=缺省 true 关闭） */
+  wallMode?: boolean;
+  /** ★BJ629 件1：档0 底锚 SolidWithTop 两臂（平台 proper-top ∨ tileSolidTop 非平台）
+   *  开关——136 拉杆基记录底锚=SolidTile|SolidSide 双位（TileObjectData.cs:4562,
+   *  无 SolidWithTop;平台=solidTop 原版 :388 SolidTile 臂拒）→ false 关闭。
+   *  缺省 true=630/631/723/724/442 既有语义不变。 */
+  bottomSolidTop?: boolean;
+  /** ★BJ629 件1：档1 顶锚开关（136 无顶锚备档=:4551-4577 全块无 AnchorTop 写位）
+   *  → false 跳过。缺省 true=既有五备档族语义。 */
+  top?: boolean;
+  /** ★BJ629 件1：侧锚备档号（alternate 序=帧带）。缺省 [2,3]=五备档族
+   *  （0底/1顶/2,3侧/4墙）;136 四备档（0底/1左/2右/3墙,无顶档）→ [1,2]。 */
+  sideAlts?: readonly [number, number];
+  /** ★BJ629 件1：墙锚备档号。缺省 4;136 → 3。 */
+  wallAlt?: number;
+}
+const ANCHOR_GATE_723: AnchorGateSpec = { members: new Set<number>(), wallMode: true };
+/** 630/631/442/136 的门规格（sheet 域键） */
+export const ANCHOR_GATE_SPECS: Readonly<Record<number, AnchorGateSpec>> = {
+  723: ANCHOR_GATE_723,
+  724: ANCHOR_GATE_723,
+  630: { members: ANCHOR_ALTERNATE_SHEETS, sideSwap: true, wallMode: true },
+  631: { members: ANCHOR_ALTERNATE_SHEETS, sideSwap: true, wallMode: true },
+  442: { members: ANCHOR_ALTERNATE_SHEETS, bottomTable: true, projPad: true,
+    sideMembersOnly: true, wallMode: false },
+  // ★BJ629 件1（2026-10-10）：136 拉杆四档入链（TileObjectData.cs:4551-4577 亲读）——
+  //  基记录 alt0=底锚 SolidTile|SolidSide（FlattenAnchors=true :4559,uccp :4554,
+  //  StyleHorizontal :4558,StyleMultiplier 缺省 1 → 帧带=档×18）;alt1=AnchorLeft
+  //  （SolidTile|SolidSide|Tree|AlternateTile{124,561,574-578} :4564-4565,DrawXOffset
+  //  +2）/alt2=AnchorRight（:4569-4570,-2）/alt3=AnchorWall（:4574）——三备档
+  //  CopyFrom(StyleSwitch)（:4560 俘获,先于 :4562 底锚赋值）【不含底锚】=exclusive 制。
+  //  成员表只在侧档（基记录底锚无 AlternateTile 位）=sideMembersOnly;底锚无
+  //  SolidWithTop 位=bottomSolidTop:false;无顶锚备档=top:false;备档号 1左/2右/3墙
+  //  （sideAlts/wallAlt,非五备档族缺省 2,3/4）。旧保守回落 hasSupport 底∪墙
+  //  （≈alt0∪alt3）撤除——侧挂/梁成员/树干档归位。
+  136: { members: ANCHOR_ALTERNATE_SHEETS, sideMembersOnly: true, wallMode: true,
+    bottomSolidTop: false, top: false, sideAlts: [1, 2], wallAlt: 3 },
+};
+
+/** ★BJ624 件1：442 弹幕压垫四向 viable（CheckProjectilePressurePad_
+ *  GetPossiblePlacementDirections WorldGen.cs:87501-87560 1:1）。消费位：
+ *  放置 HookCheckIfCanPlace（TileObject.cs:716-727 逐 alternate :87583-87604
+ *  case 0=down/1=up/2=left/3=right）与 TileFrame 生存 CheckProjectilePressurePad
+ *  （:87473-87500）同源。邻格采集门：下 j+1 !halfBrick∧!topSlope / 上 j-1
+ *  !bottomSlope / 左 i-1 slope%2!=1 / 右 i+1 slope%2!=0;对角四格=Tree 三角判。 */
+function padDirections(st: TileStore, x: number, y: number): {
+  up: boolean; left: boolean; right: boolean; down: boolean;
+} {
+  const typeAt = (ax: number, ay: number): { sheet: number; slope: number; half: boolean } | null => {
+    if (!st.inBounds(ax, ay) || !st.isActive(ax, ay)) return null;
+    const i = st.idx(ax, ay);
+    return { sheet: TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1, slope: st.slope[i] ?? 0, half: !!st.half[i] };
+  };
+  const isTree = (t: number): boolean => t >= 0 && IS_A_TREE_TRUNK_SHEETS.has(t);
+  // tileSolid 真表代理：def.solid ∪ 九件套（Main.cs tileSolid——平台族 def.solid=false）
+  const solid = (t: number): boolean => {
+    if (t < 0) return false;
+    const tid = TILE_INTERNAL_BY_SHEET.get(t);
+    return (tid !== undefined && TILE_DEFS[tid]?.solid === true) || VAN_TILE_SOLID_EXTRA.has(t);
+  };
+  const noAttach = (t: number): boolean => TILE_NO_ATTACH_SHEETS.has(t);
+  const upT = typeAt(x, y - 1), downT = typeAt(x, y + 1);
+  const leftT = typeAt(x - 1, y), rightT = typeAt(x + 1, y);
+  const dTreeL = typeAt(x - 1, y + 1), dTreeR = typeAt(x + 1, y + 1);
+  const uTreeL = typeAt(x - 1, y - 1), uTreeR = typeAt(x + 1, y - 1);
+  // 本格（压垫自身）形态位——原版 canUp 的 shape/豁免臂读 Main.tile[i,j]（压垫格,
+  // 放置时空格 slope0/half0 → shape 支恒真;生存期亦无 half 形态,照抄读真值）
+  const padSlope = st.inBounds(x, y) ? (st.slope[st.idx(x, y)] ?? 0) : 0;
+  const padHalf = st.inBounds(x, y) && !!st.half[st.idx(x, y)];
+  const num2 = upT && upT.slope !== 3 && upT.slope !== 4 ? upT.sheet : -1;      // !bottomSlope（:87520）
+  const num = downT && !downT.half && downT.slope !== 1 && downT.slope !== 2 ? downT.sheet : -1; // !halfBrick∧!topSlope（:87523）
+  const num3 = leftT && (leftT.slope === 0 || leftT.slope % 2 !== 1) ? leftT.sheet : -1;   // :87525
+  const num4 = rightT && (rightT.slope === 0 || rightT.slope % 2 !== 0) ? rightT.sheet : -1; // :87527
+  // canDown（:87546-87548）：下邻 tileSolid∧(!noAttach∨平台)∧(bottomSlope∨slope0)∧!halfBrick
+  const down = num >= 0 && solid(num) && (!noAttach(num) || PLATFORMS_SHEETS.has(num))
+    && downT != null && (downT.slope === 3 || downT.slope === 4 || downT.slope === 0) && !downT.half;
+  // canUp（:87549-87551）：上邻 tileSolid∧(!noAttach∨(平台∧本格halfBrick))∧(本格 topSlope∨slope0∨halfBrick)
+  const up = num2 >= 0 && solid(num2) && (!noAttach(num2) || (PLATFORMS_SHEETS.has(num2) && padHalf))
+    && (padSlope === 1 || padSlope === 2 || padSlope === 0 || padHalf);
+  // canLeft（:87552-87555）：左邻实心平/左坡 无半砖 ∨ IsBeam ∨ 树三角（左邻+左上对角+左下对角）
+  const left = ((num3 >= 0 && solid(num3) && !noAttach(num3)
+      && (leftT!.slope === 2 || leftT!.slope === 0) && !leftT!.half)
+    || (num3 >= 0 && IS_BEAM_SHEETS.has(num3))
+    || (isTree(num3) && isTree(uTreeL?.sheet ?? -1) && isTree(dTreeL?.sheet ?? -1)));
+  // canRight（:87556-87559）：右邻同构镜像（rightSlope=slope1）
+  const right = ((num4 >= 0 && solid(num4) && !noAttach(num4)
+      && (rightT!.slope === 1 || rightT!.slope === 0) && !rightT!.half)
+    || (num4 >= 0 && IS_BEAM_SHEETS.has(num4))
+    || (isTree(num4) && isTree(uTreeR?.sheet ?? -1) && isTree(dTreeR?.sheet ?? -1)));
+  return { up, left, right, down };
+}
 
 /** 锚格实心平块支（SolidTile 全式 :459-462）：nactive ∧ tileSolid ∧ !tileSolidTop ∧
  *  !tileNoAttach ∧ 坡/半砖皆无（blockType()==0）。tileSolid∧!tileSolidTop = def.solid
@@ -1629,41 +1753,85 @@ function anchorTreeTrunk(st: TileStore, x: number, y: number): boolean {
 }
 
 /**
- * 锚桩 723/724 放置档判定（TileObject.CanPlace 1:1,五档首中制）。
- * @returns 0 底锚 / 1 顶锚 / 2 左锚 / 3 右锚 / 4 墙锚；-1 = 全失（拒置）
+ * 锚桩放置档判定（TileObject.CanPlace 1:1,逐 alternate 首中制）。
+ * ★BJ624 表驱动扩展：723/724（BJ426 专档,成员表=空集=惰性位翻正）/630/631
+ * （成员表真值+侧档序互换）/442（四档+四向 viable 门+档0 Table 位）。
+ * ★BJ629 件1：136 拉杆四备档（0底/1左/2右/3墙,top:false+sideAlts:[1,2]+wallAlt:3,
+ * bottomSolidTop:false——TileObjectData.cs:4551-4577）。
+ * @returns alternate 序档号（=帧带：0 底 / 1 顶 / 2、3 侧（630/631 互换）/ 4 墙;
+ *          136=0底/1左/2右/3墙）；-1 = 全档失（拒置）。442 无墙档（wallMode=false）。
  */
-export function anchorTilePlacementStyle(st: TileStore, x: number, y: number): number {
-  // 档 0 底锚（CanPlace 逐支序:SolidTile→SolidWithTop→SolidSide→AlternateTile :455-570）
+export function anchorTilePlacementStyle(st: TileStore, x: number, y: number,
+  spec: AnchorGateSpec = ANCHOR_GATE_723): number {
+  const sheetAt = (ax: number, ay: number): number =>
+    st.inBounds(ax, ay) ? (TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? -1) : -1;
+  // ★BJ629 件1 翻正：sideMembersOnly 语义按接口注（成员表只在侧档生效）落全——
+  //  旧式 `!sideMembersOnly && …` 把 442 侧档成员臂（:4652/:4658 AnchorAlternateTiles
+  //  真值）整臂杀死=严于原版（梁侧挂拒）,且 136 同表同病。pos 参数：side 恒吃成员表,
+  //  bottom/top 仅 sideMembersOnly 假时吃（630/631 全档带表=基记录 CopyFrom 链）。
+  const memberAt = (ax: number, ay: number, pos: 'bottom' | 'top' | 'side'): boolean =>
+    st.isActive(ax, ay) && spec.members.has(sheetAt(ax, ay))
+    && (pos === 'side' || !spec.sideMembersOnly);
+  // 档 0 底锚（CanPlace 逐支序:SolidTile→SolidWithTop→SolidSide→[Table]→AlternateTile
+  //  :404-570;Table 位仅 442——TileObject.cs:404-408 !Platforms∧tileTable∧bt0）
+  //  ★BJ629 件1：SolidWithTop 两臂受 spec.bottomSolidTop 开关（仅 136 关,见规格表注）
   if (anchorSolidFlat(st, x, y + 1)
-    || anchorPlatformTop(st, x, y + 1)
-    || anchorSolidTopSolid(st, x, y + 1)
+    || (spec.bottomSolidTop !== false && anchorPlatformTop(st, x, y + 1))
+    || (spec.bottomSolidTop !== false && anchorSolidTopSolid(st, x, y + 1))
     || (anchorSolidNonTop(st, x, y + 1)
       && (() => { const s = st.slope[st.idx(x, y + 1)]; return s === 3 || s === 4; })())
-    || (st.isActive(x, y + 1)
-      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y + 1)]]?.vanilla?.sheet ?? -1))) return 0;
+    || (spec.bottomTable === true
+      && (() => {
+        if (!st.isActive(x, y + 1)) return false;
+        const sh = sheetAt(x, y + 1);
+        const i = st.idx(x, y + 1);
+        return !PLATFORMS_SHEETS.has(sh) && TILE_TABLE_SHEETS.has(sh)
+          && (st.slope[i] ?? 0) === 0 && !st.half[i];
+      })())
+    || memberAt(x, y + 1, 'bottom')) {
+    if (!spec.projPad || padDirections(st, x, y).down) return 0;   // :87583 case 0=canDown
+  }
   // 档 1 顶锚（SolidTile→SolidBottom→SolidSide→AlternateTile :421-470 区）
-  if (anchorSolidFlat(st, x, y - 1)
+  //  ★BJ629 件1：spec.top false（136 无顶锚备档）跳过
+  if (spec.top !== false && (
+    anchorSolidFlat(st, x, y - 1)
     || anchorSolidBottom(st, x, y - 1)
     || (anchorSolidNonTop(st, x, y - 1)
       && (() => { const s = st.slope[st.idx(x, y - 1)]; return s === 1 || s === 2; })())
-    || (st.isActive(x, y - 1)
-      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? -1))) return 1;
-  // 档 2 左锚（SolidTile→SolidSide{slope 2|4}→Tree→AlternateTile :498-570）
-  if (anchorSolidFlat(st, x - 1, y)
-    || (anchorSolidNonTop(st, x - 1, y)
-      && (() => { const s = st.slope[st.idx(x - 1, y)]; return s === 2 || s === 4; })())
-    || anchorTreeTrunk(st, x - 1, y)
-    || (st.isActive(x - 1, y)
-      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x - 1, y)]]?.vanilla?.sheet ?? -1))) return 2;
-  // 档 3 右锚（SolidTile→SolidSide{slope 1|3}→Tree→AlternateTile :479-570）
-  if (anchorSolidFlat(st, x + 1, y)
-    || (anchorSolidNonTop(st, x + 1, y)
-      && (() => { const s = st.slope[st.idx(x + 1, y)]; return s === 1 || s === 3; })())
-    || anchorTreeTrunk(st, x + 1, y)
-    || (st.isActive(x + 1, y)
-      && ANCHOR_ALTERNATE_SHEETS.has(TILE_DEFS[st.type[st.idx(x + 1, y)]]?.vanilla?.sheet ?? -1))) return 3;
-  // 档 4 墙锚（AnchorWall=isValidWallAnchor(wall)≠0 :4505-4506/:1948-1962——无 active 门）
-  if (st.inBounds(x, y) && st.wall[st.idx(x, y)] > 0) return 4;
+    || memberAt(x, y - 1, 'top'))) {
+    if (!spec.projPad || padDirections(st, x, y).up) return 1;     // :87586 case 1=canUp
+  }
+  // 档 2 侧锚 A（alternate 2）：723/724/442=左锚（SolidSide{slope 2|4}→Tree→AlternateTile
+  //  :498-570）;630/631=右锚（alternate 2=AnchorRight,:4462-4465）
+  const sideA = spec.sideSwap ? 'right' : 'left';
+  const sideB = spec.sideSwap ? 'left' : 'right';
+  const sideOk = (dir: 'left' | 'right'): boolean => {
+    const dx = dir === 'left' ? -1 : 1;
+    return anchorSolidFlat(st, x + dx, y)
+      || (anchorSolidNonTop(st, x + dx, y)
+        && (() => {
+          const s = st.slope[st.idx(x + dx, y)];
+          return dir === 'left' ? (s === 2 || s === 4) : (s === 1 || s === 3);
+        })())
+      || anchorTreeTrunk(st, x + dx, y)
+      || memberAt(x + dx, y, 'side');
+  };
+  if (sideOk(sideA)) {
+    if (!spec.projPad || (sideA === 'left' ? padDirections(st, x, y).left : padDirections(st, x, y).right)) {
+      return spec.sideAlts?.[0] ?? 2;
+    }
+  }
+  // 档 3 侧锚 B（alternate 3;136 备档号 2=右,见 sideAlts）
+  if (sideOk(sideB)) {
+    if (!spec.projPad || (sideB === 'left' ? padDirections(st, x, y).left : padDirections(st, x, y).right)) {
+      return spec.sideAlts?.[1] ?? 3;
+    }
+  }
+  // 档 4 墙锚（AnchorWall=isValidWallAnchor(wall)≠0 :4505-4506/:1948-1962——无 active 门;
+  //  442 无墙挂档=wallMode false 跳过;136 备档号 3=wallAlt）
+  if (spec.wallMode !== false && st.inBounds(x, y) && st.wall[st.idx(x, y)] > 0) {
+    return spec.wallAlt ?? 4;
+  }
   return -1;
 }
 /** ★M-4（2026-09-02 九批）PlaceThing_Tiles_BlockPlacementIfOverPlayers 实体门名单
@@ -3389,11 +3557,10 @@ export class Game implements GameHooks {
   private spiderMinionCycle = 0;
   /** Journey 研究内核（Research：need 表 6089 条 + 覆盖 12 对 + event 45 半数门） */
   research = new Research();
-  /** 成就系统（AchievementManager + AchievementsHelper 移植；跨世界 localStorage 持久化） */
+  /** 成就系统（AchievementManager + AchievementsHelper 移植；跨世界持久化——
+   *  ★BJ627 迁 PrefsStore：IDB 单写+内存缓存,同步读接口零改） */
   achievements = new Achievements(
-    typeof localStorage !== 'undefined'
-      ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (s) => localStorage.setItem('sbw.achievements.v1', s) }
-      : null,
+    { load: () => prefGet('sbw.achievements.v1'), save: (s) => prefSet('sbw.achievements.v1', s) },
   );
   /** 黑暗视野（buff 80 Blackout）：updateLightDecay ×0.85 */
   blackout = false;
@@ -28164,6 +28331,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  误拒）。权威门 = PlaceLogicTiles 419 支（WorldGen.cs:45712-45721：下方须
     //  active 419/420）——在下方通用放置头单独实现（见 placeLogicLampGate）。
     const isLogicLamp = def?.vanilla?.sheet === 419;
+    // ★BJ629 件4（2026-10-10）：419 叠挂 alternate（TileObjectData.cs:4344-4352 亲读）——
+    //  基记录 alt0=Origin(0,0)+AnchorBottom=AlternateTile{420,419}（:4346-4347,点击格
+    //  空位、下方既有灯）;alt1=Origin(0,1)+成员表{419}（:4350-4351）——点击格【就是】
+    //  既有 419 灯时新灯落点击上一格（叠挂 UX 档,alt Style=1 → frameX 18,StyleHorizontal
+    //  CoordinateFullWidth 16+2）。CanPlace alternates 全序（TileObject.cs:205-765,alt0
+    //  先评:足印占用 flag5/液体 flag3 → alt0 足印被非豁免件占即落 alt1;420 ∉ alt1 成员
+    //  表=点灭灯不放,alt0 足印占用同拒）。旧 IIII234 门只建模 alt0（下方 419/420 下方
+    //  支,原 :286xx 区已折叠入此单源）→ 点灯串顶灯无反应=债销案。幸存面无需新支：
+    //  'logic' 级联（CheckLogicTiles :45678 419 下锚门）按「下方格」判,叠挂灯同域对称。
+    let lampStacked = false;
+    if (isLogicLamp) {
+      const lampBelowSheet = st.inBounds(tx, ty + 1) && st.hasTile(tx, ty + 1)
+        ? (TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1) : -1;
+      const lampAtClick = st.inBounds(tx, ty) && st.hasTile(tx, ty)
+        ? (TILE_DEFS[st.get(tx, ty)]?.vanilla?.sheet ?? -1) : -1;
+      // alt0 足印可入 = 点击格空 ∪ clearable（CanPlace :357 tileCut∪BreakableWhenPlacing）
+      const lampClickClearable = !st.hasTile(tx, ty)
+        || placeObstructionClearable(st.get(tx, ty), lampAtClick);
+      if ((lampBelowSheet === 419 || lampBelowSheet === 420) && lampClickClearable) {
+        // alt0（基档）：灯落点击格,帧带 0（原 PlaceLogicTiles 419 支 :45712-45721 语义）
+      } else if (lampAtClick === 419 && st.inBounds(tx, ty - 1)) {
+        // alt1（Origin(0,1)）：点击格=既有 419 → 新灯落 (tx, ty-1)
+        const lampLiq = liquidSpecOf(419)?.liq;
+        if (lampLiq && !liquidCellOk(st, tx, ty - 1, lampLiq)) return;   // 足印液体门（:342 flag3）
+        ty -= 1;
+        lampStacked = true;
+      } else {
+        return;                       // 两档全失=原版拒置（CanPlace false → 零写零消耗）
+      }
+    }
     // ★BJ323（2026-09-24）：129 水晶碎晶/149 节日灯多向锚放置门——幸存面 'multidir'
     //  （CheckAndAdjustMultiDirectionalTile :60805）同源判据,不走 hasSupport 底行∨墙
     //  近似（原版四邻实心锚,墙不作支撑——防"贴墙放得上、落完即被失撑链拆走掉落"
@@ -28176,12 +28373,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  （底实心∪墙）两向偏差:漏顶/左/右/平台档（吊顶/侧挂/平台上放不下,严于原版）+
     //  SolidTile 漏 noAttach 排除（松于原版）。命中档号 anchorPlaceStyle 同步作 723 放置
     //  帧档（frameX=档×18,CalculatePlacementStyle :1990-1998 与 CheckAnchor :54290 同域）。
+    //  ★BJ624（2026-10-10 件1）：门表驱动化+扩 630/631 臭虫箱（五档,成员表真值,
+    //  侧档序互换）/442 弹幕压垫（四档+四向 viable 门+档0 Table 位）——两件旧走
+    //  hasSupport 近似（严于原版拒平台/松于原版放贴墙,与 723/724 同病）;723/724
+    //  成员表惰性位翻正（原版全表无 AnchorAlternateTiles 赋值行,见门头注）。
     const anchorSheet = def?.vanilla?.sheet ?? -1;
-    const isAnchorTile = anchorSheet === 723 || anchorSheet === 724;
+    const anchorSpec = ANCHOR_GATE_SPECS[anchorSheet];
+    // ★BJ629 件1：136 拉杆入五锚档路由（四档 exclusive,BJ624 保守回落撤除——
+    //  侧挂/梁成员/树干/墙档全归位;uccp1x1 排除位保留=源结构锁 BJ624-件3）
+    const isAnchorTile = anchorSheet === 723 || anchorSheet === 724
+      || anchorSheet === 630 || anchorSheet === 631 || anchorSheet === 442
+      || anchorSheet === 136;
     let anchorPlaceStyle = -1;
     if (isAnchorTile) {
-      anchorPlaceStyle = anchorTilePlacementStyle(st, tx, ty);
-      if (anchorPlaceStyle < 0) return;   // 五档全失=原版拒置（CanPlace false → 零消耗）
+      anchorPlaceStyle = anchorTilePlacementStyle(st, tx, ty, anchorSpec ?? ANCHOR_GATE_723);
+      if (anchorPlaceStyle < 0) return;   // 全档失=原版拒置（CanPlace false → 零消耗）
     }
     const needSupport = !isTrack && !isAlchPlace && !isLogicLamp && !isMultiDirPlace && !isAnchorTile
       && (def.solid || def.platform || def.framed);
@@ -28202,18 +28408,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  债在本档位首笔偿付）：427 队伍平台 framed 但 uccp=false（原版 legacy
     //  AssortedThings 路,:4445-4452）不吃本支仍走 hasSupport;19 平台非 framed 天然
     //  不入面;419 灯 anchorBottom=AlternateTile 命中 exotic 豁免维持专用
-    //  placeLogicLampGate。⚠不收编面（BJ602④ 长尾登记,勿在本刀扩）：锚档 1×1
-    //  （hasSupport 对其是双向偏差——SolidWithTop 平台档 36/141/210/239/593/624/650/
-    //  656/700/701/703/135 严于原版拒平台,wall 松臂松于原版放贴墙）逐件翻案另批。
-    const anchorFree1x1 = anchorRec !== null
+    //  placeLogicLampGate。
+    // ★BJ624（2026-10-10 件1/件3 收官）：anchorFree1x1（无锚档专用）扩展为 uccp1x1
+    //  全语义路由——原版 Player.cs:40085 `CustomPlace(type,placeStyle) && type ∉
+    //  {82,227,4}` → TileObject.CanPlace 全链,对【锚档 1×1】同样成立（锚档=记录
+    //  带锚带,CanPlace :404-716 逐锚档满分制;validateAnchors 即其移植）。本刀收编：
+    //  · 件1 十九件中非 exotic 十五件（36 礼物/78 陶盆/81 珊瑚/135 压板/141 炸药/
+    //    210 地雷/239 矿锭/324 海贝/428 加重压板/476 球洞/494 球座/520 食物盘/
+    //    579 石魔头/593 小火山 + 里程外同构件 624/650/656/700/701/703/707/178 与
+    //    桌面族 13/33/49/50/174/372/646——后者的 ON_TABLE_1X1 门在其后仍生效,
+    //    下方 tileTable 判据双闸同判）——hasSupport 近似的双向偏差归位：
+    //    严面=SolidWithTop 平台档拒放（hasSupport 底行 SolidTile2 无平台臂）,
+    //    松面=wall 松臂放贴墙（记录 wall=false 无墙锚,原版 CanPlace 无墙即拒）。
+    //  · 136 拉杆排除（★BJ629 件1 翻正落位）：原版 StyleSwitch 块三备档
+    //    CopyFrom(StyleSwitch)（:4560 俘获先于 :4562 底锚赋值）不含底锚=exclusive 制
+    //    （alt1 左/alt2 右=SolidTile|SolidSide|Tree|AlternateTile{124,561,574-578},
+    //    alt3=AnchorWall,TileObjectData.cs:4563-4575）——旧注「备档叠加底锚」系误读;
+    //    已改走 isAnchorTile 五锚档路由（ANCHOR_GATE_SPECS[136]）,hasSupport 保守回落
+    //    撤除。本排除位保留=uccp1x1 门不受理 136（源结构锁 BJ624-件3）。
+    //  723/724（BJ426 五锚档专档）/442/630/631（BJ624 五锚档扩展）在 needSupport
+    //  isAnchorTile 豁免位走 anchorTilePlacementStyle（alternates 全序路由）。
+    const uccp1x1 = anchorRec !== null
       && anchorRec.w === 1 && anchorRec.h === 1 && anchorRec.uccp === true && !anchorRec.wall
-      && [anchorRec.anchorTop, anchorRec.anchorBottom, anchorRec.anchorLeft, anchorRec.anchorRight]
-        .every((a) => a === null || a.cnt === 0);
+      && (def.vanilla?.sheet ?? -1) !== 136;
     // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
     if (needSupport && !anchorCovered) {
-      if (anchorFree1x1) {
-        // 无锚档=自记录全语义消费（validateAnchors 即 CanPlace 移植:占用/液体/墙/
-        // 锚带;1×1 无吸附,点击格即占位左上,同原版 Origin(0,0) tileTarget 直判）
+      if (uccp1x1) {
+        // uccp 1×1 全档（无锚/锚档一统）=自记录全语义消费（validateAnchors 即
+        // CanPlace 移植:占用/液体/墙/锚带;1×1 无吸附,点击格即占位左上,同原版
+        // Origin(0,0) tileTarget 直判）
         if (!validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;
       } else if (!this.hasSupport(tx, ty, ow, oh, !!def.framed,
         ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) {
@@ -28464,16 +28687,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 放置
     // 行为录制：主通用放置路径（所有门已过、即将写格）——火把/绳索/轨道/wand
     // 等早 return 分支各自在写点录；from=放置目标恒空格（空间检查已保证）
-    // ★IIIII234（2026-09-09）：逻辑门灯 419 放置支撑门——PlaceLogicTiles 419 支
-    //  （WorldGen.cs:45712-45721）只在 `Main.tile[x,y+1].active() &&
-    //  (type==419 || type==420)` 时写格（灯串/门顶叠加），不满足 = PlaceTile
-    //  不落格（物品不消耗）。原版 420 门/423 感应器/424/429/445 else 支无支撑门
-    //  （悬空可放）。active 位读 = hasTile（flags bit0,幽灵格不算 active）。
-    if (def.vanilla?.sheet === 419) {
-      const sh419 = st.inBounds(tx, ty + 1) && st.hasTile(tx, ty + 1)
-        ? TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet : -1;
-      if (sh419 !== 419 && sh419 !== 420) return;
-    }
+    // ★IIIII234（2026-09-09）→★BJ629 件4（2026-10-10）折叠：419 支撑门原在此处
+    //  （PlaceLogicTiles 419 支 :45712-45721 下方须 active 419/420），随叠挂 alternate
+    //  建模上移至 isLogicLamp 门单源（alt0 下方判 + alt1 点击灯判,见该注）。
     this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'place' });
     const isVanillaStyle = !!def.vanilla && def.vanilla.frame === 'style';
     // ★债 A（2026-09-01 四批）：写循环期间抑制 DECOR 分派。原版多格放置 =
@@ -28672,10 +28888,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const ti = st.idx(tx, ty);
       st.setTile(tx, ty, tileId, st.frameX[ti] + 18, st.frameY[ti]);
     }
+    // ★BJ624：630/631 臭虫箱/442 弹幕压垫锚档帧覆写——通用写循环恒写 style0 帧,
+    //  命中锚档在此覆写（同 723 臂 anchorPlaceStyle 覆写位次）。帧带=alternate 序:
+    //  630/631 StyleHorizontal frameX=档×18（0底/1顶/2右/3左/4墙,侧序互换见门规格;
+    //  CheckStinkbugBlocker :54373 重定向写 style*18 同域）;442 帧步长 22
+    //  （CoordinateWidth 20+pad2,0下/1上/2左/3右,CheckProjectilePressurePad
+    //  :87480 frameX/22 反推同域）。
+    //  ★BJ629 件1：136 拉杆同域入列——StyleMultiplier 缺省 1,帧带=档×18
+    //  （0底/1左/2右/3墙,CalculatePlacementStyle :1990-1998 style×1+档Style）。
+    if (anchorSheet === 630 || anchorSheet === 631 || anchorSheet === 136) {
+      st.setTile(tx, ty, tileId, anchorPlaceStyle * 18, 0);
+    } else if (anchorSheet === 442) {
+      st.setTile(tx, ty, tileId, anchorPlaceStyle * 22, 0);
+    }
     // 逻辑门灯 419 放置即重算下方门（★R20-C7,PlaceThing_Tiles_PlaceIt_TriggerLogicLamp
     // :41145-41158 → Wiring.PokeLogicGate(tileTargetX,tileTargetY)——曾死代码,拆/放灯
-    // 后门保持旧输出）
-    if (def.vanilla?.sheet === 419) this.wiring?.pokeLogicGate(tx, ty);
+    // 后门保持旧输出）。★BJ629 件4：参格=tileTarget（点击格）1:1——alt1 叠挂时点击格
+    // =被点的旧灯（其门输出随串变,原版同位）;alt0 时=放置格同值。叠挂帧带在此覆写
+    // （alt1 Style=1 → frameX 18,CalculatePlacementStyle :1990-1998;通用写循环恒 0）。
+    if (def.vanilla?.sheet === 419) {
+      if (lampStacked) st.setTile(tx, ty, tileId, 18, 0);
+      this.wiring?.pokeLogicGate(clickX, clickY);
+    }
     // 感应器 423 放置即校准（★R20-D3 附带,TELogicSensor.Hook_AfterPlacement
     // :322-331 FigureCheckState+GetFrame:1:1——frameX = 当前态?18:0;曾恒 0）
     if (def.vanilla?.sheet === 423) {
@@ -38714,12 +38948,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.refreshPylons();
       pylonDuplicate = hasPylonOfType(this.pylons, style);
     }
+    // ★BJ629 件5：五锚档族幽灵帧带/AllInvalid 直读（与实放同一 anchorTilePlacementStyle
+    //  门源——预览不说谎 doctrine;ANCHOR_GATE_SPECS[sheet] 存在才挂）
+    const pvGateSpec = ANCHOR_GATE_SPECS[sheet];
     updatePlacePreviewFrame({
       st: this.world.store, tx, ty, sheet,
       defFramed: !!def.framed, defW: def.w ?? 1, defH: def.h ?? 1,
       style, pylonDuplicate,
       hasSupport: (x, y, w, h, framed, onTable) => this.hasSupport(x, y, w, h, framed, onTable),
       obstructionClearable: (typeId, sh) => placeObstructionClearable(typeId, sh),
+      anchorStyleAt: pvGateSpec
+        ? (x, y) => anchorTilePlacementStyle(this.world.store, x, y, pvGateSpec)
+        : undefined,
     });
   }
 
@@ -39401,12 +39641,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 会话内一次性）。真正的角色档字段位随存档批次再迁。
       const giftKey = `sbw.bartenderGift.${this.world.seed}.${this.playerName()}`;
       let gifted = false;
-      try { gifted = window.localStorage.getItem(giftKey) === '1'; } catch { /* 隐私模式 */ }
+      try { gifted = prefGet(giftKey) === '1'; } catch { /* 隐私模式 */ }   // ★BJ627 IDB 单写
       if (!gifted) {
         const key = VANILLA_ITEM_KEY_BY_ID[3817];
         if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 10);
         this.cb.onInventoryChanged?.();
-        try { window.localStorage.setItem(giftKey, '1'); } catch { /* 隐私模式 */ }
+        try { prefSet(giftKey, '1'); } catch { /* 隐私模式 */ }
         return Lang.text('BartenderSpecialText.FirstHelp');
       }
     }
@@ -49883,11 +50123,50 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // CheckStinkbugBlocker（:54373）：锚向（fx/18=0 地板/1 天花/2 左壁/3 右壁）
         // 失效 → 重定向（ValidateOrAttemptReorientingAnchor :54299,树干特支略）,
         // 全失效 → 杀（:54403-54408）。重定向写帧走原版 style*18
+        // ★BJ624 补臂（放置/幸存对称——放置门五档已开,幸存门缺臂=放置即拆）：
+        //  ①树干臂 ConsideredSolidTileForAnchor（:54357-54369）;②墙锚臂（:54351-54354
+        //    `style==-1 && wall>0 → style=4` 无条件回退档）。
+        //  ★BJ629 件3（2026-10-10）：树干臂细判补全（:54365-54369 全式 1:1）——
+        //  `type==323 ∨ (IsATreeTrunk ∧ !IsTileATreeBranch) 且 !IsTileALeafyTreeTop`：
+        //  · IsTileATreeBranch（:29998-30021）=active∧≠323∧IsATreeTrunk∧帧面枝位
+        //    （fx44·fy{198,220,242} / fx66·fy{0,22,44} → 干右 offset1;fx66·fy{198,220,242}
+        //    / fx88·fy{66,88,110} → 干左 offset-1）——横向枝臂格不作锚;
+        //  · IsTileALeafyTreeTop（:29960-29974）=active∧GetsCheckedForLeaves∧
+        //    (323·fx≥88 ∨ fx22·fy∈[198,242])——树冠顶格不作锚（323 棕榈顶/阔叶顶）。
+        //  旧 trunkAt 粗判（323∨IsATreeTrunk 即锚）松于原版:枝臂/树冠格承桩=臭虫箱
+        //  挂枝生存期不拆。InWorld 缺省 true 臂（:54352-54359 界外/null→true）本仓
+        //  inBounds 门=反向保守（界外格不承锚）——世界缘 quirks,备案不展开。
+        const isBranchAt = (ax: number, ay: number): boolean => {
+          if (!st.inBounds(ax, ay) || !st.isActive(ax, ay)) return false;
+          const sh = sheetAt(st, ax, ay);
+          if (sh === 323 || !IS_A_TREE_TRUNK_SHEETS.has(sh)) return false;
+          const fx = st.frameX[st.idx(ax, ay)] ?? 0;
+          const fy = st.frameY[st.idx(ax, ay)] ?? 0;
+          return (fx === 44 && (fy === 198 || fy === 220 || fy === 242))
+            || (fx === 66 && (fy === 0 || fy === 22 || fy === 44))
+            || (fx === 66 && (fy === 198 || fy === 220 || fy === 242))
+            || (fx === 88 && (fy === 66 || fy === 88 || fy === 110));
+        };
+        const isLeafyTopAt = (ax: number, ay: number): boolean => {
+          if (!st.inBounds(ax, ay) || !st.isActive(ax, ay)) return false;
+          const sh = sheetAt(st, ax, ay);
+          if (!GETS_CHECKED_FOR_LEAVES_SHEETS.has(sh)) return false;
+          const fx = st.frameX[st.idx(ax, ay)] ?? 0;
+          const fy = st.frameY[st.idx(ax, ay)] ?? 0;
+          return (sh === 323 && fx >= 88) || (fx === 22 && fy >= 198 && fy <= 242);
+        };
+        const trunkAt = (ax: number, ay: number): boolean => {
+          if (!st.inBounds(ax, ay) || !st.isActive(ax, ay)) return false;
+          const sh = TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? -1;
+          return (sh === 323 || (IS_A_TREE_TRUNK_SHEETS.has(sh) && !isBranchAt(ax, ay)))
+            && !isLeafyTopAt(ax, ay);
+        };
         const dirs: Array<[number, boolean]> = [
-          [0, this.solidAllowBottomSlopeAt(x, y + 1)],
-          [1, this.solidAllowTopSlopeAt(x, y - 1)],
-          [2, this.solidAllowLeftSlopeAt(x - 1, y)],
-          [3, this.solidAllowRightSlopeAt(x + 1, y)],
+          [0, this.solidAllowBottomSlopeAt(x, y + 1) || trunkAt(x, y + 1)],
+          [1, this.solidAllowTopSlopeAt(x, y - 1) || trunkAt(x, y - 1)],
+          [2, this.solidAllowLeftSlopeAt(x - 1, y) || trunkAt(x - 1, y)],
+          [3, this.solidAllowRightSlopeAt(x + 1, y) || trunkAt(x + 1, y)],
+          [4, (st.wall[st.idx(x, y)] ?? 0) > 0],
         ];
         let cur = Math.floor(st.frameX[i] / 18);
         if (cur === 2 || cur === 3) cur = 5 - cur;   // :54385-54392 2/3 互换后比对
@@ -49895,6 +50174,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const alt = dirs.find(([, ok]) => ok);
         if (!alt) { this.killDecorTile(x, y); return; }
         st.frameX[i] = alt[0] * 18;   // 写入=验证后锚向 style*18（:54395;2/3 互换仅用于免写比对）
+        this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+        return;
+      }
+      case 'projpad': {
+        // CheckProjectilePressurePad（WorldGen.cs:87473-87500）1:1：num=frameX/22
+        //  （0下/1上/2左/3右,CoordinateWidth 20+pad2=22 帧步）;当前档向 viable（
+        //  GetPossiblePlacementDirections :87501,padDirections 单源）→ 保持;
+        //  失 viable → 重定向首 viable 档（frameX=22×档 :87487-87495,序 下→上→左→右）;
+        //  全失 → 杀（:87497）。带外档（>3）同重定向（switch `_ => true` :87481）。
+        const dirsP = padDirections(st, x, y);
+        const viab = [dirsP.down, dirsP.up, dirsP.left, dirsP.right];
+        const curP = Math.floor(Math.max(0, st.frameX[i] ?? 0) / 22);
+        if (curP >= 0 && curP <= 3 && viab[curP]) return;
+        const altP = viab.findIndex((ok) => ok);
+        if (altP < 0) { this.killDecorTile(x, y); return; }
+        st.frameX[i] = altP * 22;
         this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
         return;
       }
@@ -52052,6 +52347,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const cam = this.camera;
     const L = this.lighting;
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
+    // ★BJ625件1：TV 头 271 屏态机 NPC.AnyDanger 每帧快照（GetTVScreen :2518 末旗;
+    //  npcAnyDanger 单源=DangerThatPreventsOtherDangers vid 集防漂移复制）
+    this.renderer.anyDangerSnapshot = this.npcAnyDanger();
     this.renderer._worldPaused = this.paused; // 暂停镜像:冻结天气物理/滤镜状态机
     this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
     // ★BJ305：FPS 读数注入（设置「帧率显示」开=读 this.fps——最近 60 帧 rAF 均值

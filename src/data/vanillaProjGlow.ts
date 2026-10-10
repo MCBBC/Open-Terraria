@@ -103,3 +103,34 @@ export function projGlowColors(projId: number, alpha: number, args: {
   }
   return [[250, 250, 250, Math.max(0, Math.min(255, Math.trunc(alpha)))]];
 }
+
+// ---- ★BJ625件3（2026-10-10）688-690 闪电光环哨兵专绘支 glow 叠画 ----
+//  原版锚（Main.cs:32481-32527 DrawProjDirect 专支,1456 :31680-31726 同式对拍）：
+//   · Glow_228/229/230 与 Projectile_688/689/690 同布局平行表（22×180/28×192/34×304,
+//     projFrames 6/6/8=Main.cs:8603-8605）——同矩形=value62.Frame(1,projFrames,0,frame)
+//     逐帧切片叠画（:32505-32507）。
+//   · 色：color73 = Color.Lerp(proj.GetAlpha(projectileColor), White, 0.5)（本体+底座
+//     同色 :32497/:32524）;color74 = color73 截 A=127（glow :32498-32499）。688-690
+//     SetDefaults 无 alpha（Projectile.cs:7327-7339）→ GetAlpha 恒等。
+//   · projectileColor = proj 中心 tile 光照（:30068 Lighting.GetColor(center/16)）——
+//     本仓弹幕域无 per-proj 光照色通道（合成后乘光=本体既有近似面）→ glow 走绘制侧
+//     解算（lightAt 中心 tile）+ pushGlowOps 合成后逃逸（flushItemGlow bake/boost
+//     分解同域）。暗处 net = 光×0.5+0.5（半亮自发光,非恒亮）。
+
+/** glow 贴图分派（:32493-32501 switch：688→Glow_228/689→229/690→230,余 null）。 */
+export function auraGlowMaskOf(projId: number): number | null {
+  return projId === 688 ? 228 : projId === 689 ? 229 : projId === 690 ? 230 : null;
+}
+
+/** color73 RGB 面（Lerp(light,White,.5)——light=0-255 语域,GetAlpha 恒等态）→
+ *  归一 tint；glow alpha 恒 127/255（color74.A=127）。 */
+export function auraGlowTint(light: readonly [number, number, number]): [number, number, number] {
+  return [
+    (light[0] / 255) * 0.5 + 0.5,
+    (light[1] / 255) * 0.5 + 0.5,
+    (light[2] / 255) * 0.5 + 0.5,
+  ];
+}
+
+/** color74.A（:32499）——XNA AlphaBlend dst 衰减面（A>0 → source-over ×alpha）。 */
+export const AURA_GLOW_ALPHA = 127 / 255;

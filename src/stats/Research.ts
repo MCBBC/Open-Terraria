@@ -27,14 +27,17 @@
 //     DryadText_Do_StardewValleyBit（给树妖 Joja Cola 5275 的星露谷彩蛋）
 //     → NotifyProgressionEvent(46)——勿接进本内核。
 //
-// 持久化：localStorage 按玩家档案分键（R24 勘误+修复：原版 creativeTracker 是
+// 持久化：按玩家档案分键（R24 勘误+修复：原版 creativeTracker 是
 // Player 字段（Player.cs:777），随 .plr 档存取（Player.cs:55569 creativeTracker.Save）
 // ——【不是】此前注释所写的 ".wld CreativeTracker"，也【不应】是浏览器全局单桶；
 // 旧实现 sbw.research.v1 全局共享 = 跨角色串档。现键 sbw.research.v2.p<id> 随角色，
 // usePlayerProfile(cid) 在进世界装配时切换；旧全局桶由首个加载角色一次性收编
-// （防多角色各拷一份）。计数按「解析后 id」存，语义同 _sacrificesCountByItemIdCache，
-// 只是键型数字而非 persistentId 字符串——override 映射确定性，二者等价【偏差登记】）。
+// （防多角色各拷一份）。★BJ627：持久面迁 PrefsStore（IDB 单写+内存缓存;LS 只读
+// 兜底——历史 LS 键由启动收编序迁 IDB）。计数按「解析后 id」存，语义同
+// _sacrificesCountByItemIdCache，只是键型数字而非 persistentId 字符串——override
+// 映射确定性，二者等价【偏差登记】）。
 import raw from '../data/vanilla-research.json';
+import { prefGet, prefRemove, prefSet } from '../save/PrefsStore';
 
 export interface ResearchStore {
   load(): string | null;
@@ -64,13 +67,6 @@ export function playerResearchKey(playerId: number): string {
   return `sbw.research.v2.p${playerId}`;
 }
 
-function lsGet(k: string): string | null {
-  try { return localStorage.getItem(k); } catch { return null; }
-}
-function lsSet(k: string, v: string): void {
-  try { localStorage.setItem(k, v); } catch { /* 满/无 DOM 忽略 */ }
-}
-
 /** 原版 CountFullyResearchedItems 的返回对（ItemsSacrificedUnlocksTracker.cs:59-74） */
 export interface SacrificeTotals { fullyResearchedItems: number; allItems: number }
 
@@ -96,11 +92,12 @@ export class Research {
     this.load();
   }
 
-  /** 生效存储：注入 store（测试）直用；缺省走 localStorage，键随档案切换 */
+  /** 生效存储：注入 store（测试）直用；缺省走 PrefsStore（★BJ627 IDB 单写），
+   *  键随档案切换 */
   private get effStore(): ResearchStore {
     return this.store ?? {
-      load: () => lsGet(this.storeKey),
-      save: (s: string) => lsSet(this.storeKey, s),
+      load: () => prefGet(this.storeKey),
+      save: (s: string) => prefSet(this.storeKey, s),
     };
   }
 
@@ -114,10 +111,11 @@ export class Research {
     const key = playerId != null ? playerResearchKey(playerId) : RESEARCH_STORE_KEY;
     if (key === this.storeKey) return;
     if (!this.store) {
-      const legacy = lsGet(RESEARCH_STORE_KEY);
-      if (playerId != null && !lsGet(key) && legacy) {
-        lsSet(key, legacy);
-        try { localStorage.removeItem(RESEARCH_STORE_KEY); } catch { /* 忽略 */ }
+      // ★BJ627：收编链走 PrefsStore（prefRemove 三清——LS+IDB 同清防二次收编）
+      const legacy = prefGet(RESEARCH_STORE_KEY);
+      if (playerId != null && !prefGet(key) && legacy) {
+        prefSet(key, legacy);
+        prefRemove(RESEARCH_STORE_KEY);
       }
     }
     this.storeKey = key;

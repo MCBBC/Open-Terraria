@@ -42,6 +42,14 @@ export const Lang = {
   init(lang?: string | number): Promise<boolean> { return languageManager.init(lang); },
   async load(): Promise<boolean> { return Lang.init(); },
 
+  /** ★BJ628（2026-10-10）l10n 就绪门：启动链唯一权威入口（main.ts 两处 Lang.init
+   *  已替换为此门）。有界重试吸收弱网瞬断;预算耗尽放行+后台自愈（成功广播
+   *  onChange → TitleMenu.renderTexts 等订阅面免刷新自愈）。健康启动 loaded
+   *  已真=幂等即时返回。 */
+  ensureReady(lang?: string | number, budgetMs?: number): Promise<boolean> {
+    return languageManager.ensureReady(lang, budgetMs);
+  },
+
   /** 切换语言并广播(onLanguageChanged);失败返回 false 不改变状态 */
   setLanguage(culture: string | number): Promise<boolean> { return languageManager.setLanguage(culture); },
 

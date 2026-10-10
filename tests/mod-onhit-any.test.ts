@@ -46,9 +46,9 @@ describe('mod onHitAny 钩(C# CalamityPlayerOnHit.ItemOnHit/ProjOnHit 形)', () 
     warn.mockRestore();
   });
 
-  it('重复注册 fail-fast', () => {
-    registerModOnHitAny('calamity', () => {});
-    expect(() => registerModOnHitAny('calamity', () => {})).toThrow(/重复注册/);
+  it('★五百九十一:同 modId 追加链(域拆分多闭包;派发依注册序逐个)', () => {
+    registerModOnHitAny('calamity-chain', () => {});
+    expect(() => registerModOnHitAny('calamity-chain', () => {})).not.toThrow();
   });
 });
 

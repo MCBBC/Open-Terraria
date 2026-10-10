@@ -66,8 +66,10 @@ describe('SW-BJ11 ② 甲下皮肤躯干/皮肤腿(与甲无关先画)', () => {
     expect(src).toContain('const LEGS_HIDE_SKIN = new Set([55, 63, 67, 106, 138, 140, 143, 217, 222, 226, 228]);');
     expect(src).toContain('const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0);');
     // 层序:皮肤腿先、腿甲后(甲叠于肤上)
+    // ★BJ631 2026-10-10 锚随名更新:腿甲染烘提出循环(legsArmor→legsArmorImg,
+    // legsArmor 本名保留=UITextures 记录),层序锁语义不变(肤先甲后)
     const under = src.indexOf('if (skinLegsTinted) ctx.drawImage(skinLegsTinted');
-    const armor = src.indexOf('ctx.drawImage(legsArmor.img, 0, row * FRAME_H', under);
+    const armor = src.indexOf('ctx.drawImage(legsArmorImg, 0, row * FRAME_H', under);
     expect(under).toBeGreaterThan(-1);
     expect(armor).toBeGreaterThan(under);
   });

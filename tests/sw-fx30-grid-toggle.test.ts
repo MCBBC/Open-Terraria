@@ -328,8 +328,11 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
 describe('SW-FX30 接线锚定：Game.ts 尾臂 + mainFlow + Options', () => {
   it('interactAt 尾臂（Player.cs:33541-33547）：资格谓词 → rightDown 消费 + cb', () => {
     expect(gameSrc).toMatch(/import \{ craftingFilterForTile \} from '\.\.\/ui\/craftingGrid';/);
-    // 臂序 = 分派链末位（pylon 臂后、方法闭括号前）
-    expect(gameSrc).toMatch(/this\.usePylon\(tx, ty\);\s*\n\s*\}\s*\n\s*\/\/ ---- 合成站尾臂[^]*?const craftFilter = craftingFilterForTile\(sh\);\s*\n\s*if \(craftFilter\) \{\s*\n\s*this\.input\.rightDown = false;\s*\n\s*this\.cb\.onCraftingStationOpen\?\.\(craftFilter\);\s*\n\s*\}/);
+    // 臂序 = 分派链末位（pylon 臂 → mod tile 右键臂（★四百八十三刀 BJ483,07aa9eba
+    //  落盘）→ 方法闭括号前尾臂）。★BJ626（2026-10-10）：BJ618 期锚到并行会话
+    //  Game.ts 脏态;现跑仍红但现盘=已提交合法态（mod 臂插于 pylon 与尾臂之间,
+    //  尾臂本体零变化）——按现盘语义重产锚（mod 臂体内注释面用有界通配,不钉注释行数）。
+    expect(gameSrc).toMatch(/this\.usePylon\(tx, ty\);\s*\n\s*\} else if \(TILE_DEFS\[type\]\?\.key\?\.startsWith\('mod_'\) && runModTileInteract\(type, tx, ty, this\)\) \{[^]*?this\.input\.rightDown = false;\s*\n\s*\}\s*\n\s*\/\/ ---- 合成站尾臂[^]*?const craftFilter = craftingFilterForTile\(sh\);\s*\n\s*if \(craftFilter\) \{\s*\n\s*this\.input\.rightDown = false;\s*\n\s*this\.cb\.onCraftingStationOpen\?\.\(craftFilter\);\s*\n\s*\}/);
   });
   it('mainFlow cb 接线（onCraftingStationOpen → openCraftingStationFilter）', () => {
     expect(flowSrc).toMatch(/onCraftingStationOpen: \(f\) => ui\.openCraftingStationFilter\(f\),/);

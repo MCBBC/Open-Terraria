@@ -15,6 +15,7 @@
 //  多标签页 index 写面无锁无合并=用户明示接受面（双开各自覆盖写 last-writer-wins,
 //  支持 locks 的浏览器由 SessionLock 会话锁拒载预防;本类不做任何合并/写前重读）。
 import { kvGet, kvGetIdb, kvGetIdbEx, kvSet, kvDelete } from './KvStore';
+import { prefGet, prefRemove } from './PrefsStore';   // ★BJ627 偏好域（lastCharId 失效三清）
 import { validateAppearance, type Appearance } from '../player/Appearance';
 
 const INDEX_KEY = 'sandboxworld.players.index';
@@ -219,11 +220,11 @@ export class CharacterStore {
     await this.saveIndex();   // ★BJ618 件4：onIndexWrite → players.index.json 墓碑重写
     await kvDelete(dataKey(id));
     await kvDelete(stateKey(id));   // 随身态一并清(硬核消亡)
-    // ★BJ618 件4（BJ616 probe F5）：失效陈旧 lastCharId——LS 指针不随 delete 失效时
+    // ★BJ618 件4（BJ616 probe F5）：失效陈旧 lastCharId——指针不随 delete 失效时
     //  doSave 的 charContextId() 会以已删 id 复写 state 键=无主复活。仅指向被删 id 才清
-    //  （他角色指针不动）。
+    //  （他角色指针不动）。★BJ627：迁 PrefsStore,prefRemove 三清（LS 同清防收编复活）。
     try {
-      if (localStorage.getItem(LAST_CHAR_ID_KEY) === String(id)) localStorage.removeItem(LAST_CHAR_ID_KEY);
+      if (prefGet(LAST_CHAR_ID_KEY) === String(id)) prefRemove(LAST_CHAR_ID_KEY);
     } catch { /* 隐私模式 */ }
     // ★BJ618 件4：FS 备份同组快照清理（外观+随身态两组;fire-and-forget 增强链）
     try { this.onDeleted?.(id, 'all'); }

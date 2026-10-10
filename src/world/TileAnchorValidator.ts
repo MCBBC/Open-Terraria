@@ -4,8 +4,16 @@
 // 验收语义（TileObject.cs CanPlace 尾判）：锚点格子与占位格【全部】通过才可放
 //   （num35/num36 双满分制），备选方向按序取首个满分者。
 import anchorsJson from '../data/tile-anchors.json';
-import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS,
+  PLATFORMS_SHEETS } from '../data/tiles';
+import { VAN_TILE_SOLID_EXTRA } from './gen/vanilla/GenSolid';
+import { platformProperTopFrame } from './Torch';
 import { LIQUID_TYPE } from './TileStore';
+// ★BJ629 件2：Main.tileNoAttach 全表单源（SmartCursor.ts:76 67 项,与 Game.ts 局部
+//  NO_ATTACH_SHEETS 逐值同表——Main.cs :7260-10258 逐条赋值 + 435-439 循环 :10130）。
+//  world←player 引用向无环（SmartCursor 依赖面 data/*+world/{TileStore,Housing,
+//  CanCutTile} 均不回指本文件）。
+import { TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
 import type { World } from './World';
 
 export interface AnchorDataRec { t: string[]; cnt: number | string; start: number | string }
@@ -47,12 +55,32 @@ export interface AnchorRec {
 }
 const RAW = (anchorsJson as unknown as { v: string; tiles: Record<string, AnchorRec | null> }).tiles;
 
-/** ★BJ602：AlternateTile 位已建模（altTiles 成员表）——仅对「子样式/成员表全提取」
- *  的三族解除整体回落：698（altTiles 8 成员 TileObjectData.cs:2481）、693/694（坐地
- *  变体 subTiles 39-77 全提取,位本身无成员表=原版恒 false 惰性位）。其余 AlternateTile
- *  载体（82-84/419/630/631/753 有 altTiles 但 alternates/valid-tiles 邻接维度未建模、
- *  165/442/723/724 位惰性但路由面未逐族验 Cascade）维持保守回落=逐族翻案留后续刀。 */
-const ALTERNATE_MODELED = new Set([698, 693, 694]);
+/** ★BJ602：AlternateTile 位已建模（altTiles 成员表）——白名单渐进解禁：
+ *  698（altTiles 8 成员 TileObjectData.cs:2481）、693/694（坐地变体 subTiles 39-77
+ *  全提取,位本身无成员表=原版恒 false 惰性位）。
+ *  ★BJ624（2026-10-10 件2 逐族翻案,亲读反编译逐块）追加四族：
+ *  · 82/83/84 药草（AnchorAlternateTiles={78} 陶盆,:4756/:4759-4782 全 subTile 同值）
+ *    ——放置链走 placeAlchRuntime 专用支（Player.cs:40085 `tileToCreate != 82` 路由
+ *    排除,Player.cs:40085 区）,解禁后 anchorRec 仅作数据面/预览/实体门域,放置路由
+ *    不变（needSupport isAlchPlace 豁免+清格相 BJ567 专用支全在位）。
+ *  · 753 巨型提基（AnchorAlternateTiles={753} 自身,:4129）——3×3 多格,解禁后入
+ *    chooseAnchorFromClick/validateAnchors 表驱动链（底行 SolidWithTop 平台档归位+
+ *    贴墙松臂撤除:wall=false 无墙锚=原版无墙挂档）。
+ *  仍维持保守回落（BJ624 复核维持,★BJ629 更新）：419（BJ622 判语=placeLogicLampGate
+ *    专用门维持;★BJ629 件4 叠挂 alternate1 Origin(0,1) 已入 Game.ts 419 门——本链仍
+ *    回落,placeStyle 档/基档液体面独立有效）;442/630/631/723/724（走 Game.ts
+ *    anchorTilePlacementStyle 五锚档路由=CanPlace alternates 全序,不入本链）;
+ *    136 拉杆（★BJ629 件1 定谳翻正：原版 StyleSwitch 块 :4551-4577 亲读——
+ *    addBaseTile(out StyleSwitch) :4560 先于 AnchorBottom 赋值 :4562,故
+ *    newAlternate.CopyFrom(StyleSwitch) 三备档【不含】底锚:alt1=AnchorLeft+梁成员表
+ *    {124,561,574-578}/alt2=AnchorRight+同表/alt3=AnchorWall,exclusive 制与 630/631
+ *    同构——旧注「alternates 叠加底锚」系误读,保守回落已撤,改走 Game.ts 五锚档路由
+ *    （ANCHOR_GATE_SPECS[136],bottomSolidTop=false 对应基记录底锚 SolidTile|SolidSide
+ *    双位无 SolidWithTop）;本链 anchorSpecOf(136) 基记录仍非空（无 exotic 位）=预览面
+ *    足印域消费,放置路由不经过）;
+ *    165（ BJ602 销案锚维持：AlternateTile 位无成员表=原版恒 false 惰性位,入链无增益,
+ *    且 subTiles 惰性位+级联面已 'stalactite' 单源）。 */
+const ALTERNATE_MODELED = new Set([698, 693, 694, 82, 83, 84, 753]);
 
 const _resolved = new Map<string, AnchorRec | null>();
 /** 取 tile 的锚点规格；无数据 / 复杂构造回落(null)/含未建模豁免位者归 null 走旧路径。
@@ -115,10 +143,6 @@ function solidPureFlat(st: World['store'], x: number, y: number, flatten: boolea
   if (!(d.solid && !d.platform)) return false;
   return flatten || btOf(st, x, y) === 0;
 }
-function solidTopLike(st: World['store'], x: number, y: number): boolean {
-  // SolidWithTop/Platform 位宽口径：平台族 + 桌台类（tableTop 集，平台兼桌面）
-  return st.isPlatform(x, y) || TILE_TABLE_SHEETS.has(defAt(st, x, y)?.vanilla?.sheet ?? -1);
-}
 /** 原版 blockType 侧缘对位表（SolidSide）：bottom{4,5} top{2,3} left{3,5} right{2,4} */
 const SIDE_BT_PAIRS: Record<string, number[]> = {
   bottom: [4, 5], top: [2, 3], left: [3, 5], right: [2, 4],
@@ -136,11 +160,37 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
   if (active) {
     const d = defAt(st, cx, cy)!;
     const sheet = d?.vanilla?.sheet ?? -1;
-    if (bit('SolidTile') && d?.solid && !d.platform && st.wall[st.idx(cx, cy)] >= 0
+    const iCell = st.idx(cx, cy);
+    // ★BJ629 件2（2026-10-10）：SolidTile 臂补 !tileNoAttach 排除（原版四锚同款:
+    //  底 TileObject.cs:388 / 顶 :457 / 右 :561 / 左 :647——`Main.tileSolid &&
+    //  !Main.tileSolidTop && !Main.tileNoAttach && (FlattenAnchors || blockType()==0)`）。
+    //  旧缺=松于原版:关态门 10（tileSolid[10]=true Main.cs:8027 而 noAttach[10]=true
+    //  Main.cs:7812 区）等 noAttach 实心件曾被当承重锚（可浮贴门顶等）。其余臂不受影
+    //  响:SolidSide（:411/:497/:565/:651）/SolidBottom（:465）/SolidWithTop（:392-406）
+    //  原文本就无 noAttach 位——勿扩大。多格链共面（validateAnchors 逐格）一并受益。
+    if (bit('SolidTile') && d?.solid && !d.platform && st.wall[iCell] >= 0
+      && !TILE_NO_ATTACH_SHEETS.has(sheet)
       && (rec.flatten || btOf(st, cx, cy) === 0)) ok = true;
-    if (!ok && (bit('SolidWithTop') || bit('Table')) && solidTopLike(st, cx, cy)
-      && (rec.flatten || !(st.isPlatform(cx, cy) && (st.half[st.idx(cx, cy)] || btOf(st, cx, cy) > 0))))
-      ok = true;
+    // ★BJ624（2026-10-10）：SolidWithTop / Table 两臂拆分（原版 CanPlace 底锚四支
+    //  1:1,TileObject.cs:404-476）——旧合并支 solidTopLike（isPlatform∪tileTable）
+    //  双向松：① SolidWithTop 桌面漏拒（桌 14/工作台 18 tileSolidTop=true 而
+    //  tileSolid=false,原版非平台支 :474-476 要求 tileSolid∧tileSolidTop 双旗→
+    //  桌不承;平台支 :466-473 要求 !halfBrick∧PlatformProperTopFrame（frameX 连接
+    //  带,WorldGen.cs:70686——斜坡带 8-11/17-24 不承））;② Table 平台漏拒
+    //  （:404-408 显式 !TileID.Sets.Platforms 前置——tileTable[19/427/435-439]=true
+    //  而桌面锚支排除平台）。
+    if (!ok && bit('SolidWithTop')) {
+      if (PLATFORMS_SHEETS.has(sheet)) {
+        // 平台支（:466-473）：Platforms ∧ !halfBrick ∧ PlatformProperTopFrame
+        if (rec.flatten || (!st.half[iCell] && platformProperTopFrame(st.frameX[iCell] ?? 0))) ok = true;
+      } else if (VAN_TILE_SOLID_EXTRA.has(sheet)) {
+        // 非平台支（:474-476）：tileSolid ∧ tileSolidTop（九件套差集 239/380 等,
+        //  无 blockType 门——坡/半砖锭顶亦承,原版本相）
+        ok = true;
+      }
+    }
+    if (!ok && bit('Table') && TILE_TABLE_SHEETS.has(sheet) && !PLATFORMS_SHEETS.has(sheet)
+      && btOf(st, cx, cy) === 0) ok = true;
     if (!ok && bit('SolidSide') && d?.solid && !d.platform
       && SIDE_BT_PAIRS[side]?.includes(btOf(st, cx, cy))) ok = true;
     if (!ok && bit('PlanterBox') && sheet === 380) ok = true;

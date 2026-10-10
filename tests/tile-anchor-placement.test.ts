@@ -379,9 +379,12 @@ describe('E. M-3c 消费接线（门 10/11 岩浆门 liqGateDoor + 药草 legacy
     expect(liquidCellOk(st as never, 10, 11, liqOf(82, 3))).toBe(false);   // 死亡草（FullCopyFrom :4786-4788）
   });
 
-  it('liquidSpecOf：豁免面独立——药草 82-84 anchorSpecOf 恒 null（AlternateTile :4749）而液体档可直读', () => {
+  it('liquidSpecOf：豁免面独立——液体档可直读（★BJ624：82-84 anchorSpecOf 已随件2翻案解禁）', () => {
     for (const id of [82, 83, 84]) {
-      expect(anchorSpecOf(id)).toBeNull();
+      // ★BJ624 件2（2026-10-10）：AnchorAlternateTiles={78}（:4756/:4759-4782）建模
+      // 完成 → anchorSpecOf 非空;放置路由不变（placeAlchRuntime 专用支+
+      // Player.cs:40085 `tileToCreate != 82` 路由排除）,液体档与该豁免两维独立
+      expect(anchorSpecOf(id)).not.toBeNull();
       expect(liquidSpecOf(id)!.liq).toEqual({ water: 'notAllowed', lava: 'notAllowed' });   // StyleAlch（:4750-4752）
       expect(liquidSpecOf(id)!.liqStyles).toEqual(manifestTiles[String(id)].liqStyles);
     }

@@ -139,9 +139,14 @@ describe('BJ602-A 提取器三维度金标（反编译行号锚,防静默漂移�
     const rec = (manifestJson.tiles as Record<string, any>)['698'];
     expect(rec.altTiles).toEqual([213, 366, 365, 353, 214, 449, 450, 451]);
     expect(anchorSpecOf(698)).not.toBeNull();
-    // 其余 AlternateTile 载体维持保守回落（基记录毒性连带子样式）
+    // 保守回落面（★BJ624 翻案后复核）：165 位惰性（无成员表=原版恒 false,销案锚维持）
+    // 与 136 拉杆（alternates 三档未建模）维持;82-84/753 已随 BJ624 件2 逐族翻案解禁
+    // （82: AnchorAlternateTiles={78} :4756——放置路由仍走 placeAlchRuntime 专用支,
+    // Player.cs:40085 `tileToCreate != 82` 路由排除,解禁只放开数据面/预览/实体门域）
     expect(anchorSpecOf(165)).toBeNull();
-    expect(anchorSpecOf(82)).toBeNull();
+    expect(anchorSpecOf(82)).not.toBeNull();
+    expect(anchorSpecOf(753)).not.toBeNull();
+    expect(anchorSpecOf(419)).toBeNull();     // BJ622 判语维持（placeLogicLampGate）
   });
 
   it('③693/694 subTiles 坐地变体（:4406-4426/:4231-4241 addSubTileRange(39,39)）', () => {

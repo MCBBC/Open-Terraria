@@ -89,6 +89,11 @@ export interface ModAccAccumulator {
   dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
   critMelee?: number; critRanged?: number; critMagic?: number; critAll?: number;
   endurance?: number; dmgMinion?: number;
+  /** ★五百八十七:挖矿速度折扣加算池(Mining 套 pickSpeedOff 同池;C# pickSpeed-=0.1) */
+  pickSpeedOff?: number;
+  /** ★595:随从上限加算(statis_blessing +2/voltaic_jelly +1/starbuster_core +1;
+   *  C# maxMinions++ UpdateAccessory;cache-period 静态面) */
+  minionSlots?: number;
   /** ★四百七十二刀:冲刺授予档(原版 dashType 1=忍者/盾冲族;聚合取 max) */
   dash?: number;
   /** ★四百七十二刀:vanilla-accfx 键形旗包(dashType/blackBelt/noFallDmg/accFlipper/
@@ -184,6 +189,10 @@ export interface ModProjSpec {
   lifetime?: number;
   /** 穿透次数(缺省 1;≤0=无限穿透) */
   pierce?: number;
+  /** ★五百八十五:竖排帧数(贴图高=frames×单帧高;绘制按 (ageTicks/6)%frames 切行) */
+  frames?: number;
+  /** ★五百八十五:同敌重击窗(tick;常驻召唤体可再命中;缺省 0=永久去重) */
+  hitRefresh?: number;
   /** 撞块消亡(缺省 true) */
   tileCollide?: boolean;
   /** 贴图 textures/ 相对路径(经 mod 资产注入,Projectile_<projId> 语义) */
@@ -335,11 +344,14 @@ export function registerModOnHitNpc(
 type ModOnHitAnyCtx = { e: Enemy; game: unknown;
   damage: number; crit: boolean; killed: boolean; projId: number; melee: boolean };
 type ModOnHitAnyFn = (ctx: ModOnHitAnyCtx) => void;
-const onHitAny = new Map<string, ModOnHitAnyFn>();
+/** ★五百九十一:per-mod 追加链(多闭包;域模块各自挂链——acc-extra/effects 双域
+ *  同用;旧单闭包 fail-fast 形与域拆分冲突) */
+const onHitAny = new Map<string, ModOnHitAnyFn[]>();
 
 export function registerModOnHitAny(modId: string, fn: ModOnHitAnyFn): void {
-  if (onHitAny.has(modId)) throw new Error(`[mod-hooks] onHitAny 重复注册: ${modId}`);
-  onHitAny.set(modId, fn);
+  const list = onHitAny.get(modId);
+  if (list) list.push(fn);
+  else onHitAny.set(modId, [fn]);
 }
 
 /** Enemy.hurt 受理面尾段派发(killed=crit 双支 return 前;零注册=零成本)。 */
@@ -347,8 +359,10 @@ export function runModOnHitAny(e: Enemy, game: unknown, ctx: {
   damage: number; crit: boolean; killed: boolean; projId: number; melee: boolean;
 }): void {
   if (onHitAny.size === 0) return;
-  for (const fn of onHitAny.values()) {
-    try { fn({ e, game, ...ctx }); } catch (err) { console.warn('[mod-hooks] onHitAny', err); }
+  for (const list of onHitAny.values()) {
+    for (const fn of list) {
+      try { fn({ e, game, ...ctx }); } catch (err) { console.warn('[mod-hooks] onHitAny', err); }
+    }
   }
 }
 
@@ -368,6 +382,39 @@ export function runModPlayerThorns(p: unknown, game: unknown, e: Enemy, dmg: num
   for (const fn of playerThorns.values()) {
     try { fn({ p, game, e, dmg }); } catch (err) { console.warn('[mod-hooks] playerThorns', err); }
   }
+}
+
+/** ★594:mod 受击钩(C# OnHurt face 同位——Player.damage 伤害落地后派发;
+ *  ctx={player, game, dmg=实扣};rBrain 墨云/墨炸弹/百年魔典等受击响应面;
+ *  多 mod 逐个派发,零注册零成本) */
+const playerHurts = new Map<string, (ctx: { player: unknown; game: unknown; dmg: number }) => void>();
+
+export function registerModPlayerHurt(modId: string, fn: (ctx: { player: unknown; game: unknown; dmg: number }) => void): void {
+  playerHurts.set(modId, fn);   // 单注册(多效果=同闭包连写;追加面=登记)
+}
+
+export function runModPlayerHurt(player: unknown, game: unknown, dmg: number): void {
+  if (playerHurts.size === 0) return;
+  for (const fn of playerHurts.values()) {
+    try { fn({ player, game, dmg }); } catch (err) { console.warn('[mod-hooks] playerHurt', err); }
+  }
+}
+
+/** ★593:mod 闪避掷门(灾厄 DodgeEffects 消费品闪避族同位——C# CalamityPlayerHitHurt
+ *  :824 procDodgeEffects→Consumable Dodge 步;fn(player, game)→true=本拍闪避成立
+ *  [效果+冷却 mod 自管];多 mod 任一 true 即闪避。零注册零成本) */
+const dodgeRolls = new Map<string, (player: unknown, game: unknown) => boolean>();
+
+export function registerModDodgeRoll(modId: string, fn: (player: unknown, game: unknown) => boolean): void {
+  dodgeRolls.set(modId, fn);   // 单注册(多效果=同闭包内连判;追加面=登记)
+}
+
+export function runModDodgeRoll(player: unknown, game: unknown): boolean {
+  if (dodgeRolls.size === 0) return false;
+  for (const fn of dodgeRolls.values()) {
+    try { if (fn(player, game)) return true; } catch (err) { console.warn('[mod-hooks] dodgeRoll', err); }
+  }
+  return false;
 }
 
 /** ★五百四十八:治疗物使用钩(C# CalamityGlobalItem 治疗物交互面——jelly 光环族/
@@ -752,6 +799,8 @@ export function _resetModHooksForTests(): void {
   modBuffNpcTicks.clear();
   onHitNpc.clear();
   onHitAny.clear();
+  dodgeRolls.clear();
+  playerHurts.clear();
   tileInteract.clear();
   playerThorns.clear();
   healItem.clear();

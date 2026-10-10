@@ -60,7 +60,15 @@ export function drawPlacePreview(ctx: Ctx2D, atlas: PvAtlas, pv: PlacePreviewDat
       if (v !== 1 && v !== 2) continue;
       let fx2: number, fy2: number;
       let src: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number } | null;
-      if (pv.fx !== undefined && pv.fy !== undefined) {
+      let extraX = 0;
+      if (pv.pvFrame) {
+        // ★BJ629 件5：五锚档族直供帧源（DrawPreview :897-899 命中档帧带切片;
+        //  extraX = num13 帧宽居中偏移 :944 `(CoordinateWidth-16)/2`——442 20px 帧=−2px）
+        fx2 = pv.pvFrame.fx; fy2 = pv.pvFrame.fy;
+        const img = atlas.ensureVImage(`vanilla/Tiles_${pv.sheet}.png`);
+        src = img ? { img, sx: fx2, sy: fy2, sw: pv.pvFrame.sw, sh: pv.pvFrame.sh } : null;
+        extraX = pv.pvFrame.dx ?? 0;
+      } else if (pv.fx !== undefined && pv.fy !== undefined) {
         // 1×1 特例（火把）：22px 步长帧直取（18px 网格 vframeAt 域外）
         fx2 = pv.fx; fy2 = pv.fy;
         const img = atlas.ensureVImage(`vanilla/Tiles_${pv.sheet}.png`);
@@ -72,7 +80,7 @@ export function drawPlacePreview(ctx: Ctx2D, atlas: PvAtlas, pv: PlacePreviewDat
       }
       if (!src) continue;
       const dyOff = tileTopOf(pv.sheet, fx2, fy2);
-      const px = (pv.ax + dx) * TILE;
+      const px = (pv.ax + dx) * TILE + extraX;
       const py = (pv.ay + dy) * TILE + dyOff;
       if (v === 1) {
         ctx.globalAlpha = 0.5;                      // Color.White * 0.5（TileObject.cs:913）

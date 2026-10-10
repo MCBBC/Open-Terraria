@@ -5,21 +5,29 @@
 //  · iOS Safari:无该事件 → 4s 后显示"分享 → 添加到主屏幕"引导(仅文案)
 //  · 已安装(standalone 运行)/ 7 天内关闭过 → 本会话+期间不再提示
 //  · 像素风与站点一致;调试工具属性文案硬编码不走 l10n
+// ★BJ627:dismissed 冷却读迁 PrefsStore(IDB 单写)。module 顶层同步 mount=最早
+//  消费面——原「顶层读 LS,冷却内整体不挂监听」改形:监听同步挂(防错过
+//  beforeinstallprompt 早发,preventDefault 时序与原版一致),冷却判定延后到
+//  prefReady 后在显示点判定(内存缓存,成本~0;未预载窗口=LS 兜底等价)。
 import { swTrace } from '../net/AssetCache';
+import { prefGet, prefReady, prefSet } from '../save/PrefsStore';
 
 const DISMISS_KEY = 'swInstallDismissedAt';
 const DISMISS_COOLDOWN = 7 * 86_400_000;
 
 export function mountInstallPrompt(): void {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  if (typeof window === 'undefined') return;
   if (!import.meta.env.PROD) return;
   const standalone = window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as unknown as { standalone?: boolean }).standalone === true;
   if (standalone) return;   // 已安装运行中
-  try {
-    const dismissed = Number(localStorage.getItem(DISMISS_KEY) ?? 0);
-    if (dismissed && Date.now() - dismissed < DISMISS_COOLDOWN) return;
-  } catch { /* */ }
+
+  const cooldownDismissed = (): boolean => {
+    try {
+      const dismissed = Number(prefGet(DISMISS_KEY) ?? 0);
+      return !!(dismissed && Date.now() - dismissed < DISMISS_COOLDOWN);
+    } catch { return false; }
+  };
 
   const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && (navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints! > 1);
@@ -29,7 +37,7 @@ export function mountInstallPrompt(): void {
   let bar: HTMLElement | null = null;
 
   const dismiss = (why: string) => {
-    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* */ }
+    prefSet(DISMISS_KEY, String(Date.now()));
     swTrace(`安装提示关闭(${why})`);
     bar?.remove(); bar = null;
   };
@@ -66,7 +74,7 @@ export function mountInstallPrompt(): void {
           await deferred.prompt();
           const choice = await deferred.userChoice;
           swTrace(`安装对话框结果: ${choice.outcome}`);
-          if (choice.outcome === 'accepted') { try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* */ } }
+          if (choice.outcome === 'accepted') prefSet(DISMISS_KEY, String(Date.now()));
           deferred = null;
         } catch { /* */ }
         bar?.remove(); bar = null;
@@ -79,11 +87,16 @@ export function mountInstallPrompt(): void {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferred = e as BIPEvent;
-    if (!iOS) show(false);
+    if (iOS) return;
+    void prefReady().then(() => { if (!cooldownDismissed() && deferred) show(false); });
   });
-  if (iOS) setTimeout(() => { if (!deferred) show(true); }, 4000);
+  if (iOS) {
+    setTimeout(() => {
+      void prefReady().then(() => { if (!deferred && !cooldownDismissed()) show(true); });
+    }, 4000);
+  }
   window.addEventListener('appinstalled', () => {
-    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* */ }
+    prefSet(DISMISS_KEY, String(Date.now()));
     swTrace('PWA 已安装(appinstalled)');
     bar?.remove(); bar = null;
   });

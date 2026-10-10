@@ -26,6 +26,7 @@ import {
 } from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域);★SW-FX38 滚轮档数/吸附步进
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
+import { prefGet, prefSet } from '../save/PrefsStore';   // ★BJ627 偏好域 IDB 单写
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import vanillaExpertJson from '../data/vanilla-expert.json';
 import { mouseTextInnerColor } from '../render/Renderer';
@@ -3956,7 +3957,7 @@ export class UI {
   openItemSearch() {
     if (!this.game) return;
     let confirmed = false;
-    try { confirmed = localStorage.getItem('sbw.itemSearchConfirmed') === '1'; } catch { /* 隐私模式静默 */ }
+    try { confirmed = prefGet('sbw.itemSearchConfirmed') === '1'; } catch { /* 隐私模式静默 */ }
     if (!confirmed) { this.showItemSearchGate(); return; }
     this.openItemSearchPanel();
   }
@@ -3980,7 +3981,7 @@ export class UI {
     ok.style.cssText = 'margin:0; width:auto; padding:5px 14px; font-size:12px;';
     ok.addEventListener('mousedown', (e) => e.stopPropagation());
     ok.addEventListener('click', () => {
-      try { localStorage.setItem('sbw.itemSearchConfirmed', '1'); } catch { /* 隐私模式静默 */ }
+      try { prefSet('sbw.itemSearchConfirmed', '1'); } catch { /* 隐私模式静默 */ }
       overlay.remove();
       this.openItemSearch();
     });

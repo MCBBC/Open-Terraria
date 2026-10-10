@@ -54,41 +54,46 @@ export function installFakeIdb(): FakeIdbHandle {
           close() { /* no-op */ },
           transaction(_store: string, _mode: string) {
             let completed = false;
+            // ★BJ627：真实 IDB 语义补齐——tx.oncomplete=「所有请求完毕后提交」,
+            // 旧垫只有写算子触发 complete,readonly 事务（kvSweepIdb 的
+            // getAllKeys+批量 get）永挂。pending 计数:请求登记++、回调解执--,
+            // 归零即 commit（写算子走同路径,幂等 complete 不变）。
+            let pending = 0;
             const complete = () => {
               if (completed) return;
               completed = true;
               tx.oncomplete?.();
             };
+            const maybeComplete = () => { if (pending <= 0) complete(); };
             const tx = {
               oncomplete: null as (() => void) | null,
               onerror: null as (() => void) | null,
               objectStore(_s: string) {
+                const ro = (fill: (r: ReqLike) => void) => {
+                  const r = mkReq();
+                  pending++;
+                  queueMicrotask(() => {
+                    if (state.failTx) { r.error = new DOMException('fake-idb: 模拟事务失败', 'UnknownError'); r.onerror?.(); pending--; maybeComplete(); return; }
+                    fill(r); r.onsuccess?.(); pending--; maybeComplete();
+                  });
+                  return r;
+                };
                 return {
                   get(key: string) {
-                    const r = mkReq();
-                    queueMicrotask(() => {
-                      if (state.failTx) { r.error = new DOMException('fake-idb: 模拟事务失败', 'UnknownError'); r.onerror?.(); return; }
-                      r.result = map.get(key); r.onsuccess?.();
-                    });
-                    return r;
+                    return ro((r) => { r.result = map.get(key); });
                   },
                   getKey(key: string) {
-                    const r = mkReq();
-                    queueMicrotask(() => {
-                      if (state.failTx) { r.error = new DOMException('fake-idb: 模拟事务失败', 'UnknownError'); r.onerror?.(); return; }
-                      r.result = map.has(key) ? key : undefined; r.onsuccess?.();
-                    });
-                    return r;
+                    return ro((r) => { r.result = map.has(key) ? key : undefined; });
+                  },
+                  // ★BJ627：kvSweepIdb 键枚举算子（只键串;值仍走 get——大值不入内存语义保真）
+                  getAllKeys() {
+                    return ro((r) => { r.result = [...map.keys()]; });
                   },
                   put(value: unknown, key: string) {
-                    const r = mkReq();
-                    queueMicrotask(() => { map.set(key, value); r.result = key; r.onsuccess?.(); complete(); });
-                    return r;
+                    return ro((r) => { map.set(key, value); r.result = key; });
                   },
                   delete(key: string) {
-                    const r = mkReq();
-                    queueMicrotask(() => { map.delete(key); r.result = undefined; r.onsuccess?.(); complete(); });
-                    return r;
+                    return ro((r) => { map.delete(key); r.result = undefined; });
                   },
                 };
               },
