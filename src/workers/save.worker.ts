@@ -6,7 +6,7 @@
 // WldImport 无 DOM 依赖(纯数据表+SaveFile 纯函数),worker 可安全加载。
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★process 兜底首导入(见 procShim.ts;2026-09-02 worldGen 同款扩面)
-import { serializeSave } from '../save/serialize';
+import { assembleSave } from '../save/serialize';
 import { applyModItemIds } from '../data/items';
 import { applyModTileStableMap } from '../data/tiles';
 import { setCurrentAlloc } from '../mods/bridge';
@@ -138,8 +138,12 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
       explored: req.bufs.explored ? new Uint8Array(req.bufs.explored) : undefined,
     };
     const meta: SaveMeta = { ...req.meta, w: req.w, h: req.h };
-    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs, req.events, req.pillarNpcs, req.pressurePlates);
-    (self as unknown as Worker).postMessage({ type: 'saved', id: req.id, json });
+    // ★BJ620 件6-F9（探针 scripts/_bj620-f9-parse-probe.mjs：8400×2400 档 json 21.4MB,
+    //  主线程 JSON.parse(json).player 12.4ms>10ms 阈）——装配拆分后 data.player 即
+    //  json.player（稳定 id 磁盘形,serialize.ts assembleSave 注）,随响应结构化克隆回传
+    //  （小对象 memcpy），主线程 charStore.setState 免整档 21MB JSON.parse。
+    const data = assembleSave(view, meta, req.player, req.playTimeMs, req.townNpcs, req.events, req.pillarNpcs, req.pressurePlates);
+    (self as unknown as Worker).postMessage({ type: 'saved', id: req.id, json: JSON.stringify(data), player: data.player });
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });
   }

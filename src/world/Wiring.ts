@@ -36,6 +36,51 @@ const MAX_MECH = 1000; // Wiring.cs:41(MaxMech=1000,注册上限 999)
  *  ★BJ263 收编单源 data/tiles.ts:PREVENTS_ACTUATION_UNDER_SHEETS（逐值对拍全等,§6l） */
 export const PREVENTS_ACTUATION_UNDER: ReadonlySet<number> = PREVENTS_ACTUATION_UNDER_SHEETS;
 
+/**
+ * 宏伟蓝图 L 形路由格序单源（Wiring.cs MassWireOperationInner :3248-3337 1:1）。
+ * 朝向段序：dirFirstVertical=true（玩家朝右 `dir = master.direction == 1`
+ * Wiring.cs:3259/:436）=先竖段（x=ps.x 固定,y ps.y→pe.y 开区间）后横段
+ * （y=pe.y 固定,x ps.x→pe.x 开区间）+端点 pe;朝左=先横段（y=ps.y）后竖段
+ * （x=pe.x）+端点。同行/同列拖拽=一段空转（`i != num4` 首拍即断）=纯直线,
+ * 斜拖=L 形（原版本相——预览绘制 Main.cs:32241+ 同段序 flag34=direction==1,
+ * 与放置同源）。cells 顺序=原版放置/预览顺序;Renderer.drawGrandPreview 与
+ * massWireOperation 单源消费（★BJ613 预览/放置零分歧判据）。
+ */
+export function grandDesignPath(
+  ps: [number, number], pe: [number, number], dirFirstVertical: boolean,
+): Array<[number, number]> {
+  const cells: Array<[number, number]> = [];
+  if (dirFirstVertical) {
+    const sy = Math.sign(pe[1] - ps[1]);
+    for (let y = ps[1]; y !== pe[1]; y += sy) cells.push([ps[0], y]);
+    const sx = Math.sign(pe[0] - ps[0]);
+    for (let x = ps[0]; x !== pe[0]; x += sx) cells.push([x, pe[1]]);
+  } else {
+    const sx = Math.sign(pe[0] - ps[0]);
+    for (let x = ps[0]; x !== pe[0]; x += sx) cells.push([x, ps[1]]);
+    const sy = Math.sign(pe[1] - ps[1]);
+    for (let y = ps[1]; y !== pe[1]; y += sy) cells.push([pe[0], y]);
+  }
+  cells.push([pe[0], pe[1]]);
+  return cells;
+}
+
+/**
+ * 蓝图拖拽 ghost 连接掩码（Main.cs:43621-43640 同码表:上+18 右+36 下+72 左+144）。
+ * 邻接判【路径成员】非世界线邻接——原版预览逐格端帽/中段/角点帧即此掩码
+ * （Main.cs:32157-32405:start 段向帽/中段 90|180/角 54|108|162|216/端点帽,
+ * Projectile_651 帧表 X=掩码×18px 距,288×36=16 掩码列×2 行）。单格=0（孤点帧）。
+ */
+export function pathConnectionMasks(cells: Array<[number, number]>): Array<number> {
+  const set = new Set(cells.map(([x, y]) => `${x},${y}`));
+  const has = (x: number, y: number) => set.has(`${x},${y}`);
+  return cells.map(([x, y]) =>
+    (has(x, y - 1) ? 18 : 0) |
+    (has(x + 1, y) ? 36 : 0) |
+    (has(x, y + 1) ? 72 : 0) |
+    (has(x - 1, y) ? 144 : 0));
+}
+
 export class Wiring {
   readonly st: TileStore;
   /** 器件表(P3 注入) */
@@ -817,28 +862,11 @@ export class Wiring {
       }
       return true;
     };
-    // 第一段:主轴(dir=true → 垂直)(:2428-2454)
-    const sx = Math.sign(pe[0] - ps[0]), sy = Math.sign(pe[1] - ps[1]);
-    let px = ps[0], py = ps[1];
-    const first = dir ? sy : sx;
-    {
-      const from = dir ? ps[1] : ps[0];
-      const to = dir ? pe[1] : pe[0];
-      for (let v = from; v !== to && !aborted; v += first) {
-        if (dir) py = v; else px = v;
-        if (!step(px, py)) { aborted = true; break; }
-      }
-    }
-    // 第二段:副轴(:2455-2484)
-    {
-      if (dir) py = pe[1]; else px = pe[0];
-      const from = dir ? ps[0] : ps[1];
-      const to = dir ? pe[0] : pe[1];
-      const stepDir = dir ? sx : sy;
-      for (let v = from; v !== to && !aborted; v += stepDir) {
-        if (dir) px = v; else py = v;
-        if (!step(px, py)) { aborted = true; break; }
-      }
+    // 第一段/第二段/端点 = grandDesignPath 单源（:2428-2486 三段一体;★BJ613
+    // 预览/放置零分歧判据——cell 序=原版放置序,abort 支同原版 flag 双环齐断）
+    const cells = grandDesignPath(ps, pe, dir);
+    for (let k = 0; k < cells.length - 1 && !aborted; k++) {
+      if (!step(cells[k][0], cells[k][1])) aborted = true;
     }
     // 端点(:2485-2486)
     if (!aborted) step(pe[0], pe[1]);

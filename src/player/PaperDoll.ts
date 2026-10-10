@@ -7,6 +7,7 @@ import { type Appearance, backHairDraw, MALE_VARIANTS } from './Appearance';
 import { UITextures } from '../vui/assets/UITextures';
 import { noteVuiConsumer } from '../assets/SpriteAtlas';
 import { texReady } from '../render/texId';
+import { dyeApplyOf, applyDyePass } from '../data/vanillaDyes';
 
 export const BODY_FRAMES = 20;     // 身体帧数
 export const FRAME_W = 40;
@@ -366,12 +367,33 @@ export function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: numbe
   return out;
 }
 
+
+/** ★五百七十:armor dye bake(composite 层;vanilla ApplyItemDye 面——
+ *  染后 sprite 一次性生成在 composite 缓存 miss 时=非逐帧) */
+function dyeBakeArmorSprite(img: any, dyeVid: number): HTMLCanvasElement {
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const c2 = cv.getContext('2d', { willReadFrequently: true })!;
+  c2.drawImage(img, 0, 0);
+  const emu = dyeApplyOf(dyeVid);
+  if (emu) {
+    const id = c2.getImageData(0, 0, cv.width, cv.height);
+    applyDyePass(id.data, cv.width, cv.height, emu);
+    c2.putImageData(id, 0, 0);
+  }
+  return cv;
+}
+
 export function compositePaperDoll(
   a: Appearance,
-  equip?: { head?: number | null; body?: number | null; legs?: number | null },
+  equip?: { head?: number | null; body?: number | null; legs?: number | null;
+    /** ★五百六十九:armor dye slots(0=head/1=body/2=legs;vanilla ApplyItemDye;
+     *  dyeVid=染料 vid 或 null=无染料——composite 缓存键含 dye=染色合成本体) */
+    dyeHead?: number | null; dyeBody?: number | null; dyeLegs?: number | null },
   opts?: { skipHair?: boolean; skipFace?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm },
 ): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
+    + (equip?.dyeHead ? `|dh${equip.dyeHead}` : '') + (equip?.dyeBody ? `|db${equip.dyeBody}` : '') + (equip?.dyeLegs ? `|dl${equip.dyeLegs}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.skipFace ? '|noface' : '') + (opts?.layer ? `|L${opts.layer}` : '')
     + (opts?.part ? `|P${opts.part}` : '')
     + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
@@ -472,6 +494,9 @@ export function compositePaperDoll(
 
   // ---- 竖条通道（腿/裤/鞋/头/眼：20 帧直排） ----
   const legsArmor = equip?.legs ? UITextures.get(`Armor_Legs_${equip.legs}.png`) : null;
+  const bodyArmorImg: HTMLImageElement | ImageBitmap | null = equip?.body ? (UITextures.get(`Armor_Armor_${equip.body}.png`))?.img as HTMLImageElement | ImageBitmap ?? null : null;
+  const dyedBodyImg = equip?.dyeBody ? dyeBakeArmorSprite(bodyArmorImg, equip.dyeBody) : bodyArmorImg;
+
   for (const ch of onlyArmor ? [] : VERTICAL_CHANNELS) {
     // part 拆分：竖条通道仅 10/11/12（腿组）与 0/1/2（头组）——body 件无竖条
     if (part && part !== (ch.sheet >= 10 && ch.sheet <= 12 ? 'legs' : 'head')) continue;
@@ -508,12 +533,12 @@ export function compositePaperDoll(
       const row = rowsMode ? rowsMode.legs : i;
       if (sit) {
         for (const s of sittingSlicePlan(equip?.legs ?? 0, false, equip?.body ?? 0, sit.seatYOffset, row)) {
-          ctx.drawImage(legsArmor.img, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
+          ctx.drawImage(equip?.dyeLegs ? dyeBakeArmorSprite(legsArmor.img, equip.dyeLegs) : legsArmor.img, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
         }
         continue;
       }
       if (skinLegsTinted) ctx.drawImage(skinLegsTinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
-      ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
+      ctx.drawImage(equip?.dyeLegs ? dyeBakeArmorSprite(legsArmor.img, equip.dyeLegs) : legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
 
@@ -530,8 +555,6 @@ export function compositePaperDoll(
   const pet = opts?.petArm ?? null;
   const PET_ARM_PIVOT: readonly [number, number] = [26, 30];
   // 身甲（Armor/Armor_{id} 复合网格，与玩家复合通道同构；有身甲时替代全部衣着层）
-  const bodyArmor = equip?.body ? UITextures.get(`Armor_Armor_${equip.body}.png`) : null;
-  const bodyArmorImg = bodyArmor ? (bodyArmor.img as HTMLImageElement) : null;
   const gridRect = (sheet: number, x: number, y: number, color: { r: number; g: number; b: number }) => {
     return { sheet, x, y, color };
   };
@@ -559,7 +582,7 @@ export function compositePaperDoll(
         -PET_ARM_PIVOT[0], -PET_ARM_PIVOT[1], FRAME_W, FRAME_H);
       ctx.restore();
     };
-    const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number, rot = 0) => {
+    const drawArmorCell = (img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, x: number, y: number, rot = 0) => {
       if (rot === 0) {
         ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
           0, i * FRAME_H + hgY, FRAME_W, FRAME_H);
@@ -593,14 +616,14 @@ export function compositePaperDoll(
         if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
       }
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
-      drawArmorCell(bodyArmorImg, 1, 1 + dy);                          // 后肩
+      drawArmorCell(dyedBodyImg ?? bodyArmorImg, 1, 1 + dy);                          // 后肩
       // 后臂：petting 换列 8 拉伸档 + 旋转（甲臂同格；甲下皮肤臂层为既有
       // 静态臂同款省略——missingArm/missingHand 语义沿本仓甲覆盖口径，登记）
-      if (pet) drawArmorCell(bodyArmorImg, 8, pet.stretch, pet.rot);   // 后臂（抚摸）
-      else drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2);            // 后臂
-      drawArmorCell(bodyArmorImg, torsoX, dy);                         // 躯干
-      drawArmorCell(bodyArmorImg, 0, 1 + dy);                          // 前肩
-      drawArmorCell(bodyArmorImg, arm[0], arm[1]);                     // 前臂
+      if (pet) drawArmorCell(dyedBodyImg ?? bodyArmorImg, 8, pet.stretch, pet.rot);   // 后臂（抚摸）
+      else drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1] + 2);            // 后臂
+      drawArmorCell(dyedBodyImg ?? bodyArmorImg, torsoX, dy);                         // 躯干
+      drawArmorCell(dyedBodyImg ?? bodyArmorImg, 0, 1 + dy);                          // 前肩
+      drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1]);                     // 前臂
       continue;
     }
     // 无盔甲复合绘制（DrawPlayer_12_SkinComposite_BackArmShirt :1385-1403 /

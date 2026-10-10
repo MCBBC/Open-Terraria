@@ -1,5 +1,7 @@
-// 角色存储 CRUD + Appearance 校验（node 环境需 stub localStorage）
+// 角色存储 CRUD + Appearance 校验（node 环境需 stub localStorage + fake-IDB——
+// ★BJ615 单写方案后 kvSet 恒走 IDB,node 需可写 IDB 垫才能驱动真实读写链）
 import { describe, it, expect, beforeEach } from 'vitest';
+import { installFakeIdb } from './fake-idb-util';
 
 const mem = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -10,6 +12,7 @@ const mem = new Map<string, string>();
   key: (i: number) => [...mem.keys()][i] ?? null,
   get length() { return mem.size; },
 } as Storage;
+const idb = installFakeIdb();
 
 const { CharacterStore } = await import('../src/save/CharacterStore');
 const { validateAppearance, defaultAppearance, randomAppearance, MALE_VARIANTS, FEMALE_VARIANTS, FEMALE_HAIRS, VALID_CLOTH_STYLES } = await import('../src/player/Appearance');
@@ -67,7 +70,7 @@ describe('Appearance', () => {
 });
 
 describe('CharacterStore', () => {
-  beforeEach(() => mem.clear());
+  beforeEach(() => { mem.clear(); idb.map.clear(); idb.dropConnection(); });
 
   it('创建/列表/读取', async () => {
     const s = new CharacterStore();

@@ -1,5 +1,7 @@
-// WorldStore 多世界槽位 + quicksave 迁移（stub localStorage）
+// WorldStore 多世界槽位 + quicksave 迁移（stub localStorage + fake-IDB——★BJ615
+// 单写方案后 kvSet 恒走 IDB,node 需可写 IDB 垫才能驱动真实读写链）
 import { describe, it, expect, beforeEach } from 'vitest';
+import { installFakeIdb } from './fake-idb-util';
 
 const mem = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -10,13 +12,14 @@ const mem = new Map<string, string>();
   key: (i: number) => [...mem.keys()][i] ?? null,
   get length() { return mem.size; },
 } as Storage;
+const idb = installFakeIdb();
 
 const { WorldStore } = await import('../src/save/WorldStore');
 const { parseSeed } = await import('../src/world/gen/SeedEasterEggs');
 const { randomWorldName } = await import('../src/i18n/RandomText');
 
 describe('WorldStore', () => {
-  beforeEach(() => mem.clear());
+  beforeEach(() => { mem.clear(); idb.map.clear(); idb.dropConnection(); });
 
   it('注册/列表/保存/读取', async () => {
     const s = new WorldStore();

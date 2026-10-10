@@ -1636,14 +1636,12 @@ export function drawVanillaCell(  ctx: Ctx2D, atlas: SpriteAtlas,
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
   const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
-  // ★BJ118① 水晶碎块质感层（TileDrawing.cs:1101-1118 + :1276-1293 净效果）:
-  //   基底 α100 全亮 + 大簇 4 向彩虹辉光——接管常规尾画（129 不在 FLIP_X_EVEN/
-  //   无坡/无半砖,早退安全）
-  if (sheet === 129) {
-    drawShardCell(ctx, r, asx, asy, fdx + vx, dpy + vy, x, y, fx);
-    void fw; void fh;
-    return;
-  }
+  // ★BJ621（2026-10-10）：case 129 专支（drawShardCell α100 基底+辉光带）已整段迁出——
+  //   原版 tile 129 绘制色固定覆写 GetFinalLight（:1103 白100/:1107 凝胶 Transparent+
+  //   :1281-1318 glow 段独立色）=全域自发光【不吃光照】;画在世界层会被合成乘光吃暗
+  //   =用户实报「明胶水晶很半透,原版不是半透的」真凶。现全量走 TileGlow crystal129
+  //   支（crystal129Ops→itemGlowQueue 合成后冲刷,免光照）;此处若再画即双画。
+  //   （此域不可达:drawAnimatedTileLayer skip 129+烘焙 isDynamicAnimSheet 摘除。）
   // X 镜像(植物/藤蔓变体:x%2==0 翻转)
   if (FLIP_X_EVEN.has(sheet) && x % 2 === 0) {
     ctx.save();
@@ -2297,76 +2295,22 @@ function hue2rgb(c: number, t1: number, t2: number): number {
   return t1;
 }
 
-/** 辉光 tint（:1284-1286 verbatim:A/=2 → ×0.3 截断）——纯函数供金标测试/变异证红 */
+/** 辉光 tint（:1284-1286 verbatim:A/=2 → ×0.3 截断）——纯函数供金标测试/变异证红
+ *  ★BJ621：消费面迁 TileGlow crystal129 支（op tint/alpha 原生承载,染色副本画布摘除） */
 export function shardGlowTint(clockSec: number, x: number, y: number): [number, number, number, number] {
   const hue = 0.7 + Math.sin(Math.PI * 2 * clockSec * 0.16 + x * 0.3 + y * 0.7) * 0.16;
   const [r, g, b] = shardHslToRgb(hue, 1, 0.5);
   return [Math.floor(r * 0.3), Math.floor(g * 0.3), Math.floor(b * 0.3), Math.floor(255 / 2 * 0.3)];
 }
 
-const shardTintCache = new Map<string, AnyCanvas>();
-const shardTintImgIds = new WeakMap<object, number>();
-let shardTintNextId = 1;
-const SHARD_TINT_CACHE_CAP = 512;
+// ★BJ621：shardTintCache/shardTintedCopy 摘除（唯一消费 drawShardCell 已迁 TileGlow op 面
+// ——op 的 tint/alpha 由 Renderer 冲刷面原生承载,无需逐像素染色副本画布）
 
-/** 辉光带染色副本缓存（键=图像身份|源矩形|tint——tint 随 hue 量化连续变化,LRU 淘汰;
- *  逐像素 = XNA SpriteBatch 调制语义 texel×tint/255,α 同乘后 source-over 合成等价） */
-function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
-  tint: [number, number, number, number]): AnyCanvas | null {
-  let imgId = shardTintImgIds.get(r.img as object);
-  if (imgId === undefined) { imgId = shardTintNextId++; shardTintImgIds.set(r.img as object, imgId); }
-  const key = `${imgId}|${r.sx}|${r.sy}|${tint[0]},${tint[1]},${tint[2]}`;
-  const hit = shardTintCache.get(key);
-  if (hit) { shardTintCache.delete(key); shardTintCache.set(key, hit); return hit; }
-  const c = mkCanvas(r.sw, r.sh);   // ★C4:工厂化（worker OffscreenCanvas 同源）
-  if (!c) return null;
-  const cx = ctx2d(c, { willReadFrequently: true });
-  if (!cx) return null;
-  cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
-  const im = cx.getImageData(0, 0, r.sw, r.sh);
-  const d = im.data;
-  const [tr, tg, tb, ta] = tint;
-  for (let p = 0; p < d.length; p += 4) {
-    if (d[p + 3] === 0) continue;
-    d[p] = Math.floor(d[p] * tr / 255);
-    d[p + 1] = Math.floor(d[p + 1] * tg / 255);
-    d[p + 2] = Math.floor(d[p + 2] * tb / 255);
-    d[p + 3] = Math.floor(d[p + 3] * ta / 255);
-  }
-  cx.putImageData(im, 0, 0);
-  if (shardTintCache.size >= SHARD_TINT_CACHE_CAP) {
-    const oldest = shardTintCache.keys().next().value;
-    if (oldest !== undefined) shardTintCache.delete(oldest);
-  }
-  shardTintCache.set(key, c);
-  return c;
-}
-
-/** 水晶碎块整格绘制（TileDrawing.cs:1101-1118 + 1276-1293 净效果 1:1）：
- *  基底 α100 全亮;大簇（fx>=324）另加 4 向 2px 辉光副本（源带 sy+72,色随
- *  GlobalTimeWrappedHourly + 世界坐标相位脉动）。
- *  ★红蓝-G②（2026-09-18）绘序定谳：原版 glow 段先画 4×(band+72) 色副本
- *  （:1290-1295 tileBatch 入队）、「后」画 α100 基底（:1313 color2=(255,255,255,100)
- *  → !flag3 尾画）——16×18 核心叠域 4 副本互叠+基底盖顶 source-over 不可交换
- *  （Δ≈(1-αB)⁴ 序差 ×(基底−tint) 色差,非 0）。本仓曾反序（先基底后副本）→ 微弱
- *  色差,已按原版序调正。导出仅供绘序金标测试（记录 ctx 桩）。 */
-export function drawShardCell(ctx: Ctx2D,
-  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
-  sx: number, sy: number, dx: number, dy: number, x: number, y: number, fx: number): void {
-  if (fx >= 324 && sy + 72 + r.sh <= r.img.height && sy + 72 >= 0) {   // 辉光带越界防御
-    const tint = shardGlowTint(shardGlowClock(), x, y);
-    const tex = shardTintedCopy({ img: r.img, sx, sy: sy + 72, sw: r.sw, sh: r.sh }, tint);
-    if (tex) {
-      ctx.globalAlpha = 1;
-      for (const [ox, oy] of [[2, 0], [0, 2], [-2, 0], [0, -2]] as const) {
-        ctx.drawImage(tex, 0, 0, r.sw, r.sh, dx + ox, dy + oy, r.sw, r.sh);
-      }
-    }
-  }
-  ctx.globalAlpha = SHARD_BASE_ALPHA;
-  ctx.drawImage(r.img, sx, sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
-  ctx.globalAlpha = 1;
-}
+/** ★BJ621（2026-10-10）drawShardCell 已摘除——像素等价面迁 TileGlow crystal129 支
+ *  （crystal129Ops→itemGlowQueue 合成后冲刷=免光照,TileDrawing.cs:1101-1118/:1276-1318
+ *  固定色覆写 GetFinalLight=自发光语义）。本仓世界层绘制面吃合成乘光,原版 glow mask
+ *  层不吃——半透暗感真凶（用户实报「原版不是半透的」）。shardGlowTint/shardGlowClock/
+ *  SHARD_BASE_ALPHA 保留（TileGlow/金标测试消费）。 */
 
 /** ★SW-BJ3（2026-09-06）：半砖格绘制 1:1（TileDrawing.cs:1016/:1022/:1653-1666）。
  *  原版基础拍：normalTileRect = (frameX+addFrX, frameY+addFrY, tileWidth,

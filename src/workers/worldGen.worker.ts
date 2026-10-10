@@ -217,8 +217,8 @@ ctx.onmessage = async (e) => {
         if (req.key) {
           // ★BJ605：kvGetIdbEx 精细读——「打不开库/键不存在/值非 string」三态
           //  可操作面完全不同（存储不可用可自救 vs 数据真缺失不可恢复）；分类后
-          //  主线程对缺失族走 kvGet fallback（≤2MB 小档 kvSet 双写 localStorage，
-          //  IDB 被驱逐/不可用时副本救援）。
+          //  主线程对缺失族走 kvGet fallback（LS 兜底读救援：双写时代历史副本；
+          //  ★BJ615 单写后新档只在 IDB）。
           dataSrc = 'idb';
           const r = await kvGetIdbEx(req.key);
           if (r.cause === 'ok') {

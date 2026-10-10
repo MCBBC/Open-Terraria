@@ -1474,6 +1474,15 @@ export class Player extends Entity {
   /** ★五百零三刀:mod 装备运气加算面(C# calamityBonusLuck=OldDie +0.2/MOAB
    *  +0.05;聚合期重置+accEffect 加算——luckEquipmentBonus 现读面并入) */
   modLuckBonus = 0;
+  /** ★五百四十六:mod 受伤增伤乘区(C# damageMult += CrushingEgo 0.2/Demonshade
+   *  enrage;【赋值】语义=每 tick mod 侧重写,缺省 1=零扰动;damagePlayer 头乘区) */
+  modTakenMult = 1;
+  /** ★五百四十七:mod 输出乘区面(C# multiplicativeDamage——GenericDamageClass
+   *  全系 ×N;【赋值】语义=每 tick mod 侧重写,缺省 1;damageMult 尾乘区) */
+  modDmgMult = 1;
+  /** ★五百五十三:mod 暴击加算面(C# GetCritChance<系> 加法池——vanilla stat face;
+   *  【赋值/累加】双语义=mod 侧自管;critChance 访问器消费) */
+  modCritAdd: Partial<Record<'melee' | 'ranged' | 'magic', number>> = {};
   /** ★四百七十八刀:mod 百分比生命上限面(C# CalamityPlayer :2104-2122
    *  percentMaxLifeIncrease 家族——bloodPact 25/chalice 25/affliction 10/community
    *  2-10/shatteredCommunity 10;静态=accEffect 加算(聚合期重置),动态=community
@@ -3794,6 +3803,9 @@ export class Player extends Entity {
     if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
     // 枯萎武器(196)：四系伤害 ×0.5（Player.cs:25712-25719）
     if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;
+    // ★五百四十七:mod 输出乘区面(C# multiplicativeDamage :4535-4540——
+    //  GenericDamageClass 全系 ×N;【赋值】语义=每 tick mod 侧重写,缺省 1)
+    if (this.modDmgMult !== 1) m *= this.modDmgMult;
     return m;
   }
   /** 远程分道乘区（1457 Player.cs:3966-3970 bowEffectiveDamage/gunEffectiveDamage/
@@ -4072,6 +4084,7 @@ export class Player extends Entity {
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     c += this.buffs.hungerCrit;     // 饥饿/极饿全系暴击 -2/-4（:11562+/:11585+）
+    c += this.modCritAdd[kind] ?? 0;   // ★五百五十三:mod 暴击加算面(C# GetCritChance<系> 加法池)
     return c;
   }
 
@@ -4302,7 +4315,10 @@ export class Player extends Entity {
         return true;
       }
     }
-    this.mana = 0;                                 // :53243/:53254 statMana = 0
+    // ★五百五十五:负 mana 面(C# Player.cs:5878 statMana -= mana×manaCost
+    //  可产负值;ChaosStone statMana<0 门依赖此态——原两路径分离→本仓 checkMana
+    //  单路径=负值结构性不可达;修=扣量直落(可负)=C# :5878 直扣同相)
+    this.mana -= amount;                           // 可负=ChaosStone 检测面
     this.slowMagicUse = true;                      // DoRunOutOfManaEffect :53258-53261
     return true;                                   // ManaV2：照常施法
   }

@@ -15,6 +15,10 @@ import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
 import { Lang } from '../i18n/Lang';
+import {
+  fsBackupSupported, fsBackupStatus, fsBackupDirName, fsBackupPickDirectory,
+  fsBackupDisable, fsBackupRequestPermission, onFsBackupStatusChange,
+} from '../save/FsBackup';   // ★BJ614 本地备份目录（增强）开关+状态面
 
 export interface SettingsFlow {
   onBack(): void;
@@ -89,6 +93,8 @@ export class SettingsPanel {
   private content: HTMLElement;
   private cat = 'sound';
   private unsubLang: (() => void) | null = null;
+  private fsBackupUnsub: (() => void) | null = null;
+  private fsBackupStatusEl: HTMLElement | null = null;
 
   constructor(parent: HTMLElement, private flow: SettingsFlow) {
     // ★样式幂等守卫(2026-08-29 对齐菜单侧修法):原"getElementById 只建不更"在
@@ -113,6 +119,9 @@ export class SettingsPanel {
     `;
     this.content = this.panel.querySelector('.sw-set-content')!;
     this.buildCats();
+    // ★BJ614：备份状态变化（后台连败转 broken/授权流转）→ 面板重建回显;
+    // close 必退订（面板每开一建,订阅不退=监听器自捕环家族判例 BJ335/BJ328）
+    this.fsBackupUnsub = onFsBackupStatusChange(() => this.build());
     this.panel.querySelector('.sw-set-back')!.addEventListener('click', () => this.close(flow.onBack));
     this.escHandler = (e: KeyboardEvent) => {
       if (e.code === 'Escape') this.close(flow.onBack);
@@ -159,6 +168,8 @@ export class SettingsPanel {
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
     this.cancelRebindListen();
     this.unsubLang?.();
+    this.fsBackupUnsub?.();   // ★BJ614：状态订阅退订（防自捕环）
+    this.fsBackupUnsub = null;
     this.panel.remove();
     fn();
   }
@@ -668,6 +679,12 @@ export class SettingsPanel {
             void options.set('autoSaveIntervalMin', steps[(steps.indexOf(d.autoSaveIntervalMin) + 1) % steps.length] ?? 10);
           },
         ),
+        // ★BJ614 本地备份目录（增强,用户拍板「File System Access 做为增强选项,先在
+        //  设置中可启用」,缺省关）——开=showDirectoryPicker 选目录（checkbox change=
+        //  用户手势 ✓）→ 句柄入 IDB;此后每次存档成功链尾自动快照（世界/角色外观/
+        //  随身态 时间戳档各留最近 3 份 + 双 index 覆盖档）。跨会话权限 prompt=自动
+        //  链静默跳过+「待重新授权」按钮（不强弹）;Firefox/Safari 无 API=禁用+标注
+        this.fsBackupBlock(),
         // 自动暂停（:628 Main.autoPause 默认 false,config 键 "AutoPause"
         // Main.cs:4203/:4426;原版语义=开界面暂停,CanPauseGame Main.cs:17493-17508
         // autoPause 臂 :17500-17504——★非"切 tab 暂停",失焦面归 playWhenUnfocused,
@@ -937,6 +954,86 @@ export class SettingsPanel {
       devHint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevKeysHint');
       this.content.append(devHint);
     }
+  }
+
+  /** 语言已切换:重建标题/分栏/内容(保留 this.cat) */
+  /** ★BJ614 本地备份目录块（增强选项,缺省关）：开关行+状态行+条件按钮
+   *  （重新授权/重新选择目录）。状态源=F sBackup 模块（IDB 句柄=唯一真源,无
+   *  Options 字段——「关」=无句柄）;后台状态变化经 onFsBackupStatusChange 订阅
+   *  整面板重建回显（constructor 订阅/close 退订）。 */
+  private fsBackupBlock(): HTMLElement {
+    const wrap = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'sw-set-row';
+    const span = document.createElement('span');
+    span.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupDir');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    const st = fsBackupStatus();
+    input.checked = st === 'ready' || st === 'needs-permission' || st === 'broken';
+    if (!fsBackupSupported()) {
+      // 兼容门：showDirectoryPicker 不存在（Firefox/Safari）——禁用+标注
+      input.disabled = true;
+      input.checked = false;
+      input.title = Lang.text('Mods.SandboxWorld.Settings.FsBackupUnsupported');
+      span.title = input.title;
+    } else {
+      // change 事件=用户手势：pickDirectory 首个 await 即 picker 调用（模块内不
+      // 前置 IDB 读）,保 transient activation;取消/失败 → build 回读真态回落
+      input.addEventListener('change', () => {
+        void (async () => {
+          if (input.checked) await fsBackupPickDirectory();
+          else await fsBackupDisable();
+        })().finally(() => this.build());
+      });
+    }
+    row.append(span, input);
+    const status = document.createElement('div');
+    status.className = 'sw-set-hint';
+    this.fsBackupStatusEl = status;
+    wrap.append(row, status);
+    if (fsBackupSupported()) {
+      const hint = document.createElement('div');
+      hint.className = 'sw-set-hint';
+      hint.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupHint');
+      wrap.append(hint);
+    }
+    this.renderFsBackupStatus();
+    return wrap;
+  }
+
+  /** 状态行渲染（同步;目录名异步补齐带旧元素守卫;条件按钮按态挂载） */
+  private renderFsBackupStatus(): void {
+    const el = this.fsBackupStatusEl;
+    if (!el) return;
+    el.textContent = '';
+    const s = fsBackupStatus();
+    if (s === 'unsupported') { el.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupUnsupported'); return; }
+    if (s === 'off') { el.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupStatusOff'); return; }
+    if (s === 'ready') {
+      el.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupStatusReady', '…');
+      void fsBackupDirName().then((n) => {
+        if (this.fsBackupStatusEl === el && fsBackupStatus() === 'ready') {
+          el.textContent = Lang.text('Mods.SandboxWorld.Settings.FsBackupStatusReady', n ?? '…');
+        }
+      });
+      return;
+    }
+    el.textContent = Lang.text(s === 'needs-permission'
+      ? 'Mods.SandboxWorld.Settings.FsBackupStatusAuth' : 'Mods.SandboxWorld.Settings.FsBackupStatusBroken');
+    const btn = document.createElement('button');
+    btn.className = 'sw-set-back';
+    btn.style.padding = '4px 14px';
+    btn.style.marginLeft = '8px';
+    btn.textContent = Lang.text(s === 'needs-permission'
+      ? 'Mods.SandboxWorld.Settings.FsBackupReauth' : 'Mods.SandboxWorld.Settings.FsBackupRepick');
+    btn.addEventListener('click', () => {
+      void (async () => {
+        if (s === 'needs-permission') await fsBackupRequestPermission();   // click=手势
+        else await fsBackupPickDirectory();
+      })().finally(() => this.build());
+    });
+    el.append(btn);
   }
 
   /** 语言已切换:重建标题/分栏/内容(保留 this.cat) */

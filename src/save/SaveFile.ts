@@ -4,7 +4,7 @@
 import type { World } from '../world/World';
 import { World as WorldClass, CHEST_MAX_ITEMS } from '../world/World';
 import type { Player } from '../entities/Player';
-import { serializeSave } from './serialize';
+import { assembleSave, serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { getSaveModEntries, getEnabledModIds, getCurrentAlloc } from '../mods/bridge';
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
@@ -132,9 +132,14 @@ export function buildPlayerSaveData(world: World, player: Player): SaveData['pla
 }
 
 /** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
-export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
+/** ★BJ620 件6-F9（BJ616 F9 实测落刀,探针=scripts/_bj620-f9-parse-probe.mjs）：
+ *  同步路径 parts 形——saveGame 的 json+player 切片（data.player=serializeSave 变换后
+ *  的稳定 id 磁盘形,与 json.player 全等;worker 不可用回退时 mainFlow 的
+ *  charStore.setState 同享免整档 JSON.parse 面）。★命名注：与服务器 ioWorker 路径的
+ *  buildSaveParts(world)（view/meta/player 装配形）无涉——本函数=saveGame 全量对。 */
+export function buildSaveGameParts(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
   // ★SW-FX11（2026-09-10）：天界四塔 NPC 段（WF:1744-1755）+ 按压压力板段（WF:3374-3386）
-  pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): string {
+  pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): { json: string; player: SaveData['player'] } {
   const st = world.store;
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
@@ -208,7 +213,14 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
   // ★BJ575（2026-10-08）：玩家段装配单源化——原内联块（R16-14 全字段）迁出为
   //  buildPlayerSaveData，与 SaveClient.doSave（worker 生产主路径）共用。见该函数头注。
   const playerData = buildPlayerSaveData(world, player);
-  return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
+  const data = assembleSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
+  return { json: JSON.stringify(data), player: data.player };
+}
+
+/** 旧签名薄壳（json 串;parts 形见 buildSaveParts）。 */
+export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
+  pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): string {
+  return buildSaveGameParts(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates).json;
 }
 
 export function loadSave(json: string): ReturnType<typeof loadSaveData> {

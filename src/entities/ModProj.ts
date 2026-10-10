@@ -71,7 +71,11 @@ export class ModProj extends Entity {
       const p = (game as unknown as { player?: { cx: number; cy: number; dead?: boolean; checkMana?(n: number): boolean } }).player;
       const held = (game as unknown as { input?: { mouseHeld?: boolean } }).input?.mouseHeld;
       const h = this.spec.holdout;
-      if (!p || p.dead || !held) { this.dead = true; return; }   // channel 门
+      if (!p || p.dead || !held) {
+        // ★五百七十一:channel 结束钩(松开左键/死亡时调用=释放面;C# KillHoldoutLogic 同位)
+        h.onChannelEnd?.(this as any, game as any);
+        this.dead = true; return;
+      }   // channel 门
       this.x = p.cx - this.w / 2;                                 // 跟随(:35 Owner.Center+offset)
       this.y = p.cy - this.h / 2;
       this.vx = 0; this.vy = 0;

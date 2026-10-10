@@ -6,6 +6,7 @@
 // Main.cs:1432/:256/:4284/:4575/:16986-16990、Player.cs:326/:330/:777、
 // UICharacterListItem.cs:114-116、Main.cs GetLinesInfo :21195-21280。
 import { describe, it, expect, beforeEach } from 'vitest';
+import { installFakeIdb } from './fake-idb-util';
 
 // ---- node 环境 localStorage 桩（KvStore/Research 的 localStorage 路径需要）----
 const mem = new Map<string, string>();
@@ -171,6 +172,9 @@ describe('#4 Settings 默认值 ×3 + Game Zoom（Main.cs:1432 / Player.cs:326/:
 });
 
 describe('#5 收藏档防删（UICharacterListItem.cs:114-116 !IsFavorite 才挂删除）', () => {
+  // ★BJ618 件2：CharacterStore.create 写败（kvSet 'fail'）现抛 CharacterSaveWriteError
+  // （probe F8 收口）——本套件 node 环境须装可写 IDB 垫驱动真实读写链（BJ615 习语）
+  installFakeIdb();
   beforeEach(() => mem.clear());
 
   it('收藏角色 delete 为无操作；取消收藏后可删', async () => {

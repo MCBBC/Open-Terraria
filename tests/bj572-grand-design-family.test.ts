@@ -294,12 +294,19 @@ describe('★BJ572 §3 面②：WiresRadial 开合/几何/交互/斜坡', () => 
     const cutter = flowerSlotColors(WIRES_TOOL_CUTTER, TOOL_GREEN, false);
     expect(cutter.button).toEqual([255, 255, 255]);   // i==4 豁免灰化
   });
-  it('迷你色点：横排 45px 步距,锚=(鼠+10,25);3625 支 +(-20,10) 且 4 点', () => {
+  it('迷你色点：★BJ619 定谳重移植——紧凑环簇（:616-668 num4 覆写,非横排）+Floor(:690)', () => {
     const dots3611 = cursorDots(500, 400, true, 0);
     expect(dots3611.length).toBe(5);                       // 4 色+致动器
-    expect(dots3611[0].x).toBeCloseTo(500 + 10 + 45 * (-1.5), 6);
-    expect(dots3611[0].y).toBe(400 + 25);
-    expect(dots3611[1].x - dots3611[0].x).toBeCloseTo(45, 6);
+    // actuator 支（3611 在持）：锚=(500+10,400+25)=(510,425)
+    //   红(-12,0)→(498,425) / 黄(12,0)→(522,425) / 蓝(-6,12)→(504,437)
+    //   绿(6,12)→(516,437) / 致动器(0,0)→(510,425)（旧横排 45px 锁=死码几何,废）
+    expect(dots3611.find((d) => d.kind === 'red')).toMatchObject({ x: 498, y: 425 });
+    expect(dots3611.find((d) => d.kind === 'yellow')).toMatchObject({ x: 522, y: 425 });
+    expect(dots3611.find((d) => d.kind === 'blue')).toMatchObject({ x: 504, y: 437 });
+    expect(dots3611.find((d) => d.kind === 'green')).toMatchObject({ x: 516, y: 437 });
+    expect(dots3611.find((d) => d.kind === 'actuator')).toMatchObject({ x: 510, y: 425 });
+    // 紧凑环判别：纵坐标两档（中行 425/下排 437）——横排退化必红
+    expect(new Set(dots3611.map((d) => d.y)).size).toBe(2);
     // 色表（DrawCursorArea :575-590）
     expect(dots3611.find((d) => d.kind === 'red')!.r).toBe(253);
     expect(dots3611.find((d) => d.kind === 'blue')!.g).toBe(180);
@@ -311,8 +318,13 @@ describe('★BJ572 §3 面②：WiresRadial 开合/几何/交互/斜坡', () => 
     expect(dots3611.find((d) => d.kind === 'green')!.bit).toBe(TOOL_GREEN);
     const dots3625 = cursorDots(500, 400, false, 0);
     expect(dots3625.length).toBe(4);                       // !actuator 跳 i=4
-    expect(dots3625[0].x).toBeCloseTo(500 + 10 - 20 + 45 * (-1.5), 6);
-    expect(dots3625[0].y).toBe(400 + 25 + 10);
+    // 非 actuator 支：锚=(500-10,400+35)=(490,435),×num6=0.7 菱形+Floor
+    //   红(0,-8.4)→(490,426.6)⇒426 / 黄(8.4,0)→(498.4,435)⇒(498,435)
+    //   蓝(-8.4,0)→(481.6,435)⇒(481,435) / 绿(0,8.4)→(490,443.4)⇒(490,443)
+    expect(dots3625.find((d) => d.kind === 'red')).toMatchObject({ x: 490, y: 426 });
+    expect(dots3625.find((d) => d.kind === 'yellow')).toMatchObject({ x: 498, y: 435 });
+    expect(dots3625.find((d) => d.kind === 'blue')).toMatchObject({ x: 481, y: 435 });
+    expect(dots3625.find((d) => d.kind === 'green')).toMatchObject({ x: 490, y: 443 });
   });
   it('位灭色 lerp 黑 0.65（:590）', () => {
     expect(dotDimColor([253, 58, 61])).toEqual([Math.round(253 * 0.35), Math.round(58 * 0.35), Math.round(61 * 0.35)]);

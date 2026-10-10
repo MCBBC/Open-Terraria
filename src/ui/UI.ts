@@ -3,7 +3,7 @@ import type { Game } from '../core/Game';
 import { getPass, runPassOnImageData, defaultUniforms } from '../fx/SM2Effect';
 import { options } from '../core/Options';
 import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
-import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, WIRE_ICON_COUNTER_VIDS } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';   // ★清偿刀 C：槽位 CD 谓词单源（potion/healMana）
 import {
   ITEM_GLOWMASK, dropGlowColors, xnaColorToOp, monkT3GlowRect, MONK_T3_GLOW,
@@ -314,6 +314,19 @@ function prefixedDamage(def: (typeof ITEM_DEFS)[number], prefix?: number): numbe
 function vidOf(itemId: number): number {
   const def = ITEM_DEFS[itemId];
   return def ? (def.vid ?? -1) : -1;
+}
+
+/** ★BJ613（2026-10-10）热栏图标电线计数（ItemSlot.cs:2665-2674）：热栏槽
+ *  （invSlot 0-9=context 13 HotbarItem;undefined/≥10=非热栏 context 无计数）
+ *  持扳手族/蓝图 3611 → 返回背包 530 电线总数（含 0;null=不绘走 stack 支）。 */
+export function wireIconCounterOf(
+  content: { id: number } | null, invSlot: number | undefined,
+  inv: { countOf(id: number): number },
+): number | null {
+  if (!content || invSlot === undefined || invSlot >= 10) return null;
+  if (!WIRE_ICON_COUNTER_VIDS.has(vidOf(content.id))) return null;
+  const wireId = internalIdOfVid(530);
+  return wireId >= 0 ? inv.countOf(wireId) : null;
 }
 
 /** 原版 item id → 内部 item id（vid→key→ITEM_BY_KEY；未注册 -1）。
@@ -6964,7 +6977,7 @@ export class UI {
         const slotEl = this.slotEl(i, 'inv');
         if (!slotEl) continue;
         const col = i % compact.cols, row = (i / compact.cols) | 0;
-        this.paintSlot(slotEl, inv.slots[i]);
+        this.paintSlot(slotEl, inv.slots[i], i);   // ★BJ613:热栏 context13 传槽位(电线计数)
         slotEl.style.left = `${ox + col * step}px`;
         slotEl.style.top = `${oy + row * rowH}px`;
         slotEl.style.width = slotEl.style.height = '52px';
@@ -6993,7 +7006,7 @@ export class UI {
         if (!slotEl) continue;
         const sel = i === inv.selected && !invOpen;
         const scale = sel ? 1 : 0.75;
-        this.paintSlot(slotEl, inv.slots[i]);
+        this.paintSlot(slotEl, inv.slots[i], i);   // ★BJ613:热栏 context13 传槽位(电线计数)
         slotEl.style.left = `${x}px`;
         slotEl.style.top = `${Math.trunc(20 + 22 * (1 - scale))}px`;
         slotEl.style.width = slotEl.style.height = '52px';
@@ -7085,17 +7098,19 @@ export class UI {
   private paintInvSlotPair(slotEl: HTMLElement, i: number, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null): void {
     const glowOn = this.slotGlowState.has(`inv:${i}`);
     if (!glowOn) {
+      // ★BJ613：热栏扳手族/蓝图 sig 并入电线计数值（只耗线不动物品时计数照刷）
+      const wireCnt = wireIconCounterOf(content, i, this.game.player.inv);
       const sig = content
-        ? `${content.id}|${content.stack}|${content.prefix ?? 0}|${content.favorited ? 1 : 0}|${iconUrl(this.game, content.id)}`
+        ? `${content.id}|${content.stack}|${content.prefix ?? 0}|${content.favorited ? 1 : 0}|${iconUrl(this.game, content.id)}|${wireCnt ?? ''}`
         : '';
       if (this._slotPaintSigs.get(slotEl) === sig) return;
       this._slotPaintSigs.set(slotEl, sig);
     }
-    this.paintSlot(slotEl, content);
+    this.paintSlot(slotEl, content, i);
     this.paintSlotChrome(slotEl, 'inv', i);
   }
 
-  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) {
+  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null, invSlot?: number) {
     // ★元素复用(2026-08-14 trace④:80 万次 LazyPixelRef 恒定流根因):此前每次
     // 刷新删旧 <img> 建新——新元素即使 src 相同也要重新解码,50-80 槽 × iconUiDirty
     // 风暴期的每 30t 刷新 = 每帧 50+ 次解码任务。复用元素且 src 不变不动 = 零解码
@@ -7115,7 +7130,18 @@ export class UI {
         slotEl.appendChild(img);
       }
       if (img.getAttribute('src') !== url) img.src = url;  // 不变不动:免重解码/重光栅
-      if (content.stack > 1) {
+      // ★BJ613（2026-10-10）热栏图标电线计数（ItemSlot.cs:2665-2674 1:1）：
+      //  热栏槽（context 13=HotbarItem;invSlot 0-9）持扳手族/蓝图 3611 时右下
+      //  恒绘背包 530 总数——num22!=-1 压 stack 计数支（stack==1 也绘,0 也绘;
+      //  非热栏槽 context 0 无计数=原版同相）
+      const wireCnt = wireIconCounterOf(content, invSlot, this.game.player.inv);
+      if (wireCnt !== null) {
+        const stackStr = String(wireCnt);
+        if (oldCnt) {
+          if (oldCnt.textContent !== stackStr) oldCnt.textContent = stackStr;
+        }
+        else slotEl.appendChild(el('span', 'cnt', stackStr));
+      } else if (content.stack > 1) {
         const stackStr = String(content.stack);
         if (oldCnt) {
           if (oldCnt.textContent !== stackStr) oldCnt.textContent = stackStr;

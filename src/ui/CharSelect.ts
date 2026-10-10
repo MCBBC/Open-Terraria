@@ -335,7 +335,11 @@ export class CharSelectPanel {
           a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed'));
         if (name2 == null) return;
         a.name = name2.slice(0, 20);
-        await this.store.update(meta.id, a);
+        // ★BJ618 件2：update 写败抛 CharacterSaveWriteError——catch 防 unhandled
+        //  rejection,reload 自存储重读回滚行显示（提示由 onWriteFailData 导出兜底发）
+        try {
+          await this.store.update(meta.id, a);
+        } catch (e) { console.warn('[charSelect] 改名落库失败', e); }
         await this.reload();
       });
       // 导出钮(2026-09-05 用户需求):下载原版 .plr 档(外观+随身态全套,原版游戏可读)。

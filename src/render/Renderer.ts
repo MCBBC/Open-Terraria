@@ -143,7 +143,7 @@ import {
   monkT3GlowRect, MONK_T3_GLOW, type RGBA,
 } from '../data/vanillaItemGlow';   // ★BJ601 Item.glowMask 消费面（手持两段+掉落物光罩）
 import { PROJ_GLOWMASK, PROJ_GLOW_DISCO, projGlowColors } from '../data/vanillaProjGlow';   // ★BJ603 弹幕域
-import { TOOL_CUTTER } from '../world/Wiring';
+import { TOOL_CUTTER, TOOL_ACTUATOR, grandDesignPath, pathConnectionMasks } from '../world/Wiring';   // ★BJ613:ghost 预览单源路径+掩码
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
@@ -4060,6 +4060,9 @@ export class Renderer {
    *  桶=SM2 染料动画 ~5fps（R33 判例;uTime 逐帧喂的动画面不冻结）。容量闸+2s 修剪。 */
   private readonly solarDyeCache = new Map<string, HTMLCanvasElement>();
   private solarDyeCachePruneAt = 0;
+  /** ★五百六十八:armor dye bake 缓存(甲槽染料;同 solarDyeCache 模式) */
+  private readonly armorDyeCache = new Map<string, HTMLCanvasElement>();
+  private armorDyeCachePruneAt = 0;
   /** 眼球伞云盖合成后逃逸队列（A4 终版 2026-09-03；drawPlayer 收集、flushEyebrellaCloud 消费） */
   private eyebrellaQueue: Array<{ wx: number; wy: number; num2: number; src: HTMLImageElement | HTMLCanvasElement | ImageBitmap; cw: number; ch: number }> = [];
   /** ★BJ594 日曜盾球合成后逃逸队列（drawPlayer 收集、flushSolarShieldQueue 消费；
@@ -8299,8 +8302,8 @@ export class Renderer {
    *  段消费——本仓拆同帧两段：drawBuilderRulers 置值,drawCursorItemIcon 前的屏幕
    *  层绘制。null=不显（1×1 或 speed>6 或线关）。 */
   rulerReadout: { text: string } | null = null;
-  /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
-  grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
+  /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile;★BJ613 +facingRight 段序源) */
+  grandPreview: { from: [number, number]; to: [number, number]; facingRight: boolean; mode: number } | null = null;
 
   /** 训练假人 tile 动态绘制层（TileDrawing.cs:4374-4399 addFrY 1:1）：tile 378 是
    *  视觉本体且【已摘出 chunk 烘焙】（ChunkCache bake skip）——本层每帧画当前动画行，
@@ -8408,6 +8411,11 @@ export class Renderer {
         const type = st.type[i];
         const van = TILE_DEFS[type]!.vanilla!;
         const sheet = van.sheet;
+        // ★BJ621（2026-10-10）：129 全域绘制迁 TileGlow crystal129 支（免光照自发光面,
+        //   crystal129Ops→itemGlowQueue 合成后冲刷）——动态层 skip 防双画（RATE 表键
+        //   保留=维持「不进烘焙」,相位在 op 侧逐帧算）。原版锚:TileDrawing.cs:1103/:1107
+        //   固定色覆写 GetFinalLight+:1276-1318 glow 段 color2 独立=绘制色不含光照。
+        if (sheet === 129) continue;
         // 相位预加族（原烘焙侧 1:1 迁入）：215 篝火帧行归位 / 207 喷泉逐 x 错相
         let fy = st.frameY[i];
         if (sheet === 215) fy = campfireYOffset(st.frameY[i]);
@@ -9009,28 +9017,71 @@ export class Renderer {
     }
   }
 
+  /** ★BJ613（2026-10-10）宏伟蓝图拖拽 ghost 预览 1:1——原版 Main.cs:32157-32405
+   *  弹 651 绘制段：路径格序=MassWireOperationInner 同源（Wiring.grandDesignPath,
+   *  段序 flag34=player.direction==1 :32241 与放置 Wiring.cs:3259 同相）+逐格连接
+   *  掩码帧（Projectile_651.png 288×36=16 掩码列×18px 距×2 行,行 0=彩色线件/
+   *  行 18=暗件;端帽/中段 90|180/角 54|108|162|216=Wiring.pathConnectionMasks）。
+   *  色=链式 Lerp(Red→Blue→Green→Yellow,基 127 灰,Main.cs:32129-32159) 原版 α=0
+   *  纯加法习语（xna-alpha0-additive-idiom）本域以 α=1 直绘近似=登记债;
+   *  剪刀位=行 18 暗件 ×rgb(50,50,50)（:32152 color69）;致动器位=格底
+   *  Actuator.png 近似 WireUi[11]（:32173,无该 UI 图集=登记债）。曾=半透明色块
+   *  自创面+固定先竖段（不吃朝向）+终点吃 hover。 */
   private drawGrandPreview() {
     const gp = this.grandPreview;
-    if (!gp) return;
+    if (!gp || !this.atlas) return;
+    const sheet = this.atlas.ensureVImage('vanilla/Projectile_651.png');
+    if (!sheet) return;
     const ctx = this.ctx;
     const ts = TILE;
-    const cells: Array<[number, number]> = [];
-    const [fx, fy] = gp.from;
-    const [tx, ty] = gp.to;
-    const sy = Math.sign(ty - fy), sx = Math.sign(tx - fx);
-    for (let y = fy; y !== ty; y += sy) cells.push([fx, y]);
-    for (let x = fx; x !== tx; x += sx) cells.push([x, ty]);
-    cells.push([tx, ty]);
-    const color = gp.mode & TOOL_CUTTER
-      ? 'rgba(140,160,255,0.30)'
-      : (gp.mode & 15) === 0 ? 'rgba(80,220,120,0.30)' // 仅致动器
-        : 'rgba(255,70,70,0.30)';
-    ctx.fillStyle = color;
-    for (const [x, y] of cells) ctx.fillRect(x * ts, y * ts, ts, ts);
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(tx * ts + 0.5, ty * ts + 0.5, ts - 1, ts - 1);
+    const cells = grandDesignPath(gp.from, gp.to, gp.facingRight);
+    const masks = pathConnectionMasks(cells);
+    const cutter = (gp.mode & TOOL_CUTTER) !== 0;
+    // color70 链式混合（Main.cs:32129-32159:序 红→蓝→绿→黄,基 (127,127,127),
+    //  Lerp=start+amount*(end-start) XNA 截断;剪刀位 color69=(50,50,50) :32152）
+    let tint: [number, number, number] = [127, 127, 127];
+    if (cutter) {
+      tint = [50, 50, 50];
+    } else {
+      let n = 0;
+      for (const [bit, col] of [[1, [255, 0, 0]], [2, [0, 0, 255]], [4, [0, 255, 0]], [8, [255, 255, 0]]] as const) {
+        if ((gp.mode & bit) !== 0) {
+          n++;
+          const a = 1 / n;
+          tint = [
+            Math.trunc(tint[0] + a * (col[0] - tint[0])),
+            Math.trunc(tint[1] + a * (col[1] - tint[1])),
+            Math.trunc(tint[2] + a * (col[2] - tint[2])),
+          ];
+        }
+      }
+    }
+    if (!this._grandGhostScratch) {
+      this._grandGhostScratch = document.createElement('canvas');
+      this._grandGhostScratch.width = TILE;
+      this._grandGhostScratch.height = TILE;
+    }
+    const sc = this._grandGhostScratch.getContext('2d')!;
+    const actuatorImg = (gp.mode & TOOL_ACTUATOR) !== 0
+      ? this.atlas.ensureVImage('vanilla/Actuator.png') : null;
+    ctx.imageSmoothingEnabled = false;
+    for (let k = 0; k < cells.length; k++) {
+      const [x, y] = cells[k];
+      const m = masks[k];
+      const dx = x * ts, dy = y * ts;
+      if (actuatorImg) ctx.drawImage(actuatorImg, 0, 0, 16, 16, dx, dy, ts, ts);
+      sc.globalCompositeOperation = 'source-over';
+      sc.clearRect(0, 0, TILE, TILE);
+      sc.drawImage(sheet, m, cutter ? 18 : 0, 16, 16, 0, 0, TILE, TILE);
+      sc.globalCompositeOperation = 'source-in';
+      sc.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+      sc.fillRect(0, 0, TILE, TILE);
+      ctx.drawImage(sc.canvas, dx, dy);
+    }
   }
+
+  /** ghost 单格染色 scratch（16×16 现烘现画,无键域=E51b 判例） */
+  private _grandGhostScratch: HTMLCanvasElement | null = null;
 
   /** ★BJ557（2026-10-07）放置预览幽灵消费位（TileObject.DrawPreview 1:1——
    *  原版 TileDrawing.cs:742 tile pass 尾;状态面=placePreviewFrame（Game.updateUse
@@ -17822,6 +17873,33 @@ export class Renderer {
    *  【缓存条目画布本体】（免独立 scratch:结果即条目,mountTintScratch 单面复用
    *  判例的免冲突形态——命中路径零触碰共享面,无跨尺寸覆写 hazard）。
    *  容量闸 32+2s 修剪防膨胀（勿整表 clear=重分配雪崩,2026-09-07 canvas 哨兵案）。 */
+  /** ★五百六十八:armor dye bake(甲槽染料→染后 sprite 缓存;同 bodyAccDyeBake 模式) */
+  private armorDyeBake(tex: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
+    emu: DyeApply, dyeVid: number, facing: number, keyPrefix: string): HTMLCanvasElement | null {
+    const bucket = Math.floor(performance.now() / 200);
+    const key = `${keyPrefix}:${dyeVid}:${facing}:${bucket}`;
+    const hit = this.armorDyeCache.get(key);
+    if (hit) return hit;
+    try {
+      const sc = document.createElement('canvas');
+      sc.width = tex.width; sc.height = tex.height;
+      const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+      sctx.drawImage(tex, 0, 0);
+      const id = sctx.getImageData(0, 0, sc.width, sc.height);
+      emu.uniforms.uDirection = facing;
+      this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
+      sctx.putImageData(id, 0, 0);
+      if (performance.now() - this.armorDyeCachePruneAt > 2000) {
+        this.armorDyeCachePruneAt = performance.now();
+        while (this.armorDyeCache.size >= 32) {
+          this.armorDyeCache.delete(this.armorDyeCache.keys().next().value as string);
+        }
+      }
+      this.armorDyeCache.set(key, sc);
+      return sc;
+    } catch { return null; }
+  }
+
   private bodyAccDyeBake(tex: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
     emu: DyeApply, dyeVid: number, facing: number, keyPrefix: string): HTMLCanvasElement {
     const bucket = Math.floor(performance.now() / 200);
@@ -18779,7 +18857,20 @@ export class Renderer {
     const frontH = layer.back ? 26 : FRAME_H;
     ctx.drawImage(tinted, 0, 0, FRAME_W, frontH, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, frontH);
     const head = headArmorImage(equip?.head ?? 0);
-    if (head) ctx.drawImage(head, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
+    if (head) {
+      // ★五百六十八:armor dye 管线(head slot;dye[0]→dyeApplyOf→cached bake;
+      //  vanilla ApplyItemDye 渲染面——paperdoll 合成层不经过 dye=直绘替代)
+      const headDye = p.inv?.dye?.[0];
+      const dyeVid = headDye ? (ITEM_DEFS[headDye.id]?.vid ?? -1) : -1;
+      if (dyeVid > 0) {
+        const emu = dyeApplyOf(dyeVid);
+        if (emu) {
+          const dyed = this.armorDyeBake(head, emu, dyeVid, 0, `hd:${equip?.head ?? 0}`);
+          if (dyed) { ctx.drawImage(dyed, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H); return; }
+        }
+      }
+      ctx.drawImage(head, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
+    }
   }
 
   /** 死亡散飞渲染（审计#1：原版 dead 不跳绘制——LegacyPlayerRenderer.cs:479-482

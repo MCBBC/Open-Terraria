@@ -35,7 +35,7 @@ export class ModConfigState {
     return this.values[key]!;
   }
 
-  /** 写入+异步持久化(kvSet 即发即忘;≤2MB 双写 IDB+localStorage 通道) */
+  /** 写入+异步持久化(kvSet 即发即忘;IDB 单写通道,★BJ615) */
   set(key: string, value: boolean | number | string): void {
     const e = this.schema[key];
     if (!e) throw new Error(`[mod-config] mod ${this.modId} 未声明配置键: ${key}`);

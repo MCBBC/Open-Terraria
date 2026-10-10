@@ -18,7 +18,7 @@
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
 import {
-  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
+  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem,
   type ModSystemHooks, type ModUseCtx,
@@ -111,6 +111,8 @@ export interface ModContext {
   /** ★四百八十八刀:承伤面 thorns 钩(玩家接触受击荆棘面调;ctx={p,game,e,dmg};
    *  反伤自调 e.hurt 或 spawnProj) */
   playerThorns(fn: (ctx: Record<string, unknown>) => void): void;
+  /** ★五百四十八:治疗物使用钩(healLife 消费后派发;ctx={vid,heal}) */
+  healItem(fn: (vid: number, heal: number) => void): void;
   /** ★三百三十五刀:配饰效果钩(装备期每 tick 调;C# UpdateAccessory 同位;
    *  fn(player, game)) */
   accEffect(key: string, fn: (player: unknown, game: unknown) => void): void;
@@ -285,6 +287,10 @@ export function createModContext(
     itemIdOf(key) { return idOf('items', key); },
     playerThorns(fn) {
       registerModPlayerThorns(modId, fn as unknown as Parameters<typeof registerModPlayerThorns>[1]);
+    },
+    /** ★五百四十八:治疗物使用钩(healLife 消费后派发) */
+    healItem(fn: (vid: number, heal: number) => void): void {
+      registerModHealItem(modId, fn);
     },
     accEffect(key, fn) {
       registerModAccEffect(idOf('items', key), fn as Parameters<typeof registerModAccEffect>[1]);

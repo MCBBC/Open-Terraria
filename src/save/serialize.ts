@@ -483,7 +483,10 @@ export function rleTileActiveDiff(st: Pick<SaveStoreView, 'type' | 'flags'>): Ui
  *  （!flags && type≠0 → type=0）——已删除：v5 起 tileActive 差分通道承载 active
  *  位，幽灵格（act=0,type≠0）原样落档（对齐原版 .wld inactive 位随档）。
  *  本函数现在【零就地写】，主线程活存储与 worker 副本路径字节一致。 */
-export function serializeSave(
+/** ★BJ620 件6-F9：装配/串行拆分——assembleSave 返回内存 SaveData（worker 据此回传
+ *  data.player=与 json.player 全等的稳定 id 磁盘形,主线程 charStore.setState 免整档
+ *  JSON.parse）;serializeSave 保持旧签名=stringify 薄壳（存量消费方零改动）。 */
+export function assembleSave(
   st: SaveStoreView, meta: SaveMeta,
   player: SaveData['player'], playTimeMs: number,
   townNpcs?: SaveData['npcs'],
@@ -492,7 +495,7 @@ export function serializeSave(
   //  同通道——SaveMeta 由 World 组装,此二者来自 Game 实体扫描故走参数位）
   pillarNpcs?: SaveData['pillarNpcs'],
   pressurePlates?: SaveData['pressurePlates'],
-): string {
+): SaveData {
   // 物品 id → 稳定 id(全槽位统一;量小直接遍历)。保留 favorited/prefix。
   // v4 起 armor/dye/trash/miscEquips/miscDyes/loadouts 也走稳定 id(v3 曾裸透传内部
   // 下标——注册表一变即错位;本地物品退役时顺手根治)
@@ -618,7 +621,19 @@ export function serializeSave(
     townRooms: meta.townRooms?.length ? meta.townRooms : undefined,
     idScheme: 'sheet',
   };
-  return JSON.stringify(data);
+  return data;
+}
+
+/** 串行薄壳（旧签名不变）——装配见 assembleSave。 */
+export function serializeSave(
+  st: SaveStoreView, meta: SaveMeta,
+  player: SaveData['player'], playTimeMs: number,
+  townNpcs?: SaveData['npcs'],
+  events?: SaveData['events'],
+  pillarNpcs?: SaveData['pillarNpcs'],
+  pressurePlates?: SaveData['pressurePlates'],
+): string {
+  return JSON.stringify(assembleSave(st, meta, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates));
 }
 
 /** half + slope → 单字节 blockType(原版 Tile.blockType: 0=整砖 1=半砖 2-5=slope1-4) */

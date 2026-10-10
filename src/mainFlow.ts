@@ -19,7 +19,7 @@ import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
-import { kvGet, kvHas, kvSet, kvIdbStatus } from './save/KvStore';   // ★BJ605：+kvIdbStatus 读档报错路径 IDB 态诊断
+import { kvHas, kvSet, kvIdbStatus } from './save/KvStore';   // ★BJ605：+kvIdbStatus 读档报错路径 IDB 态诊断（★BJ617 件2：kvGet 读面随 resolveLoadText 三段择源退役）
 import { makeBeforeUnloadHandler, hiddenBackstopShouldSave } from './save/UnloadGuard';   // ★BJ280 页面卸载拦截纯核
 import { WBAKE_ENABLED } from './workers/BakeClient';   // ★C4 烘焙 worker 灰度旗（入场覆盖门分支用）
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
@@ -41,6 +41,9 @@ import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
 import { MenuBackground } from './render/MenuBackground';
 import { CharacterStore } from './save/CharacterStore';
 import { WorldStore, WorldSaveWriteError, buildSaveBackupFilename, type WorldMeta } from './save/WorldStore';   // ★BJ605：+WorldSaveWriteError 保存时点告警判别 + 备份文件名（用户明令件）
+import { requestStoragePersistence, shouldShowPersistNotice, markPersistNoticeShown, evictNoticeFingerprint, shouldShowEvictNotice, markEvictNoticeShown, scanEvictedSaves, refreshStorageStatus } from './save/StoragePersistence';   // ★BJ611 持久存储申请/预警面/驱逐幽灵检测
+import { fsBackupSnapshot, fsBackupIndex, restoreFromBackup, fsBackupRestoreEvicted, fsBackupPurgeSnapshots, setFailToastHandler, resolveLoadText, backupTargetOfKey } from './save/FsBackup';   // ★BJ614 File System Access 本地目录自动备份（增强链）+读档自愈恢复链；★BJ617 件2：读档文本三段择源；★BJ618：quicksave 快照/恢复+删除组清理
+import { acquireSessionLock, worldLockKey, charLockKey, type SessionLock } from './save/SessionLock';   // ★BJ617 件1（用户拍板）：多标签页并发防线=Web Locks 会话锁（同世界/同角色已有会话拒载;不支持=降级放行）
 import { options } from './core/Options';
 import { UIScale } from './vui/draw/UIScale';
 import { Lang } from './i18n/Lang';
@@ -282,6 +285,32 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (id == null) return;
     try { localStorage.setItem(LAST_CHAR_KEY, String(id)); } catch { /* 隐私模式等 */ }
   }
+  // ★BJ617 件1（用户拍板 2026-10-10「干脆就不应该有合并这个功能」）：多标签页并发
+  //  防线=Web Locks 会话锁（src/save/SessionLock）——同世界/同角色已有会话拒载;
+  //  不支持 locks 的浏览器=降级放行（双开各自覆盖写 last-writer-wins=用户明示接受面）。
+  //  持有槽：loadFromKey/createWorldFlow 装入;quitToMenu/载入失败/生成中止释放;
+  //  tab 关闭=浏览器自动释放（标准 API 语义,零接线）。
+  let heldSessionLocks: { release(): void } | null = null;
+  /** 载入会话锁组装：世界键反解 id（world.<id>）取世界锁+charContextId() 取角色锁。
+   *  任一 'busy'=他 tab 会话在途 → { ok:false, which }（拒载）;unsupported=降级跳过
+   *  （放行）。后半 busy 时先释放已到手的前半（防半持锁泄漏）;全到手才 ok。 */
+  async function acquireLoadSessionLocks(key: string): Promise<{ ok: true; held: { release(): void } } | { ok: false; which: 'world' | 'char' }> {
+    const held: SessionLock[] = [];
+    const releaseAll = (): void => { for (const l of held.splice(0)) l.release(); };
+    const wid = /^sandboxworld\.world\.(\d+)$/.exec(key ?? '')?.[1];
+    if (wid != null) {
+      const w = await acquireSessionLock(worldLockKey(Number(wid)));
+      if (w === 'busy') return { ok: false, which: 'world' };
+      if (w !== 'unsupported') held.push(w);
+    }
+    const cid = charContextId();
+    if (cid != null) {
+      const c = await acquireSessionLock(charLockKey(cid));
+      if (c === 'busy') { releaseAll(); return { ok: false, which: 'char' }; }
+      if (c !== 'unsupported') held.push(c);
+    }
+    return { ok: true, held: { release: releaseAll } };
+  }
   let currentWorld: WorldMeta | null = null;
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
@@ -291,15 +320,115 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   //  ★用户明令件：数据写失败 → 自动导出存档文件下载兜底（手头 json 仍在，落库不成
   //  至少落文件——三旧档数据键消失根因未定谳前的用户级保险）
   worldStore.onWriteFail = () => { ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage')); };
-  worldStore.onWriteFailData = (name, _dk, saveJson) => {
+  // ★BJ618 件2：导出兜底提为共享助手（世界/角色数据写败同一面——用户明令件
+  //  「本地存档无法成功→自动导出存档提供下载」）
+  const exportSaveBackup = (name: string, json: string): void => {
     try {
-      const filename = downloadSaveJson(name, saveJson);
+      const filename = downloadSaveJson(name, json);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveExportedBackup', filename));
     } catch (e) {
       console.warn('[save] 备份导出失败', e);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
     }
   };
+  worldStore.onWriteFailData = (name, _dk, saveJson) => exportSaveBackup(name, saveJson);
+  // ★BJ618 件2：CharacterStore 告警面（镜像 WorldStore——BJ611 登记②收口+probe F8）：
+  //  index 写败 toast;create/update/setState 数据写败抛 CharacterSaveWriteError（各
+  //  调用方 catch 面感知）+本回调自动导出兜底（用户提示统一由此发出）。
+  charStore.onWriteFail = () => { ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage')); };
+  charStore.onWriteFailData = (name, _dk, json) => exportSaveBackup(name, json);
+  // ★BJ618 件4：删除成功 → FS 备份同组快照清理（防已删世界/角色经恢复链复活+隐私
+  //  面;双 index 墓碑由 delete 内 saveIndex→onIndexWrite 重写生效,此处只清数据组）。
+  worldStore.onDeleted = (id) => { void fsBackupPurgeSnapshots('world', id); };
+  charStore.onDeleted = (id, what) => {
+    if (what === 'all') void fsBackupPurgeSnapshots('player', id);
+    void fsBackupPurgeSnapshots('playerstate', id);
+  };
+
+  // ★BJ614（2026-10-10 用户拍板「File System Access 是个不错的方向,可以做为增强选项,
+  //  先在设置中可启用」）：本地目录自动备份接线——存档成功链尾自动快照（世界/角色
+  //  外观/随身态 时间戳档各留最近 3 份）+ 双 index 覆盖档（worlds/players.index.json,
+  //  恢复场景=索引被驱逐时的重建来源）。角色幸存于 BJ611 驱逐本质是「小档 ≤2MB 双写
+  //  localStorage」的运气而非设计（用户点破）——外观/随身态同入备份面。增强链
+  //  fire-and-forget,FsBackup 内部全 try-catch 绝不影响主保存链。
+  worldStore.onDataWrite = (name, id, json) => { void fsBackupSnapshot('world', id, name, json); };
+  worldStore.onIndexWrite = () => { void fsBackupIndex('worlds', JSON.stringify(worldStore.list())); };
+  charStore.onDataWrite = (name, id, json) => {
+    void fsBackupSnapshot('player', id, name, json);
+    void fsBackupIndex('players', JSON.stringify(charStore.list()));
+  };
+  charStore.onStateWrite = (id, json) => {
+    const cm = charStore.list().find((x) => x.id === id);
+    void fsBackupSnapshot('playerstate', id, cm?.name ?? 'char', json);
+    void fsBackupIndex('players', JSON.stringify(charStore.list()));
+  };
+  // ★BJ614 连败一次性 toast（连续 3 败 → 目录可能被删/移动;同一连败段只报一次）
+  setFailToastHandler(() => { ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupFailStreak')); });
+  // ★BJ614 读档自愈恢复链注入（世界/角色/双 index 键通用）：键缺失 → FS 备份目录
+  //  最新同键档写回 IDB → 调用方以返回文本续正常链（零旁路）;prompt 态=补「去设置
+  //  授权」提示（会话一次防刷屏,不强弹）。
+  let fsBackupAuthHintShown = false;
+  const fsBackupAuthHintFire = (): void => {
+    if (fsBackupAuthHintShown) return;
+    fsBackupAuthHintShown = true;
+    ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupNeedAuth'));
+  };
+  const fsBackupRestoreMiss = async (key: string): Promise<string | null> => {
+    const r = await restoreFromBackup(key);
+    if (r.ok) {
+      console.warn('[load] FS 备份恢复命中', key, r.file);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', r.file));
+      return r.text;
+    }
+    if (r.reason === 'prompt') fsBackupAuthHintFire();
+    return null;
+  };
+  worldStore.onRestoreMiss = fsBackupRestoreMiss;
+  charStore.onRestoreMiss = fsBackupRestoreMiss;
+
+  // ★BJ611（2026-10-10 线上事故·Chromium 磁盘紧张驱逐根治面）：持久存储统一申请+
+  // 授予态追踪 + 未授予一次性提醒 + 驱逐后首启幽灵档检测（fire-and-forget,不阻断
+  // 装配）。事故终因：C 盘仅剩 ~3GB → QuotaManager 整批驱逐 best-effort origin
+  // （IDB+Cache API,localStorage 幸存）→ 全部世界数据键消失。此前存档链从未申请
+  // persist() 恒 best-effort;申请口=src/save/StoragePersistence.ts（会话一次;
+  // AssetCache 素材暖存链既有调用幂等无害）。
+  void initStoragePersistenceWatch();
+  async function initStoragePersistenceWatch(): Promise<void> {
+    const state = await requestStoragePersistence();
+    // ② persisted=false 一次性提醒（localStorage 记忆跨会话只弹一次;文案含可操作
+    //    建议=安装为应用/收藏书签提高 Chrome 启发式授权率 + 定期导出备份闭环）
+    if (state !== 'granted' && shouldShowPersistNotice(localStorage)) {
+      markPersistNoticeShown(localStorage);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.StorageNotPersisted'));
+    }
+    // ③ 幽灵档扫描（驱逐后首启检测）:index 有 meta 而数据键 IDB 缺失且 localStorage
+    //    无副本=被清理形态;IDB 打不开=不可定谳弃检。指纹记忆——新增驱逐才再提醒。
+    await Promise.all([worldStore.ensureLoaded(), charStore.ensureLoaded()]);
+    const scan = await scanEvictedSaves(worldStore.list(), charStore.list());
+    if (scan.conclusive && scan.evicted.length > 0) {
+      // ★BJ614 幽灵扫描联动：FS 备份启用+granted → 逐键自动恢复被驱逐数据（写回
+      //  IDB=原键直读恢复）。放指纹门外——每次首启扫描都尝试（prompt 会话静默跳过,
+      //  用户授权后下次首启自动补齐;若在门内会被「已提醒过」一次性吞掉恢复链）。
+      const rec = await fsBackupRestoreEvicted(scan.evicted);
+      const fp = evictNoticeFingerprint(scan.evicted);
+      if (shouldShowEvictNotice(localStorage, fp)) {
+        markEvictNoticeShown(localStorage, fp);
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNotice', scan.evicted.length));
+        // ★BJ614 幽灵提示补「已尝试从本地备份恢复」（成功 N 个=诚实措辞带
+        //  「可能落后于最后状态」;尝试无果=补未恢复说明,授权提示走读档链/设置页）
+        if (rec.attempted) {
+          ui.toast(rec.restored > 0
+            ? Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNoticeFsRestored', rec.restored)
+            : Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNoticeFsTried'));
+        }
+      }
+    }
+    // ④ estimate 快照（存档列表状态行首读;此后存档/列表打开时再采样）。
+    //    ★摘除注（2026-10-10 用户实测+明令）：quota 环比骤降预警 toast 链已摘——
+    //    M97+ quota 锚磁盘总容量（C 盘剩 3GB 空闲时 quota 仍 10.3GB）,环比抓不到
+    //    磁盘变紧;休眠纯核与 re-arm 口见 src/save/StoragePersistence.ts。
+    void refreshStorageStatus();
+  }
 
   /** 角色贴图预载（2026-08-28 用户要求“确保角色贴图加载完整再进入世界”）：
    *  按角色档案实际外观预载 Player_ 通道/发型——读档/导入路径 makeGame 时
@@ -564,8 +693,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         // 清随身态（物品已全数掉落;残留=下一世界复活全套装备的复制窗,2026-08-19
         // 补齐)+ 清 lastCharId（quickLoad 回退不再命中亡者态）
         if (selectedCharId != null) {
-          await charStore.update(selectedCharId, appearance);
-          await charStore.clearState(selectedCharId);
+          // ★BJ618 件2：update/clearState 写败抛错——catch 面防 unhandled rejection
+          //  （提示由 onWriteFailData 导出兜底回调发;消亡标记失败不阻断后续清理）
+          try {
+            await charStore.update(selectedCharId, appearance);
+            await charStore.clearState(selectedCharId);
+          } catch (e) { console.warn('[char] 硬核消亡回写失败', e); }
         }
         try { localStorage.removeItem('sbw.lastCharId'); } catch { /* 隐私模式 */ }
       },
@@ -577,7 +710,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           g.player.appearance = a;
           if (typeof a.team === 'number') g.player.team = a.team;
           g.net?.resendAppearance();
-          if (selectedCharId != null) await charStore.update(selectedCharId, a);
+          // ★BJ618 件2：update 写败抛错——catch 防 unhandled rejection（提示由
+          //  onWriteFailData 导出兜底回调发;失败不弹「已更衣」假提示）
+          try {
+            if (selectedCharId != null) await charStore.update(selectedCharId, a);
+          } catch (e) { console.warn('[char] 更衣回写失败', e); return; }
           ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
         });
       },
@@ -593,7 +730,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             selectedAppearance = a;
             g.player.appearance = a;
             g.net?.resendAppearance();
-            if (selectedCharId != null) await charStore.update(selectedCharId, a);
+            try {
+              if (selectedCharId != null) await charStore.update(selectedCharId, a);
+            } catch (e) { console.warn('[char] 理发回写失败', e); return; }
             ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
             g.closeNpcDialog();   // BuyHairWindow :43110 SetTalkNPC(-1)
           },
@@ -820,7 +959,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到
    *  worker 的主线程序列化开销——大存档实测秒级 100% CPU）；worker 不可用时
-   *  才在主线程 kvGet 走 fallback。
+   *  才在主线程走文本择源 fallback（★BJ617 件2 resolveLoadText：IDB→FS 备份→LS 副本）。
    *  ★防重入门(2026-09-07):大世界读档链路含多个 await 窗口(worker 往返/
    *  charStore/资源预热),双触发(双击 Play/探针事件重复)=两条链并行——第二链
    *  makeGame() 重置全局 while 第一链仍引用旧 g,第一链恢复后 g.player 未建即
@@ -830,6 +969,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function loadFromKey(key: string) {
     if (loadFlowBusy) return;
     loadFlowBusy = true;
+    // ★BJ617 件1：载入会话锁（世界锁 world-lock.<id>+角色锁 char-lock.<id>）——
+    //  他 tab 会话在途=拒载+toast;quicksave 键无槽位 id 可反解 → 只走角色锁
+    //  （quickload 会话 slotMeta=null 不写世界槽位,无世界互踩面）;unsupported=
+    //  降级放行（用户接受面,SessionLock 登记）。
+    heldSessionLocks?.release();   // 防御：上一会话清理残留（正常路径 quitToMenu 已清）
+    heldSessionLocks = null;
+    const lockTake = await acquireLoadSessionLocks(key);
+    if (!lockTake.ok) {
+      loadFlowBusy = false;
+      ui.toast(Lang.text(lockTake.which === 'world'
+        ? 'Mods.SandboxWorld.Toast.WorldLockedByOtherTab'
+        : 'Mods.SandboxWorld.Toast.CharLockedByOtherTab'));
+      return;
+    }
+    heldSessionLocks = lockTake.held;
     // ★BJ605（2026-10-10 线上事故）：worker 报「存档数据缺失」的分类
     //  （null = WorldGenUnavailable 来路或无分类——toast 走原语义文案）
     let saveMissing: SaveMissingReason | null = null;
@@ -872,23 +1026,50 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           return;
         } catch (e) {
           // ★BJ605 catch 判别重构（修复前只放行 WorldGenUnavailable——「存档数据缺失」
-          //  被 re-throw 拦死，主线程 kvGet fallback 永不可达）：
+          //  被 re-throw 拦死，主线程 fallback 永不可达；★BJ617 件2 后 fallback=
+          //  resolveLoadText 三段择源 IDB→FS 备份→LS 副本）：
           //  ①「存档数据缺失」族（worker 分类 idbUnavailable/keyMissing/typeMismatch/
-          //    jsonParseFailed——数据面缺口）→ 走 kvGet fallback（≤2MB 小档 kvSet 双写
-          //    localStorage，IDB 毒化/驱逐/不可用时副本救援；kvGet 也 null 才报错）；
+          //    jsonParseFailed——数据面缺口）→ 走主线程择源 fallback（LS 兜底副本救援：
+          //    双写时代历史副本；★BJ615 单写后新档只在 IDB。三源皆无才报错）；
           //  ②WorldGenUnavailable（worker 全不可用）→ 原语义走 fallback；
           //  ③其余（loadSaveData 内部解析崩等）fallback 救不了 → 保持 re-throw
           //    走外层 alert 原文案（不吞）。
           saveMissing = parseSaveMissingReason((e as Error | undefined)?.message);
           if (saveMissing) {
-            console.warn('[load] worker 报存档数据缺失 → 主线程 kvGet fallback（localStorage 副本救援）', (e as Error | undefined)?.message);
+            console.warn('[load] worker 报存档数据缺失 → 主线程择源 fallback（FS 备份/LS 副本救援）', (e as Error | undefined)?.message);
           } else if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
           // worker 失败/存档数据缺失 → 主线程 fallback
         }
       }
-      const text = await kvGet(key);
-      if (!text) {
-        // ★BJ605：IDB+localStorage 双空——IDB 态诊断物证留 console（用户自查/
+      // ★BJ617 件2（BJ616 F2 读序倒挂修复）：读档文本三段择源 resolveLoadText——
+      //  ① IDB 现值恒权威直返（健康档绝不咨询 FS——备份回写不得倒灌现值）;
+      //  ② IDB miss → FS 备份优先于 LS 兜底副本。旧实现 kvGet 非空即短路恢复链——
+      //     双写时代 LS 陈旧副本抢先,用户静默载入旧档（可能远旧于 FS 备份）,再存档
+      //     =进度回滚坐实。择新依据：LS 副本冻结于 BJ615 单写升级时点≈很久以前,
+      //     FS 备份=BJ614 后每保存刷新=几乎恒新;两版皆无内嵌保存时间戳可比。
+      //  ③ FS 恢复链失败 → LS 兜底副本（诚实标注「较旧副本」,仅限有备份面的键;
+      //     ★BJ618 件3 起 quicksave 亦有备份面 quicksave.json,同样作陈旧宣称）。
+      //  ④ 三源皆空=missing（prompt 授权提示+IDB 态诊断+缺失分类文案,原语义）。
+      const resolved = await resolveLoadText(key, () => localStorage.getItem(key));
+      if (resolved.source === 'fs-backup') {
+        // ★BJ614 用户明令「IndexedDB 中找不到要从备份取」：最新同键快照已写回 IDB
+        //  （自愈,下次读直命中）→ 以恢复文本续正常读档链 loadFromJson（零旁路;
+        //  恢复档诚实标注「可能落后于最后状态」）;prompt 态不强弹（resolveLoadText
+        //  仅在真缺 restoreFromBackup 咨询,prompt 随 missing 分支补提示）。
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', resolved.file));   // 文件名进 {0} 槽（onRestoreMiss 恢复链 :338 同款）
+        await loadFromJson(resolved.text);
+        return;
+      }
+      if (resolved.source === 'ls-fallback') {
+        if (backupTargetOfKey(key)) ui.toast(Lang.text('Mods.SandboxWorld.Toast.LoadStaleLocalCopy'));
+        await loadFromJson(resolved.text);
+        return;
+      }
+      if (resolved.source === 'missing') {
+        heldSessionLocks?.release();   // ★BJ617 件1：载入失败=会话未开始,会话锁即释
+        heldSessionLocks = null;
+        if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();
+        // ★BJ605：IDB+FS+LS 三处皆无——IDB 态诊断物证留 console（用户自查/
         //  DevTools 物证请求共同依赖），文案按缺失分类给可操作指引
         //  （存储不可用引导自救 vs 数据真缺失如实告知不可恢复）；
         //  saveMissing=null（WorldGenUnavailable 来路）→ 原语义 SaveLoadFailed 文案。
@@ -896,8 +1077,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         ui.toast(Lang.text(saveMissingToastKey(saveMissing), '存档数据缺失'));
         return;
       }
-      await loadFromJson(text);
+      await loadFromJson(resolved.text);   // 'idb'：健康直读
     } catch (e) {
+      heldSessionLocks?.release();   // ★BJ617 件1：载入失败（alert 面）=会话未开始,会话锁即释
+      heldSessionLocks = null;
       console.error(e);
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
@@ -1279,10 +1462,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           onNew: () => {
             new CharCreation(holder, {
               onCreate: async (a) => {
-                const meta = await charStore.create(a);
-                selectedAppearance = a;
-                selectedCharId = meta.id;   // ★新角色立即可用 id——曾置 null,读档时
-                pickWorld();                 // charContextId() 回退 localStorage 上一角色 id → 继承其装备/血量(2026-08-26 用户实报)
+                // ★BJ618 件2：create 写败抛 CharacterSaveWriteError——catch 面感知失败
+                //  不续进世界流程（提示由 onWriteFailData 导出兜底回调发）
+                try {
+                  const meta = await charStore.create(a);
+                  selectedAppearance = a;
+                  selectedCharId = meta.id;   // ★新角色立即可用 id——曾置 null,读档时
+                  pickWorld();                 // charContextId() 回退 localStorage 上一角色 id → 继承其装备/血量(2026-08-26 用户实报)
+                } catch (e) { console.warn('[char] 角色创建落库失败', e); }
               },
               onCancel: () => closeFlow(),
             });
@@ -1312,11 +1499,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           onNew: () => {
             new CharCreation(holder, {
               onCreate: async (a) => {
-                const meta = await charStore.create(a);
-                closeHolder();
-                selectedAppearance = a;
-                selectedCharId = meta.id;   // ★新角色 id 立即可用(曾置 null → 读档回退上一角色 id=串档)
-                then();
+                // ★BJ618 件2：create 写败抛错——catch 面感知失败不续联机流程
+                try {
+                  const meta = await charStore.create(a);
+                  closeHolder();
+                  selectedAppearance = a;
+                  selectedCharId = meta.id;   // ★新角色 id 立即可用(曾置 null → 读档回退上一角色 id=串档)
+                  then();
+                } catch (e) { console.warn('[char] 角色创建落库失败', e); }
               },
               onCancel: () => closeHolder(),
             });
@@ -1343,9 +1533,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNew: () => {
         new CharCreation(root, {
           onCreate: async (a) => {
-            const meta = await charStore.create(a);
-            selectedCharId = meta.id;   // ★同上:新角色 id 立即可用(曾置 null=串档)
-            showCharacterSelect();
+            // ★BJ618 件2：create 写败抛错——catch 面感知失败不续流程
+            try {
+              const meta = await charStore.create(a);
+              selectedCharId = meta.id;   // ★同上:新角色 id 立即可用(曾置 null=串档)
+              showCharacterSelect();
+            } catch (e) { console.warn('[char] 角色创建落库失败', e); }
           },
           onCancel: () => showCharacterSelect(),
         });
@@ -1390,6 +1583,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
   async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; size: number; difficulty: number; evil: -1 | 0 | 1 }) {
+    // ★BJ617 件1：新世界 id 全新注册=无跨 tab 世界争用面（不取世界锁）;角色锁照接
+    //  （创建会话同样回写 playerstate——同角色双 tab 互踩面同 loadFromKey）。
+    heldSessionLocks?.release();   // 防御：上一会话清理残留（正常路径 quitToMenu 已清）
+    heldSessionLocks = null;
+    {
+      const cid0 = charContextId();
+      if (cid0 != null) {
+        const c = await acquireSessionLock(charLockKey(cid0));
+        if (c === 'busy') {
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.CharLockedByOtherTab'));
+          return;
+        }
+        if (c !== 'unsupported') heldSessionLocks = { release: () => c.release() };
+      }
+    }
     // ★IIIII226 halloweenGen 日期臂（vanilla FinishCreatingWorld UIWorldCreation.cs:984-986
     //   → WorldFileData.SetSeedToRandomWithCurrentEvents WorldFileData.cs:417-425）：种子为空
     //   或特殊种子文本时,现实万圣日期窗（Main.isHalloweenDateNow Main.cs:13313-13327）
@@ -1450,10 +1658,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // ★IIIII229 ①：Esc 中止收场（WorldGenAbortedError 判别,真实生成错误原样上抛）——
       //  世界不登记不落库,生成屏退场回菜单（vanilla 中止后 UIWorldLoad 离场同态）。
       if (e instanceof WorldGenAbortedError) {
+        heldSessionLocks?.release();   // ★BJ617 件1：生成中止=会话未开始,会话锁即释
+        heldSessionLocks = null;
         VUI.setState(null);
         showTitle();   // 回标题（vanilla Esc 中止→UIWorldLoad 离场→menuMode 0）
         return;
       }
+      heldSessionLocks?.release();   // ★BJ617 件1：真实生成错误上抛前放锁（不留孤儿持锁）
+      heldSessionLocks = null;
       throw e;
     } finally {
       // ★IIIII218 生成流收场还原（成败同途;vanilla FinishWorldGen → ResetWorldSeedFlags
@@ -1700,6 +1912,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 由 closeAll→detachGame 摘
       (window as unknown as { __swGame?: Game | null }).__swGame = null;
       currentWorld = null;
+      // ★BJ617 件1：会话锁随退出释放（此点 doSave 全链已落定——先落盘再放锁,
+      //  他 tab 的拒载窗覆盖到我们的最终写入为止;tab 关闭另有浏览器自动释放面）
+      heldSessionLocks?.release();
+      heldSessionLocks = null;
       // ★BJ318（2026-09-23 退出链释放审计补刀,须在 game=null 后——面板 onClosed
       //  的 `if (game) ui.openInventory()` 在退出路径不得误开背包）：
       //  ① F6 住房面板挂 document.body 且持 Game 引用（__swHousingPanel）——
@@ -1743,25 +1959,56 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // ★BJ144：返回值改为【全链落定】promise——quitToMenu/更新横幅 reload 等
     //  「退出即持久化」消费方 await 到序列化+quicksave+槽位双 IDB 写全部 settle,
     //  不再 fire-and-forget(原版 SaveAndQuit 保存屏语义,WorldGen.cs:6612-6635)
-    return saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then(async (json) => {
+    // ★BJ620 件6-F9（探针 scripts/_bj620-f9-parse-probe.mjs：8400×2400 档主线程
+    //  JSON.parse(json).player 12.4ms>10ms 阈）：saveWithPlayer——worker 回传 player
+    //  切片（稳定 id 磁盘形,与 json.player 全等）,charState 同步支免整档 21MB parse。
+    return saveClient.saveWithPlayer(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then(async ({ json, player }) => {
       // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制快路径退役——原
       //  kvSetCompat 曾先 kvSetBinary 写二进制副本再 kvSet 同 key 写 JSON,IDB 同 store
       //  串行 → JSON 恒后写覆盖二进制副本（快路径零活跃消费方,评估定谳）;且崩溃窗口
       //  二进制残留是元数据全丢的损毁态（packSaveBinary meta={} → loadSaveData
       //  data.header.width TypeError）。守卫=tests/save-binary-deadpath.test.ts
-      const quickWrite = kvSet(QUICK_SAVE_KEY, json).then((where) => {
-        if (where === 'fail') {
-          // ★BJ605 用户明令件：quicksave 是最后救命稻草，写失败同样自动导出兜底
-          //  （json 在手；槽位写失败走 WorldStore.onWriteFailData 回调，此处为 quick 面）
+      // ★BJ620 件3（BJ616 F11）：同链失败面上报去重——quickWrite 'fail' 与 slotWrite
+      //  'fail' 双路径旧实现各走一遍 BJ605 兜底=同一 json 下载两次+SaveFailedStorage
+      //  弹多条（全败一次保存 2 下载+4 toast）。链内标记位：首个失败面执行导出+告警,
+      //  后续面跳过——BJ605 兜底语义不变（至少一次导出+至少一条告警）;slot 面导出经
+      //  WorldStore.save 第四参 failNotify（chainFailNotify）进入同一标记。
+      const failGate = { exported: false, toasted: false };
+      const noteChainSaveFail = (withExport: boolean): void => {
+        if (withExport && !failGate.exported) {
+          failGate.exported = true;
           try {
             const filename = downloadSaveJson(worldNameNow, json);
             ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveExportedBackup', filename));
           } catch (e2) {
-            console.warn('[save] quicksave 备份导出失败', e2);
+            console.warn('[save] 备份导出失败', e2);
           }
+        }
+        if (!failGate.toasted) {
+          failGate.toasted = true;
           ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+        }
+      };
+      // slot 面链内去重通知（WorldStore.save 数据写败时优先于全局 onWriteFailData）：
+      // 只认领导出+走 exportSaveBackup;SaveFailedStorage 告警由下方 slotWrite .catch
+      // 统一发（认领制）——同链双败时 quick 面/槽面合计恰一次导出+一次告警。
+      const chainFailNotify = (name: string, _dk: string, j: string): void => {
+        if (failGate.exported) return;
+        failGate.exported = true;
+        exportSaveBackup(name, j);
+      };
+      const quickWrite = kvSet(QUICK_SAVE_KEY, json).then((where) => {
+        if (where === 'fail') {
+          // ★BJ605 用户明令件：quicksave 是最后救命稻草，写失败同样自动导出兜底
+          //  （json 在手；★BJ620 件3：同链 slotWrite 也败时只导一次/告警一次）
+          noteChainSaveFail(true);
         } else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
+          // ★BJ618 件3（BJ616 probe F6 转正·快照面）：quicksave 写成功链尾 FS 备份快照
+          //  （覆盖式单档 quicksave.json——「最后救命稻草」恰是 BJ614 唯一无备份通道;
+          //  fire-and-forget 增强链,FsBackup 内部全吞错）
+          try { void fsBackupSnapshot('quicksave', 0, worldNameNow, json); }
+          catch (e) { console.warn('[save] quicksave 快照回调异常', e); }
           // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀）。
           // silent 档 = 自动保存路径（2026-08-27 用户要求：自动保存不弹提示,原版
           // DoUpdate_AutoSave 亦全程静默）；失败 toast 不受 silent 门控（数据安全告警）
@@ -1769,7 +2016,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         }
       }).catch((e) => {
         console.error('kvSet failed', e);
-        ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+        noteChainSaveFail(false);   // ★BJ620 件3：kvSet 抛弃型失败同链去重（不导出——槽位面成功则档已在库）
       });
       // 多世界槽位（M3）：登记到 WorldStore（slotMeta=退出置空前的调用帧快照）
       // ★BJ144：槽位写失败此前仅 console.error（无提示）——「世界已保存」toast 只由
@@ -1778,21 +2025,29 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       let slotWrite: Promise<void> = Promise.resolve();
       if (slotMeta) {
         slotMeta.hardMode = hardModeNow;
-        slotWrite = worldStore.save(slotMeta, json, playTimeMs).catch((e) => {
+        // ★BJ620 件3：failNotify=chainFailNotify——槽面导出与 quick 面共享同链标记
+        slotWrite = worldStore.save(slotMeta, json, playTimeMs, chainFailNotify).catch((e) => {
           console.error('worldStore.save failed', e);
-          ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+          noteChainSaveFail(false);
         });
       }
-      // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,
-      // 原样入 CharacterStore——与读侧 playerFromDiskForm 对称。同步失败不阻断存档
+      // 角色随身态同步（原版 .plr 语义）：player 段=磁盘稳定 id 形（★BJ620 件6-F9:
+      //  worker/同步回退双路径切片直传,与 json.player 全等——旧实现整档 JSON.parse
+      //  只为取 player 段,大档 10ms 级主线程停顿）,原样入 CharacterStore——与读侧
+      //  playerFromDiskForm 对称。同步失败不阻断存档
       {
         const cid = charContextId();   // quickLoad 等无选角上下文会话也回写上次角色
         if (cid != null) {
-          try { void charStore.setState(cid, JSON.parse(json).player); }
+          // ★BJ618 件2：setState 写败抛 CharacterSaveWriteError—— rejection 面收进
+          //  .catch（旧 try/catch 只能接同步抛）,用户提示由 onWriteFailData 导出兜底发
+          try { charStore.setState(cid, player).catch((e) => { console.warn('charState sync failed', e); }); }
           catch (e) { console.warn('charState sync failed', e); }
         }
       }
       await Promise.all([quickWrite, slotWrite]);
+      // ★BJ611：保存时点刷新存储状态快照（estimate 预警面;fire-and-forget 不阻塞
+      // 存档链——存档列表状态行/警示色读最近快照）
+      void refreshStorageStatus();
       // ★BJ280：用户确认存档点（手动保存/保存并退出——非静默链）全链落定 → 解除
       // 拦截态。静默档（自动保存/隐藏兜底/横幅刷新）不清位。
       if (!silent) worldDirty = false;

@@ -12,9 +12,13 @@
 //     num3=5,num4=11;3625 时 4 外圈,num3=4,num4=-0.5）+ 中心剪线钳;
 //     悬浮=距离<19（中心<20,键盘路径）;左键图标⇒ToolMode 位 XOR;左键空白⇒收;
 //     图标钮 WireUi[0|1]（Cutter 态 8|9）+色标 WireUi[2..5]/[6|7]/[10]。
-//   · DrawCursorArea(:517-690)：花关闭期光标迷你色点——横排 45px 步距（i-1.5),
-//     锚=MouseScreen+(10,25)（!actuator 时 +(−20,10)）,BuilderAcc 表
-//     (128,0,10,10) 底+(140,2,6,6) 色点+(148,2,6,6) 剪线钳角标;
+//   · DrawCursorArea(:517-690)：花关闭期光标迷你色点——★BJ619（2026-10-10）定谳
+//     重移植：活码在 :616-668 按 num4 【覆写】vec（旧实现误用死码 DrawLine :190-335
+//     的横排 45px 几何=用户实报图92「五点横排」病灶）：actuator 支（3611 在持）
+//     红(-12,0)/黄(12,0)/蓝(-6,12)/绿(6,12)/致动器(0,0) 居中;非 actuator 支（3625）
+//     ×num6=0.7 菱形 红(0,-8.4)/黄(8.4,0)/蓝(-8.4,0)/绿(0,8.4);末位 vec.Floor()
+//     （:690 像素对齐）。锚=MouseScreen+(10,25)（!actuator 时 +(−20,10),:512-522）,
+//     BuilderAcc 表 (128,0,10,10) 底+(140,2,6,6) 色点+(148,2,6,6) 剪线钳角标;
 //     i→num4={3,2,1,0,5},色 num4:0 红(253,58,61)/1 蓝(83,180,253)/2 绿(83,253,153)/
 //     3 黄(253,254,83)/5 白烟;bit=num5(1↔2 交换后 1<<num5,5→致动器);
 //     关位色=lerp(色,黑,0.65)。
@@ -179,7 +183,8 @@ export function flowerPick(slots: FlowerSlot[], mx: number, my: number): FlowerS
 }
 
 /** 迷你色点（DrawCursorArea :540-690）：i→num4={3,2,1,0,5};色表见文件头;
- *  横排 45px 步距,锚=MouseScreen+(10,25)（!actuator 时再 +(−20,10)）。 */
+ *  ★BJ619：紧凑环簇几何（:616-668 num4 键位偏移覆写,非横排）+ Floor（:690）。
+ *  num=1（cursorScale 支在 :535-537 flag 恒 false 死码内,不活）。 */
 export interface CursorDot {
   x: number;
   y: number;
@@ -214,9 +219,26 @@ export function cursorDots(mouseSX: number, mouseSY: number, actuatorAllowed: bo
     if (i === 3) num4 = 0;
     if (i === 4) num4 = 5;
     const [r, g, b] = COLORS[num4];
+    // DrawCursorArea :616-668——actuator 支：红左/黄右/蓝左下/绿右下/致动器居中;
+    // 非 actuator 支 ×num6=0.7：红上/黄右/蓝左/绿下（紧凑菱形）。
+    let ox = 0;
+    let oy = 0;
+    if (actuatorAllowed) {
+      if (num4 === 0) { ox = -12; oy = 0; }          // 红
+      else if (num4 === 3) { ox = 12; oy = 0; }      // 黄
+      else if (num4 === 1) { ox = -6; oy = 12; }     // 蓝
+      else if (num4 === 2) { ox = 6; oy = 12; }      // 绿
+      // num4=5 致动器 (0,0) 居中
+    } else {
+      const num6 = 0.7;
+      if (num4 === 0) { ox = 0; oy = -12 * num6; }         // 红
+      else if (num4 === 3) { ox = 12 * num6; oy = 0; }     // 黄
+      else if (num4 === 1) { ox = -12 * num6; oy = 0; }    // 蓝
+      else { ox = 0; oy = 12 * num6; }                     // num4=2 绿
+    }
     dots.push({
-      x: vecX + 45 * (i - 1.5),
-      y: vecY,
+      x: Math.floor(vecX + ox),   // :690 vec.Floor()
+      y: Math.floor(vecY + oy),
       kind: KINDS[num4],
       bit: BITS[num4],
       r, g, b,

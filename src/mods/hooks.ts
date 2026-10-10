@@ -175,6 +175,9 @@ export interface ModProjSpec {
     /** ★三百五十六刀:节拍射击面(每 every tick 自动发射;vel 缺省 8;
      *  atMouse=true=目标弹在鼠标处生成)——节拍射击族 holdout 免写钩 */
     shoot?: { proj: string; every: number; vel?: number; atMouse?: boolean };
+    /** ★五百七十一:channel 结束钩(松开左键/死亡/魔耗失败时在 kill 前调用;
+     *  M1Garand reload/Condemnation 倾泻/MagnaCannon 泄射等释放面) */
+    onChannelEnd?: (p: any, game: any) => void;
   };
   /** 寿命 tick(缺省 3600) */
   lifetime?: number;
@@ -356,6 +359,22 @@ export function runModPlayerThorns(p: unknown, game: unknown, e: Enemy, dmg: num
   if (playerThorns.size === 0) return;
   for (const fn of playerThorns.values()) {
     try { fn({ p, game, e, dmg }); } catch (err) { console.warn('[mod-hooks] playerThorns', err); }
+  }
+}
+
+/** ★五百四十八:治疗物使用钩(C# CalamityGlobalItem 治疗物交互面——jelly 光环族/
+ *  Bloom Stone=healLife 消费后派发;零注册零成本)。 */
+const healItem = new Map<string, (vid: number, heal: number) => void>();
+
+export function registerModHealItem(modId: string, fn: (vid: number, heal: number) => void): void {
+  if (healItem.has(modId)) throw new Error(`[mod-hooks] healItem 重复注册: ${modId}`);
+  healItem.set(modId, fn);
+}
+
+export function runModHealItem(vid: number, heal: number): void {
+  if (healItem.size === 0) return;
+  for (const fn of healItem.values()) {
+    try { fn(vid, heal); } catch (err) { console.warn('[mod-hooks] healItem', err); }
   }
 }
 
@@ -727,6 +746,7 @@ export function _resetModHooksForTests(): void {
   onHitAny.clear();
   tileInteract.clear();
   playerThorns.clear();
+  healItem.clear();
   modifyHurtByNpc.clear();
   npcOnHitPlayerBuff.clear();
   modifyHitNpc.clear();

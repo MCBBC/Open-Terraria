@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { kvSet, kvGet } from '../src/save/KvStore';
+import { installFakeIdb } from './fake-idb-util';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -53,8 +54,10 @@ describe('v6 二进制快路径退役态（★BJ90 债④,BJ71 登记②）', ()
   });
 
   it('行为面：快照读写走纯 JSON 链（kvSet→kvGet→JSON.parse→loadSaveData）', async () => {
-    // node 环境 IndexedDB 不可用 → kvSet 走 localStorage 副本/IDB 失败兜底;垫最小
-    // localStorage 桩以覆盖 kvGet 回读链（真 IDB 环境由探针/人工 F5 验证）
+    // ★BJ615（2026-10-10）单写方案：kvSet 恒走 IDB（LS 写已摘,返回值 'local' 档退役）
+    // ——node 垫 fake-IDB（tests/fake-idb-util）驱动真实 kvSet→kvGet 读写链;
+    // localStorage 桩仅保 kvGet 兜底腿不 ReferenceError（本测 IDB 恒命中,走不到）。
+    installFakeIdb();
     const m = new Map<string, string>();
     (globalThis as { localStorage?: unknown }).localStorage = {
       getItem: (k: string) => m.get(k) ?? null,
@@ -68,10 +71,8 @@ describe('v6 二进制快路径退役态（★BJ90 债④,BJ71 登记②）', ()
     world.spawnX = 30; world.spawnY = 10;
     world.flags.hardMode = true;
     const json = saveGame(world, new Player(100, 100, new Inventory()), 0);
-    // 同进程 IDB 不可用（node 环境）→ kvSet 兜底 localStorage 或 fail,但返回值非二进制;
-    // 真读写契约由 save.test.ts round-trip 主判据覆盖,此处锁「写入口返回 string 通道语义」
     const where = await kvSet('sandboxworld.test.deadpath', json);
-    expect(where).toBe('local');   // ≤2MB 快路径命中 shim（IDB 在 node 不可用=兜底链）
+    expect(where).toBe('idb');   // BJ615 单写：恒 'idb' 或 'fail',再无 'local'
     const back = await kvGet('sandboxworld.test.deadpath');
     expect(back).not.toBeNull();   // 回读必为字符串（非 ArrayBuffer——v6 二进制残留即在此炸）
     const w2 = loadSave(back as string);

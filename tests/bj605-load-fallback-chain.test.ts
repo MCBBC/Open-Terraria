@@ -2,7 +2,8 @@
 // 事故链（定谳）：KvStore.openDb 把 rejected promise 永久缓存（毒化）→ 瞬时 open
 // 失败后本会话所有 IDB 读恒 null → worker saveParse key 源抛「存档数据缺失」→
 // mainFlow.loadFromKey 的 worker catch 只放行 WorldGenUnavailable，其他 re-throw
-// → 主线程 kvGet（IDB 优先 + localStorage 副本兜底，≤2MB 小档 kvSet 双写）fallback
+// → 主线程 kvGet（IDB 优先 + localStorage 副本兜底；★BJ615 后副本=双写时代遗留,
+// 只读不写）fallback
 // 永不可达 → 用户「线上存档突然无法进入」。叠加态B（单档幽灵）：WorldStore 写链
 // 弃检 kvSet 'fail' 返回值 → 保存静默丢档、meta 照常入 index → 列表有档进不去。
 // 本文件锁六面：
@@ -27,7 +28,7 @@ import { WorldStore, WorldSaveWriteError, buildSaveBackupFilename } from '../src
 // —— 可编程 KvStore mock（A 组透传 actual 真实现；B/D/F 组按用例注入）——
 const kvMock = vi.hoisted(() => ({
   getEx: undefined as undefined | ((key: string) => Promise<{ value: string | null; cause: string; detail?: string }>),
-  set: undefined as undefined | ((key: string, value: string) => Promise<'local' | 'idb' | 'fail'>),
+  set: undefined as undefined | ((key: string, value: string) => Promise<'idb' | 'fail'>),
   get: undefined as undefined | ((key: string) => Promise<string | null>),
   has: undefined as undefined | ((key: string) => Promise<boolean>),
 }));
@@ -370,7 +371,8 @@ describe('BJ605 F组：全缝——client.loadSave({key}) 错误回传可判别 
     expect(caught?.message).toContain('存档数据缺失 (keyMissing, src=idb, key=sandboxworld.world.9)');
     // 主线程 catch 判别输入=此 message → 判别为缺失族 → 走 kvGet fallback
     expect(parseSaveMissingReason(caught?.message)).toBe('keyMissing');
-    // 救援材料：kvGet 的 localStorage 兜底读得到副本（kvSet ≤2MB 双写的读侧回环）
+    // 救援材料：kvGet 的 localStorage 兜底读得到副本（双写时代遗留副本的读侧救援，
+    // ★BJ615 留读摘写）
     kvMock.get = async () => '{"header":{"width":64,"height":32}}';
     expect(await (await import('../src/save/KvStore')).kvGet('sandboxworld.world.9')).toContain('header');
     client.terminate();
@@ -384,7 +386,7 @@ describe('BJ605 E组：接线结构锚（防回归退化）', () => {
     const s = codeOf('../src/mainFlow.ts');
     expect(s).toContain('saveMissing = parseSaveMissingReason((e as Error | undefined)?.message)');
     expect(s).toContain("} else if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;");
-    expect(s).toContain('const text = await kvGet(key);');
+    expect(s).toContain('const resolved = await resolveLoadText(key,');   // ★BJ617 件2：主线程 fallback=三段择源（IDB→FS 备份→LS 副本）
     expect(s).toContain('ui.toast(Lang.text(saveMissingToastKey(saveMissing)');
     expect(s).toContain('kvIdbStatus(key)');
   });
@@ -399,7 +401,11 @@ describe('BJ605 E组：接线结构锚（防回归退化）', () => {
     const s = codeOf('../src/save/WorldStore.ts');
     expect(s.match(/if \(where === 'fail'\)/g)?.length).toBeGreaterThanOrEqual(4);   // save/importSlot/duplicate/saveIndex
     expect(s).toContain('rollbackRegister');
-    expect(s.match(/onWriteFailData\?\./g)?.length).toBe(3);   // ★用户明令件：三写点全接导出回调
+    // ★用户明令件：三写点全接导出回调。★BJ620 件3：save 写点改 (failNotify ??
+    // onWriteFailData)?.（链内去重通知可选注入,缺省仍=onWriteFailData 原语义）——
+    // 锚形扩为两种调用形并取并计数。
+    expect(s.match(/onWriteFailData\)\?\.\(/g)?.length).toBe(1);   // save 写点（failNotify 优先形）
+    expect(s.match(/this\.onWriteFailData\?\.\(/g)?.length).toBe(2);   // importSlot/duplicate（原形）
   });
 
   it('mainFlow：备份导出面在位（downloadSaveJson/onWriteFailData 接线/quicksave fail 导出）', () => {

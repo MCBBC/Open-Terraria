@@ -18,18 +18,21 @@
 //   有而 isSolid 宽谓词无）+pickSentryLandingSpot 换谓词;端到端=377 出膛 vy15
 //   在平台面落地（moveAndCollide 平台顶承接既有面 :TileCollision 491 plat 门）。
 // 症状①「只有一半贴图」= 绘制面对拍结论：
-//   vanilla 主绘（Main.cs:34950-34957 特例 + :35047 通用尾）：308/377 帧内是
-//   【左右两半镜像对】（texel 实证:Projectile_377.png 66×450=9 帧 66×50,左右半
-//   镜像差 11%,蜘蛛内容居帧下半 20-50 行;Projectile_308.png 94×780=10 帧 94×78）
-//   ——num481/=2 → 源矩形半宽、num153/=2 → texW/4、ai[2]==1（哨兵背包携行）
-//   x15=半宽取右半、num151=-6 仅 377（:30190）。本仓 MinionProj.draw 半宽切片块
-//   （SW-FX6 2026-09-10 债③）与 :35047 逐参数对拍恒等——本测试把契约钉死
-//   （贴图 stub+recording-ctx;全宽回潮/锚漂移→红）。若用户现 build 仍见半图,
-//   差异面=旧版缺 SW-FX6 刀或另域（GL 呈现层）,须带 build 号复现（登记）。
+//   ★BJ612（2026-10-10）勘误翻案:旧论「帧内左右两半镜像对」系拿 1456 旧贴图
+//   （66×450/94×780）当 value139 钉契约=跨版错配。1.4.5.7 重制两贴图为每帧
+//   【左右两姿并排】（377=132×450 部署/携行两姿;308=188×780）,num481=W/2=66/94
+//   =一只完整蜘蛛（左姿部署 ai[2]==0,右姿携行 ai[2]==1）;实证=本机 1.4.5.8 XNB
+//   解码（237777−177=237600px;旧图=新图左半逐像素全等）。病根=绘制码忠实而
+//   贴图旧版 → 33px 断肢残蛛（用户复报物证 F3 盒 66×50 内残躯）。修复=贴图
+//   资产换真身（public/sprites/vanilla/ + terraria-assets/ + mobile 壳三处）,
+//   绘制码零改（halfW 动态取 sheet.width/2）。本测试钉新契约（recording-ctx;
+//   源半宽/锚/dest 逐值;回 33px 源或锚漂移→红）。
+//   vanilla 主绘（Main.cs:34950-34957 特例 + :35047 通用尾）：num481/=2 → 源
+//   半宽、num153/=2 → W/4、ai[2]==1 x15=num481 取右半、num151=-6 仅 377（:30190）。
 // 同域登记（不越界）：DD2 光环塔 688-690（AI_137,AURA_TOWER 既有）召唤入口 =
 //   3829-3831 不在 SENTRY_WAND_VIDS → 通用随从召唤路（非 PickSentryLandingSpot;
 //   与原版放置面对拍未定谳）——原任务书「闪电光环塔穿模」域,另刀处理。
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
@@ -37,6 +40,7 @@ import { MinionProj, pickSentryLandingSpot } from '../src/entities/MinionProj';
 import { setProjSpriteOverride } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
+import { lockSpiderMutation, unlockSpiderMutation, assertPristineDisk } from './spider-sentry-mutation-mutex';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 80, H = 130;
@@ -174,22 +178,22 @@ describe('BJ-C9-SP 症状① 377/308 半宽切片绘制契约（Main.cs:34950-34
     return ops;
   }
 
-  it('377：源(0,f×50,33,49)+锚(x+16.5,y+25)+dest(−16.5,−19)（num153/2+num151=−6 逐参数）', () => {
-    const ops = drawSentry(377, 1, 66, 450, 66, 50);
+  it('377：源(0,f×50,66,49)+锚(x+33,y+25)+dest(−33,−19)（132 宽真身 num153/2+num151=−6 逐参数）', () => {
+    const ops = drawSentry(377, 1, 132, 450, 66, 50);
     const tr = ops.find((o) => o.m === 'translate');
-    expect(tr?.a, '锚=盒左+半宽/2（num153=66/4=16.5）非盒心（通用路 cx=x+33 判别）').toEqual([116.5, 225]);
+    expect(tr?.a, '锚=盒左+W/4（num153=(132−66)/2+33=66→/2=33）非盒心（通用路 cx=x+33 判别）').toEqual([133, 225]);
     const draw = ops.find((o) => o.m === 'drawImage');
     expect(draw, '半宽切片出图（贴图 stub 在位）').toBeTruthy();
     const a = draw!.a as number[];
-    expect(a.slice(1, 5), '源矩形 (x15=0, y25=0, 33, 49)（num481/=2+底行 −1 shave）').toEqual([0, 0, 33, 49]);
-    expect(a.slice(5, 9), 'dest (−16.5, −(25−6), 33, 49)（origin=盒高/2+num151,num151=−6 :30190）')
-      .toEqual([-16.5, -19, 33, 49]);
+    expect(a.slice(1, 5), '源矩形 (x15=0, y25=0, 66, 49)（num481=132/2=完整蜘蛛+底行 −1 shave）').toEqual([0, 0, 66, 49]);
+    expect(a.slice(5, 9), 'dest (−33, −(25−6), 66, 49)（origin=盒高/2+num151,num151=−6 :30190）')
+      .toEqual([-33, -19, 66, 49]);
     expect(ops.some((o) => o.m === 'set:imageSmoothingEnabled' && o.a[0] === false)).toBe(true);
   });
 
-  it('377 携行态（ai[2]==1）x15=半宽取右半（:34954-34956）+朝向镜像 scale(-1,1)', () => {
-    const ops = drawSentry(377, 1, 66, 450, 66, 50);
-    setProjSpriteOverride(377, { width: 66, height: 450 } as never);
+  it('377 携行态（ai[2]==1）x15=半宽取右半姿（:34954-34956）+朝向镜像 scale(-1,1)', () => {
+    const ops = drawSentry(377, 1, 132, 450, 66, 50);
+    setProjSpriteOverride(377, { width: 132, height: 450 } as never);
     const g2 = new MinionProj(100, 200, 377, 26, 7.5, true, 0, false, () => null);
     (g2 as unknown as { w: number; h: number }).w = 66;
     (g2 as unknown as { h: number }).h = 50;
@@ -198,21 +202,21 @@ describe('BJ-C9-SP 症状① 377/308 半宽切片绘制契约（Main.cs:34950-34
     const { ctx, ops: ops2 } = recordingCtx();
     g2.draw({ ctx } as never);
     const draw2 = ops2.find((o) => o.m === 'drawImage')!;
-    expect((draw2.a as number[])[1], '携行源 X=右半列 33').toBe(33);
+    expect((draw2.a as number[])[1], '携行源 X=右半列 66（携行收腿姿）').toBe(66);
     // 朝向镜像面（facing=−1 → scale(−1,1)）
-    const opsL = drawSentry(377, -1, 66, 450, 66, 50);
+    const opsL = drawSentry(377, -1, 132, 450, 66, 50);
     expect(opsL.some((o) => o.m === 'scale' && (o.a as number[])[0] === -1), '朝左镜像').toBe(true);
     void ops;
   });
 
-  it('308：同切片式（94×780/10 帧=78,halfW=47,num151=0 → dest −37）——同构核', () => {
-    const ops = drawSentry(308, 1, 94, 780, 80, 74);
+  it('308：同切片式（188×780/10 帧=78,halfW=94,num151=0 → dest −47）——同构核', () => {
+    const ops = drawSentry(308, 1, 188, 780, 80, 74);
     const tr = ops.find((o) => o.m === 'translate');
-    expect(tr?.a).toEqual([100 + 23.5, 200 + 37]);
+    expect(tr?.a).toEqual([100 + 47, 200 + 37]);
     const draw = ops.find((o) => o.m === 'drawImage')!;
     const a = draw.a as number[];
-    expect(a.slice(1, 5)).toEqual([0, 0, 47, 77]);   // 94/2、780/10=78−1 shave
-    expect(a.slice(5, 9)).toEqual([-23.5, -37, 47, 77]);
+    expect(a.slice(1, 5)).toEqual([0, 0, 94, 77]);   // 188/2、780/10=78−1 shave
+    expect(a.slice(5, 9)).toEqual([-47, -37, 94, 77]);
   });
 });
 
@@ -223,6 +227,12 @@ describe.skipIf(process.env.SW_BJ_C9_MUT)('BJ-C9-SP E. 变异自证', () => {
   const writeFileSync = (f: string, s: string) => require('node:fs').writeFileSync(f, s);
   const { createHash } = require('node:crypto') as typeof import('node:crypto');
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+  // ★BJ612 事故共锁（2026-10-10）：本节 M9 与 BJ612 M-A 同变异 MinionProj.ts,vitest
+  //  多文件并行时 restore 窗交错曾把「含对方变异的盘面」当 PRISTINE 回写=变异泄漏
+  //  固化（isSolid2→isSolid 被 bake,真机扫描回退,tsc 捕获）。D 面持锁串行化+
+  //  锁内毒盘面哨兵（tests/spider-sentry-mutation-mutex.ts,npcdust-mutation-mutex 同族）。
+  beforeAll(() => { lockSpiderMutation(); });
+  afterAll(() => { unlockSpiderMutation(); });
 
   const spawnVitest = (filter: string) => spawnSync(
     'npx', ['vitest', 'run', 'tests/bj-c9-spiderqueen-sentry.test.ts', '--no-file-parallelism', '-t', filter], {
@@ -238,6 +248,7 @@ describe.skipIf(process.env.SW_BJ_C9_MUT)('BJ-C9-SP E. 变异自证', () => {
     }
     const PRISTINE = cur;
     expect(PRISTINE).toContain(trigger);
+    if (file === MINION) assertPristineDisk(PRISTINE);   // ★BJ612:毒盘面哨兵(并行变异污染拒绝捕获)
     try {
       writeFileSync(file, PRISTINE.replace(trigger, replacement));
       const r = spawnVitest(filter);

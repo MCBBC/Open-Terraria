@@ -12,6 +12,7 @@
 //  （UpdateGlitchAnimation :14-33，帧间随机 3t、首帧后停 15-120t，4/8/12 帧边界
 //  1/3 概率换 7 变体列）。
 import { WorldStore, type WorldMeta } from '../save/WorldStore';
+import { refreshStorageStatus } from '../save/StoragePersistence';   // ★BJ611 存储状态行
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
 import { parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
@@ -127,6 +128,13 @@ function copyFallback(text: string): void {
   ta.remove();
 }
 
+/** ★BJ611 状态行字节格式化（KB/MB/GB 自适应） */
+function fmtBytes(b: number): string {
+  if (b >= 1024 * 1024 * 1024) return `${(b / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+  if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)}MB`;
+  return `${Math.max(0, Math.round(b / 1024))}KB`;
+}
+
 /** 天顶帧图 7×16 帧（IconEverythingAnimated 434×960 → 62×60/帧，UIWorldListItem
  *  _worldIcon 原生贴图尺寸挂载）；同 UI_Bestiary 徽标的小型附加样式（CharSelect
  *  ensureStyle 之外本面板自有的两条例则，幂等注入） */
@@ -135,6 +143,9 @@ const WSEL_CSS = `
   width:62px; height:60px; image-rendering:pixelated; pointer-events:none; }
 .sw-vitem-mixed { position:absolute; left:12px; top:calc(50% + 11px);
   width:22px; height:18px; image-rendering:pixelated; pointer-events:none; }
+.sw-vsel-storage { text-align:center; font-size:12px; line-height:1.5; opacity:0.75;
+  padding:2px 8px 6px; user-select:none; pointer-events:none; }
+.sw-vsel-storage.sw-storage-warn { color:#ff7b72; opacity:1; }
 `;
 let wselStyled = false;
 function ensureWorldSelectStyle(): void {
@@ -164,6 +175,7 @@ export class WorldSelectPanel {
     this.panel.innerHTML = `
       <div class="sw-vsel-title sw-vbtn">${Lang.text('UI.SelectWorld')}</div>
       <div class="sw-vsel-panel sw-vpanel"><div class="sw-vsel-list"></div></div>
+      <div class="sw-vsel-storage"></div>
       <div class="sw-vsel-footer">
         <button class="sw-vbtn" data-act="back">${Lang.text('UI.Back')}</button>
         <button class="sw-vbtn" data-act="import">${Lang.text('Mods.SandboxWorld.WorldSelect.Import')}</button>
@@ -299,6 +311,28 @@ export class WorldSelectPanel {
     };
     this.iconTimers.add(timer);
     return cv;
+  }
+
+  /** ★BJ611 存储状态行（存档列表常驻小字标）：「已用 X / 配额 Y · 持久化:已授予/未授予」。
+   *  未授予或近配额 → 警示色（best-effort 存储在磁盘紧张时可被系统整批清理——BJ611
+   *  事故面知情）。estimate 采样口之一（启动/保存/本面板每次打开;
+   *  refreshStorageStatus 幂等,持久化位走会话一次的 persist() 申请结果）。 */
+  private async refreshStorageLine(): Promise<void> {
+    const el = this.panel.querySelector('.sw-vsel-storage') as HTMLElement | null;
+    if (!el) return;
+    const st = await refreshStorageStatus();
+    if (!el.isConnected) return;   // close/reload 竞态门（红队R3⑥ 同族）
+    if (!st) {
+      el.textContent = Lang.text('Mods.SandboxWorld.Storage.StatusUnknown');
+      el.classList.remove('sw-storage-warn');
+      return;
+    }
+    const quotaText = st.quota != null ? fmtBytes(st.quota) : Lang.text('Mods.SandboxWorld.Storage.QuotaUnknown');
+    const persistedText = Lang.text(st.persisted ? 'Mods.SandboxWorld.Storage.PersistGranted' : 'Mods.SandboxWorld.Storage.PersistNotGranted');
+    // ★摘除注（2026-10-10 用户明令）：quota 骤降「↓」角标随预警触发面一并摘除
+    // （M97+ quota 锚磁盘总容量,环比失效）——警示色只锚持久化位/静态压力面。
+    el.textContent = Lang.text('Mods.SandboxWorld.Storage.StatusLine', fmtBytes(st.usage), quotaText, persistedText);
+    el.classList.toggle('sw-storage-warn', !st.persisted || st.pressure !== 'none');
   }
 
   async reload() {
@@ -448,6 +482,8 @@ export class WorldSelectPanel {
       empty.textContent = Lang.text('Mods.SandboxWorld.WorldSelect.Empty');
       this.body.appendChild(empty);
     }
+    // ★BJ611：存储状态行随每次列表打开/语言切换/导入删除后刷新（estimate 采样口之一）
+    void this.refreshStorageLine();
   }
 
   close(fn?: () => void) {

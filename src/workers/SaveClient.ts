@@ -6,8 +6,8 @@
 // 大档 JSON.parse 搬后台;主线程回退路径与旧同步实现逐位一致。
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
-import type { SaveMeta } from '../save/serialize';   // ★BJ575:SaveData 随玩家段内联块单源化（buildPlayerSaveData）撤除
-import { saveGame, loadSave, buildPlayerSaveData } from '../save/SaveFile';   // ★BJ575:玩家段装配单源（buildPlayerSaveData）
+import type { SaveMeta, SaveData } from '../save/serialize';   // ★BJ575:SaveData 随玩家段内联块单源化（buildPlayerSaveData）撤除
+import { loadSave, buildPlayerSaveData, buildSaveGameParts } from '../save/SaveFile';   // ★BJ575:玩家段装配单源（buildPlayerSaveData）★BJ620:+buildSaveGameParts parts 形（saveGame 同步回退随之退役）
 import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
 import { weatherToSave } from '../world/weather/Weather';
@@ -34,11 +34,20 @@ export interface SaveHeaderInfo {
 }
 
 type SaveResponse =
-  | { type: 'saved'; id: number; json: string }
+  | { type: 'saved'; id: number; json: string; player: SaveData['player'] }
   | { type: 'imported'; id: number; json: string; meta: ImportedWorld['meta'] }
   | { type: 'inspected'; id: number; ok: boolean; meta?: SaveHeaderInfo['meta'] }
   | { type: 'exported-wld'; id: number; buf: ArrayBuffer }
   | { type: 'error'; id: number; message: string };
+
+/** ★BJ620 件6-F9（探针 scripts/_bj620-f9-parse-probe.mjs：8400×2400 档 json 21.4MB,
+ *  主线程 JSON.parse(json).player 实测 12.4ms>10ms 阈=落刀）：save 产物对——json 全文
+ *  + player 切片（serializeSave 变换后的稳定 id 磁盘形,与 json.player 全等）。
+ *  消费面=doSave 的 charStore.setState（原实现整档 JSON.parse 只为取 player 段）。 */
+export interface SaveParts {
+  json: string;
+  player: SaveData['player'];
+}
 
 export class SaveClient {
   private worker: Worker | null = null;
@@ -49,9 +58,17 @@ export class SaveClient {
   private chain: Promise<unknown> = Promise.resolve();
 
   /** 后台存档(串行):成功返回与 saveGame 逐位一致的 JSON;任何失败回退同步路径 */
-  save(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs'], events?: import('../save/serialize').SaveData['events'],
+  save(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
     // ★SW-FX11（2026-09-10）：四塔位/压力板位（与 saveGame 同参位）
-    pillarNpcs?: import('../save/serialize').SaveData['pillarNpcs'], pressurePlates?: import('../save/serialize').SaveData['pressurePlates']): Promise<string> {
+    pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): Promise<string> {
+    return this.saveWithPlayer(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates)
+      .then((r) => r.json);   // ★BJ620 件6-F9：旧签名薄壳（json 串;存量消费方零改动）
+  }
+
+  /** ★BJ620 件6-F9：parts 形存档（json+player 切片同链串行;worker 回传 data.player,
+   *  回退路径 buildSaveParts 同形——两条路径的 player 均与 json.player 全等）。 */
+  saveWithPlayer(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
+    pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): Promise<SaveParts> {
     const run = this.chain
       .catch(() => undefined) // 前序失败不阻塞本次
       .then(() => this.doSave(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates));
@@ -59,10 +76,10 @@ export class SaveClient {
     return run;
   }
 
-  private async doSave(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs'], events?: import('../save/serialize').SaveData['events'],
-    pillarNpcs?: import('../save/serialize').SaveData['pillarNpcs'], pressurePlates?: import('../save/serialize').SaveData['pressurePlates']): Promise<string> {
+  private async doSave(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
+    pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): Promise<SaveParts> {
     const w = this.worker;
-    if (this.broken || !w) return saveGame(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
+    if (this.broken || !w) return buildSaveGameParts(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
     const st = world.store;
     const id = this.nextId++;
     void townNpcs; // 附进 meta 消息（下方展开处）
@@ -145,8 +162,8 @@ export class SaveClient {
       coat: st.coat.buffer,   // 涂层四位（WF:1539-1552）
       explored: world.explored.buffer,   // 战争迷雾（0/1 位图；结构化克隆快照，不 transfer）
     };
-    const promise = new Promise<string>((resolve, reject) => {
-      this.pending.set(id, { resolve: (v) => resolve(v as string), reject });
+    const promise = new Promise<SaveParts>((resolve, reject) => {
+      this.pending.set(id, { resolve: (v) => resolve(v as SaveParts), reject });
       setTimeout(() => {
         const p = this.pending.get(id);
         if (p) { this.pending.delete(id); p.reject(new Error('save worker timeout')); }
@@ -157,12 +174,12 @@ export class SaveClient {
     } catch {
       const p = this.pending.get(id);
       if (p) { this.pending.delete(id); }
-      return saveGame(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
+      return buildSaveGameParts(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
     }
     try {
       return await promise;
     } catch {
-      return saveGame(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates); // 回退同步
+      return buildSaveGameParts(world, player, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates); // 回退同步
     }
   }
 
@@ -318,7 +335,7 @@ export class SaveClient {
         const p = this.pending.get(d.id);
         if (!p) return;
         this.pending.delete(d.id);
-        if (d.type === 'saved') p.resolve(d.json);
+        if (d.type === 'saved') p.resolve({ json: d.json, player: d.player });
         else if (d.type === 'imported') p.resolve({ json: d.json, meta: d.meta });
         else if (d.type === 'inspected') p.resolve({ ok: d.ok, meta: d.meta });
         else if (d.type === 'exported-wld') p.resolve({ buf: d.buf });

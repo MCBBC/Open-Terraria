@@ -1,7 +1,30 @@
-// 键值存储：优先 IndexedDB（容量数百 MB+，大地图存档不受 localStorage ~5MB 限制），
-// localStorage 作为小存档缓存与回退。async API，调用方 await。
+// 键值存储：IndexedDB 恒权威（容量数百 MB+，大地图存档不受 localStorage ~5MB 限制），
+// localStorage 仅读兜底（★BJ615 2026-10-10 单写方案：只读不写——双写时代历史副本
+// 自然陈化，新数据恒单写 IDB）。async API，调用方 await。
 // v2(2026-08-19 素材重制管线):新增 remaster blob store(素材包 png 持久化,
 // kv 字符串通道放不下);他标签页升级时让路(关闭+清缓存,下次调用重连)。
+//
+// ★BJ620 件5（BJ616 F12 处置·只文档化不迁键——物理迁键须逐键改写+双读过渡,历史值
+//  无法一次性转型=丢数据风险,用户「谨慎」纪律拍板不做）：【'kv' 单 store 键域注册表】
+//  IDB object store 无模式,四类值型/三套前缀系混装同店;新键型入域前先读本表防误用
+//  通道（字符串通道读 Blob=typeMismatch 判 null,恰是 probe F7 病根形态）：
+//  ┌ 值型 ────────────┬ 键域 ────────────────────────┬ 读写通道 ─────────────────────┬ 消费方 ─────────────┐
+//  ① string           │ sandboxworld.worlds.index     │ kvSet/kvSetIdb 写             │ WorldStore          │
+//    （JSON 文本/      │ sandboxworld.world.<id>       │ kvGet/kvGetIdb/kvGetIdbEx 读  │ （存档索引/数据/     │
+//    偏好小值）        │ sandboxworld.quicksave        │ kvHas 在判/kvDelete 双删      │   快存档）           │
+//                     │ sandboxworld.players.index    │                              │ CharacterStore      │
+//                     │ sandboxworld.player.<id>      │                              │ （角色索引/外观/     │
+//                     │ sandboxworld.playerstate.<id> │                              │   随身态）           │
+//                     │ sbw.*（UI 偏好散键）           │                              │ mainFlow            │
+//  ② Blob（zip）      │ rp:zip:<id>                   │ rpPutZip/rpGetZip/rpDeleteZip │ ResourcePackStore   │
+//                     │ mod:zip:<id>                  │ modPutZip/modGetZip/modDeleteZip │ ModLoader(mod 包) │
+//  ③ 结构化克隆值     │ sandboxworld.fsBackup.*       │ kvPutValue 写/kvGetUnknown 读 │ FsBackup（目录句柄;  │
+//    （非 string/Blob）│   （.dir=目录句柄）           │ （字符串通道读不出=typeMismatch）│ 字符串通道互不干扰） │
+//  ④ 行对象           │ （独立 store 'remaster'）      │ remasterPut/All/Get/Delete    │ 素材重制管线(PackStore)│
+//  └──────────────────┴───────────────────────────────┴───────────────────────────────┴─────────────────────┘
+//  迁移禁令与兜底：①②③同店混装是既成事实（零 schema 变更免 DB 版本升级=onblocked
+//  窗口免诱发）;kvGetIdbEx 对②③值按 typeMismatch 报因（不误报 keyMissing）;②zip 通道
+//  失败一次性 console.warn 留物证（下方 warnZipChannelOnce）。
 const DB_NAME = 'sandboxworld';
 const STORE = 'kv';
 const REMASTER_STORE = 'remaster';
@@ -144,11 +167,14 @@ export async function kvIdbStatus(key?: string): Promise<{ open: boolean; reason
     const db = await openDb();
     if (!key) return { open: true, keyExists: 'unknown' };
     try {
-      const keyExists = await new Promise<boolean>((resolve) => {
+      const keyExists = await new Promise<boolean>((resolve, reject) => {
         const tx = db.transaction(STORE, 'readonly');
         const req = tx.objectStore(STORE).getKey(key);
         req.onsuccess = () => resolve(req.result !== undefined);
-        req.onerror = () => resolve(false);
+        // ★BJ620 件4（BJ616 F13）：tx 失败旧实现 resolve(false)→「键不存在」——诊断
+        //  物证面失真（键在不在无从判定≠键不在,误导「存档数据缺失」归因）。改 reject
+        //  落入下方 catch → { open:true, reason, keyExists:'unknown' } 诚实档。
+        req.onerror = () => reject(tx.error ?? req.error ?? new Error('kvIdbStatus tx failed'));
       });
       return { open: true, keyExists };
     } catch (err) {
@@ -177,43 +203,29 @@ export async function kvSetIdb(key: string, value: string): Promise<'idb' | 'fai
   }
 }
 
-/** 读取（IndexedDB 优先——大存档只进 IDB，localStorage 可能留着旧的小存档；
-   读取顺序必须与写入优先级一致，否则会读到过期档） */
+/** 读取（IndexedDB 优先；★BJ615 单写后 LS 只剩双写时代历史副本——IDB miss 才兜底,
+ *  保证有 IDB 档时绝不读到更陈旧的 LS 副本） */
 export async function kvGet(key: string): Promise<string | null> {
   const idbVal = await kvGetIdb(key);
   if (idbVal !== null) return idbVal;
   return localStorage.getItem(key);
 }
 
-/** 写入：字符串 ≤ 2MB 双写 localStorage(读加速副本)+IndexedDB(权威),>2MB 只进 IDB。
- *  ★双写(2026-09-05 方案A):小记录此前只落 localStorage(唯一副本)——iOS ITP 7 天
- *  驱逐/壳浏览器单独清 localStorage 会让角色外观/随身态蒸发而 IDB 空闲;现 IDB
- *  恒为权威副本,localStorage 仅加速。localStorage 满溢不再影响数据安全
- *  (catch 后仍写 IDB,返回值如实反映落点)。 */
-export async function kvSet(key: string, value: string): Promise<'local' | 'idb' | 'fail'> {
-  let where: 'local' | 'idb' = 'idb';
-  if (value.length <= 2 * 1024 * 1024) {
-    try {
-      localStorage.setItem(key, value);
-      where = 'local';
-    } catch { /* 超限或被禁 → IDB 单写 */ }
-  }
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(value, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    return where;
-  } catch {
-    // IDB 也不可用:快路径已成功(≤2MB)算 'local',否则整体失败
-    return where === 'local' ? 'local' : 'fail';
-  }
+/** 写入：恒走 IndexedDB（★BJ615 2026-10-10 单写方案：摘 LS 写、留 LS 读兜底——
+ *  用户明令「存储链避免把任何信息写入 localStorage，第一优先 IndexedDB」）。
+ *  史注：2026-09-05 方案A 曾 ≤2MB 双写 localStorage（读加速副本）+IDB（权威），
+ *  解 iOS ITP 7 天驱逐/壳浏览器单独清 LS 的蒸发面;现 IDB 恒权威已由 BJ605（open
+ *  毒化修复+失败重试退避+blocked 超时）与 BJ611（persist 持久化申请+幽灵档扫描）
+ *  双面加固,LS ~5MB 全局上限+多一写路径多一分维护面不再值得。LS 兜底读保留：
+ *  双写时代 IDB 写失败过用户的旧副本仍可经 kvGet 救回（自然陈化）;kvDelete 双删
+ *  清残留。返回值 'idb'|'fail'（'local' 档随单写退役——全库普查零消费方,BJ605
+ *  写失败检测链只判 'fail',不受影响）。 */
+export async function kvSet(key: string, value: string): Promise<'idb' | 'fail'> {
+  return kvSetIdb(key, value);
 }
 
-/** 删除（两处都清） */
+/** 删除（两处都清：IDB + LS——★BJ615 单写后 LS 残留只来自双写时代旧副本,
+ *  一并清掉防 kvGet 兜底读到已删数据） */
 export async function kvDelete(key: string): Promise<void> {
   localStorage.removeItem(key);
   try {
@@ -232,6 +244,16 @@ export async function kvDelete(key: string): Promise<void> {
 // IDB object store 无模式,键上放 Blob 与字符串同存;kvGet/kvSet 只走字符串
 // 通道互不干扰。容量走 IndexedDB 配额(与 remaster blob store 同量级)。
 
+// ★BJ620 件5（BJ616 F12 附刀）：rp/mod zip 通道失败旧实现全静默吞（put 返 false/
+//  get 返 null）——资源包/mod 包装不上与存不进零物证。加一次性 console.warn 留物证
+//  （同会话只报首例,防驱逐态每装一个包刷一条;读 miss 走 onsuccess 判型不算失败）。
+let zipChannelWarned = false;
+function warnZipChannelOnce(op: string, key: string, e: unknown): void {
+  if (zipChannelWarned) return;
+  zipChannelWarned = true;
+  console.warn(`[kv] rp/mod zip 通道失败（一次性告警,后续静默）: ${op} ${key}`, e);
+}
+
 export async function rpPutZip(id: string, blob: Blob): Promise<boolean> {
   try {
     const db = await openDb();
@@ -242,7 +264,7 @@ export async function rpPutZip(id: string, blob: Blob): Promise<boolean> {
       tx.onerror = () => reject(tx.error);
     });
     return true;
-  } catch { return false; }
+  } catch (e) { warnZipChannelOnce('rpPutZip', `rp:zip:${id}`, e); return false; }
 }
 
 export async function rpGetZip(id: string): Promise<Blob | null> {
@@ -254,7 +276,7 @@ export async function rpGetZip(id: string): Promise<Blob | null> {
       req.onsuccess = () => resolve(req.result instanceof Blob ? req.result : null);
       req.onerror = () => resolve(null);
     });
-  } catch { return null; }
+  } catch (e) { warnZipChannelOnce('rpGetZip', `rp:zip:${id}`, e); return null; }
 }
 
 export async function rpDeleteZip(id: string): Promise<void> {
@@ -266,7 +288,7 @@ export async function rpDeleteZip(id: string): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
-  } catch { /* IDB 不可用忽略 */ }
+  } catch (e) { warnZipChannelOnce('rpDeleteZip', `rp:zip:${id}`, e); /* IDB 不可用忽略 */ }
 }
 
 // ---- mod 包 zip blob('mod:zip:' 前缀键;2026-10-04 mod loader,与 rp 同款零升级策略) ----
@@ -281,7 +303,7 @@ export async function modPutZip(id: string, blob: Blob): Promise<boolean> {
       tx.onerror = () => reject(tx.error);
     });
     return true;
-  } catch { return false; }
+  } catch (e) { warnZipChannelOnce('modPutZip', `mod:zip:${id}`, e); return false; }
 }
 
 export async function modGetZip(id: string): Promise<Blob | null> {
@@ -293,7 +315,7 @@ export async function modGetZip(id: string): Promise<Blob | null> {
       req.onsuccess = () => resolve(req.result instanceof Blob ? req.result : null);
       req.onerror = () => resolve(null);
     });
-  } catch { return null; }
+  } catch (e) { warnZipChannelOnce('modGetZip', `mod:zip:${id}`, e); return null; }
 }
 
 export async function modDeleteZip(id: string): Promise<void> {
@@ -305,7 +327,39 @@ export async function modDeleteZip(id: string): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
-  } catch { /* IDB 不可用忽略 */ }
+  } catch (e) { warnZipChannelOnce('modDeleteZip', `mod:zip:${id}`, e); /* IDB 不可用忽略 */ }
+}
+
+// ---- 结构化克隆通用值存取（★BJ614 File System Access 目录句柄持久化） ----
+// FileSystemDirectoryHandle 原生可结构化克隆但不是 string 也不是 Blob——kvSet/kvGet
+// 字符串通道读不出（kvGetIdbEx 会按 typeMismatch 判掉）。同一 'kv' store 键域隔离
+// （专用键 sandboxworld.fsBackup.*），零 schema 变更免 DB 版本升级（rp/mod zip 同策略）。
+
+/** 写入任意结构化克隆值（句柄等）。true=落库成功。 */
+export async function kvPutValue(key: string, value: unknown): Promise<boolean> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch { return false; }
+}
+
+/** 读取结构化克隆值；键不存在/库不可用/值非预期形状由调用方自行判型（返回 unknown）。 */
+export async function kvGetUnknown(key: string): Promise<unknown> {
+  try {
+    const db = await openDb();
+    return await new Promise<unknown>((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
 }
 
 // ---- remaster blob store(v2;素材包混合 sheet png 持久化) ----

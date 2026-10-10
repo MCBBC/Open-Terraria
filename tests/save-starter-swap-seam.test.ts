@@ -69,7 +69,9 @@ function attachFakeSaveWorker(client: SaveClient): Array<Record<string, unknown>
     const p = clientAny.pending.get(d.id);
     if (!p) return;
     clientAny.pending.delete(d.id);
-    if (d.type === 'saved') p.resolve(d.json);
+    // ★BJ620 件6-F9：'saved' 契约升级为 {json, player} 对（worker 回传 player 切片）——
+    // 本垫不消费 player,占位 undefined。
+    if (d.type === 'saved') p.resolve({ json: d.json, player: undefined });
     else p.reject(new Error('fake save worker error'));
   };
   const c = client as unknown as { worker: unknown; broken: boolean };

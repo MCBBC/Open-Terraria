@@ -1209,6 +1209,9 @@ export class BuffState {
   private honeyOffsetUnits = 0;
   /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费） */
   nebulaLifeLevel = 0;
+  /** ★五百四十二:mod DoT 减免乘区(Reaver defense=DoT×0.5;【赋值】语义=每 tick
+   *  mod 侧重写,缺省 1=无减免;ENV_DOTS 结算尾乘区——负 dot 减额回流 heal 对冲池) */
+  modDotMult = 1;
 
   /** UpdateStarvingState（Player.cs:11743-11768）：无任何 fed-state（26/206/207/332/
    *  333/334）在栏 → 授予 332（remix 组合 28800t 否则 18000t）。原版在 UpdateBuffs
@@ -1448,6 +1451,14 @@ export class BuffState {
     if (dots < 0 && this.nebulaLifeLevel > 0) {
       heal -= dots;
       dots = 0;
+    }
+    // ★五百四十二:mod DoT 减免乘区(C# CalamityPlayerLifeRegen :285-287 Reaver
+    //  defense helm=totalNegativeLifeRegen ×(1−0.5)——减额口径=乘后余量;
+    //  【赋值】语义=每 tick mod 侧重写,缺省 1=无减免)
+    if (dots < 0 && this.modDotMult < 1) {
+      const reduced = dots * this.modDotMult;
+      heal -= dots - reduced;
+      dots = reduced;
       this.dotChunkOut = 0;
     }
     // ---- 极饿 334 单通道流干（Player.cs :19255-19276 + :19458-19477）：

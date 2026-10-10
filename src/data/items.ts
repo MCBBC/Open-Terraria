@@ -1627,6 +1627,12 @@ for (const [vid, wt] of WIRE_TOOL_TABLE) {
   if (d) d.wireTool = wt;
 }
 
+/** 热栏图标电线计数物品面（ItemSlot.cs:2665-2674,★BJ613 2026-10-10）：热栏槽
+ *  （context 13=HotbarItem）持这些 vid 时图标右下恒绘背包 530 电线总数（替代
+ *  stack 计数——num22!=-1 压 stack 绘制支,stack==1 也绘,0 也绘）。原版字面
+ *  六件=509 红/850 蓝/851 绿/3612 黄扳手+3625 五彩扳手+3611 宏伟蓝图。 */
+export const WIRE_ICON_COUNTER_VIDS: ReadonlySet<number> = new Set([509, 850, 851, 3612, 3625, 3611]);
+
 
 
 

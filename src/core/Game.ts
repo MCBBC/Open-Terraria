@@ -156,7 +156,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -5969,8 +5969,12 @@ export class Game implements GameHooks {
    *  递减；mode1 = 进度变化刷新 160t，mode2 = 近场常显重灌） */
   invasionProgressDisplayLeft = 0;
   private invasionProgressSnapshot = 0;
-  /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
-  wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
+  /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环)——★BJ619（2026-10-10）：
+   *  缺省=只开红线（WiresUI.Settings.ToolMode 静态初始化 `= MultiToolMode.Red`,
+   *  WiresUI.cs:23——用户实报「默认应该只开启红线色环,而不是四个都开」）。
+   *  会话态不入档（vanilla static 字段同相;PlrImport/serialize/SaveFile 亲查无
+   *  wireToolMode 字段=.plr/存档链均不持久化,每会话按本缺省起） */
+  wireToolMode = TOOL_RED;
   /** 宏伟蓝图路由起点锚(tile 坐标)——★BJ569 起 = tickGrandDesignRoute 状态机独占
    *  （按下设锚,松开以裸鼠标格为终点执行 L 形;右键/CC/换手取消）。非空即引导期,
    *  预览消费 = Renderer.grandPreview 写入面。 */
@@ -13680,6 +13684,7 @@ export class Game implements GameHooks {
       const heal = vid === 3001 ? this.strangeBrewRoll() : f.healLife;
       p.hp = Math.min(p.maxHp, p.hp + heal);
       this.addDamageNumber(p.cx, p.y, heal, false, '#40E080');
+      runModHealItem(vid, heal);   // ★五百四十八:治疗物使用钩(jelly 光环族=GetSource_ItemUse 治疗物交互面)
       if (f.potion) this.applyPotionSickness(vid);            // :5284-5286
     }
     if (f.healMana) {
@@ -25972,7 +25977,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // ---- 引导期：释放臂=执行（:36368-36375 !channel → Kill → MassWireOperation）----
     if (this.grandAnchor) {
-      if (!inp.mouseHeld) this.executeGrandDesignRoute();
+      // ★BJ613 引导期朝向同步（AI_125 :36477-36481）：channel 期逐拍
+      //  `ChangeDir(Sign(velocity.X))`（vx=0 不翻）——L 形段序 dir=direction==1
+      //  （Wiring.cs:3259）的朝向源,曾缺=站定拖拽段序挂陈旧朝向。释放帧不同步
+      //  （原版 Kill 内 MassWireOperation 先于同拍 ChangeDir 消费,终向=上一引导拍）。
+      if (inp.mouseHeld) {
+        const vs = Math.sign(p.vx);
+        if (vs !== 0) p.facing = vs;
+      } else {
+        this.executeGrandDesignRoute();
+      }
       return;
     }
     // ---- 起手臂（controlUseItem 沿 = mouseDown 边沿;门面镜 :52680-52716）----
@@ -28171,9 +28185,41 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const needSupport = !isTrack && !isAlchPlace && !isLogicLamp && !isMultiDirPlace && !isAnchorTile
       && (def.solid || def.platform || def.framed);
+    // ★BJ622（2026-10-10 用户实报「计时器不能放在平台上」）：1×1 无锚档路由 = 原版
+    //  TileObject.CanPlace 全语义。定谳（1457 亲读）：计时器 144 记录
+    //  AnchorBottom=AnchorType.None（TileObjectData.cs:4399-4404,CopyFrom Style1x1
+    //  :4246-4251 → uccp=true）→ CustomPlace(144)=true（TileObjectData.cs:5017-5036,
+    //  Player.cs:40085 路由门）→ CanPlace（TileObject.cs:174）——:390
+    //  `anchorBottom.tileCount != 0` 整段跳过 → 【无任何锚定面】平台/桌面/实心/悬空
+    //  皆可放,门=占用(:357 tileCut∪BreakableWhenPlacing 豁免)+液体(LiquidPlace
+    //  :1853-1907,水 Allowed/岩浆 NotAllowed)。同族收编（同构 None 块,uccp=true）:
+    //  420 逻辑门(:4251-4256)/423 传感器(:4353-4358)/424 管线(:4358-4363)/
+    //  445 像素盒(:4363-4368)/429 灯泡(:4368-4373)——原版 TileFrame 无 144 支、
+    //  420/423/424/429/445 仅 CheckLogicTiles 帧对齐支(:45678,:86874 派发) →
+    //  悬空放置后无失撑杀=放置/幸存对称。旧 hasSupport 近似（底 SolidTile2∪墙,
+    //  framed 无邻接臂）严于原版=平台/桌面/悬空拒放（用户实报根因）。
+    //  路由判据 uccp===true（=CustomPlace 路由门本体,BJ602「uccp 只入库不设路由门」
+    //  债在本档位首笔偿付）：427 队伍平台 framed 但 uccp=false（原版 legacy
+    //  AssortedThings 路,:4445-4452）不吃本支仍走 hasSupport;19 平台非 framed 天然
+    //  不入面;419 灯 anchorBottom=AlternateTile 命中 exotic 豁免维持专用
+    //  placeLogicLampGate。⚠不收编面（BJ602④ 长尾登记,勿在本刀扩）：锚档 1×1
+    //  （hasSupport 对其是双向偏差——SolidWithTop 平台档 36/141/210/239/593/624/650/
+    //  656/700/701/703/135 严于原版拒平台,wall 松臂松于原版放贴墙）逐件翻案另批。
+    const anchorFree1x1 = anchorRec !== null
+      && anchorRec.w === 1 && anchorRec.h === 1 && anchorRec.uccp === true && !anchorRec.wall
+      && [anchorRec.anchorTop, anchorRec.anchorBottom, anchorRec.anchorLeft, anchorRec.anchorRight]
+        .every((a) => a === null || a.cnt === 0);
     // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
-    if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
-      ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
+    if (needSupport && !anchorCovered) {
+      if (anchorFree1x1) {
+        // 无锚档=自记录全语义消费（validateAnchors 即 CanPlace 移植:占用/液体/墙/
+        // 锚带;1×1 无吸附,点击格即占位左上,同原版 Origin(0,0) tileTarget 直判）
+        if (!validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;
+      } else if (!this.hasSupport(tx, ty, ow, oh, !!def.framed,
+        ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) {
+        return;
+      }
+    }
     if (isMultiDirPlace && this.multiDirBestDirAt(tx, ty) < 0) return;   // 全失锚=原版拒绝放置
     if (needSupport && anchorCovered
       // stylePlumb（M-3b）：placeStyle 子样式液体档（火把外 27 族水下/岩浆可放性，
@@ -43643,6 +43689,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (modAttackerVid >= MOD_NPC_ID_BASE) {
       dmg = runModModifyHurtByNpc(p, this, modAttackerVid, dmg, contactOnly);
     }
+    // ★五百四十六:mod 受伤增伤乘区(C# CalamityPlayerHitHurt :1550-1556
+    //  damageMult += 0.2 CrushingEgo/ + Demonshade enrage——乘区在 banner 前=
+    //  原文 SourceDamage 修正位;缺省 1=零扰动)
+    if (p.modTakenMult !== 1) {
+      dmg = Math.max(1, dmg * p.modTakenMult);
+    }
     const eq = p.equipStats;   // ★IIIII250 受击路径快照(4 直读;所读 armorPen/longInvince/starCloak/bees 全装备派生,panicTime/buff 受击写面不影响其值)
     // 本次受击生效冷却桶 id（★A2：环境站经瞬态通道注入 Lava/TileContactDamage 等；
     // General=-1 时与旧语义同）。Counter/TeamDamageShare/Retaliate 三集合读它——
@@ -52085,10 +52137,20 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;
     })();
-    // 宏伟蓝图拖拽预览:锚点已按下且鼠标悬停有效格时,把 L 路径交给渲染器
-    this.renderer.grandPreview = this.grandAnchor && hover
-      ? { from: this.grandAnchor, to: [hover.x, hover.y], mode: this.wireToolMode }
-      : null;
+    // 宏伟蓝图拖拽预览（★BJ613：终点=裸鼠标格——原版引导弹 651 Center 逐拍跟裸鼠标
+    //  （Projectile.cs:36389-36395 screenPosition+mouse),预览绘制读弹 Center
+    //  （Main.cs:32164-32169 point2=Center.ToTileCoordinates)——不吃智能光标 hover
+    //  目标（曾用 hover=智能光标态预览/放置两端点分歧,用户「画直线出 L 形」诱因面）;
+    //  facingRight 同放置段序源 Wiring.cs:3259 dir=direction==1）
+    this.renderer.grandPreview = (() => {
+      if (!this.grandAnchor) return null;
+      const [gx, gy] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
+      if (!this.world.store.inBounds(gx, gy)) return null;
+      return {
+        from: this.grandAnchor, to: [gx, gy] as [number, number],
+        facingRight: this.player.facing === 1, mode: this.wireToolMode,
+      };
+    })();
     // Main.netMode != 0 近似（DyeInitializer.cs:334 队伍发色剂单机恒白）
     this.renderer.netActive = !!this.net?.active;
     // module100 天空氛围：联机 = 服务器 AmbienceServer 独占掷族（本地调度门关）
