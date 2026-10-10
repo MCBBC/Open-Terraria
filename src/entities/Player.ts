@@ -1471,6 +1471,9 @@ export class Player extends Entity {
   /** ★四百九十五刀:mod 每 tick 条件伤加算面(Victide 水下系伤/条件系伤族;
    *  postUpdate 消费器【赋值】语义=非累积;damageMult 双支加算池) */
   modDmgAdd: Partial<Record<'melee' | 'ranged' | 'magic' | 'summon', number>> | null = null;
+  /** ★五百零三刀:mod 装备运气加算面(C# calamityBonusLuck=OldDie +0.2/MOAB
+   *  +0.05;聚合期重置+accEffect 加算——luckEquipmentBonus 现读面并入) */
+  modLuckBonus = 0;
   /** ★四百七十八刀:mod 百分比生命上限面(C# CalamityPlayer :2104-2122
    *  percentMaxLifeIncrease 家族——bloodPact 25/chalice 25/affliction 10/community
    *  2-10/shatteredCommunity 10;静态=accEffect 加算(聚合期重置),动态=community
@@ -2543,6 +2546,7 @@ export class Player extends Entity {
     this.modAccLight = null;   // ★三百六十五刀:每帧重置(accEffect 闭包重设)
     this.modIgnoreWater = false;   // ★四百七十二刀:同面重置(van 键形重设)
     this.modNoAggroTypes = null;   // ★四百七十四刀:同面重置(accEffect 整集重设)
+    this.modLuckBonus = 0;   // ★五百零三刀:同面重置(accEffect 加算重设)
     this.modMaxLifePct = 0;   // ★四百七十八刀:同面重置(accEffect 加算重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
@@ -11528,6 +11532,7 @@ export class Player extends Entity {
       if (Player.LUCK_HORSESHOE_VIDS.has(ITEM_DEFS[s.id]?.vid ?? -1)) horseshoe = true;
     }
     if (horseshoe) b += 0.05;                          // :12628-12631
+    b += this.modLuckBonus;   // ★五百零三:mod 装备运气加算面(OldDie/MOAB 族)
     // 四叶草三旗：背包 0-57 + 装备槽 armor[0-9]（UpdateEquips :12494-12530 双扫描）
     let clover = 0, wilted = 0, raven = 0;
     const see = (vid: number) => {
