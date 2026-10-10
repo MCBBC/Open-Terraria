@@ -1,6 +1,6 @@
-// ★juddersmooth（2026-10-10,?smooth=1 缺省关）——迟到帧半步混合（judder smoothing,
-//  「视觉欺骗」刀;用户本日实报定谳:「系统负载高时 110-120+ 浮动,高帧率也觉得卡;
-//  降到 60 仍 58-60 波动」）。
+// ★juddersmooth（2026-10-10,★已转正缺省开,?smooth=0 逃生门）——迟到帧半步混合
+//  （judder smoothing,「视觉欺骗」刀;用户本日实报定谳:「系统负载高时 110-120+ 浮动,
+//  高帧率也觉得卡;降到 60 仍 58-60 波动」;转正证据=实机体感「挺好的,效果还不错」）。
 //
 // 机理（定谳）:系统负载把回调交付推迟过 vsync 快照点（快照在网格点拍,迟到 1ms 即
 //  错过本槽）→ 该槽重复上屏旧帧,内容一步跳两格（运动步长序列 0,2）=高帧率下依然
@@ -11,12 +11,20 @@
 //  逐位直出。与 ghostblur 的区别:ghostblur=每帧恒定累积拖影（用户实测无体感收益）;
 //  本刀=仅跳槽瞬间单帧半影,瞬态平滑非累积模糊。
 //
-// 成本:每帧 1 次全屏拷贝（留真帧,跳槽不可预测必须常备）+跳槽帧 1 次全屏 α 绘。
+// 成本模型（★v2 lazy-arming,2026-10-10 Trace-20261010T112144 定谳后刀A）:静默期
+// 【零拷贝】（未武装=除 gap 判定外全旁路——首版每帧 1 次全屏捕获在 98% 饱和主线程
+// 上占 6.9%=本刀清除）;跳槽即武装（捕获常备,后续跳槽享混合）,末次跳槽后
+// JUDDER_ARM_HOLD_MS 静默自动退役。首次跳槽本身无 prev 不混合（吃一次原始跳,换
+// 稳态零成本——跳槽成簇出现,首跳原价、后续全平滑）。退役时 prevCanvas 清位
+// （陈旧真帧不得跨静默期混合=整屏旧画面鬼影）。
 // v1 整帧混合（挂 Game tick 的 ghostFrameEnd 同族收口点=render() 完整返回后,全路径
 // 唯一必经——GL/2D 回退/早退支全覆盖）:HUD 静态像素混合同值不重影,动画 HUD 位
 // 瞬态半影（登记;若体感有碍,v2 收窄混合域）。双画布乒乓（prevRaw=上一真帧/capture=
 // 本帧捕获槽）,混合发生在捕获【之后】→ prevRaw 恒为真帧,连续跳槽无拖影累积
 // （0.25^k 污染面消除）。
+// ★刀C 合并案证伪登记（2026-10-10）:「judder 捕获并入 c10e 合成省一次拷贝」不成立
+// ——judder 需含 HUD 的终帧,c10e 产物只有 sky+gl;省拷贝的真解=GL 直出呈现架构
+// （glCanvas 直接作显示层）,登记为架构级观察项不落本刀。
 // 断流卫生:gap>JUDDER_BREAK_MS（tab 切换/暂停恢复）或 > 周期×8（长停顿）=不连续,
 // 不混合只重捕获（长停顿后首帧混合=整屏鬼影,禁）。periodMs<=0（跟满档/未锚定）=
 // 完全旁路。canvas 尺寸 0=terra-blink 截断家族判例,禁操作。
@@ -32,6 +40,9 @@ export const JUDDER_BREAK_MS = 250;
 export const JUDDER_BLEND_ALPHA = 0.5;
 /** 长停顿上限:gap 超过周期×此值同断流处理（防暂停恢复首帧整屏鬼影）。 */
 export const JUDDER_MAX_GAP_RATIO = 8;
+/** ★v2 武装保持窗:末次跳槽后静默此毫秒自动退役（停捕获,零常态成本）。
+ *  2000ms:覆盖负载尖刺簇（misses 成簇,簇间隔 <2s 保持武装;2s 干净=尖刺过去）。 */
+export const JUDDER_ARM_HOLD_MS = 2000;
 
 /** 纯判定（node 可测）:本帧是否「跳槽混合」帧。period<=0=旁路;gap<0=首帧/异常=否;
  *  断流（>JUDDER_BREAK_MS）与长停顿（>周期×JUDDER_MAX_GAP_RATIO）=否。 */
@@ -41,12 +52,14 @@ export function judderMissFrame(gapMs: number, periodMs: number): boolean {
   return gapMs > periodMs * JUDDER_MISS_RATIO && gapMs <= periodMs * JUDDER_MAX_GAP_RATIO;
 }
 
-/** ?smooth=1 灰度旗（缺省关=完全旁路零改动,fail-closed 家族;node/测试环境恒关,
- *  测试经 judderSmoothSetForTest 显式开启）。转正审查后按用户惯例翻缺省。 */
+/** ★juddersmooth 旗（★2026-10-10 已转正缺省开;?smooth=0 逃生门=完全旁路逐位）。
+ *  ★转正（用户令;证据=Mac 实机体感验证「挺好的,效果还不错」+机械闸 8 测
+ *  （纯判定表/乒乓序列/断流卫生/resize/零拖影累积)+乒乓自毁真 bug 由闸抓出并修）。
+ *  node/测试环境恒关（测试经 judderSmoothSetForTest 显式控制）。 */
 export let judderSmooth = (() => {
   try {
     if (typeof location === 'undefined') return false;
-    return new URLSearchParams(location.search).get('smooth') === '1';
+    return new URLSearchParams(location.search).get('smooth') !== '0';
   } catch { return false; }
 })();
 /** 测试/对拍翻面（生产代码禁调——生产只读 URLSearchParams 一次） */
@@ -68,10 +81,14 @@ export function judderCanvasFactoryForTest(fn: (w: number, h: number) => AnyCanv
 let prevCanvas: AnyCanvas | null = null;
 let captureCanvas: AnyCanvas | null = null;
 let lastMs = -1;
+/** ★v2 武装态:false=静默期（除 gap 判定外全旁路,零拷贝）;true=捕获常备+跳槽混合。 */
+let armed = false;
+/** 末次跳槽时刻（武装保持窗计时基;断流不重置——静默 2s 退役与断流正交）。 */
+let lastMissMs = -Infinity;
 
 /** 测试/对拍状态复位（生产禁调）。 */
 export function judderResetForTest(): void {
-  prevCanvas = null; captureCanvas = null; lastMs = -1;
+  prevCanvas = null; captureCanvas = null; lastMs = -1; armed = false; lastMissMs = -Infinity;
 }
 
 /** 帧尾收口（Renderer.judderFrameEnd 转发;Game tick 在 render() 完整返回后调用——
@@ -83,6 +100,18 @@ export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: numb
   const now = nowMs ?? nowFn();
   const gap = lastMs >= 0 ? now - lastMs : -1;
   lastMs = now;
+  const miss = judderMissFrame(gap, periodMs);
+  // ★v2 lazy-arming:静默期（未武装）零拷贝;跳槽即武装;静默 JUDDER_ARM_HOLD_MS 退役。
+  if (miss) lastMissMs = now;
+  if (!armed) {
+    if (!miss) return;                                      // 静默期无跳槽:零拷贝旁路
+    armed = true;                                           // 首次跳槽:武装（本帧无 prev 不混合,开始捕获）
+    prevCanvas = null;                                      // 跨静默期的陈旧真帧作废（防整屏旧画面鬼影）
+  } else if (now - lastMissMs > JUDDER_ARM_HOLD_MS) {
+    armed = false;                                          // 静默 2s:退役
+    prevCanvas = null;                                      // 退役清位（同上）
+    return;
+  }
   const cv = ctx.canvas;
   const w = cv.width, h = cv.height;
   if (w === 0 || h === 0) return;                           // terra-blink 截断家族:禁操作
@@ -98,12 +127,12 @@ export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: numb
   }
   const capCtx = captureCanvas.getContext('2d') as Ctx2D | null;
   if (!capCtx) return;
-  const miss = prevCanvas !== null && judderMissFrame(gap, periodMs);
+  const blend = armed && prevCanvas !== null && miss;
   // ① 捕获本帧真值（混合【前】→ prevRaw 恒真帧,连续跳槽零拖影累积）
   capCtx.clearRect(0, 0, w, h);
   capCtx.drawImage(cv as CanvasImageSource, 0, 0);
-  // ② 跳槽混合:上一真帧半步叠上（globalAlpha 恢复由 try/finally 保证）
-  if (miss && prevCanvas) {
+  // ② 跳槽混合:上一真帧半步叠上（globalAlpha 恢复由真 ctx save/restore 保证）
+  if (blend) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);                     // 页绝对坐标（c10e 合成同族习语）
     ctx.globalAlpha = JUDDER_BLEND_ALPHA;

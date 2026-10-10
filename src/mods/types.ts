@@ -67,7 +67,9 @@ export interface ModItemContent {
   stats?: { def?: number; s?: 'h' | 'b' | 'l'; acc?: 0 | 1; van?: 1; life?: number;
     dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
     critMelee?: number; critRanged?: number; critMagic?: number;
-    moveMult?: number; endurance?: number };
+    moveMult?: number; endurance?: number;
+    /** ★四百八十二刀:盔甲绘制槽序号(套装匹配键;extract-armor 写入,3000+ 段) */
+    hs?: number; bs?: number; ls?: number; };
   /** P4:旅程研究所需献祭数(缺省=不可研究) */
   research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */

@@ -21,6 +21,13 @@ export abstract class Entity {
    *  消费点 Enemy.slimeAI 携物梯（:61309 气球弹跳 / :61932/:62124 落地嵌固回退） */
   collideY = false;
   dropThrough = false;
+  /** ★BJ608（2026-10-10）：平台嵌入驻留承接 opt-in（TileCollision.ts 越行块嵌入支
+   *  消费旗）。原版 TileCollision 平台承接唯一门=旧脚≤平台顶（Collision.cs:2364,
+   *  else 链其余三支 `!tileSolidTop` 排除平台）——嵌入盒永不承接=玩家下落穿平台后
+   *  绝不被抬回。唯一合法消费者=哨兵 spawn 嵌入驻留（Player.cs:50045-50063
+   *  PickSentryLandingSpot spawnY=(首实心行−1)×16−24,h=50 盒底嵌 10px;BJ-C9-SP
+   *  用户基准「平台可驻」=登记在案的故意分歧）——仅哨兵弹体置 true（MinionProj）。 */
+  embedPlatSnap = false;
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946 默认 水/岩浆 .5、
    *  蜂蜜 .25、微光 .375）。1=dry 不减速；Enemy 侧 npcLiquid.updateNpcLiquid 每 tick 写，
    *  moveAndCollide 入口缩 dx/dy（velocity 不变——同 Collision_MoveWhileWet :93986） */
@@ -96,8 +103,15 @@ function compact(list: Entity[]): void {
 }
 
 /** CanCutTiles 排除型（Projectile.cs:15407 尾支排除表）+ aiStyle 45/137/92/105/106
- *  族以 vanillaId 近似过滤——中央收口误砍的最小化护栏 */
-const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040]);
+ *  族以 vanillaId 近似过滤——中央收口误砍的最小化护栏。
+ *  ★BJ606-R（2026-10-10 用户实报「放置大范围破坏杂草」定谳）：137 闪电光环族
+ *  688/689/690 此前缺位——sentry=true/minion=false 弹不被 !m.minion 门拦，
+ *  CanCutTiles :15407 头支 `aiStyle != 137 …` 对 137 恒 false=原版零割；
+ *  旧 16×16 出生盒期割面每拍 ≤2 格无感，BJ606 场盒化（320×320）后=整盒
+ *  割草机（behavior-log 4464 拍 19 格药草带+6006 拍 27 格藤簇、EntityManager
+ *  探针 30 拍 13230 次上报/441 格=实锤）。45/92/105/106 族成员（237-239/243-245/
+ *  511-513/567/568/1007/1128）全系 minion 旗，上游 !m.minion 门已拦=不入本表。 */
+const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040, 688, 689, 690]);
 
 export class EntityManager {
   nextId = 1;

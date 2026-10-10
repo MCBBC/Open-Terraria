@@ -58,6 +58,30 @@ for (const p of files) {
   // 全系伤害 GetDamage<Generic> += 0.Xf
   const gd = [...body.matchAll(/GetDamage<GenericDamageClass>\(\) \+= (0?\.\d+)f/g)].map(m => Number(m[1]));
   if (gd.length) { rule.dmgAll = gd.reduce((a, b) => a + b, 0); hit = true; }
+  // ★四百八十四:系别伤害 GetDamage<XxxDamageClass> += 0.Xf
+  //  (Melee/Ranged/Magic;Throwing=Rogue 系=引擎无 rogue 伤害类,登记跳过)
+  for (const [pat, fld] of [
+    [/GetDamage<MeleeDamageClass>\(\) \+= (0?\.\d+)f/g, 'dmgMelee'],
+    [/GetDamage<RangedDamageClass>\(\) \+= (0?\.\d+)f/g, 'dmgRanged'],
+    [/GetDamage<MagicDamageClass>\(\) \+= (0?\.\d+)f/g, 'dmgMagic'],
+  ]) {
+    const xs = [...body.matchAll(pat)].map(m => Number(m[1]));
+    if (xs.length) { rule[fld] = (rule[fld] ?? 0) + xs.reduce((a, b) => a + b, 0); hit = true; }
+  }
+  if (/GetDamage<ThrowingDamageClass>\(\)/.test(body)) skipped++;   // rogue 系=登记(不产行)
+  // 系别暴击 GetCritChance<Xxx> += N
+  for (const [pat, fld] of [
+    [/GetCritChance<MeleeDamageClass>\(\) \+= (\d+)/g, 'critMelee'],
+    [/GetCritChance<RangedDamageClass>\(\) \+= (\d+)/g, 'critRanged'],
+    [/GetCritChance<MagicDamageClass>\(\) \+= (\d+)/g, 'critMagic'],
+    [/GetCritChance<GenericDamageClass>\(\) \+= (\d+)/g, 'critAll'],
+  ]) {
+    const xs = [...body.matchAll(pat)].map(m => Number(m[1]));
+    if (xs.length) { rule[fld] = (rule[fld] ?? 0) + xs.reduce((a, b) => a + b, 0); hit = true; }
+  }
+  // endurance += 0.Xf(减伤)
+  const en = [...body.matchAll(/endurance \+= (0?\.\d+)f/g)].map(m => Number(m[1]));
+  if (en.length) { rule.endurance = en.reduce((a, b) => a + b, 0); hit = true; }
   // 暴击 meleeCrit/rangedCrit/magicCrit/ThrowCrit += N
   for (const [crit, fld] of [['meleeCrit', 'critMelee'], ['rangedCrit', 'critRanged'], ['magicCrit', 'critMagic']]) {
     const cm = [...body.matchAll(new RegExp(`player\\\\.?.?${crit} \\+= (\\\\d+)`, 'g'))];
@@ -71,5 +95,17 @@ for (const p of files) {
   if (!hit) { skipped++; continue; }
   rows.push(rule); stat++;
 }
-writeFileSync(OUT, JSON.stringify(rows, null, 1));
-console.log(`acc-boosts: ${stat} 件规则(纯 stat 面)/skipped ${skipped}(非 stat 行为)`);
+// ★四百八十四:手植字段反哺(percentMaxLifeIncrease 在 CalamityPlayer 非物品类,
+//  提取器不可推导——重产时回填;四百七十八刀通道)。
+//  HAND_OMIT=与 main.js 手注 accEffect 重复注册的项(fail-fast 面,行全并入手注)。
+const HAND_OVERRIDES = {
+  chalice_of_the_blood_god: { maxLifePct: 25 },
+};
+const HAND_OMIT = new Set(['shattered_community', 'flesh_totem', 'mana_polarizer', 'moonstone_crown']);
+for (const r of rows) {
+  const ov = HAND_OVERRIDES[r.item];
+  if (ov) Object.assign(r, ov);
+}
+const kept = rows.filter((r) => !HAND_OMIT.has(r.item));
+writeFileSync(OUT, JSON.stringify(kept, null, 1));
+console.log(`acc-boosts: ${kept.length} 件规则(纯 stat 面;omit ${rows.length - kept.length} 手注重复)/skipped ${skipped}(非 stat 行为)`);

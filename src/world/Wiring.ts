@@ -723,6 +723,18 @@ export class Wiring {
     return true;
   }
 
+  /** KillWire 族与 KillActuator 成功剪断面钩（★BJ607,2026-10-10）——WorldGen.cs:58505
+   *  KillActuator / :58605 KillWire / :58635 KillWire2 / :58665 KillWire3 / :58695
+   *  KillWire4 五函数同面：SoundEngine.PlaySound(SoundID.Dig=0, i*16, j*16)
+   *  （SoundID.cs:22 Dig=0）→ 清位 → `Main.netMode != 1` 侧
+   *  Item.NewItem(GetItemSource_FromTileBreak(i,j), i*16, j*16, 16, 16, 530)
+   *  （四通道全掉 530=普通线——1457 无彩线物品,853-855=蓝/黄压板/折扣卡,idNames
+   *  亲读;KillActuator 掉 849 致动器）×1 + 5×Dust.NewDust((i*16,j*16),16,16,50)。
+   *  本仓四条剪线路（剪线钳 510 / 五彩扳手 cutter 位 / 宏伟蓝图 massWireOperation
+   *  cutter 支——Wiring.cs:3412-3424 同入 KillWire*）统一经此单源触发;vid 由本域
+   *  钉值、Game 侧经 VI() 查 key。null（测试/未装配）=静默清位（旧相位）。 */
+  wireKillFx?: (x: number, y: number, vid: number) => void;
+
   /** 移除某色线;不存在返回 false */
   killWire(x: number, y: number, colorBit: number): boolean {
     const st = this.st;
@@ -730,6 +742,7 @@ export class Wiring {
     const i = st.idx(x, y);
     if (!(st.wire[i] & colorBit)) return false;
     st.setWire(x, y, st.wire[i] & ~colorBit);
+    this.wireKillFx?.(x, y, 530);
     return true;
   }
 
@@ -748,6 +761,7 @@ export class Wiring {
     const i = st.idx(x, y);
     if (!(st.wire[i] & TileStore.WIRE_ACTUATOR)) return false;
     st.setWire(x, y, st.wire[i] & ~TileStore.WIRE_ACTUATOR);
+    this.wireKillFx?.(x, y, 849);
     return true;
   }
 

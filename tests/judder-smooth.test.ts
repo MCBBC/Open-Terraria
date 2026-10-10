@@ -1,4 +1,5 @@
-// ★juddersmooth 机械闸(2026-10-10,?smooth=1 灰度)——迟到帧半步混合(judder smoothing):
+// ★juddersmooth 机械闸(2026-10-10,★已转正缺省开,?smooth=0 逃生门)——迟到帧半步混合
+//  (judder smoothing):
 //  纯判定表+帧尾序列账面(乒乓捕获/跳槽混合/断流卫生/resize 重建)。node 桩画布
 //  (canvasFactory 注入缝);生产 canvasEnv.mkCanvas。像素级等价由实机探针兜底
 //  (liquid-render-prepare-cache 先例)。
@@ -72,8 +73,15 @@ describe('judderMissFrame 纯判定表', () => {
   });
 });
 
-describe('judderFrameEnd 帧尾序列(桩画布账面)', () => {
-  it('旗关=完全旁路(零调用)', () => {
+describe('judderFrameEnd 帧尾序列(v2 lazy-arming;桩画布账面)', () => {
+  afterEach(() => {
+    judderSmoothSetForTest(false);
+    judderResetForTest();
+    judderClockForTest(() => performance.now());
+    judderCanvasFactoryForTest(() => null);
+  });
+
+  it('逃生门(?smooth=0)=完全旁路(零调用)', () => {
     judderSmoothSetForTest(false);
     const { ctx, calls } = recordingCtx();
     judderFrameEnd(ctx, P120, 100);
@@ -87,71 +95,85 @@ describe('judderFrameEnd 帧尾序列(桩画布账面)', () => {
     expect(calls).toEqual([]);
   });
 
-  it('序列:首帧只捕获→正常帧只捕获(乒乓换槽)→跳槽帧混合(α=0.5,源=上一真帧槽)→捕获在前混合在后', () => {
-    judderSmoothSetForTest(true);
-    const calls: string[] = [];
-    judderCanvasFactoryForTest(stubFactory(calls));
-    const { ctx } = recordingCtx(64, 64, calls);            // 单一时间线(捕获+混合同数组)
-    let t = 0;
-    judderFrameEnd(ctx, P120, t);            // 首帧:gap=-1 只捕获(c1)
-    expect(calls).toEqual(['cap:c1']);
-    t += 8;                                   // 正常帧(gap 8<12.5):只捕获(c2,乒乓换槽)
-    judderFrameEnd(ctx, P120, t);
-    expect(calls).toEqual(['cap:c1', 'cap:c2']);
-    t += 17;                                  // 跳槽帧(gap 17>12.5):先捕获(c1,乒乓回位)再混合(c2@α.5)
-    judderFrameEnd(ctx, P120, t);
-    expect(calls).toEqual(['cap:c1', 'cap:c2', 'cap:c1', 'save', 'setTransform', 'draw:c2@a0.50', 'restore']);
-    // α 复位由真 ctx 的 save/restore 保证（桩 restore 不回写值,序列末 restore 即证）
-  });
-
-  it('断流(gap>250ms)=不混合只捕获;长停顿(gap>周期×8)同;连续跳槽无拖影累积(每次混合源=上一真帧)', () => {
+  it('★v2 静默期零拷贝:无跳槽帧=全旁路(首版每帧捕获 6.9% 税清除)', () => {
     judderSmoothSetForTest(true);
     const calls: string[] = [];
     judderCanvasFactoryForTest(stubFactory(calls));
     const { ctx } = recordingCtx(64, 64, calls);
     let t = 0;
-    judderFrameEnd(ctx, P120, t);            // c1
-    t += 300;                                 // 断流
-    judderFrameEnd(ctx, P120, t);            // c2(无混合)
-    t += 8;
-    judderFrameEnd(ctx, P120, t);            // c1
-    t += 17;
-    judderFrameEnd(ctx, P120, t);            // 跳槽:混 c2
-    t += 17;
-    judderFrameEnd(ctx, P120, t);            // 连续跳槽:混 c1(上一真帧,非混合帧)
-    const blends = calls.filter((c) => c.startsWith('draw:'));
-    expect(blends).toEqual(['draw:c1@a0.50', 'draw:c2@a0.50']);   // 源轮转=真帧乒乓(无 0.25^k 累积)
+    for (let i = 0; i < 10; i++) { judderFrameEnd(ctx, P120, t); t += 8; }   // 全程 gap 8 无跳槽
+    expect(calls).toEqual([]);                                               // 零捕获零混合
   });
 
-  it('resize(canvas 尺寸变化)=整组重建,首帧不混合只捕获', () => {
+  it('★v2 首跳武装:跳槽帧开始捕获但无混合(首跳吃原价,后续享平滑)', () => {
+    judderSmoothSetForTest(true);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    judderFrameEnd(ctx, P120, t);            // 静默:零调用
+    expect(calls).toEqual([]);
+    t += 17;                                  // 首次跳槽:武装+捕获 c1,无混合
+    judderFrameEnd(ctx, P120, t);
+    expect(calls).toEqual(['cap:c1']);
+    t += 8;                                   // 武装期正常帧:继续捕获(备 prev),无混合
+    judderFrameEnd(ctx, P120, t);
+    expect(calls).toEqual(['cap:c1', 'cap:c2']);
+    t += 17;                                  // 武装期跳槽:混合(c2=上一真帧@α.5)+捕获 c1
+    judderFrameEnd(ctx, P120, t);
+    expect(calls).toEqual(['cap:c1', 'cap:c2', 'cap:c1', 'save', 'setTransform', 'draw:c2@a0.50', 'restore']);
+  });
+
+  it('★v2 静默退役:末次跳槽 2s 后停捕获+prev 清位(再跳槽重新武装不混陈旧帧)', () => {
+    judderSmoothSetForTest(true);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 垫底帧(首帧恒 gap=-1 不触发):静默零调用
+    expect(calls).toEqual([]);
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:武装 cap c1
+    t += 8; judderFrameEnd(ctx, P120, t);    // cap c2
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽混 c2
+    const afterMiss = t;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 武装保持(捕获)
+    t = afterMiss + 2001; judderFrameEnd(ctx, P120, t);   // 2s 静默:退役
+    const mark = calls.length;                     // 事件总数(混入 blend 不致帧界切歪)
+    t += 8; judderFrameEnd(ctx, P120, t);    // 退役后:零调用
+    expect(calls.slice(mark)).toEqual([]);
+    t += 17; judderFrameEnd(ctx, P120, t);   // 再跳槽:重新武装,prev 已清=只捕获无混合
+    expect(calls.slice(mark)).toEqual(['cap:c1']);   // 乒乓槽复用(退役不清槽组,只清 prev)
+    expect(calls.filter((c) => c.startsWith('draw:')).length).toBe(1);   // 仍只第一次跳槽混合过
+  });
+
+  it('断流(gap>250ms):不混合;武装保持;退役计时不被断流重置', () => {
+    judderSmoothSetForTest(true);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 垫底帧:静默零调用
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:武装 cap c1
+    t += 300; judderFrameEnd(ctx, P120, t);  // 断流:miss=false,武装保持,捕获 c2
+    expect(calls).toEqual(['cap:c1', 'cap:c2']);
+    t += 1800; judderFrameEnd(ctx, P120, t); // 距末次跳槽 2.1s:退役(此帧 gap 1800 断流无跳槽)
+    const mark = calls.length;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 退役后零调用
+    expect(calls.slice(mark)).toEqual([]);
+  });
+
+  it('resize(武装期 canvas 尺寸变化)=槽组重建,当帧无混合', () => {
     judderSmoothSetForTest(true);
     const calls: string[] = [];
     judderCanvasFactoryForTest(stubFactory(calls));
     const { ctx, canv } = recordingCtx(64, 64, calls);
     let t = 0;
-    judderFrameEnd(ctx, P120, t);            // c1
-    t += 8;
-    judderFrameEnd(ctx, P120, t);            // c2
+    t += 8; judderFrameEnd(ctx, P120, t);    // 垫底帧:静默零调用
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:武装 cap c1
+    t += 8; judderFrameEnd(ctx, P120, t);    // cap c2
     canv.width = 128;                         // resize
-    t += 17;                                  // gap 够跳槽,但重建后无真帧
-    judderFrameEnd(ctx, P120, t);
-    expect(calls.filter((c) => c.startsWith('draw:'))).toEqual([]);   // 重建帧零混合
-    expect(calls[calls.length - 1]).toBe('cap:c3');                             // 新画布组捕获
-  });
-
-  it('跳槽混合不污染捕获(混合发生在捕获后):跳槽帧的捕获内容=本帧真值(混合前的 visible)', () => {
-    judderSmoothSetForTest(true);
-    const calls: string[] = [];
-    judderCanvasFactoryForTest(stubFactory(calls));
-    const { ctx } = recordingCtx(64, 64, calls);
-    let t = 0;
-    judderFrameEnd(ctx, P120, t);
-    t += 8;
-    judderFrameEnd(ctx, P120, t);
-    t += 17;
-    judderFrameEnd(ctx, P120, t);
-    // 跳槽帧的调用序:捕获(cap:c1,本帧真值)先于混合(draw:c2@0.5)——prevRaw 恒真帧的机制保证
-    expect(calls.indexOf('draw:c2@a0.50')).toBeGreaterThan(calls.lastIndexOf('cap:c1'));
-    expect(JUDDER_BLEND_ALPHA).toBe(0.5);
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽但重建:无混合,捕获 c3
+    expect(calls.filter((c) => c.includes('@0.50'))).toEqual([]);
+    expect(calls[calls.length - 1]).toBe('cap:c3');
   });
 });

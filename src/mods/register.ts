@@ -363,6 +363,11 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     }
     if (spec.stats) registerModStats(it.stableId, {
       def: spec.stats.def, s: spec.stats.s, acc: spec.stats.acc, van: spec.stats.van, life: spec.stats.life,
+      // ★四百八十二刀:盔甲绘制槽序号(套装匹配键 hs|bs|ls——extract-armor 提取器
+      //  写入 content;mod 甲自编号 3000+ 段,与原版 1-100 无碰撞)
+      ...(spec.stats.hs !== undefined ? { hs: spec.stats.hs } : {}),
+      ...(spec.stats.bs !== undefined ? { bs: spec.stats.bs } : {}),
+      ...(spec.stats.ls !== undefined ? { ls: spec.stats.ls } : {}),
       // ★六十六刀:UpdateEquip 加法面透传(读侧=聚合器配饰环,余段登记)
       dmgMelee: spec.stats.dmgMelee, dmgRanged: spec.stats.dmgRanged, dmgMagic: spec.stats.dmgMagic, dmgAll: spec.stats.dmgAll,
       critMelee: spec.stats.critMelee, critRanged: spec.stats.critRanged, critMagic: spec.stats.critMagic,

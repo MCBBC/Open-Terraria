@@ -6241,6 +6241,11 @@ export class MinionProj extends Entity {
     this.damage = damage;
     this.knockback = knockback;
     this.sentry = sentry;
+    // ★BJ608（2026-10-10）：哨兵=平台嵌入驻留承接 opt-in（TileCollision 越行块嵌入支
+    //  消费旗,Entity.embedPlatSnap 注）——PickSentryLandingSpot spawnY=(首实心行−1)×16−24
+    //  对 377 h=50 盒底嵌平台格 10px,出膛 vy15（Player.cs:48662-48684）需嵌入支拉回
+    //  平台顶（BJ-C9-SP 用户基准）。非哨兵体恒 false=原版语义（嵌入盒永不承接）。
+    if (sentry) this.embedPlatSnap = true;
     this.slot = slot;
     this.ground = ground;
     this.life = sentry ? 60 * 600 : Infinity; // 哨兵 10 分钟（哨兵类默认时限近似）
@@ -6878,6 +6883,19 @@ export class MinionProj extends Entity {
         // 放置点本体（落地扫描+定速下坠）由 pickSentryLandingSpot 导出函数承载,
         // Game 接线见落点清单。
         this.vx = 0; this.vy = 0;
+      } else if (AURA_TOWER.has(this.projId) && this.auraSide > 0) {
+        // ★BJ606-R（2026-10-10 用户实报「放置时乱浮空」定谳）：688-690 场盒化后
+        //  =锚定冻结——vanilla 事实链：①AI_137 首拍场盒 Center=地面接触点（嵌入,
+        //  Projectile.cs:70016）;②HandleMovement aiStyle 137 专支=Y-ONLY 且 X 恒
+        //  不动（:17764-17776/:17845-17857 vector.X 零写位）;③TileCollision 四向
+        //  分类【无嵌入支】（Collision.cs:2409-2455 嵌入盒=零校正零旗）→ 嵌入场盒
+        //  恒不触发碰撞=钉在探测锚;④:18097 flag 位只吃真碰撞拍（嵌入盒恒不触,
+        //  position+=velocity 不达）。旧走通用重力段（vy+=0.2+moveAndCollide+
+        //  unembedPass 嵌入抬升）=行走体管线——坡/台阶地形触发 unembed/步面抬升
+        //  （EntityManager 探针实录:坡面 1 拍 +160px 瞬移 1440→1280）=乱浮空根因。
+        //  探测失败（auraSide=0,无地面支 :65948 position.Y+=16 早退）不入本支=照
+        //  通用重力下坠（vanilla 次拍起 tileCollide=true 同相）。
+        this.vx = 0; this.vy = 0;
       } else if (this.projId !== 1025) {
         // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
         // ★BJ516⑤：1025 恒不入通用哨兵重力段——AI_197 自有垂直面（吸顶升/衰减）,
@@ -7308,6 +7326,51 @@ export class MinionProj extends Entity {
                   kb: 0,                    // 光环场伤零击退（同敌怪环 :5355 kx=ky=0）
                 };
               });
+          }
+          // ★BJ606-R（2026-10-10 用户实报「攻击也不对」定谳补）：AI_137 放电视觉尘
+          //  （:70034-70056 1:1;1456 :65945 区块同式）——①场缘电弧（每拍 4 试×1/6 掷）：
+          //  随机单位向 |x|<0.12 跳过 → 目标点 = 场心 + 单位向×((H-40)/2)（=伤害域缘
+          //  side/2-20 同径,:70040）→ 目标格非实心 ∧ AI_137_CanHit 通过 → 尘 226
+          //  钉点（perfect=NewDustDirect 定点语义）,速度 = (塔锚-尘位).SafeNormalize
+          //  （塔锚 vector2=(盒顶心X, 盒顶+40) :70031-70032）,scale 0.7/fadeIn 1/
+          //  noGravity/noLight。②塔柱火花（非携行 4 试×1/10 掷,:70047-70056）:
+          //  盒 (盒顶心X-8, 盒顶+40, 16, H/2-40) 内尘 226,速度 ×0.6+(0,-2),scale 0.7。
+          //  `:70051 for(k<0)` = 原版死循环（必死支不可达判谳,不移植）。此前攻击面
+          //  仅伤害+声（C-3472）无任何视觉=「放电无电弧」观感缺失。
+          if (game.spawnDust) {
+            const anchorX = this.cx, anchorY = this.y + 40;   // vector2（盒顶心, 盒顶+40）
+            const arcR = (side - 40) / 2;                     // (height-num4)/2（:70040）
+            for (let j = 0; j < 4; j++) {
+              if (Math.random() >= 1 / 6) continue;           // Next(6)!=0 → skip（1/6 通过）
+              const ang = Math.random() * Math.PI * 2;
+              const ux = Math.cos(ang), uy = Math.sin(ang);
+              if (Math.abs(ux) < 0.12) continue;              // :70042
+              const tx2 = this.cx + ux * arcR;                // :70040 目标点（场缘同径）
+              const ty2 = fieldCy + uy * arcR;
+              const txc = Math.floor(tx2 / 16), tyc = Math.floor(ty2 / 16);
+              if (game.world.store.isSolid(txc, tyc)) continue;   // :70040 SolidTile 门
+              if (!lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, tx2, ty2)) continue;
+              const d = game.spawnDust(0, 0, 0, 0, 226, 0, 0, 100, null, 0.7, true, true);
+              if (d) {
+                d.x = tx2; d.y = ty2;
+                const vl = Math.hypot(anchorX - tx2, anchorY - ty2) || 1;
+                d.vx = (anchorX - tx2) / vl; d.vy = (anchorY - ty2) / vl;   // SafeNormalize(Zero)
+                d.fadeIn = 1; d.scale = 0.7;
+                d.noGravity = true; d.noLight = true;
+              }
+            }
+            if (!this.carriedByBackpack) {
+              for (let l = 0; l < 4; l++) {
+                if (Math.random() >= 1 / 10) continue;        // Next(10)==0 → 1/10 通过
+                const d2 = game.spawnDust(this.cx - 8, this.y + 40, 16,
+                  Math.max(1, Math.floor(this.auraSide / 2 - 40)), 226, 0, 0, 100, null, 0.7, true);
+                if (d2) {
+                  d2.vx = d2.vx * 0.6; d2.vy = d2.vy * 0.6 - 2;   // :70052-70053 ×0.6 + (0,-2)
+                  d2.scale = 0.7;
+                  d2.noGravity = true; d2.noLight = true;
+                }
+              }
+            }
           }
           // ★台账批 C-3472（2026-08-31）：电弧声密度对齐原版 ai[0] 循环（AI_137
           //  :69955-69979：ai[0]++ %num3==0 时扫场，场内有敌才 PlayTrackedSound——

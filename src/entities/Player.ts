@@ -1466,6 +1466,11 @@ export class Player extends Entity {
   /** ★四百七十四刀:mod 配饰无仇恨型集(AquaticEmblem 鲨鱼族 5 型=C#
    *  npcTypeNoAggro[type] 置位;聚合期重置+accEffect 整集重设——Enemy 索敌门并集) */
   modNoAggroTypes: Set<number> | null = null;
+  /** ★四百八十二刀:mod 套装旗名集(ArmorSetBonus.modFlags;聚合期整集重设=卸甲即清) */
+  __swSetFlags: Set<string> | null = null;
+  /** ★四百九十五刀:mod 每 tick 条件伤加算面(Victide 水下系伤/条件系伤族;
+   *  postUpdate 消费器【赋值】语义=非累积;damageMult 双支加算池) */
+  modDmgAdd: Partial<Record<'melee' | 'ranged' | 'magic' | 'summon', number>> | null = null;
   /** ★四百七十八刀:mod 百分比生命上限面(C# CalamityPlayer :2104-2122
    *  percentMaxLifeIncrease 家族——bloodPact 25/chalice 25/affliction 10/community
    *  2-10/shatteredCommunity 10;静态=accEffect 加算(聚合期重置),动态=community
@@ -3415,9 +3420,11 @@ export class Player extends Entity {
       if (sb.dmgMelee) dmgMelee += sb.dmgMelee;
       if (sb.dmgRanged) dmgRanged += sb.dmgRanged;
       if (sb.dmgMagic) dmgMagic += sb.dmgMagic;
+      if (sb.dmgAll) { dmgMelee += sb.dmgAll; dmgRanged += sb.dmgAll; dmgMagic += sb.dmgAll; }   // ★四百八十二:GenericDamageClass 全系
       if (sb.critMelee) critMelee += sb.critMelee;
       if (sb.critRanged) critRanged += sb.critRanged;
       if (sb.critMagic) critMagic += sb.critMagic;
+      if (sb.critAll) { critMelee += sb.critAll; critRanged += sb.critAll; critMagic += sb.critAll; }
       if (sb.noKnockback) noKnockback = true;
       if (sb.runAccMul) setRunAccMul = sb.runAccMul;      // 暗影套 :26195-26201
       if (sb.maxRunMul) setMaxRunMul = sb.maxRunMul;
@@ -3452,6 +3459,8 @@ export class Player extends Entity {
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
+    // ★四百八十二刀:mod 套装旗面整集重设(main.js postUpdate 消费;替换式=卸甲即清)
+    this.__swSetFlags = setMatch?.modFlags ? new Set(setMatch.modFlags) : null;
     // 女猎手 T2/T3 套装旗标（setHuntressT2,Player.cs:16119/:16149——爆炸机关弹
     // 694-696 的 Oiled 门,StatusNPC :10786;由 MinionProj 经 ctx 传入 applyProjStatus）
     let huntressT2 = false;
@@ -3516,6 +3525,17 @@ export class Player extends Entity {
     //  moveMult 加算 + dash/van 面整缺=acc-boosts moveMult 域静默丢弃)。
     //  C# moveSpeed 加算语义 → move += ;dash 取 max(同 fx.dashType 链)。
     move += modAcc.moveMult;
+    // ★四百八十四刀:modAcc 系别伤/暴击/减伤加算消费面(C# GetDamage<系>/
+    //  GetCritChance<系>/endurance 加算;与 accfx 链同池)
+    if (modAcc.dmgMelee) dmgMelee += modAcc.dmgMelee;
+    if (modAcc.dmgRanged) dmgRanged += modAcc.dmgRanged;
+    if (modAcc.dmgMagic) dmgMagic += modAcc.dmgMagic;
+    if (modAcc.dmgAll) { dmgMelee += modAcc.dmgAll; dmgRanged += modAcc.dmgAll; dmgMagic += modAcc.dmgAll; }
+    if (modAcc.critMelee) critMelee += modAcc.critMelee;
+    if (modAcc.critRanged) critRanged += modAcc.critRanged;
+    if (modAcc.critMagic) critMagic += modAcc.critMagic;
+    if (modAcc.critAll) { critMelee += modAcc.critAll; critRanged += modAcc.critAll; critMagic += modAcc.critAll; }
+    if (modAcc.endurance) setEndurance += modAcc.endurance;
     if (modAcc.dash) dash = Math.max(dash, modAcc.dash);
     if (modAcc.van) {
       const f = modAcc.van;
@@ -3729,6 +3749,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
       m += this.buffs.hungerDamage;      // 饥饿/极饿全系 -5/-10%（:11565+/:11588+，含召唤）
+      m += this.modDmgAdd?.summon ?? 0;   // ★四百九十五:mod 每 tick 条件伤加算池
       m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
       if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:25715）
       // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
@@ -3739,6 +3760,7 @@ export class Player extends Entity {
       return m;
     }
     let m = 1 + (kind === 'melee' ? (st.dmgMelee ?? 0) : kind === 'ranged' ? (st.dmgRanged ?? 0) : (st.dmgMagic ?? 0));   // ★BJ175 桩面 ?? 防御（缺省 0）
+    m += this.modDmgAdd?.[kind] ?? 0;   // ★四百九十五:mod 每 tick 条件伤加算池(Victide 水下族)
     if (kind === 'magic') {
       m += this.buffs.magicDmgBonus;            // MagicPower +20%（:9669）
       m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10003/:25616）

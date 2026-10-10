@@ -29,6 +29,11 @@ export interface Body {
   collideY?: boolean;
   /** 平台单向碰撞：仅当开启且下落时与平台碰撞 */
   dropThrough?: boolean;
+  /** ★BJ608（2026-10-10）：平台嵌入驻留承接 opt-in——true 时越行块嵌入支
+   *  （prevB∈(顶,顶+16]→拉回平台顶）才对本体生效。原版 TileCollision 无此承接
+   *  （Collision.cs:2364 门+else 链 !tileSolidTop 三排=嵌入盒永不承接），唯一合法
+   *  消费者=哨兵 spawn 嵌入驻留（Player.cs:50045-50063+MinionProj 置位面）。 */
+  embedPlatSnap?: boolean;
   /** slopeEmbedRevert 回退锚:moveAndCollide 入口处记录的本 tick 移动前位置 */
   px?: number; py?: number;
   /** Projectile.tileCollide 镜像（AI 逐态直写,如蜘蛛 :62843-62860 穿平台/归位飞行
@@ -522,14 +527,23 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     //  prevBottom ≤ top+1 = 从上来主门;prevBottom ∈ (top, top+16] = 放置嵌入驻留
     //  面（PickSentryLandingSpot spawnY=i×16−24 对 h=50 的 377 盒底嵌平台格 10px,
     //  原版哨兵对准平台可驻=用户实报基准;横移入格（vx≠0 行走穿越）不在此 door——
-    //  嵌入驻留仅 spawn 面可达,登记:原版本支嵌入解析源码位未钉,行为基准=用户实报）。
+    //  ★BJ608（2026-10-10）嵌入支收窄为 opt-in（b.embedPlatSnap,仅哨兵置位）——
+    //  嵌入解析源码位今已钉死:原版 TileCollision 平台承接【唯一】入口=Collision.cs:2364
+    //  `vector3.Y + Height <= vector4.Y`（旧脚≤平台顶）,else 链其余三支全部
+    //  `!Main.tileSolidTop` 排除平台（:2435/:2449/:2464）→ 嵌入盒（旧脚已低于平台顶）
+    //  永不承接=下落体穿平台后绝不被抬回。旧嵌入支对一切下落体生效:十周年派对区
+    //  行272长平台+x3930 竖列平台（行273/274/275,16px 间距）下,短按 S 穿落释放即被
+    //  连拉抬回原平台（真机拍序 feet 4394→4384→4368→4352 三拍梯爬;用户实报
+    //  「下落到下一格平台时被强制抬升到上面平台」=BJ608 两件套物证复现）。哨兵
+    //  spawn 面保留（Player.cs:50045-50063 spawnY=(首实心行−1)×16−24 嵌 10px+出膛
+    //  vy15,BJ-C9-SP 端到端基准）。
     if (dir > 0 && !b.dropThrough) {
       for (let tyy = bottomRowOld; tyy < ty; tyy++) {
         for (let tx = x0; tx <= x1; tx++) {
           if (!world.store.isPlatform(tx, tyy)) continue;
           const prevB = (b.y + b.h) - dy;
           const topP = tyy * TILE;
-          if (prevB > topP + 1 && !(prevB > topP && prevB <= topP + TILE)) continue;
+          if (prevB > topP + 1 && !(b.embedPlatSnap === true && prevB > topP && prevB <= topP + TILE)) continue;
           if (topP < bestTop) bestTop = topP;
         }
       }

@@ -365,16 +365,18 @@ describe('BJ467-⑤：AI_137 场盒钳 T3 档（num=14/num5=8 → [128,224];旧�
     expect(sideOf(mT3)).toBe(256);                     // ★主判别:128×2（旧 128 必红）
   });
 
-  it('5b 露天（净空 >224）：非 T3 钳 160→场盒 320;T3 保留净空原值（>320）', () => {
+  it('5b 露天（净空 >224）：非 T3 钳 160→场盒 320;T3 保留净空原值（>320）——★BJ606 注：ty 取【出生拍】盒心 tile（原版 origin=Center 在 localAI[0] 首拍盒改写前采样,Projectile.cs:69987;BJ606 盒本体化后实体 cy=地面点,读稳态 cy 不再是净空基准）', () => {
     const { hooks, player } = makeGame();
     const mNo = place(hooks, player);
+    const tyNo = Math.floor((mNo as unknown as { cy: number }).cy / 16);   // 出生拍盒心 tile（盒改写前）
     tickUntil(mNo, hooks, () => sideOf(mNo) > 0);
     expect(sideOf(mNo)).toBe(320);                     // 旧档=160×2（回归锚）
     const { hooks: hooks2, player: player2 } = makeGame();
     setMonk(player2, true, true);
     const mT3 = place(hooks2, player2);
+    const ty = Math.floor((mT3 as unknown as { cy: number }).cy / 16);     // 出生拍盒心 tile
+    expect(ty, '出生位同列同几何（夹具自证）').toBe(tyNo);
     tickUntil(mT3, hooks2, () => sideOf(mT3) > 0);
-    const ty = Math.floor((mT3 as unknown as { cy: number }).cy / 16);
     const raw = 1600 - (ty - 11) * 16;                 // 无天花板 → origin-num-1（:65956-58）
     expect(sideOf(mT3)).toBe(2 * Math.min(224, Math.max(128, raw)));   // ★主判别:T3 钳 [128,224]（旧 ≤320 必红）
     expect(sideOf(mT3)).toBeGreaterThan(320);

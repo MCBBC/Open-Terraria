@@ -68,6 +68,11 @@ export interface ArmorSetBonus {
   onHitPetal?: boolean;      // 山铜（奥利哈刚）全套（:215-221 Orichalcum→onHitPetal;
                              // Player.cs:6963-6985 OnHit 花瓣弹 221,petalTimer=20 共享窗）
   onHitDodge?: boolean;      // 神圣套/神圣召唤套（:228-236 Hallowed·HallowedSummoner→
+  /** ★四百八十二刀:mod 套装面扩展——dmgAll/critAll(C# GenericDamageClass 全系
+   *  同值) + modFlags(旗名集→Player.__swSetFlags 整集重设,main.js postUpdate 消费) */
+  dmgAll?: number;
+  critAll?: number;
+  modFlags?: string[];
                              // onHitDodge;Player.cs:6937-6940 shadowDodgeTimer==0 门 →
                              // AddBuff(59,1800) 幻影闪避——Hurt 第四闪避支来源链）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
@@ -508,3 +513,10 @@ export const DD2_PIECE_FX: Record<number, Partial<ArmorSetBonus>> = {
   3881: { meleeSpd: 0.2, critMelee: 5, dmgMinion: 0.2 },        // :13333
   3882: { dmgMinion: 0.2, critMelee: 20, move: 0.3 },           // :13338
 };
+
+/** ★四百八十二刀:mod 套装注册面(sw.armorSet;键=内部物品 id 三元组,
+ *  与 ARMOR_SET_BONUSES 既有 lane 同消费面——activeArmorSetMatch/sb 投影)。
+ *  全零字段条目照写(modFlags-only 套=sb 投影为 null 但 setMatch 命中面仍挂旗)。 */
+export function registerModArmorSet(hInternal: number, bInternal: number, lInternal: number, bonus: ArmorSetBonus): void {
+  ARMOR_SET_BONUSES[`${hInternal}|${bInternal}|${lInternal}`] = bonus;
+}

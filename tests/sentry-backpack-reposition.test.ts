@@ -101,9 +101,10 @@ describe('① heavySlingReposition 落位几何（Projectile.cs:70096-70470）',
     expect(s.cx).toBe(player.cx);                          // vector2 零
     expect(s.cy).toBe(player.cy - (21 + 20 + 16));         // h=32 → height/2=16（int 除）
   });
-  it('aiStyle 137（688 闪电光环）：Center = MountedCenter（:70129）', () => {
+  it('aiStyle 137（688 闪电光环）：Center = MountedCenter（:70129）——★BJ606 注：原版首拍支序=携行钉（flag 支）→localAI[0] 场盒化（base.Center=center,Projectile.cs:70016）覆盖一拍（稳态拍 2+ 携行钉回）;本测试取稳态（BJ606 盒本体化后首拍=地面点为 vanilla 同构）', () => {
     const { player, hooks } = makeHooks();
     const s = carry(688, player, hooks);
+    s.fixedUpdate(1 / 60, hooks);   // 拍 2：稳态（首拍场盒化已被携行钉覆盖回）
     expect(s.cx).toBe(player.cx);
     expect(s.cy).toBe(player.cy);
   });

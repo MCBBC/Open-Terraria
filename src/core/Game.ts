@@ -156,7 +156,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -7370,6 +7370,13 @@ export class Game implements GameHooks {
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
     this.wiring = new Wiring(w.store);
     this.wiring.worldSurface = w.groundLevel;
+    // ★BJ607（2026-10-10）：KillWire*/KillActuator 剪断面（WorldGen.cs:58505/:58605/
+    //  :58635/:58665/:58695 五函数 1:1）——音 Dig(SoundID.cs:22 =0,带坐标衰减) +
+    //  掉落 NewItem(i*16,j*16,16,16,530/849) 矩形载=格【中心】(+8,+8,Item.cs:49657
+    //  同仙人掌 BJ338 判例;数量恒 1;四通道全掉 530=普通线,无彩线物品) + 5×Dust 50。
+    //  MP 面无单设门：本仓剪线走本机有编辑权侧（netCanEditTile），掉落经 spawnDrop
+    //  → 既有 msg21 SyncItem 基建（netDropSweep 上行/房主下行,与挖掘掉落同链）。
+    this.wiring.wireKillFx = (kx: number, ky: number, vid: number) => this.wireKillDropFx(kx, ky, vid);
     // HitSwitch 触发音（Wiring.cs 每支 PlaySound(28)=Mech;R8-51 接触触发不再静音。
     // ★2026-09-03 F5 音效录制定罪：曾播 'tink'(SoundID 21)——原版 HitSwitch 七支
     //   分支(:267/:272/:285/:310/:323/:339/:375)全播 SoundID 28=Mech_0,坐标准同
@@ -25729,6 +25736,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#497811', 10, 1.8);
   }
 
+  /** ★BJ607（2026-10-10）KillWire 族/KillActuator 剪断面实体——构造器注入
+   *  wiring.wireKillFx 的闭包体（独立方法体=判别测试窄视图可驱动）。原版五函数
+   *  （WorldGen.cs:58505/:58605/:58635/:58665/:58695）函数体内三件套：
+   *  ① Item.NewItem(GetItemSource_FromTileBreak(i,j), i*16, j*16, 16, 16, 530/849)
+   *    ——矩形载=格【中心】(+8,+8)（Item.cs:49657,同仙人掌 BJ338 判例）,数量恒 1,
+   *    四通道全掉 530=普通线（1457 无彩线物品;853-855=蓝/黄压板/折扣卡）,致动器掉
+   *    849——spawnDrop 中心锚同义,世界掉落物(掉地可拾取)非直进背包;
+   *  ② SoundEngine.PlaySound(SoundID.Dig=0, i*16, j*16)（SoundID.cs:22 Dig=0,
+   *    带坐标衰减）;
+   *  ③ 5×Dust.NewDust((i*16,j*16),16,16,50)（无特殊行为档,通用老化链）。
+   *  每成功剪一格恰触发一次（useWireTool 单格面=1 次;宏伟蓝图 massWireOperation
+   *  cutter 支=逐格,与原版 Wiring.cs:3412-3424 逐格 KillWire* 同相）。 */
+  private wireKillDropFx(kx: number, ky: number, vid: number): void {
+    this.spawnDrop(kx * TILE + 8, ky * TILE + 8, VI(vid), 1);
+    this.sfx.play('dig', 1, kx * TILE, ky * TILE);
+    for (let k = 0; k < 5; k++) this.vanillaDust.spawn(kx * TILE, ky * TILE, 16, 16, 50);
+  }
+
   /** 电路工具使用(原版 Player.cs:30289-30444 ItemCheck_UseWiringTools) */
   private useWireTool(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
@@ -25767,6 +25792,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // 剪线钳:按优先级移除一件(致动器>黄>绿>蓝>红)
+    // ★BJ607:音/尘/掉落全数入 Wiring.wireKillFx（KillWire* 函数体内 1:1,每成功
+    //  剪一格恰一响 Dig,原按锄无坐标近似声已并入钩）
     if (wt.cutter) {
       const done =
         w.killActuator(tx, ty) ||
@@ -25774,7 +25801,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         w.killWire(tx, ty, TileStore.WIRE_GREEN) ||
         w.killWire(tx, ty, TileStore.WIRE_BLUE) ||
         w.killWire(tx, ty, TileStore.WIRE_RED);
-      if (done) { this.player.useTime = 5; this.sfx.play('dig'); }
+      if (done) this.player.useTime = 5;
       return;
     }
     // 宏伟蓝图不走本分派——★BJ569（2026-10-08）整面迁 tickGrandDesignRoute
@@ -25787,13 +25814,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 五彩扳手:单点,用当前模式
     const mode = (itemDef.vid ?? -1) === 3625 ? this.wireToolMode : (wt.place ?? 0);
     if (mode & TOOL_CUTTER) {
+      // ★BJ607:音/尘/掉落入 wireKillFx（同剪线钳支注）
       const done =
         (mode & TOOL_ACTUATOR ? w.killActuator(tx, ty) : false) ||
         (mode & TOOL_YELLOW ? w.killWire(tx, ty, TileStore.WIRE_YELLOW) : false) ||
         (mode & TOOL_GREEN ? w.killWire(tx, ty, TileStore.WIRE_GREEN) : false) ||
         (mode & TOOL_BLUE ? w.killWire(tx, ty, TileStore.WIRE_BLUE) : false) ||
         (mode & TOOL_RED ? w.killWire(tx, ty, TileStore.WIRE_RED) : false);
-      if (done) { this.player.useTime = 5; this.sfx.play('dig'); }
+      if (done) this.player.useTime = 5;
       return;
     }
     // 扳手/致动器放置
@@ -25984,9 +26012,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!(mode & TOOL_CUTTER)) {
       if (res.wire > 0) inv.remove(VI_ID(530), res.wire);
       if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
     }
-    this.sfx.play('place');
-    this.cb.onInventoryChanged();
+    // ★BJ607:cutter 支音/尘/掉落已入 wireKillFx（每成功 KillWire* 一响 Dig,
+    //  Wiring.cs:3412-3424 逐格同面）——旧无条件 'place' 在剪线模式=原版无此声,摘。
   }
 
   /** ★BJ569 CanDoWireStuffHere（Player.cs:47327-47350 1:1——MassWireOperationStep
@@ -30172,6 +30202,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (type === TILE_BY_KEY['v_597_pylons']) {
       // 传送晶塔 597（Player.cs:31707-31747）：开全屏地图选其它晶塔传送
       this.usePylon(tx, ty);
+    } else if (TILE_DEFS[type]?.key?.startsWith('mod_') && runModTileInteract(type, tx, ty, this)) {
+      // ★四百八十三刀:mod tile 右键面（C# ModTile.RightClick 同位——AstralBeacon
+      //  星核仪式/SCalAltar 终末坛等 tile 召唤通道;返回 true=消费 rightDown
+      //  （⟺tileInteractionHappened 置位面）;零注册零成本头门）
+      this.input.rightDown = false;
     }
     // ---- 合成站尾臂（★SW-FX30 刀⑦ 2026-09-11：Player.cs:33541-33547 逐字——格交互
     // 分派完（switch 全臂之后、active 块内末位）查合成站资格：命中 → flag2=true
@@ -43693,6 +43728,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (p.cactusSet) {                                // :31644-56 独立定值支
           hurtReflector(mainMasterMode(this.world) ? 45 : mainExpertMode(this.world) ? 30 : 15);
         }
+        // ★四百八十八刀:mod 承伤面 thorns 链(C# CalamityPlayerHitHurt
+        //  crawCarapace/baroclaw=荆棘反伤+推离+debuff;同面 flag3/contactOnly 门)
+        runModPlayerThorns(p, this, attacker, dmg);
         if (canParry) {
           grantCollisionAttackImmunity(p, (eq.longInvince ? 60 : 30));   // :31667（★IIIII250 走受击路径快照 eq;测试桩玩家无 equipStats 时 damagePlayer 早于本行不达）
           p.parryDamageBuff = true;                       // AddBuff(198,300)（:31668）

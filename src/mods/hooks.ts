@@ -84,6 +84,11 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
 /** 配饰效果累加器（computeEquipStats return 合并;闭包直改） */
 export interface ModAccAccumulator {
   def: number; mana: number; life: number; moveMult: number; fish: number; wingTime: number;
+  /** ★四百八十四刀:系别伤害/暴击/减伤加算面(aggro 环同链:C# GetDamage<系>/
+   *  GetCritChance<系>/endurance;聚合显式合并) */
+  dmgMelee?: number; dmgRanged?: number; dmgMagic?: number; dmgAll?: number;
+  critMelee?: number; critRanged?: number; critMagic?: number; critAll?: number;
+  endurance?: number;
   /** ★四百七十二刀:冲刺授予档(原版 dashType 1=忍者/盾冲族;聚合取 max) */
   dash?: number;
   /** ★四百七十二刀:vanilla-accfx 键形旗包(dashType/blackBelt/noFallDmg/accFlipper/
@@ -97,12 +102,25 @@ export function registerModAccEffect(vid: number, fn: (player: Player, game: unk
   accEffects.set(vid, fn);
 }
 
+/** ★四百八十六刀:accEffect 追加链(同 vid 多闭包——数据族批(hand 先/后)与
+ *  专属闭包的结构性并置;C# 单 UpdateAccessory 的本仓拆分面)。追加闭包在
+ *  主闭包后依注册序执行,累加器共享(加算语义天然可链)。 */
+const accEffectExtras = new Map<number, Array<(player: Player, game: unknown, acc: ModAccAccumulator) => void>>();
+
+export function appendModAccEffect(vid: number, fn: (player: Player, game: unknown, acc: ModAccAccumulator) => void): void {
+  const list = accEffectExtras.get(vid);
+  if (list) list.push(fn);
+  else accEffectExtras.set(vid, [fn]);
+}
+
 export function runModAccEffect(vid: number, player: Player, game: unknown, acc: ModAccAccumulator): boolean {
-  if (accEffects.size === 0 || vid < MOD_ITEM_STABLE_BASE) return false;
+  const extras = accEffectExtras.get(vid);
+  if (accEffects.size === 0 && !extras) return false;
+  if (vid < MOD_ITEM_STABLE_BASE) return false;
   const fn = accEffects.get(vid);
-  if (!fn) return false;
-  fn(player, game, acc);
-  return true;
+  if (fn) fn(player, game, acc);
+  if (extras) for (const x of extras) x(player, game, acc);
+  return !!(fn || extras);
 }
 
 /** ★三百三十九刀:mod 手持效果钩(C# HoldItem 同位;手持该物品每 tick 调) */
@@ -321,6 +339,41 @@ export function runModOnHitAny(e: Enemy, game: unknown, ctx: {
   for (const fn of onHitAny.values()) {
     try { fn({ e, game, ...ctx }); } catch (err) { console.warn('[mod-hooks] onHitAny', err); }
   }
+}
+
+/** ★四百八十八刀:mod 承伤面 thorns 链(C# CalamityPlayerHitHurt crawCarapace/
+ *  baroclaw=玩家接触受击反伤+推离+debuff;damagePlayer 荆棘面尾派发——
+ *  contactOnly+非 pvp+flag3 免疫门同 thorns 面;零注册零成本)。 */
+type ModPlayerThornsFn = (ctx: { p: unknown; game: unknown; e: Enemy; dmg: number }) => void;
+const playerThorns = new Map<string, ModPlayerThornsFn>();
+
+export function registerModPlayerThorns(modId: string, fn: ModPlayerThornsFn): void {
+  if (playerThorns.has(modId)) throw new Error(`[mod-hooks] playerThorns 重复注册: ${modId}`);
+  playerThorns.set(modId, fn);
+}
+
+export function runModPlayerThorns(p: unknown, game: unknown, e: Enemy, dmg: number): void {
+  if (playerThorns.size === 0) return;
+  for (const fn of playerThorns.values()) {
+    try { fn({ p, game, e, dmg }); } catch (err) { console.warn('[mod-hooks] playerThorns', err); }
+  }
+}
+
+/** ★四百八十三刀:mod tile 右键面(C# ModTile.RightClick 同位——AstralBeacon
+ *  星核仪式/SCalAltar 终末坛等 tile 右键召唤通道;interactAt 尾臂派发,
+ *  返回 true=消费 rightDown;零注册零成本)。 */
+const tileInteract = new Map<number, (tx: number, ty: number, game: unknown) => boolean>();
+
+export function registerModTileInteract(tileInternal: number, fn: (tx: number, ty: number, game: unknown) => boolean): void {
+  if (tileInteract.has(tileInternal)) throw new Error(`[mod-hooks] tileInteract 重复注册: ${tileInternal}`);
+  tileInteract.set(tileInternal, fn);
+}
+
+export function runModTileInteract(tileInternal: number, tx: number, ty: number, game: unknown): boolean {
+  if (tileInteract.size === 0) return false;
+  const fn = tileInteract.get(tileInternal);
+  if (!fn) return false;
+  try { return !!fn(tx, ty, game); } catch (err) { console.warn('[mod-hooks] tileInteract', err); return false; }
 }
 
 /** B6:mod 音效通道(原版 SoundID 键;mod 音频装载=余段)。sink=main.ts 注入
@@ -662,6 +715,7 @@ export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
   itemCanUse.clear();
   accEffects.clear();
+  accEffectExtras.clear();
   holdItems.clear();
   _resetModMusicForTests();
   modBiomeMusicList.length = 0;
@@ -671,6 +725,8 @@ export function _resetModHooksForTests(): void {
   modBuffNpcTicks.clear();
   onHitNpc.clear();
   onHitAny.clear();
+  tileInteract.clear();
+  playerThorns.clear();
   modifyHurtByNpc.clear();
   npcOnHitPlayerBuff.clear();
   modifyHitNpc.clear();

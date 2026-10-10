@@ -18,15 +18,18 @@
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
 import {
-  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerItemUse, registerSystem, registerProjHooks, playModSound,
+  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
-  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, registerModHoldItem,
+  registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem,
   type ModSystemHooks, type ModUseCtx,
 } from './hooks';
+import { applyBuffTicks } from '../entities/projStatus';   // ★四百九十刀:敌侧原版 debuff
+import { projClassOfProjId } from '../entities/projTargets';   // ★四百九十一刀:系别探针
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerModMusic, registerModBossMusic, modMusicIdOfFull } from './music';   // ★BGM 面
 import { registerGenPass } from '../world/gen/WorldGen';
 import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
+import { registerModArmorSet } from '../data/vanillaArmorSets';   // ★四百八十二刀
 import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
 import { rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★一百二十二刀
 import { isPrefixableAccessory } from '../items/Inventory';
@@ -95,14 +98,37 @@ export interface ModContext {
   projIdOf(key: string): number;
   /** ★三百三十三刀:使用条件门(fn 返回 false=本拍禁用;C# CanUseItem 同位) */
   canUse(key: string, fn: (ctx: unknown) => boolean): void;
+  /** ★四百八十二刀:mod 套装加成注册(h/b/l=本 mod 物品键;bonus=数值/旗面,
+   *  与原版 ARMOR_SET_BONUSES 同消费面——穿戴三件即亮) */
+  armorSet(spec: { h: string; b: string; l: string; bonus: Record<string, unknown> }): void;
+  /** ★四百八十三刀:mod tile 右键钩(fn 返回 true=消费右键;C# ModTile.RightClick 同位) */
+  tileInteract(key: string, fn: (tx: number, ty: number, game: unknown) => boolean): void;
+  /** ★四百八十三刀:mod 物品键→vid(fail-fast;运行时闭包解析用——gs.mods.itemIdByKey
+   *  仅生成期在场) */
+  itemIdOf(key: string): number;
+  /** ★四百八十八刀:承伤面 thorns 钩(玩家接触受击荆棘面调;ctx={p,game,e,dmg};
+   *  反伤自调 e.hurt 或 spawnProj) */
+  playerThorns(fn: (ctx: Record<string, unknown>) => void): void;
   /** ★三百三十五刀:配饰效果钩(装备期每 tick 调;C# UpdateAccessory 同位;
    *  fn(player, game)) */
   accEffect(key: string, fn: (player: unknown, game: unknown) => void): void;
+  /** ★四百八十六刀:配饰效果追加链(同 vid 多闭包;主闭包后依注册序执行,
+   *  累加器共享——数据族批与专属闭包结构性并置用) */
+  accEffectAppend(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★三百三十九刀:手持效果钩(手持该物品每 tick 调;C# HoldItem 同位) */
   holdItem(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★三百四十四刀:给玩家施加本 mod buff(npcAi/holdItem 闭包内用;
    *  key=sw.buff 注册键;秒数,每帧重调=max 合并即持续) */
   playerBuff(key: string, seconds: number, player: unknown): void;
+  /** ★四百八十九刀:给敌怪施加本 mod debuff(同上;applyModNpcBuff max 合并;
+   *  onNpcTick=声明面 npcDps/代码钩族) */
+  enemyBuff(e: unknown, key: string, seconds: number): void;
+  /** ★四百九十刀:给敌怪施加原版 debuff(vid=原版 BuffID;applyBuffTicks max 合并
+   *  +NPC 免疫表门——SUPPORTED 表内 33 debuff 生效,表外=登记) */
+  enemyBuffVanilla(e: unknown, vanillaBuffId: number, seconds: number): void;
+  /** ★四百九十一刀:弹幕系别探针(projId→'melee'|'ranged'|'magic'|'summon'|null;
+   *  C# CountsAsClass<X> 同位——onHitAny 系别门用,替换 !melee 近似) */
+  projClassOf(projId: number): 'melee' | 'ranged' | 'magic' | 'summon' | null;
   /** ★三百六十四刀:mod buff 免疫(装备期每帧调=immuneMod 每帧 add;
    *  key=sw.buff 注册键) */
   playerImmune(key: string, player: unknown): void;
@@ -240,8 +266,28 @@ export function createModContext(
     canUse(key, fn) {
       registerModCanUse(idOf('items', key), fn as Parameters<typeof registerModCanUse>[1]);
     },
+    // ★四百八十二刀:mod 套装加成(键→内部物品 id=stableId 三元组入 ARMOR_SET_BONUSES;
+    //  hs/bs/ls 匹配键由 extract-armor-slots 写入 content stats 三方同源)
+    armorSet(spec) {
+      const internal = (k: string) => idOf('items', k);
+      registerModArmorSet(
+        internal(spec.h), internal(spec.b), internal(spec.l),
+        spec.bonus as Parameters<typeof registerModArmorSet>[3],
+      );
+    },
+    // ★四百八十三刀:mod tile 右键(tiles 域 id 解析→interactAt 尾臂派发)
+    tileInteract(key, fn) {
+      registerModTileInteract(idOf('tiles', key), fn as Parameters<typeof registerModTileInteract>[1]);
+    },
+    itemIdOf(key) { return idOf('items', key); },
+    playerThorns(fn) {
+      registerModPlayerThorns(modId, fn as unknown as Parameters<typeof registerModPlayerThorns>[1]);
+    },
     accEffect(key, fn) {
       registerModAccEffect(idOf('items', key), fn as Parameters<typeof registerModAccEffect>[1]);
+    },
+    accEffectAppend(key, fn) {
+      appendModAccEffect(idOf('items', key), fn as Parameters<typeof appendModAccEffect>[1]);
     },
     holdItem(key, fn) {
       registerModHoldItem(idOf('items', key), fn as Parameters<typeof registerModHoldItem>[1]);
@@ -249,6 +295,19 @@ export function createModContext(
     playerBuff(key, seconds, player) {
       (player as { buffs: { apply(t: number, s: number): void } }).buffs.apply(
         modBuffTypeOf(modId, key), seconds);
+    },
+    // ★四百八十九刀:敌侧 mod debuff(applyModNpcBuff max 合并=原版 AddBuff 语义;
+    //  npcBuffStore 内部面经 hooks 导出通道)
+    enemyBuff(e, key, seconds) {
+      applyModNpcBuff(e as object, modBuffTypeOf(modId, key), seconds);
+    },
+    // ★四百九十刀:敌侧原版 debuff(applyBuffTicks=SUPPORTED 表面 max 合并+免疫门)
+    enemyBuffVanilla(e, vanillaBuffId, seconds) {
+      applyBuffTicks(e as never, vanillaBuffId, Math.max(1, Math.round(seconds * 60)));
+    },
+    // ★四百九十一刀:弹幕系别探针(projTargets 投影序=melee→ranged→magic→minion)
+    projClassOf(projId: number) {
+      return projClassOfProjId(projId);
     },
     playerImmune(key, player) {
       const bt = modBuffTypeOf(modId, key);
