@@ -277,7 +277,7 @@ describe('BJ617 B组 件2：resolveLoadText 三段择源（IDB → FS 备份 →
 
   it('B7 mainFlow 接线锚：三段择源装配+陈旧副本诚实标注（仅限有备份面的键）', () => {
     const s = readFileSync(resolve(__dirname, '../src/mainFlow.ts'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-    expect(s).toContain('const resolved = await resolveLoadText(key, () => localStorage.getItem(key));');
+    expect(s).toContain('const resolved = await resolveLoadText(key, () => lsGetSafe(key));');   // ★R13-F2：lsRead 安全垫化
     expect(s).toContain("ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', resolved.file));");
     expect(s).toContain("if (backupTargetOfKey(key)) ui.toast(Lang.text('Mods.SandboxWorld.Toast.LoadStaleLocalCopy'));");
     expect(s).toContain("if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();");

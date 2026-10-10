@@ -3902,6 +3902,10 @@ export class UI {
     // (refreshHotbar 开包早退的还原面;classic 关包链无刷新点,main.ts:427 直调)
     if (this._builtLayout === 'vanilla') {
       this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)
+      // ★BJ633：关包=playerInventory=false(Main.cs:46443 InReforgeMenu=false)→原版
+      //   下拍 dropItemCheck reforgeItem 支消费(Player.cs:5115-5118)——本仓离散链
+      //   此处即时归还,重铸槽物品不随关包滞留(吞装备根因之一)
+      this.returnReforgeItem();
       this.vinvGuideMenuOpen = false;   // ★刀19:向导态随背包关闭退出(关包=playerInventory 面同步)
       this.reflowBuffs();             // ★SW-FX10 债④:页2 列内 buff 块回流 HUD 栏(关包当帧)
       this.refreshAll();
@@ -4195,8 +4199,11 @@ export class UI {
 
   // ============ 重铸（哥布林工匠，Main.InReforgeMenu + ReforgeItemInReforgeSlot） ============
 
-  /** 重铸槽物品（Main.reforgeItem；关闭时归还背包，Player.cs:4912） */
-  reforgeItem: { id: number; stack: number; prefix?: number } | null = null;
+  /** 重铸槽物品（Main.reforgeItem；关闭时归还背包=dropItemCheck reforgeItem 支
+   *  Player.cs:5115-5118 GetOrDropItem——旧注 :4912 系 1456 陈锚,1457 实位 :5115）。
+   *  ★BJ633：placeStyle/favorited 随行——vinv 放入=heldStack 整件展开克隆,字段域
+   *  同 heldStack(:1012),回包走 returnReforgeItem 七参 add 全随行（RB4a/BP1 同族） */
+  reforgeItem: { id: number; stack: number; prefix?: number; placeStyle?: number; favorited?: boolean } | null = null;
   private reforgeEl: HTMLDivElement | null = null;
   private reforgeCostEl: HTMLElement | null = null;
   private reforgeSlotEl: HTMLElement | null = null;
@@ -4366,17 +4373,49 @@ export class UI {
   }
 
   closeReforge(): void {
-    // 归还重铸槽物品（Player.cs:4912：GetOrDropItem）
-    if (this.reforgeItem) {
-      this.game.player.inv.add(this.reforgeItem.id, this.reforgeItem.stack, this.reforgeItem.prefix); // 归还保留词缀（旧 inv.add 丢 prefix=白重铸）
-      this.reforgeItem = null;
-    }
+    // 归还重铸槽物品（dropItemCheck reforgeItem 支 Player.cs:5115-5118 GetOrDropItem
+    // ——旧注 :4912 陈锚）。★BJ633：单源 returnReforgeItem——顺带补满包余量落地
+    // （GetOrDropItem=GetItem 回包+余量 RequestNewItem(base.Center) :7197-7204;
+    //   旧裸 inv.add 三参满包余量静默吞=物损方向）+favorited/placeStyle 随行
+    this.returnReforgeItem();
     if (this.reforgeEl) {
       this.reforgeEl.remove();
       this.reforgeEl = null;
     }
     this.reforgeSlotEl = null;
     this.refreshAll();
+  }
+
+  /** 重铸槽物品归还单源（★BJ633 2026-10-10 用户实报「重铸槽吞装备,不取下来直接退出
+   *  重铸页面的话装备会留在哥布林那里」）。原版锚=Player.dropItemCheck reforgeItem 支
+   *  （Player.cs:5115-5118:!Main.InReforgeMenu ∧ Main.reforgeItem.type>0 →
+   *  GetOrDropItem(Main.reforgeItem, GetItemSettings.ReturnItemFromSlot)+reforgeItem
+   *  =new Item()）——GetItem 回包,余量 RequestNewItem(base.Center) 玩家中心落地
+   *  （Player.cs:7197-7204,InventoryOverflow 源,词缀随行）。触发面三族:
+   *  ①每拍兜底 Player.Update :25411 / 界面帧 Main.cs:17550(playerInventory);
+   *  ②强制退出臂同帧直调 Main.cs:42275-42288(开箱/开店/走远 talkNPC==-1/向导态 →
+   *    InReforgeMenu=false 后紧跟 dropItemCheck);
+   *  ③关包链 Main.cs:46438-46447 !playerInventory → InReforgeMenu=false → 下拍①。
+   *  本仓断点=vinv 面三退出点只清 vinvReforgeOpen 不归还(:10900 旧注「reforgeItem
+   *  不清=原版静态量同相」系误读:静态的是字段槽位,内容被 dropItemCheck 即时消费
+   *  ——退出当拍即回包)+closeReforge 满包余量静默吞。消费面=closeInventory(vanilla
+   *  关包臂)/vinvGuideMenuExitCheck(退出臂)/openChestPanel(vanilla 臂)/closeReforge。
+   *  closeAll 不归还=原版 ClearPlayerTempInfo TurnToAir 同相(Player.cs:55706-55711
+   *  ——原版正常流到此槽已空:全部在-game 退出面先行回包;存档持久面
+   *  SaveTemporaryItemSlotContents bitsByte[3] :55595-55617 本仓不建模=登记债,
+   *  与 guideItem bitsByte[2] 同族)。vinvReturnGuidePlaced ★SW-RB29c F3 同式 */
+  private returnReforgeItem(): void {
+    const r = this.reforgeItem;
+    if (r && this.game?.player) {
+      const left = this.game.player.inv.add(r.id, r.stack, r.prefix, r.placeStyle, false, false, !!r.favorited);
+      if (left > 0) {
+        const key = ITEM_DEFS[r.id]?.key ?? '';
+        // ★BJ390：余量词缀随行（Player.cs:7200-7202 RequestNewItem(item2.prefix) 同域）
+        this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left, undefined, undefined, r.placeStyle, r.prefix);
+      }
+      this.game.cb?.onInventoryChanged?.();
+    }
+    this.reforgeItem = null;
   }
 
   // ============ 向导配方反查（guideItem → CollectGuideRecipes，组匹配生效） ============
@@ -6683,6 +6722,9 @@ export class UI {
     // ★2026-09-08 vanilla 布局:宝箱条直接叠背包下方(vinvBuildChest),无独立 modal
     if (this._builtLayout === 'vanilla') {
       this.vinvReforgeOpen = false;   // 原版 :42277 chest≠-1 → InReforgeMenu=false
+      // ★BJ633：:42277 强制退出臂同帧 dropItemCheck(Main.cs:42288)——开箱退出重铸
+      //   态时槽内物品即时回包（不走开=滞留卡槽）
+      this.returnReforgeItem();
       this.openInventory(true);
       this.refreshAll();
       return;
@@ -10897,7 +10939,12 @@ export class UI {
     const dlgNpc = (g as unknown as { dialogNpc?: unknown }).dialogNpc;
     if (this.vinvReforgeOpen) {
       if (!!this.openChest || !!g?.npcShopOpen || !dlgNpc || this.vinvGuideMenuOpen) {
-        this.vinvReforgeOpen = false;   // reforgeItem 不清=原版 reforgeItem 静态量同相
+        // ★BJ633：强制退出臂同帧直调归还——原版 Main.cs:42286-42288 InReforgeMenu=false
+        //   后紧跟 player[myPlayer].dropItemCheck()(reforgeItem 支 :5115-5118)=当帧回包;
+        //   旧注「reforgeItem 不清=原版静态量同相」系误读(静态的是字段槽位,内容被
+        //   dropItemCheck 即时消费)——不走远无归还=物品卡槽(吞装备根因之二)
+        this.vinvReforgeOpen = false;
+        this.returnReforgeItem();
         this.vinvLayoutSig = '';
         this.layoutVanilla();
       }

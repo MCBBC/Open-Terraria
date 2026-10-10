@@ -14,7 +14,7 @@
 //  ★登记维持（BJ617 登记②,用户拍板口径 2026-10-10「干脆就不应该有合并这个功能」）：
 //  多标签页 index 写面无锁无合并=用户明示接受面（双开各自覆盖写 last-writer-wins,
 //  支持 locks 的浏览器由 SessionLock 会话锁拒载预防;本类不做任何合并/写前重读）。
-import { kvGet, kvGetIdb, kvGetIdbEx, kvSet, kvDelete } from './KvStore';
+import { kvGet, kvGetIdb, kvGetIdbEx, kvSet, kvDelete, lsGetSafe } from './KvStore';
 import { prefGet, prefRemove } from './PrefsStore';   // ★BJ627 偏好域（lastCharId 失效三清）
 import { validateAppearance, type Appearance } from '../player/Appearance';
 
@@ -57,7 +57,8 @@ export class CharacterStore {
   /** ★BJ614：角色外观（Appearance JSON）成功写库后回调（create/update;FS 本地目录
    *  自动备份链,mainFlow 接 FsBackup fire-and-forget）。参数 = (角色名, id, JSON)。 */
   onDataWrite: ((name: string, id: number, json: string) => void) | null = null;
-  /** ★BJ614：随身态成功写库后回调（setState=doSave 每次存档同步/复制角色路径）。 */
+  /** ★BJ614：随身态成功写库后回调（setState=doSave 每次存档同步点;R13-F5 copy 死码
+   *  删除后本回调唯一生产方=doSave）。 */
   onStateWrite: ((id: number, json: string) => void) | null = null;
   /** ★BJ614：index 元数据成功写库后回调（players.index.json 覆盖式备份）。 */
   onIndexWrite: (() => void) | null = null;
@@ -236,9 +237,13 @@ export class CharacterStore {
   // 读侧经 playerFromDiskForm 还原内部 id——与 loadSaveData 同一映射)。
 
   async getState(id: number): Promise<import('../save/serialize').SaveData['player'] | null> {
-    // ★BJ614：随身态键缺失 → FS 备份恢复（恢复链写回 IDB 后以文本直读,自愈一次性）
-    let raw = await kvGet(stateKey(id));
+    // ★R13-F1（读序倒挂第五面收口,resolveLoadText/ensureLoaded 同族）：kvGet 的 LS
+    //  兜底腿会以双写时代陈旧副本抢先 FS 恢复链（kvGet 非空即短路 onRestoreMiss）。
+    //  改三段择源 IDB → onRestoreMiss（FS 备份,恢复回调内部已写回 IDB=自愈）→ LS
+    //  兜底（FS 失败回落,旧用户数据不因读序修复消失）。
+    let raw = await kvGetIdb(stateKey(id));
     if (!raw && this.onRestoreMiss) raw = await this.safeRestoreMiss(stateKey(id));
+    if (!raw) raw = lsGetSafe(stateKey(id));
     if (!raw) return null;
     try {
       const p = JSON.parse(raw);
@@ -274,12 +279,9 @@ export class CharacterStore {
     catch (e) { console.warn('[charStore] onDeleted 回调异常', e); }
   }
 
-  async copy(id: number): Promise<CharacterMeta | null> {
-    const a = await this.get(id);
-    if (!a) return null;
-    const meta = await this.create({ ...a, name: `${a.name} 副本` });
-    const st = await this.getState(id);   // 副本连随身态一起拷(原版复制角色同款)
-    if (st && meta) await this.setState(meta.id, structuredClone(st));
-    return meta;
-  }
+  // ★R13-F5：copy()（角色复制：get→create(名+" 副本")→getState→setState 整链）已
+  //  删除——死码清扫判例（BJ223 同款）：全库普查 src+tests 零调用方（原版复制角色
+  //  UICharCreation 从未接线到本方法;唯一潜在消费面 CharSelect 只有删除/收藏/改名/
+  //  导出钮）。且其抛错链无 catch（create/setState 的 CharacterSaveWriteError 会以
+  //  unhandled rejection 漏出）——接线前必须补 catch 面,故按死码删除而非保留。
 }

@@ -226,6 +226,21 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       // ★四百九十七:mod 盔甲渲染链(hs/bs/ls→Armor_Head_/Armor_Armor_/Armor_Legs_;
       //  贴图=pack textures/armor/<key>_<Part>.png(extract-armor-textures 产);
       //  别名走 SW cache(三百十一通道)+运行期清单键注入(vanilla-ui.json 零扰动))
+      // ★608:manifest.visualSheets(变身视觉表——伪槽别名,消费=Renderer 覆写臂)
+      for (const vs of (pack.manifest as { visualSheets?: Array<{ head?: number; body?: number; legs?: number; headTex?: string; bodyTex?: string; legsTex?: string }> }).visualSheets ?? []) {
+        const triples = [
+          [vs.head, vs.headTex, 'Head'],
+          [vs.body, vs.bodyTex, 'Body'],
+          [vs.legs, vs.legsTex, 'Legs'],
+        ] as const;
+        for (const [idx, texPath, part] of triples) {
+          if (idx === undefined || !texPath) continue;
+          const fileKey = `vanilla-ui/Armor_${part === 'Body' ? 'Armor' : part}_${idx}.png`;
+          if (!packTexBytes(pack, texPath)) continue;
+          aliasJob(atlas, modId, { fileKey, texPath });
+          atlas.registerUiFile(fileKey.replace(/^vanilla-ui\//, ''), fileKey);
+        }
+      }
       for (const path of discoverPackJsonPaths(pack, 'items')) {
         const spec = readPackJson<ModItemContent>(pack, path);
         if (!spec?.key) continue;

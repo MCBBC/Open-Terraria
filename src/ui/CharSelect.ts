@@ -357,7 +357,14 @@ export class CharSelectPanel {
       const delFn: (() => void) | null = meta.favorite ? null : async () => {
         if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete',
           a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
-        await this.store.delete(meta.id);
+        // ★R13-F2：删除链异常 catch+告警（原版面板 alert 习语,同 ImportFail）——
+        //  存储面抛不留 unhandled rejection,reload 自存储重读防行显示与实态漂移
+        try {
+          await this.store.delete(meta.id);
+        } catch (e) {
+          console.warn('[charSelect] 删除落库失败', e);
+          alert(Lang.text('Mods.SandboxWorld.CharSelect.DeleteFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+        }
         await this.reload();
       };
       this.iconBtn(del, 'UI_ButtonDelete', delLabelKey(), () => {

@@ -25,6 +25,11 @@ export interface ModManifest {
     min?: number;
     max?: number;
   }>;
+
+  /** ★608:变身视觉表(纸娃娃三甲槽覆写;slot=5001+ 段——assets.ts 别名注入
+   *  Armor_Head_/Armor_Legs_<slot>;消费=Renderer dollEquip 覆写臂) */
+  visualSheets?: Array<{ head?: number; body?: number; legs?: number;
+    headTex?: string; bodyTex?: string; legsTex?: string }>;
 }
 
 /** L1 物品内容(content/items/*.json)。字段面=ItemDef/itemfunc/itemcombat/itemstats

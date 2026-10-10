@@ -182,7 +182,13 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       onNpcTick: dps
         ? (enemy, game) => {
             const t = enemy as unknown as { _modDotCarry?: number };
-            t._modDotCarry = (t._modDotCarry ?? 0) + dps / 60;
+            // ★615:玩家 debuff 轴乘(攻者 alcohol/IVDrip 面;category=声明面
+            //  debuffCategory(缺省 sickness=DoT 主类);Calamity DebuffData 全量聚合=登记)
+            let dpsEff = dps;
+            const amp = (game as unknown as { player?: { __swDebuffAmp?: Record<string, number> | null } }).player?.__swDebuffAmp;
+            const cat = (b.spec as unknown as { debuffCategory?: string }).debuffCategory ?? 'sickness';
+            if (amp && typeof amp[cat] === 'number') dpsEff = dps * (1 + amp[cat]);
+            t._modDotCarry = (t._modDotCarry ?? 0) + dpsEff / 60;
             if (t._modDotCarry >= 1) {
               const d = Math.floor(t._modDotCarry);
               t._modDotCarry -= d;

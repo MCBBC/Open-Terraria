@@ -480,6 +480,26 @@ const AI014_DOUBLE_STEP = new Set([49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 6
  *    其 rotation=vx×0.1 写点在 findFrameRotation 156/62/66 支。 */
 export const FF_VXSDIR_GROUP = new Set([48, 49, 51, 60, 82, 93, 121, 137, 150, 151, 152, 158, 182, 210, 211, 226, 253, 316, 634, 660, 662, 664]);
 
+/** ★C12/R11（2026-10-11）FindFrame sdir 写点扩面族（六案组 11 型,红蓝 R11 F1-F3 清偿）
+ *  ——显示镜像同走 drawEnemy ffSdirMirror 门（==1 翻,Main.cs:23357-23361）；ffSdir 写点
+ *  在 findFrameRotation 各【专属支】（形貌各异,不入 FF_VXSDIR_GROUP 通用 vx×0.1 支）：
+ *  · 558-560 埃特尼亚飞龙（FindFrame case 558-560,NPC.cs:68609-68645）sdir=sign(vx)
+ *    if/if 死区档（:68613-68618）+ rotation 双档（:68619-68626:ai[0]==2 → 速度角折叠
+ *    ToRotation,vx<0 再 +π;余 → vx×0.1）。AI_108 层 :66279 sdir=−sign(vx) 与 :66120
+ *    rotation=ToRotation 每拍被 FindFrame 覆写（FindFrame 在 AI 后 :91626）——本仓 AI 层
+ *    两写点（bossAI_dd2.ts divingFlyerAI→facing/visAngle）原样保留（撞墙反弹/俯冲逻辑域,
+ *    BJ588 两字段判例）,显示面独立 ffSdir/visAngle。修前显示面=facing 通用门（AI 写
+ *    facing=−sign(vx)）→ flip⟺vx<0 = 反极性（原版 flip⟺sdir==1⟺vx>0）。
+ *  · 574/575 小妖魔滑翔怪（:68661-68668）sdir=sign(vx) if/if 死区档（rotation=AI 直写
+ *    速度角+FindFrame AngleTowards 0.02 微推,BJ591 已在轨对映不重复写）。
+ *  · 330 骚灵（:75685-75691）sdir=sign(vx) 死区档 + rotation=vx×0.15（既有 330 支补 sdir）。
+ *  · 224/587 飞鱼/眼球飞鱼（:75559-75568）sdir=sign(vx) 死区档 + rotation=±vy×0.2
+ *    （既有支补 sdir——rotation 已接、sdir 缺=R11 定谳形态）。
+ *  · 612/613 水黾（:70578-70580）sdir=Math.Sign(vx)【vx≠0 门死区档】;零 rotation 写点。
+ *  · 423 进化兽（:71342-71344）sdir=Math.Sign(−vx)【反极性死区档,vx≠0 门】;零 rotation
+ *    ——ffSdir=−sign(vx),镜像门 ==1 翻 → flip⟺vx<0 = 原版同相。 */
+export const FF_VXSDIR_EX = new Set([558, 559, 560, 574, 575, 330, 224, 587, 612, 613, 423]);
+
 /** Collision.SolidCollision（Collision.cs:2713-2743）1:1：盒与全实心砖重叠判定
  *  （tileSolid && !tileSolidTop；半砖顶面 +8、厚度 8）。G5 落地嵌固回退
  *  （AI_001 :61932/:62124）消费——落地后位置仍嵌进实心（坡角/台阶楔入）时的
@@ -3306,7 +3326,14 @@ export class Enemy extends Entity {
     const vid = this.vanillaId ?? 0;
     if (vid === 75) this.visAngle = this.vx * 0.1;                    // 精灵 :74820
     else if (vid === 122) this.visAngle = this.vx * 0.05;             // 蜗牛怪 :74307
-    else if (vid === 330) this.visAngle = this.vx * 0.15;             // 骚灵 :75595
+    else if (vid === 330) {
+      // 骚灵 FindFrame case 330（:75684-75691）——★C12/R11-F3 补 sdir 死区档
+      // （:75685-75690 if/if,vx==0 保前值;AI_022 亲读 330 无 sdir 写点=显示面唯一来源）;
+      // rotation=vx×0.15（:75691）原有。
+      if (this.vx > 0) this.ffSdir = 1;
+      else if (this.vx < 0) this.ffSdir = -1;
+      this.visAngle = this.vx * 0.15;
+    }
     else if (vid === 301) {
       // 渡鸦 FindFrame case 301（:74257-74271 专属支）：spriteDirection 有态写点——
       //   落地(vy==0) =-direction(:74260)；飞行 vx>0.5→-1 / vx<-0.5→1(:74263-74270)、
@@ -3319,9 +3346,11 @@ export class Enemy extends Entity {
     }
     else if (vid === 156 || vid === 62 || vid === 66) this.visAngle = this.vx * 0.1;  // ★BJ590 红魔/恶魔/巫毒恶魔(FindFrame :74699/:74683-74698 vx×0.1,sdir=direction→通用 facing 镜像;226 已并 FF_VXSDIR_GROUP 族支)
     else if (vid === 509 || vid === 581) this.visAngle = this.vx * 0.1;  // 巨型飞蚁狮/飞蚁狮（AI 段 :31107/:31140）
-    else if (vid === 224 || vid === 587) {                            // 飞鱼/眼球飞鱼 :75460-75468
-      if (this.vx > 0) this.visAngle = this.vy * 0.2;
-      else if (this.vx < 0) this.visAngle = -this.vy * 0.2;
+    else if (vid === 224 || vid === 587) {                            // 飞鱼/眼球飞鱼 :75559-75568
+      // ★C12/R11-F3 补 sdir 死区档（:75561-75568 if/if——rotation ±vy×0.2 与 sdir
+      // 同支同写,本仓 rotation 已接 sdir 缺=R11 定谳形态）;vx==0 两面均保前值。
+      if (this.vx > 0) { this.ffSdir = 1; this.visAngle = this.vy * 0.2; }
+      else if (this.vx < 0) { this.ffSdir = -1; this.visAngle = -this.vy * 0.2; }
     } else if (vid === 603) {                                         // 海鸥2 :74550+
       if (this.wet || this.vy === 0 || (this.vx === 0 && this.vy === 0)) this.visAngle = 0;
       else this.visAngle = this.vx * 0.1;
@@ -3354,7 +3383,42 @@ export class Enemy extends Entity {
       // 取负系本仓 facing 语义）与 visAngle=±π 折叠速度角（:66120 rotation 直写+
       // 本 case :68669-68674 AngleTowards 0.02 微推 ≤0.02rad,渲染端 108 旋转消费
       // 已定谳）——本层只补帧机与尘面,不重复写旋转。
+      // ★C12/R11-F2 sdir 死区档收编（:68661-68668 sign(vx) if/if → ffSdir 单源写点,
+      //   本层序 = 原版 case 内 sdir 写（:68663-68668）先于口部尘锚 vector4 消费
+      //   （:68687）——koboldFlyerFindFrame 的口部锚改读 ffSdir 同拍同值;AI 层
+      //   facing=−sign(vx) 原样保留（AI 语义）,显示镜像走 ffSdirMirror 门（修前
+      //   通用 facing 门 flip⟺vx<0 = 反极性,与 558-560 同病同刀）。
+      if (this.vx > 0) this.ffSdir = 1;
+      else if (this.vx < 0) this.ffSdir = -1;
       this.koboldFlyerFindFrame(game);
+    } else if (vid === 558 || vid === 559 || vid === 560) {
+      // ★C12/R11-F1 埃特尼亚飞龙 FindFrame case 558-560（NPC.cs:68609-68645）：
+      //  · sdir=sign(vx) if/if 死区档（:68613-68618,vx==0 保前值）→ ffSdir;
+      //  · rotation 双档（:68619-68626）：ai[0]==2（俯冲态）→ 速度角折叠
+      //    ToRotation（vx<0 再 +π,原版 num53 折叠式）;余态 → vx×0.1（俯仰档）。
+      //    AI_108 层 :66120 rotation=ToRotation + :66282-66290 折叠 ±π/2 与
+      //    :66279 sdir=−sign(vx) 每拍被本 FindFrame 层覆写（原版 FindFrame 在 AI
+      //    后 :91626）——本仓 AI 层两写点原样保留（撞墙反弹/俯冲逻辑域）,显示面
+      //    独立 ffSdir/visAngle（BJ588 两字段判例）。修前显示面=facing 通用门
+      //    （AI 写 facing=−sign(vx)）→ flip⟺vx<0 = 反极性（原版 flip⟺sdir==1
+      //    ⟺vx>0）;旋转恒 AI 速度角 = 常态俯仰档缺失。
+      //  · 帧档（ai[0]==2 → 帧 4 定格/余 6t×4 帧循环,:68627-68643）不在本层
+      //    （帧机=Renderer vanillaFrameIdx 域,帧 4 定格支缺=登记债,见 C12 报告）。
+      if (this.vx > 0) this.ffSdir = 1;
+      else if (this.vx < 0) this.ffSdir = -1;
+      if (this.ai0 === 2) this.visAngle = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+      else this.visAngle = this.vx * 0.1;
+    } else if (vid === 612 || vid === 613) {
+      // ★C12/R11-F3 水黾 FindFrame case 612/613（:70578-70580）：sdir=Math.Sign(vx)
+      // 【vx≠0 门死区档——Math.Sign(0)=0 由门挡】→ ffSdir;零 rotation 写点
+      // （aiStyle116 原版不旋转,AI_116 亲读无 sdir/rotation 写面=显示面唯一来源）。
+      if (this.vx !== 0) this.ffSdir = this.vx > 0 ? 1 : -1;
+    } else if (vid === 423) {
+      // ★C12/R11-F3 进化兽 FindFrame case 423（:71342-71344）：sdir=Math.Sign(−vx)
+      // 【反极性死区档,vx≠0 门】→ ffSdir=−sign(vx);镜像门 ==1 翻 → flip⟺vx<0 =
+      // 原版同相。零 rotation 写点。（R11 U2 复核：亲读 case 423 块 :71320-71355,
+      // 反极性形与 sdir 写点确认无误,非邻域 419/425-429 误配。）
+      if (this.vx !== 0) this.ffSdir = this.vx > 0 ? -1 : 1;
     } else if (FF_VXSDIR_GROUP.has(vid)) {
       // ★BJ588 FindFrame case 48..664 死区档 15 型族（NPC.cs:75620-75681;1456
       //  :75522-75577 同构零漂移——BJ581 案组收编）。本层 ≙ 原版 FindFrame 每

@@ -8,21 +8,25 @@
 // （KvStore/mainFlow）从未申请 → 存档恒 best-effort=可被整批驱逐。persist() 是
 // origin 级授权（授予则全站生效）,Chrome 启发式下普通网页大概率静默拒绝。
 //
-// 浏览器授予启发式（MDN "Storage quotas and eviction criteria" + web.dev
-// "Persistent storage" 调研,提示文案措辞的依据）：
-//  - Chrome/Chromium（含 Edge）：无任何提示自动裁决——「站点参与度(engagement)高 /
-//    已安装为应用或已收藏书签 / 已授予通知权限」三启发式,任一命中即授予,否则静默
-//    拒绝（可稍后重申,同准则再评）→ 文案建议「安装为应用或收藏书签」即据此。
-//  - Firefox：委派用户——弹权限框请求确认。
+// 浏览器授予启发式与驱逐机制（★R13-F7 引用更新：原注把两源并写一处——现行 MDN 页
+//  已不载 Chromium 三启发式,三判据改引 web.dev 现行表述,驱逐机制引现行 MDN 页）：
+//  - 授予三判据 = web.dev "Persistent storage"（web.dev/articles/persistent-storage,
+//    现行版亲读 2026-10-11）,提示文案措辞的依据——Chrome/Chromium（含 Edge）无任何
+//    提示自动裁决,判据=「站点参与度（site engagement）高 / 已安装为应用或已收藏
+//    书签 / 已授予通知权限」三条,任一命中即静默授予,否则静默拒绝（可稍后重申,
+//    同准则再评）→ 文案建议「安装为应用或收藏书签」即据此。
+//  - Firefox：委派用户——弹权限框请求确认（同 web.dev 页）。
 //  - Safari 15.2+：同 Chromium 自动裁决（无提示）;另有 ITP 7 天无交互主动驱逐面
 //    （persist 不豁免 7 天面,只豁免存储压力 LRU 面——Safari 提示面另属）。
-//  - 驱逐机制（全浏览器）：存储压力 LRU 只清 best-effort origin,persistent 跳过;
-//    驱逐=origin 整批同删（IDB+Cache API）,与事故「IDB 全空而 localStorage 幸存」
-//    形态吻合。★用户实测（2026-10-10 Windows C 盘剩 3GB 空闲）:estimate().quota
-//    =10.3GB——Chromium M97+（2022 起）quota 锚【磁盘总容量】,故意不随空闲波动,
-//    quota/usage 配比与环比均不构成磁盘紧张信号——预警阈值只锚 usage 绝对值+
-//    持久化位（下 storagePressureKind）;quota 环比骤降预警已按用户明令摘除（下
-//    quota 区段休眠注）。
+//  - 驱逐机制 = MDN "Storage quotas and eviction criteria"（Storage API 章节现行版,
+//    developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria,亲读 2026-10-11）：
+//    best-effort 数据在存储压力下按 LRU 逐 origin 驱逐,persistent 跳过;驱逐=origin
+//    数据整批同删（不分片）,与事故「IDB
+//    全空而 localStorage 幸存」形态吻合。★用户实测（2026-10-10 Windows C 盘剩 3GB
+//    空闲）:estimate().quota=10.3GB——Chromium M97+（2022 起）quota 锚【磁盘总容量】,
+//    故意不随空闲波动,quota/usage 配比与环比均不构成磁盘紧张信号——预警阈值只锚
+//    usage 绝对值+持久化位（下 storagePressureKind）;quota 环比骤降预警已按用户
+//    明令摘除（下 quota 区段休眠注）。
 //
 // 全部 API 可选面（老浏览器/隐私模式）try/catch 降级,任何残缺环境不抛。
 import { kvGetIdbEx } from './KvStore';
@@ -223,7 +227,7 @@ export function markEvictNoticeShown(ls: LsLike, fingerprint: string): void {
 
 export type EvictProbeCause = 'keyMissing' | 'present' | 'unavailable';
 
-export interface EvictedEntry { kind: 'world' | 'player' | 'quicksave'; id: number; name: string; }
+export interface EvictedEntry { kind: 'world' | 'player' | 'playerstate' | 'quicksave'; id: number; name: string; }
 
 export interface EvictScanResult {
   evicted: EvictedEntry[];
@@ -242,7 +246,8 @@ export interface EvictScanResult {
  *  测:quicksave 键 keyMissing 且 LS 无副本=幽灵。健康态/全新安装（evicted 空）不
  *  补测——单键探测无「曾经存在」物证,防「从未存过 quicksave」被误报成被清理
  *  （写入侧 doSave 每次存档都写 quicksave 键,有 index 的用户缺失该键只可能是
- *  驱逐/写败,后者非本扫描职责）。 */
+ *  驱逐/写败,后者非本扫描职责）。★R13-F4：playerstate 补进扫描面——仅当同角色
+ *  外观键也缺（驱逐实锤=双缺）才补测,防「新角色未进过世界」的合法缺失误报。 */
 export async function scanEvictedSaves(
   worlds: ReadonlyArray<{ id: number; name: string }>,
   players: ReadonlyArray<{ id: number; name: string }>,
@@ -257,7 +262,17 @@ export async function scanEvictedSaves(
   for (const m of players) {
     const c = await probe(`sandboxworld.player.${m.id}`);   // CharacterStore dataKey 同构
     if (c === 'unavailable') return { evicted: [], conclusive: false };
-    if (c === 'keyMissing') evicted.push({ kind: 'player', id: m.id, name: m.name });
+    if (c === 'keyMissing') {
+      evicted.push({ kind: 'player', id: m.id, name: m.name });
+      // ★R13-F4：playerstate（随身态）补进扫描面——外观与随身态同库,驱逐=整批同删
+      //  （双缺=实锤,补测恢复面见 fsBackupRestoreEvicted kind 扩 playerstate）。
+      //  ★门=外观键同缺才补测：随身态键缺失有合法形态（新角色未进过世界/前代角色
+      //  无随身态段——doSave 首存前/stateKey 从未写过）,单键缺失≠被清理,quicksave
+      //  同款「驱逐实锤才补测」纪律防误报。
+      const cs = await probe(`sandboxworld.playerstate.${m.id}`);   // CharacterStore stateKey 同构
+      if (cs === 'unavailable') return { evicted: [], conclusive: false };
+      if (cs === 'keyMissing') evicted.push({ kind: 'playerstate', id: m.id, name: m.name });
+    }
   }
   if (evicted.length > 0) {   // ★BJ618 件3：驱逐实锤后补测 quicksave（id=0 无槽位语义）
     const c = await probe('sandboxworld.quicksave');

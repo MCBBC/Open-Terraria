@@ -510,7 +510,8 @@ describe('BJ614 H组：接线结构锚+l10n 双语言', () => {
     expect(s).toContain('worldStore.onRestoreMiss = fsBackupRestoreMiss;');
     expect(s).toContain('charStore.onRestoreMiss = fsBackupRestoreMiss;');
     // loadFromKey 恢复链（★BJ617 件2 三段择源：IDB 现值 → FS 备份 → LS 副本 → loadFromJson 续跑）
-    expect(s).toContain('const resolved = await resolveLoadText(key, () => localStorage.getItem(key));');
+    // ★R13-F2：lsRead 裸 localStorage 直读改原语层安全垫（LS 抛不炸读档链）
+    expect(s).toContain('const resolved = await resolveLoadText(key, () => lsGetSafe(key));');
     expect(s).toContain('await loadFromJson(resolved.text);');
     expect(s).toContain("if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();");
     // 幽灵扫描联动（BJ611 锚线不得动——扫描外尝试恢复,门内补提示）

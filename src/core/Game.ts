@@ -163,7 +163,7 @@ import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
 import { modBossMusicFor } from '../mods/music';   // ★BGM 面:mod Boss 换曲绑定
-import { takeModBiomeMusic, takeModFrameMusic } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
+import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE, MOD_NPC_ID_BASE } from '../mods/types';
 import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
@@ -5695,6 +5695,23 @@ export class Game implements GameHooks {
   private lastWasDay: boolean | null = null;
   /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
   scene: SceneFlags = { ...EMPTY_SCENE };
+
+  /** ★614:lock-on 目标态(the_pointer/LockOnHelper 子系统——就近循环;
+   *  键沿=mod keybind;括弧渲染=Renderer lockOnBrackets) */
+  lockOnTargetId: number | null = null;
+  lockOnCycle(dir: 1 | -1): void {
+    const p = this.player;
+    if (!p) return;
+    const cands = (this.entities?.enemies ?? []).filter((e) => !e.dead
+      && Math.hypot(e.cx - p.cx, e.cy - p.cy) < 900);
+    if (!cands.length) { this.lockOnTargetId = null; return; }
+    cands.sort((a, b) => Math.hypot(a.cx - p.cx, a.cy - p.cy) - Math.hypot(b.cx - p.cx, b.cy - p.cy));
+    const cur = this.lockOnTargetId;
+    const idx = cands.findIndex((e) => (e as unknown as { id?: number }).id === cur);
+    const next = cands[(idx + (dir === 1 ? 1 : cands.length - 1) + 1) % cands.length];
+    this.lockOnTargetId = (next as unknown as { id?: number }).id ?? null;
+  }
+
   /** 可视域群系计数(15tick 刷新;SetBackColor 群系变色数据源) */
   private biomeCounts = { evil: 0, blood: 0, jungle: 0, mushroom: 0, graveyard: 0 };
   /** 蘑菇光照影响平滑值(Main.SmoothedMushroomLightInfluence :61380-61404:
@@ -43988,9 +44005,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : !(getGlobalHurtBuckets()?.blocksHit(effCd));
       if (attacker && attackerHurtOk && contactOnly && !pvp && !attacker.dead && flag3 && !attacker.dontTakeDamage) {
         // CanParryAgainst 等价谓词（原文方向比较用矩形中心 x 符号）
-        const canParry = p.shieldParryTimeLeft > 0
+        // ★609:mod parry 窗口门(divine_providence/flame_licked_shell 30t 窗;
+        //  同向谓词共享——窗口 mod 自管)
+        const canParryMod = runModParryActive(p)
           && Math.sign((attacker.cx + attacker.w / 2) - (p.cx + p.w / 2)) === p.facing
           && (attacker.vx !== 0 || attacker.vy !== 0);
+        const canParry = canParryMod || (p.shieldParryTimeLeft > 0
+          && Math.sign((attacker.cx + attacker.w / 2) - (p.cx + p.w / 2)) === p.facing
+          && (attacker.vx !== 0 || attacker.vy !== 0));
         const kbVel = canParry ? 5 : 10;
         // num3（:31619-31623）：怪在玩家左 ⇒ +1（攻向右推玩家）→ 反射取 -num3 推离玩家
         const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1;
@@ -44024,6 +44046,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  crawCarapace/baroclaw=荆棘反伤+推离+debuff;同面 flag3/contactOnly 门)
         runModPlayerThorns(p, this, attacker, dmg);
         if (canParry) {
+          if (canParryMod) runModParrySuccess(p, this);   // ★611:mod parry 成功(反冲弹族)
           grantCollisionAttackImmunity(p, (eq.longInvince ? 60 : 30));   // :31667（★IIIII250 走受击路径快照 eq;测试桩玩家无 equipStats 时 damagePlayer 早于本行不达）
           p.parryDamageBuff = true;                       // AddBuff(198,300)（:31668）
           p.parryDamageBuffT = 300;

@@ -20,6 +20,9 @@ import type { ModIdAllocation } from './types';
 import {
   registerModDodgeRoll,
   registerModPlayerHurt,
+  registerModDamageGate,
+  registerModDashType,
+  registerModKeybindFace, registerModParryGate, registerModParrySuccess, modKeybindDown,
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
@@ -129,6 +132,21 @@ export interface ModContext {
   /** ★594:mod 受击钩(C# OnHurt 同位;伤害落地后派发,ctx={player,game,dmg=实扣};
    *  rBrain 墨云/墨炸弹族消费;单注册) */
   playerHurt(fn: (ctx: { player: unknown; game: unknown; dmg: number }) => void): void;
+  /** ★605:mod 伤害闸(能量盾族同位;Player.damage 头派发[防御计算前],
+   *  fn(player,dmg)→剩余伤;多 mod 连减;单注册) */
+  damageGate(fn: (player: unknown, dmg: number) => number): void;
+  /** ★606:mod dash 类(PlayerDashEffect 同位;slot≥7;speed=初速;decelMult=
+   *  滑行阻尼;shieldSlam=接触伤害;midDash=滑行期钩) */
+  dashType(spec: { slot: number; speed: number; decelMult?: number; shieldSlam?: boolean;
+    midDash?: (p: unknown, game: unknown) => void }): void;
+  /** ★609:mod 键位(id=`mod:<modId>:<name>`;默认键=Keyboard code;重绑 UI=登记) */
+  keybind(name: string, defaultKey: string): void;
+  /** ★609:mod 键位按下查询(边沿=mod 自管上一帧态) */
+  keyDown(name: string): boolean;
+  /** ★609:mod parry 窗口门(fn(player)→窗口激活;同向谓词引擎共享) */
+  parryGate(fn: (player: unknown) => boolean): void;
+  /** ★611:parry 成功钩(窗口内接触 parry 受理后派发;反冲弹族消费) */
+  parrySuccess(fn: (player: unknown, game: unknown) => void): void;
   /** ★三百三十九刀:手持效果钩(手持该物品每 tick 调;C# HoldItem 同位) */
   holdItem(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★三百四十四刀:给玩家施加本 mod buff(npcAi/holdItem 闭包内用;
@@ -303,6 +321,27 @@ export function createModContext(
     },
     playerHurt(fn) {
       registerModPlayerHurt(modId, fn as Parameters<typeof registerModPlayerHurt>[1]);
+    },
+    damageGate(fn) {
+      registerModDamageGate(modId, fn as Parameters<typeof registerModDamageGate>[1]);
+    },
+    dashType(spec) {
+      registerModDashType(spec.slot, spec as Parameters<typeof registerModDashType>[1]);
+    },
+    keybind(name, defaultKey) {
+      registerModKeybindFace(`mod:${modId}:${name}`, [defaultKey]);
+    },
+    keyDown(name) {
+      const g = (globalThis as { __swGame?: { input?: { keys?: Set<string>; touchKeys?: Set<string> } } }).__swGame;
+      const keys = g?.input?.keys;
+      if (!keys) return false;
+      return modKeybindDown(`mod:${modId}:${name}`, keys);
+    },
+    parryGate(fn) {
+      registerModParryGate(modId, fn as Parameters<typeof registerModParryGate>[1]);
+    },
+    parrySuccess(fn) {
+      registerModParrySuccess(modId, fn as Parameters<typeof registerModParrySuccess>[1]);
     },
     playerThorns(fn) {
       registerModPlayerThorns(modId, fn as unknown as Parameters<typeof registerModPlayerThorns>[1]);

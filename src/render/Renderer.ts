@@ -7501,6 +7501,8 @@ export class Renderer {
           ctx.scale(bs, bs);
           ctx.translate(-viewW / 2, 0);
         }
+        // ★614:lock-on 括弧(世界覆盖物;目标=Game.lockOnTargetId)
+        this.drawLockOnBrackets(ctx, cam, entities);
         this.drawBossBar(ctx, viewW, viewH, snap);
         if (bs !== 1) ctx.restore();
       }
@@ -18954,6 +18956,10 @@ export class Renderer {
     //  PlayerDrawLayers.cs:2173 → 狼头 38 同染,Spread 保 dyeHead/dyeBody/dyeLegs）
     if (p.buffs.has(BuffType.Werewolf)) dollEquip = { ...dollEquip, head: 38, body: 21, legs: 20 };
     if (p.merman) dollEquip = { ...dollEquip, head: 39, body: 22, legs: 21 };   // 人鱼强制三件（:35473-35494，死亡态同置）
+    // ★608:PSC 变身视觉覆写(mod visualSheets 伪槽;day=5001/5002 night=5003/5004;
+    //  置位面=acc-extra PSC 消费器 pscState 非 vanity)
+    const pscVis = (p as unknown as { __swPscTransform?: { head?: number; body?: number; legs?: number } | null }).__swPscTransform;
+    if (pscVis) dollEquip = { ...dollEquip, ...pscVis };
     const full = compositePaperDoll(a, dollEquip);
     if (!full) return;
     // 死亡帧行冻结（原版 UpdateDead 不跑 PlayerFrame——bodyFrame 停在死亡瞬间值；
@@ -25623,6 +25629,30 @@ export class Renderer {
    *  ★SW-FX14：ShowText 数字开关接线（BigProgressBarSystem.ShowText，原版缺省
    *  true 且经 Preferences "ShowBossBarHealthText" 持久化——BigProgressBarSystem.
    *  cs:76/:74/:118-124；设置行 IngameOptions.cs:806-812）——旧实现未传参恒显 */
+  /** ★614:lock-on 目标括弧(LockOnHelper.Draw 备案清偿——世界层覆盖物;
+   *  Game.lockOnTargetId → 括弧四角 8px,紫白色) */
+  private drawLockOnBrackets(ctx: CanvasRenderingContext2D, cam: { x: number; y: number }, entities: unknown): void {
+    const gid = (globalThis as { __swGame?: { lockOnTargetId?: number | null } }).__swGame?.lockOnTargetId;
+    if (gid == null) return;
+    const list = (entities as Array<{ id?: number; dead?: boolean; x: number; y: number; w: number; h: number }>) ?? [];
+    const t = list.find((e) => !e.dead && e.id === gid);
+    if (!t) return;
+    const sx = t.x - cam.x, sy = t.y - cam.y;
+    const L = 8;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(220,120,255,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    // 四角括弧
+    for (const [cx, cy, dx, dy] of [[sx, sy, 1, 1], [sx + t.w, sy, -1, 1], [sx, sy + t.h, 1, -1], [sx + t.w, sy + t.h, -1, -1]] as const) {
+      ctx.moveTo(cx + dx * L, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy + dy * L);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   private drawBossBar(
     ctx: CanvasRenderingContext2D, viewW: number, viewH: number, info: CollectInfo,
   ) {

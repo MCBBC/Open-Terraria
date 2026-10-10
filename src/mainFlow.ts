@@ -19,7 +19,7 @@ import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
-import { kvHas, kvSet, kvIdbStatus } from './save/KvStore';   // ★BJ605：+kvIdbStatus 读档报错路径 IDB 态诊断（★BJ617 件2：kvGet 读面随 resolveLoadText 三段择源退役）
+import { kvHas, kvSet, kvIdbStatus, lsGetSafe } from './save/KvStore';   // ★BJ605：+kvIdbStatus 读档报错路径 IDB 态诊断（★BJ617 件2：kvGet 读面随 resolveLoadText 三段择源退役）;★R13-F2：+lsGetSafe LS 安全读垫（resolveLoadText lsRead 注入）
 import { makeBeforeUnloadHandler, hiddenBackstopShouldSave } from './save/UnloadGuard';   // ★BJ280 页面卸载拦截纯核
 import { WBAKE_ENABLED } from './workers/BakeClient';   // ★C4 烘焙 worker 灰度旗（入场覆盖门分支用）
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
@@ -1053,7 +1053,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       //  ③ FS 恢复链失败 → LS 兜底副本（诚实标注「较旧副本」,仅限有备份面的键;
       //     ★BJ618 件3 起 quicksave 亦有备份面 quicksave.json,同样作陈旧宣称）。
       //  ④ 三源皆空=missing（prompt 授权提示+IDB 态诊断+缺失分类文案,原语义）。
-      const resolved = await resolveLoadText(key, () => localStorage.getItem(key));
+      const resolved = await resolveLoadText(key, () => lsGetSafe(key));   // ★R13-F2：裸 localStorage 直读随 LS 抛（隐私模式）炸读档链——原语层安全垫收口
       if (resolved.source === 'fs-backup') {
         // ★BJ614 用户明令「IndexedDB 中找不到要从备份取」：最新同键快照已写回 IDB
         //  （自愈,下次读直命中）→ 以恢复文本续正常读档链 loadFromJson（零旁路;
@@ -1916,7 +1916,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       (window as unknown as { __swGame?: Game | null }).__swGame = null;
       currentWorld = null;
       // ★BJ617 件1：会话锁随退出释放（此点 doSave 全链已落定——先落盘再放锁,
-      //  他 tab 的拒载窗覆盖到我们的最终写入为止;tab 关闭另有浏览器自动释放面）
+      //  他 tab 的拒载窗覆盖到我们的最终写入为止;tab 关闭另有浏览器自动释放面。
+      //  ★R13-F3：charState 写已并入 doSave 全链 Promise.all——本释放位次在 .plr
+      //  段 settle 之后,角色锁不再于 charState 在途时提前放手）
       heldSessionLocks?.release();
       heldSessionLocks = null;
       // ★BJ318（2026-09-23 退出链释放审计补刀,须在 game=null 后——面板 onClosed
@@ -2012,10 +2014,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           //  fire-and-forget 增强链,FsBackup 内部全吞错）
           try { void fsBackupSnapshot('quicksave', 0, worldNameNow, json); }
           catch (e) { console.warn('[save] quicksave 快照回调异常', e); }
-          // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀）。
-          // silent 档 = 自动保存路径（2026-08-27 用户要求：自动保存不弹提示,原版
-          // DoUpdate_AutoSave 亦全程静默）；失败 toast 不受 silent 门控（数据安全告警）
-          if (!silent) ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved'));
+          // ★R13-F6：保存成功提示已移出本支——旧位置 quick 写成即弹「世界已保存」,
+          //  槽位写随后败=成功+失败双 toast 并存;现全链 Promise.all settle 后按
+          //  failGate 判言统一发（见下方 await 后）。
         }
       }).catch((e) => {
         console.error('kvSet failed', e);
@@ -2037,17 +2038,29 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 角色随身态同步（原版 .plr 语义）：player 段=磁盘稳定 id 形（★BJ620 件6-F9:
       //  worker/同步回退双路径切片直传,与 json.player 全等——旧实现整档 JSON.parse
       //  只为取 player 段,大档 10ms 级主线程停顿）,原样入 CharacterStore——与读侧
-      //  playerFromDiskForm 对称。同步失败不阻断存档
+      //  playerFromDiskForm 对称。
+      // ★R13-F3（BJ144 契约字面兑现）：charState 写入并入全链 Promise.all——旧实现
+      //  悬浮 fire-and-forget（.catch 吞 rejection 但 doSave 不等它 settle）,doSave
+      //  返回（quitToMenu 放会话锁/saveAndReload 立即 reload）时 charState 写可能
+      //  仍在途=撕写（下会话读 state 键缺失/半程 → 回落世界内嵌 player=「背包铜三件」
+      //  回退形态）。失败仍不阻断存档（.catch 收面,用户提示由 onWriteFailData 导出
+      //  兜底发）——但 settle 必须等到：BJ144「退出等保存完成」含 .plr 段。
+      let charWrite: Promise<void> = Promise.resolve();
       {
         const cid = charContextId();   // quickLoad 等无选角上下文会话也回写上次角色
         if (cid != null) {
           // ★BJ618 件2：setState 写败抛 CharacterSaveWriteError—— rejection 面收进
           //  .catch（旧 try/catch 只能接同步抛）,用户提示由 onWriteFailData 导出兜底发
-          try { charStore.setState(cid, player).catch((e) => { console.warn('charState sync failed', e); }); }
-          catch (e) { console.warn('charState sync failed', e); }
+          charWrite = charStore.setState(cid, player).catch((e) => { console.warn('charState sync failed', e); });
         }
       }
-      await Promise.all([quickWrite, slotWrite]);
+      await Promise.all([quickWrite, slotWrite, charWrite]);
+      // ★R13-F6：「世界已保存」改全链成功才报——旧实现 quick 写成即弹（槽位写随后败
+      //  =「世界已保存」+「保存失败」双 toast 并存,自相矛盾）。全链 settle 后按同链
+      //  失败标记判言（noteChainSaveFail 任一腿失败都置位）;charState 败不计（世界档
+      //  已落库）;silent 档（自动保存）仍不弹,失败 toast 亦不受 silent 门控（数据安全
+      //  告警,noteChainSaveFail 内发）。
+      if (!silent && !failGate.toasted) ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved'));
       // ★BJ611：保存时点刷新存储状态快照（estimate 预警面;fire-and-forget 不阻塞
       // 存档链——存档列表状态行/警示色读最近快照）
       void refreshStorageStatus();
@@ -2115,8 +2128,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     })();
   }
 
-  // 快速存档存在性预查
-  void kvHas(QUICK_SAVE_KEY).then((v) => { quickSaveExists = v; });
+  // 快速存档存在性预查（★R13-F2：LS/IDB 抛≠装配炸——catch 按无快存档降级,快存档
+  //  菜单项自然隐藏;不留 unhandled rejection）
+  void kvHas(QUICK_SAVE_KEY).then((v) => { quickSaveExists = v; }).catch((e) => {
+    console.warn('[flow] quicksave 存在性预查失败（按无快存档降级）', e);
+  });
 
   // ★BJ318（2026-09-24）：纯注册表调试桥一次性挂载（createFlow 作用域,不含 g 槽）。
   //  曾在 enterGame 内逐局覆写——闭包与 enterGame 作用域共享 `g` 槽,被 window 长持=

@@ -15,7 +15,7 @@
 //  IDB → onRestoreMiss（FS 备份）→ LS 副本（仅载入读面;写前重读/合并仍被用户明令
 //  否决,见 BJ617 A6）；件4（probe F5/F6）delete 成功链尾 onDeleted 回调（mainFlow 接
 //  FsBackup 快照组清理——防已删世界经恢复链复活+隐私面;index 墓碑经 saveIndex 重写）。
-import { kvGet, kvGetIdb, kvSet, kvHas, kvDelete } from './KvStore';
+import { kvGet, kvGetIdb, kvSet, kvHas, kvDelete, lsGetSafe } from './KvStore';
 
 const INDEX_KEY = 'sandboxworld.worlds.index';
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
@@ -112,14 +112,22 @@ export class WorldStore {
     if (!raw) {
       try { raw = localStorage.getItem(INDEX_KEY); } catch { /* 隐私模式 */ }
     }
+    // ★R13-F8：迁移门判据从「index 键文本不在」细化为「index 未成功解析出数组」——
+    //  旧门 `!raw` 漏掉损坏 index 形态（raw 在但 JSON.parse 抛/非数组 → index 空而
+    //  raw 真值 → 遗留 quicksave 永不迁移,迁移面整体失效）。显式空数组 `[]` 仍不算
+    //  损坏（用户删光世界的合法现态,不复活迁移,原语义保留）。
+    let indexParsed = false;
     if (raw) {
       try {
         const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) this.index = arr.filter((x) => x && typeof x.id === 'number');
-      } catch { /* 损坏索引当空 */ }
+        if (Array.isArray(arr)) {
+          this.index = arr.filter((x) => x && typeof x.id === 'number');
+          indexParsed = true;
+        }
+      } catch { /* 损坏索引当空——R13-F8：仍可走迁移 */ }
     }
     // 迁移：旧版单槽 quicksave → 世界 id=1（幂等）
-    if (this.index.length === 0 && !raw) {
+    if (this.index.length === 0 && !indexParsed) {
       if (await kvHas(QUICK_SAVE_KEY)) {
         const text = await kvGet(QUICK_SAVE_KEY);
         if (text) {
@@ -232,7 +240,19 @@ export class WorldStore {
   }
 
   async load(meta: WorldMeta): Promise<string | null> {
-    return kvGet(dataKey(meta.id));
+    // ★R13-F1（读序倒挂第六面收口,resolveLoadText/ensureLoaded 同族）：kvGet 的 LS
+    //  兜底腿会以双写时代陈旧副本抢先 FS 恢复链（kvGet 非空即短路恢复链）——改三段
+    //  择源 IDB → onRestoreMiss（FS 备份,恢复回调内部已写回 IDB=自愈）→ LS 兜底
+    //  （FS 失败回落）。消费=duplicate（副本源头,mainFlow loadWorldFlow）+联机建房
+    //  选世界（mainFlow onCreateRoomFlow.onPlay）。
+    const key = dataKey(meta.id);
+    let text = await kvGetIdb(key);
+    if (!text && this.onRestoreMiss) {
+      try { text = await this.onRestoreMiss(key); }
+      catch { /* 恢复链异常=按无备份继续（ensureLoaded 同构） */ }
+    }
+    if (text) return text;
+    return lsGetSafe(key);
   }
 
   async delete(id: number) {

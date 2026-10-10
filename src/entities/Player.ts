@@ -24,7 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
-import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt } from '../mods/hooks';
+import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -3580,6 +3580,9 @@ export class Player extends Entity {
       // ★五百八十六:mod 岩浆完全豁免面(van 键形;C# UpdateAccessory lavaImmune=true
       //  ——hydrothermic_armor/reaver_head_explore;消费=lavaTotalImmune 并集)
       if (f.lavaImmune) this.modLavaImmune = true;
+      // ★612:渔猎 van 键(accLavaFishing=岩浆钓门 :14127-14140——直入 equipStats
+      //  lavaFishing 池,Bobber ownerLavaOk 消费;accFishingBobber=fishingSkill+10 面=登记)
+      if (f.lavaFishing) lavaFishing = true;
       // ★五百九十二:长无敌帧(van 键形;C# longInvince=true——Regenerator;
       //  消费=黑带/克脑闪避 SetImmuneTimeForAllTypes 120:80 档)
       if (f.longInvince) longInvince = true;
@@ -8714,7 +8717,9 @@ export class Player extends Entity {
     // ★C5-B4/B5（2026-10-06）外门改 dash 闩锁位（:21225 `if (dash == 2 && eocDash
     //  > 0)`——dash 字段冻结在发起拍档位,中途卸盾滑行期扫敌照续=原版相;旧式读活
     //  eq.dash 且把 eocHitId<0 折入外门 → 回弹臂整支不可达）。
-    if (this.dashLatched === 2 && this.eocDash > 0) {
+    // ★606:mod ShieldSlam 档(≥7 spec.shieldSlam)走 dash2 同款扫敌门
+    const modDashLatched = this.dashLatched >= 7 ? modDashSpecOf(this.dashLatched) : null;
+    if ((this.dashLatched === 2 || modDashLatched?.shieldSlam === true) && this.eocDash > 0) {
       // ★C5-B4 内门劈两支（:21227-21289）：eocHit<0 逐帧扫敌；else（已命中,
       //  eocDash 10t 冷却窗内）无同向输入 → vx×0.95 回弹衰减——持同向键=「接住」
       //  反弹不衰减（原版 `(!controlLeft || !(velocity.X < 0f)) && (!controlRight
@@ -8791,6 +8796,8 @@ export class Player extends Entity {
       // 不落）。逐参在 emitDashSlideDust 单源（tests/bj595+tests/bj594 直测）。
       // adjustDashDustMethod（坐骑委托改尘位,:21439 等 6 站）本仓无委托面未建模=登记。
       emitDashSlideDust(game.vanillaDust, this, this.dashLatched, this.armorSetDyeVid());
+      // ★606:mod dash 滑行期钩(MidDashEffects 同位)
+      if (modDashLatched?.midDash) modDashLatched.midDash(this, (globalThis as { __swGame?: unknown }).__swGame);
       // 滑行阻尼（:20970-21113）：|vx|>12 → ×0.985；否则 |vx|>max(accRunSpeed,
       // maxRunSpeed) → ×0.94；跌破档位即结束滑行（dashDelay=20）并把 vx 钳回
       // ±maxRunSpeed（:21108-21113）。num13 = max(accRunSpeed,maxRunSpeed)
@@ -8845,8 +8852,10 @@ export class Player extends Entity {
       //  即漂移（原版不可能路径）。m6Glide 期 dashLatched===6 不落任何装备档,门保
       //  留（!m6Glide）作 F1 结构锚。
       const accOverridden = !m6Glide && (this.dashLatched === 2 || this.dashLatched === 3 || this.dashLatched === 4);
+      // ★606:mod dash 档阻尼(decelMult 覆写 num14;v8=0.925/ornate 12.5 速=decel 面近似)
+      const modDashSpec = this.dashLatched >= 7 ? modDashSpecOf(this.dashLatched) : null;
       const dashNum13 = (!m6Glide && this.dashLatched === 3) ? 14 : 12;
-      const dashNum14 = accOverridden ? 0.985 : 0.992;
+      const dashNum14 = modDashSpec?.decelMult ?? (accOverridden ? 0.985 : 0.992);
       const dashNum16 = accOverridden ? 0.94 : 0.96;
       const dashNum17 = m6Ended ? 30 : (!m6Glide && this.dashLatched === 2 ? 30 : 20);   // :21523 num17=(dashDelay)=30（反向收敛特例）;其余按各档
       if (m6Ended) { this.dashDelay = 30; this.mountDash6Active = false; }   // dashTime=0 无独立窗建模
@@ -8952,7 +8961,10 @@ export class Player extends Entity {
           this.mountDash6Active = false;   // 配饰冲刺取代 dash6 语境
           this.dashDir = dir;
           this.dashDelay = -1;          // :21138 进入滑行态
-          this.vx = (eq.dash === 2 ? 14.5 : eq.dash === 3 ? 21.9 : 16.9) * dir;
+          // ★606:mod dash 档(≥7=PlayerDashEffect 类;speed=CalculateDashSpeed)
+          const modDash = eq.dash >= 7 ? modDashSpecOf(eq.dash) : null;
+          this.vx = (modDash ? modDash.speed
+            : eq.dash === 2 ? 14.5 : eq.dash === 3 ? 21.9 : 16.9) * dir;
           // :21588 dash1=16.9 / :21619 dash2=14.5 / :21643 dash3 日曜=21.9
           //（R5-F13：旧 dash3 落 16.9,冲撞初速低 23%）
           // ★组B 批（2026-09-18）dash5 水晶刺客（套装 sb.dashType=5 → Math.max 链入位）
@@ -8964,6 +8976,7 @@ export class Player extends Entity {
           // SolidOrSlopedTile → velocity.X /= 2
           if (this.dashWallAhead(dir)) this.vx /= 2;
           if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
+          if (modDash?.shieldSlam) { this.eocDash = 15; this.eocHitId = -1; }   // ★606:ShieldSlam=接触伤害同 dash2 扫敌
           if (eq.dash === 3) { this.solarDashing = true; this.solarDashConsumed = false; } // :21258-21260 SolarDashStart
           // ★BJ595 起爆尘（DashMovement 起爆段——dash1 :21583-21612 / dash5
           //   :21700-21715,逐参在 emitDashLaunchBurst 单源=tests/bj595 直测;
@@ -11698,6 +11711,9 @@ export class Player extends Entity {
     //   内可再吃 NoCheese 命中,反之亦然），写面 :38674-38683 写回同桶。通道仍走
     //   全局登记表 getGlobalHurtBuckets() 单例（player 不建第二份）；无表的裸测
     //   面退 General 旧路（缺省不变形）。该入参由 NPC/boss 族调用方注入。
+    // ★605:mod 伤害闸(能量盾族——C# HasAnyEnergyShield 位=damagePlayer 头吸伤;
+    //  防御/endurance 计算前,盾伤不吃防御减)
+    dmg = runModDamageGate(this, dmg);
     let effBucketId = -1;
     let effBucketTable: import('../player/HurtCooldownBuckets').HurtCooldownBuckets | null = null;
     {

@@ -8662,6 +8662,15 @@ export class MinionProj extends Entity {
       //  308=10 Main.cs:8711/377=9 :8760/966=3 :8843——旧 age/8 匀速兜底扫遍非姿帧
       //  对三型退役）
       frame = Math.min(this.s53Frame, Math.max(0, frames - 1));
+    } else if (this.projId === 864) {
+      // ★BJ632（2026-10-10）刃杖恒帧 0：AI_169_Smolstars 全函数零 frame 写
+      //  （Projectile.cs:46559-46725 亲读扫描）→ proj.frame 出生后恒 0（projFrames[864]=2
+      //  Main.cs:8804 只是贴图布局声明）——帧 1 = 纯白模（贴图 18×64 下半 340/340 全白,
+      //  帧 0 = 暗刃 avgRGB(87,63,116)）仅作辉光层（Main.cs:31395-31403 value18.Y+=Height
+      //  4 份旋转 A/4,GetFloatingDaggerMinionGlowColor 蓝紫循环色）。旧通用兜底
+      //  age/8 % 2 令主精灵每 8t 切白帧 = 用户实报「一直闪白」（探针 BJ632-D 白块率
+      //  0↔0.108 方波半周期≈8t 吻合）。辉光层本仓未实现 = 伴生登记债（见下注）。
+      frame = 0;
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,

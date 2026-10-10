@@ -293,3 +293,18 @@ export function keybindCodeLabel(code: string): string {
   if (code === 'NumpadSubtract') return 'Num-';
   return code;
 }
+
+/** ★609:mod 键位注册表(action id=`mod:<modId>:<name>`;不入原版 KEYBIND_ACTIONS
+ *  闭集——重绑 UI 行=登记;查询走 bindsOfMod=custom→default 回退) */
+const MOD_KEYBINDS = new Map<string, readonly string[]>();   // id → 默认键
+
+export function registerModKeybind(id: string, defaultKeys: readonly string[]): void {
+  if (!id.startsWith('mod:')) throw new Error(`[keybinds] mod 键位 id 须 mod:<modId>:<name>: ${id}`);
+  MOD_KEYBINDS.set(id, defaultKeys);
+}
+
+export function bindsOfMod(id: string): readonly string[] {
+  const custom = options.data.keybinds?.[id];
+  if (Array.isArray(custom)) return custom;
+  return MOD_KEYBINDS.get(id) ?? [];
+}

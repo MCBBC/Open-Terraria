@@ -108,9 +108,26 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+// ---- ★R13-F2 LS 卫生垫（隐私模式/安全策略下 localStorage 访问同步抛——原语层统一
+//  吞,调用方零感知）：LS 在 BJ615 单写后只是「双写时代历史副本」的兜底读面,不可用
+//  =「无兜底副本」恰是本意而非错误;绝不能让 LS 抛错劫持 IDB 主链（kvDelete 曾因此
+//  跳过 IDB 删除+调用方 FS 清理=隐私面,kvHas 抛曾炸 boot 门）。垫一次性 try/catch,
+//  返 null/false=「LS 不可用」诚实档。 ----
+/** LS 安全读（抛错返 null）。导出供原语层外消费点复用（mainFlow resolveLoadText 的
+ *  lsRead 注入、Store 层 load 三段择源 LS 兜底腿——同一垫,免各处裸 try/catch 漂移）。 */
+export function lsGetSafe(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsHasSafe(key: string): boolean {
+  try { return localStorage.getItem(key) !== null; } catch { return false; }
+}
+function lsRemoveSafe(key: string): void {
+  try { localStorage.removeItem(key); } catch { /* 隐私模式:LS 清不掉=残留副本留,但 IDB 删除与调用方清理面必须继续 */ }
+}
+
 /** 是否有某 key（IndexedDB 或 localStorage） */
 export async function kvHas(key: string): Promise<boolean> {
-  if (localStorage.getItem(key) !== null) return true;
+  if (lsHasSafe(key)) return true;
   try {
     const db = await openDb();
     return await new Promise<boolean>((resolve) => {
@@ -208,7 +225,7 @@ export async function kvSetIdb(key: string, value: string): Promise<'idb' | 'fai
 export async function kvGet(key: string): Promise<string | null> {
   const idbVal = await kvGetIdb(key);
   if (idbVal !== null) return idbVal;
-  return localStorage.getItem(key);
+  return lsGetSafe(key);   // ★R13-F2：裸读曾随 LS 抛炸调用链——垫收
 }
 
 /** 写入：恒走 IndexedDB（★BJ615 2026-10-10 单写方案：摘 LS 写、留 LS 读兜底——
@@ -225,9 +242,11 @@ export async function kvSet(key: string, value: string): Promise<'idb' | 'fail'>
 }
 
 /** 删除（两处都清：IDB + LS——★BJ615 单写后 LS 残留只来自双写时代旧副本,
- *  一并清掉防 kvGet 兜底读到已删数据） */
+ *  一并清掉防 kvGet 兜底读到已删数据）。★R13-F2：首语句裸 removeItem 曾随 LS 抛
+ *  整体炸出——IDB 删除+调用方 FS 备份清理（onDeleted 链）全跳过=已删数据经恢复链
+ *  复活的隐私面;现 LS 垫收,LS 清不掉不劫持 IDB 主删链。 */
 export async function kvDelete(key: string): Promise<void> {
-  localStorage.removeItem(key);
+  lsRemoveSafe(key);
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {

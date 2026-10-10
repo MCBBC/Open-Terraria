@@ -885,7 +885,13 @@ setInterval(() => {
 }, 250);
 
 // ---- 启动 ----
-kvHas('sandboxworld.quicksave').then(async () => {
+// ★R13-F2：kvHas 预查拒绝（LS 抛残余/IDB open 链拒绝——原语层已垫 LS,此处兜链上
+//  残余）≠不 boot——旧实现无 catch,拒绝=then 不执行=启动链整体不跑=黑屏死路。降级
+//  按「无快存档」续走（本 then 不消费返回值,快存档存在性另有 mainFlow 同款预查）。
+kvHas('sandboxworld.quicksave').catch((e) => {
+  console.warn('[boot] quicksave 存在性预查失败（降级续走 boot）', e);
+  return false;
+}).then(async () => {
   // ① 音频开启拦截（所有流程前置，2026-08-24 用户要求）：AC 被自动播放策略
   //    挂起 → 纯黑幕+白色耳机图标+两行提示，点击/按键任意位置恢复音频放行；
   //    未拦截（AC running）或调试旁路/探针（navigator.webdriver）直通

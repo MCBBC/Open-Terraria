@@ -96,13 +96,8 @@ describe('CharacterStore', () => {
     expect(s.list().map((x) => x.id)).toEqual([m2.id, m3.id]);
   });
 
-  it('复制带「副本」后缀', async () => {
-    const s = new CharacterStore();
-    const m = await s.create(defaultAppearance('abc'));
-    const c = await s.copy(m.id);
-    expect(c?.name).toBe('abc 副本');
-    expect(s.list()).toHaveLength(2);
-  });
+  // 「复制带『副本』后缀」用例已随 R13-F5 死码清扫一并移除（copy() 零生产调用方
+  //  删除;本用例是死码影子——CharSelect 复制钮早已改作导出钮,见 CharSelect 头注）
 
   it('重载后索引持久（localStorage 模拟）', async () => {
     const s1 = new CharacterStore();

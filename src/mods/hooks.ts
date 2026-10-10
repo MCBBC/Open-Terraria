@@ -384,6 +384,93 @@ export function runModPlayerThorns(p: unknown, game: unknown, e: Enemy, dmg: num
   }
 }
 
+/** ★609:mod 键位(id=mod:<modId>:<name>;Keybinds mod 注册表) */
+export function registerModKeybindFace(id: string, defaultKeys: readonly string[]): void {
+  // 动态 import 防环(Keybinds 不依赖 hooks)——单键位量级,微任务内生效可接受
+  void import('../core/Keybinds').then(({ registerModKeybind }) => registerModKeybind(id, defaultKeys));
+}
+
+/** ★609:mod 键位按下查询(bindsOfMod 转发;keys=Input.keys 实时集) */
+let bindsOfModFn: ((id: string) => readonly string[]) | null = null;
+export function modKeybindDown(id: string, keys: ReadonlySet<string>): boolean {
+  if (!bindsOfModFn) return false;
+  for (const code of bindsOfModFn(id)) if (keys.has(code)) return true;
+  return false;
+}
+void import('../core/Keybinds').then((m) => { bindsOfModFn = m.bindsOfMod; });
+
+/** ★609:mod parry 窗口门(C# divineProvidence/flameLickedShell 30t 窗——
+ *  mod 自管窗态;Game 接触 parry 门=shieldParry ‖ 本门;任一 true=可 parry) */
+const modParryGates = new Map<string, (player: unknown) => boolean>();
+
+export function registerModParryGate(modId: string, fn: (player: unknown) => boolean): void {
+  modParryGates.set(modId, fn);   // 单注册(多件=同闭包连判)
+}
+
+/** ★611:parry 成功钩(canParryMod 受理后派发——反冲弹/音效/屏幕震动族;
+ *  mod 自管一次性效果) */
+const modParrySuccess = new Map<string, (player: unknown, game: unknown) => void>();
+
+export function registerModParrySuccess(modId: string, fn: (player: unknown, game: unknown) => void): void {
+  modParrySuccess.set(modId, fn);   // 单注册(多件=同闭包连写)
+}
+
+export function runModParrySuccess(player: unknown, game: unknown): void {
+  if (modParrySuccess.size === 0) return;
+  for (const fn of modParrySuccess.values()) {
+    try { fn(player, game); } catch (err) { console.warn('[mod-hooks] parrySuccess', err); }
+  }
+}
+
+export function runModParryActive(player: unknown): boolean {
+  if (modParryGates.size === 0) return false;
+  for (const fn of modParryGates.values()) {
+    try { if (fn(player)) return true; } catch (err) { console.warn('[mod-hooks] parryGate', err); }
+  }
+  return false;
+}
+
+/** ★606:mod dash 类(C# PlayerDashEffect 同位——Calamity 自定义冲刺;
+ *  slot=dashType 数 ≥7(6=坐骑段);speed=初速;decelMult=滑行阻尼覆写;
+ *  shieldSlam=接触伤害(dash2 同款 eoc 扫敌);midDash=滑行期逐帧钩)
+ *  装备侧经 acc.dash=max 链入(聚合链既有语义) */
+export interface ModDashSpec {
+  speed: number;
+  decelMult?: number;
+  shieldSlam?: boolean;
+  midDash?: (p: unknown, game: unknown) => void;
+}
+const modDashTypes = new Map<number, ModDashSpec>();
+
+export function registerModDashType(slot: number, spec: ModDashSpec): void {
+  if (slot < 7) throw new Error(`[mod-hooks] dash slot 须 ≥7(1-3 原版/5 水晶/6 坐骑): ${slot}`);
+  modDashTypes.set(slot, spec);
+}
+
+export function modDashSpecOf(slot: number): ModDashSpec | null {
+  return modDashTypes.get(slot) ?? null;
+}
+
+/** ★605:mod 伤害闸(C# 能量盾类同位——HasAnyEnergyShield damagePlayer 头吸伤;
+ *  fn(player, dmg)→剩余伤(可 0);Player.damage 头派发[防御计算前];
+ *  多 mod 连减;零注册零成本) */
+const damageGates = new Map<string, (player: unknown, dmg: number) => number>();
+
+export function registerModDamageGate(modId: string, fn: (player: unknown, dmg: number) => number): void {
+  damageGates.set(modId, fn);   // 单注册(多盾=同闭包连减;追加面=登记)
+}
+
+export function runModDamageGate(player: unknown, dmg: number): number {
+  if (damageGates.size === 0) return dmg;
+  for (const fn of damageGates.values()) {
+    try {
+      const r = fn(player, dmg);
+      if (typeof r === 'number' && Number.isFinite(r) && r >= 0) dmg = r;
+    } catch (err) { console.warn('[mod-hooks] damageGate', err); }
+  }
+  return dmg;
+}
+
 /** ★594:mod 受击钩(C# OnHurt face 同位——Player.damage 伤害落地后派发;
  *  ctx={player, game, dmg=实扣};rBrain 墨云/墨炸弹/百年魔典等受击响应面;
  *  多 mod 逐个派发,零注册零成本) */
@@ -801,6 +888,10 @@ export function _resetModHooksForTests(): void {
   onHitAny.clear();
   dodgeRolls.clear();
   playerHurts.clear();
+  damageGates.clear();
+  modDashTypes.clear();
+  modParryGates.clear();
+  modParrySuccess.clear();
   tileInteract.clear();
   playerThorns.clear();
   healItem.clear();

@@ -478,9 +478,11 @@ export async function restoreFromBackup(idbKey: string): Promise<FsBackupRestore
 
 /** 幽灵扫描联动（BJ611 scanEvictedSaves 消费点）：对被驱逐条目逐键尝试自动恢复。
  *  ★BJ618 件3：kind 扩 'quicksave'（扫描补探测项——恢复面=quicksave.json 专用支）。
+ *  ★R13-F4：kind 扩 'playerstate'（扫描面补 playerstate 探测——恢复面=同 (kind,id)
+ *  轮转组最新快照,backupTargetOfKey 本就映射 sandboxworld.playerstate.<id>）。
  *  attempted=false=特性未启用/未授权（无尝试,不弹恢复相关提示）。 */
 export async function fsBackupRestoreEvicted(
-  entries: ReadonlyArray<{ kind: 'world' | 'player' | 'quicksave'; id: number }>,
+  entries: ReadonlyArray<{ kind: 'world' | 'player' | 'playerstate' | 'quicksave'; id: number }>,
 ): Promise<{ attempted: boolean; restored: number }> {
   if (entries.length === 0) return { attempted: false, restored: 0 };
   const gate = await backupGate();
@@ -489,6 +491,7 @@ export async function fsBackupRestoreEvicted(
   for (const en of entries) {
     const key = en.kind === 'world' ? `sandboxworld.world.${en.id}`
       : en.kind === 'quicksave' ? 'sandboxworld.quicksave'
+      : en.kind === 'playerstate' ? `sandboxworld.playerstate.${en.id}`
       : `sandboxworld.player.${en.id}`;
     const r = await restoreFromBackup(key);
     if (r.ok) restored++;
