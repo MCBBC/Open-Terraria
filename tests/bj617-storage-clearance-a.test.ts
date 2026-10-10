@@ -189,10 +189,10 @@ describe('BJ617 A组 件1：SessionLock Web Locks 会话锁', () => {
     // ★BJ618 件5（BJ617 自登记债清偿）：本锚原形 `not.toContain('kvGetIdb')` 随
     // ensureLoaded 载入读面三段择源（IDB → FS 恢复链 → LS）收窄——用户明令否决的是
     // 【写前重读+合并】面（BJ617 件1 拍板语境）,非载入读面（probe F4 后半同族病）。
-    // 锚改形：kvGetIdb 仅限 import+ensureLoaded 读面两处,写面（saveIndex/register/
-    // importSlot/duplicate）零出现=写前重读仍被否决。
+    // 锚改形：kvGetIdb 仅限读面（import+ensureLoaded 载入读面+R13-F1 load 数据读面
+    // 三处）,写面（saveIndex/register/importSlot/duplicate）零出现=写前重读仍被否决。
     const idbReadLines = ws.split('\n').filter((l) => l.includes('kvGetIdb'));
-    expect(idbReadLines.length, 'kvGetIdb 仅 import+ensureLoaded 载入读面两处').toBe(2);
+    expect(idbReadLines.length, 'kvGetIdb 仅读面三处（import/ensureLoaded/load——零写前重读）').toBe(3);
     expect(idbReadLines.join('\n'), '写前重读面仍被否决——写面零 kvGetIdb').not.toMatch(/saveIndex|register\(|importSlot|duplicate/);
     expect(ws).toContain('const meta: WorldMeta = { ...rest, id: nextId++, createdAt: Date.now()');
     expect(ws).toContain('const where = await kvSet(INDEX_KEY, JSON.stringify(this.index));');

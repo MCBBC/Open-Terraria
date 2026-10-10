@@ -39,8 +39,9 @@ describe('v6 二进制快路径退役态（★BJ90 债④,BJ71 登记②）', ()
     expect(s).not.toMatch(/kvSetBinary|packSaveBinary|BinarySave/);
     // 快照写=JSON 单写。★BJ144（2026-09-18）：不再 `void kvSet(...)` fire-and-forget——
     // 改 quickWrite 捕获、纳入 doSave 全链 settle（quitToMenu await 到落盘后才拆台）
+    // ★R13-F3：charWrite（.plr 段）并入第三腿——BJ144 契约字面兑现
     expect(s).toMatch(/kvSet\(QUICK_SAVE_KEY, json\)/);
-    expect(s).toMatch(/await Promise\.all\(\[quickWrite, slotWrite\]\)/);   // 持久化尾必须被 await
+    expect(s).toMatch(/await Promise\.all\(\[quickWrite, slotWrite, charWrite\]\)/);   // 持久化尾必须被 await
   });
 
   it('读缝：worldGen.worker 二进制分支不复植（kvGetIdb 直读 JSON）', () => {

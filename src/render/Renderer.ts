@@ -1076,7 +1076,8 @@ import { MAP_SNOW_TYPES, mapSnowinessB, snowDirtBg, snowRockBg, sceneSnowinessB 
 import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
 import { visEffectFrames } from '../entities/Enemy';
-import { FF_VXSDIR_GROUP } from '../entities/Enemy';   // ★BJ588:FindFrame case 48..664 死区档 15 型族（单源表）
+import { FF_VXSDIR_GROUP, FF_VXSDIR_EX } from '../entities/Enemy';   // ★BJ588:FindFrame case 48..664 死区档 15 型族（单源表）
+// ★C12/R11:FindFrame sdir 写点扩面族（六案组 11 型,专属支各异——单源表见 Enemy.ts）
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { whiteK811 } from '../entities/Dart';   // ★BJ245：811 光地板 k 单源（Dart 白化同式）
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
@@ -11452,7 +11453,7 @@ export class Renderer {
         else if (stR === 19) ctx.rotate(e.visAngle);   // AI_019 蚁狮 69:rotation=atan2(瞄准)+π/2 钳±0.8(cs:24477-24486);spriteDirection 恒默认→禁镜像(rotationDriven)
         else if (stR === 17 && idR === 61) ctx.rotate(e.vx * 0.1);  // 秃鹫 FindFrame(cs:74235-74240):rotation=vx×0.1 每帧含飞行;spriteDirection=direction 仍镜像——曾误挂 aiStyle5 分支=死代码(61 是 aiStyle17)
         else if (stR === 22) ctx.rotate(e.visAngle);   // AI_022 幽灵族:169 冰雪元素瞄准角(cs:24970-24979+spriteDirection=direction)/268 灵液粘怪 vx×0.1(cs:25004)——AI 已写 visAngle 但渲染分支未接(2026-08-20 旋转三件套审计);其余族员原版不旋转(恒 0)
-        else if (stR === 44) ctx.rotate(e.visAngle);   // AI_044 飞鱼/飞蚁狮 224/509/581/587——findFrameRotation 层喂值:509/581 vx×0.1(cs:31107/:31140)、224/587 ±vy×0.2(FindFrame cs:75460-75468);spriteDirection 仍镜像
+        else if (stR === 44) ctx.rotate(e.visAngle);   // AI_044 飞鱼/飞蚁狮 224/509/581/587——findFrameRotation 层喂值:509/581 vx×0.1(cs:31107/:31140)、224/587 ±vy×0.2(FindFrame cs:75559-75568);镜像:224/587 走 ffSdirMirror（★C12/R11-F3 补 sdir）,509/581 仍通用 facing 门
         else if (stR === 16) ctx.rotate(e.visAngle);   // AI_016 鱼族:通用 vy×dir×0.1 钳±0.2/692 貌鱼瞄准钳±0.3/海豚跃出 vy×dir×0.3 钳±2π/5+空中翻滚(cs:23664-24076 尾段);spriteDirection 仍镜像
         else if (stR === 39) ctx.rotate(e.visAngle);   // AI_039 陆龟族 153/154/417:弹射态恒速自旋(ai[2]=0.3/t)、下落态衰减、复位归零(cs:29562-29645);spriteDirection 仍镜像
         else if (stR === 9) ctx.rotate(e.visAngle);    // AI_009 弹跳球族:rotation += 0.1/0.4×direction(bouncingBallAI 已写 cs:21473/:21549);spriteDirection 恒默认→禁镜像(rotationDriven)
@@ -11577,7 +11578,11 @@ export class Renderer {
         // 缺省 -1 ≙ 原版 Entity 缺省 :6522）——此处只按 Main.cs:23357-23361 `spriteDirection==1`
         // 镜像,禁通用 facing 门（batAI/ghostAI 的 facing=原版 direction≠显示面,随 AI 重瞄
         // 逐帧翻转;蜂 210/211 此前全仓零写点+通用门缺省 1=恒镜像面,本门翻正）。
-        const ffSdirMirror = FF_VXSDIR_GROUP.has(idR);
+        // ★C12/R11（F1-F3）扩面：FF_VXSDIR_EX 六案组 11 型（558-560 飞龙/574-575 滑翔怪
+        // ——修前走通用 facing 门且 AI 写 facing=−sign(vx) → flip⟺vx<0 反极性;330 骚灵/
+        // 224·587 飞鱼/612·613 水黾/423 进化兽〔反极性档,ffSdir=−sign(vx)〕——写点形态
+        // 见 Enemy.ts FF_VXSDIR_EX 注）。
+        const ffSdirMirror = FF_VXSDIR_GROUP.has(idR) || FF_VXSDIR_EX.has(idR);
         if (!rotationDriven && !slimeNoMirror && !ffSdirMirror && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !revFlipMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg || fairyMirror || revFlipMirror) && e.facing < 0) ctx.scale(-1, 1);
         if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
@@ -11736,6 +11741,9 @@ export class Renderer {
         }
         if (!gRotDriven) {
           if (gid === 546) gMirror = e.facing < 0;           // 546 反翻族（:7841-7842 同款）
+          // ★C12/R11:ffSdir 族（BJ588 组+C12 扩面）残影镜像与本体同源（显示面=ffSdir,
+          // 残影镜像消费同字段——修前残影走 facing=与本体新门脱钩,558-560/574/575 反极性）
+          else if (FF_VXSDIR_GROUP.has(gid) || FF_VXSDIR_EX.has(gid)) gMirror = e.ffSdir === 1;
           else gMirror = e.facing > 0;
         }
         if (e.vanillaId === 50) {

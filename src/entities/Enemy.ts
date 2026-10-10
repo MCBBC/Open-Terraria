@@ -3498,7 +3498,10 @@ export class Enemy extends Entity {
       if (this.koboldFrameY < 2) { this.koboldFrameY = 2; this.koboldFC = 0; }
       const delay = this.koboldFrameY >= 5 ? 8 : 4;      // :68682-68686（推进前帧号定档）
       // 口部锚 vector4 = Center + (56*sdir, -30).RotatedBy(rotation)（:68687）
-      const sdir = -this.facing;                          // ≙ spriteDirection=sign(vx) 死区档
+      const sdir = this.ffSdir;                           // ★C12/R11-F2 单源对齐：FindFrame 层
+      //  sdir=sign(vx) 死区档（:68661-68668,本支 :68663-68668 写→:68687 消费同序,
+      //  本仓 findFrameRotation 内 ffSdir 写先于本调用同拍同值;旧式 −facing 全链
+      //  等值〔AI 每 tick facing=−sign(vx)〕但语义两面脱钩,随单源收编）
       const rot = Math.atan2(this.vy, this.vx);           // ≙ npc.rotation（AI :66120 直写值）
       const mx = 56 * sdir, my = -30;
       const cosR = Math.cos(rot), sinR = Math.sin(rot);
