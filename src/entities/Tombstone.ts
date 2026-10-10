@@ -21,6 +21,8 @@
 //   style 映射（Projectile.cs:25681-25687）：43→0；201-205→1-5；527-531→6-10（Tiles_85 偶数列）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { Lang } from '../i18n/Lang';
+import { DEFAULT_CULTURE_NAME } from '../i18n/GameCulture';
 import { MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE_BY_KEY } from '../data/tiles';
@@ -76,9 +78,36 @@ function pickStyle(coinsOwned: number): number {
   return graveTypeToStyle(type);
 }
 
-/** 原版长日期（en: "MMMM d, yyy"；zh culture: ToLongDate） */
-function longDate(): string {
-  return new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+/** .NET LongDatePattern 是否带星期（Player.cs:39458 `ToString("D")` 各 culture 长日期,
+ *  Windows 文化数据逐文化核对）：de/it/fr/es/pt-BR/ko 带星期（dddd）;ru/pl/ja/zh 系
+ *  不带。en-US 原版特例式 "MMMM d, yyy" 同样不带（Player.cs:39460 覆写）。 */
+const LONGDATE_WEEKDAY = new Set(['de-DE', 'it-IT', 'fr-FR', 'es-ES', 'pt-BR', 'ko-KR']);
+
+/** ★C12/R11-F4 原版长日期（Player.cs:39455-39461）：英文文化特例 `ToString("MMMM d, yyy")`
+ *  （yyy ≥1000 年 ≡ yyyy）;余文化 `ToString("D")`（culture 长日期——带星期与否逐文化对齐
+ *  LONGDATE_WEEKDAY 表）。修前硬编码 zh-CN=活动语言无关（英文化死亡日期仍中文式）。
+ *  culture 入参可显式注入（测试）;缺省按活动语言（Lang.activeCultureName,i18n 未就绪
+ *  落 DEFAULT_CULTURE_NAME=en-US ≙ 原版 GameCulture 默认态）。 */
+export function longDate(culture?: string): string {
+  const cult = culture ?? Lang.activeCultureName ?? DEFAULT_CULTURE_NAME;
+  const now = new Date();
+  if (cult === 'en-US') {
+    return now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+  const opts: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+  if (LONGDATE_WEEKDAY.has(cult)) opts.weekday = 'long';
+  return now.toLocaleDateString(cult, opts);
+}
+
+/** 墓碑随机游走修正（Player.cs:39415-39417 / NPC.cs:79091-79092 同式）：init
+ *  Next(-35,36)×0.1，|num|<2 环内则 += Next(-30,31)×0.1 直至出环（|num|∈[2,3.5]）。
+ *  ★C12/R11-F5 拆出单源：玩家支游走在先（:39415）、城镇支在抛币后（:79091）——
+ *  旧式共享前置计算把城镇支结构序钉成 游走→抛币→款式 = 与原版序矛盾
+ *  （Math.random 域行为不可观,结构/注对齐防未来爆红）。 */
+function tombstoneWander(): number {
+  let num = (Math.floor(Math.random() * 71) - 35) * 0.1;
+  while (num < 2 && num > -2) num += (Math.floor(Math.random() * 61) - 30) * 0.1;
+  return num;
 }
 
 export class Tombstone extends Entity {
@@ -132,22 +161,25 @@ export class Tombstone extends Entity {
      *    ④damage/knockBack 恒 0（NewProjectile 第 6/8 参直写 0,Projectile.cs:10920-10921
      *    参数覆写在 SetDefaults 之后——SetDefaults FTW 70/10 面不适用,纯物理恒）；
      *    ⑤miscText = 死亡文本（:79107 deathText.ToString(),无日期——玩家面
-     *    deathText+"\n"+ToLongDate :39455-39461）。掷序 1:1 = 抛币→游走→款式→vx→vy。 */
+     *    deathText+"\n"+ToLongDate :39455-39461）。掷序 1:1 = 抛币→游走→款式→vx→vy
+     *    （★C12/R11-F5：结构序修前实为 游走→抛币→款式,与原版序矛盾,本刀对齐;
+     *    玩家面原版序=游走在先 Player.cs:39415,两支分野由 tombstoneWander 拆单源承载）。 */
     townNpcType = 0) {
     super();
     this.epitaph = townNpcType > 0 ? deathText : `${deathText}\n${longDate()}`;
-    // DropTombstone L38446-38449：随机游走修正直到 |num|≥2（范围 ±3.5）
-    let num = (Math.floor(Math.random() * 71) - 35) * 0.1;
-    while (num < 2 && num > -2) num += (Math.floor(Math.random() * 61) - 30) * 0.1;
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
     if (townNpcType > 0) {
-      // :79086-79090 抛向抛币（±0.1）→ :79092-79102 款式 → :79103-79105 弹速
-      const flip = (Math.floor(Math.random() * 2) === 0 ? -1 : 1) * 0.1;
-      const roll = Math.floor(Math.random() * 6);                // :79092 Next(6) 单掷同用
+      // ★C12/R11-F5 掷序 1:1（NPC.cs:79086-79105）：抛币（:79086-79090 Next(2)==0→−0.1）
+      // → 游走（:79091-79092,与玩家面同式）→ 款式（:79093-79102）→ 弹速（:79103-79105）。
+      // 修前结构序=游走→抛币→款式（共享 num 前置计算所钉,bj587 测试注「BJ562 钉序」
+      // 同误——本刀双正）。
+      const flip = Math.floor(Math.random() * 2) === 0 ? -0.1 : 0.1;   // :79086-79090 抛币 ±0.1
+      const num = tombstoneWander();                                   // :79091-79092
+      const roll = Math.floor(Math.random() * 6);                      // :79093 Next(6) 单掷同用
       const type = (townNpcType === 17 || townNpcType === 441)
-        ? 527 + Math.floor(Math.random() * 5)                    // :79097-79102 恒金
-        : (roll !== 0 ? 200 + roll : 43);                        // :79093-79096 → 201-205/43
+        ? 527 + Math.floor(Math.random() * 5)                          // :79097-79102 恒金
+        : (roll !== 0 ? 200 + roll : 43);                              // :79093-79096 → 201-205/43
       this.style = graveTypeToStyle(type);
       // Next(10,30)*num + num2（Next 全 [min,max) 半开——上限取 rand*跨度）
       this.vx = (Math.floor(Math.random() * 20) + 10) * flip + num;
@@ -156,6 +188,9 @@ export class Tombstone extends Entity {
       this.knockBack = 0;
       return;
     }
+    // 玩家面（Player.cs:39415-39462）：游走在先（:39415）→ 款式（:39417 Next(6)/高币
+    // :39425 Next(5)+527）→ 弹速;★BJ587 整数半开界（下一式注释）。
+    const num = tombstoneWander();
     this.style = pickStyle(coinsOwned);
     // :39437 非 FTW 抛射 / 同行三目 getGood 分支 ×1.5——Next(10,30)/Next(-40,-20) 整数
     // 半开界 = 10..29 / -40..-21（各 20 值；★BJ587 玩家面 off-by-one 清偿：旧 *21 乘式

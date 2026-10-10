@@ -59,13 +59,19 @@ function multiplyRGBA(a: readonly [number, number, number, number],
   ];
 }
 
-/** :3603-3605 星旋支——MultiplyRGBA(新 Color(Lerp(One,(0,.12,.16,0),1-s))) */
+/** :3603-3605 星旋支——MultiplyRGBA(新 Color(Lerp(One,(0,.12,.16,0),1-s)))。
+ *  ★C13-F1 判语（2026-10-11 oracle 重产）：Lerp(One,(0,.12,.16,0),t) 逐分量
+ *  = One+(target−One)·t——W 分量 = 1+(0−1)·t = 1−t = s（t=1−s）【非恒 1】;
+ *  MultiplyRGBA（Utils.cs:2116-2120）第四式 `(byte)(A·b.A/255f)` 确乘 A 通道。
+ *  旧转录 `fnaColorByte(1)` + 钉值 [7,37,47,255] 系「目标 W=0」误读为「因子 W=1」,
+ *  反编译 :3602-3604 亲读 + Utils.MultiplyRGBA 亲读双锚翻案。深档 s=0.03：
+ *  White×[7,37,47,7]（A=trunc(0.03·255)=7 与 R 同式同源 1f−(1f−0.03f)）。 */
 function vanillaVortex(c: readonly [number, number, number, number], stealth: number):
   [number, number, number, number] {
   const s = stealth < 0.03 ? 0.03 : stealth;
   const k = 1 - s;
   const factor: [number, number, number, number] = [
-    fnaColorByte(1 - k), fnaColorByte(1 - 0.88 * k), fnaColorByte(1 - 0.84 * k), fnaColorByte(1),
+    fnaColorByte(1 - k), fnaColorByte(1 - 0.88 * k), fnaColorByte(1 - 0.84 * k), fnaColorByte(1 - k),
   ];
   return multiplyRGBA(c, factor);
 }
@@ -87,7 +93,7 @@ const COLOR_SAMPLES: ReadonlyArray<readonly [number, number, number, number]> = 
   [50, 50, 100, 20],      // 5293 color5
   [255, 255, 255, 200],   // 5353 color5
   [250, 250, 250, 100],   // 翼叠画族基色
-  [7, 37, 47, 255],       // 星旋深档因子复乘（幂等性探针）
+  [7, 37, 47, 255],       // 旧钉值反例输入（A=255 已不存在于新因子域——复乘面守卫）
 ];
 
 // ===================== ① 触发门 + 逐档系数锁 =====================
@@ -133,23 +139,28 @@ describe('BJ599 ①触发门（:3591-3593 flag|flag2 + 双套旗,真值表）', 
     expect(dim({ drawUseStyle: true, ranged: true, shroomiteSet: true, stealth: 1.5 })).toBeNull();
   });
 
-  it('钳档 0.03 钉值（:3596/:3604——s<0.03 → 0.03）：蘑菇矿 [7,7,30,7] / 星旋 [7,37,47,255]', () => {
+  it('钳档 0.03 钉值（:3596/:3604——s<0.03 → 0.03）：蘑菇矿 [7,7,30,7] / 星旋 [7,37,47,7]', () => {
+    // ★C13-F1 oracle 重产（2026-10-11）：星旋 A 因子 = Lerp W 分量 = 1−t = s,
+    //  MultiplyRGBA 确乘 A（Utils.cs:2116-2120 第四式）——旧钉值 [7,37,47,255]
+    //  系「目标 W=0」误读为「因子 W=1」（详见 vanillaVortex 判语）
     expect(applyStealthToColor([255, 255, 255, 255],
       dim({ drawHoldStyle: true, shroomiteSet: true, stealth: 0 })!)).toEqual([7, 7, 30, 7]);
     expect(applyStealthToColor([255, 255, 255, 255],
-      dim({ drawHoldStyle: true, vortexSet: true, stealth: 0 })!)).toEqual([7, 37, 47, 255]);
+      dim({ drawHoldStyle: true, vortexSet: true, stealth: 0 })!)).toEqual([7, 37, 47, 7]);
   });
 
-  it('中档钉值：s=0.5 蘑菇矿 [127,127,139,127]（B×(1+10s)/11 保蓝）/ 星旋 [127,142,147,255]', () => {
+  it('中档钉值：s=0.5 蘑菇矿 [127,127,139,127]（B×(1+10s)/11 保蓝）/ 星旋 [127,142,147,127]', () => {
     expect(applyStealthToColor([255, 255, 255, 255],
       dim({ drawHoldStyle: true, shroomiteSet: true, stealth: 0.5 })!)).toEqual([127, 127, 139, 127]);
     expect(applyStealthToColor([255, 255, 255, 255],
-      dim({ drawHoldStyle: true, vortexSet: true, stealth: 0.5 })!)).toEqual([127, 142, 147, 255]);
+      dim({ drawHoldStyle: true, vortexSet: true, stealth: 0.5 })!)).toEqual([127, 142, 147, 127]);
   });
 
-  it('星旋 A 面 255 恒不变（暗青只走 RGB 面,与本体减色 A×s 分域——:3605 MultiplyRGBA 因子 A=1）', () => {
+  it('星旋 A 面 = s 渐隐（与 R 同因子——:3602-3604 Lerp W 分量 1−t=MultiplyRGBA 乘 A,', () => {
+    // ★C13-F1 翻案后与蘑菇矿 A×s 同域：A=trunc(0.1·255)=25
     const d = dim({ drawHoldStyle: true, vortexSet: true, stealth: 0.1 })!;
-    expect(applyStealthToColor([255, 255, 255, 255], d)[3]).toBe(255);
+    expect(d.vortexBytes![3]).toBe(25);
+    expect(applyStealthToColor([255, 255, 255, 255], d)[3]).toBe(25);
     const s = dim({ drawHoldStyle: true, shroomiteSet: true, stealth: 0.1 })!;
     expect(applyStealthToColor([255, 255, 255, 255], s)[3]).toBeLessThan(255);   // 蘑菇矿 A×s 渐隐
   });

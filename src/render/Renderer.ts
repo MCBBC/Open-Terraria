@@ -11517,7 +11517,7 @@ export class Renderer {
           ctx.rotate(e.visAngle);
           if (e.snailSdir === 1) ctx.scale(-1, 1);
         }
-        else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
+        else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(558-560/574-575:FindFrame 层喂值——★C12/R11-F1/F2 双档 ai0==2 折叠速度角/余 vx×0.1〔558-560〕与 AI 直写速度角〔574/575,AngleTowards 微推并入〕;镜像走 ffSdirMirror 门=修前通用 facing 门反极性翻正)/AI_110 Betsy 551(cs:62714 AngleTowards;spriteDirection 仍通用 facing 镜像)
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection=-direction 反翻(见 revFlipMirror;:47700,旧注"仍镜像"=误)
         else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
         else if (stR === 10) ctx.rotate(e.visAngle);   // AI_010 诅咒头骨族:rotation=atan2(v)(vx<0 再+π,cs:21713-21721;694 伪装/觉醒态钉 0);spriteDirection 仍镜像→不进 rotationDriven

@@ -202,12 +202,14 @@ describe('BJ587 债2：aiStyle17 FTW 慢速清伤（Projectile.cs:25644-25648）
 
   it('BJ562 城镇面出膛界零回归：Next(10,30)/Next(-40,-20) 整数半开界（*20 式原样）', () => {
     let t!: Tombstone;
-    // 城镇掷序（BJ562 钉）：游走init/游走步/抛币 Next(2)/款式 Next(6)/vx/vy
-    withRng([0.5, 0.82, 0, 0.99999, 0.99999, 0.99999], () => {
+    // ★C12/R11-F5 掷序勘正（原版序 NPC.cs:79086-79092）：抛币 Next(2)/游走init/
+    // 游走步/款式 Next(6)/vx/vy——旧注「BJ562 钉：游走→抛币→款式」系按修前结构序
+    // 误钉（共享 num 前置计算所钉）,原版城镇支抛币在游走前,测试注随结构同刀订正。
+    withRng([0, 0.5, 0.82, 0.99999, 0.99999, 0.99999], () => {
       t = new Tombstone(0, 0, 0, 'x', 0, false, 22);
     });
     expect(t.style).toBe(5);                         // roll 5 → 205
-    expect(t.vx).toBeCloseTo(29 * -0.1 + NUM, 10);   // 29 上界在现（30 不现）
+    expect(t.vx).toBeCloseTo(29 * -0.1 + NUM, 10);   // 29 上界在现（30 不现）;抛币 −0.1+游走 +2.0
     expect(t.vy).toBeCloseTo(-2.1, 10);              // -21 上界在现（-20 不现）
   });
 });

@@ -349,7 +349,10 @@ export function isSolarFlareFullSet(head: number, body: number, legs: number): b
  *  渲染端镜像空间直接画,无需乘向。 */
 export function solarOutlineStamps(ghostFade: number): Array<{ ox: number; oy: number; k: number }> {
   const d = ghostFade * 5;                                       // :361 num2
-  const k = 1 - ghostFade;                                       // shadow=ghostFade 全通道乘
+  // ★C13-F9 注释订正（实现对注释错,2026-10-11）：乘子 = 1−shadow = 1−ghostFade
+  //  （DrawPlayer shadow=ghostFade → GetImmuneAlphaPure Player.cs:54834-54846
+  //  `num *= 1f - alphaReduction`——非「shadow=ghostFade 全通道乘」）
+  const k = 1 - ghostFade;
   return [
     { ox: d, oy: 0, k },                                         // default: (num2,0)
     { ox: -d, oy: 0, k },                                        // case 1: (−num2,0)

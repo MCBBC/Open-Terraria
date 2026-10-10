@@ -15,7 +15,9 @@
  *                   new Vector4(0f,0.12f,0.16f,0f), 1f - s)));
  *       }
  *     两分支按序串联（套装互斥但实现保留序）；B 通道乘 num2=(1+10s)/11 > s =
- *     蘑菇矿潜行保蓝偏色；星旋 RGB Lerp 向 (0,0.12,0.16) 暗青、A 面不动。
+ *     蘑菇矿潜行保蓝偏色；星旋 RGB Lerp 向 (0,0.12,0.16) 暗青、A 因子 = Lerp W 分量
+ *     = 1−t = s 同乘渐隐（MultiplyRGBA Utils.cs:2116-2120 确乘 A 通道——★C13-F1
+ *     翻案:旧注「A 面不动」系 Lerp 目标 W=0 误读为因子 W=1）。
  *   · 调用点（DrawPlayer_27_HeldItem）：drawinfo.itemColor(:3193,主贴图经
  *     heldItem.GetAlpha(itemColor) 消费)、glow color(:3272)、glowMask color3(:3475)、
  *     3788 color4(:3483)、5670/5671 phase(:3506)、火苗 color5(:3574)。
@@ -73,9 +75,11 @@ export function heldItemStealthDim(args: {
   }
   if (args.vortexSet) {
     const k = 1 - s;                                     // Lerp 张量 1-s
-    // Lerp(One,(0,0.12,0.16,0),k) = (1-k, 1-0.88k, 1-0.84k, 1) → FNA (byte)Clamp(v*255)
+    // Lerp(One,(0,0.12,0.16,0),k) = (1-k, 1-0.88k, 1-0.84k, 1-k) → FNA (byte)Clamp(v*255)
+    // ★C13-F1：W 分量 = Lerp(1,0,k) = 1-k ≡ s（与 R 同式同源,原版 f32 结构
+    //   1f-(1f-num3)）——旧值恒 255 系误读;A 渐隐在深档 = White×[7,37,47,7]
     vortexBytes = [truncByte((1 - k) * 255), truncByte((1 - 0.88 * k) * 255),
-      truncByte((1 - 0.84 * k) * 255), 255];
+      truncByte((1 - 0.84 * k) * 255), truncByte((1 - k) * 255)];
   }
   return { shroomiteRaw, vortexBytes };
 }

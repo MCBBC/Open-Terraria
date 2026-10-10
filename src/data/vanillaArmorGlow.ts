@@ -301,13 +301,18 @@ export function armorGlowBakeBoost(
     boost: (boost[0] > 1e-4 || boost[1] > 1e-4 || boost[2] > 1e-4) ? boost : undefined,
   };
 }
-/** 双抖动档区间（Grox 族：RandomInt(−10,10)×0.125 :2392/:1563/:227 支） */
+/** 双抖动档区间（Grox 族：Main.rand.Next(−10,10)×0.125 → [−1.25,1.125] 离散 20 档;
+ *  :2392/:1564/:68/:95/:1005/:1487 六站同式。★C13-F9 登记:本仓 Math.random 连续
+ *  [−1.25,1.25] 近似——原版每 miscCounter/4 帧重掷 LCG 种子的相位面未建模,登记） */
 const JITTER_125: [number, number] = [-1.25, 1.25];
 /** 学徒火头（head 211 :2412-2413）：x=RandomInt(−10,11)×0.2、y=RandomInt(−14,1)×0.15 */
 const JITTER_APPR_HEAD: [[number, number], [number, number]] = [[-2, 2], [-2.1, 0]];
-/** 学徒火身（body 205 :3674-3675 抖在 origin → 位置反向）：x=−RandomInt(−10,11)×0.2、
- *  y=−RandomInt(−10,1)×0.15 */
-const JITTER_APPR_BODY: [[number, number], [number, number]] = [[-2, 2], [0, 1.5]];
+/** 学徒火身（body 205 :3673-3683）：抖在 position 位（同本体式,与 head 211 同构——
+ *  DrawData position 项 `+ new Vector2(bodyFrame.Width/2 + num3, bodyFrame.Height/2 + num4)`,
+ *  origin=bodyVect 不动 → 视觉偏移 = +num3/+num4 无反向）：x=RandomInt(−10,11)×0.2、
+ *  y=RandomInt(−10,1)×0.15=[−1.5,0]（RandomInt(min,max)=[min,max) 含下不含上,Utils.cs:2448）。
+ *  ★C13-F8 翻案:旧值 y=[0,1.5] 系「抖在 origin → 位置反向」误读（原版抖在 position 位） */
+const JITTER_APPR_BODY: [[number, number], [number, number]] = [[-2, 2], [-1.5, 0]];
 
 function glowTex(mask: number): string {
   return `vanilla/Glow_${mask}.png`;
