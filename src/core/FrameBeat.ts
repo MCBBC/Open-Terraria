@@ -817,6 +817,12 @@ export class FrameBeat {
     return 1000 / tier;
   }
 
+  /** 现役档周期快捷读取(★v9.14 呈现链用:juddersmooth 跳槽判定;零分配——snapshot
+   *  免)。cap≤0(跟满/未锚定)=0=调用方旁路语义 */
+  tierPeriodNow(): number {
+    return this.cap > 0 ? 1000 / this.effTier : 0;
+  }
+
   /** 拍地板:最小 k 使 k×vsync ≥ (1−容差)×目标周期(整数倍折算+估计噪声容差;
    *  cap=0/cap≥屏率 → 拍 1(全速);cap60@120Hz 拍 2;cap30@120Hz 拍 4;cap30@60Hz 拍 2) */
   minK(vsyncPeriod = this.vsyncPeriod, cap = this.cap): number {

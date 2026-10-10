@@ -7141,6 +7141,16 @@ export class MinionProj extends Entity {
           side *= 2;                      // :65978 height *= 2（width=height，封顶 999）
           this.auraSide = Math.min(999, side);
           this.auraCy = centerY; // base.Center = center（:65980）
+          // ★BJ606（2026-10-10 用户复报 F3 物证：碰撞盒 16×16 挂贴图左上+贴图陷地）
+          //  盒本体化（:65970-65980 直译,1457 :70003-70016 同式）：原版首拍把出生盒
+          //  改写为场盒——base.Size=(1,clearance)→钳→height*=2→width=height（封顶
+          //  999）→base.Center=center（地面点）⇒ 盒=square 场盒以地面接触点为心。
+          //  旧只记虚场（auraSide/auraCy）不写盒 ⇒ 盒钉出生点 16×16,F3 盒与绘制锚
+          //  双失。盒化后非携行态 auraSide≡w≡h、auraCy≡cy（伤害消费面语义不变;
+          //  携行态 Center=MountedCenter 每拍既有支 :70129 承接,vanilla 同）。
+          this.w = this.auraSide; this.h = this.auraSide;        // width = height（:65979）
+          this.x = tx * TILE + 8 - this.w / 2;                   // Center=(tx*16+8, centerY)
+          this.y = centerY - this.h / 2;                         // （:65980 base.Center=center）
         }
         const side = this.auraSide;
         // ★哨兵背包携带面（2026-09-03）：原版场盒 = Size(height×height) 以 base.Center
@@ -8726,6 +8736,40 @@ export class MinionProj extends Entity {
         ctx.restore();
         return;
       }
+    }
+    // ---- ★BJ606（2026-10-10,用户 F3 复报定谳落刀）：688-690 闪电光环哨兵专绘
+    //      （Main.cs:32481-32527 1:1;1456 :31680-31726 同式）----
+    //  原版本支：本体帧 position=proj.Top（盒顶心）、origin=帧顶心（Size×(0.5,0),
+    //  :32486/:32497）——「悬空球体」哨兵（球悬基地上空 H/2=4~10 格,wiki 同证）,
+    //  非落地塔;底座 Extra_86/87/88 position=proj.Center（盒心=地面接触点）、
+    //  origin=(宽/2,高−2)（:32516-32521 origin.Y-=2）,ai[2]==1（哨兵背包携行）不画。
+    //  rotation 恒 0（AI_137 零写向）、spriteDirection 恒 +1（零赋值）=不翻转。
+    //  projFrames 688/689=6、690=8（Main.cs:8603-8605）,帧机 8t 一翻（:70018-70024）
+    //  =通用 age/8 循环既恰。glow 叠画（Glow_228/229/230 同矩形 α=127）本仓弹幕
+    //  绘制无 per-proj 光照色通道=未接（登记债;663/677/691 族同未接）。
+    //  旧通用尾 off3=[0,0] 帧左上锚盒左上 ⇒ 盒挂贴图左上+球体陷地（用户实报）。
+    if (this.sentry && AURA_TOWER.has(this.projId) && img) {
+      ctx.save();
+      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(this.cx, this.y);                    // proj.Top（gfxOffY 恒 0 未建模）
+      if (this.rot !== 0) ctx.rotate(this.rot);          // 守恒序（恒 0 不触发）
+      ctx.drawImage(img, -img.width / 2, 0);             // origin=(帧宽/2, 0)
+      ctx.restore();
+      if (!this.carriedByBackpack) {                     // ai[2]!=1f 门（:32514）
+        const baseTex = r.atlas?.ensureVImage(
+          `vanilla/Extra_${this.projId === 689 ? 87 : this.projId === 690 ? 88 : 86}.png`) ?? null;
+        if (baseTex) {
+          ctx.save();
+          if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+          ctx.imageSmoothingEnabled = false;
+          ctx.translate(this.cx, this.cy);               // proj.Center（:32515）
+          ctx.drawImage(baseTex as CanvasImageSource,
+            -baseTex.width / 2, -(baseTex.height - 2));  // origin=(宽/2, 高−2)
+          ctx.restore();
+        }
+      }
+      return;
     }
     // ---- ★BJ582②（2026-10-09,用户实报「原版的贴图还有三个气球」定谳落刀）----
     // 1025 藤堡专绘（Main.cs:34959-34999 1:1）——悬浮态（ai[0]==0 ⇔ sAttach==0

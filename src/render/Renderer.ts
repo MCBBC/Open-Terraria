@@ -296,6 +296,7 @@ import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
 import { ghostFrameEnd } from './GhostBlur';   // ★ghostblur（2026-10-07;?ghostblur=1 缺省关,Game 帧 tick 尾收口）
+import { judderFrameEnd } from './JudderSmooth';   // ★juddersmooth（2026-10-10;?smooth=1 缺省关,同族收口点）
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
@@ -4569,6 +4570,14 @@ export class Renderer {
    *  管线不可用=完全旁路（GhostBlur 内部 fail-closed+状态复位）。 */
   ghostFrameEnd(cam: Camera): void {
     ghostFrameEnd(this.swPipe, cam.x, cam.y, Renderer.ghostBlur && this._c10eFrame);
+  }
+
+  /** ★juddersmooth 帧尾收口（2026-10-10,?smooth=1 缺省关）:Game tick 在 render() 完整
+   *  返回后调用——与 ghostFrameEnd 同族全路径必经收口点（GL/2D 回退/早退支全覆盖,
+   *  挂接点论证见 JudderSmooth.ts 头注）。periodMs=现役档周期（Game 侧
+   *  beat.tierPeriodNow();0=跟满/未锚定=旁路）。旗关=完全旁路零改动。 */
+  judderFrameEnd(periodMs: number): void {
+    judderFrameEnd(this.ctx, periodMs);
   }
 
   /** ★C10e 滤镜链输入源（2026-10-01,设计文档 §四 F-sfx）：滤镜链采「整个画面」

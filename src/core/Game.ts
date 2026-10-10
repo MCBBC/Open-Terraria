@@ -52184,6 +52184,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //  accumulation pass——render() 完整返回后=本帧 glCanvas 一切 GL 写入落定的
     //  全路径唯一必经收口点（早退支覆盖;挂接点论证见 GhostBlur.ts 头注）。
     this.renderer.ghostFrameEnd(cam);
+    // ★juddersmooth（2026-10-10,?smooth=1 缺省关）:迟到帧半步混合（judder smoothing）
+    //  ——同族收口点;periodMs=现役档周期（0=跟满/未锚定旁路;机理/挂接论证见
+    //  JudderSmooth.ts 头注）。
+    this.renderer.judderFrameEnd(this.beat.tierPeriodNow());
     glStatFrame();   // #perf-gpulog:GPU 提交账本帧推进(唯一 tick 点)
   }
 

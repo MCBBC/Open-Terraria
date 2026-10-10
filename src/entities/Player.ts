@@ -1466,6 +1466,12 @@ export class Player extends Entity {
   /** ★四百七十四刀:mod 配饰无仇恨型集(AquaticEmblem 鲨鱼族 5 型=C#
    *  npcTypeNoAggro[type] 置位;聚合期重置+accEffect 整集重设——Enemy 索敌门并集) */
   modNoAggroTypes: Set<number> | null = null;
+  /** ★四百七十八刀:mod 百分比生命上限面(C# CalamityPlayer :2104-2122
+   *  percentMaxLifeIncrease 家族——bloodPact 25/chalice 25/affliction 10/community
+   *  2-10/shatteredCommunity 10;静态=accEffect 加算(聚合期重置),动态=community
+   *  CalculatePower 战勋比例(postUpdate 消费器赋值);换算 C# statLifeMax/5/20×pct */
+  modMaxLifePct = 0;
+  modMaxLifePctDyn = 0;
   private shimmerUnstuckHelperUpdate(game: GameHooks): void {
     const dry = !this.shimmering && !this.inShimmer;   // flag = !shimmering && !shimmerWet（:26）
     if (dry) this.shimmerUnstuckIndefinite = false;
@@ -2532,6 +2538,7 @@ export class Player extends Entity {
     this.modAccLight = null;   // ★三百六十五刀:每帧重置(accEffect 闭包重设)
     this.modIgnoreWater = false;   // ★四百七十二刀:同面重置(van 键形重设)
     this.modNoAggroTypes = null;   // ★四百七十四刀:同面重置(accEffect 整集重设)
+    this.modMaxLifePct = 0;   // ★四百七十八刀:同面重置(accEffect 加算重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
@@ -3610,7 +3617,11 @@ export class Player extends Entity {
   get maxHp(): number {
     // 生命力药水（Lifeforce :9883）：statLifeMax2 += statLifeMax/5/20*20 → +20%（按 20 取整）
     const lf = this.buffs.has(BuffType.Lifeforce) ? Math.floor(this.baseMaxHp / 5 / 20) * 20 : 0;
-    return this.baseMaxHp + this.buffs.healthBonus + lf;
+    // ★四百七十八刀:mod 百分比生命上限(C# :2121 statLifeMax/5/20×pct——每点=
+    //  基础上限/100;静态+动态双源)
+    const modPct = this.modMaxLifePct + this.modMaxLifePctDyn;
+    const modLife = modPct > 0 ? Math.floor(this.baseMaxHp / 5 / 20) * modPct : 0;
+    return this.baseMaxHp + this.buffs.healthBonus + lf + modLife;
   }
   get maxMana(): number {
     return this.baseMaxMana + (this.equipStats.mana ?? 0) + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481)（★BJ175 桩面 ?? 防御,缺省 0）
