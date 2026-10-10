@@ -10,7 +10,7 @@ import { resolveTouchMode } from './core/input/touchMode';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
-import { isOomLoadError } from './save/LoadErrors';   // ★BJ318：读档 OOM 族判别→可操作文案
+import { isOomLoadError, parseSaveMissingReason, saveMissingToastKey, type SaveMissingReason } from './save/LoadErrors';   // ★BJ318 OOM 判别 + ★BJ605 存档数据缺失族判别/文案映射
 import { builderAccDefaults } from './stats/builderAcc';   // ★SW-FX19:builderAccStatus 回填缺省形
 import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
@@ -19,7 +19,7 @@ import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
-import { kvGet, kvHas, kvSet } from './save/KvStore';
+import { kvGet, kvHas, kvSet, kvIdbStatus } from './save/KvStore';   // ★BJ605：+kvIdbStatus 读档报错路径 IDB 态诊断
 import { makeBeforeUnloadHandler, hiddenBackstopShouldSave } from './save/UnloadGuard';   // ★BJ280 页面卸载拦截纯核
 import { WBAKE_ENABLED } from './workers/BakeClient';   // ★C4 烘焙 worker 灰度旗（入场覆盖门分支用）
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
@@ -40,7 +40,7 @@ import { CharCreation } from './ui/CharCreation';
 import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
 import { MenuBackground } from './render/MenuBackground';
 import { CharacterStore } from './save/CharacterStore';
-import { WorldStore, type WorldMeta } from './save/WorldStore';
+import { WorldStore, WorldSaveWriteError, buildSaveBackupFilename, type WorldMeta } from './save/WorldStore';   // ★BJ605：+WorldSaveWriteError 保存时点告警判别 + 备份文件名（用户明令件）
 import { options } from './core/Options';
 import { UIScale } from './vui/draw/UIScale';
 import { Lang } from './i18n/Lang';
@@ -285,6 +285,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let currentWorld: WorldMeta | null = null;
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
+  // ★BJ605（2026-10-10 线上事故·态B）：index 元数据写失败告警（WorldStore.saveIndex
+  //  kvSet 'fail'——元数据丢档不砸数据面，回调而非抛；数据写入面 save/importSlot/
+  //  duplicate 失败走 WorldSaveWriteError 抛错，由各调用方 catch 面接 toast）+
+  //  ★用户明令件：数据写失败 → 自动导出存档文件下载兜底（手头 json 仍在，落库不成
+  //  至少落文件——三旧档数据键消失根因未定谳前的用户级保险）
+  worldStore.onWriteFail = () => { ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage')); };
+  worldStore.onWriteFailData = (name, _dk, saveJson) => {
+    try {
+      const filename = downloadSaveJson(name, saveJson);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveExportedBackup', filename));
+    } catch (e) {
+      console.warn('[save] 备份导出失败', e);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+    }
+  };
 
   /** 角色贴图预载（2026-08-28 用户要求“确保角色贴图加载完整再进入世界”）：
    *  按角色档案实际外观预载 Player_ 通道/发型——读档/导入路径 makeGame 时
@@ -815,6 +830,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function loadFromKey(key: string) {
     if (loadFlowBusy) return;
     loadFlowBusy = true;
+    // ★BJ605（2026-10-10 线上事故）：worker 报「存档数据缺失」的分类
+    //  （null = WorldGenUnavailable 来路或无分类——toast 走原语义文案）
+    let saveMissing: SaveMissingReason | null = null;
     // ★IIIII229（④ 218 章遗留）：读档路 lockBG 接线——vanilla Main.cs:20056-20065
     //   `gameMenu && WorldGen.isGeneratingOrLoadingWorld → lockMenuBGChange=true`
     //   每帧恒置,语义含**读档**（218 批只接了创建流）;loadWorldFlow/loadFromKey/
@@ -853,12 +871,31 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
         } catch (e) {
-          if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
-          // worker 失败 → 主线程 fallback
+          // ★BJ605 catch 判别重构（修复前只放行 WorldGenUnavailable——「存档数据缺失」
+          //  被 re-throw 拦死，主线程 kvGet fallback 永不可达）：
+          //  ①「存档数据缺失」族（worker 分类 idbUnavailable/keyMissing/typeMismatch/
+          //    jsonParseFailed——数据面缺口）→ 走 kvGet fallback（≤2MB 小档 kvSet 双写
+          //    localStorage，IDB 毒化/驱逐/不可用时副本救援；kvGet 也 null 才报错）；
+          //  ②WorldGenUnavailable（worker 全不可用）→ 原语义走 fallback；
+          //  ③其余（loadSaveData 内部解析崩等）fallback 救不了 → 保持 re-throw
+          //    走外层 alert 原文案（不吞）。
+          saveMissing = parseSaveMissingReason((e as Error | undefined)?.message);
+          if (saveMissing) {
+            console.warn('[load] worker 报存档数据缺失 → 主线程 kvGet fallback（localStorage 副本救援）', (e as Error | undefined)?.message);
+          } else if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
+          // worker 失败/存档数据缺失 → 主线程 fallback
         }
       }
       const text = await kvGet(key);
-      if (!text) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', '存档数据缺失')); return; }
+      if (!text) {
+        // ★BJ605：IDB+localStorage 双空——IDB 态诊断物证留 console（用户自查/
+        //  DevTools 物证请求共同依赖），文案按缺失分类给可操作指引
+        //  （存储不可用引导自救 vs 数据真缺失如实告知不可恢复）；
+        //  saveMissing=null（WorldGenUnavailable 来路）→ 原语义 SaveLoadFailed 文案。
+        void kvIdbStatus(key).then((s) => console.warn('[load] IDB 态诊断', key, s));
+        ui.toast(Lang.text(saveMissingToastKey(saveMissing), '存档数据缺失'));
+        return;
+      }
       await loadFromJson(text);
     } catch (e) {
       console.error(e);
@@ -1012,7 +1049,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       }
     } catch (e) {
       console.error(e);
-      ui.toast(Lang.text('Mods.SandboxWorld.Toast.ImportFailed', (e as Error).message));
+      // ★BJ605：WorldSaveWriteError=浏览器存储写入失败（importSlot 数据未落库、
+      //  幽灵槽已回滚）——可操作自救文案，不吃进 ImportFailed 技术插值
+      ui.toast(e instanceof WorldSaveWriteError
+        ? Lang.text('Mods.SandboxWorld.Toast.SaveWriteFailed')
+        : Lang.text('Mods.SandboxWorld.Toast.ImportFailed', (e as Error).message));
     }
   }
 
@@ -1696,6 +1737,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // ★BJ144(2026-09-18):quitToMenu 已改等全链落定,快照语义仍保留(双重保险)
     const slotMeta = currentWorld;
     const hardModeNow = !!game.world.flags.hardMode;
+    const worldNameNow = game.world.name ?? 'world';   // ★BJ605 备份导出用调用帧快照（.then 闭包内 game narrowing 失效+quitToMenu 置空前不可再读全局）
     const playTimeMs = cumulativePlayMs();
     saveClient.ensure();
     // ★BJ144：返回值改为【全链落定】promise——quitToMenu/更新横幅 reload 等
@@ -1708,8 +1750,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       //  二进制残留是元数据全丢的损毁态（packSaveBinary meta={} → loadSaveData
       //  data.header.width TypeError）。守卫=tests/save-binary-deadpath.test.ts
       const quickWrite = kvSet(QUICK_SAVE_KEY, json).then((where) => {
-        if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
-        else {
+        if (where === 'fail') {
+          // ★BJ605 用户明令件：quicksave 是最后救命稻草，写失败同样自动导出兜底
+          //  （json 在手；槽位写失败走 WorldStore.onWriteFailData 回调，此处为 quick 面）
+          try {
+            const filename = downloadSaveJson(worldNameNow, json);
+            ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveExportedBackup', filename));
+          } catch (e2) {
+            console.warn('[save] quicksave 备份导出失败', e2);
+          }
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+        } else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
           // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀）。
           // silent 档 = 自动保存路径（2026-08-27 用户要求：自动保存不弹提示,原版
@@ -1752,6 +1803,22 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
       return false;
     }).finally(() => { saveInFlight = false; });   // ★BJ280：在途标志解除（成败皆清）
+  }
+
+  /** ★BJ605 用户明令件（「如果本地存档无法成功，也应当改为自动导出存档提供下载」）：
+   *  存档 JSON 兜底下载——a[download]+Blob 程序触发（无需用户交互）。文件名 =
+   *  世界名_YYYYMMDD_HHmmss.json（buildSaveBackupFilename 消毒/格式，可单测）。
+   *  消费面：WorldStore 数据写失败回调 / quicksave 写失败（doSave）。
+   *  返回文件名（toast/日志用）。JSON 单格式最小刀；.wld 双格式登记后续。 */
+  function downloadSaveJson(rawName: string, json: string): string {
+    const filename = buildSaveBackupFilename(rawName, new Date());
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return filename;
   }
 
   /** 导出存档:同一序列化链(saveClient),产物落盘为 .sbw.json 下载——

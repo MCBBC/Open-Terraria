@@ -14,7 +14,7 @@ import { genItemIconPixels } from '../assets/ItemIconGen';
 import { packWorld } from './worldPacket';
 import { renderPreviewBitmap } from './previewBitmap';
 import { loadSaveData } from '../save/SaveFile';
-import { kvGetIdb } from '../save/KvStore';
+import { kvGetIdbEx } from '../save/KvStore';   // ★BJ605：三态精细读（kvGetIdb 薄壳化后 value 投影等价）
 import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
 
 assertWorkerBootGate('worldGen.worker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
@@ -198,6 +198,11 @@ ctx.onmessage = async (e) => {
       const __t0 = performance.now();
       let data: import('../save/SaveFile').SaveData | null;
       let dataSrc = '';
+      // ★BJ605（2026-10-10 线上事故）：数据缺失分类——idbUnavailable/keyMissing/
+      //  typeMismatch/jsonParseFailed/noSource 五态,进 message 供主线程
+      //  isSaveDataMissingError 判别 fallback 资格与文案映射（形状契约见
+      //  src/save/LoadErrors.ts BJ605 段;判别测试 tests/bj605-load-fallback-chain.test.ts）
+      let missingReason: import('../save/LoadErrors').SaveMissingReason = 'noSource';
       {
         // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制分支退役——
         //  kvSetCompat 写的二进制副本恒被同 key JSON 后写覆盖（IDB 同 store 串行,
@@ -210,22 +215,49 @@ ctx.onmessage = async (e) => {
         //  client.loadSave({save}) 唯一消费=tests/bj223-saveparse-three-sources.test.ts
         //  round-trip 守卫（协议三源形状保留，分支留作契约面）。
         if (req.key) {
+          // ★BJ605：kvGetIdbEx 精细读——「打不开库/键不存在/值非 string」三态
+          //  可操作面完全不同（存储不可用可自救 vs 数据真缺失不可恢复）；分类后
+          //  主线程对缺失族走 kvGet fallback（≤2MB 小档 kvSet 双写 localStorage，
+          //  IDB 被驱逐/不可用时副本救援）。
           dataSrc = 'idb';
-          data = JSON.parse((await kvGetIdb(req.key)) ?? 'null') as import('../save/SaveFile').SaveData | null;
+          const r = await kvGetIdbEx(req.key);
+          if (r.cause === 'ok') {
+            try {
+              data = JSON.parse(r.value as string) as import('../save/SaveFile').SaveData;
+            } catch (err) {
+              // IDB 值损坏（非合法 JSON）——同属缺失族（localStorage 副本可能完好）
+              throw new Error(`存档数据缺失 (jsonParseFailed, src=${dataSrc}, key=${req.key}, detail=${err instanceof Error ? err.message : String(err)})`);
+            }
+          } else {
+            missingReason = r.cause === 'keyMissing' ? 'keyMissing'
+              : r.cause === 'typeMismatch' ? 'typeMismatch' : 'idbUnavailable';
+            data = null;
+          }
         } else if ('json' in req && typeof req.json === 'string') {
           // 小档/调试/探针/导入镜像路径（mainFlow.loadFromJson）：JSON 文本 worker 内解析
           dataSrc = 'json';
-          data = JSON.parse(req.json) as import('../save/SaveFile').SaveData;
+          try {
+            data = JSON.parse(req.json) as import('../save/SaveFile').SaveData;
+          } catch (err) {
+            // ★BJ605：裸 SyntaxError 收编进缺失族分类（主线程 loadFromJson 原语义
+            //  re-throw 不变——同 text 的主线程 fallback 必然同败,re-throw 即最优）
+            throw new Error(`存档数据缺失 (jsonParseFailed, src=${dataSrc}, key=-, detail=${err instanceof Error ? err.message : String(err)})`);
+          }
         } else if ('save' in req && req.save) {
           // ★BJ283 注勘误：save 源零生产消费方——.wld 导入实走主线程 loadSaveData 直调
           //  （mainFlow.ts:926-932），不经此源；仅 BJ223 守卫 round-trip 消费（契约面保留）
           dataSrc = 'save';
           data = req.save;
         } else {
+          dataSrc = '';
+          missingReason = 'noSource';
           data = null;
         }
       }
-      if (!data) throw new Error('存档数据缺失');
+      // ★BJ605：分类 message（WorldGenClient 包装后主线程实际收到
+      //  `[worldGen worker] 存档数据缺失 (...)`——判别正则非锚定）。
+      //  原「存档数据缺失」裸文案兼容 bj223 结构锁（toContain）。
+      if (!data) throw new Error(`存档数据缺失 (${missingReason}, src=${dataSrc}, key=${req.key ?? '-'})`);
       __wkLog.push(`parse(${dataSrc}) ${Math.round(performance.now() - __t0)}ms`);
       // ★大世界内存峰值削减(2026-09-06)：SaveData 对象在 loadSaveData 后不再需要,
       //   立即提取尾部需要的字段并释放引用——6400×1800 世界 SaveData+TypedArrays

@@ -58,7 +58,12 @@ export function royalGelActive(player: Player): boolean {
  *  ★原文数组直查【无】direction!=0 守卫（该守卫仅 :78490/:78542 TargetClosest
  *  两处所有），此判定子对齐原文裸语义。 */
 export function npcTypeNoAggro(vanillaId: number | null | undefined, player: Player): boolean {
-  return vanillaId != null && CALMING_NO_AGGRO_TYPES.has(vanillaId) && royalGelActive(player);
+  if (vanillaId == null) return false;
+  if (CALMING_NO_AGGRO_TYPES.has(vanillaId) && royalGelActive(player)) return true;
+  // ★四百七十四刀:mod 配饰型集并集(AquaticEmblem 鲨鱼族 5 型= npcTypeNoAggro
+  //  同一原文数组面的第二置位源;聚合期整集重设)
+  const modSet = (player as unknown as { modNoAggroTypes?: Set<number> | null }).modNoAggroTypes;
+  return !!modSet?.has(vanillaId);
 }
 /** Main.wallDungeon（Main.cs:10507-10515：主题墙 7/8/9 + 1.4 变体 94-99）——地牢之魂
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
@@ -138,7 +143,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
-import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff } from '../mods/hooks';
+import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff, runModOnHitAny } from '../mods/hooks';
 import type { Game } from '../core/Game';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -15916,10 +15921,16 @@ export class Enemy extends Entity {
         }
       }
       // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
+      if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
       return true;
     }
     // ★BJ254：受击通用彩色粒子近似（def.gore[0] 5 粒 spawnParticles）退役——
     // 受击尘全归 spawnNpcHitDust 查表（表外型受击零尘=原版相,唯一故意行为变化）。
+    // ★四百七十刀:OnHit 域派发缝（C# CalamityPlayerOnHit.ItemOnHit/ProjOnHit 同位
+    //  =玩家来源受理伤害结算尾;fromPlayer 门=NPC 互伤/陷阱/环境伤不进;免疫帧/
+    //  dontTakeDamage/零伤转换早退支不进=原版 OnHitNPC 同相）。
+    //  零注册=零成本（runModOnHitAny 头门）。melee 探针=非弹幕穿面（pierce=0 近战惯例）。
+    if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
     return false;
   }
 

@@ -7,18 +7,69 @@ const STORE = 'kv';
 const REMASTER_STORE = 'remaster';
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// ★BJ605（2026-10-10 线上事故定谳）openDb 失败重试预算——连续 N 次 open 失败后
+// 退避 5s（防死循环打库；退避窗内调用方立刻拿到 openFailed，不排队不打库）。
+const OPEN_MAX_STREAK = 3;
+const OPEN_BACKOFF_MS = 5000;
+// blocked 超时：他标签页持旧版本连接不让路时，旧实现只 warn 不 reject——
+// promise 永久 pending，await openDb() 永挂（kvGetIdb 永不回、读档看门狗
+// 超时才收场）。现 blocked 后 3s 放弃并 reject 可操作错误。
+const OPEN_BLOCKED_TIMEOUT_MS = 3000;
+let openFailStreak = 0;
+let openBackoffUntil = 0;
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
+  // ★BJ605 毒化修复：失败路径必须清 dbPromise（旧实现把 rejected promise 永久
+  // 缓存——某次 openDb 瞬时失败（磁盘瞬时满/升级竞态/配额抖动）后本会话所有
+  // IDB 读恒 null，「存档数据缺失」刷新前永不自愈）。退避窗内直接拒绝。
+  if (Date.now() < openBackoffUntil) {
+    return Promise.reject(new DOMException(
+      `IndexedDB open 退避中（连续 ${openFailStreak} 次失败后暂停重试）`, 'InvalidStateError'));
+  }
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.open(DB_NAME, 2);
+    } catch (err) {
+      // 同步抛（隐私模式 indexedDB 未定义/安全策略）同样不毒化缓存
+      dbPromise = null;
+      openFailStreak++;
+      if (openFailStreak >= OPEN_MAX_STREAK) openBackoffUntil = Date.now() + OPEN_BACKOFF_MS;
+      console.warn('[kv] IndexedDB open 同步抛出（隐私模式/安全策略?）', err);
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    let settled = false;
+    let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+    const fail = (err: unknown, warn: string) => {
+      if (settled) return;
+      settled = true;
+      dbPromise = null;   // ★毒化修复：失败不缓存——下次调用重试
+      openFailStreak++;
+      if (openFailStreak >= OPEN_MAX_STREAK) openBackoffUntil = Date.now() + OPEN_BACKOFF_MS;
+      console.warn(`[kv] ${warn}`, err);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
     // ★blocked = 他标签页持旧版本连接不让路(旧 bundle 无 onversionchange 处理,
-    // 生产首次 v1→v2 部署必踩)——只告警不重试;调用方(main 装配)有超时兜底
-    req.onblocked = () => console.warn('[kv] IndexedDB 升级被其他标签页阻塞(关闭旧标签页即恢复)');
+    // 生产首次 v1→v2 部署必踩)——告警后 3s 放弃 reject（对方让路则 onsuccess
+    // 照常成功）;不再永久挂起。
+    req.onblocked = () => {
+      console.warn('[kv] IndexedDB 升级被其他标签页阻塞(关闭旧标签页即恢复)——3s 后放弃本次打开');
+      blockedTimer = setTimeout(() => {
+        fail(new DOMException('IndexedDB 升级被其他标签页阻塞（超时放弃）', 'VersionError'),
+          'IndexedDB open 被其他标签页阻塞（超时放弃——关闭其他本站标签页即恢复）');
+      }, OPEN_BLOCKED_TIMEOUT_MS);
+    };
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
       if (!req.result.objectStoreNames.contains(REMASTER_STORE)) req.result.createObjectStore(REMASTER_STORE);
     };
     req.onsuccess = () => {
+      if (settled) { req.result.close(); return; }   // blocked 超时已放弃——让路后迟到的连接立即关闭
+      settled = true;
+      if (blockedTimer) clearTimeout(blockedTimer);
+      openFailStreak = 0;   // 成功即清失败连击/退避
       const db = req.result;
       db.onversionchange = () => {   // 他页要升级 → 让路,本页缓存失效(下次调用重开)
         db.close();
@@ -26,7 +77,10 @@ function openDb(): Promise<IDBDatabase> {
       };
       resolve(db);
     };
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      if (blockedTimer) clearTimeout(blockedTimer);
+      fail(req.error, `IndexedDB open 失败(${(req.error as DOMException | null)?.name ?? 'UnknownError'})`);
+    };
   });
   return dbPromise;
 }
@@ -50,16 +104,58 @@ export async function kvHas(key: string): Promise<boolean> {
 /** 只读 IndexedDB（worker 安全：无 localStorage 依赖；大存档只进 IDB）。
  *  命中返回字符串，未命中/不可用返回 null */
 export async function kvGetIdb(key: string): Promise<string | null> {
+  return (await kvGetIdbEx(key)).value;
+}
+
+export type KvIdbReadCause = 'ok' | 'keyMissing' | 'typeMismatch' | 'openFailed' | 'txFailed';
+
+/** ★BJ605（2026-10-10）只读 IndexedDB 精细版：与 kvGetIdb 同读取语义（kvGetIdb
+ *  即本函数的 value 投影薄壳），但区分「键不存在 / 类型异常 / 打开失败 / 事务
+ *  失败」——worker saveParse「存档数据缺失」三态错误分类的数据源。
+ *  键不存在 = open/tx 都健康但 get 返回 undefined（cause:'keyMissing'），
+ *  与「打不开库」（cause:'openFailed'，含退避窗拒绝）是两种可操作面完全不同的态。 */
+export async function kvGetIdbEx(key: string): Promise<{ value: string | null; cause: KvIdbReadCause; detail?: string }> {
   try {
     const db = await openDb();
-    return await new Promise<string | null>((resolve) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).get(key);
-      req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null);
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
+    try {
+      return await new Promise<{ value: string | null; cause: KvIdbReadCause; detail?: string }>((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => {
+          if (typeof req.result === 'string') resolve({ value: req.result, cause: 'ok' });
+          else if (req.result === undefined) resolve({ value: null, cause: 'keyMissing' });
+          else resolve({ value: null, cause: 'typeMismatch', detail: typeof req.result });
+        };
+        req.onerror = () => resolve({ value: null, cause: 'txFailed', detail: (req.error as DOMException | null)?.name });
+      });
+    } catch (err) {
+      return { value: null, cause: 'txFailed', detail: err instanceof Error ? err.message : String(err) };
+    }
+  } catch (err) {
+    return { value: null, cause: 'openFailed', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** ★BJ605 诊断探测（只读面，不改变任何存储语义）：主线程报「存档数据缺失」
+ *  时留物证——IDB 能否打开/失败原因/目标键是否存在于 IDB。用户自查指引与
+ *  开发排查（DevTools 物证请求）共同依赖此输出。 */
+export async function kvIdbStatus(key?: string): Promise<{ open: boolean; reason?: string; keyExists: boolean | 'unknown' }> {
+  try {
+    const db = await openDb();
+    if (!key) return { open: true, keyExists: 'unknown' };
+    try {
+      const keyExists = await new Promise<boolean>((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).getKey(key);
+        req.onsuccess = () => resolve(req.result !== undefined);
+        req.onerror = () => resolve(false);
+      });
+      return { open: true, keyExists };
+    } catch (err) {
+      return { open: true, reason: err instanceof Error ? err.message : String(err), keyExists: 'unknown' };
+    }
+  } catch (err) {
+    return { open: false, reason: err instanceof Error ? err.message : String(err), keyExists: 'unknown' };
   }
 }
 

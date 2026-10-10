@@ -82,7 +82,14 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
 /** ★三百三十五刀:mod 配饰效果钩(C# ModItem.UpdateAccessory 同位;Player
  *  配饰槽 3..9 每帧环内派发——装备期每 tick 调,卸下自然停调) */
 /** 配饰效果累加器（computeEquipStats return 合并;闭包直改） */
-export interface ModAccAccumulator { def?: number; mana?: number; life?: number; moveMult?: number; fish?: number; wingTime?: number }
+export interface ModAccAccumulator {
+  def: number; mana: number; life: number; moveMult: number; fish: number; wingTime: number;
+  /** ★四百七十二刀:冲刺授予档(原版 dashType 1=忍者/盾冲族;聚合取 max) */
+  dash?: number;
+  /** ★四百七十二刀:vanilla-accfx 键形旗包(dashType/blackBelt/noFallDmg/accFlipper/
+   *  spikedBoots/waterWalk/jumpBoost/fireWalk/autoJump/noKnockback;聚合显式合并) */
+  van?: Record<string, number | boolean>;
+}
 const accEffects = new Map<number, (player: Player, game: unknown, acc: ModAccAccumulator) => void>();
 
 export function registerModAccEffect(vid: number, fn: (player: Player, game: unknown, acc: ModAccAccumulator) => void): void {
@@ -289,6 +296,31 @@ export function registerModOnHitNpc(
   if (!(vid >= MOD_ITEM_STABLE_BASE)) throw new Error(`[mod-hooks] onHitNpc vid 须 ≥${MOD_ITEM_STABLE_BASE}: ${vid}`);
   if (onHitNpc.has(vid)) throw new Error(`[mod-hooks] onHitNpc 重复注册: ${vid}`);
   onHitNpc.set(vid, fn);
+}
+
+/** ★四百七十刀:OnHit 域通用命中钩(C# CalamityPlayerOnHit.cs ItemOnHit/ProjOnHit
+ *  形;per-mod 单链,Enemy.hurt 受理面尾段派发——fromPlayer 门,存活/击杀双支)。
+ *  任何玩家来源伤害(近战扫/弹幕/爆炸/mod 弹)进链;免疫帧拒收/dontTakeDamage/
+ *  零伤转换支不进(原版 OnHitNPC 同相=只吃受理伤害)。game=GameHooks 宽接口
+ *  (Enemy.hurt 调用域同款,mod 侧按 unknown 消费)。 */
+type ModOnHitAnyCtx = { e: Enemy; game: unknown;
+  damage: number; crit: boolean; killed: boolean; projId: number; melee: boolean };
+type ModOnHitAnyFn = (ctx: ModOnHitAnyCtx) => void;
+const onHitAny = new Map<string, ModOnHitAnyFn>();
+
+export function registerModOnHitAny(modId: string, fn: ModOnHitAnyFn): void {
+  if (onHitAny.has(modId)) throw new Error(`[mod-hooks] onHitAny 重复注册: ${modId}`);
+  onHitAny.set(modId, fn);
+}
+
+/** Enemy.hurt 受理面尾段派发(killed=crit 双支 return 前;零注册=零成本)。 */
+export function runModOnHitAny(e: Enemy, game: unknown, ctx: {
+  damage: number; crit: boolean; killed: boolean; projId: number; melee: boolean;
+}): void {
+  if (onHitAny.size === 0) return;
+  for (const fn of onHitAny.values()) {
+    try { fn({ e, game, ...ctx }); } catch (err) { console.warn('[mod-hooks] onHitAny', err); }
+  }
 }
 
 /** B6:mod 音效通道(原版 SoundID 键;mod 音频装载=余段)。sink=main.ts 注入
@@ -638,6 +670,7 @@ export function _resetModHooksForTests(): void {
   projSpecs.clear(); projRegs.length = 0; modBuffTicks.clear();
   modBuffNpcTicks.clear();
   onHitNpc.clear();
+  onHitAny.clear();
   modifyHurtByNpc.clear();
   npcOnHitPlayerBuff.clear();
   modifyHitNpc.clear();

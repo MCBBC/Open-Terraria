@@ -18,7 +18,7 @@
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
 import {
-  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerItemUse, registerSystem, registerProjHooks, playModSound,
+  registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerItemUse, registerSystem, registerProjHooks, playModSound,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, registerModHoldItem,
   type ModSystemHooks, type ModUseCtx,
@@ -42,6 +42,10 @@ export interface ModContext {
   onHitNpc(key: string, fn: (e: unknown, game: unknown, ctx: { damage: number; crit: boolean; killed: boolean }) => void): void;
   /** B6:本 mod NPC 死亡钩(击杀单口;Hive Tumor→Boss 遭遇链面) */
   onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void): void;
+  /** ★四百七十刀:通用命中钩(C# CalamityPlayerOnHit.ItemOnHit/ProjOnHit 形;
+   *  任何玩家来源伤害受理后调一次——ctx={e,game,damage,crit,killed,projId,melee};
+   *  免疫帧拒收/dontTakeDamage 不进=原版 OnHitNPC 同相) */
+  onHitAny(fn: (ctx: Record<string, unknown>) => void): void;
   /** ★二百八十七刀:mod 刷怪池独占面(pool.Clear 语义;返回规则表=本拍顶替
    *  原版选怪池,只掷返回规则;null=不接管;酸雨事件消费) */
   spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null): void;
@@ -163,6 +167,9 @@ export function createModContext(
     },
     onNpcDeath(key: string, fn: (e: unknown, game: unknown) => void) {
       registerModNpcDeath(idOf('npcs', key), fn as Parameters<typeof registerModNpcDeath>[1]);
+    },
+    onHitAny(fn: (ctx: Record<string, unknown>) => void) {
+      registerModOnHitAny(modId, fn as unknown as Parameters<typeof registerModOnHitAny>[1]);
     },
     spawnPool(fn: (ctx: { game: unknown; player: unknown }) => Array<Record<string, unknown>> | null) {
       registerModSpawnPool(modId, fn as unknown as Parameters<typeof registerModSpawnPool>[1]);

@@ -177,15 +177,15 @@ export function auditL10nAll(srcDir) {
 //    Farewell.Hint→"世界仍保存在本地。"/Reload→"重新载入"/Title→"下次再见"
 //    （Farewell 三键为 src/mainFlow.ts:1806-1812 退出告别幕布活键）。
 //    摘除后若值回退占位形态，本闸白名单外命中即红（stale 自净闸的反向面）。
-//  · 有意保留 4 键（en 同文镜像/品牌名，非占位腐化）：
-//    Settings.On/Off（en-identical 开关文案）、TitleLinks.Bluesky（品牌名）、
-//    UI.Dash（原版键 en 镜像覆写块成员，11 语言 custom 同步同值，src 无字面消费）。
+//  · 有意保留 3 键（en 同文镜像/品牌名，非占位腐化）：
+//    Settings.On/Off（en-identical 开关文案）、TitleLinks.Bluesky（品牌名）。
+//    ★UI.Dash 条目已摘（BJ605 收敛波顺手同步）：zh 已补译「冲刺」（非占位形态），
+//    stale 自净闸红逼摘除；若未来回退占位形态，白名单外命中即红（反向面自洽）。
 const ZH_PLACEHOLDER_ALLOWLIST = [
   // 有意保留（长期条目）
   'Mods.SandboxWorld.Settings.On',
   'Mods.SandboxWorld.Settings.Off',
   'TitleLinks.Bluesky',
-  'UI.Dash',
 ];
 
 /** zh-Hans custom 裸键占位检测。

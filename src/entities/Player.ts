@@ -1457,6 +1457,15 @@ export class Player extends Entity {
   /** ★三百六十五刀:mod 配饰光源(accEffect 钩设置;每帧 computeEquipStats 重算域
    *  重置——由 acc-immunes 同款 accEffect 闭包重设) */
   modAccLight: [number, number, number] | null = null;
+  /** ★四百七十二刀:mod 配饰水中机动旗(DeepDiver ignoreWater=C# :12 装备期;
+   *  聚合期重置+van 键形重设——liqFactor 组合面消费) */
+  modIgnoreWater = false;
+  /** ★四百七十四刀:mod 配饰每 tick 防御加值(AquaticEmblem 湿态爬坡=C# statDefense
+   *  Remap 面;postUpdate 消费器【赋值】语义=非累积;defense 访问器消费) */
+  modDefBoost = 0;
+  /** ★四百七十四刀:mod 配饰无仇恨型集(AquaticEmblem 鲨鱼族 5 型=C#
+   *  npcTypeNoAggro[type] 置位;聚合期重置+accEffect 整集重设——Enemy 索敌门并集) */
+  modNoAggroTypes: Set<number> | null = null;
   private shimmerUnstuckHelperUpdate(game: GameHooks): void {
     const dry = !this.shimmering && !this.inShimmer;   // flag = !shimmering && !shimmerWet（:26）
     if (dry) this.shimmerUnstuckIndefinite = false;
@@ -2230,6 +2239,7 @@ export class Player extends Entity {
   get defense(): number {
     let d = this.buffs.defenseBonus + (this.equipStats.def ?? 0) + this.cartDefenseBonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
     if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
+    d += this.modDefBoost;   // ★四百七十四刀:mod 配饰每 tick 防御面(AquaticEmblem 爬坡;赋值语义非累积)
     // ★BJ585（2026-10-09）：armor[0..2] 改走 GetEffectiveArmor——原版 statDefense 护甲段
     //   在 GrantArmorBenefits（Player.cs:13220 `statDefense += armorPiece.defense`）内，
     //   其调用面 k=0..9 【全走 GetEffectiveArmor(k)】（Player.cs:13014-13019）——
@@ -2518,8 +2528,10 @@ export class Player extends Entity {
     }
     let def = 0, mana = 0, life = 0;
     // ★三百三十五刀:mod 配饰效果累加器(sw.accEffect 闭包直改;return 合并)
-    const modAcc = { def: 0, mana: 0, life: 0, moveMult: 0, fish: 0, wingTime: 0 };
+    const modAcc: import('../mods/hooks').ModAccAccumulator = { def: 0, mana: 0, life: 0, moveMult: 0, fish: 0, wingTime: 0 };
     this.modAccLight = null;   // ★三百六十五刀:每帧重置(accEffect 闭包重设)
+    this.modIgnoreWater = false;   // ★四百七十二刀:同面重置(van 键形重设)
+    this.modNoAggroTypes = null;   // ★四百七十四刀:同面重置(accEffect 整集重设)
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
@@ -3493,6 +3505,25 @@ export class Player extends Entity {
     // （accRunSpeed 不随 moveSpeed 缩放——靴族冲刺走【慢爬坡段】到 6/6.75,旧折算
     // runSpeed/3-1 把 sprint 当移速乘区致 Flurry 装备即 +1.0 移速上限,2026-08-13
     // 拆除;accRunSpeed 单独经 equipStats）
+    // ★四百七十二刀:modAcc 消费面补全(曾只接 def/mana/life/fish/wingTime——
+    //  moveMult 加算 + dash/van 面整缺=acc-boosts moveMult 域静默丢弃)。
+    //  C# moveSpeed 加算语义 → move += ;dash 取 max(同 fx.dashType 链)。
+    move += modAcc.moveMult;
+    if (modAcc.dash) dash = Math.max(dash, modAcc.dash);
+    if (modAcc.van) {
+      const f = modAcc.van;
+      if (f.dashType) dash = Math.max(dash, Number(f.dashType));
+      if (f.blackBelt) blackBelt = true;
+      if (f.noFallDmg) noFallDmg = true;
+      if (f.accFlipper) flipper = true;
+      if (f.spikedBoots) spikedBoots = Math.max(spikedBoots, Number(f.spikedBoots));
+      if (f.waterWalk) { waterWalk = true; waterWalkLava = true; }
+      if (f.jumpBoost) jumpBoost = true;
+      if (f.fireWalk) fireWalk = true;
+      if (f.autoJump) autoJump = true;
+      if (f.noKnockback) noKnockback = true;
+      if (f.ignoreWater) this.modIgnoreWater = true;
+    }
     const moveMult = 1 + move;
     return {
       def: def + modAcc.def, mana: mana + modAcc.mana,
@@ -7865,7 +7896,8 @@ export class Player extends Entity {
     {
       const ignoreWater = this.ridingMountSwimFree
         || this.buffs.has(BuffType.FlipperPotion)
-        || eqM.wing?.slot === 26;
+        || eqM.wing?.slot === 26
+        || this.modIgnoreWater === true;   // ★四百七十二刀:mod 配饰面(DeepDiver)
       const heldIt2 = this.inv.heldItem();
       const heldVid2 = heldIt2 ? (ITEM_DEFS[heldIt2.id]?.vid ?? (ITEM_DEFS[heldIt2.id].vid ?? -1)) : -1;
       this.liqFactor = this.inShimmer ? 0.375
