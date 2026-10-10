@@ -175,9 +175,10 @@ export interface ModProjSpec {
     /** ★三百五十六刀:节拍射击面(每 every tick 自动发射;vel 缺省 8;
      *  atMouse=true=目标弹在鼠标处生成)——节拍射击族 holdout 免写钩 */
     shoot?: { proj: string; every: number; vel?: number; atMouse?: boolean };
-    /** ★五百七十一:channel 结束钩(松开左键/死亡/魔耗失败时在 kill 前调用;
-     *  M1Garand reload/Condemnation 倾泻/MagnaCannon 泄射等释放面) */
-    onChannelEnd?: (p: any, game: any) => void;
+    /** ★五百七十一/五百八十二:channel 结束钩(松开左键/死亡/魔耗失败时在 kill 前
+     *  调用;返回 true=释放存续——Condemnation 转储/M1Garand 再装填弹体存续面,
+     *  update 钩自管后续与 kill;void/false=照旧消亡) */
+    onChannelEnd?: (p: any, game: any) => boolean | void;
   };
   /** 寿命 tick(缺省 3600) */
   lifetime?: number;
