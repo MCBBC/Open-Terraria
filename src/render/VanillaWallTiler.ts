@@ -7,6 +7,7 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { tintedVanillaRegion } from './TileTint';   // ★门卡顿根治刀:墙绘制时染色(源染色,零读回)
 import { tileAnim } from './TileAnim';
 
 // 4 位基数掩码位序（与 tile framing 不同！）：N=1 W=2 E=4 S=8
@@ -123,7 +124,7 @@ export class VanillaWallTiler {
   }
 
   /** 绘制一格墙（源 32×32，目标以格为中心的 2×2 格大小）。★C4 ctx 加宽（worker OffscreenCanvas 同源烘焙） */
-  draw(ctx: import('./canvasEnv').Ctx2D, st: TileStore, x: number, y: number, wallId: number, truncates: number[], px: number, py: number): void {
+  draw(ctx: import('./canvasEnv').Ctx2D, st: TileStore, x: number, y: number, wallId: number, truncates: number[], px: number, py: number, paint = 0): void {
     const img = this.wallImg(wallId);
     if (!img) return;
     // 掩码：N=1 W=2 E=4 S=8
@@ -147,6 +148,12 @@ export class VanillaWallTiler {
     const bandRows = wallAnimBandRows(wallId, x, y);
     const sx = fr[0] * STRIDE, sy = (fr[1] + bandRows) * STRIDE;
     if (sx + 32 > img.width || sy + 32 > img.height) return; // 变体3 超出矮表（默认模式不会发生）
+    // ★门卡顿根治刀（2026-10-10）：paintWall>0 → 源染色绘制（tintedVanillaRegion
+    //  缓存,零读回;isWall=true=负相 30 档）——原版按绘制调用上色语义
+    if (paint > 0) {
+      const t = tintedVanillaRegion(img, sx, sy, 32, 32, paint, true);
+      if (t) { ctx.drawImage(t, 0, 0, 32, 32, px - TILE / 2, py - TILE / 2, 32, 32); return; }
+    }
     ctx.drawImage(img, sx, sy, 32, 32, px - TILE / 2, py - TILE / 2, 32, 32);
   }
 

@@ -168,7 +168,7 @@ describe('BJ609 平台 fallThrough 半边（:2391 慢放行/快承接拆分）',
     b2.y = P * 16 + 10 - 50;
     b2.vy = 15;
     moveAndCollide(b2, { store } as never, 0, 15.2);
-    expect(b2.y + b.h, '哨兵嵌入驻留=拉回平台顶（opt-in 面零变）').toBe(P * 16);
+    expect(b2.y + b2.h, '哨兵嵌入驻留=拉回平台顶（opt-in 面零变）').toBe(P * 16);
     expect(b2.onGround).toBe(true);
   });
 

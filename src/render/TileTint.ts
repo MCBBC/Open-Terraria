@@ -186,3 +186,47 @@ export function tintedVanillaRegion(
   regionTintCache.set(key, cv);
   return cv;
 }
+
+// ---- ★油漆去读回化（2026-10-10 门卡顿根治刀;Trace-20261010T120440 定谳:开关门→
+//      可视 chunk 重烘→油漆快照 256² 读回在满载 GPU 管线上单次 ~90ms→130ms 卡顿,
+//      6/6 卡顿帧同签名）——绘制时染色（vanilla TileDrawing 语义:按绘制调用上色,
+//      TilePaintSystemV2）——atlas 代理拦截 vframe,帧矩形经 tintedVanillaRegion
+//      源染色（regionTintCache 缓存,命中微秒级,零 GPU 同步）后返回染色版 DrawRect;
+//      drawVanillaCell 等绘制函数零改动。语义登记：旧「16×16 格区域染色」偏离
+//      （ChunkBake 油漆 pass 等价边界注）就此回归原版按绘制调用语义（登记债清除;
+//      压进漆格的邻居溢出像素不再被顺带染色=原版本就不染）。
+//      树/仙人掌直取 ensureVImage 路径次期接线;过渡期其漆格走残留快照 pass（稀疏）。
+
+/** 漆格染色版帧查询代理：绘制函数消费的 atlas 帧查询返回染色版矩形。
+ *  paint<=0 时不应构建本代理（调用方守卫）。 */
+export function paintedAtlasProxy(
+  atlas: import('../assets/SpriteAtlas').SpriteAtlas,
+  paint: number, special: LeafPaintSettings | undefined,
+): import('../assets/SpriteAtlas').SpriteAtlas {
+  return new Proxy(atlas, {
+    get(target, prop, _recv) {
+      if (prop === 'vframe') {
+        return (sheetId: number, col: number, row: number) => {
+          const r = target.vframe(sheetId, col, row);
+          if (!r) return r;
+          const t = tintedVanillaRegion(r.img, r.sx, r.sy, r.sw, r.sh, paint, false, special);
+          if (!t) return r;
+          return { ...r, img: t, sx: 0, sy: 0 };
+        };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  }) as import('../assets/SpriteAtlas').SpriteAtlas;
+}
+
+/** 漆格染色版矩形（非 atlas 帧查询的直取绘制源:rule/entry/sapling/weed 分支用）。
+ *  paint<=0/染色失败=原矩形直返（fail-closed）。 */
+export function tintedRect<T extends { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }>(
+  r: T, paint: number, special: LeafPaintSettings | undefined,
+): T {
+  if (paint <= 0) return r;
+  const t = tintedVanillaRegion(r.img, r.sx, r.sy, r.sw, r.sh, paint, false, special);
+  if (!t) return r;
+  return { ...r, img: t, sx: 0, sy: 0 };
+}

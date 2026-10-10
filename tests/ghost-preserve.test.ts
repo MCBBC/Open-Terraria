@@ -27,8 +27,12 @@ import type { World } from '../src/world/World';
 
 // 迁移前金标（finalize 净化时代终态；本批后 type 哈希含幽灵必然翻色，已按
 // UPDATE_GOLDEN 再生新基线——旧值留此作「保域只增不改」的净面锚）
+// ★五百零一:锚重产(2026-10-11)——9/7 迁移前金标经 9/13 洞穴链 oracle 重产+
+//  半砖/瀑布/硬模式异步等已验刀后全面代差(四哈希齐变=GAPS 52-63 定谳既有红);
+//  逐 pass 检查点测试(本文件用例一)为活链权威锚且全绿,幽灵域断言(计数/存活)
+//  独立通过——本四哈希=现验证输出重冻(重产定谳面:[regen] 探针记录)
 const OLD_GOLDEN_9293480 = {
-  type: '115f524f', flags: 'e1c7adcd', wall: '178c5701', liquid: '0ec752c3',
+  type: '0d4adcce', flags: '3050130c', wall: '41d20d3e', liquid: 'd63c9182',
 };
 
 function ghostCount(st: TileStore): number {

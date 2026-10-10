@@ -124,10 +124,21 @@ export async function loadModsPhase1(
           const lang = path.slice(5, -5);
           if (!lang) continue;
           try {
-            const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, Record<string, string>>;
+            const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
             const prefixed: Record<string, Record<string, string>> = {};
             for (const [cat, entries] of Object.entries(raw)) {
-              prefixed[`Mods.${manifest.id}.${cat}`] = entries;
+              if (typeof entries === 'string') {
+                // ★五百刀:平铺点键归一('TownChat.bandit.1' 串值=GLM娘批实形)——
+                //  旧实现把串值直塞 Record 位=overlay Object.entries(串)逐字符
+                //  劣化(单字符键污染+Lang.has 恒假=城镇闲聊 l10n 整缺)。
+                //  归一=首段为 cat、余段为 key(TownChat.bandit.1→TownChat/bandit.1)
+                const dot = cat.indexOf('.');
+                if (dot <= 0) continue;   // 无段的纯键无 cat 位=不可路由,跳过
+                const c = cat.slice(0, dot);
+                (prefixed[`Mods.${manifest.id}.${c}`] ??= {})[cat.slice(dot + 1)] = entries;
+              } else {
+                prefixed[`Mods.${manifest.id}.${cat}`] = entries as Record<string, string>;
+              }
             }
             dicts[lang] = prefixed;
           } catch { /* 坏 i18n 文件跳过 */ }

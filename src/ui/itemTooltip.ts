@@ -520,9 +520,15 @@ export function buildTooltipBody(
     if (!worn?.worn) {
       const first = containing[0]!;
       const partVid = first.primary === 1 ? first.h : first.primary === 2 ? first.b : first.l;
+      // ★四百九十九:mod 套 l10n 优先(T=原文本键回退英文 desc;getText 缺失=返键本身)
+      const descOf = (name: string, fb: string | undefined): string => {
+        if (!fb) return T(`ArmorSetBonus.${name}`);
+        const l = T(`ArmorSetBonus.${name}`);
+        return l !== `ArmorSetBonus.${name}` ? l : fb;
+      };
       const desc = first.primary !== 0 && partVid !== vid
         ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[first.primary]}`)
-        : first.desc ?? T(`ArmorSetBonus.${first.name}`);
+        : descOf(first.name, first.desc);
       const text = fmt('UI.ItemSetBonusGeneral', { Description: desc });
       // Description 自带 \n（如 HallowedSummoner 双行文案）→ 同色拆行（原版 MouseText
       // 多行绘制语义;DOM 侧 white-space 不保留 \n）
@@ -541,9 +547,15 @@ export function buildTooltipBody(
       }
     }
     const partVid = best.primary === 1 ? best.h : best.primary === 2 ? best.b : best.l;
+    // ★四百九十九:mod 套 l10n 优先(同上;原版面 desc=undefined 走 T() 不变)
+    const descOf2 = (name: string, fb: string | undefined): string => {
+      if (!fb) return T(`ArmorSetBonus.${name}`);
+      const l = T(`ArmorSetBonus.${name}`);
+      return l !== `ArmorSetBonus.${name}` ? l : fb;
+    };
     const desc = best.primary !== 0 && partVid !== wornAt(best.primary)
       ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[best.primary]}`)
-      : best.desc ?? T(`ArmorSetBonus.${best.name}`);
+      : descOf2(best.name, best.desc);
     const text = fmt('UI.ItemSetBonusEquipped', {
       Numerator: bestFound, Denominator: bestNeeded, Description: desc });
     const color = bestFound === bestNeeded ? 'rgb(50,205,50)' : 'rgb(130,130,130)';

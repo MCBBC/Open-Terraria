@@ -263,7 +263,8 @@ describe.skipIf(process.env.SW_BJ_C9_MUT)('BJ-C9-SP E. 变异自证', () => {
 
   it('M10 越行平台补漏摘除（穿平台回潮）→ 端到端平台落地红', () => {
     mutate(TCOL,
-      "if (dir > 0 && !b.dropThrough) {\n      for (let tyy = bottomRowOld; tyy < ty; tyy++) {",
+      // ★BJ609（2026-10-10）：门式随 fallThrough 半边落刀更新（旧锚 `dir > 0 && !b.dropThrough`）
+      "if (dir > 0 && (!b.dropThrough || (b.platFallThrough === true && b.vy > 1))) {\n      for (let tyy = bottomRowOld; tyy < ty; tyy++) {",
       "if (false) {\n      for (let tyy = bottomRowOld; tyy < ty; tyy++) { // ★C9-SP 变异:越行补漏摘除",
       '端到端：377 出膛');
   });

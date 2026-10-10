@@ -72,26 +72,25 @@ describe('BJ608 平台穿落强制抬升（用户场景复现锁）', () => {
     const store = makeWorld();
     const world = { store };
     const b = makeBody(store, P * 16, { onGround: true });
-    // ★BJ609（2026-10-10）夹具补 platFallThrough（runTicks 内 dropThrough 旗面已拆分,
-    //   见下注）——按 S 期 vy≤1 慢速放行、释放后承接下来首个平台（阶梯下降第一级）。
+    // ★BJ609（2026-10-10）夹具补 platFallThrough（fallThrough 慢放行/快承接半边,
+    //   Player.ts 写位同源）——按 S 期 vy>1 仍承接:t9 已在 P+1 顶被接住一次
+    //   （vy=3.6>1）;t10 慢速起步（vy=0.4≤1 放行,feet=顶+0.4）,t11 释放后旧脚
+    //   1616.4>顶+0.01（嵌入域,:2364 门不放行）→ 续落 t18 被第二级 P+2 接住。
+    //   终态仍=(P+2)×16（原真机对拍 4384 恰与阶梯语义同值——中途多一次 P+1 承接）。
     b.platFallThrough = true;
     const seq = runTicks(b, world, 45, (i) => i < 10);   // 前10拍按S,后35拍释放
     // 起始 feet=P*16;按S期间穿落（feet 单调增,穿过列平台行 P+1..P+3 各顶）
     expect(seq[0], '重力首拍=+0.4').toBeCloseTo(P * 16 + 0.4, 6);
-    // 释放后每一拍 feet 不得回退（原版嵌入盒永不承接=无上行梯爬;≤1px 内允许
-    // BJ-C9-SP prevB≤top+1 容差窗的亚像素承接修正,BJ608 抬回病灶=10-22px 级）
+    // 释放后每一拍 feet 不得回退（原版嵌入盒永不承接=无上行梯爬）
     for (let i = 11; i < seq.length; i++) {
       const landed = seq[i] === seq[i - 1];
-      expect(seq[i] >= seq[i - 1] || landed || seq[i - 1] - seq[i] <= 1.01,
-        `释放后拍${i}: feet ${seq[i - 1]}→${seq[i]} 出现上行=抬升`).toBe(true);
+      expect(seq[i] >= seq[i - 1] || landed, `释放后拍${i}: feet ${seq[i - 1]}→${seq[i]} 出现上行=抬升`).toBe(true);
     }
-    // 终态=自上方承接的平台顶。★BJ609 语义更新:按 S 期 vy>1 仍承接（:2391 后半）
-    // → 按S 10t 期间已在 P+1 顶被接住一次（vy=3.6>1,t9）,释放时旧脚仅超 P+1 顶
-    // 0.4px∈(top,top+1] 容差窗 → 承接驻留 P+1（BJ609 前全量放行旧值=(P+2)×16,
-    // 真机对拍 4384 系全量放行下的物证标定,随语义退役）。
+    // 终态=自上方承接的平台顶（列行 P+2 顶,真机对拍=feet 4384=(272+2)×16;
+    // BJ609 后按 S 期 t9 在 P+1 有一次承接,终值不变）
     expect(b.onGround, '落地下承接').toBe(true);
-    expect(b.y + b.h, '终态 feet=下方平台顶 (P+1)×16（BJ609 阶梯下降第一级）')
-      .toBe((P + 1) * 16);
+    expect(b.y + b.h, '终态 feet=下方平台顶 (P+2)×16')
+      .toBe((P + 2) * 16);
     // 永不回到原平台顶
     for (const f of seq.slice(11)) expect(f, '不得回到原平台（抬回=病灶）').toBeGreaterThan(P * 16);
   });

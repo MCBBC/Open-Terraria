@@ -519,8 +519,14 @@ export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: nu
 /** auto 帧内容检测缓存：key = 图像:像素偏移。查找表引用的帧在部分表（草皮族等
  *  窄表）上是空像素，直画会整格空白 → 检出后回退默认帧 */
 const frameContentCache = new Map<string, boolean>();
+const frameImgIds = new WeakMap<object, number>();
+let frameImgNextId = 1;
 function frameHasContent(r: DrawRect): boolean {
-  const key = `${(r.img as HTMLImageElement).width || r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
+  // ★门卡顿根治刀（2026-10-10）：键换图像身份（旧=尺寸:矩形——染色版画布（paintedAtlasProxy
+  //  产物,全部 16²:0,0）会互撞+与原帧撞 → 首个定型全表错判）。WeakMap 稳定 id。
+  let imgId = frameImgIds.get(r.img as object);
+  if (imgId === undefined) { imgId = frameImgNextId++; frameImgIds.set(r.img as object, imgId); }
+  const key = `${imgId}:${r.sx},${r.sy}`;
   const hit = frameContentCache.get(key);
   if (hit !== undefined) return hit;
   let ok = false;

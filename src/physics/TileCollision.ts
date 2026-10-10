@@ -516,7 +516,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
       //   !fall2 时 vy≤1 放行、vy>1 仍承接（高速下落逐级接住=阶梯下降）。b.vy=本拍
       //   碰撞前速度（原版 Velocity.Y 同量纲,px/tick,向下正）——子步 ≤8px 不改写 vy。
       //   仅 dropThrough（弹体/NPC/钩爪/爬墙源）=fall2 恒不承接,语义零变。
-      const plat = !(b.dropThrough || (b.platFallThrough === true && b.vy <= 1)) && dir > 0
+      const plat = (!b.dropThrough || (b.platFallThrough === true && b.vy > 1)) && dir > 0
         && world.store.isPlatform(tx, ty)
         && (b.y + b.h) - dy <= ty * TILE + halfTop + 1; // 上一位置在平台之上（半砖平台面=格顶+8）
       if (dir > 0) {
@@ -557,7 +557,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     //  vy15,BJ-C9-SP 端到端基准）。
     // ★BJ609：越行补扫同门——按 S 慢速（vy≤1）放行、快速（vy>1）仍逐行承接（:2391）；
     //   仅 dropThrough（fall2 源）恒跳过,嵌入支 opt-in 收窄面零变。
-    if (dir > 0 && !(b.dropThrough || (b.platFallThrough === true && b.vy <= 1))) {
+    if (dir > 0 && (!b.dropThrough || (b.platFallThrough === true && b.vy > 1))) {
       for (let tyy = bottomRowOld; tyy < ty; tyy++) {
         for (let tx = x0; tx <= x1; tx++) {
           if (!world.store.isPlatform(tx, tyy)) continue;

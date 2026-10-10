@@ -29,7 +29,7 @@ import { cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import { getTilePaintSettings } from '../world/Paint';
-import { tintRegion, tintRegionData } from './TileTint';
+import { tintRegion, tintRegionData, paintedAtlasProxy, tintedRect } from './TileTint';   // ★paint-at-draw:染色后绘制(零读回)
 import { TileStore } from '../world/TileStore';
 import { mkCanvas, type AnyCanvas, type Ctx2D } from './canvasEnv';
 
@@ -224,6 +224,17 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
   wall: AnyCanvas, tile: AnyCanvas, ox: number, oy: number): void {
   const st = env.st;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
+  // ★paint-at-draw：漆格特判组计算单源（旧油漆 pass 逻辑迁入——Main.cs:58064-58083
+  //  分发判据,style 派生仅 5/323;墙恒无特判组）
+  const paintSpecialFor = (type: number, x: number, y: number, i: number, pt: number) => {
+    const vt = TILE_DEFS[type]?.vanilla?.sheet;
+    let style = 0;
+    if (vt === 5) style = treeTrunkPaintStyle(st, x, y, st.frameX[i], st.frameY[i], env.groundLevel);
+    else if (vt === 323) style = palmTreePaintStyle(st, x, y, st.w);
+    return pt >= 1 && pt <= 12 ? getTilePaintSettings(vt ?? -1, style) ?? undefined : undefined;
+  };
+  // 走绘制时染色路由的漆格集（残留快照 pass 只管未路由的树族/填充回退漆格）
+  const routedPaint = new Set<number>();
 
   // ---- 第一遍：背景墙全部先画（避免后格的墙盖住跨格物体如宝箱/树冠）----
   // 原版墙 framing（VanillaWallTiler）：32×32 帧以格为中心外溢 8px →
@@ -247,7 +258,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
           // 星彩玻璃逐格错相）不进烘焙，由 Renderer.drawAnimatedWallLayer 逐帧
           // 补画——同 tiles 侧判例（密度放大 ⇒ 重烘风暴）
           if (wallAnimRate(wallId) !== 0) continue;
-          env.wallTiler.draw(wctx, st, x, y, wallId, env.truncatesWalls, px, py);
+          env.wallTiler.draw(wctx, st, x, y, wallId, env.truncatesWalls, px, py, st.paintWall[i]);   // ★paint-at-draw(源染色,零读回)
         } else {
           const wd = WALL_DEFS[wallId];
           if (wd) {
@@ -295,8 +306,11 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       if (isDynamicAnimSheet(sheet)) continue;   // 动画格统一动态层（含 215/207/314/笼/瀑布族）
       if (swayBakeSkip(type, st.frameX[i]) || cageFamilyOf(sheet)) continue;
       if (tileDrawYOffsetOf(sheet, st.frameX[i], st.frameY[i]) > 0) {
+        // ★paint-at-draw:溢出带随源格油漆染色（源染色,零读回）
+        const pPt = st.paint[i];
+        const pAtlas = pPt > 0 ? paintedAtlasProxy(env.autotiler.atlas, pPt, paintSpecialFor(type, x, y, i, pPt)) : env.autotiler.atlas;
         drawVanillaCell(
-          ctx, env.autotiler.atlas, sheet, def.vanilla.frame,
+          ctx, pAtlas, sheet, def.vanilla.frame,
           def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
           st, x, y, type,
           (t) => t === type || frameMergesWith(type, t),
@@ -349,6 +363,10 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       // 绘制（dummy 378 同款先例）——rate10 的整块重烘风暴曾致船区掉帧主因
       // （海盗船体 329 块 ⇒ 覆盖 chunk 每 10t 全量重画 + 油漆 tintRegion 重刷）
       if (def.vanilla?.sheet === 272) continue;
+      // ★paint-at-draw（2026-10-10 根治刀）：漆格在绘制时染色（源染色经
+      //  regionTintCache,零读回）——语义=原版按绘制调用上色（登记偏离清偿）
+      const pt = st.paint[i];
+      const pSpecial = pt > 0 ? paintSpecialFor(type, x, y, i, pt) : undefined;
       // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
       if (def.vanilla && env.autotiler) {
         // ★2026-08-31 根治：动画格一律不进烘焙（isDynamicAnimSheet 谓词 =
@@ -359,8 +377,10 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
         //   消灭动画家具跨 chunk 的 2px 陈旧溢出行隐患。215/207 的相位预加
         //   （campfireYOffset/fountainYOffset）随格子移入动态层。
         if (isDynamicAnimSheet(def.vanilla.sheet)) continue;
+        if (pt > 0) routedPaint.add(i);
         drawVanillaCell(
-          ctx, env.autotiler.atlas, def.vanilla.sheet, def.vanilla.frame,
+          ctx, pt > 0 ? paintedAtlasProxy(env.autotiler.atlas, pt, pSpecial) : env.autotiler.atlas,
+          def.vanilla.sheet, def.vanilla.frame,
           def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
           st, x, y, type,
           // 同 id 融合 + 原版跨类型合并家族（TileMergeFamily:砖/沙/冰雪族互连,
@@ -379,16 +399,18 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       }
       // 树苗：Tree_Bodys 树干段作小苗（底部对齐）
       if (type === T.SAPLING && env.autotiler) {
-        const r = env.autotiler.saplingSprite(x, y);
+        let r = env.autotiler.saplingSprite(x, y);
         if (r) {
+          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px + (TILE - r.sw) / 2, py + TILE - r.sh, r.sw, r.sh);
           continue;
         }
       }
       // 杂草：Maples Tiles_3 杂草贴图（16×20，底部对齐，hash 选变体）
       if (type === T.TALLGRASS && env.autotiler) {
-        const r = env.autotiler.weedSprite(x, y);
+        let r = env.autotiler.weedSprite(x, y);
         if (r) {
+          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px - (r.sw - TILE) / 2, py + TILE - r.sh, r.sw, r.sh);
           continue;
         }
@@ -398,14 +420,18 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       if (ruleName && env.autotiler) {
         // 草皮覆盖件：保持原生透明（缺口露出背后的墙/天空），不做任何垫底/填充
         if (ruleName === '@grass') {
-          const r = env.autotiler.tile(ruleName, st, x, y, type);
-          if (r) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+          let r = env.autotiler.tile(ruleName, st, x, y, type);
+          if (r) {
+            if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+          }
           continue;
         }
-        const r = env.autotiler.tile(ruleName, st, x, y, type);
+        let r = env.autotiler.tile(ruleName, st, x, y, type);
         if (r) {
           // 大图（树冠 80×80，宽>2格）跳过 —— 第三遍统一绘制（跨 chunk 补全 + 树叶盖树干）
           if (r.sw > TILE * 2) continue;
+          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
           // 按精灵原始尺寸绘制。树干等"宽≤2格、高>1格"的竖向件顶部对齐：
           // 溢出向下伸，由更下方的格（后画）覆盖 —— 下层不压上层。
           let dy = py + (TILE - r.sh) / 2;
@@ -424,30 +450,36 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       if (entry.kind === 'blend') {
         const mask = neighborMask(st, x, y, type);
         const col = mask & 15, row = mask >> 4;
-        ctx.drawImage(entry.canvas, col * TILE, row * TILE, TILE, TILE, px, py, TILE, TILE);
+        const rr = pt > 0 ? tintedRect({ img: entry.canvas, sx: col * TILE, sy: row * TILE, sw: TILE, sh: TILE }, pt, pSpecial) : { img: entry.canvas, sx: col * TILE, sy: row * TILE, sw: TILE, sh: TILE };
+        if (pt > 0) routedPaint.add(i);
+        ctx.drawImage(rr.img, rr.sx, rr.sy, rr.sw, rr.sh, px, py, TILE, TILE);
       } else if (entry.kind === 'object') {
         // 仅锚点绘制整体
         if (st.frameX[i] === 0 && st.frameY[i] === 0) {
           const w = (entry.w ?? 1) * TILE, h = (entry.h ?? 1) * TILE;
-          ctx.drawImage(entry.canvas, px, py, w, h);
+          const rr = pt > 0 ? tintedRect({ img: entry.canvas, sx: 0, sy: 0, sw: w, sh: h }, pt, pSpecial) : { img: entry.canvas, sx: 0, sy: 0, sw: w, sh: h };
+          if (pt > 0) routedPaint.add(i);
+          ctx.drawImage(rr.img, rr.sx, rr.sy, rr.sw, rr.sh, px, py, w, h);
         }
       } else {
         // single：帧偏移直接取
-        ctx.drawImage(entry.canvas, st.frameX[i], st.frameY[i], TILE, TILE, px, py, TILE, TILE);
+        const rr = pt > 0 ? tintedRect({ img: entry.canvas, sx: st.frameX[i], sy: st.frameY[i], sw: TILE, sh: TILE }, pt, pSpecial) : { img: entry.canvas, sx: st.frameX[i], sy: st.frameY[i], sw: TILE, sh: TILE };
+        if (pt > 0) routedPaint.add(i);
+        ctx.drawImage(rr.img, rr.sx, rr.sy, rr.sw, rr.sh, px, py, TILE, TILE);
       }
     }
   }
   ctx.globalAlpha = 1; // alpha 复位(防影响后续 pass;致动暗化走 filter,已逐格显式复位)
 
-  // ---- 油漆逐像素 pass：墙层 + tile 层分别着色（TileShader.cso 真值） ----
-  // 原版 tile/wall 各自经 tileShader 按格取 paint（TilePaintSystemV2）；
-  // Canvas 等价 = tintRegion 逐像素 applyPaintTint/applyPaintTintSpecial。
+  // ---- 油漆残留 pass（★2026-10-10 paint-at-draw 根治刀后=稀疏残面） ----
+  // 主遍 tile/wall 的漆格已在绘制时源染色（paintedAtlasProxy/tintedRect/wallTiler
+  //  paint 参数,regionTintCache 缓存,零读回）——本 pass 只剩：
+  //  墙=填充回退（无纹理墙）;tile=未路由漆格（树族直取 ensureVImage/填充回退/
+  //  pixel-block）。语义登记清偿：旧「16×16 格区域染色」偏离（多格物件邻居溢出
+  //  像素被顺带染色）回归原版按绘制调用上色（TilePaintSystemV2）。
   // 分发判据（Main.cs:58064-58083）：特判组 ⟺ paint∈[1,12] ∧ 类型在
   // getTilePaintSettings 表内【都】成立；墙恒无特判组（isWall 只影响负相 30 档）。
   // style 派生仅 5/323（GetTreeBiome/GetPalmTreeBiome，TileDrawing.cs:1460-1478）。
-  // ★ 等价边界：原版按"绘制调用"着色（多格物件整张贴图随锚格上色）；
-  //   本实现按 16×16 格区域着色——涂多格家具/树只有被涂格区域显色（登记）
-  //   (atlas 化:src=页画布,区域坐标须用页内绝对 ox+lx*TILE)
   // ★bakenoread（2026-10-08）：noRead 旗开时首漆格触发该层【一次】整 cell 快照
   //  getImageData(ox,oy,256²)（旧路=每漆格一次 16² 页读回,Windows 逐 op 管线同步
   //  放大=Trace-202608T175748 定谳 31ms/s 主头），逐格 tint 改从快照行拷贝
@@ -465,13 +497,15 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
       const pw = st.paintWall[i];
-      if (pw > 0 && st.wall[i] !== 0) {
+      // ★paint-at-draw 后残留面:墙=仅填充回退（无纹理墙,wallTiler 直画路径已源染色）
+      if (pw > 0 && st.wall[i] !== 0 && !env.wallTiler?.hasTexture(st.wall[i])) {
         if (noRead && !wallSnap) wallSnap = wctx.getImageData(ox, oy, S, S);
         if (wallSnap) tintRegionData(wctx, wallSnap, lx * TILE, ly * TILE, pw, lx * TILE, ly * TILE, true);
         else tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE, true);
       }
       const pt = st.paint[i];
-      if (pt > 0 && st.flags[i] && st.type[i] !== 0) {
+      // ★paint-at-draw 后残留面:tile=未路由漆格（树族直取/填充回退/pixel-block）
+      if (pt > 0 && st.flags[i] && st.type[i] !== 0 && !routedPaint.has(i)) {
         const vt = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
         let style = 0;
         if (vt === 5) style = treeTrunkPaintStyle(st, x, y, st.frameX[i], st.frameY[i], env.groundLevel);
