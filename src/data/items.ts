@@ -348,7 +348,8 @@ item({ key: 'vi_298_shine_potion', name: '', value: 1 });
 item({ key: 'vi_5007_dead_man_s_sweater', name: '', value: 1 });
 item({ key: 'vi_117_meteorite_bar', name: '', value: 1 });
 item({ key: 'vi_186_breathing_reed', name: '', value: 1 });
-// ---- 浮漂饰品 5139-5146（Item.cs:41803-41840 DefaultToAccessory + glowMask 318-324）：
+// ---- 浮漂饰品 5139-5146（Item.cs:41803-41840 DefaultToAccessory；glowMask 318-324
+//      =5140-5146 七发光件,5139 经典浮漂无——Item.cs:41846-41864,BJ601 提取器钉值）：
 //      装备 → accFishingBobber（fishingSkill+10，Player.cs:12552-12554/:14121-14124）
 //      + 浮标弹型覆写（UpdateFishingBobber :36244-36272 → overrideFishingBobber=986-993；
 //      ItemCheck :46551-46553 抛竿时 projToShoot 改走覆写）----

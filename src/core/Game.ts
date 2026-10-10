@@ -38,6 +38,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLocke
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
+import type { AnchorRec } from '../world/TileAnchorValidator';
 import { getTileDustAmount, makeTileDust, makeTileDustCtx, type DustSpawn } from '../world/TileDust';   // ★BJ444 KillTile 统一尘系统（WorldGen.cs:67119-69696）
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
@@ -142,7 +143,7 @@ import {
 } from '../world/Extractinator';
 import { TILE_DEFS, T, TILE_BY_KEY, MOD_SAPLING_TO_TREE, MOD_TREE_BASE, MOD_TREE_IDS, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, MOD_CHEST_TILES, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
-import { framedCellFrame } from '../world/FurnitureStyle';
+import { framedCellFrame, furnitureStyleBase } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
@@ -27152,6 +27153,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      （cycleOffset 模容量，持杖 ↑/↓ 循环）；弹药非耗材族不扣 ----
     const wandVid = (itemDef.vid ?? -1);
     const wand = wandVid > 0 ? flexibleWandOf(wandVid) : null;
+    // ★BJ602：回落链弹药消耗旗（multi 族魔杖注入后链尾 ConsumeFlexibleWandMaterial
+    //  分流扣【弹药桶】;函数级声明=wand 块外链尾消费点可达）
+    let wandAmmoVid = -1;
     if (wand) {
       const slots = this.player.inv.slots;
       const invVids = slots.map((s) => s
@@ -27172,32 +27176,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  掉 4609（行为日志 2026-10-09 Starter_World t=1821-1825 物证:每拍 wand 写→
       //  kill→drop 循环）;分支又零消耗=双重复制链。南瓜灯 35（2×2,CheckMB :51649）/
       //  派对礼物 457（2×2）/沙堡桶 552（3×2）/火烈鸟 545（2×3）同病。
-      //  修=「单件族 × 多格 sheet（anchorRec 在册）」注入 tile+style 后【回落通用链】
-      //  （=原版覆写语义;锚点/清格/写帧/消耗由链承担）;1×1 sheet（书 50/珊瑚 81/
-      //  贝壳 324/礼物 36/炸药 141/宝石 178——直写与原版同相）保持原路;碎块魔杖
-      //  multi 族（consumesAmmo=true,弹药桶语义）原路不动（其 647/648=3×2 直写残废
-      //  另登记债）;241 地下墓穴（锚表缺 AnchorWall——TileObjectData.cs:4794
-      //  Style3x3Wall 系提取缺口）与 698 瓶（anchorTop 含 AlternateTile 特殊位→
-      //  anchorSpecOf 保守回落 null）暂留旧路=不引入新偏离。
-      const wSpec = anchorSpecOf(opt.tileSheet);
-      if (!wand.consumesAmmo && wSpec && (wSpec.w > 1 || wSpec.h > 1)
-        && opt.tileSheet !== 241) {
+      //  修=「多格 sheet（anchorRec 在册）」注入 tile+style 后【回落通用链】
+      //  （=原版覆写语义;锚点/清格/写帧/消耗由链承担）。★BJ602（2026-10-10）扩面
+      //  收尾：①multi 族魔杖（碎块 5324/5329/5330/MiteyTitey 5464/便携窑 5481,
+      //  consumesAmmo=true）同入回落链——原版同支（ModifyFlexibleWandPlacementInfo
+      //  只覆写 tile/style,CustomPlace(647 等)=true 走 CanPlace/Place 全链）,旧 1×1
+      //  直写=3×2 足印残废;弹药消耗改链尾分流（ConsumeFlexibleWandMaterial
+      //  Player.cs:40477-40479/:40490-40499,wand 本体不扣）。②241 地下墓穴解禁——
+      //  BJ600 登记的 AnchorWall 提取缺口已补（recon-tileobj Width 净化门修复,
+      //  TileObjectData.cs:4794 Style3x3Wall AnchorWall=true → 241 wall=true 入表）。
+      //  ③698 瓶解禁——AlternateTile 位建模（altTiles 成员表 + evalCell 分支,
+      //  TileObject.cs:509 isValidAlternateAnchor :1969）;693/694 坐地变体
+      //  （subTiles 39-77,anchorTop→anchorBottom 翻转）同批入表。
+      //  1×1 sheet 保持原路（书 50/珊瑚 81/贝壳 324/礼物 36/炸药 141/宝石 178/
+      //  小碎砾 650/700/701/703/707/钟乳石 693——支撑面由 belowOk 近似升级为
+      //  validateAnchors 逐件锚表,见下方注释）。
+      const wSpec = anchorSpecOf(opt.tileSheet, opt.style);
+      if (wSpec && (wSpec.w > 1 || wSpec.h > 1)) {
         // tile+style 注入（CreateSingleTileWand 桶 tile≡createTile,域不符时兜底覆写;
         // style 消费面=chooseAnchorFromClick/validateAnchors/framedCellFrame 全链同吃）
         itemDef = { ...itemDef, placeStyle: opt.style };
         if (TILE_BY_KEY[itemDef.tile ?? ''] !== wandTile) {
           itemDef = { ...itemDef, tile: TILE_DEFS[wandTile]?.key };
         }
+        if (wand.consumesAmmo && opt.ammoVid > 0) wandAmmoVid = opt.ammoVid;
         // 不 return：继续走下方通用放置链（消耗/useTime/级联在链尾 :28671 域）
       } else {
         if (st.get(tx, ty) !== 0) return;
-        // 落地锚（单件装饰族多 1×1；碎块族亦 1×1 帧 style 帧）：下方须桌面/实心支撑
-        //（桌面臂格 nactive() 门=WorldGen.cs:45747；isSolid 臂自带 active() 首门）
-        const belowOk = st.inBounds(tx, ty + 1)
-          && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
-            && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1)));
-        if (!belowOk) return;
-        st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
+        // ★BJ602④：1×1 族支撑面 = 逐件 TileObjectData 锚表（validateAnchors 全谓词:
+        // 锚带/液体/占用）——书 50=仅桌面（AnchorBottom.Table,TileObjectData.cs:4437 区）
+        // /珊瑚 81=顶格须空+底部实心族（anchorTop EmptyTile+anchorBottom SolidTile|
+        // SolidWithTop|SolidSide,:2440 区）/钟乳石 693=顶部悬挂（anchorTop,style≥39
+        // 坐地子样式）/宝石 178=SolidTile/小碎砾 650/700/701/703/707=各自底锚档。
+        // 旧 belowOk（isSolid|table 二值近似）两向偏差:书可落地/珊瑚无顶格门/
+        // 693 无吊顶门/700 水域可放（liq notAllowed 未设门）。wSpec null（无记录/
+        // exotic 保守回落族）→ 旧 belowOk 兜底。
+        const supportOk = wSpec
+          ? validateAnchors(st, tx, ty, wSpec, opt.style)
+          : (st.inBounds(tx, ty + 1)
+            && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
+              && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1))));
+        if (!supportOk) return;
+        // 帧基偏移单源化（FurnitureStyle.furnitureStyleBase）——1×1 族 default=style*18
+        // 同旧值;693/694 style≥39 折行（StyleWrapLimit=39,case 693/694 注）。
+        const [wfx, wfy] = furnitureStyleBase(TILE_DEFS[wandTile]?.vanilla?.sheet ?? -1,
+          opt.style, TILE_DEFS[wandTile]?.vanilla?.fw ?? 1);
+        st.setTile(tx, ty, wandTile, wfx, wfy);
         this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
         this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
         if (wand.consumesAmmo && opt.ammoVid > 0) {
@@ -27642,7 +27666,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     let anchorCovered = false;
     const anchorRec = (() => {
       if (!def?.framed || !def.vanilla || !def.vanilla.sheet) return null;
-      const sp = anchorSpecOf(def.vanilla.sheet);
+      // ★BJ602：子样式记录解析（GetTileData TileObjectData.cs:5127-5162 整记录替换
+      //  语义,越界/缺 style 回落基记录）——694 钟乳石坐地变体（style≥39 anchorBottom）
+      //  等 per-style 锚。子样式记录与注册表足迹不符 → 基记录（14 炉 style25 3×1
+      //  子样式 vs def 3×2:足迹固定不走本路径,维持基记录=既往语义）。
+      const sp0 = anchorSpecOf(def.vanilla.sheet);
+      if (!sp0) return null;
+      const spSub = anchorSpecOf(def.vanilla.sheet, itemDef.placeStyle ?? 0);
+      const sp = (spSub && spSub !== sp0
+        && ((def.w ?? 1) !== spSub.w || (def.h ?? 1) !== spSub.h)) ? sp0 : spSub;
       if (!sp) return null;
       // 特例豁免：门(双锚寻位列)/火把/轨道/晶塔/橡实已有专用分支；w,h 与注册表
       // 不一致的自创地块不走本路径（保守回落）
@@ -28702,7 +28734,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // consumable=false 的放置物放置不消耗：5464 Mitey-Titey（Item.cs:43089 显式
     // 覆写 DefaultToPlaceableTile 的 consumable=true）。数据源 = vanilla-itemcombat
     // （extract-itemfunc 漏录该件的 consumable 键）；legacy/缺条目维持原消耗行为
-    if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
+    // ★BJ602：multi 族魔杖回落链弹药分流（PlaceIt_ConsumeFlexibleWandMaterial
+    // Player.cs:40477-40479 成功拍调用/:40490-40499 体——ConsumesAmmoItem 族扣
+    // 【弹药桶】1 件（stack--/TurnToAir）,wand 本体不扣;ApplyItemTime 仍取 wand）。
+    // 单件装饰族（consumesAmmo=false）wandAmmoVid 恒 -1 走 held 门=BJ600 语义不变。
+    if (wandAmmoVid > 0) {
+      const wandSlots = this.player.inv.slots;
+      const ammoIdx = wandSlots.findIndex((s) => {
+        if (!s) return false;
+        const d = ITEM_DEFS[s.id];
+        return d != null && (d.vid ?? -1) === wandAmmoVid;
+      });
+      if (ammoIdx >= 0) this.player.inv.removeAt(ammoIdx, 1);
+    } else if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
       this.player.inv.removeHeld(1);
     }
     // ApplyItemTime（PlaceIt :39485 → :4221-4230）：itemTime = useTime×tileSpeed

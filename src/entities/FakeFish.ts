@@ -43,6 +43,7 @@ import { liquidCollision } from '../stats/TouchDamage';
 import { canHitLine } from '../physics/LineOfSight';
 import { getDisplayableDrops } from '../data/vanillaFishing';
 import type { FishingRollCtx } from '../data/vanillaFishing';
+import { ITEM_GLOWMASK } from '../data/vanillaItemGlow';   // ★BJ603 件4① 装饰鱼光罩守卫
 import { queueRippleRaw, RippleShape } from '../render/WaterWaves';
 
 /** Main.rand.NextFloat() 缺省注入（测试换种子实现） */
@@ -896,6 +897,52 @@ function silhouetteOf(
   return c;
 }
 
+/** ★BJ603 件4① 装饰鱼 glowMask 叠画副本（FakeFishParticle.cs:499-502）：
+ *  色 = Lerp(White,Black,0.8)×num2×0.7（无 sonar 白化臂——与本体色支差异点,
+ *  :495 本体 color 先 ×0.7 再 sonar-lerp 再 ×num2,光罩 = 直乘）→ 恒暗罩副本;
+ *  A=255×num2×0.7>0 source-over。源矩形 = glowmaskFrame（DrawItem_GetBasics
+ *  缺省=物品动画同帧——鱼族无 itemAnimations 注册件=整张）;变换同本体
+ *  （rotation/origin=frame.Size/2/scale=vector2 呼吸/effects=FlipVertically）。
+ *  【数据面销案并存】vanilla 73 处 Item.glowMask 赋值位（Item.cs SetDefaults
+ *  全量亲读）无一命中鱼族段（ quest fish/装饰鱼 2475-2500 等零 hit）→ 本面
+ *  对全 vanilla 鱼不可达;守卫保 mod/管理面喂入光罩物品时的同相（BJ603 测试
+ *  以合成光罩物品直调验证）。 */
+const fishGlowCache = new Map<string, HTMLCanvasElement>();
+function fishGlowCopy(
+  atlas: { ensureVImage(path: string): CanvasImageSource | null },
+  vid: number, rgb: [number, number, number],
+): HTMLCanvasElement | null {
+  const gm = ITEM_GLOWMASK[vid];
+  if (gm === undefined) return null;
+  const q = (v: number) => Math.round(v / 32) * 32;
+  const key = `g${gm}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
+  const hit = fishGlowCache.get(key);
+  if (hit) return hit;
+  if (fishGlowCache.size > 128) { const k0 = fishGlowCache.keys().next().value; if (k0 !== undefined) fishGlowCache.delete(k0); }
+  if (typeof document === 'undefined') return null;
+  const img = atlas.ensureVImage(`vanilla/Glow_${gm}.png`);
+  if (!img) return null;
+  const wRaw = (img as { width?: number }).width ?? 0;
+  const hRaw = (img as { height?: number }).height ?? 0;
+  if (!(wRaw > 0) || !(hRaw > 0)) return null;
+  const w = Math.max(1, wRaw);
+  const h = Math.max(1, hRaw);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  cx.fillRect(0, 0, w, h);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(img, 0, 0);
+  cx.globalCompositeOperation = 'source-over';
+  fishGlowCache.set(key, c);
+  return c;
+}
+
 /** Draw（:447-503）。r = Renderer（类型经调用方结构化传递避免环 import）：
  *  ctx/atlas/vicon 可达即可。glowmask 叠画与 sonar 环复制未画（见头注②③）。 */
 export function drawFakeFishSchool(r: {
@@ -972,6 +1019,21 @@ export function drawFakeFishSchool(r: {
     const dw = ar.sw * sx, dh = ar.sh * sy;
     ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
+    // ★BJ603 件4① glowMask 暗罩叠画（:499-502——色 (51,51,51)×num2×0.7 恒暗、
+    //   无 sonar 白化;源=Glow_{gm} 整张,变换同本体。全 vanilla 鱼无 glowMask
+    //   （数据面销案并存,见 fishGlowCopy 注）→ 守卫面对 mod/管理面喂入生效）
+    if (ITEM_GLOWMASK[f.itemType] !== undefined) {
+      const glowImg = fishGlowCopy(atlas, f.itemType, [51, 51, 51]);
+      if (glowImg) {
+        ctx.save();
+        ctx.translate(f.x, f.y);
+        ctx.rotate(rot);
+        if (flip) ctx.scale(1, -1);
+        ctx.globalAlpha = Math.min(1, envelope * 0.7);
+        ctx.drawImage(glowImg, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+      }
+    }
   }
   ctx.restore();
 }

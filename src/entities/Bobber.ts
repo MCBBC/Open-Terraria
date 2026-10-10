@@ -914,6 +914,18 @@ export class Bobber extends Entity {
     // ---- 浮标本体（通用绘制 :34040 + bobber→num143=8,Main.cs:29411）----
     // 贴图左上 = (盒左, 盒上−8);rotation = 收线段 atan2(v)+π/2(AI_61 :50833)
     const img = projFrameImg(this.projId, 0);
+    // ★BJ603 发光浮漂 glowMask（Main.cs DrawProjDirect bobber 支 :35433-35441——
+    //   987-993 → 318+(type-987)（Projectile.cs:9434）,993 Disco 特例 :35434-35436）：
+    //   源矩形 = GlowMask 贴图【自身全幅】（bobber 支独用 value147 尺寸,非弹幕表尺寸
+    //   ——Glow_318..324 30×30 ≡ Projectile_987..993 30×30 对拍同框）;dest = 本体同框
+    //   同变换（position+num153/num152、origin=(num153,h/2+num151) ≙ 本仓 −num145/
+    //   −(h/2+8) 盒）;色 = GetAlpha(White)=White（alpha=0）自发光 → itemGlowQueue
+    //   合成后冲刷。m 捕获 = translate 前。
+    const rGlow = r as unknown as {
+      pushProjGlow?: (id: number, m: DOMMatrix, dx: number, dy: number, sw: number, sh: number, alpha: number) => void;
+    };
+    const mBefore = img && rGlow.pushProjGlow ? ctx.getTransform() : null;
+    let glowBox: [number, number, number, number] | null = null;
     if (img) {
       const num145 = (img.width + this.w) / 2;
       ctx.translate(this.cx - this.w / 2 + num145, this.cy);
@@ -922,6 +934,7 @@ export class Bobber extends Entity {
       }
       if (this.drawRot !== 0) ctx.rotate(this.drawRot);
       ctx.drawImage(img, -num145, -(this.h / 2 + 8), img.width, img.height);
+      glowBox = [-num145, -(this.h / 2 + 8), img.width, img.height];
     } else {
       // 兜底（贴图懒加载未就绪）：近似色块
       // ★P0-B 零上传兜底：arc 路径 op 在 acc 态=逐帧 rasterizePathOp 栅格化+上传;
@@ -929,6 +942,11 @@ export class Bobber extends Entity {
       ctx.translate(this.cx, this.cy);
       ctx.fillStyle = this.biteT > 0 ? '#FF6060' : '#E04838';
       ctx.fillRect(-4, -4, 8, 8);
+    }
+    // glow 冲刷（本体框就绪后入队;ctx 恢复由外层 save/restore 承担——矩阵捕获
+    // 在 translate 前=世界系,op dest 已是本体局部盒）
+    if (mBefore && glowBox) {
+      rGlow.pushProjGlow?.(this.projId, mBefore, glowBox[0], glowBox[1], glowBox[2], glowBox[3], 0);
     }
     // 声呐药水（buff 122,Projectile.cs:19340-19346 渔获 / :19354-19361 敌怪）：
     // 咬钩时浮标上方弹渔获名/血月敌怪名——此前 sonarLabel 数据在而零消费

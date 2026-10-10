@@ -28,6 +28,22 @@
 //   Calculate()（:1820-1833）提交耦合强制 NotAllowed。消费端 TileAnchorValidator 按
 //   liquidType 分流（water 维=WATER/HONEY/SHIMMER，lava 维=LAVA；LIQUID_TYPE 枚举换算，
 //   原版 liquidType 0/2/3↔水维、1↔岩浆维）。
+// ★BJ602（2026-10-10 tile-anchors 提取缺口收尾）新增三维度：
+//   ① `wall` 继承修复：Width 处的家族头净化改为【仅本块无 CopyFrom 时】生效——
+//      CopyFrom(Style3x3Wall)（:4794 AnchorWall=true）后接 Width 的 241/242/245/246
+//      旧提取 wall 恒 false（继承面被无条件清零）=提取缺口（BJ600 登记）。
+//   ② `altTiles`：AnchorAlternateTiles（:434-446/:1969-1984 isValidAlternateAnchor）——
+//      AnchorType.AlternateTile 位的成员表，newTile 级入库（8 族：82/83/84/419/630/
+//      631/698/753）；newAlternate/newSubTile 级随脸未建模（计数审计）。
+//   ③ `subTiles`：子样式全记录（GetTileData :5127-5162 SubTiles[style] 整记录替换）——
+//      newSubTile 几何/锚/路由字段建模进 subWork 脸，addSubTile 提交，与基记录
+//      发散过滤入库（14 style25 3×1 炉 / 165 / 693 / 694 style39-77 坐地变体等）。
+//      未建模子样式字段（AnchorValidTiles/DrawFrameOffsets 非中性项等）→ subPoisoned
+//      该 style 不提交回落基记录（fail-safe，与基记录 poison 仅 warn 不同）。
+//   ④ `uccp`：UsesCustomCanPlace（:145-155,ctor :1679 缺省 false,CopyFrom :1702 继承,
+//      ApplyNaturalObjectRules :1847-1851 置 false）——CustomPlace（:5017-5038）路由
+//      维度；只记 true。★消费端暂不设 CustomPlace 门（19/427/165/233 等在册件照旧
+//      走本仓既有路由）=登记债（BJ602）。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const SRC = process.env.TOD_SRC ?? '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ObjectData/TileObjectData.cs';
@@ -60,6 +76,14 @@ const firstAddTileCallAt = lines.findIndex((l) => /^addTile\(-?\d+\)\s*;/.test(l
 //    LavaPlacement=NotAllowed。⚠️ LiquidPlacementModule 自身 ctor 缺省是两维全 Allowed
 //    （Module cs:11-14），但 _baseObject 构造后立即被 SetupBaseObject 覆盖为岩浆禁。
 const LIQ_DEFAULTS = Object.freeze({ water: 'allowed', lava: 'notAllowed' });
+// ★BJ602：子样式脸建模域（几何/锚/路由=实义;中性=不建模合法;其余=毒→回落基记录）
+const SUB_GEOM_PROPS = new Set(['width', 'height', 'origin', 'anchorbottom', 'anchortop',
+  'anchorleft', 'anchorright', 'anchorwall', 'flattenanchors', 'direction', 'drawyoffset',
+  'usescustomcanplace', 'anchoralternatetiles']);
+const SUB_NEUTRAL_PROPS = new Set(['coordinatewidth', 'coordinatepadding', 'coordinateheights',
+  'style', 'stylehorizontal', 'stylewraplimit', 'stylemultiplier', 'randomstylerange',
+  'drawstepdown', 'drawxoffset', 'drawfliphorizontal', 'allowalwaysonscreen', 'wraps',
+  'hookpostplacemyplayer', 'drawframeoffsets']);
 const LIQ_VAL_MAP = { Allowed: 'allowed', NotAllowed: 'notAllowed', OnlyInFullLiquid: 'onlyInFull', OnlyInLiquid: 'onlyInLiquid' };
 function parseLiqVal(rhs) {
   const m = rhs.match(/LiquidPlacement\.(\w+)/);
@@ -76,7 +100,8 @@ function mkWork() {
   return {
     w: 0, h: 0, ox: 0, oy: 0,
     anchorTop: null, anchorBottom: null, anchorLeft: null, anchorRight: null,
-    wall: false, liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false,
+    wall: false, uccp: false,
+    liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false,
     flatten: false, dir: '', yOff: 0,
     // 转义：AnchorData 第二参为 newTile.Width 表达式时需在快照期以最终 W 具象化
   };
@@ -92,7 +117,26 @@ let work = mkWork();
 // ---- M-3b 子样式工作面：newSubTile 液体态（缺省 = new TileObjectData(_baseObject)
 //      继承 SetupBaseObject :1767-1768 两维缺省）+ 已提交 per-style 记录 + int 局部变量
 //      （addSubTileRange(num,num) / addSubTile(1+newTile.StyleWrapLimit) 求值所需）。 ----
-let subWork = { liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false };
+// ★BJ602：子样式全脸建模（原版 newSubTile = new TileObjectData(_baseObject) 独立
+//  记录面,GetTileData :5127-5162 SubTiles[style] 整记录替换非合并）。缺省=基对象终态
+//  （1×1 无锚+uccp false+液体缺省）。subPoisoned=子样式脸未建模字段命中 → 该 style
+//  记录不提交（GetTileData 回落基记录=fail-safe,与基记录 poison 只 warn 不同）。
+function mkSubFace() {
+  return {
+    w: 1, h: 1, ox: 0, oy: 0,
+    anchorTop: null, anchorBottom: null, anchorLeft: null, anchorRight: null,
+    wall: false, uccp: false, altTiles: undefined,
+    liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false,
+    flatten: false, dir: '', yOff: 0,
+  };
+}
+function fullSubFace(src) {
+  const c = structuredClone(src);
+  return Object.assign(mkSubFace(), c);
+}
+let subWork = mkSubFace();
+let subPoisoned = false;
+let pendingSubTiles = new Map();    // style → 子样式全脸（subPoisoned 未命中才提交）
 let pendingSubLiq = new Map();      // style → liq（addSubTile 提交,death 耦合已应用）
 const intLocals = new Map();        // `int num = 39;` 局部变量（:4230/:4417）
 let styleWrapLimit = 0;             // newTile.StyleWrapLimit（addSubTile 表达式求值所需,不入库）
@@ -103,6 +147,7 @@ let lastAltDir = '';
 const pendingAudit = [];
 function curIdGuess(rec){ return rec._lastId ?? -1; }
 let poisoned = null;         // {tile,into} 复杂构造污染标记（当前对象不可信）
+let copiedThisBlock = false;  // ★BJ602：本 addTile 块内是否已 CopyFrom/FullCopyFrom 显式重立状态
 
 const deep = (w) => structuredClone(w);
 
@@ -129,7 +174,23 @@ function evalTodExpr(raw) {
 }
 function resetSubWork() {
   // addSubTile/addSubTileRange 尾 `newSubTile = new TileObjectData(_baseObject)`（:2041/:2070/:2095）
-  subWork = { liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false };
+  subWork = mkSubFace();
+  subPoisoned = false;
+}
+/** 子样式脸表达式解析（W/H/Hminus1 标记按子脸自身 W/H 具象化,TileObject.Commit 语义） */
+function resolveSubExprs(f) {
+  for (const a of [f.anchorTop, f.anchorBottom, f.anchorLeft, f.anchorRight]) {
+    if (!a) continue;
+    if (a.cnt === 'W') a.cnt = f.w;
+    else if (a.cnt === 'H') a.cnt = f.h;
+    if (a.start === 'Hminus1') a.start = Math.max(0, f.h - 1);
+  }
+}
+/** 子样式记录 vs 基记录发散判定（建模域任一发散即整记录入库=GetTileData 整记录替换） */
+const SUB_CMP_FIELDS = ['w', 'h', 'ox', 'oy', 'anchorTop', 'anchorBottom', 'anchorLeft', 'anchorRight',
+  'wall', 'flatten', 'dir', 'yOff', 'altTiles', 'uccp'];
+function subDiverges(f, base) {
+  return SUB_CMP_FIELDS.some((k) => JSON.stringify(f[k] ?? null) !== JSON.stringify(base[k] ?? null));
 }
 
 function parseAnchor(rhs) {
@@ -170,6 +231,7 @@ for (let ln = 0; ln < lines.length; ln++) {
     const nm = m[1];
     if (!bases.has(nm)) { console.error(`[warn] CopyFrom 未知名 ${nm} @${ln + 1}`); }
     work = deep(bases.has(nm) ? bases.get(nm) : mkWork());
+    copiedThisBlock = true;   // ★BJ602：显式重立 → 后续 Width 不得净化继承锚
     continue;
   }
   if ((m = L.match(/^addBaseTile\(out (\w+)\)\s*;/))) {
@@ -180,6 +242,8 @@ for (let ln = 0; ln < lines.length; ln++) {
     applyLiquidDeathCoupling(snap);
     delete snap.waterDeath; delete snap.lavaDeath;
     bases.set(m[1], snap);
+    copiedThisBlock = false;
+    pendingSubTiles = new Map();
     resetLiquid(work);
     work.yOff = 0;                       // ★SW-FX26：基样式快照后同复位（:2008/:1793）——
                                          //   块内显式 DrawYOffset 已随 snap 落库,残留=上游块污染
@@ -192,6 +256,8 @@ for (let ln = 0; ln < lines.length; ln++) {
     const id = parseInt(m[1]);
     stats.total++;
     if (id <= 0) {                       // addTile(-1) 清工作面语义等价 newTile 复位
+      copiedThisBlock = false;
+      pendingSubTiles = new Map();
       resetLiquid(work);
       work.yOff = 0;                     // ★SW-FX26：复位同含 DrawYOffset（:1793 SetupBaseObject）
       continue;
@@ -209,6 +275,14 @@ for (let ln = 0; ln < lines.length; ln++) {
         if (lq.water !== rec.liq.water || lq.lava !== rec.liq.lava) liqStyles[String(st)] = lq;
       }
       if (Object.keys(liqStyles).length) rec.liqStyles = liqStyles;
+      // ★BJ602：子样式全记录——发散过滤（vs 提交后的基记录;GetTileData 回落语义等价）
+      const subs = {};
+      for (const [st, face] of pendingSubTiles) {
+        const f = deep(face);
+        resolveSubExprs(f);
+        if (subDiverges(f, rec)) subs[String(st)] = f;
+      }
+      if (Object.keys(subs).length) rec.subTiles = subs;
       manifest[id] = rec;
       stats.parsed++;
       if (poisoned) { stats.warned.push(id); }
@@ -220,6 +294,8 @@ for (let ln = 0; ln < lines.length; ln++) {
     pendingAlts = [];
     poisoned = null;
     pendingSubLiq = new Map();           // 子样式归属 newTile,addTile 一并复位
+    pendingSubTiles = new Map();
+    copiedThisBlock = false;
     resetSubWork();
     styleWrapLimit = 0;                  // 原版 newTile=new(_baseObject) 复位 StyleWrapLimit
     resetLiquid(work);                   // 原版 addTile 尾 newTile = new(_baseObject)（:2013）
@@ -244,10 +320,15 @@ for (let ln = 0; ln < lines.length; ln++) {
   //      需要显式搬运（几何字段本就沿 work 继承等价）。 ----
   if ((m = L.match(/^newTile\.FullCopyFrom\((\d+)\)\s*;/))) {
     const srcRec = manifest[m[1]];
+    copiedThisBlock = true;   // ★BJ602：FullCopyFrom 整表拷贝=显式重立
     if (srcRec?.liq) {
       work.liq = structuredClone(srcRec.liq);
+      work.altTiles = srcRec.altTiles ? structuredClone(srcRec.altTiles) : undefined;
+      work.uccp = !!srcRec.uccp;
       pendingSubLiq = new Map();
       for (const [st, lq] of Object.entries(srcRec.liqStyles ?? {})) pendingSubLiq.set(Number(st), structuredClone(lq));
+      pendingSubTiles = new Map();
+      for (const [st, f] of Object.entries(srcRec.subTiles ?? {})) pendingSubTiles.set(Number(st), structuredClone(f));
     } else { poisoned = true; }
     continue;
   }
@@ -259,9 +340,10 @@ for (let ln = 0; ln < lines.length; ln++) {
     stats.subCopyFrom = (stats.subCopyFrom ?? 0) + 1;
     const src = m[1] === 'newTile' ? work
       : m[1] === 'newSubTile' ? subWork
-      : m[1] === 'newAlternate' ? null      // newAlternate 从未持有液体覆写（M-3b 定谳）
+      : m[1] === 'newAlternate' ? null      // newAlternate 脸未建模（dirs 锚覆盖缺失）→ 子脸不可信
       : bases.get(m[1]);
-    if (src) subWork = { liq: { ...src.liq }, waterDeath: !!src.waterDeath, lavaDeath: !!src.lavaDeath };
+    if (src) { subWork = fullSubFace(src); subPoisoned = false; }
+    else subPoisoned = true;
     continue;
   }
   // ---- M-3b：addSubTile/addSubTileRange（TileObjectData.cs:2016-2096）——当前 newSubTile
@@ -272,16 +354,30 @@ for (let ln = 0; ln < lines.length; ln++) {
     if (Number.isFinite(start) && Number.isFinite(cnt)) {
       const snap = subCoupled();
       for (let i = 0; i < cnt; i++) pendingSubLiq.set(start + i, { ...snap });
+      if (!subPoisoned) {
+        const face = deep(subWork);
+        applyLiquidDeathCoupling(face);
+        delete face.waterDeath; delete face.lavaDeath;
+        for (let i = 0; i < cnt; i++) pendingSubTiles.set(start + i, face);
+      } else { stats.subPoisonSkips = (stats.subPoisonSkips ?? 0) + cnt; }
     } else { console.error(`[warn] addSubTileRange 样式表达式不可求值 @${ln + 1}`); }
     resetSubWork();
     continue;
   }
   if ((m = L.match(/^addSubTile\(([^)]*)\)\s*;/))) {
     const snap = subCoupled();
+    let face = null;
+    if (!subPoisoned) {
+      face = deep(subWork);
+      applyLiquidDeathCoupling(face);
+      delete face.waterDeath; delete face.lavaDeath;
+    }
     for (const rawSt of m[1].split(',')) {
       const st = evalTodExpr(rawSt);
       if (!Number.isFinite(st)) { console.error(`[warn] addSubTile 样式表达式不可求值 @${ln + 1}: ${m[1]}`); continue; }
       pendingSubLiq.set(st, { ...snap });
+      if (face) pendingSubTiles.set(st, face);
+      else stats.subPoisonSkips = (stats.subPoisonSkips ?? 0) + 1;
     }
     resetSubWork();
     continue;
@@ -289,6 +385,39 @@ for (let ln = 0; ln < lines.length; ln++) {
   // ---- M-3b：`int num = 39;` 局部变量（:4230/:4417，addSubTileRange 参数求值所需）----
   if ((m = L.match(/^int (\w+) = (.+?);\s*$/))) { intLocals.set(m[1], evalTodExpr(m[2])); continue; }
 
+  // ---- ★BJ602：子样式几何字段应用（与 newTile 同式解析,写 subWork 脸）----
+  function applySubProp(lp, rhs) {
+    switch (lp) {
+      case 'width': subWork.w = parseInt(rhs) || 0; break;
+      case 'height': subWork.h = parseInt(rhs) || 0; break;
+      case 'origin': {
+        const p2 = rhs.match(/new\s+Point16\((-?\w+),\s*(-?\w+)\)/);
+        if (p2) { subWork.ox = valOrExpr(p2[1]); subWork.oy = valOrExpr(p2[2]); }
+        else subPoisoned = true;
+        break;
+      }
+      case 'anchorbottom': case 'anchortop': case 'anchorleft': case 'anchorright': {
+        const key2 = { anchorbottom: 'anchorBottom', anchortop: 'anchorTop', anchorleft: 'anchorLeft', anchorright: 'anchorRight' }[lp];
+        if (/^null/.test(rhs) || /^AnchorData\.Empty\s*$/.test(rhs) || /^default\s*\(\s*AnchorData\s*\)\s*$/.test(rhs)) { subWork[key2] = null; break; }
+        const a2 = parseAnchor(rhs + ';');
+        if (!a2) subPoisoned = true; else subWork[key2] = a2;
+        break;
+      }
+      case 'anchorwall': subWork.wall = /true/i.test(rhs); break;
+      case 'flattenanchors': subWork.flatten = /true/i.test(rhs); break;
+      case 'direction': subWork.dir = rhs.replace(/^TileObjectDirection\./, '').trim(); break;
+      case 'drawyoffset': subWork.yOff = parseInt(rhs) || 0; break;
+      case 'usescustomcanplace': subWork.uccp = /true/i.test(rhs); break;
+      case 'anchoralternatetiles': {
+        const mt2 = rhs.match(/new int\s*\[[^\]]*\]\s*\{([^}]*)\}/);
+        if (mt2) subWork.altTiles = mt2[1].split(',').map((x) => parseInt(x.trim(), 10)).filter(Number.isFinite);
+        else if (/^null/.test(rhs)) subWork.altTiles = undefined;
+        else subPoisoned = true;
+        break;
+      }
+      default: subPoisoned = true;
+    }
+  }
   // ---- 属性赋值（newTile. / newSubTile. 双前缀；newAlternate.* 无液体赋值（grep 全文件
   //      证实），仍走后置毒分支）----
   if ((m = L.match(/^(newTile|newSubTile)\.(\w+)\s*=\s*(.+);\s*$/))) {
@@ -303,15 +432,20 @@ for (let ln = 0; ln < lines.length; ln++) {
       if (lp === 'waterplacement' || lp === 'lavaplacement') {
         stats.subLiqWrites = (stats.subLiqWrites ?? 0) + 1;
         const v = parseLiqVal(raw.trim());
-        if (!v) { poisoned = true; break; }
+        if (!v) { subPoisoned = true; break; }
         if (lp === 'waterplacement') subWork.liq.water = v;
         else subWork.liq.lava = v;
       } else if (lp === 'waterdeath' || lp === 'lavadeath') {
         stats.subLiqWrites = (stats.subLiqWrites ?? 0) + 1;
         if (lp === 'waterdeath') subWork.waterDeath = /true/i.test(raw);
         else subWork.lavaDeath = /true/i.test(raw);
+      } else if (SUB_GEOM_PROPS.has(lp)) {
+        // ★BJ602：子样式几何/锚/路由字段建模（写 subWork 脸,addSubTile 提交）
+        applySubProp(lp, raw.trim());
+      } else if (SUB_NEUTRAL_PROPS.has(lp)) {
+        // 白名单中性项（不建模不污染）
       } else {
-        poisoned = poisoned ?? true;
+        subPoisoned = true;   // 未建模字段 → 子脸不可信,该 style 回落基记录（fail-safe）
       }
       continue;
     }
@@ -325,15 +459,23 @@ for (let ln = 0; ln < lines.length; ln++) {
         //   后续显式补写的对象记入审计表人工核对。
         const prev = deep(work);
         const hadAnchors = !!(prev.anchorTop ?? prev.anchorBottom ?? prev.anchorLeft ?? prev.anchorRight) || prev.wall;
-        work.anchorTop = null; work.anchorBottom = null;
-        work.anchorLeft = null; work.anchorRight = null;
-        work.wall = false; work.flatten = false;
-        work.dir = ''; lastAltDir = ''; pendingAlts = [];
-        work.w = parseInt(rhs) || 0;
-        if (hadAnchors && !Object.isFrozen(prev)) {
-          // 记录待审计：后续若至下一 addTile 无任何 anchor 写回则可能继承语义丢失
-          pendingAudit.push({ idHint: +curIdGuess(prev), types: 'head-reset', kept: false });
+        // ★BJ602（2026-10-10）：净化门=本块【无 CopyFrom】才生效——家族头继承泄漏
+        //  （前族锚残留）须在首个 Width 处清零；但 CopyFrom(Style*) 后的 Width 调整
+        //  （如 241=CopyFrom(Style3x3Wall)+Width4）继承的是【显式重立】的合法锚/
+        //  AnchorWall（TileObjectData.cs:4794 Style3x3Wall AnchorWall=true → 241/242/
+        //  245/246 同承），旧无条件净化=继承面丢失（wall 恒 false 提取缺口）。
+        if (!copiedThisBlock) {
+          work.anchorTop = null; work.anchorBottom = null;
+          work.anchorLeft = null; work.anchorRight = null;
+          work.wall = false; work.flatten = false;
+          work.dir = ''; lastAltDir = ''; pendingAlts = [];
+          work.altTiles = undefined;
+          if (hadAnchors && !Object.isFrozen(prev)) {
+            // 记录待审计：后续若至下一 addTile 无任何 anchor 写回则可能继承语义丢失
+            pendingAudit.push({ idHint: +curIdGuess(prev), types: 'head-reset', kept: false });
+          }
         }
+        work.w = parseInt(rhs) || 0;
         break;
       }
       case 'height': work.h = parseInt(rhs) || 0; break;
@@ -363,6 +505,18 @@ for (let ln = 0; ln < lines.length; ln++) {
         break;
       }
       case 'anchorwall': work.wall = /true/i.test(rhs); break;
+      case 'anchoralternatetiles': {
+        // ★BJ602（2026-10-10）：AnchorAlternateTiles（TileObjectData.cs:434-446 属性/
+        // :1969-1984 isValidAlternateAnchor）——AnchorType.AlternateTile 位的成员表,
+        // 锚格 active 且 sheet∈表 → 该锚成立（TileObject.cs:419/:509/:611/:697）。
+        const mt = rhs.match(/new int\s*\[[^\]]*\]\s*\{([^}]*)\}/);
+        if (mt) {
+          const arr = mt[1].split(',').map((x) => parseInt(x.trim(), 10)).filter(Number.isFinite);
+          work.altTiles = arr;
+        } else if (/^null/.test(rhs)) { work.altTiles = undefined; }
+        else { poisoned = true; }
+        break;
+      }
       case 'waterplacement':
       case 'lavaplacement': {
         // ★M-3：newTile.WaterPlacement/LavaPlacement 显式赋值（TileObjectData.cs:574-640
@@ -389,7 +543,15 @@ for (let ln = 0; ln < lines.length; ln++) {
       case 'drawyoffset': work.yOff = parseInt(rhs) || 0; break;
       // 白名单中性项（不建模但合法）：跳过，不污染（waterdeath/lavadeath 已升级为实义解析）
       case 'coordinatewidth': case 'coordinatepadding':
-      case 'coordinateheights': case 'usescustomcanplace': case 'stylehorizontal': case 'style':
+      case 'coordinateheights': case 'stylehorizontal': case 'style':
+        break;
+      case 'usescustomcanplace':
+        // ★BJ602：UsesCustomCanPlace（TileObjectData.cs:145-155 属性,ctor :1679 缺省
+        //  false,CopyFrom :1702 继承）——CustomPlace（:5017-5038）的路由维度：
+        //  false → 原版 PlaceThing_Tiles_TryPlacing（Player.cs:40085）走 AssortedThings
+        //  legacy 而非 TileObject.CanPlace。入库只记 true（缺省=unset 即 false）。
+        work.uccp = /true/i.test(rhs);
+        break;
       case 'randomstylerange': case 'allowalwaysonscreen': case 'wraps':
         break;
       case 'stylewraplimit':
@@ -409,7 +571,15 @@ for (let ln = 0; ln < lines.length; ln++) {
   // 其它 newAlternate.* 属性写入（罕见）→ 污染
   if (/^newAlternate\./.test(L) && !/CopyFrom/.test(L)) { poisoned = true; continue; }
   // 其它明显复杂构造：方法调用/条件结构行不匹配以上任何 → 仅在涉及 newTile/newSubTile 时置毒
-  if (/^newSubTile\.|^for \([^)]*\)$|^switch|^if\s*\(/.test(L)) { poisoned = poisoned ?? true; continue; }
+  // ★BJ602：ApplyNaturalObjectRules（TileObjectData.cs:1847-1851）=UsesCustomCanPlace
+  //  =false + UsesGlobalLiquidChecks=true（后者不建模——uccp=false 已整体走 legacy,
+  //  CanPlace 不达）。两脸同式：newTile→work.uccp=false;newSubTile→subWork.uccp=false。
+  if (/^newTile\.ApplyNaturalObjectRules\(\)\s*;/.test(L)) { work.uccp = false; continue; }
+  if (/^newSubTile\.ApplyNaturalObjectRules\(\)\s*;/.test(L)) { subWork.uccp = false; continue; }
+  // 其余 newSubTile 方法调用=子脸未建模字段 → subPoisoned（该 style 回落基记录,fail-safe）;
+  // 不毒基记录（子脸独立于 newTile 基面）
+  if (/^newSubTile\./.test(L)) { subPoisoned = true; continue; }
+  if (/^for \([^)]*\)$|^switch|^if\s*\(/.test(L)) { poisoned = poisoned ?? true; continue; }
 }
 
 function valOrExpr(t) {
@@ -435,7 +605,7 @@ mkdirSync('src/data', { recursive: true });
 mkdirSync('tests/golden', { recursive: true });
 writeFileSync(OUT_RUNTIME, JSON.stringify({ v: '1457', tiles: manifest }, null, 1));
 writeFileSync(OUT_GOLDEN, JSON.stringify({ v: '1457', tiles: manifest }, null, 1));
-console.log(`total=${stats.total} parsed=${stats.parsed} unparsed=${stats.unparsed.length} warned=${stats.warned.length} subCopyFrom=${stats.subCopyFrom ?? 0} subLiqWrites=${stats.subLiqWrites ?? 0}`);
+console.log(`total=${stats.total} parsed=${stats.parsed} unparsed=${stats.unparsed.length} warned=${stats.warned.length} subCopyFrom=${stats.subCopyFrom ?? 0} subLiqWrites=${stats.subLiqWrites ?? 0} altTiles=${Object.values(manifest).filter((r) => r?.altTiles).length} uccp=${Object.values(manifest).filter((r) => r?.uccp === true).length} subTiles=${Object.values(manifest).filter((r) => r?.subTiles).length} subPoisonSkips=${stats.subPoisonSkips ?? 0}`);
 console.log('unparsed ids:', stats.unparsed.join(','));
 // 液体两维分布抽查（M-3）
 {

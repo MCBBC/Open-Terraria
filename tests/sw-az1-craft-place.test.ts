@@ -307,7 +307,11 @@ describe('SW-AZ1 结构锁', () => {
     //  consumable 位（Game.ts 4544x 段,:11446/:38997 族）,BJ536 本刀零新增消费位
     //  （刀面=heldItem/syncCursorMirror/commitCursorMirror,逐字无 removeHeld 调用）,
     //  此处只把锁数对齐盘上实况拍照（防套件常红;归属批落定后可再精确归因）。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(58);
+    // ★BJ600 重锚（2026-10-10）:58→59——tryPlace wand 分支 raw 路（1×1 族）补
+    //  held 本体消耗位（原版 ItemCheck consumable 消耗拍 Player.cs:43612-43645;
+    //  旧分支零消耗=书/珊瑚/贝壳/礼物/炸药/宝石白放复制链,与侏儒放置即掉落同支
+    //  同根,合法入账）。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(59);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

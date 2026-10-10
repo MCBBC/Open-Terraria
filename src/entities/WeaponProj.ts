@@ -10,6 +10,7 @@ import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
 import { LIQUID_TYPE, TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
+import { PROJ_GLOWMASK } from '../data/vanillaProjGlow';   // ★BJ603 弹幕 glowMask（1101/1102 相位双画）
 import { TtlSpriteMap } from '../assets/ttlSprite';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -150,7 +151,12 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   // 不落实体层,把同一绘制序列打包成闭包交调用方（projFullbrightQueue 光照合成后
   // source-over 复绘=常量色弹面;单源=变换数学仍在本函数,零复制）。19 Flamarang/
   // 35 Sunfury 恒白面（Projectile.cs:81465-81468 Color.White）经此收编。
-  capture?: (fn: (ctx: CanvasRenderingContext2D) => void) => void): void {
+  capture?: (fn: (ctx: CanvasRenderingContext2D) => void) => void,
+  // ★BJ603：glowMask 臂（Main.cs DrawProjDirect 通用支 :35498-35518——1101:372/
+  //   1102:373 相位双画,Projectile.cs:10021/:10037）——true 且 PROJ_GLOWMASK 命中
+  //   时,本体绘制后以同矩阵收 projGlow op（源=弹幕贴图全幅、dest=本体同框;
+  //   色自发光 → itemGlowQueue 合成后冲刷）。
+  glowMask = false): void {
   // drawSize=绘制尺寸(0/-1=贴图原生尺寸×scale——F1/RB28 前缺省 0 曾取碰撞盒 w;
   // -1 为历史显式写法,与缺省 0 同义——原版投射物绘制语义,爆炸族雷管 10×32 竖条
   // 等非方贴图必须走原生尺寸否则被拉方)
@@ -223,6 +229,16 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
         -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (sh / W));
     } else {
       ctx.drawImage(img!, -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (img!.height / img!.width));
+    }
+    // ★BJ603 glowMask 臂（:35498-35518 通用支——本体后同矩阵同框叠画;源=弹幕
+    //   贴图全幅=光罩平行表同框。alpha 恒 0（1101/1102 SetDefaults 无 alpha 覆写）
+    //   ——相位双画色序由 pushProjGlow 内 projGlowColors 承担）
+    if (glowMask && PROJ_GLOWMASK[projId] !== undefined) {
+      const m = ctx.getTransform();
+      (r as unknown as {
+        pushProjGlow?: (id: number, mm: DOMMatrix, dx: number, dy: number, sw: number, sh: number, alpha: number) => void;
+      }).pushProjGlow?.(projId, m,
+        -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (img!.height / img!.width), 0);
     }
   } else {
     ctx.fillStyle = fallbackColor;
@@ -1033,7 +1049,10 @@ export class Boomerang extends Entity {
         });
       return;
     }
-    drawProj(r, cam, this, this.projId, this.rot, '#C0A060', 1, 0, false, false, this.visScale);
+    // ★BJ603：1101/1102 相刃 glowMask 双画（Main.cs :35498-35518）——drawProj
+    //   glowMask 臂承载（源=弹幕贴图全幅/dest=本体同框/相位双画色序）
+    drawProj(r, cam, this, this.projId, this.rot, '#C0A060', 1, 0, false, false, this.visScale,
+      -1, 0, undefined, this.projId === 1101 || this.projId === 1102);
   }
 
   /** 轴向目标速度逼近（AI_003 追踪/返回共用式 :36937-36973/:37249-37282）：

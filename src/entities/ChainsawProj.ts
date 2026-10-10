@@ -310,6 +310,15 @@ export class ChainsawProj extends Entity {
     // DrawProjDirect 的 dir 翻转仅 ownerHitCheck && gravDir==-1 倒重力支 Main.cs:35447-35456,
     // 常规重力 dir=SpriteEffects.None）——两处均本仓自创,随 SW-FX4 勘误撤除。
     const rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // :25889（1.5700000524f 即 π/2）
+    // ★BJ603 弹幕 glowMask（Main.cs DrawProjDirect 通用支 :35498-35518——427:2/
+    //   428:3/429:7/430:8/609:180/610:179 六型,Projectile.cs:4990-5037）：源矩形=
+    //   弹幕贴图全幅（projFrames 恒 1,Glow_N≡Projectile_N 同尺寸对拍）,dest=本体
+    //   同框同变换;色 (250,250,250,alpha) 自发光 → itemGlowQueue 合成后冲刷。
+    //   m 捕获 = translate 前（dest 取本体局部坐标 −dw/2/−dh/2）。
+    const rGlow = r as unknown as {
+      pushProjGlow?: (id: number, m: DOMMatrix, dx: number, dy: number, sw: number, sh: number, alpha: number) => void;
+    };
+    const mBefore = rGlow.pushProjGlow ? ctx.getTransform() : null;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(rot);
@@ -317,5 +326,8 @@ export class ChainsawProj extends Entity {
     const dw = img.width * this.drawScale, dh = fh * this.drawScale;
     ctx.drawImage(img, 0, idx * fh, img.width, fh, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
+    if (mBefore && frames === 1) {
+      rGlow.pushProjGlow?.(this.projId, mBefore, -dw / 2, -dh / 2, img.width, img.height, 0);
+    }
   }
 }

@@ -31,22 +31,50 @@ export interface AnchorRec {
   liqStyles?: Record<string, { water: LiquidPlacementVal; lava: LiquidPlacementVal }>;
   flatten: boolean; dir: string; yOff: number;
   dirs?: Array<{ dir: string }>;
+  /** ★BJ602（2026-10-10）：AnchorAlternateTiles（TileObjectData.cs:434-446）——
+   *  AnchorType.AlternateTile 位的成员表；锚格 active 且 sheet∈表 → 该锚成立
+   *  （isValidAlternateAnchor :1969-1984；消费位 TileObject.cs:419/:509/:611/:697）。
+   *  位存在而表缺省（null）=原版本相恒 false（isValidAlternateAnchor 早退）。 */
+  altTiles?: number[];
+  /** ★BJ602：子样式全记录（GetTileData TileObjectData.cs:5127-5162 SubTiles[style]
+   *  整记录替换非合并,越界/缺style回落基记录）。recon-tileobj 从反编译提取,
+   *  只存与基记录发散的 style。 */
+  subTiles?: Record<string, AnchorRec>;
+  /** ★BJ602：UsesCustomCanPlace（TileObjectData.cs:145-155,ctor :1679 缺省 false）——
+   *  CustomPlace（:5017-5038）路由维度。★暂只入库不设路由门（消费端 19/427/165/233
+   *  等在册件照旧走既有路由）=登记债（BJ602）。 */
+  uccp?: boolean;
 }
 const RAW = (anchorsJson as unknown as { v: string; tiles: Record<string, AnchorRec | null> }).tiles;
 
-const _resolved = new Map<number, AnchorRec | null>();
-/** 取 tile 的锚点规格；无数据 / 复杂构造回落(null)/含未建模豁免位者归 null 走旧路径 */
-export function anchorSpecOf(sheet: number): AnchorRec | null {
-  if (_resolved.has(sheet)) return _resolved.get(sheet)!;
+/** ★BJ602：AlternateTile 位已建模（altTiles 成员表）——仅对「子样式/成员表全提取」
+ *  的三族解除整体回落：698（altTiles 8 成员 TileObjectData.cs:2481）、693/694（坐地
+ *  变体 subTiles 39-77 全提取,位本身无成员表=原版恒 false 惰性位）。其余 AlternateTile
+ *  载体（82-84/419/630/631/753 有 altTiles 但 alternates/valid-tiles 邻接维度未建模、
+ *  165/442/723/724 位惰性但路由面未逐族验 Cascade）维持保守回落=逐族翻案留后续刀。 */
+const ALTERNATE_MODELED = new Set([698, 693, 694]);
+
+const _resolved = new Map<string, AnchorRec | null>();
+/** 取 tile 的锚点规格；无数据 / 复杂构造回落(null)/含未建模豁免位者归 null 走旧路径。
+ *  ★BJ602：style 给定且命中 subTiles[style] → 返回子样式记录（GetTileData 整记录
+ *  替换语义,TileObjectData.cs:5127-5162）；未命中/越界回落基记录（同 :5142-5150）。 */
+export function anchorSpecOf(sheet: number, style?: number): AnchorRec | null {
+  const key = `${sheet}|${style ?? ''}`;
+  if (_resolved.has(key)) return _resolved.get(key)!;
   const raw = RAW[String(sheet)];
   let out: AnchorRec | null = null;
   if (raw) {
-    // AlternateTile/Tree 位依赖逐族白名单（未提取）→ 整体回落旧近似（保守）
-    const hasExoticBits = [raw.anchorTop, raw.anchorBottom, raw.anchorLeft, raw.anchorRight]
-      .some((a) => a?.t.some((s) => s === 'AlternateTile' || s === 'Tree'));
-    out = hasExoticBits ? null : raw;
+    const face = (style !== undefined ? raw.subTiles?.[String(style)] : undefined) ?? raw;
+    // Tree 位依赖逐族白名单（未提取）→ 整体回落旧近似（保守）;AlternateTile 已建模
+    // （ALTERNATE_MODELED 三族外仍保守回落）。★基记录毒性连带子样式：基记录含未建模
+    // 位 → 该 tile 整体回落（子样式路由翻转不得早于其级联/帧带建模,如 165 坐地子样式
+    // 入表驱动链会以吊顶帧带落地→级联杀=掉落循环）。
+    const exoticOf = (f: AnchorRec) => [f.anchorTop, f.anchorBottom, f.anchorLeft, f.anchorRight]
+      .some((a) => a?.t.some((s) => s === 'Tree'
+        || (s === 'AlternateTile' && !ALTERNATE_MODELED.has(sheet))));
+    out = (exoticOf(raw) || exoticOf(face)) ? null : face;
   }
-  _resolved.set(sheet, out);
+  _resolved.set(key, out);
   return out;
 }
 
@@ -116,6 +144,10 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
     if (!ok && bit('SolidSide') && d?.solid && !d.platform
       && SIDE_BT_PAIRS[side]?.includes(btOf(st, cx, cy))) ok = true;
     if (!ok && bit('PlanterBox') && sheet === 380) ok = true;
+    // ★BJ602：AlternateTile 位（TileObject.cs:419/:509/:611/:697）——锚格 active 且
+    // sheet ∈ rec.altTiles（AnchorAlternateTiles,isValidAlternateAnchor
+    // TileObjectData.cs:1969-1984）→ 锚成立。表缺省 = 原版本相恒 false（惰性位）。
+    if (!ok && bit('AlternateTile') && (rec.altTiles ?? []).includes(sheet)) ok = true;
     if (!ok && bit('SolidBottom')) {
       // Composite（TileObject :541-556）：整实心 / 半砖 / 顶坡 / 平台的半砖·顶坡形态；
       // NotReallySolid/bottomSlope 近似忽略（花箱族已由 PlanterBox 覆盖）

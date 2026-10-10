@@ -40,6 +40,7 @@ import { Inventory } from '../src/items/Inventory';
 import { HitTile } from '../src/core/HitTile';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { newWiresRadialState } from '../src/stats/wiresRadial';
 import { releaseBlockMouse } from '../src/core/Input';
 
 const iidOf = (vid: number): number =>
@@ -84,6 +85,10 @@ function bj536Game() {
     timeUiHover: false, weatherUiHover: false, minimapUiHover: false,
   };
   g.smartCursor = { showing: false, lockedContinuity: null, x: 0, y: 0 };
+  // ★BJ600 回归修复（2026-10-10）：updateUse 内 tickWiresRadial（BJ569/572 于
+  //  7647345e 落线）读 this.wiresRadial——Object.create 壳无构造器字段 →
+  //  flowerUpdate(st=undefined) TypeError（既有红,与本刀无关,补桩复绿）
+  g.wiresRadial = newWiresRadialState();
   g.annotateMode = false;
   g.mining = null;
   g.swingHitSet = new Set<number>();

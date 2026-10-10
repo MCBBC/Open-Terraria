@@ -137,6 +137,12 @@ import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { blendItemColorTint } from '../data/vanillaItemColor';   // SW-BJ60 掉落物 Item.color 两遍合成（与 UI.iconUrl 单源）
 import { armorGlowOps, type ArmorGlowOp } from '../data/vanillaArmorGlow';   // ★BJ597 甲位 GlowMask 表（SetPassColors 数据化）
+import {
+  ITEM_GLOWMASK, DROP_GLOW_EXCLUDED, HAND_GLOW_SKIP, STAFF_GLOW_SPECIAL,
+  heldGlowColors, dropGlowColors, dropGlowKind, xnaColorToOp, staticHoldDrawGate,
+  monkT3GlowRect, MONK_T3_GLOW, type RGBA,
+} from '../data/vanillaItemGlow';   // ★BJ601 Item.glowMask 消费面（手持两段+掉落物光罩）
+import { PROJ_GLOWMASK, PROJ_GLOW_DISCO, projGlowColors } from '../data/vanillaProjGlow';   // ★BJ603 弹幕域
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
@@ -276,7 +282,8 @@ import {
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
-import { heldItemStealthDim, dimmedHeldRegion, type HeldStealthDim } from './heldItemStealthDim';   // ★BJ599 手持物潜行减色（ApplyStealthToColor 移植）
+import { drawTileGlows, type TileGlowOp } from './TileGlow';   // ★BJ603 tileGlowMask 运行时叠画（visEffectFrames 已有 :1006 import）
+import { heldItemStealthDim, dimmedHeldRegion, applyStealthToColor, type HeldStealthDim } from './heldItemStealthDim';   // ★BJ599 手持物潜行减色（ApplyStealthToColor 移植）
 import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
 import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
 import { setTintAtlasInvalidateRect } from './TintAtlas';   // ★E51 刀A:回收矩形精确失效注入
@@ -588,10 +595,18 @@ const ARCANUM_HOLD_FRAME_PX = 24;
  *  rasterizeDrawImage 隔离栅格化/降级链（GLShimExecutor.ts:803-806）,与 glow 层
  *  （filter=none → quad 快路径）分叉 = "glow 可见而主层消失"的唯一实现差异点
  *  （分层隔离探针 _bj348b2-layer-iso 实证纯 2D 下两层全对 = shim filter 路径
- *  是唯一环境分叉）。防御 = 一次性把暗化(RGB×0.5,α 面 0.8 由 globalAlpha 承载
- *  =原版 MultiplyRGBA(0.5,0.5,0.5,0.8) 逐字节)烘进 canvas,运行时主层
+ *  是唯一环境分叉）。防御 = 一次性把暗化烘进 canvas,运行时主层
  *  filter=none 走 quad 快路径零 shim 兼容面。懒烘焙:ensureVImage 晚到自愈
- *  （每帧重调,null 帧画原帧=首帧偏亮 1-2 帧可忽略）。 */
+ *  （每帧重调,null 帧画原帧=首帧偏亮 1-2 帧可忽略）。
+ *  ★BJ604件2（2026-10-10 RGB 双乘翻案）：烘焙因子 0.5→0.625。合成代数——canvas
+ *  globalAlpha 在预乘空间【同时缩放色彩与 α】（W3C source-over: co=cs+cb·(1−αs),
+ *  globalAlpha 乘 αs 同时乘 cs),旧烘焙 RGB×0.5+globalAlpha 0.8 = 合成 RGB 面
+ *  ×0.4 ≠ 原版。原版锚（PlayerDrawLayers.cs:3344/:3370）MultiplyRGBA(0.5,0.5,0.5,0.8)
+ *  在 XNA 预乘混合下 = RGB 面×0.5/A 面×0.8（A 因子只衰减混合权重不衰减 RGB 面值）。
+ *  修=烘焙 ×0.625（=0.5/0.8 补偿）×globalAlpha 0.8 → 合成 RGB=×0.5 ✓ A=×0.8 ✓。
+ *  （「A×0.8 烘进 tex+globalAlpha→1」代数上与旧态恒等=×0.4,处方证伪——原处方
+ *  未落,按 W3C 算子式选本等价重构。字节域：原版 Color(Vector4(0.5,…,0.8)) 截断
+ *  =(127,127,127,204),RGB 面精确因子 127/255≈0.498;0.625×0.8=0.5 语义档,≤1 LSB。） */
 let arcanumDimCanvas: HTMLCanvasElement | null = null;
 function arcanumDimTex(atlas: SpriteAtlas): HTMLCanvasElement | null {
   if (arcanumDimCanvas) return arcanumDimCanvas;
@@ -604,13 +619,48 @@ function arcanumDimTex(atlas: SpriteAtlas): HTMLCanvasElement | null {
   c.drawImage(img, 0, 0);
   const id = c.getImageData(0, 0, cv.width, cv.height);
   for (let i = 0; i < id.data.length; i += 4) {
-    id.data[i] = (id.data[i] * 0.5) | 0;          // MultiplyRGBA RGB 面 ×0.5（:3345）
-    id.data[i + 1] = (id.data[i + 1] * 0.5) | 0;
-    id.data[i + 2] = (id.data[i + 2] * 0.5) | 0;  // α 面不动（0.8 由 globalAlpha 承载）
+    id.data[i] = (id.data[i] * 0.625) | 0;          // ×0.625(=0.5/0.8)×globalAlpha0.8 → RGB 面合成 ×0.5（:3345）
+    id.data[i + 1] = (id.data[i + 1] * 0.625) | 0;
+    id.data[i + 2] = (id.data[i + 2] * 0.625) | 0;  // α 面不动（0.8 由 globalAlpha 承载）
   }
   c.putImageData(id, 0, 0);
   arcanumDimCanvas = cv;
   return cv;
+}
+
+/** ★BJ603 3779 本体减色预烘焙（MultiplyRGBA(0.5,0.5,0.5,0.8) RGB 面×0.625 补偿烘焙,
+ *  A 面 0.8 由 globalAlpha 承载——arcanumDimTex 同配方泛化;WeakMap 按源图像身份缓存,
+ *  整幅烘焙（源坐标系不变,调用侧仍按 ar.sx/sy/ar.sw/ar.sh 取框））
+ *  ★BJ604件2 同根：烘焙 0.5→0.625（globalAlpha 预乘缩放补偿,×0.8 → 合成 RGB×0.5,
+ *  详见 arcanumDimTex 注）——3779 站旧态同病 ×0.4。 */
+const halfDimTexCache = new WeakMap<object, HTMLCanvasElement>();
+function halfDimTex(
+  img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas,
+): HTMLCanvasElement | null {
+  const cached = halfDimTexCache.get(img as object);
+  if (cached) return cached;
+  const w = (img as { width: number }).width;
+  const h = (img as { height: number }).height;
+  if (!(w > 0) || !(h > 0)) return null;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const c = cv.getContext('2d', { willReadFrequently: true });
+    if (!c) return null;
+    c.imageSmoothingEnabled = false;
+    c.drawImage(img as CanvasImageSource, 0, 0);
+    const id = c.getImageData(0, 0, w, h);
+    for (let i = 0; i < id.data.length; i += 4) {
+      id.data[i] = (id.data[i] * 0.625) | 0;        // ★BJ604件2：×0.625×globalAlpha0.8=RGB 面合成 ×0.5
+      id.data[i + 1] = (id.data[i + 1] * 0.625) | 0;
+      id.data[i + 2] = (id.data[i + 2] * 0.625) | 0;
+    }
+    c.putImageData(id, 0, 0);
+    halfDimTexCache.set(img as object, cv);
+    return cv;
+  } catch {
+    return null;
+  }
 }
 
 /** useStyle 5 的"法杖持位"物品（Main.cs:6695-6740 Item.staff=true 全 34 件）：
@@ -1055,6 +1105,7 @@ import {
   BigProgressBarSystem, drawBigProgressBar, refLifeMaxOf,
   type BarContext, type BarNpc, type CollectInfo,
 } from './BossBars';
+import { BOSS_BAG_IDS } from '../data/vanillaBossBags';   // ★BJ603 掉落环绕光斑集（ItemID.Sets.BossBag）
 import { globalTimeWrappedHourly, gameTickCount } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
 import { drawInfernoRings, ensureFlameRingImage, type FlameRingPlayer } from './InfernoRing';   // ★BJ579 狱火药水火圈
 
@@ -5413,6 +5464,10 @@ export class Renderer {
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
     this._diagFrame++;   // ★P0-A:诊断帧戳（swpipe 降级指纹/计数按帧去重的时基）
+    // ★BJ603：LocalPlayer.miscCounter 渲染侧快照（弹幕 glowMask 相位双画 1101/1102
+    //   GetPhaseColor(proj.type) 消费 Main.LocalPlayer.miscCounter——Proj 类 draw
+    //   侧无 Player 引用,经本快照读）
+    this._localMiscCounter = player.miscCounter;
     // 全屏地图关闭 → 释放整幅资源(GL 纹理 + 2D 临时画布;开图期才占 GPU,
     // 常态零占用——2026-08-18 CPU 化的核心收益点)
     // ★M6 拍照模式:_capturePass 的全屏地图关闭是截图重渲的临时态
@@ -6310,6 +6365,24 @@ export class Renderer {
       const fty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
       const fty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
       drawTileFlames(ctx, this.atlas, world.store, ftx0, fty0, ftx1, fty1, flicker);
+      // ★BJ603 tileGlowMask 叠画（TileDrawing.cs:1196-1341 DrawBasicTile 本体后
+      //   尾段 1:1）：36 件光罩表（129=BJ118① 已承担跳过/718 零贡献不画/209 实体
+      //   通道休眠）逐格 op 收集 → itemGlowQueue 合成后冲刷（光罩色不取光照=
+      //   自发光,同槽判例=四塔/甲位/物品域逃逸族）。源矩形=本体同矩形
+      //   （vframeAt+drawAdjust 带门动画同源,390/708 无门 addFr）,dest=x*16+
+      //   tileTop 权威表。层序登记：冲刷在 7e 逃逸域=实体之上（tile 批次内本体
+      //   后≈原版位;加算面覆盖序偏差同 BJ504/677 既有惯例同槽）。
+      const glowOps: TileGlowOp[] = [];
+      drawTileGlows(this.atlas, world.store, ftx0, fty0, ftx1, fty1, {
+        tVis: visEffectFrames(),
+        gtwh: 0,
+        discoRGB: this.lighting?.clock?.discoColor?.() ?? null,
+        lightAt: (tx, ty) => this.lighting?.lightAt(tx, ty) ?? null,
+        noirOpacity: this.monoFilters.noirOpacity(),
+      }, (ops) => { for (const o of ops) glowOps.push(o); });
+      if (glowOps.length) {
+        this.itemGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: glowOps });
+      }
     }
 
     // 2c'.0 虚空保险库悬浮透镜层（TileDrawing.DrawVoidLenses :8876-8902——与晶塔
@@ -6621,7 +6694,7 @@ export class Renderer {
     //     (:63213) 之后——物品精灵盖在玩家身上；曾进实体 y 排序=玩家盖物品。
     //     磁吸/拾取逻辑在更新侧不受影响）
     for (const e of sorted) {
-      if (e instanceof ItemDrop) this.drawDrop(e);
+      if (e instanceof ItemDrop) this.drawDrop(e, player.miscCounter);   // BJ601 miscCounter 传参（:39424 LocalPlayer.miscCounter）
     }
 
     // 4.4 雨（★2026-08-24 r15 R15-1：原版 DrawRain 在 DrawItems/全部实体之后
@@ -6905,6 +6978,10 @@ export class Renderer {
     //      ——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。在翼光
     //      后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族）
     this.flushArmorGlow();
+    // 7e''''' Item.glowMask（★BJ601 2026-10-10：手持两段+掉落物光罩——光罩色不取
+    //      光照=自发光,drawPlayer/drawUseItem/drawDrop 收集、此处消费。同槽判例=
+    //      四塔/甲位/盾球合成后逃逸族）
+    this.flushItemGlow();
     // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
     //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
     //      用户实报"半透的比较暗";drawPlayer 收集、此处消费。同槽判例=翼光/
@@ -10576,7 +10653,7 @@ export class Renderer {
     this.drawLeashedKite(this.ctx, k, k.windSnapshot);
   }
 
-  private drawDrop(d: ItemDrop) {
+  private drawDrop(d: ItemDrop, miscCounter = 0) {
     const bob = Math.sin((d.age + d.bobPhase * 60) * 0.1) * 1.5;
     // 优先 Maples 图标。绘制尺寸 = 贴图单帧原尺寸（原版 Main.DrawItem 掉落物
     // 按 texture.Frame 原大画,星星 Item_75 单帧 22×26 比方块还大;曾统一压
@@ -10588,6 +10665,12 @@ export class Renderer {
       //   曾按盒左上角画 = 大贴图物品（坠落星 22×26 盒 16×16）精灵溢出右下、
       //   选中框视觉钉在左上（用户实报 2026-09-02）
       const ddx = d.x - (ar.sw - d.w) / 2, ddy = d.y - (ar.sh - d.h) / 2 + bob;
+      // ★BJ603 掉落贴图 velocity 旋转（Main.cs:39284 `num = velocity.X × 0.2f`）：
+      //   掉落域旧债收编——本体/环绕光斑/光罩三面同旋转量。豁免：微光转化态
+      //   （:39286-39288 num=0）;onConveyor 传送带支本仓无该域（395 传送带未实装,
+      //   登记≡0 同相）。XNA rotation 弧度直用（vx px/tick × 0.2）。
+      const rot = d.shimmered ? 0 : d.vx * 0.2;
+      const rcx = ddx + ar.sw / 2, rcy = ddy + ar.sh / 2;
       // 原版 Item.color 两遍着色（ItemSlot.cs:2888 同款 GetColor 消费,世界掉落
       // DrawItem 域 Main.cs:39408）。SW-BJ60：烘焙改 itemColorSprite（与 UI.iconUrl 共用
       // blendItemColorTint 单源公式,XNA pass1 底图+pass2 色图精确合成）——
@@ -10600,13 +10683,84 @@ export class Renderer {
       // 时无差,alpha 维度加入后即现形);烘焙失败回落裸底图(BJ60 同款 fail-open)
       const needsComp = (d.color !== undefined && d.color[3] > 0)
         || (d.alpha !== undefined && d.alpha > 0);
+      // ★BJ601 掉落物光罩（Main.cs DrawItem :39300 num2=glowMask/:39387 3779→-1/
+      //   :39408-39437 叠画）：光罩色不取光照=自发光 → itemGlowQueue 合成后冲刷
+      //   （flushItemGlow）。源矩形 = 缺省整张 Glow_{N}（67 件无 itemAnimations
+      //   注册件,glowmaskFrame=item 同帧;3858 专支=动画三帧条高−2）;dest = 光罩
+      //   中心≡物品精灵中心（原版 origin=glowmaskFrame.Size()/2 :39431/:39436）。
+      //   icon 回退路径（atlasIcon null）无几何不画（登记）。
+      //   ★BJ603：光罩随 velocity 旋转同相（原版 rotation=num :39431/:39436）。
+      {
+        const vid = ITEM_DEFS[d.itemId]?.vid ?? -1;
+        if (vid >= 0 && ITEM_GLOWMASK[vid] !== undefined) {
+          this.collectDropItemGlow(ctx, vid, ar, rcx, rcy, miscCounter, rot);
+        }
+      }
+      // ★BJ603 环绕光斑（Main.cs DrawItem :39329-39386,BossBag 集/75/4143 专支——
+      //   非 glowMask 域的物品贴图环绕复本面,原版在【本体之下】画）：相位 =
+      //   timeSinceItemSpawned/240 + GTWH×0.04;脉冲半径 = GTWH 三角波归一
+      //   （BossBag %4、75/4143 %5）;复本 = 物品贴图同帧,rotation=velocity 旋转。
+      const vidDrop = ITEM_DEFS[d.itemId]?.vid ?? -1;
+      {
+        const gtw = globalTimeWrappedHourly();
+        const phase = d.age / 240 + gtw * 0.04;
+        const triBase = BOSS_BAG_IDS.has(vidDrop) ? (gtw % 4) / 2 : (gtw % 5) / 2.5;
+        const triRaw = triBase >= 1 ? 2 - triBase : triBase;
+        const tri = triRaw * 0.5 + 0.5;
+        // (0,baseY).RotatedBy(θ) = (−sinθ·baseY, cosθ·baseY)（XNA 逆时针正角）
+        const ringDraw = (count: number, step: number, baseY: number, color: readonly [number, number, number, number]) => {
+          for (let k = 0; k < count; k++) {
+            const ang = (k * step + phase) * Math.PI * 2;
+            const ox = -Math.sin(ang) * baseY * tri;
+            const oy = Math.cos(ang) * baseY * tri;
+            ctx.save();
+            ctx.translate(rcx + ox, rcy + oy);
+            ctx.rotate(rot);
+            ctx.globalAlpha = color[3] / 255;
+            ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+            ctx.restore();
+          }
+        };
+        if (BOSS_BAG_IDS.has(vidDrop)) {
+          ringDraw(4, 0.25, 8, [90, 70, 255, 50]);
+          ringDraw(3, 0.34, 4, [140, 120, 255, 77]);
+        } else if (vidDrop === 75) {
+          ringDraw(4, 0.25, 8, [50, 50, 255, 50]);
+          ringDraw(3, 0.34, 4, [120, 120, 255, 127]);
+        } else if (vidDrop === 4143) {
+          ringDraw(3, 0.34, 8, [30, 30, 155, 60]);
+          ringDraw(3, 0.34, 4, [60, 60, 127, 57]);
+          // :39385 白 A128 半透本体垫层（4143 专支尾,环后/真本体前）
+          ctx.save();
+          ctx.globalAlpha = 128 / 255;
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+          ctx.restore();
+        }
+      }
       if (!needsComp) {
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+        if (rot !== 0) {
+          ctx.save();
+          ctx.translate(rcx, rcy);
+          ctx.rotate(rot);
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+          ctx.restore();
+        } else {
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+        }
         return;
       }
       const tinted = this.itemColorSprite(`item${d.itemId}`, ar, d.color ?? null, d.alpha ?? 0);
-      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
-      else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+      if (rot !== 0) {
+        ctx.save();
+        ctx.translate(rcx, rcy);
+        ctx.rotate(rot);
+        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+        else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+        ctx.restore();
+      } else {
+        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
+        else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+      }
       return;
     }
     const icon = this.itemIcon(d.itemId);
@@ -16763,6 +16917,29 @@ export class Renderer {
    *  两档制,本仓双绘本体无害、glow 加算双份有害——首绘收集、次绘跳过;flush 期重置） */
   private armorGlowCollected = new WeakSet<Player>();
 
+  /** ★BJ601（2026-10-10）Item.glowMask 叠画队列（手持两段 PlayerDrawLayers.cs:
+   *  3472-3477/:3499-3509 + 掉落物光罩 Main.cs:39408-39437）。光罩色不取光照
+   *  （White 缺省/特例色式=自发光；46/3827 手持段收集侧 lightAt 逐件取真值
+   *  =:3187 itemColor 链原版语义）→ 合成后逃逸（BJ509 四塔/BJ597 甲位同判例域）。
+   *  op = tex+源矩形+dest+blend/tint/alpha 纯计划（ItemGlowOp 形同 ArmorGlowOp);
+   *  m = 收集点完整矩阵（shim 镜像 getTransform,R3x 判例）+ k=_worldLowK 归一;
+   *  tex 存名 flush 侧 ensureVImage 懒加载（armorGlowQueue 同惯例,零跨拍 img 持有）。
+   *  层序登记：本 flush 在甲位 glow 后=逃逸域内(原版 glow 在物品/玩家绘制链内——
+   *  与 BJ504/677/668「此槽在玩家之上」既有偏差惯例同槽）。 */
+  private itemGlowQueue: Array<{ m: DOMMatrix; k: number; ops: Array<{
+    tex: string; sx: number; sy: number; sw: number; sh: number;
+    dx: number; dy: number; blend: 'add' | 'over'; tint: [number, number, number]; alpha: number;
+    /** ★BJ603 掉落 velocity 旋转（Main.cs:39284 num — 光罩/复本随本体同旋转量）：
+     *  缺省 undefined=轴对齐（手持/tile 面）;rot+ox/oy=绕 (ox,oy) 旋转（世界系） */
+    rot?: number; ox?: number; oy?: number;
+  }> }> = [];
+  /** 手持段同帧双绘去重（坐椅/睡床早绘+主段再绘——armorGlowCollected 同判例；
+   *  静持/挥舞互斥共用一集,flush 期重置） */
+  private itemGlowHeldCollected = new WeakSet<Player>();
+  /** ★BJ603 LocalPlayer.miscCounter 渲染帧快照（render() 头写入;弹幕 glowMask
+   *  相位双画 1101/1102 消费——Proj 类 draw 侧无 Player 引用） */
+  private _localMiscCounter = 0;
+
   /** 全亮翅膀绘制队列（mainGlow 主纹理 + 全部叠画；光照合成后 flush） */
   private wingGlowQueue: Array<{
     p: Player; slot: number; fr: number; anchor: [number, number];
@@ -17230,24 +17407,221 @@ export class Renderer {
         if (sy + op.sh > img.height) sy = Math.max(0, img.height - op.sh);
         ctx.setTransform(m.a * invK, m.b * invK, m.c * invK, m.d * invK, m.e * invK, m.f * invK);
         const copies = op.copies ?? 1;
+        // ★BJ604件3：两旋钮合成分解（XNA 预乘 AlphaBlend=(One,InvSrcAlpha) 精确重放,
+        //  vanillaArmorGlow armorGlowBakeBoost 注）——旧 alpha-only 把 α_f 当 r_f
+        //  （R≠A 全族 RGB 面偏差）。draw#1=衰减拍（source-over×alpha,bake 补偿
+        //  min(r_f,α_f)）;draw#2=补差拍（'lighter'×1,boost=max(0,r_f−α_f)）,两拍和
+        //  恰=r_f。add（A=0）无衰减拍=bake 全额走 lighter×alpha;R==A 档 bake/boost
+        //  双省=旧路径逐位（mtPulse 零回归）。tint 烘焙=tintSliceRGB 现烘（合成后
+        //  窗外,wingTintScratch 单槽与 flushItemGlow 同许可;拷贝循环内逐拍现烘——
+        //  bake/boost 两烘共用单槽,不得预持并行）。
+        const passes: Array<{ comp: 'lighter' | 'source-over'; g: number;
+          tint: readonly [number, number, number] | null }> = op.blend === 'add'
+          ? [{ comp: 'lighter', g: Math.max(0, Math.min(1, op.alpha)), tint: op.bake ?? null }]
+          : [
+              { comp: 'source-over', g: Math.max(0, Math.min(1, op.alpha)), tint: op.bake ?? null },
+              ...(op.boost ? [{ comp: 'lighter' as const, g: 1, tint: op.boost }] : []),
+            ];
         for (let ci = 0; ci < copies; ci++) {
           const jx = op.jx ? (Math.random() * (op.jx[1] - op.jx[0]) + op.jx[0]) : 0;
           const jy = op.jy ? (Math.random() * (op.jy[1] - op.jy[0]) + op.jy[0]) : 0;
-          ctx.globalCompositeOperation = op.blend === 'add' ? 'lighter' : 'source-over';
-          ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
-          if (op.rot && op.pivot) {
-            ctx.save();
-            ctx.translate(op.pivot[0] + jx, op.pivot[1] + jy);
-            ctx.rotate(op.rot);
-            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx - op.pivot[0], op.dy - op.pivot[1], op.sw, op.sh);
-            ctx.restore();
-          } else {
-            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx + jx, op.dy + jy, op.sw, op.sh);
+          for (const pass of passes) {
+            // 逐拍现烘（wingTintScratch 单槽——bake/boost 两烘不得并行预持,先画后烘
+            // 下拍才可复用;jitter 拷贝间重烘 40×56 极小）
+            const src = pass.tint
+              ? this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, pass.tint as [number, number, number], 1)
+              : null;
+            ctx.globalCompositeOperation = pass.comp;
+            ctx.globalAlpha = pass.g;
+            if (op.rot && op.pivot) {
+              ctx.save();
+              ctx.translate(op.pivot[0] + jx, op.pivot[1] + jy);
+              ctx.rotate(op.rot);
+              if (src) ctx.drawImage(src, 0, 0, op.sw, op.sh, op.dx - op.pivot[0], op.dy - op.pivot[1], op.sw, op.sh);
+              else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx - op.pivot[0], op.dy - op.pivot[1], op.sw, op.sh);
+              ctx.restore();
+            } else if (src) {
+              ctx.drawImage(src, 0, 0, op.sw, op.sh, op.dx + jx, op.dy + jy, op.sw, op.sh);
+            } else {
+              ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx + jx, op.dy + jy, op.sw, op.sh);
+            }
           }
         }
       }
     }
     ctx.restore();
+  }
+
+  /** ★BJ601 Item.glowMask 冲刷（收集侧见 itemGlowQueue 注）：op 重放 = setTransform
+   *  矩阵 ×(1/k)（armorGlow 同式）+ 'lighter'(A=0 纯加法)/'source-over'(A>0)；
+   *  非均匀 tint（相位色/橙脉冲/palGlow/disco 等）走 tintSliceRGB 现烘（本 flush 在
+   *  合成后=shim 窗外,wingTintScratch 单槽许可约束满足;烘→画相邻无插序）；
+   *  白系 tint 恒等走快路径直画。手持双绘去重 WeakSet 在此重置。 */
+  private flushItemGlow(): void {
+    const q = this.itemGlowQueue;
+    this.itemGlowQueue = [];
+    this.itemGlowHeldCollected = new WeakSet();
+    if (!q.length || !this.atlas) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of q) {
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      const m = e.m;
+      for (const op of e.ops) {
+        const img = this.atlas.ensureVImage(op.tex);
+        if (!img || img.width <= 0) continue;
+        // 源行越界钳（armorGlow 同习语）
+        let sy = op.sy;
+        if (sy + op.sh > img.height) sy = Math.max(0, img.height - op.sh);
+        ctx.setTransform(m.a * invK, m.b * invK, m.c * invK, m.d * invK, m.e * invK, m.f * invK);
+        const gClamped = Math.max(0, Math.min(1, op.alpha));
+        ctx.globalCompositeOperation = op.blend === 'add' ? 'lighter' : 'source-over';
+        ctx.globalAlpha = gClamped;
+        // ★BJ603 旋转臂（rot+ox/oy 缺省 undefined=轴对齐恒等——掉落 velocity
+        //   旋转面,绕 (ox,oy) 世界点旋转后再画 dest 矩形）
+        if (op.rot) {
+          ctx.translate(op.ox ?? op.dx, op.oy ?? op.dy);
+          ctx.rotate(op.rot);
+          ctx.translate(-(op.ox ?? op.dx), -(op.oy ?? op.dy));
+        }
+        // ★BJ604件3 同根配刀（2026-10-10）：over 支两旋钮分解（XNA 预乘合成
+        //  RGB 面=r_f=tint、dst 衰减=a_f=alpha 独立两因子）。旧支 bake=tint+
+        //  g=alpha = RGB 面 ×R/255×A/255 双乘（white63/monk3858 ×0.138 应 ×0.749
+        //  =5.4×过暗;palGlow 同病）;白 tint 走 <0.999 免烘门,但 R=255>A 的
+        //  alpha-only 支同病（staffWhite127 (255,255,255,127) ×0.498 应 ×1）。
+        //  修=draw#1 source-over×alpha+bake=min(1,r_f/a_f) + draw#2 'lighter'×1
+        //  补差 boost=max(0,r_f−a_f)（两拍和恰=r_f,无 byte 截断）。add 支
+        //  alpha≡1（xnaColorToOp）原路径恰等零回归;R==A 档双免=旧白路径逐位。
+        if (op.blend !== 'add') {
+          if (gClamped <= 0) continue;                             // 防御：over α=0 不可达,保底直画语义
+          const bake: [number, number, number] = [
+            Math.min(1, op.tint[0] / gClamped), Math.min(1, op.tint[1] / gClamped),
+            Math.min(1, op.tint[2] / gClamped),
+          ];
+          const boost: [number, number, number] = [
+            Math.max(0, op.tint[0] - gClamped), Math.max(0, op.tint[1] - gClamped),
+            Math.max(0, op.tint[2] - gClamped),
+          ];
+          const needBake = bake[0] < 0.999 || bake[1] < 0.999 || bake[2] < 0.999;
+          const needBoost = boost[0] > 1e-4 || boost[1] > 1e-4 || boost[2] > 1e-4;
+          if (!needBake && !needBoost) {
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);   // R==A 字节等=旧路径
+            continue;
+          }
+          if (needBake) {
+            const sc = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, bake, 1);
+            if (sc) ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+          } else {
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+          }
+          if (needBoost) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 1;
+            const sc2 = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, boost, 1);
+            if (sc2) ctx.drawImage(sc2, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+          }
+          continue;
+        }
+        if (op.tint[0] < 0.999 || op.tint[1] < 0.999 || op.tint[2] < 0.999) {
+          const sc = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, op.tint, 1);
+          if (sc) {
+            ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            continue;
+          }
+        }
+        ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ601 手持段 glowMask 收集（DrawPlayer_27_HeldItem 段 A/B 统一入口）：
+   *  位置/尺寸 = 物品同矩形同变换（原版同 sourceRect/position/rotation/origin/
+   *  scale/effect :3476/:3508）→ 捕获当帧矩阵,dest 取 (dx,dy,sw,sh) 局部值。
+   *  色序 = heldGlowColors（White 缺省/特例)→ applyStealthToColor（:3475/:3272
+   *  消费点,dimF=BJ599 移植面）→ xnaColorToOp。46/3827 读玩家中心光照（:3187
+   *  itemColor=Lighting.GetColor 原版语义,主贴图 ≡White 近似为既有登记不动）。 */
+  private collectHeldItemGlow(
+    ctx: CanvasRenderingContext2D,
+    p: Player, vid: number, dx: number, dy: number, sw: number, sh: number,
+    dimF: HeldStealthDim | null,
+  ): void {
+    const gm = ITEM_GLOWMASK[vid];
+    if (gm === undefined || HAND_GLOW_SKIP.has(vid)) return;
+    if (this.itemGlowHeldCollected.has(p)) return;   // 坐椅/睡床双绘去重（加算双份有害）
+    this.itemGlowHeldCollected.add(p);
+    const light: readonly [number, number, number] | null = (vid === 46 || vid === 3827)
+      ? (this.lighting?.lightAt(Math.trunc(p.cx / 16), Math.trunc((p.y + p.h / 2) / 16)) ?? [255, 255, 255])
+      : null;
+    const colors = heldGlowColors(vid, { miscCounter: p.miscCounter, light });
+    const ops = colors.map((c: RGBA) => {
+      const rgba: RGBA = dimF ? applyStealthToColor(c, dimF) : c;
+      return { tex: `vanilla/Glow_${gm}.png`, sx: 0, sy: 0, sw, sh, dx, dy, ...xnaColorToOp(rgba) };
+    });
+    // ★矩阵捕获用【传入 ctx】（drawPlayer/drawUseItem 窗内 = shim 代理,R3x getTransform
+    //  镜像;this.ctx 是主画布本体,acc 态两者矩阵面不同——armorGlow 收集同判例）
+    this.itemGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops });
+  }
+
+  /** ★BJ601 掉落物光罩收集（Main.cs DrawItem :39300/:39387/:39408-39437）：
+   *  源矩形 = 缺省整张 Glow_{N}（67 件无 itemAnimations 注册件;3858 专支=动画
+   *  三帧条高−2 :39230-39235,帧钟=5t/帧 itemFrameCounter[slot]/5）；dest = 光罩
+   *  中心≡物品精灵中心（原版 origin=glowmaskFrame.Size()/2 :39431/:39436）；
+   *  本仓 drop 锚=盒中心对齐面（drawDrop 既有注）→ 光罩随同锚。 */
+  private collectDropItemGlow(
+    ctx: CanvasRenderingContext2D,
+    vid: number, ar: { sw: number; sh: number }, cx: number, cy: number, miscCounter: number,
+    rot = 0,
+  ): void {
+    const gm = ITEM_GLOWMASK[vid];
+    if (gm === undefined || DROP_GLOW_EXCLUDED.has(vid)) return;
+    const img = this.atlas?.ensureVImage(`vanilla/Glow_${gm}.png`);
+    if (!img || img.width <= 0 || img.height <= 0) return;
+    const rect = vid === 3858
+      ? monkT3GlowRect(Math.floor(this.animTick / MONK_T3_GLOW.tickPerFrame))
+      : { sy: 0, sh: img.height };
+    const disco: readonly [number, number, number] | null = dropGlowKind(vid) === 'disco'
+      ? (this.lighting?.clock.discoColor() ?? null)
+      : null;
+    const colors = dropGlowColors(vid, {
+      miscCounter,
+      globalTimeWrappedHourly: globalTimeWrappedHourly(),
+      discoRGB: disco,
+    });
+    // ★BJ603：rot 缺省 0=轴对齐（BJ601 面恒等）;掉落 velocity 旋转面传本体同量
+    //   （Main.cs:39431/:39436 rotation=num 同源）——op 带 rot+ox/oy,flush 侧旋转臂消费
+    const ops = colors.map((c: RGBA) => ({
+      tex: `vanilla/Glow_${gm}.png`, sx: 0, sy: rect.sy, sw: img.width, sh: rect.sh,
+      dx: cx - img.width / 2, dy: cy - rect.sh / 2, ...xnaColorToOp(c),
+      ...(rot !== 0 ? { rot, ox: cx, oy: cy } : {}),
+    }));
+    this.itemGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops });
+  }
+
+  /** ★BJ603 弹幕 glowMask 收集（Main.cs DrawProjDirect 通用支 :35498-35518/
+   *  bobber 支 :35433-35441）：源矩形 = 弹幕贴图全幅（16 型 Main.projFrames 零
+   *  命中=无帧分帧;光罩贴图与弹幕贴图同布局平行表,Glow_N ≡ Projectile_N 逐张
+   *  尺寸对拍）,dest = 本体同框（dx,dy = 本体绘制 dest 左上,本体坐标系）。
+   *  色 = projGlowColors（缺省 (250,250,250,alpha)/993 Disco/1101-1102 相位双画）
+   *  ——不取光照=自发光 → itemGlowQueue 合成后冲刷。m = 本体当帧矩阵
+   *  （各 Proj 类 draw 侧 ctx.getTransform() 捕获,translate 前取=dest 局部坐标）。
+   *  flush 侧 ÷k 归一同 drop/hand 面。 */
+  pushProjGlow(
+    projId: number, m: DOMMatrix,
+    dx: number, dy: number, sw: number, sh: number,
+    alpha: number, miscCounter = this._localMiscCounter,
+  ): void {
+    const gm = PROJ_GLOWMASK[projId];
+    if (gm === undefined) return;
+    const disco = projId === PROJ_GLOW_DISCO ? (this.lighting?.clock.discoColor() ?? null) : null;
+    const colors = projGlowColors(projId, alpha, { miscCounter, discoRGB: disco });
+    const ops = colors.map((c) => ({
+      tex: `vanilla/Glow_${gm}.png`, sx: 0, sy: 0, sw, sh, dx, dy, ...xnaColorToOp(c),
+    }));
+    this.itemGlowQueue.push({ m, k: this._worldLowK, ops });
   }
 
   /** ★BJ594 日曜盾球合成后冲刷（2026-10-09）：DrawPlayer_26_SolarShield
@@ -18642,6 +19016,11 @@ export class Renderer {
         //  `if (item.holdStyle == 4) { … if (gravDir == -1f) return false; }`——
         //  hs4=高尔夫球杆族（Item.cs:48524 DefaultToGolfClub）倒挂时不画持物）
         if (hs === 4 && p.gravDir === -1) staticHoldStyle = 0;
+        // ★BJ601 pulley 门（PlayerDrawLayers.cs:3183 flag2 = holdStyle!=0 && !pulley）
+        //  ——滑轮挂绳期静持物【整不画】（挥舞支 flag 无 pulley 因子照画;CanVisually
+        //  HoldItem 同位 caller 门）。身体行 holdStyleRaw 不受门（:36025-36045 行档
+        //  无 pulley 因子;BJ576 绳攀姿势行 16692 另有原版 :36727 支管行档）。
+        staticHoldStyle = staticHoldDrawGate(staticHoldStyle, p.pulley);
         holdStyleRaw = hs;
         // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
         // ★BJ401：DontHoldItems={55,56,61}（MountID.cs:29 CreateBoolSet）三骑禁持：
@@ -19421,6 +19800,8 @@ export class Renderer {
       });
       if (ar) {
         // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）
+        //  ★BJ604件2：烘焙 ×0.625+globalAlpha 0.8 → 合成 RGB×0.5/A×0.8（原版语义;
+        //  旧烘焙 ×0.5 在 globalAlpha 预乘缩放下=×0.4 双乘——详见 arcanumDimTex 注）
         //  ★BJ348b-3：暗化预烘焙进 canvas（arcanumDimTex）——ctx.filter 在
         //  shim/acc 链走栅格化/降级分叉 = 主层消失根因防御;null 帧画原帧自愈
         if (arcanumHold0) {
@@ -19455,6 +19836,14 @@ export class Renderer {
         }
       } else if (icon) {
         ctx.drawImage(icon, 0, p.gravDir === -1 ? heldItemOriginFlipY(-icon.height * 0.6, icon.height * 0.6, -1) : -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
+      }
+      // ★BJ601 静持段 glowMask 叠画（PlayerDrawLayers.cs:3499-3509 段 B 静持面）：
+      //  同源矩形同变换（原版同 rectangle/rotation/origin/scale/itemEffect :3508）
+      //  → 同 dest 矩形收进 itemGlowQueue 合成后冲刷。色 = White 缺省+特例
+      //  （:3211-3226）+ ApplyStealthToColor（:3475,dimF=BJ599 面）。icon 回退
+      //  （ar=null）无几何不画。位次 = 本体后/火苗前（原版 glow :3499 < 火苗 :3567）。
+      if (ar && vid >= 0 && ITEM_GLOWMASK[vid] !== undefined && !HAND_GLOW_SKIP.has(vid)) {
+        this.collectHeldItemGlow(ctx, p, vid, holdDX, holdDY, ar.sw, ar.sh, dimF);
       }
       // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
       // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）
@@ -20488,6 +20877,9 @@ export class Renderer {
     ctx.save();
     ctx.translate(p.cx + p.facing * offX, p.y + gravOffY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
+    // ★BJ603 3779 中心锚基准（case 3779 :3352-3372 专支）：pivot = ItemLocation
+    //   + halfW×dir、origin=贴图中心——锚矩阵须取【rotate 前】的 translate·mirror 面
+    const spiritFlameAnchor = heldVid === 3779 ? ctx.getTransform() : null;
     ctx.rotate(gravRot);
     // ② itemEffect=FlipVertically（PlayerDrawSet.cs:1722 direction==1 /
     //    :1727 direction==-1 双支）——持物贴图竖直镜像无条件随 gravDir=-1（含
@@ -20527,10 +20919,61 @@ export class Renderer {
       // useStyle 5 非法杖（握把 (-num9,H/2)）与 9（Size*(0.5,0.4) 轴心）经 drawOX/drawOY 覆盖
       // ★BJ348b-2 3476 第一层 = GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)
       //  （:3344-3346）——RGB×0.5 + A×0.8（光照染色无逐物品管线,登记近似恒白）
+      //  ★BJ604件2：烘焙 ×0.625+globalAlpha 0.8=合成 RGB×0.5（旧 ×0.5 烘焙=×0.4 双乘）
       //  ★BJ348b-3：暗化预烘焙（arcanumDimTex）——去 ctx.filter 依赖（同静持段注）
       //  ★BJ599：3476 在 arcanumDimTex 暗化面之上再乘减色（:3344 GetAlpha(itemColor)
       //  先减色再 MultiplyRGBA(0.5),乘法可换序）
-      if (heldVid === 3476) {
+      // ★BJ603 3779 灵焰专支（PlayerDrawLayers.cs:3352-3372 case 3779——非 glowMask
+      //  域的 orb 环绕面,整支 return 替代标准手持绘制,仅 use 期 flag 支可达
+      //  [holdStyle 0=静持不画]）：
+      //  · 几何 = 中心锚——pos = ItemLocation+(halfW×dir,0)、origin=贴图中心、
+      //    rotation=itemRotation（标准支=握点锚/origin 底角,两锚异构故整支重画）。
+      //  · 本体减色 = GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)（:3370）
+      //    ——RGB×0.625 补偿烘焙+A×0.8 globalAlpha=合成 RGB×0.5（BJ348b 同配方
+      //    零 ctx.filter;★BJ604件2 同根双乘修复,见 halfDimTex/arcanumDimTex 注）。
+      //  · orb 环 = GlowMask[218] 本体矩形 4 份,(k·π/2) 方向 ×2px 偏移、A=0 纯加算,
+      //    色 = (120,40,222,0)×(cos(miscCounter/75·2π)/2×0.3+0.85)×0.5（:3359-3360
+      //    双乘链）——自发光走 itemGlowQueue 合成后冲刷（捕获本支矩阵）。
+      if (heldVid === 3779 && this.atlas && spiritFlameAnchor) {
+        const gmImg = this.atlas.ensureVImage('vanilla/Glow_218.png');
+        const dimBody = halfDimTex(ar.img as ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas);
+        // 中心锚链 = translate·mirror · T(halfW,0) · R(gravRot) · [S(1,−1) gd=−1]
+        const mAnchor = new DOMMatrix([
+          spiritFlameAnchor.a, spiritFlameAnchor.b, spiritFlameAnchor.c,
+          spiritFlameAnchor.d, spiritFlameAnchor.e, spiritFlameAnchor.f,
+        ])
+          .translate(ar.sw / 2, 0)
+          .rotate(gravRot * 180 / Math.PI);
+        if (p.gravDir === -1) mAnchor.scaleSelf(1, -1);   // itemEffect FlipVertically（中心锚=盒不动仅内容翻）
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.setTransform(mAnchor.a, mAnchor.b, mAnchor.c, mAnchor.d, mAnchor.e, mAnchor.f);
+        ctx.globalAlpha = 0.8;                  // A×0.8（:3370 MultiplyRGBA A 分量）
+        if (dimBody) ctx.drawImage(dimBody, ar.sx, ar.sy, ar.sw, ar.sh, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+        else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -ar.sw / 2, -ar.sh / 2, ar.sw, ar.sh);
+        ctx.restore();
+        if (gmImg && gmImg.width > 0) {
+          const pulse = Math.cos((p.miscCounter / 75) * Math.PI * 2);   // :3359 ToRotationVector2().X
+          const f1 = (pulse / 2) * 0.3 + 0.85;
+          const cb = (v: number) => Math.trunc(Math.min(255, Math.max(0, v)));
+          const tint: [number, number, number] = [
+            cb(120 * f1 * 0.5) / 255, cb(40 * f1 * 0.5) / 255, cb(222 * f1 * 0.5) / 255,
+          ];
+          // orb 环 4 份（:3362-3366）：(k·π/2) 方向 ×2px 世界系偏移——op dest 中心
+          // = 偏移−half 盒;gd=−1 时盒对称偏移取反（S 在链内,op 空间 y 镜像）
+          const flip = p.gravDir === -1;
+          const ops = [0, 1, 2, 3].map((k) => {
+            const ox = Math.cos(k * Math.PI / 2) * 2;
+            const oy = Math.sin(k * Math.PI / 2) * 2;
+            return {
+              tex: 'vanilla/Glow_218.png', sx: 0, sy: 0, sw: gmImg.width, sh: gmImg.height,
+              dx: ox - ar.sw / 2, dy: (flip ? -oy : oy) - ar.sh / 2,
+              blend: 'add' as const, tint, alpha: 1,
+            };
+          });
+          this.itemGlowQueue.push({ m: mAnchor, k: this._worldLowK, ops });
+        }
+      } else if (heldVid === 3476) {
         const dim = arcanumDimTex(this.atlas!);
         ctx.save();
         ctx.globalAlpha = 0.8;
@@ -20562,6 +21005,18 @@ export class Renderer {
       }
     } else if (icon) {
       ctx.drawImage(icon, drawOX, p.gravDir === -1 ? heldItemOriginFlipY(-14, 14, -1) : -14, 14, 14);
+    }
+    // ★BJ601 挥舞段 glowMask 叠画（PlayerDrawLayers.cs:3499-3509 段 B + useStyle 5
+    //  通用瞄准段 :3472-3477 段 A——本仓 drawUseItem 单站统一,两段几何同构=同源
+    //  矩形同变换）。staff 支（Item.staff）不走通用段（:3371 return 早退）——
+    //  3870 唯一特例=staff 支内自带 [238]×(255,255,255,127)（:3439-3445）;
+    //  3476 专支已自带 Glow_195（BJ348b-2）/3779 专支四游 orb（无通用 halo）/
+    //  5462 Transparent≡不可见——三件 HAND_GLOW_SKIP。icon 回退无几何不画。
+    //  位次 = 本体后/火苗前（原版 glow :3499 < 火苗 :3567）。
+    if (ar && heldVid >= 0 && ITEM_GLOWMASK[heldVid] !== undefined
+      && !HAND_GLOW_SKIP.has(heldVid)
+      && (!STAFF_ITEMS.has(heldVid) || heldVid === STAFF_GLOW_SPECIAL)) {
+      this.collectHeldItemGlow(ctx, p, heldVid, drawOX, drawOYEff, ar.sw, ar.sh, dimF);
     }
     // 手持火苗（PlayerDrawLayers.cs:3519-3561 挥舞分支同接）：flame 物品在武器贴图
     // 之上叠 ItemFlame_{id}（与本体同变换，dest = drawOX/drawOYEff 本体矩形——

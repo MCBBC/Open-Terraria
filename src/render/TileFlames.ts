@@ -504,6 +504,7 @@ function tintedFlameCell(
   img: CanvasImageSource & { width: number; height: number },
   sx: number, sy: number, sw: number, sh: number,
   r: number, g: number, b: number,
+  a?: number,
 ): HTMLCanvasElement | null {
   // ★键必须含贴图身份(Flame_N)：各族源矩形同格同 tint 时会跨表命中——
   //   例如同为 (0,0,18,18)+(100,100,100) 的 default 族,后画的会拿到先画族的
@@ -511,9 +512,11 @@ function tintedFlameCell(
   // ★tint 量化步进 8 进键(2026-08-18 canvas 哨兵实抓:火光 tint 随光照连续
   //   漂移 → 每档新键 → 用户真机 37-63 张/秒 createElement 持续 30 窗;
   //   量化后键只在跨桶时换。烘焙用桶内首个精确色,火焰本身闪烁,3% 内无感)
+  // ★BJ599：A 面（color5.A）进键【不量化】——A 值离散且携带精确 alpha 衰减
+  //   语义（5293=20/5322=150/5353=200 及其潜行减色档）,量化 = 每像素 α 偏差。
   let imgId = _flameImgIds.get(img);
   if (imgId === undefined) { imgId = ++_flameImgIdSeq; _flameImgIds.set(img, imgId); }
-  const key = `${imgId},${sx},${sy},${sw},${sh},${r & ~7},${g & ~7},${b & ~7}`;
+  const key = `${imgId},${sx},${sy},${sw},${sh},${r & ~7},${g & ~7},${b & ~7},${a && a > 0 ? a : 0}`;
   let c = _tintCache.get(key);
   if (c) return c;
   if (typeof document === 'undefined') return null;
@@ -529,6 +532,17 @@ function tintedFlameCell(
   // multiply 会把透明像素染成实色——按原 alpha 裁回
   cc.globalCompositeOperation = 'destination-in';
   cc.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  // ★BJ599 A 面（a>0 时）：dest-in 白×α 系数 = 预乘面（rgb 与 alpha）×a/255——
+  //   cell ≙ 原版 DrawData tex_p×color5（rgb×tint×a/255、alpha×a/255）,
+  //   消费端 source-over ≙ XNA AlphaBlend（src_p + dst×(1−src_a)）逐式。
+  //   a=0/undefined：cell alpha 不动（canvas 预乘存不下 α=0 的 rgb 面）,
+  //   消费端 'lighter' = A=0 纯加性（RGB 面逐式）。
+  if (a && a > 0 && a < 255) {
+    cc.globalAlpha = a / 255;
+    cc.fillStyle = '#fff';
+    cc.fillRect(0, 0, sw, sh);
+    cc.globalAlpha = 1;
+  }
   if (_tintCache.size > 512) {
     // 逐条淘汰最旧(Map 插入序;旧版整表 clear() = 下帧全量重烘焙雪崩)
     const first = _tintCache.keys().next().value;
@@ -732,18 +746,21 @@ export interface HeldFlameSpec {
   dxDir: number;
   /** 颜色乘子 rgb(0-255)；null = 白直用 */
   tint: readonly [number, number, number] | null;
+  /** color5.A 面（PlayerDrawLayers.cs:3528-3551 逐件表）：0=加性族（default/
+   *  3045/4952）；5293=20、5322=150、5353=200——AlphaBlend 背景衰减+alpha 面真值 */
+  a: number;
   /** 迪斯科动态色（3045） */
   disco?: boolean;
 }
 
 export function heldFlameSpec(itemId: number): HeldFlameSpec {
   switch (itemId) {
-    case 3045: return { count: 7, scale: 1, dxDir: 0, tint: null, disco: true };  // :3534-3536
-    case 5293: return { count: 7, scale: 1, dxDir: 0, tint: [50, 50, 100] };      // :3537-3539
-    case 5353: return { count: 7, scale: 1, dxDir: 0, tint: null };               // :3540-3542（白）
-    case 4952: return { count: 3, scale: 0.6, dxDir: 0, tint: [50, 50, 50] };     // :3543-3547
-    case 5322: return { count: 7, scale: 1, dxDir: -2, tint: [100, 100, 100] };   // :3548-3551
-    default: return { count: 7, scale: 1, dxDir: 0, tint: [100, 100, 100] };      // :3528-3531
+    case 3045: return { count: 7, scale: 1, dxDir: 0, tint: null, a: 0, disco: true };  // :3534-3536
+    case 5293: return { count: 7, scale: 1, dxDir: 0, tint: [50, 50, 100], a: 20 };     // :3537-3539
+    case 5353: return { count: 7, scale: 1, dxDir: 0, tint: null, a: 200 };             // :3540-3542（白,A=200）
+    case 4952: return { count: 3, scale: 0.6, dxDir: 0, tint: [50, 50, 50], a: 0 };     // :3543-3547
+    case 5322: return { count: 7, scale: 1, dxDir: -2, tint: [100, 100, 100], a: 150 }; // :3548-3551
+    default: return { count: 7, scale: 1, dxDir: 0, tint: [100, 100, 100], a: 0 };      // :3528-3531
   }
 }
 
@@ -793,17 +810,23 @@ export function drawHeldItemFlame(
       tint = [128, 128, 128];
     }
   }
-  // ★BJ599：color5 先减色再烘（原版序 :3574——色5 赋值后 ApplyStealthToColor）；
-  //  tint=null ≙ color5 RGB 255（5353 白档,A 面本仓既有近似忽略）
-  if (dim) {
-    const [dr, dg, db] = applyStealthToColor(
-      [tint?.[0] ?? 255, tint?.[1] ?? 255, tint?.[2] ?? 255, 255], dim);
-    tint = [dr, dg, db];
-  }
-  const cell = tint ? tintedFlameCell(img, 0, 0, img.width, img.height, tint[0], tint[1], tint[2]) : null;
+  // ★BJ599：color5 = (RGB,A) 全式（RGB=spec.tint/disco/白,A=spec.a 逐件表）——
+  //  原版序 :3574 = 色5 赋值后 ApplyStealthToColor 全 RGBA 面减色（A 面 shroomite
+  //  ×s 渐隐/星旋恒 255）。减色后整面烘进染色缓存键（A 面随键）。
+  const c5: [number, number, number, number] = [
+    tint?.[0] ?? 255, tint?.[1] ?? 255, tint?.[2] ?? 255, spec.a,
+  ];
+  const dimmed = dim ? applyStealthToColor(c5, dim) : c5;
+  const cell = tintedFlameCell(img, 0, 0, img.width, img.height,
+    dimmed[0], dimmed[1], dimmed[2], dimmed[3]);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.globalCompositeOperation = 'lighter';   // A=0 预乘加色语义（同放置态火苗）
+  // A=0 加性族（default/3045/4952）：'lighter' = RGB 面纯加算（canvas 预乘存储
+  // 存不下 α=0 的 rgb 面——XNA shader 端 ×color 后 blend 的等价实现）。
+  // A>0（5293/5322/5353）：source-over ≙ XNA AlphaBlend 预乘（src_p + dst×(1−src_a)）
+  // ——背景衰减 + alpha 面 1:1（cell 已带 a/255 alpha 面,见 tintedFlameCell）。
+  // 显式置面（防调用点环境 composite 污染——两站现均 source-over,守恒式写法）
+  ctx.globalCompositeOperation = (dimmed[3] > 0) ? 'source-over' : 'lighter';
   // 原版 :3558 位置 = (int)(vector + num22*scale + num21)、(int)(vector.Y + num23*scale)
   // ——num21/num22 均为【世界空间】偏移，局部空间（含 scale(direction) 镜像）除以
   // direction（=乘 direction，direction=±1）

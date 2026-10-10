@@ -195,6 +195,12 @@ export interface ArmorGlowOp {
   blend: 'add' | 'over';
   tint: [number, number, number];
   alpha: number;
+  /** ★BJ604件3 合成分解（XNA 预乘 AlphaBlend 精确重放）：bake = draw#1（source-over
+   *  ×alpha）的 RGB 补偿 min(1,r_f/α_f)（mul 约分,undefined=恒等免烘）；
+   *  boost = draw#2（'lighter'×1）补差 max(0,r_f−α_f)·mul（R>A 时单 bake 截断,
+   *  两拍和恰=r_f）。add（A=0）无衰减拍 → bake=tint 全额走 lighter×alpha。 */
+  bake?: [number, number, number];
+  boost?: [number, number, number];
   /** 抖动拷贝数（flush 逐份独立随机；区间 px） */
   copies?: number;
   jx?: [number, number];
@@ -221,6 +227,37 @@ export interface ArmorGlowCtx {
 const FRAME_W = 40;
 const FRAME_H = 56;
 const PAD = 4;
+
+/** ★BJ604件3（2026-10-10）：op 合成分解（原版锚 PlayerDrawSet.cs:806-811 尾拍
+ *  GetImmuneAlphaPure=Color.Multiply【整色四通道乘】× mul + XNA SpriteBatch 预乘
+ *  AlphaBlend=(One,InvSrcAlpha)）——终色 c=(R,G,B,A)·mul ⇒ RGB 面因子
+ *  r_f=R/255·mul、dst 衰减 α_f=A/255·mul 两因子独立。旧 alpha-only flush 单旋钮
+ *  globalAlpha 把 α_f 当 r_f（R≠A 全族偏差：Lokis(255,127) ×0.498 应 ×1、
+ *  Grox(230,60) ×0.235 应 ×0.902、arkhalis 白 ×0.706 应 ×underShirt 色、
+ *  luna ×0.392p 应 ×p、add 族 127/100 灰 2-2.55× 过亮、mtPulseA0/chickenBones
+ *  脉冲丢失）。canvas 两旋钮精确分解：bake=min(1,r_f_unit/α_f_unit)（draw#1
+ *  source-over×alpha 的 RGB 补偿,mul 约分恒 ≤1 免截断）+boost=max(0,r_f−α_f)
+ *  （draw#2 'lighter'×1 补差拍；min+max 恰=r_f,byte 域无截断）。
+ *  R==A 档（mtPulse (n,n,n,n)）bake=1/boost=0 → 双字段省略=flush 旧路径逐位。 */
+export function armorGlowBakeBoost(
+  rc: ResolvedGlowColor, mul: number,
+): { bake?: [number, number, number]; boost?: [number, number, number] } {
+  if (rc.blend === 'add') {
+    return { bake: [rc.tint[0], rc.tint[1], rc.tint[2]] };   // A=0：无 dst 衰减,全额 lighter×alpha
+  }
+  const a0 = rc.alpha;                                       // α_f unit（mul 约分）
+  const bake: [number, number, number] = [
+    Math.min(1, rc.tint[0] / a0), Math.min(1, rc.tint[1] / a0), Math.min(1, rc.tint[2] / a0),
+  ];
+  const boost: [number, number, number] = [
+    Math.max(0, rc.tint[0] - a0) * mul, Math.max(0, rc.tint[1] - a0) * mul,
+    Math.max(0, rc.tint[2] - a0) * mul,
+  ];
+  return {
+    bake: (bake[0] < 0.999 || bake[1] < 0.999 || bake[2] < 0.999) ? bake : undefined,
+    boost: (boost[0] > 1e-4 || boost[1] > 1e-4 || boost[2] > 1e-4) ? boost : undefined,
+  };
+}
 /** 双抖动档区间（Grox 族：RandomInt(−10,10)×0.125 :2392/:1563/:227 支） */
 const JITTER_125: [number, number] = [-1.25, 1.25];
 /** 学徒火头（head 211 :2412-2413）：x=RandomInt(−10,11)×0.2、y=RandomInt(−14,1)×0.15 */
@@ -243,6 +280,7 @@ function stripOp(mask: number, srcRow: number, frameTop: number, rc: ResolvedGlo
     dx: -FRAME_W / 2, dy: frameTop,
     blend: rc.blend, tint: rc.tint,
     alpha: rc.alpha * mul,
+    ...armorGlowBakeBoost(rc, mul),               // ★BJ604件3 合成分解
     copies: e?.jitter,
     jx: e?.jx, jy: e?.jy,
   };
@@ -272,6 +310,7 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
           sx: s.sx, sy: s.sy, sw: s.sw, sh: s.sh,
           dx: -FRAME_W / 2 + s.dx, dy: frameTop + s.dy,
           blend: rc.blend, tint: rc.tint, alpha: rc.alpha * c.mul,
+          ...armorGlowBakeBoost(rc, c.mul),          // ★BJ604件3 合成分解
           copies: jit?.copies, jx: jit?.jx, jy: jit?.jy,
         });
       }
@@ -314,6 +353,7 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
         sx: cell.x * FRAME_W, sy: cell.y * FRAME_H + syOff, sw: FRAME_W, sh: FRAME_H,
         dx: -FRAME_W / 2, dy: frameTop + hgY,
         blend: rc.blend, tint: rc.tint, alpha: rc.alpha * c.mul,
+        ...armorGlowBakeBoost(rc, c.mul),            // ★BJ604件3 合成分解
         copies: comp.jitter, jx: comp.jitter ? JITTER_125 : undefined,
         jy: comp.jitter ? JITTER_125 : undefined,
       };

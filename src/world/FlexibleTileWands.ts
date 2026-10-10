@@ -13,7 +13,7 @@ type Bucket = [number, Array<[number, number]>];
 export interface WandDef {
   /** 弹药桶（首个背包命中的桶生效——TryGetPlacementOption 逐槽扫描序） */
   buckets: Bucket[];
-  /** 消耗弹药（Rubblemaker 三件 = true；单件装饰族 WithoutAmmoConsumption） */
+  /** 消耗弹药（Rubblemaker 三件 + 沙堡桶 4460 = true；单件装饰族 WithoutAmmoConsumption） */
   consumesAmmo: boolean;
   /** 悬停弹药图标（ShowsHoverAmmoIcon；碎块三件 true 其余 false） */
   showsAmmoIcon: boolean;
@@ -31,6 +31,16 @@ function single(tileSheet: number, styles: number[]): WandDef {
   return { buckets: [[-1, styles.map((s) => [tileSheet, s] as [number, number])]],
     consumesAmmo: false, showsAmmoIcon: false };
 }
+/** ★BJ604件1（FlexibleTileWand.cs:48）：沙堡桶 4460 = CreateSingleTileWand(169,552,…)
+ *  .WithoutAmmoIcon() ——【无 WithoutAmmoConsumption】（single 族唯一例外,:52-98 其余
+ *  全带）= ConsumesAmmoItem:true。放置门+消耗 = 背包沙块 169（TryGetPlacementOption
+ *  扫 _options[169]→无沙块 canUse=false;PlaceIt_ConsumeFlexibleWandMaterial
+ *  Player.cs:40492-40501 每拍扣 1）;杖本体 consumable=false（Item.cs:37686-37697
+ *  case 4460）永不扣。showsAmmoIcon 仍 false（WithoutAmmoIcon 独立旗）。 */
+function singleWithAmmo(ammoVid: number, tileSheet: number, styles: number[]): WandDef {
+  return { buckets: [[ammoVid, styles.map((s) => [tileSheet, s] as [number, number])]],
+    consumesAmmo: true, showsAmmoIcon: false };
+}
 /** ExposedGem（:103）：tile 178（洞穴晶体），style = s / s+7 / s+14 */
 function exposedGem(style: number): WandDef {
   return single(178, [style, style + 7, style + 14]);
@@ -44,7 +54,7 @@ export function flexibleWandOf(vid: number): WandDef | null {
     case 5330: return multi(TABLES.large);
     case 5464: return multi(TABLES.mitey);
     case 5481: return multi(TABLES.kiln);
-    case 4460: return single(552, [0, 1, 2, 3]);            // SandCastleBucket
+    case 4460: return singleWithAmmo(169, 552, [0, 1, 2, 3]); // SandCastleBucket（★BJ604件1：耗沙块169）
     case 4609: return single(567, [0, 1, 2, 3, 4]);         // GardenGnome
     case 4420: return single(545, [0, 1]);                  // LawnFlamingo
     case 275: return single(81, [0, 1, 2, 3, 4, 5]);        // Coral

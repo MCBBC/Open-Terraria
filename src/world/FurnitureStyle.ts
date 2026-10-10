@@ -52,6 +52,18 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 242: return [Math.floor(style / 27) * 108, (style % 27) * 72];
     case 245: return [style * 36, 0];
     case 246: return [0, style * 36];
+    // ★BJ602（2026-10-10）：693/694 洞穴钟乳石 Echo（TileObjectData.cs:4406-4426/:4231-4241
+    //  StyleHorizontal=true + StyleWrapLimit=39）——横排 X 步 18（FullWidth=16+2）,
+    //  style≥39 折行：frameY = floor(style/39) × FullHeight（StyleLineSkip 缺省 1,
+    //  TileObjectStyleModule.cs:29;TileObject.Place :66-75 num4%=wrap/num5=÷wrap×skip）。
+    //  FullHeight：693=18（Style1x1 heights{16}+pad2）/694=36（Style1x2 {16,16}+pad2×2）
+    //  ——行带恰=CheckStalactiteEcho（WorldGen.cs:39267,派发 :86536-86539）的吊顶/坐地
+    //  分界（693 fy<18 吊顶 / 694 fy<36 吊顶,否则坐地）:基样式 0-38=吊顶带（anchorTop）,
+    //  子样式 39-77（addSubTileRange :4416/:4240,anchorBottom 坐地）折入第二行带。
+    //  MiteyTitey wand（FlexibleTileWand.cs:327-355 AddVariationsWithOffset offset=39）
+    //  注入 style≥42 后 default X 向（style*18 不折行）=帧写越带错档+级联判带错杀。
+    case 693: return [(style % 39) * 18, Math.floor(style / 39) * 18];
+    case 694: return [(style % 39) * 18, Math.floor(style / 39) * 36];
     // 216 烟花火箭 / 572 瓶装魂（S2/D-7 接档 2026-08-23,竖排 1×2 族）：原版
     // Place1x2（cs:47055 `frameY=style*40`,216 CoordinateHeights{16,20}）/
     // Place1x2Top（cs:47084 `frameY=style*36`）——曾落 default X 向（style*18）

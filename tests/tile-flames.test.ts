@@ -271,15 +271,17 @@ describe('② 手持火苗触发（PlayerDrawLayers.cs:3519-3561 + Item.cs flame
     }
   });
 
-  it('逐物品参数（:3528-3552）：默认 7 份×1；(3045)迪斯科/(5293)恶魔/(5353)白', () => {
-    expect(heldFlameSpec(8)).toEqual({ count: 7, scale: 1, dxDir: 0, tint: [100, 100, 100] });
-    expect(heldFlameSpec(3045)).toEqual({ count: 7, scale: 1, dxDir: 0, tint: null, disco: true });
+  it('逐物品参数（:3528-3552）：默认 7 份×1；(3045)迪斯科/(5293)恶魔/(5353)白；A 面逐件（BJ599 全式）', () => {
+    expect(heldFlameSpec(8)).toEqual({ count: 7, scale: 1, dxDir: 0, tint: [100, 100, 100], a: 0 });
+    expect(heldFlameSpec(3045)).toEqual({ count: 7, scale: 1, dxDir: 0, tint: null, a: 0, disco: true });
     expect(heldFlameSpec(5293).tint).toEqual([50, 50, 100]);
+    expect(heldFlameSpec(5293).a).toBe(20);   // :3537-3539 Color(50,50,100,20)
     expect(heldFlameSpec(5353).tint).toBeNull();
+    expect(heldFlameSpec(5353).a).toBe(200);  // :3540-3542 Color(255³,200)
     // 夜光 4952：3 份 × 0.6（:3543-3547）
-    expect(heldFlameSpec(4952)).toEqual({ count: 3, scale: 0.6, dxDir: 0, tint: [50, 50, 50] });
+    expect(heldFlameSpec(4952)).toEqual({ count: 3, scale: 0.6, dxDir: 0, tint: [50, 50, 50], a: 0 });
     // 暗影火把 5322：附加 X 偏移 -2*direction（:3548-3551）
-    expect(heldFlameSpec(5322)).toEqual({ count: 7, scale: 1, dxDir: -2, tint: [100, 100, 100] });
+    expect(heldFlameSpec(5322)).toEqual({ count: 7, scale: 1, dxDir: -2, tint: [100, 100, 100], a: 150 });
   });
 
   it('素材结构 = 单帧、与物品贴图同尺寸（非动画横条）——动画由 itemFlamePos 抖动承担', () => {

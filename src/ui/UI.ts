@@ -5,6 +5,11 @@ import { options } from '../core/Options';
 import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';   // ★清偿刀 C：槽位 CD 谓词单源（potion/healMana）
+import {
+  ITEM_GLOWMASK, dropGlowColors, xnaColorToOp, monkT3GlowRect, MONK_T3_GLOW,
+} from '../data/vanillaItemGlow';   // ★BJ603 件1 UI 槽位光罩（ItemSlot.cs:2890-2931）
+/** UI 槽位光罩排除面（ItemSlot.cs:2890 外门 type!=3779 && type!=46 && type!=5462）。 */
+const UI_GLOW_EXCLUDED: ReadonlySet<number> = new Set([3779, 46, 5462]);
 // ★BJ154:isFunctionalTileItem/vanillaItemCreateTile 消费随池构建摘入 itemSearch.ts
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
@@ -424,6 +429,37 @@ export function iconUrl(game: Game, id: number): string {
           const id32 = cx.getImageData(0, 0, 32, 32);
           blendItemColorTint(id32.data, tint ?? null, itemAlpha ?? 0);
           cx.putImageData(id32, 0, 0);
+        }
+        // ★BJ603 件1 UI 槽位光罩（ItemSlot.cs:2890-2931 同构叠画,第四消费站——
+        //   BJ601 登记④收编）：门 = glowMask!=-1 && type!=3779 && type!=46 &&
+        //   type!=5462（:2890 外门——UI 面排除集 = {3779,46,5462}）;色式 = 掉落
+        //   面同构 switch（:2893-2915,dropGlowColors 单源复用;UI 专有 3858 动画
+        //   帧 = Glow_233 三帧条 Frame(1,3,0,帧)高−2 :2918-2921——本烘焙为静态
+        //   图标=帧 0 定格,与坠星 75"静态帧 0"既有图标惯例同槽登记）;几何 =
+        //   光罩中心≡物品图标中心（origin=rect.Size()/2 :2927/:2931）、scale 同
+        //   物品（只缩不放）;合成 = xnaColorToOp(A=0 'lighter' 加算/A>0 over)。
+        //   槽位量级大 → iconCache 单次烘焙全槽共用（BJ601 bake 习语）。
+        if (tvid > 0 && ITEM_GLOWMASK[tvid] !== undefined && !UI_GLOW_EXCLUDED.has(tvid)) {
+          const gmImg = game.atlas?.ensureVImage(`vanilla/Glow_${ITEM_GLOWMASK[tvid]}.png`);
+          if (gmImg && gmImg.width > 0) {
+            const gRect = tvid === 3858
+              ? monkT3GlowRect(0)
+              : { sy: 0, sh: gmImg.height };
+            const gsw = ar.sw, gsh = tvid === 3858 ? MONK_T3_GLOW.frameHm2 : ar.sh;
+            const colors = dropGlowColors(tvid, {
+              miscCounter: 0, globalTimeWrappedHourly: 0, discoRGB: null,
+            });
+            for (const col of colors) {
+              const op = xnaColorToOp(col);
+              cx.save();
+              cx.globalCompositeOperation = op.blend === 'add' ? 'lighter' : 'source-over';
+              cx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
+              const gw = gsw * s, gh = gsh * s;
+              cx.drawImage(gmImg, 0, gRect.sy, gsw, gsh,
+                16 - gw / 2, 16 - gh / 2, gw, gh);
+              cx.restore();
+            }
+          }
         }
         url = c.toDataURL();
         iconCache.set(id, url);

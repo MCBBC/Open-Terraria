@@ -646,6 +646,12 @@ export class MonolithFilters {
   visibleFilters(): FilterState[] {
     return this.filters.filter((f) => f.opacity > 0);
   }
+  /** Noir 滤镜 Opacity（★BJ603 tileGlowMask 725 NoirMonolith 专支消费面,
+   *  TileDrawing.cs:1344 `Filters.Scene["Noir"].Opacity` 同口径——扫描侧逐帧读） */
+  noirOpacity(): number {
+    const f = this.filters.find((s) => s.def.sceneKey === 'Noir');
+    return f ? f.opacity : 0;
+  }
 
   // -------------------------------------------------------------------------
   // 6) canvas 等价绘制

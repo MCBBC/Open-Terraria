@@ -135,14 +135,20 @@ describe('BJ348b-2 手持视觉专支（PlayerDrawLayers.cs:3334-3351 case 3476 
     const hits = src.match(/miscCounter % ARCANUM_HOLD_FRAME_PERIOD/g)?.length ?? 0;
     expect(hits).toBe(2);
   });
-  it('双层绘制式：主层暗化预烘焙（RGB×0.5,去 ctx.filter 依赖）+第二层 Glow_195 A=0 纯加算', () => {
+  it('双层绘制式：主层暗化预烘焙（RGB×0.625 补偿,去 ctx.filter 依赖）+第二层 Glow_195 A=0 纯加算', () => {
     const src = rs();
-    // ★BJ348b-3：暗化烘焙函数在位（MultiplyRGBA RGB 面 ×0.5,α 面不动）
+    // ★BJ604件2 翻案重产（BJ594 习语）：原锁「烘焙 ×0.5」锁的是双乘病面本身——
+    //  独立判语=W3C source-over 预乘式 co=cs+cb·(1−αs) 下 globalAlpha 同时缩放
+    //  cs 与 αs ⇒ 烘焙 ×0.5+globalAlpha 0.8=合成 RGB×0.4 ≠ 原版
+    //  MultiplyRGBA(0.5,0.5,0.5,0.8)（XNA 预乘混合 RGB 面×0.5/A 面×0.8）。
+    //  修=烘焙 ×0.625（0.5/0.8 补偿）×globalAlpha 0.8=合成 RGB×0.5 ✓。
+    //  「A×0.8 烘进 tex+globalAlpha→1」与旧态代数恒等（×0.4 不变）=处方证伪。
     expect(src).toContain('function arcanumDimTex');
-    expect(src.match(/id\.data\[i(?: \+ \d)?\] = \(id\.data\[i(?: \+ \d)?\] \* 0\.5\) \| 0;/g)?.length).toBe(3);
+    expect(src.match(/id\.data\[i(?: \+ \d)?\] = \(id\.data\[i(?: \+ \d)?\] \* 0\.625\) \| 0;/g)?.length).toBe(6);
+    expect(src.match(/id\.data\[i(?: \+ \d)?\] = \(id\.data\[i(?: \+ \d)?\] \* 0\.5\) \| 0;/g)?.length ?? 0).toBe(0);
     // 手持两处主层零 ctx.filter 依赖（shim acc 链 filter 分叉根因防御）
     expect(src).not.toContain("ctx.filter = 'brightness(0.5)'");
-    expect(src.match(/globalAlpha = 0\.8/g)?.length).toBe(2);            // 静持+挥舞两处第一层
+    expect(src.match(/globalAlpha = 0\.8/g)?.length).toBe(3);            // 静持+挥舞 3476 两处 + BJ603 3779 本体站
     // 发光层组合字面（lighter + 125/255 相邻行）×2（静持+挥舞）
     const glowPair = src.match(/globalCompositeOperation = 'lighter';\s*\n\s*ctx\.globalAlpha = 125 \/ 255;/g)?.length ?? 0;
     expect(glowPair).toBe(2);

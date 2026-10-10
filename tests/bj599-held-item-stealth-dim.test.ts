@@ -104,6 +104,10 @@ describe('BJ599 ①触发门（:3591-3593 flag|flag2 + 双套旗,真值表）', 
     expect(dim({ drawUseStyle: true, ranged: true, vortexSet: true })).not.toBeNull();
     expect(dim({ drawUseStyle: true, ranged: false, shroomiteSet: true })).toBeNull();
     expect(dim({ drawUseStyle: true, ranged: false, vortexSet: true })).toBeNull();
+    // ★flag2 的 !drawUseStyle 因子（:3592）：holdStyle 物挥舞帧不减（火把
+    //   useStyle1+holdStyle1 同体——挥动中非远程即灭灯,静持帧才减）
+    expect(dim({ drawUseStyle: true, ranged: false, drawHoldStyle: true, shroomiteSet: true })).toBeNull();
+    expect(dim({ drawUseStyle: true, ranged: false, drawHoldStyle: true, vortexSet: true })).toBeNull();
   });
 
   it('静持支 flag2：holdStyle 持位物全减（含非远程火把/荧光棒）——:3592 原版语义', () => {
@@ -227,17 +231,16 @@ describe('BJ599 ②减色式 = 反编译公式独立转录全域对拍（:3589-3
 
 describe('BJ599 ③不触发面零因子（无套/无门/恒等——逐位原路径守卫）', () => {
   it('六态全 null：调用方 dimF=null 逐位走原 drawImage 路径（Renderer dimF 空支）', () => {
-    for (const o of [
-      { shroomiteSet: false, vortexSet: false, drawUseStyle: true, ranged: true },
-      { shroomiteSet: false, vortexSet: false, drawHoldStyle: true },
-      { shroomiteSet: true, drawUseStyle: false, drawHoldStyle: false },
-      { vortexSet: true, drawUseStyle: false, drawHoldStyle: false },
-      { shroomiteSet: true, drawUseStyle: true, ranged: false, drawHoldStyle: false },
-      { vortexSet: true, drawUseStyle: true, ranged: false, drawHoldStyle: false },
-    ] as const) {
-      expect(heldItemStealthDim({
-        stealth: 0.5, ...o,
-      })).toBeNull();
+    const cases: Parameters<typeof heldItemStealthDim>[0][] = [
+      { stealth: 0.5, shroomiteSet: false, vortexSet: false, drawUseStyle: true, drawHoldStyle: false, ranged: true },
+      { stealth: 0.5, shroomiteSet: false, vortexSet: false, drawUseStyle: false, drawHoldStyle: true, ranged: false },
+      { stealth: 0.5, shroomiteSet: true, vortexSet: false, drawUseStyle: false, drawHoldStyle: false, ranged: false },
+      { stealth: 0.5, shroomiteSet: false, vortexSet: true, drawUseStyle: false, drawHoldStyle: false, ranged: false },
+      { stealth: 0.5, shroomiteSet: true, vortexSet: false, drawUseStyle: true, drawHoldStyle: false, ranged: false },
+      { stealth: 0.5, shroomiteSet: false, vortexSet: true, drawUseStyle: true, drawHoldStyle: false, ranged: false },
+    ];
+    for (const o of cases) {
+      expect(heldItemStealthDim(o)).toBeNull();
     }
   });
 
@@ -270,10 +273,15 @@ describe('BJ599 ④BJ348b-3 判例锁（零 ctx.filter 面——shim/acc 栅格�
     expect((RDR.match(/drawHeldItemFlame\(ctx, this\.atlas, (?:vid|fvid), p\.facing, \{[^}]+\}, flicker, dimF\)/g) ?? []).length).toBe(2);
   });
 
-  it('TileFlames 火苗减色面：dim 参预乘进 tintedFlameCell 染色缓存键（运行时零新绘制面）', () => {
+  it('TileFlames 火苗减色面：color5 全 RGBA（含 A 面）过 dim → 染色缓存键,A>0 走 AlphaBlend 真值', () => {
     expect(TF.includes('applyStealthToColor')).toBe(true);
     expect(TF.includes('dim?: HeldStealthDim | null')).toBe(true);
-    expect(TF.includes('if (dim) {')).toBe(true);
+    expect(TF.includes('const dimmed = dim ? applyStealthToColor(c5, dim) : c5;')).toBe(true);
+    // color5 = (RGB, spec.A) 全式（A 面逐件表 :3528-3551——近似忽略已移除）
+    expect(TF.includes('tint?.[2] ?? 255, spec.a,')).toBe(true);
+    // A=0 加性族 'lighter' / A>0 source-over ≙ XNA AlphaBlend 预乘（背景衰减+alpha 面）
+    expect(TF.includes("ctx.globalCompositeOperation = (dimmed[3] > 0) ? 'source-over' : 'lighter';")).toBe(true);
+    expect(TF.includes('a && a > 0 && a < 255')).toBe(true);   // cell A 面烘焙门
     expect(/\.filter\s*=/.test(TF)).toBe(false);
   });
 

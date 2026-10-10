@@ -34,7 +34,7 @@ describe('A. 提取器金标（防静默漂移）', () => {
     expect(goldenJson).toEqual(manifestJson);
   });
 
-  it('关键家族钉值：固化机=底锚落地不可挂墙；墙族白名单恰为 4 家', () => {
+  it('关键家族钉值：固化机=底锚落地不可挂墙；墙族白名单恰为 8 家', () => {
     const s220 = (manifestJson.tiles as Record<string, any>)['220'];
     expect(s220).toMatchObject({
       w: 3, h: 3, ox: 1, oy: 2,
@@ -42,9 +42,14 @@ describe('A. 提取器金标（防静默漂移）', () => {
       wall: false,
     });
     expect(anchorSpecOf(220)?.anchorTop).toBeNull();
+    // ★BJ602（2026-10-10）：Style3x3Wall 系 AnchorWall 继承修复（recon-tileobj Width
+    //  净化门=仅本块无 CopyFrom 时生效）——TileObjectData.cs:4794 `newTile.AnchorWall
+    //  = true`（Style3x3Wall 基样式块）→ CopyFrom 后接 Width 的 241/242/245/246 同承
+    //  （:4840-4846/:4853-4856/:4825-4833/:4804-4807）;240/440/334/471 无 Width 调整
+    //  沿旧提取（wall=true 不变,TileObjectData.cs:4799-4824）。
     const WALL_IDS = Object.entries(manifestJson.tiles as Record<string, any>)
       .filter(([, r]) => r?.wall === true).map(([k]) => k).sort();
-    expect(WALL_IDS).toEqual(['240', '334', '440', '471']);
+    expect(WALL_IDS).toEqual(['240', '241', '242', '245', '246', '334', '440', '471']);
   });
 
   it('M-3c 平台族 19/427 家族头缺省继承：1×1 无锚=原版数据形态（TileObjectData.cs:2128-2140/:2147-2149）', () => {
