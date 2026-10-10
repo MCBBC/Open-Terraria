@@ -419,7 +419,12 @@ describe('SW-BJ10 结构锁', () => {
     // ★SW-BJ18：ReplaceTile 原位重写单格路径尾 :63150 SquareTileFrame 的平台面
     //  = 第 4 消费位（replaceTileSingle 内,块换平台/块→平台目标）
     expect(src.match(/this\.squareTileFramePlatform\(/g)?.length).toBe(4);
-    expect(src).toMatch(/import \{ framePlatformSweep \} from '\.\.\/world\/gen\/vanilla\/FinalCleanupPass';/);
+    // ★BJ610（2026-10-10）：并位导入兼容——BJ548（2026-10-07）把 framePlanterBoxSweep
+    //  并进同模块 import（Game.ts:557 `{ framePlatformSweep, framePlanterBoxSweep }`,
+    //  消费位=replaceTileSingle 380 支 + checkDecorSquareFrame case 'planterbox'）。
+    //  旧 regex 冻结单名导入=陈旧。扩面后仍钉本体语义：framePlatformSweep 必须从
+    //  '../world/gen/vanilla/FinalCleanupPass' 具名导入（改名/换模块/删除均爆红）。
+    expect(src).toMatch(/import \{[^}]*\bframePlatformSweep\b[^}]*\} from '\.\.\/world\/gen\/vanilla\/FinalCleanupPass';/);
   });
 
   it('vanilla 权威同源：vanilla/FinalCleanupPass.framePlatformSweep 已导出（III190 面）且码表齐全', async () => {

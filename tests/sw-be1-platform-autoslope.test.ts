@@ -43,7 +43,11 @@ function shell(w: World, o: { smart?: boolean; plays?: string[]; dusts?: number[
   g.entities = { critters: [], enemies: [], npcs: [], projectiles: [] };
   g.remotePlayerProxies = [];
   g.smartCursor = { wanted: o.smart ?? true, showing: false };
-  g.spawnParticles = () => { o.dusts?.push(1); };
+  g.spawnParticles = () => {};   // ★BJ610：格尘已 BJ444 单源 vanillaDust,spawnParticles 不再承载格尘
+  // ★BJ610（2026-10-10）尘汇重产：BJ444 格尘单源化后 worldGenSlopeTile 尘位走
+  //  spawnTileDustAt → this.vanillaDust.spawn（KillTile :64212 尘位 per-type 表）；
+  //  旧 stub spawnParticles 为退役口（预存红「改斜尘 1≠0」根因=测试陈旧非行为债）。
+  g.vanillaDust = { spawn: () => { o.dusts?.push(1); return { vx: 0, vy: 0, scale: 0, fadeIn: 0 }; } };
   g.recLog = () => {};
   g.spawnDrop = () => {};
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
@@ -128,7 +132,12 @@ describe('SW-BE1 平台放置自动斜放（SpinSmartPlatform Player.cs:40989-41
     expect(slopeAt(st, 10, 20)).toBe(1);      // 新台自斜（GetSmartPlatformSlope=1）
     expect(slopeAt(st, 9, 19)).toBe(1);       // 旧台被联动改斜（双方联动）
     // 新台自斜 noEffects:true=无尘；旧台联动 noEffects:false=有尘；两拍都播 dig（:82057 恒播）
-    expect(dusts.length).toBe(1);
+    // ★BJ610（2026-10-10）oracle 重产（数量档）：旧台联动 = SlopeTile(noEffects:false) →
+    //  KillTile(fail:true, effectOnly:true)（WorldGen.cs:82053-82056）→ GetTileDustAmount
+    //  default fail=3（:67119-67126,平台 19 入 default）× MakeTileDust 3 拍（:64212-64216）
+    //  = 3 粒；新台自斜 noEffects:true 零尘（:82053 !noEffects 门）。此前断言 1 = 冻结在
+    //  BJ444 前近似尘口（1 次事件）的陈旧档,vanilla 粒数档=3。
+    expect(dusts.length).toBe(3);
     expect(plays.filter((k) => k === 'dig').length).toBe(2);
   });
 

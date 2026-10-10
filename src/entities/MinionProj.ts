@@ -1165,6 +1165,13 @@ export class MinionProj extends Entity {
       case 533: return [0.8, 0.3, 0.1];
       case 653: return [0.5, 0.5, 0.5];
       case 641: return [0.3, 0.9, 0.7];   // ★SW-RB11e：AI_123 :37744（月门青绿光）
+      // ★BJ606-R2（2026-10-10 三返「隔空受伤看不到弹幕」定谳补）：AI_137 场域蓝光带
+      //  （:69983 DelegateMethods.v3_1=(0.2,0.7,1) + :70000-70001 PlotTileLine(
+      //  Center±UnitX×40, 80f, CastLightOpen)——开放格逐格 AddLight 满色,带宽 ±40px×
+      //  高 80px 以场心为锚）——尘 226 全旗 noLight=true（:70045/:70054）,域内照明
+      //  全靠本带;缺带=场域/球体/电弧尘全沉环境暗（夜间/阴影=「放电全盲」本相）。
+      //  本仓点光通道折算：带心单点同色（点光半径≈带半高；带形偏差=登记债）。
+      case 688: case 689: case 690: return [0.2, 0.7, 1];
       // ★BJ245：沙漠虎三档白光（AI_067 :50174-50185;ai[0]!=4 门=tigerA0 镜像）
       case 833: return this.tigerA0 !== 4 ? [0.5, 0.5, 0.5] : null;
       case 834: return this.tigerA0 !== 4 ? [0.8, 0.8, 0.8] : null;
