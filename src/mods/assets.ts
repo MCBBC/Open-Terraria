@@ -223,6 +223,27 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         if (reg.modId !== modId) continue;
         aliasJob(atlas, modId, { fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
       }
+      // ★四百九十七:mod 盔甲渲染链(hs/bs/ls→Armor_Head_/Armor_Armor_/Armor_Legs_;
+      //  贴图=pack textures/armor/<key>_<Part>.png(extract-armor-textures 产);
+      //  别名走 SW cache(三百十一通道)+运行期清单键注入(vanilla-ui.json 零扰动))
+      for (const path of discoverPackJsonPaths(pack, 'items')) {
+        const spec = readPackJson<ModItemContent>(pack, path);
+        if (!spec?.key) continue;
+        const st = (spec as { stats?: { hs?: number; bs?: number; ls?: number } }).stats;
+        if (!st) continue;
+        const armorTriples = [
+          [st.hs, 'Head', `vanilla-ui/Armor_Head_${st.hs}.png`],
+          [st.bs, 'Body', `vanilla-ui/Armor_Armor_${st.bs}.png`],
+          [st.ls, 'Legs', `vanilla-ui/Armor_Legs_${st.ls}.png`],
+        ] as const;
+        for (const [idx, part, fileKey] of armorTriples) {
+          if (idx === undefined) continue;
+          const texPath = `textures/armor/${spec.key}_${part}.png`;
+          if (!packTexBytes(pack, texPath)) continue;
+          aliasJob(atlas, modId, { fileKey, texPath });
+          atlas.registerUiFile(fileKey.replace(/^vanilla-ui\//, ''), fileKey);
+        }
+      }
       // 音频(B6):pack sounds/*.ogg 已在暖存;modWavData 字节路径保留
       // (decodeAudioData 需 ArrayBuffer,字节已在 IDB=双份成本可接受,登记)
       for (const sf of Array.from(pack.files.keys()).filter((k) => k.startsWith('sounds/') && k.endsWith('.ogg'))) {

@@ -53046,6 +53046,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // 松键 +0.01（:22446 原版语义；曾 -2 截断）
     if (!p.inputJump && p.vy < 0) p.vy += 0.01;
     p.dropThrough = !!p.inputDown;
+    // ★BJ609：代理同源 fallThrough 半边（Player.ts 主写位同式——:2391 vy>1 承接;
+    //   gravDir=-1 原版强 fall2 :28298 不置）
+    p.platFallThrough = !!p.inputDown && p.gravDir !== -1;
     p.liqFactor = p.inWater ? 0.5 : 1;   // 湿态位移 ×0.5（WetCollision num109；代理粗判无蜜/微光分档）
     moveAndCollide(p, this.world, p.vx, p.vy);
     if (Math.abs(p.vx) > 0.3 && p.onGround) p.animTime += Math.abs(p.vx);

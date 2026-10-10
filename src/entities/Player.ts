@@ -7853,6 +7853,14 @@ export class Player extends Entity {
     //      位移积分【前】语境不变（TileCollision 在更晚的 moveAndCollide）。
 
     this.dropThrough = !!this.inputDown || this.ratClimbVy !== null;   // 爬墙期间平台穿透（:27777）
+    // ★BJ609（2026-10-10）：fallThrough/fall2 拆分——原版 Player.cs:28296
+    //   `fallThrough = controlDown`（逐拍态,无窗口计时器）与 :28298 flag30 源
+    //   （GoingDownWithGrapple/pulley/mount.Cart/gravDir==-1 → flag30∧fallThrough 双置）
+    //   两语义:按 S 平台 vy≤1 放行、vy>1 仍承接（Collision.cs:2391 后半=逐级阶梯下降）;
+    //   ratClimb（SW 侧机制,无原版锚）与钩爪下拉=fall2 恒不承接,只走 dropThrough 单旗。
+    //   gravDir=-1 原版强 fall2（:28298 首项）→ platFallThrough 不置=平台整体不承接。
+    //   平台门消费面=TileCollision moveAxis 两支（边缘行+BJ-C9-SP 越行补扫）。
+    this.platFallThrough = !!this.inputDown && this.gravDir !== -1;
     // SW-RB6b 2026-09-07：补 StepUp 的钩爪否决腿（原版 :28278 `(…)&& !controlDown &&
     // !IsRidingTracks && !flag28 && grappling[0] == -1` 才 StepUp——挂钩中不自动上
     // 台阶,牵引撞上半砖/台阶即被拦停）。旧恒 true = 挂钩沿地被拖时仍爬台阶。

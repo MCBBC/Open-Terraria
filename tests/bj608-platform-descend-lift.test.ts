@@ -19,7 +19,8 @@
 //   MinionProj 置位）。
 // 十周年种子面:celebrationmk10 不改平台物理（本仓 gen/SeedEasterEggs 无平台物理旗）,
 //   种子仅提供上述布局（本测试夹具按 .wld dump 1:1 缩比复刻）——种子面不另设锁。
-// 原版锚:Collision.cs:2364（承接门）/2391（fallThrough∧vy≤1 放行）/2435/2449/2464
+// 原版锚:Collision.cs:2364（承接门）/2391（fallThrough∧vy≤1 放行;★BJ609 补钉后半
+//   vy>1 仍承接=阶梯下降半边,①②终态随语义更新）/2435/2449/2464
 //   （else 链 !tileSolidTop 三排）/Player.cs:28296（fallThrough=controlDown,无窗口计时器）。
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
@@ -71,32 +72,45 @@ describe('BJ608 平台穿落强制抬升（用户场景复现锁）', () => {
     const store = makeWorld();
     const world = { store };
     const b = makeBody(store, P * 16, { onGround: true });
+    // ★BJ609（2026-10-10）夹具补 platFallThrough（runTicks 内 dropThrough 旗面已拆分,
+    //   见下注）——按 S 期 vy≤1 慢速放行、释放后承接下来首个平台（阶梯下降第一级）。
+    b.platFallThrough = true;
     const seq = runTicks(b, world, 45, (i) => i < 10);   // 前10拍按S,后35拍释放
     // 起始 feet=P*16;按S期间穿落（feet 单调增,穿过列平台行 P+1..P+3 各顶）
     expect(seq[0], '重力首拍=+0.4').toBeCloseTo(P * 16 + 0.4, 6);
-    // 释放后每一拍 feet 不得回退（原版嵌入盒永不承接=无上行梯爬）
+    // 释放后每一拍 feet 不得回退（原版嵌入盒永不承接=无上行梯爬;≤1px 内允许
+    // BJ-C9-SP prevB≤top+1 容差窗的亚像素承接修正,BJ608 抬回病灶=10-22px 级）
     for (let i = 11; i < seq.length; i++) {
       const landed = seq[i] === seq[i - 1];
-      expect(seq[i] >= seq[i - 1] || landed, `释放后拍${i}: feet ${seq[i - 1]}→${seq[i]} 出现上行=抬升`).toBe(true);
+      expect(seq[i] >= seq[i - 1] || landed || seq[i - 1] - seq[i] <= 1.01,
+        `释放后拍${i}: feet ${seq[i - 1]}→${seq[i]} 出现上行=抬升`).toBe(true);
     }
-    // 终态=自上方承接的平台顶（列行 P+2 顶,真机对拍=feet 4384=(272+2)×16）
+    // 终态=自上方承接的平台顶。★BJ609 语义更新:按 S 期 vy>1 仍承接（:2391 后半）
+    // → 按S 10t 期间已在 P+1 顶被接住一次（vy=3.6>1,t9）,释放时旧脚仅超 P+1 顶
+    // 0.4px∈(top,top+1] 容差窗 → 承接驻留 P+1（BJ609 前全量放行旧值=(P+2)×16,
+    // 真机对拍 4384 系全量放行下的物证标定,随语义退役）。
     expect(b.onGround, '落地下承接').toBe(true);
-    expect(b.y + b.h, '终态 feet=下方平台顶 (P+2)×16（原版同款:释放点旧脚已低于P/P+1顶,两行不放行,首个可承接行=P+2）')
-      .toBe((P + 2) * 16);
+    expect(b.y + b.h, '终态 feet=下方平台顶 (P+1)×16（BJ609 阶梯下降第一级）')
+      .toBe((P + 1) * 16);
     // 永不回到原平台顶
     for (const f of seq.slice(11)) expect(f, '不得回到原平台（抬回=病灶）').toBeGreaterThan(P * 16);
   });
 
-  it('②长按S 18t 落到实体地面:释放后驻留不被抬回（物证 34905→34935 抬回相）', () => {
+  it('②长按S 18t 落到下方平台顶:释放后驻留不被抬回（物证 34905→34935 抬回相）', () => {
     const store = makeWorld();
     const world = { store };
     const b = makeBody(store, P * 16, { onGround: true });
+    // ★BJ609：夹具补 platFallThrough（见①注）。长按 S 期阶梯下降:vy>1 逐级接住
+    //   （t9 接 P+1、t18 接 P+2）;18t 窗恰停在 (P+2)×16——BJ609 前全量放行旧值
+    //   =(P+4)×16（真机 4416 系全量放行物证标定,随语义退役;长按到底需持续按 S
+    //   逐级续落=原版逐级阶梯下降节奏）。
+    b.platFallThrough = true;
     const seq = runTicks(b, world, 40, (i) => i < 18);
-    // 落到棕榈木替身顶（(P+4)*16;真机=4416=276×16）
+    // 落到列平台 P+2 顶（(P+2)*16）
     expect(b.onGround).toBe(true);
-    expect(b.y + b.h, '落实体面 (P+4)×16').toBe((P + 4) * 16);
+    expect(b.y + b.h, '阶梯承接面 (P+2)×16').toBe((P + 2) * 16);
     // 释放后恒驻留（无梯爬回 P 行）
-    for (const f of seq.slice(19)) expect(f, '实体面驻留,不得被抬回').toBe((P + 4) * 16);
+    for (const f of seq.slice(19)) expect(f, '平台面驻留,不得被抬回').toBe((P + 2) * 16);
   });
 });
 

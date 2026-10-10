@@ -388,6 +388,14 @@ export class SpriteAtlas {
     return this.assetAlias.has(key);
   }
 
+  /** ★四百九十七刀:运行期 UI 清单键注入(mod 盔甲渲染链——Armor_Head_<hs>.png 等;
+   *  原版 vanilla-ui.json 清单零扰动(禁重生成纪律),键=运行期 map 追加,
+   *  path 走 ensureUiImage 的 assetAlias 别名 fetch 支(三百十一既有通道)) */
+  registerUiFile(name: string, path: string): void {
+    if (this.uiFiles[name]) return;   // 原版键在册=不覆写
+    this.uiFiles[name] = path;
+  }
+
   vmisc(path: string): DrawRect | null {
     const hit = this.vimages.get(path); // 命中直接返回(node 测试环境的已注入项同样有效)
     if (hit) return { img: hit, sx: 0, sy: 0, sw: hit.width, sh: hit.height };

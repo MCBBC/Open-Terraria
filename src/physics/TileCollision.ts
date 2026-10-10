@@ -34,6 +34,18 @@ export interface Body {
    *  （Collision.cs:2364 门+else 链 !tileSolidTop 三排=嵌入盒永不承接），唯一合法
    *  消费者=哨兵 spawn 嵌入驻留（Player.cs:50045-50063+MinionProj 置位面）。 */
   embedPlatSnap?: boolean;
+  /** ★BJ609（2026-10-10）：fallThrough 慢放行/快承接半边（原版 fallThrough≠fall2 拆分）。
+   *  原版 Player.cs:28296 `fallThrough = controlDown` 按 S 期平台【非全量放行】——
+   *  Collision.cs:2391 门 `(!(solidTop&fallThrough) || !((vy≤1)|fall2))`：isPlat∧fallThrough
+   *  时 vy≤1（慢速）放行、vy>1（快速）仍承接（高速下落逐级被平台接住=原版逐级阶梯下降）。
+   *  fall2（ignorePlats，Player.cs:28298 GoingDownWithGrapple/pulley/mount.Cart/gravDir=-1）
+   *  =平台整体不承接，与 fallThrough 两语义（原版 Projectile.cs:17705-17721/NPC.cs:93867
+   *  Collision_MoveNormal 均以 (flag6,flag6)/(fall,fall) 双参=永不承接）。
+   *  本仓 Body.dropThrough 历史语义=「平台永不承接」（≡原版双参合流），弹体/NPC/随从/
+   *  钩爪下拉/爬墙各源照旧零改；本字段【仅】玩家 inputDown 源置 true（Player.ts 每拍写，
+   *  gravDir=-1 时原版强 fall2 故不置）——平台门读到 dropThrough∧platFallThrough 同置时
+   *  vy>1 仍承接（原版 :2391 后半）。 */
+  platFallThrough?: boolean;
   /** slopeEmbedRevert 回退锚:moveAndCollide 入口处记录的本 tick 移动前位置 */
   px?: number; py?: number;
   /** Projectile.tileCollide 镜像（AI 逐态直写,如蜘蛛 :62843-62860 穿平台/归位飞行
@@ -499,7 +511,13 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
       // ★SW-FX34b：半砖盒顶 +8（Collision.cs:2350-2354 `vector4.Y += 8`）——平台族
       //   落地面同步（wiki 竖直单向墙"底部平台"=锤 3 次半砖平台,接人面=格顶+8）
       const halfTop = st.half[st.idx(tx, ty)] ? 8 : 0;
-      const plat = !b.dropThrough && dir > 0 && world.store.isPlatform(tx, ty)
+      // ★BJ609（2026-10-10）：按 S（dropThrough∧platFallThrough 同置）期非全量放行——
+      //   原版 :2391 `(!(solidTop&fallThrough) || !((vy≤1)|fall2))`：isPlat∧fallThrough∧
+      //   !fall2 时 vy≤1 放行、vy>1 仍承接（高速下落逐级接住=阶梯下降）。b.vy=本拍
+      //   碰撞前速度（原版 Velocity.Y 同量纲,px/tick,向下正）——子步 ≤8px 不改写 vy。
+      //   仅 dropThrough（弹体/NPC/钩爪/爬墙源）=fall2 恒不承接,语义零变。
+      const plat = !(b.dropThrough || (b.platFallThrough === true && b.vy <= 1)) && dir > 0
+        && world.store.isPlatform(tx, ty)
         && (b.y + b.h) - dy <= ty * TILE + halfTop + 1; // 上一位置在平台之上（半砖平台面=格顶+8）
       if (dir > 0) {
         if (!solid && !plat) continue;
@@ -537,7 +555,9 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     //  「下落到下一格平台时被强制抬升到上面平台」=BJ608 两件套物证复现）。哨兵
     //  spawn 面保留（Player.cs:50045-50063 spawnY=(首实心行−1)×16−24 嵌 10px+出膛
     //  vy15,BJ-C9-SP 端到端基准）。
-    if (dir > 0 && !b.dropThrough) {
+    // ★BJ609：越行补扫同门——按 S 慢速（vy≤1）放行、快速（vy>1）仍逐行承接（:2391）；
+    //   仅 dropThrough（fall2 源）恒跳过,嵌入支 opt-in 收窄面零变。
+    if (dir > 0 && !(b.dropThrough || (b.platFallThrough === true && b.vy <= 1))) {
       for (let tyy = bottomRowOld; tyy < ty; tyy++) {
         for (let tx = x0; tx <= x1; tx++) {
           if (!world.store.isPlatform(tx, tyy)) continue;

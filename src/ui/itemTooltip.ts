@@ -522,7 +522,7 @@ export function buildTooltipBody(
       const partVid = first.primary === 1 ? first.h : first.primary === 2 ? first.b : first.l;
       const desc = first.primary !== 0 && partVid !== vid
         ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[first.primary]}`)
-        : T(`ArmorSetBonus.${first.name}`);
+        : first.desc ?? T(`ArmorSetBonus.${first.name}`);
       const text = fmt('UI.ItemSetBonusGeneral', { Description: desc });
       // Description 自带 \n（如 HallowedSummoner 双行文案）→ 同色拆行（原版 MouseText
       // 多行绘制语义;DOM 侧 white-space 不保留 \n）
@@ -543,7 +543,7 @@ export function buildTooltipBody(
     const partVid = best.primary === 1 ? best.h : best.primary === 2 ? best.b : best.l;
     const desc = best.primary !== 0 && partVid !== wornAt(best.primary)
       ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[best.primary]}`)
-      : T(`ArmorSetBonus.${best.name}`);
+      : best.desc ?? T(`ArmorSetBonus.${best.name}`);
     const text = fmt('UI.ItemSetBonusEquipped', {
       Numerator: bestFound, Denominator: bestNeeded, Description: desc });
     const color = bestFound === bestNeeded ? 'rgb(50,205,50)' : 'rgb(130,130,130)';

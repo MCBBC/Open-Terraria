@@ -100,7 +100,9 @@ export interface ModContext {
   canUse(key: string, fn: (ctx: unknown) => boolean): void;
   /** ★四百八十二刀:mod 套装加成注册(h/b/l=本 mod 物品键;bonus=数值/旗面,
    *  与原版 ARMOR_SET_BONUSES 同消费面——穿戴三件即亮) */
-  armorSet(spec: { h: string; b: string; l: string; bonus: Record<string, unknown> }): void;
+  armorSet(spec: { h: string; b: string; l: string; bonus: Record<string, unknown>;
+    /** ★四百九十八:悬停套装提示文本(desc 直挂=mod 文本) */
+    tipName?: string; tipText?: string }): void;
   /** ★四百八十三刀:mod tile 右键钩(fn 返回 true=消费右键;C# ModTile.RightClick 同位) */
   tileInteract(key: string, fn: (tx: number, ty: number, game: unknown) => boolean): void;
   /** ★四百八十三刀:mod 物品键→vid(fail-fast;运行时闭包解析用——gs.mods.itemIdByKey
@@ -273,6 +275,7 @@ export function createModContext(
       registerModArmorSet(
         internal(spec.h), internal(spec.b), internal(spec.l),
         spec.bonus as Parameters<typeof registerModArmorSet>[3],
+        spec.tipName && spec.tipText ? { name: spec.tipName, desc: spec.tipText } : undefined,
       );
     },
     // ★四百八十三刀:mod tile 右键(tiles 域 id 解析→interactAt 尾臂派发)

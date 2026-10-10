@@ -395,7 +395,7 @@ export function matchArmorSetBonusVid(hVid: number, bVid: number, lVid: number):
 // /GetTooltipForWornArmor 的 DecidedBy* 文案判据,ArmorSetBonus.cs :201-227）。
 // 仅 tooltip 显示消费（行为面仍在上方两条键 lane;recon-armorset-1457 闸门不覆盖本
 // lane——金标 = tests/bj224-setbonus-tooltip.test.ts 反编译直读逐套对拍）。
-export interface ArmorSetTooltipSet { name: string; primary: 0 | 1 | 2; triples: [number, number, number][] }
+export interface ArmorSetTooltipSet { name: string; primary: 0 | 1 | 2; triples: [number, number, number][]; /** ★四百九十八:mod 套描述直挂(l10n 键缺域——原版套走 ArmorSetBonus.<name> 键) */ desc?: string }
 export const ARMOR_SET_TOOLTIP_SETS: ArmorSetTooltipSet[] = [
   { name: 'Shroomite', primary: 0, triples: [[1548, 1549, 1550], [1546, 1549, 1550], [1547, 1549, 1550]], },
   { name: 'Wood', primary: 0, triples: [[727, 728, 729], [733, 734, 735], [730, 731, 732], [736, 737, 738], [924, 925, 926], [2509, 2510, 2511], [2512, 2513, 2514]], },
@@ -464,7 +464,7 @@ export const ARMOR_SET_TOOLTIP_SETS: ArmorSetTooltipSet[] = [
 ];
 
 /** 注册套实例（展开三元组后的单条） */
-export interface ArmorSetTooltipMember { name: string; primary: 0 | 1 | 2; h: number; b: number; l: number }
+export interface ArmorSetTooltipMember { name: string; primary: 0 | 1 | 2; h: number; b: number; l: number; desc?: string }
 let TOOLTIP_SETS_BY_VID: Map<number, ArmorSetTooltipMember[]> | null = null;
 /** 含 vid 的注册套实例（注册序）——SetsContaining[vid] 等价（三元组 0 位 =「该位
  *  不计」占位（TryCounting :189-199 needed=0 不计数）,不产生成员关系,同 BuildLookup
@@ -478,7 +478,7 @@ export function armorSetTooltipContaining(vid: number): readonly ArmorSetTooltip
           if (part === 0) continue;
           let arr = m.get(part);
           if (!arr) { arr = []; m.set(part, arr); }
-          arr.push({ name: set.name, primary: set.primary, h, b, l });
+          arr.push({ name: set.name, primary: set.primary, h, b, l, ...(set.desc ? { desc: set.desc } : {}) });
         }
       }
     }
@@ -517,6 +517,12 @@ export const DD2_PIECE_FX: Record<number, Partial<ArmorSetBonus>> = {
 /** ★四百八十二刀:mod 套装注册面(sw.armorSet;键=内部物品 id 三元组,
  *  与 ARMOR_SET_BONUSES 既有 lane 同消费面——activeArmorSetMatch/sb 投影)。
  *  全零字段条目照写(modFlags-only 套=sb 投影为 null 但 setMatch 命中面仍挂旗)。 */
-export function registerModArmorSet(hInternal: number, bInternal: number, lInternal: number, bonus: ArmorSetBonus): void {
+export function registerModArmorSet(hInternal: number, bInternal: number, lInternal: number, bonus: ArmorSetBonus,
+  tip?: { name: string; desc: string }): void {
   ARMOR_SET_BONUSES[`${hInternal}|${bInternal}|${lInternal}`] = bonus;
+  // ★四百九十八:tooltip 套注册(desc 直挂=mod 文本 l10n 键缺域;查表缓存失效)
+  if (tip) {
+    ARMOR_SET_TOOLTIP_SETS.push({ name: tip.name, primary: 0, triples: [[hInternal, bInternal, lInternal]], desc: tip.desc });
+    TOOLTIP_SETS_BY_VID = null;
+  }
 }

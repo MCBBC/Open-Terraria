@@ -21,6 +21,11 @@ export abstract class Entity {
    *  消费点 Enemy.slimeAI 携物梯（:61309 气球弹跳 / :61932/:62124 落地嵌固回退） */
   collideY = false;
   dropThrough = false;
+  /** ★BJ609（2026-10-10）：fallThrough 慢放行/快承接半边（TileCollision.Body.platFallThrough
+   *  注——Collision.cs:2391 vy≤1 放行/vy>1 承接;Player.cs:28296 fallThrough=controlDown）。
+   *  仅玩家侧每拍写（Player.ts inputDown 源,gravDir=-1 原版强 fall2 不置）;
+   *  弹体/NPC/随从等 dropThrough 单旗源保持「平台永不承接」语义零变。 */
+  platFallThrough = false;
   /** ★BJ608（2026-10-10）：平台嵌入驻留承接 opt-in（TileCollision.ts 越行块嵌入支
    *  消费旗）。原版 TileCollision 平台承接唯一门=旧脚≤平台顶（Collision.cs:2364,
    *  else 链其余三支 `!tileSolidTop` 排除平台）——嵌入盒永不承接=玩家下落穿平台后
