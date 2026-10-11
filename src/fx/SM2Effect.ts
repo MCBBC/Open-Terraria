@@ -45,6 +45,52 @@ import { GEN_MAP } from './gen/genIndex.gen';
 let SM2_CODEGEN = true;
 export function setSm2CodegenEnabled(v: boolean): void { SM2_CODEGEN = v; }
 
+// ---- ★SM2 池化（2026-10-11;任务#15 刀①，Windows Trace-225221 定谳:fit self 2571ms
+//      (4.18%)+主线程 GC minor 25.6/s vs Mac 对照面 4.9/s（qs-mac-control-face）----
+// 热路径 runPassOnImageData 的分配面收编进模块级 scratch：
+//  - 逐调用: c/inpool/outregs/temps（3×2KB+2KB）/written Set/regs/tex/v0/o/srcData
+//    （srcData=整 tile 拷贝,queen slime 洗染 cell 可达数十 KB/次）
+//  - 逐像素: t0 UV 元组（原 t0of 每像素 new [x,y]）+ execPixel 结果元组（原每像素
+//    new [r,g,b,a]）——后者经 additive resOut 出参消化,旧调用面零改动
+// 单线程已核（全仓无 worker 引用 SM2Effect;同步不可重入——采样器为纯像素读,不回调
+// 本模块）。★语义等价三保险：①复用槽入口 fill(0)（恢复「新数组=零」语义——VM 自身
+// regs/o fill、tex 的 texld 目的槽、v0[4..7] 空闲槽、c/inpool/outregs/temps 的未写槽
+// 全覆盖,不依赖 gen 体是否自带 fill）②written Set clear() ③srcData 仍全量拷贝
+// （读写交叠防御同旧,swirl 径向采样读前方可越过写指针）。
+// ?smpool=0 逃生门=整段回退逐调用分配现状（含运行期 setSm2PoolEnabled 双跑,测试用）。
+let SM2_POOL = (() => {
+  try {
+    return (typeof location !== 'undefined' ? location.search : '').includes('smpool=0') === false;
+  } catch { return true; }
+})();
+export function setSm2PoolEnabled(v: boolean): void { SM2_POOL = v; }
+export function sm2PoolEnabled(): boolean { return SM2_POOL; }
+
+/** 模块级 scratch（sm2Scratch() 惰性建;字段与逐调用分配版本同形同尺寸） */
+interface Sm2Scratch {
+  c: Float64Array; inpool: Float64Array; outregs: Float64Array; temps: Float64Array;
+  s0: Float64Array; s1: Float64Array; s2: Float64Array; dst: Float64Array;
+  regs: Float64Array; tex: Float64Array; v0: Float64Array; o: Float64Array;
+  written: Set<number>;
+  res: [number, number, number, number];
+  srcData: Uint8ClampedArray;
+}
+let SM2_SCRATCH: Sm2Scratch | null = null;
+function sm2Scratch(): Sm2Scratch {
+  if (!SM2_SCRATCH) {
+    SM2_SCRATCH = {
+      c: new Float64Array(64 * 4), inpool: new Float64Array(64 * 4), outregs: new Float64Array(64 * 4),
+      temps: new Float64Array(64 * 4),
+      s0: new Float64Array(4), s1: new Float64Array(4), s2: new Float64Array(4), dst: new Float64Array(4),
+      regs: new Float64Array(32 * 4), tex: new Float64Array(8 * 4), v0: new Float64Array(8), o: new Float64Array(4),
+      written: new Set<number>(),
+      res: [0, 0, 0, 0],
+      srcData: new Uint8ClampedArray(0),
+    };
+  }
+  return SM2_SCRATCH;
+}
+
 export interface SM2Uniforms {
   uColor: [number, number, number];
   uSecondaryColor: [number, number, number];
@@ -234,9 +280,12 @@ export class SM2Pass {
     return this.symbols.every((s) => s.kind !== 'sampler' || s.reg === 's0');
   }
 
-  /** 常量寄存器装配：def → CTAB 符号注入 → preshader 覆写（64×4 float） */
-  setupConstants(u: SM2Uniforms): Float64Array {
-    const c = new Float64Array(64 * 4);
+  /** 常量寄存器装配：def → CTAB 符号注入 → preshader 覆写（64×4 float）。
+   *  ★SM2 池化：sc 在场=c/inpool/outregs/written 走 scratch（入口 fill(0)/clear()
+   *  恢复「新数组」语义,见 SM2_POOL 头注）;缺省=逐调用分配现状逐位。 */
+  setupConstants(u: SM2Uniforms, sc?: Sm2Scratch): Float64Array {
+    const c = sc ? sc.c : new Float64Array(64 * 4);
+    c.fill(0);
     for (const ins of this.prog) {                       // def 常量（imm mov 的静态求值）
       if (ins.op === 0x01 && ins.srcs[0]?.imm && ins.dstFile === 2) {
         const vals = ins.srcs[0].imm;
@@ -254,14 +303,17 @@ export class SM2Pass {
       }
     }
     if (this.pres) {                                     // preshader 覆写
-      const inpool = new Float64Array(64 * 4);
+      const inpool = sc ? sc.inpool : new Float64Array(64 * 4);
+      inpool.fill(0);
       for (const s of this.pres.syms) {
         const v = uniformVec4(u, s.name);
         if (v) for (let k = 0; k < 4; k++) inpool[s.regIndex * 4 + k] = v[k];
       }
-      const outregs = new Float64Array(64 * 4);
-      const written = new Set<number>();
-      this.runPreshader(this.pres, inpool, outregs, written);
+      const outregs = sc ? sc.outregs : new Float64Array(64 * 4);
+      outregs.fill(0);
+      const written = sc ? sc.written : new Set<number>();
+      written.clear();
+      this.runPreshader(this.pres, inpool, outregs, written, sc);
       // ★P3 已撤销（2026-09-01 金标门裁决）：理论推导"静态族依赖链 ≤40×2⁻²⁴ ≪ 半
       //   量化步，fround 必不翻字节"被实测否证——非 fp32 可表的 uniform 输入经
       //   preshader 放大后落在 8bit 量化边界上，ArmorColored 梯度场景即现 stack 层
@@ -287,12 +339,17 @@ export class SM2Pass {
   }
 
   /** FXLC VM（run_preshader, mojoshader_effects.c:19-206）：dst=末位 operand。
-   *  返回实际写入的 outreg item 列表（覆写只动这些项） */
+   *  返回实际写入的 outreg item 列表（覆写只动这些项）。
+   *  ★SM2 池化：sc 在场=temps/标量槽走 scratch（入口 fill(0)——标量槽 s0/s1/s2 逐
+   *  指令写前读序依赖 elems/标量档,零基线防御不依赖写覆盖完备性） */
   private runPreshader(pres: NonNullable<FxPassJson['preshader']>,
-    inpool: Float64Array, outregs: Float64Array, written?: Set<number>): void {
-    const temps = new Float64Array(64 * 4);
-    const s0 = new Float64Array(4), s1 = new Float64Array(4), s2 = new Float64Array(4);
-    const dst = new Float64Array(4);
+    inpool: Float64Array, outregs: Float64Array, written?: Set<number>, sc?: Sm2Scratch): void {
+    const temps = sc ? sc.temps : new Float64Array(64 * 4);
+    temps.fill(0);
+    const s0 = sc ? sc.s0 : new Float64Array(4), s1 = sc ? sc.s1 : new Float64Array(4), s2 = sc ? sc.s2 : new Float64Array(4);
+    s0.fill(0); s1.fill(0); s2.fill(0);
+    const dst = sc ? sc.dst : new Float64Array(4);
+    dst.fill(0);
     for (const [opTok, operands] of pres.insts) {
       const op = (opTok >> 16) & 0xFFFF;
       const elems = opTok & 0xFF;
@@ -366,10 +423,14 @@ export class SM2Pass {
   private static normCache = new WeakMap<object, Array<((u: number, v: number, out: Float64Array) => void) | undefined>>();
 
   /** execPixel：codegen 直线体优先(SM2_CODEGEN 且有产物)，否则回退 VM。
-   * VM 路径与生成路径共享金标网(codegen-parity 差分门=切换前提)。 */
+   * VM 路径与生成路径共享金标网(codegen-parity 差分门=切换前提)。
+   * ★SM2 池化：resOut 在场=结果写进调用方缓冲并原引用返回（逐像素调用面的结果
+   * 元组分配消化;消费即止契约不变——返回值在下一次 execPixel 前必须读完）;缺省=
+   * 每次新元组,旧调用面零改动。 */
   execPixel(c: Float64Array, regs: Float64Array, tex: Float64Array,
     v0: Float64Array, o: Float64Array, t0x: number, t0y: number,
-    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>): [number, number, number, number] | null {
+    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>,
+    resOut?: [number, number, number, number]): [number, number, number, number] | null {
     if (SM2_CODEGEN && this.genFn === undefined) {
       const e = (GEN_MAP as Record<string, { px: unknown; killable: boolean } | undefined>)[this.name];
       this.genFn = e ? (e.px as Sm2PxGenFn) : null;   // 缺产物=null ⇒ 本 pass 走 VM
@@ -395,10 +456,11 @@ export class SM2Pass {
       tex[0] = t0x; tex[1] = t0y;
       const killed = this.genFn(c, regs, tex, v0, o, norm, this.sampOutGen, SM2Pass.scrGen);
       if (killed === null) return null;
+      if (resOut) { resOut[0] = o[0]; resOut[1] = o[1]; resOut[2] = o[2]; resOut[3] = o[3]; return resOut; }
       return [o[0], o[1], o[2], o[3]];
     }
     tex[0] = t0x; tex[1] = t0y;
-    return this.execPixelVM(c, regs, tex, v0, o, samplers);
+    return this.execPixelVM(c, regs, tex, v0, o, samplers, resOut);
   }
 
   private sampOutGen = new Float64Array(4);           // OUT 写回缓冲(gen 契约)
@@ -412,7 +474,8 @@ export class SM2Pass {
    *  语义面完全一致（差分门锁定）。orginal inline implementation moved verbatim. */
   private execPixelVM(c: Float64Array, regs: Float64Array, tex: Float64Array,
     v0: Float64Array, o: Float64Array,
-    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>): [number, number, number, number] | null {
+    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>,
+    resOut?: [number, number, number, number]): [number, number, number, number] | null {
     regs.fill(0);
     o.fill(0);
     for (const ins of this.prog) {
@@ -497,7 +560,9 @@ export class SM2Pass {
         default: break;
       }
     }
-    return [sat(o[0]), sat(o[1]), sat(o[2]), sat(o[3])];
+    const r0 = sat(o[0]), r1 = sat(o[1]), r2 = sat(o[2]), r3 = sat(o[3]);
+    if (resOut) { resOut[0] = r0; resOut[1] = r1; resOut[2] = r2; resOut[3] = r3; return resOut; }
+    return [r0, r1, r2, r3];
   }
 }
 
@@ -536,15 +601,26 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
     if (!u.uImageSize0[0] && !u.uImageSize0[1]) u.uImageSize0 = [w, h];
     if (!u.uSourceRect[2] && !u.uSourceRect[3]) u.uSourceRect = [0, 0, w, h];
   }
-  const c = pass.setupConstants(u);
-  const regs = new Float64Array(32 * 4);
-  const tex = new Float64Array(8 * 4);
-  const v0 = new Float64Array(8);                  // v0/v1（v1 空闲）
+  // ★SM2 池化：SM2_POOL 开=sc 全程走模块 scratch（入口 fill(0) 恢复零基线,见头注）;
+  // 关=逐位回退逐调用分配现状。sc.res 契约=消费即止（循环内读到下一像素前）。
+  const sc = SM2_POOL ? sm2Scratch() : null;
+  const c = pass.setupConstants(u, sc ?? undefined);
+  const regs = sc ? sc.regs : new Float64Array(32 * 4);
+  const tex = sc ? sc.tex : new Float64Array(8 * 4);
+  const v0 = sc ? sc.v0 : new Float64Array(8);     // v0/v1（v1 空闲）
+  const o = sc ? sc.o : new Float64Array(4);
+  if (sc) { regs.fill(0); tex.fill(0); v0.fill(0); o.fill(0); }   // 零基线防御（不依赖 VM/gen 自带 fill 的完备性）
   // v0=UNORM 顶点色（硬件属性域恒 0..1）——入参钳制防调用方漂移（sat 含 NaN 透传语义）
   if (v0Rgb) { v0[0] = sat(v0Rgb[0]); v0[1] = sat(v0Rgb[1]); v0[2] = sat(v0Rgb[2]); v0[3] = 1; }
   else v0[0] = v0[1] = v0[2] = v0[3] = 1;
-  const o = new Float64Array(4);
-  const srcData = new Uint8ClampedArray(data);           // s0 采样源（防读写交叠）
+  let srcData: Uint8ClampedArray;                        // s0 采样源（防读写交叠）
+  if (sc) {
+    if (sc.srcData.length < data.length) sc.srcData = new Uint8ClampedArray(data.length);
+    sc.srcData.set(data);                                // 池缓冲按最大 tile 增长;本调用只用前 data.length
+    srcData = sc.srcData;
+  } else {
+    srcData = new Uint8ClampedArray(data);
+  }
   // s0 = 被染贴图。vanilla 中它是【整表纹理】、t0 是全表 UV；本仓烘焙图只有切片
   // → 采样前做表空间→切片空间反变换（派生坐标的偏移采样同样落在正确语义上）
   const s0: SM2SamplerOut = t0Rect
@@ -553,15 +629,14 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
     : (uu, vv, o4) => { sampleImageInto(srcData, w, h, uu, vv, false, o4); };
   const samplers = [s0, ...extraSamplers];
   // t0 = 全表 UV（SpriteBatch 子矩形语义：(rect.X + u·rect.W)/texW）——
-  // 渐变族按 t0×uImageSize0−uSourceRect.xy 取像素位，切片局部 UV 会错锚
-  const t0of = (x: number, y: number): [number, number] => t0Rect
-    ? [(t0Rect.sx + x + 0.5) / t0Rect.sheetW, (t0Rect.sy + y + 0.5) / t0Rect.sheetH]
-    : [(x + 0.5) / w, (y + 0.5) / h];
+  // 渐变族按 t0×uImageSize0−uSourceRect.xy 取像素位，切片局部 UV 会错锚。
+  // ★SM2 池化：原 t0of 每像素 new [x,y] 元组 → 标量内联（算式逐字同式,零分配）。
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      const [t0x, t0y] = t0of(x, y);
-      const res = pass.execPixel(c, regs, tex, v0, o, t0x, t0y, samplers);
+      const t0x = t0Rect ? (t0Rect.sx + x + 0.5) / t0Rect.sheetW : (x + 0.5) / w;
+      const t0y = t0Rect ? (t0Rect.sy + y + 0.5) / t0Rect.sheetH : (y + 0.5) / h;
+      const res = pass.execPixel(c, regs, tex, v0, o, t0x, t0y, samplers, sc ? sc.res : undefined);
       if (!res) { data[i] = data[i + 1] = data[i + 2] = data[i + 3] = 0; continue; }
       data[i] = res[0] * 255; data[i + 1] = res[1] * 255;
       data[i + 2] = res[2] * 255; data[i + 3] = res[3] * 255;

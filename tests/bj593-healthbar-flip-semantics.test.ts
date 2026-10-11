@@ -119,11 +119,14 @@ describe('BJ593 全亮域单 pass（实体循环零血条调用,层序 4<14 同�
   it('实体循环内零 drawHealthBar 直调（收集面替代）', () => {
     // 收集面三支 + 镇民支
     expect((rendererSrc.match(/hbPass\.push\(/g) ?? []).length).toBe(4);
-    // drawHealthBar 调用全仓唯一 = flushEntityHealthBars 内
+    // drawHealthBar 调用全仓唯一 = flushEntityHealthBars 内（★C13-F6 2026-10-11：
+    //  玩家血条收编同 pass → NPC 漏斗+玩家漏斗共 2 站,均在 flush 内——「实体循环
+    //  零直调,收集面替代」语义不变）
     const calls = [...rendererSrc.matchAll(/this\.drawHealthBar\(/g)].map((m) => m.index ?? 0);
-    expect(calls.length, 'drawHealthBar 调用唯一').toBe(1);
+    expect(calls.length, 'drawHealthBar 调用唯一（C13-F6 后=NPC+玩家双漏斗）').toBe(2);
     const flushSig = rendererSrc.indexOf('private flushEntityHealthBars(');
     expect(calls[0]).toBeGreaterThan(flushSig);
+    expect(calls[1]).toBeGreaterThan(flushSig);
   });
 
   it('flush 调用位：drawScreenFilterChain 之后（≙ 原版 EndCapture 后接口段）、8 飘字之前', () => {

@@ -1,28 +1,36 @@
 // BJ624 2026-10-10 放置锚域收官刀（BJ600/602/622 四代债链闭合判别面）
+// ★C14-F1/F7（2026-10-11）：件1 三用例判谳翻转（579/50/707 平台拒→收）+ 拆臂哨兵
+//  重锚 + 19 件翻案表行号勘正（位面全对纯文档,addTile 行号按 1457 逐件重测）——
+//  F1 定谳（亲读 TileObject.cs:392-410）：共享臂条件 = `(SolidWithTop || Table)`
+//  两开,平台/实心∧solidTop 分支为共享体;:407-410 Table 臂=追加支。生存面同构
+//  （WorldGen.AnchorValid :52310-52326）——Table 单位记录平台承重=原版本相,
+//  BJ624 旧「两臂拆分/平台拒」判谳作废（MV 伪锚家族+1）。
 //
 // 件1（主件）：SolidWithTop 平台档 19 件翻案（BJ602④ 长尾,BJ622 登记清单）——
 //   BJ622 判例：hasSupport 近似是双向偏差（严于原版拒平台 + 松于原版放贴墙）,
 //   逐件翻案勿一刀切。路由 = 原版 Player.cs:40085 CustomPlace(type,placeStyle)
 //   && type ∉ {82,227,4} → TileObject.CanPlace 全链（validateAnchors 即其移植）,
 //   对【锚档 1×1】同样成立 → Game.ts uccp1x1 门（BJ622 anchorFree1x1 全语义化）。
-//   逐件原版锚（TileObjectData.cs 亲读,addTile 行号）：
-//     36 礼物   :4453-4456 CopyFrom(Style1x1) → 底 SolidTile|SolidWithTop|SolidSide
-//     78 陶盆   :2384-2389 StyleOnTable1x1+底 +SolidWithTop+Table|SolidSide,LavaDeath=false
-//     81 珊瑚   :4377-4388 顶 EmptyTile+底 SolidTile|SolidWithTop|SolidSide,uccp
-//     135 压板  :4389-4393 Style1x1 继承底三档（BJ622 双判已核）
-//     141 炸药  :4397-4399 Style1x1 继承,LavaDeath=false
-//     210 地雷  :4404-4406 Style1x1 继承,DrawYOffset 2
-//     239 矿锭  :4407-4411 Style1x1 继承,StyleHorizontal
-//     324 海贝  :4419-4428 uccp+底 SolidTile|SolidWithTop|Table|SolidSide
-//     428 加重板 :4393-4396 Style1x1 继承,LavaDeath=false
-//     442 弹幕压垫 :4613-4663 uccp+HookCheckIfCanPlace=CanPlaceProjectilePressurePad
-//     476 球洞  :4343-4348 底 SolidTile|SolidWithTop|Table
-//     494 球座  :2389-2394 底 SolidTile|SolidWithTop|Table
-//     520 食物盘 :2377-2384 底 SolidTile|SolidWithTop|Table+TEFoodPlatter
-//     579 石魔头 :2241-2223 StyleDye+底 SolidTile|Table（无 SolidWithTop!）
-//     593 小火山 :4428-4434 底 SolidTile|SolidWithTop|Table|SolidSide
-//     630/631 臭虫箱 :4450-4487/4471-4488 五锚档（底/顶/右/左/墙,梁成员表真值）
-//     723/724 锚桩 :4508-4536/4537-4560 五锚档（AlternateTile 位惰性=无成员表）
+//   逐件原版锚（TileObjectData.cs 亲读,块区间=[前件 addTile+1, 本件 addTile],
+//   ★C14-F7 勘正后行号）：
+//     36 礼物   :4427-4430 CopyFrom(Style1x1) → 底 SolidTile|SolidWithTop|SolidSide
+//     78 陶盆   :2385-2389 StyleOnTable1x1+底 +SolidWithTop+Table|SolidSide,LavaDeath=false
+//     81 珊瑚   :4374-4383 顶 EmptyTile+底 SolidTile|SolidWithTop|SolidSide,uccp
+//     135 压板  :4384-4389 Style1x1 继承底三档（BJ622 双判已核）
+//     141 炸药  :4396-4398 Style1x1 继承,LavaDeath=false
+//     210 地雷  :4405-4407 Style1x1 继承,DrawYOffset 2
+//     239 矿锭  :4408-4411 Style1x1 继承,StyleHorizontal
+//     324 海贝  :4431-4440 uccp+底 SolidTile|SolidWithTop|Table|SolidSide
+//     428 加重板 :4390-4395 Style1x1 继承,LavaDeath=false
+//     442 弹幕压垫 :4630-4663 uccp+HookCheckIfCanPlace=CanPlaceProjectilePressurePad
+//     476 球洞  :4338-4343 底 SolidTile|SolidWithTop|Table
+//     494 球座  :2381-2384 底 SolidTile|SolidWithTop|Table
+//     520 食物盘 :2356-2366 底 SolidTile|SolidWithTop|Table+TEFoodPlatter
+//     579 石魔头 :2210-2223 StyleDye+底 SolidTile|Table（无 SolidWithTop——★C14-F1
+//               翻正：Table 位即开平台承重,原版平台可放）
+//     593 小火山 :4441-4446 底 SolidTile|SolidWithTop|Table|SolidSide
+//     630/631 臭虫箱 :4447-4467/4468-4488 五锚档（底/顶/右/左/墙,梁成员表真值）
+//     723/724 锚桩 :4489-4518/4519-4550 五锚档（AlternateTile 位惰性=无成员表）
 //  件2：AlternateTile 载体逐族翻案（82-84/753 白名单解禁;419 BJ622 判语维持;
 //   165/442/723/724 位惰性销案锚维持;136 拉杆三档未建模保守回落）。
 //  件3：uccp 路由矩阵（CustomPlace 全集亲读 :5017-5038 + Player.cs:40085 排除集;
@@ -137,22 +145,23 @@ describe('BJ624-件1A uccp1x1 十五件三面数据锁（validateAnchors 逐面�
         expect(validateAnchors(st, 12, 19, rec, 0), '实心底收').toBe(true);
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, 0, 0, 0);
       }
-      // 平台面：SolidWithTop 位 → 平台（proper-top 帧带 frameX=0）收;
-      // 无该位（579 石魔头/178 宝石）→ 平台拒 = 原版四支无平台臂（:404-476）
-      if (bits.includes('SolidWithTop')) {
+      // 平台面：★C14-F1 共享臂两开（TileObject.cs:392-406 亲读判语
+      //  `(SolidWithTop || Table)`）→ SolidWithTop 或 Table 任一位平台承
+      //  （proper-top 帧带 frameX=0）;无该两位（178 宝石 底 SolidTile 纯档）→ 平台拒
+      if (bits.includes('SolidWithTop') || bits.includes('Table')) {
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, PLATFORM, 0, 0);
         expect(validateAnchors(st, 12, 19, rec, 0), '平台 proper-top 收').toBe(true);
-        // 半砖平台不承（SolidWithTop 平台支 !halfBrick,TileObject.cs:466-473）
+        // 半砖平台不承（共享臂平台支 !halfBrick,TileObject.cs:394-401）
         st.half[st.idx(12, 20)] = 1;
         expect(validateAnchors(st, 12, 19, rec, 0), '半砖平台拒').toBe(false);
         st.half[st.idx(12, 20)] = 0;
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, 0, 0, 0);
       } else {
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, PLATFORM, 0, 0);
-        expect(validateAnchors(st, 12, 19, rec, 0), '记录无 SolidWithTop → 平台拒').toBe(false);
+        expect(validateAnchors(st, 12, 19, rec, 0), '记录无 SolidWithTop/Table → 平台拒').toBe(false);
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, 0, 0, 0);
       }
-      // 桌面面：Table 位（!Platforms 前置,TileObject.cs:404-408）→ 桌收
+      // 桌面面：Table 位（追加臂 !Platforms 前置,TileObject.cs:407-410）→ 桌收
       if (bits.includes('Table')) {
         for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, TABLE, 0, 0);
         expect(validateAnchors(st, 12, 19, rec, 0), '桌面收').toBe(true);
@@ -240,12 +249,12 @@ describe('BJ624-件1B Game 级三面锁（平台收/贴墙拒/实心收,消耗�
     expect(reg.some((f) => f.x === 12 && f.y === 19)).toBe(true);
   });
 
-  it('石魔头 579 平台拒（记录无 SolidWithTop=原版底 SolidTile|Table 双档）桌面收', () => {
+  it('石魔头 579 平台收（★C14-F1 判谳翻转:底 SolidTile|Table 双档共享臂两开,TileObject.cs:392-410）桌面收不回归', () => {
     const { g, w } = mkShell(4761);
     const st = w.store;
     for (let x = 8; x < 24; x++) st.setTileSilent(x, 20, PLATFORM, 0, 0);
     g.tryPlace(12, 19, ITEM_DEFS[iidOf(4761)]);
-    expect(st.get(12, 19)).toBe(0);
+    expect(st.get(12, 19)).toBe(TILE_INTERNAL_BY_SHEET(579));
     for (let x = 8; x < 24; x++) st.setTileSilent(x, 20, TABLE, 0, 0);
     g.tryPlace(12, 19, ITEM_DEFS[iidOf(4761)]);
     expect(st.get(12, 19)).toBe(TILE_INTERNAL_BY_SHEET(579));
@@ -295,22 +304,22 @@ describe('BJ624-件1B Game 级三面锁（平台收/贴墙拒/实心收,消耗�
 // ============================================================================
 // 件1-C 桌面族与 riders 回归（13/33/49/50/174/372/646 双闸同判 + 707 书 Echo）
 // ============================================================================
-describe('BJ624-件1C 桌面族双闸回归', () => {
-  it('书 50 平台拒（CanPlace Table 臂 !Platforms,TileObject.cs:404-408）桌面收不回归', () => {
+describe('BJ624-件1C 桌面族（★C14-F1 单路收敛:ON_TABLE 放置叠闸退役,uccp1x1 单路）', () => {
+  it('书 50 平台收（★C14-F1 判谳翻转:Table 位共享臂两开 TileObject.cs:392-410+ON_TABLE 双闸退役）桌面收不回归', () => {
     const { g, w } = mkShell(149);
     const st = w.store;
     for (let x = 8; x < 24; x++) st.setTileSilent(x, 20, PLATFORM, 0, 0);
     g.tryPlace(12, 19, ITEM_DEFS[iidOf(149)]);
-    expect(st.get(12, 19)).toBe(0);
+    expect(st.get(12, 19)).toBe(TILE_INTERNAL_BY_SHEET(50));
     for (let x = 8; x < 24; x++) st.setTileSilent(x, 20, TABLE, 0, 0);
     g.tryPlace(12, 19, ITEM_DEFS[iidOf(149)]);
     expect(st.get(12, 19)).toBe(TILE_INTERNAL_BY_SHEET(50));
   });
 
-  it('书 Echo 707（无直接放置物品=echo 变体族,数据面锁）：Table 档收/平台拒/贴墙拒', () => {
-    // 707 BooksEcho Table-only（TileObjectData.cs:4566-4571 区 CopyFrom(Style1x1)+
-    // anchorBottom Table,uccp 继承）——旧 hasSupport 近似下桌不收（严偏差）+
-    // 墙收（松偏差）双面;若来日接入直接放置物品,uccp1x1 门按本判据归位。
+  it('书 Echo 707（无直接放置物品=echo 变体族,数据面锁）：Table 档收/平台收（★C14-F1 共享臂两开）', () => {
+    // 707 BooksEcho Table-only（TileObjectData.cs:2378-2380 区 CopyFrom(StyleOnTable1x1)
+    // +anchorBottom Table 继承,uccp 继承）——★C14-F1 翻正：Table 位=共享臂两开
+    // （TileObject.cs:392-406 亲读）,平台承重与桌面同相;旧「平台拒」判谳作废。
     const rec = anchorSpecOf(707)!;
     expect(rec).not.toBeNull();
     expect(rec.anchorBottom!.t).toEqual(['Table']);
@@ -318,7 +327,7 @@ describe('BJ624-件1C 桌面族双闸回归', () => {
     for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, TABLE, 0, 0);
     expect(validateAnchors(st, 12, 19, rec, 0), '桌面收').toBe(true);
     for (let x = 8; x < 20; x++) st.setTileSilent(x, 20, PLATFORM, 0, 0);
-    expect(validateAnchors(st, 12, 19, rec, 0), '平台拒（Table 臂 !Platforms）').toBe(false);
+    expect(validateAnchors(st, 12, 19, rec, 0), '平台收（共享臂 SolidWithTop||Table）').toBe(true);
   });
 
   it('拉杆 136 保守回落面维持（uccp1x1 排除 → hasSupport 底∪墙,墙挂照收）', () => {
@@ -460,12 +469,18 @@ describe('BJ624-件3 uccp 路由矩阵锁', () => {
     expect(src).toMatch(/const isLogicLamp = def\?\.vanilla\?\.sheet === 419;/);
   });
 
-  it('validateAnchors 拆臂哨兵：SolidWithTop/Table 两臂独立（旧合并支退役）', () => {
+  it('★C14-F1 共享臂两开哨兵（TileObject.cs:392-410 亲读判语,拆臂哨兵重锚）', () => {
+    // 定谳亲读（1457 原文 TileObject.cs:392-406）：共享臂条件 =
+    // `(anchorBottom.type & AnchorType.SolidWithTop) == AnchorType.SolidWithTop
+    //  || (anchorBottom.type & AnchorType.Table) == AnchorType.Table` —— 平台支
+    //  （Platforms→!halfBrick∧PlatformProperTopFrame）与非平台支（tileSolid∧solidTop）
+    //  为共享体;:407-410 Table 臂（tileTable∧!Platform∧bt0）= 追加支。
+    //  生存面同构：WorldGen.AnchorValid :52310-52326 同式两开。
+    //  旧「两臂拆分」结构锁（not.toMatch 合并支）= R14-F1 判谳级误读,作废重锚。
     const src = readFileSync(join(process.cwd(), 'src', 'world', 'TileAnchorValidator.ts'), 'utf8');
-    expect(src).not.toMatch(/bit\('SolidWithTop'\) \|\| bit\('Table'\)/);   // 合并支已拆
-    expect(src).toMatch(/bit\('SolidWithTop'\)/);
-    expect(src).toMatch(/bit\('Table'\) && TILE_TABLE_SHEETS\.has\(sheet\) && !PLATFORMS_SHEETS\.has\(sheet\)/);
-    // SolidWithTop 平台臂须带 proper-top 帧带门（WorldGen.PlatformProperTopFrame :70686）
+    expect(src).toMatch(/bit\('SolidWithTop'\) \|\| bit\('Table'\)/);      // 共享臂两开
+    expect(src).toMatch(/bit\('Table'\) && TILE_TABLE_SHEETS\.has\(sheet\) && !PLATFORMS_SHEETS\.has\(sheet\)/);   // 追加支保留
+    // 共享臂平台支须带 proper-top 帧带门（WorldGen.PlatformProperTopFrame :70686）
     expect(src).toMatch(/platformProperTopFrame/);
   });
 });

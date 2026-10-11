@@ -69,6 +69,10 @@ class ScriptedLink {
   /** ★C9d2 二期:引擎切片入口改走 buildWorkerTiles（假链同款零尺寸包,语义不变） */
   buildWorkerTiles(): TileSlicePack { return this.buildSlice(); }
   send(msg: Omit<LightSnapshotMsg, 'op' | 'seq'>): void { this.lastSent = msg as LightSnapshotMsg; }
+  /** ★lwbp（2026-10-11 刀②）link 契约两法——脚本化链=瞬时回执语义（恒可发=恒发
+   *  现状;本测试时序设定不受门影响,门算术由 tests/lwbp-backpressure 锁定） */
+  sendReady(): boolean { return true; }
+  noteSendSkip(): void { /* 脚本化链不跳发 */ }
   dispose(): void { /* noop */ }
   /** 测试驱动：worker 算完回达（在「渲染后、下一 fixedUpdate 前」调用=最快调度） */
   deliverNow(): void {

@@ -42,8 +42,8 @@ const stateKeyOf = (id: number) => `sandboxworld.playerstate.${id}`;
 const dataKeyOf = (id: number) => `sandboxworld.world.${id}`;
 const FS_HANDLE_KEY = 'sandboxworld.fsBackup.dir';   // = FsBackup.FS_BACKUP_HANDLE_KEY（模块导入前装,字面量）
 
-/** WorldMeta 最小形（ensureLoaded 解析只滤 id:number） */
-const wmeta = (id: number, name: string) => ({ id, name, seed: '', w: 1, h: 1, difficulty: 0, evil: -1, createdAt: 0, lastPlayed: 0, playTimeMs: 0, favorite: false });
+/** WorldMeta 最小形（ensureLoaded 解析只滤 id:number;evil 字面量窄化=可直传 WorldMeta 形参） */
+const wmeta = (id: number, name: string) => ({ id, name, seed: '', w: 1, h: 1, difficulty: 0, evil: -1 as const, createdAt: 0, lastPlayed: 0, playTimeMs: 0, favorite: false });
 
 /** LS 抛错夹具：临时把 globalThis.localStorage 换成「getItem/removeItem 一抛」桩
  *  （隐私模式/安全策略面）——测毕原样还原,不影响同文件他用例。 */

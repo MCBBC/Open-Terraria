@@ -207,6 +207,11 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/StatuesPass.ts', 'world/gen/vanilla/TeleportSpotCheck.ts',
     'world/gen/vanilla/TemplePass.ts', 'world/gen/vanilla/TileCleanupPass.ts',
     'world/gen/vanilla/TrapsPass.ts',
+    // ★C14(2026-10-11)转正：world/TileAnchorValidator.ts=CanPlace 移植本体,evalCell
+    //   全程 sheet 域消费（SolidWithTop 平台支 BJ624 :183 既有+Platform/
+    //   PlatformNonHammered 平台顶备档 C14-F2c/d :337-347）——域一致,补家清单
+    //   （违规面 BJ624 即在,C14 只扩同文件同表消费位,首违非 C14）。
+    'world/TileAnchorValidator.ts',
     // ★BJ426-债A(2026-10-01)转正两处:
     //   · VanillaFraming SETS_PLATFORMS=S256([...PLATFORMS_SHEETS]) sheet 键 LUT(BJ221 收编面漏挂)
     //   · ClingerStaffWallProj CLINGER_WALL_STOP_SHEETS=[...PLATFORMS_SHEETS,380] 停行集

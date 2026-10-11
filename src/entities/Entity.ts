@@ -114,9 +114,25 @@ function compact(list: Entity[]): void {
  *  CanCutTiles :15407 头支 `aiStyle != 137 …` 对 137 恒 false=原版零割；
  *  旧 16×16 出生盒期割面每拍 ≤2 格无感，BJ606 场盒化（320×320）后=整盒
  *  割草机（behavior-log 4464 拍 19 格药草带+6006 拍 27 格藤簇、EntityManager
- *  探针 30 拍 13230 次上报/441 格=实锤）。45/92/105/106 族成员（237-239/243-245/
- *  511-513/567/568/1007/1128）全系 minion 旗，上游 !m.minion 门已拦=不入本表。 */
+ *  探针 30 拍 13230 次上报/441 格=实锤）。
+ *  ★R15-F7（2026-10-11 C15 清偿,R15-UNVERIFIED #3 逐 vid 回放定谳）：旧注
+ *  「45/92/105/106 族成员（237-239/243-245/511-513/567/568/1007/1128）全系
+ *  minion 旗,上游 !m.minion 门已拦=不入本表」系判谳级误读——SetDefaults 亲读：
+ *  239/245 雨滴（aiStyle 45,friendly=true）、511-513 毒雾（92,friendly）、
+ *  567/568 孢子陷阱（105,friendly）、1007 毒气陷阱（92,friendly+hostile+trap）、
+ *  1128 叶绿锭剑孢子云（92,friendly）【无一 minion】；已实装面回放=239/245
+ *  （WeaponProj 雨云族,雨滴 4×40 盒落地即割草=实害）、1128（proj1457 孢子云,
+ *  friendly=true 非随从=实害）——aiStyle 45/92/105/106 级排除落本门（projectileData
+ *  .aiStyle 直判,:15407 原式 1:1,免逐 vid 维护）。IsAGolfBall 族 715-718
+ *  （aiStyle 147,friendly）与 1091 风暴闪电（aiStyle 203 双旗 trap,尾支
+ *  `return type != 1091`=排除）同谳同落。未实装 vid（511-513/567/568/1007）
+ *  无割面=销案;237/238/243/244 无 friendly 行=friendly 门已拦（双保险）。 */
 const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040, 688, 689, 690]);
+/** aiStyle 级排除（:15407 头支 `aiStyle != 45 && != 137 && != 92 && != 105 && != 106`
+ *  ——137 已由 BJ606-R 收 CUT_EXCLUDE_VIDS 成员式,此处补 45/92/105/106 家族级）；
+ *  尾支 `return type != 1091`（:15418-15420）单型落 vid 集。 */
+const CUT_EXCLUDE_AISTYLES = new Set([45, 92, 105, 106, 147]);   // 147=IsAGolfBall(715-718) aiStyle
+const CUT_EXCLUDE_VIDS_TAIL = new Set([1091]);
 
 export class EntityManager {
   nextId = 1;
@@ -240,6 +256,12 @@ export class EntityManager {
           //     444/460/633/971·975（钉扎态 ai0==1,Player.cs:44518 出生
           //     即 1）/818 落 vanilla Damage_CanDealDamage（:12461）豁免表 → vanilla
           //     实际不割、本仓照割=多割相位差家族（SW 自造玩家弹侧,登记待刀）。
+          //   · ★R15-F8 登记债（2026-10-11 C15）：原版第二割面=HandleMovement 碰撞支
+          //     （Projectile.cs:18021-18026 `owner==myPlayer && CanCutTiles() &&
+          //     (friendly||hostile) && damage>0`——【撞格拍】以速度外延盒（±velocity）
+          //     CutTiles,滚石/巨石族贴地滚动每拍碰撞触发）;本仓中央收口=每拍 AI 后
+          //     弹盒上报（单面）——两面并集差=撞格拍速度外延边带 1-2px 边缘格割草
+          //     时序差（敌对滚地弹贴地磨草相位差,面宽待逐型回放定谳,登记不落）。
           //   · ★307 防回潮锚（件 4 零修刀）：vanilla 306 尖球 Kill 原位派生 307
           //     （P.cs:78055）→ AI_036 锁敌支 `friendly = true`（P.cs:27789-27792,
           //     全 vanilla 唯一置位;型录 307 无 friendly 行）→ 锁敌后每 tick 割。
@@ -249,7 +271,9 @@ export class EntityManager {
           const cutFriendly = m.noVanillaCut !== true
             && (vid === 0 ? true : projectileData(vid)?.friendly === true);
           if (!e.dead && cutFriendly && m.reflected !== true && !e.netPuppet
-            && m.npcProj !== true && !m.minion && vid !== 1054 && !CUT_EXCLUDE_VIDS.has(vid)) {
+            && m.npcProj !== true && !m.minion && vid !== 1054
+            && !CUT_EXCLUDE_VIDS.has(vid) && !CUT_EXCLUDE_VIDS_TAIL.has(vid)
+            && !CUT_EXCLUDE_AISTYLES.has(projectileData(vid)?.aiStyle ?? -1)) {
             // ★SW-BJ67（2026-09-14）：vid 随盒穿线——CutTiles 逐型豁免面
             //   （P.cs:15391-15393 1047 滚过幼虫 231 不割,详 ProjCutTiles.ts 注）
             // ★债刀-4 ②（2026-09-17）：出程旗随盒穿线——CutTilesAt :15384-86

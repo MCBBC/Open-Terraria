@@ -617,11 +617,22 @@ export class SpriteAtlas {
     return this.preloadFiles(files);
   }
 
-  /** 预载常驻杂项(树冠/液体/瀑布/电路)+ NPC 表(小动物)——出生点必有,量小全载 */
+  /** 预载常驻杂项(树冠/液体/瀑布/电路)+ NPC 表——出生点必有,量小全载。
+   *  ★BJ636(2026-10-11 线上实报"一进游戏所有怪物透明,刷新重进自愈"):
+   *  旧清单只含 vanilla.json npcs 登记的 20 张特殊表——普通怪(史莱姆/僵尸等
+   *  676 张 vanilla/NPC_{id}.png 散件)不在预载面,走 vnpc 首遇懒加载;发布形态
+   *  prune-dist 删光 dist/sprites/vanilla 散件(字节只在 SW 缓存=zip 暖存直写),
+   *  SW 未接管(首访空窗)或缓存缺件(warm 未完成/清空)时这些 fetch 全 404
+   *  (SPA fallback 回 index.html),vnpc→ensureVImage 10s 冷却循环重试恒空 →
+   *  drawEnemy if (r) 跳画 = 全体怪物透明,直到刷新后 SW 接管+缓存命中自愈。
+   *  修=进世界门槛(await preloadSceneAssets)预载 NPC 主表全集(vanilla-npcs.json
+   *  696 键,~4.6MB,与物品图标 24MB 同量级远小于 tile 表)——进游戏零懒加载
+   *  竞态窗;NPC_X_Alt_* 变体(144 张,特殊渲染分支消费)不进清单,按需自愈。 */
   preloadMiscAndNpcs(): Promise<void> {
     return this.preloadFiles([
       ...VANILLA_MISC,
       ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
+      ...Object.keys(vanillaNpcFrames).map((id) => `vanilla/NPC_${id}.png`),
     ]);
   }
 

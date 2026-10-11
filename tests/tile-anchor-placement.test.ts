@@ -286,18 +286,29 @@ describe('D. 子样式液体档（M-3b：newSubTile.* → liqStyles per-style �
     // 药草 anchorBottom 含 AlternateTile（:4749）走 anchorSpecOf 豁免回落——门级直取
     // manifest 原始记录验液体档（液体门与锚点门独立,AlternateTile 位 evalCell 不吃）
     const herb = manifestTiles['83'] as never as AnchorRec;  // StyleAlch 基记录水/岩浆全禁（:4750-4752）
+    // ★C14-F3（2026-10-11）：子样式 AnchorValidTiles 成员表门（TileObjectData.cs
+    //  :4755-4781,isValidTileAnchor :1910-1935）——style4 死亡草 {53,116}/style5
+    //  火焰花 {57,633}/style6 雪花莲 {147,161,163,164,200}：石/泥地板在原版即非
+    //  法锚（SolidTile 臂过门拒）。液体档测试按 style 铺【合法锚面】（沙/灰烬/雪）,
+    //  与锚点维度分域（本测试意图=液体档,锚点维度见 C14 判别测试）。
+    const SAND = TILE_BY_KEY['sand']!;   // sheet 53（style4 {53,116}）
+    const ASH = TILE_BY_KEY['ash']!;     // sheet 57（style5 {57,633}）
+    const SNOW = TILE_BY_KEY['snow']!;   // sheet 147（style6 {147,161,163,164,200}）
     // style4（死亡草种子 vi_310 placeStyle=4）：水放（:4772 addSubTile(4) :4773）
+    st.setTile(8, 12, SAND);
     flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.WATER);
     expect(validateAnchors(st, 8, 11, herb, 4)).toBe(true);
     expect(validateAnchors(st, 8, 11, herb, 0)).toBe(false);   // style0（daybloom）基档水禁
     for (let x = 8; x < 8 + herb.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
     // style5（火焰花种子 vi_312 placeStyle=5）：岩浆放（:4777-4778 addSubTile(5) :4779）
+    st.setTile(8, 12, ASH);
     flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.LAVA);
     expect(validateAnchors(st, 8, 11, herb, 5)).toBe(true);
     expect(validateAnchors(st, 8, 11, herb, 4)).toBe(false);   // style4 岩浆仍禁
     expect(validateAnchors(st, 8, 11, herb, 0)).toBe(false);
     for (let x = 8; x < 8 + herb.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
     // style6（雪花莲 vi_2357 placeStyle=6）：水放（:4783 addSubTile(6) :4784）
+    st.setTile(8, 12, SNOW);
     flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.WATER);
     expect(validateAnchors(st, 8, 11, herb, 6)).toBe(true);
   });

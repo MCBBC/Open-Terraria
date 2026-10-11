@@ -221,7 +221,12 @@ describe('SW-BJ114 ③结构锁', () => {
   });
 
   it('渲染头帧守恒结构锁:animTick++ 后紧跟 iconOverlayFrameGate', () => {
-    expect(rendererSrc).toMatch(/this\.animTick\+\+;\s*\n\s*this\.iconOverlayFrameGate\(\);/);
+    // ★C13-F2 锚随迁(2026-10-11 债②):呼吸钟行(advanceGhostAureole,_capturePass
+    //  豁免=拍照分块不步进)有意插于 animTick++ 与帧守恒 gate 之间(c13 套件行串
+    //  同锚)——锁容纳该行,仍要求 gate 紧随其后(gate 摘除/再后移=红)
+    expect(rendererSrc).toMatch(
+      /this\.animTick\+\+;\s*\n\s*(?:if \(!this\._capturePass\) this\._gFade = advanceGhostAureole\(performance\.now\(\)\);[^\n]*\n\s*)?this\.iconOverlayFrameGate\(\);/,
+    );
   });
 
   it('dispose 结构锁:上浮层 DOM 兄弟节点随 Renderer 生命周期摘除', () => {

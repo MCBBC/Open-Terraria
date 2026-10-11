@@ -21,7 +21,7 @@ import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect } from './Arrow';
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
-import { auraGlowMaskOf, auraGlowTint, AURA_GLOW_ALPHA } from '../data/vanillaProjGlow';   // ★BJ625件3 闪电光环哨兵 glow 叠画色式
+import { auraGlowMaskOf, auraGlowTint, AURA_GLOW_ALPHA, FLAMEBURST_GLOW_MASK, TRAP_GLOW_MASK, flameburstGlowRadius, flameburstGlowTintAlpha, TRAP_GLOW_ALPHA } from '../data/vanillaProjGlow';   // ★BJ625件3 闪电光环哨兵 glow 叠画色式 + ★R15-F1/F2 哨兵辉光数据面
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { applyProjStatus } from './projStatus';
@@ -46,6 +46,8 @@ import { ITEM_DEFS } from '../data/items';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCellsMushroom';
+// ★BJ635：Utils.GetChaseResults 消费面（AI_066_TryInterceptingTarget）——本文件已带
+//  1:1 折算单源（台账批⑤ GetChaseResults/solveQuadratic 导出,见下方接口块）,零新增导入。
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  开火动画、第 12t 出火球（弹型/速度/周期/冷却按 FLAMEBURST_TIERS 分层） */
@@ -290,9 +292,16 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
   //  （AI_026 :65464-65500 空中 5t 循环 1-7/地面 8t 0·5·6·7 + 返程 :62434-62444
   //  6t 循环 8-11）由 ai026TailGround 内联直写 sl266Frame,draw 走 266 专支
   317: [5, 4, 0],   // 乌鸦：fc≥4 → frame++，frame>3 → 0
-  387: [4, 3, 0],  388: [4, 3, 0], // 双子眼球：fc>3 → frame++，cap 2（:28878-28888）
-  533: [2, 3, 0],   // 致命球：fc>1 → frame++，cap 2
+  387: [4, 3, 0],  388: [4, 3, 0], // 双子眼球：fc>3 → frame++，cap 2（:30587-30595;projFrames[387]=3
+                                   //  Main.cs:8664——★BJ635：388 冲刺态 2t 快循环由 twFrame 通道覆写）
+  // ★BJ635：533 移出（原 [2,3,0] 三帧近似与原版状态帧机相悖——AI_066 533 帧=
+  //  ai[0] 三态分相（待机 4+fc/4·归位 14+fc/8·攻击闪 17+fc/3 wrap :30596-30620）/
+  //  蓄力 num533 表（:30190-30215）/ 冲刺定帧 5/13/17（:30245-30262）;projFrames[533]=21
+  //  Main.cs:8686）→ dFrame 通道直写（deadlySpherePhase 维护,draw 支消费）
   755: [6, 5, 0],   // 血红杖：fc≥6 循环 5 帧
+  643: [3, 8, 0],   // ★BJ635：彩虹水晶塔 3t 帧循环（AI_123 :37787-37793 fc≥3 推帧
+                    //  cap projFrames[643]=8 Main.cs:8615——BJ632 登记「643 3t 帧循环」
+                    //  债清偿;641 月门 projFrames=1 静态不入表）
   759: [6, 4, 0],   // 雀杖：fc≥6，cap projFrames-1=4
   831: [4, 6, 0],   // 沙漠虎：fc≥4，frame≥6 → 0
   970: [4, 6, 0],   // 阿比盖尔：fc≥4，frame≥6 → 0
@@ -504,7 +513,8 @@ const MINION_SHOOT: Record<number, { shot: number; speed: number; cd?: number; r
     rangeSlot: 40 },
   194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true,
     rangeSlot: 40 },
-  387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15, life: 300 },  // timeLeft=300(:28981)
+  // ★BJ635：387 激光条目退役（twinsStep :30594-30613 原版随机游走冷却+CanHitLine
+  //  中心点门+389 dmg×1.15 1:1 承接;旧固定 cd45+盒 CanHit 近似面废弃）
   // Foxparks 族（AI_026 flag10 段 :62566-62753）：cd num135 42/30（1113 :62573）；
   // 射程门 num139<800+num134（1113 num134+=360 :62674-62675 → 1160）； muzzleY=-10
   // ★三轮蓝队 F5④ 核证：原版 vector14 = (pos.X+w/2, pos.Y+h/2−8)＝【Center−8】
@@ -574,6 +584,8 @@ export function minionTrueBox(projId: number): { w: number; h: number } {
     case 625: case 626: case 627: case 628: return { w: 24, h: 24 };   // 龙链四段（:6743-6744）
     case 758: return { w: 20, h: 30 };                   // 吸血蛙（:7817-7818）
     case 759: case 831: case 970: return { w: 10, h: 10 };   // 雀杖/虎宝石/阿比盖尔计数器（:7839/:8073/:9188）
+    case 387: case 388: return { w: 40, h: 20 };         // ★BJ635 双子（:4714-4715/:4730-4731）
+    case 533: return { w: 20, h: 20 };                   // ★BJ635 致命球（:6005-6006）
     case 951: return { w: 26, h: 26 };                   // 雪怪（:8972-8973）
     case 963: return { w: 30, h: 48 };                   // 阿比盖尔一阶体（:9106-9107）
     case 663: return { w: 30, h: 54 };                   // :7133-7134
@@ -731,6 +743,34 @@ export const getLerpValue = (from: number, to: number, t: number): number => {
   else { if (t < to) return 1; if (t > from) return 0; }
   return (t - from) / (to - from);
 };
+
+/** ★BJ635（2026-10-11）AI_158_GetHomeLocation（Projectile.cs:49854-49913）1:1 折算
+ *  ——雀宝宝 759 归位锚（肩头/头顶栖息位栈）。入参 = RotatedRelativePoint(MountedCenter)
+ *  展开位 + player.direction + 编队位 index（AI_GetMyGroupIndexAndFillBlackList 等位）。
+ *  逐项：
+ *  - `Vector2 pos = Main.OffsetsPlayerHeadgear[master.bodyFrame.Y / num]; pos.Y -= 2f`
+ *    （:49856-49861,num=bodyFrame.Height=56）：头饰行偏移表（Main.cs:504-525,
+ *    Renderer.ts:858 HEADGEAR_OFFSET_Y 同源——静立行 0=+2 → −2 后 (0,0)）。玩家实体侧
+ *    无 bodyFrame 行（帧行归渲染域）→ 按静立行 0 折算,行族 ±2px=登记近似。
+ *  - mount 52/54/55/56/61 四支（:49864-49884）：本仓 MOUNT_DATA 现役 62-65 代,
+ *    四支不可达,省略（登记）。
+ *  - stackedIndex % 6 五档偏移 + `(0, gravDir×−16)×(stackedIndex/6)` 栈高（:49886-49906）。
+ *  - 终位 = RotatedRelativePoint(MountedCenter) + (0, gravDir×−21) + pos, Floor（:49908-49912）。
+ *  @pure 可独立测钉（变异面：case 表逐档删支即红） */
+export function babyBirdHomeLocation(
+  mcx: number, mcy: number, direction: number, stackedIndex: number, gravDir = 1,
+): { x: number; y: number } {
+  let px = 0; let py = 0;                     // OffsetsPlayerHeadgear[行0]=(0,2),−2 → (0,0)
+  switch (((stackedIndex % 6) + 6) % 6) {
+    case 1: px += direction * 8; py += gravDir * -2; break;    // :49887-49889
+    case 2: px += direction * -10; py += gravDir * -2; break;  // :49890-49892
+    case 4: px += direction * 10; py += gravDir * -10; break;  // :49893-49895
+    case 5: px += direction * -12; py += gravDir * -10; break; // :49896-49898
+    case 3: py += gravDir * -10; break;                        // :49899-49904
+  }
+  py += gravDir * -16 * Math.floor(stackedIndex / 6);          // :49905
+  return { x: Math.floor(mcx + px), y: Math.floor(mcy + gravDir * -21 + py) };   // :49907-49912
+}
 
 /** ★台账批⑤（2026-08-31）：Utils.SolveQuadratic（Utils.cs:721-737）+ GetChaseResults
  *  （Utils.cs:651-708）1:1 —— AI_067_TryJumpingToTarget 蘑菇支蓄跃拦截速度的真预测面。
@@ -1138,6 +1178,10 @@ export class MinionProj extends Entity {
   auraCy = 0;
   /** AI_137 电弧声循环 ai[0] 镜像（30t/僧侣T2 25t 一轮,:69955-69979——台账批 C-3472） */
   private zapCycle = 0;
+  /** ★R15-F1：火爆塔 663/665/667 localAI[0] 镜像（AI_130 每拍 ++ 后 ≥300 归零,
+   *  Projectile.cs:69183/:69235/:69287 三档同式,300t 周期自由环）——辉光四向脉动
+   *  num434=cos(localAI[0]/100·2π)+1 的驱动源（Main.cs:34430 绘制侧消费） */
+  sPulseT = 0;
   /** 朝向（哨兵 spriteDirection / 随从渲染翻转） */
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
@@ -1163,7 +1207,9 @@ export class MinionProj extends Entity {
       case 613: return [0.2, 0.6, 0.7];
       case 623: return [0.9, 0.9, 0.7];
       case 1094: return [0.5, 0.3, 0.1];
-      case 533: return [0.8, 0.3, 0.1];
+      // ★BJ635：533 状态分色（AI_066 :30150-30155 `(int)ai[0] % 3 != 2` → (0.8,0.3,0.1)
+      //  else (0.3,0.5,0.7)——ai[0]∈{2,5,8} 相位档蓝光,余档暖橙;旧恒 (0.8,0.3,0.1)）
+      case 533: return this.dA0 % 3 !== 2 ? [0.8, 0.3, 0.1] : [0.3, 0.5, 0.7];
       case 653: return [0.5, 0.5, 0.5];
       case 641: return [0.3, 0.9, 0.7];   // ★SW-RB11e：AI_123 :37744（月门青绿光）
       // ★BJ606-R2（2026-10-10 三返「隔空受伤看不到弹幕」定谳补）：AI_137 场域蓝光带
@@ -1175,6 +1221,11 @@ export class MinionProj extends Entity {
       case 688: case 689: case 690: return [0.2, 0.7, 1];
       // ★BJ245：沙漠虎三档白光（AI_067 :50174-50185;ai[0]!=4 门=tigerA0 镜像）
       case 833: return this.tigerA0 !== 4 ? [0.5, 0.5, 0.5] : null;
+      // ★R15-F3（2026-10-11 C15 清偿）：AI_138 爆炸机关 691-693 世界光（Projectile.cs
+      //  :70414 `Lighting.AddLight(base.Center, 0.6f, 0.5f, 0.3f)`——无 ai[2] 门=携行
+      //  也亮,与本 getter 无条件消费面同相;691-693 SetDefaults 无 light 字段,该点光
+      //  是唯一照明源）。本仓点光通道=Game 实体光循环 projectiles 桶读 lightRGB。
+      case 691: case 692: case 693: return [0.6, 0.5, 0.3];
       case 834: return this.tigerA0 !== 4 ? [0.8, 0.8, 0.8] : null;
       case 835: return this.tigerA0 !== 4 ? [1, 250.2 / 255, 217.8 / 255] : null;
       default: return null;
@@ -1187,6 +1238,26 @@ export class MinionProj extends Entity {
   /** 虎扑链状态（AI_067）：ai[0] 4=链发后等待 / ai[1]=剩余等待 tick（:46702-46718） */
   private tigerA0 = 0;
   private tigerA1 = 0;
+  /** ★BJ634 刃杖 864 状态机（AI_169_Smolstars Projectile.cs:46559-46700）：
+   *  a169St=ai[0]（0 闲置巡航 / -1 返航重整 / 60 攻击）、a169Tg=ai[1] 攻击态
+   *  目标 id（:46604-46608 ai[1]=attackTarget）、a169Rt=返航态 ai[1] 计数
+   *  （:46635-46643 ai[1]++ ≥9 回 0——返航时 :14129-14141 命中特支置 0）
+   */
+  private a169St = 0;
+  private a169Tg = 0;
+  private a169Rt = 0;
+  /** ★BJ635 雀宝宝 759（AI_158_BabyBird :49643-49913）：bbFrame=栖息帧通道——
+   *  归位瞬移（:49747-49756）/ 肩头栖息（:49814-49823）拍 frame=projFrames-1=4 逐一拍
+   *  （下拍 AI 头清 -1,帧机 :49658-49664 回归 0-3 循环=MINION_FRAMES[759] 表）。 */
+  private bbFrame = -1;
+  /** ★BJ635 双子 387/388（AI_066 flag29 :30084-30645）：twA0=ai[0]（0 巡航/1 归位/
+   *  388 冲刺=2）、twA1=ai[1]（387 激光冷却随机游走 +rand(1,3) 上限 90 :30568-30583/
+   *  388 冲刺计时上限 40）、twFc=frameCounter、twFrame=388 冲刺快循环帧通道（2t/帧
+   *  cap 2 :30159-30166,常态帧走 MINION_FRAMES 表）。 */
+  private twA0 = 0;
+  private twA1 = 0;
+  private twFc = 0;
+  private twFrame = -1;
   /** ★BJ235 通用 oldPos 残影环（Projectile.cs:17197-17300 UpdateTrails 表驱动;
    *  Main.cs:30609 通用表+逐型色/帧锚特支）。undefined=未初始化/null=该 id 无
    *  记录式（随从活动集内 533/755/833/834/835 有 TrailingMode,余 id 缺省 -1 → null）。
@@ -1226,6 +1297,12 @@ export class MinionProj extends Entity {
   private dA0 = 0;
   private dA1 = 0;
   private dLai0 = 0;
+  /** ★BJ635：dFc=frameCounter、dFrame=状态帧通道（AI_066 533 帧机直写,draw 支消费;
+   *  dLai2=localAI[2] 撞墙计数（:30120 Clamp 逐拍 −1、:18314 撞墙 +30、:14618 消费
+   *  击退 ×0.5 面≥40——消费面归 contact 签名域=登记债,计数面先落） */
+  private dFc = 0;
+  private dFrame = -1;
+  private dLai2 = 0;
   /** AI_062 射手族态机（373/375/407/423/613，1457 Projectile.cs :66067-67166 镜像）：
    *  a62A0=ai[0]（0 交战 / 1 归位 / 2+ 攻击闪·423/613 冲刺）、a62A1=ai[1]（射击冷却
    *  随机计数器 + 423/613 冲刺时长）、a62Lai0=localAI[0]（423/613 冲刺冷却 60） */
@@ -1247,9 +1324,18 @@ export class MinionProj extends Entity {
   private spDir = 1;
   spFrame = 0;
   /** 吸血蛙 758 状态（AI_067 flag2，:50478-50482/:51161-51177/:51296-51619 镜像）：
-   *  frA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击）、frA1=ai[1]（扑击倒数 num10=20） */
+   *  frA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击）、frA1=ai[1]（扑击倒数 num10=20）；
+   *  frFc=frameCounter、frFrame=状态帧通道（★BJ635：flag6 帧机 :51718-51762——
+   *  静立 0/飞行 1/步行带 2-9（fc+=|vx| 速度计频 >10）/攻击带 10-15/空中攻击 13;
+   *  projFrames[758]=24 Main.cs:8770） */
   private frA0 = 0;
   private frA1 = 0;
+  private frFc = 0;
+  private frFrame = -1;
+  /** ★BJ635：禁戒魂灵 1119 帧机（AI_206 :38293-38324——待机带 0-4 随机滞帧 +
+   *  攻击带 5-8 出弹前 4t 起帧;projFrames[1119]=9 Main.cs:8700） */
+  private fmFc = 0;
+  private fmFrame = 0;
   /** 地面步行族 StepUp 坡步门（AI_026 :63261 / AI_067 :51508 同款 Collision.StepUp——
    *  spiderStep/frogStep 入口置位;palGroundStep/mushBoiStep 2026-09-07 嵌入定谳批
    *  补接（帕鲁扑击支显式复位 false,原版 StepUp 不入 ai[0]==2 块）,moveAndCollide 消费） */
@@ -3430,17 +3516,22 @@ export class MinionProj extends Entity {
   private tInit = false;
 
   /** AI_GetMyGroupIndexAndFillBlackList（:52505-52520，仅计数——blacklist 实际
-   *  不填,TryAttackingNPCs 的黑名单门为空操作） */
-  private tGroup(game: GameHooks): { index: number; total: number } {
+   *  不填,TryAttackingNPCs 的黑名单门为空操作）。★BJ634：pid 形参化——AI_169 864
+   *  出生态同调（:46573 AI_GetMyGroupIndexAndFillBlackList(null,...)，owner/type
+   *  两门=本仓单玩家 owner 恒本地玩家同构,whoAmI 序=id 序同构）。
+   *  原版遍历 Main.projectile 含自身（whoAmI 恒 active）→ total≥1 恒成立;本仓
+   *  遍历 entities.projectiles 在弹入列前调用（出生拍/夹具漏 push）会得 total=0
+   *  → AI_169 num3=0 → gtw%num3=NaN 全链污染 → 防御回退 total=1（自见=index0）。 */
+  private tGroup(game: GameHooks, pid = 946): { index: number; total: number } {
     let index = 0, total = 0;
     for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
       const m = e as MinionProj;
-      if (m instanceof MinionProj && !m.dead && m.projId === 946) {
+      if (m instanceof MinionProj && !m.dead && m.projId === pid) {
         if (this.id > m.id) index++;
         total++;
       }
     }
-    return { index, total };
+    return total > 0 ? { index, total } : { index: 0, total: 1 };
   }
 
   /** AI_156_TryAttackingNPCs（:52694-52725）：距玩家心 1000 内最近敌 + 视线。
@@ -3507,6 +3598,420 @@ export class MinionProj extends Entity {
     this.terraprismaAI(game, p, dmg0);
     this.tHist.unshift(this.cx, this.cy, this.rot);
     if (this.tHist.length > 60) this.tHist.length = 60;   // oldPos.Length=TrailCacheLength[946]=20（SW-RB11a）
+  }
+
+  /** ★BJ634（2026-10-11）：刃杖 864 专属 AI = AI_169_Smolstars（Projectile.cs:46559-46700）
+   *  1:1 折算。此前 864 无专属分支落通用飞行路径 = 用户实报「打 boss 老不打/追不上」
+   *  根因三面全偏：攻击速度 5（原版 16 :46666-46671 直写钳）/巡航 4（原版 10~40
+   *  :46588-46600 GetLerpValue(200,600,dist) 梯）/索敌 nearestEnemy(700) 每拍重选
+   *  （原版 800 + Minion_FindTargetInRange 焦点支/boss 豁免 viewRect :46601-46602 +
+   *  ai[0]=60 锁敌态机 :46603-46608 + 命中受理转返航 :14129-14141）。
+   *  态机 ai[0]：0 闲置巡航 / -1 返航重整 / 60 攻击（a169St/a169Tg/a169Rt 三槽）。
+   *  命中盒 10×10（:8288-8289,构造器补注册）;接触冷却 localNPCHitCooldown=10
+   *  （CONTACT_CD_TABLE 864:10,BJ511 已接）;imm[owner]=0 清窗由 local 档 pierce=-3
+   *  承载（BJ436）。玩家死亡断供（:46566-46569 dead→smolstar=false→下帧 DelBuff 271
+   *  →弹 60t 内灭）→ 本仓维护链（maintainMinionBuffs BJ405）同拍直杀=净语义同相。
+   */
+  private smolstarAI(game: GameHooks, p: Player, dmg0: number): void {
+    // ---- 玩家死亡断供（:46566-46569）----
+    if (p.dead) { this.dead = true; return; }
+    // ---- ai[0]==0：闲置/巡航态（:46585-46616）----
+    if (this.a169St === 0) {
+      // 悬浮锚 = player.Top + (0,-30)（:46562）+ 编队椭圆偏移（:46573-46584）：
+      // index/total=AI_GetMyGroupIndexAndFillBlackList（:46575）;num2=2π/total
+      // （:46576）;num3=total×0.66（:46577）;vector2=(30,6)/5×(total-1)（:46578）;
+      // vector3=UnitY.RotatedBy(num2×index + gtw%num3/num3×2π)（:46579——
+      // GlobalTimeWrappedHourly 相位轮转）;vector+=vector3×vector2【组件乘】
+      // （:46580,Vector2×Vector2=组件乘判例）;Y+=gfxOffY（本仓未建模恒 0）;Floor
+      const g = this.tGroup(game, 864);
+      const num2 = (Math.PI * 2) / g.total;
+      const num3 = g.total * 0.66;
+      const vec2x = (30 / 5) * (g.total - 1);
+      const vec2y = (6 / 5) * (g.total - 1);
+      const ang = num2 * g.index + (gtwSec() % num3) / num3 * (Math.PI * 2);
+      let hx = p.cx;                                     // player.Top.X = Center.X
+      let hy = p.y - 30;                                 // player.Top.Y + (0,-30)
+      hx += -Math.sin(ang) * vec2x;                      // UnitY.RotatedBy(ang).X = −sin
+      hy += Math.cos(ang) * vec2y;                       // UnitY.RotatedBy(ang).Y = cos
+      hx = Math.floor(hx); hy = Math.floor(hy);          // vector.Floor()（:46582）
+      const dx = hx - this.cx, dy = hy - this.cy;
+      const dist = Math.hypot(dx, dy);
+      // num4 = 10 + GetLerpValue(200,600,dist,true)×30（:46588-46590）——200px 内 10、
+      // 600px 外 40（速度梯=巡航「追大部队」主升档）
+      const num4 = 10 + clamp01((dist - 200) / 400) * 30;
+      if (dist >= 3000) {                                // :46591-46593 瞬移锚点
+        this.x = hx - this.w / 2; this.y = hy - this.h / 2;   // Center = vector
+      }
+      this.vx = dx; this.vy = dy;                        // velocity = vector4（:46594 直写）
+      if (dist > num4) {                                 // :46595-46597 钳 num4
+        this.vx = dx / dist * num4; this.vy = dy / dist * num4;
+      }
+      // 索敌（:46598-46602）：Minion_FindTargetInRange(800, skip=false)——
+      // respectOwnerTarget 缺省 true（原版调用未传）→ findTargetInRangeDual 焦点支照吃
+      const tgtF = this.findTargetInRangeDual(game, 800);
+      if (tgtF) {                                        // :46603-46608 锁敌态机
+        this.a169St = 60;
+        this.a169Tg = tgtF.id;
+      }
+      // rotation（:46609-46613）：vel 向 +π/2;dist<40 → 恒 π/2（UnitY.ToRotation()）
+      let tAng = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+      if (dist < 40) tAng = Math.PI / 2;
+      this.rot = angleLerp(this.rot, tAng, 0.2);
+      this.x += this.vx; this.y += this.vy;
+      // 命中特支同巡航态成立（原版时序：AI 内索敌先置 ai[0]=60（:46603-46608）→
+      // Damage 面 864 特支读 ai[0]>0（:14135）→ 同拍锁定命中也转返航）
+      if (this.contact(game, dmg0) && this.a169St > 0) { this.a169St = -1; this.a169Rt = 0; }
+      return;
+    }
+    // ---- ai[0]==-1：返航重整态（:46617-46644）----
+    if (this.a169St === -1) {
+      if (this.a169Rt === 0) {
+        // 首拍：PlaySound(0)=SoundDig rand 0-2（LegacySoundPlayer.cs:441-448）+ 尘 15×2
+        // （:46622-46632,oldVelocity×0.2 初速/rand3≠0 → scale×1.3 vel×1.1/noGravity/
+        // fadeIn 0）+ 圆缘随机冲量 4（:46633 NextVector2CircularEdge）
+        game.playSfxFiles(soundTrackFiles('dig'), 1, this.cx, this.cy);
+        for (let i = 0; i < 2; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 15,
+            this.vx * 0.2, this.vy * 0.2, 0, null, 1.4);
+          if (d) {
+            if (Math.floor(Math.random() * 3) !== 0) { d.scale *= 1.3; d.vx *= 1.1; d.vy *= 1.1; }
+            d.noGravity = true;
+            d.fadeIn = 0;
+          }
+        }
+        const ea = Math.random() * Math.PI * 2;
+        this.vx += Math.cos(ea) * 4; this.vy += Math.sin(ea) * 4;
+      }
+      this.a169Rt++;                                     // :46635
+      this.rot += this.vx * 0.1 + this.vy * 0.05;        // :46636
+      this.vx *= 0.92; this.vy *= 0.92;                  // :46637
+      if (this.a169Rt >= 9) { this.a169St = 0; this.a169Rt = 0; }   // :46638-46643
+      this.x += this.vx; this.y += this.vy;
+      this.contact(game, dmg0);                          // -1 态命中不转返航（ai[0]>0 门）
+      return;
+    }
+    // ---- ai[0]==60：攻击态（:46645-46674）----
+    const tgt = this.a169Tg ? this.findEnemyById(game, this.a169Tg) : null;
+    if (!tgt || !canBeChasedBy(tgt)) {                   // :46647-46650 CanBeChasedBy 校验
+      this.a169St = -1; this.a169Rt = 0;                 // :46651-46656 → 返航（ai[1]=0）
+    } else if (Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) >= 900) {   // :46657-46662
+      this.a169St = 0; this.a169Tg = 0;                  // 玩家距目标 ≥900 → 放弃
+    } else {
+      const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
+      const dist = Math.hypot(dx, dy);
+      this.vx = dx; this.vy = dy;                        // velocity = vector5（:46667 直写）
+      if (dist > 16) {                                   // :46666/:46668-46671 钳 16
+        this.vx = dx / dist * 16; this.vy = dy / dist * 16;
+      }
+      this.rot = angleLerp(this.rot, Math.atan2(this.vy, this.vx) + Math.PI / 2, 0.4);   // :46672-46673
+    }
+    // ---- 分离力（:46675-46698,攻击态拍尾恒跑——目标失效拍亦跑,if/else 链不 return）：
+    // num8 = width×5 = 50（:46676）;同类同主曼哈顿 <50 → 双轴互推 ±0.1（:46677-46698,
+    // position 序判向）。velocity 覆写后叠加 → 当拍位移即受影响（HandleMovement 积分）。
+    {
+      const num8 = this.w * 5;
+      for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+        const o = ent as MinionProj;
+        if (!(o instanceof MinionProj) || o === this || o.dead || o.projId !== 864) continue;
+        if (o.ownerRef() !== p) continue;                // owner == owner（:46679）
+        if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= num8) continue;
+        this.vx += this.x < o.x ? -0.1 : 0.1;            // :46681-46688
+        this.vy += this.y < o.y ? -0.1 : 0.1;            // :46689-46696
+      }
+    }
+    this.x += this.vx; this.y += this.vy;
+    // 命中受理→返航（:14129-14141 Damage_PVE_Inner 864 特支）：ai[0]>0（=60 态）
+    // 命中 → ai[0]=-1/ai[1]=0。私表写位（localNPCHitCooldown=10/imm[owner]=0 清窗）
+    // 已由 contact() local 档承载（BJ511/BJ436）。
+    if (this.contact(game, dmg0) && this.a169St > 0) {
+      this.a169St = -1;
+      this.a169Rt = 0;
+    }
+  }
+
+  /** ★BJ635（2026-10-11）② 雀宝宝 759 专属 AI = AI_158_BabyBird（Projectile.cs:49643-49853
+   *  + AI_158_GetHomeLocation :49854-49913）1:1 折算。普查定谳（BJ634 判例同形态）：
+   *  759 此前无专属分支落通用飞行路径——追击恒速 5（原版三档：远档 Lerp(velocity,
+   *  dir×6,0.15) :49690-49695 / 近身 sign±0.35 步进钳 8 :49696-49705 / 盒接触 ×1.1
+   *  加速钳 8 :49679-49689）、锚位=通用环形槽（原版 = AI_158_GetHomeLocation 玩家
+   *  头部栖息位栈 :49854）、零同类分离力（攻击档 ±0.025/width×3 :49706-49722、
+   *  归位档 ±0.05/width :49775-49795）、零 2000px 归位瞬移（:49747-49756）。
+   *  伴生面：tileCollide 逐态翻转（自由盒→true :49671-49673;盒接触/近身/归位 false）、
+   *  栖息/瞬移拍 frame=4（bbFrame 通道逐一拍,帧循环 0-3 由 MINION_FRAMES[759] 表）。
+   *  timeLeft=2 面（:49653 player.babyBird）=buff 216 维护链承载（maintainMinionBuffs
+   *  BJ405）;玩家死亡断供（:49652-49655 dead→babyBird=false）同 864 判例。 */
+  private babyBirdStep(game: GameHooks, p: Player, dmg0: number): void {
+    if (p.dead) { this.dead = true; return; }        // :49652-49655（净语义同 864 判例）
+    this.bbFrame = -1;                               // 栖息帧通道逐一拍（上拍置位已消费）
+    const st = game.world.store;
+    // ---- 索敌（:49666 Minion_FindTargetInRange(800, skip=false, respectOwnerTarget
+    // 缺省 true) + :49670-49674 玩家心距 >800 → 攻击目标作废）----
+    let tgt = this.findTargetInRangeDual(game, 800);
+    if (tgt && Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 800) tgt = null;
+    if (tgt) {
+      if (!this.solidOverlap(st)) this.tileCollide = true;   // :49671-49673 自由盒→可碰块
+      const num5 = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+      const intersects = this.x < tgt.x + tgt.w && this.x + this.w > tgt.x
+        && this.y < tgt.y + tgt.h && this.y + this.h > tgt.y;   // Rectangle.Intersects :49678
+      if (intersects) {                              // :49679-49689 盒接触：贴脸加速
+        this.tileCollide = false;
+        if (Math.abs(this.vx) + Math.abs(this.vy) < 8) { this.vx *= 1.1; this.vy *= 1.1; }
+        const l = Math.hypot(this.vx, this.vy);
+        if (l > 8) { this.vx *= 8 / l; this.vy *= 8 / l; }
+      } else if (num5 > 150) {                       // :49690-49695 远档：Lerp 0.15 速 6
+        const dx = (tgt.cx - this.cx) / num5, dy = (tgt.cy - this.cy) / num5;
+        this.vx += (dx * 6 - this.vx) * 0.15;
+        this.vy += (dy * 6 - this.vy) * 0.15;
+      } else {                                       // :49696-49705 近身：sign 步进 0.35 钳 8
+        this.tileCollide = false;
+        const l = num5 || 1;
+        this.vx += Math.sign((tgt.cx - this.cx) / l) * 0.35;
+        this.vy += Math.sign((tgt.cy - this.cy) / l) * 0.35;
+        const l2 = Math.hypot(this.vx, this.vy);
+        if (l2 > 8) { this.vx *= 8 / l2; this.vy *= 8 / l2; }
+      }
+      // 分离力（:49706-49722,num6=0.025、num7=width×3=30——同主同型 position 曼哈顿）
+      const num7 = this.w * 3;
+      for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+        const o = ent as MinionProj;
+        if (!(o instanceof MinionProj) || o === this || o.dead || o.projId !== 759) continue;
+        if (o.ownerRef() !== p) continue;
+        if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= num7) continue;
+        this.vx += this.x < o.x ? -0.025 : 0.025;    // :49709-49716
+        this.vy += this.y < o.y ? -0.025 : 0.025;    // :49717-49721
+      }
+      this.rot = this.vx * 0.1;                      // :49723
+      this.facing = this.vx > 0 ? 1 : -1;            // direction/spriteDirection :49724-49725
+    } else {
+      this.tileCollide = false;                      // :49728
+      const g = this.tGroup(game, 759);              // AI_GetMyGroupIndexAndFillBlackList → localAI[0]=index（:49732-49735）
+      const rrp = p.rotatedRelativePoint(p.mountedCenter.x, p.mountedCenter.y);
+      const home = babyBirdHomeLocation(rrp.x, rrp.y, p.facing, g.index, p.gravDir ?? 1);
+      const num8 = Math.hypot(home.x - this.cx, home.y - this.cy);
+      // flag（:49741）= gravDir>0 ∧ fullRotation==0 ∧ headRotation==0（本仓后两位未建模=0）
+      const flag = (p.gravDir ?? 1) > 0
+        && ((p as unknown as { anchorFullRotation?: number }).anchorFullRotation ?? 0) === 0;
+      if (num8 > 2000) {                             // :49747-49756 超远瞬移归位
+        this.x = home.x - this.w / 2; this.y = home.y - this.h / 2;
+        this.bbFrame = 4; this.vx = 0; this.vy = 0;
+        this.facing = p.facing; this.rot = 0;
+      } else if (num8 > 40) {                        // :49757-49799 归位飞行
+        const num9 = 6 + num8 * 0.006;               // :49759
+        const glv = getLerpValue(40, 800, num8);     // :49762 GetLerpValue(40,800,clamped)
+        const mul = 1 + (5 - 1) * glv;               // Lerp(1,5,glv) :49763
+        const dx = (home.x - this.cx) / num8, dy = (home.y - this.cy) / num8;
+        this.vx += (dx * num9 * mul - this.vx) * 0.025;   // :49764 Lerp 0.025
+        this.vy += (dy * num9 * mul - this.vy) * 0.025;
+        const l = Math.hypot(this.vx, this.vy);
+        if (l > num9) { this.vx *= num9 / l; this.vy *= num9 / l; }   // :49766-49768 钳 num9
+        const num11 = this.w;                        // num10=0.05、num11=width（:49770-49771）
+        for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+          const o = ent as MinionProj;
+          if (!(o instanceof MinionProj) || o === this || o.dead || o.projId !== 759) continue;
+          if (o.ownerRef() !== p) continue;
+          if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= num11) continue;
+          this.vx += this.x < o.x ? -0.05 : 0.05;    // :49775-49790
+          this.vy += this.y < o.y ? -0.05 : 0.05;
+        }
+        this.rot = this.vx * 0.04;                   // :49796
+        this.facing = this.vx > 0 ? 1 : -1;          // :49797-49798
+      } else if (num8 > 8 + Math.hypot(p.vx, p.vy)) {   // :49800-49813 近家步进（钳 num=6）
+        const l = num8 || 1;
+        this.vx += Math.sign((home.x - this.cx) / l) * 0.05;
+        this.vy += Math.sign((home.y - this.cy) / l) * 0.05;
+        const l2 = Math.hypot(this.vx, this.vy);
+        if (l2 > 6) { this.vx *= 6 / l2; this.vy *= 6 / l2; }
+        this.rot = this.vx * 0.1;                    // :49808
+        this.facing = this.vx > 0 ? 1 : -1;          // :49809-49810
+      } else if (flag) {                             // :49814-49823 肩头栖息
+        this.x = home.x - this.w / 2; this.y = home.y - this.h / 2;
+        this.bbFrame = 4; this.vx = 0; this.vy = 0;
+        this.facing = p.facing; this.rot = 0;
+      }
+    }
+    // ---- 位移（tileCollide 镜像;ignoreWater=true 无湿阻尼;碰墙=原版碰撞链缺省档
+    // X×(−0.5)/Y×(−0.5)（:19826-19840 尾档）——本仓 moveAndCollide 停墙+速度反转折算）----
+    const lvx = this.vx, lvy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall && this.vx === lvx) this.vx = -lvx * 0.5;
+    if (this.collideY && this.vy === lvy && lvy > 1) this.vy = -lvy * 0.5;
+    this.contact(game, dmg0);   // localNPCHitCooldown=15（:7843-7844,CONTACT_CD_TABLE 759:15）
+    this.recordGhostTrail();
+  }
+
+  /** ★BJ635（2026-10-11）③ 双子魔眼 387/388 专支 = AI_066 flag29 面（Projectile.cs
+   *  :30084-30645）1:1 折算。普查定谳：此前无专支——追击=通用恒速 5（原版=距敌
+   *  >200 阻尼逼近 (v×40+dir×spd)/41、387 速 6/388 速 14 :30351-30361;≤200 反推
+   *  (v×40+dir×−4)/41 :30362-30368）;388 冲刺攻击态全缺（ai[0]=2 速 8+截击速度+
+   *  40t 计时+2t 快帧循环 :30154-30178/:30495-30514）;387 激光=MINION_SHOOT 固定
+   *  cd45（原版 ai[1] 随机游走 +rand(1,3)/t 上限 90 :30567-30583）;无 ai[0]=1 归位态
+   *  leash（>800/交战 1200 → 归位速 15 阻尼 30、<150 落位回 0 :30374-30380/
+   *  :30386-30400/:30403-30412）。常数（:30089-30092）：num526=2000/num527=800/
+   *  num528=1200/num529=150。 */
+  private twinsStep(game: GameHooks, p: Player, tgt: EnemyLike | null, dmg0: number): void {
+    const st = game.world.store;
+    // ---- 388 冲刺态（:30154-30178,flag31——先于索敌/运动,态内不重扫）----
+    if (this.projId === 388 && this.twA0 === 2) {
+      // extraUpdates=1（:30156）→ 2 子步/拍;结束拍 numUpdates=0=余子步作废（break 即净语义）
+      for (let sub = 0; sub < 2; sub++) {
+        this.twA1++;
+        this.rot = Math.atan2(this.vy, this.vx) + Math.PI;   // :30158
+        if (++this.twFc > 1) {                       // :30160-30166 2t 快帧循环 cap 2
+          this.twFc = 0;
+          this.twFrame = this.twFrame < 0 || this.twFrame > 2 ? 0 : this.twFrame + 1;
+        }
+        if (this.twA1 > 40) {                        // :30169-30174 40 子步结束回巡航
+          this.twA1 = 1; this.twA0 = 0;
+          break;
+        }
+        moveAndCollide(this, game.world, this.vx, this.vy);   // 子步位移（velocity 恒=触发拍截击速度）
+      }
+      return;   // flag31/numUpdates=0 → 本拍止于冲刺子步（常态帧通道下一拍清）
+    }
+    this.twFrame = -1;                               // 非冲刺拍清快帧通道（表帧接管）
+    let num526 = 2000;                               // :30090（索敌检索半径,运行中=锁定距）
+    let flag32 = false;
+    let cx5 = 0, cy5 = 0, zx = 0, zy = 0;            // center5=锁定敌心;zero=敌速（:30286/:30288）
+    if (tgt) {
+      num526 = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+      cx5 = tgt.cx; cy5 = tgt.cy;
+      flag32 = true;
+      // 焦点支（:30328-30340）零速特典：focus 分支不写 zero（恒 (0,0)）——
+      // 野生支 :30356 才写 nPC.velocity。focus 判定 = minionTargetId 同 id
+      if ((p as unknown as { minionTargetId?: number }).minionTargetId !== tgt.id) {
+        zx = (tgt as unknown as { vx?: number }).vx ?? 0;
+        zy = (tgt as unknown as { vy?: number }).vy ?? 0;
+      }
+    }
+    // ---- 分离力（:30117-30146,num530=0.05——双子对/533 对 position 曼哈顿 < width=40）----
+    for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+      const o = ent as MinionProj;
+      if (!(o instanceof MinionProj) || o === this || o.dead) continue;
+      if (o.ownerRef() !== p) continue;
+      const pair = this.projId === 387 || this.projId === 388
+        ? o.projId === 387 || o.projId === 388
+        : o.projId === this.projId;                  // flag30（:30128-30131）
+      if (!pair) continue;
+      if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
+      this.vx += this.x < o.x ? -0.05 : 0.05;        // :30137-30144
+      this.vy += this.y < o.y ? -0.05 : 0.05;
+    }
+    // ---- tileCollide 翻转（:30300-30310）+ 锁定/leash（:30363-30373）----
+    if (this.twA0 !== 1) this.tileCollide = true;
+    if (this.tileCollide && st.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
+      this.tileCollide = false;                      // :30310-30313 中心格实心→免碰
+    }
+    const num542 = flag32 ? 1200 : 800;              // :30362-30364 num527/num528
+    if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > num542) {
+      if (this.twA0 !== 1) this.twA0 = 1;            // :30366-30368 leash → 归位态
+      this.tileCollide = false;
+    }
+    // ---- 逼近/悬停（:30374-30461）----
+    if (flag32 && this.twA0 === 0) {                 // 交战逼近（:30374-30369）
+      const dx = cx5 - this.cx, dy = cy5 - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = dx / d, ny = dy / d;
+      if (d > 200) {                                 // :30377-30385 速 6（388=14）阻尼 40
+        const spd = this.projId === 388 ? 14 : 6;
+        this.vx = (this.vx * 40 + nx * spd) / 41;
+        this.vy = (this.vy * 40 + ny * spd) / 41;
+      } else {                                       // :30386-30392 ≤200 反推 −4 同阻尼
+        this.vx = (this.vx * 40 + nx * -4) / 41;
+        this.vy = (this.vy * 40 + ny * -4) / 41;
+      }
+    } else {
+      const flag33 = this.twA0 === 1;                // :30399-30401（387/388 归位态）
+      let num546 = 6; let num547 = 40;
+      if (flag33) num546 = 15;                       // :30407-30409
+      const hx = p.cx - this.cx, hy = p.cy - this.cy - 60;   // vector42 = player.Center−Center+(0,−60)（:30403）
+      const num548 = Math.hypot(hx, hy);
+      if (num548 > 200 && num546 < 8) num546 = 8;    // :30420-30423
+      const pv = Math.abs(p.vx) + Math.abs(p.vy);
+      if (num546 < pv) {                             // :30424-30434 跟玩家速度链
+        num547 = 30; num546 = pv;
+        if (num548 > 200) { num547 = 20; num546 += 4; }
+        else if (num548 > 100) { num546 += 3; }
+      }
+      if (flag33 && num548 > 300) { num546 += 6; num547 -= 10; }   // :30435-30438
+      if (num548 < 150 && flag33 && !this.solidOverlap(st)) {
+        this.twA0 = 0;                               // :30439-30446 落位回巡航
+      }
+      if (num548 > 2000) {                           // :30447-30451 瞬移回玩家
+        this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
+      }
+      if (num548 > 70) {                             // :30452-30458 阻尼逼近
+        const l = num548 || 1;
+        this.vx = (this.vx * num547 + (hx / l) * num546) / (num547 + 1);
+        this.vy = (this.vy * num547 + (hy / l) * num546) / (num547 + 1);
+      } else if (this.vx === 0 && this.vy === 0) {   // :30459-30463 静置微漂
+        this.vx = -0.15; this.vy = -0.05;
+      }
+      const vl = Math.hypot(this.vx, this.vy);
+      if (vl > num546) { this.vx *= 0.95; this.vy *= 0.95; }   // :30464-30467
+    }
+    // ---- 旋转（:30468-30480）——MINION_ROT_ONLY 族（零 spriteDirection 写）----
+    if (this.projId === 388) {
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI;
+    } else if (flag32 && this.twA0 !== 1) {
+      this.rot = Math.atan2(cy5 - this.cy, cx5 - this.cx) + Math.PI;   // 387 交战朝敌
+    } else {
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI;
+    }
+    // ---- 冷却随机游走（:30568-30583）：ai[1]>0 → +rand(1,3);387>90/388>40 → 0 ----
+    if (this.twA1 > 0) this.twA1 += 1 + Math.floor(Math.random() * 3);
+    if (this.twA1 > 90 && this.projId === 387) this.twA1 = 0;
+    if (this.twA1 > 40 && this.projId === 388) this.twA1 = 0;
+    // ---- 攻击触发（:30587-30645,巡航态 ai[0]==0）----
+    if (this.twA0 === 0) {
+      if (this.projId === 387) {
+        if (flag32 && this.twA1 === 0) {             // :30594-30613 激光眼 389
+          this.twA1++;
+          if (canHitLine(st, this.x, this.y, this.w, this.h, cx5, cy5, 0, 0)) {
+            const dx = cx5 - this.cx, dy = cy5 - this.cy;
+            const d = Math.hypot(dx, dy) || 1;
+            const laser = new Arrow(this.cx - 5, this.cy - 5, dx / d * 8, dy / d * 8,
+              Math.max(1, Math.trunc(dmg0 * 1.15)), 0, 389, { grav: 0, life: 300 });
+            laser.whipTagShot = true;                // 389 ∈ MinionShot（ProjectileID.cs:291）
+            (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(laser, 'projectiles');
+          }
+        }
+      } else if (this.twA1 === 0 && flag32 && num526 < 500) {   // :30614-30630 388 冲刺触发
+        this.twA1++;
+        this.twA0 = 2;
+        const dx = cx5 - this.cx, dy = cy5 - this.cy;
+        let nx = dx, ny = dy;
+        const dl = Math.hypot(dx, dy);
+        if (dl > 0) { nx = dx / dl; ny = dy / dl; }
+        else { const vl = Math.hypot(this.vx, this.vy) || 1; nx = this.vx / vl; ny = this.vy / vl; }   // SafeNormalize(velocity)
+        this.vx = nx * 8; this.vy = ny * 8;
+        this.ai066TryInterceptingTarget(cx5, cy5, zx, zy, 8, 388);   // :30625 截击速度覆写
+      }
+    }
+    // ---- 帧机常态档由 MINION_FRAMES[387]/[388] 表（fc>3 → frame++ cap 2 :30587-30595）
+    // ---- 位移 + 接触（tileCollide 翻转面同 759 注;idStatic 16/12 CONTACT_CD_TABLE 既有）----
+    const lvx = this.vx, lvy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall && this.vx === lvx) this.vx = -lvx * 0.5;
+    if (this.collideY && this.vy === lvy && lvy > 1) this.vy = -lvy * 0.5;
+    this.contact(game, dmg0);
+    this.recordGhostTrail();
+  }
+
+  /** AI_066_TryInterceptingTarget（Projectile.cs:43142-43180）1:1 折算——冲刺出膛的
+   *  截击速度面：GetChaseResults(本体心, speed, 敌心, 敌速/num4) 交点时刻 ≤ num2+5
+   *  → velocity = 截击速度（预判提前量）。num4=2（533/388 同档,num2 30/40）。
+   *  原文 `for (num7=1; num7<=1.5; num7+=0.1)` 循环体内参数恒定 = 定点重试（首次
+   *  命中即 break,等价单次）;`flag` 声明后零写位（:43150）→ ai[1] 补偿支 = 死码不落。 */
+  private ai066TryInterceptingTarget(tpx: number, tpy: number, tvx: number, tvy: number,
+    speed: number, kind: 533 | 388): void {
+    const num2 = kind === 388 ? 40 : 30;             // :43144
+    const num4 = 2;                                  // :43155-43161（533/388 同档）
+    const num3 = num2 + 5;                           // :43145 window
+    tvx /= num4; tvy /= num4;                        // :43163
+    const chase = getChaseResults(this.cx, this.cy, speed, tpx, tpy, tvx, tvy);
+    if (chase.intercepts && chase.time <= num3) {    // :43166-43168
+      this.vx = chase.vx; this.vy = chase.vy;        // :43169 velocity = ChaserVelocity
+    }
   }
 
   private terraprismaAI(game: GameHooks, p: Player, dmg0: number): void {
@@ -4656,6 +5161,7 @@ export class MinionProj extends Entity {
         if (this.vy > dy / l * num19) { this.vy -= 0.2; if (this.vy > 0) this.vy -= 0.3; }
         this.x += this.vx; this.y += this.vy;         // tileCollide=false（:50637）
       }
+      this.frogFrameTick(tgt);
       return;
     }
     // ---- 扑击态（ai[0]=2,:50901-50956）----
@@ -4667,6 +5173,7 @@ export class MinionProj extends Entity {
       const dfFrogPounce = projWaterDragFactor(this);
       moveAndCollide(this, game.world, this.vx * dfFrogPounce, this.vy * dfFrogPounce);
       if (this.frA1 <= 0) { this.frA0 = 0; this.frA1 = 0; }        // :50954-50956
+      this.frogFrameTick(tgt);
       this.contact(game, dmg0);                       // 台账批③：吸血蛙 idStatic 10（CONTACT_CD_TABLE :7825）
       return;
     }
@@ -4742,7 +5249,37 @@ export class MinionProj extends Entity {
       }
       if (wet) this.vy *= 2;                          // :51616-51619 湿身跳翻倍
     }
+    this.frogFrameTick(tgt);
     this.contact(game, dmg0);                         // friendly 恒开（:50478-50482）;台账批③ idStatic 10（:7825,旧 20t/30t 私表退役）
+  }
+
+  /** ★BJ635：吸血蛙 758 状态帧机（AI_067 flag6 :51718-51762 1:1 折算）——BJ632 登记
+   *  帧档债清偿（旧 age/8 匀速兜底扫遍全 24 帧带）。四带：静立 0 / 飞行 1 / 步行带
+   *  2-9（fc += trunc|vx|+1 速度计频,>10 推帧）/攻击带 10-15（fc>3 推帧）/
+   *  空中攻击 13。grounded 判定 = onGround（原版 velocity.Y==0 读相=碰撞后重力前,
+   *  BJ516① 定谳;本仓 moveAndCollide 后 vy 恒含重力,onGround 等价承载）。
+   *  调用位 = frogStep 三子步拍尾（home-fly/pounce/ground——原版帧块在 AI 尾全态共享）。 */
+  private frogFrameTick(tgt: EnemyLike | null): void {
+    if (tgt) {
+      if (!this.onGround) { this.frFrame = 13; this.frFc = 0; }          // :51722-51726
+      else if (++this.frFc > 3) {                                        // :51727-51734
+        this.frFc = 0;
+        this.frFrame++;
+        if (this.frFrame < 10 || this.frFrame > 15) this.frFrame = 10;   // 攻击带 10-15
+      }
+    } else if (this.onGround) {
+      if (this.vx === 0) { this.frFrame = 0; this.frFc = 0; }            // :51735-51739
+      else if (Math.abs(this.vx) >= 0.5) {                               // :51740-51750
+        this.frFc += Math.trunc(Math.abs(this.vx)); this.frFc++;
+        if (this.frFc > 10) {
+          this.frFc = 0;
+          this.frFrame++;
+          if (this.frFrame < 2 || this.frFrame > 9) this.frFrame = 2;    // 步行带 2-9
+        }
+      } else { this.frFrame = 0; this.frFc = 0; }
+    } else {
+      this.frFrame = 1; this.frFc = 0;                                   // :51751-51756
+    }
   }
 
   /** 乌鸦 317（aiStyle 54，AI :27383-27590 1:1）：同类 28px 内互推 0.05
@@ -4845,40 +5382,182 @@ export class MinionProj extends Entity {
    *  ai[0]-=6 + localAI[0]++（:28658-28666）；距玩家 >1500 → ai[0]+=3×(3-⌊ai[0]/3⌋)
    *  入 9-11 归位（:28741-28753），<450 落位 ai[0]-=9（:28824-28834）；攻击间隔
    *  ai[1] 1→10 自增归零（:28958-28967） */
-  private deadlySpherePhase(game: GameHooks, p: Player, tgt: EnemyLike | null): void {
-    const distP = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+  /** ★BJ635（2026-10-11）④ 致命球 533 = AI_066 533 面全式重写（Projectile.cs:30084-30645,
+   *  旧 deadlySpherePhase 只有相位机、运动面被通用飞行块逐拍覆写）。普查定谳四面全偏：
+   *  ①蓄力段 ×0.81/拍（原版 velocity×0.9/子步、无 extraUpdates=每拍一子步 :30193）；
+   *  ②冲刺段零速度写（原版触发拍 velocity=dir×10/12 :30640-30643 + 截击覆写 + 冲刺
+   *  MaxUpdates=2 双子步积分 :30241）——旧=通用恒速 5 逐拍覆写,冲刺不冲；
+   *  ③悬停=通用环形槽（原版 hover 锚 player.Center+(0,−60) 阻尼 (v×40+dir×12)/41
+   *  :30402-30467）;④零 533 对分离力（原版 :30117-30146 flag30 双球 ±0.05）。
+   *  态机 ai[0]：0-2 待机（2=攻击闪蓝光）/3-5 蓄力/6-8 冲刺/9-11 归位冲刺;
+   *  ai[1]=冷却/段计时、localAI[0]=三连冲刺计数、localAI[2]=撞墙计数（击退 ×0.5 面
+   *  :14618 消费=contact 签名域登记债,计数面 :30120/:18314 落位）。 */
+  private deadlySpherePhase(game: GameHooks, p: Player, tgt: EnemyLike | null, dmg0: number): void {
+    const st = game.world.store;
+    // ---- localAI[2] 逐拍衰减钳（:30120 Clamp(−1, 0, 60)）----
+    this.dLai2 = Math.max(0, Math.min(60, this.dLai2 - 1));
+    // ---- 分离力（:30117-30146 flag30=同主同型 533 对,position 曼哈顿 < width=20）----
+    for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+      const o = ent as MinionProj;
+      if (!(o instanceof MinionProj) || o === this || o.dead || o.projId !== 533) continue;
+      if (o.ownerRef() !== p) continue;
+      if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
+      this.vx += this.x < o.x ? -0.05 : 0.05;        // :30137-30144
+      this.vy += this.y < o.y ? -0.05 : 0.05;
+    }
+    // ---- 蓄力态（:30190-30215,flag31——态内不重索敌/不 hover）----
     if (this.dA0 >= 3 && this.dA0 <= 5) {
-      // 蓄力段（:28581-28629）：velocity×0.9/update + ai[1] 计时
+      this.vx *= 0.9; this.vy *= 0.9;                // :30193（每拍一子步,无 extraUpdates）
       this.dA1++;
-      this.vx *= 0.81; this.vy *= 0.81; // ×0.9 每 update ×2 update/tick
-      if (this.dA1 > 16) { this.dA0 -= 3; this.dA1 = 0; } // :28624-28628（num564×8）
+      const num533 = Math.trunc(this.dA1 / 2) + (this.dA0 - 3) * 8;   // :30196 帧表游标
+      if (num533 < 4) this.dFrame = 17 + num533;
+      else if (num533 < 5) this.dFrame = 0;
+      else if (num533 < 8) this.dFrame = 1 + num533 - 5;
+      else if (num533 < 11) this.dFrame = 11 - num533;
+      else if (num533 < 12) this.dFrame = 0;
+      else if (num533 < 16) this.dFrame = num533 - 2;
+      else if (num533 < 20) this.dFrame = 29 - num533;
+      else if (num533 < 21) this.dFrame = 0;
+      else this.dFrame = num533 - 4;
+      if (this.dA1 > 16) { this.dA0 -= 3; this.dA1 = 0; }   // :30213-30216（num532×8）
+      this.integrate533(game, st);
       return;
     }
+    // ---- 冲刺态（:30239-30280,MaxUpdates=2 → 双子步;velocity 恒=触发拍出膛值）----
     if (this.dA0 >= 6 && this.dA0 <= 8) {
-      // 冲刺段（:28630-28685）：ai[1] 计时（6→40t、7/8→30t）
-      this.dA1++;
-      if (this.dA1 > (this.dA0 === 6 ? 40 : 30)) { this.dA1 = 1; this.dA0 -= 6; this.dLai0++; }
+      for (let sub = 0; sub < 2; sub++) {            // MaxUpdates=2（:30241）
+        this.dA1++;
+        if (this.dA0 === 7) this.rot = Math.atan2(this.vy, this.vx) + Math.PI;   // :30244
+        else this.rot += Math.PI / 6;                // :30246
+        this.dFrame = this.dA0 === 6 ? 5 : this.dA0 === 7 ? 13 : 17;   // :30249-30262
+        const num534 = this.dA0 === 6 ? 40 : 30;
+        if (this.dA1 > num534) { this.dA1 = 1; this.dA0 -= 6; this.dLai0++; break; }   // :30264-30269
+        if (this.dA0 === 8) {                        // :30270-30279 四向尘（每子步）
+          for (let i = 0; i < 4; i++) {
+            const ang = i * (Math.PI / 2) + this.rot;
+            const d = game.spawnDust?.(this.cx, this.cy, 0, 0,
+              [226, 228, 75][Math.floor(Math.random() * 3)],
+              Math.cos(ang), Math.sin(ang), 0, null, 0.6 + Math.random() * 0.5);
+            if (d) d.noGravity = true;
+          }
+        }
+        this.integrate533(game, st);
+      }
       return;
     }
-    // 攻击间隔（:28958-28967）
+    // ---- 攻击间隔冷却（:30568-30577）----
     if (this.dA1 > 0 && ++this.dA1 > 10) this.dA1 = 0;
-    // 归位落位（:28824-28834：距玩家 <450 且脚下非实心 → ai[0]-9 回待机）
-    if (this.dA0 >= 9 && distP < 450
-      && !game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
-      this.dA0 -= 9;
+    // ---- tileCollide 翻转（:30306-30313）----
+    if (this.dA0 < 9) this.tileCollide = true;
+    if (this.tileCollide && st.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
+      this.tileCollide = false;
     }
-    // 距玩家过远 → 归位冲刺（:28735-28753：num574 = 有目标 1500 / 无目标 900）
-    if (this.dA0 < 3 && distP > (tgt ? 1500 : 900)) {
-      this.dA0 += 3 * (3 - Math.floor(this.dA0 / 3));
-      return;
+    // ---- leash（:30373-30380：距玩家 >1500（有敌）/900（无敌）→ 跳归位带;不 return——
+    //      同拍照走 hover（旧实现 return=自造相）----
+    const distP = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+    if (distP > (tgt ? 1500 : 900)) {
+      if (this.dA0 < 9) this.dA0 += 3 * (3 - Math.trunc(this.dA0 / 3));
+      this.tileCollide = false;
     }
-    // 攻击触发（:29005-29038：ai[0]<9、冷却好、敌 <800）
-    if (this.dA0 < 3 && this.dA1 === 0 && tgt) {
-      if (Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) < 800) {
+    // ---- hover（:30386-30467,533 无 flag29 → 恒 else 支;flag33=归位带 dA0≥9）----
+    {
+      const flag33 = this.dA0 >= 9;
+      let num546 = 12; let num547 = 40;              // :30395-30397 533 档（num526 档覆盖）
+      const hx = p.cx - this.cx, hy = p.cy - this.cy - 60;   // vector42 = Center−me+(0,−60)
+      const num548 = Math.hypot(hx, hy);
+      const pv = Math.abs(p.vx) + Math.abs(p.vy);
+      if (num546 < pv) {                             // :30424-30434 跟玩家速度链
+        num547 = 30; num546 = pv;
+        if (num548 > 200) { num547 = 20; num546 += 4; }
+        else if (num548 > 100) { num546 += 3; }
+      }
+      if (flag33 && num548 > 300) { num546 += 6; num547 -= 10; }   // :30435-30438
+      if (num548 < 450 && flag33 && !this.solidOverlap(st)) {
+        this.dA0 -= 9;                               // :30439-30446 落位回待机（盒判,旧=中心格）
+      }
+      if (num548 > 2000) {                           // :30447-30451 瞬移回玩家
+        this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
+      }
+      if (num548 > 70) {                             // :30452-30458 阻尼逼近
+        const l = num548 || 1;
+        this.vx = (this.vx * num547 + (hx / l) * num546) / (num547 + 1);
+        this.vy = (this.vy * num547 + (hy / l) * num546) / (num547 + 1);
+      } else if (this.vx === 0 && this.vy === 0) {   // :30459-30463
+        this.vx = -0.15; this.vy = -0.05;
+      }
+      const vl = Math.hypot(this.vx, this.vy);
+      if (vl > num546) { this.vx *= 0.95; this.vy *= 0.95; }   // :30464-30467
+    }
+    // ---- 旋转（:30471-30474：ai[0]<3∨≥9 才自旋——3-8 冲段不自旋）----
+    if (this.dA0 < 3 || this.dA0 >= 9) this.rot += this.vx * 0.04;
+    // ---- 帧机（:30596-30620,待机带三态分相）----
+    if (this.dA0 < 3 || this.dA0 >= 9) {
+      if (++this.dFc >= 24) this.dFc = 0;
+      switch (this.dA0) {
+        case 0: case 9: this.dFrame = 4 + Math.floor(this.dFc / 4); break;
+        case 1: case 10: this.dFrame = 14 + Math.floor(this.dFc / 8); break;
+        case 2: case 11: {
+          let n = Math.floor(this.dFc / 3);
+          if (n >= 4) n -= 4;
+          this.dFrame = 17 + n;
+          break;
+        }
+        default: this.dFrame = 4 + Math.floor(this.dFc / 4); break;
+      }
+      // 攻击闪尘（:30636-30660,ai[0]==2 ∧ 50% → 四向尘 noLight）
+      if (this.dA0 === 2 && Math.floor(Math.random() * 2) === 0) {
+        for (let i = 0; i < 4; i++) {
+          if (Math.floor(Math.random() * 2) !== 0) continue;
+          const ang = i * (Math.PI / 2) + this.rot;
+          const d = game.spawnDust?.(this.cx, this.cy, 0, 0,
+            [226, 228, 75][Math.floor(Math.random() * 3)],
+            Math.cos(ang), Math.sin(ang), 0, null, 0.3 + Math.random() * 0.5);
+          if (d) { d.noGravity = true; d.noLight = true; }
+        }
+      }
+    }
+    // ---- 攻击触发（:30631-30645：ai[0]<9 ∧ 冷却好 ∧ 锁定 ∧ num526<800）----
+    if (this.dA0 < 9 && this.dA1 === 0 && tgt) {
+      const num526 = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+      if (num526 < 800) {
         this.dA1++;
         if (this.dLai0 >= 3) { this.dA0 += 4; if (this.dA0 === 6) this.dA0 = 3; this.dLai0 = 0; }
-        else this.dA0 += 6;
+        else {
+          this.dA0 += 6;
+          const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
+          const dl = Math.hypot(dx, dy);
+          const nx = dl > 0 ? dx / dl : 0, ny = dl > 0 ? dy / dl : 0;   // SafeNormalize(ZERO)
+          const num560 = this.dA0 === 8 ? 12 : 10;   // :30639-30640
+          this.vx = nx * num560; this.vy = ny * num560;
+          this.ai066TryInterceptingTarget(tgt.cx, tgt.cy,
+            (tgt as unknown as { vx?: number }).vx ?? 0,
+            (tgt as unknown as { vy?: number }).vy ?? 0, num560, 533);
+        }
       }
+    }
+    // ---- 位移（case 533 碰撞反弹 :18281-18320——X 全反/Y×0.5/模长归一/dLai2+30）----
+    this.integrate533(game, st);
+    this.contact(game, dmg0);
+    this.recordGhostTrail();
+  }
+
+  /** 533 位移积分 + case 533 碰撞反弹（Projectile.cs:18281-18320）：moveAndCollide 停墙
+   *  后按受阻轴反转——X 全量、Y ×0.5、模长归一回撞前值;dA0==7 段 vy<−0.1 修 0.1 上顶;
+   *  冲刺带 HitTiles 尘=登记（视觉面）;dLai2 += 30（:18314,击退 ×0.5 消费面 :14618
+   *  =contact 签名域登记债）。tileCollide=false 拍=直写位移（无碰撞）。 */
+  private integrate533(game: GameHooks, st: { isSolid(x: number, y: number): boolean }): void {
+    void st;
+    const lvx = this.vx, lvy = this.vy;
+    const lastLen = Math.hypot(lvx, lvy);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    let bounced = false;
+    if (this.hitWall && this.vx === lvx) { this.vx = -lvx; bounced = true; }          // :18285-18288
+    if (this.collideY && (this.vy === lvy || lvy === 0)) { this.vy = -lvy * 0.5; bounced = true; }   // :18289-18292
+    if (bounced && lastLen > 0) {
+      const nl = Math.hypot(this.vx, this.vy);
+      if (nl > 0) { this.vx *= lastLen / nl; this.vy *= lastLen / nl; }               // :18296-18300 归一
+      if (this.dA0 === 7 && this.vy < -0.1) this.vy += 0.1;                           // :18301-18304
+      this.dLai2 += 30;                                                               // :18314
     }
   }
 
@@ -6327,6 +7006,14 @@ export class MinionProj extends Entity {
     else if (projId === 625 || projId === 626 || projId === 627 || projId === 628) { this.w = 24; this.h = 24; }
     else if (projId === 758) { this.w = 20; this.h = 30; }
     else if (projId === 759 || projId === 831 || projId === 970) { this.w = 10; this.h = 10; }
+    // ★BJ635：AI_066 三型真盒补注册（SetDefaults :4714-4715/:4730-4731/:6005-6006）——
+    //  此前 387/388 落 16×16 缺省（原版 40×20,分离力判定盒 width=40 亦随真盒）、
+    //  533 落 16×16（原版 20×20）
+    else if (projId === 387 || projId === 388) { this.w = 40; this.h = 20; }
+    else if (projId === 533) { this.w = 20; this.h = 20; }
+    // ★BJ634：刃杖 864 真盒 10×10（SetDefaults :8288-8289）——此前落 16×16 缺省
+    //  = 判定盒/湿段采样盒偏大（编队悬浮锚命中面亦随盒偏移）
+    else if (projId === 864) { this.w = 10; this.h = 10; }
     else if (projId === 951) { this.w = 26; this.h = 26; }
     else if (projId === 963) { this.w = 30; this.h = 48; }
     // ★GC 移交收口（终局扫尾批 A7，2026-08-31）：DD2 哨兵塔 SetDefaults 真盒注册——
@@ -6919,6 +7606,10 @@ export class MinionProj extends Entity {
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
       if (FLAMEBURST_TOWER.has(this.projId)) {
         const tier = FLAMEBURST_TIERS[this.projId] ?? FLAMEBURST_TIERS[667];
+        // ★R15-F1：localAI[0] 300t 周期自由环（Projectile.cs:69183 `if (++localAI[0]
+        //  >= 300f) localAI[0] = 0f;`——663/665/667 三档 case 内同式 :69235/:69287,
+        //  无 ai[2]/开火门=每拍必走）——辉光脉动相位源（draw 侧 flameburstGlowRadius）
+        this.sPulseT = (this.sPulseT + 1) % 300;
         // ★台账批 C-4179（2026-08-31）：AI_130 每 update 双矩形环境尘 1:1
         //  （1458 Projectile.cs case 663 :69181-69225 / 665 :69229-69272 / 667
         //  :69276-69320）——①底盆白烟 d270：盒 = (pos.X+w/4, bottom−16,
@@ -7147,14 +7838,22 @@ export class MinionProj extends Entity {
             if (st.inBounds(tx, y) && st.isSolid(tx, y)) { groundY = y; break; }
           }
           if (groundY < 0) { this.y += 16; return; } // 无地面（:65948-65952）
+          // ★R15-F4（2026-10-11 C15 清偿）：搜索档参数化——原版 num/num5 是 T3 联动
+          //  变量（Projectile.cs:69937-69938 `if (setMonkT3) { num = 14; num5 = 8; }`）,
+          //  同一 num 同时驱动三站:①Up(num) 天花板搜索窗（:69952,旧硬编码 10=T2 形）
+          //  ②height 上钳 num×16（:69974）③fallback origin.Y−num−1（:69956,旧硬编码
+          //  ty−11）。T3 露天档 14×16×2=448px（旧 384 偏差=BJ467⑤ 钉值错标,钉已重产）。
+          const monkT3Field = dd2SetFlags(this.ownerRef()).monkT3;
+          const fieldNum = monkT3Field ? 14 : 10;        // num（:69926/:69937）
+          const fieldNum5 = monkT3Field ? 8 : 4;         // num5（:69929/:69938）
           let ceilY = -1;
-          for (let y = groundY - 1; y >= groundY - 10; y--) { // Searches.Up(num=10)
+          for (let y = groundY - 1; y >= groundY - fieldNum; y--) { // Searches.Up(num)
             if (y >= 0 && st.inBounds(tx, y) && st.isSolid(tx, y)) { ceilY = y; break; }
           }
-          if (ceilY < 0) ceilY = ty - 11; // :65956-65958（无天花板 → origin-num-1）
+          if (ceilY < 0) ceilY = ty - fieldNum - 1; // :69955-69957（无天花板 → origin-num-1）
           const centerY = groundY * TILE; // result.ToWorldCoordinates(8f, num6)（半砖 +8 未实装）
           const topY = ceilY * TILE;      // result2.ToWorldCoordinates(8f, 0f)
-          let side = centerY - topY;      // :65970 base.Size = (1, center.Y - top.Y)
+          let side = centerY - topY;      // :69970 base.Size = (1, center.Y - top.Y)
           // ★BJ467⑤ AI_137 T3 场盒档（Projectile.cs:69924-69938 亲读）：`int num = 10;
           //  int num5 = 4; … if (setMonkT3) { num = 14; num5 = 8; }`（:69937-69938）→
           //  场盒钳 [num5×16, num×16]（:69972-69977）——T3 档 [128,224]（×2 后
@@ -7162,8 +7861,8 @@ export class MinionProj extends Entity {
           //  zapPeriod（:69935 -5→25,zapCycle 档已接 :6035）不动盒。档位读落位拍
           //  =localAI[0]==0 单次支（:69979）——vanilla 盒只算一次,落位后换装不变盒;
           //  读 setMonkT3 经 dd2SetFlags 单源（同 monkAuraForcedCrit :151 装备门）。
-          const monkT3Field = dd2SetFlags(this.ownerRef()).monkT3;
-          side = Math.max(monkT3Field ? 128 : 64, Math.min(monkT3Field ? 224 : 160, side));
+          //  ★R15-F4：钳值亦参数化（旧三目字面量与搜索窗割裂=同一 num 两处手写）。
+          side = Math.max(fieldNum5 * 16, Math.min(fieldNum * 16, side));
           side *= 2;                      // :65978 height *= 2（width=height，封顶 999）
           this.auraSide = Math.min(999, side);
           this.auraCy = centerY; // base.Center = center（:65980）
@@ -7423,6 +8122,10 @@ export class MinionProj extends Entity {
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
             // 原版塔体 691/692/693 生成【爆炸弹】694/695/696（AI_138 :66063-66073）,
             // StatusNPC 走爆炸弹型号——Oiled 门在 694 族(:10786,setHuntressT2 套装门)
+            // ★R15-F6 登记债（2026-10-11 C15）：694-696 纯视觉域未建模——爆炸弹实体
+            //  本体绘（AI_139 :70466+ 帧机/爆闪 78t 存活面）+ AI_138 :70415 起的
+            //  PlotTileLine 光带/爆心尘（伤害面已由本直伤臂另刀承载=本仓离散链同相）。
+            //  视觉缺=爆炸瞬间的光带渐隐与爆闪弹贴图,实害面零（登记不落,C15 报告 §F6）。
             const boomProj = 694 + (this.projId - 691);
             const ownerH = (this.ownerRef() as unknown as { equipStats?: { huntressT2?: boolean } } | null)
               ?.equipStats?.huntressT2 ?? false;
@@ -8046,6 +8749,13 @@ export class MinionProj extends Entity {
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
     if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
     if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
+    // ★BJ634：刃杖 864 = AI_169_Smolstars（:46559-46700 1:1,smolstarAI 注）——
+    // 此前落通用飞行路径（追击恒速 5/索敌 700 每拍重选/无锁敌态机）= 用户实报
+    // 「打 boss 老不打/追不上」根因
+    if (this.projId === 864) { this.smolstarAI(game, p, dmg0); return; }
+    // ★BJ635：雀宝宝 759 = AI_158_BabyBird 专支（自管索敌 800 双距+玩家距门,不消费
+    //  通用 tgt 面——分派前置 tgt 块对该 id 空转一次,零副作用）
+    if (this.projId === 759) { this.babyBirdStep(game, p, dmg0); return; }
     if (this.projId === 946) { this.terraprismaBody(game, p, dmg0); return; }
     if (this.projId === 755) { this.batOfLightBody(game, p, dmg0); return; }
     if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
@@ -8061,7 +8771,10 @@ export class MinionProj extends Entity {
     if (this.projId === 951) { this.flinxStep(game, p, dmg0); return; }
     if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
     if (this.projId === 317) { this.ravenBody(game, p, dmg0); return; }
-    if (this.projId === 533) this.deadlySpherePhase(game, p, tgt); // AI_066 相位机（自旋门 :28874）
+    // ★BJ635：AI_066 双子（387/388）专支——此前落通用飞行路径（追击恒速 5/无 388
+    //  冲刺态/387 激光固定 cd）;533 同函数 533 面全式（旧=相位机+通用运动覆写）
+    if (this.projId === 387 || this.projId === 388) { this.twinsStep(game, p, tgt, dmg0); return; }
+    if (this.projId === 533) { this.deadlySpherePhase(game, p, tgt, dmg0); return; }   // AI_066 533 面全式（BJ635）
     // Cool Whip 雪花哨兵 917（buff 312 维持,AI_177 :45938）——独立索敌 400+Lerp 追逐,
     // 伤害吃 summonDamageMult;★BJ516①：1036 已重路由 webStep（AI_067 flag7）
     // Foxparks 1094/1113 喷火态（PR:56081-56159 / 1457 :60064-60135：ai[0] 1000-1003
@@ -8183,6 +8896,18 @@ export class MinionProj extends Entity {
       if (Math.hypot(this.cx - p.cx, this.cy - p.cy) > 2000) {   // :38194 瞬移门
         this.x = p.cx; this.y = p.cy - 40;
       }
+      // ★BJ635：AI_206 状态帧机（:38293-38324,BJ632 登记「1119 状态帧」债清偿——
+      //  旧 age/8 匀速兜底扫遍 9 帧含攻击带）。攻击带起帧 = 出弹前 4t
+      //  （num5−num6+4=124 :38255,repo 出弹位=shootCd 120）;攻击带 5-8 fc≥4 推帧
+      //  ≥9 回 0 + 失靶即断;待机带 0-4 fc≥4 推帧 + frame==0 ∧ rand(7)≠0 滞帧。
+      if (tgtF && this.shootCd === 124) this.fmFrame = 5;        // :38296-38298
+      if (this.fmFrame >= 5 && this.fmFrame <= 8) {              // :38299-38311
+        if (++this.fmFc >= 4) { this.fmFc = 0; if (++this.fmFrame >= 9) this.fmFrame = 0; }
+        if (!tgtF) { this.fmFc = 0; this.fmFrame = 0; }          // :38307-38310
+      } else if (this.fmFrame <= 4) {                            // :38313-38324（>4 段冻结=idle 机不跑）
+        if (this.fmFrame === 0 && Math.floor(Math.random() * 7) !== 0) this.fmFc = 0;   // 滞帧
+        if (++this.fmFc >= 4) { this.fmFc = 0; if (++this.fmFrame >= 5) this.fmFrame = 0; }
+      }
       this.contact(game, dmg0, 30);   // localNPCHitCooldown 30（:10452-10464）
       return;
     }
@@ -8260,21 +8985,20 @@ export class MinionProj extends Entity {
         this.vx = (dx / d) * 5;
         this.vy = (dy / d) * 5;
       } else if (this.projId === 387 || this.projId === 388) {
-        // 双子专属悬停（AI_66 :28790-28860）：锚点 = 玩家中心+(0,-60)；距锚
-        // >70px 才有阻尼趋近（v=(v×15+dir×spd)/16，spd 跟随玩家速度链），≤70px
-        // 【无任何驱动力】——这是互斥自由区，±0.05/t 的互推累积把两眼分开到
-        // 曼哈顿 ~40px 并保持（通用槽位硬弹簧会压回互斥，曾致两眼恒叠）
+        // ★BJ635 退役亚支：双子已离场（twinsStep AI_066 专支 1:1——含本悬停面的
+        //  原版阻尼形 (v×num547+dir×num546)/(num547+1),num547=40/30/20 玩家速链
+        //  档位;旧 (v×15+dir×spd)/16 阻尼系数与原版 40 系分叉）
         const hx = p.cx, hy = p.cy - 60;
         const dx = hx - this.cx, dy = hy - this.cy;
         const d = Math.hypot(dx, dy) || 1;
         if (d > 70) {
-          const spd = Math.max(15, Math.abs(p.vx) + Math.abs(p.vy));   // :28806-28814
+          const spd = Math.max(15, Math.abs(p.vx) + Math.abs(p.vy));
           this.vx = (this.vx * 15 + (dx / d) * spd) / 16;
           this.vy = (this.vy * 15 + (dy / d) * spd) / 16;
         } else if (this.vx === 0 && this.vy === 0) {
-          this.vx = -0.15; this.vy = -0.05;                            // :28846-28849
+          this.vx = -0.15; this.vy = -0.05;
         }
-        if (Math.hypot(this.vx, this.vy) > 15) { this.vx *= 0.95; this.vy *= 0.95; }  // :28853-28856
+        if (Math.hypot(this.vx, this.vy) > 15) { this.vx *= 0.95; this.vy *= 0.95; }
       } else {
         const hoverAng = this.slot * Math.PI * 0.5;
         const hx = p.cx - p.facing * 36 + Math.cos(hoverAng) * 22;
@@ -8285,22 +9009,8 @@ export class MinionProj extends Entity {
         this.vx = (dx / d) * spd;
         this.vy = (dy / d) * spd;
       }
-      // 双子互斥（AI_66 :28514-28539）：同主另一只双子（387/388）曼哈顿距 <
-      // 判定盒宽(40) → 双轴速度各互推 ±0.05/t——原版两只眼不叠在一起的本体机制。
-      // 精确同位（成对出生同点）时按 id 决胜一侧，防对称死锁（原版靠浮点噪声散开）
-      if (this.projId === 387 || this.projId === 388) {
-        for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
-          const o = ent as MinionProj;
-          if (!(o instanceof MinionProj) || o === this || o.dead) continue;
-          if (o.projId !== 387 && o.projId !== 388) continue;
-          if (o.ownerRef() !== p) continue;                  // 同主
-          if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
-          const ltx = this.x < o.x || (this.x === o.x && this.id < o.id);
-          const lty = this.y < o.y || (this.y === o.y && this.id < o.id);
-          this.vx += ltx ? -0.05 : 0.05;
-          this.vy += lty ? -0.05 : 0.05;
-        }
-      }
+      // ★BJ635：双子互斥块退役——387/388 已离场（twinsStep AI_066 专支 :30117-30146
+      //  flag30 分离力 1:1 同主同型对 ±0.05/t）
       // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
       // 速度场不减只削位移;域外 id 无湿段 → 四旗恒 false → 档恒 1 数值不变）
       const dfFly = projWaterDragFactor(this);
@@ -8338,25 +9048,15 @@ export class MinionProj extends Entity {
       const dirX = Math.sign(this.vx);
       if (dirX !== 0) this.facing = AI62_LEFT_ART.has(this.projId) ? -dirX : dirX;
     }
-    // 旋转制族：双子 387/388 rotation = velocity.ToRotation()+π（:28859-28861/
-    // :28864-28868——贴图朝左 +π 补偿；387 交战中朝 LOS 目标 :28867）；
-    // 533 致命球滚动 rotation += vx*0.04——仅 ai[0]<3 || ≥9（:28874-28877，
-    // 3-8 冲刺段不自旋，相位机见 deadlySpherePhase）
-    if (this.projId === 387 || this.projId === 388) {
-      let ang = Math.atan2(this.vy, this.vx);
-      if (this.projId === 387 && tgt
-        && canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) {
-        ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
-      }
-      this.rot = ang + Math.PI;
-    } else if (this.projId === 533) {
-      if (this.dA0 < 3 || this.dA0 >= 9) this.rot += this.vx * 0.04;
-    }
+    // ★BJ635：旋转制族块退役——双子 387/388（rotation=velocity.ToRotation()+π、
+    //  387 交战朝敌）与 533（滚动 rot += vx*0.04）均已离场至 AI_066 专支
+    //  （twinsStep :30468-30480 / deadlySpherePhase :30471-30474）
     // 远程射击（AI_062/aiStyle66 射击族：射程门内且冷却好 → 朝目标发射专属弹幕）。
     // ★BJ516④（2026-10-05）：AI_026 尾族（191-194/266→无弹,1094/1113）改走
     //  ai026TailGround 内联开火（num151 转向-开火阈 + num154/num155 瞄准锥
-    //  :62701-62760）,不再达本块;本块现役消费者 = 387 双子（388 无 MINION_SHOOT
-    //  键不射）。AI_062 五族不走本块（ai62Step 原版冷却/门距接管）
+    //  :62701-62760）,不再达本块;★BJ635：387 激光消费面随 twinsStep 退役
+    //  （388 无 MINION_SHOOT 键本就不射）——本块降为未移植型兜底。
+    //  AI_062 五族不走本块（ai62Step 原版冷却/门距接管）
     const shooter = MINION_SHOOT[this.projId];
     if (tgt && shooter) {
       if (this.shootCd > 0) this.shootCd--;
@@ -8367,8 +9067,7 @@ export class MinionProj extends Entity {
         const range = (shooter.range ?? 700) + (shooter.rangeSlot ?? 0) * this.slot;
         // 门界比较（终零波 M4 对账）：曼哈顿族原文是【严格 <】,欧氏族维持既有面
         const inRange = shooter.metric === 'manhattan' ? d < range : d <= range;
-        // 387 双子激光眼需视线（:28982 CanHitLine 门；AI_062 五族无此门）
-        if (this.projId === 387 && !canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) return;
+        // ★BJ635：387 视线门随条目退役（twinsStep CanHitLine 中心点门 1:1 承接）
         if (inRange) this.shootMinionShot(game, dmg0, shooter, tgt.cx, tgt.cy);
       }
     }
@@ -8671,6 +9370,26 @@ export class MinionProj extends Entity {
       //  age/8 % 2 令主精灵每 8t 切白帧 = 用户实报「一直闪白」（探针 BJ632-D 白块率
       //  0↔0.108 方波半周期≈8t 吻合）。辉光层本仓未实现 = 伴生登记债（见下注）。
       frame = 0;
+    } else if (this.projId === 758 && this.frFrame >= 0) {
+      // ★BJ635：吸血蛙状态帧通道（AI_067 flag6 四带机 :51718-51762——frogFrameTick
+      //  每拍直写;旧 age/8 匀速兜底扫遍全 24 帧带=BJ632 债）
+      frame = this.frFrame;
+    } else if (this.projId === 1119) {
+      // ★BJ635：禁戒魂灵状态帧通道（AI_206 :38293-38324 待机带随机滞帧+攻击带——
+      //  fmFrame 每拍直写;旧 age/8 匀速兜底=BJ632「1119 状态帧」债）
+      frame = this.fmFrame;
+    } else if (this.projId === 759 && this.bbFrame >= 0) {
+      // ★BJ635：雀宝宝栖息/瞬移拍 frame=4（AI_158 :49751/:49820 projFrames-1=4
+      //  静止档,逐一拍——AI 头清 -1 后回归 MINION_FRAMES[759] 0-3 循环）
+      frame = this.bbFrame;
+    } else if ((this.projId === 387 || this.projId === 388) && this.twFrame >= 0) {
+      // ★BJ635：388 冲刺快帧通道（AI_066 :30160-30166 2t/帧 cap 2——extraUpdates=1
+      //  子步机直写;常态 4t 三帧循环由 MINION_FRAMES 表承接）
+      frame = this.twFrame;
+    } else if (this.projId === 533 && this.dFrame >= 0) {
+      // ★BJ635：致命球状态帧通道（AI_066 :30190-30620 蓄力 num533 表/冲刺定帧
+      //  5/13/17/待机三态分相——MINION_FRAMES 三帧近似退役,dFrame 全态直写）
+      frame = this.dFrame;
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,
@@ -8748,6 +9467,34 @@ export class MinionProj extends Entity {
           sx, sy, halfW, fh,
           -halfW / 2, -(fh - 4), halfW, fh);              // origin=(半宽/2, 半高−4)
         ctx.restore();
+        // ★R15-F1（2026-10-11 C15 清偿）：火爆塔辉光四向脉动叠层（Main.cs:34426-34445
+        //  DrawProjDirect 663/665/667 支,BJ625件3 旧「663 零缺面」判谳翻正）。原版
+        //  rectangle23 已在本支 :34077-34082 半宽化 → 辉光与本体同矩形（sx 同携行选半）;
+        //  num434 = cos(localAI[0]/100·2π)+1 ∈ [0,2]（:34430,sPulseT 镜像）;色 =
+        //  (140,100,40,0)×(num434/4+0.5)——A=0 纯加法（XNA α=0 习语,不取光照=自发光）
+        //  → pushGlowOps 'add' 逃逸队列（BJ625件3 同判例）;4 份 offset=(k·π/2)×num434
+        //  世界系（右/下/左/上,不随 dir 镜像——XNA SpriteEffects 只翻贴图不翻位置）;
+        //  锚/origin/rotation/scale 同本体支（vector99=Bottom、origin32=(半宽/2,半高−4)、
+        //  :34444 同矩形同参,facing<0 镜像沿本体同轴）。携行态照画（:34426 无 ai[2] 门）。
+        const ga = flameburstGlowTintAlpha(this.sPulseT);
+        const glowTexF = `vanilla/Glow_${FLAMEBURST_GLOW_MASK[this.projId]}.png`;
+        const rad = flameburstGlowRadius(this.sPulseT);                   // num434 = cos(θ)+1
+        const gaT = ga.tint;
+        const fadeF = this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1;
+        for (let k = 0; k < 4; k++) {
+          const ang = k * (Math.PI / 2);
+          const offX = Math.cos(ang) * rad, offY = Math.sin(ang) * rad;
+          ctx.save();
+          ctx.translate(this.cx + offX, (this.cy + this.h / 2) + offY);   // vector99+offset
+          if (this.facing < 0) ctx.scale(-1, 1);                          // dir 镜像沿本体轴
+          r.pushGlowOps?.([{
+            tex: glowTexF,
+            sx, sy, sw: halfW, sh: fh,                                    // 同矩形（携行选半）
+            dx: -halfW / 2, dy: -(fh - 4),                                // origin 同本体
+            blend: 'add', tint: gaT, alpha: ga.alpha * fadeF,
+          }], ctx.getTransform());
+          ctx.restore();
+        }
         return;
       }
     }
@@ -8826,11 +9573,16 @@ export class MinionProj extends Entity {
     //  rotation 恒 0（AI_137 零写向）、spriteDirection 恒 +1（零赋值）=不翻转。
     //  projFrames 688/689=6、690=8（Main.cs:8603-8605）,帧机 8t 一翻（:70018-70024）
     //  =通用 age/8 循环既恰。glow 叠画（Glow_228/229/230 同矩形 A=127）★BJ625件3
-    //  已接（上支,合成后逃逸+绘制侧取光）。★663/677/691 族逐型核（同登记域定谳,
-    //  2026-10-10）：三族专支（:34075-34086/:34097-34137/:34087-34096）只改锚/origin
-    //  +底座,色走公共尾 :34212 color106=proj.GetAlpha(projectileColor)【plain 光】
-    //  无白 lerp、无 glow 层 ⇒ 本仓世界层合成乘光=同构等价,零缺面（该「同未接」
-    //  记法指 per-proj 光照色通道,对本族=无歧义等价面,非债）。
+    //  已接（上支,合成后逃逸+绘制侧取光）。★663/677/691 族逐型核【判谳订正】
+    //  （R15-F1/F2 复核,2026-10-11 推翻 2026-10-10「三族零缺面」旧谳）：677（弩车）
+    //  确系零缺面——本体+塔座两笔 plain 光同构等价,原版本支无 glow 层;但 663
+    //  （火爆塔）与 691（爆炸机关）旧谳漏核 DrawProjDirect 后段专支——663 辉光
+    //  四向脉动（:34426-34445,localAI[0] 300t 驱动）与 691 白 A=127 辉光（:34507-
+    //  34521）均为字面色自发光叠层（不取光照、非 plain 光链）,旧「只改锚/origin
+    //  +底座」核面只扫了 :34075-34137 锚段未扫 :34400+ 色段=定谳不完整。两缺面
+    //  已于 C15 清偿（FLAMEBURST/TRAP 绘制支 pushGlowOps,见各支注）;本仓世界层
+    //  合成乘光对 677 本体+塔座=同构等价维持（「同未接」记法指 per-proj 光照色
+    //  通道,对 677=无歧义等价面,非债）。
     //  旧通用尾 off3=[0,0] 帧左上锚盒左上 ⇒ 盒挂贴图左上+球体陷地（用户实报）。
     if (this.sentry && AURA_TOWER.has(this.projId) && img) {
       // ★BJ630件1（2026-10-10）本体/底座光照色通道（BJ625 定谳残面收口）：原版本支
@@ -9231,6 +9983,10 @@ export class MinionProj extends Entity {
       return;
     }
     // ---- ★SW-FX6 2026-09-10 债②清偿：691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097）----
+    // ★R15-F5 登记债（2026-10-11 C15）：原版 691-693 SetDefaults drawLayer=2
+    //  （Projectile.cs:7355——DrawProjDirect :18156 分层链,NPC 层之后绘制）——本仓
+    //  无弹体 drawLayer 分层机制（全局单层实体序）→ 机制面登记不落：塔在 NPC 身后
+    //  时的遮挡序差=视觉面（玩家弹/NPC 遮塔 1 档层序,无实害）;机制移植面单独立刀。
     // vanilla（非携行）：vector99 = proj.Bottom + UnitY·gfxOffY（:34092）、
     // origin32 = 帧尺寸×(0.5,1) 后 Y 连减 2×2 → (fw/2, fh−4)（:34093-34096）⇒
     // 精灵横居盒、底 = 盒底 + 4（758/951/663 族同款「脚微陷」恒量）。携行态
@@ -9249,6 +10005,22 @@ export class MinionProj extends Entity {
         ctx.translate(this.cx, this.cy);                               // 携行=B 支缺省盒心锚
         ctx.drawImage(img as CanvasImageSource, -img.width / 2, -img.height / 2);
       }
+      // ★R15-F2（2026-10-11 C15 清偿）：爆炸机关辉光叠画（Main.cs:34507-34521
+      //  DrawProjDirect 691/692/693 支,BJ625件3 旧「691 零缺面」判谳翻正）——
+      //  Glow_235/236/237 与本体同布局平行表、同矩形（691 支无半宽化,全帧宽切片）、
+      //  同锚同参（vector99/origin32 即本支重锚结果）。色 = Color(255,255,255,127)
+      //  字面（A=127 source-over 半透白,非 A=0 加法;不取光照=自发光 → pushGlowOps
+      //  'over' 逃逸队列,flushItemGlow over 支 bake/boost 分解承载 BJ604件3 判例）。
+      //  携行态照画（:34507 无 ai[2] 门,锚随 :34089 反支缺省=本 translate 面）。
+      ctx.restore();
+      ctx.save();
+      ctx.translate(this.cx, this.carriedByBackpack ? this.cy : this.y + this.h);
+      r.pushGlowOps?.([{
+        tex: `vanilla/Glow_${TRAP_GLOW_MASK[this.projId]}.png`,
+        sx: 0, sy: frame * img.height, sw: img.width, sh: img.height,
+        dx: -img.width / 2, dy: this.carriedByBackpack ? -img.height / 2 : -(img.height - 4),
+        blend: 'over', tint: [1, 1, 1], alpha: TRAP_GLOW_ALPHA,
+      }], ctx.getTransform());
       ctx.restore();
       return;
     }

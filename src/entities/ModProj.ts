@@ -199,7 +199,7 @@ export class ModProj extends Entity {
     // —— 敌怪命中(friendly 弹;命中门/免疫/伤害全原版设施) ——
     // ★GameHooks 无 entities 面——Arrow.ts:9608 同款 cast 习语
     const entities = (game as unknown as { entities: { enemies: Enemy[] } }).entities;
-    if (this.ownerIsPlayer && this.damage > 0) {
+    if (this.ownerIsPlayer && this.damage > 0 && !this.spec.noContactDamage) {
       for (const e of entities.enemies) {
         if (e.dead) continue;
         const hitT = this.hitSet.get(e.id);
@@ -256,8 +256,13 @@ export class ModProj extends Entity {
     // ★rivals 批修复(用户实报"隔空伤害无贴图"):实体循环 ctx 已含相机变换
     //   (Arrow.draw 同约定,世界坐标直绘)——旧实现做 this.x-cam.x 屏幕坐标换算
     //   = 相机变换叠加双重偏移,弹体恒画到屏外。视口剔除改世界域粗判。
-    if (this.x + this.w < cam.x - 64 || this.x - this.w > cam.x + r.canvas.width + 64) return;
-    if (this.y + this.h < cam.y - 64 || this.y - this.h > cam.y + r.canvas.height + 64) return;
+    // ★618-R3F1:相机锚=视口中心(worldToScreen=(wx-cam.x)*z+viewW/2)——
+    //  旧式 cam.x±宽 当左上角=左/上半屏弹恒被剔除;改中心锚+zoom 归一
+    const zoom = (r as unknown as { zoom?: number }).zoom ?? 1;
+    const halfW = r.canvas.width / (2 * zoom) + 64, halfH = r.canvas.height / (2 * zoom) + 64;
+    const cx2 = cam.x;   // 中心锚=cam.x(渲染变换 translate(viewW/2)·scale(z)·translate(-cam.x) 的 cam.x 即视口中心)
+    if (this.x + this.w < cx2 - halfW || this.x - this.w > cx2 + halfW) return;
+    if (this.y + this.h < cam.y - halfH || this.y - this.h > cam.y + halfH) return;
     // ★五百八十五:竖排帧切片(frames>1 时按 (ageTicks/6)%frames 取行;
     //  贴图高=frames×单帧高,行高=img.height/frames)
     const frames = this.spec.frames ?? 1;

@@ -284,12 +284,19 @@ describe('BJ633 ⑥ classic closeReforge 走单源（余量落地+随行域同�
 // ⑦ closeAll 退世界 = ClearPlayerTempInfo TurnToAir 同相（结构锁,变异即红）
 // ========================================================================
 describe('BJ633 ⑦ closeAll 退世界直销同相（Player.cs:55706-55711 ClearPlayerTempInfo）', () => {
-  it('closeAll 体=reforgeItem 直销（不归还）——原版正常流退世界前槽已空（关包链先行回包）', () => {
+  it('closeAll 体=分道：在-game（5644 onCloseAllUI）置旗下一拍归还;菜单路径=reforgeItem 直销', () => {
+    // ★R15-F15（2026-10-11 C15）判谳精化：旧「closeAll 一律直销」把占卜球 5644
+    //   在-game CloseAll（IngameUIWindows.CloseAll Main.cs:43017——原版【不触】
+    //   reforgeItem）误并入退世界面=丢件。修后分道：this.game 在=置
+    //   vinvReforgeForcedReturn（下一拍 tickStackSplitMain 头臂 returnReforgeItem,
+    //   位次=:42282-42288 强制退出臂）;game=null（showTitle/quitToMenu 等）维持
+    //   直销=ClearPlayerTempInfo TurnToAir 同相（本测试原语义收窄至菜单路径）。
     const close = UI_SRC.indexOf('  closeAll() {');
     expect(close).toBeGreaterThan(-1);
     const body = UI_SRC.slice(close, UI_SRC.indexOf('\n  }', close));
-    expect(body).toContain('this.reforgeItem = null;');
-    expect(body).not.toContain('returnReforgeItem');   // 退世界不归还=ClearPlayerTempInfo 同相
+    expect(body).toContain('this.vinvReforgeForcedReturn = true;');
+    expect(body).toContain('else this.reforgeItem = null;');   // 菜单路径直销维持
+    expect(body).toContain('if (this.game)');                  // 分道门
   });
 });
 

@@ -49,7 +49,27 @@ try {
   const p2 = await browser.newPage();
   track(p2, '②');
   await p2.goto(ORIGIN + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await sleep(30000);
+  // mod 世界 gen(Sulphurous Sea 等四 pass)~30-40s——轮询至 game 在场(上限 90s)
+  for (let i = 0; i < 30; i++) {
+    await sleep(3000);
+    const ok = await p2.evaluate(() => !!(window.__swGame?.player)).catch(() => false);
+    if (ok) break;
+  }
+  // 关欢迎幕(WelcomeAnnounce)——canvas 覆盖层非 DOM button,坐标点击+键盘双路
+  for (let a = 0; a < 2; a++) {
+    const bb = await p2.evaluate(() => {
+      const els = [...document.querySelectorAll('div, button')];
+      const b = els.filter((x) => x.textContent?.trim() === '我已知晓' && x.offsetParent).pop();
+      if (!b) return null;
+      const r = b.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }).catch(() => null);
+    if (!bb) break;
+    await p2.mouse.click(bb.x, bb.y);
+    await sleep(700);
+  }
+  await p2.keyboard.press('Escape').catch(() => {});
+  await sleep(500);
   out.world = await p2.evaluate(() => {
     const g = window.__swGame;
     if (!g?.player) return { fail: 'game/player 不在场' };
@@ -70,7 +90,7 @@ try {
     const give = [];
     // 经 allocation 反查三件 mod 甲 vid(equip 槽 0/1/2)
     const alloc = window.__swMods?.result?.()?.allocation;
-    const keys = ['mod_calamity_statigel_helm', 'mod_calamity_statigel_armor', 'mod_calamity_statigel_greaves', 'mod_calamity_m1_garand'];
+    const keys = ['mod_calamity_statigel_head_melee', 'mod_calamity_statigel_armor', 'mod_calamity_statigel_greaves', 'mod_calamity_m1_garand'];
     for (const k of keys) {
       const id = alloc?.items?.get(k);
       if (id === undefined) { give.push(`${k}:MISS`); continue; }
@@ -85,10 +105,13 @@ try {
     const g = window.__swGame;
     const p = g.player;
     const alloc = window.__swMods?.result?.()?.allocation;
-    const ids = ['mod_calamity_statigel_helm', 'mod_calamity_statigel_armor', 'mod_calamity_statigel_greaves']
+    const ids = ['mod_calamity_statigel_head_melee', 'mod_calamity_statigel_armor', 'mod_calamity_statigel_greaves']
       .map((k) => alloc?.items?.get(k)).filter((x) => x !== undefined);
-    // armor 槽 0..2 直写(物品内部 id)
-    ids.forEach((id, i) => { try { p.inv.setSlot?.(i, { id, stack: 1 }, true); } catch { /* 探针容错 */ } });
+    // armor[0..2] 直写(InvItem 形;Inventory.armor 数组面)
+    ids.forEach((id, i) => { try { p.inv.armor[i] = { id, stack: 1 }; } catch (e) { /* 容错 */ } });
+    // 无敌化(Boss 战斗截图用):HP 拉满+周期回满
+    p.hp = p.maxHp;
+    window.__swGodTick = setInterval(() => { const q = window.__swGame?.player; if (q && !q.dead) q.hp = q.maxHp; }, 200);
   }).catch(() => {});
   await sleep(2500);
   const shot1 = SHOT + '-armor.png';
@@ -97,39 +120,39 @@ try {
   // ---- ④ Boss 召唤(desert_medallion 经 itemUse/或 debug 召唤面)----
   out.boss = await p2.evaluate(() => {
     const g = window.__swGame;
-    // 走 F6 调试召唤面板同源 face:mod boss 键→spawnNpc 直调(与 summon-rules 同键)
     const alloc = window.__swMods?.result?.()?.allocation;
     const headId = alloc?.npcs?.get('mod_calamity_desert_scourge_head');
     if (headId === undefined) return { fail: 'boss id 缺' };
-    const p = g.player;
-    const EnemyCtor = g.EnemyClass ?? null;
-    // 经全局引擎 face:entities spawn 直调面(引擎 debugSummonPanel 同键)——
-    // 这里用窗口暴露的 __swDebugSummon(面板在位)或直接经 itemUse(medallion)
-    return { headId, frame: g.tickCount };
+    // F6 面板同源 face:Game.debugSpawnNpc(vanillaId)
+    const fn = g.debugSpawnNpc ?? g.debugSpawnNPC;
+    if (typeof fn !== 'function') return { fail: 'debugSpawnNpc 不在', headId };
+    const err = fn.call(g, headId, 1, false);
+    return { headId, spawnErr: err ?? null, frame: g.tickCount };
   }).catch((e) => ({ fail: String(e).slice(0, 150) }));
-  // 简化:丢下 medallion 到热栏并 useUse(itemUse 通道)——召唤物注册在 holdouts/summon-rules
-  await p2.evaluate(() => {
+  // 出生即读+5s 后读(死亡时刻定位)+死亡原因账
+  await sleep(600);
+  out.boss.spawnT = await p2.evaluate(() => {
     const g = window.__swGame;
-    const alloc = window.__swMods?.result?.()?.allocation;
-    const medId = alloc?.items?.get('mod_calamity_desert_medallion');
-    if (medId !== undefined) {
-      const p = g.player;
-      try { p.inv.setSlot?.(0, { id: medId, stack: 5 }, true); } catch { /* 容错 */ }
-    }
-  }).catch(() => {});
-  await sleep(1200);
-  // 按住左键使用(召唤)
-  await p2.mouse.move(640, 300);
-  await p2.mouse.down(); await sleep(600); await p2.mouse.up();
-  await sleep(4000);
+    const m = (g.entities?.enemies ?? []).filter((e) => !e.dead && (e.vanillaId ?? -1) >= 800);
+    return { alive: m.length, hp: m[0]?.hp, segs: (g.entities?.enemies ?? []).filter((e) => !e.dead && (e.vanillaId ?? -1) >= 800).length, bossSlot: !!g.boss, frame: g.tickCount };
+  }).catch((e) => ({ evalFail: String(e).slice(0, 120) }));
+  await sleep(4400);
   out.boss = { ...(out.boss ?? {}), ...(await p2.evaluate(() => {
     const g = window.__swGame;
     const enemies = g.entities?.enemies ?? [];
-    const modBoss = enemies.find((e) => !e.dead && (e.vanillaId ?? -1) >= 800);
-    return { modBossAlive: !!modBoss, modBossId: modBoss?.vanillaId ?? null, modBossHp: modBoss?.hp ?? null, enemyCount: enemies.filter((e) => !e.dead).length };
+    const mods = enemies.filter((e) => !e.dead && (e.vanillaId ?? -1) >= 800);
+    const b = g.boss;
+    return {
+      modBossAlive: mods.length > 0 || (!!b && !b.dead && (b.vanillaId ?? -1) >= 800),
+      modBossId: mods[0]?.vanillaId ?? b?.vanillaId ?? null,
+      modBossHp: mods[0]?.hp ?? b?.hp ?? null,
+      enemyCount: enemies.filter((e) => !e.dead).length,
+      bossSlotAlive: !!b && !b.dead,
+    };
   }).catch((e) => ({ evalFail: String(e).slice(0, 120) }))) };
   const shot2 = SHOT + '-boss.png';
   await p2.screenshot({ path: shot2 });
+  clearInterval(window.__swGodTick);
 
   // ---- ⑤ 视觉像素检查(甲区非空像素比)----
   out.visual = await p2.evaluate(() => {

@@ -2353,6 +2353,22 @@ export class UI {
    *  声明 :1772/读 :63420/复位 :63430 三站,"钩爪快造持握保 stackSplit"场景在原版
    *  不可达,建模反成自创行为（登记备查）。 */
   tickStackSplitMain(): void {
+    // ★R15-F15（C15 清偿）：占卜球 5644 强制退出臂（下一拍归还,原版位次
+    //   Main.cs:42282-42288——CloseAll 关窗后下一帧 talkNPC==-1 → InReforgeMenu=false
+    //   + dropItemCheck reforgeItem 支回包）。onStackSplitTick=60Hz 常走帧路径
+    //   （暂停期照走,Game.ts 注）=关包后仍会跑的逐拍 UI 通道。F17 同臂搭车：
+    //   classic modal 重铸面板走远自动关（原版 :42277 四退出条件对 classic 面同相;
+    //   vinv 面已由 vinvGuideMenuExitCheck 承载,classic overlay 无逐拍退出臂=旧缺）。
+    if (this.vinvReforgeForcedReturn) {
+      this.vinvReforgeForcedReturn = false;
+      if (this.vinvReforgeOpen) this.vinvReforgeOpen = false;
+      this.returnReforgeItem();   // 内含 onInventoryChanged → refreshAll
+    }
+    if (this.reforgeEl && this.game
+      && (!!this.openChest || !!this.game.npcShopOpen
+        || !(this.game as unknown as { dialogNpc?: unknown }).dialogNpc)) {
+      this.closeReforge();      // 走远/开箱/开店 → classic 面强制退出（同 :42277 条件集）
+    }
     if (this.stackSplit === 0) {                             // :62728-62733
       this.timesTriedToFastStack = 0;
       this.stackCounter = 0;
@@ -2493,6 +2509,16 @@ export class UI {
       researchMenuOpen: this.researchMenuShowing(),
       guideMenuOpen: !!this.guideEl || this.vinvGuideMenuOpen,
       itemMaterial: cur ? curVid > 0 && materialVids().has(curVid) : false,   // ★SW-BJ24 2026-09-07 vid 域池（旧并集池 iid 跨域碰撞：钉鞋 975→iid 24 污染）
+      // ★R15-F16：vinv 重铸菜单在显 + 可词缀判据（canReforge=CanHavePrefixes 等价面
+      //  单源;classic overlay 不可达=只置 vinv 面）
+      // ★债①惰性化（2026-10-11 C15-F16 收尾）：canReforge 只在重铸菜单在显时求值——
+      //  消费面 SlotActions.ts:217-219 的 itemCanHavePrefixes 读取点在 reforgeMenuOpen
+      //  支内（:217 门先于 :218 读;env 同帧同步构造+消费,无交叉窗）→ 菜单关态该值
+      //  不可观测。&& 短路序以 vinvReforgeOpen 为首门：开态表达式逐位不变=行为同;
+      //  关态免一次纯读求值（alt/shift/ctrl 点击热面）,旧槽域测试桩无 canReforge
+      //  API 面亦不再炸（16 红复绿=副作用面,非目的）。
+      reforgeMenuOpen: this.vinvReforgeOpen,
+      itemCanHavePrefixes: this.vinvReforgeOpen && !!cur && this.game.canReforge(cur),
     });
     if (!plan) return false;
     switch (plan.kind) {
@@ -2536,6 +2562,24 @@ export class UI {
         }
         if (this.guideEl || this.vinvGuideMenuOpen) {  // ★RB29c F2:vanilla 内嵌向导态同支（:810-815 Utils.Swap(inv[slot], guideItem)）
           this.shiftGuideSwap(i, cur);
+          return true;
+        }
+        // ★R15-F16（C15 清偿）：重铸对置支（ItemSlot.cs:793-806 cursorOverride 9
+        //  InReforgeMenu——:797 stack≤1=Utils.Swap(ref inv[slot], ref Main.reforgeItem)
+        //  双向保全（槽内旧重铸物回原格）;:798-806 stack>1 ∧ 槽空=Clone stack=1 +
+        //  源 stack--。两臂皆播 SoundEngine.PlaySound(7)=pickup。stack>1 且槽占=
+        //  原版无支静默消费（no-op,return true 同相））
+        if (this.vinvReforgeOpen && !this.researchMenuShowing()) {
+          if (cur.stack <= 1) {
+            const tmp = this.reforgeItem;
+            this.reforgeItem = { ...cur };
+            inv.slots[i] = tmp ?? null;                // Utils.Swap 双向（旧重铸物回格）
+          } else if (!this.reforgeItem) {
+            this.reforgeItem = { ...cur, stack: 1 };   // 取 1 件（F13 同式）
+            cur.stack -= 1;
+          }
+          this.game.sfx.play('pickup', 1);             // SoundEngine.PlaySound(7)
+          this.refreshAll();
           return true;
         }
         if (chest) this.shiftDepositToChest(i, cur);
@@ -4236,9 +4280,19 @@ export class UI {
       e.stopPropagation();
       if (this.heldStack) {
         // 放入 1 件（ItemSlot :757-764：reforgeItem = item.Clone() stack=1）
+        // ★R15-F17（2026-10-11 C15 清偿,自造面最小化收口①）：favorited/placeStyle
+        //   随行——原版 Item.Clone() 全字段复制（Item.cs Clone 深拷贝）,旧字面量
+        //   {id,stack,prefix} 丢 placeStyle（块/墙类放置样式随行断链,回包走
+        //   returnReforgeItem 七参 add 全随行=回包端已备,放置端断喂）与 favorited
+        //   （Swap 臂 Utils.Swap 双向骑行收藏旗）。占槽 swap 面维持登记（自造面,
+        //   vanilla case 1 :1008-1046 占槽+持物=互换;此处 return 不动=偏差留档）。
         if (this.reforgeItem) return;
         if (!this.game.canReforge(this.heldStack)) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.CannotReforge')); return; }
-        this.reforgeItem = { id: this.heldStack.id, stack: 1, prefix: this.heldStack.prefix }; // 保留词缀
+        this.reforgeItem = {
+          id: this.heldStack.id, stack: 1, prefix: this.heldStack.prefix,
+          placeStyle: (this.heldStack as { placeStyle?: number }).placeStyle,
+          favorited: (this.heldStack as { favorited?: boolean }).favorited,
+        };
         this.heldStack.stack -= 1;
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else if (this.reforgeItem) {
@@ -7774,7 +7828,16 @@ export class UI {
     this.root.innerHTML = '';
     this.heldStack = null;
     this.openChest = null;
-    this.reforgeItem = null;
+    // ★R15-F15（2026-10-11 C15 清偿,占卜球 5644 丢件定谳）：在-game 路径
+    //   （onCloseAllUI=IngameUIWindows.CloseAll Main.cs:43017）原版【不触】reforgeItem
+    //   ——CloseAll 只关窗,重铸物由下一拍强制退出臂归还（:42282-42288
+    //   talkNPC==-1 → InReforgeMenu=false + dropItemCheck reforgeItem 支
+    //   Player.cs:5115-5118）=原版位次。本仓等价：置 vinvReforgeForcedReturn 旗,
+    //   下一拍 tickStackSplitMain 头臂 returnReforgeItem() 归还。菜单路径
+    //   （showTitle/quitToMenu/showMainMenu/showMultiplayerSelect）维持直清
+    //   =原版 ClearPlayerTempInfo TurnToAir 同相（BJ633 登记债维持）。
+    if (this.game) this.vinvReforgeForcedReturn = true;
+    else this.reforgeItem = null;
     this.detachGame();
     this.reforgeEl?.remove();
     this.reforgeEl = null;
@@ -11047,6 +11110,10 @@ export class UI {
    *  vinv 锤钮与 classic modal 两面共用(FX60 用户实报「不能快速连点」收口) */
   private vinvReforgeCooldownUntil = 0;
   private vinvReforgeHadItem = false;
+  /** ★R15-F15：占卜球 5644 在-game CloseAll 后的下一拍强制退出臂待还旗
+   *  （InReforgeMenu=false 等价;消费点=tickStackSplitMain 头臂 → returnReforgeItem）。
+   *  菜单路径（closeAll else 支）不置旗=ClearPlayerTempInfo TurnToAir 同相直清。 */
+  private vinvReforgeForcedReturn = false;
 
   private vinvBuildReforge(): void {
     const root = this.vinvRoot;
@@ -11060,15 +11127,7 @@ export class UI {
       + 'transform:scale(0.85);';
     slot.addEventListener('mousedown', (e) => {
       e.stopPropagation();
-      if (this.heldStack) {
-        if (!this.game.canReforge(this.heldStack)) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.CannotReforge')); return; }
-        this.reforgeItem = { ...this.heldStack };   // 整件克隆(ctx5 全栈语义,:42387)
-        this.heldStack = null;
-      } else if (this.reforgeItem) {
-        this.heldStack = { ...this.reforgeItem };
-        this.reforgeItem = null;
-      }
-      this.refreshAll();
+      this.vinvReforgeSlotClick();
     });
     slot.addEventListener('mouseenter', () => { if (this.reforgeItem) this.showReforgeTooltip(); });
     slot.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
@@ -11122,6 +11181,35 @@ export class UI {
       if (!this.vinvReforgeVisible() || !this.reforgeItem) return null;   // DrawSavings 在有件支(:42318)
       return { x: 180, y: 258 };
     } });
+  }
+
+  /** 重铸槽左键点击面（vinvBuildReforge 槽 mousedown 单源,ctx5=ItemSlot.Handle 面）。
+   *  ★R15-F12/F13（2026-10-11 C15 清偿,红蓝 R15 实害双吞点）：
+   *   · F12（HIGH）旧码 cursor 持物点【已占】槽直接覆写 reforgeItem=旧槽物静默
+   *     吞件——修=MouseItemSwap 双向互换（ItemSlot.cs:1008-1046 `Utils.Swap(ref
+   *     slot, ref Main.mouseItem)` 原文;槽内旧物回光标,光标物入槽）。
+   *   · F13（MED）旧码整组克隆入槽——原版恒取 1 件（ItemSlot.cs:1053-1057 case 1
+   *     stack>1 支 `inv[slot]=mouseItem.Clone(); inv[slot].stack=1; mouseItem.stack--;`
+   *     ;shift-click 支 :798-806 同式）。reforgeCost 按 1 计（Main.cs:42297
+   *     value×stack,stack 恒 1=费用不随整组膨胀）。
+   *   canReforge 门维持（本仓放置侧自造近似面,原版放置无门+重铸时才验——登记）。 */
+  vinvReforgeSlotClick(): void {
+    if (this.heldStack) {
+      if (this.reforgeItem) {
+        const tmp = this.reforgeItem;
+        this.reforgeItem = { ...this.heldStack };
+        this.heldStack = tmp;                    // 双向保全（Swap 语义,零吞件）
+      } else {
+        if (!this.game.canReforge(this.heldStack)) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.CannotReforge')); return; }
+        this.reforgeItem = { ...this.heldStack, stack: 1 };   // 取 1 件（词缀随行）
+        this.heldStack.stack -= 1;
+        if (this.heldStack.stack <= 0) this.heldStack = null;
+      }
+    } else if (this.reforgeItem) {
+      this.heldStack = { ...this.reforgeItem };
+      this.reforgeItem = null;
+    }
+    this.refreshAll();
   }
 
   /** 锤钮点击(Main.cs:42370 mouseLeftRelease 边沿=每击一次,长按不连发)。

@@ -11662,8 +11662,9 @@ export class Player extends Entity {
   /** 受伤预览（与 damage() 同口径：难度防御系数 0.5/0.75/1.0 + endurance）——
    *  供调用方飘字使用，避免显示≠实扣（Main.cs:65646 CalculateDamagePlayersTake） */
   damagePreview(dmg: number): number {
+    // ★R15-F9：与 damage() 拆步截断同步（甲虫自 endurance 和拆出=独立乘区各自
+    //   (int);预演不消耗球,用当前 orbs 即实扣该拍值——damage 消耗亦在该拍结算后）。
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
-      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)
       + (this.equipStats.enduranceEq ?? 0)   // 日曜套 0.12（与 damage 同口径,2026-08-13 同步）
       + this.modEnduranceDyn   // ★五百七十九:mod 每帧动态面(PSC 夜相;与 damage 同口径)
       // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25
@@ -11674,7 +11675,13 @@ export class Player extends Entity {
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
     // ★BJ585（2026-10-09）：与 damage() 结算同步 (int) 截断（floor）——预演=实扣口径
     //   （环境站 floatDealt 预演回填面随本刀自动与实扣对齐，不再现显示≠实扣）
-    return Math.max(1, Math.floor((dmg - this.defense * defF) * (1 - endurance)));
+    // ★R15-F9：拆步同步——防御步（double 下限 1）→ endurance (int) → 甲虫 (int)。
+    let num2 = Math.max(1, dmg - this.defense * defF);
+    num2 = Math.floor(num2 * (1 - endurance));
+    if (this.equipStats.beetleDef && this.beetleOrbs > 0) {
+      num2 = Math.floor(num2 * (1 - 0.15 * this.beetleOrbs));
+    }
+    return Math.max(1, num2);
   }
 
   /** pvp=true 走 Hurt 的 pvp 语义（Player.cs:37592 Hurt pvp 参）：减伤链与 PvE 完全
@@ -11752,7 +11759,7 @@ export class Player extends Entity {
     }
     // ★593:mod 闪避掷门(灾厄 DodgeEffects 消费品闪避族——C# 消费品冷却=受伤量
     //  缩放 lerp 面=登记,本仓 mod 侧自管窗;fn=true=已闪避[效果+冷却自管])
-    if (runModDodgeRoll(this, (globalThis as { __swGame?: unknown }).__swGame)) {
+    if (runModDodgeRoll(this, (globalThis as { __swGame?: unknown }).__swGame, dmg)) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
@@ -11791,15 +11798,23 @@ export class Player extends Entity {
     //  闪避族全部早退【后】、stealth 复位【前】= 原文同段；300t 恒值窗）
     if (eq.summonSet?.squireT2 === true) this.ballistaPanicT = 300;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
+    // ★R15-F9（2026-10-11 C15 清偿）：乘区序拆步截断——原版每步各 (int)
+    //   （Hurt :38590 endurance → :38601 日曜护盾 → :38612 甲虫 orbs → :38651 圣骑士;
+    //   防御步 CalculateDamagePlayersTake Main.cs:65646-65657 返 double 不截断,两道
+    //   下限 1 各自独立 :65652/:38661）。旧单次 Math.floor 连乘=中段截断语义缺失
+    //   （实分歧例:专家 51 防+耐久+日曜盾=原版 8 vs 本仓 9——floor(floor(A·0.78)·0.8)
+    //   ≠floor(A·0.78·0.8)）。甲虫步自 endurance 和中拆出（原版独立乘区,与本步
+    //   各自截断;拆出后球消耗位次亦与原文对齐=:38612 步内即减）。
+    //   圣骑士 0.75 步（:38648-38651 defendedByPaladin 单人域）本仓未建模（MP bit5
+    //   转移面 Game.ts:5043 走 damagePreview 近似,登记维持）。
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
-      + (eq.beetleDef ? 0.15 * this.beetleOrbs : 0)   // 甲虫壳每球 15%（buffs 95-97）
       + (eq.enduranceEq ?? 0)                           // 日曜套 0.12（:16224,2026-08-13 接）
       + this.modEnduranceDyn   // ★五百七十九:mod 每帧动态面(PSC 夜相 +0.05;同口径)
       // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25（蠕虫围巾 0.17 走 enduranceEq）
       // 冰障 buff 62（:10127-10152）：半血以下 endurance += 0.25（蠕虫围巾 0.17 走 enduranceEq）
       + (this.buffs.has(BuffType.IceBarrier) && this.hp <= this.maxHp / 2 ? 0.25 : 0);
     // 玩家受伤防御难度系数（Main.cs:65646-65657 CalculateDamagePlayersTake：
-    // 经典 0.5 / 专家 0.75 / 大师 1.0，Journey 同经典档；防御步先截断，endurance 后乘）
+    // 经典 0.5 / 专家 0.75 / 大师 1.0，Journey 同经典档；防御步返 double 不截断）
     const diff = scaleStatsWorld().difficulty;
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
     // 日曜护盾（:37699-37720:套装在场且有层 → 消耗 1 层,该次伤 ×0.2+solarCounter 清零;
@@ -11857,13 +11872,25 @@ export class Player extends Entity {
       this.solarShields--;
       this.solarCounter = 0;
     }
-    const solarMul = solarConsumed ? 0.2 : 1;
     // ★BJ585（2026-10-09）：取整改 (int) 截断语义（floor，正数域同构）——原版
     //   Player.Hurt :38590 `num2 = (int)((double)(1f - endurance) * num2)`、
     //   :38672 `statLife -= (int)num2`（CalculateDamagePlayersTake 返回 double 不含
     //   取整）。旧 Math.round 在半点档向上多扣 1（用户实测 51 防 22.75 → 实扣 23，
     //   原版 22；100 伤 → 62 vs 原版 61）。
-    const reduction = Math.max(1, Math.floor((dmg - this.defense * defF) * (1 - endurance) * solarMul));
+    // ★R15-F9：拆步截断展开（逐段 (int)）——
+    //   防御步（double,下限 1 :65652）→ endurance 步（(int) :38590）→ 日曜护盾步
+    //   （(int)×0.8 :38601,num5=0.2f）→ 甲虫步（(int)×(1−0.15·orbs) :38612,球消耗
+    //   在步内 :38613）→ 尾下限 1（:38661 `if (num2 < 1.0) num2 = 1.0`）→
+    //   statLife −= (int)num2（:38672,num2 步后恒整数值）。圣骑士步未建模（见上）。
+    let num2 = Math.max(1, dmg - this.defense * defF);       // CalculateDamagePlayersTake
+    num2 = Math.floor(num2 * (1 - endurance));               // :38590 (int)
+    if (solarConsumed) num2 = Math.floor(num2 * 0.8);        // :38601 (int)（num5=0.2f→×0.8）
+    if (eq.beetleDef && this.beetleOrbs > 0) {               // :38605-38613 甲虫步
+      num2 = Math.floor(num2 * (1 - 0.15 * this.beetleOrbs)); // :38612 (int)（orbs=消耗前值）
+      this.beetleOrbs--;                                     // :38613 步内即减（原位次）
+      (this as unknown as { __swBeetle?: { resetCounter(): void } }).__swBeetle?.resetCounter();
+    }
+    const reduction = Math.max(1, num2);                     // :38661 下限 1 + :38672 (int)
     this.hp -= reduction;
     // 受击闭眼 20t（Player.Hurt :37916 eyeHelper.BlinkBecausePlayerGotHurt——
     // 与无敌帧同步的全闭眼优先档，仅对真正造成伤害的命中）
@@ -11885,13 +11912,10 @@ export class Player extends Entity {
     if (pvp && this.hp <= 0) this.lastPvpDeath = true;
     this.sinceHurt = 0; // 受击打断自然回血
     this.lifeRegenTime = 0; // 同源清零（Player.Hurt :37784 lifeRegenTime=0）
-    // 甲虫防御壳受击掉一颗（Player.Hurt :38608-38625：仅 beetleDefense 侧消费，
-    // 减伤 0.15×orbs 同拍先行（:6448 同序）；掉球后蓄能计数清零（:38624 →
-    // BeetleMeter.resetCounter，meter 挂玩家对象）。猛攻族不掉球——自然抽水衰减）
-    if (eq.beetleDef && this.beetleOrbs > 0) {
-      this.beetleOrbs--;
-      (this as unknown as { __swBeetle?: { resetCounter(): void } }).__swBeetle?.resetCounter();
-    }
+    // 甲虫防御壳受击掉一颗（Player.Hurt :38608-38625）——★R15-F9 迁位：球消耗
+    //   原文在甲虫减伤步内（:38613,先于 statLife 写面 :38672），旧注置于 hp 写后
+    //   =位次后置；现随拆步截断上移至乘区内（见上方 reduction 段）。仅 beetleDefense
+    //   侧消费；掉球后蓄能计数清零（:38624 → BeetleMeter.resetCounter）。猛攻族不掉球
     // 隐身药水受击破隐（Hurt :38566-38575 `if (invis) DelBuff(10)`——buff 10 在栏
     // 即删。R5-F27：旧受击不破隐,已补）
     if (this.buffs.has(BuffType.Invisibility)) this.buffs.remove(BuffType.Invisibility);

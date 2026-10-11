@@ -43,7 +43,13 @@ export interface TileGlowOp {
  *   · :1101-1118 finalColor 段 case 129：`finalColor = new Color(255,255,255,100)`（碎块域）
  *     /`fx>=324 → Color.Transparent`（凝胶域本体层不画）；**vector 抖动全域生效**：
  *     fy<36 → vector.Y += 2×(fy==0 ? +1 : -1)；else → vector.X += 2×(fy==36 ? +1 : -1)。
- *   · :1196-1341 glow 段（GlowMask 层,在 DrawBasicTile(:1527) 本体主绘【之前】）case 129：
+ *   · :1197-1341 glow 段（GlowMask 层,★F11 注释订正 2026-10-11：旧注「在
+ *     DrawBasicTile(:1527) 本体主绘【之前】」系行号误读——:1527 是 DrawBasicTile
+ *     方法定义行,调用点 = :1194 且【先于】glow 段;实际序 = 首绘 DrawBasicTile
+ *     （:1194,凝胶域 finalColor=Transparent 不出像素/碎块域=(255,255,255,100) 出像素）
+ *     → glow 段四带 → 尾笔 color2=(255,255,255,100) 本体帧重画（:1330-1321 直绘
+ *     TileBatch.Draw）。可见像素序「辉光先/本体后」结论维持（红蓝-G② 同序）,仅锚
+ *     由定义行 :1527 改正为调用点 :1194+尾笔 :1321）case 129：
  *     碎块域 flag3=true 跳过；凝胶域 4×白模带
  *     （src=(fx+addFrX, fy+addFrY+72),调制=hslToRgb(0.7+sin(2π·GTW·0.16+x·0.3+y·0.7)×0.16,1,0.5),
  *     A/=2×0.3=38,dest=vector±(2,0)/(0,2) 四向）→ 尾笔 color2=(255,255,255,100) 本体帧

@@ -134,3 +134,35 @@ export function auraGlowTint(light: readonly [number, number, number]): [number,
 
 /** color74.A（:32499）——XNA AlphaBlend dst 衰减面（A>0 → source-over ×alpha）。 */
 export const AURA_GLOW_ALPHA = 127 / 255;
+
+// ---- ★R15-F1/F2（2026-10-11 C15 清偿）哨兵族辉光数据面（Main.cs DrawProjDirect）----
+//  · F1 火爆塔 663/665/667（:34426-34445）：GlowMask 221/222/223 与本体同布局平行表
+//    （rectangle23 已在 :34077-34082 半宽化——X += Width iff ai[2]==1 携行）。脉冲驱动
+//    =AI_130 每拍 `++localAI[0]>=300 → 0`（Projectile.cs:69183/:69235/:69287 三档同式,
+//    300t 周期自由环）;num434 = (localAI[0]/100·2π).ToRotationVector2().X×1 + 1
+//    = cos(θ)+1 ∈ [0,2]（:34430）;色 = Color(140,100,40,0)×(num434/4+0.5)（A=0 纯加法
+//    ——XNA α=0 习语,dst 不衰减）×4 份（num435=0..3,offset=(k·π/2).ToRotationVector2()
+//    ×num434,右/下/左/上,世界系偏移不随 dir 镜像）。锚/origin/rotation/scale/dir 同本体
+//    663 支（vector99=Bottom、origin32=(半宽/2,半高−4)、:34444 同矩形同参）。
+//  · F2 爆炸机关 691/692/693（:34507-34521）：GlowMask 235/236/237 同矩形（全帧宽——
+//    691 支无半宽化 :34087-34096）,色 = Color(255,255,255,127) 字面（A=127 source-over
+//    半透白,XNA AlphaBlend dst 衰减面——flushItemGlow over 支 bake/boost 分解承载）,
+//    锚/origin 同本体（vector99/origin32 于 :34089-34096 非携行重锚;携行态=B 支缺省）。
+//    均不取光照（字面色,非 color106/GetAlpha 链）→ 本仓 pushGlowOps 合成后逃逸
+//    （BJ625件3 同判例）。
+export const FLAMEBURST_GLOW_MASK: Readonly<Record<number, number>> = { 663: 221, 665: 222, 667: 223 };
+export const TRAP_GLOW_MASK: Readonly<Record<number, number>> = { 691: 235, 692: 236, 693: 237 };
+
+/** F1 num434（:34430）：(localAI[0]/100·2π) 旋转向量 X 分量 + 1 = cos(θ)+1 ∈ [0,2]。 */
+export function flameburstGlowRadius(localAI0: number): number {
+  return Math.cos((localAI0 / 100) * Math.PI * 2) + 1;
+}
+
+/** F1 color117（:34431）：Color(140,100,40,0)×(num434/4+0.5)——A=0 纯加法语义下
+ *  贡献 = tex×(rgb/255)×乘子 → 本仓 'add' 支 tint=rgb/255、alpha=乘子。 */
+export function flameburstGlowTintAlpha(localAI0: number): { tint: [number, number, number]; alpha: number } {
+  return { tint: [140 / 255, 100 / 255, 40 / 255], alpha: flameburstGlowRadius(localAI0) / 4 + 0.5 };
+}
+
+/** F2 color74 同款白 A=127（:34521——与 AURA_GLOW_ALPHA 同值异源,独立转录防跨域耦合）。 */
+export const TRAP_GLOW_ALPHA = 127 / 255;

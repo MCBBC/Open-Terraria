@@ -575,6 +575,44 @@ const HOLD_STYLE_ITEMS = new Set([
   282, 286, 3112, 3002, 4776, 5643,
 ]);
 
+/** ★C13-F5 蠕虫血条头→尾中点映射族（Main.cs:46743-46781 switch 1:1）：
+ *  {7→9 掘墓者, 10→12 吞噬怪, 39→41, 87→92 骨蛇, 95→97 水蛭, 98→100 世界喂食者,
+ *   117→119 飞龙, 412→414 血鳗, 454→459 沙漠虫, 510→512, 513→515, 621→623 血鱿鱼}——
+ *  头段血条锚 = (头.position+尾.position)/2 + (头.width/2, 头.height/2)
+ *  （:46902-46911 DrawInterface_Healthbar_Worm;尾 = 本仓 wormNext 链端近似）。
+ *  未入表蠕虫（EoW 13/14/15 等）原版走 default per-段条——本仓维持 head-only 登记近似 */
+const HB_WORM_MID_HEADS: ReadonlySet<number> = new Set([
+  7, 10, 39, 87, 95, 98, 117, 412, 454, 510, 513, 621,
+]);
+
+// ===================== ★C13-F2 socialGhost 甲件渐隐呼吸钟 =====================
+// Main.gFader/gFade/gFadeDir（Main.cs:718-722,初值 0/-/1=上）——DoUpdate_Animate-
+// VisualPlayerAura（:19752-19770）每帧 ±0.1、gFade=(byte)gFader 截断、gFade>150
+// 转降 / gFade<100 转升（byte 域 99..151 呼吸,60fps 定步）。消费 = socialGhost 甲
+// 三色 A 钳制（PlayerDrawSet.cs:1501-1511）+ 翅膀 11 头环（PlayerDrawLayers.cs:976-978
+// 本仓未建模,登记）+ 学徒时装 GetAlpha（Item.cs:49256 世界掉落 sprite 面未建模,登记）。
+// 本仓 = 渲染侧 dt 缩放步进（渲染帧率无关,均值=原版 ±6.0/s@60fps;换页/卡顿 dt 钳
+// 100ms;拍照分块 pass 不步进）。暂停不冻结（原版 DoUpdate_Animate 在 gamePaused
+// 早退段之后照跑 = tile 动画同域判例）。
+let _gAureoleFader = 0;
+let _gAureoleDir: 0 | 1 = 1;
+let _gAureoleTickAt = -1;
+export function advanceGhostAureole(nowMs: number): number {
+  const dt = _gAureoleTickAt < 0 ? 1000 / 60 : Math.min(100, nowMs - _gAureoleTickAt);
+  _gAureoleTickAt = nowMs;
+  _gAureoleFader += (_gAureoleDir === 1 ? 0.1 : -0.1) * (dt / (1000 / 60));
+  const fade = Math.max(0, Math.trunc(_gAureoleFader));
+  if (_gAureoleDir === 1) { if (fade > 150) _gAureoleDir = 0; }
+  else if (fade < 100) _gAureoleDir = 1;
+  return fade;
+}
+/** 测试隔离用（tests/c13 直测呼吸钟相位面——重置模块态到任意相位） */
+export function resetGhostAureole(fader = 0, dir: 0 | 1 = 1): void {
+  _gAureoleFader = fader;
+  _gAureoleDir = dir;
+  _gAureoleTickAt = -1;
+}
+
 /** 原版 noWet=true 物品集（Item.cs 逐 case 字面 `noWet = true` 63 件 + DefaultToTorch
  *  无 allowWaterPlacement 族 7 件（4383,4385-4388,5293,5353；:48086 `noWet = !allowWater`
  *  ——4384 水可放火把 allowWater=true → noWet=false 排除）。★523/1333/4384 手写火把块
@@ -1118,7 +1156,7 @@ import {
   resolveFaceLayers, faceLayerSplitPlan, FACE_HEAD_OFFSET_IDS, FACE_HEAD_HELMET_OFFSET,
   accCompositeArmSrcRect,
 } from '../data/vanillaAccDrawslots';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, sm2PoolEnabled, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustPmCacheEvictGen, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
@@ -5547,6 +5585,7 @@ export class Renderer {
     // 世界模拟照跑(fixedUpdate 独立),画面冻结——向已死上下文刷绘制只会喂大事件风暴
     if (this.gpuDegraded) return;
     this.animTick++;
+    if (!this._capturePass) this._gFade = advanceGhostAureole(performance.now());   // ★C13-F2 呼吸钟（拍照分块不步进）
     this.iconOverlayFrameGate();   // 交互图标上浮层帧守恒（SW-BJ114,方法注）
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this.armorGlowQueue.length = 0;   // ★BJ597 甲位 glow 队列逐帧重建（flush 亦自愈重置）
@@ -6597,7 +6636,7 @@ export class Renderer {
     //  原式）。同层登记不落刀：DD2 波间倒计时(:46866 同层)/镇民"!"图标(:46855
     //  同层)仍在原位（低暴露,另立刀）；原版 ShowLife/shimmerTransparency==0 门
     //  （:46605）本仓未建模,登记。
-    const hbPass: Array<{ e: Enemy | TownNPC; expert: boolean }> = [];
+    const hbPass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number }; stealthA?: number }> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) {
@@ -6615,7 +6654,7 @@ export class Renderer {
         //   drawEnemy 内唯一回写面 spriteBottomWorld 陈旧只喂屏外血条=零视觉差,
         //   副作用巡检表见批档案）。MustAlwaysDraw 族在 npcOffscreen 内恒画。
         if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
-        hbPass.push({ e, expert: world.isExpert });
+        hbPass.push(this.hbEntryOf(e, world.isExpert, player, viewW));
         this.drawDd2CrystalCountdown(e, world);   // ★BJ454（548 波间倒计时,Main.cs:46866）
       }
       // ★r15 R15-5:掉落物摘出排序循环——原版 DrawItems(:63226)在
@@ -6715,24 +6754,18 @@ export class Renderer {
       for (const paint of this.prismCrystalQueue) paint();
       this.prismCrystalQueue.length = 0;
     }
-    // PvP 头顶血条（备案偏差：原版无玩家头顶名/血条——仅悬停提示与地图头像边框；
-    // 真联机 PvP 下"谁是可攻击目标"是核心信息，按计划以头顶条替代）。
-    // 仅 hostile 目标显示（同队/非 hostile 玩家无条），队伍色描边 + 原版血条同款
-    // 绿→黄→红渐变填充；受伤即显示（对齐 DrawHealthBar 的 life!=lifeMax 门）
-    for (const rp of this.remotePlayers) {
-      if (!rp.hostile || rp.hp >= rp.maxHp || rp.dead) continue;
-      const tc = TEAM_COLORS[Math.max(0, Math.min(5, rp.team))];
-      const x = rp.cx - 19, y = rp.y - 14;
-      const fill = Math.max(0, Math.min(1, rp.hp / rp.maxHp));
-      const r = Math.round(fill > 0.5 ? 255 * (1 - fill) * 2 : 255);
-      const g = Math.round(fill > 0.5 ? 255 : 255 * fill * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(x - 1, y - 1, 40, 6);
-      ctx.fillStyle = `rgb(${tc[0]},${tc[1]},${tc[2]})`;
-      ctx.fillRect(x - 1, y - 1, 40, 2);
-      ctx.fillStyle = `rgb(${r},${g},0)`;
-      ctx.fillRect(x, y, 38 * fill, 4);
-    }
+    // PvP 玩家血条（★C13-F6 2026-10-11 升级：旧自造 rect 条——hostile 门+队伍色描边
+    // +fillRect 渐变——整组退役,升级原版 DrawHealthBar 贴图版并收编 hbPass 全亮域
+    // 单 pass（恒最上主旨,见 hbPass 收集面注）。原版玩家段 = Main.cs:46882-46900
+    // （NPC 段【之后】的 k 循环）：门 = active&&!ghost&&!dead&&!invis&&statLife !=
+    // statLifeMax2（:46886 【无 hostile 门】——受伤远端玩家恒显示,同队也显示）、
+    // 锚 = Bottom+(0,+10)（HealthBarDrawSettings==1 档 :46885;2 档顶部条本仓无,登记）、
+    // alpha = stealth×Brightness（:46887）。消费面 = flushEntityHealthBars 内
+    // this.remotePlayers 直读（本仓该字段逐帧快照,血条 pass 在世界/光照/滤镜链后,
+    // 与 NPC 条同层同域;ghost/invis 字段本仓无——:19570 同账登记）。原版无玩家
+    // 头顶【名】——本仓亦未画名,备案偏差面维持）
+    // （原位自造 rect 条已移除——fillRect 面与世界层耦合会被后绘内容覆盖,同 BJ593
+    //  「血条错误镜像偏转」覆盖病同根,收编后根治）
 
     // 4.35 掉落物（★r15 R15-5：原版 DrawItems(M57:63226) 在
     //     DrawPlayers_AfterProjectiles(:63204) 与 DrawCachedNPCs(OverPlayers)
@@ -7490,6 +7523,8 @@ export class Renderer {
     // 15 类特化条（双子合血/世吞恒定分母/克脑+爬行者/石巨人两件/月总四件/四塔盾量
     // /火星碟/海盗船 4 炮/鹿角怪敌意门/NeverValid 压制）+ Common 兜底；数值一律由
     // 条自身聚合——Game 侧 boss 槽旧参数（含 EoW ×150 近似分母）自此退役）
+    // ★618-R3F2:lock-on 括弧挪出 if(snap)(非 Boss 目标也有条)——屏空间直绘
+    this.drawLockOnBrackets(ctx, cam, viewW, viewH, entities);
     {
       const snap = this.bossBars.tick(this.buildBarContext(entities, player, world, cam, viewW, viewH));
       if (snap) {
@@ -7502,8 +7537,6 @@ export class Renderer {
           ctx.scale(bs, bs);
           ctx.translate(-viewW / 2, 0);
         }
-        // ★614:lock-on 括弧(世界覆盖物;目标=Game.lockOnTargetId)
-        this.drawLockOnBrackets(ctx, cam, entities);
         this.drawBossBar(ctx, viewW, viewH, snap);
         if (bs !== 1) ctx.restore();
       }
@@ -10167,6 +10200,7 @@ export class Renderer {
   private static readonly HB_BIG_SCALE = new Set([
     4, 35, 36, 50, 113, 114, 125, 126, 127, 128, 129, 130, 131, 222, 262, 266,
     245, 246, 247, 248, 249, 564, 565, 551, 576, 577, 87, 510, 454, 621, 439, 370,
+    134, 135, 136,   // ★C13-F5 毁灭者：分支内显式 scale=1.5（:46716;链段条 head-only 不受 135/136 影响）
   ]);
   /** NPCAddHeight（Main.cs:21840-22005）：血条在脚底 +10 之上的额外下沉（视觉修正） */
   /** ★BJ584（2026-10-09）：原版 FindFrame【从不写 spriteDirection】的 AI_001 史莱姆全族
@@ -10210,35 +10244,93 @@ export class Renderer {
     671: 10, 672: 10, 673: 10, 674: 10, 675: 10,   // 笼中鸟族（switch 尾 :22385-22389,曾漏）
   };
 
+  /** ★C13-F5 血条入口档（hbPass 收集面→drawHealthBar 之间的锚分型产出,2026-10-11）：
+   *  仅主通道（非 behindTiles/hide）Enemy 调用——毁灭者锚需 player/viewW 语境,
+   *  在收集期一次算毕（原版 flag 面每帧恰一次,:46714-46752;本仓 head(134) 唯一
+   *  消费段=等价频次）。
+   *  · 毁灭者 134（:46714-46752 1:1）：closest 段（player.Center 欧氏最近——原版
+   *    `vector2.Length() < num4 && Collision.CanHit(...)`,CanHit 面本仓无等值,
+   *    nearest 近似登记）→ destroyerHB 平滑（首设/(×49+v)/50 慢跟/超 viewW 重置）,
+   *    锚 = 平滑位 + head.width/2 + head.height/2（段中心;无 +10/NPCAddHeight 面）。
+   *  · 蠕虫头映射族（HB_WORM_MID_HEADS,:46902-46911 1:1）：锚 = (头.x+尾.x)/2 +
+   *    头.w/2、(头.y+尾.y)/2 + 头.h/2;尾 = wormNext 链端（原版=首个尾 type 段,
+   *    链断时本仓停在断点,登记）。 */
+  private hbEntryOf(e: Enemy, expert: boolean, player: Player, viewW: number):
+    { e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number } } {
+    const entry: { e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number } } = { e, expert };
+    if (e.dead || e.hp <= 0 || e.hp >= e.maxHp) return entry;   // 门（:46606 life!=lifeMax）不开锚
+    if (e.vanillaId === 134) {
+      let best: Enemy | null = null;
+      let bestD = Infinity;
+      for (let s: Enemy | null = e; s; s = s.wormNext) {
+        const d = Math.hypot(player.cx - s.cx, player.cy - s.cy);
+        if (d < bestD) { bestD = d; best = s; }
+      }
+      if (best && bestD < viewW) {   // :46719-46721 num4 < screenWidth 门
+        if (this._destroyerHB.x < 100 && this._destroyerHB.y < 100) {
+          this._destroyerHB = { x: best.x, y: best.y };
+        } else {
+          this._destroyerHB = { x: (this._destroyerHB.x * 49 + best.x) / 50, y: (this._destroyerHB.y * 49 + best.y) / 50 };
+        }
+        entry.hbAnchor = { x: this._destroyerHB.x + e.w / 2, y: this._destroyerHB.y + e.h / 2 };
+      } else {
+        this._destroyerHB = { x: 0, y: 0 };   // :46747-46750 else destroyerHB=(0,0)
+      }
+    } else if (!e.wormFollow && e.vanillaId != null && HB_WORM_MID_HEADS.has(e.vanillaId)) {
+      let tail: Enemy | null = null;
+      for (let s = e.wormNext; s; s = s.wormNext) {
+        if (s.dead) break;
+        tail = s;
+      }
+      if (tail) entry.hbAnchor = { x: (e.x + tail.x) / 2 + e.w / 2, y: (e.y + tail.y) / 2 + e.h / 2 };
+    }
+    return entry;
+  }
+
   /** 受伤实体血条（DrawInterface_14_EntityHealthBars Main.cs:45203 + DrawHealthBar :21748）：
    *  life != lifeMax 即显示（无时间衰减——原版打到没满血就一直显示）；画在脚底
    *  +10+NPCAddHeight；填充 36px×比例；绿→黄→红渐变（:21766-21778）；光照亮度调
-   *  alpha（:45417 Brightness）。蠕虫段不画（头部血条代表全链）；毁灭者原版为
-   *  全链共享一条（destroyerHB 平滑），此处近似画在头下。专家档克脑 266 不画
+   *  alpha（:45417 Brightness）。★C13-F5 锚/α 分型（2026-10-11）：毁灭者 134-136 =
+   *  destroyerHB 平滑锚+α=(Brightness+1)/2+scale 1.5（:46714-46752,链唯一条,本仓
+   *  head(134) 唯一消费段）;蠕虫头映射族 = (头+尾)/2 中点锚（:46902-46911,
+   *  hbEntryOf 产 hbAnchor 覆写）;EoW 13/14/15 等未映射族原版走 per-段条
+   *  （:46787 default）——本仓维持 head-only+头下锚（既有登记近似不扩）。
+   *  ★C13-F3/F4 门（:46710）：690 无条件排除、439/440 仅 ai0==5。
+   *  ★C13-F6 玩家条同漏斗：stealthA 入参 × 光照（:46887）。专家档克脑 266 不画
    *  （Main.cs:45321 `(!expertMode || type != 266)` 门——有四镜像在,血条会穿帮）。 */
   /** ★BJ593（2026-10-09）屏空间化：调用面=flushEntityHealthBars 全亮域单 pass
    *  （原版 Interface_14 语义,见 hbPass 收集面注）。几何/染色/分段与 BJ584 谙面
    *  逐位不变（填充恒左锚 e.cx-18·scale 起笔/零朝向消费/36px×比例）,唯 dest 换算
    *  世界→屏（worldToScreen+zoom;flipY 锚镜像=原版 :22129-22132
    *  `num4 = screenHeight - (num4 - screenY)` 原式,gd=1 恒等）。 */
-  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number }, expert: boolean, cam: Camera) {
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number; hbAnchor?: { x: number; y: number }; stealthA?: number; ai0?: number }, expert: boolean, cam: Camera) {
     const hp = e.hp, maxHp = e.maxHp;
     if (hp <= 0 || hp >= maxHp) return;
     if (e.wormFollow) return;
     if (expert && e.vanillaId === 266) return;   // Main.cs:45321
+    // ★C13-F3/F4（Main.cs:46710 门 1:1）：`(!expertMode || type != 266) && type != 690
+    //  && ((type != 439 && type != 440) || ai[0] != 5f)`——690 雕像宝箱怪无条件排除;
+    //  439 拜月教邪教徒/440 僵尸教徒仅 ai[0]==5 态显示（仪式态;本仓 439 AI 的 ai0
+    //  相位面若未建模到 5 = 恒隐,保守方向,登记）。
+    if (e.vanillaId === 690) return;
+    if ((e.vanillaId === 439 || e.vanillaId === 440) && e.ai0 !== 5) return;
     if (!this.atlas) return;
     const hb1 = this.atlas.ensureVImage('vanilla/HealthBar1.png');
     const hb2 = this.atlas.ensureVImage('vanilla/HealthBar2.png');
     if (!hb1 || !hb2) return;
     const vid = e.vanillaId ?? 0;
     const scale = Renderer.HB_BIG_SCALE.has(vid) ? 1.5 : 1;
-    const wx = e.cx - 18 * scale;
+    let wx = e.cx - 18 * scale;
     // 原版条位 = 盒底+10+NPCAddHeight（num47 已含该类型贴图下沉量,鸟妖 32/双子 30…
     // ——2026-08-24 中心锚勘误后贴图底=盒底+num47+帧半高,若仍对全体取 max(贴图底+6)
     // 会把条推到帧底透明边距之下=比原版低 20-40px）。max 兜底只服务【校准偏差族】
     // （EoC 4:+23/+30 用户校准下移,num47=0 原版公式够不着眼球底）
-    const wy = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
+    // ★C13-F5 锚分型覆写（hbEntryOf 产出）：毁灭者 134 = destroyerHB 平滑位+段
+    //  width/2+height/2（:46730-46732,无 +10/NPCAddHeight 面）、蠕虫头 = (头+尾)/2
+    //  中点+头 width/2+height/2（:46902-46911 DrawInterface_Healthbar_Worm）
+    let wy = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
       (vid === 4 && e.spriteBottomWorld) ? e.spriteBottomWorld + 6 : -Infinity);
+    if (e.hbAnchor) { wx = e.hbAnchor.x - 18 * scale; wy = e.hbAnchor.y; }
     // 屏空间换算（worldToScreen 内含 punch 位移;flipY = 原版 gravDir==-1 锚镜像）
     const [sx, sy0] = cam.worldToScreen(wx, wy);
     const x = sx;
@@ -10253,6 +10345,11 @@ export class Renderer {
       // 平均,非 max 通道）——蓝火把 (0,0.1,1.3) 下原版 ≈0.56、max 读法 ≈1.56
       aQ = Math.round(((lr + lg + lb) / (3 * 255)) * 7) / 7;
     }
+    // ★C13-F5 毁灭者 alpha = (Brightness+1)/2（Main.cs:46729-46732——恒 ≥0.5,
+    //  深处链体条不没入黑暗）;★C13-F6 玩家条 alpha = stealth×Brightness
+    //  （Main.cs:46887 `player[k].stealth * Lighting.Brightness(...)`）
+    if (vid === 134 || vid === 135 || vid === 136) aQ = (aQ + 1) / 2;
+    if (e.stealthA !== undefined) aQ *= e.stealthA;
     // 全黑也留一点可见度（光照区外 lightAt=0 的兜底）——自造辅助,登记（原版全黑暗条）
     if (aQ <= 0) aQ = 0.15;
     // 颜色（:21766-21778）：n=hp%-0.1；>0.5 绿满红减，否则红满绿增
@@ -10288,13 +10385,28 @@ export class Renderer {
    *  7a-pre 标尺之后（表序 1_2<4<14）/ 8 飘字之前。恒最上：后绘实体/弹幕（鞭弧
    *  postPlayerDraws :6573）/尘/落叶/天气不再覆盖血条 = 用户实报「血条错误镜像
    *  偏转」（苔藓黄蜂群叠+鞭弧扫过被标靶场景）根治。 */
-  private flushEntityHealthBars(pass: Array<{ e: Enemy | TownNPC; expert: boolean }>, cam: Camera): void {
-    if (!pass.length || !this.ctx) return;
+  private flushEntityHealthBars(pass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number }; stealthA?: number }>, cam: Camera): void {
+    if (!pass.length && !this.remotePlayers.length) return;
+    if (!this.ctx) return;
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（BJ553 标记同款）
     ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
     for (const { e, expert } of pass) this.drawHealthBar(e, expert, cam);
+    // ★C13-F6 玩家血条（原版玩家段 Main.cs:46882-46900 在 NPC 段【之后】= 玩家条盖
+    //  NPC 条）：门 = active&&!ghost&&!dead&&!invis&&statLife != statLifeMax2
+    //  （:46886 【无 hostile 门】——受伤远端玩家恒显示,同队同;ghost/invis 字段本仓
+    //  无（:19570 同账登记）,remotePlayers 仅含 active）;锚 = Bottom+(0,+10)
+    //  （HealthBarDrawSettings==1 档 :46885;2 档顶部条本仓无,登记）;alpha =
+    //  stealth×Brightness（:46887,stealthA 入参）;scale 1（玩家无 1.5 档）。
+    //  DrawHealthBar 内层 `Health <= 0` 早退 → hp<=0 同效并入门。
+    for (const rp of this.remotePlayers) {
+      if (rp.dead || rp.hp <= 0 || rp.hp >= rp.maxHp) continue;
+      this.drawHealthBar(
+        { cx: rp.cx, cy: rp.cy, y: rp.y, h: rp.h, hp: rp.hp, maxHp: rp.maxHp, vanillaId: null, stealthA: rp.stealth },
+        false, cam,
+      );
+    }
     ctx.restore();
   }
 
@@ -11861,7 +11973,7 @@ export class Renderer {
             vid: 289, tex: 'vanilla/NPC_289.png',
             sy: r.sy, sw: r.sw, sh: r.sh,
             cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
-            tint: [250, 250, 250], tintA: 100, // ★C9 变异:半透恒量漂移
+            tint: [250, 250, 250], tintA: 50,
           });
         } else if (e.vanillaId === 440 || e.vanillaId === 30 || e.vanillaId === 665
           || e.vanillaId === 25 || e.vanillaId === 59 || e.vanillaId === 60) {
@@ -13961,6 +14073,12 @@ export class Renderer {
    *  QueenSlime pass 经 fx-sm2-v0-commute 实测 Δ=1 可交换,输出仅依赖(uTime,切片)。 */
   private qsWashCache = new Map<string, HTMLCanvasElement>();
   private qsWashPruneAt = 0;
+  /** ★SM2 池化随刀（2026-10-11）：洗染输出画布 free-list——qsWashCache 淘汰画布按
+   *  尺寸键回收（战斗期 5 桶/s 的 createElement/销毁 churn 消化;同 idx 洗染 cell
+   *  尺寸恒定,命中=零画布创建）。?smpool=0 时旁路（照旧 createElement,现状逐位）。
+   *  复用安全性：淘汰=200ms 桶过期+容量帽,消费方（drawQueenSlime 同步 drawImage）
+   *  早已结束,无持引用窗口。 */
+  private qsWashFree = new Map<string, HTMLCanvasElement[]>();
   private queenSlimeWashedCell(
     e: Enemy, img: ImageBitmap | HTMLImageElement,
     g: { cellW: number; cellH: number; perRow?: number; inflateY?: number },
@@ -13981,12 +14099,28 @@ export class Renderer {
     if (qsCached) return qsCached;
     if (performance.now() - this.qsWashPruneAt > 2000) {
       this.qsWashPruneAt = performance.now();
-      while (this.qsWashCache.size >= 16) this.qsWashCache.delete(this.qsWashCache.keys().next().value as string);
+      while (this.qsWashCache.size >= 16) {
+        const k0 = this.qsWashCache.keys().next().value as string;
+        const ev = this.qsWashCache.get(k0)!;
+        this.qsWashCache.delete(k0);
+        if (sm2PoolEnabled() && ev.width > 0) {   // ★SM2 池化:淘汰画布按尺寸键回收(cap 4/尺寸)
+          const fk = `${ev.width}x${ev.height}`;
+          let fl = this.qsWashFree.get(fk);
+          if (!fl) { fl = []; this.qsWashFree.set(fk, fl); }
+          if (fl.length < 4) fl.push(ev);
+        }
+      }
     }
     try {
       const pass = getPass('QueenSlime');
       if (!pass) return null;
-      const cv0 = document.createElement('canvas');
+      // ★SM2 池化:同尺寸回收画布优先（?smpool=0 旁路=createElement 现状逐位）
+      let cv0: HTMLCanvasElement | undefined;
+      if (sm2PoolEnabled()) {
+        const fl = this.qsWashFree.get(`${sw}x${sh}`);
+        if (fl && fl.length) cv0 = fl.pop();
+      }
+      if (!cv0) cv0 = document.createElement('canvas');
       cv0.width = sw; cv0.height = sh;
       const c0 = cv0.getContext('2d', { willReadFrequently: true });
       if (!c0) return null;
@@ -17041,6 +17175,13 @@ export class Renderer {
   /** ★BJ603 LocalPlayer.miscCounter 渲染帧快照（render() 头写入;弹幕 glowMask
    *  相位双画 1101/1102 消费——Proj 类 draw 侧无 Player 引用） */
   private _localMiscCounter = 0;
+  /** ★C13-F5 毁灭者血条平滑锚（Main.destroyerHB Main.cs:46721-46750 1:1）：世界
+   *  坐标段左上角;首帧直设（<100 双轴判定=新值）、其后 (hb*49+closest)/50 慢跟、
+   *  closest 段超 screenWidth 重置 (0,0)。跨帧持久（原版 Main 静态同寿） */
+  private _destroyerHB = { x: 0, y: 0 };
+  /** ★C13-F2 Main.gFade 现值（render() 头步进,drawPlayer 消费=socialGhost 甲件
+   *  A 钳制 gFade/255） */
+  private _gFade = 0;
 
   /** 全亮翅膀绘制队列（mainGlow 主纹理 + 全部叠画；光照合成后 flush） */
   private wingGlowQueue: Array<{
@@ -18899,9 +19040,13 @@ export class Renderer {
     row: number, pad: number,
     color: { r: number; g: number; b: number },
     back: boolean,
+    ghostA = 1,
   ): void {
     const layer = p.appearance ? dollHairLayer(p.appearance, equip?.head ?? 0) : null;
     if (!layer) return;
+    // ★C13-F2：发 = colorHair 族（PlayerDrawSet.cs:1492 socialGhost → Transparent）
+    //  ——后发整支/前发段整隐;头甲续画 A×ghostA（colorArmorHead A 钳 :1501-1503）
+    if (ghostA < 1 && back) return;
     const tinted = hairFrameTinted(layer, row, color);
     if (!tinted) return;
     const ctx = this.ctx;
@@ -18912,21 +19057,26 @@ export class Renderer {
     }
     // 前发层（backHairDraw 时只画顶部 26px——PlayerDrawSet:1751-1753）
     const frontH = layer.back ? 26 : FRAME_H;
-    ctx.drawImage(tinted, 0, 0, FRAME_W, frontH, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, frontH);
+    if (ghostA >= 1) {
+      ctx.drawImage(tinted, 0, 0, FRAME_W, frontH, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, frontH);
+    }
     const head = headArmorImage(equip?.head ?? 0);
     if (head) {
       // ★五百六十八:armor dye 管线(head slot;dye[0]→dyeApplyOf→cached bake;
       //  vanilla ApplyItemDye 渲染面——paperdoll 合成层不经过 dye=直绘替代)
       const headDye = p.inv?.dye?.[0];
       const dyeVid = headDye ? (ITEM_DEFS[headDye.id]?.vid ?? -1) : -1;
+      const ga = ctx.globalAlpha;
+      if (ghostA < 1) ctx.globalAlpha = ga * ghostA;   // ★C13-F2 头甲 A×gFade
       if (dyeVid > 0) {
         const emu = dyeApplyOf(dyeVid);
         if (emu) {
           const dyed = this.armorDyeBake(head, emu, dyeVid, 0, `hd:${equip?.head ?? 0}`);
-          if (dyed) { ctx.drawImage(dyed, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H); return; }
+          if (dyed) { ctx.drawImage(dyed, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H); ctx.globalAlpha = ga; return; }
         }
       }
       ctx.drawImage(head, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
+      ctx.globalAlpha = ga;
     }
   }
 
@@ -19381,9 +19531,22 @@ export class Renderer {
       }
       accRows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, accDollEquip?.legs ?? 0);
     }
+    // ★C13-F2 socialGhost 门（Player.cs:37326-37328 SetArmorEffectVisuals 1:1）：
+    //  (head==101||head==156) && body==66 && legs==55（学徒套装全家福,visual 槽=
+    //  displayArmor 时装优先同式——狼/人鱼覆写/OverrideHelmet 清槽在门【前】已落,
+    //  与原版覆写序同相）。消费 = 皮肤族整隐 + 甲件/甲色族配饰 A 钳 Main.gFade
+    //  （PlayerDrawSet.cs:1489-1516——钳制【先】于甲潜行乘（:1523-1651 在后）→
+    //  A = min(gFade,甲A)×s',乘法可交换）;gFade 呼吸钟 = render() 头步进
+    //  （Main.gFade,本文件 advanceGhostAureole）。
+    const socialGhost = !!accDollEquip
+      && (accDollEquip.head === 101 || accDollEquip.head === 156)
+      && accDollEquip.body === 66 && accDollEquip.legs === 55;
+    const ghostA = socialGhost ? this._gFade / 255 : 1;
     // 背包/尾巴子层（DrawPlayer_08_Backpacks/08_1_Tails——层序在翼前
-    // LegacyPlayerRenderer.cs:180-190,故先于下方翅膀层）
-    this.drawAccBackpackTailLayers(ctx, p, accRows, stealthClamp, mnt);
+    // LegacyPlayerRenderer.cs:180-190,故先于下方翅膀层;
+    // ★C13-F2 背包/尾巴原版亦染 colorArmorBody（PlayerDrawLayers.cs:459/:470 面读,
+    //  尾 :1563 同）→ A 钳 gFade 随行）
+    this.drawAccBackpackTailLayers(ctx, p, accRows, socialGhost ? stealthClamp * ghostA : stealthClamp, mnt);
     // ---- 翅膀层（DrawPlayer_09_Wings :655-1040：身后，先于身体绘制）----
     // 表驱动（src/data/vanillaWingVisuals.ts）：逐款切帧数 num14（generic=4，曾误写 7/6）
     // + 局部锚点（基底 = Position+(w/2, h−bodyFrame.Height/2)+(0,7) → 脚底局部 (0,−21)，
@@ -19475,7 +19638,7 @@ export class Renderer {
     // ---- 配饰身上贴图·身后族（帧行/背包/尾巴已在前,见翅膀层上方）----
     // 披风（DrawPlayer_10_BackAcc :590-655,层序在翼后肤前
     // LegacyPlayerRenderer.cs:186-194）+ 气球（DrawPlayer_11_Balloons :1140-1172）
-    this.drawAccBehindLayers(ctx, p, accRows, stealthClamp, mnt);
+    this.drawAccBehindLayers(ctx, p, accRows, socialGhost ? stealthClamp * ghostA : stealthClamp, mnt);
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
     // use 期间 bodyFrame 行（Player.cs:35874-35990 itemAnimation>0 分支逐 useStyle）：
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
@@ -19625,7 +19788,7 @@ export class Renderer {
             ctx.restore();
           }
         }
-        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, true);
+        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, true, ghostA);
         // ★BJ423 浮游圈管体·背半（DrawPlayer_12_Skin_Composite :1273-1280——后发后、
         //   躯干皮肤前；源=Extra_105 上半 (0,0,40,56)）。门 = hasFloatingTube（可见轮
         //   两环,Player.ts hasFloatingTubeVis）∧ !hideEntirePlayer 族（外层 mntHidden
@@ -19654,36 +19817,45 @@ export class Renderer {
           ctx.globalAlpha = ga;
         };
         tubeDraw(0, 0);   // 背半
-        if (stealthClamp >= 1) {
+        // ★C13-F2：socialGhost 强制走拆层支（皮肤族整隐,甲件 A=gFade）——整烘单画支
+        //  会把皮肤/甲像素一起画（skinDoll 分层是唯一皮肤整隐面）
+        if (stealthClamp >= 1 && !socialGhost) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
         } else {
           // stealth 分层（PlayerDrawSet.cs:1523-1651 1:1）：皮肤/发/衣着 RGBA×s'²
           // 先画，甲层（RGB×armorMul / A×s'）后画——甲覆盖像素走甲公式、裸露像素
-          // 走皮肤公式，与原版逐 DrawData color 一致
-          const s2 = stF.skinMul;                      // s'²
-          const skinDoll = compositePaperDoll(p.appearance, dollEquip,
-            { skipHair: hairSplit, skipFace: facePlan?.skipFace, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
-          if (skinDoll) {
-            const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
-            const ga = ctx.globalAlpha;
-            ctx.globalAlpha = ga * s2;
-            ctx.drawImage(fs.img, fs.sx, fs.sy, fs.sw, fs.sh, -fs.sw / 2, -fs.sh + pad, fs.sw, fs.sh);
-            ctx.globalAlpha = ga;
+          // 走皮肤公式，与原版逐 DrawData color 一致。
+          // ★C13-F2 socialGhost：皮肤族全 Transparent（:1489-1500）→ skin 层整支跳画
+          if (!socialGhost) {
+            const s2 = stF.skinMul;                    // s'²
+            const skinDoll = compositePaperDoll(p.appearance, dollEquip,
+              { skipHair: hairSplit, skipFace: facePlan?.skipFace, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
+            if (skinDoll) {
+              const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
+              const ga = ctx.globalAlpha;
+              ctx.globalAlpha = ga * s2;
+              ctx.drawImage(fs.img, fs.sx, fs.sy, fs.sw, fs.sh, -fs.sw / 2, -fs.sh + pad, fs.sw, fs.sh);
+              ctx.globalAlpha = ga;
+            }
           }
           // 甲层（身/腿）画在 前发+头甲 叠层之前（原版层序：躯干甲→前发→头甲）；
           // 发色剂/头层脸饰拆层时头甲归 overlay(false) 路径（armorNoHead）。
           // ★overlay(false) 内的头甲/发色发层尚未消费 stealth 乘数（发×s'²、头甲
           //   ×armorMul——原版 colorHair×s'² / colorArmorHead×s'）：发色剂+潜行同开
           //   时该叠层不衰减，集成点在 drawDollHairOverlays（发色剂会话在途）
+          // ★C13-F2：ghostSkin=甲下皮肤垫（躯干 3/腿 10）同整隐（原版皮肤族
+          //   colorBodySkin/colorLegs → Transparent）;甲 A 钳 = globalAlpha ×ghostA
+          //   （gFade 呼吸,99..151/255——PlayerDrawSet.cs:1501-1511 先钳,潜行
+          //   :1523-1651 后乘,可交换）
           const armorDoll = compositePaperDoll(p.appearance, dollEquip,
-            { layer: hairSplit ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
+            { layer: hairSplit ? 'armorNoHead' : 'armor', ...(socialGhost ? { ghostSkin: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
               ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
               : [stealthClamp, stealthClamp, stealthSettled];      // B×settled（:1539-1541）
             const fa = dollFrameRows(tintRGBA(armorDoll, armorMul), rows);
             const ga2 = ctx.globalAlpha;
-            ctx.globalAlpha = ga2 * stealthClamp;                  // A×s'
+            ctx.globalAlpha = ga2 * stealthClamp * ghostA;         // A×s'（×gFade 钳,C13-F2）
             ctx.drawImage(fa.img, fa.sx, fa.sy, fa.sw, fa.sh, -fa.sw / 2, -fa.sh + pad, fa.sw, fa.sh);
             ctx.globalAlpha = ga2;
           }
@@ -19769,7 +19941,8 @@ export class Renderer {
             }
           } else {
             // 分支三（:2617-2647）：皮肤脸（doll 已烘）→ 眼睑 → underHair
-            this.drawEyelid(ctx, p, row, pad, false);
+            // ★C13-F2：眼睑 = colorEyeWhites/colorEyes 族（:1490-1491 Transparent）
+            if (!socialGhost) this.drawEyelid(ctx, p, row, pad, false);
           }
           if (FACE_UNDER_HAIR.has(facePlan.face)) {
             // underHair（:2598-2613/:2633-2641）：裸锚;盲眼罩 5 + 骷髅族 faceHead
@@ -19793,12 +19966,13 @@ export class Renderer {
           headFaceDrawn = true;
         }
         // 前发+头甲回画（发色剂/头层脸饰拆层时;hairHidden=发整隐不回画）
-        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, false);
+        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, false, ghostA);
         // ---- 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid :2640-2683：叠画于
         //      头/眼之上——眨眼/眯眼/耷拉眼/床闭眼/致盲/受击，见 Player.updateEyeState；
         //      HidesHead 头甲（狼人 38 族）下随 base 脸一并跳过（:2577 flag 门）；
         //      头层脸饰拆画帧已在上段按 TheFace 支序插入） ----
-        if (!headFaceDrawn) this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
+        // ★C13-F2：主眼睑站同 skin 族门（colorEyeWhites/colorEyes Transparent）
+        if (!headFaceDrawn && !socialGhost) this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
         drawn = true;
       }
     }
@@ -19875,7 +20049,7 @@ export class Renderer {
     // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
     // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
     // 详见 drawAccFrontLayers。head = 纸娃娃头盔 ArmorIDs（胡须/脸饰头盔门）
-    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0, headFaceDrawn);
+    this.drawAccFrontLayers(ctx, p, accRows, socialGhost ? stealthClamp * ghostA : stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0, headFaceDrawn);
 
     ctx.restore();
     // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
@@ -25639,13 +25813,16 @@ export class Renderer {
    *  cs:76/:74/:118-124；设置行 IngameOptions.cs:806-812）——旧实现未传参恒显 */
   /** ★614:lock-on 目标括弧(LockOnHelper.Draw 备案清偿——世界层覆盖物;
    *  Game.lockOnTargetId → 括弧四角 8px,紫白色) */
-  private drawLockOnBrackets(ctx: CanvasRenderingContext2D, cam: { x: number; y: number }, entities: unknown): void {
+  private drawLockOnBrackets(ctx: CanvasRenderingContext2D, cam: { x: number; y: number; zoom?: number }, viewW: number, viewH: number, entities: unknown): void {
     const gid = (globalThis as { __swGame?: { lockOnTargetId?: number | null } }).__swGame?.lockOnTargetId;
     if (gid == null) return;
     const list = (entities as Array<{ id?: number; dead?: boolean; x: number; y: number; w: number; h: number }>) ?? [];
     const t = list.find((e) => !e.dead && e.id === gid);
     if (!t) return;
-    const sx = t.x - cam.x, sy = t.y - cam.y;
+    // ★618-R3F2:屏位=(wx-cam.x)*z+viewW/2(同 annotateMarks worldToScreen 锚)
+    const z = cam.zoom ?? 1;
+    const sx = (t.x - cam.x) * z + viewW / 2;
+    const sy = (t.y - cam.y) * z + viewH / 2;
     const L = 8;
     ctx.save();
     ctx.strokeStyle = 'rgba(220,120,255,0.85)';

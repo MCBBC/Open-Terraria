@@ -46,6 +46,21 @@ export const lightDeltaFlag = (() => {
   } catch { return false; }
 })();
 
+/** ★lwbp backpressure（2026-10-11,任务#15 刀②;Windows Trace-225221 定谳:主线程
+ *  postMessage self 1522ms(light send 1039+wave frame 471) vs Mac 对照面 231ms——
+ *  Mac 以 4× 帧率发更多消息反便宜 10-20×/条 = Windows 每 op IPC 税
+ *  （qs-mac-control-face 判例族:bakenoread 同构）。修=在飞门:worker 回包未达
+ *  （1:1 回执约定）不派下一快照,send 率自动钳在 worker 实际消化率——快时零跳发
+ *  （零延迟损失）,慢时指数退让。?lwbp=0 逃生门=每 tick 恒发现状逐位。
+ *  let+setter（SM2 池化同款）:node/测试域 URL 缺席恒 false→测试经 setter 显式开。 */
+export let lwbpFlag = (() => {
+  try {
+    if (typeof document === 'undefined') return false;
+    return new URLSearchParams(location.search).get('lwbp') !== '0';
+  } catch { return false; }
+})();
+export function setLwbpEnabled(v: boolean): void { lwbpFlag = v; }
+
 /** 引擎公共面回填目标（结构最小面,避免与 LightingEngine 运行时互相导入） */
 export interface LightTarget {
   rx: number; ry: number; rw: number; rh: number;
@@ -68,7 +83,10 @@ const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0, skipped: 0,
   //  resPoolTakes/resPoolMisses=worker 结果池取/未中（随 rp 回传的 worker 累计值）;
   //  deltaPoolHits/deltaPoolMisses=编码器 delta scratch 池命中/未中（主线程本地）。
   retSent: 0, retDropped: 0, resPoolTakes: 0, resPoolMisses: 0, deltaPoolHits: 0, deltaPoolMisses: 0,
-  fallsBy: newFallsBy(), respawns: 0 };
+  fallsBy: newFallsBy(), respawns: 0,
+  // ★lwbp（2026-10-11 刀②）:bpSkips=在飞门跳发 tick 数（F5/探针对账面——跳发率=
+  //  worker 消化压力直读;恒 0=worker 不慢,门无感）。
+  bpSkips: 0 };
 /** ★R1b-1:引擎侧世代校验丢弃一个晚到结果时登记（探针/F5 对账面） */
 export function noteLightResultSkipped(): void { lwStat.skipped++; }
 /** ★看门狗治理:引擎阶梯重生分派时登记（F5 respawns 消费面） */
@@ -77,7 +95,7 @@ export function lightWorkerStats(): { on: boolean; posted: number; results: numb
   tileBytes: number; fmt: { full: number; delta: number }; poolHits: number; poolMisses: number; resyncs: number;
   lastFullReason: string;
   retSent: number; retDropped: number; resPoolTakes: number; resPoolMisses: number; deltaPoolHits: number; deltaPoolMisses: number;
-  fallsBy: Record<WorkerFallReason, number>; respawns: number } {
+  fallsBy: Record<WorkerFallReason, number>; respawns: number; bpSkips: number } {
   return { on: lightWorkerFlag, ...lwStat, fmt: { ...lwStat.fmt }, fallsBy: { ...lwStat.fallsBy } };
 }
 
@@ -99,6 +117,11 @@ export class LightWorkerLink {
   private _retired: ResultTriple[] = [];
   private seq = 0;
   private lastSentAt = 0;
+  /** ★lwbp（2026-10-11 刀②）:已完成回执计数（1:1 回执约定——frame 结果经
+   *  arriveResult、致命 error 通知各冲账一次）。outstanding = seq − _doneCount;
+   *  sendReady()=outstanding<1。error 冲账理由:error 即链路将回落（lwGate/watchdog
+   *  接管）,账面必须解锁防 live 链饿死等一个永不回来的回执。 */
+  private _doneCount = 0;
   /** ★看门狗治理（2026-09-28）:outstanding-aware 心跳（旧「2s 无回传即杀」的墙钟
    *  判据退役——主线程忙/暂停/隐藏期与开局冷模块图取曾被整段误杀;trace 定谳见
    *  WorkerGovernance 头注）。每实例一个,回落即弃（重生换全新 link=全新 watchdog）。 */
@@ -305,6 +328,7 @@ export class LightWorkerLink {
           if (m.op === 'resync') { lwStat.resyncs++; if (this._enc) this._enc.noteResync(); return; }
           if (m.op === 'error') {
             this.errored = true;
+            this._doneCount++;   // ★lwbp:致命错误=该帧永不回执,冲账防 live 链饿死（链路随后回落/重生）
             console.warn('[LightWorker] worker frame failed:', String((m as { message: string }).message).slice(0, 140));
             return;
           }
@@ -377,6 +401,18 @@ export class LightWorkerLink {
     this.postFrameWithTiles({ ...msg, ...(ret !== undefined ? { ret } : {}), op: 'frame', seq }, t);
   }
 
+  /** ★lwbp（2026-10-11 刀②）:在飞门查询——worker 回包未达（outstanding≥1）时
+   *  false=引擎跳发本 tick 快照。worker 未建链（首帧）/旗关=恒 true（现状逐位）。
+   *  看门狗语义相容:跳发帧不 onSend,outstanding 年龄照走——回执 2s 内必达则门
+   *  自愈;超时=看门狗既有回落链接管（宁可回落不可静默黑光,语义不变）。 */
+  sendReady(): boolean {
+    if (!lwbpFlag) return true;
+    if (this.worker === null) return true;   // 首帧必须放行（send() 内建链）
+    return this.seq - this._doneCount < 1;
+  }
+  /** ★lwbp:引擎跳发登记（对账面） */
+  noteSendSkip(): void { lwStat.bpSkips++; }
+
   /** 结果消息到达（onmessage 结果支;独立成法=测试可驱动,无 Worker 环境驱动链路）。
    *  ★债3 池化收口:retDelta（delta scratch 回池）/rp（worker 结果池对账镜像）/
    *  pending 生命周期门（覆写点退役未应用孤儿;已应用=公共面活体禁碰） */
@@ -384,6 +420,7 @@ export class LightWorkerLink {
     if (m.retDelta !== undefined && this._enc !== null) this._enc.retireDelta(m.retDelta.meta, m.retDelta.data);
     if (m.rp !== undefined) { lwStat.resPoolTakes = m.rp.t; lwStat.resPoolMisses = m.rp.m; }
     this.results++;
+    this._doneCount++;   // ★lwbp:1:1 回执冲账
     lwStat.results++;
     this.lastResultAt = performance.now();
     this.wd.onResult(this.lastResultAt);   // ★看门狗:回达冲账（应用/世代丢弃不影响心跳）

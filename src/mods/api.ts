@@ -128,7 +128,7 @@ export interface ModContext {
   accEffectAppend(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★593:mod 闪避掷门(DodgeEffects 消费品闪避族;fn→true=本拍闪避成立,
    *  效果+冷却 mod 自管;单注册) */
-  dodgeRoll(fn: (player: unknown, game: unknown) => boolean): void;
+  dodgeRoll(fn: (player: unknown, game: unknown, dmg: number) => boolean): void;
   /** ★594:mod 受击钩(C# OnHurt 同位;伤害落地后派发,ctx={player,game,dmg=实扣};
    *  rBrain 墨云/墨炸弹族消费;单注册) */
   playerHurt(fn: (ctx: { player: unknown; game: unknown; dmg: number }) => void): void;

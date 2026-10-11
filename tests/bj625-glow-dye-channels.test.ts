@@ -15,7 +15,12 @@
 //  · 件3 688-690 glow：Main.cs:32498-32507——Glow_228/229/230 与本体贴图同布局平行
 //    表,同矩形（Frame(1,projFrames,0,frame)）同锚同参;color74=Lerp(GetAlpha(light),
 //    White,.5) 截 A=127。663/677/691 族逐型核：三族专支（:34075-34096/:34097-34137）
-//    只改锚/origin+底座,色走公共尾 :34212 plain 光,无白 lerp、无 glow 层=零缺面。
+//    只改锚/origin+底座,色走公共尾 :34212 plain 光,无白 lerp、无 glow 层。
+//    ★R15-F1/F2 判谳订正（2026-10-11 C15）：上句「零缺面」系 2026-10-10 定谳不完整
+//    ——只扫了 :34075-34137 锚段,漏核 :34400+ 色段专支：663 辉光四向脉动
+//    （:34426-34445）/691 白 A=127 辉光（:34507-34521）均为字面色自发光叠层,
+//    已于 C15 落刀（MinionProj FLAMEBURST/TRAP 绘制支 pushGlowOps;c15 清偿测试锁）。
+//    677 确系零缺面维持。
 //  · 件4/件5 伪债翻案：BJ606-R2「底座染料未接」/BJ612「377/308 染料未接线」前提
 //    「原版 GetProjectileDesiredShader 对哨兵生效」不成立——Main.cs:22429-22463 只吃
 //    minion/projHook/projPet/LightPet+switch{623,1020,1105,818};哨兵 SetDefaults

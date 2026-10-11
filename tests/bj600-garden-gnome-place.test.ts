@@ -224,7 +224,12 @@ describe('BJ600-⑤ 同族多格件冒烟锁（南瓜灯 35/派对礼物 457/沙
     it(`vid ${vid} → ${tileKey} 整件落位+零掉落+消耗 1`, () => {
       const { g, w: world, inv, drops } = mkShell(2);
       const st = world.store;
-      for (let dx = 8; dx < 18; dx++) st.setTileSilent(dx, 13, STONE, 0, 0);
+      // ★C14-F3（2026-10-11）：沙堡桶 552 原版 AnchorValidTiles={53,112,234,116}
+      //  （TileObjectData.cs:3315——沙/黑沙/猩红沙/……专锚）→ 地板按件给沙面;
+      //  旧石地板对新成员表门=原版本相拒放。
+      for (let dx = 8; dx < 18; dx++) {
+        st.setTileSilent(dx, 13, sheet === 552 ? TILE_BY_KEY['sand']! : STONE, 0, 0);
+      }
       const iid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid] ?? '']!;
       const tid = TILE_BY_KEY[tileKey]!;
       const td = TILE_DEFS[tid];

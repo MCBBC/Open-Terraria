@@ -236,11 +236,11 @@ let _wwCapture: { k: string; a: number[] }[] | null = null;
  *  pickup-timeout)、respawns=阶梯重生执行次数（F5 驾驶舱扩展）。 */
 const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0,
   bytes: 0, resyncs: 0, fallsBy: newFallsBy(), respawns: 0, quietSkips: 0,
-  fmt: { full: 0, delta: 0, f32: 0 } };
+  fmt: { full: 0, delta: 0, f32: 0 }, bpSkips: 0 };
 export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number;
   posted: number; fields: number; falls: number; bytes: number; resyncs: number;
   fallsBy: Record<WorkerFallReason, number>; respawns: number; quietSkips: number;
-  fmt: { full: number; delta: number; f32: number } } {
+  fmt: { full: number; delta: number; f32: number }; bpSkips: number } {
   return { on: waterWaves.wwActive(), ..._wwStat, fallsBy: { ..._wwStat.fallsBy }, fmt: { ..._wwStat.fmt } };
 }
 
@@ -455,6 +455,21 @@ const wwQuietFlag = (() => {
   } catch { return true; }
 })();
 
+/** ★lwbp backpressure（2026-10-11,任务#15 刀②;LightWorkerLink.lwbpFlag 同族判例:
+ *  Windows 每 op IPC 税 10-20×,wave frame WIN self 471ms vs MAC 0.1ms）。在飞门:
+ *  1:1 回执约定下 field 回传未达不派下一 frame——send 率钳在 worker 实际消化率。
+ *  ★dt 累积:跳发帧的 inp.dt 并入 _wwPendingDt,下次实发一并携带（worker 步进总时
+ *  间=墙钟时间,不因跳发压缩——quietSkip 无此需=场冻结点 dt 无意义,此处 active 水
+ *  面必须保真）。?wwbp=0 逃生门。let+setter:node/测试域经 setter 显式开。 */
+let wwBpFlag = (() => {
+  try {
+    if (typeof document === 'undefined') return false;
+    return typeof location === 'undefined' || new URLSearchParams(location.search).get('wwbp') !== '0';
+  } catch { return false; }
+})();
+/** ★lwbp 测试/操作端开关（node 域 URL 缺席恒 false;生产 URL 旗为缺省面） */
+export function setWwBpEnabled(v: boolean): void { wwBpFlag = v; }
+
 export class WaterWaveSystem {
   quality = 3;
   gates = waveSourceGates(3);
@@ -512,6 +527,11 @@ export class WaterWaveSystem {
   private _wwQuietFrames = 0;
   private _wwQuietVW = -1;
   private _wwQuietVH = -1;
+  /** ★lwbp（2026-10-11 刀②）:在飞 frame 数（1:1 回执——post ++ / field 回传 --;
+   *  回落/terminate 路径随状态复位清零）。>0=上一帧未回,本帧跳发。
+   *  _wwPendingDt=跳发帧 dt 累积（下次实发并入,保真 worker 步进总时间）。 */
+  private _wwInFlight = 0;
+  private _wwPendingDt = 0;
 
   private _wwEnsure(): void {
     if (this._wwSpawned) return;
@@ -578,6 +598,7 @@ export class WaterWaveSystem {
         _wwStat.fields++;
         this._wwLastField = performance.now();
         this._wwWd?.onResult(this._wwLastField);   // 到达即冲账（应用/世代丢弃不影响心跳）
+        if (this._wwInFlight > 0) this._wwInFlight--;   // ★lwbp:1:1 回执冲账（防御下限 0）
         this._wwApplyField(e.data);
         // ★重生完成判定:shadow 期首个场到达 → 切主（本地模拟退役,后续纯 worker 模式）
         if (this._wwShadow) this._wwShadow = false;
@@ -595,6 +616,7 @@ export class WaterWaveSystem {
       //  会跳发 frame → 新 worker 永收不到首帧 → 首场永不到达=死锁,必须复位）。
       this._wwQuietRun = 0; this._wwQuietFrames = 0;
       this._wwQuietVW = -1; this._wwQuietVH = -1;
+      this._wwInFlight = 0; this._wwPendingDt = 0;   // ★lwbp:新链在飞账/dt 残留清零（同上死锁面）
       this._wwTrySendTex();
       if (respawn) { this._wwShadow = true; _wwStat.respawns++; }
     } catch {
@@ -966,6 +988,7 @@ export class WaterWaveSystem {
         this._wwWd = null;
         this._wwErrored = false;
         this._wwQuietRun = 0; this._wwQuietFrames = 0;   // ★MSG-FREQ：回落=本地模拟接管,静默态作废
+        this._wwInFlight = 0; this._wwPendingDt = 0;     // ★lwbp:worker 已死,在飞账作废（dt 已随死帧丢弃=本地重放接管时间轴）
         this._replayInj(pending);
         // ★去永久化：阶梯重生（5s/10s/20s;?wwretry=0 逃生门=旧终态语义）
         if (workerRetryEnabled()) this._wwRespawnAt = now + ladderDelayMs(this._wwFallCount++);
@@ -973,7 +996,16 @@ export class WaterWaveSystem {
       } else {
         this._wwTrySendTex();   // ★C8：纹理未就绪时随帧补发（一次性）
         const inj = _wwCapture || [];
-        _wwCapture = [];
+        // ★lwbp 在飞门（2026-10-11 刀②;LightWorkerLink.lwbp 同族判例——Windows 每
+        //  op IPC 税,wave frame WIN self 471ms vs MAC 0.1ms）:上一 frame 回执未达
+        //  （1:1 约定,_wwInFlight>0）→ 本帧跳发。跳发帧①不排空注入批（随下次实发
+        //  一并带走到 worker,实体波纹零丢失只延迟 1-2 tick）②dt 并入 _wwPendingDt
+        //  （下次实发携带,worker 步进总时间=墙钟,水面动画不因跳发减速）。与静默窗
+        //  正交:静默=场不动点跳发（dt 无意义）,在飞=worker 慢跳发（dt 必须保真）。
+        //  看门狗相容:跳发不 onSend,outstanding 年龄照走,worker 回执 2s 内必达则门
+        //  自愈;超时=既有回落链接管（宁可回落不可静态水,语义不变）。?wwbp=0=现状。
+        const inFlightSkip = wwBpFlag && !this._wwShadow && this._wwInFlight > 0;
+        if (!inFlightSkip) _wwCapture = [];
         // ★MSG-FREQ 静默窗跳发（2026-10-04）：worker 侧场已处内核不动点（连续
         //  零跨度 delta 证得：确定性内核 f(F)=F 与 dx=dy=0 下 f(F_n)=F_{n-1} ⇒
         //  F_{n+1}=f(F_n)=F_n 恒冻结）且本帧无实体注入（camera 注入项值与最后
@@ -989,13 +1021,22 @@ export class WaterWaveSystem {
           && inp.viewW === this._wwQuietVW && inp.viewH === this._wwQuietVH
           && inj.every((e) => e.k === 'camera'
             && e.a[0] === inp.camX && e.a[1] === inp.camY && e.a[2] === inp.zoom);
-        if (quietSkip) {
+        if (inFlightSkip) {
+          _wwStat.bpSkips++;
+          this._wwPendingDt += inp.dt;
+        } else if (quietSkip) {
           _wwStat.quietSkips++;
           this._wwQuietFrames++;
         } else {
           _wwStat.posted++;
           this._wwWd!.onSend(now);
-          this._ww!.postMessage({ op: 'frame', inp, inj });
+          this._wwInFlight++;   // ★lwbp:在飞+1（onmessage field 回执冲账）
+          if (this._wwPendingDt > 0) {
+            this._ww!.postMessage({ op: 'frame', inp: { ...inp, dt: inp.dt + this._wwPendingDt }, inj });
+            this._wwPendingDt = 0;
+          } else {
+            this._ww!.postMessage({ op: 'frame', inp, inj });
+          }
           this._wwQuietVW = inp.viewW; this._wwQuietVH = inp.viewH;
           this._wwQuietFrames = 0;
         }

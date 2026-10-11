@@ -175,6 +175,13 @@ export interface AltClickEnv {
   guideMenuOpen?: boolean;
   /** ★SW-AY1 R5 item.material（:647）——向导支材料判别（本仓=配方原料反查集近似） */
   itemMaterial?: boolean;
+  /** ★R15-F16（C15 清偿）：Main.InReforgeMenu（:638-643）——重铸菜单在显（vinv
+   *  布局内嵌面;classic 全屏 overlay 不可达维持结案注）。前置保护=可词缀物品
+   *  shift-click 不落 quick-trash,改走 cursorOverride 9 重铸对置支（:793-806） */
+  reforgeMenuOpen?: boolean;
+  /** ★R15-F16：item.CanHavePrefixes（:639）——重铸支受理判据（本仓 canReforge
+   *  单源=GetRollablePrefixes != null 等价面） */
+  itemCanHavePrefixes?: boolean;
 }
 
 /** GetAlternateClickAction（ItemSlot.cs:601-700）1:1。返回 null = 无替代动作 →
@@ -195,13 +202,23 @@ export function planAlternateClick(e: AltClickEnv): AltClickPlan | null {
   switch (e.context) {
     case 0: case 1: case 2: {                                      // :628-663
       // :631-651 菜单特化链（研究→重铸→向导→箱→快弃，else-if 互斥序）。
-      // ★重铸支（:638-643 InReforgeMenu）本仓证据结案不建模：UI.showReforge 开
-      //  全屏 overlay（inset:0 z:1150）拦截一切槽点击——:638 支在仓内不可达。
+      // ★重铸支（:638-643 InReforgeMenu）——★R15-F16（2026-10-11 C15 清偿）转正：
+      //  vinv 布局重铸槽内嵌背包（无 overlay 拦截）,shift-click 可词缀物品须改走
+      //  重铸对置支（:793-806 cursorOverride 9:stack≤1=Utils.Swap 双向保全;stack>1
+      //  且槽空=克隆 1 件源 stack--）——不接则落入快弃链=重铸菜单开态 shift-click
+      //  直接丢垃圾桶（原版 :638-643 专门保护=不落 quick-trash）。classic 全屏
+      //  overlay 不可达维持结案注（reforgeMenuOpen 只在 vinv 置位）。
       // ★tileEntityAnchor 支（:618-625 模特/帽架槽）同结案：本仓 TE 模特/帽架
       //  走世界侧点击（Game dollPlace/hatRackPlace），无 ItemSlot 语境 23-27 槽面。
       if (e.researchMenuOpen) {                                    // :631-637
         if (e.context === 0) return { kind: 'toChest', cursorOverride: CURSOR_TO_CHEST };
         return null;                                               // context 1/2 在研究菜单下落空
+      }
+      if (e.reforgeMenuOpen) {                                     // :638-643 InReforgeMenu
+        if (e.context === 0 && e.itemCanHavePrefixes) {
+          return { kind: 'toChest', cursorOverride: CURSOR_TO_CHEST };   // → 重铸对置支
+        }
+        // 非 prefixable/context≠0：落出（原版同序→箱/快弃链,后续分支承接）
       }
       if (e.guideMenuOpen) {                                       // :645-651
         if (e.context === 0 && e.itemMaterial) return { kind: 'toChest', cursorOverride: CURSOR_TO_CHEST };

@@ -202,6 +202,8 @@ export interface ModProjContent {
   /** ★五百八十五:同敌重击窗(tick;命中记录按 ageTicks 过期=常驻召唤体可再命中;
    *  缺省 0=永久去重) */
   hitRefresh?: number;
+  /** ★618-R2F9:接触伤害豁免(healer/defense 守卫;C# CanDamage=false 同位) */
+  noContactDamage?: boolean;
   /** ★三百五十一:holdout(channel 魔耗面;声明面直通) */
   holdout?: { manaRate?: number; manaCost?: number };
 }

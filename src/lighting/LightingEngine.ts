@@ -378,15 +378,29 @@ export class LightingEngine {
           if (pWasWorker && this.r !== pR) this.retireWorkerArrays(pR, pG, pB);
           this.publicFromWorker = true;
         }
-        lw.send(this.buildWorkerSnapshot(reg));
+        // ★lwbp backpressure（2026-10-11,任务#15 刀②;Windows Trace-225221 postMessage
+        //  self send 1039ms=每 op IPC 税,qs-mac-control-face 判例族）:在飞未回跳发
+        //  本 tick 快照（send 率钳在 worker 实际消化率,快时零跳发）。warmup(非 live)
+        //  恒发=建链前提;跳发帧语义:①快照面/写日志累积到下次实发（encodeDelta 容量
+        //  溢出走既有 escalate 全量锚,正确性由 planFull 承担）②点光=逐 tick 重注册
+        //  的无状态面,跳发帧照清（防重注册叠加双亮）③dirty/liquidDirty 只在实发时
+        //  消费（清早了=差量门把历史写面当本帧=恒全量,注释同下）。?lwbp=0=恒发现状。
+        const sent = !live || lw.sendReady();
+        if (sent) {
+          lw.send(this.buildWorkerSnapshot(reg));
+        } else {
+          lw.noteSendSkip();
+        }
         if (live && this.snapCoveredByPublic()) {
           this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
-          this.perFrame.length = 0;   // 点光已随快照带走(本地 processScan 不再跑)
+          this.perFrame.length = 0;   // 点光已随快照带走(本地 processScan 不再跑;跳发帧=重注册面照清)
           // ★C9d2:live 态 dirty/liquidDirty 消费（外部只写不读,本引擎本地路径是唯一
           //  读面;不清则差量内容脏门把历史写面当本帧写面=恒全量）。回退路径
-          //  dispose 处显式置 dirty=true,语义保持。
-          this.dirty = false;
-          this.liquidDirty = false;
+          //  dispose 处显式置 dirty=true,语义保持。★lwbp:跳发帧保留(下次实发消费)。
+          if (sent) {
+            this.dirty = false;
+            this.liquidDirty = false;
+          }
           return;
         }
         // live 态大跳（传送/召回/重生/读档/离屏截图分块——快照区域跳出公共采样域

@@ -193,6 +193,9 @@ export interface ModProjSpec {
   frames?: number;
   /** ★五百八十五:同敌重击窗(tick;常驻召唤体可再命中;缺省 0=永久去重) */
   hitRefresh?: number;
+  /** ★618-R2F9:接触伤害豁免(C# CanDamage()=false 同位——healer/defense 守卫;
+   *  true=本弹不结算接触伤) */
+  noContactDamage?: boolean;
   /** 撞块消亡(缺省 true) */
   tileCollide?: boolean;
   /** 贴图 textures/ 相对路径(经 mod 资产注入,Projectile_<projId> 语义) */
@@ -401,31 +404,39 @@ void import('../core/Keybinds').then((m) => { bindsOfModFn = m.bindsOfMod; });
 
 /** ★609:mod parry 窗口门(C# divineProvidence/flameLickedShell 30t 窗——
  *  mod 自管窗态;Game 接触 parry 门=shieldParry ‖ 本门;任一 true=可 parry) */
-const modParryGates = new Map<string, (player: unknown) => boolean>();
+const modParryGates = new Map<string, Array<(player: unknown) => boolean>>();
 
 export function registerModParryGate(modId: string, fn: (player: unknown) => boolean): void {
-  modParryGates.set(modId, fn);   // 单注册(多件=同闭包连判)
+  const list = modParryGates.get(modId);
+  if (list) list.push(fn);
+  else modParryGates.set(modId, [fn]);
 }
 
 /** ★611:parry 成功钩(canParryMod 受理后派发——反冲弹/音效/屏幕震动族;
  *  mod 自管一次性效果) */
-const modParrySuccess = new Map<string, (player: unknown, game: unknown) => void>();
+const modParrySuccess = new Map<string, Array<(player: unknown, game: unknown) => void>>();
 
 export function registerModParrySuccess(modId: string, fn: (player: unknown, game: unknown) => void): void {
-  modParrySuccess.set(modId, fn);   // 单注册(多件=同闭包连写)
+  const list = modParrySuccess.get(modId);
+  if (list) list.push(fn);
+  else modParrySuccess.set(modId, [fn]);
 }
 
 export function runModParrySuccess(player: unknown, game: unknown): void {
   if (modParrySuccess.size === 0) return;
-  for (const fn of modParrySuccess.values()) {
-    try { fn(player, game); } catch (err) { console.warn('[mod-hooks] parrySuccess', err); }
+  for (const list of modParrySuccess.values()) {
+    for (const fn of list) {
+      try { fn(player, game); } catch (err) { console.warn('[mod-hooks] parrySuccess', err); }
+    }
   }
 }
 
 export function runModParryActive(player: unknown): boolean {
   if (modParryGates.size === 0) return false;
-  for (const fn of modParryGates.values()) {
-    try { if (fn(player)) return true; } catch (err) { console.warn('[mod-hooks] parryGate', err); }
+  for (const list of modParryGates.values()) {
+    for (const fn of list) {
+      try { if (fn(player)) return true; } catch (err) { console.warn('[mod-hooks] parryGate', err); }
+    }
   }
   return false;
 }
@@ -454,19 +465,23 @@ export function modDashSpecOf(slot: number): ModDashSpec | null {
 /** ★605:mod 伤害闸(C# 能量盾类同位——HasAnyEnergyShield damagePlayer 头吸伤;
  *  fn(player, dmg)→剩余伤(可 0);Player.damage 头派发[防御计算前];
  *  多 mod 连减;零注册零成本) */
-const damageGates = new Map<string, (player: unknown, dmg: number) => number>();
+const damageGates = new Map<string, Array<(player: unknown, dmg: number) => number>>();
 
 export function registerModDamageGate(modId: string, fn: (player: unknown, dmg: number) => number): void {
-  damageGates.set(modId, fn);   // 单注册(多盾=同闭包连减;追加面=登记)
+  const list = damageGates.get(modId);
+  if (list) list.push(fn);
+  else damageGates.set(modId, [fn]);
 }
 
 export function runModDamageGate(player: unknown, dmg: number): number {
   if (damageGates.size === 0) return dmg;
-  for (const fn of damageGates.values()) {
-    try {
-      const r = fn(player, dmg);
-      if (typeof r === 'number' && Number.isFinite(r) && r >= 0) dmg = r;
-    } catch (err) { console.warn('[mod-hooks] damageGate', err); }
+  for (const list of damageGates.values()) {
+    for (const fn of list) {
+      try {
+        const r = fn(player, dmg);
+        if (typeof r === 'number' && Number.isFinite(r) && r >= 0) dmg = r;
+      } catch (err) { console.warn('[mod-hooks] damageGate', err); }
+    }
   }
   return dmg;
 }
@@ -474,32 +489,40 @@ export function runModDamageGate(player: unknown, dmg: number): number {
 /** ★594:mod 受击钩(C# OnHurt face 同位——Player.damage 伤害落地后派发;
  *  ctx={player, game, dmg=实扣};rBrain 墨云/墨炸弹/百年魔典等受击响应面;
  *  多 mod 逐个派发,零注册零成本) */
-const playerHurts = new Map<string, (ctx: { player: unknown; game: unknown; dmg: number }) => void>();
+const playerHurts = new Map<string, Array<(ctx: { player: unknown; game: unknown; dmg: number }) => void>>();
 
 export function registerModPlayerHurt(modId: string, fn: (ctx: { player: unknown; game: unknown; dmg: number }) => void): void {
-  playerHurts.set(modId, fn);   // 单注册(多效果=同闭包连写;追加面=登记)
+  const list = playerHurts.get(modId);
+  if (list) list.push(fn);
+  else playerHurts.set(modId, [fn]);
 }
 
 export function runModPlayerHurt(player: unknown, game: unknown, dmg: number): void {
   if (playerHurts.size === 0) return;
-  for (const fn of playerHurts.values()) {
-    try { fn({ player, game, dmg }); } catch (err) { console.warn('[mod-hooks] playerHurt', err); }
+  for (const list of playerHurts.values()) {
+    for (const fn of list) {
+      try { fn({ player, game, dmg }); } catch (err) { console.warn('[mod-hooks] playerHurt', err); }
+    }
   }
 }
 
 /** ★593:mod 闪避掷门(灾厄 DodgeEffects 消费品闪避族同位——C# CalamityPlayerHitHurt
  *  :824 procDodgeEffects→Consumable Dodge 步;fn(player, game)→true=本拍闪避成立
  *  [效果+冷却 mod 自管];多 mod 任一 true 即闪避。零注册零成本) */
-const dodgeRolls = new Map<string, (player: unknown, game: unknown) => boolean>();
+const dodgeRolls = new Map<string, Array<(player: unknown, game: unknown, dmg: number) => boolean>>();
 
-export function registerModDodgeRoll(modId: string, fn: (player: unknown, game: unknown) => boolean): void {
-  dodgeRolls.set(modId, fn);   // 单注册(多效果=同闭包内连判;追加面=登记)
+export function registerModDodgeRoll(modId: string, fn: (player: unknown, game: unknown, dmg: number) => boolean): void {
+  const list = dodgeRolls.get(modId);
+  if (list) list.push(fn);
+  else dodgeRolls.set(modId, [fn]);
 }
 
-export function runModDodgeRoll(player: unknown, game: unknown): boolean {
+export function runModDodgeRoll(player: unknown, game: unknown, dmg: number): boolean {
   if (dodgeRolls.size === 0) return false;
-  for (const fn of dodgeRolls.values()) {
-    try { if (fn(player, game)) return true; } catch (err) { console.warn('[mod-hooks] dodgeRoll', err); }
+  for (const list of dodgeRolls.values()) {
+    for (const fn of list) {
+      try { if (fn(player, game, dmg)) return true; } catch (err) { console.warn('[mod-hooks] dodgeRoll', err); }
+    }
   }
   return false;
 }

@@ -128,7 +128,18 @@ describe('BJ528 §F 用户组合复现·数值面（真实链 fixedUpdate 驱动
 
   it('F3 刃杖 864 真实链每击伤害=6（dmg0=6,armorPen 25 池钳 def/2=3: 6+3−3）+窗面', () => {
     const { hooks, player } = makeGame();
-    const z = foe(hooks, 3, 5283);
+    // ★BJ637（2026-10-11）几何迁改定谳：BJ634 忠实移植 AI_169_Smolstars（P.cs:46559-46700）
+    //  后,旧敌位 (400,600) 不可再实现——①敌距玩家 1032.6px>800 双距超程（md 巡航脱离后
+    //  恒>800,pd 恒 1032.6）;②敌盒 y 580..620 在玩家 viewRect（1920×1200 心=player.Center,
+    //  Main.cs:758;:49903 全局扫 `(boss || rectangle.Intersects)` 门）外 → 原版同样不锁敌
+    //  （本仓 findTargetInRangeDual 同门同值,探针 P2/P3 实证 canHitWithOwnBodyBox/canBeChasedBy
+    //  全过,拒锁唯 viewRect）;③巡航首拍 40px/t（num4=10+GetLerpValue(200,600,dist)×30,
+    //  dist≈985 满档）即脱离重叠盒（原版时序同:AI→HandleMovement→Damage 用位移后盒）→
+    //  原版同场景同为 0 伤=F3 旧期望钉的是 BJ634 前「通用飞行路径 5px/t」非忠实相。
+    //  迁敌位至 (960,1380)（玩家锚正下 30px,viewRect 内+pd=60<800;巡航位移 (0,10) 不脱盒
+    //  →锁定+同拍接触）,钉值（6/iframes0/whip/hitCd=10）不变;判别锁见
+    //  tests/bj637-bladestaff-realchain.test.ts（L1 锁敌/L2 viewRect 外不锁=原版本相钉/L3 全链追击）。
+    const z = foe(hooks, 3, 5283, 960, 1380);
     // 基伤 6 = itemCombat(4758).damage（刃杖）;BJ511 同批第二发同查
     const blade = new MinionProj(z.cx - 5, z.cy - 5, 864, 6, 2, false, 0, false, () => player);
     (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(blade);

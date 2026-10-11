@@ -14,6 +14,7 @@
 //   warm-zip(SW 内 fflate 解压直写缓存,12003 请求→~10);manifest 缺失/dev/
 //   SW 无 fflate(warm-zip-unavailable)→ 整会话回退逐文件 legacy warm。
 import vanillaJson from '../../public/sprites/vanilla.json';
+import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
 import assetsIndexJson from '../../public/assets-index.json';
 import { MUSIC } from '../data/Music';
@@ -145,12 +146,21 @@ export function menuWarmUrls(uiFiles: UiFiles, index: AssetsIndex = assetsIndexJ
   return out;
 }
 
-/** P1 游戏贴图:全部图块/墙表 + NPC 表 + VANILLA_MISC(烘焙族/门对/液体) + 物品图标图集 */
+/** P1 游戏贴图:全部图块/墙表 + NPC 表(登记 20 张 + ★BJ636 散件全集) + VANILLA_MISC
+ *  (烘焙族/门对/液体) + 物品图标图集。
+ *  ★BJ636(2026-10-11):NPC 主表散件全集(vanilla-npcs.json 696 键)补进 P1——
+ *  旧清单只有 vanilla.json npcs 登记的 20 张,普通怪散件不暖存;legacy 逐文件
+ *  warm 回退会话(manifest 缺失/SW 无 fflate)下 Cache API 缺件 + 发布形态散件
+ *  被 prune → cache-first miss 网络回源 404 = 进游戏全体怪物透明(与
+ *  SpriteAtlas.preloadMiscAndNpcs 同源双修)。zip 模式本就覆盖(pack 扫盘全集),
+ *  清单加项不换缓存版本(版本=JSON 内容 hash 面,vanilla-npcs.json 不在其内),
+ *  存量缓存由冷启 warmAllAssets have-set 差集对账自动补下。 */
 export function worldWarmUrls(vanilla: VanillaData = vanillaJson): string[] {
   const out = new Set<string>();
   for (const m of Object.values(vanilla.tiles ?? {})) if (m.sheet) out.add(`sprites/${m.sheet}`);
   for (const m of Object.values(vanilla.walls ?? {})) if (m.sheet) out.add(`sprites/${m.sheet}`);
   for (const m of Object.values(vanilla.npcs ?? {})) if (m.sheet) out.add(`sprites/${m.sheet}`);
+  for (const id of Object.keys(vanillaNpcsJson as Record<string, unknown>)) out.add(`sprites/vanilla/NPC_${id}.png`);
   for (const m of Object.values(vanilla.items ?? {})) if (m.icon) out.add(`sprites/${m.icon}`);
   for (const f of VANILLA_MISC) out.add(`sprites/${f}`);
   return [...out];

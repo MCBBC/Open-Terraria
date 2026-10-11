@@ -57,14 +57,19 @@ describe('SW-BJ11 ② 甲下皮肤躯干/皮肤腿(与甲无关先画)', () => {
   it('皮肤躯干(3)画在身甲下:hidesTopSkin 门={82,83,93,21,22}(PlayerDrawSet.cs:1789)', () => {
     expect(src).toContain('const HIDES_TOP_SKIN_BODIES = new Set([82, 83, 93, 21, 22]);');
     // 整烘甲支与 stealth skin 层两处都要画(否则潜行拆层甲下露肤面分叉)
-    const draws = src.split('if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0)) {').length - 1;
+    // ★C13-F2 锚随迁(2026-10-11 债②):整烘甲支皮肤垫层带 ghostSkin 整隐门
+    //  (colorBodySkin Transparent 面,原版 :1494;c13 套件行串同锚)——计数按门头
+    //  匹配两支(甲支门尾 ghostSkin 门+stealth 支裸门),「两处都画」语义面不变
+    const draws = src.split('if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0)').length - 1;
     expect(draws).toBe(2);
     expect(src).toContain('drawTinted(torsoSkin, torsoX, dy, a.skinColor)');
   });
 
   it('皮肤腿(10)画在腿甲下:白名单外照画;袍/裙族=ShouldOverrideLegs_CheckPants(:1219-1240)', () => {
     expect(src).toContain('const LEGS_HIDE_SKIN = new Set([55, 63, 67, 106, 138, 140, 143, 217, 222, 226, 228]);');
-    expect(src).toContain('const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0);');
+    // ★C13-F2 锚随迁:甲下皮肤腿垫带 ghostSkin 整隐门(colorLegs Transparent 面,
+    //  原版 :1498;c13 套件同锚)——行串随门更新,门序(白名单外+非坐姿)语义不变
+    expect(src).toContain('const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin;');
     // 层序:皮肤腿先、腿甲后(甲叠于肤上)
     // ★BJ631 2026-10-10 锚随名更新:腿甲染烘提出循环(legsArmor→legsArmorImg,
     // legsArmor 本名保留=UITextures 记录),层序锁语义不变(肤先甲后)

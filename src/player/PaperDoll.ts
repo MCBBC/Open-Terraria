@@ -396,11 +396,15 @@ export function compositePaperDoll(
     /** ★五百六十九:armor dye slots(0=head/1=body/2=legs;vanilla ApplyItemDye;
      *  dyeVid=染料 vid 或 null=无染料——composite 缓存键含 dye=染色合成本体) */
     dyeHead?: number | null; dyeBody?: number | null; dyeLegs?: number | null },
-  opts?: { skipHair?: boolean; skipFace?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm },
+  opts?: { skipHair?: boolean; skipFace?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm;
+    /** ★C13-F2 socialGhost（PlayerDrawSet.cs:1489-1516）：皮肤族全 Transparent——
+     *  甲合成层内两处皮肤垫（甲下皮肤躯干 3 / 甲下皮肤腿 10）同整隐 */
+    ghostSkin?: boolean },
 ): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
     + (equip?.dyeHead ? `|dh${equip.dyeHead}` : '') + (equip?.dyeBody ? `|db${equip.dyeBody}` : '') + (equip?.dyeLegs ? `|dl${equip.dyeLegs}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.skipFace ? '|noface' : '') + (opts?.layer ? `|L${opts.layer}` : '')
+    + (opts?.ghostSkin ? '|gh' : '')
     + (opts?.part ? `|P${opts.part}` : '')
     + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
     + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '')
@@ -532,7 +536,8 @@ export function compositePaperDoll(
   //  腿甲下先画皮肤腿再叠甲(满罩甲不可见,镂空甲族露肤=原版本相);坐姿
   //  hidesBottomSkin=1(PlayerDrawSet.cs:1244)不画,切片仅甲
   if (legsArmor && !noArmor && wantLegs) {
-    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0);
+    // ★C13-F2：ghostSkin → 甲下皮肤腿垫整隐（colorLegs Transparent 面,原版 :1498）
+    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin;
     const skinLegsImg = showSkinUnderLegs ? sheetRect(a.skinVariant, 10) : null;
     const skinLegsTinted = skinLegsImg ? tint(skinLegsImg, a.skinColor) : null;
     // ★BJ631 件1:染腿烘提出帧/切片循环（BJ625 喂值恒缺时不可达=冷码;喂值链上线后
@@ -620,7 +625,8 @@ export function compositePaperDoll(
       //  在 !hidesTopSkin 时与甲无关地先画(17_TorsoComposite 甲再叠上)——女式胸甲
       //  镂空处露肤(女胸轮廓)=原版本相(女甲态 12px 残差实证,见 _swbj11-matrix)。
       //  hidesTopSkin={82,83,93,21,22}(21/22=狼人/人鱼全形态)不画
-      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0)) {
+      //  ★C13-F2：ghostSkin → 皮肤躯干垫同整隐（colorBodySkin Transparent 面,:1494）
+      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0) && !opts?.ghostSkin) {
         const torsoSkin = sheetRect(a.skinVariant, 3);
         if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
       }

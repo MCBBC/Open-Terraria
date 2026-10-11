@@ -8,8 +8,10 @@
 // 本测试锁定这条真实链路：贴图文件存在 + Options 持久化 + 切换纯函数（CycleSelection 方向）。
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
+import { installFakeIdb } from './fake-idb-util';
 
-// localStorage stub（Options 经 KvStore 走 localStorage 快路径；node 无实现，同 character-store.test.ts）
+// localStorage stub（★BJ615 单写后 Options 落盘恒走 IndexedDB（kvSet→kvSetIdb）,
+// LS 只剩读兜底腿——本测试装 fake-IDB 驱动真实写链;LS 桩保留供兜底腿,同 character-store.test.ts）
 const mem = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
   getItem: (k: string) => mem.get(k) ?? null,
@@ -19,13 +21,14 @@ const mem = new Map<string, string>();
   key: (i: number) => [...mem.keys()][i] ?? null,
   get length() { return mem.size; },
 } as Storage;
+const idb = installFakeIdb();
 
 const { OptionsStore, MINIMAP_FRAME_SKINS, cycleMinimapFrame } = await import('../src/core/Options');
 
 const OPTIONS_KEY = 'sandboxworld.options'; // Options.ts 私有 KEY（kv 落盘键）
 
 describe('小地图边框皮肤（MinimapFrameManager）', () => {
-  beforeEach(() => mem.clear());
+  beforeEach(() => { mem.clear(); idb.map.clear(); idb.dropConnection(); });
 
   it('9 款皮肤 = 原版插入序（MinimapFrameManager.cs:32-42，Dictionary 枚举序）', () => {
     expect([...MINIMAP_FRAME_SKINS]).toEqual([
@@ -67,9 +70,10 @@ describe('小地图边框皮肤（MinimapFrameManager）', () => {
       expect(a.data.minimapFrame).toBe('Default');
       await a.set('minimapFrame', 'Golden');
       expect(a.data.minimapFrame).toBe('Golden');          // 内存值即时（所见即所得）
-      expect(mem.get(OPTIONS_KEY)).toBeUndefined();        // 防抖窗内未落盘（设计语义）
+      expect(idb.map.get(OPTIONS_KEY)).toBeUndefined();    // 防抖窗内未落盘（设计语义）
       await vi.advanceTimersByTimeAsync(400);              // 走完 400ms 防抖窗
-      expect(JSON.parse(mem.get(OPTIONS_KEY)!).minimapFrame).toBe('Golden');
+      // ★BJ615：落盘恒走 IndexedDB（单写方案,LS 无写路径）
+      expect(JSON.parse(idb.map.get(OPTIONS_KEY)! as string).minimapFrame).toBe('Golden');
       const b = new OptionsStore();
       await b.load();
       expect(b.data.minimapFrame).toBe('Golden');

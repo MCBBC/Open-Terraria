@@ -377,8 +377,17 @@ describe('BJ467-⑤：AI_137 场盒钳 T3 档（num=14/num5=8 → [128,224];旧�
     const ty = Math.floor((mT3 as unknown as { cy: number }).cy / 16);     // 出生拍盒心 tile
     expect(ty, '出生位同列同几何（夹具自证）').toBe(tyNo);
     tickUntil(mT3, hooks2, () => sideOf(mT3) > 0);
-    const raw = 1600 - (ty - 11) * 16;                 // 无天花板 → origin-num-1（:65956-58）
+    // ★R15-F4 钉值重产（2026-10-11）：旧 raw 用 (ty-11) 系把非 T3 档 num=10 硬编码
+    //   带进 T3 期望——原版 T3 num=14 → fallback origin.Y−14−1（Projectile.cs:69955-
+    //   69957 `result2 = new Point(origin.X, origin.Y - num - 1)`,num 于 :69937 被
+    //   `if (setMonkT3) { num = 14; num5 = 8; }` 覆写）→ ty−15。露天档=Up(14) 全空
+    //   → raw=1600−(99−15)×16=256 → 钳 [128,224] 取 224 → ×2=448（原版 448px 露天档;
+    //   旧钉 384=偏差金标,先破钉后按反编译直读重产）。低天花板 5a 档不受影响
+    //   （天花板 96 在 Up(14) 窗内,搜索命中分支与 num 无关）。
+    const raw = 1600 - (ty - 15) * 16;                 // 无天花板 → origin-num-1（:69955-57,T3 num=14）
+    expect(raw).toBe(256);                             // 夹具自证（旧 (ty-11) 算式=192 必红）
     expect(sideOf(mT3)).toBe(2 * Math.min(224, Math.max(128, raw)));   // ★主判别:T3 钳 [128,224]（旧 ≤320 必红）
+    expect(sideOf(mT3)).toBe(448);                     // ★原版 448px 露天档（旧 384 偏差钉已破）
     expect(sideOf(mT3)).toBeGreaterThan(320);
   });
 });

@@ -37,7 +37,8 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLocke
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
-import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
+import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors,
+  alternateCellFrame, anchorChainOf, chooseAnchorFromClickChain, validateAnchorChainAt } from '../world/TileAnchorValidator';
 import type { AnchorRec } from '../world/TileAnchorValidator';
 import { getTileDustAmount, makeTileDust, makeTileDustCtx, type DustSpawn } from '../world/TileDust';   // ★BJ444 KillTile 统一尘系统（WorldGen.cs:67119-69696）
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
@@ -240,7 +241,7 @@ import { scanLuckScene, torchLuckCheckCenterBelowSurface, rollLuck, rollOnlyBadL
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
 import { playerVidCarried, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描（★FX36:装备改背包∪装备扫描）
 import { newWiresRadialState, flowerUpdate, lineOpacityUpdate, flowerSlots, flowerPick, wiresDrawToolModeUI, noteRadialHeld, radialActuatorAllowed } from '../stats/wiresRadial';   // ★BJ572 面②:径向工具模式菜单（WiresUI.cs 1:1 纯逻辑）
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld, roundCSf32Mul, truncCSf32Mul, truncCSf32MulBias } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）+★BJ343 件 2 舍入单源
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld, roundCSf32Mul, truncCSf32Mul, truncCSf32MulBias, f32 } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）+★BJ343 件 2 舍入单源 +★R15-F14 f32（Item.Prefix value 烘焙逐位）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
@@ -27439,16 +27440,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 旧 belowOk（isSolid|table 二值近似）两向偏差:书可落地/珊瑚无顶格门/
         // 693 无吊顶门/700 水域可放（liq notAllowed 未设门）。wSpec null（无记录/
         // exotic 保守回落族）→ 旧 belowOk 兜底。
+        // ★C14-F2（2026-10-11）：1×1 族支撑面接备档链（原版 wand 只覆写 tile+style,
+        // 放置本体仍走 CanPlace 全链=逐备档满分制首中,TileObject.cs:203-225;
+        // :208-209 逐备档各自 Origin 换算,:209-212 Direction 过滤）——宝石 178 备档
+        // 63右/21顶/42左（TileObjectData.cs:4664-4683）此前被基记录单档门拒吊顶/侧挂。
+        const wandChainHit = wSpec
+          ? validateAnchorChainAt(st, tx, ty, opt.tileSheet, opt.style, this.player.facing, wSpec)
+          : null;
         const supportOk = wSpec
-          ? validateAnchors(st, tx, ty, wSpec, opt.style)
+          ? wandChainHit !== null
           : (st.inBounds(tx, ty + 1)
             && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
               && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1))));
         if (!supportOk) return;
         // 帧基偏移单源化（FurnitureStyle.furnitureStyleBase）——1×1 族 default=style*18
         // 同旧值;693/694 style≥39 折行（StyleWrapLimit=39,case 693/694 注）。
-        const [wfx, wfy] = furnitureStyleBase(TILE_DEFS[wandTile]?.vanilla?.sheet ?? -1,
-          opt.style, TILE_DEFS[wandTile]?.vanilla?.fw ?? 1);
+        // ★C14-F2：备档命中（alt>0）→ Place :60-108 备档帧带（CalculatePlacementStyle
+        // :1989-1999 placeStyle*mult+sb 折行）;基记录维持 furnitureStyleBase 零回归。
+        const [wfx, wfy] = (wandChainHit && wandChainHit.alt > 0)
+          ? alternateCellFrame(wandChainHit.rec, wandChainHit.sb, opt.style, 0, 0)
+          : furnitureStyleBase(TILE_DEFS[wandTile]?.vanilla?.sheet ?? -1,
+            opt.style, TILE_DEFS[wandTile]?.vanilla?.fw ?? 1);
         st.setTile(tx, ty, wandTile, wfx, wfy);
         this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
         this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
@@ -27892,6 +27904,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  tx,ty → 在首个改写点【之前】保存原始点击格,写循环结束后用它复验。
     const clickX = tx, clickY = ty;
     let anchorCovered = false;
+    // ★C14-F2（2026-10-11）：备档命中态（链评估首中备档序>0 时非空）——写循环按
+    // TileObject.Place :60-108 备档帧带数学出帧（alternateCellFrame）。
+    let placedAlt: { rec: AnchorRec; sb: number } | null = null;
     const anchorRec = (() => {
       if (!def?.framed || !def.vanilla || !def.vanilla.sheet) return null;
       // ★BJ602：子样式记录解析（GetTileData TileObjectData.cs:5127-5162 整记录替换
@@ -27971,9 +27986,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (anchorRec && anchorRec.w > 1 || anchorRec && anchorRec.h > 1) {
       // stylePlumb（M-3b）：placeStyle → TileObjectData style → validateAnchors 子样式
       // 液体档（heldInst 实例级覆盖已在 :18666 合并进 itemDef）
-      const pick = chooseAnchorFromClick(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0);
+      // ★C14-F2（2026-10-11）：备档链吸附——CanPlace（TileObject.cs:203-225）逐备档
+      //  满分制、:836-839 首个满分备档即中；本仓吸附窗（repo 扩展）逐备档复用,
+      //  基→alts 同序首中;无备档记录链长 1 = 旧 chooseAnchorFromClick 全等。
+      //  baseOverride=上方足迹门解析的 anchorRec（防 style 子样式几何换挡）。
+      const pick = chooseAnchorFromClickChain(st, tx, ty, def.vanilla!.sheet,
+        itemDef.placeStyle ?? 0, this.player.facing, anchorRec);
       if (!pick) return;
       tx = pick.x; ty = pick.y;
+      if (pick.alt > 0) {
+        const entry = anchorChainOf(def.vanilla!.sheet, itemDef.placeStyle ?? 0, anchorRec)[pick.alt];
+        placedAlt = entry ? { rec: entry.rec, sb: entry.sb } : null;
+      }
       anchorCovered = true;
     }
     // ★点击格 → 锚换算（旧左下近似，仅未覆盖家族回落；2026-08-21 用户报
@@ -28454,7 +28478,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // uccp 1×1 全档（无锚/锚档一统）=自记录全语义消费（validateAnchors 即
         // CanPlace 移植:占用/液体/墙/锚带;1×1 无吸附,点击格即占位左上,同原版
         // Origin(0,0) tileTarget 直判）
-        if (!validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;
+        // ★C14-F2（2026-10-11）：备档链评估（CanPlace TileObject.cs:203-225 逐备档
+        //  满分制首中;:208-209 逐备档各自 Origin 换算占位左上;:209-212 Direction
+        //  过滤=玩家朝向面）。链首=anchorRec（足迹门同记录）。
+        const chainHit = validateAnchorChainAt(st, tx, ty, def.vanilla!.sheet,
+          itemDef.placeStyle ?? 0, this.player.facing, anchorRec);
+        if (!chainHit) return;
+        if (chainHit.alt > 0) placedAlt = { rec: chainHit.rec, sb: chainHit.sb };
       } else if (!this.hasSupport(tx, ty, ow, oh, !!def.framed,
         ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) {
         return;
@@ -28464,6 +28494,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (needSupport && anchorCovered
       // stylePlumb（M-3b）：placeStyle 子样式液体档（火把外 27 族水下/岩浆可放性，
       // recon-tileobj liqStyles；缺省 0=基记录,行为不变）
+      // ★C14-F2：备档命中（placedAlt）时跳过基记录双保险——链评估已对命中备档
+      //  满分制验证（CanPlace :836-839 首中即定档,基记录不必满分）。
+      && !placedAlt
       && !validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;   // 双保险(状态未变时恒真)
     // ★猪龙彩罐重复放置门（PlaceThing_Tiles_BlockPlacementForRepeatedPigronatas,
     //  Player.cs:41731-41745,1458 :41729-41743 同文）：454 ∈ tileCut（Main.cs:8460）
@@ -28527,14 +28560,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
-    //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
-    if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
-      // 下方桌面格 nactive() 门（WorldGen.cs:45747）
-      const below = st.inBounds(tx, ty + 1) && st.isActive(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
-      const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
-      if (!TILE_TABLE_SHEETS.has(belowSheet)) return;
-    }
+    // ★C14-F1 连带（2026-10-11）：ON_TABLE_1X1 放置门退役=按原版单路收敛。
+    //  定谳（亲读 1457）：六员 {13,33,49,50,174,372,646} 全员 uccp=true（StyleOnTable1x1
+    //  基档 AnchorBottom=Table 单位+UsesCustomCanPlace=true,TileObjectData.cs:2329-2335,
+    //  addTile :2339-2393）→ Player.cs:40085 CustomPlace 路由 → TileObject.CanPlace
+    //  【单路】,legacy AssortedThings 路（PlaceOnTable1x1 WorldGen.cs:45736 桌面门,
+    //  :60475 调用点）不可达。旧本仓门=把 legacy 路的桌面要求叠在 CanPlace 路之后
+    //  （双闸）——严于原版拒平台（CanPlace 共享臂 SolidWithTop||Table 两开,平台承,
+    //  TileObject.cs:392-410;生存面 CheckOnTable1x1 :43899 → AnchorValid :52310-52326
+    //  同构=放置/幸存对称,平台放置后不掉）。本刀撤除放置侧叠闸;悬空仍被
+    //  validateAnchors 底锚带拒（Table 位无臂命中）;桌面仍由 Table 追加臂
+    //  （:407-410 tileTable∧!Platform∧bt0）受理。幸存面 DECOR_SUPPORT 'ontable'
+    //  （CheckOnTable1x1 1:1）不动。
+    //  hasSupport 的 onTable 位参（:28442）保留=非表驱动回落路径防波堤（六员已全
+    //  uccp1x1 化,现不可达,纯保守）。
     if (this.player.useTime > 0) return;
 
     // ★M-4（2026-09-02 九批）：实体重叠门【前移到清格相之前】+ 两档建模。
@@ -28739,7 +28778,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确。
           // 单格帧合成统一走 framedCellFrame（旗帜 91 逆写 / 竖排族布局表 / 通用
           // style*fw*18）——tests/cage-placement 用同一入口做放置帧锚端到端断言
-          if (isVanillaStyle) {
+          if (placedAlt) {
+            // ★C14-F2（2026-10-11）：备档命中帧带（TileObject.Place :60-108 全式——
+            //  CalculatePlacementStyle TileObjectData.cs:1989-1999 placeStyle*mult+sb
+            //  折行+横竖排布;格内偏移 :93-108 cw+cp/hts 累进）。基记录（alt=0）仍走
+            //  framedCellFrame（下方）=零回归面。
+            const [fx2, fy2] = alternateCellFrame(placedAlt.rec, placedAlt.sb,
+              itemDef.placeStyle ?? 0, dx2, dy2);
+            st.setTile(px, py, tileId, fx2, fy2);
+          } else if (isVanillaStyle) {
             let [fx2, fy2] = framedCellFrame(
               def.vanilla?.sheet ?? -1, def.vanilla?.fw ?? 1, itemDef.placeStyle ?? 0, dx2, dy2);
             // 书（50）放置帧随机 0-4（PlaceOnTable1x1 WorldGen.cs:45379
@@ -44063,6 +44110,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && COLD_DAMAGE_NPCS.has(attacker.vanillaId) && p.buffs.has(BuffType.Warmth)) {
       dmg = Math.trunc(dmg * 0.7);
     }
+    // ★618-R4F6:draedons_heart 接触减伤 15%(C# DraedonsHeart.cs :17/:63
+    //  contactDamageReduction+=0.15——温暖同位后乘)
+    if (attacker && contactOnly && (p as unknown as { __swContactRed?: number }).__swContactRed) {
+      dmg = Math.max(1, Math.trunc(dmg * (1 - (p as unknown as { __swContactRed: number }).__swContactRed)));
+    }
     // 日曜护盾反击门（1458 P.cs:38589-38605 Counter 集 + ConsumeSolarFlare →
     // NewProjectile 608）。下层 shieldsBefore 支 = 爆闪 608 全参等价实现
     // （settleSolarFlareRetaliation）——旧「608 追踪弹未实装,直伤近似」登记销核。
@@ -51233,11 +51285,26 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
    *  （openNpcDialog 时 computeShopHappiness）;非对话态 = ShoppingSettings.NotInShop 1f。
    *  f32 语义走 truncCSf32Mul（ScaleStats:= trunc(f32(f32(a)*f32(b)))=C# (long)((float)a*b)）。
    *  vi_ 物品注册期 value=1 占位——权威值查 vanilla-itemvalue.json（extract-itemrare.mjs） */
-  reforgeCost(item: { id: number; stack: number }): number {
+  reforgeCost(item: { id: number; stack: number; prefix?: number }): number {
     const def = ITEM_DEFS[item.id];
     if (!def) return 0;
     const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
-    const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
+    // ★R15-F14（2026-10-11 C15 清偿）：费用基改含当前词缀 value——原版 num55 =
+    //   (long)reforgeItem.value × (long)reforgeItem.stack（Main.cs:42297）,其中
+    //   reforgeItem.value 已被 Item.Prefix 烘进词缀乘区（Item.cs:612-613
+    //   `num2 *= num2; value = (int)((float)value * num2)`——TryGetPrefixStatMultipliersForItem
+    //   out value 平方后乘,:597 (int) 截断）。旧读裸表值=平价（带词缀重铸与白板同价,
+    //   神级≈2.4× 档原版应显著更贵）。f32 逐位=SellChain.itemValueWithPrefix 同式
+    //   （该助手基表源 vanilla-shopstock.json 与本表 vanilla-itemvalue.json 12 处值
+    //   差+缺条目——不跨表,基面维持原表逐位不动,只加词缀乘区）。
+    const base = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
+    let value = base;
+    const pfx = item.prefix ?? 0;
+    if (pfx > 0) {
+      const m = prefixValueMul(pfx);          // 未平方乘区（vanillaPrefixes 同式）
+      const sq = f32(f32(m) * f32(m));        // :612 num2 *= num2
+      value = Math.trunc(f32(f32(base) * sq)); // :597 (int) 截断
+    }
     let cost = value * item.stack;
     if (this.player.equipStats.discount) cost = Math.floor(cost * 0.8);   // 折扣先行（:42299-42301）
     // 幸福价乘区（:42302 (long)((float)num55*PriceAdjustment)）——乘子取对话 NPC

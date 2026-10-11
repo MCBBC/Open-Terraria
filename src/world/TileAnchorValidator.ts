@@ -48,6 +48,25 @@ export interface AnchorRec {
    *  整记录替换非合并,越界/缺style回落基记录）。recon-tileobj 从反编译提取,
    *  只存与基记录发散的 style。 */
   subTiles?: Record<string, AnchorRec>;
+  /** ★C14-F3：AnchorValidTiles/AnchorInvalidTiles（TileObjectData.cs:390-429 属性,
+   *  isValidTileAnchor :1910-1935——invalid 先查,valid 缺省=无门恒 true）。
+   *  消费臂=SolidTile/SolidSide/SolidBottom/Platform/PlatformNonHammered/PlanterBox
+   *  六臂（TileObject.cs:390/:416/:468/:479/:487/:496/:502/:563/:570/:649/:656——
+   *  SolidWithTop/Table/AlternateTile/EmptyTile 四臂【无】门）。 */
+  vTiles?: number[];
+  ivTiles?: number[];
+  /** ★C14-F2：备档全记录（Alternates,TileObjectData.cs:2098-2108 addAlternate 提交;
+   *  GetTileData(type,style,alt) :5127-5162 alt>0 → Alternates[alt-1] 整记录替换;
+   *  CanPlace TileObject.cs:203-225 逐备档满分制首中）。sb = addAlternate(baseStyle)
+   *  的 Style 基偏移（CalculatePlacementStyle :1989-1999 帧带数学）;sty 缺省=继承
+   *  基记录同段。 */
+  alts?: Array<Omit<AnchorRec, 'alts' | 'sty'> & { sb: number; sty?: AnchorRec['sty'] }>;
+  /** ★C14-F2：样式/坐标模块面（TileObject.Place :60-108 备档帧带数学）——
+   *  sh=StyleHorizontal/swl=StyleWrapLimit/sls=StyleLineSkip/sm=StyleMultiplier/
+   *  cw=CoordinateWidth/cp=CoordinatePadding/hts=CoordinateHeights。
+   *  仅携带备档的记录入库;FullWidth=(cw+cp)*w、FullHeight=Σ(hts+cp)
+   *  （Calculate TileObjectData.cs:1808-1820）。 */
+  sty?: { sh: boolean; swl: number; sls: number; sm: number; cw: number; cp: number; hts: number[] };
   /** ★BJ602：UsesCustomCanPlace（TileObjectData.cs:145-155,ctor :1679 缺省 false）——
    *  CustomPlace（:5017-5038）路由维度。★暂只入库不设路由门（消费端 19/427/165/233
    *  等在册件照旧走既有路由）=登记债（BJ602）。 */
@@ -106,6 +125,86 @@ export function anchorSpecOf(sheet: number, style?: number): AnchorRec | null {
   return out;
 }
 
+/** ★C14-F2（2026-10-11）备档评估链。原版 CanPlace（TileObject.cs:203-225）在单点
+ *  上逐备档取 GetTileData(type,style,num7)（:207,alternate 0=基,N=Alternates[N-1]
+ *  整记录替换）做满分制评分,:836-839 首个满分备档即中（break）——本仓评估链按同序
+ *  逐备档首中。subTiles 命中 style 的子样式记录沿用基记录备档（LinkedAlternates
+ *  语义,TileObjectData.cs:603-617;子样式独立 Alternates 1457 无实例=登记债）。 */
+export interface ChainEntry { rec: AnchorRec; sb: number; sty: AnchorRec['sty'] }
+/** baseOverride：调用方已按足迹门解析的基记录（Game.ts anchorRec——style 子样式
+ *  足迹不符时回落基记录,链首必须与门面同记录,防子样式几何换挡）。 */
+export function anchorChainOf(sheet: number, style?: number, baseOverride?: AnchorRec | null): ChainEntry[] {
+  const base = baseOverride !== undefined ? baseOverride : anchorSpecOf(sheet, style);
+  const raw = base ? RAW[String(sheet)] : null;
+  if (!base || !raw) return [];
+  const out: ChainEntry[] = [{ rec: base, sb: 0, sty: raw.sty }];
+  for (const a of raw.alts ?? []) {
+    // 备档 rec 物化继承 sty（入库时发散过滤省略,帧数学消费 rec.sty）
+    const rec = (a.sty ? a : { ...a, sty: raw.sty }) as AnchorRec;
+    out.push({ rec, sb: a.sb, sty: rec.sty });
+  }
+  return out;
+}
+/** 原版 Direction 过滤（CanPlace TileObject.cs:209-212）：备档 Direction=PlaceLeft
+ *  且玩家朝右（dir==1）→ 跳过;PlaceRight 且朝左（dir==-1）→ 跳过。dir=0（未知/
+ *  非玩家链）不过滤。 */
+function dirSkipped(rec: AnchorRec, dir: number): boolean {
+  if (dir === 0) return false;
+  return (rec.dir === 'PlaceLeft' && dir === 1) || (rec.dir === 'PlaceRight' && dir === -1);
+}
+/** ★C14-F2 多格链：点击格 → 逐备档评估首中（基→alts 同序）。返回命中位置与备档序
+ *  （alt=0 基记录,行为与旧 chooseAnchorFromClick 全等——无备档记录链长 1）。 */
+export function chooseAnchorFromClickChain(st: World['store'], cx: number, cy: number,
+  sheet: number, style = 0, dir = 0,
+  baseOverride?: AnchorRec | null): { x: number; y: number; alt: number } | null {
+  const chain = anchorChainOf(sheet, style, baseOverride);
+  for (let k = 0; k < chain.length; k++) {
+    if (dirSkipped(chain[k].rec, dir)) continue;
+    const hit = chooseAnchorFromClick(st, cx, cy, chain[k].rec, style);
+    if (hit) return { x: hit.x, y: hit.y, alt: k };
+  }
+  return null;
+}
+/** ★C14-F2 uccp 1×1 链：点击格直判（无吸附）,逐备档按各自 Origin 换算占位左上
+ *  （CanPlace :208-209 `num8 = x - tileData2.Origin.X`）,首中制。返回命中备档。 */
+export function validateAnchorChainAt(st: World['store'], tx: number, ty: number,
+  sheet: number, style = 0, dir = 0,
+  baseOverride?: AnchorRec | null): { alt: number; rec: AnchorRec; sb: number } | null {
+  const chain = anchorChainOf(sheet, style, baseOverride);
+  for (let k = 0; k < chain.length; k++) {
+    const { rec, sb } = chain[k];
+    if (dirSkipped(rec, dir)) continue;
+    if (validateAnchors(st, tx - rec.ox, ty - rec.oy, rec, style)) return { alt: k, rec, sb };
+  }
+  return null;
+}
+/** ★C14-F2 备档帧带基偏移（TileObject.Place :60-108 全式）：
+ *  CalculatePlacementStyle（TileObjectData.cs:1989-1999）num = placeStyle*StyleMultiplier
+ *  + Style(备档 sb) + random;按记录样式模块折行（:63-68 wrap/lineSkip）;
+ *  横排 frameX=FullWidth*col/frameY=FullHeight*row,竖排互换（:70-75）。
+ *  FullWidth=(cw+cp)*w、FullHeight=Σ(hts+cp)（Calculate :1808-1820,PaddingFix 零表）。 */
+export function alternateFrameBase(rec: AnchorRec, sb: number, placeStyle: number,
+  random = 0): [number, number] {
+  const sty = rec.sty;
+  if (!sty) return [0, 0];
+  let num = placeStyle * (sty.sm || 1) + sb + random;
+  let row = 0;
+  if (sty.swl > 0) { row = Math.floor(num / sty.swl) * (sty.sls || 1); num %= sty.swl; }
+  const fw = (sty.cw + sty.cp) * rec.w;
+  const fh = (sty.hts ?? []).reduce((a, h) => a + h + sty.cp, 0);
+  return sty.sh ? [fw * num, fh * row] : [fw * row, fh * num];
+}
+/** ★C14-F2 备档格内偏移（Place :93-108：frameX=base+k*(CoordinateWidth+CoordinatePadding),
+ *  frameY=base+Σ_{l<dy}(heights[l]+pad)）。sty 缺省=旧 default（dx/dy*18）。 */
+export function alternateCellFrame(rec: AnchorRec, sb: number, placeStyle: number,
+  dx: number, dy: number, random = 0): [number, number] {
+  const sty = rec.sty;
+  if (!sty) return [dx * 18, dy * 18];
+  const [bx, by] = alternateFrameBase(rec, sb, placeStyle, random);
+  const fy = (sty.hts ?? []).slice(0, dy).reduce((a, h) => a + h + sty.cp, 0);
+  return [bx + dx * (sty.cw + sty.cp), by + fy];
+}
+
 /** ★M-3c 液体档直读（绕开 anchorSpecOf 的 AlternateTile/Tree 豁免回落）。
  *  消费位 = Game.ts 门双锚分支（liqGateDoor——门 10/11 被显式豁免走专用路径）与
  *  药草 legacy 置放路径（liqGateHerb——药草 82-84 anchorBottom 含 AlternateTile
@@ -150,13 +249,36 @@ const SIDE_BT_PAIRS: Record<string, number[]> = {
 
 interface SideSpec { t: string[]; cnt: number; start: number }
 
+/** ★C14-F3：isValidTileAnchor（TileObjectData.cs:1910-1935 全支）——AnchorValidTiles/
+ *  AnchorInvalidTiles 成员表门：先查 invalid（命中即 false）,再查 valid（表缺省=null
+ *  =无门恒 true;有表须命中）。消费臂=SolidTile/SolidSide/SolidBottom/Platform/
+ *  PlatformNonHammered/PlanterBox（TileObject.cs:390/:416/:468/:479/:487/:496/:502/
+ *  :563/:570/:649/:656——SolidWithTop/Table/AlternateTile/EmptyTile 四臂【无】门）。
+ *  表数据源=recon-tileobj 提取 vTiles/ivTiles（C14-F3 维度）;mem=style 解析后的
+ *  成员表面（validateAnchors 子样式档,见该函数 C14-F3 注）。 */
+function validTileAnchor(mem: Pick<AnchorRec, 'vTiles' | 'ivTiles'>, sheet: number): boolean {
+  if (mem.ivTiles?.includes(sheet)) return false;
+  if (!mem.vTiles) return true;
+  return mem.vTiles.includes(sheet);
+}
+
+/** 顶坡判定（blockType 2/3 = slope1/2 上坡面;TileObject.cs:481 `topSlope()`）。 */
+function isTopSlope(st: World['store'], x: number, y: number): boolean {
+  const b = btOf(st, x, y);
+  return b === 2 || b === 3;
+}
+
+/** evalCell 返回值 = 原版 num30（成功:0/8;失败:null）——AllFlatHeight 顶侧全行一致
+ *  门（TileObject.cs:493-530 num28 跨格一致制）的消费面。 */
 function evalCell(side: string, spec: SideSpec, at: [number, number],
-  st: World['store'], rec: AnchorRec): boolean {
+  st: World['store'], rec: AnchorRec,
+  mem: Pick<AnchorRec, 'vTiles' | 'ivTiles'> = rec): number | null {
   const [cx, cy] = at;
-  if (!st.inBounds(cx, cy)) return false;
+  if (!st.inBounds(cx, cy)) return null;
   const active = st.isActive(cx, cy);
   const bit = (name: string) => spec.t.includes(name);
   let ok = false;
+  let h30 = 0;
   if (active) {
     const d = defAt(st, cx, cy)!;
     const sheet = d?.vanilla?.sheet ?? -1;
@@ -164,27 +286,34 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
     // ★BJ629 件2（2026-10-10）：SolidTile 臂补 !tileNoAttach 排除（原版四锚同款:
     //  底 TileObject.cs:388 / 顶 :457 / 右 :561 / 左 :647——`Main.tileSolid &&
     //  !Main.tileSolidTop && !Main.tileNoAttach && (FlattenAnchors || blockType()==0)`）。
+    //  ★C14-F3：isValidTileAnchor 门（:388-390/:457-459/:561-563/:647-649 同式）。
     //  旧缺=松于原版:关态门 10（tileSolid[10]=true Main.cs:8027 而 noAttach[10]=true
     //  Main.cs:7812 区）等 noAttach 实心件曾被当承重锚（可浮贴门顶等）。其余臂不受影
     //  响:SolidSide（:411/:497/:565/:651）/SolidBottom（:465）/SolidWithTop（:392-406）
     //  原文本就无 noAttach 位——勿扩大。多格链共面（validateAnchors 逐格）一并受益。
     if (bit('SolidTile') && d?.solid && !d.platform && st.wall[iCell] >= 0
       && !TILE_NO_ATTACH_SHEETS.has(sheet)
-      && (rec.flatten || btOf(st, cx, cy) === 0)) ok = true;
-    // ★BJ624（2026-10-10）：SolidWithTop / Table 两臂拆分（原版 CanPlace 底锚四支
-    //  1:1,TileObject.cs:404-476）——旧合并支 solidTopLike（isPlatform∪tileTable）
-    //  双向松：① SolidWithTop 桌面漏拒（桌 14/工作台 18 tileSolidTop=true 而
-    //  tileSolid=false,原版非平台支 :474-476 要求 tileSolid∧tileSolidTop 双旗→
-    //  桌不承;平台支 :466-473 要求 !halfBrick∧PlatformProperTopFrame（frameX 连接
-    //  带,WorldGen.cs:70686——斜坡带 8-11/17-24 不承））;② Table 平台漏拒
-    //  （:404-408 显式 !TileID.Sets.Platforms 前置——tileTable[19/427/435-439]=true
-    //  而桌面锚支排除平台）。
-    if (!ok && bit('SolidWithTop')) {
+      && (rec.flatten || btOf(st, cx, cy) === 0)
+      && validTileAnchor(mem, sheet)) ok = true;
+    // ★C14-F1（2026-10-11 判谳级翻正,R14-F1 定谳亲读复核）：共享臂两开——原版
+    //  TileObject.cs:392-406 共享臂条件 = `(AnchorType.SolidWithTop || AnchorType.Table)`
+    //  （两 bit 任一即进入平台/实心∧solidTop 分支）,:407-410 Table 臂
+    //  （tileTable∧!Platform∧bt0）= 追加支。旧 BJ624「两臂拆分」把共享臂只挂
+    //  SolidWithTop = 严于原版：Table 单位记录（书 50/烛 33/水烛 49/存钱罐/瓶/石像族
+    //  等 86 条）的平台承重被拒。亲读判语（1457 原文 TileObject.cs:392-410）：
+    //  `if (!flag6 && ((anchorBottom.type & AnchorType.SolidWithTop) == AnchorType.SolidWithTop
+    //    || (anchorBottom.type & AnchorType.Table) == AnchorType.Table)) {`
+    //  生存面同构双证：WorldGen.AnchorValid :52310-52326 同式两开。
+    //  登记债（本刀未动）：平台支的 `rec.flatten ||` 原版无此项（FlattenAnchors 只在
+    //  SolidTile/SolidSide 臂,TileObject.cs:388/:416/:457/:561/:647）——flatten=true 三件
+    //  （4/136/442）半砖平台在本支松于原版;活路由不达（4 专用支/136·442 五锚档专支）
+    //  =惰性偏差,C14 备案未落刀。
+    if (!ok && (bit('SolidWithTop') || bit('Table'))) {
       if (PLATFORMS_SHEETS.has(sheet)) {
-        // 平台支（:466-473）：Platforms ∧ !halfBrick ∧ PlatformProperTopFrame
+        // 平台支（:394-401）：Platforms ∧ !halfBrick ∧ PlatformProperTopFrame
         if (rec.flatten || (!st.half[iCell] && platformProperTopFrame(st.frameX[iCell] ?? 0))) ok = true;
       } else if (VAN_TILE_SOLID_EXTRA.has(sheet)) {
-        // 非平台支（:474-476）：tileSolid ∧ tileSolidTop（九件套差集 239/380 等,
+        // 非平台支（:402-405）：tileSolid ∧ tileSolidTop（九件套差集 239/380 等,
         //  无 blockType 门——坡/半砖锭顶亦承,原版本相）
         ok = true;
       }
@@ -192,20 +321,40 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
     if (!ok && bit('Table') && TILE_TABLE_SHEETS.has(sheet) && !PLATFORMS_SHEETS.has(sheet)
       && btOf(st, cx, cy) === 0) ok = true;
     if (!ok && bit('SolidSide') && d?.solid && !d.platform
-      && SIDE_BT_PAIRS[side]?.includes(btOf(st, cx, cy))) ok = true;
-    if (!ok && bit('PlanterBox') && sheet === 380) ok = true;
+      && SIDE_BT_PAIRS[side]?.includes(btOf(st, cx, cy))
+      && validTileAnchor(mem, sheet)) ok = true;
+    if (!ok && bit('PlanterBox') && sheet === 380 && validTileAnchor(mem, sheet)) ok = true;
     // ★BJ602：AlternateTile 位（TileObject.cs:419/:509/:611/:697）——锚格 active 且
     // sheet ∈ rec.altTiles（AnchorAlternateTiles,isValidAlternateAnchor
     // TileObjectData.cs:1969-1984）→ 锚成立。表缺省 = 原版本相恒 false（惰性位）。
     if (!ok && bit('AlternateTile') && (rec.altTiles ?? []).includes(sheet)) ok = true;
+    // ★C14-F2c/d（2026-10-11）：顶锚 Platform / PlatformNonHammered 两臂（原版顶锚
+    //  专有,TileObject.cs:477-490——底/侧锚无此二位）：
+    //  · Platform（:477-483）：Platforms → isValidTileAnchor 门;num30=(!halfBrick∧
+    //    !topSlope)?8:0（平顶平台挂装下探 8px 语义,AllFlatHeight 一致门消费）。
+    //  · PlatformNonHammered（:485-490）：Platforms ∧ slope()==0 ∧ !halfBrick →
+    //    isValidTileAnchor 门;num30=8。（591 灯柱平台顶放备档=
+    //    PlatformNonHammered|AllFlatHeight,TileObjectData.cs:3094。）
+    if (!ok && bit('Platform') && PLATFORMS_SHEETS.has(sheet)
+      && validTileAnchor(mem, sheet)) {
+      ok = true;
+      h30 = (!st.half[iCell] && !isTopSlope(st, cx, cy)) ? 8 : 0;
+    }
+    if (!ok && bit('PlatformNonHammered') && PLATFORMS_SHEETS.has(sheet)
+      && btOf(st, cx, cy) === 0 && !st.half[iCell]
+      && validTileAnchor(mem, sheet)) {
+      ok = true;
+      h30 = 8;
+    }
     if (!ok && bit('SolidBottom')) {
       // Composite（TileObject :541-556）：整实心 / 半砖 / 顶坡 / 平台的半砖·顶坡形态；
       // NotReallySolid/bottomSlope 近似忽略（花箱族已由 PlanterBox 覆盖）
+      // ★C14-F3：SolidBottom 臂亦过 isValidTileAnchor 门（:463-475）
       const b = btOf(st, cx, cy);
-      if (d?.solid || b === 1 || b >= 2) ok = true;
+      if ((d?.solid || b === 1 || b >= 2) && validTileAnchor(mem, sheet)) ok = true;
     }
   } else if (bit('EmptyTile')) ok = true;
-  return ok;
+  return ok ? h30 : null;
 }
 
 /** ★M-3c 单格液体放置门（TileObjectData.LiquidPlace TileObjectData.cs:1853-1907 全支）。
@@ -241,7 +390,12 @@ export function liquidCellOk(st: World['store'], x: number, y: number,
 export function validateAnchors(st: World['store'], ax: number, ay: number, rec: AnchorRec,
   style = 0, occupiedIgnore?: (x: number, y: number) => boolean): boolean {
   if (!Number.isFinite(ax) || !Number.isFinite(ay)) return false;
-  if (ax < 1 || ay < 1 || ax + rec.w > st.w - 1 || ay + rec.h > st.h - 1) return false;
+  // ★C14-F6（2026-10-11）：边距 5 格硬门对齐（TileObject.CanPlace :215——
+  //  `num8 < 5 || num8 + Width > maxTilesX - 5 || num9 < 5 || num9 + Height > maxTilesY - 5
+  //  → return false`）。原版 quirk：该门在备档循环【内】逐备档判定且为硬 return——
+  //  任一备档自身 Origin/W/H 越出 5 格边距即整体拒（F2 备档链逐档复验同款）。
+  //  旧 1 格边距=松于原版（贴世界边 5 格内可放）。
+  if (ax < 5 || ay < 5 || ax + rec.w > st.w - 5 || ay + rec.h > st.h - 5) return false;
   for (let j = 0; j < rec.h; j++) {
     for (let i = 0; i < rec.w; i++) {
       const x = ax + i, y = ay + j;
@@ -290,21 +444,40 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       start: typeof a.start === 'number' ? a.start : Math.max(0, rec.h - 1),
     };
   };
+  // ★C14-F3（2026-10-11）：成员表 style 档解析（M-3b liqStyles 同构——GetTileData
+  //  整记录替换语义,子样式记录的 AnchorValidTiles/InvalidTiles 随 style 生效;
+  //  未命中回落基记录表。消费例：药草 82/83/84 style1-6 六表 :4758-4781——
+  //  style4 死亡草 {53,116} 沙面专锚,基表 {2,477,109,492} 草面——旧基表单档把
+  //  子样式合法锚面全拒）。锚几何仍取 rec 本体（足迹门在调用方解析,同 BJ602 约定）。
+  const subFace = rec.subTiles?.[String(style)];
+  const mem: Pick<AnchorRec, 'vTiles' | 'ivTiles'> = subFace
+    ? { vTiles: subFace.vTiles ?? rec.vTiles, ivTiles: subFace.ivTiles ?? rec.ivTiles }
+    : rec;
   const bottom = sideSpec('bottom');
   if (bottom) for (let k = 0; k < bottom.cnt; k++) {
-    if (!evalCell('bottom', bottom, [ax + bottom.start + k, ay + rec.h], st, rec)) return false;
+    if (evalCell('bottom', bottom, [ax + bottom.start + k, ay + rec.h], st, rec, mem) === null) return false;
   }
+  // ★C14-F2d：顶侧 AllFlatHeight 一致门（TileObject.cs:493-530）——num28 = 首格 num30,
+  //  后续格 num30 不一致即该格失败（整侧全行同高制,591 平台顶放备档消费）。
   const top = sideSpec('top');
-  if (top) for (let k = 0; k < top.cnt; k++) {
-    if (!evalCell('top', top, [ax + top.start + k, ay - 1], st, rec)) return false;
+  if (top) {
+    let num28 = -1;
+    for (let k = 0; k < top.cnt; k++) {
+      const h30 = evalCell('top', top, [ax + top.start + k, ay - 1], st, rec, mem);
+      if (h30 === null) return false;
+      if (top.t.includes('AllFlatHeight')) {
+        if (num28 === -1) num28 = h30;
+        else if (num28 !== h30) return false;
+      }
+    }
   }
   const left = sideSpec('left');
   if (left) for (let k = 0; k < left.cnt; k++) {
-    if (!evalCell('left', left, [ax - 1, ay + left.start + k], st, rec)) return false;
+    if (evalCell('left', left, [ax - 1, ay + left.start + k], st, rec, mem) === null) return false;
   }
   const right = sideSpec('right');
   if (right) for (let k = 0; k < right.cnt; k++) {
-    if (!evalCell('right', right, [ax + rec.w, ay + right.start + k], st, rec)) return false;
+    if (evalCell('right', right, [ax + rec.w, ay + right.start + k], st, rec, mem) === null) return false;
   }
   return true;
 }

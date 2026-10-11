@@ -180,8 +180,10 @@ describe('BJ588 本仓 Enemy 落刀锚', () => {
 
 describe('BJ588 本仓 Renderer 落刀锚', () => {
   it('FF_VXSDIR_GROUP 单源导入 + ffSdirMirror 门 + ==1 翻转行（≙ Main.cs:23357-23361）', () => {
-    expect(rendererSrc).toMatch(/import \{ FF_VXSDIR_GROUP \} from '\.\.\/entities\/Enemy';/);
-    expect(rendererSrc).toMatch(/const ffSdirMirror = FF_VXSDIR_GROUP\.has\(idR\);/);
+    // ★C12/R11（2026-10-11）扩面：FF_VXSDIR_EX 并入门（GROUP∪EX,六案组 11 型）——
+    // 本锚随单源行更新（语义不变：==1 翻转行/通用门排他原样,见 tests/c12-npc-r11-clearance.test.ts）
+    expect(rendererSrc).toMatch(/import \{ FF_VXSDIR_GROUP, FF_VXSDIR_EX \} from '\.\.\/entities\/Enemy';/);
+    expect(rendererSrc).toMatch(/const ffSdirMirror = FF_VXSDIR_GROUP\.has\(idR\) \|\| FF_VXSDIR_EX\.has\(idR\);/);
     expect(rendererSrc).toMatch(
       /if \(!rotationDriven && !slimeNoMirror && !ffSdirMirror && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !revFlipMirror && !eyeMirrorByVx && e\.facing > 0\) ctx\.scale\(-1, 1\);/,
     );
