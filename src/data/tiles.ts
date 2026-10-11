@@ -792,7 +792,11 @@ def({ key: 'v_500_solar_brick', name: '', solid: true, opacity: 1, pick: 0, mapC
 def({ key: 'v_501_vortex_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#22DD97', blend: true, drop: 4230, light: [0, 115, 134], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 501, frame: 'auto' } });
 def({ key: 'v_502_nebula_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F9AAEC', blend: true, drop: 4231, light: [115, 38, 115], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 502, frame: 'auto' } });
 def({ key: 'v_503_stardust_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#23C8FE', blend: true, drop: 4232, light: [115, 115, 172], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 503, frame: 'auto' } });
-def({ key: 'v_504_mystic_snake_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#5C4B76', drop: null, vanilla: { sheet: 504, frame: 'auto' } });
+// ★BJ644（2026-10-12）rope 旗补装（Main.tileRope[504]=true,Main.cs:9457）——玩家
+//  攀爬/Block Swap 绳臂/IsRope 下滑全消费面（Player.ts:10586 等）;drop=null=零掉落
+//  （KillTile_GetItemDrops case 504 WorldGen.cs:66485）。449/450/451 彩带族同缺
+//  （Main.cs:9458-9460）——同族异件,登记债（本刀 504 域,不越界）。
+def({ key: 'v_504_mystic_snake_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#5C4B76', drop: null, rope: true, vanilla: { sheet: 504, frame: 'auto' } });
 def({ key: 'v_505_gold_fish_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: 4275 /* Check2x2 :49049 */, vanilla: { sheet: 505, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_507_gold_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4277, vanilla: { sheet: 507, frame: 'auto' } });
 def({ key: 'v_508_blue_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4278, vanilla: { sheet: 508, frame: 'auto' } });

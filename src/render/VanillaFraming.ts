@@ -312,7 +312,11 @@ const SET_REF_FN = {
   tileSolid: (t: number) => TILE_SOLID[t] ?? false,
   tileSolidTop: (t: number) => TILE_SOLID_TOP[t] ?? false,
   tileLargeFrames: () => 0, // 大帧特殊块(2D 变体表)不在本移植域,常 0 = 不走该分支
-  tileRope: (t: number) => t === 42 || t === 213 || t === 214 || t === 223 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366,
+  // ★BJ644（2026-10-12）补 Main.tileRope 全表缺员 504/449/450/451（Main.cs:9452-9460
+  //  九件全表={213,214,353,365,366,504,449,450,451}——504 弄蛇绳 TileFrame rope 支
+  //  :83173-83210 的 `num!=504` 特支此前整不达,504 落通用框帧=绳形错帧）。42/223/
+  //  314/345 为本仓既有外员（旧建模,非 vanilla tileRope——存疑不动,独立判例债）。
+  tileRope: (t: number) => t === 42 || t === 213 || t === 214 || t === 223 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366 || t === 504 || t === 449 || t === 450 || t === 451,
   tileNoAttach: (t: number) => t === 407 || false,
   tile: (a: number, b: number) => false,
 };
@@ -802,7 +806,9 @@ function isRopeAt(st: TileStore, x: number, y: number): boolean {
     const y2 = y + k;
     if (!st.inBounds(x, y2)) break;
     const t = st.type[st.idx(x, y2)];
-    if (st.flags[st.idx(x, y2)] && (t === 42 || t === 213 || t === 214 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366 || t === 223)) return true;
+    // ★BJ644（2026-10-12）补 Main.tileRope 缺员 504/449/450/451（vanilla IsRope
+    //  首支=Main.tileRope[tile.type] WorldGen.cs:70621——504 绳邻域判定此前漏判）
+    if (st.flags[st.idx(x, y2)] && (t === 42 || t === 213 || t === 214 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366 || t === 223 || t === 504 || t === 449 || t === 450 || t === 451)) return true;
   }
   return false;
 }

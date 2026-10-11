@@ -154,7 +154,7 @@ const UNMAPPED_WARNED = new Set<number>();
 const CRITTER_TURN_ON_PLAYERS = new Set([299, 538, 539, 639, 640, 641, 642, 643, 644, 645]);
 
 /** NPCID.Sets.BirdThatCanPoop（NPCID.cs:4777）：飞行时 1/50 极端霉运玩家头顶拉屎
- *  （鸟 NPC.cs:25398-25407 / 飞行鸭 :34863-34873，弹 1080） */
+ *  （鸟 NPC.cs:25459-25467 / 飞行鸭 aiStyle68 :34947-34955——★BJ644 行号 1456→1457，弹 1080） */
 const BIRD_THAT_CAN_POOP = new Set([74, 297, 298, 442, 363, 365, 603, 609, 671, 672, 673, 674, 675]);
 
 /** IsThisCenx（Player.cs:18032-18038）：四位开发者名（小写比较）恒被鸟粪命中 */
@@ -10651,7 +10651,7 @@ export class Enemy extends Entity {
    *  飞行：X 轴 0.1 步进,帽 3(丛林鸟 671-675 帽 4,:25495-25499);Y 轴前方
    *  下探 15 格——全空 vy+=0.05 缓沉,受阻 vy-=0.1,近障 5 格内再 -0.2(:25568-25605);
    *  撞墙 direction 反转 + 旧速×-0.5(最小 ±(cap-1)/±1);湿态上浮(:25596-25610)。
-   *  鸟粪彩蛋（:25398-25407，BirdThatCanPoop 表 NPCID.cs:4777 = 74/297/298/442/
+   *  鸟粪彩蛋（:25459-25467，BirdThatCanPoop 表 NPCID.cs:4779 = 74/297/298/442/
    *  363/365/603/609/671-675）：飞行态 + localAI[3]==0 + 鸟 Center.X 落在玩家
    *  水平带内 + 玩家在鸟下方 + CanHit + 玩家 RollOnlyBadLuckExtreme(50)==0
    *  （1/50 极端霉运或 IsThisCenx 四名,2026-08-19 补）→ localAI[3]=1 + 弹 1080
@@ -10666,7 +10666,7 @@ export class Enemy extends Entity {
     const owl = id === 611 || id === 689;
     const day = game.world.clock.isDay;
     const cloud = (game.world.weather.cloudAlpha ?? 0) > 0;
-    // ---- 鸟粪彩蛋（:25398-25407）----
+    // ---- 鸟粪彩蛋（:25459-25467）----
     if (this.ai0 === 1 && BIRD_THAT_CAN_POOP.has(id) && this.lai3 === 0 && player && !player.dead) {
       if (this.cx >= player.x && this.cx <= player.x + player.w
         && player.y > this.y + this.h
@@ -11839,7 +11839,7 @@ export class Enemy extends Entity {
       return;
     }
     // ---- 鸟粪彩蛋（aiStyle 68 飞行鸭同款,:34863-34872;BIRD_THAT_CAN_POOP
-    //      表含 363/365/603/609——B 批代理在 birdAI(:25398) 实现了 PoopProj,
+    //      表含 363/365/603/609——B 批代理在 birdAI(:25459) 实现了 PoopProj,
     //      此处补齐本族 10 行,2026-08-19）----
     if (this.lai3 === 0 && !player.dead) {
       if (this.cx >= player.x && this.cx <= player.x + player.w

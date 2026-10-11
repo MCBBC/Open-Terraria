@@ -506,6 +506,7 @@ import { MonkStaffSpin, MonkSlam, GhastlyGlaiveProj, MonkGhast } from '../entiti
 import { SlimeGlob } from '../entities/SlimeGlob';
 import { GlobProj } from '../entities/GlobProj';
 import { ChumBucketProj } from '../entities/ChumBucketProj';
+import { MysticSnakeCoil, mysticSnakeLandingSpot } from '../entities/MysticSnakeCoil';   // ★BJ644 弄蛇笛 754/4262 整装
 import { SkyLanternProj } from '../entities/SkyLanternProj';
 import { chumOnPreUpdateAll } from '../entities/chumBucket';
 import { FlintChargeProj, FlintWaveProj, FlintSpikeProj, emitFlintSpikes } from '../entities/DeadCellsFlint';
@@ -15599,37 +15600,32 @@ export class Game implements GameHooks {
         return;
       }
       if (nvVid === 4262 && this.player.useTime === 0) {
-        // 秘蛇：沿鼠标向逐格 CanHitLine+落地扫描（WorldUtils.Find MysticSnake 简化——
-        // 向下 ≤31 格找实心;ai155 蜷绕态机登记后置）,Kill 旧蛇单实例重生
-        const [mvx2, mvy2] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        // 耍蛇笛 4262（ItemCheck_Shoot :48278-48334 1:1；★BJ644 2026-10-12 ai155
+        //  整装收官）：沿鼠标向逐列 CanHitLine + Searches.Down(31)×Conditions.MysticSnake
+        //  （active 非 cut 非 504——非实心域,树/平台皆可落）落点扫描 + 顶上连叠回溯
+        //  ≤7 层（mysticSnakeLandingSpot 承载）；中靶才 Kill 旧蛇（已铺装=timeLeft 4
+        //  走撤绳支,上升中=立即杀）单实例重生（:48313-48327）。物品非消耗面
+        //  （SetDefaults :36653-36664 无 consumable 行——旧实现误按消耗品删笛,
+        //  本刀撤）；UseSound=Item_151（表值）；useTime=useAnimation=90（表值）
+        const [mvx2] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         const mdir = mvx2 >= this.player.cx ? 1 : -1;
-        const st42 = this.world.store;
-        let land42: { x: number; y: number } | null = null;
         const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
         const scanMax = Math.min(15, Math.floor(Math.abs(mvx2 - this.player.cx) / TILE) + (mdir < 0 ? 1 : 0));
-        for (let step = scanMax; step >= 0; step--) {
-          const cx9 = ptx + mdir * step;
-          if (!canHitLine(st42, this.player.cx, this.player.cy, 1, 1,
-            this.player.cx + TILE * step * mdir, this.player.cy, 1, 1)) continue;
-          for (let down = 0; down <= 31; down++) {              // Searches.Down(31)
-            const ty9 = pty + down;
-            if (!st42.inBounds(cx9, ty9)) break;
-            if (st42.isSolid(cx9, ty9)) { land42 = { x: cx9, y: ty9 }; break; }
-          }
-          if (land42) break;
-        }
+        const land42 = mysticSnakeLandingSpot(this.world.store,
+          this.player.cx, this.player.cy, ptx, pty, mdir, scanMax);
         if (land42) {
           for (const m of this.entities.projectiles) {
-            if (m instanceof Arrow && !m.dead && m.projId === 754) m.dead = true;   // 旧蛇硬杀
+            if (m instanceof MysticSnakeCoil && !m.dead) m.requestRecall();   // :48313-48327
           }
-          const snake = new Arrow(land42.x * TILE + 8 - 7, land42.y * TILE + 8 - 16 - 7,
-            0, -2.6666667, 0, 0, 754, { grav: 0, life: 3600, pierce: 1 });
+          // NewProjectile(result.X·16+8, result.Y·16+8−16, 0, −2.6666667, ai0=result.Y·16+8−16)（:48328）
+          const snake = new MysticSnakeCoil(land42.x * TILE + 8, land42.y * TILE + 8 - 16,
+            land42.y * TILE + 8 - 16);
           this.entities.add(snake, 'projectiles');
         }
         this.useSwing(heldDef, mdir > 0 ? 0 : Math.PI);
-        this.player.useTime = Math.max(1, itemCombat(4262)?.useAnimation ?? 30);
-        this.player.inv.removeHeld(1);   // consumable 装饰件
-        this.cb.onInventoryChanged();
+        this.player.useTime = Math.max(1, itemCombat(4262)?.useTime
+          ?? itemCombat(4262)?.useAnimation ?? 30);
+        this.playUseSound(nvVid, 'tink');   // UseSound Item_151（vanilla-itemusesound 表值）
         this.input.mouseDown = false;
         return;
       }

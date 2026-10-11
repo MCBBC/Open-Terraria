@@ -5916,7 +5916,7 @@ export class Arrow extends Entity {
       const live194 = !!p194 && !p194.dead;                       // :42038 player.active&&!dead（单机恒 active）
       const dx194 = live194 ? (p194 as { cx: number }).cx - this.cx : 0;   // :42043 目标失效=零向量
       const dy194 = live194 ? (p194 as { cy: number }).cy - this.cy : 0;
-      if (!(dy194 < 30) || !(dy194 > -30)) {      // :42049 |dy|≥30 才调 Y（±30 死区）
+      if (Math.abs(dy194) >= 30) {   // :42049 |dy|≥30 才调 Y（±30 死区）
         this.vy = Math.min(5, Math.max(-5, this.vy + Math.sign(dy194) * 0.4));   // :42052 钳 ±5
       }
       this.vx = Math.min(4, Math.max(-4, this.vx + Math.sign(dx194) * 0.4));     // :42054 钳 ±4
