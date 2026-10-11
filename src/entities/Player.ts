@@ -26,7 +26,7 @@ import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buff
 import { LuckState } from '../stats/Luck';
 import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { itemCombat } from '../data/vanillaItemCombat';
+import { itemCombat, BONUS_MELEE_SPEED_MULTIPLIER, NO_MELEE_SPEED_BONUS } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TileStoreRT } from '../world/TileStore';   // 运行时 SOLID_LUT（type-only import 会被剥）
@@ -3755,19 +3755,36 @@ export class Player extends Entity {
     return (h === 75 || h === 7) && b === 7 && l === 7;
   }
   /** 近战攻速倍率（CapAttackSpeeds + TurnAttackSpeedToUseTimeMultiplier，Player.cs
-   *  :28555-28574 1:1）：meleeSpeed 加法总和（装备 0.12 档 + 词缀 77-80 + 套装 + buff）
-   *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。原"猛爪手套 ×2"档已废——
-   *  原版猛爪手套 211 只给 meleeSpeed += 0.12 + autoReuseGlove（:14559-14562），
-   *  0.12 已经 vanilla-accfx.json 走 equipStats.meleeSpeed，不应再翻倍。 */
+   *  :29253-29262 1:1）：meleeSpeed 【加法】总和（装备 0.12 框 + 词缀 77-80 + 套装 +
+   *  buff + 甲虫球 + 食物档——原版全部 `meleeSpeed +=` 同一加算堆,:26110 前完成），
+   *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。
+   *  ★BJ640（2026-10-11）链条普查批3三面：
+   *  ①聚合加法化——旧式 Tipsy/Werewolf/Weak/甲虫/食物走【乘法】叠在装备和上
+   *  （(1+0.12)×1.1=1.232 vs 原版 1+0.12+0.1=1.22,多源堆叠漂移放大）;
+   *  ②per-item BonusMeleeSpeedMultiplier（:26110-26112,num29=(meleeSpeed−1)×
+   *  ItemID.Sets.BonusMeleeSpeedMultiplier[selectedItem]、ItemID.cs:1168 四件——
+   *  Bladed Glove 0.5/Fetid Baghnakhs 0.25/Psycho Knife 0.33/Terra Blade 0.75,
+   *  按手持物品缩放,在封顶【前】）;
+   *  ③NoMeleeSpeedBonus（ItemID.cs:62 {3821}）排除=该物品不吃近战攻速（原版
+   *  :4456 走 else 支零缩放;3821 vanilla ranged 本就不可达,表携带为数据面）。
+   *  原"猛爪手套 ×2"档已废——原版猛爪手套 211 只给 meleeSpeed += 0.12 +
+   *  autoReuseGlove（:14559-14562），0.12 已经 vanilla-accfx.json 走
+   *  equipStats.meleeSpeed，不应再翻倍。 */
   get attackSpeedMult(): number {
-    const raw = (1 + (this.equipStats.meleeSpeed ?? 0))   // ★BJ175 桩面 ?? 防御（缺省 0）
-      * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
-      * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
-      * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
-      * (1 + 0.1 * this.beetleMightOrbs)                     // 甲虫力量攻速（:10518-10520 98-100 分支）
-      * (1 + this.buffs.wellFedMeleeSpeed)                   // 食物近战速 +5/7.5/10%（:11528+）
-      * (1 + this.buffs.hungerMeleeSpeed);                   // 饥饿/极饿近战速 -5/-10%（:11566+/:11589+）
-    return raw > 3 ? 1 / 3 : 1 / raw;                        // :28566-28573
+    let accum = 1
+      + (this.equipStats.meleeSpeed ?? 0)                    // ★BJ175 桩面 ?? 防御（缺省 0）
+      + (this.buffs.has(BuffType.Tipsy) ? 0.1 : 0)           // Tipsy meleeSpeed += 0.1（:12012）
+      + (this.buffs.has(BuffType.Werewolf) ? 0.051 : 0)      // 狼人 meleeSpeed += 5.1%（:11989）
+      - (this.buffs.has(BuffType.Weak) ? 0.051 : 0)          // 虚弱 meleeSpeed -= 5.1%（:12002）
+      + 0.1 * this.beetleMightOrbs                           // 甲虫力量攻速（:10518-10520 98-100 分支）
+      + this.buffs.wellFedMeleeSpeed                         // 食物近战速 +5/7.5/10%（:12025/:12041/:12057）
+      + this.buffs.hungerMeleeSpeed;                         // 饥饿/极饿近战速 -5/-10%（:12073/:12088）
+    const held = this.inv.heldItem();
+    const heldVid = held ? (ITEM_DEFS[held.id]?.vid ?? -1) : -1;
+    if (NO_MELEE_SPEED_BONUS.has(heldVid)) return 1;         // :62 排除表（不缩放不封顶=中性）
+    const scale = BONUS_MELEE_SPEED_MULTIPLIER[heldVid] ?? 1;
+    accum = 1 + (accum - 1) * scale;                         // :26110-26112 per-item 缩放
+    return accum > 3 ? 1 / 3 : 1 / accum;                    // :29260-29266 封顶取倒数
   }
 
   /** 甲虫力量档球数（buff 98/99/100 在场派生——原版攻伤/攻速由 UpdateBuffs 的
@@ -11721,9 +11738,6 @@ export class Player extends Entity {
     //   内可再吃 NoCheese 命中,反之亦然），写面 :38674-38683 写回同桶。通道仍走
     //   全局登记表 getGlobalHurtBuckets() 单例（player 不建第二份）；无表的裸测
     //   面退 General 旧路（缺省不变形）。该入参由 NPC/boss 族调用方注入。
-    // ★605:mod 伤害闸(能量盾族——C# HasAnyEnergyShield 位=damagePlayer 头吸伤;
-    //  防御/endurance 计算前,盾伤不吃防御减)
-    dmg = runModDamageGate(this, dmg);
     let effBucketId = -1;
     let effBucketTable: import('../player/HurtCooldownBuckets').HurtCooldownBuckets | null = null;
     {
@@ -11791,6 +11805,10 @@ export class Player extends Entity {
       this.shadowDodgeTimer = 1800;                     // :38326 重整窗 30s
       return 0;
     }
+    // ★619-R3F4/F5:mod 伤害闸挪闪避族早退后(幽灵命中不吃盾)——C# HasAnyEnergyShield
+    //  同位(免疫/闪避门后、防御计算前);dmg<=0 早退=全吸盾可达成
+    dmg = runModDamageGate(this, dmg);
+    if (dmg <= 0) { this.dodgeFullFill(eq.longInvince ? 120 : 80); return 0; }
     // 受击破潜行（Player.Hurt :38530 `stealth = 1f;`——闪避分支已全部早退,走到此处
     // 即伤害落地,无条件复位；潜行装下一帧由更新段自然回蓄。曾缺=潜行态挨打不破隐）
     this.stealth = 1;

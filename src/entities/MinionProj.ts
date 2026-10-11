@@ -19,7 +19,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
-import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect } from './Arrow';
+import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect, empressHslRgb } from './Arrow';
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
 import { auraGlowMaskOf, auraGlowTint, AURA_GLOW_ALPHA, FLAMEBURST_GLOW_MASK, TRAP_GLOW_MASK, flameburstGlowRadius, flameburstGlowTintAlpha, TRAP_GLOW_ALPHA } from '../data/vanillaProjGlow';   // ★BJ625件3 闪电光环哨兵 glow 叠画色式 + ★R15-F1/F2 哨兵辉光数据面
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
@@ -31,6 +31,10 @@ import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble'
 import { hitCritters, hitTownNpcs, townVoodooGateOpen, applyBannerDamageDealt, type TownHitSettle } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
+import { laserScan } from './ForbiddenSignProj';   // ★BJ639 批1：642 束长 LaserScan 单源（Collision.cs:4599-4614 1:1）
+import { cutTilesBox } from './ProjCutTiles';      // ★BJ639 批1：642 沿束切割（CutTiles :15288 段）
+import { segHitsRect } from './bossAI_duke_moonlord';   // ★BJ639 批1：642 线碰撞（Colliding :16029 AABBvLine 等价核）
+import { tintedTex } from '../render/StringLine';  // ★BJ639 批1：644 hsl 染色烘焙（BJ-C9 F4 单源）
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
 import { ParticleOrchestraType } from '../net/syncModules';
 import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
@@ -626,6 +630,455 @@ export const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: num
  *  升空吸顶/衰减状态机 :41033-41145,见 1025 支）;放置速度 (0,0) 语义不变
  *  （Player.cs:48687-48689）。此前走通用哨兵重力段 vy+=0.2 落地的更早病根已除 */
 const FLOATING_SENTRIES = new Set<number>([641, 643]);
+
+// ===========================================================================
+// ★BJ639 批 1（2026-10-11）：aiStyle 123 两哨兵的【弹面】1:1 落刀（BJ635 批 2
+//  候选 642/644 定谳=真缺——此前 642 落「速度 9 直飞弹」通用承载、644 落「落点
+//  即时 AoE」近似,弹实体本体不存在。原版：
+//   · 642 = 月门连续激光（AI_084 642 支 :31964-31971 锁心+扫摆 / :32076-32085
+//     寿命包络 / :32113-32186 LaserScan 束长 / :32195-32213 束端尘+PlotTileLine
+//     光照 / Colliding :16029-16037 线碰撞 / CutTiles :15288 沿束切割 /
+//     usesLocalNPCImmunity cd10 :6915-6916 / 50t Kill / Draw Main.cs:32841-32856
+//     TurretLaserDraw 三段条带）。宿主 641 死 → 锁链尾支 Kill（:31993-31999,
+//     537 A2 同语义）;641 Kill 亦全扫 642（:73328-73333）。
+//   · 644 = 彩虹水晶爆裂弹（aiStyle 112 644 支 :34866-34998：渐显 α−8/拍、
+//     hsl 色相=出生拍 Disco、自旋、scale=Opacity/2×localAI[0]、t=30 才 60×60
+//     一次引爆（DoRainbowCrystalStaffExplosion :80316 + Damage 盒 :34972-34998）、
+//     t=60 Kill 二段爆花（Kill :73416-73430——usesIDStaticNPCImmunity :6951 单发
+//     语义=第二段伤害被免疫面吃掉,视觉爆花照放）;花瓣尘 1/10×4 站 + 亮星尘
+//     （:34899-34947）;回门光线（Draw Main.cs:34184-34202,t≥30 起亮）。宿主 643
+//     Kill 全扫 644（:73336-73347）。
+//  判别锁 = tests/bj639-moongate-rainbow-ai.test.ts（真哨兵夹具+变异）。
+// ===========================================================================
+
+/** Main.rgbToHsl 的色相分量（Main.cs:48743-48779 1:1——644 出生 ai[0] 喂入 :37922）。 */
+export function rgbToHslHue(r: number, g: number, b: number): number {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  if (max === min) return 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  let h: number;
+  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  return h / 6;
+}
+
+/** Main.DiscoR/G/B 六相循环取色相（DoUpdate_AnimateDiscoRGB Main.cs:19776-19825
+ *  1:1 折算：初值 R=255/:1036、每拍 ±7、六相周期 = 6×⌈255/7⌉=219t。
+ *  纯函数——tick 由调用方给（运行时 performance.now()×60/1000;测试注入钉值）。 */
+export function discoHueAt(tick: number): number {
+  let r = 255, g = 0, b = 0, style = 0;
+  const steps = Math.floor(tick) % 219;
+  for (let i = 0; i < steps; i++) {
+    if (style === 0) { g += 7; if (g >= 255) { g = 255; style = 1; } }
+    else if (style === 1) { r -= 7; if (r <= 0) { r = 0; style = 2; } }
+    else if (style === 2) { b += 7; if (b >= 255) { b = 255; style = 3; } }
+    else if (style === 3) { g -= 7; if (g <= 0) { g = 0; style = 4; } }
+    else if (style === 4) { r += 7; if (r >= 255) { r = 255; style = 5; } }
+    else { b -= 7; if (b <= 0) { b = 0; style = 0; } }
+  }
+  return rgbToHslHue(r, g, b);
+}
+
+/** 运行时全局 tick（Main.Disco 步进源）：performance.now 折 60t/s。 */
+export function discoTickNow(): number {
+  return (typeof performance !== 'undefined' ? performance.now() : 0) / (1000 / 60);
+}
+
+/** ★BJ639 批 1①：642 月门光束弹（aiStyle 84 642 支全式——见上方块注）。
+ *  位移独占：AI 直写位置/束向（UpdatePosition aiStyle84 早退表 :20549 同族,
+ *  velocity 只当束向单位向量）;盒 18×18（SetDefaults :6906-6916）。 */
+export class MoonGateBeam extends Entity {
+  readonly projId = 642;
+  w = 18; h = 18;
+  damage: number;
+  knockback: number;
+  armorPen = 0;
+  /** ai[0] = 当前束向角（出生 = 目标角 + direction×π/6 :37910-37914） */
+  ai0: number;
+  /** proj.direction = 出生束向 X 符号（NewProjectile 速度符号链）——扫向系数 */
+  direction: 1 | -1;
+  /** localAI[0] 寿命计（≥50 Kill :32079-32083） */
+  localAI0 = 0;
+  /** localAI[1] LaserScan 束长（Lerp 0.5/拍 :32174-32177） */
+  localAI1 = 0;
+  /** proj.scale = min(sin(life×π/50)×10, 1)（:32080-32085） */
+  scale = 0;
+  /** rotation = 束向 − π/2（:32112-32113,draw 消费） */
+  rot = 0;
+  /** 归一束向（AI 每拍直写——命中/束长/光照共用） */
+  vx = 0; vy = -1;
+  dead = false;
+  /** SentryShot（ProjectileID.cs:293 集合含 642,WhipTag.SENTRY_SHOT_SET 同表） */
+  whipTagShot = true;
+  /** 城镇臂可空（登记：461/537 光束先例同口径 enemies-only,642 城镇面零消费先例） */
+  private hostRef: () => MinionProj | null;
+  /** 受理面 crit/timer 消费 owner（spawn 拍捕获——vanilla NewProjectile owner 语义） */
+  private ownerPlayer: Player | null;
+  private hitCd = new Map<number, number>();
+
+  constructor(x: number, y: number, ai0: number, direction: 1 | -1,
+    damage: number, knockback: number, host: MinionProj | null, owner: Player | null) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;   // NewProjectile X/Y=Center :10878
+    this.ai0 = ai0;
+    this.direction = direction;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.hostRef = () => (host && !host.dead ? host : null);
+    this.ownerPlayer = owner;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // 宿主失联 = 锁链尾支 Kill（:31993-31999——A2 537 同语义,先于一切束效果）
+    const host = this.hostRef();
+    if (!host) { this.dead = true; return; }
+    // ①束心锁 = host.Center（:31965 base.Center = proj.Center——携行重定位随宿主自足）
+    this.x = host.cx - this.w / 2;
+    this.y = host.cy - this.h / 2;
+    // ②扫摆（:31966-31970）：vector62 = ai0.RotatedBy(−direction×(π/3)/50);velocity=归一
+    const sweep = -(this.direction as number) * (Math.PI / 3) / 50;
+    const ca = Math.cos(sweep), sa = Math.sin(sweep);
+    const ux = Math.cos(this.ai0), uy = Math.sin(this.ai0);
+    const rx = ux * ca - uy * sa, ry = ux * sa + uy * ca;
+    const rl = Math.hypot(rx, ry) || 1;
+    this.ai0 = Math.atan2(ry, rx);
+    this.vx = rx / rl; this.vy = ry / rl;
+    // ③寿命包络（:32076-32085）
+    this.localAI0++;
+    if (this.localAI0 >= 50) { this.dead = true; return; }
+    this.scale = Math.min(Math.sin(this.localAI0 * Math.PI / 50) * 10, 1);
+    // ④rotation = 束向 − π/2（:32112-32113）;velocity=旋转向量归一（:32114 已单位）
+    this.rot = Math.atan2(this.vy, this.vx) - Math.PI / 2;
+    // ⑤束长（:32125-32177）：num702=2/num703=0 → LaserScan(Center,vel,0,2400,[2])
+    //  → 均值 → localAI[1] = Lerp(localAI[1], avg, 0.5)
+    const smp = [0, 0];
+    laserScan(game.world.store, { x: this.cx, y: this.cy }, { x: this.vx, y: this.vy }, 0, 2400, smp);
+    this.localAI1 += ((smp[0] + smp[1]) / 2 - this.localAI1) * 0.5;
+    // ⑥束端尘（:32195-32213）：端点=Center+velocity×(localAI[1]−14);
+    //  2×d229 锥形（束角±π/2 随机侧,速 rand×2+2,noGravity scale1.7）+1/5 d31
+    //  （端点+侧偏×width,α100 scale1.5,vel×0.5、vy=−|vy| 上浮）
+    const tipX = this.cx + this.vx * (this.localAI1 - 14);
+    const tipY = this.cy + this.vy * (this.localAI1 - 14);
+    for (let k = 0; k < 2; k++) {
+      const da = Math.atan2(this.vy, this.vx) + (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2);
+      const mag = Math.random() * 2 + 2;
+      const d = game.spawnDust?.(tipX, tipY, 0, 0, 229, Math.cos(da) * mag, Math.sin(da) * mag);
+      if (d) { d.noGravity = true; d.scale = 1.7; }
+    }
+    if (Math.floor(Math.random() * 5) === 0) {
+      const px2 = -this.vy, py2 = this.vx;                       // RotatedBy(π/2)
+      const side = (Math.random() - 0.5) * this.w;
+      const d31 = game.spawnDust?.(tipX + px2 * side - 4, tipY + py2 * side - 4, 8, 8, 31, 0, 0, 100, null, 1.5);
+      if (d31) { d31.vx *= 0.5; d31.vy *= 0.5; d31.vy = -Math.abs(d31.vy); }
+    }
+    // ⑦光照（:32212-32213 PlotTileLine CastLight (0.3,0.65,0.7)）——沿束步进三线带
+    const half = (this.w * this.scale) / 2;
+    for (let dd = 0; dd <= this.localAI1; dd += TILE) {
+      game.addLightAt?.(this.cx + this.vx * dd, this.cy + this.vy * dd, 0.3, 0.65, 0.7);
+      game.addLightAt?.(this.cx + this.vx * dd - this.vy * half, this.cy + this.vy * dd + this.vx * half, 0.3, 0.65, 0.7);
+      game.addLightAt?.(this.cx + this.vx * dd + this.vy * half, this.cy + this.vy * dd - this.vx * half, 0.3, 0.65, 0.7);
+    }
+    // ⑧沿束切割（CutTiles :15288——PlotTileLine Center→Center+velocity×localAI[1],
+    //  线宽 width×scale）：12px 步进盒近似（461 光束同族先例宽 22 直译面）
+    if (this.localAI1 > 4) {
+      for (let dd = 0; dd <= this.localAI1; dd += 12) {
+        cutTilesBox(game, this.cx + this.vx * dd - this.w / 2, this.cy + this.vy * dd - this.h / 2,
+          this.w, this.h, this.projId);
+      }
+    }
+    // ⑨线碰撞命中（Colliding :16029-16037：AABB vs 线 Center→Center+velocity×
+    //  localAI[1] 宽 30×scale;usesLocalNPCImmunity cd10 :6915-6916→本仓 hitCd 10t 表;
+    //  受理面 tag/crit/横切面=694-696 爆弹臂同构,SentryShot 单源）
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    if (this.localAI1 < 4 || this.scale <= 0) return;
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      const en = ent as unknown as {
+        x: number; y: number; w: number; h: number; cx: number; cy: number; id: number; dead: boolean;
+        dontTakeDamage?: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+          pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+      };
+      if (en.dead || this.hitCd.has(en.id)) continue;
+      if (!segHitsRect(this.cx, this.cy, this.vx * this.localAI1, this.vy * this.localAI1,
+        30 * this.scale, en)) continue;
+      if (en.dontTakeDamage === true) continue;                    // BJ467⑥ :12686 头门前置
+      if (MinionProj.enemyImmune(en)) continue;                    // BJ452 N3① :12636
+      const direct: number[] = [];
+      (en as never as import('./WhipTag').WhipTagged).hurtFx = (d: number) => { direct.push(d); };
+      const timerCrit = tryConsumeTimerCritOf(this.ownerPlayer, game, en.x, en.y, en.w, en.h);
+      const monkCrit = monkAuraForcedCrit(this.ownerPlayer, this.projId);
+      const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
+        this.damage, game,
+        (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+        SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerPlayer, 0, this.projId);
+      const gated = en.dead;                                       // dontTakeDamage 已被头门早退（窄化余项）
+      const golemCrit = rollGolemSentryCrit(game, this.projId, false);   // 6176 SentryShot 10%
+      const crit = res.crit || timerCrit || monkCrit || golemCrit;
+      en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? res.dmg * 2 : res.dmg),
+        this.vx * this.knockback, this.vy * this.knockback, game, 0, crit, 1, true);
+      if (!gated) {
+        ghostHealProc(game, this.projId, 0,
+          en as unknown as Parameters<typeof ghostHealProc>[3]);   // Z1/D1② :13877-84
+      }
+      applyProjStatus(this.projId, en as unknown as Record<string, number>, {});
+      if (direct.length > 0 && !gated) {
+        for (const d of direct) darkHarvestChain(game, d, en.cx, en.cy, en.id);
+      }
+      this.hitCd.set(en.id, 10);                                   // localNPCHitCooldown=10
+    }
+  }
+
+  private ownerOf(game: GameHooks): Player | null {
+    return this.ownerPlayer ?? game.player ?? null;
+  }
+
+  /** Draw（Main.cs:32841-32856 DrawLaser TurretLaserDraw 三段条带两过）：
+   *  pass1 = 白 α127/255 全宽（无 Opacity 系）;pass2 = 白 α127/255×0.75×Opacity
+   *  半宽——642 alpha 恒 255（aiStyle84 无减档,全支亲读）→ Opacity=0,pass2 恒零
+   *  =原版仅半透白条带;仍照实现（数据面若未来接 α 链自动点亮）。束长预算 =
+   *  localAI[1] − scale×10.5（:32845 num296）。条带 22px 宽×scale,段进 19px
+   *  （frame.Height−1 :960）,体帧 y=22×(1..5) 五帧循环（i_1=54000−time/2 :32848）。 */
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
+    if (!ctx || this.localAI1 < 8 || this.scale <= 0.02) return;
+    const img = projSprite(this.projId);
+    const budget = Math.max(0, this.localAI1 - this.scale * 10.5);
+    if (budget < 1) return;
+    const bodyNum = 54000 - Math.floor(discoTickNow() / 2);
+    const bodyFrame = ((bodyNum % 5) + 5) % 5;                     // i_1%5（:32848 段内递进近似=全局相位）
+    const passes: Array<{ a: number; wMul: number }> = [
+      { a: 127 / 255, wMul: 1 },                                   // c_=white127（:32847）
+      { a: (127 / 255) * 0.75 * 0, wMul: 0.5 },                    // ×0.75×Opacity（:32853）——α 恒 255 → Opacity=0 恒零过
+    ];
+    for (const p of passes) {
+      if (p.a <= 0.002) continue;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, p.a);
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.rot);
+      const wid = this.scale * p.wMul;
+      if (!img || img.width === 0) {
+        ctx.fillStyle = `rgba(200,244,255,${p.a})`;
+        ctx.fillRect(-11 * wid, 0, 22 * wid, budget);
+        ctx.restore();
+        continue;
+      }
+      const tw = 22;
+      ctx.drawImage(img, 0, 0, tw, 20, (-11) * wid, -10 * wid, tw * wid, 20 * wid);   // stage0 炮口
+      let y = 22 * wid;                                            // stage0 distCovered=32 − origin 偏 10
+      let adv = 0;
+      while (adv + 19 < budget - 32) {                             // stage1 体段 19px/段
+        const fy = 22 * (bodyFrame + 1);
+        ctx.drawImage(img, 0, fy, tw, 20, (-11) * wid, y, tw * wid, 20 * wid);
+        adv += 19 * wid;
+        y += 19 * wid;
+      }
+      const restH = Math.max(4, budget - 32 - adv);                // stage2 端帽（截余量）
+      ctx.drawImage(img, 0, 154, tw, 30, (-11) * wid, y, tw * wid, Math.min(30, restH) * wid);
+      ctx.restore();
+    }
+  }
+}
+
+/** ★BJ639 批 1②：644 彩虹水晶爆裂弹（aiStyle 112 644 支 :34866-34998 全式 +
+ *  t=30 引爆/60 Kill 二段——见上方块注）。盒 14×14 tileCollide=false 零速悬浮
+ *  （SetDefaults :6943-6953）。faces = 哨兵闭包注入的受理面（敌/城伤害臂内聚在
+ *  MinionProj.rainbowBurstHitFace——townAcceptLadder 私有归属面）。 */
+export interface RainbowBurstFaces {
+  /** t=30 引爆受理面（敌怪 60×60 + 城镇 60×60 同链,注入点=643 哨兵） */
+  hitAt: (game: GameHooks, x: number, y: number) => void;
+}
+
+export class RainbowCrystalBurst extends Entity {
+  readonly projId = 644;
+  w = 14; h = 14;
+  /** ai[0] = 出生拍 Disco 色相（:37922 rgbToHsl(Disco).X——同一 volley 三发同相） */
+  hue: number;
+  /** localAI[0] = scale 随机档 0.8-1.6（:34878 NextFloat×0.8+0.8,首拍掷定） */
+  localAI0 = 0;
+  /** localAI[1] = 寿命计（==30 引爆 / ≥60 Kill :34954-34976） */
+  localAI1 = 0;
+  /** direction = ±1（:34879 旋转向） */
+  direction: 1 | -1 = 1;
+  /** proj.scale = Opacity/2×localAI[0]（:34953） */
+  scale = 0;
+  /** rotation = localAI[1]/40×2π×direction（:34883-34885） */
+  rot = 0;
+  alpha = 255;                                                     // SetDefaults :6950 −8/拍渐显
+  dead = false;
+  whipTagShot = true;                                              // SENTRY_SHOT_SET 含 644
+  vx = 0; vy = 0;                                                  // velocity=Zero（:34953）
+  private parentRef: () => MinionProj | null;
+  private faces: RainbowBurstFaces;
+  private boomed = false;
+
+  constructor(x: number, y: number, hue: number, parent: MinionProj | null,
+    faces: RainbowBurstFaces) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.hue = hue;
+    this.parentRef = () => (parent && !parent.dead ? parent : null);
+    this.faces = faces;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // 宿主 643 死 = 全扫（Kill :73336-73347 同语义）
+    if (!this.parentRef()) { this.dead = true; return; }
+    if (this.localAI1 === 0) {                                     // 首拍掷定（:34877-34880）
+      this.localAI0 = Math.random() * 0.8 + 0.8;
+      this.direction = Math.random() < 0.5 ? 1 : -1;
+    }
+    this.localAI1++;
+    // α −8/拍（:34887-34893）→ Opacity = 1−α/255
+    if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 8);
+    const opacity = 1 - this.alpha / 255;
+    this.rot = (this.localAI1 / 40) * Math.PI * 2 * this.direction;
+    this.scale = (opacity / 2) * this.localAI0;
+    // 回门光线（:34868-34875 PlotTileLine CastLight ×0.5 hsl 色;宿主活才画）
+    if (this.alpha === 0) {
+      const [hr, hg, hb] = empressHslRgb(this.hue);
+      const p = this.parentRef()!;
+      for (let dd = 0; dd <= Math.hypot(p.cx - this.cx, p.cy - this.cy); dd += 16) {
+        const t2 = dd / (Math.hypot(p.cx - this.cx, p.cy - this.cy) || 1);
+        game.addLightAt?.(this.cx + (p.cx - this.cx) * t2, this.cy + (p.cy - this.cy) * t2,
+          hr / 255 * 0.5, hg / 255 * 0.5, hb / 255 * 0.5);
+      }
+    }
+    // 花瓣尘（:34899-34924 两环×2 每 1/10 掷,d267 色相染 noLight;Up.RotatedBy(±π)
+    // .RotatedBy(rotation)×2.5,scale=Opacity×localAI[0]）+ 亮星尘 1/10（:34925-34948）
+    const [dr, dg, db] = empressHslRgb(this.hue);
+    for (let loop = 0; loop < 2; loop++) {
+      for (let n = 0; n < 2; n++) {
+        if (Math.floor(Math.random() * 10) !== 0) continue;
+        const ang = Math.PI * n + this.rot;                        // UnitY.RotatedBy(nπ).RotatedBy(rot)
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267,
+          Math.sin(ang) * 2.5, Math.cos(ang) * 2.5, 225,
+          { r: dr, g: dg, b: db, a: 255 }, 1.5, true, false, false);
+        if (d) {
+          d.noGravity = true;
+          d.noLight = true;
+          d.scale = opacity * this.localAI0;
+          d.vx = Math.sin(ang) * 2.5; d.vy = Math.cos(ang) * 2.5;
+        }
+      }
+    }
+    if (Math.floor(Math.random() * 10) === 0) {                    // 亮星尘（:34925-34948 单站折算）
+      const mag = 1 + Math.random() * 2;
+      const off = { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2 };
+      const ol = Math.hypot(off.x, off.y);
+      if (ol > 0.001) {
+        const ox = off.x / ol * (20 + Math.random() * 100);
+        const oy = off.y / ol * (20 + Math.random() * 100);
+        const ws = game.world.store;
+        const tx = Math.floor((this.cx + ox) / TILE), ty = Math.floor((this.cy + oy) / TILE);
+        if (ws.inBounds(tx, ty) && !ws.isSolid(tx, ty)) {
+          const ds = game.spawnDust?.(this.cx + ox, this.cy + oy, 0, 0, 267, 0, 0, 127,
+            { r: dr, g: dg, b: db, a: 255 }, 1, true, false, false);
+          if (ds) {
+            ds.noGravity = true;
+            ds.vy = -mag * (Math.random() * 0.9 + 1.6);
+            ds.fadeIn = 1 + Math.random();
+            ds.scale = 1 + Math.random();
+            ds.noLight = true;
+          }
+        }
+      }
+    }
+    // t=30 引爆（:34975-34998）+ t=60 Kill（:34955-34960 → Kill :73416 二段爆花,
+    //  usesIDStatic :6951=单发伤害语义,第二段只放视觉）
+    if (this.localAI1 === 30 && !this.boomed) {
+      this.boomed = true;
+      this.rainbowExplosionDust(game);
+      this.faces.hitAt(game, this.cx, this.cy);
+    }
+    if (this.localAI1 >= 60) {
+      this.rainbowExplosionDust(game);
+      this.dead = true;
+      return;
+    }
+  }
+
+  /** DoRainbowCrystalStaffExplosion（:80316-80360 双环 d267 hsl 染 + 白克隆折算）。 */
+  private rainbowExplosionDust(game: GameHooks): void {
+    const [dr, dg, db] = empressHslRgb(this.hue);
+    const num = 7 + Math.floor(Math.random() * 6);                 // Next(7,13)
+    for (let ring = 0; ring < 2; ring++) {
+      for (let i = 0; i < num; i++) {
+        const spinA = Math.random() * Math.PI * 2;                 // (0,−3).RotatedByRandom(π)
+        const ang = spinA + Math.PI * 2 * i / num;
+        const speedK = ring === 0 ? 0.8 + Math.random() * 0.4 : (0.8 + Math.random() * 0.4) * (Math.random() * 0.8);
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267,
+          Math.sin(ang) * 2.05 * speedK, -Math.cos(ang) * 3 * speedK / 2.05 * 2.05, 0,
+          { r: dr, g: dg, b: db, a: 255 }, ring === 0 ? 2 : Math.random(), true, false, false);
+        if (d) {
+          d.noGravity = true;
+          d.scale = ring === 0 ? 2 : Math.random();
+          d.fadeIn = Math.random() * 2;
+        }
+      }
+    }
+  }
+
+  /** Draw（Main.cs:34184-34202 两过：体旋转（rotation）+体不旋转,均 ×Opacity×
+   *  scale×2 hsl 染色;34445 glow 不旋转过=第三过折算半 α;t≥30 回门光线拉伸 pass
+   *  =垂直拉伸体纹理沿向宿主（Main.cs :34190-34201,scaleY=dist/texH）。 */
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const opacity = 1 - this.alpha / 255;
+    if (opacity <= 0.001) return;
+    const img = projSprite(this.projId);
+    if (!img || img.width === 0) return;
+    const [tr, tg, tb] = empressHslRgb(this.hue);
+    const tex = tintedTex(img as unknown as HTMLImageElement, [tr, tg, tb], false) ?? img;
+    const sz = this.scale * 2;
+    const passes: Array<{ rot: number; a: number }> = [
+      { rot: this.rot, a: opacity },                               // 旋转体（:34187）
+      { rot: 0, a: opacity },                                      // 不旋转体（:34188）
+      { rot: 0, a: opacity * 0.45 },                               // glow 过折算（:34445 color106 半档）
+    ];
+    for (const pass of passes) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, pass.a);
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(pass.rot);
+      const dw = this.w * sz, dh = this.h * sz;
+      ctx.drawImage(tex, -dw / 2, -dh / 2, dw, dh);
+      ctx.restore();
+    }
+    // 回门光线（:34190-34201 宿主活 + Opacity>0.3 + t≥30 起亮;拉伸 = texW×1 ×
+    //  dist/texH,α 值115=clamp(|30−t|/20)）
+    const parent = this.parentRef();
+    if (parent && opacity > 0.3 && this.localAI1 > 30) {
+      let v115 = Math.abs(30 - this.localAI1) / 20;
+      v115 = Math.max(0, Math.min(1, v115));
+      if (v115 > 0) {
+        const dx = parent.cx - this.cx, dy = parent.cy - this.cy;
+        const dist = Math.hypot(dx, dy) || 1;
+        const ang = Math.atan2(dy, dx) + Math.PI / 2;
+        const sy = dist / (img as { height: number }).height;
+        for (const pa of [{ a: v115, syMul: 1 }, { a: v115, syMul: 0.5 }]) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, pa.a);
+          ctx.imageSmoothingEnabled = false;
+          ctx.translate(this.cx, this.cy);
+          ctx.rotate(ang);
+          ctx.drawImage(tex, -(this.w * sz) / 2, 0, this.w * sz, (img as { height: number }).height * sy * pa.syMul);
+          ctx.restore();
+        }
+      }
+    }
+  }
+}
 
 /** 哨兵放置落地扫描（PickSentryLandingSpot Player.cs:50043-50059 1:1 纯函数,
  *  R31 §C①——Game.ts case 'summon' 接线见落点清单;本导出先落可测实现）：
@@ -3653,9 +4106,13 @@ export class MinionProj extends Entity {
         this.a169St = 60;
         this.a169Tg = tgtF.id;
       }
-      // rotation（:46609-46613）：vel 向 +π/2;dist<40 → 恒 π/2（UnitY.ToRotation()）
+      // rotation（:46609-46613）：vel 向 +π/2;dist<40 → 恒 π（Vector2.UnitY.ToRotation()
+      // +MathF.PI/2 = π/2+π/2 = π——★BJ637 复报定谳（用户截图 107.png「召唤物横着的」）：
+      // 旧写 π/2 系转写漏加后项（把 UnitY.ToRotation() 当终值），竖刃贴图（帧 0 尖朝上）
+      // 转 90° = 横置;π = 尖朝下竖直。旋转源=AI rotation 本体，本体绘制 ctx.rotate(this.rot)
+      // 通用路消费（MinionProj.draw 尾）;辉光十字/残影（:31395/:30883）为同 rot 叠层不承载朝向。
       let tAng = Math.atan2(this.vy, this.vx) + Math.PI / 2;
-      if (dist < 40) tAng = Math.PI / 2;
+      if (dist < 40) tAng = Math.PI;
       this.rot = angleLerp(this.rot, tAng, 0.2);
       this.x += this.vx; this.y += this.vy;
       // 命中特支同巡航态成立（原版时序：AI 内索敌先置 ai[0]=60（:46603-46608）→
@@ -6893,6 +7350,84 @@ export class MinionProj extends Entity {
     this.emitSpawnHitVisuals(game);
   }
 
+  /** ★BJ639 批 1②：644 t=30 引爆受理面（原版 = 弹体本体 60×60 盒 Damage() 一次:
+   *  :34975-34998 width=height=60/penetrate=-1 + Kill :73416-73430 二段被
+   *  usesIDStaticNPCImmunity :6951 吃掉=单发伤害语义）。几何 = 60×60 盒 vs 靶盒
+   *  AABB（30+半宽/半高）;受理面 tag/crit/横切与旧爆弹臂同构（SentryShot 单源）。
+   *  伤害/击退取 643 出生拍捕获值（faces.hitAt 闭包注入）。 */
+  private rainbowBurstHitFace(game: GameHooks, bx: number, by: number, dmg: number): void {
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, 644)) continue;   // friendly 门（Damage_PVE_Inner :11892）
+      const en = ent as EnemyLike & { dead: boolean };
+      if (en.dead) continue;
+      if (Math.abs(en.cx - bx) < 30 + en.w / 2 && Math.abs(en.cy - by) < 30 + en.h / 2) {
+        // BJ467⑥ :12686 头门前置（dontTakeDamage 靶不达;644 aiStyle112 非反噬族）
+        if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+        // BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,窗拒拍=写梯/tag 全不达）
+        if (MinionProj.enemyImmune(en)) continue;
+        // BJ452 N3② tag 面：644 ∈ SentryShot → 完整 WhipTagEffect 栈,挂单源
+        const volleyDirect: number[] = [];
+        (en as never as import('./WhipTag').WhipTagged).hurtFx = (d: number) => { volleyDirect.push(d); };
+        // BJ453 受理面 crit 段补全（:12928-12943,载体=644 本体——timerCrit 消费
+        // owner 态;武僧 688-690 掷以载体 644 判定=恒假,形位保留）
+        const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+        const monkCrit = monkAuraForcedCrit(this.ownerRef(), 644);
+        const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
+          dmg, game,
+          (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+          SUMMON_TAG_MUL[644] ?? 1, en.cx, en.cy, this.ownerRef(), 0, 644);
+        const gated = en.dead || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        const golemCrit = rollGolemSentryCrit(game, 644, false);   // 6176 SentryShot 10%
+        const crit = res.crit || timerCrit || monkCrit || golemCrit;
+        en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? res.dmg * 2 : res.dmg),
+          Math.sign(en.cx - bx) * this.knockback, -2, game, 0, crit, 1, true);
+        // Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段;载体=644,numHits=0）
+        if (!gated) {
+          ghostHealProc(game, 644, 0, en as unknown as Parameters<typeof ghostHealProc>[3]);
+        }
+        applyProjStatus(644, en as unknown as Record<string, number>,
+          { catalystBand: this.ownerRef()?.equipStats.catalystBand });
+        // BJ452 N3② W5 :13711 位落地（受理后）——916 链电伤落其他敌
+        if (volleyDirect.length > 0 && !gated) {
+          for (const d of volleyDirect) darkHarvestChain(game, d, en.cx, en.cy, en.id);
+        }
+      }
+    }
+    // 城镇臂（:34975 Damage() 管线同链——Y2 清偿刀既案;60×60 几何外置 skip）
+    hitTownNpcs({ x: bx, y: by, w: 0, h: 0 }, game, dmg, 0, 'playerProj', 644,
+      () => true, undefined,
+      (n) => {
+        const tn0 = n as TownNpcHitTarget;
+        if (!townVoodooGateOpen(game, n.vanillaId, 644)) return true;
+        // BJ445③ 三族共门（usesIDStatic → flag3 不豁免——窗内靶整跳）
+        if ((n as { iframes?: number }).iframes !== undefined
+          && (n as { iframes?: number }).iframes! > 0) return true;
+        return !(Math.abs(tn0.cx - bx) < 30 + tn0.w / 2 && Math.abs(tn0.cy - by) < 30 + tn0.h / 2);
+      },
+      (n) => {
+        ghostHealProc(game, 644, 0, n as unknown as Parameters<typeof ghostHealProc>[3]);
+        // 写梯归档：644 usesIDStatic + penetrate=1 → 原版写梯内支不达=immune[owner]
+        // 零写——TownNPC.hurt 通用档写的 10t 须清还原（Y2 报告③既案）
+        this.townAcceptLadder(game, n, true);
+      },
+      (n) => {
+        const tn = n as TownNpcHitTarget;
+        const direct: number[] = [];
+        tn.hurtFx = (d: number) => { direct.push(d); };
+        const timerCritT = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
+        const monkCritT = monkAuraForcedCrit(this.ownerRef(), 644);
+        const res = resolveWhipTagHit(tn, dmg, game,
+          (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+          SUMMON_TAG_MUL[644] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, 644);
+        const golemCritT = rollGolemSentryCrit(game, 644, false);
+        return {
+          dmg: res.crit ? res.dmg / 2 : res.dmg,
+          crit: res.crit || timerCritT || monkCritT || golemCritT,
+          kb: Math.sign(tn.cx - bx) * this.knockback,
+        };
+      });
+  }
+
   /** 同类计数（计数器/本体伤害档位用：831 宝石数 / 970 阿比盖尔数） */
   private peerCount(game: GameHooks, id: number): number {
     let n = 0;
@@ -7102,7 +7637,9 @@ export class MinionProj extends Entity {
     const fullRotBJ518 = playerFullRotationOf(owner, owner.mount, owner.cart)?.angle ?? 0;
     const floorPos = (): void => { this.x = Math.floor(this.x); this.y = Math.floor(this.y); };
     // ---- 早退支①：aiStyle 123（641 月门/643 彩虹水晶）∪ 84（642 激光随 641 携带,
-    //      Projectile.cs:31963-31970 调本函数;642 激光随行建模缺,见 SENTRY_SHOOT 注）----
+    //      Projectile.cs:31963-31970 调本函数。★BJ639 批 1：642 连续激光已落
+    //      MoonGateBeam（束心每拍锁 641 Center=随行自动成立,本早退支仅剩 641/643
+    //      携行自身重定位面;642 弹本体不再入哨兵集合）----
     if (this.projId === 641 || this.projId === 643) {
       // :70110-70112 Center = MountedCenter + (0, gravDir * -(num + 20 + height/2))
       this.x = mc.x - this.w / 2;
@@ -8555,138 +9092,51 @@ export class MinionProj extends Entity {
           const mx = this.cx;
           const my = this.cy;
           if (ss.volley) {
-            // 彩虹水晶 643：3 连目标区随机落点（:34005——距离越远散布越大 0.5-1.25×）
-            for (let i = 0; i < ss.volley; i++) {
-              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-              const spread = 0.1 + 0.65 * Math.max(0, Math.min(1, (800 - Math.min(800, d)) / 600));
-              const px = tgt.cx + (Math.random() - 0.5) * 2 * (20 + spread * 60);
-              const py = tgt.cy + (Math.random() - 0.5) * 2 * (20 + spread * 60);
-              // 644 是原地爆裂弹（零速生成,短时引爆）→ 落点直接 AoE
-              for (const ent of game.enemies()) {
-                if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-                const en = ent as EnemyLike & { dead: boolean };
-                if (en.dead) continue;
-                if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
-                  // ★BJ467⑥ :12686 头门前置（同拳盒臂——dontTakeDamage 靶不达 TimerCrit/
-                  //  tag ModifyHit/golem 掷;644 aiStyle 112 非接触反噬族 → 水母亦无
-                  //  zap 口,整跳=原版净语义）
-                  if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
-                  // ★BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,先于 crit 掷/tag 消费
-                  //  ——644 usesIDStatic 族 flag3 不豁免,窗拒拍=写梯/tag 全不达;BJ445③ 城镇臂 :6218 同式）
-                  if (MinionProj.enemyImmune(en)) continue;
-                  // ★BJ452 N3② tag 面：644 ∈ SentryShot（ProjectileID.cs:293）→
-                  //  CanRunHitEffects 达 → ModifyHit+OnHit 照跑=完整栈,挂单源
-                  //  resolveWhipTagHit;916 汇出收集,受理后落地（W5 :13711 位次纪律）。
-                  const volleyDirect: number[] = [];
-                  (en as never as import('./WhipTag').WhipTagged).hurtFx = (d: number) => { volleyDirect.push(d); };
-                  // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
-                  //  伤害载体=爆裂弹 644 本体——timerCrit 消费 owner 态,武僧掷恒假形位保留）
-                  const timerCritVolley = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
-                  const monkCritVolley = monkAuraForcedCrit(this.ownerRef(), ss.shot);
-                  const resVolley = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
-                    dmgOf(), game,
-                    (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-                    SUMMON_TAG_MUL[ss.shot] ?? 1, en.cx, en.cy, this.ownerRef(), 0, ss.shot);
-                  const volleyGated = en.dead
-                    || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;   // 受理预判（contact :4849 同式）
-                  // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
-                  //   原版伤害面=爆裂弹 644 本体（SentryShot）→ 10% 强制暴击
-                  const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);
-                  // ★BJ453 并链：crit 源 ‖ timerCritVolley（:12928）‖ monkCritVolley
-                  //  （:12929-12943）,新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg;
-                  //  res.crit∧golem 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）
-                  const critVolley = resVolley.crit || timerCritVolley || monkCritVolley || golemCritVolley;
-                  en.hurt(applyBannerDamageDealt(game, en, critVolley && !resVolley.crit ? resVolley.dmg * 2 : resVolley.dmg),
-                    Math.sign(en.cx - px) * this.knockback, -2, game, 0, critVolley, 1, true);   // ★N2 同式 crit 色位（res.crit‖golem）
-                  // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
-                  //  爆裂弹 644（原地引爆瞬态弹）→ projId 传 ss.shot、numHits=0
-                  //  ★BJ455⑤ 门径统一（:13712 flag10 无死亡复查——击杀拍照回血,爆弹臂同刀）
-                  if (!volleyGated) {
-                    ghostHealProc(game, ss.shot, 0,
-                      en as unknown as Parameters<typeof ghostHealProc>[3]);
-                  }
-                  applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
-                  // ★BJ452 N3② W5 :13711 位落地（主命中受理后）——916 链电伤落其他敌（源敌永免 :18）
-                  if (volleyDirect.length > 0 && !volleyGated) {
-                    for (const d of volleyDirect) {
-                      darkHarvestChain(game, d, en.cx, en.cy, en.id);
-                    }
-                  }
-                }
+            // ★BJ639 批 1②（2026-10-11）：643 volley = 真 644 爆裂弹 ×3（AI_123
+            //  :37918-37932 1:1 落点公式——j=0 = NPC 盒内随机点+宿速×30 前导;
+            //  j>0 = RotatedByRandom(π/4)×(NextFloat×num11+0.5),num11 =
+            //  Lerp(0.1,0.75,GetLerpValue(800,200,距心))。旧「落点即时 AoE」退役=
+            //  弹实体本体补建（14×14 t=0 → 60×60 t=30+60t 演出面,见类注）。
+            //  色相 = 出生拍 Disco（:37922 rgbToHsl(Disco).X——同 volley 三发同相）。
+            const hue644 = discoHueAt(discoTickNow());
+            const tgtE = tgt as unknown as { x: number; y: number; w: number; h: number; vx: number; vy: number };
+            const dmg644 = dmgOf();
+            const faces: RainbowBurstFaces = {
+              hitAt: (g2: GameHooks, bx: number, by: number) =>
+                this.rainbowBurstHitFace(g2, bx, by, dmg644),
+            };
+            for (let j = 0; j < ss.volley; j++) {
+              const vx4 = tgtE.x + Math.random() * tgtE.w - this.cx;   // vector4=盒内随机点−心
+              const vy4 = tgtE.y + Math.random() * tgtE.h - this.cy;
+              let ox = vx4 + (tgtE.vx ?? 0) * 30;                       // vector5=宿速×30 前导
+              let oy = vy4 + (tgtE.vy ?? 0) * 30;
+              if (j > 0) {
+                const dist = Math.hypot(ox, oy);
+                const num11 = 0.1 + (0.75 - 0.1) * Math.max(0, Math.min(1, (dist - 800) / (200 - 800)));
+                const ra = (Math.random() - Math.random()) * (Math.PI / 4);  // RotatedByRandom(π/4)
+                const ca2 = Math.cos(ra), sa2 = Math.sin(ra);
+                const sc = Math.random() * num11 + 0.5;                 // NextFloat×num11+0.5
+                const rxx = (vx4 * ca2 - vy4 * sa2) * sc;
+                const ryy = (vx4 * sa2 + vy4 * ca2) * sc;
+                ox = rxx; oy = ryy;
               }
-              // ★清偿刀 Y2：城镇臂——爆裂弹 644 的 Damage() 管线对城镇靶同链（643 本体
-              //  aiStyle 123 不伤,伤面=644 爆裂弹,SentryShot）。AoE 半径含靶半宽 →
-              //  几何外置 skip、collide 恒真（同爆炸弹臂）。
-              //  ★BJ452 N3② tag 面（城镇靶同链:SentryShot → ModifyHit/OnHit 照跑）——
-              //  settle 挂单源 resolveWhipTagHit,916 汇出在受理拍（写梯后）落地。
-              let volleyTownDirect: number[] | null = null;
-              hitTownNpcs({ x: px, y: py, w: 0, h: 0 }, game, dmgOf(), 0, 'playerProj', ss.shot,
-                () => true, undefined,
-                (n) => {
-                  const tn0 = n as TownNpcHitTarget;
-                  if (!townVoodooGateOpen(game, n.vanillaId, this.projId)) return true;
-                  // ★BJ445③ :12636 三族共门（644 usesIDStatic → flag3 不豁免）——
-                  //  窗内靶整跳（每 volley=独立瞬态 644,原版同相）
-                  if ((n as { iframes?: number }).iframes !== undefined
-                    && (n as { iframes?: number }).iframes! > 0) return true;
-                  return !(Math.abs(tn0.cx - px) < 14 + tn0.w / 2 && Math.abs(tn0.cy - py) < 14 + tn0.h / 2);
-                },
-                (n) => {
-                  // ★Z1/D1② 城镇臂 ghostHeal 白耗/治疗面（:13877-84 城镇靶同面;载体=
-                  //  爆裂弹 644 瞬态弹,numHits=0 同敌怪环）
-                  ghostHealProc(game, ss.shot, 0,
-                    n as unknown as Parameters<typeof ghostHealProc>[3]);
-                  // ★BJ445③ 写梯归档：644 = usesIDStaticNPCImmunity（Projectile.cs
-                  //  :6943-6953 SetDefaults 亲读）+ penetrate=1（:6946）→ 原版写梯
-                  //  usesIDStatic 外支命中但内支 `penetrate != 1` 不达 = immune[owner]
-                  //  【零写】保持门位 0——TownNPC.hurt 通用档写的 10t 须清还原（旧
-                  //  「通用档 iframes=10 保留」误档,Y2 报告③）。644 不入 CONTACT_CD_TABLE：
-                  //  idStatic 写位不可达=门恒开,cd 位不可表（登记）。
-                  this.townAcceptLadder(game, n, true);
-                  // ★BJ452 N3② W5 :13711 位落地（写梯后）——916 链电自城镇靶位寻
-                  //  CanBeChasedBy 敌,城镇 NPC 本体永免（_DarkHarvest.cs:18）
-                  const tnL = n as TownNpcHitTarget;
-                  if (volleyTownDirect) {
-                    for (const d of volleyTownDirect) {
-                      darkHarvestChain(game, d, tnL.cx, tnL.cy, tnL.id);
-                    }
-                    volleyTownDirect = null;
-                  }
-                },
-                (n) => {
-                  const tn = n as TownNpcHitTarget;
-                  const direct: number[] = [];
-                  tn.hurtFx = (d: number) => { direct.push(d); };
-                  // ★BJ453 受理面 crit 段补全（Projectile.cs:12928-12943 同位,ModifyHit 前;
-                  //  原版 crit 段敌/城共享）：TimerCrit :12928 + 武僧 688-690 掷 :12929-12943
-                  //  （载体=644 恒假,形位保留）
-                  const timerCritVolleyT = tryConsumeTimerCritOf(this.ownerRef(), game, tn.x, tn.y, tn.w, tn.h);
-                  const monkCritVolleyT = monkAuraForcedCrit(this.ownerRef(), ss.shot);
-                  const res = resolveWhipTagHit(tn, dmgOf(), game,
-                    (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-                    SUMMON_TAG_MUL[ss.shot] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, ss.shot);
-                  volleyTownDirect = direct;
-                  const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);   // 6176（爆裂弹面）
-                  // ★BJ452 N3② BJ445② 同构 settle（crit 参=防后×2+色一体;dmg 仅 res.crit
-                  //  摘半——tag-crit 预倍在 res.dmg,golem 预倍不经 dmg 承载勿摘）
-                  //  ★BJ453 并链：crit 源 ‖ timerCritVolleyT ‖ monkCritVolleyT——crit 参
-                  //  单布尔防后单次 ×2,dmg 面不动。
-                  return {
-                    dmg: res.crit ? res.dmg / 2 : res.dmg,
-                    crit: res.crit || timerCritVolleyT || monkCritVolleyT || golemCritVolley,
-                    kb: Math.sign(tn.cx - px) * this.knockback,
-                  };
-                });
-              game.spawnParticles(px, py, `hsl(${Math.floor(Math.random() * 360)},90%,65%)`, 8, 2.4, { life: 26 });
+              const px = this.cx + ox, py = this.cy + oy;
+              (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+                new RainbowCrystalBurst(px, py, hue644, this, faces), 'projectiles');
             }
           } else {
-            const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
-            // 641 月门原版锚点 = 本体 Center（:33993），642 传送门弹 18×18 → −9
-            // （曾 mx-5 写死 + 锚点 -2 近似 → 弹心偏移半格）
+            // ★BJ639 批 1①（2026-10-11）：641 → 642 月门连续激光（aiStyle 84 642 支
+            //  全式,见 MoonGateBeam 类注）。旧「速度 9 直飞 Arrow」退役=BJ635 批 2
+            //  候选定谳真缺（原版=随门心 50t 扫摆 ±30° 束,LaserScan/线碰撞/切割/光照）。
+            //  出生参数：ai[0]=目标角+direction×π/6（:37910-37914）、direction=
+            //  DirectionTo(target).X 符号、Center=本体心（:33993）。
+            const dirX0 = tgt.cx - this.cx, dirY0 = tgt.cy - this.cy;
+            const dl0 = Math.hypot(dirX0, dirY0) || 1;
+            const aimAng = Math.atan2(dirY0 / dl0, dirX0 / dl0);
+            const gdir: 1 | -1 = dirX0 > 0 ? 1 : -1;                    // num10=sign(vector3.X)
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              Object.assign(new Arrow(mx - 9, my - 9, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
-                dmgOf(), this.knockback, ss.shot, { grav: 0 }), { whipTagShot: true }),
-              'projectiles');
+              new MoonGateBeam(this.cx, this.cy, aimAng + gdir * (Math.PI / 6), gdir,
+                dmgOf(), this.knockback, this, this.ownerRef()), 'projectiles');
           }
         }
         if (this.sCool > 0) this.sCool--;
@@ -8779,9 +9229,11 @@ export class MinionProj extends Entity {
     // 伤害吃 summonDamageMult;★BJ516①：1036 已重路由 webStep（AI_067 flag7）
     // Foxparks 1094/1113 喷火态（PR:56081-56159 / 1457 :60064-60135：ai[0] 1000-1003
     // 每 4t 一发 1106；伤 = dmg（1456 :56133 ×0.75 → 1457 :60068 全额）×命中 0.85
-    // (:12620)；OnFire 300t(:11002)；penetrate 4；寿命 72t/54t 后不伤——Arrow 无
-    // extraUpdates，速度×3/life÷3 等价换算。1113 弹速 num17=10.5（:60074，1094=5）
-    // → ×3=31.5；idStaticNPCHitCooldown=10（:60100）两型同）
+    // (SetDefaults case 1106 :13491-13496 (int) 截断)；OnFire 300t(:11002)；penetrate 4；
+    // 寿命 72 子步（AI_193 :42084）/54 子步后不伤（Damage_CanDealDamage :12479）——
+    // ★BJ642：×3/life÷3 补偿退役（Arrow 已消费 extraUpdates=2=3 子步/tick 逐子步
+    // 消 life,出生改原版字面 velocity=num17/life=72,见下）;1113 弹速 num17=10.5
+    // （:60074，1094=5）；idStaticNPCHitCooldown=10（:60100）两型同）
     // ★BJ521②（2026-10-05,BJ520② 备案债清偿）：岩浆门折算——原版门序=AI_026 顶
     //  flag10 岩浆逃逸门 :59170-59174（lavaWet → ai[0]=1/ai[1]=0）先于 flag8 喷火块
     //  :60011-60101（ai[0]>=1000 :60014;块尾 return :60101）——岩浆拍 ai[0] 被覆写为
@@ -8808,14 +9260,23 @@ export class MinionProj extends Entity {
         //  fourthShot 注入（foxT%4===0 位于 ++foxT%4===1 块内=恒假死支,且错域：
         //  ai[1] 循环属 idle 态 1097 支）摘除;真注入面=ai026TailGround→
         //  shootMinionShot（:62742-62751 localAI[2]<=-3 回卷,本批实装）。
-        const flameSpd = this.projId === 1113 ? 31.5 : 15; // num17 ×3 补偿（:60072/:60074）
+        // ★BJ642（2026-10-11）：×3/life÷3 补偿退役——Arrow 已消费
+        //  extraUpdates=2（vanilla-projectiles.json,pd0 载入）=3 子步/tick 逐子步
+        //  消 life,补偿式变成双重折算（速度 15px/子步×3=45px/tick vs 原版 5×3=
+        //  15px/tick 三倍速;life 24 子步=8tick vs 72 子步=24tick 三倍短）——
+        //  foxHitInflate 速度门(:15079>10)与 BJ642 演出面 flag2(:35747)同被
+        //  ×3 速度污染。现出生=原版字面（velocity=num17 向、life=72 子步），
+        //  速度/寿命/命中盒/演出门四面同相。
+        //  伤 = dmg×0.85（SetDefaults case 1106 :13491-13496 (int) 截断——旧 round
+        //  差 1 伤登记清偿）
+        const flameSpd = this.projId === 1113 ? 10.5 : 5;   // num17（:60072/:60074）原版字面
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * flameSpd, this.foxAimY * flameSpd,
-          Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106,
-          { grav: 0, life: 24, pierce: 4 });
+          Math.max(1, Math.trunc(dmg0 * 0.85)), 0, 1106,
+          { grav: 0, life: 72, pierce: 4 });
         // 命中火 buff:速度门 StatusNPC :11665-11668——velocity.Length()>10 →
-        // OnFire3(323) else OnFire(24),300t 定值。★判门须用原版弹速(num17:1094=5/
-        // 1113=10.5,:60072-60074),勿用本仓 ×3 补偿后速度(15/31.5 恒>10 会双双误翻)
-        const origSpd = this.projId === 1113 ? 10.5 : 5;
+        // OnFire3(323) else OnFire(24),300t 定值。弹速=num17 字面（5/10.5）→
+        // 1094 恒 OnFire(24)、1113 恒 OnFire3(323)（:60072-60074）
+        const origSpd = flameSpd;
         flame.onFireHit = {
           buff: Math.hypot(this.foxAimX, this.foxAimY) * origSpd > 10 ? 323 : 24,
           minT: 300, maxT: 300,

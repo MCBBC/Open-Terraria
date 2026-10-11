@@ -15,6 +15,7 @@
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
+import { GorePiece } from './GorePiece';
 import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
@@ -345,6 +346,79 @@ export class TagEffectState {
     return 50 + hits * 50;                                    // :55 AddedFlatDamage += 50+hits×50
   }
 
+  /** ★BJ643② 火鞭 proc 爆炸 918 出生爆花演出面（AI_178_FireExplosion
+   *  Projectile.cs:46098-46148 localAI[0]==0 支 1:1;2026-10-11——BJ639 判
+   *  「出生 10t 尘/gore 爆花缺」本刀补齐,伤害面（96×96 全 NPC 环+城镇窄门）零改动）。
+   *  918 本体不可见（SetDefaults :8691-8703 alpha=255 无专属绘制面）+寿命 10t
+   *  （:46143-46147 localAI≥10 Kill,期间唯一行为=伤害盒）——仓内无载体弹（伤害面
+   *  折算即爆）,出生即爆=观感面等价。Center=命中锚（CreateExplosion :21-26
+   *  NewProjectile(npcHit.Center, Vector2.Zero) 居中语义 P.cs:10878-10880;
+   *  width/height=96）。velocity 恒零 → ToRotation()=0（:46123/:46130 方向环纯横向）。
+   *  · 音 :46102 SoundID.Item14（爆炸）
+   *  · A 组 4×d31 烟（:46103-46107）：α100 scale1.5、重力置位（无 noGravity 行）,
+   *    位=Center+UnitY.RotatedByRandom(π)×NextDouble()×width/2（RotatedByRandom=
+   *    三角掷 (rng−rng)×max,Utils.cs:1785-1788/F6 判例;UnitY 旋 θ→(−sinθ,cosθ)）
+   *  · B 组 30×(2×d6 火)（:46108-46119）：d6 α200 scale3.7 noGr 速×3 / d6 α100
+   *    scale1.5 noGr fadeIn2.5 速×2——位式同 A
+   *  · C 组 10×d6（:46120-46126）α0 scale2.7 noGr 速×3 / D 组 10×d31（:46127-46133）
+   *    α0 scale1.5 noGr 速×3——位=Center+UnitX.RotatedByRandom(π).RotatedBy(
+   *    velocity.ToRotation())×width/2（UnitX 旋 θ→(cosθ,sinθ);再旋 0 = 纯横向）
+   *  · gore 2×（:46134-46141）：Next(61,64) 烟团,NewGore 传入位=盒内随机量化位
+   *    （width×Next(100)/100）−One×10 → 即刻覆写位式同 A;速链=NewGore 内扰动
+   *    （Gore.cs:1347-1348,GorePiece.newGore 同式）→×0.3 → X/Y+=Next(-10,11)×0.05
+   */
+  private firecracker918Burst(g: GameHooks, hx: number, hy: number): void {
+    g.playSfxFiles?.(['Item_14'], 1, hx, hy);                       // :46102
+    const w2 = 48;                                                  // width/2（SetDefaults 96×96 :8702-8703）
+    const posY = (): [number, number] => {                          // :46106/:46111/:46115 位式（UnitY 半圆）
+      const t = (Math.random() - Math.random()) * Math.PI;          // RotatedByRandom(π) 三角掷
+      const r = Math.random();                                      // NextDouble()
+      return [hx - Math.sin(t) * r * w2, hy + Math.cos(t) * r * w2];
+    };
+    const posX = (): [number, number] => {                          // :46123/:46130 位式（UnitX,再旋 ToRotation()=0）
+      const t = (Math.random() - Math.random()) * Math.PI;
+      const r = Math.random();
+      return [hx + Math.cos(t) * r * w2, hy + Math.sin(t) * r * w2];
+    };
+    const dust = (type: number, alpha: number, scale: number,
+      pos: [number, number]): { vx: number; vy: number; noGravity: boolean; fadeIn: number } | null => {
+      const d = g.spawnDust?.(hx - w2, hy - w2, w2 * 2, w2 * 2, type, 0, 0, alpha, null, scale);
+      if (d) { d.x = pos[0]; d.y = pos[1]; }
+      return d ?? null;
+    };
+    // A 组（:46103-46107）
+    for (let i = 0; i < 4; i++) dust(31, 100, 1.5, posY());
+    // B 组（:46108-46119）
+    for (let j = 0; j < 30; j++) {
+      const b1 = dust(6, 200, 3.7, posY());
+      if (b1) { b1.noGravity = true; b1.vx *= 3; b1.vy *= 3; }      // :46112-46113
+      const b2 = dust(6, 100, 1.5, posY());
+      if (b2) { b2.vx *= 2; b2.vy *= 2; b2.noGravity = true; b2.fadeIn = 2.5; }   // :46116-46118
+    }
+    // C 组（:46120-46126）/ D 组（:46127-46133）
+    for (let k = 0; k < 10; k++) {
+      const c = dust(6, 0, 2.7, posX());
+      if (c) { c.noGravity = true; c.vx *= 3; c.vy *= 3; }          // :46124-46125
+      const d4 = dust(31, 0, 1.5, posX());
+      if (d4) { d4.noGravity = true; d4.vx *= 3; d4.vy *= 3; }      // :46131-46132
+    }
+    // gore 2×（:46134-46141）
+    for (let m = 0; m < 2; m++) {
+      const p0: [number, number] = [                                 // :46136 NewGore 传入位（盒内量化位）−One×10
+        hx - w2 + (w2 * 2 * Math.floor(Math.random() * 100)) / 100 - 10,
+        hy - w2 + (w2 * 2 * Math.floor(Math.random() * 100)) / 100 - 10,
+      ];
+      const go = GorePiece.newGore(61 + Math.floor(Math.random() * 3), p0[0], p0[1], 0, 0);   // Next(61,64)
+      if (go) {
+        const pos = posY();                                          // :46137 即刻覆写位（式同 A）
+        go.x = pos[0]; go.y = pos[1];
+        go.vx *= 0.3; go.vy *= 0.3;                                  // :46138
+        go.vx += (Math.floor(Math.random() * 21) - 10) * 0.05;       // :46139 Next(-10,11) 右开
+        go.vy += (Math.floor(Math.random() * 21) - 10) * 0.05;       // :46140
+      }
+    }
+  }
+
   /** OnHit（:109-119）：OnTaggedHit + CanProc → OnProcHit 返 true 才 ClearProc
    *  （1457 消费语义反转——基类默认 false 不消耗 :41-44） */
   onHit(ctx: WhipHitCtx, calcDamage: number, game: GameHooks): void {
@@ -420,7 +494,9 @@ export class TagEffectState {
           // ★BJ449②：城镇巫毒窄门面（918 全 NPC 环的 friendly 靶支;盒=96×96 心=命中锚）
           hitTownNpcs({ x: ctx.hx - 48, y: ctx.hy - 48, w: 96, h: 96 }, g, boom, 0,
             'playerProj', 918, undefined, undefined, undefined, undefined, () => ({ kb: 0 }));
-          g.spawnParticles?.(ctx.hx, ctx.hy, '#FF7A28', 16, 4, { life: 26 });
+          // ★BJ643②：918 出生爆花演出面（AI_178_FireExplosion :46098-46148
+          //  localAI[0]==0 支 1:1——伤害面上方零改动;旧 '#FF7A28' 粒子占位退役）
+          this.firecracker918Burst(g, ctx.hx, ctx.hy);
         }
         break;
       }

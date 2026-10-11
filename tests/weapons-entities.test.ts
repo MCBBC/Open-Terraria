@@ -395,12 +395,12 @@ describe('细剑族（aiStyle 161）', () => {
     }
   });
 
-  it('melee 弹速 /meleeSpeed（:46431-46434,attackSpeedMult = 1/meleeSpeedTotal）', () => {
+  it('★BJ640 melee 弹速 /meleeSpeed（:47466 speed /= meleeSpeed,M=CapAttackSpeeds 倒数档）', () => {
     const { hooks, player } = makeHooks();
-    Object.defineProperty(player, 'attackSpeedMult', { get: () => 0.5 });      // meleeSpeed 2.0
+    Object.defineProperty(player, 'attackSpeedMult', { get: () => 0.5 });      // M=0.5 → 攻速和 2.0
     const s = new SpearProj(1, 0, 2.4, 20, 13, 4, 938);
-    run(s, hooks, 3);                                            // 6 步,末步伸距 = 5×2.4×0.5
-    expect(Math.abs(s.cx - player.cx - 2.4 * 0.5 * 5)).toBeLessThan(1e-6);
+    run(s, hooks, 3);                                            // 6 步,末步伸距 = 5×2.4/0.5
+    expect(Math.abs(s.cx - player.cx - 2.4 * 2 * 5)).toBeLessThan(1e-6);
   });
 
   it('802/842 绘制角无 −π/4 偏置（Main.cs:32443-32446 仅 938-945）;938 有', () => {

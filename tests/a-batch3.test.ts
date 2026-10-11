@@ -351,10 +351,10 @@ describe('攻速配饰（CapAttackSpeeds :28555-28574 / 猛爪手套 :14559-1456
     expect(playerWith(['vi_211_feral_claws']).equipStats.autoReuseGlove).toBe(true);
   });
 
-  it('乘法链 raw = (1+装备)×buff 档 → 倒数；醉酒 ×1.1 叠加（:11519/:28566-28573）', () => {
+  it('★BJ640 加法堆叠：装备 +0.12 与醉酒 +0.1 同一加算堆 → 1/1.22（原版 :12012 meleeSpeed += 0.1）', () => {
     const p = playerWith(['vi_211_feral_claws']);
-    p.buffs.apply(BuffType.Tipsy, 3600);   // 醉酒近战速 ×1.1
-    expect(p.attackSpeedMult).toBeCloseTo(1 / (1.12 * 1.1), 6);
+    p.buffs.apply(BuffType.Tipsy, 3600);   // 醉酒 meleeSpeed += 0.1（加法,非 ×1.1）
+    expect(p.attackSpeedMult).toBeCloseTo(1 / 1.22, 6);
   });
 });
 

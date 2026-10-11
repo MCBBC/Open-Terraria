@@ -110,6 +110,11 @@ export interface ProjStatusCtx {
   /** 1104 火鞭（蓝队 R7-41）：跳过表中 OnFire(24) 条目——该 buff 由 WhipProj 侧
    *  窗口判定（中段 ±1 + 鞭身 !wet + 鞭尖 50×50 盒）后直投 applyBuffTicks */
   suppressBuff?: number;
+  /** ★BJ642（2026-10-11）：85 火焰弹 ai[0]（StatusNPC :11660-11663 门
+   *  `ai[0]==1 → 324 Frostburn2 else 323 OnFire3`,1200t）——生成侧经 ArrowOpts.ai0
+   *  注入（精灵熔炉 1910=1,Game 发射位）后传此,门开走 324；缺省（旧调用面）=
+   *  基档 323（文件头登记偏差随之收窄：85 的『另一档』自此可达） */
+  ai0?: number;
 }
 
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
@@ -150,6 +155,14 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
     // 调用方点名跳过某 buff（1104 火鞭 OnFire 窗口化,蓝队 R7-41—— WhipProj 侧
     //  窗口判定后经 applyBuffTicks 直投）
     if (ctx?.suppressBuff !== undefined && en.buff === ctx.suppressBuff) continue;
+    // ★BJ642：gate 'ai0==1→324'（85 火焰弹,StatusNPC :11660-11663）——ctx.ai0===1
+    //  时改投 324 Frostburn2（同 1200t）；基档 323 不变
+    if (en.gate === 'ai0==1→324' && ctx?.ai0 === 1) {
+      if (debuffWriteAllowed(enemy, 324)) {
+        applyBuffTicks(enemy, 324, en.durMin);
+      }
+      continue;
+    }
     let hit: boolean;
     if (en.mut !== undefined) {
       // 互斥组:同组共用一次掷骰,按累积 chance 区间判定本条是否被选中

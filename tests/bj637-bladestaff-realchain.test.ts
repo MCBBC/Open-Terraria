@@ -130,4 +130,30 @@ describe('BJ637 刃杖 864 真实链四段定谳回归锁（AI_169 忠实相;BJ6
     const ledger = (blade as unknown as { hitCd: { map: Map<number, number> } }).hitCd.map;
     expect(ledger.get(z.id)).toBe(10);   // cd=10 钉值（原版 :8299）
   });
+
+  it('L4 闲置悬停 rot=π（:46612-46614 UnitY.ToRotation()+π/2=π,竖刃尖朝下）——★BJ637 复报朝向回归锁', () => {
+    const { hooks, player } = makeGame();
+    // 召在悬浮锚正位（player.Top+(0,-30)=(960,1410),total=1 编队偏移零）→ dist<40
+    // 恒闲置档:tAng=π（旧写 π/2 漏加后项=横置 90°,用户截图 107.png 病灶）
+    const blade = new MinionProj(960 - 5, 1440 - 30 - 5, 864, 6, 2, false, 0, false, () => player);
+    (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(blade);
+    for (let t = 0; t < 40; t++) blade.fixedUpdate(1, hooks);   // 0.2/t 收敛:Δ=0.8π×0.8⁴⁰≈4e-4
+    expect(st(blade)).toBe(0);                     // 无敌恒闲置（rot 不被攻击态覆写）
+    const rot = (blade as unknown as { rot: number }).rot;
+    expect(Math.abs(rot - Math.PI)).toBeLessThan(0.02);   // 竖直（M3 复旧 π/2 必红）
+  });
+
+  it('L5 攻击突进 rot→π（:46672-46673 vel.ToRotation()+π/2,垂直下扑尖朝前）——π/2 项面回归锁', () => {
+    const { hooks, player } = makeGame();
+    // 敌在锚正下空中 (960,1560)（盒 951..969/1540..1580,地面 1600 上方=LOS 通;
+    //  pd=120/md=150 双距内+viewRect 内）→ 锁后垂直下扑:velRot=π/2 → tAng=π
+    const z = foe(hooks, 3, 6374, 960, 1560);
+    const blade = new MinionProj(960 - 5, 1440 - 30 - 5, 864, 6, 2, false, 0, false, () => player);
+    (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(blade);
+    for (let t = 0; t < 8; t++) blade.fixedUpdate(1, hooks);   // 拍 0 锁;下扑 7 拍 112px 未触（触点拍 8）
+    expect(st(blade)).toBe(60);
+    expect(tg(blade)).toBe(z.id);
+    const rot = (blade as unknown as { rot: number }).rot;
+    expect(Math.abs(rot - Math.PI)).toBeLessThan(0.15);   // Δ=0.8π×0.6⁷≈0.07（M4 摘 +π/2 → π/2 必红）
+  });
 });

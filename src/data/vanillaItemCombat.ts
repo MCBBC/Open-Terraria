@@ -331,6 +331,20 @@ export interface CombatWeaponItemLike {
  *  返回 null = 无战斗语义（材料/家具/药水等，或走既有手写分支的弓）。
  *  注意：消耗型 aiStyle 2（手里剑等抛物线投掷）仍走 Game.thrownCombat，
  *  这里只接管爆炸物族（ai16）——判定顺序见 Game.useItem */
+/** ★BJ640（2026-10-11）攻速链 per-item 双表（1457 Terraria.ID/ItemID.cs 亲读）：
+ *  ①BONUS_MELEE_SPEED_MULTIPLIER（ItemID.cs:1168 `Factory.CreateFloatSet(1f, 1827f, 0.5f,
+ *  3013f, 0.25f, 3106f, 0.33f, 757f, 0.75f)`）——Player.cs:26110-26112 在 CapAttackSpeeds
+ *  【前】按手持物品缩放攻速和：`num29 = meleeSpeed−1; num29 ×= set[type]; meleeSpeed = 1+num29`。
+ *  1827=Bladed Glove、3013=Fetid Baghnakhs、3106=Psycho Knife、757=Terra Blade（快武器
+ *  只吃部分攻速收益——防「无前摇连挥」）。
+ *  ②NO_MELEE_SPEED_BONUS（ItemID.cs:62 `CreateBoolSet(false, 3821)`）——Player.cs:4456
+ *  `sItem.melee && !NoMeleeSpeedBonus[type]` 才吃近战攻速动画支;3821=Ale Throwing Glove
+ *  （vanilla ranged=true,melee 支本就不可达——表携带为 1:1 数据面,防御性冗余）。 */
+export const BONUS_MELEE_SPEED_MULTIPLIER: Readonly<Record<number, number>> = {
+  1827: 0.5, 3013: 0.25, 3106: 0.33, 757: 0.75,
+};
+export const NO_MELEE_SPEED_BONUS: ReadonlySet<number> = new Set([3821]);
+
 export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   const vid = def.vid ?? -1;
   if (vid < 0) return null;

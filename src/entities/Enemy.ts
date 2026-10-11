@@ -9310,8 +9310,9 @@ export class Enemy extends Entity {
     // flag2：落地且速度与朝向相逆（cs:62808-62814）
     const flag2 = this.vy === 0 && ((this.vx > 0 && this.facing < 0) || (this.vx < 0 && this.facing > 0));
     // ---- 315 无头骑士骑手弹（cs:62852-62867）：localAI[0] 每 480t 一发 1001
-    //      （傑克灯笼追踪弹,伤 40/30 难度化,出生点 Center+随机圆 40,
-    //      速度 (vx, ±3)）----
+    //      （傑克灯笼追踪弹,伤 40/30 难度化,出生点 Center+NextVector2Circular(40,40)
+    //      随机盘,速度 (vx, ±3),timeLeft 360=SetDefaults :9519——AI_194 追踪面
+    //      在 Arrow 1001 支,★BJ643①）----
     if (vid === 315) {
       // `localAI[0]++ >= 480` 后缀自增:比旧值,命中后归零(自增被覆写)
       const oldLai = this.lai0;
@@ -9320,9 +9321,11 @@ export class Enemy extends Entity {
         this.lai0 = 0;
         if (player && !player.dead) {
           const ang = Math.random() * Math.PI * 2;
-          shoot(game, this.cx + Math.cos(ang) * 40, this.cy + Math.sin(ang) * 40,
+          const rad = Math.random() * 40;   // NextVector2Circular 盘掷（Utils.cs:1301 角均匀×线性半径;
+                                            // F6 判例。★BJ643① 曾恒满径 40=NextVector2CircularEdge 档）
+          shoot(game, this.cx + Math.cos(ang) * rad, this.cy + Math.sin(ang) * rad,
             this.vx, (Math.random() * 2 - 1) * 3,
-            getAttackDamageForProjectiles(40, 30, this.difficulty), 1001);
+            getAttackDamageForProjectiles(40, 30, this.difficulty), 1001, 360);   // life=360（:9519 timeLeft,shoot 缺省 300 系旧直飞档）
         }
       }
     }

@@ -299,6 +299,218 @@ export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElemen
   return c;
 }
 
+/** ★BJ642 喷火器 85/1106 火舌双层调色（DrawProj_Flamethrower Main.cs:35647-35716 /
+ *  DrawProj_Flamethrower_Foxsparks :35719-35832 1:1 数学面——纯函数导出供判别锁）。
+ *  变体：'flame'=85 ai[0]==0（火焰喷射器 506,橙）/ 'elf'=85 ai[0]==1（精灵熔炉
+ *  1910 注入,蓝 Frostburn2）/ 'fox'=1106（焰狐通道火,蓝→橙灰链+上浮面）。
+ *  XNA 字节面约定 = 逐通道截断（repo 习语 emberPulseColor truncByte 同式）。 */
+export type FlameVariant = 'flame' | 'elf' | 'fox';
+const FLAME_TRUNC = (v: number): number => (v < 0 ? 0 : v > 255 ? 255 : Math.trunc(v));
+/** Color.Lerp 逐通道（:35663/:35737 Lerp((255,80,20,100),(255,255,20,70),0.25) 同式） */
+const flameLerpC = (
+  a: readonly [number, number, number, number],
+  b: readonly [number, number, number, number],
+  t: number,
+): [number, number, number, number] => [
+  FLAME_TRUNC(a[0] + (b[0] - a[0]) * t),
+  FLAME_TRUNC(a[1] + (b[1] - a[1]) * t),
+  FLAME_TRUNC(a[2] + (b[2] - a[2]) * t),
+  FLAME_TRUNC(a[3] + (b[3] - a[3]) * t),
+];
+const FLAME_REMAP = (v: number, a: number, b: number, c: number, d: number): number =>
+  c + (d - c) * Math.min(1, Math.max(0, (v - a) / (b - a)));   // Utils.Remap（clamp 缺省）
+/** FLAME_C3 = Lerp((255,80,20,100),(255,255,20,70),0.25) = (255,123,32,92)（截断字节面） */
+const FLAME_C3: readonly [number, number, number, number] = flameLerpC([255, 80, 20, 100], [255, 255, 20, 70], 0.25);
+/** 调色链六段（:35662-35666 flame/elf / :35736-35745 fox——断点 0.1/0.2/0.35/0.7/0.85/1；
+ *  链 = [色0,色1,色1,色2,色3]，fox 的色2=(255,123,32,92)=flame 色3、色3=(80,80,80,100)=
+ *  flame 色4、色0/1=(95,120,255,200)/(50,180,255,70)=elf 色顶两元） */
+export function flameTongueEnv(t: number, variant: FlameVariant): [number, number, number, number] {
+  const TRANSPARENT: readonly [number, number, number, number] = [0, 0, 0, 0];
+  const C_FLAME: readonly [number, number, number, number] = [255, 80, 20, 200];
+  const C_FLAME2: readonly [number, number, number, number] = [255, 255, 20, 70];
+  const C_FLAME4: readonly [number, number, number, number] = [80, 80, 80, 100];
+  const C_ELF: readonly [number, number, number, number] = [95, 120, 255, 200];
+  const C_ELF2: readonly [number, number, number, number] = [50, 180, 255, 70];
+  const C_ELF3: readonly [number, number, number, number] = [95, 160, 255, 100];
+  const C_ELF4: readonly [number, number, number, number] = [33, 125, 202, 100];
+  const [c0, c1, c2, c3, c4] = variant === 'fox'
+    ? [C_ELF, C_ELF2, C_ELF2, FLAME_C3, C_FLAME4]
+    : variant === 'elf'
+      ? [C_ELF, C_ELF2, C_ELF2, C_ELF3, C_ELF4]
+      : [C_FLAME, C_FLAME2, C_FLAME2, FLAME_C3, C_FLAME4];
+  if (t < 0.1) return flameLerpC(TRANSPARENT, c0, t / 0.1);        // GetLerpValue(0,0.1,t)
+  if (t < 0.2) return flameLerpC(c0, c1, (t - 0.1) / 0.1);
+  if (t < 0.35) return [c2[0], c2[1], c2[2], c2[3]];
+  if (t < 0.7) return flameLerpC(c2, c3, (t - 0.35) / 0.35);
+  if (t < 0.85) return flameLerpC(c3, c4, (t - 0.7) / 0.15);
+  return flameLerpC(c4, TRANSPARENT, (t - 0.85) / 0.15);
+}
+/** 帧选择（:35670 rectangle = flag ? Frame(1,7,0,(int)Remap(t,0.5,1,3,5)) : Frame(1,7,0,3)） */
+export function flameTongueFrame(t: number, flag: boolean): number {
+  if (!flag) return 3;
+  return Math.trunc(FLAME_REMAP(t, 0.5, 1, 3, 5));
+}
+/** 火舌绘制计划（DrawProj_Flamethrower :35647-35716 / _Foxsparks :35719-35832
+ *  逐 draw 1:1 展开为纯函数——双层×步进循环的几何/调色/α 全在 plan 内,渲染层
+ *  （染缸+drawImage）与数学面分离供判别锁。每 op = 一次 EntitySpriteDraw：
+ *  · px/py：85 = 弹心 + velocity×(−num10)×num13（:35673）；1106 = 弹心 +
+ *    尾随基向×(−num10)×num13×num15 + (0,−46)×Remap(l0,20,72,0,1)³（:35782/:35798）
+ *  · ang：85 直式 rotation(=0) ± num13×π/2 ∓ GTW×(1/num6×(num13+1))×2（:35684-85）；
+ *    i=1 层 ±π/2 相位（:35692-35693）
+ *  · scale：num12（1106 ×0.5、flag2 ×1.5）;i=1 层 ×0.75
+ *  · rgb/ga：color5=env×num14（字节截断）;color6=非 flag 支 G/2、B/2 整除 +
+ *    A=min(A5+80×num14,255)（:35676-35681/:35790-35797）→ draw 色 ×num9×{0.25,1}
+ *    （i=0 偏位层 ×0.25/主层 ×1;i=1 用 color5）;ga=XNA A 通道/255
+ *  · frame：恒 3（elf 档 (int)Remap(t,0.5,1,3,5)→3..5）
+ *  · 尾随基向（1106 :35779-35781）：DirectionTo(owner.Center+v×(flag2?3:6))
+ *    .SafeNormalize(0)×(−|v|)（owner=持狐玩家;缺 owner ≈速向档登记） */
+export interface FlameTongueOp {
+  layer: 0 | 1;
+  main: boolean;
+  px: number;
+  py: number;
+  ang: number;
+  scale: number;
+  rgb: [number, number, number];
+  /** XNA 绘制色 A 通道（0-255）——ga=A/255;0 = 原版照画（黑纱 α 面,染缸同精度承载） */
+  aByte: number;
+  frame: number;
+}
+export function flameTongueOps(inp: {
+  projId: 85 | 1106;
+  /** localAI[0]（子步龄） */
+  l0: number;
+  vx: number;
+  vy: number;
+  cx: number;
+  cy: number;
+  /** GlobalTimeWrappedHourly */
+  gtw: number;
+  /** ai[0]（85：1910 精灵熔炉=1 蓝档;1106 恒 0） */
+  ai0?: number;
+  ownerCx?: number;
+  ownerCy?: number;
+}): FlameTongueOp[] {
+  const isFox = inp.projId === 1106;
+  const variant: FlameVariant = isFox ? 'fox' : (inp.ai0 === 1 ? 'elf' : 'flame');
+  const flagV = variant === 'elf';
+  const t = Math.min(1, Math.max(0, inp.l0 / 72));            // num11
+  if (t >= 1) return [];                                      // :35672-35673 不画
+  const frame = flameTongueFrame(t, flagV);
+  const spd = Math.hypot(inp.vx, inp.vy);
+  const step0 = inp.l0 > 50 ? 0.175 : 0.2;                    // :35659 num6（num=60−10）
+  const foxFast = isFox && spd > 10;                          // :35747 flag2
+  const num6eff = isFox ? step0 * 0.7 * (foxFast ? 0.5 : 1) : step0;   // :35746/:35749
+  let scl = FLAME_REMAP(t, 0.2, 0.5, 0.25, 1);                // :35670 num12
+  if (isFox) scl = scl * 0.5 * (foxFast ? 1.5 : 1);           // :35760/:35762-35764
+  const num10 = Math.min(inp.l0, 20);                         // :35660
+  const num9 = FLAME_REMAP(inp.l0, 60, 72, 1, 0);             // :35658
+  const env = flameTongueEnv(t, variant);
+  const fadeIn = FLAME_REMAP(t, 0, 0.2, 0, 1);                // :35671 num14 因子
+  // 1106 尾随基向 + 距离档（:35772-35781）
+  let fvx = 0, fvy = 0, own15 = 1;
+  if (isFox) {
+    if (inp.ownerCx !== undefined && inp.ownerCy !== undefined) {
+      const tx = inp.ownerCx + inp.vx * (foxFast ? 3 : 6);
+      const ty = inp.ownerCy + inp.vy * (foxFast ? 3 : 6);
+      const dxo = tx - inp.cx, dyo = ty - inp.cy;
+      const dlo = Math.hypot(dxo, dyo);
+      const ndx = dlo > 0 ? dxo / dlo : 0, ndy = dlo > 0 ? dyo / dlo : 0;
+      fvx = -ndx * spd; fvy = -ndy * spd;
+      own15 = Math.min(1, Math.hypot(inp.cx - inp.ownerCx, inp.cy - inp.ownerCy) / 120);
+    } else {
+      fvx = -inp.vx; fvy = -inp.vy;                           // mock 无主玩家 ≈速向档（登记）
+    }
+  }
+  const lift = isFox ? -46 * Math.pow(FLAME_REMAP(inp.l0, 20, 72, 0, 1), 3) : 0;
+  const ops: FlameTongueOp[] = [];
+  for (let i = 0; i < 2; i++) {
+    if (i === 1 && flagV) break;                              // :35708-35710 flag 档整层跳过
+    for (let k = 0; ; k++) {
+      const num13 = 1 - k * num6eff;                          // float 累退（JS double,迭代数同 float32）
+      if (num13 < 0) break;
+      const num14 = (1 - num13) * fadeIn;
+      let px: number, py: number;
+      if (isFox) {
+        px = inp.cx + fvx * (-num10) * num13 * own15;
+        py = inp.cy + fvy * (-num10) * num13 * own15 + lift;
+      } else {
+        px = inp.cx + inp.vx * (-num10) * num13;
+        py = inp.cy + inp.vy * (-num10) * num13;
+      }
+      const r5 = FLAME_TRUNC(env[0] * num14), g5 = FLAME_TRUNC(env[1] * num14);
+      const b5 = FLAME_TRUNC(env[2] * num14), a5 = FLAME_TRUNC(env[3] * num14);
+      const halve = !flagV;
+      const r6 = r5, g6 = halve ? Math.trunc(g5 / 2) : g5;
+      const b6 = halve ? Math.trunc(b5 / 2) : b5;
+      const a6 = halve ? Math.min(255, Math.trunc(a5 + 80 * num14)) : a5;
+      const spin = (1 / num6eff) * (num13 + 1);
+      const rotA = num13 * (Math.PI / 2) + inp.gtw * spin * 2;
+      const rotB = -(num13 * (Math.PI / 2)) - inp.gtw * spin * 2;
+      const layer = i as 0 | 1;
+      // XNA Color×float = 逐通道截断、左结合双乘（color6 × num9 × 0.25 = 两次截断）
+      const mul2 = (v: number, f1: number, f2?: number): number =>
+        f2 === undefined ? FLAME_TRUNC(v * f1) : FLAME_TRUNC(FLAME_TRUNC(v * f1) * f2);
+      if (i === 0) {
+        // :35686-35689（color6 ×num9×0.25 偏位层 + ×num9 主层）
+        ops.push({ layer, main: false, px: px + inp.vx * (-num10) * num6eff * 0.5,
+          py: py + inp.vy * (-num10) * num6eff * 0.5, ang: rotA + Math.PI / 4, scale: scl,
+          rgb: [mul2(r6, num9, 0.25), mul2(g6, num9, 0.25), mul2(b6, num9, 0.25)],
+          aByte: mul2(a6, num9, 0.25), frame });
+        ops.push({ layer, main: true, px, py, ang: rotB, scale: scl,
+          rgb: [mul2(r6, num9), mul2(g6, num9), mul2(b6, num9)],
+          aByte: mul2(a6, num9), frame });
+      } else {
+        // :35690-35694（color5 ×0.75 缩放档,±π/2 相位）
+        ops.push({ layer, main: false, px: px + inp.vx * (-num10) * num6eff * 0.2,
+          py: py + inp.vy * (-num10) * num6eff * 0.2, ang: rotA + Math.PI / 2,
+          scale: scl * 0.75, rgb: [mul2(r5, num9, 0.25), mul2(g5, num9, 0.25), mul2(b5, num9, 0.25)],
+          aByte: mul2(a5, num9, 0.25), frame });
+        ops.push({ layer, main: true, px, py, ang: rotB + Math.PI / 2,
+          scale: scl * 0.75, rgb: [mul2(r5, num9), mul2(g5, num9), mul2(b5, num9)],
+          aByte: mul2(a5, num9), frame });
+      }
+    }
+  }
+  return ops;
+}
+
+/** 火舌染缸（fqwTintBake 同构：multiply 染色 + destination-in 还原轮廓；键含贴图 id，
+ *  cap 256——flame 每帧 2 色角色 × num14 六步连续值量化 &~7 后多弹共享,64 档会
+ *  抖动刷缓存（E51 追新税判例），扩容 + 首进先出） */
+const flameTintCache = new Map<string, HTMLCanvasElement>();
+function flameTongueTint(
+  projId: number,
+  src: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
+  rgb: readonly [number, number, number],
+): HTMLCanvasElement | null {
+  const w = (src as HTMLImageElement).width ?? (src as ImageBitmap).width;
+  const h = (src as HTMLImageElement).height ?? (src as ImageBitmap).height;
+  if (!w || !h || typeof document === 'undefined') return null;
+  const q = (v: number) => Math.round(v) & ~7;
+  const key = `${projId}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
+  const hit = flameTintCache.get(key);
+  if (hit) return hit;
+  if (flameTintCache.size > 256) {
+    const k0 = flameTintCache.keys().next().value;
+    if (k0 !== undefined) flameTintCache.delete(k0);
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(src as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  cx.fillRect(0, 0, w, h);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(src as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'source-over';
+  flameTintCache.set(key, c);
+  return c;
+}
+
 /** ★EoL2 修5：932 彩虹乘色烘焙（GetFairyQueenWeaponsColor hsl 真值染色;
  *  multiply+destination-in 两步染形,bossAI_lategame tintBake 同构本地副本——
  *  entities 域无共享助手,Portal/FakeFish 本地烘焙先例同款）。键按 RGB 步进 8
@@ -554,7 +766,9 @@ interface PiranhaTarget {
  *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器）、
  *  1026 藤堡弹（★BJ582②：AI_028 :26943-26944 rotation=velocity 角+左移−π、
  *    spriteDirection=sign(vx)——右向贴图镜像语义同族;旧缺省支 atan2+π/2=弹头恒偏 90°） */
-const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485, 1026]);
+//  1001 无头骑士南瓜弹（★BJ643①：AI_194 :42055-42056 rotation=velocity.ToRotation()+
+//    spriteDirection=(!(vx<0))?1:-1——同族逐帧速度角+左飞镜像;旧 Dart 直飞桶无姿态面）
+const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485, 1026, 1001]);
 
 /** aiStyle 27 剑气族（AI_027 尾部 :24858-24861：rotation = atan2(vy,vx) + 0.785
  *  = 速度角 + 45°，斜向剑气贴图）——曾走默认 +π/2 恒偏 45°（用户报"附魔剑
@@ -979,6 +1193,10 @@ export const PROJ_ALPHA0: Record<number, number> = {
   // α≡0 兜底碰巧=1,现一并显式豁免）/
   // 7/8/150/151/152 荆棘链 alpha=255(:884/:2408，aiStyle4 渐显期 −50[/−75]/update 消费)
   22: 255, 27: 255, 45: 100,
+  // ★BJ643①：1001 无头骑士南瓜弹（SetDefaults :9520 alpha=255——AI_194 Opacity 链
+  //  :42057-42064 驱动渐显/淡出;消费=vanillaProjAlpha fade2 档（GetAlpha :80718-80720
+  //  White*Opacity 后落缺省尾）——出生隐形,30t 渐显 1/30/t、末 6t −0.1/t 淡出）
+  1001: 255,
   410: 255,                                                          // 泡泡枪泡体（:4926 alpha=255,ai72 −25/t 渐显钳 50）
   // ★BJ371：409 剃刀台风（SetDefaults :4911 alpha=255——AI −5/触发 钳 50 :30872-30877;
   //  ★绘制面 inert：GetAlpha 409 专属支 :81148-81151 恒 (250,250,250,200) 不读 α,
@@ -1318,7 +1536,7 @@ export const BULLET_KILL_SFX = new Set([14, 20, 88, 36, 83, 84, 389, 104, 279, 1
 /** Main.hslToRgb(h,1,0.5) 的本地副本（873 Kill 尘色 AI_171_GetColor :46398 消费；
  *  l=0.5/s=1 固定 → c=1、m=0,标准 HSL→RGB 解析式）。不引 AuroraSky/Appearance 的
  *  现成实现=避免 entities → render/player 反向依赖 */
-function empressHslRgb(hue: number): [number, number, number] {
+export function empressHslRgb(hue: number): [number, number, number] {
   const h = ((hue % 1) + 1) % 1 * 6;
   const x = 1 - Math.abs((h % 2) - 1);
   const seg = Math.floor(h) % 6;
@@ -2588,6 +2806,10 @@ export class Arrow extends Entity {
     // 374 黄蜂毒刺 scale ×0.9（SetDefaults :4586 `scale *= 0.9f`——提取器漏 scale 列,
     // 常量补;蓝队 R7-27：曾 drawScale 恒 1,毒刺视觉大 11%）
     if (projId === 374) this.drawScale = 0.9;
+    // ★BJ643①：1001 南瓜弹（SetDefaults :9518 `scale = 1f + Main.rand.Next(51)*0.01f`
+    //  ∈ {1.00..1.50} 离散档——Projectile.scale 纯绘制字段不缩判定盒（P.cs:322 直写字段）,
+    //  drawScale 通道同语义;提取器表达式列未提取,发射位同分布掷定）
+    if (projId === 1001) this.drawScale = 1 + Math.floor(Math.random() * 51) * 0.01;
     // NewProjectile 出生速钳（Projectile.cs:10259-10267）：aiStyle 1 弹逐轴 |v|≥16
     // → 双轴 ×0.97 收敛（注意原版负 vy 侧无等号：vy < −16 才收）
     if ((pd0?.aiStyle ?? -1) === 1) {
@@ -3181,6 +3403,60 @@ export class Arrow extends Entity {
         ctx.restore();
         return;
       }
+    }
+    // ---- ★BJ642 喷火器 85/1106 火舌独占支（DrawProj_Flamethrower Main.cs:35647-35716
+    //      / DrawProj_Flamethrower_Foxsparks :35719-35832 1:1；DrawProj 分派
+    //      :32069-32078 `if (proj.type == 85) { DrawProj_Flamethrower(proj); return; }`
+    //      / 1106 同构）。此前整缺落通用路径：98×686 七帧竖条【整幅】画出（projFrames
+    //      无 85/1106 赋值=帧数 1,frag 整图直绘）+ 无调色渐变 + 无双层——BJ639 判
+    //      「演出面整缺」本刀补齐。要点：
+    //      · 七帧竖条 Frame(1,7,0,frame)：frame 恒 3（flag 档 (int)Remap(t,0.5,1,3,5)）
+    //      · 双层×六步：num13 从 1 以 num6 步退（0.2/0.175——localAI[0]>50 切档）,
+    //        i=0 层 color6（非 flag 支 G/2,B/2 整除 + A+80×num14）双 draw、
+    //        i=1 层 color5 原×0.75 缩放双 draw（flag 档整层跳过）
+    //      · 调色链六段（0.1/0.2/0.35/0.7/0.85/1 断点,flameTongueEnv 导出锁值）,
+    //        ×num14 渐入 ×num9 寿命衰减（Remap(localAI[0],60,72,1,0)）
+    //      · 几何：尾随位 = 弹心 + velocity×(−min(localAI[0],20))×num13（85 直式 /
+    //        1106 经玩家向折算 ×num15 距离档）+ fox −46 上浮（Remap(l0,20,72,0,1)³）
+    //      · 旋转 = proj.rotation(=0,AI_193 不写) ± num13×π/2 ∓ GTW×(num13+1)/num6×2
+    //      · 恒自发光（调色常量不读格光,GetAlpha 不经手）→ queueProjFullbright
+    //        光照合成后复绘（270/45 判例）；mock 无队列回退直绘（测试/探针链）
+    //      · 染缸 flameTongueTint（multiply+dest-in,fqwTintBake 同构 cap 256）
+    if (this.projId === 85 || this.projId === 1106) {
+      const imgF = projSprite(this.projId);
+      if (imgF && imgF.width > 0 && this.age < 72) {          // :35672 num11>=1 → 不画
+        const fh7 = imgF.height / 7;                          // Frame(1,7) 帧高（98）
+        const mpF = r.mainPlayer;
+        const ops = flameTongueOps({
+          projId: this.projId as 85 | 1106,
+          l0: this.age, vx: this.vx, vy: this.vy, cx: this.cx, cy: this.cy,
+          gtw: globalTimeWrappedHourly(),
+          ai0: this.hostileAi0,
+          ownerCx: mpF?.cx, ownerCy: mpF?.cy,
+        });
+        const drawInto = (c: CanvasRenderingContext2D) => {
+          c.save();
+          c.imageSmoothingEnabled = false;
+          for (const op of ops) {
+            const tint = flameTongueTint(this.projId, imgF, op.rgb);
+            if (!tint || op.aByte <= 0) continue;             // A=0 XNA 恒等 no-op（黑纱档 aByte>0 照画）
+            c.save();
+            c.globalAlpha = Math.max(0, Math.min(1, op.aByte / 255));
+            c.translate(op.px, op.py);
+            c.rotate(op.ang);
+            c.drawImage(tint, 0, op.frame * fh7, imgF.width, fh7,
+              -imgF.width * op.scale / 2, -fh7 * op.scale / 2, imgF.width * op.scale, fh7 * op.scale);
+            c.restore();
+          }
+          c.restore();
+        };
+        const qFb = (r as unknown as {
+          queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+        }).queueProjFullbright;
+        if (typeof qFb === 'function') qFb.call(r, drawInto);
+        else drawInto(ctx);
+      }
+      return;
     }
     // ★HOUSE(2026-08-31 终案):原版出生=盒中心,弹穿出身体后可见——
     //  角色盒内不渲染弹体,替代全部几何出生点近似(用户拍板禁对齐回去)。
@@ -5534,6 +5810,128 @@ export class Arrow extends Entity {
     // 中心格几何近似（浅缘半浸/邻格液面两向偏差）,登记近似退役
     if (this.projId === 469) {
       if (this.wet && !this.honeyWet && !this.shimmerWet) { this.killNow(game); return; }
+    }
+    // ---- ★BJ642 喷火器 85/1106 AI_193 尘链+寿命面（Projectile.cs:42075-42142 1:1，
+    //      2026-10-11——BJ639 判「演出面整缺」本刀补齐；age=localAI[0] 子步语义，
+    //      extraUpdates=2（vanilla-projectiles.json）→ 本类子步环逐子步驱动同原版）：
+    //      · 寿命 :42084 localAI[0]>=72 → Kill；阻尼 :42087 >=60 → velocity×0.95/子步
+    //      · 尘链 A（:42098-42115）：rate num8=0.25（1106 ×0.5=0.125）∧ age<num5
+    //        （num5=50 基档 / ai0==1 flag 档 60）；尘 id=flag?135:6，出生位=Center+
+    //        Circular(num6,num6)×Remap(age,0,72,0.5,1)（num6=60 基档 / 1106 15）4×4 盒，
+    //        初速=v×0.2（+NewDust 内在 ±2 合成，spawnDust 通道同式），α100；
+    //        1/4 掷：noGravity+scale×3+v×2 / else scale×1.5；两支共用 scale×1.5、
+    //        v×1.2、v+=弹速×Remap(age,0,45,1,0.1)×Remap(age,0,6,0.1,1)、customData=1
+    //        （int=1 档逐子步 scale×0.98/vy×0.98+嵌入收缩=Dust.cs:604-627，本仓
+    //        VanillaDust 未建模该 customData 档——BJ642 债①登记，出生面已 1:1）
+    //      · 尘链 B 烟（:42116-42131）：age>=num4（50；flag 档 num4=0 恒不掷）∧ 1/2 掷；
+    //        d31 烟，位=Center+Circular(num7,num7)−向×2，vel=（Center−玩家心）
+    //        .SafeNormalize(0).RotatedByRandom(0.19634954631328583)×7（三角掷=F6 判例
+    //        (rng−rng)×max），α150 色(80,80,80)、noGravity、scale×(1.1+rand×0.2)、
+    //        customData=−0.3−0.15×rand（float 档 vy+=customData/子步 Dust.cs:1342-1346
+    //        同债①，出生面已 1:1）
+    //      · 1106 音面 :42101-42106（soundDelay==0∧whoAmI%3==0 三发一门）=MinionProj
+    //        发射侧 1/3 播 Item_34 近似已承载（:9269 注），AI 侧不重复播（登记）
+    //      · Kill 在 vanilla 先于尘链执行但【不中断】AI 体（C# 无 return）——杀拍尘
+    //        B 照出生；本仓按尘链→Kill 收口序等价（尘 A 门 age<50 对 72 恒假，
+    //        尘 B 唯一杀拍可达面；寿命杀取本仓杀拍口径 killNow+return）
+    if (this.projId === 85 || this.projId === 1106) {
+      const l0 = this.age;                                   // localAI[0]（子步龄）
+      const flag = this.hostileAi0 === 1;                    // ai[0]==1（Elf Melter 1910 发射位注入）
+      if (l0 >= 60) { this.vx *= 0.95; this.vy *= 0.95; }    // :42087-42089
+      const is1106 = this.projId === 1106;
+      const num6 = is1106 ? 15 : 60;                         // :42093-42096（1106 15/15）
+      const num7 = is1106 ? 15 : 50;
+      const num8 = is1106 ? 0.125 : 0.25;                    // num8 0.25;1106 ×0.5
+      const num5 = flag ? 60 : 50;                           // :42091-42096
+      const num4 = flag ? 0 : 50;
+      const remap = (v: number, a: number, b: number, c: number, d: number): number =>
+        c + (d - c) * Math.min(1, Math.max(0, (v - a) / (b - a)));   // Utils.Remap（clamp 缺省）
+      // 尘链 A（:42098-42115）
+      if (l0 < num5 && Math.random() < num8) {
+        const grow = remap(l0, 0, 72, 0.5, 1);               // :42104 Remap(localAI[0],0,72,0.5,1)
+        const ca = Math.random() * Math.PI * 2, cr = Math.random();   // NextVector2Circular（角均匀×线性半径盘,F6 判例）
+        const d = game.spawnDust?.(
+          this.cx + Math.cos(ca) * cr * num6 * grow,
+          this.cy + Math.sin(ca) * cr * num6 * grow,
+          4, 4, flag ? 135 : 6, this.vx * 0.2, this.vy * 0.2, 100);
+        if (d) {
+          if (Math.floor(Math.random() * 4) === 0) {         // Main.rand.Next(4)==0（:42106-42110）
+            d.noGravity = true;
+            d.scale *= 3;
+            d.vx *= 2; d.vy *= 2;
+          } else {
+            d.scale *= 1.5;
+          }
+          d.scale *= 1.5;                                    // :42112 两支共用
+          d.vx *= 1.2; d.vy *= 1.2;                          // :42113
+          const k45 = remap(l0, 0, 45, 1, 0.1);              // :42114 Remap(…,num*0.75=45,1,0.1)
+          const k6 = remap(l0, 0, 6, 0.1, 1);                // :42114 Remap(…,num*0.1=6,0.1,1)
+          d.vx += this.vx * k45 * k6;
+          d.vy += this.vy * k45 * k6;
+          // d.customData=1（:42115）——int=1 档 VanillaDust 未建模（债①）
+        }
+      }
+      // 尘链 B（:42116-42131）
+      if (num4 > 0 && l0 >= num4 && Math.random() < 0.5) {   // num9=0.5（:42097）
+        const pcx = game.player.cx, pcy = game.player.cy;
+        let dxv = this.cx - pcx, dyv = this.cy - pcy;
+        const dl = Math.hypot(dxv, dyv);
+        if (dl > 0) { dxv /= dl; dyv /= dl; } else { dxv = 0; dyv = 0; }   // SafeNormalize(Vector2.Zero)
+        const tri = (Math.random() - Math.random()) * 0.19634954631328583;   // RotatedByRandom 三角掷（F6 判例）
+        const ct = Math.cos(tri), stt = Math.sin(tri);
+        const rx = (dxv * ct - dyv * stt) * 7, ry = (dxv * stt + dyv * ct) * 7;   // :42121 ×7f
+        const ba = Math.random() * Math.PI * 2, br = Math.random();
+        const d = game.spawnDust?.(
+          this.cx + Math.cos(ba) * br * num7 - rx * 2,
+          this.cy + Math.sin(ba) * br * num7 - ry * 2,
+          4, 4, 31, 0, 0, 150, { r: 80, g: 80, b: 80, a: 255 }, undefined, true);
+        if (d) {
+          d.vx = rx; d.vy = ry;                              // :42123 velocity=vector（NewDust 内速全覆写）
+          d.scale *= 1.1 + Math.random() * 0.2;              // :42125
+          // d.customData=−0.3−0.15×rand（:42131）——float 档 VanillaDust 未建模（债①）
+        }
+      }
+      if (l0 >= 72) { this.killNow(game); return; }          // :42082-42084（尘链后收口，见上序注）
+    }
+    // ---- ★BJ643① 无头骑士南瓜弹 1001 AI_194_HorsemanPumpkin（Projectile.cs:42031-42073，
+    //      2026-10-11——BJ639 判「本仓落 Dart 通用直线」本刀补齐追踪/透明/尘面）：
+    //      原版 ai[0]=发射时 NPC.target（NPC.cs:63065 第 8 参;315 发射位注入,本仓单机
+    //      =本地玩家）——目标 active&&!dead → 朝玩家,否则 center 停本体（:42033-42042
+    //      向量零,Sign(0)=0 无加速;tileCollide=false/ignoreWater/timeLeft 360 由数据表
+    //      +发射位承载）。逐 tick（extraUpdates=0）：
+    //      · X 加速 :42054 sign(dx)×0.4（num5）钳 ±4（num3）——无死区恒调
+    //      · Y 加速 :42049-42053 仅 |dy|≥30（±30 死区 num2 外）sign(dy)×0.4（num6）
+    //        钳 ±5（num4）
+    //      · rotation=velocity.ToRotation()+spriteDirection 按 vx（:42055-42056）——
+    //        绘制面走 PROJ_ROT_RIGHT 速度角族（1001 已入集,左飞水平镜像）
+    //      · Opacity 链 :42057-42064：timeLeft<6 → Opacity−=0.1,否则 +=1/30——
+    //        getter/setter 对（P.cs:542-548）以 int alpha 落地（trunc 钳 0..255）;
+    //        α 初值 255（PROJ_ALPHA0）→ 出生隐形 30t 渐显、寿命末 timeLeft=5..1 共
+    //        5 步 −0.1/t 淡出（Opac 1→0.5,淡出不打满——vanilla 同相）
+    //      · 尘 :42065-42072：2/3 掷 NewDustDirect(position,26,26,6,vx,vy)——d6 火,
+    //        初速=弹速（+NewDust ±2 内在抖动,spawnDust 通道同式）,scale 0.6/
+    //        fadeIn 1.1（生长目标档,Dust.cs:2148-2171 语义）/noGravity/noLight
+    if (this.projId === 1001) {
+      const p194 = game.player as { dead?: boolean; cx: number; cy: number } | undefined;
+      const live194 = !!p194 && !p194.dead;                       // :42038 player.active&&!dead（单机恒 active）
+      const dx194 = live194 ? (p194 as { cx: number }).cx - this.cx : 0;   // :42043 目标失效=零向量
+      const dy194 = live194 ? (p194 as { cy: number }).cy - this.cy : 0;
+      if (!(dy194 < 30) || !(dy194 > -30)) {      // :42049 |dy|≥30 才调 Y（±30 死区）
+        this.vy = Math.min(5, Math.max(-5, this.vy + Math.sign(dy194) * 0.4));   // :42052 钳 ±5
+      }
+      this.vx = Math.min(4, Math.max(-4, this.vx + Math.sign(dx194) * 0.4));     // :42054 钳 ±4
+      const o194 = 1 - this.alpha / 255;                          // Opacity getter（P.cs:542-545）
+      const n194 = this.life < 6 ? o194 - 0.1 : o194 + 1 / 30;    // :42057-42064
+      this.alpha = Math.trunc(Math.min(255, Math.max(0, (1 - n194) * 255)));     // setter（P.cs:546-548）
+      if (Math.floor(Math.random() * 3) !== 0) {                  // Main.rand.Next(3)!=0（:42065,2/3 掷）
+        const d194 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, this.vx, this.vy);
+        if (d194) {
+          d194.scale = 0.6;                                       // :42068
+          d194.fadeIn = 1.1;                                      // :42069
+          d194.noGravity = true;                                  // :42070
+          d194.noLight = true;                                    // :42071
+        }
+      }
     }
     // ---- 教徒火球 467 真制导（AI_001 type==467 支；1458 P.cs:55133-55253 /
     //      1457 :55132-55252 两版本逐字同段。2026-08-31 台账批——此前 Arrow 直飞桶
@@ -9521,6 +9919,18 @@ export class Arrow extends Entity {
           else this.vy = -this.vy;                                          // :18831-18837
           return;
         }
+        // ---- ★BJ642 喷火器 85/1106 撞块滑移（HandleMovement type 段
+        //      Projectile.cs:18414-18417；1458 同段逐字）：碰撞事件拍不消亡——
+        //      velocity = lastVelocity×0.95 + position -= velocity（退步脱壁）。
+        //      火舌贴壁驻留继续阻尼至 72 子步寿终（AI_193 寿命面收口）——此前落
+        //      通用消亡口=首撞即碎。本仓单点碰撞无截断回写 → 入撞速≙lastVelocity
+        //      （94/496 档同约定）：v=v×0.95 后 position -= v（vanilla 先赋值后退步,
+        //      退步量=新速度）----
+        if (this.projId === 85 || this.projId === 1106) {
+          this.vx *= 0.95; this.vy *= 0.95;                                 // velocity = lastVelocity*0.95f
+          this.x -= this.vx; this.y -= this.vy;                             // position -= velocity
+          return;
+        }
         // ---- 蜂族撞块弹反（HandleMovement type 段 :19019-19030，★T1 批 2026-09-01
         //      补齐——181/189/357/566 四型 penetrate>0 时撞实心块不消亡）：
         //      penetrate--（与命中敌共用同一穿透计数）+ 速度全速反号。357 每弹反
@@ -9729,6 +10139,10 @@ export class Arrow extends Entity {
     // 451 涌流剑可伤门（Damage_CanDealDamage :12463）：淡出态 [1,1+pen) 恒豁免、
     // 末段前 5 拍（ai[1]<5）豁免——淡出/瞬移期穿过敌怪不结算
     if (this.projId === 451 && !this.iwCanDamage()) return;
+    // ★BJ642 喷火器 85/1106 可伤门（Damage_CanDealDamage :12475-12480）：
+    //  localAI[0]>=54（=18 tick）后纯视觉尾焰——穿过敌怪不再结算伤害。
+    //  此前整缺=寿命面缺失掩盖（弹 3600 子步不灭）;AI_193 寿命刀后尾段照门收紧
+    if ((this.projId === 85 || this.projId === 1106) && this.age >= 54) return;
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     // 飞龙剑气 684 命中盒 = 垂直线 ±40px 厚 16（CanHitWithOwnBody :14693-14701，
     // 非通用 16×16 盒——巨剑气横扫判定）
@@ -10137,7 +10551,10 @@ export class Arrow extends Entity {
         //  借 1458 门补齐；!npcProj=仅玩家弹（敌箭不走本敌伤路径,天然满足）
         applyProjStatus(this.projId, e as unknown as Record<string, number>,
           this.projId === 614 ? { ai1TargetId: this.stickerTgt }
-            : { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+            : this.projId === 85
+              ? { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true,
+                  ai0: this.hostileAi0 }   // ★BJ642：85 ai[0] 门（1910=1 → 324 Frostburn2 :11660-11663）
+              : { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
         // ★1458 毒刺 6165/6184/6185（StatusNPC :11182-11191,1458 加 !npcProj 门）：
         // 玩家箭体命中 100% Poisoned(20) 90t=1.5s——本仓 1457 漏接（equipStats 旗
         // 聚合于 Player.ts:1234-1259 但零消费）,借 1458 修复补齐
@@ -10413,12 +10830,14 @@ export class Arrow extends Entity {
   }
 
   /** 1457 :15079-15086（Damage_GetHitbox 1106 狐火分支,仅此 type 挂高速门）:
-   *  num2 = (int)Remap(localAI[0],0,72,0,20)（localAI[0]=出膛龄）;velocity.Length()>10
-   *  → num2×2+10。本仓 1106 出生 life 24 = 72t 的 3 速等价（MinionProj 出生注释）,
-   *  龄 ×3 回 vanilla 刻度 */
+   *  num2 = (int)Remap(localAI[0],0,72,0,20)（localAI[0]=出膛子步龄）;velocity.Length()>10
+   *  → num2×2+10。★BJ642：×3 刻度补偿退役——Arrow 已消费 extraUpdates=2（本类
+   *  子步环=age 逐子步自增,=localAI[0] 原生刻度）+ MinionProj 出生速度已回原版
+   *  字面（5/10.5）,×3 反成三倍膨胀（age 36→108 钳 72→n 恒 20 满档）。速度门
+   *  读原生 |v|（10.5 狐 1113 恒真、5 狐 1094 恒假,:60072-60074） */
   private foxHitInflate(): number {
     if (this.projId !== 1106) return 0;
-    const age = Math.min(this.age * 3, 72);
+    const age = Math.min(this.age, 72);
     let n = Math.floor((age / 72) * 20);
     if (Math.hypot(this.vx, this.vy) > 10) n = n * 2 + 10;
     return n;

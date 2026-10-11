@@ -79,6 +79,10 @@ export class ModProj extends Entity {
       // ★五百八十二:释放存续期——channel 门/魔耗/节拍射击全解除,只跑 update 钩
       //  (mod 侧转储/再装填/kill 自管;寿命不受 3600 上限——存续弹自管消亡)
       if (this.__swHoldoutReleased) {
+        // ★619-R3F6:释放态兜底寿命 1200t(20s;正常转储/装填<10s)——mod update 钩
+        //  不自 kill 时引擎兜底,防永生弹污染 ownedProjCount/独占门
+        this.ageTicks++;
+        if (this.ageTicks > (this.spec.lifetime ?? 3600) + 1200) this.dead = true;
         this.spec.update?.(this as unknown as ModProjLike, game as never);
         return;
       }
@@ -267,7 +271,7 @@ export class ModProj extends Entity {
     //  贴图高=frames×单帧高,行高=img.height/frames)
     const frames = this.spec.frames ?? 1;
     const fh = frames > 1 ? img.height / frames : img.height;
-    const row = frames > 1 ? Math.floor(this.ageTicks / 6) % frames : 0;
+    const row = frames > 1 ? Math.floor(this.ageTicks / (this.spec.frameRate ?? 6)) % frames : 0;   // ★619-R3F13
     if (this.spec.rotateToVelocity) {
       const ang = Math.atan2(this.vy, this.vx);
       c.save();

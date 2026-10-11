@@ -785,12 +785,15 @@ const BOOMERANG_DUST_TRUTH: Record<number, (s: BoomerangDustCtx, game: GameHooks
   },
 };
 
-/** melee 投掷初速（ItemCheck_Shoot :46430-46434）：shootSpeed / meleeSpeed——
- *  本仓 attackSpeedMult = 1/meleeSpeed（Player.ts CapAttackSpeeds 镜像）,
- *  等价 shootSpeed × attackSpeedMult。NoMeleeSpeedVelocityScaling 排除表
- *  {699,707,877-879,985,973}（ProjectileID.cs:337）的弹型不缩放,调用方自查 */
+/** melee 投掷初速（ItemCheck_Shoot :47466-47468）：`speed /= meleeSpeed`——
+ *  原版此处 meleeSpeed 字段已是 CapAttackSpeeds 倒数档 M（Player.cs:26176 每拍
+ *  Update 先翻转,:28495 ItemCheck 在后）,正加成 → M<1 → 速度/=M=×攻速和变快。
+ *  本仓 attackSpeedMult = M（Player.ts:3762 CapAttackSpeeds 镜像）——
+ *  ★BJ640（2026-10-11）：旧式 ×M = 方向反（+70% 回旋镖初速 ×0.588 变慢）,改 ÷M
+ *  （与 Game.ts :16151 天降星/星怒等已正确的 ÷M 面同向）。NoMeleeSpeedVelocityScaling
+ *  排除表 {699,707,877-879,985,973}（ProjectileID.cs:337）的弹型不缩放,调用方自查 */
 export function meleeThrowSpeed(shootSpeed: number, attackSpeedMult: number): number {
-  return shootSpeed * (attackSpeedMult || 1);
+  return shootSpeed / (attackSpeedMult || 1);
 }
 
 /** 挥掷系 shoot 出生落点核（ItemCheck_Shoot 通用尾支）：pointPosition =
@@ -1361,12 +1364,14 @@ export class Boomerang extends Entity {
     }
     // tileCollide=false（:37145）——moveStep 直接积分
     const [spd0, acc0] = BOOMERANG_RETURN[this.projId] ?? (isPhase ? [40, 3] : [9, 0.4]); // :37146-37206
-    // 1457 :40172-40186（1456 无）:回程参数接攻速缩放——num30 = Remap(1.5,0,1,1,1/meleeSpeed)
-    // = 1.5/meleeSpeed − 0.5 钳 1..10（本仓 meleeSpeed = 1/attackSpeedMult，即 toMax =
-    // attackSpeedMult）;光刃族豁免（flag3=false）。攻速惩罚档回程更慢更飘,加速档钳底 1 不缩
+    // 1457 :40172-40186（1456 无）:回程参数接攻速缩放——toMax = 1f/meleeSpeed（:40175）
+    // = 1/M = 攻速和 A（meleeSpeed 字段=M 倒数档）;num30 = Remap(1.5,0,1,1,toMax)
+    // = 1.5×A − 0.5 钳 1..10。★BJ640（2026-10-11）：旧式直用 attackSpeedMult（=M）
+    // =方向反——攻速加成档（A=1.7）原版 num30=2.05 回程更快,旧式 0.55 钳 1 恒中性;
+    // 减速档（A=0.8）原版 0.7 钳 1 中性,旧式 1.08 反而更快。光刃族豁免（flag3=false）。
     let spd = spd0, acc = acc0;
     if (!isPhase) {
-      const asm = game.player.attackSpeedMult || 1;
+      const asm = 1 / (game.player.attackSpeedMult || 1);
       let num30 = 1.5 * asm - 0.5;
       if (num30 > 10) num30 = 10;
       if (num30 < 1) num30 = 1;
@@ -1770,8 +1775,9 @@ export class SpearProj extends Entity {
   dy: number;
   /** 原版 item.shootSpeed（velocity 模长——位移=offset×此值,勿当单位向量用） */
   spd: number;
-  /** 出生帧乘上的 meleeSpeed 缩放（attackSpeedMult = 1/meleeSpeed）——延伸盒
-   *  len ×= 1/meleeSpeed（Projectile.cs:43559）复用同值（缺省 1 = 无缩放） */
+  /** 出生帧乘上的 meleeSpeed 缩放——延伸盒 len ×= 1/meleeSpeed（Projectile.cs:47066
+   *  `num4 ×= 1f/master.meleeSpeed`,meleeSpeed=M 倒数档 → 本仓存 1/attackSpeedMult=攻速和
+   *  ★BJ640 旧式存 attackSpeedMult 本身=方向反;缺省 1 = 无缩放） */
   private spdMul = 1;
   t = 0;   // 已存活 tick（public 同 SpearDustCtx 消费口径）
   private dur: number;
@@ -1866,12 +1872,16 @@ export class SpearProj extends Entity {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     const p = game.player;
-    // melee 弹速 /meleeSpeed（ItemCheck_Shoot :46431-46434——长矛与短剑刺都不在
+    // melee 弹速 /meleeSpeed（ItemCheck_Shoot :47466-47468——长矛与短剑刺都不在
     // NoMeleeSpeedVelocityScaling 排除表 {699,707,877-879,985,973} 内,ProjectileID.cs:337;
-    // attackSpeedMult = 1/meleeSpeedTotal,Player.ts 同式）。出生帧一次定型
+    // ★BJ640（2026-10-11）：原版此处 meleeSpeed 字段=CapAttackSpeeds 倒数档 M
+    // （:26176 在 Update 每拍先翻转）——speed/=M=×攻速和。本仓 attackSpeedMult=M,
+    // 旧式 ×am 方向反（+25% 矛速 ×0.8 变慢）,改 ÷am；延伸盒 spdMul 同源改存
+    // 1/am（=原版 1/meleeSpeed 和,AI_019_Spears_GetExtensionHitbox :47066
+    // `num4 ×= 1f/master.meleeSpeed` 消费 A=攻速和））。出生帧一次定型
     if (this.t === 0) {
       const am = (p as { attackSpeedMult?: number }).attackSpeedMult;
-      if (am && am > 0 && am !== 1) { this.spd *= am; this.spdMul = am; }
+      if (am && am > 0 && am !== 1) { this.spd /= am; this.spdMul = 1 / am; }
     }
     if (RAPIER_PROJ.has(this.projId)) {
       // AI_161_RapierStabs(:44987-45004) + extraUpdates=1(DefaultToShortsword :10165;
@@ -3480,12 +3490,15 @@ export class YoyoProj extends Entity {
       else if (this.cx < p.cx - 2) this.dir = -1;
     }
     this.hitCd.tick();
-    // ---- AI_099_2_Yoyos 参数链（:64945-64977）----
-    // ★原版 meleeSpeed 基 1（Player.cs:2328 =1f,装备加法 +0.12 档）——本仓
-    //   attackSpeedMult = 1/meleeSpeed(CapAttackSpeeds :28566-28573),取倒数还原;
-    //   曾直接拿 attackSpeedMult 当 meleeSpeed 用,加成方向反（越快射程越长）
-    const vms = 1 / (p.attackSpeedMult || 1);
-    const msRange = (1 + vms * 3) / 4;          // 射程/顶速缩放(:64974-64975)
+    // ---- AI_099_2_Yoyos 参数链（:68803-68806 寿命 / :68941-68942 射程顶速）----
+    // ★BJ640（2026-10-11）方向翻案：原版 meleeSpeed 字段 = CapAttackSpeeds 倒数档 M
+    //   （Player.cs:26176 每拍 Update 先翻转,弹 AI 读到的恒为 M<1 档）——正加成
+    //   M<1 → (1+M×3)/4<1 → range/=小数=射程【变长】、(1+M)/2<1 → 寿命烧得更快
+    //   =原版「攻速越快悠悠球射程越长/滞留越短」。旧注「越快射程越长=方向反」系
+    //   把 meleeSpeed 误当攻速和（1/M）——旧式 vms=1/attackSpeedMult=攻速和恰反。
+    //   本仓 attackSpeedMult=M（Player.ts:3762 镜像）,vms 直取即原版字段值。
+    const vms = p.attackSpeedMult || 1;
+    const msRange = (1 + vms * 3) / 4;          // 射程/顶速缩放(:68941)
     let range = YOYO_RANGE[this.projId] ?? 200;
     if (eq.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
     range /= msRange;

@@ -181,10 +181,10 @@ describe('回旋镖自旋方向（Projectile.cs:15674-15682 AutomaticallyChanges
 // ④ melee 投掷初速（Player.cs:46430-46434 / :46642-46680）
 // ============================================================
 describe('melee 投掷初速 shootSpeed/meleeSpeed（Player.cs:46430-46434）', () => {
-  it('meleeThrowSpeed = shootSpeed×attackSpeedMult（attackSpeedMult=1/meleeSpeed）', () => {
+  it('★BJ640 meleeThrowSpeed = shootSpeed/attackSpeedMult（:47466 speed /= meleeSpeed,M=倒数档——×M 方向反已翻案）', () => {
     expect(meleeThrowSpeed(16, 1)).toBe(16);
-    expect(meleeThrowSpeed(16, 0.8)).toBeCloseTo(12.8);   // meleeSpeed 1.25 → 12.8
-    expect(meleeThrowSpeed(9, 0.5)).toBeCloseTo(4.5);
+    expect(meleeThrowSpeed(16, 0.8)).toBeCloseTo(20);     // M=0.8（+25% 攻速）→ ÷0.8 变快
+    expect(meleeThrowSpeed(9, 0.5)).toBeCloseTo(18);
     expect(meleeThrowSpeed(16, 0)).toBe(16);              // 缺省基 1（|| 1 门）
   });
 

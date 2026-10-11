@@ -2,8 +2,9 @@
 //   · 弩车 GetBallistraShotDelay(1457 :69721-69735):160 基档 → T3 侍从套 100 →
 //     恐慌 60 → 双真 30;1457 :69599-69609 落位首帧 ai[1]=shotDelay(放置后不再
 //     立即射第一箭,先等满一档装填)
-//   · 回力镖回程参数接攻速(1457 :40172-40186,1456 无):num30 = 1.5×attackSpeedMult−0.5
-//     钳 1..10,spd/acc 同乘;光刃族豁免(flag3=false)
+//   · 回力镖回程参数接攻速(1457 :40172-40186,1456 无):toMax=1/meleeSpeed(M 倒数档)
+//     →num30 = 1.5×toMax−0.5 钳 1..10,spd/acc 同乘;光刃族豁免(flag3=false)
+//     ★BJ640 语义翻案:旧注「num30=1.5×attackSpeedMult−0.5」把 M 当攻速和用=方向反
 import { describe, it, expect } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Boomerang } from '../src/entities/WeaponProj';
@@ -77,7 +78,7 @@ describe('1457 弩车首射延迟(GetBallistraShotDelay + 落位首帧装填)', 
   });
 });
 
-describe('1457 回力镖回程攻速缩放(:40172-40186 num30 = 1.5×asm−0.5 钳 1..10)', () => {
+describe('1457 回力镖回程攻速缩放(:40172-40186 toMax=1/meleeSpeed,num30=1.5×toMax−0.5 钳 1..10)', () => {
   /** ai[0]=1(返回段)首步轴向步进 acc×num30——用 vx 增量反读 num30 */
   const returnAccOf = (attackSpeedMult: number, projId = 6): number => {
     const player = {
@@ -96,21 +97,25 @@ describe('1457 回力镖回程攻速缩放(:40172-40186 num30 = 1.5×asm−0.5 �
     return b.vx;                                 // steerTo:0→+acc(异号加倍不触发)
   };
 
+  // ★BJ640（2026-10-11）语义翻案：原版 :40175 `toMax = 1f/meleeSpeed`、meleeSpeed 字段 =
+  //   CapAttackSpeeds 倒数档 M（:26176 每拍先翻转）→ toMax = 1/M = 攻速和 A，
+  //   num30 = 1.5×A − 0.5。旧期望把 attackSpeedMult（=M）直接当 A 用 = 方向反
+  //   （加速档 num30 应 2.5 旧式给了减速档……入参按 M 注：加速档 M=1/2）。
   it('基档 asm=1 → num30=1,acc=0.4(缺省族 [9,0.4])', () => {
     expect(returnAccOf(1)).toBeCloseTo(0.4, 6);
   });
-  it('加速档 asm=2 → num30=2.5,acc=1.0(回程更急)', () => {
-    expect(returnAccOf(2)).toBeCloseTo(1.0, 6);
+  it('加速档 A=2（M=1/2）→ num30=2.5,acc=1.0(回程更急)', () => {
+    expect(returnAccOf(1 / 2)).toBeCloseTo(1.0, 6);
   });
-  it('上钳:asm=7 → num30=1.5×7−0.5=10,acc=4.0(不超 10)', () => {
-    expect(returnAccOf(7)).toBeCloseTo(4.0, 6);
-    expect(returnAccOf(20)).toBeCloseTo(4.0, 6);   // 29.5 → 仍钳 10
+  it('上钳:A=7（M=1/7）→ num30=1.5×7−0.5=10,acc=4.0(不超 10)', () => {
+    expect(returnAccOf(1 / 7)).toBeCloseTo(4.0, 6);
+    expect(returnAccOf(1 / 20)).toBeCloseTo(4.0, 6);   // 29.5 → 仍钳 10
   });
-  it('下钳:asm=0.5 → num30=0.25 → 钳底 1(攻速惩罚档回程不更飘)', () => {
-    expect(returnAccOf(0.5)).toBeCloseTo(0.4, 6);
+  it('下钳:A=0.5（M=2）→ num30=0.25 → 钳底 1(攻速惩罚档回程不更飘)', () => {
+    expect(returnAccOf(2)).toBeCloseTo(0.4, 6);
   });
-  it('光刃族豁免(flag3=false):asm=7 时 acc 仍 3(不缩放)', () => {
-    expect(returnAccOf(7, 1059)).toBeCloseTo(3, 6);
+  it('光刃族豁免(flag3=false):A=7 时 acc 仍 3(不缩放)', () => {
+    expect(returnAccOf(1 / 7, 1059)).toBeCloseTo(3, 6);
     expect(returnAccOf(1, 1059)).toBeCloseTo(3, 6);
   });
 });

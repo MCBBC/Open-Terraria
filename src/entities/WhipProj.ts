@@ -43,6 +43,7 @@ import type { Player } from './Player';
 import { projSprite } from './Arrow';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { roundCSf32Mul } from '../stats/ScaleStats';   // ★BJ640 词缀烘定（(int)Math.Round f32 银行家）
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
@@ -67,6 +68,21 @@ export {
 } from './WhipTag';
 export { whipTagDamageOf, resolveWhipTagHit } from './WhipTag';
 export type { WhipTagged } from './WhipTag';
+
+/** ★BJ638 鞭攻速合流（原版 Player.cs:29253-29262 CapAttackSpeeds + :4461 鞭动画支）：
+ *  用时倍率 = whipUseTimeMultiplier × 1/min(3, meleeSpeed + swb)。近战攻速速度面
+ *  （attackSpeedMult 倒数还原 = min(3, meleeSpeed)）与鞭 buff 总和 swb（UpdateBuffs
+ *  :10200-10208：311 +0.35 / 308 +0.25 / 314 +0.12）在取倒数【前】加算合流；黑曜套
+ *  whipUseTimeMultiplier ×= 1/1.15（Terraria.DataStructures/ArmorSetBonuses.cs
+ *  ObsidianOutlaw :120-127）——乘在【用时倍率】上,绝非 buff 和系数。封顶单调性保证
+ *  「先还原后加算再封顶」与原版「先加算后封顶」同值。attackSpeedMult 入参 = 本仓
+ *  Player.attackSpeedMult（CapAttackSpeeds 倒数档镜像,桩面可用 1=无加成）。
+ *  消费位：Game.ts 鞭支 useTime/挥动窗 + 本文件 ctor anim（itemAnimationMax →
+ *  timeToFlyOut,GetWhipSettings :49219-49221）。 */
+export function whipUseTimeFold(attackSpeedMult: number, swb: number, whipSpd: number): number {
+  const meleeSpeed = 1 / (attackSpeedMult || 1);   // CapAttackSpeeds 逆还原（=min(3,速度面)）
+  return whipSpd / Math.min(3, meleeSpeed + swb);
+}
 
 /** 2D 向量最小形状 */
 interface V2 { x: number; y: number }
@@ -192,6 +208,10 @@ export class WhipProj extends Entity {
     damage: number, knockback: number, anim: number, speed: number,
     owner: () => Player | null,
     aimAng?: () => number,
+    /** ★BJ640（2026-10-11）词缀 spd 烘定（Item.Prefix :567 useAnimation=(int)Math.Round
+     *  (useAnimation×spd)——鞭词缀池=PrefixesForSwords,Light/Rapid 等旧式整缺;
+     *  Game.ts 鞭支传 heldPrefixStat().spd,缺省 1=BJ638 测试桩零漂移） */
+    prefixSpd = 1,
   ) {
     super();
     this.x = x; this.y = y;
@@ -217,8 +237,16 @@ export class WhipProj extends Entity {
     if (o?.equipStats.accWickedArmlet) this.knockback += 1;
     const swb = o ? (o.whipBuffs[311] ? 0.35 : 0) + (o.whipBuffs[308] ? 0.25 : 0)
       + (o.whipBuffs[314] ? 0.12 : 0) : 0;
-    const whipAtk = Math.min(3, 1 + swb * (o?.equipStats.whipSpd ?? 1));
-    this.anim = Math.max(1, Math.round(anim / whipAtk));
+    // ★BJ638（2026-10-11）：anim = itemAnimationMax（SetItemAnimation :4461 鞭支 →
+    //  GetWhipSettings :49220 timeToFlyOut = itemAnimationMax × MaxUpdates）——
+    //  meleeSpeed + swb 加算合流、whipSpd 乘用时倍率,与 Game.ts useTime 同折
+    //  （whipUseTimeFold 注）。旧式 1+swb×whipSpd 漏 meleeSpeed（鞭对攻速饰品全免疫
+    //  =用户实报）且把 1/1.15 错乘进 buff 和；（int) 截断 =原版 SetItemAnimation
+    //  :4445 val=(int)(base×mult),非 round
+    //  ★BJ640（2026-10-11）：词缀 spd 先烘定（:567 (int)Math.Round f32 银行家）再乘
+    //  fold——原版烘定序=词缀整数化在前、攻速乘区在后
+    this.anim = Math.max(1, Math.floor(roundCSf32Mul(anim, prefixSpd) * whipUseTimeFold(
+      (o?.attackSpeedMult as number | undefined) ?? 1, swb, o?.equipStats.whipSpd ?? 1)));
     this.damage = damage;
     this.dmgNow = Math.max(1, Math.round(damage * (o ? o.summonDamageMult : 1))); // ⑥ pen 移 hurt 参
   }

@@ -168,6 +168,7 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       homingDist: s.homingDist,
       frames: s.frames,
       hitRefresh: s.hitRefresh,
+      frameRate: s.frameRate,
       noContactDamage: s.noContactDamage,
       holdout: s.holdout,
     }, pr.fullKey);

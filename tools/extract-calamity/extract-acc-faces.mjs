@@ -139,6 +139,16 @@ for (const p of files) {
   }
 }
 
+// ★619-R4F10:immuneVanilla id 空间闸(原版 1-400;引擎 BuffType 枚举≠原版 id——
+//  R4-F1 事故=七行引擎枚举值在 899 全绿下存活)。落盘前逐行核:vanilla id>400→报错
+for (const r of out.immunes) {
+  if (r.immuneVanilla) {
+    for (const id of r.immuneVanilla) {
+      if (id > 400 || id < 1) throw new Error(`[acc-faces] ${r.item} immuneVanilla[${id}] 越原版段(1-400)=引擎 BuffType 串入`);
+    }
+  }
+}
+
 // —— 落盘(merge:已存在键不重) ——
 const mergeInto = (file, rows, keyOf) => {
   const p = join(GAME, `mods/calamity/${file}`);

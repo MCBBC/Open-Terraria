@@ -204,7 +204,9 @@ export function sanitizeKeybinds(raw: unknown): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   if (!raw || typeof raw !== 'object') return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!ACTION_SET.has(k) || !Array.isArray(v)) continue;
+    // ★619-R3F10:mod: 前缀键放行(重绑 UI 未列=登记,但 persist 通路不能焊死)
+    if (!k.startsWith('mod:') && !ACTION_SET.has(k)) continue;
+    if (!Array.isArray(v)) continue;
     const codes = [...new Set(v.filter((c): c is string => typeof c === 'string' && c.length > 0))];
     out[k] = codes;
   }

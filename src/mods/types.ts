@@ -199,6 +199,8 @@ export interface ModProjContent {
   /** ★五百八十五:竖排帧数(贴图高=frames×单帧高;绘制按 (ageTicks/6)%frames 切行;
    *  缺省 1=整图) */
   frames?: number;
+  /** ★619-R3F13:帧节奏(tick/帧;缺省 6) */
+  frameRate?: number;
   /** ★五百八十五:同敌重击窗(tick;命中记录按 ageTicks 过期=常驻召唤体可再命中;
    *  缺省 0=永久去重) */
   hitRefresh?: number;

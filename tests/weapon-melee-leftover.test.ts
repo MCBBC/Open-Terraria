@@ -58,10 +58,13 @@ describe('① 挥击动画时长下限 1（SetItemAnimation base>0 → max(val,1
 
   it('结构锚：melee 支 max(4,…)→max(1,…)、工具支 max(12,…)→max(1,…)（同函数同门）', () => {
     const src = srcGame();
-    expect(src).toContain('Math.max(1, Math.round(nativeSpd / this.player.attackSpeedMult))');
-    expect(src).toContain('Math.max(1, Math.round((cwMelee!.useAnimation) / this.player.attackSpeedMult))');
+    // ★BJ640（2026-10-11）攻速链普查批1：melee 支改 ×attackSpeedMult（CapAttackSpeeds
+    // 倒数档 M）+词缀烘定 roundCSf32Mul+(int) 截断 truncCSf32Mul——下限 1 门保持
+    expect(src).toContain('Math.max(1, truncCSf32Mul(roundCSf32Mul(nativeSpd, psSw?.spd ?? 1), this.player.attackSpeedMult))');
+    expect(src).toContain('Math.max(1, truncCSf32Mul(roundCSf32Mul(cwMelee!.useAnimation, psSw?.spd ?? 1), this.player.attackSpeedMult))');
     expect(src).not.toContain('Math.max(12, Math.round(nativeSpd');
     expect(src).not.toContain('Math.max(4, Math.round((cwMelee');
+    expect(src).not.toContain('Math.round(nativeSpd / this.player.attackSpeedMult)');   // 旧 ÷ 向退役
   });
 
   it('结构锚：heldUseAnimation 基值下限同步 4→1（base 本身无 4 下限）', () => {
@@ -72,15 +75,17 @@ describe('① 挥击动画时长下限 1（SetItemAnimation base>0 → max(val,1
     const src = srcGame();
     expect(src).not.toContain('Math.max(12, Math.round((cw?.useTime');
     expect(src).not.toContain('Math.max(14, Math.round((def.tool.speed');
-    expect(src).toContain('return Math.max(1, Math.round((cw?.useTime ?? def.tool?.speed ?? 42) / spd));');
+    // ★BJ640：×M 截断面（远端词缀未同步登记 BJ640-R1）
+    expect(src).toContain('return Math.max(1, truncCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, spd));');
   });
 });
 
 // ============ ② 弧弹 ai1 乘攻速（itemAnimationMax=(int)(useAnimation×meleeSpeed)） ============
 describe('② 弧弹 ai1 = useAnimation×meleeSpeed（Player.cs:49381/:49443 实参）', () => {
-  it('结构锚：972 锚弧 animT 除以 attackSpeedMult（=×meleeSpeed）+ 下限 1', () => {
+  it('结构锚：972 锚弧 animT ×attackSpeedMult（=CapAttackSpeeds 倒数档 M,itemAnimationMax 式）+ 下限 1', () => {
     const src = srcGame();
-    expect(src).toContain('Math.max(1, Math.round((cwMelee.useAnimation ?? cwMelee.useTime ?? 100)\n            / this.player.attackSpeedMult))');
+    // ★BJ640：×M 截断 + 词缀烘定（旧 ÷attackSpeedMult=×攻速和方向反）
+    expect(src).toContain('truncCSf32Mul(roundCSf32Mul(cwMelee.useAnimation ?? cwMelee.useTime ?? 100, ps?.spd ?? 1),\n            this.player.attackSpeedMult)');
     expect(src).not.toContain('const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 100;');
   });
 
@@ -89,7 +94,8 @@ describe('② 弧弹 ai1 = useAnimation×meleeSpeed（Player.cs:49381/:49443 实
     expect(src).not.toContain('new SwingArc(this.player, 984, cwMelee.useTime');
     const i = src.indexOf('new SwingArc(this.player, 984,');
     expect(i).toBeGreaterThan(-1);
-    expect(src.slice(i, i + 220)).toContain('/ this.player.attackSpeedMult))');
+    // ★BJ640：×M 截断+词缀烘定（与 972 锚弧同式）
+    expect(src.slice(i, i + 260)).toContain('truncCSf32Mul(roundCSf32Mul(cwMelee.useAnimation ?? cwMelee.useTime ?? 100, ps?.spd ?? 1)');
   });
 
   it('行为锚：SwingArc ai1=传入 animMax（下限 1）、寿命=ai1 tick', () => {

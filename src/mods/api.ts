@@ -393,8 +393,17 @@ export function createModContext(
       const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
       const pid = alloc.projs.get(full);
       if (pid === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册弹幕: ${key}`);
-      const g = (globalThis as { __swGame?: { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } } }).__swGame;
-      return g?.entities?.projectiles?.filter((q) => !q.dead && q.projId === pid).length ?? 0;
+      // ★619-R3F12:计数缓存(per-frame;缓存键=frame tick,帧内首调算后续读——
+      //  多召唤体同帧多键各 O(n) 一次/帧=可接受;跨帧失效)
+      const g = (globalThis as unknown as { __swGame?: { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }>; tickCount?: number } } }).__swGame;
+      if (!g?.entities?.projectiles) return 0;
+      const gg = g as { tickCount?: number; __swOpCache?: { frame: number; counts: Map<number, number> } };
+      const cache = gg.__swOpCache ?? (gg.__swOpCache = { frame: -1, counts: new Map<number, number>() });
+      if (cache.frame !== gg.tickCount) { cache.frame = gg.tickCount ?? 0; cache.counts.clear(); }
+      if (cache.counts.has(pid)) return cache.counts.get(pid) ?? 0;
+      const n = g.entities.projectiles.filter((q) => !q.dead && q.projId === pid).length;
+      cache.counts.set(pid, n);
+      return n;
     },
     // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)
     playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void) {
@@ -468,7 +477,9 @@ export function createModContext(
       // ★五百八十二:holdout 同型独占(C# Player.CantUseHoldout 语义——channel 期
       //  重入 itemUse 不叠弹;释放存续期同在册=同样拦)
       if (ownerIsPlayer && modProjSpecOf(pid)?.holdout) {
-        if (g.entities.projectiles.some((q) => !q.dead && q.projId === pid)) return;
+        // ★619-R3F7:ownerIsPlayer 限定(联机远端傀儡弹 projId 同但 host 权威不可拦)
+        if (g.entities.projectiles.some((q) => !q.dead && q.projId === pid
+          && (q as unknown as { ownerIsPlayer?: boolean }).ownerIsPlayer !== false)) return;
       }
       void import('../entities/ModProj').then(({ ModProj }) => {
         g.entities.add(new ModProj(x, y, vx, vy, damage, knockback, pid, ownerIsPlayer), 'projectiles');

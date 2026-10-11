@@ -191,6 +191,8 @@ export interface ModProjSpec {
   pierce?: number;
   /** ★五百八十五:竖排帧数(贴图高=frames×单帧高;绘制按 (ageTicks/6)%frames 切行) */
   frames?: number;
+  /** ★619-R3F13:帧节奏(tick/帧;缺省 6=C# 常见档;3/5/8 档族可声明) */
+  frameRate?: number;
   /** ★五百八十五:同敌重击窗(tick;常驻召唤体可再命中;缺省 0=永久去重) */
   hitRefresh?: number;
   /** ★618-R2F9:接触伤害豁免(C# CanDamage()=false 同位——healer/defense 守卫;

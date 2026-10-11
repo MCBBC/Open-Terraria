@@ -520,7 +520,7 @@ import { FirstFractalSlash } from '../entities/FirstFractal';
 import { ChainsawProj } from '../entities/ChainsawProj';
 import { ClingerStaffWallProj, computeClingerWallSpawn } from '../entities/ClingerStaffWallProj';   // ★BJ286 爬藤怪法杖 482 诅咒焰墙
 import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';
-import { WhipProj } from '../entities/WhipProj';
+import { WhipProj, whipUseTimeFold } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
 import { updateFakeFishSchool, clearFakeFish, repelParticlesAt } from '../entities/FakeFish';
 import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
@@ -5708,8 +5708,11 @@ export class Game implements GameHooks {
     if (!cands.length) { this.lockOnTargetId = null; return; }
     cands.sort((a, b) => Math.hypot(a.cx - p.cx, a.cy - p.cy) - Math.hypot(b.cx - p.cx, b.cy - p.cy));
     const cur = this.lockOnTargetId;
+    // ★619-R3F3:标准环形步进(idx=-1=新选→落 cands[0]=最近)
     const idx = cands.findIndex((e) => (e as unknown as { id?: number }).id === cur);
-    const next = cands[(idx + (dir === 1 ? 1 : cands.length - 1) + 1) % cands.length];
+    const next = dir === 1
+      ? cands[(idx + 1) % cands.length]                          // 正向:下一个
+      : cands[(idx - 1 + cands.length) % cands.length];          // 反向:上一个(-1→末位)
     this.lockOnTargetId = (next as unknown as { id?: number }).id ?? null;
   }
 
@@ -13386,7 +13389,10 @@ export class Game implements GameHooks {
     // base>0 时下限 1。放置物走 ApplyItemAnimation createTile/createWall 档
     //（:4270-4275：useAnimation×tileSpeed/wallSpeed）
     const base = this.heldUseAnimation(def);
-    let dur = mult === 1 ? base + extra : Math.round(base * mult);
+    // ★BJ640（2026-10-11）：mult 乘区=(int)(base×mult) 截断（Player.cs:4438-4446
+    // SetItemAnimation(base,mult)——tileSpeed/wallSpeed/词缀 spd/slowMagic 各支同函数
+    // 同门）,非 Math.round
+    let dur = mult === 1 ? base + extra : Math.max(1, truncCSf32Mul(base, mult));
     if (base > 0) dur = Math.max(dur, 1);
     // ★R26 GAP-07：reuseDelay 后摇窗并入动画尾（ApplyItemAnimation 尾
     // `reuseDelay = sItem.reuseDelay` :4482 起手拷贝 → 动画归零后 ItemCheck
@@ -15649,17 +15655,29 @@ export class Game implements GameHooks {
       // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）
       // autoReuse 持按链式：useTime<useAnimation 时原版会在动画未走完时重置弧线（下挥被截）
       const nativeSpd = tool?.speed;
-      // ★1457 动画时长下限 1（Player.cs:4438-4446 SetItemAnimation(base,mult)：
-      // val=(int)(base×mult)、base>0 时 val=max(val,1)——melee/工具同函数同门，
-      // 此前自造下限 melee 4 / 工具 12 使高攻速档挥击被钳长）
+      // ★BJ640（2026-10-11）攻速方向+词缀速度+截断三面（链条普查批1）：
+      //  ①方向——原版 SetItemAnimation(useAnimation, meleeSpeed)（Player.cs:4457）
+      //  乘的是【CapAttackSpeeds 倒数档 M】（:26176 每拍 Update 内已翻转,ItemCheck
+      //  在其后 :28495 → :52291-52291 ApplyItemAnimation）,正加成 → M<1 → 动画变短；
+      //  旧式 useAnimation/attackSpeedMult = ×攻速和 = 方向反（+12% 挥击 21→24 tick,
+      //  原版 21→18；Weak 反向变快）。attackSpeedMult getter 语义=M（Player.ts:3762
+      //  CapAttackSpeeds 镜像,与 :16151 弹速 ÷M 正确面同源）——应【乘】非【除】。
+      //  ②词缀速度——Item.Prefix :566-568 把 spd 烘进 useTime【和】useAnimation
+      //  （(int)Math.Round((float)base×spd) 银行家 f32=roundCSf32Mul）,旧式两值全裸
+      //  =近战词缀速度整缺（Light/Rapid/Quick/Slow 不消费）。
+      //  ③截断——val=(int)(base×mult)（:4438-4446）朝零截断=truncCSf32Mul,非 Math.round。
+      //  折算序=原版烘定序：先词缀（整数化）后攻速（截断）；下限 1 同 :4444。
+      //  ④per-item 缩放/排除在 attackSpeedMult getter 内（批3,BonusMeleeSpeedMultiplier
+      //  :26110-26112 + NoMeleeSpeedBonus ItemID.cs:62）。
+      const psSw = this.heldPrefixStat();
       const animSpd = nativeSpd != null
-        ? Math.max(1, Math.round(nativeSpd / this.player.attackSpeedMult))
-        : Math.max(1, Math.round((cwMelee!.useAnimation) / this.player.attackSpeedMult));
-      // ★原版 ApplyItemTime（P:4216-4222）useTime 裸值不乘 meleeSpeed——此前误缩
-      // 导致近战连挥随攻速加成变快（原版只有动画变快、冷却恒定），审计 §1/§7 修正
+        ? Math.max(1, truncCSf32Mul(roundCSf32Mul(nativeSpd, psSw?.spd ?? 1), this.player.attackSpeedMult))
+        : Math.max(1, truncCSf32Mul(roundCSf32Mul(cwMelee!.useAnimation, psSw?.spd ?? 1), this.player.attackSpeedMult));
+      // ★原版 ApplyItemTime（P:4216-4222）itemTime = 烘定 useTime（词缀已折,不再乘
+      //  meleeSpeed——此前误缩导致近战连挥随攻速加成变快,审计 §1/§7 修正保留）
       const reuseSpd = nativeSpd != null
         ? animSpd
-        : Math.max(1, Math.round(cwMelee!.useTime));
+        : Math.max(1, roundCSf32Mul(cwMelee!.useTime, psSw?.spd ?? 1));
       // TryAllowingItemReuse（Player.cs:52036-52053）：autoReuseGlove（力量手套族配饰）给
       // 近战武器补自动连挥——唯 type 3030 除外；原生 legacy sword 保持持按连挥
       const heldVid = heldDef?.vid ?? -1;   // vi_ 物品 vid 从 key 反解
@@ -15677,7 +15695,7 @@ export class Game implements GameHooks {
       const clickEdge = inp.mouseDown && !this.prevSwingMouse;
       const canChain = autoReuse || clickEdge; // 非 autoReuse 武器需重新点击（原版语义）
       // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
-      const ps = this.heldPrefixStat();
+      const ps = psSw;
       // ★ 重启门含 swing.t<=1（原版 itemAnimation 归零同帧即重启挥动,NPC AI 永远看不到 0 帧；
       //   此前 !this.swing 硬门让每挥击周期漏出 1 帧 useTime==0——黄蜂 ai[1] 每周期清零,
       //   永远攒不到 130 → 战斗中黄蜂从不射毒刺(NPC.cs:51165 的 itemAnimation 门因此误判"待机")）
@@ -15761,8 +15779,11 @@ export class Game implements GameHooks {
           //  Player.cs:49381/:49427/:49396/:49403/:49443）。attackSpeedMult = 1/meleeSpeed
           //  取倒数（Player.ts:1709-1722 CapAttackSpeeds 档），故除之。此前裸
           //  useAnimation：攻速加成下弧寿命不随挥击缩短，弧在收招后仍可命中
-          const animT = Math.max(1, Math.round((cwMelee.useAnimation ?? cwMelee.useTime ?? 100)
-            / this.player.attackSpeedMult));   // ResetStats 缺省（Item.cs:48626-48627）
+          // ★BJ640（2026-10-11）：ai[1]=itemAnimationMax=(int)(【词缀烘定】useAnimation×M)
+          // （Player.cs:49381 实参 + :4438-4446 截断 + :566-568 词缀烘定）——旧式
+          // ÷attackSpeedMult=×攻速和方向反,且漏词缀速度。
+          const animT = Math.max(1, truncCSf32Mul(roundCSf32Mul(cwMelee.useAnimation ?? cwMelee.useTime ?? 100, ps?.spd ?? 1),
+            this.player.attackSpeedMult));   // ResetStats 缺省（Item.cs:48626-48627）
           const scaleT = ps?.size ?? 1;
           // ★SW-FX31：真刃系 ai[0] = direction × gravDir（Player.cs:49381/:49382×0.1/
           //  :49396/:49403/:49416/:49427/:49435/:49443/:49444 逐链实参）——倒挂时
@@ -16111,8 +16132,9 @@ export class Game implements GameHooks {
             // :4455-4458 melee 档；attackSpeedMult=1/meleeSpeed 倒数——Player.ts:1709）
             // ——此前误用 useTime 裸值（冷却值≠动画时长，攻速下弧寿命失真）
             const arc = new SwingArc(this.player, 984,
-              Math.max(1, Math.round((cwMelee.useAnimation ?? cwMelee.useTime ?? 100)
-                / this.player.attackSpeedMult)),
+              // ★BJ640（2026-10-11）：同 animT 面——×M（截断）+词缀烘定,非 ÷
+              Math.max(1, truncCSf32Mul(roundCSf32Mul(cwMelee.useAnimation ?? cwMelee.useTime ?? 100, ps?.spd ?? 1),
+                this.player.attackSpeedMult)),
               // ★SW-FX31：757 链 984 弧 ai[0] = direction×gravDir（Player.cs:49443）
               Math.round((this.swing.dmg ?? 1)), this.player.facing * this.player.gravDir, (ps?.size ?? 1));
             // ★BJ486③ 退役载体死写摘除（原 `arc.critChance = arcCrit`）——掷率在
@@ -16215,7 +16237,10 @@ export class Game implements GameHooks {
       // useAnimation=12）：挥击动画/挥击音/重启节拍 14t→12t（原版档）;挖掘命中节奏
       // 不受影响（tryMine 内部按 useTime 节流,审计 E3 已勘误——原版重启门=itemAnimation
       // 归零=useAnimation,:43084,非 useTime）。
-      const spd = Math.max(1, Math.round((tool.speed ?? 46) / this.player.attackSpeedMult));
+      // ★BJ640（2026-10-11）：同剑支三面——方向（×attackSpeedMult=M 非除）、词缀速度
+      // （Item.Prefix :566-568 烘 useAnimation——工具词缀 Light/Legendary 旧式整缺）、
+      // (int) 截断（:4438-4446）。挖掘命中节奏仍走 tryMine 的 useTime×pickSpeed 面。
+      const spd = Math.max(1, truncCSf32Mul(roundCSf32Mul(tool.speed ?? 46, this.heldPrefixStat()?.spd ?? 1), this.player.attackSpeedMult));
       const dual = this.dualToolResolve(tool, this.world.store.get(tx, ty), heldDef ?? undefined);
       // 同剑系：swing.t<=1 放行同帧重启（防黄蜂 ai[1] 每周期清零,见上）
       if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
@@ -17604,7 +17629,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.entities.add(muzzle, 'projectiles');
           }
           // 复用冷却/动画 × 词缀 spd（Item.cs:559-560 Prefix 烘入语义，同主枪路径）
-          this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 6) * (ps?.spd ?? 1)));
+          this.player.useTime = Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 6, ps?.spd ?? 1));
           this.useSwing(heldDef, Math.atan2(mwy - this.player.cy, mwx - this.player.cx),
             ps?.spd ?? 1);
           this.input.mouseDown = false;
@@ -17715,7 +17740,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             && !this.ammoSaveRoll()) {
             this.player.inv.removeAt(ammoSlot, 1);
           }
-          this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 100) * (ps?.spd ?? 1)));
+          this.player.useTime = Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 100, ps?.spd ?? 1));
           this.useSwing(heldDef, ang, ps?.spd ?? 1);
           const usFw = itemUseSoundWav(bowVid2);        // UseSound=Item156（Item.cs:31942）
           if (usFw) this.playSfxFile(usFw);
@@ -17841,7 +17866,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.player.inv.removeAt(ammoSlot, 1);
           }
           // 复用冷却/动画 × 词缀 spd（Item.cs:559-560 Prefix 烘入；ResetStats 缺省 100）
-          this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 100) * (ps?.spd ?? 1)));
+          this.player.useTime = Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 100, ps?.spd ?? 1));
           this.useSwing(heldDef, ang, ps?.spd ?? 1);
           const usBow16 = itemUseSoundWav(bowVid2);
           if (usBow16) this.playSfxFile(usBow16);
@@ -17868,7 +17893,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.player.inv.removeAt(ammoSlot, 1);
           }
           // 复用冷却/动画 × 词缀 spd（Item.cs:559-560 Prefix 烘入；ResetStats 缺省 100）
-          this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 100) * (ps?.spd ?? 1)));
+          this.player.useTime = Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 100, ps?.spd ?? 1));
           this.useSwing(heldDef, ang, ps?.spd ?? 1);   // useStyle 5 瞄准持械（Item.cs 779/5134）
           const usSpray = itemUseSoundWav(bowVid2);   // UseSound Item_34（两型同）
           if (usSpray) this.playSfxFile(usSpray);
@@ -18172,7 +18197,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           const ppItemId = ITEM_BY_KEY[heldDef.key];
           const ppOwner = this.player;
-          const ppInterval = Math.max(1, Math.round((bowC?.useAnimation ?? 18) * (ps?.spd ?? 1)));
+          const ppInterval = Math.max(1, roundCSf32Mul(bowC?.useAnimation ?? 18, ps?.spd ?? 1));
           const carrier = new PhoenixChannel(
             ppOwner,
             Math.cos(ang) * (bowC?.shootSpeed ?? 20), Math.sin(ang) * (bowC?.shootSpeed ?? 20),
@@ -18309,6 +18334,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (specialShots === 0) {
         const bowArrow = new Arrow(ax, ay, svx, svy,
           damage, knockback, projId, gravOpts);
+        // ★BJ642（2026-10-11）：精灵熔炉 1910 的 ai[0]=1（Player.cs:49627-49629
+        //  NewProjectile 第 10 参=1f）——喷火器 85 的蓝焰变体旗：AI_193 flag 档
+        //  （尘 135/圈半径面 :42091-42096）+ DrawProj_Flamethrower 蓝调色板
+        //  （:35663-35667）+ StatusNPC buff 324 Frostburn2（:11660-11663,ctx.ai0 面）。
+        //  火焰喷射器 506 缺省不传=ai[0]=0 橙档；opts.ai0 槽（hostileAi0）逐型
+        //  注入约定同 88/496 先例
+        if (projId === 85 && bowVid2 === 1910) bowArrow.hostileAi0 = 1;
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         // ★BJ493③（2026-10-04）critBonus 冻结写位摘除→0.04 路由门——弓/枪主弹掷率
         //  走 Arrow 通用环 rollVanillaHitCrit 命中拍动态（:12915-12927 owner 装配+
@@ -18387,12 +18419,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // （cycleCooldown 读到旧 swing=null）→ hold 以 4t 连发无 burst 无后摇（红队 §6）。
         // tap 三连发由下方 multishot 注册承载（flag4 循环 :43868）
         const animDur434 = bowVid2 === 434
-          ? Math.max(1, Math.round((bowC?.useAnimation ?? 12) * (ps?.spd ?? 1))) : 0;
+          ? Math.max(1, roundCSf32Mul(bowC?.useAnimation ?? 12, ps?.spd ?? 1)) : 0;
         if (bowVid2 === 434) {
           this.player.useTime = animDur434 + (REUSE_DELAY_TICKS[bowVid2] ?? 0);
         } else {
           this.player.useTime = this.cycleCooldown(bowVid2,
-            Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 100) * (ps?.spd ?? 1))));
+            Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 100, ps?.spd ?? 1)));
         }
         // useStyle 5（弓枪族恒 5）：朝鼠标静持姿势 + 身体行档（Player.cs:46708 itemRotation=瞄准角）
         // 动画时长 = useAnimation × 词缀 spd（SetItemAnimation(base, mult) :4240-4247）
@@ -18410,7 +18442,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //（PickAmmo !ItemAnimationJustStarted :54275）。松手不影响余下两发（flag4 只看
         // itemAnimation>0）;弹药逐发不重解析的近似登记（原版每发重跑 PickAmmo 可轮换槽））
         if (bowVid2 === 434 && this.swing && cw434Idx <= 0) {
-          const ut434 = Math.max(1, Math.round((bowC?.useTime ?? 4) * (ps?.spd ?? 1)));
+          const ut434 = Math.max(1, roundCSf32Mul(bowC?.useTime ?? 4, ps?.spd ?? 1));
           const fx434 = ax, fy434 = ay;
           const pid434 = projId, dmg434 = damage, kb434 = knockback;
           const arpen434 = arpenTotal;            // ★BJ493③：crit434 随 critBonus 退役
@@ -19348,7 +19380,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       knockback: cwIn.knockback * (ps?.kb ?? 1),
       // ⑧ 词缀乘区出口统一折算（I:558-568）：shtspd→shootSpeed、spd→useTime（I:561）
       shootSpeed: ((cwIn as { shootSpeed?: number }).shootSpeed ?? 0) * (ps?.shtspd ?? 1),
-      useTime: Math.max(1, Math.round(((cwIn as { useTime?: number }).useTime ?? 0) * (ps?.spd ?? 1))),
+      useTime: Math.max(1, roundCSf32Mul((cwIn as { useTime?: number }).useTime ?? 0, ps?.spd ?? 1)),
     };
     // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff——
     // 投射物近战四族此前写死 4%（Sunfury item.crit=7 原版应 11%）
@@ -19717,6 +19749,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
           () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
             inp.mouseX - this.renderer.canvas.width / 2),
+          ps?.spd ?? 1,   // ★BJ640 词缀 spd 烘定（Item.Prefix :567;与 scaledAnim 同源）
         );
         this.entities.add(whipObj, 'projectiles');
         // 蛇环计数（ItemCheck_Shoot :49183-49186：真挥 repeatWhipSwings++ +
@@ -19724,17 +19757,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  补挥本体在 WhipProj 动画中点判定 :43041-43063）
         owner.repeatWhipSwings++;
         owner.repeatWhipsResetCooldown = 120;
-        // 鞭攻速（SetItemAnimation :4266：summonerWeaponSpeedBonus × whipUseTimeMultiplier，
-        // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）
+        // 鞭攻速（原版 SetItemAnimation :4461 鞭支：useAnimation × summonerWeaponSpeedBonus
+        //  × whipUseTimeMultiplier；CapAttackSpeeds :29253-29262 summonerWeaponSpeedBonus =
+        //  1/min(3, meleeSpeed + swb)——装备近战攻速与鞭 buff（UpdateBuffs :10200-10208：
+        //  311 +0.35 / 308 +0.25 / 314 +0.12）在取倒数【前】加算合流；黑曜套
+        //  whipUseTimeMultiplier=1/1.15（ArmorSetBonuses.ObsidianOutlaw）乘在用时倍率上。
+        //  ★BJ638（2026-10-11，用户实报+部署面实测：+70% 近战攻速鞭用时 27≡27 tick）：
+        //  旧式 1+swb×whipSpd 漏 meleeSpeed（鞭对攻速饰品全免疫）且把 1/1.15 错乘进
+        //  buff 和）
         const swb = (owner.whipBuffs[311] ? 0.35 : 0) + (owner.whipBuffs[308] ? 0.25 : 0)
           + (owner.whipBuffs[314] ? 0.12 : 0);
-        const whipAtk = Math.min(3, 1 + swb * (eq.whipSpd ?? 1));   // ★BJ175 桩面 ?? 防御（缺省 1=:2815）
-        this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
+        const fold = whipUseTimeFold(this.player.attackSpeedMult, swb, eq.whipSpd ?? 1);   // ★BJ175 桩面 ?? 防御（缺省 1=:2815）
+        // (int) 截断 =SetItemAnimation :4445 val=(int)(base×mult)；鞭 itemTime=itemAnimation
+        // （AI_165_Whip :48572 MatchItemTimeToItemAnimation）→ useTime 与挥动窗同值同拍
+        // ★BJ640（2026-10-11）：词缀 spd 先烘定（Item.Prefix :567）再乘 fold——烘定序
+        const scaledAnim = Math.max(1, Math.floor(roundCSf32Mul(whip.useTime, ps?.spd ?? 1) * fold));
+        this.player.useTime = scaledAnim;
         whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
         // 鞭 useStyle 1 挥动动画 + noUseGraphic=true（DefaultToWhip Item.cs:47473
         // ——投射物即本体，全族置，不逐 vid 建表）
         this.useSwing(def, ang);
-        if (this.swing) this.swing.noGraphic = true;
+        if (this.swing) {
+          this.swing.noGraphic = true;
+          this.swing.t = scaledAnim; this.swing.dur = scaledAnim;   // 挥动窗=鞭 itemAnimation,勿留未折 30
+        }
         this.sfx.playWav('whipCrack', 1, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
@@ -21561,7 +21607,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ×(aim长−randDirection×0.5)；命中挂 397 孢子侵染 300t（projstatus 表）。
         // 1227 melee+noMelee → 'shot' 兜底,在此单点分流（同 491/636 先例）
         if (cw.shoot === 1127) {
-          const ms = this.player.attackSpeedMult > 0 ? 1 / this.player.attackSpeedMult : 1;   // meleeSpeed
+          // ★BJ640（2026-10-11）：Remap 实参 = meleeSpeed 字段 = CapAttackSpeeds 倒数档 M
+          // （Player.cs:47752,∈[1/3,1]）——本仓 attackSpeedMult 即 M,直取;旧式 1/M=攻速和
+          // 让 Remap 恒饱和到 0.25（任何加成都给最大散布）。
+          const ms = this.player.attackSpeedMult > 0 ? this.player.attackSpeedMult : 1;   // meleeSpeed
           const aimX = Math.cos(ang) * cw.shootSpeed;
           const aimY = Math.sin(ang) * cw.shootSpeed;
           const spread = 0.65 * (1 + (0.25 - 1) * Math.min(1, Math.max(0, (ms - 1) / (1 / 3 - 1))));  // Remap
@@ -53454,10 +53503,12 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const spd = proxy ? proxy.attackSpeedMult : 1;
     if (def.tool?.type === 'sword' || combatWeapon(def)?.kind === 'melee') {
       const cw = combatWeapon(def);
-      return Math.max(1, Math.round((cw?.useTime ?? def.tool?.speed ?? 42) / spd));
+      // ★BJ640（2026-10-11）：同剑支方向面（×M=乘倒数档,截断）——远端词缀未同步
+      // （swingNet 广播缺 prefix,登记债 BJ640-R1）,此处仅攻速方向/截断对齐
+      return Math.max(1, truncCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, spd));
     }
     if (def.tool && (def.tool.type === 'pick' || def.tool.type === 'axe' || def.tool.type === 'hammer')) {
-      return Math.max(1, Math.round((def.tool.speed ?? 46) / spd));
+      return Math.max(1, truncCSf32Mul(def.tool.speed ?? 46, spd));
     }
     return 30;
   }
