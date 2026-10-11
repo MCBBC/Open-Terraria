@@ -15,10 +15,27 @@ import type { SM2Pass, SM2Uniforms } from '../fx/SM2Effect';
 import { sat } from '../fx/sm2Runtime';
 
 // ---------------- ABI 常量(与 sm2.as.ts / README 对齐) ----------------
-const ABI_VERSION = 1;
+// ★v2(2026-10-11 任务#20):ABI 2=全 pass 化——s1/s2 纹理槽(sm2UploadTex)+
+// 运行期槽模式(sm2RunImage2 modes)+s0 t0Rect+宿主 Math 导入(逐位一致面)。
+const ABI_VERSION = 2;
 const TOK_BYTES = 64 * 1024;        // u32 token 上传暂存(最大 pass=ArmorGel 332 token,余量×48)
 const TEX_BYTES = 1024 * 1024;      // 源贴图容量(覆盖 ≤512²)
 const OUT_BYTES = 1024 * 1024;      // 产物容量
+
+/** ★v2 采样槽模式编码(runModes bit2-3=s1,bit4-5=s2;与 as.ts sampleSlotN 同源) */
+export const enum SM2TexMode {
+  BILINEAR_CLAMP = 0,       // s0 同式(双线性钳)
+  WRAPUV_BILINEAR_CLAMP = 1, // vanillaDyes noise 闭包:UV 先 wrap 再钳边双线性
+  WRAPUV_NEAREST = 2,       // queenSlime mkSampler:wrapUV+|0 截断最近邻
+  BILINEAR_WRAP = 3,        // HallowBoss ramp 闭包:mod 回绕双线性(sampleImageInto wrap=true)
+}
+/** ★v2 采样器描述符(JS 闭包的 wasm 可复刻面;describeSampler 登记,WeakMap 弱持) */
+export interface SM2TexDesc {
+  data: Uint8ClampedArray;  // 像素源(与闭包读的同一 buffer;每调用全量上传=无持久面)
+  w: number;
+  h: number;
+  mode: SM2TexMode;
+}
 
 interface Sm2Exports {
   memory: WebAssembly.Memory;
@@ -32,6 +49,14 @@ interface Sm2Exports {
   sm2UploadProgram(tokLen: number, modes: number): number;
   sm2RunImage(prog: number, w: number, h: number,
     v0x: number, v0y: number, v0z: number, v0a: number): number;
+  // ---- v2 ----
+  sm2UploadTex(slot: number, byteLen: number, w: number, h: number): number;
+  sm2Tex1Buf(): number;
+  sm2Tex2Buf(): number;
+  sm2ClearTex(slot: number): void;
+  sm2RunImage2(prog: number, w: number, h: number,
+    v0x: number, v0y: number, v0z: number, modes: number,
+    sx: number, sy: number, sheetW: number, sheetH: number): number;
 }
 
 // ---------------- 加载状态(②约定:fail-closed,任何失败=永久 JS 回退) ----------------
@@ -43,6 +68,9 @@ let cView: Float64Array | null = null;      // 256 f64 常量库(setupConstants 
 let tokView: Uint32Array | null = null;     // token 上传暂存
 let texView: Uint8Array | null = null;      // 源贴图 RGBA
 let outView: Uint8Array | null = null;      // 产物 RGBA
+let tex1View: Uint8Array | null = null;     // ★v2 s1/s2 槽视图(uploadTex 增配后重建)
+let tex2View: Uint8Array | null = null;
+let tex1CapB = 0, tex2CapB = 0;
 let texCap = 0, outCap = 0;
 
 /** 测试/探针计数面:runs=WASM 产物成功数,refusals=能力面拒(形态不支持),
@@ -74,6 +102,8 @@ export function __resetSm2WasmForTest(): void {
   loadPromise = null;
   ex = null;
   cView = tokView = texView = outView = null;
+  tex1View = tex2View = null;
+  tex1CapB = tex2CapB = 0;
 }
 
 /** 同步就绪检查(调用点模式 ③ 的「wasm可用」半边;未就绪=JS 原路径) */
@@ -113,17 +143,15 @@ export function ensureSm2Wasm(): Promise<boolean> {
       if (typeof WebAssembly !== 'object') throw new Error('no WebAssembly');
       const bytes = await loadBytes();
       if (!bytes) throw new Error('no bytes');
-      // 零 import 模块(构建脚本自检背书)→ 空导入对象任意环境可实例化
-      const res = await (WebAssembly.instantiate(bytes, {}) as unknown as
+      // ★v2:Math 白名单 import(超越函数走宿主 V8=与 JS 链逐位同源;构建脚本自检背书)
+      //   其余环境(node/浏览器)globalThis.Math 同一 V8 实现,逐位一致性跨域成立。
+      const imports = { Math: globalThis.Math } as unknown as WebAssembly.Imports;
+      const res = await (WebAssembly.instantiate(bytes, imports) as unknown as
         Promise<WebAssembly.WebAssemblyInstantiatedSource>);
       e = res.instance.exports as unknown as Sm2Exports;
       if (e.sm2Version() !== ABI_VERSION) throw new Error('ABI mismatch');
       if (e.sm2Init(TOK_BYTES, TEX_BYTES, OUT_BYTES) !== 1) throw new Error('init fail');
-      const mem = e.memory;
-      cView = new Float64Array(mem.buffer, e.sm2ConstBuf(), 256);
-      tokView = new Uint32Array(mem.buffer, e.sm2TokenBuf(), TOK_BYTES / 4);
-      texView = new Uint8Array(mem.buffer, e.sm2TexBuf(), TEX_BYTES);
-      outView = new Uint8Array(mem.buffer, e.sm2OutBuf(), OUT_BYTES);
+      rebuildViews(e);
       texCap = TEX_BYTES; outCap = OUT_BYTES;
       ex = e;
       loadState = 'ready';
@@ -136,6 +164,32 @@ export function ensureSm2Wasm(): Promise<boolean> {
     }
   })();
   return loadPromise;
+}
+
+// ---------------- ★v2 视图重建/槽上传 ----------------
+/** 全视图重建(uploadTex 增配=heap.alloc 可能 memory.grow,旧 ArrayBuffer 全 detach)。 */
+function rebuildViews(e: Sm2Exports): void {
+  const mem = e.memory;
+  cView = new Float64Array(mem.buffer, e.sm2ConstBuf(), 256);
+  tokView = new Uint32Array(mem.buffer, e.sm2TokenBuf(), TOK_BYTES / 4);
+  texView = new Uint8Array(mem.buffer, e.sm2TexBuf(), TEX_BYTES);
+  outView = new Uint8Array(mem.buffer, e.sm2OutBuf(), OUT_BYTES);
+  tex1View = tex1CapB > 0 ? new Uint8Array(mem.buffer, e.sm2Tex1Buf(), tex1CapB) : null;
+  tex2View = tex2CapB > 0 ? new Uint8Array(mem.buffer, e.sm2Tex2Buf(), tex2CapB) : null;
+}
+
+/** ★v2 槽上传(全量重传语义=JS 闭包直读同一 buffer 的 wasm 等价;返回 false=拒)。 */
+function uploadSlot(slot: 1 | 2, d: SM2TexDesc): boolean {
+  const px4 = d.w * d.h * 4;
+  if (px4 <= 0 || px4 > d.data.length) return false;
+  const ptr = ex!.sm2UploadTex(slot, px4, d.w, d.h);
+  if (!ptr) return false;
+  const capChanged = slot === 1 ? px4 > tex1CapB : px4 > tex2CapB;
+  if (slot === 1) tex1CapB = Math.max(tex1CapB, px4); else tex2CapB = Math.max(tex2CapB, px4);
+  if (capChanged) rebuildViews(ex!);   // grow=旧视图 detach,全部重建
+  const v = slot === 1 ? tex1View! : tex2View!;
+  v.set(d.data.subarray(0, px4));
+  return true;
 }
 
 // ---------------- 程序上传缓存(pass 单例;句柄 1-based) ----------------
@@ -180,6 +234,66 @@ export function wasmRunPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
     // v0:缺省恒白 / v0Rgb 钳制(SM2Effect.ts:534 同式 sat)
     const rc = ex!.sm2RunImage(handle, w, h,
       v0Rgb ? sat(v0Rgb[0]) : 1, v0Rgb ? sat(v0Rgb[1]) : 1, v0Rgb ? sat(v0Rgb[2]) : 1, 1);
+    if (rc !== 1) { __sm2WasmStats.refusals++; return false; }
+    data.set(outView!.subarray(0, px4));
+    __sm2WasmStats.runs++;
+    return true;
+  } catch {
+    return false;                    // 任何异常 → JS 原链(数据可能未动;调用方整图重跑)
+  }
+}
+
+/** ★v2 全形态入口(2026-10-11 任务#20):s1/s2 描述符槽+t0Rect+v0Rgb——runPassOnImageData
+ *  的 wasm 等价路由面。descs=[s1,s2](null=槽空缺→(0,0,0,1) 兜底同 JS undefined 槽;
+ *  未登记闭包在路由侧已拦截=不会以半描述符到达)。返回 false=拒/不可用 → 调用方
+ *  落回 JS 原链(fail-closed 同上)。槽占位清除:desc null 时 sm2ClearTex 防上次残影。 */
+export function wasmRunPassOnImageData2(pass: SM2Pass, data: Uint8ClampedArray,
+  w: number, h: number, uniforms: SM2Uniforms,
+  descs: [SM2TexDesc | null, SM2TexDesc | null] | null,
+  t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number },
+  v0Rgb?: readonly [number, number, number]): boolean {
+  if (!sm2WasmReady()) return false;
+  try {
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) return false;
+    const px4 = w * h * 4;
+    if (px4 > texCap || px4 > outCap) return false;
+    if (data.length < px4) return false;
+    // uniform 预处理与 runPassOnImageData 逐字同式(SM2Effect.ts:531-538)
+    const u = { ...uniforms };
+    if (t0Rect) {
+      u.uImageSize0 = [t0Rect.sheetW, t0Rect.sheetH];
+      u.uSourceRect = [t0Rect.sx, t0Rect.sy, w, h];
+    } else {
+      if (!u.uImageSize0[0] && !u.uImageSize0[1]) u.uImageSize0 = [w, h];
+      if (!u.uSourceRect[2] && !u.uSourceRect[3]) u.uSourceRect = [0, 0, w, h];
+    }
+    let handle = progHandles.get(pass) ?? 0;
+    if (!handle) {
+      handle = uploadProgram(pass);
+      if (!handle) { __sm2WasmStats.refusals++; return false; }
+      progHandles.set(pass, handle);
+    }
+    // 槽上传/占位清除+modes 位域(bit2-3=s1 模式,bit4-5=s2 模式;as.ts sampleSlotN 同源)
+    let modes = 0;
+    if (descs) {
+      if (descs[0]) {
+        if (!uploadSlot(1, descs[0])) { __sm2WasmStats.refusals++; return false; }
+        modes |= (descs[0].mode & 3) << 2;
+      } else ex!.sm2ClearTex(1);
+      if (descs[1]) {
+        if (!uploadSlot(2, descs[1])) { __sm2WasmStats.refusals++; return false; }
+        modes |= (descs[1].mode & 3) << 4;
+      } else ex!.sm2ClearTex(2);
+    } else {
+      ex!.sm2ClearTex(1); ex!.sm2ClearTex(2);
+    }
+    // 常量库(JS 装配=setupConstants 含 preshader,常量=输入契约)+ 源贴图(s0 副本语义)
+    cView!.set(pass.setupConstants(u));
+    texView!.set(data.subarray(0, px4));
+    const rc = ex!.sm2RunImage2(handle, w, h,
+      v0Rgb ? sat(v0Rgb[0]) : 1, v0Rgb ? sat(v0Rgb[1]) : 1, v0Rgb ? sat(v0Rgb[2]) : 1, modes,
+      t0Rect ? t0Rect.sx : 0, t0Rect ? t0Rect.sy : 0,
+      t0Rect ? t0Rect.sheetW : 0, t0Rect ? t0Rect.sheetH : 0);
     if (rc !== 1) { __sm2WasmStats.refusals++; return false; }
     data.set(outView!.subarray(0, px4));
     __sm2WasmStats.runs++;

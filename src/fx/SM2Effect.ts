@@ -38,6 +38,7 @@
 import fxJson from '../data/fxPixelShader.json';
 import { sat, type Sm2PxGenFn } from './sm2Runtime';
 import { GEN_MAP } from './gen/genIndex.gen';
+import { sm2WasmEnabled, sm2WasmReady, ensureSm2Wasm, wasmRunPassOnImageData2, type SM2TexDesc } from '../wasm/sm2Wasm';
 
 /** PR#3 引擎开关：codegen 直线代码优先，VM 保留为差分门 oracle 与回退路径。
  *  任何 pass 无生成产物（genIndex 缺项/生成器 refuse）自动落回 VM。
@@ -579,6 +580,34 @@ export function getPass(name: string): SM2Pass | null {
 
 export const passNames = (): string[] => [...PASS_MAP.keys()];
 
+// ---- ★SM2 wasm 全 pass 路由（2026-10-11 任务#20「能 wasm 的都 wasm」）----
+// 单 choke point=runPassOnImageData 头部:wasm 可用∧旗开∧全部 extraSamplers 可描述
+// → 整图下沉 wasm（fail-closed:false=回 JS 原链,任何一半描述不了=JS）。s0 恒 wasm
+// 内建双线性钳(±t0Rect 逆变换);s1/s2 走 describeSampler 登记的描述符——JS 闭包的
+// 微语义（wrapUV/最近邻/mod 回绕）必须在 SM2TexMode 四规范形之一,否则不登记=该
+// 调用站 JS（任意闭包无法离登记面担保逐位）。
+// 循环安全:sm2Wasm 仅 type import 本模块(SM2Pass/SM2Uniforms),运行时零回环。
+const samplerTexDescs = new WeakMap<object, SM2TexDesc>();
+/** 登记 JS 采样闭包的 wasm 等价描述符（同一 buffer 引用,零拷贝登记;每次调用全量
+ *  上传=wasm 侧无持久内容面）。未登记闭包=该采样器不可 wasm 化（JS 原链兜底）。 */
+export function describeSampler(sampler: SM2SamplerOut, desc: SM2TexDesc): void {
+  samplerTexDescs.set(sampler, desc);
+}
+/** 路由解析:extraSamplers → [s1,s2] 描述符(null=槽空缺,JS undefined 同义);
+ *  任一非空闭包未登记 → null=整调用回 JS。 */
+function resolveWasmDescs(extras: Array<SM2Sampler | SM2SamplerOut | undefined>): [SM2TexDesc | null, SM2TexDesc | null] | null {
+  if (extras.length === 0) return null;
+  const out: [SM2TexDesc | null, SM2TexDesc | null] = [null, null];
+  for (let i = 0; i < Math.min(2, extras.length); i++) {
+    const s = extras[i];
+    if (s === undefined) continue;                      // 显式空缺=槽兜底(JS 同)
+    const d = samplerTexDescs.get(s as SM2SamplerOut);
+    if (!d) return null;                                // 未登记闭包=JS
+    out[i] = d;
+  }
+  return out;
+}
+
 /**
  * 对 ImageData 整体执行 pass（染料烘焙主入口）。
  * uImageSize0/uSourceRect 未设置时按整图 (w,h)/(0,0,w,h) 补齐。
@@ -592,6 +621,19 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   extraSamplers: Array<SM2Sampler | SM2SamplerOut | undefined> = [],
   t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number },
   v0Rgb?: readonly [number, number, number]): void {
+  // ★SM2 wasm 全 pass 路由（任务#20）:wasm 可用∧全部采样器可描述 → 整图下沉
+  //  wasm（逐位一致由宿主 Math 导入+1:1 移植闸保;wasmRunPassOnImageData2 内部
+  //  fail-closed:false=落回下方 JS 原链）。s0-only 调用（extras 空）恒可路由。
+  //  惰性引导:未就绪时 fire-and-forget 加载(首次调用走 JS,就绪后路由生效)——
+  //  生产链原 ensure 点仅 ForceField 构造,路由化后 SM2 首调即引导。
+  if (sm2WasmEnabled()) {
+    if (sm2WasmReady()) {
+      const descs = resolveWasmDescs(extraSamplers);
+      if (descs !== null && wasmRunPassOnImageData2(pass, data, w, h, uniforms, descs, t0Rect, v0Rgb)) return;
+    } else {
+      void ensureSm2Wasm();
+    }
+  }
   const u = { ...uniforms };
   if (t0Rect) {
     // t0Rect 在场时三值必须同源（表尺寸/子矩形/UV 映射），强制对齐防调用方漂移

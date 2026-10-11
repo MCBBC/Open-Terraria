@@ -3,12 +3,12 @@
   "asc": "Version 0.28.20",
   "modules": {
     "sm2": {
-      "srcHash": "8a3543569f23b39b77d12437ee27386f4c9d17ba2e9a0bffebf1f1f2d644e1a0",
-      "abi": 1,
+      "srcHash": "23c56e94831a2b7ff21c89ea7a1c5c50bcd570b805c445a9b68f93e42c29a107",
+      "abi": 2,
       "src": "src/wasm/sm2.as.ts",
-      "builtAt": "2026-10-03T11:01:36.512Z",
-      "wasmSha256": "30577c1bddf02b9131f7d4fc8c7a996e21fdc27d1808349676654571fa63146f",
-      "wasmBytes": 30866
+      "builtAt": "2026-10-11T10:43:50.036Z",
+      "wasmSha256": "0b01cffe94014c33243813866bb37b82bb3aa4a535d46187063f778dbcc84732",
+      "wasmBytes": 19586
     },
     "light": {
       "srcHash": "5db83bbe4385fa723bf0dfc33384ae3bdcb9d724afba6e894d3216e0a1ecfa4c",

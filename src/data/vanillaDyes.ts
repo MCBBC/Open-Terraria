@@ -8,7 +8,8 @@
 // 梯度对齐 ReflectiveArmorShaderData.Apply。
 import dyeJson from './vanilla-dyes.json';
 import fxShaderJson from './fxPixelShader.json';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2Pass, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, describeSampler, getPass, runPassOnImageData, sampleImageInto, type SM2Pass, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { SM2TexMode } from '../wasm/sm2Wasm';
 
 export interface DyeEntry {
   tech: string;
@@ -86,7 +87,11 @@ function noiseSampler(): SM2SamplerOut {
         cx.drawImage(img, 0, 0);
         const d = cx.getImageData(0, 0, cv.width, cv.height).data;
         const w = cv.width, h = cv.height;
-        noiseSam = (u, v, o4) => { sampleImageInto(d, w, h, u - Math.floor(u), v - Math.floor(v), false, o4); };
+        // ★SM2 wasm 路由登记(任务#20):wrapUV+双线性钳规范形——创建即登记,wasm 链
+        //   1:1 复刻本式;JS 链照旧零改动。
+        const f = (u: number, v: number, o4: Float64Array): void => { sampleImageInto(d, w, h, u - Math.floor(u), v - Math.floor(v), false, o4); };
+        describeSampler(f, { data: d, w, h, mode: SM2TexMode.WRAPUV_BILINEAR_CLAMP });
+        noiseSam = f;
       } catch { /* 解码失败：维持中性灰 */ }
     };
     img.onerror = () => {

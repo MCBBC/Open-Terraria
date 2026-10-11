@@ -1156,7 +1156,8 @@ import {
   resolveFaceLayers, faceLayerSplitPlan, FACE_HEAD_OFFSET_IDS, FACE_HEAD_HELMET_OFFSET,
   accCompositeArmSrcRect,
 } from '../data/vanillaAccDrawslots';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, sm2PoolEnabled, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, describeSampler, getPass, runPassOnImageData, sampleImageInto, sm2PoolEnabled, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { SM2TexMode } from '../wasm/sm2Wasm';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustPmCacheEvictGen, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
@@ -14139,12 +14140,16 @@ export class Renderer {
           px = { w: nc.width, h: nc.height, data: ncx.getImageData(0, 0, nc.width, nc.height).data };
           this.qsNoisePix[file] = px;
         }
-        return (uu, vv, o4) => {
+        // ★SM2 wasm 路由登记(任务#20):wrapUV+最近邻规范形——创建即登记,wasm 链
+        //   1:1 复刻本式;JS 链照旧读同 buffer 零改动。
+        const f = (uu: number, vv: number, o4: Float64Array): void => {
           const u2 = uu - Math.floor(uu), v2 = vv - Math.floor(vv);
           const x = Math.min(px.w - 1, (u2 * px.w) | 0), y = Math.min(px.h - 1, (v2 * px.h) | 0);
           const o = (y * px.w + x) * 4;
           o4[0] = px.data[o] / 255; o4[1] = px.data[o + 1] / 255; o4[2] = px.data[o + 2] / 255; o4[3] = px.data[o + 3] / 255;
         };
+        describeSampler(f, { data: px.data, w: px.w, h: px.h, mode: SM2TexMode.WRAPUV_NEAREST });
+        return f;
       };
       const s1 = mkSampler('Extra_180'), s2 = mkSampler('Extra_179');
       const u = defaultUniforms();
@@ -17992,7 +17997,10 @@ export class Renderer {
     }
     const r = this.hallowRampData;
     // PR#1：出参版 wrap 采样（Extra_156 ramp；LinearWrap=MiscShaderData.Apply 默认）
-    return (u, v, o4) => { sampleImageInto(r!.data, r!.w, r!.h, u, v, true, o4); };
+    // ★SM2 wasm 路由登记(任务#20):mod 回绕双线性规范形(BILINEAR_WRAP)
+    const f = (u: number, v: number, o4: Float64Array): void => { sampleImageInto(r!.data, r!.w, r!.h, u, v, true, o4); };
+    describeSampler(f, { data: r!.data, w: r!.w, h: r!.h, mode: SM2TexMode.BILINEAR_WRAP });
+    return f;
   }
 
   /** 44 彩虹翼烘焙缓存（PlayerRainbowWingsTextureContent.cs 1:1）：Extra_171 全图
