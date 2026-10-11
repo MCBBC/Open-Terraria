@@ -290,6 +290,12 @@ export function applyModNpcBuff(enemy: object, buffType: number, seconds: number
   m.set(buffType, Math.max(m.get(buffType) ?? 0, seconds));   // max 合并=原版 AddBuff 语义
 }
 
+/** ★619:mod debuff 读取面(abaddon 散播拷贝——源敌 mod debuff 逐条转嫁;
+ *  返回副本 Map,写侧仍走 applyModNpcBuff) */
+export function readModNpcBuffs(enemy: object): Map<number, number> {
+  return new Map(npcBuffStore.get(enemy) ?? []);
+}
+
 const modBuffNpcTicks = new Map<number, (enemy: Enemy, game: Game) => void>();
 
 export function registerModBuffNpcTick(buffType: number, fn: (enemy: Enemy, game: Game) => void): void {

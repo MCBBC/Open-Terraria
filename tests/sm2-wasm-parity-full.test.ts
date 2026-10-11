@@ -158,4 +158,25 @@ describe('SM2 wasm 全 pass 判谳(go/no-go)', () => {
       console.log(`[wasm-parity] ${c.name}: 逐位 ✓`);
     }
   });
+
+  it('v0Rgb×多采样器组合逐位(v0 中段消费族受累面)', () => {
+    expect(wasmOk).toBe(true);
+    const w = 40, h = 36;
+    // ArmorAcid=v0 中段消费受累名单成员(fx-sm2-v0-commute 定谳族),s1=noise
+    const pass = getPass('ArmorAcid')!;
+    const n = noiseWrapBilinear(31);
+    describeSampler(n.s, n.desc);
+    const u = defaultUniforms();
+    u.uTime = 2.71;
+    const v0: readonly [number, number, number] = [0.25, 0.62, 0.9];
+    __setSm2WasmFlagForTest(false);
+    const dJs = seededInput(w, h, 0x5eed);
+    runPassOnImageData(pass, dJs, w, h, u, [n.s], undefined, v0);
+    __setSm2WasmFlagForTest(true);
+    const dWasm = seededInput(w, h, 0x5eed);
+    runPassOnImageData(pass, dWasm, w, h, u, [n.s], undefined, v0);
+    const maxd = bytesEqual(dJs, dWasm);
+    expect(maxd, `v0Rgb 组合 maxd=${maxd}`).toBe(0);
+    console.log('[wasm-parity] ArmorAcid v0Rgb+s1: 逐位 ✓');
+  });
 });

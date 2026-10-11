@@ -22,7 +22,7 @@ import {
   registerModPlayerHurt,
   registerModDamageGate,
   registerModDashType,
-  registerModKeybindFace, registerModParryGate, registerModParrySuccess, modKeybindDown,
+  registerModKeybindFace, registerModParryGate, registerModParrySuccess, modKeybindDown, readModNpcBuffs,
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
@@ -147,6 +147,8 @@ export interface ModContext {
   parryGate(fn: (player: unknown) => boolean): void;
   /** ★611:parry 成功钩(窗口内接触 parry 受理后派发;反冲弹族消费) */
   parrySuccess(fn: (player: unknown, game: unknown) => void): void;
+  /** ★619:mod debuff 读取面(abaddon 散播拷贝——源敌 mod debuff 逐条转嫁) */
+  readModNpcBuffs(enemy: unknown): Map<number, number>;
   /** ★三百三十九刀:手持效果钩(手持该物品每 tick 调;C# HoldItem 同位) */
   holdItem(key: string, fn: (player: unknown, game: unknown) => void): void;
   /** ★三百四十四刀:给玩家施加本 mod buff(npcAi/holdItem 闭包内用;
@@ -342,6 +344,9 @@ export function createModContext(
     },
     parrySuccess(fn) {
       registerModParrySuccess(modId, fn as Parameters<typeof registerModParrySuccess>[1]);
+    },
+    readModNpcBuffs(enemy: unknown) {
+      return readModNpcBuffs(enemy as object);
     },
     playerThorns(fn) {
       registerModPlayerThorns(modId, fn as unknown as Parameters<typeof registerModPlayerThorns>[1]);
