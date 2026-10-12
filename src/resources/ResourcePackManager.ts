@@ -70,6 +70,9 @@ export class ResourcePackManager {
 
   attachRuntime(rt: RemasterRuntime): void { this.runtime = rt; }
 
+  /** 当前已注入的图像键台账(applyImagesMap 写;差量回退基准) */
+  private appliedImageKeys = new Set<string>();
+
   /** 类别开关求值(缺省=开;cats 只存显式覆写) */
   private catOn(row: PackRow, c: PackCategoryId): boolean {
     return row.categories?.[c] ?? true;
@@ -261,6 +264,10 @@ export class ResourcePackManager {
       }
       for (const [k, v] of pack.fonts) if (!fonts.has(k) && on('ui')) fonts.set(k, v);
     }
+    // ★差量回退(类别开关/禁用共用):上一轮注入而本轮不再合并的键 → 清映射+回原版
+    //   (重放只加不减的旧病=关类别后 waifu 位图仍驻 vimages,用户视角"关了没反应")
+    const removed = [...this.appliedImageKeys].filter((k) => !merged.has(k));
+    if (removed.length) await this.restoreFiles(removed);
     if (merged.size) await this.applyImagesMap(merged);
     else clearPackPortraitUrls();   // 零包=清包头像(回原版)
     for (const [fam, bytes] of fonts) void registerPackFont(fam, bytes);
@@ -270,6 +277,7 @@ export class ResourcePackManager {
 
   private async applyImagesMap(images: Map<string, Uint8Array>): Promise<void> {
     if (!this.runtime || images.size === 0) return;
+    this.appliedImageKeys = new Set(images.keys());   // 台账:类别/禁用差量回退用
     const sheets = new Map<string, Blob>();
     for (const [file, bytes] of images) sheets.set(file, new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
     // ★城镇NPC本体别名(2026-10-12 用户实报"只有住房旗帜换了"):城镇 NPC 本体贴图

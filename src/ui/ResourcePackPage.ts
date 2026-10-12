@@ -280,15 +280,10 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
   btns.append(mkBtn('✕', Lang.text('Mods.SandboxWorld.ResourcePacks.Remove'), async () => { await mgr.remove(row.id); rerender(); }, 'del'));
 
   // ★类别开关(仅启用行;仅列该包实际覆盖的类别)
+  //  ⚙ = 开合切换:面板按需构建——初版无条件挂载(默认开)且齿轮只删不建(关后
+  //  永打不开,用户实报两症)。
   if (row.enabled) {
-    const gear = mkBtn('⚙', Lang.text('Mods.SandboxWorld.ResourcePacks.CatsTitle'), () => {
-      const existing = el.parentElement?.querySelector(`.sw-rp-cats[data-rp-id="${row.id}"]`);
-      existing?.remove();   // 已展开=收起
-    });
-    btns.append(gear);
-    // 类别面板(展开在行下方;按类别实际覆盖过滤)
-    const cats = mgr.packCategoriesOf(row.id);
-    if (cats.length > 0) {
+    const buildCatsPanel = (): HTMLElement => {
       const panel = document.createElement('div');
       panel.className = 'sw-rp-cats';
       panel.dataset.rpId = row.id;
@@ -297,7 +292,7 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
       head.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.CatsTitle');
       panel.append(head);
       for (const c of PACK_CATEGORIES) {
-        if (!cats.includes(c.id)) continue;
+        if (!mgr.packCategoriesOf(row.id).includes(c.id)) continue;
         const lb = document.createElement('label');
         lb.className = 'sw-rp-cat';
         const cb = document.createElement('input');
@@ -311,8 +306,14 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
         lb.append(cb, document.createTextNode(Lang.text(c.labelKey)));
         panel.append(lb);
       }
-      el.append(panel);
-    }
+      return panel;
+    };
+    const gear = mkBtn('⚙', Lang.text('Mods.SandboxWorld.ResourcePacks.CatsTitle'), () => {
+      const existing = el.querySelector(':scope > .sw-rp-cats');
+      if (existing) { existing.remove(); return; }        // 已展开=收起
+      el.append(buildCatsPanel());                        // 收起=按需重建(读最新类别态)
+    });
+    btns.append(gear);
   }
 
   el.append(icon, mid, btns);

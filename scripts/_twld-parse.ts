@@ -43,7 +43,11 @@ function readPayload(id: number, r: BEReader): unknown {
     case 9: {                               // list
       const eid = r.u8(), n = r.i32();
       const out: unknown[] = [];
-      for (let i = 0; i < n; i++) out.push(readPayload(eid, r));
+      for (let i = 0; i < n; i++) {
+        // ★compound 列表元素=裸 payload(无 {id,name} 头)——TagIO.ReadList 直调
+        //  PayloadHandlers[10].Read;其余类型同式(readPayload 覆盖)
+        out.push(readPayload(eid, r));
+      }
       return out;
     }
     case 10: {                              // compound
@@ -126,13 +130,17 @@ if (process.argv[2]) {
     for (const s of tc) console.log(`  [tiles.${s.name}] payload=${s.t}${s.t === 7 ? ` len=${(s.v as Uint8Array).length}` : s.t === 9 ? ` len=${(s.v as unknown[]).length}` : ''}`);
     const tileMap = tc.find((t) => t.name === 'tileMap');
     if (tileMap) {
-      const list = tileMap.v as Tag[];
-      console.log(`[twld] tileMap ${list.length} 条;前 5 条:`);
-      for (const e of list.slice(0, 5)) {
-        const f = e.v as Tag[];
-        const get = (nm: string) => f.find((x) => x.name === nm)?.v;
-        console.log(`   value=${get('value')} mod=${get('mod')} name=${get('name')} framed=${get('framed')}`);
-      }
+      const list = tileMap.v as unknown[];
+      const get = (e: unknown, nm: string) => ((Array.isArray(e) ? e : (e as Tag).v) as Tag[]).find((x) => x.name === nm)?.v;
+      const vals = list.map((e) => Number(get(e, 'value') ?? 0));
+      console.log(`[twld] tileMap ${list.length} 条;value min=${Math.min(...vals)} max=${Math.max(...vals)};991 在表=${vals.includes(991)}`);
+      const mods: Record<string, number> = {};
+      for (const e of list) { const m = String(get(e, 'mod') ?? ''); mods[m] = (mods[m] ?? 0) + 1; }
+      console.log(`[twld] mods 分布:`, JSON.stringify(mods));
+      console.log(`[twld] 前 5 条:`);
+      for (const e of list.slice(0, 5)) console.log(`   value=${get(e, 'value')} mod=${get(e, 'mod')} name=${get(e, 'name')} framed=${get(e, 'framed')}`);
+      console.log(`[twld] 末 5 条:`);
+      for (const e of list.slice(-5)) console.log(`   value=${get(e, 'value')} mod=${get(e, 'mod')} name=${get(e, 'name')} framed=${get(e, 'framed')}`);
     }
   }
 }

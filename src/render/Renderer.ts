@@ -18633,11 +18633,17 @@ export class Renderer {
    *  条目自有画布 = R3-F4 bodyAccDyeBake / eyebrellaDyeCache 免冲突形态 +
    *  WeatherRenderer.bakeMemoized F1 判例「条目对外不可变」:条目身份=键,内容仅
    *  本键 rebake（LRU 逐出后）才变 → shim 静态纹理缓存语义正确。代价=每 miss
-   *  一次 createElement（桶 200ms,活跃键 ~5-15/秒,翼切片 ≤41KB,GC 托管;共享槽
-   *  复用被否:同 texId 重投会撞 shim 陈旧纹理键——量级可忽略,不设画布池,
-   *  债登记 wing-dye-canvas-churn）。LRU 容量闸/修剪沿用。 */
+   *  一次 createElement（桶 200ms）——★债 wing-dye-canvas-churn 清偿（2026-10-12
+   *  canvas哨兵实报 69/s 定谳刀）：三消费站（drawPlayer 翼 :17659/气球 :18323/
+   *  盾 :18528）全是【纯 2D ctx.drawImage】（同步读现像素,无 GL shim 身份键）——
+   *  旧「共享槽复用被否:同 texId 重投撞 shim 陈旧纹理键」对这三站不成立（若
+   *  未来消费面接 GL shim,复用画布必须 bumpTexEpoch,er: 键机制就位）。淘汰画布
+   *  按尺寸入池 wingBakeFree 复用=杀分配不杀重烘（tintTex 池同判例）;bake 频率
+   *  (=桶 200ms 语义)与视觉零改动。LRU 容量闸/修剪沿用。 */
   private wingBakeCache = new Map<string, HTMLCanvasElement>();
   private wingBakeCachePruneAt = 0;
+  /** ★wing-dye-canvas-churn 清偿池：淘汰画布按尺寸键回收(cap 24/尺寸) */
+  private wingBakeFree = new Map<string, HTMLCanvasElement[]>();
   private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
     dye: DyeApply | null, tint: [number, number, number] | null,
     v0Light?: [number, number, number]): HTMLCanvasElement | null {
@@ -18650,12 +18656,33 @@ export class Renderer {
     if (performance.now() - this.wingBakeCachePruneAt > 2000) {
       this.wingBakeCachePruneAt = performance.now();
       while (this.wingBakeCache.size >= 48) {
-        this.wingBakeCache.delete(this.wingBakeCache.keys().next().value as string);
+        const k0 = this.wingBakeCache.keys().next().value as string;
+        const ev = this.wingBakeCache.get(k0);
+        this.wingBakeCache.delete(k0);
+        // ★池化：淘汰画布按尺寸入池（cap 24/尺寸）供 miss 复用（消费站全 2D drawImage,
+        //  复用安全判据见 wingBakeCache 类注债清偿段）
+        if (ev && ev.width > 0) {
+          const ek = `${ev.width}x${ev.height}`;
+          let ef = this.wingBakeFree.get(ek);
+          if (!ef) { ef = []; this.wingBakeFree.set(ek, ef); }
+          if (ef.length < 24) ef.push(ev);
+        }
       }
     }
-    // ★翼案修复:烘进条目自有画布（见类注 (a)/(b) 两面病灶）——零共享槽触碰
-    const sc = document.createElement('canvas');
-    sc.width = sw; sc.height = sh;
+    // ★翼案修复:烘进条目自有画布（见类注 (a)/(b) 两面病灶）——零共享槽触碰。
+    //  ★池化：同尺寸淘汰画布优先（createElement 换池取=稳态出生率→0）
+    let sc: HTMLCanvasElement;
+    {
+      const fk = `${sw}x${sh}`;
+      const fl = this.wingBakeFree.get(fk);
+      if (fl && fl.length) {
+        sc = fl.pop()!;
+        if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+      } else {
+        sc = document.createElement('canvas');
+        sc.width = sw; sc.height = sh;
+      }
+    }
     const sctx = sc.getContext('2d', { willReadFrequently: true })!;
     sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
     const id = sctx.getImageData(0, 0, sw, sh);
