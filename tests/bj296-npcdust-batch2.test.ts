@@ -14,10 +14,13 @@
 //   D. 变异自证——M1 摘分支单掷（恒 t 臂）=636 死亡 d69 消失；M2 摘 pre 短路=
 //      262 低血拍耗掷。原子+逐字节还原（禁 git checkout）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -469,7 +472,7 @@ describe('BJ296 C. 边界', () => {
 });
 
 // ===================== D. 变异自证（原子+逐字节还原） =====================
-describe('BJ296 D. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ296_MUT)('BJ296 D. 变异自证', () => {   // ★残留普查波补 dam（全族同款习语）
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
   // ★子进程模式（era-guard ④ 同款）：变异写盘 → 子 vitest 只跑 B 面（-t 过滤,D 面不注册执行
   //   = 无递归）→ 判别面红 = 消费行为锁对变异有捕获力;finally 逐字节还原（禁 git checkout）。
@@ -483,33 +486,28 @@ describe('BJ296 D. 变异自证', () => {
   beforeAll(() => { lockConsumerMutation(); });
   afterAll(() => { unlockConsumerMutation(); });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （按目标文件互斥/panic-safe 还原/残留自检+自愈）;域锁由 beforeAll 持有
+  //  （闸面信号源）,文件锁在守卫内层,序恒定。
   it('M1 摘分支单掷（roll 恒真=恒 t 臂）→ 恒 t 臂两臂齐现面红（B 面 636 hit 必炸）', () => {
-    const src = readFileSync(CONSUMER, 'utf8');
-    const TRIGGER = "      const roll = Math.floor(Math.random() * el.roll.k);\n      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;";
-    expect(src).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, src.replace(TRIGGER, '      const pass = true; // ★变异:摘单掷'));
-      const r = spawnVitest('BJ296 B. 批2 消费行为');
-      expect(r.status).not.toBe(0);                       // ★变异证红:两臂互斥+掷序锁捕获
-      expect(r.stdout).toContain('636 hit');              // 指名判别组（恒 t 臂 → 两臂齐现断言炸）
-    } finally {
-      writeFileSync(CONSUMER, src);                       // 逐字节还原（禁 git checkout）
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(src);
+    withMutation(CONSUMER,
+      "      const roll = Math.floor(Math.random() * el.roll.k);\n      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;",
+      '      const pass = true; // ★变异:摘单掷',
+      () => {
+        const r = spawnVitest('BJ296 B. 批2 消费行为');
+        expect(r.status).not.toBe(0);                       // ★变异证红:两臂互斥+掷序锁捕获
+        expect(r.stdout).toContain('636 hit');              // 指名判别组（恒 t 臂 → 两臂齐现断言炸）
+      }, { label: 'BJ296 M1' });
   });
 
   it('M2 摘 pre 短路（臂条件失效恒掷）→ 262 低血拍零耗掷锁红（B 面 262 pre 短路必炸）', () => {
-    const src = readFileSync(CONSUMER, 'utf8');
-    const TRIGGER = "      if (!prePass(el.pre, e)) {                        // 臂条件判负：走 else 臂,不耗掷（&& 短路同相）";
-    expect(src).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, src.replace(TRIGGER, '      if (false) { // ★变异:摘 pre 短路'));
-      const r = spawnVitest('BJ296 B. 批2 消费行为');
-      expect(r.status).not.toBe(0);                       // ★变异证红:零耗掷锁捕获
-      expect(r.stdout).toContain('262 pre');              // 指名判别组
-    } finally {
-      writeFileSync(CONSUMER, src);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(src);
+    withMutation(CONSUMER,
+      "      if (!prePass(el.pre, e)) {                        // 臂条件判负：走 else 臂,不耗掷（&& 短路同相）",
+      '      if (false) { // ★变异:摘 pre 短路',
+      () => {
+        const r = spawnVitest('BJ296 B. 批2 消费行为');
+        expect(r.status).not.toBe(0);                       // ★变异证红:零耗掷锁捕获
+        expect(r.stdout).toContain('262 pre');              // 指名判别组
+      }, { label: 'BJ296 M2' });
   });
 });

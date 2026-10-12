@@ -3769,7 +3769,12 @@ export class Player extends Entity {
    *  :4456 走 else 支零缩放;3821 vanilla ranged 本就不可达,表携带为数据面）。
    *  原"猛爪手套 ×2"档已废——原版猛爪手套 211 只给 meleeSpeed += 0.12 +
    *  autoReuseGlove（:14559-14562），0.12 已经 vanilla-accfx.json 走
-   *  equipStats.meleeSpeed，不应再翻倍。 */
+   *  equipStats.meleeSpeed，不应再翻倍。
+   *  ★R17-F5（2026-10-12）f64 vs f32 登记维持：本 getter 及攻速链消费站按 JS f64
+   *  直算,原版 f32（TurnAttackSpeedToUseTimeMultiplier :29260-29266——仅 csCompat
+   *  桥面 truncCSf32Mul/roundCSf32Mul 显式 f32 化）。184 态堆叠档普查零差异,
+   *  非穷尽证明（f32 舍入差可存在于未普查的中间值组合）——登记为接受债,
+   *  不逐一 f32 化;若未来出±1 ULP 级实报,先查此处再动刀。 */
   get attackSpeedMult(): number {
     let accum = 1
       + (this.equipStats.meleeSpeed ?? 0)                    // ★BJ175 桩面 ?? 防御（缺省 0）

@@ -31,12 +31,15 @@
 //      M3 提取器 tmp 变异体摘 ai3Locals 登记=85 退化为桶尾值 37（探针物证）。
 //      M1/M2 npcdust-mutation-mutex 共锁（bj296/bj304/bj327 同锁,锚含批6）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -270,7 +273,7 @@ describe('BJ479 C. 伪装态名牌门（85/341/629 族,ai0==0 隐藏/激活显�
 
 // ===================== D. 变异自证（原子+逐字节还原+sha256,共锁） =====================
 
-describe('BJ479 D. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ479_MUT)('BJ479 D. 变异自证', () => {   // ★残留普查波补 dam:内层 spawn 递归防波堤（全族同款习语;旧靠内层 pristine 检查意外兜底,守卫自愈升级后必须显式）
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
   const EXTRACTOR = join(process.cwd(), 'tools', 'extract-npcdust.mjs');
   const spawnVitest = (filter: string) => spawnSync('npx', ['vitest', 'run', 'tests/bj479-mimic-dust-nameplate.test.ts', '--no-file-parallelism', '-t', filter], {
@@ -280,40 +283,39 @@ describe('BJ479 D. 变异自证', () => {
 
   beforeAll(() => { gateConsumerMutation('SW_BJ479_MUT', CONSUMER); });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （按目标文件互斥/panic-safe 还原/残留自检+自愈）;域锁（npcdust-mutation-mutex）
+  //  保留=闸面信号源（gateConsumerMutation 靠它等在途变异窗）;域锁→文件锁序恒定。
   it('M1 摘解释器 idAi3 消费（恒缺省尘）→ 段位选尘判别红', () => {
     lockConsumerMutation();
-    const PRISTINE = readFileSync(CONSUMER, 'utf8');
-    const before = sha256(CONSUMER);
-    const TRIGGER = 'st.idAi3 != null ? (st.idAi3.m[e.ai3 ?? 0] ?? st.dust) : st.dust';
-    expect(PRISTINE).toContain(TRIGGER);
     try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, 'st.dust'));   // ★变异:恒缺省尘（纯表达式,防注释吞闭合括号=解析死伪红）
-      const r = spawnVitest('段位选尘');
-      expect(r.status).not.toBe(0);               // ★变异证红:段 2/3 尘型判别捕获
-      expect(r.stdout).toContain('段位选尘');
+      withMutation(CONSUMER,
+        'st.idAi3 != null ? (st.idAi3.m[e.ai3 ?? 0] ?? st.dust) : st.dust',
+        'st.dust',   // ★变异:恒缺省尘（纯表达式,防注释吞闭合括号=解析死伪红）
+        () => {
+          const r = spawnVitest('85 段位选尘');   // ★残留普查波:过滤器去撞名（旧「段位选尘」子串命中 M1 自身名=bj484 M3 判例同款洞,曾致内层递归自唤）
+          expect(r.status).not.toBe(0);               // ★变异证红:段 2/3 尘型判别捕获
+          expect(r.stdout).toContain('85 段位选尘');
+        }, { label: 'BJ479 M1' });
     } finally {
-      writeFileSync(CONSUMER, PRISTINE);
+      unlockConsumerMutation();
     }
-    expect(sha256(CONSUMER)).toBe(before);       // 逐字节还原
-    unlockConsumerMutation();
   });
 
   it('M2 摘受击簇 ceil（→floor）→ 簇数公式判别红', () => {
     lockConsumerMutation();
-    const PRISTINE = readFileSync(CONSUMER, 'utf8');
-    const before = sha256(CONSUMER);
-    const TRIGGER = "if (el.hitK != null) return Math.ceil((dmg / e.maxHp) * el.hitK);";
-    expect(PRISTINE).toContain(TRIGGER);
     try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, 'if (el.hitK != null) return Math.floor((dmg / e.maxHp) * el.hitK); // ★变异:ceil→floor'));
-      const r = spawnVitest('两触发面');
-      expect(r.status).not.toBe(0);               // ★变异证红:3 发 vs floor=2 判别捕获
-      expect(r.stdout).toContain('两触发面');
+      withMutation(CONSUMER,
+        'if (el.hitK != null) return Math.ceil((dmg / e.maxHp) * el.hitK);',
+        'if (el.hitK != null) return Math.floor((dmg / e.maxHp) * el.hitK); // ★变异:ceil→floor',
+        () => {
+          const r = spawnVitest('两触发面');
+          expect(r.status).not.toBe(0);               // ★变异证红:3 发 vs floor=2 判别捕获
+          expect(r.stdout).toContain('两触发面');
+        }, { label: 'BJ479 M2' });
     } finally {
-      writeFileSync(CONSUMER, PRISTINE);
+      unlockConsumerMutation();
     }
-    expect(sha256(CONSUMER)).toBe(before);
-    unlockConsumerMutation();
   });
 
   it('M3 提取器 tmp 变异体摘 ai3Locals 消费支 → 85 探针退化为桶尾值 37（provenance 物证）', () => {

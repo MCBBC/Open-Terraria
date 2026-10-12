@@ -28,7 +28,10 @@
 //   无测试文件、aura 块/绘制链无改动）=报告式收官未落刀;BJ-C9-SP 测试注「另刀
 //   处理」即本刀。③=防回潮锁（专绘支摘除→通用尾回潮→红）。
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { join } from 'node:path';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import { EntityManager } from '../src/entities/Entity';
@@ -346,9 +349,6 @@ describe('BJ606-R2 ⑦：场域蓝光带锁（lightRGB 688-690=(0.2,0.7,1)——
 // ===================== ③ BJ580 前刀判别面回归锁（防报告式收官回潮） =====================
 
 describe.skipIf(process.env.SW_BJ606_MUT)('BJ606 ③：变异自证（恰红+逐字节还原+sha256 对拍）', () => {
-  const readFileSync = (f: string) => require('node:fs').readFileSync(f, 'utf8') as string;
-  const writeFileSync = (f: string, s: string) => require('node:fs').writeFileSync(f, s);
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
 
   const spawnVitest = (filter: string) => spawnSync(
@@ -356,26 +356,16 @@ describe.skipIf(process.env.SW_BJ606_MUT)('BJ606 ③：变异自证（恰红+逐
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_BJ606_MUT: '1' },
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造——三层守卫（跨套件按文件互斥锁/
+  //  panic-safe 还原/残留自检+纯净备份自愈）收敛进 tests/mutation-guard.ts,
+  //  本文件只留 spawnVitest+恰红断言（改造范式,他套件同构跟刀）。
+  //  逐字节还原对拍已由守卫 finally 内建（不一致即 throw）。
   const mutate = (file: string, trigger: string, replacement: string, filter: string): void => {
-    let cur = readFileSync(file);
-    if (!cur.includes(trigger) && cur.includes(replacement)) {
-      writeFileSync(file, cur.replace(replacement, trigger));   // 上轮 SIGKILL 泄漏自愈
-      cur = readFileSync(file);
-    }
-    const PRISTINE = cur;
-    expect(PRISTINE).toContain(trigger);
-    try {
-      writeFileSync(file, PRISTINE.replace(trigger, replacement));
+    withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(filter);
       expect(r.status, `变异须证红: ${replacement}`).not.toBe(0);
       expect(r.stdout).toContain(filter);
-    } finally {
-      writeFileSync(file, PRISTINE);
-    }
-    const restored = readFileSync(file);
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));
+    }, { label: `BJ606 ${filter}` });
   };
 
   const MINION = join(process.cwd(), 'src', 'entities', 'MinionProj.ts');

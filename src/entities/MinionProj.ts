@@ -942,31 +942,40 @@ export class RainbowCrystalBurst extends Entity {
     const opacity = 1 - this.alpha / 255;
     this.rot = (this.localAI1 / 40) * Math.PI * 2 * this.direction;
     this.scale = (opacity / 2) * this.localAI0;
-    // 回门光线（:34868-34875 PlotTileLine CastLight ×0.5 hsl 色;宿主活才画）
-    if (this.alpha === 0) {
+    // 回门光线（:34868-34875 PlotTileLine CastLight ×0.5 hsl 色）——★C16a-F9：
+    //  宿主活即每拍画（无 α 门;旧实现错挂 alpha==0 门=渐显期光线整缺）;
+    //  α 门只属于 :34895-34899 的 AddLight(Center, 色×0.5) 单站点（两笔拆分）
+    {
       const [hr, hg, hb] = empressHslRgb(this.hue);
       const p = this.parentRef()!;
-      for (let dd = 0; dd <= Math.hypot(p.cx - this.cx, p.cy - this.cy); dd += 16) {
-        const t2 = dd / (Math.hypot(p.cx - this.cx, p.cy - this.cy) || 1);
+      const dist = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+      for (let dd = 0; dd <= dist; dd += 16) {
+        const t2 = dd / (dist || 1);
         game.addLightAt?.(this.cx + (p.cx - this.cx) * t2, this.cy + (p.cy - this.cy) * t2,
           hr / 255 * 0.5, hg / 255 * 0.5, hb / 255 * 0.5);
       }
+      if (this.alpha === 0) {
+        game.addLightAt?.(this.cx, this.cy, hr / 255 * 0.5, hg / 255 * 0.5, hb / 255 * 0.5);
+      }
     }
-    // 花瓣尘（:34899-34924 两环×2 每 1/10 掷,d267 色相染 noLight;Up.RotatedBy(±π)
-    // .RotatedBy(rotation)×2.5,scale=Opacity×localAI[0]）+ 亮星尘 1/10（:34925-34948）
+    // 花瓣尘（:34899-34924 两环×2 每 1/10 掷,d267 色相染 noLight,scale=Opacity×
+    //  localAI[0]）——★C16a-F8：环 1 = UnitY.RotatedBy(nπ).RotatedBy(rotation)
+    //  （角合成 nπ+rot;UnitY.RotatedBy X=−sin 判例 → vx=−sin·2.5/vy=cos·2.5）;
+    //  环 2 = 仅 UnitY.RotatedBy(nπ)（不随 rotation,= 垂直上下对 ±2.5）。
+    //  旧实现两环同式且 +sin=镜像翻转。亮星尘 1/10（:34925-34948）见下
     const [dr, dg, db] = empressHslRgb(this.hue);
     for (let loop = 0; loop < 2; loop++) {
       for (let n = 0; n < 2; n++) {
         if (Math.floor(Math.random() * 10) !== 0) continue;
-        const ang = Math.PI * n + this.rot;                        // UnitY.RotatedBy(nπ).RotatedBy(rot)
+        const ang = loop === 0 ? Math.PI * n + this.rot : Math.PI * n;
         const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267,
-          Math.sin(ang) * 2.5, Math.cos(ang) * 2.5, 225,
+          -Math.sin(ang) * 2.5, Math.cos(ang) * 2.5, 225,
           { r: dr, g: dg, b: db, a: 255 }, 1.5, true, false, false);
         if (d) {
           d.noGravity = true;
           d.noLight = true;
           d.scale = opacity * this.localAI0;
-          d.vx = Math.sin(ang) * 2.5; d.vy = Math.cos(ang) * 2.5;
+          d.vx = -Math.sin(ang) * 2.5; d.vy = Math.cos(ang) * 2.5;
         }
       }
     }
@@ -988,12 +997,23 @@ export class RainbowCrystalBurst extends Entity {
             ds.fadeIn = 1 + Math.random();
             ds.scale = 1 + Math.random();
             ds.noLight = true;
+            // ★C16a-F4 白克隆补（:34946-34949）：scale×0.65/fadeIn×0.65 + 白色
+            const wc = game.cloneDust?.(ds);
+            if (wc) {
+              wc.scale *= 0.65;
+              wc.fadeIn *= 0.65;
+              wc.color = { r: 255, g: 255, b: 255, a: 255 };
+            }
           }
         }
       }
     }
-    // t=30 引爆（:34975-34998）+ t=60 Kill（:34955-34960 → Kill :73416 二段爆花,
-    //  usesIDStatic :6951=单发伤害语义,第二段只放视觉）
+    // t=30 引爆（:34975-34998）+ t=60 Kill（:34955-34960 → Kill :73416-73430）
+    // ★C16a-F3②（2026-10-12）破钉重产：Kill 二段 = 爆花尘 + friendly=true + 60×60
+    //  盒 penetrate=-1/maxPenetrate=-1 再 Damage() 一轮（旧钉「单发语义/第二段只放
+    //  视觉」= 误读判谳——IDStatic 表 cd=-1（:468 字段缺省）经 :14036 写
+    //  count+(uint)(-1)=count-1（uint 回绕）,门 :606-608 `stored<=count` 恒真
+    //  =免疫面零阻,R1-F1 纪律——第二段对盒内全体(含 t=30 已命中者)成立）
     if (this.localAI1 === 30 && !this.boomed) {
       this.boomed = true;
       this.rainbowExplosionDust(game);
@@ -1001,12 +1021,18 @@ export class RainbowCrystalBurst extends Entity {
     }
     if (this.localAI1 >= 60) {
       this.rainbowExplosionDust(game);
+      this.faces.hitAt(game, this.cx, this.cy);   // :73421-73428 二段 Damage（吃同表）
       this.dead = true;
       return;
     }
   }
 
-  /** DoRainbowCrystalStaffExplosion（:80316-80360 双环 d267 hsl 染 + 白克隆折算）。 */
+  /** DoRainbowCrystalStaffExplosion（:80316-80360 双环 d267 hsl 染 + 白克隆）。
+   *  ★C16a-F4（2026-10-12）速度式勘正：spinningpoint=(0,−3).RotatedByRandom(π)
+   *  → RotatedBy(2π·i/num) 角合成 (θ+φ) → ×vector(2.1,2) = (6.3·sin,−6·cos)
+   *  → ×k（:80318-80322）。旧实现 x×0.33/y×0.5 模长漏乘且 x:y 比错（2.05:3 应
+   *  6.3:6=1.05）。白克隆（:80337-80341 两环同式）：CloneDust → scale/2、fadeIn/2、
+   *  纯白（255,255,255,255）——旧实现整缺。 */
   private rainbowExplosionDust(game: GameHooks): void {
     const [dr, dg, db] = empressHslRgb(this.hue);
     const num = 7 + Math.floor(Math.random() * 6);                 // Next(7,13)
@@ -1016,12 +1042,18 @@ export class RainbowCrystalBurst extends Entity {
         const ang = spinA + Math.PI * 2 * i / num;
         const speedK = ring === 0 ? 0.8 + Math.random() * 0.4 : (0.8 + Math.random() * 0.4) * (Math.random() * 0.8);
         const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267,
-          Math.sin(ang) * 2.05 * speedK, -Math.cos(ang) * 3 * speedK / 2.05 * 2.05, 0,
+          Math.sin(ang) * 6.3 * speedK, -Math.cos(ang) * 6 * speedK, 0,
           { r: dr, g: dg, b: db, a: 255 }, ring === 0 ? 2 : Math.random(), true, false, false);
         if (d) {
           d.noGravity = true;
           d.scale = ring === 0 ? 2 : Math.random();
           d.fadeIn = Math.random() * 2;
+          const wc = game.cloneDust?.(d);                          // :80337-80341 白克隆
+          if (wc) {
+            wc.scale /= 2;
+            wc.fadeIn /= 2;
+            wc.color = { r: 255, g: 255, b: 255, a: 255 };
+          }
         }
       }
     }
@@ -3968,18 +4000,24 @@ export class MinionProj extends Entity {
   private tHit = new Map<number, number>();   // localNPCHitImmunity（StartAttack 清=每轮每敌一次）
   private tInit = false;
 
-  /** AI_GetMyGroupIndexAndFillBlackList（:52505-52520，仅计数——blacklist 实际
+  /** AI_GetMyGroupIndexAndFillBlackList（:52809-52825，仅计数——blacklist 实际
    *  不填,TryAttackingNPCs 的黑名单门为空操作）。★BJ634：pid 形参化——AI_169 864
-   *  出生态同调（:46573 AI_GetMyGroupIndexAndFillBlackList(null,...)，owner/type
-   *  两门=本仓单玩家 owner 恒本地玩家同构,whoAmI 序=id 序同构）。
-   *  原版遍历 Main.projectile 含自身（whoAmI 恒 active）→ total≥1 恒成立;本仓
-   *  遍历 entities.projectiles 在弹入列前调用（出生拍/夹具漏 push）会得 total=0
-   *  → AI_169 num3=0 → gtw%num3=NaN 全链污染 → 防御回退 total=1（自见=index0）。 */
+   *  出生态同调（:46573 AI_GetMyGroupIndexAndFillBlackList(null,...)）。
+   *  ★C16a-F6（2026-10-12）补两门（:52811-52813 原式）：①owner 门
+   *  `projectile.owner == owner`（旧注「单玩家恒同构」=对主世界成立、夹具/模块
+   *  注入不同 owner 弹时失真）;②759 栖息帧过滤 `type!=759 || frame==projFrames-1`
+   *  （projFrames[759]=5 Main.cs:8645 → 只计 bbFrame==4 肩头栖息只——飞行中雀
+   *  不占编队位）。原版遍历 Main.projectile 含自身（whoAmI 恒 active）→ total≥1
+   *  恒成立;本仓遍历 entities.projectiles 在弹入列前调用（出生拍/夹具漏 push）
+   *  会得 total=0 → AI_169 num3=0 → gtw%num3=NaN 全链污染 → 防御回退 total=1
+   *  （自见=index0）。 */
   private tGroup(game: GameHooks, pid = 946): { index: number; total: number } {
+    const own = this.ownerRef();
     let index = 0, total = 0;
     for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
       const m = e as MinionProj;
-      if (m instanceof MinionProj && !m.dead && m.projId === pid) {
+      if (m instanceof MinionProj && !m.dead && m.ownerRef() === own && m.projId === pid
+        && (pid !== 759 || m.bbFrame === 4)) {
         if (this.id > m.id) index++;
         total++;
       }
@@ -4305,12 +4343,35 @@ export class MinionProj extends Entity {
    *  leash（>800/交战 1200 → 归位速 15 阻尼 30、<150 落位回 0 :30374-30380/
    *  :30386-30400/:30403-30412）。常数（:30089-30092）：num526=2000/num527=800/
    *  num528=1200/num529=150。 */
+  /** 分离环（AI_066 :30123-30146,num530=0.05）：双子 387/388 互对 ∪ 533 同型对,
+   *  position 曼哈顿 < width 才推。★C16a-F5（2026-10-12）：原版此环位于 388 冲刺
+   *  块（:30157-30178）【之前】,冲刺态每 AI 跑（extraUpdates=1→2 子步）照吃推离——
+   *  冲刺 velocity 只在触发拍写死、态内不覆写,分离推力实时改写冲刺轨迹。旧实现
+   *  冲刺早退在环前=双拉姆冲刺同轨互穿。 */
+  private separationNudge(game: GameHooks, p: Player): void {
+    for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+      const o = ent as MinionProj;
+      if (!(o instanceof MinionProj) || o === this || o.dead) continue;
+      if (o.ownerRef() !== p) continue;
+      const pair = this.projId === 387 || this.projId === 388
+        ? o.projId === 387 || o.projId === 388
+        : o.projId === this.projId;                  // flag30（:30128-30131）
+      if (!pair) continue;
+      if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
+      this.vx += this.x < o.x ? -0.05 : 0.05;        // :30137-30144
+      this.vy += this.y < o.y ? -0.05 : 0.05;
+    }
+  }
+
   private twinsStep(game: GameHooks, p: Player, tgt: EnemyLike | null, dmg0: number): void {
     const st = game.world.store;
     // ---- 388 冲刺态（:30154-30178,flag31——先于索敌/运动,态内不重扫）----
     if (this.projId === 388 && this.twA0 === 2) {
       // extraUpdates=1（:30156）→ 2 子步/拍;结束拍 numUpdates=0=余子步作废（break 即净语义）
       for (let sub = 0; sub < 2; sub++) {
+        // ★C16a-F5：分离环先于冲刺块（原版位次 :30123-146 < :30157）——每 AI 跑
+        //  （子步）照吃推离,rot 读分离后速度（:30158 在环后）
+        this.separationNudge(game, p);
         this.twA1++;
         this.rot = Math.atan2(this.vy, this.vx) + Math.PI;   // :30158
         if (++this.twFc > 1) {                       // :30160-30166 2t 快帧循环 cap 2
@@ -4341,18 +4402,7 @@ export class MinionProj extends Entity {
       }
     }
     // ---- 分离力（:30117-30146,num530=0.05——双子对/533 对 position 曼哈顿 < width=40）----
-    for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
-      const o = ent as MinionProj;
-      if (!(o instanceof MinionProj) || o === this || o.dead) continue;
-      if (o.ownerRef() !== p) continue;
-      const pair = this.projId === 387 || this.projId === 388
-        ? o.projId === 387 || o.projId === 388
-        : o.projId === this.projId;                  // flag30（:30128-30131）
-      if (!pair) continue;
-      if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
-      this.vx += this.x < o.x ? -0.05 : 0.05;        // :30137-30144
-      this.vy += this.y < o.y ? -0.05 : 0.05;
-    }
+    this.separationNudge(game, p);
     // ---- tileCollide 翻转（:30300-30310）+ 锁定/leash（:30363-30373）----
     if (this.twA0 !== 1) this.tileCollide = true;
     if (this.tileCollide && st.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
@@ -4426,7 +4476,10 @@ export class MinionProj extends Entity {
           if (canHitLine(st, this.x, this.y, this.w, this.h, cx5, cy5, 0, 0)) {
             const dx = cx5 - this.cx, dy = cy5 - this.cy;
             const d = Math.hypot(dx, dy) || 1;
-            const laser = new Arrow(this.cx - 5, this.cy - 5, dx / d * 8, dy / d * 8,
+            // ★C16a-F1（2026-10-12）：出膛锚=NewProjectile 中心域（Projectile.cs:30601
+            //  传 base.Center → :10880 position=Center−w/2）——389 盒 4×4（:4732-4743）
+            //  → 左上=Center−2（旧 −5 写死=弹心偏 3px）
+            const laser = new Arrow(this.cx - 2, this.cy - 2, dx / d * 8, dy / d * 8,
               Math.max(1, Math.trunc(dmg0 * 1.15)), 0, 389, { grav: 0, life: 300 });
             laser.whipTagShot = true;                // 389 ∈ MinionShot（ProjectileID.cs:291）
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(laser, 'projectiles');
@@ -5889,12 +5942,16 @@ export class MinionProj extends Entity {
         this.dFrame = this.dA0 === 6 ? 5 : this.dA0 === 7 ? 13 : 17;   // :30249-30262
         const num534 = this.dA0 === 6 ? 40 : 30;
         if (this.dA1 > num534) { this.dA1 = 1; this.dA0 -= 6; this.dLai0++; break; }   // :30264-30269
-        if (this.dA0 === 8) {                        // :30270-30279 四向尘（每子步）
+        if (this.dA0 === 8) {                        // :30283-30291 四向尘（每子步）
           for (let i = 0; i < 4; i++) {
-            const ang = i * (Math.PI / 2) + this.rot;
-            const d = game.spawnDust?.(this.cx, this.cy, 0, 0,
+            // ★C16a-F7：Vector2.One（模√2、45° 对角）.RotatedBy(i·π/2).RotatedBy(rot)
+            //  = 45°+i·90°+rot 方向、√2 模；position=Center+vec×10、velocity=vec×1
+            //  （:30287-30289。旧实现=i·90°+rot 单位模 + 零偏移,三错齐发）
+            const ang = Math.PI / 4 + i * (Math.PI / 2) + this.rot;
+            const ux = Math.SQRT2 * Math.cos(ang), uy = Math.SQRT2 * Math.sin(ang);
+            const d = game.spawnDust?.(this.cx + ux * 10, this.cy + uy * 10, 0, 0,
               [226, 228, 75][Math.floor(Math.random() * 3)],
-              Math.cos(ang), Math.sin(ang), 0, null, 0.6 + Math.random() * 0.5);
+              ux, uy, 0, null, 0.6 + Math.random() * 0.5);
             if (d) d.noGravity = true;
           }
         }
@@ -5961,14 +6018,16 @@ export class MinionProj extends Entity {
         }
         default: this.dFrame = 4 + Math.floor(this.dFc / 4); break;
       }
-      // 攻击闪尘（:30636-30660,ai[0]==2 ∧ 50% → 四向尘 noLight）
+      // 攻击闪尘（:30533-30550,ai[0]==2 ∧ 50% → 四向尘 noLight）——★C16a-F7 同
+      //  :30283 式三错齐修（45° 对角基准/√2 模/位 Center+vec×10）
       if (this.dA0 === 2 && Math.floor(Math.random() * 2) === 0) {
         for (let i = 0; i < 4; i++) {
           if (Math.floor(Math.random() * 2) !== 0) continue;
-          const ang = i * (Math.PI / 2) + this.rot;
-          const d = game.spawnDust?.(this.cx, this.cy, 0, 0,
+          const ang = Math.PI / 4 + i * (Math.PI / 2) + this.rot;
+          const ux = Math.SQRT2 * Math.cos(ang), uy = Math.SQRT2 * Math.sin(ang);
+          const d = game.spawnDust?.(this.cx + ux * 10, this.cy + uy * 10, 0, 0,
             [226, 228, 75][Math.floor(Math.random() * 3)],
-            Math.cos(ang), Math.sin(ang), 0, null, 0.3 + Math.random() * 0.5);
+            ux, uy, 0, null, 0.3 + Math.random() * 0.5);
           if (d) { d.noGravity = true; d.noLight = true; }
         }
       }
@@ -5986,9 +6045,13 @@ export class MinionProj extends Entity {
           const nx = dl > 0 ? dx / dl : 0, ny = dl > 0 ? dy / dl : 0;   // SafeNormalize(ZERO)
           const num560 = this.dA0 === 8 ? 12 : 10;   // :30639-30640
           this.vx = nx * num560; this.vy = ny * num560;
+          // ★C16a-F11（2026-10-12）焦点零速特典（:30319-30323 focus 支不写 zero,
+          //  恒 Vector2.Zero——野生支 :30357 才写 nPC.velocity;twinsStep 同判既案）：
+          //  集火目标喂截击面的 targetVelocity 必须 (0,0),旧实现恒喂敌速
+          const isFocus533 = (p as unknown as { minionTargetId?: number }).minionTargetId === tgt.id;
           this.ai066TryInterceptingTarget(tgt.cx, tgt.cy,
-            (tgt as unknown as { vx?: number }).vx ?? 0,
-            (tgt as unknown as { vy?: number }).vy ?? 0, num560, 533);
+            isFocus533 ? 0 : (tgt as unknown as { vx?: number }).vx ?? 0,
+            isFocus533 ? 0 : (tgt as unknown as { vy?: number }).vy ?? 0, num560, 533);
         }
       }
     }
@@ -7350,10 +7413,15 @@ export class MinionProj extends Entity {
     this.emitSpawnHitVisuals(game);
   }
 
-  /** ★BJ639 批 1②：644 t=30 引爆受理面（原版 = 弹体本体 60×60 盒 Damage() 一次:
-   *  :34975-34998 width=height=60/penetrate=-1 + Kill :73416-73430 二段被
-   *  usesIDStaticNPCImmunity :6951 吃掉=单发伤害语义）。几何 = 60×60 盒 vs 靶盒
-   *  AABB（30+半宽/半高）;受理面 tag/crit/横切与旧爆弹臂同构（SentryShot 单源）。
+  /** ★BJ639 批 1②：644 引爆受理面（t=30 :34975-34998 + t=60 Kill :73416-73430 二段
+   *  ——★C16a-F3 破钉重产：旧注「二段被 usesIDStaticNPCImmunity :6951 吃掉=单发
+   *  伤害语义」系误读判谳。定谳（R1-F1 纪律,反编译机读）：644 idStaticNPCHitCooldown
+   *  =−1（:468 字段缺省,:6951 只置 usesIDStaticNPCImmunity）→ :14036 写
+   *  perIDStatic[644,npc]=GameUpdateCount+(uint)(−1)=count−1（uint 回绕）,
+   *  门 :606-608 `stored<=GameUpdateCount` 恒真=免疫表零阻 → 二段 Damage 对盒内
+   *  全体（含 t=30 已命中者）成立;:14035 命中尾 `targetNPC.immune[owner]=0` 清窗
+   *  （IDStatic 支独占,不走 :14182 缺省 10t 窗写）。几何 = 60×60 盒 vs 靶盒 AABB
+   *  （30+半宽/半高）;受理面 tag/crit/横切与旧爆弹臂同构（SentryShot 单源）。
    *  伤害/击退取 643 出生拍捕获值（faces.hitAt 闭包注入）。 */
   private rainbowBurstHitFace(game: GameHooks, bx: number, by: number, dmg: number): void {
     for (const ent of game.enemies()) {
@@ -7363,6 +7431,11 @@ export class MinionProj extends Entity {
       if (Math.abs(en.cx - bx) < 30 + en.w / 2 && Math.abs(en.cy - by) < 30 + en.h / 2) {
         // BJ467⑥ :12686 头门前置（dontTakeDamage 靶不达;644 aiStyle112 非反噬族）
         if ((en as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+        // ★C16a-F3① IDStatic 免疫表门（Damage_PVE flag2 :12595 → :606-608 读形）
+        //  ——644 桶 cd=−1：MinionHitCd(−1) 不积档恒 ready=「stored<=count 恒真」
+        //  同相（:14036 uint 回绕=count−1）。写位=ready() 内（pass 即写,与
+        //  contact() idStatic 支同构）
+        if (!this.idStaticBucket(644).ready(en.id, -1)) continue;
         // BJ452 N3① :12636 三族共门（immune[owner]>0 整跳,窗拒拍=写梯/tag 全不达）
         if (MinionProj.enemyImmune(en)) continue;
         // BJ452 N3② tag 面：644 ∈ SentryShot → 完整 WhipTagEffect 栈,挂单源
@@ -7381,6 +7454,11 @@ export class MinionProj extends Entity {
         const crit = res.crit || timerCrit || monkCrit || golemCrit;
         en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? res.dmg * 2 : res.dmg),
           Math.sign(en.cx - bx) * this.knockback, -2, game, 0, crit, 1, true);
+        // ★C16a-F3① 命中尾 IDStatic 写梯（:14030-14036）：usesIDStatic ∧ penetrate≠1
+        //  （引爆拍 =−1）→ immune[owner]=0 清窗（不走 :14182 缺省 10t 写）——敌侧
+        //  清窗使 t=60 二段过 :12636 共门（城镇臂 townAcceptLadder clearWindow=true
+        //  既案同构）。旧实现缺清窗=en.hurt pierce=0 尾写 10t 残留
+        (en as { iframes?: number }).iframes = 0;
         // Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段;载体=644,numHits=0）
         if (!gated) {
           ghostHealProc(game, 644, 0, en as unknown as Parameters<typeof ghostHealProc>[3]);
@@ -7406,8 +7484,9 @@ export class MinionProj extends Entity {
       },
       (n) => {
         ghostHealProc(game, 644, 0, n as unknown as Parameters<typeof ghostHealProc>[3]);
-        // 写梯归档：644 usesIDStatic + penetrate=1 → 原版写梯内支不达=immune[owner]
-        // 零写——TownNPC.hurt 通用档写的 10t 须清还原（Y2 报告③既案）
+        // 写梯归档（★C16a-F3 注释勘正）：本面=引爆拍（penetrate=-1）→ 原版写梯
+        //  usesIDStatic 支（:14030-14036）直达=immune[owner]=0 清窗（非「内支不达」
+        //  ——那仅本体 penetrate=1 档）;clearWindow=true 即 :14035 折算（Y2 报告③既案）
         this.townAcceptLadder(game, n, true);
       },
       (n) => {

@@ -194,9 +194,10 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(m.facing).toBe(1);                  // 朝右不翻（贴图朝右）
   });
 
-  it('387 激光出弹锚点 = 本体中心（NewProjectile @Center :28977-38981）', () => {
+  it('387 激光出弹锚点 = 本体中心（★C16a-F1 引注勘正：NewProjectile @Center :30601 + :10880 position=Center−w/2）', () => {
     const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40)]);
     const m = mkMinion(387, false, player);
+    const cx0 = m.cx, cy0 = m.cy;              // 出膛拍心（fire 后同拍 moveAndCollide 微移≈0.15px）
     const before = projectiles.length;
     m.fixedUpdate(1, hooks);                   // 首帧即射（shootCd 初 0）
     const shots = projectiles.slice(before)
@@ -204,10 +205,10 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(shots.length).toBeGreaterThanOrEqual(1);
     const s = shots[0];
     expect(s.projId).toBe(389);                // MiniRetinaLaser
-    expect(s.life).toBe(300);                  // :28981 timeLeft=300
-    // 4×4 判定盒 → 左上 = Center−2；弹体中心精确等于随从中心（曾 -5 写死偏 3px）
-    expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);
-    expect(s.y + s.h / 2).toBeCloseTo(m.cy, 6);
+    expect(s.life).toBe(300);                  // :30612 timeLeft=300
+    // 4×4 判定盒（:4732-4743）→ 左上 = Center−2；弹体中心=随从发拍心（曾 -5 写死偏 3px）
+    expect(s.x + s.w / 2).toBeCloseTo(cx0, 6);
+    expect(s.y + s.h / 2).toBeCloseTo(cy0, 6);
   });
 
   it('俾格米 191 掷矛锚点 = Center−8（AI_026 vector15 :58764）+ timeLeft 300', () => {

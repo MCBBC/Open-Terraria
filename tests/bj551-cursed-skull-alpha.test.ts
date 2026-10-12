@@ -44,11 +44,13 @@
 //   D. 同族普查——288 死型登记/34 乘光族同相/伪装态不走复绘/弹 299 无病注。
 //   E. 变异自证——M1 ga 钉值漂移/M2 摘 capture 支/M3 摘消费 tint 档→恰红
 //      （逐字节还原+sha256 对拍）。
-import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { npcWhiteLiftAlpha } from '../src/render/npcExtraParts';
 
 const RENDERER = join(process.cwd(), 'src', 'render', 'Renderer.ts');
@@ -222,73 +224,39 @@ describe.skipIf(process.env.SW_BJ551_MUT)('BJ551 E. 变异自证', () => {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_BJ551_MUT: '1' },   // ★子进程豁免变异面（对变异文件跑 A-D 面）
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
-  // ★BJ-C9（2026-10-08）自愈前置：上轮运行被 SIGKILL 中断在变异窗=盘上残留变异串
-  //  （exit 144 杀树跳过 finally 的泄漏位,实际事故=B J-C9 会话两起）——含变异标记而
-  //  缺触发串 → 先还原触发串再取 PRISTINE,保证各发可重入。
-  const heal = (FILE: string, TRIGGER: string, replacement: string): string => {
-    let cur = readFileSync(FILE, 'utf8');
-    if (!cur.includes(TRIGGER) && cur.includes(replacement)) {
-      writeFileSync(FILE, cur.replace(replacement, TRIGGER));
-      cur = readFileSync(FILE, 'utf8');
-    }
-    return cur;
-  };
-
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥/panic-safe 还原/残留自检+自愈）;旧 heal() 前置自愈被
+  //  守卫 preflight 字节级备份自愈取代（防把毒盘当 PRISTINE 回写）。
   it('M1 289 tintA 50→100（A 恒量漂移=半透面丢失）→ 钉值断言红', () => {
-    const FILE = RENDERER;
-    const TRIGGER = 'tint: [250, 250, 250], tintA: 50,';
-    const replacement = 'tint: [250, 250, 250], tintA: 100, // ★BJ551 变异:半透恒量漂移';
-    const PRISTINE = heal(FILE, TRIGGER, replacement);
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
-      const r = spawnVitest('289 capture 支原文');
-      expect(r.status).not.toBe(0);              // ★变异证红:ga 钉值
-      expect(r.stdout).toContain('289 capture 支原文');
-    } finally {
-      writeFileSync(FILE, PRISTINE);
-    }
-    const restored = readFileSync(FILE, 'utf8');
-    expect(restored).toBe(PRISTINE);             // 逐字节还原
-    expect(sha256(restored)).toBe(sha256(PRISTINE));   // sha256 对拍
+    withMutation(RENDERER,
+      'tint: [250, 250, 250], tintA: 50,',
+      'tint: [250, 250, 250], tintA: 100, // ★BJ551 变异:半透恒量漂移',
+      () => {
+        const r = spawnVitest('289 capture 支原文');
+        expect(r.status).not.toBe(0);              // ★变异证红:ga 钉值
+        expect(r.stdout).toContain('289 capture 支原文');
+      }, { label: 'BJ551 M1' });
   });
 
   it('M2 摘 289 capture 支（恒色支整缺→退回通用乘光实心）→ 接线断言红', () => {
-    const FILE = RENDERER;
-    const TRIGGER = '} else if (e.vanillaId === 289) {';
-    const replacement = '} else if (e.vanillaId === 2890) { // ★BJ551 变异:289 支摘除(永不命中→退回通用直绘)';
-    const PRISTINE = heal(FILE, TRIGGER, replacement);
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
-      const r = spawnVitest('capture 支位序');
-      expect(r.status).not.toBe(0);              // ★变异证红:位序钉原文
-      expect(r.stdout).toContain('capture 支位序');
-    } finally {
-      writeFileSync(FILE, PRISTINE);
-    }
-    const restored = readFileSync(FILE, 'utf8');
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));
+    withMutation(RENDERER,
+      '} else if (e.vanillaId === 289) {',
+      '} else if (e.vanillaId === 2890) { // ★BJ551 变异:289 支摘除(永不命中→退回通用直绘)',
+      () => {
+        const r = spawnVitest('capture 支位序');
+        expect(r.status).not.toBe(0);              // ★变异证红:位序钉原文
+        expect(r.stdout).toContain('capture 支位序');
+      }, { label: 'BJ551 M2' });
   });
 
   it('M3 摘消费 tint 档（289 复绘缺 rgb 烘焙=亮度差 2%）→ 消费断言红', () => {
-    const FILE = RENDERER;
-    const TRIGGER = 'const imgT = q.tint ? tintedTex(imgL, q.tint, false) : imgL;';
-    const replacement = 'const imgT = imgL; // ★BJ551 变异:tint 烘焙档摘除';
-    const PRISTINE = heal(FILE, TRIGGER, replacement);
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER, replacement));
-      const r = spawnVitest('消费 tint 烘焙档');
-      expect(r.status).not.toBe(0);              // ★变异证红:消费原文钉值
-      expect(r.stdout).toContain('消费 tint 烘焙档');
-    } finally {
-      writeFileSync(FILE, PRISTINE);
-    }
-    const restored = readFileSync(FILE, 'utf8');
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));
+    withMutation(RENDERER,
+      'const imgT = q.tint ? tintedTex(imgL, q.tint, false) : imgL;',
+      'const imgT = imgL; // ★BJ551 变异:tint 烘焙档摘除',
+      () => {
+        const r = spawnVitest('消费 tint 烘焙档');
+        expect(r.status).not.toBe(0);              // ★变异证红:消费原文钉值
+        expect(r.stdout).toContain('消费 tint 烘焙档');
+      }, { label: 'BJ551 M3' });
   });
 });

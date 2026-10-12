@@ -36,10 +36,13 @@
 //   E. 变异自证——M1 摘 alpha post=红;M2 摘 stride（恒 1→20 组 100 粒）=红。
 //      npcdust-mutation-mutex 共锁（bj296/304/327 同锁）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { VanillaDust } from '../src/fx/VanillaDust';
@@ -349,7 +352,7 @@ describe('BJ503 D. 519 AI 面——火尘拖尾 1:1+自爆走查表', () => {
 });
 
 // ===================== E. 变异自证（原子+逐字节还原,共锁） =====================
-describe('BJ503 E. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ503_MUT)('BJ503 E. 变异自证', () => {   // ★残留普查波补 dam（全族同款习语）
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
   const spawnVitest = (filter: string) => spawnSync('npx', ['vitest', 'run', 'tests/bj503-solar-pillar-projectiles.test.ts', '--no-file-parallelism', '-t', filter], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
@@ -366,31 +369,27 @@ describe('BJ503 E. 变异自证', () => {
     unlockConsumerMutation();
   });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （按目标文件互斥/panic-safe 还原/残留自检+自愈）;域锁/快照钉面保留,文件锁在守卫内层。
   it('M1 摘 alpha post 应用（case 空转）→ 519 查表 α200 断言红', () => {
-    const TRIGGER = "      case 'alpha': d.alpha = op[1]; break;";
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, "      case 'alpha': break; // ★BJ503 变异:摘 alpha 应用"));
-      const r = spawnVitest('519 death 查表');
-      expect(r.status).not.toBe(0);               // ★变异证红:α200 落活尘锁捕获
-      expect(r.stdout).toContain('519 death 查表');
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      "      case 'alpha': d.alpha = op[1]; break;",
+      "      case 'alpha': break; // ★BJ503 变异:摘 alpha 应用",
+      () => {
+        const r = spawnVitest('519 death 查表');
+        expect(r.status).not.toBe(0);               // ★变异证红:α200 落活尘锁捕获
+        expect(r.stdout).toContain('519 death 查表');
+      }, { label: 'BJ503 M1' });
   });
 
   it('M2 摘 stride（恒 1 → 20 组 100 粒）→ 519 查表 35 粒断言红', () => {
-    const TRIGGER = '      const stride = el.stride ?? 1;';
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, '      const stride = 1; // ★BJ503 变异:摘步进'));
-      const r = spawnVitest('519 death 查表');
-      expect(r.status).not.toBe(0);               // ★变异证红:stride3 环 7 组 → 恒 1 变 20 组=100 粒
-      expect(r.stdout).toContain('519 death 查表');
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      '      const stride = el.stride ?? 1;',
+      '      const stride = 1; // ★BJ503 变异:摘步进',
+      () => {
+        const r = spawnVitest('519 death 查表');
+        expect(r.status).not.toBe(0);               // ★变异证红:stride3 环 7 组 → 恒 1 变 20 组=100 粒
+        expect(r.stdout).toContain('519 death 查表');
+      }, { label: 'BJ503 M2' });
   });
 });

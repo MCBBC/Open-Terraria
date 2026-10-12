@@ -24,10 +24,12 @@
 //   B. 算式——实数域恒等式逐点精确 + 字节域（XNA Lerp 截断）|repo−vanilla|≤1。
 //   C. 接线——收集守卫/队列字段/消费循环/α 消费/帧头清/槽序（7d' 内,先于 7d'''）。
 //   D. 变异自证——M1 摘 0.4→0.5=钉值红;M2 反转收集守卫=接线红（逐字节还原+sha256）。
-import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { join } from 'node:path';
 import { npcWhiteLiftAlpha } from '../src/render/npcExtraParts';
 
@@ -139,43 +141,27 @@ describe.skipIf(process.env.SW_BJ504_MUT)('BJ504 D. 变异自证', () => {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_BJ504_MUT: '1' },   // ★子进程豁免变异面（对变异文件跑 A-C 面）
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
-
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥/panic-safe 还原/残留自检+自愈）;本文件只留恰红断言。
   it('M1 白提亮因子 0.4→0.5（formula 漂移）→ 钉值断言红', () => {
-    const FILE = PARTS;
-    const PRISTINE = readFileSync(FILE, 'utf8');
-    const TRIGGER = 'if (vid === 395 || vid === 519) return 0.4;   // :94679 两型同档 0.4';
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER,
-        'if (vid === 395 || vid === 519) return 0.5; // ★BJ504 变异:因子漂移'));
-      const r = spawnVitest('395/519 → 0.4');
-      expect(r.status).not.toBe(0);              // ★变异证红:0.4 恒等钉值
-      expect(r.stdout).toContain('395/519 → 0.4');
-    } finally {
-      writeFileSync(FILE, PRISTINE);
-    }
-    const restored = readFileSync(FILE, 'utf8');
-    expect(restored).toBe(PRISTINE);             // 逐字节还原
-    expect(sha256(restored)).toBe(sha256(PRISTINE));   // sha256 对拍
+    withMutation(PARTS,
+      'if (vid === 395 || vid === 519) return 0.4;   // :94679 两型同档 0.4',
+      'if (vid === 395 || vid === 519) return 0.5; // ★BJ504 变异:因子漂移',
+      () => {
+        const r = spawnVitest('395/519 → 0.4');
+        expect(r.status).not.toBe(0);              // ★变异证红:0.4 恒等钉值
+        expect(r.stdout).toContain('395/519 → 0.4');
+      }, { label: 'BJ504 M1' });
   });
 
   it('M2 反转收集守卫（395/519 永不入队=特征整缺）→ 接线断言红', () => {
-    const FILE = RENDERER;
-    const PRISTINE = readFileSync(FILE, 'utf8');
-    const TRIGGER = 'npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null';
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(FILE, PRISTINE.replace(TRIGGER,
-        'npcWhiteLiftAlpha(e.vanillaId ?? -1) === null // ★BJ504 变异:守卫反转'));
-      const r = spawnVitest('收集守卫在 drawEnemy');
-      expect(r.status).not.toBe(0);              // ★变异证红:守卫原文钉值
-      expect(r.stdout).toContain('收集守卫在 drawEnemy');
-    } finally {
-      writeFileSync(FILE, PRISTINE);
-    }
-    const restored = readFileSync(FILE, 'utf8');
-    expect(restored).toBe(PRISTINE);             // 逐字节还原
-    expect(sha256(restored)).toBe(sha256(PRISTINE));   // sha256 对拍
+    withMutation(RENDERER,
+      'npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null',
+      'npcWhiteLiftAlpha(e.vanillaId ?? -1) === null // ★BJ504 变异:守卫反转',
+      () => {
+        const r = spawnVitest('收集守卫在 drawEnemy');
+        expect(r.status).not.toBe(0);              // ★变异证红:守卫原文钉值
+        expect(r.stdout).toContain('收集守卫在 drawEnemy');
+      }, { label: 'BJ504 M2' });
   });
 });

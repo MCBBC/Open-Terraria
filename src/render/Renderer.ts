@@ -5527,6 +5527,9 @@ export class Renderer {
   /** 悬停告示牌头顶指示泡（Main.signBubble，Player.cs:33839 置位/:45133 绘制；
    *  屏坐标在悬停检测段算好存此处，tooltip 层消费。无文本的空牌也显示） */
   private signBubbleScreen: { x: number; y: number; flip: boolean } | null = null;
+  /** ★BJ648：住房旗帜 hover 名条收集面（drawHouseBanners 收集/flushBannerLabels
+   *  消费）——名条上收 UI 语义（原版 DrawInterface_7 无光直绘）,旗布本体留世界层 */
+  private _bannerLabelPass: Array<{ bx: number; by: number; rectH: number; label: string }> = [];
   private _mouseY = 0;
   private _mouseDown = false;
 
@@ -5593,6 +5596,7 @@ export class Renderer {
     this.armorGlowCollected = new WeakSet();   // 同帧双绘去重随帧重置（早绘/主段双 pass）
     this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
     this.solarShieldQueue.length = 0;   // ★BJ594 日曜盾球队列逐帧重建（drawPlayer 收集,7e 消费）
+    this._bannerLabelPass.length = 0;   // ★BJ648 名条队列逐帧重建（drawHouseBanners 收集,flushBannerLabels 消费;flush 尾自清之外的早退兜底）
     this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
     // ★C2 单遍合并（2026-09-22）：bobber 扫描 + 绘制键预计算（原排序块内循环）
     //   并为一遍全实体扫（原两遍）。逐位同值论证：同枚举序、两侧均只读扫描、
@@ -7331,6 +7335,14 @@ export class Renderer {
     }
 
     this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z, world);
+
+    // ★BJ648：住房旗帜 hover 名条（原版 DrawInterface_7 接口层无光直绘）——
+    //  滤镜链/光照乘之后屏空间直绘,与旗帜布本体（世界层吃格光,:41467 同相）分离。
+    //  位次 = flushEntityHealthBars 之前：原版 SetupDrawInterfaceLayers 表序
+    //  7 TownNPCHouseBanners（Main.cs:45522）< 14 EntityHealthBars（:45541）→
+    //  血条盖名条（原版先 7 后 14）;曾误置于血条之后=名条反盖血条（注释同段
+    //  自述 7<14 与实现相悖,2026-10-12 BJ648 位次勘误）。
+    this.flushBannerLabels(cam);
 
     // 7e'. 实体血条 pass（★BJ593 2026-10-09,见 hbPass 收集面注）：原版
     //  DrawInterface_14_EntityHealthBars（Main.cs:46574-46983）接口层语义 =
@@ -16436,7 +16448,14 @@ export class Renderer {
         ctx.fillRect(bx - rectW / 2, by - rectH / 2, rectW, rectH);
         ctx.restore();
       }
-      // hover 名条（原版 40255+：鼠标悬停旗帜显示 NPC 名）
+      // hover 名条（原版 40255+：鼠标悬停旗帜显示 NPC 名）——★BJ647-B 2026-10-12：
+      //  【收集面】只记锚与文本,绘制挪 flushBannerLabels（屏空间直绘）。原版本名条 =
+      //  DrawInterface_7_TownNPCHouseBanners（Main.cs:46992）=接口层【无光直绘】;
+      //  旧实现画在世界层内,后续 compositeLight 光照乘把黑框 rgba(20,16,28,0.85) 与
+      //  白字 #E8E4F0 一起乘暗——清晨/夜晚旗区格光≈0 时整条名条隐入夜色（用户实报
+      //  「文字消失只剩背景黑矩形」,debug-report 十周年纪念种子 18-11 + v18 探针
+      //  昼夜 A/B:day 帧框字清晰/night 帧整条灭,旗区光照实读）。旗布本体吃格光 =
+      //  原版 :41467 同相不动,仅名条上收 UI 语义。
       if (this._mouseX >= 0) {
         const [mwx, mwy] = cam.screenToWorld(this._mouseX, this._mouseY);
         if (mwx >= bx - rectW / 2 && mwx <= bx + rectW / 2 && mwy >= by - rectH / 2 && mwy <= by + rectH / 2) {
@@ -16444,17 +16463,40 @@ export class Renderer {
           //  有个人名 → Game.NPCTitle（zh "{1}{0}"=类型名+个人名）；无 → 类型名
           const typeName = Lang.npcName(n.vanillaId) ?? n.npcKey;
           const label = n.givenName ? Lang.text('Game.NPCTitle', n.givenName, typeName) : typeName;
-          ctx.font = '12px "Fusion Pixel 12px", sans-serif';
-          const tw = ctx.measureText(label).width;
-          ctx.fillStyle = 'rgba(20,16,28,0.85)';
-          ctx.fillRect(bx - tw / 2 - 5, by - rectH / 2 - 20, tw + 10, 15);
-          ctx.fillStyle = '#E8E4F0';
-          ctx.textAlign = 'center';
-          ctx.fillText(label, bx, by - rectH / 2 - 9);
-          ctx.textAlign = 'left';
+          this._bannerLabelPass.push({ bx, by, rectH, label });
         }
       }
     }
+  }
+
+  /** ★BJ647-B/BJ648（2026-10-12）：住房旗帜 hover 名条 flush——屏空间直绘（恒亮）。
+   *  调用面 = flushEntityHealthBars 【之前】（光照乘/滤镜链之后,原版 DrawInterface_7
+   *  接口层表序 1_1 EmoteBubbles<…<7 TownNPCHouseBanners<13<14 HealthBars——
+   *  本仓旗帜布本体仍在世界层吃格光（:41467 原版同相）,仅 hover 名条上收;
+   *  层序 = 名条先画、血条后画=血条盖名条（原版 7<14 同序,BJ648 位次勘误后实现
+   *  与本注一致;恒等域+worldToScreen+flipY 手翻=drawHealthBar BJ593 同款）。 */
+  private flushBannerLabels(cam: Camera): void {
+    if (!this._bannerLabelPass.length || !this.ctx) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（drawHealthBar BJ593 同款）
+    ctx.imageSmoothingEnabled = false;
+    ctx.font = '12px "Fusion Pixel 12px", sans-serif';
+    for (const { bx, by, rectH, label } of this._bannerLabelPass) {
+      const [sx0, sy0] = cam.worldToScreen(bx, by - rectH / 2 - 9);
+      const sx = sx0;
+      const sy = cam.flipY ? cam.viewH - sy0 : sy0;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(20,16,28,0.85)';
+      ctx.fillRect(sx - tw / 2 - 5, sy - 11, tw + 10, 15);
+      ctx.fillStyle = '#E8E4F0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(label, sx, sy);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+    this._bannerLabelPass.length = 0;
   }
 
   /** ★BJ259：单旗几何（drawHouseBanners 与右键踢出命中共用单源）——null=不挂旗。

@@ -309,12 +309,14 @@ export class MysticSnakeCoil extends Entity {
       }
     }
     for (let i = 0; i < 5; i++) {                            // :53058-53067
+      // ★C16a-F10（2026-10-12）：尘盒锚 `vector + new Vector2(-8f)`（:53060/:53062
+      //  单参构造=双轴 −8,旧实现只偏 X 漏 Y=尘盒整体下沉半格）
       if (Math.floor(Math.random() * 8) === 0) {
-        const d31 = game.spawnDust?.(vx0 - 8, vy0, 16, 16, 31, 0, 0, 100,
+        const d31 = game.spawnDust?.(vx0 - 8, vy0 - 8, 16, 16, 31, 0, 0, 100,
           { r: 0, g: 0, b: 0, a: 0 }, 1);
         if (d31) { d31.vx *= 0.4; d31.vy *= 0.4; }           // velocity *= 0.4f 双轴
       }
-      const d = game.spawnDust?.(vx0 - 8, vy0, 16, 16, 27, 0, 0, 100,
+      const d = game.spawnDust?.(vx0 - 8, vy0 - 8, 16, 16, 27, 0, 0, 100,
         { r: 0, g: 0, b: 0, a: 0 }, 1.7);
       if (d) {
         d.vx *= 2;                                           // velocity *= 2f 双轴 :53065

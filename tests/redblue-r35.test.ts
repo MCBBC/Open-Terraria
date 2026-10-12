@@ -23,7 +23,10 @@ describe('R35-A 3065 Star Wrath 天降三剑', () => {
     expect(gameSrc).toContain('Math.min(mwy, this.player.cy - 200)');
     // 三发循环 + 本击只出天降剑(防通用单发补射)
     expect(gameSrc).toContain('for (let i503 = 0; i503 < 3; i503++)');
-    expect(gameSrc).toMatch(/cwMelee\.shoot === 503[\s\S]{0,1200}return;/);
+    // 临距重锚（残留普查波 2026-10-12）：BJ-C2/F3 暴击路由注（2026-10-06）+ BJ640
+    //  攻速链 spd503/attackSpeedMult 行把分支体撑到实测 1435 字符（>旧 1200 窗），
+    //  分支本身五项几何未动——窗放宽到 1600 维持「return 挂分支尾」语义。
+    expect(gameSrc).toMatch(/cwMelee\.shoot === 503[\s\S]{0,1600}return;/);
   });
 });
 

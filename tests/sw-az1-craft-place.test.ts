@@ -311,7 +311,12 @@ describe('SW-AZ1 结构锁', () => {
     //  held 本体消耗位（原版 ItemCheck consumable 消耗拍 Player.cs:43612-43645;
     //  旧分支零消耗=书/珊瑚/贝壳/礼物/炸药/宝石白放复制链,与侏儒放置即掉落同支
     //  同根,合法入账）。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(59);
+    // ★BJ644 拍照重锚（2026-10-12）:59→58——耍蛇笛 4262 旧实现误按消耗品删笛
+    //  （4262 分支出手链 removeHeld(1) 消耗位）,BJ644 定谳非消耗品（SetDefaults
+    //  Item.cs:36653-36664 无 consumable 行,ItemCheck_Shoot :48278-48334 消耗臂
+    //  不适用）合法退役该消耗位（Game.ts 15602 段现无 removeHeld 调用）,锁数随
+    //  实际消费位回落（az1 拍照重锚协议=BJ536 判例同式,非丢失扣减）。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(58);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

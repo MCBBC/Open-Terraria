@@ -470,7 +470,27 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
     expect(s).toContain("if (this._builtLayout === 'vanilla') this.paintVanillaInvSlots();");
     // 刀 12:closeInventory 尾刷扩为 vinvReforgeOpen 复位+刷新;SW-FX10:再入 buff 块回流
     // 刀19:向导态复位行插入(vinvGuideMenuOpen=false)
-    expect(s).toContain("if (this._builtLayout === 'vanilla') {\n      this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)\n      this.vinvGuideMenuOpen = false;   // ★刀19:向导态随背包关闭退出(关包=playerInventory 面同步)\n      this.reflowBuffs();             // ★SW-FX10 债④:页2 列内 buff 块回流 HUD 栏(关包当帧)\n      this.refreshAll();\n    }");
+    // ★C16c-F3 重锚(2026-10-12):BJ633 在 vanilla 关包臂插 returnReforgeItem()=合法新增,
+    //   连续字面块锚断(红 ~20h)——改锁 vanilla 臂【代码行全序】(注释行不入锚=免注释
+    //   漂移复发;returnReforgeItem 挂点/语义面由 bj633-reforge-slot-return ⑧ 哨兵自锁)。
+    //   序=旗清→重铸归还(BJ633)→向导复位→buff 回流→刷新。
+    const close = s.indexOf('  closeInventory() {');
+    const body = s.slice(close, s.indexOf('\n  }', close));
+    const order = [
+      "if (this._builtLayout === 'vanilla') {",
+      'this.vinvReforgeOpen = false;',
+      'this.returnReforgeItem();',
+      'this.vinvGuideMenuOpen = false;',
+      'this.reflowBuffs();',
+      'this.refreshAll();',
+    ];
+    let at = -1;
+    for (const line of order) {
+      const i = body.indexOf(line);
+      expect(i, line).toBeGreaterThan(-1);
+      expect(i, `位次: ${line}`).toBeGreaterThan(at);
+      at = i;
+    }
   });
   it('teardown 清单:双构建器字段全清(重建路径完整性)', () => {
     const s = ui();

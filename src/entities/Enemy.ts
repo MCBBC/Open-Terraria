@@ -6351,17 +6351,15 @@ export class Enemy extends Entity {
         const num146 = Math.hypot(num144, num145);                       // :59362
         // ★R8 F2:1456 伪影门删除——1457(:59562-59566)无 <700 距离门(远距由
         // flag14=AI_GlobalFiringDistanceCheck 承担,链内已接 :5349);原版归一化后直射
-        if (true) {
-          const num143 = 15;                                             // :59355 弹速
-          // 出生点沿弹向 +vel×3（:59371-59372）
-          const u = num146 || 1;
-          // ★N 批:出膛音 Item_33（AI_001 首拍 ai[1]==0 :56195-56199,发射位等价结算
-          // 与 shootBolt462 先例同构;Eyezor 251 同款 :59335-59378 本位即此处）
-          game.playSfxWav?.('Item_33', 1, this.cx, this.cy);
-          this.shootDart(game, mx + (num144 / u) * num143 * 3, my + (num145 / u) * num143 * 3,
-            num144, num145, num143, 30, 83);                             // :59373 proj 83 伤 30
-          this.ai2 = 0;                                                  // :59374
-        }
+        const num143 = 15;                                             // :59355 弹速
+        // 出生点沿弹向 +vel×3（:59371-59372）
+        const u = num146 || 1;
+        // ★N 批:出膛音 Item_33（AI_001 首拍 ai[1]==0 :56195-56199,发射位等价结算
+        // 与 shootBolt462 先例同构;Eyezor 251 同款 :59335-59378 本位即此处）
+        game.playSfxWav?.('Item_33', 1, this.cx, this.cy);
+        this.shootDart(game, mx + (num144 / u) * num143 * 3, my + (num145 / u) * num143 * 3,
+          num144, num145, num143, 30, 83);                             // :59373 proj 83 伤 30
+        this.ai2 = 0;                                                  // :59374
       }
     }
   }

@@ -115,10 +115,31 @@ describe('SW-FX28 ②单源接线锚定(结构锁,变异证红)', () => {
 describe('SW-FX28 ③开箱流 D0/绑定面(UI.ts)', () => {
   it('开箱 vanilla 分支:无独立 modal,原位开背包+退重铸(Main.cs:41164 playerInventory=true 等价)', () => {
     const s = uiSrc;
-    expect(s).toContain("if (this._builtLayout === 'vanilla') {\n      this.vinvReforgeOpen = false;   // 原版 :42277 chest≠-1 → InReforgeMenu=false\n      this.openInventory(true);\n      this.refreshAll();\n      return;\n    }");
-    // vanilla 分支后不再落 chestPanel display:block(独立面板=classic 专属)
-    const vanillaBranch = s.slice(s.indexOf('private openChestPanel'), s.indexOf('closeChest()'));
-    expect(vanillaBranch).not.toContain("chestPanel.style.display = 'block'");
+    // ★C16c-F3 重锚(2026-10-12):BJ633 在 :42277 强制退出臂插 returnReforgeItem()=合法
+    //   新增,连续字面块锚断(红 ~20h)——改锁 vanilla 分支【代码行全序】(注释行不入锚;
+    //   returnReforgeItem 挂点/序由 bj633 ⑧ 哨兵自锁)。序=旗清→重铸归还→开包→刷新→退。
+    //   ★连带修复:旧第二断言切片 s.indexOf('closeChest()') 命中 closeInventory 内调用
+    //   (位次先于 openChestPanel)→slice 起点大于终点=空串,not.toContain 恒vacuous——
+    //   改用 chestTitle.textContent 界定的 vanilla 分支真实域,断言转活。
+    const body = s.slice(s.indexOf('private openChestPanel'), s.indexOf('this.chestTitle.textContent'));
+    const order = [
+      "if (this._builtLayout === 'vanilla') {",
+      'this.vinvReforgeOpen = false;',
+      'this.returnReforgeItem();',
+      'this.openInventory(true);',
+      'this.refreshAll();',
+      'return;',
+    ];
+    let at = -1;
+    for (const line of order) {
+      const i = body.indexOf(line);
+      expect(i, line).toBeGreaterThan(-1);
+      expect(i, `位次: ${line}`).toBeGreaterThan(at);
+      at = i;
+    }
+    // vanilla 分支后不再落 chestPanel display:block(独立面板=classic 专属;classic 臂
+    // 的 display='block' 在 chestTitle 之后=切片域外)
+    expect(body).not.toContain("chestPanel.style.display = 'block'");
   });
   it('关箱链:closeChest 清 openChest(箱条 pos 门失效→display:none)并随关包调用', () => {
     expect(uiSrc).toContain('closeChest() {\n    this.openChest = null;');

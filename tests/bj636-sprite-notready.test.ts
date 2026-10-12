@@ -8,7 +8,8 @@
 //   vnpc 恒 null(10s 冷却循环) → drawEnemy 跳画 = 全体怪物透明;刷新重进后 SW
 //   已接管+缓存命中 = 全体自愈(用户实报形态 1:1)。
 // 修复:preloadMiscAndNpcs(world 进场门槛 await 面)与 worldWarmUrls(legacy 逐文件
-//   warm 清单)双源补 NPC 主表全集(vanilla-npcs.json 696 键,~4.6MB)。
+//   warm 清单)双源补 NPC 主表全集(vanilla-npcs.json 696 键,~3.17MB——★C16c-F5
+//   2026-10-12 勘正,旧注 ~4.6MB 系未实测估算,盘上实测 3.167MB)。
 //
 // 三闸:
 //   ①渲染面 not-ready 语义锁 —— vnpc not-ready=null(=drawEnemy 跳画窗,即透明窗

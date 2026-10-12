@@ -28,7 +28,9 @@
 // 同域登记(不越界):377/308 染料通道未接线——draw 半宽切片块直用 projSprite 原片,
 //   不走 dFrameImg 染料闭包(原版 GetProjectileDesiredShader 对哨兵生效);且接线时
 //   projFrameSrcRect/Arrow 对两姿宽片 sw=img.width 须同步半宽化(否则 T0 相位错)。
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 // pngjs 无类型声明（同 tests/atlas-append-golden.test.ts 既有用法）
@@ -41,6 +43,7 @@ import { setProjSpriteOverride } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { lockSpiderMutation, unlockSpiderMutation, assertPristineDisk } from './spider-sentry-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import type { GameHooks } from '../src/entities/types';
 
 const ROOT = process.cwd();
@@ -266,9 +269,6 @@ describe('BJ612 C. 落地面锁（平台即止/边列窗/嵌入 10px 首拍承�
 // ===================== D. 变异自证（恰红+逐字节还原+sha256 对拍） =====================
 
 describe.skipIf(process.env.SW_BJ612_MUT)('BJ612 D. 变异自证', () => {
-  const readFileSync = (f: string) => require('node:fs').readFileSync(f, 'utf8') as string;
-  const writeFileSync = (f: string, s: string) => require('node:fs').writeFileSync(f, s);
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
   // ★BJ612 事故共锁（见 tests/spider-sentry-mutation-mutex.ts 头注）：本节 M-A 与
   //  BJ-C9-SP M9 同变异 MinionProj.ts——D 面持锁串行化+锁内毒盘面哨兵。
@@ -280,27 +280,18 @@ describe.skipIf(process.env.SW_BJ612_MUT)('BJ612 D. 变异自证', () => {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_BJ612_MUT: '1' },
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥/panic-safe 还原/残留自检+自愈）;毒盘哨兵经 onPristine 钩沿用。
+  //  逐字节还原对拍已由守卫 finally 内建（不一致即 throw）。
   const mutate = (file: string, trigger: string, replacement: string, filter: string): void => {
-    let cur = readFileSync(file);
-    if (!cur.includes(trigger) && cur.includes(replacement)) {
-      writeFileSync(file, cur.replace(replacement, trigger));   // 上轮 SIGKILL 泄漏自愈
-      cur = readFileSync(file);
-    }
-    const PRISTINE = cur;
-    expect(PRISTINE).toContain(trigger);
-    if (file === MINION) assertPristineDisk(PRISTINE);   // ★BJ612:毒盘面哨兵(并行变异污染拒绝捕获)
-    try {
-      writeFileSync(file, PRISTINE.replace(trigger, replacement));
+    withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(filter);
       expect(r.status, `变异须证红: ${replacement}`).not.toBe(0);
       expect(r.stdout).toContain(filter);
-    } finally {
-      writeFileSync(file, PRISTINE);
-    }
-    const restored = readFileSync(file);
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));
+    }, {
+      label: `BJ612 ${filter}`,
+      onPristine: (p) => { if (file === MINION) assertPristineDisk(p); },   // ★BJ612:毒盘面哨兵(并行变异污染拒绝捕获)
+    });
   };
 
   const MINION = join(process.cwd(), 'src', 'entities', 'MinionProj.ts');

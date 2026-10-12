@@ -30,12 +30,15 @@
 //      指名 341（名单线承重物证;真工具/现库零接触 sha256 对拍）;M2 现库 json 变异
 //      341 尘 196→31→判别子测试红（npcdust-mutation-mutex 共锁）→逐字节还原+sha256。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -256,7 +259,7 @@ describe('BJ484 C. 实战形态（473-476 bigMimicAI 激活/死亡链专项定�
 
 // ===================== D. 变异自证（原子+逐字节还原+sha256,共锁） =====================
 
-describe('BJ484 D. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ484_MUT)('BJ484 D. 变异自证', () => {   // ★残留普查波补 dam（全族同款习语）
   const EXTRACTOR = join(process.cwd(), 'tools', 'extract-npcdust.mjs');
   const LIVE_JSON = join(process.cwd(), 'src', 'data', 'vanilla-npcdust.json');
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
@@ -293,30 +296,42 @@ describe('BJ484 D. 变异自证', () => {
     }
   });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫;
+  //  JSON round-trip 变异走自定义算子（mutate/verifyPristine/isMutated 钩）,
+  //  域锁保留（闸面信号源）,文件锁在守卫内层,序恒定。
   it('M2 现库 json 变异 341 常量尘→四系值 → 判别子测试红（共锁窗内）→逐字节还原+sha256 对拍', () => {
     lockConsumerMutation();
-    const PRISTINE = readFileSync(LIVE_JSON, 'utf8');
-    const before = sha256(LIVE_JSON);
     try {
-      const parsed = JSON.parse(PRISTINE) as typeof TABLE;
-      // ★round-trip 闸：parse→stringify(indent 1) 必须逐字节还原现库（变异窗只碰目标值）
-      expect(JSON.stringify(parsed, null, 1) + '\n').toBe(PRISTINE);
-      // ★BJ479 同款触发闸（递归防波堤）：现库非 pristine（残留/上轮窗未还原）→ 此处
-      //   fail-fast,不再下写/不下发子测试——M2 变异(196→31)幂等,无此闸=子进程 -t 命中
-      //   本测试时无限自递归（曾 600s 爆匣+变异残留）。
-      const hit341 = parsed['341'].hit?.[0];
-      expect(hit341?.dust).toBe(196);
-      if (hit341) hit341.dust = 31;              // ★变异:常量尘 196→31（四系大宝箱值）
-      writeFileSync(LIVE_JSON, JSON.stringify(parsed, null, 1) + '\n');
-      // ★过滤器=「礼物怪尘档钉值」——只命中 A 面 341 金标,不命中 D 面（测试名不含该串,
-      //   防 M 系测试自匹配递归;M1/M2 名含裸「341」,禁用裸数字作过滤器）
-      const r = spawnVitest('礼物怪尘档钉值');
-      expect(r.status).not.toBe(0);              // ★变异证红:A 金标 341 判别捕获
-      expect(r.stdout).toContain('礼物怪尘档钉值');
+      withMutation(LIVE_JSON, '', '', () => {
+        // ★过滤器=「礼物怪尘档钉值」——只命中 A 面 341 金标,不命中 D 面（测试名不含该串,
+        //   防 M 系测试自匹配递归;M1/M2 名含裸「341」,禁用裸数字作过滤器）
+        const r = spawnVitest('礼物怪尘档钉值');
+        expect(r.status).not.toBe(0);              // ★变异证红:A 金标 341 判别捕获
+        expect(r.stdout).toContain('礼物怪尘档钉值');
+      }, {
+        label: 'BJ484 M2',
+        // ★纯净闸=round-trip 逐字节等价 + 341 命中 196（残留/上轮窗未还原→loud 红,
+        //   M2 变异幂等,无此闸=子进程自递归 600s 爆匣——BJ479 同款触发闸收编）
+        verifyPristine: (p) => {
+          const parsed = JSON.parse(p) as typeof TABLE;
+          if (JSON.stringify(parsed, null, 1) + '\n' !== p) throw new Error('round-trip 不等价');
+          if (parsed['341'].hit?.[0]?.dust !== 196) throw new Error('341 命中非 196（残留态）');
+        },
+        // ★盘面变异态判别:341 命中=31（精确到目标键,非子串误报面）
+        isMutated: (cur) => {
+          try { return (JSON.parse(cur) as typeof TABLE)['341'].hit?.[0]?.dust === 31; }
+          catch { return false; }
+        },
+        // ★变异算子:常量尘 196→31（四系大宝箱值）,round-trip 序列化保持逐字节格式
+        mutate: (p) => {
+          const parsed = JSON.parse(p) as typeof TABLE;
+          const hit341 = parsed['341'].hit![0]!;
+          hit341.dust = 31;
+          return JSON.stringify(parsed, null, 1) + '\n';
+        },
+      });
     } finally {
-      writeFileSync(LIVE_JSON, PRISTINE);        // 逐字节还原（原串写回）
+      unlockConsumerMutation();
     }
-    expect(sha256(LIVE_JSON)).toBe(before);      // sha256 对拍
-    unlockConsumerMutation();
   });
 });

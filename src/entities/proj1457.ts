@@ -662,13 +662,17 @@ export class ChloroClaymoreBlade extends Entity {
     }
     // ---- 挥击尾孢子（:42924-42947，两态都撒） ----
     if (num <= 0.8 && this.spawnSpore) {
-      const ms = p.attackSpeedMult > 0 ? 1 / p.attackSpeedMult : 1;   // meleeSpeed（Player.ts 倒数还原）
+      // ★R17-F2（2026-10-12）：Remap 实参 = meleeSpeed 字段 = CapAttackSpeeds 倒数档 M
+      //  （Player.cs:42928 `Remap(player.meleeSpeed,1f,1/3f,4f,2f)` 直读字段——本仓
+      //  attackSpeedMult 即 M,直取;Game.ts:21609 1127 同款先例。旧式 1/M=攻速和,
+      //  正攻速加成下恒饱和 remap=4,掷率不随攻速升=双重还原）。(int) 截断取整。
+      const ms = p.attackSpeedMult > 0 ? p.attackSpeedMult : 1;   // meleeSpeed=M 直取
       const remap = 4 + (2 - 4) * Math.min(1, Math.max(0, (ms - 1) / (1 / 3 - 1)));  // Remap(ms,1,1/3,4,2)
       // ★:42933-42938 的两处 `localAI[0]==localAI[1]/3` "保底帧"是死代码——AI_190
       //  （:42734-43002）全函数无 localAI[1] 赋值（恒 0 → 条件要求 localAI[0]==0，
       //  而首帧自增后 ≥1 永假）。原版孢子纯靠每帧 Next(Remap(meleeSpeed,1,1/3,4,2))==0
       //  掷。蓝队 R2-07：曾把死分支读成 animMax/3、2animMax/3 保底必出，孢子密度虚高
-      if (Math.floor(Math.random() * Math.max(1, Math.round(remap))) === 0) {
+      if (Math.floor(Math.random() * Math.max(1, Math.trunc(remap))) === 0) {   // (int) 截断（R17-F2）
         // :42926 vector9 = player.velocity×0.77 + vector7×5（vector7=随机侧向单位向量）
         const side = this.rot + (Math.random() * 2 - 1) * (Math.PI / 2) * 0.7 + this.dir * Math.PI / 2;
         const svx = p.vx * 0.77 + Math.cos(side) * 5;

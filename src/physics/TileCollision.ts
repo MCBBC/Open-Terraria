@@ -114,6 +114,16 @@ export interface Body {
   /** 湿身态（NPC.wet 碰撞盒触液）。unembedPass 对 wet 体整段跳过——水中嵌入由
    *  原版浮力/水物理接管（AI_001 wet 段 cs:61877/62080），兜底踢入水中=非原版扰动 */
   wet?: boolean;
+  /** ★BJ647（2026-10-12）：城镇 NPC 坐姿态（AI_007 ai[0]==5 族）。unembedPass 对
+   *  sitPose 体整段让位——原版坐锚 Bottom=(x*16+8+2*dir, y*16(+16))（NPC.cs:53285-86
+   *  /:55972-75）无净空门,贴墙椅（frameX 档朝墙侧 +2px）钉位后盒缘合法嵌墙 1-4px;
+   *  原版全文无 unembed 等价机制,vx=0 坐姿无位移=无碰撞响应=嵌墙稳定坐（Bottom−2px
+   *  探针恒椅格,坐满 900+rand(10800)）。横推把探针格打到邻列 → canSitAt 失败起身 →
+   *  夜间回家臂走回再坐 = 用户实录「走到右侧瞬移到左侧重新走路」循环。
+   *  ★撞名规避：独立 sitPose 不用 sitting——Player.sitting（Player.ts:2196,坐姿
+   *  交互态,每拍 moveAndCollide(this)）不得触发本让位面。TownNPC.fixedUpdate 头部
+   *  每 tick 同步 this.sitPose = this.sitting */
+  sitPose?: boolean;
   /** 连续中心格嵌入 tick 计数（unembedPass 延迟门用；脱出/未嵌入即复位） */
   embedTicks?: number;
   /** 本嵌入会话（embedTicks 未清零期）topEmbedded 横推已消耗预算 px
@@ -1401,6 +1411,15 @@ function unembedPass(b: Body, world: World): void {
   //  NPC 族 hoik=false（2026-09-01 登记债）救援不变;unembed-pass.test.ts 全部
   //  用例（凹龛/活埋/贴墙/刷角）Body 均缺省 falsy 不受影响。
   if (b.hoik) return;
+  // ★BJ647 2026-10-12：坐姿态整段让位（用户实报巫医 Kogi-ghi/海盗 David「走到右侧
+  //  瞬移到左侧重新走路」150t 循环;debug-report 十周年纪念种子 18-05/18-11 + 探针
+  //  _bj647-repro.mjs t=438-441 逐拍实录:forceSit 钉位 cx=62954=3934*16+8+2*1 →
+  //  本支 topEmbedded 2t 快速横推 −16px → 坐探针格从椅列变桌列 canSitAt 失败 →
+  //  起身臂 wT=90/tl=43 → 夜间回家臂 REST_LEG 325 重走 → 再坐再推）。原版坐锚无
+  //  净空门（NPC.cs:53285-86/:55972-75）,贴墙椅盒缘嵌墙 1-4px 是合法稳态;原版无
+  //  unembed 等价机制=嵌墙长坐（探针恒椅格）。本支纯自愈兜底对合法锚位让位,
+  //  与 wet/hoik/unwedgeDrift 让位判例同构。判别测试 tests/bj647-townnpc-wander。
+  if (b.sitPose) return;
   // ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃期整段让位（consume-once）。
   //  原版嵌入体的唯一自救 = AI_001 的 position.X -= velocity.X + direction
   //  （NPC.cs:62139 贴地支/:62331 滞空支，门 collideY+oldVelocity.Y≠0+

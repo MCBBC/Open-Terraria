@@ -26,6 +26,7 @@ import { ChumBucketProj } from '../src/entities/ChumBucketProj';
 import { SkyLanternProj } from '../src/entities/SkyLanternProj';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { VI } from '../src/data/itemKeys';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ572 面②:updateUse→tickWiresRadial 链读 this.wiresRadial（Object.create 桩绕过 ctor 字段初始化,缺位=flowerUpdate TypeError——残留普查波补桩）
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { applyBuffTicks } from '../src/entities/projStatus';
 import { isNpcShimmerImmune, npcShimmerTransformTo } from '../src/stats/Shimmer';
@@ -123,6 +124,8 @@ function updUseGame(heldVid: number, stack = 1) {
     timeUiHover: false, weatherUiHover: false };
   g.smartCursor = { showing: false };
   g.annotateMode = false;
+  g.wiresRadial = newWiresRadialState();   // ctor 类字段被 Object.create 绕过——updateUse→tickWiresRadial 必读
+  g._wiresRadialPrevRight = false;
   g.prevSwingMouse = false;
   g.mining = null;
   g.swingHitSet = new Set<number>();

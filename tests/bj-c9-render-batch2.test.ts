@@ -42,11 +42,14 @@
 // 变异自证（E 块,子进程对拍+sha256 逐字节还原）：M1 漏乘回潮/M2 削底系数漂移/
 //  M3 multiply 摘除/M4 549 档摘除/M5 289 tintA 漂移/M6 498 色面漂移/M7 tint 门摘除/
 //  M8 F7 vx×2.3 摘除 → 恰红。
-import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+
 import { join } from 'node:path';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Renderer } from '../src/render/Renderer';
 import { npcWhiteLiftAlpha } from '../src/render/npcExtraParts';
 import { PROJ_ALPHA_MOD, projConstFullbright, projConstTint } from '../src/data/vanillaProjAlpha';
@@ -85,8 +88,15 @@ describe('BJ-C9 F1. 548 核心笔色 = Lerp((140,50,255,0)×0.6f, White, .5)（M
     expect(src).toContain('static readonly BJ_C9_CORE_TINT: [number, number, number] = [169, 142, 204];');
     expect(src).toContain('Renderer.BJ_C9_CORE_TINT);');   // 消费位接线
     // 削底系数 127/255 逐字（旧 128=127.5 误上取整,F8 偏差维持注）
-    expect(src).toContain('ctx.globalAlpha = 127 / 255;');
-    expect(src).not.toContain('ctx.globalAlpha = 128 / 255;');
+    // ★残留普查波重锚（2026-10-12）：并行刀 4143 掉落物 FX 专支在 Renderer.ts 合法
+    //  新增 `ctx.globalAlpha = 128 / 255;`（原版 :39385 白 A128 半透垫层,与 F1 消费点
+    //  无关）——全文件禁 128 断言误伤,收窄为 F1 消费点邻域窗（±1200 字符内禁 128）。
+    const f1Idx = src.indexOf('Renderer.BJ_C9_CORE_TINT);');
+    expect(f1Idx, 'F1 消费点在位').toBeGreaterThan(0);
+    // 实测 127 行距消费点 1319 字符——窗取 ±2000（4143 的 128 在 11 万字符外,天然排除）
+    const f1Window = src.slice(Math.max(0, f1Idx - 200), f1Idx + 2000);
+    expect(f1Window).toContain('ctx.globalAlpha = 127 / 255;');
+    expect(f1Window).not.toContain('ctx.globalAlpha = 128 / 255;');
   });
 });
 
@@ -360,28 +370,14 @@ describe.skipIf(process.env.SW_BJ_C9_MUT)('BJ-C9 E. 变异自证（≥6 发恰�
       cwd: process.cwd(), encoding: 'utf8', timeout: 600_000,
       env: { ...process.env, SW_BJ_C9_MUT: '1' },   // ★子进程豁免变异面
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥/panic-safe 还原/残留自检+自愈）;本文件只留恰红断言。
   const mutate = (file: string, trigger: string, replacement: string, target: string, filter: string): void => {
-    // ★自愈前置（上轮运行被 SIGKILL 中断在变异窗=盘上残留变异串的复原位）：
-    //  含变异标记而缺触发串 → 先还原触发串再取 PRISTINE,保证本发可重入。
-    let cur = readFileSync(file, 'utf8');
-    if (!cur.includes(trigger) && cur.includes(replacement)) {
-      writeFileSync(file, cur.replace(replacement, trigger));
-      cur = readFileSync(file, 'utf8');
-    }
-    const PRISTINE = cur;
-    expect(PRISTINE, `触发串必须在位: ${trigger}`).toContain(trigger);
-    try {
-      writeFileSync(file, PRISTINE.replace(trigger, replacement));
+    withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(target, filter);
       expect(r.status, `变异须证红: ${replacement}`).not.toBe(0);
       expect(r.stdout).toContain(filter);
-    } finally {
-      writeFileSync(file, PRISTINE);
-    }
-    const restored = readFileSync(file, 'utf8');
-    expect(restored).toBe(PRISTINE);                     // 逐字节还原
-    expect(sha256(restored)).toBe(sha256(PRISTINE));     // sha256 对拍
+    }, { label: `BJ-C9 ${target} ${filter}` });
   };
 
   it('M1 F1 漏乘回潮（BJ_C9_CORE_TINT 169→198）→ bj547 tint 钉值红', () => {

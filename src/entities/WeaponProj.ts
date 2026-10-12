@@ -1716,15 +1716,16 @@ const SPEAR_SIZE: Record<number, [number, number]> = {
   481: [22, 22],   // Chain Guillotines（:5563-5572 width=height=22）
 };
 
-/** AI_019_Spears_GetExtensionHitbox（Projectile.cs:43530-43571）纯函数：
+/** AI_019_Spears_GetExtensionHitbox（Projectile.cs:47034-47073——1456 伪锚 :43530-43571
+ *  勘正 R17-F4）纯函数：
  *  105 昆恩枪/46 暗黑长枪/153 腐叉（default return false——其余长矛无延伸盒）在
- *  【伸出相】（itemAnimation ≥ itemAnimationMax/3，:43533 缩回相不生成）沿速度向
+ *  【伸出相】（itemAnimation ≥ itemAnimationMax/3，:47037-47040 缩回相不生成）沿速度向
  *  生成前向延伸方盒：
  *    num2 = Remap(itemAnimation, max, ⌊max/3⌋, 0,1) = t/(max−⌊max/3⌋)（出生 0 →
  *           伸出相末 1，钳 [0,1]）
  *    距离 num7 = 10 + len·num2（len：105/46=50、153=40；default 30）、
  *    边长 num8 = 10 + size·num2（size：105=20、46=15、153=10；default 10）
- *    len ×= 1/meleeSpeed（:43559——本仓 attackSpeedMult = 1/meleeSpeed）
+ *    len ×= 1/meleeSpeed（:47066——实参 spdMul = 1/attackSpeedMult = 攻速和 1/M）
  *    盒 = CenteredRectangle(Center + velocity向·num7, (num8,num8))
  *  消费：伤害 Colliding 步进盒（:14554-14576，hitEnemies extBox 参）+ CutTiles
  *  （:14176-14179 CutTilesAt(extensionBox)）。t/dur 与 SpearProj 的 itemAnimation
@@ -1734,18 +1735,18 @@ export function spearExtensionHitbox(
   cx: number, cy: number, dx: number, dy: number,
   attackSpeedMult = 1,
 ): { x: number; y: number; w: number; h: number } | null {
-  if (projId !== 105 && projId !== 46 && projId !== 153) return null;   // :43544 default
-  if (dur - t < dur / 3) return null;                    // :43533-43535 缩回相（浮点 max/3）
-  const num3 = Math.floor(dur / 3);                                     // :43536 int 除法
+  if (projId !== 105 && projId !== 46 && projId !== 153) return null;   // :47051-47052 default
+  if (dur - t < dur / 3) return null;                    // :47037-47040 缩回相（浮点 max/3）
+  const num3 = Math.floor(dur / 3);                                     // :47043 int 除法
   let num4 = 50, num6 = 15;
   if (projId === 105) { num4 = 50; num6 = 20; }
   else if (projId === 153) { num4 = 40; num6 = 10; }
-  num4 *= attackSpeedMult;                                              // :43559
-  const num2 = Math.min(1, Math.max(0, t / (dur - num3)));              // :43539 Remap
-  const num7 = 10 + num4 * num2;                                        // :43560
-  const num8 = 10 + num6 * num2;                                        // :43561
-  const ccx = cx + dx * num7, ccy = cy + dy * num7;                     // :43562
-  return { x: ccx - num8 / 2, y: ccy - num8 / 2, w: num8, h: num8 };    // :43563
+  num4 *= attackSpeedMult;                                              // :47066（R17-F4 勘正）
+  const num2 = Math.min(1, Math.max(0, t / (dur - num3)));              // :47044 Remap
+  const num7 = 10 + num4 * num2;                                        // :47067
+  const num8 = 10 + num6 * num2;                                        // :47068
+  const ccx = cx + dx * num7, ccy = cy + dy * num7;                     // :47070
+  return { x: ccx - num8 / 2, y: ccy - num8 / 2, w: num8, h: num8 };    // :47071
 }
 
 export class SpearProj extends Entity {
@@ -1970,7 +1971,7 @@ export class SpearProj extends Entity {
         }
       }
     }
-    // 前向延伸盒（AI_019_Spears_GetExtensionHitbox :43530-43571，仅 105/46/153 伸出相）
+    // 前向延伸盒（AI_019_Spears_GetExtensionHitbox :47034-47073，仅 105/46/153 伸出相）
     const extBox = spearExtensionHitbox(this.projId, this.t, this.dur,
       this.cx, this.cy, this.dx, this.dy, this.spdMul);
     // CutTiles（Projectile.CutTiles aiStyle 19 支 :14176-14179）：CutTilesAt(extensionBox)
@@ -3772,7 +3773,8 @@ export class YoyoProj extends Entity {
     this.ghostRing?.record(this.x, this.y, this.rot, this.dir, true);
   }
 
-  /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段）:-2 只被弹开（不触发
+  /** 命中链（Projectile.cs:13288-13333 aiStyle 99 段——1456 伪锚 :12467-12508 勘正
+   *  R17-F4;活跃反弹+烧段 :13323-13333）:-2 只被弹开（不触发
    *  Counterweight）;其余调 Counterweight + 方向定号;ai0>=0 活跃反弹 +
    *  localAI[0] += 20（无视线 +40,寿命快捷烧） */
   private onYoyoHit(e: unknown, game: GameHooks) {
@@ -3798,9 +3800,11 @@ export class YoyoProj extends Entity {
         const bd = Math.hypot(bx, by) || 1;
         this.vx = this.vx * -0.5 + (bx / bd) * push;
         this.vy = this.vy * -0.5 + (by / bd) * push;
-        // 寿命快捷烧（:12501-12505）：localAI[0] += 20;对玩家无视线再 +40
+        // 寿命快捷烧（:13323-13333——1456 伪锚 :12501-12505 勘正 R17-F1/F4）：vanilla
+        // localAI[0] += 20f（:13327）;无视线再 +40f（:13330）【无除式】,除式只在寿命换算
+        // :68803 num /= (1f+meleeSpeed)/2——本仓预除模型两站同 M（与 :3500 同款直取）
         const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
-        const vms = 1 / (p.attackSpeedMult || 1);
+        const vms = p.attackSpeedMult || 1;   // ★R17-F1 直取 M;旧式 1/(attackSpeedMult||1)=攻速和,命中烧方向反
         this.lifeT += (noLos ? 60 : 20) / 60 / ((1 + vms) / 2);
       }
     }
@@ -4682,7 +4686,8 @@ export class FlailProj extends Entity {
     this.handX = p.cx;
     this.handY = p.cy;
     this.hitCd.tick();
-    // meleeSpeed 缩放链（:41151-41159,1/meleeSpeed）——repo attackSpeedMult 语义同向(>1 更快)
+    // meleeSpeed 缩放链（:44629-44635 meleeSpeed→num16 七连乘——1456 伪锚 :41151-41159 勘正
+    //  R17-F4）——inv = 1/M = 原版 num16（攻速和,>1 更快）
     const inv = 1 / (p.attackSpeedMult || 1);
     const throwSpd = this.prm.throwSpeed * inv;
     const pullAccel = this.prm.pullAccel * inv;

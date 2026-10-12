@@ -18,9 +18,12 @@
 //  真 Arrow fixedUpdate 驱动 + Math.random=0 钉死（尘链掷率全确定性）。
 //  ★变异证红（BJ606 习语）：M1 AI_193 寿命杀 72→7200 / M2 演出版 elf 半旗摘除 /
 //    M3 尘链 B 掷率 0.5→0 恰红（逐字节还原 + sha256 对拍，见套件尾变异块）。
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Arrow, flameTongueEnv, flameTongueFrame, flameTongueOps } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -453,8 +456,6 @@ describe('§8 演出面接线源锚', () => {
 //    SW_BJ642_MUT=1 时本组跳过（变异运行读环境位跳过自证组,防递归）
 // ============================================================
 describe.skipIf(process.env.SW_BJ642_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
-  const writeFileSync = (f: string, s2: string) => require('node:fs').writeFileSync(f, s2);
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
 
   const spawnVitest = (filter: string) => spawnSync(
@@ -462,17 +463,11 @@ describe.skipIf(process.env.SW_BJ642_MUT)('③ 变异自证（恰红+逐字节�
       cwd: process.cwd(), encoding: 'utf8', timeout: 600_000,
       env: { ...process.env, SW_BJ642_MUT: '1' },
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥=bj642/bj643 同变异 Arrow.ts 联跑互染根除/panic-safe 还原/
+  //  残留自检+自愈）;本文件只留 spawnVitest+恰红双门断言。
   const mutate = (file: string, trigger: string, replacement: string, filter: string): void => {
-    let cur = readFileSync(file, 'utf8');
-    if (!cur.includes(trigger) && cur.includes(replacement)) {
-      writeFileSync(file, cur.replace(replacement, trigger));   // 上轮 SIGKILL 泄漏自愈
-      cur = readFileSync(file, 'utf8');
-    }
-    const PRISTINE = cur;
-    expect(PRISTINE).toContain(trigger);
-    try {
-      writeFileSync(file, PRISTINE.replace(trigger, replacement));
+    withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(filter);
       const out = r.stdout + r.stderr;
       // 恰红双门：退出码非零 ∨ 输出面含红账（联跑池并发下 exit code 可能被
@@ -481,12 +476,7 @@ describe.skipIf(process.env.SW_BJ642_MUT)('③ 变异自证（恰红+逐字节�
       expect(red, `变异须证红: ${replacement}`).toBe(true);
       expect(out).toContain(filter);
       expect(out).not.toContain('没有找到测试');
-    } finally {
-      writeFileSync(file, PRISTINE);
-    }
-    const restored = readFileSync(file, 'utf8');
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));            // sha256 对拍（逐字节还原）
+    }, { label: `BJ642 ${filter}` });
   };
 
   const ARROW = join(process.cwd(), 'src', 'entities', 'Arrow.ts');

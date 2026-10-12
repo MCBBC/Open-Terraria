@@ -13,9 +13,12 @@
 //  ★变异证红（BJ606 习语：spawnSync 子进程恰红 + 逐字节还原 + sha256 对拍）：
 //    M1 642 扫摆摘除 / M2 642 寿命 50→500 / M3 644 引爆 t30→t0（回退旧即时档）/
 //    M4 644 引爆盒 60→14（回退旧窄盒档） 各必恰红。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
@@ -246,10 +249,15 @@ describe('② 644 彩虹水晶爆裂（aiStyle112 644 支）', () => {
     for (const b of added) (b as RainbowCrystalBurst).fixedUpdate(1, hooks);
     const after = e.hits.length + ring.hits.length;
     for (let t = 0; t < 5; t++) for (const b of added) (b as RainbowCrystalBurst).fixedUpdate(1, hooks);
-    expect(e.hits.length + ring.hits.length).toBe(after);              // 单发语义（usesIDStatic :6951）
+    expect(e.hits.length + ring.hits.length).toBe(after);              // t=30-35 无再引爆（下一段在 t=60 Kill;★C16a-F3）
   });
 
-  it('t=60 Kill 二段爆花（无伤害）+ 宿主 643 死全扫（:73336）', () => {
+  it('t=60 Kill 二段爆花+二段伤害（盒内全体含已命中者;★C16a-F3 破钉重产）+ 宿主 643 死全扫（:73336）', () => {
+    // ★C16a-F3 破钉重产（R1-F1 纪律）：旧钉「二段零伤=单发语义」系误读判谳——
+    //  644 idStaticNPCHitCooldown=−1（:468 字段缺省）→ :14036 写 count+(uint)(−1)
+    //  =count−1（uint 回绕）,门 :606-608 `stored<=count` 恒真=免疫面零阻;
+    //  :14035 命中尾 immune[owner]=0 清窗 → t=60 二段 Damage（:73421-73428）对
+    //  盒内全体（含 t=30 已命中者）成立
     const e = mkEnemy(1, 60 * 16 + 200, 110 * 16);
     const { hooks, player, added } = makeHooks([e]);
     const g = sentry(player, hooks, 643, 60 * 16, 110 * 16);
@@ -259,7 +267,7 @@ describe('② 644 彩虹水晶爆裂（aiStyle112 644 支）', () => {
     const hitsAt30 = e.hits.length;                                    // t=30 已伤（真弹语义）
     for (let t = 31; t < 60 && !b0.dead; t++) b0.fixedUpdate(1, hooks);
     expect(b0.dead).toBe(true);                                        // 60t Kill（旧即时 AoE 无寿命面）
-    expect(e.hits.length).toBe(hitsAt30);                              // 二段零伤（单发语义）
+    expect(e.hits.length).toBe(hitsAt30 + 1);                          // 二段伤害=+1 拍（:73421-73430）
     // 宿主扫除
     const b1 = added[1] as RainbowCrystalBurst;
     g.dead = true;
@@ -286,8 +294,6 @@ describe('② 纯函数（Disco 色相链）', () => {
 //    SW_BJ639_MUT=1 时本组跳过（变异运行读环境位跳过自证组,防递归）
 // ============================================================
 describe.skipIf(process.env.SW_BJ639_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
-  const writeFileSync = (f: string, s: string) => require('node:fs').writeFileSync(f, s);
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
 
   const spawnVitest = (filter: string) => spawnSync(
@@ -295,26 +301,14 @@ describe.skipIf(process.env.SW_BJ639_MUT)('③ 变异自证（恰红+逐字节�
       cwd: process.cwd(), encoding: 'utf8', timeout: 600_000,
       env: { ...process.env, SW_BJ639_MUT: '1' },
     });
-  const sha256 = (b: string) => createHash('sha256').update(b).digest('hex');
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （跨套件按文件互斥/panic-safe 还原/残留自检+自愈）;本文件只留恰红断言。
   const mutate = (file: string, trigger: string, replacement: string, filter: string): void => {
-    let cur = readFileSync(file, 'utf8');
-    if (!cur.includes(trigger) && cur.includes(replacement)) {
-      writeFileSync(file, cur.replace(replacement, trigger));   // 上轮 SIGKILL 泄漏自愈
-      cur = readFileSync(file, 'utf8');
-    }
-    const PRISTINE = cur;
-    expect(PRISTINE).toContain(trigger);
-    try {
-      writeFileSync(file, PRISTINE.replace(trigger, replacement));
+    withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(filter);
       expect(r.status, `变异须证红: ${replacement}`).not.toBe(0);
       expect(r.stdout + r.stderr).toContain(filter);
-    } finally {
-      writeFileSync(file, PRISTINE);
-    }
-    const restored = readFileSync(file, 'utf8');
-    expect(restored).toBe(PRISTINE);
-    expect(sha256(restored)).toBe(sha256(PRISTINE));            // sha256 对拍（逐字节还原）
+    }, { label: `BJ639 ${filter}` });
   };
 
   const MINION = join(process.cwd(), 'src', 'entities', 'MinionProj.ts');

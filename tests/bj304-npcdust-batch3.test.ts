@@ -16,10 +16,13 @@
 //   D. 变异自证——M1 摘 fadeIn 算子应用=叶 fadeIn 断言红；M2 摘无臂占位掷流=524 耗掷锁红。
 //      原子+逐字节还原（禁 git checkout）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -407,7 +410,7 @@ describe('BJ304 C. 边界', () => {
 //   上轮残留毒化下轮 B 面——快照+afterEach 双保险后,残留至多活到本轮 afterEach）。
 const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
 // ★消费面变异互斥（与 bj296 D 面共锁,实现=tests/npcdust-mutation-mutex.ts）
-describe('BJ304 D. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ304_MUT)('BJ304 D. 变异自证', () => {   // ★残留普查波补 dam（全族同款习语）
   // ★子进程模式（era-guard ④/bj296 D 同款）：变异写盘 → 子 vitest 只跑 B 面（-t 过滤,D 面
   //   不注册执行=无递归）→ 判别面红 = 行为锁对变异有捕获力;finally+afterEach 逐字节还原
   //   （禁 git checkout）。
@@ -428,31 +431,28 @@ describe('BJ304 D. 变异自证', () => {
     unlockConsumerMutation();
   });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （按目标文件互斥/panic-safe 还原/残留自检+自愈）;域锁/快照钉面保留（闸面信号源）,
+  //  文件锁在守卫内层,序恒定;纯净基准改由守卫持锁现读（快照仅作 afterEach 钉面）。
   it('M1 摘 fadeIn 算子应用（case 空转）→ 叶 fadeIn=1 断言红（B 面 416 hit 必炸）', () => {
-    const TRIGGER = "      case 'fadeIn': d.fadeIn = op[1]; break;";
-    expect(PRISTINE).toContain(TRIGGER);                 // 快照自证（残留→loud 红,不静默）
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, "      case 'fadeIn': break; // ★变异:摘 fadeIn 应用"));
-      const r = spawnVitest('BJ304 B. 批3 消费行为');
-      expect(r.status).not.toBe(0);                       // ★变异证红:fadeIn 落尘锁捕获
-      expect(r.stdout).toContain('416 hit');              // 指名判别组
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);                  // 逐字节还原（禁 git checkout）
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      "      case 'fadeIn': d.fadeIn = op[1]; break;",
+      "      case 'fadeIn': break; // ★变异:摘 fadeIn 应用",
+      () => {
+        const r = spawnVitest('BJ304 B. 批3 消费行为');
+        expect(r.status).not.toBe(0);                       // ★变异证红:fadeIn 落尘锁捕获
+        expect(r.stdout).toContain('416 hit');              // 指名判别组
+      }, { label: 'BJ304 M1' });
   });
 
   it('M2 摘无臂占位掷流（空分支提前 continue）→ 524 耗掷锁红（B 面 524 hit 必炸）', () => {
-    const TRIGGER = "      const roll = Math.floor(Math.random() * el.roll.k);\n      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;\n      const arm = pass ? el.t : el.e;";
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, "      if (!el.t && !el.e) { continue; } // ★变异:摘占位掷流\n" + TRIGGER));
-      const r = spawnVitest('BJ304 B. 批3 消费行为');
-      expect(r.status).not.toBe(0);                       // ★变异证红:占位耗掷锁捕获
-      expect(r.stdout).toContain('524 hit');              // 指名判别组
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      "      const roll = Math.floor(Math.random() * el.roll.k);\n      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;\n      const arm = pass ? el.t : el.e;",
+      "      if (!el.t && !el.e) { continue; } // ★变异:摘占位掷流\n      const roll = Math.floor(Math.random() * el.roll.k);\n      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;\n      const arm = pass ? el.t : el.e;",
+      () => {
+        const r = spawnVitest('BJ304 B. 批3 消费行为');
+        expect(r.status).not.toBe(0);                       // ★变异证红:占位耗掷锁捕获
+        expect(r.stdout).toContain('524 hit');              // 指名判别组
+      }, { label: 'BJ304 M2' });
   });
 });

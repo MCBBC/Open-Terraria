@@ -13360,7 +13360,7 @@ export class Game implements GameHooks {
    *  全 ≥20（items.ts VANILLA_TOOL_POWERS 桥）,旧 max(10,·) 恒惰性但非 1457 语义） */
   private heldUseAnimation(def: (typeof ITEM_DEFS)[number] | null): number {
     if (!def) return 30;
-    if (def.tool?.speed) return def.tool.speed;   // 1457：base=useAnimation 原值（:4448-4480），下限 1 在 useSwing 侧
+    if (def.tool?.speed) return def.tool.speed;   // 1457：base=useAnimation 原值（ApplyItemAnimation :4448-4480 → melee 走 SetItemAnimation(useAnimation,meleeSpeed);itemTime 孪生=ApplyItemTime(Item,mult) :4401-4414——R17-F4 补锚），下限 1 在 useSwing 侧
     const vid = def.vid ?? -1;
     if (vid >= 0) {
       const ua = itemCombat(vid)?.useAnimation;
@@ -15463,7 +15463,8 @@ export class Game implements GameHooks {
     if (runModItemUse(this, heldDef, held, tx, ty)) return;
 
     // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速倍率 =
-    // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）。
+    // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:29253-29262——
+    // 1456 伪锚 :28555-28574 勘正 R17-F4）。
     // ★工具豁免：镐/斧/锤同时是 melee(Item.cs melee=true)——cwMelee 会命中,若不豁免
     //  本分支 return 会把挖掘链(tryMine)整个截胡 = 镐斧无法挖掘/砍树(2026-08-13 实锤:
     //  铜镐 tryMine 调用数 0)。工具优先落工具分支(自带低伤挥击打怪),仅无工具的
@@ -15610,7 +15611,11 @@ export class Game implements GameHooks {
         const [mvx2] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         const mdir = mvx2 >= this.player.cx ? 1 : -1;
         const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
-        const scanMax = Math.min(15, Math.floor(Math.abs(mvx2 - this.player.cx) / TILE) + (mdir < 0 ? 1 : 0));
+        // ★C16a-F12（2026-10-12）：num56 距离基准=player.position.X（顶左,Player.cs
+        //  :48285）非 Center——右半场差 +0.625 格（半宽 10px）,整数截断下扫描列数
+        //  可差 1;+1 修正=direction<0（useStyle5+useTurn → direction=鼠标侧,mdir
+        //  同相;旧实现基准取 cx=≤0.6 格边界差）
+        const scanMax = Math.min(15, Math.floor(Math.abs(mvx2 - this.player.x) / TILE) + (mdir < 0 ? 1 : 0));
         const land42 = mysticSnakeLandingSpot(this.world.store,
           this.player.cx, this.player.cy, ptx, pty, mdir, scanMax);
         if (land42) {
@@ -19659,7 +19664,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // AI_003 1:1：出程无摩擦直线/命中·撞墙·计数三门回收/返回段目标速度制/回手消失
         // （AI_003_Boomerang :36623-37352;第 8 参 = 掷出瞬间玩家 facing → 原版 direction,
         //   自旋符号由 Projectile.Update :15674-15682 每 tick=sign(vx) 接管）
-        // 初速 = shootSpeed/meleeSpeed（ItemCheck_Shoot :46430-46434 melee 弹速缩放,
+        // 初速 = shootSpeed/meleeSpeed（ItemCheck_Shoot :47463+:47466-47469 melee 弹速缩放
+        //   ——1456 伪锚 :46430-46434 勘正 R17-F4,
         //   回旋镖族不在 NoMeleeSpeedVelocityScaling 排除表;attackSpeedMult=1/meleeSpeed）
         const throwSpd = meleeThrowSpeed(cw.shootSpeed, this.player.attackSpeedMult);
         // 出手锚点 = 玩家盒心（R30 §4.2/B-3 落点清单 #1）：ItemCheck_Shoot 通用尾支
@@ -19687,7 +19693,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       case 'spear': {
         // AI_019：随角色前刺——伸缩包络按型号参数表(AI_019_Spears_GetSpearOffset),位移=offset×shootSpeed
-        const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed * (ps?.size ?? 1), cw.useTime, // P:46431 num13=shootSpeed×scale(词缀 size)
+        // R17-F3：膛速 = shootSpeed 不吃词缀 size（:47466 speed=sItem.shootSpeed →
+        //   :47469 /=meleeSpeed;通用 NewProjectile :47948 亦无 scale 参——1456 伪锚
+        //   P:46431 "num13=shootSpeed×scale" 勘正;vanilla 池 size 恒 1=潜伏发散摘除）
+        const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed, cw.useTime,
           cw.damage, cw.knockback, cw.shoot);
         // ★BJ489 def-3：spear 掷率=hitEnemies 注入支 rollVanillaHitCrit（ai19 全族
         //  melee 旗,命中拍动态）——critTotal 冻结载体退役
@@ -19715,7 +19724,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 同型在场门 = SetDummyItemTime(5) 每 tick 续期(:24942-24947,itemTime>0
         // 阻再用)——拳未回手不能再开火;481 不设门且不走本支(R30 专支)
         if (anchoredActive(this.entities.projectiles, cw.shoot)) return;
-        const throwSpd = meleeThrowSpeed(cw.shootSpeed * (ps?.size ?? 1), this.player.attackSpeedMult);
+        // R17-F3：×ps.size 摘除——:47466 speed=sItem.shootSpeed 不吃 size（vanilla 池
+        //   size 恒 1=潜伏发散;/M 缩放由 meleeThrowSpeed 承载）
+        const throwSpd = meleeThrowSpeed(cw.shootSpeed, this.player.attackSpeedMult);
         const anchored = new AnchoredProj(Math.cos(ang), Math.sin(ang), throwSpd,
           cw.damage, cw.knockback, cw.shoot);
         placeAtShootSpawn(anchored, this.player.cx, this.player.cy);   // 盒心=玩家中心(:47588/:10878)

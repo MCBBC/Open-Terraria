@@ -626,8 +626,10 @@ export class SpriteAtlas {
    *  (SPA fallback 回 index.html),vnpc→ensureVImage 10s 冷却循环重试恒空 →
    *  drawEnemy if (r) 跳画 = 全体怪物透明,直到刷新后 SW 接管+缓存命中自愈。
    *  修=进世界门槛(await preloadSceneAssets)预载 NPC 主表全集(vanilla-npcs.json
-   *  696 键,~4.6MB,与物品图标 24MB 同量级远小于 tile 表)——进游戏零懒加载
-   *  竞态窗;NPC_X_Alt_* 变体(144 张,特殊渲染分支消费)不进清单,按需自愈。 */
+   *  696 键,~3.17MB,远小于物品图标 24MB/tile 表)——进游戏零懒加载
+   *  竞态窗;NPC_X_Alt_* 变体(22 张,特殊渲染分支消费)不进清单,按需自愈。
+   *  ★C16c-F5(2026-10-12) 勘正:旧注 ~4.6MB/144 张系未实测估算——盘上实测预载集
+   *  3.167MB(696 键派生 NPC_{id}.png ∪ vanilla.json npcs 20 特殊表),Alt_* 22 张。 */
   preloadMiscAndNpcs(): Promise<void> {
     return this.preloadFiles([
       ...VANILLA_MISC,

@@ -1073,6 +1073,9 @@ export class TownNPC extends Entity {
    *  FindGoodRestingSpot 扫 home 附近可坐格 → 走到/传送落到落座格 → TryForcingSitting。
    *  渲染消费：drawPartyHat 坐姿帽 Y 链（sittingHatY）+ hatStateOffsetX 的 550 档 */
   sitting = false;
+  /** ★BJ647：坐姿态物理投影（Body.sitPose,unembedPass 让位面）。fixedUpdate 头部
+   *  每 tick 同步 = this.sitting;字段独立于 Player.sitting（交互态撞名规避） */
+  sitPose = false;
   /** ai[1] 坐姿倒计时（入座 = 900+rand(10800)，:53283） */
   private sitTimer = 0;
   /** 本 tick 的夜椅 rest spot（FindGoodRestingSpot 缓存；白天/无 home = null） */
@@ -2204,6 +2207,10 @@ export class TownNPC extends Entity {
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
+    // ★BJ647：坐姿态投影到物理体（unembedPass 让位面读 sitPose;TileCollision.ts
+    //   Body.sitPose 字段注=本案定谳。不用 sitting 撞 Player.sitting 交互态）。
+    //   每 tick 头同步:微光上升/被缚早退分支与主物理段三处 moveAndCollide 全覆盖。
+    this.sitPose = this.sitting;
     // ★SW-BJ55 圣诞老人季末自灭（★1457 NPC.cs:53708,1458 同行号零漂移）：
     //   type==142 && Main.netMode!=1 && !Main.xMas → StrikeNPCNoInteraction(9999,0,0)
     //   ——圣诞窗（checkXMas Main.cs:13290：12/15-31 ∪ forceXMasForToday/Forever）

@@ -28,10 +28,13 @@
 //   D. 变异自证——M1 摘 noLight 算子=426 环 noLight 断言红;M2 摘 oldPos 绑定=402 轨迹位红。
 //      npcdust-mutation-mutex 共锁（bj296/bj304 同锁,锚含批4）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
+import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -433,7 +436,7 @@ describe('BJ327 C. 边界', () => {
 });
 
 // ===================== D. 变异自证（原子+逐字节还原,共锁） =====================
-describe('BJ327 D. 变异自证', () => {
+describe.skipIf(process.env.SW_BJ327_MUT)('BJ327 D. 变异自证', () => {   // ★残留普查波补 dam（全族同款习语）
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
   const spawnVitest = (filter: string) => spawnSync('npx', ['vitest', 'run', 'tests/bj327-npcdust-batch4.test.ts', '--no-file-parallelism', '-t', filter], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
@@ -450,31 +453,27 @@ describe('BJ327 D. 变异自证', () => {
     unlockConsumerMutation();
   });
 
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫
+  //  （按目标文件互斥/panic-safe 还原/残留自检+自愈）;域锁/快照钉面保留,文件锁在守卫内层。
   it('M1 摘 noLight 算子应用（case 空转）→ 426 环 noLight 断言红（B 面 idPick 带权必炸）', () => {
-    const TRIGGER = "      case 'noLight': d.noLight = op[1]; break;";
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, "      case 'noLight': break; // ★变异:摘 noLight 应用"));
-      const r = spawnVitest('426/427 death idPick');
-      expect(r.status).not.toBe(0);               // ★变异证红:noLight 落活尘锁捕获
-      expect(r.stdout).toContain('426/427 death idPick');
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      "      case 'noLight': d.noLight = op[1]; break;",
+      "      case 'noLight': break; // ★变异:摘 noLight 应用",
+      () => {
+        const r = spawnVitest('426/427 death idPick');
+        expect(r.status).not.toBe(0);               // ★变异证红:noLight 落活尘锁捕获
+        expect(r.stdout).toContain('426/427 death idPick');
+      }, { label: 'BJ327 M1' });
   });
 
   it('M2 摘 oldPos 绑定（恒取最新位）→ 402 轨迹位判别红（B 面 深度2 hit 必炸）', () => {
-    const TRIGGER = '    x = e.histXAt(ctx.oldIdx);';
-    expect(PRISTINE).toContain(TRIGGER);
-    try {
-      writeFileSync(CONSUMER, PRISTINE.replace(TRIGGER, '    x = e.histXAt(0); // ★变异:摘轨迹位绑定'));
-      const r = spawnVitest('402 hit（深度2,全门过）');
-      expect(r.status).not.toBe(0);               // ★变异证红:old0/old1 双位判别捕获
-      expect(r.stdout).toContain('402 hit');
-    } finally {
-      writeFileSync(CONSUMER, PRISTINE);
-    }
-    expect(readFileSync(CONSUMER, 'utf8')).toBe(PRISTINE);
+    withMutation(CONSUMER,
+      '    x = e.histXAt(ctx.oldIdx);',
+      '    x = e.histXAt(0); // ★变异:摘轨迹位绑定',
+      () => {
+        const r = spawnVitest('402 hit（深度2,全门过）');
+        expect(r.status).not.toBe(0);               // ★变异证红:old0/old1 双位判别捕获
+        expect(r.stdout).toContain('402 hit');
+      }, { label: 'BJ327 M2' });
   });
 });
