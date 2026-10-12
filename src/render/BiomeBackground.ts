@@ -731,6 +731,20 @@ export class BiomeBackground {
     return this.alphaFront;
   }
 
+  /** mod 面样式探针（lights-and-shadows 消费）：Main.snowBG[0]/desertBG[0] 等价
+   *  ——活动样式行三元组首元。雪原 t 首元 258/263/267=原版 mod 日光白化判定档；
+   *  沙漠 p 首元 248=沙暴巨丘档（沙暴时阴影提取关断）。仅读种子样式；zone/槽
+   *  门控由消费方（mod 端按 zone 旗）负责。非沙漠槽 desert0=-1。 */
+  styleProbe(): { snow0: number; desert0: number } {
+    const snow = this.styleRow('snow', SNOW_STYLES, this.snowStyle);
+    const desertSlot = this.bgStyle === Desert || this.bgStyle === CorruptDesert
+      || this.bgStyle === HallowDesert || this.bgStyle === CrimsonDesert;
+    return {
+      snow0: snow?.t?.[0] ?? -1,
+      desert0: desertSlot ? this.desertTripleForSlot(this.bgStyle)[0] : -1,
+    };
+  }
+
   /** 样式快照（CaptureMode 手动群系档专用，2026-08-25）：样式直落 + 双 alpha 槽
    *  全开 + 冷却/渐变/瞬切计数清零——拍照分块重渲跨数帧，走正常交叉淡化
    *  （±0.05/帧）会拍到半透明中间态；原版 DrawCapture 直接改 Main.bgStyle 无

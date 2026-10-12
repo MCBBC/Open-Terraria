@@ -147,7 +147,8 @@ describe('BJ593 全亮域单 pass（实体循环零血条调用,层序 4<14 同�
     const body = rendererSrc.slice(sig, rendererSrc.indexOf('\n  /**', sig + 10));
     expect(body).toMatch(/ctx\.setTransform\(1, 0, 0, 1, 0, 0\)/);
     expect(body).toMatch(/ctx\.imageSmoothingEnabled = false/);
-    expect(body).toMatch(/for \(const \{ e, expert \} of pass\) this\.drawHealthBar\(e, expert, cam\);/);
+    // ★BJ665c：解构补取 hbAnchor + 第 4 参直传（C13-F5 锚死线接通;逐条目驱动语义不变）
+    expect(body).toMatch(/for \(const \{ e, expert, hbAnchor \} of pass\) this\.drawHealthBar\(e, expert, cam, hbAnchor\);/);
   });
 });
 

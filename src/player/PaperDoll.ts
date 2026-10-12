@@ -8,6 +8,7 @@ import { UITextures } from '../vui/assets/UITextures';
 import { noteVuiConsumer } from '../assets/SpriteAtlas';
 import { texReady } from '../render/texId';
 import { dyeApplyOf, applyDyePass } from '../data/vanillaDyes';
+import { lunarConstPieceOf } from '../data/vanillaLunarArmor';   // ★BJ665b 恒色甲位判定
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ631:染料烘焙 uTime 单源钟
 
 export const BODY_FRAMES = 20;     // 身体帧数
@@ -399,12 +400,23 @@ export function compositePaperDoll(
   opts?: { skipHair?: boolean; skipFace?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm;
     /** ★C13-F2 socialGhost（PlayerDrawSet.cs:1489-1516）：皮肤族全 Transparent——
      *  甲合成层内两处皮肤垫（甲下皮肤躯干 3 / 甲下皮肤腿 10）同整隐 */
-    ghostSkin?: boolean },
+    ghostSkin?: boolean;
+    /** ★BJ665b 四月套恒色甲件拆分（PlayerDrawSet.cs SetPassColors 恒色覆写面，
+     *  见 ../data/vanillaLunarArmor.ts 头注）：true = 日耀/星尘恒色甲位（head 171/
+     *  189、body 177/190、legs 112/130）从常规烘焙面【烘除】（skin-under 皮肤垫
+     *  照画=原版 12_Skin 语义），由 lunarPart 面单独出件。lit 实体窗烘除→合成后
+     *  逃逸重绘（armorGlowQueue 五族同判例域） */
+    lunarSplit?: boolean;
+    /** ★BJ665b 恒色件烘焙面：'upper'=恒色头甲+身甲复合件（都 250）、
+     *  'legs'=恒色腿甲（日耀 250/星尘 252——值在消费侧与乘区链合成）。该模式下
+     *  只烘恒色甲件本体（含染料），毛发/皮肤/竖条通道全跳 */
+    lunarPart?: 'upper' | 'legs' },
 ): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
     + (equip?.dyeHead ? `|dh${equip.dyeHead}` : '') + (equip?.dyeBody ? `|db${equip.dyeBody}` : '') + (equip?.dyeLegs ? `|dl${equip.dyeLegs}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.skipFace ? '|noface' : '') + (opts?.layer ? `|L${opts.layer}` : '')
     + (opts?.ghostSkin ? '|gh' : '')
+    + (opts?.lunarSplit ? '|ls' : '') + (opts?.lunarPart ? `|lp${opts.lunarPart}` : '')
     + (opts?.part ? `|P${opts.part}` : '')
     + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
     + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '')
@@ -484,6 +496,14 @@ export function compositePaperDoll(
   const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;
   const onlyArmor = opts?.layer === 'armor' || opts?.layer === 'armorNoHead';
   const noArmor = opts?.layer === 'skin';
+  // ★BJ665b 恒色甲位判定（原版 PlayerDrawSet.cs SetPassColors 恒色覆写面——日耀
+  //  171/177/112=250³、星尘 189/190=250³/130=252³；漩涡/星云无覆写不入）。拆分时
+  //  常规面烘除恒色件（皮肤垫照画）、lunarPart 面只烘恒色件。
+  const lunarSplitOn = opts?.lunarSplit === true;
+  const lunarPartOn = opts?.lunarPart != null;
+  const lunarHeadC = lunarSplitOn ? lunarConstPieceOf(equip?.head ?? 0) : null;
+  const lunarBodyC = lunarSplitOn ? lunarConstPieceOf(equip?.body ?? 0) : null;
+  const lunarLegsC = lunarSplitOn ? lunarConstPieceOf(equip?.legs ?? 0) : null;
   // part 拆分门：head=发/头皮肤/眼白/瞳+头甲；body=复合网格+身甲；legs=腿皮肤/裤/鞋+腿甲
   const wantHead = !part || part === 'head';
   const wantBody = !part || part === 'body';
@@ -535,9 +555,12 @@ export function compositePaperDoll(
   //  IsBottomOverridden(袍/裙族 LEGS_HIDE_SKIN ∪ shoe15[未入参,登记])压制,常规
   //  腿甲下先画皮肤腿再叠甲(满罩甲不可见,镂空甲族露肤=原版本相);坐姿
   //  hidesBottomSkin=1(PlayerDrawSet.cs:1244)不画,切片仅甲
-  if (legsArmor && !noArmor && wantLegs) {
+  if (legsArmor && !noArmor && wantLegs
+    // ★BJ665b：拆分时常规面烘除恒色腿甲（皮肤垫照画）;lunarPart='legs' 面只烘恒色腿甲
+    && (lunarPartOn ? lunarLegsC != null : lunarLegsC == null)) {
     // ★C13-F2：ghostSkin → 甲下皮肤腿垫整隐（colorLegs Transparent 面,原版 :1498）
-    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin;
+    //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入）
+    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin && !lunarPartOn;
     const skinLegsImg = showSkinUnderLegs ? sheetRect(a.skinVariant, 10) : null;
     const skinLegsTinted = skinLegsImg ? tint(skinLegsImg, a.skinColor) : null;
     // ★BJ631 件1:染腿烘提出帧/切片循环（BJ625 喂值恒缺时不可达=冷码;喂值链上线后
@@ -610,6 +633,9 @@ export function compositePaperDoll(
       ctx.restore();
     };
     if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
+    if (lunarPartOn && lunarBodyC == null) continue;   // ★BJ665b：lunarPart 面无恒色身甲=空件
+    // ★BJ665b：拆分时常规面烘除恒色身甲复合件（皮肤躯干垫照画）;lunarPart 面只烘恒色件
+    const bodyCellsOn = lunarPartOn ? lunarBodyC != null : lunarBodyC == null;
     if (noArmor && bodyArmorImg) {
       // skin 层（stealth ×s'² 消费）：身甲在位时衣着/臂仍留空（甲覆盖语义），但
       // ★SW-BJ11 2026-09-07 皮肤躯干照画（同 12_Skin_Composite !hidesTopSkin 门,
@@ -626,19 +652,23 @@ export function compositePaperDoll(
       //  镂空处露肤(女胸轮廓)=原版本相(女甲态 12px 残差实证,见 _swbj11-matrix)。
       //  hidesTopSkin={82,83,93,21,22}(21/22=狼人/人鱼全形态)不画
       //  ★C13-F2：ghostSkin → 皮肤躯干垫同整隐（colorBodySkin Transparent 面,:1494）
-      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0) && !opts?.ghostSkin) {
+      //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入）
+      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0) && !opts?.ghostSkin && !lunarPartOn) {
         const torsoSkin = sheetRect(a.skinVariant, 3);
         if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
       }
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
-      drawArmorCell(dyedBodyImg ?? bodyArmorImg, 1, 1 + dy);                          // 后肩
-      // 后臂：petting 换列 8 拉伸档 + 旋转（甲臂同格；甲下皮肤臂层为既有
-      // 静态臂同款省略——missingArm/missingHand 语义沿本仓甲覆盖口径，登记）
-      if (pet) drawArmorCell(dyedBodyImg ?? bodyArmorImg, 8, pet.stretch, pet.rot);   // 后臂（抚摸）
-      else drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1] + 2);            // 后臂
-      drawArmorCell(dyedBodyImg ?? bodyArmorImg, torsoX, dy);                         // 躯干
-      drawArmorCell(dyedBodyImg ?? bodyArmorImg, 0, 1 + dy);                          // 前肩
-      drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1]);                     // 前臂
+      //  ★BJ665b：恒色身甲在拆分常规面烘除（bodyCellsOn=false）、lunarPart 面单出
+      if (bodyCellsOn) {
+        drawArmorCell(dyedBodyImg ?? bodyArmorImg, 1, 1 + dy);                          // 后肩
+        // 后臂：petting 换列 8 拉伸档 + 旋转（甲臂同格；甲下皮肤臂层为既有
+        // 静态臂同款省略——missingArm/missingHand 语义沿本仓甲覆盖口径，登记）
+        if (pet) drawArmorCell(dyedBodyImg ?? bodyArmorImg, 8, pet.stretch, pet.rot);   // 后臂（抚摸）
+        else drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1] + 2);            // 后臂
+        drawArmorCell(dyedBodyImg ?? bodyArmorImg, torsoX, dy);                         // 躯干
+        drawArmorCell(dyedBodyImg ?? bodyArmorImg, 0, 1 + dy);                          // 前肩
+        drawArmorCell(dyedBodyImg ?? bodyArmorImg, arm[0], arm[1]);                     // 前臂
+      }
       continue;
     }
     // 无盔甲复合绘制（DrawPlayer_12_SkinComposite_BackArmShirt :1385-1403 /
@@ -690,7 +720,9 @@ export function compositePaperDoll(
   //  UpdateDyes Player.cs:9679 cHead=GetEffectiveDye(0).dye;头甲层 shader=
   //  drawinfo.cHead,PlayerDrawLayers.cs:2173）。dyeBakeArmorSprite 同 body/legs
   //  烘焙面（composite 缓存键 `|dh` 段此前就是死键——形参在位、消费与喂值双缺）。
-  if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead' && wantHead) {
+  if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead' && wantHead
+    // ★BJ665b：拆分时常规面烘除恒色头甲;lunarPart='upper' 面只烘恒色头甲
+    && (lunarPartOn ? lunarHeadC != null : lunarHeadC == null)) {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
       const headArmorImg = equip?.dyeHead ? dyeBakeArmorSprite(headArmor.img, equip.dyeHead) : headArmor.img;

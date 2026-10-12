@@ -16,13 +16,13 @@
 //   F8 学徒火 body205 抖动 y 反号（LOW）——PlayerDrawLayers.cs:3673
 //     RandomInt(-10,1)×0.15=[-1.5,0]（position 位同本体式,origin 反向系误读）。
 //   F9 注释病两处（LOW）——solarOutlineStamps k 行注释订正 + Grox ±0.125px 登记。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   heldItemStealthDim, applyStealthToColor,
 } from '../src/render/heldItemStealthDim';
-import { advanceGhostAureole, resetGhostAureole } from '../src/render/Renderer';
+import { advanceGhostAureole, resetGhostAureole, Renderer } from '../src/render/Renderer';
 
 const ROOT = join(__dirname, '..');
 const RDR = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
@@ -207,6 +207,87 @@ describe('C13-F5 毁灭者 destroyerHB 平滑+α=(B+1)/2;蠕虫头尾中点', ()
   });
 });
 
+// ===================== F5-wire BJ665c hbAnchor 活线行为面 =====================
+// ★BJ665c（2026-10-12）：F5 两面锚（毁灭者平滑位/蠕虫中点）曾为运行时死线——
+// hbEntryOf 产锚在 entry 包裹面而 flush 解构只取 {e,expert}（BJ664b 旁案定谳）。
+// 修复 = 解构补取 + drawHealthBar 第 4 显式参（entry 单源保留）。本块 = 坐标级
+// 行为锁（死线回插必红）;全量行为套件（双型锚+遗留面+默认回落+线源锚）=
+// tests/bj665c-hbanchor-wire.test.ts。
+type HbOp = { kind: 'img'; dx: number; dy: number; dw: number; dh: number };
+
+describe('C13-F5-wire 锚经 flushEntityHealthBars 活线生效（BJ665c 坐标级行为锁）', () => {
+  let rr: InstanceType<typeof Renderer>;
+  beforeAll(() => {
+    (globalThis as Record<string, unknown>).Image = class {
+      src = ''; onload: (() => void) | null = null;
+      addEventListener() { /* noop */ }
+    };
+    const anyStub = (): Record<string, unknown> => new Proxy(function stub() { /* noop */ } as unknown as Record<string, unknown>, {
+      get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : anyStub()),
+      set: () => true,
+      apply: () => anyStub(),
+      construct: () => anyStub(),
+    });
+    (globalThis as Record<string, unknown>).document = { createElement: () => anyStub() };
+    (globalThis as unknown as { addEventListener: unknown }).addEventListener = () => {};
+    (globalThis as Record<string, unknown>).window = { addEventListener: () => {}, removeEventListener: () => {} };
+    rr = new Renderer(null as never);
+  }, 120000);
+
+  const mkCam = () => ({
+    x: 640, y: 360, zoom: 1, viewW: 1280, viewH: 720, punchX: 0, punchY: 0, flipY: false,
+    worldToScreen(wx: number, wy: number): [number, number] {
+      return [(wx - this.x + this.punchX) * this.zoom + this.viewW / 2, (wy - this.y + this.punchY) * this.zoom + this.viewH / 2];
+    },
+  });
+
+  const armAndFlush = (entry: unknown) => {
+    const ops: HbOp[] = [];
+    const ctx = {
+      globalAlpha: 1, imageSmoothingEnabled: true, globalCompositeOperation: 'source-over',
+      fillStyle: '', textAlign: '', textBaseline: '', font: '',
+      save() { /* noop */ }, restore() { /* noop */ }, setTransform() { /* noop */ },
+      measureText() { return { width: 0 }; },
+      fillRect() { /* noop */ }, fillText() { /* noop */ },
+      drawImage(_i: unknown, _sx: number, _sy: number, _sw: number, _sh: number,
+        dx: number, dy: number, dw: number, dh: number) { ops.push({ kind: 'img', dx, dy, dw, dh }); },
+    };
+    const w = rr as unknown as {
+      ctx: unknown; lighting: unknown; atlas: unknown; tintedSprite: unknown;
+      remotePlayers: unknown[]; flushEntityHealthBars(pass: unknown, cam: unknown): void;
+    };
+    w.ctx = ctx;
+    w.lighting = { lightAt: () => [255, 255, 255] };
+    w.atlas = { ensureVImage: () => ({ img: {} }) };
+    (w as unknown as { tintedSprite: () => unknown }).tintedSprite =
+      () => ({ c: {}, x: 0, y: 0, w: 2, h: 12 });
+    w.flushEntityHealthBars([entry], mkCam());
+    return {
+      l: Math.min(...ops.map((q) => q.dx)), t: Math.min(...ops.map((q) => q.dy)),
+    };
+  };
+
+  it('毁灭者 134：entry.hbAnchor={1000,300} → 条屏位 (973,300)（默认锚反事实 190 被否）', () => {
+    const { l, t } = armAndFlush({
+      e: { cx: 500, cy: 320, y: 100, h: 50, hp: 50, maxHp: 100, vanillaId: 134, ai0: 0 },
+      expert: false, hbAnchor: { x: 1000, y: 300 },
+    });
+    expect(l).toBe(973);   // 1000 - 18×1.5（BIG_SCALE 134）
+    expect(t).toBe(300);
+    expect(t).not.toBe(190);
+  });
+
+  it('蠕虫 vid 10：entry.hbAnchor={900,250} → 条屏位 (882,250)（默认锚反事实 168 被否）', () => {
+    const { l, t } = armAndFlush({
+      e: { cx: 460, cy: 280, y: 100, h: 50, hp: 50, maxHp: 100, vanillaId: 10, ai0: 0 },
+      expert: false, hbAnchor: { x: 900, y: 250 },
+    });
+    expect(l).toBe(882);   // 900 - 18×1
+    expect(t).toBe(250);
+    expect(t).not.toBe(168);
+  });
+});
+
 // ===================== F6 PvP 玩家血条升级 =====================
 
 describe('C13-F6 玩家血条 = DrawHealthBar 贴图版+原版门+stealth α+全亮域收编', () => {
@@ -242,7 +323,8 @@ describe('C13-F7 血条显示门 life!=lifeMax（满血不画断言）', () => {
 
   it('本仓:drawHealthBar 满血/无血早退（变异逃逸补锁）', () => {
     const i = RDR.indexOf('private drawHealthBar(');
-    const seg = RDR.slice(i, RDR.indexOf('/** ★C13-F5 血条入口档', i) > 0 ? RDR.indexOf('/** ★C13-F5 血条入口档', i) : i + 400);
+    // ★BJ665c：签名增第 4 参 hbAnchorOverride 后窗口 400→600（hp 门仍在签名后首二行）
+    const seg = RDR.slice(i, RDR.indexOf('/** ★C13-F5 血条入口档', i) > 0 ? RDR.indexOf('/** ★C13-F5 血条入口档', i) : i + 600);
     expect(seg).toContain('if (hp <= 0 || hp >= maxHp) return;');
   });
 });

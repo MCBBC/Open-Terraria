@@ -28,13 +28,29 @@ const kvStorage: PackStorage = {
 };
 
 /** 行数据净化：旧档/手改坏行剔除非法字段（FromJson 对单包失败仅 Console.WriteLine
- *  跳过 :110-113 的宽容语义——这里对行内字段钳默认，整行坏则弃） */
+ *  跳过 :110-113 的宽容语义——这里对行内字段钳默认，整行坏则弃）。
+ *  ★categories(2026-10-12 类别开关)在册——缺此字段读回即剥=开关刷新即失(用户实报)。 */
+const VALID_CATEGORY_IDS = new Set([
+  'town', 'creature', 'item', 'player', 'armor', 'tile',
+  'proj', 'gore', 'ui', 'sfx', 'music', 'other',
+]);
+
+function sanitizeCategories(raw: unknown): Partial<Record<string, boolean>> | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (VALID_CATEGORY_IDS.has(k) && typeof v === 'boolean') out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeRow(raw: unknown): PackRow | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.id !== 'string' || typeof o.fileName !== 'string') return null;
   const str = (x: unknown, d = ''): string => (typeof x === 'string' ? x : d);
   const ver = (o.version ?? {}) as Record<string, unknown>;
+  const categories = sanitizeCategories(o.categories);
   return {
     id: o.id,
     fileName: o.fileName,
@@ -50,6 +66,7 @@ function sanitizeRow(raw: unknown): PackRow | null {
     addedAt: typeof o.addedAt === 'number' ? o.addedAt : 0,
     fileCount: typeof o.fileCount === 'number' ? Math.trunc(o.fileCount) : 0,
     iconDataUrl: typeof o.iconDataUrl === 'string' ? o.iconDataUrl : null,
+    ...(categories ? { categories } : {}),
   };
 }
 

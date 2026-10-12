@@ -73,7 +73,13 @@ export type ScreenFxPass =
    *  MagicPixel 全屏 alpha 混合,参数由 SkyRenderer.sandstormSkyTint/blizzardSkyTint
    *  按原版公式算好）。注意:这不是 FilterManager 滤镜(是 SkyManager 天空层),
    *  故 cots 已含在 color/alpha 内、不参与链尾 uTint 乘(EndCapture :194 不经过) */
-  | { kind: 'SkyWeatherTint'; color: readonly [number, number, number]; alpha: number };
+  | { kind: 'SkyWeatherTint'; color: readonly [number, number, number]; alpha: number }
+  /** mod 全屏后处理 pass(2026-10-12;hooks.collectModScreenFx 产位——tML
+   *  FilterManager.EndCapture MonoMod 前缀同位,插链最前=先于原版滤镜)。
+   *  exec 自管子管线(自有程序/FBO),出口契约=写 outFbo(fboA,GL 朝向,同滤镜
+   *  pass——直通 blit/present 据此闭合);uniform 侧不声明 uTint=自然豁免链乘
+   *  (原版 mod 所见为未乘天色场景,FilterManager.cs:150-210 反编译定谳)。 */
+  | { kind: 'ModScreenFx'; exec: ModScreenFxChainPass['exec'] };
 
 const VERT = `
 attribute vec2 aPos;              // 单位 quad (0..1)^2
@@ -592,6 +598,7 @@ export function noiseData(): { w: number; h: number; data: Uint8ClampedArray } |
 
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw, registerFence } from './GLStats';
 import { GLPipeline, type PipelineFbo, type PipelineProgram } from './GLPipeline';   // ★A1:FBO 乒乓链宿主（A0 消费方白名单已收录）
+import type { ModScreenFxChainPass } from '../mods/hooks';   // mod 全屏后处理 pass 载体(纯 type——零运行时环)
 export class GLScreenFilters {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -1254,6 +1261,17 @@ export class GLScreenFilters {
     let srcTex: WebGLTexture = srcTex0;   // 恒等布局（v0=图像顶）
     for (let i = 0; i < chain.length; i++) {
       const p = chain[i];
+      // ---- mod 全屏后处理 pass:无 FRAGS 程序表项,exec 自管子管线(uTint 豁免
+      //      ——着色器不声明即不乘;契约=出口写 fboA GL 朝向,直通 blit/present 照常) ----
+      if (p.kind === 'ModScreenFx') {
+        if (!fboA.tex || !fboB.tex) return false;
+        p.exec(gl, pipe, srcTex, fboA, w, h);
+        if (gl.isContextLost()) return false;
+        if (i === chain.length - 1) break;
+        if (!this.pipeFlipTo(gl, pipe, w, h, fboA, fboB)) return false;
+        srcTex = fboB.tex!;
+        continue;
+      }
       const entry = this.pipeProgram(pipe, p.kind);
       if (!entry?.prog || !fboA.tex || !fboB.tex) return false;
       const last = i === chain.length - 1;

@@ -36,7 +36,9 @@ function eventTintedSprite(
     return hit;
   }
   let c = eventTintFree.pop();
+  let pooledE = false;
   if (!c) c = document.createElement('canvas');
+  else pooledE = true;
   if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
   const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.globalCompositeOperation = 'copy';
@@ -46,6 +48,7 @@ function eventTintedSprite(
   cx.fillRect(0, 0, c.width, c.height);
   cx.globalCompositeOperation = 'destination-in';
   cx.drawImage(tex as CanvasImageSource, 0, 0);
+  if (pooledE) bumpTexEpoch(c);   // ★池取重烘必换代（copy 只换像素,shim er: 键不动=陈旧纹理）
   EVENT_TINT_CACHE.set(key, c);
   if (EVENT_TINT_CACHE.size > 64) {
     const first = EVENT_TINT_CACHE.keys().next().value;
@@ -61,7 +64,7 @@ import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
 import type { GLSpriteLayer, TexEntry } from './GLSpriteLayer';
-import { texId, texReady } from './texId';
+import { texId, texReady, bumpTexEpoch } from './texId';
 import { horizonPhaseOf, sunColorOf, moonDrawColor } from '../lighting/Horizon';
 import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
 import { AuroraSky } from './AuroraSky';
@@ -811,8 +814,11 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   const hit = flareTintCache.get(key);
   if (hit) return hit;
   let c = flareTintFree.pop();
+  let pooledF = false;
   if (!c) c = document.createElement('canvas');
+  else pooledF = true;
   if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
+  c.getContext('2d')!.clearRect(0, 0, c.width, c.height);   // ★池取必清（混帧回归同判例）
   const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.imageSmoothingEnabled = true;
   cx.drawImage(tex, 0, 0);
@@ -840,6 +846,7 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   }
   if (mMin === mMax) return null;
   cx.putImageData(img, 0, 0);
+  if (pooledF) bumpTexEpoch(c);   // ★shim er: 键换代（池取重烘铁律）
   flareTintCache.set(key, c);
   if (flareTintCache.size > 24) {
     const first = flareTintCache.keys().next().value;
@@ -1592,13 +1599,20 @@ export class SkyRenderer {
     //  有原图快路径,一帧原色自愈），绝不把平色矩形烘进缓存
     if (!texReady(tex)) return tex;
     // ★晨昏色扫池化（2026-10-12）：同尺寸淘汰画布优先（createElement 换池取,
-    //  稳态出生率→0）;尺寸失配才 resize(罕见——源贴图尺寸恒定)
+    //  稳态出生率→0）;尺寸失配才 resize(罕见——源贴图尺寸恒定)。
+    //  ★★池取必 clearRect（wingTexSource 混帧回归同判例）：源贴图部分-α 像素
+    //  透出残留旧色=边缘晕影;clear 前置=逐位等价新烘。
+    //  ★★★池取重烘必 bumpTexEpoch（wingTexSource shim 陈旧纹理同判例）:
+    //  天空 ctx 多态(2D/shim),同身份重烘 epoch 不动=er: 键陈旧纹理。
+    let pooledT = false;
     {
       const fk = `${tex.width}x${tex.height}`;
       const fl = this.tintFree.get(fk);
       if (fl && fl.length) {
         c = fl.pop()!;
+        pooledT = true;
         if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
+        c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
       } else {
         c = document.createElement('canvas');
         c.width = tex.width; c.height = tex.height;
@@ -1627,6 +1641,7 @@ export class SkyRenderer {
         }
       }
     }
+    if (pooledT) bumpTexEpoch(c);   // ★shim er: 键换代（池取重烘铁律）
     this.tintCache2.set(key, c);
     return c;
   }

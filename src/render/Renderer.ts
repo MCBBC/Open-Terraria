@@ -129,7 +129,8 @@ import type { GoreSegSpec } from './glshim/GLShimExecutor'; // ★F-gore 批段�
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
-import type { World, Clock } from '../world/World';
+import { Clock, type World } from '../world/World';
+import { collectModScreenFx, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
 import { TileStore } from '../world/TileStore';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -137,6 +138,7 @@ import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { blendItemColorTint } from '../data/vanillaItemColor';   // SW-BJ60 掉落物 Item.color 两遍合成（与 UI.iconUrl 单源）
 import { armorGlowOps, tvScreenState, type ArmorGlowOp } from '../data/vanillaArmorGlow';   // ★BJ597 甲位 GlowMask 表（SetPassColors 数据化）+★BJ625件1 TV 屏态机
+import { lunarConstPieces, lunarArmorFlushTint, type LunarConstPieces } from '../data/vanillaLunarArmor';   // ★BJ665b 四月套恒色甲位判定（SetPassColors 恒色覆写面）
 import { LanternNight } from '../world/LanternNight';   // ★BJ625件1 TV 头 271 节庆态输入（LanternNight.LanternsUp）
 import {
   ITEM_GLOWMASK, DROP_GLOW_EXCLUDED, HAND_GLOW_SKIP, STAFF_GLOW_SPECIAL,
@@ -146,6 +148,7 @@ import {
 import { PROJ_GLOWMASK, PROJ_GLOW_DISCO, projGlowColors } from '../data/vanillaProjGlow';   // ★BJ603 弹幕域
 import { TOOL_CUTTER, TOOL_ACTUATOR, grandDesignPath, pathConnectionMasks } from '../world/Wiring';   // ★BJ613:ghost 预览单源路径+掩码
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
+import type { Baked } from './bitmapize';   // ★BJ665b 恒色件烘焙面类型（PaperDoll 同源）
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
 import type { Appearance } from '../player/Appearance';
@@ -315,7 +318,7 @@ import { heldItemStealthDim, dimmedHeldRegion, applyStealthToColor, type HeldSte
 import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
 import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
 import { setTintAtlasInvalidateRect } from './TintAtlas';   // ★E51 刀A:回收矩形精确失效注入
-import { texId, texEpoch } from './texId';   // ★F-gore 批段纹理幂等键（er: 同族）
+import { texId, texEpoch, bumpTexEpoch } from './texId';   // ★F-gore 批段纹理幂等键（er: 同族）;池化重烘换代（2026-10-12）
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -1027,7 +1030,15 @@ export function prettyStarSparkle(
   //   摊平 alpha 画布 × source-over，2026-09-02 最小复现 E 面板逐像素复现定谳）
   const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
     if (alpha <= 0 || sw <= 0 || sh <= 0) return;
-    const w = Math.max(1, Math.round(tw * sw)), h = Math.max(1, Math.round(th * sh));
+    // ★canvas哨兵接力案（2026-10-12 用户实报 152/s）：BJ314 精确 (img,w,h) 缓存只救
+    //  【重复尺寸】——淡入淡出包络 num 连续扫 → w/h 逐帧新键 → LRU96 必 miss
+    //  （星尘蠕虫/天顶剑挥舞期持续 churn,哨兵栈:createElement←sparkleStrokeTex←
+    //  stroke←prettyStarSparkle）。修=目标尺寸 2px 量化（tintTex 4 色量化同判据:
+    //  ≤1px 臂长差在辉光条纹+旋转+淡出运动中不可辨）→ 键域收敛、逐帧以命中为主,
+    //  穿越桶界才烘。两步管线（最近邻拉伸→旋转采样）字节恒等语义不变（拉伸目标
+    //  即量化尺寸,消费 1:1 直贴）。
+    const q2 = (n: number): number => Math.max(1, Math.round(n / 2) * 2);
+    const w = q2(tw * sw), h = q2(th * sh);
     // ★canvas 哨兵案（2026-09-23 用户实报 30-40fps）：原 sbuf 每次 call 新建 +
     //  4 次 stroke 各因宽高不同 resize 4 次 = 天顶剑 60-113 张/秒 canvas churn
     //  （哨兵栈:createElement←stroke←prettyStarSparkle←ZenithSword.draw）→
@@ -5594,6 +5605,9 @@ export class Renderer {
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this.armorGlowQueue.length = 0;   // ★BJ597 甲位 glow 队列逐帧重建（flush 亦自愈重置）
     this.armorGlowCollected = new WeakSet();   // 同帧双绘去重随帧重置（早绘/主段双 pass）
+    this.lunarArmorQueue.length = 0;   // ★BJ665b 恒色甲件队列逐帧重建（flush 亦自愈重置）
+    this.lunarCoverQueue.length = 0;   // ★BJ665b 被盖层随迁队列逐帧重建
+    this.lunarCoverCollected = new WeakSet();   // ★BJ665b 双绘去重随帧重置（早绘/主段双 pass）
     this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
     this.solarShieldQueue.length = 0;   // ★BJ594 日曜盾球队列逐帧重建（drawPlayer 收集,7e 消费）
     this._bannerLabelPass.length = 0;   // ★BJ648 名条队列逐帧重建（drawHouseBanners 收集,flushBannerLabels 消费;flush 尾自清之外的早退兜底）
@@ -6641,7 +6655,10 @@ export class Renderer {
     //  原式）。同层登记不落刀：DD2 波间倒计时(:46866 同层)/镇民"!"图标(:46855
     //  同层)仍在原位（低暴露,另立刀）；原版 ShowLife/shimmerTransparency==0 门
     //  （:46605）本仓未建模,登记。
-    const hbPass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number }; stealthA?: number }> = [];
+    // ★BJ665d：entry 级 stealthA 收窄移除（普查=零生产者/零读者纯幽灵——4 个
+    //  push 位与 hbEntryOf 均不产,flush 解构不读;玩家 stealth α 走 remotePlayers
+    //  直驱,不经 entry,见 :10436 直传 rp.stealth→drawHealthBar e 形参面）。
+    const hbPass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number } }> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) {
@@ -7057,10 +7074,20 @@ export class Renderer {
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
+    // 7e² 恒色甲件（★BJ665b 2026-10-12：BJ594 登记架构债落地——日耀/星尘甲件
+    //      SetPassColors 恒色 250³ 覆写采光基值=自发光甲。lit 实体窗烘除（PaperDoll
+    //      lunarSplit）→ 合成后重绘；被盖层随迁在 7e⁴。位次=甲位 glow 前（星尘
+    //      GlowMask 叠层在甲件之上=原版逐件后随叠画序））
+    this.flushLunarArmor();
     // 7e'''' 甲位 GlowMask（★BJ597 2026-10-10：SetPassColors 色面免光照=自发光
     //      ——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。在翼光
     //      后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族）
     this.flushArmorGlow();
+    // 7e⁴ 恒色甲件被盖层随迁（★BJ665b：手持物/身前配饰/滑轮/坐骑前层等原版
+    //      18-38 层组——甲件恒色重绘在其下=层序保持（禁 C 裸重绘）;在甲位 glow 后
+    //      =原版 glow 逐件后随叠画 < 22 脸饰 < 27 手持物序;本槽在 itemGlow 前=
+    //      手持光罩仍在物品之上）
+    this.flushLunarCovered();
     // 7e''''' Item.glowMask（★BJ601 2026-10-10：手持两段+掉落物光罩——光罩色不取
     //      光照=自发光,drawPlayer/drawUseItem/drawDrop 收集、此处消费。同槽判例=
     //      四塔/甲位/盾球合成后逃逸族）
@@ -10316,7 +10343,7 @@ export class Renderer {
    *  逐位不变（填充恒左锚 e.cx-18·scale 起笔/零朝向消费/36px×比例）,唯 dest 换算
    *  世界→屏（worldToScreen+zoom;flipY 锚镜像=原版 :22129-22132
    *  `num4 = screenHeight - (num4 - screenY)` 原式,gd=1 恒等）。 */
-  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number; hbAnchor?: { x: number; y: number }; stealthA?: number; ai0?: number }, expert: boolean, cam: Camera) {
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number; hbAnchor?: { x: number; y: number }; stealthA?: number; ai0?: number }, expert: boolean, cam: Camera, hbAnchorOverride?: { x: number; y: number }) {
     const hp = e.hp, maxHp = e.maxHp;
     if (hp <= 0 || hp >= maxHp) return;
     if (e.wormFollow) return;
@@ -10343,7 +10370,12 @@ export class Renderer {
     //  中点+头 width/2+height/2（:46902-46911 DrawInterface_Healthbar_Worm）
     let wy = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
       (vid === 4 && e.spriteBottomWorld) ? e.spriteBottomWorld + 6 : -Infinity);
-    if (e.hbAnchor) { wx = e.hbAnchor.x - 18 * scale; wy = e.hbAnchor.y; }
+    // ★BJ665c：锚 = 入参覆写（hbEntryOf 产在 entry 包裹面——flushEntityHealthBars
+    //  解构转交,见 :10408）∪ e 本体遗留面。曾只读 e.hbAnchor 而 entry 面恒缺 =
+    //  C13-F5 锚分型运行时死线（毁灭者平滑锚/蠕虫中点锚恒回落默认锚,BJ664b 旁案;
+    //  显式入参而非回写 e 本体=蠕虫尾断帧残留上帧陈旧锚的跨帧污染免疫）。
+    const hbA = hbAnchorOverride ?? e.hbAnchor;
+    if (hbA) { wx = hbA.x - 18 * scale; wy = hbA.y; }
     // 屏空间换算（worldToScreen 内含 punch 位移;flipY = 原版 gravDir==-1 锚镜像）
     const [sx, sy0] = cam.worldToScreen(wx, wy);
     const x = sx;
@@ -10398,14 +10430,20 @@ export class Renderer {
    *  7a-pre 标尺之后（表序 1_2<4<14）/ 8 飘字之前。恒最上：后绘实体/弹幕（鞭弧
    *  postPlayerDraws :6573）/尘/落叶/天气不再覆盖血条 = 用户实报「血条错误镜像
    *  偏转」（苔藓黄蜂群叠+鞭弧扫过被标靶场景）根治。 */
-  private flushEntityHealthBars(pass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number }; stealthA?: number }>, cam: Camera): void {
+  // ★BJ665d：pass entry 类型去 stealthA（同 :6652 收窄;玩家段 stealth α=remotePlayers
+  //  直驱直传,不入 entry——NPC 段无潜行 α 面,C13-F6 语义分型钉明）。
+  private flushEntityHealthBars(pass: Array<{ e: Enemy | TownNPC; expert: boolean; hbAnchor?: { x: number; y: number } }>, cam: Camera): void {
     if (!pass.length && !this.remotePlayers.length) return;
     if (!this.ctx) return;
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);   // 主画布恒等域（BJ553 标记同款）
     ctx.imageSmoothingEnabled = false;    // SamplerState.PointClamp
-    for (const { e, expert } of pass) this.drawHealthBar(e, expert, cam);
+    // ★BJ665c：hbAnchor 补取转交——hbEntryOf 把锚产在 entry 包裹面（:10288/:10298,
+    //  单源不动）,曾解构丢锚 = C13-F5 锚分型（毁灭者 134 平滑锚/蠕虫头尾中点锚）
+    //  运行时死线,此类条恒回落默认锚 e.y+e.h+10+HB_ADD_H（BJ664b 旁案定谳;
+    //  显式第 4 参直传,不回写 e 本体=跨帧陈旧锚免疫）。
+    for (const { e, expert, hbAnchor } of pass) this.drawHealthBar(e, expert, cam, hbAnchor);
     // ★C13-F6 玩家血条（原版玩家段 Main.cs:46882-46900 在 NPC 段【之后】= 玩家条盖
     //  NPC 条）：门 = active&&!ghost&&!dead&&!invis&&statLife != statLifeMax2
     //  （:46886 【无 hostile 门】——受伤远端玩家恒显示,同队同;ghost/invis 字段本仓
@@ -14127,14 +14165,21 @@ export class Renderer {
     try {
       const pass = getPass('QueenSlime');
       if (!pass) return null;
-      // ★SM2 池化:同尺寸回收画布优先（?smpool=0 旁路=createElement 现状逐位）
+      // ★SM2 池化:同尺寸回收画布优先（?smpool=0 旁路=createElement 现状逐位）。
+      //  ★★池取必 clearRect（wingTexSource 混帧回归同判例）:洗染切片透明区透出
+      //  残留旧帧,且 getImageData 会把鬼影一起带进 SM2 处理链。
+      //  ★★★池取重烘必 bumpTexEpoch（wingTexSource shim 陈旧纹理同判例）:洗染
+      //  cell 经 drawNpcGrid/value19 叠绘进 shim——同身份重烘 epoch 不动=er: 键
+      //  陈旧纹理间歇上屏（皇后史莱姆洗染闪烁面）。
       let cv0: HTMLCanvasElement | undefined;
+      let cvPooled = false;
       if (sm2PoolEnabled()) {
         const fl = this.qsWashFree.get(`${sw}x${sh}`);
-        if (fl && fl.length) cv0 = fl.pop();
+        if (fl && fl.length) { cv0 = fl.pop(); cvPooled = true; }
       }
       if (!cv0) cv0 = document.createElement('canvas');
       cv0.width = sw; cv0.height = sh;
+      cv0.getContext('2d')!.clearRect(0, 0, sw, sh);
       const c0 = cv0.getContext('2d', { willReadFrequently: true });
       if (!c0) return null;
       c0.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, sw, sh);
@@ -14171,6 +14216,7 @@ export class Renderer {
       u.uColor = [1, 1, 1]; u.uOpacity = 1; u.uSaturation = 1;
       runPassOnImageData(pass, im.data, sw, sh, u, [s1, s2]);
       c0.putImageData(im, 0, 0);
+      if (cvPooled) bumpTexEpoch(cv0);   // ★shim er: 键换代（池取重烘铁律）
       this.qsWashCache.set(qsKey, cv0);
       return cv0;
     } catch {
@@ -17222,6 +17268,120 @@ export class Renderer {
   /** 手持段同帧双绘去重（坐椅/睡床早绘+主段再绘——armorGlowCollected 同判例；
    *  静持/挥舞互斥共用一集,flush 期重置） */
   private itemGlowHeldCollected = new WeakSet<Player>();
+  /** ★BJ665b（2026-10-12）四月套恒色甲件逃逸队列（BJ594 登记架构债=免光实体窗
+   *  面，候选 B 落地）。恒色甲件（日耀 171/177/112=250³、星尘 189/190=250³/
+   *  130=252³——vanillaLunarArmor.ts 逐支亲读）从 lit 实体窗烘除（PaperDoll
+   *  lunarSplit）→ 此处合成后重绘：m=甲层画毕完整矩阵（armorGlowQueue 同判例）、
+   *  upper/legs=恒色件烘焙面（染料已烘）、mul=甲潜行 RGB 乘区（:1539-1541/
+   *  :1641-1644 与 armorDoll 同式）、alpha=bodyAlpha×s'×gFade、legsC=腿位恒色值
+   *  （250/252——upper 面恒 250）。冲刷位=flushArmorGlow 前（星尘 glow 叠层在甲
+   *  之上=原版逐件后随叠画序）。 */
+  private lunarArmorQueue: Array<{
+    m: DOMMatrix; k: number;
+    upper: Baked | null; legs: Baked | null;
+    rows: { body: number; legs: number };
+    mul: [number, number, number]; alpha: number; legsC: number;
+  }> = [];
+  /** ★BJ665b 被盖层随迁队列（候选 B=甲件+其后所有层重绘，层序保持禁 C 裸重绘）：
+   *  原版 18-38 层组中本仓画在 doll 之后的段（浮游圈前半/滑轮/身前配饰/手持物/
+   *  挥舞/甲虫 orb/坐骑前层/矿车）在 lunarSplit 时重定向进区域 scratch 全亮重放
+   *  → 光照一次性烘焙（lightAt 玩家中心,BJ596「采样点差」既有惯例）→ 合成后
+   *  甲件之上重放。drawPlayer 期即重定向落墨（内容稳定驻留 scratch）,flush 侧
+   *  纯 blit（×invK worldCanvas→页域,armorGlowQueue 重放同式）。ox/oy/w/h=
+   *  scratch 在 worldCanvas 像素域的 AABB;cv=会话画布（池化回收）。 */
+  private lunarCoverQueue: Array<{
+    m: DOMMatrix; k: number; ox: number; oy: number; w: number; h: number;
+    cv: HTMLCanvasElement;
+  }> = [];
+  /** ★BJ665b 坐椅/睡床双绘去重（早绘+主段=armorGlowCollected 同判例——covered
+   *  闭包双冲刷=烘焙光二乘,首绘收集、次绘回内联原路径） */
+  private lunarCoverCollected = new WeakSet<Player>();
+  /** ★BJ665b 采光烘焙快照面（destination-in 复原 α 源——eyebrella 同式;只扩不缩） */
+  private lunarCovB: HTMLCanvasElement | null = null;
+  /** ★BJ665b 会话画布池（take/give 闭环——每玩家每帧最多 3 会话窗,池上限 8 面;
+   *  flush blit 后还池,超限弃置=GC） */
+  private lunarCovPool: HTMLCanvasElement[] = [];
+
+  /** ★BJ665b 被盖层会话 AABB（世界盒 [cx±112, y−112, y+h+48] 四角经矩阵取包络
+   *  ——世界→worldCanvas 像素域,朝向镜像/坐骑机身旋转/躺卧旋转全效应覆盖;
+   *  2px 外扩;上限 1024²） */
+  private lunarCoverBox(m: DOMMatrix, p: Player): { ox: number; oy: number; w: number; h: number } {
+    const x0 = p.cx - 112, x1 = p.cx + 112, y0 = p.y - 112, y1 = p.y + p.h + 48;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [wx, wy] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]] as const) {
+      const sx = m.a * wx + m.c * wy + m.e;
+      const sy = m.b * wx + m.d * wy + m.f;
+      if (sx < minX) minX = sx;
+      if (sx > maxX) maxX = sx;
+      if (sy < minY) minY = sy;
+      if (sy > maxY) maxY = sy;
+    }
+    const ox = Math.floor(minX) - 2, oy = Math.floor(minY) - 2;
+    return { ox, oy, w: Math.min(1024, Math.ceil(maxX) - ox + 2), h: Math.min(1024, Math.ceil(maxY) - oy + 2) };
+  }
+
+  /** ★BJ665b 会话开窗：取池画布+重定向点状态镜像（globalAlpha/水下滤镜/平滑/
+   *  合成序——resize 重置态保真）+变换=基矩阵+屏域 AABB 原点平移（e/f 分量减,
+   *  屏域平移=后乘语义）。glowMark=itemGlow 窗口起点（End 侧矩阵回改）。 */
+  private lunarCoverBegin(base: CanvasRenderingContext2D, p: Player): {
+    c: CanvasRenderingContext2D; cv: HTMLCanvasElement;
+    ox: number; oy: number; w: number; h: number;
+    m: DOMMatrix; k: number; glowMark: number; anchor: readonly [number, number];
+  } | null {
+    if (typeof document === 'undefined') return null;
+    const m = base.getTransform();
+    const box = this.lunarCoverBox(m, p);
+    const cv = this.lunarCovPool.pop() ?? document.createElement('canvas');
+    const w = Math.max(1, box.w), h = Math.max(1, box.h);
+    if (cv.width < w || cv.height < h) { cv.width = w; cv.height = h; }
+    const c = cv.getContext('2d');
+    if (!c) return null;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.globalAlpha = base.globalAlpha;
+    c.filter = base.filter;
+    c.imageSmoothingEnabled = base.imageSmoothingEnabled;
+    c.globalCompositeOperation = base.globalCompositeOperation;
+    c.setTransform(m.a, m.b, m.c, m.d, m.e - box.ox, m.f - box.oy);
+    return {
+      c, cv, ox: box.ox, oy: box.oy, w, h, m, k: this._worldLowK,
+      glowMark: this.itemGlowQueue.length,
+      anchor: [p.cx, p.y + p.h / 2] as const,
+    };
+  }
+
+  /** ★BJ665b 会话收窗：①重定向窗内 itemGlow 推送矩阵回改（捕获态=scratch 原点
+   *  偏移矩阵 → 真矩阵,重放坐标闭包不变）②采光一次性烘焙（玩家中心 lightAt,
+   *  multiply+destination-in 复原 α——eyebrella A4 同式;fullbright 跳过=世界
+   *  无乘光同相）③入队（flush 侧纯 blit+还池）。 */
+  private lunarCoverEnd(s: NonNullable<ReturnType<Renderer['lunarCoverBegin']>>): void {
+    for (let i = s.glowMark; i < this.itemGlowQueue.length; i++) {
+      this.itemGlowQueue[i].m = s.m;
+      this.itemGlowQueue[i].k = s.k;
+    }
+    if (!this.fullbright) {
+      const [lr, lg, lb] = this.lighting
+        ? this.lighting.lightAt(Math.floor(s.anchor[0] / 16), Math.floor(s.anchor[1] / 16))
+        : [255, 255, 255];
+      const b = this.lunarCovB ??= document.createElement('canvas');
+      if (b.width < s.w || b.height < s.h) { b.width = s.w; b.height = s.h; }
+      const cb = b.getContext('2d');
+      if (cb) {
+        cb.setTransform(1, 0, 0, 1, 0, 0);
+        cb.globalAlpha = 1; cb.filter = 'none'; cb.globalCompositeOperation = 'source-over';
+        cb.clearRect(0, 0, s.w, s.h);
+        cb.drawImage(s.cv, 0, 0);
+        s.c.setTransform(1, 0, 0, 1, 0, 0);
+        s.c.globalCompositeOperation = 'multiply';
+        s.c.fillStyle = `rgb(${Math.round(lr)},${Math.round(lg)},${Math.round(lb)})`;
+        s.c.fillRect(0, 0, s.w, s.h);
+        s.c.globalCompositeOperation = 'destination-in';
+        s.c.drawImage(b, 0, 0);
+        s.c.globalCompositeOperation = 'source-over';
+      }
+    }
+    this.lunarCoverQueue.push({ m: s.m, k: s.k, ox: s.ox, oy: s.oy, w: s.w, h: s.h, cv: s.cv });
+  }
   /** ★BJ603 LocalPlayer.miscCounter 渲染帧快照（render() 头写入;弹幕 glowMask
    *  相位双画 1101/1102 消费——Proj 类 draw 侧无 Player 引用） */
   private _localMiscCounter = 0;
@@ -17675,6 +17835,60 @@ export class Renderer {
     }
     ctx.restore();
     this.wingGlowQueue.length = 0;
+  }
+
+  /** ★BJ665b 恒色甲件冲刷（收集侧见 lunarArmorQueue 注）：重放 = setTransform
+   *  矩阵 ×(1/k)（armorGlowQueue 同式,worldCanvas→页全幅原点合成关系）+ 件面
+   *  tintRGBA（恒色 250³/252³ ÷255 × 甲潜行乘区——量化缓存,与 armorDoll 消费
+   *  逐式同源）+ A 链 globalAlpha。dest = 帧盒 (−20, −(h−4))（doll 贴底 +4 pad
+   *  同式;rows 模式单帧/坐姿 64 高帧 dollFrameRows 归一）。位次=甲位 glow 前
+   *  （星尘 GlowMask 叠层在甲件之上=原版逐件后随叠画序）。 */
+  private flushLunarArmor(): void {
+    const q = this.lunarArmorQueue;
+    this.lunarArmorQueue = [];
+    if (!q.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of q) {
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      const g = Math.max(0, Math.min(1, e.alpha));
+      if (g <= 0) continue;
+      ctx.setTransform(e.m.a * invK, e.m.b * invK, e.m.c * invK, e.m.d * invK, e.m.e * invK, e.m.f * invK);
+      ctx.globalAlpha = g;
+      const pieces: Array<{ bake: Baked | null; cv: number }> = [
+        { bake: e.upper, cv: 250 },
+        { bake: e.legs, cv: e.legsC },
+      ];
+      for (const pc of pieces) {
+        if (!pc.bake) continue;
+        const tinted = tintRGBA(pc.bake, lunarArmorFlushTint(pc.cv, e.mul));
+        const ff = dollFrameRows(tinted, e.rows);
+        ctx.drawImage(ff.img, ff.sx, ff.sy, ff.sw, ff.sh, -ff.sw / 2, -ff.sh + 4, ff.sw, ff.sh);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ665b 被盖层随迁冲刷（收集侧见 lunarCoverQueue/lunarCoverBegin 注）：
+   *  纯 blit = 会话 scratch（drawPlayer 期已落墨+采光烘焙）×(1/k) 页域回贴。
+   *  位次=甲位 glow 后、itemGlow 前（原版序：glow 逐件后随 < 22 脸饰 < 27 手持物
+   *  < 手持光罩）。blit 毕会话画布还池（≤8 面,超限弃置=GC）。 */
+  private flushLunarCovered(): void {
+    const q = this.lunarCoverQueue;
+    this.lunarCoverQueue = [];
+    if (!q.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = 'source-over';
+    for (const e of q) {
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      ctx.setTransform(invK, 0, 0, invK, 0, 0);
+      ctx.drawImage(e.cv, 0, 0, e.w, e.h, e.ox, e.oy, e.w, e.h);
+      if (this.lunarCovPool.length < 8) this.lunarCovPool.push(e.cv);
+    }
+    ctx.restore();
   }
 
   /** ★BJ597 甲位 GlowMask 冲刷（收集侧见 armorGlowQueue 注）：op 重放 = setTransform
@@ -18659,8 +18873,8 @@ export class Renderer {
         const k0 = this.wingBakeCache.keys().next().value as string;
         const ev = this.wingBakeCache.get(k0);
         this.wingBakeCache.delete(k0);
-        // ★池化：淘汰画布按尺寸入池（cap 24/尺寸）供 miss 复用（消费站全 2D drawImage,
-        //  复用安全判据见 wingBakeCache 类注债清偿段）
+        // ★池化：淘汰画布按尺寸入池（cap 24/尺寸）供 miss 复用（消费站 ctx 多态:
+        //  2D 或 shim——复用重烘必 clearRect+bumpTexEpoch,见 wingTexSource 内注）
         if (ev && ev.width > 0) {
           const ek = `${ev.width}x${ev.height}`;
           let ef = this.wingBakeFree.get(ek);
@@ -18670,14 +18884,25 @@ export class Renderer {
       }
     }
     // ★翼案修复:烘进条目自有画布（见类注 (a)/(b) 两面病灶）——零共享槽触碰。
-    //  ★池化：同尺寸淘汰画布优先（createElement 换池取=稳态出生率→0）
+    //  ★池化：同尺寸淘汰画布优先（createElement 换池取=稳态出生率→0）。
+    //  ★★池取必 clearRect（2026-10-12 用户一报）：drawImage=source-over,新帧透明区
+    //  透出残留旧帧=混帧鬼影。
+    //  ★★★池取重烘必 bumpTexEpoch（2026-10-12 用户二报定谳——间隔不一的自扑动真凶）：
+    //  drawPlayer 的 ctx 在 GL 模式=shim 执行器,静态纹理键=er:texId:epoch:区域
+    //  （GLShimExecutor.resolveTex）——池画布同身份重烘而 epoch 不动 → er: 键不变
+    //  → texCache 命中=【陈旧纹理】,直至 256-texId FIFO 偶然逐出才刷新=间歇错帧
+    //  （旧债否决理由由此成立,本注此前「消费站全 2D」判读有误——ctx 是多态的）。
+    //  bumpTexEpoch=er: 键换代→重传（texId.ts 既有机制;2D 路径不读 epoch=零开销）。
     let sc: HTMLCanvasElement;
+    let pooled = false;
     {
       const fk = `${sw}x${sh}`;
       const fl = this.wingBakeFree.get(fk);
       if (fl && fl.length) {
         sc = fl.pop()!;
+        pooled = true;
         if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+        sc.getContext('2d')!.clearRect(0, 0, sc.width, sc.height);
       } else {
         sc = document.createElement('canvas');
         sc.width = sw; sc.height = sh;
@@ -18697,6 +18922,7 @@ export class Renderer {
       }
     }
     sctx.putImageData(id, 0, 0);
+    if (pooled) bumpTexEpoch(sc);   // ★shim er: 键换代（上注定谳;重烘内容≠旧键内容必 bump）
     this.wingBakeCache.set(cacheKey, sc);
     return sc;
   }
@@ -19330,7 +19556,10 @@ export class Renderer {
   }
 
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
-    const ctx = this.ctx;
+    // ★BJ665b：let = 恒色甲件被盖层重定向（lunarCover 区域 scratch——闭包捕获
+    //  变量绑定非值,tubeDraw 等在重定向窗内取到 scratch ctx,窗外恢复原值）
+    let ctx = this.ctx;
+    const mainCtx = ctx;
     if (p.dead) { this.drawDeadPlayerParts(p, world); return; }
     // ---- 变身坐骑隐藏玩家本体（PlayerDrawSet.cs:385-410 AdjustmentsFor{Wolf,
     //      Velociraptor,Rat,Bat,Pixie}Mount → hideEntirePlayer；MountID.Sets.
@@ -19742,6 +19971,9 @@ export class Renderer {
     // 装备槽与 AccFace 贴图族（引擎级缺口，勿在渲染层硬造；补系统时 wolf 52 的
     // (28,-2) 偏移同表在此）。Position.X −= direction·14（:1851）→ 镜像空间内平移 −14
     const veloHead = mntHidden && p.mount.type === 54;
+    // ★BJ665b：恒色甲件判定提升到函数域（迅猛龙藏身支只画头=头甲恒色单独成件;
+    //  主支在 doll 块内赋值）——R1/R2/R3 被盖层重定向窗统一吃此门
+    let lunarHoist: LunarConstPieces | null = null;
     if (p.appearance && (!mntHidden || veloHead)) {
       if (veloHead) {
         let vh = dollEquipFromInv(p.inv, p.appearance, true);
@@ -19749,12 +19981,36 @@ export class Renderer {
         if (p.buffs.has(BuffType.Werewolf)) vh = { ...vh, head: 38, body: 21, legs: 20 };
         if (p.merman) vh = { ...vh, head: 39, body: 22, legs: 21 };
         const vr = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, vh.legs ?? 0);
-        const headDoll = vh.head ? compositePaperDoll(p.appearance, vh, { part: 'head' }) : null;
+        // ★BJ665b：迅猛龙藏身+恒色头甲（CanDrawOnVelociraptorMount 门内头盔照画,
+        //  原版色=colorArmorHead=恒色覆写面同域）——lit 烘除+逃逸重绘（头甲件面）
+        const vl = lunarConstPieces(vh.head ?? 0, vh.body ?? 0, vh.legs ?? 0);
+        lunarHoist = vl;
+        const vlHead = vl?.head != null && !!vh.head;
+        const headDoll = vh.head
+          ? compositePaperDoll(p.appearance, vh, { part: 'head', ...(vlHead ? { lunarSplit: true } : {}) })
+          : null;
         if (headDoll) {
           ctx.save();
           ctx.translate(-14, 0);   // Position.X −= direction·14（镜像空间局部 X）
           const hf = dollFrame(headDoll, vr.body);
           ctx.drawImage(hf.img, hf.sx, hf.sy, hf.sw, hf.sh, -hf.sw / 2, -hf.sh + 4, hf.sw, hf.sh);
+          if (vlHead) {
+            // 恒色头甲件（part:'head'+lunarPart:'upper'=只烘头甲;双绘去重=armorGlowCollected
+            // 同集（藏身支不过 glow 收集块,零冲突）;乘区=无潜行拆层（藏身支无 stealth 面,
+            // 染料已烘入件面））
+            if (!this.armorGlowCollected.has(p)) {
+              this.armorGlowCollected.add(p);
+              const vlBake = compositePaperDoll(p.appearance, vh, { part: 'head', lunarSplit: true, lunarPart: 'upper' });
+              if (vlBake) {
+                this.lunarArmorQueue.push({
+                  m: ctx.getTransform(), k: this._worldLowK,
+                  upper: vlBake, legs: null,
+                  rows: { body: vr.body, legs: vr.body },
+                  mul: [1, 1, 1], alpha: bodyAlpha, legsC: vl.head ?? 250,
+                });
+              }
+            }
+          }
           this.drawEyelid(ctx, p, vr.body, 4, HIDES_HEAD.has(vh.head ?? 0));
           ctx.restore();
           drawn = true;
@@ -19797,7 +20053,15 @@ export class Renderer {
       // 落在 皮肤脸→脸饰→发→头甲 的原版序中,TheFace :2574 → hair :2422 → helmet
       // :2143+）;OverrideHelmet 命中（hairHidden）= 发整隐,拆出后不回画
       const hairSplit = !!dyeColor || !!facePlan?.split;
-      const dollOpts = { ...(hairSplit ? { skipHair: true } : {}), ...(facePlan?.skipFace ? { skipFace: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt };
+      // ★BJ665b 恒色甲件判定（PlayerDrawSet.cs SetPassColors 恒色覆写面——日耀/
+      //  星尘两族,见 vanillaLunarArmor.ts 逐支亲读）。命中 → 甲件从 lit 烘焙面
+      //  烘除（lunarSplit）+合成后逃逸重绘（候选 B）+被盖层随迁（本函数尾部三段
+      //  重定向窗）;漩涡/星云无恒色覆写（glow 叠层 BJ597 已落）零进入。
+      const lunar = lunarConstPieces(dollEquip.head ?? 0, dollEquip.body ?? 0, dollEquip.legs ?? 0);
+      lunarHoist = lunar;   // ★BJ665b：提升到函数域（R1/R2/R3 被盖层重定向窗消费）
+      const lunarSplit = lunar != null;
+      const lunarOpt = lunarSplit ? { lunarSplit: true } : {};
+      const dollOpts = { ...(hairSplit ? { skipHair: true } : {}), ...(facePlan?.skipFace ? { skipFace: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt, ...lunarOpt };
       const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
       if (doll) {
         const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
@@ -19838,6 +20102,22 @@ export class Renderer {
         //      目标,恒色目标须 α=1。精确修复 = 逐层采光或免光实体窗（架构级）,
         //      暂记债不落刀; heuristic 补偿（按光档混 α）属自造语义,反伪影纪律
         //      禁止。stamps（本块）与盾球（7e''' 槽）不受此债影响已落。
+        // ---- ★BJ665b 恒色件烘焙面（upper=头甲+身甲复合件 250、legs=腿甲 日耀 250/
+        //      星尘 252）：raw 件烘焙（染料已入），恒色值在消费侧与乘区链合成。
+        //      lit 主烘焙面已烘除恒色件（lunarSplit）——stamps/残影同样需要件面
+        //      覆盖（原版 stamp=全层组×GetImmuneAlphaPure(shadow),甲色=250³×k）。 ----
+        const lunarUpper = lunarSplit
+          ? compositePaperDoll(p.appearance, dollEquip, { ...dollOpts, lunarPart: 'upper' })
+          : null;
+        const lunarLegsBake = lunarSplit
+          ? compositePaperDoll(p.appearance, dollEquip, { ...dollOpts, lunarPart: 'legs' })
+          : null;
+        /** stamp/残影的恒色件覆盖（同 filter/globalAlpha/偏移——f.img 已烘除甲件） */
+        const stampLunarPiece = (bake: Baked | null, cv: number, ox: number, oy: number): void => {
+          if (!bake) return;
+          const ff = dollFrameRows(tintRGBA(bake, [cv / 255, cv / 255, cv / 255]), rows);
+          ctx.drawImage(ff.img, ff.sx, ff.sy, ff.sw, ff.sh, ox - ff.sw / 2, oy - ff.sh + pad, ff.sw, ff.sh);
+        };
         const solarSetFull = isSolarFlareFullSet(
           dollEquip.head ?? 0, dollEquip.body ?? 0, dollEquip.legs ?? 0);
         if (solarSetFull) {
@@ -19848,6 +20128,8 @@ export class Renderer {
             ctx.filter = `brightness(${s.k})`;
             ctx.globalAlpha *= s.k;
             ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, s.ox - f.sw / 2, s.oy - f.sh + pad, f.sw, f.sh);
+            stampLunarPiece(lunarUpper, 250, s.ox, s.oy);
+            stampLunarPiece(lunarLegsBake, lunar?.legs ?? 250, s.ox, s.oy);
             ctx.restore();
           }
         }
@@ -19870,6 +20152,8 @@ export class Renderer {
             ctx.filter = `brightness(${g.k})`;
             ctx.globalAlpha *= g.k;
             ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, g.lx - f.sw / 2, g.ly - f.sh + pad, f.sw, f.sh);
+            stampLunarPiece(lunarUpper, 250, g.lx, g.ly);
+            stampLunarPiece(lunarLegsBake, lunar?.legs ?? 250, g.lx, g.ly);
             ctx.restore();
           }
         }
@@ -19933,7 +20217,7 @@ export class Renderer {
           //   （gFade 呼吸,99..151/255——PlayerDrawSet.cs:1501-1511 先钳,潜行
           //   :1523-1651 后乘,可交换）
           const armorDoll = compositePaperDoll(p.appearance, dollEquip,
-            { layer: hairSplit ? 'armorNoHead' : 'armor', ...(socialGhost ? { ghostSkin: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
+            { layer: hairSplit ? 'armorNoHead' : 'armor', ...(socialGhost ? { ghostSkin: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt, ...lunarOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
               ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
@@ -19981,6 +20265,21 @@ export class Renderer {
               : null,
           });
           if (agOps.length) this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps });
+          // ★BJ665b 恒色甲件入队（同块=armorGlowCollected 双绘去重免早绘/主段双份）：
+          //  乘区/A 链与 armorDoll 逐式同源（vortex Lerp 通道 :1641-1644 / B×settled
+          //  :1539-1541 / A×s'×gFade×bodyAlpha）——恒色 250³/252³ 在 flush 侧与 mul
+          //  合成（tintRGBA 量化缓存）;件面 raw 烘焙（染料已入,缓存键含染料/lunarPart）。
+          if (lunarUpper || lunarLegsBake) {
+            const lunarMul: [number, number, number] = stEq.vortexSet
+              ? [vortexTint![0], vortexTint![1], vortexTint![2]]
+              : [stealthClamp, stealthClamp, stealthSettled];
+            this.lunarArmorQueue.push({
+              m: ctx.getTransform(), k: this._worldLowK,
+              upper: lunarUpper, legs: lunarLegsBake,
+              rows, mul: lunarMul, alpha: bodyAlpha * stealthClamp * ghostA,
+              legsC: lunar?.legs ?? 250,
+            });
+          }
         }
         // ---- ★BJ625件2：头 269 前管本体（FloretProtector 前伸探头管）----
         //  原版两站同式（PlayerDrawLayers.cs:104-118 FrontShoulder 复合站 +
@@ -20012,7 +20311,15 @@ export class Renderer {
         // ★BJ423 浮游圈管体·前半（DrawPlayer_17_TorsoComposite :2037-2044——躯干甲/
         //   大衣后、OffhandAcc/Head 前；源=Extra_105 下半 (0,56,40,56)）。同锚帧盒,
         //   坐姿补 −torsoOffset（site2 无 torsoOffset 臂 vs 本仓坐下整体平移含项）。
+        // ★BJ665b R1 被盖层重定向：浮游圈管体·前半（原版 17_TorsoComposite site2
+        //  :2037-2044=躯干甲之上）——恒色甲件逃逸重绘在其上,层序保持须随迁
+        //  （候选 B;漩涡/星云无恒色覆写 lunarHoist=null 零进入）。区域 scratch
+        //  全亮重放→玩家中心采光烘焙→合成后甲件之上重放（flushLunarCovered）。
+        const covR1 = lunarHoist != null && !this.lunarCoverCollected.has(p)
+          ? this.lunarCoverBegin(ctx, p) : null;
+        if (covR1) ctx = covR1.c;
         tubeDraw(56, p.sitting ? -Math.trunc(p.seatOffsetY) : 0);   // 前半
+        if (covR1) { this.lunarCoverEnd(covR1); ctx = mainCtx; }
         // ---- 头层脸饰（DrawPlayer_21_Head_TheFace :2574-2650——发层之下的头层路径,
         //      2026-09-03 四层路由批接入）----
         if (facePlan?.split) {
@@ -20129,12 +20436,18 @@ export class Renderer {
     //      后/32_FrontAcc_BackPart 前（LegacyPlayerRenderer.cs:228）——本体层之上、
     //      身前配饰之下。mntHidden（变身坐骑整玩家隐）与 pulley 物理门本互斥
     //      （pulley 门含 !mount.Active,:25815/:26481）,此处防御性同门）----
+    // ★BJ665b R2 被盖层重定向：滑轮（24_Pulley）+身前配饰族（29/32 层组）——
+    //  恒色甲件重绘在其下=原版层序保持（mntHidden 支两站本体不画,窗门同收）。
+    const covR2 = lunarHoist != null && !mntHidden && !this.lunarCoverCollected.has(p)
+      ? this.lunarCoverBegin(ctx, p) : null;
+    if (covR2) ctx = covR2.c;
     if (!mntHidden) this.drawPulleyLayer(ctx, p, !!swing);
 
     // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
     // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
     // 详见 drawAccFrontLayers。head = 纸娃娃头盔 ArmorIDs（胡须/脸饰头盔门）
     this.drawAccFrontLayers(ctx, p, accRows, socialGhost ? stealthClamp * ghostA : stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0, headFaceDrawn);
+    if (covR2) { this.lunarCoverEnd(covR2); ctx = mainCtx; }
 
     ctx.restore();
     // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
@@ -20218,6 +20531,18 @@ export class Renderer {
     //      ★曾整段画在段 A（本体之前）= 武器被身体贴图挡住,用户实报
     //      "原版的贴图是在角色层级之上"。mrot/坐椅偏移随原变换
     //      （TransformDrawData 手持层整组随转;坐椅 save 在本位仍未收口） ----
+    // ★BJ665b R3 被盖层重定向：手持物（27_HeldItem 静持+挥舞）/甲虫 orb（37）/
+    //  坐骑前层+矿车（23_MountFront）——恒色甲件重绘在其下=原版层序保持（禁 C
+    //  裸重绘）。禁戒符号环（原版 05 层=甲【下】,留 lit 窗=恒色甲件覆盖之=更贴
+    //  原版序,登记）与盾球/眼球伞（既有 7e 逃逸族）不入窗。窗内 itemGlow 推送
+    //  矩阵由 lunarCoverEnd 回改（重定向态捕获→真矩阵）。窗【必须】在坐椅
+    //  restore（下方）前收口——restore 作用于主 ctx 栈。
+    const lunarR3Content = !!(heldDraw || (swing && swing.item >= 0 && !swing.noGraphic)
+      || ((p.equipStats.beetleDef === true || p.equipStats.beetleOff === true) && !p.dead && !mntHidden)
+      || mnt || cart);
+    const covR3 = lunarHoist != null && lunarR3Content && !this.lunarCoverCollected.has(p)
+      ? this.lunarCoverBegin(ctx, p) : null;
+    if (covR3) ctx = covR3.c;
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
     if (heldDraw) {
       const { vid, ar, icon, fw, fh, offX, offY, rot } = heldDraw;
@@ -20487,6 +20812,10 @@ export class Renderer {
         ctx.restore();
       }
     }
+    if (covR3) { this.lunarCoverEnd(covR3); ctx = mainCtx; }
+    // ★BJ665b：首遍收集完标记（坐椅/睡床双绘去重——次遍全窗回内联原路径,lit 窗
+    //  内容被合成后甲件+随迁重放覆盖,终像=队列版）
+    if (lunarHoist != null) this.lunarCoverCollected.add(p);
     // 使用类物品层已并入段 A（身体后图层）——原版 weaponDrawOrder 恒 BehindFrontArm
     // （PlayerDrawSet.cs:354），工具/武器/消耗品挥舞同一层序，勿在此双画
     // （旧"非工具画身体前"分支已退役，2026-08-22 手持层级统一）
@@ -22437,6 +22766,40 @@ export class Renderer {
     console.log(`[prewarmGL] WebGL 管线预热完成 ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
+  /** mod 全屏后处理状态快照(hooks.ModScreenFxState 契约;lights-and-shadows 消费)。
+   *  口径锚:time=Clock.vanillaMainTime(分段 Main.time,昼 0..54000/夜 0..32400);
+   *  screen=视口左上世界px(=screenPos 同式);bgAlpha=biomeBg.frontLayer()
+   *  槽 7(Snow)/2(Desert)(vanilla bgAlphaFrontLayer 同域);样式=biomeBg.styleProbe()
+   *  (Main.snowBG[0]/desertBG[0] 等价)。无世界(菜单/拍照间隙)返中性缺省——
+   *  消费方 pass 仍会被链执行,故缺省须为无效果值(time=昼半程/alpha=0)。 */
+  private modScreenFxState(
+    cam: Camera, player: Player, viewW: number, viewH: number, z: number, world?: World,
+  ): ModScreenFxState {
+    const w = world;
+    const clock = w?.clock;
+    const front = w ? this.biomeBg.frontLayer() : null;
+    const probe = w ? this.biomeBg.styleProbe() : { snow0: -1, desert0: -1 };
+    return {
+      time: clock ? Clock.vanillaMainTime(clock.timeOfDay) : 27000,
+      dayTime: clock ? clock.isDay : true,
+      worldSurface: w ? w.groundLevel : 0,
+      moonPhase: clock ? clock.moonPhase : 0,
+      colorOfTheSkies: this.colorOfTheSkies,
+      screenX: cam.x - viewW / z / 2,
+      screenY: cam.y - viewH / z / 2,
+      viewW, viewH,
+      playerCx: player.cx, playerCy: player.cy,
+      gravDir: player.gravDir,
+      zoneSnow: !!w?.scene?.zoneSnow,
+      zoneCrimson: !!w?.scene?.zoneCrimson,
+      zoneCorrupt: !!w?.scene?.zoneCorrupt,
+      bgAlphaFrontSnow: front ? (front[7] ?? 0) : 0,
+      bgAlphaFrontDesert: front ? (front[2] ?? 0) : 0,
+      snowBgStyle: probe.snow0,
+      desertBgStyle: probe.desert0,
+    };
+  }
+
   /** 7d 滤镜链合成：HeatDistortion(Low) → 柱族(Medium) → CRT/Test2(VeryHigh)。
    *  GL 优先(字节码 1:1,含 ColorOfTheSkies 链乘 EndCapture :172/:194);
    *  失败回退 2D(heat 半分辨率扭曲 + MonolithFilters canvas 近似) */
@@ -22471,7 +22834,12 @@ export class Renderer {
       }
     }
     const towVisible = TOWER_KEYS.some((k) => tows[k] != null && this._towerFilterOpacity[k] > 0);
-    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible) { this.sfxPathUsed = '-'; return; }
+    // ---- mod 全屏后处理 pass(lights-and-shadows 首消费方;tML FilterManager.
+    //      EndCapture MonoMod 前缀同位——空注册零成本,快照工厂仅在有注册时调用) ----
+    const modPasses = collectModScreenFx(() => this.modScreenFxState(cam, player, viewW, viewH, z, world));
+    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible && modPasses.length === 0) {
+      this.sfxPathUsed = '-'; return;
+    }
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -22480,6 +22848,10 @@ export class Renderer {
     const gl = this.screenFxLayer();
     if (gl) {
       const passes: ScreenFxPass[] = [];
+      // mod pass 在链最前(=先于 orig(EndCapture) 的原版 mod 同位;uTint 豁免由
+      // 着色器不声明达成——原版 mod 所见场景未乘 ColorOfTheSkies,FilterManager.cs
+      // :150-210 定谳:天色乘法仅发生在各 Filter Apply 绘制)
+      for (const mp of modPasses) passes.push(mp);
       if (mono.heatVisible) {
         passes.push({
           kind: 'FilterHeatDistortion', screenRes, screenPos,

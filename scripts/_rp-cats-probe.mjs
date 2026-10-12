@@ -91,6 +91,17 @@ const sfx = await page.evaluate(async (id) => {
   return { before, after, restored }
 }, rowId)
 check('关 sfx → 音效覆盖清空/恢复', sfx.before === 19 && sfx.after === 0 && sfx.restored === 19, JSON.stringify(sfx))
+// ---- 持久化核验:刷新后类别开关留存 ----
+await page.goto(ORIGIN + '/?play=small', { waitUntil: 'networkidle2', timeout: 90000 })
+await new Promise((r) => setTimeout(r, 4000))
+const persist = await page.evaluate((id) => {
+  const mgr = window.__swResourcePacks
+  const row = mgr?.rows?.find((r) => r.id === id)
+  return { cats: row?.categories ?? null }
+}, rowId)
+check('刷新后类别开关持久', persist.cats && Object.keys(persist.cats).length > 0, JSON.stringify(persist.cats))
+console.log('持久化:', JSON.stringify(persist.cats))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 if (errs.length) console.log('页面异常:', errs.slice(0, 3))
 await browser.close()

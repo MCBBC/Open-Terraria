@@ -903,8 +903,90 @@ export function menuThemeSnapshot(): ModMenuThemeSpec | null {
   return menuThemeSpec;
 }
 
+// ---- mod 全屏后处理 pass(2026-10-12;lights-and-shadows 首消费方) ----
+//
+// 定位 ≙ tML 模组挂钩 FilterManager.EndCapture 的 MonoMod 前缀(反编译
+// FilterManager.cs:150-210:ColorOfTheSkies 乘法仅发生在各 Filter Apply 绘制时,
+// 无滤镜走 Color.White——故本钩子快照/输入纹理均为【未乘天色】场景,与原版
+// mod 所见一致;mod pass 插入滤镜链最前=先于 orig(EndCapture) 同位)。
+// 执行机 = GLScreenFilters pipeRunPasses('ModScreenFx' 分支):exec 收链输入
+// (恒等布局)与输出槽 fboA(GL 朝向契约),内部子管线自管(自有 FBO/程序)。
+// 纪律同全局:①空注册零成本(collect 首行 length 短路,快照不装配);
+// ②注册只在 loader 脚本相位;③fail-fast 重复 id;④import type 单向零环。
+import type { GLPipeline, PipelineFbo } from '../render/GLPipeline';
+
+/** 每帧游戏状态快照(渲染 7d 组装端装配;只读——mod 不得改写) */
+export interface ModScreenFxState {
+  /** 原版分段 Main.time(昼 0..54000 自 4:30AM、夜 0..32400 自 7:30PM;Clock.vanillaMainTime) */
+  time: number;
+  dayTime: boolean;
+  /** 地表高度(tile;world.groundLevel) */
+  worldSurface: number;
+  /** 0=满月 4=新月(world.clock.moonPhase,原版 Main.moonPhase 同域) */
+  moonPhase: number;
+  /** 天景色 RGB(0-255;Renderer.colorOfTheSkies) */
+  colorOfTheSkies: readonly [number, number, number];
+  /** 屏幕左上世界 px(Main.screenPosition 同域) */
+  screenX: number;
+  screenY: number;
+  /** 链面尺寸(主画布 px) */
+  viewW: number;
+  viewH: number;
+  /** 玩家中心世界 px */
+  playerCx: number;
+  playerCy: number;
+  /** 1=正常 -1=反转重力 */
+  gravDir: number;
+  zoneSnow: boolean;
+  zoneCrimson: boolean;
+  zoneCorrupt: boolean;
+  /** Main.bgAlphaFrontLayer[7]/[2] 等价(biomeBg.frontLayer()) */
+  bgAlphaFrontSnow: number;
+  bgAlphaFrontDesert: number;
+  /** Main.snowBG[0]/desertBG[0] 等价(活动样式三元组首元;非对应群系时仍有种子值,
+   *  消费方按 zone 旗门控) */
+  snowBgStyle: number;
+  desertBgStyle: number;
+}
+
+/** mod pass 执行契约:输出须写 outFbo(链输出槽,GL 朝向——与滤镜 pass 出口同,
+ *  直通 blit/present 据此闭合);inputTex=链输入(恒等布局,v0=图像顶)。
+ *  exec 全权管理自身子管线(自有 pipe.program/fbo),返回前 outFbo 须绑定为
+ *  当前 FRAMEBUFFER。GL 丢失自判(gl.isContextLost 由执行机兜底)。 */
+export type ModScreenFxExec = (
+  gl: WebGL2RenderingContext, pipe: GLPipeline,
+  inputTex: WebGLTexture, outFbo: PipelineFbo, w: number, h: number,
+  state: ModScreenFxState,
+) => void;
+
+export interface ModScreenFxPass { id: string; exec: ModScreenFxExec }
+
+const modScreenFx: ModScreenFxPass[] = [];
+
+export function registerModScreenFx(p: ModScreenFxPass): void {
+  if (modScreenFx.some((x) => x.id === p.id)) throw new Error(`[mod-hooks] screenFx 重复注册: ${p.id}`);
+  modScreenFx.push(p);
+}
+
+/** 渲染端组装口:空注册零成本短路(不装配快照);非空调用时返回已绑状态的
+ *  链 pass 载体(GLScreenFilters 'ModScreenFx' 消费) */
+export interface ModScreenFxChainPass {
+  kind: 'ModScreenFx';
+  exec: (gl: WebGL2RenderingContext, pipe: GLPipeline,
+    inputTex: WebGLTexture, outFbo: PipelineFbo, w: number, h: number) => void;
+}
+export function collectModScreenFx(makeState: () => ModScreenFxState): readonly ModScreenFxChainPass[] {
+  if (modScreenFx.length === 0) return [];   // 空注册零成本:快照工厂不调用
+  const state = makeState();
+  return modScreenFx.map((p) => ({
+    kind: 'ModScreenFx' as const,
+    exec: (gl, pipe, inputTex, outFbo, w, h) => p.exec(gl, pipe, inputTex, outFbo, w, h, state),
+  }));
+}
+
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
+  modScreenFx.length = 0;
   itemCanUse.clear();
   accEffects.clear();
   accEffectExtras.clear();

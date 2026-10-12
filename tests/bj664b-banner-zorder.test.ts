@@ -27,6 +27,9 @@
 //  蠕虫头尾中点锚,Renderer.ts:10260 头注）=运行时死线,此类条回落默认锚
 //  e.y+e.h+10+HB_ADD_H。c13-render-r12-clearance.test.ts 只锚源码未锚行为,
 //  未覆盖此缝。本测试夹具因此走真实路径（默认锚）,禁喂 hbAnchor 幻影字段。
+//  ★BJ665c（2026-10-12）已接通清偿（解构补取+drawHealthBar 第 4 参直传;行为锁
+//  =tests/bj665c-hbanchor-wire.test.ts + c13 F5-wire 行为面）——本件夹具仍走
+//  默认锚路径不变（vid 1 无锚实体=真实常态路径）。
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -178,9 +181,9 @@ const mkCtx = (lightAtCalls: { n: number }) => {
   };
 };
 
-/** 场景几何（同屏重叠,真实运行时路径——★夹具禁喂幻影字段:hbEntryOf 把
- *  hbAnchor 产在 entry 上而 flush 解构只取 {e,expert},e.hbAnchor 运行时恒缺
- *  （旁案登记见头注）→ 条锚 = 默认式 e.y+e.h+10=220）。名条锚 by=252/rectH=46
+/** 场景几何（同屏重叠,真实运行时路径——夹具走【无锚默认式】=vid 1 无锚实体
+ *  常态（hbAnchor 死线旁案已由 BJ665c 接通,见头注;本件仍不喂 entry 级锚））
+ *  → 条锚 = 默认式 e.y+e.h+10=220。名条锚 by=252/rectH=46
  *  → 基线 wy=220 → 框屏 y 209..224;血条条屏 y 220..232、x 782..818（vid=1
  *  scale=1,fill=18 段式）——y 带 220..224 与名条框重叠。 */
 const LABEL = { bx: 800, by: 252, rectH: 46, label: '向导' };
