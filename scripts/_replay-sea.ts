@@ -15,6 +15,10 @@ const { RNG, translateSeed } = await import('../src/core/rng.ts');
     try { registerModTile({ key: `mod_calamity_${f.replace('.json', '')}`, name: '' }, nextId++); } catch { /* skip */ }
   }
 }
+// ★652:pass 域依赖注入——gen-sea 的 genSolid/sheetOf 读 globalThis.__calamityTileDefs
+// (引擎由 src/mods/register.ts:152 注入;判卷此前漏配=genSolid 恒 false→YStart 落
+//  worldSurface 兜底 337、棕榈清除/RemoveStupid 全盲,首判 78,725 的第一因)。
+(globalThis as Record<string, unknown>).__calamityTileDefs = TILE_DEFS;
 
 // 快照载入(x 主序→行主序;gzip)
 function loadSnap(pat: string) {
@@ -118,6 +122,11 @@ console.log('[replay] pass fn 就绪');
 const gs = {
   seed: translateSeed('9293480'),
   worldSurface: 337, rockLevel: 535,
+  // ★652:GenVars.worldSurfaceLow(TerrainPass.cs:237=num5=全图地表最小值;真实值
+  //  属 [228,276] 夹带)——DetermineYStart 从 low−20 下行找首实心。判卷列实测:
+  //  搜索列 x=3828 首实心 y=246 → 凡 start≤244(low≤264)搜索结果不变(不变量域),
+  //  取 246 落域内。缺省回退 worldSurface=337=start 317 已在滩体内=错位 ~90 行。
+  worldSurfaceLow: 246,
   dungeonX: 3421, dungeonMaxY: 207, dungeonMinX: 0, dungeonMaxX: 4200,
   seedFlags: {},
   mods: {
@@ -128,6 +137,14 @@ const gs = {
 };
 const rng = new RNG(gs.seed as number);
 (seaFn as (...a: unknown[]) => void)(store, rng, gs);
+
+// ★652:存档域归一(ghost purge)——post 快照=pass 边界的「已保存世界」视图:原版
+//  .wld 对未激活 tile 不写 type(WF:1458-1462 flag 门)→ inactive 格 type 恒 0。
+//  物证:首差格(3839,222) pre=树(5)→post=0,而 C# RemoveStupidTilesAboveSea
+//  (SulphurousSea.cs:303) 只 HasTile=false(type 内存中保留)→ 快照必为归一化编码。
+//  判卷侧对齐之(TileStore.purgeGhostTiles 同式,TileStore.ts:140-155);pass 内部
+//  保持活体语义(C# live;pass2 PlaceAmbience 裸读 type 依赖它)。
+for (let i = 0; i < n; i++) { if (!(store.flags[i] & 1) && store.type[i] !== 0) store.type[i] = 0; }
 
 let diff = 0;
 const diffByType = new Map<string, number>();

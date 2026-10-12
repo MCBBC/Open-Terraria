@@ -10,12 +10,31 @@ const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 
-// mod tile 注册(803)
+// mod tile 注册(803)——★重放定谳:须透传 content json 字段(solid/framed/w/h/chest…),
+// 与 src/mods/register.ts:220 运行时注册面对齐;裸 key 注册=solid 恒 false
+// → placeCragObject 锚行全拒(ambience 全零假象)。
 {
   let nextId = 1030;
   for (const f of readdirSync(`${root}/mods/calamity/content/tiles`).sort()) {
     if (!f.endsWith('.json')) continue;
-    try { registerModTile({ key: `mod_calamity_${f.replace('.json', '')}`, name: '' }, nextId++); } catch { /* skip */ }
+    try {
+      const spec = JSON.parse(readFileSync(`${root}/mods/calamity/content/tiles/${f}`, 'utf8')) as Record<string, unknown>;
+      registerModTile({
+        key: `mod_calamity_${f.replace('.json', '')}`,
+        name: (spec.name as string) ?? '',
+        solid: (spec.solid as boolean) ?? false,
+        platform: (spec.platform as boolean) ?? false,
+        decor: (spec.decor as boolean) ?? false,
+        chest: (spec.chest as boolean) ?? false,
+        framed: (spec.framed as boolean) ?? false,
+        w: spec.w as number | undefined,
+        h: spec.h as number | undefined,
+        opacity: spec.opacity as number | undefined,
+        pick: (spec.pick as number) ?? 0,
+        mapColor: (spec.mapColor as string) ?? '#808080',
+        blend: false,
+      }, nextId++);
+    } catch { /* skip */ }
   }
 }
 
@@ -79,11 +98,20 @@ const MOD_ID_TO_NAME = new Map<number, number>();   // cs id → 本仓 internal
   const root0 = payload(10, r) as Array<{ t: number; name: string; v: unknown }>;
   const tiles = (root0.find((t) => t.name === 'tiles')?.v ?? []) as Array<{ t: number; name: string; v: unknown }>;
   const tileMap = tiles.find((t) => t.name === 'tileMap')?.v as unknown[];
+  // ★重放定谳:Calamity 类名数字后缀(CragStalactiteGiant1/LavaLily3)→本仓键含 _(
+  //   crag_stalactite_giant_1);单 snake 变体丢配 → 快照 mod id 全部落 0(仪盲)。
+  const ourByKey = (nm: string): number | undefined => {
+    const s1 = nm.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+    for (const s of [s1, s1.replace(/([a-z])(\d)/g, '$1_$2')]) {
+      const id = TILE_BY_KEY[`mod_calamity_${s}`];
+      if (id !== undefined) return id;
+    }
+    return undefined;
+  };
   for (const e of tileMap) {
     const f = (Array.isArray(e) ? e : (e as { v: unknown }).v) as Array<{ name: string; v: unknown }>;
     const get = (nm: string) => f.find((x) => x.name === nm)?.v;
-    const snake = String(get('name')).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-    const our = TILE_BY_KEY[`mod_calamity_${snake}`];
+    const our = ourByKey(String(get('name')));
     if (our !== undefined) MOD_ID_TO_NAME.set(Number(get('value')), our);
   }
   console.log('[replay] mod 名映射', MOD_ID_TO_NAME.size);
@@ -150,7 +178,9 @@ const biomeStart = 4200 - Math.floor(4200 / 5) - 25, biomeEdge = biomeStart + Ma
 console.log(`[replay] crag 区 x∈[${biomeStart},${biomeEdge}] uw=${uw}`);
 
 const rng = new RNG(gs.seed as number);
+(globalThis as Record<string, unknown>).__cragDbg = {};
 (cragFn as (...a: unknown[]) => void)(store, rng, gs);
+console.log('[replay] placeCragObject 失败谱:', JSON.stringify((globalThis as any).__cragDbg));
 
 // ── diff 剖面 ──
 let diff = 0, diffIn = 0, diffOut = 0;
