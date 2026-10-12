@@ -46,10 +46,10 @@ import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 import { BuffType } from '../stats/Buffs';
 import { TORCH_DUST_BY_STYLE } from '../world/Torch';
 
-/** 原版投射物绘制偏移表（Main.cs:29375-29826 num143/num144 表,96 条静态项）。
+/** 原版投射物绘制偏移表（Main.cs:30077-30528 num151/num152 表,96 条静态项——★BJ665 勘正 1456 伪锚 :29375-29826/1456 伪名 num143/num144）。
  *  语义:贴图左上角落于 (盒左 + num144, 盒上 − num143)——num143 为"上移"量。
  *  典型:炸弹 28=上移 8(22×30 贴图,引线 y=0-7 全在盒外,弹体 y=8-29 恰填 22×22 盒,
- *  Main.cs:29560);雷管 29=上移 11(10×32)。
+ *  Main.cs:30262);雷管 29=上移 11(10×32)（★BJ665 勘正 1456 伪锚 :29560）。
  *  方向/高度依赖项已入 PROJ_DRAW_OFFSET_DYN(959/1095/1096/1003/1004/112/
  *  191-194/390-392/313/397——待对应弹型接入时传 dirX 生效);
  *  浮标 proj.bobber=8 项不经本表——Bobber 实体自持绘制(AI_061 全语义移植)。 */
@@ -85,7 +85,7 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
   517: [6, 0], 681: [6, 0], 516: [6, 0], 127: [8, 0], 155: [3, 3],   // 397 移 DYN 表(num145−1)
 };
 
-/** 方向/高度依赖偏移项（Main.cs:29375-29826 表内 spriteDirection/direction/height
+/** 方向/高度依赖偏移项（Main.cs:30077-30528 表内 spriteDirection/direction/height——★BJ665 勘正 1456 伪锚 :29375-29826
  *  条目,2026-08-19 补齐机制）。dirX = 弹体朝向（spriteDirection 语义:+1 右/-1 左,
  *  调用方传实体 facing）；dir = 原版 proj.direction（AI 移动朝向,缺省=dirX——
  *  ★F5b：191-194/390-392 三族原文读 direction 非 spriteDirection
@@ -137,8 +137,8 @@ export function projDrawOffsetFor(projId: number, dirX: number, boxH: number,
 }
 
 /** 共用绘制：投射物贴图按角度旋转。
- *  锚点 1:1 原版通用绘制公式（Main.cs:34040）:
- *    anchor = (盒左 + num145 + num144, 盒上 + 盒高/2),origin = (num145, 盒高/2 + num143)
+ *  锚点 1:1 原版通用绘制公式（Main.cs:35047;origin38=:35032——★BJ665 勘正 1456 伪锚 :34040）:
+ *    anchor = (盒左 + num153 + num152, 盒上 + 盒高/2),origin = (num153, 盒高/2 + num151)（1456 伪名 num145/num144/num143）
  *    num145 = (贴图宽 + 盒宽)/2 → 展开后贴图左上角落于 (盒左 + num144, 盒上 − num143),
  *    旋转绕 anchor 进行。非方贴图(W≠盒宽)按此公式为"盒左对齐"而非居中。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
@@ -161,7 +161,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   // -1 为历史显式写法,与缺省 0 同义——原版投射物绘制语义,爆炸族雷管 10×32 竖条
   // 等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
-  // centerAnchor=Main.cs:32360 专属组（802/842/938-945 短剑刺族等）：锚=盒中心、
+  // centerAnchor=Main.cs:33161 专属组（802/842/938-945 短剑刺族等,★BJ665 勘正 1456 伪锚 :32360）：锚=盒中心、
   // origin=贴图中心、无 num143/144 偏置——曾误走通用 num145 偏置锚（枢轴≈剑尖），
   // 右刺角度巧合正常、左刺 −π/4×sd 与镜像叠加后枢轴错位=剑柄朝前（2026-08-17 用户报）
   const img0 = projSprite(projId);
@@ -182,7 +182,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const img = img0;
   const hasImg = !!(img && (img.width > 0) && img.width > 0);
   const W = hasImg ? img!.width : dw;
-  // num145 = (贴图宽−盒宽)/2 + 盒宽/2 = 贴图宽/2（Main.cs:29601 原式化简）——
+  // num153 = (贴图宽−盒宽)/2 + 盒宽/2 = 贴图宽/2（Main.cs:30303 原式化简——★BJ665 勘正 1456 伪锚 :29601/伪名 num145）——
   // 旋转枢=贴图水平中点;曾误写 (贴图宽+盒宽)/2 → 悠悠球/回旋镖绕偏心点公转
   const num145 = W / 2;
   // 偏移取值：方向/高度依赖项优先（弹体朝向取实体 facing——spriteDirection 语义），
@@ -190,7 +190,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const off3 = projDrawOffsetFor(projId, (e as { facing?: number }).facing ?? 0, e.h);
   const [off143, off144, num145Adj] = off3 ?? [0, 0, 0];
   const num145f = num145 + num145Adj;
-  const dwS = dw * scale;                             // 绘制缩放（M.cs:32360 Vector2.One×proj.scale）
+  const dwS = dw * scale;                             // 绘制缩放（Main.cs:33161 Vector2.One×proj.scale——★BJ665 勘正 1456 伪锚 :32360）
   const s = dwS / W;                                  // 绘制缩放(原生尺寸=1)
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
@@ -201,7 +201,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
     if (mirror) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
     if (hasImg) {
-      // ★中心锚组绘制尺寸=贴图原生×scale（M.cs:32360 vector76=Vector2.One×proj.scale,
+      // ★中心锚组绘制尺寸=贴图原生×scale（Main.cs:33161 vector76=Vector2.One×proj.scale——★BJ665 勘正 1456 伪锚 :32360,
       // origin=贴图中心）——勿用 dw（drawSize=0 时 dw=盒宽,会把球缩到命中盒大小）
       const sw = W * scale, sh = img!.height * scale;
       ctx.drawImage(img!, -sw / 2, -sh / 2, sw, sh);
@@ -407,7 +407,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     const extHit = !bodyHit && extRects.some((r) =>
       r.x < e.x + e.w && r.x + r.w > e.x && r.y < e.y + e.h && r.y + r.h > e.y);
     if (!bodyHit && !extHit) continue;
-    // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
+    // 反射源命中（Projectile.cs:12781-12791——★BJ665 勘正 1456 伪锚 :12050-12060）：按 projId 查 CanBeReflected 白名单——
     // 回旋镖 aiStyle3/长矛 19/161/悠悠球 99/15 均不在表内不反射，白名单内新弹型自动生效
     if (me.projId !== undefined && tryReflectProjectile(me, me.projId, e, game)) return;
     if (playerImmune) {
@@ -622,7 +622,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
   }
 }
 
-// ================= 回旋镖（aiStyle 3，AI_003_Boomerang，Projectile.cs:36623-37352） =================
+// ================= 回旋镖（aiStyle 3，AI_003_Boomerang，Projectile.cs:39572-40359——★BJ665 勘正 1456 伪锚 :36623-37352） =================
 // 原版四段（Update 的 numUpdates 循环内【先 AI(:15434) 后移动/碰撞(:15674)】——step() 同序）：
 //   ① 出程 ai[0]==0（:36783-37087）：无摩擦直线——AI 内无任何通用摩擦/减速项,
 //      速度只被特例族（下垂/追踪/双门）改写;
@@ -670,7 +670,7 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
   320: [15, 3], 383: [16, 4], 1000: [9.5, 0.4],
 };
 
-/** Phaseblade 族（ProjectileID.cs:27 IsAPhaseblade,19 型）：
+/** Phaseblade 族（ProjectileID.cs:33 IsAPhaseblade,19 型——★BJ665 勘正 1456 伪锚 :27）：
  *  出程 30t 后垂落;返回 40/3 高速穿墙归位 + extraUpdates 随距离增长（:37211-37221）。
  *  exported：Game 发射侧接线再掷召回门（recallGate）/回归测试共面 */
 export const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
@@ -791,13 +791,13 @@ const BOOMERANG_DUST_TRUTH: Record<number, (s: BoomerangDustCtx, game: GameHooks
  *  本仓 attackSpeedMult = M（Player.ts:3762 CapAttackSpeeds 镜像）——
  *  ★BJ640（2026-10-11）：旧式 ×M = 方向反（+70% 回旋镖初速 ×0.588 变慢）,改 ÷M
  *  （与 Game.ts :16151 天降星/星怒等已正确的 ÷M 面同向）。NoMeleeSpeedVelocityScaling
- *  排除表 {699,707,877-879,985,973}（ProjectileID.cs:337）的弹型不缩放,调用方自查 */
+ *  排除表 {699,707,877-879,985,973}（ProjectileID.cs:429 NoMeleeSpeedVelocityScaling——★BJ665 勘正 1456 伪锚 :337）的弹型不缩放,调用方自查 */
 export function meleeThrowSpeed(shootSpeed: number, attackSpeedMult: number): number {
   return shootSpeed / (attackSpeedMult || 1);
 }
 
 /** 挥掷系 shoot 出生落点核（ItemCheck_Shoot 通用尾支）：pointPosition =
- *  RotatedRelativePoint(MountedCenter)（1457 Player.cs:47588——无旋转/坐骑/睡坐
+ *  RotatedRelativePoint(MountedCenter)（1457 Player.cs:47605——★BJ665 勘正 伪锚 :47588;无旋转/坐骑/睡坐
  *  = 玩家中心）→ NewProjectile 盒心落点（Projectile.cs:10878-10879
  *  落点（Projectile.cs:10878-10879）。链锤/悠悠球绝大多数无 per-weapon 出生偏移
  *  （2026-08-23 备案；★2026-09-02 纠错:唯二例外 = 2611 Flairon/5526 FlaironFlail 出生前移 +1px 沿瞄准向（1457 Player.cs:47648-47657/1456 :46603-46612），当年审计只查 Projectile.cs 侧漏了 Player.cs，经 flaironSpawnNudge 接线）
@@ -917,7 +917,7 @@ export class Boomerang extends Entity {
   /** channel 电平（★301 的"按住/松手双门"出程语义已按 1457 真值退役——原版 AI_003
    *  无 controlUseItem 门;字段保留承接 Game 发射侧既有注入接线,当前无消费面） */
   channel: (() => boolean) | null = null;
-  /** 光刃再掷召回电平（P.cs:39717-39722 IsAPhaseblade[HeldItem.shoot]&&controlUseItem；
+  /** 光刃再掷召回电平（Projectile.cs:39716-39720 IsAPhaseblade[HeldItem.shoot]&&controlUseItem——★BJ665 勘正 伪锚 :39717-39722；
    *  Game 发射侧仅对 PHASEBLADE_PROJ 注入——mouseHeld+手持同物品,flail channel 同管线） */
   recallGate?: () => boolean;
   /** ★ai[0]（:36783 起）：0 飞出 / 1 返回 / 2 光刃撞墙悬停（:17975-17990 置 2） */
@@ -989,7 +989,7 @@ export class Boomerang extends Entity {
   /** 通用湿段步进（projWetSection 共享体穿参壳——活拍/杀拍两调用点共用）。
    *  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿）：本类 aiStyle 3 域不命中任何
    *  aiStyle 支（:22719 缺省支无动作）,唯【相刃族】19 型（PHASEBLADE_PROJ=
-   *  ProjectileID.Sets.IsAPhaseblade,ProjectileID.cs:33）→ 相刃支（P.cs:22587-22604）
+   *  ProjectileID.Sets.IsAPhaseblade,ProjectileID.cs:33）→ 相刃支（Projectile.cs:22587-22604）
    *  ——ai[0]==1（返回态）早退;否则 ai[1]=ai[0]=0（出程计数/状态复位=微光中重启
    *  出程）+ vy>-11 浮升（>16 先 ×0.9）+ vx×1.1 钳 ±14。面适配：ai0≡ai0（0 飞出/
    *  1 返回/2 悬停,本类同名字段）;ai1≡outT（飞出段计数——ai[1] 写面只此一支,
@@ -1175,7 +1175,7 @@ export class Boomerang extends Entity {
       boomExt = { x: this.cx - half, y: this.cy - half, w: this.boomBox, h: this.boomBox };
       this.boomBox = -1;
     }
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）先于 Damage_PVE
     //  （:12523）——有限穿透回旋镖（如 866 penetrate=5,:13124-13182 自减面）计数耗尽
     //  即亡拍【照割】;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。vid+1052 出程旗
     //  随盒穿线（CutTilesAt :15384-86 树面逐拍适用,与中央收口同参）。
@@ -1507,7 +1507,7 @@ export class Boomerang extends Entity {
     game.playSfx('dig', 1, this.cx, this.cy);
   }
 
-  /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
+  /** LightDisc_Bounce（Projectile.cs:13101-13112,106 光碟撞墙溅射——★BJ665 勘正 伪锚 :28787-28801;C1 批"视觉略"
    *  登记的终清波实装）：NewDustPerfect 306 ×4 主粒（α200/scale1.6/color=
    *  Color.Lerp(new Color(219,253,0), Cyan, rand)）+ CloneDust 白档副本（白,s1,α50）。
    *  spinningpoint = Vector2.Reflect(velocity, normal)（XNA 原式 v−2(v·n)n,n 可为
@@ -1654,7 +1654,7 @@ export class Boomerang extends Entity {
   }
 }
 
-// ================= 长矛（aiStyle 19，AI_019_Spears，Projectile.cs:43198） =================
+// ================= 长矛（aiStyle 19，AI_019_Spears，Projectile.cs:46702——★BJ665 勘正 1456 伪锚 :43198） =================
 
 /** 每型号伸缩参数（AI_019_Spears_GetSpearOffsetRelativeToPlayer :43417-43540 switch）：
  *  [初始偏移 num6, 伸出速 num7, 缩回速 num8]——位移 = dir × shootSpeed × offset。
@@ -1668,26 +1668,26 @@ const SPEAR_PARAMS: Record<number, [number, number, number]> = {
   130: [3, 1.0, 1.3], 1103: [4, 0.85, 1.1],
 };
 
-/** aiStyle 161 短剑刺族（DefaultToShortsword :10158-10172 全集合：802 GladiusStab /
- *  842 RulerStab / 938-945 七金属短剑+铁短剑刺）。AI_161_RapierStabs（:44987-45004）
+/** aiStyle 161 短剑刺族（DefaultToShortsword :10775-10789 全集合——★BJ665 勘正 伪锚 :10158-10172：802 GladiusStab /
+ *  842 RulerStab / 938-945 七金属短剑+铁短剑刺）。AI_161_RapierStabs（:48483-48517——★BJ665 勘正 伪锚 :44987-45004）
  *  独立直刺模型：Center = 玩家MountedCenter + velocity×(ai[0]−1),ai[0]≥16 Kill;
- *  ★extraUpdates = 1（:10165）——每帧跑 2 个 AI 子步（Projectile.cs:15331-15336
+ *  ★extraUpdates = 1（:10786）——每帧跑 2 个 AI 子步（Projectile.cs:16780-16783——★BJ665 勘正 伪锚 :10165/:15331-15336
  *  numUpdates 循环）,整刺 16 步在 8 帧内完成、每帧推进 2×shootSpeed（1.4.4 短剑
  *  重做的"快刺"节奏本体）。考古备注：1.4.5.6 的 aiStyle 161 无"掷出"独立态——
  *  短剑重做的可投掷性体现在物品侧（useStyle 13 + noUseGraphic + shoot=刺弹）,
  *  Projectile.AI case 161 仅持握刺击单态（无 ai[1] 分支/无 throw 站点,
- *  938-945 唯一生成点 = ItemCheck_Shoot 通用尾段 :48637） */
+ *  938-945 唯一生成点 = ItemCheck_Shoot 通用尾段 :47823——★BJ665 勘正 1456 伪锚 :48637） */
 const RAPIER_PROJ = new Set([802, 842, 938, 939, 940, 941, 942, 943, 944, 945]);
 /** 802/842（Gladius/Ruler）出膛抖动族（ItemCheck_Shoot :46700-46707）：
  *  角 ±π/8、速 ±0.7——Ruler/Gladius 的"尺子不准"机制本体 */
 const RAPIER_JITTER_PROJ = new Set([802, 842]);
 
 /** 长矛/细剑绘制角与镜像(纯函数,供 draw 与回归测试共用)。
- *  AI_019 = DrawProj_Spear 专支(Main.cs:34153-34157 按 aiStyle==19 派发,
- *  :34659-34668):num = atan2(vy,vx)+2.355(=3π/4);theOwner.direction>0(玩家朝右)
+ *  AI_019 = DrawProj_Spear 专支(Main.cs:35161-35164 按 aiStyle==19 派发——★BJ665 勘正 伪锚 :34153-34157,
+ *  :35806-35816——★BJ665 勘正 伪锚 :34659-34668):num = atan2(vy,vx)+2.355(=3π/4);theOwner.direction>0(玩家朝右)
  *  → dir=FlipHorizontally 且 num -= π/2、origin.X=贴图宽。AI 侧 rotation 赋值同值
- *  (:43271-43276,:43214 spriteDirection=-direction)。
- *  AI_161 = :44990 rotation=atan2+π/2;DrawProjDirect(:32360 族)里【仅 938-945】
+ *  (:46789-46793,:46715 spriteDirection=-direction——★BJ665 勘正 伪锚 :43271-43276/:43214)。
+ *  AI_161 = :48486 rotation=atan2+π/2(★BJ665 勘正 伪锚 :44990);DrawProjDirect(:33161 族——★BJ665 勘正 伪锚 :32360)里【仅 938-945】
  *  再 num327 -= π/4×sd（:32443-32446）——802/842 无此偏置,只 atan2+π/2;
  *  dir=spriteDirection==-1 → FlipHorizontally（:29825-29829,DrawProj 层级全局位,
  *  AI_161 :44995 设 spriteDirection=sign(vx)）。
@@ -1698,7 +1698,7 @@ export function spearDrawAngle(
 ): { ang: number; mirror: boolean } {
   const sd = dx >= 0 ? 1 : -1;
   if (isRapier) {
-    // rapierNoQuarter = 802/842（Main.cs:32443 只列 938-945）
+    // rapierNoQuarter = 802/842（Main.cs:33255 列 938-945+1127——★BJ665 勘正 1456 伪锚 :32443）
     return { ang: Math.atan2(dy, dx) + Math.PI / 2 - (rapierNoQuarter ? 0 : Math.PI / 4 * sd), mirror: sd === -1 };
   }
   let ang = Math.atan2(dy, dx) + 2.355; // :34659
@@ -1874,7 +1874,7 @@ export class SpearProj extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     const p = game.player;
     // melee 弹速 /meleeSpeed（ItemCheck_Shoot :47466-47468——长矛与短剑刺都不在
-    // NoMeleeSpeedVelocityScaling 排除表 {699,707,877-879,985,973} 内,ProjectileID.cs:337;
+    // NoMeleeSpeedVelocityScaling 排除表 {699,707,877-879,985,973} 内,ProjectileID.cs:429——★BJ665 勘正 1456 伪锚 :337;
     // ★BJ640（2026-10-11）：原版此处 meleeSpeed 字段=CapAttackSpeeds 倒数档 M
     // （:26176 在 Update 每拍先翻转）——speed/=M=×攻速和。本仓 attackSpeedMult=M,
     // 旧式 ×am 方向反（+25% 矛速 ×0.8 变慢）,改 ÷am；延伸盒 spdMul 同源改存
@@ -1886,7 +1886,7 @@ export class SpearProj extends Entity {
     }
     if (RAPIER_PROJ.has(this.projId)) {
       // AI_161_RapierStabs(:44987-45004) + extraUpdates=1(DefaultToShortsword :10165;
-      // Projectile.cs:15331-15336 numUpdates 循环)：每帧 2 个 AI 子步,16 步 8 帧跑完
+      // Projectile.cs:16780-16783 numUpdates 循环——★BJ665 勘正 伪锚 :15331-15336)：每帧 2 个 AI 子步,16 步 8 帧跑完
       this.rapierStep(game);
       if (!this.dead) this.rapierStep(game);
       return;
@@ -2006,7 +2006,7 @@ export class SpearProj extends Entity {
     this.x = p.cx - this.w / 2 + this.dx * this.spd * (this.t - 1);
     this.y = p.cy - this.h / 2 + this.dy * this.spd * (this.t - 1);
     if (this.t >= 16) { this.dead = true; return; }
-    // CutTiles（Projectile.cs:14151-14155：Center 起 10px×scale 线段扫杂草/瓦罐
+    // CutTiles（Projectile.cs:15312-15319：Center 起 10px×scale 线段扫杂草/瓦罐——★BJ665 勘正 1456 伪锚 :14151-14155
     // ——细剑戳击可清障的机制本体，曾整段漏接 2026-08-13 报障修复）
     game.cutTile(Math.floor((this.cx + this.dx * 10) / 16), Math.floor((this.cy + this.dy * 10) / 16));
     // 通用湿段（:16903-17113,每【子步】各一次——extraUpdates=1 :10165 → numUpdates
@@ -2844,7 +2844,7 @@ export class MolotovProj extends Entity {
 /** 配重球运行上下文（Game 注入闭包——实体不持 EntityManager 引用） */
 export interface CounterweightCtx {
   /** 拥有者（玩家中心/装备/绳锚链；null 或 dead → Kill,:64490-64493）。
-   *  yoyoStringAnchor = Main.cs:27794-27803 悠悠球/配重球线起点全链
+   *  yoyoStringAnchor = Main.cs:28366-28373 悠悠球/配重球线起点全链——★BJ665 勘正 伪锚 :27794-27803
    *  （mountedCenter → mount52 → +gfxOffY → ApplyItemPositionOffsetFromMount），
    *  Player 实装——Game 闭包返回完整 Player 实例，结构满足 */
   owner: () => {
@@ -2864,7 +2864,7 @@ export interface CounterweightCtx {
   mouseDelta: () => { dx: number; dy: number };
   /** 魔法线克隆回调（:64727-64733:-1 回收 + magicString → 掷 75% 伤/击退脱离克隆） */
   spawnClone?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number, projId: number, crit?: number, armorPen?: number) => void;
-  /** 悠悠球命中链回调（Projectile.cs:12482 Player.Counterweight）——配重球命中同样触发 */
+  /** 悠悠球命中链回调（Projectile.cs:13306 Player.Counterweight——★BJ665 勘正 1456 伪锚 :12482）——配重球命中同样触发 */
   counterweight?: (hitX: number, hitY: number, dmg: number, kb: number) => void;
 }
 
@@ -2936,7 +2936,7 @@ export class CounterweightProj extends Entity {
     // :16870 wetVelocity 快照（子步 AI 前——回收态湿位移消费,见下回收积分支）
     const preVx = this.vx, preVy = this.vy;
     if (!p || p.dead) { this.dead = true; return; }   // player.dead → Kill（:64490-64493）
-    // 线起点（Main.cs:27794-27803 悠悠球/配重球共用段）：mountedCenter → mount52
+    // 线起点（Main.cs:28368-28370 悠悠球/配重球共用段——★BJ665 勘正 伪锚 :27794-27803）：mountedCenter → mount52
     // 修正 → +gfxOffY → ApplyItemPositionOffsetFromMount（Player.yoyoStringAnchor
     // 全链；aimTarget = 光标世界坐标，channel = itemAnimation>0 代理——原版
     // 悠悠球 channel 期 itemAnimation 持续刷新）
@@ -3203,7 +3203,7 @@ export class CounterweightProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // 线（配重球同走 aiStyle 99 段链,Main.cs:27799-27908——ai[0] != -2 命中;-3 幽灵仍画线）
+    // 线（配重球同走 aiStyle 99 段链,Main.cs:28366-28482——ai[0] != -2 命中 :28366;-3 幽灵仍画线——★BJ665 勘正 伪锚 :27799-27908）
     if (this.ai0 !== -2) {
       const c = r.ctx;
       const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
@@ -3214,14 +3214,14 @@ export class CounterweightProj extends Entity {
     }
     // -3 幽灵 alpha=255（全透明,:68696-68700;1456 伪锚 :64734-64736 勘正）;贴图原生尺寸（SetDefaults 盒 10×10 而贴
     // 图 16×16,drawSize=-1 防缩）。旋转 = proj.rotation 原样（1457 通用尾支
-    // M.cs:35040 rotation=proj.rotation、origin=(num153,盒高/2+num151),配重球 556-561/1079
+    // Main.cs:35047 rotation=proj.rotation、origin38=(num153,盒高/2+num151)=:35032,配重球 556-561/1079（★BJ665 勘正 伪锚 :35040）
     // 无 num151/152 特支亦无 +π/2——自转增量在 AI（AI_099_1 :68463 rotation+=0.5f,本仓
     // rot+=0.5 同源）;曾 +π/2 = 球体朝向恒偏 90°。悠悠球同族直绘 this.rot（YoyoProj.draw）
     drawProj(r, cam, this, this.projId, this.rot, '#B09060', this.ghost ? 0 : 1, -1);
   }
 }
 
-/** Player.Counterweight 决策核（Player.cs:11946-12004 纯逻辑,Game 侧执行掷出）：
+/** Player.Counterweight 决策核（Player.cs:12445-12504 纯逻辑——★BJ665 勘正 伪锚 :11946-12004;Game 侧执行掷出）：
  *  数场上悠悠球（非配重球旗标、ai0 != -2）与配重球（旗标、ai0 != -2）→
  *  ① yoyoGlove 且悠悠球数 <2 且 ≥1 → 掷同型二号悠悠球（ai0=1）
  *  ② else if counterWeight >0 且配重球数 <悠悠球数 → 掷配重球（vanity 优先;
@@ -3233,7 +3233,7 @@ export type CounterweightSpawn =
   | { kind: 'second-yoyo' }
   | { kind: 'counterweight'; type: number; kb: number; secondary: boolean };
 
-/** 悠悠球袋配重球颜色掷骰（Player.cs:14176/:14200——1/7→黑配重 1079,
+/** 悠悠球袋配重球颜色掷骰（Player.cs:14824/:14848——1/7→黑配重 1079,★BJ665 勘正 伪锚 :14176/:14200,
  *  否则 556+Next(6) 彩色族）。2026-08-19 从 equipStats getter 迁出：原版
  *  ResetEffects 每帧清零后 UpdateEquips 重掷 = 使用期随机；getter 每访问掷
  *  会随记忆化冻结成"每套装备一次"，消费端掷 = 每次命中独立（与原采样等价）。 */
@@ -3276,7 +3276,7 @@ export function counterweightDecision(
 
 // ================= 悠悠球 / 连枷（aiStyle 99 / 15，channel 语义） =================
 
-/** 悠悠球型号三表（ProjectileID.cs:185/187/189 全量 1:1；键=projId，缺省=表默认） */
+/** 悠悠球型号三表（ProjectileID.cs:279/281/283 全量 1:1——★BJ665 勘正 1456 伪锚 :185/187/189；键=projId，缺省=表默认） */
 export const YOYO_RANGE: Record<number, number> = { // 最大射程 px（默认 200）
   541: 130, 548: 170, 542: 195, 543: 207, 544: 215, 534: 220, 564: 225, 999: 225,
   545: 235, 562: 320, 563: 250, 546: 275, 552: 270, 553: 330, 547: 280, 549: 290,
@@ -3313,7 +3313,7 @@ export class YoyoProj extends Entity {
   /** 光标世界坐标 getter */
   private target: () => { x: number; y: number };
   /** ★废弃死参数（Game 侧传 0）:射程唯一源 = Sets.YoyosMaximumRange 表
-   *  （ProjectileID.cs:187,21 型号缺省 200）+ yoyoString×1.25+30（:64968-64970）+
+   *  （ProjectileID.cs:281,21 型号缺省 200——★BJ665 勘正 伪锚 :187）+ yoyoString×1.25+30（:68937-68939——★BJ665 勘正 伪锚 :64968-64970）+
    *  ÷(1+meleeSpeed×3)/4（:64974）——旧"220+spd×10"自造公式已废,勿再启用 */
   private stringLen: number;
   private hitCd = new HitCooldown();
@@ -3332,7 +3332,7 @@ export class YoyoProj extends Entity {
    *  >=0 = 目标 X 缓存（活跃追标，ai[1]=目标 Y）；
    *  -1  = 回收（松手/石化冰冻/超寿命/1.3×超程 → 飞回玩家 <top+10 消亡）；
    *  -2  = 脱离坠落（魔法线克隆专属出生态：重力 0.3、penetrate=Next(3,7)、撞墙即亡、
-   *        免画线 Main.cs:27799；:65118-65151）；
+   *        免画线 Main.cs:28366（★BJ665 勘正 伪锚 :27799）；:65118-65151）；
    *  -3  = 魔法线幽灵（-1+magicString → 隐身零伤飞回，:65110-65120）。 */
   ai0 = 0;
   /** ai[1] 目标 Y 缓存（回收转移时清 0，:65005） */
@@ -3355,7 +3355,7 @@ export class YoyoProj extends Entity {
    *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收。
    *  脱离态（-2）寿命无限（:68809-68812 num2=-1;1456 伪锚 :64850-64852 勘正）——撞墙/穿透尽才亡 */
   life = 7200;
-  /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
+  /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:283,★BJ665 勘正 伪锚 :189） */
   topSpeed = 10;
   dead = false;
 
@@ -3388,7 +3388,7 @@ export class YoyoProj extends Entity {
   recallFamily?: () => void;
   /** 魔法线克隆回调（:65110-65116：-1+magicString → 掷 75% 伤/击退的 -2 脱离克隆） */
   spawnClone?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number) => void;
-  /** 悠悠球命中链回调（Projectile.cs:12482 Player.Counterweight；-2 免调） */
+  /** 悠悠球命中链回调（Projectile.cs:13306 Player.Counterweight——★BJ665 勘正 1456 伪锚 :12482；-2 免调） */
   counterweight?: (hitX: number, hitY: number, dmg: number, kb: number) => void;
   /** 1457 EverySomeYoyoHits per-hit 族伴生弹生成回调（:13761-13870 NewProjectile——
    *  entities.add 不在 GameHooks,Game 侧 wireYoyoCallbacks 注入） */
@@ -3427,14 +3427,14 @@ export class YoyoProj extends Entity {
       if (dl > 0) { this.vx = (ddx / dl) * initSpeed; this.vy = (ddy / dl) * initSpeed; }
       else { this.vx = initSpeed; this.vy = 0; }   // num4==0&&num5==0 → (direction,0) 档
     }
-    // 无限寿命型号（Sets.YoyosLifeTimeMultiplier 缺省 -1,ProjectileID.cs:185）不上限
+    // 无限寿命型号（Sets.YoyosLifeTimeMultiplier 缺省 -1,ProjectileID.cs:279——★BJ665 勘正 伪锚 :185）不上限
     if ((YOYO_LIFE[projId] ?? -1) === -1) this.life = Number.POSITIVE_INFINITY;
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // 线（Main.cs:27799-27908 DrawProjDirect aiStyle99 段 1:1）：手部→球体 12px 段链，
+    // 线（Main.cs:28366-28482 DrawProjDirect aiStyle99 段 1:1——★BJ665 勘正 伪锚 :27799-27908）：手部→球体 12px 段链，
     // FishingLine.png 竖条逐段旋贴、摆垂、线饰品染色（StringLine 共享模块——曾灰直线近似）。
-    // ★ai[0] != -2 免画线门（Main.cs:27799——脱离态无线；-3 幽灵仍画线）
+    // ★ai[0] != -2 免画线门（Main.cs:28366——★BJ665 勘正 伪锚 :27799;脱离态无线；-3 幽灵仍画线）
     if (this.ai0 !== -2) {
       const c = r.ctx;
       const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
@@ -3473,7 +3473,7 @@ export class YoyoProj extends Entity {
     const preVx = this.vx, preVy = this.vy;
     const p = game.player;
     const eq = p.equipStats;
-    // 线起点（Main.cs:27794-27803）：mountedCenter → mount52 修正 → +gfxOffY →
+    // 线起点（Main.cs:28368-28370——★BJ665 勘正 伪锚 :27794-27803）：mountedCenter → mount52 修正 → +gfxOffY →
     // ApplyItemPositionOffsetFromMount（Player.yoyoStringAnchor 全链；target =
     // 光标世界坐标（mount54 行档 aim），channel = itemAnimation>0 代理——原版
     // 悠悠球 channel 期 itemAnimation 持续刷新恒>0）
@@ -3491,7 +3491,7 @@ export class YoyoProj extends Entity {
       else if (this.cx < p.cx - 2) this.dir = -1;
     }
     this.hitCd.tick();
-    // ---- AI_099_2_Yoyos 参数链（:68803-68806 寿命 / :68941-68942 射程顶速）----
+    // ---- AI_099_2_Yoyos 参数链（:68802-68808 寿命——★BJ665 精确化 / :68941-68942 射程顶速）----
     // ★BJ640（2026-10-11）方向翻案：原版 meleeSpeed 字段 = CapAttackSpeeds 倒数档 M
     //   （Player.cs:26176 每拍 Update 先翻转,弹 AI 读到的恒为 M<1 档）——正加成
     //   M<1 → (1+M×3)/4<1 → range/=小数=射程【变长】、(1+M)/2<1 → 寿命烧得更快
@@ -3735,7 +3735,7 @@ export class YoyoProj extends Entity {
     // 命中免疫 = 玩家级共享 10t（DefaultToYoyo 无 usesLocalNPCImmunity/
     // localNPCHitCooldown,Projectile.cs:10155-10161 → Damage_PVE 走 npc.immune[owner]
     // 全局档 :12603/:12635-12637/:13152（★BJ340 表面勘误:旧锚 :11905 漂）——同玩家所有悠悠球/配重球共享,不再逐弹私账）
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）先于 Damage_PVE
     //  （:12523）——回收态命中照结算（onYoyoHit 弹开段）;aiStyle 99/悠悠球族均过两道门
     //  （CanCutTiles :15407 两表均无;CanDealDamage :12461 无）。死亡拍（脱离态
     //  penetrate 3-6 耗尽 :13290 段）照割,中央割 !e.dead 门=死亡拍整缺。
@@ -3774,7 +3774,7 @@ export class YoyoProj extends Entity {
   }
 
   /** 命中链（Projectile.cs:13290-13335 aiStyle 99 段——1456 伪锚 :12467-12508 勘正（BJ661 复核 :13290-13335）
-   *  R17-F4;活跃反弹+烧段 :13323-13333）:-2 只被弹开（不触发
+   *  R17-F4;活跃反弹+烧段 :13315-13333（烧段 :13327-13333——★BJ665 精确化,旧区间 :13323-13333）):-2 只被弹开（不触发
    *  Counterweight）;其余调 Counterweight + 方向定号;ai0>=0 活跃反弹 +
    *  localAI[0] += 20（无视线 +40,寿命快捷烧） */
   private onYoyoHit(e: unknown, game: GameHooks) {
@@ -3800,7 +3800,7 @@ export class YoyoProj extends Entity {
         const bd = Math.hypot(bx, by) || 1;
         this.vx = this.vx * -0.5 + (bx / bd) * push;
         this.vy = this.vy * -0.5 + (by / bd) * push;
-        // 寿命快捷烧（:13323-13333——1456 伪锚 :12501-12505 勘正 R17-F1/F4）：vanilla
+        // 寿命快捷烧（:13327-13333——★BJ665 精确化,旧区间 :13323-13333;1456 伪锚 :12501-12505 勘正 R17-F1/F4）：vanilla
         // localAI[0] += 20f（:13327）;无视线再 +40f（:13330）【无除式】,除式只在寿命换算
         // :68803 num /= (1f+meleeSpeed)/2——本仓预除模型两站同 M（与 :3500 同款直取）
         const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
@@ -4478,10 +4478,10 @@ export class FlailProj extends Entity {
   /** 当拍伤害冷却覆写（localNPCHitCooldown=num 转坠落覆写 :44505——原版字段直接
    *  改写,下一 Damage() 生效;本仓经单拍覆盖位承载,消费即清零） */
   private cdOverride: number | null = null;
-  /** spriteDirection（=direction,:41479-41483 每 tick=sign(vx),1058 豁免保持出生向;
-   *  绘制侧 -1 水平翻转 M.cs:29827-29831） */
+  /** spriteDirection（=direction,:44885/:44960 每 tick=sign(vx)——★BJ665 勘正 伪锚 :41479-41483,1058 豁免保持出生向;
+   *  绘制侧 -1 水平翻转 Main.cs:30529-30532——★BJ665 勘正 伪锚 :29827-29831） */
   private spriteDir = 1;
-  /** SetDefaults scale（P.cs:10075-10076 命中盒缩放 + M.cs:32360 绘制缩放共用） */
+  /** SetDefaults scale（Projectile.cs:10673-10674 命中盒缩放 + Main.cs:33161 绘制缩放共用——★BJ665 勘正 伪锚 :10075-10076/:32360） */
   private texScale: number;
   private rotation = 0;
   private hitCd = new HitCooldown();
@@ -4529,7 +4529,7 @@ export class FlailProj extends Entity {
     this.target = target;
     this.prm = { ...FLAIL_DEFAULT, ...FLAIL_PARAMS[projId] };
     const pd = projectileData(projId);
-    // 命中盒 = (int)(SetDefaults 宽高 × scale)（Projectile.cs:10075-10076 SetDefaults
+    // 命中盒 = (int)(SetDefaults 宽高 × scale)（Projectile.cs:10673-10674 SetDefaults——★BJ665 勘正 伪锚 :10075-10076
     // 尾段统一缩放,JSON 宽高为缩放前原值）——25=0.9→19、26/35/154=0.8→17;
     // 曾取裸型号宽 → 带 scale 的 4 型号命中盒偏大
     this.texScale = pd?.scale ?? 1;
@@ -4547,7 +4547,7 @@ export class FlailProj extends Entity {
   draw(r: Renderer, cam: Camera): void {
     const ctx = r.ctx;
     if (ctx) this.drawChain(ctx, r);
-    // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
+    // alpha 原版语义(Main.cs:29635 color *= (255-alpha)/255——★BJ665 勘正 伪锚 :28965;越大越透明)
     // ★BJ388 件4（BJ367/344 登记债,2026-09-28 独立复核）：中心锚组 = M.cs:33161 大表
     //  （旧注 ":32360" 系行号漂移;404/1058/947/948 均不在表）——链球族仅
     //  {25,26,35,63,154,247,757} 在表走【盒中心+贴图中心 origin】;
@@ -4564,7 +4564,7 @@ export class FlailProj extends Entity {
     //  [4,−4]（off143=4/off144=−4,066d742b 2026-08-17 入表）→ 现行绘制已=原版锚
     //  （translate=(盒左+9,盒上+10)、origin=(13,14)）,旧注「本仓现同样误走中心锚」
     //  系件4 落刀前状态,判别面锁 tests/bj393-weaponproj-anchor-accept.test.ts。
-    // spriteDirection=-1 → 水平翻转（M.cs:29827-29831 FlipHorizontally;:41479-41483
+    // spriteDirection=-1 → 水平翻转（Main.cs:30529-30532 FlipHorizontally——★BJ665 勘正 伪锚 :29827-29831;:44885/:44960
     // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale
     // ★BJ-C1 F2（2026-10-06,BJ529/530 同族普查收编）：35 太阳怒 Sunfury——
     //  GetAlpha :81465-81468 `34||35||15||19||44||45 → Color.White` 恒满亮【不读
@@ -5049,7 +5049,7 @@ export class FlailProj extends Entity {
     // direction/spriteDirection = sign(vx)（★BJ344 勘正:旧注 :41479-41483 系 1456 世代,
     // 1457 = :44957-44961 每 tick 重写,vx==0 → -1;1058 豁免=专属式 :44876-44885 离玩家向
     // （player−ball X<0 → 1）每拍连 spriteDirection 覆写 :44885——本仓 1058 spriteDir 曾
-    // 出生冻结=绘制面缺口,本刀补齐）——绘制侧 -1 水平翻转（M.cs:29827-29831）,曾恒 false
+    // 出生冻结=绘制面缺口,本刀补齐）——绘制侧 -1 水平翻转（Main.cs:30529-30532——★BJ665 勘正 伪锚 :29827-29831）,曾恒 false
     if (this.projId !== 1058) this.spriteDir = this.vx > 0 ? 1 : -1;
     else this.spriteDir = p.cx < this.cx ? 1 : -1;
     // ★BJ344 F3（kdir 家族,BJ340 台账 §4 三面亲审定谳）：aiStyle 15 全族伤害期覆写
@@ -5080,7 +5080,7 @@ export class FlailProj extends Entity {
     else { this.vx += (ddx / dd) * accel; this.vy += (ddy / dd) * accel; }
   }
 
-  /** Player.ChangeDir（Player.cs:41440-41460）:同向早退只写 direction;原版还镜像
+  /** Player.ChangeDir（Player.cs:42412-42437——★BJ665 勘正 伪锚 :41440-41460）:同向早退只写 direction;原版还镜像
    *  手臂合成旋转/itemRotation/itemLocation——本仓无手臂/持物朝向系统,仅落 facing */
   private changeDir(p: { facing: number }, dir: number): void {
     if (p.facing !== dir) p.facing = dir;
@@ -5321,7 +5321,7 @@ export class FlaironSpike extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // α 原版语义(Main.cs:28965 color *= (255-alpha)/255,越大越透明):SetDefaults 255
+    // α 原版语义(Main.cs:29635 color *= (255-alpha)/255——★BJ665 勘正 伪锚 :28965,越大越透明):SetDefaults 255
     // (:4590)出生隐形,漂入段每 tick -25 至 50(:29225-29229)→ 淡入。
     // 此前直接 alpha/255 当不透明度 = 方向写反(出生全显、越漂越透明)。
     // ★BJ367 尺寸修正：绘制=贴图原生 20×proj.scale（M.cs:35492 通支 source 全贴图+
@@ -5424,7 +5424,7 @@ export class FlaironSpike extends Entity {
     // ★MAJOR-2（2026-09-02 红队 J′）：penetrate=1 命中敌 → Damage() 内 :14189
     // penetrate-- → 0（keepIterating=false）→ Update :17312 `if (penetrate == 0) Kill()`
     // 同拍消亡——旧码命中后继续飞 = 无限穿透。onHit 回调记账后走既有爆尘出口
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）先于 Damage_PVE
     //  （:12523）——405 penetrate=1 首中即亡拍【照割】（SetDefaults :4859-4868,aiStyle 70/
     //  friendly/melee）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。405 过两道门
     //  （CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
@@ -8864,7 +8864,7 @@ export class CrystalSerpentProj extends Entity {
     if (body.hitWall || body.collideY || body.hitHead) { this.killFx(game); return; }
     // ⑧ 命中敌(Damage_GetHitbox :15037 = 全 32×32 盒,523 无特例;penetrate=1 首中耗尽 →
     //    Damage() 尾 Kill;Poisoned 600..1740t 由 hitEnemies 尾 applyProjStatus(523) 表驱动)
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）先于 Damage_PVE
     //  （:12523）——523 水晶蛇弹 penetrate=1 首中即亡拍【照割】（SetDefaults :5931-5940,
     //  aiStyle 95/friendly/ranged）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
     //  523 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。

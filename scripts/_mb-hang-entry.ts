@@ -36,6 +36,22 @@ for (const f of readdirSync(tileDir).sort()) {
   const k = `mod_calamity_${f.replace('.json', '')}`;
   if (TILE_BY_KEY[k] === undefined) TILE_BY_KEY[k] = nextId++;
 }
+// ★mod item 注册(走浏览器同款 registerModItem——Astral Chest 等 pass 消费
+//  itemIdByKey;node rig 不注册=astral chest 恒零产是 rig 伪影非 gen 缺口)
+import { registerModItem } from '../src/data/items';
+const itemDir = join(contentDir, 'items');
+let itemN = 0;
+try {
+  for (const f of readdirSync(itemDir).sort()) {
+    if (!f.endsWith('.json')) continue;
+    const key = `mod_calamity_${f.replace('.json', '')}`;
+    try {
+      registerModItem({ key, name: key }, 30000 + itemN);
+      itemN++;
+    } catch { /* 重复/越段=skip(幂等重跑) */ }
+  }
+} catch { /* 无目录 */ }
+console.log(`[repro] mod items 注册 ${itemN}`);
 
 const g = globalThis as Record<string, unknown>;
 g.__calamityModData = modData;
@@ -46,12 +62,26 @@ g.__calamityGenTiles = {};
 g.__calamityLoaded = true;
 
 // ---- mod bundle eval(重演 worker 两步) ----
+// ★registerGenPass 必须用 WorldGen 的真注册器(worker 域 stub 同款)——推本地数组=
+//  genPasses 空=passes 不跑=复现不出卡死
+import { registerGenPass } from '../src/world/gen/WorldGen';
 const noop = () => {};
 const stubSw: Record<string, unknown> = new Proxy({}, {
   get: (_t, prop: string) => {
     if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void) => {
-      modPasses.push({ name, fn });
-      console.log(`[repro] gen pass 注册: ${name}`);
+      try {
+        registerGenPass({
+          name,
+          fn: (...a: unknown[]) => {
+            const t0 = Date.now();
+            console.log(`[repro] ▶ mod pass 开始: ${name}`);
+            fn(...a);
+            console.log(`[repro] ✓ mod pass 完成: ${name} ${Date.now() - t0}ms`);
+          },
+        });
+        modPasses.push({ name, fn });
+        console.log(`[repro] gen pass 注册: ${name}`);
+      } catch (e) { console.log(`[repro] 注册失败 ${name}: ${e}`); }
     };
     if (prop === 'rollPrefixFor') return () => 0;
     if (prop === 'log') return (...a: unknown[]) => console.log('[mod:gen]', ...a);
@@ -61,6 +91,18 @@ const stubSw: Record<string, unknown> = new Proxy({}, {
   has: () => true,
 });
 const modPasses: Array<{ name: string; fn: (...a: unknown[]) => void }> = [];
+// ★626f:挂 __swSeg 段探针(MicroBiomes 全程插桩)+mod pass 起止打印
+(g as { __swSeg?: (name: string, detail?: unknown) => void }).__swSeg = (name, detail) => {
+  console.log(`[seg] ${name}`, detail !== undefined && typeof detail !== 'object' ? JSON.stringify(detail) : '');
+};
+// ★626g:沉降相位+逐迭代探针(冻结点分辨:quickWater/waterCheck/轮环+活量走势)
+let tickN = 0;
+(g as { __swSettleMark?: (s: string) => void }).__swSettleMark = (s) => {
+  console.log(`[settle] 相位: ${s}`);
+};
+(g as { __swSettleTick?: (r: number, it: number, liq: number, max: number) => void }).__swSettleTick = (r, it, liq, max) => {
+  if (++tickN % 200000 === 0) console.log(`[settle] round=${r} iter=${it} liq=${liq} maxIter=${max}`);
+};
 const src = readFileSync(join(root, 'mods/calamity/scripts/main.js'), 'utf8');
 const tail = /export\s*\{\s*(\w+)\s+as\s+default\s*\}\s*;?\s*$/.exec(src);
 const cjs = src.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
@@ -73,20 +115,46 @@ console.log(`[repro] mod bundle eval 完成,gen passes=${modPasses.length}`);
 import { generateWorld } from '../src/world/gen/WorldGen';
 console.log('[repro] generateWorld 开始', new Date().toISOString());
 const t0 = Date.now();
+let lastP = 0;
+const SEED = process.env.SW_SEED ?? '9293480';   // ★金标固定种子(与 vanilla 金标同族)
 const world = await generateWorld(
-  { width: 4200, height: 1200, seedText: '', name: 'mbhang' },
+  {
+    width: 4200, height: 1200, seedText: SEED, name: 'mbhang', evil: 0,
+    onWorldPartial: (_w, passIndex, passName) => {
+      console.log(`[repro] pass 完成 #${passIndex} ${passName} +${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    },
+  },
   (label, p) => {
     const pct = (p * 100).toFixed(1);
     if (p > lastP + 0.005 || label !== undefined) console.log(`[repro] ${new Date().toISOString()} +${((Date.now() - t0) / 1000).toFixed(0)}s label=${label ?? ''} p=${pct}%`);
     lastP = p;
   },
 );
-let lastP = 0;
 console.log(`[repro] 生成完成 ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 // mod tile 扫描
-const st = world.store as { type: Uint16Array };
-let sulph = 0;
-const sid = TILE_BY_KEY['mod_calamity_sulphurous_sand'] ?? -1;
-for (let i = 0; i < st.type.length; i++) if (st.type[i] === sid) sulph++;
-console.log('[repro] sulphurous_sand:', sulph);
+const st = world.store as { type: Uint16Array; wall: Uint16Array };
+// ★金标采集:固定种子→签名 tile 精确计数+全图 FNV-1a(type/wall)
+const SIGNATURE = [
+  'sulphurous_sand', 'abyss_gravel', 'sulphurous_shale', 'voidstone', 'scoria_ore',
+  'brimstone_slag', 'infernal_suevite', 'aerialite_ore_disenchanted', 'astral_dirt',
+  'abyss_treasure_chest', 'void_chest', 'astral_chest_locked',
+];
+const counts: Record<string, number> = {};
+for (const k of SIGNATURE) {
+  const id = TILE_BY_KEY[`mod_calamity_${k}`] ?? -1;
+  let n = 0;
+  if (id >= 0) for (let i = 0; i < st.type.length; i++) if (st.type[i] === id) n++;
+  counts[k] = n;
+}
+const fnv = (arr: Uint16Array): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < arr.length; i++) {
+    h ^= arr[i] & 0xff; h = Math.imul(h, 0x01000193) >>> 0;   // ★imul=精确 32 位(×有双精度舍入,曾与测试面分歧)
+    h ^= (arr[i] >>> 8) & 0xff; h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+};
+console.log('[golden] seed =', process.env.SW_SEED ?? '9293480');
+console.log('[golden] counts =', JSON.stringify(counts));
+console.log('[golden] fnvType =', fnv(st.type), ' fnvWall =', fnv(st.wall));
 process.exit(0);

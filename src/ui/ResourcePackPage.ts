@@ -19,6 +19,7 @@
 import { Lang } from '../i18n/Lang';
 import { getResourcePacks, type ResourcePackManager } from '../resources/ResourcePackManager';
 import { enabledSorted, disabledSorted, type PackRow } from '../resources/ResourcePackList';
+import { PACK_CATEGORIES } from '../resources/packPaths';
 import { ResourcePackError } from '../resources/ResourcePackZip';
 
 export const RESOURCE_PACK_PAGE_CSS = `
@@ -31,7 +32,7 @@ export const RESOURCE_PACK_PAGE_CSS = `
   background: #1a2140; border: 1px solid #3a4680; border-radius: 4px; padding: 6px; }
 .sw-rp-col-title { color: #ffe8a0; font-size: 13px; text-align: center; margin-bottom: 2px; }
 .sw-rp-list { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; max-height: 44vh; }
-.sw-rp-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+.sw-rp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px;
   background: rgba(26,40,89,.8); border: 1px solid rgba(13,20,44,.8); border-radius: 4px; }
 .sw-rp-row:hover { background: rgb(46,60,119); }
 .sw-rp-icon, .sw-rp-icon-ph { width: 40px; height: 40px; flex: none; }
@@ -44,6 +45,13 @@ export const RESOURCE_PACK_PAGE_CSS = `
 .sw-rp-name { color: #e8e8f4; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-rp-author { color: #8a90b8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-rp-btns { display: flex; gap: 3px; flex: none; }
+.sw-rp-cats { display: flex; flex-wrap: wrap; gap: 4px 14px; width: 100%;
+  background: #1a2140; border: 1px solid #3a4680; border-radius: 4px;
+  padding: 8px 10px; margin-top: 6px; }
+.sw-rp-cats-title { color: #ffe8a0; font-size: 12px; width: 100%; }
+.sw-rp-cat { display: flex; align-items: center; gap: 5px; color: #dfe4f8;
+  font-size: 12px; cursor: pointer; }
+.sw-rp-cat input { accent-color: #ffd76e; }
 .sw-rp-btns button { background: #232c52; color: #e8e8f4; border: 1px solid #3a4680;
   border-radius: 3px; padding: 3px 7px; cursor: pointer; font-family: inherit; font-size: 12px; }
 .sw-rp-btns button:hover { background: #4a5aa0; }
@@ -218,10 +226,13 @@ function buildMain(mgr: ResourcePackManager, go: (v: View) => void): HTMLElement
   return wrap;
 }
 
-/** 单行（UIResourcePack 面板：图标+名称+作者 + 按钮组） */
+/** 单行（UIResourcePack 面板：图标+名称+作者 + 按钮组）
+ *  ★类别开关(2026-10-12):⚙ 展开本行类别复选(仅列该包实际覆盖的类别,缺省全开;
+ *  改动即 setPackCategories 持久化+全量重放)。 */
 function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): HTMLElement {
   const el = document.createElement('div');
   el.className = 'sw-rp-row';
+  el.dataset.rpId = row.id;
   const icon = document.createElement(row.iconDataUrl ? 'img' : 'div') as HTMLImageElement | HTMLDivElement;
   icon.className = row.iconDataUrl ? 'sw-rp-icon' : 'sw-rp-icon-ph';
   if (row.iconDataUrl) (icon as HTMLImageElement).src = row.iconDataUrl;
@@ -267,6 +278,42 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
   }
   // 卸载（Web 增项）
   btns.append(mkBtn('✕', Lang.text('Mods.SandboxWorld.ResourcePacks.Remove'), async () => { await mgr.remove(row.id); rerender(); }, 'del'));
+
+  // ★类别开关(仅启用行;仅列该包实际覆盖的类别)
+  if (row.enabled) {
+    const gear = mkBtn('⚙', Lang.text('Mods.SandboxWorld.ResourcePacks.CatsTitle'), () => {
+      const existing = el.parentElement?.querySelector(`.sw-rp-cats[data-rp-id="${row.id}"]`);
+      existing?.remove();   // 已展开=收起
+    });
+    btns.append(gear);
+    // 类别面板(展开在行下方;按类别实际覆盖过滤)
+    const cats = mgr.packCategoriesOf(row.id);
+    if (cats.length > 0) {
+      const panel = document.createElement('div');
+      panel.className = 'sw-rp-cats';
+      panel.dataset.rpId = row.id;
+      const head = document.createElement('div');
+      head.className = 'sw-rp-cats-title';
+      head.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.CatsTitle');
+      panel.append(head);
+      for (const c of PACK_CATEGORIES) {
+        if (!cats.includes(c.id)) continue;
+        const lb = document.createElement('label');
+        lb.className = 'sw-rp-cat';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = row.categories?.[c.id] ?? true;
+        cb.addEventListener('change', async () => {
+          const next = { ...(row.categories ?? {}) };
+          next[c.id] = cb.checked;   // 缺项=开:取消勾选才落 false;重勾回 true
+          await mgr.setPackCategories(row.id, next);
+        });
+        lb.append(cb, document.createTextNode(Lang.text(c.labelKey)));
+        panel.append(lb);
+      }
+      el.append(panel);
+    }
+  }
 
   el.append(icon, mid, btns);
   return el;

@@ -21,6 +21,7 @@ import { buildManifest, zipStore, type ZipEntry } from '../remaster/PackFormat';
 import type { LoadedPack } from '../remaster/types';
 import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, sfxPackOverrideKeys } from '../core/Sfx';
 import { TOWN_NPC_PROFILE } from '../data/townNpcProfiles';
+import { packKeyCategory, setTownProfileIds, PACK_CATEGORIES, type PackCategoryId } from './packPaths';
 import { registerPackPortraitUrl, clearPackPortraitUrls } from '../data/npcPortraits';
 import {
   readResourcePack, normalizePackFilePaths, parseFromEntries, ResourcePackError, formatPackVersion,
@@ -64,9 +65,36 @@ export class ResourcePackManager {
   constructor(runtime: RemasterRuntime | null, store = new ResourcePackStore()) {
     this.runtime = runtime;
     this.store = store;
+    setTownProfileIds(new Set(Object.keys(TOWN_NPC_PROFILE).map(Number)));   // 类别分流表注入
   }
 
   attachRuntime(rt: RemasterRuntime): void { this.runtime = rt; }
+
+  /** 类别开关求值(缺省=开;cats 只存显式覆写) */
+  private catOn(row: PackRow, c: PackCategoryId): boolean {
+    return row.categories?.[c] ?? true;
+  }
+
+  /** 该包实际覆盖的类别集(信息面/开关面展示用;未启用/未解析=空) */
+  packCategoriesOf(id: string): PackCategoryId[] {
+    const pack = this.parsed.get(id);
+    if (!pack) return [];
+    const set = new Set<PackCategoryId>();
+    for (const k of pack.images.keys()) set.add(packKeyCategory(k));
+    if (pack.sounds.size) set.add('sfx');
+    if (pack.music.size) set.add('music');
+    for (const _f of pack.fonts.keys()) { set.add('ui'); break; }
+    return PACK_CATEGORIES.map((c) => c.id).filter((c) => set.has(c));
+  }
+
+  /** 设置类别开关(持久化 + 全量重放;cats 缺项=开) */
+  async setPackCategories(id: string, cats: Partial<Record<PackCategoryId, boolean>>): Promise<void> {
+    const row = this.rows.find((r) => r.id === id);
+    if (!row) return;
+    row.categories = cats;
+    await this.store.saveRows(this.rows);
+    await this.applyAll();
+  }
 
   /** 启动恢复：列注册表 + 启用包解 zip + 全量应用（main.ts 装配，菜单显示前）。 */
   async applyInstalled(): Promise<{ packs: number; applied: number }> {
@@ -224,8 +252,14 @@ export class ResourcePackManager {
     for (const row of enabledSorted(this.rows)) {   // 升序遍历,先到先得
       const pack = await this.loadParsed(row);
       if (!pack) continue;
-      for (const [k, v] of pack.images) if (!merged.has(k)) merged.set(k, v);
-      for (const [k, v] of pack.fonts) if (!fonts.has(k)) fonts.set(k, v);
+      // ★类别开关(2026-10-12):每包可关停部分材质类别(缺省全开)——合并期过滤,
+      //   关停键不进 merged(别名派生/头像注册都在下游,天然不吃关停键)
+      const on = (c: PackCategoryId) => this.catOn(row, c);
+      for (const [k, v] of pack.images) {
+        if (merged.has(k) || !on(packKeyCategory(k))) continue;
+        merged.set(k, v);
+      }
+      for (const [k, v] of pack.fonts) if (!fonts.has(k) && on('ui')) fonts.set(k, v);
     }
     if (merged.size) await this.applyImagesMap(merged);
     else clearPackPortraitUrls();   // 零包=清包头像(回原版)
@@ -293,8 +327,9 @@ export class ResourcePackManager {
     for (const row of enabledSorted(this.rows)) {
       const pack = this.parsed.get(row.id);
       if (!pack) continue;
-      for (const [k, v] of pack.sounds) if (!merged.has(k)) merged.set(k, v);
-      for (const [k, v] of pack.music) if (!music.has(k)) music.set(k, v);
+      // ★类别开关:音效/音乐各自独立闸(关停键不进覆盖表)
+      if (this.catOn(row, 'sfx')) for (const [k, v] of pack.sounds) if (!merged.has(k)) merged.set(k, v);
+      if (this.catOn(row, 'music')) for (const [k, v] of pack.music) if (!music.has(k)) music.set(k, v);
     }
     applySfxPackOverrides(merged);
     applyMusicPackOverrides(music);

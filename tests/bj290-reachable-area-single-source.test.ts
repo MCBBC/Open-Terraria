@@ -10,7 +10,7 @@
 //     1920×1200 只平移进 play area,不与 play area 相交裁剪。旧 MissileProj 相交
 //     裁剪版（盒可缩小+玩家恒居裁后盒心）=P1③ 偏差本体——U1 例:世界宽 8400/
 //     玩家 cx=700/目标 2000:原版可达不动,旧版钳到 1660（差 340px 落点偏差）。
-//   · Player.LimitPointToPlayerReachableArea（Player.cs:45830-45858）:CenteredRectangle
+//   · Player.LimitPointToPlayerReachableArea（Player.cs:45832-45861——★BJ665 勘正 伪锚 :45830-45858）:CenteredRectangle
 //     (Center,1920×1200)（Utils.cs:961-963 截断）→ ClampToWorldBorders（WorldUtils
 //     .cs:29-34）→ 钳后矩形心径向等比回拉（k=min(960/|dx|,600/|dy|,1) 两轴同比）。
 import { describe, it, expect } from 'vitest';
@@ -35,7 +35,7 @@ describe('BJ290-件2 Utils.Clamp<T> 判序（Utils.cs:223-231 先 max 后 min）
   });
 });
 
-describe('BJ290-件2 LimitPointToPlayerReachableArea 平移钳语义（Player.cs:45830-45858）', () => {
+describe('BJ290-件2 LimitPointToPlayerReachableArea 平移钳语义（Player.cs:45832-45861）', () => {
   it('常量面：MaxWorldViewSize=1920×1200（Main.cs:758）、play area 内收 640（WorldUtils.cs:20）', () => {
     expect(MAX_WORLD_VIEW_W).toBe(1920);
     expect(MAX_WORLD_VIEW_H).toBe(1200);

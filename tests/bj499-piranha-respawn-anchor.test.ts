@@ -2,7 +2,7 @@
 //  定谳锚（Terarria1457 亲读,行号=落刀日盘上）：
 //   · 原版补射门 Player.cs:43878-43892 `type==1156 && channel && num<3` 只置 flag4 →
 //     与首发同走 ItemCheck_Shoot 1156 专支（:48846-48862 逐发 NewProjectile）——
-//     0/1/2 条补射【单路径】无独立补射位：出生点=pointPosition（:47588
+//     0/1/2 条补射【单路径】无独立补射位：出生点=pointPosition（:47605——★BJ665 勘正 伪锚 :47588
 //     RotatedRelativePoint(MountedCenter),站立恒等玩家中心——fullRotation=0 时
 //     vector2=(0,−4)+(0,4) 恒等零;NewProjectile 传位=盒心 Projectile.cs:10878-10879）,
 //     瞄准原点=num4/num5 起算点=同 pointPosition（:47743-47744 MouseWorld−pointPosition）。
@@ -105,7 +105,7 @@ describe('BJ499-§1：0 条补射出生/瞄准均=玩家中心（与首发 :2075
       .tickPiranhaChannelRefire({ mouseX: 400, mouseY: 300 });
     expect(spawned.length).toBe(3);
     // 原版 num4/num5 = MouseWorld − pointPosition（:47743-47744,pointPosition=玩家中心
-    // :47588）→ aim 原点=玩家中心,非 (cx, cy−4)（旧码角度差 ~0.0044 rad ≫ 1e-4）
+    // :47605——★BJ665 勘正 伪锚 :47588）→ aim 原点=玩家中心,非 (cx, cy−4)（旧码角度差 ~0.0044 rad ≫ 1e-4）
     const ang0 = Math.atan2(MOUSE[1] - CY, MOUSE[0] - CX);
     for (const pg of spawned) {
       expect(pg.pShootSpeed).toBe(14);                   // 夹具自证（itemCombat(1156).shootSpeed）

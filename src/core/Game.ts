@@ -14926,7 +14926,7 @@ export class Game implements GameHooks {
     // ★退出语义定谳（2026-09-15 用户实报「分配后单击一直=分配」）：
     //   分配成功 → TryMovingNPC :45929-45936 MoveTownNPC 过 ⇒ SetMouseNPC(-1,-1)
     //   摘携带+Sound 12（失败无分支=保持携带可重试）；查询 → PerformHousingCheck
-    //   :45918-45927 不清携带（连查多间,原版同款）；右键 → :45941-45945
+    //   :45918-45927 不清携带（连查多间,原版同款）；右键 → :45980-45984（★BJ665 勘正 伪锚 :45941-45945）
     //   mouseRight&&mouseRightRelease ⇒ Sound 12+SetMouseNPC(-1,-1)（全屏任意处,
     //   不限于条上——此前右键取消只接在 UI 槽位上）；关包 → :46429（UI 侧 closeInventory）
     // ★BJ259（2026-09-22 用户实报「不能把 NPC 踢出房间」）踢出臂（DrawNPCHousesInWorld
@@ -14958,9 +14958,12 @@ export class Game implements GameHooks {
       // MouseCarriedObject :45938 在链内），住房光标不消费左键（查询/分配）、不吞
       // 右键取消、不吞 mouseDown——本支在 :12709 fullMap 早退门之前裸跑，assign 态
       // 曾可从地图视图搬 NPC。★MED-1b 开图清携带（原版定谳：开图入口
-      // TryOpeningFullscreenMap Player.cs:29340 / 小地图钮 Main.cs:41806 均置
-      // playerInventory=false → DrawInterface_26_InterfaceLogic3 :46434-46440
-      // !playerInventory 臂 SetMouseNPC(-1,-1) 静默清携带=开图后携带不存活；本仓
+      // TryOpeningFullscreenMap Player.cs:29339 / 小地图钮 Main.cs:41806 均置
+      // playerInventory=false → DrawInterface_27_Inventory 尾 :46429
+      // !playerInventory 每帧无条件 SetMouseNPC(-1,-1) 静默清携带（playerInventory
+      // 支 :46414-46415 提前 return;DrawInterface_26_InterfaceLogic3 :46439-46446
+      // !playerInventory 臂只收箱/关制作窗,无 SetMouseNPC——★BJ665 机制归属订正,
+      // 旧注误归 26 臂）=开图后携带不存活；本仓
       // 背包不随开图收，同相=开图即清。单点写在此处覆盖 M 键/晶塔右键全部开图入口
       // （SW-BJ120：小地图按压开图面已摘除），keepPanel=true 仅摘选中面板保持）。
       if (this.renderer.fullMap.open) {

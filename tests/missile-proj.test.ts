@@ -1,5 +1,5 @@
 // 可控导弹族（MagicMissileProj，aiStyle 9 = AI_009_MagicMissiles
-// Projectile.cs:40518-40751）+ 老星怒落星（StarfuryStar，proj 9 aiStyle 5
+// Projectile.cs:43996-44230+Old :44231——★BJ665 勘正 伪锚 :40518-40751）+ 老星怒落星（StarfuryStar，proj 9 aiStyle 5
 // :22130-22247）行为回归——操控转向 / 松手语义 / 旋转角 / 穿透 / 持按连发。
 // ★BJ288（2026-09-23）7 例金标重产（BJ277 中心格杀位退役+BJ279 钳射程落刀后未重产
 // 的陈旧红）：oracle=反编译 :19439-19462 引导豁免 + :44044-44046 光标钳可达区——
@@ -104,7 +104,7 @@ afterEach(() => {
   made.length = 0;
 });
 
-describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () => {
+describe('MagicMissileProj 操控（AI_009_MagicMissiles :43996-44230）', () => {
   it('channel 期间速度直接对准光标 min(32, 距离)（:40639-40655，amount=1）', () => {
     const { hooks, player } = makeHooks();
     const m = mkMissile(hooks, {

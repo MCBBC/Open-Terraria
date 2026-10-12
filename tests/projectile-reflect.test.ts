@@ -1,4 +1,4 @@
-// 弹幕反射管线回归（原版 Projectile.cs:12050-12060 + NPC.cs:67036-67059 + Projectile.cs:20216）：
+// 弹幕反射管线回归（原版 Projectile.cs:12781-12791——★BJ665 勘正 伪锚 :12050-12060 + NPC.cs:67036-67059 + Projectile.cs:20216）：
 //  419 旋刃怪冲刺（reflectsProjectiles 置标）命中可反射弹（CanBeReflected 白名单）→
 //  弹体转 hostile 回打发射者、伤害 ÷4、穿透归一、敌怪不掉血；二次命中不重复反射；
 //  非置标敌不反射；联机傀儡（netPuppet）不进命中链天然不反射。

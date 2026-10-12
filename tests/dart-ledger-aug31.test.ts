@@ -3,7 +3,7 @@
 //   A2 537 束宿主死即灭(aiStyle84 位锁链尾支 Kill,P.cs:31993-31999)
 //   B4 75 HappyBomb 贴地摩擦门改原式 vy==0 门 + |vx|≤0.01 截停(AI_016 尾 :48379-48413)
 //   B5 束测距 LaserScan→HitLine 整格量化(Collision.cs:4599-4614/:782-1147)
-//   A6 飞刀光标钳 LimitPointToPlayerReachableArea(Player.cs:45830-45858)刹车环可达
+//   A6 飞刀光标钳 LimitPointToPlayerReachableArea(Player.cs:45832-45861——★BJ665 勘正 伪锚 :45830-45858)刹车环可达
 //   C1 彩虹拖尾色相相位基准换 GlobalTimeWrappedHourly(Main.cs:17014)
 import { describe, it, expect, afterEach } from 'vitest';
 import { TrapShot, Dart } from '../src/entities/Dart';
@@ -232,7 +232,7 @@ describe('B4 75 HappyBomb 贴地摩擦门(vy==0 且 ai[0]>5)+|vx|≤0.01 截停'
   });
 });
 
-describe('A6 飞刀 491 光标可达区钳制(Player.cs:45830-45858)', () => {
+describe('A6 飞刀 491 光标可达区钳制(Player.cs:45832-45861)', () => {
   it('盒内点恒等；盒外沿中心射线回拉到 ±960/±600 面', () => {
     const pcx = 2400, pcy = 2400;
     expect(limitPointToPlayerReachableArea(pcx + 100, pcy - 50, pcx, pcy, 4800, 4800))

@@ -103,10 +103,10 @@ export function parseFromEntries(entries: Iterable<[string, Uint8Array]>): Parse
       //   按 TownNPCs_Portraits_Portrait_<X> 模式转 objectURL 注册(键无人直绘)
       else if (m.kind === 'townPortrait') { images.set(`vanilla/TownNPCs_Portraits_Portrait_${m.name}.png`, data); counts.images++; }
       else if (m.kind === 'sound') {
-        // ★.xnb 音效:解容器取 PCM 包 WAV(失败计入 skippedXnb,与"web 不可解码"同档)
+        // ★.xnb 音效:解容器取 PCM 包 WAV(Sfx 键=去 .xnb 茎名;失败计入 skippedXnb)
         if (m.file.toLowerCase().endsWith('.xnb')) {
           const wav = decodeXnbSoundToWav(data);
-          if (wav) { sounds.set(m.file, wav); counts.sounds++; }
+          if (wav) { sounds.set(m.file.slice(0, -4), wav); counts.sounds++; }
           else counts.skippedXnb++;
         } else { sounds.set(m.file, data); counts.sounds++; }
       }

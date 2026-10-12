@@ -91,9 +91,10 @@ export function mapPackAsset(rel: string): MappedAsset[] {
   if (lower(head) === 'sounds') {
     const drop = rest.length > 1 && lower(rest[0]) === 'custom' ? rest.slice(1) : rest;
     const file = drop.join('_');
-    // ★.xnb 音效(2026-10-12 工坊包实测=Waifu 19 张全是 xnb):容器内=PCM WAV,
-    //   decodeXnbSoundToWav 解包后走既有 wav 覆盖面(消费端 decodeAudioData 可解)。
-    if (lower(file).endsWith('.xnb')) return [{ kind: 'sound', file: file.slice(0, -4) }];
+    // ★.xnb 音效(2026-10-12 工坊包实测=Waifu 19 张全是 xnb):容器内=PCM WAV。
+    //   ★file 保留 .xnb 扩展名(解码分派在 parseFromEntries 按后缀判;若在此剥掉,
+    //   消费端判不到 → 原始 XNB 字节直接进覆盖表 = decodeAudioData 拒收静默,实报)。
+    if (lower(file).endsWith('.xnb')) return [{ kind: 'sound', file }];
     if (hasExt(file, AUDIO_EXT) === null) return [];
     return [{ kind: 'sound', file: file.slice(0, file.lastIndexOf('.')) }];
   }
@@ -154,4 +155,77 @@ export function mapPackAsset(rel: string): MappedAsset[] {
   }
   if (SUBDIR_TO_VANILLA.includes(sub)) return [{ kind: 'image', file: `vanilla/${rest[0]}_${flat}` }];
   return [];
+}
+
+// ================= 材质类别(2026-10-12 用户需求:按类别部分应用) =================
+// 类别 id(用户可见名走 l10n:Mods.SandboxWorld.ResourcePacks.Cat.<Pascal>)
+export type PackCategoryId =
+  | 'town' | 'creature' | 'item' | 'player' | 'armor' | 'tile'
+  | 'proj' | 'gore' | 'ui' | 'sfx' | 'music' | 'other';
+
+export const PACK_CATEGORIES: ReadonlyArray<{ id: PackCategoryId; labelKey: string }> = [
+  { id: 'town', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Town' },
+  { id: 'creature', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Creature' },
+  { id: 'item', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Item' },
+  { id: 'player', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Player' },
+  { id: 'armor', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Armor' },
+  { id: 'tile', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Tile' },
+  { id: 'proj', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Proj' },
+  { id: 'gore', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Gore' },
+  { id: 'ui', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Ui' },
+  { id: 'sfx', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Sfx' },
+  { id: 'music', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Music' },
+  { id: 'other', labelKey: 'Mods.SandboxWorld.ResourcePacks.Cat.Other' },
+];
+
+/** 注入键(或 Sfx/Music/字体键)→ 类别。规则:
+ *  - 城镇 vs 怪物:NPC_<id> 按 TOWN_NPC_PROFILE 分流(城镇本体=档案名族/头像族全归 town)
+ *  - Player_<v>_<c>/Player_Hair → player;Armor_* → armor;Item_* → item;
+ *    Tile_/Wall_ → tile;Projectile_ → proj;Gore_ → gore;vanilla-ui/UI_ 与字体 → ui */
+export function packKeyCategory(file: string): PackCategoryId {
+  if (file.startsWith('vanilla-ui/')) {
+    if (/^vanilla-ui\/(Player_\d+_\d+|Player_Hair|Player_HairAlt)/.test(file)) return 'player';
+    if (/^vanilla-ui\/Armor_/.test(file)) return 'armor';
+    return 'ui';
+  }
+  if (file.startsWith('vanilla/')) {
+    let m = /^vanilla\/NPC_(\d+)\.png$/.exec(file);
+    if (m) {
+      // ★城镇 vs 怪物分流:TOWN_NPC_PROFILE 延迟 require(纯函数文件保持零重依赖——
+      //   node 单测环境直接 import 会拉穿 items/tiles 全链)
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      try {
+        // 动态查表(同步):城镇档案 id 集
+        const townIds = townProfileIds ?? (townProfileIds = loadTownProfileIds());
+        if (townIds.has(Number(m[1]))) return 'town';
+      } catch { /* 查表不可用=按怪物 */ }
+      return 'creature';
+    }
+    if (/^vanilla\/TownNPCs_Portraits_/.test(file)) return 'town';
+    if (/^vanilla\/Shimmered_[A-Za-z]+_/.test(file)) return 'town';
+    if (/^vanilla\/[A-Za-z]+_Default(_Party|_Transformed)?\.png$/.test(file)) return 'town';
+    if (/^vanilla\/Player_\d+_\d+\.png$/.test(file)) return 'player';
+    if (/^vanilla\/Player_Hair/.test(file)) return 'player';
+    if (/^vanilla\/Armor_/.test(file)) return 'armor';
+    if (/^vanilla\/Item_\d+\.png$/.test(file)) return 'item';
+    if (/^vanilla\/Tile_\d+\.png$/.test(file)) return 'tile';
+    if (/^vanilla\/Wall_\d+\.png$/.test(file)) return 'tile';
+    if (/^vanilla\/Projectile_\d+\.png$/.test(file)) return 'proj';
+    if (/^vanilla\/Gore_\d+\.png$/.test(file)) return 'gore';
+    return 'other';
+  }
+  if (file.startsWith('sfx:')) return 'sfx';
+  if (file.startsWith('music:')) return 'music';
+  return 'other';
+}
+
+let townProfileIds: Set<number> | null = null;
+function loadTownProfileIds(): Set<number> {
+  // 同步面:packPaths 保持纯函数(无静态依赖)——调用方经 setTownProfileIds 注入
+  return townProfileIds ?? new Set();
+}
+
+/** 城镇 id 表注入(Manager 装配期调用一次;避免 packPaths 静态依赖数据模块) */
+export function setTownProfileIds(ids: Set<number>): void {
+  townProfileIds = ids;
 }

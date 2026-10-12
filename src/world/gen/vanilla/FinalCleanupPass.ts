@@ -1739,19 +1739,19 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       && !solidAllowBottom(st, num2 + 1, num6 + 2)) flag = true;
   }
   if (!flag) return;
-  // ★三百二十刀（2026-10-08）：败支零命中闸【金标判别期暂时摘除】——ghost-preserve
-  //   出口 type 哈希红（0d4adcce≠115f524f），零命中闸嫌疑待判别。观测面保留：
-  //   __sw2x2FailN=零命中败支发生计数（金标跑中读此数=可达性实证）。
-  {
-    let hits2x2 = 0;
-    for (let k = num2; k < num2 + 2; k++) for (let l = num6; l < num6 + 2; l++) {
-      if (inW(k, l) && st.flags[st.idx(k, l)] && SWEEP_SHEET[st.type[st.idx(k, l)]!] === sheet) hits2x2++;
-    }
-    if (hits2x2 === 0) {
-      // ★三百二十刀观测面(dormant):零命中败支可达性计数——本体金标种子 9293480
-      //   全管线实证 0 触发(2026-10-08 探针)=闸对本体零扰动;mod 世界为自环主态
-      (globalThis as unknown as { __sw2x2FailN?: number }).__sw2x2FailN = ((globalThis as { __sw2x2FailN?: number }).__sw2x2FailN ?? 0) + 1;
-    }
+  // ★三百二十刀（2026-10-08）→ ★626 复刀（2026-10-12）：败支零命中闸【复辟】——
+  //   首刀曾因 ghost-preserve 出口 type 哈希红（0d4adcce≠115f524f）判别期摘除；
+  //   复刀物证=mod 世界 Piles/沉降/断线陷阱清理等任意 FCP 消费 pass 卡死（node
+  //   repro 三 seed 三 pass 挂点漂移，本闸复辟后 node 全链完成），本体金标种子
+  //   9293480 全管线实证 0 触发=闸对 vanilla 链零扰动（金标测试同轮复验）。
+  //   __sw2x2FailN 观测面保留（金标跑中读此数=可达性实证）。
+  let hits2x2 = 0;
+  for (let k = num2; k < num2 + 2; k++) for (let l = num6; l < num6 + 2; l++) {
+    if (inW(k, l) && st.flags[st.idx(k, l)] && SWEEP_SHEET[st.type[st.idx(k, l)]!] === sheet) hits2x2++;
+  }
+  if (hits2x2 === 0) {
+    (globalThis as unknown as { __sw2x2FailN?: number }).__sw2x2FailN = ((globalThis as { __sw2x2FailN?: number }).__sw2x2FailN ?? 0) + 1;
+    return;   // 零命中：2×2 域已无本 sheet 活格——killTile 级联只会重帧邻域再进本败支（自环主态）
   }
   ctx.destroyObject = true;                                                 // cs:48567
   for (let k = num2; k < num2 + 2; k++) {

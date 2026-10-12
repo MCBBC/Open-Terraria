@@ -1,3 +1,5 @@
+import type { PackCategoryId } from './packPaths';
+
 // 资源包列表语义（M13）——ResourcePackList.cs + UIResourcePackSelectionMenu 的
 // 纯函数化（排序/启停/调序），node 单测直测。
 //
@@ -44,6 +46,8 @@ export interface PackRow {
   fileCount: number;
   /** icon.png dataURL（缺省 null → 默认图标） */
   iconDataUrl: string | null;
+  /** ★材质类别开关(2026-10-12):缺项=开(默认全开)——合并期按类别过滤该包注入 */
+  categories?: Partial<Record<PackCategoryId, boolean>>;
 }
 
 type RowLike = Pick<PackRow, 'name' | 'version' | 'fileName'>;

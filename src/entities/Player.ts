@@ -1152,7 +1152,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
      *  1.8→eqM.jumpSpd 聚合,jumpBaseSnapshot 与翼飞 JS 同源生效）;②:22419-22422
      *  WingMovement 扇动消耗后 `wingTime != 0f` 即回满 wingTimeMax = 无限飞行
      *  （含喷气 -2 档/hover ×0.5 档;原版无湿态/悬浮/坐骑豁免——湿链 WingMovement 同吃）；
-     *  ③:26698-26700 runAcceleration×1.75（无 vy/坐骑门,钩爪/舌头支外）；
+     *  ③:26702-26713 runAcceleration×1.75（★BJ665 勘正 伪锚 :26698-26700;无 vy/坐骑门,钩爪/舌头支外）；
      *  ④:27063-27065 rocketTime 恒回满 7（无门,无靴态也置 7=原版同,
      *  消费端全带 rocketBoots 门故惰性） */
     empressBrooch: boolean;
@@ -1823,7 +1823,7 @@ export class Player extends Entity {
    *  3-9 有图标;盔甲 0-2 与社交 13-19 无)。消费侧:①UpdateVisibleAccessories
    *  :36361 !hide 才 UpdateVisibleAccessory(功能槽贴图隐藏,功能效果不受影响
    *  ——ApplyEquipFunctional :13962 独立扫);②翅膀特例 :12580 隐藏翼在
-   *  vy≠0 且 mount.CanUseWings 时仍显形;③UpdateItemDye :9313-9322 隐藏槽染料
+   *  vy≠0 且 mount.CanUseWings 时仍显形;③UpdateItemDye :9702 起（★BJ665 勘正 伪锚 :9313-9322）隐藏槽染料
    *  不应用(翼族/盾 fallback 豁免);④社交槽 13-19 第二轮 :36368-36375 无 hide 门。
    *  ★原版语义定谳:眼睛图标只挂功能配饰段,"虚荣槽 13-19 也可隐藏"与原版不符,
    *  审计登记回写不改码 */

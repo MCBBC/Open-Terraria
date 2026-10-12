@@ -1,11 +1,13 @@
 // C16b 攻速链域清偿（红蓝 R17 F1-F5,2026-10-12）。标杆 Terarria1457 逐行亲读：
-//   F1(MED) 悠悠球命中烧寿命除数：Projectile.cs:13323-13333 命中烧 = localAI[0] += 20f
+//   F1(MED) 悠悠球命中烧寿命除数：Projectile.cs:13327-13333（★BJ665 精确化,旧区间
+//       :13323-13333）命中烧 = localAI[0] += 20f
 //       （:13327）/无视线 +40f（:13330）【无除式】,除式只在寿命换算 :68803
 //       `num /= (1f + Main.player[owner].meleeSpeed) / 2f`——meleeSpeed 字段 =
 //       CapAttackSpeeds 倒数档 M（:26176 每拍先翻转）= 本仓 attackSpeedMult（Player.ts
 //       attackSpeedMult getter :29260-29266 镜像）。本仓预除模型两站（每拍 :3514 /
 //       命中 :3807）必须同 M——旧命中站 vms=1/(attackSpeedMult||1)=攻速和,正加成下
-//       (1+1/M)/2>1 烧得慢=方向反。行段锚 :12501→:13323-13333 勘正。
+//       (1+1/M)/2>1 烧得慢=方向反。行段锚 :12501→:13327-13333 勘正（R17 初勘 :13323-13333,
+//       BJ661 复核命中链 :13290-13335,BJ665 烧段精确化）。
 //   F2(MED) 叶绿 1126 孢子掷率双重还原：Projectile.cs:42928
 //       `Main.rand.Next((int)Utils.Remap(player.meleeSpeed, 1f, 1f/3f, 4f, 2f)) == 0`
 //       直读 meleeSpeed 字段（=M）+ (int) 截断——旧式 ms=1/M（攻速和,正加成下恒饱和
@@ -198,18 +200,18 @@ describe('R17-F3 膛速不吃词缀 size（:47466 speed=sItem.shootSpeed;NewProj
 
 // ================= F4：行段误锚族 5 处勘正 =================
 describe('R17-F4 行段误锚族勘正（1456 伪锚 → 1457 真位）', () => {
-  it('WeaponProj：延伸盒 :47034-47073/:47066、烧段 :13323-13333、缩放链 :44629-44635', () => {
+  it('WeaponProj：延伸盒 :47034-47073/:47066、烧段 :13327-13333（★BJ665 精确化）、缩放链 :44629-44635', () => {
     const wp = src('../src/entities/WeaponProj.ts');
     expect(wp).toMatch(/AI_019_Spears_GetExtensionHitbox（Projectile\.cs:47034-47073——1456 伪锚 :43530-43571\n \*  勘正 R17-F4）纯函数/);
     expect(wp).toMatch(/num4 \*= attackSpeedMult;\s*\/\/ :47066（R17-F4 勘正）/);
     expect(wp).not.toMatch(/GetExtensionHitbox（Projectile\.cs:43530-43571）/);
     expect(wp).not.toMatch(/\/\/ :43559\b/);
     expect(wp).not.toMatch(/\/\/ :43533-43535|\/\/ :43536 int|\/\/ :43539 Remap/);
-    expect(wp).toMatch(/命中链（Projectile\.cs:13288-13333 aiStyle 99 段——1456 伪锚 :12467-12508 勘正/);
+    expect(wp).toMatch(/命中链（Projectile\.cs:13290-13335 aiStyle 99 段——1456 伪锚 :12467-12508 勘正/);
     expect(wp).not.toMatch(/12467-12508 aiStyle 99 段）:-2/);
-    expect(wp).toMatch(/寿命快捷烧（:13323-13333——1456 伪锚 :12501-12505 勘正/);
+    expect(wp).toMatch(/寿命快捷烧（:13327-13333——★BJ665 精确化,旧区间 :13323-13333;1456 伪锚 :12501-12505 勘正/);
     expect(wp).not.toMatch(/寿命快捷烧（:12501-12505）/);
-    expect(wp).toMatch(/meleeSpeed 缩放链（:44629-44635 meleeSpeed→num16 七连乘——1456 伪锚 :41151-41159 勘正/);
+    expect(wp).toMatch(/meleeSpeed 缩放链（:44629-44637 meleeSpeed→num16 七连乘（BJ661 复核补 :44636-44637 num6\/num7 两乘）——1456 伪锚 :41151-41159 勘正/);
     expect(wp).not.toMatch(/:41151-41159,1\/meleeSpeed/);
   });
 

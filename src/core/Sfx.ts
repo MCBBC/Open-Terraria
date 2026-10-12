@@ -591,6 +591,13 @@ export function applySfxPackOverrides(sounds: ReadonlyMap<string, Uint8Array>): 
 /** 测试/调试探针：当前覆盖表只读视图 */
 export function sfxPackOverrideKeys(): string[] { return [...packSoundOverrides.keys()]; }
 
+/** 调试探针:覆盖表逐键头 4 字节 + 长度(XNB='XNBx' vs WAV='RIFF'——区分解码与否) */
+export function sfxPackOverrideProbe(): Array<{ k: string; len: number; head: string }> {
+  return [...packSoundOverrides.entries()].map(([k, v]) => ({
+    k, len: v.length, head: [...v.subarray(0, 4)].map((x) => x.toString(16).padStart(2, '0')).join(' ') + `'${String.fromCharCode(...v.subarray(0, Math.min(4, v.length)))}'`,
+  }));
+}
+
 // ---- 资源包音乐覆盖（★SW-FX16 2026-09-10 原版锚定补缺）----
 // 原版资源包可替换音乐轨 = LegacyAudioSystem.LoadFromSources(:34-54) 按
 // "Music/<曲名>" 资产路径经 FindReplacementTrack(:84-124) 取 .ogg/.wav/.mp3
@@ -1273,8 +1280,9 @@ export class Sfx {
         if (override) {
           const decoded = await ctx.decodeAudioData(override.slice().buffer).catch(() => null);
           if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); this.failedAt.delete(file); return decoded; }
-          this.markFailed(file);
-          return null;
+          // ★材质包坏键回退原版(2026-10-12):旧=markFailed 静默——包内一根坏键
+          //  吃掉原版声(用户实报受击全哑)。改为落穿下方 opus/mp3 原版 fetch,
+          //  双失败才负缓存。坏包诊断仍可经 DebugReport(rejectedBlank 同族)。
         }
         // ★双格式回退(2026-09-04 Opus 兼容报告定案):.opus 主(Safari 桌面全系
         //  对 Ogg Opus 的 decodeAudioData 仍"部分支持")→ decode 失败/404 →

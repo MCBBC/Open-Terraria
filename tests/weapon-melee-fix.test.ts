@@ -115,7 +115,7 @@ describe('② 泰拉刃 985 光束', () => {
     // 旧错值 `tdx / tdl * 5`（漏乘 shootSpeed）已退役
     expect(src.includes('tdx / tdl * 5,')).toBe(false);
     expect(src).toContain('tdx / tdl * cwMelee.shootSpeed * 5, tdy / tdl * cwMelee.shootSpeed * 5');
-    // 985 ∈ NoMeleeSpeedVelocityScaling（ProjectileID.cs:337）——不除 attackSpeedMult
+    // 985 ∈ NoMeleeSpeedVelocityScaling（ProjectileID.cs:429——★BJ665 勘正 伪锚 :337）——不除 attackSpeedMult
     const i = src.indexOf('tdx / tdl * cwMelee.shootSpeed * 5');
     expect(src.slice(i - 400, i)).not.toContain('attackSpeedMult');
   });

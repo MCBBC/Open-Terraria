@@ -1,4 +1,4 @@
-// 悠悠球袋装备族全链测试（Player.cs:14174-14226 装备映射 / :11946-12004
+// 悠悠球袋装备族全链测试（Player.cs:14174-14226 装备映射 / :12445-12504——★BJ665 勘正 伪锚 :11946-12004
 // Player.Counterweight / AI_099_1 配重球 / AI_099_2 悠悠球 ai0 状态机 + 魔法线）：
 //   ① equipStats 装备映射逐物品（3366/3334/3309-3314/5547/5540/5541 + 虚荣槽 + 卸下归零）
 //   ② counterweightDecision 纯决策（手套二号球/配重球计数门/vanity 优先/kb 公式）
@@ -57,7 +57,7 @@ describe('悠悠球袋族装备映射（Player.cs:14174-14226）', () => {
     expect(rollYoyoCounterweight()).toBe(559);
   });
 
-  it('双袋（3366+5541）→ yoyoBag 幂等置位（掷骰迁消费端后 :14176/:14200 的==0 门自然消失）', () => {
+  it('双袋（3366+5541）→ yoyoBag 幂等置位（掷骰迁消费端后 :14824/:14848——★BJ665 勘正 伪锚 :14176/:14200 的==0 门自然消失）', () => {
     const p = mkPlayer();
     equip(p, 3, 3366);
     equip(p, 4, 5541);
@@ -145,9 +145,9 @@ describe('悠悠球袋族装备映射（Player.cs:14174-14226）', () => {
 });
 
 // ============================================================
-// ② counterweightDecision（Player.cs:11946-12004 纯决策核）
+// ② counterweightDecision（Player.cs:12445-12504 纯决策核——★BJ665 勘正 伪锚 :11946-12004）
 // ============================================================
-describe('Player.Counterweight 决策（Player.cs:11946-12004）', () => {
+describe('Player.Counterweight 决策（Player.cs:12445-12504）', () => {
   const EQ = (o: Partial<{ yoyoGlove: boolean; counterWeight: number; vanityCounterWeight: number }>) => ({
     yoyoGlove: false, counterWeight: 0, vanityCounterWeight: 0, ...o,
   });
@@ -549,7 +549,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
     y.counterweight = () => { cwCalls++; };
     run(y, hooks, 30);
     expect(hits.length).toBeGreaterThan(0);   // 命中过敌
-    expect(cwCalls).toBe(hits.length);        // 每次命中都调 Counterweight（:12482）
+    expect(cwCalls).toBe(hits.length);        // 每次命中都调 Counterweight（:13306——★BJ665 勘正 伪锚 :12482）
     // 活跃态命中被弹开：速度反向（-0.5×v + 离敌向 16）
     expect(Math.hypot(y.vx, y.vy)).toBeGreaterThan(0);
 

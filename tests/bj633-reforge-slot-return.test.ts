@@ -9,7 +9,7 @@
 //   ② 强制退出臂同帧直调:Main.cs:42275-42288(开箱 chest!=-1/开店 npcShop!=0/
 //      走远 talkNPC==-1/向导态 InGuideCraftMenu → InReforgeMenu=false 后紧跟
 //      dropItemCheck)=退出当帧回包;
-//   ③ 关包链:Main.cs:46438-46447 DrawInterface_26 !playerInventory →
+//   ③ 关包链:Main.cs:46439-46446 DrawInterface_26 !playerInventory 臂（只收箱/关制作窗;★BJ665 勘正 :46438-46447;清携带在 DrawInterface_27 尾 :46429）→
 //      InReforgeMenu=false → 下拍 ① 消费=Esc 关包即回包。
 //   本仓断点（vinv 面）:三退出点只清 vinvReforgeOpen 不归还 reforgeItem——
 //   closeInventory 关包臂/vinvGuideMenuExitCheck 退出臂(旧注「reforgeItem 不清=

@@ -35,8 +35,8 @@ export function decodeXnbSoundToWav(b: Uint8Array): Uint8Array | null {
     };
     const readerCount = read7();
     for (let i = 0; i < readerCount; i++) { readStr(); off += 4; }   // name + version u32
-    off += 4;   // shared resource count
-    off += 4;   // object count
+    off++;   // shared resource count(★7-bit 编码非 u32——实测 19/19 布局票选定谳)
+    off++;   // object count(7-bit)
     // SoundEffect 对象:formatSize u32 + fmt + dataSize u32 + pcm
     const formatSize = dv.getUint32(off, true); off += 4;
     const fmt = b.subarray(off, off + formatSize); off += formatSize;
@@ -76,7 +76,9 @@ export function decodeXnbSoundToWav(b: Uint8Array): Uint8Array | null {
     wdv.setUint32(40, pcm.length, true);
     wav.set(pcm, 44);
     return wav;
-  } catch {
+  } catch (e) {
+    // 解析失败诊断(坏容器/未支持变体):debug 级不刷屏,坏包走跳过计数
+    console.debug('[xnb] 音效解码失败(跳过):', (e as Error)?.message ?? e);
     return null;
   }
 }

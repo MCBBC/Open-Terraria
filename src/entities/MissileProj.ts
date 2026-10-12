@@ -1,33 +1,33 @@
-// 可控导弹族（Projectile aiStyle 9 = AI_009_MagicMissiles，Projectile.cs:40518-40751）
+// 可控导弹族（Projectile aiStyle 9 = AI_009_MagicMissiles，Projectile.cs:43996-44230 + AI_009_MagicMissiles_Old :44231 起——★BJ665 勘正 1456 伪锚 :40518-40751）
 // + 老星怒天降落星（proj 9，aiStyle 5，Projectile.cs:24081-24364;1456 伪锚 :22130-22247 勘正 + Player.cs 出生链）。
 // 此前两族都被 Game.useCombatWeapon 的"兜底 mArrow"当直线弹发出去——导弹失去
 // 光标操控语义、老星怒失去天降语义。本文件 1:1 移植两族行为层。
 //
-// ── 成员（SetDefaults 实测，aiStyle 全部 = 9，:22676-22680 分派）─────────────
-//   16 魔法飞弹   item 113 Magic Missile（:714-724）   32×32 alpha100 light0.8
+// ── 成员（SetDefaults 实测，aiStyle 全部 = 9，:24644 分派——★BJ665 勘正 伪锚 :22676-22680）─────────────
+//   16 魔法飞弹   item 113 Magic Missile（:976-986——★BJ665 勘正 伪锚 :714-724）   32×32 alpha100 light0.8
 //                 magic ignoreWater；penetrate 缺省 1（命中即灭）
 //   34 Flamelash  item 218（:902-912）                 32×32 penetrate2 light0.8 magic
-//                 usesLocalNPCImmunity / localNPCHitCooldown=12；6 帧动画 Main.cs:8403
-//   79 彩虹魔杖弹 item 495 Rainbow Rod（:1322-1333）   32×32 penetrate3 light0.8 magic
+//                 usesLocalNPCImmunity / localNPCHitCooldown=12；6 帧动画 Main.cs:8593（★BJ665 勘正 伪锚 :8403）
+//   79 彩虹魔杖弹 item 495 Rainbow Rod（:1596-1608——★BJ665 勘正 伪锚 :1322-1333）   32×32 penetrate3 light0.8 magic
 //                 同 34 免疫档 + ignoreWater
 //   ★ 任务清单里的 579/753/1262 经核对【不是】本族：579=Drax（钻镐，shoot 107）、
 //     753=Seaweed（海龟宠物链，buffType 42，shoot 127=aiStyle 26 宠物）、
 //     1262=ChlorophyteJackhammer（shoot 252=aiStyle 20 手持钻头，:23837-23942）。
 //     aiStyle 20 是钻头/链锯挂手 AI（:23837），28 是直线风动物理族（:24866）——
 //     都不是光标导弹，本实体只接管 aiStyle 9（同族还有 491 Flying Knife，走
-//     AI_009_MagicMissiles_Old :40753 回旋语义，另案登记）。
+//     AI_009_MagicMissiles_Old :44231 回旋语义（★BJ665 勘正 伪锚 :40753），另案登记）。
 //
 // ── 操控语义（AI_009_MagicMissiles 逐段）──────────────────────────────────
-//   channel 期间 ai[0]/ai[1] = 光标点（:40560-40574），amount=1 的 Lerp（:40654）
+//   channel 期间 ai[0]/ai[1] = 光标点（:44042-44051——★BJ665 勘正 伪锚 :40560-40574），amount=1 的 Lerp（:44132——★BJ665 勘正 伪锚 :40654）
 //   → 速度直接对齐 normalize(目标−中心)×min(32, 距离)——转向是【瞬时】的；
-//   "转向速率"只作用于视觉 rotation：AngleTowards(速度角, π/4/tick)（:40678-40681）。
-//   近距 <64px 改为衰减盘旋：vel×0.3 + (目标−中心)×0.3（:40657-40660）。
-//   松手（:40575-40593）：FindTargetWithLineOfSight（:42972-42999：800px 内最近
-//   CanBeChasedBy(NPC.cs:91070-91082) NPC + Collision.CanHit 视线 + 免疫表空）→
-//   ai[1]=NPC 槽位追踪（amount 公式 :40620-40623 恒收敛 0.2，逐字保留）；无目标 →
-//   速度归一 32 直飞（<2 时取 DirectionFrom(玩家)），timeLeft 钳 300（:40667-40676）。
+//   "转向速率"只作用于视觉 rotation：AngleTowards(速度角, π/4/tick)（:44158-44161——★BJ665 勘正 伪锚 :40678-40681）。
+//   近距 <64px 改为衰减盘旋：vel×0.3 + (目标−中心)×0.3（:44136-44138——★BJ665 勘正 伪锚 :40657-40660）。
+//   松手（:44055-44075——★BJ665 勘正 伪锚 :40575-40593）：FindTargetWithLineOfSight（:46466-46493——★BJ665 勘正 伪锚 :42972-42999：800px 内最近
+//   CanBeChasedBy(NPC.cs:91139-91150——★BJ665 勘正 1456 伪锚 :91070-91082) NPC + Collision.CanHit 视线 + 免疫表空）→
+//   ai[1]=NPC 槽位追踪（amount 公式 :44098-44100——★BJ665 勘正 伪锚 :40620-40623 恒收敛 0.2，逐字保留）；无目标 →
+//   速度归一 32 直飞（<2 时取 DirectionFrom(玩家)），timeLeft 钳 300（:44151-44154——★BJ665 勘正 伪锚 :40667-40676）。
 //   持按连发：原版 item.channel 武器每 useAnimation 循环重用一次（pendingItemReuse
-//   Player.cs:42143-42147 → ItemCheck_TryStartUse :51182-51196 每拍扣 mana）——
+//   Player.cs:43152-43158 → ItemCheck_TryStartUse :52659（★BJ665 勘正 伪锚 :42143-42147/:51182-51196）每拍扣 mana）——
 //   每循环【一发】新弹，由最新存活弹独占驱动（否则 N 弹会指数增殖）。
 //   碰撞面（★BJ277 2026-09-22）：HandleMovement TileCollision 4×4 盒扫掠（Center−2 盒,
 //   GetCollisionParams :19982/:20127-20131）+ aiStyle 9 反应支（:19439-19462,1458 同）——
@@ -79,7 +79,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { limitPointToPlayerReachableArea } from './PlayerReachableArea';
 export { limitPointToPlayerReachableArea };
 
-/** Utils.GetLerpValue（Utils.cs:283-307，clamped=true）——含 from>to 倒置区间 */
+/** Utils.GetLerpValue（Utils.cs:315-322——★BJ665 勘正 伪锚 :283-307，clamped=true）——含 from>to 倒置区间 */
 function lerpValue(from: number, to: number, t: number): number {
   if (from < to) {
     if (t < from) return 0;
@@ -161,7 +161,7 @@ function tinted79(img: HTMLImageElement | ImageBitmap, tint: readonly [number, n
 
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
-/** float.AngleTowards（Utils.cs:2142-2159）：最短路径钳 maxChange/tick */
+/** float.AngleTowards（Utils.cs:2174-2185——★BJ665 勘正 伪锚 :2142-2159）：最短路径钳 maxChange/tick */
 function angleTowards(cur: number, target: number, maxChange: number): number {
   let c = wrapAngle(cur);
   const t = wrapAngle(target);
@@ -171,7 +171,7 @@ function angleTowards(cur: number, target: number, maxChange: number): number {
   return wrapAngle(c);
 }
 
-/** float.AngleLerp（Utils.cs:2122-2140）：最短路径 Lerp(amount) */
+/** float.AngleLerp（Utils.cs:2154-2172——★BJ665 勘正 伪锚 :2122-2140）：最短路径 Lerp(amount) */
 function angleLerp(cur: number, target: number, amount: number): number {
   let angle: number;
   if (target < cur) {
@@ -194,7 +194,7 @@ function moveTowardsV2(cx: number, cy: number, tx: number, ty: number, max: numb
   return [cx + dx / d * max, cy + dy / d * max];
 }
 
-/** Main.hslToRgb(H, S=1, L)（Main.cs:48695-48737 双精度 hue2rgb + byte=Math.Round，
+/** Main.hslToRgb(H, S=1, L)（Main.cs:48689-48737——★BJ665 勘正 伪锚 :48695-48737;双精度 hue2rgb + byte=Math.Round，
  *  与 fx/orchestraFx.leafHslToRgb255 同式）。S 钉 1 的纯色环：飞行拖尾/14×火花用
  *  缺省 L=.5（原文 hslToRgb(rand,1,.5)），Kill 迸散尾迹用 L=.65（:72441）。
  *  ★终清波升级：旧六边形分段表只支持 L=.5，79 Kill 的 newColor3 是 L=.65 档——
@@ -345,7 +345,7 @@ export class MagicMissileProj extends Entity {
   private page = false;
   /** localAI[0]：发红计时（:40555-40558） */
   private redT = 0;
-  /** rotation（Projectile.cs:523 初值 0；AI :40678-40685 驱动） */
+  /** rotation（Projectile.cs:324 初值 0——★BJ665 勘正 伪锚 :523；AI :44158-44161 驱动——★BJ665 勘正 伪锚 :40678-40685） */
   rot = 0;
   /** timeLeft（SetDefaults 默认 3600，:526） */
   timeLeft: number;
@@ -376,7 +376,7 @@ export class MagicMissileProj extends Entity {
    *  同帧发射的多弹色相恒差一个常数偏移、也和世界的 GlobalTime 不同相；★BJ330 起直读
    *  GameTime 单源 %3600（Main.TotalGameTime 等价——暂停/失焦随世界冻结） */
   private globalT = globalTimeWrappedHourly();
-  /** Main.DiscoR/G/B（Main.cs:19441 六段 ±7/帧；79 点光 :15157-15160） */
+  /** Main.DiscoR/G/B（Main.cs:19786-19831 六段 ±7/帧——★BJ665 勘正 伪锚 :19441；79 点光 =SetDefaults light :1602——★BJ665 勘正 伪锚 :15157-15160） */
   private discoR = 255;
   private discoG = 0;
   private discoB = 0;
@@ -393,7 +393,7 @@ export class MagicMissileProj extends Entity {
   //      水中位移阻尼（tileCollide 缺省 true → HandleMovement :17581 阻尼块生效）
   //      + IsDestroyedByWater 水death（ProjectileID.Sets :287 六型含 34;:16923-16925
   //      `wet && !lavaWet` → Kill——经 hooks.kill 接 killNow,段内特支 34 浆穿
-  //      :16933-16936 由共享体内建）。出生侧禁射门（Player.cs:51274 wet&&¬lavaWet
+  //      :16933-16936 由共享体内建）。出生侧禁射门（Player.cs:52751 wet&&¬lavaWet——★BJ665 勘正 伪锚 :51274
   //      &&shoot∈{85,15,34}）已在 Game.useCombatWeapon :16701。
   //    · 79 彩虹魔杖弹 — block :1596-1606 ignoreWater=true :1607 = 豁免（段 no-op）
   //  段位序 = AI(steer) → 湿段 → 位移（直积分乘 drag,速度场不减）;本类 AI 无湿旗
@@ -505,7 +505,7 @@ export class MagicMissileProj extends Entity {
     this.x += this.wet ? wvx : this.vx;          // UpdatePosition :20563-20569 `if (wet)`
     this.y += this.wet ? wvy : this.vy;
     if (this.dead) return;   // 反应链/湿段杀位——:17153 !active 早退,不入带不结算
-    if (this.stripCap > 0) this.stripRecord();   // P.cs:17197（位移后;TrailingMode[16/34/79]=3）
+    if (this.stripCap > 0) this.stripRecord();   // Projectile.cs:17246（位移后;TrailingMode[16/34/79]=3——★BJ665 勘正 伪锚 :17197 mode-0 支）
     this.hitStep(game);
   }
 
@@ -558,7 +558,7 @@ export class MagicMissileProj extends Entity {
         game.player.onChannelManaHold?.();
         // ai[0]/ai[1] = 光标（:40566-40573）。★BJ279 移交②（BJ277 批并刀）：
         // Main.MouseWorld 先经 LimitPointToPlayerReachableArea（:44044-44046;
-        // Player.cs:45830-45858）钳进玩家可达区——旧直传裸光标=超射程引导目标域偏差
+        // Player.cs:45832-45861——★BJ665 勘正 伪锚 :45830-45858）钳进玩家可达区——旧直传裸光标=超射程引导目标域偏差
         // （limitPointToPlayerReachableArea 头注登记的「新导弹族接线遗漏」就此销账）。
         const raw = this.aimCb();
         const [clx, cly] = limitPointToPlayerReachableArea(raw.x, raw.y,
@@ -691,7 +691,7 @@ export class MagicMissileProj extends Entity {
       //  同方法体"=跨函数误归属，d66 尘+Item9 音整面退役。保留项（均原版在位）：
       //  · ProjLight :16600-16605 type==79 light = Disco 色（下方 disco 状态机+lightRGB）
       //  · Kill :72426-72465 彩虹迸散（killNow 链,不在本函数）
-      const n = 7;                          // Main.cs:19441 六段 ±7/帧
+      const n = 7;                          // Main.cs:19786-19831 六段 ±7/帧（★BJ665 勘正 伪锚 :19441）
       switch (this.discoStyle) {
         case 0: this.discoG = Math.min(255, this.discoG + n); if (this.discoG >= 255) this.discoStyle++; break;
         case 1: this.discoR = Math.max(0, this.discoR - n); if (this.discoR <= 0) this.discoStyle++; break;
@@ -700,7 +700,7 @@ export class MagicMissileProj extends Entity {
         case 4: this.discoR = Math.min(255, this.discoR + n); if (this.discoR >= 255) this.discoStyle++; break;
         default: this.discoB = Math.max(0, this.discoB - n); if (this.discoB <= 0) this.discoStyle = 0; break;
       }
-      this.lightRGB = [this.discoR / 255 * 0.8, this.discoG / 255 * 0.8, this.discoB / 255 * 0.8]; // :15157-15160
+      this.lightRGB = [this.discoR / 255 * 0.8, this.discoG / 255 * 0.8, this.discoB / 255 * 0.8]; // SetDefaults light=0.8 :1602（★BJ665 勘正 伪锚 :15157-15160）
     }
     // 急转尘爆（:40686 flag3——oldVel·vel 归一 < 0.2 时 2-5 尘，:40703-40715/:40737-40749）
     // ★BJ255：原版 flag3 尘块分别整体位于 `if (type == 16)`/:44112 与 type==34 段内
@@ -837,7 +837,7 @@ export class MagicMissileProj extends Entity {
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）在 Damage() 内
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）在 Damage() 内
     //  先于 Damage_PVE（:12523）——16/34/79 penetrate 1/2/3 计数耗尽即亡拍【照割】
     //  （SetDefaults :976-984/:1164-1180/:1596-1610,aiStyle 9/friendly）;中央割
     //  !e.dead 门=死亡拍整缺 → BJ260 前置习语。三型均过两道门（CanCutTiles :15407
@@ -1474,8 +1474,8 @@ export class MagicMissileProj extends Entity {
 
 /**
  * proj 491（SetDefaults :5131-5139：26×26 aiStyle9 friendly melee penetrate−1）——
- * item 3030 飞刀（Item.cs:28029-28045：channel、useStyle1、shootSpeed17、dmg40、
- * noMelee）。AI_009 入口 :40520-40524 把 type==491 整体转投 Old 分支（:40753-40910），
+ * item 3030 飞刀（Item.cs:28055 起——★BJ665 勘正 伪锚 :28029-28045：channel、useStyle1、shootSpeed17、dmg40、
+ * noMelee）。AI_009 入口 :43998-44002 把 type==491 整体转投 Old 分支（:44231 起——★BJ665 勘正 伪锚 :40520-40524/:40753-40910），
  * 与本文件新导弹（光标点对齐 + 松手索敌/直飞）语义完全不同：
  *   · channel 期间（:40757-40830）：距光标 ≥100px → 速度朝光标方向 4:1 收敛
  *     （上限 20px/t，:40794-40817）；<100px → 只沿当前方向 ×1.1 加速并自锁
@@ -1579,7 +1579,7 @@ export class FlyingKnifeProj extends Entity {
       if (this.channelCb()) {
         const num = 20;                    // :40764-40767（491 专属上限）
         // ★2026-08-31 台账 A6 清偿（Projectile.cs:44247-44249）：光标先钳进玩家可达区
-        // （LimitPointToPlayerReachableArea，Player.cs:45830-45858 盒=1920×1200 中心
+        // （LimitPointToPlayerReachableArea，Player.cs:45832-45861——★BJ665 勘正 伪锚 :45830-45858 盒=1920×1200 中心
         // 玩家∩世界边框内缩 640px）再算距离——曾直追原始 MouseWorld 导致"距光标<100px
         // 刹车/悬停环"在大屏/越界光标下永远不可达（未建模登记就此关闭）
         const raw = this.aimCb();
@@ -1835,7 +1835,7 @@ export class StarfuryStar extends Entity {
       game.cutTile(tx, ty);
       if (world.store.isSolid(tx, ty)) { this.killNow(game); return; }
     }
-    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（Projectile.cs:12517 调用点/方法 :15276）先于 Damage_PVE
     //  （:12523）——星体 9 penetrate=2 耗尽即亡拍【照割】（SetDefaults :888-897,aiStyle 5/
     //  friendly/tileCollide=false）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
     //  9 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。

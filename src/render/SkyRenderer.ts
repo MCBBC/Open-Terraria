@@ -796,6 +796,11 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
 
 /** 镜头元素乘色缓存（lighter 叠加前先 multiply 着色——LensFlareElement.Color :422 等） */
 const flareTintCache = new Map<string, HTMLCanvasElement>();
+/** ★flare 淘汰画布池（2026-10-12 同 tintTex 池判例）：晨昏 sunDim/occlusion 漂移
+ *  → 精确色键连续 miss → createElement+bake（含 getImageData 读回=满载管线上
+ *  ms 级,120440 判例）churn——淘汰画布按尺寸回收复用,杀分配杀 churn;烘焙频率
+ *  (=miss 率)与视觉语义零改动。 */
+const flareTintFree: HTMLCanvasElement[] = [];
 function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   // ★半加载窗守卫（2026-08-24 方片竞态）：元数据已到（width>0）但主体未完时
@@ -805,8 +810,9 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   const key = `${texId(tex)}|${r},${g},${b}`;
   const hit = flareTintCache.get(key);
   if (hit) return hit;
-  const c = document.createElement('canvas');
-  c.width = tex.width; c.height = tex.height;
+  let c = flareTintFree.pop();
+  if (!c) c = document.createElement('canvas');
+  if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
   const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.imageSmoothingEnabled = true;
   cx.drawImage(tex, 0, 0);
@@ -837,7 +843,11 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   flareTintCache.set(key, c);
   if (flareTintCache.size > 24) {
     const first = flareTintCache.keys().next().value;
-    if (first !== undefined) flareTintCache.delete(first);
+    if (first !== undefined) {
+      const ev = flareTintCache.get(first);
+      flareTintCache.delete(first);
+      if (ev && ev.width > 0 && flareTintFree.length < 16) flareTintFree.push(ev);   // ★池化：淘汰入池
+    }
   }
   return c;
 }
@@ -1561,6 +1571,15 @@ export class SkyRenderer {
   horizonPhase = 0;
   /** 通用染色缓存(multiply+destination-in 三步,键=用途+纹理id+8 量化色) */
   private tintCache2 = new Map<string, HTMLCanvasElement>();
+  /** ★晨昏色扫画布池（2026-10-12 canvas哨兵实报 396/s 定谳刀）：tintCache2 淘汰
+   *  画布按尺寸键回收（同 qsWashFree 判例）。【根因】cots=Renderer 每帧从时钟重算
+   *  （colorOfTheSkies），晨昏窗内 `b.rgb×cots/255` 连续扫过 4 量化桶 → 缓存键
+   *  漂移 → 每帧每带 miss=createElement（3-4 band×120fps≈396/s，用户实报晨昏
+   *  掉帧同源=画布后备 churn）。量化粒度不能再粗（4/255 已是既定视觉阈）→
+   *  【杀分配不杀重绘】：miss 重烘照旧（≤3 op 小图，µs 级），createElement 换
+   *  池取=稳态出生率→0，哨兵静默+晨昏 churn 消失。复用安全性：淘汰=容量帽，
+   *  消费方（drawImage）同步消费早已结束，无持引用窗口。 */
+  private tintFree = new Map<string, HTMLCanvasElement[]>();
   private tintTex(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, use: string): HTMLCanvasElement | HTMLImageElement | ImageBitmap {
     // ★键 = 4 单位量化（2026-08-24 canvas 哨兵实报雪崩：晨昏时间流动使 r/g/b
     //  每 tick 微变 → 精确键永不命中 → 每帧 createElement + 64 满清 clear-all
@@ -1572,8 +1591,19 @@ export class SkyRenderer {
     // ★半加载窗守卫（2026-08-24 同洞加固）：未就绪本帧退回原贴图（调用方本就
     //  有原图快路径,一帧原色自愈），绝不把平色矩形烘进缓存
     if (!texReady(tex)) return tex;
-    c = document.createElement('canvas');
-    c.width = tex.width; c.height = tex.height;
+    // ★晨昏色扫池化（2026-10-12）：同尺寸淘汰画布优先（createElement 换池取,
+    //  稳态出生率→0）;尺寸失配才 resize(罕见——源贴图尺寸恒定)
+    {
+      const fk = `${tex.width}x${tex.height}`;
+      const fl = this.tintFree.get(fk);
+      if (fl && fl.length) {
+        c = fl.pop()!;
+        if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
+      } else {
+        c = document.createElement('canvas');
+        c.width = tex.width; c.height = tex.height;
+      }
+    }
     const tc = c.getContext('2d')!;
     tc.drawImage(tex as CanvasImageSource, 0, 0);
     tc.globalCompositeOperation = 'multiply';
@@ -1582,11 +1612,19 @@ export class SkyRenderer {
     tc.globalCompositeOperation = 'destination-in';
     tc.drawImage(tex as CanvasImageSource, 0, 0);
     if (this.tintCache2.size > 256) {
-      // 删最旧一半（Map 保插入序）——曾 clear-all 连热键一起清=晨昏期每帧重烘
+      // 删最旧一半（Map 保插入序）——曾 clear-all 连热键一起清=晨昏期每帧重烘。
+      // ★池化：淘汰画布按尺寸键入池（cap 32/尺寸）供 miss 复用
       let n = 0;
       for (const k of this.tintCache2.keys()) {
         if (n++ > 128) break;
+        const ev = this.tintCache2.get(k);
         this.tintCache2.delete(k);
+        if (ev && ev.width > 0) {
+          const ek = `${ev.width}x${ev.height}`;
+          let ef = this.tintFree.get(ek);
+          if (!ef) { ef = []; this.tintFree.set(ek, ef); }
+          if (ef.length < 32) ef.push(ev);
+        }
       }
     }
     this.tintCache2.set(key, c);
