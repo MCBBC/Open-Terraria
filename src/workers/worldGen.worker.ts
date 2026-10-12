@@ -41,8 +41,8 @@ function registerModGenPassesInWorker(src: string): void {
     // stub sw:registerGenPass 活+rollPrefixFor/log 兜底;其余 no-op
     const stubSw = new Proxy({}, {
       get: (target, prop: string) => {
-        if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void) => {
-          registerGenPass({ name, fn });
+        if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void, opts?: Record<string, unknown>) => {
+          registerGenPass({ name, fn, ...(opts ?? {}) });   // ★645:opts 透传(after/before/order/replace 锚)
         };
         if (prop === 'rollPrefixFor') return () => 0;
         if (prop === 'log') return (...args: unknown[]) => console.log('[mod:gen]', ...args);

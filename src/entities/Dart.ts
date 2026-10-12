@@ -1262,6 +1262,52 @@ export class Dart extends Entity {
       }
       return;
     }
+    // ★BJ666 普查刀②（2026-10-12）：257 冰雪射线（冰巨人 243 NPC.cs:59516-59525 →
+    //  shootDart 本载体）GetAlpha P.cs:81294-81301 `type==257 → α>200→Transparent /
+    //  else Color(255−α,255−α,255−α,0)`——A=0【纯加算白】×(255−α)/255 渐显
+    //  （α 生命周期=SetDefaults 无行≡255 起、AI :56880-56887 −10/子步 恒减至 0
+    //  = dartStep 已接,dart-proj-styles 判别站）——XNA 预乘 out=tex.rgb×(255−α)/255
+    //  全额加算,不读格光=自发光。旧通用路径双病：ga=(255−α)/255 source-over
+    //  （合成方式错）+ 实体层被 compositeLight 乘光压暗（BJ529 暗腔 k=0.325 同病）
+    //  + α>200 硬隐门未建模（出生 5.5 子步原版全隐）。承接=BJ530 Dart 44 判例同构：
+    //  capture→本体不进实体层,projFullbrightQueue 光照合成后主画布 'lighter' 复绘
+    //  （ga=max(0,(255−α)/255),α>200→0 硬档;mock 无队列回退直绘=测试链）。
+    //  姿态面零改：257 无 DART_STYLE 专档（回旋直飞），rot=方向角。表不加项
+    //  =300 census 锁不动（off 注同步更新）。
+    if (this.projId === 257) {
+      const img257 = projSprite(257);
+      if (img257 && img257.width > 0) {
+        const a257 = this.alpha;
+        const ga257 = a257 > 200 ? 0 : Math.max(0, Math.min(1, (255 - a257) / 255));
+        const rot257 = this.rot;
+        const cx257 = this.cx, cy257 = this.cy;
+        const sc257 = this.scale;
+        if (ga257 > 0) {
+          const rect257 = projFrameSrcRect(257, 0);
+          const drawInto257 = (c: CanvasRenderingContext2D) => {
+            c.save();
+            c.imageSmoothingEnabled = false;
+            c.globalCompositeOperation = 'lighter';
+            c.globalAlpha = ga257;
+            c.translate(cx257, cy257);
+            c.rotate(rot257);
+            if (rect257) {
+              c.drawImage(img257, rect257.sx, rect257.sy, rect257.sw, rect257.sh,
+                -rect257.sw * sc257 / 2, -rect257.sh * sc257 / 2,
+                rect257.sw * sc257, rect257.sh * sc257);
+            } else {
+              c.drawImage(img257, -img257.width * sc257 / 2, -img257.height * sc257 / 2,
+                img257.width * sc257, img257.height * sc257);
+            }
+            c.restore();
+          };
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.(drawInto257);
+        }
+      }
+      return;
+    }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (!st) {
       // 无表项回退:旧色块(0 = 通用 Dart,历史遗留调用)
@@ -3058,10 +3104,13 @@ interface DartStyle {
   whiteLerp?: number;
 }
 
-/** Lerp(色,White,k) 的 Canvas filter 近似——逐字照搬 Arrow.ts drawTableAlpha 内
- *  lerpFilter（:1941-1943）：k≥0.999 → brightness(2.2) saturate(0) 纯白剪影;
+/** Lerp(色,White,k) 的 Canvas filter 近似——旧逐字照搬 Arrow.ts drawTableAlpha 内
+ *  lerpFilter：k≥0.999 → brightness(2.2) saturate(0) 纯白剪影;
  *  否则 brightness 提亮（中灰 128 → 128(1−k)+255k）+ saturate 随 k 去色。
- *  独立副本原因:Arrow 侧为类私有闭包未导出,本批改动限定 Dart.ts 单文件 */
+ *  ★BJ668（2026-10-12）注:Arrow 侧 lerpFilter 已改两遍制基底 brightness(1−k)
+ *  （白抬升项 ×k 走 projFullbrightQueue 'lighter' 光照后复绘,saturate 摘除）——
+ *  本副本维持静态滤镜近似（811/814 非本表 lerp 族,白化系数动态 Remap/静态各一;
+ *  同病=抬升项被乘光,别通道登记待各自载体定谳派刀,vanillaProjAlpha 头注 BJ668 债③） */
 function lerpWhiteFilter(k: number): string {
   return k >= 0.999 ? 'brightness(2.2) saturate(0)'
     : `brightness(${(1 - k + (k * 255) / 128).toFixed(2)}) saturate(${Math.max(0, 1 - k * 0.8).toFixed(2)})`;

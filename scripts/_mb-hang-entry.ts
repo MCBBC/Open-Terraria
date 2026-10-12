@@ -68,19 +68,24 @@ import { registerGenPass } from '../src/world/gen/WorldGen';
 const noop = () => {};
 const stubSw: Record<string, unknown> = new Proxy({}, {
   get: (_t, prop: string) => {
-    if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void) => {
+    if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void, opts?: Record<string, unknown>) => {
       try {
         registerGenPass({
-          name,
+          name, ...(opts ?? {}),
           fn: (...a: unknown[]) => {
             const t0 = Date.now();
             console.log(`[repro] ▶ mod pass 开始: ${name}`);
             fn(...a);
-            console.log(`[repro] ✓ mod pass 完成: ${name} ${Date.now() - t0}ms`);
+            const vc = TILE_BY_KEY['mod_calamity_void_chest'] ?? -1;
+            const st2 = (globalThis as { __vcStore?: { type: Uint16Array } }).__vcStore;
+            let vcN = -1;
+            if (st2 && vc >= 0) { vcN = 0; for (let i = 0; i < st2.type.length; i++) if (st2.type[i] === vc) vcN++; }
+            console.log(`[repro] ✓ mod pass 完成: ${name} ${Date.now() - t0}ms void_chest=${vcN}`);; 
+            if (name === 'Abyss' && st2) { console.log(`[abyss-probe] (170,850)=${st2.type[850 * 4200 + 170]} (170,851)=${st2.type[851 * 4200 + 170]} flags=${st2.flags ? st2.flags[850 * 4200 + 170] : '?'}`); }
           },
-        });
+        } as never);
         modPasses.push({ name, fn });
-        console.log(`[repro] gen pass 注册: ${name}`);
+        console.log(`[repro] gen pass 注册: ${name}${opts ? ' ⚓' + JSON.stringify(opts) : ''}`);
       } catch (e) { console.log(`[repro] 注册失败 ${name}: ${e}`); }
     };
     if (prop === 'rollPrefixFor') return () => 0;
@@ -99,6 +104,16 @@ const modPasses: Array<{ name: string; fn: (...a: unknown[]) => void }> = [];
 let tickN = 0;
 (g as { __swSettleMark?: (s: string) => void }).__swSettleMark = (s) => {
   console.log(`[settle] 相位: ${s}`);
+};
+(g as { __swI159OT?: (x: number, y: number) => void }).__swI159OT = (x, y) => {
+  const st = g as { __otn?: number };
+  st.__otn = (st.__otn ?? 0) + 1;
+  if (st.__otn % 200 === 0) console.log(`[piles-ot] #${st.__otn} ${x},${y}`);
+};
+(g as { __swI148Att?: (x: number, y: number, bl: number, wl: number) => void }).__swI148Att = (x, y, bl, wl) => {
+  const st = g as { __attn?: number };
+  st.__attn = (st.__attn ?? 0) + 1;
+  if (st.__attn % 200 === 0) console.log(`[piles-att] #${st.__attn} ${x},${y} bl=${bl} wl=${wl}`);
 };
 (g as { __swSettleTick?: (r: number, it: number, liq: number, max: number) => void }).__swSettleTick = (r, it, liq, max) => {
   if (++tickN % 200000 === 0) console.log(`[settle] round=${r} iter=${it} liq=${liq} maxIter=${max}`);
@@ -120,7 +135,8 @@ const SEED = process.env.SW_SEED ?? '9293480';   // ★金标固定种子(与 va
 const world = await generateWorld(
   {
     width: 4200, height: 1200, seedText: SEED, name: 'mbhang', evil: 0,
-    onWorldPartial: (_w, passIndex, passName) => {
+    onWorldPartial: (w2, passIndex, passName) => {
+      (globalThis as { __vcStore?: unknown }).__vcStore = w2.store;
       console.log(`[repro] pass 完成 #${passIndex} ${passName} +${((Date.now() - t0) / 1000).toFixed(1)}s`);
     },
   },

@@ -51,8 +51,11 @@ describe('A0 GLPipeline 管线壳', () => {
     // ★ghostblur 动工（2026-10-07）：GhostBlur 帧尾 accumulation pass（?ghostblur=1
     //   缺省关）——第六消费方入白名单（fbo('ghostCur'/'ghostA'/'ghostB') 租名+
     //   program('ghostmix')+present 门面消费;GLPipeline 本体零改动）
+    // ★mod screenFx 动工（2026-10-12）：mods/hooks.ts 第七消费方——mod 全屏后处理
+    //   契约面（ModScreenFxExec 签名类型引用,纯 type import 零运行时边）;
+    //   mod 脚本经 sw.screenFx 注册,exec 由 GLScreenFilters 'ModScreenFx' 分支派发
     const root = fileURLToPath(new URL('../src', import.meta.url));
-    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts', 'GhostBlur.ts']);
+    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts', 'GhostBlur.ts', 'hooks.ts']);
     const offenders: string[] = [];
     for (const f of walkTs(root)) {
       if (f.endsWith('GLPipeline.ts')) continue;

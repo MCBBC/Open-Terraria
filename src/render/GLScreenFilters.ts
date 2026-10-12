@@ -482,7 +482,7 @@ void main() {
   gl_FragColor = vec4(mix(sc.rgb, col, uOpacity), 1.0);
 }`;
 
-const FRAGS: Record<ScreenFxPass['kind'], string> = {
+const FRAGS: Record<Exclude<ScreenFxPass['kind'], 'ModScreenFx'>, string> = {
   FilterHeatDistortion: FRAG_HEAT,
   FilterMiniTower: FRAG_MINITOWER,
   FilterTower: FRAG_TOWER,
@@ -677,7 +677,7 @@ export class GLScreenFilters {
     loadNoise();
   }
 
-  private program(kind: ScreenFxPass['kind']): { prog: WebGLProgram; uni: Record<string, WebGLUniformLocation | null> } | null {
+  private program(kind: Exclude<ScreenFxPass['kind'], 'ModScreenFx'>): { prog: WebGLProgram; uni: Record<string, WebGLUniformLocation | null> } | null {
     const gl = this.gl!;
     const hit = this.progs.get(kind);
     if (hit) return hit;
@@ -773,10 +773,14 @@ export class GLScreenFilters {
    * 逐级把前级结果作为 s0 再滤；每级乘 ColorOfTheSkies）。结果写回 this.canvas，
    * 调用方 ctx.drawImage(this.canvas, 0, 0)。
    */
-  drawChain(source: HTMLCanvasElement, passes: readonly ScreenFxPass[],
+  drawChain(source: HTMLCanvasElement, passesRaw: readonly ScreenFxPass[],
     tint: readonly [number, number, number]): boolean {
     if (!this.ensureStandalone()) return false;   // ★A1:独立上下文惰性建（首用 probe）
     const gl = this.gl!;
+    // mod 全屏后处理 pass 不入 legacy 乒乓链(独立上下文无共享管线程序/FBO 面
+    // ——mod 效果在旧链路径静默缺席,等同原版 2D 近似回退档)
+    let passes: readonly Exclude<ScreenFxPass, { kind: 'ModScreenFx' }>[] = passesRaw.filter(
+      (p): p is Exclude<ScreenFxPass, { kind: 'ModScreenFx' }> => p.kind !== 'ModScreenFx');
     if (!gl || this.diedAt || this.unavailable || passes.length === 0) return false;
     const w = source.width, h = source.height;
     if (w === 0 || h === 0) return false;
@@ -1015,7 +1019,7 @@ export class GLScreenFilters {
    *  ——与旧链编译单元逐字同源（★二版定谳:挂不同 VERT 的变体单元会在 8bit
    *  舍入边界产生 ±1 编译差,见头注①）;'sfx:flip'=非末 pass 朝向归还直通 blit。
    *  不撞 clouds/bg 层命名空间;失败 prog=null→drawChainPipe 返 false 落旧链。 */
-  private pipeProgram(pipe: GLPipeline, kind: ScreenFxPass['kind']): PipelineProgram | null {
+  private pipeProgram(pipe: GLPipeline, kind: Exclude<ScreenFxPass['kind'], 'ModScreenFx'>): PipelineProgram | null {
     const key = `F:${kind}`;
     let h = this.pipeProgHandles.get(key);
     if (h) return h;
@@ -1099,7 +1103,7 @@ export class GLScreenFilters {
     const gl = pipe.glx;
     if (!gl || pipe.unavailable) return;
     if (this.pipeGlId !== gl) { this.pipeDrop(); this.pipeGlId = gl; }
-    for (const kind of Object.keys(FRAGS) as ScreenFxPass['kind'][]) this.pipeProgram(pipe, kind);
+    for (const kind of Object.keys(FRAGS) as Exclude<ScreenFxPass['kind'], 'ModScreenFx'>[]) this.pipeProgram(pipe, kind);
     this.pipeFlipProgram(pipe);
   }
 

@@ -63,9 +63,13 @@ class BER {
 function payload(id: number, r: BER): unknown {
   switch (id) {
     case 1: return r.u8(); case 2: return r.i16(); case 3: return r.i32();
+    case 4: { let v = 0n; for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(r.b[r.off + i]); r.off += 8; return v; }
+    case 5: { const v = r.i32(); return new Float32Array(new Int32Array([v]).buffer)[0]; }
+    case 6: { let v = 0n; for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(r.b[r.off + i]); r.off += 8; return v; }
     case 7: return r.bytes(r.i32()); case 8: return r.str();
     case 9: { const e = r.u8(), n = r.i32(); const o: unknown[] = []; for (let i = 0; i < n; i++) o.push(payload(e, r)); return o; }
     case 10: { const t: Array<{ t: number; name: string; v: unknown }> = []; for (;;) { if (r.off >= r.b.length) break; const id2 = r.u8(); if (id2 === 0) break; const name = r.str(); t.push({ t: id2, name, v: payload(id2, r) }); } return t; }
+    case 11: { const n = r.i32(); const o: number[] = []; for (let i = 0; i < n; i++) o.push(r.i32()); return o; }
     default: throw new Error('pid ' + id);
   }
 }
@@ -73,6 +77,11 @@ const MOD_ID_TO_NAME = new Map<number, string>();
 {
   const twld = gz2(readFileSync(`${root}/mods/calamity/golden-oracle/golden-calamity.twld`));
   const r = new BER(twld);
+  // ★root 帧=「byte id 10 + short 名长 + 名 + payload」——直接 payload(10) 会把名长
+  //  字节当子 tag 读出空 compound
+  const rootId = r.u8();
+  const rootName = r.str();
+  void rootId; void rootName;
   const root0 = payload(10, r) as Array<{ t: number; name: string; v: unknown }>;
   const tiles = (root0.find((t) => t.name === 'tiles')?.v ?? []) as Array<{ t: number; name: string; v: unknown }>;
   const tileMap = tiles.find((t) => t.name === 'tileMap')?.v as unknown[];

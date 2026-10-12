@@ -59,12 +59,26 @@ await page.evaluate(async (id) => {
   // 打开材质包页并关闭玩家类别(绕 UI 直调,语义同 ⚙ 勾选)
   await window.__swResourcePacks.setPackCategories(id, { player: false })
 }, rowId)
-await page.goto(ORIGIN + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 90000 })
-await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 })
+// 世界2 用全新页面(同页二次导航会被 SW/音频门状态卡住,实测)
+const page2 = await browser.newPage()
+page2.on('pageerror', (e) => errs.push(String(e).slice(0, 140)))
+await page2.goto(ORIGIN + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 90000 })
+await page2.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 })
 await new Promise((r) => setTimeout(r, 2500))
-await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').includes('我已知晓')); b?.click() })
+await page2.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => (x.textContent ?? '').includes('我已知晓')); b?.click() })
 await new Promise((r) => setTimeout(r, 1200))
-const shot2 = await shotPlayer()
+const shotPlayer2 = () => page2.evaluate(() => {
+  const g = window.__swGame
+  const p = g.player
+  const [sx, sy] = g.camera.worldToScreen(p.cx, p.y + p.h)
+  const c = document.createElement('canvas'); c.width = 48; c.height = 64
+  const cx = c.getContext('2d')
+  cx.imageSmoothingEnabled = false
+  const main = document.querySelector('canvas')
+  cx.drawImage(main, Math.round(sx) - 24, Math.round(sy) - 56, 48, 64, 0, 0, 48, 64)
+  return c.toDataURL('image/png')
+})
+const shot2 = await shotPlayer2()
 fs.writeFileSync('/tmp/player-world2.png', Buffer.from(shot2.split(',')[1], 'base64'))
 // 对比两图
 const same = shot1 === shot2

@@ -160,22 +160,40 @@ export class RainbowSegment extends Entity {
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    // GetAlpha :81318-81324（1457）：`type==251 → r=g=b=255−alpha; return Color(r,g,b,0)`
+    // ——A=0【纯加算白】×(255−α)/255 渐显（XNA 预乘 out=tex.rgb×(255−α)/255 全额加算;
+    // RGB=(255−α) 常量【不读 newColor 格光】=自发光——彩虹枪暗处发光的机制面）。
+    // ★BJ667 批2 刀①（2026-10-12）：旧实现 source-over 直绘实体层 → compositeLight
+    //   全屏乘光压暗（BJ529 探针 _bj529-skull-ab 暗腔 k=0.325 同病）+合成方式错
+    //   （加算→over 双偏离）。承接=BJ666 刀① 465 判例同构：capture→本体不进实体层,
+    //   projFullbrightQueue 光照合成后主画布 'lighter' 复绘（ga=(255−α)/255 同曲线;
+    //   mock 无队列回退直绘=测试/探针链）。α 曲线零改（fixedUpdate :26758-26770
+    //   淡入 10t/全显/淡出 10t 已接）,绘制锚/rot/scale1.25 照旧（Main.cs:29886
+    //   num143=18/num144=−10）。
     const img = projSprite(251);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = Math.max(0, Math.min(1, (255 - this.alpha) / 255));   // GetAlpha 亮度=255−alpha
     if (a <= 0.01) return;
-    ctx.save();
-    ctx.globalAlpha = a;
-    // 绘制锚（Main.cs:29886 num143=18/num144=−10：贴图中心 = 盒中心 + (−10,−18)
-    // ——段贴图骑在弹道上方而非盒心，2026-08-13 复查修正）
-    ctx.translate(this.cx - 10, this.cy - 18);
-    ctx.rotate(this.rot);
-    ctx.imageSmoothingEnabled = false;
-    // scale 1.25（SetDefaults）——32×32 贴图 → 40×40
-    ctx.drawImage(img, -20, -20, 40, 40);
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    const cx251 = this.cx, cy251 = this.cy, rot251 = this.rot;
+    const drawInto = (c: CanvasRenderingContext2D) => {
+      c.save();
+      c.imageSmoothingEnabled = false;
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = a;
+      // 绘制锚（Main.cs:29886 num143=18/num144=−10：贴图中心 = 盒中心 + (−10,−18)
+      // ——段贴图骑在弹道上方而非盒心，2026-08-13 复查修正）
+      c.translate(cx251 - 10, cy251 - 18);
+      c.rotate(rot251);
+      // scale 1.25（SetDefaults）——32×32 贴图 → 40×40
+      c.drawImage(img, -20, -20, 40, 40);
+      c.restore();
+    };
+    const qFb = (r as unknown as {
+      queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+    }).queueProjFullbright;
+    if (typeof qFb === 'function') qFb.call(r, drawInto);
+    else drawInto(ctx);
   }
 }
 

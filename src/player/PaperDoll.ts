@@ -559,9 +559,9 @@ export function compositePaperDoll(
     // ★BJ665b：拆分时常规面烘除恒色腿甲（皮肤垫照画）;lunarPart='legs' 面只烘恒色腿甲
     && (lunarPartOn ? lunarLegsC != null : lunarLegsC == null)) {
     // ★C13-F2：ghostSkin → 甲下皮肤腿垫整隐（colorLegs Transparent 面,原版 :1498）
-    //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入）
-    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin && !lunarPartOn;
-    const skinLegsImg = showSkinUnderLegs ? sheetRect(a.skinVariant, 10) : null;
+    //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入,门在取图处）
+    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0) && !opts?.ghostSkin;
+    const skinLegsImg = showSkinUnderLegs && !lunarPartOn ? sheetRect(a.skinVariant, 10) : null;
     const skinLegsTinted = skinLegsImg ? tint(skinLegsImg, a.skinColor) : null;
     // ★BJ631 件1:染腿烘提出帧/切片循环（BJ625 喂值恒缺时不可达=冷码;喂值链上线后
     //  逐切片逐帧重烘=病理性,一次烘出 20 帧整表后循环直用——body 侧 dyedBodyImg 同式）
@@ -652,9 +652,9 @@ export function compositePaperDoll(
       //  镂空处露肤(女胸轮廓)=原版本相(女甲态 12px 残差实证,见 _swbj11-matrix)。
       //  hidesTopSkin={82,83,93,21,22}(21/22=狼人/人鱼全形态)不画
       //  ★C13-F2：ghostSkin → 皮肤躯干垫同整隐（colorBodySkin Transparent 面,:1494）
-      //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入）
-      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0) && !opts?.ghostSkin && !lunarPartOn) {
-        const torsoSkin = sheetRect(a.skinVariant, 3);
+      //  ★BJ665b：lunarPart 面=恒色件本体（皮肤垫不入,门在取图处）
+      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0) && !opts?.ghostSkin) {
+        const torsoSkin = !lunarPartOn ? sheetRect(a.skinVariant, 3) : null;
         if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
       }
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层

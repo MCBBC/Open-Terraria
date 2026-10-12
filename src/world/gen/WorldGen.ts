@@ -195,11 +195,52 @@ export class WorldGenAbortedError extends Error {
 
 /** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
 /** ★mod 生成 pass 通用注册面(mod 装载期注册,Beaches 后依序执行;引擎零 mod 知识) */
-export interface ModGenPass { name: string; fn: (store: unknown, rng: unknown, gs: unknown) => void; }
+export interface ModGenPass {
+  name: string;
+  fn: (store: unknown, rng: unknown, gs: unknown) => void;
+  /** ★642:C# vanilla pass 名锚——本 pass 在该 vanilla pass 完成后执行
+   *  (WorldgenManagementSystem.cs 的 tasks.FindIndex+Insert 1:1 语义);
+   *  缺省=Beaches 后(旧行为)。同锚多 pass 按注册序。 */
+  after?: string;
+  /** 同锚分序(终清理区段链:Gem=1/Forsaken=2/Crag=3/Shrines=4/Aerialite=5/
+   *  Labs=6/Abyss=7/AbyssDecor=8/SulphurSea2=9/Planetoids=10,真链 probe 定谳) */
+  order?: number;
+  /** 替换语义(C# tasks[i]=new PassLegacy 同名替换):引擎跳过本 vanilla 槽改跑本 fn */
+  replace?: string;
+  /** ★终清理区段族用:C# Insert(finalIndex-1)=Final Cleanup【前】——本仓锚消费在
+   *  槽前执行。与 after 互斥使用。 */
+  before?: string;
+}
 const genPasses: ModGenPass[] = [];
-export function registerGenPass(p: ModGenPass): void {
-  if (genPasses.some((x) => x.name === p.name)) throw new Error(`[gen] genPass 重复注册: ${p.name}`);
-  genPasses.push(p);
+let _regSeq = 0;
+/** ★642:C# vanilla pass 名→本仓槽名(SLOT_VANILLA_PASSES 定谳) */
+const C_ANCHOR_SLOT: Readonly<Record<string, string>> = {
+  'Smooth World': '半砖平滑',
+  'Floating Island Houses': '浮空岛屋',
+  'Dungeon': '生物群系',
+  'Living Trees': '结构',
+  'Hives': '生物群系',
+  'Sunflowers': '向日葵',
+  'Muds Walls In Jungle': '丛林墙',
+  'Settle Liquids Again': '二次沉降',
+  'Micro Biomes': '微群系',
+  'Final Cleanup': '终清理',
+  'Lihzahrd Altars': '蜥蜴祭坛',
+  'Temple': '神庙陈设',
+  'Jungle Temple': '生物群系',
+};
+
+export function registerGenPass(p: ModGenPass | string, fn?: ModGenPass['fn'], opts?: Omit<ModGenPass, 'name' | 'fn'>): void {
+  const pass: ModGenPass = typeof p === 'string' ? { name: p, fn: fn!, ...opts } : p;
+  if (genPasses.some((x) => x.name === pass.name)) throw new Error(`[gen] genPass 重复注册: ${pass.name}`);
+  (pass as ModGenPass & { _reg?: number })._reg = _regSeq++;
+  genPasses.push(pass);
+}
+
+/** ★642:锚解析——after/before 的 C# pass 名→本仓槽名;缺省=Beaches 后(旧行为) */
+function modAnchorSlot(p: ModGenPass): { slot: string; phase: 'after' | 'before' } {
+  if (p.before) return { slot: C_ANCHOR_SLOT[p.before] ?? '终清理', phase: 'before' };
+  return { slot: p.after ? (C_ANCHOR_SLOT[p.after] ?? '生物群系') : '生物群系', phase: 'after' };
 }
 
 /** ★622:mod genPasses 快照+独立执行面(worker 路径补跑——Worker 模块实例独立=
@@ -590,6 +631,37 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
     //   至少以新流开始"；槽内含多个原版 pass 的包装（vanillaCaves/vanillaBiomes/
     //   vanillaStructures/statuesChestsPass 等）另有内部各 pass 边界的 rng.reseed。
     ctx.rng.reseed(world.seed);
+    // ★642:before-锚消费(终清理区段族:C# Insert(finalIndex-1)=Final Cleanup 前)
+    {
+      const grp = genPasses
+        .filter((mp) => modAnchorSlot(mp).phase === 'before' && modAnchorSlot(mp).slot === passes[i].name)
+        .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || ((a as ModGenPass & { _reg?: number })._reg ?? 0) - ((b as ModGenPass & { _reg?: number })._reg ?? 0));
+      for (const mp of grp) {
+        ctx.rng.reseed(world.seed);
+        prog?.beginVan(mp.name);
+        try {
+          (mp.fn as (st: unknown, r: unknown, g: unknown) => void)(ctx.store, ctx.rng, ctxGs[0]);
+        } catch (err) {
+          if (err instanceof RangeError) console.error(`[worldgen] mod pass ${mp.name} 栈溢出——跳过(优雅降级)`);
+          else throw err;
+        }
+        if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, mp.name);
+      }
+    }
+    // ★642:替换语义——mod pass 声明 replace=本槽名 → 跳过 vanilla run 改跑 mod fn
+    const replacePass = genPasses.find((mp) => mp.replace === passes[i].name);
+    if (replacePass) {
+      prog?.beginVan(replacePass.name);
+      try {
+        (replacePass.fn as (st: unknown, r: unknown, g: unknown) => void)(ctx.store, ctx.rng, ctxGs[0]);
+      } catch (err) {
+        if (err instanceof RangeError) console.error(`[worldgen] mod pass ${replacePass.name} 栈溢出——跳过(优雅降级)`);
+        else throw err;
+      }
+      prog?.leaveSlot();
+      if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, replacePass.name);
+      continue;
+    }
     try {
       await passes[i].run(ctx, () => {});
     } catch (err) {
@@ -611,6 +683,24 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
     }
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
+    // ★642:after-锚消费(本槽完成后跑锚定 mod pass;同锚按 order→注册序)
+    {
+      const grp = genPasses
+        .filter((mp) => modAnchorSlot(mp).phase === 'after' && modAnchorSlot(mp).slot === passes[i].name)
+        .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || ((a as ModGenPass & { _reg?: number })._reg ?? 0) - ((b as ModGenPass & { _reg?: number })._reg ?? 0));
+      for (const mp of grp) {
+        ctx.rng.reseed(world.seed);
+        prog?.beginVan(mp.name);
+        try {
+          (mp.fn as (st: unknown, r: unknown, g: unknown) => void)(ctx.store, ctx.rng, ctxGs[0]);
+        } catch (err) {
+          if (err instanceof RangeError) console.error(`[worldgen] mod pass ${mp.name} 栈溢出——跳过(优雅降级)`);
+          else throw err;
+        }
+        prog?.leaveSlot();
+        if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, mp.name);
+      }
+    }
   }
 
   ctx.prog?.beginTail();     // 附尾窗：finalize 帧净化/幻影活性清扫 + 墓园时钟 + 秘种子终段 + 残片兜底
@@ -1515,10 +1605,15 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
   };
   (gs as { mods?: typeof gsMods }).mods = gsMods;   // ★二百七十八刀:挂回 gs(mod pass 读取面不变;原 cast 表达式赋值改显式两步修 never[] 推断)
   resetKillTileGuard();   // ★三百十六:级联护栏本局复位
+  // ★642 勘误:旧「Beaches 后无条件全跑」环已废——mod pass 改由主循环锚消费
+  // (after/before/replace;缺省锚=生物群系槽后=旧行为等价)。无锚声明的旧面
+  // (探针/金标 rig 直调 fn)不受影响。
   for (const pass of genPasses) {
-    rng.reseed(gs.seed);
-    prog?.beginVan(pass.name);
-    pass.fn(store, rng, gs);
+    if (modAnchorSlot(pass).slot === '生物群系' && modAnchorSlot(pass).phase === 'after') {
+      rng.reseed(gs.seed);
+      prog?.beginVan(pass.name);
+      pass.fn(store, rng, gs);
+    }
   }
   // ★一百一十三刀:mod 生成箱转正(ChestData 40 槽;loot 依序落;locked 透传)
   {

@@ -30,7 +30,8 @@ import {
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
-  type ModSystemHooks, type ModUseCtx,
+  registerModScreenFx,
+  type ModScreenFxPass, type ModSystemHooks, type ModUseCtx,
 } from './hooks';
 import { applyBuffTicks } from '../entities/projStatus';   // ★四百九十刀:敌侧原版 debuff
 import { projClassOfProjId } from '../entities/projTargets';   // ★四百九十一刀:系别探针
@@ -99,6 +100,9 @@ export interface ModContext {
   buff(key: string, spec: ModBuffSpec): void;
   /** 系统/世界生命周期钩子(全可选) */
   system(hooks: ModSystemHooks): void;
+  /** mod 全屏后处理 pass(Renderer 7d 滤镜链最前执行;tML FilterManager.
+   *  EndCapture MonoMod 前缀同位——lights-and-shadows 首消费方) */
+  screenFx(pass: ModScreenFxPass): void;
   /** 声明式配置读写(mod.json config 表声明的键;set 即持久化) */
   config: {
     get(key: string): boolean | number | string;
@@ -303,6 +307,7 @@ export function createModContext(
     },
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },
+    screenFx(pass) { registerModScreenFx(pass); },
     projIdOf(key) { return idOf('projs' as 'items', key); },
     canUse(key, fn) {
       registerModCanUse(idOf('items', key), fn as Parameters<typeof registerModCanUse>[1]);

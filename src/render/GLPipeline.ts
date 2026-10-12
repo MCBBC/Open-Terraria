@@ -227,6 +227,12 @@ export class GLPipeline {
     const fb = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    // ★2026-10-13 清零收口:texImage2D(null)=内容未定义(spec)——任何"分配后未写
+    //  全即读/present"路径(消费方半写/异常退化/revive 窗)会把驱动残留内存上屏
+    //  (lights-and-shadows 用户实报:干净 180° 翻转帧=释放的 G 朝向中间帧内存被
+    //  复用)。分配即清透明,一次性成本零稳态开销。
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     f.tex = tex; f.fbo = fb; f.w = w; f.h = h;
     glStatTexCreate(this.statName, texBytes('RGBA8', w, h));

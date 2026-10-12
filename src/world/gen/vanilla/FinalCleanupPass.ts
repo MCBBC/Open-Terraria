@@ -3451,15 +3451,53 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       _g(`KILLGRID ${x},${y} sh=${sheet} grp=[${x0},${y0}] ${acc}`);
     }
   }
+  // ★640:败支零命中闸(★三百二十刀 2x2 同族复刀——check3x2Sweep 败支对【全死组】
+  //  killTile 循环零效,而尾扫 5×5 重派发死邻=check3x2↔tileFrameGen 互递归自环
+  //  (CDP 暂停抓栈实证:tileFrameGen→check3x2Sweep→dispatch→inner→tileFrameGen
+  //  ×∞,mod 地形 Piles pass 触发);零命中=无事可杀+尾扫只喂循环,早退。
+  //  本体金标种子零触发面待复验(同 2x2 判例流程);__sw3x2FailN 观测面保留)
+  {
+    let hits3x2 = 0;
+    for (let k = x0; k < x0 + 3; k++) {
+      for (let l = y0; l < yEnd; l++) {
+        if (st.inBounds(k, l) && st.flags[st.idx(k, l)] && SWEEP_SHEET[st.type[st.idx(k, l)]] === sheet) hits3x2++;
+      }
+    }
+    if (hits3x2 === 0) {
+      const gg = globalThis as unknown as { __sw3x2FailN?: number };
+      gg.__sw3x2FailN = (gg.__sw3x2FailN ?? 0) + 1;
+      return;
+    }
+  }
   // cs:49420：击杀前捕获锚格 frameX（KillTile 会写 -1；186 金币堆掉落掷的门）
   const fxChk = st.frameX[i]!;
   ctx.destroyObject = true;
+  // ★640:杀前快照活性数(级联闸禁杀时 killTileGen=无操作——循环杀不净→尾扫重派发
+  //  =check3x2↔tileFrameGen 永动;杀后活性数不变=无事发生,跳过尾扫)
+  let aliveBefore = 0;
+  for (let k = x0; k < x0 + 3; k++) {
+    for (let l = y0; l < yEnd; l++) {
+      if (st.inBounds(k, l) && st.flags[st.idx(k, l)]) aliveBefore++;
+    }
+  }
   for (let k = x0; k < x0 + 3; k++) {
     for (let l = y0; l < yEnd; l++) {
       if (st.inBounds(k, l) && sheetAt2(st, k, l) === sheet && activeAt2(st, k, l)) {
         killTileGen(st, ctx, k, l);
       }
     }
+  }
+  let aliveAfter = 0;
+  for (let k = x0; k < x0 + 3; k++) {
+    for (let l = y0; l < yEnd; l++) {
+      if (st.inBounds(k, l) && st.flags[st.idx(k, l)]) aliveAfter++;
+    }
+  }
+  if (aliveAfter === aliveBefore) {
+    ctx.destroyObject = false;
+    (globalThis as unknown as { __sw3x2NoKillN?: number }).__sw3x2NoKillN =
+      ((globalThis as unknown as { __sw3x2NoKillN?: number }).__sw3x2NoKillN ?? 0) + 1;
+    return;   // 禁杀态:组未变,尾扫只会喂自环
   }
   // 掉落掷（cs:49436-49855 掉落 switch 的 genRand 实参——生成期 Item.NewItem 仍
   // 急切求值掷；187→Main.rand 不耗 genRand；488 生成期再生短路不到此；其余族零掷）

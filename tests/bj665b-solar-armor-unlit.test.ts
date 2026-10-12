@@ -156,8 +156,10 @@ describe('BJ665b ②③：甲件重绘免光照（lightAt=[0,0,0] 下甲件仍=t
     expect(PD).toContain("lunarPartOn ? lunarLegsC != null : lunarLegsC == null");
     expect(PD).toContain('const bodyCellsOn = lunarPartOn ? lunarBodyC != null : lunarBodyC == null;');
     expect(PD).toContain("lunarPartOn ? lunarHeadC != null : lunarHeadC == null");
-    // 皮肤垫照画（原版 12_Skin 语义:甲下皮肤先画,lit 窗被恒色件整盖）
-    expect(PD).toContain('!opts?.ghostSkin && !lunarPartOn');
+    // 皮肤垫照画（原版 12_Skin 语义:甲下皮肤先画,lit 窗被恒色件整盖）——
+    // 门在取图处（C13-F2/SW-BJ11 源文锁行字节不动）
+    expect(PD).toContain('const skinLegsImg = showSkinUnderLegs && !lunarPartOn');
+    expect(PD).toContain('const torsoSkin = !lunarPartOn ? sheetRect(a.skinVariant, 3) : null;');
   });
 
   it('非月辉玩家零进入（lunarOpt 空 = 烘焙键/路径逐位同旧）', () => {
@@ -227,7 +229,7 @@ describe('BJ665b ④：层序锁（候选 B=甲件+被盖层随迁,禁 C 裸重�
 
   it('恒色甲件队列位次=甲位 glow 前（星尘 GlowMask 叠层在甲件之上=原版逐件后随叠画序）', () => {
     const iAg = RDR.indexOf("this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps })");
-    const iLunar = RDR.indexOf('this.lunarArmorQueue.push({');
+    const iLunar = RDR.indexOf('this.lunarArmorQueue.push({', iAg);
     expect(iAg).toBeGreaterThan(0);
     expect(iLunar).toBeGreaterThan(iAg);   // 同收集块内,agOps 先入（glow 叠层重放序在甲件后）
     expect(RDR).toContain('armorGlowCollected.add(p)');
@@ -271,8 +273,8 @@ describe('BJ665b ⑤：回归面（BJ401/599/604/594/631 + 四月套其余两族
     const headBlock = PD.slice(PD.indexOf('const headArmor = UITextures.get(`Armor_Head_'));
     expect(headBlock).toContain('dyeBakeArmorSprite(headArmor.img, equip.dyeHead)');
     // 缓存键含染料+拆分旗（恒色件面与常规面不同键,不串缓存）
-    expect(PD).toContain("'|ls'");
-    expect(PD).toContain("'|lp'");
+    expect(PD).toContain('|ls');
+    expect(PD).toContain('|lp');
     expect(PD).toContain('|dh');
   });
 
@@ -288,9 +290,12 @@ describe('BJ665b ⑤：回归面（BJ401/599/604/594/631 + 四月套其余两族
     const velo = RDR.slice(RDR.indexOf('const vl = lunarConstPieces'), RDR.indexOf('this.drawEyelid(ctx, p, vr.body, 4'));
     expect(velo).toContain("lunarPart: 'upper'");
     expect(velo).toContain('this.armorGlowCollected.add(p)');
-    // 主支 armor 入队走 armorGlowCollected 块（双绘去重免费）
-    const push = RDR.slice(RDR.indexOf('★BJ665b 恒色甲件入队'), RDR.indexOf('★BJ665b 恒色甲件入队') + 700);
-    expect(push).toContain('this.armorGlowCollected.has(p)');
+    // 主支 armor 入队在 glow 收集块内（armorGlowCollected.has 门=双绘去重免费）
+    const iCollect = RDR.indexOf('if (!this.armorGlowCollected.has(p)) {');
+    expect(iCollect).toBeGreaterThan(0);
+    const blk = RDR.slice(iCollect, iCollect + 1800);
+    expect(blk).toContain('armorGlowCollected.add(p)');
+    expect(blk).toContain('this.lunarArmorQueue.push({');
   });
 
   it('被盖层窗与坐椅 restore 边界（窗在坐椅收口前闭合——restore 作用于主 ctx 栈）', () => {
@@ -300,11 +305,12 @@ describe('BJ665b ⑤：回归面（BJ401/599/604/594/631 + 四月套其余两族
     expect(iSit).toBeGreaterThan(iEnd);
   });
 
-  it(' SCRATCH/池生命周期：只扩不缩+上限 1024+池回收（BJ311 内存判例域）', () => {
+  it('SCRATCH/池生命周期：只扩不缩+上限 1024+池回收（BJ311 内存判例域）', () => {
+    const box = RDR.slice(RDR.indexOf('private lunarCoverBox'), RDR.indexOf('private lunarCoverBegin'));
+    expect(box).toContain('Math.min(1024');
     const begin = RDR.slice(RDR.indexOf('private lunarCoverBegin'), RDR.indexOf('private lunarCoverEnd'));
     expect(begin).toContain('this.lunarCovPool.pop()');
     expect(begin).toContain('cv.width < w || cv.height < h');
-    expect(begin).toContain('Math.min(1024') || expect(begin).toContain('1024');
     const flush = RDR.slice(RDR.indexOf('private flushLunarCovered'), RDR.indexOf('★BJ597 甲位 GlowMask 冲刷'));
     expect(flush).toContain('this.lunarCovPool.push(e.cv)');
     expect(flush).toContain('this.lunarCovPool.length < 8');

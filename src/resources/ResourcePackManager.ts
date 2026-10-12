@@ -23,6 +23,7 @@ import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, 
 import { TOWN_NPC_PROFILE } from '../data/townNpcProfiles';
 import { packKeyCategory, setTownProfileIds, PACK_CATEGORIES, type PackCategoryId } from './packPaths';
 import { registerPackPortraitUrl, clearPackPortraitUrls } from '../data/npcPortraits';
+import { clearPaperDollCache } from '../player/PaperDoll';
 import {
   readResourcePack, normalizePackFilePaths, parseFromEntries, ResourcePackError, formatPackVersion,
   type ParsedResourcePack,
@@ -268,6 +269,9 @@ export class ResourcePackManager {
     //   (重放只加不减的旧病=关类别后 waifu 位图仍驻 vimages,用户视角"关了没反应")
     const removed = [...this.appliedImageKeys].filter((k) => !merged.has(k));
     if (removed.length) await this.restoreFiles(removed);
+    // ★纸娃娃合成缓存失效(vui 部件变了):缓存键不含贴图身份,不清=旧烘焙驻留
+    //  (玩家类别开关后进世界仍旧皮的最后一环;destroy 路径已清,此处补重放路径)
+    if (removed.length) clearPaperDollCache();
     if (merged.size) await this.applyImagesMap(merged);
     else clearPackPortraitUrls();   // 零包=清包头像(回原版)
     for (const [fam, bytes] of fonts) void registerPackFont(fam, bytes);

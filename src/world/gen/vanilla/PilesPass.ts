@@ -481,7 +481,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   /** 原版空 for 下落：到 (x,y+1) 变 active 为止（上界 h-5） */
   const dropTo = (x: number, y: number): number => {
     let j = y;
-    while (!st.flags[st.idx(x, j + 1)] && j < h - 5) j++;
+    let __n = 0;
+    while (!st.flags[st.idx(x, j + 1)] && j < h - 5) { j++; if (++__n % 300 === 0) console.log(`[dropTo] x=${x} j=${j} n=${__n}`); }
     return j;
   };
   /** 小堆 scatter（cs:18996-19010 同型四处）：Next(1,5)×Next(-10,11)×Next(5)×Next(12,36) */
@@ -499,6 +500,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const pick = (type: number): number => (type === 186 ? PILE186 : PILE187);
 
   // ===== ① 洞穴堆（cs:18924-19044）：w*0.06 =====
+  console.log('[piles] seg1 begin');
   {
     const total = w * 0.06;
     for (let i = 0; i < total; i++) {
@@ -559,6 +561,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ② 深层堆（cs:19049-19116）：w*0.01，y∈[h-300,h-10) =====
+  console.log('[piles] seg2 begin');
   {
     const total = w * 0.01;
     for (let i = 0; i < total; i++) {
@@ -590,6 +593,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ③ 地表堆（cs:19118-19182）：w*0.03 =====
+  console.log('[piles] seg3 begin');
   {
     const total = w * 0.03;
     for (let i = 0; i < total; i++) {
@@ -624,6 +628,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ④ 地表带墙堆（cs:19184-19259）：w*0.0035，起始格须有墙 =====
+  console.log('[piles] seg4 begin');
   {
     const total = w * 0.0035;
     for (let i = 0; i < total; i++) {
@@ -657,6 +662,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ⑤ 全洞穴 185 小堆（cs:19261-19409）：w*0.6 =====
+  console.log('[piles] seg5 begin');
   {
     // ★SSSS 仲裁终案（2026-08-19）：⑤ 段迭代数 = **2520**。织入 GPA 头计数实测
     // Piles 全程 3669 次 = 252(×0.06f)+42(×0.01f)+126(×0.03f)+15(×0.0035f)+
@@ -737,6 +743,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ⑥ 地表 185 小堆（cs:19411-19470）：w*0.02 =====
+  console.log('[piles] seg6 begin');
   {
     const total = w * 0.02;
     for (let i = 0; i < total; i++) {
@@ -781,6 +788,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 
   // ===== ⑦ 地表墙 2/40 小堆（cs:19472-19566）：w*0.15 =====
+  console.log('[piles] seg7 begin');
   {
     // ★YYYYY：同 ⑤ 的 float32 语义（fround(6400×0.15f)=960.0000610 → 961 迭代）
     const total = Math.ceil(Math.fround(w * Math.fround(0.15)));

@@ -26,7 +26,7 @@ import { LCG32 } from '../fx/LightningGenerator';
 import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { PROJ_ALPHA_MOD, projConstFullbright, projConstTint, type ProjAlphaMod } from '../data/vanillaProjAlpha';
+import { PROJ_ALPHA_MOD, projConstFullbright, projConstTint, projLerpLiftK, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 import { tintedTex } from '../render/StringLine';   // ★BJ-C9 F4：tint 档 add 面烘焙（flatten=true）
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
@@ -999,6 +999,43 @@ export function replayTintedFullbright(
   };
   replayPass('erase');
   replayPass('add');
+}
+
+/** ★BJ668（2026-10-12）Lerp 族光感算子 lift 面重放（recording-ctx 消费侧;
+ *  export=测试面直调体裁,生产消费=draw finally 段闭包）：
+ *  代数恒等式白抬升半边——base（实体层,流内 filter=brightness(1−k),被 compositeLight
+ *  乘光）+ lift（本函数,flushTrailShade 7f 光照合成后主画布重放）:
+ *    base·light + lift = tex·tex.a·ga·[(1−k)·light + k] ≡ vanilla tex×ga×Lerp(light,White,k)。
+ *  变换规则（replayTintedFullbright 同契）：
+ *   · set:filter 流内剔除 + 强制 'none'（基底 brightness(1−k) 不得压 lift 面——
+ *     lift 权重全在 globalAlpha ×k 里）;
+ *   · set:globalCompositeOperation 流内剔除 + 强制 'lighter'（整个 lift 面预乘加算,
+ *     XNA One/One——dst 因子缺失恒等:vanilla C 项像素贡献=tex·ga·k 纯加法;
+ *     流内 lighter↔source-over 舞蹈（xeno 叠画族）逐笔归一加算=权重面同构）;
+ *   · set:globalAlpha 逐值 ×k（体贡献 tex·tex.a·ga·k 精确;写面在流内交错——
+ *     xeno baseGa 读回-覆写-恢复链同倍缩放,权重比例零漂）;
+ *   · 其余状态/几何（save/translate/rotate/scale/平滑）逐位重放=专支/帧选/镜像
+ *     单源零复制（createRecBodyCtx 同契）。 */
+export function replayLerpLift(
+  rec: RecOp[], c: CanvasRenderingContext2D, k: number,
+): void {
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  c.filter = 'none';
+  for (const r0 of rec) {
+    if (r0.op === 'set:globalCompositeOperation' || r0.op === 'set:filter') continue;
+    if (r0.op === 'set:globalAlpha') {
+      const g = (r0.args[0] as number) * k;
+      c.globalAlpha = Math.max(0, Math.min(1, g));
+      continue;
+    }
+    if (r0.op.startsWith('set:')) {
+      (c as unknown as Record<string, unknown>)[r0.op.slice(4)] = r0.args[0];
+    } else {
+      (c as unknown as Record<string, (...a: unknown[]) => void>)[r0.op]?.(...(r0.args ?? []));
+    }
+  }
+  c.restore();
 }
 
 /** ★V3 溅花段共享体（Projectile.cs:16935-17102 producer 站=湿缓存刷新位,2026-09-03；
@@ -3308,11 +3345,14 @@ export class Arrow extends Entity {
       if (r === g && g === b) return `brightness(${(r / 255).toFixed(3)})`;
       return `brightness(${(((r + g + b) / 3) / 255).toFixed(3)})`;
     };
-    // Lerp(newColor,White,k) 白化近似：brightness 使中灰 128 → 128(1−k)+255k，
-    // saturate 随 k 去色（k=1 全白剪影；drawXenoFilter 440/449/606 档已摘=T3 死存储）
-    const lerpFilter = (k: number): string =>
-      k >= 0.999 ? 'brightness(2.2) saturate(0)'
-        : `brightness(${(1 - k + (k * 255) / 128).toFixed(2)}) saturate(${Math.max(0, 1 - k * 0.8).toFixed(2)})`;
+    // ★BJ668（2026-10-12）Lerp(light,White,k) 两遍制基底滤镜：brightness(1−k)=W3C
+    //  纯线性乘（逐通道精确,旧「中灰 128 归一 + saturate」近似退役——旧式抬升项被
+    //  compositeLight 乘光=暗场抬升归零 BJ529 病根 + 亮场中灰归一过亮 f=1+0.992k
+    //  双偏离）。白抬升项 ×k 不乘光 → 由 lerpLiftGate capture + replayLerpLift
+    //  （projFullbrightQueue 'lighter' 光照后复绘）承接:base×light + lift ≡
+    //  tex×ga×[(1−k)light+k] 恒等（vanillaProjAlpha.ts 头注 BJ668 块）。
+    //  drawXenoFilter 440/449/606 档已摘=T3 死存储（与本滤镜无关）。
+    const lerpFilter = (k: number): string => `brightness(${Math.max(0, 1 - k).toFixed(3)})`;
     switch (m.kind) {
       case 'invisible': return { ga: 0, filter: null };
       case 'fade':
@@ -3329,8 +3369,19 @@ export class Arrow extends Entity {
         if (m.inv) ga *= fade;                       // rgb 侧 (255−α) 衰减折进 ga
         return { ga, filter: rgbFilter(m.rgba) };
       }
-      case 'lerp': return { ga: fade * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
-      case 'lerpkeep': return { ga: m.mul ?? 1, filter: lerpFilter(m.k ?? 1) };
+      // ★BJ668 charm 分流（:80605-80611 先于全 lerp 支截走,aiStyle1∧charm 态）:
+      //  White×Opacity = RGB 恒等×Opacity（无 k 语义无 mul——A=255×Opacity 非 25/200
+      //  折面）→ plain fade 无滤镜（白帧路径 whiteSpriteOf 已在 draw 本体段承接）。
+      //  非 charm 态:ga=A 侧（fade/mul 折面,与 1457 各支 A 语义逐值同构）,
+      //  filter=两遍制基底 brightness(1−k),抬升面 ×k 走 lerpLiftGate 通道。
+      case 'lerp':
+        return this.phoenixQuivered || this.seraphNecklaced
+          ? { ga: fade, filter: null }
+          : { ga: fade * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
+      case 'lerpkeep':
+        return this.phoenixQuivered || this.seraphNecklaced
+          ? { ga: fade, filter: null }
+          : { ga: m.mul ?? 1, filter: lerpFilter(m.k ?? 1) };
       case 'lerpblack': return { ga: 1, filter: `brightness(${1 - (m.k ?? 0.25)})` };
       case 'lerpcolor':
         // Lerp(newColor,(255,200,60),0.5) 橙化：亮度近似（色相偏移未建模）
@@ -3338,7 +3389,12 @@ export class Arrow extends Entity {
           ga: fade,
           filter: `brightness(${((((m.rgba?.[0] ?? 255) + (m.rgba?.[1] ?? 200) + (m.rgba?.[2] ?? 60)) / 3 / 128) * 0.5 + 0.5).toFixed(2)}) saturate(1.2)`,
         };
-      case 'lerpalphain': return { ga: (a / 255) * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
+      case 'lerpalphain':
+        // 352（:81126-81131）：A=lerp(light.A,255,k)×(α/255)=α/255（α 越大越显,
+        // 与 lerp 的 fade 反相——alpha 面差异定谳;两遍制分解对 A 侧无感,只切 RGB 侧）
+        return this.phoenixQuivered || this.seraphNecklaced
+          ? { ga: fade, filter: null }
+          : { ga: (a / 255) * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
       case 'alpha0': return { ga: a === 0 ? (m.rgba?.[3] ?? 200) / 255 : 0, filter: null };
       case 'alpha0additive':
         // 265/355（GetAlpha :81286-81293）：α>0→Transparent 全隐（fade 期可见面=AI
@@ -3377,6 +3433,19 @@ export class Arrow extends Entity {
     if (ADDITIVE_GLOW_PROJS.has(this.projId)) return false;
     if (this.drawGlobalAlpha() !== null) return false;
     return projConstFullbright(this.projId);
+  }
+
+  /** ★BJ668（2026-10-12）Lerp 族光感算子门（表驱动 kind 面,零 id 专支——活跃 11 站
+   *  与休眠 21 站同走本门,vanillaProjAlpha 头注 BJ668 普查块）：kind∈lerp/lerpkeep/
+   *  lerpalphain ∧ 非 off ∧ k>0（projLerpLiftK 单源）∧ GA 未截走（732 类:GA 档优先
+   *  于表,双消费禁止）∧ 非 charm 分流（:80605 White×Opacity 先于全 lerp 支截走,
+   *  无 k 语义）。返回 k=白抬升权重（replayLerpLift lift 面）;null=不进通道。
+   *  与 constFullbrightGate/projConstTint 互斥（kind 集不相交:lerp 族不进常量色族,
+   *  draw 捕获段仍显式守卫防漂移）。 */
+  private lerpLiftGate(): number | null {
+    if (this.phoenixQuivered || this.seraphNecklaced) return null;
+    if (this.drawGlobalAlpha() !== null) return null;
+    return projLerpLiftK(this.projId);
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -3961,11 +4030,26 @@ export class Arrow extends Entity {
       ? (PROJ_ALPHA_MOD[this.projId]?.kind === 'fixedfade'
         ? Math.max(0, 1 - this.alpha / 255) : 1)
       : 1;
+    // ★BJ668（2026-10-12）Lerp 族光感算子通道（与常量色族两门互斥显式守卫——kind 集
+    //  不相交,防谓词漂移双入队）：capture 本体段（逐位执行只换落笔目标,BJ-C1 F3 同契）,
+    //  finally 段【基底立即重放】回实体 ctx（流内含 tableFilter=brightness(1−k) 与
+    //  ga——与直绘逐位等值,z-order 同拍保持）+【lift 闭包】入 projFullbrightQueue
+    //  （replayLerpLift:光照后 'lighter' ×k 复绘）→ base×light + lift ≡ 原版
+    //  Lerp(light,White,k)（vanillaProjAlpha 头注 BJ668 恒等块;活跃 11 站=342/435/
+    //  595/664/666/668/712/735/920/921/926,休眠站同门待出生面点亮）。
+    let liftRec: RecOp[] | null = null;
+    let liftCommit: ((c: CanvasRenderingContext2D) => void) | null = null;
+    const liftK = (gateFullbright || tintRgba) ? null : this.lerpLiftGate();
     if (gateFullbright || tintRgba) {
       fbRec = [];
       const rc = createRecBodyCtx(fbRec);
       fbCommit = rc.commit;
       ctx = rc.proxy;
+    } else if (liftK !== null) {
+      liftRec = [];
+      const rcL = createRecBodyCtx(liftRec);
+      liftCommit = rcL.commit;
+      ctx = rcL.proxy;
     }
     try {
     ctx.save();
@@ -4201,6 +4285,21 @@ export class Arrow extends Entity {
         }).queueProjFullbright?.((c) => {
           if (tint) replayTintedFullbright(fbRec!, c, tint, addGa);
           else commit(c);
+        });
+      } else if (liftCommit && liftRec && liftRec.length && liftK !== null) {
+        // ★BJ668 两遍制：基底立即重放回实体 ctx（流内 filter=brightness(1−k)+ga
+        //  与直绘逐位等值——本体重进乘光实体层,×(1−k) 项被 compositeLight 乘光同相）;
+        //  lift 闭包=光照后 'lighter' ×k 复绘（白抬升项不乘光）。基底先于入队=实体层
+        //  z-order 与直绘同拍保持;无队列回退（mock/探针）=基底直绘+lift 缺席=旧暗场
+        //  失真上界,与 251/465 判例同守卫域（登记）。
+        const baseCommit = liftCommit;
+        const recL = liftRec;
+        const kL = liftK;
+        baseCommit(r.ctx!);
+        (r as unknown as {
+          queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+        }).queueProjFullbright?.((c) => {
+          replayLerpLift(recL!, c, kL);
         });
       }
     }

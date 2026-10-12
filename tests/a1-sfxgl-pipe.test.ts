@@ -76,7 +76,10 @@ describe('A1 管线链结构（GLScreenFilters）', () => {
   it('独立上下文惰性建（构造不 init;drawChain 首用 ensureStandalone——管线模式 IOSurface 净−1）', () => {
     expect(SFX).toMatch(/constructor\(\) \{[^]*?★A1:独立上下文惰性建[^]*?\}/);
     expect(SFX).toContain('ensureStandalone(): boolean {');
-    expect(SFX).toMatch(/drawChain\(source: HTMLCanvasElement, passes: readonly ScreenFxPass\[\],\s*\n\s*tint: readonly \[number, number, number\]\): boolean \{\s*\n\s*if \(!this\.ensureStandalone\(\)\) return false;/);
+    // ★mod screenFx（2026-10-12）:drawChain 头部加 mod pass 剥除(入参改名 passesRaw
+    //   +窄化过滤——legacy 链无共享管线程序面,mod 效果缺席=回退档既有语义)
+    expect(SFX).toMatch(/drawChain\(source: HTMLCanvasElement, passesRaw: readonly ScreenFxPass\[\],\s*\n\s*tint: readonly \[number, number, number\]\): boolean \{\s*\n\s*if \(!this\.ensureStandalone\(\)\) return false;/);
+    expect(SFX).toMatch(/let passes: readonly Exclude<ScreenFxPass, \{ kind: 'ModScreenFx' \}>\[\] = passesRaw\.filter\(\s*\n\s*\(p\): p is Exclude<ScreenFxPass, \{ kind: 'ModScreenFx' \}> => p\.kind !== 'ModScreenFx'\);/);
   });
 
   it('噪声依赖过滤逐式转录（Noir/Sepia 未就绪剔 pass;Misc 未就绪只剔 Heat/Vortex;空链返 false）', () => {
@@ -134,7 +137,10 @@ describe('A1 逃生门双路（Renderer.drawScreenFilterChain）', () => {
   });
 
   it('无滤镜帧早退诊断面（sfxPathUsed=\'-\'）;2D 回退面标记（\'2d\'）', () => {
-    expect(RDR).toMatch(/if \(!mono\.anyInUse && !mono\.heatInUse && shakeI <= 0 && !towVisible\) \{ this\.sfxPathUsed = '-'; return; \}/);
+    // ★mod screenFx（2026-10-12）:早退门扩 modPasses(链须随 mod pass 常开);
+    //   modPasses 组装行(采集跳过=原版 IsCapturing 门)
+    expect(RDR).toMatch(/if \(!mono\.anyInUse && !mono\.heatInUse && shakeI <= 0 && !towVisible && modPasses\.length === 0\) \{\s*\n\s*this\.sfxPathUsed = '-'; return;\s*\n\s*\}/);
+    expect(RDR).toMatch(/const modPasses = this\._capturePass \? \[\] : collectModScreenFx\(/);
     expect(RDR).toMatch(/this\.sfxPathUsed = '2d';\s*\n\s*this\.sfxPathStats\['2d'\]/);
   });
 

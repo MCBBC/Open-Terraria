@@ -86,7 +86,43 @@
  *  =IsAPhaseblade 光刃投掷弹（Boomerang aiStyle3 载体,:10008-10060 微光湿段三区间块
  *  实证），非剑挥砍弹;GetAlpha 活支=:80613-80616 `IsAPhaseblade[type] → Color.White`
  *  （1457 锚,旧注 :75942 系 1456 退役行号）;1039 活支=:80753-80756 `White*Opacity`
- *  （旧注 :76082 同系退役锚,与 872/873/931/913/34 同支）。 */
+ *  （旧注 :76082 系 1456 退役锚,与 872/873/931/913/34 同支）。
+ *
+ *  ★BJ668 Lerp 族光感算子（2026-10-12,通道级一刀,批 3）定谳+普查：
+ *  【代数恒等】原版 `Lerp(newColor,White,k)`（Color.Lerp 含 A 通道,light.A=255 →
+ *  A 侧不变）= light×(1−k) + White×k（逐通道）——像素 = tex×ga×C,C=light(1−k)+k。
+ *  白抬升项 ×k 【不乘光】;旧 lerpFilter（brightness 中灰归一 + saturate）=静态亮度
+ *  滤镜近似 → 抬升项被 compositeLight 乘光：暗场→0（原版 tex×ga×k 发光保留,
+ *  BJ529 病根同族）+ 亮场中灰归一过亮（f=1+0.992k,k=0.5 → +49.6%）双偏离。
+ *  修=两遍制分解：实体层基底 ×(1−k)（filter brightness(1−k),W3C 纯线性乘,逐通道
+ *  精确）+ projFullbrightQueue 'lighter' 光照后 ×k 纹理抬升复绘（251/465 capture
+ *  判例通用化,Arrow.replayLerpLift）→ base×light + lift ≡ tex×ga×[(1−k)light+k]
+ *  恒等（W3C plus-lighter 预乘加算;判别测试=bj668-lerp-lightband）。
+ *  【活跃面普查】（三源 join:武器 shoot 面=vanilla-itemcombat.json/敌对出生=
+ *  1457 NPC.cs NewProjectile∩本仓 AI 移植面/载体=专类承载;非 off 32 项）——
+ *  · 活跃 11（Arrow drawTableAlpha 消费可达,全量一刀=kind 驱动通用算子,零专支）：
+ *    342 北极（item1947）/435 火星炮塔弹（bossAI_martian 387,BJ667 批2 已接 mul 档）/
+ *    595 阿卡利之刃（item3368）/664·666·668 爆炸烈焰塔弹（MinionProj 塔 663/665/667
+ *    出膛,BJ375）/712 书杖弹（item3852）/735 恐惧饥饿（item4144）/920·921 史莱姆皇后
+ *    随从弹/926 凝胶攻击（bossAI_lategame shoot→Arrow）。
+ *  · 休眠 21（登记不派刀;通用算子自动覆盖,未来出生面接入即点亮）：
+ *    无出生面 10=75（霜雪军团 214 未移植）/180（霜月坚果克家族 aiStyle61 未移植）/
+ *    325·345·346·347（霜月 344 常绿尖叫怪 AI 未移植）/352（Krampus 未移植）/
+ *    436（全反编译面零出生,BJ667 判谳）/585（裁缝诅咒未移植）/682（DD2 电光虫未移植）;
+ *    载体专类 10=586（DryadWardRingShot,TownShot）/646-649（GrappleProj 月钩,
+ *    自绘发光层）/691-693（MinionProj TRAP_TOWER 爆炸陷阱）/731（ThunderBoltShot
+ *    专类,见下债①）/833（MinionProj 沙漠虎,BJ245 白光补课已自理）;
+ *    GA 截走 1=732（drawGlobalAlpha case 131/732——★登记:
+ *    原版 :81133 `435||732||731` 同支=Lerp 抬升+A=25,GA 档 (255−α)/255 值面错案,
+ *    732 出生面=730 首拍子弹（Projectile.cs:46743-46749）本仓 730 AI 未移植=dormant,
+ *    接入面时须连 GA 档重审）。〔off 10 项另计,含 k=0 缺省直通档 1090。〕
+ *  · ★新发现债（本批只登记不落刀,载体级面须各自定谳）：
+ *    ①731 雷霆法杖弹=ThunderBoltShot 专类（proj1457.ts）draw ga=(255−α)/255 全显
+ *      ——表档 mul:0.098（A=25）与 Lerp(White,0.8) 白化均未承接=过显 ~10 倍+无白化
+ *      （BJ667 ② 同病专类变体;原版 GetAlpha :81133 不读 α,A 恒 25——类内 α 渐显与
+ *      GetAlpha 常量的关系未定谳,先探针后派刀）;②730 雷霆矛首拍 732 子弹（同上
+ *      :46743）未移植=特性缺线;③Dart.whiteLerp（811/814,Dart.ts lerpWhiteFilter
+ *      逐字副本）同病别通道（非本表 lerp 族,白化系数动态/静态各一,登记）。 */
 export interface ProjAlphaMod {
   kind: 'invisible' | 'fade' | 'fade2' | 'fixed' | 'fixedfade' | 'afade' | 'lerp' | 'lerpkeep'
     | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alpha0additive' | 'alphaLt'
@@ -103,7 +139,7 @@ export interface ProjAlphaMod {
   inv?: 1;
   /** afade：寿命尾门（life<tail → α=255−255·life/tail） */
   tail?: number;
-  /** fade：rgb×bright 后落缺省（650 ×1.5） */
+  /** fade：rgb×bright 后落缺省（★650 ×1.5 已摘=死码, BJ667 批2;字段保留=防御档） */
   bright?: number;
   /** alphaLt：α 阈值 */
   lt?: number;
@@ -156,6 +192,23 @@ export function projConstTint(id: number): readonly [number, number, number, num
   const rgb = m.rgba;
   if (!rgb) return null;
   return rgb;
+}
+
+/** ★BJ668（2026-10-12）Lerp 族光感算子白抬升系数分类器（表驱动纯函数,单源）：
+ *  kind ∈ lerp/lerpkeep/lerpalphain ∧ 非 off ∧ k>0 → 返回 k（白抬升权重,两遍制
+ *  lift 面）;其余（含 k=0 缺省直通档 1090）→ null。消费面=Arrow.draw lerpLiftGate
+ *  （GA 截走/charm 分流/常量色族互斥在门侧判,本谓词保持表驱动单源）。
+ *  代数面=Lerp(light,White,k)=light(1−k)+k 白抬升项不乘光（头注 BJ668 块）——
+ *  基底 ×(1−k)（实体层,乘光同相）+ lift ×k（光照后 'lighter' 复绘,不乘光）恒等。 */
+export const PROJ_LERP_LIFT_KINDS: ReadonlySet<string> =
+  new Set(['lerp', 'lerpkeep', 'lerpalphain']);
+
+export function projLerpLiftK(id: number): number | null {
+  const m = PROJ_ALPHA_MOD[id];
+  if (!m || m.off) return null;
+  if (!PROJ_LERP_LIFT_KINDS.has(m.kind)) return null;
+  const k = m.k ?? 1;
+  return k > 0.001 ? k : null;   // k=0=Lerp(·,·,0)=newColor 直通=缺省路径,无抬升面
 }
 
 export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
@@ -214,10 +267,10 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   229: { kind: 'fixed', rgba: [255,255,255,50], off: 1 },  // :81333 | (255,255,255,50) 恒；SKIP: Main.cs:28340-28343 DrawProjDirect `type==229 return` 整弹不画=GetAlpha 死值——弹面归零走 Arrow drawGlobalAlpha case 229 return 0（★R2 2026-09-02；旧锚 :76662 系 Kill 段错行；本仓无 229 出生面=dormant 台账）
   242: { kind: 'alphaLt', rgba: [255,255,255,100], lt: 140 },  // :76690 | α<140→(255,255,255,100) else Transparent
   250: { kind: 'invisible', off: 1 },  // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
-  251: { kind: 'invisible', off: 1 },  // (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  251: { kind: 'invisible', off: 1 },  // :81318-81324（1457）| r=g=b=255−alpha 后 (r,g,b,0) A=0 加算白×(255−α)/255 渐显——非隐形;★BJ667 批2 刀①已接线（2026-10-12）:RainbowSegment 载体 draw capture→projFullbrightQueue 'lighter' 复绘（ga=(255−α)/255 同曲线;出生面=彩虹枪 250 AI_046 每 2t 铺段,RainbowProj.ts）;off=本表不消费维持（300 census 锁不动,勿按隐形登记）
   253: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },  // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   254: { kind: 'invisible', off: 1 },  // timeLeft<30 门后 (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+寿命门+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;★BJ236 已接线（2026-09-21）:GA case 254 min(1,life/30)（强度代数化简=(255−α)/255,α 写面仅在 GetAlpha 门内 ≡0）+ ADDITIVE_GLOW_PROJS 入组,出生面=★BJ345（2026-09-25）起磁球 254 独立实体 MagnetSphereProj 自绘;Arrow 路径面=联机 kind0 傀儡位（netProjBroadcast 拦截支重建 Arrow 254）,GA case 254 勿摘,本 off 档转存档
-  257: { kind: 'invisible', off: 1 },  // α>200→Transparent 真零 / else (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  257: { kind: 'invisible', off: 1 },  // P.cs:81294-81301 | α>200→Transparent 真零 / else (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;★BJ666 普查刀②已接线（2026-10-12）:Dart 载体 draw 257 专属支（capture→projFullbrightQueue 'lighter' 复绘,ga=max(0,(255−α)/255)、α>200→0 硬档;出生面=冰巨人 243 shootDart）;off=本表不消费维持（300 census 锁不动,勿按隐形登记）
   258: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },  // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   259: { kind: 'invisible', off: 1 },  // α>200→Transparent 真零 / else (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   263: { kind: 'life' },  // :76551 | timeLeft<255→(255,255,255,timeLeft) else 全白（life 淡入）
@@ -261,9 +314,9 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   409: { kind: 'fixed', rgba: [250,250,250,200] },  // :76477 | (250,250,250,200) 恒
   431: { kind: 'afade', rgba: [250,250,250,250], slope: 1 },  // :76506 | (250,250,250,255−α)
   432: { kind: 'afade', rgba: [250,250,250,250], slope: 1 },  // :76506 | (250,250,250,255−α)
-  435: { kind: 'lerp', k: 0.8, mul: 0.098, off: 1 },  // :76462 | Lerp(White,0.8) 后 (r,g,b,25)；SKIP: XenoBubbleProj 专属类消费
-  436: { kind: 'lerp', k: 0.8, mul: 0.098, off: 1 },  // :76472 | Lerp(White,0.8) 后 (r,g,b,25)——XenoBubbleProj 消费 skip；SKIP: XenoBubbleProj 专属类消费
-  437: { kind: 'invisible', off: 1 },  // :76444 | (255,255,255,0)×(1−α/255) A=0 隐形；SKIP: XenoBubbleProj 专属类消费
+  435: { kind: 'lerp', k: 0.8, mul: 0.098 },  // :81133-81137（1457,与 731/732 同支;旧锚 :76462 系 1456 退役行号）| Lerp(White,0.8) 后 (r,g,b,25)——★BJ667 批2 勘误 2026-10-12:旧注 SKIP 载体错案（误指 XenoBubbleProj=444 泡沫 XENO_BUBBLE_PROJ,与本弹无关）;活面=特斯拉炮塔 387 aiStyle73 放电（NPC.cs:35544 伤 35 速 14→bossAI_martian shootM :898→Arrow 通用）;off 解除=drawTableAlpha mul:0.098 消费（A=25/255≈0.098,旧通用路径 (255−α)/255 全显=过显 ~10 倍）
+  436: { kind: 'lerp', k: 0.8, mul: 0.098 },  // :81143-81147（1457 专支;旧锚 :76472 系 1456 退役行号）| Lerp(White,0.8) 后 (r,g,b,25)——★BJ667 批2 勘误 2026-10-12:旧注 SKIP 载体错案（误指 XenoBubbleProj=444 泡沫）;全反编译面 NewProjectile 436 零命中=无出生面（防御档,与 435/731/732 同式）,off 解除=drawTableAlpha mul:0.098 消费（旧通用路径 (255−α)/255 全显=过显 ~10 倍）
+  437: { kind: 'invisible', off: 1 },  // :81115-81118（1457,与 700 同支;旧锚 :76444 系 1456 退役行号）| (255,255,255,0)×(1−α/255)——★BJ667 批2 定谳 2026-10-12:非隐形=A=0 加算白×Opacity（T5 族,同 9/723-728/1133,乘子只降 rgb 强度=A 仍 0）;旧注 SKIP 载体错案（误指 XenoBubbleProj=444 泡沫;原版出生面=火星兵 389 aiStyle3 尾段 NPC.cs:59655 伤 25 速 6,本仓 389 未移植=无出生面 dormant）;正确承接=GA (255−α)/255+'lighter',本 id off=登记残留维持（300 census 锁不动）
   438: { kind: 'fixedfade', rgba: [255,255,255,128] },  // :76436 | (255,255,255,128)×(1−α/255)
   440: { kind: 'fade', off: 1 },  // :76416 | r=g=b=255−α 后落缺省（双重衰减）——现有档保留；SKIP: drawGlobalAlpha Xeno 族 r=g=b=255−α
   443: { kind: 'fixedfade', rgba: [255,255,255,128] },  // :76428 | (255,255,255,128)×(1−α/255)
@@ -279,7 +332,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   459: { kind: 'fixed', rgba: [255,255,255,200] },  // :76392 | (255,255,255,200) 恒
   462: { kind: 'fixedfade', rgba: [255,255,255,128] },  // :76452 | (255,255,255,128)×(1−α/255)
   464: { kind: 'fade' },  // :76384 | (255,255,255,255)×((255−α)/255)
-  465: { kind: 'invisible', off: 1 },  // (255,255,255,0)×(1−α/255) A=0 加算白×(1−α/255)——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  465: { kind: 'invisible', off: 1 },  // P.cs:81225-81228 | (255,255,255,0)×(1−α/255) A=0 加算白×(1−α/255)——非隐形;★BJ666 普查刀①已接线（2026-10-12）:bossAI_lategame LightningOrb.draw capture→projFullbrightQueue 'lighter' 复绘（ga=(255−α)/255 同曲线;出生面=教徒第三拍闪电球）;off=本表不消费维持（300 census 锁不动,勿按隐形登记）
   467: { kind: 'fade' },  // :76351 | (255,255,255,255)×(1−α/255)
   473: { kind: 'fixed', rgba: [255,255,255,255], off: 1 },  // :76308 | (255,255,255,255) 恒；SKIP: WeaponProj 专属类消费
   477: { kind: 'alpha0', rgba: [255,255,255,200], off: 1 },  // :76300 | α==0→(255,255,255,200) else (0,0,0,0)；SKIP: drawGlobalAlpha alpha==0 档
@@ -344,7 +397,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   647: { kind: 'lerp', k: 0.8 },  // :76408 | Lerp(White,0.8)×(1−α/255)
   648: { kind: 'lerp', k: 0.8 },  // :76408 | Lerp(White,0.8)×(1−α/255)
   649: { kind: 'lerp', k: 0.8 },  // :76408 | Lerp(White,0.8)×(1−α/255)
-  650: { kind: 'fade', bright: 1.5 },  // :76123 | rgb×1.5 钳 255 后落缺省 fade
+  650: { kind: 'fade' },  // :80794-80811（1457;旧锚 :76123 系 1456 退役行号）| ★BJ667 批2 死码摘除 2026-10-12（BJ297 207 勘误同族漏网,BJ666 定谳）:分支只赋 r/g/b（newColor×1.5 钳 255）不 return,GetAlpha 尾段 :81507-81510 无条件 r/g/b=newColor×(255−α)/255 重算覆写 → bright:1.5 死码,净值≡缺省 fade（650=疑视触手 buff190 宠物弹 aiStyle124,出生面 Player.cs:11353;「只赋不 return=死码」判据入 bj667 测试源级结构锁）
   658: { kind: 'invisible', off: 1 },  // (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   659: { kind: 'afade', rgba: [255,255,255,128], slope: 0.5, inv: 1, tail: 30 },  // :76232 | timeLeft<30 门：α=255−255·tL/30 后 (255−α,…,128−α/2)（本仓 life 可消费）
   660: { kind: 'alpha0additive' },  // :81373 | (150,255,255,0)*Opacity（Opacity=1−α/255 :542-552）A=0 彩色加算青白——SetDefaults α=255 出生首拍 Opacity=0 全隐,AI 首子步白闪门 α→0（:56653）后恒满强 → alpha0additive（GA α==0?1:0）+ ADDITIVE_GLOW_PROJS 'lighter' 承接（2026-09-17 接线,off 登记残留清偿）;彩色色相未建模=亮度近似债（表头注约定）;charm 态 :80605 White*Opacity 截走=drawTableAlpha case 内建分流

@@ -606,23 +606,40 @@ export class LightningOrb extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    // Main.cs:32812 帧切分支：Projectile_465.png 四帧行按 frame 切片居中、alpha 渐显
+    // Main.cs:32812 帧切分支：Projectile_465.png 四帧行按 frame 切片居中、alpha 渐显。
+    // ★BJ666 普查刀①（2026-10-12）：GetAlpha :81225-81228 `type==465 →
+    //   Color(255,255,255,0)×(1−alpha/255)`——A=0【纯加算白】×(1−α/255) 渐显
+    //   （XNA 预乘 out=tex.rgb×(1−α/255) 全额加算,不读格光=自发光）。旧实现
+    //   source-over 直绘实体层 → compositeLight 全屏乘光压暗（BJ529 探针
+    //   _bj529-skull-ab 暗腔 k=0.325 同病）+合成方式错（加算→over 双偏离）。
+    //   承接=BJ530 Dart 44 判例同构：capture→本体不进实体层,projFullbrightQueue
+    //   光照合成后主画布 'lighter' 复绘（ga=(255−α)/255 同曲线;mock 无队列回退
+    //   直绘=测试/探针链）。α 曲线零改（AI :30919-30925 已接 −5/拍 渐显）。
     const ctx = r.ctx;
     if (!ctx) return;
     const bright = (255 - this.alpha) / 255;
     if (bright <= 0) return;
     const img = projFrameImg(465, this.frame) ?? projSprite(465);
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.globalAlpha = bright;
-    if (img && img.width > 0) {
-      ctx.drawImage(img, this.cx - img.width / 2, this.cy - img.height / 2,
-        img.width, img.height);
-    } else {
-      ctx.fillStyle = '#9FE8F0';
-      ctx.beginPath(); ctx.arc(this.cx, this.cy, 28, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.restore();
+    const cx465 = this.cx, cy465 = this.cy;
+    const drawInto = (c: CanvasRenderingContext2D) => {
+      c.save();
+      c.imageSmoothingEnabled = false;
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = Math.max(0, Math.min(1, bright));
+      if (img && img.width > 0) {
+        c.drawImage(img, cx465 - img.width / 2, cy465 - img.height / 2,
+          img.width, img.height);
+      } else {
+        c.fillStyle = '#9FE8F0';
+        c.beginPath(); c.arc(cx465, cy465, 28, 0, Math.PI * 2); c.fill();
+      }
+      c.restore();
+    };
+    const qFb = (r as unknown as {
+      queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+    }).queueProjFullbright;
+    if (typeof qFb === 'function') qFb.call(r, drawInto);
+    else drawInto(ctx);
   }
 }
 

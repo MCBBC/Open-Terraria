@@ -20102,6 +20102,12 @@ export class Renderer {
         //      目标,恒色目标须 α=1。精确修复 = 逐层采光或免光实体窗（架构级）,
         //      暂记债不落刀; heuristic 补偿（按光档混 α）属自造语义,反伪影纪律
         //      禁止。stamps（本块）与盾球（7e''' 槽）不受此债影响已落。
+//      ★BJ665b（2026-10-12）本债已落刀销案：候选 B（恒色甲件从 lit 烘除→
+//      lunarArmorQueue 合成后重绘+被盖层三重定向窗随迁,flushLunarArmor/flushLunarCovered）——
+//      逐支亲读只有日耀/星尘两族恒色覆写（漩涡/星云=glow 叠层族,BJ597 已落）,
+//      判定面=../data/vanillaLunarArmor.ts（批闸 LUNAR_CONST_BATCH）;判别套件
+//      tests/bj665b-solar-armor-unlit.test.ts+真机探针 scripts/_bj665b-probe.mjs
+//      （暗场甲区 95.6 vs 裸装 8.3,暗≈昼=恒色实证）。 ----
         // ---- ★BJ665b 恒色件烘焙面（upper=头甲+身甲复合件 250、legs=腿甲 日耀 250/
         //      星尘 252）：raw 件烘焙（染料已入），恒色值在消费侧与乘区链合成。
         //      lit 主烘焙面已烘除恒色件（lunarSplit）——stamps/残影同样需要件面
@@ -22835,8 +22841,10 @@ export class Renderer {
     }
     const towVisible = TOWER_KEYS.some((k) => tows[k] != null && this._towerFilterOpacity[k] > 0);
     // ---- mod 全屏后处理 pass(lights-and-shadows 首消费方;tML FilterManager.
-    //      EndCapture MonoMod 前缀同位——空注册零成本,快照工厂仅在有注册时调用) ----
-    const modPasses = collectModScreenFx(() => this.modScreenFxState(cam, player, viewW, viewH, z, world));
+    //      EndCapture MonoMod 前缀同位——空注册零成本,快照工厂仅在有注册时调用;
+    //      拍照采集跳过=原版 IsCapturing 门同款) ----
+    const modPasses = this._capturePass ? [] : collectModScreenFx(
+      () => this.modScreenFxState(cam, player, viewW, viewH, z, world));
     if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible && modPasses.length === 0) {
       this.sfxPathUsed = '-'; return;
     }
