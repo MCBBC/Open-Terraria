@@ -242,18 +242,18 @@ console.log('[replay] pass fn 就绪:', captured.join(', '));
 const gs = {
   seed: translateSeed('9293480'),
   worldSurface: 337, rockLevel: 535,
+  // ★652:worldSurfaceLow=真链 GenVars 顶层字段(引擎 ctxGs[0] 同名同位;
+  //  TerrainPass.ts:195 产出)——gen.ts Abyss 段消费此键定堑壕起点
+  worldSurfaceLow: surfLowEquiv,
   dungeonX: 3421, dungeonMaxY: 207, dungeonMinX: 0, dungeonMaxX: 4200,
   seedFlags: {},
   mods: {
     tileIdByKey: Object.fromEntries(Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_')).map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
     itemIdByKey: {},
     chests: [] as unknown[],
-    // 真链状态面(SulphurousSea.cs:188 零掷派生;dungeonX=3421>2100→false;
-    //  worldSurfaceLow=★652 探针列等价值——真链 TerrainPass.cs:237 游走 min,
-    //  引擎全链 ctxGs[0] 自带,vanilla 全等已由 TerrainPass 位级金标背书)
+    // 真链状态面(SulphurousSea.cs:188 零掷派生;dungeonX=3421>2100→false)
     sulphurAtLeft: false,
     sulphurYStart,
-    worldSurfaceLow: surfLowEquiv,
   },
 };
 const atLeft = gs.mods.sulphurAtLeft as boolean;
@@ -261,6 +261,12 @@ const genLimit = Math.floor(w / 2);
 const chasmX = atLeft ? 170 : genLimit + (genLimit - 135) - 35;
 const xLo0 = chasmX - 170;
 console.log(`[replay] atLeft=${atLeft} chasmX=${chasmX} 区 x∈[${chasmX - 170}, ${Math.min(w, chasmX + 170)}]`);
+// 堑壕探针命中行(与 pass 内同式:自 j 下行探首个实心;j=L+65 / L / L)
+{
+  const L = gs.worldSurfaceLow as number;
+  const hit = (col: number, j: number) => { for (let y = Math.max(0, j); y < h - 1; y++) if (store.hasTile(col, y)) return y; return -1; };
+  console.log(`[replay] 堑壕探针命中: 中(${chasmX - 125},${L + 65})→${hit(chasmX - 125, L + 65)} 左(${chasmX - 22 - 125},${L})→${hit(chasmX - 22 - 125, L)} 右(${chasmX + 22 - 125},${L})→${hit(chasmX + 22 - 125, L)}`);
+}
 
 // 两 pass 连跑(真链一个 Abyss pass 的两段;单流连续)
 // K 扫描钩:SW_ABYSS_PREFIX_ROLLS 覆盖 Prefix(-1) 世界流掷数(校准用)
@@ -268,9 +274,148 @@ if (process.env.SW_ABYSS_PREFIX_ROLLS) (globalThis as { __swAbyssPrefixRolls?: n
 const preHad = new Uint8Array(n);
 for (let i = 0; i < n; i++) preHad[i] = store.flags[i] & 1;
 const rng = new RNG(gs.seed as number);
+let drawCount = 0;
+const drawVals: number[] = [];
+const rawNext = rng.next.bind(rng);
+(rng as { next: () => number }).next = () => { const v = rawNext(); drawCount++; if (drawVals.length < 16384) drawVals.push(v); return v; };
 (abyssFn as (...a: unknown[]) => void)(store, rng, gs);
+console.log(`[replay] Abyss pass 掷数=${drawCount}`);
+drawCount = 0;
 (decorFn as (...a: unknown[]) => void)(store, rng, gs);
+console.log(`[replay] Decorations 掷数=${drawCount}`);
 console.log(`[replay] chests=${gs.mods.chests.length}`);
+
+// ── 填充 dither 位流对拍(★652):真 POST 反推 coin 位 vs 我方掷值序 ──
+// 可写格=!has||vanilla;三 dither 带:1-2(526-535) coin→gravel(806) else shale(847);
+// 2-3(707-709) coin→pyre(815) else gravel(806);3-4(857-859) coin→void(852) else pyre(815)。
+// POST 被后期覆盖的格(非候选值)跳过。j=全带掷序游标。
+{
+  const CS_INV = new Map<number, number>();
+  for (const [cs, internal] of MOD_ID_TO_NAME) CS_INV.set(internal, cs);
+  const pyreCs = 815, voidCs = 852, gravelCs = 806, shaleCs = 847;
+  (globalThis as { __abyssCs?: unknown }).__abyssCs = { pyreCs, voidCs, gravelCs, shaleCs, CS_INV };
+  const pyreCs2 = pyreCs, voidCs2 = voidCs, gravelCs2 = gravelCs;
+  const lowerCsOf = (u: number) => (u === pyreCs ? gravelCs : u === voidCs ? pyreCs : shaleCs);
+  const CS_INV2 = CS_INV;
+  let j = 0, mismatch = 0, checked = 0, skipped = 0, outOfVals = 0;
+  const repairs: string[] = [];
+  let firstMis = '';
+  for (let x = 3870; x < 4200; x++) for (let y = 0; y < 1000; y++) {
+    const i = y * w + x;
+    const has = pre.type[i] !== 0;
+    if (has && pre.type[i] >= 753) continue;         // mod tile=不可写,零掷
+    let upperCs = -1, lowerCs = -1;
+    if (y >= 525 && y <= 535) { upperCs = gravelCs; lowerCs = shaleCs; }   // rock-10=525,11 行
+    else if (y >= 707 && y <= 709) { upperCs = pyreCs; lowerCs = gravelCs; }
+    else if (y >= 857 && y <= 859) { upperCs = voidCs; lowerCs = pyreCs; }
+    else continue;
+    const myVal = drawVals[j];
+    if (myVal === undefined) { outOfVals++; break; }
+    const realCs = CS_TO_OURS(post.type[i]) !== 0 ? CS_INV.get(CS_TO_OURS(post.type[i])) ?? -1 : 0;
+    if (realCs !== upperCs && realCs !== lowerCs) { skipped++; j++; continue; }  // 后期覆盖/雕除(含空)=歧义格
+    checked++;
+    const realBit = realCs === upperCs;
+    const myBit = myVal < 0.5;
+    if (myBit !== realBit) {
+      mismatch++;
+      if (!firstMis) {
+        firstMis = `首分歧 掷#${j} (${x},${y}) 真=${realBit ? 1 : 0}`;
+        // 相位假设检验:j+δ (δ∈-3..3) 后续 500 个对拍位的匹配率
+        let best = '';
+        for (let d = -48; d <= 48; d++) {
+          let ok = 0, tot = 0;
+          let jj = j + d;
+          for (let x2 = x, y2 = y + 1;; y2++) {
+            if (y2 >= 1000) { y2 = 0; x2++; if (x2 >= 4200) break; }
+            const ii2 = y2 * w + x2;
+            const has2 = pre.type[ii2] !== 0;
+            if (has2 && pre.type[ii2] >= 753) continue;
+            let u2 = -1;
+            if (y2 >= 525 && y2 <= 535) u2 = gravelCs;
+            else if (y2 >= 707 && y2 <= 709) u2 = pyreCs;
+            else if (y2 >= 857 && y2 <= 859) u2 = voidCs;
+            else continue;
+            const rc2 = CS_TO_OURS(post.type[ii2]) !== 0 ? CS_INV.get(CS_TO_OURS(post.type[ii2])) ?? -1 : -2;
+            if (rc2 !== u2 && rc2 !== (u2 === pyreCs ? gravelCs : u2 === voidCs ? pyreCs : shaleCs)) continue;
+            const v2 = drawVals[jj];
+            if (v2 === undefined || tot >= 500) break;
+            tot++;
+            if ((v2 < 0.5) === (rc2 === u2)) ok++;
+            jj++;
+          }
+          best += ` δ${d}:${ok}/${tot}`;
+        }
+        console.log(`[replay] 相位检验:${best}`);
+        // 打印分歧点前后掷值
+        const ctx: string[] = [];
+        for (let k = j - 4; k <= j + 8; k++) ctx.push(`#${k}=${drawVals[k]?.toFixed(3) ?? '—'}`);
+        console.log(`[replay] 掷值窗: ${ctx.join(' ')}`);
+        // 邻域明细:x∈[j列-2, j列+2] 全 dither 行的 PRE/POST/我位/真位
+        {
+          const CS_INV3 = CS_INV;
+          for (let x3 = x - 2; x3 <= x + 2; x3++) {
+            const rows = [525,526,527,528,529,530,531,532,533,534,535,707,708,709,857,858,859];
+            const parts: string[] = [];
+            for (const y3 of rows) {
+              const ii3 = y3 * w + x3;
+              const preV = pre.type[ii3], postV = post.type[ii3];
+              const rc3 = CS_TO_OURS(postV) !== 0 ? CS_INV3.get(CS_TO_OURS(postV)) ?? -1 : 0;
+              const u3 = (y3 >= 525 && y3 <= 535) ? gravelCs : (y3 >= 707 && y3 <= 709) ? pyreCs : voidCs;
+              const valid = rc3 === u3 || rc3 === (u3 === pyreCs ? gravelCs : u3 === voidCs ? pyreCs : shaleCs);
+              parts.push(`y${y3}:pre${preV}/post${postV}${valid ? (rc3 === u3 ? '↥1' : '↧0') : '?'}`);
+            }
+            console.log(`[replay] x=${x3}: ${parts.join(' ')}`);
+          }
+        }
+      }
+    }
+    j++;
+  }
+  console.log(`[replay] dither 位对拍: 查=${checked} 歧义=${skipped} 窗外=${outOfVals} 分歧=${mismatch}/${checked} ${firstMis}`);
+  console.log(`[replay] 相位修复 ${repairs.length} 处:`, repairs.slice(0, 12).join(' | '));
+  // 偏移扫描:收集真位流(带格坐标),在首分歧后试 offset ∈ [-4..4],看后续 240 位匹配率
+  {
+    const realSeq: Array<{ x: number; y: number; bit: boolean }> = [];
+    const xColMax = Number(process.env.SW_ABYSS_BITCOLS ?? 4200);
+    let j2 = 0;
+    for (let x = 3870; x < 4200; x++) for (let y = 0; y < 1000; y++) {
+      const i = y * w + x;
+      const has = pre.type[i] !== 0;
+      if (has && pre.type[i] >= 753) continue;
+      let upperCs = -1;
+      if (y >= 525 && y <= 535) upperCs = gravelCs2;
+      else if (y >= 707 && y <= 709) upperCs = pyreCs2;
+      else if (y >= 857 && y <= 859) upperCs = voidCs2;
+      else continue;
+      const realCs = CS_TO_OURS(post.type[i]) !== 0 ? CS_INV2.get(CS_TO_OURS(post.type[i])) ?? -1 : 0;
+      if (realCs !== upperCs && realCs !== lowerCsOf(upperCs) && realCs !== 0) { j2++; continue; }
+      if (x > xColMax) { j2++; continue; }
+      realSeq.push({ x, y, bit: realCs === upperCs });
+      j2++;
+    }
+    // 找首分歧位置(不修复的朴素游标)
+    let jj = 0, firstDivIdx = -1;
+    for (let k = 0; k < realSeq.length; k++) {
+      const v = drawVals[jj];
+      if (v === undefined) break;
+      if ((v < 0.5) !== realSeq[k].bit) { firstDivIdx = k; break; }
+      jj++;
+    }
+    if (firstDivIdx >= 0) {
+      console.log(`[replay] 朴素游标首分歧 realSeq[${firstDivIdx}] (${realSeq[firstDivIdx].x},${realSeq[firstDivIdx].y})`);
+      for (let off = -4; off <= 4; off++) {
+        let ok = 0, tot = 0;
+        for (let k = firstDivIdx; k < Math.min(realSeq.length, firstDivIdx + 240); k++) {
+          const v = drawVals[jj + off + (k - firstDivIdx)];
+          if (v === undefined) break;
+          tot++;
+          if ((v < 0.5) === realSeq[k].bit) ok++;
+        }
+        console.log(`[replay] offset=${off}: ${ok}/${tot}`);
+      }
+    }
+  }
+}
 
 // 我方雕除带(PRE 有 tile → pass 后无)vs 真链雕除带——堑壕路径对拍
 {
@@ -307,6 +452,18 @@ for (let i = 0; i < n; i++) {
   }
 }
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
+// 纯堑壕带(y∈[realCarveTop-20, 380)——页岩岛带起点≥382,填充门 490 之上无其他写入)
+// = L 的干净探测器(L 决定堑壕掷数→流位;岛/装饰污染不进入此带)
+{
+  let chasmBand = 0;
+  for (let y = Math.max(0, realCarveTop - 20); y < 380; y++) {
+    for (let x = chasmX - 170; x < Math.min(w, chasmX + 170); x++) {
+      const i = y * w + x;
+      if (store.type[i] !== CS_TO_OURS(post.type[i])) chasmBand++;
+    }
+  }
+  console.log(`[replay] 纯堑壕带 diff(y[${Math.max(0, realCarveTop - 20)},380))=${chasmBand}`);
+}
 console.log('[replay] y 带差格(y:count):', [...yBands.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([b, c]) => `${b}:${c}`).join(' '));
 console.log('[replay] x 带差格(x:count):', [...xBands.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([b, c]) => `${b}:${c}`).join(' '));
 console.log('[replay] 迁移对 TOP15(我→真):');
