@@ -66,3 +66,12 @@ export function getEnabledModIds(): string[] | null { return enabledModsProvider
 let genSrcProvider: (() => string | null) | null = null;
 export function setGenSrcProvider(fn: () => string | null): void { genSrcProvider = fn; }
 export function getModGenSrc(): string | null { return genSrcProvider?.() ?? null; }
+
+/** gen 全局数据面(schematics/genTiles/modData——gen passes 消费) */
+export interface GenGlobalData {
+  schematics: Record<string, unknown>;
+  modData: Record<string, unknown>;
+}
+let genGlobalsProvider: (() => GenGlobalData | null) | null = null;
+export function setGenGlobalsProvider(fn: () => GenGlobalData | null): void { genGlobalsProvider = fn; }
+export function getGenGlobals(): GenGlobalData | null { return genGlobalsProvider?.() ?? null; }

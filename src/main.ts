@@ -307,6 +307,29 @@ async function loadAssets() {
         new Promise<void>((resolve) => setTimeout(resolve, 8000)),
       ]);
       (window as unknown as { __swResourcePacks?: ResourcePackManager }).__swResourcePacks = rpManager;
+      // ★桌面 Steam 工坊材质包自动发现(2026-10-12):/resourcepacks-workshop/index.json
+      //   (desktop/main.mjs 扫 steamapps/workshop/content/105600/* 含 pack.json 的包)
+      //   → 未装包自动导入并启用(订阅=意图;已装按 fileName=workshop_<id> 跳过,
+      //   启停权交资源包页)。失败静默跳过(增强不是必需)。
+      if ((window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell) {
+        try {
+          const idx = await fetch('resourcepacks-workshop/index.json').then((r) => r.json()) as {
+            packs?: Array<{ id: string; name: string }>;
+          };
+          for (const p of idx.packs ?? []) {
+            try {
+              const mark = `workshop_${p.id}.zip`;
+              if (rpManager.rows.some((r) => r.fileName === mark)) continue;
+              const zip = new Uint8Array(await fetch(`resourcepacks-workshop/${p.id}/pack.zip`).then((r) => r.arrayBuffer()) as unknown as ArrayBuffer);
+              const row = await rpManager.importPack(zip, mark);
+              await rpManager.setEnabled(row.id, true);
+              console.info(`[resourcepacks] 工坊包已导入并启用: ${p.name} (${p.id})`);
+            } catch (e) {
+              console.warn('[resourcepacks] 工坊包导入失败(跳过):', p?.id, e);
+            }
+          }
+        } catch { /* 无工坊路由=静默 */ }
+      }
     } catch (err) {
       console.warn('[resourcepacks] 启动应用资源包失败(已跳过):', err);
     }

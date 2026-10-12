@@ -1828,12 +1828,27 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
       onMultiplayer: () => showMultiplayerSelect(),
-      // 素材包管理(自制:重制热补丁;面板动态 import 分块,HousingPanel 同模式)
+      // ★素材包入口改挂原版资源包页(2026-10-12 退役裁决):RemasterPanel(sw-remaster-pack
+      //  自创格式)退出用户面——原版资源包(Steam 工坊订阅/zip/文件夹)为唯一包形态。
+      //  RemotionManager 引擎保留静默应用存量包(已装 remaster 包不失效,导入面关闭)。
       onAssetPacks: () => {
-        const m = (window as unknown as { __swRemaster?: { manager: import('./remaster/RemasterManager').RemasterManager } }).__swRemaster?.manager;
-        if (!m) { ui.toast(Lang.text('Mods.SandboxWorld.Remaster.NotReady')); return; }
-        void import('./ui/RemasterPanel').then(({ openRemasterPanel }) => {
-          openRemasterPanel(root, m, { onToast: (msg) => ui.toast(msg) });
+        void import('./ui/ResourcePackPage').then(({ buildResourcePackPage }) => {
+          // 遮罩层(居中承载)+ 卡体(素材包页内容)+ 右上关闭——RemasterPanel 同观感
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;z-index:60;background:rgba(4,6,14,.82);'
+            + 'display:flex;align-items:center;justify-content:center;';
+          const panel = buildResourcePackPage();
+          panel.style.cssText = 'position:relative;background:#241a4e;border:2px solid #7d92d6;'
+            + 'box-shadow:0 0 0 2px #0a0e1e;border-radius:6px;padding:20px 24px;'
+            + 'width:min(680px,92vw);max-height:82vh;overflow-y:auto;';
+          const close = document.createElement('button');
+          close.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.Close');
+          close.style.cssText = 'position:absolute;top:10px;right:14px;padding:5px 12px;'
+            + 'border-radius:3px;border:1px solid #7d92d6;background:#3a2a5a;color:#fff;cursor:pointer;'
+            + 'font-family:inherit;font-size:13px;';
+          close.addEventListener('click', () => overlay.remove());
+          overlay.append(panel, close);
+          root.append(overlay);
         });
       },
       // GOING_OLDSCHOOL B2：日月拖拽 → 菜单时钟跟手（Main.cs:62434-62446 反算 t01）

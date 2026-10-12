@@ -2363,6 +2363,16 @@ export function applyModTileStableMap(pairs: ReadonlyArray<readonly [number, num
   }
 }
 
+/** ★622:mod tile key→internal id 写入(worker 侧 TILE_BY_KEY 补 mod 条目;
+ *  主线程 registerModTile 写的,worker 侧缺=gen passes 的 gs.mods.tileIdByKey 恒空) */
+export function applyModTileKeys(keys: ReadonlyArray<readonly [string, number]>): void {
+  for (const [fullKey, internal] of keys) {
+    if (internal >= 1 && TILE_BY_KEY[fullKey] === undefined) {
+      TILE_BY_KEY[fullKey] = internal;
+    }
+  }
+}
+
 /** ★烘焙域桥读面(2026-10-04):BakeWorker 按 payload 顺序直落 mod tile def
  *  (internal 下标对齐由「同序注册=同下标」保证——worker 与主线程模块初始化同源
  *  同长,payload 保序)。幂等(已注册=skip)。与 applyModTileStableMap 双写不冲突

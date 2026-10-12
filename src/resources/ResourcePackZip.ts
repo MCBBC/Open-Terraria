@@ -65,6 +65,12 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
   } catch (e) {
     throw new ResourcePackError(`zip 解压失败: ${(e as Error).message}`);
   }
+  return parseFromEntries(Object.entries(entries));
+}
+
+/** ★原版包解析主循环(zip 与散目录共用;娘化工坊包实测 3734 图全映射)。
+ *  fromPath 形如 'Content/Images/NPC_474.png'(目录导入的相对路径,/ 归一)。 */
+export function parseFromEntries(entries: Iterable<[string, Uint8Array]>): ParsedResourcePack {
   let manifest: PackManifestInfo | null = null;
   let iconPng: Uint8Array | null = null;
   const images = new Map<string, Uint8Array>();
@@ -72,7 +78,7 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
   const music = new Map<string, Uint8Array>();
   const fonts = new Map<string, Uint8Array>();
   const counts = { images: 0, sounds: 0, music: 0, fonts: 0, skippedXnb: 0, skippedUnknown: 0 };
-  for (const [entry, data] of Object.entries(entries)) {
+  for (const [entry, data] of entries) {
     if (isPackManifest(entry)) {
       try {
         manifest = parsePackManifest(strFromU8(data));
@@ -102,4 +108,32 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
     throw new ResourcePackError('资源包缺少 pack.json（Resource Pack must contain a pack.json file）');
   }
   return { manifest, iconPng, images, sounds, music, fonts, counts };
+}
+
+/** ★散目录导入(2026-10-12 原版材质包直读):Steam 创意工坊/用户目录形态 = 解包文件夹
+ *  (pack.json 在根 + Content/**)。files.path 为相对包根路径(Windows 选区反斜杠/
+ *  webkitRelativePath 外层目录前缀均归一:无根 pack.json 时按首文件公共前缀剥一层)。
+ *  归一与解析分离导出——持久化回封必须用【归一后路径】(v1 事故:回封带外层前缀,
+ *  刷新后 stripContentRoot 不认 → "缺 pack.json" 用户实报)。 */
+export function normalizePackFilePaths(
+  files: Array<{ path: string; data: Uint8Array }>,
+): Array<{ path: string; data: Uint8Array }> {
+  const norm = files.map((f) => ({ path: f.path.replace(/\\/g, '/').replace(/^\.?\//, ''), data: f.data }));
+  const hasRootManifest = norm.some((f) => f.path.toLowerCase() === 'pack.json');
+  if (hasRootManifest || norm.length === 0) return norm;
+  const firstSlash = norm[0].path.indexOf('/');
+  if (firstSlash > 0) {
+    const prefix = norm[0].path.slice(0, firstSlash + 1);
+    if (norm.some((f) => f.path.toLowerCase() === `${prefix}pack.json`)) {
+      return norm.map((f) => ({ path: f.path.startsWith(prefix) ? f.path.slice(prefix.length) : f.path, data: f.data }));
+    }
+  }
+  return norm;
+}
+
+export function readResourcePackFromFiles(
+  files: Array<{ path: string; data: Uint8Array }>,
+): ParsedResourcePack {
+  const norm = normalizePackFilePaths(files);
+  return parseFromEntries(norm.map((f) => [f.path, f.data] as [string, Uint8Array]));
 }

@@ -70,8 +70,16 @@ function amountTitle(key: string, n: number): string {
   return Lang.text(key).replace('{Amount}', String(n));
 }
 
-/** 构建资源包页根节点（SettingsPanel 的 packs 分栏内容） */
+/** 构建资源包页根节点（SettingsPanel 的 packs 分栏内容）
+ *  ★2026-10-12 修复:RESOURCE_PACK_PAGE_CSS 的注入点随 Settings 资源包栏摘除一起
+ *  消失——标题菜单新入口打开时整页裸奔无样式(用户实报)。此处自注入(幂等)。 */
 export function buildResourcePackPage(): HTMLElement {
+  if (typeof document !== 'undefined' && !document.getElementById('sw-rp-style')) {
+    const st = document.createElement('style');
+    st.id = 'sw-rp-style';
+    st.textContent = RESOURCE_PACK_PAGE_CSS;
+    document.head.appendChild(st);
+  }
   const mgr = getResourcePacks();
   const root = document.createElement('div');
   root.className = 'sw-rp-wrap';
@@ -129,7 +137,45 @@ function buildMain(mgr: ResourcePackManager, go: (v: View) => void): HTMLElement
     }
     go({ kind: 'main' });   // 重绘主列
   });
-  bar.append(upload, file);
+  // ★原版散目录导入(2026-10-12):Steam 创意工坊订阅包 = 解包文件夹(pack.json 在根)
+  //   ——webkitdirectory 目录选区,按 webkitRelativePath 走 readResourcePackFromFiles。
+  const uploadDir = document.createElement('button');
+  uploadDir.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.UploadDir');
+  const dir = document.createElement('input');
+  dir.type = 'file';
+  (dir as HTMLInputElement & { webkitdirectory?: boolean }).webkitdirectory = true;
+  dir.style.display = 'none';
+  uploadDir.addEventListener('click', () => dir.click());
+  dir.addEventListener('change', async () => {
+    const list = [...(dir.files ?? [])];
+    dir.value = '';
+    if (list.length === 0) return;
+    uploadDir.disabled = true;
+    let errMsg: string | null = null;
+    try {
+      const files = await Promise.all(list.map(async (f) => ({
+        path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+        data: new Uint8Array(await f.arrayBuffer()),
+      })));
+      const folderName = files[0]!.path.split('/')[0] ?? 'pack';
+      await mgr.importPackFromFiles(files, folderName);
+    } catch (e) {
+      errMsg = e instanceof ResourcePackError
+        ? Lang.text('Mods.SandboxWorld.ResourcePacks.ImportFailed', (e as Error).message)
+        : `${(e as Error).message}`;
+    } finally {
+      uploadDir.disabled = false;
+    }
+    if (errMsg) {
+      const err = document.createElement('div');
+      err.className = 'sw-rp-err';
+      err.textContent = errMsg;
+      wrap.append(err);
+      return;
+    }
+    go({ kind: 'main' });
+  });
+  bar.append(upload, file, uploadDir, dir);
   wrap.append(bar);
 
   // ---- 双列 ----

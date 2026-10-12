@@ -32,7 +32,7 @@ import { newCensusCounter } from '../world/EmotePick';
 import { anchorBeeBottom, beeSpawnAuthority, breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
 import { bigMimicSummonCheck, bigMimicSpawnSmoke } from '../world/BigMimicSummon';   // ★SW-BJ147 钥匙放箱召宝箱怪（NPC.cs:78318）
-import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
+import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError, getModGenPasses, runModGenPasses } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
@@ -6881,6 +6881,13 @@ export class Game implements GameHooks {
         onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
         applyDifficulty();
         this.afterWorldLoad();
+        // ★622c:mod gen passes 主线程补跑(afterWorldLoad 后 player 就位;
+        //  主线程有全套 globals;worker 侧 genSrc 注册=并行路线另解)
+        try {
+          if (getModGenPasses().length > 0) {
+            runModGenPasses(this.world as unknown as Parameters<typeof runModGenPasses>[0]);
+          }
+        } catch (genErr) { console.error('[newWorld] mod gen 补跑:', genErr); }
         await this.minimapReady;   // 小地图拆带构建完成(见 new Minimap 注释)再进图
         this.cb.onWorldReady();
         return;
@@ -52411,7 +52418,12 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
    *  p.banks 序）。单仓 CoinsCount 同 :1054-1081 */
   coinSavingsByBank(): [number, number, number, number] {
     const out: [number, number, number, number] = [0, 0, 0, 0];
-    const pools = this.player.banks;
+    // ★BJ660 件1：pools 本体兜底——player.banks 类字段初值恒 4×40,但导入/读档链上
+    //  玩家态曾被观测缺 banks（真机 layoutVanilla(UI.ts:9131) 每帧经此取储蓄行签名,
+    //  崩一次=每帧抛「reading 'length'」）。原版语义:bank 桶随 .plr 角色档携行,
+    //  导入 .wld 本就无 bank 数据=应初始化空桶（WldImport save.player 已显式补
+    //  4×40 空桶,本兜底=数据口最后防线;桶内 `?? []` 双防保留）
+    const pools = this.player.banks ?? [];
     for (let b = 0; b < 4 && b < pools.length; b++) {
       for (const s of pools[b] ?? []) {
         if (!s) continue;

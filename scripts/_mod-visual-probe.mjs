@@ -13,7 +13,7 @@ const browser = await puppeteer.launch({
 });
 
 const errs = [];
-const out = { install: null, load: null, world: null, items: null, boss: null, visual: null, errsTop: [] };
+const out = { install: null, load: null, world: null, items: null, boss: null, terrain: null, visual: null, errsTop: [] };
 const track = (page, tag) => {
   page.on('pageerror', (e) => errs.push(`${tag} PAGEERR: ` + String(e).slice(0, 220)));
   page.on('console', (m) => { const t = m.text(); if (m.type() === 'error') errs.push(`${tag} CONSOLE: ` + t.slice(0, 180)); });
@@ -154,7 +154,28 @@ try {
   }).catch((e) => ({ evalFail: String(e).slice(0, 120) }))) };
   const shot2 = SHOT + '-boss.png';
   await p2.screenshot({ path: shot2 });
-  clearInterval(window.__swGodTick);
+  try { clearInterval(window.__swGodTick); } catch { /* Node 无 window */ }
+
+  // ---- ④b mod 地形扫描(硫磺海/深渊/星球矿 tile 计数)----
+  out.terrain = await p2.evaluate(async () => {
+    const g = window.__swGame;
+    if (!g?.world?.store) return { fail: 'world 不在' };
+    const store = g.world.store;
+    const tiles = await import('/src/data/tiles.ts');
+    const ids = {
+      sulphSand: tiles.TILE_BY_KEY['mod_calamity_sulphurous_sand'] ?? -1,
+      astralDirt: tiles.TILE_BY_KEY['mod_calamity_astral_dirt'] ?? -1,
+    };
+    let sulph = 0, astral = 0;
+    for (let x = 0; x < store.w; x += 4) {
+      for (let y = 0; y < store.h; y += 4) {
+        const t = store.get(x, y);
+        if (t === ids.sulphSand) sulph++;
+        if (t === ids.astralDirt) astral++;
+      }
+    }
+    return { sulphSandId: ids.sulphSand, sulph, astral, w: store.w, h: store.h };
+  }).catch(e => ({ fail: String(e).slice(0, 150) }));
 
   // ---- ⑤ 视觉像素检查(甲区非空像素比)----
   out.visual = await p2.evaluate(() => {

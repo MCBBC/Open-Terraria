@@ -9,7 +9,10 @@ const browser = await puppeteer.launch({
 // ① 装 mod(首页 install+reload)
 const p1 = await browser.newPage();
 await p1.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
-await new Promise(r => setTimeout(r, 12000));
+for (let i = 0; i < 15; i++) {
+  await new Promise(r => setTimeout(r, 2000));
+  if (await p1.evaluate(() => !!window.__swMods?.install).catch(() => false)) break;
+}
 await p1.evaluate(async () => {
   const buf = await fetch('mods/dist/calamity.swmod').then(r => r.arrayBuffer());
   await window.__swMods.install(new Uint8Array(buf));

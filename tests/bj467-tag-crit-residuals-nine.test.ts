@@ -471,9 +471,25 @@ describe('BJ467-⑥：拳盒/光环/爆弹/爆裂四敌臂 dontTakeDamage 前置
     dtd.dontTakeDamage = true;
     push(hooks, dtd);
     const m = new MinionProj(400 - 8, 600 - 8, 643, 30, 0, true, 0, false, () => player);
-    tickUntil(m, hooks, () => target.calls.length > 0);
-    expect(target.calls.length).toBeGreaterThanOrEqual(1);   // 引爆拍自证
-    expect(dtd.calls.length).toBe(0);                  // ★主判别:DTD 靶 0 调（旧 ≥1 必红）
+    // ★BJ660 件2 重锚（2026-10-12）：BJ639 批 1 重建后 643 volley = 真 644 爆裂弹实体
+    //  （RainbowCrystalBurst,t=30 引爆——原版 Projectile.cs :34975-34998 friendly=true
+    //  60×60 penetrate=-1 走 Damage() 全管线;旧「落点即时 AoE」同步结算面已退役）。
+    //  夹具须随实体桶推进（bj639 判别锁 ② 同式）：643 哨兵拍 + projectiles 桶各一拍。
+    //  旧 tickUntil 单驱哨兵=644 实体永不引爆 → 达面自证恒 0 调=确定性红（BJ659 误诊
+    //  BJ650/生产链无罪）。DTD 门现挂重建链 rainbowBurstHitFace :12686 头门前置+
+    //  城镇臂 townVoodooGateOpen 巫毒窄门（Damage_PVE_Inner :12618-12631 22+killGuide/
+    //  54+killClothier 1:1）——本锁随重建链语义。
+    const bucket = (hooks as unknown as { entities: { projectiles: Array<{
+      fixedUpdate?: (dt: number, g: GameHooks) => void; dead?: boolean }> } }).entities.projectiles;
+    for (let i = 0; i < 120 && target.calls.length === 0; i++) {
+      m.fixedUpdate(1, hooks);
+      for (const p of [...bucket]) {
+        if (p.fixedUpdate && !p.dead) p.fixedUpdate(1, hooks);
+      }
+    }
+    expect(target.calls.length).toBeGreaterThanOrEqual(1);   // 引爆拍自证（644 实体 t=30 引爆）
+    expect(dtd.calls.length).toBe(0);                  // ★主判别:DTD 靶 0 调（旧 ≥1 必红;
+                                                       //  锁重建链 rainbowBurstHitFace 头门）
   });
 });
 

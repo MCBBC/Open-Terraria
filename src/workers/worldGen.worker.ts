@@ -5,7 +5,7 @@
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
-import { applyModTileStableMap } from '../data/tiles';
+import { applyModTileStableMap, applyModTileKeys } from '../data/tiles';
 import { setCurrentAlloc } from '../mods/bridge';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';
 import { registerGenPass } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
@@ -125,11 +125,23 @@ ctx.onmessage = async (e) => {
     if (req.type === 'applyModIds') {
       applyModItemIds(req.payload.itemStableIds);
       applyModTileStableMap(req.payload.tilePairs);
+      applyModTileKeys(req.payload.tileKeys);   // ★622:TILE_BY_KEY 补 mod 条目(gen passes 消费)
       // ★P5 id 平移解:当前分配映射入 worker 域(loadSaveData 重映射消费)
       setCurrentAlloc({
         itemKeys: new Map(req.payload.itemKeys),
         tileKeys: new Map(req.payload.tileKeys),
       });
+      return;
+    }
+    // ★622:mod gen pass 源码(worker 侧注册——eval mod bundle+stub sw=gen 注册闭环)
+    if (req.type === 'applyGenSrc') {
+      const gp = req.payload as { src: string; globals?: { schematics?: Record<string, unknown>; modData?: Record<string, unknown> } };
+      if (gp.globals) {
+        const w = globalThis as Record<string, unknown>;
+        if (gp.globals.schematics) w.__calamitySchematics = gp.globals.schematics;
+        if (gp.globals.modData) w.__calamityModData = gp.globals.modData;
+      }
+      registerModGenPassesInWorker(gp.src);
       return;
     }
     if (req.type === 'generate') {

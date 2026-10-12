@@ -17,11 +17,11 @@
 // 经 setMusicOverrideListener 回调）。
 // 字体 = FontFace 注册（web 适配：族名 SWRP:<基名>；XNB 字体不可译已在上游跳过）。
 import { RemasterRuntime } from '../remaster/RemasterRuntime';
-import { buildManifest } from '../remaster/PackFormat';
+import { buildManifest, zipStore, type ZipEntry } from '../remaster/PackFormat';
 import type { LoadedPack } from '../remaster/types';
 import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, sfxPackOverrideKeys } from '../core/Sfx';
 import {
-  readResourcePack, ResourcePackError, formatPackVersion,
+  readResourcePack, normalizePackFilePaths, parseFromEntries, ResourcePackError, formatPackVersion,
   type ParsedResourcePack,
 } from './ResourcePackZip';
 import {
@@ -88,10 +88,10 @@ export class ResourcePackManager {
 
   /** 导入 zip（新包默认禁用——ResourcePackList.FromJson 对未存档包 IsEnabled=false）。
    *  同名 fileName 覆盖旧包（FromJson 按 FileName 去重语义）。 */
-  async importPack(source: File | Uint8Array): Promise<PackRow> {
+  async importPack(source: File | Uint8Array, displayName?: string): Promise<PackRow> {
     const bytes = source instanceof File ? new Uint8Array(await source.arrayBuffer()) : source;
     const pack = readResourcePack(bytes);
-    const fileName = source instanceof File ? source.name : 'pack.zip';
+    const fileName = displayName ?? (source instanceof File ? source.name : 'pack.zip');
     await this.ready();
     const prev = this.rows.find((r) => r.fileName === fileName);
     if (prev) await this.store.remove(prev.id);
@@ -99,6 +99,41 @@ export class ResourcePackManager {
       id: `rp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       fileName,
       name: pack.manifest.name || fileName.replace(/\.zip$/i, ''),
+      description: pack.manifest.description,
+      author: pack.manifest.author,
+      version: pack.manifest.version,
+      enabled: false,
+      sortingOrder: 0,
+      addedAt: Date.now(),
+      fileCount: pack.images.size,
+      iconDataUrl: pack.iconPng ? pngToDataUrl(pack.iconPng) : null,
+    };
+    this.parsed.set(row.id, pack);
+    this.rows = [...this.rows.filter((r) => r.id !== prev?.id), row];
+    const stored = await this.store.putZip(row.id, bytes);
+    if (!stored) console.warn('[resourcepacks] zip 持久化失败(IndexedDB 不可用)——本包仅会话内可用');
+    await this.store.saveRows(this.rows);
+    return row;
+  }
+
+  /** ★散目录导入(2026-10-12 原版材质包直读):工坊订阅/用户文件夹形态。
+   *  会话解析与持久化回封【共用归一化路径】(readResourcePackFromFiles 内同一
+   *  normalizePackFilePaths)——★v2 修复:旧实现回封带 webkitRelativePath 外层
+   *  目录前缀的原始路径,刷新后 stripContentRoot 不认="缺 pack.json"(用户实报)。 */
+  async importPackFromFiles(
+    files: Array<{ path: string; data: Uint8Array }>, displayName: string,
+  ): Promise<PackRow> {
+    const norm = normalizePackFilePaths(files);
+    const pack = parseFromEntries(norm.map((f) => [f.path, f.data] as [string, Uint8Array]));
+    await this.ready();
+    const entries: ZipEntry[] = norm.map((f) => ({ name: f.path, data: f.data }));
+    const bytes = zipStore(entries);
+    const prev = this.rows.find((r) => r.fileName === displayName);
+    if (prev) await this.store.remove(prev.id);
+    const row: PackRow = {
+      id: `rp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      fileName: displayName,
+      name: pack.manifest.name || displayName,
       description: pack.manifest.description,
       author: pack.manifest.author,
       version: pack.manifest.version,

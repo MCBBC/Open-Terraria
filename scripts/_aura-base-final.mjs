@@ -51,7 +51,7 @@ const spot = await page.evaluate(() => {
   return { gx, groundY, cxw, cyw };
 });
 console.log('spot:', JSON.stringify(spot));
-await pump(page, 10, { step: 10 });   // 相机收敛
+await pump(page, 45, { step: 15 });   // 相机充分收敛（防放置期漂移=塔落点偏移根）
 
 // 放塔（多 aim 偏移重试至 side>0；每次先清旧塔）
 const placeResult = await page.evaluate(async ({ cxw, cyw }) => {

@@ -316,6 +316,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
         ${this.flow.onAchievements ? `<div class="sw-title-btn" data-act="ach">${Lang.text('LegacyMenu.131')}</div>` : ''}
         <div class="sw-title-btn" data-act="mods">${Lang.text('Mods.SandboxWorld.Menu.Mods')}</div>
+        ${this.flow.onAssetPacks ? `<div class="sw-title-btn" data-act="packs">${Lang.text('Mods.SandboxWorld.Menu.AssetPacks')}</div>` : ''}
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <!-- ★2026-10-04 用户令:主菜单摘除「复刻笔记」入口按钮(仅去按钮,功能链
@@ -395,6 +396,7 @@ export class TitleMenu {
     on('mp', () => flow.onMultiplayer());
     on('ach', () => flow.onAchievements?.());   // ★SW-FX18 成就页（menu[131] 同位）
     on('mods', () => openModsPanel());          // ★mod loader(2026-10-04):mods 管理面板
+    on('packs', () => flow.onAssetPacks?.());   // ★原版资源包页(2026-10-12 退役 RemotionPanel 后改挂)
     on('set', () => flow.onSettings());
     on('buy', () => window.open('https://store.steampowered.com/app/105600/Terraria', '_blank', 'noopener'));
     on('replog', () => window.open('https://github.com/Vinlic/terraria-replica-build-notes', '_blank', 'noopener'));

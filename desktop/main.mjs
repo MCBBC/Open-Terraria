@@ -16,6 +16,7 @@ import { app, BrowserWindow, Menu, shell, powerSaveBlocker, dialog, ipcMain } fr
 import { readFile, writeFile } from 'node:fs/promises';
 import { statSync, existsSync, readdirSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, normalize as pathNormalize, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 
@@ -140,6 +141,145 @@ function boot() {
   });
 
   app.on('window-all-closed', () => app.quit());
+}
+
+// ---- ★Steam 工坊原版资源包发现（2026-10-12）：扫描候选 Steam 根下
+//      steamapps/workshop/content/105600/*/，取含 pack.json 的目录（ContentType
+//      = ResourcePack 的工坊条目形态）。候选根穷举（mac/win/linux/SteamLibrary
+//      多库盘）；缺失即空。文件面白名单 = pack.json/icon.png/Content/**。 ----
+function workshopRoots() {
+  const home = homedir();
+  const candidates = [
+    join(home, 'Library/Application Support/Steam'),           // macOS
+    'C:/Program Files (x86)/Steam',
+    'C:/Program Files/Steam',
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, 'Steam') : '',
+    join(home, '.steam/steam'),                                 // linux
+    join(home, '.var/app/com.valvesoftware.Steam/.local/share/Steam'), // flatpak
+    process.env.STEAMPATH || '',
+  ].filter(Boolean);
+  const roots = [];
+  for (const c of candidates) {
+    const w = join(c, 'steamapps/workshop/content/105600');
+    if (existsSync(w)) roots.push(w);
+    // 多库盘：libraryfolders.vdf 粗解（"path"\\t\\t"..." 行）
+    try {
+      const vdf = readFileSync(join(c, 'steamapps/libraryfolders.vdf'), 'utf8');
+      for (const m of vdf.matchAll(/"path"\s*"([^"]+)"/g)) {
+        const lib = m[1].replace(/\\\\/g, '/');
+        const wl = join(lib, 'steamapps/workshop/content/105600');
+        if (existsSync(wl) && !roots.includes(wl)) roots.push(wl);
+      }
+    } catch { /* 无 vdf=单库 */ }
+  }
+  return roots;
+}
+
+function scanWorkshopResourcePacks() {
+  const out = [];
+  for (const root of workshopRoots()) {
+    let dirs = [];
+    try { dirs = readdirSync(root); } catch { continue; }
+    for (const id of dirs) {
+      if (!/^\d+$/.test(id)) continue;
+      const dir = join(root, id);
+      let manifest = null;
+      let files = [];
+      try {
+        for (const e of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+          if (e.name.startsWith('.') || e.isDirectory()) continue;   // ★目录滤除(EISDIR)
+          const full = join(e.parentPath ?? e.path, e.name);
+          const rel = full.slice(dir.length + 1).replace(/\\/g, '/');
+          const low = rel.toLowerCase();
+          if (low === 'pack.json') {
+            manifest = JSON.parse(readFileSync(full, 'utf8'));
+            files.push({ name: rel, data: readFileSync(full) });   // ★包体也要带 pack.json(解析端必需)
+            continue;
+          }
+          if (low === 'world.wld' || low === 'template.psd' || low.endsWith('.ds_store')) continue;
+          if (low === 'icon.png' || low.startsWith('content/')) files.push({ name: rel, data: readFileSync(full) });
+        }
+      } catch { continue; }
+      if (!manifest) continue;
+      out.push({
+        id,
+        name: manifest.Name || manifest.name || id,
+        files,
+      });
+    }
+  }
+  return out;
+}
+
+// ---- 手写 STORED zip（PNG 已压缩,store 零损零依赖;CRC32 查表+头段,与
+//      remaster/PackFormat.zipStore 同式——desktop 壳无 fflate 依赖,自含 40 行） ----
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(data) {
+  let c = 0xffffffff;
+  for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function storeZip(entries) {
+  const enc = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = enc.encode(e.name);
+    const crc = crc32(e.data);
+    const lh = new Uint8Array(30 + name.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true);
+    dv.setUint16(8, 0, true);
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, e.data.length, true);
+    dv.setUint32(22, e.data.length, true);
+    dv.setUint16(26, name.length, true);
+    lh.set(name, 30);   // ★文件名字节入头段(漏写=条目无名,解析端全跳)
+    chunks.push(lh, e.data);
+    const ch = new Uint8Array(46 + name.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, e.data.length, true);
+    cv.setUint32(24, e.data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    ch.set(name, 46);   // ★同上
+    central.push(ch);
+    offset += lh.length + e.data.length;
+  }
+  const cdSize = central.reduce((s, c) => s + c.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  // ★拼接勿用 [...arr].flat()——Array.flat 不展平 TypedArray(Uint8Array 非 Array
+  //   子类),flat 后仍是数组对象=产物乱码(实测定谳)。手动 set 逐段拷贝。
+  const out = new Uint8Array(offset + cdSize + eocd.length);
+  let pos = 0;
+  for (const part of chunks) { out.set(part, pos); pos += part.length; }
+  for (const part of central) { out.set(part, pos); pos += part.length; }
+  out.set(eocd, pos);
+  return out;
 }
 
 async function createWindow(winStatePath, url) {
@@ -316,6 +456,35 @@ async function startEmbeddedDist() {
       try { data = readFileSync(filePath); } catch { res.writeHead(404).end('404'); return; }
       res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-cache' });
       res.end(data);
+      return;
+    }
+
+    // ---- ★原版材质包工坊路由（2026-10-12）：Steam 创意工坊订阅的原版资源包
+    //      （workshop/content/105600/<entryId>/，pack.json+Content/** 散目录形态）
+    //      → GET /resourcepacks-workshop/index.json 列包；GET .../<id>/pack.zip
+    //      现打 STORED zip（PNG 已压缩零损零依赖,手写头段）。客户端走既有
+    //      readResourcePack zip 通道,零新解析码。 ----
+    if (urlPath === '/resourcepacks-workshop/index.json' || urlPath.startsWith('/resourcepacks-workshop/')) {
+      const packs = scanWorkshopResourcePacks();
+      if (urlPath === '/resourcepacks-workshop/index.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify({
+          packs: packs.map((p) => ({
+            id: p.id, name: p.name, author: p.name, fileCount: p.files.length,
+            files: p.files.map((f) => f.rel),
+          })),
+        }));
+        return;
+      }
+      const m = urlPath.match(/^\/resourcepacks-workshop\/([^/]+)\/pack\.zip$/);
+      if (m && packs.some((p) => p.id === m[1])) {
+        const pack = packs.find((p) => p.id === m[1]);
+        const entries = pack.files.map((f) => ({ name: f.rel, data: f.data }));
+        res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-cache' });
+        res.end(storeZip(entries));
+        return;
+      }
+      res.writeHead(404).end('404');
       return;
     }
 

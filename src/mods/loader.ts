@@ -11,7 +11,7 @@ import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from '
 import { applyRegistrationPlan, bindModBiomeFlags } from './register';
 import { resolveModBossMusic } from './music';   // ★BGM 面:boss 曲绑定解析(L2 后)
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider } from './bridge';
+import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider, setGenGlobalsProvider } from './bridge';
 import { createModContext, type ModEntry } from './api';
 import { loadModConfigValues } from './config';
 import { modBuffTypeOf } from './buffs';
@@ -161,6 +161,10 @@ export async function loadModsPhase1(
         const modSrc = new TextDecoder().decode(code);
         (globalThis as any).__swModEntrySrc = modSrc;
         setGenSrcProvider(() => modSrc);
+        setGenGlobalsProvider(() => ({
+          schematics: (globalThis as unknown as { __calamitySchematics?: Record<string, unknown> }).__calamitySchematics ?? {},
+          modData: (globalThis as unknown as { __calamityModData?: Record<string, unknown> }).__calamityModData ?? {},
+        }));
         if ((globalThis as any).__swSkipModEntry) { continue; }
         try {
           const configState = await loadModConfigValues(manifest.id, manifest.config ?? {});
@@ -208,7 +212,7 @@ export async function loadModsPhase1(
           })
           .filter((e): e is { def: (typeof TILE_DEFS)[number]; internal: number; stable: number } => e !== null),
         itemKeys: [...plan.allocation.items.entries()],
-        tileKeys: [...plan.allocation.tiles.entries()],
+        tileKeys: plan.tileSpecs.map((t) => [t.fullKey, TILE_BY_KEY[t.fullKey]] as [string, number]).filter(([, id]) => id !== undefined && id >= 1),
       }));
       // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
 

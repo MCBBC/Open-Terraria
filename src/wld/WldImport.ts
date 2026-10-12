@@ -1061,6 +1061,13 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       x: wld.spawnX * 16 + 8,
       y: (wld.spawnY - 2) * 16,
       inventory: Array(40).fill(null),
+      // ★BJ660 件1：bank 桶显式初始化——原版 bank/bank2/bank3/bank4（存钱罐/保险箱/
+      //  守护者熔炉/虚空保险库）随 .plr 角色档携行,.wld 本体无 bank 数据 → 导入档
+      //  =四空桶各 40 槽（与 Player 类字段初值同形）。此前缺字段=导入 SaveData 的
+      //  player 形不完整,储蓄链（applyPlayer 守卫跳过→coinSavingsByBank/layoutVanilla
+      //  储蓄行签名）在缺桶玩家态上曾炸 UI 刷新链「reading 'length'」。
+      //  applyPlayer 缺省守卫与 Game.coinSavingsByBank `?? []` 兜底保留=旧档/损档双防。
+      banks: [Array(40).fill(null), Array(40).fill(null), Array(40).fill(null), Array(40).fill(null)],
       selected: 0,
     },
     // 城镇 NPC（原版 WorldFile town NPC 段）：spriteId→key（bound 型映射并置 bound），

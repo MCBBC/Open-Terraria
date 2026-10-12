@@ -33,6 +33,11 @@ export type MappedAsset =
 /** 根级图片但消费侧在 vui 的族（vanilla-atlas.mjs 盔甲段：根级 Armor_Head/Legs
  *  同时拷入 vanilla-ui/；PaperDoll 走 vui）。映射产出双写目标。 */
 const ROOT_VUI_RE = /^Armor_(?:Head|Legs)_\d+\.png$/;
+/** ★根级玩家分件族（2026-10-12 玩家换肤债清偿）：Player_<skinVariant>_<clothStyle>
+ *  消费侧在 vui（PaperDoll 逐部件合成 + CopyVariant 链,SW-BJ21；本仓烘焙管线
+ *  vanilla-atlas.mjs 玩家段同样归 vanilla-ui/）——双写对齐。Player_<n>.png
+ *  单下划线仍走 vanilla/（非本族）。 */
+const ROOT_VUI_PLAYER_RE = /^Player_\d+_\d+\.png$/;
 /** 子目录 → vanilla/（族前缀展平）的家族（vanilla-atlas.mjs SUBDIRS_MISC；小写比较） */
 const SUBDIR_TO_VANILLA = ['townnpcs', 'misc', 'backgrounds', 'accessories', 'splashscreens'];
 /** 子目录 → vanilla-ui/ 的家族（SUBDIRS_UI；Armor 特判双写，见下；小写比较） */
@@ -112,7 +117,7 @@ export function mapPackAsset(rel: string): MappedAsset[] {
     const name = rest[0];
     if (hasExt(name, IMG_EXT) === null) return [];
     const out: MappedAsset[] = [{ kind: 'image', file: `vanilla/${name}` }];
-    if (ROOT_VUI_RE.test(name)) out.push({ kind: 'image', file: `vanilla-ui/${name}` });
+    if (ROOT_VUI_RE.test(name) || ROOT_VUI_PLAYER_RE.test(name)) out.push({ kind: 'image', file: `vanilla-ui/${name}` });
     return out;
   }
   const sub = lower(rest[0]);
