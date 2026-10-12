@@ -2208,7 +2208,12 @@ export class BestiaryPanel {
         const rt = document.createElement('span');
         rt.className = 'rt';
         const rangeTxt = d.min !== d.max ? ` (${d.min}-${d.max})` : d.min > 1 ? ` (${d.min})` : '';
-        rt.textContent = `${rangeTxt} ${st >= UnlockState.DropsWithRates && d.chance !== null ? dropRateText(d.chance) : '???'}`;
+        // GetDropInfo 合成式（UIBestiaryInfoItemLine.cs:83-86 stackRange 非空才前拼
+        // `stackRange + " " + droprate`；:95-99 ??? 形清 stackRange → 裸 "???"）。
+        // ★BJ653：旧式恒 `rangeTxt + " " + rate` = 无段行带前导空格、??? 形带段前缀,
+        //  两处均偏离原版合成。前导空格右对齐下不可见=视觉无差;??? 形带段=真差。
+        const rateTxt = st >= UnlockState.DropsWithRates && d.chance !== null ? dropRateText(d.chance) : null;
+        rt.textContent = rateTxt === null ? '???' : rangeTxt ? `${rangeTxt} ${rateTxt}` : rateTxt;
         line.appendChild(rt);
         // ★BJ507 B2：悬停 = 全量 item tooltip（原版 DrawMouseOver :130-134：
         //  Main.HoverItem = _infoDisplayItem（SetDefaults(itemId) fresh item）+

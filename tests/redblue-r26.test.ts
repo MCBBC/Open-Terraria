@@ -86,7 +86,8 @@ describe('REUSE_DELAY_TICKS vs vanilla-shoot-table.json(R26 提取器权威,只�
     // +1 门子句(1458 ApplyItemAnimation :4451 `sItem.reuseDelay == 0`)
     expect(src).toMatch(/reuseDelayOf\(vid\) === 0\) extra = 1/);
     // ApplyReuseDelay 后摇窗并入(useSwing 尾部 dur += )
-    expect(src).toMatch(/dur \+= reuseDelayOf\(vid\);/);
+    // ★BJ651-R3：rd 词缀烘定（Item.cs:569 roundCSf32Mul,见 reuseDelayBakedOf）
+    expect(src).toMatch(/dur \+= reuseDelayBakedOf\(vid, this\.heldPrefixStat\(\)\?\.spd \?\? 1\);/);
     // yoyo/flail 派发点收口(cycleCooldown)
     expect(src).toMatch(/this\.player\.useTime = this\.cycleCooldown\(critVid, cw\.useTime\)/);
   });

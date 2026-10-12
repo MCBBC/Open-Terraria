@@ -386,7 +386,7 @@ describe('BJ605 E组：接线结构锚（防回归退化）', () => {
     const s = codeOf('../src/mainFlow.ts');
     expect(s).toContain('saveMissing = parseSaveMissingReason((e as Error | undefined)?.message)');
     expect(s).toContain("} else if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;");
-    expect(s).toContain('const resolved = await resolveLoadText(key,');   // ★BJ617 件2：主线程 fallback=三段择源（IDB→FS 备份→LS 副本）
+    expect(s).toContain('let resolved = await resolveLoadText(key,');   // ★BJ617 件2：主线程 fallback=三段择源（IDB→FS 备份→LS 副本）;★BJ655 let=授权后重跑择源
     expect(s).toContain('ui.toast(Lang.text(saveMissingToastKey(saveMissing)');
     expect(s).toContain('kvIdbStatus(key)');
   });

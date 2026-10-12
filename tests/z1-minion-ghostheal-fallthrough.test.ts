@@ -190,10 +190,21 @@ describe('Z1-§A：MinionProj 各受理位 ghostHeal 白耗面（:13877-84 通�
   it('A7 爆裂弹 644（彩虹水晶 volley,瞬态载体）：proc projId=644/numHits=0', () => {
     const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // 落点零散布=正中敌心
     const steals: StealCall[] = [];
-    const { hooks, player } = makeGame([], [], steals);
+    const { hooks, player, projectiles } = makeGame([], [], steals);
     const z = zombie(hooks, 4016, 480, 600);
     const tower = mk(643, player, 400, 600, true);
-    tower.fixedUpdate(1, hooks);                        // volley=3 连发
+    tower.fixedUpdate(1, hooks);                        // volley=3 连发（真 644 爆裂弹实体）
+    // ★BJ652 件5a 重锚定谳（2026-10-12）：红根因=BJ639 批 1②（2026-10-11）把 643
+    //  volley 从「落点即时 AoE」重建成真 644 爆裂弹实体（RainbowCrystalBurst,
+    //  14×14 t=0 → t=30 引爆 :34975-34998/t≥60 二段 Kill）——旧期望「单拍
+    //  fixedUpdate 即 steal」锚在已退役的即时 AoE 形态上,非回归（BJ640 攻速链
+    //  不在 643 哨兵支,发射节奏 cd=26 未变;发射本身正常,实体补建后 steal 面移到
+    //  爆裂弹引爆受理位）。重锚=驱动爆裂弹实体跑满 30t 引爆面,偷血语义不变：
+    //  steal 仍由 644 受理位 proc（瞬态载体不计数——塔身 pveNumHits 恒 0）。
+    const bursts = projectiles.filter((e): e is import('../src/entities/MinionProj').RainbowCrystalBurst =>
+      (e as { projId?: number }).projId === 644);
+    expect(bursts.length).toBe(3);                      // volley=3 连发（:37918-37932）
+    for (let t = 0; t < 31; t++) for (const b of bursts) if (!b.dead) b.fixedUpdate(1 / 60, hooks);
     expect(steals.length).toBeGreaterThanOrEqual(1);
     expect(steals[0].isMagic).toBe(false);
     expect(priv(tower).pveNumHits).toBe(0);

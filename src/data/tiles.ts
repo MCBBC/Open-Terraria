@@ -762,9 +762,13 @@ def({ platform: true, key: 'v_439_white_team_platform', name: '', solid: false, 
 def({ key: 'v_446_silly_pink_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4298', blend: true, drop: 3736, vanilla: { sheet: 446, frame: 'auto' } });
 def({ key: 'v_447_silly_purple_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B384FF', blend: true, drop: 3737, vanilla: { sheet: 447, frame: 'auto' } });
 def({ key: 'v_448_silly_green_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00CEB4', blend: true, drop: 3738, vanilla: { sheet: 448, frame: 'auto' } });
-def({ key: 'v_449_blue_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#5bbaf0', blend: true, drop: 3739, vanilla: { sheet: 449, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[449] 赋值（bool[] 默认 false）+TileID.cs:1335 SillyStreamerBlue=装饰/彩带/烟/活火
-def({ key: 'v_450_green_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#5cf05b', blend: true, drop: 3740, vanilla: { sheet: 450, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[450] 赋值（bool[] 默认 false）+TileID.cs:1337 SillyStreamerGreen=装饰/彩带/烟/活火
-def({ key: 'v_451_pink_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#f05b93', blend: true, drop: 3741, vanilla: { sheet: 451, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[451] 赋值（bool[] 默认 false）+TileID.cs:1339 SillyStreamerPink=装饰/彩带/烟/活火
+// ★BJ652 件1（2026-10-12）rope 旗补装 449/450/451（Main.tileRope Main.cs:9458-9460
+//  ——BJ644 504 先例同构）：def.rope=Main.tileRope 代理（Player.rawRopeAt:10578 攀爬/
+//  onRope:6630、Game.replaceTileIsValidSolid:1993 绳臂消费面）。四49 彩带族此前整缺=
+//  攀爬判定漏。实心面不动（★F2 注）。
+def({ key: 'v_449_blue_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#5bbaf0', blend: true, drop: 3739, rope: true, vanilla: { sheet: 449, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[449] 赋值（bool[] 默认 false）+TileID.cs:1335 SillyStreamerBlue=装饰/彩带/烟/活火
+def({ key: 'v_450_green_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#5cf05b', blend: true, drop: 3740, rope: true, vanilla: { sheet: 450, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[450] 赋值（bool[] 默认 false）+TileID.cs:1337 SillyStreamerGreen=装饰/彩带/烟/活火
+def({ key: 'v_451_pink_streamer', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#f05b93', blend: true, drop: 3741, rope: true, vanilla: { sheet: 451, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[451] 赋值（bool[] 默认 false）+TileID.cs:1339 SillyStreamerPink=装饰/彩带/烟/活火
 def({ key: 'v_453_silly_tied_balloon', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#B384FF', drop: null, vanilla: { sheet: 453, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_454_pigronata', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 3, mapColor: '#ae10b0', drop: null, vanilla: { sheet: 454, frame: 'style', fw: 4, fh: 3 } });
 def({ key: 'v_456_silly_tied_bundle_of_balloons', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#b384ff', drop: null, vanilla: { sheet: 456, frame: 'style', fw: 2, fh: 3 } });

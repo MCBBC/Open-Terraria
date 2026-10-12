@@ -11,7 +11,7 @@ import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from '
 import { applyRegistrationPlan, bindModBiomeFlags } from './register';
 import { resolveModBossMusic } from './music';   // ★BGM 面:boss 曲绑定解析(L2 后)
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc } from './bridge';
+import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider } from './bridge';
 import { createModContext, type ModEntry } from './api';
 import { loadModConfigValues } from './config';
 import { modBuffTypeOf } from './buffs';
@@ -157,6 +157,11 @@ export async function loadModsPhase1(
       for (const { manifest, pack } of plan.mods) {
         const code = pack.files.get('scripts/main.js');
         if (!code) continue;
+        // ★622:mod gen pass 源码捕获(worker 注入——eval mod bundle+stub sw=gen 注册)
+        const modSrc = new TextDecoder().decode(code);
+        (globalThis as any).__swModEntrySrc = modSrc;
+        setGenSrcProvider(() => modSrc);
+        if ((globalThis as any).__swSkipModEntry) { continue; }
         try {
           const configState = await loadModConfigValues(manifest.id, manifest.config ?? {});
           const modBuffKey = (bkey: string): number => modBuffTypeOf(manifest.id, bkey);
@@ -206,6 +211,7 @@ export async function loadModsPhase1(
         tileKeys: [...plan.allocation.tiles.entries()],
       }));
       // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
+
       setCurrentAlloc({
         itemKeys: plan.allocation.items,
         tileKeys: plan.allocation.tiles,

@@ -3635,13 +3635,29 @@ export class UI {
    *  条件描述行族（SetBestiaryNotesOnItemCache → Item.BestiaryNotes）。
    *  消费方 = BestiaryPanel（flow 桥,mainFlow openBestiary 接线） */
   showFloatingItemTooltip(itemId: number, anchor: HTMLElement, notes?: string[]): void {
+    // ★BJ653 图鉴悬停层序（用户实报 111.png：气泡左缘被图鉴面板裁切「莱姆法杖」+暗化）——
+    //  .sw-tooltip 挂 .sw-root(z10) 语境,图鉴 .sw-bst(z30+全屏黑幕) 同层压过 → 恒被盖。
+    //  原版 = MouseText 系接口层恒最上：Main.DrawInterface :45678-45690 先绘全部
+    //  _gameInterfaceLayers（图鉴 UIState 在内）再 DrawPendingMouseText(:45776) ——
+    //  tooltip 绘制位次在一切 UIState 之后。随 MouseTextTip 族惯例（.sw-mt-tip
+    //  document.body+z1300）暂离 .sw-root 挂 body；归宿记录/还原 = 搜索浮窗
+    //  tooltipHome 先例(:4059/:4237)——图鉴 close() 恒走 hideItemTooltip 归还。
+    const tipEl = this.tooltip as HTMLElement | undefined;   // teardown 期可 null（closeAll :7911）
+    if (tipEl && !this.tooltipHome) {
+      this.tooltipHome = tipEl.parentElement;
+      document.body.appendChild(tipEl);
+    }
     this.showTooltipFor(itemId, 'inv', { slot: { id: itemId, stack: 1 }, anchor, bestiaryNotes: notes });
   }
 
   /** ★BJ507 B2 悬停离开（原版 mouseText 管线每帧重算,离开=HoverItem 空气自然消失;
-   *  DOM 遗留态须显式撤泡） */
+   *  DOM 遗留态须显式撤泡）+★BJ653 暂离归还（body→原宿,背包悬停气泡不留顶层语境） */
   hideFloatingItemTooltip(): void {
     this.tooltip.style.display = 'none';
+    if (this.tooltipHome) {
+      this.tooltipHome.appendChild(this.tooltip);
+      this.tooltipHome = null;
+    }
   }
 
   /** 商店悬停上下文（MouseText_DrawItemTooltip_AddShopLines Main.cs:20632-20402，

@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
-import { MinionProj, pickSentryLandingSpot } from '../src/entities/MinionProj';
+import { MinionProj, pickSentryLandingSpot, sentrySpawnBox } from '../src/entities/MinionProj';
 import { setProjSpriteOverride } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -244,14 +244,21 @@ describe('BJ612 C. 落地面锁（平台即止/边列窗/嵌入 10px 首拍承�
     expect(spotL.y, '左邻列平台即止').toBe((PLATFORM_ROW - 1) * 16 - 24);
   });
 
-  it('端到端：出生盒底嵌入平台行 10px(vy=15)→首拍承接,盒底=平台顶 P×16 稳驻', () => {
+  it('端到端：出膛中心化（NewProjectile :10879-10880 X/Y=中心）→盒底=面上 15px→常规承接贴面稳驻', () => {
+    // ★BJ630-R2（2026-10-12）翻案：原条「出生盒底嵌入平台行 10px」系 top-left 误读——
+    //  NewProjectile 的 (X,Y)=【中心】（position=XY−size/2 verbatim）,PickSentryLandingSpot
+    //  返回值=中心点：spawnY(i×16−24) 对 377(h=50) → 盒=[中心−25,中心+25],盒底=
+    //  P×16−15（面上 15px,非嵌 10px）→ vy=15 首拍即跨面顶→承接门（Collision.cs:2394
+    //  oldBottom≤tileTop）常规可达→静驻盒底=面顶（Game 侧中心化接线见 SENTRY_WAND 支）。
     const st = makeWorld();
     for (let x = 20; x < 23; x++) st.setTile(x, PLATFORM_ROW, PLATFORM, 0, 0);
     const { hooks } = makeHooks(st);
     const spot = pickSentryLandingSpot(st, 21 * 16 + 8, (PLATFORM_ROW - 2) * 16 + 8, 2366, H);
-    // 原版出生盒底 = spawnY+50 = P×16+10（PickSentryLandingSpot :50058 spawnY=i×16−24）
-    expect(spot.y + 50).toBe(PLATFORM_ROW * 16 + 10);
-    const g = new MinionProj(spot.x, spot.y, 377, 26, 7.5, true, 0, false, () => null);
+    // 中心语义盒底 = spawnY(中心)+h/2 = P×16−40+25 = P×16−15（面上 15px）
+    expect(spot.y + 25).toBe(PLATFORM_ROW * 16 - 15);
+    // Game.SENTRY_WAND 支同式中心化（minionTrueBox 377=66×50）
+    const sp = sentrySpawnBox(377, spot);   // 单源中心化（Game.SENTRY_WAND 支同函数）
+    const g = new MinionProj(sp.x, sp.y, 377, 26, 7.5, true, 0, false, () => null);
     g.vy = 15;                                   // speedY11=15（Player.cs:48731）
     run(g, hooks, 90);
     expect(g.dead).toBe(false);
@@ -263,6 +270,28 @@ describe('BJ612 C. 落地面锁（平台即止/边列窗/嵌入 10px 首拍承�
     // 悬浮三件免扫描
     const fl = pickSentryLandingSpot(st, 60 * 16 + 8, 50 * 16 + 8, 3571, H);
     expect(fl.y).toBe(50 * 16 - 24);
+  });
+
+  // ★BJ630-R2 蜘蛛女王「贴图陷 1 格」判别锁（用户实报 2026-10-12：盒 66×50 目测贴地、
+  //  蜘蛛足陷下 1 格——top-left 直喂=整盒低半高→实心地静驻嵌 16px、足=表面+19）：
+  //  中心化后盒底=表面（嵌 0）、足（贴图内容 row-local 47）=表面+3、slice 缘=表面+5
+  //  （BJ612 B 节「微陷 5px」真值）。X 面：盒心=光标 X（NewProjectile 中心语义）。
+  it('BJ630-R2 实心地静驻贴面：盒底=表面(嵌 0)、足=表面+3、盒心=光标 X（377 端到端）', () => {
+    const st = makeWorld();
+    const { hooks } = makeHooks(st);
+    const cursorX = 21 * 16 + 8, cursorY = (GROUND_ROW - 2) * 16 + 8;
+    const spot = pickSentryLandingSpot(st, cursorX, cursorY, 2366, H);
+    expect(spot.y, '落点=末自由行中心（i×16−24）').toBe((GROUND_ROW - 1) * 16 - 24);
+    const sp = sentrySpawnBox(377, spot);   // 单源中心化（Game.SENTRY_WAND 支同函数）
+    const g = new MinionProj(sp.x, sp.y, 377, 26, 7.5, true, 0, false, () => null);
+    g.vy = 15;
+    run(g, hooks, 120);
+    expect(g.dead).toBe(false);
+    const surface = GROUND_ROW * 16;
+    expect(g.y + g.h, '盒底=表面（嵌 0,旧 top-left 静驻嵌 16px 应红）').toBe(surface);
+    // 足=盒顶+6+47（slice 上缘 :32486 boxTop+6 + 内容 row-local 47）=表面+3
+    expect(g.y + 6 + 47, '足=表面+3（BJ612 B 节 slice 缘+5 同域真值）').toBe(surface + 3);
+    expect(g.x + g.w / 2, '盒心=光标 X（中心语义,X 半高偏移漏加应红）').toBe(cursorX);
   });
 });
 

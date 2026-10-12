@@ -76,7 +76,8 @@ describe('① 挥击动画时长下限 1（SetItemAnimation base>0 → max(val,1
     expect(src).not.toContain('Math.max(12, Math.round((cw?.useTime');
     expect(src).not.toContain('Math.max(14, Math.round((def.tool.speed');
     // ★BJ640：×M 截断面（远端词缀未同步登记 BJ640-R1）
-    expect(src).toContain('return Math.max(1, truncCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, spd));');
+    // ★BJ651-R1：词缀烘定补同步（roundCSf32Mul 先词缀后攻速,登记债 BJ640-R1 清偿）
+    expect(src).toContain('return Math.max(1, truncCSf32Mul(roundCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, pSpd), spd));');
   });
 });
 

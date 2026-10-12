@@ -27,6 +27,8 @@ import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
 import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）
+import { hslToRgb255 } from '../render/AuroraSky';   // ★BJ650件1：864 辉光色 Main.hslToRgb 直译（:80378,同 projGhostTrail 消费源）
+import { ExplosiveTrapBlastProj } from './ExplosiveTrapBlast';   // ★BJ650件4：爆炸机关弹视觉实体（R15-F6 清偿）
 import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
 import { hitCritters, hitTownNpcs, townVoodooGateOpen, applyBannerDamageDealt, type TownHitSettle } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -1141,6 +1143,46 @@ export function pickSentryLandingSpot(
   return { x: mouseWX, y: ty * 16 - 24 };
 }
 
+/** ★C16b-R17（2026-10-12）AI_137 场域光带带式发射（:69983-69985 1:1）：PlotTileLine(
+ *  Center±UnitX×40, 80f, CastLightOpen) 的 tile 覆盖 = 列 floor((x−hw)/16)..floor(
+ *  (x+hw)/16) × 行 floor((y−hh)/16)..floor((y+hh)/16)（Utils.cs:2479-2501 perp=
+ *  (0,±width/2)，水平线逐列+每列垂直跨），CastLightOpen（DelegateMethods.cs:729-745）
+ *  对【开放格】逐格 AddLight 满色——开放格谓词 !active∨inActive∨tileSolidTop∨!tileSolid
+ *  ≡ repo !isSolid（SOLID_LUT≡tileSolid∧!tileSolidTop；平台 tileSolidTop=亮、实心砖=
+ *  暗，坡/半砖属型级判定不入门）。消费=Game 实体光循环 band 通道（MinionProj.lightBand，
+ *  688-690 闪电光环专用；判别测试直驱真 TileStore+Lighting 引擎） */
+export function auraLightBandCast(
+  st: { inBounds(x: number, y: number): boolean; isSolid(x: number, y: number): boolean },
+  band: { x: number; y: number; hw: number; hh: number; rgb: readonly [number, number, number] },
+  addLight: (tx: number, ty: number, r: number, g: number, b: number) => void,
+): void {
+  const x0 = Math.floor((band.x - band.hw) / 16), x1 = Math.floor((band.x + band.hw) / 16);
+  const y0 = Math.floor((band.y - band.hh) / 16), y1 = Math.floor((band.y + band.hh) / 16);
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) continue;   // CastLightOpen 开放格门
+      addLight(tx, ty, band.rgb[0], band.rgb[1], band.rgb[2]);
+    }
+  }
+}
+
+/** ★BJ630-R2（2026-10-12）哨兵出膛中心化（NewProjectile :10879-10880 verbatim：
+ *  `position.X = X − width*0.5; position.Y = Y − height*0.5`——X/Y=【中心】）：
+ *  pickSentryLandingSpot 返回值 = NewProjectile 中心点（spawnY=i×16−24 对 377=地表行顶
+ *  −40）。此前 Game.SENTRY_WAND 支直喂 MinionProj top-left 构造 = 整盒低半高（377
+ *  +25px → 出膛盒底已嵌地 10px → 实心下行承接门 oldBottom≤tileTop（Collision.cs:2394）
+ *  只捕下一行顶 → 静驻嵌 16px、足=表面+19）= 用户实报「贴图陷 1 格」根因（F3 盒叠进
+ *  地砖目测「正常贴地」；平台面靠 BJ-C9-SP embedPlatSnap 分支补偿故未显）。中心化后
+ *  盒底=面上 15px → 承接门常规可达 → 静驻贴面（盒底=面顶）、足=表面+3、slice 缘+5
+ *  = BJ612「微陷 5px」真值；「嵌 10px 驻留」系同根 top-left 误读的补偿面
+ *  （embedPlatSnap spawn 输入随之消失=休眠保留,BJ608 收窄面零动）。 */
+export function sentrySpawnBox(
+  pid: number, center: { x: number; y: number },
+): { x: number; y: number } {
+  const b = minionTrueBox(pid);
+  return { x: center.x - b.w / 2, y: center.y - b.h / 2 };
+}
+
 /** 随从/哨兵专属召唤音（生成后首帧起按 at 节拍各播一次）——原版来源：
  *  · 1093/1094/1112/1113 Pal 随从：弹幕 AI soundDelay 双声（Projectile.cs:350 初值 0，
  *    `--soundDelay == -20` 第 20 拍家族叫声 PalCattiva :50099-50102 / PalFoxparks
@@ -1702,8 +1744,13 @@ export class MinionProj extends Entity {
       //  Center±UnitX×40, 80f, CastLightOpen)——开放格逐格 AddLight 满色,带宽 ±40px×
       //  高 80px 以场心为锚）——尘 226 全旗 noLight=true（:70045/:70054）,域内照明
       //  全靠本带;缺带=场域/球体/电弧尘全沉环境暗（夜间/阴影=「放电全盲」本相）。
-      //  本仓点光通道折算：带心单点同色（点光半径≈带半高；带形偏差=登记债）。
-      case 688: case 689: case 690: return [0.2, 0.7, 1];
+      //  ★C16b-R17 终刀（2026-10-12 用户三返暗处攻击全盲）：旧「点光折算=带心单点
+      //  （点光半径≈带半高；带形偏差=登记债）」运行时复核定谳=不足——用户世界 base
+      //  位点（暗处）实测带心外 lightRim=[6,21,30]≈2% 光,场缘电弧尘 α 不可见=「隔空
+      //  伤害无视觉」本相（白昼开阔地探针恒绿=运行时假绿根）。按原版带式清偿：
+      //  688-690 改走 lightBand 带式通道（见下）,本点光通道摘除（带含中心格,点光
+      //  并挂=中心超原版亮度;vanilla AI_137 全域仅此一带,无第二光源）。 */
+      // case 688/689/690 → lightBand（C16b-R17 迁出）
       // ★BJ245：沙漠虎三档白光（AI_067 :50174-50185;ai[0]!=4 门=tigerA0 镜像）
       case 833: return this.tigerA0 !== 4 ? [0.5, 0.5, 0.5] : null;
       // ★R15-F3（2026-10-11 C15 清偿）：AI_138 爆炸机关 691-693 世界光（Projectile.cs
@@ -1715,6 +1762,24 @@ export class MinionProj extends Entity {
       case 835: return this.tigerA0 !== 4 ? [1, 250.2 / 255, 217.8 / 255] : null;
       default: return null;
     }
+  }
+  /** ★C16b-R17（2026-10-12）AI_137 场域光带原版带式（:69983-69985）：PlotTileLine(
+   *  Center±UnitX×40, 80f, CastLightOpen)——Utils.cs:2479-2501 perp=(0,±width/2)=
+   *  (0,±40)：逐【tile 列】floor((cx−40)/16)..floor((cx+40)/16) 扫 floor((cy−40)/16)
+   *  ..floor((cy+40)/16) 垂直跨,CastLightOpen（DelegateMethods.cs:729-745）对开放格
+   *  （!active∨inActive∨tileSolidTop∨!tileSolid ≡ repo !isSolid——SOLID_LUT≡
+   *  tileSolid∧!tileSolidTop 逐字同构,平台 tileSolidTop 亮/实心砖暗/坡面同型级判定）
+   *  逐格 AddLight(0.2,0.7,1) 满色。锚=base.Center（与伤害域同锚：携行态=本体中心
+   *  cy、落位态=auraCy;sizing 失败桩（side=0）vanilla 照扫——带段在 sizing 块后,
+   *  失败支 return 只免当拍）→ auraCy≤0 未测时回退本体 cy 同相。消费=Game 实体光
+   *  循环 band 通道（auraLightBandCast）。 */
+  get lightBand(): { x: number; y: number; hw: number; hh: number; rgb: [number, number, number] } | null {
+    if (!AURA_TOWER.has(this.projId)) return null;
+    return {
+      x: this.cx,
+      y: this.carriedByBackpack || this.auraCy <= 0 ? this.cy : this.auraCy,
+      hw: 40, hh: 40, rgb: [0.2, 0.7, 1],
+    };
   }
   /** 不占随从槽位（沙漠虎/阿比盖尔本体、龙身体段、星尘守护者——原版 minionSlots=0/不统计） */
   noSlot = false;
@@ -4156,7 +4221,8 @@ export class MinionProj extends Entity {
       // 命中特支同巡航态成立（原版时序：AI 内索敌先置 ai[0]=60（:46603-46608）→
       // Damage 面 864 特支读 ai[0]>0（:14135）→ 同拍锁定命中也转返航）
       if (this.contact(game, dmg0) && this.a169St > 0) { this.a169St = -1; this.a169Rt = 0; }
-      return;
+      this.recordGhostTrail();   // ★BJ650件1：UpdateTrails（:17198,mode2=12 份白模残影
+      return;                    //  :30888-30892——旧 smolstarAI 三出口零记录=环恒空,残影死支）
     }
     // ---- ai[0]==-1：返航重整态（:46617-46644）----
     if (this.a169St === -1) {
@@ -4183,6 +4249,7 @@ export class MinionProj extends Entity {
       if (this.a169Rt >= 9) { this.a169St = 0; this.a169Rt = 0; }   // :46638-46643
       this.x += this.vx; this.y += this.vy;
       this.contact(game, dmg0);                          // -1 态命中不转返航（ai[0]>0 门）
+      this.recordGhostTrail();                           // ★BJ650件1（同上,返航态出口）
       return;
     }
     // ---- ai[0]==60：攻击态（:46645-46674）----
@@ -4222,6 +4289,7 @@ export class MinionProj extends Entity {
       this.a169St = -1;
       this.a169Rt = 0;
     }
+    this.recordGhostTrail();   // ★BJ650件1（同上,攻击态出口）
   }
 
   /** ★BJ635（2026-10-11）② 雀宝宝 759 专属 AI = AI_158_BabyBird（Projectile.cs:49643-49853
@@ -6057,7 +6125,15 @@ export class MinionProj extends Entity {
     }
     // ---- 位移（case 533 碰撞反弹 :18281-18320——X 全反/Y×0.5/模长归一/dLai2+30）----
     this.integrate533(game, st);
-    this.contact(game, dmg0);
+    // ★BJ650件2（2026-10-12,BJ635 登记债清偿）：localAI[2]≥40 → 本拍伤害 ×0.5
+    //  （Damage_GetProjectileSpecificDamageMultiplier Projectile.cs:14618-14621
+    //  `if (type == 533 && localAI[2] >= 40f) num *= 0.5f`——注意 :14618 是【伤害】
+    //  乘区非击退（登记文案「击退 ×0.5」系误记,击退面 num5=knockBack 不经此函数;
+    //  消费位 = Damage() PVE/PVP num7=(int)(damage×mul) :12873/:14718 截断,倍率
+    //  先于 ModifyHit/OnHit tag 栈=本仓 dmg 入 contact 前乘同序）;蓄力档减伤联动=
+    //  撞墙计数（:18314 每次 +30、:30120 逐拍 −1 钳 [0,60],两次反弹即达阈值）。
+    const dmg533 = this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0;   // num7 (int) 截断
+    this.contact(game, dmg533);
     this.recordGhostTrail();
   }
 
@@ -6071,12 +6147,31 @@ export class MinionProj extends Entity {
     const lastLen = Math.hypot(lvx, lvy);
     moveAndCollide(this, game.world, this.vx, this.vy);
     let bounced = false;
+    // ★BJ650 定谳补刀（2026-10-12,件2/件3 落刀撞出,BJ635 反义误植两面）：
+    //  ①Y 支判据 :18289 `velocity.Y != lastVelocity.Y || velocity.Y == 0f`——原版
+    //   判据读【撞后】速度（TileCollision 落地清零 vy → != 恒真;后者=撞后零速档）,
+    //   旧码误植为撞前对（`vy===lvy‖lvy===0`）→ 本仓 moveAndCollide 落地清零 vy
+    //   （slopeCollide stand 双清）下判据恒假=地面反弹死支（dLai2 撞墙计数/件3
+    //   冲刺尘链同断）。X 支 hitWall+vx 位不变（moveAxis 不改写 vx）=受阻同相保留。
+    //  ②归一式 :18294-18298 `velocity /= num20`（num20=lastLen/|velocity|）——
+    //   旧码 `*= lastLen/nl` 除向反植（Y 档 ×2=回满速 vs 原版 ÷2=入速 1/4 出膛）。
     if (this.hitWall && this.vx === lvx) { this.vx = -lvx; bounced = true; }          // :18285-18288
-    if (this.collideY && (this.vy === lvy || lvy === 0)) { this.vy = -lvy * 0.5; bounced = true; }   // :18289-18292
+    if (this.collideY && (this.vy !== lvy || this.vy === 0)) {
+      this.vy = -lvy * 0.5; bounced = true;                                           // :18289-18292
+    }
     if (bounced && lastLen > 0) {
       const nl = Math.hypot(this.vx, this.vy);
-      if (nl > 0) { this.vx *= lastLen / nl; this.vy *= lastLen / nl; }               // :18296-18300 归一
+      const num20 = nl > 0 ? lastLen / nl : Number.POSITIVE_INFINITY;   // nl=0 → /=Inf 归零（vanilla float 同相）
+      this.vx /= num20; this.vy /= num20;                                             // :18298 归一（除向）
       if (this.dA0 === 7 && this.vy < -0.1) this.vy += 0.1;                           // :18301-18304
+      // ★BJ650件3（2026-10-12,BJ635 登记债清偿）：冲刺带撞块砖屑尘（:18304-18306
+      //  `if (ai[0] >= 6f && ai[0] < 9f) Collision.HitTiles(position, lastVelocity,
+      //  width, height)`——仅冲刺档 dA0∈[6,8] 反弹拍;velocity=lastVelocity（撞前速）
+      //  语义=hitTilesFx 形参同源（下帧预测位=position+velocity 交叠面撒尘,
+      //  Game.hitTilesFx 批 3 全量化 1:1——KillTile(fail:true,effectOnly) 尘面无音）
+      if (this.dA0 >= 6 && this.dA0 <= 8) {
+        game.hitTilesFx?.(this.x, this.y, this.w, this.h, lvx, lvy);
+      }
       this.dLai2 += 30;                                                               // :18314
     }
   }
@@ -8738,11 +8833,18 @@ export class MinionProj extends Entity {
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
             // 原版塔体 691/692/693 生成【爆炸弹】694/695/696（AI_138 :66063-66073）,
             // StatusNPC 走爆炸弹型号——Oiled 门在 694 族(:10786,setHuntressT2 套装门)
-            // ★R15-F6 登记债（2026-10-11 C15）：694-696 纯视觉域未建模——爆炸弹实体
-            //  本体绘（AI_139 :70466+ 帧机/爆闪 78t 存活面）+ AI_138 :70415 起的
-            //  PlotTileLine 光带/爆心尘（伤害面已由本直伤臂另刀承载=本仓离散链同相）。
-            //  视觉缺=爆炸瞬间的光带渐隐与爆闪弹贴图,实害面零（登记不落,C15 报告 §F6）。
+            // ★R15-F6 登记债（2026-10-11 C15）——★BJ650件4（2026-10-12）清偿：
+            //  694-696 视觉面落地 = 爆炸弹实体（ExplosiveTrapBlastProj,AI_139 帧机
+            //  alpha −25/拍渐显 + 3t/帧爆花 + :70488 PlotTileLine 光带(1.3,0.9,0.2)
+            //  + Main.cs:32522-32546 Bottom 锚双笔本体绘）。生成位 = AI_138 :70440
+            //  NewProjectile(base.Center+(0,−num2), Zero, num, ...)——ecx/ecy 即
+            //  塔心+(0,−num2)（探测盒心同源）。伤害面仍由本直伤臂承载（BJ630 判例,
+            //  弹体零伤害=离散链同相勿双伤）。访客侧不广播（塔臂 owner 权威既有
+            //  口径,MP 爆花缺面登记）。
             const boomProj = 694 + (this.projId - 691);
+            // ★BJ650件4：爆炸弹视觉实体生成（:70440;盒心=ecx/ecy,144×144 SetDefaults）
+            (game as unknown as { entities: { add: (x: unknown, b: string) => void } })
+              .entities.add(new ExplosiveTrapBlastProj(ecx, ecy, boomProj as 694 | 695 | 696), 'projectiles');
             const ownerH = (this.ownerRef() as unknown as { equipStats?: { huntressT2?: boolean } } | null)
               ?.equipStats?.huntressT2 ?? false;
             let boom = 0;
@@ -9973,7 +10075,53 @@ export class MinionProj extends Entity {
           opacity: 1,
           vxLen: Math.hypot(this.vx, this.vy),
           spriteDirection: this.facing >= 0 ? 1 : -1,
+          whoAmI: this.id,   // ★BJ650件1：864 辉光色相 whoAmI%6 消费（余 id 不读）
         });
+      }
+    }
+    // ---- ★BJ650件1（2026-10-12,BJ634/632 伴生登记债清偿）：864 刃杖辉光 4 份白模
+    //      旋转（Main.cs:31395-31403 亲读 1:1）——色 = GetFloatingDaggerMinionGlowColor
+    //      （Projectile.cs:80377-80381:hue=0.66+0.33×(whoAmI%6)/6 六档蓝→品红、
+    //      s=0.7/l=0.6、×0.7f 逐字节截断）后 A/=4（(byte)178→44）;源矩形 = value18
+    //      （rectangle4.Y+=Height=帧 1 纯白模,与残影 12 份 :30883 value16 同源——
+    //      残影走 drawProjGhosts 864 档〔帧 1 白模同切片〕,本支=本体后另一 4 份,
+    //      位序:原版残影块尾→本体前）;位 = Center+(0,gfxOffY) + rot 单位向
+    //      .RotatedBy(π/2·k)×2（世界系四向,π/2 间隔;dir 只翻贴图不翻位——
+    //      XNA SpriteEffects 语义,与 755 红晕同式）;rotation/origin(帧心 9,16)/
+    //      scale 同本体支。字面色不取光照=自发光 → pushGlowOps 'over' 逃逸队列
+    //      （R15-F1 FLAMEBURST 辉光同判例;XNA AlphaBlend 直色=RGB 面 tint+A 面
+    //      alpha 两旋钮,BJ604件3 分解式;★通道复用=BJ630件1 AURA 同槽 itemGlowQueue
+    //      ——仅 864 进本支,688-690 走 auraGlowTint 色解算不混用）。染料面：原版
+    //      EntitySpriteDraw 染料先于字面色——本仓 glow 通道未接染料,白模染料
+    //      近似登记债（drawProjGhosts 残影侧已整片染,本支 4 份未染,差异面=染料弹
+    //      辉光色相）。层序登记：原版本支在【本体前】（:31395 → :31578 本体）,
+    //      本仓逃逸队列恒合成后冲刷=辉光叠本体上——刃身不透明域被 4 份白模
+    //      α=44/255 顺次叠加（透见 (1−44/255)⁴≈0.47）,vanilla 本体全遮辉光;
+    //      暗处保发光 vs 层序二取一按 AURA 通道判例取前者（755 红晕 repo 先例
+    //      亦本体后直绘）。 ----
+    if (this.projId === 864) {
+      const sheet864 = projSprite(864);
+      if (sheet864 && sheet864.height >= 64) {
+        const fh864 = Math.floor(sheet864.height / 2);        // projFrames[864]=2（Main.cs:8804）
+        const hue = 0.66 + 0.33 * ((this.id % 6) / 6);        // :80378
+        const rgb864 = hslToRgb255(hue, 0.7, 0.6);
+        const a864 = Math.trunc(Math.trunc(255 * 0.7) / 4);   // (byte)178 → /4=44（byte 整除）
+        for (let k = 0; k < 4; k++) {
+          const ang = this.rot + (Math.PI / 2) * k;           // rot 单位向 .RotatedBy(π/2·k)
+          ctx.save();
+          ctx.translate(this.cx + Math.cos(ang) * 2, this.cy + Math.sin(ang) * 2);
+          ctx.rotate(this.rot);                               // rotation 同本体支
+          if (this.facing < 0) ctx.scale(-1, 1);              // dir 镜像（贴图空间）
+          r.pushGlowOps?.([{
+            tex: 'vanilla/Projectile_864.png',
+            sx: 0, sy: fh864, sw: sheet864.width, sh: fh864,   // value18=帧 1 白模
+            dx: -sheet864.width / 2, dy: -fh864 / 2,           // origin8=帧矩形心（:30621）
+            blend: 'over',
+            tint: [rgb864[0] * 0.7 / 255, rgb864[1] * 0.7 / 255, rgb864[2] * 0.7 / 255],
+            alpha: a864 / 255,
+          }], ctx.getTransform());
+          ctx.restore();
+        }
       }
     }
     // ---- ★三轮蓝队 F5①：爆炸烈焰塔 663/665/667 半帧专绘（Main.cs:34075-34086）----

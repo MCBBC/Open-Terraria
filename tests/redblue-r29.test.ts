@@ -323,7 +323,8 @@ describe('R29 §2/§7 多发型特例支（Game.ts 源断言）', () => {
   it('发条突击步枪 434：点射档位 + multishot 注册 + 动画窗+rd14 冷却', () => {
     expect(gameSrc).toMatch(/bowVid2 === 434/);
     expect(gameSrc).toMatch(/spawnClockworkBurstShot/);
-    expect(gameSrc).toMatch(/animDur434 \+ \(REUSE_DELAY_TICKS\[bowVid2\] \?\? 0\)/);
+    // ★BJ651-R3：rd 段词缀烘定（reuseDelayBakedOf,Item.cs:569）——原裸表值式退役
+    expect(gameSrc).toMatch(/animDur434 \+ reuseDelayBakedOf\(bowVid2, ps\?\.spd \?\? 1\)/);
     // 档位方向：i=1 中档 ×=1.05、i≥2 大档 ×=1.1（itemAnimation 倒数语义）
     expect(gameSrc).toMatch(/_cw434Idx === 1[\s\S]{0,140}\*= 1\.05/);
     expect(gameSrc).toMatch(/_cw434Idx >= 2[\s\S]{0,140}\*= 1\.1/);

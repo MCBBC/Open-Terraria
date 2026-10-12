@@ -28,11 +28,15 @@ for (let i = 0; i < 150; i++) {
 await new Promise((r) => setTimeout(r, 4000));
 await page.evaluate(() => document.getElementById('sw-welcome-announce')?.remove());
 // 场景：夜（用户日志 night）+玩家站 Slachi 旁静观（无 pin——自然态）
+// ★BJ649 收口验证：把 Slachi 钉回物证位（行 272 平台顶,feet=4352,x≈3903 列），
+// 玩家在旁（回家传送视野门压制）——观察修复后是否仍 0.02px/t 龟速原地蹦跳
 await page.evaluate(() => {
   const g = window.__swGame;
   const n = g.entities.npcs.find((x) => x.npcKey === 'town_slime_cool');
   g.world.clock.timeOfDay = 0.9;
-  g.player.x = n.cx - 40; g.player.y = n.y; g.player.vx = 0; g.player.vy = 0;
+  n.x = 3903 * 16 + 8 - n.w / 2; n.y = 272 * 16 - n.h;   // feet 恰贴平台顶
+  n.vx = 0; n.vy = 0;
+  g.player.x = n.cx + 40; g.player.y = n.y; g.player.vx = 0; g.player.vy = 0;
   window.__rows = [];
   const st = g.world.store;
   const pump = () => {

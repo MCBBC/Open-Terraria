@@ -277,10 +277,13 @@ describe('BJ617 B组 件2：resolveLoadText 三段择源（IDB → FS 备份 →
 
   it('B7 mainFlow 接线锚：三段择源装配+陈旧副本诚实标注（仅限有备份面的键）', () => {
     const s = readFileSync(resolve(__dirname, '../src/mainFlow.ts'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-    expect(s).toContain('const resolved = await resolveLoadText(key, () => lsGetSafe(key));');   // ★R13-F2：lsRead 安全垫化
+    expect(s).toContain('let resolved = await resolveLoadText(key, () => lsGetSafe(key));');   // ★R13-F2：lsRead 安全垫化;★BJ655 let=授权后重跑择源
     expect(s).toContain("ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', resolved.file));");
     expect(s).toContain("if (backupTargetOfKey(key)) ui.toast(Lang.text('Mods.SandboxWorld.Toast.LoadStaleLocalCopy'));");
-    expect(s).toContain("if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();");
+    // ★BJ655：prompt 手势链内当场授权+FsBackupNeedAuth toast 退役（主流程零 toast）
+    expect(s).toContain('&& await fsBackupRequestPermission()) {');
+    expect(s).not.toContain('fsBackupAuthHintFire');
+    expect(s).not.toContain('FsBackupNeedAuth');
   });
 });
 
@@ -326,7 +329,10 @@ describe('BJ617 C组 件3：l10n 陈旧 flat 草稿不再遮蔽嵌套正确版',
     expect(zh.Mods['SandboxWorld.Toast.FsBackupRestored']).not.toContain('个存档');
     // 其余同族键随重复组删除回落嵌套正确版
     expect(zh.Mods['SandboxWorld.Settings.FsBackupDir']).toBe('本地备份目录（增强）');
-    expect(zh.Mods['SandboxWorld.Toast.FsBackupNeedAuth']).toContain('本地备份目录');
+    // ★BJ655：FsBackupNeedAuth toast 退役——主流程 prompt 静默+读档手势链内当场授权,
+    //  授权状态提示面=设置页「待重新授权」（键随 toast 面移除,三语言产物零残留）
+    expect(zh.Mods['SandboxWorld.Toast.FsBackupNeedAuth']).toBeUndefined();
+    expect(en.Mods['SandboxWorld.Toast.FsBackupNeedAuth']).toBeUndefined();
   });
 
   it('C3 全语言 overlay：非 en/zh 语言经 enBase 兜底可解析（light 抽检,全量闸=l10n-audit）', () => {

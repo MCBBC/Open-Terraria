@@ -52,7 +52,9 @@
 //      「不再逐条取 lightAt,否则与全屏 pass 双重相乘会过暗」）——每个残影像素本就按
 //      其屏幕位吃格光,逐槽再乘=双乘过暗。563 的逐槽 GetColor（:35291）同理由全屏乘
 //      承载（563 轨面BJ235 落地,见 drawHslMidpointTrail 注）。
-//   ③ 864 辉光色相 whoAmI%6 项以 0 档近似（环内同色;原版随弹序异色）;
+//   ③ 864 辉光色相 whoAmI%6 项以 0 档近似（环内同色;原版随弹序异色）
+//      ——★BJ650件1 retired（2026-10-12）：whoAmI 通道落地（DrawGhostOpts.whoAmI）,
+//      色式 1:1（hue 6 档循环 + A 面 (byte)178/4=44）,864 消费位传本实体 id;
 //   ④ 931 FQW 色玩家名彩蛋支（Cenx 等四人名,GetFairyQueenWeaponsColorFull switch）
 //      未移植（常名不可达,色式主干 1:1）;
 //   ⑤ 388 专用块 origin=(w/2,h/2)（proj 尺寸系 :34921）以帧矩形中心承载（同帧同尺寸
@@ -326,6 +328,9 @@ export interface TintCtx {
   bodyScale: number;
   vxLen: number;         // |velocity|（833-835 白染门）
   rng: () => number;     // 916 播种随机（seed=timeLeft LCG,循环内顺序消费）
+  /** ★BJ650件1：whoAmI（Projectile 实体序,Projectile.cs:80378 GetFloatingDagger-
+   *  MinionGlowColor 消费)——缺省 0=旧 0 档近似（登记③ retired:864 消费） */
+  whoAmI?: number;
 }
 
 /** 返回 [r,g,b] 染色（0-255）与 aMul（α 乘子=特支 A 面系数,1=A≡fade 档）。 */
@@ -377,10 +382,18 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
     if (c.i > 80) aMul *= 0.15 * getLerp(120, 80, c.i);
     return { rgb, aMul };
   },
-  864: () => {                                                               // FDMGlow A/=4 :31237-31240
-    const hue = 0.66 + 0.33 * (0 / 6);                    // whoAmI%6——0 档近似（登记③）
+  864: (c) => {                                                              // FDMGlow A/=4 :31237-31240
+    // ★BJ650件1（2026-10-12）色式精化（GetFloatingDaggerMinionGlowColor P.cs:80377-80381
+    //  1:1）：hue = 0.66 + 0.33×(whoAmI%6)/6（6 档蓝→品红循环,随弹序异色——旧 0 档
+    //  近似登记③ retired）;s=0.7/l=0.6 → hslToRgb255;×0.7f = XNA 逐字节截断
+    //  （R/G/B 面,byte 噪声在染色 bake 面内）;A 面：255×0.7→(byte)178 → /4=44
+    //  （C# byte 整除,旧 aMul=0.25 忽略 ×0.7 的 A 通道=1.45× 过亮,retired）。
+    const hue = 0.66 + 0.33 * (((c.whoAmI ?? 0) % 6) / 6);
     const h0 = hslToRgb255(hue, 0.7, 0.6);
-    return { rgb: [h0[0] * 0.7, h0[1] * 0.7, h0[2] * 0.7], aMul: 0.25 };
+    return {
+      rgb: [h0[0] * 0.7, h0[1] * 0.7, h0[2] * 0.7],
+      aMul: Math.trunc(Math.trunc(255 * 0.7) / 4) / 255,   // (byte)178 → /4=44（byte 整除）→ 44/255
+    };
   },
   686: (c) => {                                                              // 紫/黑两段 :31241-31252
     const t = c.i / c.start;
@@ -493,6 +506,8 @@ export interface DrawGhostOpts {
   opacity: number;
   vxLen: number;
   spriteDirection: number;      // 当前 spriteDirection 语义（dirEdge 锚/镜像偏移;登记①）
+  /** ★BJ650件1：whoAmI（弹实体序,864 辉光色相消费;缺省 0=旧 0 档近似） */
+  whoAmI?: number;
 }
 
 /** 通用残影绘制（Main.cs:31134-31349 循环 1:1）。在【本体之前】调用（原版残影块
@@ -563,7 +578,7 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     } else if (tint) {
       const t = tint({ id: o.id, i, start, end, fade, ai0: o.ai0, ai1: o.ai1,
         timeLeft: o.timeLeft, opacity: o.opacity, bodyScale: o.bodyScale,
-        vxLen: o.vxLen, rng });
+        vxLen: o.vxLen, rng, whoAmI: o.whoAmI });
       if (t) { rgb = t.rgb; aMul = t.aMul; if (t.gScaleMul) gScaleEff *= t.gScaleMul; }
     }
     const fadeEff = alphaOverride >= 0 ? alphaOverride : fade;

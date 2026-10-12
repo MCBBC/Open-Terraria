@@ -17215,6 +17215,9 @@ export class Renderer {
     /** ★BJ603 掉落 velocity 旋转（Main.cs:39284 num — 光罩/复本随本体同旋转量）：
      *  缺省 undefined=轴对齐（手持/tile 面）;rot+ox/oy=绕 (ox,oy) 旋转（世界系） */
     rot?: number; ox?: number; oy?: number;
+    /** ★BJ650件4：dest 尺寸覆写（XNA EntitySpriteDraw scale 参——694-696 爆闪弹
+     *  第二笔 color×0.3 × scale×1.1 Main.cs:32536;缺省 undefined=dest≡源矩形） */
+    dw?: number; dh?: number;
   }> }> = [];
   /** 手持段同帧双绘去重（坐椅/睡床早绘+主段再绘——armorGlowCollected 同判例；
    *  静持/挥舞互斥共用一集,flush 期重置） */
@@ -17768,6 +17771,9 @@ export class Renderer {
         const gClamped = Math.max(0, Math.min(1, op.alpha));
         ctx.globalCompositeOperation = op.blend === 'add' ? 'lighter' : 'source-over';
         ctx.globalAlpha = gClamped;
+        // ★BJ650件4：dest 尺寸覆写（缺省恒等——既有消费面零变化）
+        const dWidth = op.dw ?? op.sw;
+        const dHeight = op.dh ?? op.sh;
         // ★BJ603 旋转臂（rot+ox/oy 缺省 undefined=轴对齐恒等——掉落 velocity
         //   旋转面,绕 (ox,oy) 世界点旋转后再画 dest 矩形）
         if (op.rot) {
@@ -17796,33 +17802,33 @@ export class Renderer {
           const needBake = bake[0] < 0.999 || bake[1] < 0.999 || bake[2] < 0.999;
           const needBoost = boost[0] > 1e-4 || boost[1] > 1e-4 || boost[2] > 1e-4;
           if (!needBake && !needBoost) {
-            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);   // R==A 字节等=旧路径
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);   // R==A 字节等=旧路径
             continue;
           }
           if (needBake) {
             const sc = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, bake, 1);
-            if (sc) ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
-            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            if (sc) ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
+            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
           } else {
-            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
           }
           if (needBoost) {
             ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = 1;
             const sc2 = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, boost, 1);
-            if (sc2) ctx.drawImage(sc2, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
-            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            if (sc2) ctx.drawImage(sc2, 0, 0, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
+            else ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
           }
           continue;
         }
         if (op.tint[0] < 0.999 || op.tint[1] < 0.999 || op.tint[2] < 0.999) {
           const sc = this.tintSliceRGB(img, op.sx, sy, op.sw, op.sh, op.tint, 1);
           if (sc) {
-            ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+            ctx.drawImage(sc, 0, 0, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
             continue;
           }
         }
-        ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, op.sw, op.sh);
+        ctx.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
       }
     }
     ctx.restore();
@@ -17924,6 +17930,8 @@ export class Renderer {
   pushGlowOps(ops: Array<{
     tex: string; sx: number; sy: number; sw: number; sh: number;
     dx: number; dy: number; blend: 'add' | 'over'; tint: [number, number, number]; alpha: number;
+    /** ★BJ650件4：dest 尺寸覆写（XNA scale 参,缺省=源矩形——flushItemGlow 消费） */
+    dw?: number; dh?: number;
   }>, m: DOMMatrix): void {
     if (!ops.length) return;
     this.itemGlowQueue.push({ m, k: this._worldLowK, ops });

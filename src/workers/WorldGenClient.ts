@@ -4,7 +4,7 @@
 import { World } from '../world/World';
 import { WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① 中止判别（与 WorldGenUnavailable 判例同形:不触发 fallback）
 import type { GenConfigDTO, WorldWorkerEvent, WorldWorkerRequest } from './protocol';
-import { getModBridgePayload } from '../mods/bridge';
+import { getModBridgePayload, getModGenSrc } from '../mods/bridge';
 
 export interface PreviewFrame {
   width: number; height: number;
@@ -142,6 +142,11 @@ export class WorldGenClient {
     try {
       const payload = getModBridgePayload();
       if (payload) w.postMessage({ id: this.nextId++, type: 'applyModIds', payload });
+      // ★622:mod gen pass 源码推(worker 两步 eval=gen 注册闭环;★622c 验证 13 pass ✓)
+      try {
+        const genSrc = getModGenSrc();
+        if (genSrc) w.postMessage({ id: this.nextId++, type: 'applyGenSrc', payload: genSrc });
+      } catch { /* gen src 不可用忽略(terrain 缺=可容忍) */ }
     } catch { /* 握手前失败忽略,后续 ensure 重推 */ }
     // 握手 ping（超时则视为不可用）
     return new Promise<Worker>((resolve, reject) => {

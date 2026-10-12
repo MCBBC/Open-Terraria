@@ -46,6 +46,8 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
   // ★★对抗修复批②2026-09-01（C-F1 近链/C-F4 受理核/C-F6 松露条件）
   queryRoom, acceptTownNPCAtHouse, checkHousesNearAPlayer,
+  // ★BJ654 房检扫描视觉（RichRoomCheckFeedback 采集通道+补跑+发射）
+  createRoomScanTrace, backfillRoomScanScoring,
   expandedMushroomCount, truffleHomeConditionOk, truffleSurfaceOk,
   MUSHROOM_TILE_THRESHOLD,
   // ★SW-BO1 2026-09-07（债①优先型锁/债③夜扫清场）
@@ -520,7 +522,7 @@ import { TideSlash } from '../entities/TideSlash';
 import { FirstFractalSlash } from '../entities/FirstFractal';
 import { ChainsawProj } from '../entities/ChainsawProj';
 import { ClingerStaffWallProj, computeClingerWallSpawn } from '../entities/ClingerStaffWallProj';   // ★BJ286 爬藤怪法杖 482 诅咒焰墙
-import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';
+import { MinionProj, pickSentryLandingSpot, minionTrueBox, sentrySpawnBox, auraLightBandCast } from '../entities/MinionProj';
 import { WhipProj, whipUseTimeFold } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
 import { updateFakeFishSchool, clearFakeFish, repelParticlesAt } from '../entities/FakeFish';
@@ -553,6 +555,7 @@ import { holidayPickupSubstitute } from '../drops/SeasonalPickups';   // ★SW-B
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { fadingParticles } from '../fx/FadingParticles';
+import { spawnRoomCheckScan } from '../fx/HousingScanFx';   // ★BJ654 房检扫描视觉发射
 import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJob, hardmodeRepairJob, type HardmodeJob } from '../world/gen/vanilla/HardmodePass';
 // ★SW-BJ10 2026-09-07：运行时平台帧重算复用生成期权威（TileFrameImportant 平台支镜像
 //  vanilla/FinalCleanupPass:293,IIIII190 已导出面；生成期/运行时同表单源防漂移——
@@ -2450,6 +2453,19 @@ export const REUSE_DELAY_TICKS: Record<number, number> = {
 /** vid → reuseDelay 拍数（非表件 0） */
 export function reuseDelayOf(vid: number): number {
   return REUSE_DELAY_TICKS[vid] ?? 0;
+}
+/** vid → reuseDelay 词缀烘定拍数（★BJ651-R3 2026-10-12：Item.cs:569
+ *  `reuseDelay = (int)Math.Round((float)reuseDelay * spd)`——f32 银行家
+ *  =roundCSf32Mul,与 useTime/useAnimation 同段同式（Item.cs:566-568）;非表件 0。
+ *  受影响件=REUSE_DELAY_TICKS×词缀池交集：434(GunsBows 池)+3787/3269/3870/3541
+ *  (Magic 池)可掷 spd 词缀;27 召唤杖=Summons 池【无】spd 词缀（PrefixLegacy.cs:39-42
+ *  亲读,tests/bj651 池交集锁）——roundCSf32Mul(rd,1)=rd 零漂移。
+ *  ★攻速配饰 M【不】进此式：原版 reuseDelay 只在 Prefix 烘定一次（ApplyItemAnimation
+ *  Player.cs:4482 `reuseDelay = sItem.reuseDelay` 原值拷贝,SetItemAnimation 乘区
+ *  只折 useAnimation,ApplyReuseDelay :53475-53480 原值回灌） */
+export function reuseDelayBakedOf(vid: number, spd: number): number {
+  const rd = REUSE_DELAY_TICKS[vid];
+  return rd ? roundCSf32Mul(rd, spd) : 0;
 }
 /** 玩家出生点 failover 核（纯函数，tests/finalzero-game-domain 直测）——
  *  Player.Spawn :37851-37858 的「床点 vs 世界初始」两源复验式：
@@ -6859,6 +6875,8 @@ export class Game implements GameHooks {
             },
           },
         );
+        // ★622:mod gen passes=worker 侧 applyGenSrc 注册(generateWorld 内含 mod pass;
+        //  主线程 dispatch 撤=worker 路径 handles it natively)
         await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
         onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
         applyDifficulty();
@@ -11021,12 +11039,13 @@ export class Game implements GameHooks {
               const stl = this.world.store;
               const cT2 = Math.floor(nx.cx / 16);
               const probeX = cT2 + n.facing;
-              // 简化版 walkPrediction 核心逻辑:前视列扫 j=-1..4 找 solid/platform
+              // 简化版 walkPrediction 核心逻辑:前视列扫 j=-1..4 找支撑
+              // ★BJ656 谓词换道 isVanillaTileSolid(=walkPrediction 同式,平台计入/
+              // 家具顶不计)——仪表面与玩法面同锚,防探针漂移
               for (let dj = -1; dj <= 4; dj++) {
                 const py = Math.floor(n.cy / 16) + dj;
                 if (!stl.inBounds(probeX, py)) continue;
-                const pi = stl.idx(probeX, py);
-                if (stl.type[pi] !== 0 && (stl.isSolid(probeX, py) || stl.isPlatform(probeX, py))) return 'ok';
+                if (stl.isVanillaTileSolid(probeX, py)) return 'ok';
               }
               return 'af';
             } catch (e) { return 'ERR:' + String(e).slice(0, 60); }
@@ -13108,12 +13127,23 @@ export class Game implements GameHooks {
     for (const bucket of [this.entities.enemies, this.entities.critters, this.entities.projectiles, this.entities.drops, this.entities.npcs]) {
       for (const ent of bucket) {
         const l = (ent as Enemy).lightRGB;
-        if (!l) continue;
-        const e2 = ent as Enemy;
-        // 光源像素坐标覆盖（火把僵尸 590/591 手持火把偏移格；缺省=实体中心）
-        const at = (ent as Enemy).lightRGBAt;
-        const tx2 = Math.floor((at ? at.x : e2.cx) / TILE), ty2 = Math.floor((at ? at.y : e2.cy) / TILE);
-        if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
+        if (l) {
+          const e2 = ent as Enemy;
+          // 光源像素坐标覆盖（火把僵尸 590/591 手持火把偏移格；缺省=实体中心）
+          const at = (ent as Enemy).lightRGBAt;
+          const tx2 = Math.floor((at ? at.x : e2.cx) / TILE), ty2 = Math.floor((at ? at.y : e2.cy) / TILE);
+          if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
+        }
+        // ★C16b-R17（2026-10-12）：带式光源通道（首消费=AI_137 场域蓝光带 688-690）——
+        //  PlotTileLine+CastLightOpen 逐开放格满色 AddLight（:69983-69985 1:1）。旧
+        //  BJ606-R2 点光折算（带心单点）在暗处只亮中心 1-2 格,场缘电弧尘落点光衰减尾
+        //  ≈2% α=不可见=用户三返「隔空伤害无视觉」根因（运行时复核 lightRim
+        //  [6,21,30] 物证;白昼开阔地探针恒绿=假绿面）。
+        const band = (ent as MinionProj).lightBand;
+        if (band) {
+          auraLightBandCast(this.world.store, band,
+            (tx, ty, r, g, b) => this.lighting.addLight(tx, ty, r, g, b));
+        }
       }
     }
     // 水母潜水装备 1860 浸水发光（Player.cs:15343-15358：!wet 微光 0.225/0.05/0.15、
@@ -13401,7 +13431,11 @@ export class Game implements GameHooks {
     // reuseDelay; reuseDelay=0`）。itemAnimation>0 期间持物姿势延续——本仓以
     // swing 窗延长同构表达（复用冷却侧由 cycleCooldown 收口,见 case 'yoyo' 等）。
     // 非表件零改动
-    dur += reuseDelayOf(vid);
+    // ★BJ651-R3（2026-10-12）：rd 词缀烘定——Item.cs:569 `reuseDelay = (int)Math.Round(
+    //  (float)reuseDelay * spd)`（f32 银行家,与 useTime/useAnimation 同段同式）。
+    //  旧裸表值=spd 词缀整缺;★攻速配饰 M 不折（ApplyItemAnimation :4482 原值拷贝,
+    //  SetItemAnimation 乘区只折 useAnimation——见 reuseDelayBakedOf 注）
+    dur += reuseDelayBakedOf(vid, this.heldPrefixStat()?.spd ?? 1);
     this.swing = {
       t: dur, dur, item: ITEM_BY_KEY[def.key] ?? 0,
       useStyle: us,
@@ -15453,6 +15487,20 @@ export class Game implements GameHooks {
       return;
     }
 
+    // ★BJ652 件3（2026-10-12）湿身灭火门（ItemCheck_CheckCanUse_Inner Player.cs:52751
+    //  逐字四弹型）：`if (wet && !lavaWet && (sItem.shoot == 85 || sItem.shoot == 15 ||
+    //  sItem.shoot == 34 || sItem.shoot == 1122)) flag = false`——shoot 85=Flames
+    //  （506 喷火器/1910 精灵熔炉）、15=BallOfFire（112 火花之花）、34=Flamelash
+    //  （218 火焰鞭）、1122=红闪电（6173 电弧涌动,1457 新件 Item.cs:47557
+    //  DefaultToStaff(1122)）。语义=湿身（任意液体含蜜,岩浆豁免）灭火,can-use 门=
+    //  本仓 updateUse 早退位（TryStartUse 同位;useTime 递减在 postUpdate,早退不卡）。
+    //  wet=lavaWet 读 Player 物理相最新帧（wetSticky≙wet/:28060,splashLavaWet≙
+    //  lavaWet/:27883——BJ89/RB20a 定谳名）。shoot 走 itemCombat 数据面直查（506/1910
+    //  有 useAmmo,combatWeapon 返 null,不可走该面）。
+    if (heldDef && this.player.wetSticky && !this.player.splashLavaWet) {
+      const wetShoot = itemCombat(heldDef.vid ?? -1)?.shoot;
+      if (wetShoot === 85 || wetShoot === 15 || wetShoot === 34 || wetShoot === 1122) return;
+    }
     // ★mod item use 分流（2026-10-04,docs/mod-loader-design.md §2.3）：mod 物品
     //  （vid≡30000+）经 entry.js 的 sw.itemUse 注册了处理器时最优先接管——原版
     //  专支（帕鲁钻地龟/无人机等）同位先例；返回 true=已消费（useTime 节奏由
@@ -15752,7 +15800,11 @@ export class Game implements GameHooks {
         && this.player.useTime === 0 && canChain && (swingOver || reuseSpd < animSpd)) {
         this.swing = {
           t: animSpd, dur: animSpd, item: held!.id,
-          dmg: cwMelee ? Math.max(1, Math.round(cwMelee.damage * (ps?.dmg ?? 1))) : undefined,
+          // ★BJ651-R2 站①（2026-10-12）：词缀烘定=Item.cs:577 `(int)Math.Round(
+          //  (float)damage * dmg)` f32 银行家=roundCSf32Mul——旧 f64 half-up Math.round
+          //  在 f32 中点档差 1（777: 15×1.1 原版 16/旧 17）。玩家伤害乘区不在本站
+          //  （命中侧 :36558/:37098 damageMult('melee') 消费=GetWeaponDamage 第二步）
+          dmg: cwMelee ? Math.max(1, roundCSf32Mul(cwMelee.damage, ps?.dmg ?? 1)) : undefined,
           kb: cwMelee ? cwMelee.knockback * (ps?.kb ?? 1) : undefined,
         };
         this.player.useTime = reuseSpd;
@@ -17562,8 +17614,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 const mVid = (mDef.vid ?? -1);
                 const mC = itemCombat(mVid);
                 const rKind2 = useAmmo === 97 ? 'bullet' as const : 'rocket' as const;
-                const dmg2 = Math.round(mzBase * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind2))
-                  + (mC?.damage ?? 0);
+                // ★BJ651-R2 站②（2026-10-12）：原版两步+弹药乘区（AI_075 :68015
+                //  `Damage = player.GetWeaponDamage(...)` → PickAmmo :54200
+                //  `Damage += (int)((float)num × GetWeaponDamageMultiplier(item))`）：
+                //  ①武器段=烘定 roundCSf32Mul（Item.cs:577）→ GetWeaponDamage
+                //  truncCSf32MulBias（Player.cs:54066,含 5E-06 偏置）——旧单次 f64
+                //  Math.round 组合乘在中点档差 1（50×1.05 原版 52/旧 53）;
+                //  ②弹药段乘分道乘区+截断（主枪路径 :17672 同式,D-❌② 2026-08-21
+                //  已定谳归位,本站漏网）——旧裸加不乘
+                const dmg2 = truncCSf32MulBias(this.player.rangedDamageMult(rKind2), roundCSf32Mul(mzBase, ps?.dmg ?? 1))
+                  + Math.trunc((mC?.damage ?? 0) * this.player.rangedDamageMult(rKind2));
                 const kb2 = mzKb * (ps?.kb ?? 1) + (mC?.knockBack ?? 0);
                 if (mzId === 714) {
                   // MK2：烟花弹 715-718（Specific 表解析），变体驱动弹道
@@ -18422,7 +18482,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const animDur434 = bowVid2 === 434
           ? Math.max(1, roundCSf32Mul(bowC?.useAnimation ?? 12, ps?.spd ?? 1)) : 0;
         if (bowVid2 === 434) {
-          this.player.useTime = animDur434 + (REUSE_DELAY_TICKS[bowVid2] ?? 0);
+          // ★BJ651-R3：rd 段同 Prefix 烘定（Item.cs:569 round f32 银行家）——旧裸表值
+          this.player.useTime = animDur434 + reuseDelayBakedOf(bowVid2, ps?.spd ?? 1);
         } else {
           this.player.useTime = this.cycleCooldown(bowVid2,
             Math.max(1, roundCSf32Mul(bowC?.useTime ?? rg?.speed ?? 100, ps?.spd ?? 1)));
@@ -19377,7 +19438,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ? 'melee' as const : 'ranged' as const;
     const cw = {
       ...cwIn,
-      damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind))), // ⑥ pen 移 hit 时
+      // ★BJ651-R2 站③（2026-10-12）：原版两步——烘定 roundCSf32Mul（Item.cs:577
+      //  `(int)Math.Round((float)damage * dmg)`）→ GetWeaponDamage truncCSf32MulBias
+      //  （Player.cs:54066 `(int)((float)damage × mult + 5E-06f)`;乘区=dmgKind 分流
+      //  GetWeaponDamageMultiplier :54031-54055）。旧单次 f64 Math.round 组合乘在中点
+      //  档差 1（链锤 162: 15×1.1 原版 16/旧 17）。cw.damage 消费面=NewProjectile
+      //  Damage 实参（:43060 GetWeaponDamage 同位）——站①不同,勿在此再乘
+      damage: Math.max(1, truncCSf32MulBias(this.player.damageMult(dmgKind), roundCSf32Mul(cwIn.damage, ps?.dmg ?? 1))), // ⑥ pen 移 hit 时
       knockback: cwIn.knockback * (ps?.kb ?? 1),
       // ⑧ 词缀乘区出口统一折算（I:558-568）：shtspd→shootSpeed、spd→useTime（I:561）
       shootSpeed: ((cwIn as { shootSpeed?: number }).shootSpeed ?? 0) * (ps?.shtspd ?? 1),
@@ -19750,8 +19817,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const owner = this.player;
         const whipObj = new WhipProj(
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
-          Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
-          whip.knockback, whip.useTime, whip.shootSpeed,
+          // ★BJ651-R2 站④（2026-10-12）：词缀烘定=Item.cs:577 roundCSf32Mul——旧 f64
+          //  Math.round 中点档差 1（鞭 4678: 55×1.1 原版 60/旧 61）。minionDamage 乘区
+          //  在 WhipProj.spawn dmgNow（GetWeaponDamage 第二步 :54066,同批 truncCSf32MulBias）
+          Math.max(1, roundCSf32Mul(cwIn.damage, ps?.dmg ?? 1)),
+          // ★BJ651-R2 站④附（2026-10-12）：anim 实参回 Raw——cw.useTime 已烘过词缀
+          //  （:19431 出口统一折算）,ctor 再乘 prefixSpd=双重烘定（BJ640 引入回归：
+          //  spd 0.9 鞭 30→25 应 27→25,快 3t）。单点烘定在 WhipProj ctor（roundCSf32Mul）
+          whip.knockback, cwIn.useTime, whip.shootSpeed,
           () => owner,   // ownerRef：AI_165 全程读 Main.player[owner]（:48545/:48550 锚/:48575 补鞭）——无 owner 态杀门（唯一 Kill :48552-48556）,死亡鞭飞满程;旧注 :49309-49331 系 AI_160_Kites 误锚（回滚批 2026-09-08）
           // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
           () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
@@ -19778,7 +19851,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // (int) 截断 =SetItemAnimation :4445 val=(int)(base×mult)；鞭 itemTime=itemAnimation
         // （AI_165_Whip :48572 MatchItemTimeToItemAnimation）→ useTime 与挥动窗同值同拍
         // ★BJ640（2026-10-11）：词缀 spd 先烘定（Item.Prefix :567）再乘 fold——烘定序
-        const scaledAnim = Math.max(1, Math.floor(roundCSf32Mul(whip.useTime, ps?.spd ?? 1) * fold));
+        // ★BJ651-R2 站④附（2026-10-12）：烘定基回 Raw（cwIn.useTime）——whip.useTime
+        //  已是 cw 出口烘定值,再 roundCSf32Mul=双重烘定（BJ640 引入回归,同 ctor 实参
+        //  面）；烘定单点=ctor/scaledAnim 各一次 roundCSf32Mul(raw,spd)
+        const scaledAnim = Math.max(1, Math.floor(roundCSf32Mul(cwIn.useTime, ps?.spd ?? 1) * fold));
         this.player.useTime = scaledAnim;
         whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
         // 鞭 useStyle 1 挥动动画 + noUseGraphic=true（DefaultToWhip Item.cs:47473
@@ -19827,7 +19903,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (sentries.length >= this.player.maxSentries) sentries[0].dead = true;
         }
         const owner = this.player;
-        const summonDmg = Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))); // 基伤×词缀（乘区由 MinionProj live 结算，勿用预乘的 cw.damage）
+        // ★BJ651-R2 站⑤（2026-10-12）：词缀烘定=Item.cs:577 roundCSf32Mul（f32 银行家）
+        //  ——旧 f64 Math.round 中点档差 1（杖 3249: 55×1.1 原版 60/旧 61）。
+        //  minionDamage 乘区由 MinionProj live 结算（勿用预乘的 cw.damage）
+        const summonDmg = Math.max(1, roundCSf32Mul(cwIn.damage, ps?.dmg ?? 1));
         const slotIdx = this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length;
         // SpawnMinionOnCursor（Player.cs:48745-48768）：出生点 = Main.MouseWorld
         // （鼠标世界坐标,Main.cs:2809-2813 → camera.screenToWorld）经
@@ -19895,7 +19974,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const spot = pickSentryLandingSpot(this.world.store, mwx, mwy, critVid,
             this.world.store.h);
           if (critVid === 5463) spot.y = mwy;      // speedY11=0 同帧置零（:48739）
-          spawned = spawnMinion(cw.shoot, spot);
+          // ★BJ630-R2（2026-10-12）出膛中心化（NewProjectile :10879-10880 verbatim：
+          //  `position.X = X − width*0.5; position.Y = Y − height*0.5`——X/Y=【中心】）：
+          //  PickSentryLandingSpot 返回值 = NewProjectile 中心点（spawnY=i×16−24 对
+          //  377=地表行顶−40）。此前直喂 MinionProj top-left 构造=整盒低半高（377
+          //  +25px→出膛盒底已嵌地 10px→实心下行承接门 oldBottom≤tileTop
+          //  （Collision.cs:2394）只捕下一行顶→静驻嵌 16px,足=表面+19）=用户实报
+          //  「贴图陷 1 格」根因（F3 盒叠进地砖目测「正常贴地」;平台面靠 BJ-C9-SP
+          //  embedPlatSnap 分支补偿故未显）。中心化后盒底=面上 15px→表面/平台承接门
+          //  常规可达→静驻贴面（盒底=面顶）,足=表面+3、slice 缘+5=BJ612「微陷 5px」
+          //  真值归位;「嵌 10px 驻留」系同根 top-left 误读的补偿面,embedPlatSnap
+          //  spawn 输入随之消失（分支休眠保留,BJ608 收窄面零动）。尺寸=minionTrueBox
+          //  单源（SetDefaults 真盒:308 80×74 :4001-4002/377 66×50 :4619-4620/
+          //  966 18×60 :9146-9147/641/643 32×32 :6919-6920/:6932-6933/1025 42×38
+          //  :9710-9711）。纯函数 sentrySpawnBox（MinionProj.ts 单源,判别测试直驱）。
+          spawned = spawnMinion(cw.shoot, sentrySpawnBox(cw.shoot, spot));
           spawned.vx = 0;                          // speedX9=0（:48730）
           spawned.vy = critVid === 5463 ? 0 : 15;  // speedY11（:48731/:48740）
         } else {
@@ -20537,7 +20630,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               fired: 1,
               maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
                 itemCombat(critVid)?.useAnimation ?? animDurSf, cw.useTime,
-                itemCombat(critVid)?.useAnimation, animDurSf, reuseDelayOf(critVid))?.shots ?? 1,
+                itemCombat(critVid)?.useAnimation, animDurSf, reuseDelayBakedOf(critVid, this.heldPrefixStat()?.spd ?? 1))?.shots ?? 1,
               fire: () => { burstSf.n++; fireArrow3053(burstSf.n - 1, true); },
             };
             // ★F-03：窗已拉伸（付款点）→ 窗冷却 = 拉伸窗本身（53）;旧式
@@ -20651,7 +20744,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               //（正常 12/4 → 3 不变;rd=18 天界碎裂见 REUSE_DELAY_TICKS 非字面补录）
               maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
                 cw.useAnimation ?? animDur937, cw.useTime,
-                itemCombat(critVid)?.useAnimation, animDur937, reuseDelayOf(critVid))?.shots ?? 1,   // 1+⌊11/4⌋=3
+                itemCombat(critVid)?.useAnimation, animDur937, reuseDelayBakedOf(critVid, this.heldPrefixStat()?.spd ?? 1))?.shots ?? 1,   // 1+⌊11/4⌋=3
               fire: () => { mid937 = true; fireFracture(); mid937 = false; },
             };
             // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）
@@ -20773,7 +20866,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // useAnimation 行 → 慢施分叉旁路=slowMagicSprayPlan 登记债）
               maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
                 cw.useAnimation ?? animDur6152, cw.useTime,
-                itemCombat(critVid)?.useAnimation, animDur6152, reuseDelayOf(critVid))?.shots ?? 1,
+                itemCombat(critVid)?.useAnimation, animDur6152, reuseDelayBakedOf(critVid, this.heldPrefixStat()?.spd ?? 1))?.shots ?? 1,
               fire: () => { midSwing6152 = true; fireBloom6152(); midSwing6152 = false; },
               gate: (): boolean => {
                 const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 0;
@@ -20963,7 +21056,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // useAnimation 行 → 慢施分叉旁路=slowMagicSprayPlan 登记债）
               maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
                 cw.useAnimation ?? animDur6173, cw.useTime,
-                itemCombat(critVid)?.useAnimation, animDur6173, reuseDelayOf(critVid))?.shots ?? 1,
+                itemCombat(critVid)?.useAnimation, animDur6173, reuseDelayBakedOf(critVid, this.heldPrefixStat()?.spd ?? 1))?.shots ?? 1,
               fire: fireArcSurge6173,
             };
             // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）
@@ -21319,11 +21412,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
               return this.player.checkMana(cost);
             },
-            // 伤害每拍刷新（Projectile.cs:63630）：damage=(int)(手持物 damage×
-            // player.magicDamage)——手持物面板 = 基础×词缀 dmg（Item.Prefix :558 round），
+            // 伤害每拍刷新（Projectile.cs:63630 → :67596 `damage = (int)((float)
+            // player.inventory[player.selectedItem].damage * player.magicDamage)`）：
+            // 手持物面板 = 烘定 roundCSf32Mul（Item.Prefix :558 round f32 银行家——
+            // ★BJ651-R2 站⑥：旧内层 f64 Math.round 组合式;此行原版【无】+5E-06 偏置,
+            // 与 GetWeaponDamage :54066 异,用 truncCSf32Mul 非 Bias）,
             // 魔伤乘区走 player.damageMult('magic')（=原版 player.magicDamage 全链：
             // 装备+MagicPower/魔力眩晕/魔力过热/食物/星云），channel 期 buff 变动即时生效
-            () => Math.trunc(Math.round(cwIn.damage * (ps?.dmg ?? 1)) * this.player.damageMult('magic')));
+            () => truncCSf32Mul(this.player.damageMult('magic'), roundCSf32Mul(cwIn.damage, ps?.dmg ?? 1)));
           prism.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           // ★BJ489 def-3：prism(633) 挂手晶体无伤面,掷率=632 光棱 PrismProng 面
           //  rollVanillaHitCrit（magic 旗,命中拍动态;传播链类缺省 0.04 路由门）——
@@ -21476,7 +21572,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // ★F-03：慢施那一击按缩放对计发数（swing.dur 已由付款点拉伸 →
             // A_eff=dur−1−rd;正常对透传 spray27 原值,R26 冻结面零改动）
             maxShots: slowMagicSprayPlan(this.player.slowMagicUse, animDur27, cw.useTime,
-              itemCombat(critVid)?.useAnimation, this.swing.dur, reuseDelayOf(critVid))?.shots
+              itemCombat(critVid)?.useAnimation, this.swing.dur,
+              reuseDelayBakedOf(critVid, this.heldPrefixStat()?.spd ?? 1))?.shots
               ?? spray27.shots,
             fire: fireAgain27,
             ...(winTail !== undefined ? {
@@ -40468,7 +40565,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   housingQuery(x: number, y: number): void {
-    const q = housingCheckAt(this.world.store, this.housingOccupied(), x, y);
+    // ★BJ654（2026-10-12 用户实报「原版住房检测有扫描视觉,每格一个小点」）：房检扫描
+    // 视觉=PerformHousingCheck（Main.cs:45918-45924）双跑的首跑 RichRoomCheckFeedback
+    // 语义——视觉采集与文案判定并列,判定面零耦合（scan 只进不扰;发射=spawnRoomCheck
+    // Scan→fadingParticles 池,步进/绘制走既有 7d'' OverPlayers 层管线）。
+    const occ = this.housingOccupied();
+    const scan = createRoomScanTrace(x, y);
+    const q = housingCheckAt(this.world.store, occ, x, y, -1, scan);
+    // 判定面早退档（失败泛洪/臭虫否决）按 vanilla Rich StopOnFail=false 语义补跑
+    // ScoreRoom 采集（候选绿点/金黄最优点,WorldGen.cs:4722-4747 无条件跑到 EndScoring）
+    backfillRoomScanScoring(this.world.store, scan, occ);
+    spawnRoomCheckScan(this.world.store, scan);
     if (q.reason === 'ok') {
       this.newText(Lang.inter(39), 255, 240, 20);
       return;
@@ -43974,6 +44081,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  同一堆 → 傀儡/实例一律出局；改完的堆即刻 op0 全态广播（= 原版每笔转账的
    *  SendData(21)，等下一轮 60t 重 assert 会闪旧值）。返回是否释放了槽位 */
   private emergencyStackMakeSpace(): boolean {
+    // ★622d:player 未就绪(world gen 期 mod gen pass setTile→装饰检查→killDecorTile
+    //  →spawnDrop 到此)→无堆可整=return false(调用方跳过紧急堆叠)
+    if (!this.player) return false;
     const players: Array<{ x: number; y: number }> = [{ x: this.player.cx, y: this.player.cy }];
     // 远端可视域中心（PlayerViewRectSize 扫描面）：net.players Map 的权威位
     // （碰撞盒左上 → +10/+21 取中心，与 lootPlayers 同一换算）
@@ -44401,6 +44511,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ...p.voiceState,
         frostArmor: eq.frostBurn === true,
         boneArmor: p.boneArmor,
+        // ★BJ652 件4:坐骑/狼人支（PlayHurtSound :38946-38982——override 后、甲支前）:
+        //  mountType=mount.Type（mount.Active 才置,原版 mount.Active 外层门）;
+        //  wereWolf=Werewolf buff 28 在身（wereWolf :11986 置位面;forceWerewolf/
+        //  hideWolf 未建模=PlayerVoice 头注登记偏差）
+        mountType: p.mount.active ? p.mount.type : 0,
+        wereWolf: p.buffs.has(BuffType.Werewolf),
       });
       // 本地飘字单点（★A2）：noLocalFloat 抑制（虚空坠落等原版无 Hurt 飘字面的站点）；
       // floatDealt 由环境站以 damagePreview 预演回填终值（防双发且像素零漂移）——
@@ -53508,14 +53624,23 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const def = ITEM_DEFS[itemId];
     if (!def) return 30;
     const spd = proxy ? proxy.attackSpeedMult : 1;
+    // ★BJ651-R1（2026-10-12）：词缀 spd 烘定补同步（BJ640-R1 登记债清偿）——
+    //  序列化面本已带 prefix（msg5 writePlayerItems u8 尾段 R16-13 + 上行 R17 +
+    //  applyRemoteItems 落袋），消费面此前整缺=远端挥击时长无词缀烘定（本地
+    //  :15675 同式先 roundCSf32Mul 词缀后 trunc 攻速——本地/远端节拍差）。
+    //  Item.cs:566-569 `useTime = (int)Math.Round((float)useTime * spd)` f32 银行家；
+    //  远端代理 inv 槽=远端 bag 直拷（{id,stack,prefix}）→ heldItem().prefix 即源。
+    const pfx = proxy?.inv.heldItem()?.prefix;
+    const pSpd = pfx ? prefixStat(pfx).spd : 1;
     if (def.tool?.type === 'sword' || combatWeapon(def)?.kind === 'melee') {
       const cw = combatWeapon(def);
-      // ★BJ640（2026-10-11）：同剑支方向面（×M=乘倒数档,截断）——远端词缀未同步
-      // （swingNet 广播缺 prefix,登记债 BJ640-R1）,此处仅攻速方向/截断对齐
-      return Math.max(1, truncCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, spd));
+      // ★BJ640（2026-10-11）：同剑支方向面（×M=乘倒数档,截断）+★BJ651-R1 词缀烘定
+      //  （先词缀后攻速,烘定序同本地 :15675）
+      return Math.max(1, truncCSf32Mul(roundCSf32Mul(cw?.useTime ?? def.tool?.speed ?? 42, pSpd), spd));
     }
     if (def.tool && (def.tool.type === 'pick' || def.tool.type === 'axe' || def.tool.type === 'hammer')) {
-      return Math.max(1, truncCSf32Mul(def.tool.speed ?? 46, spd));
+      // ★BJ651-R1：工具支同烘定（本地 :16244 同式 roundCSf32Mul→truncCSf32Mul）
+      return Math.max(1, truncCSf32Mul(roundCSf32Mul(def.tool.speed ?? 46, pSpd), spd));
     }
     return 30;
   }

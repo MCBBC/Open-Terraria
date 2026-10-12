@@ -298,6 +298,55 @@ export class TileStore {
     return this.frameY[i] === 0;   // 家具族：底行才可站
   }
 
+  /** ★BJ656（2026-10-12）原版裸 Main.tileSolid[type] 物化（nactive() 门）——
+   *  isSolid（SOLID_LUT≡tileSolid∧!tileSolidTop）∪ 平台九件套补差集
+   *  （tileSolid∩tileSolidTop 双 true 全集 {19,239,380,427,435-439}——Main.cs
+   *  :8031-32/:9797-9800/:10118-10136,PLATFORM_SOLID2_SHEETS 同集）=tileSolid 真表。
+   *  消费面=AI_007 城镇 NPC 支撑扫描三站（BJ656 亲读定谳【同式】统一——
+   *   ①腾空停走臂B NPC.cs:54771-72 `tileSafely6.liquid>0 || (tileSafely6.nactive()
+   *     && Main.tileSolid[tileSafely6.type])`；②坑口停走三列 :54563 同式（无液体臂）；
+   *   ③walkPrediction 前视列 :56291 同式——平台经双旗真值本就计入,家具顶（桌14/
+   *   椅15/铁砧16/工作台18 等原版 tileSolid=false）不计）。
+   *  ★勿与 isPlatform（TileCollision :2330-33 可站顶宽谓词,含家具 frameY==0 顶）
+   *  混用——那正是 2026-08-31 walkPrediction 宽化的病根（其注释错锚 SolidOrSloped
+   *  TileOrPlatform :53335——该函数实为 FindGoodRestingSpot :53352 找地板谓词,
+   *  =tileSolid∧!tileSolidTop ∪ TileID.Sets.Platforms{19,427,435-439},同样不含
+   *  家具顶）。 */
+  isVanillaTileSolid(x: number, y: number): boolean {
+    if (this.isSolid(x, y)) return true;
+    if (!this.isActive(x, y)) return false;   // nactive()（active ∧ !inActive）
+    return TileStore.PLATFORM_SOLID2_SHEETS.has(
+      TILE_DEFS[this.type[this.idx(x, y)]]?.vanilla?.sheet ?? -1);
+  }
+
+  /** ★BJ657（2026-10-12）原版 TileID.Sets.Platforms（TileID.cs:243
+   *  CreateBoolSet(19,427,435,436,437,438,439)）七件——PLATFORM_SOLID2_SHEETS
+   *  九件套的【子集】,差集 {239,380}（tileSolid∩tileSolidTop 双 true 但不在
+   *  Platforms）。单源消费=isSolidOrSlopedTileOrPlatform 平台臂;勿与九件套混用
+   *  （九件套用于 tileSolid 真表补差,七件用于 FindGoodRestingSpot 地板谓词）。 */
+  static readonly TILE_ID_PLATFORMS: ReadonlySet<number> = new Set([
+    19, 427, 435, 436, 437, 438, 439,
+  ]);
+
+  /** ★BJ657（2026-10-12）NPC.SolidOrSlopedTileOrPlatform（NPC.cs:53335-53343）
+   *  1:1 物化：active ∧ (tileSolid∧!tileSolidTop ∨ TileID.Sets.Platforms) ∧
+   *  !inActive。★与 isVanillaTileSolid（BJ656 同族）【不同式】——平台臂是七件
+   *  子集 TILE_ID_PLATFORMS,非九件套全：239 矿锭架/380 花盆箱 tileSolid∩tileSolidTop
+   *  双 true 但不在 Platforms → 原版地板下探不把它们当地板——勿换九件套（重蹈
+   *  isPlatform 宽化=BJ656 登记债 D1）;家具顶（桌14/铁砧16/工作台18 等原版
+   *  tileSolid=false,isPlatform frameY==0 可站面）同样不当地板（下探须穿透）。
+   *  唯一原版消费面=AI_007_FindGoodRestingSpot 地板下探 :53352（本仓两站
+   *  findChairSpot/restFloor;椅搜本体 :53363+ 走 CanBeSatOnForNPCs 不经本谓词;
+   *  :53363 面是城镇史莱姆/ai0==5 跳过门）。坡面/半砖不排除（原文本无 slope/
+   *  halfBrick 门,函数名 Sloped 系历史命名,本仓 isSolid 同不查坡=同式）。 */
+  isSolidOrSlopedTileOrPlatform(x: number, y: number): boolean {
+    if (this.isSolid(x, y)) return true; // tileSolid∧!tileSolidTop（active∧!inActive 门已含）
+    if (!this.hasTile(x, y)) return false;                                 // tile.active()
+    if (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) return false; // !inActive()
+    return TileStore.TILE_ID_PLATFORMS.has(
+      TILE_DEFS[this.type[this.idx(x, y)]]?.vanilla?.sheet ?? -1);
+  }
+
   onTileChanged(fn: (x: number, y: number) => void) {
     this.listeners.push(fn);
   }

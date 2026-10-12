@@ -511,9 +511,15 @@ describe('BJ614 H组：接线结构锚+l10n 双语言', () => {
     expect(s).toContain('charStore.onRestoreMiss = fsBackupRestoreMiss;');
     // loadFromKey 恢复链（★BJ617 件2 三段择源：IDB 现值 → FS 备份 → LS 副本 → loadFromJson 续跑）
     // ★R13-F2：lsRead 裸 localStorage 直读改原语层安全垫（LS 抛不炸读档链）
-    expect(s).toContain('const resolved = await resolveLoadText(key, () => lsGetSafe(key));');
+    // ★BJ655：prompt=读档点击手势链内当场 requestPermission+重跑择源;FsBackupNeedAuth
+    //  toast 全面退役（主流程零 toast,授权状态提示面=设置页「待重新授权」）。
+    expect(s).toContain('let resolved = await resolveLoadText(key, () => lsGetSafe(key));');
+    expect(s).toContain("if (resolved.source === 'missing' && resolved.restoreReason === 'prompt'");
+    expect(s).toContain('&& await fsBackupRequestPermission()) {');
+    expect(s).toContain('resolved = await resolveLoadText(key, () => lsGetSafe(key));');
+    expect(s).not.toContain('fsBackupAuthHintFire');
+    expect(s).not.toContain('FsBackupNeedAuth');
     expect(s).toContain('await loadFromJson(resolved.text);');
-    expect(s).toContain("if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();");
     // 幽灵扫描联动（BJ611 锚线不得动——扫描外尝试恢复,门内补提示）
     expect(s).toContain('const rec = await fsBackupRestoreEvicted(scan.evicted);');
     expect(s).toContain("Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNotice', scan.evicted.length)");
@@ -565,7 +571,6 @@ describe('BJ614 H组：接线结构锚+l10n 双语言', () => {
       'Mods.SandboxWorld.Settings.FsBackupRepick',
       'Mods.SandboxWorld.Settings.FsBackupHint',
       'Mods.SandboxWorld.Toast.FsBackupRestored',
-      'Mods.SandboxWorld.Toast.FsBackupNeedAuth',
       'Mods.SandboxWorld.Toast.FsBackupFailStreak',
       'Mods.SandboxWorld.Toast.StorageEvictedNoticeFsRestored',
       'Mods.SandboxWorld.Toast.StorageEvictedNoticeFsTried',

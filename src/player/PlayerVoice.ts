@@ -11,8 +11,12 @@
 //      停旧播新=Sfx.SINGLE_SLOT_STOP NPC_Hit_1..56 族），甲支在 hurtVoicePlan
 //      （override 命中即先返;位次与原版序 override→甲支→dontStarve→variant 同序,
 //      甲旗由调用方传 frostArmor/boneArmor——Game.damagePlayer 与尘爆站同谓词
-//      eq.frostBurn/p.boneArmor）。mount 52/54-56/61、狼人（:38946-38982）仍未
-//      移植——挂 B3 待办;未移植态回落普通语音,登记偏差。
+//      eq.frostBurn/p.boneArmor）。★BJ652 件4（2026-10-12）mount 52/54-56/61、
+//      狼人（:38946-38982）已补（原 BJ598 期 B3 待办销案）——位次=override→
+//      mount→狼人→甲支→DST→variant（原版序逐环;legacy(3,N)=NPC_Hit_N/
+//      (4,N)=NPC_Killed_N,vol 缺省 1 同甲支;DST 门跳过面=凡 plan.source 有档,
+//      原版各支均在 DST 门【前】return）。forceWerewolf/hideWolf 本仓未建模
+//      （狼人饰品 vanity 隐藏位）=condition 只认 wereWolf,登记偏差。
 //   ③ voiceVariant（ID/PlayerVoiceID.cs：1 男/2 女/3 其他,VariantOrder={1,2,3}）+
 //      voicePitchOffset（梳妆台滑杆 -1..1,Main.cs:45429-45451）尾段分派
 //      （:38996-39009）：pitch=Remap(offset,-1,1,-0.7,0.7) 显式直传（三 case 同式,
@@ -81,6 +85,14 @@ export interface VoiceState {
    *  （override 之后、DST 世界门之前）;两旗同时为真按原版序 frost 先于 bone */
   frostArmor?: boolean;
   boneArmor?: boolean;
+  /** ★BJ652 件4:坐骑/狼人支（PlayHurtSound :38946-38982——override 后、甲支前,
+   *  各支命中即 return）——mountType=mount.Type（mount.Active 才传,缺省/0=无坐骑）；
+   *  wereWolf=wereWolf‖forceWerewolf‖!hideWolf 合成面（forceWerewolf/hideWolf
+   *  本仓未建模=只认 wereWolf,头注登记）。52 狼骑(3,6)/54 迅猛龙(3,47)/
+   *  55 鼠(4,4)/56 蝙蝠(4,4)/61 仙灵(3,5);狼人(3,6) */
+  mountType?: number | null;
+  wereWolf?: boolean;
+  hideWolf?: boolean;
 }
 
 /** 受击分派计划（纯函数零 RNG;鸡稀有变体独立掷交播放侧执行） */
@@ -91,9 +103,10 @@ export interface HurtVoicePlan {
   pitch?: number;
   /** case6 鸡 1/5 稀有变体（PlayHurtSound case6 本体 :38899-38906,Next(5)==0） */
   rare?: { denom: number; files: string[]; vol: number };
-  /** ★BJ598:分派来源档——'override'=voiceOverride 直播;'armor'=甲支（frost/bone,
-   *  :38984-38991,原版先于 dontStarve 世界门,DST 门据此排除）;缺省='variant' 尾段 */
-  source?: 'override' | 'armor' | 'variant';
+  /** ★BJ598:分派来源档——'override'=voiceOverride 直播;'mount'/'werewolf'=坐骑/
+   *  狼人支（:38946-38982,BJ652 件4）;'armor'=甲支（frost/bone,:38984-38991,
+   *  原版各支先于 dontStarve 世界门 return,DST 门据此排除）;缺省='variant' 尾段 */
+  source?: 'override' | 'mount' | 'werewolf' | 'armor' | 'variant';
 }
 
 // —— voiceOverride 直播表（PlayHurtSound switch :38879-38996;vol=SoundID WithVolume;
@@ -140,8 +153,25 @@ export function hurtVoicePlan(state: VoiceState | number | null | undefined): Hu
       ? { ...hit, rare: { denom: 5, files: ['player_hit_chicken_rare'], vol: 0.5 }, source: 'override' as const }
       : { ...hit, source: 'override' as const };
   }
-  // ★BJ598 件2:甲支（PlayHurtSound :38984-38991——override switch 之后、werewolf
-  //  支（未移植=头注②登记）与 dontStarve 世界门之前）:frostArmor→SoundID.Item27、
+  // ★BJ652 件4:坐骑/狼人支（PlayHurtSound :38946-38982——override switch 之后、
+  //  甲支之前,原版各支命中即 return）。坐骑音=mount.Type 五档（52 狼骑(3,6)/
+  //  54 迅猛龙(3,47)/55 鼠(4,4)/56 蝙蝠(4,4)/61 仙灵(3,5)）;狼人=(wereWolf‖
+  //  forceWerewolf)&&!hideWolf → (3,6)——本仓 forceWerewolf/hideWolf 未建模
+  //  （登记偏差,头注②）。legacy(3,N)=NPC_Hit_N/(4,N)=NPC_Killed_N（NPCHit25
+  //  同法 Game.ts:14136 消费互证）,vol 缺省 1（legacy PlaySound 无音量实参）。
+  if (st.mountType != null && st.mountType > 0) {
+    const mt = st.mountType;
+    if (mt === 52) return { files: ['NPC_Hit_6'], vol: 1, source: 'mount' };      // :38950
+    if (mt === 54) return { files: ['NPC_Hit_47'], vol: 1, source: 'mount' };     // :38954
+    if (mt === 55) return { files: ['NPC_Killed_4'], vol: 1, source: 'mount' };   // :38958
+    if (mt === 56) return { files: ['NPC_Killed_4'], vol: 1, source: 'mount' };   // :38962
+    if (mt === 61) return { files: ['NPC_Hit_5'], vol: 1, source: 'mount' };      // :38966
+  }
+  if ((st.wereWolf || (st as { forceWerewolf?: boolean }).forceWerewolf) && !st.hideWolf) {
+    return { files: ['NPC_Hit_6'], vol: 1, source: 'werewolf' };                  // :38969-38972
+  }
+  // ★BJ598 件2:甲支（PlayHurtSound :38984-38991——override/mount/狼人支之后、
+  //  dontStarve 世界门之前）:frostArmor→SoundID.Item27、
   //  boneArmor→legacy(3,style2)=NPCHit2,vol 均缺省 1（legacy PlaySound 无音量实参）。
   //  两旗同帧按原版序 frost 先于 bone（原版两支互斥 return;frost 套与骨甲三件不同
   //  槽实际不可同穿,序仅锁语义）。
@@ -172,11 +202,11 @@ export function playHurtVoice(game: GameHooks, state: VoiceState | number | null
   // ★BJ598:计划先行——甲支（plan.source==='armor'）原版位次在 dontStarve 门之前
   const plan = hurtVoicePlan(state);
   // DST 世界门(:38993-38995,dontStarve&&!remix——override switch 后、variant 段前;
-  // override 命中（voiceOverride 真值）与甲支命中（source==='armor'）均跳过本门;
-  // mount/狼人支未移植故 override 未命中直达此门,头注②登记的回落序与原版一致):
+  // override/mount/狼人/甲支命中（plan.source 有档）均跳过本门——原版各支在
+  // DST 门【前】return,只有落空到 variant 尾段才可达此门):
   // Male ? DSTMaleHurt : DSTFemaleHurt,三变体随机,vol 0.1(SoundID.cs:1056/:1058)
   const sfH = (game as unknown as { world?: { seedFlags?: Record<string, boolean | undefined> } }).world?.seedFlags ?? {};
-  if (!st0.voiceOverride && plan.source !== 'armor' && sfH.theConstant && !sfH.remix) {
+  if (!plan.source && sfH.theConstant && !sfH.remix) {
     const maleH = !FEMALE_VARIANTS.includes(st0.skinVariant ?? 0);
     game.playSfxWav?.(`${maleH ? 'dst_male_hit' : 'dst_female_hit'}_${Math.floor(Math.random() * 3)}`, 0.1);
     return;

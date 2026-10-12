@@ -43,7 +43,7 @@ import type { Player } from './Player';
 import { projSprite } from './Arrow';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { roundCSf32Mul } from '../stats/ScaleStats';   // ★BJ640 词缀烘定（(int)Math.Round f32 银行家）
+import { roundCSf32Mul, truncCSf32MulBias } from '../stats/ScaleStats';   // ★BJ640 词缀烘定（(int)Math.Round f32 银行家）+★BJ651 站④②GetWeaponDamage 截断
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
@@ -248,7 +248,12 @@ export class WhipProj extends Entity {
     this.anim = Math.max(1, Math.floor(roundCSf32Mul(anim, prefixSpd) * whipUseTimeFold(
       (o?.attackSpeedMult as number | undefined) ?? 1, swb, o?.equipStats.whipSpd ?? 1)));
     this.damage = damage;
-    this.dmgNow = Math.max(1, Math.round(damage * (o ? o.summonDamageMult : 1))); // ⑥ pen 移 hurt 参
+    // ★BJ651-R2 站④②（2026-10-12）：第二乘区=GetWeaponDamage（Player.cs:54066
+    //  `(int)((float)damage × GetWeaponDamageMultiplier + 5E-06f)`,鞭 summon→
+    //  minionDamage）——Game 鞭支 NewProjectile Damage 实参同位。第一乘区=词缀烘定
+    //  （Game 鞭支 :19796 roundCSf32Mul,ctor 形参即烘定基）。旧 f64 Math.round 无偏置
+    //  =中点档差 1（鞭 4678 裸词缀×summon 1.1: 55→60.5 原版 60/旧 61）
+    this.dmgNow = Math.max(1, truncCSf32MulBias(o ? o.summonDamageMult : 1, damage)); // ⑥ pen 移 hurt 参
   }
 
   /** GetWhipSettings（:45683-45761） */

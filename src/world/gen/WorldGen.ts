@@ -202,6 +202,46 @@ export function registerGenPass(p: ModGenPass): void {
   genPasses.push(p);
 }
 
+/** ★622:mod genPasses 快照+独立执行面(worker 路径补跑——Worker 模块实例独立=
+ *  主线程注册的 genPasses 对 Worker 不可见;Worker 返回后主线程对本 store 补跑) */
+export function getModGenPasses(): readonly ModGenPass[] { return genPasses; }
+
+/** 独立执行 mod gen passes(worker 返回后调用;WorldGenClient 路径补跑面)
+ *  ★622:world=World 实例(有 groundLevel/rockLevel/seed/store)——worker 模块实例
+ *  独立=主线程 genPasses 对 Worker 不可见,返回后主线程对本 store 补跑 */
+export function runModGenPasses(world: { store: unknown; groundLevel: number; rockLevel: number; seed: number }): void {
+  const store = world.store as Record<string, unknown> & { setTile: (...a: unknown[]) => void; setTileSilent: (...a: unknown[]) => void };
+  // ★622:主线程 setTile 有 Game listeners(→breakTile→spawnDrop→this.player 未就绪
+  //  =crash);gen 期用 setTileSilent(生成期绕过=TileStore :323 注释原文)
+  const origSetTile = store.setTile;
+  store.setTile = store.setTileSilent.bind(store);
+  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
+    tileIdByKey: Object.fromEntries(
+      Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
+        .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
+    itemIdByKey: Object.fromEntries(
+      Object.entries(ITEM_BY_KEY).filter(([k]) => k.startsWith('mod_'))),
+    chests: [],
+  };
+  const gs: Record<string, unknown> = {
+    seed: world.seed,
+    worldSurface: world.groundLevel,
+    rockLevel: world.rockLevel,
+    mods: gsMods,
+  };
+  for (const pass of genPasses) {
+    try {
+      const rng = new RNG(world.seed);
+      pass.fn(store, rng, gs);
+    } catch (err) {
+      console.error(`[gen] mod pass "${pass.name}" 异常:`, err);
+    }
+  }
+  store.setTile = origSetTile;   // 恢复(后续世界正常 listener 派发)
+  (store as { __modChests?: typeof gsMods.chests }).__modChests = gsMods.chests;
+}
+
+
 export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress): Promise<World> {
   genAbortRequested = false;   // ★IIIII229 ①：陈旧请求清零（vanilla 每次生成新建 Controller 同效）
   // ★IIIII88：dotted 秘种子配方路由先行（TryApplyingCopiedSeed cs:232-289）——

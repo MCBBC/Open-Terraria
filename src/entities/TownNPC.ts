@@ -11,6 +11,9 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS, AVOIDED_BY_NPCS_SHEETS, INTERACTABLE_BY_NPCS_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
+// ★BJ656：tileSolid 真表代理已收编进 TileStore.isVanillaTileSolid（平台九件套
+// PLATFORM_SOLID2_SHEETS 同集,nactive() 门）——旧直查 GenSolid.VAN_TILE_SOLID_EXTRA
+// 三站（臂B/坑口/walkPrediction）全部换道,本文件不再直引
 import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable, isNpcShimmerImmune, findShimmerFreeSpot } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
@@ -150,7 +153,8 @@ export function canSitAt(tileId: number, frameY: number): boolean {
 export interface SitSpot { x: number; y: number; }
 
 /** AI_007_FindGoodRestingSpot 夜椅扫描（NPC.cs:53195-53262）：
- *  - 自 home 向下找地面（SolidOrSlopedTileOrPlatform = 实心非 top 或平台，:53186）
+ *  - 自 home 向下找地面（SolidOrSlopedTileOrPlatform = 实心非 top ∪ Platforms
+ *    七件，:53335-53343；旧注 ":53186" 系错引，BJ657 勘误）
  *  - ±7 列 × 行 {+2,0,-2,-4,-6}（num2/num4/num3/num6）扫可坐格；上格(frameY%40==0)
  *    仅当 row+1<=floorY+2 收（:53224），下格恒收
  *  - 取 |dx|+|dy| 最小（严格 <，先到先得，:53226-53233）
@@ -160,7 +164,11 @@ export interface SitSpot { x: number; y: number; }
 export function findChairSpot(st: TileStore, homeX: number, homeY: number): SitSpot | null {
   let fx = homeX, fy = homeY;
   if (fx < 0 || fy < 0) return null;                       // :53200-53203 home 无效
-  while (fy < st.h - 20 && !(st.isSolid(fx, fy) || st.isPlatform(fx, fy))) fy++;
+  // ★BJ657（2026-10-12）地板下探谓词换道 isSolidOrSlopedTileOrPlatform（原版
+  //  SolidOrSlopedTileOrPlatform :53335-53343,唯一消费面 :53352 同式收编）——
+  //  旧 isSolid∪isPlatform 多计 {239,380}+家具顶 84 件（BJ656 登记债 D1）：
+  //  家具顶不是地板,下探在家具顶提前停=假地板,须穿透至真实地面行
+  while (fy < st.h - 20 && !st.isSolidOrSlopedTileOrPlatform(fx, fy)) fy++;
   let best: { x: number; y: number; d: number; frameY: number } | null = null;
   for (let i = fx - 7; i <= fx + 7; i++) {
     for (let r = fy + 2; r >= fy - 6; r -= 2) {
@@ -500,10 +508,12 @@ export function meleeAttackRect(
  *  friendly NPC → 续走（挤人绕行）；③溺水恒续走。①②由调用方合算为
  *  crowdedOrBlocked 传入（plotAvoidClear 反相 + crowdedByStationaryNpc）。
  *  消费点（:54609-54613 障碍段尾）：keepwalking → 走程重置 90t。
- *  avoidFalling 主链：前视列扫 j=−1..+4：液体累计 num / 岩浆 flag2 / 首个实心
- *  格记落点 p 并放行；avoidFalling |= flag2（岩浆恒避）；num ≥ ceil(h/16)
- *  （深水没身）→ 避；落点水淹（DrownCollision）→ 避。豁免（:56120-56123）：
- *  TownCritter 恒不避；不在 home±35 且正朝 home 走 → 不避（远处赶路愿意跳坑） */
+ *  avoidFalling 主链：前视列扫 j=−1..+4（:56279）：液体累计 num / 岩浆 flag2 /
+ *  首个实心格（:56291 `nactive() && Main.tileSolid[type]`——★BJ656 三站同式
+ *  定谳,仓内=isVanillaTileSolid）记落点 p 并放行；avoidFalling |= flag2（岩浆
+ *  恒避）；num ≥ ceil(h/16)（深水没身）→ 避；落点水淹（DrownCollision）→ 避。
+ *  豁免（:56120-56123）：TownCritter 恒不避；不在 home±35 且正朝 home 走 →
+ *  不避（远处赶路愿意跳坑） */
 export function walkPrediction(
   st: TileStore, myTileX: number, homeFloorX: number, isTownCritter: boolean,
   dir: number, tileX: number, tileY: number, heightPx: number,
@@ -536,11 +546,16 @@ export function walkPrediction(
     if (st.type[idx] !== 0 && isClosedDoorOrGate(st.type[idx])) {
       continue;   // ★2026-08-30:关门列=可行走面(门口到达的前提;否则避坠停走死循环在门前)
     }
-    // ★平台=合法落点(2026-08-31 实测定谳):原版 SolidOrSlopedTileOrPlatform 同款
-    // 谓词——平台楼梯/地板前视只认 isSolid 会把面前判成深坑,avoidFalling 恒真,
-    // NPC 钉死原地永不迈步(用户实报向导楼梯/dyer 屋内铁证:npcMove span=0)
-    if (st.type[idx] !== 0
-      && (st.isSolid(tileX, ty) || st.isPlatform(tileX, ty))) {
+    // ★BJ656（2026-10-12）支撑谓词统一=st.isVanillaTileSolid（=原版裸
+    // Main.tileSolid[type] 代理,nactive() 门,平台九件套经双旗真值
+    // Main.cs:8031-32 计入）——与臂B/坑口停走三站同式（NPC.cs:56291/:54771-72/
+    // :54563 全 `nactive() && Main.tileSolid[type]`）。旧 isSolid∪isPlatform 系
+    // 2026-08-31 平台落点修复（用户实报向导楼梯/dyer 屋内铁证:npcMove span=0,
+    // 平台前视只认 isSolid 会判深坑钉死原地——该案保真,平台计入不变）,但其注释
+    // 锚 SolidOrSlopedTileOrPlatform 系错锚（NPC.cs:53335=FindGoodRestingSpot
+    // :53352 找地板谓词,非本扫描）,isPlatform 把家具顶（桌14/工作台18 等原版
+    // tileSolid=false）一并宽化=登记债;本刀摘除家具顶,平台保 8-31 案。
+    if (st.isVanillaTileSolid(tileX, ty)) {
       if (depth > 0) { px = tileX; py = ty; }                 // :56148-56151
       avoidFalling = false;                                   // 实心落点 → 放行
       break;
@@ -2816,14 +2831,18 @@ export class TownNPC extends Entity {
       } else if (!drowningNow) {
         this.jumpBackX = Number.NaN;                            // :54450-54462 非溺水清记录
       }
-      // avoidFalling 站坑口停走（:54444-54467）：脚下三列（cx±1, 脚行+1）实心 ≤2
+      // avoidFalling 站坑口停走（:54556-54577,旧注 :54444-54467 系行号漂移）：
+      // 脚下三列（cx±1, 脚行+1）实心 ≤2 → 停走五常数（ai[0]=0/ai[1]=50+Next(50)/
+      // ai[2]=0/localAI[3]=40 + keepwalking3=(avoidFalling3=false)——wantDir 归 0
+      // 承接,下游跳臂照原版跳过）。谓词=原版 :54563 `tileSafely2.nactive() &&
+      // Main.tileSolid[tileSafely2.type]`（无液体臂）——★BJ656 统一
+      // isVanillaTileSolid：平台双旗真值本就计入（平台面上不误判坑口,8-31 案保
+      // 真）;家具顶（isPlatform 宽化残留）摘除=回归原版
       if (pred.avoidFalling && !jumpedOut) {
         const bx = Math.floor(this.cx / TILE);
         let solid = 0;
         for (let o = -1; o <= 1; o++) {
-          // ★平台也计为落点(避免平台面上被误判坑口——同 :1318 家族)
-          if (st.inBounds(bx + o, fy + 1)
-            && (st.isSolid(bx + o, fy + 1) || st.isPlatform(bx + o, fy + 1))) solid++;
+          if (st.isVanillaTileSolid(bx + o, fy + 1)) solid++;
         }
         if (solid <= 2) {
           this.walkMode = 0;
@@ -2870,6 +2889,24 @@ export class TownNPC extends Entity {
       // turnLock=40（localAI[3] 承接）/ ai[2]=0 / vx×0.2。GetTileSafely 出界空格
       // 语义同 A8（不计入）。骰面：仅触发时耗一张 Next(50)。wantDir 归零承接
       // 原版 ai[0]=0（本 tick 不再作加速度/朝向消费位）
+      // ★BJ649（2026-10-12 用户实报十周年纪念种子酷酷史莱姆「被推出房间外弹跳」
+      // 定谳落刀）：支撑谓词=原版裸 Main.tileSolid[type]（cs:54771-72
+      // `tileSafely6.nactive() && Main.tileSolid[tileSafely6.type]`——【无
+      // !tileSolidTop 排除】）→ 平台九件套整批计入（Main.cs:8031-32
+      // `tileSolidTop[19]=true; tileSolid[19]=true` 同批 239/380/427/435-439）。
+      // 本仓 SOLID_LUT=defs.solid≡tileSolid∧!tileSolidTop 把平台排除,旧 isSolid
+      // 谓词平台上空支撑恒 0≤2 → 臂B 每滞空拍点火（vx×0.2 停走）→ 城镇史莱姆在
+      // 平台屋顶（行272 长平台）上空 0.02px/t 龟速原地蹦跳永不下地=用户实录
+      // 「悬浮 home 上方 6 格、33px 振幅/300t 慢抛物线、g=0 全程」（30t 采样对
+      // ~33t 常蹦周期的混叠假象）。原版平台计入支撑 → 臂B 静默 → 走态保持 →
+      // vx 加速至 num22=1.0 → 正常蹦跳行走、一个腿程（200-400t）内走下平台梯回家。
+      // 同族判例:2026-08-31 walkPrediction avoidFalling 平台落点修复（本文件同域
+      // 已修,本支漏同步）。修=isSolid ∪ VAN_TILE_SOLID_EXTRA 九件套（sheet 域
+      // 单源 GenSolid,=原版 tileSolid 真表代理,Game.solid() 同式）。家具顶
+      // （桌 14/工作台 16 等原版 tileSolid=false）不计入——勿放宽到 isPlatform。
+      // ★BJ656（2026-10-12）三站统一谓词=st.isVanillaTileSolid（同式收编,
+      // 外加 nactive() 门——原九件套直查臂漏幽灵平台 flags=0 门,补齐=原版
+      // `tileSafely6.nactive()` 同相）
       const st = world.store;
       const bx = Math.floor(this.cx / TILE);
       const fyA = Math.floor((this.y + this.h - 16) / TILE);
@@ -2878,7 +2915,7 @@ export class TownNPC extends Entity {
         for (let d = 1; d <= 6; d++) {
           if (!st.inBounds(bx + o, fyA + d)) continue;   // 出界 = 空 tile 不计
           const ii = st.idx(bx + o, fyA + d);
-          if (st.liquid[ii] > 0 || (st.type[ii] !== 0 && st.isSolid(bx + o, fyA + d))) {
+          if (st.liquid[ii] > 0 || st.isVanillaTileSolid(bx + o, fyA + d)) {
             supports++;
           }
         }
@@ -3161,7 +3198,9 @@ export class TownNPC extends Entity {
     if (!a) return null;
     const st = world.store;
     let fy = a.y;
-    while (fy < st.h - 20 && !(st.isSolid(a.x, fy) || st.isPlatform(a.x, fy))) fy++;
+    // ★BJ657（2026-10-12）同 findChairSpot 换道 isSolidOrSlopedTileOrPlatform
+    //  （:53352 同式;{239,380}/家具顶不当地板——下探穿透至真实地面行）
+    while (fy < st.h - 20 && !st.isSolidOrSlopedTileOrPlatform(a.x, fy)) fy++;
     return { x: a.x, y: fy };
   }
 

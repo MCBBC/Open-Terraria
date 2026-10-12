@@ -292,14 +292,21 @@ describe('BJ644 件1-③ Rope 层（Main.tileRope 全表 Main.cs:9452-9460）', 
     expect(TILE_ROPE_SHEETS.size).toBe(9);
   });
   it('VanillaFraming tileRope 谓词 + isRopeAt 补 504/449/450/451（era guard）', () => {
+    // ★BJ652 件2 重锚（2026-10-12）：谓词/isRopeAt 收敛单源 VANILLA_TILE_ROPE 九件
+    // 全表（外员 42/223/314/345 摘除+域错勘正）——本锁意图（九件全在两消费面）由
+    // 集合字面逐值锁等价承载，判别力更强（多员/缺员均红）。
     const src = readFileSync(join(ROOT, 'src/render/VanillaFraming.ts'), 'utf-8');
     const at = src.indexOf('tileRope: (t: number)');
     expect(at).toBeGreaterThan(0);
     const line = src.slice(at, src.indexOf('\n', at));
-    for (const s of [504, 449, 450, 451]) expect(line).toContain(`t === ${s}`);
+    expect(line).toContain('VANILLA_TILE_ROPE.has(t)');
+    const setAt = src.indexOf('VANILLA_TILE_ROPE: ReadonlySet<number> = new Set(');
+    expect(setAt).toBeGreaterThan(0);
+    const setBody = src.slice(setAt, src.indexOf('])', setAt));
+    for (const s of [213, 214, 353, 365, 366, 504, 449, 450, 451]) expect(setBody).toContain(String(s));
     const ropeAt = src.indexOf('function isRopeAt');
     const body = src.slice(ropeAt, src.indexOf('}', ropeAt) + 1);
-    for (const s of [504, 449, 450, 451]) expect(body).toContain(`t === ${s}`);
+    expect(body).toContain('VANILLA_TILE_ROPE.has(t0)');
   });
   it('tile 504 def rope 旗=Main.tileRope[504]（攀爬/Block Swap 绳臂/IsRope 消费面）', async () => {
     const { TILE_DEFS, TILE_BY_KEY } = await import('../src/data/tiles');

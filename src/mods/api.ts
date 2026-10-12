@@ -17,6 +17,10 @@
 // 内容(物品/NPC/tile 数据)一律走 content/*.json 声明面(L1 单管线=确定性 id);
 // entry.js 只挂行为/弹幕/配置。键解析经分配表,未注册键 fail-fast。
 import type { ModIdAllocation } from './types';
+
+/** ★622:gen pass 源码收集(worker 注入队列;装载期填充,世界创建时读取) */
+const __swGenPassSrc: Array<{ name: string; src: string }> = [];
+export function getGenPassSources() { return __swGenPassSrc; }
 import {
   registerModDodgeRoll,
   registerModPlayerHurt,
@@ -416,6 +420,8 @@ export function createModContext(
     /** ★B7 一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
     registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void {
       registerGenPass({ name, fn });
+      // ★622:序列化 gen pass 源码(worker 注入——Worker 模块实例独立,主线程注册不可见)
+      __swGenPassSrc.push({ name, src: fn.toString() });
     },
     // ★一百一十六刀:mod 箱解锁条件(tiles 域 id 解析)
     chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void {

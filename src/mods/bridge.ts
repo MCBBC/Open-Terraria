@@ -59,3 +59,10 @@ export function getSaveModEntries(): Array<{ id: string; version: string; items:
 let enabledModsProvider: (() => string[] | null) | null = null;
 export function setEnabledModsProvider(fn: () => string[] | null): void { enabledModsProvider = fn; }
 export function getEnabledModIds(): string[] | null { return enabledModsProvider?.() ?? null; }
+
+// ---- ★622:mod gen pass 源码桥(worker 注入——Worker 模块实例独立=主线程注册
+//  的 genPasses 对 Worker 不可见;worker eval mod bundle 源码+stub sw=gen 注册闭环) ----
+
+let genSrcProvider: (() => string | null) | null = null;
+export function setGenSrcProvider(fn: () => string | null): void { genSrcProvider = fn; }
+export function getModGenSrc(): string | null { return genSrcProvider?.() ?? null; }

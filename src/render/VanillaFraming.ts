@@ -82,6 +82,13 @@ const JUNGLE_SPECIAL = S256([...JUNGLE_SPECIAL_SHEETS]);   // ★BJ221（TileID.
 const HELL_SPECIAL = S256([...HELL_SPECIAL_SHEETS]);       // ★BJ221（TileID.cs:303,§6k）
 const SETS_ORE = S256([...ORE_SHEETS]);   // TileID.Sets.Ore(:403)——★BJ210 补收 BJ203 漏网 S256 形（单源派生,§6h/§6i）
 const SETS_PLATFORMS = S256([...PLATFORMS_SHEETS]);   // TileID.Sets.Platforms(:243)——★BJ221 单源派生（§6k,与 HalfBrick.PLATFORMS_4X2 同族）
+// ★BJ652 件2（2026-10-12）Main.tileRope 权威九件（Main.cs:9452-9460 逐行）——
+//  框帧域 S.tileRope 与 PRED.IsRope（isRopeAt）单源。旧表含 42/223/314/345 四外员
+//  （"旧建模"）＝实害定谳：223 钛矿(frame:'auto')/345 蜂蜜瀑布(blend) 经
+//  vanillaChainFrame 入通用程序后 S.tileRope(num)=true → 落 rope 支（codegen :616）
+//  错帧+越权 TileFrame 递归；42 灯笼/314 矿轨 'style' 框帧不达通用程序=死外员。
+//  314/380/平台族经 IsRope 第二支（GetRopeEnds 双锚）恢复 vanilla 语义。
+export const VANILLA_TILE_ROPE: ReadonlySet<number> = new Set([213, 214, 353, 365, 366, 504, 449, 450, 451]);
 const HAS_SLOPE_FRAMES = S256([...HAS_SLOPE_FRAMES_SHEETS]);   // ★BJ221 收编单源（TileID.cs:267,§6k）
 // tileMerge 矩阵(SetupTileMerge M:3714-3719 六对)
 const MERGE_PAIRS: Array<[number, number]> = [[426, 727], [430, 728], [431, 729], [432, 730], [433, 731], [434, 732]];
@@ -314,9 +321,10 @@ const SET_REF_FN = {
   tileLargeFrames: () => 0, // 大帧特殊块(2D 变体表)不在本移植域,常 0 = 不走该分支
   // ★BJ644（2026-10-12）补 Main.tileRope 全表缺员 504/449/450/451（Main.cs:9452-9460
   //  九件全表={213,214,353,365,366,504,449,450,451}——504 弄蛇绳 TileFrame rope 支
-  //  :83173-83210 的 `num!=504` 特支此前整不达,504 落通用框帧=绳形错帧）。42/223/
-  //  314/345 为本仓既有外员（旧建模,非 vanilla tileRope——存疑不动,独立判例债）。
-  tileRope: (t: number) => t === 42 || t === 213 || t === 214 || t === 223 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366 || t === 504 || t === 449 || t === 450 || t === 451,
+  //  :83173-83210 的 `num!=504` 特支此前整不达,504 落通用框帧=绳形错帧）。
+  //  ★BJ652 件2（2026-10-12）外员 {42,223,314,345} 摘除（实害定谳见 VANILLA_TILE_ROPE
+  //  头注）——单源 VANILLA_TILE_ROPE，逐值全等 Main.cs:9452-9460。
+  tileRope: (t: number) => VANILLA_TILE_ROPE.has(t),
   tileNoAttach: (t: number) => t === 407 || false,
   tile: (a: number, b: number) => false,
 };
@@ -800,17 +808,42 @@ function runCosmeticChain(st: TileStore, i: number, j: number, NUMraw: number, p
 }
 
 function isRopeAt(st: TileStore, x: number, y: number): boolean {
-  // WorldGen.IsRope(:70605):向下扫 5 格找绳
+  // ★BJ652 件2（2026-10-12）WorldGen.IsRope 1:1（WorldGen.cs:70612-70634,range 5）——
+  //  旧实现双偏离定谳：①【域错】st.type=内部 id 直比 vanilla sheet（亲测
+  //  TILE_INTERNAL_BY_SHEET：213→263/504→573,谓词对真绳格恒假,仅内部 id 撞表偶发真）
+  //  ②【语义错】"向下扫 5 格"非 IsRope 本相——IsRope=本格直判（tileRope→true）,
+  //  314 矿轨/380 种植盆/平台族 → GetRopeEnds(:70556-70604,treatEmpty=false)
+  //  上下 5 格双锚（绳穿平台/矿轨可攀链）。消费面=codegen/解释器 PRED.IsRope
+  //  绳支两行（:83175/:83179——异型绳链 504↔213 连通、绳穿轨/平台双锚此前整缺;
+  //  同型绳邻 up==num 先短路,故本谓词错不影响最常见同链构型）。
   if (!st.inBounds(x, y)) return false;
-  for (let k = 0; k < 5; k++) {
-    const y2 = y + k;
-    if (!st.inBounds(x, y2)) break;
-    const t = st.type[st.idx(x, y2)];
-    // ★BJ644（2026-10-12）补 Main.tileRope 缺员 504/449/450/451（vanilla IsRope
-    //  首支=Main.tileRope[tile.type] WorldGen.cs:70621——504 绳邻域判定此前漏判）
-    if (st.flags[st.idx(x, y2)] && (t === 42 || t === 213 || t === 214 || t === 314 || t === 345 || t === 353 || t === 365 || t === 366 || t === 223 || t === 504 || t === 449 || t === 450 || t === 451)) return true;
+  const k0 = st.idx(x, y);
+  if (!st.flags[k0]) return false;                       // tile==null||!active → false(:70619)
+  const t0 = vanillaIdOf(st.type[k0]);
+  if (VANILLA_TILE_ROPE.has(t0)) return true;            // Main.tileRope[tile.type](:70621)
+  if (t0 !== 314 && t0 !== 380 && !SETS_PLATFORMS[t0]) return false;   // :70624
+  return getRopeEndsAnchored(st, x, y);
+}
+/** GetRopeEnds（WorldGen.cs:70556-70604,treatEmptyAsTheRopeEnd=false,rangeToCheck=5）：
+ *  上扫 y-1..y-5 找绳（tile==null/!active→break；active 非绳→继续穿行；
+ *  绳→置 topRopeY 破）；下扫自 y+1 起查 topRopeY+j（j∈[1+y−topRopeY, 6]）同语义。
+ *  两端均绳 → true（IsRope :70628-70632 topRopeY!=-1 && bottomRopeY!=-1）。 */
+function getRopeEndsAnchored(st: TileStore, x: number, y: number): boolean {
+  let topRopeY = -1;
+  for (let i = 1; i <= 5 && st.inBounds(x, y - i); i++) {          // InWorld(:70559)
+    const k = st.idx(x, y - i);
+    if (!st.flags[k]) break;                                       // null/!active → break
+    if (VANILLA_TILE_ROPE.has(vanillaIdOf(st.type[k]))) { topRopeY = y - i; break; }
   }
-  return false;
+  if (topRopeY === -1) return false;                               // IsRope :70630 return false
+  const num = y - topRopeY;                                        // :70577
+  let bottomRopeY = -1;
+  for (let j = 1 + num; j <= 6 && st.inBounds(x, topRopeY + j); j++) {   // :70578 j≤range+1
+    const k = st.idx(x, topRopeY + j);
+    if (!st.flags[k]) break;
+    if (VANILLA_TILE_ROPE.has(vanillaIdOf(st.type[k]))) { bottomRopeY = topRopeY + j; break; }
+  }
+  return bottomRopeY !== -1;                                       // :70631
 }
 function isVineAt(st: TileStore, x: number, y: number): boolean {
   return st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && [52, 62, 69, 115, 205, 352, 382, 636, 638].includes(st.type[st.idx(x, y)]);

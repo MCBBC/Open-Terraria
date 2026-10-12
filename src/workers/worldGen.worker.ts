@@ -7,7 +7,8 @@ import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升�
 import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
 import { applyModTileStableMap } from '../data/tiles';
 import { setCurrentAlloc } from '../mods/bridge';
-import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
+import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';
+import { registerGenPass } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { genItemIconPixels } from '../assets/ItemIconGen';
@@ -16,6 +17,46 @@ import { renderPreviewBitmap } from './previewBitmap';
 import { loadSaveData } from '../save/SaveFile';
 import { kvGetIdbEx } from '../save/KvStore';   // ★BJ605：三态精细读（kvGetIdb 薄壳化后 value 投影等价）
 import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
+
+
+
+// ★622:mod gen pass 注册(worker 侧——eval mod bundle+stub sw 只活 gen 三面)
+let genSrcRegistered = false;
+function registerModGenPassesInWorker(src: string): void {
+  if (genSrcRegistered) return;   // 幂等(重 build 不重注册)
+  genSrcRegistered = true;
+  try {
+    // 全局数据面(gen passes 消费;worker 自有表直写)
+    const tilesMod = globalThis as Record<string, unknown>;
+    import('../data/tiles').then((tiles) => {
+      tilesMod.__calamityTileDefs = tiles.TILE_DEFS;
+      tilesMod.__calamityTileIdByKey = tiles.TILE_BY_KEY;
+    });
+    // stub sw:registerGenPass 活+rollPrefixFor/log 兜底;其余 no-op
+    const stubSw = new Proxy({}, {
+      get: (target, prop: string) => {
+        if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void) => {
+          registerGenPass({ name, fn });
+        };
+        if (prop === 'rollPrefixFor') return () => 0;
+        if (prop === 'log') return (...args: unknown[]) => console.log('[mod:gen]', ...args);
+        if (prop === 'config') return { get: () => false, set: () => {} };
+        return () => {};   // 其余全 no-op
+      },
+      has: () => true,
+    });
+    // eval mod bundle(★622c 两步:①IIFE 返回 entry fn ②entry(stubSw)=注册面执行)
+    const tail = /export\s*\{\s*(\w+)\s+as\s+default\s*\}\s*;?\s*$/.exec(src);
+    const cjs = src.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
+    const entryName = tail ? tail[1] : 'main';
+    const modIIFE = new Function('sw', cjs + '\nreturn ' + entryName + ';');
+    const entry = modIIFE(stubSw);
+    entry(stubSw);   // ← 注册面执行(setupGen→registerGenPass 13 次)
+    console.log('[worker] mod gen passes registered');
+  } catch (err) {
+    console.error('[worker] mod gen registration failed:', err);
+  }
+}
 
 assertWorkerBootGate('worldGen.worker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 

@@ -42,7 +42,7 @@ import { MenuBackground } from './render/MenuBackground';
 import { CharacterStore } from './save/CharacterStore';
 import { WorldStore, WorldSaveWriteError, buildSaveBackupFilename, type WorldMeta } from './save/WorldStore';   // ★BJ605：+WorldSaveWriteError 保存时点告警判别 + 备份文件名（用户明令件）
 import { requestStoragePersistence, shouldShowPersistNotice, markPersistNoticeShown, evictNoticeFingerprint, shouldShowEvictNotice, markEvictNoticeShown, scanEvictedSaves, refreshStorageStatus } from './save/StoragePersistence';   // ★BJ611 持久存储申请/预警面/驱逐幽灵检测
-import { fsBackupSnapshot, fsBackupIndex, restoreFromBackup, fsBackupRestoreEvicted, fsBackupPurgeSnapshots, setFailToastHandler, resolveLoadText, backupTargetOfKey } from './save/FsBackup';   // ★BJ614 File System Access 本地目录自动备份（增强链）+读档自愈恢复链；★BJ617 件2：读档文本三段择源；★BJ618：quicksave 快照/恢复+删除组清理
+import { fsBackupSnapshot, fsBackupIndex, restoreFromBackup, fsBackupRestoreEvicted, fsBackupPurgeSnapshots, setFailToastHandler, resolveLoadText, backupTargetOfKey, fsBackupRequestPermission } from './save/FsBackup';   // ★BJ614 File System Access 本地目录自动备份（增强链）+读档自愈恢复链；★BJ617 件2：读档文本三段择源；★BJ618：quicksave 快照/恢复+删除组清理；★BJ655：读档手势链内当场重新授权
 import { acquireSessionLock, worldLockKey, charLockKey, type SessionLock } from './save/SessionLock';   // ★BJ617 件1（用户拍板）：多标签页并发防线=Web Locks 会话锁（同世界/同角色已有会话拒载;不支持=降级放行）
 import { prefGet, prefLsLike, prefRemove, prefSet } from './save/PrefsStore';   // ★BJ627 偏好域 IDB 单写（LS 零新写）
 import { options } from './core/Options';
@@ -367,14 +367,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // ★BJ614 连败一次性 toast（连续 3 败 → 目录可能被删/移动;同一连败段只报一次）
   setFailToastHandler(() => { ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupFailStreak')); });
   // ★BJ614 读档自愈恢复链注入（世界/角色/双 index 键通用）：键缺失 → FS 备份目录
-  //  最新同键档写回 IDB → 调用方以返回文本续正常链（零旁路）;prompt 态=补「去设置
-  //  授权」提示（会话一次防刷屏,不强弹）。
-  let fsBackupAuthHintShown = false;
-  const fsBackupAuthHintFire = (): void => {
-    if (fsBackupAuthHintShown) return;
-    fsBackupAuthHintShown = true;
-    ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupNeedAuth'));
-  };
+  //  最新同键档写回 IDB → 调用方以返回文本续正常链（零旁路）。
+  //  ★BJ655（2026-10-12 用户实报「Mac 上每次进入都提示本地备份目录要重新授权」）：
+  //  prompt 态改静默——Chromium 句柄权限会话级（BJ614 登记债:普通标签页每新会话
+  //  回落 prompt）,本链多在启动装配（BJ611 幽灵扫描/ensureLoaded）触发,每次新会话
+  //  都 toast=每次进入都打扰。设计原意（Settings.ts:685 面）=自动链静默跳过+设置页
+  //  「待重新授权」常驻态+按钮;恢复幽灵档是增强链非用户显式请求,授权借读档点击
+  //  手势当场申请（loadFromKey prompt 分支→fsBackupRequestPermission）。
   const fsBackupRestoreMiss = async (key: string): Promise<string | null> => {
     const r = await restoreFromBackup(key);
     if (r.ok) {
@@ -382,8 +381,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', r.file));
       return r.text;
     }
-    if (r.reason === 'prompt') fsBackupAuthHintFire();
-    return null;
+    return null;   // ★BJ655：prompt（及一切失败态）静默,授权状态提示面=设置页
   };
   worldStore.onRestoreMiss = fsBackupRestoreMiss;
   charStore.onRestoreMiss = fsBackupRestoreMiss;
@@ -1053,7 +1051,20 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       //  ③ FS 恢复链失败 → LS 兜底副本（诚实标注「较旧副本」,仅限有备份面的键;
       //     ★BJ618 件3 起 quicksave 亦有备份面 quicksave.json,同样作陈旧宣称）。
       //  ④ 三源皆空=missing（prompt 授权提示+IDB 态诊断+缺失分类文案,原语义）。
-      const resolved = await resolveLoadText(key, () => lsGetSafe(key));   // ★R13-F2：裸 localStorage 直读随 LS 抛（隐私模式）炸读档链——原语层安全垫收口
+      let resolved = await resolveLoadText(key, () => lsGetSafe(key));   // ★R13-F2：裸 localStorage 直读随 LS 抛（隐私模式）炸读档链——原语层安全垫收口
+      // ★BJ655：prompt=句柄在但权限回落会话级（BJ614 登记债:普通标签页每新会话
+      //  'prompt',安装态 PWA 除外）。本链由读档点击触发（transient activation 在手;
+      //  键盘触发 quickLoad 同为手势;程序化入口无手势=SecurityError→catch 静默）,
+      //  在该手势链内当场申请授权——MDN/Chrome 官方（2026-10-12 亲读定谳）：
+      //  requestPermission「只能由用户手势触发」「需 transient activation,无手势
+      //  SecurityError 拒绝」;链内既有 await（worker 解析/IDB 读）非 activation
+      //  消耗型 API 且时长≪5s 窗口。授予 → 重跑择源（FS 备份恢复+备份链当场激活,
+      //  设置页状态订阅面同步）;未授/拒绝 → 静默落 missing 面（提示面=设置页
+      //  「待重新授权」状态行+按钮,主流程零 toast——BJ655 用户实报收敛）。
+      if (resolved.source === 'missing' && resolved.restoreReason === 'prompt'
+        && await fsBackupRequestPermission()) {
+        resolved = await resolveLoadText(key, () => lsGetSafe(key));
+      }
       if (resolved.source === 'fs-backup') {
         // ★BJ614 用户明令「IndexedDB 中找不到要从备份取」：最新同键快照已写回 IDB
         //  （自愈,下次读直命中）→ 以恢复文本续正常读档链 loadFromJson（零旁路;
@@ -1071,7 +1082,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (resolved.source === 'missing') {
         heldSessionLocks?.release();   // ★BJ617 件1：载入失败=会话未开始,会话锁即释
         heldSessionLocks = null;
-        if (resolved.restoreReason === 'prompt') fsBackupAuthHintFire();
+        // ★BJ655：prompt 已在手势链内尝试过 requestPermission（授予则不会落此支）,
+        //  此处零 toast——授权状态提示面=设置页「待重新授权」+按钮（常驻,不强弹）。
         // ★BJ605：IDB+FS+LS 三处皆无——IDB 态诊断物证留 console（用户自查/
         //  DevTools 物证请求共同依赖），文案按缺失分类给可操作指引
         //  （存储不可用引导自救 vs 数据真缺失如实告知不可恢复）；

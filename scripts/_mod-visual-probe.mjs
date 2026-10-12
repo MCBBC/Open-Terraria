@@ -72,7 +72,9 @@ try {
   await sleep(500);
   out.world = await p2.evaluate(() => {
     const g = window.__swGame;
-    if (!g?.player) return { fail: 'game/player 不在场' };
+    if (!g) return { fail: 'game 不在' };
+    if (!g.world) return { fail: 'world 不在', frame: g.tickCount };
+    if (!g.player) return { fail: 'player 不在(world 在)', worldStore: !!g.world.store, frame: g.tickCount };
     return {
       alive: !g.player.dead,
       modsLoaded: window.__swModsLoaded === true,

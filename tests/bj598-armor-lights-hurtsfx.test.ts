@@ -265,7 +265,10 @@ describe('BJ598 件2:playHurtVoice 播放位次锁（DST 世界门序）', () =>
     expect(played[0]!.file).toMatch(/^Player_Hit_\d$/);
   });
   it('DST 门序源锁（plan.source 排除位次在门条件内）', () => {
-    expect(VOICE.includes("plan.source !== 'armor' && sfH.theConstant")).toBe(true);
+    // ★BJ652 件4 重锚（2026-10-12）：mount/狼人支补装后门条件收窄为「凡 plan.source
+    //  有档即跳过」（原版 override/mount/狼人/甲支各支均在 DST 门【前】return,只有
+    //  落空到 variant 尾段才可达此门）——旧形 `plan.source !== 'armor'` 随两支退役。
+    expect(VOICE.includes("!plan.source && sfH.theConstant")).toBe(true);
   });
 });
 

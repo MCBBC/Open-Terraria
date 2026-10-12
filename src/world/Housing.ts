@@ -56,17 +56,17 @@ export const WALL_HOUSE = new Set([
 // 平台 19 是合法"门"（CheckRoom :6090 houseTile 在 tileSolid 短路【前】登记——
 // 平台地板格即满足 door 需求,平台入口房原版合格）。
 /** CountsAsTorchTypes（TileID.cs:112-119,26 项=住房光源权威表） */
-const COUNTS_AS_TORCH = new Set<number>([
+export const COUNTS_AS_TORCH = new Set<number>([
   4, 33, 34, 35, 42, 49, 93, 95, 98, 100,
   149, 173, 174, 270, 271, 316, 317, 318, 92, 372,
   646, 405, 592, 572, 581, 660,
 ]);
 /** CountsAsDoorTypes（TileID.cs:121-127,13 项：木门/开门/平台/翻板/高门/队伍平台） */
-const COUNTS_AS_DOOR = new Set<number>([10, 11, 19, 387, 386, 388, 389, 436, 435, 438, 427, 439, 437]);
+export const COUNTS_AS_DOOR = new Set<number>([10, 11, 19, 387, 386, 388, 389, 436, 435, 438, 427, 439, 437]);
 /** CountsAsTableTypes（TileID.cs:101-108,12 项） */
-const COUNTS_AS_TABLE = new Set<number>([14, 18, 87, 88, 90, 101, 354, 355, 464, 469, 487, 699]);
+export const COUNTS_AS_TABLE = new Set<number>([14, 18, 87, 88, 90, 101, 354, 355, 464, 469, 487, 699]);
 /** CountsAsChairTypes（TileID.cs:94-97,6 项：15 椅/79 床/89 浴缸/102 王座/487/497 马桶） */
-const COUNTS_AS_CHAIR = new Set<number>([15, 79, 89, 102, 487, 497]);
+export const COUNTS_AS_CHAIR = new Set<number>([15, 79, 89, 102, 487, 497]);
 
 const isDoorType = (t: number) => t === T.DOOR_CLOSED || t === T.DOOR_OPEN;
 
@@ -378,6 +378,7 @@ export function scoreRoom(
   st: TileStore, room: Room,
   occupied: ReadonlyArray<Occupant>,
   askingNpcId = -1,
+  scan?: RoomScanTrace,
 ): RoomScore {
   const fail: RoomScore = { score: 0, x: room.standX, y: room.standY, roomEvil: false, hasStandingSpace: false };
   // ① 占用检查（ScoreRoom_IsThisRoomOccupiedBySomeone WorldGen.cs:5750-5763）：home 与
@@ -466,6 +467,9 @@ export function scoreRoom(
       if (sharedX >= 0 && num >= 1 && Math.abs(sharedX - i) < 3) num = 1;
       if (num > 0 && chests > 0) { num -= 30 * chests; if (num < 1) num = 1; }
       if (num > 0 && centerCol > 0) { num -= 15 * centerCol; if (num < 1) num = 1; }
+      // ★BJ654：ReportScore（WorldGen.cs:5914）——候选点采集（与原版同位：首过滤后、
+      //  hiScore 比较前;含负分档,EndScoring 分型着色）
+      if (scan) scan.scores.push({ x: i, y: j, score: num });
       if (num <= hiScore) continue;
       // ⑤ 落位校验：地板与上方 1-3 格都在房内且上方无实心（5908-5926）
       let ok = room.tiles.has(ii);
@@ -478,6 +482,8 @@ export function scoreRoom(
         hiScore = num;
         bestX = i;
         bestY = j;
+        // ★BJ654：SetAsHighScore（WorldGen.cs:5946）——最优站位采集（金黄点）
+        if (scan) scan.best = { x: i, y: j, score: num };
       }
     }
   }
@@ -552,6 +558,76 @@ interface FloodOpts {
   extraSolid?: Set<number>;
   /** 校验旁路(RoomNeeds 不满足不判负——幽灵 home 校验只关心围合+tiles 归属) */
   ignoreNeeds?: boolean;
+  /** ★BJ654 房检扫描视觉采集通道（vanilla RichRoomCheckFeedback 采集面 1:1——
+   *  WorldGen.CheckRoom 逐格 feedback 回调镜像,见 RoomScanTrace 注）。可选出参：
+   *  判定链行为零变化,仅 housingQuery 查询路径传入。 */
+  scan?: RoomScanTrace;
+}
+
+// ================= ★BJ654 房检扫描视觉采集通道（2026-10-12 用户实报「原版住房检测
+// 有扫描视觉,每格一个小点」） =================
+// 原版视觉面（亲读定谳）：
+//   - Main.PerformHousingCheck（Main.cs:45918-45924）= MoveTownNPC(x,y,-1) 跑两遍：
+//     第一遍 feedback=RichRoomCheckFeedback.Instance（StopOnFail=false/DisplayText=false,
+//     纯视觉采集）、第二遍 NoRoomCheckFeedback.WithText（纯文案）——视觉与文案本就
+//     是并列双跑,本仓采集通道同构（判定面零耦合）。
+//   - 采集点=WorldGen.CheckRoom 逐格回调（WorldGen.cs:6072-6174）：
+//     AnyBlockScannedHere(:6102)=每处理格 good（青点 Extra[293]）；BlockingWall(:6110)/
+//     BlockingOpenGate(:6113-6127)=blocked（EndSpread 内 continue 不发射,且消耗同格
+//     good→边界实心格净零点）；Stinkbug/EchoStinkbug(:6128-6137)=hazard（红 X
+//     Extra[292]）；UnsafeWall(:6165)=红十字 Extra[298]；MissingAWall(:6168)=红 X。
+//     StartRoomCheck 头 TooCloseToWorldEdge(:6014)=openAir、StartedInASolidTile(:6028)
+//     =blocked（永不发射→实心种子零点,与原版一致）。
+//   - 发射面=RichRoomCheckFeedback.EndSpread（Terraria.DataStructures/
+//     RichRoomCheckFeedback.cs,发射公式 1:1 见 fx/HousingScanFx.ts）；打分点面=
+//     EndScoring（ScoreRoom ReportScore/SetAsHighScore 候选点集）。
+export type RoomScanTileKind = 'good' | 'blocked' | 'hazard' | 'unsafeWall' | 'openAir';
+export interface RoomScanEntry {
+  x: number;
+  y: number;
+  kind: RoomScanTileKind;
+}
+export interface RoomScanScoreEntry {
+  x: number;
+  y: number;
+  score: number;
+}
+export interface RoomScanTrace {
+  /** 检测种子格（Main.PerformHousingCheck 的 (x,y)——波纹原点） */
+  originX: number;
+  originY: number;
+  /** 逐格采集序（floodRoom 处理序;EndSpread 消耗面/家具去重按此序 1:1） */
+  entries: RoomScanEntry[];
+  /** 泛洪访问集（floodRoom tiles 集引用——失败路径=部分集,vanilla StopOnFail=false
+   *  的 ScoreRoom 无条件跑语义所需,见 backfillRoomScanScoring） */
+  tileSet: Set<number>;
+  /** housingCheckAt 是否已跑过 scoreRoom（其判定面早退分支不跑→由 backfill 补跑） */
+  scored: boolean;
+  /** ScoreRoom.ReportScore 候选（WorldGen.cs:5914,采集序） */
+  scores: RoomScanScoreEntry[];
+  /** ScoreRoom.SetAsHighScore（WorldGen.cs:5946——score≠0 才发射,EndScoring 门） */
+  best: RoomScanScoreEntry | null;
+}
+
+export function createRoomScanTrace(x: number, y: number): RoomScanTrace {
+  return {
+    originX: x, originY: y, entries: [], tileSet: new Set<number>(),
+    scored: false, scores: [], best: null,
+  };
+}
+
+/** 判定面早退（失败泛洪/臭虫否决）时的打分采集补跑——vanilla MoveTownNPC 对
+ *  RichRoomCheckFeedback（StopOnFail=false）【无条件】跑到 BeginScoring→ScoreRoom→
+ *  EndScoring（WorldGen.cs:4722-4747 各 stopOnFail 支对 false 全不折返）,失败房也出
+ *  候选绿点/金黄最优点。本仓 housingCheckAt 判定面在臭虫/失败档早退（不跑 scoreRoom）,
+ *  视觉域按原版语义以泛洪部分集补跑（纯采集,判定零影响）。 */
+export function backfillRoomScanScoring(
+  st: TileStore, scan: RoomScanTrace,
+  occupied: ReadonlyArray<Occupant>, askingNpcId = -1,
+): void {
+  if (scan.scored) return;
+  scan.scored = true;
+  scoreRoom(st, { standX: scan.originX, standY: scan.originY, tiles: scan.tileSet }, occupied, askingNpcId, scan);
 }
 
 function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags, opts: FloodOpts = {}): Room | null {
@@ -582,9 +658,15 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       || (sT !== 0 && doorFrameBoundary(sSheet, st.frameX[si], st.frameY[si]))
       || (sT !== 0 && extraSolid.has(sSheet)))) {
     lastRoomCheckFail = 'notValid';   // BlockingWall/BlockingOpenGate 族同域（未设 failureReason,归 notValid 档）
+    // ★BJ654：StartedInASolidTile（WorldGen.cs:6028）——blocked 不发射（EndSpread
+    //  BlockedWall 支 continue）→ 实心种子零点,与原版一致
+    opts.scan?.entries.push({ x: sx, y: sy, kind: 'blocked' });
     return null;
   }
   const tiles = new Set<number>();
+  // ★BJ654：tiles 集引用挂入采集通道（失败路径=部分集——backfillRoomScanScoring
+  //  的 vanilla StopOnFail=false ScoreRoom 无条件跑语义所需）
+  if (opts.scan) opts.scan.tileSet = tiles;
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
   // ★对抗修复批④2026-09-01（C-F5）：roomHasStinkbug/roomHasEchoStinkbug 的泛洪局部等价物
   // （StartRoomCheck 头复位 cs:5986-5987 ↔ 本函数每次调用清零;CheckRoom 置位 :6128-6137）
@@ -617,6 +699,10 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     const x = i % st.w, y = (i / st.w) | 0;
     const t = st.type[i];
     const def = t ? TILE_DEFS[t] : undefined;
+    // ★BJ654：AnyBlockScannedHere（WorldGen.cs:6102）——每处理格 good 采集
+    //  （青点 Extra[293];后续 blocked/hazard/unsafeWall/openAir 同格采集会在
+    //  EndSpread 消耗面压掉 good,与原版逐格回调序等价）
+    opts.scan?.entries.push({ x, y, kind: 'good' });
     // ★对抗修复批⑤B 2026-09-01（B2|R1-F2 宽松墙证据窗逐格执行）：vanilla CheckRoom
     // 对【每个被处理格】无条件跑五格横竖双向窗（WorldGen.cs:6139-6159 两向循环）,
     // 任一向证据缺失即整房判负（:6160-6174）。此前仅纯空气格跑窗、active 家具格整段
@@ -629,6 +715,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       // WorldGen.CheckRoom 判决尾 ：6162-6171：有墙但非房墙 = TooManyUnsafeWalls（天然
       // 墙不安全）;无墙 = HoleInWallIsTooBig（漏墙）
       lastRoomCheckFail = st.wall[i] > 0 ? 'unsafeWalls' : 'hole';
+      // ★BJ654：UnsafeWall(:6165,Extra[298] 红十字)/MissingAWall(:6168,Extra[292] 红 X)
+      //  ——原版同格 good 已被消耗面压掉,净红点
+      opts.scan?.entries.push({ x, y, kind: st.wall[i] > 0 ? 'unsafeWall' : 'openAir' });
       return null;
     }
     // ★G1谓词批(2026-09-04)：houseTile/臭虫置位同在 nactive 门内（WorldGen.cs:6108
@@ -642,11 +731,19 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       // BlockingWall 早退(:6113-6117)同样先于置位行,口径一致
       if (sh === STINKBUG_SHEET) hasStinkbug = true;
       else if (sh === ECHO_STINKBUG_SHEET) hasEchoStinkbug = true;
+      // ★BJ654：Stinkbug/EchoStinkbug（WorldGen.cs:6128-6137）——hazard 红 X
+      //  Extra[292]（同格 good 被消耗面压掉）
+      if (sh === STINKBUG_SHEET || sh === ECHO_STINKBUG_SHEET) {
+        opts.scan?.entries.push({ x, y, kind: 'hazard' });
+      }
     }
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const nx = x + dx, ny = y + dy;
       if (nx < 1 || ny < 1 || nx >= st.w - 1 || ny >= st.h - 1) {
         lastRoomCheckFail = 'edge';   // 原版 CheckRoom 越界 = TooCloseToWorldEdge
+        // ★BJ654：TooCloseToWorldEdge（WorldGen.cs:6100/6014）——红 X 采集（界外格
+        //  出界侧发射器走类型查找守卫）
+        opts.scan?.entries.push({ x: nx, y: ny, kind: 'openAir' });
         return null;
       }
       const ni = st.idx(nx, ny);
@@ -671,6 +768,11 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
         // 边界格同样登记 houseTile（原版在 tileSolid 短路前 :6090）——平台 19
         // 地板即"门"（R21:平台入口房不再一律 notValid）
         if (ndef) markHouseTile(ndef.vanilla?.sheet ?? -1);
+        // ★BJ654：BlockingWall/BlockingOpenGate（WorldGen.cs:6110/:6113-6127）——
+        //  blocked 采集（EndSpread BlockedWall 支 continue 不发射+消耗面压掉同格
+        //  good → 边界实心/门锚格净零点,与原版一致;仅记 blocked 不另记 good=
+        //  净等价,采集序列减容）
+        opts.scan?.entries.push({ x: nx, y: ny, kind: 'blocked' });
         tiles.add(ni);
         if (nx < minX) minX = nx;
         if (nx > maxX) maxX = nx;
@@ -680,10 +782,12 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       }
       if (tiles.size >= MAX_TILES) {
         lastRoomCheckFail = 'tooBig';   // RoomIsTooBig（WorldGen.cs:4210）
+        opts.scan?.entries.push({ x: nx, y: ny, kind: 'openAir' });   // ★BJ654 RoomTooBig 红点
         return null;
       }
       if (maxX - minX >= MAX_ROOM_SPAN || maxY - minY >= MAX_ROOM_SPAN) {
         lastRoomCheckFail = 'tooBig';
+        opts.scan?.entries.push({ x: nx, y: ny, kind: 'openAir' });   // ★BJ654 RoomTooBig 红点
         return null;
       }
       tiles.add(ni);
@@ -935,12 +1039,14 @@ export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'uns
 export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
 export function queryRoom(st: TileStore, x: number, y: number,
-  opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid' | 'requireStand'> = {}): HousingQueryResult {
+  opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid' | 'requireStand' | 'scan'> = {}): HousingQueryResult {
   const flags: RoomNeedsFlags = {
     table: false, chair: false, light: false, door: false,
     stinkbug: false, echoStinkbug: false,
   };
   if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) {
+    // ★BJ654：TooCloseToWorldEdge（WorldGen.cs:6014）——红点采集
+    opts.scan?.entries.push({ x, y, kind: 'openAir' });
     return { room: null, flags, reason: 'edge' };
   }
   // 起点实心（StartedInASolidTile :6025-6032）——原版仅置 canSpawn=false 后继续
@@ -951,6 +1057,8 @@ export function queryRoom(st: TileStore, x: number, y: number,
   if (st.isActive(x, y)
     && (tileSolidLike(st.type[st.idx(x, y)])
       || MAIN_EXTRA_SOLID.has(sheetOf(st.type[st.idx(x, y)])))) {
+    // ★BJ654：StartedInASolidTile（WorldGen.cs:6028）——blocked 采集（不发射=零点）
+    opts.scan?.entries.push({ x, y, kind: 'blocked' });
     return { room: null, flags, reason: 'solid' };
   }
   const room = floodRoom(st, x, y, flags, opts);
@@ -981,9 +1089,10 @@ export function queryRoom(st: TileStore, x: number, y: number,
 export function housingCheckAt(
   st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
   x: number, y: number, askingNpcId = -1,
+  scan?: RoomScanTrace,
 ): HousingQueryResult & { score: number } {
   // 主链 extraSolid 缺省（C-F4）：queryRoom/floodRoom 默认带 MAIN_EXTRA_SOLID{379}
-  const q = queryRoom(st, x, y);
+  const q = queryRoom(st, x, y, scan ? { scan } : undefined);
   if (!q.room) return { ...q, score: 0 };
   // ★对抗修复批④（C-F5）：臭虫否决先于占用/邪恶评分位判定（cs:4694-4718 位于
   // ScoreRoom 调用之前）。score 保持 0（不反映 ScoreRoom——原版此处尚未打分）；
@@ -991,7 +1100,10 @@ export function housingCheckAt(
   if ((q.flags.stinkbug || q.flags.echoStinkbug) && npcHousingCategory(askingNpcId) !== 1) {
     return { ...q, room: q.room, reason: q.flags.stinkbug ? 'stinkbug' : 'echoStinkbug', score: 0 };
   }
-  const s = scoreRoom(st, q.room, occupied, askingNpcId);
+  // ★BJ654：scoreRoom 打分采集挂入（scored 旗=已跑,backfill 跳过——vanilla Rich 跑
+  //  MoveTownNPC 对 ScoreRoom 无条件,本处即其采集位）
+  if (scan) scan.scored = true;
+  const s = scoreRoom(st, q.room, occupied, askingNpcId, scan);
   if (s.score < 0) return { ...q, room: q.room, reason: 'occupied', score: -1 };
   // ★BJ406（2026-09-23 用户实报「腐化环境房屋仍可入住」定谳刀）：原版唯一否决位 =
   // hiScore<=0（MoveTownNPC cs:4722-4747 stopOnFail 支 / QuickFindHome cs:5692 /

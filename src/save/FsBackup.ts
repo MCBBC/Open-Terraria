@@ -294,16 +294,20 @@ export async function fsBackupDisable(): Promise<void> {
   try { await kvDelete(FS_BACKUP_HANDLE_KEY); } catch { /* IDB 不可用忽略 */ }
 }
 
-/** 重新授权（设置页按钮,用户手势）：requestPermission granted → ready;
- *  dismiss（prompt）/denied 维持 needs-permission/broken,不重复弹。 */
+/** 重新授权（设置页按钮/★BJ655 读档点击手势链,用户手势）：requestPermission
+ *  granted → ready;dismiss（prompt）/denied 维持 needs-permission/broken,不重复弹。
+ *  ★BJ655：SecurityError（无手势——程序化入口;或 worker/跨域 iframe）≠目录损坏,
+ *  catch 静默返 false 且**不降级 'broken'**（设置页误导「重新选择目录」;维持现态
+ *  「待重新授权」,真目录损坏由写失败面 noteWriteFailure 纠正状态）。 */
 export async function fsBackupRequestPermission(): Promise<boolean> {
   await ensureLoaded();
   if (!dirHandle?.requestPermission) return false;
-  let state: FsPermissionState = 'denied';
+  let state: FsPermissionState;
   try {
     state = await dirHandle.requestPermission({ mode: 'readwrite' });
   } catch (e) {
     console.warn('[fsBackup] requestPermission 失败', e);
+    return false;   // ★BJ655：无手势等异常=保持现态（needs-permission）,不误降级
   }
   if (state === 'granted') {
     failStreak = 0;

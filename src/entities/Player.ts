@@ -1336,8 +1336,10 @@ export class Player extends Entity {
   wetSticky = false;
   /** 原版 lavaWet 粘滞镜像（Player.cs:27872 flag24 / :27883 lavaWet=flag25 / :28164 !wet 清）
    *  ——溅花液型门专用：入水门=本拍 flag25（:27989）、出水门=上拍值（:28083）。
-   *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离） */
-  private splashLavaWet = false;
+   *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离）
+   *  ★BJ652 件3：private 摘除——wet 灭火门（Game.updateUse,Player.cs:52751
+   *  `wet && !lavaWet`）跨模块消费本位，按 wetSticky/RB21 先例转 public,零运行时差 */
+  splashLavaWet = false;
   /** 原版 shimmerWet 粘滞镜像（:27943 置位 / :28161 !shimmer 清 / :28164 !wet 清）
    *  ——inShimmer 桶位是当拍即时值,溅花需要跨拍粘滞（出水拍读上拍液型） */
   private splashShimmerWet = false;
@@ -10578,10 +10580,11 @@ export class Player extends Entity {
     return (st.flags[k] & 1) !== 0 && !!TILE_DEFS[st.type[k]]?.rope;
   }
 
-  /** WorldGen.IsRope(x,y)（WorldGen.cs:70118-70152，rangeToCheck=5）：
-   *  tileRope 族直判；314 矿轨/380 花盆箱/平台族格 → GetRopeEnds 上下 5 格内
-   *  均有绳才算（绳穿平台可攀）。pulley 抓绳门（FindPulley :19363）与
-   *  维持退出门（:25950）的判定源 */
+  /** WorldGen.IsRope(x,y)（1457 WorldGen.cs:70612-70634，rangeToCheck=5）：
+   *  tileRope 族直判；314 矿轨/380 花盆箱/平台族格 → GetRopeEnds（:70556-70604）
+   *  上下 5 格内均有绳才算（绳穿平台/矿轨可攀——扫描对 active 非绳格【穿行】,
+   *  null/!active 才断,★BJ652 件2 勘正,见下方循环注）。pulley 抓绳门
+   *  （FindPulley :19363）与维持退出门（:25950）的判定源 */
   isRopeAt(st: TileStore, x: number, y: number): boolean {
     if (!st.inBounds(x, y)) return false;
     const k = st.idx(x, y);
@@ -10592,21 +10595,24 @@ export class Player extends Entity {
     const sheet = def.vanilla?.sheet ?? -1;
     if (sheet !== 314 && sheet !== 380 && !VANILLA_PLATFORM_SHEETS.has(sheet)) return false;
     // GetRopeEnds（WorldGen.cs:70069-70105，treatEmptyAsTheRopeEnd=false，range 5）
+    // ★BJ652 件2（2026-10-12）扫描语义勘正：旧实现首格非绳即 break——原版对
+    //  【active 非绳格】是继续穿行（null/!active 才 break,绳才置位破），
+    //  绳藏在平台/矿轨后一格起即漏判（:70559-70574/:70578-70593 亲读）。
     let topRopeY = -1;
     for (let i = 1; i <= 5; i++) {
       const ty = y - i;
-      if (!st.inBounds(x, ty)) break;                  // InWorld 出界即止
-      if (!this.rawRopeAt(st, x, ty)) break;           // !active→break；绳→置位 break
-      topRopeY = ty;
-      break;
+      if (!st.inBounds(x, ty)) break;                  // InWorld 出界即止（:70559）
+      const k = st.idx(x, ty);
+      if (!(st.flags[k] & 1)) break;                   // tile==null||!active → break（:70564）
+      if (TILE_DEFS[st.type[k]]?.rope) { topRopeY = ty; break; }   // 绳→置位破;active 非绳→继续
     }
     let bottomRopeY = -1;
     for (let j = 1 + (y - topRopeY); j <= 6; j++) {
       const ty = topRopeY + j;
       if (!st.inBounds(x, ty)) break;
-      if (!this.rawRopeAt(st, x, ty)) break;
-      bottomRopeY = ty;
-      break;
+      const k = st.idx(x, ty);
+      if (!(st.flags[k] & 1)) break;
+      if (TILE_DEFS[st.type[k]]?.rope) { bottomRopeY = ty; break; }
     }
     return topRopeY !== -1 && bottomRopeY !== -1;
   }
