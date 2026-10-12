@@ -127,12 +127,12 @@ function compact(list: Entity[]): void {
  *  （aiStyle 147,friendly）与 1091 风暴闪电（aiStyle 203 双旗 trap,尾支
  *  `return type != 1091`=排除）同谳同落。未实装 vid（511-513/567/568/1007）
  *  无割面=销案;237/238/243/244 无 friendly 行=friendly 门已拦（双保险）。 */
-const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040, 688, 689, 690]);
+export const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040, 688, 689, 690]);
 /** aiStyle 级排除（:15407 头支 `aiStyle != 45 && != 137 && != 92 && != 105 && != 106`
  *  ——137 已由 BJ606-R 收 CUT_EXCLUDE_VIDS 成员式,此处补 45/92/105/106 家族级）；
  *  尾支 `return type != 1091`（:15418-15420）单型落 vid 集。 */
-const CUT_EXCLUDE_AISTYLES = new Set([45, 92, 105, 106, 147]);   // 147=IsAGolfBall(715-718) aiStyle
-const CUT_EXCLUDE_VIDS_TAIL = new Set([1091]);
+export const CUT_EXCLUDE_AISTYLES = new Set([45, 92, 105, 106, 147]);   // 147=IsAGolfBall(715-718) aiStyle
+export const CUT_EXCLUDE_VIDS_TAIL = new Set([1091]);   // ★BJ663件2 导出：第二割面门（Game.ts crush sweep）同源消费
 
 export class EntityManager {
   nextId = 1;

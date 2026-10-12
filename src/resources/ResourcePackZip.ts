@@ -8,6 +8,7 @@
 // zip 解压 = fflate（既有依赖，package.json dependencies ^0.8.3，零新依赖）。
 import { unzipSync, strFromU8 } from 'fflate';
 import { isPackIcon, isPackManifest, mapPackAsset, stripContentRoot, type MappedAsset } from './packPaths';
+import { decodeXnbSoundToWav } from './XnbAudio';
 
 /** pack.json 清单（ResourcePack.Name/Description/Author/Version） */
 export interface PackManifestInfo {
@@ -98,7 +99,17 @@ export function parseFromEntries(entries: Iterable<[string, Uint8Array]>): Parse
     }
     for (const m of mapped) {
       if (m.kind === 'image') { images.set(m.file, data); counts.images++; }
-      else if (m.kind === 'sound') { sounds.set(m.file, data); counts.sounds++; }
+      // ★对话头像(TownNPCs/Portraits):保留在 images 下以展平键承载,manager 侧
+      //   按 TownNPCs_Portraits_Portrait_<X> 模式转 objectURL 注册(键无人直绘)
+      else if (m.kind === 'townPortrait') { images.set(`vanilla/TownNPCs_Portraits_Portrait_${m.name}.png`, data); counts.images++; }
+      else if (m.kind === 'sound') {
+        // ★.xnb 音效:解容器取 PCM 包 WAV(失败计入 skippedXnb,与"web 不可解码"同档)
+        if (m.file.toLowerCase().endsWith('.xnb')) {
+          const wav = decodeXnbSoundToWav(data);
+          if (wav) { sounds.set(m.file, wav); counts.sounds++; }
+          else counts.skippedXnb++;
+        } else { sounds.set(m.file, data); counts.sounds++; }
+      }
       else if (m.kind === 'music') { music.set(m.file, data); counts.music++; }
       else { fonts.set(m.family, data); counts.fonts++; }
     }

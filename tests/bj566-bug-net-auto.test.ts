@@ -21,6 +21,7 @@
 //  ③同族对拍：金网 18t / 木网 21t 各自周期长
 //  ④结构锁：裸挥臂复用节拍门表达式在位
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
@@ -64,6 +65,8 @@ const iidOf = (vid: number): number => {
 /** updateUse 可驱动的最小 Game 桩（tests/bj69-nouse-gate.test.ts stubGame 同构） */
 function stubGame(heldVid: number) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   player.inv.add(iidOf(heldVid), 1);
   const sel = player.inv.slots.findIndex((s) => s && s.id === iidOf(heldVid));

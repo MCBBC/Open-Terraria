@@ -26,6 +26,7 @@
 /** 映射目标 */
 export type MappedAsset =
   | { kind: 'image'; file: string }   // 形如 'vanilla/<X>.png' | 'vanilla-ui/<X>.png'（按 vanilla-ui/ 前缀分流注入目标）
+  | { kind: 'townPortrait'; name: string } // TownNPCs/Portraits/Portrait_<X> → 对话头像(按 Name 注册 objectURL)
   | { kind: 'sound'; file: string }   // Sfx 键（sounds/<file>.wav 的 file 部分）
   | { kind: 'music'; file: string }   // ★SW-FX16：音乐键 'Music_<id>'（Audio.buffer / Sfx.loadCueBuffer 消费）
   | { kind: 'font'; family: string }; // FontFace 族名（SWRP:<基名>）
@@ -90,6 +91,9 @@ export function mapPackAsset(rel: string): MappedAsset[] {
   if (lower(head) === 'sounds') {
     const drop = rest.length > 1 && lower(rest[0]) === 'custom' ? rest.slice(1) : rest;
     const file = drop.join('_');
+    // ★.xnb 音效(2026-10-12 工坊包实测=Waifu 19 张全是 xnb):容器内=PCM WAV,
+    //   decodeXnbSoundToWav 解包后走既有 wav 覆盖面(消费端 decodeAudioData 可解)。
+    if (lower(file).endsWith('.xnb')) return [{ kind: 'sound', file: file.slice(0, -4) }];
     if (hasExt(file, AUDIO_EXT) === null) return [];
     return [{ kind: 'sound', file: file.slice(0, file.lastIndexOf('.')) }];
   }
@@ -123,6 +127,23 @@ export function mapPackAsset(rel: string): MappedAsset[] {
   const sub = lower(rest[0]);
   const flat = rest.slice(1).join('_');
   if (hasExt(flat, IMG_EXT) === null) return [];
+  // ★TownNPCs 档案族(2026-10-12 娘化包实测):包内带完整档案名家族——
+  //   TownNPCs/<Name>_<Variant>.png(Default/_Party/_Transformed)→ vanilla/ 同名键
+  //   (城镇本体消费=townNpcProfileSheet);TownNPCs/Shimmered/<...>→ vanilla/Shimmered_<...>;
+  //   TownNPCs/Portraits/Portrait_<X>.png → 'townPortrait'(对话头像,manager 侧
+  //   objectURL 注册消费——vimages 键无人消费)。其余 TownNPCs 杂件回退展平。
+  if (sub === 'townnpcs') {
+    const rest2 = rest.slice(1);
+    if (rest2.length === 1 && rest2[0].endsWith('.png')) return [{ kind: 'image', file: `vanilla/${rest2[0]}` }];
+    if (lower(rest2[0] ?? '') === 'shimmered' && rest2.length === 2 && rest2[1].endsWith('.png')) {
+      return [{ kind: 'image', file: `vanilla/Shimmered_${rest2[1]}` }];
+    }
+    if (lower(rest2[0] ?? '') === 'portraits' && rest2.length === 2) {
+      const pm = /^Portrait_(.+)\.png$/i.exec(rest2[1]);
+      if (pm) return [{ kind: 'townPortrait', name: pm[1] }];
+    }
+    return [{ kind: 'image', file: `vanilla/${rest[0]}_${flat}` }];
+  }
   if (SUBDIR_TO_UI.includes(sub)) return [{ kind: 'image', file: `vanilla-ui/${rest[0]}_${flat}` }];
   if (sub === 'armor') {
     // Armor/Armor_N → vui 消费(PaperDoll) + vanilla/ 镜像(bulk 拷贝同键)

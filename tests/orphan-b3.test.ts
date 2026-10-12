@@ -16,6 +16,7 @@
 //       :38989-39004、case 4765/4766 :39207-39216、case 5285 :41966-41975；
 //       Projectile.cs AI_154 :53071-53101、AI_032 :27264-27408、Kill :75111-75131。
 import { describe, it, expect, vi } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { existsSync } from 'node:fs';
 import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
@@ -101,6 +102,8 @@ function stubGame(_mouseAt: [number, number]) {
     openedChests: Array<{ x?: number; y?: number; items: Array<unknown> }>;
     chestClosed: boolean;
   };
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   g.player = player;
   g.world = { store: new TileStore(200, 200) };
@@ -679,6 +682,8 @@ describe('X-F1 fresh-click 门（B3 左键 ⑩ 边沿；右键换型支不受影
   function updUseGame(heldVid: number, stack = 1,
     opts?: { nearCursor?: boolean }) {
     const g = Object.create(Game.prototype) as Record<string, any>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
     const iidV = invIndexOfVanilla(heldVid);
     expect(iidV).toBeGreaterThanOrEqual(0);

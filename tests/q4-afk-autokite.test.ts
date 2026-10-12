@@ -20,6 +20,7 @@
 //   ★BJ428（2026-10-01）M6 updateUse G1 总闸 `&& !this._afkKiteForceUse` 删 →
 //     C1 红（装备置旗但 KiteProj 出膛数 0——用户实报「装备不放飞」断链层）
 import { describe, it, expect, vi } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -184,6 +185,8 @@ interface AfkShell {
 
 function afkShell(p: Player): AfkShell {
   const g = Object.create(Game.prototype) as unknown as AfkShell;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   g.player = p;
   g.input = { mouseX: 320, mouseY: 240, downAction: () => false };
   g.camera = { screenToWorld: () => [0, 0], y: 0, zoom: 1 };

@@ -27,6 +27,7 @@ import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/items';
+import { newWiresRadialState } from '../src/stats/wiresRadial';
 import { itemCombat } from '../src/data/vanillaItemCombat';
 import { itemUseSoundWav } from '../src/data/itemUseSound';
 import { combatWeapon } from '../src/data/vanillaItemCombat';
@@ -70,6 +71,11 @@ function stubGame(heldVid: number) {
   g.camera = { tileUnder: () => [60, 60], screenToWorld: () => [800, 0], x: 800, y: 0 };
   g.renderer = { canvas: { width: 800, height: 600 }, fullMap: { open: false }, timeUiHover: false, weatherUiHover: false };
   g.smartCursor = { showing: false };
+  // ★BJ662（2026-10-12）BJ626 bj545/bj536 壳桩同款：updateUse 头 tickWiresRadial
+  //  （BJ572 落线）读 this.wiresRadial——Object.create 壳无构造器字段 →
+  //  flowerUpdate(st=undefined) TypeError（BJ646/BJ651 登记存量红,桩仅为通路;
+  //  虫网/裸挥居民非 wire 工具走 flowerUpdate 早退支）
+  g.wiresRadial = newWiresRadialState();
   g.annotateMode = false;
   g.prevSwingMouse = false;
   g.mining = null;

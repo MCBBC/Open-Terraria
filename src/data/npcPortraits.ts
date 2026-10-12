@@ -43,6 +43,36 @@ export function registerModPortraitUrl(npcId: number, url: string): void {
   MOD_PORTRAIT_URL.set(npcId, url);
 }
 
+/** 撤销登记（材质包禁用/重放时清派生头像,2026-10-12:包禁用后头像应回原版） */
+export function unregisterModPortraitUrl(npcId: number): void {
+  MOD_PORTRAIT_URL.delete(npcId);
+}
+
+// ---- 材质包自带头像(2026-10-12):按档案名 Portrait_<Name> 注册(资源包注入侧
+//   从 vanilla/TownNPCs_Portraits_Portrait_<Name>.png 转 objectURL)——名键与
+//   NPC_PORTRAITS 的 id→Name 对接;含 _shimmer 变体名。 ----
+const PACK_PORTRAIT_URL_BY_NAME = new Map<string, string>();
+
+/** 登记材质包对话头像(名键;幂等覆盖) */
+export function registerPackPortraitUrl(name: string, url: string): void {
+  PACK_PORTRAIT_URL_BY_NAME.set(name, url);
+}
+
+/** 清全部材质包头像(重放先清/零包回退) */
+export function clearPackPortraitUrls(): void {
+  PACK_PORTRAIT_URL_BY_NAME.clear();
+}
+
+/** 材质包是否带该名头像(含 _shimmer 变体查询) */
+export function packPortraitHas(name: string, shimmer = false): boolean {
+  return PACK_PORTRAIT_URL_BY_NAME.has(shimmer ? `${name}_shimmer` : name);
+}
+
+/** 材质包头像 url(无=null) */
+export function packPortraitUrl(name: string, shimmer = false): string | null {
+  return PACK_PORTRAIT_URL_BY_NAME.get(shimmer ? `${name}_shimmer` : name) ?? null;
+}
+
 /** mod NPC 头像 url（未登记 = null） */
 export function modPortraitUrl(npcId: number): string | null {
   return MOD_PORTRAIT_URL.get(npcId) ?? null;
@@ -81,6 +111,12 @@ export function portraitForNpc(npc: PortraitNpcCtx): string | null {
     // 狼人微光,非微光&&狼人→狼人,缺省→人）
     const name = npc.altTexture === 2 ? 'Zoologistb' : 'Zoologista';
     return `sprites/portraits/Portrait_${name}${npc.shimmered ? '_shimmer' : ''}.png`;
+  }
+  // ★材质包自带头像优先(名键;含微光变体——包带 _shimmer 时微光态用之,否则常态)
+  const baseName = NPC_PORTRAITS[v];
+  if (baseName && packPortraitHas(baseName)) {
+    if (npc.shimmered && packPortraitHas(baseName, true)) return packPortraitUrl(baseName, true)!;
+    return packPortraitUrl(baseName)!;
   }
   const base = portraitUrl(v);
   if (!base) return null;

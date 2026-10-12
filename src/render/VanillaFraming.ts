@@ -12,7 +12,7 @@ import type { TileStore } from '../world/TileStore';
 import programJson from '../data/generated/tileframe-program.json';
 import { makeFrame } from '../data/generated/tileframe-codegen.js';
 import type { FrameDRV, FrameTileH } from '../data/generated/tileframe-codegen.js';
-import { TILE_DEFS, TILE_MOSS_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, MOSS_BRICK_SHEETS, MOSS_SHEETS, CONV_GRASS_SHEETS, ORE_SHEETS, ICES_SNOW_SHEETS, ORE_MERGES_WITH_MUD_SHEETS, CHECKS_FOR_MERGE_SHEETS, FORCED_DIRT_MERGING_SHEETS, MERGES_WITH_CLOUDS_SHEETS, DONT_MERGE_WITH_SNOW_SHEETS, SETS_DIRT_SHEETS, SETS_MUD_SHEETS, SETS_ASH_SHEETS, GRASS_SPECIAL_SHEETS, JUNGLE_SPECIAL_SHEETS, HELL_SPECIAL_SHEETS, HAS_SLOPE_FRAMES_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_MOSS_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, MOSS_BRICK_SHEETS, MOSS_SHEETS, CONV_GRASS_SHEETS, ORE_SHEETS, ICES_SNOW_SHEETS, ORE_MERGES_WITH_MUD_SHEETS, CHECKS_FOR_MERGE_SHEETS, FORCED_DIRT_MERGING_SHEETS, MERGES_WITH_CLOUDS_SHEETS, DONT_MERGE_WITH_SNOW_SHEETS, SETS_DIRT_SHEETS, SETS_MUD_SHEETS, SETS_ASH_SHEETS, GRASS_SPECIAL_SHEETS, JUNGLE_SPECIAL_SHEETS, HELL_SPECIAL_SHEETS, HAS_SLOPE_FRAMES_SHEETS, PLATFORMS_SHEETS, IS_VINE_SHEETS } from '../data/tiles';
 import { vanillaIdOf } from './TileMergeFamily';
 
 // ★ID 域契约(2026-08-28 重定):本链全部集合/比较在 vanilla tile id 域。
@@ -845,6 +845,21 @@ function getRopeEndsAnchored(st: TileStore, x: number, y: number): boolean {
   }
   return bottomRopeY !== -1;                                       // :70631
 }
-function isVineAt(st: TileStore, x: number, y: number): boolean {
-  return st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && [52, 62, 69, 115, 205, 352, 382, 636, 638].includes(st.type[st.idx(x, y)]);
+/** IsVine（TileID.Sets.IsVine,TileID.cs:237 八员;框帧消费位 = WorldGen.cs:82652
+ *  `TileID.Sets.IsVine[type] && !CheckVines(i,j,type,tile)` 支——CheckVines 本体由
+ *  Game.checkVineAt 单独承载,本谓词=PRED.IsVine scope 权威面）。★BJ663件3（2026-10-12）
+ *  域错重写（BJ652 件2 isRopeAt 同族同刀）：旧实现 st.type 内部 id 直比手抄 vanilla
+ *  sheet 表 {52,62,69,115,205,352,382,636,638} 三重偏离定谳——①【域错】内部 id 撞表
+ *  （亲测 TILE_DEFS:52=硬化沙/62=椅/69=浴缸/115=史莱姆块/205=碗/352=琥珀宝石火花/
+ *  382=血月魔镜/636=琥珀兔笼/638=黄晶松鼠笼 全为假阳性;真藤内部 id 258/259/260/264/
+ *  273/274/280/408 全不命中=对真藤格恒假）②【表错】vanilla 真表无 69/352 荆棘、
+ *  有 528 蘑菇藤③【单源缺位】未挂 data/tiles.ts:IS_VINE_SHEETS（BJ218 收编单源,
+ *  ≡VineThreads 同值双语义名）。消费面现状=框帧程序零调用（tileframe-program.json
+ *  无 IsVine——原版消费点 :82652 在 TileFrameCosmetic 提取区 82684-86071 之外）=
+ *  死线排雷（重提取器若扩区即吃本谓词,先归正再扩）。 */
+export function isVineAt(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const k0 = st.idx(x, y);
+  if (!st.flags[k0]) return false;                       // tile==null||!active
+  return IS_VINE_SHEETS.has(vanillaIdOf(st.type[k0]));   // TileID.Sets.IsVine[type]（vanilla sheet 域）
 }

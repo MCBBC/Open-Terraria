@@ -42,7 +42,7 @@ import { Celeb2Muzzle } from '../src/entities/Celeb2';
 import { writePlayerItems, readPlayerItems, ItemContainer, NetReader } from '../src/net/protocol';
 import { TILE } from '../src/core/constants';
 import { newWiresRadialState } from '../src/stats/wiresRadial';
-import { withMutation } from './mutation-guard';
+import { withMutation, lockTargetFile, unlockTargetFile } from './mutation-guard';
 
 const GAME_ROOT = join(__dirname, '..');
 const srcGame = () => readFileSync(join(GAME_ROOT, 'src/core/Game.ts'), 'utf8');
@@ -325,18 +325,30 @@ describe('BJ651件3 reuseDelayBakedOf（Item.cs:569 round f32 银行家;M 不折
 describe.skipIf(process.env.SW_BJ651_MUT)('BJ651 变异自证（每件≥1 发,恰红）', () => {
   const GAME = join(GAME_ROOT, 'src/core/Game.ts');
   const WHIP = join(GAME_ROOT, 'src/entities/WhipProj.ts');
-  const sha = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
+  const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');   // ★BJ662：内容取 hash（基准改锁内 onPristine 捕获,文件读面移入重入锁对拍窗）
 
   const mutate = (file: string, trigger: string, replacement: string, filter: string, target: string) => {
-    const pristineSha = sha(file);
+    let pristineSha = '';
     withMutation(file, trigger, replacement, () => {
       const r = spawnSync('npx',
         ['vitest', 'run', 'tests/bj651-attackspeed-tail.test.ts', '--no-file-parallelism', '-t', filter],
         { cwd: process.cwd(), encoding: 'utf8', timeout: 600_000, env: { ...process.env, SW_BJ651_MUT: '1' } });
       expect(r.status, `变异须证红（${target}）: ${replacement}\n${r.stdout.slice(-3000)}`).not.toBe(0);
       expect(r.stdout).toContain(filter);
-    }, { label: `BJ651 ${filter}` });
-    expect(sha(file), `还原后 sha256 对拍不一致: ${file}`).toBe(pristineSha);
+    }, {
+      label: `BJ651 ${filter}`,
+      // ★BJ662（2026-10-12）还原对拍重锚：基准改锁内捕获（onPristine）——旧 pristineSha
+      // 在锁外求值,并行池内同文件变异窗（bj652 GAME.ts 等）在盘=基准读变异盘 → 联跑假红
+      // （bj650 M3×bj612 同族实锤 2026-10-12）。
+      onPristine: (p) => { pristineSha = sha256hex(p); },
+    });
+    // ★BJ662：重入同文件锁后再独立重读对拍（对拍窗全程持锁,消除释放→重读间隙竞态）
+    lockTargetFile(file, `BJ651 还原对拍 ${filter}`);
+    try {
+      expect(sha256hex(readFileSync(file, 'utf8')), `还原后 sha256 对拍不一致: ${file}`).toBe(pristineSha);
+    } finally {
+      unlockTargetFile(file);
+    }
   };
 
   it('M1 件1：remoteSwingDur 词缀烘定摘除 → 件1 消费面红', () => {

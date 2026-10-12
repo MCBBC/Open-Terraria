@@ -2,12 +2,15 @@
 // 工具:tools/recon-frame-tables.mjs;金标:tests/golden/frame-tables-recon.json。
 // 三源交叉(gore/proj/tile)×四规则(漏配/越界/尺寸错/过配);三起手工案例
 // (Gore_1007/1008 竖排 8 帧漏配/tile 752 源矩形越界/projFrames 族)逐一注入复现→红。
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, existsSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { lockTargetFile, unlockTargetFile } from './mutation-guard';
+
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★BJ662:canary 入 mutation-guard 文件锁后,beforeAll 等待 in-flight 变异窗可超默认 hookTimeout——按仓内习语放宽（mutation-guard 家族同款）
 
 const GAME = join(__dirname, '..');
 const SCRIPT = join(GAME, 'tools', 'recon-frame-tables.mjs');
@@ -25,6 +28,14 @@ const CANARY_FILES = [
   join(GAME, 'public/sprites/vanilla.json'),
 ];
 let canaryBefore: Record<string, string> = {};
+// ★BJ662（2026-10-12）canary 入 mutation-guard 文件锁（BJ652 建议落刀）：下列 canary
+//  同时是他套 withMutation 的写盘变异目标（Arrow.ts ← bj642/bj643）——vitest 并行池内
+//  本套 snapshot→afterAll canary 断言跨度与其 mutate→spawn→restore 窗交错 =「canary
+//  被写」联跑假红（2026-10-12 实锤面）。整段持同文件锁（mutation-guard L1 同键互斥,
+//  锁键 realpath 归一防路径拼写分叉）后再取 md5 基准,断言后释放。
+const MUTATION_TARGETED_CANARIES = [
+  join(GAME, 'src/entities/Arrow.ts'),
+];
 
 /** 跑工具(缺省=干跑对拍闸);SW_OUT 捕获报告 JSON */
 function run(extraEnv: Record<string, string | undefined> = {}, extraArgs: string[] = []) {
@@ -56,11 +67,18 @@ function runInject(files: Record<string, string>, extraEnv: Record<string, strin
 }
 
 beforeAll(() => {
+  for (const p of MUTATION_TARGETED_CANARIES) lockTargetFile(p, 'BJ378 canary');
   canaryBefore = Object.fromEntries(CANARY_FILES.map((p) => [p, md5(p)]));
 });
 afterAll(() => {
-  for (const p of CANARY_FILES) expect(md5(p), `canary 被写:${p}`).toBe(canaryBefore[p]);
-  rmSync(TMP, { recursive: true, force: true });
+  try {
+    for (const p of CANARY_FILES) expect(md5(p), `canary 被写:${p}`).toBe(canaryBefore[p]);
+  } finally {
+    // ★BJ662：canary 断言炸红也必须释放文件锁（漏放=后续 withMutation 等待者
+    //  干等陈锁收编 900s）——finally 强制配对。
+    for (const p of MUTATION_TARGETED_CANARIES) unlockTargetFile(p);
+    rmSync(TMP, { recursive: true, force: true });
+  }
 });
 
 describe('BJ378 基线:干跑对拍闸全绿', () => {

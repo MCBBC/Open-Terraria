@@ -6,6 +6,7 @@
 //     Player.AllowsRespawnTimerSkip :39264-39391(DeadSkipLockoutTime=90 :1627)。
 //     幽灵相/PvP 死亡两门内联在 Game.fixedUpdate :4741,后四门在 allowsRespawnTimerSkip。
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** updateUse 可驱动的最小 Game 桩(手持 1226、鼠标指右) */
 function chlorophyteGame(counter = 0) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   player.inv.add(ITEM_BY_KEY['vi_1226_ChlorophyteClaymore'], 1);
   player.chlorophyteBladeCounter = counter;
@@ -83,6 +86,8 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
 /** allowsRespawnTimerSkip 可驱动的最小 Game 桩(敌表经回调构造——玩家坐标先行可用) */
 function respawnGame(enemiesFn: (p: Player) => Array<Record<string, unknown>> = () => []) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const world = new World(120, 120, 30, 'respawn');
   const player = new Player(60 * TILE, 60 * TILE, new Inventory());
   g.player = player;

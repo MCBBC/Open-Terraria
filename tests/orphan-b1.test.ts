@@ -23,6 +23,7 @@
 //     Item.NewItem）——通用投掷尾 dropKey 置 null（THROWN_NO_RECOVERY_VIDS），撞块
 //     消亡不再走 Arrow 的 rand<1/3 回收掷（同雪球 949/beenade dropKey=null 先例）
 import { describe, it, expect, vi } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { Arrow } from '../src/entities/Arrow';
 import { GorePiece } from '../src/entities/GorePiece';
 import { projectileData } from '../src/data/vanillaProjectiles';
@@ -606,6 +607,8 @@ describe('B1-6 零伤投掷出口根治：damage≤0 直传 + penetrate raw（23
   /** updateUse 可驱动的最小 Game 桩（orphan-weapons-a updUseGame 同款,本文件独立副本） */
   function updUseGame(heldVid: number, stack = 1) {
     const g = Object.create(Game.prototype) as Record<string, any>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
     const iidV = invIndexOfVanilla(heldVid);
     expect(iidV).toBeGreaterThanOrEqual(0);

@@ -402,6 +402,15 @@ describe('② 行为判别锁', () => {
     const { hooks, player, dusts } = makeHooks([], { dust: true });
     const parent = new MinionProj(60 * 16, 110 * 16, 643, 30, 2, true, 0, true, () => player);
     const b = new RainbowCrystalBurst(60 * 16 + 200, 110 * 16, 0.25, parent, { hitAt: () => {} });
+    // ★BJ662（2026-10-12）M8 逃逸封锁（确定性 tick 驱动,红判据必达）：rot=localAI1/40·
+    //  2π·direction → t=20 拍 rot=+π（direction=1 首拍 0 掷钉定）——M8（环 2 旋转化）
+    //  下环 2 判据唯一的 bitwise 对齐点 = t=20 的 n=0 花瓣（ang=0+π 与检验式
+    //  sin(π) 逐位同值;t=40 rot=2π 时 sin(2π)=−2.45e-16 ≠ sin(0)/sin(π) 不对齐）。
+    //  旧自由掷下红判据依赖 1/10 掷恰落在该拍（逃逸率≈81%）。改掷流钉定：
+    //  localAI1=20 拍掷 0.5（四花瓣站全跳,对齐拍零生成）,其余拍掷 0（全生成）——
+    //  pristine 环 2 由 loop-1 非对齐拍承载（ang=nπ 恒不随 rot,bitwise 对齐检验式）,
+    //  M8 变异下环 2 判据恒 0 → 恰红。
+    vi.spyOn(Math, 'random').mockImplementation(() => (b.localAI1 === 20 ? 0.5 : 0));
     let petals: Array<{ d: DustRec; rot: number }> = [];
     for (let t = 0; t < 59 && !b.dead; t++) {
       const before = dusts.length;

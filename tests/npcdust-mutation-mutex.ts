@@ -2,7 +2,10 @@
 // vitest 多文件并行时 write→sub-vitest→restore 窗口交错会让对方子进程读到「无变异」现库
 // （判别面假绿）或对方 B 面读到「有变异」现库（误红）。本模块给两面统一：
 //   · lockConsumerMutation/unlockConsumerMutation：D 面 beforeAll/afterAll 持锁串行化;
-//     O_EXCL 锁 + 陈旧强拆（>120s=上轮崩溃残留）+ 忙等 250ms 轮询。
+//     O_EXCL 锁 + 陈旧强拆（>600s=上轮崩溃残留,★BJ662 2026-10-12 统一域锁阈:
+//     旧 120s < D 面内层 spawn 上限 600s（家族 testTimeout 档）=合法持锁可被
+//     等待者误拆→两 D 面/闸面同窗互染;600s=合法持锁零误拆,真崩溃残留 ≤10min
+//     被收编——与 mutation-guard STALE 900s/文件锁同族分层语义）+ 忙等 250ms 轮询。
 //   · gateConsumerMutation(envFlag)：文件级 beforeAll 闸——变异子进程以自身 env 豁免
 //     （子进程就是要对变异文件跑 B 面）;其余进程等锁释放再过闸,过闸后校验消费面含批2/批3
 //     锚（残留→loud 红,防 B 面静默中毒）。子进程 -t 过滤只跑 B 面,D 面 beforeAll 不执行
@@ -20,9 +23,17 @@ const ANCHORS = [
   "case 'alpha': d.alpha = op[1]; break;",     // BJ503 批7 alpha 后置直赋算子（519 :83919）
 ];
 
+// ★BJ662（2026-10-12）陈锁阈统一 600s：D 面内层 spawnSync timeout 上限=600s（家族
+//  testTimeout 档）,合法持锁期被其 bound——旧 120s 阈下长跑 D 面持锁 120-600s 段
+//  全程暴露给等待者误拆=两 D 面/闸面同窗互染;600s 阈=误拆面只剩「子进程吃满
+//  600s 被杀+还原毫秒级」的理论缝（守卫 L3 残留自检兜底）。等待上限 660s=陈锁阈
+//  +60s 余量——等待者永不早于可收编点弃权;vitest hookTimeout 600s 为更外层兜底。
+const STALE_MS = 600_000;
+const WAIT_DEADLINE_MS = 660_000;
+
 function stealIfStale(): boolean {
   try {
-    if (Date.now() - statSync(MUT_LOCK).mtimeMs > 120_000) { unlinkSync(MUT_LOCK); return true; }
+    if (Date.now() - statSync(MUT_LOCK).mtimeMs > STALE_MS) { unlinkSync(MUT_LOCK); return true; }
   } catch { /* 锁不存在 */ }
   return false;
 }
@@ -33,7 +44,7 @@ export function lockConsumerMutation(): void {
     try { writeFileSync(MUT_LOCK, String(process.pid), { flag: 'wx' }); return; }
     catch {
       stealIfStale();
-      if (Date.now() - t0 > 180_000) throw new Error('npcdust mutation lock timeout（并行 D 面互斥,锁=' + MUT_LOCK + '）');
+      if (Date.now() - t0 > WAIT_DEADLINE_MS) throw new Error('npcdust mutation lock timeout（并行 D 面互斥,锁=' + MUT_LOCK + '）');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
     }
   }
@@ -51,7 +62,7 @@ export function gateConsumerMutation(envFlag: string, consumerPath: string): voi
     let held = false;
     try { statSync(MUT_LOCK); held = true; } catch { held = false; }
     if (held) {
-      if (Date.now() - t0 > 180_000) throw new Error('npcdust mutation gate timeout（在途变异窗未释放,锁=' + MUT_LOCK + '）');
+      if (Date.now() - t0 > WAIT_DEADLINE_MS) throw new Error('npcdust mutation gate timeout（在途变异窗未释放,锁=' + MUT_LOCK + '）');
       stealIfStale();
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
       continue;

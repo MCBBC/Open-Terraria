@@ -40,7 +40,7 @@ import { ExplosiveTrapBlastProj } from '../src/entities/ExplosiveTrapBlast';
 import { setProjSpriteOverride } from '../src/entities/Arrow';
 import { GHOST_TINT } from '../src/entities/projGhostTrail';
 import { hslToRgb255 as hslToRgb255SelfTest } from '../src/render/AuroraSky';
-import { withMutation } from './mutation-guard';
+import { withMutation, lockTargetFile, unlockTargetFile } from './mutation-guard';
 import type { GameHooks } from '../src/entities/types';
 
 const GAME = join(__dirname, '..');
@@ -468,15 +468,30 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
       env: { ...process.env, SW_BJ650_MUT: '1' },   // ★子进程豁免变异面
     });
 
-  const mutate = (file: string, trigger: string, replacement: string, filter: string, preHash: string): void => {
+  const mutate = (file: string, trigger: string, replacement: string, filter: string): void => {
+    let pristineSha = '';
     withMutation(file, trigger, replacement, () => {
       const r = spawnVitest(filter);
       expect(r.status, `变异须证红: ${filter}`).not.toBe(0);
       expect(r.stdout).toContain(filter);
-    }, { label: `BJ650 ${filter}` });
-    // 逐字节还原对拍（sha256）——withMutation 内部已强写+对拍,此处独立复核
-    const post = createHash('sha256').update(readFileSync(file)).digest('hex');
-    expect(post, `还原对拍 ${file}`).toBe(preHash);
+    }, {
+      label: `BJ650 ${filter}`,
+      // ★BJ662（2026-10-12）还原对拍重锚：基准改锁内捕获（onPristine=持锁后 pristine
+      // 内容）——旧 preHash 在 withMutation 锁外求值（实参先于锁等待求值）,并行池内
+      // 另一 MinionProj.ts 变异窗（bj612/bj-c9/c16a…）在盘=基准读到变异盘 → 还原后
+      // 对拍必假红（bj650 M3×bj612 联跑实锤 2026-10-12）。
+      onPristine: (p) => { pristineSha = createHash('sha256').update(p).digest('hex'); },
+    });
+    // 逐字节还原对拍（sha256）——withMutation 内部已强写+对拍,此处独立复核;
+    // ★BJ662：重入同文件锁后再读盘（对拍窗全程持锁,消除「释放→重读」间隙竞态;
+    // 锁内等待者=在途变异窗,等毕读到的必是还原后 pristine）
+    lockTargetFile(file, `BJ650 还原对拍 ${filter}`);
+    try {
+      const post = createHash('sha256').update(readFileSync(file)).digest('hex');
+      expect(post, `还原对拍 ${file}`).toBe(pristineSha);
+    } finally {
+      unlockTargetFile(file);
+    }
   };
   const sha = (f: string): string => createHash('sha256').update(readFileSync(f)).digest('hex');
 
@@ -484,41 +499,41 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
     mutate(MP,
       'this.recordGhostTrail();   // ★BJ650件1：UpdateTrails（:17198,mode2=12 份白模残影',
       '/* ★BJ650 M1 变异:残影接线摘除 */',
-      'smolstarAI 每拍 recordGhostTrail', sha(MP));
+      'smolstarAI 每拍 recordGhostTrail');
   });
 
   it('M2 件1 色相 whoAmI 钉 0 档 → 六档循环红', () => {
     mutate(PG,
       'const hue = 0.66 + 0.33 * (((c.whoAmI ?? 0) % 6) / 6);',
       'const hue = 0.66; // ★BJ650 M2 变异:whoAmI 0 档近似回潮',
-      'hue 随 whoAmI 六档循环', sha(PG));
+      'hue 随 whoAmI 六档循环');
   });
 
   it('M3 件2 ×0.5 摘除 → 减半断言红', () => {
     mutate(MP,
       'const dmg533 = this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0;',
       'const dmg533 = dmg0; // ★BJ650 M3 变异:14618 乘区摘除',
-      'dLai2≥40 → 受击伤害减半截断', sha(MP));
+      'dLai2≥40 → 受击伤害减半截断');
   });
 
   it('M4 件3 冲刺尘门摘除 → hitTilesFx 断言红', () => {
     mutate(MP,
       'if (this.dA0 >= 6 && this.dA0 <= 8) {\n        game.hitTilesFx?.(this.x, this.y, this.w, this.h, lvx, lvy);\n      }',
       '/* ★BJ650 M4 变异:18304 冲刺尘门摘除 */',
-      '冲刺档（dA0=6）落地反弹', sha(MP));
+      '冲刺档（dA0=6）落地反弹');
   });
 
   it('M5 件4 爆炸弹生成摘除 → 塔触发断言红', () => {
     mutate(MP,
       ".entities.add(new ExplosiveTrapBlastProj(ecx, ecy, boomProj as 694 | 695 | 696), 'projectiles');",
       "; // ★BJ650 M5 变异:R15-F6 视觉面摘除",
-      '塔 691 触发拍生成爆炸弹实体', sha(MP));
+      '塔 691 触发拍生成爆炸弹实体');
   });
 
   it('M6 件4 帧机 3t→999t → Kill 节拍红', () => {
     mutate(EB,
       'if (++this.fc >= 3) {',
       'if (++this.fc >= 999) { // ★BJ650 M6 变异:帧机节拍漂移',
-      'AI_139 帧机：alpha −25/拍', sha(EB));
+      'AI_139 帧机：alpha −25/拍');
   });
 });

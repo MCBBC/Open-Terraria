@@ -160,6 +160,23 @@ const tickUntil = (m: { fixedUpdate: (dt: number, g: GameHooks) => void; dead: b
   for (let i = 0; i < max && !until(); i++) m.fixedUpdate(1, hooks);
   return max;
 };
+/** ★BJ662（2026-10-12）N3e/N3f 复绿：BJ639 批1② 643 volley 实体化后,644 爆裂弹=
+ *  独立实体（入 hooks.entities.projectiles）需自身 fixedUpdate 驱动到 t=30 引爆拍
+ *  ——旧 tickUntil 只驱 643 本体（旧「落点即时 AoE」时代够用）,弹体永不引爆=
+ *  两臂零受理（BJ646/BJ650 登记存量红根因,机制面 1:1 无罪——对拍
+ *  Projectile.cs:37918-37932 散布式逐位同相,全驱动下 65/150/3×15 全中）。
+ *  本 helper=本体拍 + 快照驱动弹幕注册表（N3e/N3f 专用,不动共享 tickUntil 零 blast）。 */
+const tickUntilAll = (m: { fixedUpdate: (dt: number, g: GameHooks) => void; dead: boolean },
+  hooks: GameHooks, until: () => boolean, max = 120): number => {
+  for (let i = 0; i < max && !until(); i++) {
+    m.fixedUpdate(1, hooks);
+    const reg = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
+    for (const p of [...reg]) {
+      (p as { fixedUpdate?: (dt: number, g: GameHooks) => void }).fixedUpdate?.(1, hooks);
+    }
+  }
+  return max;
+};
 
 beforeEach(() => { vi.restoreAllMocks(); });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -330,7 +347,7 @@ describe('BJ452-N3：694 爆炸弹/644 爆裂弹臂（:12636 共门+tag 全栈�
     const spy = vi.spyOn(e, 'hurt');
     const m = new MinionProj(384, 584, 643, 50, 2, true, 0, false, () => player);
     player.tagEffectStack.tryApplyTagToNPC(4680, e.id, 0, 0);
-    tickUntil(m, hooks, () => spy.mock.calls.length > 0);
+    tickUntilAll(m, hooks, () => spy.mock.calls.length > 0);   // ★BJ662：全弹驱动（644 实体化后须自驱到引爆拍）
     expect(spy.mock.calls[0]![0]).toBe(65);            // ★主判别:tag 加伤（旧 50 必红）
   });
 
@@ -346,7 +363,7 @@ describe('BJ452-N3：694 爆炸弹/644 爆裂弹臂（:12636 共门+tag 全栈�
     player.tagEffectStack.tryApplyTagToNPC(4680, g.id, 22, 0);   // 黑收成 tagDamage 15（hurtFx 汇出源）
     const spyE = vi.spyOn(e, 'hurt');
     const m = new MinionProj(384, 584, 643, 50, 2, true, 0, false, () => player);
-    tickUntil(m, hooks, () => g.hp < 5000);
+    tickUntilAll(m, hooks, () => g.hp < 5000);                 // ★BJ662：全弹驱动（644 实体化后须自驱到引爆拍）
     // 3 volley × (res.dmg=50+15=65 → 65−15=50);链电自 guide 位（e 同位=最近链靶,
     //  每 volley 落 15;城镇本体永免=源不回链）
     expect(5000 - g.hp).toBe(150);                     // ★主判别①:tag 加伤（旧 3×35=105 必红）

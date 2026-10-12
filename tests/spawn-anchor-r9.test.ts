@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { Arrow } from '../src/entities/Arrow';
 import { MagicMissileProj, FlyingKnifeProj } from '../src/entities/MissileProj';
@@ -191,6 +192,8 @@ function r9Game(vid: number): {
   updateUse: () => void;
 } {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const world = new World(160, 160, 7, 'r9');
   // 高空开阔带（行 12-60 全清）——玩家 (60,24) 格，canHit/muzzle 探针不受地形干扰
   for (let x = 0; x < 160; x++) {
@@ -572,6 +575,8 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     updateUse: () => void;
   } {
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const world = new World(160, 160, 7, 'r9-thrown');
     for (let x = 0; x < 160; x++) {
       for (let y = 12; y <= 60; y++) world.store.setTileSilent(x, y, 0, 0, 0);

@@ -21,6 +21,7 @@ import { buildManifest, zipStore, type ZipEntry } from '../remaster/PackFormat';
 import type { LoadedPack } from '../remaster/types';
 import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, sfxPackOverrideKeys } from '../core/Sfx';
 import { TOWN_NPC_PROFILE } from '../data/townNpcProfiles';
+import { registerPackPortraitUrl, clearPackPortraitUrls } from '../data/npcPortraits';
 import {
   readResourcePack, normalizePackFilePaths, parseFromEntries, ResourcePackError, formatPackVersion,
   type ParsedResourcePack,
@@ -227,9 +228,11 @@ export class ResourcePackManager {
       for (const [k, v] of pack.fonts) if (!fonts.has(k)) fonts.set(k, v);
     }
     if (merged.size) await this.applyImagesMap(merged);
+    else clearPackPortraitUrls();   // 零包=清包头像(回原版)
     for (const [fam, bytes] of fonts) void registerPackFont(fam, bytes);
     this.pushAudioOverrides();
   }
+
 
   private async applyImagesMap(images: Map<string, Uint8Array>): Promise<void> {
     if (!this.runtime || images.size === 0) return;
@@ -239,13 +242,26 @@ export class ResourcePackManager {
     //   走档案名 {Name}_Default.png(TownNPCProfiles.GetTextureNPCShouldUse),而包替换
     //   的是原版名 NPC_<id>.png——按 TOWN_NPC_PROFILE 派生别名(包未显式带档案名才
     //   派生;_Party/_Transformed/Shimmered 变体不派生=派对/微光期回原版,登记)。
+    const aliasedTownIds: number[] = [];
+    clearPackPortraitUrls();   // 重放先清(重注册在下方 Portraits 扫描)
     for (const [file, bytes] of images) {
       const m = /^vanilla\/NPC_(\d+)\.png$/.exec(file);
       if (!m) continue;
-      const profile = TOWN_NPC_PROFILE[Number(m[1])];
+      const id = Number(m[1]);
+      const profile = TOWN_NPC_PROFILE[id];
       if (!profile) continue;
+      aliasedTownIds.push(id);
       const alias = `vanilla/${profile.name}_Default.png`;
       if (!sheets.has(alias)) sheets.set(alias, new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+    }
+    // ★对话头像(2026-10-12 用户指正:包自带 TownNPCs/Portraits 真头像,不需派生):
+    //   包头像按名注册 objectURL(portraitUrl 经 PACK_PORTRAIT_URL_BY_NAME 优先命中,
+    //   含 _shimmer 微光变体);重放先清后立,包禁用=回原版头像。
+    for (const [file, bytes] of images) {
+      const pm = /^vanilla\/TownNPCs_Portraits_Portrait_(.+)\.png$/.exec(file);
+      if (!pm) continue;
+      const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+      registerPackPortraitUrl(pm[1], url);
     }
     const synthetic: LoadedPack = {
       id: 'resourcepacks',

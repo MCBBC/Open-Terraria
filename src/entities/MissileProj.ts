@@ -1,5 +1,5 @@
 // 可控导弹族（Projectile aiStyle 9 = AI_009_MagicMissiles，Projectile.cs:40518-40751）
-// + 老星怒天降落星（proj 9，aiStyle 5，Projectile.cs:22130-22247 + Player.cs 出生链）。
+// + 老星怒天降落星（proj 9，aiStyle 5，Projectile.cs:24081-24364;1456 伪锚 :22130-22247 勘正 + Player.cs 出生链）。
 // 此前两族都被 Game.useCombatWeapon 的"兜底 mArrow"当直线弹发出去——导弹失去
 // 光标操控语义、老星怒失去天降语义。本文件 1:1 移植两族行为层。
 //
@@ -1720,10 +1720,10 @@ export class FlyingKnifeProj extends Entity {
 
 /**
  * proj 9（SetDefaults :626-636：24×24 aiStyle5 penetrate2 scale0.8 tileCollide=false
- * melee）。出生链 = Player.cs:46613-46625（projToShoot==9：出生点 = 光标 X + 远离
+ * melee）。出生链 = Player.cs:47661-47676;1456 伪锚 :46613-46625 勘正（projToShoot==9：出生点 = 光标 X + 远离
  * 玩家侧 rand(0..200)、Y = MountedCenter−600；伤害 ×1.5、击退清零）+
- * :48479-48491（type 65：目标线从光标向出生点方向逐 16px 回退到首个非实心格）。
- * 行为（:22130-22247）：恒速无重力；tileCollide = Bottom.Y ≥ ai[1]（:22159-22162，
+ * :49607-49620;1456 伪锚 :48479-48491 勘正（type 65：目标线从光标向出生点方向逐 16px 回退到首个非实心格）。
+ * 行为（:24081-24364;1456 伪锚 :22130-22247 勘正）：恒速无重力；tileCollide = Bottom.Y ≥ ai[1]（:24116-24119;1456 伪锚 :22159-22162 勘正，
  * 与 503 的 Center.Y > ai[1] 不同——底边对齐）；alpha −15/t（线上钳 150 / 线下钳 0，
  * :22194-22207）；Item9 周期音 20-60t（:22175-22179）；rotation 按
  * (|vx|+|vy|)×0.01×direction 翻滚（:22246，非 503 的 vel−π/2）；尘 86 粉星尾
@@ -1753,7 +1753,7 @@ export class StarfuryStar extends Entity {
   //  豁免核对：9 SetDefaults（P.cs:888-898：24×24/aiStyle 5/penetrate 2/scale 0.8/
   //  tileCollide=false/melee）【无 ignoreWater 行】= 受段（projectileData 数据面同向）。
   //  阻尼（湿支 :17721-17764 只在 HandleMovement tileCollide 支）：9 的 tileCollide
-  //  动态门（:22159-22162 Bottom.Y ≥ ai[1]）——越线【前】false → 位移全速;越线【后】
+  //  动态门（:24116-24119;1456 伪锚 :22159-22162 勘正 Bottom.Y ≥ ai[1]）——越线【前】false → 位移全速;越线【后】
   //  true → 湿态档位消费（水 0.5/蜂蜜 0.25/微光 0.375,乘进位移行,速度场不减）。
   //  杀拍口径（Arrow.ts ⑥配方）：杀位=timeLeft 头杀（fixedUpdate 首;vanilla timeLeft
   //  杀在 Update 尾 :17307-17311=湿段后）/出界/撞块/穿透尽——头杀拍由 dead 支补跑
@@ -1804,7 +1804,7 @@ export class StarfuryStar extends Entity {
     // dead 支补跑=杀拍口径⑥）
     if (--this.timeLeft <= 0) this.killNow(game);
     if (this.dead) { this.wetSectionStep(game); return; }   // ★杀拍补跑
-    // :22159-22162 tileCollide = Bottom.Y ≥ ai[1]（越线前穿墙）
+    // :24116-24119（1456 伪锚 :22159-22162 勘正）tileCollide = Bottom.Y ≥ ai[1]（越线前穿墙）
     const collide = this.y + this.h >= this.targetY;
     // :22175-22179 Item9 周期音（20-60t 掷一次）
     if (this.soundT <= 0) {

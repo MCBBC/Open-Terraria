@@ -4,6 +4,7 @@
 // R2-13 低速 scale 收缩 Kill / R2-08 1126 ownerHitCheck 300px + usesOwnerMeleeHitCD。
 // 权威 = Terarria1457（行号见各断言）。
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { Arrow } from '../src/entities/Arrow';
 import { ChloroClaymoreBlade } from '../src/entities/proj1457';
 import { packGemStaffFeatures, gemDamageMultiplier } from '../src/data/vanillaGemStaff';
@@ -218,6 +219,8 @@ const iid = (vid: number): number => {
 /** updateUse 可驱动的最小 Game 桩（手持指定 vid 法杖、可选胸槽长袍、鼠标指右） */
 function casterGame(heldVid: number, robeVid?: number) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   player.inv.add(iid(heldVid), 1);
   player.inv.selected = player.inv.slots.length - 1;   // add 落在首个空格，选中它

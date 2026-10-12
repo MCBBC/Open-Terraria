@@ -313,8 +313,8 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
    *  旧锚 :11905 漂,1457 该行为命中敌方 buff 施加支,非免疫门）,hurt 落地置 10t :13152 缺省档）。
    *  同玩家全部 aiStyle 99 弹共享:手套二号球/配重球 10t 内不能重复命中同敌 */
   playerImmune = false,
-  /** 前向延伸命中盒（AI_019 长矛 105/46/153 伸出相,Projectile.cs:43530-43571）：
-   *  Colliding（:14554-14576）语义 = 弹心→盒心按 max(w,h)(min12) 步进连续方盒
+  /** 前向延伸命中盒（AI_019 长矛 105/46/153 伸出相,Projectile.cs:47034-47073;1456 伪锚 :43530-43571 勘正）：
+   *  Colliding（:15420,aiStyle 19 步进支 :15902-15927;1456 伪锚 :14554-14576 勘正）语义 = 弹心→盒心按 max(w,h)(min12) 步进连续方盒
    *  + 延伸盒本体,与弹体 AABB 并集判定 */
   extBox?: { x: number; y: number; w: number; h: number } | null,
   /** ★BJ339（2026-09-25）：hurt pierce 位实参（Enemy.hurt 第 7 参,Projectile.cs
@@ -2889,7 +2889,7 @@ export class CounterweightProj extends Entity {
   handX = 0;
   handY = 0;
   stringColor = 0;
-  /** -3 幽灵隐身（alpha=255,:64734-64736）——绘制侧消费 */
+  /** -3 幽灵隐身（alpha=255,:68696-68700;1456 伪锚 :64734-64736 勘正）——绘制侧消费 */
   ghost = false;
   // ---- ★通用湿段（Projectile.cs:16903-17113;2026-09-06 R3 漏网类批 11 类之一）----
   //  域 id 集 = {556-561 彩色配重球(:6086 Range 块 DefaultToYoyo)/1079 黑配重(同块)}
@@ -3163,7 +3163,7 @@ export class CounterweightProj extends Entity {
     }
     // ★BJ290 件1（死亡段割面族 BJ260/285 同款前置习语,2026-09-23）：CutTiles
     //  （P.cs:12517）先于 Damage_PVE（:12523）aiStyle 99 段——-2 脱离克隆 penetrate 1
-    //  （:64741-64744）一次命中即亡拍【照割】（556-561/1079 过 CanCutTiles :15407 /
+    //  （:68701-68707 ai0=-2 支头 penetrate<0→1;1456 伪锚 :64741-64744 勘正）一次命中即亡拍【照割】（556-561/1079 过 CanCutTiles :15407 /
     //  CanDealDamage :12461 两表;中央割 !e.dead 门=死亡拍整缺 → 前置弹盒上报,hurt
     //  (:403)/onHit(:413) 前序=原版序）。撞墙亡（上方 chX 支）=原版 HandleMovement
     //  杀位 → :17132 !active 门,原版本就不割勿扩;环绕态 0/1 命中只弹不亡无死亡拍。
@@ -3175,26 +3175,26 @@ export class CounterweightProj extends Entity {
       undefined, 0, this.vx < 0 ? -1 : 1);
   }
 
-  /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段;-2 只被弹开,其余走
+  /** 命中链（Projectile.cs:13290-13335 aiStyle 99 段;1456 伪锚 :12467-12508 勘正;-2 只被弹开,其余走
    *  Counterweight 调用 + 方向定号 + ai0>=0 活跃反弹（localAI[0] += 20 段对配重球
    *  无寿命语义,天然无效）） */
   private onHit(e: unknown) {
     const ecx = (e as { x: number; w: number }).x + (e as { x: number; w: number }).w / 2;
     const ecy = (e as { y: number; h: number }).y + (e as { y: number; h: number }).h / 2;
     if (this.ai0 === -2) {
-      // 脱离态被弹开（:12469-12477）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16
+      // 脱离态被弹开（:13292-13303;1456 伪锚 :12469-12477 勘正）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16
       this.vx /= 5; this.vy /= 5;
       this.vy -= (50 + Math.floor(Math.random() * 31)) * 0.1;
       if (this.vy < -16) this.vy = -16;
-      this.dead = true;   // penetrate=1（:64741-64744）一次命中即亡
+      this.dead = true;   // penetrate=1（:68701-68707 ai0=-2 支头 penetrate<0→1;1456 伪锚 :64741-64744 勘正）一次命中即亡
       return;
     }
     const p = this.ctx.owner();
     if (!p) return;
-    this.ctx.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
-    this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
+    this.ctx.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :13306（1456 伪锚 :12482 勘正）
+    this.dir = ecx < p.cx ? -1 : 1;   // :13307-13314（1456 伪锚 :12484-12489 勘正）
     if (this.ai0 >= 0) {
-      // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
+      // 活跃态命中反弹（:13315-13333;1456 伪锚 :12490-12500 勘正）：v×-0.5 + 离敌向 ×16
       let bx = this.cx - ecx, by = this.cy - ecy;
       const bd = Math.hypot(bx, by) || 1;
       this.vx = this.vx * -0.5 + (bx / bd) * 16;
@@ -3212,7 +3212,7 @@ export class CounterweightProj extends Entity {
           this.stringColor, stringColorOpts(r.lighting?.clock));
       }
     }
-    // -3 幽灵 alpha=255（全透明,:64734-64736）;贴图原生尺寸（SetDefaults 盒 10×10 而贴
+    // -3 幽灵 alpha=255（全透明,:68696-68700;1456 伪锚 :64734-64736 勘正）;贴图原生尺寸（SetDefaults 盒 10×10 而贴
     // 图 16×16,drawSize=-1 防缩）。旋转 = proj.rotation 原样（1457 通用尾支
     // M.cs:35040 rotation=proj.rotation、origin=(num153,盒高/2+num151),配重球 556-561/1079
     // 无 num151/152 特支亦无 +π/2——自转增量在 AI（AI_099_1 :68463 rotation+=0.5f,本仓
@@ -3340,7 +3340,7 @@ export class YoyoProj extends Entity {
   /** 旧"回收锁"语义兼容读口（= ai0 ∈ {-1,-3}） */
   get recalled(): boolean { return this.ai0 === -1 || this.ai0 === -3; }
   /** projectile.direction（AI_099 ChangeDir 段 :64925-64935：球在玩家右侧 >2px → 1、
-   *  左侧 → -1,±2 死区内保持原值；flag/脱离态不更新——:64907-64934 门）——
+   *  左侧 → -1,±2 死区内保持原值；flag/脱离态不更新——:68883-68902 门;1456 伪锚 :64907-64934 勘正）——
    *  击退方向以此为准（曾误用 sign(vx)） */
   private dir = 1;
   /** -2 脱离态穿透计数（penetrate 懒置 Next(3,7)=3-6，:65122-65125；-1=未置） */
@@ -3353,7 +3353,7 @@ export class YoyoProj extends Entity {
   private ghostRing?: ProjGhostRing | null;
   /** 存活 tick 上限:有限寿命型号 7200 防泄漏;无限寿命（YOYO_LIFE 缺省 -1）无上限——
    *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收。
-   *  脱离态（-2）寿命无限（:64850-64852 num2=-1）——撞墙/穿透尽才亡 */
+   *  脱离态（-2）寿命无限（:68809-68812 num2=-1;1456 伪锚 :64850-64852 勘正）——撞墙/穿透尽才亡 */
   life = 7200;
   /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
   topSpeed = 10;
@@ -3380,8 +3380,8 @@ export class YoyoProj extends Entity {
   /** 出生预置已做（一次;NewProjectile :10887-10893 等价——首拍同位测值;
    *  AI_099_2 无 position 写面 → 首拍位=出生盒,与原版 NewProjectile 时点同位） */
   presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
-  /** 同型前球在场（AI_099_2 flag :64827-64835：手套二号球寿命加速烧 rand(10,31)×0.1、
-   *  死区 +20（:64976-64978）、免持械转向（:64907-64934）——Game 注入闭包扫描） */
+  /** 同型前球在场（AI_099_2 flag :68787-68794;1456 伪锚 :64827-64835 勘正：手套二号球寿命加速烧 rand(10,31)×0.1、
+   *  死区 +20（:68949-68952）、免持械转向（:68883-68902;1456 伪锚 :64976-64978/:64907-64934 勘正）——Game 注入闭包扫描） */
   secondInPlay?: () => boolean;
   /** 寿命尽全量回收广播（:64852-64866：该玩家所有 aiStyle99 且 ai0>=0 → -1——含
    *  配重球；Game 注入闭包扫描） */
@@ -3416,8 +3416,8 @@ export class YoyoProj extends Entity {
     this.stringLen = stringLen;
     this.channel = channel;
     this.target = target;
-    // 出生初速（ItemCheck_Shoot :46430-46434 melee 弹速 = shootSpeed/meleeSpeed——
-    // 悠悠球 shootSpeed=16 且不在 NoMeleeSpeedVelocityScaling 排除表;:46642-46680
+    // 出生初速（ItemCheck_Shoot :47466 弹速声明 + :47468-47470 melee 弹速 = shootSpeed/meleeSpeed;1456 伪锚 :46430-46434 勘正——
+    // 悠悠球 shootSpeed=16 且不在 NoMeleeSpeedVelocityScaling 排除表;:47687-47718 num4/5（1456 伪锚 :46642-46680 勘正）
     // num4/5 = (光标−手心)归一×speed → 16/meleeSpeed 朝光标。此前零速起步,
     // 首帧全靠 AI 逼近段加速=出速迟钝）
     if (initSpeed > 0) {
@@ -3483,9 +3483,9 @@ export class YoyoProj extends Entity {
       this.handY = h.y;
     }
     this.stringColor = eq.stringColor;
-    // flag：同型前球在场（:64827-64835——手套二号球标记）
+    // flag：同型前球在场（:68787-68794;1456 伪锚 :64827-64835 勘正——手套二号球标记）
     const flag = !!this.secondInPlay?.();
-    // ChangeDir 段（:64907-64934）：!flag && ai0 != -2 才持械转向（±2px 死区保原值）
+    // ChangeDir 段（:68883-68902;1456 伪锚 :64907-64934 勘正）：!flag && ai0 != -2 才持械转向（±2px 死区保原值）
     if (!flag && this.ai0 !== -2) {
       if (this.cx > p.cx + 2) this.dir = 1;
       else if (this.cx < p.cx - 2) this.dir = -1;
@@ -3501,23 +3501,23 @@ export class YoyoProj extends Entity {
     const vms = p.attackSpeedMult || 1;
     const msRange = (1 + vms * 3) / 4;          // 射程/顶速缩放(:68941)
     let range = YOYO_RANGE[this.projId] ?? 200;
-    if (eq.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
+    if (eq.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:68937-68940;1456 伪锚 :64971 勘正)
     range /= msRange;
     let top = YOYO_TOP[this.projId] ?? 10;
-    // 554 双球在场顶速 ×0.75（:68944-68947 `(type == 554) & flag`——手套二号球防重叠;
+    // 554 双球在场顶速 ×0.75（:68918-68922 `(type == 554) & flag`;1456 伪锚 :68944-68947 勘正——手套二号球防重叠;
     //  蓝队 R7-31：曾缺,双 Kraken 顶速偏高 25%）
     if (this.projId === 554 && flag) top *= 0.75;
     top /= msRange;
-    let inertia = Math.max(1, 14 - top / 2);   // num7(:64968-64971)
-    const deadZone = 5 + top / 2 + (flag ? 20 : 0);  // num9 光标死区半径(:64972 + flag:64976-64978)
-    // 寿命（:64827-64854）：localAI[0] += 1（flag 另加 rand(10,31)×0.1）→ 秒数
+    let inertia = Math.max(1, 14 - top / 2);   // num7(:68943-68947;1456 伪锚 :64968-64971 勘正)
+    const deadZone = 5 + top / 2 + (flag ? 20 : 0);  // num9 光标死区半径(:68948 + flag:68949-68952;1456 伪锚 :64972/:64976-64978 勘正)
+    // 寿命（:68795-68827;1456 伪锚 :64827-64854 勘正）：localAI[0] += 1（flag 另加 rand(10,31)×0.1）→ 秒数
     // ÷(1+meleeSpeed)/2,超 YoyosLifeTimeMultiplier → 回收（并广播全量回收）
     this.lifeT += (1 + (flag ? (10 + Math.floor(Math.random() * 21)) * 0.1 : 0)) / 60 / ((1 + vms) / 2);
     let lifeMul = YOYO_LIFE[this.projId] ?? -1;
     if (eq.yoyoString && lifeMul > 0) lifeMul *= 1.5;
-    if (this.ai0 <= -2) lifeMul = -1;   // 脱离/幽灵态寿命无限（:64850-64852）
+    if (this.ai0 <= -2) lifeMul = -1;   // 脱离/幽灵态寿命无限（:68809-68812;1456 伪锚 :64850-64852 勘正）
     if (lifeMul !== -1 && this.lifeT > lifeMul) {
-      this.recallFamily?.();   // :64853-64865 该玩家所有 aiStyle99 ai0>=0 → -1（含配重球）
+      this.recallFamily?.();   // :68813-68827（1456 伪锚 :64853-64865 勘正）该玩家所有 aiStyle99 ai0>=0 → -1（含配重球）
       this.ai0 = -1;
     }
     // ---- 603 孢子伴生（:68829-68868,蓝队 R7-30 整缺）——每 6t 反向掷一枚 604 孢子云：
@@ -3773,7 +3773,7 @@ export class YoyoProj extends Entity {
     this.ghostRing?.record(this.x, this.y, this.rot, this.dir, true);
   }
 
-  /** 命中链（Projectile.cs:13288-13333 aiStyle 99 段——1456 伪锚 :12467-12508 勘正
+  /** 命中链（Projectile.cs:13290-13335 aiStyle 99 段——1456 伪锚 :12467-12508 勘正（BJ661 复核 :13290-13335）
    *  R17-F4;活跃反弹+烧段 :13323-13333）:-2 只被弹开（不触发
    *  Counterweight）;其余调 Counterweight + 方向定号;ai0>=0 活跃反弹 +
    *  localAI[0] += 20（无视线 +40,寿命快捷烧） */
@@ -3782,18 +3782,18 @@ export class YoyoProj extends Entity {
     const ecx = (e as { x: number; w: number }).x + (e as { x: number; w: number }).w / 2;
     const ecy = (e as { y: number; h: number }).y + (e as { y: number; h: number }).h / 2;
     if (this.ai0 === -2) {
-      // 脱离态被弹开（:12469-12477）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16;
+      // 脱离态被弹开（:13292-13303;1456 伪锚 :12469-12477 勘正）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16;
       // 穿透自减（penetrate 3-6 尽 → Kill）——★不 return：原版 Damage() 内弹开段
-      // (:12469)与 per-hit 族段(:13761+)同函数先后执行,554/546/555 无 ai[0]!=-2 门
+      // (:13292;1456 伪锚 :12469 勘正)与 per-hit 族段(:13761+)同函数先后执行,554/546/555 无 ai[0]!=-2 门
       this.vx /= 5; this.vy /= 5;
       this.vy -= (50 + Math.floor(Math.random() * 31)) * 0.1;
       if (this.vy < -16) this.vy = -16;
       if (--this.pierceLeft <= 0) this.dead = true;
     } else {
-      this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
-      this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
+      this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :13306（1456 伪锚 :12482 勘正）
+      this.dir = ecx < p.cx ? -1 : 1;   // :13307-13314（1456 伪锚 :12484-12489 勘正）
       if (this.ai0 >= 0) {
-        // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×num25（缺省 16;554 Kraken
+        // 活跃态命中反弹（:13315-13333;1456 伪锚 :12490-12500 勘正）：v×-0.5 + 离敌向 ×num25（缺省 16;554 Kraken
         //  =4 :13300-13302——命中后贴敌续磨,连击率;蓝队 R7-32：曾恒 16,Kraken 命中即弹远）
         const push = this.projId === 554 ? 4 : 16;
         let bx = this.cx - ecx, by = this.cy - ecy;
@@ -4327,10 +4327,10 @@ export class YoyoShotProj extends Entity {
   }
 }
 
-// ================= 连枷/链球（aiStyle 15，AI_015_Flails，Projectile.cs:41051-41506） =================
+// ================= 连枷/链球（aiStyle 15，AI_015_Flails，Projectile.cs:44529-45018;1456 伪锚 :41051-41506 勘正） =================
 
-/** 每型号参数（Projectile.cs:41073-41087 默认值 + :41088-41148 switch 各 case；单位 px/tick/tick）。
- *  meleeSpeed 缩放链（:41151-41159）：throwSpd/farPull/pullAccel/retractKill/returnAccel/
+/** 每型号参数（Projectile.cs:44551-44565 默认值 + :44566-44628 switch 各 case;1456 伪锚 :41073-41087/:41088-41148 勘正；单位 px/tick/tick）。
+ *  meleeSpeed 缩放链（:44629-44637;1456 伪锚 :41151-41159 勘正）：throwSpd/farPull/pullAccel/retractKill/returnAccel/
  *  returnKill ×(1/meleeSpeed)——orbitRadius(num15)不缩放 */
 interface FlailParams {
   flightTicks: number;  // num:掷出态飞行上限 tick（超时 → 回拉）
@@ -4686,7 +4686,7 @@ export class FlailProj extends Entity {
     this.handX = p.cx;
     this.handY = p.cy;
     this.hitCd.tick();
-    // meleeSpeed 缩放链（:44629-44635 meleeSpeed→num16 七连乘——1456 伪锚 :41151-41159 勘正
+    // meleeSpeed 缩放链（:44629-44637 meleeSpeed→num16 七连乘（BJ661 复核补 :44636-44637 num6/num7 两乘）——1456 伪锚 :41151-41159 勘正
     //  R17-F4）——inv = 1/M = 原版 num16（攻速和,>1 更快）
     const inv = 1 / (p.attackSpeedMult || 1);
     const throwSpd = this.prm.throwSpeed * inv;

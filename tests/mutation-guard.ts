@@ -28,7 +28,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const ROOT = join(realpathSync(tmpdir()), 'sw-mutation-guard');
-const keyOf = (f: string): string => createHash('md5').update(f).digest('hex').slice(0, 16);
+// ★BJ662（2026-10-12）锁键 realpath 归一：withMutation 调用方与 canary 持锁方的
+//  同文件路径拼写可能不同（process.cwd() vs join(__dirname,'..')）——键取真实路径
+//  保证同一文件恒同锁（防御 symlink/cwd 漂移;文件不存在时回退原串=行为不变）。
+const keyOf = (f: string): string => {
+  let rf = f;
+  try { rf = realpathSync(f); } catch { /* 首锁时目标文件必已存在;防御性回退原串 */ }
+  return createHash('md5').update(rf).digest('hex').slice(0, 16);
+};
 const lockPathOf = (f: string): string => join(ROOT, `lock-${keyOf(f)}.lock`);
 const backupPathOf = (f: string): string => join(ROOT, `pristine-${keyOf(f)}.bak`);
 
@@ -93,6 +100,22 @@ function acquireLock(file: string, label: string): void {
 
 function releaseLock(file: string): void {
   try { unlinkSync(lockPathOf(file)); } catch { /* 已释放/被收编 */ }
+}
+
+// ---------------- L1 补充：长持锁通道（读盘自证窗专用,★BJ662/BJ652 建议③） ----------------
+
+/** 非变异方的【跨测试整段】持锁：静态对账闸（bj378 canary）等「snapshot→assert 读盘
+ *  自证窗」与 in-flight withMutation 的 mutate→spawn→restore 窗按同文件互斥——并行
+ *  池内交错 = canary 假红（bj378×bj642/bj643 Arrow.ts 实锤）。持锁方零写盘,不触
+ *  L2 registry/还原面;陈锁收编/忙等等语义与 withMutation 完全同键同参。
+ *  纪律：lock/unlock 必须 beforeAll/afterAll 同域配对（afterAll 侧放 finally）,
+ *  持锁跨度内禁止再经 withMutation 触同一文件（自锁死）。 */
+export function lockTargetFile(file: string, label: string): void {
+  mkdirSync(ROOT, { recursive: true });
+  acquireLock(file, label);
+}
+export function unlockTargetFile(file: string): void {
+  releaseLock(file);
 }
 
 // ---------------- L3: 残留自检 ----------------

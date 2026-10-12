@@ -29,6 +29,7 @@
 // 变异证红：摘 webbed 清输入腿 → ②红;摘出口 controlLeft 直读 → ③红;摘矿车/死亡/
 //   坐睡 prevInputX 补刷 → ④红;①组为销案判据守卫（现行为即绿,防回归）。
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { Player } from '../src/entities/Player';
@@ -184,6 +185,8 @@ describe('MV2② 债②：webbed 宽面封输入（CCed :25432-25446 全控制�
 
   it('webbed 禁用物品（ItemCheck CCed 早退 :42924 仓内 updateUse 等价位）', () => {
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
     player.hp = 500;
     player.inv.add(iid(112), 1);            // 花火（非宝石魔法弹 → Arrow 15）

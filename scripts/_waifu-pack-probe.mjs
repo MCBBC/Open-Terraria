@@ -29,7 +29,12 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
 const page = await browser.newPage()
 const errs = []
 page.on('pageerror', (e) => errs.push('PAGEERR: ' + String(e).slice(0, 160)))
-page.on('console', (m) => { if (m.type() === 'error') errs.push('CON: ' + m.text().slice(0, 130)) })
+const bootLogs = []
+page.on('console', (m) => {
+  if (m.type() === 'error') errs.push('CON: ' + m.text().slice(0, 130))
+  const t = m.text()
+  if (t.includes('音效覆盖') || t.includes('启动应用:')) bootLogs.push(t.slice(0, 160))
+})
 
 let pass = 0, fail = 0
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; }
@@ -56,6 +61,9 @@ const restored = await page.evaluate(() => {
   return { rows: mgr?.rows?.map((r) => ({ n: r.name, on: r.enabled, files: r.fileCount })) ?? null }
 })
 check('重载后包恢复启用', (restored.rows ?? []).some((r) => r.on && r.files > 2000), JSON.stringify(restored.rows))
+// 音效覆盖链:启动日志应报 N 个音效覆盖(xnb 解包→Sfx override)
+const sfxLog = bootLogs.find((t) => t.includes('音效覆盖'))
+check('音效覆盖链生效(19 张 xnb→Sfx)', !!sfxLog && /(\d+) 个音效覆盖/.test(sfxLog) === true && parseInt((sfxLog.match(/(\d+) 个音效覆盖/) ?? [])[1] ?? '0', 10) >= 19, bootLogs.join(' | ').slice(0, 200))
 
 // 进世界截图(找向导 NPC——娘化包替换 NPC_22)
 await page.goto(ORIGIN + '/?play=small', { waitUntil: 'networkidle2', timeout: 90000 })
@@ -109,6 +117,34 @@ await page.screenshot({ path: 'shots/waifu-player.png' })
 console.log('shots: shots/waifu-player.png')
 
 console.log('shots: shots/waifu-npc.png')
+
+// ---- 对话头像派生验证:贴近向导→开对话框→查 Detailed canvas 并截图 ----
+//  ★Detailed 头像是 <canvas class=sw-npc-portrait>(drawPortrait 画入),非 <img>
+await page.evaluate(() => {
+  const g = window.__swGame
+  const guide = g.entities.npcs.find((n) => n.vanillaId === 22 && !n.dead)
+  if (guide) { g.player.x = guide.x - 60; g.player.y = guide.y }
+})
+await new Promise((r) => setTimeout(r, 600))
+const port2 = await page.evaluate(async () => {
+  const g = window.__swGame
+  const guide = g.entities.npcs.find((n) => n.vanillaId === 22 && !n.dead)
+  if (!guide) return { npc: false }
+  g.openNpcDialog(guide)
+  await new Promise((r) => setTimeout(r, 400))
+  const cv = document.querySelector('canvas.sw-npc-portrait')
+  // 画布内容采样:中心区应有非透明像素(头像画入)
+  let px = 0
+  if (cv) {
+    const d = cv.getContext('2d').getImageData(60, 60, 80, 80).data
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 30) px++
+  }
+  return { npc: true, panel: !!document.querySelector('.sw-npc-dialog'), cv: !!cv, px }
+})
+check('对话头像派生(Detailed canvas 画入)', port2.cv === true && (port2.px ?? 0) > 50, JSON.stringify(port2))
+await page.screenshot({ path: 'shots/waifu-dialog.png' })
+console.log('shots: shots/waifu-dialog.png')
+
 console.log(`\n${pass} passed, ${fail} failed`)
 if (errs.length) console.log('页面异常:', errs.slice(0, 4))
 await browser.close()

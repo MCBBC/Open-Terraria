@@ -15,6 +15,7 @@
 //    与锁盒 HasItemInInventoryOrOpenVoidBag :56575 分流
 //  - 与左键链共存：Game.ts 持用链不动，两入口同走 openBossBag 引擎
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { openBagItem, OPENABLE_BAG_VIDS, type BagOpenWorld } from '../src/data/vanillaOpenBags';
 import { BOSS_BAG_IDS } from '../src/data/vanillaBossBags';
 // ★RB15a 变异实验夹具依赖（Game/Player/World 最小桩,惯例=blue-r2-fixes casterGame）
@@ -177,6 +178,8 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
   /** updateUse 可驱动的最小 Game 桩（蓝队 R2 惯例:blue-r2-fixes casterGame 同款） */
   function bagGame(heldVid: number) {
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
     player.inv.add(bagIid(heldVid), 1);
     const sel = player.inv.slots.findIndex((s) => s && s.id === bagIid(heldVid));

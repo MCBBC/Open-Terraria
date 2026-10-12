@@ -21,7 +21,13 @@ import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
 
 
 // ★622:mod gen pass 注册(worker 侧——eval mod bundle+stub sw 只活 gen 三面)
+// ★626 勘误:注册不得在 applyGenSrc 消息内同步跑——20MB bundle 的 new Function 编译
+//  +全量注册要数秒,握 ping 在同一消息队列排在它后面,3000ms 握手预算必超
+//  (→WorldGenUnavailable→主线程同步生成回退→mod pass 主线程冻结,探针实测)。
+//  改为 applyGenSrc 只存源,generate 请求处理头【先注册再生成】——次序确定性由
+//  「ensureWorker 先推 genSrc 后握 ping,generate 恒在握手成功后才发」保证。
 let genSrcRegistered = false;
+let genSrcPending: string | null = null;
 function registerModGenPassesInWorker(src: string): void {
   if (genSrcRegistered) return;   // 幂等(重 build 不重注册)
   genSrcRegistered = true;
@@ -134,6 +140,7 @@ ctx.onmessage = async (e) => {
       return;
     }
     // ★622:mod gen pass 源码(worker 侧注册——eval mod bundle+stub sw=gen 注册闭环)
+    //  ★626:只存源不跑——注册挪到 generate 处理头(见 genSrcPending 注)
     if (req.type === 'applyGenSrc') {
       const gp = req.payload as { src: string; globals?: { schematics?: Record<string, unknown>; modData?: Record<string, unknown> } };
       if (gp.globals) {
@@ -141,10 +148,16 @@ ctx.onmessage = async (e) => {
         if (gp.globals.schematics) w.__calamitySchematics = gp.globals.schematics;
         if (gp.globals.modData) w.__calamityModData = gp.globals.modData;
       }
-      registerModGenPassesInWorker(gp.src);
+      genSrcPending = gp.src;
       return;
     }
     if (req.type === 'generate') {
+      // ★626:gen 注册在首个 generate 前消费(次序恒定;eval 数秒属生成期预期成本)
+      if (genSrcPending && !genSrcRegistered) {
+        const src = genSrcPending;
+        genSrcPending = null;
+        registerModGenPassesInWorker(src);
+      }
       // ★预览抓帧与进度锚点同步（2026-08-31）：共享一个 400ms 冷却钟——
       //   槽边界帧（onWorldPartial）与进度里程碑帧（换窗 / Δp≥1% / 完成）都过同一
       //   闸门 ⇒ 总量≤2.5fps。相对旧实现（每槽必出一帧、长 pass 冻结数秒）：

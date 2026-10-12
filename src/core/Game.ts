@@ -32,7 +32,7 @@ import { newCensusCounter } from '../world/EmotePick';
 import { anchorBeeBottom, beeSpawnAuthority, breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
 import { bigMimicSummonCheck, bigMimicSpawnSmoke } from '../world/BigMimicSummon';   // ★SW-BJ147 钥匙放箱召宝箱怪（NPC.cs:78318）
-import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError, getModGenPasses, runModGenPasses } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
+import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
@@ -298,7 +298,7 @@ const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
 ]);
 import { CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM } from '../data/critters';
 import { dropBaitRoll, baitWormType, dropCloverRoll } from '../world/DropBait';
-import { EntityManager, Entity } from '../entities/Entity';
+import { EntityManager, Entity, CUT_EXCLUDE_VIDS, CUT_EXCLUDE_AISTYLES, CUT_EXCLUDE_VIDS_TAIL } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 import { PunchCameraModifier } from '../render/CameraModifierStack';
 import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
@@ -1514,6 +1514,28 @@ export const TILE_CUT = new Set<number>(
  *  单点 → vid 由 EntityManager 中央收口/cutTilesBox 穿线。独立导出 = 行为面可测。 */
 export function cutTilesTypeExempt(vid: number | undefined, tileType: number): boolean {
   return vid === 1047 && tileType === (TILE_BY_KEY['v_231_larva'] ?? -1);
+}
+/** ★BJ663件2（2026-10-12）R15-F8 清偿：第二割面门纯核（Projectile.cs:18021
+ *  `owner==Main.myPlayer && CanCutTiles() && (friendly||hostile) && damage>0`
+ *  亲读 1:1 投影,crush sweep 消费）。投影面：
+ *  · owner==myPlayer → !netPuppet（联机傀儡弹归 owner 端,单机恒 false）+
+ *    数据面 friendly（BJ293 投影判例;hostile 支=PvP 域单机不可达,敌射 84 族
+ *    hostile=true 无 owner 位可辨——照 BJ293 friendly-only 收口,登记）。
+ *  · CanCutTiles（:15407）→ CUT_EXCLUDE_VIDS/TAIL/AISTYLES 三表（Entity.ts 单源,
+ *    与中央收口同源消费）。
+ *  · 【不】挂 npcProj/minion——原版第二割面无此二因（:18021 亲读,与中央收口
+ *    :12516 门面差;随从/城镇弹撞格照割=vanilla 同相）。
+ *  · damage>0 未建模（全量弹缺统一 damage 面,SW vid=0 保守照准=BJ294 惯例）。
+ *  · vid!==1054 不挂——那是中央收口 :12515 第五因（主割面专有）,第二割面无。 */
+export function projSecondCutEligible(
+  vid: number,
+  pd: { friendly?: boolean; hostile?: boolean; aiStyle?: number } | null | undefined,
+  m: { noVanillaCut?: boolean; reflected?: boolean; netPuppet?: boolean },
+): boolean {
+  if (m.noVanillaCut === true || m.reflected === true || m.netPuppet === true) return false;
+  if (vid !== 0 && pd?.friendly !== true) return false;   // owner==myPlayer && friendly 投影（BJ293）
+  return !CUT_EXCLUDE_VIDS.has(vid) && !CUT_EXCLUDE_VIDS_TAIL.has(vid)
+    && !CUT_EXCLUDE_AISTYLES.has(pd?.aiStyle ?? -1);      // CanCutTiles :15407 投影
 }
 // 原版 TileID.Sets.BreakableWhenPlacing（TileID.cs:383）→ 内部 id——放置占用
 // 例外面第二支（CanPlace TileObject.cs:357 / Place 清格 TileObject.cs:84-86）：
@@ -6881,13 +6903,12 @@ export class Game implements GameHooks {
         onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
         applyDifficulty();
         this.afterWorldLoad();
-        // ★622c:mod gen passes 主线程补跑(afterWorldLoad 后 player 就位;
-        //  主线程有全套 globals;worker 侧 genSrc 注册=并行路线另解)
-        try {
-          if (getModGenPasses().length > 0) {
-            runModGenPasses(this.world as unknown as Parameters<typeof runModGenPasses>[0]);
-          }
-        } catch (genErr) { console.error('[newWorld] mod gen 补跑:', genErr); }
+        // ★626 勘误:mod gen passes【不再】主线程补跑——worker 路径经 applyGenSrc 在
+        //  worker 内联消费(WorldGen generateWorld:1517,全 gs 上下文);主线程 fallback
+        //  路径同样内联消费。此处的旧补跑=对同一 store 二次执行(且 gs 只有
+        //  seed/worldSurface/rockLevel 三件,dungeonX/jungleX 缺失→pass 内拒绝采样
+        //  NaN 恒不命中=主线程同步冻结,探针实测 t+30s evaluate 永不返回)。
+        //  runModGenPasses 面保留(worker 域注册验证/探针用),不再有生产消费方。
         await this.minimapReady;   // 小地图拆带构建完成(见 new Minimap 注释)再进图
         this.cb.onWorldReady();
         return;
@@ -13423,9 +13444,9 @@ export class Game implements GameHooks {
     if (us === 5 && uc?.autoReuse === true && uc?.melee !== true
       && (uc.useTime ?? 0) <= (uc.useAnimation ?? 0)
       && (uc.shoot ?? 0) > 0 && mult === 1 && reuseDelayOf(vid) === 0) extra = 1;
-    // SetItemAnimation(base, mult)（Player.cs:4240-4247）：val=(int)(base×mult)，
+    // SetItemAnimation(base, mult)（Player.cs:4438-4446;1456 伪锚 :4240-4247 勘正）：val=(int)(base×mult)，
     // base>0 时下限 1。放置物走 ApplyItemAnimation createTile/createWall 档
-    //（:4270-4275：useAnimation×tileSpeed/wallSpeed）
+    //（:4470-4477 createTile/createWall 档;1456 伪锚 :4270-4275 勘正：useAnimation×tileSpeed/wallSpeed）
     const base = this.heldUseAnimation(def);
     // ★BJ640（2026-10-11）：mult 乘区=(int)(base×mult) 截断（Player.cs:4438-4446
     // SetItemAnimation(base,mult)——tileSpeed/wallSpeed/词缀 spd/slowMagic 各支同函数
@@ -16174,7 +16195,7 @@ export class Game implements GameHooks {
             this.entities.add(new Arrow(
               this.player.cx, this.player.cy - 4,
               // :49444 `new Vector2(num4, num5) * 5f`（★BJ206 重锚）——num4/5 已含 shootSpeed
-              // （ItemCheck_Shoot :46430-46434 speed = sItem.shootSpeed，985 ∈
+              // （ItemCheck_Shoot :47466 speed = sItem.shootSpeed;1456 伪锚 :46430-46434 勘正，985 ∈
               // NoMeleeSpeedVelocityScaling（ProjectileID.cs:337）不除 meleeSpeed）
               // → 实际初速 = 单位向×12×5 = 60（曾漏乘 shootSpeed 只 ×5）
               tdx / tdl * cwMelee.shootSpeed * 5, tdy / tdl * cwMelee.shootSpeed * 5,
@@ -16204,12 +16225,12 @@ export class Game implements GameHooks {
             this.mining = null;
             return;
           }
-          // 老星怒 65 → 9 天降落星（Player.cs:46613-46625 出生链 + :48479-48491
+          // 老星怒 65 → 9 天降落星（Player.cs:47661-47676 出生链 + :49607-49620
           // type65 块）：出生 = 光标 X + 远离玩家侧 rand(0..200)、玩家上方 600px；
           // 伤害 ×1.5、击退清零；目标线从光标向出生点逐 16px 回退到首个非实心格
-          // （aiStyle 5 :22159-22162 越线前穿墙用 Bottom.Y ≥ ai[1]——与 503 的
+          // （aiStyle 5 :24116-24119 越线前穿墙用 Bottom.Y ≥ ai[1]——与 503 的
           // Center.Y > ai[1] 不同）。65 在"仅 ItemAnimationJustStarted 射弹"名单
-          // （Player.cs:42783）= 每挥一星
+          // （Player.cs:43793;1456 伪锚 :42783 勘正）= 每挥一星
           if (cwMelee.shoot === 9) {
             const [mwx9, mwy9] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
             const num3 = mwx9 < this.player.x ? 1
@@ -16217,7 +16238,7 @@ export class Game implements GameHooks {
             const sx9 = this.player.x + this.player.w / 2 + Math.floor(Math.random() * 201) * num3
               + (mwx9 - this.player.x);
             const sy9 = this.player.cy - 600;
-            // 目标线回退（:48483-48488）：vec 从光标沿 normalize(出生点−光标) 步进
+            // 目标线回退（:49613-49617;1456 伪锚 :48483-48488 勘正）：vec 从光标沿 normalize(出生点−光标) 步进
             let vx9 = mwx9, vy9 = mwy9;
             let ux9 = sx9 - mwx9, uy9 = sy9 - mwy9;
             const dl9 = Math.hypot(ux9, uy9);
@@ -16464,7 +16485,7 @@ export class Game implements GameHooks {
       //  + blockRange——★原版此支只置 enabled 不进缓存,本调用同上为我方扩展登记）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
         this.itemIconCacheUpdate(heldDef.vid ?? 0);
-      // 同上 createTile 档（:4270-4272 useAnimation×tileSpeed）
+      // 同上 createTile 档（:4470-4473;1456 伪锚 :4270-4272 勘正 useAnimation×tileSpeed）
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
       return;
@@ -17731,18 +17752,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   ——2026-08-22 补 B 批已实装（resolveSandGunSwap，上方换弹处），弹 42/65/
       //   68/354 物理与落地放块链同步补齐（AI_010/Kill aiStyle 10 支）。
       //   accSharpBarb 箭 +1（:54195-54198）= 1457 新配饰未移植,备案。
-      // 1457 :54200-54202：`Damage += (int)(num × GetWeaponDamageMultiplier(item))`——
+      // 1457 :54192-54194：`Damage += (int)((float)num × GetWeaponDamageMultiplier(item))`——
       // 弹药伤（含加伤）乘弹药伤害分道乘区（箭=bowEffective/弹=gunEffective…,本仓
       // rangedDamageMult(rKind) 同源）。1456 加伤裸加不乘；本仓此前连 item.damage
       // 也裸加,一并归位（D-❌② 2026-08-21）
-      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind))
-        + Math.trunc(((ammoC?.damage ?? 0) + ammoBonus) * this.player.rangedDamageMult(rKind)); // ⑥ pen 移 hit 时
-      // 1457 :54204-54207：纳米弹（projToShoot==285）总伤 ×1.25——(int) 截断
+      // ★BJ661 两步式：①词缀烘定 roundCSf32Mul（Item.cs:577 `(int)Math.Round(
+      //  (float)damage * dmg)`）→ ②GetWeaponDamage truncCSf32MulBias（Player.cs:54066
+      //  `(int)((float)damage × mult + 5E-06f)`,含偏置）——旧单次 f64 组合 Math.round
+      //  中点档差 1（50×1.05:原版 52/旧 53,BJ651 判别值复用）。弹药加项 = :54193
+      //  `(int)((float)num × mult)` = truncCSf32Mul（无偏置;弹药 item.ranged=true
+      //  同吃 rKind 乘区）——旧 f64 trunc 同族对齐。
+      let damage = truncCSf32MulBias(this.player.rangedDamageMult(rKind),
+          roundCSf32Mul(bowC?.damage ?? rg?.damage ?? 1, ps?.dmg ?? 1))
+        + truncCSf32Mul(this.player.rangedDamageMult(rKind), (ammoC?.damage ?? 0) + ammoBonus); // ⑥ pen 移 hit 时
+      // 1457 :54196-54199：纳米弹（projToShoot==285）总伤 ×1.25——(int) 截断
       if (projId === 285) damage = Math.trunc(damage * 1.25);
       let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
       if (isArrowKind && eq.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
         // 瞄准原点 = 玩家中心→鼠标世界坐标（Player.cs:46568 vector = Main.MouseWorld −
-        // pointPosition、:46642-46643 num4/num5 同点起算）——曾用"鼠标−画布中心"，
+        // pointPosition、:47687-47688 num4/num5 同点起算;1456 伪锚 :46642-46643 勘正）——曾用"鼠标−画布中心"，
         // 相机在世界边缘被钳时玩家不在屏心 = 整枪方向偏斜（2026-08-22 修）
         const ang = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
         // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
@@ -18618,7 +18646,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // critters）。命中侧零结算由 Arrow 零伤门接管（Damage_PVE :12576 同构：
         // `damage<=0` 先于一切 NPC 迭代）。非零件维持 ranged 乘区链不变。
         const dmgT = tc.damage <= 0 ? tc.damage
-          : Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('ranged')));
+          // ★BJ661 两步式：词缀烘定 roundCSf32Mul（Item.cs:577）→ GetWeaponDamage
+          //  truncCSf32MulBias（Player.cs:54066,含 5E-06f 偏置;注入位 :43060
+          //  ItemCheck_Shoot(sItem, GetWeaponDamage(sItem))）——旧单次 f64 组合 round
+          : Math.max(1, truncCSf32MulBias(this.player.damageMult('ranged'),
+              roundCSf32Mul(tc.damage, psT?.dmg ?? 1)));
         const pen = projectileData(tc.shoot)?.penetrate ?? 1;
         // 物理档 = aiStyle 2 投掷族默认档（Projectile.cs:21955-21977）：前 20t
         // 平飞 → vy+0.4/vx×0.97/tick，终端 32；全体翻滚（:21508），刀族
@@ -20167,8 +20199,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 射程/顶速/寿命/惯性全部由 YoyoProj 实体内按 AI_099 公式 1:1 重算
         // （YOYO_RANGE/TOP/LIFE 三表 + meleeSpeed 缩放 + yoyoString 修正）——
         // 此前 Game 侧另算 stringLen/life 双轨,与实体内冲突已统一（2026-08-13）
-        // 出生初速 = 16/meleeSpeed 朝光标（ItemCheck_Shoot :46430-46434 弹速缩放 +
-        //   :46642-46680 num4/5=光标−手心归一×speed;悠悠球 shootSpeed=16）。
+        // 出生初速 = 16/meleeSpeed 朝光标（ItemCheck_Shoot :47468-47470 弹速缩放;1456 伪锚 :46430-46434 勘正 +
+        //   :47687-47718 num4/5=光标−手心归一×speed;1456 伪锚 :46642-46680 勘正;悠悠球 shootSpeed=16）。
         // 出生点同链锤 = 通用尾支 pointPosition（Player.cs:47588 玩家中心,:49952 发射）
         // → 盒心落点（Projectile.cs:10878-10879）;无 per-weapon 出生偏移（见链锤支注）
         const yoyo = new YoyoProj(this.player.cx, this.player.cy, cw.damage, cw.knockback, cw.shoot, 0,
@@ -22010,7 +22042,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 悠悠球族 Game 侧回调接线（初掷/手套二号球/魔法线克隆三处共用）：
-   *  secondInPlay（AI_099_2 flag :64827-64835——同型前球在场,出生序比对）/
+   *  secondInPlay（AI_099_2 flag :68787-68794;1456 伪锚 :64827-64835 勘正——同型前球在场,出生序比对）/
    *  recallFamily（寿命尽广播 :64852-64866——该玩家所有 aiStyle99 且 ai0>=0 → -1,含配重球）/
    *  spawnClone（魔法线 :65110-65116——75% 伤/击退的 -2 脱离克隆）/
    *  counterweight（命中链 :12482）。 */
@@ -30007,7 +30039,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           return true;
         }
       }
-      // 动画同 createTile 档（ApplyItemAnimation :4270-4272——使用即挥动，放置成败不影响）
+      // 动画同 createTile 档（ApplyItemAnimation :4448/createTile 档 :4470-4473——使用即挥动，放置成败不影响）
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
       return true;
@@ -30340,7 +30372,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : (!this.world.fastForwardTimeToDusk && this.world.moondialCooldown === 0)) {
         if (sundial) { this.world.fastForwardTimeToDawn = true; this.world.sundialCooldown = 8; }
         else { this.world.fastForwardTimeToDusk = true; this.world.moondialCooldown = 8; }
-        this.sfx.play('drink'); // SoundID.Item4
+        this.playSfxFile('Item_4', 1, this.player.cx, this.player.cy); // SoundID.Item4（:32887/:32896,position=玩家坐标）★BJ664 旧 drink(Item_3)=错档占位
       }
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_494_golf_tee']) {
@@ -30487,12 +30519,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 : type === TILE_BY_KEY['v_699_alchemy_flask'] ? BuffType.DeadCellsPotionStation
                   : BuffType.SugarRush;
       this.player.buffs.apply(bt, dur);
-      // 工位音分流（Player.cs:32861-32866/:32873-32878）：磨刀石 377→Item37、
-      // 弹药箱 287→Item149、药水站 699→Item179（:32861）；其余工位原版仍 Item4
-      if (type === TILE_BY_KEY['v_377_sharpening_station']) this.playSfxFile('Item_37', 1, tx * TILE, ty * TILE);
-      else if (type === TILE_BY_KEY['v_287_ammo_box']) this.playSfxFile('Item_149', 1, tx * TILE, ty * TILE);
-      else if (type === TILE_BY_KEY['v_699_alchemy_flask']) this.playSfxFile('Item_179', 1, tx * TILE, ty * TILE);
-      else this.sfx.play('drink'); // 原版 SoundID.Item4（药水/授予类 UseSound 占位）
+      // 工位音分流（★BJ664 2026-10-12 逐音对表 Player.cs:32839-32879——七站原版音各异，
+      // 旧「非三站恒 drink(Item_3)」=错档占位音：水晶球 125→Item4(:32843)/附魔台
+      // 354→Item4(:32873)/战争桌 464→Item4(:32855)/蛋糕 621→Item2(:32849)/磨刀石
+      // 377→Item37(:32867)/弹药箱 287→Item149(:32879)/药水站 699→Item179(:32861)。
+      // ★第二参全站恒 `position`=玩家坐标（非 tile 坐标）——旧 tile 定位多一次
+      // 距离衰减,一并修正。音量修正面：Item_37 ×0.5 已在 FILE_CASE_VOL（:567），
+      // Item2/4/149/179 无 case 修正）
+      if (type === TILE_BY_KEY['v_621_slice_of_cake']) this.playSfxFile('Item_2', 1, this.player.cx, this.player.cy);
+      else if (type === TILE_BY_KEY['v_699_alchemy_flask']) this.playSfxFile('Item_179', 1, this.player.cx, this.player.cy);
+      else if (type === TILE_BY_KEY['v_377_sharpening_station']) this.playSfxFile('Item_37', 1, this.player.cx, this.player.cy);
+      else if (type === TILE_BY_KEY['v_287_ammo_box']) this.playSfxFile('Item_149', 1, this.player.cx, this.player.cy);
+      else this.playSfxFile('Item_4', 1, this.player.cx, this.player.cy); // 水晶球 125/附魔台 354/战争桌 464 → SoundID.Item4
       this.cb.onInventoryChanged();
       this.input.rightDown = false;
     } else if (sh === 216) {
@@ -32467,7 +32505,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.world.fastForwardTimeToDusk = true;
           this.world.moondialCooldown = 8;
         }
-        this.sfx.play('drink'); // SoundID.Item4（右键路径同款）
+        // ★BJ664 普查翻案：导线路径原版【无声】——Item4 在右键臂体内（Player.cs:32887/
+        // :32896），Main.Sundialing/Moondialing（Main.cs:6304-6331）与 Wiring.cs:1149-1175
+        // 触发链均无 PlaySound。旧「右键路径同款」类比不成立，撤多余音。
       },
       dropItem: (vanillaItemId: number, px: number, py: number) => {
         const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
@@ -35011,20 +35051,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const [kx, ky, ksh] of killed) fx(kx, ky, ksh);
   }
 
-  /** 弹幕移动扫掠盒内裂砖切碎（Projectile.HandleMovement :16630-16655 等价：
-   *  移动前后包围盒内 CrackedBricks 逐格 KillTile——CanCutTile AttackProjectile
-   *  上下文（WorldGen.cs:88111-24 单源 world/CanCutTile.ts,Projectile.cs:15395 同
-   *  上下文消费）：墙 350 / 正下 78·380·579 豁免，254 未熟南瓜拒，其余可切）。
-   *  DebrisProj 豁免（自身弹片不碎砖，其连锁走 Kill 段 :75347）。快照长度迭代——
-   *  链上追加的弹片不参与本轮扫掠。 */
+  /** 弹幕移动扫掠盒内裂砖切碎 + 484 RollingCactus 撞格割面（★BJ663件2 R15-F8 清偿：
+   *  Projectile.HandleMovement 第二割面 :18021-18078 亲读全式——【撞格拍】速度外延盒
+   *  （position±velocity±1px,:18023-18026/:18044-18047）两支：
+   *  ①支 A :18022-18056 仅 tile 484 逐格 KillTile（tileCut[484]=true Main.cs:7605,
+   *    中央收口只吃 current-box=撞格 snap 后贴边失覆差 1-2px 带由本支补口）;
+   *  ②支 B :18059-18078 CrackedBricks 1/3 掷（Main.rand.Next(3)==0,本仓=每拍恒切
+   *    近似——统计率 3×/撞格拍限定两差面均登记,不可感档,见台账）。
+   *  门 = projSecondCutEligible（:18021 四因投影,owner 投影=BJ293 friendly 数据面;
+   *  【不】挂 npcProj/minion——原版第二割面无此二因,随从/城镇弹撞格照割）。
+   *  CanCutTile AttackProjectile 上下文（WorldGen.cs:88111-24 单源 world/CanCutTile.ts,
+   *  Projectile.cs:15395 同上下文消费）：墙 350 / 正下 78·380·579 豁免，254 未熟南瓜拒，
+   *  其余可切。DebrisProj 豁免（自身弹片不碎砖，其连锁走 Kill 段 :75347）。快照长度
+   *  迭代——链上追加的弹片不参与本轮扫掠。
+   *  484 路由=game.cutTile 单源（tileCut 候选+CanCutTile+trap 免保护面/GetTileCutIgnorance
+   *  全在彼处,vanilla 支 A 同吃 tileCutIgnorance :18032）;盒=扫掠盒 ∪ 速度外延 ±1px。
+   *  残差登记：vanilla 支仅【撞格拍】触发,本仓=每拍（含飞行近擦 1px 带）——solid 格
+   *  近擦必伴碰撞,差面≤1px 微差;死弹末拍盒不扫（compact 先于本站,vanilla 支在
+   *  HandleMovement 内先于 Kill 触发）=箭矢撞裂砖末拍差面,登记债（涉 BJ232 死弹窗
+   *  时序,另批落刀）。 */
   private crushCrackedBricksSweptByProjectiles(): void {
     const st = this.world.store;
     const projs = this.entities.projectiles;
     const n = projs.length;
+    const rollingCactus = TILE_INTERNAL_BY_SHEET.get(484) ?? -1;   // 支 A 唯一 tile（Main.cs:7605 tileCut 域外特判）
     for (let pi = 0; pi < n; pi++) {
-      const p = projs[pi] as { x: number; y: number; w: number; h: number; vx: number; vy: number; dead: boolean };
+      const p = projs[pi] as { x: number; y: number; w: number; h: number; vx: number; vy: number; dead: boolean;
+        vanillaId?: number; projId?: number; reflected?: boolean; noVanillaCut?: boolean; netPuppet?: boolean };
       if (p.dead || p instanceof DebrisProj) continue;
       if (p.vx === 0 && p.vy === 0) continue;
+      // ★BJ663件2：第二割面门（:18021 投影——此前无门=敌射弹越权碎裂砖 BJ293 同族病,
+      //  红蓝 R15-F8「敌对弹滚地割草差」实锤面）
+      const vid = p.vanillaId ?? p.projId ?? 0;
+      if (!projSecondCutEligible(vid, vid !== 0 ? projectileData(vid) : undefined, p)) continue;
       const x0 = Math.floor(Math.min(p.x, p.x + p.vx) / TILE);
       const x1 = Math.floor((Math.max(p.x, p.x + p.vx) + p.w) / TILE);
       const y0 = Math.floor(Math.min(p.y, p.y + p.vy) / TILE);
@@ -35039,6 +35098,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // byPlayer=true：AttackProjectile 上下文 = Projectile.CutTiles 窗内循环体
           // （CanCutTile :15395 在 CurrentlyMining=true 包络 :15282-15351 内）→ 计
           this.breakTile(x, y, true, true);   // KillTile(noItem) → breakCrackedBrick（连锁无掉落，DropBait 同门不掷）
+        }
+      }
+      // ★BJ663件2 支 A：484 RollingCactus（:18022-18056——盒 ±1px 速度外延,:18023-18026
+      //  `(int)(position+velocity∓1)`/`+width+velocity+1` 排除界同 cutTilesBox +1 语义,
+      //  末含格=trunc((x+w)/16)）;cutTile 内零候选零操作=非 484 格廉价跳过
+      const cx0 = Math.floor((Math.min(p.x, p.x + p.vx) - 1) / TILE);
+      const cx1 = Math.floor((Math.max(p.x, p.x + p.vx) + p.w + 1) / TILE);
+      const cy0 = Math.floor((Math.min(p.y, p.y + p.vy) - 1) / TILE);
+      const cy1 = Math.floor((Math.max(p.y, p.y + p.vy) + p.h + 1) / TILE);
+      for (let x = cx0; x <= cx1; x++) {
+        for (let y = cy0; y <= cy1; y++) {
+          if (st.get(x, y) !== rollingCactus) continue;
+          this.cutTile(x, y, vid);            // KillTile 直派(:18038-18043) ≡ cutTile 候选路由
         }
       }
     }
@@ -47013,7 +47085,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const ang = Math.atan2(wy - this.player.cy, wx - this.player.cx);
     this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
     const psT = this.heldPrefixStat();
-    const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('ranged')));
+    // ★BJ661 两步式（同投掷通用面 :18626:烘定 roundCSf32Mul → GetWeaponDamage
+    //  truncCSf32MulBias,Player.cs:54066 含偏置）——旧单次 f64 组合 round
+    const dmgT = Math.max(1, truncCSf32MulBias(this.player.damageMult('ranged'),
+      roundCSf32Mul(tc.damage, psT?.dmg ?? 1)));
     const beeGrenade = new Arrow(this.player.cx + Math.cos(ang) * 14,
       this.player.cy - 4 + Math.sin(ang) * 14,
       Math.cos(ang) * (c?.shootSpeed ?? 6), Math.sin(ang) * (c?.shootSpeed ?? 6),
@@ -53210,7 +53285,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     }
   }
 
-  /** 格墙 id 探针（SporeSac :42783 `Main.tile[num6,num7].wall > 0`） */
+  /** 格墙 id 探针（SporeSac :42781;1456 伪锚 :42783 勘正 `Main.tile[num6,num7].wall > 0`） */
   private wallAtTile(tx: number, ty: number): number {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return 0;
@@ -53453,7 +53528,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (this.net?.active) {
       this.net.tick();
       // R3 移动续传：跨条带（200×20）边界时向服务器请求周围 strip。
-      // 观战期取相机位（= RemoteClient.CheckSection 的观战段等价 :17118——
+      // 观战期取相机位（= RemoteClient.CheckSection 的观战段等价 :17385;1456 伪锚 :17118 勘正——
       // 条带跟随观战目标而非自身 avatar）
       // ★X4 清偿刀D（2026-09-29）：条带锚扩展到相机目标全三域（specCam??droneCam??
       // golfCam——原版 section 请求按屏幕走,Main.screenPosition 即相机;无人机/高尔夫

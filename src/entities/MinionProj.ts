@@ -18,6 +18,7 @@ import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
+import { truncCSf32MulBias } from '../stats/ScaleStats';   // ★BJ661 随从 live 伤两步式（Projectile.cs:16812 (int)((float)od×md+5E-06f)）
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite, projFrameSrcRect, empressHslRgb } from './Arrow';
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
@@ -7567,6 +7568,12 @@ export class MinionProj extends Entity {
       }
     }
     // 城镇臂（:34975 Damage() 管线同链——Y2 清偿刀既案;60×60 几何外置 skip）
+    // ★BJ662（2026-10-12）N3f 定谳补缺：916 链电延迟汇出（原版序 :13711 OnHit 在
+    //  StrikeNPC :13702【后】——写梯后落地,城镇靶同面=旧即时 AoE 面既有
+    //  volleyTownDirect 通道）。BJ639 批1② volley 实体化重写本面时整缺
+    //  （settle 收集 direct 后无发布+onAccept 无消费=链电永落,登记债
+    //  bj452-N3f 存量红根因之二）;pendingDirect 习语=contact 面 :7449 同式。
+    let pendingDirect: number[] | null = null;
     hitTownNpcs({ x: bx, y: by, w: 0, h: 0 }, game, dmg, 0, 'playerProj', 644,
       () => true, undefined,
       (n) => {
@@ -7583,6 +7590,15 @@ export class MinionProj extends Entity {
         //  usesIDStatic 支（:14030-14036）直达=immune[owner]=0 清窗（非「内支不达」
         //  ——那仅本体 penetrate=1 档）;clearWindow=true 即 :14035 折算（Y2 报告③既案）
         this.townAcceptLadder(game, n, true);
+        // ★BJ662 补缺：W5 :13711 位落地（写梯后）——916 链电自城镇靶位寻
+        //  CanBeChasedBy 敌,城镇 NPC 本体永免（_DarkHarvest.cs:18;链靶=tn 位）
+        const tnL = n as TownNpcHitTarget;
+        if (pendingDirect) {
+          for (const d of pendingDirect) {
+            darkHarvestChain(game, d, tnL.cx, tnL.cy, tnL.id);
+          }
+          pendingDirect = null;
+        }
       },
       (n) => {
         const tn = n as TownNpcHitTarget;
@@ -7593,6 +7609,7 @@ export class MinionProj extends Entity {
         const res = resolveWhipTagHit(tn, dmg, game,
           (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
           SUMMON_TAG_MUL[644] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, 644);
+        pendingDirect = direct;                             // ★BJ662 补缺：汇出发布（settle 位=ModifyHit+OnHit 消费后）
         const golemCritT = rollGolemSentryCrit(game, 644, false);
         return {
           dmg: res.crit ? res.dmg / 2 : res.dmg,
@@ -8309,10 +8326,13 @@ export class MinionProj extends Entity {
         this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
         moveAndCollide(this, game.world, 0, this.vy);
       }
-      // 随从/哨兵伤害：武器基伤 × summonDamageMult（live 刷新，换装即时生效，
-      // Projectile.cs:15368 语义）+ 护甲穿透（对随从弹幕生效 :12068）
-      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))); // ⑥ pen 移 hit 时
-      // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
+      // 随从/哨兵伤害：originalDamage（=烘定武器基伤,BJ651-R2 站⑤ Game 召唤出口
+      //  roundCSf32Mul）× summonDamageMult live 刷新（每拍重算,换装即时生效,
+      //  Projectile.cs:16809-16813 语义;1456 伪锚 :15368 勘正）——★BJ661 两步式
+      //  truncCSf32MulBias（:16812 `(int)((float)originalDamage×minionDamage+5E-06f)`,
+      //  含偏置;旧 f64 Math.round 中点/边界档差 1）+ 护甲穿透（对随从弹幕生效 :12068）
+      const dmgOf = () => Math.max(1, truncCSf32MulBias(owner ? owner.summonDamageMult : 1, this.damage)); // ⑥ pen 移 hit 时
+      // 爆炸烈焰塔族（AI_130，Projectile.cs:69163-69464 1:1;1456 伪锚 :65194-65450 勘正）：
       // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
       if (FLAMEBURST_TOWER.has(this.projId)) {
@@ -9373,8 +9393,10 @@ export class MinionProj extends Entity {
         ? this.nearestEnemy(game, 2000, 'line', 'self', 6000)
         : this.nearestEnemy(game, MINION_SHOOT[this.projId]?.search
           ?? (MINION_SHOOT[this.projId] ? 1000 : 700));
-    // 基础伤害（每 tick 按当前装备 live 重算 = Projectile.cs:15368；+armorPen）
-    const dmg0 = Math.max(1, Math.round(this.damage * p.summonDamageMult)); // ⑥ pen 移 hit 时
+    // 基础伤害（每 tick 按当前装备 live 重算 = Projectile.cs:16809-16813
+    //  `(int)((float)originalDamage × player.minionDamage + 5E-06f)`;1456 伪锚
+    //  :15368 勘正;★BJ661 两步式=truncCSf32MulBias（含偏置）,+armorPen）
+    const dmg0 = Math.max(1, truncCSf32MulBias(p.summonDamageMult, this.damage)); // ⑥ pen 移 hit 时
     // ---- 旗舰家族分发（源码行号见各方法注释；先于通用运动）----
     if (this.projId >= 626 && this.projId <= 628) { this.dragonSegment(game, p, dmg0); return; }
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
@@ -10864,6 +10886,31 @@ export class MinionProj extends Entity {
           ctx.restore();
         }
         ctx.globalAlpha = 1;
+      }
+    }
+    // ---- ★BJ663件1（2026-10-12）：533 致命球 Glow_128 本体罩（Main.cs:31588-31591
+    //      DrawProjDirect 亲读 1:1）——本体（:31578）后同矩形同参叠画：sourceRect=
+    //      rectangle4 帧切片（与本体同 slice）、rotation=proj.rotation（533 num162=0
+    //      :30636 缺省,rotation24≡proj.rotation）、origin=帧矩形心（:30634）、
+    //      scale=proj.scale（533 SetDefaults 缺省 1）、dir 同本体（MINION_ROT_ONLY
+    //      dir=None）;位 = Center+(0,gfxOffY)（:31590——zero=:30635 Vector2.Zero、
+    //      num151 无 533 项=0,gfxOffY 全仓未建模恒 0）=与本体同位。色 =
+    //      Color.White*0.3（XNA float→byte 截断 (byte)76.5=76,四通道同乘）字面恒色
+    //      不取光照=自发光 → pushGlowOps 'over' 逃逸队列（864 刃杖辉光/BJ625件3
+    //      同通道判例;非 Projectile.glowMask 字段面=Main.cs 逐型专支,不入
+    //      PROJ_GLOWMASK 表）。层序登记：原版 glow 在本体后同批绘制,本仓合成后冲刷
+    //      =叠本体上——暗处保发光 vs 层序按 AURA 通道判例取前者（864 同款登记）。
+    //      染料面：glow 通道未接染料=登记债（864 同款）。
+    if (this.projId === 533 && img) {
+      const glow533 = r.atlas?.ensureVImage('vanilla/Glow_128.png');
+      if (glow533) {
+        r.pushGlowOps?.([{                              // 矩阵捕获=translate/rotate 后（rot 随本体同参）
+          tex: 'vanilla/Glow_128.png',
+          sx: 0, sy: frame * img.height, sw: img.width, sh: img.height,   // rectangle4 同本体帧切片
+          dx: -img.width / 2, dy: -img.height / 2,      // origin8=帧矩形心（:30634）
+          blend: 'over',
+          tint: [76 / 255, 76 / 255, 76 / 255], alpha: 76 / 255,          // White*0.3 → (byte)76
+        }], ctx.getTransform());
       }
     }
     ctx.restore();

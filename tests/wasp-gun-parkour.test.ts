@@ -54,6 +54,7 @@
 //          见下方「F4 落地」describe（节拍用 tick 墙钟驱动 idStaticCheck 的
 //          Date.now 节流,16.67ms/tick 恒速推进,与原版 GameUpdateCount 计数同构）。
 import { describe, it, expect, vi } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player, refreshMechanicalAccsFromItemType } from '../src/entities/Player';
@@ -441,6 +442,8 @@ function withRng<T>(value: number, fn: () => T): T {
  *  （读槽位 prefix → prefixStat 表）——词缀折叠 wrapper 不桩,单次应用形才可验 */
 function magicGame(vid: number, o?: { prefix?: number; mana?: number }) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   const iid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]];
   player.inv.add(iid, 1);
@@ -547,6 +550,8 @@ describe('F2/F3 黄蜂枪 1155 出手链单次应用形（Player.cs:48809-48820�
 /** updateUse 最小桩（6190/6195 右键快换手势面）：右键交互块全链可达 */
 function parkourGame(vid: 6190 | 6195, input: Record<string, unknown>, prevRightDown = false) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   // SW-FX46 重锚（2026-09-12）：手持物直写热栏槽 0（magicGame :446 同法先例）。
   // ★定谳：原 `inv.add(...)` 曾落热栏系旧 ③ 空格支升序臂（0..49）把 6837 落槽 0;
@@ -690,6 +695,8 @@ describe('M3 HiveFive 999：YoyoProj 命中链放蜂 proc（Projectile.cs:13752-
 describe('M3 HiveFive 999：Game.spawnBee 落桶三链（Player.cs:12506-12531 + :13759 melee 覆写）', () => {
   function beeGame(strongBees: boolean) {
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+    (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
     if (strongBees) {
       // 蜂巢背包 3333 走真装备链（equipStats 为计算 getter,不可直写——r30r31 ⑤ 同法）

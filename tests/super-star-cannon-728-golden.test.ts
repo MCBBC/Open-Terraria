@@ -17,6 +17,7 @@
 //     （I.cs:199），原版项侧无声（P.cs:6083 null 门）——星啸由弹 AI 承载；
 //     Game 发射尾此前落枪械合成音=多一声，本批 4060 专支修
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -143,6 +144,8 @@ describe('4060 获取途径（Recipe.cs:11981-11987 照抄登记）', () => {
  *  Player+Inventory，走 Game.updateUse 真实分派链） */
 function updUseGame(heldVid: number) {
   const g = Object.create(Game.prototype) as Record<string, any>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   const iidV = invIndexOfVanilla(heldVid);
   expect(iidV).toBeGreaterThanOrEqual(0);

@@ -1562,9 +1562,9 @@ export class Player extends Entity {
   private lavaAccum = 0;
   animTime = 0;          // 走路动画计时
   useTime = 0;           // 通用动作冷却
-  // ---- pulley 绳索悬挂态（Player.cs:1028/1026/994/1506/1504；FindPulley :19355-19460）----
+  // ---- pulley 绳索悬挂态（Player.cs:1028/1026/994/1506/1504；FindPulley :19771-19876;1456 伪锚 :19355-19460 勘正）----
   /** 绳上悬挂（原版 pulley）：按上/下键抓绳吸附进态；HorizontalMovement 整段不跑
-   *  （Player.cs:26366 在 pulley else 分支内）、X 钉绳列、gfxOffY 视觉偏移 */
+   *  （Player.cs:26889 在 pulley else 分支内;1456 伪锚 :26366 勘正）、X 钉绳列、gfxOffY 视觉偏移 */
   pulley = false;
   /** 悬挂侧向档（原版 pulleyDir，Player.cs:1026）：0=未定（状态机首帧归 1）、
    *  1=绳列中心、2=中心±6px（贴绳侧挂） */
@@ -1605,7 +1605,7 @@ export class Player extends Entity {
    *  本仓台阶走 stepRenderY 独立系统不写此值） */
   stepSpeed = 1;
   /** 绳端下穿冷却（Player.cs:994 ropeCount）：孤立绳格按下键穿落时置 10，
-   *  归零前 FindPulley 不再抓绳（:25801-25805 门 / :26129 置位） */
+   *  归零前 FindPulley 不再抓绳（:26316-26323 门 / :26644 置位;1456 伪锚 :25801-25805/:26129 勘正） */
   ropeCount = 0;
   /** 手持物品 useTurn（Item.cs SetDefaults；Game 每帧注入）——itemAnimation 窗内
    *  允许移动改朝向的唯一豁免（:19546-19556） */
@@ -6262,7 +6262,7 @@ export class Player extends Entity {
     // Scutlix/Santank 瞄准中锁朝向（Player.cs:19549 flag3 的 AllowDirectionChange 门；
     // 声明在冲刺分支外——滑行段的改向门同样消费）
     const mountAllowDir = !this.ridingMount || this.mount.allowDirectionChange;
-    // pulley 悬挂期 HorizontalMovement 整段不跑（Player.cs:26366 在 pulley else
+    // pulley 悬挂期 HorizontalMovement 整段不跑（Player.cs:26889 在 pulley else;1456 伪锚 :26366 勘正
     // 分支内）——朝向翻转归 flag12 状态机（★BJ-C8 F1：转身 :26356-26365/侧挂回中
     // :26369-26392,移动相 pulley 块内;下方空支仅承载分派）
     // ★SW-FX47（e）：jumpSpeed 字段前置快照（原版序 = UpdateJumpHeight :19714 经
@@ -6675,7 +6675,7 @@ export class Player extends Entity {
         // 中段绳但身体中心已顶出（攀到绳上端）：速度链照走（:26016-26125）
         this.ropeClimbVy(flag15);
       } else if (this.inputDown) {
-        // 孤立绳格按下 → 穿落（:26127-26132）：ropeCount=10 拦 FindPulley 十 tick
+        // 孤立绳格按下 → 穿落（:26642-26647;1456 伪锚 :26127-26132 勘正）：ropeCount=10 拦 FindPulley 十 tick
         this.ropeCount = 10;
         this.pulley = false;
         this.vy = 1;
@@ -10584,7 +10584,7 @@ export class Player extends Entity {
    *  tileRope 族直判；314 矿轨/380 花盆箱/平台族格 → GetRopeEnds（:70556-70604）
    *  上下 5 格内均有绳才算（绳穿平台/矿轨可攀——扫描对 active 非绳格【穿行】,
    *  null/!active 才断,★BJ652 件2 勘正,见下方循环注）。pulley 抓绳门
-   *  （FindPulley :19363）与维持退出门（:25950）的判定源 */
+   *  （FindPulley :19771;1456 伪锚 :19363 勘正）与维持退出门（:26465-26468;1456 伪锚 :25950 勘正）的判定源 */
   isRopeAt(st: TileStore, x: number, y: number): boolean {
     if (!st.inBounds(x, y)) return false;
     const k = st.idx(x, y);
@@ -10594,10 +10594,10 @@ export class Player extends Entity {
     if (def.rope) return true;                         // Main.tileRope
     const sheet = def.vanilla?.sheet ?? -1;
     if (sheet !== 314 && sheet !== 380 && !VANILLA_PLATFORM_SHEETS.has(sheet)) return false;
-    // GetRopeEnds（WorldGen.cs:70069-70105，treatEmptyAsTheRopeEnd=false，range 5）
+    // GetRopeEnds（WorldGen.cs:70556-70603;1456 伪锚 :70069-70105 勘正，treatEmptyAsTheRopeEnd=false，range 5）
     // ★BJ652 件2（2026-10-12）扫描语义勘正：旧实现首格非绳即 break——原版对
     //  【active 非绳格】是继续穿行（null/!active 才 break,绳才置位破），
-    //  绳藏在平台/矿轨后一格起即漏判（:70559-70574/:70578-70593 亲读）。
+    //  绳藏在平台/矿轨后一格起即漏判（:70560-70580/:70582-70602 亲读;BJ661 复核行界）。
     let topRopeY = -1;
     for (let i = 1; i <= 5; i++) {
       const ty = y - i;
@@ -10619,7 +10619,7 @@ export class Player extends Entity {
 
   /** Collision.SolidCollision（Collision.cs:2713-2746）：盒与实心非平台格相交
    *  判定（扫描域 x∈[⌊px/16⌋−1, ⌊(px+w)/16⌋+2]、y 同构；halfBrick 只算下半
-   *  8px；已致动格不计）。FindPulley 吸附位碰撞预检（:19413/:19430/:19447） */
+   *  8px；已致动格不计）。FindPulley 吸附位碰撞预检（:19829/:19846/:19863;1456 伪锚 :19413/:19430/:19447 勘正） */
   private solidCollision(st: TileStore, px: number, py: number): boolean {
     const x0 = Math.floor(px / TILE) - 1;
     const x1 = Math.floor((px + this.w) / TILE) + 2;
@@ -11818,8 +11818,15 @@ export class Player extends Entity {
     }
     // ★619-R3F4/F5:mod 伤害闸挪闪避族早退后(幽灵命中不吃盾)——C# HasAnyEnergyShield
     //  同位(免疫/闪避门后、防御计算前);dmg<=0 早退=全吸盾可达成
+    // ★BJ662（2026-10-12）吸收闸窄化：只对「mod 闸把正伤减到 ≤0」的【真吸收】面生效
+    //  ——原版 Hurt 无 Damage<=0 门（:38482-38500 早退族仅上帝/微光/免疫/闪避四族,
+    //  亲读）,CalculateDamagePlayersTake 对 0 伤输入钳 1（Main.cs:67146-67157 `if
+    //  (num < 1.0) num = 1.0`）;零 mod 时 identity 闸透传 dmg=0 合成输入落此早退=
+    //  原版偏离（orphan-b3 工单3「dmg>0 门已删」存量红根因——B3 波删的 vanilla 面
+    //  门被 619 mod 面门在 dmg=0 输入档复活）。
+    const dmgGateIn = dmg;
     dmg = runModDamageGate(this, dmg);
-    if (dmg <= 0) { this.dodgeFullFill(eq.longInvince ? 120 : 80); return 0; }
+    if (dmg <= 0 && dmgGateIn > 0) { this.dodgeFullFill(eq.longInvince ? 120 : 80); return 0; }
     // 受击破潜行（Player.Hurt :38530 `stealth = 1f;`——闪避分支已全部早退,走到此处
     // 即伤害落地,无条件复位；潜行装下一帧由更新段自然回蓄。曾缺=潜行态挨打不破隐）
     this.stealth = 1;

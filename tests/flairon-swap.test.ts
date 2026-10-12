@@ -17,6 +17,7 @@
 // 仓内：Game.updateUse 右键交互块触发（6190↔6195 先例同位）+ Game.swapFlaironForm。
 // 运行：cd game && npx vitest run tests/flairon-swap.test.ts
 import { describe, it, expect } from 'vitest';
+import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -65,6 +66,8 @@ function makeHooks() {
  *  右键交互块全链可达——tile 交互分派全部落空 + 快换支在 altUse 族支之前） */
 function flaironGame(vid: 2611 | 5526, input: Record<string, unknown>, prevRightDown = false) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  // ★BJ662（2026-10-12）updateUse 头 tickWiresRadial（BJ572）读 this.wiresRadial——Object.create 壳无构造器字段 → flowerUpdate(st=undefined) TypeError（存量桩族缺件,持物非 wire 工具走早退支,桩仅为通路）
+  (g as unknown as { wiresRadial: unknown }).wiresRadial = newWiresRadialState();
   const player = new Player(PX, PY, new Inventory());
   player.inv.add(iidOf(vid), 1);
   g.player = player;

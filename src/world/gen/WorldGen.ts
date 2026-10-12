@@ -206,9 +206,10 @@ export function registerGenPass(p: ModGenPass): void {
  *  主线程注册的 genPasses 对 Worker 不可见;Worker 返回后主线程对本 store 补跑) */
 export function getModGenPasses(): readonly ModGenPass[] { return genPasses; }
 
-/** 独立执行 mod gen passes(worker 返回后调用;WorldGenClient 路径补跑面)
- *  ★622:world=World 实例(有 groundLevel/rockLevel/seed/store)——worker 模块实例
- *  独立=主线程 genPasses 对 Worker 不可见,返回后主线程对本 store 补跑 */
+/** 独立执行 mod gen passes(★626 勘误:生产路径已全部内联消费——worker 经 applyGenSrc
+ *  在 worker 域注册+generateWorld:1517 内联跑;主线程 fallback 同款内联。本面降级为
+ *  探针/验证专用,gs 只含最小三件(seed/worldSurface/rockLevel),勿再接生产调用点——
+ *  旧「主线程补跑」曾因 gs 缺 dungeonX/jungleX 致 pass 拒绝采样 NaN 恒不命中=主线程冻结) */
 export function runModGenPasses(world: { store: unknown; groundLevel: number; rockLevel: number; seed: number }): void {
   const store = world.store as Record<string, unknown> & { setTile: (...a: unknown[]) => void; setTileSilent: (...a: unknown[]) => void };
   // ★622:主线程 setTile 有 Game listeners(→breakTile→spawnDrop→this.player 未就绪
