@@ -1837,7 +1837,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const overlay = document.createElement('div');
           overlay.style.cssText = 'position:fixed;inset:0;z-index:60;background:rgba(4,6,14,.82);'
             + 'display:flex;align-items:center;justify-content:center;';
-          const panel = buildResourcePackPage();
+          const panel = buildResourcePackPage({ onClose: () => overlay.remove() });
           panel.style.cssText = 'position:relative;background:#241a4e;border:2px solid #7d92d6;'
             + 'box-shadow:0 0 0 2px #0a0e1e;border-radius:6px;padding:20px 24px;'
             + 'width:min(680px,92vw);max-height:82vh;overflow-y:auto;';

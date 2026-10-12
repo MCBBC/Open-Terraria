@@ -23,6 +23,9 @@ import { ResourcePackError } from '../resources/ResourcePackZip';
 
 export const RESOURCE_PACK_PAGE_CSS = `
 .sw-rp-wrap { display: flex; flex-direction: column; gap: 10px; min-height: 240px; }
+/* ★提示文字用本页自有类(.sw-set-hint 的样式挂在 Settings 的 style 标签里,本入口
+   打开时未注入=继承暗色不可读,用户实报)——亮白常显 */
+.sw-rp-hint { color: #dfe4f8; font-size: 12px; line-height: 1.6; }
 .sw-rp-cols { display: flex; gap: 10px; flex: 1; min-height: 0; }
 .sw-rp-col { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0;
   background: #1a2140; border: 1px solid #3a4680; border-radius: 4px; padding: 6px; }
@@ -73,7 +76,7 @@ function amountTitle(key: string, n: number): string {
 /** 构建资源包页根节点（SettingsPanel 的 packs 分栏内容）
  *  ★2026-10-12 修复:RESOURCE_PACK_PAGE_CSS 的注入点随 Settings 资源包栏摘除一起
  *  消失——标题菜单新入口打开时整页裸奔无样式(用户实报)。此处自注入(幂等)。 */
-export function buildResourcePackPage(): HTMLElement {
+export function buildResourcePackPage(opts?: { onClose?: () => void }): HTMLElement {
   if (typeof document !== 'undefined' && !document.getElementById('sw-rp-style')) {
     const st = document.createElement('style');
     st.id = 'sw-rp-style';
@@ -89,7 +92,8 @@ export function buildResourcePackPage(): HTMLElement {
     root.innerHTML = '';
     root.append(view.kind === 'main'
       ? buildMain(mgr, (v) => { view = v; render(); })
-      : buildInfo(mgr, view.id, render));
+      // 信息页「取消」= 关闭整框(用户期望;独立嵌入无 onClose 时回落主列)
+      : buildInfo(mgr, view.id, opts?.onClose ?? (() => { view = { kind: 'main' }; render(); })));
   };
   render();
   // 首帧用当前行(启动已恢复),异步补拉后有行则重绘（面板先于 applyInstalled 的窗口）
@@ -208,7 +212,7 @@ function buildMain(mgr: ResourcePackManager, go: (v: View) => void): HTMLElement
   wrap.append(cols);
 
   const hint = document.createElement('div');
-  hint.className = 'sw-set-hint';
+  hint.className = 'sw-rp-hint';
   hint.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.Hint');
   wrap.append(hint);
   return wrap;

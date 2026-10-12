@@ -20,6 +20,7 @@ import { RemasterRuntime } from '../remaster/RemasterRuntime';
 import { buildManifest, zipStore, type ZipEntry } from '../remaster/PackFormat';
 import type { LoadedPack } from '../remaster/types';
 import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, sfxPackOverrideKeys } from '../core/Sfx';
+import { TOWN_NPC_PROFILE } from '../data/townNpcProfiles';
 import {
   readResourcePack, normalizePackFilePaths, parseFromEntries, ResourcePackError, formatPackVersion,
   type ParsedResourcePack,
@@ -234,6 +235,18 @@ export class ResourcePackManager {
     if (!this.runtime || images.size === 0) return;
     const sheets = new Map<string, Blob>();
     for (const [file, bytes] of images) sheets.set(file, new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+    // ★城镇NPC本体别名(2026-10-12 用户实报"只有住房旗帜换了"):城镇 NPC 本体贴图
+    //   走档案名 {Name}_Default.png(TownNPCProfiles.GetTextureNPCShouldUse),而包替换
+    //   的是原版名 NPC_<id>.png——按 TOWN_NPC_PROFILE 派生别名(包未显式带档案名才
+    //   派生;_Party/_Transformed/Shimmered 变体不派生=派对/微光期回原版,登记)。
+    for (const [file, bytes] of images) {
+      const m = /^vanilla\/NPC_(\d+)\.png$/.exec(file);
+      if (!m) continue;
+      const profile = TOWN_NPC_PROFILE[Number(m[1])];
+      if (!profile) continue;
+      const alias = `vanilla/${profile.name}_Default.png`;
+      if (!sheets.has(alias)) sheets.set(alias, new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+    }
     const synthetic: LoadedPack = {
       id: 'resourcepacks',
       manifest: buildManifest('resourcepacks', 'vanilla', {}),

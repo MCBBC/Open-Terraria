@@ -117,9 +117,11 @@ export class RemasterRuntime {
     for (const [file, blob] of pack.sheets) {
       try {
         const img = await this.decode(blob);
-        // ★坏包防线:全透明 sheet 拒绝注入(注入=该表全家贴图静默隐形)
+        // ★坏包防线:全透明 sheet 拒绝注入(注入=该表全家贴图静默隐形)。
+        //  ★降噪(2026-10-12):材质包对未覆盖内容【故意放空】是合法形态(空=回退
+        //  原版,Waifu 包实测 194 张全是),逐文件 console.error=194 条噪音刷屏;
+        //  收集进 rejectedBlank(汇总行由调用方打印),真坏包诊断走 DebugReport。
         if (!this.probeContent(img)) {
-          console.error(`[remaster] 拒绝注入全透明 sheet:${file}(空导出/坏包——注入后该表弹幕/图标将全部隐形)`);
           this.rejectedBlank.push(file);
           failed.push({ file, reason: '全透明 sheet(空导出/坏包),已拒绝注入' });
           continue;
