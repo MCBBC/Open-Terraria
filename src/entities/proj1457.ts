@@ -18,6 +18,7 @@ import { TILE } from '../core/constants';
 //   ArcSurge 折线与双音已由 emitBoltFx+声段原生承担——不重复接线,消费派发面在 Game）)
 import { blueLightningSmallLongFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★刀4-A:弹命中 NPC 修正链
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll } from './projTargets';
@@ -539,6 +540,10 @@ export function dealContacts(
     //  首位消费者 = 482 诅咒焰墙蠕形减半 :12983 `dmg /= 2`，序在 DamageVar(:12970)
     //  后、banner(:13388)/暴击翻倍前 = 原文序）。既有调用零传参零变化。
     if (damageAdj) dmg = damageAdj(e, dmg);
+    // ★刀4-A(2026-10-13):玩家弹幕命中 NPC 伤害修正链(ModifyHitNPCWithProj 形;倍率连乘;
+    //  位=damageAdj 后/banner 前=弹侧 ModifyHit 统一位;空 mod=size===0 恒等)
+    dmg = runModModifyHitNpcByProj(game.player, game, self.projId,
+      (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);
     dmg = applyBannerDamageDealt(game, e, dmg);
     dmg *= crit ? 2 : 1;
     // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——
@@ -2805,20 +2810,50 @@ export class ThunderBoltShot extends Entity {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(731);
+    // ★BJ668b 件1（2026-10-13,登记债①清偿）GetAlpha 承接（Projectile.cs:81133-81137,
+    //  435/732/731 同支）：绘制色 = Color.Lerp(格光,White,0.8) 且 A=25 硬编码——
+    //  :81133 不读 α,类内 alpha 渐显(:38471-38475)是绘制死面（DrawProj 标准路径
+    //  Main.cs:31532 `color48 = proj.GetAlpha(projectileColor)` 直绘无 731 特判/
+    //  Opacity :542 不消费/Update 体 16750-17400 零 α 读者=弹域审计,唯一读者是
+    //  AI 自递减）。旧 draw ga=(255−α)/255 全显=双偏离（过显 ~10.2×=1/0.098+
+    //  无白化,BJ667 ② 同病专类变体）。承接=BJ668 两遍制算子（Arrow.replayLerpLift
+    //  同式直绘闭包变体——本体单笔无流内交错,与录制式逐位等值）：基底=实体层
+    //  brightness(1−k)×ga（compositeLight 乘光同相）+ lift=projFullbrightQueue
+    //  'lighter' ×k 光照后复绘 → base×light+lift ≡ tex×ga×[(1−k)light+k]
+    //  （vanillaProjAlpha 头注 BJ668 恒等块）。无队列（mock/探针）=仅基底=暗场
+    //  失真上界,251/465 判例同守卫域（登记）。
+    const GA = 25 / 255;                                       // :81137 A=25 硬编码（mul≈0.098）
+    const K = 0.8;                                             // :81134 Lerp(White,0.8)
+    const drawBody = (c: CanvasRenderingContext2D): void => {
+      c.save();
+      c.translate(this.cx, this.cy);
+      c.rotate(Math.atan2(this.vy, this.vx) + 0 /*ai29 弹体竖直贴图→随速度向*/);
+      c.imageSmoothingEnabled = false;
+      if (img && img.width > 0) {
+        const fh = img.height / 4;
+        c.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+          -(img.width * 0.7) / 2, -fh / 2, img.width * 0.7, fh);
+      } else {
+        c.fillStyle = '#66CCFF';
+        c.fillRect(-3, -3, 6, 6);
+      }
+      c.restore();
+    };
     ctx.save();
-    ctx.globalAlpha = 1 - this.alpha / 255;                    // GetAlpha 白化淡入(:81134 灰阶近似)
-    ctx.translate(this.cx, this.cy);
-    ctx.rotate(Math.atan2(this.vy, this.vx) + 0 /*ai29 弹体竖直贴图→随速度向*/);
-    ctx.imageSmoothingEnabled = false;
-    if (img && img.width > 0) {
-      const fh = img.height / 4;
-      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
-        -(img.width * 0.7) / 2, -fh / 2, img.width * 0.7, fh);
-    } else {
-      ctx.fillStyle = '#66CCFF';
-      ctx.fillRect(-3, -3, 6, 6);
-    }
+    ctx.globalAlpha = GA;
+    ctx.filter = `brightness(${(1 - K).toFixed(3)})`;          // 基底 ×(1−k)（W3C 线性乘,乘光同相）
+    drawBody(ctx);
     ctx.restore();
+    (r as unknown as {
+      queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+    }).queueProjFullbright?.((c) => {                          // lift:光照后 'lighter' ×k 复绘
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.filter = 'none';
+      c.globalAlpha = GA * K;
+      drawBody(c);
+      c.restore();
+    });
   }
 }
 

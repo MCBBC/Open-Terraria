@@ -1349,39 +1349,74 @@ export class Dart extends Entity {
     //  仅登记不修——需 post-light 通道,与 whiteLerp 残差同账。
     const is596 = this.projId === 596;
     const effAlpha = is596 && this.life < 30 ? 255 - 255 * (this.life / 30) : this.alpha;
-    const whiteFilter = this.projId === 811 ? lerpWhiteFilter(whiteK811(this.age))
-      : st.whiteLerp != null ? lerpWhiteFilter(st.whiteLerp)
+    // ★BJ668b 件2（2026-10-13,BJ667 债④清偿）：811/814 白化改道 BJ668 两遍制算子
+    //  （Main.cs:30847/:30855 DrawProjDirect 本体预 Lerp(projectileColor,White,k)
+    //  ——非 GetAlpha 表族=别通道;811 k=whiteK811(age) 动态 Remap(ai0,0,15,1,0.3)、
+    //  814 k=0.35 静态;A 面=缺省 GetAlpha 路径 num14=(255−α)/255 :81511-81527
+    //  （811/814 无 GetAlpha 分支）不变）。旧 lerpWhiteFilter 静态滤镜=白抬升被
+    //  compositeLight 乘光（BJ529 病根同族:暗场抬升归零+亮场中灰归一过亮
+    //  f=1+0.992k）。两遍制：基底 brightness(1−k)×ga（乘光同相）+
+    //  projFullbrightQueue 'lighter' ×k 光照后复绘 → base×light+lift ≡
+    //  tex×ga×[(1−k)light+k]（vanillaProjAlpha 头注 BJ668 恒等块）。596 通道保持
+    //  旧滤镜（M3-d 光照豁免/自发光=GetAlpha :80903-80910 不读格光,另账登记不动）。
+    //  无队列（mock/探针）=仅基底=暗场失真上界,251/465 判例同守卫域（登记）。
+    const lerpK811 = this.projId === 811 ? whiteK811(this.age)
+      : (!is596 && st.whiteLerp != null) ? st.whiteLerp : null;
+    const whiteFilter = lerpK811 != null ? null
       : is596 ? lerpWhiteFilter((255 - effAlpha) / 255) : null;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    ctx.globalAlpha = this.netPuppet ? 1
+    const gaDart = this.netPuppet ? 1
       : is596 ? Math.max(0, (128 - effAlpha / 2) / 255)                      // A=128−α/2
       : Math.max(0, 1 - this.alpha / 255); // 傀儡不跑 dartStep,alpha 恒初始 → 恒可见
+    ctx.globalAlpha = gaDart;
     if (whiteFilter) ctx.filter = whiteFilter;
+    else if (lerpK811 != null) ctx.filter = `brightness(${Math.max(0, 1 - lerpK811).toFixed(3)})`;
     let drawn = false;
-    if (st.hFrames) {
-      // 836 蒲公英籽:横向 4 列胶片(Frame(4,1,frame),Main.cs:33247)——projFrameImg 竖切不适用
-      const full = projSprite(this.projId);
-      if (full && (full.width > 0) && full.width > 0) {
-        const fw = full.width / st.hFrames;
-        const idx = Math.min(st.hFrames - 1, this.frame);
-        ctx.drawImage(full, Math.round(idx * fw), 0, Math.round(fw), full.height,
-          -fw * this.scale / 2, -full.height * this.scale / 2, fw * this.scale, full.height * this.scale);
-        drawn = true;
+    const drawBody = (c: CanvasRenderingContext2D): void => {
+      if (st.hFrames) {
+        // 836 蒲公英籽:横向 4 列胶片(Frame(4,1,frame),Main.cs:33247)——projFrameImg 竖切不适用
+        const full = projSprite(this.projId);
+        if (full && (full.width > 0) && full.width > 0) {
+          const fw = full.width / st.hFrames;
+          const idx = Math.min(st.hFrames - 1, this.frame);
+          c.drawImage(full, Math.round(idx * fw), 0, Math.round(fw), full.height,
+            -fw * this.scale / 2, -full.height * this.scale / 2, fw * this.scale, full.height * this.scale);
+          drawn = true;
+        }
+      } else {
+        const img = projFrameImg(this.projId, this.frame);
+        if (img) {
+          const dw = img.width * this.scale, dh = img.height * this.scale;
+          c.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          drawn = true;
+        }
       }
-    } else {
-      const img = projFrameImg(this.projId, this.frame);
-      if (img) {
-        const dw = img.width * this.scale, dh = img.height * this.scale;
-        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-        drawn = true;
-      }
-    }
+    };
+    drawBody(ctx);
     ctx.restore();
     ctx.globalAlpha = 1;
-    if (whiteFilter) ctx.filter = 'none';   // 出界显式复位（save/restore 本身已还原,双保险）
+    if (whiteFilter || lerpK811 != null) ctx.filter = 'none';   // 出界显式复位（save/restore 本身已还原,双保险）
+    // ★BJ668b 件2：lift 闭包（811/814 白抬升 ×k,几何当帧冻结;光照后 'lighter' 复绘
+    //  =两遍制右半边——本体单笔,直绘闭包与录制式逐位等值）
+    if (drawn && lerpK811 != null) {
+      const cxL = this.cx, cyL = this.cy, rotL = this.rot, gaL = gaDart, kL = lerpK811;
+      (r as unknown as {
+        queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+      }).queueProjFullbright?.((c) => {
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        c.filter = 'none';
+        c.imageSmoothingEnabled = false;
+        c.translate(cxL, cyL);
+        c.rotate(rotL);
+        c.globalAlpha = Math.max(0, Math.min(1, gaL * kL));
+        drawBody(c);
+        c.restore();
+      });
+    }
     if (drawn) return;
     // ★P0-B（2026-09-27）贴图未就绪帧不画（旧「短线兜底(方向与弹速一致)」已摘）:
     //  路径 op 在 acc 态=每弹每帧 rasterizePathOp 隔离栅格化+整幅上传（Arrow.draw

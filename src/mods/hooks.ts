@@ -588,7 +588,9 @@ export function getModWavData(): ReadonlyMap<string, ArrayBuffer> { return modWa
 /** B6:NPC 死亡钩注册表(Hive Tumor→Boss 遭遇链面) */
 const onNpcDeath = new Map<number, (e: Enemy, game: Game) => void>();
 
-/** CalPlayer 基建(六十三刀):玩家承伤修正链(仅 mod NPC 进攻面;ModifyHitByNPC 形)。
+/** CalPlayer 基建(六十三刀):玩家承伤修正链(ModifyHitByNPC 形)。
+ *  ★刀4-A(2026-10-13)扩域:原版攻端亦进链(工坊普查五刀战役;灾厄 CalPlayer.ModifyHitByNPC
+ *  语义=全部 NPC 来源受击,ctx.attackerVid ≥800=mod 攻端供分支)。零注册恒等。
  *  fn(ctx) → number=修正后伤(可 0=吞)/undefined=不改。空表零成本。 */
 const modifyHurtByNpc = new Map<string, (ctx: {
   player: unknown; game: Game; attackerVid: number; dmg: number;
@@ -605,7 +607,9 @@ export function registerModModifyHurtByNpc(modId: string, fn: (ctx: {
 export function runModModifyHurtByNpc(
   player: unknown, game: Game, attackerVid: number, dmg: number, contact: boolean,
 ): number {
-  if (attackerVid < MOD_NPC_ID_BASE || modifyHurtByNpc.size === 0) return dmg;
+  // ★刀4-A:域门撤除(原版攻端亦进链;attackerVid 判域移交 mod 侧 ctx 分支)——
+  //  空表短路保持首行,零 mod 逐字节恒等不变
+  if (modifyHurtByNpc.size === 0) return dmg;
   let cur = dmg;
   for (const fn of modifyHurtByNpc.values()) {
     const r = fn({ player, game, attackerVid, dmg: cur, contact });
@@ -654,20 +658,84 @@ export function runModOnHitPlayerBuff(
  *  fn(ctx) → number=倍率(1=不变);多钩连乘。空表=1。 */
 const modifyHitNpc = new Map<string, (ctx: {
   player: unknown; game: Game; vid: number; dmg: number;
+  /** ★刀4-A ctx 加宽(近战掷后装配;旧消费者零感知): */
+  crit?: boolean; kb?: number; armorPen?: number;
 }) => number | void>();
 
 export function registerModModifyHitNpc(modId: string, fn: (ctx: {
   player: unknown; game: Game; vid: number; dmg: number;
+  crit?: boolean; kb?: number; armorPen?: number;
 }) => number | void): void {
   if (modifyHitNpc.has(modId)) throw new Error(`[mod-hooks] modifyHitNpc 重复注册: ${modId}`);
   modifyHitNpc.set(modId, fn);
 }
 
-export function runModModifyHitNpc(player: unknown, game: Game, vid: number, dmg: number): number {
+export function runModModifyHitNpc(player: unknown, game: Game, vid: number, dmg: number,
+  extra?: { crit?: boolean; kb?: number; armorPen?: number }): number {
   if (modifyHitNpc.size === 0) return dmg;
   let mult = 1;
   for (const fn of modifyHitNpc.values()) {
-    const r = fn({ player, game, vid, dmg });
+    const r = fn({ player, game, vid, dmg, ...extra });
+    if (typeof r === 'number' && Number.isFinite(r)) mult *= r;
+  }
+  return dmg * mult;
+}
+
+// ---- ★刀4-A 批(2026-10-13):命中链弹侧两钩(工坊普查五刀战役;锚点详见
+//      docs/mod-five-knives-recon-2026-10-13.md 刀4 节) ----
+
+/** 玩家弹幕命中 NPC 伤害修正链(tML ModifyHitNPCWithProj 形;P1457 dealContacts/
+ *  WeaponProj hitEnemies(!vanillaGated 受理位)/hitTownNpcs 城镇支(免疫窗外)三受理
+ *  位派发;倍率连乘;空表=1)。game=GameHooks 宽接口(弹侧调用域同款,mod 侧按
+ *  unknown 消费,onHitAny 判例)。
+ *  ★红队 R1-F3 ctx.dmg 域声明(逐站):P1457=DamageVar+damageAdj 后【pre-crit】基伤;
+ *  WPROJ=DamageVar/dmgScale/parry/nano 后【post-crit×2】;城镇=settle 后【pre-crit】
+ *  (TownNPC.hurt 防后×2)。纯倍率三站终值可交换;mod 按 crit 分支/加法时须知此差。
+ *  ★红队 R1-F4 覆盖边界:独立结算面(StormLightning/Prism/Rainbow/MagnetSphere/
+ *  SpectreSoul/TideSlash/Volcano/scarab 等)本批未接=B 批账,见 recon doc。 */
+type ModModifyHitNpcByProjFn = (ctx: {
+  player: unknown; game: unknown; projVid: number; targetVid: number; dmg: number; crit: boolean;
+}) => number | void;
+const modifyHitNpcByProj = new Map<string, ModModifyHitNpcByProjFn>();
+
+export function registerModModifyHitNpcByProj(modId: string, fn: ModModifyHitNpcByProjFn): void {
+  if (modifyHitNpcByProj.has(modId)) throw new Error(`[mod-hooks] modifyHitNpcByProj 重复注册: ${modId}`);
+  modifyHitNpcByProj.set(modId, fn);
+}
+
+export function runModModifyHitNpcByProj(
+  player: unknown, game: unknown, projVid: number, targetVid: number, dmg: number, crit: boolean,
+): number {
+  if (modifyHitNpcByProj.size === 0) return dmg;
+  let mult = 1;
+  for (const fn of modifyHitNpcByProj.values()) {
+    const r = fn({ player, game, projVid, targetVid, dmg, crit });
+    if (typeof r === 'number' && Number.isFinite(r)) mult *= r;
+  }
+  return dmg * mult;
+}
+
+/** 敌方弹幕命中玩家伤害修正链(tML ModifyHitByProjectile 形;PTGT hitPlayer resistCold
+ *  后、hostileDifficulty 缩放前派发——纯倍率与缩放可交换;pvp/trap 透传供分支;
+ *  倍率连乘;空表=1。★红队 R1-F6 边界:仅敌弹面;直调 damagePlayer 的弹幕语义伤
+ *  (duke 龙卷等)经 opts.projDomain 排除接触链=两链皆不进,直调面覆盖=B 批账)。 */
+type ModModifyHitPlayerByProjFn = (ctx: {
+  player: unknown; game: unknown; projVid: number; dmg: number; trap: boolean; pvp: boolean;
+}) => number | void;
+const modifyHitPlayerByProj = new Map<string, ModModifyHitPlayerByProjFn>();
+
+export function registerModModifyHitPlayerByProj(modId: string, fn: ModModifyHitPlayerByProjFn): void {
+  if (modifyHitPlayerByProj.has(modId)) throw new Error(`[mod-hooks] modifyHitPlayerByProj 重复注册: ${modId}`);
+  modifyHitPlayerByProj.set(modId, fn);
+}
+
+export function runModModifyHitPlayerByProj(
+  player: unknown, game: unknown, projVid: number, dmg: number, trap: boolean, pvp: boolean,
+): number {
+  if (modifyHitPlayerByProj.size === 0) return dmg;
+  let mult = 1;
+  for (const fn of modifyHitPlayerByProj.values()) {
+    const r = fn({ player, game, projVid, dmg, trap, pvp });
     if (typeof r === 'number' && Number.isFinite(r)) mult *= r;
   }
   return dmg * mult;
@@ -1011,6 +1079,8 @@ export function _resetModHooksForTests(): void {
   modifyHurtByNpc.clear();
   npcOnHitPlayerBuff.clear();
   modifyHitNpc.clear();
+  modifyHitNpcByProj.clear();
+  modifyHitPlayerByProj.clear();
   modGenPasses.length = 0;
   modChestUnlock.clear();
   modConversions.length = 0;

@@ -131,6 +131,7 @@ import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
 import { Clock, type World } from '../world/World';
 import { collectModScreenFx, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
+import { modRarityRgb255 } from '../mods/rarity';   // ★刀3-1:mod 稀有度档色(MouseText 主链消费)
 import { TileStore } from '../world/TileStore';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -1838,6 +1839,17 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     }
     return 0;
   }
+  // ★BJ668b 件3（2026-10-13,R11-F1 边界清偿——ffSdir/rotation 双档已落 :11683,
+  //  帧机末面）：埃特尼亚飞龙 558-560（FindFrame case 558-560,NPC.cs:68627-68643）：
+  //  ai[0]==2（俯冲态,AI_108 :66371 写入,divingFlyerAI bossAI_dd2 同步）→ 帧 4
+  //  定格（frame.Y=num*4）;余态 6t×4 帧循环（frameCounter++ ≥6 推进,≥num*4 回卷
+  //  0——定格帧 4 不参与循环）。曾落末尾通用 6t 全帧档：frames=5 循 0..4=飞行期
+  //  把攻击定格帧当循环帧播+俯冲期不定格。解冻瞬态：原版解冻后定格帧 4 仍显至
+  //  下个 6t 界（≤6t）才回 0——本档 t 相位制立即回循环（差 <6t,登记）。
+  if (id === 558 || id === 559 || id === 560) {
+    if (e.ai0 === 2) return Math.min(4, frames - 1);
+    return Math.floor(t / 6) % 4;
+  }
   // 圣骑士 290（FindFrame case 290，NPC.cs:76763-76786，IIIII235 2026-09-10 补）：
   // 瞄准/掷锤相（ai[2]>0）帧行按 ai[1] 倒数窗切换——[20..30]→9（起手）、[10..19]→10
   // （瞄准,掷锤恰在 ai1==15 此行）、[0..9]→11（随掷）；随后才是行走带：腾空=1、
@@ -2906,6 +2918,13 @@ export function mouseTextInnerColor(
   if (rare === 9) out = c(5, 200, 255);          // :20469-20471
   if (rare === 10) out = c(255, 40, 100);        // :20472-20474
   if (rare >= 11) out = c(180, 40, 255);         // :20475-20477
+  // ★刀3-1(2026-10-13):mod 稀有度档色(12+ 段查表;miss=null 走原链 ≥11 紫档;
+  //  亮度乘区 num3 与原档同式)。★红队 R3-M1 修正:本块原插在 ≥11 行【前】=顺序
+  //  if 链被紫档无条件覆写=死码;移至其后(mod 档覆写紫档),diff 档仍居末位
+  {
+    const modRgb = modRarityRgb255(rare);
+    if (modRgb) out = c(modRgb[0], modRgb[1], modRgb[2]);
+  }
   if (diff === 1) out = c(255, 153, 0);          // :20478-20480 mcColor (1f,0.6f,0f) Main.cs:978
   // ★SW-F3 2026-09-16：蓝通道 26→25——FNA Color(float,float,float) 构造器逐通道
   //  (byte)Clamp(v*255f) 截断（FNA src Color.cs Color(float r,float g,float b,float a):

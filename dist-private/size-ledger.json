@@ -1,51 +1,51 @@
 {
- "at": "2026-10-12T16:34:29.778Z",
+ "at": "2026-10-13T03:02:54.431Z",
  "release": true,
  "totalJsMb": 31.72,
  "chunks": [
   {
-   "file": "assets/index-CJ0EoCD8.js",
-   "kb": 13145
+   "file": "assets/index-H51GIiYI.js",
+   "kb": 13153
   },
   {
-   "file": "assets/worldGen.worker-CNvB5wt1.js",
-   "kb": 7038
+   "file": "assets/worldGen.worker-DDs_sL92.js",
+   "kb": 7037.7
   },
   {
-   "file": "assets/BakeWorker-Q4cnrjZw.js",
-   "kb": 4721.1
+   "file": "assets/BakeWorker-_bw2Bv4W.js",
+   "kb": 4717.9
   },
   {
-   "file": "assets/LightWorker-u5L0r7Vm.js",
-   "kb": 4439.7
+   "file": "assets/LightWorker-DDGnmwm4.js",
+   "kb": 4437.1
   },
   {
    "file": "assets/save.worker-CDN8cluA.js",
-   "kb": 3033
+   "kb": 3030.9
   },
   {
    "file": "assets/WaveWorker-9Kry1UwV.js",
-   "kb": 37.4
+   "kb": 37.2
   },
   {
    "file": "sw.js",
    "kb": 30.5
   },
   {
-   "file": "assets/ResourcePackPage-DVHk7fJz.js",
-   "kb": 13.6
+   "file": "assets/ResourcePackPage-rFEXgLVh.js",
+   "kb": 13.7
   },
   {
-   "file": "assets/asset-warm.worker-CGW84J-A.js",
-   "kb": 11.2
+   "file": "assets/asset-warm.worker-C-6t2K5-.js",
+   "kb": 11.7
   },
   {
-   "file": "assets/assets-BwP1k4qe.js",
-   "kb": 10.1
+   "file": "assets/assets-C54CiNV3.js",
+   "kb": 10.4
   },
   {
    "file": "assets/BackgroundPump-DxIK3vAo.js",
-   "kb": 0.7
+   "kb": 0.8
   }
  ]
 }

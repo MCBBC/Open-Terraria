@@ -11,6 +11,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
   takeModNpcAi, runModItemUse, runModPreUpdate, runModPostEntities, runModPostUpdate,
   registerNpcAi, registerItemUse, registerSystem, _resetModHooksForTests,
+  runModModifyHitNpcByProj, runModModifyHitPlayerByProj, runModModifyHurtByNpc, runModModifyHitNpc,
+  registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj,
 } from '../src/data/../mods/hooks';
 import { applyModItemIds } from '../src/data/items';
 import { ITEM_STABLE_OF_INTERNAL, ITEM_INTERNAL_OF_STABLE } from '../src/data/items';
@@ -87,5 +89,50 @@ describe('mod 钩子性能守卫(满载=mod 挂满后的框架开销上限)', ()
     expect(ms).toBeLessThan(10);
     expect(ITEM_INTERNAL_OF_STABLE.get(65535)).toBe(65535);
     // 回滚本次接长对本文件后续测试无影响(fresh registry per file)
+  });
+});
+
+// ★刀4-A(2026-10-13):命中链扩容四钩空载守卫——按「每次命中」计频(非每 tick),
+//   阈值沿用 size===0 短路族 50ns 档;modifyHurtByNpc 域门撤除后仍须恒等短路。
+describe('刀4-A 命中链钩空载守卫(按每次命中计频)', () => {
+  beforeAll(() => {
+    _resetModHooksForTests();
+  });
+
+  it('runModModifyHitNpcByProj 空载 ≤ 50ns(每次弹命中)', () => {
+    const ns = bench(() => runModModifyHitNpcByProj({}, {}, 5, 42, 100, false), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModModifyHitPlayerByProj 空载 ≤ 50ns(每次敌弹命中)', () => {
+    const ns = bench(() => runModModifyHitPlayerByProj({}, {}, 919, 50, false, false), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModModifyHurtByNpc 域门撤除后空载仍 ≤ 50ns(每次受击;原版攻端亦短路)', () => {
+    const ns = bench(() => runModModifyHurtByNpc({}, {} as never, 50, 30, true), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModModifyHitNpc ctx 加宽后空载仍 ≤ 50ns(每次近战命中)', () => {
+    const ns = bench(() => runModModifyHitNpc({}, {} as never, 30000, 50, { crit: false, kb: 3, armorPen: 0 }), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  // ★红蓝复查补账(D9 验收面):满载 8 钩连乘链——每次命中 8 次 fn 调用+ctx 对象
+  it('刀4-A 满载:modifyHitNpcByProj 8 钩连乘 ≤ 400ns(每次命中)', () => {
+    _resetModHooksForTests();
+    for (let i = 0; i < 8; i++) registerModModifyHitNpcByProj(`m${i}`, () => 1.01);
+    const ns = bench(() => runModModifyHitNpcByProj({}, {}, 5, 42, 100, false), 1_000_000);
+    expect(ns).toBeLessThan(400);
+    _resetModHooksForTests();
+  });
+
+  it('刀4-A 满载:modifyHitPlayerByProj 8 钩连乘 ≤ 400ns(每次敌弹命中)', () => {
+    _resetModHooksForTests();
+    for (let i = 0; i < 8; i++) registerModModifyHitPlayerByProj(`m${i}`, () => 0.99);
+    const ns = bench(() => runModModifyHitPlayerByProj({}, {}, 919, 50, false, false), 1_000_000);
+    expect(ns).toBeLessThan(400);
+    _resetModHooksForTests();
   });
 });

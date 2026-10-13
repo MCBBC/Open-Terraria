@@ -80,6 +80,43 @@ export function composeVersion(base: string, contentHash: string): string {
   return fnv1a32(base + '|' + contentHash).toString(36);
 }
 
+// ---- 分片 CDN 多源(2026-10-13,preview 切源;生产无 cdn.json=纯同源零改动) ----
+// cdn.json 由 scripts/publish-assets-cdn.mjs 发布分片到 npm(@sandboxworld/assets-p<i>,
+// 版本=内容哈希 0.0.0-<hash8>)后产出并验活,只写进 dist-release 部署工件:
+//   { v:1, generatedAt, parts: { 'p1-d3b56b63.zip': { urls: [npmmirror, jsDelivr] } } }
+// ★客户端只认 urls;末位恒同源('/assets-zip/<file>')兜底——CDN 全灭时行为=旧版。
+// ★缓存键全是 zip 内相对路径,与分片来源无关:换源不换版本,存量缓存零重拉。
+
+export interface ZipCdnMap {
+  v: number;
+  parts: Record<string, { urls: string[] }>;
+}
+
+/** cdn.json 受理门(纯函数):v=1 + parts 对象;单条 urls 在 buildPartCandidates
+ *  处再消毒(https-only/上限 4),此处只拦结构性垃圾 */
+export function acceptsCdnMap(m: unknown): m is ZipCdnMap {
+  if (!m || typeof m !== 'object') return false;
+  const o = m as { v?: unknown; parts?: unknown };
+  if (o.v !== 1 || !o.parts || typeof o.parts !== 'object' || Array.isArray(o.parts)) return false;
+  const entries = Object.values(o.parts as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > 256) return false;
+  return entries.every((e) => !!e && typeof e === 'object' && Array.isArray((e as { urls?: unknown }).urls));
+}
+
+/** 分片下载候选序(纯函数):cdn URLs(http(s)-only,≤4)→ 末位恒同源。
+ *  ★根相对:worker 自身 URL 在 /assets/ 下,裸相对会解析成 /assets/assets-zip/ */
+export function buildPartCandidates(file: string, cdn: ZipCdnMap | null | undefined): string[] {
+  const out: string[] = [];
+  const urls = cdn?.parts?.[file]?.urls;
+  if (Array.isArray(urls)) {
+    for (const u of urls) {
+      if (typeof u === 'string' && /^https:\/\//.test(u) && out.length < 4) out.push(u);
+    }
+  }
+  out.push('/assets-zip/' + file);
+  return out;
+}
+
 // ---- 诊断 trace(2026-08-27 手机无 Console 方案)----
 // 环形日志:内存(本轮)+ 持久份(★BJ627 迁 IDB 经 PrefsStore,pagehide 节流刷盘)。
 // 手机端经主菜单 logo 连点 5 次弹出 textarea 复制(readSwTrace)。
@@ -253,6 +290,8 @@ let plan = priorityPlan();
 state.total = plan.urls.length;
 /** zip 分片计划(InitAssetCache 拉到 manifest 才置;null=legacy 逐文件模式) */
 let zipPlan: ZipManifest | null = null;
+/** 分片 CDN 候选(拉到 cdn.json 才置;null=纯同源。?cdn=0 显式关闭) */
+let zipCdn: ZipCdnMap | null = null;
 let zipRun = 0;                 // 直给循环代次号(force 重启 → 旧循环在下个检查点自行退出)
 let dlCommitted = 0;            // 已完成片累计字节(页面侧 MB 账)
 let dlPartGot = 0;              // 当前片最近上报的片内累计
@@ -473,6 +512,32 @@ function scheduleManifestRetry(): void {
   }, 20_000);
 }
 
+/** cdn.json 拉取(可选加速器,失败/缺失一律静默回同源;单次尝试不重试):
+ *  与 manifest 并行发起,5s 超时;404=未发布 CDN(生产常态)→ trace 一笔即止。
+ *  ?cdn=0 显式关闭(A/B 与诊断用);cache:'reload' 与 manifest 同款防旧。 */
+async function fetchCdnMapInto(): Promise<void> {
+  const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  if (q.get('cdn') === '0') { swTrace('cdn.json ?cdn=0 显式关闭'); return; }
+  const t0 = Date.now();
+  try {
+    const ctrl: RequestInit = { cache: 'reload' };
+    if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+      ctrl.signal = AbortSignal.timeout(5000);
+    }
+    const res = await fetch('assets-zip/cdn.json', ctrl);
+    if (!res.ok) { swTrace(`cdn.json http ${res.status}(未发布=同源直连,常态)`); return; }
+    const m = (await res.json()) as unknown;
+    if (acceptsCdnMap(m)) {
+      zipCdn = m;
+      swTrace(`cdn.json ok ${Object.keys(m.parts).length}片(${Date.now() - t0}ms)`);
+    } else {
+      swTrace(`cdn.json 形状不符 → 忽略(${Date.now() - t0}ms)`);
+    }
+  } catch (e) {
+    swTrace(`cdn.json 拉取异常(忽略,同源直连) ${String(e).slice(0, 60)}`);
+  }
+}
+
 let initInFlight: Promise<void> | null = null;
 /** 管线未启用原因(2026-09-03 用户要求"SW 没起来弹窗警告而非静默失败"):
  *  doInitAssetCache 每个 early-return 出口落一笔;''=无失败(enabled/预期关闭)。
@@ -540,6 +605,9 @@ async function doInitAssetCache(): Promise<void> {
   }
   try {
     state.version = assetVersion();
+    // ★cdn.json 与 manifest 并行拉(同为同源小文件;只在 zipPlan 到手后才有意义,
+    //  warm 前 await 定案,避免 jobs 构造读到 null 的竞态)
+    const cdnP = fetchCdnMapInto();
     // zip manifest 拉取(3s 超时;路径不匹配 ASSET_RE → SW 天然放行不缓存;
     // cache:'reload' 防部署后读到旧 manifest)。失败=legacy 逐文件(dev/旧部署)
     // ★manifest 拉取(2026-08-26 引入重试;2026-08-27 抽 fetchManifestInto):
@@ -686,7 +754,10 @@ async function doInitAssetCache(): Promise<void> {
     //   have-set×manifest 差集下载,无缺失秒退,代价 ≈ 一次 keys() 扫描。
     // ★manifest 失败会话不 warm(2026-08-27):zipPlan=null 时 legacy 逐文件在
     //   prune 形态下注定全 404(熔断兜底前也白烧请求),且本会话缓存只读保命。
-    if (zipPlan) warmAllAssets(true);
+    if (zipPlan) {
+      await cdnP;   // 定案 CDN 候选(失败/缺失已在 fetchCdnMapInto 内落 trace,静默回同源)
+      warmAllAssets(true);
+    }
   } catch (e) {
     // 注册失败(老浏览器/隐私模式)→ 降级现状;原因落账供弹窗/诊断(行为不变)
     notePipelineDown(`初始化异常: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`, true);
@@ -907,7 +978,7 @@ async function startZipWarm(): Promise<void> {
     const jobs = zipPlan.parts.map((p) => {
       const missing = p.entries.filter((n) => !have.has(n));
       base += p.entries.length - missing.length;
-      return { file: p.file, zipBytes: p.zipBytes, missing };
+      return { file: p.file, zipBytes: p.zipBytes, missing, urls: buildPartCandidates(p.file, zipCdn) };
     });
     state.done = Math.min(base, state.total);
     {
@@ -936,9 +1007,20 @@ async function startZipWarm(): Promise<void> {
     //  可与末批 'files' 的 cache.put 并发——终验快照把在途条目误判缺失。链式排队
     //  保序,'done' 必然看到全部批次落库后的真实缓存态。
     let msgTail: Promise<void> = Promise.resolve();
+    // 命中源标签(遥测):候选下标 → 'origin' | CDN hostname(自证式 trace)
+    const jobUrls = new Map<string, string[]>();
+    for (const j of jobs) jobUrls.set(j.file, j.urls);
+    const viaLabel = (file: string, via: number): string => {
+      const urls = jobUrls.get(file);
+      if (!urls || via < 0 || via >= urls.length) return 'none';
+      if (via === urls.length - 1) return 'origin';
+      try { return new URL(urls[via]!).hostname; } catch { return `cdn${via}`; }
+    };
+    const viaCount = new Map<string, number>();
+    let viaFirstLogged = false;
     const handleZipMsg = async (d: {
       type: string; names?: string[]; bufs?: ArrayBuffer[];
-      mime?: string[]; failed?: number; done?: number; got?: number;
+      mime?: string[]; failed?: number; done?: number; got?: number; via?: number; file?: string;
     }): Promise<void> => {
       if (myRun !== zipRun) return;   // 已被 force 重启取代,丢弃旧 worker 消息
       if (d.type === 'dl' && d.got) {
@@ -967,6 +1049,14 @@ async function startZipWarm(): Promise<void> {
         zipFailedAcc += d.failed ?? 0;   // 字节账已由 'dl' 全局直通,无需分片入账
         state.failed = zipFailedAcc;
         lastProgressAt = Date.now();
+        if (typeof d.via === 'number' && d.file) {
+          const tag = viaLabel(d.file, d.via);
+          viaCount.set(tag, (viaCount.get(tag) ?? 0) + 1);
+          if (!viaFirstLogged) {
+            viaFirstLogged = true;
+            swTrace(`首片源=${tag}(via=${d.via})${d.failed ? ` 失败${d.failed}条` : ' ok'}`);
+          }
+        }
         emit();
       } else if (d.type === 'done') {
         zipFailedAcc += 0;   // 条目级已实时累计
@@ -991,7 +1081,10 @@ async function startZipWarm(): Promise<void> {
           for (const n of p.entries) if (!have.has(n)) missing.push(n);
         }
         const verified = missing.length === 0;
-        swTrace(`warm终态 keys=${keys.length} 缺${missing.length}条${missing.length ? ` 样本:${missing.slice(0, 12).join(', ')}` : ''} failed=${zipFailedAcc} bytes=${Math.round(state.bytesDone / 1048576)}MB`);
+        const viaLine = viaCount.size
+          ? ` 源分布:${[...viaCount.entries()].map(([k, n]) => `${k}×${n}`).join(' ')}`
+          : '';
+        swTrace(`warm终态 keys=${keys.length} 缺${missing.length}条${missing.length ? ` 样本:${missing.slice(0, 12).join(', ')}` : ''} failed=${zipFailedAcc} bytes=${Math.round(state.bytesDone / 1048576)}MB${viaLine}`);
         if (verified) {
           state.warming = false;
           state.done = state.total;

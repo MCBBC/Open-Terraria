@@ -340,7 +340,9 @@ describe('三批结构锚', () => {
 
   it('γ 移交：挖地龟出生中心锚（minionTrueBox 半盒回撤）', () => {
     const g = srcGame();
-    expect(g.includes("import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';")).toBe(true);
+    // ★2026-10-13 刀4-A 批前先在债勘正:HEAD import 已扩 sentrySpawnBox/auraLightBandCast
+    //  (sentry 工作面),本锚锁「三件核心名同源导入」不锁全名清单(全名锁=过脆,扩名即伪红)
+    expect(g.includes("import { MinionProj, pickSentryLandingSpot, minionTrueBox, sentrySpawnBox, auraLightBandCast } from '../entities/MinionProj';")).toBe(true);
     expect(g.includes('new MinionProj(x * TILE + 8 - bwT.w / 2, y * TILE - 32 - bwT.h / 2, projId')).toBe(true);
   });
 

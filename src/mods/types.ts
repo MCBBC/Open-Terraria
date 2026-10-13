@@ -2,6 +2,11 @@
 // 设计锚:game/docs/mod-loader-design.md;基线=session-13 规划(2026-08-11)。
 // 能力分层:L1 纯数据(本文件全部类型)/L2 脚本(P1)/L3 白名单补丁(P2+)。
 import type { ModTownArrivalSpec } from '../data/vanillaNpcs';
+import type { ModRarityContent } from './rarity';   // ★刀3-1:稀有度档色 schema(类型单向)
+import type { ModPetContent } from './pets';        // ★刀3-2:宠物声明 schema(类型单向)
+import type { ModGoreContent } from './gore';       // ★刀3-3:gore 声明 schema(类型单向)
+export type { ModRarityContent };
+export type { ModGoreContent };
 
 /** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
 export interface ModManifest {
@@ -38,7 +43,12 @@ export interface ModItemContent {
   /** mod 内唯一键;运行时全键 = `mod_<modid>_<key>` */
   key: string;
   name: string;
-  rare?: number;
+  /** 稀有度:数字直填;或 `{$rarity: key}` 引用本 mod content/rarities 档(注册期解析,
+   *  ★刀3-1)。原版值域 -13..10;mod 档=12+ 段(mods/rarity.ts;11=原版词缀位移可达域) */
+  rare?: number | { $rarity: string };
+  /** ★刀3-2:宠物声明(tML 同构 buff+proj 组合;buff=本 mod content/buffs 键,
+   *  proj=`proj:<key>`/裸键/原版 proj vid;light=true=光宠槽 1) */
+  pet?: ModPetContent;
   value?: number;
   maxStack?: number;
   /** 战斗面(vanilla-itemcombat 语义)。shoot:数字=原版弹 vid;字符串 `proj:<key>`=
@@ -144,6 +154,10 @@ export interface ModNpcContent {
   friendly?: boolean; townNPC?: boolean;
   noGravity?: boolean; noTileCollide?: boolean;
   critter?: boolean;
+  /** ★刀3-3:死亡碎块声明(HitEffect NewGore 形;gore=本 mod content/gores 键或
+   *  原版 gore id 数字;n=片数(loop);scale 缺省=1(spawnDeathGore 缺省档,
+   *  ★红队 R3-m3 勘正:vanillaScale 支仅在原版表 scaleExpr 条目,声明形不暴露) */
+  deathGore?: Array<{ gore: string | number; n?: number; scale?: number }>;
   HitSound?: string;
   DeathSound?: string | null;
   /** 价值(金币掷,原版 npcvalue 语义) */
@@ -254,6 +268,15 @@ export const MOD_PROJ_ID_BASE = 2000;
 /** mod buff 伪 vanillaBuff 段基址(BuffType 运行时另配;图标键 Buff_<伪id> 走
  *  mods/buffs.ts 的 objectURL 覆盖,不落 /sprites/vanilla) */
 export const MOD_BUFF_VANILLA_BASE = 9000;
+/** mod 稀有度档 id 段基址(★刀3-1:原版 rare 值域 -13..10,词缀档位移可达 11
+ *  (Item.Prefix clamp 上限=原版紫档域)——12 起为 mod 档(对齐 tML 灾厄 12/13 惯例);
+ *  硬顶 254) */
+export const MOD_RARITY_ID_BASE = 12;
+/** mod gore id 段基址(★刀3-3。★红队 R3-C1 段位修正:伪锚「原版 max=696」实为
+ *  NPC Count=697 误搬——原版 gore id 空间实到 1406(vanilla-gore.json _meta.tex
+ *  键域 1..1406,1404 张 Gore_*.png,死亡表项直引 697-1406),697 起段会劫持
+ *  原版 Gore_697+ 贴图/碰撞盒/物理家族。基址 1500=1406+缓冲) */
+export const MOD_GORE_ID_BASE = 1500;
 
 /** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
 export interface ModIdAllocation {
@@ -267,6 +290,10 @@ export interface ModIdAllocation {
   projs: Map<string, number>;
   /** 全 buff 键 `mod_<modid>_<key>` → 伪 vanilla id(B6 声明 buff;9000+ 段) */
   buffs: Map<string, number>;
+  /** 全稀有度键 `mod_<modid>_<key>` → 档 id(★刀3-1;12+ 段) */
+  rarities: Map<string, number>;
+  /** 全 gore 键 `mod_<modid>_<key>` → gore id(★刀3-3;697+ 段) */
+  gores: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -283,6 +310,10 @@ export interface RegistrationPlan {
   recipes: Array<{ modId: string; spec: ModRecipeContent }>;
   /** B6:声明 buff 计划(确定性伪 vanilla id 已分配) */
   buffSpecs: Array<{ modId: string; spec: ModBuffContent; pseudoVanilla: number; fullKey: string }>;
+  /** ★刀3-1:mod 稀有度档色计划(12+ 段;先于 itemSpecs 消费) */
+  raritySpecs: Array<{ modId: string; spec: ModRarityContent; rarityId: number; fullKey: string }>;
+  /** ★刀3-3:mod gore 计划(697+ 段;NPC deathGore 引用解析依赖) */
+  goreSpecs: Array<{ modId: string; spec: ModGoreContent; goreId: number; fullKey: string }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */

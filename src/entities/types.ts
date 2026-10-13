@@ -111,7 +111,9 @@ export interface GameHooks {
    *      显示点，环境站经 damagePreview 预演回填终值保像素零漂移并消除双发。 */
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: import('./Enemy').Enemy,
     contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
-    opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number;
+    opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean;
+      /** ★红队 R1-F2:弹幕域旗(attacker 仅死亡归因,不进 modifyHurtByNpc 接触链) */
+      projDomain?: boolean }): number;
   /** ★充能电水母反噬单口（Player.TakeDamageFromJellyfish :44607-44613）——近战
    *  （ProcessHitAgainstNPC :44620）与弹幕（Damage_PVE_Inner :12682 ZappingJellyfish
    *  块）两口共用同一方法；proj1457.dealContacts 水母块消费 */

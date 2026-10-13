@@ -1054,7 +1054,10 @@ export class DukeSharknadoTornado extends Entity {
           : (mainExpertMode(game.world) ? 25 : 40);
         game.damagePlayer(
           hostileProjectileDamage(base, mainDifficulty(game.world)) * 2,
-          this.cx, this.cy, this.src);
+          this.cx, this.cy, this.src,
+          // ★红队 R1-F2 修正(2026-10-13):本伤=Damage_EVP 弹幕语义(上方定谳注),
+          //  attacker 仅死亡归因——projDomain 旗防错域进 modifyHurtByNpc 接触链
+          false, false, true, { projDomain: true });
       }
     }
   }

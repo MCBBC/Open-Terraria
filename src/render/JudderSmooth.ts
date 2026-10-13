@@ -44,6 +44,23 @@ export const JUDDER_MAX_GAP_RATIO = 8;
  *  2000ms:覆盖负载尖刺簇（misses 成簇,簇间隔 <2s 保持武装;2s 干净=尖刺过去）。 */
 export const JUDDER_ARM_HOLD_MS = 2000;
 
+/** ★v3 捕获/混合半分辨率（2026-10-12,Trace-20261013T103710 定谳刀;用户否决
+ *  「高帧率豁免」——110fps 无平滑仍显顿挫,平滑必须保,降的是成本面）。
+ *  【定谳】武装窗内每帧全分辨率捕获（clear+drawImage 整屏,语义必需:prev 必须
+ *  紧邻真帧,半步数学根基）在 GPU 紧张期恰成自强化环：捕获加压→更多跳槽→
+ *  武装更久→捕获不停。judderFrameEnd 主线程自耗 567ms/20.3s=drawImage 第二大项。
+ *  【修】prev 存储精度降档:捕获槽 ½×½（nearest 降采样,读+写各 4×省）,混合时
+ *  上采样回全屏（α=0.5 运动半步影,软半步不可辨;判定/系数/乒乓语义零改动）。
+ *  ?smoothfullcap=1 逃生门=旧全分辨率捕获（A/B 对拍口）。 */
+export let judderHalfCap = (() => {
+  try {
+    if (typeof location === 'undefined') return true;
+    return new URLSearchParams(location.search).get('smoothfullcap') !== '1';
+  } catch { return true; }
+})();
+/** 测试/对拍翻面（生产代码禁调）。 */
+export function judderHalfCapSetForTest(v: boolean): void { judderHalfCap = v; }
+
 /** 纯判定（node 可测）:本帧是否「跳槽混合」帧。period<=0=旁路;gap<0=首帧/异常=否;
  *  断流（>JUDDER_BREAK_MS）与长停顿（>周期×JUDDER_MAX_GAP_RATIO）=否。 */
 export function judderMissFrame(gapMs: number, periodMs: number): boolean {
@@ -115,28 +132,36 @@ export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: numb
   const cv = ctx.canvas;
   const w = cv.width, h = cv.height;
   if (w === 0 || h === 0) return;                           // terra-blink 截断家族:禁操作
+  // ★v3 捕获槽半分辨率（judderHalfCap 缺省开;?smoothfullcap=1=全分辨率旧行为）
+  const capW = judderHalfCap ? Math.max(1, w >> 1) : w;
+  const capH = judderHalfCap ? Math.max(1, h >> 1) : h;
   // 画布组管理:尺寸变化（窗口 resize）=捕獲槽重建+prev 复位（旧 prev 尺寸失配=无效）;
   // capture==null 的补充分配（乒乓初态/refill）保留 prev——★首版此处无条件 null prev
   // =乒乓自毁（swap 把 null 传回 capture→每帧重建→prev 恒 null→混合永不触发,本文件
   // 机械闸抓到）。resize 后经一帧 refill 换掉残留旧尺寸槽,第二帧起稳定。
-  if (!captureCanvas || captureCanvas.width !== w || captureCanvas.height !== h) {
+  if (!captureCanvas || captureCanvas.width !== capW || captureCanvas.height !== capH) {
     const sizeChanged = captureCanvas !== null;
-    captureCanvas = canvasFactory(w, h);
+    captureCanvas = canvasFactory(capW, capH);
     if (!captureCanvas) { prevCanvas = null; return; }      // 无画布环境（node）:旁路
     if (sizeChanged) prevCanvas = null;                     // 尺寸变化:旧 prev 失效
   }
   const capCtx = captureCanvas.getContext('2d') as Ctx2D | null;
   if (!capCtx) return;
-  const blend = armed && prevCanvas !== null && miss;
-  // ① 捕获本帧真值（混合【前】→ prevRaw 恒真帧,连续跳槽零拖影累积）
-  capCtx.clearRect(0, 0, w, h);
-  capCtx.drawImage(cv as CanvasImageSource, 0, 0);
-  // ② 跳槽混合:上一真帧半步叠上（globalAlpha 恢复由真 ctx save/restore 保证）
-  if (blend) {
+  const prev = prevCanvas;                                  // 混合源快照（乒乓交换前取）
+  const blend = armed && prev !== null && miss;
+  // ① 捕获本帧真值（混合【前】→ prevRaw 恒真帧,连续跳槽零拖影累积）。
+  //  ★v3 半分辨率:nearest 降采样（smoothing 关=只读 ¼ 源纹素,读+写双 4×省）;
+  //  半步影在运动中上采样显示,软化不可辨（判定/系数/乒乓语义零改动）。
+  capCtx.imageSmoothingEnabled = false;
+  capCtx.clearRect(0, 0, capW, capH);
+  capCtx.drawImage(cv as CanvasImageSource, 0, 0, w, h, 0, 0, capW, capH);
+  // ② 跳槽混合:上一真帧半步叠上（globalAlpha 恢复由真 ctx save/restore 保证）。
+  //  ★v3:prev 槽为 ½ 分辨率——上采样回全屏（源纹理 ¼ 读取;软半步影）。
+  if (blend && prev) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);                     // 页绝对坐标（c10e 合成同族习语）
     ctx.globalAlpha = JUDDER_BLEND_ALPHA;
-    ctx.drawImage(prevCanvas as CanvasImageSource, 0, 0);
+    ctx.drawImage(prev as CanvasImageSource, 0, 0, prev.width, prev.height, 0, 0, w, h);
     ctx.restore();
   }
   // ③ 乒乓交换:本帧捕获槽晋升为 prevRaw,旧 prevRaw 槽降为下帧捕获槽

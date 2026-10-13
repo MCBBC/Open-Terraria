@@ -2,12 +2,12 @@
 // 拓扑排序(Kahn)+ 确定性 id 分配(拓扑序内 mod id 字典序;mod 内内容键字典序)
 // =联机双端一致性与存档 id 稳定性的根(design.md §2)。
 import type {
-  ModBuffContent, ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
-  ModRecipeContent, ModShopContent, ModTileContent, RegistrationPlan,
+  ModBuffContent, ModGoreContent, ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
+  ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, RegistrationPlan,
 } from './types';
 import {
-  MOD_BUFF_VANILLA_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
-  MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX,
+  MOD_BUFF_VANILLA_BASE, MOD_GORE_ID_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
+  MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX,
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
@@ -34,6 +34,24 @@ function parseTile(modId: string, raw: unknown): ModTileContent {
   if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'tile', key);
   if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'tile', key);
   return o as unknown as ModTileContent;
+}
+
+/** ★刀3-1:mod 稀有度档(content/rarities/*.json {key,color}) */
+function parseRarity(modId: string, raw: unknown): ModRarityContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'rarity', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'rarity', key);
+  if (typeof o.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(o.color)) fail(modId, 'rarity', key);
+  return o as unknown as ModRarityContent;
+}
+
+/** ★刀3-3:mod gore(content/gores/*.json {key,texture}) */
+function parseGore(modId: string, raw: unknown): ModGoreContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'gore', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'gore', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'gore', key);
+  return o as unknown as ModGoreContent;
 }
 
 function parseNpc(modId: string, raw: unknown): ModNpcContent {
@@ -121,7 +139,7 @@ export function topoSortMods(manifests: ModPack[]): string[] {
 export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const order = topoSortMods(packs);
   const byId = new Map(packs.map((p) => [p.manifest.id, p]));
-  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map() };
+  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map() };
   const itemSpecs: RegistrationPlan['itemSpecs'] = [];
   const tileSpecs: RegistrationPlan['tileSpecs'] = [];
   const npcSpecs: RegistrationPlan['npcSpecs'] = [];
@@ -129,11 +147,40 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const shops: RegistrationPlan['shops'] = [];
   const recipes: RegistrationPlan['recipes'] = [];
   const buffSpecs: RegistrationPlan['buffSpecs'] = [];
+  const raritySpecs: RegistrationPlan['raritySpecs'] = [];
+  const goreSpecs: RegistrationPlan['goreSpecs'] = [];
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
   for (const pack of sortedPacks) {
     const modId = pack.manifest.id;
+    // ★刀3-1:rarities(先于 items——物品 rare `{$rarity}` 引用档键;全键字典序分配 12+ 段)
+    const raritySpecsOfPack: Array<{ spec: ModRarityContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'rarities')) {
+      raritySpecsOfPack.push({ spec: parseRarity(modId, readPackJson(pack, path)) });
+    }
+    raritySpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of raritySpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.rarities.has(fullKey)) throw new ModPlanError(`mod ${modId} 稀有度键重复: ${spec.key}`);
+      const rarityId = MOD_RARITY_ID_BASE + allocation.rarities.size;
+      if (rarityId > 254) throw new ModPlanError(`mod 稀有度段溢出(>254): ${fullKey}`);
+      allocation.rarities.set(fullKey, rarityId);
+      raritySpecs.push({ modId, spec, rarityId, fullKey });
+    }
+    // ★刀3-3:gores(先于 npcs——npc deathGore 引用 gore 键;全键字典序分配 697+ 段)
+    const goreSpecsOfPack: Array<{ spec: ModGoreContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'gores')) {
+      goreSpecsOfPack.push({ spec: parseGore(modId, readPackJson(pack, path)) });
+    }
+    goreSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of goreSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.gores.has(fullKey)) throw new ModPlanError(`mod ${modId} gore 键重复: ${spec.key}`);
+      const goreId = MOD_GORE_ID_BASE + allocation.gores.size;
+      allocation.gores.set(fullKey, goreId);
+      goreSpecs.push({ modId, spec, goreId, fullKey });
+    }
     // items:全键字典序分配 stable id
     const itemSpecsOfPack: Array<{ path: string; spec: ModItemContent }> = [];
     for (const path of discoverPackJsonPaths(pack, 'items')) {
@@ -221,7 +268,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       }
     }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----
@@ -301,6 +348,47 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
     // ★P4 边界收口(2026-10-05 B4 全量提取驱动)：magic/mana 类 + 声明弹放行——
     //  engine 侧 case 'magic' 通用尾支已插 mod 弹分流(付款/杖头锚/沉默门共享),
     //  原 fail-fast(C-MAJOR-4)前提消除。summon 类=MinionProj 通用兜底(真召唤 AI=B6)。
+  }
+  // ★红队 R3-M2(2026-10-13):三刀新增跨引用收编校验面(旧在 apply 期抛=半装
+  //  违反「注册阶段不中途抛」不变量,apply 中途逸出会携半装全局表+毒死重试)
+  //  ——pet.buff/pet.proj、item rare {$rarity}、npc.deathGore 三类。
+  for (const it of plan.itemSpecs) {
+    const spec = it.spec;
+    if (spec.rare !== undefined && typeof spec.rare !== 'number') {
+      const full = `mod_${it.modId}_${spec.rare.$rarity}`;
+      if (!plan.allocation.rarities.has(full)) {
+        throw new ModPlanError(`mod ${it.modId} 物品 ${spec.key} 引用未注册稀有度: ${spec.rare.$rarity}`);
+      }
+    } else if (typeof spec.rare === 'number' && spec.rare >= MOD_RARITY_ID_BASE) {
+      // ★红队 R2-m4:裸数字 mod 档=全局 id 语义(跨 mod 泄漏风险;灾厄 12/13 先例
+      //  在案,不 fail-loud 防破载)——无任何 mod 注册该档时 warn 指路 {$rarity}
+      if (![...plan.allocation.rarities.values()].includes(spec.rare)) {
+        console.warn(`[mod-plan] mod ${it.modId} 物品 ${spec.key} rare=${spec.rare} 为裸 mod 档 id 且无任何 mod 注册该档(显示回落紫档);建议改用 {"rare":{"$rarity":"key"}} 引用本 mod content/rarities 档`);
+      }
+    }
+    if (spec.pet) {
+      const buffFull = spec.pet.buff.startsWith('mod_') ? spec.pet.buff : `mod_${it.modId}_${spec.pet.buff}`;
+      if (!plan.allocation.buffs.has(buffFull)) {
+        throw new ModPlanError(`mod ${it.modId} 物品 ${spec.key} pet.buff 引用未注册 buff: ${spec.pet.buff}`);
+      }
+      if (typeof spec.pet.proj === 'string') {
+        const projFull = spec.pet.proj.startsWith('mod_') ? spec.pet.proj
+          : spec.pet.proj.startsWith('proj:') ? `mod_${it.modId}_${spec.pet.proj.slice(5)}`
+            : `mod_${it.modId}_${spec.pet.proj}`;
+        if (!plan.allocation.projs.has(projFull)) {
+          throw new ModPlanError(`mod ${it.modId} 物品 ${spec.key} pet.proj 引用未注册弹幕: ${spec.pet.proj}`);
+        }
+      }
+    }
+  }
+  for (const n of plan.npcSpecs) {
+    for (const d of n.spec.deathGore ?? []) {
+      if (typeof d.gore === 'number') continue;   // 原版 gore id 直通
+      const full = d.gore.startsWith('mod_') ? d.gore : `mod_${n.modId}_${d.gore}`;
+      if (!plan.allocation.gores.has(full)) {
+        throw new ModPlanError(`mod ${n.modId} NPC ${n.spec.key} deathGore 引用未注册 gore: ${d.gore}`);
+      }
+    }
   }
 }
 

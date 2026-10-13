@@ -82,6 +82,7 @@ const gs = {
 };
 const rng = new RNG(gs.seed as number);
 (globalThis as any).__cragTrig = [];
+if ((globalThis as any).__cragPre) (rng as any).next();   // ★单样本先行假设检验
 let drawCount = 0;
 const origNext = rng.next.bind(rng), origNI = rng.nextInt.bind(rng), origNIR = rng.nextIntRange.bind(rng);
 rng.next = (...a: unknown[]) => { drawCount++; return (origNext as any)(...a); };

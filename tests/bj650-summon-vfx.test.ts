@@ -6,6 +6,14 @@
 //   队列（BJ625件3 基建/BJ630件1 AURA 通道同槽）+ 残影 12 份（:30883 num166=12 档,
 //   projGhostTrail 864 表既有）whoAmI 色相精化（登记③ retired）+ smolstarAI 三出口
 //   recordGhostTrail 补接线（旧环恒空=残影死支）。
+//   ★件1 返工（2026-10-13 用户实报「本体右上品红半透影子=不同颜色」）：色相源
+//   whoAmI 误用 this.id（EntityManager 全实体递增计数器 Entity.ts:150——敌/掉落/
+//   NPC/弹共享 nextId）→ id%6 档位随会话总生成数漂移,长会话恒落高档 4/5=品红。
+//   原版 whoAmI=出生拍 Main.projectile 首空闲槽（活期稳定/复用循环）→ 对映=注册表
+//   插入位懒快照（首拍一次,未入列回退 0 档）;辉光十字与残影环两消费位同源。
+//   嫌疑「辉光位偏二次旋转」定谳否证：位偏在 translate 里先于 rotate 烘入=世界系
+//   （捕获矩阵 rot 项只旋精灵=EntitySpriteDraw rotation 参数同构）;原版 AI_169
+//   空闲档 targetAngle=UnitY.ToRotation()+π/2=π（:46612-46614）与仓内 rot=π 同值。
 // 件2 [533 致命球 localAI[2]≥40 伤害 ×0.5]（BJ635 登记）:Projectile.cs:14618-14621
 //   Damage_GetProjectileSpecificDamageMultiplier `num *= 0.5f`——消费位 num7=
 //   (int)(damage×mul)（:12873/:14718 截断,先于 ModifyHit tag 栈）。★登记文案「击退
@@ -24,7 +32,7 @@
 // ★变异证红（withMutation 三层守卫,逐字节还原+sha256 对拍）：
 //   M1 件1 recordGhostTrail 摘除 → 残影环恒空红 / M2 件1 色相 whoAmI 钉 0 档红 /
 //   M3 件2 ×0.5 摘除红 / M4 件3 冲刺门摘除红 / M5 件4 弹体生成摘除红 /
-//   M6 件4 帧机 3t→999t 红。各 ≥1 发,恰红断言。
+//   M6 件4 帧机 3t→999t 红 / M7 件1 返工 whoAmI 槽位源回潮 id 红。各 ≥1 发,恰红断言。
 //
 // 运行：cd game && npx vitest run tests/bj650-summon-vfx.test.ts
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -221,6 +229,11 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
     const { hooks, player } = makeHooks([]);
     const m = minion(player, hooks, 864, 50 * 16, 90 * 16);
     m.rot = 0.7;
+    // ★BJ650件1 返工：色相源=whoAmI 槽位快照（出生拍注册表插入位,原版首空闲槽
+    //  对映）非 this.id（全实体递增计数器→档位随会话漂移=用户实报品红影子）。
+    //  本测直驱 draw 不走 fixedUpdate → 显式 stamp 槽位并从 stamp 推导期望色。
+    const slot = 3;
+    (m as unknown as { whoAmI: number }).whoAmI = slot;
     setProjSpriteOverride(864, { width: 18, height: 64 } as never);
     const drawOps: Array<{ m: string; a: unknown[] }> = [];
     const ctx = new Proxy({} as Record<string, unknown>, {
@@ -241,7 +254,7 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
     (m as unknown as { draw(r: unknown): void }).draw(fakeR);
     // 4 份 op：sy=帧 1 行（白模 32）、sw=18/sh=32、A=44/255、tint=0.7×hsl/255
     expect(glowOps.length).toBe(4);
-    const [r, g, b] = hslToRgb255SelfTest(0.66 + 0.33 * ((m.id % 6) / 6), 0.7, 0.6);
+    const [r, g, b] = hslToRgb255SelfTest(0.66 + 0.33 * ((slot % 6) / 6), 0.7, 0.6);
     for (const op of glowOps) {
       expect(op.sy).toBe(32);
       expect(op.sw).toBe(18); expect(op.sh).toBe(32);
@@ -263,6 +276,31 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
     const ring = fld(m, 'ghostRing') as { filled: number } | null | undefined;
     expect(ring).toBeTruthy();
     expect(ring!.filled).toBeGreaterThanOrEqual(2);   // 旧 0 → 红
+  });
+
+  it('★返工：whoAmI 槽位快照=出生拍注册表插入位（this.id 全实体计数器档位漂移 → M6 红）', () => {
+    // 定谳（2026-10-13 实报）：原版 whoAmI=出生拍 Main.projectile 首空闲槽
+    //  （NewProjectile :10873 扫槽,活期稳定/复用循环）;this.id=EntityManager
+    //  全实体递增（Entity.ts:150,敌/掉落/NPC/弹共享 nextId）→ id%6 随会话总
+    //  生成数漂移=用户实报「品红影子不同色」真凶。对映=注册表插入位（紧凑
+    //  数组槽语义;原版洞复用底档偏置由紧凑低计数承载,活期漂移差=登记近似）。
+    const { hooks, player } = makeHooks([]);
+    const a = minion(player, hooks, 864, player.cx + 100, player.cy);   // 插入位 0
+    const b = minion(player, hooks, 864, player.cx + 140, player.cy);   // 插入位 1
+    a.fixedUpdate(1 / 60, hooks);
+    b.fixedUpdate(1 / 60, hooks);
+    expect(fld(a, 'whoAmI')).toBe(0);                 // 首槽（原版蓝端 0.66）
+    expect(fld(b, 'whoAmI')).toBe(1);                 // 多刃异档（原版多刃异色同相）
+    // 槽位活期稳定（原版 whoAmI 出生钉死,不逐拍重掷）
+    a.fixedUpdate(1 / 60, hooks);
+    expect(fld(a, 'whoAmI')).toBe(0);
+    // 第 7 刃：插入位=6——id 源回潮（id%6∈[0,5]）恒 ≠6 → M6 恰红判别位
+    let last: MinionProj | null = null;
+    for (let i = 0; i < 5; i++) {
+      last = minion(player, hooks, 864, player.cx + 180 + i * 40, player.cy);
+    }
+    last!.fixedUpdate(1 / 60, hooks);
+    expect(fld(last, 'whoAmI')).toBe(6);
   });
 });
 
@@ -535,5 +573,13 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
       'if (++this.fc >= 3) {',
       'if (++this.fc >= 999) { // ★BJ650 M6 变异:帧机节拍漂移',
       'AI_139 帧机：alpha −25/拍');
+  });
+
+  it('M7 件1 返工 whoAmI 槽位源回潮 this.id → 档位漂移红', () => {
+    // 判别力：快照=注册表插入位（第 7 刃=6）；回潮 this.id%6∈[0,5] 恒 ≠6 → 恰红
+    mutate(MP,
+      '      this.whoAmI = Math.max(0,\n        (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.indexOf(this));',
+      '      this.whoAmI = this.id % 6; // ★BJ650 M7 变异:id 源回潮（全实体计数器档位漂移）',
+      'whoAmI 槽位快照');
   });
 });

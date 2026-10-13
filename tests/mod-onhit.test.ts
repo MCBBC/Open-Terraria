@@ -49,12 +49,14 @@ describe('mod OnNpcDeath 钩(Hive Tumor→Boss 遭遇链面)', () => {
 describe('CalPlayer 基建:modifyHurtByNpc 承伤修正链(六十三刀)', () => {
   beforeEach(() => _resetModHooksForTests());
 
-  it('注册+修正:mod NPC 进攻面逐钩折减;原版域/空表零扰动', () => {
+  it('注册+修正:全 NPC 攻端逐钩折减(★刀4-A 扩域:原版攻端进链)/空表零扰动', () => {
     registerModModifyHurtByNpc('calamity', (ctx) => ctx.dmg * 0.5);
     // mod 域(800+):逐钩修正
     expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 900, 40, true)).toBe(20);
-    // 原版域:零调用原伤透传
-    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 42, 40, true)).toBe(40);
+    // 原版域:★刀4-A(2026-10-13)起进链(工坊普查五刀战役;灾厄 CalPlayer.ModifyHitByNPC
+    // 语义=全部 NPC 来源受击;ctx.attackerVid≥800=mod 攻端供分支)——原 42 档旧锁
+    // 「原版透传」断言随域门撤除翻新,语义变更已在 hooks.ts/Game.ts 注释登记
+    expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 42, 40, true)).toBe(20);
     // 多钩链序:第二钩吃第一钩产物
     registerModModifyHurtByNpc('other', (ctx) => ctx.dmg - 5);
     expect(runModModifyHurtByNpc({ hp: 100 }, {} as never, 900, 40, true)).toBe(15);

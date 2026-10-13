@@ -28,7 +28,7 @@ import {
   registerModDashType,
   registerModKeybindFace, registerModParryGate, registerModParrySuccess, modKeybindDown, readModNpcBuffs,
   registerNpcAi, registerModOnHitNpc, registerModNpcDeath, registerModOnHitAny, registerModTileInteract, registerModPlayerThorns, registerModHealItem, registerItemUse, registerSystem, registerProjHooks, playModSound, applyModNpcBuff,
-  registerModModifyHurtByNpc, registerModModifyHitNpc, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
+  registerModModifyHurtByNpc, registerModModifyHitNpc, registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
   registerModScreenFx,
   type ModScreenFxPass, type ModSystemHooks, type ModUseCtx,
@@ -181,9 +181,14 @@ export interface ModContext {
   ownedProjCount(key: string): number;
   /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
    *  (fn(ctx: {player, game, attackerVid, dmg, contact}) → number=修正后伤/
-   *  undefined=不改;仅 mod NPC 进攻面进入) */
-  /** playerHook 双 kind:modifyHurtByNpc=承伤修正链 / modifyHitNpc=命中伤害增幅链 */
-  playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc', fn: (ctx: Record<string, unknown>) => number | void): void;
+   *  undefined=不改;★刀4-A 扩域:全部 NPC 攻端进入,attackerVid≥800=mod 攻端) */
+  /** playerHook 四 kind(★刀4-A 扩容):
+   *  modifyHurtByNpc=承伤修正链(值链;全 NPC 攻端)
+   *  modifyHitNpc=近战命中伤害增幅链(倍率链;ctx 含 crit/kb/armorPen)
+   *  modifyHitNpcByProj=玩家弹命中 NPC 增幅链(倍率;ctx: projVid/targetVid/dmg/crit)
+   *  modifyHitPlayerByProj=敌弹命中玩家增幅链(倍率;ctx: projVid/dmg/trap/pvp) */
+  playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc' | 'modifyHitNpcByProj' | 'modifyHitPlayerByProj',
+    fn: (ctx: Record<string, unknown>) => number | void): void;
   /** ★一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
   registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void;
   /** ★一百一十六刀:mod 功能箱解锁条件(chest.locked 消费面;fn(world)=true 可开) */
@@ -414,12 +419,17 @@ export function createModContext(
       cache.counts.set(pid, n);
       return n;
     },
-    // ★CalPlayer 基建(六十三刀):玩家承伤修正链(mod NPC 进攻面;ModifyHitByNPC 形)
+    // ★CalPlayer 基建(六十三刀):玩家承伤修正链(ModifyHitByNPC 形)
+    //  ★刀4-A:四 kind(承伤值链/近战倍率链/弹命中 NPC 倍率链/敌弹命中玩家倍率链)
     playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void) {
       if (kind === 'modifyHurtByNpc') {
         registerModModifyHurtByNpc(modId, fn as Parameters<typeof registerModModifyHurtByNpc>[1]);
       } else if (kind === 'modifyHitNpc') {
         registerModModifyHitNpc(modId, fn as Parameters<typeof registerModModifyHitNpc>[1]);
+      } else if (kind === 'modifyHitNpcByProj') {
+        registerModModifyHitNpcByProj(modId, fn as Parameters<typeof registerModModifyHitNpcByProj>[1]);
+      } else if (kind === 'modifyHitPlayerByProj') {
+        registerModModifyHitPlayerByProj(modId, fn as Parameters<typeof registerModModifyHitPlayerByProj>[1]);
       } else throw new Error(`[mod-api] 未知 playerHook: ${kind}`);
     },
     /** ★B7 一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */

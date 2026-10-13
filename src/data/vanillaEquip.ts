@@ -33,8 +33,23 @@ const KIND_BY_IID = (() => {
   return m;
 })();
 
+/** ★刀3-2(2026-10-13):mod 装备分类 overlay——KIND_BY_IID 模块载入期冻结,
+ *  mod 件(注册晚于模块求值)进不了表=宠物/坐骑槽准入盲区。注册期直写本表,
+ *  读侧单源经 equipKindOfInternal 统一收口(mod iid 与原版 iid 域不相交,查序无歧义)。 */
+const MOD_KIND_BY_IID = new Map<number, EquipKind>();
+export function registerModEquipKind(id: number, kind: EquipKind): void {
+  if (KIND_BY_IID.has(id)) throw new Error(`[mod-equip] iid 与原版分类表冲突: ${id}`);
+  if (MOD_KIND_BY_IID.has(id)) throw new Error(`[mod-equip] 重复注册: ${id}`);
+  MOD_KIND_BY_IID.set(id, kind);
+}
+
 export function equipKindOfInternal(id: number): EquipKind | null {
-  return KIND_BY_IID.get(id) ?? null;
+  return MOD_KIND_BY_IID.get(id) ?? KIND_BY_IID.get(id) ?? null;
+}
+
+/** ★红队 R3-m6:测试清账面(overlay 注册表无清除路径=二次装载撞重复注册) */
+export function _resetModEquipKindsForTests(): void {
+  MOD_KIND_BY_IID.clear();
 }
 
 /** 染料判定（ItemSlot context 12/25/27/33：checkItem.dye > 0） */
@@ -46,7 +61,7 @@ export function isDyeItem(id: number): boolean {
 export const MISC_KINDS: EquipKind[] = ['pet', 'light', 'cart', 'mount', 'hook'];
 
 export function miscSlotAccepts(slot: number, id: number): boolean {
-  return KIND_BY_IID.get(id) === MISC_KINDS[slot];
+  return equipKindOfInternal(id) === MISC_KINDS[slot];   // ★刀3-2:收口 overlay(mod 件准入)
 }
 
 // ---- ★清偿刀 Z（2026-09-29）配饰互斥组谓词单源（原 UI.ts 模块内私有,提至数据层——

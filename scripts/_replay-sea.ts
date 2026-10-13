@@ -7,12 +7,21 @@ const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 
-// mod tile 注册(803)
+// mod tile 注册(803)。★2026-10-13 修复:注册面须透传 JSON 字段(solid/framed/growsOn/
+// chest 等)——旧版只传 key/name 致 defs[mod].solid=false→genSolid 对一切 mod tile
+// 恒 false→LayTrees noGround 78/78(树 0 棵)+DetermineYStart 落点漂移风险。
 {
   let nextId = 1030;
   for (const f of readdirSync(`${root}/mods/calamity/content/tiles`).sort()) {
     if (!f.endsWith('.json')) continue;
-    try { registerModTile({ key: `mod_calamity_${f.replace('.json', '')}`, name: '' }, nextId++); } catch { /* skip */ }
+    try {
+      const j = JSON.parse(readFileSync(`${root}/mods/calamity/content/tiles/${f}`, 'utf8'));
+      registerModTile({
+        key: `mod_calamity_${f.replace('.json', '')}`, name: '',
+        solid: !!j.solid, decor: !!j.decor, framed: !!j.framed, chest: !!j.chest,
+        opacity: j.opacity, pick: j.pick, axe: j.axe,
+      }, nextId++);
+    } catch { /* skip */ }
   }
 }
 // ★652:pass 域依赖注入——gen-sea 的 genSolid/sheetOf 读 globalThis.__calamityTileDefs
@@ -43,7 +52,7 @@ for (let i = 1; i < TILE_DEFS.length; i++) {
   if (d?.vanilla && d.vanilla.sheet < 753 && !SHEET_TO_INTERNAL.has(d.vanilla.sheet)) SHEET_TO_INTERNAL.set(d.vanilla.sheet, i);
 }
 // mod 运行时 id→名(终版 twld tileMap)
-class BER { off = 0; constructor(public b: Uint8Array) {} u8() { return this.b[this.off++]; } i16() { const v = (this.b[this.off] << 8) | this.b[this.off + 1]; this.off += 2; return (v << 16) >> 16; } i32() { const v = ((this.b[this.off] << 24) | (this.b[this.off + 1] << 16) | (this.b[this.off + 2] << 8) | this.b[this.off + 3]) | 0; this.off += 4; return v; } bytes(n: number) { const s = this.b.subarray(this.off, this.off + n); this.off += n; return s; } str() { const n = this.i16(); return Buffer.from(this.bytes(n)).toString('utf8'); } }
+class BER { off = 0; b: Uint8Array; constructor(b: Uint8Array) { this.b = b; } u8() { return this.b[this.off++]; } i16() { const v = (this.b[this.off] << 8) | this.b[this.off + 1]; this.off += 2; return (v << 16) >> 16; } i32() { const v = ((this.b[this.off] << 24) | (this.b[this.off + 1] << 16) | (this.b[this.off + 2] << 8) | this.b[this.off + 3]) | 0; this.off += 4; return v; } bytes(n: number) { const s = this.b.subarray(this.off, this.off + n); this.off += n; return s; } str() { const n = this.i16(); return Buffer.from(this.bytes(n)).toString('utf8'); } }
 function payload(id: number, r: BER): unknown {
   switch (id) {
     case 1: return r.u8(); case 2: return r.i16(); case 3: return r.i32();
@@ -126,6 +135,9 @@ const gs = {
   //  属 [228,276] 夹带)——DetermineYStart 从 low−20 下行找首实心。判卷列实测:
   //  搜索列 x=3828 首实心 y=246 → 凡 start≤244(low≤264)搜索结果不变(不变量域),
   //  取 246 落域内。缺省回退 worldSurface=337=start 317 已在滩体内=错位 ~90 行。
+  //  ★2026-10-13 yStart 定谳=248:岛屿零游程(i[0-23] topS 差恒 0=岛形确定性恒等)
+  //  否证 251(+3 恒差)、topS 一致率 248=124/371 ≫ 251=10/371;tileSolid[186]=false
+  //  (Main.cs Initialize_TileAndNPCData 全块无 185/186/187)。
   worldSurfaceLow: 246,
   dungeonX: 3421, dungeonMaxY: 207, dungeonMinX: 0, dungeonMaxX: 4200,
   seedFlags: {},
@@ -136,7 +148,49 @@ const gs = {
   },
 };
 const rng = new RNG(gs.seed as number);
+// ★671:掷数计数(对拍真链 SPY 谱)。★2026-10-13 口径收口:SPY 数 genRand 每次
+//  Sample(=InternalSample);本仓 next/nextInt/nextIntRange/range/nextBool 均 1:1,
+//  旧版漏包 range(shallowwater descent 1 掷)——补全。
+let drawCount = 0;
+const METH_COUNT: Record<string, number> = {};
+const SEG_METH: Array<Record<string, number>> = [];
+{
+  const proto = rng as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const COUNTED = ['next', 'nextInt', 'nextIntRange', 'range', 'nextBool'];
+  for (const m of COUNTED) {
+    const fn = (proto[m] as ((...a: unknown[]) => unknown) | undefined);
+    if (typeof fn !== 'function') continue;
+    (rng as unknown as Record<string, unknown>)[m] = function (this: unknown, ...a: unknown[]) { drawCount++; METH_COUNT[m] = (METH_COUNT[m] ?? 0) + 1; const cur = SEG_METH[SEG_METH.length - 1]; if (!cur) { throw new Error('掷在无段区 ' + m + '\n' + new Error().stack); } cur[m] = (cur[m] ?? 0) + 1; return fn.apply(this, a); };
+  }
+}
+// ★掷数谱段标记(gen-sea.ts seaSeg 钩子):记录段边界累计掷数快照
+const SEG_MARKS: string[] = [];
+const SEG_AT: number[] = [];
+(globalThis as { __seaSegMark?: (n: string) => void }).__seaSegMark = (n: string) => { SEG_MARKS.push(n); SEG_AT.push(drawCount); SEG_METH.push({}); };
+(globalThis as { __seaTreeDbg?: { n05: number; noGround: number; liquid: number; fail: string[]; ok: string[] } | null }).__seaTreeDbg = { n05: 0, noGround: 0, liquid: 0, fail: [], ok: [] };
+console.log('[sea] 海 pass 掷骰总数 =', ((seaFn as any) && 0));
 (seaFn as (...a: unknown[]) => void)(store, rng, gs);
+console.log('[sea] 海 pass 掷骰总数 =', drawCount);
+{
+  let prev = 0;
+  console.log('[sea] 段谱(段名 段掷 累计 | 方法直方):');
+  for (let k = 0; k < SEG_MARKS.length; k++) {
+    const h = SEG_METH[k];
+    const hs = Object.entries(h).map(([m, c]) => `${m}:${c}`).join(' ') || '-';
+    console.log(`  ${SEG_MARKS[k].padEnd(14)} ${SEG_AT[k] - prev}\t累计=${SEG_AT[k]}\t[${hs}]`);
+    prev = SEG_AT[k];
+  }
+  console.log('  (tail)', drawCount - prev);
+}
+{
+  const dbg = (globalThis as { __seaTreeDbg?: { n05: number; noGround: number; liquid: number; fail: string[]; ok: string[] } }).__seaTreeDbg;
+  if (dbg) console.log('[sea] treeDbg:', JSON.stringify({ ...dbg, ok: (dbg as any).ok, fail: dbg.fail.slice(0, 10), failN: dbg.fail.length }));
+}
+{
+  const defs = (globalThis as { __calamityTileDefs?: Array<{ key?: string; solid?: boolean }> }).__calamityTileDefs || [];
+  const tid = gs.mods.tileIdByKey as Record<string, number>;
+  console.log('[sea] ids: sulphSand=', tid['sulphurous_sand'], 'hardened=', tid['hardened_sulphurous_sandstone'], 'defs[ss]=', JSON.stringify(defs[tid['sulphurous_sand']]?.let?.() ?? { key: defs[tid['sulphurous_sand']]?.key, solid: defs[tid['sulphurous_sand']]?.solid }), 'defs.len=', defs.length);
+}
 
 // ★652:存档域归一(ghost purge)——post 快照=pass 边界的「已保存世界」视图:原版
 //  .wld 对未激活 tile 不写 type(WF:1458-1462 flag 门)→ inactive 格 type 恒 0。

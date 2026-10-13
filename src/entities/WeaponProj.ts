@@ -42,6 +42,7 @@ import { canHit } from '../physics/LineOfSight';
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { damageVarRoll } from '../stats/DamageVar';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★刀4-A:弹命中 NPC 修正链
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 import { BuffType } from '../stats/Buffs';
 import { TORCH_DUST_BY_STYLE } from '../world/Torch';
@@ -509,7 +510,13 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   旧 trunc(13×0.63)=8）。crit×2 = 精确整数倍乘不涉截断位;dmgScale 未传时
     //   与旧式逐位同值（零漂移）。
     const dmgBase = Math.trunc((crit ? self.damage * 2 : self.damage) * mul);
-    const dmg = dmgScale ? dmgScale(e, dmgBase) : dmgBase;
+    // ★刀4-A(2026-10-13):玩家弹幕命中 NPC 伤害修正链(ModifyHitNPCWithProj 形;倍率连乘;
+    //  位=dmgScale 段后/banner(内联于 hurt 首参)前=弹侧 ModifyHit 统一位;空 mod=恒等)。
+    //  ★红队复查修正:按 !vanillaGated 受理位求值(对齐 onHit 族 BJ393 判据——门拒靶
+    //  (iframes>0,hurt 内部拒)不发钩,防 mod 侧副作用误发)
+    const dmgScaled = dmgScale ? dmgScale(e, dmgBase) : dmgBase;
+    const dmg = vanillaGated ? dmgScaled : runModModifyHitNpcByProj(pl, game, self.projId ?? -1,
+      (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmgScaled, crit);
     // ★BJ339：num40 = direction 缺省语义（:13652）——dirOverride 在传时强占
     //（404 球侧 direction 每拍重写 :30742-30751;未传弹保持敌相对弹位既有承载）
     // ★BJ344：回调档逐敌求值 = 原版写位在 Damage_PVE_Inner 逐敌段（:13056-13098/

@@ -122,7 +122,21 @@
  *      （BJ667 ② 同病专类变体;原版 GetAlpha :81133 不读 α,A 恒 25——类内 α 渐显与
  *      GetAlpha 常量的关系未定谳,先探针后派刀）;②730 雷霆矛首拍 732 子弹（同上
  *      :46743）未移植=特性缺线;③Dart.whiteLerp（811/814,Dart.ts lerpWhiteFilter
- *      逐字副本）同病别通道（非本表 lerp 族,白化系数动态/静态各一,登记）。 */
+ *      逐字副本）同病别通道（非本表 lerp 族,白化系数动态/静态各一,登记）。
+ *    ★BJ668b 尾批（2026-10-13）清偿/定谳：债①=731 已承接（ThunderBoltShot.draw
+ *      两遍制 GA=25/255+K=0.8,探针+α 死面定谳见 tests/bj668b-tail-clearance.test.ts;
+ *      类内 α 渐显=绘制死面已亲读钉死——DrawProj 标准路径/Opacity/Update 全零消费）;
+ *      债③=811/814 已改道两遍制（Dart.draw lerpK811 门,596 旧通道不动）。
+ *    ★BJ668b 件4 lerpcolor 色相面宽定谳（只登记不落刀,另批定夺）：原版 GetAlpha
+ *      色相 Lerp 全族（Projectile.cs:80595-81540 全支普查）仅 2 型——855 灯笼弹
+ *      Lerp(newColor,(255,200,60),0.5)（:80715-80717,出生面=放飞灯笼 4702,
+ *      SkyLanternProj 专类未消费本表档=色相面整缺）+ 586 枯萎之环弹 ai[2]==1
+ *      正弦色变形变支（:80737-80748,载体 DryadWardRingShot dormant=死码面）;
+ *      本体预 Lerp（DrawProjDirect :30841-30856）全族仅 811/814 白（件2 已承接）;
+ *      残影 trail 色相族（:31157-31181,424-426/1037/1049 红·671 紫·811 绯红·261 灰·
+ *      高尔夫黄）=BJ219 drawProjGhosts 残影面,低可感度。算子面：有色 lift 与白抬升
+ *      不同构（'lighter' 复绘须乘色=tint 白模烘焙/source-in 预乘,或 hue-rotate 非精确
+ *      近似）——面宽小（活跃 1 型+休眠 1 面）但须新算子,另批定夺。 */
 export interface ProjAlphaMod {
   kind: 'invisible' | 'fade' | 'fade2' | 'fixed' | 'fixedfade' | 'afade' | 'lerp' | 'lerpkeep'
     | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alpha0additive' | 'alphaLt'

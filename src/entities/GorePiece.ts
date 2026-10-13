@@ -39,6 +39,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { moveAndCollide } from '../physics/TileCollision';
 import goreTable from '../data/vanilla-gore.json';
+import { modDeathGoreOf, modGoreTexSizeOf } from '../mods/gore';   // ★刀3-3:mod 死亡碎块/贴图尺寸(类型单向,零环)
 
 /** Gore.goreTime（Gore.cs:16） */
 export const GORE_TIME = 600;
@@ -312,9 +313,10 @@ type GoreTable = Record<string, GoreSpawnEntry[]> & {
 const TABLE = goreTable as unknown as GoreTable;
 const TEX = TABLE._meta?.tex ?? {};
 
-/** NPC id → 死亡 gore 表项（无表项 = 原版只出尘不出块，如史莱姆族） */
+/** NPC id → 死亡 gore 表项（无表项 = 原版只出尘不出块，如史莱姆族）。
+ *  ★刀3-3(2026-10-13):mod NPC(vid≥800)回退 MOD_DEATH_GORE(注册期已解析为原版形) */
 export function deathGoreFor(npcId: number): GoreSpawnEntry[] {
-  return TABLE[String(npcId)] ?? [];
+  return TABLE[String(npcId)] ?? modDeathGoreOf(npcId) ?? [];
 }
 
 const irand = (n: number) => Math.floor(Math.random() * n);
@@ -364,8 +366,8 @@ export class GorePiece extends Entity {
     this.scale = scale;
     const tex = TEX[type];
     // 气泡族（411-430）已入 _meta.tex 运行时直调面；BUBBLE_TEX 仍作缺图兜底（见其注释）
-    this.texW = tex?.w ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
-    this.texH = tex?.h ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
+    this.texW = tex?.w ?? modGoreTexSizeOf(type)?.w ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
+    this.texH = tex?.h ?? modGoreTexSizeOf(type)?.h ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
     this.x = x;
     this.y = y;
     this.resizeBox();

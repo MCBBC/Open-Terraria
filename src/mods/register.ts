@@ -15,6 +15,17 @@ import { registerModStats } from '../data/vanillaItemStats';
 import { registerModWingStats } from '../data/vanillaWingStats';
 import { registerModNpcRules, registerModNpcValue } from '../drops/NpcDrops';
 import { registerModProj, registerModNpcOnHitPlayerBuff } from './hooks';
+import { registerModRarity, modRarityIdOf } from './rarity';   // ★刀3-1:稀有度档色
+import { registerModPet } from './pets';                        // ★刀3-2:mod 宠物
+import { registerModEquipKind } from '../data/vanillaEquip';    // ★刀3-2:装备分类 overlay
+import { registerModGoreId, registerModGoreTexSize, registerModNpcDeathGore, modGoreIdOf } from './gore';   // ★刀3-3:mod gore
+
+/** pack 贴图字节(带 textures/ 前缀归一;register 期 PNG 头读取用) */
+function packTexBytesLocal(pack: { files: Map<string, Uint8Array> } | undefined, texPath: string): Uint8Array | null {
+  if (!pack) return null;
+  return pack.files.get(texPath.startsWith('textures/') ? texPath : `textures/${texPath}`)
+    ?? pack.files.get(texPath) ?? null;
+}
 import { MOD_SPAWN_RULES } from '../world/spawn/VanillaSpawner';
 import { registerModBiomeFlag } from '../world/SceneMetrics';
 
@@ -252,6 +263,20 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
   }
   // npcs
   const modSummonAccum: SummonEntry[] = [];   // F6 面板条目暂存(循环尾一次性追加)
+  // ★刀3-3:mod gore(先于 npcs——deathGore 引用解析依赖;PNG IHDR 头同步读尺寸
+  //  @16/@20 大端,零解码——GorePiece 构造器碰撞盒查本表)
+  for (const g of plan.goreSpecs) {
+    registerModGoreId(g.goreId, g.fullKey);
+    const pack = plan.mods.find((m) => m.manifest.id === g.modId)?.pack;
+    const bytes = packTexBytesLocal(pack, g.spec.texture);
+    // ★红队 R3-m2:PNG 签名校验(8 字节魔数)+尺寸界钳(垃圾头防巨盒 resizeBox)
+    if (bytes && bytes.length > 24
+      && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const w = dv.getUint32(16), h = dv.getUint32(20);
+      if (w >= 1 && w <= 4096 && h >= 1 && h <= 4096) registerModGoreTexSize(g.goreId, w, h);
+    }
+  }
   for (const n of plan.npcSpecs) {
     const spec = n.spec;
     registerModNpc(n.npcId, {
@@ -331,17 +356,41 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     // ★P7 红蓝修正(M4 高优①):mod NPC 金币价值接线(旧实现 ModNpcContent.value
     //  声明被丢弃→mod 怪恒 0 金)
     if (spec.value !== undefined) registerModNpcValue(n.npcId, spec.value);
+    // ★刀3-3:死亡碎块声明(gore 键/原版 id 双形;loop=片数;GorePiece.deathGoreFor 回退)
+    if (spec.deathGore?.length) {
+      registerModNpcDeathGore(n.npcId, spec.deathGore.map((d) => {
+        const gid = typeof d.gore === 'number' ? d.gore
+          : modGoreIdOf(d.gore.startsWith('mod_') ? d.gore : `mod_${n.modId}_${d.gore}`);
+        if (gid === undefined) {
+          throw new Error(`[mod-npc] mod ${n.modId} NPC ${spec.key} 引用未注册 gore: ${d.gore}`);
+        }
+        return { id: gid, loop: d.n, scale: d.scale };
+      }));
+    }
     npcs++;
   }
   // F6 召唤面板追加面(mod 条目;零 mod 时 SUMMON_ENTRIES 零扰动)
   if (modSummonAccum.length > 0) appendModSummonEntries(modSummonAccum);
+  // ★刀3-1:mod 稀有度档色(先于 items——物品 rare `{$rarity}` 解析依赖档表)
+  for (const r of plan.raritySpecs) registerModRarity(r.rarityId, r.spec.color, r.fullKey);
   // items(combat/func/stats 拆写三表;placeTile 翻译)
   for (const it of plan.itemSpecs) {
     const spec = it.spec;
+    // ★刀3-1:rare 形二态——数字直传 / {$rarity: key} → 档 id(未注册键 fail-loud)
+    const rareResolved = spec.rare === undefined ? undefined
+      : typeof spec.rare === 'number' ? spec.rare
+        : (() => {
+            const full = `mod_${it.modId}_${spec.rare.$rarity}`;
+            const id = modRarityIdOf(full);
+            if (id === undefined) {
+              throw new Error(`[mod-item] mod ${it.modId} 物品 ${spec.key} 引用未注册稀有度: ${full}`);
+            }
+            return id;
+          })();
     const def: Parameters<typeof registerModItem>[0] = {
       key: it.fullKey,
       name: spec.name,
-      rare: spec.rare,
+      rare: rareResolved,
       value: spec.value,
       maxStack: spec.maxStack ?? 999,
     };
@@ -356,6 +405,17 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       }
     }
     registerModItem(def, it.stableId);
+    if (spec.pet) {
+      // ★刀3-2:mod 宠物(MOD_PETS 反查表+装备分类 overlay;buffSpecs 先于 items 应用,
+      //  modBuffTypeOf 此处必命中;proj 字符串形走 resolveShoot 同通道)
+      registerModPet(it.stableId, {
+        buffType: modBuffTypeOf(it.modId, spec.pet.buff),
+        projId: typeof spec.pet.proj === 'number' ? spec.pet.proj
+          : resolveShoot(plan, it.modId, spec.pet.proj) as number,
+        light: spec.pet.light === true,
+      });
+      registerModEquipKind(it.stableId, spec.pet.light ? 'light' : 'pet');
+    }
     if (spec.research !== undefined) registerModResearch(it.stableId, spec.research);
     if (spec.func) registerModItemFunc(it.stableId, spec.func);
     if (spec.combat) {

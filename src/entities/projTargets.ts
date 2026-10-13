@@ -14,6 +14,7 @@ import {
   getGlobalHurtBuckets, ImmunityCooldownID,
 } from '../player/HurtCooldownBuckets';
 import { getProjScanCtx } from './projScanCtx';
+import { runModModifyHitNpcByProj, runModModifyHitPlayerByProj } from '../mods/hooks';   // ★刀4-A:弹命中修正链两族
 import { snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★清偿刀 P1 门位快照单源（C5 定谳#3——ESM 函数声明环安全:两侧均仅运行时调用）
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ488① critter 面三类掷（:12915-12927）——proj1457 彼侧 import 本模块（hitCritters 族）=函数声明环,两侧均运行时调用（P1 同习语）
 
@@ -133,7 +134,15 @@ export function hitTownNpcs(
     //   hostile 弹 owner=255 无此面）。城镇 NPC 无 banner 档（BannerSystem 无城镇族键）
     //   → applyBannerDamageDealt 结构恒等值,面位照原版占位（判据经 bannerOfNpc 空档早退）。
     const st = settle?.(n);
-    const rawDmg = st?.dmg ?? dmg;
+    // ★刀4-A(2026-10-13):弹命中城镇 NPC 伤害修正链(ModifyHitNPCWithProj 同面;
+    //  位=settle 后/banner 前;空 mod=恒等。crit 语义注意:TownNPC.hurt 防后 ×2
+    //  (:82067),此处 dmg 为未预倍基伤,ctx.crit 仅透传)。
+    //  ★红队 R1-F5:免疫窗靶(TownNPC.hurt 体内门 :1451 iframes>0||shimmerRise
+    //  拒收)不发钩=受理位对齐,防幻影
+    const rawDmg0 = st?.dmg ?? dmg;
+    const rawDmg = source === 'playerProj' && !((n.iframes ?? 0) > 0)
+      ? runModModifyHitNpcByProj(game.player, game, projId, n.vanillaId ?? -1, rawDmg0, st?.crit ?? false)
+      : rawDmg0;
     const outDmg = source === 'playerProj' ? applyBannerDamageDealt(game, n, rawDmg) : rawDmg;
     // ★BJ395（2026-09-28,BJ393 同族债五处清偿⑤）锚备案【原版同相,不落刀】：本站
     //   消费对象=TownNPC.hurt（非 Enemy.hurt）——其返值契约=受理（TownNPC.ts:1535
@@ -764,6 +773,10 @@ export function hitPlayer(
     && p.buffs.has(BuffType.Warmth)) {
     dmg = Math.trunc(dmg * 0.7);
   }
+  // ★刀4-A(2026-10-13):敌弹命中玩家伤害修正链(ModifyHitByProjectile 形;倍率连乘;
+  //  位=resistCold 后/hostileDifficulty 缩放前——纯倍率与缩放可交换;空 mod=恒等;
+  //  pvp=Damage_PVP 族/trap=陷阱弹经 ctx 透传供分支)
+  dmg = runModModifyHitPlayerByProj(p, game, evpId ?? -1, dmg, trap, pvp);
   const ifr = p.iframes;
   // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:14912-14917，Damage_EVP 段）：
   //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`

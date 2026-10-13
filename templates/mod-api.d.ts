@@ -79,9 +79,13 @@ export declare interface ModContext {
     onTileHit?(p: ModProjLike, game: any): boolean | void;
   }): void;
   buff(key: string, spec: ModBuffSpec): void;
-  /** B6:玩家侧钩;kind='modifyHurtByNpc'=承伤修正链(仅 mod NPC 进攻面;
-   *  fn(ctx:{player,game,attackerVid,dmg,contact}) → number=修正后伤/undefined=不改) */
-  playerHook(kind: string, fn: (ctx: { player: unknown; game: unknown; attackerVid: number; dmg: number; contact: boolean }) => number | void): void;
+  /** 玩家侧钩(刀4-A 四 kind):
+   *  'modifyHurtByNpc'=承伤修正链(值链;★全 NPC 攻端,ctx.attackerVid≥800=mod 攻端;
+   *    fn(ctx:{player,game,attackerVid,dmg,contact}) → number=修正后伤/undefined=不改)
+   *  'modifyHitNpc'=近战命中增幅链(倍率;ctx:{player,game,vid,dmg,crit?,kb?,armorPen?})
+   *  'modifyHitNpcByProj'=玩家弹命中 NPC 增幅链(倍率;ctx:{player,game,projVid,targetVid,dmg,crit})
+   *  'modifyHitPlayerByProj'=敌弹命中玩家增幅链(倍率;ctx:{player,game,projVid,dmg,trap,pvp}) */
+  playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void): void;
   /** 世界生成 pass 注册(Beaches 后依序执行) */
   registerGenPass(name: string, fn: (store: any, rng: any, gs: any) => void): void;
   system(hooks: ModSystemHooks): void;

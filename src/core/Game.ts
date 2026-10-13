@@ -166,8 +166,10 @@ import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
 import { modShopStockOf } from '../mods/shops';
 import { modBossMusicFor } from '../mods/music';   // ★BGM 面:mod Boss 换曲绑定
+import { modRarityColorOf } from '../mods/rarity';   // ★刀3-1:mod 稀有度档色(拾取飘字消费)
+import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物反查
 import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
-import { MOD_PROJ_ID_BASE, MOD_NPC_ID_BASE } from '../mods/types';
+import { MOD_PROJ_ID_BASE } from '../mods/types';   // ★红队 R1-F7:MOD_NPC_ID_BASE 死 import 清理(域门已撤)
 import { ModProj } from '../entities/ModProj';
 import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
@@ -329,9 +331,9 @@ const POPUP_RARITY_COLORS: Record<number, string> = {
   9: '#05C8FF', 10: '#FF2864',
 };
 const POPUP_RARITY_COLOR_11PLUS = '#B428FF';   // ≥11（Item.cs:692-694）
-/** 稀有度 → 飘字色（表查 + ≥11 档） */
+/** 稀有度 → 飘字色（表查 + ★刀3-1 mod 档色查表 + ≥11 档） */
 function popupRarityColor(rare: number): string {
-  return POPUP_RARITY_COLORS[rare] ?? (rare >= 11 ? POPUP_RARITY_COLOR_11PLUS : '#FFFFFF');
+  return POPUP_RARITY_COLORS[rare] ?? modRarityColorOf(rare) ?? (rare >= 11 ? POPUP_RARITY_COLOR_11PLUS : '#FFFFFF');
 }
 
 /** 词缀显示名（Item.AffixName Item.cs:1195-1203：prefix≤0 → 本名；否则
@@ -13735,6 +13737,12 @@ export class Game implements GameHooks {
    *  反查成 buff 集——light=true 入光宠集，false 入宠物集；非宠物 buff 两集皆无）。
    *  懒建一次（62 件全表扫 vid 1..5700） */
   private static _petBuffLight: Set<number> | null = null;
+  /** ★红队 R2-N3:测试清账面(懒建缓存并入 mod 宠物后,_resetModPetsForTests
+   *  不及此处=同进程二次装载串扰) */
+  static _resetPetBuffKindCachesForTests(): void {
+    Game._petBuffLight = null;
+    Game._petBuffVanity = null;
+  }
   private static _petBuffVanity: Set<number> | null = null;
   private static petBuffKinds(): { light: Set<number>; vanity: Set<number> } {
     if (!Game._petBuffLight || !Game._petBuffVanity) {
@@ -13744,6 +13752,9 @@ export class Game implements GameHooks {
         if (!pi) continue;
         (pi.light ? light : vanity).add(pi.buff);
       }
+      // ★刀3-2(2026-10-13):mod 宠物并入(buff=BuffType 直域;QuickBuff 跳过/装备
+      //   槽门同消费——mod 件 buffType 在集内即视同宠物伴生 buff)
+      for (const mp of modPetEntries()) (mp.light ? light : vanity).add(mp.buff);
       Game._petBuffLight = light;
       Game._petBuffVanity = vanity;
     }
@@ -36866,7 +36877,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★F8 加法形保持单行结构锚（weapon-melee-leftover 结构断言依赖序：kbGlove→Titan→3106）
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
       // ★CalPlayer 基建(一百零四刀):玩家命中伤害修正链(Rage/Adrenaline 增幅消费)
-      dmg = runModModifyHitNpc(this.player, this, swingVid ?? -1, dmg);
+      //  ★刀4-A ctx 加宽:crit/kb/armorPen 透传(旧消费者零感知;空表零成本)
+      dmg = runModModifyHitNpc(this.player, this, swingVid ?? -1, dmg, { crit, kb, armorPen: (eq.armorPen ?? 0) + this.player.meleeArmorPen });
       const killed = e.hurt(dmg, kdir * kb, 0, this, (eq.armorPen ?? 0) + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
       // ★B6 mod OnHitNPC 钩(受理命中后;tModLoader ModItem.OnHitNPC 形,空表零成本):
       //  mod 近战武器命中敌怪的任意逻辑面(damage=chainDmg 词缀后实扣值)
@@ -44232,14 +44244,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （hitDir/floatDealt/floatColor/noLocalFloat——语义见 GameHooks.damagePlayer 注）。 */
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy,
     contactOnly = false, pvp = false, knockback = true,
-    opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number {
+    opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean;
+      /** ★红队 R1-F2 修正(2026-10-13):弹幕域旗——attacker 仅作死亡归因、不进
+       *  modifyHurtByNpc 接触修正链(duke 龙卷等 Damage_EVP 语义直调点;弹域修正
+       *  归 modifyHitPlayerByProj 链,直调面覆盖缺口已登记 recon doc F4 账) */
+      projDomain?: boolean }): number {
     const p = this.player;
     if (p.dead) return 0;
-    // ★CalPlayer 基建(六十三刀):mod NPC 进攻面承伤修正链(ModifyHitByNPC 形;
-    //  仅 attacker≥MOD_NPC_ID_BASE 走钩,原版面零扰动;空表零成本)
-    const modAttackerVid = attacker?.vanillaId ?? -1;
-    if (modAttackerVid >= MOD_NPC_ID_BASE) {
-      dmg = runModModifyHurtByNpc(p, this, modAttackerVid, dmg, contactOnly);
+    // ★CalPlayer 基建(六十三刀):承伤修正链(ModifyHitByNPC 形)。
+    //  ★刀4-A(2026-10-13)扩域:原版攻端亦进链(域门撤至 hooks 侧 size 短路;
+    //  ctx.attackerVid≥800=mod 攻端,由 mod 自行分支;零 mod=size===0 恒等);
+    //  attacker 缺省=环境伤族不经此(与原版 Hurt 攻端面同相)。
+    //  ★红队 R1-F2:opts.projDomain=弹幕语义伤(attacker 仅归因)不进本链
+    if (attacker !== undefined && !opts?.projDomain) {
+      dmg = runModModifyHurtByNpc(p, this, attacker.vanillaId ?? -1, dmg, contactOnly);
     }
     // ★五百四十六:mod 受伤增伤乘区(C# CalamityPlayerHitHurt :1550-1556
     //  damageMult += 0.2 CrushingEgo/ + Demonshade enrage——乘区在 banner 前=
@@ -47163,7 +47181,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private updatePetSlot(slot: 0 | 1, visible: boolean, cur: PetFollower | null): PetFollower | null {
     const item = this.player.inv.miscEquips[slot];
-    const info = item ? petInfoOfVid(ITEM_DEFS[item.id]?.vid ?? -1) : null;
+    const eqVid = item ? ITEM_DEFS[item.id]?.vid ?? -1 : -1;
+    // ★刀3-2(2026-10-13):mod 宠物反查并入(原版表 miss → MOD_PETS;info.mod 分支=
+    //   BuffType 直挂不走 vanilla light/vanity 集门——spec.light 本身即槽语义;
+    //   proj=mod projId 2000+,PetFollower 表外 AI=legacy 肩后悬停兜底)
+    const vanillaInfo = petInfoOfVid(eqVid);
+    const modInfo = vanillaInfo ? null : modPetInfoOf(eqVid);
+    const info = vanillaInfo ? { buff: vanillaInfo.buff, proj: vanillaInfo.proj, light: vanillaInfo.light, mod: false as const }
+      : modInfo ? { buff: modInfo.buff, proj: modInfo.proj, light: modInfo.light, mod: true as const }
+      : null;
     // ★SW-FX2：UpdatePet/UpdatePetLight 补挂面（1457 Player.cs:17414-17425 / :17427-17445）——
     // 装备槽在位（petInfo 反查 = Main.vanityPet/lightPet 成员集 :17417/:17430）+ 未隐藏
     //（!hideMisc = visible :17418/:17431）+ FindBuffIndex==-1（:17420/:17442）→
@@ -47174,18 +47200,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 无载体;且 603 未入仓,登记）。消费面 = SW-FX2 58 缺口重项 40/41/42/127/202 +
     // pets 表对拍 217/219/259/261/268 的 buff 图标显示链
     if (info && visible && item) {
-      const pk = Game.petBuffKinds();
-      if (pk.light.has(info.buff) || pk.vanity.has(info.buff)) {
-        let vb = info.buff;
-        // UpdatePetLight :17436-17441：仙灵铃 27 须三色全缺才重掷（27/102/101 均匀）
-        if (slot === 1 && vb === 27 && !this.player.buffs.has(BuffType.FairyBlue)
-          && !this.player.buffs.has(BuffType.FairyRed) && !this.player.buffs.has(BuffType.FairyGreen)) {
-          vb = [27, 102, 101][Math.floor(Math.random() * 3)];   // Utils.SelectRandom(27,102,101)
+      if (info.mod) {
+        // ★刀3-2:mod 宠物补挂面(BuffType 直挂;60s 周期与原版 AddBuff(num,3600) 同相)
+        if (!this.player.buffs.has(info.buff)) {
+          this.player.buffs.apply(info.buff, 60);
+          this.playUseSound(eqVid, 'tink');
         }
-        const bt = BUFF_BY_VANILLA(vb);
-        if (bt !== undefined && !this.player.buffs.has(bt)) {
-          this.player.buffs.apply(bt, 60);                        // AddBuff(num, 3600t)
-          this.playUseSound((ITEM_DEFS[item.id]?.vid ?? -1), 'tink');    // miscEquips.UseSound（:17422）
+      } else {
+        const pk = Game.petBuffKinds();
+        if (pk.light.has(info.buff) || pk.vanity.has(info.buff)) {
+          let vb = info.buff;
+          // UpdatePetLight :17436-17441：仙灵铃 27 须三色全缺才重掷（27/102/101 均匀）
+          if (slot === 1 && vb === 27 && !this.player.buffs.has(BuffType.FairyBlue)
+            && !this.player.buffs.has(BuffType.FairyRed) && !this.player.buffs.has(BuffType.FairyGreen)) {
+            vb = [27, 102, 101][Math.floor(Math.random() * 3)];   // Utils.SelectRandom(27,102,101)
+          }
+          const bt = BUFF_BY_VANILLA(vb);
+          if (bt !== undefined && !this.player.buffs.has(bt)) {
+            this.player.buffs.apply(bt, 60);                      // AddBuff(num, 3600t)
+            this.playUseSound(eqVid, 'tink');                     // miscEquips.UseSound（:17422）
+          }
         }
       }
     }
@@ -47226,8 +47260,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  次帧重挂（updatePetSlot,音/时长原版语义）
     if ((slot === 0 && this.petHidden) || (slot === 1 && this.lightPetHidden)) {
       const eq = this.player.inv.miscEquips[slot]!;
-      const vb = petInfoOfVid(ITEM_DEFS[eq.id]?.vid ?? -1)?.buff;
-      const bt = vb !== undefined ? BUFF_BY_VANILLA(vb) : undefined;
+      const eqVidT = ITEM_DEFS[eq.id]?.vid ?? -1;
+      const vb = petInfoOfVid(eqVidT)?.buff;
+      // ★刀3-2:mod 宠物隐藏清 buff(buff=BuffType 直域,无需反查)
+      const modBt = vb === undefined ? modPetInfoOf(eqVidT)?.buff : undefined;
+      const bt = vb !== undefined ? BUFF_BY_VANILLA(vb) : modBt;
       if (bt !== undefined) this.player.buffs.remove(bt);
       if (slot === 1 && vb === 27) {
         for (const fv of [102, 101]) {
@@ -48369,9 +48406,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const name = popupAffixName(prefix, Lang.itemNameByKey(def.key));
     const mergeKey = prefix ? `${itemKey}#${prefix}` : itemKey;
     const coinIdx = COIN_KEYS.indexOf(def.key as (typeof COIN_KEYS)[number]);   // :201 flag
-    // ★SW-N4：rareOverride ?? 基表（0=合法档位,?? 不误吞;覆写含词缀档位移终值）
+    // ★SW-N4：rareOverride ?? 基表（0=合法档位,?? 不误吞;覆写含词缀档位移终值）。
+    //  ★红队 R2-M2:mod 物品 def.rare 直读(注册期已解析 12+ 档 id)——旧漏读=
+    //  mod 物品拾取飘字恒白,mod 档色只接了 reforge 半条链
     const rare = rareOverride
-      ?? (def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : 0);
+      ?? (def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : (def.rare ?? 0));
     // ---- 合并扫描（:202-247）----
     for (const d of this.dmgNumbers) {
       if (!d.label) continue;

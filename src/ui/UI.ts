@@ -25,6 +25,8 @@ import {
   type CraftingGridControl, type CraftingTileFilter,
 } from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域);★SW-FX38 滚轮档数/吸附步进
 import { petInfoOfVid } from '../data/vanillaPets';
+import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物
+import { MOD_RARITY_ID_BASE } from '../mods/types';   // ★刀3-1/R3-M3:词缀 cap 边界段常量
 import { showJourneyQuickGate } from './QuickGate';
 import { prefGet, prefSet } from '../save/PrefsStore';   // ★BJ627 偏好域 IDB 单写
 import vanillaRareJson from '../data/vanilla-itemrare.json';
@@ -3347,7 +3349,7 @@ export class UI {
    *    ★SW-N4:opts.forPopup=PopupText 飘字链跳过本步——覆写是 MouseText 绘制期
    *    行为,飘字链 PrepareEffects PopupText.cs:388-404 读 Item.rare 字段值,expert
    *    走 somePopup.expert 旗不改色,见方法尾注） */
-  private tooltipRareOf(def: { key: string; value?: number }, prefix?: number, opts?: { forPopup?: boolean }): number {
+  private tooltipRareOf(def: { key: string; value?: number; rare?: number }, prefix?: number, opts?: { forPopup?: boolean }): number {
     let rare = 0;
     const isVi = def.key.startsWith('vi_');
     const vid = isVi ? parseInt(def.key.slice(3), 10) : -1;
@@ -3358,10 +3360,21 @@ export class UI {
         rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
       }
       rare = variantRareOfVid(vid) ?? rare;
+    } else if (def.rare !== undefined) {
+      // ★刀3-1(2026-10-13):mod 物品 def.rare 直读(旧实现漏读=mod 物品 tooltip 恒白;
+      //  rare `{$rarity}` 已在注册期解析成 11+ 档 id,色面走 mouseTextInnerColor mod 查表)
+      rare = def.rare;
     }
     if (prefix) {
       const pv = prefixValueMul(prefix);
-      if (pv >= 1.2) rare = Math.min(11, rare + 2);
+      // ★刀3-1:词缀档位移分域。★红队 R2-M1 修正:tML ModRarity.GetPrefixedRarity
+      //  缺省=Type(档位不变,ModRarity.cs:31;Item.cs.patch:995-1017 baseRarity≥
+      //  ItemRarityID.Count(12) 走 ModRarity 面)——mod 档(≥12)整体跳过位移
+      //  (旧实现 12+2=14 泛紫/12−2=10 落原版红=reforge 丢档色);原版域(≤11)
+      //  clamp 11 逐位保持(tML cap Purple 同相)
+      if (rare >= MOD_RARITY_ID_BASE) {
+        // mod 档:档位恒等(零位移)
+      } else if (pv >= 1.2) rare = Math.min(11, rare + 2);
       else if (pv >= 1.05) rare = Math.min(11, rare + 1);
       else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
       else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
@@ -5948,6 +5961,8 @@ export class UI {
   /** vanilla-pets.json 全表伴生 buff 集（普通循环跳过哨兵；懒建一次，同
    *  Game.petBuffKinds 口径） */
   private static _petVanillaBuffs: Set<number> | null = null;
+  /** ★红队 R2-N3:测试清账面(懒建哨兵集并入 mod 宠物后) */
+  static _resetPetSentinelForTests(): void { UI._petVanillaBuffs = null; }
   private static petVanillaBuffs(): Set<number> {
     if (!UI._petVanillaBuffs) {
       const s = new Set<number>();
@@ -5955,6 +5970,7 @@ export class UI {
         const pi = petInfoOfVid(vid);
         if (pi) s.add(pi.buff);
       }
+      for (const mp of modPetEntries()) s.add(mp.buff);   // ★刀3-2:mod 宠物伴生 buff 入哨兵集
       UI._petVanillaBuffs = s;
     }
     return UI._petVanillaBuffs;
@@ -6001,15 +6017,23 @@ export class UI {
 
   /** 槽位当前应显示的宠物 buff：装备在槽 + 跟随体存活（hideMisc/玩家死亡时
    *  Game.updatePetSlot 即灭跟随体，等价原版 TogglePet 的 ClearBuff） */
-  private activePetBuff(slot: 0 | 1): { buff: number; proj: number } | null {
+  private activePetBuff(slot: 0 | 1): { buff: number; proj: number; mod: boolean } | null {
     const g = this.game;
     const item = g.player.inv.miscEquips[slot];
     if (!item) return null;
-    const info = petInfoOfVid(vidOf(item.id));
+    // ★刀3-2(2026-10-13):mod 宠物反查并入(原版表 miss → MOD_PETS;buff=BuffType 域)。
+    //  ★红队 R2-C1:mod 旗随行——原版件 buff=原版 buff id(数值域与仓内 BuffType
+    //  枚举不同!48/83 数值碰撞),mod 件=BuffType;图标链据此分域,禁混查
+    const vid = vidOf(item.id);
+    const vi = petInfoOfVid(vid);
+    const mi = vi ? null : modPetInfoOf(vid);
+    const info = vi ? { buff: vi.buff, proj: vi.proj, mod: false }
+      : mi ? { buff: mi.buff, proj: mi.proj, mod: true }
+      : null;
     if (!info) return null;
     const f = slot === 0 ? g.petFollower : g.lightPetFollower;
     if (!f || f.dead || f.projId !== info.proj) return null;
-    return { buff: info.buff, proj: info.proj };
+    return info;
   }
 
   /** 每帧轻通道（红队 A1 定罪 2026-08-31：原版 DrawBuffIcon :44042-44060 每帧跑，
@@ -6344,7 +6368,11 @@ export class UI {
       u.block.dataset.swTipDesc = nm ? (Lang.buffDesc(pb.buff) ?? '') : '';
       // buffNoTimeDisplay：宠物 buff 不显示剩余时长（原版 TryGetBuffTime 不出文字）
       u.time.textContent = '';
-      const want = remasterBuffIcon?.(pb.buff) ?? `/sprites/vanilla/Buff_${pb.buff}.png`;
+      // ★刀3-2:mod 宠物 buff=BuffType 域 → 经 BUFF_DEFS 反解 pseudoVanilla 走 mod 图标
+      //  通道(modBuffIconUrl objectURL)。★红队 R2-C1 域门修正:仅 mod 件反解——
+      //  原版件 buff=原版 id 直用(数值域与 BuffType 枚举不同,混查=47/83 图标错挂)
+      const petBuffVanilla = pb.mod ? (BUFF_DEFS[pb.buff as BuffType]?.vanillaBuff ?? pb.buff) : pb.buff;
+      const want = remasterBuffIcon?.(petBuffVanilla) ?? `/sprites/vanilla/Buff_${petBuffVanilla}.png`;
       if (!(u.icon as HTMLImageElement).src.endsWith(want)) {
         (u.icon as HTMLImageElement).onerror = () => {
           // 素材缺失兜底：退回宠物投射物贴图 Projectile_<proj>.png

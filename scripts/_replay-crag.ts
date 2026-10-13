@@ -178,9 +178,19 @@ const biomeStart = 4200 - Math.floor(4200 / 5) - 25, biomeEdge = biomeStart + Ma
 console.log(`[replay] crag 区 x∈[${biomeStart},${biomeEdge}] uw=${uw}`);
 
 const rng = new RNG(gs.seed as number);
-(globalThis as Record<string, unknown>).__cragDbg = {};
+// ★671:掷数计数(对拍真链 SPY 谱)
+(globalThis as { __drawN?: number }).__drawN = 0;
+{
+  const proto = rng as unknown as Record<string, (...a: unknown[]) => unknown>;
+  for (const m of Object.getOwnPropertyNames(Object.getPrototypeOf(rng))) {
+    const fn = proto[m];
+    if (typeof fn === 'function' && /^(next|int|intRange|nextBool|nextFloat|nextDouble)/i.test(m)) {
+      proto[m] = function (this: unknown, ...a: unknown[]) { (globalThis as { __drawN?: number }).__drawN = ((globalThis as { __drawN?: number }).__drawN ?? 0) + 1; return fn.apply(this, a); };
+    }
+  }
+}
+if ((globalThis as unknown as { __cragPre?: boolean }).__cragPre) (rng as any).next();   // ★单样本先行假设检验旋钮(实测=伪改善,默认关)
 (cragFn as (...a: unknown[]) => void)(store, rng, gs);
-console.log('[replay] placeCragObject 失败谱:', JSON.stringify((globalThis as any).__cragDbg));
 
 // ── diff 剖面 ──
 let diff = 0, diffIn = 0, diffOut = 0;

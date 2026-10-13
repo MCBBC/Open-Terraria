@@ -7,7 +7,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   judderMissFrame, judderFrameEnd, judderSmoothSetForTest, judderResetForTest,
-  judderClockForTest, judderCanvasFactoryForTest, JUDDER_MISS_RATIO, JUDDER_BLEND_ALPHA,
+  judderClockForTest, judderCanvasFactoryForTest, judderHalfCapSetForTest,
+  JUDDER_MISS_RATIO, JUDDER_BLEND_ALPHA,
 } from '../src/render/JudderSmooth';
 
 /** 记录桩 ctx(canvas 尺寸可变;drawImage/globalAlpha/setTransform/save/restore 记账;
@@ -175,5 +176,33 @@ describe('judderFrameEnd 帧尾序列(v2 lazy-arming;桩画布账面)', () => {
     t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽但重建:无混合,捕获 c3
     expect(calls.filter((c) => c.includes('@0.50'))).toEqual([]);
     expect(calls[calls.length - 1]).toBe('cap:c3');
+  });
+
+  it('★v3 捕获半分辨率:工厂收 ½ 尺寸槽,混合为 9 参上采样(判定/乒乓语义不变)', () => {
+    judderSmoothSetForTest(true);
+    judderHalfCapSetForTest(true);
+    const calls: string[] = [];
+    const sizes: Array<[number, number]> = [];
+    judderCanvasFactoryForTest((w, h) => { sizes.push([w, h]); return stubFactory(calls)(w, h); });
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 垫底(gap 8 无跳槽,零拷贝)
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:武装,槽=½×½
+    expect(sizes[0]).toEqual([32, 32]);
+    t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:混合(½ 源上采样)
+    const blendCalls = calls.filter((c) => c.startsWith('draw:'));
+    expect(blendCalls.length).toBe(1);       // 混合发生(recordingCtx 的 draw 记账)
+  });
+
+  it('★v3 逃生门(?smoothfullcap=1)=全分辨率捕获槽,语义同旧', () => {
+    judderSmoothSetForTest(true);
+    judderHalfCapSetForTest(false);
+    const sizes: Array<[number, number]> = [];
+    judderCanvasFactoryForTest((w, h) => { sizes.push([w, h]); return stubFactory([])(w, h); });
+    const { ctx } = recordingCtx(64, 64);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);    // 垫底
+    t += 17; judderFrameEnd(ctx, P120, t);
+    expect(sizes[0]).toEqual([64, 64]);      // 全分辨率
   });
 });

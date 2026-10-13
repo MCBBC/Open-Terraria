@@ -174,7 +174,7 @@ async function decodeBatch(
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
   if (!result || result.allocation === null) return;
-  const { items, tiles, npcs } = result.allocation;
+  const { items, tiles, npcs, gores } = result.allocation;
   const tileMetaTable = atlas.vanilla.tiles as unknown as Record<string, unknown>;
   for (const pack of getLoadedPacks()) {
     const modId = pack.manifest.id;
@@ -222,6 +222,15 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       for (const reg of modProjRegs()) {
         if (reg.modId !== modId) continue;
         aliasJob(atlas, modId, { fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
+      }
+      // ★刀3-3(2026-10-13):mod gore 贴图(SW 别名支;消费=atlas.ensureVImage
+      //  `vanilla/Gore_<id>.png` 同原版键形;尺寸已在 register 期 IHDR 头解析)
+      for (const path of discoverPackJsonPaths(pack, 'gores')) {
+        const spec = readPackJson<import('./types').ModGoreContent>(pack, path);
+        const goreId = gores.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.texture && goreId !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Gore_${goreId}.png`, texPath: spec.texture });
+        }
       }
       // ★四百九十七:mod 盔甲渲染链(hs/bs/ls→Armor_Head_/Armor_Armor_/Armor_Legs_;
       //  贴图=pack textures/armor/<key>_<Part>.png(extract-armor-textures 产);
@@ -352,6 +361,17 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       projJobs.push({ fileKey: `vanilla/Projectile_${reg.projId}.png`, texPath: reg.spec.texture });
     }
     await decodeBatch(atlas, pack, modId, projJobs);
+    // —— ★刀3-3(2026-10-13):mod gore 贴图(内存回退支;SW 支=上方 aliasJob) ——
+    const goreJobs: Array<{ fileKey: string; texPath: string }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'gores')) {
+      const spec = readPackJson<import('./types').ModGoreContent>(pack, path);
+      const goreId = gores.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.texture && goreId !== undefined) {
+        referenced.add(spec.texture);
+        goreJobs.push({ fileKey: `vanilla/Gore_${goreId}.png`, texPath: spec.texture });
+      }
+    }
+    await decodeBatch(atlas, pack, modId, goreJobs);
     // —— mod 音频(B6):pack sounds/*.ogg → decodeAudioData → Sfx.buffers ——
     for (const path of discoverPackJsonPaths(pack, 'sounds') ?? []) { /* ogg 不走 json */ }
     // mod 音频(B6):pack sounds/*.ogg → modWavData(main.ts 在 game 创建后 decodeAudioData 注入 Sfx.buffers)

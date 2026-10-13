@@ -1714,6 +1714,16 @@ export class MinionProj extends Entity {
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
   attackFlash = 0;
+  /** ★BJ650件1 返工（2026-10-13 实报）：whoAmI 槽位快照——原版 = 出生拍占用的
+   *  Main.projectile[1000] 首个空闲槽（NewProjectile :10873 起扫槽,活期稳定、
+   *  复用循环）,GetFloatingDaggerMinionGlowColor（:80377）按 whoAmI%6 取六档
+   *  蓝→品红。本仓 this.id = EntityManager 全实体递增计数器（Entity.ts:150,
+   *  敌/掉落/NPC/弹共享）→ id%6 档位随会话总生成数漂移（长会话恒落高档 4/5
+   *  =品红——用户实报「本体右上品红半透影子=不同颜色」真凶;辉光十字与残影
+   *  环两消费位同染）。对映 = 出生拍 entities.projectiles 注册表插入位（紧凑
+   *  数组槽语义, EntityManager.add push/压紧 ≈ 原版首空闲槽分布）——首拍懒
+   *  快照一次,未入列（夹具直驱）回退 0 档。 −1 = 未快照哨兵。 */
+  whoAmI = -1;
   /** 随从世界点光（Game 实体光通道读 lightRGB——原版各 AI 的 Lighting.AddLight）：
    *  755 血蝙蝠 = Crimson CastLightOpen（:48604 GetColor=Color.Crimson(220,20,60)）；
    *  613 星尘细胞 (0.2,0.6,0.7)（:62191）；623 守护者 (0.9,0.9,0.7)（:41997）；
@@ -8209,6 +8219,12 @@ export class MinionProj extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     void dt;
+    // ---- ★BJ650件1 返工：whoAmI 槽位懒快照（首拍一次）——注册表插入位 =
+    //  原版 Main.projectile 首空闲槽对映（语义详字段注）。 indexOf 一次 O(n) 可忽略。 ----
+    if (this.whoAmI < 0) {
+      this.whoAmI = Math.max(0,
+        (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.indexOf(this));
+    }
     // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
     //  tick 头插位（杀拍覆盖/采样位/域论证见字段块头注）;阻尼=位移处乘档位
     //  （palGroundStep/mushBoiStep/digtoiseStep/ai067WalkChase/spiderStep/frogStep/
@@ -10097,7 +10113,7 @@ export class MinionProj extends Entity {
           opacity: 1,
           vxLen: Math.hypot(this.vx, this.vy),
           spriteDirection: this.facing >= 0 ? 1 : -1,
-          whoAmI: this.id,   // ★BJ650件1：864 辉光色相 whoAmI%6 消费（余 id 不读）
+          whoAmI: Math.max(0, this.whoAmI),   // ★BJ650件1 返工：槽位快照消费（:80377 whoAmI%6;余 id 不读）——旧 this.id=全实体计数器档位漂移（字段注）
         });
       }
     }
@@ -10125,7 +10141,7 @@ export class MinionProj extends Entity {
       const sheet864 = projSprite(864);
       if (sheet864 && sheet864.height >= 64) {
         const fh864 = Math.floor(sheet864.height / 2);        // projFrames[864]=2（Main.cs:8804）
-        const hue = 0.66 + 0.33 * ((this.id % 6) / 6);        // :80378
+        const hue = 0.66 + 0.33 * ((Math.max(0, this.whoAmI) % 6) / 6);        // :80378（★返工：槽位快照,旧 this.id 档位漂移）
         const rgb864 = hslToRgb255(hue, 0.7, 0.6);
         const a864 = Math.trunc(Math.trunc(255 * 0.7) / 4);   // (byte)178 → /4=44（byte 整除）
         for (let k = 0; k < 4; k++) {
