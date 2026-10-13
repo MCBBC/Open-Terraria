@@ -160,7 +160,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem, runVanillaOverrideValue,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem, runVanillaOverrideValue, runModOnKillAnyNpc, runModPlayerRespawn, runModPlayerUpdateDead,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -10972,6 +10972,8 @@ export class Game implements GameHooks {
       if (player.respawnTimer > 0) {
         player.respawnTimer = Math.max(0, player.respawnTimer - 1);
       }
+      // ★B/C 批:ModPlayer.UpdateDead 通知链(死亡态每 tick;空表零成本)
+      runModPlayerUpdateDead(player, this, player.respawnTimer, player.deadTime);
       // 1457: 死亡界面按跳跃跳过复活倒计时（Main.cs:46124-46134 JustBecameTrue(Jump)
       // → LocalPlayer.SkipRespawnTime()；门 = Player.AllowsRespawnTimerSkip，
       // DeadSkipLockoutTime=90 :1627——elapsed 语义走 deadTime）。幽灵相/PvP 死亡/
@@ -46090,6 +46092,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   onEnemyKilled(key: string, enemy?: Enemy, opts?: { petrifyBypassInteractionGate?: boolean }) {
     // ★B6 mod NPC 死亡钩(击杀单口;空表零成本)
     if (enemy) runModOnNpcDeath(enemy.vanillaId, enemy, this);
+    // ★B 批:GlobalNPC OnKill 全域对(原版域含;事件链 try/catch)
+    if (enemy) runModOnKillAnyNpc(enemy, this);
     // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);
@@ -52725,6 +52729,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // 硬核角色已消亡（Player.cs:16894 difficulty==2 死亡后 ghost=true 不再重生；
     // 本仓最小集 = hardcoreDead 标记 → 不允许重生，死亡画面停留）
     if (p.appearance?.hardcoreDead) return;
+    // ★B/C 批:ModPlayer.Respawn 通知链(重生单口;空表零成本)。
+    //  ★红队 R-B-F2 勘位:hardcoreDead 早退【后】——tML OnRespawn 在 Spawn 的
+    //  if(dead) 门内=仅真重生可达;旧位(早退前)对 hardcore 幽灵相每 tick 假发
+    //  (timer≤0 每帧直调 60 次/s+按跳+1)。
+    runModPlayerRespawn(p, this);
     // Spawn 清观战（Player.cs:37186-37187）：复活即回自机镜头——死亡观战遗留的
     // spectatingSlot 不清会带着冻结输入的存活观战态重生（msg150 focus(-1)
     // 同时把服务器 AOI 焦点还原到自身，原版由双端各自 Spawn 清字段等价）
@@ -52795,15 +52804,25 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         && ntWireGate);
     // ★SW-FX19：线材可见度四态注入（Main.cs:59126-59140 DrawWires 头——非装备透镜
     //  时 num2..num6 恒 1（Normal）；装备后逐色读 builderAccStatus[4]/[5]/[6]/[7]/[9]：
-    //  0 Bright=White / 1 Normal=光照色（本仓线层无逐格光照采样,Normal≡Bright 登记偏差）
-    //  / 2 Faded=×0.5 / 3 Hidden=Transparent 不画。消费面 Renderer.drawWires。）
+    //  0 Bright=White / 1 Normal=光照色（★BJ583 已落双通道：light 档世界层吃
+    //  compositeLight 乘光=原版 GetColor 等效，旧「Normal≡Bright 登记偏差」已清）
+    //  / 2 Faded=×0.5 / 3 Hidden=Transparent 不画。消费面 Renderer.drawWiresPass。）
+    // ★BJ585 蓝/绿互换刀（用户实报图标态「经典/褪色像透明」连带定谳）：注入序=线色位序
+    //  [红线,蓝线,绿线,黄线,致动器]，但 status[5]=【蓝线】、status[6]=【绿线】——
+    //  Main.cs:59207 switch(num2=status[4])→tile.wire 红 / :59276 switch(num3=status[5])
+    //  →tile.wire2 蓝 / :59377 switch(num4=status[6])→tile.wire3 绿 / :59478 num5=status[7]
+    //  →黄 / :59533 num6=status[9]→致动器。反编译枚举名 WireVisibility_Green=5/
+    //  WireVisibility_Blue=6（Player.cs:44-48）与行为错位=原版自身命名 quirk（hover
+    //  :48304-48306 num3=5→Game.BlueWires、sheet 实测列5=蓝图标 均随行为走）——
+    //  旧码按枚举名注入=蓝/绿两线可见度模式互换（点蓝图标动绿线）。测试锁
+    //  tests/bj583 §5 ⑤。
     const w8 = this.player.equipStats.mechShowWires;
     this.renderer.wireModes = w8
-      ? [this.player.builderAccStatus[BACC.WireVisibility_Red],
-         this.player.builderAccStatus[BACC.WireVisibility_Blue],
-         this.player.builderAccStatus[BACC.WireVisibility_Green],
-         this.player.builderAccStatus[BACC.WireVisibility_Yellow],
-         this.player.builderAccStatus[BACC.WireVisibility_Actuators]]
+      ? [this.player.builderAccStatus[BACC.WireVisibility_Red],        // [0]红线 =s[4]
+         this.player.builderAccStatus[BACC.WireVisibility_Green],      // [1]蓝线 =s[5]（枚举名 Green 与行为错位）
+         this.player.builderAccStatus[BACC.WireVisibility_Blue],       // [2]绿线 =s[6]（枚举名 Blue 与行为错位）
+         this.player.builderAccStatus[BACC.WireVisibility_Yellow],     // [3]黄线 =s[7]
+         this.player.builderAccStatus[BACC.WireVisibility_Actuators]]  // [4]致动器 =s[9]
       : [1, 1, 1, 1, 1];
     // ★SW-FX19：标尺线/标尺网格注入（DrawInterface_4_Ruler :47046 门 rulerLine &&
     //  status[0]==0；DrawInterface_3_LaserRuler :47148 门 rulerGrid && status[1]==0。

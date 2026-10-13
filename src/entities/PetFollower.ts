@@ -27,6 +27,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projectileData } from '../data/vanillaProjectiles';
+import { modProjSpecOf } from '../mods/hooks';   // ★R-A-D5:mod 弹判定盒透传
 import { dyeChannelsOf, getProjDesiredDyeVid, dyedProjCanvas, type DyeInvSource } from '../data/projDye';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
@@ -351,8 +352,11 @@ export class PetFollower extends Entity {
     super();
     this.x = x; this.y = y;
     const pd = projectileData(projId);
-    this.w = pd?.width ?? 16;
-    this.h = pd?.height ?? 16;
+    // ★R-A-D5(2026-10-13):mod 弹(spec 2000+)判定盒从 modProjSpec 透传(旧 pd null→
+    //  16×16 恒等盒;mod proj spec.width/height 被忽略=判定盒/帧序近似)
+    const spec = modProjSpecOf(projId);
+    this.w = spec?.width ?? pd?.width ?? 16;
+    this.h = spec?.height ?? pd?.height ?? 16;
     this.params = resolveParams(projId);
   }
 

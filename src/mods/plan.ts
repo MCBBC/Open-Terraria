@@ -2,12 +2,12 @@
 // 拓扑排序(Kahn)+ 确定性 id 分配(拓扑序内 mod id 字典序;mod 内内容键字典序)
 // =联机双端一致性与存档 id 稳定性的根(design.md §2)。
 import type {
-  ModBuffContent, ModGoreContent, ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
-  ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, ModWallContent, RegistrationPlan,
+  ModBuffContent, ModGoreContent, ModIdAllocation, ModItemContent, ModMountContent, ModNpcContent, ModPack, ModProjContent,
+  ModHairContent, ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, ModWallContent, RegistrationPlan,
 } from './types';
 import {
   MOD_BUFF_VANILLA_BASE, MOD_GORE_ID_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
-  MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX, MOD_WALL_STABLE_BASE, MOD_WALL_STABLE_MAX,
+  MOD_HAIR_BASE, MOD_HAIR_MAX, MOD_MOUNT_STABLE_BASE, MOD_MOUNT_STABLE_MAX, MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX, MOD_WALL_STABLE_BASE, MOD_WALL_STABLE_MAX,
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
@@ -63,6 +63,26 @@ function parseWall(modId: string, raw: unknown): ModWallContent {
   if (o.mapColor !== undefined && (typeof o.mapColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(o.mapColor))) fail(modId, 'wall', key);
   if (o.largeFrame !== undefined && o.largeFrame !== 0 && o.largeFrame !== 1 && o.largeFrame !== 2) fail(modId, 'wall', key);
   return o as unknown as ModWallContent;
+}
+
+/** ★第三批:mod 坐骑(content/mounts/*.json) */
+function parseMount(modId: string, raw: unknown): ModMountContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'mount', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'mount', key);
+  if (typeof o.buff !== 'string' || o.buff.length === 0) fail(modId, 'mount', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'mount', key);
+  if (typeof o.runSpeed !== 'number' || typeof o.acceleration !== 'number') fail(modId, 'mount', key);
+  return o as unknown as ModMountContent;
+}
+
+/** ★第三批:mod 发型(content/hairs/*.json) */
+function parseHair(modId: string, raw: unknown): ModHairContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'hair', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'hair', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'hair', key);
+  return o as unknown as ModHairContent;
 }
 
 function parseNpc(modId: string, raw: unknown): ModNpcContent {
@@ -150,7 +170,7 @@ export function topoSortMods(manifests: ModPack[]): string[] {
 export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const order = topoSortMods(packs);
   const byId = new Map(packs.map((p) => [p.manifest.id, p]));
-  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map(), walls: new Map() };
+  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map(), walls: new Map(), mounts: new Map(), hairs: new Map() };
   const itemSpecs: RegistrationPlan['itemSpecs'] = [];
   const tileSpecs: RegistrationPlan['tileSpecs'] = [];
   const npcSpecs: RegistrationPlan['npcSpecs'] = [];
@@ -161,6 +181,8 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const raritySpecs: RegistrationPlan['raritySpecs'] = [];
   const goreSpecs: RegistrationPlan['goreSpecs'] = [];
   const wallSpecs: RegistrationPlan['wallSpecs'] = [];
+  const mountSpecs: RegistrationPlan['mountSpecs'] = [];
+  const hairSpecs: RegistrationPlan['hairSpecs'] = [];
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
@@ -206,6 +228,34 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       if (wallId > MOD_WALL_STABLE_MAX) throw new ModPlanError(`mod 墙段溢出(>${MOD_WALL_STABLE_MAX}): ${fullKey}`);
       allocation.walls.set(fullKey, wallId);
       wallSpecs.push({ modId, spec, wallId, fullKey });
+    }
+    // ★第三批:mounts(先于 items——mountItem 引用解析;全键字典序分配 66+ 段)
+    const mountSpecsOfPack: Array<{ spec: ModMountContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'mounts')) {
+      mountSpecsOfPack.push({ spec: parseMount(modId, readPackJson(pack, path)) });
+    }
+    mountSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of mountSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.mounts.has(fullKey)) throw new ModPlanError(`mod ${modId} 坐骑键重复: ${spec.key}`);
+      const mountId = MOD_MOUNT_STABLE_BASE + allocation.mounts.size;
+      if (mountId > MOD_MOUNT_STABLE_MAX) throw new ModPlanError(`mod 坐骑段溢出(>${MOD_MOUNT_STABLE_MAX}): ${fullKey}`);
+      allocation.mounts.set(fullKey, mountId);
+      mountSpecs.push({ modId, spec, mountId, fullKey });
+    }
+    // ★第三批:hairs(全键字典序分配 228-255 段)
+    const hairSpecsOfPack: Array<{ spec: ModHairContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'hairs')) {
+      hairSpecsOfPack.push({ spec: parseHair(modId, readPackJson(pack, path)) });
+    }
+    hairSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of hairSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.hairs.has(fullKey)) throw new ModPlanError(`mod ${modId} 发型键重复: ${spec.key}`);
+      const hairId = MOD_HAIR_BASE + allocation.hairs.size;
+      if (hairId > MOD_HAIR_MAX) throw new ModPlanError(`mod 发型段溢出(>${MOD_HAIR_MAX}): ${fullKey}`);
+      allocation.hairs.set(fullKey, hairId);
+      hairSpecs.push({ modId, spec, hairId, fullKey });
     }
     // items:全键字典序分配 stable id
     const itemSpecsOfPack: Array<{ path: string; spec: ModItemContent }> = [];
@@ -294,7 +344,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       }
     }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs, mountSpecs, hairSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----
@@ -414,6 +464,15 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
       if (!plan.allocation.gores.has(full)) {
         throw new ModPlanError(`mod ${n.modId} NPC ${n.spec.key} deathGore 引用未注册 gore: ${d.gore}`);
       }
+    }
+  }
+  // ★第三批:物品 mountItem 引用校验
+  for (const it of plan.itemSpecs) {
+    const mi = it.spec.mountItem;
+    if (mi === undefined) continue;
+    const full = mi.startsWith('mod_') ? mi : `mod_${it.modId}_${mi}`;
+    if (!plan.allocation.mounts.has(full)) {
+      throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key} mountItem 引用未注册坐骑: ${mi}`);
     }
   }
   // ★刀3-墙(R3-M2 同族收编):物品 placeWall 引用校验(mod 墙键/原版墙键双形)

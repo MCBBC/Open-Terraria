@@ -33,6 +33,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 // ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
 //  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
@@ -240,7 +241,9 @@ export class PrismProng extends Entity {
           //  mock hurt 无写支故测试绿;同刀 R「旧 pierce=0 受理写 10」判谳）；②死亡
           //  转换写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死命中拍误判。
           const gate = snapshotVanillaGate(e);
-          e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+          dmg = runModModifyHitNpcByProj(game.player, game, this.projId,
+            (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);   // ★D2:独立结算面补钩
+                    e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
           const vanillaGated = vanillaGateRejected(gate);
           // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
           // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t

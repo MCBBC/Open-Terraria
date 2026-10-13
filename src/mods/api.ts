@@ -31,7 +31,7 @@ import {
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
   registerModScreenFx,
-  registerModNpcDraw, registerModItemDraw, registerVanillaOverride,
+  registerModNpcDraw, registerModItemDraw, registerVanillaOverride, registerGlobalNpcHooks, registerModPlayerPreHurt, registerModPlayerPostHurt, registerModPlayerRespawn, registerModPlayerUpdateDead, registerModPlayerModifyMoveSpeed,
   type ModScreenFxPass, type ModSystemHooks, type ModUseCtx, type ModDrawCtx,
 } from './hooks';
 import { modUiPanel, modUiCloseAllOf } from './ui';   // ★刀1:mod UI 宿主面板
@@ -131,6 +131,19 @@ export interface ModContext {
    *  per-mod 单注册,值链=后钩吃前钩产物 */
   vanillaOverride(slot: 'Player.ApplyLifeAndOrMana' | 'Player.UpdateLifeRegen', anchor: number,
     fn: (ctx: Record<string, unknown>) => number | void): void;
+  /** ★B/C 批:全局 NPC 钩(tML GlobalNPC 形;全域 NPC 含原版) */
+  globalNpc(spec: {
+    /** 原版 AI 前;返 false=本 tick 跳过 AI 派发 */
+    preAi?: (e: unknown, game: unknown) => boolean | void;
+    /** AI 派发完成后 */
+    postAi?: (e: unknown, game: unknown) => void;
+    /** 防御结算后伤害值链(fn(ctx:{value}) → number=修正后值;DR 族) */
+    incomingHit?: (e: unknown, ctx: { value: number }) => number | void;
+    /** 受击任意来源全域(fromPlayer 门不设;ctx:{damage,crit,killed,projId}) */
+    onHitByAny?: (e: unknown, ctx: { damage: number; crit: boolean; killed: boolean; projId: number }) => void;
+    /** 击杀(原版域含) */
+    onKill?: (e: unknown, game: unknown) => void;
+  }): void;
   /** 注册 mod buff(本地玩家;onTick 逐 tick;图标/名称/buff 栏全链) */
   buff(key: string, spec: ModBuffSpec): void;
   /** 系统/世界生命周期钩子(全可选) */
@@ -217,12 +230,21 @@ export interface ModContext {
   /** ★CalPlayer 基建(六十三刀):玩家侧钩;kind='modifyHurtByNpc'=承伤修正链
    *  (fn(ctx: {player, game, attackerVid, dmg, contact}) → number=修正后伤/
    *  undefined=不改;★刀4-A 扩域:全部 NPC 攻端进入,attackerVid≥800=mod 攻端) */
-  /** playerHook 四 kind(★刀4-A 扩容):
+  /** playerHook 九 kind(★刀4-A+刀B/C 扩容):
    *  modifyHurtByNpc=承伤修正链(值链;全 NPC 攻端)
    *  modifyHitNpc=近战命中伤害增幅链(倍率链;ctx 含 crit/kb/armorPen)
    *  modifyHitNpcByProj=玩家弹命中 NPC 增幅链(倍率;ctx: projVid/targetVid/dmg/crit)
-   *  modifyHitPlayerByProj=敌弹命中玩家增幅链(倍率;ctx: projVid/dmg/trap/pvp) */
-  playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc' | 'modifyHitNpcByProj' | 'modifyHitPlayerByProj',
+   *  modifyHitPlayerByProj=敌弹命中玩家增幅链(倍率;ctx: projVid/dmg/trap/pvp)
+   *  ★B/C 批五 kind:
+   *  preHurt=承伤值链(闪避族前;返 ≤0=拒伤[无无敌帧=tML Cancelled 同相;满填帧
+   *    需求走 postHurt 自管 AddBuff])
+   *  postHurt=伤害落地通知(ctx.reduction=实扣;仅存活拍[tML statLife>0 同相];
+   *    载荷贫面:无 crit/pvp/hitDirection——需攻端信息走 modifyHurtByNpc 系)
+   *  respawn=重生通知(hardcore 不发)
+   *  updateDead=死亡态每 tick(ctx.respawnTimer/deadTime)
+   *  modifyMoveSpeed=移速乘区链(返乘数,≥0 钳;消费面=maxRun,dash 加速/骑乘不吃) */
+  playerHook(kind: 'modifyHurtByNpc' | 'modifyHitNpc' | 'modifyHitNpcByProj' | 'modifyHitPlayerByProj'
+    | 'preHurt' | 'postHurt' | 'respawn' | 'updateDead' | 'modifyMoveSpeed',
     fn: (ctx: Record<string, unknown>) => number | void): void;
   /** ★一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */
   registerGenPass(name: string, fn: (store: unknown, rng: unknown, gs: unknown) => void): void;
@@ -365,6 +387,10 @@ export function createModContext(
     vanillaOverride(slot, anchor, fn) {
       registerVanillaOverride(slot, anchor, modId, fn as Parameters<typeof registerVanillaOverride>[3]);
     },
+    // ★B/C 批:全局 NPC 钩(GlobalNPC 形;per-mod 单注册)
+    globalNpc(spec) {
+      registerGlobalNpcHooks(modId, spec as Parameters<typeof registerGlobalNpcHooks>[1]);
+    },
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },
     screenFx(pass) { registerModScreenFx(pass); },
@@ -485,6 +511,18 @@ export function createModContext(
         registerModModifyHitNpcByProj(modId, fn as Parameters<typeof registerModModifyHitNpcByProj>[1]);
       } else if (kind === 'modifyHitPlayerByProj') {
         registerModModifyHitPlayerByProj(modId, fn as Parameters<typeof registerModModifyHitPlayerByProj>[1]);
+      }
+      // ★B/C 批:ModPlayer 级五 kind
+      else if (kind === 'preHurt') {
+        registerModPlayerPreHurt(modId, fn as Parameters<typeof registerModPlayerPreHurt>[1]);
+      } else if (kind === 'postHurt') {
+        registerModPlayerPostHurt(modId, fn as Parameters<typeof registerModPlayerPostHurt>[1]);
+      } else if (kind === 'respawn') {
+        registerModPlayerRespawn(modId, fn as Parameters<typeof registerModPlayerRespawn>[1]);
+      } else if (kind === 'updateDead') {
+        registerModPlayerUpdateDead(modId, fn as Parameters<typeof registerModPlayerUpdateDead>[1]);
+      } else if (kind === 'modifyMoveSpeed') {
+        registerModPlayerModifyMoveSpeed(modId, fn as Parameters<typeof registerModPlayerModifyMoveSpeed>[1]);
       } else throw new Error(`[mod-api] 未知 playerHook: ${kind}`);
     },
     /** ★B7 一百零八R2:世界生成 pass 注册(Beaches 后依序执行;引擎零 mod 知识) */

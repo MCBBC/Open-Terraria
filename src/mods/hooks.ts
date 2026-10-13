@@ -1217,6 +1217,147 @@ export function registerModCanUseRule(vid: number, rule: ModCanUseRule): void {
   modCanUseRules.set(vid, rule);
 }
 
+// ---- ★B/C 批(2026-10-13):全局 NPC 钩族(tML GlobalNPC PreAI/PostAI/ModifyIncomingHit/
+//      OnHitByAny/OnKill 语义)+ ModPlayer 级玩家钩(PreHurt/PostHurt/Respawn/
+//      UpdateDead/ModifyMoveSpeed)。纪律同族:per-mod 单注册 fail-fast/空表 size 短路/
+//      值链(后钩吃前钩产物)/热路径(AI/IncomingHit/MoveSpeed)无 try/catch。 ----
+
+/** 全局 NPC 钩(tML GlobalNPC 形;全域 NPC 含原版——preAi 返 false=阻断原版 AI) */
+export interface ModGlobalNpcHooks {
+  /** 原版 AI 前;返 false=本 tick 跳过 AI 派发(wormBody 链驱段不适用=登记) */
+  preAi?: (e: Enemy, game: unknown) => boolean | void;
+  /** AI 派发完成后(共享尾段/点光前) */
+  postAi?: (e: Enemy, game: unknown) => void;
+  /** 防御结算后伤害值链(fn(ctx:{value}) → number=修正后值;灾厄 DR 族消费面) */
+  incomingHit?: (e: Enemy, ctx: { value: number }) => number | void;
+  /** 受击任意来源全域(OnHitNPC 全域对——fromPlayer 门不设;受理伤害尾派发) */
+  onHitByAny?: (e: Enemy, ctx: { damage: number; crit: boolean; killed: boolean; projId: number }) => void;
+  /** 击杀(原版域含;runModOnNpcDeath 的全域对) */
+  onKill?: (e: Enemy, game: unknown) => void;
+}
+const globalNpcHooks = new Map<string, ModGlobalNpcHooks>();
+
+export function registerGlobalNpcHooks(modId: string, spec: ModGlobalNpcHooks): void {
+  if (globalNpcHooks.has(modId)) throw new Error(`[mod-hooks] globalNpc 重复注册: ${modId}`);
+  globalNpcHooks.set(modId, spec);
+}
+
+/** PreAI(全域;返 false=阻断 AI 派发)。空表直通。 */
+export function runModNpcPreAiBlocked(e: Enemy, game: unknown): boolean {
+  if (globalNpcHooks.size === 0) return false;
+  for (const h of globalNpcHooks.values()) {
+    if (h.preAi && h.preAi(e, game) === false) return true;
+  }
+  return false;
+}
+
+/** PostAI(AI 派发后;空表零成本)。 */
+export function runModNpcPostAi(e: Enemy, game: unknown): void {
+  if (globalNpcHooks.size === 0) return;
+  for (const h of globalNpcHooks.values()) h.postAi?.(e, game);
+}
+
+/** ModifyIncomingHit 值链(防御结算后;非有限返值跳过)。 */
+export function runModNpcIncomingHit(e: Enemy, value: number): number {
+  if (globalNpcHooks.size === 0) return value;
+  const ctx = { value };
+  for (const h of globalNpcHooks.values()) {
+    const r = h.incomingHit?.(e, ctx);
+    if (typeof r === 'number' && Number.isFinite(r)) ctx.value = r;
+  }
+  return ctx.value;
+}
+
+/** OnHitByAny 事件链(受理伤害尾全域派发;多 mod 链 try/catch 事件纪律)。
+ *  ctx.damage=防前入参伤(与 runModOnHitAny 同口径);每 mod 浅拷贝 ctx=防前 mod
+ *  改写污染后链(R-B-F5)。 */
+export function runModOnNpcHitByAny(
+  e: Enemy, game: unknown,
+  ctx: { damage: number; crit: boolean; killed: boolean; projId: number },
+): void {
+  if (globalNpcHooks.size === 0) return;
+  for (const h of globalNpcHooks.values()) {
+    try { h.onHitByAny?.(e, { ...ctx }); } catch (err) { console.warn('[mod-hooks] onHitByAny', err); }
+  }
+}
+
+/** OnKill 事件链(全域击杀;事件纪律)。 */
+export function runModOnKillAnyNpc(e: Enemy, game: unknown): void {
+  if (globalNpcHooks.size === 0) return;
+  for (const h of globalNpcHooks.values()) {
+    try { h.onKill?.(e, game); } catch (err) { console.warn('[mod-hooks] onKill', err); }
+  }
+}
+
+// ---- ModPlayer 级(playerHook 新 kind 五类) ----
+
+/** PreHurt 值链(闪避族前;返 0=拒伤[引擎 dodgeFullFill 满填];非有限跳过)。 */
+const preHurts = new Map<string, (ctx: { player: unknown; game: unknown; dmg: number }) => number | void>();
+export function registerModPlayerPreHurt(modId: string, fn: (ctx: { player: unknown; game: unknown; dmg: number }) => number | void): void {
+  if (preHurts.has(modId)) throw new Error(`[mod-hooks] preHurt 重复注册: ${modId}`);
+  preHurts.set(modId, fn);
+}
+export function runModPlayerPreHurt(p: unknown, game: unknown, dmg: number): number {
+  if (preHurts.size === 0) return dmg;
+  const ctx = { player: p, game, dmg };
+  for (const fn of preHurts.values()) {
+    const r = fn(ctx);
+    if (typeof r === 'number' && Number.isFinite(r)) ctx.dmg = r;
+  }
+  return ctx.dmg;
+}
+
+/** PostHurt 通知链(伤害落地后;ctx.reduction=实扣)。 */
+const postHurts = new Map<string, (ctx: { player: unknown; game: unknown; reduction: number }) => void>();
+export function registerModPlayerPostHurt(modId: string, fn: (ctx: { player: unknown; game: unknown; reduction: number }) => void): void {
+  if (postHurts.has(modId)) throw new Error(`[mod-hooks] postHurt 重复注册: ${modId}`);
+  postHurts.set(modId, fn);
+}
+export function runModPlayerPostHurt(p: unknown, game: unknown, reduction: number): void {
+  if (postHurts.size === 0) return;
+  for (const fn of postHurts.values()) fn({ player: p, game, reduction });
+}
+
+/** Respawn 通知链。 */
+const respawns = new Map<string, (p: unknown, game: unknown) => void>();
+export function registerModPlayerRespawn(modId: string, fn: (p: unknown, game: unknown) => void): void {
+  if (respawns.has(modId)) throw new Error(`[mod-hooks] respawn 重复注册: ${modId}`);
+  respawns.set(modId, fn);
+}
+export function runModPlayerRespawn(p: unknown, game: unknown): void {
+  if (respawns.size === 0) return;
+  for (const fn of respawns.values()) fn(p, game);
+}
+
+/** UpdateDead 通知链(死亡态每 tick;ctx.respawnTimer/deadTime)。 */
+const updateDeads = new Map<string, (ctx: { player: unknown; game: unknown; respawnTimer: number; deadTime: number }) => void>();
+export function registerModPlayerUpdateDead(modId: string, fn: (ctx: { player: unknown; game: unknown; respawnTimer: number; deadTime: number }) => void): void {
+  if (updateDeads.has(modId)) throw new Error(`[mod-hooks] updateDead 重复注册: ${modId}`);
+  updateDeads.set(modId, fn);
+}
+export function runModPlayerUpdateDead(p: unknown, game: unknown, respawnTimer: number, deadTime: number): void {
+  if (updateDeads.size === 0) return;
+  for (const fn of updateDeads.values()) fn({ player: p, game, respawnTimer, deadTime });
+}
+
+/** ModifyMoveSpeed 乘区链(移动合成 speedMult 尾乘;返乘数,缺省 1)。 */
+const moveSpeeds = new Map<string, (ctx: { player: unknown; game: unknown }) => number | void>();
+export function registerModPlayerModifyMoveSpeed(modId: string, fn: (ctx: { player: unknown; game: unknown }) => number | void): void {
+  if (moveSpeeds.has(modId)) throw new Error(`[mod-hooks] modifyMoveSpeed 重复注册: ${modId}`);
+  moveSpeeds.set(modId, fn);
+}
+export function runModPlayerModifyMoveSpeed(p: unknown, game: unknown): number {
+  if (moveSpeeds.size === 0) return 1;
+  let mult = 1;
+  const ctx = { player: p, game };
+  for (const fn of moveSpeeds.values()) {
+    const r = fn(ctx);
+    if (typeof r === 'number' && Number.isFinite(r)) mult *= r;
+  }
+  // ★红队 R-B-F4:≥0 钳(家族惯例同 damageGate r>=0)——负值=maxRun 反向失谐
+  return Math.max(0, mult);
+}
+
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
   modScreenFx.length = 0;
@@ -1250,6 +1391,12 @@ export function _resetModHooksForTests(): void {
   modItemDraws.clear();
   vanillaOverrides.clear();
   modCanUseRules.clear();
+  globalNpcHooks.clear();
+  preHurts.clear();
+  postHurts.clear();
+  respawns.clear();
+  updateDeads.clear();
+  moveSpeeds.clear();
   modGenPasses.length = 0;
   modChestUnlock.clear();
   modConversions.length = 0;

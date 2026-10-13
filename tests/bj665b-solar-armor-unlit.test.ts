@@ -236,9 +236,12 @@ describe('BJ665b ④：层序锁（候选 B=甲件+被盖层随迁,禁 C 裸重�
   });
 
   it('BJ594 stamps/残影覆盖恒色件面（stamps=全层组×GetImmuneAlphaPure(shadow),甲色=250³×k）', () => {
-    expect(RDR).toContain('stampLunarPiece(lunarUpper, 250, s.ox, s.oy)');
-    expect(RDR).toContain('stampLunarPiece(lunarLegsBake, lunar?.legs ?? 250, s.ox, s.oy)');
+    // ★2026-10-12 结构刀改形：outline 四印同 k 同源 → 亮度栈一次合成（putPiece 入
+    //   solarStampScratch）+逐印平绘（globalAlpha×k 语义不变）;残影（异 k）保留逐印。
+    expect(RDR).toContain('putPiece(lunarUpper, 250)');
+    expect(RDR).toContain('putPiece(lunarLegsBake, lunar?.legs ?? 250)');
     expect(RDR).toContain('stampLunarPiece(lunarUpper, 250, g.lx, g.ly)');
+    expect(RDR).toContain('ctx.globalAlpha *= s.k');   // 逐印 α×k 语义锁
   });
 });
 
@@ -264,7 +267,7 @@ describe('BJ665b ⑤：回归面（BJ401/599/604/594/631 + 四月套其余两族
 
   it('BJ594 stamps 数学/门未受扰（solarSetFull 门+outline+残影仍在 lit 窗本体前）', () => {
     expect(RDR).toContain('const solarSetFull = isSolarFlareFullSet(');
-    expect(RDR.indexOf('for (const s of solarOutlineStamps(p.ghostFade))')).toBeGreaterThan(0);
+    expect(RDR.indexOf('solarOutlineStamps(p.ghostFade)')).toBeGreaterThan(0);
     expect(RDR.indexOf('for (const g of downDashGhostStamps(p, p.shadowRing()))')).toBeGreaterThan(0);
   });
 

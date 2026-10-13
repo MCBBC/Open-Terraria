@@ -18,6 +18,13 @@ export function equipKindOfVid(vid: number): EquipKind | null {
   return null;
 }
 
+/** ★R-A-D7(2026-10-13):vid 域收口——mod 件 vid≡iid,overlay 直查;原版域零扰动。
+ *  旧三消费面(modernCrafting/FurnitureItems/SecretSeedDoEnds)不经此=mod 件恒 null。 */
+export function equipKindOfAnyVid(vid: number): EquipKind | null {
+  if (vid >= 30000) return MOD_KIND_BY_IID.get(vid) ?? null;
+  return equipKindOfVid(vid);
+}
+
 /** 内部 item id → 分类（缓存；vi_ key 反解原版 id） */
 const KIND_BY_IID = (() => {
   const m = new Map<number, EquipKind>();

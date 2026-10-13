@@ -271,4 +271,35 @@ describe('★BJ583 §5 Game.ts wireModes 注入面（BJ572 链不回归+Normal �
     const PSRC = readFileSync(join(HERE, '..', 'src/entities/Player.ts'), 'utf8');
     expect(PSRC).toContain('const MECH_ACC_VIDS = new Set<number>([3619, 3611, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095, 6190]);');
   });
+  // ★BJ585（2026-10-13 用户实报连带定谳）：注入序=线色位序[红,蓝,绿,黄,致动器]，而
+  //  status[5]=蓝线/status[6]=绿线（Main.cs:59276 num3=status[5]→wire2=蓝、:59377
+  //  num4=status[6]→wire3=绿）——反编译枚举名 WireVisibility_Green=5/Blue=6
+  //  （Player.cs:44-48）与行为错位=原版自身命名 quirk（hover Main.cs:48304-48306
+  //  num3=5→Game.BlueWires、sheet 实测列5=蓝图标(20,65,98) 均随行为走）。
+  //  旧码按枚举名序注入=蓝/绿两线可见度互换（点蓝图标动绿线）。旧 §5 键名存在性
+  //  锁对此无判别力（两键都在=绿）,本用例锁【位序】补盲区。
+  it('⑤ 蓝/绿互换刀：wireModes 注入位序=[红线,蓝线(s5),绿线(s6),黄线,致动器]（枚举名 quirk 锁,旧序必红）', () => {
+    const m = GAME_SRC.match(/wireModes = w8\s*\?\s*\[([\s\S]*?)\]\s*:/);
+    expect(m).toBeTruthy();
+    const order = m![1].split(',').map((s) => s.trim()).filter(Boolean);
+    expect(order).toHaveLength(5);
+    expect(order[0]).toContain('BACC.WireVisibility_Red');
+    expect(order[1]).toContain('BACC.WireVisibility_Green');   // =status[5]【蓝线】（枚举名错位）
+    expect(order[2]).toContain('BACC.WireVisibility_Blue');    // =status[6]【绿线】（枚举名错位）
+    expect(order[3]).toContain('BACC.WireVisibility_Yellow');
+    expect(order[4]).toContain('BACC.WireVisibility_Actuators');
+  });
+  // ★BJ585 图标面：原版态渲染=SpriteBatch tint【RGB 暗化】非 α 半透明——线材族四态
+  //  （Main.cs:48288-48290:0 White/1 Color(127,127,127) 不透明/2 MultiplyRGBA(0.66)
+  //  =(83,α168)/3 MultiplyRGBA(0.33)=(41,α84)）;二态族 off 同为 (127,127,127) 暗灰
+  //  （:48168）。旧码三态折叠 opacity 0.497=「经典/褪色像透明」病灶。UI 源锁：
+  it('⑤ 图标四态 tint 链：brightness(127/255)/(83,α168)/(41,α84)+二态 off 暗灰（UI.ts paintSlot,三态折叠 opacity 必红）', () => {
+    const USRC = readFileSync(join(HERE, '..', 'src/ui/UI.ts'), 'utf8');
+    expect(USRC).toContain('brightness(${127 / 255})');
+    expect(USRC).toContain('brightness(${83 / 255})');
+    expect(USRC).toContain('brightness(${41 / 255})');
+    expect(USRC).toContain('${168 / 255}');
+    expect(USRC).toContain('${84 / 255}');
+    expect(USRC).not.toContain("b.style.opacity = on ? '1' : '0.497'");
+  });
 });

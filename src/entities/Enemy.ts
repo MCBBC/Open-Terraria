@@ -143,7 +143,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
-import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff, runModOnHitAny } from '../mods/hooks';
+import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff, runModOnHitAny, runModNpcPreAiBlocked, runModNpcPostAi, runModNpcIncomingHit, runModOnNpcHitByAny } from '../mods/hooks';
 import type { Game } from '../core/Game';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -2328,7 +2328,9 @@ export class Enemy extends Entity {
       // ★P4 红蓝修正(C-MINOR-6):mod AI 已注册的 critter 不走被动游荡(旧序 npcAi
       //  注册被 critter 前置支静默吞掉);原版 critter 域 takeModNpcAi 恒 null 零扰动
       this.critterWanderAI(game, hasPlayer ? player : null);
-    } else if (this.vanilla && !wormBody) {
+    } else if (this.vanilla && !wormBody && !runModNpcPreAiBlocked(this, game as unknown as Game)) {
+      // ★B 批:GlobalNPC PreAI(全域;返 false=本 tick 跳过 AI 派发——mod 返 false 面只在
+      //  本 vanilla 分支生效;wormBody 链驱段/critter 前置支不适用=登记)
       const p = hasPlayer ? player : null;
       // ★mod AI 派发（2026-10-04,docs/mod-loader-design.md §2.3）：mod NPC（800+）
       //  经 entry.js 的 sw.npcAi 注册了自定义 AI 时整支接管（不走原版 switch），
@@ -2336,7 +2338,12 @@ export class Enemy extends Entity {
       //  空注册/原版域=Map size 短路零成本，行为逐位恒等（中立性金标锁）。
       // ★一百三十九刀:vanilla AI 覆盖(mod 侧复仇变体族;先于 mod NPC 派发)
       const vAi = this.vanillaId === null ? null : takeVanillaNpcAiOverride(this.vanillaId);
-      if (vAi !== null) { vAi(this, game as unknown as Game, p); return; }
+      if (vAi !== null) {
+        vAi(this, game as unknown as Game, p);
+        // ★红队 R-A-m2:PostAI 无条件(tML 逐字)——vAi 整支接管也要发(旧 return 直出=跳)
+        runModNpcPostAi(this, game as unknown as Game);
+        return;
+      }
       const modAi = takeModNpcAi(this.vanillaId);
       if (modAi !== null) {
         // GameHooks→Game:本实参运行时恒为全量 Game 实例(Enemy 形参窄化仅类型面)
@@ -2535,6 +2542,8 @@ export class Enemy extends Entity {
     }
 
     // ---- AI 家族外的三段恒走点光（与 AI 分发无关，原版各自独立方法）----
+    // ★B 批:GlobalNPC PostAI(AI 派发完成后;全域;空表零成本)
+    runModNpcPostAi(this, game as unknown as Game);
     this.updateNpcCastLights();
     this.updateNpcTrailLights();
     this.updateNpcDebuffLights();
@@ -15006,6 +15015,16 @@ export class Enemy extends Entity {
     //   （NPC.cs:82067）。旧 round() 在奇防非暴击面每击系统性 +1（例 10/7→6.5：
     //   原版 6、旧实现 7），统一换 trunc。
     dmg = Math.trunc(Math.max(1, dmg + penAdd - def * 0.5));
+    // ★B 批:GlobalNPC ModifyIncomingHit 值链(防御结算后;DR 族消费;空表直通;
+    //  消费侧 ≥1 钳=原版 floor 同相)。
+    //  ★红队 R-A-M2 勘位:≥9999=内联演出/级联死亡通道(四塔收刀 1e9/幽灵 9999/
+    //  EoW die 9999/DoT 杀 9999)——不进 mod 值链(伤害帽类 mod 断 1e9 致死=塔永生
+    //  软锁)。★R-A-M3 位次声明:本站=【防后】值链(tML ModifyIncomingHit=防前
+    //  HitModifiers 位)——接口注释已显式标注灾厄 DR 族语义选择,移植 mod 按
+    //  ctx.value=防御后实伤写入;防前位=登记 D 台账(B 批遗留)。
+    if (dmg < 9999) {
+      dmg = Math.max(1, Math.trunc(runModNpcIncomingHit(this, dmg)));
+    }
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     // （takenDamageMultiplier 段 NPC.cs:82070-82072 亦为 (int) 截断非 round）
@@ -15990,6 +16009,7 @@ export class Enemy extends Entity {
       }
       // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
       if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
+      runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击
       return true;
     }
     // ★BJ254：受击通用彩色粒子近似（def.gore[0] 5 粒 spawnParticles）退役——
@@ -15999,6 +16019,7 @@ export class Enemy extends Entity {
     //  dontTakeDamage/零伤转换早退支不进=原版 OnHitNPC 同相）。
     //  零注册=零成本（runModOnHitAny 头门）。melee 探针=非弹幕穿面（pierce=0 近战惯例）。
     if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
+    runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId });   // ★B 批:全域受击
     return false;
   }
 

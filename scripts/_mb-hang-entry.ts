@@ -28,7 +28,7 @@ try {
     }
   }
 } catch { /* 无目录 */ }
-// mod tile 注册(ids 1030+,与浏览器 loader 分配同型)
+// ★693b:mod tile 注册(双环形态=工作态;单环 registerModTile 曾因字段校验全 throw)
 const tileDir = join(contentDir, 'tiles');
 let nextId = 1030;
 for (const f of readdirSync(tileDir).sort()) {
@@ -36,7 +36,7 @@ for (const f of readdirSync(tileDir).sort()) {
   const k = `mod_calamity_${f.replace('.json', '')}`;
   if (TILE_BY_KEY[k] === undefined) TILE_BY_KEY[k] = nextId++;
 }
-// ★685:content json 字段透传(chest 旗→TILE_DEFS.chest→FCP 箱保护;裸 key 注册=字段盲)
+// content json 字段透传(chest 旗→TILE_DEFS.chest→FCP 箱保护);重复键=skip(幂等)
 import { registerModTile as regTileFull } from '../src/data/tiles';
 {
   let rid = 1030;
@@ -44,26 +44,10 @@ import { registerModTile as regTileFull } from '../src/data/tiles';
     if (!f.endsWith('.json')) continue;
     try {
       const j = JSON.parse(readFileSync(join(tileDir, f), 'utf8')) as Record<string, unknown>;
-      regTileFull({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: j.w as number, h: j.h as number }, rid++);
+      regTileFull({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: (j.w as number) ?? 1, h: (j.h as number) ?? 1 }, rid++);
     } catch { /* skip */ }
   }
 }
-// ★mod item 注册(走浏览器同款 registerModItem——Astral Chest 等 pass 消费
-//  itemIdByKey;node rig 不注册=astral chest 恒零产是 rig 伪影非 gen 缺口)
-import { registerModItem } from '../src/data/items';
-const itemDir = join(contentDir, 'items');
-let itemN = 0;
-try {
-  for (const f of readdirSync(itemDir).sort()) {
-    if (!f.endsWith('.json')) continue;
-    const key = `mod_calamity_${f.replace('.json', '')}`;
-    try {
-      registerModItem({ key, name: key }, 30000 + itemN);
-      itemN++;
-    } catch { /* 重复/越段=skip(幂等重跑) */ }
-  }
-} catch { /* 无目录 */ }
-console.log(`[repro] mod items 注册 ${itemN}`);
 
 const g = globalThis as Record<string, unknown>;
 g.__calamityModData = modData;

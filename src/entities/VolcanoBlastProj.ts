@@ -61,6 +61,7 @@ import { GorePiece } from './GorePiece';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import type { GameHooks } from './types';
 import { playerCanHitEntity } from '../physics/LineOfSight';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 /** Utils.Remap 直移植（单调映射 + 边界外钳制）：Remap(v,inA,inB,outA,outB)。 */
 function remap(value: number, inMin: number, inMax: number, outMin: number, outMax: number): number {
@@ -305,7 +306,10 @@ export class VolcanoBlastProj extends Entity {
         { projId: 978 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      e.hurt(dmgVar * (crit ? 2 : 1)
+      // ★D2:独立结算面补钩(dmgVar 值域→新变量承接)
+      const dmgHooked = runModModifyHitNpcByProj(game.player, game, (this as unknown as { projId?: number }).projId ?? -1,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmgVar * (crit ? 2 : 1), crit);
+            e.hurt(dmgHooked
         + (snapBonusVolcano ? Math.trunc(snapBonusVolcano * (crit ? 2 : 1)) : 0),
         // pierce=-3 = usesLocal 族清零档（BJ398 现役梯,Enemy.hurt :14317 iframes=0
         // ≙ 原文 :14175-14178 `immune[owner]=0` 写面）——★Q4 刀写半面对齐：旧档

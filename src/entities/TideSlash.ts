@@ -17,6 +17,7 @@ import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 export class TideSlash extends Entity {
   readonly projId = 451;
@@ -167,7 +168,10 @@ export class TideSlash extends Entity {
         { projId: 451 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      e.hurt(applyBannerDamageDealt(game, e, dmg)
+      // ★D2:独立结算面补钩(dmg=const 值域→新变量承接)
+      const dmgHooked = runModModifyHitNpcByProj(game.player, game, this.projId,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);
+            e.hurt(applyBannerDamageDealt(game, e, dmgHooked)
         + (snapBonusTide ? Math.trunc(snapBonusTide * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitSet.add(e.id);

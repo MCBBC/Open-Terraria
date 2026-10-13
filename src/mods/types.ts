@@ -6,9 +6,13 @@ import type { ModRarityContent } from './rarity';   // ★刀3-1:稀有度档色
 import type { ModPetContent } from './pets';        // ★刀3-2:宠物声明 schema(类型单向)
 import type { ModGoreContent } from './gore';       // ★刀3-3:gore 声明 schema(类型单向)
 import type { ModWallContent } from './walls';      // ★刀3-墙:墙声明 schema(类型单向)
+import type { ModMountContent } from './mounts';    // ★第三批:坐骑声明 schema(类型单向)
+import type { ModHairContent } from './hairs';      // ★第三批:发型声明 schema(类型单向)
 export type { ModRarityContent };
 export type { ModGoreContent };
 export type { ModWallContent };
+export type { ModMountContent };
+export type { ModHairContent };
 
 /** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
 export interface ModManifest {
@@ -102,6 +106,8 @@ export interface ModItemContent {
   research?: number;
   /** 可放置:目标 tile 键(本 mod tile 键或原版 tile 键 v_<TileID>_*);缺省=不可放置 */
   placeTile?: string;
+  /** ★第三批:坐骑召唤件(本 mod content/mounts 键;注册期解析→ITEM_TO_MOUNT 扩条) */
+  mountItem?: string;
   /** 贴图(textures/ 下相对路径);缺省=无名占位(灰格) */
   texture?: string;
   /** ★刀2-C1:掉落/手持光罩(贴图 alias 到 vanilla/Glow_<伪 GlowMaskID>.png,
@@ -307,6 +313,14 @@ export const MOD_GORE_ID_BASE = 1500;
 export const MOD_WALL_STABLE_BASE = 367;
 /** mod 墙段硬顶(u16 内;溢出 fail-fast) */
 export const MOD_WALL_STABLE_MAX = 4095;
+/** mod 坐骑 id 段基址(★第三批:原版 MOUNT_COUNT=66,ids 0-65) */
+export const MOD_MOUNT_STABLE_BASE = 66;
+/** mod 坐骑段硬顶(矿车/ability 后置,首刀只接非矿车声明族) */
+export const MOD_MOUNT_STABLE_MAX = 200;
+/** mod 发型 id 段基址(★第三批:原版 HAIR_COUNT=228,ids 0-227;byte 域顶 255) */
+export const MOD_HAIR_BASE = 228;
+/** mod 发型段硬顶(byte 域=存档 1 字节;255-228=28 个 mod 发型槽) */
+export const MOD_HAIR_MAX = 255;
 
 /** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
 export interface ModIdAllocation {
@@ -326,6 +340,10 @@ export interface ModIdAllocation {
   gores: Map<string, number>;
   /** 全墙键 `mod_<modid>_<key>` → wall id(★刀3-墙;367+ 段) */
   walls: Map<string, number>;
+  /** 全坐骑键 `mod_<modid>_<key>` → mount id(★第三批;66+ 段) */
+  mounts: Map<string, number>;
+  /** 全发型键 `mod_<modid>_<key>` → hair id(★第三批;228-255 段) */
+  hairs: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -348,6 +366,10 @@ export interface RegistrationPlan {
   goreSpecs: Array<{ modId: string; spec: ModGoreContent; goreId: number; fullKey: string }>;
   /** ★刀3-墙:mod 墙计划(367+ 段;先于 itemSpecs——placeWall 引用解析依赖) */
   wallSpecs: Array<{ modId: string; spec: ModWallContent; wallId: number; fullKey: string }>;
+  /** ★第三批:mod 坐骑计划(66+ 段;先于 itemSpecs——mountItem 引用解析依赖) */
+  mountSpecs: Array<{ modId: string; spec: ModMountContent; mountId: number; fullKey: string }>;
+  /** ★第三批:mod 发型计划(228-255 段) */
+  hairSpecs: Array<{ modId: string; spec: ModHairContent; hairId: number; fullKey: string }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */

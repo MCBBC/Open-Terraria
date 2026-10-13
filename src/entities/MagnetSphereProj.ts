@@ -71,6 +71,7 @@ import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoul
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 import { TILE } from '../core/constants';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 /** 悬停球 254（ProjectileID.MagnetSphereBall） */
 export const MAGNET_SPHERE_BALL = 254;
@@ -229,7 +230,10 @@ export class BeamBoltProj extends Entity {
         //   级联 :14369 族返假但伤害已实扣=原版受理 → 旧布尔闸下 ghostHeal/numHits
         //   对非致死命中整面不达（激光弹主导形态=under-fire）。
         const vanillaGated = e.dontTakeDamage === true;
-        e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
+        // ★D2:独立结算面补钩(this.damage 值域→新变量承接)
+        const dmgHooked = runModModifyHitNpcByProj(game.player, game, (this as unknown as { projId?: number }).projId ?? -1,
+          (e as unknown as { vanillaId?: number }).vanillaId ?? -1, this.damage, false);
+                e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(dmgHooked))),
           Math.sign(e.x + e.w / 2 - this.cx) * this.knockback, 0, game,
           this.armorPen, crit, 1, true);     // pierce=1 单发 flag3（:11904 语义）
         if (!vanillaGated) {

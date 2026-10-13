@@ -85,10 +85,37 @@ export declare interface ModContext {
    *  'modifyHitNpc'=近战命中增幅链(倍率;ctx:{player,game,vid,dmg,crit?,kb?,armorPen?})
    *  'modifyHitNpcByProj'=玩家弹命中 NPC 增幅链(倍率;ctx:{player,game,projVid,targetVid,dmg,crit})
    *  'modifyHitPlayerByProj'=敌弹命中玩家增幅链(倍率;ctx:{player,game,projVid,dmg,trap,pvp}) */
+  /** playerHook 九 kind(刀4-A 四+刀B/C 五):
+   *  preHurt=承伤值链(闪避族前;返 0=拒伤)/postHurt=落地通知(ctx.reduction)
+   *  respawn=重生通知/updateDead=死亡态每 tick(ctx.respawnTimer/deadTime)
+   *  modifyMoveSpeed=移速乘区链(返乘数,缺省 1) */
   playerHook(kind: string, fn: (ctx: Record<string, unknown>) => number | void): void;
   /** 世界生成 pass 注册(Beaches 后依序执行) */
   registerGenPass(name: string, fn: (store: any, rng: any, gs: any) => void): void;
   system(hooks: ModSystemHooks): void;
+  /** ★刀2-C2:NPC 自绘(preDraw 返 false=跳原版/postDraw 后随) */
+  npcDraw(key: string, spec: {
+    preDraw?(e: unknown, ctx: Record<string, unknown>): boolean | void;
+    postDraw?(e: unknown, ctx: Record<string, unknown>): void;
+  }): void;
+  /** ★刀2-C2:物品世界自绘(preDrawInWorld 返 false=跳原版) */
+  itemDraw(key: string, spec: {
+    preDrawInWorld?(d: unknown, ctx: Record<string, unknown>): boolean | void;
+    postDrawInWorld?(d: unknown, ctx: Record<string, unknown>): void;
+  }): void;
+  /** ★B/C 批:全局 NPC 钩(tML GlobalNPC 形;全域 NPC 含原版) */
+  globalNpc(spec: {
+    /** 原版 AI 前;返 false=本 tick 跳过 AI 派发 */
+    preAi?(e: object, game: object): boolean | void;
+    /** AI 派发完成后 */
+    postAi?(e: object, game: object): void;
+    /** 防御结算后伤害值链(fn(ctx:{value}) → number=修正后值;DR 族) */
+    incomingHit?(e: object, ctx: { value: number }): number | void;
+    /** 受击任意来源全域(fromPlayer 门不设;ctx:{damage,crit,killed,projId}) */
+    onHitByAny?(e: object, ctx: { damage: number; crit: boolean; killed: boolean; projId: number }): void;
+    /** 击杀(原版域含) */
+    onKill?(e: object, game: object): void;
+  }): void;
   /** ★刀1:游戏内 UI 面板(vui 保留树晋升;拖拽标题栏/关闭钮/Esc 关最上层/
    *  世界输入自动让位。同键重开=聚焦既有面板;面板保留可 show/hide 重开) */
   ui: {

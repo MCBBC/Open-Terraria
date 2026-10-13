@@ -89,7 +89,7 @@ import {
 import { createPotentialDungeonBounds } from './DungeonStyles1457';
 import { TILE_REMOVE_WHEN_UNDER_SPAWN } from '../../../data/vanillaSets1457';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
-import { equipKindOfVid } from '../../../data/vanillaEquip';
+import { equipKindOfAnyVid } from '../../../data/vanillaEquip';   // ★R-A-D7:vid 域收口
 
 // ---------- sheet ↔ 内部 id 映射 ----------
 const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -2010,7 +2010,7 @@ export function doRainbowStuff(st: TileStore, rng: RNG, gs: GenState, chests: Wo
           const vidPick = RAINBOW_CHEST_POOL[rng.nextInt(RAINBOW_CHEST_POOL.length)];   // 六选一
           const iid = VID_TABLE[vidPick];
           if (iid < 0) break;
-          const stack = equipKindOfVid(vidPick) === 'dye' ? 3 : 1;      // dye>0 → stack=3（cs:2841-2844）
+          const stack = equipKindOfAnyVid(vidPick) === 'dye' ? 3 : 1;      // dye>0 → stack=3（cs:2841-2844）
           chest.items.splice(m, 0, { id: iid, stack });
           break;
         }

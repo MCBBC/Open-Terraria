@@ -154,7 +154,13 @@ export class NatureParticles {
           }
         }
         const r = boxCollide(st, l.x, l.y, moveX, -0.2, 3); // vector3=(vx,-0.2) 盒 3px（:1115-1118）
-        l.x = r.nx; l.y = r.ny;
+        // ★BJ669f（2026-10-13 用户实报「树叶落地陷入→弹起→再压循环」定谳）：原版
+        //  落地支 position.Y 【完全不动】（Gore.cs:1146-1150——vector3.Y=-0.2 仅作
+        //  TileCollision 碰撞探针,解算后只消费 X：`velocity.X=vector3.X; position.X+=
+        //  velocity.X; return` 零 Y 写）——叶恒贴地滑移。旧 l.y=r.ny 把「向上探
+        //  0.2」的解算位写回 → 叶每拍抬升 → 脚下 isSolid 门（:1135 ty+1）翻转判
+        //  「脚下不实」→ vy=0.1 回下落支 → 再落再抬=「陷入→弹起→再压」循环。
+        l.x = r.nx;
         l.vx = r.nvx * 0.94; // :1145
         if (Math.abs(l.vx) < 0.01) l.vx = 0; // |Δ|<0.01 → 0（:1146）
         if (l.timeLeft > 0) l.timeLeft -= 1; // DisappearSpeed=1

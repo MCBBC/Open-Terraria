@@ -13,6 +13,8 @@ import {
   registerNpcAi, registerItemUse, registerSystem, _resetModHooksForTests,
   runModModifyHitNpcByProj, runModModifyHitPlayerByProj, runModModifyHurtByNpc, runModModifyHitNpc,
   registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj,
+  runModNpcPreAiBlocked, runModNpcPostAi, runModNpcIncomingHit, runModPlayerModifyMoveSpeed,
+  registerGlobalNpcHooks,
 } from '../src/data/../mods/hooks';
 import { applyModItemIds } from '../src/data/items';
 import { ITEM_STABLE_OF_INTERNAL, ITEM_INTERNAL_OF_STABLE } from '../src/data/items';
@@ -132,6 +134,42 @@ describe('刀4-A 命中链钩空载守卫(按每次命中计频)', () => {
     _resetModHooksForTests();
     for (let i = 0; i < 8; i++) registerModModifyHitPlayerByProj(`m${i}`, () => 0.99);
     const ns = bench(() => runModModifyHitPlayerByProj({}, {}, 919, 50, false, false), 1_000_000);
+    expect(ns).toBeLessThan(400);
+    _resetModHooksForTests();
+  });
+});
+
+// ★B/C 批(2026-10-13):全局 NPC 钩热路径守卫——AI 链 per-enemy per-tick 最高频,
+//   空载(零 mod 会话实际形态)阈值沿用 50ns 档;有链面=8 mod×2 空钩循环。
+describe('B/C 批热路径守卫(每敌每 tick)', () => {
+  beforeAll(() => {
+    _resetModHooksForTests();
+  });
+
+  it('runModNpcPreAiBlocked 空载 ≤ 50ns(每敌每 tick;300 敌=每拍 ≤ 15µs)', () => {
+    const ns = bench(() => runModNpcPreAiBlocked({ vanillaId: 42 } as never, {}), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModNpcPostAi 空载 ≤ 50ns(每敌每 tick)', () => {
+    const ns = bench(() => runModNpcPostAi({ vanillaId: 42 } as never, {}), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModNpcIncomingHit 空载 ≤ 50ns(每次受击;空表直通)', () => {
+    const ns = bench(() => runModNpcIncomingHit({ vanillaId: 42 } as never, 100), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('runModPlayerModifyMoveSpeed 空载 ≤ 50ns(每帧;空表直通 1)', () => {
+    const ns = bench(() => runModPlayerModifyMoveSpeed({}, {}), 2_000_000);
+    expect(ns).toBeLessThan(50);
+  });
+
+  it('B/C 满载:preAi 8 钩循环 ≤ 400ns(每敌每 tick;300 敌=每拍 ≤ 120µs=0.72%)', () => {
+    _resetModHooksForTests();
+    for (let i = 0; i < 8; i++) registerGlobalNpcHooks(`g${i}`, {});
+    const ns = bench(() => runModNpcPreAiBlocked({ vanillaId: 42 } as never, {}), 1_000_000);
     expect(ns).toBeLessThan(400);
     _resetModHooksForTests();
   });

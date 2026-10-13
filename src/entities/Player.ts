@@ -24,7 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
-import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf, runVanillaOverrideValue } from '../mods/hooks';
+import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf, runVanillaOverrideValue, runModPlayerPreHurt, runModPlayerPostHurt, runModPlayerModifyMoveSpeed } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat, BONUS_MELEE_SPEED_MULTIPLIER, NO_MELEE_SPEED_BONUS } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -5988,7 +5988,8 @@ export class Player extends Entity {
                                               // 旧 `&& stealth>0` 系 0/1 语义反写期产物,满潜行
                                               // 后移速惩罚反而消失,1456 :25563-25564 同无门）
       * (duneBoost ? 1.75 : 1)
-      * strongestSlow;
+      * strongestSlow
+      * runModPlayerModifyMoveSpeed(this, (globalThis as { __swGame?: unknown }).__swGame);   // ★B/C 批:ModPlayer 移速乘区(空表=1)
     // 冰冻 Frozen(47,Player.cs:9749 frozen=true) ∪ 微光化 buff 353（:11381-11388
     // frozen=true 同语义）：整帧封移动输入——跳跃/攀绳/矿车同读这些标志,一并归零
     // （原版 Update 段 control* 清零语义,发生在移动积分之前）。帧末由 Game 重灌输入。
@@ -11769,6 +11770,16 @@ export class Player extends Entity {
       }
     }
     const eq = this.equipStats;
+    // ★B/C 批:ModPlayer.PreHurt 值链(闪避族前;返 ≤0=拒伤;ctx.dmg 可变携带,值链=
+    //  后钩吃前钩产物;非有限跳过)。
+    //  ★红蓝自查修正:拒伤门 0→≤0(值链无钳位,mod 返负值穿透 ===0 精确门=
+    //  hp -= 负值变相回血;负值语义上也是「伤害消解」=并入拒伤支)。
+    //  ★红队 R-B-F1 勘位(2026-10-13):拒伤【不】走 dodgeFullFill——tML ModifyHurt
+    //  Cancelled(:5885-5900)=return 0.0 于 Hurt 之前,immune/immuneTime 不执行=
+    //  无任何无敌帧;只有原版闪避族(Ninja/BOC/幻影/黑带)才满填。旧形 mod 恒返 0=
+    //  恒无敌(白送 40-120t 全桶帧),与 tML「mod 取消=自管冷却」语义相反→对齐。
+    dmg = runModPlayerPreHurt(this, (globalThis as { __swGame?: unknown }).__swGame, dmg);
+    if (dmg <= 0) return 0;
     // 神秘艺术腰布 6189（Player.Hurt :38501-38505 mysticSashDodge 分支——1457 新,
     // 排在黑带前）：10% 闪避 → SetImmuneTimeForAllTypes(longInvince?120:80)（:38342-38344;
     // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）。
@@ -11985,6 +11996,12 @@ export class Player extends Entity {
     // ★594:mod 受击钩(C# OnHurt face——rBrain 墨云/墨炸弹/百年魔典等受击响应面;
     //  伤害落地后派发[与 C# Hurt 尾同位];reduction=实扣伤)
     runModPlayerHurt(this, (globalThis as { __swGame?: unknown }).__swGame, reduction);
+    // ★B/C 批:ModPlayer.PostHurt 通知链(伤害落地后;ctx.reduction=实扣)。
+    //  ★红队 R-B-F3 勘位:tML PostHurt 在 statLife>0 存活支内(patch :6208)——
+    //  致死拍(hp≤0,死亡管线在后)不派发=对齐
+    if (this.hp > 0) {
+      runModPlayerPostHurt(this, (globalThis as { __swGame?: unknown }).__swGame, reduction);
+    }
     return reduction;
   }
 

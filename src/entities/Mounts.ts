@@ -88,6 +88,13 @@ import { MOUNT_DATA, type MountData } from '../data/mountData';
 export { MOUNT_DATA, type MountData };
 
 export const MOUNT_COUNT: number = mountJson.count;
+/** ★第三批(2026-10-13):mod 坐骑段顶(66+N;registerModMountData 时递增)——
+ *  setMount 门消费;原版域 0-65 零扰动 */
+let _mountCountMax = MOUNT_COUNT;
+export function mountCountMax(): number { return _mountCountMax; }
+export function bumpMountCountMax(id: number): void {
+  if (id >= _mountCountMax) _mountCountMax = id + 1;
+}
 /** id → 内部名（MountID.cs const 表） */
 export const MOUNT_NAMES: Record<string, string> = mountJson.names;
 /** MountID.Sets 能力位（CreateBoolSet/CreateIntSet 展开） */
@@ -2173,7 +2180,7 @@ export class MountInstance {
     spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
     playSfxFiles?(files: string[], vol?: number, x?: number, y?: number): void;
   }): boolean {
-    if (this.type === m || m < 0 || m >= MOUNT_COUNT) return false;
+    if (this.type === m || m < 0 || m >= _mountCountMax) return false;
     if (m === 5 && p.inWater) return false;              // 蜜蜂座骑浸水不可上（:6190）
     // ★BJ357 蝙蝠诅咒 56 湿身拒上（CanMount :6662 `m == 56 && (wet || dripping ||
     //  WetCollision(...))`——本仓视图仅 inWater 一量,dripping/WetCollision 探针未建模,

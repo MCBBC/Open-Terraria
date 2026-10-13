@@ -43,7 +43,7 @@ import { VAN_TILE_FRAME_IMPORTANT } from '../world/gen/vanilla/VanillaTileFlags'
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { vanillaStatOfVid } from '../data/vanillaItemStats';
-import { equipKindOfVid } from '../data/vanillaEquip';
+import { equipKindOfAnyVid } from '../data/vanillaEquip';   // ★R-A-D7:vid 域收口
 import whipsJson from '../data/vanilla-whips.json';
 import { materialVids } from './itemTooltip';
 import {
@@ -210,7 +210,7 @@ export function filterItemOfVid(vid: number): FilterItem {
   const f = itemFuncOfVid(vid);
   const c = itemCombat(vid);
   const st = vanillaStatOfVid(vid);
-  const kind = equipKindOfVid(vid);
+  const kind = equipKindOfAnyVid(vid);
   const createTile = f?.createTile ?? -1;
   const it: FilterItem = {
     vid,

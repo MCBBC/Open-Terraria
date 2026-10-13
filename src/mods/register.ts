@@ -4,6 +4,7 @@
 import type { RegistrationPlan } from './types';
 import { registerModItem, ITEM_DEFS } from '../data/items';
 import { registerModTile, TILE_BY_KEY, TILE_DEFS, WALL_BY_KEY, type TileDef } from '../data/tiles';
+import { ITEM_TO_MOUNT } from '../entities/Mounts';   // ★第三批:mod 坐骑物品映射
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
 import { registerModBoss, registerModWormChain } from '../entities/Enemy';
 import { registerModBuff, modBuffTypeOf } from './buffs';
@@ -22,6 +23,8 @@ import { registerModGoreId, registerModGoreTexSize, registerModNpcDeathGore, mod
 import { registerModWall, registerModWallMeta } from './walls';   // ★刀3-墙:mod 墙
 import { registerModNpcDrawSpec, registerModItemGlowmask } from './drawspecs';   // ★刀2-C1:绘制声明面
 import { registerModCanUseRule } from './hooks';   // ★刀5-A 族:canUse 声明规则
+import { registerModHairData } from './hairs';   // ★第三批:mod 发型
+import { registerModMountData } from './mounts';   // ★第三批:mod 坐骑
 
 /** pack 贴图字节(带 textures/ 前缀归一;register 期 PNG 头读取用) */
 function packTexBytesLocal(pack: { files: Map<string, Uint8Array> } | undefined, texPath: string): Uint8Array | null {
@@ -292,6 +295,68 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       opacity: w.spec.opacity ?? 1,
       ...(w.spec.largeFrame !== undefined ? { largeFrame: w.spec.largeFrame } : {}),
     }, { unbreakable: w.spec.unbreakable === true, ...(w.spec.dungeonGate !== undefined ? { dungeonGate: w.spec.dungeonGate } : {}) });
+  }
+  // ★第三批:mod 坐骑(先于 items——mountItem 引用;MOUNT_DATA 追加+ITEM_TO_MOUNT)
+  for (const mt of plan.mountSpecs) {
+    const bt = modBuffTypeOf(mt.modId, mt.spec.buff);
+    registerModMountData(mt.mountId, {
+      buff: bt,
+      runSpeed: mt.spec.runSpeed,
+      acceleration: mt.spec.acceleration,
+      jumpHeight: mt.spec.jumpHeight,
+      jumpSpeed: mt.spec.jumpSpeed,
+      ...(mt.spec.heightBoost !== undefined ? { heightBoost: mt.spec.heightBoost } : {}),
+      ...(mt.spec.flightTimeMax !== undefined ? { flightTimeMax: mt.spec.flightTimeMax } : {}),
+      ...(mt.spec.fatigueMax !== undefined ? { fatigueMax: mt.spec.fatigueMax } : {}),
+      ...(mt.spec.fallDamage !== undefined ? { fallDamage: mt.spec.fallDamage } : {}),
+      ...(mt.spec.extraFall !== undefined ? { extraFall: mt.spec.extraFall } : {}),
+      ...(mt.spec.dashSpeed !== undefined ? { dashSpeed: mt.spec.dashSpeed } : {}),
+      ...(mt.spec.swimSpeed !== undefined ? { swimSpeed: mt.spec.swimSpeed } : {}),
+      ...(mt.spec.usesHover !== undefined ? { usesHover: mt.spec.usesHover } : {}),
+      ...(mt.spec.constantJump !== undefined ? { constantJump: mt.spec.constantJump } : {}),
+      ...(mt.spec.blockExtraJumps !== undefined ? { blockExtraJumps: mt.spec.blockExtraJumps } : {}),
+      ...(mt.spec.canUseWings !== undefined ? { CanUseWings: mt.spec.canUseWings } : {}),
+      totalFrames: mt.spec.totalFrames,
+      ...(mt.spec.playerYOffsets !== undefined ? { playerYOffsets: mt.spec.playerYOffsets } : {}),
+      ...(mt.spec.xOffset !== undefined ? { xOffset: mt.spec.xOffset } : {}),
+      ...(mt.spec.yOffset !== undefined ? { yOffset: mt.spec.yOffset } : {}),
+      ...(mt.spec.playerHeadOffset !== undefined ? { playerHeadOffset: mt.spec.playerHeadOffset } : {}),
+      ...(mt.spec.emitsLight !== undefined ? { emitsLight: mt.spec.emitsLight } : {}),
+      ...(mt.spec.lightColor !== undefined ? { lightColor: mt.spec.lightColor } : {}),
+      ...(mt.spec.standingFrameStart !== undefined ? { standingFrameStart: mt.spec.standingFrameStart } : {}),
+      ...(mt.spec.standingFrameCount !== undefined ? { standingFrameCount: mt.spec.standingFrameCount } : {}),
+      ...(mt.spec.standingFrameDelay !== undefined ? { standingFrameDelay: mt.spec.standingFrameDelay } : {}),
+      ...(mt.spec.runningFrameStart !== undefined ? { runningFrameStart: mt.spec.runningFrameStart } : {}),
+      ...(mt.spec.runningFrameCount !== undefined ? { runningFrameCount: mt.spec.runningFrameCount } : {}),
+      ...(mt.spec.runningFrameDelay !== undefined ? { runningFrameDelay: mt.spec.runningFrameDelay } : {}),
+      ...(mt.spec.flyingFrameStart !== undefined ? { flyingFrameStart: mt.spec.flyingFrameStart } : {}),
+      ...(mt.spec.flyingFrameCount !== undefined ? { flyingFrameCount: mt.spec.flyingFrameCount } : {}),
+      ...(mt.spec.flyingFrameDelay !== undefined ? { flyingFrameDelay: mt.spec.flyingFrameDelay } : {}),
+      ...(mt.spec.inAirFrameStart !== undefined ? { inAirFrameStart: mt.spec.inAirFrameStart } : {}),
+      ...(mt.spec.inAirFrameCount !== undefined ? { inAirFrameCount: mt.spec.inAirFrameCount } : {}),
+      ...(mt.spec.inAirFrameDelay !== undefined ? { inAirFrameDelay: mt.spec.inAirFrameDelay } : {}),
+      ...(mt.spec.idleFrameStart !== undefined ? { idleFrameStart: mt.spec.idleFrameStart } : {}),
+      ...(mt.spec.idleFrameCount !== undefined ? { idleFrameCount: mt.spec.idleFrameCount } : {}),
+      ...(mt.spec.idleFrameDelay !== undefined ? { idleFrameDelay: mt.spec.idleFrameDelay } : {}),
+      ...(mt.spec.swimFrameStart !== undefined ? { swimFrameStart: mt.spec.swimFrameStart } : {}),
+      ...(mt.spec.swimFrameCount !== undefined ? { swimFrameCount: mt.spec.swimFrameCount } : {}),
+      ...(mt.spec.swimFrameDelay !== undefined ? { swimFrameDelay: mt.spec.swimFrameDelay } : {}),
+      ...(mt.spec.dashingFrameStart !== undefined ? { dashingFrameStart: mt.spec.dashingFrameStart } : {}),
+      ...(mt.spec.dashingFrameCount !== undefined ? { dashingFrameCount: mt.spec.dashingFrameCount } : {}),
+      ...(mt.spec.dashingFrameDelay !== undefined ? { dashingFrameDelay: mt.spec.dashingFrameDelay } : {}),
+    });
+    // ITEM_TO_MOUNT 扩条(物品 vid → mount id;quickMount/useMountItem 消费)
+    for (const it of plan.itemSpecs) {
+      if (it.spec.mountItem === undefined || it.modId !== mt.modId) continue;
+      const mk = it.spec.mountItem.startsWith('mod_') ? it.spec.mountItem : `mod_${mt.modId}_${it.spec.mountItem}`;
+      if (mk === mt.fullKey) {
+        (ITEM_TO_MOUNT as Record<string, number>)[String(it.stableId)] = mt.mountId;
+      }
+    }
+  }
+  // ★第三批:mod 发型(hairs → registerModHairData 递增 _hairCountMax)
+  for (const hr of plan.hairSpecs) {
+    registerModHairData(hr.hairId, hr.spec.texture, hr.spec.back !== false, hr.spec.female === true);
   }
   for (const n of plan.npcSpecs) {
     const spec = n.spec;

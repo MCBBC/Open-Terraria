@@ -1897,7 +1897,9 @@ export class StormLightning extends Entity {
       //  （门已在上方受理面收口——BJ420 旧后置快照+wrapper 退役:到达本位恒受理面,
       //  pveNumHits/proc 无条件达;门拒面 comboSeed 治疗支（:12795-12807 return）随
       //  门位前移一并收口——旧档 iframes>0 敌照治。）
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit,
+      dmg = runModModifyHitNpcByProj(game.player, game, this.projId,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);   // ★D2:独立结算面补钩
+            e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit,
         this.projId === 1122 ? -2 : 0, true);   // fromPlayer=DPS 计（1122=-2 清窗档,D4）
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       //  ★D3 受理面化：StatusNPC :13634 在 :12635 门后 = 拒收不可达（Arrow BJ395

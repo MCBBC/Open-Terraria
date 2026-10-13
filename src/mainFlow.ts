@@ -1848,17 +1848,30 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const overlay = document.createElement('div');
           overlay.style.cssText = 'position:fixed;inset:0;z-index:60;background:rgba(4,6,14,.82);'
             + 'display:flex;align-items:center;justify-content:center;';
-          const panel = buildResourcePackPage({ onClose: () => overlay.remove() });
-          panel.style.cssText = 'position:relative;background:#241a4e;border:2px solid #7d92d6;'
+          const panel = buildResourcePackPage();
+          if (!document.getElementById('sw-rp-modal-style')) {
+            const st = document.createElement('style');
+            st.id = 'sw-rp-modal-style';
+            st.textContent = '.sw-rp-modal-close { padding: 5px 12px; border-radius: 3px;'
+              + 'border: 1px solid #7d92d6; background: #3a2a5a; color: #fff; cursor: pointer;'
+              + 'font-family: inherit; font-size: 13px; }'
+              + '.sw-rp-modal-close:hover { background: #4a5aa0; }';
+            document.head.appendChild(st);
+          }
+          // ★关闭钮=卡体容器的【兄弟】(absolute 锚 cardWrap)——不能挂 panel 根:
+          //   页面自身 render() 会 innerHTML='' 整表重绘,panel 子节点全被抹
+          //   (关闭钮/悬停样式消失,用户实报)。卡片观感由 cardWrap 承担。
+          const cardWrap = document.createElement('div');
+          cardWrap.style.cssText = 'position:relative;background:#241a4e;border:2px solid #7d92d6;'
             + 'box-shadow:0 0 0 2px #0a0e1e;border-radius:6px;padding:20px 24px;'
             + 'width:min(680px,92vw);max-height:82vh;overflow-y:auto;';
           const close = document.createElement('button');
+          close.className = 'sw-rp-modal-close';
           close.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.Close');
-          close.style.cssText = 'position:absolute;top:10px;right:14px;padding:5px 12px;'
-            + 'border-radius:3px;border:1px solid #7d92d6;background:#3a2a5a;color:#fff;cursor:pointer;'
-            + 'font-family:inherit;font-size:13px;';
+          close.style.cssText = 'position:absolute;top:10px;right:14px;z-index:2;';
           close.addEventListener('click', () => overlay.remove());
-          overlay.append(panel, close);
+          cardWrap.append(panel, close);
+          overlay.append(cardWrap);
           root.append(overlay);
         });
       },

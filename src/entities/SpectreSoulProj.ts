@@ -41,6 +41,7 @@ import { cutTilesBox } from './ProjCutTiles';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 /** NPC.canGhostHeal=false 族（NPC.cs SetDefaults 写点——NPC.cs:6270 字段缺省 true；
  *  false 站点 :13921(type384)/:13961(type387)/:13978(type388)/:15839(type523)）。
@@ -254,7 +255,7 @@ export function playerHasGhostHurt(player: unknown): boolean {
 export interface GhostSrcCtx {
   /** Projectile.magic（Projectile.cs SetDefaults magic 位;vanilla-projectiles.json 列） */
   magic: boolean;
-  /** this.damage（弹基伤——ghostHurt 内 `int num = damage` 用它当浮魂弹伤,:12025）*/
+  /** dmgHooked_659（弹基伤——ghostHurt 内 `int num = damage` 用它当浮魂弹伤,:12025）*/
   projDamage: number;
   /** this.position/width/height（候选窗与 CanHit 原点是弹盒自身几何,:12040-12047） */
   projX: number; projY: number; projW: number; projH: number;
@@ -512,7 +513,9 @@ export class SpectreSoulProj extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // flag3 单发族：pierce 入参 1 = Enemy.hurt 的免疫豁免+不设帧面（:13152 对应位）
-      e.hurt(applyBannerDamageDealt(game, e, this.damage), 0, 0, game, 0, false, 1, true);
+      const dmgHooked_659 = runModModifyHitNpcByProj(game.player, game, this.projId,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, this.damage, false);   // ★D2
+            e.hurt(applyBannerDamageDealt(game, e, this.damage), 0, 0, game, 0, false, 1, true);
       this.penetrate--;                            // （:14189 命中尾递减,写段判定用写前值）
       return;                                      // keepIterating=false（单发结算终了）
     }

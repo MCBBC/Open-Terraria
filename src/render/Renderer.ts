@@ -17411,6 +17411,9 @@ export class Renderer {
   private lunarCoverCollected = new WeakSet<Player>();
   /** ★BJ665b 采光烘焙快照面（destination-in 复原 α 源——eyebrella 同式;只扩不缩） */
   private lunarCovB: HTMLCanvasElement | null = null;
+  /** ★日耀残影同 k 合成 scratch（2026-10-12 结构刀,见 drawPlayer 日耀块注）：
+   *  四印亮度栈一次成图,逐印平绘。惰性建,尺寸只增。 */
+  private solarStampScratch: HTMLCanvasElement | null = null;
   /** ★BJ665b 会话画布池（take/give 闭环——每玩家每帧最多 3 会话窗,池上限 8 面;
    *  flush blit 后还池,超限弃置=GC） */
   private lunarCovPool: HTMLCanvasElement[] = [];
@@ -20252,14 +20255,37 @@ export class Renderer {
         if (solarSetFull) {
           const gf = advanceSolarGhostFade(p.ghostFade, p.ghostDir, this._worldPaused);
           p.ghostFade = gf.fade; p.ghostDir = gf.dir;
-          for (const s of solarOutlineStamps(p.ghostFade)) {
-            ctx.save();
-            ctx.filter = `brightness(${s.k})`;
-            ctx.globalAlpha *= s.k;
-            ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, s.ox - f.sw / 2, s.oy - f.sh + pad, f.sw, f.sh);
-            stampLunarPiece(lunarUpper, 250, s.ox, s.oy);
-            stampLunarPiece(lunarLegsBake, lunar?.legs ?? 250, s.ox, s.oy);
-            ctx.restore();
+          const stamps = solarOutlineStamps(p.ghostFade);
+          // ★同 k 合成一次（2026-10-12 结构刀,日耀套残影面）：四印 k 恒同
+          //  （=1−ghostFade,solarOutlineStamps 单值）∧源恒同（f.img+双月件）——
+          //  亮度栈烘进一次性 scratch（ctx.filter=2D 慢路径,4 次→1 次;
+          //  drawImage 12→7）。逐印=1 次平绘（globalAlpha×s.k 语义不变）。
+          //  月件相对位=(f.sw−ff.sw)/2, f.sh−ff.sh（两 draw 的 +pad 在帧域相消）。
+          if (stamps.length && f.img) {
+            const s0 = stamps[0];
+            const sw = f.sw, sh = f.sh;
+            const sc = (this.solarStampScratch ??= document.createElement('canvas'));
+            if (sc.width < sw || sc.height < sh) { sc.width = sw; sc.height = sh; }
+            const scx = sc.getContext('2d')!;
+            scx.setTransform(1, 0, 0, 1, 0, 0);
+            scx.globalAlpha = 1; scx.filter = `brightness(${s0.k})`;
+            scx.globalCompositeOperation = 'copy';
+            scx.drawImage(f.img, f.sx, f.sy, sw, sh, 0, 0, sw, sh);
+            scx.globalCompositeOperation = 'source-over';
+            const putPiece = (bake: Baked | null, cv: number): void => {
+              if (!bake) return;
+              const ff = dollFrameRows(tintRGBA(bake, [cv / 255, cv / 255, cv / 255]), rows);
+              scx.drawImage(ff.img, ff.sx, ff.sy, ff.sw, ff.sh, (sw - ff.sw) / 2, sh - ff.sh, ff.sw, ff.sh);
+            };
+            putPiece(lunarUpper, 250);
+            putPiece(lunarLegsBake, lunar?.legs ?? 250);
+            scx.filter = 'none';
+            for (const s of stamps) {
+              ctx.save();
+              ctx.globalAlpha *= s.k;
+              ctx.drawImage(sc, 0, 0, sw, sh, s.ox - sw / 2, s.oy - sh + pad, sw, sh);
+              ctx.restore();
+            }
           }
         }
         // ---- ★BJ550 下砸过程残影（过程特效+绘制姿势面）：Player.cs:37354-37357

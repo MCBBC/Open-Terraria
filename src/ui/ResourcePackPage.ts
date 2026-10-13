@@ -100,8 +100,9 @@ export function buildResourcePackPage(opts?: { onClose?: () => void }): HTMLElem
     root.innerHTML = '';
     root.append(view.kind === 'main'
       ? buildMain(mgr, (v) => { view = v; render(); })
-      // 信息页「取消」= 关闭整框(用户期望;独立嵌入无 onClose 时回落主列)
-      : buildInfo(mgr, view.id, opts?.onClose ?? (() => { view = { kind: 'main' }; render(); })));
+      // 信息页「取消」= 返回主列(2026-10-13 用户裁决:取消只退子页,整框关闭归
+      //  右上角「关闭」钮——此前误接 onClose 把整框一起关了)
+      : buildInfo(mgr, view.id, () => { view = { kind: 'main' }; render(); }));
   };
   render();
   // 首帧用当前行(启动已恢复),异步补拉后有行则重绘（面板先于 applyInstalled 的窗口）
@@ -251,19 +252,28 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
   const rerender = (): void => go({ kind: 'main' });
   const btns = document.createElement('div');
   btns.className = 'sw-rp-btns';
-  const mkBtn = (label: string, title: string, fn: () => void | Promise<void>, cls = ''): HTMLButtonElement => {
+  const mkBtn = (label: string, title: string, fn: (b: HTMLButtonElement) => void | Promise<void>, cls = ''): HTMLButtonElement => {
     const b = document.createElement('button');
     b.textContent = label;
     b.title = title;
     if (cls) b.classList.add(cls);
-    b.addEventListener('click', () => { void fn(); });
+    b.addEventListener('click', () => { void fn(b); });
     return b;
   };
-  // 启用/禁用（GameUI.Enabled/Disabled 文案 + Enable/DisableTexturePack tooltip）
+  // 启用/禁用（GameUI.Enabled/Disabled 文案 + Enable/DisableTexturePack tooltip）。
+  // ★进行态(2026-10-12 用户需求):重放含全图解码,秒级——按钮禁用+「处理中…」
+  //  防重复点击(旧=无反馈,用户以为没点上连点)。
   btns.append(mkBtn(
     Lang.text(row.enabled ? 'GameUI.Disabled' : 'GameUI.Enabled'),
     Lang.text(row.enabled ? 'UI.DisableTexturePack' : 'UI.EnableTexturePack'),
-    async () => { await mgr.setEnabled(row.id, !row.enabled); rerender(); },
+    async (b) => {
+      if (b.disabled) return;
+      const prev = b.textContent;
+      b.disabled = true;
+      b.textContent = Lang.text('Mods.SandboxWorld.ResourcePacks.Working');
+      try { await mgr.setEnabled(row.id, !row.enabled); } finally { b.disabled = false; b.textContent = prev; }
+      rerender();
+    },
     row.enabled ? 'on' : '',
   ));
   // 信息（UI.SeeTexturePackInfo）→ 信息子页

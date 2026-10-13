@@ -191,7 +191,7 @@ async function decodeBatch(
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
   if (!result || result.allocation === null) return;
-  const { items, tiles, npcs, gores, walls } = result.allocation;
+  const { items, tiles, npcs, gores, walls, mounts, hairs } = result.allocation;
   const tileMetaTable = atlas.vanilla.tiles as unknown as Record<string, unknown>;
   for (const pack of getLoadedPacks()) {
     const modId = pack.manifest.id;
@@ -265,6 +265,21 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
           rows: spec.rows ?? (spec.largeFrame ? 7 : 5),   // ★R-A-M4:largeFrame 变体必用行 5-6,5 行表=越表空洞
           ...(spec.largeFrame !== undefined ? { largeFrame: spec.largeFrame } : {}),
         };
+      }
+      // ★第三批:mod 坐骑/发型贴图(SW 别名支)
+      for (const path of discoverPackJsonPaths(pack, 'mounts')) {
+        const spec = readPackJson<import('./types').ModMountContent>(pack, path);
+        const mountId = mounts.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.texture && mountId !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Mount_${mountId}.png`, texPath: spec.texture });
+        }
+      }
+      for (const path of discoverPackJsonPaths(pack, 'hairs')) {
+        const spec = readPackJson<import('./types').ModHairContent>(pack, path);
+        const hairId = hairs.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.texture && hairId !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Player_Hair_${hairId + 1}.png`, texPath: spec.texture });
+        }
       }
       // ★刀2-C1(2026-10-13):NPC glowmask/物品 glowmask 贴图(SW 别名支;
       //  NPC=vanilla/NPC_Glow_<id>.png;物品=vanilla/Glow_<伪 GlowMaskID>.png)

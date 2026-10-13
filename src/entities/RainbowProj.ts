@@ -21,6 +21,7 @@ import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaP
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -111,7 +112,10 @@ export class RainbowSegment extends Entity {
       //  写支故绿,本刀修复）；②死亡转换写支（Enemy.ts:14421 四塔血尽转演出写
       //  iframes=2,写支 1:1 禁改）→ 致死命中拍误判门拒。快照双源同治。
       const gate = snapshotVanillaGate(e);
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★D2:独立结算面补钩(dmg=const 值域→新变量承接)
+      const dmgHooked = runModModifyHitNpcByProj(game.player, game, this.projId,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);
+      e.hurt(applyBannerDamageDealt(game, e, dmgHooked), Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // ★X2-D2（2026-09-29）：251 幽灵兜帽吸血 proc 接线——原版 Damage() 通用 on-hit
       //  段 :13712 flag10（251 magic/friendly/aiStyle46≠59）→ :13875 canGhostHeal 门 →
       //  :13877-79 ghostHeal(num41, victimCenter)。本弹自有 hurt 面此前无接线=漏。

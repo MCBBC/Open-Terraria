@@ -166,6 +166,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   return c.toDataURL();
 }
 import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
+import { resolveTouchMode } from '../core/input/touchMode';   // ★BJ669e2：触屏长按 tooltip 元素锚回落判据
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixValueMul, PREFIX_NAMES, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★BJ407：prefixLines 消费面收编入 buildTooltipHtml（itemTooltip.ts 自带 import）
 import { bannerNpcOfItem } from '../world/Banners';
@@ -2850,6 +2851,15 @@ export class UI {
     document.addEventListener('mousemove', (e) => {
       this.mouseX = e.clientX; this.mouseY = e.clientY;
       this.moveGhost();
+      // ★BJ669e2：光标锚 tooltip 跟随臂——原版 MouseText 即时模式每帧以当帧光标
+      //  重定位（Main.cs:20378）。enter 拍的滞后坐标（边界事件先于同批 mousemove
+      //  派发）由紧随其后的本臂同批纠正,快速跨槽不再钉旧位换内容。元素锚路径
+      //  （重铸/buff/触屏长按）tooltipFollowsCursor=false 不跟随
+      if (this.tooltipFollowsCursor && this.tooltip.style.display === 'block' && this.tooltipCursorSize) {
+        const { left, top } = this.cursorTooltipPos(this.tooltipCursorSize.tw, this.tooltipCursorSize.th);
+        this.tooltip.style.left = `${left}px`;
+        this.tooltip.style.top = `${top}px`;
+      }
       // 未持有物品时按下并移动 >4px → 整叠拾取开始拖拽
       if (this.dragFrom && !this.heldStack) {
         const d = Math.hypot(e.clientX - this.dragFrom.sx, e.clientY - this.dragFrom.sy);
@@ -3610,6 +3620,9 @@ export class UI {
       const from = inv.effectiveSharedFrom(i, where === 'dye');
       if (from !== null) s = (where === 'dye' ? inv.loadouts[from].dye[i] : inv.loadouts[from].armor[i]) ?? null;
     }
+    // ★BJ669e2：触屏锚标记在早退支也要消费（单读即清,残留会跨次污染下一 show）
+    const touchAnchor = this.tooltipTouchAnchor;
+    this.tooltipTouchAnchor = undefined;
     if (!s) { this.tooltip.style.display = 'none'; return; }
     this.tooltip.innerHTML = this.buildTooltipHtml(s, where, i, override);
     this.tooltip.style.display = 'block';
@@ -3625,16 +3638,40 @@ export class UI {
     //   重复贴图凸块（原版即时模式每帧按当帧串宽画底 Utils.DrawInvBG :2718-2742，
     //   无跨帧位置反馈 = 无此伪影，本仓 DOM 遗留态特有）。
     const slotEl = override?.anchor ?? this.slotEl(i, where);
-    if (slotEl) {
+    // ★BJ669e2：触屏长按通道回落元素锚（标记已在上方早退支前单读即清）——触屏
+    //  会话无 mousemove 流,光标锚的 mouseX/mouseY 无更新源 → 气泡钉左上角;
+    //  桌面 mouseenter 支恒 undefined=光标锚不受影响
+    this.tooltipFollowsCursor = false;   // 默认不跟随;仅下方光标锚支置 true
+    if (touchAnchor) {
       this.tooltip.style.left = '0px';   // 清旧 left 约束（同帧多次写样式,无中间绘制）
       this.tooltip.style.top = '0px';
-      const r = slotEl.getBoundingClientRect();
       const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
-      let left = r.right + 8, top = r.top;
-      if (left + tw > window.innerWidth - 18) left = Math.max(0, window.innerWidth - tw - 18);
-      if (top + th > window.innerHeight - 18) top = Math.max(0, window.innerHeight - th - 18);
+      const r = touchAnchor.getBoundingClientRect();
+      let left = r.right + 8, top = r.top;   // BJ669e 前元素锚语义（触屏无光标流）
+      const pad = 18;
+      if (left + tw > window.innerWidth - pad) left = Math.max(0, window.innerWidth - tw - pad);
+      if (top + th > window.innerHeight - pad) top = Math.max(0, window.innerHeight - th - pad);
       this.tooltip.style.left = `${left}px`;
       this.tooltip.style.top = `${top}px`;
+    } else if (slotEl) {
+      this.tooltip.style.left = '0px';   // 清旧 left 约束（同帧多次写样式,无中间绘制）
+      this.tooltip.style.top = '0px';
+      const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
+      // ★BJ669e（2026-10-13 用户实报「装备栏悬停气泡遮挡」定谳）：原版 MouseText
+      //  锚=【光标】（Main.cs:20378 X=mouseX+14/Y=mouseY+14;ThickMouse +6;持物
+      //  !mouseItem.IsAir → X+=34 避让手持贴图 :20386;右/底缘钳 num2 边距
+      //  :20403-20412）——「跟手」语义=气泡不出现在光标所指格上。旧「槽右+8、
+      //  槽顶对齐」系自创锚（SW-TT1 注「槽锚定确定性更好」）——右缘槽（装备栏）
+      //  右缘钳后左缘退回槽区=盖住所指格+相邻列（图 123 实报）。改光标锚+原版钳式,
+      //  SW-TT1 的「先清旧锚再量测、烘底定位后」教训保留。
+      //  ★BJ669e2（2026-10-13 用户实报「快速跨装备槽 tooltip 原地换内容不重算位」）：
+      //  光标锚公式迁 cursorTooltipPos 单源（本方法与 mousemove 跟随臂共用）,显示期
+      //  每拍对齐当帧光标=原版即时模式同相（跟随臂见 bindDocumentHandlers mousemove）。
+      this.tooltipCursorSize = { tw, th };
+      const { left, top } = this.cursorTooltipPos(tw, th);
+      this.tooltip.style.left = `${left}px`;
+      this.tooltip.style.top = `${top}px`;
+      this.tooltipFollowsCursor = true;
     }
     this.applyTooltipBg();   // ★终布局后量测烘底（原在定位前 = 旧约束宽）
   }
@@ -3712,6 +3749,31 @@ export class UI {
   private tooltipPulseRaf = 0;
   private tooltipPulseVal = 255;
   private tooltipPulseDir = -1;
+  /** ★BJ669e2（2026-10-13 用户实报「快速跨装备槽 tooltip 原地换内容不重算位」定谳）：
+   *  浏览器边界事件先于同批 mousemove 派发——mouseenter 拍 this.mouseX 还是
+   *  【上一次】move 的坐标（快速跨槽=旧槽位）,而 DOM 气泡只在 enter 拍定位一次 →
+   *  钉旧位换新内容（=实报形态）。原版 MouseText=即时模式每帧以【当帧】mouseX
+   *  重绘（Main.cs:20378）,显示期恒跟手。修=光标锚路径置位本门,mousemove 跟随臂
+   *  （bindDocumentHandlers）在显示期间逐拍重定位（同批 mousemove 立即纠正 enter
+   *  拍的滞后坐标,零可见帧）。元素锚路径（重铸/buff/触屏长按）不置位=不受跟随臂
+   *  拖动;tooltipCursorSize=定位拍缓存的自然宽高（跟随臂免逐拍 offsetWidth 布局读,
+   *  内容只在 show 拍变化=缓存精确） */
+  private tooltipFollowsCursor = false;
+  private tooltipCursorSize: { tw: number; th: number } | null = null;
+  /** 触屏长按元素锚标记（showSlotHintTouch 触屏支单写,showTooltipFor 单读即清） */
+  private tooltipTouchAnchor: HTMLElement | null | undefined = undefined;
+
+  /** ★BJ669e2 光标锚定位公式单源（Main.cs:20378-20414,原 BJ669e 内联式迁移零行为差）：
+   *  X=mouseX+14/Y=mouseY+14、持物 +34 避让（:20386）、右/底缘 18 边距钳
+   *  （:20403-20412）。showTooltipFor 定位拍与 mousemove 跟随臂共用 */
+  private cursorTooltipPos(tw: number, th: number): { left: number; top: number } {
+    let left = this.mouseX + 14, top = this.mouseY + 14;
+    if (this.heldStack) left += 34;    // !mouseItem.IsAir → +34（:20386）
+    const pad = 18;
+    if (left + tw > window.innerWidth - pad) left = Math.max(0, window.innerWidth - tw - pad);
+    if (top + th > window.innerHeight - pad) top = Math.max(0, window.innerHeight - th - pad);
+    return { left, top };
+  }
   private startTooltipPulse(): void {
     cancelAnimationFrame(this.tooltipPulseRaf);
     this.tooltip.style.filter = '';   // 清历史整元素滤镜（面板恒定，勿再暗化）
@@ -4435,6 +4497,7 @@ export class UI {
     if (!s) return;
     this.tooltip.innerHTML = this.buildTooltipHtml({ id: s.id, stack: s.stack, prefix: s.prefix }, 'inv', -1);
     this.tooltip.style.display = 'block';
+    this.tooltipFollowsCursor = false;   // ★BJ669e2：元素锚路径=不进 mousemove 跟随臂
     this.startTooltipPulse();   // ★BJ407：与 showTooltipFor 同序（innerHTML 后挂帧驱动）
     // ★SW-TT1 同族②（2026-09-19 实报「重铸格 tooltip 背景平铺成多块气泡」）：本路径
     //   此前从不烘底——元素一直带着上一次物品气泡的固有尺寸底图，重铸文本更宽时
@@ -5862,6 +5925,7 @@ export class UI {
     for (const ln of desc.split('\n')) if (ln) html += `<br>${ln}`;
     this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}</div>`;
     this.tooltip.style.display = 'block';
+    this.tooltipFollowsCursor = false;   // ★BJ669e2：元素锚路径=不进 mousemove 跟随臂
     this.startTooltipPulse();
     // ★SW-TT1 同族③：与 showTooltipFor 同序——清旧 left/top 约束量自然宽 → 定位
     //   钳制 → 终布局后烘底（旧序定位前烘底，定位回弹后 repeat 平铺出右缘凸块）
@@ -7218,6 +7282,9 @@ export class UI {
   /** 触屏长按槽位 tooltip(mobile-adaptation-plan 模块④):显示后挂一次性
    *  document 触摸关闭(桌面 mouseleave 已有;触屏无 leave 语义) */
   private showSlotHintTouch(i: number, where: string, anchor?: HTMLElement): void {
+    // ★BJ669e2：触屏支标记元素锚（showTooltipFor 读后即清）——触屏会话无 mousemove
+    //  流,光标锚的 mouseX/mouseY 无更新源 → 气泡钉左上角;桌面 mouseenter 支不受影响
+    this.tooltipTouchAnchor = resolveTouchMode() === 'touch' ? (anchor ?? null) : undefined;
     this.showTooltipFor(i, where as never, anchor ? { anchor } : undefined);
     document.addEventListener('touchstart', () => {
       this.tooltip.style.display = 'none';
@@ -11539,12 +11606,29 @@ export class UI {
     });
     const ICON_SRC = 'sprites/vanilla-ui/UI_BuilderIcons.png';
     const slotEls: Array<HTMLButtonElement | null> = BUILDER_ACC_ICON_ORDER.map(() => null);
+    // ★BJ585（用户实报「四线只有明亮正确渲染,经典/褪色像透明」定谳落刀）：原版图标
+    //  态=SpriteBatch tint【RGB 暗化】非 α 半透明——线材族四态链（Main.cs:48288-48290）：
+    //  0 White / 1 Color(127,127,127)【不透明暗灰】/ 2 同色 MultiplyRGBA(Color(0.66×4))
+    //  →(83,83,83,α168) / 3 MultiplyRGBA(0.33×4)→(41,41,41,α84)；二态族（:48168 等）
+    //  off=Color(127,127,127) 不透明暗灰。旧码把 tint 误译为 opacity 0.497 半透明且
+    //  1/2/3 三态折叠同观感=「经典/褪色像透明」病灶。CSS 译法：RGB 暗化→filter
+    //  brightness(k)、α→opacity（byte 链=Color(float)→(byte)(f·255) 截断后分量乘）。
     const paintSlot = (i: number): void => {
       const b = slotEls[i];
       if (!b) return;
-      const idx = BUILDER_ACC_ICON_ORDER[i].accIndex;
-      const on = statusOf()[idx] === 0;
-      b.style.opacity = on ? '1' : '0.497';   // color2 = (127,127,127) ≙ White×0.498(:48168)
+      const st = statusOf()[BUILDER_ACC_ICON_ORDER[i].accIndex];
+      if (BUILDER_ACC_ICON_ORDER[i].wireMode) {
+        // 0 Bright→原色;1 Normal→×127/255=0.498;2 Faded→(83,α168);3 Hidden→(41,α84)
+        b.style.opacity = st === 2 ? `${168 / 255}` : st === 3 ? `${84 / 255}` : '1';
+        b.style.filter = st === 0 ? ''
+          : st === 1 ? `brightness(${127 / 255})`
+          : st === 2 ? `brightness(${83 / 255})`
+          : `brightness(${41 / 255})`;
+      } else {
+        const on = st === 0;
+        b.style.opacity = '1';
+        b.style.filter = on ? '' : `brightness(${127 / 255})`;   // color2(127,127,127) 不透明暗灰(:48168)
+      }
     };
     // ★2026-09-13 反馈轮6:hover 文案抽函数走自有气泡(:48300-48320 MouseText 域;
     //  文案随 num3 走的映射错位 quirk 见 BUILDER_ACC_ICON_ORDER 注)

@@ -35,7 +35,7 @@ import { TILE_BY_KEY } from '../data/tiles';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { vanillaStatOfVid } from '../data/vanillaItemStats';
-import { equipKindOfVid } from '../data/vanillaEquip';
+import { equipKindOfAnyVid } from '../data/vanillaEquip';   // ★R-A-D7:vid 域收口
 import { ITEM_DEFS } from '../data/items';
 import { ITEM_ACCESSORY_INCOMPATIBILITY_TYPE } from '../data/vanillaSets1457';
 
@@ -243,7 +243,7 @@ function vanillaIsAccessory(vid: number): boolean {
 
 /** Item.mountType >= 0（vanilla-equip.json mount/cart 两组 id，Item.cs mountType 赋值） */
 function vanillaMountType(vid: number): number {
-  const k = equipKindOfVid(vid);
+  const k = equipKindOfAnyVid(vid);
   return k === 'mount' || k === 'cart' ? 0 : -1;
 }
 

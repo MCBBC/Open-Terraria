@@ -91,7 +91,7 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
   return {
     name: typeof a.name === 'string' ? a.name.slice(0, 20) : d.name,
     // 1.4.5.6 保护（Player.cs:54209）：hair >= 228 → 0
-    hair: clampInt(a.hair, 0, HAIR_COUNT - 1, d.hair),
+    hair: clampInt(a.hair, 0, _hairCountMax - 1, d.hair),
     skinVariant: clampInt(a.skinVariant, 0, 11, d.skinVariant),
     hairColor: c(a.hairColor, d.hairColor),
     skinColor: c(a.skinColor, d.skinColor),
@@ -132,6 +132,13 @@ export const FEMALE_VARIANTS = [4, 5, 6, 7, 9, 11];
 
 /** 发型 id 为 0 基（0..227）；贴图 = Player_Hair_{id+1}.png（AssetInitializer:455） */
 export const HAIR_COUNT = 228;
+/** ★第三批(2026-10-13):mod 发型段顶(228+N;registerModHairData 递增)——
+ *  validateAppearance/CHAR_CREATION_HAIRS 消费;原版域 0-227 零扰动 */
+let _hairCountMax = HAIR_COUNT;
+export function hairCountMax(): number { return _hairCountMax; }
+export function bumpHairCountMax(id: number): void {
+  if (id >= _hairCountMax) _hairCountMax = id + 1;
+}
 
 /** 角色创建可用发型白名单（HairstyleUnlocksHelper.RebuildList：0-50 + 136-144,147-151,154,155,157,158,161
  *  + 51-122 + 134,135,146,152,153,156,159,165,160 + 166-227） */
@@ -141,7 +148,7 @@ export const CHAR_CREATION_HAIRS: number[] = (() => {
   list.push(136, 137, 138, 139, 140, 141, 142, 143, 144, 147, 148, 149, 150, 151, 154, 155, 157, 158, 161);
   for (let i = 51; i <= 122; i++) list.push(i);
   list.push(134, 135, 146, 152, 153, 156, 159, 165, 160);
-  for (let i = 166; i < HAIR_COUNT; i++) list.push(i);
+  for (let i = 166; i < _hairCountMax; i++) list.push(i);
   return list;
 })();
 
