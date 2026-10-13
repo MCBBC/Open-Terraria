@@ -60,7 +60,7 @@ import { newLovestruckHeart, GorePiece } from './GorePiece';   // ★清偿刀 F
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from '../fx/CombatTextColors';
-import { runModOnHitAny, runModOnNpcHitByAny, runModOnNpcDeath, runModOnKillAnyNpc } from '../mods/hooks';   // ★D20-m5:城镇 NPC 受击/击杀派发
+import { runModOnHitAny, runModOnNpcHitByAny, runModOnNpcDeath, runModOnKillAnyNpc, runModNpcIncomingHit } from '../mods/hooks';   // ★D20-m5:城镇 NPC 受击/击杀派发;★R-B-F4:承伤值链
 
 // ---- 本文件随机源约定（★2026-08-31 治理批 F8 定案）----
 // 运行时「行为」掷骰一律走实例注入面 this.rng()（测试 stub 后构造/回放的 NPC 同样
@@ -1522,6 +1522,9 @@ export class TownNPC extends Entity {
     const penAdd = npcCheckArmorPenetration(def, flatPen, penPercent, {});
     let calc = dmg + penAdd - def * 0.5;
     if (calc < 1) calc = 1;
+    // ★R-B-F4(2026-10-13):mod 承伤值链(防御结算后/暴击前=tML ModifyIncomingHit 域;
+    //  Enemy.hurt :15026 同族——旧=城镇域整缺,DR 族 mod 对城镇 NPC 不生效)
+    calc = Math.max(1, Math.trunc(runModNpcIncomingHit(this as never, calc)));
     dmg = Math.trunc(calc * (crit ? 2 : 1));
     this.hp -= dmg;
     this.lastStrikeDealt = dmg;   // ★X1 face 4：num41 等位（StrikeNPC 返值=防后实扣）

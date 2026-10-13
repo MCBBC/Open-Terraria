@@ -3855,6 +3855,10 @@ export class MinionProj extends Entity {
    *  26/36（:39475-39481）；探到块但全不可伤 → 转离场（:39500-39503）。 */
   private digtoiseStep(game: GameHooks, p: Player): void {
     const st = game.world.store;
+    // ★BJ672：弹面 flag6=TRUE 缺省（1098/1123 aiStyle 204,SetDefaults 无 tileCollide=
+    //  false 行=初值 true、非 pet、不在覆写 switch → 下落穿平台;三处 moveAndCollide
+    //  共享本入口逐拍置位）。
+    this.dropThrough = true;
     const trusty = this.projId === 1123;
     // ★IIIII233（2026-09-09）：演出气泡 = Main.cs:34250-34266 Draw 期直绘的 tick 等价
     //  （DrawTemporaryBubble(emote, maxLifetime, remaining, anchor)）——
@@ -4405,6 +4409,9 @@ export class MinionProj extends Entity {
     }
     // ---- 位移（tileCollide 镜像;ignoreWater=true 无湿阻尼;碰墙=原版碰撞链缺省档
     // X×(−0.5)/Y×(−0.5)（:19826-19840 尾档）——本仓 moveAndCollide 停墙+速度反转折算）----
+    // ★BJ672：弹面 flag6=TRUE（case 759 显式 :17693）→ 下落穿平台（原版雀宝宝
+    //  穿平台归主;tileCollide 初值 true :4741 域无 false 行）。
+    this.dropThrough = true;
     const lvx = this.vx, lvy = this.vy;
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall && this.vx === lvx) this.vx = -lvx * 0.5;
@@ -5685,6 +5692,10 @@ export class MinionProj extends Entity {
     if (this.vx < -num184 && flag2) this.spDir = -1;
     this.facing = -this.spDir;
     this.vy = Math.min(this.vy + 0.4, 10);            // :65244-65247
+    // ★BJ672：弹面 flag6=TRUE 缺省（390-392 SetDefaults :4744-4754 无 tileCollide=
+    //  false 行=初值 true、非 pet、不在覆写 switch → 下落穿平台;贴地行走 vy=0 时
+    //  平台无碰撞面不受影响=原版蜘蛛可站平台行走、下落穿过）。
+    this.dropThrough = true;
     // ★水中位移阻尼（:17721 湿支;蜘蛛 tileCollide 动态门 :62843-62845,真拍走湿支）
     const dfSpiderWalk = projWaterDragFactor(this);
     moveAndCollide(this, game.world, this.vx * dfSpiderWalk, this.vy * dfSpiderWalk);
@@ -6796,7 +6807,12 @@ export class MinionProj extends Entity {
     // 跳跃（:63197-63281）：意图单格探 → 落地梯跳五档;266 行走恒小跳
     const dirX = flag2 ? -1 : flag3 ? 1 : 0;
     const flag5 = (flag2 || flag3) && this.walkerJumpIntent(st, dirX);
-    this.dropThrough = (p.y + p.h - 8) > (this.y + this.h);        // flag4（:63213-63215）
+    // ★BJ672（逐族普查定谳）：AI_026_TAIL 7 vid（191-194/266/1094/1113）原版弹面
+    //  flag6 恒 TRUE（SetDefaults 无 tileCollide=false 行=初值 true、非 pet、不在
+    //  覆写 switch :17670-17696、decidesManualFallThrough=false → shouldFallThrough
+    //  写值不被弹面消费）→ 恒穿平台。旧 :50454-8 玩家脚锚条件式=偏差（dMFT=false
+    //  时该公式在原版无消费面,条件不成立拍旧式回落承接=非原版相）。
+    this.dropThrough = true;
     this.tileCollide = true;                                       // :63098
     const dfA026 = projWaterDragFactor(this);
     const xPreMoveA026 = this.x;   // ★BJ517③/BJ518②：flag27 判据（本拍位移零=机器读相「最近位移」;266 与 191-194 帧机共用同一快照）
@@ -9241,6 +9257,9 @@ export class MinionProj extends Entity {
           }
           // 位移+吸附（tileCollide=true 缺省 :9710-9716 无 tileCollide 行;
           // 碰撞即 HandleTileCollision=ai[0]=1 :18752-18757 + Item167 音/尘/gore）
+          // ★BJ672：弹面 flag6=TRUE 缺省（1025 aiStyle 197 非覆写面）→ 恒穿平台
+          //  不吸平台（吸附面只对实体物块成立=原版相;旧缺省承接=水晶可吸在平台上）。
+          this.dropThrough = true;
           moveAndCollide(this, game.world, this.vx, this.vy);
           if ((this.collideY || this.hitWall) && this.sAttach === 0) {
             this.sAttach = 1;
@@ -9730,6 +9749,10 @@ export class MinionProj extends Entity {
         if (Math.abs(dx) > 60) this.vx = Math.max(-2.5, Math.min(2.5, dx * 0.02));
       }
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      // ★BJ672：弹面 flag6=TRUE 缺省（AI_062 族 373-963 非 pet/非覆写面;375/963
+      //  SetDefaults tileCollide=false 时弹面整段跳过、本块不达;423/613 初值 true
+      //  弹面跑时恒穿平台）→ 地面态下落穿平台。
+      this.dropThrough = true;
       // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗;
       // 域外 id 无湿段 → 四旗恒 false → 档恒 1 数值不变）
       const dfGnd = projWaterDragFactor(this);
@@ -9918,6 +9941,10 @@ export class MinionProj extends Entity {
     vx = Math.max(-clamp, Math.min(clamp, vx));
     if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
     // 重力 + 碰撞（tileCollide=true）
+    // ★BJ672：弹面 flag6=TRUE 缺省（653 aiStyle 67 SetDefaults 无 tileCollide=false 行、
+    //  非 pet、不在覆写 switch;decidesManualFallThrough=false → AI_067 :50454 写的
+    //  shouldFallThrough 不被弹面消费 → flag6 恒 TRUE 恒穿平台）。
+    this.dropThrough = true;
     vy = Math.min(vy + 0.3, MAX_FALL_SPEED);
     this.vx = vx; this.vy = vy;
     moveAndCollide(this, w, vx, vy);

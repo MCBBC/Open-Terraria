@@ -145,4 +145,37 @@ describe('D20-M1:六致死转态支受击派发(onHitByAny killed=false)', () =>
     expect(n.dead).toBe(true);
     expect(order).toEqual(['onHitByAny', 'onKill']);
   }, 60_000);
+  // ★R-B-F2(2026-10-13):realLife 转移死——段 killed=false 一拍,头零受击拍
+  //  (tML=OnHit 只对被击段;头 die→hurt(9999) 幻影拍抑制),头击杀钩照发
+  it('realLife 转移:段单拍 killed=false;头零幻影拍+击杀钩照发', async () => {
+    const beats: Array<Record<string, unknown>> = [];
+    const kills: string[] = [];
+    registerGlobalNpcHooks('t', {
+      onHitByAny: (e, ctx) => { beats.push({ vid: (e as { vanillaId?: number }).vanillaId, ...ctx }); },
+      onKill: (e) => { kills.push(String((e as { vanillaId?: number }).vanillaId)); },
+    });
+    const { Enemy: E2 } = await import('../src/entities/Enemy');
+    const head = E2.fromVanilla(134, 100, 100)!;   // 毁灭者头
+    const seg = E2.fromVanilla(135, 100, 100)!;    // 段
+    (seg as unknown as { realLifeHost: Enemy }).realLifeHost = head;
+    const w2 = new World(64, 64, 7, 't');
+    const g2 = {
+      world: w2,
+      player: { dead: false, cx: 0, cy: 0, buffs: { has: () => false, apply: () => {} }, equipStats: {}, addDPS: () => {} },
+      recLog: () => {}, addDamageNumber: () => {}, lastDamageCause: null,
+      playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
+      spawnParticles: () => {}, spawnDrop: () => null, onEnemyKilled: () => {},
+      enemies: () => [], critters: () => [],
+      dust: { spawn: () => ({}) },
+      noSpawnCycleThisFrame: false, bossDamageSink: {},
+      lighting: { addLight: () => {} },
+    } as never;
+    seg.hurt(1e9, 0, 0, g2, 0, false, 0, true);
+    const hitBeats = beats.filter((b) => !b.killed);
+    const killBeats = beats.filter((b) => b.killed);
+    expect(hitBeats).toHaveLength(1);                       // 段单拍
+    expect((hitBeats[0]! as { vid?: number }).vid).toBe(135);
+    expect(killBeats).toHaveLength(0);                      // 头幻影拍抑制
+    expect(kills).toContain('134');                         // 头击杀钩照发
+  }, 60_000);
 });

@@ -164,7 +164,7 @@ const SEG_METH: Array<Record<string, number>> = [];
     (rng as unknown as Record<string, unknown>)[m] = function (this: unknown, ...a: unknown[]) {
       const v = fn.apply(this, a);
       drawCount++; METH_COUNT[m] = (METH_COUNT[m] ?? 0) + 1; const cur = SEG_METH[SEG_METH.length - 1]; if (!cur) { throw new Error('掷在无段区 ' + m + '\n' + new Error().stack); } cur[m] = (cur[m] ?? 0) + 1;
-      const tag = m === 'next' ? 'd' : m === 'range' ? `f${a[0]}_${a[1]}` : m === 'nextInt' ? `i${a[0]}` : `r${a[0]}_${(a[1] as number) + 1}`;
+      const tag = m === 'next' ? 'd' : m === 'range' ? `f${a[0]}_${a[1]}` : m === 'nextInt' ? `i${a[0]}` : `r${a[0]}_${a[1]}`;
       ((globalThis as { __seaDrawBuf?: string[] }).__seaDrawBuf ?? []).push(`${drawCount - 1}\t${tag}\t${v}`);
       return v;
     };

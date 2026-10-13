@@ -1308,6 +1308,51 @@ export class Dart extends Entity {
       }
       return;
     }
+    // ★红魔鬼三叉戟 115（2026-10-13,用户实报「贴图反的+越来越大」定谳刀）：GetAlpha
+    //  P.cs:81444-81456 专梯（114||115）——localAI[1]<5→Transparent / 5..15→灰梯
+    //  (l−5)/10×255 / ≥15→(255,255,255,alpha)。★A=α 场直通（≠本仓通用 (255−α)/255,
+    //  出场 α=255=不透明;Arrow 载体 BJ236 判例同式 case 116/132/156/157/173=
+    //  ramp<5?0:ramp<15?(ramp−5)/10:α/255）,RGB 恒白不读光照 → 承接 BJ530 Dart 44
+    //  判例：capture→实体层零绘,projFullbrightQueue 光照合成后主画布 source-over
+    //  复绘（非 257 加算）。通用路径旧双病：① ga=(255−α)/255 使脉冲闪烁相位颠倒
+    //  （原版=小而实/大而隐）;② 渐入 fade 已摘（dartStep 段注）——脉冲 α 有界
+    //  [0,255],scale 有界 [0.98,1.16]（AI_027 :26870-26889）,负 scale 镜像/
+    //  无界增大两案自此根除。傀儡不跑 dartStep（ai115L1 恒 0）→ 按 ≥15 档恒定直绘。
+    //  阶梯读 ai115L1（dartStep 115 尘支同源镜像,到 15 晚原版 1 拍=既有尘站时差）。
+    if (this.projId === 115) {
+      const l1 = this.netPuppet ? 15 : this.ai115L1;
+      const ga115 = l1 < 5 ? 0
+        : l1 < 15 ? (l1 - 5) / 10
+        : Math.max(0, Math.min(1, this.alpha / 255));
+      if (ga115 > 0) {
+        const img115 = projSprite(115);
+        if (img115 && img115.width > 0) {
+          const rot115 = this.rot;
+          const cx115 = this.cx, cy115 = this.cy;
+          const sc115 = this.scale;
+          const rect115 = projFrameSrcRect(115, 0);
+          (r as unknown as {
+            queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+          }).queueProjFullbright?.((c) => {
+            c.save();
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = ga115;
+            c.translate(cx115, cy115);
+            c.rotate(rot115);
+            if (rect115) {
+              c.drawImage(img115, rect115.sx, rect115.sy, rect115.sw, rect115.sh,
+                -rect115.sw * sc115 / 2, -rect115.sh * sc115 / 2,
+                rect115.sw * sc115, rect115.sh * sc115);
+            } else {
+              c.drawImage(img115, -img115.width * sc115 / 2, -img115.height * sc115 / 2,
+                img115.width * sc115, img115.height * sc115);
+            }
+            c.restore();
+          });
+        }
+      }
+      return;
+    }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (!st) {
       // 无表项回退:旧色块(0 = 通用 Dart,历史遗留调用)
@@ -1832,15 +1877,25 @@ export class Dart extends Entity {
     //  596 自管（aiStyle107 :34208-34219 带 timeLeft>30 门+实心盒钳 128,见 596 段）;
     //  290/291 恒隐不衰（alpha=255 原版无渐入——AI 48 每子步写 255/291 支无 alpha 行,
     //  见上两段）;fadeDelay=前 N 拍免衰（577/576 localAI[1]>2 门,P.cs:56603-56613,批六 m1）
+    //  115 同此列（★红魔鬼三叉戟实报定谳 2026-10-13）：原版 α 唯一写面=AI_027 呼吸
+    //  脉冲（P.cs:26849-26891）,无通用渐入;fade 每拍 −50 会让脉冲 phase0 的 α+30 永远
+    //  追不上 250 翻相门 → pulseDir 钉死 0 → scale −0.02/t 无界缩 → 过零负 scale
+    //  =drawImage 负宽高镜像+|scale| 无界涨（用户两案根因,见 pulse 段注）
     if (this.alpha > 0 && this.projId !== 596 && this.projId !== 290 && this.projId !== 291
-      && this.age > (st.fadeDelay ?? 0)) {
+      && this.projId !== 115 && this.age > (st.fadeDelay ?? 0)) {
       this.alpha -= st.fade === 'speed'
         ? Math.hypot(this.vx, this.vy) * 0.9
         : (typeof st.fade === 'number' ? st.fade : 50);
       if (this.alpha < 0) this.alpha = 0;
     }
-    // ---- 115 三叉戟呼吸脉冲（AI_027 :24806-24826:15 更新起 scale ∓0.02/alpha ±30 交替）----
-    if (st.pulse && this.age > 15) {
+    // ---- 115 三叉戟呼吸脉冲（AI_027 P.cs:26849-26891）——门=localAI[1]≥15（:26849
+    //  if(<15)++ else{脉动},与 115 尘站 else 同源;本仓镜像=ai115L1,早 1 拍 set-5 无 ++,
+    //  到 15 晚原版 1 拍=既有尘站时差,不另动）;phase0 scale−0.02/α+30(≥250→钉 255 翻相
+    //  :26870-26879)/phase1 scale+0.02/α−30(≤0 钉 0 翻相 :26880-26889)——α 255 出场
+    //  （SetDefaults :2047,GetAlpha :81448 A 直通=不透明）→ 首脉冲拍即翻相 1,有界
+    //  [0.98,1.16] 往复。★pulse 旗唯一消费型=115,新 pulse 型须自带 localAI 镜像;
+    //  α 唯一写面=本段+翻相钉值（通用渐入已摘,见上段注）----
+    if (st.pulse && this.ai115L1 >= 15) {
       if (this.pulseDir === 0) {
         this.scale -= 0.02; this.alpha = Math.min(255, this.alpha + 30);
         if (this.alpha >= 250) this.pulseDir = 1;
@@ -3223,9 +3278,13 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    ——每 update 1×d75 scale=3×弹scale）;scale=SetDefaults :1811-1812 双写终值 1.3（曾缺）
   96: { w: 16, h: 16, rot: 'spin', spinRate: 0.3, alpha0: 100, scale: 1.3,
     sfx: ['Item_20'], fallback: '#8A5AE8' },
-  // 115 邪恶三叉戟(红恶魔 156 :23533):16×16,a45,alpha255 呼吸脉冲,加速 ×1.125@ai0<30(:24753),
-  //    光=ProjLight 0.5×(0.5,0.05,1)(:15205);Item8
-  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true, life: 300,
+  // 115 邪恶三叉戟(红恶魔 156 NPC.cs:23575-23603):16×16,a45,α 唯一写面=AI_027 呼吸脉冲
+  //    （P.cs:26849-26891,±30↔scale∓0.02,有界 [0.98,1.16]）——★fade 退役
+  //    (2026-10-13 实报定谳):原版无通用渐入,fade −50/t 会钉死脉冲相位使 scale
+  //    无界缩过零负=镜像+|scale| 涨;α 出场 255=GetAlpha A 直通「不透明」
+  //    (:81448,draw 115 专属支消费)。加速 ×1.125@ai0<30(:26770-26777),光=ProjLight
+  //    0.5×(0.5,0.05,1)(:15205);Item8
+  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, pulse: true, life: 300,
     accel: { from: 0, to: 30, mul: 1.125 }, sfx: ['Item_8'], fallback: '#B060FF' },
   // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3 = aiStyle28
   //  :26983-26992（★FX53:泛色 trail 退役,真尘站见 dartStep 128 支）;Item28

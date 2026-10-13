@@ -5357,9 +5357,11 @@ export class Enemy extends Entity {
             // achCheckBestiary;旗杀 CountKillForBannersAndDropThem → recordBannerKill）
             // ★石化旁路（H2-2）：原文无交互门也不调 lastCreatureHit/NotifyNPCKilled,
             // 经 opts.petrifyBypassInteractionGate 逐项对齐
+            // ★R-B-F5(2026-10-13):dead 先置再记账——mod onKill 快照=e.dead=true/hp=0
+            //  (旧序 mod 钩内读活态,与 hurt 死亡支快照不一致)
+            this.dead = true; this.hp = 0;                   // life=0+active=false（:56467-56468）
             game.onEnemyKilled(this.key, this, { petrifyBypassInteractionGate: true });
             game.achievements?.notifyProgressionEvent(24);   // :56466（prog24=TURN_GNOME_TO_STATUE 地精石化;IIIII231 订正旧注——ev24 才是 GAIN_TORCH_GODS_FAVOR,prog24 域不同）
-            this.dead = true; this.hp = 0;                   // life=0+active=false（:56467-56468）
             return;
           }
         }
@@ -15295,7 +15297,13 @@ export class Enemy extends Entity {
       // 门判"头活着"→ head.die→hurt→本门→die 无限递归 → RangeError → rAF 熔断整机
       // 停机（末击落在毁灭者/千足蜈蚣/Mechdusa 头 hitbox 时复现×4）。
       if (this.realLifeHost && this.realLifeHost !== this && !this.realLifeHost.dead) {
+        // ★R-B-F2(2026-10-13):转移死的头部不打受击拍——tML 语义=OnHit 只对【被击段】
+        //  一拍(头 checkDead 只走死亡管线,无伤害管线);旧 die→hurt(9999) 全管线在头
+        //  上派发 killed=true 幻影拍(damage=9999+实体错位)。静默旗只压 onHitAny/
+        //  onHitByAny,击杀双钩照发(头=真死者)。
+        (this.realLifeHost as { __swModSilentHit?: boolean }).__swModSilentHit = true;
         this.realLifeHost.die(game);
+        (this.realLifeHost as { __swModSilentHit?: boolean }).__swModSilentHit = false;
         this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
@@ -16021,8 +16029,11 @@ export class Enemy extends Entity {
         }
       }
       // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
-      if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
-      runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击
+      // ★R-B-F2:转移死幻影拍抑制窗(realLifeHost.__swModSilentHit)
+      if (!(this as { __swModSilentHit?: boolean }).__swModSilentHit) {
+        if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
+        runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击
+      }
       // ★D20-m3:mod 击杀双钩尾派发(tML OnKill 序;onHitByAny 之后)
       runModOnNpcDeath(this.vanillaId, this, game as unknown as Game);
       runModOnKillAnyNpc(this, game);

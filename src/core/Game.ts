@@ -221,8 +221,15 @@ export function itemBuffIdOf(defKey: string, bt2: number | string | undefined): 
   const modId = defKey.slice(4, defKey.indexOf('_', 4));
   try {
     return (BUFF_DEFS as Record<number, { vanillaBuff: number }>)[modBuffTypeOf(modId, bt2)]?.vanillaBuff ?? 0;
-  } catch { return 0; }
+  } catch {
+    // ★R-B-F6:未注册键 warn once(旧=完全静默+tooltip「string 恒显」=显示/行为
+    //  不一致调试黑洞;每 defKey+键 一次)
+    const wk = `${defKey}:${bt2}`;
+    if (!itemBuffWarned.has(wk)) { itemBuffWarned.add(wk); console.warn(`[mods] ${defKey} func.buffType 引用未注册 buff 键「${bt2}」(无 buff 效果)`); }
+    return 0;
+  }
 }
+const itemBuffWarned = new Set<string>();
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, MOD_SPAWN_RULES, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx, type ModSpawnRule } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
@@ -33419,7 +33426,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const tcrit = Game.explodeCritRoll(projId, this.rangedCritPct());
           tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
             kbDir ? kbDir * (kb ?? 2) : ((Math.sign(tn.cx - cx) * (kb ?? 2)) || 1), 0, this,
-            0, 0, tcrit);
+            0, 0, tcrit, false, true, projId);   // ★R-B-F1:玩家源旗+弹域 id
         }
       }
     }
@@ -33805,7 +33812,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (Math.abs(tn.cx - px) < 64 + tn.w / 2 && Math.abs(tn.cy - py) < 64 + tn.h / 2) {
         tn.hurt(this.explodeFriendlyVictimDamage(40, tn),
           kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
-            : ((Math.sign(tn.cx - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1), 0, this);
+            : ((Math.sign(tn.cx - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1), 0, this,
+          0, 0, false, false, true, 102);   // ★R-B-F1:玩家源旗(爆炸物 102)
       }
     }
     // SW-AA1 2026-09-04（F-1）：friendly 敌怪半边——受害集 `friendly &&
@@ -34002,7 +34010,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(this, tn.x, tn.y, tn.w, tn.h) ?? false;   // 双?.形=测试桩习语
         tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
-          (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this, 0, 0, townTimerCrit);   // SW-AC1：方向=弹体朝向（同敌怪支）;★BJ467④ crit 参（防后×2 交接收端）
+          (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this, 0, 0, townTimerCrit,
+          false, true, 773);   // SW-AC1：方向=弹体朝向;★BJ467④ crit 参;★R-B-F1:玩家源旗
       }
     }
     // SelfHurtPlayers（:15104-15152）：FixedSelfDamageForPlayers 表无 773 → 自然伤害
@@ -36670,7 +36679,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this,
         isFlyMeal ? 1 : 0,
         (eq.armorPen ?? 0) + this.player.meleeArmorPen,
-        tnCrit);   // ★ζ-L1：暴击位进 StrikeNPC_Inner 防后 ×2（TownNPC.hurt F6 注）
+        tnCrit, false, true, 0);   // ★ζ-L1：暴击位进 StrikeNPC_Inner 防后 ×2;★R-B-F1:玩家源旗(fromPlayer=tML ApplyDamageToNPC→OnHitNPC 城镇域同相)
+
       // :44779/:44784 —— 城镇 NPC 受理命中同写双冷却面
       this.meleeNpcCd.set(tn.id, Math.max(1, Math.trunc(this.swing?.t ?? 0)));
       this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));

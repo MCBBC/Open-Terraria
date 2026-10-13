@@ -8079,6 +8079,17 @@ export class Renderer {
   })();
   static get c10e() { return this._c10e; }
   static c10eSetForTest(v: boolean): void { this._c10e = v; }
+  /** ★GL 直出 Phase 1 旗（2026-10-12 侦察定谳后立项,用户令:旗控灰度+逐像素一致+
+   *  验收后转正）：加算面逐桥化——post-composite 'lighter' 族（7x 段/标记/黑晕/
+   *  回声环）经 GL 会话加算呈现,替代「c10e 加算垫底折叠」（每帧 2 次全屏
+   *  drawImage,Trace-230353=56ms/s 饱和场景第一架构税）。?gladd=1 灰度开
+   *  （缺省关=折叠路径逐位）;验收转正后翻转缺省。侦察判据=memory
+   *  trace-103710-gpu-pressure-map GL 直出侦察段+probe _c10e-fold-probe.mjs。 */
+  static gladd = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('gladd') === '1';
+    } catch { return false; }
+  })();
   /** ★A1 screenFx 滤镜链入管线旗（2026-09-25,渲染 v2 路线图最后一枚收割刀）——
    *  GLScreenFilters 多 pass 链从「GL→2D→GL 乒乓、每 pass 全帧重传」迁入共管
    *  GLPipeline：FBO('sfxA'/'sfxB') 乒乓直采+非末 pass 直通 blit 翻向+末 pass

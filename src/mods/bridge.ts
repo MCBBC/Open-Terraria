@@ -51,7 +51,10 @@ export function getCurrentAlloc(): ModCurrentAlloc | null {
 
 let saveModsProvider: (() => Array<{ id: string; version: string; items: number; tiles: number; npcs: number }> | null) | null = null;
 
-export function setSaveModsProvider(fn: () => Array<{ id: string; version: string; items: number; tiles: number; npcs: number }> | null): void {
+export function setSaveModsProvider(fn: () => Array<{ id: string; version: string; items: number; tiles: number; npcs: number;
+  /** ★R-A-F13(2026-10-13):类型对齐实际供数形(loader 整对象携 buffs/P5 三映射;
+   *  旧窄类型=下次按声明「收窄复制」会静默丢键) */
+  buffs?: number; itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]>; wallIds?: Array<[string, number]> }> | null): void {
   saveModsProvider = fn;
 }
 

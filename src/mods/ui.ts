@@ -218,6 +218,29 @@ function ensureDomGate(): void {
   window.addEventListener('mousemove', () => { if (inGame && panels.size > 0) modUiSyncDomGate(); });
 }
 
+/** ★R-C-F4-b(2026-10-13):触屏 tap 命中查询——面板(普通盒/fullscreen 整屏)在
+ *  tap 点现役=true;同步写 UIScale.mouse 触屏坐标(触屏无 mousemove,旧=命中测试
+ *  恒陈旧坐标)。Input.touchstart 消费(false=世界 tap 照常)。 */
+export function modUiTouchGate(clientX: number, clientY: number): boolean {
+  if (!inGame || visibleCount() === 0 || VUI.ui.current !== hostState) return false;
+  for (let i = openOrder.length - 1; i >= 0; i--) {
+    if (openOrder[i].visible && openOrder[i].fullscreen) return true;
+  }
+  const px = clientX / UIScale.scale, py = clientY / UIScale.scale;
+  (UIScale as { mouseX?: number }).mouseX = px;
+  (UIScale as { mouseY?: number }).mouseY = py;
+  const el = VUI.elementUnderMouse();
+  if (!el || el === hostState) return false;
+  let cur: UIElement | null = el;
+  while (cur && cur !== hostState) cur = cur.parent;
+  return cur === hostState;
+}
+
+/** ★R-C-F4-b:触屏沿 DOM 吞门同步(触屏无 mousemove,Input.touchstart 消费面调) */
+export function modUiSyncDomGateTouch(): void {
+  modUiSyncDomGate();
+}
+
 /** ESC 链消费:关最上层可见面板(escapeChain closeModPanels 支);false=无可关 */
 export function modUiCloseTop(): boolean {
   for (let i = openOrder.length - 1; i >= 0; i--) {

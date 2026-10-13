@@ -98,3 +98,40 @@ describe('BJ671 ② 行为判别：387/388/533 下落穿平台（原版 flag6 �
     expect(m.y, '锚在上方 → 弹上行远离平台（顶不越平台顶）').toBeLessThan(90 * 16);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ③ BJ672 逐族普查（2026-10-13 用户令「登记的进行逐族普查」）：MinionProj 全走
+//  moveAndCollide 的 AI 支 × 原版弹面 flag6 类别全对拍。flag6 覆写面 = projPet
+//  条件（:17590）∪ switch（500/677-693/1105=承接,759=穿,1020=角度判 :17670-17696）
+//  ∪ decidesManualFallThrough（AI 写 shouldFallThrough 才被消费 :17698）。其余
+//  全族 TRUE 缺省=穿平台。普查产物：
+//  · 补恒穿桥：759（case=TRUE）/390-392/653/1025/1098/1123（TRUE 缺省）/ai62 地面态;
+//  · ai026TailGround :6799 条件式改恒穿（AI_026_TAIL 7 vid 全 TRUE 缺省——dMFT=
+//    false 时 shouldFallThrough 写值不被弹面消费,旧条件式回落承接=非原版相）;
+//  · 不动（已核正确）：dMFT 9 支（758/833-835/951/1022/1036/1093/1112/1118 桥在
+//    :50454/:52112 双锚）/688-693/1105 哨兵段（flag6=承接,缺省相恰）/864/963/970/
+//    831/625-628/946 直写位移无弹面/917 tileCollide=false 无弹面。
+// ---------------------------------------------------------------------------
+describe('BJ671 ③ BJ672 普查判别：AI_026 族恒穿 + 普查源锚', () => {
+  it('源锚：六处补桥在码（digtoise/babyBird/spider/companionCube/1025/ai62 地面态）', () => {
+    for (const anchor of [
+      '★BJ672：弹面 flag6=TRUE（case 759 显式 :17693）',
+      '★BJ672：弹面 flag6=TRUE 缺省（390-392 SetDefaults :4744-4754',
+      '★BJ672：弹面 flag6=TRUE 缺省（1098/1123 aiStyle 204',
+      '★BJ672：弹面 flag6=TRUE 缺省（653 aiStyle 67',
+      '★BJ672：弹面 flag6=TRUE 缺省（1025 aiStyle 197 非覆写面）',
+      '★BJ672：弹面 flag6=TRUE 缺省（AI_062 族 373-963 非 pet/非覆写面',
+      '★BJ672（逐族普查定谳）：AI_026_TAIL 7 vid',
+    ]) {
+      expect(MINION_TS).toContain(anchor);
+    }
+  });
+
+  it('vid 266（AI_026 史莱姆宝宝）：平台上方出生 → 恒穿下落（旧条件式玩家脚锚下回落承接=红）', () => {
+    const { hooks, player, platRow } = makeHooks(97 * 16);
+    const m = spawn(player, hooks, 266, 60 * 16, 88 * 16);
+    run(m, hooks, 90);
+    expect(m.dead, '弹存活').toBe(false);
+    expect(m.y + m.h, '盒底越过平台顶（恒穿=原版 flag6 TRUE 缺省相）').toBeGreaterThan(platRow * 16 + 8);
+  });
+});

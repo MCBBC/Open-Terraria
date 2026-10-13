@@ -3,6 +3,7 @@ import { bindsOf, type KeybindAction } from './Keybinds';
 import { isDomUiTarget } from './input/domTargets';
 import { resolveTouchMode } from './input/touchMode';
 import { wheelEventPx } from './input/wheel';   // ★SW-FX51：滚轮 deltaMode 归一（RB14d 单源）
+import { modUiTouchGate, modUiSyncDomGateTouch } from '../mods/ui';   // ★R-C-F4-b:mod 面板触屏让位
 
 /** 泛化键沿载荷(mobile-adaptation-plan 模块①):keydownHandlers 的统一第二参。
  *  物理键盘派发时由 KeyboardEvent 逐字段映射(origin='physical');虚拟通道
@@ -291,6 +292,15 @@ export class Input {
       // 操作模式门(keyboard 强制=触摸屏点击不合成世界输入;键鼠语义接管)
       if (resolveTouchMode() !== 'touch') return;
       if (isDomUiTarget(e.target)) return;          // UI/控件原生处理
+      // ★R-C-F4-b(2026-10-13):mod 面板触屏让位——tap 落面板(vui z300 PE:none,
+      //  画布恒非 target)时:①同步 UIScale.mouse 触屏坐标(旧=唯一写点 mousemove,
+      //  触屏恒陈旧=面板命中测试全错)②吞世界输入合成(旧=穿面板挖/打+面板该点死区)
+      //  ③不 preventDefault(放行浏览器兼容 mouse 序=VUI.presses 计数,面板收点按)
+      const mt = e.changedTouches[0];
+      if (modUiTouchGate(mt.clientX, mt.clientY)) {
+        modUiSyncDomGateTouch();
+        return;
+      }
       if (worldTouchId !== null) return;            // 首指驱动光标，次指忽略(P1 FingerRoles 升级)
       const t = e.changedTouches[0];
       worldTouchId = t.identifier;

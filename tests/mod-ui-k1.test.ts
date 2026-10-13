@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resolveEscapeChain } from '../src/ui/escapeChain';
 import {
   modUiPanel, modUiSetInGame, modUiBlockingPointer, modUiCloseTop,
-  modUiPanelsOpen, modUiCloseAllOf, _resetModUiForTests,
+  modUiPanelsOpen, modUiCloseAllOf, modUiTouchGate, _resetModUiForTests,
 } from '../src/mods/ui';
 import { UIScale } from '../src/vui/draw/UIScale';
 import { VUI } from '../src/vui/VUI';
@@ -146,5 +146,17 @@ describe('mod UI 宿主(刀1)', () => {
     fs.hide();
     expect(g.input.uiBlocking).toBe(false);  // 我们清自己的
     delete (globalThis as { __swGame?: unknown }).__swGame;
+  });
+
+  // ★R-C-F4-b(2026-10-13):触屏让位——无面板 false;fullscreen 面板=整屏真
+  //  (elementUnderMouse 不经路径);普通面板无 DOM 环境走命中链=node 恒 false(登记)
+  it('触屏让位(F4-b):无面板 false;fullscreen 整屏真', () => {
+    modUiSetInGame(true);
+    expect(modUiTouchGate(100, 100)).toBe(false);
+    const fs = modUiPanel('m', 'fs3', { x: 0, y: 0, width: 400, height: 300, fullscreen: true });
+    fs.show();
+    expect(modUiTouchGate(9999, 9999)).toBe(true);   // 整屏(位置无关)
+    fs.hide();
+    expect(modUiTouchGate(100, 100)).toBe(false);
   });
 });

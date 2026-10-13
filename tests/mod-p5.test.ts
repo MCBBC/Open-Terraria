@@ -180,4 +180,29 @@ describe('P5:id 平移完整解(存档映射+读档重映射)', () => {
     const wallVal = (w!.wall as Uint16Array)[idx];
     expect(wallVal).toBe(rbWall2);          // 旧 savedId 经重映射 → 当前 id(未错位)
   }, 60_000);
+
+  // ★R-A-F2/F-A3(2026-10-13):墙 internal=stable 恒等式断言 + worker 桥载荷 wallKeys
+  it('墙 id 恒等式与 worker 桥载荷(注册后断言;键改名/载荷拆域回归=爆红)', async () => {
+    vi.resetModules();
+    const { ModStore } = await import('../src/mods/store');
+    const { readModPack } = await import('../src/mods/pack');
+    const { loadModsPhase1, getModLoadResult } = await import('../src/mods/loader');
+    const { WALL_DEFS } = await import('../src/data/tiles');
+    const { getModBridgePayload } = await import('../src/mods/bridge');
+
+    const storage = new MemStorage();
+    const store = new ModStore(storage as never);
+    const bytes = buildModZip('wq', 'wq_item', undefined, 'wq_wall');
+    await store.install(readModPack(bytes).manifest, bytes);
+    await loadModsPhase1(storage, { entryLoader: nodeEntryLoader });
+    const alloc = getModLoadResult()!.allocation!;
+    const wid = alloc.walls.get('mod_wq_wq_wall')!;
+    // 恒等式:WALL_DEFS[id].id===id ∧ WALL_BY_KEY 反查一致(解耦即静默错位的唯一拦截)
+    expect(WALL_DEFS[wid]?.id).toBe(wid);
+    expect(WALL_DEFS[wid]?.key).toBe('mod_wq_wq_wall');
+    // worker 桥载荷携 wallKeys(整包 post 域;缺=worker 域墙平移静默失效)
+    const payload = getModBridgePayload();
+    expect(payload?.wallKeys?.length).toBeGreaterThan(0);
+    expect(payload?.wallKeys).toContainEqual(['mod_wq_wq_wall', wid]);
+  }, 60_000);
 });
