@@ -160,7 +160,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem, runVanillaOverrideValue,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -168,6 +168,8 @@ import { modShopStockOf } from '../mods/shops';
 import { modBossMusicFor } from '../mods/music';   // ★BGM 面:mod Boss 换曲绑定
 import { modRarityColorOf } from '../mods/rarity';   // ★刀3-1:mod 稀有度档色(拾取飘字消费)
 import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物反查
+import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(拆墙门消费)
+import { modUiBlockingPointer, modUiSetInGame } from '../mods/ui';   // ★刀1:mod UI 宿主(输入让位/在役旗)
 import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE } from '../mods/types';   // ★红队 R1-F7:MOD_NPC_ID_BASE 死 import 清理(域门已撤)
 import { ModProj } from '../entities/ModProj';
@@ -8670,6 +8672,7 @@ export class Game implements GameHooks {
     if (this.destroyed) return;
     this.destroyed = true;
     runModOnWorldUnload(this);   // ★mod 系统 onWorldUnload（2026-10-04：拆实例最先调,钩子见完整世界态）
+    modUiSetInGame(false);   // ★刀1:回菜单沿=宿主让位(menu 态 setState 由 mainFlow 管)
     // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
     this.net?.disconnect();
     this.net = null;
@@ -9071,6 +9074,7 @@ export class Game implements GameHooks {
     this.running = true;
     this.lastTime = performance.now();
     runModOnWorldLoad(this);   // ★mod 系统 onWorldLoad（2026-10-04：世界全链就绪、主循环起跑前唯一汇点）
+    modUiSetInGame(true);   // ★刀1:mod UI 宿主接管旗(可见面板回挂 vui;读档/换世界沿重同步)
     const loop = (now: number) => {
       if (!this.running) return;
       try {
@@ -13947,9 +13951,12 @@ export class Game implements GameHooks {
       // 诡药 3001：随机 70-120 + i-帧档（ApplyLifeAndOrMana :51126-51146——QuickHeal
       // 同经此链,2026-08-22 补）
       const heal = vid === 3001 ? this.strangeBrewRoll() : f.healLife;
-      p.hp = Math.min(p.maxHp, p.hp + heal);
-      this.addDamageNumber(p.cx, p.y, heal, false, '#40E080');
-      runModHealItem(vid, heal);   // ★五百四十八:治疗物使用钩(jelly 光环族=GetSource_ItemUse 治疗物交互面)
+      // ★刀5:具名修正槽『Player.ApplyLifeAndOrMana』(治疗量;空槽直通零分配;
+      //  值链=后钩吃前钩产物;消费侧钳 ≥0)
+      const healFinal = Math.max(0, Math.round(runVanillaOverrideValue('Player.ApplyLifeAndOrMana', heal, { vid })));
+      p.hp = Math.min(p.maxHp, p.hp + healFinal);
+      this.addDamageNumber(p.cx, p.y, healFinal, false, '#40E080');
+      runModHealItem(vid, healFinal);   // ★五百四十八:治疗物使用钩(jelly 光环族=GetSource_ItemUse 治疗物交互面)
       if (f.potion) this.applyPotionSickness(vid);            // :5284-5286
     }
     if (f.healMana) {
@@ -14688,6 +14695,10 @@ export class Game implements GameHooks {
   private _domUiHitResult = false;
 
   private inpOverDomUi(): boolean {
+    // ★刀1(2026-10-13):vui mod 面板指针让位短路(宿主现役+命中非空=UI 吃指针;
+    //  纯算术盒命中零布局成本,置于 DOM 快照面之前;vui 输入在 window 层自持,
+    //  本面只管世界交互门让位)
+    if (modUiBlockingPointer()) return true;
     if (typeof document === 'undefined') return false;
     const inp = this.input;
     if (!inp) return false;
@@ -23044,6 +23055,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const canPlayerSmashWall = (x: number, y: number): boolean => {
         const w = wallAt(x, y);
         if (w === 350) return false;
+        // ★刀3-墙:mod 墙 unbreakable 恒拒(350 同款;killWallCheckFailure 面已同门)
+        if (modWallMetaOf(w)?.unbreakable) return false;
         if (WALL_HOUSE.has(w)) return true;
         for (let a = x - 1; a <= x + 1; a++) for (let b = y - 1; b <= y + 1; b++) {
           const w2 = wallAt(a, b);

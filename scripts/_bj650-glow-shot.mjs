@@ -37,6 +37,7 @@ const setup = await page.evaluate(async () => {
   g.__bj650tag = 42;
   const { Enemy } = await import('/src/entities/Enemy.ts');
   const { MinionProj } = await import('/src/entities/MinionProj.ts');
+  const { buffTypeByVanilla } = await import('/src/stats/Buffs.ts');
   const px = Math.trunc(g.player.cx), py = Math.trunc(g.player.cy);
   const st = g.world.store;
   let gy = Math.trunc(py / 16);
@@ -46,8 +47,12 @@ const setup = await page.evaluate(async () => {
   g.entities.add(e, 'enemies');
   const m = new MinionProj(px + 60, py - 30, 864, 6, 0, false, 0, false, () => g.player);
   g.entities.add(m, 'projectiles');
-  window.__bj650probe = { added: true, projCount: g.entities.projectiles.length, enemyCount: g.entities.enemies.length };
-  return { px, py, gy, projCount: g.entities.projectiles.length };
+  // 随从 buff 维持凭证（附魔飞刀=271;缺 buff=upkeep 同拍直杀 :3398-3410）
+  const bt = buffTypeByVanilla(271);
+  if (bt !== undefined) g.player.buffs.set(bt, 300);
+  window.__bj650probe = { added: true, projCount: g.entities.projectiles.length,
+    enemyCount: g.entities.enemies.length, bt };
+  return { px, py, gy, projCount: g.entities.projectiles.length, bt };
 });
 L.chk('布景完成', !!setup, JSON.stringify(setup));
 L.say(`add 后快照: ${JSON.stringify(await page.evaluate(() => window.__bj650probe))}`);
@@ -83,8 +88,9 @@ const hue = await page.evaluate(() => {
   if (!m) return { blue: 0, magenta: 0, body: 0, total: 0, err: 'no 864' };
   const cam = g.camera;
   const z = cam.zoom ?? 1;
-  const sx = (m.cx - cam.x) * z, sy = (m.cy - cam.y) * z;
-  const R = 80;
+  // cam.x/y = 视野中心（Camera.ts:7）——屏位 = (world−cam)×z + 半屏
+  const sx = (m.cx - cam.x) * z + cv.width / 2, sy = (m.cy - cam.y) * z + cv.height / 2;
+  const R = 48;
   const x0 = Math.max(0, Math.trunc(sx - R)), y0 = Math.max(0, Math.trunc(sy - R));
   const x1 = Math.min(cv.width, Math.trunc(sx + R)), y1 = Math.min(cv.height, Math.trunc(sy + R));
   const img = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
@@ -124,6 +130,30 @@ await page.evaluate(() => {
 await wait(700);
 const shot2 = await savePageShot(page, resolveShotPath('bj650-glow-trail.png'));
 L.say(`截图: ${shot2}`);
+
+// 3× 局部放大（刃周 160px 窗）——辉光/残影色相取证图
+const zoomed = await page.evaluate(() => {
+  const g = window.__swGame;
+  const cv = g?.renderer?.canvas ?? document.querySelectorAll('canvas')[1];
+  const m = g.entities.projectiles.find((p) => p.projId === 864 && !p.dead);
+  if (!m) return null;
+  const cam = g.camera;
+  const z = cam.zoom ?? 1;
+  const sx = (m.cx - cam.x) * z + cv.width / 2, sy = (m.cy - cam.y) * z + cv.height / 2;
+  const W = 160, H = 160;
+  const out = document.createElement('canvas');
+  out.width = W * 3; out.height = H * 3;
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = false;
+  octx.drawImage(cv, sx - W / 2, sy - H / 2, W, H, 0, 0, W * 3, H * 3);
+  return out.toDataURL('image/png');
+});
+if (zoomed) {
+  const { writeFile } = await import('node:fs/promises');
+  const p3 = resolveShotPath('bj650-glow-zoom3x.png');
+  await writeFile(p3, Buffer.from(zoomed.split(',')[1], 'base64'));
+  L.say(`截图: ${p3}`);
+}
 
 L.say(`耗时 ${L.elapsed()}`);
 L.print();

@@ -46,6 +46,13 @@ export function jsDelivrFileUrl(pkg, ver, file) {
   return `${JSDELIVR_BASE}/${pkg}@${ver}/${file}`;
 }
 
+/** npmmirror tarball URL(国内快车道;unpkg files API 有白名单,registry tarball 无)。
+ *  ★scoped 包 tarball basename 剥 scope:@scope/name@ver → name-ver.tgz(npm 规则) */
+export function npmmirrorTarballUrl(pkg, ver) {
+  const base = pkg.includes('/') ? pkg.split('/')[1] : pkg;
+  return `${NPM_MIRROR_BASE}/${pkg}/-/${base}-${ver}.tgz`;
+}
+
 /** manifest → 发布计划(纯函数;顺序=manifest.parts,确定性) */
 export function derivePlan(manifest, scope) {
   if (!manifest || !Array.isArray(manifest.parts) || manifest.parts.length === 0) {
@@ -60,6 +67,7 @@ export function derivePlan(manifest, scope) {
       pkg,
       ver,
       npmmirrorUrl: npmmirrorFileUrl(pkg, ver, p.file),
+      npmmirrorTgzUrl: npmmirrorTarballUrl(pkg, ver),
       jsDelivrUrl: jsDelivrFileUrl(pkg, ver, p.file),
     };
   });
@@ -132,23 +140,34 @@ async function publishPart(part, dry) {
   }
 }
 
-/** URL 验活:Range GET 取首字节,content-range/length 与 zipBytes 对账 */
-async function verifyUrl(url, zipBytes) {
+/** URL 验活:Range GET 取首字节 → 返回实测总字节数(content-range),不符/失败 = null。
+ *  ★tgz 候选的期望字节未知(dist.size 字段不可靠)——以实测为准回填 cdn.json,
+ *  客户端长度校验即用此值;zip 候选须与 zipBytes 逐位相等 */
+async function measureUrl(url, expectBytes) {
   try {
     const res = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const cr = res.headers.get('content-range');   // "bytes 0-0/<total>"
     const total = cr ? Number(cr.split('/')[1]) : Number(res.headers.get('content-length'));
-    return total === zipBytes;
+    if (!Number.isFinite(total) || total <= 0) return null;
+    if (expectBytes != null && total !== expectBytes) return null;
+    return total;
   } catch {
-    return false;
+    return null;
   }
 }
 
-/** 触发 npmmirror 同步(非致命:失败只影响就绪速度,验活循环兜底) */
+/** 触发 npmmirror 同步(cnpmcore API:PUT /-/package/<enc>/syncs + body{name};
+ *  非致命:失败只影响就绪速度,验活循环兜底;cnpmcore 对未知包的 GET 元数据
+ *  也会按需回源,双保险) */
 async function triggerSync(pkg) {
   try {
-    await fetch(`${SYNC_BASE}/${pkg}/syncs?sync_upstream=true`, { method: 'PUT', signal: AbortSignal.timeout(10000) });
+    await fetch(`${SYNC_BASE}/-/package/${encodeURIComponent(pkg)}/syncs`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: pkg, sync_upstream: true }),
+      signal: AbortSignal.timeout(10000),
+    });
   } catch { /* 同步接口偶发不可用;验活轮询是最终裁决 */ }
 }
 
@@ -203,33 +222,36 @@ async function main() {
   // 2) 触发 npmmirror 同步(仅新发布的/全部——PUT 幂等,开销小)
   if (!DRY) await mapLimit(plan, 4, async (p) => { await triggerSync(p.pkg); });
 
-  // 3) 验活轮询:npmmirror sync 就绪 + jsDelivr 按需回源,均需 zipBytes 对账通过
-  const st = new Map(plan.map((p) => [p.file, { npmmirror: false, jsdelivr: false }]));
+  // 3) 验活轮询:npmmirror tarball(国内)与 jsDelivr zip(全球)就绪即入 cdn.json;
+  //    files API 受 unpkg 白名单限制(新 scope 拒),不作候选
+  const st = new Map(plan.map((p) => [p.file, { tgz: null, jsdelivr: false }]));
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   const verifyOnce = async () => {
     await mapLimit(plan, 6, async (p) => {
       const s = st.get(p.file);
-      if (!s.npmmirror) s.npmmirror = await verifyUrl(p.npmmirrorUrl, p.zipBytes);
-      if (!s.jsdelivr) s.jsdelivr = await verifyUrl(p.jsDelivrUrl, p.zipBytes);
+      if (!s.tgz) s.tgz = await measureUrl(p.npmmirrorTgzUrl, null);   // tgz 字节实测回填
+      if (!s.jsdelivr) s.jsdelivr = (await measureUrl(p.jsDelivrUrl, p.zipBytes)) != null;
     });
   };
   log(`验活开始(超时 ${VERIFY_TIMEOUT_MS / 1000}s)…`);
   await verifyOnce();
-  while (Date.now() < deadline && st.size > 0 && [...st.values()].some((s) => !s.npmmirror || !s.jsdelivr)) {
+  while (Date.now() < deadline && st.size > 0 && [...st.values()].some((s) => !s.tgz || !s.jsdelivr)) {
     await sleep(15000);
     await verifyOnce();
   }
 
-  // 4) 产出 cdn.json(只写 dist 工件;urls 仅列验活通过的,空 = 客户端回同源)
+  // 4) 产出 cdn.json(只写 dist 工件;仅列验活通过的,空 = 客户端回同源)
+  //    ★候选优先级由客户端定:tgzUrls(国内)→ urls(jsDelivr)→ 同源
   const parts = {};
   let mmOk = 0, jdOk = 0, none = 0;
   for (const p of plan) {
     const s = st.get(p.file);
-    const urls = [];
-    if (s?.npmmirror) { urls.push(p.npmmirrorUrl); mmOk++; }
-    if (s?.jsdelivr) { urls.push(p.jsDelivrUrl); jdOk++; }
-    if (!urls.length) none++;
-    parts[p.file] = { pkg: p.pkg, version: p.ver, urls };
+    const tgzUrls = s?.tgz ? [{ url: p.npmmirrorTgzUrl, bytes: s.tgz }] : [];
+    const urls = s?.jsdelivr ? [p.jsDelivrUrl] : [];
+    if (tgzUrls.length) mmOk++;
+    if (urls.length) jdOk++;
+    if (!tgzUrls.length && !urls.length) none++;
+    parts[p.file] = { pkg: p.pkg, version: p.ver, urls, ...(tgzUrls.length ? { tgzUrls } : {}) };
   }
   const cdn = { v: 1, generatedAt: new Date().toISOString(), scope: SCOPE, parts };
   if (DRY) {
@@ -239,7 +261,13 @@ async function main() {
     log(`cdn.json → ${CDN_JSON_PATH}(${Object.keys(parts).length}片)`);
   }
   log(`验活结果: npmmirror ${mmOk}/${plan.length}  jsDelivr ${jdOk}/${plan.length}  双皆无 ${none}`);
-  if (none > 0) log(`⚠ ${none} 片无可用 CDN 源(客户端自动回同源,不影响功能)`);
+  if (none > 0) {
+    log(`⚠ ${none} 片无可用 CDN 源(客户端自动回同源,不影响功能)`);
+    if (jdOk === plan.length && mmOk < plan.length) {
+      log(`⚠ npmmirror 未就绪 = sync 排队中(实测几分钟~几十分钟):可先部署(jsDelivr 顶上),`);
+      log(`  过 10-30 分钟后重跑本脚本 --skip-publish 补入 tgzUrls,再部署一次(纯 cdn.json 差量,秒级)`);
+    }
+  }
   log(`用时 ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   log(`★提醒: cdn.json 已进 ${DIST} —— 部署 preview 即生效切源;若要生产保持同源,` +
     `部署 main 前删除 ${CDN_JSON_PATH}(见 game/docs/asset-cdn-rollout.md)`);

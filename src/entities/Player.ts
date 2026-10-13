@@ -24,7 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
-import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf } from '../mods/hooks';
+import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf, runVanillaOverrideValue } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat, BONUS_MELEE_SPEED_MULTIPLIER, NO_MELEE_SPEED_BONUS } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -4896,8 +4896,10 @@ export class Player extends Entity {
     // 旧 `-= dt` 把 480t 窗口拉成 480 秒,R5-F26 连带修正）
     if (this.panicTime > 0) this.panicTime = Math.max(0, this.panicTime - dt * 60);
     const eqM = this.equipStats;   // ★IIIII250 函数级快照:置于 buffs.tick(3443)+panic 递减(3479)之后——此点后至函数尾,键输入 apply/remove 面(Honey/Wet/Merfolk/Shimmered/LeafCrystal/日曜盾)均不改变本函数所读字段值(全装备派生;Werewolf jumpSpd 恰取 tick 后态),值等价;58 次直读→1 次
-    // 装备生命回复（再生手环族 lifeRegen：每半秒 N/2 HP → 每秒 N/2；战斗中也生效）
-    const equipRegen = eqM.hpPerSec;
+    // 装备生命回复（再生手环族 lifeRegen：每半秒 N/2 HP → 每秒 N/2；战斗中也生效）。
+    // ★刀5:具名修正槽『Player.UpdateLifeRegen』(装备回复通道量;空槽直通零分配;
+    //  自然 9 档公式不在槽=登记 D 台账;值链=后钩吃前钩产物,消费侧 ≥0 钳)
+    const equipRegen = Math.max(0, runVanillaOverrideValue('Player.UpdateLifeRegen', eqM.hpPerSec, { player: this, game }));
     if (equipRegen > 0 && this.hp > 0) {
       this.regenAccum += equipRegen * dt;
       if (this.regenAccum >= 1) {

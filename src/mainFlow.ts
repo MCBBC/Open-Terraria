@@ -967,21 +967,26 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  被 applyPlayer 访问(TypeError: reading 'inv',探针实测)。读档期间拒绝
    *  二次进入,重入静默返回(加载页已在前一链手上)。 */
   let loadFlowBusy = false;
-  async function loadFromKey(key: string) {
+  async function loadFromKey(key: string, opts?: { backToList?: boolean }) {
     if (loadFlowBusy) return;
     loadFlowBusy = true;
     // ★BJ617 件1：载入会话锁（世界锁 world-lock.<id>+角色锁 char-lock.<id>）——
     //  他 tab 会话在途=拒载+toast;quicksave 键无槽位 id 可反解 → 只走角色锁
     //  （quickload 会话 slotMeta=null 不写世界槽位,无世界互踩面）;unsupported=
     //  降级放行（用户接受面,SessionLock 登记）。
+    //  ★2026-10-13 UX（用户实报「进世界失败停在空界面只能刷新」）：世界列表路径
+    //  （backToList）失败即回世界列表——面板在 onPlay 前已 close,不回退=裸背景
+    //  死态;quickload 等其他入口维持原状（标题屏在场,非死态）。
     heldSessionLocks?.release();   // 防御：上一会话清理残留（正常路径 quitToMenu 已清）
     heldSessionLocks = null;
+    const backToList = (): void => { if (opts?.backToList) showWorldSelect(); };
     const lockTake = await acquireLoadSessionLocks(key);
     if (!lockTake.ok) {
       loadFlowBusy = false;
       ui.toast(Lang.text(lockTake.which === 'world'
         ? 'Mods.SandboxWorld.Toast.WorldLockedByOtherTab'
         : 'Mods.SandboxWorld.Toast.CharLockedByOtherTab'));
+      backToList();
       return;
     }
     heldSessionLocks = lockTake.held;
@@ -1090,6 +1095,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         //  saveMissing=null（WorldGenUnavailable 来路）→ 原语义 SaveLoadFailed 文案。
         void kvIdbStatus(key).then((s) => console.warn('[load] IDB 态诊断', key, s));
         ui.toast(Lang.text(saveMissingToastKey(saveMissing), '存档数据缺失'));
+        backToList();   // ★2026-10-13 UX:同锁拒绝——回世界列表防裸背景死态
         return;
       }
       await loadFromJson(resolved.text);   // 'idb'：健康直读
@@ -1104,6 +1110,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       alert(isOomLoadError(String((e as Error)?.message ?? e))
         ? Lang.text('Mods.SandboxWorld.Toast.LoadOom')
         : Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+      backToList();   // ★2026-10-13 UX:异常路径同回世界列表(alert 关闭后裸背景死态同治)
     } finally {
       loadFlowBusy = false;
       menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（嵌套 loadFromJson 双解锁幂等）
@@ -1590,7 +1597,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 后续 quickLoad/文件导入路径（那些场景 fallback=null 不生效）
     difficultyFallback = meta.difficulty;
     try {
-      await loadFromKey(`sandboxworld.world.${meta.id}`);
+      await loadFromKey(`sandboxworld.world.${meta.id}`, { backToList: true });   // ★2026-10-13 UX:失败回世界列表
     } finally {
       difficultyFallback = null;
     }
@@ -1608,6 +1615,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         const c = await acquireSessionLock(charLockKey(cid0));
         if (c === 'busy') {
           ui.toast(Lang.text('Mods.SandboxWorld.Toast.CharLockedByOtherTab'));
+          showWorldSelect();   // ★2026-10-13 UX:创建面板已 close→回世界列表防裸背景死态
           return;
         }
         if (c !== 'unsupported') heldSessionLocks = { release: () => c.release() };

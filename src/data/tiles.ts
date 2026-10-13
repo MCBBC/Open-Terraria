@@ -2373,6 +2373,17 @@ export function applyModTileKeys(keys: ReadonlyArray<readonly [string, number]>)
   }
 }
 
+/** ★刀3-墙(2026-10-13)worker 桥:mod 墙键注入(worker 域无装载期注册面——
+ *  gen pass gs.mods.wallIdByKey 消费;幂等;色块兜底形=worker 只需 id/键,
+ *  渲染 vmeta/贴图主线程 applyModAssets 供)。 */
+export function applyModWallKeys(keys: ReadonlyArray<readonly [string, number]>): void {
+  for (const [fullKey, id] of keys) {
+    if (id < 367 || WALL_DEFS[id]) continue;
+    WALL_DEFS[id] = { id, key: fullKey, name: '', mapColor: '#808080', opacity: 1 };
+    WALL_BY_KEY[fullKey] = id;
+  }
+}
+
 /** ★烘焙域桥读面(2026-10-04):BakeWorker 按 payload 顺序直落 mod tile def
  *  (internal 下标对齐由「同序注册=同下标」保证——worker 与主线程模块初始化同源
  *  同长,payload 保序)。幂等(已注册=skip)。与 applyModTileStableMap 双写不冲突

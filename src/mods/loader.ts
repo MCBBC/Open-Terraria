@@ -213,6 +213,8 @@ export async function loadModsPhase1(
           .filter((e): e is { def: (typeof TILE_DEFS)[number]; internal: number; stable: number } => e !== null),
         itemKeys: [...plan.allocation.items.entries()],
         tileKeys: plan.tileSpecs.map((t) => [t.fullKey, TILE_BY_KEY[t.fullKey]] as [string, number]).filter(([, id]) => id !== undefined && id >= 1),
+        // ★刀3-墙:mod 墙键跨线程(worker WALL_DEFS 注入=gen pass wallIdByKey 消费)
+        wallKeys: [...plan.allocation.walls.entries()],
       }));
       // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
 

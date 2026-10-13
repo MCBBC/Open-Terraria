@@ -11,6 +11,9 @@ export interface ModIdBridgePayload {
   /** ★P5 id 平移解:当前分配映射 fullKey→stableId(worker 读档重映射用) */
   itemKeys: Array<[string, number]>;
   tileKeys: Array<[string, number]>;
+  /** ★刀3-墙(2026-10-13):mod 墙 fullKey→wallId(worker WALL_DEFS 注入——
+   *  gen pass wallIdByKey 消费面;缺失=worker 域 Sunken Sea 墙静默不铺) */
+  wallKeys?: Array<[string, number]>;
 }
 
 let provider: (() => ModIdBridgePayload | null) | null = null;

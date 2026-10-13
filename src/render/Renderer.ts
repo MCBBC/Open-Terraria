@@ -130,8 +130,10 @@ import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldIte
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
 import { Clock, type World } from '../world/World';
-import { collectModScreenFx, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
+import { collectModScreenFx, modProjSpecOf, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
 import { modRarityRgb255 } from '../mods/rarity';   // ★刀3-1:mod 稀有度档色(MouseText 主链消费)
+import { modNpcFrameRateOf, modNpcGlowSpecOf, modNpcFullbright, modItemGlowMaskIdOf } from '../mods/drawspecs';   // ★刀2-C1:绘制声明面
+import { modNpcDrawSpecOf, modItemDrawSpecOf, type ModDrawCtx } from '../mods/hooks';   // ★刀2-C2:实体自绘面
 import { TileStore } from '../world/TileStore';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -1534,6 +1536,11 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // AI 侧算定的帧号直读（694 水书宝箱怪态机帧——态切换清零的 frameCounter
   // 无法从全局 t 推出，cursedSkullAI 的 mimic694Frame 维护）
   if (e.customFrameIdx != null) return Math.min(frames - 1, e.customFrameIdx);
+  // ★刀2-C1(2026-10-13):mod NPC 声明帧率早退(缺省 6t=尾段通用档同值;顺带免
+  //  数百家族比较;AI 写 customFrameIdx 仍最优先=上行;animT 直读=t 声明前置)
+  if ((e.vanillaId ?? 0) >= 800) {
+    return Math.floor(e.animT / (modNpcFrameRateOf(e.vanillaId!) ?? 6)) % frames;
+  }
   const id = e.vanillaId ?? 0;
   const ai = e.vanilla?.aiStyle ?? 0;
   const t = e.animT; // tick 计数（≈原版 frameCounter 驱动源）
@@ -6413,7 +6420,7 @@ export class Renderer {
     for (const e of sorted) {
       // ★四柱掉帧批:behindTiles 段同受原版视域门（DrawNPCs(behindTiles) 同一
       //   rectangle/Intersects 在 behindTiles==behindTiles 支内,:22536-22660）
-      if (e instanceof Enemy && this.isBehindTilesEnemy(e) && !this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
+      if (e instanceof Enemy && this.isBehindTilesEnemy(e) && !this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities, cam);
     }
     this.bglEntWindowEnd();
 
@@ -6694,7 +6701,7 @@ export class Renderer {
         //   DrawNPCCheckAlt+DrawNPC 之前;血条不随门——屏外实体血条本不可见,
         //   drawEnemy 内唯一回写面 spriteBottomWorld 陈旧只喂屏外血条=零视觉差,
         //   副作用巡检表见批档案）。MustAlwaysDraw 族在 npcOffscreen 内恒画。
-        if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
+        if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities, cam);
         hbPass.push(this.hbEntryOf(e, world.isExpert, player, viewW));
         this.drawDd2CrystalCountdown(e, world);   // ★BJ454（548 波间倒计时,Main.cs:46866）
       }
@@ -6723,7 +6730,9 @@ export class Renderer {
         noteHeldProjEntity(e);
         if ('projId' in (e as object)) {
           const ee = e as unknown as { draw(r: Renderer, cam: Camera): void };
-          const queue = PROJ_DRAW_OVER_PLAYERS.has((e as { projId?: number }).projId ?? -1)
+          // ★刀2-C1:mod 弹 overPlayers 声明(drawLayer 4/7/8 族=post 玩家)
+          const mpId = (e as { projId?: number }).projId ?? -1;
+          const queue = PROJ_DRAW_OVER_PLAYERS.has(mpId) || modProjSpecOf(mpId)?.overPlayers === true
             ? postPlayerDraws
             : prePlayerDraws;
           queue.push(() => ee.draw(this, cam));
@@ -10931,6 +10940,14 @@ export class Renderer {
   }
 
   private drawDrop(d: ItemDrop, miscCounter = 0) {
+    // ★刀2-C2(2026-10-13):mod 物品世界自绘(P4;preDrawInWorld false=mod 全权,
+    //  跳默认图标/着色/光罩面[tML PreDrawInWorld 语义])
+    const mDraw = modItemDrawSpecOf(ITEM_DEFS[d.itemId]?.vid ?? -1);
+    const mctxAt = (): ModDrawCtx => this.buildModDrawCtx(d.x + d.w / 2, d.y + d.h / 2);
+    if (mDraw?.preDrawInWorld && mDraw.preDrawInWorld(d, mctxAt()) === false) {
+      mDraw.postDrawInWorld?.(d, mctxAt());
+      return;
+    }
     const bob = Math.sin((d.age + d.bobPhase * 60) * 0.1) * 1.5;
     // 优先 Maples 图标。绘制尺寸 = 贴图单帧原尺寸（原版 Main.DrawItem 掉落物
     // 按 texture.Frame 原大画,星星 Item_75 单帧 22×26 比方块还大;曾统一压
@@ -10969,7 +10986,8 @@ export class Renderer {
       //   ★BJ603：光罩随 velocity 旋转同相（原版 rotation=num :39431/:39436）。
       {
         const vid = ITEM_DEFS[d.itemId]?.vid ?? -1;
-        if (vid >= 0 && ITEM_GLOWMASK[vid] !== undefined) {
+        // ★刀2-C1:mod 物品 glowmask(伪 GlowMaskID 1000+ 段查表)
+        if (vid >= 0 && (ITEM_GLOWMASK[vid] !== undefined || modItemGlowMaskIdOf(vid) !== undefined)) {
           this.collectDropItemGlow(ctx, vid, ar, rcx, rcy, miscCounter, rot);
         }
       }
@@ -11024,6 +11042,8 @@ export class Renderer {
         } else {
           ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
         }
+        // ★刀2-C2:mod 物品 postDrawInWorld(默认绘制完成点)
+        mDraw?.postDrawInWorld?.(d, mctxAt());
         return;
       }
       const tinted = this.itemColorSprite(`item${d.itemId}`, ar, d.color ?? null, d.alpha ?? 0);
@@ -11038,11 +11058,15 @@ export class Renderer {
         if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
         else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
       }
+      // ★刀2-C2:mod 物品 postDrawInWorld(着色绘制完成点)
+      mDraw?.postDrawInWorld?.(d, mctxAt());
       return;
     }
     const icon = this.itemIcon(d.itemId);
     if (!icon) return;
     this.ctx.drawImage(icon, d.x, d.y + bob, 12, 12);
+    // ★刀2-C2:mod 物品 postDrawInWorld(占位图标回退点)
+    mDraw?.postDrawInWorld?.(d, mctxAt());
   }
 
   // 敌人 → Maples 动画映射
@@ -11344,7 +11368,49 @@ export class Renderer {
     return !!e.vanilla?.behindTiles;
   }
 
-  private drawEnemy(e: Enemy, world: World, entities: unknown[] = []) {
+  /** ★刀2-C2(2026-10-13):ModDrawCtx 受限算子面生产(bake-first——draw/drawAdd/tinted
+   *  三算子,不裸发 ctx=GL 冲窗风险面隔离;光照=逐格 lightAt+中心预采样;rot 绕目标
+   *  中心/mirror 水平翻/alpha 0-1 显式参) */
+  buildModDrawCtx(cx: number, cy: number, cam?: Camera): ModDrawCtx {
+    const ctx = this.ctx;
+    const self = this;
+    const wrap = (add: boolean) =>
+      (img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+        dx: number, dy: number, dw: number, dh: number,
+        o?: { rot?: number; alpha?: number; mirror?: boolean }): void => {
+        if (!ctx) return;
+        ctx.save();
+        if (add) ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = Math.max(0, Math.min(1, o?.alpha ?? 1));
+        ctx.imageSmoothingEnabled = false;
+        if (o?.rot) {
+          ctx.translate(dx + dw / 2, dy + dh / 2);
+          ctx.rotate(o.rot);
+          ctx.drawImage(img, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh);
+        } else if (o?.mirror) {
+          ctx.translate(dx + dw, dy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+        } else {
+          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+        }
+        ctx.restore();
+      };
+    const light: readonly [number, number, number] =
+      self.lighting?.lightAt(Math.floor(cx / 16), Math.floor(cy / 16)) ?? [255, 255, 255];
+    return {
+      draw: wrap(false),
+      drawAdd: wrap(true),
+      tinted: (img, rgb) => tintedTex(img, rgb, false),
+      lightAt: (tx, ty) => self.lighting?.lightAt(tx, ty) ?? [255, 255, 255],
+      light,
+      worldToScreen: (wx, wy) => (cam ? cam.worldToScreen(wx, wy) : [wx, wy]),
+      gtW: globalTimeWrappedHourly(),
+      cx, cy,
+    };
+  }
+
+  private drawEnemy(e: Enemy, world: World, entities: unknown[] = [], cam?: Camera) {
     const ctx = this.ctx;
     const spr = this.assets.enemySprites.get(e.key);
     // 受击闪白
@@ -11433,6 +11499,14 @@ export class Renderer {
       if (e.vanillaId === 491) { this.drawDutchman(e, entities); return; }
       if (e.vanillaId === 492
         && (entities as Enemy[]).some((n) => n instanceof Enemy && !n.dead && n.vanillaId === 491)) {
+        return;
+      }
+      // ★刀2-C2(2026-10-13):mod NPC 自绘分派(preDraw false=跳原版本体段含叠画=
+      //  mod 全权[tML PreDraw 语义];postDraw 落原版 restore 同位)。早退点无外层
+      //  save/restore(体段 save 在 if(r) 内)=栈态干净
+      const mDraw = modNpcDrawSpecOf(e.vanillaId ?? -1);
+      if (mDraw?.preDraw && mDraw.preDraw(e, this.buildModDrawCtx(e.cx, e.cy, cam)) === false) {
+        mDraw.postDraw?.(e, this.buildModDrawCtx(e.cx, e.cy, cam));
         return;
       }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
@@ -12238,11 +12312,13 @@ export class Renderer {
         //  光照合成后 source-over α=0.4 复绘同帧（本体同枢零漂移,gRot/gMirror=BJ237
         //  残影同源单源）。原版 519 拖影粉（:24643-24649 直用 Pink）/395 GlowMask[49]
         //  （:24957 固定色）不经 GetAlpha=不提亮,本仓两面已同相,不涉本刀。
-        if (npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null) {
+        if (npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null || modNpcFullbright(e.vanillaId ?? -1)) {
+          // ★刀2-C1:mod NPC fullbright=ga:1 全亮复绘(原版白提亮 40% 档零扰动)
           this.npcWhiteLiftQueue.push({
             vid: e.vanillaId ?? -1, tex: `vanilla/NPC_${e.vanillaId}.png`,
             sy: r.sy, sw: r.sw, sh: r.sh,
             cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY,
+            ...(modNpcFullbright(e.vanillaId ?? -1) ? { ga: 1 } : {}),
           });
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
@@ -12268,6 +12344,8 @@ export class Renderer {
         // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
         // mirror（★BJ509）= gMirror 传入——vel4 收集侧镜像守卫用
         this.drawNpcGlow(e, r, -r.sw / 2, anchorY, gMirror);
+        // ★刀2-C2:mod NPC postDraw(原版本体+glow 段后=restore 同位;tML PostDraw 语义)
+        if (mDraw?.postDraw) mDraw.postDraw(e, this.buildModDrawCtx(e.cx, e.cy, cam));
         // 546 怒滚草亮核（Main.cs:26156-26158,rotation 台账附带登记本批清偿）：
         // Extra_76 专属 glow 叠画——rotation=Clamp(vx×0.1,±π/8) 瞬时式,与本体
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
@@ -13156,7 +13234,8 @@ export class Renderer {
     mirror = false,
   ) {
     if (!this.atlas) return;
-    const g = Renderer.NPC_GLOW[e.vanillaId ?? -1];
+    // ★刀2-C1:mod NPC glowmask 查表回退(声明面;贴图 vanilla/NPC_Glow_<id>.png alias)
+    const g = Renderer.NPC_GLOW[e.vanillaId ?? -1] ?? modNpcGlowSpecOf(e.vanillaId ?? -1);
     if (!g) return;
     if (g.cond && !g.cond(e)) return;
     const img = this.atlas.ensureVImage(g.tex);   // 懒加载（首帧 null，次帧生效）
@@ -15772,6 +15851,14 @@ export class Renderer {
     //  无出场渐显 → floor 恒 1,整 tile 白=既有 596/811 同面近似）;拖尾/幻影层经
     //  MinionProj.draw 946 专绘走 trailShadeQueue 全亮通道（合成后直绘）双保险。
     [946, () => ({ floor: 1, whiten: true })],
+    // ★BJ669（2026-10-13 用户实报「影子层序+错位」定谳刀）：864 刃杖——GetAlpha
+    //  专支恒白不读格光（Projectile.cs:80751 `type == 764 || 856 || 857 || 864`
+    //  → Color.White）+ 辉光 4 份（:31395-31403 GetFloatingDaggerMinionGlowColor
+    //  字面色）+ 残影 12 份（:31237 同色 A/4）全层不读 Lighting.GetColor = 自发光
+    //  （946 判例同款;用户图 115 原版夜景物证=刃身+辉光全亮品红）。floor=1
+    //  （α≡0 恒显,SetDefaults :8286-8299 无 alpha 写）whiten=true（顶点色恒白,
+    //  ★I″ 消色差）。本体/辉光/残影世界层直绘的暗处全亮由本光地板承载。
+    [864, () => ({ floor: 1, whiten: true })],
     // ★EoL2 修2（2026-10-05）：光之女皇彩虹尾迹族补覆盖——原版全族【不读
     //  Lighting.GetColor】（AI_171_GetColor :46398-46406 / AI_173_GetColor :46276-46284 /
     //  GetFairyQueenWeaponsColor :21780-21787——色=自发光 hsl/白,与格光无关）,
@@ -17382,21 +17469,31 @@ export class Renderer {
       const [lr, lg, lb] = this.lighting
         ? this.lighting.lightAt(Math.floor(s.anchor[0] / 16), Math.floor(s.anchor[1] / 16))
         : [255, 255, 255];
-      const b = this.lunarCovB ??= document.createElement('canvas');
-      if (b.width < s.w || b.height < s.h) { b.width = s.w; b.height = s.h; }
-      const cb = b.getContext('2d');
-      if (cb) {
-        cb.setTransform(1, 0, 0, 1, 0, 0);
-        cb.globalAlpha = 1; cb.filter = 'none'; cb.globalCompositeOperation = 'source-over';
-        cb.clearRect(0, 0, s.w, s.h);
-        cb.drawImage(s.cv, 0, 0);
-        s.c.setTransform(1, 0, 0, 1, 0, 0);
-        s.c.globalCompositeOperation = 'multiply';
-        s.c.fillStyle = `rgb(${Math.round(lr)},${Math.round(lg)},${Math.round(lb)})`;
-        s.c.fillRect(0, 0, s.w, s.h);
-        s.c.globalCompositeOperation = 'destination-in';
-        s.c.drawImage(b, 0, 0);
-        s.c.globalCompositeOperation = 'source-over';
+      // ★满光快路径（2026-10-12,Trace-20261013T103710 定谳:日耀套户外昼=lightAt 恒
+      //  (255,255,255),采光烘焙三 op(copy 1024²+multiply fill+destination-in)恒等
+      //  于无操作——multiply×白=RGB 恒等,α 舞蹈（CovB 复原）在无 multiply 时不需要。
+      //  跳过=主线程省 2 drawImage+clear+fill/玩家/帧（639ms drawImage 第一大头）,
+      //  GPU 同份额;blit 仍走（层序重放必需）。不足 255=原路径逐位。
+      if (!(lr >= 255 && lg >= 255 && lb >= 255)) {
+        const b = this.lunarCovB ??= document.createElement('canvas');
+        if (b.width < s.w || b.height < s.h) { b.width = s.w; b.height = s.h; }
+        const cb = b.getContext('2d');
+        if (cb) {
+          // ★夜间路径 op 收敛（2026-10-12;Windows 每 op 税判例——减 op 不减像素）:
+          //  旧 clearRect+drawImage 两 op → `copy` 合成整幅替换（含 α）单 op
+          //  （语义恒等=clear+source-over,copy ≡ 全量覆写,judder capture/eventTint
+          //  同习语）。舞餗 4 op→3 op。
+          cb.setTransform(1, 0, 0, 1, 0, 0);
+          cb.globalAlpha = 1; cb.filter = 'none'; cb.globalCompositeOperation = 'copy';
+          cb.drawImage(s.cv, 0, 0);
+          s.c.setTransform(1, 0, 0, 1, 0, 0);
+          s.c.globalCompositeOperation = 'multiply';
+          s.c.fillStyle = `rgb(${Math.round(lr)},${Math.round(lg)},${Math.round(lb)})`;
+          s.c.fillRect(0, 0, s.w, s.h);
+          s.c.globalCompositeOperation = 'destination-in';
+          s.c.drawImage(b, 0, 0);
+          s.c.globalCompositeOperation = 'source-over';
+        }
       }
     }
     this.lunarCoverQueue.push({ m: s.m, k: s.k, ox: s.ox, oy: s.oy, w: s.w, h: s.h, cv: s.cv });
@@ -18105,7 +18202,7 @@ export class Renderer {
     vid: number, ar: { sw: number; sh: number }, cx: number, cy: number, miscCounter: number,
     rot = 0,
   ): void {
-    const gm = ITEM_GLOWMASK[vid];
+    const gm = ITEM_GLOWMASK[vid] ?? modItemGlowMaskIdOf(vid);   // ★刀2-C1:mod 伪 id 直通
     if (gm === undefined || DROP_GLOW_EXCLUDED.has(vid)) return;
     const img = this.atlas?.ensureVImage(`vanilla/Glow_${gm}.png`);
     if (!img || img.width <= 0 || img.height <= 0) return;
@@ -20340,7 +20437,12 @@ export class Renderer {
         //  :2037-2044=躯干甲之上）——恒色甲件逃逸重绘在其上,层序保持须随迁
         //  （候选 B;漩涡/星云无恒色覆写 lunarHoist=null 零进入）。区域 scratch
         //  全亮重放→玩家中心采光烘焙→合成后甲件之上重放（flushLunarCovered）。
-        const covR1 = lunarHoist != null && !this.lunarCoverCollected.has(p)
+        //  ★R3 同款内容门（2026-10-12 结构刀,Trace-103710 定谳）：R3 有
+        //  lunarR3Content 谓词,R1 原门缺内容检查——无浮游圈装备（hasFloatingTube
+        //  常态 false）时 tubeDraw 全 no-op,R1 会话=空 scratch 白跳舞蹈+blit
+        //  （4 op/帧/玩家纯浪费,日耀套常驻面）。门镜像 tubeDraw 自身谓词
+        //  （tubeTex 就绪）=内容精确镜像,逐位等价。
+        const covR1 = lunarHoist != null && tubeTex != null && tubeTex.width > 0 && !this.lunarCoverCollected.has(p)
           ? this.lunarCoverBegin(ctx, p) : null;
         if (covR1) ctx = covR1.c;
         tubeDraw(56, p.sitting ? -Math.trunc(p.seatOffsetY) : 0);   // 前半

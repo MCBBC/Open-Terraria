@@ -257,10 +257,13 @@ export function runModGenPasses(world: { store: unknown; groundLevel: number; ro
   //  =crash);gen 期用 setTileSilent(生成期绕过=TileStore :323 注释原文)
   const origSetTile = store.setTile;
   store.setTile = store.setTileSilent.bind(store);
-  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
+  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; wallIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
     tileIdByKey: Object.fromEntries(
       Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
         .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
+    // ★刀3-墙(2026-10-13):mod 墙键→wall id(pass 解析;裸键口径=tileIdByKey 同构)
+    wallIdByKey: Object.fromEntries(
+      modWallKeyEntries().map(({ fullKey, id }) => [fullKey.replace(/^mod_[a-z0-9]+_/, ''), id])),
     itemIdByKey: Object.fromEntries(
       Object.entries(ITEM_BY_KEY).filter(([k]) => k.startsWith('mod_'))),
     chests: [],
@@ -851,6 +854,7 @@ import { doErrorWorldFinish } from './vanilla/SecretSeedDoEndsPass';
 import { doErrorWorldShuffleBlocks } from './vanilla/SecretSeedDoEndsPass';
 // ★IIIII17：DoPortalGunInChests（WorldGen.cs:3004，FinalizeSecretSeeds #18 位）
 import { doPortalGunInChests } from './vanilla/FinalSeedCleanupPass';
+import { modWallKeyEntries } from '../../mods/walls';   // ★刀3-墙:gs.mods.wallIdByKey 装载(裸键=tileIdByKey 同构)
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 // ★UUUUUU：oceanStrip 形参化——原版 cs:16221-16231 海洋带归水全扫只在 #49
@@ -1593,10 +1597,13 @@ function vanillaBiomes({ store, rng, world, surface, prog }: GenCtx) {
   runBeachesPass(store, rng, gs);
   // ★mod 生成 pass 通用消费面(mod 装载期经 sw.registerGenPass 注册;零 mod 知识):
   //  Beaches 后=海盆就位;gs.mods.tileIdByKey=mod tile 键→内部 id(pass 解析用)。
-  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
+  const gsMods: { tileIdByKey: Record<string, number>; itemIdByKey: Record<string, number>; wallIdByKey: Record<string, number>; chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }> } = {
     tileIdByKey: Object.fromEntries(
       Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_'))
         .map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
+    // ★刀3-墙(2026-10-13):mod 墙键→wall id(pass 解析;裸键口径=tileIdByKey 同构)
+    wallIdByKey: Object.fromEntries(
+      modWallKeyEntries().map(({ fullKey, id }) => [fullKey.replace(/^mod_[a-z0-9]+_/, ''), id])),
     // ★一百一十三刀:item 键→vid(mod 箱 loot 解析;mod 键=mod_<mod>_ 前缀全键)
     itemIdByKey: Object.fromEntries(
       Object.entries(ITEM_BY_KEY).filter(([k]) => k.startsWith('mod_'))),

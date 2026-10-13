@@ -51,6 +51,7 @@ export type EscapeIntent = 'escape' | 'inventory' | 'pause';
 
 export type EscapeChainAction =
   | 'closeSummon'      // F6 召唤面板（SW 自有态,优先于一切——原版无对应物,历史序保留）
+  | 'closeModPanels'   // ★刀1:vui mod 面板（关最上层;closeSummon 后、fullMap 前）
   | 'closeFullMap'     // 原版 mapFullscreen 支（Player.cs:4963-4971）
   | 'closePause'       // 原版 ingameOptionsWindow 支（:4978-4986 IngameOptions.Close）
   | 'closeNpcDialog'   // 原版 talkNPC 支（:5000-5013,Shop 随对话关）
@@ -74,6 +75,9 @@ export interface EscapeChainState {
    *  同相）；否则 pauseOpen 支同帧双收两层（设置+暂停整关=状态残留） */
   settingsOpen: boolean;
   uiBlocking: boolean;
+  /** ★刀1(2026-10-13):vui mod 面板开着(closeSummon 后、fullMap 前——用户游戏内
+   *  自开窗优先于地图;Esc 关最上层 mod 面板,不落背包/暂停) */
+  modPanelsOpen?: boolean;
   inventoryOpen: boolean;
   /** SW-RB6b 2026-09-07 补：死亡/幽灵态——原版此态 ToggleInv 整链不跑
    *  （Update :17185-17193 死亡走 UpdateDead 分支），Inventory 沿改道
@@ -86,6 +90,9 @@ export interface EscapeChainState {
 
 export function resolveEscapeChain(s: EscapeChainState, intent: EscapeIntent): EscapeChainAction {
   if (s.summonOpen) return 'closeSummon';
+  // ★刀1:mod 面板支(优先于 fullMap——用户刚开的工具窗 Esc 即收,防「先开地图」
+  //  语义抢沿;关最上层=栈式,连按逐层收)
+  if (s.modPanelsOpen) return 'closeModPanels';
   if (s.fullMapOpen) return 'closeFullMap';
   // ★RB28-F3：设置子页面叠开于暂停浮层——链让位（面板自带 Esc=关设置回暂停菜单,
   // IngameOptions.Close「关设置+保持暂停态」同相）;置于 pauseOpen 支前,否则 closePause

@@ -3,7 +3,7 @@
 // 全部走各数据模块的 registerMod* 追加面(零改原版面;零 mod 时整文件无副作用)。
 import type { RegistrationPlan } from './types';
 import { registerModItem, ITEM_DEFS } from '../data/items';
-import { registerModTile, TILE_BY_KEY, TILE_DEFS, type TileDef } from '../data/tiles';
+import { registerModTile, TILE_BY_KEY, TILE_DEFS, WALL_BY_KEY, type TileDef } from '../data/tiles';
 import { registerModNpc, registerModTownNpc, type VanillaNpc } from '../data/vanillaNpcs';
 import { registerModBoss, registerModWormChain } from '../entities/Enemy';
 import { registerModBuff, modBuffTypeOf } from './buffs';
@@ -19,6 +19,9 @@ import { registerModRarity, modRarityIdOf } from './rarity';   // ★刀3-1:稀�
 import { registerModPet } from './pets';                        // ★刀3-2:mod 宠物
 import { registerModEquipKind } from '../data/vanillaEquip';    // ★刀3-2:装备分类 overlay
 import { registerModGoreId, registerModGoreTexSize, registerModNpcDeathGore, modGoreIdOf } from './gore';   // ★刀3-3:mod gore
+import { registerModWall, registerModWallMeta } from './walls';   // ★刀3-墙:mod 墙
+import { registerModNpcDrawSpec, registerModItemGlowmask } from './drawspecs';   // ★刀2-C1:绘制声明面
+import { registerModCanUseRule } from './hooks';   // ★刀5-A 族:canUse 声明规则
 
 /** pack 贴图字节(带 textures/ 前缀归一;register 期 PNG 头读取用) */
 function packTexBytesLocal(pack: { files: Map<string, Uint8Array> } | undefined, texPath: string): Uint8Array | null {
@@ -182,6 +185,9 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       frameRate: s.frameRate,
       noContactDamage: s.noContactDamage,
       holdout: s.holdout,
+      additive: s.additive,
+      fullbright: s.fullbright,
+      overPlayers: s.overPlayers,
     }, pr.fullKey);
     projs++;
   }
@@ -277,6 +283,16 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       if (w >= 1 && w <= 4096 && h >= 1 && h <= 4096) registerModGoreTexSize(g.goreId, w, h);
     }
   }
+  // ★刀3-墙:mod 墙(先于 items——placeWall 引用;WALL_DEFS/WALL_BY_KEY 直追加,
+  //  墙 id=internal=stable 零恒等表;dropItem 引用物品=items 应用后二段解析)
+  for (const w of plan.wallSpecs) {
+    registerModWall(w.wallId, w.fullKey, {
+      name: w.spec.name ?? w.spec.key,
+      mapColor: w.spec.mapColor ?? '#808080',
+      opacity: w.spec.opacity ?? 1,
+      ...(w.spec.largeFrame !== undefined ? { largeFrame: w.spec.largeFrame } : {}),
+    }, { unbreakable: w.spec.unbreakable === true, ...(w.spec.dungeonGate !== undefined ? { dungeonGate: w.spec.dungeonGate } : {}) });
+  }
   for (const n of plan.npcSpecs) {
     const spec = n.spec;
     registerModNpc(n.npcId, {
@@ -302,6 +318,15 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       alpha: spec.alpha,
       behindTiles: spec.behindTiles,
     } satisfies VanillaNpc);
+    // ★刀2-C1:绘制声明面(frameRate/glowmask/fullbright → vanillaFrameIdx 顶部
+    //  早退/drawNpcGlow 查表/npcWhiteLiftQueue ga=1 捕获)
+    if (spec.frameRate !== undefined || spec.glowmask || spec.fullbright) {
+      registerModNpcDrawSpec(n.npcId, {
+        ...(spec.frameRate !== undefined ? { frameRate: spec.frameRate } : {}),
+        ...(spec.glowmask ? { glowTex: `vanilla/NPC_Glow_${n.npcId}.png` } : {}),
+        ...(spec.fullbright ? { fullbright: true } : {}),
+      });
+    }
     // ★P8:Boss 位直亮(VANILLA_BOSS_IDS.add——血条/Boss 槽/掉落锚定三消费点)
     if (spec.boss) registerModBoss(n.npcId);
     // ★P8:蠕虫链声明(头条目;body×bodyCount + tail → segIds,键→id 经分配表)
@@ -405,6 +430,29 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       }
     }
     registerModItem(def, it.stableId);
+    if (spec.func?.canUseOwnedBelow) {
+      // ★刀5-A 族:canuse-rules 数据解释器注册(proj 键解析=resolveShoot 同通道)
+      const cb = spec.func.canUseOwnedBelow;
+      const projId = typeof cb.proj === 'number' ? cb.proj
+        : resolveShoot(plan, it.modId, cb.proj) as number;
+      registerModCanUseRule(it.stableId, { ownedProjBelow: { proj: projId, lt: cb.lt } });
+    }
+    if (spec.glowmask) {
+      // ★刀2-C1:物品 glowmask(伪 GlowMaskID=1000+stableId-30000;贴图 alias 进
+      //  Glow_ 空间,drawDrop 捕获+collectDropItemGlow 查表全链白嫖)
+      registerModItemGlowmask(it.stableId);
+    }
+    if (spec.placeWall !== undefined) {
+      // ★刀3-墙:放置墙面(plan.allocation.walls 解析;def.wallId=updateUse 派发门
+      //  heldDef.wallId 消费面,与 vanilla-wallitems 挂法同式)
+      const raw = spec.placeWall;
+      const wid = raw.startsWith('mod_') ? plan.allocation.walls.get(raw)
+        : plan.allocation.walls.get(`mod_${it.modId}_${raw}`) ?? WALL_BY_KEY[raw];
+      if (wid === undefined) {
+        throw new Error(`[mod-item] mod ${it.modId} 物品 ${spec.key} placeWall 引用未注册墙: ${raw}`);
+      }
+      (ITEM_DEFS[it.stableId] as { wallId?: number }).wallId = wid;
+    }
     if (spec.pet) {
       // ★刀3-2:mod 宠物(MOD_PETS 反查表+装备分类 overlay;buffSpecs 先于 items 应用,
       //  modBuffTypeOf 此处必命中;proj 字符串形走 resolveShoot 同通道)
@@ -451,6 +499,22 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       registerModWingStats(spec.stats.wing, spec.stats.wingStats);
     }
     items++;
+  }
+  // ★刀3-墙:墙掉落二段解析(dropItem→物品 vid;items 全量注册后才能解析)
+  {
+    const itemOf = (modId: string, raw: string): number | undefined => {
+      if (/^\d+$/.test(raw)) return Number(raw);
+      const full = raw.startsWith('mod_') ? raw : `mod_${modId}_${raw}`;
+      return plan.allocation.items.get(full);
+    };
+    for (const w of plan.wallSpecs) {
+      if (w.spec.dropItem === undefined) continue;
+      const vid = itemOf(w.modId, w.spec.dropItem);
+      if (vid === undefined) {
+        throw new Error(`[mod-wall] mod ${w.modId} 墙 ${w.spec.key} dropItem 引用未注册物品: ${w.spec.dropItem}`);
+      }
+      registerModWallMeta(w.wallId, { dropItemVid: vid, unbreakable: w.spec.unbreakable === true, ...(w.spec.dungeonGate !== undefined ? { dungeonGate: w.spec.dungeonGate } : {}) });
+    }
   }
   // shops(P3):物品 id 解析(本 mod 键/原版 vid);price 缺省=物品 value(原版
   // price:null→value 同相;无 value=500 兜底)

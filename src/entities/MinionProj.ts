@@ -10117,48 +10117,47 @@ export class MinionProj extends Entity {
         });
       }
     }
-    // ---- ★BJ650件1（2026-10-12,BJ634/632 伴生登记债清偿）：864 刃杖辉光 4 份白模
-    //      旋转（Main.cs:31395-31403 亲读 1:1）——色 = GetFloatingDaggerMinionGlowColor
-    //      （Projectile.cs:80377-80381:hue=0.66+0.33×(whoAmI%6)/6 六档蓝→品红、
-    //      s=0.7/l=0.6、×0.7f 逐字节截断）后 A/=4（(byte)178→44）;源矩形 = value18
-    //      （rectangle4.Y+=Height=帧 1 纯白模,与残影 12 份 :30883 value16 同源——
-    //      残影走 drawProjGhosts 864 档〔帧 1 白模同切片〕,本支=本体后另一 4 份,
-    //      位序:原版残影块尾→本体前）;位 = Center+(0,gfxOffY) + rot 单位向
-    //      .RotatedBy(π/2·k)×2（世界系四向,π/2 间隔;dir 只翻贴图不翻位——
-    //      XNA SpriteEffects 语义,与 755 红晕同式）;rotation/origin(帧心 9,16)/
-    //      scale 同本体支。字面色不取光照=自发光 → pushGlowOps 'over' 逃逸队列
-    //      （R15-F1 FLAMEBURST 辉光同判例;XNA AlphaBlend 直色=RGB 面 tint+A 面
-    //      alpha 两旋钮,BJ604件3 分解式;★通道复用=BJ630件1 AURA 同槽 itemGlowQueue
-    //      ——仅 864 进本支,688-690 走 auraGlowTint 色解算不混用）。染料面：原版
-    //      EntitySpriteDraw 染料先于字面色——本仓 glow 通道未接染料,白模染料
-    //      近似登记债（drawProjGhosts 残影侧已整片染,本支 4 份未染,差异面=染料弹
-    //      辉光色相）。层序登记：原版本支在【本体前】（:31395 → :31578 本体）,
-    //      本仓逃逸队列恒合成后冲刷=辉光叠本体上——刃身不透明域被 4 份白模
-    //      α=44/255 顺次叠加（透见 (1−44/255)⁴≈0.47）,vanilla 本体全遮辉光;
-    //      暗处保发光 vs 层序二取一按 AURA 通道判例取前者（755 红晕 repo 先例
-    //      亦本体后直绘）。 ----
+    // ---- ★BJ669（2026-10-13 用户实报「影子在刃背后,不是刃前面+错位」定谳刀）：
+    //      864 刃杖辉光 4 份白模旋转（Main.cs:31395-31403 亲读 1:1）——【层序翻正】：
+    //      原版本支在【本体前】（:31395 → :31578 本体）= 影子画在刃背后、刃身不透明
+    //      域全遮辉光（用户图 115 原版物证=刃后淡影）。旧 BJ650件1 走 pushGlowOps
+    //      'over' 逃逸队列=合成后冲刷叠本体顶（层序反+「暗处保发光 vs 层序二取一」
+    //      当时取前者）——用户拍板按原版层序。免光改由 SELF_LUMINOUS_PROJS 光地板
+    //      承载（本刀伴生,Renderer 946 判例同款）= 层序+自发光二兼得。
+    //      色式不变（GetFloatingDaggerMinionGlowColor :80377-80381:hue=0.66+0.33×
+    //      (whoAmI%6)/6 六档蓝→品红、s=0.7/l=0.6、×0.7f 逐字节截断、A=(byte)178/4=44）;
+    //      源矩形 = value18（rectangle4.Y+=Height=帧 1 纯白模）;位 = Center+(0,gfxOffY)
+    //      + rot 单位向 .RotatedBy(π/2·k)×2（世界系四向;dir 只翻贴图不翻位——
+    //      XNA SpriteEffects 语义）;rotation/origin(帧心)/scale=1 同本体支。
+    //      【XNA 预乘双笔分解】（drawProjGhosts 864 档同式,One/InvSrcAlpha）：
+    //      dst' = tex.rgb×C.rgb + dst×(1−tex.a×C.a) —— C.rgb=hsl×0.7 档（A=44 不进
+    //      rgb 面）→ cut 笔黑染 ga=44/255（A 衰减面）+ add 笔 rgb 染 'lighter' ga=1
+    //      （rgb 贡献面,透明域贡献 0 保形）。染色对=whoAmI%6 六档惰性缓存
+    //      （glow864TexPair,一次性烘 12 张 18×32 微画布）。 ----
     if (this.projId === 864) {
       const sheet864 = projSprite(864);
       if (sheet864 && sheet864.height >= 64) {
         const fh864 = Math.floor(sheet864.height / 2);        // projFrames[864]=2（Main.cs:8804）
-        const hue = 0.66 + 0.33 * ((Math.max(0, this.whoAmI) % 6) / 6);        // :80378（★返工：槽位快照,旧 this.id 档位漂移）
-        const rgb864 = hslToRgb255(hue, 0.7, 0.6);
+        const hueK = Math.max(0, this.whoAmI) % 6;            // :80378（★BJ661 返工：槽位快照）
+        const rgb864 = hslToRgb255(0.66 + 0.33 * (hueK / 6), 0.7, 0.6);
         const a864 = Math.trunc(Math.trunc(255 * 0.7) / 4);   // (byte)178 → /4=44（byte 整除）
-        for (let k = 0; k < 4; k++) {
-          const ang = this.rot + (Math.PI / 2) * k;           // rot 单位向 .RotatedBy(π/2·k)
-          ctx.save();
-          ctx.translate(this.cx + Math.cos(ang) * 2, this.cy + Math.sin(ang) * 2);
-          ctx.rotate(this.rot);                               // rotation 同本体支
-          if (this.facing < 0) ctx.scale(-1, 1);              // dir 镜像（贴图空间）
-          r.pushGlowOps?.([{
-            tex: 'vanilla/Projectile_864.png',
-            sx: 0, sy: fh864, sw: sheet864.width, sh: fh864,   // value18=帧 1 白模
-            dx: -sheet864.width / 2, dy: -fh864 / 2,           // origin8=帧矩形心（:30621）
-            blend: 'over',
-            tint: [rgb864[0] * 0.7 / 255, rgb864[1] * 0.7 / 255, rgb864[2] * 0.7 / 255],
-            alpha: a864 / 255,
-          }], ctx.getTransform());
-          ctx.restore();
+        const pair864 = glow864TexPair(hueK, rgb864);
+        if (pair864) {
+          for (let k = 0; k < 4; k++) {
+            const ang = this.rot + (Math.PI / 2) * k;         // rot 单位向 .RotatedBy(π/2·k)
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            ctx.translate(this.cx + Math.cos(ang) * 2, this.cy + Math.sin(ang) * 2);
+            ctx.rotate(this.rot);                             // rotation 同本体支
+            if (this.facing < 0) ctx.scale(-1, 1);            // dir 镜像（贴图空间）
+            ctx.globalAlpha = a864 / 255;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.drawImage(pair864.cut, -sheet864.width / 2, -fh864 / 2);   // origin8=帧心
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(pair864.add, -sheet864.width / 2, -fh864 / 2);
+            ctx.restore();
+          }
         }
       }
     }
@@ -10986,6 +10985,45 @@ let HUE_TINT_SCRATCH: HTMLCanvasElement | null = null;
 /** ★变体①终扫:女皇剑烘焙环形序号（家族独立计数;环形窗 64 ≥ 单帧烘焙剑数,
  *  窗内复用=先行剑 rec 纹理被原地改写——shine 单键回归教训） */
 let empressTintSeq = 0;
+/** ★BJ669：864 辉光 4 份染色对缓存（whoAmI%6 六档键,惰性烘焙幂等）——
+ *  cut=帧 1 白模黑染（A 衰减面）、add=帧 1 白模 rgb×0.7 染（rgb 贡献面）。
+ *  XNA 预乘 One/InvSrcAlpha 分解（drawProjGhosts 864 档同式）：
+ *  dst' = tex.rgb×C.rgb + dst×(1−tex.a×C.a)。帧 1=纯白模（BJ632 探针 340/340 全白）
+ *  → source-atop 染=同形纯色剪影。烘焙失败（无 sheet/headless）缓存 null 防重试抖动。 */
+const GLOW864_CACHE = new Map<number, { cut: HTMLCanvasElement; add: HTMLCanvasElement } | null>();
+function glow864TexPair(k: number, rgb: readonly [number, number, number]): { cut: HTMLCanvasElement; add: HTMLCanvasElement } | null {
+  if (GLOW864_CACHE.has(k)) return GLOW864_CACHE.get(k) ?? null;
+  if (typeof document === 'undefined') return null;
+  const sheet = projSprite(864);
+  // 贴图未就绪（headless/异步首帧）→ 不缓存 null（每帧重查,就绪后下一拍即烘）
+  if (!sheet || sheet.height < 64) return null;
+  const fh = Math.floor(sheet.height / 2);
+  const bake = (fill: string): HTMLCanvasElement | null => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = sheet.width; c.height = fh;
+      const g = c.getContext('2d');
+      if (!g) return null;
+      g.drawImage(sheet as CanvasImageSource, 0, fh, sheet.width, fh, 0, 0, sheet.width, fh);
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = fill;
+      g.fillRect(0, 0, c.width, c.height);
+      return c;
+    } catch {
+      return null;   // 贴图源不可绘（测试桩/解码中）→ 视同未就绪,不缓存
+    }
+  };
+  const cut = bake('rgb(0,0,0)');
+  const add = bake(`rgb(${Math.round(rgb[0] * 0.7)},${Math.round(rgb[1] * 0.7)},${Math.round(rgb[2] * 0.7)})`);
+  if (!cut || !add) return null;
+  const pair = {
+    cut: cut as HTMLCanvasElement,
+    add: add as HTMLCanvasElement,
+  };
+  GLOW864_CACHE.set(k, pair);
+  return pair;
+}
+
 function tintFrameHue(src: HTMLCanvasElement, rgb: readonly [number, number, number]): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   HUE_TINT_SCRATCH ??= document.createElement('canvas');

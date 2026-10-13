@@ -1296,6 +1296,12 @@ function checkSignSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, shee
 
 /** TileFrameImportant 分派（cs:85703+）——返回 true=已处理（含 no-op 族） */
 function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number, reset = false): boolean {
+  // ★652b:mod 功能箱保护(≡C# SetUpChest→TileID.Sets.BasicChest[Type]=true 语义,
+  //   tML TileFrameImportant 无 case → ModTile.TileFrame 默认不杀)——mod 箱 pseudo-sheet
+  //   不在 C2X2_MAIN_GROUP/CHECK2XX_TYPES,旧落"未移植族→非 frameImportant 回落"
+  //   → Piles/沉降 plain 路径把箱当普通非实心格杀(全链 repro 箱 tile=0 根因)。
+  //   chest 旗由 content JSON(registryModTile chest:true)挂 TILE_DEFS。
+  if (TILE_DEFS[st.type[st.idx(x, y)]]?.chest) return true;
   __swFnt39('TI', x, y, String(sheet));
   // frameSparse 模式跳过的读帧族（165/185/28/240族/485/72/C3X2 族——见 SweepCtx 注释）
   //   ★CCCCC：+138/411——Check2x2 完整性门读 2×2 四格帧；探针基座（金标 typ×陈旧

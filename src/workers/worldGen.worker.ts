@@ -5,7 +5,7 @@
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
-import { applyModTileStableMap, applyModTileKeys } from '../data/tiles';
+import { applyModTileStableMap, applyModTileKeys, applyModWallKeys } from '../data/tiles';
 import { setCurrentAlloc } from '../mods/bridge';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';
 import { registerGenPass } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
@@ -132,6 +132,9 @@ ctx.onmessage = async (e) => {
       applyModItemIds(req.payload.itemStableIds);
       applyModTileStableMap(req.payload.tilePairs);
       applyModTileKeys(req.payload.tileKeys);   // ★622:TILE_BY_KEY 补 mod 条目(gen passes 消费)
+      // ★刀3-墙(2026-10-13):mod 墙键注入(worker WALL_DEFS——gen pass wallIdByKey 消费;
+      //  缺推=worker 域 Sunken Sea 墙静默不铺,蓝队复查 critical 已修)
+      if (req.payload.wallKeys) applyModWallKeys(req.payload.wallKeys);
       // ★P5 id 平移解:当前分配映射入 worker 域(loadSaveData 重映射消费)
       setCurrentAlloc({
         itemKeys: new Map(req.payload.itemKeys),

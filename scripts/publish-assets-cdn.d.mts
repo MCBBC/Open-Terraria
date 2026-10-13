@@ -5,10 +5,12 @@ export interface CdnPlanPart {
   pkg: string;
   ver: string;
   npmmirrorUrl: string;
+  npmmirrorTgzUrl: string;
   jsDelivrUrl: string;
 }
 export declare function pkgName(scope: string, file: string): string;
 export declare function npmVersion(file: string): string;
 export declare function npmmirrorFileUrl(pkg: string, ver: string, file: string): string;
+export declare function npmmirrorTarballUrl(pkg: string, ver: string): string;
 export declare function jsDelivrFileUrl(pkg: string, ver: string, file: string): string;
 export declare function derivePlan(manifest: { parts: Array<{ file: string; zipBytes: number }> }, scope: string): CdnPlanPart[];

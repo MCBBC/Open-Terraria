@@ -7,6 +7,7 @@ import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
 import { mountInstallPrompt } from './ui/InstallPrompt';
 import { UI } from './ui/UI';
 import { resolveEscapeChain } from './ui/escapeChain';   // SW-BN2 2026-09-07
+import { modUiPanelsOpen, modUiCloseTop } from './mods/ui';   // ★刀1:mod UI 面板(ESC 链支)
 import { kvHas } from './save/KvStore';
 import { preloadPrefs } from './save/PrefsStore';   // ★BJ627 偏好域 IDB 预载（候选 C:IDB 权威+内存缓存）
 import { saveGame } from './save/SaveFile';
@@ -526,11 +527,16 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'p
     // ToggleInv,永不开关背包）
     dead: game.player.dead,
     inventoryOpen: ui.inventoryOpen,
+    // ★刀1:vui mod 面板开着(Esc 关最上层,不落背包/暂停)
+    modPanelsOpen: modUiPanelsOpen(),
   }, intent);
   switch (act) {
     case 'closeSummon':
       game.summonPanel!.close();
       game.input.uiBlocking = false;
+      break;
+    case 'closeModPanels':
+      modUiCloseTop();
       break;
     case 'closeFullMap':
       game.renderer.fullMap.open = false;

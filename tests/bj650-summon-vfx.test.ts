@@ -225,16 +225,22 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
     expect(c0.aMul).toBeCloseTo(44 / 255, 6);         // A 面 (byte)178/4=44（旧 0.25 → 红）
   });
 
-  it('draw 侧：帧 1 白模 4 份 π/2 旋转 + A=44 逃逸队列 op（M1 伴生红位）', () => {
+  it('draw 侧：帧 1 白模 4 份 π/2 旋转 + A=44 直绘双笔（★BJ669 层序翻正重锚：逃逸队列→本体前直绘）', () => {
     const { hooks, player } = makeHooks([]);
     const m = minion(player, hooks, 864, 50 * 16, 90 * 16);
     m.rot = 0.7;
     // ★BJ650件1 返工：色相源=whoAmI 槽位快照（出生拍注册表插入位,原版首空闲槽
     //  对映）非 this.id（全实体递增计数器→档位随会话漂移=用户实报品红影子）。
     //  本测直驱 draw 不走 fixedUpdate → 显式 stamp 槽位并从 stamp 推导期望色。
+    //  ★BJ669：染色对=glow864TexPair 惰性烘焙（stub sprite 不可绘→null→支跳过）
+    //  ——本测用可绘 stub canvas 烘（stubDocument 已铺 document）。
     const slot = 3;
     (m as unknown as { whoAmI: number }).whoAmI = slot;
-    setProjSpriteOverride(864, { width: 18, height: 64 } as never);
+    const stubSheet = document.createElement('canvas');
+    stubSheet.width = 18; stubSheet.height = 64;
+    const sg = stubSheet.getContext('2d');
+    if (sg) { sg.fillStyle = '#fff'; sg.fillRect(0, 0, 18, 64); }
+    setProjSpriteOverride(864, stubSheet as never);
     const drawOps: Array<{ m: string; a: unknown[] }> = [];
     const ctx = new Proxy({} as Record<string, unknown>, {
       get(_t, k) {
@@ -252,16 +258,18 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
       pushGlowOps: (o: Array<Record<string, unknown>>) => { glowOps.push(...o); },
     };
     (m as unknown as { draw(r: unknown): void }).draw(fakeR);
-    // 4 份 op：sy=帧 1 行（白模 32）、sw=18/sh=32、A=44/255、tint=0.7×hsl/255
-    expect(glowOps.length).toBe(4);
-    const [r, g, b] = hslToRgb255SelfTest(0.66 + 0.33 * ((slot % 6) / 6), 0.7, 0.6);
-    for (const op of glowOps) {
-      expect(op.sy).toBe(32);
-      expect(op.sw).toBe(18); expect(op.sh).toBe(32);
-      expect(op.blend).toBe('over');
-      expect(op.alpha).toBeCloseTo(44 / 255, 6);
-      expect(op.tint).toEqual([r * 0.7 / 255, g * 0.7 / 255, b * 0.7 / 255]);
-    }
+    // ★BJ669：不再走逃逸队列（合成后冲刷=叠本体顶,层序反）——改世界层直绘
+    expect(glowOps.length).toBe(0);
+    // 4 份×2 笔（cut 黑染 A 衰减 ga=44/255 + add rgb 染 'lighter' ga=1）——
+    // 代理 ctx 下 drawImage 调用=本体 1 + 残影 0（环空）+ 辉光 8 = 9;
+    // lighter 段 ≥4、A=44/255 段 ≥4（XNA 预乘分解 One/InvSrcAlpha）
+    const draws = drawOps.filter((o) => o.m === 'drawImage');
+    expect(draws.length).toBe(9);
+    const lighterSets = drawOps.filter((o) => o.m === 'set:globalCompositeOperation' && o.a[0] === 'lighter');
+    expect(lighterSets.length).toBeGreaterThanOrEqual(4);
+    const alphaSets = drawOps.filter((o) => o.m === 'set:globalAlpha')
+      .map((o) => o.a[0] as number);
+    expect(alphaSets.filter((v) => Math.abs(v - 44 / 255) < 1e-6).length).toBeGreaterThanOrEqual(4);
     // 世界系四向位：rot 单位向 RotatedBy(π/2·k)×2（rot=0.7 → 4 个互异偏移）
     const tx = drawOps.filter((o) => o.m === 'translate').map((o) => o.a as number[]);
     const offs = tx.slice(0, 4).map(([x, y]) => [x - (50 * 16), y - (90 * 16)]);

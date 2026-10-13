@@ -104,7 +104,10 @@ export function auditWorldRender(st: AuditStoreView, maxReport = 200): AuditRepo
       }
       const wall = st.wall[i];
       if (wall >= WALL_DEFS.length) {
-        push('error', x, y, -1, `墙 id 越界: wall=${wall}（WALL_DEFS.length=${WALL_DEFS.length}）`);
+        // ★刀3-墙(2026-10-13):error→warn 降档——mod 墙段(367+)注册后 length 覆盖
+        //  新写面;旧存档可能残留 gen 域外值(381/394,gen-misc 旧字面量),色块兜底
+        //  可渲染,不值得 error 级噪音( recon doc D13)
+        push('warn', x, y, -1, `墙 id 越界: wall=${wall}（WALL_DEFS.length=${WALL_DEFS.length}）`);
       }
       if (type === 0) continue;
       scanned++;

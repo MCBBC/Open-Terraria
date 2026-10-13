@@ -12,6 +12,7 @@ import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
 import { registerModWavData, modProjRegs } from './hooks';
 import { modBuffRegs, registerModBuffIcon } from './buffs';
+import { modItemGlowMaskId } from './drawspecs';   // ★刀2-C1:物品 glowmask 伪 id
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import { registerModPortraitUrl } from '../data/npcPortraits';
 import type { VanillaTileMeta } from '../assets/SpriteAtlas';
@@ -174,7 +175,7 @@ async function decodeBatch(
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
   if (!result || result.allocation === null) return;
-  const { items, tiles, npcs, gores } = result.allocation;
+  const { items, tiles, npcs, gores, walls } = result.allocation;
   const tileMetaTable = atlas.vanilla.tiles as unknown as Record<string, unknown>;
   for (const pack of getLoadedPacks()) {
     const modId = pack.manifest.id;
@@ -230,6 +231,38 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         const goreId = gores.get(fullKeyOf(modId, spec?.key ?? ''));
         if (spec?.texture && goreId !== undefined) {
           aliasJob(atlas, modId, { fileKey: `vanilla/Gore_${goreId}.png`, texPath: spec.texture });
+        }
+      }
+      // ★刀3-墙(2026-10-13):mod 墙贴图(SW 别名支;Wall_N 同构 TEdit 13 列×36px;
+      //  vmeta 注入 atlas.vanilla.walls=VanillaWallTiler 消费面,rows 缺省 5)
+      for (const path of discoverPackJsonPaths(pack, 'walls')) {
+        const spec = readPackJson<import('./types').ModWallContent>(pack, path);
+        const wallId = walls.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (!spec?.texture || wallId === undefined) continue;
+        const fileKey = `vanilla/Wall_${wallId}.png`;
+        aliasJob(atlas, modId, { fileKey, texPath: spec.texture });
+        (atlas.vanilla.walls as unknown as Record<string, unknown>)[String(wallId)] = {
+          name: spec.name ?? spec.key, key: spec.key, sheet: fileKey,
+          color: spec.mapColor ?? '#808080',
+          grid: [32, 32], stride: [36, 36], cols: 13,
+          rows: spec.rows ?? 5,
+          ...(spec.largeFrame !== undefined ? { largeFrame: spec.largeFrame } : {}),
+        };
+      }
+      // ★刀2-C1(2026-10-13):NPC glowmask/物品 glowmask 贴图(SW 别名支;
+      //  NPC=vanilla/NPC_Glow_<id>.png;物品=vanilla/Glow_<伪 GlowMaskID>.png)
+      for (const path of discoverPackJsonPaths(pack, 'npcs')) {
+        const spec = readPackJson<import('./types').ModNpcContent>(pack, path);
+        const npcId = npcs.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.glowmask?.texture && npcId !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/NPC_Glow_${npcId}.png`, texPath: spec.glowmask.texture });
+        }
+      }
+      for (const path of discoverPackJsonPaths(pack, 'items')) {
+        const spec = readPackJson<import('./types').ModItemContent>(pack, path);
+        const st = items.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.glowmask?.texture && st !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Glow_${modItemGlowMaskId(st)}.png`, texPath: spec.glowmask.texture });
         }
       }
       // ★四百九十七:mod 盔甲渲染链(hs/bs/ls→Armor_Head_/Armor_Armor_/Armor_Legs_;
@@ -372,6 +405,48 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       }
     }
     await decodeBatch(atlas, pack, modId, goreJobs);
+    // —— ★刀3-墙(2026-10-13):mod 墙贴图(内存回退支;SW 支=上方 aliasJob+vmeta) ——
+    const wallMetaTable = atlas.vanilla.walls as unknown as Record<string, unknown>;
+    const wallJobs: Array<{ fileKey: string; texPath: string; wallId: number; spec: import('./types').ModWallContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'walls')) {
+      const spec = readPackJson<import('./types').ModWallContent>(pack, path);
+      const wallId = walls.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (!spec?.texture || wallId === undefined) continue;
+      referenced.add(spec.texture);
+      wallJobs.push({ fileKey: `vanilla/Wall_${wallId}.png`, texPath: spec.texture, wallId, spec });
+    }
+    await Promise.all(wallJobs.map(async (j) => {
+      const bmp = await decodePngOrWarn(pack, modId, j.texPath);
+      if (bmp !== null) {
+        inject(atlas, j.fileKey, bmp);
+        wallMetaTable[String(j.wallId)] = {
+          name: j.spec.name ?? j.spec.key, key: j.spec.key, sheet: j.fileKey,
+          color: j.spec.mapColor ?? '#808080',
+          grid: [32, 32], stride: [36, 36], cols: 13,
+          rows: j.spec.rows ?? 5,
+          ...(j.spec.largeFrame !== undefined ? { largeFrame: j.spec.largeFrame } : {}),
+        };
+      }
+    }));
+    // —— ★刀2-C1(2026-10-13):NPC/物品 glowmask(内存回退支;SW 支=上方 aliasJob) ——
+    const glowJobs: Array<{ fileKey: string; texPath: string }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'npcs')) {
+      const spec = readPackJson<import('./types').ModNpcContent>(pack, path);
+      const npcId = npcs.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.glowmask?.texture && npcId !== undefined) {
+        referenced.add(spec.glowmask.texture);
+        glowJobs.push({ fileKey: `vanilla/NPC_Glow_${npcId}.png`, texPath: spec.glowmask.texture });
+      }
+    }
+    for (const path of discoverPackJsonPaths(pack, 'items')) {
+      const spec = readPackJson<import('./types').ModItemContent>(pack, path);
+      const st = items.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.glowmask?.texture && st !== undefined) {
+        referenced.add(spec.glowmask.texture);
+        glowJobs.push({ fileKey: `vanilla/Glow_${modItemGlowMaskId(st)}.png`, texPath: spec.glowmask.texture });
+      }
+    }
+    await decodeBatch(atlas, pack, modId, glowJobs);
     // —— mod 音频(B6):pack sounds/*.ogg → decodeAudioData → Sfx.buffers ——
     for (const path of discoverPackJsonPaths(pack, 'sounds') ?? []) { /* ogg 不走 json */ }
     // mod 音频(B6):pack sounds/*.ogg → modWavData(main.ts 在 game 创建后 decodeAudioData 注入 Sfx.buffers)

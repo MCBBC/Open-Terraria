@@ -22,6 +22,7 @@ import { unzipSync } from 'fflate';   // zip 快路径页面直给解压(SW 不�
 import { VANILLA_MISC } from '../assets/SpriteAtlas';
 import { mimeOf } from './assetMime';   // ★落库 CT 单源(2026-09-16 根修,见 assetMime.ts 头注)
 import { prefGet, prefRemove, prefSet } from '../save/PrefsStore';   // ★BJ627 trace/完成旗/hash 键迁 IDB 单写
+import { demoteSuspicious, type PartCandidate } from './partFetcher';   // ★CDN 化候选(2026-10-13;demote=黑洞降级)
 
 /** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动)。
  *  ★2(2026-08-21):public/sprites/vanilla/*.png 字节被并行会话 remaster 测试替换又
@@ -83,37 +84,55 @@ export function composeVersion(base: string, contentHash: string): string {
 // ---- 分片 CDN 多源(2026-10-13,preview 切源;生产无 cdn.json=纯同源零改动) ----
 // cdn.json 由 scripts/publish-assets-cdn.mjs 发布分片到 npm(@sandboxworld/assets-p<i>,
 // 版本=内容哈希 0.0.0-<hash8>)后产出并验活,只写进 dist-release 部署工件:
-//   { v:1, generatedAt, parts: { 'p1-d3b56b63.zip': { urls: [npmmirror, jsDelivr] } } }
-// ★客户端只认 urls;末位恒同源('/assets-zip/<file>')兜底——CDN 全灭时行为=旧版。
+//   { v:1, generatedAt, parts: { 'p1-d3b56b63.zip': {
+//       pkg, version,
+//       urls:    [jsDelivr zip 直链…],            // 全球源(内容寻址,immutable)
+//       tgzUrls: [{url, bytes}…],                 // ★npmmirror tarball(国内快车道)
+//   } } }
+// ★npmmirror unpkg files API 有白名单(新 scope 拒绝,cnpm/unpkg-white-list)→ 国内
+//   源走 tarball(tgz 包着 zip,registry 核心功能无白名单);客户端 gunzip+tar 取 zip。
+// ★候选序(纯函数):tgzUrls(国内)→ urls(全球)→ 末位恒同源兜底——CDN 全灭=旧版行为。
 // ★缓存键全是 zip 内相对路径,与分片来源无关:换源不换版本,存量缓存零重拉。
 
+export interface ZipCdnTgz { url: string; bytes: number }
 export interface ZipCdnMap {
   v: number;
-  parts: Record<string, { urls: string[] }>;
+  parts: Record<string, { urls?: string[]; tgzUrls?: ZipCdnTgz[]; pkg?: string; version?: string }>;
 }
 
-/** cdn.json 受理门(纯函数):v=1 + parts 对象;单条 urls 在 buildPartCandidates
- *  处再消毒(https-only/上限 4),此处只拦结构性垃圾 */
+/** cdn.json 受理门(纯函数):v=1 + parts 对象;单条 urls/tgzUrls 在
+ *  buildPartCandidates 处再消毒(https-only/上限 4/bytes 正数),此处只拦结构性垃圾 */
 export function acceptsCdnMap(m: unknown): m is ZipCdnMap {
   if (!m || typeof m !== 'object') return false;
   const o = m as { v?: unknown; parts?: unknown };
   if (o.v !== 1 || !o.parts || typeof o.parts !== 'object' || Array.isArray(o.parts)) return false;
   const entries = Object.values(o.parts as Record<string, unknown>);
   if (entries.length === 0 || entries.length > 256) return false;
-  return entries.every((e) => !!e && typeof e === 'object' && Array.isArray((e as { urls?: unknown }).urls));
+  return entries.every((e) => !!e && typeof e === 'object'
+    && ((e as { urls?: unknown }).urls === undefined || Array.isArray((e as { urls?: unknown }).urls))
+    && ((e as { tgzUrls?: unknown }).tgzUrls === undefined || Array.isArray((e as { tgzUrls?: unknown }).tgzUrls))
+    && ((e as { urls?: unknown }).urls !== undefined || (e as { tgzUrls?: unknown }).tgzUrls !== undefined));
 }
 
-/** 分片下载候选序(纯函数):cdn URLs(http(s)-only,≤4)→ 末位恒同源。
+/** 分片下载候选序(纯函数):tgzUrls(国内快车道,优先)→ urls(全球 zip)→ 末位恒同源。
+ *  消毒:https-only / ≤4 / tgz.bytes 须正数(长度校验锚)。
  *  ★根相对:worker 自身 URL 在 /assets/ 下,裸相对会解析成 /assets/assets-zip/ */
-export function buildPartCandidates(file: string, cdn: ZipCdnMap | null | undefined): string[] {
-  const out: string[] = [];
-  const urls = cdn?.parts?.[file]?.urls;
-  if (Array.isArray(urls)) {
-    for (const u of urls) {
-      if (typeof u === 'string' && /^https:\/\//.test(u) && out.length < 4) out.push(u);
+export function buildPartCandidates(file: string, zipBytes: number, cdn: ZipCdnMap | null | undefined): PartCandidate[] {
+  const out: PartCandidate[] = [];
+  const e = cdn?.parts?.[file];
+  if (e) {
+    for (const t of Array.isArray(e.tgzUrls) ? e.tgzUrls : []) {
+      if (out.length >= 4) break;
+      if (t && typeof t.url === 'string' && /^https:\/\//.test(t.url) && Number.isFinite(t.bytes) && t.bytes > 0) {
+        out.push({ url: t.url, bytes: t.bytes, kind: 'tgz' });
+      }
+    }
+    for (const u of Array.isArray(e.urls) ? e.urls : []) {
+      if (out.length >= 4) break;
+      if (typeof u === 'string' && /^https:\/\//.test(u)) out.push({ url: u, bytes: zipBytes, kind: 'zip' });
     }
   }
-  out.push('/assets-zip/' + file);
+  out.push({ url: '/assets-zip/' + file, bytes: zipBytes, kind: 'zip' });
   return out;
 }
 
@@ -292,6 +311,11 @@ state.total = plan.urls.length;
 let zipPlan: ZipManifest | null = null;
 /** 分片 CDN 候选(拉到 cdn.json 才置;null=纯同源。?cdn=0 显式关闭) */
 let zipCdn: ZipCdnMap | null = null;
+/** 候选嫌疑账(页面级,跨 worker 重启/force 重warm 生效;★黑洞防护另一半):
+ *  worker 'candFail' 逐候选失败上报 → 此处记账;startZipWarm 构造 jobs 时按嫌疑
+ *  重排(坏源踢到队尾,origin 恒末位)——没有它,首选源挂起会被 45s 看门狗
+ *  反复 force 重启且每次都先撞同一个挂起源 = 活锁,永远走不到回退通道 */
+const zipCandSuspicion = new Map<string, number>();
 let zipRun = 0;                 // 直给循环代次号(force 重启 → 旧循环在下个检查点自行退出)
 let dlCommitted = 0;            // 已完成片累计字节(页面侧 MB 账)
 let dlPartGot = 0;              // 当前片最近上报的片内累计
@@ -978,7 +1002,10 @@ async function startZipWarm(): Promise<void> {
     const jobs = zipPlan.parts.map((p) => {
       const missing = p.entries.filter((n) => !have.has(n));
       base += p.entries.length - missing.length;
-      return { file: p.file, zipBytes: p.zipBytes, missing, urls: buildPartCandidates(p.file, zipCdn) };
+      // ★页面级嫌疑重排(跨 worker 重启生效):坏源(黑洞挂起/连续失败)踢到队尾,
+      //  origin 恒末位——与 worker 同 run 内的 suspect 账互补,合起来堵死活锁
+      const cands = demoteSuspicious(buildPartCandidates(p.file, p.zipBytes, zipCdn), zipCandSuspicion);
+      return { file: p.file, zipBytes: p.zipBytes, missing, cands };
     });
     state.done = Math.min(base, state.total);
     {
@@ -1008,13 +1035,14 @@ async function startZipWarm(): Promise<void> {
     //  保序,'done' 必然看到全部批次落库后的真实缓存态。
     let msgTail: Promise<void> = Promise.resolve();
     // 命中源标签(遥测):候选下标 → 'origin' | CDN hostname(自证式 trace)
-    const jobUrls = new Map<string, string[]>();
-    for (const j of jobs) jobUrls.set(j.file, j.urls);
+    const jobCands = new Map<string, PartCandidate[]>();
+    for (const j of jobs) jobCands.set(j.file, j.cands);
     const viaLabel = (file: string, via: number): string => {
-      const urls = jobUrls.get(file);
-      if (!urls || via < 0 || via >= urls.length) return 'none';
-      if (via === urls.length - 1) return 'origin';
-      try { return new URL(urls[via]!).hostname; } catch { return `cdn${via}`; }
+      const cands = jobCands.get(file);
+      if (!cands || via < 0 || via >= cands.length) return 'none';
+      if (via === cands.length - 1) return 'origin';
+      const c = cands[via]!;
+      try { return `${new URL(c.url).hostname}${c.kind === 'tgz' ? '(tgz)' : ''}`; } catch { return `cdn${via}`; }
     };
     const viaCount = new Map<string, number>();
     let viaFirstLogged = false;
@@ -1045,6 +1073,14 @@ async function startZipWarm(): Promise<void> {
         }
         state.phase = state.done >= state.total ? 'done' : zipPhaseAt(zipPlan!.parts, state.done);
         emit();
+      } else if (d.type === 'candFail') {
+        // ★黑洞防护记账:候选失败(含超时)→ 页面嫌疑账 +1;下次 warm 构造 jobs 时
+        //  该候选被排到队尾(see startZipWarm demoteSuspicious)。黑洞挂起场景
+        //  partDone 永不到达,唯有本消息能把"这源坏了"带出 worker
+        if (typeof d.via === 'number' && d.file) {
+          const url = jobCands.get(d.file)?.[d.via]?.url;
+          if (url) zipCandSuspicion.set(url, (zipCandSuspicion.get(url) ?? 0) + 1);
+        }
       } else if (d.type === 'partDone') {
         zipFailedAcc += d.failed ?? 0;   // 字节账已由 'dl' 全局直通,无需分片入账
         state.failed = zipFailedAcc;

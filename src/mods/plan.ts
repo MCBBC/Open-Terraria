@@ -3,11 +3,11 @@
 // =联机双端一致性与存档 id 稳定性的根(design.md §2)。
 import type {
   ModBuffContent, ModGoreContent, ModIdAllocation, ModItemContent, ModNpcContent, ModPack, ModProjContent,
-  ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, RegistrationPlan,
+  ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, ModWallContent, RegistrationPlan,
 } from './types';
 import {
   MOD_BUFF_VANILLA_BASE, MOD_GORE_ID_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
-  MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX,
+  MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX, MOD_WALL_STABLE_BASE, MOD_WALL_STABLE_MAX,
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
@@ -52,6 +52,17 @@ function parseGore(modId: string, raw: unknown): ModGoreContent {
   if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'gore', key);
   if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'gore', key);
   return o as unknown as ModGoreContent;
+}
+
+/** ★刀3-墙:mod 墙(content/walls/*.json {key,texture,...}) */
+function parseWall(modId: string, raw: unknown): ModWallContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'wall', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'wall', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'wall', key);
+  if (o.mapColor !== undefined && (typeof o.mapColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(o.mapColor))) fail(modId, 'wall', key);
+  if (o.largeFrame !== undefined && o.largeFrame !== 0 && o.largeFrame !== 1 && o.largeFrame !== 2) fail(modId, 'wall', key);
+  return o as unknown as ModWallContent;
 }
 
 function parseNpc(modId: string, raw: unknown): ModNpcContent {
@@ -139,7 +150,7 @@ export function topoSortMods(manifests: ModPack[]): string[] {
 export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const order = topoSortMods(packs);
   const byId = new Map(packs.map((p) => [p.manifest.id, p]));
-  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map() };
+  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map(), walls: new Map() };
   const itemSpecs: RegistrationPlan['itemSpecs'] = [];
   const tileSpecs: RegistrationPlan['tileSpecs'] = [];
   const npcSpecs: RegistrationPlan['npcSpecs'] = [];
@@ -149,6 +160,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const buffSpecs: RegistrationPlan['buffSpecs'] = [];
   const raritySpecs: RegistrationPlan['raritySpecs'] = [];
   const goreSpecs: RegistrationPlan['goreSpecs'] = [];
+  const wallSpecs: RegistrationPlan['wallSpecs'] = [];
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
@@ -180,6 +192,20 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       const goreId = MOD_GORE_ID_BASE + allocation.gores.size;
       allocation.gores.set(fullKey, goreId);
       goreSpecs.push({ modId, spec, goreId, fullKey });
+    }
+    // ★刀3-墙:walls(先于 items——物品 placeWall 引用墙键;全键字典序分配 367+ 段)
+    const wallSpecsOfPack: Array<{ spec: ModWallContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'walls')) {
+      wallSpecsOfPack.push({ spec: parseWall(modId, readPackJson(pack, path)) });
+    }
+    wallSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of wallSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.walls.has(fullKey)) throw new ModPlanError(`mod ${modId} 墙键重复: ${spec.key}`);
+      const wallId = MOD_WALL_STABLE_BASE + allocation.walls.size;
+      if (wallId > MOD_WALL_STABLE_MAX) throw new ModPlanError(`mod 墙段溢出(>${MOD_WALL_STABLE_MAX}): ${fullKey}`);
+      allocation.walls.set(fullKey, wallId);
+      wallSpecs.push({ modId, spec, wallId, fullKey });
     }
     // items:全键字典序分配 stable id
     const itemSpecsOfPack: Array<{ path: string; spec: ModItemContent }> = [];
@@ -268,7 +294,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       }
     }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----
@@ -389,6 +415,21 @@ export function validatePlanReferences(plan: RegistrationPlan): void {
         throw new ModPlanError(`mod ${n.modId} NPC ${n.spec.key} deathGore 引用未注册 gore: ${d.gore}`);
       }
     }
+  }
+  // ★刀3-墙(R3-M2 同族收编):物品 placeWall 引用校验(mod 墙键/原版墙键双形)
+  for (const it of plan.itemSpecs) {
+    const pw = it.spec.placeWall;
+    if (pw === undefined) continue;
+    if (pw.startsWith('mod_')) {
+      if (!plan.allocation.walls.has(pw)) {
+        throw new ModPlanError(`mod ${it.modId} 物品 ${it.spec.key} placeWall 引用未注册墙: ${pw}`);
+      }
+      continue;
+    }
+    if (plan.allocation.walls.has(`mod_${it.modId}_${pw}`)) continue;   // 本 mod 裸键
+    // 原版墙键(wN_*)存在性走 tileKeyProbe 同款注入?墙无 probe 面——register 期
+    // WALL_BY_KEY 直查 fail-loud(原版键集静态,plan 期可经 wallKeyProbe 同构注入;
+    // 本批=register 期防御性断言,登记 D 台账)
   }
 }
 

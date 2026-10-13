@@ -21,6 +21,7 @@
 //    需 downedBoss3(骷髅王)、87 蜥蜴墙需 downedGolemBoss——fail 时墙保持原状、不掉物（尘/音照放）。
 
 import { WALL_DUNGEON_SHEETS } from './tiles';
+import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(掉落/fail 门消费;零环:walls 不回依本模块)
 
 /** Main.wallDungeon（Main.cs:10734-10745）——KillWall_CheckFailure 消费。
  *  ★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等）——转出口
@@ -325,14 +326,25 @@ export const WALL_DROPS: Readonly<Record<number, number>> = Object.freeze({
   366: 6133,
 });
 
-/** 墙 → 掉落物品 vid（0=不掉）。唯一消费入口（同表单源）。 */
+/** 墙 → 掉落物品 vid（0=不掉）。唯一消费入口（同表单源）。
+ *  ★刀3-墙(2026-10-13):mod 墙(367+)meta 优先直查,原版表零扰动 */
 export function wallDropItemVid(wall: number): number {
+  const m = modWallMetaOf(wall);
+  if (m) return m.dropItemVid ?? 0;
   return WALL_DROPS[wall] ?? 0;
 }
 
 /** KillWall_CheckFailure（WorldGen.cs:60901-60912）1:1：true=拆墙失败（墙保持原状不掉物）。
- *  @param downedBoss3 NPC.downedBoss3（骷髅王）；downedGolem NPC.downedGolemBoss（石巨人 245） */
+ *  @param downedBoss3 NPC.downedBoss3（骷髅王）；downedGolem NPC.downedGolemBoss（石巨人 245）
+ *  ★刀3-墙:mod 墙 fail 门扩表(unbreakable 恒拒/dungeonGate 对齐原版 boss 门序) */
 export function killWallCheckFailure(wall: number, downedBoss3: boolean, downedGolem: boolean): boolean {
+  const m = modWallMetaOf(wall);
+  if (m) {
+    if (m.unbreakable) return true;
+    if (m.dungeonGate === 'skeletron') return !downedBoss3;
+    if (m.dungeonGate === 'golem') return !downedGolem;
+    return false;
+  }
   if (WALL_DUNGEON_WALLS.has(wall) && !downedBoss3) return true;   // :60903-60905
   if (wall === 87 && !downedGolem) return true;                    // :60906-60908
   return false;

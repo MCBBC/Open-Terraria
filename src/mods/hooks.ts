@@ -67,9 +67,20 @@ export function registerModCanUse(vid: number, fn: (ctx: ModUseCtx) => boolean):
 }
 
 export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | null): boolean {
-  if (itemCanUse.size === 0 || !def || !item) return true;
+  if (itemCanUse.size === 0 && modCanUseRules.size === 0) return true;
+  if (!def || !item) return true;
   const vid = def.vid;
   if (vid === undefined || vid < MOD_ITEM_STABLE_BASE) return true;
+  // ★刀5-A 族:声明规则解释器先于代码钩(数据面优先;ownedProjBelow=在场弹补位门)
+  const rule = modCanUseRules.get(vid);
+  if (rule?.ownedProjBelow) {
+    const g = (globalThis as unknown as { __swGame?: { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } } }).__swGame;
+    const list = g?.entities?.projectiles;
+    if (!list) return true;
+    let n = 0;
+    for (const q of list) if (!q.dead && q.projId === rule.ownedProjBelow.proj) n++;
+    return n < rule.ownedProjBelow.lt;
+  }
   const fn = itemCanUse.get(vid);
   if (!fn) return true;
   try {
@@ -207,6 +218,18 @@ export interface ModProjSpec {
   height?: number;
   /** 绘制旋转=速度向(箭类;缺省 false) */
   rotateToVelocity?: boolean;
+  /** ★刀2-C1:A=0 纯加性(XNA 预乘恒等式='lighter'+ga=1;拖尾/光晕族) */
+  additive?: boolean;
+  /** ★刀2-C1:全亮(projFullbrightQueue 乘光后重绘) */
+  fullbright?: boolean;
+  /** ★刀2-C1:画在玩家之后(drawLayer 4/7/8 族) */
+  overPlayers?: boolean;
+  /** ★刀2-C2:自绘全权(tML ModProjectile.Draw 形;缺省绘制被替换) */
+  draw?: (p: unknown, ctx: ModDrawCtx) => void;
+  /** ★刀2-C2:绘制前钩(false=跳默认绘制段,mod 全权——含 additive/fullbright 面) */
+  preDraw?: (p: unknown, ctx: ModDrawCtx) => boolean | void;
+  /** ★刀2-C2:绘制后钩(默认/自绘段后;层序=本体同位) */
+  postDraw?: (p: unknown, ctx: ModDrawCtx) => void;
 }
 
 /** ModProj 暴露给 mod 钩子的最小面 */
@@ -253,6 +276,10 @@ export function registerProjHooks(projId: number, hooks: {
   onHit?: ModProjSpec['onHit'];
   onHitPlayer?: ModProjSpec['onHitPlayer'];
   onTileHit?: ModProjSpec['onTileHit'];
+  /** ★刀2-C2:自绘三钩(PreDraw false=跳默认段/Draw 全权/PostDraw 后随) */
+  preDraw?: ModProjSpec['preDraw'];
+  draw?: ModProjSpec['draw'];
+  postDraw?: ModProjSpec['postDraw'];
   /** ★五百八十二:channel 结束钩(仅 holdout 弹;返回 true=释放存续——C#
    *  Condemnation 转储/M1Garand 装填弹体存续面;非 holdout 弹 fail-fast) */
   onChannelEnd?: (p: any, game: any) => boolean | void;
@@ -261,6 +288,9 @@ export function registerProjHooks(projId: number, hooks: {
   if (!spec) throw new Error(`[mod-hooks] projectileHook 引用未注册弹: ${projId}`);
   if (hooks.update) spec.update = hooks.update;
   if (hooks.onHit) spec.onHit = hooks.onHit;
+  if (hooks.preDraw) spec.preDraw = hooks.preDraw;
+  if (hooks.draw) spec.draw = hooks.draw;
+  if (hooks.postDraw) spec.postDraw = hooks.postDraw;
   if (hooks.onHitPlayer) spec.onHitPlayer = hooks.onHitPlayer;
   if (hooks.onTileHit) spec.onTileHit = hooks.onTileHit;
   if (hooks.onChannelEnd) {
@@ -1052,6 +1082,138 @@ export function collectModScreenFx(makeState: () => ModScreenFxState): readonly 
   }));
 }
 
+// ---- ★刀2-C2(2026-10-13):实体自绘钩(tML ModNPC.PreDraw/PostDraw 与
+//      ModItem.PreDrawInWorld/PostDrawInWorld 形)。ModDrawCtx=受限算子面
+//      (draw/drawAdd/tinted 三算子,不裸发 ctx——GL 冲窗风险面隔离;光照=
+//      逐格 lightAt+中心预采样;生产=Renderer.buildModDrawCtx)。纪律同族:
+//      空注册零成本/装载相位注册/fail-fast。 ----
+
+/** 自绘上下文(受限算子面;Renderer.buildModDrawCtx 产) */
+export interface ModDrawCtx {
+  /** source-over 块拷贝(rot=绕目标中心/mirror=水平翻/alpha 0-1) */
+  draw(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    o?: { rot?: number; alpha?: number; mirror?: boolean }): void;
+  /** A=0 纯加性('lighter'+ga=1;拖尾/光晕族) */
+  drawAdd(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    o?: { rot?: number; alpha?: number; mirror?: boolean }): void;
+  /** 保形染烘焙(BJ551 tintedTex WeakMap 缓存;rgb 0-255 三元,alpha 保形;
+   *  null=node 无 DOM 跳笔) */
+  tinted(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement,
+    rgb: readonly [number, number, number]): HTMLCanvasElement | null;
+  /** 逐格光(0-255 rgb;tile 坐标) */
+  lightAt(tx: number, ty: number): readonly [number, number, number];
+  /** 实体中心格预采样光 */
+  readonly light: readonly [number, number, number];
+  /** 世界→屏幕(相机系含 zoom;无 cam 域=恒等回退) */
+  worldToScreen(wx: number, wy: number): readonly [number, number];
+  /** globalTimeWrappedHourly(BJ330 单源) */
+  readonly gtW: number;
+  /** 实体中心(世界 px) */
+  readonly cx: number;
+  readonly cy: number;
+}
+
+/** mod NPC 自绘面(键=npcId;preDraw false=跳原版本体段[含叠画]=mod 全权) */
+export interface ModNpcDrawSpec {
+  preDraw?: (e: unknown, ctx: ModDrawCtx) => boolean | void;
+  postDraw?: (e: unknown, ctx: ModDrawCtx) => void;
+}
+const modNpcDraws = new Map<number, ModNpcDrawSpec>();
+
+export function registerModNpcDraw(npcId: number, spec: ModNpcDrawSpec): void {
+  if (!(npcId >= MOD_NPC_ID_BASE)) throw new Error(`[mod-hooks] npcDraw id 须 ≥${MOD_NPC_ID_BASE}: ${npcId}`);
+  if (modNpcDraws.has(npcId)) throw new Error(`[mod-hooks] npcDraw 重复注册: ${npcId}`);
+  modNpcDraws.set(npcId, spec);
+}
+
+export function modNpcDrawSpecOf(npcId: number): ModNpcDrawSpec | null {
+  if (modNpcDraws.size === 0 || !(npcId >= MOD_NPC_ID_BASE)) return null;
+  return modNpcDraws.get(npcId) ?? null;
+}
+
+/** mod 物品世界自绘面(键=stableId;掉落/手持图标绘制位消费) */
+export interface ModItemDrawSpec {
+  preDrawInWorld?: (d: unknown, ctx: ModDrawCtx) => boolean | void;
+  postDrawInWorld?: (d: unknown, ctx: ModDrawCtx) => void;
+}
+const modItemDraws = new Map<number, ModItemDrawSpec>();
+
+export function registerModItemDraw(vid: number, spec: ModItemDrawSpec): void {
+  if (!(vid >= MOD_ITEM_STABLE_BASE)) throw new Error(`[mod-hooks] itemDraw vid 须 ≥${MOD_ITEM_STABLE_BASE}: ${vid}`);
+  if (modItemDraws.has(vid)) throw new Error(`[mod-hooks] itemDraw 重复注册: ${vid}`);
+  modItemDraws.set(vid, spec);
+}
+
+export function modItemDrawSpecOf(vid: number): ModItemDrawSpec | null {
+  if (modItemDraws.size === 0 || !(vid >= MOD_ITEM_STABLE_BASE)) return null;
+  return modItemDraws.get(vid) ?? null;
+}
+
+// ---- ★刀5(2026-10-13):具名修正槽(tML detour 等价物·修正形;K5 方案 A/B 收敛)。
+//  机制:①槽名封闭集(VANILLA_OVERRIDE_SLOTS,引擎占位点逐个文档化) ②注册必带
+//  anchor(槽语义版本——引擎改站点语义时 bump,旧 mod 装载 fail-loud=弃用回原版)
+//  ③per-mod 链(注册序求值,值链=后钩吃前钩产物;非有限返值跳过) ④空槽零成本
+//  (size 短路,零分配直通)。K5 方案 B 的「orig 闭包覆写槽」=控制流替换形,现无
+//  生产需求不落(recon doc D 台账);sw.tune 纯参数表=每键即引擎槽,按需增键。
+
+/** 引擎覆写槽注册表(封闭集;新增槽=引擎侧占位+本表登记+anchor 置 1) */
+export const VANILLA_OVERRIDE_SLOTS = {
+  /** 治疗量修正(quickConsume healLife 面;fn(ctx:{value,vid}) → number|void) */
+  'Player.ApplyLifeAndOrMana': { anchor: 1, desc: '治疗量修正(healLife 面)' },
+  /** 装备回复通道量修正(每秒 HP;fn(ctx:{value,player,game}) → number|void;
+   *  自然 9 档公式不在槽内=登记 D 台账) */
+  'Player.UpdateLifeRegen': { anchor: 1, desc: '装备回复通道量修正(hpPerSec 面)' },
+} as const;
+export type VanillaOverrideSlot = keyof typeof VANILLA_OVERRIDE_SLOTS;
+
+const vanillaOverrides = new Map<string, Map<string, (ctx: Record<string, unknown>) => number | void>>();
+
+export function registerVanillaOverride(
+  slot: VanillaOverrideSlot, anchor: number, modId: string,
+  fn: (ctx: Record<string, unknown>) => number | void,
+): void {
+  const def = (VANILLA_OVERRIDE_SLOTS as Record<string, { anchor: number; desc: string }>)[slot];
+  if (!def) throw new Error(`[mod-hooks] 未知覆写槽: ${String(slot)}`);
+  if (def.anchor !== anchor) {
+    throw new Error(`[mod-hooks] 覆写槽 ${slot} anchor 不匹配(引擎=${def.anchor} mod=${anchor})——mod 基于旧槽语义构建,拒载(回原版行为=不注册)`);
+  }
+  let perMod = vanillaOverrides.get(slot);
+  if (!perMod) { perMod = new Map(); vanillaOverrides.set(slot, perMod); }
+  if (perMod.has(modId)) throw new Error(`[mod-hooks] 覆写槽 ${slot} 重复注册: ${modId}`);
+  perMod.set(modId, fn);
+}
+
+/** 值链求值(空槽=直通零分配;非有限返值跳过)。ctx.value 可变携带,后钩吃前钩产物。 */
+export function runVanillaOverrideValue(
+  slot: VanillaOverrideSlot, value: number, ctx?: Record<string, unknown>,
+): number {
+  const perMod = vanillaOverrides.get(slot);
+  if (!perMod || perMod.size === 0) return value;
+  const c: { value: number } & Record<string, unknown> = { ...ctx, value };
+  for (const fn of perMod.values()) {
+    const r = fn(c);
+    if (typeof r === 'number' && Number.isFinite(r)) c.value = r;
+  }
+  return c.value;
+}
+
+// ---- ★刀5-A 族:canuse-rules 数据解释器(灾厄 sidecar 同形下沉——
+//  「在场弹计数门」声明化,引擎解释,mod 零胶水) ----
+
+export interface ModCanUseRule {
+  /** 本弹在场数 < lt 才可用(召唤/炮台类「补位门」;proj=解析后 projId) */
+  ownedProjBelow?: { proj: number; lt: number };
+}
+const modCanUseRules = new Map<number, ModCanUseRule>();
+
+export function registerModCanUseRule(vid: number, rule: ModCanUseRule): void {
+  if (!(vid >= MOD_ITEM_STABLE_BASE)) throw new Error(`[mod-hooks] canUseRule vid 须 ≥${MOD_ITEM_STABLE_BASE}: ${vid}`);
+  if (modCanUseRules.has(vid)) throw new Error(`[mod-hooks] canUseRule 重复注册: ${vid}`);
+  modCanUseRules.set(vid, rule);
+}
+
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
   modScreenFx.length = 0;
@@ -1081,6 +1243,10 @@ export function _resetModHooksForTests(): void {
   modifyHitNpc.clear();
   modifyHitNpcByProj.clear();
   modifyHitPlayerByProj.clear();
+  modNpcDraws.clear();
+  modItemDraws.clear();
+  vanillaOverrides.clear();
+  modCanUseRules.clear();
   modGenPasses.length = 0;
   modChestUnlock.clear();
   modConversions.length = 0;

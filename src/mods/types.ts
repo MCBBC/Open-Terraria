@@ -5,8 +5,10 @@ import type { ModTownArrivalSpec } from '../data/vanillaNpcs';
 import type { ModRarityContent } from './rarity';   // ★刀3-1:稀有度档色 schema(类型单向)
 import type { ModPetContent } from './pets';        // ★刀3-2:宠物声明 schema(类型单向)
 import type { ModGoreContent } from './gore';       // ★刀3-3:gore 声明 schema(类型单向)
+import type { ModWallContent } from './walls';      // ★刀3-墙:墙声明 schema(类型单向)
 export type { ModRarityContent };
 export type { ModGoreContent };
+export type { ModWallContent };
 
 /** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
 export interface ModManifest {
@@ -49,6 +51,9 @@ export interface ModItemContent {
   /** ★刀3-2:宠物声明(tML 同构 buff+proj 组合;buff=本 mod content/buffs 键,
    *  proj=`proj:<key>`/裸键/原版 proj vid;light=true=光宠槽 1) */
   pet?: ModPetContent;
+  /** ★刀3-墙:可放置墙面(本 mod content/walls 键/原版墙键 `wN_*`;注册期解析成
+   *  wallId 挂 def——updateUse 派发门 heldDef.wallId 消费,放置/ReplaceWall 全链白嫖) */
+  placeWall?: string;
   value?: number;
   maxStack?: number;
   /** 战斗面(vanilla-itemcombat 语义)。shoot:数字=原版弹 vid;字符串 `proj:<key>`=
@@ -75,6 +80,9 @@ export interface ModItemContent {
      *  原版 vid 数字串;chance 0-1 缺省 1;全空掷=保底首条×1)。
      *  coins=按 NPC 价值掷币(CoinsBasedOnNPCValue;值=本 mod 键或原版 npcId) */
     bagLoot?: Array<{ item?: string | number; coins?: string | number; min?: number; max?: number; chance?: number }>;
+    /** ★刀5-A 族:在场弹补位门(canuse-rules 数据解释器;proj=`proj:<key>`/裸键/
+     *  原版 proj vid;lt=门限——本弹在场数 < lt 才可用,召唤/炮台类「补位门」) */
+    canUseOwnedBelow?: { proj: string | number; lt: number };
   };
   /** 盔甲/配饰面(vanilla-itemstats 语义)。def=防御;s='h'|'b'|'l';acc=1 功能配饰/0 社交;
    *  life=生命回复(hpPerSec=life/2);dmg 各系/crit 各系/moveMult/endurance=UpdateEquip
@@ -96,6 +104,9 @@ export interface ModItemContent {
   placeTile?: string;
   /** 贴图(textures/ 下相对路径);缺省=无名占位(灰格) */
   texture?: string;
+  /** ★刀2-C1:掉落/手持光罩(贴图 alias 到 vanilla/Glow_<伪 GlowMaskID>.png,
+   *  1000+ 段=原版 379 张空间外;drawDrop 捕获+flushItemGlow 全链白嫖) */
+  glowmask?: { texture: string };
 }
 
 /** mod tile 稳定段上限(B5 扩窗定谳:原 2047=保守帽;全仓审计零 11 位打包——
@@ -154,6 +165,14 @@ export interface ModNpcContent {
   friendly?: boolean; townNPC?: boolean;
   noGravity?: boolean; noTileCollide?: boolean;
   critter?: boolean;
+  /** ★刀2-C1:声明帧率(tick/帧;缺省 6t=vanillaFrameIdx 通用档;AI 写
+   *  customFrameIdx 仍最优先) */
+  frameRate?: number;
+  /** ★刀2-C1:NPC glowmask(发光叠画,与本体同布局帧表;贴图 alias
+   *  vanilla/NPC_Glow_<npcId>.png;drawNpcGlow 查表) */
+  glowmask?: { texture: string };
+  /** ★刀2-C1:全亮(npcWhiteLiftQueue 捕获 ga=1,compositeLight 后全亮复绘) */
+  fullbright?: boolean;
   /** ★刀3-3:死亡碎块声明(HitEffect NewGore 形;gore=本 mod content/gores 键或
    *  原版 gore id 数字;n=片数(loop);scale 缺省=1(spawnDeathGore 缺省档,
    *  ★红队 R3-m3 勘正:vanillaScale 支仅在原版表 scaleExpr 条目,声明形不暴露) */
@@ -220,6 +239,12 @@ export interface ModProjContent {
   hitRefresh?: number;
   /** ★618-R2F9:接触伤害豁免(healer/defense 守卫;C# CanDamage=false 同位) */
   noContactDamage?: boolean;
+  /** ★刀2-C1:A=0 纯加性(XNA 预乘恒等式='lighter'+ga=1;拖尾/光晕族) */
+  additive?: boolean;
+  /** ★刀2-C1:全亮(projFullbrightQueue 乘光后重绘;引导光族) */
+  fullbright?: boolean;
+  /** ★刀2-C1:画在玩家之后(drawLayer 4/7/8 族=PROJ_DRAW_OVER_PLAYERS 同槽) */
+  overPlayers?: boolean;
   /** ★三百五十一:holdout(channel 魔耗面;声明面直通) */
   holdout?: { manaRate?: number; manaCost?: number };
 }
@@ -277,6 +302,11 @@ export const MOD_RARITY_ID_BASE = 12;
  *  键域 1..1406,1404 张 Gore_*.png,死亡表项直引 697-1406),697 起段会劫持
  *  原版 Gore_697+ 贴图/碰撞盒/物理家族。基址 1500=1406+缓冲) */
 export const MOD_GORE_ID_BASE = 1500;
+/** mod 墙 stable 段基址(★刀3-墙:原版 WALL_DEFS id 0-366 连续 367 条实测;u16
+ *  存档通道原生兼容;硬顶 4095=对齐 tile 段纪律) */
+export const MOD_WALL_STABLE_BASE = 367;
+/** mod 墙段硬顶(u16 内;溢出 fail-fast) */
+export const MOD_WALL_STABLE_MAX = 4095;
 
 /** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
 export interface ModIdAllocation {
@@ -292,8 +322,10 @@ export interface ModIdAllocation {
   buffs: Map<string, number>;
   /** 全稀有度键 `mod_<modid>_<key>` → 档 id(★刀3-1;12+ 段) */
   rarities: Map<string, number>;
-  /** 全 gore 键 `mod_<modid>_<key>` → gore id(★刀3-3;697+ 段) */
+  /** 全 gore 键 `mod_<modid>_<key>` → gore id(★刀3-3;1500+ 段) */
   gores: Map<string, number>;
+  /** 全墙键 `mod_<modid>_<key>` → wall id(★刀3-墙;367+ 段) */
+  walls: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -312,8 +344,10 @@ export interface RegistrationPlan {
   buffSpecs: Array<{ modId: string; spec: ModBuffContent; pseudoVanilla: number; fullKey: string }>;
   /** ★刀3-1:mod 稀有度档色计划(12+ 段;先于 itemSpecs 消费) */
   raritySpecs: Array<{ modId: string; spec: ModRarityContent; rarityId: number; fullKey: string }>;
-  /** ★刀3-3:mod gore 计划(697+ 段;NPC deathGore 引用解析依赖) */
+  /** ★刀3-3:mod gore 计划(1500+ 段;NPC deathGore 引用解析依赖) */
   goreSpecs: Array<{ modId: string; spec: ModGoreContent; goreId: number; fullKey: string }>;
+  /** ★刀3-墙:mod 墙计划(367+ 段;先于 itemSpecs——placeWall 引用解析依赖) */
+  wallSpecs: Array<{ modId: string; spec: ModWallContent; wallId: number; fullKey: string }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */

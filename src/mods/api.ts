@@ -31,8 +31,10 @@ import {
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
   registerModScreenFx,
-  type ModScreenFxPass, type ModSystemHooks, type ModUseCtx,
+  registerModNpcDraw, registerModItemDraw, registerVanillaOverride,
+  type ModScreenFxPass, type ModSystemHooks, type ModUseCtx, type ModDrawCtx,
 } from './hooks';
+import { modUiPanel, modUiCloseAllOf } from './ui';   // ★刀1:mod UI 宿主面板
 import { applyBuffTicks } from '../entities/projStatus';   // ★四百九十刀:敌侧原版 debuff
 import { projClassOfProjId } from '../entities/projTargets';   // ★四百九十一刀:系别探针
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
@@ -95,7 +97,40 @@ export interface ModContext {
     onHitPlayer?: (p: unknown, game: unknown) => boolean | void;
     onTileHit?: (p: unknown, game: unknown) => boolean | void;
     onChannelEnd?: (p: unknown, game: unknown) => boolean | void;
+    /** ★刀2-C2:自绘三钩(preDraw false=跳默认绘制段/draw 全权/postDraw 后随) */
+    preDraw?: (p: unknown, ctx: ModDrawCtx) => boolean | void;
+    draw?: (p: unknown, ctx: ModDrawCtx) => void;
+    postDraw?: (p: unknown, ctx: ModDrawCtx) => void;
   }): void;
+  /** ★刀2-C2:本 mod NPC 自绘(tML ModNPC.PreDraw/PostDraw 形;preDraw 返 false=
+   *  跳原版本体段含叠画=mod 全权;ModDrawCtx=受限算子面 draw/drawAdd/tinted) */
+  npcDraw(key: string, spec: {
+    preDraw?: (e: unknown, ctx: ModDrawCtx) => boolean | void;
+    postDraw?: (e: unknown, ctx: ModDrawCtx) => void;
+  }): void;
+  /** ★刀2-C2:本 mod 物品世界自绘(tML ModItem.PreDrawInWorld/PostDrawInWorld 形;
+   *  掉落物绘制位消费) */
+  itemDraw(key: string, spec: {
+    preDrawInWorld?: (d: unknown, ctx: ModDrawCtx) => boolean | void;
+    postDrawInWorld?: (d: unknown, ctx: ModDrawCtx) => void;
+  }): void;
+  /** ★刀1:游戏内 UI 面板(vui 保留树晋升;拖拽标题栏/关闭钮/级联定位;
+   *  Esc 链 closeModPanels 支+世界输入让位全桥接。同键重开=聚焦既有面板) */
+  ui: {
+    panel(key: string, opts: {
+      title?: string; x?: number; y?: number; width: number; height: number;
+      draggable?: boolean; closable?: boolean;
+    }): import('./ui').ModPanelHandle;
+    /** 关全部本 mod 面板 */
+    closeAll(): void;
+  };
+  /** ★刀5:具名修正槽(tML detour 等价物·修正形)。槽名封闭集见引擎
+   *  VANILLA_OVERRIDE_SLOTS('Player.ApplyLifeAndOrMana'=治疗量/
+   *  'Player.UpdateLifeRegen'=装备回复量);anchor=槽语义版本(引擎 bump 时旧 mod
+   *  fail-loud 弃用回原版);fn(ctx:{value,...}) → number=修正后值/undefined=不改;
+   *  per-mod 单注册,值链=后钩吃前钩产物 */
+  vanillaOverride(slot: 'Player.ApplyLifeAndOrMana' | 'Player.UpdateLifeRegen', anchor: number,
+    fn: (ctx: Record<string, unknown>) => number | void): void;
   /** 注册 mod buff(本地玩家;onTick 逐 tick;图标/名称/buff 栏全链) */
   buff(key: string, spec: ModBuffSpec): void;
   /** 系统/世界生命周期钩子(全可选) */
@@ -309,6 +344,26 @@ export function createModContext(
       const id = alloc.projs.get(full);
       if (id === undefined) throw new Error(`[mod-api] mod ${modId} 引用未注册弹幕: ${key}`);
       registerProjHooks(id, hooks as Parameters<typeof registerProjHooks>[1]);
+    },
+    // ★刀2-C2:实体自绘面(NPC/物品;ModDrawCtx 受限算子面)
+    npcDraw(key, spec) {
+      registerModNpcDraw(idOf('npcs', key), spec as Parameters<typeof registerModNpcDraw>[1]);
+    },
+    itemDraw(key, spec) {
+      registerModItemDraw(idOf('items', key), spec as Parameters<typeof registerModItemDraw>[1]);
+    },
+    // ★刀1:游戏内 UI 面板(vui 晋升;面板=运行时对象非装载期注册,同键重开=聚焦)
+    ui: {
+      panel(key, opts) {
+        return modUiPanel(modId, key, opts);
+      },
+      closeAll() {
+        modUiCloseAllOf(modId);
+      },
+    },
+    // ★刀5:具名修正槽(anchor 版本锚 fail-loud;per-mod 单注册)
+    vanillaOverride(slot, anchor, fn) {
+      registerVanillaOverride(slot, anchor, modId, fn as Parameters<typeof registerVanillaOverride>[3]);
     },
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },

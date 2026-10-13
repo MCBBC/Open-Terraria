@@ -272,17 +272,57 @@ export class ModProj extends Entity {
     const frames = this.spec.frames ?? 1;
     const fh = frames > 1 ? img.height / frames : img.height;
     const row = frames > 1 ? Math.floor(this.ageTicks / (this.spec.frameRate ?? 6)) % frames : 0;   // ★619-R3F13
-    if (this.spec.rotateToVelocity) {
-      const ang = Math.atan2(this.vy, this.vx);
-      c.save();
-      c.imageSmoothingEnabled = false;
-      c.translate(this.x + this.w / 2, this.y + this.h / 2);
-      c.rotate(ang);
-      c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, -this.w / 2, -this.h / 2, this.w, this.h);
-      c.restore();
-    } else {
-      c.imageSmoothingEnabled = false;
-      c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, this.x, this.y, this.w, this.h);
+    // ★刀2-C2(2026-10-13):mod 弹自绘三钩(tML PreDraw/Draw/PostDraw 形;
+    //  preDraw false=跳默认绘制段=mod 全权[additive/fullbright 面一并接管])
+    if (this.spec.preDraw || this.spec.draw || this.spec.postDraw) {
+      const mctx = r.buildModDrawCtx(this.x + this.w / 2, this.y + this.h / 2, cam);
+      if (this.spec.preDraw && this.spec.preDraw(this, mctx) === false) {
+        if (!this.spec.draw) { this.spec.postDraw?.(this, mctx); return; }
+      }
     }
+    // ★刀2-C1(2026-10-13):additive(A=0 纯加性恒等式='lighter'+ga=1,拖尾/光晕族)/
+    //   fullbright(projFullbrightQueue 乘光后世界系重绘,79 彩虹头判例同层)
+    const paint = (): void => {
+      if (this.spec.draw) { this.spec.draw(this, r.buildModDrawCtx(this.x + this.w / 2, this.y + this.h / 2, cam)); return; }
+      if (this.spec.rotateToVelocity) {
+        const ang = Math.atan2(this.vy, this.vx);
+        c.save();
+        c.imageSmoothingEnabled = false;
+        c.translate(this.x + this.w / 2, this.y + this.h / 2);
+        c.rotate(ang);
+        c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, -this.w / 2, -this.h / 2, this.w, this.h);
+        c.restore();
+      } else {
+        c.imageSmoothingEnabled = false;
+        c.drawImage(img as CanvasImageSource, 0, row * fh, img.width, fh, this.x, this.y, this.w, this.h);
+      }
+    };
+    if (this.spec.additive) {
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+    }
+    paint();
+    if (this.spec.additive) c.restore();
+    if (this.spec.fullbright) {
+      const self = this;
+      r.queueProjFullbright((c2) => {
+        // 世界系闭包(冲销侧已套 translate/scale/-cam 变换,实体段同坐标)
+        const fhF = frames > 1 ? img.height / frames : img.height;
+        const rowF = frames > 1 ? Math.floor(self.ageTicks / (self.spec.frameRate ?? 6)) % frames : 0;
+        c2.imageSmoothingEnabled = false;
+        if (self.spec.rotateToVelocity) {
+          const ang = Math.atan2(self.vy, self.vx);
+          c2.save();
+          c2.translate(self.x + self.w / 2, self.y + self.h / 2);
+          c2.rotate(ang);
+          c2.drawImage(img as CanvasImageSource, 0, rowF * fhF, img.width, fhF, -self.w / 2, -self.h / 2, self.w, self.h);
+          c2.restore();
+        } else {
+          c2.drawImage(img as CanvasImageSource, 0, rowF * fhF, img.width, fhF, self.x, self.y, self.w, self.h);
+        }
+      });
+    }
+    // ★刀2-C2:mod 弹 postDraw(默认/自绘段后)
+    if (this.spec.postDraw) this.spec.postDraw(this, r.buildModDrawCtx(this.x + this.w / 2, this.y + this.h / 2, cam));
   }
 }

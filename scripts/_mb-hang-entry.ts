@@ -36,6 +36,18 @@ for (const f of readdirSync(tileDir).sort()) {
   const k = `mod_calamity_${f.replace('.json', '')}`;
   if (TILE_BY_KEY[k] === undefined) TILE_BY_KEY[k] = nextId++;
 }
+// ★685:content json 字段透传(chest 旗→TILE_DEFS.chest→FCP 箱保护;裸 key 注册=字段盲)
+import { registerModTile as regTileFull } from '../src/data/tiles';
+{
+  let rid = 1030;
+  for (const f of readdirSync(tileDir).sort()) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const j = JSON.parse(readFileSync(join(tileDir, f), 'utf8')) as Record<string, unknown>;
+      regTileFull({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: j.w as number, h: j.h as number }, rid++);
+    } catch { /* skip */ }
+  }
+}
 // ★mod item 注册(走浏览器同款 registerModItem——Astral Chest 等 pass 消费
 //  itemIdByKey;node rig 不注册=astral chest 恒零产是 rig 伪影非 gen 缺口)
 import { registerModItem } from '../src/data/items';
@@ -80,7 +92,7 @@ const stubSw: Record<string, unknown> = new Proxy({}, {
             const st2 = (globalThis as { __vcStore?: { type: Uint16Array } }).__vcStore;
             let vcN = -1;
             if (st2 && vc >= 0) { vcN = 0; for (let i = 0; i < st2.type.length; i++) if (st2.type[i] === vc) vcN++; }
-            console.log(`[repro] ✓ mod pass 完成: ${name} ${Date.now() - t0}ms void_chest=${vcN}`);; 
+            console.log(`[repro] ✓ mod pass 完成: ${name} ${Date.now() - t0}ms void_chest=${vcN} atc=${(() => { const a = TILE_BY_KEY["mod_calamity_abyss_treasure_chest"] ?? -1; if (a < 0 || !st2) return -1; let n = 0; for (let i = 0; i < st2.type.length; i++) if (st2.type[i] === a) n++; return n; })()}`);; 
             if (name === 'Abyss' && st2) { console.log(`[abyss-probe] (170,850)=${st2.type[850 * 4200 + 170]} (170,851)=${st2.type[851 * 4200 + 170]} flags=${st2.flags ? st2.flags[850 * 4200 + 170] : '?'}`); }
           },
         } as never);

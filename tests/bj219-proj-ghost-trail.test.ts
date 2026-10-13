@@ -92,6 +92,14 @@ describe('BJ219 绘制面参数 recon（Main.cs 通用表+专用四弹 spot 锁�
     expect(GHOST_PARAMS[638]).toMatchObject({ end: 5, step: 1, gScale: 1 });
     expect(GHOST_PARAMS[640]).toMatchObject({ end: 20, step: 1, gScale: 1 });
     expect(GHOST_PARAMS[1026]).toMatchObject({ start: 8, end: 0, step: -2, gScale: 0.5 });
+    // ★BJ650 残影列二复报定谳锁（2026-10-13）：864 = num166=12/num164=0/num165=−1/
+    //  num167=1.4（Main.cs:30888-30892）+ num168=15/num169=0 缺省（:30724-30725）
+    //  + TCL[864]=60（ProjectileID.cs:387）→ 绘 12 份 fade=(12−i)/90——用户实报
+    //  「刃杖上方小刃簇」=运动残影列原版本相（静止叠栈 spread=0 实测;单刃轨道
+    //  半径=0 无 bob :46578）。参数漂移即此锁红。
+    expect(GHOST_PARAMS[864]).toMatchObject({ start: 12, end: 0, step: -1, gScale: 1.4, denom: 15, rotMul: 0 });
+    expect(PROJ_TRAIL_CACHE_LEN[864]).toBe(60);
+    expect(PROJ_TRAILING_MODE[864]).toBe(2);
     expect(GHOST_PARAMS[909]).toMatchObject({ start: 5, end: 0, step: -1, gScale: 1 });
     expect(GHOST_PARAMS[1097]).toMatchObject({ start: 19, end: 0, step: -3, gScale: 0.5 });
     expect(GHOST_PARAMS[582]).toMatchObject({ end: 10, step: 2, gScale: 0.7, rotMul: 0.2 });

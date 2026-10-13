@@ -89,6 +89,29 @@ export declare interface ModContext {
   /** 世界生成 pass 注册(Beaches 后依序执行) */
   registerGenPass(name: string, fn: (store: any, rng: any, gs: any) => void): void;
   system(hooks: ModSystemHooks): void;
+  /** ★刀1:游戏内 UI 面板(vui 保留树晋升;拖拽标题栏/关闭钮/Esc 关最上层/
+   *  世界输入自动让位。同键重开=聚焦既有面板;面板保留可 show/hide 重开) */
+  ui: {
+    panel(key: string, opts: {
+      title?: string; x?: number; y?: number; width: number; height: number;
+      draggable?: boolean; closable?: boolean;
+    }): {
+      readonly key: string;
+      readonly visible: boolean;
+      addText(text: string, o: { x: number; y: number; scale?: number; large?: boolean }): void;
+      addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void }): void;
+      setPosition(x: number, y: number): void;
+      moveBy(dx: number, dy: number): void;
+      show(): void; hide(): void; toggle(): void; close(): void;
+    };
+    closeAll(): void;
+  };
+  /** ★刀5:具名修正槽(tML detour 等价物·修正形)。槽名封闭集:
+   *  'Player.ApplyLifeAndOrMana'=治疗量修正 / 'Player.UpdateLifeRegen'=装备回复量修正;
+   *  anchor=槽语义版本(引擎 bump 时旧 mod fail-loud 弃用回原版);
+   *  fn(ctx:{value,...}) → number=修正后值/undefined=不改;per-mod 单注册,值链 */
+  vanillaOverride(slot: 'Player.ApplyLifeAndOrMana' | 'Player.UpdateLifeRegen', anchor: number,
+    fn: (ctx: Record<string, unknown>) => number | void): void;
   config: {
     get(key: string): boolean | number | string;
     set(key: string, value: boolean | number | string): void;
