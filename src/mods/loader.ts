@@ -11,7 +11,7 @@ import { buildRegistrationPlan, validatePlanReferences, setTileKeyProbe } from '
 import { applyRegistrationPlan, bindModBiomeFlags } from './register';
 import { resolveModBossMusic } from './music';   // ★BGM 面:boss 曲绑定解析(L2 后)
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider, setGenGlobalsProvider } from './bridge';
+import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider, setGenSrcsProvider, setGenGlobalsProvider } from './bridge';
 import { createModContext, type ModEntry } from './api';
 import { loadModConfigValues, registerLiveModConfig } from './config';
 import { modBuffTypeOf } from './buffs';
@@ -158,13 +158,15 @@ export async function loadModsPhase1(
       //      ★P2:config 先行加载(kv 持久化值并默认),sw.config 读写面注入;
       //      itemUse 上下文注入 applyBuff(mod buff 键→BuffType 解析)。
       //      装载失败登记 errors 不阻断(其余 mod/L1 内容已注册保留)。 ----
+      // ★多 mod gen 修复(2026-10-14):全 mod 源清单收集(per-mod push;整批喂 worker)
+      const genSrcs: Array<{ modId: string; src: string }> = [];
       for (const { manifest, pack } of plan.mods) {
         const code = pack.files.get('scripts/main.js');
         if (!code) continue;
         // ★622:mod gen pass 源码捕获(worker 注入——eval mod bundle+stub sw=gen 注册)
         const modSrc = new TextDecoder().decode(code);
         (globalThis as any).__swModEntrySrc = modSrc;
-        setGenSrcProvider(() => modSrc);
+        genSrcs.push({ modId: manifest.id, src: modSrc });
         setGenGlobalsProvider(() => ({
           schematics: (globalThis as unknown as { __calamitySchematics?: Record<string, unknown> }).__calamitySchematics ?? {},
           modData: (globalThis as unknown as { __calamityModData?: Record<string, unknown> }).__calamityModData ?? {},
@@ -222,6 +224,11 @@ export async function loadModsPhase1(
         // ★刀3-墙:mod 墙键跨线程(worker WALL_DEFS 注入=gen pass wallIdByKey 消费)
         wallKeys: [...plan.allocation.walls.entries()],
       }));
+      // ★多 mod gen 修复:全源清单喂 worker(旧 setGenSrcProvider 单源 last-wins=
+      //  worker 只注册末位 mod 的 gen pass,前位全丢;旧单源保留兼容)
+      setGenSrcsProvider(() => genSrcs);
+      setGenSrcProvider(() => genSrcs[genSrcs.length - 1]?.src ?? null);
+
       // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
 
       setCurrentAlloc({

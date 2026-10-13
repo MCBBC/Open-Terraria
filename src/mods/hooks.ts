@@ -13,6 +13,7 @@ import type { InvItem } from '../items/Inventory';
 import { MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE, MOD_BUFF_VANILLA_BASE } from './types';
 import { _resetModMusicForTests, setMenuMusicKey } from './music';   // BGM 面:菜单主题音乐键载体
 import type { ModSpawnRule } from '../world/spawn/VanillaSpawner';
+import { tickModTileEntities, hasModTileEntities as teRegistryProbe } from './tileEntities';   // ★TE 梯队
 
 /** mod 物品 use 上下文(updateUse 预分流点供给) */
 export interface ModUseCtx {
@@ -832,6 +833,8 @@ export function runModPostEntities(game: Game, dt: number): void {
   }
   // ★mod NPC debuff tick(P4):独立于 systems 门(同 buff tick 纪律)
   if (modBuffNpcTicks.size > 0) tickNpcBuffs(game, dt);
+  // ★TE 梯队(2026-10-14):mod tile entity 逐实例 update(registry 空直通)
+  if (teRegistryProbe()) tickModTileEntities(game);
 }
 
 export function runModPostUpdate(game: Game): void {

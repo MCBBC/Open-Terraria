@@ -169,6 +169,8 @@ export interface SaveData {
    *  base64 RLE 同构通道——0/1 游程压到几个字节；旧档缺段 = 全 0 未探索（旧行为，不迁移） */
   explored?: string;
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; name?: string }>;
+  /** ★TE 梯队:mod tile entity 实例段(上方 ModTESaveEntry) */
+  teMods?: ModTESaveEntry[];
   player: {
     hp: number; x: number; y: number;
     inventory: Array<SavedItem | null>;
@@ -305,6 +307,11 @@ export interface SaveData {
     wallIds?: Array<[string, number]> }>;
 }
 
+/** ★TE 梯队(2026-10-14):mod tile entity 存档段——k=te 全键(mod_<modId>_<key>),
+ *  d=mod 自序列化 state(JSON-able;sw.tileEntity save 钩/缺省 state 直存)。
+ *  旧档无键=零迁移;读档 restoreModTileEntities(mods/tileEntities) 回填实例。 */
+export interface ModTESaveEntry { k: string; x: number; y: number; d?: Record<string, unknown> }
+
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
 export interface SavedItem {
   id: number; stack: number;
@@ -364,6 +371,9 @@ export interface SaveMeta {
     itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]>;
     /** ★D16(2026-10-13):墙域 P5 平移随档(墙 id=internal=stable;读档 wallRemap) */
     wallIds?: Array<[string, number]> }>;
+  /** ★TE 梯队(2026-10-14):mod tile entity 实例段(SaveFile/SaveClient 装配经
+   *  mods/tileEntities serializeModTEs 供数;与 mods 同族防漏喂纪律) */
+  teMods?: ModTESaveEntry[];
   /** ★IIIII20b：StarterNPC 换人一次性迁移标记（见 SaveData.header 同名注释） */
   starterSwapMigrated?: boolean;
   /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */
@@ -621,6 +631,7 @@ export function assembleSave(
     wldSnap: meta.wldSnap && Object.keys(meta.wldSnap).length ? meta.wldSnap : undefined,
     // ★mod 清单（2026-10-04 P1）：空=null 不落键（JSON.stringify 丢弃,零 mod 零迁移）
     mods: meta.mods?.length ? meta.mods : undefined,
+    teMods: meta.teMods?.length ? meta.teMods : undefined,   // ★TE 梯队
     teSnap: meta.teSnap?.length ? meta.teSnap : undefined,
     townRooms: meta.townRooms?.length ? meta.townRooms : undefined,
     idScheme: 'sheet',

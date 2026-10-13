@@ -4,7 +4,7 @@
 import { World } from '../world/World';
 import { WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① 中止判别（与 WorldGenUnavailable 判例同形:不触发 fallback）
 import type { GenConfigDTO, WorldWorkerEvent, WorldWorkerRequest } from './protocol';
-import { getModBridgePayload, getModGenSrc, getGenGlobals } from '../mods/bridge';
+import { getModBridgePayload, getModGenSrc, getModGenSrcs, getGenGlobals } from '../mods/bridge';
 
 export interface PreviewFrame {
   width: number; height: number;
@@ -143,11 +143,18 @@ export class WorldGenClient {
       const payload = getModBridgePayload();
       if (payload) w.postMessage({ id: this.nextId++, type: 'applyModIds', payload });
       // ★622:mod gen pass 源码推(worker 两步 eval=gen 注册闭环;★622c 验证 13 pass ✓)
+      //  ★多 mod gen 修复(2026-10-14):优先多源清单(全 mod 各自 eval,单 mod 失败
+      //  不拖累其余);旧单源兜底兼容
       try {
-        const genSrc = getModGenSrc();
-        if (genSrc) {
-          const globals = getGenGlobals();
-          w.postMessage({ id: this.nextId++, type: 'applyGenSrc', payload: { src: genSrc, globals } });
+        const srcs = getModGenSrcs();
+        const globals = getGenGlobals();
+        if (srcs && srcs.length > 0) {
+          w.postMessage({ id: this.nextId++, type: 'applyGenSrc', payload: { srcs, globals } });
+        } else {
+          const genSrc = getModGenSrc();
+          if (genSrc) {
+            w.postMessage({ id: this.nextId++, type: 'applyGenSrc', payload: { src: genSrc, globals } });
+          }
         }
       } catch { /* gen src 不可用忽略(terrain 缺=可容忍) */ }
     } catch { /* 握手前失败忽略,后续 ensure 重推 */ }

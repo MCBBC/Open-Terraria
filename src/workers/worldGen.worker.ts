@@ -27,10 +27,35 @@ import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
 //  改为 applyGenSrc 只存源,generate 请求处理头【先注册再生成】——次序确定性由
 //  「ensureWorker 先推 genSrc 后握 ping,generate 恒在握手成功后才发」保证。
 let genSrcRegistered = false;
+let genSrcsPending: Array<{ modId: string; src: string }> | null = null;
 let genSrcPending: string | null = null;
-function registerModGenPassesInWorker(src: string): void {
-  if (genSrcRegistered) return;   // 幂等(重 build 不重注册)
+/** ★多 mod gen 修复(2026-10-14):逐 mod eval(per-mod try/catch——单 mod bundle 在
+ *  worker 环境抛错不拖累其余;旧单源单 try=一处炸全部静默丢) */
+function registerModGenPassesInWorkerMulti(srcs: Array<{ modId: string; src: string }>): void {
+  if (genSrcRegistered) return;
   genSrcRegistered = true;
+  let ok = 0, fail = 0;
+  for (const { modId, src } of srcs) {
+    const before = registeredGenPassCount();
+    try {
+      evalOneModGen(modId, src);
+      ok++;
+    } catch (err) {
+      fail++;
+      console.error(`[worker] mod gen registration failed (${modId}):`, String(err instanceof Error ? err.message : err).slice(0, 200));
+    }
+    const after = registeredGenPassCount();
+    void before; void after;
+  }
+  console.log(`[worker] mod gen passes registered (${ok} ok, ${fail} failed, ${registeredGenPassCount()} passes)`);
+}
+
+/** 已注册 gen pass 计数(桩内直计——worker 域注册表=WorldGen 自有,hooks 表在
+ *  worker 实例恒空) */
+let genPassRegCount = 0;
+function registeredGenPassCount(): number { return genPassRegCount; }
+
+function evalOneModGen(modId: string, src: string): void {
   try {
     // 全局数据面(gen passes 消费;worker 自有表直写)
     const tilesMod = globalThis as Record<string, unknown>;
@@ -43,6 +68,7 @@ function registerModGenPassesInWorker(src: string): void {
       get: (target, prop: string) => {
         if (prop === 'registerGenPass') return (name: string, fn: (...a: unknown[]) => void, opts?: Record<string, unknown>) => {
           registerGenPass({ name, fn, ...(opts ?? {}) });   // ★645:opts 透传(after/before/order/replace 锚)
+          genPassRegCount++;
         };
         if (prop === 'rollPrefixFor') return () => 0;
         if (prop === 'log') return (...args: unknown[]) => console.log('[mod:gen]', ...args);
@@ -52,15 +78,25 @@ function registerModGenPassesInWorker(src: string): void {
       has: () => true,
     });
     // eval mod bundle(★622c 两步:①IIFE 返回 entry fn ②entry(stubSw)=注册面执行)
+    //  ★多 mod gen(2026-10-14):三形态——①esbuild 尾 `export {X as default}`(calamity)
+    //  ②raw `export default function NAME`(rivals/glmgirl)③raw `export default <expr>`
+    //  (lights 箭头体)——旧只认①=②③在 worker eval 抛 Unexpected token 'export'
+    let entry: (sw: unknown) => void;
     const tail = /export\s*\{\s*(\w+)\s+as\s+default\s*\}\s*;?\s*$/.exec(src);
-    const cjs = src.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
-    const entryName = tail ? tail[1] : 'main';
-    const modIIFE = new Function('sw', cjs + '\nreturn ' + entryName + ';');
-    const entry = modIIFE(stubSw);
-    entry(stubSw);   // ← 注册面执行(setupGen→registerGenPass 13 次)
-    console.log('[worker] mod gen passes registered');
+    const named = /export\s+default\s+(?:async\s+)?function\s+(\w+)\s*\(/.exec(src);
+    if (tail) {
+      const cjs = src.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
+      entry = new Function('sw', cjs + '\nreturn ' + tail[1] + ';')(stubSw);
+    } else if (named) {
+      const cjs = src.replace(/export\s+default\s+/, '');
+      entry = new Function('sw', cjs + '\nreturn ' + named[1] + ';')(stubSw);
+    } else {
+      const cjs = src.replace(/export\s+default\s+/, 'return ');
+      entry = new Function('sw', cjs)(stubSw);
+    }
+    entry(stubSw);   // ← 注册面执行
   } catch (err) {
-    console.error('[worker] mod gen registration failed:', err);
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
@@ -146,21 +182,27 @@ ctx.onmessage = async (e) => {
     // ★622:mod gen pass 源码(worker 侧注册——eval mod bundle+stub sw=gen 注册闭环)
     //  ★626:只存源不跑——注册挪到 generate 处理头(见 genSrcPending 注)
     if (req.type === 'applyGenSrc') {
-      const gp = req.payload as { src: string; globals?: { schematics?: Record<string, unknown>; modData?: Record<string, unknown> } };
+      const gp = req.payload as { src?: string; srcs?: Array<{ modId: string; src: string }>; globals?: { schematics?: Record<string, unknown>; modData?: Record<string, unknown> } };
       if (gp.globals) {
         const w = globalThis as Record<string, unknown>;
         if (gp.globals.schematics) w.__calamitySchematics = gp.globals.schematics;
         if (gp.globals.modData) w.__calamityModData = gp.globals.modData;
       }
-      genSrcPending = gp.src;
+      if (gp.srcs) genSrcsPending = gp.srcs;   // ★多 mod gen:清单优先
+      genSrcPending = gp.src ?? null;
       return;
     }
     if (req.type === 'generate') {
       // ★626:gen 注册在首个 generate 前消费(次序恒定;eval 数秒属生成期预期成本)
-      if (genSrcPending && !genSrcRegistered) {
+      if (genSrcsPending && !genSrcRegistered) {
+        const srcs = genSrcsPending;
+        genSrcsPending = null;
+        genSrcPending = null;
+        registerModGenPassesInWorkerMulti(srcs);
+      } else if (genSrcPending && !genSrcRegistered) {
         const src = genSrcPending;
         genSrcPending = null;
-        registerModGenPassesInWorker(src);
+        registerModGenPassesInWorkerMulti([{ modId: 'legacy', src }]);
       }
       // ★预览抓帧与进度锚点同步（2026-08-31）：共享一个 400ms 冷却钟——
       //   槽边界帧（onWorldPartial）与进度里程碑帧（换窗 / Δp≥1% / 完成）都过同一

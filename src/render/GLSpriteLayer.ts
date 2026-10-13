@@ -1400,6 +1400,10 @@ export class GLSpriteLayer {
   /** ★B1 tile 面 quad（gl_FragCoord texelFetch——任意 dst offset/缩放相位下
    *  最近邻映射精确;tie 语义 ≙ Chrome 2D,见 TILE_*_SRC 注）。程序不可用返回
    *  false（调用方回 2D 栅格化）。draw 后恢复基础 quad 程序态（begin 约定）。 */
+  /** ★gladd 桥预验（2026-10-14,task#22 面①）:tile 面程序在位=quadTile 可用——
+   *  编译失败恒 false,调用方发射【前】整面回 2D（B2b 半截 quad 不可回退判例:
+   *  预验前移,begin 后零失败面）。 */
+  get tileProgramReady(): boolean { return this.progTile !== null; }
   quadTile(
     e: TexEntry, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number,

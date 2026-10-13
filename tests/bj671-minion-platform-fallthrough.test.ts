@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
+import { BuffType } from '../src/stats/Buffs';
 import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import type { GameHooks } from '../src/entities/types';
@@ -21,8 +22,8 @@ import type { GameHooks } from '../src/entities/types';
 const GAME = join(__dirname, '..');
 const MINION_TS = readFileSync(join(GAME, 'src/entities/MinionProj.ts'), 'utf8');
 
-/** 夹具：平台行 row（tile type=19 木平台,TileID.Platforms=19）+ 地面 row+3;
- *  玩家在平台【下方】（巡航锚=玩家心−60px 也在平台下 → 弹须下穿平台到位）。
+/** 夹具：平台行 row（tile type=11 木平台,T.PLATFORM=11）+ 地面 row+4;
+ *  玩家 py 由用例指定（97*16=平台下方/88*16=站平台上）——巡航/归位锚随玩家位走。
  *  仿 BJ635 夹具纪律：真 World/真 Player/直接驱动 fixedUpdate。 */
 function makeHooks(playerPy: number) {
   const w = new World(120, 120, 7, 'bj671');
@@ -75,10 +76,11 @@ describe('BJ671 ① 源锚', () => {
   });
 });
 
-describe('BJ671 ② 行为判别：387/388/533 下落穿平台（原版 flag6 缺省相）', () => {
-  // 玩家 py=92*16（平台 90 行下方）;弹出生在平台上方 88 行 → 巡航锚（玩家心−60）
-  // 在平台下方 → 弹须下落穿平台。旧实现（dropThrough 缺省 false）被平台承接 =
-  // y 停在 (PLAT_ROW*16 − h) 不再下行 = 变异退化值。
+describe('BJ671 ② 行为判别：387/388/533 下落穿平台（aiStyle 66 后置覆写=恒穿相）', () => {
+  // 玩家 py=97*16（平台 90 行下方,巡航锚=玩家心−60 在平台下）→ 弹须下落穿平台。
+  // 旧实现（dropThrough 缺省 false）被平台承接 = y 停在平台顶不再下行 = 变异退化值。
+  // ★注：387/388/533 在 Main.projPet 表内,但 aiStyle 66 覆写（Projectile.cs:17621）
+  //  后置覆盖 projPet 门 → 恒穿=R3-F#6 勘正后的正确模型（BJ672 旧注「非 pet」错）。
   for (const pid of [387, 388, 533] as const) {
     it(`vid ${pid}：平台上方出生 90 拍 → y 越过平台顶至少 8px（穿过）`, () => {
       const { hooks, player, platRow } = makeHooks(97 * 16);
@@ -112,26 +114,55 @@ describe('BJ671 ② 行为判别：387/388/533 下落穿平台（原版 flag6 �
 //    :50454/:52112 双锚）/688-693/1105 哨兵段（flag6=承接,缺省相恰）/864/963/970/
 //    831/625-628/946 直写位移无弹面/917 tileCollide=false 无弹面。
 // ---------------------------------------------------------------------------
-describe('BJ671 ③ BJ672 普查判别：AI_026 族恒穿 + 普查源锚', () => {
-  it('源锚：六处补桥在码（digtoise/babyBird/spider/companionCube/1025/ai62 地面态）', () => {
+describe('BJ671 ③ BJ673 勘误后普查判别（R3-F#1/2/3 翻案：projPet 门 vid=承接,覆写面 vid=穿）', () => {
+  it('源锚：补桥在码（759/1098+1123/1025/ai62 恒穿 + AI_026/390 −12 门 + 653 +4 门）', () => {
     for (const anchor of [
       '★BJ672：弹面 flag6=TRUE（case 759 显式 :17693）',
-      '★BJ672：弹面 flag6=TRUE 缺省（390-392 SetDefaults :4744-4754',
       '★BJ672：弹面 flag6=TRUE 缺省（1098/1123 aiStyle 204',
-      '★BJ672：弹面 flag6=TRUE 缺省（653 aiStyle 67',
       '★BJ672：弹面 flag6=TRUE 缺省（1025 aiStyle 197 非覆写面）',
-      '★BJ672：弹面 flag6=TRUE 缺省（AI_062 族 373-963 非 pet/非覆写面',
-      '★BJ672（逐族普查定谳）：AI_026_TAIL 7 vid',
+      '★BJ673 勘误（2026-10-14 红蓝 R3-F#1 翻案 BJ672）',
+      '★BJ673 勘误（红蓝 R3-F#2 翻案 BJ672）：390-392 在 Main.projPet',
+      '★BJ673 勘误（红蓝 R3-F#3 翻案 BJ672）：653 有显式承接面',
     ]) {
       expect(MINION_TS).toContain(anchor);
     }
   });
 
-  it('vid 266（AI_026 史莱姆宝宝）：平台上方出生 → 恒穿下落（旧条件式玩家脚锚下回落承接=红）', () => {
-    const { hooks, player, platRow } = makeHooks(97 * 16);
+  // 判别夹具设计（R3-F#5）：玩家站平台上（底 1430 ≤ 平台顶 1440+12 门）→ projPet
+  // vid（266/390）flag6=false=被承接；玩家在平台下方（底 1594−12=1582 > 弹底）→ 穿。
+  // 三实现分辨：恒穿=第一支红、无条件承接=第二支红。
+  it('vid 266 玩家站平台上 → 已站台位不沉（projPet −12 门关=承接;BJ672 恒穿在此红）', () => {
+    const { hooks, player, platRow } = makeHooks(1440 - 42); // 玩家底=1440=平台顶（站位）
+    const m = spawn(player, hooks, 266, 60 * 16, platRow * 16 - 20); // 盒底=平台顶（已站台）
+    run(m, hooks, 90);
+    expect(m.dead, '弹存活').toBe(false);
+    // 门：玩家底−12=1428 ≯ 弹底 1440 → dropThrough=false → 逐拍重承接维持站立
+    //（恒穿实现会立即沉穿到下方地面 94 行=1504）
+    expect(m.y + m.h, '盒底被平台托住（≤平台顶+8）').toBeLessThanOrEqual(platRow * 16 + 8);
+  });
+
+  it('vid 266 玩家在平台下方 → 穿台（projPet 门开）', () => {
+    const { hooks, player, platRow } = makeHooks(97 * 16);   // 玩家底−12=1582 > 承接位 1440
     const m = spawn(player, hooks, 266, 60 * 16, 88 * 16);
     run(m, hooks, 90);
     expect(m.dead, '弹存活').toBe(false);
-    expect(m.y + m.h, '盒底越过平台顶（恒穿=原版 flag6 TRUE 缺省相）').toBeGreaterThan(platRow * 16 + 8);
+    expect(m.y + m.h, '盒底越过平台顶（穿台下行）').toBeGreaterThan(platRow * 16 + 8);
+  });
+
+  it('vid 390 蜘蛛玩家站平台上 → 已站台位不沉（双机制①站平台行走）', () => {
+    const { hooks, player, platRow } = makeHooks(1440 - 42);
+    const m = spawn(player, hooks, 390, 60 * 16, platRow * 16 - 30);
+    run(m, hooks, 90);
+    expect(m.dead, '弹存活').toBe(false);
+    expect(m.y + m.h, '盒底被平台托住').toBeLessThanOrEqual(platRow * 16 + 8);
+  });
+
+  it('vid 653 伴侣立方玩家站平台上 → 平台承接（:17605 显式 +4 门原版相）', () => {
+    const { hooks, player, platRow } = makeHooks(1440 - 42);
+    player.buffs.apply(BuffType.CompanionCube, 300);   // AI 生命期门（buff 191）
+    const m = spawn(player, hooks, 653, 60 * 16, platRow * 16 - 30);
+    run(m, hooks, 90);
+    expect(m.dead, '弹存活').toBe(false);
+    expect(m.y + m.h, '盒底被平台托住（恒穿在此红）').toBeLessThanOrEqual(platRow * 16 + 8);
   });
 });

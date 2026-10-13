@@ -74,6 +74,12 @@ export function getEnabledModIds(): string[] | null { return enabledModsProvider
 let genSrcProvider: (() => string | null) | null = null;
 export function setGenSrcProvider(fn: () => string | null): void { genSrcProvider = fn; }
 export function getModGenSrc(): string | null { return genSrcProvider?.() ?? null; }
+/** ★多 mod gen 修复(2026-10-14):全 mod 入口源清单——旧单源 provider 被 per-mod
+ *  装载循环覆写(last-wins)=worker 只注册末位 mod 的 gen pass,前位全丢 */
+export interface ModGenSrcEntry { modId: string; src: string }
+let genSrcsProvider: (() => ModGenSrcEntry[] | null) | null = null;
+export function setGenSrcsProvider(fn: () => ModGenSrcEntry[] | null): void { genSrcsProvider = fn; }
+export function getModGenSrcs(): ModGenSrcEntry[] | null { return genSrcsProvider?.() ?? null; }
 
 /** gen 全局数据面(schematics/genTiles/modData——gen passes 消费) */
 export interface GenGlobalData {

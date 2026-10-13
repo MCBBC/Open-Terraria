@@ -31,7 +31,7 @@ const MINION_TS = readFileSync(join(ROOT, 'src/entities/MinionProj.ts'), 'utf8')
 /** 金标：1456 Item.cs SetDefaults 逐杖（buffType, shoot）——node 直读反编译提取。
  *  projs 多型族对 UpdateBuffs 维护段：矮人 191-194（:10150-10157）/蜘蛛 390-392
  *  （:10233-10240）/双子 387+388（:10249-10256）/海盗 393-395（:10265-10272） */
-const ORACLE: ReadonlyArray<{ staff: number; buff: number; projs: number[]; name: string }> = [
+const ORACLE: ReadonlyArray<{ staff: number; buff: number; projs: number[]; extra?: number[]; name: string }> = [
   { staff: 1157, buff: 49, projs: [191, 192, 193, 194], name: 'PygmyStaff/矮人' },
   { staff: 1309, buff: 64, projs: [266], name: 'SlimeStaff/史莱姆宝宝' },
   { staff: 1802, buff: 83, projs: [317], name: 'RavenStaff/乌鸦' },
@@ -48,7 +48,7 @@ const ORACLE: ReadonlyArray<{ staff: number; buff: number; projs: number[]; name
   { staff: 4269, buff: 213, projs: [755], name: 'SanguineStaff/血红蝙蝠' },
   { staff: 4273, buff: 214, projs: [758], name: 'VampireFrogStaff/吸血鬼青蛙' },
   { staff: 4281, buff: 216, projs: [759], name: 'BabyBirdStaff/雀宝宝' },
-  { staff: 4607, buff: 263, projs: [831], name: 'StormTigerStaff/沙漠虎' },
+  { staff: 4607, buff: 263, projs: [831], extra: [833, 834, 835], name: 'StormTigerStaff/沙漠虎' },
   { staff: 4758, buff: 271, projs: [864], name: 'Smolstar/附魔飞刀' },
   { staff: 5005, buff: 322, projs: [946], name: 'EmpressBlade/泰拉棱镜' },
   { staff: 5069, buff: 325, projs: [951], name: 'FlinxStaff/小雪怪' },

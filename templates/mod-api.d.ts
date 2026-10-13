@@ -118,6 +118,15 @@ export declare interface ModScreenFxState {
   snowBgStyle: number; desertBgStyle: number;
 }
 
+/** ★TE 梯队:mod tile entity 句柄 */
+export declare interface ModTEHandle {
+  readonly x: number;
+  readonly y: number;
+  /** te 全键(mod_<modId>_<key>) */
+  readonly key: string;
+  state: Record<string, unknown>;
+}
+
 export declare interface ModContext {
   readonly id: string;
   /** 接管本 mod NPC 自定义 AI(每 fixedUpdate;共享尾段照走) */
@@ -288,6 +297,16 @@ export declare interface ModContext {
   chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void;
   /** ★一百一十七:mod 群系蔓延注册(tileMap=vanilla sheet→mod tile 键) */
   biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void;
+  /** ★TE 梯队(2026-10-14):mod tile entity(tML ModTileEntity 形;绑定本 mod tile。
+   *  放置[锚格]自愈建/破坏 onDestroy/逐 tick update/存读 save+load;state 须 JSON-able
+   *  [缺省 save=state 直存]) */
+  tileEntity(tileKey: string, spec: {
+    create?(): Record<string, unknown>;
+    update?(te: ModTEHandle, game: object): void;
+    onDestroy?(te: ModTEHandle): void;
+    save?(te: ModTEHandle): Record<string, unknown> | undefined;
+    load?(te: ModTEHandle, data: unknown): void;
+  }): void;
   /** ★一百二十:mod 群系旗注册(depth=(y−rock)/h 带;xDist=边缘带绝对距) */
   biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number;
     depth?: { min: number; max: number }; xDist?: number }): void;

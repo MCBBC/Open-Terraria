@@ -7,6 +7,7 @@ import type { Player } from '../entities/Player';
 import { assembleSave, serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { getSaveModEntries, getEnabledModIds, getCurrentAlloc } from '../mods/bridge';
+import { serializeModTEs, restoreModTEs } from '../mods/tileEntities';   // ★TE 梯队
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
@@ -213,6 +214,8 @@ export function buildSaveGameParts(world: World, player: Player, playTimeMs: num
   // ★BJ575（2026-10-08）：玩家段装配单源化——原内联块（R16-14 全字段）迁出为
   //  buildPlayerSaveData，与 SaveClient.doSave（worker 生产主路径）共用。见该函数头注。
   const playerData = buildPlayerSaveData(world, player);
+  // ★TE 梯队(2026-10-14):mod tile entity 实例段(meta 供数;与 mods 同族防漏喂)
+  meta.teMods = serializeModTEs(world.store);
   const data = assembleSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
   return { json: JSON.stringify(data), player: data.player };
 }
@@ -545,6 +548,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
   if (data.bannerKills) world.bannerKills = data.bannerKills;   // 旗击杀计数（旧档缺省=空）
   world.chests = v3Chests ?? [];   // v3 id 翻译+locked 透传（★R16-16 缺段守卫）
+  // ★TE 梯队(2026-10-14):mod tile entity 实例回填(load 钩恢复;缺 mod=静默降级)
+  restoreModTEs(world.store, data.teMods);
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags ?? {};   // ★R16-16
   // ★RB28-F2（2026-09-14）旧导入档脏键一次性归正（债锚 WldParser.ts:501-505）：

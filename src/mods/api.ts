@@ -40,6 +40,7 @@ import { projClassOfProjId } from '../entities/projTargets';   // ★四百九�
 import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerModMusic, registerModBossMusic, modMusicIdOfFull } from './music';   // ★BGM 面
 import { registerGenPass } from '../world/gen/WorldGen';
+import { registerModTileEntity, getModTileEntitiesOfTile } from './tileEntities';   // ★TE 梯队
 import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
 import { registerModArmorSet } from '../data/vanillaArmorSets';   // ★四百八十二刀
 import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
@@ -181,6 +182,12 @@ export interface ModContext {
   /** ★四百八十三刀:mod 物品键→vid(fail-fast;运行时闭包解析用——gs.mods.itemIdByKey
    *  仅生成期在场) */
   itemIdOf(key: string): number;
+  /** ★magic-storage(2026-10-14):mod tile 键→内部 id(fail-fast;tileInteract/
+   *  tileEntity 网络扫描/TE 跨读用) */
+  tileIdOf(key: string): number;
+  /** ★magic-storage(2026-10-14):枚举某 mod tile 的全部 TE 实例句柄(网络泛洪/
+   *  跨实例读 state;世界未绑/无实例=空) */
+  tileEntitiesOf(key: string): Array<{ x: number; y: number; key: string; state: Record<string, unknown> }>;
   /** ★四百八十八刀:承伤面 thorns 钩(玩家接触受击荆棘面调;ctx={p,game,e,dmg};
    *  反伤自调 e.hurt 或 spawnProj) */
   playerThorns(fn: (ctx: Record<string, unknown>) => void): void;
@@ -263,6 +270,16 @@ export interface ModContext {
   /** ★一百一十七刀:mod 群系蔓延注册(tML ModBiomeConversion 形;spreads=mod tile
    *  键数组,tileMap=vanilla sheet→mod tile 键;引擎 WorldEvolution 蔓延扫描消费) */
   biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void;
+  /** ★TE 梯队(2026-10-14):mod tile entity(tML ModTileEntity 形;绑定本 mod tile。
+   *  放置[锚格 frame 0,0]自愈建/破坏 onDestroy/逐 tick update/存读 save+load 钩;
+   *  state=自由对象,缺省 save=state 直存[须 JSON-able]) */
+  tileEntity(tileKey: string, spec: {
+    create?(): Record<string, unknown>;
+    update?(te: { readonly x: number; readonly y: number; readonly key: string; state: Record<string, unknown> }, game: unknown): void;
+    onDestroy?(te: { readonly x: number; readonly y: number; readonly key: string; state: Record<string, unknown> }): void;
+    save?(te: { readonly x: number; readonly y: number; readonly key: string; state: Record<string, unknown> }): Record<string, unknown> | undefined;
+    load?(te: { readonly x: number; readonly y: number; readonly key: string; state: Record<string, unknown> }, data: unknown): void;
+  }): void;
   /** ★一百二十刀:mod 群系旗注册(AbyssLayer 复合面;depth=(y−rock)/h 带,
    *  xDist=边缘带绝对距;tiles=mod tile 键) */
   biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number; depth?: { min: number; max: number }; xDist?: number }): void;
@@ -431,6 +448,8 @@ export function createModContext(
       registerModTileInteract(idOf('tiles', key), fn as Parameters<typeof registerModTileInteract>[1]);
     },
     itemIdOf(key) { return idOf('items', key); },
+    tileIdOf(key) { return idOf('tiles', key); },   // ★magic-storage:tile 键→内部 id
+    tileEntitiesOf(key) { return getModTileEntitiesOfTile(idOf('tiles', key)); },   // ★magic-storage:TE 枚举
     dodgeRoll(fn) {
       registerModDodgeRoll(modId, fn as Parameters<typeof registerModDodgeRoll>[1]);
     },
@@ -569,6 +588,10 @@ export function createModContext(
       return rollNaturalPrefixForVid(vid, isPrefixableAccessory(vid), () => Math.random());
     },
     // ★一百二十刀:mod 群系旗(AbyssLayer 复合面;键→内部 id)
+    // ★TE 梯队:mod tile entity(tiles 域 id 解析→registry)
+    tileEntity(tileKey, spec) {
+      registerModTileEntity(modId, idOf('tiles', tileKey), tileKey, spec as never);
+    },
     biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number; depth?: { min: number; max: number }; xDist?: number }): void {
       const tidF = (k: string) => {
         const full = k.startsWith('mod_') ? k : `mod_${modId}_${k}`;

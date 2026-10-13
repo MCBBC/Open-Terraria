@@ -12,6 +12,7 @@ import { parseWldToSave } from '../wld/WldImport';
 import { exportWld } from '../wld/WldExport';
 import { weatherToSave } from '../world/weather/Weather';
 import { getModBridgePayload, getSaveModEntries } from '../mods/bridge';
+import { serializeModTEs } from '../mods/tileEntities';   // ★TE 梯队
 
 const HANDSHAKE_MS = 2000;
 const SAVE_TIMEOUT_MS = 20000;
@@ -141,6 +142,9 @@ export class SaveClient {
       townRooms: world.townRooms,
       // ★mod 清单（2026-10-04 P1）：三处 meta 装配之一（worker 主路径;BJ71 防漏喂）
       mods: getSaveModEntries() ?? undefined,
+      // ★TE 梯队(2026-10-14):mod tile entity 实例段(三处装配之三;BJ71 防漏喂——
+      //  缺此处=生产保存主路径落盘 JSON 无 teMods=重进 TE 全失)
+      teMods: serializeModTEs(world.store),
       // 挂物族存放物：内部 id 直传（worker 侧 serializeSave 统一过稳定 id 表）
       furniture: world.furnitureItems,
     };

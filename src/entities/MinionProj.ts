@@ -5692,10 +5692,12 @@ export class MinionProj extends Entity {
     if (this.vx < -num184 && flag2) this.spDir = -1;
     this.facing = -this.spDir;
     this.vy = Math.min(this.vy + 0.4, 10);            // :65244-65247
-    // ★BJ672：弹面 flag6=TRUE 缺省（390-392 SetDefaults :4744-4754 无 tileCollide=
-    //  false 行=初值 true、非 pet、不在覆写 switch → 下落穿平台;贴地行走 vy=0 时
-    //  平台无碰撞面不受影响=原版蜘蛛可站平台行走、下落穿过）。
-    this.dropThrough = true;
+    // ★BJ673 勘误（红蓝 R3-F#2 翻案 BJ672）：390-392 在 Main.projPet（Main.cs:8907-
+    //  8909）→ 弹面 flag6=projPet −12 门（承接,玩家在下方才穿）;aiStyle 26 无后置
+    //  覆写。原版蜘蛛=双机制：①projPet 面站平台行走;②flag7 专属「LOS 目标在本体
+    //  下方且脚下行是平台→tileCollide=false 穿台下扑」（:62852-62863,本仓 :5570-
+    //  5572 已 1:1）——恒穿使①永不成立、②冗余死效。
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     // ★水中位移阻尼（:17721 湿支;蜘蛛 tileCollide 动态门 :62843-62845,真拍走湿支）
     const dfSpiderWalk = projWaterDragFactor(this);
     moveAndCollide(this, game.world, this.vx * dfSpiderWalk, this.vy * dfSpiderWalk);
@@ -6807,12 +6809,14 @@ export class MinionProj extends Entity {
     // 跳跃（:63197-63281）：意图单格探 → 落地梯跳五档;266 行走恒小跳
     const dirX = flag2 ? -1 : flag3 ? 1 : 0;
     const flag5 = (flag2 || flag3) && this.walkerJumpIntent(st, dirX);
-    // ★BJ672（逐族普查定谳）：AI_026_TAIL 7 vid（191-194/266/1094/1113）原版弹面
-    //  flag6 恒 TRUE（SetDefaults 无 tileCollide=false 行=初值 true、非 pet、不在
-    //  覆写 switch :17670-17696、decidesManualFallThrough=false → shouldFallThrough
-    //  写值不被弹面消费）→ 恒穿平台。旧 :50454-8 玩家脚锚条件式=偏差（dMFT=false
-    //  时该公式在原版无消费面,条件不成立拍旧式回落承接=非原版相）。
-    this.dropThrough = true;
+    // ★BJ673 勘误（2026-10-14 红蓝 R3-F#1 翻案 BJ672）：AI_026_TAIL 7 vid
+    //  （191-194/266/1094/1113）在 Main.projPet 全表（Main.cs:8878/:8886-8889/
+    //  :8914/:8916——projPet=宠物∪随从全集,非 SetDefaults pet 字段!）→ 弹面
+    //  flag6=:17589 projPet 门（false=承接,玩家脚低于弹底 12px 才穿）。aiStyle 26
+    //  无后置覆写。BJ672 曾误判恒穿（提取器查错载体）=移除承接门=站平台行走机制
+    //  被毁。恢复原版 −12 门（:2536/:6345 同式先例;旧 −8 系锚 AI_026 flag4 阈值,
+    //  实为 :17591 −12）。
+    this.dropThrough = (p.y + p.h - 12) > (this.y + this.h);
     this.tileCollide = true;                                       // :63098
     const dfA026 = projWaterDragFactor(this);
     const xPreMoveA026 = this.x;   // ★BJ517③/BJ518②：flag27 判据（本拍位移零=机器读相「最近位移」;266 与 191-194 帧机共用同一快照）
@@ -9941,10 +9945,11 @@ export class MinionProj extends Entity {
     vx = Math.max(-clamp, Math.min(clamp, vx));
     if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
     // 重力 + 碰撞（tileCollide=true）
-    // ★BJ672：弹面 flag6=TRUE 缺省（653 aiStyle 67 SetDefaults 无 tileCollide=false 行、
-    //  非 pet、不在覆写 switch;decidesManualFallThrough=false → AI_067 :50454 写的
-    //  shouldFallThrough 不被弹面消费 → flag6 恒 TRUE 恒穿平台）。
-    this.dropThrough = true;
+    // ★BJ673 勘误（红蓝 R3-F#3 翻案 BJ672）：653 有显式承接面——Projectile.cs:
+    //  17605-17612 `if (type == 653 || 1018) { flag6=false; if (player.Bottom.Y >
+    //  Bottom.Y + 4) flag6=true; }`（后置于 projPet 门）——默认承接平台,仅玩家底
+    //  低于立方底 4px 时穿。BJ672 的「恒穿」判据两前提（非 pet/不在覆写面）皆假。
+    this.dropThrough = owner ? (owner.y + owner.h) > (this.y + this.h) + 4 : false;
     vy = Math.min(vy + 0.3, MAX_FALL_SPEED);
     this.vx = vx; this.vy = vy;
     moveAndCollide(this, w, vx, vy);

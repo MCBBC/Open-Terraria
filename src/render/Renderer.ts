@@ -328,7 +328,7 @@ import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
-import { GLSpriteLayer } from './GLSpriteLayer';
+import { GLSpriteLayer, type TexEntry } from './GLSpriteLayer';
 import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
 import { ghostFrameEnd } from './GhostBlur';   // ★ghostblur（2026-10-07;?ghostblur=1 缺省关,Game 帧 tick 尾收口）
 import { judderFrameEnd } from './JudderSmooth';   // ★juddersmooth（2026-10-10;?smooth=1 缺省关,同族收口点）
@@ -6975,9 +6975,17 @@ export class Renderer {
     // ★C10e 加算垫底扫尾（2026-10-03,虚空透镜案同族判语）:7x 段全部 'lighter'
     //    直绘面落透明 HUD 会 dst×(1−α) 衰减下层画面（BJ278/虚空透镜同病）——
     //    各面头部经幂等闩垫底（首面生效,后续零开销）;开灯模式全屏已原色跳过。
+    //    ★gladd Phase 1 试点（2026-10-14,task#22 面①）:旗开+纯帧+世界在 glCanvas
+    //    =coat glow 先行 GL 会话（drawCoatGlowGridGL）——over present 落屏栈
+    //    （bg<world<coatglow=2D 位）,下方垫底经 drawImage(glCanvas) 把它一并收进
+    //    HUD,终像 sky<gl<coatglow 逐位同;夹层帧（世界 blit 回 HUD,会话会压在
+    //    HUD 世界之下）/已合成帧（P1 全帧合成在前）/GL 失败=2D 原路径。
     if (!this.fullbright) {
+      const cgGl = Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
+        && !this._c10eComposited && this.swPipe?.screenStackMode
+        ? this.drawCoatGlowGridGL(chunks, cam, world, viewW, viewH, z) : null;
       this.c10eCompositeIntoHud();
-      this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
+      if (!cgGl) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
     }
 
     // 7-shine. tileShine +0.39 加法支（Main.shine case 262-268 Gemspark：原版加在
@@ -23908,6 +23916,94 @@ export class Renderer {
       }
     }
     ctx.restore();
+  }
+
+  /** ★gladd Phase 1 试点（2026-10-14,task#22 面①）:coat glow GL 会话桥——
+   *  drawCoatGlowGrid 的 quadTile 直出版（世界格 GL 路径 6350 位同款发射式;
+   *  gl_FragCoord texelFetch=任意 dst offset/缩放相位下最近邻映射精确,tie 语义
+   *  ≙ Chrome 2D imageSmoothingEnabled=false）。设备矩形与 2D 路径【同式逐字】
+   *  （共享 round 表达式,防双路漂移）。blend=begin 基态 (ONE,1−SA) premul-SO
+   *  ≙ 2D source-over（纹理 premul 上传,texFromImage 判例）。
+   *  会话序在垫底【前】（调用点注）:end(true,true) over present 推屏栈,随后的
+   *  c10eCompositeIntoHud drawImage(glCanvas) 把 coatglow 一并收进 HUD。
+   *  纹理键 `coatglow:cx:cy`:p.glow 画布每次重烘新建（mkCanvas 恒新,canvasEnv:30
+   *  ——画布身份即版本号,身份变→texRefresh 全幅重传;texFromImage 键命中不刷新
+   *  =身份不变不得复用旧内容）。LRU 逐出/层重建（dropCloudPipe→新实例）经
+   *  texAlive 自愈（旧 entry 对新层必失配→重传）。glow 消失（漆面移除）=drop
+   *  防泄漏（视野内逐帧扫,视野外残留由 LRU 兜底）。
+   *  返回 null=任一环节失败（退避窗/begin 审计错/纹理就绪失败/发射期 quadTile
+   *  假）→调用方整面回 2D 原路径（all-or-nothing,B2b 半截 quad 不可回退判例
+   *  ——纹理【发射前】全量预验,begin 后零失败面）。零 glow 帧=免开会话（比 2D
+   *  路径还省 save/restore）。 */
+  private _coatGlowTex = new Map<string, { src: HTMLCanvasElement; e: TexEntry }>();
+  /** 探针面（?gladd=1 验收）:gl=会话发射（含零 glow 空)）/empty=零 glow 免开/fb=回 2D */
+  gladdCoatStats = { gl: 0, empty: 0, fb: 0 };
+  private drawCoatGlowGridGL(
+    chunks: ChunkCache, cam: Camera, world: World, viewW: number, viewH: number, z: number,
+  ): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable || !gl.tileProgramReady) { this.gladdCoatStats.fb++; return null; }
+    const ts = TILE;
+    const x0 = Math.floor((cam.x - viewW / 2 / z) / (CHUNK * ts)) - 1;
+    const x1 = Math.floor((cam.x + viewW / 2 / z) / (CHUNK * ts)) + 1;
+    const y0 = Math.floor((cam.y - viewH / 2 / z) / (CHUNK * ts)) - 1;
+    const y1 = Math.floor((cam.y + viewH / 2 / z) / (CHUNK * ts)) + 1;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const wKg = this._worldLowK || 1;   // 门保证 c10e 帧恒 1;保留同式防漂移
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
+    const S = CHUNK * ts;
+    const zz = z * wKg;
+    // ① 选集+纹理预验（发射前全量——B2b 判例）
+    const plans: Array<{ e: TexEntry; xd0: number; yd0: number; dw: number; dh: number }> = [];
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
+        const key = `coatglow:${cx}:${cy}`;
+        const p = chunks.get(cx, cy);
+        if (!p.glow) {
+          if (this._coatGlowTex.has(key)) {   // glow 消失（漆面移除）:drop 防泄漏
+            gl.dropTexture(key);
+            this._coatGlowTex.delete(key);
+          }
+          continue;
+        }
+        let t = this._coatGlowTex.get(key);
+        if (!t || t.src !== p.glow) {
+          const e = t ? gl.texRefresh(key, p.glow) : gl.texFromImage(key, p.glow, false, true);
+          if (!e) { this.gladdCoatStats.fb++; return null; }
+          t = { src: p.glow, e };
+          this._coatGlowTex.set(key, t);
+        } else if (!gl.texAlive(t.e)) {   // LRU 逐出/层重建:重传自愈
+          const e = gl.texRefresh(key, p.glow);
+          if (!e) { this.gladdCoatStats.fb++; return null; }
+          t = { src: p.glow, e };
+          this._coatGlowTex.set(key, t);
+        }
+        const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * zz);
+        const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * zz);
+        const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * zz);
+        const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * zz);
+        const dw = xd1 - xd0, dh = yd1 - yd0;
+        if (dw <= 0 || dh <= 0) continue;   // 2D 路径同款退化矩形（round 重合）=不可见
+        plans.push({ e: t.e, xd0, yd0, dw, dh });
+      }
+    }
+    if (!plans.length) { this.gladdCoatStats.empty++; return gl; }   // 零 glow:免开会话
+    // ② 会话+发射（预验后零失败面;quadTile 假=防御支,end(false) 弃 FBO 回 2D）
+    gl.begin('coatglow');
+    if (gl.unavailable) { this.gladdCoatStats.fb++; return null; }
+    for (const pl of plans) {
+      if (!gl.quadTile(pl.e, 0, 0, S, S, pl.xd0, pl.yd0, pl.dw, pl.dh)) {
+        gl.end(false);
+        this.gladdCoatStats.fb++;
+        return null;
+      }
+    }
+    gl.end(true, true);   // over present:推屏栈+premul-SO 叠合 glCanvas（bg<world<coatglow）
+    this.gladdCoatStats.gl++;
+    return gl;
   }
 
   private compositeLight(

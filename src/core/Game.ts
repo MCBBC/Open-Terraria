@@ -170,6 +170,7 @@ import { modRarityColorOf } from '../mods/rarity';   // ★刀3-1:mod 稀有度�
 import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物反查
 import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(拆墙门消费)
 import { modUiBlockingPointer, modUiSetInGame } from '../mods/ui';   // ★刀1:mod UI 宿主(输入让位/在役旗)
+import { bindModTileEntities, unbindModTileEntities } from '../mods/tileEntities';   // ★TE 梯队
 import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE } from '../mods/types';   // ★红队 R1-F7:MOD_NPC_ID_BASE 死 import 清理(域门已撤)
 import { ModProj } from '../entities/ModProj';
@@ -3390,7 +3391,7 @@ export const MINION_BUFFS: ReadonlyArray<{ buff: number; staff: number; projs: n
   { buff: 213, staff: 4269, projs: [755] },                 // 血红蝙蝠（:10344）
   { buff: 214, staff: 4273, projs: [758] },                 // 吸血鬼青蛙（:10280）
   { buff: 216, staff: 4281, projs: [759] },                 // 雀宝宝（:10360,带重生支）
-  { buff: 263, staff: 4607, projs: [831] },                 // 沙漠虎（:10476）
+  { buff: 263, staff: 4607, projs: [831], extra: [833, 834, 835] },   // 沙漠虎（:10476;★BJ673 红蓝R2-F#1：虎族=第二个双弹结构——831 虎宝石计数器(aiStyle 164 与 970 同构,Projectile.cs:8069-8082)+833-835 本体(aiStyle 67 :8084-8125,UpdateStormTigerStatus Player.cs:12383-12419 派生)——四弹全族 stormTiger 旗→timeLeft=2 保活(AI_164 :47458/AI_067 flag3 :50155),右击 263 须四弹同灭,否则本体永久残留）
   { buff: 271, staff: 4758, projs: [864] },                 // 附魔飞刀（:10496）
   { buff: 322, staff: 5005, projs: [946] },                 // 泰拉棱镜（:10512）
   { buff: 325, staff: 5069, projs: [951] },                 // 小雪怪（:10440）
@@ -8713,6 +8714,7 @@ export class Game implements GameHooks {
     if (this.destroyed) return;
     this.destroyed = true;
     runModOnWorldUnload(this);   // ★mod 系统 onWorldUnload（2026-10-04：拆实例最先调,钩子见完整世界态）
+    unbindModTileEntities(this.world.store);   // ★TE 梯队:解绑+清实例桶(跨世界隔离)
     modUiSetInGame(false);   // ★刀1:回菜单沿=宿主让位(menu 态 setState 由 mainFlow 管)
     // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
     this.net?.disconnect();
@@ -9114,6 +9116,7 @@ export class Game implements GameHooks {
     if (this.running) return;
     this.running = true;
     this.lastTime = performance.now();
+    bindModTileEntities(this.world.store);   // ★TE 梯队(2026-10-14):世界绑定(放置/破坏自愈)
     runModOnWorldLoad(this);   // ★mod 系统 onWorldLoad（2026-10-04：世界全链就绪、主循环起跑前唯一汇点）
     modUiSetInGame(true);   // ★刀1:mod UI 宿主接管旗(可见面板回挂 vui;读档/换世界沿重同步)
     const loop = (now: number) => {
@@ -51485,6 +51488,26 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       mechdusa: (!!this.world.seedFlags.remix && !!this.world.seedFlags.getGoodWorld) || !!this.world.seedFlags.everything,
       torchGod: !!this.world.flags.unlockedBiomeTorches,
     }, this._craftSourcesCache());
+  }
+
+  /** ★magic-storage(2026-10-14):带自定义材料源的可用配方/扣料——mod 存储网络
+   *  (Magic Storage 移植)的合成访问消费面:storage 单元 item 数组作为 CraftItemSource
+   *  传入,扣料原位落在单元槽(引擎 availableRecipes/consumeMaterials 原生支持
+   *  外部源,与附近箱同通道)。ctx 与 vanillaAvailableRecipes 同式同源。 */
+  vanillaAvailableRecipesWithSources(sources: readonly import('../data/vanillaRecipes').CraftItemSource[]) {
+    return availableRecipes(this.player.inv, {
+      nearbyInternal: this.vanillaNearbyStations(),
+      nearWater: this._nearLiquid.water, nearHoney: this._nearLiquid.honey, nearLava: this._nearLiquid.lava,
+      zoneSnow: this.scene.zoneSnow,
+      zoneGraveyard: this.scene.zoneGraveyard,
+      mechdusa: (!!this.world.seedFlags.remix && !!this.world.seedFlags.getGoodWorld) || !!this.world.seedFlags.everything,
+      torchGod: !!this.world.flags.unlockedBiomeTorches,
+    }, sources);
+  }
+  /** ★magic-storage:自定义材料源扣料(consumeMaterials 原位扣减;返实际合成轮数) */
+  vanillaConsumeWithSources(r: import('../data/vanillaRecipes').VanillaRecipe,
+    sources: readonly import('../data/vanillaRecipes').CraftItemSource[], times = 1) {
+    return consumeMaterials(this.player.inv, r, times, false, sources);
   }
 
   /** 材料源聚合持有量表（Recipe._ownedItems；GetAvailableItemCount Recipe.cs:313-320

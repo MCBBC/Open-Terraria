@@ -133,7 +133,7 @@ export type WorldWorkerRequest =
   /** ★mod 桥(2026-10-04,fire-and-forget 无回执;幂等可重推)——mod 物品/tile 稳定
    *  id 增量,worker 侧接长恒等域+补双向映射(mods/bridge.ts 供数,Client 握手后推) */
   | { id: number; type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]>; itemKeys: Array<[string, number]>; tileKeys: Array<[string, number]>; wallKeys?: Array<[string, number]> } }
-  | { id: number; type: 'applyGenSrc'; payload: { src: string; globals?: { schematics: Record<string, unknown>; modData: Record<string, unknown> } } };
+  | { id: number; type: 'applyGenSrc'; payload: { src?: string; srcs?: Array<{ modId: string; src: string }>; globals?: { schematics: Record<string, unknown>; modData: Record<string, unknown> } } };   // ★多 mod gen:srcs 清单优先/src 兜底
 
 export type WorldWorkerEvent =
   | { id: number; type: 'ready' }
