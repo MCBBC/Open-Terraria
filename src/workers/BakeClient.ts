@@ -18,6 +18,7 @@ import { renderEnv, plates428Pressed } from '../render/VanillaTiler';
 import { gameTickCount } from '../core/GameTime';
 import { buildBakeSnapshot, snapshotBuffers, type BakeWorkerResponse } from './BakeProtocol';
 import { getModBridgePayload } from '../mods/bridge';
+import { modWallShipEntries } from '../mods/assets';   // ★刀3-墙/R-A-C2:mod 墙贴图 ship 源
 
 // createImageBitmap 为浏览器全局（worker/主线程均可用;node 测试环境 undefined
 // → attach 探测失败=降级主线程路径）。
@@ -150,7 +151,27 @@ export class BakeClient {
         return stable !== undefined && meta ? { stableId: stable, meta } : null;
       })
       .filter((x) => x !== null);
-    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles, modTileMetas },
+    // ★刀3-墙/R-A-C2(2026-10-13):mod 墙跨 bake worker(键+vmeta+贴图位图)——
+    //  worker 域 vanilla.walls=静态快照无 mod 条目+SW 别名支墙贴图不在 vimages
+    //  (按 pack 字节补解码;内存支已在 vimages=去重跳过)。位图不进 transfer 列表
+    //  (结构化克隆拷贝——内存支同一位图主线程 atlas 在持,transfer 会 detach)
+    const bridge = getModBridgePayload();
+    const wallKeys = bridge?.wallKeys ?? [];
+    const shipped = new Set(vimg.map((v) => v.file));
+    const modWallVmetas: Array<{ id: number; meta: unknown }> = [];
+    for (const [fullKey, id] of wallKeys) {
+      void fullKey;
+      const meta = this.atlas.vanilla.walls[String(id)];
+      if (meta) modWallVmetas.push({ id, meta });
+      const ship = modWallShipEntries().find((e) => e.file === `vanilla/Wall_${id}.png`);
+      if (ship && !shipped.has(ship.file)) {
+        shipped.add(ship.file);
+        jobs.push(createImageBitmap(new Blob([ship.bytes.slice()], { type: 'image/png' }))
+          .then((bmp) => { vimg.push({ file: ship.file, bmp }); })
+          .catch(() => { /* 降级 missing 链(worker 色块兜底) */ }));
+      }
+    }
+    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles, modTileMetas, wallKeys, modWallVmetas },
       [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp), ...sheetList.map((s) => s.bmp)]);
   }
 

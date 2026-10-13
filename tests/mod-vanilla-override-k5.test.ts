@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   registerVanillaOverride, runVanillaOverrideValue, VANILLA_OVERRIDE_SLOTS,
-  registerModCanUseRule, runModCanUse, _resetModHooksForTests,
+  registerModCanUseRule, registerModCanUse, runModCanUse, _resetModHooksForTests,
 } from '../src/mods/hooks';
 
 describe('具名修正槽(刀5)', () => {
@@ -38,35 +38,30 @@ describe('具名修正槽(刀5)', () => {
 describe('canUse 声明规则解释器(刀5-A 族 ownedProjBelow)', () => {
   beforeEach(() => _resetModHooksForTests());
 
-  const fakeGame = (counts: Array<{ projId: number; dead?: boolean }>) => {
-    (globalThis as { __swGame?: unknown }).__swGame = {
-      entities: { projectiles: counts.map((c) => ({ projId: c.projId, dead: c.dead ?? false })) },
-    };
-  };
+  const fakeGame = (counts: Array<{ projId: number; dead?: boolean }>) =>
+    ({ input: { mouseX: 0, mouseY: 0 }, player: {},
+      entities: { projectiles: counts.map((c) => ({ projId: c.projId, dead: c.dead ?? false })) } }) as never;
   const def = { vid: 30000 } as never;
   const item = { id: 1, stack: 1 } as never;
 
-  beforeEach(() => {
-    delete (globalThis as { __swGame?: unknown }).__swGame;
-  });
-
   it('在场数 < lt 可用;≥ lt 拒;dead 不计;无规则恒可用', () => {
     registerModCanUseRule(30000, { ownedProjBelow: { proj: 2000, lt: 2 } });
-    fakeGame([{ projId: 2000 }, { projId: 2000 }, { projId: 2001 }]);
-    expect(runModCanUse({} as never, def, item)).toBe(false);   // 2 ≥ 2 拒
-    fakeGame([{ projId: 2000 }, { projId: 2001 }, { projId: 2000, dead: true }]);
-    expect(runModCanUse({} as never, def, item)).toBe(true);    // 1 < 2 可用
+    expect(runModCanUse(fakeGame([{ projId: 2000 }, { projId: 2000 }, { projId: 2001 }]) as never, def, item)).toBe(false);   // 2 ≥ 2 拒
+    expect(runModCanUse(fakeGame([{ projId: 2000 }, { projId: 2001 }, { projId: 2000, dead: true }]) as never, def, item)).toBe(true);    // 1 < 2 可用
     _resetModHooksForTests();
     expect(runModCanUse({} as never, def, item)).toBe(true);    // 无规则恒真
   });
 
-  it('fail-fast;无 __swGame 探针=可用(fail-open)', () => {
+  it('fail-fast;合取门(规则过→落代码钩);实体表缺=可用(fail-open)', () => {
     registerModCanUseRule(30000, { ownedProjBelow: { proj: 2000, lt: 1 } });
     expect(() => registerModCanUseRule(30000, {})).toThrow(/重复注册/);
     expect(() => registerModCanUseRule(46, {})).toThrow(/≥30000/);
-    fakeGame([]);   // 探针在位=走门
-    expect(runModCanUse({} as never, def, item)).toBe(true);
-    delete (globalThis as { __swGame?: unknown }).__swGame;
-    expect(runModCanUse({} as never, def, item)).toBe(true);    // 探针缺=fail-open
+    // ★R-C-F3 合取门:规则过→代码钩可达(钩拒=拒)
+    registerModCanUseRule(30001, { ownedProjBelow: { proj: 2000, lt: 5 } });
+    registerModCanUse(30001 as never, () => false);
+    expect(runModCanUse(fakeGame([]) as never, { vid: 30001 } as never, item)).toBe(false);   // 规则过,钩拒
+    expect(runModCanUse(fakeGame([{ projId: 2000 }, { projId: 2000 }]) as never, { vid: 30001 } as never, item)).toBe(false); // 规则拒
+    // 实体表缺=fail-open(规则门跳过)
+    expect(runModCanUse({} as never, { vid: 30000 } as never, item)).toBe(true);
   });
 });

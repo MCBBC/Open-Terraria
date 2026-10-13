@@ -99,6 +99,22 @@ function packTexBytes(pack: { files: Map<string, Uint8Array> }, texPath: string)
     ?? pack.files.get(texPath) ?? null;
 }
 
+/** ★刀3-墙/R-A-C2:mod 墙贴图台账(bake worker ship 源——SW 别名支墙贴图不在
+ *  主线程 vimages,BakeClient 须按 pack 字节补解码;bytes=pack 文件引用零拷贝) */
+const modWallTexById = new Map<number, { modId: string; texPath: string; bytes: Uint8Array }>();
+function recordModWallTex(wallId: number, modId: string, texPath: string, bytes: Uint8Array | null): void {
+  if (!bytes) return;
+  modWallTexById.set(wallId, { modId, texPath, bytes });
+}
+/** bake worker ship 源(键=引擎 fileKey;去重由消费方按 file 判) */
+export function modWallShipEntries(): Array<{ file: string; bytes: Uint8Array }> {
+  const out: Array<{ file: string; bytes: Uint8Array }> = [];
+  for (const [id, e] of modWallTexById) {
+    out.push({ file: `vanilla/Wall_${id}.png`, bytes: e.bytes });
+  }
+  return out;
+}
+
 /** 构造 mod tile 的 VanillaTileMeta(纯声明几何;SW 支零位图依赖——rows 依
  *  声明 styles,缺省按 w/h 与贴图常规比例推 1;位图精确反推走回退支) */
 function buildModTileMetaSpec(spec: ModTileContent): VanillaTileMeta {
@@ -241,11 +257,12 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         if (!spec?.texture || wallId === undefined) continue;
         const fileKey = `vanilla/Wall_${wallId}.png`;
         aliasJob(atlas, modId, { fileKey, texPath: spec.texture });
+        recordModWallTex(wallId, modId, spec.texture, packTexBytes(pack, spec.texture));
         (atlas.vanilla.walls as unknown as Record<string, unknown>)[String(wallId)] = {
           name: spec.name ?? spec.key, key: spec.key, sheet: fileKey,
           color: spec.mapColor ?? '#808080',
           grid: [32, 32], stride: [36, 36], cols: 13,
-          rows: spec.rows ?? 5,
+          rows: spec.rows ?? (spec.largeFrame ? 7 : 5),   // ★R-A-M4:largeFrame 变体必用行 5-6,5 行表=越表空洞
           ...(spec.largeFrame !== undefined ? { largeFrame: spec.largeFrame } : {}),
         };
       }
@@ -419,6 +436,7 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       const bmp = await decodePngOrWarn(pack, modId, j.texPath);
       if (bmp !== null) {
         inject(atlas, j.fileKey, bmp);
+        recordModWallTex(j.wallId, modId, j.texPath, packTexBytes(pack, j.texPath));   // ★R-A-C2:ship 源
         wallMetaTable[String(j.wallId)] = {
           name: j.spec.name ?? j.spec.key, key: j.spec.key, sheet: j.fileKey,
           color: j.spec.mapColor ?? '#808080',
@@ -428,6 +446,7 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         };
       }
     }));
+    // ★R-A-C2:内存支墙贴图台账(位图已在 atlas.vimages=ship regex 覆盖,此处仅记 bytes)
     // —— ★刀2-C1(2026-10-13):NPC/物品 glowmask(内存回退支;SW 支=上方 aliasJob) ——
     const glowJobs: Array<{ fileKey: string; texPath: string }> = [];
     for (const path of discoverPackJsonPaths(pack, 'npcs')) {

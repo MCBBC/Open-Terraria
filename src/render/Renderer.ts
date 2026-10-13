@@ -1536,11 +1536,6 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // AI 侧算定的帧号直读（694 水书宝箱怪态机帧——态切换清零的 frameCounter
   // 无法从全局 t 推出，cursedSkullAI 的 mimic694Frame 维护）
   if (e.customFrameIdx != null) return Math.min(frames - 1, e.customFrameIdx);
-  // ★刀2-C1(2026-10-13):mod NPC 声明帧率早退(缺省 6t=尾段通用档同值;顺带免
-  //  数百家族比较;AI 写 customFrameIdx 仍最优先=上行;animT 直读=t 声明前置)
-  if ((e.vanillaId ?? 0) >= 800) {
-    return Math.floor(e.animT / (modNpcFrameRateOf(e.vanillaId!) ?? 6)) % frames;
-  }
   const id = e.vanillaId ?? 0;
   const ai = e.vanilla?.aiStyle ?? 0;
   const t = e.animT; // tick 计数（≈原版 frameCounter 驱动源）
@@ -2133,6 +2128,13 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 不写 ai2 → 恒帧 0。此前落入通用 6t 全帧循环 = 亮/灭两帧间闪跳（用户实报）。
   // 头 134/尾 136 frames=1，任何循环都恒帧 0，无需分支。
   if (id === 135) return e.ai2 === 0 ? 0 : Math.min(1, frames - 1);
+  // ★刀2-C1(2026-10-13)+红队 R-B-F2 勘位:mod NPC 声明帧率——置于全家族分支
+  //  【之后】、通用兜底之前(顶部早退曾截断 aiStyle 1/3/7/107 等家族=mod 城镇 NPC
+  //  丢行走区/mod aiStyle 1 速度漂移 8t→6t)。缺省 6t=本兜底同值;customFrameIdx
+  //  仍最优先(函数头早退);AI 声明 frameRate 仅替换【兜底】档。
+  if ((e.vanillaId ?? 0) >= 800) {
+    return Math.floor(t / (modNpcFrameRateOf(e.vanillaId!) ?? 6)) % frames;
+  }
   // 其余（眼/幽灵/蠕虫段等；蜂 210/211 已拆 BJ589 3t 专档）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -6822,7 +6824,7 @@ export class Renderer {
     //     (:63213) 之后——物品精灵盖在玩家身上；曾进实体 y 排序=玩家盖物品。
     //     磁吸/拾取逻辑在更新侧不受影响）
     for (const e of sorted) {
-      if (e instanceof ItemDrop) this.drawDrop(e, player.miscCounter);   // BJ601 miscCounter 传参（:39424 LocalPlayer.miscCounter）
+      if (e instanceof ItemDrop) this.drawDrop(e, player.miscCounter, cam);   // BJ601 miscCounter 传参（:39424 LocalPlayer.miscCounter）
     }
 
     // 4.4 雨（★2026-08-24 r15 R15-1：原版 DrawRain 在 DrawItems/全部实体之后
@@ -10939,11 +10941,12 @@ export class Renderer {
     this.drawLeashedKite(this.ctx, k, k.windSnapshot);
   }
 
-  private drawDrop(d: ItemDrop, miscCounter = 0) {
+  private drawDrop(d: ItemDrop, miscCounter = 0, cam?: Camera) {
     // ★刀2-C2(2026-10-13):mod 物品世界自绘(P4;preDrawInWorld false=mod 全权,
     //  跳默认图标/着色/光罩面[tML PreDrawInWorld 语义])
+    //  ★红队 R-B-F7:mctxAt 透传 cam(worldToScreen 恒等回退=三 seam 域一致)
     const mDraw = modItemDrawSpecOf(ITEM_DEFS[d.itemId]?.vid ?? -1);
-    const mctxAt = (): ModDrawCtx => this.buildModDrawCtx(d.x + d.w / 2, d.y + d.h / 2);
+    const mctxAt = (): ModDrawCtx => this.buildModDrawCtx(d.x + d.w / 2, d.y + d.h / 2, cam);
     if (mDraw?.preDrawInWorld && mDraw.preDrawInWorld(d, mctxAt()) === false) {
       mDraw.postDrawInWorld?.(d, mctxAt());
       return;
@@ -12344,8 +12347,6 @@ export class Renderer {
         // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
         // mirror（★BJ509）= gMirror 传入——vel4 收集侧镜像守卫用
         this.drawNpcGlow(e, r, -r.sw / 2, anchorY, gMirror);
-        // ★刀2-C2:mod NPC postDraw(原版本体+glow 段后=restore 同位;tML PostDraw 语义)
-        if (mDraw?.postDraw) mDraw.postDraw(e, this.buildModDrawCtx(e.cx, e.cy, cam));
         // 546 怒滚草亮核（Main.cs:26156-26158,rotation 台账附带登记本批清偿）：
         // Extra_76 专属 glow 叠画——rotation=Clamp(vx×0.1,±π/8) 瞬时式,与本体
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
@@ -12361,6 +12362,10 @@ export class Renderer {
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
+        // ★刀2-C2+红队 R-B-F3 勘位:mod NPC postDraw——置于本体变换链 restore 之后
+        //  (旧位在体段内=世界坐标被 translate/rotate/scale/mirror 二次变换;且 r=null
+        //  首帧不对称跳过)。两路径(体段走完/preDraw false 早返)各调一次,域恒=相机域
+        if (mDraw?.postDraw) mDraw.postDraw(e, this.buildModDrawCtx(e.cx, e.cy, cam));
         // ---- ★BJ237 NPC 残影族【本体之上】挂点（本体 restore 之后=绝对世界坐标）：
         // 仅特支后绘组 120/137/138/471/477/479 + 克眼冲刺残影（原版 :26015/:26030/
         // :26361/:26383/:26396 在本体链之后的后绘 extras 区=本体之上同相）。
@@ -15851,14 +15856,16 @@ export class Renderer {
     //  无出场渐显 → floor 恒 1,整 tile 白=既有 596/811 同面近似）;拖尾/幻影层经
     //  MinionProj.draw 946 专绘走 trailShadeQueue 全亮通道（合成后直绘）双保险。
     [946, () => ({ floor: 1, whiten: true })],
-    // ★BJ669（2026-10-13 用户实报「影子层序+错位」定谳刀）：864 刃杖——GetAlpha
-    //  专支恒白不读格光（Projectile.cs:80751 `type == 764 || 856 || 857 || 864`
-    //  → Color.White）+ 辉光 4 份（:31395-31403 GetFloatingDaggerMinionGlowColor
-    //  字面色）+ 残影 12 份（:31237 同色 A/4）全层不读 Lighting.GetColor = 自发光
-    //  （946 判例同款;用户图 115 原版夜景物证=刃身+辉光全亮品红）。floor=1
-    //  （α≡0 恒显,SetDefaults :8286-8299 无 alpha 写）whiten=true（顶点色恒白,
-    //  ★I″ 消色差）。本体/辉光/残影世界层直绘的暗处全亮由本光地板承载。
-    [864, () => ({ floor: 1, whiten: true })],
+    // ★BJ669b（2026-10-13 用户对照截图 117/118 回退）：864 刃杖免光【光地板通道
+    //  回退】——BJ669 首落 floor=1（GetAlpha :80751 恒白判据,946 同款），用户
+    //  实测炸出【环境亮斑】（弹覆盖格光通道抬满 → compositeLight 把背景墙/
+    //  云层一起照亮 = 竖长水滴白斑叠在刃下,截图 117 实锤）。原版语义=GetAlpha
+    //  恒白是「弹【自身】不受格光压暗」,864 原版【无 Lighting.AddLight】（AI_169
+    //  :46559-46700 亲读零 AddLight）=不照亮周围环境——光地板把两件事并成一件
+    //  =近似破缺。946 同病面（整 tile 白）系既有登记近似,864 用户盯检显形。
+    //  本体/辉光/残影回世界层乘光：暗处刃偏暗=已知偏差（原版暗处全亮）,待
+    //  「逐弹免乘」机制刀（合成前掩码/独立层）另立,不再走光地板近似。
+    //  [bj669-864-luminous-channel] 登记债。
     // ★EoL2 修2（2026-10-05）：光之女皇彩虹尾迹族补覆盖——原版全族【不读
     //  Lighting.GetColor】（AI_171_GetColor :46398-46406 / AI_173_GetColor :46276-46284 /
     //  GetFairyQueenWeaponsColor :21780-21787——色=自发光 hsl/白,与格光无关）,
@@ -18175,7 +18182,7 @@ export class Renderer {
     p: Player, vid: number, dx: number, dy: number, sw: number, sh: number,
     dimF: HeldStealthDim | null,
   ): void {
-    const gm = ITEM_GLOWMASK[vid];
+    const gm = ITEM_GLOWMASK[vid] ?? modItemGlowMaskIdOf(vid);   // ★刀2-C1/R-B-F5:mod 伪 id
     if (gm === undefined || HAND_GLOW_SKIP.has(vid)) return;
     if (this.itemGlowHeldCollected.has(p)) return;   // 坐椅/睡床双绘去重（加算双份有害）
     this.itemGlowHeldCollected.add(p);
@@ -20763,7 +20770,7 @@ export class Renderer {
       //  → 同 dest 矩形收进 itemGlowQueue 合成后冲刷。色 = White 缺省+特例
       //  （:3211-3226）+ ApplyStealthToColor（:3475,dimF=BJ599 面）。icon 回退
       //  （ar=null）无几何不画。位次 = 本体后/火苗前（原版 glow :3499 < 火苗 :3567）。
-      if (ar && vid >= 0 && ITEM_GLOWMASK[vid] !== undefined && !HAND_GLOW_SKIP.has(vid)) {
+      if (ar && vid >= 0 && (ITEM_GLOWMASK[vid] !== undefined || modItemGlowMaskIdOf(vid) !== undefined) && !HAND_GLOW_SKIP.has(vid)) {   // ★刀2-C1/R-B-F5:mod 伪 id
         this.collectHeldItemGlow(ctx, p, vid, holdDX, holdDY, ar.sw, ar.sh, dimF);
       }
       // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
@@ -21938,7 +21945,7 @@ export class Renderer {
     //  3476 专支已自带 Glow_195（BJ348b-2）/3779 专支四游 orb（无通用 halo）/
     //  5462 Transparent≡不可见——三件 HAND_GLOW_SKIP。icon 回退无几何不画。
     //  位次 = 本体后/火苗前（原版 glow :3499 < 火苗 :3567）。
-    if (ar && heldVid >= 0 && ITEM_GLOWMASK[heldVid] !== undefined
+    if (ar && heldVid >= 0 && (ITEM_GLOWMASK[heldVid] !== undefined || modItemGlowMaskIdOf(heldVid) !== undefined)
       && !HAND_GLOW_SKIP.has(heldVid)
       && (!STAFF_ITEMS.has(heldVid) || heldVid === STAFF_GLOW_SPECIAL)) {
       this.collectHeldItemGlow(ctx, p, heldVid, drawOX, drawOYEff, ar.sw, ar.sh, dimF);

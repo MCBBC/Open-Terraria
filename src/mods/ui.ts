@@ -87,9 +87,18 @@ export function modUiSetInGame(v: boolean): void {
   if (!v) sync();
 }
 
-/** 世界装载沿重同步(读档/换世界后面板恢复接管) */
-export function modUiResync(): void {
-  sync();
+/** 世界装载沿重同步(读档/换世界后面板恢复接管)。
+ *  ★红队 R-C-F1:stopMenu 的 setState(null) 在 Game.start【之后】跑(mainFlow 时序)——
+ *  裸 null 会摘掉宿主;世界进入链末尾须调本函数替代。
+ *  @param forceClear true=保留原 stopMenu 无条件清场语义(无面板也摘——清生成页残帧);
+ *  false=仅在宿主现役/需摘时动 setState(游戏内常规沿)。 */
+export function modUiResync(forceClear = false): void {
+  const want = inGame && visibleCount() > 0;
+  if (want) {
+    if (VUI.ui.current !== hostState) VUI.setState(hostState);
+  } else if (forceClear || VUI.ui.current === hostState) {
+    VUI.setState(null);
+  }
 }
 
 /** 世界输入让位判定(Game.inpOverDomUi 头部短路;纯算术盒命中,零 DOM 布局成本)。
@@ -200,8 +209,7 @@ export function modUiPanel(
   } else {
     entry.titleBar.onMouseDown(() => bringToFront(entry));
   }
-  // 记拖拽抓取偏移(mousedown 时鼠标相对面板左上的距离)
-  entry.titleBar.onMouseUp(() => { /* 配对清 drag */ });
+  // 记拖拽抓取偏移(mousedown 时鼠标相对面板左上的距离;冒泡序=titleBar 先、root 后)
   root.onMouseDown(() => {
     const d = root.getDimensions();
     entry.dragOffX = UIScale.mouseX - d.x;
@@ -235,7 +243,6 @@ function bringToFront(p: PanelEntry): void {
 }
 
 function makeHandle(p: PanelEntry): ModPanelHandle {
-  const w = p.root.width.getValue(0);
   return {
     key: p.key,
     get visible() { return p.visible; },
@@ -269,7 +276,6 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
     toggle() { p.visible = !p.visible; rebuildHostTree(); },
     close() { this.hide(); },
   };
-  void w;
 }
 
 /** 测试/卸载清账(引擎 vui 全局树单例——只摘本域面板) */

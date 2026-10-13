@@ -307,6 +307,11 @@ export class ModProj extends Entity {
       const self = this;
       r.queueProjFullbright((c2) => {
         // 世界系闭包(冲销侧已套 translate/scale/-cam 变换,实体段同坐标)
+        // ★红队 R-B-F4:draw 全权时冲销期重绘 mod 自绘(旧=固定重画默认贴图=mod 内容上叠原版图)
+        if (self.spec.draw) {
+          self.spec.draw(self, r.buildModDrawCtx(self.x + self.w / 2, self.y + self.h / 2, cam));
+          return;
+        }
         const fhF = frames > 1 ? img.height / frames : img.height;
         const rowF = frames > 1 ? Math.floor(self.ageTicks / (self.spec.frameRate ?? 6)) % frames : 0;
         c2.imageSmoothingEnabled = false;

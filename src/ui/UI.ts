@@ -25,6 +25,7 @@ import {
   type CraftingGridControl, type CraftingTileFilter,
 } from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域);★SW-FX38 滚轮档数/吸附步进
 import { petInfoOfVid } from '../data/vanillaPets';
+import { modItemGlowMaskIdOf } from '../mods/drawspecs';   // ★刀2-C1/R-B-F5:mod 物品光罩(背包格图标链)
 import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物
 import { MOD_RARITY_ID_BASE } from '../mods/types';   // ★刀3-1/R3-M3:词缀 cap 边界段常量
 import { showJourneyQuickGate } from './QuickGate';
@@ -455,8 +456,8 @@ export function iconUrl(game: Game, id: number): string {
         //   光罩中心≡物品图标中心（origin=rect.Size()/2 :2927/:2931）、scale 同
         //   物品（只缩不放）;合成 = xnaColorToOp(A=0 'lighter' 加算/A>0 over)。
         //   槽位量级大 → iconCache 单次烘焙全槽共用（BJ601 bake 习语）。
-        if (tvid > 0 && ITEM_GLOWMASK[tvid] !== undefined && !UI_GLOW_EXCLUDED.has(tvid)) {
-          const gmImg = game.atlas?.ensureVImage(`vanilla/Glow_${ITEM_GLOWMASK[tvid]}.png`);
+        if (tvid > 0 && (ITEM_GLOWMASK[tvid] !== undefined || modItemGlowMaskIdOf(tvid) !== undefined) && !UI_GLOW_EXCLUDED.has(tvid)) {
+          const gmImg = game.atlas?.ensureVImage(`vanilla/Glow_${ITEM_GLOWMASK[tvid] ?? modItemGlowMaskIdOf(tvid)}.png`);
           if (gmImg && gmImg.width > 0) {
             const gRect = tvid === 3858
               ? monkT3GlowRect(0)

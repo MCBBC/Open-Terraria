@@ -13952,10 +13952,13 @@ export class Game implements GameHooks {
       // 同经此链,2026-08-22 补）
       const heal = vid === 3001 ? this.strangeBrewRoll() : f.healLife;
       // ★刀5:具名修正槽『Player.ApplyLifeAndOrMana』(治疗量;空槽直通零分配;
-      //  值链=后钩吃前钩产物;消费侧钳 ≥0)
+      //  值链=后钩吃前钩产物;消费侧钳 ≥0。★红队 R-C-F5:0 值不飘字=原版
+      //  Player.cs:52566 num>0 门同相)
       const healFinal = Math.max(0, Math.round(runVanillaOverrideValue('Player.ApplyLifeAndOrMana', heal, { vid })));
-      p.hp = Math.min(p.maxHp, p.hp + healFinal);
-      this.addDamageNumber(p.cx, p.y, healFinal, false, '#40E080');
+      if (healFinal > 0) {
+        p.hp = Math.min(p.maxHp, p.hp + healFinal);
+        this.addDamageNumber(p.cx, p.y, healFinal, false, '#40E080');
+      }
       runModHealItem(vid, healFinal);   // ★五百四十八:治疗物使用钩(jelly 光环族=GetSource_ItemUse 治疗物交互面)
       if (f.potion) this.applyPotionSickness(vid);            // :5284-5286
     }
@@ -17506,8 +17509,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 诡药 3001：随机 70-120 + i-帧档（Player.cs:51126-51146，2026-08-22 补——
             // 曾固定 70 丢随机段与 10/20/30% 档 240/120/60t 免疫）
             const heal = fvid === 3001 ? this.strangeBrewRoll() : ff.healLife;
-            this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
-            this.addDamageNumber(this.player.cx, this.player.y, heal, false, '#40E080');
+            // ★刀5+红队 R-C-F2:三 healLife 路径同槽(手喝主路径;quickConsume/quickDrinkPotion 同)
+            const healFinal = Math.max(0, Math.round(runVanillaOverrideValue('Player.ApplyLifeAndOrMana', heal, { vid: fvid })));
+            if (healFinal > 0) {
+              this.player.hp = Math.min(this.player.maxHp, this.player.hp + healFinal);
+              this.addDamageNumber(this.player.cx, this.player.y, healFinal, false, '#40E080');
+            }
             this.applyPotionSickness(fvid);   // 药水病分档（ApplyPotionDelay :51085-51120）
           }
           if (ff.healMana) {
@@ -22549,7 +22556,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!drillWallFail) {
         st.setWall(tx, ty, 0);
         const dropVid = wallDropItemVid(wall);
-        const dropKey = dropVid > 0 ? VI(dropVid) : '';
+        const dropKey = dropVid > 0 ? (ITEM_DEFS[dropVid]?.key ?? VI(dropVid)) : '';   // ★R-A-M1:mod 物品键直查
         if (dropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, dropKey, 1);   // Stack 缺省 1
       }
       // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
@@ -23156,7 +23163,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!hammerWallFail) {
           st.setWall(wX, wY, 0);
           const dropVid = wallDropItemVid(w);
-          const dropKey = dropVid > 0 ? VI(dropVid) : '';
+          const dropKey = dropVid > 0 ? (ITEM_DEFS[dropVid]?.key ?? VI(dropVid)) : '';   // ★R-A-M1:mod 物品键直查
           if (dropKey) this.spawnDrop(wX * TILE + 8, wY * TILE + 8, dropKey, 1);
         }
         // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
@@ -26491,9 +26498,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // + 墙 ≠ 350。成功：旧墙尘 + 掉旧墙物（SW-BF1 2026-09-06）+ 换墙 + 消耗
     if (st.wall[i0] !== 0) {
       const oldWall = st.wall[i0];
-      if (oldWall === 350) return;
-      if (WALL_DUNGEON.has(oldWall) && !this.skeletronDowned()) return;
-      if (oldWall === 87 && !this.world.flags['downed_245']) return;
+      // ★刀3-墙/R-A-M2(2026-10-13):内联三支(350/地牢/87)收编 killWallCheckFailure
+      //  单源(语义 1:1:mod unbreakable 恒拒/dungeonGate 门+原版两门同式)——旧内联形
+      //  对 mod 墙不设防=unbreakable 可被任意墙覆盖。原版 PlaceThing_TryReplacingWalls
+      //  过的正是 KillWall_CheckFailure 同一门。
+      if (killWallCheckFailure(oldWall, this.skeletronDowned(), !!this.world.flags['downed_245'])) return;
       // NearFriendlyWall：自身/四邻任一格墙为空或房墙（WALL_HOUSE 表）
       const friendly = (ax: number, ay: number) =>
         !st.inBounds(ax, ay) || st.wall[st.idx(ax, ay)] === 0 || WALL_HOUSE.has(st.wall[st.idx(ax, ay)]);
@@ -26504,7 +26513,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 清偿本面旧登记债「墙掉落表未移植——旧墙物品不掉」。表内墙掉 1 件,表外墙不掉
       // （GetItemDrops=0）。fail 门（上方 WALL_DUNGEON/87 两行）已按原版先行拦截。
       const oldDropVid = wallDropItemVid(oldWall);
-      const oldDropKey = oldDropVid > 0 ? VI(oldDropVid) : '';
+      const oldDropKey = oldDropVid > 0 ? (ITEM_DEFS[oldDropVid]?.key ?? VI(oldDropVid)) : '';   // ★R-A-M1
       if (oldDropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, oldDropKey, 1);
       st.setWall(tx, ty, wallId);
       // ReplaceWall 尾 ClearWallPaintAndCoating（WorldGen.cs:63049-63050 `tile.wall =
@@ -33245,7 +33254,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (explWallFail) continue;               // fail=墙保持原状不掉物（:60890-60892）
               st.setWall(wx, wy, 0);
               const dropVid = wallDropItemVid(w);
-              if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1);
+              if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, ITEM_DEFS[dropVid]?.key ?? VI(dropVid), 1);   // ★R-A-M1
             }
           }
         }
@@ -33879,7 +33888,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 //  与 explodeAt 支同修,注见彼处）
                 st.setWall(wx, wy, 0);
                 const dropVid = wallDropItemVid(w);
-                if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1);
+                if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, ITEM_DEFS[dropVid]?.key ?? VI(dropVid), 1);   // ★R-A-M1
               }
             }
           }
@@ -47408,8 +47417,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 诡药 3001：随机 70-120 + i-帧档（Player.cs:51126-51146，与主链同构）
       const qvid = (ITEM_DEFS[s.id]?.vid ?? -1);
       const heal = qvid === 3001 ? this.strangeBrewRoll() : ff.healLife;
-      p.hp = Math.min(p.maxHp, p.hp + heal);
-      this.addDamageNumber(p.cx, p.y, heal, false, '#40E080');
+      // ★刀5+红队 R-C-F2:三 healLife 路径同槽(背包快捷饮)
+      const healFinal = Math.max(0, Math.round(runVanillaOverrideValue('Player.ApplyLifeAndOrMana', heal, { vid: qvid })));
+      if (healFinal > 0) {
+        p.hp = Math.min(p.maxHp, p.hp + healFinal);
+        this.addDamageNumber(p.cx, p.y, healFinal, false, '#40E080');
+      }
       // 药水病五档分档（ApplyPotionDelay :51085-51120——曾写死 60s 丢档：
       // 5=30s/1912=40s/227·126=45s/3001=40-70s 随机/其余 60s）
       this.applyPotionSickness(qvid);

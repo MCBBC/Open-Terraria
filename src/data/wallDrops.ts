@@ -22,6 +22,15 @@
 
 import { WALL_DUNGEON_SHEETS } from './tiles';
 import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(掉落/fail 门消费;零环:walls 不回依本模块)
+import { ITEM_DEFS } from './items';
+
+/** ★刀3-墙/R-A-M1(2026-10-13):掉落键双域——mod 物品(30000+)走 def.key 直查
+ *  (ITEM_BY_KEY 全链已注册),原版 vid 走消费方既有 VI 反查;旧 VI-only 形对
+ *  mod 掉落三支(锤/换墙/爆炸)静默不掉。返回 ''=不掉(消费方判空)。 */
+export function wallDropItemKey(vid: number): string {
+  if (vid >= 30000) return ITEM_DEFS[vid]?.key ?? '';
+  return '';   // 原版域=消费方 VI 反查(本 helper 只补 mod 域)
+}
 
 /** Main.wallDungeon（Main.cs:10734-10745）——KillWall_CheckFailure 消费。
  *  ★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等）——转出口

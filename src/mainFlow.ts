@@ -7,6 +7,7 @@ import { peekSaveDims, worldGenTimeoutMs } from './workers/WorldGenClient';   //
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { resolveTouchMode } from './core/input/touchMode';
+import { modUiResync } from './mods/ui';   // ★刀1/R-C-F1:mod UI 宿主重同步(stopMenu 清场沿)
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
@@ -1359,7 +1360,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     legacyShim?.remove();
     legacyShim = null;
     // 进游戏前清空 VUI（游戏内 UI 走 DOM，生成页仍用 VUI）
-    VUI.setState(null);
+    // ★红队 R-C-F1:mod UI 宿主现役时回挂(裸 null 摘宿主=世界重载面板失挂);
+    // forceClear=保留原无条件清场语义(无面板时清生成页残帧)
+    modUiResync(true);
     VUI.clear();
   }
 

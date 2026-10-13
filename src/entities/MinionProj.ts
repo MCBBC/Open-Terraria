@@ -8804,7 +8804,12 @@ export class MinionProj extends Entity {
               const txc = Math.floor(tx2 / 16), tyc = Math.floor(ty2 / 16);
               if (game.world.store.isSolid(txc, tyc)) continue;   // :70040 SolidTile 门
               if (!lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, tx2, ty2)) continue;
-              const d = game.spawnDust(0, 0, 0, 0, 226, 0, 0, 100, null, 0.7, true, true);
+              // ★BJ669d（2026-10-13 用户实报「只有中间电弧没有外围」定谳）：首两参
+              //  须传场缘点（原版 NewDustDirect(targetPosition,…) :70041——裁剪盒=
+              //  (Position,10,10) 恒定,BJ466 裁剪在 spawn 头、后钉 d.x 无效）——旧
+              //  传 (0,0)=世界原点恒屏外 → j 循环零产出（探针 3s 71 尘全中轴、外围 0）
+              //  =「只有中间电弧没有外围半圆」根因。0 尺寸盒不构成豁免（BJ480 钉案）。
+              const d = game.spawnDust(tx2, ty2, 0, 0, 226, 0, 0, 100, null, 0.7, true, true);
               if (d) {
                 d.x = tx2; d.y = ty2;
                 const vl = Math.hypot(anchorX - tx2, anchorY - ty2) || 1;
@@ -10122,8 +10127,10 @@ export class MinionProj extends Entity {
     //      原版本支在【本体前】（:31395 → :31578 本体）= 影子画在刃背后、刃身不透明
     //      域全遮辉光（用户图 115 原版物证=刃后淡影）。旧 BJ650件1 走 pushGlowOps
     //      'over' 逃逸队列=合成后冲刷叠本体顶（层序反+「暗处保发光 vs 层序二取一」
-    //      当时取前者）——用户拍板按原版层序。免光改由 SELF_LUMINOUS_PROJS 光地板
-    //      承载（本刀伴生,Renderer 946 判例同款）= 层序+自发光二兼得。
+    //      当时取前者）——用户拍板按原版层序。★BJ669b：免光的光地板伴生刀已回退
+    //      （用户对照截图 117 炸出环境亮斑——弹覆盖格光抬满把背景墙一起照亮,而
+    //      原版 GetAlpha 恒白=只免自身压暗、不照亮环境,AI_169 零 AddLight）——
+    //      本体/辉光/残影回世界层乘光,暗处偏暗=登记债 [bj669-864-luminous-channel]。
     //      色式不变（GetFloatingDaggerMinionGlowColor :80377-80381:hue=0.66+0.33×
     //      (whoAmI%6)/6 六档蓝→品红、s=0.7/l=0.6、×0.7f 逐字节截断、A=(byte)178/4=44）;
     //      源矩形 = value18（rectangle4.Y+=Height=帧 1 纯白模）;位 = Center+(0,gfxOffY)

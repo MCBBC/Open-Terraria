@@ -71,15 +71,18 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
   if (!def || !item) return true;
   const vid = def.vid;
   if (vid === undefined || vid < MOD_ITEM_STABLE_BASE) return true;
-  // ★刀5-A 族:声明规则解释器先于代码钩(数据面优先;ownedProjBelow=在场弹补位门)
+  // ★刀5-A 族:声明规则解释器先于代码钩(ownedProjBelow=在场弹补位门)。
+  //  ★红队 R-C-F3 语义修正:合取门(tML CanUseItem 同相)——规则拒=假;规则过=
+  //  落代码钩(双声明物品两门同验;灾厄普查今日零交集,预防性纠正)
   const rule = modCanUseRules.get(vid);
   if (rule?.ownedProjBelow) {
-    const g = (globalThis as unknown as { __swGame?: { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } } }).__swGame;
-    const list = g?.entities?.projectiles;
-    if (!list) return true;
-    let n = 0;
-    for (const q of list) if (!q.dead && q.projId === rule.ownedProjBelow.proj) n++;
-    return n < rule.ownedProjBelow.lt;
+    // ★红队 R-C-F6:计数走调用侧 game 手(原 __swGame 全局探针=fail-open 窗+清理时序耦合)
+    const list = (game as unknown as { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } })?.entities?.projectiles;
+    if (list) {
+      let n = 0;
+      for (const q of list) if (!q.dead && q.projId === rule.ownedProjBelow.proj) n++;
+      if (!(n < rule.ownedProjBelow.lt)) return false;
+    }
   }
   const fn = itemCanUse.get(vid);
   if (!fn) return true;

@@ -15,9 +15,7 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1400, height: 860 },
 });
 const pageA = await browser.newPage();
-const pageB = await browser.newPage();
 pageA.on('pageerror', (e) => log(`A PAGE-EXC ${String(e).slice(0, 160)}`));
-pageB.on('pageerror', (e) => log(`B PAGE-EXC ${String(e).slice(0, 160)}`));
 
 // 两页共用同一 profile → 先在 A 打开(B 稍后再开,共享 IDB/locks)
 await pageA.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 180000 });
@@ -54,6 +52,7 @@ await pageA.waitForFunction(() => !!window.__swGame?.world?.store?.w, { timeout:
 log('A IN-GAME');
 
 // B:同 profile 开页(共享 WebLocks 域) → 走到世界列表 → Play 同一世界
+const pageB = await browser.newPage();   // A 进世界后再开 B(共享 IDB/WebLocks 域)
 await pageB.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 180000 });
 await pageB.waitForFunction(() => document.body && document.body.innerText.includes('单人模式'), { timeout: 180000 });
 await new Promise((r) => setTimeout(r, 1200));

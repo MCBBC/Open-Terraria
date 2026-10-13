@@ -5,7 +5,8 @@
 // 零恒等表;TileStore.wall u16 通道原生兼容)+ 本表 meta(dropItem/unbreakable/
 // dungeonGate——wallDrops 两函数+canPlayerSmashWall 消费)。
 // 贴图=Wall_N 同构 TEdit 13 列×36px 整表(vanilla/Wall_<id>.png alias+vmeta 注入,
-// assets 两支同接);无贴图/解码失败→mapColor 色块(引擎既有兜底)。
+// assets 两支同接)。★R-A-m4 兜底语义二分:已注册无贴图→mapColor 色块;
+// 未注册域外值(旧档残留)→什么都不画(露背景)——两种「无贴图」视觉不同。
 // tML 对应:ModWall 7 钩(Drop/KillWall/AnimateWall/WallFrame/CanBeTeleportedTo/
 // OnWallConverted/RegisterItemDrop)——本批声明面覆盖 Drop/KillWall(fail 门),
 // AnimateWall/OnWallConverted=登记债(recon doc D 台账)。

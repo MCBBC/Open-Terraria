@@ -43,6 +43,7 @@ import { liquidCollision } from '../stats/TouchDamage';
 import { canHitLine } from '../physics/LineOfSight';
 import { getDisplayableDrops } from '../data/vanillaFishing';
 import type { FishingRollCtx } from '../data/vanillaFishing';
+import { modItemGlowMaskIdOf } from '../mods/drawspecs';   // ★刀2-C1/R-B-F5
 import { ITEM_GLOWMASK } from '../data/vanillaItemGlow';   // ★BJ603 件4① 装饰鱼光罩守卫
 import { queueRippleRaw, RippleShape } from '../render/WaterWaves';
 
@@ -912,7 +913,7 @@ function fishGlowCopy(
   atlas: { ensureVImage(path: string): CanvasImageSource | null },
   vid: number, rgb: [number, number, number],
 ): HTMLCanvasElement | null {
-  const gm = ITEM_GLOWMASK[vid];
+  const gm = ITEM_GLOWMASK[vid] ?? modItemGlowMaskIdOf(vid);   // ★刀2-C1/R-B-F5
   if (gm === undefined) return null;
   const q = (v: number) => Math.round(v / 32) * 32;
   const key = `g${gm}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
@@ -1022,7 +1023,7 @@ export function drawFakeFishSchool(r: {
     // ★BJ603 件4① glowMask 暗罩叠画（:499-502——色 (51,51,51)×num2×0.7 恒暗、
     //   无 sonar 白化;源=Glow_{gm} 整张,变换同本体。全 vanilla 鱼无 glowMask
     //   （数据面销案并存,见 fishGlowCopy 注）→ 守卫面对 mod/管理面喂入生效）
-    if (ITEM_GLOWMASK[f.itemType] !== undefined) {
+    if ((ITEM_GLOWMASK[f.itemType] !== undefined || modItemGlowMaskIdOf(f.itemType) !== undefined)) {
       const glowImg = fishGlowCopy(atlas, f.itemType, [51, 51, 51]);
       if (glowImg) {
         ctx.save();

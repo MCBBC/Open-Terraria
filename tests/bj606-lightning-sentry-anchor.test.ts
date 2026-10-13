@@ -334,14 +334,17 @@ describe('BJ606-R ⑥：锚定冻结锁（坡面地形不瞬移——HandleMovem
 // 本带。原版 AI_137 全段【零 NewProjectile】（弹 686=DD2BetsyFireball,Betsy 专弹,
 // hostile,与光环无关=「686 视觉弹」假设证伪）——攻击产物完整清单=伤害管线+尘226
 // 双循环+zap 声+光带,四项本仓已齐（真机探针:夜场 lightAtField=[28,99,141] 蓝占优）。
-describe('BJ606-R2 ⑦：场域蓝光带锁（lightRGB 688-690=(0.2,0.7,1)——PlotTileLine 带折算点光）', () => {
-  it('三档塔 lightRGB=(0.2,0.7,1)（:69983 v3_1 逐值;686=BetsyFireball 非本族）', () => {
+describe('BJ606-R2 ⑦：场域蓝光带锁（★BJ669d 重锚：C16b-R17 已迁出 lightRGB 点光→lightBand 带式,锁消费终态）', () => {
+  it('三档塔 lightBand=(hw40,hh40,rgb(0.2,0.7,1))（:69983 v3_1 逐值;686=BetsyFireball 非本族）', () => {
     const { hooks, player } = makeGame();
     for (const vid of [688, 689, 690] as const) {
       const m = new MinionProj(50 * 16, 98 * 16 - 8, vid, 34, 0, true, 0, false, () => player);
       run(m, hooks, 2);
-      const l = (m as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
-      expect(l, `vid ${vid} 光色`).toEqual([0.2, 0.7, 1]);
+      const l = (m as unknown as { lightBand: { x: number; y: number; hw: number; hh: number; rgb: [number, number, number] } | null }).lightBand;
+      expect(l, `vid ${vid} 光带`).toBeTruthy();
+      expect(l!.rgb, `vid ${vid} 光色`).toEqual([0.2, 0.7, 1]);
+      expect(l!.hw).toBe(40);   // ±40px 带（:69984 UnitX×40）
+      expect(l!.hh).toBe(40);
     }
   });
 });
@@ -413,10 +416,10 @@ describe.skipIf(process.env.SW_BJ606_MUT)('BJ606 ③：变异自证（恰红+逐
       '尘 226 出炉');
   });
 
-  it('M7 场域蓝光带摘除（688-690 出 lightRGB 表→域内照明回退环境暗）→ ⑦光锁红', () => {
+  it('M7 场域蓝光带摘除（688-690 lightBand AURA_TOWER 门摘除→域内照明回退环境暗）→ ⑦光锁红', () => {
     mutate(MINION,
-      'case 688: case 689: case 690: return [0.2, 0.7, 1];',
-      'case 688: case 689: case 690: return null; // ★BJ606 变异:光带摘除',
+      'if (!AURA_TOWER.has(this.projId)) return null;',
+      'if (true) return null; // ★BJ606 变异:光带摘除',
       '场域蓝光带锁');
   });
 });

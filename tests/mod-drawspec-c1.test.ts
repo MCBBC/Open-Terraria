@@ -74,7 +74,7 @@ describe('刀2-C1 e2e:绘制声明面装载+查表', () => {
     const npcId = res?.allocation?.npcs.get('mod_d1_glow_wraith')!;
     expect(npcId).toBeDefined();
     expect(modNpcFrameRateOf(npcId)).toBe(3);
-    expect(modNpcGlowSpecOf(npcId)).toEqual({ tex: `vanilla/NPC_Glow_${npcId}.png` });
+    expect(modNpcGlowSpecOf(npcId)).toEqual({ tex: `vanilla/NPC_Glow_${npcId}.png`, mode: 'frame' });   // ★R-B-F1:显式 mode 防落 trail 分支
     expect(modNpcFullbright(npcId)).toBe(true);
     expect(modNpcFrameRateOf(42)).toBeNull();     // 原版域零扰动
     expect(modNpcGlowSpecOf(42)).toBeNull();

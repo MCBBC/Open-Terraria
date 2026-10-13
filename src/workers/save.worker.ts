@@ -50,7 +50,7 @@ type SaveWorkerRequest = SaveRequest
   | { type: 'exportWld'; id: number; json: string }
   // ★mod 桥(2026-10-04,fire-and-forget 幂等):mod 物品/tile 稳定 id 增量——
   //  序列化(RLE 稳定 id 翻译)在本线程表上完成,不接桥=mod 内容存档静默归 0
-  | { type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]>; itemKeys: Array<[string, number]>; tileKeys: Array<[string, number]> } };
+  | { type: 'applyModIds'; payload: { itemStableIds: number[]; tilePairs: Array<[number, number]>; itemKeys: Array<[string, number]>; tileKeys: Array<[string, number]>; wallKeys?: Array<[string, number]> } };   // ★R-A-m2:类型对齐 protocol(运行时忽略)
 
 self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   const req = e.data;

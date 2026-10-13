@@ -18,9 +18,13 @@ const npcFullbright = new Set<number>();
 /** vid → 物品 glowmask 伪 GlowMaskID(1000+vid-30000;贴图经 alias 进 Glow_ 空间) */
 const itemGlowMask = new Map<number, number>();
 
+const npcDrawRegistered = new Set<number>();
 export function registerModNpcDrawSpec(
   vid: number, spec: { frameRate?: number; glowTex?: string; fullbright?: boolean },
 ): void {
+  // ★红队 R-B-F10:fail-fast(与 hooks 族纪律一致;boot-once 装载下防重)
+  if (npcDrawRegistered.has(vid)) throw new Error(`[mod-draw] npcDraw 重复注册: ${vid}`);
+  npcDrawRegistered.add(vid);
   if (spec.frameRate !== undefined) {
     if (!(spec.frameRate >= 1) || !Number.isFinite(spec.frameRate)) {
       throw new Error(`[mod-draw] frameRate 须 ≥1: ${spec.frameRate}(vid ${vid})`);
@@ -35,9 +39,11 @@ export function modNpcFrameRateOf(vid: number): number | null {
   return npcFrameRate.get(vid) ?? null;
 }
 
-export function modNpcGlowSpecOf(vid: number): { tex: string } | null {
+export function modNpcGlowSpecOf(vid: number): { tex: string; mode: 'frame' } | null {
   const tex = npcGlow.get(vid);
-  return tex ? { tex } : null;
+  // ★红队 R-B-F1:显式 mode:'frame'——缺省漏进 drawNpcGlow 尾段 'trail' 分支
+  //  (419 火月怪专属)=中心+4 份速度拷贝(静止过曝/移动十字鬼影);'frame'=单份叠画
+  return tex ? { tex, mode: 'frame' } : null;
 }
 
 export function modNpcFullbright(vid: number): boolean {
@@ -61,16 +67,10 @@ export function modItemGlowMaskIdOf(vid: number): number | undefined {
   return itemGlowMask.get(vid);
 }
 
-/** glowmask 伪 id 反查(assets aliasJob 用:vid=1000+(vid-30000) 还原) */
-export function modItemGlowMaskVidOf(gm: number): number | undefined {
-  if (gm < MOD_ITEM_GLOWMASK_BASE) return undefined;
-  const vid = 30000 + (gm - MOD_ITEM_GLOWMASK_BASE);
-  return itemGlowMask.has(vid) ? vid : undefined;
-}
-
 export function _resetModDrawSpecsForTests(): void {
   npcFrameRate.clear();
   npcGlow.clear();
   npcFullbright.clear();
   itemGlowMask.clear();
+  npcDrawRegistered.clear();
 }

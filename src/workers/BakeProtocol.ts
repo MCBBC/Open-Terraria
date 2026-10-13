@@ -64,7 +64,11 @@ export type BakeWorkerRequest =
       maples: Array<{ file: string; bmp: ImageBitmap }>;
       sheets: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }>;
       modTiles?: Array<{ def: import('../data/tiles').TileDef; internal: number; stable: number }>;
-      modTileMetas?: Array<{ stableId: number; meta: unknown }> }
+      modTileMetas?: Array<{ stableId: number; meta: unknown }>;
+      /** ★刀3-墙/R-A-C2:mod 墙跨 worker(键注入 WALL_DEFS+vmeta 并入 vanilla.walls;
+       *  贴图位图随 vimages 通道) */
+      wallKeys?: Array<[string, number]>;
+      modWallVmetas?: Array<{ id: number; meta: unknown }> }
   | { type: 'bake'; id: number; snap: BakeSnapshot };
 
 /** worker 回包（worker → 主线程）。baked 的位图与快照通道全部 transfer。 */

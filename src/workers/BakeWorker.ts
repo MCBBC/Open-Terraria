@@ -21,7 +21,7 @@ import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 
 import { SpriteAtlas, type DrawRect } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
-import { TILE_BY_KEY, applyModTileDefs } from '../data/tiles';
+import { TILE_BY_KEY, applyModTileDefs, applyModWallKeys } from '../data/tiles';
 import { bakeChunkIntoEnv, type ChunkBakeEnv, type SheetEntryLike } from '../render/ChunkBake';
 import { tileAnim } from '../render/TileAnim';
 import { renderEnv, plates428Pressed } from '../render/VanillaTiler';
@@ -93,6 +93,13 @@ self.onmessage = (ev: MessageEvent<BakeWorkerRequest>) => {
     if (msg.type === 'ship') {
       // ★mod 桥(2026-10-04):mod tile def 先于贴图落表(保序直落,幂等)
       if (msg.modTiles?.length) applyModTileDefs(msg.modTiles);
+      // ★刀3-墙/R-A-C2:mod 墙(键→WALL_DEFS 色块兜底域+vmeta→vanilla.walls tiler 消费;
+      //  贴图位图走通用 vimages 注入)
+      if (msg.wallKeys?.length) applyModWallKeys(msg.wallKeys);
+      if (msg.modWallVmetas?.length) {
+        const wt = (atlas.vanilla.walls as unknown as Record<string, unknown>);
+        for (const { id, meta } of msg.modWallVmetas) wt[String(id)] = meta;
+      }
       // ★B5b:mod tile 运行时 meta 并入 worker 侧静态快照(vmeta 伪 sheet 注册;
       //  主线程侧 assets.ts 直写同对象=live,worker 侧必须 ship 携带)
       if (msg.modTileMetas?.length) {
