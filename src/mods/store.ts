@@ -15,6 +15,8 @@ export interface ModRow {
   description: string;
   enabled: boolean;
   addedAt: number;
+  /** ★包根 icon.png dataURL(2026-10-13 面板图标显示;缺省 null=占位) */
+  iconDataUrl?: string | null;
 }
 
 export interface ModStorage {
@@ -46,6 +48,7 @@ function sanitizeRow(raw: unknown): ModRow | null {
     description: str(o.description),
     enabled: o.enabled === true,
     addedAt: typeof o.addedAt === 'number' ? o.addedAt : 0,
+    iconDataUrl: typeof o.iconDataUrl === 'string' ? o.iconDataUrl : null,
   };
 }
 
@@ -69,7 +72,7 @@ export class ModStore {
   /** 安装:zip 字节落库 + 注册表行写 manifest 冗余字段。同 id 覆盖重装。
    *  ★P4 红蓝修正(D-m3):putZip 失败(IDB 不可用)即抛——旧实现注册表照写,
    *  UI 报"已安装"但 zip 未落,下次启动变"数据缺失"行 */
-  async install(manifest: ModManifest, bytes: Uint8Array): Promise<ModRow> {
+  async install(manifest: ModManifest, bytes: Uint8Array, iconDataUrl?: string | null): Promise<ModRow> {
     const copy = new Uint8Array(bytes.length);
     copy.set(bytes);
     const ok = await this.storage.putZip(manifest.id, new Blob([copy], { type: 'application/zip' }));
@@ -78,6 +81,7 @@ export class ModStore {
     const row: ModRow = {
       id: manifest.id,
       name: manifest.name,
+      iconDataUrl: iconDataUrl ?? null,
       version: manifest.version,
       author: manifest.author ?? '',
       description: manifest.description ?? '',

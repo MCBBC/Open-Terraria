@@ -60,7 +60,9 @@ function clampEntry(e: ModConfigEntry, v: unknown): boolean | number | string {
   return typeof v === 'string' ? v : String(v ?? e.default ?? '');
 }
 
-/** 装载相位:异步读 kv 存储值构建运行时(在 loader 脚本相位前 await) */
+/** 装载相位:异步读 kv 存储值构建运行时(在 loader 脚本相位前 await)。
+ *  ★纯构建不注册活实例——modsPanel 等编辑面也走本口,注册权在 loader(防独立
+ *  编辑实例冒充 sw.config 本体=双写漂移)。 */
 export async function loadModConfigValues(modId: string, schema: ModConfigSchema): Promise<ModConfigState> {
   let stored: ModConfigValues | null = null;
   try {
@@ -68,4 +70,25 @@ export async function loadModConfigValues(modId: string, schema: ModConfigSchema
     if (raw) stored = JSON.parse(raw) as ModConfigValues;
   } catch { /* 坏档=回默认值 */ }
   return new ModConfigState(modId, schema, stored);
+}
+
+// ---- 活实例注册表(2026-10-13 游戏内模组设置面板):装载相位构建的 ModConfigState
+// 即 mod entry 持有的 sw.config 本体——游戏内面板优先取活实例编辑=热生效
+// (逐拍读 config 的 mod 立刻感知),否则(标题屏/装载失败)回落 loadModConfigValues
+// 独立实例=重载后生效。两路 set 都持久化 kv,语义一致。 ----
+const liveStates = new Map<string, ModConfigState>();
+
+/** loader L2 相位注册(生产链每 mod 一次;同 id 重装载覆盖) */
+export function registerLiveModConfig(state: ModConfigState): void {
+  liveStates.set(state.modId, state);
+}
+
+/** 游戏内面板读活实例;未装载(标题屏/脚本失败)返 null */
+export function getLiveModConfig(modId: string): ModConfigState | null {
+  return liveStates.get(modId) ?? null;
+}
+
+/** loader 单测重置用 */
+export function _resetLiveModConfigsForTests(): void {
+  liveStates.clear();
 }

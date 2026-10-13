@@ -3,6 +3,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import type { ModPack } from './types';
 import { ModManifestError, parseModManifest } from './manifest';
+import { proceduralModIcon } from './icons';
 
 export class ModPackError extends Error {}
 
@@ -41,7 +42,18 @@ export function readModPack(bytes: Uint8Array): ModPack {
     throw new ModPackError('mod 包缺 mod.json');
   }
   const manifest = parseModManifest(manifestJson);
-  return { manifest, files };
+  // ★包根 icon.png → dataURL(2026-10-13 模组面板重构:图标显示;缺省=程序化图标兜底
+  //   2026-10-13 用户实报:第三方移植包(Lights And Shadows/Calamity)无图标,面板
+  //   占位字母观感差——同 id 确定性生成,重装/刷新不漂移)
+  let iconDataUrl: string | null = null;
+  const iconEntry = Object.entries(entries).find(([k]) => k.toLowerCase() === 'icon.png');
+  if (iconEntry && typeof document !== 'undefined') {
+    try {
+      iconDataUrl = `data:image/png;base64,${btoa(String.fromCharCode(...iconEntry[1].subarray(0, 256 * 1024)))}`;
+    } catch { /* 大图标/无 btoa 环境=回落程序化图标 */ }
+  }
+  if (!iconDataUrl) iconDataUrl = proceduralModIcon(manifest.id, manifest.name);
+  return { manifest, files, iconDataUrl };
 }
 
 /** 从文件表读文本 json(L1 内容文件通用口) */

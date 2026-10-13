@@ -3332,9 +3332,20 @@ export const PALPETTABLE_MINIONS = new Set([1093, 1112, 1118, 1094, 1113, 1098, 
  *  projs = 该 buff 认可的全部弹型（多型族：矮人 191-194 :10150-10157、蜘蛛 390/391/392
  *  :10233-10240、双子 387/388 :10249-10256、海盗 393/394/395 :10265-10272）。
  *  216 雀宝宝带重生支（弹缺 + 背包有 4281 + 有空槽 → 直生弹 :10369-10385,见维护链）。
+ *  extra = 伴生可视本体（不参与 inService/buff 续期判据=凭证单向语义;仅在维护链
+ *  杀支随 buff 槽摘除同拍带走——原版经 timeLeft=2 断续命 ≤2t 亡,本仓同拍直杀等价）。
+ *  ★BJ670（2026-10-13 用户实报「阿比盖尔右击 buff 消失但本体不消失」）：335 条目
+ *  伴生本体 963 缺席=右击后 963 残留的根因——原版凭证弹 970（AbigailCounter,
+ *  hide=true,aiStyle 164 :9184-9197）与可视本体 963（aiStyle 62 :9102-9116）是
+ *  双弹结构：5114 shoot=970（Item.cs:40965）,970 补生 963（UpdateAbigailStatus
+ *  Player.cs:12363-12377 else-if 支）；buff 335 支置位/续期的弹判据只认 970
+ *  （Player.cs:10946-10960 ownedProjectileCounts[970]）,963/970 双弹的保活都走
+ *  player.abigailMinion 旗 → timeLeft=2 贴地（AI_062 :66077-66084 / AI_164
+ *  :47479-47486）——旗由 buff 循环置位、ResetEffects 每拍清零（:18756）,右击摘
+ *  buff → 旗无人置 → 双弹 ≤2t 同灭。本仓无 timeLeft 面 → 同拍直杀须双弹全带。
  *  187 星尘守护者/391/392 坐骑伴生不在本表（守护者走 fixedUpdate 星尘套装常驻段,
  *  坐骑本体未实装） */
-export const MINION_BUFFS: ReadonlyArray<{ buff: number; staff: number; projs: number[] }> = [
+export const MINION_BUFFS: ReadonlyArray<{ buff: number; staff: number; projs: number[]; extra?: number[] }> = [
   { buff: 49, staff: 1157, projs: [191, 192, 193, 194] },   // 矮人（:10149）
   { buff: 64, staff: 1309, projs: [266] },                  // 史莱姆宝宝（:10184）
   { buff: 83, staff: 1802, projs: [317] },                  // 乌鸦（:10168）
@@ -3355,7 +3366,7 @@ export const MINION_BUFFS: ReadonlyArray<{ buff: number; staff: number; projs: n
   { buff: 271, staff: 4758, projs: [864] },                 // 附魔飞刀（:10496）
   { buff: 322, staff: 5005, projs: [946] },                 // 泰拉棱镜（:10512）
   { buff: 325, staff: 5069, projs: [951] },                 // 小雪怪（:10440）
-  { buff: 335, staff: 5114, projs: [970] },                 // 阿比盖尔（:10456）
+  { buff: 335, staff: 5114, projs: [970], extra: [963] },   // 阿比盖尔（:10456;★BJ670 伴生本体 963——原版双弹 970 凭证+963 可视,右击须双灭）
   { buff: 355, staff: 5456, projs: [1022] },                // 蘑菇小伙伴（:10392）
   { buff: 385, staff: 5663, projs: [1093] },                // 帕鲁捣蛋猫（:10408）
   { buff: 386, staff: 5664, projs: [1094] },                // 帕鲁火绒狐（:10424）
@@ -3397,21 +3408,23 @@ export function maintainMinionBuffs(
     const m = e as MinionProj;
     if (m instanceof MinionProj && !m.dead) owned.set(m.projId, (owned.get(m.projId) ?? 0) + 1);
   }
-  for (const { buff, projs } of MINION_BUFFS) {
+  for (const { buff, projs, extra } of MINION_BUFFS) {
     const bt = BUFF_BY_VANILLA(buff);
     if (bt === undefined) continue;
     // ★BJ405 槽位门：buff 槽不在（右键取消/尚未授予）= 原版维护支整体不进——
     // 在役随从失去活体凭证 → 同拍直杀（见函数注的 timeLeft 桥建模）
-    const inService = projs.some((p) => (owned.get(p) ?? 0) > 0);
+    // ★BJ670：杀支带 extra 伴生弹且不设 inService 门——原版「buff 槽摘 →
+    //  abigailMinion 旗无人置 → 全族弹 timeLeft=2 断续命 ≤2t 同灭」,与在役与否
+    //  无关；旧 inService 门会让「凭证 970 先亡（→本支摘 buff）→ 次拍 963 残留」
+    const killSet = extra ? [...projs, ...extra] : projs;
     if (!player.buffs.has(bt)) {
-      if (inService) {
-        for (const e of projectiles) {
-          const m = e as MinionProj;
-          if (m instanceof MinionProj && !m.dead && projs.includes(m.projId)) m.dead = true;
-        }
+      for (const e of projectiles) {
+        const m = e as MinionProj;
+        if (m instanceof MinionProj && !m.dead && killSet.includes(m.projId)) m.dead = true;
       }
       continue;
     }
+    const inService = projs.some((p) => (owned.get(p) ?? 0) > 0);   // 仅 216 重生支消费（BJ670 起杀支不用）
     // 216 重生支（UpdateBuffs :10369-10385）：弹缺 + 背包有雀杖 4281 + 空随从槽
     //（原版分支在 buff 槽循环体内 → 槽不在不重生,BJ405 同一门）
     if (!inService && buff === 216 && !player.dead && player.inv.countOf(4281) > 0) {

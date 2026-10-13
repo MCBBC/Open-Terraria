@@ -63,6 +63,8 @@ import { initResourcePacks, type ResourcePackManager } from './resources/Resourc
 import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 import { modBuffIconUrl } from './mods/buffs';
 import { setModAudioSink, getModWavData } from './mods/hooks';
+import { getModLoadResult } from './mods/loader';   // ★模组设置入口门控(loaded>0 才显示)
+import { openModSettingsPanel } from './mods/modSettingsPanel';
 
 // canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
@@ -461,6 +463,11 @@ function openInGamePause(game: Game): void {
     // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
     // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
     onSettings: () => flow?.openSettings(true),
+    // ★模组设置(2026-10-13 用户令):有已装载(启用) mod 才显示;双栏面板叠开于
+    //   暂停菜单之上(不摘 pausePanel=关闭回暂停菜单),世界保持暂停
+    ...((getModLoadResult()?.loaded.length ?? 0) > 0
+      ? { onMods: () => openModSettingsPanel(game) }
+      : {}),
     // ★2026-09-14 反馈轮8:暂停菜单摘 住房(原版 EquipPage=1 页签已覆盖)/图鉴(背包
     // 2×2 钮已覆盖);天气/时间/道具搜索收入"开发者选项"子视图(showPause 侧)
     // ★刀 5 停车坪:道具搜索/天气/时间/玩家列表/旅程/研究同迁(vanilla 门控;
@@ -958,7 +965,7 @@ kvHas('sandboxworld.quicksave').catch((e) => {
             const rows = await store.listRows();
             const existing = rows.find((r) => r.id === pack.manifest.id);
             if (!existing || existing.version !== pack.manifest.version) {
-              await store.install(pack.manifest, bytes);
+              await store.install(pack.manifest, bytes, (pack as import("./mods/types").ModPack).iconDataUrl);
               // ★P4 红蓝修正(D-M3):版本覆盖重装保留用户启停态(install 缺省 enabled,
               //  旧实现每次启动把面板停用强制翻回=目录压过注册表)
               if (existing && !existing.enabled) await store.setEnabled(pack.manifest.id, false);
@@ -982,7 +989,7 @@ kvHas('sandboxworld.quicksave').catch((e) => {
           import('./mods/store'), import('./mods/pack'),
         ]);
         const pack = readModPack(bytes);
-        return new ModStore().install(pack.manifest, bytes);
+        return new ModStore().install(pack.manifest, bytes, pack.iconDataUrl);
       },
     };
   } catch (err) {

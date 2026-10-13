@@ -220,4 +220,42 @@ const keys = new Set([...oursC.keys(), ...realC.keys()]);
 const rows = [...keys].map((k) => [k, oursC.get(k) ?? 0, realC.get(k) ?? 0]).filter((r) => Math.abs((r[1] ?? 0) - (r[2] ?? 0)) > 50).sort((a, b) => Math.abs((b[1] ?? 0) - (b[2] ?? 0)) - Math.abs((a[1] ?? 0) - (a[2] ?? 0)));
 console.log('[replay] 聚合差 TOP12(tile 我 真):');
 for (const [k, a, b] of rows.slice(0, 12)) console.log(`  ${k}: ${a} vs ${b}`);
+// ★2026-10-13 lessrigid 判别实验:heightSeed 重采样——真链上游流位≠我方(±2.4%/+8.3%
+//  段偏),真 heightSeed 是同分布另一样本。若 3,365 落入重采样谱内=掷面已全(残差=流
+//  采样差,非缺面);若谱外=缺面定谳(候选=PlaceWall(0) 臂中心掷)。
+if (process.env.SW_LESS_RESAMPLE === '1') {
+  const heightSeedAt = SEG_AT[SEG_MARKS.indexOf('hardline')] ?? 0;   // heightSeed=其后第 1 掷
+  const trials = Number(process.env.SW_LESS_TRIALS ?? '30');
+  const stats: number[] = [];
+  for (let t = 0; t < trials; t++) {
+    const st2 = buildStore(pre);
+    const rng2 = new RNG(gs.seed as number);
+    let pos = 0;
+    const proto2 = rng2 as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const COUNTED = ['next', 'nextInt', 'nextIntRange', 'range', 'nextBool'];
+    for (const m of COUNTED) {
+      const fn = proto2[m];
+      if (typeof fn !== 'function') continue;
+      (rng2 as unknown as Record<string, unknown>)[m] = function (this: unknown, ...a: unknown[]) {
+        pos++;
+        if (m === 'next' && pos === heightSeedAt + 1) {
+          // 线性同余伪列(heightSeed 重采样;值域 [0,1) 全域)
+          const s = (1103515245 * (t + 1) + 12345) >>> 0;
+          return (s % 2147483647) / 2147483647;
+        }
+        return fn.apply(this, a);
+      };
+    }
+    const segs: Array<[string, number]> = [];
+    (globalThis as { __seaSegMark?: (n: string) => void }).__seaSegMark = (n: string) => segs.push([n, pos]);
+    (seaFn as (...a: unknown[]) => void)(st2, rng2, gs);
+    const hi = segs.findIndex((s) => s[0] === 'lessrigid');
+    const hardlineAt = segs.find((s) => s[0] === 'hardline')?.[1] ?? 0;
+    const n2 = segs[hi]?.[1] ?? -1;
+    stats.push(n2 - hardlineAt);
+  }
+  stats.sort((a, b) => a - b);
+  console.log(`[resample] lessrigid 掷数谱 n=${trials}: min=${stats[0]} p25=${stats[Math.floor(trials * 0.25)]} med=${stats[Math.floor(trials / 2)]} p75=${stats[Math.floor(trials * 0.75)]} max=${stats[trials - 1]}`);
+  console.log('[resample] 全谱:', stats.join(','));
+}
 process.exit(0);

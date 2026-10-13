@@ -65,7 +65,9 @@ function maintain(pl: Player, minions: MinionProj[]): MinionProj[] {
 describe('① BJ405 源锚：槽位门 + 右键门挂线', () => {
   it('Game.maintainMinionBuffs 槽位门在码：buff 不在 → 在役随从同拍直杀', () => {
     expect(GAME_TS).toContain('if (!player.buffs.has(bt)) {');
-    expect(GAME_TS).toContain('projs.includes(m.projId)) m.dead = true');
+    // ★BJ670 重锚：杀支带 extra 伴生弹面（killSet ∪= extra;旧 projs.includes 形已被替换）
+    expect(GAME_TS).toContain('killSet.includes(m.projId)) m.dead = true');
+    expect(GAME_TS).toContain('const killSet = extra ? [...projs, ...extra] : projs;');
   });
 
   it('UI.makeBuffBlock 右键挂线：else if (buffRightClickRemovable(t)) 门', () => {
@@ -255,5 +257,72 @@ describe('④ 右键取消召唤：槽位门消散链（黄蜂 373/125 全程 re
       expect(spawned).toHaveLength(0);
       expect(pl.buffs.has(t), `vanilla ${buff} 无凭证不应在栏`).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑤ BJ670（2026-10-13 用户实报「阿比盖尔右击 buff 消失但召唤物本体不消失」）：
+//   原版双弹结构（970 凭证 + 963 可视本体）右击须双灭。
+//   锚（1457 亲读）：5114 shoot=970（Item.cs:40965）;970=AbigailCounter 隐藏凭证
+//   弹（hide=true,aiStyle 164,Projectile.cs:9184-9197）,963=可视本体（aiStyle 62,
+//   :9102-9116）由 UpdateAbigailStatus 依 970 计数补生/全杀（Player.cs:12363-12377）；
+//   buff 335 支置位/续期弹判据只认 970（Player.cs:10946-10960）;963/970 保活皆走
+//   abigailMinion 旗 → timeLeft=2 贴地（AI_062 :66077-66084/AI_164 :47479-47486）,
+//   旗由 buff 循环置位、ResetEffects 每拍清零（:18756）——右击摘 buff → 双弹
+//   ≤2t 同灭。本仓同拍直杀建模：杀支须带 extra 伴生本体 963。
+// ---------------------------------------------------------------------------
+describe('⑤ BJ670 阿比盖尔双弹：右击 buff → 凭证 970 + 本体 963 双灭', () => {
+  it('源锚：335 条目带 extra: [963]（伴生面在表）', () => {
+    const abigail = MINION_BUFFS.find((e) => e.buff === 335);
+    expect(abigail, '335 条目在表').toBeTruthy();
+    expect(abigail!.projs, '凭证弹=970（buff 置位/续期判据只认它,单向凭证语义）').toEqual([970]);
+    expect(abigail!.extra, '伴生可视本体=963（★BJ670 杀支面）').toEqual([963]);
+  });
+
+  it('召唤态前置：buff 244 在 + 970/963 双弹在 → 双活 + buff 续 300（续期判据不被 963 污染）', () => {
+    const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    const t = buffTypeByVanilla(335)!;
+    pl.buffs.apply(t, 300);
+    const counter = makeMinion(pl, 970);
+    const body = makeMinion(pl, 963);
+    maintain(pl, [counter, body]);
+    expect(pl.buffs.active.get(t)).toBe(300);      // buffTime[j]=18000 桥
+    expect(counter.dead).toBe(false);
+    expect(body.dead).toBe(false);
+  });
+
+  it('★右击 → 次拍双灭 + buff 永撤（本实报主判据;旧杀支 963 残留在此红）', () => {
+    const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    const t = buffTypeByVanilla(335)!;
+    pl.buffs.apply(t, 300);
+    const counter = makeMinion(pl, 970);
+    const body = makeMinion(pl, 963);
+    maintain(pl, [counter, body]);
+    expect(buffRightClickRemovable(t)).toBe(true);
+    pl.buffs.remove(t);                            // 右键 ≡ DelBuff
+    maintain(pl, [counter, body]);                 // 次 tick 维护
+    expect(pl.buffs.has(t), '右键后 buff 永撤').toBe(false);
+    expect(counter.dead, '凭证弹 970 同拍灭（BJ405 槽位门既有面）').toBe(true);
+    expect(body.dead, '伴生本体 963 同拍灭（★BJ670 病灶面——原版 timeLeft=2 断续命 ≤2t 亡的直杀桥）').toBe(true);
+  });
+
+  it('970 先亡变体（原版 2t 桥次拍）：970 缺 → buff 摘;次拍 963 断续命灭（旧 inService 门在此残留=变异面）', () => {
+    const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    const t = buffTypeByVanilla(335)!;
+    pl.buffs.apply(t, 300);
+    const body = makeMinion(pl, 963);              // 仅本体在场（凭证 970 已被任意途径灭）
+    maintain(pl, [body]);                          // 拍 1：970 缺 → inService=false → DelBuff
+    expect(pl.buffs.has(t), '凭证弹缺 → buff 摘（Player.cs:10946 置位门 + :10953 DelBuff）').toBe(false);
+    maintain(pl, [body]);                          // 拍 2：槽位门 → 963 杀
+    expect(body.dead, '次拍 963 灭（杀支不设 inService 门——旧门下本体永留）').toBe(true);
+  });
+
+  it('异族零牵连回归：黄蜂 373 单弹族行为零变化（extra 面只属 335）', () => {
+    const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.HornetMinion, 300);
+    const hornet = makeMinion(pl, 373);
+    maintain(pl, [hornet]);
+    expect(hornet.dead).toBe(false);
+    expect(pl.buffs.active.get(BuffType.HornetMinion)).toBe(300);
   });
 });

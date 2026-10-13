@@ -7839,6 +7839,8 @@ export class UI {
   // ============ 暂停菜单（原版像素风：IngameOptions.Draw + Utils.DrawInvBG） ============
 
   showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void;
+    /** ★2026-10-13:模组设置入口(有已启用 mod 才传=才渲染;双栏面板见 modSettingsPanel) */
+    onMods?: () => void;
     /** ★2026-09-07 刀 5 停车坪(vanilla 布局):自创功能入口自背包簇格迁暂停菜单 */
     onItemSearch?: () => void; onWeather?: () => void; onTime?: () => void; onPlayerList?: () => void; onJourney?: () => void; onResearch?: () => void }) {
     // 已开守卫：移除旧面板再建新——防 ESC 快速连按/HMR 监听器堆积导致多层叠框
@@ -7906,6 +7908,9 @@ export class UI {
       if (handlers.onJourney) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.JourneyPowers.Title'), () => { panel.remove(); handlers.onJourney?.(); }));
       // ★SW-RB14b:研究钮标签订正(LegacyInterface.112 原版=你必须先设置边框,非研究面)
       if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Research.Title'), () => { panel.remove(); handlers.onResearch?.(); }));
+      // ★模组设置入口(2026-10-13 用户令):有已启用 mod 才渲染(main.ts 门控);
+      //   面板不摘本面板=关闭设置回暂停菜单(与设置钮叠层语义同)
+      if (handlers.onMods) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.ModSettings.Title'), () => handlers.onMods?.()));
       if (handlers.onWeather || handlers.onTime || handlers.onItemSearch) {
         panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.UI.DevOptions'), () => buildDev()));
       }

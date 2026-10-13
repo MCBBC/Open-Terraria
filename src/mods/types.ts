@@ -377,6 +377,8 @@ export interface ModPack {
   manifest: ModManifest;
   /** 相对路径(如 'content/items/sword.json'/'textures/x.png')→ 字节 */
   files: Map<string, Uint8Array>;
+  /** ★包根 icon.png(2026-10-13 模组面板重构):dataURL(缺省 null)——面板行图标 */
+  iconDataUrl?: string | null;
 }
 
 /** 装载结果(UI 面板/日志/存档头消费) */

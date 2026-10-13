@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
 
 // ---- mod 数据 globals(重演 golden test 装配) ----
-import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, registerModTile } from '../src/data/tiles';
 const modData: Record<string, unknown> = {};
 const schematics: Record<string, unknown> = {};
 const contentDir = join(root, 'mods/calamity/content');
@@ -28,24 +28,17 @@ try {
     }
   }
 } catch { /* 无目录 */ }
-// ★693b:mod tile 注册(双环形态=工作态;单环 registerModTile 曾因字段校验全 throw)
+// ★700:mod tile 注册统一 registerModTile(有视力形态: defs 全=solid/chest 真值;
+//  genSolid/FCP 箱保护/树挂全部生效。裸环 1030+ 曾=defs 盲=箱 canPlace 全败根因)
 const tileDir = join(contentDir, 'tiles');
-let nextId = 1030;
-for (const f of readdirSync(tileDir).sort()) {
-  if (!f.endsWith('.json')) continue;
-  const k = `mod_calamity_${f.replace('.json', '')}`;
-  if (TILE_BY_KEY[k] === undefined) TILE_BY_KEY[k] = nextId++;
-}
-// content json 字段透传(chest 旗→TILE_DEFS.chest→FCP 箱保护);重复键=skip(幂等)
-import { registerModTile as regTileFull } from '../src/data/tiles';
 {
   let rid = 1030;
   for (const f of readdirSync(tileDir).sort()) {
     if (!f.endsWith('.json')) continue;
     try {
       const j = JSON.parse(readFileSync(join(tileDir, f), 'utf8')) as Record<string, unknown>;
-      regTileFull({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: (j.w as number) ?? 1, h: (j.h as number) ?? 1 }, rid++);
-    } catch { /* skip */ }
+      registerModTile({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: (j.w as number) ?? 1, h: (j.h as number) ?? 1 }, rid++);
+    } catch (e) { console.log('[reg-fail]', f, String(e).slice(0, 60)); }
   }
 }
 

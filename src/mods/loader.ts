@@ -13,7 +13,7 @@ import { resolveModBossMusic } from './music';   // ★BGM 面:boss 曲绑定解
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setCurrentAlloc, setGenSrcProvider, setGenGlobalsProvider } from './bridge';
 import { createModContext, type ModEntry } from './api';
-import { loadModConfigValues } from './config';
+import { loadModConfigValues, registerLiveModConfig } from './config';
 import { modBuffTypeOf } from './buffs';
 
 /** L2 入口装载:浏览器=blob URL 动态 import(求值后即 revoke)。
@@ -168,6 +168,8 @@ export async function loadModsPhase1(
         if ((globalThis as any).__swSkipModEntry) { continue; }
         try {
           const configState = await loadModConfigValues(manifest.id, manifest.config ?? {});
+          // ★活实例注册(2026-10-13 游戏内模组设置面板):此 state 即 sw.config 本体
+          registerLiveModConfig(configState);
           const modBuffKey = (bkey: string): number => modBuffTypeOf(manifest.id, bkey);
           const entry = await entryLoader(code);
           if (typeof entry !== 'function') {
