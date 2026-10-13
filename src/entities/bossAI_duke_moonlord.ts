@@ -1057,7 +1057,9 @@ export class DukeSharknadoTornado extends Entity {
           this.cx, this.cy, this.src,
           // ★红队 R1-F2 修正(2026-10-13):本伤=Damage_EVP 弹幕语义(上方定谳注),
           //  attacker 仅死亡归因——projDomain 旗防错域进 modifyHurtByNpc 接触链
-          false, false, true, { projDomain: true });
+          //  ★D3 清偿(2026-10-13):projVid 接 modifyHitPlayerByProj 弹域倍率链
+          //  (龙卷列=384 小/386 大,Sharknado aiStyle 64;385=零伤落地生成器)
+          false, false, true, { projDomain: true, projVid: this.big ? 386 : 384 });
       }
     }
   }

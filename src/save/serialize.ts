@@ -300,7 +300,9 @@ export interface SaveData {
    *  旧档缺省 undefined=零迁移;读档缺失检测在 loadSaveData(mods/bridge 供数)。
    *  ★P5:itemIds/tileIds 随档(id 平移完整解,见 SaveMeta.mods 注) */
   mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number;
-    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]> }>;
+    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]>;
+    /** ★D16(2026-10-13):墙域 P5 平移随档(墙 id=internal=stable;读档 wallRemap) */
+    wallIds?: Array<[string, number]> }>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -359,7 +361,9 @@ export interface SaveMeta {
    *  ★P5：itemIds/tileIds=存档期分配映射（id 平移完整解——读档构建
    *  savedStable→currentStable 重映射） */
   mods?: Array<{ id: string; version: string; items: number; tiles: number; npcs: number;
-    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]> }>;
+    itemIds?: Array<[string, number]>; tileIds?: Array<[string, number]>;
+    /** ★D16(2026-10-13):墙域 P5 平移随档(墙 id=internal=stable;读档 wallRemap) */
+    wallIds?: Array<[string, number]> }>;
   /** ★IIIII20b：StarterNPC 换人一次性迁移标记（见 SaveData.header 同名注释） */
   starterSwapMigrated?: boolean;
   /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */

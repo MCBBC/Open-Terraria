@@ -10,7 +10,9 @@ export interface ItemFunc {
   createTile?: number; createWall?: number; placeStyle?: number;
   consumable?: number; potion?: number;
   healLife?: number; healMana?: number;
-  buffType?: number; buffTime?: number;
+  /** ★D6(2026-10-13):union 扩展——string=mod buff 键(消费期 itemBuffIdOf 解析;
+   *  原版 json 恒数字,零扰动) */
+  buffType?: number | string; buffTime?: number;
   ammo?: number; useAmmo?: number; notAmmo?: number;
   shoot?: number; channel?: number; holdStyle?: number; torch?: number;
   useStyle?: number; knockBack?: number; autoReuse?: number;

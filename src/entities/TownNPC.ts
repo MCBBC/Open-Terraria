@@ -60,6 +60,7 @@ import { newLovestruckHeart, GorePiece } from './GorePiece';   // ★清偿刀 F
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from '../fx/CombatTextColors';
+import { runModOnHitAny, runModOnNpcHitByAny, runModOnNpcDeath, runModOnKillAnyNpc } from '../mods/hooks';   // ★D20-m5:城镇 NPC 受击/击杀派发
 
 // ---- 本文件随机源约定（★2026-08-31 治理批 F8 定案）----
 // 运行时「行为」掷骰一律走实例注入面 this.rng()（测试 stub 后构造/回放的 NPC 同样
@@ -1638,6 +1639,17 @@ export class TownNPC extends Entity {
       // StrikeNPC 受击音 = per-NPC HitSound 满响（曾硬编码 NPC_Hit_1 ×0.6）
       const hitFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.HitSound) ?? ['NPC_Hit_1'];
       game.playSfxFiles?.(hitFiles, 1);
+    }
+    // ★D20-m5(2026-10-13):城镇 NPC 受击派发(tML OnHitNPC 全域对;死亡支含在
+    //  this.dead 旗内=killed 真值;值=防后实扣与 lastStrikeDealt 同源;melee 探针=
+    //  srcProjId===0 近战惯例[本面无 pierce 位]。零注册零成本)
+    if (fromPlayer) runModOnHitAny(this as never, game, { damage: dmg, crit, killed: this.dead, projId: srcProjId, melee: srcProjId === 0 });
+    runModOnNpcHitByAny(this as never, game, { damage: dmg, crit, killed: this.dead, projId: srcProjId });
+    // ★D20-m5:mod 击杀钩在 onHitByAny 之后(m3 tML 序同款;死亡支/存活支共用本出口,
+    //  this.dead 旗判别;per-NPC 先/global 后;城镇 NPC 含 mod townNPC 声明域)
+    if (this.dead) {
+      runModOnNpcDeath(this.vanillaId, this as never, game as never);
+      runModOnKillAnyNpc(this as never, game as never);
     }
     return true;
   }

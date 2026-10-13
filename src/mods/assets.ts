@@ -43,6 +43,11 @@ const CT_BY_EXT: Record<string, string> = {
 async function warmModAssetsCache(pack: import('./types').ModPack): Promise<boolean> {
   try {
     if (typeof caches === 'undefined') return false;
+    // ★D8 定谳(2026-10-13):SW 不在控(controller=null)时暖存字节无人接应——
+    //  dev 默认关 SW(AssetCache:611),别名 fetch 落 dev server SPA fallback
+    //  (200 text/html)=mod 纹理全断的死支;controller 在位才走 SW 别名支,
+    //  否则内存解码支(decodeBatch 直注入,全环境正确;prod 首访未 claim 同样安全回退)
+    if (typeof navigator !== 'undefined' && !navigator.serviceWorker?.controller) return false;
     const cache = await caches.open(MODS_CACHE);
     const markerPath = modCachePath(pack.manifest.id, '__ver__.json');
     const marker = await cache.match(markerPath);
@@ -178,10 +183,15 @@ async function decodeBatch(
   pack: { files: Map<string, Uint8Array> }, modId: string,
   jobs: Array<{ fileKey: string; texPath: string }>,
 ): Promise<void> {
-  await Promise.all(jobs.map(async (j) => {
-    const bmp = await decodePngOrWarn(pack, modId, j.texPath);
-    if (bmp !== null) inject(atlas, j.fileKey, bmp);
-  }));
+  // ★R-A-F5(2026-10-13):并发上界池(32)——灾厄级单域 job 数千,无界 Promise.all
+  //  =一拍内全部 slice+Blob 分配(百 MB 级瞬时峰值);分批跑=峰值钳常量级
+  const BATCH = 32;
+  for (let i = 0; i < jobs.length; i += BATCH) {
+    await Promise.all(jobs.slice(i, i + BATCH).map(async (j) => {
+      const bmp = await decodePngOrWarn(pack, modId, j.texPath);
+      if (bmp !== null) inject(atlas, j.fileKey, bmp);
+    }));
+  }
 }
 
 /** 注入全部已装载 mod 的贴图。幂等(重复调用覆盖同键)。
@@ -191,7 +201,7 @@ async function decodeBatch(
 export async function applyModAssets(atlas: import('../assets/SpriteAtlas').SpriteAtlas): Promise<void> {
   const result = getModLoadResult();
   if (!result || result.allocation === null) return;
-  const { items, tiles, npcs, gores, walls, mounts, hairs } = result.allocation;
+  const { items, tiles, npcs, gores, walls, mounts, hairs, dusts } = result.allocation;
   const tileMetaTable = atlas.vanilla.tiles as unknown as Record<string, unknown>;
   for (const pack of getLoadedPacks()) {
     const modId = pack.manifest.id;
@@ -216,6 +226,15 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
           }
           if (spec.head) {
             aliasJob(atlas, modId, { fileKey: `vanilla/NPC_Head_${modTownNpcHeadIndex(npcs.get(fullKeyOf(modId, spec.key)) ?? -1)}.png`, texPath: spec.head });
+          }
+          // ★R-A-F8(2026-10-13):SW 支补 portrait(blob objectURL 通道,与内存支同源;
+          //  旧=内存支单腿,SW 在控生产态 mod 对话头像全缺)
+          if (spec.portrait) {
+            const bytes = packTexBytes(pack, spec.portrait);
+            if (bytes && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+              registerModPortraitUrl(npcs.get(fullKeyOf(modId, spec.key))!,
+                URL.createObjectURL(new Blob([bytes.slice()], { type: 'image/png' })));
+            }
           }
         }
       }
@@ -279,6 +298,29 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         const hairId = hairs.get(fullKeyOf(modId, spec?.key ?? ''));
         if (spec?.texture && hairId !== undefined) {
           aliasJob(atlas, modId, { fileKey: `vanilla/Player_Hair_${hairId + 1}.png`, texPath: spec.texture });
+        }
+      }
+      // ★第四批:mod 尘埃贴图(SW 别名支;per-type vanilla/Dust_<type>.png)
+      for (const path of discoverPackJsonPaths(pack, 'dusts')) {
+        const spec = readPackJson<import('./types').ModDustContent>(pack, path);
+        const dustType = dusts.get(fullKeyOf(modId, spec?.key ?? ''));
+        if (spec?.texture && dustType !== undefined) {
+          aliasJob(atlas, modId, { fileKey: `vanilla/Dust_${dustType}.png`, texPath: spec.texture });
+        }
+      }
+      // ★D15(2026-10-13):mod UI 贴图(textures/ui/*.png 约定目录;键=vanilla/ModUI_
+      //  <modId>_<相对路径扁平化>.png;sw.ui.panel addImage 消费。子目录防撞=路径扁平;
+      //  ★R-A-F11:扁平化可碰撞('a/b'≡'a_b')——碰撞 warn(静默覆盖=随机赢家,内存支
+      //  decodeBatch 完成序非确定))
+      {
+        const seenFlat = new Map<string, string>();
+        for (const [path] of pack.files) {
+          if (!path.startsWith('textures/ui/') || !path.endsWith('.png')) continue;
+          const flat = path.slice('textures/ui/'.length, -'.png'.length).replace(/[^A-Za-z0-9]+/g, '_');
+          const prev = seenFlat.get(flat);
+          if (prev !== undefined) console.warn(`[mods] ${modId} UI 贴图扁平键碰撞: ${prev} ≈ ${path}(后者覆盖,请改名)`);
+          seenFlat.set(flat, path);
+          aliasJob(atlas, modId, { fileKey: `vanilla/ModUI_${modId}_${flat}.png`, texPath: path });
         }
       }
       // ★刀2-C1(2026-10-13):NPC glowmask/物品 glowmask 贴图(SW 别名支;
@@ -359,6 +401,81 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       }
     }
     await decodeBatch(atlas, pack, modId, itemJobs);
+    // ★D12(2026-10-13):mod 尘埃贴图内存回退支(旧仅 SW 别名支=无 SW 环境全缺;
+    //  R-A C2 bake worker 零墙桥同族判例「两支必成对」)
+    const dustJobs: Array<{ fileKey: string; texPath: string }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'dusts')) {
+      const spec = readPackJson<import('./types').ModDustContent>(pack, path);
+      const dustType = dusts.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.texture && dustType !== undefined) {
+        referenced.add(spec.texture);
+        dustJobs.push({ fileKey: `vanilla/Dust_${dustType}.png`, texPath: spec.texture });
+      }
+    }
+    await decodeBatch(atlas, pack, modId, dustJobs);
+    // ★D15:mod UI 贴图内存回退支(与 SW 别名支同键;两支必成对判例)
+    const uiJobs: Array<{ fileKey: string; texPath: string }> = [];
+    {
+      const seenFlat = new Map<string, string>();
+      for (const [path] of pack.files) {
+        if (!path.startsWith('textures/ui/') || !path.endsWith('.png')) continue;
+        const flat = path.slice('textures/ui/'.length, -'.png'.length).replace(/[^A-Za-z0-9]+/g, '_');
+        const prev = seenFlat.get(flat);
+        if (prev !== undefined) console.warn(`[mods] ${modId} UI 贴图扁平键碰撞: ${prev} ≈ ${path}(后者覆盖,请改名)`);
+        seenFlat.set(flat, path);
+        uiJobs.push({ fileKey: `vanilla/ModUI_${modId}_${flat}.png`, texPath: path });
+      }
+    }
+    await decodeBatch(atlas, pack, modId, uiJobs);
+    // ★R-A-F7(2026-10-13):内存回退支补 mounts/hairs/visualSheets/armor 四族注入
+    //  (「两支必成对」判例第三发;与 SW 别名支同键,decodeBatch 直注入位图)
+    const famJobs: Array<{ fileKey: string; texPath: string }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'mounts')) {
+      const spec = readPackJson<import('./types').ModMountContent>(pack, path);
+      const mountId = mounts.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.texture && mountId !== undefined) {
+        referenced.add(spec.texture);
+        famJobs.push({ fileKey: `vanilla/Mount_${mountId}.png`, texPath: spec.texture });
+      }
+    }
+    for (const path of discoverPackJsonPaths(pack, 'hairs')) {
+      const spec = readPackJson<import('./types').ModHairContent>(pack, path);
+      const hairId = hairs.get(fullKeyOf(modId, spec?.key ?? ''));
+      if (spec?.texture && hairId !== undefined) {
+        referenced.add(spec.texture);
+        famJobs.push({ fileKey: `vanilla/Player_Hair_${hairId + 1}.png`, texPath: spec.texture });
+      }
+    }
+    // ★四百九十七:盔甲双族(visualSheets 变身表+stats.hs/bs/ls 三槽;与 SW 支同键)
+    for (const vs of (pack.manifest as { visualSheets?: Array<{ head?: number; body?: number; legs?: number; headTex?: string; bodyTex?: string; legsTex?: string }> }).visualSheets ?? []) {
+      for (const [idx, texPath, part] of [[vs.head, vs.headTex, 'Head'], [vs.body, vs.bodyTex, 'Body'], [vs.legs, vs.legsTex, 'Legs']] as const) {
+        if (idx === undefined || !texPath) continue;
+        const fileKey = `vanilla-ui/Armor_${part === 'Body' ? 'Armor' : part}_${idx}.png`;
+        if (!packTexBytes(pack, texPath)) continue;
+        referenced.add(texPath);
+        famJobs.push({ fileKey, texPath });
+        atlas.registerUiFile(fileKey.replace(/^vanilla-ui\//, ''), fileKey);
+      }
+    }
+    for (const path of discoverPackJsonPaths(pack, 'items')) {
+      const spec = readPackJson<ModItemContent>(pack, path);
+      if (!spec?.key) continue;
+      const st = (spec as { stats?: { hs?: number; bs?: number; ls?: number } }).stats;
+      if (!st) continue;
+      for (const [idx, part, fileKey] of [
+        [st.hs, 'Head', `vanilla-ui/Armor_Head_${st.hs}.png`],
+        [st.bs, 'Body', `vanilla-ui/Armor_Armor_${st.bs}.png`],
+        [st.ls, 'Legs', `vanilla-ui/Armor_Legs_${st.ls}.png`],
+      ] as const) {
+        if (idx === undefined) continue;
+        const texPath = `textures/armor/${spec.key}_${part}.png`;
+        if (!packTexBytes(pack, texPath)) continue;
+        referenced.add(texPath);
+        famJobs.push({ fileKey, texPath });
+        atlas.registerUiFile(fileKey.replace(/^vanilla-ui\//, ''), fileKey);
+      }
+    }
+    await decodeBatch(atlas, pack, modId, famJobs);
     const npcJobs: Array<{ fileKey: string; texPath: string }> = [];
     for (const path of discoverPackJsonPaths(pack, 'npcs')) {
       const spec = readPackJson<ModNpcContent>(pack, path);
@@ -456,7 +573,7 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
           name: j.spec.name ?? j.spec.key, key: j.spec.key, sheet: j.fileKey,
           color: j.spec.mapColor ?? '#808080',
           grid: [32, 32], stride: [36, 36], cols: 13,
-          rows: j.spec.rows ?? 5,
+          rows: j.spec.rows ?? (j.spec.largeFrame ? 7 : 5),   // ★R-A-F10:largeFrame 变体必用行 5-6(与 SW 支 M4 对齐,旧=5 越表空洞)
           ...(j.spec.largeFrame !== undefined ? { largeFrame: j.spec.largeFrame } : {}),
         };
       }

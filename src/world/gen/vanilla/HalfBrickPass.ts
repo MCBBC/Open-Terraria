@@ -1089,7 +1089,9 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   if (_ktDisabled) return;
   if (++_ktDepth > 3000) {
     _ktDisabled = true;   // 本局禁杀(优雅降级:地形保留,世界照常完成)
-    console.error(`[HalfBrickPass] killTile 级联深度溢出 (${x},${y}) type=${st.type[st.idx(x, y)]} —— 本局禁杀(优雅降级)`);
+    // ★灾厄实机定谳(2026-10-13):腐化荆棘(type=32)链式击杀+mod gen pass 交互正常
+    //  触发本护栏——设计内降级路径,console.warn 留痕(误置 error 曾炸探针错误门)
+    console.warn(`[HalfBrickPass] killTile 级联深度溢出 (${x},${y}) type=${st.type[st.idx(x, y)]} —— 本局禁杀(优雅降级)`);
     _ktDepth--;
     return;
   }

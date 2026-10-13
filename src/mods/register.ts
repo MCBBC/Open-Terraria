@@ -24,6 +24,8 @@ import { registerModWall, registerModWallMeta } from './walls';   // ★刀3-墙
 import { registerModNpcDrawSpec, registerModItemGlowmask } from './drawspecs';   // ★刀2-C1:绘制声明面
 import { registerModCanUseRule } from './hooks';   // ★刀5-A 族:canUse 声明规则
 import { registerModHairData } from './hairs';   // ★第三批:mod 发型
+import { registerModDustData } from './dusts';   // ★第四批:mod 尘埃
+import { bumpHairCountMax } from '../player/Appearance';   // ★R-A:hairCountMax 可变顶(零调用修正)
 import { registerModMountData } from './mounts';   // ★第三批:mod 坐骑
 
 /** pack 贴图字节(带 textures/ 前缀归一;register 期 PNG 头读取用) */
@@ -301,6 +303,11 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
     const bt = modBuffTypeOf(mt.modId, mt.spec.buff);
     registerModMountData(mt.mountId, {
       buff: bt,
+      // ★R-A-F9(2026-10-13):贴图键闭环——消费端 Mounts.textures() 读 backTexture/
+      //  frontTexture(名字键 Mount_<id>.png 同原版 vanilla-mounts.json 键形);旧实现
+      //  只喂 assets 别名(vanilla/Mount_<id>.png)未设本双键=注入键零消费点(坐骑隐形)
+      backTexture: `Mount_${mt.mountId}.png`,
+      frontTexture: `Mount_${mt.mountId}.png`,
       runSpeed: mt.spec.runSpeed,
       acceleration: mt.spec.acceleration,
       jumpHeight: mt.spec.jumpHeight,
@@ -351,12 +358,18 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
       const mk = it.spec.mountItem.startsWith('mod_') ? it.spec.mountItem : `mod_${mt.modId}_${it.spec.mountItem}`;
       if (mk === mt.fullKey) {
         (ITEM_TO_MOUNT as Record<string, number>)[String(it.stableId)] = mt.mountId;
+        registerModEquipKind(it.stableId, 'mount');   // ★R-A:装备分类 overlay(坐骑物品槽准入)
       }
     }
   }
   // ★第三批:mod 发型(hairs → registerModHairData 递增 _hairCountMax)
   for (const hr of plan.hairSpecs) {
     registerModHairData(hr.hairId, hr.spec.texture, hr.spec.back !== false, hr.spec.female === true);
+    bumpHairCountMax(hr.hairId);   // ★R-A:validateAppearance/CHAR_CREATION_HAIRS 可变顶递增
+  }
+  // ★第四批:mod 尘埃(400+ 段;per-type 贴图 alias)
+  for (const d of plan.dustSpecs) {
+    registerModDustData(d.dustType, d.spec.texture, d.spec.motionType ?? 15, d.spec.fullbright === true, d.spec.noLight === true);   // ★R-C-D12-F1:noLight opt-out
   }
   for (const n of plan.npcSpecs) {
     const spec = n.spec;

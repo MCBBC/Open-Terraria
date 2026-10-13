@@ -33,6 +33,8 @@ export function getModBridgePayload(): ModIdBridgePayload | null {
 export interface ModCurrentAlloc {
   itemKeys: Map<string, number>;
   tileKeys: Map<string, number>;
+  /** ★D16(2026-10-13):墙域 P5 平移同族(读档 wallRemap 消费;墙 id=internal=stable) */
+  wallKeys?: Map<string, number>;
 }
 
 let currentAlloc: ModCurrentAlloc | null = null;

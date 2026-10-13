@@ -77,10 +77,13 @@ export function runModCanUse(game: Game, def: ItemDef | null, item: InvItem | nu
   const rule = modCanUseRules.get(vid);
   if (rule?.ownedProjBelow) {
     // ★红队 R-C-F6:计数走调用侧 game 手(原 __swGame 全局探针=fail-open 窗+清理时序耦合)
-    const list = (game as unknown as { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean }> } })?.entities?.projectiles;
+    //  ★红队 R-C-F7(2026-10-13):owner 过滤——原版 ownedProjectileCounts=玩家自有;
+    //  敌怪同 vid 弹(ownerIsPlayer=false)不入计数(联机他玩家弹=同 vid 桶内,实体面
+    //  无 owner 位,登记文档化偏差)
+    const list = (game as unknown as { entities?: { projectiles?: Array<{ projId?: number; dead?: boolean; ownerIsPlayer?: boolean }> } })?.entities?.projectiles;
     if (list) {
       let n = 0;
-      for (const q of list) if (!q.dead && q.projId === rule.ownedProjBelow.proj) n++;
+      for (const q of list) if (!q.dead && q.projId === rule.ownedProjBelow.proj && q.ownerIsPlayer !== false) n++;
       if (!(n < rule.ownedProjBelow.lt)) return false;
     }
   }
@@ -1297,6 +1300,9 @@ export function registerModPlayerPreHurt(modId: string, fn: (ctx: { player: unkn
   if (preHurts.has(modId)) throw new Error(`[mod-hooks] preHurt 重复注册: ${modId}`);
   preHurts.set(modId, fn);
 }
+/** ★红队 R-B-P1:钩存在探针(Player.ts 拒伤门消费——空表=门不生效=零 mod 恒等) */
+export function hasModPreHurts(): boolean { return preHurts.size > 0; }
+
 export function runModPlayerPreHurt(p: unknown, game: unknown, dmg: number): number {
   if (preHurts.size === 0) return dmg;
   const ctx = { player: p, game, dmg };
@@ -1358,6 +1364,49 @@ export function runModPlayerModifyMoveSpeed(p: unknown, game: unknown): number {
   return Math.max(0, mult);
 }
 
+// ---- ★第四批:玩家外观自绘(drawPlayer 返回后 overlay;外观类 aura/拖尾/发光)。 ----
+
+/** 玩家 post-draw overlay(外观类;ModDrawCtx 受限算子面) */
+export interface ModPlayerDrawSpec {
+  postDraw?: (p: unknown, ctx: ModDrawCtx) => void;
+}
+const playerDraws = new Map<string, ModPlayerDrawSpec>();
+
+export function registerModPlayerDraw(modId: string, spec: ModPlayerDrawSpec): void {
+  if (playerDraws.has(modId)) throw new Error(`[mod-hooks] playerDraw 重复注册: ${modId}`);
+  playerDraws.set(modId, spec);
+}
+
+export function runModPlayerPostDraw(p: unknown, ctx: ModDrawCtx): void {
+  if (playerDraws.size === 0) return;
+  for (const h of playerDraws.values()) {
+    try { h.postDraw?.(p, ctx); } catch (err) { console.warn('[mod-hooks] playerDraw', err); }
+  }
+}
+
+// ---- ★第五批:tooltip 修改钩(tML GlobalItem.ModifyTooltips 形;mod 增加/修改 tooltip 行) ----
+
+export interface ModTooltipLine { text: string; color?: string; }
+export interface ModTooltipCtx { key: string; vid: number; rare: number; }
+const tooltipHooks = new Map<string, Map<string, (lines: ModTooltipLine[], ctx: ModTooltipCtx) => void>>();
+
+export function registerModTooltip(modId: string, itemKey: string,
+  fn: (lines: ModTooltipLine[], ctx: ModTooltipCtx) => void): void {
+  const fullKey = itemKey.startsWith('mod_') ? itemKey : `mod_${modId}_${itemKey}`;
+  let perItem = tooltipHooks.get(fullKey);
+  if (!perItem) { perItem = new Map(); tooltipHooks.set(fullKey, perItem); }
+  if (perItem.has(modId)) throw new Error(`[mod-hooks] tooltip 重复注册: ${fullKey}(${modId})`);
+  perItem.set(modId, fn);
+}
+
+export function runModTooltips(fullKey: string, ctx: ModTooltipCtx, lines: ModTooltipLine[]): void {
+  const perMod = tooltipHooks.get(fullKey);
+  if (!perMod) return;
+  for (const fn of perMod.values()) {
+    try { fn(lines, ctx); } catch (err) { console.warn('[mod-hooks] tooltip', err); }
+  }
+}
+
 export function _resetModHooksForTests(): void {
   menuThemeSpec = null;
   modScreenFx.length = 0;
@@ -1397,6 +1446,8 @@ export function _resetModHooksForTests(): void {
   respawns.clear();
   updateDeads.clear();
   moveSpeeds.clear();
+  playerDraws.clear();
+  tooltipHooks.clear();
   modGenPasses.length = 0;
   modChestUnlock.clear();
   modConversions.length = 0;

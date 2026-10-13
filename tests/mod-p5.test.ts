@@ -16,18 +16,26 @@ class MemStorage {
 
 const nodeEntryLoader = async (): Promise<unknown> => undefined;   // P5 无脚本
 
-function buildModZip(id: string, itemKey: string, tileKey?: string): Uint8Array {
+function buildModZip(id: string, itemKey: string, tileKey?: string, wallKey?: string): Uint8Array {
   const files: Record<string, Uint8Array> = {
     'mod.json': strToU8(JSON.stringify({ id, name: id, version: '1.0.0', api: 1, side: 'both' })),
     [`content/items/${itemKey}.json`]: strToU8(JSON.stringify({ key: itemKey, name: itemKey, value: 100 })),
   };
+  const png = new Uint8Array(Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
   if (tileKey) {
     files[`content/tiles/${tileKey}.json`] = strToU8(JSON.stringify({
       key: tileKey, name: tileKey, solid: true, pick: 0, mapColor: '#888',
       texture: 'textures/t.png', dropItem: itemKey,
     }));
-    files['textures/t.png'] = new Uint8Array(Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+    files['textures/t.png'] = png;
+  }
+  if (wallKey) {
+    // ★D16:墙声明(367+ 段;texture 缺省 468×180 TEdit 整表——1×1 png 仅验分配/存读面)
+    files[`content/walls/${wallKey}.json`] = strToU8(JSON.stringify({
+      key: wallKey, name: wallKey, mapColor: '#443322', texture: 'textures/w.png',
+    }));
+    files['textures/w.png'] = png;
   }
   return zipSync(files);
 }
@@ -119,5 +127,57 @@ describe('P5:id 平移完整解(存档映射+读档重映射)', () => {
     expect(back.player?.inventory?.[0]?.id).toBe(30000);   // 同注册表内合法解出
     expect(back.player?.inventory?.[0]?.stack).toBe(2);
     // 真"缺 mod"形态(worker 无桥/未注册)由 mod-save-bridge.test.ts fresh 态覆盖
+  }, 60_000);
+
+  // ★D16(2026-10-13):墙域 P5 平移——卸前排位 mod 后位 mod 墙 id 平移,
+  //  旧档 wallIds 随档 × 当前分配 wallRemap 纠偏(墙 id=internal=stable)
+  it('卸 ra 后 rb 墙 id 平移,旧档经 wallRemap 内容不错位', async () => {
+    // ---- 阶段 1:ra+rb 双 mod(rb 带墙)→ rb 墙铺图 → 存档 ----
+    vi.resetModules();
+    const { ModStore } = await import('../src/mods/store');
+    const { readModPack } = await import('../src/mods/pack');
+    const { loadModsPhase1, getModLoadResult } = await import('../src/mods/loader');
+    const { World } = await import('../src/world/World');
+    const { Player } = await import('../src/entities/Player');
+    const { Inventory } = await import('../src/items/Inventory');
+    const { saveGame } = await import('../src/save/SaveFile');
+
+    const storage = new MemStorage();
+    const store = new ModStore(storage as never);
+    const raBytes = buildModZip('ra', 'ra_mat', undefined, 'ra_wall');
+    await store.install(readModPack(raBytes).manifest, raBytes);
+    const rbBytes = buildModZip('rb', 'rb_gem', undefined, 'rb_wall');
+    await store.install(readModPack(rbBytes).manifest, rbBytes);
+    await loadModsPhase1(storage, { entryLoader: nodeEntryLoader });
+
+    const alloc1 = getModLoadResult()!.allocation!;
+    const rbWall1 = alloc1.walls.get('mod_rb_rb_wall')!;
+    expect(rbWall1).toBe(368);   // ra 墙(367)在前 → rb 墙=368
+    const world = new World(64, 32, 42, 't');
+    const player = new Player(100, 100, new Inventory());
+    world.store.wall[world.store.idx(7, 7)] = rbWall1;
+    const json = saveGame(world, player, 0);
+    expect(json).toContain('"wallIds"');   // 存档头携带墙分配映射
+
+    // ---- 阶段 2:卸 ra → rb 墙 id 平移 → 旧档 wallRemap 读回 ----
+    vi.resetModules();
+    const { ModStore: ModStore2 } = await import('../src/mods/store');
+    const { loadModsPhase1: load2 } = await import('../src/mods/loader');
+    const { loadSave } = await import('../src/save/SaveFile');
+
+    const store2 = new ModStore2(storage as never);
+    await store2.remove('ra');
+    const result2 = await load2(storage, { entryLoader: nodeEntryLoader });
+    const alloc2 = result2.allocation!;
+    const rbWall2 = alloc2.walls.get('mod_rb_rb_wall')!;
+    expect(rbWall2).toBe(367);              // 卸 ra(含墙)→ rb 墙平移到段首
+    expect(rbWall2).not.toBe(rbWall1);      // 平移确已发生(否则本测无判别力)
+
+    const back = loadSave(json);
+    const w = back.world?.store;
+    expect(w).toBeTruthy();
+    const idx = w!.idx(7, 7);
+    const wallVal = (w!.wall as Uint16Array)[idx];
+    expect(wallVal).toBe(rbWall2);          // 旧 savedId 经重映射 → 当前 id(未错位)
   }, 60_000);
 });

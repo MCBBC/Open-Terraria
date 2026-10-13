@@ -139,6 +139,7 @@ ctx.onmessage = async (e) => {
       setCurrentAlloc({
         itemKeys: new Map(req.payload.itemKeys),
         tileKeys: new Map(req.payload.tileKeys),
+        wallKeys: new Map(req.payload.wallKeys ?? []),   // ★D16:墙域 P5 平移
       });
       return;
     }

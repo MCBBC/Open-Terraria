@@ -30,10 +30,21 @@
 // 完全旁路。canvas 尺寸 0=terra-blink 截断家族判例,禁操作。
 import { mkCanvas, type AnyCanvas, type Ctx2D } from './canvasEnv';
 
-/** 跳槽判定系数:gap > 档周期×此值=本帧将跳槽（上次上屏后已过 1.5 个槽位）。
- *  1.5 定线:120 档正常抖动 gap≤~10ms(12.5 线下不触发);单次跳槽 gap≈16.7>12.5 ✓;
- *  60 档跳槽 33.3>25 ✓/正常 16.7<25 ✓。 */
-export const JUDDER_MISS_RATIO = 1.5;
+/** 跳槽判定系数:gap > 档周期×此值=本帧将跳槽。
+ *  ★1.7 定线（2026-10-12 用户 A/B 转正:饱和场景「比 1.5 稳定」实测）——
+ *  1.5 线在 realized<tier 时贴近自然帧距抖动带（104fps@120tier 抖 9-12ms vs 线
+ *  12.5）→ 尾部频繁误混=每帧 1 全屏 op 加剧饱和（Trace-230353 周期性降帧定谳）;
+ *  1.7（14.2ms 线）只混真大跳,混合频率降、体感更稳（用户实测定谳）。
+ *  ?smoothline= 可调（clamp 1.05..8,回 1.5=旧行为 A/B 口）。 */
+export let JUDDER_MISS_RATIO = (() => {
+  try {
+    if (typeof location === 'undefined') return 1.7;
+    const v = Number(new URLSearchParams(location.search).get('smoothline'));
+    return Number.isFinite(v) && v >= 1.05 && v <= 8 ? v : 1.7;
+  } catch { return 1.7; }
+})();
+/** 测试/对拍翻面（生产代码禁调）。 */
+export function judderLineSetForTest(v: number): void { JUDDER_MISS_RATIO = v; }
 /** 断流阈值:gap 超此值=不连续（tab 隐藏/暂停恢复）,不混合只重捕获。 */
 export const JUDDER_BREAK_MS = 250;
 /** 半步混合系数（上一真帧叠加 α;0.5=步长 0,2 → 0.5,1.5 对称半步）。 */
@@ -41,8 +52,17 @@ export const JUDDER_BLEND_ALPHA = 0.5;
 /** 长停顿上限:gap 超过周期×此值同断流处理（防暂停恢复首帧整屏鬼影）。 */
 export const JUDDER_MAX_GAP_RATIO = 8;
 /** ★v2 武装保持窗:末次跳槽后静默此毫秒自动退役（停捕获,零常态成本）。
- *  2000ms:覆盖负载尖刺簇（misses 成簇,簇间隔 <2s 保持武装;2s 干净=尖刺过去）。 */
-export const JUDDER_ARM_HOLD_MS = 2000;
+ *  2000ms:覆盖负载尖刺簇（misses 成簇,簇间隔 <2s 保持武装;2s 干净=尖刺过去）。
+ *  ★旋钮（2026-10-12 同上）:?smoothhold= 可调（clamp 200..10000）。 */
+export let JUDDER_ARM_HOLD_MS = (() => {
+  try {
+    if (typeof location === 'undefined') return 2000;
+    const v = Number(new URLSearchParams(location.search).get('smoothhold'));
+    return Number.isFinite(v) && v >= 200 && v <= 10000 ? Math.round(v) : 2000;
+  } catch { return 2000; }
+})();
+/** 测试/对拍翻面（生产代码禁调）。 */
+export function judderHoldSetForTest(v: number): void { JUDDER_ARM_HOLD_MS = v; }
 // ★v3 半分辨率捕获证伪撤案（2026-10-12,用户二报）:①「整画面含 HUD 自抖」=锐度
 //  振荡——跳槽帧显示「锐利 cur+软 prev 混合」/干净帧纯锐利,两帧交替=全局闪抖;
 //  ②「没什么改善」=Windows 成本在【op 数不在像素数】（bakenoread/IPC 每 op 税同族
@@ -98,29 +118,43 @@ let lastMissMs = -Infinity;
 /** 测试/对拍状态复位（生产禁调）。 */
 export function judderResetForTest(): void {
   prevCanvas = null; captureCanvas = null; lastMs = -1; armed = false; lastMissMs = -Infinity;
+  stats.frames = 0; stats.armedFrames = 0; stats.missFrames = 0; stats.blends = 0; stats.armCount = 0;
+}
+
+// ---- ★旋钮计数器（2026-10-12,Trace-230353 定谳后的数据面;探针页内 import 读）
+const stats = { frames: 0, armedFrames: 0, missFrames: 0, blends: 0, armCount: 0 };
+/** 累计账（载入起;探针取差分=窗口率）。armedFrames/frames=武装率;missFrames/armedFrames=混合密度。 */
+export function judderStats(): { frames: number; armedFrames: number; missFrames: number; blends: number; armCount: number; armed: boolean } {
+  return { ...stats, armed };
 }
 
 /** 帧尾收口（Renderer.judderFrameEnd 转发;Game tick 在 render() 完整返回后调用——
  *  与 ghostFrameEnd 同族挂接点论证）。periodMs=现役档周期（FrameBeat.tierPeriodNow;
- *  0=跟满/未锚定=旁路）。nowMs 参数仅供测试注入时钟。 */
-export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: number): void {
+ *  0=跟满/未锚定=旁路）。nowMs 参数仅供测试注入时钟。
+ *  ★旋钮③暂停门（2026-10-12）:paused=画面静止（暂停浮层逐帧重绘,世界不变）——
+ *  跳槽混合混合的是相同内容=纯浪费 → 全旁路。lastMs 不动:恢复帧 gap>断流阈走
+ *  既有断流卫生（恢复首帧不混合）,零额外状态。 */
+export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: number, paused = false): void {
   if (!judderSmooth || !ctx) return;
-  if (!(periodMs > 0)) return;                              // 跟满/未锚定:旁路（状态保留）
+  if (!(periodMs > 0) || paused) return;                    // 跟满/未锚定/暂停:旁路（状态保留）
   const now = nowMs ?? nowFn();
   const gap = lastMs >= 0 ? now - lastMs : -1;
   lastMs = now;
+  stats.frames++;
   const miss = judderMissFrame(gap, periodMs);
   // ★v2 lazy-arming:静默期（未武装）零拷贝;跳槽即武装;静默 JUDDER_ARM_HOLD_MS 退役。
-  if (miss) lastMissMs = now;
+  if (miss) { lastMissMs = now; stats.missFrames++; }
   if (!armed) {
     if (!miss) return;                                      // 静默期无跳槽:零拷贝旁路
     armed = true;                                           // 首次跳槽:武装（本帧无 prev 不混合,开始捕获）
+    stats.armCount++;
     prevCanvas = null;                                      // 跨静默期的陈旧真帧作废（防整屏旧画面鬼影）
   } else if (now - lastMissMs > JUDDER_ARM_HOLD_MS) {
     armed = false;                                          // 静默 2s:退役
     prevCanvas = null;                                      // 退役清位（同上）
     return;
   }
+  stats.armedFrames++;
   const cv = ctx.canvas;
   const w = cv.width, h = cv.height;
   if (w === 0 || h === 0) return;                           // terra-blink 截断家族:禁操作
@@ -138,6 +172,7 @@ export function judderFrameEnd(ctx: Ctx2D | null, periodMs: number, nowMs?: numb
   if (!capCtx) return;
   const prev = prevCanvas;                                  // 混合源快照（乒乓交换前取）
   const blend = armed && prev !== null && miss;
+  if (blend) stats.blends++;
   // ① 捕获本帧真值（混合【前】→ prevRaw 恒真帧,连续跳槽零拖影累积）。
   //  ★v3':`copy` 合成单 op 整幅替换（含 α）——v2 是 clearRect+drawImage 两 op,
   //  Windows 每 op 税域省一次全屏 op/clear（语义恒等:copy ≡ clear+source-over）。

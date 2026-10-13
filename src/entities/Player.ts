@@ -24,7 +24,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
 import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
-import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf, runVanillaOverrideValue, runModPlayerPreHurt, runModPlayerPostHurt, runModPlayerModifyMoveSpeed } from '../mods/hooks';
+import { runModHoldItem, runModAccEffect, runModDodgeRoll, runModPlayerHurt, runModDamageGate, modDashSpecOf, runVanillaOverrideValue, runModPlayerPreHurt, runModPlayerPostHurt, runModPlayerModifyMoveSpeed, hasModPreHurts } from '../mods/hooks';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat, BONUS_MELEE_SPEED_MULTIPLIER, NO_MELEE_SPEED_BONUS } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -11778,8 +11778,12 @@ export class Player extends Entity {
     //  Cancelled(:5885-5900)=return 0.0 于 Hurt 之前,immune/immuneTime 不执行=
     //  无任何无敌帧;只有原版闪避族(Ninja/BOC/幻影/黑带)才满填。旧形 mod 恒返 0=
     //  恒无敌(白送 40-120t 全桶帧),与 tML「mod 取消=自管冷却」语义相反→对齐。
-    dmg = runModPlayerPreHurt(this, (globalThis as { __swGame?: unknown }).__swGame, dmg);
-    if (dmg <= 0) return 0;
+    //  ★红队 R-B-P1 勘位:门仅在 preHurts.size > 0 时生效——零 mod 时 dmg=0 穿透
+    //  复活了 orphan-b3 工单3 刚删的 dmg>0 门(测试实锤)。
+    if (hasModPreHurts()) {
+      dmg = runModPlayerPreHurt(this, (globalThis as { __swGame?: unknown }).__swGame, dmg);
+      if (dmg <= 0) return 0;
+    }
     // 神秘艺术腰布 6189（Player.Hurt :38501-38505 mysticSashDodge 分支——1457 新,
     // 排在黑带前）：10% 闪避 → SetImmuneTimeForAllTypes(longInvince?120:80)（:38342-38344;
     // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）。

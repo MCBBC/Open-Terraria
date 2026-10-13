@@ -133,7 +133,8 @@ import { Clock, type World } from '../world/World';
 import { collectModScreenFx, modProjSpecOf, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
 import { modRarityRgb255 } from '../mods/rarity';   // ★刀3-1:mod 稀有度档色(MouseText 主链消费)
 import { modNpcFrameRateOf, modNpcGlowSpecOf, modNpcFullbright, modItemGlowMaskIdOf } from '../mods/drawspecs';   // ★刀2-C1:绘制声明面
-import { modNpcDrawSpecOf, modItemDrawSpecOf, type ModDrawCtx } from '../mods/hooks';   // ★刀2-C2:实体自绘面
+// ★第四批:mod 尘埃贴图消费已内联 alias 键(D12,2026-10-13)——modDustTexOf 导入退役
+import { modNpcDrawSpecOf, modItemDrawSpecOf, runModPlayerPostDraw, type ModDrawCtx } from '../mods/hooks';   // ★刀2-C2+第四批:实体/玩家自绘面
 import { TileStore } from '../world/TileStore';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -4686,8 +4687,8 @@ export class Renderer {
    *  返回后调用——与 ghostFrameEnd 同族全路径必经收口点（GL/2D 回退/早退支全覆盖,
    *  挂接点论证见 JudderSmooth.ts 头注）。periodMs=现役档周期（Game 侧
    *  beat.tierPeriodNow();0=跟满/未锚定=旁路）。旗关=完全旁路零改动。 */
-  judderFrameEnd(periodMs: number): void {
-    judderFrameEnd(this.ctx, periodMs);
+  judderFrameEnd(periodMs: number, paused = false): void {
+    judderFrameEnd(this.ctx, periodMs, undefined, paused);
   }
 
   /** ★C10e 滤镜链输入源（2026-10-01,设计文档 §四 F-sfx）：滤镜链采「整个画面」
@@ -5590,6 +5591,10 @@ export class Renderer {
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
     this._diagFrame++;   // ★P0-A:诊断帧戳（swpipe 降级指纹/计数按帧去重的时基）
+    // ★D18-F6(2026-10-13):全亮队列帧首清——冲刷侧清(17921 位)只盖「正常到达冲刷」
+    //  帧;收集后早退/异常帧的残留闭包跨帧滞留=下帧重影+闭包持实体泄漏。帧首清=
+    //  上帧未冲刷者显式丢弃(语义=全亮演出单帧性,漏一帧优于重影)
+    this.projFullbrightQueue.length = 0;
     // ★BJ603：LocalPlayer.miscCounter 渲染侧快照（弹幕 glowMask 相位双画 1101/1102
     //   GetPhaseColor(proj.type) 消费 Main.LocalPlayer.miscCounter——Proj 类 draw
     //   侧无 Player 引用,经本快照读）
@@ -6788,6 +6793,8 @@ export class Renderer {
       drawFakeFishSchool(this);
     }
     this.drawPlayer(player, world, swing, flicker);
+    // ★第四批:mod 玩家外观自绘 overlay(drawPlayer 返回后;ModDrawCtx 受限算子面)
+    runModPlayerPostDraw(player, this.buildModDrawCtx(player.cx, player.cy, cam));
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
@@ -9687,6 +9694,19 @@ export class Renderer {
     if (!vd) return;
     const img = this.atlas?.ensureVImage('vanilla/Dust.png');
     if (!img || !(img.width > 0) || img.width === 0) return;
+    // ★第四批:mod 尘埃 per-type 贴图缓存(400+ 段走独立贴图非 Dust.png 帧)
+    //  ★D12(2026-10-13)接通:alias 键=vanilla/Dust_<type>.png(assets 两支同键注入;
+    //  旧实现 ensureVImage(pack 相对路径)=恒 miss——缓存闭包曾零消费点未暴露)
+    const modDustImgs = new Map<number, ImageBitmap | HTMLImageElement>();
+    const getModDustImg = (type: number): ImageBitmap | HTMLImageElement | undefined => {
+      let cached = modDustImgs.get(type);
+      if (cached === undefined) {
+        const img = this.atlas?.ensureVImage(`vanilla/Dust_${type}.png`) ?? undefined;
+        if (img !== undefined) modDustImgs.set(type, img);
+        return img;
+      }
+      return cached;
+    };
     const ctx = this.ctx;
     // 剔除矩形（:38268-38269：视口外扩 ±1000/±1050，世界坐标）
     const worldW = cam.viewW / cam.zoom, worldH = cam.viewH / cam.zoom;
@@ -9721,6 +9741,32 @@ export class Renderer {
       const axis = dustAxisScale(d);
       if (axis.dual) {
         this.drawSparkleArms(d, px, py, axis.sx, axis.sy);
+        continue;
+      }
+      // ★D12(2026-10-13):mod 尘 per-type 贴图分支(第四批登记债清偿)——400+ 段不进
+      //  vanilla 帧管线(dustFrameOf 对 mod type 越界=垃圾采样)。光语义:lit 尘画在
+      //  worldLayer 内=compositeLight 自动乘光(同原版 texP×GetAlpha 光域,alphaOf
+      //  注 :1060 判例);fullbright 声明经 fullbrightnessWanted 走全亮 pass(331 同桶,
+      //  光照合成后直绘)。α=(255-alpha)/255 缺省衰落档;无拖影/染料/帧(声明面无此三面)。
+      //  贴图缺失=跳笔(占位语义,与 mod NPC 贴图缺省同相)。零 mod=分支恒 miss。
+      if (d.modType !== undefined) {
+        // ★D12 余债:motionType 重写后 d.type=运动档原版 type——载体 d.modType 才是
+        //  原 mod type(贴图键/全亮桶都读它)
+        const modImg = getModDustImg(d.modType);
+        if (modImg) {
+          const ma = (255 - d.alpha) / 255;
+          if (ma > 0.004) {
+            ctx.save();
+            ctx.translate(px, py);
+            if (d.rotation) ctx.rotate(d.rotation);
+            if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+            ctx.globalAlpha = ma;
+            ctx.drawImage(modImg, -modImg.width / 2, -modImg.height / 2);
+            ctx.restore();
+          }
+          continue;
+        }
+        // 贴图未就绪(SW 异步/缺声明)——不落 vanilla 帧采样(垃圾像素差于不可见)
         continue;
       }
       // ★BJ342 ND5：注入闪烁钟（唯 d157 mouseTextColor 脉冲档消费;:4728 同钟源）
@@ -12315,7 +12361,12 @@ export class Renderer {
         //  光照合成后 source-over α=0.4 复绘同帧（本体同枢零漂移,gRot/gMirror=BJ237
         //  残影同源单源）。原版 519 拖影粉（:24643-24649 直用 Pink）/395 GlowMask[49]
         //  （:24957 固定色）不经 GetAlpha=不提亮,本仓两面已同相,不涉本刀。
-        if (npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null || modNpcFullbright(e.vanillaId ?? -1)) {
+        // ★D18-F8(2026-10-13):behindTiles×fullbright 组合跳过全亮复绘——白提亮/全亮
+        //  队列在 7d'(光照合成后)最上层复绘,behindTiles 本体在 tile 层之下,复绘=层序
+        //  违约(被前景 tile 遮挡的语义被顶穿)。现网 vanilla 双旗零交集(零行为变化);
+        //  mod behindTiles 声明族的 fullbright 落本分支=层序优先(登记取舍)。
+        if ((npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null || modNpcFullbright(e.vanillaId ?? -1))
+          && !this.isBehindTilesEnemy(e)) {
           // ★刀2-C1:mod NPC fullbright=ga:1 全亮复绘(原版白提亮 40% 档零扰动)
           this.npcWhiteLiftQueue.push({
             vid: e.vanillaId ?? -1, tex: `vanilla/NPC_${e.vanillaId}.png`,
@@ -17713,12 +17764,16 @@ export class Renderer {
     if (!this.npcWhiteLiftQueue.length) return;
     const ctx = this.ctx;
     if (!ctx) return;
+    // ★R-C-F6-a(2026-10-13):冲刷尾自清(对齐 projFullbrightQueue 冲刷侧替换自清;
+    //  旧=完全依赖帧首清——若早退/位次调整则残留闭包持实体跨帧)
+    const liftQ = this.npcWhiteLiftQueue;
+    this.npcWhiteLiftQueue = [];
     ctx.save();
     ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
     ctx.scale(z, z);
     ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
     ctx.imageSmoothingEnabled = false;
-    for (const q of this.npcWhiteLiftQueue) {
+    for (const q of liftQ) {
       const imgL = this.atlas?.ensureVImage(q.tex);
       if (!imgL) continue;
       // ★BJ551 恒色族 tint 烘焙档（289 rgb 250 保形染帧;tintedTex WeakMap 缓存同键

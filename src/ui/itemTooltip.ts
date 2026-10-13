@@ -38,6 +38,7 @@ const SOCIAL_VANITY_EFFECTS_VIDS: ReadonlySet<number> = new Set(vanityEffectsJso
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 import { roundCSf32Mul, truncCSf32MulBias, f32 } from '../stats/ScaleStats';   // ★BJ343 件 2 舍入单源
+import { runModTooltips } from '../mods/hooks';   // ★第五批:mod tooltip 钩
 
 /** 原版物品 PascalCase 名键（ItemName.Xxx 查 l10n） */
 const vanillaItemNameKey = (vid: number): string => ITEM_NAME_BY_ID[vid] ?? `Item${vid}`;
@@ -392,7 +393,7 @@ export function buildTooltipBody(
   {
     const pet = petInfoOfVid(vid);
     const isSummon = !!f2?.summon;
-    if ((f?.buffType ?? 0) > 0 && !isSummon && !pet) {
+    if (f?.buffType && (typeof f.buffType === 'number' ? f.buffType > 0 : true) && !isSummon && !pet) {   // ★D6:string=mod 键恒显
       lines.push({ text: T('CommonItemTooltip.Buffs'), tag: 'category' });
     } else if ((f?.healLife ?? 0) > 0) {
       lines.push({ text: T('CommonItemTooltip.Healing'), tag: 'category' });
@@ -474,7 +475,7 @@ export function buildTooltipBody(
 
   // ── Buff 持续（:20834-20843；原版排在自带说明之后——装配时并入）──
   let durationLine: TooltipLine | null = null;
-  if ((f?.buffType ?? 0) > 0 && (f?.buffTime ?? 0) > 0) {
+  if (f?.buffType && (typeof f.buffType === 'number' ? f.buffType > 0 : true) && (f?.buffTime ?? 0) > 0) {   // ★D6
     const secs = f!.buffTime! / 60;
     durationLine = secs < 60
       ? { text: T('CommonItemTooltip.SecondDuration', Math.round(secs)), tag: 'duration' }
@@ -585,6 +586,8 @@ export function buildTooltipBody(
   if (ctx?.expert) expertMasterLines.push({ text: T('GameUI.Expert'), tag: 'expert' });
   if (ctx?.master) expertMasterLines.push({ text: T('GameUI.Master'), tag: 'master' });
 
+  // ★第五批:mod tooltip 钩(tML ModifyTooltips 形;mod 增加/修改 tooltip 行)
+  runModTooltips(def.key, { key: def.key, vid, rare: def.rare ?? 0 }, lines);
   return { lines, durationLine, prefixDiff, yoyoLogoLine, setBonusLines, expertMasterLines, researchLine };
 }
 

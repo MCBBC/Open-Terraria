@@ -83,4 +83,68 @@ describe('mod UI 宿主(刀1)', () => {
     p.toggle();
     expect(p.visible).toBe(false);
   });
+  // ★D19-F10(2026-10-13):卸载沿全收——modUiSetInGame(false) 关全部可见面板
+  //  (entries 保留=句柄引用稳定,mod 依 onWorldLoad 重开);再入世界由 modUiResync 恢复
+  it('卸载沿全收(F10):setInGame(false) 关面板;句柄仍可重开', () => {
+    const p = modUiPanel('m', 'wl', { x: 10, y: 10, width: 200, height: 140 });
+    p.show();
+    expect(modUiPanelsOpen()).toBe(true);
+    modUiSetInGame(true);
+    modUiSetInGame(false);
+    expect(modUiPanelsOpen()).toBe(false);
+    expect(p.visible).toBe(false);
+    p.show();   // entries 永存=句柄重开语义(mod 侧 onWorldLoad 重开面)
+    expect(p.visible).toBe(true);
+  });
+
+  // ★D19-F4(2026-10-13):DOM 吞门(无 document 环境=门静默不炸;开合沿可调)
+  it('DOM 吞门(F4):无 document 环境静默;面板开合不抛', () => {
+    const p = modUiPanel('m', 'gate', { x: 10, y: 10, width: 200, height: 140 });
+    p.show();
+    modUiCloseTop();
+    p.show();
+    p.close();
+  });
+  // ★D15余债(2026-10-13):全屏页 uiBlocking——可见置位/收板还原(owned 旗);
+  //  普通面板不置位;整屏指针让位
+  it('fullscreen 面板:uiBlocking 置位+整屏让位;收板还原', () => {
+    const g = { input: { uiBlocking: false } };
+    (globalThis as { __swGame?: unknown }).__swGame = g;
+    modUiSetInGame(true);
+    const fs = modUiPanel('m', 'fs', { x: 0, y: 0, width: 400, height: 300, fullscreen: true });
+    expect(g.input.uiBlocking).toBe(true);
+    expect(modUiBlockingPointer()).toBe(true);   // 整屏让位(不论指针)
+    const norm = modUiPanel('m', 'nm', { x: 500, y: 500, width: 200, height: 140 });
+    norm.show();
+    fs.hide();
+    expect(g.input.uiBlocking).toBe(false);      // 全收 fullscreen 后还原
+    // norm 在(500,500)不在指针(0,0)下=不整屏让位(普通面板=盒命中语义)
+    expect(modUiBlockingPointer()).toBe(false);
+    fs.show();
+    expect(g.input.uiBlocking).toBe(true);
+    modUiSetInGame(false);                        // 退世界清
+    expect(g.input.uiBlocking).toBe(false);
+    delete (globalThis as { __swGame?: unknown }).__swGame;
+  });
+
+  // ★蓝队自检(2026-10-13):原版模态先置 uiBlocking=true → fullscreen 开关 →
+  //  原版置位保留(裸 owned 旗曾连原版的一起清=互踩)
+  it('fullscreen×原版模态互踩:claim 期 preExisting 记位,释放不清原版', () => {
+    const g = { input: { uiBlocking: false } };
+    (globalThis as { __swGame?: unknown }).__swGame = g;
+    modUiSetInGame(true);
+    g.input.uiBlocking = true;   // 原版模态(图鉴/研究)先置
+    const fs = modUiPanel('m', 'fs2', { x: 0, y: 0, width: 400, height: 300, fullscreen: true });
+    expect(g.input.uiBlocking).toBe(true);
+    fs.hide();                    // mod 全屏收 → 原版置位不得被清
+    expect(g.input.uiBlocking).toBe(true);
+    fs.show(); fs.hide();
+    expect(g.input.uiBlocking).toBe(true);
+    g.input.uiBlocking = false;   // 原版模态自己收
+    fs.show();
+    expect(g.input.uiBlocking).toBe(true);   // 此时 preExisting=false → 我们置位
+    fs.hide();
+    expect(g.input.uiBlocking).toBe(false);  // 我们清自己的
+    delete (globalThis as { __swGame?: unknown }).__swGame;
+  });
 });

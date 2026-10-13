@@ -143,7 +143,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
-import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff, runModOnHitAny, runModNpcPreAiBlocked, runModNpcPostAi, runModNpcIncomingHit, runModOnNpcHitByAny } from '../mods/hooks';
+import { takeModNpcAi, takeVanillaNpcAiOverride, runModOnHitPlayerBuff, runModOnHitAny, runModNpcPreAiBlocked, runModNpcPostAi, runModNpcIncomingHit, runModOnNpcHitByAny, runModOnNpcDeath, runModOnKillAnyNpc } from '../mods/hooks';
 import type { Game } from '../core/Game';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -15105,6 +15105,9 @@ export class Enemy extends Entity {
         const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
         if (net?.active) this.applyNetInteraction(net.mySlot, game);
       }
+      // ★D20-m1(2026-10-13):假人受理伤派发(onHitByAny/onHitAny killed=false;
+      //  incomingHit 已在本分支前 :15026 过链=DR 族不重派)
+      this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);
       return true;
     }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
@@ -15293,6 +15296,7 @@ export class Enemy extends Entity {
       // 停机（末击落在毁灭者/千足蜈蚣/Mechdusa 头 hitbox 时复现×4）。
       if (this.realLifeHost && this.realLifeHost !== this && !this.realLifeHost.dead) {
         this.realLifeHost.die(game);
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78864-78883)转为闭眼残肢/死亡演出,
@@ -15312,6 +15316,7 @@ export class Enemy extends Entity {
       if (this.vanillaId === 396 || this.vanillaId === 397
         || (this.vanillaId === 398 && this.ai0 !== 2)) {
         this.dontTakeDamage = true;
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       // 猪鲨爆裂泡泡（NPC 371）：血尽不直死——checkDead（NPC.cs:78850-78855）
@@ -15324,6 +15329,7 @@ export class Enemy extends Entity {
       //   dukeBubbleAI :1363 每 tick 重写旗维持（台账①面）。
       if (this.vanillaId === 371 && this.ai0 !== 1) {
         this.dontTakeDamage = true;
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
@@ -15343,6 +15349,7 @@ export class Enemy extends Entity {
       if (this.vanillaId === 246
         && (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 245)) {
         this.dontTakeDamage = true;
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78884-78889）血尽转 ai2=1 死亡演出
@@ -15354,6 +15361,7 @@ export class Enemy extends Entity {
         //   绕门再结算（2t 窄缝）;真旗=全通道闸,演出期由 towerAI 每 tick 重写
         //   （R23b-P1 形态）,本行=原版 checkDead 位（AI tick 前的窗闭合）。
         this.dontTakeDamage = true;
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       // 永恒水晶 548（NPC.cs:78891-78898）：血尽转败北演出——ai1=1/ai0=0/满血/
@@ -15370,6 +15378,7 @@ export class Enemy extends Entity {
         this.ai0 = 0;
         this.hp = this.maxHp;
         this.dontTakeDamageFromHostiles = true;
+        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
         return false;
       }
       this.dead = true;
@@ -15885,7 +15894,11 @@ export class Enemy extends Entity {
           }
         }
       }
-      game.onEnemyKilled(this.key, this);
+      // ★D20-m3(2026-10-13):mod 击杀钩改尾派发(tML 序=StrikeNPC 内 OnHitNPC 先于
+      //  checkDead→OnKill;旧序 onEnemyKilled 头=onKill 先于 onHitByAny(killed) 反相)
+      //  ——skipModKillHooks 让 onEnemyKilled 只走原版记账,mod 双钩随 hurt 尾
+      //  onHitByAny(killed=true) 之后派发(顺序=per-NPC 先/global 后,镜像原 onEnemyKilled)
+      game.onEnemyKilled(this.key, this, { skipModKillHooks: true });
       // 死亡声 = 本体 DeathSound（NPC.Strike :48316 全 NPC 同链，Boss 亦然——
       // 血肉墙 NPCDeath10 / 机械族 NPCDeath14 / 克脑 NPCDeath11 / 猪鲨 NPCDeath20 /
       // 光皇 65 / 史后 64 / 异教徒 59 / 月总头手 62 / Betsy DD2 / 鹿角怪专属）。
@@ -16010,6 +16023,9 @@ export class Enemy extends Entity {
       // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
       if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
       runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击
+      // ★D20-m3:mod 击杀双钩尾派发(tML OnKill 序;onHitByAny 之后)
+      runModOnNpcDeath(this.vanillaId, this, game as unknown as Game);
+      runModOnKillAnyNpc(this, game);
       return true;
     }
     // ★BJ254：受击通用彩色粒子近似（def.gore[0] 5 粒 spawnParticles）退役——
@@ -16021,6 +16037,18 @@ export class Enemy extends Entity {
     if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
     runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId });   // ★B 批:全域受击
     return false;
+  }
+
+  /** ★D20-M1 清偿(2026-10-13):受理伤非死亡支的受击派发——①六致死转态支
+   *  (realLife/月总/泡泡/石巨人头/四塔/水晶,hp≤0 入转态非拒收)②训练假人 488
+   *  (immortal 早退支,D20-m1 清偿=mod 武器打假人出特效)。tML OnHitNPC 语义=受理
+   *  即发(死亡与否只影响 killed 旗;两支均 killed=false)。onKill 不在此发:转态非
+   *  死亡(realLife 经头 die()→标准管线含击杀派发;四塔/水晶演出终末走标准死亡管线
+   *  时派发),假人 immortal 永不死亡。零注册零成本(头门)。 */
+  private dispatchAcceptedHit(game: GameHooks, fromPlayer: boolean, dmg: number,
+    crit: boolean, pierce: number, projId: number): void {
+    if (fromPlayer) runModOnHitAny(this, game, { damage: dmg, crit, killed: false, projId, melee: projId === 0 && pierce === 0 });
+    runModOnNpcHitByAny(this, game, { damage: dmg, crit, killed: false, projId });
   }
 
   /** AI 触发的标准死亡（EoW 断链自灭，NPC.cs:51876-51905 的 life=0 + HitEffect +

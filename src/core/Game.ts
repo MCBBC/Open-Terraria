@@ -160,7 +160,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem, runVanillaOverrideValue, runModOnKillAnyNpc, runModPlayerRespawn, runModPlayerUpdateDead,
+import { runModPreUpdate, runModPostEntities, runModPostUpdate, runModOnWorldLoad, runModOnWorldUnload, runModItemUse, runModOnHitNpc, runModOnNpcDeath, applyModNpcBuff, modProjSpecOf, runModModifyHurtByNpc, runModModifyHitNpc, runModModifyHitPlayerByProj, runModChestUnlock, applyModSpawnStats, takeModSpawnPool, runModCanUse, runModTileInteract, runModPlayerThorns, runModHealItem, runVanillaOverrideValue, runModOnKillAnyNpc, runModPlayerRespawn, runModPlayerUpdateDead,
 } from '../mods/hooks';
 import { getModLoadResult } from '../mods/loader';
 import { modBuffTypeOf } from '../mods/buffs';
@@ -202,6 +202,27 @@ import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/Player
  *  BUFF_TYPE_BY_VANILLA 的伪 vanillaBuff 9000+ 段）不可见——改 live 转发
  *  buffTypeByVanilla（Buffs.ts 反查 Map,mod 注册面已直写）。原版域行为恒等。 */
 const BUFF_BY_VANILLA = (v: number): BuffType | undefined => buffTypeByVanilla(v);
+
+/** ★D6(2026-10-13):itemfunc.buffType 双域解析——数字=原样（原版 id 或 mod 伪 id
+ *  9000+,BUFF_BY_VANILLA 反查表两域通吃）;字符串=mod buff 键（content/buffs 声明
+ *  与 entry sw.buff 两相均可——消费期全部注册在场;注册期解析不可行=applyRegistrationPlan
+ *  先于 entry 相位）。键→BuffType→伪 vanilla id（进 BUFF_BY_VANILLA 既有通道）。
+ *  无效/未注册=0（=无 buff 语义,门处屏蔽;不炸使用链——治疗面照走） */
+/** ★D6:buffType 语义门(string=非空即有;number=>0) */
+function hasItemBuff(bt2: number | string | undefined): boolean {
+  return typeof bt2 === 'number' ? bt2 > 0 : !!bt2;
+}
+
+/** 导出供测试锚定（dustFrameOf 体裁;消费面仅 Game.ts 内四处） */
+export function itemBuffIdOf(defKey: string, bt2: number | string | undefined): number {
+  if (bt2 === undefined) return 0;
+  if (typeof bt2 === 'number') return bt2;
+  if (!defKey.startsWith('mod_')) return 0;
+  const modId = defKey.slice(4, defKey.indexOf('_', 4));
+  try {
+    return (BUFF_DEFS as Record<number, { vanillaBuff: number }>)[modBuffTypeOf(modId, bt2)]?.vanillaBuff ?? 0;
+  } catch { return 0; }
+}
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, MOD_SPAWN_RULES, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx, type ModSpawnRule } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
@@ -13397,7 +13418,7 @@ export class Game implements GameHooks {
     const fm = /^vi_(\d+)_/.exec(def.key);
     const ff = fm ? itemFuncOfVid(+fm[1]) : null;
     return !!ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
-      && (!!ff.healLife || !!ff.healMana || !!(ff.buffType && ff.buffType > 0));
+      && (!!ff.healLife || !!ff.healMana || itemBuffIdOf(def.key, ff.buffType) > 0);   // ★D6:双域
   }
 
   /** 手持物 useStyle 分族（Player.cs:49939 ItemCheck_ApplyUseStyle switch）：
@@ -13871,7 +13892,7 @@ export class Game implements GameHooks {
       if (!s || s.stack <= 0) return;
       const vid = ITEM_DEFS[s.id]?.vid ?? -1;
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      const prio = f?.buffType ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
+      const prio = f && typeof f.buffType === 'number' ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;   // ★D6:string=mod 键不入原版食物档表
       if (prio > 0) {   // 档 0 = 非食物：受理门 num3 > 0（:5933/:5948）恒拒，不入流
         cands.push({ prio, time: f!.buffTime ?? 0 });
         candRef.push({ arr, i });
@@ -13891,8 +13912,10 @@ export class Game implements GameHooks {
         if (!s || s.stack <= 0) continue;
         const vid = ITEM_DEFS[s.id]?.vid ?? -1;
         const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-        if (!f || !(f.buffType! > 0) || f.summon) continue;               // :5862-5866
-        let btype = f.buffType!;
+        // ★D6:buffType 双域(string=mod buff 键消费期解析)
+        if (!f || !hasItemBuff(f.buffType) || f.summon) continue;
+        let btype = itemBuffIdOf(ITEM_DEFS[s.id]?.key ?? '', f.buffType);
+        if (btype <= 0) continue;
         // QuickBuff_ShouldBotherUsingThisBuff（:5970-6011）
         let bother = true;
         const isFed = Game.QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
@@ -13956,8 +13979,8 @@ export class Game implements GameHooks {
     const vid = def ? (def.vid ?? -1) : -1;
     const f = vid >= 0 ? itemFuncOfVid(vid) : null;
     if (!s || !f) return -1;
-    if (f.buffType! > 0) {
-      const bt = f.buffType !== undefined ? BUFF_BY_VANILLA(f.buffType) : undefined;
+    if (hasItemBuff(f.buffType)) {
+      const bt = BUFF_BY_VANILLA(itemBuffIdOf(def?.key ?? '', f.buffType));   // ★D6:双域
       if (bt !== undefined && bt !== BuffType.Resistance) {   // 21 是副作用不主动施加
         p.buffs.apply(bt, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
       }
@@ -17500,7 +17523,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★ 无消耗品语义（水晶/果/弓族等）不得空占本 else-if 槽位——否则链条后续
       // 全部分支被饿死（else-if 匹配即终止）。命中才处理，否则落空交还链条
       if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
-        && (ff.healLife || ff.healMana || (ff.buffType && ff.buffType > 0))) {
+        && (ff.healLife || ff.healMana || hasItemBuff(ff.buffType))) {   // ★D6:双域
         if (ff.healLife && this.player.buffs.healBlocked) {
           // ★SW-FX2：原版静默拒用——ItemCheck_CheckCanUse Player.cs:52856-52858
           //  `sItem.potion && potionDelay > 0 → flag = false`（无动画/无音/无提示/无消耗;
@@ -17509,8 +17532,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         } else {
           const fvid = potionVid;   // ★P5:mod 消耗品 vid 直通(药水病分档/诡药特判按 vid,mod vid 落 default 档)
           // 原版 buff id → BuffType（BUFF_DEFS 反查；耐药性 21 是治疗副作用不主动施加）
-          if (ff.buffType && ff.buffType > 0) {
-            const bt = BUFF_BY_VANILLA(ff.buffType);
+          if (itemBuffIdOf(heldDef.key, ff.buffType) > 0) {
+            const bt = BUFF_BY_VANILLA(itemBuffIdOf(heldDef.key, ff.buffType));   // ★D6:双域
             if (bt !== undefined && bt !== BuffType.Resistance) {
               // ★SW-FX2：缺省 7200→3600——原版通用补挂缺省 = `num = item.buffTime;
               //  if (num == 0) num = 3600`（ItemCheck_UsePotionStuff Player.cs:5518-5524;
@@ -44285,7 +44308,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       /** ★红队 R1-F2 修正(2026-10-13):弹幕域旗——attacker 仅作死亡归因、不进
        *  modifyHurtByNpc 接触修正链(duke 龙卷等 Damage_EVP 语义直调点;弹域修正
        *  归 modifyHitPlayerByProj 链,直调面覆盖缺口已登记 recon doc F4 账) */
-      projDomain?: boolean }): number {
+      projDomain?: boolean;
+      /** ★D3 清偿(2026-10-13):弹域修正链接线——projDomain+projVid 双旗时进
+       *  modifyHitPlayerByProj 倍率链(此前直调面两链皆不进=mod 敌弹增减伤对
+       *  Boss 直调伤无效)。纯倍率与调用侧难度缩放可交换(PTGT 站同注) */
+      projVid?: number }): number {
     const p = this.player;
     if (p.dead) return 0;
     // ★CalPlayer 基建(六十三刀):承伤修正链(ModifyHitByNPC 形)。
@@ -44295,6 +44322,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  ★红队 R1-F2:opts.projDomain=弹幕语义伤(attacker 仅归因)不进本链
     if (attacker !== undefined && !opts?.projDomain) {
       dmg = runModModifyHurtByNpc(p, this, attacker.vanillaId ?? -1, dmg, contactOnly);
+    }
+    // ★D3 清偿(2026-10-13):直调弹幕语义面接弹域修正链(projDomain+projVid 双旗;
+    //  接触链仍排除=R1-F2 定谳;倍率连乘,PTGT 站同族)
+    if (opts?.projDomain && opts.projVid !== undefined) {
+      dmg = runModModifyHitPlayerByProj(p, this, opts.projVid, dmg, false, pvp);
     }
     // ★五百四十六:mod 受伤增伤乘区(C# CalamityPlayerHitHurt :1550-1556
     //  damageMult += 0.2 CrushingEgo/ + Demonshade enrage——乘区在 banner 前=
@@ -46102,11 +46134,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  R3-A3 交互门吞掉旗杀（旗进度偏慢）；本参置 true 时：旗杀门直通（记一次）
    *  + NotifyNPCKilled/lastCreatureHit 反向多余信号摘除,图鉴 RegisterKill 两边
    *  无门维持（石化 :56458 有 IsNPCValidForBestiaryKillCredit 门,数据层同款） */
-  onEnemyKilled(key: string, enemy?: Enemy, opts?: { petrifyBypassInteractionGate?: boolean }) {
+  onEnemyKilled(key: string, enemy?: Enemy, opts?: { petrifyBypassInteractionGate?: boolean;
+    /** ★D20-m3(2026-10-13):hurt 死亡支置位——mod 击杀双钩改 hurt 尾 onHitByAny 之后
+     *  派发(tML 序),本口只走原版记账;直调路径(石化等不经 hurt 者)缺省仍在本口头派发 */
+    skipModKillHooks?: boolean }) {
     // ★B6 mod NPC 死亡钩(击杀单口;空表零成本)
-    if (enemy) runModOnNpcDeath(enemy.vanillaId, enemy, this);
+    if (enemy && !opts?.skipModKillHooks) runModOnNpcDeath(enemy.vanillaId, enemy, this);
     // ★B 批:GlobalNPC OnKill 全域对(原版域含;事件链 try/catch)
-    if (enemy) runModOnKillAnyNpc(enemy, this);
+    if (enemy && !opts?.skipModKillHooks) runModOnKillAnyNpc(enemy, this);
     // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);
@@ -47423,8 +47458,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const s = p.inv.slots[slot]!;
     const ff = itemFuncOfVid(ITEM_DEFS[s.id]?.vid ?? -1)!;
-    if (ff.buffType && ff.buffType > 0) {
-      const bt = BUFF_BY_VANILLA(ff.buffType);
+    if (itemBuffIdOf(ITEM_DEFS[s.id]?.key ?? '', ff.buffType) > 0) {
+      const bt = BUFF_BY_VANILLA(itemBuffIdOf(ITEM_DEFS[s.id]?.key ?? '', ff.buffType));   // ★D6:双域
       if (bt !== undefined && bt !== BuffType.Resistance) {
         // ★SW-FX2：缺省 7200→3600（ItemCheck_UsePotionStuff Player.cs:5518-5524,主链同批注）
         p.buffs.apply(bt, Math.round((ff.buffTime ?? 3600) / 60));
@@ -53034,7 +53069,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // ★juddersmooth（2026-10-10,?smooth=1 缺省关）:迟到帧半步混合（judder smoothing）
     //  ——同族收口点;periodMs=现役档周期（0=跟满/未锚定旁路;机理/挂接论证见
     //  JudderSmooth.ts 头注）。
-    this.renderer.judderFrameEnd(this.beat.tierPeriodNow());
+    this.renderer.judderFrameEnd(this.beat.tierPeriodNow(), this.paused);
     glStatFrame();   // #perf-gpulog:GPU 提交账本帧推进(唯一 tick 点)
   }
 

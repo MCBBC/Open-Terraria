@@ -28,18 +28,15 @@ try {
     }
   }
 } catch { /* 无目录 */ }
-// ★700:mod tile 注册统一 registerModTile(有视力形态: defs 全=solid/chest 真值;
-//  genSolid/FCP 箱保护/树挂全部生效。裸环 1030+ 曾=defs 盲=箱 canPlace 全败根因)
+
+// mod tile 注册(裸环=TILE_BY_KEY 1030+;defs 留空=引擎 ?. 链处理[可靠态 d930f2b9];
+//  registerModTile 形态会激活 gen-misc runner 未守卫路径[crash],待 runner 守卫修复后启用)
 const tileDir = join(contentDir, 'tiles');
-{
-  let rid = 1030;
-  for (const f of readdirSync(tileDir).sort()) {
-    if (!f.endsWith('.json')) continue;
-    try {
-      const j = JSON.parse(readFileSync(join(tileDir, f), 'utf8')) as Record<string, unknown>;
-      registerModTile({ key: `mod_calamity_${f.replace('.json', '')}`, name: '', chest: j.chest === true, solid: j.solid === true, framed: j.framed === true, w: (j.w as number) ?? 1, h: (j.h as number) ?? 1 }, rid++);
-    } catch (e) { console.log('[reg-fail]', f, String(e).slice(0, 60)); }
-  }
+let nextId = 1030;
+for (const f of readdirSync(tileDir).sort()) {
+  if (!f.endsWith('.json')) continue;
+  const k = `mod_calamity_${f.replace('.json', '')}`;
+  if (TILE_BY_KEY[k] === undefined) TILE_BY_KEY[k] = nextId++;
 }
 
 const g = globalThis as Record<string, unknown>;

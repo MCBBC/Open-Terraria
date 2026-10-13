@@ -3,11 +3,11 @@
 // =联机双端一致性与存档 id 稳定性的根(design.md §2)。
 import type {
   ModBuffContent, ModGoreContent, ModIdAllocation, ModItemContent, ModMountContent, ModNpcContent, ModPack, ModProjContent,
-  ModHairContent, ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, ModWallContent, RegistrationPlan,
+  ModDustContent, ModHairContent, ModRarityContent, ModRecipeContent, ModShopContent, ModTileContent, ModWallContent, RegistrationPlan,
 } from './types';
 import {
   MOD_BUFF_VANILLA_BASE, MOD_GORE_ID_BASE, MOD_ITEM_STABLE_BASE, MOD_NPC_ID_BASE, MOD_PROJ_ID_BASE,
-  MOD_HAIR_BASE, MOD_HAIR_MAX, MOD_MOUNT_STABLE_BASE, MOD_MOUNT_STABLE_MAX, MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX, MOD_WALL_STABLE_BASE, MOD_WALL_STABLE_MAX,
+  MOD_DUST_TYPE_BASE, MOD_DUST_TYPE_MAX, MOD_HAIR_BASE, MOD_HAIR_MAX, MOD_MOUNT_STABLE_BASE, MOD_MOUNT_STABLE_MAX, MOD_RARITY_ID_BASE, MOD_TILE_STABLE_BASE, MOD_TILE_STABLE_MAX, MOD_WALL_STABLE_BASE, MOD_WALL_STABLE_MAX,
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
@@ -83,6 +83,15 @@ function parseHair(modId: string, raw: unknown): ModHairContent {
   if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'hair', key);
   if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'hair', key);
   return o as unknown as ModHairContent;
+}
+
+/** ★第四批:mod 尘埃(content/dusts/*.json) */
+function parseDust(modId: string, raw: unknown): ModDustContent {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'dust', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'dust', key);
+  if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'dust', key);
+  return o as unknown as ModDustContent;
 }
 
 function parseNpc(modId: string, raw: unknown): ModNpcContent {
@@ -170,7 +179,7 @@ export function topoSortMods(manifests: ModPack[]): string[] {
 export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const order = topoSortMods(packs);
   const byId = new Map(packs.map((p) => [p.manifest.id, p]));
-  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map(), walls: new Map(), mounts: new Map(), hairs: new Map() };
+  const allocation: ModIdAllocation = { items: new Map(), tiles: new Map(), npcs: new Map(), projs: new Map(), buffs: new Map(), rarities: new Map(), gores: new Map(), walls: new Map(), mounts: new Map(), hairs: new Map(), dusts: new Map() };
   const itemSpecs: RegistrationPlan['itemSpecs'] = [];
   const tileSpecs: RegistrationPlan['tileSpecs'] = [];
   const npcSpecs: RegistrationPlan['npcSpecs'] = [];
@@ -183,6 +192,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const wallSpecs: RegistrationPlan['wallSpecs'] = [];
   const mountSpecs: RegistrationPlan['mountSpecs'] = [];
   const hairSpecs: RegistrationPlan['hairSpecs'] = [];
+  const dustSpecs: RegistrationPlan['dustSpecs'] = [];
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
@@ -256,6 +266,20 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       if (hairId > MOD_HAIR_MAX) throw new ModPlanError(`mod 发型段溢出(>${MOD_HAIR_MAX}): ${fullKey}`);
       allocation.hairs.set(fullKey, hairId);
       hairSpecs.push({ modId, spec, hairId, fullKey });
+    }
+    // ★第四批:dusts(全键字典序分配 400+ 段)
+    const dustSpecsOfPack: Array<{ spec: ModDustContent }> = [];
+    for (const path of discoverPackJsonPaths(pack, 'dusts')) {
+      dustSpecsOfPack.push({ spec: parseDust(modId, readPackJson(pack, path)) });
+    }
+    dustSpecsOfPack.sort((a, b) => (a.spec.key < b.spec.key ? -1 : a.spec.key > b.spec.key ? 1 : 0));
+    for (const { spec } of dustSpecsOfPack) {
+      const fullKey = modItemFullKey(modId, spec.key);
+      if (allocation.dusts.has(fullKey)) throw new ModPlanError(`mod ${modId} 尘埃键重复: ${spec.key}`);
+      const dustType = MOD_DUST_TYPE_BASE + allocation.dusts.size;
+      if (dustType > MOD_DUST_TYPE_MAX) throw new ModPlanError(`mod 尘埃段溢出(>${MOD_DUST_TYPE_MAX}): ${fullKey}`);
+      allocation.dusts.set(fullKey, dustType);
+      dustSpecs.push({ modId, spec, dustType, fullKey });
     }
     // items:全键字典序分配 stable id
     const itemSpecsOfPack: Array<{ path: string; spec: ModItemContent }> = [];
@@ -344,7 +368,7 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
       }
     }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs, mountSpecs, hairSpecs };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs, mountSpecs, hairSpecs, dustSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----

@@ -113,7 +113,9 @@ export interface GameHooks {
     contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
     opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean;
       /** ★红队 R1-F2:弹幕域旗(attacker 仅死亡归因,不进 modifyHurtByNpc 接触链) */
-      projDomain?: boolean }): number;
+      projDomain?: boolean;
+      /** ★D3:弹域修正链接线(projDomain+projVid 双旗→modifyHitPlayerByProj 倍率链) */
+      projVid?: number }): number;
   /** ★充能电水母反噬单口（Player.TakeDamageFromJellyfish :44607-44613）——近战
    *  （ProcessHitAgainstNPC :44620）与弹幕（Damage_PVE_Inner :12682 ZappingJellyfish
    *  块）两口共用同一方法；proj1457.dealContacts 水母块消费 */
@@ -178,7 +180,9 @@ export interface GameHooks {
    *  原文不经 NPCLoot 交互门直记旗杀（NPC.cs:56456-56463）且不写
    *  lastCreatureHit/不调 NotifyNPCKilled */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy,
-    opts?: { petrifyBypassInteractionGate?: boolean }): void;
+    opts?: { petrifyBypassInteractionGate?: boolean;
+      /** ★D20-m3:hurt 死亡支置位——mod 击杀双钩改 hurt 尾派发(tML 序),本口只走原版记账 */
+      skipModKillHooks?: boolean }): void;
   /** 多格 framed 件运行期裸写（TileObject.Place TileObject.cs:94-110 语义：写循环期
    *  抑制 DECOR 逐格完整性裁决,全格写完后在锚点做一次 SquareTileFrame 级联
    *  （PlaceObject WorldGen.cs:51886-51888 尾）。Game 实现 = _decorPlaceBuilding 窗

@@ -686,6 +686,13 @@ const GUIDE_SLOT_GHOST_FRAME = 18;
 
 const CSS = `
 .sw-root { position:fixed; inset:0; pointer-events:none; font-family:inherit; z-index:10; }
+/* ★D19-F4(2026-10-13):mod 面板叠 DOM 双消费吞门——vui 面板画布 z=300 PE:none,
+   面板叠 DOM 槽时点击=面板 onClick+底层 DOM 槽双触发。指针落 mod 面板子树期间
+   (mods/ui.ts modUiSyncDomGate 挂 html 类)DOM 命中测试全关,离板还原 */
+html.sw-modpanel-swallow #game-root > *, html.sw-modpanel-swallow #game-root > * * { pointer-events: none !important; }
+/* ★R-C-F4-a:作用域=#game-root 全子树(旧仅 .sw-root——设置 z25/图鉴 z30/旅程/研究/
+   NPC 对话等 DOM 模态与 .sw-root 平级裸奔=叠面板双消费仍在;vui 面板画布 z300 视觉
+   在顶,DOM 层全吞=「mod 面板持有输入」语义;vui window 层输入不受 PE 影响 ✓) */
 /* ---- 原版风格：深蓝面板 + 浅蓝描边 ---- */
 .sw-panel { pointer-events:auto;
   /* 原版 UIPanel：PanelBackground × Color(63,82,151)*0.785 —— 半透底 */

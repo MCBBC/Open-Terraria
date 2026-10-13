@@ -15,6 +15,7 @@ import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
 import { Lang } from '../i18n/Lang';
+import { modUiPanelsOpen } from '../mods/ui';   // ★D19-F8(a):ESC 双收让位门
 import {
   fsBackupSupported, fsBackupStatus, fsBackupDirName, fsBackupPickDirectory,
   fsBackupDisable, fsBackupRequestPermission, onFsBackupStatusChange,
@@ -124,6 +125,11 @@ export class SettingsPanel {
     this.fsBackupUnsub = onFsBackupStatusChange(() => this.build());
     this.panel.querySelector('.sw-set-back')!.addEventListener('click', () => this.close(flow.onBack));
     this.escHandler = (e: KeyboardEvent) => {
+      // ★D19-F8(a)(2026-10-13):mod 面板叠开时让位 ESC 链(resolveEscapeChain
+      //  closeModPanels 支先收 mod 面板;本 handler 无 stopPropagation 同帧也关=
+      //  一次 Esc 双收)——面板开链期本 handler 静默一拍,链下拍自然轮到设置
+      //  (modUiCloseTop 收完 mod 面板后 modPanelsOpen=false,下次 Esc 回本 handler)
+      if (modUiPanelsOpen()) return;
       if (e.code === 'Escape') this.close(flow.onBack);
     };
     window.addEventListener('keydown', this.escHandler);

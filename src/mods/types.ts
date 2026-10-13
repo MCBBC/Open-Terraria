@@ -8,11 +8,13 @@ import type { ModGoreContent } from './gore';       // ★刀3-3:gore 声明 sch
 import type { ModWallContent } from './walls';      // ★刀3-墙:墙声明 schema(类型单向)
 import type { ModMountContent } from './mounts';    // ★第三批:坐骑声明 schema(类型单向)
 import type { ModHairContent } from './hairs';      // ★第三批:发型声明 schema(类型单向)
+import type { ModDustContent } from './dusts';      // ★第四批:尘埃声明 schema(类型单向)
 export type { ModRarityContent };
 export type { ModGoreContent };
 export type { ModWallContent };
 export type { ModMountContent };
 export type { ModHairContent };
+export type { ModDustContent };
 
 /** mod 清单(mod.json)。id=命名空间,全仓唯一。 */
 export interface ModManifest {
@@ -77,7 +79,11 @@ export interface ModItemContent {
     useStyle?: number; pick?: number; axe?: number; hammer?: number;
     createTile?: number; placeStyle?: number;
     consumable?: number; potion?: number;
-    healLife?: number; healMana?: number; buffType?: number; buffTime?: number;
+    healLife?: number; healMana?: number;
+    /** ★D6(2026-10-13):buffType 双域——number=原版 id/mod 伪 id(9000+,反查表直查);
+     *  string=mod buff 键(消费期解析——applyRegistrationPlan 先于 entry 相位,注册期
+     *  解析不可行;键→BuffType→伪 vanilla id 进 BUFF_BY_VANILLA 既有通道) */
+    buffType?: number | string; buffTime?: number;
     ammo?: number; useAmmo?: number;
     autoReuse?: number; useTime?: number; useTurn?: number;
     /** B6:宝藏袋开包面(右键/使用消耗,AllOptionsAtOnce+保底语义;item=本 mod 键或
@@ -321,6 +327,10 @@ export const MOD_MOUNT_STABLE_MAX = 200;
 export const MOD_HAIR_BASE = 228;
 /** mod 发型段硬顶(byte 域=存档 1 字节;255-228=28 个 mod 发型槽) */
 export const MOD_HAIR_MAX = 255;
+/** mod 尘埃 type 段基址(★第四批:原版 VanillaDust ~355 type 用满;400 留缓冲) */
+export const MOD_DUST_TYPE_BASE = 400;
+/** mod 尘埃段硬顶(6000 池容量无关=type 只是标签;硬顶 1000) */
+export const MOD_DUST_TYPE_MAX = 1000;
 
 /** id 分配快照(确定性:拓扑序 + mod id 字典序 + mod 内键字典序) */
 export interface ModIdAllocation {
@@ -344,6 +354,8 @@ export interface ModIdAllocation {
   mounts: Map<string, number>;
   /** 全发型键 `mod_<modid>_<key>` → hair id(★第三批;228-255 段) */
   hairs: Map<string, number>;
+  /** 全尘埃键 `mod_<modid>_<key>` → dust type(★第四批;400+ 段) */
+  dusts: Map<string, number>;
 }
 
 /** 注册计划(plan 纯数据 → register.ts 消费;loader 与数据模块解耦) */
@@ -370,6 +382,8 @@ export interface RegistrationPlan {
   mountSpecs: Array<{ modId: string; spec: ModMountContent; mountId: number; fullKey: string }>;
   /** ★第三批:mod 发型计划(228-255 段) */
   hairSpecs: Array<{ modId: string; spec: ModHairContent; hairId: number; fullKey: string }>;
+  /** ★第四批:mod 尘埃计划(400+ 段) */
+  dustSpecs: Array<{ modId: string; spec: ModDustContent; dustType: number; fullKey: string }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */

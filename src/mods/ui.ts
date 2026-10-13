@@ -14,18 +14,24 @@ import { UIElement } from '../vui/core/UIElement';
 import { UIPanel } from '../vui/elements/UIPanel';
 import { UIText } from '../vui/elements/UIText';
 import { UITextPanel } from '../vui/elements/UITextPanel';
+import { UISlot, setUISlotAtlas, type UISlotItem, type UISlotOpts } from '../vui/elements/UISlot';
 import { StyleDimension } from '../vui/core/StyleDimension';
+import type { UISpriteBatch } from '../vui/draw/UISpriteBatch';
+import type { DrawRect } from '../assets/SpriteAtlas';
 import { UIScale } from '../vui/draw/UIScale';
+import type { SpriteAtlas } from '../assets/SpriteAtlas';
 
 /** mod 面板句柄(sw.ui.panel 产) */
 export interface ModPanelHandle {
   readonly key: string;
   readonly visible: boolean;
-  /** 文本行(UIText;PixelText/bake 管线) */
   addText(text: string, o: { x: number; y: number; scale?: number; large?: boolean }): void;
-  /** 按钮(UITextPanel;onClick 左键) */
   addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void }): void;
-  /** 面板定位(逻辑 px,屏幕系) */
+  /** ★第五批:物品槽(UISlot;mod 自管库存,点击回调) */
+  addSlot(o: { x: number; y: number; getItem(): { key: string; stack: number } | null; onLeftClick?: () => void; onRightClick?: () => void }): void;
+  /** ★D15(2026-10-13):mod 贴图(tex=pack 相对路径 textures/ui/*.png 约定目录——
+   *  assets 两支装载期注入 atlas;scale=整图缩放/或 w+h=盒适配) */
+  addImage(o: { x: number; y: number; tex: string; scale?: number; w?: number; h?: number }): void;
   setPosition(x: number, y: number): void;
   moveBy(dx: number, dy: number): void;
   show(): void;
@@ -38,6 +44,10 @@ interface PanelEntry {
   modId: string;
   key: string;
   fullKey: string;
+  /** ★D15余债(2026-10-13):全屏页宿主(IngameFancyUI 同位)——可见期 uiBlocking=true
+   *  (移动/键面/世界输入全封)+整屏指针让位;Esc 链 closeModPanels 支先于 uiBlocking
+   *  让位=仍可关层 */
+  fullscreen: boolean;
   root: UIPanel;
   titleBar: UITextPanel;
   visible: boolean;
@@ -72,6 +82,31 @@ function rebuildHostTree(): void {
     if (p.visible) hostState.append(p.root);
   }
   sync();
+  modUiSyncDomGate();   // ★D19-F4:开合沿即同步(收板时指针不动也要还原 DOM PE)
+  syncUiBlocking();     // ★D15余债:fullscreen 可见面变化沿
+}
+
+/** ★D15余债(2026-10-13):全屏页 uiBlocking 同步(IngameFancyUI 同位)——fullscreen
+ *  声明面板可见期 game.input.uiBlocking=true(移动/键面/世界输入全封)。owned 旗
+ *  防与原版模态互踩(只清自己置的);★蓝队自检(2026-10-13):原版模态先置 true 再开
+ *  fullscreen 时,裸 owned 旗的清位会连原版的一起清=互踩——claim 期记 preExisting,
+ *  释放期只在「我们置的且置位前非真」时清。ESC 链 closeModPanels 支先于 uiBlocking
+ *  让位(:95/:104)=全屏页仍可 Esc 关。 */
+let uiBlockingOwned = false;
+let uiBlockingPreExisting = false;
+function syncUiBlocking(): void {
+  const g = (globalThis as { __swGame?: { input?: { uiBlocking: boolean } } }).__swGame;
+  if (!g?.input) return;
+  const want = inGame && openOrder.some((p) => p.visible && p.fullscreen);
+  if (want && !uiBlockingOwned) {
+    uiBlockingPreExisting = g.input.uiBlocking;   // 原版模态已在位=释放不清(归它)
+    g.input.uiBlocking = true;
+    uiBlockingOwned = true;
+  } else if (!want && uiBlockingOwned) {
+    if (!uiBlockingPreExisting) g.input.uiBlocking = false;
+    uiBlockingOwned = false;
+    uiBlockingPreExisting = false;
+  }
 }
 
 function sync(): void {
@@ -84,7 +119,55 @@ function sync(): void {
 /** 游戏内旗(装载/卸载沿调;菜单态面板不接管 vui) */
 export function modUiSetInGame(v: boolean): void {
   inGame = v;
-  if (!v) sync();
+  if (!v) {
+    // ★D19-F10(2026-10-13):卸载沿全收(面板=世界会话产物)——Game.destroy 不关
+    //  entries 会带陈旧内容「复活」到下一世界(F1 修复后随 rebuildHostTree 现身)。
+    //  全收语义=面板隐藏不销毁(mod 依 onWorldLoad 重开;句柄引用稳定),菜单态
+    //  panel() 仍可 build(sync no-op 不挂树,首次进世界沿现身)。
+    //  进世界沿不动(modUiResync 由世界进入链末尾调用=F1 既有位次)。
+    for (const p of openOrder) { p.visible = false; p.dragging = false; }   // ★R-C-F10-a:拖拽中退世界复位
+    rebuildHostTree();
+    uiBlockingOwned = false;   // ★D15余债:退世界不持锁(置位面随 rebuildHostTree 清)
+    domGateOn = false; modUiSyncDomGate();   // ★D19-F4:退世界还原 PE
+  }
+}
+
+/** atlas 注入(UISlot 物品图标/ModUIImage 贴图渲染用;assets 阶段调) */
+let uiAtlasRef: SpriteAtlas | null = null;
+export function modUiSetAtlas(atlas: SpriteAtlas | null): void {
+  setUISlotAtlas(atlas);
+  uiAtlasRef = atlas;
+}
+
+/** ★D15:mod 贴图元素(assets 两支注入键=vanilla/ModUI_<modId>_<扁平路径>.png;
+ *  ensureVImage 命中直返(vimages 表),miss 走别名 fetch 晚到=下帧可见) */
+class ModUIImage extends UIElement {
+  constructor(private readonly modId: string, private readonly tex: string,
+    private readonly scale = 1, private readonly fitW?: number, private readonly fitH?: number) {
+    super();
+    const t = uiAtlasRef?.ensureVImage(`vanilla/ModUI_${modId}_${ModUIImage.flatKey(modId, tex)}.png`);
+    if (t) {
+      const sc = fitW && fitH ? Math.min(fitW / t.width, fitH / t.height) : scale;
+      this.width = StyleDimension.fromPixels(t.width * sc);
+      this.height = StyleDimension.fromPixels(t.height * sc);
+    } else {
+      this.width = StyleDimension.fromPixels(fitW ?? 32);
+      this.height = StyleDimension.fromPixels(fitH ?? 32);
+    }
+  }
+  /** pack 相对路径 → 键尾扁平段(与 assets.ts 注入同式;子目录防撞) */
+  private static flatKey(modId: string, tex: string): string {
+    const rel = tex.startsWith('textures/ui/') ? tex.slice('textures/ui/'.length) : tex;
+    return rel.replace(/\.png$/i, '').replace(/[^A-Za-z0-9]+/g, '_');
+  }
+  protected override drawSelf(batch: UISpriteBatch): void {
+    const img = uiAtlasRef?.ensureVImage(`vanilla/ModUI_${this.modId}_${ModUIImage.flatKey(this.modId, this.tex)}.png`);
+    if (!img) return;
+    const d = this.getInnerDimensions();
+    const sc = this.fitW && this.fitH ? Math.min(this.fitW / img.width, this.fitH / img.height) : this.scale;
+    const rect: DrawRect = { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
+    batch.draw(rect, d.x, d.y, { scale: sc });
+  }
 }
 
 /** 世界装载沿重同步(读档/换世界后面板恢复接管)。
@@ -106,6 +189,10 @@ export function modUiResync(forceClear = false): void {
 export function modUiBlockingPointer(): boolean {
   if (!inGame || visibleCount() === 0) return false;
   if (VUI.ui.current !== hostState) return false;
+  // ★D15余债:fullscreen 面板可见=整屏命中(DOM 吞门/世界让位全覆盖)
+  for (let i = openOrder.length - 1; i >= 0; i--) {
+    if (openOrder[i].visible && openOrder[i].fullscreen) return true;
+  }
   const el = VUI.elementUnderMouse();
   if (!el || el === hostState) return false;
   let cur: UIElement | null = el;
@@ -113,11 +200,30 @@ export function modUiBlockingPointer(): boolean {
   return cur === hostState;
 }
 
+/** ★D19-F4(2026-10-13):DOM 侧吞门同步——指针落本域面板子树时挂 html
+ *  sw-modpanel-swallow 类(.sw-root PE 全关,UI.ts CSS 规则),离板/收板还原。
+ *  驱动=mousemove(挂一次)+面板开合沿(rebuildHostTree);PE 开关按沿去重。 */
+let domGateInstalled = false;
+let domGateOn = false;
+export function modUiSyncDomGate(): void {
+  if (typeof document === 'undefined') return;
+  const on = inGame && visibleCount() > 0 && modUiBlockingPointer();
+  if (on === domGateOn) return;
+  domGateOn = on;
+  document.documentElement.classList.toggle('sw-modpanel-swallow', on);
+}
+function ensureDomGate(): void {
+  if (domGateInstalled || typeof window === 'undefined') return;
+  domGateInstalled = true;
+  window.addEventListener('mousemove', () => { if (inGame && panels.size > 0) modUiSyncDomGate(); });
+}
+
 /** ESC 链消费:关最上层可见面板(escapeChain closeModPanels 支);false=无可关 */
 export function modUiCloseTop(): boolean {
   for (let i = openOrder.length - 1; i >= 0; i--) {
     if (openOrder[i].visible) {
       openOrder[i].visible = false;
+      openOrder[i].dragging = false;   // ★R-C-F10-a
       rebuildHostTree();
       return true;
     }
@@ -129,7 +235,7 @@ export function modUiCloseTop(): boolean {
 export function modUiCloseAllOf(modId: string): void {
   let touched = false;
   for (const p of openOrder) {
-    if (p.modId === modId && p.visible) { p.visible = false; touched = true; }
+    if (p.modId === modId && p.visible) { p.visible = false; p.dragging = false; touched = true; }   // ★R-C-F10-a
   }
   if (touched) rebuildHostTree();
 }
@@ -143,8 +249,9 @@ export function modUiPanelsOpen(): boolean {
 export function modUiPanel(
   modId: string, key: string,
   opts: { title?: string; x?: number; y?: number; width: number; height: number;
-    draggable?: boolean; closable?: boolean },
+    draggable?: boolean; closable?: boolean; fullscreen?: boolean },
 ): ModPanelHandle {
+  ensureDomGate();   // ★D19-F4:首面板挂 mousemove 同步臂(幂等)
   const fullKey = `mod_${modId}_${key}`;
   const existing = panels.get(fullKey);
   if (existing) {
@@ -175,6 +282,7 @@ export function modUiPanel(
 
   const entry: PanelEntry = {
     modId, key, fullKey, root,
+    fullscreen: opts.fullscreen === true,
     titleBar: new UITextPanel(opts.title ?? key, 0.8, false),
     visible: true, dragOffX: 0, dragOffY: 0, dragging: false,
   };
@@ -262,6 +370,18 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       b.onClick(() => o.onClick());
       p.root.append(b);
     },
+    addSlot(o) {
+      const s = new UISlot(o);
+      s.left = StyleDimension.fromPixels(o.x);
+      s.top = StyleDimension.fromPixels(o.y);
+      p.root.append(s);
+    },
+    addImage(o) {
+      const im = new ModUIImage(p.modId, o.tex, o.scale ?? 1, o.w, o.h);
+      im.left = StyleDimension.fromPixels(o.x);
+      im.top = StyleDimension.fromPixels(o.y);
+      p.root.append(im);
+    },
     setPosition(x, y) {
       p.root.left = StyleDimension.fromPixels(Math.round(x));
       p.root.top = StyleDimension.fromPixels(Math.round(y));
@@ -282,6 +402,7 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
 export function _resetModUiForTests(): void {
   for (const p of panels.values()) {
     p.visible = false;
+    p.dragging = false;   // ★R-C-F10-a:拖拽态随收复位
     p.root.remove();
   }
   panels.clear();

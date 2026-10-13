@@ -50,6 +50,10 @@ setSaveModsProvider(() => {
     tileIds: lastPlan!.tileSpecs
       .filter((s) => s.modId === manifest.id)
       .map((s) => [s.fullKey, s.stableId] as [string, number]),
+    // ★D16(2026-10-13):墙域 P5 平移随档(wallId=internal=stable 零恒等表)
+    wallIds: lastPlan!.wallSpecs
+      .filter((s) => s.modId === manifest.id)
+      .map((s) => [s.fullKey, s.wallId] as [string, number]),
   }));
 });
 setEnabledModsProvider(() => currentResult
@@ -223,6 +227,7 @@ export async function loadModsPhase1(
       setCurrentAlloc({
         itemKeys: plan.allocation.items,
         tileKeys: plan.allocation.tiles,
+        wallKeys: plan.allocation.walls,   // ★D16:墙域 P5 平移同源
       });
       for (const { manifest } of plan.mods) {
         result.loaded.push({

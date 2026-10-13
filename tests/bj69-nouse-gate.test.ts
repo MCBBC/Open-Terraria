@@ -452,7 +452,7 @@ function consumersOf(vid: number): string[] {
   if (FUN_USE_SET.has(vid)) cons.push('funUse');
   if (SPECIAL_VID_SET.has(vid)) cons.push('specialVid');
   if (PLACE_TILE_ON_ALT_USE.has(vid)) cons.push('placeAltUse');
-  if (f.consumable && ((f.healLife ?? 0) > 0 || (f.healMana ?? 0) > 0 || (f.buffType ?? 0) > 0)) cons.push('potion');
+  if (f.consumable && ((f.healLife ?? 0) > 0 || (f.healMana ?? 0) > 0 || ((f.buffType as number | undefined) ?? 0) > 0)) cons.push('potion');   // ★D6:原版域 json 恒数字
   if ((f.damage ?? 0) > 0 || (f.shoot ?? 0) > 0 || f.melee || f.ranged || f.magic || f.summon
     || (c.damage ?? 0) > 0 || (c.shoot ?? 0) > 0) cons.push('weapon');
   if (f.fishingPole) cons.push('fishingPole');

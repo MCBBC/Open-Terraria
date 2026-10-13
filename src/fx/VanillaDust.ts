@@ -50,11 +50,17 @@
 
 export interface DustColor { r: number; g: number; b: number; a: number }
 
+import { modDustFullbright, modDustMotionOf, modDustNoLight } from '../mods/dusts';   // ★D12:mod 尘全亮桶(dusts 运行时零引擎依赖,无环)
+
 export interface VDust {
   active: boolean;
   x: number; y: number;
   vx: number; vy: number;
   type: number;
+  /** ★D12 余债(2026-10-13):mod 尘原 type 载体——motionType 声明时 spawn 期
+   *  d.type 重写为运动档原版 type(update 运动链/alphaOf/速度特例全行为复用),
+   *  本字段保原 mod type(渲染分支/全亮桶读它;undefined=原版尘) */
+  modType?: number;
   scale: number;
   /** ★双轴通道（2026-09-03 VDust 双轴基建）：原版 PrettySparkleParticle 的
    *  Vector2 Scale 逐轴档（PrettySparkleParticle.cs:72-73 两臂都乘【整个】
@@ -312,7 +318,18 @@ export class VanillaDust {
     }
     const w2 = Math.max(5, w), h2 = Math.max(5, h);
     d.active = true;
+    d.modType = undefined;   // ★D12 余债:池复用归位(mod 载体残值=原版尘误走 mod 渲染支)
     d.type = type;
+    // ★D12 余债:motionType 复用(mod 尘 400+;重写后 update/alphaOf 全行为=运动档;
+    //  原版帧面 fx/fy 随档算——渲染分支按 modType 取独立贴图,fx/fy 无消费面)
+    if (type >= 400) {
+      d.modType = type;
+      const mMotion = modDustMotionOf(type);
+      if (mMotion > 0) d.type = mMotion;
+      // ★R-C-D12-F1:noLight 声明=运动档光贡献 opt-out(spawn 期写位;update 链
+      //  AddLight 门 !noLight&&!noLightEmittance 读本双旗)
+      if (modDustNoLight(type)) { d.noLight = true; d.noLightEmittance = true; }
+    }
     d.noGravity = false;
     d.color = color;
     d.alpha = alpha;
@@ -455,6 +472,7 @@ export class VanillaDust {
     //  scale 为单标量;本仓扩展字段缺省 undefined 不入面,双轴源尘克隆保各向异性）
     c.scaleX = rf.scaleX;
     c.scaleY = rf.scaleY;
+    c.modType = rf.modType;   // ★D12 余债:mod 载体随源尘克隆(重写型克隆保持渲染键)
     return c;
   }
 
@@ -1231,8 +1249,13 @@ function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
   // 与 6/15/59-64 同入全亮桶（光照合成后绘制）
   // ★双轴通道（PrettySparkle 编排粒子族）：原版画在 ParticleSystem_World_OverPlayers
   // （光照合成之后的独立加色层,不受 tile 光照）→ 恒入全亮桶
-  const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331
-    || d.scaleX !== undefined || d.scaleY !== undefined;
+  // ★D12(2026-10-13):mod 尘 fullbright 声明(400+ 段;原版域先短路,零 mod 零开销)
+  // ★D12 余债:mod 尘(modType 在册)=声明 fullbright 唯一权威——运动档重写后的
+  //  d.type 原版桶位(6/15/59-64/331)不传染(mod 声明 lit 即 lit)
+  const fb = d.modType !== undefined ? modDustFullbright(d.modType)
+    : d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331
+      || d.scaleX !== undefined || d.scaleY !== undefined
+      || (d.type >= 400 && modDustFullbright(d.type));
   return wantFb === fb;
 }
 

@@ -193,6 +193,9 @@ function runPass(snapPre: { type: Uint16Array; wall: Uint16Array }, udX0: number
     mods: {
       tileIdByKey: Object.fromEntries(Object.entries(TILE_BY_KEY).filter(([k]) => k.startsWith('mod_')).map(([k, v]) => [k.replace(/^mod_[a-z0-9]+_/, ''), v])),
       itemIdByKey: {},
+      // ★判卷仪墙 id 接线(刀3):replay 的 store 用真链 snap 的 wall id 域(twld wallMap
+      //   实值 NavystoneWall=394/EutrophicSandWall=381)——引擎段注册后的域内值。
+      wallIdByKey: { navystone_wall: 394, eutrophic_sand_wall: 381 },
       chests: [] as unknown[],
     },
   };
@@ -213,12 +216,30 @@ function runPass(snapPre: { type: Uint16Array; wall: Uint16Array }, udX0: number
   const rng = new RNG(gs.seed as number);
 // ★671:掷数计数(对拍真链 SPY 谱 genprobe.log PASS106 dN=1,606,423)
 (globalThis as { __drawN?: number }).__drawN = 0;
+// ★G 流 FNV 对拍(DrawSpy gh 语义:bits 按 Next 系返回值;NextDouble=double 低 32 位;
+//   剔除 CanPlace rs 掷=Main.rand 桶,由 gen-misc __sunkenSkipFNV 旗控制)
+//   真链校验点:PASS105 后 gh=a3d332d0,PASS106 后 gh=e245f582(同种子 clean run)。
+(globalThis as { __sunkenGH?: { v: number; skip: number } }).__sunkenGH = { v: 0xa3d332d0, skip: 0 };
 {
+  const dv = new DataView(new ArrayBuffer(8));
+  const fold = (bits: number) => {
+    const gh = (globalThis as { __sunkenGH?: { v: number; skip: number } }).__sunkenGH!;
+    if ((globalThis as { __sunkenSkipFNV?: boolean }).__sunkenSkipFNV) { gh.skip++; return; }
+    gh.v = (Math.imul((gh.v ^ (bits >>> 0)) >>> 0, 16777619)) >>> 0;
+  };
   const proto = rng as unknown as Record<string, (...a: unknown[]) => unknown>;
   for (const m of Object.getOwnPropertyNames(Object.getPrototypeOf(rng))) {
     const fn = proto[m];
     if (typeof fn === 'function' && /^(next|int|intRange|nextBool|nextFloat|nextDouble)/i.test(m)) {
-      proto[m] = function (this: unknown, ...a: unknown[]) { (globalThis as { __drawN?: number }).__drawN = ((globalThis as { __drawN?: number }).__drawN ?? 0) + 1; return fn.apply(this, a); };
+      const isDbl = /^(next|nextDouble)$/i.test(m) && m !== 'next' ? true : m === 'nextDouble';
+      proto[m] = function (this: unknown, ...a: unknown[]) {
+        (globalThis as { __drawN?: number }).__drawN = ((globalThis as { __drawN?: number }).__drawN ?? 0) + 1;
+        const v = fn.apply(this, a);
+        if (m === 'next' || m === 'nextDouble') { dv.setFloat64(0, v as number, true); fold(dv.getUint32(0, true)); }
+        else fold(v as number);
+        return v;
+      };
+      void isDbl;
     }
   }
 }
@@ -229,6 +250,7 @@ function runPass(snapPre: { type: Uint16Array; wall: Uint16Array }, udX0: number
 };
 // ★细粒度事件计数(__sunkenCnt;环墙/环tile/尾相中心等无法用段边界切分的面)
 (globalThis as { __sunkenCnts?: Map<string, number> }).__sunkenCnts = new Map();
+(globalThis as { __sunkenRunSR?: number[] }).__sunkenRunSR = [];
 (globalThis as { __sunkenCnt?: (n: string) => void }).__sunkenCnt = (n: string) => {
   const m = (globalThis as { __sunkenCnts?: Map<string, number> }).__sunkenCnts!;
   m.set(n, (m.get(n) ?? 0) + 1);
@@ -385,6 +407,10 @@ for (const k of modKeys) {
   const segs = (globalThis as { __sunkenSegs?: Array<[string, number]> }).__sunkenSegs ?? [];
   const drawN = (globalThis as { __drawN?: number }).__drawN ?? 0;
   console.log(`[replay] 掷数总 __drawN=${drawN} (真链 SPY dN=1,606,423, Δ我-真=${drawN - 1606423})`);
+  {
+    const gh = (globalThis as { __sunkenGH?: { v: number; skip: number } }).__sunkenGH;
+    if (gh) console.log(`[replay] G流 FNV=${gh.v.toString(16)} (真链 PASS106 终=e245f582, 起点=a3d332d0;M桶剔除=${gh.skip})`);
+  }
   const agg = new Map<string, number>();
   const cnts = new Map<string, number>();
   let prev = 0;
@@ -395,6 +421,13 @@ for (const k of modKeys) {
   }
   for (const [name, c] of agg) console.log(`[replay]   seg ${name}: ${c} (n=${cnts.get(name)})`);
   if (drawN !== prev) console.log(`[replay]   seg (未标注尾段): ${drawN - prev}`);
+  // ★真链对拍:逐事件累计掷数(runEnter/kill 对齐真链 SEGTRACE ent 值)
+  for (const want of ['runEnter', 'kill', 'tileRunner']) {
+    const evs = segs.filter(([nm]) => nm === want).map(([, cum]) => cum);
+    if (evs.length) console.log(`[replay]   ev ${want}(${evs.length}): ${evs.slice(0, 45).join(',')}`);
+  }
+  const runSR = (globalThis as { __sunkenRunSR?: number[] }).__sunkenRunSR;
+  if (runSR && runSR.length) console.log(`[replay]   runSR(${runSR.length}): ${runSR.join(',')}`);
   const evts = (globalThis as { __sunkenCnts?: Map<string, number> }).__sunkenCnts;
   if (evts && evts.size) for (const [n, c] of [...evts.entries()].sort()) console.log(`[replay]   cnt ${n}: ${c}`);
 }

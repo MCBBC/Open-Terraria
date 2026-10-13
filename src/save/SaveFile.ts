@@ -374,6 +374,9 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   //  在此纠偏;映射缺键=内容已移除 → 落既有 ??0 占位。仅 mod 段有键,原版域零扰动。
   let itemRemap: Map<number, number> | null = null;
   let tileRemap: Map<number, number> | null = null;
+  // ★D16(2026-10-13):墙域 P5 平移同族(wallIds 随档 × 当前分配=墙 id 错位纠偏;
+  //  旧档无键=零迁移;墙 id=internal=stable 零恒等表,映射域仅 mod 段)
+  let wallRemap: Map<number, number> | null = null;
   const modCur = getCurrentAlloc();
   if (data.mods?.length && modCur) {
     for (const m of data.mods) {
@@ -384,6 +387,10 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (const [fk, sid] of m.tileIds ?? []) {
         const cur = modCur.tileKeys.get(fk);
         if (cur !== undefined && cur !== sid) (tileRemap ??= new Map()).set(sid, cur);
+      }
+      for (const [fk, sid] of m.wallIds ?? []) {
+        const cur = modCur.wallKeys?.get(fk);
+        if (cur !== undefined && cur !== sid) (wallRemap ??= new Map()).set(sid, cur);
       }
     }
   }
@@ -669,6 +676,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     }
   }
   // walls（version<2 的旧档墙值迁移：1=土→2, 2=石→1, 3=木→4（现为原版 id））
+  //  ★D16(2026-10-13):migrate 后再过 wallRemap(mod 墙 savedId→currentId;
+  //  legacy 迁移只触原版 1-4 域,mod 域 367+ 恒等穿过,序安全)
   {
     const legacy = (data.version ?? 1) < 2;
     const migrate = (v: number) => (legacy ? (v === 1 ? 2 : v === 2 ? 1 : v === 3 ? 4 : v) : v);
@@ -679,7 +688,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       let vr = 0; s = 0;
       for (;;) { const b = u8[p++]; vr |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
-      const v = migrate(vr);
+      const mv = migrate(vr);
+      const v = wallRemap ? wallRemap.get(mv) ?? mv : mv;
       const end = Math.min(i + run + 1, nAll);
       for (; i < end; i++) tyW[i] = v;
     }

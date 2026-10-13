@@ -31,7 +31,7 @@ import {
   registerModModifyHurtByNpc, registerModModifyHitNpc, registerModModifyHitNpcByProj, registerModModifyHitPlayerByProj, registerModChestUnlock, registerModConversion, registerModNpcSpawnStats, registerVanillaNpcAi,
   registerModSpawnPool, registerMenuTheme, registerModBiomeMusic, requestModFrameMusic, registerModCanUse, registerModAccEffect, appendModAccEffect, registerModHoldItem, modProjSpecOf,
   registerModScreenFx,
-  registerModNpcDraw, registerModItemDraw, registerVanillaOverride, registerGlobalNpcHooks, registerModPlayerPreHurt, registerModPlayerPostHurt, registerModPlayerRespawn, registerModPlayerUpdateDead, registerModPlayerModifyMoveSpeed,
+  registerModNpcDraw, registerModItemDraw, registerVanillaOverride, registerGlobalNpcHooks, registerModPlayerPreHurt, registerModPlayerPostHurt, registerModPlayerRespawn, registerModPlayerUpdateDead, registerModPlayerModifyMoveSpeed, registerModPlayerDraw, registerModTooltip,
   type ModScreenFxPass, type ModSystemHooks, type ModUseCtx, type ModDrawCtx,
 } from './hooks';
 import { modUiPanel, modUiCloseAllOf } from './ui';   // ★刀1:mod UI 宿主面板
@@ -120,6 +120,8 @@ export interface ModContext {
     panel(key: string, opts: {
       title?: string; x?: number; y?: number; width: number; height: number;
       draggable?: boolean; closable?: boolean;
+      /** ★D15余债:全屏页宿主(可见期 uiBlocking+整屏让位;Esc 关最上层) */
+      fullscreen?: boolean;
     }): import('./ui').ModPanelHandle;
     /** 关全部本 mod 面板 */
     closeAll(): void;
@@ -144,6 +146,14 @@ export interface ModContext {
     /** 击杀(原版域含) */
     onKill?: (e: unknown, game: unknown) => void;
   }): void;
+  /** ★第四批:玩家外观自绘(drawPlayer 返回后 overlay;aura/拖尾/发光类。
+   *  ModDrawCtx 受限算子面 draw/drawAdd/tinted;ctx.cx/cy=玩家中心世界 px) */
+  playerDraw(spec: {
+    postDraw?: (p: unknown, ctx: ModDrawCtx) => void;
+  }): void;
+  /** ★第五批:tooltip 修改钩(tML ModifyTooltips 形;itemKey=mod 键;
+   *  fn(lines,ctx) → void 修改行数组(增/删/改) */
+  modifyTooltip(itemKey: string, fn: (lines: { text: string; color?: string }[], ctx: { key: string; vid: number; rare: number }) => void): void;
   /** 注册 mod buff(本地玩家;onTick 逐 tick;图标/名称/buff 栏全链) */
   buff(key: string, spec: ModBuffSpec): void;
   /** 系统/世界生命周期钩子(全可选) */
@@ -390,6 +400,14 @@ export function createModContext(
     // ★B/C 批:全局 NPC 钩(GlobalNPC 形;per-mod 单注册)
     globalNpc(spec) {
       registerGlobalNpcHooks(modId, spec as Parameters<typeof registerGlobalNpcHooks>[1]);
+    },
+    // ★第四批:玩家外观自绘(per-mod 单注册)
+    playerDraw(spec) {
+      registerModPlayerDraw(modId, spec as Parameters<typeof registerModPlayerDraw>[1]);
+    },
+    // ★第五批:tooltip 修改钩(tML ModifyTooltips 形;itemKey=mod 键)
+    modifyTooltip(itemKey: string, fn: (lines: { text: string; color?: string }[], ctx: { key: string; vid: number; rare: number }) => void) {
+      registerModTooltip(modId, itemKey, fn as Parameters<typeof registerModTooltip>[2]);
     },
     buff(key, spec) { registerModBuff(modId, key, spec); },
     system(hooks) { registerSystem(hooks); },

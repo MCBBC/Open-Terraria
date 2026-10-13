@@ -4487,6 +4487,13 @@ export class MinionProj extends Entity {
     if (this.tileCollide && st.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
       this.tileCollide = false;                      // :30310-30313 中心格实心→免碰
     }
+    // ★BJ671（2026-10-13 用户实报「激光眼不会自己下木平台」）：弹面 flag6 缺省
+    //  true（Projectile.cs:17587 非宠物弹 fallThrough=true → TileCollision 调用
+    //  (flag6,flag6) :17705-17721 = 平台永不承接）——387/388 不在覆写 switch
+    //  :17670-17696（677-693/759/1020/500）且非 projPet → 交战态 tileCollide=true
+    //  也照样【穿平台下落】。旧缺省=false=平台承接=卡平台。 WeaponProj 各支
+    //  dropThrough:true 同先例（:1456 注 P.cs:17587 系）。
+    this.dropThrough = true;
     const num542 = flag32 ? 1200 : 800;              // :30362-30364 num527/num528
     if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > num542) {
       if (this.twA0 !== 1) this.twA0 = 1;            // :30366-30368 leash → 归位态
@@ -6154,6 +6161,10 @@ export class MinionProj extends Entity {
    *  =contact 签名域登记债）。tileCollide=false 拍=直写位移（无碰撞）。 */
   private integrate533(game: GameHooks, st: { isSolid(x: number, y: number): boolean }): void {
     void st;
+    // ★BJ671：弹面 flag6 缺省 true（Projectile.cs:17587 非宠物弹 → TileCollision
+    //  (flag6,flag6)=平台永不承接;533 不在覆写 switch :17670-17696 → 穿平台下落,
+    //  撞弹面判定只对实体墙成立=反弹链语义不变）。同 twinsStep 387/388 面。
+    this.dropThrough = true;
     const lvx = this.vx, lvy = this.vy;
     const lastLen = Math.hypot(lvx, lvy);
     moveAndCollide(this, game.world, this.vx, this.vy);

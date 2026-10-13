@@ -88,8 +88,8 @@ describe('A. 缺口清单完备性（BUFF_BY_VANILLA 反查零落空）', () => 
     for (let vid = 1; vid <= 5700; vid++) {
       if (vanillaItemKey(vid) === undefined) continue; // 只锁在仓物品
       const f = itemFuncOfVid(vid);
-      if (!f || !(f.buffType && f.buffType > 0) || exempt.has(f.buffType)) continue;
-      expect(buffTypeByVanilla(f.buffType), `vid ${vid} → buff ${f.buffType}`).toBeDefined();
+      if (!f || !(f.buffType && (f.buffType as number) > 0) || exempt.has(f.buffType as number)) continue;   // ★D6:原版域 json 恒数字
+      expect(buffTypeByVanilla(f.buffType as number), `vid ${vid} → buff ${f.buffType}`).toBeDefined();
     }
   });
 });

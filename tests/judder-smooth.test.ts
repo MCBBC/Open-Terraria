@@ -7,7 +7,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   judderMissFrame, judderFrameEnd, judderSmoothSetForTest, judderResetForTest,
-  judderClockForTest, judderCanvasFactoryForTest,
+  judderClockForTest, judderCanvasFactoryForTest, judderLineSetForTest,
+  judderHoldSetForTest, judderStats,
   JUDDER_MISS_RATIO, JUDDER_BLEND_ALPHA,
 } from '../src/render/JudderSmooth';
 
@@ -51,14 +52,16 @@ const P120 = 1000 / 120;
 afterEach(() => {
   judderSmoothSetForTest(false);
   judderResetForTest();
+  judderLineSetForTest(1.7);
+  judderHoldSetForTest(2000);
   judderClockForTest(() => performance.now());
   judderCanvasFactoryForTest(() => null);
 });
 
 describe('judderMissFrame 纯判定表', () => {
   it('120 档:正常抖动 10ms=否/单跳槽 17ms=是/断流 300ms=否/长停顿 75ms(>周期×8)=否/首帧 -1=否/period 0=旁路', () => {
-    expect(JUDDER_MISS_RATIO).toBe(1.5);
-    expect(judderMissFrame(10, P120)).toBe(false);      // 12.5 线下
+    expect(JUDDER_MISS_RATIO).toBe(1.7);                // ★2026-10-12 用户 A/B 转正(饱和场景 1.5→1.7 更稳)
+    expect(judderMissFrame(10, P120)).toBe(false);      // 14.2 线下
     expect(judderMissFrame(17, P120)).toBe(true);       // 单跳槽(16.7 交付间隔)
     expect(judderMissFrame(300, P120)).toBe(false);     // 断流
     expect(judderMissFrame(75, P120)).toBe(false);      // >8×8.33=66.6 长停顿
@@ -197,5 +200,69 @@ describe('judderFrameEnd 帧尾序列(v2 lazy-arming;桩画布账面)', () => {
     t += 17; judderFrameEnd(ctx, P120, t);   // 跳槽:武装+捕获
     expect(gcos.filter((g) => g === 'copy').length).toBe(1);   // copy 单 op 捕获
     expect(gcos.filter((g) => g === 'source-over').length).toBe(1); // 复位
+  });
+
+  it('★旋钮① miss 线可调(?smoothline):抬线后边际 gap 不再判跳槽', () => {
+    judderSmoothSetForTest(true);
+    judderLineSetForTest(1.7);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);        // 垫底
+    t += P120 * 1.6;                              // 1.6×周期:旧线(1.5)=跳槽,新线(1.7)=否
+    judderFrameEnd(ctx, P120, t);
+    expect(calls).toEqual([]);                    // 抬线后零捕获
+  });
+
+  it('★旋钮② 武装保持窗可调(?smoothhold):缩短后提前退役', () => {
+    judderSmoothSetForTest(true);
+    judderHoldSetForTest(300);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);
+    t += 17; judderFrameEnd(ctx, P120, t);       // 跳槽:武装
+    t += 8; judderFrameEnd(ctx, P120, t);        // 捕获
+    t += 400; judderFrameEnd(ctx, P120, t);      // 400ms>300:退役(且 gap>断流阈=不混合)
+    const mark = calls.length;
+    t += 8; judderFrameEnd(ctx, P120, t);        // 退役后零调用
+    expect(calls.slice(mark)).toEqual([]);
+  });
+
+  it('★旋钮③ 暂停门:paused=全旁路且 lastMs 不动（恢复帧走断流卫生）', () => {
+    judderSmoothSetForTest(true);
+    const calls: string[] = [];
+    judderCanvasFactoryForTest(stubFactory(calls));
+    const { ctx } = recordingCtx(64, 64, calls);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);
+    t += 17; judderFrameEnd(ctx, P120, t);       // 武装
+    t += 8; judderFrameEnd(ctx, P120, t);        // 捕获
+    const mark = calls.length;
+    t += 17; judderFrameEnd(ctx, P120, t, true); // 暂停帧:旁路(即使 gap 达跳槽线)
+    expect(calls.slice(mark)).toEqual([]);
+    t += 17; judderFrameEnd(ctx, P120, t);       // 恢复:gap 自上次实帧 34ms——>断流阈?否(<250)
+    // gap=34ms=跳槽但 prev 为 17ms 前捕获=仍有效 → 正常混合
+    // （★记账格式='draw:tag@a'+α——includes 匹配 '@a0.50' 带前缀,二犯入档）
+    expect(calls.slice(mark).some((c) => c.includes('@a0.50'))).toBe(true);
+  });
+
+  it('★计数器:frames/armedFrames/missFrames/blends/armCount 累计', () => {
+    judderSmoothSetForTest(true);
+    judderCanvasFactoryForTest(stubFactory([]));
+    const { ctx } = recordingCtx(64, 64);
+    let t = 0;
+    t += 8; judderFrameEnd(ctx, P120, t);
+    t += 17; judderFrameEnd(ctx, P120, t);       // 跳槽:武装+miss
+    t += 17; judderFrameEnd(ctx, P120, t);       // 跳槽:混合
+    t += 8; judderFrameEnd(ctx, P120, t);        // 干净
+    const s = judderStats();
+    expect(s.frames).toBe(4);
+    expect(s.armCount).toBe(1);
+    expect(s.missFrames).toBe(2);
+    expect(s.blends).toBe(1);
+    expect(s.armed).toBe(true);
   });
 });
