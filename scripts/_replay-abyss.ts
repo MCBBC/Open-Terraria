@@ -10,7 +10,8 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const PROBE_LOG = process.env.GENPROBE_LOG ?? join2(LOGS, 'genprobe.log');
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 const awaitImportResetTerrain = await import('../src/world/gen/WorldGen.ts');
@@ -78,7 +79,7 @@ const fnvOf = (buf: Uint8Array): string => {
 };
 const passTf = new Map<string, string>();
 {
-  const log = readFileSync(join2(LOGS, 'genprobe.log'), 'utf8');
+  const log = readFileSync(PROBE_LOG, 'utf8');
   for (const line of log.split('\n')) {
     const cols = line.split('\t');
     if (cols[0] !== 'PASS') continue;

@@ -121,8 +121,22 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
   //   写原版流前必须反映射为 netId(ITEM_INTERNAL_OF_STABLE;未注册=0 空气)
   const tRaw = unrleTiles(save.tiles, n);
   const t = { type: new Uint16Array(n), frameX: tRaw.frameX, frameY: tRaw.frameY };
-  for (let i = 0; i < n; i++) t.type[i] = tRaw.type[i] === 0 ? 0 : (TILE_INTERNAL_OF_STABLE[tRaw.type[i]] ?? 0);
+  let modTileClamped = 0;
+  for (let i = 0; i < n; i++) {
+    const sRaw = tRaw.type[i];
+    // ★R-C-F8:mod tile 域(1030+)钳零(与墙同语义;.wld=vanilla 互操作格式)
+    if (sRaw >= 1030) { t.type[i] = 0; modTileClamped++; continue; }
+    t.type[i] = sRaw === 0 ? 0 : (TILE_INTERNAL_OF_STABLE[sRaw] ?? 0);
+  }
   const walls = unrlePairs(save.walls, n, 0, true) as Uint16Array;   // ★P1-4:墙 id 0-366,曾 Uint8 截断(Echo 墙 300→44)
+  // ★R-C-F8(2026-10-14):mod 墙域(367+)钳零——.wld 导出=vanilla 互操作格式,
+  //  mod 墙 id 写入原版流会被 TEdit/原版别名成 Echo 墙域(367 起恰为原版墙面域
+  //  未定义区,读侧行为不可预期)。SW↔SW 完整回环走自有 json 档(teMods/mod 全)。
+  let modWallClamped = 0;
+  for (let i = 0; i < n; i++) { if (walls[i] >= 367) { walls[i] = 0; modWallClamped++; } }
+  if (modWallClamped + modTileClamped > 0) {
+    console.warn(`[wld-export] mod 域钳零: walls=${modWallClamped} tiles=${modTileClamped}(vanilla 互操作格式不承载 mod 内容;SW↔SW 完整回环走自有 json 档)`);
+  }
   const liquid = unrlePairs(save.liquid, n);
   const liquidType = unrlePairs(save.liquidType, n);
   const wire = unrlePairs(save.wire, n);
@@ -487,6 +501,9 @@ export function exportWld(save: SaveData): Uint8Array {
       const it = items[i];
       if (!it || (it.id === 0)) { w.i16(0); continue; }
       const netId = it.id;   // 稳定 id=原版 netId（★SW-BO1 勘误,见 netIdOfStable 删除注）
+      // ★R-C-F8:mod 物品域(30000+)钳零(.wld=vanilla 互操作格式;写 30000+ 越域=
+      //  原版读侧未定义)
+      if (netId >= 30000) { w.i16(0); continue; }
       if (!netId) { w.i16(0); continue; }
       w.i16(Math.max(1, it.stack ?? 1)).i32(netId).byte(0);   // chests 元素无 prefix 形;★P3:stack 钳 ≥1(红队半裁项)
     }

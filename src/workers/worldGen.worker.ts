@@ -5,6 +5,7 @@
 import { assertWorkerBootGate } from './workerBootGate';   // ★boot 闸首导入（x-ray 定谳防线;先于 procShim,见该文件头注）
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY, applyModItemIds } from '../data/items';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { applyModTileStableMap, applyModTileKeys, applyModWallKeys } from '../data/tiles';
 import { setCurrentAlloc } from '../mods/bridge';
 import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';
@@ -36,18 +37,17 @@ function registerModGenPassesInWorkerMulti(srcs: Array<{ modId: string; src: str
   genSrcRegistered = true;
   let ok = 0, fail = 0;
   for (const { modId, src } of srcs) {
-    const before = registeredGenPassCount();
+    const before = genPassRegCount;
     try {
       evalOneModGen(modId, src);
       ok++;
+      console.log(`[worker] mod gen passes (${modId}): +${genPassRegCount - before}`);
     } catch (err) {
       fail++;
-      console.error(`[worker] mod gen registration failed (${modId}):`, String(err instanceof Error ? err.message : err).slice(0, 200));
+      console.error(`[worker] mod gen registration failed (${modId}):`, String(err instanceof Error ? err.message : err).slice(0, 200), 'srcLen=', src.length);
     }
-    const after = registeredGenPassCount();
-    void before; void after;
   }
-  console.log(`[worker] mod gen passes registered (${ok} ok, ${fail} failed, ${registeredGenPassCount()} passes)`);
+  console.log(`[worker] mod gen passes registered (${ok} ok, ${fail} failed, ${genPassRegCount} passes)`);
 }
 
 /** 已注册 gen pass 计数(桩内直计——worker 域注册表=WorldGen 自有,hooks 表在
@@ -58,11 +58,13 @@ function registeredGenPassCount(): number { return genPassRegCount; }
 function evalOneModGen(modId: string, src: string): void {
   try {
     // 全局数据面(gen passes 消费;worker 自有表直写)
-    const tilesMod = globalThis as Record<string, unknown>;
-    import('../data/tiles').then((tiles) => {
-      tilesMod.__calamityTileDefs = tiles.TILE_DEFS;
-      tilesMod.__calamityTileIdByKey = tiles.TILE_BY_KEY;
-    });
+    // ★R-C-F4(2026-10-14):静态同步写(旧=动态 import 异步回填,安全性全赖文件头
+    //  静态 import 的模块缓存顺序=碰巧安全;per-mod 重复写×N 也一并消解)
+    {
+      const tilesMod = globalThis as Record<string, unknown>;
+      tilesMod.__calamityTileDefs = TILE_DEFS;
+      tilesMod.__calamityTileIdByKey = TILE_BY_KEY;
+    }
     // stub sw:registerGenPass 活+rollPrefixFor/log 兜底;其余 no-op
     const stubSw = new Proxy({}, {
       get: (target, prop: string) => {
@@ -82,17 +84,29 @@ function evalOneModGen(modId: string, src: string): void {
     //  ②raw `export default function NAME`(rivals/glmgirl)③raw `export default <expr>`
     //  (lights 箭头体)——旧只认①=②③在 worker eval 抛 Unexpected token 'export'
     let entry: (sw: unknown) => void;
-    const tail = /export\s*\{\s*(\w+)\s+as\s+default\s*\}\s*;?\s*$/.exec(src);
-    const named = /export\s+default\s+(?:async\s+)?function\s+(\w+)\s*\(/.exec(src);
+    let form = 'tail';
+    const tail = /export\s*\{[^}]*?(\w+)\s+as\s+default[^}]*?\}\s*;?\s*$/.exec(src);
+    // ★R-C-F3(2026-10-14):named/expr strip 改【最后一处】锚定——首现 replace 会
+    //  错杀注释/字符串里的 'export default' 示例文本(现实高频),真 export 残留=
+    //  整 mod gen 静默丢
+    const named = /export\s+default\s+(?:async\s+)?function\s*\*?\s*(\w+)?\s*\(/g;
+    let nm: RegExpExecArray | null = null, nmLast: RegExpExecArray | null = null;
+    while ((nm = named.exec(src)) !== null) nmLast = nm;
+    const exprIdx = src.lastIndexOf('export default');
     if (tail) {
       const cjs = src.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
       entry = new Function('sw', cjs + '\nreturn ' + tail[1] + ';')(stubSw);
-    } else if (named) {
-      const cjs = src.replace(/export\s+default\s+/, '');
-      entry = new Function('sw', cjs + '\nreturn ' + named[1] + ';')(stubSw);
-    } else {
-      const cjs = src.replace(/export\s+default\s+/, 'return ');
+    } else if (nmLast) {
+      form = 'named';
+      const at = nmLast.index;
+      const cjs = src.slice(0, at) + src.slice(at).replace(/export\s+default\s+/, '');
+      entry = new Function('sw', cjs + '\nreturn ' + (nmLast[1] ?? 'main') + ';')(stubSw);
+    } else if (exprIdx >= 0) {
+      form = 'expr';
+      const cjs = src.slice(0, exprIdx) + 'return ' + src.slice(exprIdx + 'export default'.length);
       entry = new Function('sw', cjs)(stubSw);
+    } else {
+      throw new Error('bundle 无 default export(三形态皆 miss)');
     }
     entry(stubSw);   // ← 注册面执行
   } catch (err) {
@@ -377,6 +391,11 @@ ctx.onmessage = async (e) => {
       const savedDifficulty = data.header?.difficulty;
       const savedPlayMs = data.header?.playTimeMs;   // SW-BJ5 2026-09-07：主线程读档吸合基线用（副本/导入/quickLoad 槽位落后于存档头）
       const savedEvents = data.events;
+      const savedTeMods = data.teMods;
+      // ★R-C-F2(2026-10-14):teMods 随窄 save 回传——worker 域 TE 注册表恒空
+      //  (registerModTileEntity 仅主线程 entry 相位),worker 内 restoreModTEs 空转
+      //  =读档 TE 实例全失→下次保存键永久清空。主线程注册表在册=由主线程回填。
+      //  (teMods 提取须在 data 释放前——宽对象释放注释见下)
       if ('json' in req) (req as { json?: string }).json = undefined;
       if ('save' in req) (req as { save?: unknown }).save = undefined;
       ctx.postMessage({ id: req.id, type: 'progress', phase: 'parse', p: 0.3 });
@@ -408,7 +427,7 @@ ctx.onmessage = async (e) => {
       // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化;SW-BJ5 2026-09-07 增 playTimeMs 单字段)
       ctx.postMessage({
         id: req.id, type: 'result', world: packet, player, wkLog: __wkLog,
-        save: { header: { difficulty: savedDifficulty, playTimeMs: savedPlayMs }, events: savedEvents } as typeof data,
+        save: { header: { difficulty: savedDifficulty, playTimeMs: savedPlayMs }, events: savedEvents, teMods: savedTeMods } as typeof data,
       }, transfer);
       return;
     }

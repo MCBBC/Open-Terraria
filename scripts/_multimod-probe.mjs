@@ -4,7 +4,7 @@
 import puppeteer from 'puppeteer-core';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MODS = ['rivals', 'glmgirl', 'lights-and-shadows', 'calamity'];   // 文件名
+const MODS = ['calamity', 'rivals', 'glmgirl', 'lights-and-shadows'];   // ★R-C-F1:calamity(唯一 gen mod)排【首位】——末位单源 last-wins 回归即爆(世界墙断言)
 const MOD_IDS = ['rivals', 'glmgirl', 'lights_and_shadows', 'calamity'];   // manifest id
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`); };
@@ -113,6 +113,18 @@ try {
     // ④b 屏幕后处理 pass(lights-and-shadows 消费面)
     const fxCount = (window).__swRenderLog?.snap?.().modScreenFx ?? null;
     check('screenFx 链(信息读数)', true, `fxCount=${fxCount}(链通=渲染零崩)`);
+
+    // ④b2 ★R-C-F1:gen 正断言——mod 墙真实铺写(末位 last-wins 回归=本断言爆)
+    {
+      const st = g.world.store;
+      let wallTiles = 0;
+      for (let x = 0; x < st.w; x += 7) {
+        for (let y = 0; y < st.h; y += 7) {
+          if (st.wall[st.idx(x, y)] >= 367) wallTiles++;
+        }
+      }
+      check('世界 gen 墙(367+)', wallTiles > 0, `${wallTiles} tiles(gen mod=calamity 排首位)`);
+    }
 
     // ④c 存档 round-trip(四 mod meta:mods 清单+wallIds+teMods 并集)
     const saveOk = await (async () => {

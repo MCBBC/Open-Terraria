@@ -410,6 +410,13 @@ export function iconUrl(game: Game, id: number): string {
     const def = ITEM_DEFS[id];
     if (game.atlas && def) {
       let ar = atlasIconForKey(game.atlas, def.key);
+      // ★2026-10-14:mod 物品图标通道(atlasIconForKey 无 mod 分支→此前落 assets
+      //  兜底=原版图集无 mod id=空串裂图;道具搜索 UI 用户实报)。mod 贴图注入
+      //  别名=vanilla/Item_<stableId>.png(mods/assets.ts),vicon(vid) 直取——
+      //  背包/世界绘制同款通道(此处补齐 dataURL 面的同一解析)。
+      if (!ar && def.key.startsWith('mod_')) {
+        ar = game.atlas.vicon(def.vid ?? -1);
+      }
       if (ar && def.key.startsWith('vi_')) {
         // 物品贴图动画(坠星 75 等竖条):图标取帧 0 单帧(背包内原版也在转,
         // 此处静态帧 0——此前整条入画被压成 32×32 细条)

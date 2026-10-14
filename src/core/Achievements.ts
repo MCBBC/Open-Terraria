@@ -231,6 +231,9 @@ export class Achievements {
     this.completed.set(name, true);
     def.conditions.forEach((_, i) => this.condState.set(`${name}#${i}`, { done: true }));
     this.unlockedQueue.push(name);
+    // ★R-A-F7(2026-10-14):直完与自动驱动同 UX(onUnlock toast;ctor 回放期
+    //   onUnlock 未挂=仅入队,弹窗面零影响)
+    this.onUnlock?.(name, def);
     this.save();
     clearPendingModCompletion(name);
   }

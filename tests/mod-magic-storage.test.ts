@@ -94,7 +94,7 @@ function buildHarness(grid: string[], cfg: Record<string, boolean | number | str
         })
         .filter((x) => x.count > 0);
     },
-    vanillaConsumeWithSources(r: { items: Array<{ id: number; stack: number }> }, sources: Array<{ items: Array<{ id: number; stack: number } | null> }>, times: number) {
+    vanillaConsumeWithSources(r: { create: number; items: Array<{ id: number; stack: number }> }, sources: Array<{ items: Array<{ id: number; stack: number } | null> }>, times: number) {
       let done = 0;
       for (let k = 0; k < times; k++) {
         let ok = true;

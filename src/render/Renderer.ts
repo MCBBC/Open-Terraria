@@ -6984,6 +6984,23 @@ export class Renderer {
       const cgGl = Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
         && !this._c10eComposited && this.swPipe?.screenStackMode
         ? this.drawCoatGlowGridGL(chunks, cam, world, viewW, viewH, z) : null;
+      // ★gladd Phase 1 面②（2026-10-14,task#22）:itemGlow GL 会话【前移】到垫底前
+      //   ——队列在 compositeLight 后已冻结完整（收集位全在世界/实体/玩家段:
+      //   tileGlow 6520/手持 18276/掉落 18311/orb 22006;lunarCoverEnd 矩阵回改在
+      //   drawPlayer 窗闭时已跑完,7126-7135 各 flush 不触队列）,本位消费=内容落
+      //   glCanvas（bg<world<coatglow<itemglow=2D 相对序）且被下方垫底 drawImage
+      //   (glCanvas) 收进 HUD=铺开期实机可见+屏幕 A/B 闸有效。quadBatchRgba 任意
+      //   四边形发射（收集矩阵含相机/朝向镜像/挥旋/BJ603 rot,角点全仿射变换）。
+      //   层序登记:HUD 侧 shine/voidlens 等 2D 加算面画在含 glow 的垫底之上=
+      //   glow 在其下（2D 原位 7139 在其上）——add 支加法可交换=逐位;over 支
+      //   αS 衰减差=重叠域微差（登记口径;受控场景无重叠=逐字节）。
+      //   失败语义:GL 假（退避/begin 审计/纹理缺/发射期批假）=队列不动,7139 位
+      //   2D 原路径重放（兜底位恒在,双消费防双绘由队列排空语义保证）。
+      if (Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
+        && !this._c10eComposited && this.swPipe?.screenStackMode) {
+        const igGl = this.acquireCloudPipe();
+        if (igGl) this.flushItemGlowGL(igGl);
+      }
       this.c10eCompositeIntoHud();
       if (!cgGl) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
     }
@@ -7136,6 +7153,8 @@ export class Renderer {
     // 7e''''' Item.glowMask（★BJ601 2026-10-10：手持两段+掉落物光罩——光罩色不取
     //      光照=自发光,drawPlayer/drawUseItem/drawDrop 收集、此处消费。同槽判例=
     //      四塔/甲位/盾球合成后逃逸族）
+    //      ★gladd 面②:旗开时队列已被垫底前 GL 会话消费（见 7x 头注——会话前移）,
+    //      此处队列空=空转;GL 失败帧队列完整=本位 2D 原路径重放（兜底位不变）。
     this.flushItemGlow();
     // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
     //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
@@ -18246,6 +18265,147 @@ export class Renderer {
       }
     }
     ctx.restore();
+  }
+
+  /** ★gladd Phase 1 面②（2026-10-14,task#22）:Item.glowMask GL 会话冲刷——
+   *  flushItemGlow 的 quadBatchRgba 直出版。发射式=【角点全仿射变换】+任意四边形批
+   *  （PRECIP_VS aPos 顶点自带设备坐标）：收集位矩阵 m 含相机缩放平移（tile/掉落面,
+   *  b=c=0）/朝向镜像 a<0（手持面）/挥旋+BJ603 rot（旋转臂绕 (ox,oy) 世界点先旋
+   *  再乘 m）——四角 local→rot→m×invK→设备 px,TRIANGLES (p0,p1,p2)+(p0,p2,p3),
+   *  winding 任意（WebGL 缺省 CULL_FACE 关,全仓无启用点）。uv=图集页全跨度最近邻
+   *  （2D imageSmoothingEnabled=false 同档;缩放相位 tie 发散=B1 census 口径）。
+   *  【色语义（premul 顶点色,PRECIP_FS rgb×vCol.rgb/α×vCol.a）】2D 每支逐式对映:
+   *  · add 支（'lighter'×gClamped）:GL vCol=(tint×g,【α=0 纯加法习语】)+blendAdditive
+   *    ——★2026-10-14 亮场景缺口翻案:带真 α 的加算在 over-present 域把 glCanvas
+   *    世界按 (1−α) 衰减,而 2D 'lighter' 对 opaque 垫底无衰减——洞穴暗场景差值
+   *    归零=首版探针假阴性定谳;premul α=0 over 合成=rgb 纯加+dst 零触碰（XNA
+   *    域同根判例）。2D 加算的 HUD α 抬升在 opaque 垫底上无观感=α 通道可舍。
+   *    （tintSliceRGB 烘烤舍入=±1LSB census,乘法舍入域既有口径。）
+   *  · over 支 BJ604 两拍分解逐拍对映:pass1 source-over×g ← vCol=(bake×g,g)
+   *    （canvas drawImage(bake 烘片,α=g):premul rgb=texel×a×bake×g=premul×(bake×g) ✓,
+   *    α=texel.a×g ✓——over 支衰减 dst 是语义本体,真 α 正确）;pass2 'lighter'×1 ←
+   *    vCol=(boost,【α=0】)+blendAdditive。R==A 快路径=单 SO 拍 vCol=(g,g,g,g)。
+   *  失败语义:纹理预解析失败=整面回 2D（队列不动）;发射期 quadBatchRgba 假=end(false)
+   *  弃 FBO 回 2D（会话自包含,无 acc 半截污染面）。队列消费/WeakSet 重置仅在成功支
+   *  （2D 原路径自带消费——双消费防双绘）。空队列=消费+true（2D 同语义）。
+   *  ★铺开期口径见调用点注（垫底仍在=实机不可见;像素闸=探针读回对比）。 */
+  private _iglowTex = new Map<string, TexEntry>();
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=空队列免开/fb=回 2D */
+  gladdItemStats = { gl: 0, empty: 0, fb: 0 };
+  private flushItemGlowGL(gl: GLSpriteLayer): boolean {
+    const q = this.itemGlowQueue;
+    if (!q.length || !this.atlas) {
+      this.itemGlowQueue = [];
+      this.itemGlowHeldCollected = new WeakSet();
+      this.gladdItemStats.empty++;
+      return true;
+    }
+    if (gl.unavailable) { this.gladdItemStats.fb++; return false; }
+    // ① 纹理预解析（op.tex→图集页纹理,键=页名缓存;失败=整面回 2D）
+    const texs = new Map<string, TexEntry | null>();
+    for (const e of q) {
+      for (const op of e.ops) {
+        if (texs.has(op.tex)) continue;
+        const img = this.atlas.ensureVImage(op.tex);
+        if (!img || img.width <= 0) { texs.set(op.tex, null); continue; }
+        const key = `iglow:${op.tex}`;
+        let t = this._iglowTex.get(key);
+        if (!t || !gl.texAlive(t)) {
+          const up = gl.texFromImage(key, img, false, true);
+          if (!up) { this.gladdItemStats.fb++; return false; }
+          t = up;
+          this._iglowTex.set(key, t);
+        }
+        texs.set(op.tex, t);
+      }
+    }
+    // ② 会话
+    gl.begin('itemglow');
+    if (gl.unavailable) { this.gladdItemStats.fb++; return false; }
+    // ③ 发射（批数据 stride 8=x,y,u,v,r,g,b,a;6 顶点/quad;复用单缓冲=同步消费）
+    const vd = new Float32Array(48);
+    let fail = false;
+    const emitQuad = (t: TexEntry, cs: number[], u0: number, v0: number, u1: number, v1: number,
+      r: number, g: number, b: number, a: number, add: boolean): void => {
+      // p0=(tl,u0v0) p1=(tr,u1v0) p2=(br,u1v1) p3=(bl,u0v1);两三角 (0,1,2)+(0,2,3)
+      const V = [
+        cs[0], cs[1], u0, v0, cs[2], cs[3], u1, v0, cs[4], cs[5], u1, v1,
+        cs[0], cs[1], u0, v0, cs[4], cs[5], u1, v1, cs[6], cs[7], u0, v1,
+      ];
+      for (let i = 0; i < 6; i++) {
+        vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1]; vd[i * 8 + 2] = V[i * 4 + 2];
+        vd[i * 8 + 3] = V[i * 4 + 3]; vd[i * 8 + 4] = r; vd[i * 8 + 5] = g;
+        vd[i * 8 + 6] = b; vd[i * 8 + 7] = a;
+      }
+      if (add) gl.blendAdditive(true);
+      const ok = gl.quadBatchRgba(t, vd, 1);
+      if (add) gl.blendAdditive(false);
+      if (!ok) fail = true;
+    };
+    for (const e of q) {
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      const ma = e.m.a * invK, mb = e.m.b * invK, mc = e.m.c * invK,
+        md = e.m.d * invK, me = e.m.e * invK, mf = e.m.f * invK;
+      for (const op of e.ops) {
+        const t = texs.get(op.tex);
+        if (!t) continue;   // 2D 同语义:ensureVImage 缺=跳过该 op
+        const img = this.atlas.ensureVImage(op.tex);
+        if (!img || img.width <= 0) continue;
+        // 源行越界钳（2D 同式）
+        let sy = op.sy;
+        if (sy + op.sh > img.height) sy = Math.max(0, img.height - op.sh);
+        const iw = img.width, ih = img.height;
+        const u0 = op.sx / iw, u1 = (op.sx + op.sw) / iw;
+        const v0 = sy / ih, v1 = (sy + op.sh) / ih;
+        // 角点变换:local dest → BJ603 rot 绕 (ox,oy) → m×invK
+        const dw = op.dw ?? op.sw, dh = op.dh ?? op.sh;
+        const rot = op.rot ?? 0;
+        const cr = rot ? Math.cos(rot) : 1, sr = rot ? Math.sin(rot) : 0;
+        const rpx = rot ? (op.ox ?? op.dx) : 0, rpy = rot ? (op.oy ?? op.dy) : 0;
+        const lc: Array<[number, number]> = [
+          [op.dx, op.dy], [op.dx + dw, op.dy], [op.dx + dw, op.dy + dh], [op.dx, op.dy + dh],
+        ];
+        const cs: number[] = [];
+        for (const [lx, ly] of lc) {
+          const rdx = lx - rpx, rdy = ly - rpy;
+          const rx = rpx + rdx * cr - rdy * sr, ry = rpy + rdx * sr + rdy * cr;
+          cs.push(ma * rx + mc * ry + me, mb * rx + md * ry + mf);
+        }
+        const gC = Math.max(0, Math.min(1, op.alpha));
+        if (op.blend !== 'add') {
+          if (gC <= 0) continue;   // 2D 同防御:over α=0 不可达
+          const bake: [number, number, number] = [
+            Math.min(1, op.tint[0] / gC), Math.min(1, op.tint[1] / gC), Math.min(1, op.tint[2] / gC),
+          ];
+          const boost: [number, number, number] = [
+            Math.max(0, op.tint[0] - gC), Math.max(0, op.tint[1] - gC), Math.max(0, op.tint[2] - gC),
+          ];
+          const needBake = bake[0] < 0.999 || bake[1] < 0.999 || bake[2] < 0.999;
+          const needBoost = boost[0] > 1e-4 || boost[1] > 1e-4 || boost[2] > 1e-4;
+          if (!needBake && !needBoost) {
+            emitQuad(t, cs, u0, v0, u1, v1, gC, gC, gC, gC, false);   // R==A 快路径（tint==g）
+          } else {
+            if (needBake) emitQuad(t, cs, u0, v0, u1, v1, bake[0] * gC, bake[1] * gC, bake[2] * gC, gC, false);
+            else emitQuad(t, cs, u0, v0, u1, v1, gC, gC, gC, gC, false);
+            // ★boost 拍 α=0 纯加法习语（2026-10-14 亮场景缺口翻案）:'lighter' α=1
+            //  在 over-present 域必须走 premul α=0（rgb 纯加、dst α/rgb 零衰减）
+            //  ——带真 α 会把 glCanvas 世界按 (1−α) 衰减（2D 'lighter' 无衰减,
+            //  洞穴暗场景差值归零=探针假阴性定谳）。下同（add 支）。
+            if (needBoost) emitQuad(t, cs, u0, v0, u1, v1, boost[0], boost[1], boost[2], 0, true);
+          }
+          continue;
+        }
+        // add 支:'lighter'×gClamped → α=0 纯加法（2D 加的 HUD α 抬升在opaque垫底
+        //  上无观感;GL 侧 α=0 保 glCanvas α=与最终屏 α 同相）
+        emitQuad(t, cs, u0, v0, u1, v1, op.tint[0] * gC, op.tint[1] * gC, op.tint[2] * gC, 0, true);
+      }
+    }
+    if (fail) { gl.end(false); this.gladdItemStats.fb++; return false; }
+    gl.end(true, true);   // over present:推屏栈（bg<world<itemglow=7e 冲刷位）
+    this.itemGlowQueue = [];
+    this.itemGlowHeldCollected = new WeakSet();
+    this.gladdItemStats.gl++;
+    return true;
   }
 
   /** ★BJ601 手持段 glowMask 收集（DrawPlayer_27_HeldItem 段 A/B 统一入口）：

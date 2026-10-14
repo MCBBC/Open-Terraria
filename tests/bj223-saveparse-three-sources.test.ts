@@ -61,7 +61,7 @@ function makeFixture(): { json: string; data: ReturnType<typeof JSON.parse> } {
 
 function resultOf(id: number): {
   world: WorldPacket; player?: unknown;
-  save?: { header?: { playTimeMs?: number; difficulty?: number } };
+  save?: { header?: { playTimeMs?: number; difficulty?: number }; teMods?: Array<{ k: string; x: number; y: number; d?: Record<string, unknown> }> };
 } | undefined {
   return wkEvents.find((e) => e.type === 'result' && e.id === id) as never;
 }
@@ -81,6 +81,19 @@ describe('BJ223 saveParse 三源（真 worker 处理器进程内直测）', () =
     expect(w.spawnX).toBe(30);
     // BJ90 内存削减逻辑（savedPlayMs 提取+回传）保留——SW-BJ5 读档吸合数据源
     expect(result!.save?.header?.playTimeMs).toBe(123_456);
+  });
+
+  // ★R-C-F2(2026-10-14):teMods 随窄 save 回传——worker 域 TE 注册表恒空
+  //  (registerModTileEntity 仅主线程),worker 内 restoreModTEs 空转=读档 TE 全失
+  //  →下次保存键永久清空。守卫=窄 save 保真 teMods 键(主线程回填数据源)。
+  it('json 源：saveParse({json}) → result.save.teMods 保真(F2 主线程回填数据源)', async () => {
+    wkEvents.length = 0;
+    const { json, data } = makeFixture();
+    const withTe = { ...data, teMods: [{ k: 'mod_ms_core', x: 7, y: 9, d: { items: [] } }] };
+    await handler({ data: { id: 105, type: 'saveParse', json: JSON.stringify(withTe) } });
+    const result = resultOf(105);
+    expect(result).toBeTruthy();
+    expect(result!.save?.teMods).toEqual([{ k: 'mod_ms_core', x: 7, y: 9, d: { items: [] } }]);
   });
 
   it('save 源：saveParse({save:SaveData对象}) → result（.wld 导入面零再解析）', async () => {

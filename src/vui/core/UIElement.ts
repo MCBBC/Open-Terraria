@@ -53,6 +53,9 @@ export class UIElement {
   private _isInitialized = false;
 
   isMouseHovering = false;
+  /** ★R-B-KB-4(2026-10-14):键盘焦点旗(kbdNav setFocus 维护;有 hover 样式的
+   *  drawSelf 消费——焦点环绘制面) */
+  kbdFocus = false;
 
   // 事件（C# field-like event → 订阅集合）。onClick = 左键点击（1.4.5.6 OnLeftClick 的兼容别名）
   private handlers: Partial<Record<EvtName, Set<AnyHandler>>> = {};

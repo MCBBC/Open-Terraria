@@ -19,7 +19,7 @@ import { StyleDimension } from '../vui/core/StyleDimension';
 import type { UISpriteBatch } from '../vui/draw/UISpriteBatch';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { UIScale } from '../vui/draw/UIScale';
-import { installModKbdNav, invalidateModKbdNav, registerKbdFocusable } from './kbdNav';   // ★键盘导航域
+import { installModKbdNav, invalidateModKbdNav, registerKbdFocusable, setKbdNavBlockingProbe } from './kbdNav';   // ★键盘导航域
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 
 /** mod 面板句柄(sw.ui.panel 产) */
@@ -277,6 +277,7 @@ export function modUiPanel(
     draggable?: boolean; closable?: boolean; fullscreen?: boolean },
 ): ModPanelHandle {
   ensureDomGate();   // ★D19-F4:首面板挂 mousemove 同步臂(幂等)
+  setKbdNavBlockingProbe(() => modUiBlockingPointer());   // ★R-B-KB-1:消费门谓词注入(环避)
   installModKbdNav();   // ★键盘导航域:首面板挂 keydown 臂(幂等)
   const fullKey = `mod_${modId}_${key}`;
   const existing = panels.get(fullKey);
@@ -396,6 +397,7 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       b.onClick(() => o.onClick());
       p.root.append(b);
       registerKbdFocusable(b);   // ★键盘导航域:语义焦点集(标题栏/根不卷入)
+      invalidateModKbdNav();   // ★R-B-KB-8:动态加钮沿失效(旧=陈旧缓存新钮不可达)
     },
     addSlot(o) {
       const s = new UISlot(o);
@@ -403,6 +405,7 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       s.top = StyleDimension.fromPixels(o.y);
       p.root.append(s);
       registerKbdFocusable(s);   // ★键盘导航域
+      invalidateModKbdNav();   // ★R-B-KB-8
     },
     addImage(o) {
       const im = new ModUIImage(p.modId, o.tex, o.scale ?? 1, o.w, o.h);

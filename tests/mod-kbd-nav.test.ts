@@ -27,7 +27,7 @@ describe('键盘导航域:mod 面板焦点导航', () => {
 
   it('焦点序列/hover 语义/Enter 激活/越界校正', () => {
     modUiSetInGame(true);
-    const p = modUiPanel('m', 'nav', { x: 10, y: 10, width: 300, height: 220 });
+    const p = modUiPanel('m', 'nav', { x: 10, y: 10, width: 300, height: 220, fullscreen: true });   // ★KB-1:fullscreen=消费门恒开,隔离测试焦点语义
     const clicks: string[] = [];
     const hovers: number[] = [];
     const b1 = { c: 0, h: 0 };
@@ -73,5 +73,27 @@ describe('键盘导航域:mod 面板焦点导航', () => {
     fire('ArrowUp');     // 回绕→B2
     fire('Enter');
     expect(clicks).toEqual(['b2', 'b1', 'b2']);
+  });
+
+  it('文本输入让位:activeElement=INPUT 时全放行(UITextBox 编辑不劫)', () => {
+    modUiSetInGame(true);
+    // ★R-B-KB-1:消费门=输入让位面(fullscreen=整屏让位)——普通面板+指针在外
+    //  本就不消费(世界键放行),本测改用 fullscreen 面板隔离 INPUT 门自身
+    const p = modUiPanel('m', 'txt', { x: 10, y: 10, width: 300, height: 200, fullscreen: true });
+    let clicked = 0;
+    p.addButton('B', { x: 10, y: 40, w: 80, onClick: () => clicked++ });
+    installModKbdNav();
+    // 模拟 UITextBox 隐藏 input 聚焦态
+    const fakeInput = { tagName: 'INPUT' };
+    vi.stubGlobal('document', { activeElement: fakeInput });
+    fire('ArrowDown');
+    console.log('[dbg3] doc=', typeof document, (document as unknown as { activeElement?: { tagName: string } }).activeElement?.tagName, 'clicked=', clicked);
+    fire('Enter');
+    expect(clicked).toBe(0);   // INPUT 聚焦=导航全放行
+    vi.stubGlobal('document', { activeElement: { tagName: 'CANVAS' } });
+    fire('ArrowDown');
+    console.log('[dbg4] nav=', _kbdNavDebug(), 'clicked=', clicked);
+    fire('Enter');
+    expect(clicked).toBe(1);   // 非输入态照常
   });
 });

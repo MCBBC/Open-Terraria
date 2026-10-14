@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 
@@ -109,8 +109,11 @@ function buildStore(snap: { type: Uint16Array; wall: Uint16Array }) {
   };
 }
 
-const pre = loadSnap('pre-Micro_Biomes');   // 探针命名=当前 pass 完成态=海 pass 输入
-const post = loadSnap('post-Sulphur_Sea');
+// ★691 统一实跑(genprobe-consolidated)快照语义 FNV 实证=「pre-X 文件=X 完成后态」
+//  (每文件 tf ≡ 本 pass PASS 行 tf,探针在 pass 尾 dump):海输入=snap-110(pre-Micro_
+//  Biomes)=Micro Biomes 完成态;输出=snap-111(pre-Sulphur_Sea)=Sulphur Sea 完成态。
+const pre = loadSnap(process.env.SW_SEA_PRE ?? 'pre-Micro_Biomes');
+const post = loadSnap(process.env.SW_SEA_POST ?? 'pre-Sulphur_Sea');
 const store = buildStore(pre);
 
 const seaMod = await import('../mods/calamity/src/gen-sea.ts');

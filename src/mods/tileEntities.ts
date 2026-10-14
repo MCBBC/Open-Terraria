@@ -41,6 +41,8 @@ interface TEInstance { x: number; y: number; state: Record<string, unknown> }
 interface BoundStore {
   /** tileInternal → (posKey → instance) */
   inst: Map<number, Map<string, TEInstance>>;
+  /** 闭包身份(TE-6:listener 比对) */
+  listener: (x: number, y: number) => void;
 }
 
 /** te 注册表(tileInternal → entry;registry 非空才装监听=零 mod 零成本) */
@@ -62,9 +64,10 @@ export function registerModTileEntity(modId: string, tileInternal: number, tileK
 /** 绑定世界(Game.start 沿;幂等)。registry 空=不装监听(零 mod 零成本)。 */
 export function bindModTileEntities(store: TileStore): void {
   if (registry.size === 0 || bound.has(store)) { activeStore = store; return; }
-  const b: BoundStore = { inst: new Map() };
   const listener = (x: number, y: number): void => {
-    if (!bound.has(store)) return;   // 解绑后惰性直通(TileStore 无摘除面)
+    // ★R-B-TE-6(2026-10-14):闭包身份守卫(旧=WeakMap 成员性——同 store 解绑后
+    //  再绑场景旧监听因 map 重新有成员而复活=双桶双写;身份比对=免疫)
+    if (bound.get(store)?.listener !== listener) return;
     const i = store.idx(x, y);
     const t = store.type[i];
     const pk = `${x},${y}`;
@@ -87,9 +90,18 @@ export function bindModTileEntities(store: TileStore): void {
       }
     }
   };
+  const b: BoundStore = { inst: new Map(), listener };
   store.onTileChanged(listener);
   bound.set(store, b);
   activeStore = store;
+  // ★R-B-TE-4(2026-10-14):bind 沿锚格扫描——mod gen pass 在【worker 域】写的
+  //  TE tile 无运行期 setTile 事件、读档 restore 之外的第三建通道。全图一遍扫
+  //  (4200×1200≈5M 读,世界装载重头戏内可忽略);registry 空不达此(上方早退)。
+  for (let y = 0; y < store.h; y++) {
+    for (let x = 0; x < store.w; x++) {
+      listener(x, y);
+    }
+  }
 }
 
 /** 解绑(Game.destroy 沿;清实例桶=跨世界隔离)。TileStore 无监听摘除面——
@@ -106,10 +118,19 @@ export function tickModTileEntities(game: GameHooks): void {
   if (!store) return;
   const b = bound.get(store);
   if (!b) return;
-  for (const [, entry] of registry) {
-    const m = b.inst.get(byFullKey.get(entry.fullKey) ?? -1);
+  for (const [tileInternal, entry] of registry) {
+    const m = b.inst.get(tileInternal);
     if (!m || m.size === 0) continue;
-    for (const inst of m.values()) {
+    // ★R-B-TE-1(2026-10-14):tick 对账——silent 旁路(陨石坑/祭坛粉碎等 setTileSilent
+    //  不派发监听)的孤儿实例在此闭合约:现格失配→onDestroy+摘(每 TE 一次 store.get,
+    //  常量级;实例数小=可忽略)
+    for (const [pk, inst] of m) {
+      if (store.type[store.idx(inst.x, inst.y)] !== tileInternal) {
+        try { entry.spec.onDestroy?.({ x: inst.x, y: inst.y, key: entry.fullKey, state: inst.state }); }
+        catch (err) { console.warn('[mod-te] onDestroy', err); }
+        m.delete(pk);
+        continue;
+      }
       try { entry.spec.update?.({ x: inst.x, y: inst.y, key: entry.fullKey, state: inst.state }, game); }
       catch (err) { console.warn('[mod-te] update', err); }
     }
@@ -128,8 +149,22 @@ export function serializeModTEs(store: TileStore | null | undefined): import('..
     for (const inst of m.values()) {
       let d: Record<string, unknown> | undefined;
       try { d = entry.spec.save ? entry.spec.save({ x: inst.x, y: inst.y, key: entry.fullKey, state: inst.state }) : inst.state; }
-      catch (err) { console.warn('[mod-te] save', err); }
+      catch (err) {
+        // ★R-B-TE-3(2026-10-14):save 钩 throw=占位条目落档(旧=静默 continue=
+        //  重进 TE 消失无任何标记;占位 __lost 让 restore 侧可见+log)
+        console.warn(`[mod-te] save 钩 throw,落占位: ${entry.fullKey}@${inst.x},${inst.y}`, err);
+        out.push({ k: entry.fullKey, x: inst.x, y: inst.y, d: { __lost: true } });
+        continue;
+      }
       if (d === undefined) continue;   // save 钩显式弃存
+      // ★R-B-TE-2(2026-10-14):缺省直存消毒(JSON round-trip)——state 含循环引用/
+      //  BigInt 时 JSON.stringify 整档抛、函数/循环→worker structured clone
+      //  DataCloneError(双保存链全断);消毒失败=弃存该实例(warn)与 save 钩
+      //  throw 同语义。有 save 钩的 mod 已被钩域 try/catch 隔离。
+      if (!entry.spec.save) {
+        try { d = JSON.parse(JSON.stringify(d)) as Record<string, unknown>; }
+        catch { console.warn(`[mod-te] state 不可序列化,弃存: ${entry.fullKey}@${inst.x},${inst.y}`); continue; }
+      }
       out.push({ k: entry.fullKey, x: inst.x, y: inst.y, d });
     }
   }
@@ -145,6 +180,10 @@ export function restoreModTEs(store: TileStore, entries: import('../save/seriali
   for (const e of entries) {
     const tileInternal = byFullKey.get(e.k);
     if (tileInternal === undefined) continue;   // 缺 mod=静默降级(占位语义)
+    if ((e.d as Record<string, unknown> | undefined)?.__lost) {
+      console.warn(`[mod-te] 读档: ${e.k}@${e.x},${e.y} 上局 save 钩 throw 弃存(占位不复活)`);
+      continue;
+    }
     const entry = registry.get(tileInternal)!;
     let m = b.inst.get(tileInternal);
     if (!m) { m = new Map(); b.inst.set(tileInternal, m); }

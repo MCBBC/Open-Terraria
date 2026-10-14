@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
 const PASS = process.env.SW_PASS === 'vernal' ? 'vernal' : 'sunken';
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
@@ -267,8 +267,12 @@ function diffScore(store: { type: Uint16Array }, snapPost: { type: Uint16Array }
   return diff;
 }
 
-const prePath = PASS === 'sunken' ? 'snap-19-pre-Settle_Liquids_Again' : 'snap-17-pre-Muds_Walls_In_Jungle';
-const postPath = PASS === 'sunken' ? 'snap-20-post-Sunken_Sea' : 'snap-18-post-Vernal_Pass';
+// ★691 统一实跑快照语义 FNV 实证=「pre-X 文件=X 完成后态」(探针 pass 尾 dump):
+//  sunken 输入=pre-Settle_Liquids_Again(105)=旧名同物;输出=pre-Sunken_Sea(106)=
+//  旧 post-Sunken_Sea 同物。vernal 输入=pre-Muds_Walls_In_Jungle(102),输出=
+//  pre-Vernal_Pass(103)。
+const prePath = PASS === 'sunken' ? (process.env.SW_SUNKEN_PRE ?? 'pre-Settle_Liquids_Again') : 'pre-Muds_Walls_In_Jungle';
+const postPath = PASS === 'sunken' ? (process.env.SW_SUNKEN_POST ?? 'pre-Sunken_Sea') : 'pre-Vernal_Pass';
 const pre = loadSnap(prePath);
 const post = loadSnap(postPath);
 

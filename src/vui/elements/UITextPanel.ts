@@ -45,6 +45,14 @@ export class UITextPanel extends UIPanel {
 
   protected drawSelf(batch: UISpriteBatch): void {
     if (this.drawPanelEnabled) super.drawSelf(batch);
+    // ★R-B-KB-4(2026-10-14):键盘焦点环(kbdFocus 旗;kbdNav setFocus 维护)
+    if (this.kbdFocus) {
+      const d = this.getDimensions();
+      const ctx = batch.ctx;
+      ctx.strokeStyle = '#FFE745';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(d.x + 1, d.y + 1, d.width - 2, d.height - 2);
+    }
     this.drawText(batch);
   }
 

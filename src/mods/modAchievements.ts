@@ -67,9 +67,15 @@ export function collectModAchievement(modId: string, key: string, spec: ModAchie
   if (spec.icon) iconJobs.push({ fullKey: full, modId, texPath: spec.icon });
 }
 
-/** loader 出口:pending → AchDef(id 解析须分配表在册=全 mod 收集后一次翻译) */
+/** loader 出口:pending → AchDef(id 解析须分配表在册=全 mod 收集后一次翻译)。
+ *  ★R-A-F6:modAchDefs 只增不减——build 重入(mod 重载)经 doneByFullKey 幂等
+ *  (已译 def 跳过=双注册面闸;热重载哨兵清单=登记 D11 扩容) */
+const builtByFullKey = new Set<string>();
 export function buildModAchievementDefs(alloc: ModIdAllocation): void {
   for (const { modId, key, spec } of pending) {
+    const full0 = fullKeyOf(modId, key);
+    if (builtByFullKey.has(full0)) continue;
+    builtByFullKey.add(full0);
     const full = fullKeyOf(modId, key);
     const conditions: AchCondDef[] = spec.conditions.map((c) => {
       if (c.kind === 'custom') return { kind: 'flag', name: full };
@@ -105,10 +111,29 @@ export function completeModAchievement(modId: string, key: string): void {
   }
 }
 
-/** 图标 blob URL 登记(assets 相位;def.modIconUrl 活回填+URL 表兜底) */
+/** 图标 blob URL 登记(assets 相位;def.modIconUrl 活回填+URL 表兜底。
+ *  ★重复登记 revoke 旧 objectURL 防泄漏=D-n4 先例。★R-A-F4:晚注册 def 不在册
+ *  (build 已跑过)=回填 URL 表留证+warn(def 缺=图标永不可达,非空断言曾炸
+ *  applyModAssets 整段=后续 mod 贴图注入全丢) */
 export function registerModAchIcon(fullKey: string, url: string): void {
+  const prev = iconUrls.get(fullKey);
+  if (prev) { try { URL.revokeObjectURL(prev); } catch { /* 已释放 */ } }
   iconUrls.set(fullKey, url);
-  defsByKey.get(fullKey)!.modIconUrl = url;
+  const def = defsByKey.get(fullKey);
+  if (def) def.modIconUrl = url;
+  else console.warn(`[mods] 成就图标晚到(注册已过翻译窗,图标不可达): ${fullKey}`);
+}
+
+/** mod 卸载沿:本域图标 URL 清账(purgeModAssetsCache 调;SW 缓存外的 blob 面) */
+export function purgeModAchIcons(modId: string): void {
+  const pfx = `mod_${modId}_`;
+  for (const [k, url] of iconUrls) {
+    if (k.startsWith(pfx)) {
+      try { URL.revokeObjectURL(url); } catch { /* 已释放 */ }
+      iconUrls.delete(k);
+      defsByKey.get(k)!.modIconUrl = undefined;
+    }
+  }
 }
 
 /** UI 读:成就图标 URL(null=原版 sprite 域) */
@@ -123,4 +148,5 @@ export function _resetModAchievementsForTests(): void {
   specByKey.clear();
   defsByKey.clear();
   iconUrls.clear();
+  builtByFullKey.clear();
 }

@@ -221,6 +221,10 @@ export function openAchievementsPanel(host: AchievementsHost, focusName?: string
         glyph.style.backgroundImage = `url(${modIcon})`;
         glyph.style.backgroundSize = 'contain';
         glyph.style.backgroundPosition = 'center';
+      } else if (def.title !== undefined) {
+        // ★R-A-F3(2026-10-14):无 icon 的 mod 成就=清 CSS 默认原版贴图
+        //  (glyph 类自带 Achievements.png + 0,0 定位=显示无关首帧)
+        glyph.style.backgroundImage = 'none';
       }
       icon.appendChild(glyph);
       const border = el('img') as HTMLImageElement;

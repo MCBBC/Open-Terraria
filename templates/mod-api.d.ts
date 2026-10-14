@@ -6,6 +6,11 @@
  *
  * 用法:放到 mod 工程根,tsconfig `"include": ["mod-api.d.ts", "scripts/**/*.ts"]`。
  * entry.js 可用 TS 编写(esbuild/tsc 打包为单文件 main.js 后随 .swmod 分发)。
+ *
+ * ★渲染尺寸语义(2026-10-14,R-C-F10):content/npcs 的 width/height 仅定义【命中盒】
+ *  (碰撞/攻击判定),渲染=贴图【整幅 1:1 绘制】(frames=1 时无缩放无裁切)——
+ *  声明 48×48 的 NPC 配 224×144 贴图会画出 224×144 全图。要小体型=贴图本身缩小。
+ *  帧表:贴图宽=单帧宽,高=frames×单帧高(竖排),帧选择=(ageTicks/frameRate)%frames。
  */
 
 export declare interface ModUseCtx {

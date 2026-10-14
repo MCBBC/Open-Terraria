@@ -55,6 +55,21 @@ await page.evaluate(() => {
   if (w) { w.raining = false; w.cloudAlpha = 0; w.maxRaining = 0; w.numClouds = 60; w.lightning = 0; w.update = () => {}; }
   window.__gladdSet = (v) => { r.constructor.gladd = v; };
   window.__gladdState = () => ({ flag: r.constructor.gladd, stats: { ...r.gladdCoatStats } });
+  // ★面②队列探针（2026-10-14:磁吸拾取/收集时序定位——flushItemGlowGL 入口读队列）
+  window.__qprobe = [];
+  {
+    const proto = Object.getPrototypeOf(r);
+    const origIG = proto.flushItemGlowGL;
+    proto.flushItemGlowGL = function (...a) {
+      window.__qprobe.push({
+        qlen: this.itemGlowQueue.reduce((n, e) => n + e.ops.length, 0),
+        drops: g.entities?.drops?.length ?? -1,
+        glSt: { ...this.gladdItemStats },
+      });
+      return origIG.apply(this, a);
+    };
+  }
+  window.__qRead = (n = 99) => window.__qprobe.splice(0).slice(-n);
   window.__pause = (v) => { g.paused = v; };
   window.__teleport = (x, y) => {
     g.player.x = x; g.player.y = y;
@@ -139,6 +154,24 @@ async function snapFin() {
     for (let i = 0; i < d.length; i += CH) bin += String.fromCharCode.apply(null, d.subarray(i, Math.min(i + CH, d.length)));
     return { w: c.width, h: c.height, b64: btoa(bin) };
   });
+}
+
+/** 画布读回（which='hud'=主画布/'gl'=管线画布;preserveDrawingBuffer=true 判例——
+ *  帧外 drawImage 读回有效;面②读回对比用） */
+async function snapCanvas(which) {
+  return page.evaluate((which) => {
+    const r = window.__swGame.renderer;
+    const c = which === 'hud' ? r.canvas : (r.swPipe?.canvas ?? null);
+    if (!c || !c.width) return null;
+    const lc = document.createElement('canvas');
+    lc.width = c.width; lc.height = c.height;
+    const lx = lc.getContext('2d', { willReadFrequently: true });
+    lx.drawImage(c, 0, 0);
+    const d = lx.getImageData(0, 0, lc.width, lc.height).data;
+    let bin = ''; const CH = 0x8000;
+    for (let i = 0; i < d.length; i += CH) bin += String.fromCharCode.apply(null, d.subarray(i, Math.min(i + CH, d.length)));
+    return { w: c.width, h: c.height, b64: btoa(bin) };
+  }, which);
 }
 
 /** census:A vs B 全帧差分(像素数/maxΔ/bbox) */
@@ -364,6 +397,94 @@ await waitFrame(4);
 // ★diag 判例（2026-10-14）:烘焙预算摊销（bakeBudgetMs 8ms/帧,budgetAwaiting 传送后
 //   61 块排队）——glow 页就绪必须显式等待,否则 B 臂跑在 placeholder 上=空对拍
 if (await waitGlowPages('洞穴暗光')) await phase('洞穴暗光', false, 5);
+
+// ---- 相位 5b:itemGlow 屏幕对拍（★会话前移垫底前=内容入 HUD=屏幕 A/B 有效） ----
+// ★判别场景=洞穴+荧光漆亮底（2026-10-14 二翻案）：add 光罩叠在 fullbright 亮漆上
+//   =亮底判别力（若有 α 衰减缺口会压暗亮漆=大 diff）;纯暗场两语义重合=假阴性
+//   （首版定谳）。地表场景弃用：drunk seed 地表裂隙+磁吸半径>10 格=掉落夹具
+//   连环蒸发（drops:0 三连定谳）;洞穴掉落存活已证（首版 gl=+3）。
+//   掉落=翘位到漆面内相机相对坐标+清速度（地形/磁吸/重力全解耦）。zoom1=逐字节。
+{
+  await page.evaluate((zz) => { window.__swGame.camera.setZoomTarget(zz); }, 1.0);
+  await page.evaluate(() => window.__pause(false));
+  await pump(page, 80);
+  const fx = await page.evaluate(async () => {
+    const g = window.__swGame;
+    const items = await import('/src/data/items.ts');
+    const flow = window.__swFlow;
+    const drop = flow.itemByVid(2772);
+    const key = items.ITEM_DEFS[drop]?.key;
+    const px = g.player.x, py = g.player.y;
+    const out = [];
+    for (const [dx, dy, vy] of [[-120, -30, 0], [110, -20, 0], [-50, -60, 2]]) {
+      const d = key ? g.spawnDrop(px + dx, py + dy, key, 1, 0, vy) : null;
+      out.push(!!d);
+    }
+    return { key, spawned: out };
+  });
+  await pump(page, 2);
+  const warped = await page.evaluate(() => {
+    const g = window.__swGame;
+    const cam = g.camera;
+    const ds = (g.entities.drops ?? []).filter((d) => !d.dead);
+    const offs = [[-120, -30], [110, -20], [-50, -60]];   // 漆面内（漆=玩家±160×96px）
+    ds.forEach((d, i) => {
+      const o = offs[i % 3];
+      d.x = cam.x + o[0]; d.y = cam.y + o[1];
+      d.vx = 0; d.vy = 0;
+    });
+    return ds.length;
+  });
+  console.log('[itemGlow] 夹具:', JSON.stringify(fx), '翘位:', warped);
+  await page.evaluate(() => window.__pause(true));
+  await waitFrame(6);
+  console.log('[itemGlow] settle后队列:', JSON.stringify(await page.evaluate(() => window.__qRead(6))));
+  console.log('[itemGlow] settle后队列:', JSON.stringify(await page.evaluate(() => window.__qRead(6))));
+  // ★census 口径（2026-10-14 混合混合域定谳）:单件多 op 光罩 over 支（真 α）与
+  //   add 支（α=0 纯加）同像素叠放时,FBO 内 add 贡献被 over 支 (1−α) 衰减——
+  //   2D 参照 'lighter' 不衰减。over-stack 结构性残差（终局=加算注入世界 FBO 才
+  //   全解,同拖尾族）;实测 n=8/百万（单行重叠 sliver,不可见级）。zoom1 其余域
+  //   （含 BJ603 rot 旋臂）逐字节。
+  await phase('itemGlow', false, 0.5);
+  console.log('[itemGlow] phase后队列:', JSON.stringify(await page.evaluate(() => window.__qRead(12))));
+  // ★GA 差异像素 dump（n=24 谜团定位——diff 类别判读用）
+  {
+    await page.evaluate(() => window.__gladdSet(false));
+    await waitFrame(4);
+    await page.evaluate((n) => window.__setTick(900 + n), 0);
+    await waitFrame(1);
+    const dA = await snapFin();
+    await page.evaluate(() => window.__gladdSet(true));
+    await waitFrame(5);
+    await page.evaluate((n) => window.__setTick(900 + n), 0);
+    await waitFrame(1);
+    const dB = await snapFin();
+    const dec = (s) => { const bin = atob(s); const u = new Uint8ClampedArray(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+    const pxs = await page.evaluate(({ a, b }) => {
+      const dec2 = (s) => { const bin = atob(s); const u = new Uint8ClampedArray(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+      const P = dec2(a), Q = dec2(b), W = a.w, out = [];
+      for (let i = 0; i < P.length && out.length < 6; i += 4) {
+        const dd = Math.max(Math.abs(P[i] - Q[i]), Math.abs(P[i + 1] - Q[i + 1]), Math.abs(P[i + 2] - Q[i + 2]), Math.abs(P[i + 3] - Q[i + 3]));
+        if (dd > 0) out.push({ x: (i >> 2) % W, y: (i >> 2) / W | 0, dd, a: [P[i], P[i + 1], P[i + 2], P[i + 3]], b: [Q[i], Q[i + 1], Q[i + 2], Q[i + 3]] });
+      }
+      return out;
+    }, { a: dA.b64, b: dB.b64 });
+    console.log('[itemGlow] diff 像素:', JSON.stringify(pxs));
+  }
+  // 面② stats（phase() 的 GC 查的是 coat 面;此处补 itemGlow 面账）
+  {
+    await page.evaluate(() => window.__gladdSet(false));
+    await waitFrame(2);
+    const s0 = await page.evaluate(() => ({ ...window.__swGame.renderer.gladdItemStats }));
+    await page.evaluate(() => window.__gladdSet(true));
+    await waitFrame(4);
+    const s1 = await page.evaluate(() => ({ ...window.__swGame.renderer.gladdItemStats }));
+    chk('[itemGlow] GC2 面② GL 会话实走（gl 增量>0,fb=0,empty=0）',
+      (s1.gl - s0.gl) > 0 && (s1.fb - s0.fb) === 0 && (s1.empty - s0.empty) === 0,
+      `gl=+${s1.gl - s0.gl} empty=+${s1.empty - s0.empty} fb=+${s1.fb - s0.fb}`);
+  }
+  await page.evaluate(() => { window.__swGame.player.inv.slots[5] = null; });
+}
 
 // ---- 相位 6:重力翻转（xform 帧:_c10eComposited 闩 → GL 门关=2D 回退正确性锁;
 //      ★diag D4/D5 判例:须在地表+活体态做——洞穴泵期重力上天=死亡/ghost 态混杂） ----

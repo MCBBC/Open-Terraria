@@ -20,15 +20,27 @@ let cachedDirty = true;
 const focusRegistry = new Set<UIElement>();
 export function registerKbdFocusable(el: UIElement): void { focusRegistry.add(el); }
 
-const isInteractive = (el: UIElement): boolean => {
+/** ★R-B-KB-2(2026-10-14):可达性=沿 parent 回溯到「无父根」且根∈current 直子。
+ *  旧判据 el.parent!==null 对「面板隐藏」失效——rebuildHostTree 的
+ *  removeAllChildren 只断面板根的 parent,面板根的【子】(按钮)parent 恒非空
+ *  =隐藏面板按钮永为焦点候选(隐形激活/跨世界激活)。 */
+const reachable = (el: UIElement, cur: UIElement): boolean => {
+  let node: UIElement | null = el;
+  while (node.parent) node = node.parent;
+  return node === cur;
+};
+
+const isInteractive = (el: UIElement, cur: UIElement): boolean => {
   if (!focusRegistry.has(el)) return false;
   if (el.ignoresMouseInteraction || el.passThroughMouseInteraction) return false;
-  return el.parent !== null;   // remove() 置 null=已摘
+  return reachable(el, cur);
 };
 
 const focusables = (): UIElement[] => {
+  const cur = VUI.ui.current;
+  if (!cur) return [];
   if (cachedDirty) {
-    cachedList = [...focusRegistry].filter(isInteractive);
+    cachedList = [...focusRegistry].filter((el) => isInteractive(el, cur));
     cachedDirty = false;
   }
   return cachedList;
@@ -39,10 +51,12 @@ const setFocus = (list: UIElement[], idx: number): void => {
   const prev = list[focusIdx];
   if (prev) {
     prev.mouseOut(new UIMouseEvent(prev, { x: 0, y: 0 }));
+    prev.kbdFocus = false;   // ★R-B-KB-4:焦点环旗随迁移
   }
   focusIdx = idx;
   const el = list[idx];
   if (el) {
+    el.kbdFocus = true;
     const d = el.getDimensions();
     el.mouseOver(new UIMouseEvent(el, { x: d.x + d.width / 2, y: d.y + d.height / 2 }));
   }
@@ -51,6 +65,13 @@ const setFocus = (list: UIElement[], idx: number): void => {
 /** 键处理(window keydown 捕获;面板现役才消费) */
 const onKey = (e: KeyboardEvent): void => {
   if (VUI.ui.current === null) return;
+  // ★R-B-KB-1(2026-10-14):消费门=输入让位面(modUiBlockingPointer——fullscreen
+  //  整屏让位/普通面板=指针在其上)。旧判据「vui 现役即消费」把非全屏面板开着时的
+  //  世界方向键/Space 跳跃全吞(捕获相 stopPropagation 截断 Input 冒泡相键面)。
+  //  文本输入让位(UITextBox=隐藏 DOM input 载体,捕获相位拦截曾断其编辑)
+  if (typeof document !== 'undefined'
+    && (document.activeElement as HTMLElement | null)?.tagName === 'INPUT') return;
+  if (!(blockingProbe?.() ?? false)) return;   // 未注入=不消费(零 mod 面板语义)
   const list = focusables();
   if (list.length === 0) return;
   const nav = e.key === 'ArrowDown' || e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey);
@@ -76,6 +97,10 @@ const onKey = (e: KeyboardEvent): void => {
 };
 
 /** 安装(首面板沿;幂等) */
+/** 输入让位谓词(mods/ui 注入——kbdNav←ui 循环环避免:ui install 沿传) */
+let blockingProbe: (() => boolean) | null = null;
+export function setKbdNavBlockingProbe(fn: () => boolean): void { blockingProbe = fn; }
+
 export function installModKbdNav(): void {
   if (installed || typeof window === 'undefined') return;
   installed = true;
@@ -84,15 +109,14 @@ export function installModKbdNav(): void {
 
 /** 树变沿失效(面板开合/show/hide/addElement 后调;焦点索引保留=列表重扫) */
 export function invalidateModKbdNav(): void {
-  cachedDirty = true;
-  if (focusIdx >= 0) {
-    const list = focusables();
-    if (focusIdx >= list.length) {
-      const prev = list[focusIdx];
-      if (prev) prev.mouseOut(new UIMouseEvent(prev, { x: 0, y: 0 }));
-      focusIdx = -1;
-    }
+  // ★R-B-KB-5:mouseOut 用【旧 cachedList】(新列表 collect 后 focusIdx 越界位
+  //  按定义恒 undefined=死支;旧列表才有被摘元素引用)
+  if (focusIdx >= 0 && cachedList[focusIdx]) {
+    cachedList[focusIdx]!.mouseOut(new UIMouseEvent(cachedList[focusIdx]!, { x: 0, y: 0 }));
+    cachedList[focusIdx]!.kbdFocus = false;   // ★R-B-KB-4
   }
+  focusIdx = -1;
+  cachedDirty = true;
 }
 
 /** 测试/诊断:focus 态快照 */
@@ -104,9 +128,11 @@ export function _kbdNavDebug(): { focusIdx: number; listLen: number; current: un
 export function _resetModKbdNavForTests(): void {
   if (focusIdx >= 0) {
     const prev = cachedList[focusIdx];
-    if (prev) prev.mouseOut(new UIMouseEvent(prev, { x: 0, y: 0 }));
+    if (prev) { prev.mouseOut(new UIMouseEvent(prev, { x: 0, y: 0 })); prev.kbdFocus = false; }
   }
   focusIdx = -1;
   cachedList = [];
   cachedDirty = true;
+  focusRegistry.clear();   // 语义焦点集随清(测试隔离;生产=面板销毁沿 parent 断链自清)
+  installed = false;       // 重装允许(测试隔离)
 }

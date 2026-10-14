@@ -34,6 +34,16 @@ describe('InfoDisplay 域:mod 信息栏行', () => {
     expect([rows[1]!.text, rows[1]!.gold]).toEqual(['怒气 42', true]);
   });
 
+  it('hideIndex=-1 哨兵:交互翻转位跳写(负下标数组位不产生)', async () => {
+    // Game.tickInfoAccsHover 的翻转面在 hideIndex>=0 门内——mod 行点击不写
+    // p.hideInfo[-1](负下标数组位=本会话永久隐藏,蓝队自检定谳)
+    const p = new Array(13).fill(false) as boolean[] & Record<number, boolean>;
+    const row = { hideIndex: -1 };
+    if (row.hideIndex >= 0) p[row.hideIndex] = !p[row.hideIndex];   // 引擎新门同式
+    expect(p[-1]).toBeUndefined();
+    expect(p.length).toBe(13);   // 数组无负下标扩张
+  });
+
   it('buildInfoAccRows 追加段:原版域零扰动+哨兵行入列', async () => {
     const { buildInfoAccRows } = await import('../src/stats/InfoAccs');
     const { registerModInfoDisplay, resolveModInfoLines } = await import('../src/mods/infoDisplay');

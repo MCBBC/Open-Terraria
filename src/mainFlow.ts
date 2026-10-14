@@ -11,6 +11,7 @@ import { modUiResync } from './mods/ui';   // ★刀1/R-C-F1:mod UI 宿主重同
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
+import { restoreModTEs } from './mods/tileEntities';   // ★TE 梯队:worker 读档主线程回填
 import { isOomLoadError, parseSaveMissingReason, saveMissingToastKey, type SaveMissingReason } from './save/LoadErrors';   // ★BJ318 OOM 判别 + ★BJ605 存档数据缺失族判别/文案映射
 import { builderAccDefaults } from './stats/builderAcc';   // ★SW-FX19:builderAccStatus 回填缺省形
 import { PlayTimeTracker } from './save/PlayTime';
@@ -142,10 +143,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     return inst;
   })();
   /** 成就页开面（标题菜单/设置面板两入口共用——原版双入口喂同一
-   *  Main.AchievementsMenu,Main.cs:112 全局态；本仓同面板双宿主） */
+   *  Main.AchievementsMenu,Main.cs:112 全局态；本仓同面板双宿主）。
+   *  ★R-A-F5(2026-10-14):每开面重读 store——旧=menuAchievementsReady 单例
+   *  Promise 恒回首次实例,Game 进世界解锁(落盘共享)后回标题再开=本局解锁不可见。
+   *  新实例构造零成本(纯 localStorage/IDB 读+defs 快照),mod defs 经
+   *  registerModAchievementDefs 模块表在册=ctor 自动并入。 */
   function openMenuAchievements(): void {
-    void menuAchievementsReady.then((ach) =>
-      import('./ui/AchievementsUI').then((m) => m.openAchievementsPanel({ achievements: ach })));
+    void menuAchievementsReady.then(async () => {
+      const { Achievements } = await import('./core/Achievements');
+      const ach = new Achievements(
+        { load: () => prefGet('sbw.achievements.v1'), save: (x: string) => prefSet('sbw.achievements.v1', x) },
+      );
+      (window as unknown as { __swAchievements?: unknown }).__swAchievements = ach;
+      const m = await import('./ui/AchievementsUI');
+      m.openAchievementsPanel({ achievements: ach });
+    });
   }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
   // #perf-gpulog:gpulog 安装提前到启动装配——菜单期(Game 未构造)也可观测
@@ -1027,6 +1039,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
+          restoreModTEs(world.store, (save as { teMods?: import('./save/serialize').ModTESaveEntry[] } | undefined)?.teMods);   // ★R-C-F2:worker 域注册表空,主线程回填 TE 实例
           absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：须在 g.loadWorld(触发 enterGame 计费锚)之后,否则 quickLoad 无槽位会话的吸合基线被 start(0) 覆写
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
@@ -1155,6 +1168,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           __m('load.loadWorld.done');
+          restoreModTEs(world.store, (save as { teMods?: import('./save/serialize').ModTESaveEntry[] } | undefined)?.teMods);   // ★R-C-F2:同 loadFromKey(worker 域注册表空=主线程回填)
           absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：同 loadFromKey——计费锚(enterGame)之后吸合存档头基线
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           __m('load.player.done');

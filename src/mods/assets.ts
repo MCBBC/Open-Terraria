@@ -12,7 +12,7 @@ import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
 import { registerModWavData, modProjRegs } from './hooks';
 import { modBuffRegs, registerModBuffIcon } from './buffs';
-import { modAchIconJobs, registerModAchIcon } from './modAchievements';   // ★成就域
+import { modAchIconJobs, registerModAchIcon, purgeModAchIcons } from './modAchievements';   // ★成就域
 import { modItemGlowMaskId } from './drawspecs';   // ★刀2-C1:物品 glowmask 伪 id
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import { registerModPortraitUrl } from '../data/npcPortraits';
@@ -620,6 +620,14 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
       if (!bytes) { console.warn(`[mods] ${modId} buff 图标缺失: ${reg.texture}`); continue; }
       registerModBuffIcon(reg.modId, reg.key, bytes, (png) => URL.createObjectURL(new Blob([png], { type: 'image/png' })));
     }
+      // ★成就域:mod 成就图标 blob URL(内存回退支;R-A-F1 两支必成对第四发——
+      //  旧=SW 支单腿,dev/SW 未 claim 态图标全灭)
+      for (const job of modAchIconJobs()) {
+        if (job.modId !== modId) continue;
+        const bytes = packTexBytes(pack, job.texPath);
+        if (!bytes) { console.warn(`[mods] ${modId} 成就图标缺失: ${job.texPath}`); continue; }
+        registerModAchIcon(job.fullKey, URL.createObjectURL(new Blob([bytes.slice()], { type: 'image/png' })));
+      }
     void referenced;   // 预留:未引用贴图懒注入(P1)
   }
 }
@@ -633,6 +641,8 @@ export async function purgeModAssetsCache(modId: string): Promise<void> {
     for (const req of keys) {
       if (new URL(req.url).pathname.startsWith(`/sprites/mods/${modId}/`)) await cache.delete(req);
     }
+    // ★成就域:mod 图标 blob URL 清账(SW 缓存外的 blob 面)
+    purgeModAchIcons(modId);
   } catch { /* 清理失败不阻断卸载 */ }
 }
 

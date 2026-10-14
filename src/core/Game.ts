@@ -8291,7 +8291,8 @@ export class Game implements GameHooks {
     // 底部居中锚 screenHeight-40、300t 寿命——非 Steam 专属;UI 无 popup 钩子时回退 toast）
     // + 进世界基线
     this.achievements.onUnlock = (name) => {
-      const disp = Lang.text(`Achievements.${name}_Name`);
+      // ★成就域(2026-10-14):mod 成就字面回退(def.title 直挂;旧=裸 l10n 键)
+      const disp = this.achievements.defOf(name)?.title ?? Lang.text(`Achievements.${name}_Name`);
       if (this.cb.onAchievementPopup) this.cb.onAchievementPopup(name, disp);
       else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AchievementUnlocked', disp));
       // 解锁音（AchievementInitializer.cs:727-735 OnAchievementCompleted：
@@ -41900,7 +41901,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       r.timeUiHover = true;
       if (this.input.mouseDown && !this._infoAccClickLatch) {
         const row = r.infoAccs.state.rows[r.infoAccHover];
-        if (row) {
+        // ★InfoDisplay 域(2026-10-14):hideIndex=-1 哨兵行(mod 追加行=不可隐藏语义)
+        //  跳翻转——旧式裸写 p.hideInfo[-1]=负下标数组位=mod 行本会话永久隐藏
+        if (row && row.hideIndex >= 0) {
           p.hideInfo[row.hideIndex] = !p.hideInfo[row.hideIndex];
           this.sfx.play('menuTick', 1);
         }
