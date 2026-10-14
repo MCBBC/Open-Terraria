@@ -21,7 +21,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★刀4-A:弹命中 NPC 修正链
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll, statusPlayer } from './projTargets';
 // ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
 // ★BJ420 幽灵伤害头 ghostHurt 同单源 + 受理面快照（清偿刀 T 族规）
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt,
@@ -31,6 +31,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
+import { Lang } from '../i18n/Lang';   // ★BJ674 自伤死因弹型名（itemName 6155）
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { wetCollision } from './npcLiquid';
@@ -1336,6 +1337,10 @@ export class StormLightning extends Entity {
   /** localAI[0] 组值（Kill 帧 :71944-71952）：0=飞行期 / 1=未撞块 / 2=撞块 / 3=落点浸液。
    *  消费面 = StormLightningCollisionCheck(:16205) 爆域(1)/液体导通(3) 双门 */
   private boltLocalAI0 = 0;
+  /** ★BJ674 Kill 帧浸液落雷 + 1117 标记（:71960 `localAI[0]==3f && type==1117`）——
+   *  Damage() 后消费（selfHurtPlayers）。netPuppet 弹早退 doKill 不可达 = 原版
+   *  owner==Main.myPlayer 门同构（只在弹主本地自伤,远端弹由其 owner 端自结）。 */
+  private liquidSelfHurt = false;
   /** 全 bolt 列表（主雷+分支叉——StormLightningParticle.Draw foreach bolts 全画,
    *  叉强度 0.5×0.8^(depth−1);曾 generateMainBoltPath 传 null 列表=叉生成即丢弃） */
   private bolts: Bolt[] = [];
@@ -1590,8 +1595,12 @@ export class StormLightning extends Entity {
       if (tileHasLiquid(game, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
         this.boltLocalAI0 = 3;                                  // :71950-71952 浸液导通态
         this.spawnLiquidElectrification(game);                  // :14502-14520 电化粒子链
-        // :71956-71957 SelfHurtPlayers（1117 owner==本地 入水自伤）——本仓玩家弹不伤主
-        // 维持既有登记；导通对玩家的伤害面由下方 1091 EVP 命中口径覆盖
+        // ★BJ674：浸液落雷 1117 自伤（原版 :71960-71961 `if (localAI[0] == 3f &&
+        //   type == 1117 && owner == Main.myPlayer) SelfHurtPlayers();`）——旧登记债
+        //   「本仓玩家弹不伤主」清偿（用户实报「水里不会被电击到」根因）。执行位
+        //   在 Damage()（damageAlongBolt）之后 = 原版 :71959→:71961 序;1091 世界雷
+        //   的导通玩家伤由下方 EVP 命中口径覆盖（StatusPlayer 1091 无表项=零 buff）。
+        if (this.projId === 1117) this.liquidSelfHurt = true;
       }
     }
     // ---- 打屏/背景白闪（Spawn_StormLightning，ParticleOrchestrator.cs:1027-1053）：
@@ -1613,6 +1622,10 @@ export class StormLightning extends Entity {
     }
     // ---- MultiPointHitbox 16×16 沿 bolt 折线一次性结算（:71918-71919/:71957-71962）----
     this.damageAlongBolt(game, bolt);
+    // ---- ★BJ674 1117 浸液自伤（Kill :71960-71961 → SelfHurtPlayers :15104-15151）----
+    //   原版序：Damage() 先行（:71959），自伤后置（:71961）——本仓 damage 稳定
+    //   （×0.8 已在 Game 侧出生折算,:13581-13586），两序无值差,按原版序落位。
+    if (this.liquidSelfHurt) this.selfHurtPlayers(game);
     // ---- 1091 玩家侧结算（friendly+hostile+trap 三态弹）:Damage_EVP 全口径 —---
     //   命中面走 Colliding 的 aiStyle203 分流（bolt 折线 ±8 / 64×64 爆域 / 液体导通,
     //   与 NPC 同源——曾仅按 bolt 路径判=浸液连锁近旁玩家漏劈）;缩放序见
@@ -1741,6 +1754,41 @@ export class StormLightning extends Entity {
         return true;
       });
     }
+  }
+
+  /** ★BJ674 SelfHurtPlayers（Projectile.cs:15104-15151）——1117 浸液落雷自伤
+   *  （Kill :71960-71961 唯一调用面;AI_184 坏火把 :43579 / aiStyle16 炸弹族 :71790
+   *  非本型域）。逐门序：
+   *   · active/dead/immune（:15106-15107）→ 本仓 p.dead / p.iframes>0;
+   *   · ownerHitCheck&&!CanHitWithMeleeWeapon（:15108）——1117 SetDefaults
+   *     （:10429-10437）无 ownerHitCheck 位=恒过跳过;
+   *   · !Colliding(base.Hitbox, localPlayer.Hitbox)（:15109）——Colliding aiStyle203
+   *     分流（:15954-15965）→ StormLightningCollisionCheck（:16205-16243）＝
+   *     stormBoltCollides 全口径：localAI[0]==3 浸液导通（500px PlotLine 全液体链,
+   *     :16237-16242）∪ MultiPointHitbox bolt 折线 ±8（浸液态下玩家贴折线也中）;
+   *   · 伤值（:15110-15118）：FixedSelfDamageForPlayers[1117] 无条目
+   *     （ProjectileID.cs:193 表=墓石族 133-143 等）→ value=this.damage（出生已 ×0.8）;
+   *     num2=Main.DamageVar(value, −luck)（:15118,厄运→更重掷）;deadMansSweater&&trap
+   *     （:15123-15126）——1117 trap=false 恒跳;
+   *   · flag=!hostile && type!=949（:15124）=true（1117 friendly）→ 死因归 own 弹
+   *     + Hurt pvp 参=true → 本仓 damagePlayer pvp=true（爆炸自伤同款,Game.ts
+   *     SELF_HURT_NON_PVP_PROJS 表无 1117）;
+   *   · Hurt>0 && !dead → StatusPlayer（:15133-15134）→ 1117→buff 399 BlueLightning
+   *     60×Next(4,8)t（:12144-12146,SP_TABLE 表驱动）=「被电到」视觉/状态面。 */
+  private selfHurtPlayers(game: GameHooks): void {
+    const p = game.player as unknown as
+      { x: number; y: number; w: number; h: number; dead?: boolean; iframes?: number;
+        luck?: number; lastDamageCause?: unknown } | null | undefined;
+    if (!p || p.dead || (p.iframes ?? 0) > 0) return;            // :15106-15107 immune 门
+    if (!this.stormBoltCollides(game, p.x, p.y, p.w, p.h)) return; // :15109 Colliding 门
+    const rolled = Math.max(1, damageVarRoll(this.damage, -(p.luck ?? 0)));  // :15118
+    // 死因 ByProjectile(playerIndex=owner, whoAmI)（:15131）——弹型名 1117 本仓
+    // Lang.projectileName 无映射（id-maps 1456 源缺 LightningStrikeShot 键）,
+    // 取武器 6155 名（zh 文本与原版 ProjectileName.LightningStrikeShot 逐字同串）。
+    (p as { lastDamageCause?: unknown }).lastDamageCause =
+      { kind: 'projectile', name: Lang.itemName(6155) ?? '?' };
+    const dealt = game.damagePlayer(rolled, this.cx, this.cy, undefined, false, true);
+    if (dealt > 0 && !p.dead) statusPlayer(game, 1117, false);   // :15133-15134
   }
 
   /** Damage_EVP type==1091 终值序列（:14846-14949;1457 :14846-14949 同值序）：

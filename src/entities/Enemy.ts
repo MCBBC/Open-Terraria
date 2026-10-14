@@ -323,6 +323,11 @@ export function registerModWormChain(headId: number, segIds: number[]): void {
   if (segIds.length === 0) throw new Error(`[mod-worm] 空 segIds: head ${headId}`);
   MOD_WORM_CHAINS.set(headId, { count: segIds.length, segIds });
 }
+/** ★D11(2026-10-14):mod Boss/蠕虫链 teardown(热重载) */
+export function _resetModBossRegForTests(): void {
+  for (const id of [...VANILLA_BOSS_IDS]) if (id >= 800) VANILLA_BOSS_IDS.delete(id);
+  MOD_WORM_CHAINS.clear();
+}
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 

@@ -37,7 +37,7 @@ import {
   type InstancedLootEntry, type LiquidCell,
   readPingProbe, writePingProbeEcho,
   AnglerQuestSub, readAnglerQuestModule, writeAnglerQuestModule,
-  writeSeasonBitsModule,
+  writeSeasonBitsModule, readTEModule, writeTEModule, writeTEModuleBatched, type TENetEntry,
 } from './syncModules';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
@@ -226,6 +226,8 @@ export interface ClientNetHooks {
   onBestiaryEvent?: (events: BestiaryNetEvent[]) => void;
   /** module7 晶塔消息到达（Added/Removed→Game.pylons 维护；TeleportResult→传送/文案） */
   onPylonMessage?: (msg: PylonNetMsg) => void;
+  /** ★TE net sync(2026-10-14,module16):host TE 快照到达(client 桶重建) */
+  onTESnapshot?: (entries: TENetEntry[]) => void;
   /** module2 地图 ping 到达（他端标记；Game 入 Pings store→渲染层 15s 动画） */
   onMapPing?: (x: number, y: number) => void;
   /** module8 编排粒子到达（Game 侧按 type 派发本地视觉；未知型忽略） */
@@ -403,6 +405,8 @@ export class ClientNet {
   disconnect() {
     this.userClosed = true;
     this.active = false;
+    // ★TE net sync(2026-10-14):client 角色复位(回单机 tick/save 语义)
+    void import('../mods/tileEntities').then((m) => m.setModTENetClientRole(false));
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.ws?.close();
     this.ws = null;
@@ -687,6 +691,10 @@ export class ClientNet {
           // module4 图鉴（原版 NetBestiaryModule：三子型直写本地 tracker）
           const events = readBestiaryModule(r);
           if (events.length) this.hooks.onBestiaryEvent?.(events);
+        } else if (moduleId === NetModule.ModTE) {
+          // ★TE net sync(module16):host 权威快照→client 桶重建(0 条=清空[R-B-4])
+          const entries = readTEModule(r);
+          this.hooks.onTESnapshot?.(entries);
         } else if (moduleId === NetModule.TeleportPylon) {
           // module7 晶塔（原版 NetTeleportPylonModule：AddForClient/RemoveForClient/
           // HandleTeleportRequest——本仓 sub3 回执 = 传送批准/失败文案）
@@ -1048,6 +1056,14 @@ export class ClientNet {
   // ================= tile 上报（TileStore.netReporter → 队列 → 每 tick 冲洗） =================
 
   /** TileStore.netReporter 注入点；netSuppress 期间（应用远端操作）不收集 */
+  /** ★TE net sync(2026-10-14,module16):host 快照上行(server 镜像+全房广播)。
+   *  ★R-B-1:分批发送(writeTEModuleBatched——单帧 65535B 超限曾熔断 host)。
+   *  ★R-B-4:恒发(含 0 条快照——末 TE 摘除的清空语义;空帧 ~7B 每 2s 可忽略) */
+  sendTEModule(entries: import('./syncModules').TENetEntry[]): void {
+    if (!this.active) return;
+    for (const frame of writeTEModuleBatched(entries)) this.send(frame);
+  }
+
   reportTileOp(op: TileOp) {
     if (!this.active) return;
     if (this.tileQueue.length >= 256) {

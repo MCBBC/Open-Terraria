@@ -95,12 +95,18 @@ export function mountCountMax(): number { return _mountCountMax; }
 export function bumpMountCountMax(id: number): void {
   if (id >= _mountCountMax) _mountCountMax = id + 1;
 }
+/** ★D11(2026-10-14):mount countMax 顶重置(热重载 teardown;重装载时 bump 回来) */
+export function resetMountCountMax(): void { _mountCountMax = MOUNT_COUNT; }
 /** id → 内部名（MountID.cs const 表） */
 export const MOUNT_NAMES: Record<string, string> = mountJson.names;
 /** MountID.Sets 能力位（CreateBoolSet/CreateIntSet 展开） */
 export const MOUNT_SETS: Record<string, boolean[]> = mountJson.sets;
 /** 召唤物品 id → 坐骑 id（Item.cs SetDefaults `mountType = N` / DefaultToMinecart） */
 export const ITEM_TO_MOUNT: Record<string, number> = mountJson.itemMount;
+/** ★D11-M4(2026-10-14):mod 坐骑物品映射 teardown(热重载;键=vid 字串 ≥30000 段清) */
+export function _resetModItemToMountForTests(): void {
+  for (const k of Object.keys(ITEM_TO_MOUNT)) if (Number(k) >= 30000) delete ITEM_TO_MOUNT[k];
+}
 /** 坐骑 buff id → 坐骑 id（BuffID.Sets.MountType） */
 export const BUFF_TO_MOUNT: Record<string, number> = mountJson.buffMount;
 /** 主贴图可得性登记（terraria-assets 缺表的坐骑 → 色块近似渲染） */

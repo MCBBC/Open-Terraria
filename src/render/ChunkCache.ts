@@ -779,8 +779,22 @@ export class ChunkCache {
     while (this.chunks.size > ChunkCache.MAX_CHUNKS) {
       const oldest = this.chunks.keys().next().value as number | undefined;
       if (oldest === undefined) break;
+      // ★孤儿 cell 封堵（2026-10-14 用户 dist 二报 allocCell/mkPage 88/s=44 页对/s
+      //   页只增不减定谳,_chunk-cell-ledger-probe 实证）:markDirty 把 key 标
+      //   【undefined 值】但保留粘滞 cell（原位重烘语义）——此类 key 未重访即被
+      //   本淘汰支顶出时,旧代码 stickyCell.delete + releasePair(undefined)=no-op
+      //   → cell 不还池=孤儿（占用账面无主:实测纯传送流 3 分钟 orphan 160 cell
+      //   =10 满页浪费,页 13→23 补偿性增长;液流/草蔓/挖掘持续标脏邻域+走动顶出
+      //   =用户端持续泄漏形态）。修=pair 缺席时从 sticky 表（删除【前】）取还。
+      const oldCell = this.stickyCell.get(oldest);
       this.stickyCell.delete(oldest);
-      this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
+      const oldPair = this.chunks.get(oldest);
+      if (oldPair) {
+        this.releasePair(oldPair); // 淘汰画布同样释放,防 detached 积压
+      } else if (oldCell !== undefined && oldCell >= 0) {
+        this.cellFree.push(oldCell);
+        this.pageUsed[Math.floor(oldCell / ChunkCache.CELLS_PER_PAGE)]--;
+      }
       this.chunkSheets.delete(oldest);
       this.chunkConsumed.delete(oldest);
       this.workerAwaiting.delete(oldest);   // ★入场覆盖门:淘汰=出账（重访重建,防死 key 阻门）

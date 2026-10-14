@@ -2897,7 +2897,7 @@ export class Dart extends Entity {
         22 * this.scale, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy);
+        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)
     }
   }
 
@@ -2965,7 +2965,7 @@ export class Dart extends Entity {
       && projOverlap(this.x, this.y, this.w, this.h, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy);
+        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10
     }
   }
 

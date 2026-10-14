@@ -66,6 +66,31 @@ const CSS = `
 #sw-mods-panel .empty { color: #8a90b8; padding: 14px 0; text-align: center; }
 `;
 
+/** ★D11(2026-10-14):热重载尝试(菜单态=无 __swGame;游戏内=false 回退提示)。
+ *  成功=hint 更新「已生效」;失败/游戏内=false 由调用方回退 ReloadToApply 文案。 */
+async function tryHotReload(hintEl: HTMLElement): Promise<boolean> {
+  const w = window as unknown as { __swGame?: unknown };
+  if (w.__swGame) return false;   // 游戏内:teardown 会悬空活实体引用,回退提示
+  try {
+    const { hotReloadMods } = await import('./hotReload');
+    const atlas = (window as unknown as { __swAtlas?: unknown }).__swAtlas;
+    if (!atlas) return false;
+    const r = await hotReloadMods(atlas);
+    if (r.ok) {
+      hintEl.textContent = `${Lang.text('Mods.SandboxWorld.ModsPanel.HotReloaded')}${r.counts ? ` (${r.counts.items} items)` : ''}`;
+      return true;
+    }
+    // ★R-C-F4(2026-10-14):失败=阻断弹窗(旧=console.warn+小字提示,用户错过
+    //  → 缺 mod 进世界 → autosave 洗档不可逆)。确认后仍回退 reload 文案。
+    console.warn('[mods] 热重载失败:', r.errors.join('; '));
+    window.alert(`Mod 热重载失败:\n${r.errors.slice(0, 3).join('\n')}\n\n请刷新页面后再进入存档(避免 mod 内容丢失)。`);
+    return false;
+  } catch (err) {
+    console.warn('[mods] 热重载异常:', err);
+    return false;
+  }
+}
+
 export function openModsPanel(): void {
   if (panel?.isConnected) return;
   const store = new ModStore();
@@ -180,7 +205,9 @@ export function openModsPanel(): void {
       toggle.disabled = true;
       try {
         await store.setEnabled(row.id, (e.target as HTMLInputElement).checked);
-        hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
+        // ★D11(2026-10-14):热重载(菜单态免整页 reload;游戏内回退提示)
+        const reloaded = await tryHotReload(hintEl);
+        if (!reloaded) hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
       } finally {
         toggle.disabled = false;
       }
@@ -218,7 +245,9 @@ export function openModsPanel(): void {
           const { purgeModAssetsCache } = await import('./assets');
           await purgeModAssetsCache(row.id);
         } catch { /* 清理失败不阻断卸载 */ }
-        hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
+        // ★D11:热重载(菜单态;游戏内回退提示)
+        const reloaded = await tryHotReload(hintEl);
+        if (!reloaded) hintEl.textContent = text('Mods.SandboxWorld.ModsPanel.ReloadToApply');
       } finally {
         // refresh 重建列表会丢弃本行;失败兜底还原按钮态
         del.textContent = '✕';
@@ -250,7 +279,10 @@ export function openModsPanel(): void {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const pack = readModPack(bytes);
         await store.install(pack.manifest, bytes, pack.iconDataUrl);
+        // ★D11:热重载(菜单态)
+      if (!(await tryHotReload(hintEl))) {
         hintEl.textContent = `${text('Mods.SandboxWorld.ModsPanel.Installed')}: ${pack.manifest.name} v${pack.manifest.version} — ${text('Mods.SandboxWorld.ModsPanel.ReloadToApply')}`;
+      }
         void refresh();
       } catch (e) {
         errsEl.textContent = `${text('Mods.SandboxWorld.ModsPanel.InstallFail')}: ${(e as Error).message}`;

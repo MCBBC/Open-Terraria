@@ -43,6 +43,12 @@ export function registerModPortraitUrl(npcId: number, url: string): void {
   MOD_PORTRAIT_URL.set(npcId, url);
 }
 
+/** ★R-A-Low(2026-10-14):mod 头像 URL teardown(热重载;revoke 防 blob 泄漏) */
+export function _resetModPortraitsForTests(): void {
+  for (const url of MOD_PORTRAIT_URL.values()) { try { URL.revokeObjectURL(url); } catch { /* 已释放 */ } }
+  for (const k of [...MOD_PORTRAIT_URL.keys()]) if (k >= 800) MOD_PORTRAIT_URL.delete(k);   // mod npc id 段
+}
+
 /** 撤销登记（材质包禁用/重放时清派生头像,2026-10-12:包禁用后头像应回原版） */
 export function unregisterModPortraitUrl(npcId: number): void {
   MOD_PORTRAIT_URL.delete(npcId);

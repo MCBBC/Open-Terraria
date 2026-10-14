@@ -60,6 +60,11 @@ export function registerModResearch(vid: number, need: number): void {
   DATA.need[String(vid)] = need;
 }
 
+/** ★D11-M4(2026-10-14):mod 研究 teardown(热重载;vid≥30000 段清) */
+export function _resetModResearchForTests(): void {
+  for (const k of Object.keys(DATA.need)) if (Number(k) >= 30000) delete DATA.need[k];
+}
+
 export const RESEARCH_STORE_KEY = 'sbw.research.v1';
 
 /** 玩家档案键（原版 creativeTracker 随 .plr；本仓随角色槽位 id 分键） */

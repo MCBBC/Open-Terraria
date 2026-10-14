@@ -257,6 +257,11 @@ export function registerModCombat(vid: number, combat: ItemCombat): void {
   TABLE[String(vid)] = { ...combat };
 }
 
+/** ★D11-M4(2026-10-14):mod combat teardown(热重载)——vid≥30000 段清 */
+export function _resetModCombatForTests(): void {
+  for (const k of Object.keys(TABLE)) if (Number(k) >= 30000) delete TABLE[k];
+}
+
 /** 原版 item id → 战斗数据（无条目返回 null）。
  *  世界态变体叠层（Item.cs SetDefaults 各 Variant 分支的运行时等价物）：
  *  remix/getGood/mechdusa 秘密种子世界取变体参数，普通世界取常规值——

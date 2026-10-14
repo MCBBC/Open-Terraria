@@ -726,6 +726,11 @@ export function registerModNpcRules(npcId: number, rules: Array<Record<string, u
   for (const r of rules) l.push(r as Rule);
 }
 
+/** ★D11-M2(2026-10-14):mod 掉落规则 teardown(热重载;旧=push 累积 N 倍掉落) */
+export function _resetModNpcRulesForTests(): void {
+  for (const k of [...rulesByNpc.keys()]) if (k >= 800) rulesByNpc.delete(k);
+}
+
 // ============ 钱币管线（NPCLoot_DropMoney :80412 1:1） ============
 export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false,
   extraValue = 0): ResolvedDrop[] {

@@ -17,6 +17,9 @@ describe('键盘导航域:mod 面板焦点导航', () => {
   beforeEach(() => {
     vi.stubGlobal('window', {
       addEventListener: (t: string, fn: (e: never) => void) => { if (t === 'keydown') keyHandlers.push(fn as never); },
+      removeEventListener: (t: string, fn: unknown) => {
+        if (t === 'keydown') { const i = keyHandlers.indexOf(fn as never); if (i >= 0) keyHandlers.splice(i, 1); }
+      },
     });
     keyHandlers.length = 0;
     _resetModKbdNavForTests();
@@ -73,6 +76,26 @@ describe('键盘导航域:mod 面板焦点导航', () => {
     fire('ArrowUp');     // 回绕→B2
     fire('Enter');
     expect(clicks).toEqual(['b2', 'b1', 'b2']);
+  });
+
+  it('KB-3 removeElement:tag 簿移除/kbdNav 焦点摘/未知 tag false', () => {
+    modUiSetInGame(true);
+    const p = modUiPanel('m', 'rm', { x: 10, y: 10, width: 300, height: 220, fullscreen: true });
+    let clicked = 0;
+    p.addButton('A', { x: 10, y: 40, w: 60, onClick: () => clicked++ });
+    p.addButton('B', { x: 10, y: 80, w: 60, onClick: () => clicked++, tag: 'btnB' });
+    installModKbdNav();
+    // tag 簿移除
+    expect(p.removeElement('btnB')).toBe(true);
+    expect(p.removeElement('btnB')).toBe(false);   // 已删=false
+    expect(p.removeElement('ghost')).toBe(false);  // 未知 tag=false
+    // A 仍可激活;B 已摘(焦点序跳过)
+    fire('ArrowDown');
+    fire('Enter');
+    expect(clicked).toBe(1);   // 只 A 响应
+    fire('ArrowDown');         // 回绕仍 A(B 摘除后焦点集=1)
+    fire('Enter');
+    expect(clicked).toBe(2);
   });
 
   it('文本输入让位:activeElement=INPUT 时全放行(UITextBox 编辑不劫)', () => {

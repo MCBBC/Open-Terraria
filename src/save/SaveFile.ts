@@ -8,7 +8,7 @@ import { assembleSave, serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { getSaveModEntries, getEnabledModIds, getCurrentAlloc } from '../mods/bridge';
 import { serializeModTEs, restoreModTEs } from '../mods/tileEntities';   // ★TE 梯队
-import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
+import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY, WALL_DEFS } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
 import type { SavedItem as SavedItemT } from './serialize';
@@ -369,6 +369,10 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     const missing = data.mods.filter((m) => !enabledModIds.includes(m.id));
     if (missing.length > 0) {
       console.warn(`[mods] 存档依赖缺失 mod（内容将静默降级）: ${missing.map((m) => `${m.id}@${m.version}`).join(', ')}`);
+      // ★R-C-F5(2026-10-14):缺失面升格为可见提示(worker 域无 toast 面=存
+      //  warning 窗口;mainFlow 读档完成后消费弹 toast——旧=仅 console,用户
+      //  错过后进世界 autosave 洗档不可逆)
+      (globalThis as unknown as { __swMissingModsWarn?: Array<{ id: string; version: string }> }).__swMissingModsWarn = missing;
     }
   }
   // ★P5 id 平移完整解（2026-10-04）：存档头 itemIds/tileIds 分配映射 × 当前分配
@@ -694,7 +698,13 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       let vr = 0; s = 0;
       for (;;) { const b = u8[p++]; vr |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       const mv = migrate(vr);
-      const v = wallRemap ? wallRemap.get(mv) ?? mv : mv;
+      let v = wallRemap ? wallRemap.get(mv) ?? mv : mv;
+      // ★R-A-F1(2026-10-14):残值「再收割」告警——remap miss 且残值命中【当前
+      //  在册】mod 墙 id(=卸载 mod 残留与后位 mod 新墙 id 重合,渲染错墙+吃他 meta;
+      //  取舍=保残值换重启用恢复,此处 warn 留痕)
+      if (v >= 367 && wallRemap && !wallRemap.has(mv) && WALL_DEFS[v]) {
+        console.warn(`[mods] 墙 id 残值命中在册 mod 墙(${mv}→${v},卸载 mod 残留与现装 mod 重合——渲染/锤墙将按现装墙语义)`);
+      }
       const end = Math.min(i + run + 1, nAll);
       for (; i < end; i++) tyW[i] = v;
     }

@@ -267,4 +267,7 @@ export function _resetModLoaderForTests(): void {
   currentResult = null;
   loadedPacks.length = 0;
   lastPlan = null;
+  // ★R-A-Me3(2026-10-14):bridge currentAlloc 清(热重载失败后主线程读档回退
+  //  路径用旧映射=错;null=回 ??0 占位语义)
+  setCurrentAlloc(null);
 }

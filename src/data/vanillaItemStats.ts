@@ -119,6 +119,13 @@ export function registerModStats(vid: number, stat: VanillaItemStat, internalId:
   VID_BY_IID.set(internalId, vid);
 }
 
+/** ★D11-M4(2026-10-14):mod stats teardown(热重载;旧=停用 mod 残留=位移串味
+ *  [B 物品命中 A 甲防御])——vid≥30000 段+internalId 全表扫(VID≥30000 位) */
+export function _resetModStatsForTests(): void {
+  for (const k of Object.keys(STATS)) if (Number(k) >= 30000) delete STATS[k];
+  for (const [iid, vid] of VID_BY_IID) if (vid >= 30000) { STAT_BY_IID.delete(iid); VID_BY_IID.delete(iid); }
+}
+
 /** 盔甲部位槽序（0 头 / 1 身 / 2 腿；非盔甲 -1） */
 export function armorSlotIndexOfInternal(id: number): number {
   const s = STAT_BY_IID.get(id)?.s;

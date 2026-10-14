@@ -51,6 +51,9 @@ const registry = new Map<number, RegistryEntry>();
 const bound = new WeakMap<TileStore, BoundStore>();
 /** 现役世界(save/tick 快速解析;bind/unbind 沿维护) */
 let activeStore: TileStore | null = null;
+/** ★R-B-3(2026-10-14):早到快照缓冲——进房补发帧到达时 Game 尚未 start
+ *  (activeStore null),旧=丢弃;缓冲至 bind 沿应用(role 照置[权威语义先行]) */
+let pendingSnapshot: import('../net/syncModules').TENetEntry[] | null = null;
 /** 全键 → tileInternal(restore 反查用) */
 const byFullKey = new Map<string, number>();
 
@@ -75,9 +78,14 @@ export function bindModTileEntities(store: TileStore): void {
       const m = b.inst.get(tileInternal);
       const inst = m?.get(pk);
       if (inst) {
-        if (t !== tileInternal) {   // 破坏/替换 → onDestroy+摘
-          try { entry.spec.onDestroy?.({ x, y, key: entry.fullKey, state: inst.state }); }
-          catch (err) { console.warn('[mod-te] onDestroy', err); }
+        if (t !== tileInternal) {   // 破坏/替换 → 摘+onDestroy
+          // ★蓝队自检 B1(2026-10-14):client 角色跳 onDestroy(host 权威副作用——
+          //  远端 setTile(0) 经 msg17 落格触发本地 listener,mod 若在 onDestroy
+          //  掉物/播音=双端双份视觉幽灵;实例照摘[快照收敛])
+          if (netRole !== 'client') {
+            try { entry.spec.onDestroy?.({ x, y, key: entry.fullKey, state: inst.state }); }
+            catch (err) { console.warn('[mod-te] onDestroy', err); }
+          }
           m!.delete(pk);
         }
       } else if (t === tileInternal && store.frameX[i] === 0 && store.frameY[i] === 0) {
@@ -94,6 +102,12 @@ export function bindModTileEntities(store: TileStore): void {
   store.onTileChanged(listener);
   bound.set(store, b);
   activeStore = store;
+  // ★R-B-3:早到快照回放(进房补发在世界就绪后落地)
+  if (pendingSnapshot) {
+    const ps = pendingSnapshot;
+    pendingSnapshot = null;
+    if (netRole === 'client') applyModTESnapshot(ps);
+  }
   // ★R-B-TE-4(2026-10-14):bind 沿锚格扫描——mod gen pass 在【worker 域】写的
   //  TE tile 无运行期 setTile 事件、读档 restore 之外的第三建通道。全图一遍扫
   //  (4200×1200≈5M 读,世界装载重头戏内可忽略);registry 空不达此(上方早退)。
@@ -114,6 +128,7 @@ export function unbindModTileEntities(store: TileStore): void {
 /** 逐 tick(runModPostEntities 派发;registry 空直通)。 */
 export function tickModTileEntities(game: GameHooks): void {
   if (registry.size === 0) return;
+  if (netRole === 'client') return;   // ★TE net sync:client 不本地 tick(host 快照收敛)
   const store = (game.world?.store ?? activeStore) as TileStore | undefined | null;
   if (!store) return;
   const b = bound.get(store);
@@ -140,6 +155,7 @@ export function tickModTileEntities(game: GameHooks): void {
 /** 存档序列化(SaveFile/SaveClient meta 装配供数;与 mods 供数同族防漏喂)。 */
 export function serializeModTEs(store: TileStore | null | undefined): import('../save/serialize').ModTESaveEntry[] {
   if (registry.size === 0) return [];
+  if (netRole === 'client') return [];   // ★TE net sync:client 不落档(host 档权威)
   const b = bound.get(store ?? activeStore as TileStore);
   if (!b) return [];
   const out: import('../save/serialize').ModTESaveEntry[] = [];
@@ -218,10 +234,86 @@ export function getModTileEntityAt(tileInternal: number, x: number, y: number): 
     : null;
 }
 
+// ---- ★TE net sync(2026-10-14,module16):host 权威快照面 ----
+
+/** net 同步模式:undefined=单机/权威(host 照常 tick);'client'=本地实例仅渲染
+ *  消费面(update 不跑/save 不落/host 快照收敛) */
+let netRole: 'client' | undefined;
+
+/** 客户端模式设置(ClientNet 加入沿;断开=resetNetRole 回单机) */
+export function setModTENetClientRole(v: boolean): void { netRole = v ? 'client' : undefined; }
+
+/** ★R-C-F8(2026-10-14):键覆盖门——本端 registry 全部 TE 键 ⊆ 快照键(宿主集
+ *  ⊇ 本端集)才置 client 角色;宿主缺本端 TE mod=本端自有 TE 保本地权威(不被
+ *  全局门过度抑制)。空 registry=恒覆盖(纯消费端)。 */
+export function setModTENetRoleIfCovered(entries: ReadonlyArray<import('../net/syncModules').TENetEntry>): boolean {
+  if (registry.size === 0) { netRole = 'client'; return true; }
+  const snapKeys = new Set(entries.map((e) => e.k));
+  for (const entry of registry.values()) {
+    if (!snapKeys.has(entry.fullKey)) return false;   // 本端有宿主无=不对称
+  }
+  netRole = 'client';
+  return true;
+}
+
+/** host:快照产(serializeModTEs 的 net 形——state JSON 串;坏序列化实例跳过) */
+export function snapshotModTEsForNet(): import('../net/syncModules').TENetEntry[] {
+  const store = activeStore;
+  if (!store) return [];
+  const b = bound.get(store);
+  if (!b) return [];
+  const out: import('../net/syncModules').TENetEntry[] = [];
+  for (const [tileInternal, entry] of registry) {
+    const m = b.inst.get(tileInternal);
+    if (!m) continue;
+    for (const inst of m.values()) {
+      let j = '';
+      try { j = JSON.stringify(entry.spec.save ? entry.spec.save({ x: inst.x, y: inst.y, key: entry.fullKey, state: inst.state }) ?? {} : inst.state ?? {}); }
+      catch (err) {
+        // ★R-B-6(2026-10-14):坏序列化 warn(与存档面 __lost 对称;旧=静默剔出)
+        console.warn(`[mod-te] net 快照序列化失败,剔出: ${entry.fullKey}@${inst.x},${inst.y}`, err);
+        continue;
+      }
+      // ★R-B-1:单条超帧预算(stateJson>~60000)剔出+warn(分批编码层同判)
+      if (j.length > 60000) { console.warn(`[mod-te] stateJson 超帧预算,剔出: ${entry.fullKey}@${inst.x},${inst.y} (${j.length}B)`); continue; }
+      out.push({ k: entry.fullKey, x: inst.x, y: inst.y, j });
+    }
+  }
+  return out;
+}
+
+/** client:快照应用(重建本地实例桶;load 钩/直存回填同 restore 语义) */
+export function applyModTESnapshot(entries: ReadonlyArray<import('../net/syncModules').TENetEntry>): void {
+  if (registry.size === 0) return;
+  const store = activeStore;
+  if (!store) { pendingSnapshot = [...entries]; return; }   // ★R-B-3:早到缓冲
+  bindModTileEntities(store);
+  const b = bound.get(store);
+  if (!b) return;
+  // 全量重建:清既有桶(含 host 在场期残留)→ 逐条建
+  for (const m of b.inst.values()) m.clear();
+  for (const e of entries) {
+    const tileInternal = byFullKey.get(e.k);
+    if (tileInternal === undefined) continue;   // 缺 mod=静默降级
+    const entry = registry.get(tileInternal)!;
+    let m = b.inst.get(tileInternal);
+    if (!m) { m = new Map(); b.inst.set(tileInternal, m); }
+    let data: Record<string, unknown> = {};
+    try { data = e.j ? JSON.parse(e.j) as Record<string, unknown> : {}; } catch { /* 坏 JSON=空态 */ }
+    const state: Record<string, unknown> = {};
+    try { entry.spec.load?.({ x: e.x, y: e.y, key: entry.fullKey, state }, data); }
+    catch { /* 坏 mod 钩 */ }
+    if (!entry.spec.load) Object.assign(state, data);
+    m.set(`${e.x},${e.y}`, { x: e.x, y: e.y, state });
+  }
+}
+
 /** 测试清账 */
 export function _resetModTEsForTests(): void {
   registry.clear();
   byFullKey.clear();
   activeStore = null;
+  pendingSnapshot = null;
+  netRole = undefined;
   // bound=WeakMap 不可清;测试各自造新 store 即隔离
 }

@@ -143,6 +143,8 @@ export function modAchIconUrl(fullKey: string): string | null {
 
 /** 测试清账 */
 export function _resetModAchievementsForTests(): void {
+  // ★蓝队自检 B2(2026-10-14):blob URL 先 revoke 再清(热重载循环泄漏)
+  for (const url of iconUrls.values()) { try { URL.revokeObjectURL(url); } catch { /* 已释放 */ } }
   pending.length = 0;
   iconJobs.length = 0;
   specByKey.clear();

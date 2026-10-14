@@ -507,6 +507,12 @@ export const enum NetModule {
                   //   等价——ForToday 位是 Game 运行时位,msg7 通用 flags map 不承载）。
                   //   编解码与语义锚见 net/syncModules.ts module15 段;
                   //   旧双端 default 忽略未知 moduleId,增量通道不升 PROTO_VER
+  ModTE = 16, // ★TE net sync(2026-10-14,依 AnglerQuest=15 先例取 15+1):
+              //   host 权威 TE 快照通道——S→C 全量 {u16 n, n×[str k, i32 x, i32 y,
+              //   str stateJson]}(进房补发+周期重发[TE 实例数小,全量≈setTile 帧价];
+              //   客户端伪造上行整包忽略=Ambience 同语义)。客户端 applyModTESnapshot
+              //   重建本地实例桶(update 不跑、save 不落——host 档才是权威)。
+              //   编解码见 net/syncModules.ts module16 段;超限分批=writeTEModuleBatched
   Ambience = 100, // 天空氛围（原版 NetAmbienceModule——注册序 id=3 被 JoinLeave 占用，
                   //   依 CreativePowerPermissions=9 先例走仓库私有大号 id；语义 1:1）：
                   //   S→C {u8 playerSlot, i32 seed, u8 skyEntityType}——服务器 AmbienceServer

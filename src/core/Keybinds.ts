@@ -305,6 +305,11 @@ export function registerModKeybind(id: string, defaultKeys: readonly string[]): 
   MOD_KEYBINDS.set(id, defaultKeys);
 }
 
+/** ★R-A-Low(2026-10-14):mod 键位 teardown(热重载;'mod:' 前缀段清) */
+export function _resetModKeybindsForTests(): void {
+  for (const k of [...MOD_KEYBINDS.keys()]) if (k.startsWith('mod:')) MOD_KEYBINDS.delete(k);
+}
+
 export function bindsOfMod(id: string): readonly string[] {
   const custom = options.data.keybinds?.[id];
   if (Array.isArray(custom)) return custom;

@@ -972,6 +972,15 @@ const BUFF_TYPE_BY_VANILLA = new Map<number, BuffType>(
 export function registerBuffVanillaReverse(vanillaBuffId: number, type: number): void {
   BUFF_TYPE_BY_VANILLA.set(vanillaBuffId, type as BuffType);
 }
+
+/** ★R-A-Me3(2026-10-14):mod buff 反查 teardown(热重载;旧=停用 mod 带 buff
+ *  角色读档恢复幽灵 buff[行为钩已清、buff 栏显示残名]) */
+export function _resetModBuffReverseForTests(): void {
+  for (const [vanillaId, bt] of BUFF_TYPE_BY_VANILLA) {
+    if (vanillaId >= 9000) BUFF_TYPE_BY_VANILLA.delete(vanillaId);
+    void bt;
+  }
+}
 /** vanilla buff id → BuffType 反查（导出版）。消费方 = 按原版 buff id 表驱动的授予链：
  *  敌弹 StatusPlayer（projTargets.statusPlayer，data/vanilla-statusplayer.json 的 b 字段）。
  *  未实装 buff 返回 undefined，调用方静默跳过 */

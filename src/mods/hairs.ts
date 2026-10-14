@@ -62,3 +62,4 @@ export function _resetModHairsForTests(): void {
   hairFemaleById.clear();
   _hairCountMax = 228;
 }
+

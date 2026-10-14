@@ -273,12 +273,19 @@ const rng = new RNG(gs.seed as number);
 // ★segment 打点(分段掷数配平)
 {
   const segs: Array<[string, number]> = [];
+  const rawSegs: Array<[string, number]> = [];
   (globalThis as { __swAbyssSeg?: (n: number, name: string) => void }).__swAbyssSeg = (n, name) => {
     segs.push([name, n]);
+    rawSegs.push([name, (globalThis as { __rawN?: number }).__rawN ?? 0]);
   };
   (globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump = () => {
-    let prev = 0;
-    for (const [name, n] of segs) { console.log(`[seg] ${name}: +${n - prev} (累计 ${n})`); prev = n; }
+    let prev = 0, prevRaw = 0;
+    for (let k = 0; k < segs.length; k++) {
+      const [name, n] = segs[k];
+      const r = rawSegs[k]?.[1] ?? 0;
+      console.log(`[seg] ${name}: +${n - prev} (累计 ${n}) raw=+${r - prevRaw} (raw累计 ${r})${n - prev !== r - prevRaw ? '  ★幻差' + (n - prev - (r - prevRaw)) : ''}`);
+      prev = n; prevRaw = r;
+    }
   };
 }
 {
@@ -312,9 +319,13 @@ const FILL_DRAWS = 4880;   // 填充 dither 掷总数(位对拍 查+歧义)
 const fillDelta = Number(process.env.SW_ABYSS_FILLDELTA ?? 0);
 let injected = false;
 const rawNext = rng.next.bind(rng);
+// ★693 双计数器:__rawN=真流 next() 消耗(own-property 层);__drawN=proto 方法计数。
+//   两者差=幻计数(proto 层被多计的调用)——逐段对拍定位
+(globalThis as { __rawN?: number }).__rawN = 0;
 (rng as { next: () => number }).next = () => {
   if (!injected && drawCount >= FILL_DRAWS && fillDelta > 0) { for (let z = 0; z < fillDelta; z++) rawNext(); injected = true; }
   const v = rawNext(); drawCount++;
+  (globalThis as { __rawN?: number }).__rawN = ((globalThis as { __rawN?: number }).__rawN ?? 0) + 1;
   if (drawVals.length < 16384) drawVals.push(v);
   return v;
 };
@@ -327,6 +338,46 @@ console.log(`[replay] Decorations 掷数=${drawCount}`);
 writeFileSync('/tmp/vals-replay-chunks.txt', CHUNKS.map((h, k) => `${k}\t${(h >>> 0).toString(16)}`).join('\n'));
 writeFileSync('/tmp/vals-replay.txt', VALS_OUT.join('\n'));
 console.log(`[replay] chests=${gs.mods.chests.length}`);
+// ★693 化石区网格 dump(env SW_FOSSIL_GRID=1):我方终态 vs 真终态(x 4015..4045, y 885..905)
+if (process.env.SW_FOSSIL_GRID === '1') {
+  const CH: Record<string, string> = { voidstone: 'V', pyre_mantle: 'P', pyre_mantle_molten: 'Q', abyss_gravel: 'G', sulphurous_shale: 'S', scoria_ore: 'C', planty_mush: 'M', smooth_voidstone: 'W', abyss_fossil_tile: 'F', sulphurous_sandstone: 'n', hardened_sulphurous_sandstone: 'H', sulphurous_sand: 'd', sulphurous_sand_wall: 'w' };
+  const nmz = (t: number) => { if (t === 0) return '.'; const k = KEY_OF(t).replace('mod_calamity_', '').replace(/^v_/, ''); return CH[k] ?? (k[0] === 'v' ? 'v' : k[0] === 'm' ? 'm' : k[0] === 's' ? 's' : k[0] === 'h' ? 'h' : '?'); };
+  for (let y = 885; y <= 905; y++) {
+    let mine = '', real = '', preC = '';
+    for (let x = 4015; x <= 4045; x++) {
+      const i = y * w + x;
+      mine += nmz((store.flags[i] & 1) ? store.type[i] : 0);
+      real += nmz(CS_TO_OURS(post.type[i]));
+      preC += nmz(CS_TO_OURS(pre.type[i]));
+    }
+    const d = [...mine].map((ch, k) => ch === real[k] ? ' ' : 'X').join('');
+    console.log(`[fgrid] y${y} 前:${preC}`);
+    console.log(`[fgrid] y${y} 我:${mine} 真:${real} 差:${d}`);
+  }
+  // 逐差格三方归因
+  const cls = new Map<string, number>();
+  for (let y = 885; y <= 905; y++) for (let x = 4015; x <= 4045; x++) {
+    const i = y * w + x;
+    const p0 = nmz(CS_TO_OURS(pre.type[i])), mo = nmz((store.flags[i] & 1) ? store.type[i] : 0), re = nmz(CS_TO_OURS(post.type[i]));
+    if (mo !== re) cls.set(`(${x},${y}) 前${p0} 我${mo} 真${re}`, (cls.get(`(${x},${y}) 前${p0} 我${mo} 真${re}`) ?? 0) + 1);
+  }
+  // ★693 chasm 蛇形轨迹对拍:每 20 行带的 deactivate 格(我 vs 真)+蛇头首行
+  console.log('[snake] 每 20 行带雕格数(我/真)与带内我方雕格 x 范围:');
+  for (let y0 = 200; y0 <= 940; y0 += 20) {
+    let mo = 0, re = 0, moLo = 9999, moHi = -1, reLo = 9999, reHi = -1;
+    for (let y = y0; y < y0 + 20; y++) for (let x = 3950; x <= 4110; x++) {
+      const i = y * w + x;
+      const preHad = CS_TO_OURS(pre.type[i]) !== 0;
+      const moC = preHad && !(store.flags[i] & 1);
+      const reC = preHad && CS_TO_OURS(post.type[i]) === 0;
+      if (moC) { mo++; if (x < moLo) moLo = x; if (x > moHi) moHi = x; }
+      if (reC) { re++; if (x < reLo) reLo = x; if (x > reHi) reHi = x; }
+    }
+    if (mo || re) console.log(`  y${y0}-${y0+19}: 我=${mo}[${moLo},${moHi}] 真=${re}[${reLo},${reHi}]`);
+  }
+  console.log('[fcls] 差格归因:');
+  for (const [k, c] of cls) console.log(`  ${k} ×${c}`);
+}
 for (const c of gs.mods.chests as Array<{ x: number; y: number }>) {
   const cells: string[] = [];
   for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {

@@ -314,6 +314,10 @@ export class InfoAccsDOM {
           'color:#e8e4f0; text-shadow:' + TEXT_SHADOW + '; white-space:pre;' +
           `transform-origin:0 ${(layout.pitch / 2).toFixed(2)}px;` +
           'opacity:1; pointer-events:none;';
+        // ★I-F1(2026-10-14):mod 行(icon=-1 图标恒隐)文本 span 接管悬停面——
+        //  旧行标签 claim/高亮/吞点击对 mod 行全不可达(悬停域=图标 14×14 盒)
+        tx.addEventListener('mouseenter', () => { if (this._icEls[i]?.style.display === 'none') this._domHover = i; });
+        tx.addEventListener('mouseleave', () => { if (this._domHover === i) this._domHover = -1; });
         row.appendChild(tx);
         row.style.width = '266px';
         row.style.height = `${layout.pitch}px`;

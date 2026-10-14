@@ -50,6 +50,12 @@ export function registerModAchievementDefs(defs: AchDef[]): void {
 export function modAchDefOf(name: string): AchDef | undefined { return modAchDefs.find((d) => d.name === name); }
 /** mod 直接完成待办(mod 在无实例沿调用 completeAchievement 的暂存;ctor 消费) */
 const modPendingComplete = new Set<string>();
+/** ★D11(2026-10-14 红队候选实锤):modAchDefs 清面——热重载 teardown 缺此=
+ *  再装同 mod 时 registerModAchievementDefs 二次 push=defs 双份(UI 双行) */
+export function _resetModAchDefsForTests(): void {
+  modAchDefs.length = 0;
+  modPendingComplete.clear();
+}
 export function addPendingModCompletion(name: string): void { modPendingComplete.add(name); }
 export function clearPendingModCompletion(name: string): void { modPendingComplete.delete(name); }
 

@@ -19,6 +19,11 @@ let cachedDirty = true;
  *  探针(el.parent=null=已摘)自清。 */
 const focusRegistry = new Set<UIElement>();
 export function registerKbdFocusable(el: UIElement): void { focusRegistry.add(el); }
+/** ★KB-3:焦点集反注册(面板元素移除沿) */
+export function unregisterKbdFocusable(el: UIElement): void {
+  focusRegistry.delete(el);
+  if (el.kbdFocus) el.kbdFocus = false;
+}
 
 /** ★R-B-KB-2(2026-10-14):可达性=沿 parent 回溯到「无父根」且根∈current 直子。
  *  旧判据 el.parent!==null 对「面板隐藏」失效——rebuildHostTree 的
@@ -102,9 +107,12 @@ let blockingProbe: (() => boolean) | null = null;
 export function setKbdNavBlockingProbe(fn: () => boolean): void { blockingProbe = fn; }
 
 export function installModKbdNav(): void {
-  if (installed || typeof window === 'undefined') return;
-  installed = true;
+  if (typeof window === 'undefined') return;
+  // ★蓝队自检 B3(2026-10-14):removeEventListener 先行=幂等重装(热重载 teardown
+  //  reset installed=false 后再装,旧 listener 若不移除=onKey 双份=按键双步跳)
+  if (typeof window.removeEventListener === 'function') window.removeEventListener('keydown', onKey, true);
   window.addEventListener('keydown', onKey, true);
+  installed = true;
 }
 
 /** 树变沿失效(面板开合/show/hide/addElement 后调;焦点索引保留=列表重扫) */

@@ -217,6 +217,7 @@ import { flameParticles } from '../fx/FlameParticles';
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
 import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28576-28581）
 import { shimmerBlockFx } from '../fx/orchestraFx';   // ★SW-FX47：MakeFloorDust 微光块 659/667 编排粒子（Player.cs:24002）
+import { lightningSmallOrchestra } from '../fx/orchestraFx';   // ★BJ674 蓝/红雷 buff 编排粒子（PlayerDrawSet:1222-1239）
 import { playerAccessoryVidEquipped } from '../stats/builderAcc';   // ★SW-FX19:重力地球仪 1131 装备判定（gravControl2）
 import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
 import { heldItemCritBonus } from './proj1457';   // ★BJ-C2/F11 持械折入单源（proj1457 无反向 Player 依赖,无环）
@@ -4778,6 +4779,12 @@ export class Player extends Entity {
     // 感电移动惩罚开关先行写入（Player.cs:18900 controlLeft||controlRight）——inputX
     // 已由 Game.fixedUpdate 注入（Game.ts:2890 → :2931），此处读到的即本帧输入
     this.buffs.electrifiedMoving = this.inputX !== 0;
+    // ★BJ674 感电逐拍点光（Player.cs:10402-10405 buffType[144] 支——UpdateBuffs 循环
+    //   内 `electrified = true; Lighting.AddLight((int)Center.X/16,(int)Center.Y/16,
+    //   0.3f, 0.8f, 1.1f)`;本仓像素位近似（Forbidden 套同判例,Player.ts:4969））
+    if (this.buffs.has(BuffType.Electrified)) {
+      game.addLightAt?.(this.cx, this.cy, 0.3, 0.8, 1.1);
+    }
     // ---- The Constant 饥饿链上下文注入（Main.dontStarveWorld = seedFlags.theConstant；
     //      remix 组合（"don't dig up"+constant）拉长 332/333 至 28800t；死亡态不推进
     //      ——原版 UpdateDead 无 UpdateBuffs 链。表情 146/147/148 + Hungry 音经回调）----
@@ -5725,6 +5732,45 @@ export class Player extends Entity {
       }
     }
     if (this.buffs.has(BuffType.OnFire3) && Math.random() < 0.25) burnDustSpawn(6, 3, 0.5);   // :1084-1094
+    // ---- ★BJ674 感电/蓝红雷玩家视觉（PlayerDrawSet.cs:1214-1239——原版掷序
+    //      ichor(:1210)→electrified(:1214)→blueLightning(:1222)→redLightning(:1230)
+    //      →burned(:1239);onFire 族段在 ichor 前,本仓块按原版相对序插在
+    //      onFire3 之后、burned 之前。shadow==0 单 pass 恒真（BJ549 同判例）：
+    //   · electrified(144)（:1214-1219）：1/3 掷门 → 1 粒 dust 226：
+    //     盒 (Position−2,w+4,h+4)、α100、scale0.5 → 后置 vel×1.6 + vy−1 +
+    //     position=Lerp(position, Center, 0.5)（电花向玩家心收拢）;DustCache.Add
+    //     无层级语义不入仓（BJ549 同判例）。
+    //   · blueLightning(399)（:1222-1229）：1/10 掷门 → clientOnly 编排粒子
+    //     BlueLightningSmall（MovementVector=Circular(1,1)、Position=盒内随机点）
+    //     ——本仓 1:1 端口=lightningSmallOrchestra（orchestraFx,P57:3617-3672）。
+    //   · redLightning(400)（:1230-1239）：同构,UniqueInfoPiece=
+    //     GetLightningColor(1122).PackedValue=(255,60,60)→XNA ABGR 0xFF3C3CFF。----
+    if (this.buffs.has(BuffType.Electrified) && Math.floor(Math.random() * 3) === 0) {
+      // :1215-1218（NewDustDirect 后置链 1:1;返回 null=池满/屏外安全跳过）
+      const d = game.dust?.spawn(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+        226, 0, 0, 100, null, 0.5) as
+        { vx: number; vy: number; x: number; y: number } | null | undefined;
+      if (d) {
+        d.vx *= 1.6;                                    // :1216 velocity *= 1.6f
+        d.vy = d.vy * 1.6 - 1;                          // :1216-1217 velocity.Y--
+        // :1218 position = Lerp(position, player.Center, 0.5)
+        d.x = d.x + (this.cx - d.x) * 0.5;
+        d.y = d.y + (this.cy - d.y) * 0.5;
+      }
+    }
+    if (this.buffs.has(BuffType.BlueLightning) && Math.floor(Math.random() * 10) === 0) {
+      // :1223-1228 NextVector2Circular(1,1)=角均匀×线性半径（orchestraFx circ 同式）
+      const a6 = Math.random() * Math.PI * 2, r6 = Math.random();
+      lightningSmallOrchestra(game,
+        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+        Math.cos(a6) * r6, Math.sin(a6) * r6, 0);
+    }
+    if (this.buffs.has(BuffType.RedLightning) && Math.floor(Math.random() * 10) === 0) {
+      const a7 = Math.random() * Math.PI * 2, r7 = Math.random();
+      lightningSmallOrchestra(game,
+        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+        Math.cos(a7) * r7, Math.sin(a7) * r7, 0xff3c3cff >>> 0);   // GetLightningColor(1122)
+    }
     if (this.buffs.has(BuffType.Burning)) burnDustSpawn(6, 2, 0.75);                          // :1239-1250 无掷门
     if (this.buffs.has(BuffType.Frostburn) && Math.random() < 0.25) burnDustSpawn(135, 3, 0.5);      // :1253-1263
     if (this.buffs.has(BuffType.Frostburn2) && Math.random() < 0.25) burnDustSpawn(135, 3, 0.5);     // :1266-1276

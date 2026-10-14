@@ -16,6 +16,15 @@ describe('D6:func.buffType 双域解析', () => {
     expect(buffTypeByVanilla(bid)).toBe(bt);   // 伪 id 反查回原 BuffType=消费闭环
   });
 
+  // ★D17 族根治(2026-10-14):下划线 modId 剥键——旧 slice 对
+  //  'mod_lights_and_shadows_x' 剥成 'lights' 恒 miss;装载态经 mod id 表精确剥
+  it('下划线 modId 剥键:装载态经 mod id 表精确剥(空表回退旧式)', async () => {
+    const { modIdOfFullKey } = await import('../src/core/Game');
+    // 空表(未装载)=回退旧 slice(无下划线域同解)
+    expect(modIdOfFullKey('mod_calamity_x')).toBe('calamity');
+    expect(modIdOfFullKey('vi_23_gel')).toBe('');
+  });
+
   it('全键形态/未注册键=0(不炸使用链);数字域原样透传', () => {
     registerModBuff('t', 'b2', { name: 'x', texture: 'textures/b.png' });
     expect(itemBuffIdOf('mod_t_potion', 'mod_t_b2')).toBeGreaterThanOrEqual(9000);   // 全键亦可达

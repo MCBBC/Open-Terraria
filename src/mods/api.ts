@@ -41,6 +41,7 @@ import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerModMusic, registerModBossMusic, modMusicIdOfFull } from './music';   // ★BGM 面
 import { registerGenPass } from '../world/gen/WorldGen';
 import { registerModTileEntity, getModTileEntitiesOfTile } from './tileEntities';   // ★TE 梯队
+import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';   // ★magic-storage:stableId→内部 id 域映射
 import { collectModAchievement, completeModAchievement } from './modAchievements';   // ★成就域
 import { registerModInfoDisplay } from './infoDisplay';   // ★InfoDisplay 域
 import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
@@ -465,10 +466,17 @@ export function createModContext(
     },
     // ★四百八十三刀:mod tile 右键(tiles 域 id 解析→interactAt 尾臂派发)
     tileInteract(key, fn) {
-      registerModTileInteract(idOf('tiles', key), fn as Parameters<typeof registerModTileInteract>[1]);
+      // ★2026-10-14 域修正:interactAt 尾臂以 store.type(内部 id)派发——stableId 直喂=永不命中
+      const internal = TILE_INTERNAL_OF_STABLE[idOf('tiles', key)];
+      if (!internal) throw new Error(`[mod-api] mod ${modId} tileInteract 内部 id 缺失: ${key}`);
+      registerModTileInteract(internal, fn as Parameters<typeof registerModTileInteract>[1]);
     },
     itemIdOf(key) { return idOf('items', key); },
-    tileIdOf(key) { return idOf('tiles', key); },   // ★magic-storage:tile 键→内部 id
+    tileIdOf(key) {   // ★magic-storage:tile 键→【内部 id】(store.type/interact 派发域)
+      const internal = TILE_INTERNAL_OF_STABLE[idOf('tiles', key)];
+      if (!internal) throw new Error(`[mod-api] mod ${modId} tileIdOf 内部 id 缺失: ${key}`);
+      return internal;
+    },
     tileEntitiesOf(key) { return getModTileEntitiesOfTile(idOf('tiles', key)); },   // ★magic-storage:TE 枚举
     dodgeRoll(fn) {
       registerModDodgeRoll(modId, fn as Parameters<typeof registerModDodgeRoll>[1]);
@@ -590,7 +598,8 @@ export function createModContext(
     },
     // ★一百一十六刀:mod 箱解锁条件(tiles 域 id 解析)
     chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void {
-      registerModChestUnlock(idOf('tiles', key), fn);
+      // ★2026-10-14 域修正:消费面 Game.ts:31089 st.get(内部 id)——同 tileInteract 换域
+      registerModChestUnlock(TILE_INTERNAL_OF_STABLE[idOf('tiles', key)] ?? (() => { throw new Error(`[mod-api] mod ${modId} chestUnlock 内部 id 缺失: ${key}`); })(), fn);
     },
     // ★一百一十七刀:mod 群系蔓延(键→内部 id 解析;tileMap 键=vanilla sheet)
     biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void {
@@ -621,14 +630,23 @@ export function createModContext(
     },
     // ★TE 梯队:mod tile entity(tiles 域 id 解析→registry)
     tileEntity(tileKey, spec) {
-      registerModTileEntity(modId, idOf('tiles', tileKey), tileKey, spec as never);
+      // ★2026-10-14 域修正:idOf 返回 stableId,而 TE listener/interact 派发吃
+      //  【内部 id】(TILE_BY_KEY 域)——直喂 stableId=store.type 永不相等=TE 永不建
+      //  (深链审计链B定谳)。经 TILE_INTERNAL_OF_STABLE 换域。
+      const stable = idOf('tiles', tileKey);
+      const internal = TILE_INTERNAL_OF_STABLE[stable];
+      if (!internal) throw new Error(`[mod-api] mod ${modId} tileEntity 内部 id 缺失: ${tileKey}`);
+      registerModTileEntity(modId, internal, tileKey, spec as never);
     },
     biomeFlag(flag: string, spec: { tiles: string[]; threshold?: number; depth?: { min: number; max: number }; xDist?: number }): void {
       const tidF = (k: string) => {
         const full = k.startsWith('mod_') ? k : `mod_${modId}_${k}`;
         const v = alloc.tiles.get(full);
         if (v === undefined) throw new Error(`[mod-api] biomeFlag 引用未注册 tile: ${k}`);
-        return v;
+        // ★2026-10-14 域修正:counts 键=内部 id(SceneMetrics `counts.set(st.type[i])`)
+        const internal = TILE_INTERNAL_OF_STABLE[v];
+        if (!internal) throw new Error(`[mod-api] biomeFlag 内部 id 缺失: ${k}`);
+        return internal;
       };
       registerModBiomeFlag({
         flag,

@@ -62,6 +62,13 @@ export function registerModRecipes(list: VanillaRecipe[]): void {
     VANILLA_RECIPES.push(r);
   }
 }
+/** ★D11(2026-10-14):mod 配方 teardown(VANILLA_RECIPES 尾段 mod create 摘) */
+export function _resetModRecipesForTests(): void {
+  for (let i = VANILLA_RECIPES.length - 1; i >= 0; i--) {
+    const r = VANILLA_RECIPES[i] as { create: number };
+    if (r.create >= 30000) VANILLA_RECIPES.splice(i, 1);
+  }
+}
 
 /** 站点继承递归展开（Player.SetAdjTile :35192-35208）：tile 本身 + CountsAs 链全部置位 */
 // ================= decraft 索引表（Recipe.UpdateWhichItemsAreCrafted :15110-15127 1:1） =================
@@ -732,3 +739,12 @@ export const MATERIAL_VIDS = (() => {
 
 export type VanillaRecipeLike = VanillaRecipe;
 export { itemCombat };
+
+/** ★R-A-Low(2026-10-14):mod 配方旁表 teardown(groupItems 段/TILE_COUNTS_AS mod
+ *  段[键=mod tile internal≥20800]——重装载组 id 重分配,旧条目残留) */
+export function _resetModRecipeSideTablesForTests(): void {
+  for (const k of [...MOD_RECIPE_GROUP_ITEMS.keys()]) if (k >= 10000) MOD_RECIPE_GROUP_ITEMS.delete(k);
+  for (const k of Object.keys(TILE_COUNTS_AS)) {
+    if (Number(k) >= 20800) delete TILE_COUNTS_AS[Number(k)];
+  }
+}

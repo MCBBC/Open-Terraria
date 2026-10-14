@@ -6,7 +6,7 @@
 // 首刀只接「非矿车+无 ability」声明族(矿车/缩盒/ability 特效=L2 后置)。
 // tML 对应:ModMount 11 钩——本批声明面覆盖 MountData 数据面+SetMount/Dismount,
 // UpdateEffects/UpdateFrame/UseAbility=登记债。
-import { MOUNT_DATA, bumpMountCountMax } from '../entities/Mounts';
+import { MOUNT_DATA, bumpMountCountMax, resetMountCountMax } from '../entities/Mounts';
 import { MOD_MOUNT_STABLE_BASE, MOD_MOUNT_STABLE_MAX } from './types';
 
 export interface ModMountContent {
@@ -64,5 +64,13 @@ export function registerModMountData(id: number, data: import('../entities/Mount
 export function modMountDataOf(id: number): import('../entities/Mounts').MountData | null {
   if (id < MOD_MOUNT_STABLE_BASE) return null;
   return (MOUNT_DATA as Record<string, import('../entities/Mounts').MountData>)[String(id)] ?? null;
+}
+
+/** ★D11(2026-10-14):mod 坐骑 teardown(MOUNT_DATA 66+ 段清+countMax 顶重置) */
+export function _resetModMountsForTests(): void {
+  for (const k of Object.keys(MOUNT_DATA)) {
+    if (Number(k) >= MOD_MOUNT_STABLE_BASE) delete (MOUNT_DATA as Record<string, unknown>)[k];
+  }
+  resetMountCountMax();
 }
 

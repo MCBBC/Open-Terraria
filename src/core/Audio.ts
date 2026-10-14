@@ -305,6 +305,7 @@ export class AudioSystem {
     });
     src.start();
     this.pool.set(id, track);
+    this.startLoop();   // ★按需链重启:新轨 fade 0→1 在途（见 startLoop 注）
     this.emit('start', { id });   // 实起（解码完成后轨真正出声的时刻）
   }
 
@@ -326,23 +327,34 @@ export class AudioSystem {
       const t = this.pool.get(this.curMusic);
       if (t) { t.fade = 0; t.gain.gain.value = 0; }
     }
+    this.startLoop();   // ★按需链重启:moonNum 变化需重算静止轨 gain（见 startLoop 注）
   }
 
-  /** rAF 驱动淡化（原版按游戏帧 ±0.005，这里按 60fps 归一时间步进） */
+  /** rAF 驱动淡化（原版按游戏帧 ±0.005，这里按 60fps 归一时间步进）。
+   *  ★按需续帧（2026-10-14 rAF 普查刀,Trace-141441 顿挫案卫生刀）:fade 全静止
+   *  （pool 空/全在 target）即停链——静稳态不再每 vsync 空转第三条 rAF 链
+   *  （_raf-census 实证世界内三条常驻链:Game 主循环/VUI 自愈链/Audio 本链;
+   *  多链=每 vsync 多层回调入队=rAF 交付抖动放大器候选）。重启点=状态变化
+   *  （playMusic/track 起/切曲、setVolume、setMoonLordCountdown、toggleMute——
+   *  静止轨 gain 重算依赖这些点跑一轮）。10s 心跳随停链暂停:音频取证面
+   *  ended 事件挂 source 上不依赖 rAF（BJ74 蘑菇案判例链）,快照盲窗仅静稳态
+   *  ——登记口径。 */
   private startLoop() {
     if (this.rafId) return;
     const step = (ts: number) => {
       const dt = this.lastTs ? Math.min(100, ts - this.lastTs) : 16.7;
       this.lastTs = ts;
       const frames = dt / (1000 / 60);
-      this.tickFade(frames * 0.005);
+      const active = this.tickFade(frames * 0.005);
       this.snapshotTrace();   // ★BJ75 心跳接线：本体 10s 节流（见 trace 字段注）,RB18 定谳补缺
-      this.rafId = requestAnimationFrame(step);
+      this.rafId = active ? requestAnimationFrame(step) : 0;
     };
     this.rafId = requestAnimationFrame(step);
   }
 
   /** 步进淡化量 d（0.005/帧）：目标曲 fade+=d 至 1，其余 -=d 至 0 并停播。
+   *  返回值=fade 活动谓词（任意轨 fade≠target 在途）——startLoop 按需续帧
+   *  消费（静止即停链,见 startLoop 注）。
    *  R22 补齐两处原版细节（LegacyAudioSystem.cs:330-345 + Main.cs:11697-11705）：
    *  ① 非主曲只在主曲可闻(fade>0.25)时渐熄、curMusic=0 时立即归零硬停
    *     （旧实现恒 200 帧线性拖尾——切静音/音乐盒静音时多 3.3s 尾巴）；
@@ -351,12 +363,13 @@ export class AudioSystem {
   private tickFade(d: number) {
     if (this.muted) {
       this.tracePush({ e: 'tick-muted' });
-      for (const [id, t] of this.pool) {
+      for (const [, t] of this.pool) {
         if (t.fade > 0) { t.fade = 0; t.gain.gain.value = 0; }
       }
-      return;
+      return false;
     }
     const mainFade = this.curMusic > 0 ? this.pool.get(this.curMusic)?.fade ?? 0 : 0;
+    let active = false;
     for (const [id, t] of this.pool) {
       const target = id === this.curMusic ? 1 : 0;
       if (t.fade < target) {
@@ -377,15 +390,20 @@ export class AudioSystem {
           continue;
         }
       }
+      // ★活动谓词:fade 在途（≠target）。注意「主曲可闻才渐熄」的挂起态（fade>target
+      //  但 mainFade 不足=暂不动）仍算在途——主曲淡入到位后自会开始渐熄。
+      if (t.fade !== target) active = true;
       let v = Math.min(1, t.fade) * this.volume * this.moonNum;
       if (id >= 62 && id <= 88) v *= 0.9;   // TOW 族曲目音量修正(Main.cs:11701-11702)
       else if (id === 52) v *= 1.15;        // Storm ×1.15(:11703-11705)
       t.gain.gain.value = Math.min(1, v);
     }
+    return active;
   }
 
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(1, v));
+    this.startLoop();   // ★按需链重启:静止轨 gain 重算需跑一轮（见 startLoop 注）
   }
 
   /** 切换目标曲目（≈原版 curMusic 赋值；实际音量由淡化循环渐变） */
@@ -396,6 +414,7 @@ export class AudioSystem {
     this.curMusic = id;
     this.emit('sel', { id, ...(prev ? { p: prev } : {}) });   // 选曲意图（id=0 即静音选择）
     this.tracePush({ e: 'sel', id, prev });
+    this.startLoop();   // ★按需链重启（id=0 渐熄也要跑;见 startLoop 注）
     if (id === 0) return;
     const ac = this.audio();
     if (!ac) return;
@@ -431,6 +450,7 @@ export class AudioSystem {
     this.muted = !this.muted;
     if (this.muted) this.stop();
     this.emit('mute', { on: this.muted ? 1 : 0 });
+    this.startLoop();   // ★按需链重启:静音清零/解除重算（见 startLoop 注）
     return this.muted;
   }
 }

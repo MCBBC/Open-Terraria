@@ -38,6 +38,10 @@ import { MOD_SPAWN_RULES } from '../world/spawn/VanillaSpawner';
 import { registerModBiomeFlag } from '../world/SceneMetrics';
 
 const PENDING_BIOME_FLAGS: Array<{ flag: string; tileId: number }> = [];
+/** ★D11-M2(2026-10-14):pending 群系旗 teardown(热重载;旧=漂移 internal 复活) */
+export function _resetPendingBiomeFlagsForTests(): void {
+  PENDING_BIOME_FLAGS.length = 0;
+}
 
 /** 装载完成后由 loader 调:注册 mod 群系旗(SceneMetrics 通用面;threshold 40) */
 export function bindModBiomeFlags(): void {

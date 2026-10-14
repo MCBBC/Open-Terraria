@@ -758,3 +758,69 @@ export function writeSeasonBitsModule(bits: number): Uint8Array {
   w.u8(bits & 0xff);
   return w.finish();
 }
+
+// ================= module16 mod TE 快照（★TE net sync,2026-10-14) =================
+//
+// host 权威模型:房主/SimHost 是唯一 TE 实例权威(放置/破坏/tick 全在 host 跑),
+// 周期(2s)全量快照下发 + 进房补发;客户端重建本地实例桶(仅 update 消费面——
+// 本地 tick 不跑[host 快照收敛]、save 不落[host 档权威])。快照=全量(TE 实例
+// 数=mod 存储机器量级 ≪ 百;全量免 diff 协议且天然收敛)。
+// 客户端上行:无(放置/破坏经 TileBatch msg17 天然同步=TE 客户端自愈建/摘与 host
+// 收敛;伪造上行=Ambience 同语义整包忽略)。
+
+export interface TENetEntry { k: string; x: number; y: number; j: string }
+
+export function writeTEModule(entries: TENetEntry[]): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.ModTE);
+  w.u16(entries.length);
+  for (const e of entries) {
+    w.str(e.k);
+    w.i32(e.x);
+    w.i32(e.y);
+    w.str(e.j);
+  }
+  return w.finish();
+}
+
+/** ★R-B-1(2026-10-14):分批编码——单帧 65535B 上限(NetWriter.finish 守卫)对
+ *  大 state 存储网络(满单元 ~1.5KB×45+ 即超限)会 throw 并冒泡熔断 host 主循环。
+ *  字节预算 60000 分批(bestiary 2000/批先例;空表也产一帧=0 条快照可达
+ *  [R-B-4:末 TE 摘除的清空语义])。 */
+export function writeTEModuleBatched(entries: TENetEntry[]): Uint8Array[] {
+  const BUDGET = 60000;
+  const frames: Uint8Array[] = [];
+  let cur: TENetEntry[] = [];
+  let curBytes = 6;   // 头 [u16 len][u8 id][u16 moduleId][u16 count]
+  const flush = (): void => {
+    frames.push(writeTEModule(cur));
+    cur = [];
+    curBytes = 6;
+  };
+  for (const e of entries) {
+    // str=u16 长度前缀+字节;i32×2=8;条目估算=2+k.len+8+2+j.len
+    const est = 12 + e.k.length + e.j.length;
+    if (curBytes + est > BUDGET && cur.length > 0) flush();
+    // 单条本身超预算(超大 state):硬跳过(warn 由调用侧产——编码层无 console 面
+    // 的约束在,丢条目与坏序列化同语义[快照收敛面剔出])
+    if (est > BUDGET) continue;
+    cur.push(e);
+    curBytes += est;
+  }
+  flush();
+  return frames;
+}
+
+export function readTEModule(r: NetReader): TENetEntry[] {
+  const n = r.u16();
+  const out: TENetEntry[] = [];
+  for (let i = 0; i < n; i++) {
+    const k = r.str();
+    const x = r.i32();
+    const y = r.i32();
+    const j = r.str();
+    if (!k) continue;   // 键空=坏条目跳(i32 定长域恒有限;★R-B-6 死码清)
+    out.push({ k, x, y, j });
+  }
+  return out;
+}

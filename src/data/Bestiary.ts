@@ -215,6 +215,11 @@ export function bestiaryEntries(): BestiaryEntryDef[] {
   return out;
 }
 
+/** ★D11(2026-10-14):条目缓存失效(mod 域 teardown 后 VANILLA_NPCS 800+ 变更须重建) */
+export function _resetBestiaryEntryCacheForTests(): void {
+  entryCache = null;
+}
+
 function isQuick(id: number): boolean {
   return isBossForBestiary(id) || QUICK_UNLOCK_IDS.has(id);
 }

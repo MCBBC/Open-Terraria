@@ -543,7 +543,13 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         }
       }
     }
-    wall[i] = wld.tiles.wall[i]; // 直拷原版墙 id
+    // ★R-A-F4(2026-10-14):tML era mod 墙域(367+)钳零——.wld 内 mod 墙 id
+
+    //  是【对方 load order】的槽位号,与本会话分配无对应=不可映射;透传
+
+    //  会别名成本会话 mod 墙(SW↔SW 回环走自有 json 档)
+
+    wall[i] = wld.tiles.wall[i] >= 367 ? 0 : wld.tiles.wall[i];; // 直拷原版墙 id
     const lq = wld.tiles.liquid[i];
     if (lq > 0) liquidArr[i] = lq;
     // 液体类型：parser 已按内部编码输出（1水 2岩浆 3蜂蜜），直拷

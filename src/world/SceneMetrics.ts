@@ -124,6 +124,10 @@ const MOD_BIOME_FLAGS: ModBiomeFlag[] = [];
 export function registerModBiomeFlag(f: ModBiomeFlag): void {
   MOD_BIOME_FLAGS.push(f);
 }
+/** ★D11(2026-10-14):mod 群系旗 teardown(热重载) */
+export function _resetModBiomeFlagsForTests(): void {
+  MOD_BIOME_FLAGS.length = 0;
+}
 
 export interface SceneFlags {
   tileX: number; tileY: number;

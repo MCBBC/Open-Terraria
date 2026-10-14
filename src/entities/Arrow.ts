@@ -1569,6 +1569,55 @@ const GEM_BOLT_LIGHT: Readonly<Record<number, [number, number, number]>> = {
   1120: [1, 1, 1],
 };
 
+/** 宝石法珠弹 GemStaffShotDrawer 三色表（Main.cs:28623-28663——121/124/597/125/126
+ *  用 Violet/Purple、LimeGreen/Green、OrangeRed/DarkOrange、Red/Red、Silver/Silver
+ *  默认对;123 蓝晶专属色且三色 A/=2;1120 琥珀弹 Orange 双色;数组序=[c1,c2,c3]
+ *  =[trailColor1, trailColor2, trailColor3]）。★BJ675（2026-10-14 用户实报「紫晶法杖
+ *  弹幕效果不对」定谳）：旧表 121 c1=(0.58,0,0.83) 系误写——XNA Color.Violet=
+ *  (238,130,238)，紫晶弹主色被压成深紫红观感;且旧实现三色消费序/包络反（见
+ *  gemTrailPts 注）。 */
+export const GEM_TRAIL_COLORS: Readonly<Record<number, readonly (readonly number[])[]>> = {
+  121: [[238 / 255, 130 / 255, 238 / 255], [128 / 255, 0, 128 / 255], [1, 1, 1]],  // Violet/Purple/White
+  122: [[1, 165 / 255, 0], [1, 165 / 255, 0], [1, 1, 1]],                          // Orange/Orange/White
+  1120: [[1, 165 / 255, 0], [1, 165 / 255, 0], [1, 1, 1]],                         // 同 122（Main.cs:28632-28636）
+  123: [[60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1]], // 蓝晶三色同源（A 减半在 gemTrailPts 内乘）
+  124: [[50 / 255, 205 / 255, 50 / 255], [0, 128 / 255, 0], [1, 1, 1]],            // LimeGreen/Green/White
+  597: [[1, 69 / 255, 0], [1, 140 / 255, 0], [1, 1, 1]],                           // OrangeRed/DarkOrange/White
+  125: [[1, 0, 0], [1, 0, 0], [1, 1, 1]],                                          // Red/Red/White
+  126: [[192 / 255, 192 / 255, 192 / 255], [192 / 255, 192 / 255, 192 / 255], [1, 1, 1]], // Silver/Silver/White
+};
+
+/** 宝石法珠弹拖尾顶点色/带宽 1:1（★BJ675）：GemStaffShotDrawer.cs:16-39 ——
+ *  StripColors(progress)：value=Lerp(c1,c2,p) → Lerp(c3,value,GetLerpValue(-0.2,0.5,p))
+ *  后整体 ×(1−GetLerpValue(0,0.98,p))（XNA Color*float 四通道全乘→rgb 同乘淡出）;
+ *  StripWidth 恒 16。progress=0=oldPos[0]=弹头（TrailingMode 2 每压栈 1 位）,1=尾。
+ *  旧实现的观感病根（本仓 2026-08 批近似）:①色序 Lerp(c2,c0)反（尾=亮紫 Violet,
+ *  原版尾=深紫 Purple）②a=min(1,v*1.7) 包络反（弹头透明、尾端恒亮不熄;原版头
+ *  满亮白心、尾线性熄灭）③hw 9 vs 原版 16。123 蓝晶 Main.cs:28637-28645 三色
+ *  A/=2 → 顶点 alpha 整体 ×0.5。 */
+export function gemTrailPts(raw: number[], projId: number): TrailPt[] {
+  const cols = GEM_TRAIL_COLORS[projId] ?? GEM_TRAIL_COLORS[121];
+  const [c1, c2, c3] = cols;
+  const n2 = raw.length / 2;
+  const out: TrailPt[] = [];
+  const aMul = projId === 123 ? 127 / 255 : 1;   // Main.cs:28641-28643 三色 A/=2（byte 截断 255/2=127）
+  for (let i = 0; i < n2; i++) {
+    const v = n2 > 1 ? i / (n2 - 1) : 1;               // 0=头(新) 1=尾(旧)
+    const val = [c1[0] + (c2[0] - c1[0]) * v, c1[1] + (c2[1] - c1[1]) * v, c1[2] + (c2[2] - c1[2]) * v];
+    const gate = Math.max(0, Math.min(1, (v + 0.2) / 0.7));   // GetLerpValue(-0.2, 0.5, v)
+    const fade = 1 - Math.max(0, Math.min(1, v / 0.98));      // 1-GetLerpValue(0, 0.98, v)
+    out.push({
+      x: raw[i * 2], y: raw[i * 2 + 1],
+      hw: 16,                                          // StripWidth(GemStaffShotDrawer.cs:36-39)
+      r: (c3[0] + (val[0] - c3[0]) * gate) * fade,
+      g: (c3[1] + (val[1] - c3[1]) * gate) * fade,
+      b: (c3[2] + (val[2] - c3[2]) * gate) * fade,
+      a: fade * aMul,
+    });
+  }
+  return out;
+}
+
 /** 子弹消亡火花音族（★R29：Projectile.Kill :77624-77625 列表直抄——Collision.HitTiles
  *  +SoundID.Item10；1458 列表含 389。消费面：Arrow 实心块路径 HitTiles 近似尘 +
  *  Game.onProjectileDeath Item_10 音）。放 Arrow.ts 供两侧共用（Game 反向 import） */
@@ -3834,16 +3883,6 @@ export class Arrow extends Entity {
       const nowS = performance.now() / 1000;
       const lerpC = (a: number[], b: number[], t: number): number[] =>
         [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-      const GEM_TRAIL_COLORS: Record<number, number[][]> = {
-        121: [[0.58, 0, 0.83], [0.5, 0, 0.5], [1, 1, 1]],          // 紫晶 Violet/Purple/White
-        122: [[1, 0.65, 0], [1, 0.65, 0], [1, 1, 1]],              // 黄晶 Orange
-        1120: [[1, 0.65, 0], [1, 0.65, 0], [1, 1, 1]],
-        123: [[60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1]], // 蓝晶
-        124: [[0.2, 0.8, 0.2], [0, 0.5, 0], [1, 1, 1]],            // 翡翠 LimeGreen/Green
-        597: [[1, 0.27, 0], [1, 0.55, 0], [1, 1, 1]],              // 琥珀 OrangeRed/DarkOrange
-        125: [[1, 0, 0], [1, 0, 0], [1, 1, 1]],                    // 红晶 Red
-        126: [[0.75, 0.75, 0.75], [0.75, 0.75, 0.75], [1, 1, 1]],  // 钻石 Silver
-      };
       const buildPts = (raw: number[], hw: number, colFn: (pv: number) => number[]): TrailPt[] => {
         const n2 = raw.length / 2;
         const out: TrailPt[] = [];
@@ -3857,14 +3896,15 @@ export class Arrow extends Entity {
         return out;
       };
       if ((isGemBolt(this.projId) || this.projId === 1120) && this.gemTrail.length >= 4) {
-        const cols = GEM_TRAIL_COLORS[this.projId] ?? GEM_TRAIL_COLORS[121];
         const intensity = this.projId === 123 ? 3 : 2;
+        // ★BJ675（2026-10-14）：顶点色/带宽改走 gemTrailPts（GemStaffShotDrawer
+        //  .StripColors/StripWidth 1:1）——旧 buildPts 近似色序/包络双反+hw9 偏窄,
+        //  紫晶弹观感=「短暗尾」,原版=「长白紫光带」。
         // ★2026-09-03 黑椭圆止血：拖尾入全亮队列（flushTrailShade 合成后直绘主画布
         //  'lighter'）;mock 无队列方法回退直绘（探针/测试链保持）
         const spec = {
           set: 'RainbowRod' as const,
-          pts: buildPts(this.gemTrail, 9, (v) => v < 0.45 ? lerpC(cols[2], cols[1], v / 0.45)
-            : lerpC(cols[1], cols[0], (v - 0.45) / 0.55)),
+          pts: gemTrailPts(this.gemTrail, this.projId),
           // ★红队 F3（2026-09-03）：SM2 face 的 uOpacity=独立乘子（instr#16 mul c0），
           //  原版值 = GemStaffShotDrawer.cs:23 UseOpacity(intensity)——旧 ×0.5 是给
           //  废弃近似公式的亮度校准，字节码面下恒 2× 偏暗
@@ -5623,9 +5663,12 @@ export class Arrow extends Entity {
     // oldPos[0]=本 tick 出生位）——Colliding :15452-15466 FastThenSlow 拖尾扫掠消费
     //（蓝队 R2-02：本仓 Arrow 原无位置历史，补 5 帧环形缓冲）★1120 同 aiStyle29
     // 也吃 GemStaffShotDrawer 拖尾（Main.cs:28623 分发表含 1120）→ 记录条件扩同集
+    // ★BJ675：容量对齐 TrailCacheLength（ProjectileID.cs:387——宝石七弹=30 点、
+    //  1120 琥珀弹=20 点）。旧 12=6 点把 180px 光带截成 ~30px「短暗尾」。
     if (this.gem || isGemBolt(this.projId) || this.projId === 1120) {
       this.gemTrail.unshift(this.x, this.y);
-      if (this.gemTrail.length > 12) this.gemTrail.length = 12;
+      const cap = this.projId === 1120 ? 40 : 60;      // ×2=点数（x,y 交错存储）
+      if (this.gemTrail.length > cap) this.gemTrail.length = cap;
     }
     // ★shader 审计战役：34 火鞭/16 魔导弹/106 光棱剑拖尾记录（原版 Main.cs:28616-28622
     //   /28664-28666 FlameLashDrawer/MagicMissileDrawer/LightDiscDrawer 的 oldPos 环）

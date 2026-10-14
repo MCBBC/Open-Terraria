@@ -197,9 +197,11 @@ export declare interface ModContext {
       readonly key: string;
       readonly visible: boolean;
       addText(text: string, o: { x: number; y: number; scale?: number; large?: boolean }): void;
-      addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void }): void;
+      addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void; tag?: string }): void;
       /** ★第五批:物品槽(mod 自管库存;atlasIconForKey 物品图标) */
-      addSlot(o: { x: number; y: number; getItem(): { key: string; stack: number } | null; onLeftClick?: () => void; onRightClick?: () => void }): void;
+      addSlot(o: { x: number; y: number; getItem(): { key: string; stack: number } | null; onLeftClick?: () => void; onRightClick?: () => void; tag?: string }): void;
+      /** ★KB-3(2026-10-14):按钮/槽移除(tag=添加时声明;断链+焦点摘;未知 tag=false) */
+      removeElement(tag: string): boolean;
       /** ★D15:mod 贴图(tex=pack 相对路径,须落 textures/ui/*.png 约定目录;
        *  scale=整图缩放,或 w+h=盒适配) */
       addImage(o: { x: number; y: number; tex: string; scale?: number; w?: number; h?: number }): void;
@@ -251,6 +253,10 @@ export declare interface ModContext {
   tileInteract(key: string, fn: (tx: number, ty: number, game: unknown) => boolean): void;
   /** ★四百八十三:mod 物品键→vid(fail-fast;运行时闭包解析用) */
   itemIdOf(key: string): number;
+  /** ★magic-storage:mod tile 键→internal id(fail-fast) */
+  tileIdOf(key: string): number;
+  /** ★magic-storage:本 mod TE 实例枚举(锚格坐标+活 state 引用) */
+  tileEntitiesOf(key: string): Array<{ x: number; y: number; key: string; state: Record<string, unknown> }>;
   /** ★四百八十八:承伤面 thorns 钩(玩家接触受击;反伤自调 e.hurt/spawnProj) */
   playerThorns(fn: (ctx: Record<string, unknown>) => void): void;
   /** ★五百四十八:治疗物使用钩(healLife 消费后派发) */

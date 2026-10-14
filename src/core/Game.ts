@@ -170,7 +170,7 @@ import { modRarityColorOf } from '../mods/rarity';   // ★刀3-1:mod 稀有度�
 import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod 宠物反查
 import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(拆墙门消费)
 import { modUiBlockingPointer, modUiSetInGame } from '../mods/ui';   // ★刀1:mod UI 宿主(输入让位/在役旗)
-import { bindModTileEntities, unbindModTileEntities } from '../mods/tileEntities';   // ★TE 梯队
+import { bindModTileEntities, unbindModTileEntities, setModTENetClientRole, setModTENetRoleIfCovered, applyModTESnapshot, snapshotModTEsForNet } from '../mods/tileEntities';   // ★TE 梯队+net sync
 import { resolveModInfoLines } from '../mods/infoDisplay';   // ★InfoDisplay 域
 import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE } from '../mods/types';   // ★红队 R1-F7:MOD_NPC_ID_BASE 死 import 清理(域门已撤)
@@ -210,6 +210,23 @@ const BUFF_BY_VANILLA = (v: number): BuffType | undefined => buffTypeByVanilla(v
  *  与 entry sw.buff 两相均可——消费期全部注册在场;注册期解析不可行=applyRegistrationPlan
  *  先于 entry 相位）。键→BuffType→伪 vanilla id（进 BUFF_BY_VANILLA 既有通道）。
  *  无效/未注册=0（=无 buff 语义,门处屏蔽;不炸使用链——治疗面照走） */
+/** ★D17 族根治(2026-10-14):mod 全键 → modId 精确剥——旧 slice(4, indexOf('_'))
+ *  对含下划线 modId('lights_and_shadows')断裂为 'lights'=键解析恒 miss。
+ *  经已装载 mod id 表最长前缀匹配(modId 命名空间互不为前缀子串时唯一;
+ *  同前缀冲突时最长者胜=更具体 mod)。7 站统一收敛本源。 */
+export function modIdOfFullKey(fullKey: string): string {
+  if (!fullKey.startsWith('mod_')) return '';
+  let best = '';
+  const r = getModLoadResult();
+  for (const { manifest } of r?.loaded ?? []) {
+    if (manifest.id.length > best.length && fullKey.startsWith(`mod_${manifest.id}_`)) best = manifest.id;
+  }
+  if (best) return best;
+  // 空表回退:无装载信息(直挂注册面/测试)退回旧 slice 形——无下划线 modId
+  //  与旧法同解;含下划线域在装载态恒走上方精确匹配
+  return fullKey.slice(4, fullKey.indexOf('_', 4));
+}
+
 /** ★D6:buffType 语义门(string=非空即有;number=>0) */
 function hasItemBuff(bt2: number | string | undefined): boolean {
   return typeof bt2 === 'number' ? bt2 > 0 : !!bt2;
@@ -220,7 +237,7 @@ export function itemBuffIdOf(defKey: string, bt2: number | string | undefined): 
   if (bt2 === undefined) return 0;
   if (typeof bt2 === 'number') return bt2;
   if (!defKey.startsWith('mod_')) return 0;
-  const modId = defKey.slice(4, defKey.indexOf('_', 4));
+  const modId = modIdOfFullKey(defKey);   // ★D17 族:精确剥(modId 可含下划线)
   try {
     return (BUFF_DEFS as Record<number, { vanillaBuff: number }>)[modBuffTypeOf(modId, bt2)]?.vanillaBuff ?? 0;
   } catch {
@@ -17510,7 +17527,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (typeof entry.coins === 'number') npcId = entry.coins;
             else if (/^\d+$/.test(String(entry.coins))) npcId = Number(entry.coins);
             else {
-              const modId3 = heldDef.key.slice(4, heldDef.key.indexOf('_', 4));
+              const modId3 = modIdOfFullKey(heldDef.key);   // ★D17 族
               const full3 = String(entry.coins).startsWith('mod_') ? String(entry.coins)
                 : `mod_${modId3}_${entry.coins}`;
               npcId = getModLoadResult()?.allocation?.npcs.get(full3) ?? -1;
@@ -17537,7 +17554,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             key = ITEM_DEFS[vid2]?.key ?? '';
           } else {
             const full2 = String(entry.item).startsWith('mod_') ? String(entry.item)
-              : `mod_${heldDef.key.slice(4, heldDef.key.indexOf('_', 4))}_${entry.item}`;
+              : `mod_${modIdOfFullKey(heldDef.key)}_${entry.item}`;   // ★D17 族
             key = ITEM_DEFS[ITEM_BY_KEY[full2] ?? -1]?.key ?? '';
           }
           if (key) { this.spawnDrop(this.player.cx, this.player.cy, key, Math.max(1, n), (Math.random() - 0.5) * 3, -2); any = true; }
@@ -17547,7 +17564,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const first = ff.bagLoot[0]!;
           const full2 = typeof first.item === 'number' || /^\d+$/.test(String(first.item))
             ? (ITEM_DEFS[Number(first.item)]?.key ?? '')
-            : (ITEM_DEFS[ITEM_BY_KEY[`mod_${heldDef.key.slice(4, heldDef.key.indexOf('_', 4))}_${first.item}`] ?? -1]?.key ?? '');
+            : (ITEM_DEFS[ITEM_BY_KEY[`mod_${modIdOfFullKey(heldDef.key)}_${first.item}`] ?? -1]?.key ?? '');   // ★D17 族
           if (full2) this.spawnDrop(this.player.cx, this.player.cy, full2, 1, 0, -2);
         }
         this.player.inv.removeHeld(1);
@@ -36987,7 +37004,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (hb && (hb.chance === undefined || Math.random() < hb.chance)) {
           const dk = ITEM_DEFS[swingVid]?.key ?? '';
           if (dk.startsWith('mod_')) {
-            const modId = dk.slice(4, dk.indexOf('_', 4));
+            const modId = modIdOfFullKey(dk);   // ★D17 族
             applyModNpcBuff(e as Enemy, modBuffTypeOf(modId, hb.buff), hb.duration);
           }
         }
@@ -37000,7 +37017,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (hp) {
           const dk = ITEM_DEFS[swingVid]?.key ?? '';
           if (dk.startsWith('mod_')) {
-            const modId = dk.slice(4, dk.indexOf('_', 4));
+            const modId = modIdOfFullKey(dk);   // ★D17 族
             const pid = getModLoadResult()?.allocation?.projs.get(`mod_${modId}_${hp.proj}`);
             if (pid !== undefined) {
               const pdmg = (hp.dmg === undefined || hp.dmg === 'item')
@@ -53704,6 +53721,17 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         onLiquidSync: (cells) => this.netApplyLiquid(cells),
         onBestiaryEvent: (events) => this.netApplyBestiary(events),
         onPylonMessage: (msg) => this.netApplyPylon(msg),
+        // ★TE net sync(2026-10-14,module16):client 桶重建+client 角色设置
+        //  ★R-C-F8(2026-10-14):键覆盖门——本端 registry 键 ⊄ 快照键(宿主缺本端
+        //  TE mod)=mod 集不对称,不置 client 角色(旧=全局门过度抑制本端自有 TE
+        //  的 tick/落档);warn 提示宿主 mod 集不一致(tML 拒进服语义的降级形态)
+        onTESnapshot: (entries) => {
+          if (!setModTENetRoleIfCovered(entries)) {
+            console.warn('[mod-te] 宿主 mod 集不一致(本端 TE mod 不在宿主快照,本地权威保留)');
+            return;
+          }
+          applyModTESnapshot(entries);
+        },
         onMapPing: (x, y) => this.mapPings.add(x, y, performance.now()),
         onParticleOrchestra: (type, settings) => this.netApplyParticleOrchestra(type, settings),
         onAmbienceSpawn: (slot, seed, type) => this.netApplyAmbience(slot, seed, type),
@@ -53760,6 +53788,14 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       // :461-467，每 1024t 逐实体）+ 锚格巡检（访客破坏的 tile 落格不触发房主破坏链，
       // 实体/记录须巡检兜底——见 netLeashedHostSweep）
       if (this.net.policy.isHost && this.tickCount % 64 === 0) this.netLeashedHostSweep();
+      // ★TE net sync(2026-10-14,module16):host 周期快照上报(2s=120t;TE 实例
+      //  数小,全量帧价≈一条 setTile;server 镜像→晚进房补发)
+      if (this.net.policy.isHost && this.tickCount % 120 === 0) {
+        // ★R-B-1 保险丝:快照产/上行任何异常不熔断主循环(空窗≤下一周期自愈)
+        try {
+          this.net.sendTEModule(snapshotModTEsForNet());
+        } catch (err) { console.warn('[mod-te] net 上报失败(本周期跳过)', err); }
+      }
       if (this.tickCount % 4 === 0) {
         if (this.net.policy.isHost) this.netNpcBroadcast();
         this.netProjBroadcast();

@@ -49,6 +49,12 @@ export function appendModSummonEntries(entries: SummonEntry[]): void {
   }
   SUMMON_ENTRIES.sort((a, b) => a.id - b.id);
 }
+/** ★D11(2026-10-14):mod 召唤条目 teardown(热重载;mod 旗条目全摘) */
+export function _resetModSummonEntriesForTests(): void {
+  for (let i = SUMMON_ENTRIES.length - 1; i >= 0; i--) {
+    if ((SUMMON_ENTRIES[i] as { mod?: boolean }).mod) SUMMON_ENTRIES.splice(i, 1);
+  }
+}
 
 /** 纯过滤（单测对象）：数字/英文名/本地化名（nameOf 可空——面板传 Lang.npcName，
  *  单测省略）三路匹配；命中 id 优先排前。★Boss 行恒置顶（2026-08-19 修复：

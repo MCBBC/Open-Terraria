@@ -19,7 +19,7 @@ import { StyleDimension } from '../vui/core/StyleDimension';
 import type { UISpriteBatch } from '../vui/draw/UISpriteBatch';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { UIScale } from '../vui/draw/UIScale';
-import { installModKbdNav, invalidateModKbdNav, registerKbdFocusable, setKbdNavBlockingProbe } from './kbdNav';   // ★键盘导航域
+import { installModKbdNav, invalidateModKbdNav, registerKbdFocusable, unregisterKbdFocusable, setKbdNavBlockingProbe } from './kbdNav';   // ★键盘导航域
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 
 /** mod 面板句柄(sw.ui.panel 产) */
@@ -27,12 +27,18 @@ export interface ModPanelHandle {
   readonly key: string;
   readonly visible: boolean;
   addText(text: string, o: { x: number; y: number; scale?: number; large?: boolean }): void;
-  addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void }): void;
+  addButton(text: string, o: { x: number; y: number; w?: number; h?: number; onClick: () => void;
+    /** ★KB-3:removeElement 键 */
+    tag?: string }): void;
   /** ★第五批:物品槽(UISlot;mod 自管库存,点击回调) */
-  addSlot(o: { x: number; y: number; getItem(): { key: string; stack: number } | null; onLeftClick?: () => void; onRightClick?: () => void }): void;
+  addSlot(o: { x: number; y: number; getItem(): { key: string; stack: number } | null; onLeftClick?: () => void; onRightClick?: () => void;
+    /** ★KB-3:removeElement 键 */
+    tag?: string }): void;
   /** ★D15(2026-10-13):mod 贴图(tex=pack 相对路径 textures/ui/*.png 约定目录——
    *  assets 两支装载期注入 atlas;scale=整图缩放/或 w+h=盒适配) */
   addImage(o: { x: number; y: number; tex: string; scale?: number; w?: number; h?: number }): void;
+  /** ★KB-3(2026-10-14):按钮/槽移除(tag=add 时可选;元素断链+kbdNav 焦点摘) */
+  removeElement(tag: string): boolean;
   setPosition(x: number, y: number): void;
   moveBy(dx: number, dy: number): void;
   show(): void;
@@ -57,6 +63,8 @@ interface PanelEntry {
   dragging: boolean;
   /** 句柄缓存(同键重开返回同一对象=引用稳定) */
   handle?: ModPanelHandle;
+  /** ★KB-3:动态元素簿(tag→元素;remove 面) */
+  elements: Map<string, UIElement>;
 }
 
 /** 宿主 state(全面板的 retained 根;visible 面板按打开序 append=后开者在上) */
@@ -309,6 +317,7 @@ export function modUiPanel(
 
   const entry: PanelEntry = {
     modId, key, fullKey, root,
+    elements: new Map(),
     fullscreen: opts.fullscreen === true,
     titleBar: new UITextPanel(opts.title ?? key, 0.8, false),
     visible: true, dragOffX: 0, dragOffY: 0, dragging: false,
@@ -398,6 +407,12 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       p.root.append(b);
       registerKbdFocusable(b);   // ★键盘导航域:语义焦点集(标题栏/根不卷入)
       invalidateModKbdNav();   // ★R-B-KB-8:动态加钮沿失效(旧=陈旧缓存新钮不可达)
+      // ★R-C-F1(2026-10-14):同 tag 重复 fail-fast(旧=静默 last-wins,先者成
+      //  不可移除孤儿仍显示仍可点)
+      if (o.tag) {
+        if (p.elements.has(o.tag)) throw new Error(`[mod-ui] 面板元素 tag 重复: ${p.fullKey}/${o.tag}`);
+        p.elements.set(o.tag, b);
+      }
     },
     addSlot(o) {
       const s = new UISlot(o);
@@ -406,12 +421,28 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       p.root.append(s);
       registerKbdFocusable(s);   // ★键盘导航域
       invalidateModKbdNav();   // ★R-B-KB-8
+      const stag = (o as { tag?: string }).tag;
+      if (stag) {
+        if (p.elements.has(stag)) throw new Error(`[mod-ui] 面板元素 tag 重复: ${p.fullKey}/${stag}`);
+        p.elements.set(stag, s);   // ★KB-3
+      }
     },
     addImage(o) {
       const im = new ModUIImage(p.modId, o.tex, o.scale ?? 1, o.w, o.h);
       im.left = StyleDimension.fromPixels(o.x);
       im.top = StyleDimension.fromPixels(o.y);
       p.root.append(im);
+    },
+    // ★KB-3:元素移除(断链+kbdNav 摘+簿删)
+    removeElement(tag) {
+      const el = p.elements.get(tag);
+      if (!el) return false;
+      el.remove();   // parent 断=kbdNav 可达性自失效
+      unregisterKbdFocusable(el);
+      invalidateModKbdNav();
+      p.elements.delete(tag);
+      modUiSyncDomGate();   // ★R-C-F2:吞门沿同步(鼠标停在被移除按钮上时类残留)
+      return true;
     },
     setPosition(x, y) {
       p.root.left = StyleDimension.fromPixels(Math.round(x));

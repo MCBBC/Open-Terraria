@@ -290,6 +290,16 @@ export function registerModTownNpc(key: string, id: number, extra: number, modId
   return headIdx;
 }
 
+/** ★D11-M4(2026-10-14):mod 城镇 NPC 五面 teardown(热重载;TOWN_NPC_IDS 已由
+ *  teardown 主表清——此处补 TOWN_EXTRA_BY_ID/MOD_NPC_OWNER/MOD_TOWN_ARRIVAL/
+ *  TOWN_NPC_HEAD_INDEX mod 段[id≥800 判]) */
+export function _resetModTownNpcRegForTests(): void {
+  for (const k of [...TOWN_EXTRA_BY_ID.keys()]) if (k >= 800) TOWN_EXTRA_BY_ID.delete(k);
+  for (const k of [...MOD_NPC_OWNER.keys()]) if (k >= 800) MOD_NPC_OWNER.delete(k);
+  for (const k of [...MOD_TOWN_ARRIVAL.keys()]) if (k.startsWith('mod_')) MOD_TOWN_ARRIVAL.delete(k);
+  for (const k of Object.keys(TOWN_NPC_HEAD_INDEX)) if (Number(k) >= 800) delete TOWN_NPC_HEAD_INDEX[Number(k)];
+}
+
 /** mod 城镇 NPC 的头贴索引(未注册 = -1) */
 export function modTownNpcHeadIndex(id: number): number {
   return TOWN_NPC_HEAD_INDEX[id] ?? -1;

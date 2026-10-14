@@ -31,6 +31,8 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { liquidCollision } from '../stats/TouchDamage';
 import { NPC_LAVA_IMMUNE } from '../data/npcLavaImmune';
+// BJ677：岩浆 AddBuff(24) 免疫门单源（无循环——projStatus 只依赖 data/stats 层）
+import { debuffWriteAllowed } from './projStatus';
 
 /** Collision.WetCollision（Collision.cs:1575-1656）1:1：中心小盒 + 液面收缩 + 坡上液体。 */
 export function wetCollision(
@@ -263,10 +265,21 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
       //   AddBuff(24,180)=3s、**不打 50 直伤**；常规 = AddBuff(24,420)=7s +
       //   StrikeNPCNoInteraction(50)。The Hungry 115/116 无 lavaImmune=会烧
       //   （SetDefaults :10406-10426 无此位——wiki"唯一不禁 On Fire 的地狱敌怪"）
+      // ★BJ677（2026-10-14）：两支 AddBuff(24) 均过 NPC.AddBuff buffImmune 拒绝门
+      //  （NPC.cs:91037 `if (buffImmune[type]) return;` + NPCID.Sets.DebuffImmunitySets
+      //  @NPCID.cs:395 表——本仓静态表 = data/vanillaNpcImmunity.ts）。骨蛇 39/40/41
+      //  SpecificallyImmuneTo [20,24,31,323]（@:641/:648/:655）——入浆【照吃 50 直伤
+      //  +岩浆减速】但不上火 DoT（wiki"免疫 On Fire"真身）；同族=陨石怪 23/地狱装甲
+      //  骨 277-280/无头骑士 315 等全部 84 个 OnFire 免疫 NPC（含 ImmuneToAll 37 键档，
+      //  24 非鞭 debuff）。直伤 hurt(50) 与 lavaCd=30 不在 buffImmune 门内（原版
+      //  同拍照常）——只闸 onFireT 写位。闸走 projStatus.debuffWriteAllowed 单源
+      //  （debuffImmuneOverride 运行时豁免位同序同语义：AI_001 熔岩史莱姆 :61312-61316
+      //  运行时复位 buffImmune[20] 等照常放行）。
+      const fireOk = debuffWriteAllowed(b, 24);
       if (game.world.seedFlags?.remix && !b.vanilla?.friendly) {
-        b.onFireT = Math.max(b.onFireT, 3);               // AddBuff(24, 180)
+        if (fireOk) b.onFireT = Math.max(b.onFireT, 3);   // AddBuff(24, 180)
       } else {
-        b.onFireT = Math.max(b.onFireT, 7);               // AddBuff(24, 420)
+        if (fireOk) b.onFireT = Math.max(b.onFireT, 7);   // AddBuff(24, 420)
         b.hurt(50, 0, 0, game);                           // StrikeNPCNoInteraction(50)
       }
       game.spawnParticles(b.cx, b.cy, '#FF9A3C', 10, 1.6, { life: 30, grav: -0.05 });

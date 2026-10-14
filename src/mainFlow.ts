@@ -542,7 +542,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     g.world.exploredVersion++;
   }
 
-  function makeGame(): Game {
+  /** ★R-C-F5(2026-10-14):缺 mod 存档可见警告(loadSaveData 检测→窗口存→此处消费) */
+function warnMissingMods(): void {
+  const w = window as unknown as { __swMissingModsWarn?: Array<{ id: string; version: string }> };
+  const missing = w.__swMissingModsWarn;
+  if (!missing?.length) return;
+  w.__swMissingModsWarn = undefined;
+  ui.toast(Lang.text('Mods.SandboxWorld.Toast.MissingMods', missing.map((m) => `${m.id}@${m.version}`).join(', ')));
+}
+
+function makeGame(): Game {
     const g = new Game(root, {
       onWorldReady: () => {
         // ★首帧上屏后再切画面(#三开压测批"就绪瞬间黑一下"):enterGame 先在
@@ -1040,6 +1049,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           restoreModTEs(world.store, (save as { teMods?: import('./save/serialize').ModTESaveEntry[] } | undefined)?.teMods);   // ★R-C-F2:worker 域注册表空,主线程回填 TE 实例
+          warnMissingMods();   // ★R-C-F5:缺 mod 存档警告 toast(消费 __swMissingModsWarn)
           absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：须在 g.loadWorld(触发 enterGame 计费锚)之后,否则 quickLoad 无槽位会话的吸合基线被 start(0) 覆写
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
@@ -1169,6 +1179,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           __m('load.loadWorld.done');
           restoreModTEs(world.store, (save as { teMods?: import('./save/serialize').ModTESaveEntry[] } | undefined)?.teMods);   // ★R-C-F2:同 loadFromKey(worker 域注册表空=主线程回填)
+          warnMissingMods();   // ★R-C-F5
           absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：同 loadFromKey——计费锚(enterGame)之后吸合存档头基线
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           __m('load.player.done');
@@ -2240,6 +2251,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       name: '进度探针', seed: String(424242), w: 4200, h: 1200,
       size: 0, difficulty: 0, evil: -1 as const, ...(cfg ?? {}),
     } as never),
+    /** ★D11-M3(2026-10-14):worker 桥释放(热重载沿)——gen/save worker 缓存实例
+     *  持旧 mod 映射表;terminate=下次 ensure 惰性重建吃新 provider */
+    releaseWorkers: () => {
+      flowGenClient?.terminate();
+      flowGenClient = null;
+      try { saveClient.release(); } catch { /* 已释放 */ }
+    },
     itemByKey: (key: string) => ITEM_BY_KEY[key]
       ?? (key.startsWith('vi_') ? undefined : undefined), // 探针桥：物品 id（key=完整定义键）
     /** 探针桥：原版 id → 定义键 → 内部 id（键名卫生批后 roomprobe 等老探针的

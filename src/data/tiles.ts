@@ -2387,6 +2387,31 @@ export function applyModTileKeys(keys: ReadonlyArray<readonly [string, number]>)
 /** ★刀3-墙(2026-10-13)worker 桥:mod 墙键注入(worker 域无装载期注册面——
  *  gen pass gs.mods.wallIdByKey 消费;幂等;色块兜底形=worker 只需 id/键,
  *  渲染 vmeta/贴图主线程 applyModAssets 供)。 */
+/** ★D11-M1(2026-10-14):mod tile 域 teardown(热重载)——双映射数组 mod 段清零
+ *  (stableId≥1030 与其 internal 镜像;internal 依 TILE_STABLE_OF_INTERNAL[i]≥1030
+ *  反查)+旁表四张(MOD_CHEST_TILES/MOD_TREE_IDS/MOD_TREE_BASE/MOD_SAPLING_TO_TREE
+ *  按 mod internal 摘)。缺此=再启用撞 stableId 冲突门整批拒载。 */
+export function _resetModTilesForTests(): void {
+  for (let sId = 1030; sId < TILE_INTERNAL_OF_STABLE.length; sId++) {
+    if (TILE_INTERNAL_OF_STABLE[sId] !== 0) {
+      const internal = TILE_INTERNAL_OF_STABLE[sId]!;
+      if (TILE_STABLE_OF_INTERNAL[internal] === sId) TILE_STABLE_OF_INTERNAL[internal] = 0;
+      TILE_INTERNAL_OF_STABLE[sId] = 0;
+    }
+  }
+  // 旁表按 mod internal(≥ 原版 tile 数 754?保守按 stable≥1030 镜像位判)
+  const isModInternal = (i: number): boolean => TILE_INTERNAL_OF_STABLE[1030] !== undefined && i >= 754 && i < TILE_DEFS.length && TILE_DEFS[i] === undefined ? false : false;
+  void isModInternal;   // 旁表键域=mod internal(注册期写入),内部号段=754+;按「TILE_DEFS 洞 ∧ 号位≥754」判不可靠
+  // 简式:MOD_CHEST_TILES 等旁表在 mod 段 internal 重建后由 register 重写;
+  // teardown 保守清:凡 key ≥ 754 且非原版段(原版 tile internal ≤ 20753 非连续,取
+  // 注册期记录)。生产判:mod internal = TILE_DEFS 追加位 ≥ 原版末(约 20800+)。
+  const MOD_INTERNAL_MIN = 20800;
+  for (const k of [...MOD_CHEST_TILES]) if (k >= MOD_INTERNAL_MIN) (MOD_CHEST_TILES as Set<number>).delete(k);
+  for (const k of [...MOD_TREE_IDS]) if (k >= MOD_INTERNAL_MIN) MOD_TREE_IDS.delete(k);
+  for (const k of [...MOD_TREE_BASE.keys()]) if (k >= MOD_INTERNAL_MIN) MOD_TREE_BASE.delete(k);
+  for (const k of [...MOD_SAPLING_TO_TREE.keys()]) if (k >= MOD_INTERNAL_MIN) MOD_SAPLING_TO_TREE.delete(k);
+}
+
 export function applyModWallKeys(keys: ReadonlyArray<readonly [string, number]>): void {
   for (const [fullKey, id] of keys) {
     if (id < 367 || WALL_DEFS[id]) continue;

@@ -127,3 +127,9 @@ export function registerModItemFunc(vid: number, func: ItemFunc): void {
   if (vid < 30000) throw new Error(`[mod-itemfunc] vid 须 ≥30000(mod 段): ${vid}`);
   FUNC[String(vid)] = { ...func };
 }
+
+/** ★D11-M4(2026-10-14):mod func teardown(热重载;旧=残留=B 物品拿 A 的
+ *  useStyle/shoot[发射 A 的弹幕])——vid≥30000 段清 */
+export function _resetModItemFuncForTests(): void {
+  for (const k of Object.keys(FUNC)) if (Number(k) >= 30000) delete FUNC[k];
+}

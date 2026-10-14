@@ -526,3 +526,19 @@ export function registerModArmorSet(hInternal: number, bInternal: number, lInter
     TOOLTIP_SETS_BY_VID = null;
   }
 }
+
+/** ★D11-M2(2026-10-14):mod 套装 teardown(热重载;旧=push 累积 N 份 tooltip 行 +
+ *  停用后幽灵 bonus;tipName 'Mods.' 前缀判段) */
+export function _resetModArmorSetsForTests(): void {
+  for (let i = ARMOR_SET_TOOLTIP_SETS.length - 1; i >= 0; i--) {
+    const set = ARMOR_SET_TOOLTIP_SETS[i] as { name?: string };
+    if (set.name?.startsWith('Mods.')) ARMOR_SET_TOOLTIP_SETS.splice(i, 1);
+  }
+  // ★R-A-Low(2026-10-14):ARMOR_SET_BONUSES mod 段清(键='h|b|l' internal 拼;
+  //  mod 物品 internal≡stable≥30000——任一分量≥30000 即 mod 键;旧=停用后幽灵
+  //  bonus 段残留[套装奖励照生效])
+  for (const k of Object.keys(ARMOR_SET_BONUSES)) {
+    if (k.split('|').some((seg) => Number(seg) >= 30000)) delete ARMOR_SET_BONUSES[k];
+  }
+  TOOLTIP_SETS_BY_VID = null;
+}

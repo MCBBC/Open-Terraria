@@ -56,6 +56,11 @@ export function registerModWingStats(slot: number, ws: ModWingStat): void {
   MOD_WING_STATS.set(slot, ws);
 }
 
+/** ★D11-M4(2026-10-14):mod 翼 stats teardown(热重载;slot≥4000 段清) */
+export function _resetModWingStatsForTests(): void {
+  for (const k of [...MOD_WING_STATS.keys()]) if (k >= 4000) MOD_WING_STATS.delete(k);
+}
+
 /** wing slot（=wingsLogic，Player.cs:12584 wingsLogic = armor.wingSlot）→ 属性 */
 export function wingStatOf(slot: number): WingStat {
   const m = MOD_WING_STATS.get(slot);

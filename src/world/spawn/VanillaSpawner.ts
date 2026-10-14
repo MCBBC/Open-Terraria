@@ -311,6 +311,10 @@ export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: numb
 /** ★两百四十九刀:requireFlags/blockFlags=world.flags 条件门((mod boss downed 旗/事件门) */
 export interface ModSpawnRule { npcId: number; zone: string | null; water: boolean; mult: number; maxCount?: number; depth?: { min: number; max: number }; requireFlags?: string[]; blockFlags?: string[]; }
 export const MOD_SPAWN_RULES: ModSpawnRule[] = [];
+/** ★D11-M2(2026-10-14):mod 生成规则 teardown(热重载;旧=push 累积 N 倍生成率) */
+export function _resetModSpawnRulesForTests(): void {
+  MOD_SPAWN_RULES.length = 0;
+}
 
 export function spawnTileSolid(st: TileStore, x: number, y: number): boolean {
   if (st.isSolid(x, y)) return true;
