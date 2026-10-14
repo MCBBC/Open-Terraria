@@ -19,10 +19,19 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
 import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { applyBuffTicks } from './projStatus';
 
-/** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）；无 Buff 表直写计时 */
+/** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）。
+ *  ★BJ678（2026-10-14）：原版 611/612 两处 AddBuff(189,300)（Projectile.StatusNPC
+ *  :11356-11361,与 636/953 表驱动路同款施加）全过 NPC.AddBuff buffImmune 拒绝门
+ *  （NPC.cs:91037 `if (buffImmune[type]) return;` + DebuffImmunitySets 表）——
+ *  316 Ghost/521/533 长表族 + ImmuneToAll 37 键档不吃破晓（原版免疫）。
+ *  曾私有直写 daybreakT=300 双病灶：①绕免疫门（本债）②单位错——daybreakT 消费侧
+ *  为秒（Enemy.fixedUpdate -=dt;636 表路 weapons-entities 锁 5s）,裸写 300=60 倍
+ *  时长。收编 = 经 applyBuffTicks 单源注入器（免疫门 + 300t→5s 换算 + AddBuff
+ *  max 合并,与 636/953 表驱动路同一注入点;直投零掷,chance 掷不存在）。 */
 function applyDaybreak(e: Record<string, number>): void {
-  e.daybreakT = Math.max(e.daybreakT ?? 0, 300);
+  applyBuffTicks(e, 189, 300);
 }
 
 export class SolarFlare extends Entity {

@@ -195,6 +195,8 @@ Sfx.onEvent = (k, d, tag) => flow?.game?.audioRec.sfx.log(tag ? `${k}@ui` : k, d
 audio.onEvent = (k, d) => flow?.game?.audioRec.bgm.log(k, d);   // sel/start/stop/fail/ended(ended+无 stoppedByFade=loop 失效哨兵)
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
+/** ★A9:暂停浮层开启前的 uiBlocking 沿(关闭还原非覆写) */
+let pauseSavedBlocking = false;
 
 // ★首屏静态读条摘除(见 index.html #sw-boot-static 注):bundle 就绪后由
 //   启动幕(#sw-boot-prime)接棒——幕挂载时摘(无缝交接);bypass 路径无幕,
@@ -455,6 +457,7 @@ function openInGamePause(game: Game): void {
   game.releaseAutoPauseOwnership();
   if (ui.inventoryOpen) ui.closeInventory();
   game.paused = true;
+  pauseSavedBlocking = game.input.uiBlocking;   // ★A9(2026-10-14):沿保存(close 还原非覆写)
   pausePanel = ui.showPause({
     onResume: () => {
       closeInGamePause(game);   // ★SW-RB8c：Close 面=收浮层+回背包（:108）
@@ -507,7 +510,7 @@ function closeInGamePause(g: Game): void {
   pausePanel?.remove();
   pausePanel = null;
   g.paused = false;
-  g.input.uiBlocking = false;
+  g.input.uiBlocking = pauseSavedBlocking;   // ★A9:还原非覆写(旧=无条件 false 抹 mod claim)
   if (!g.player.dead) ui.openInventory(true);   // IngameOptions.Close :108（alive 面）
 }
 
@@ -980,6 +983,16 @@ kvHas('sandboxworld.quicksave').catch((e) => {
       }
     }
     await loadModsPhase1();
+    // ★2026-10-14 用户令:装载错误必上 console(旧=仅模组面板可见,F12 盲——深链
+    //  审计案发现 silent 失效无任何线索)。loaded 一行+每错误一行。
+    {
+      const { getModLoadResult } = await import('./mods/loader');
+      const r = getModLoadResult();
+      if (r) {
+        console.log(`[mods] 装载完成: ${r.loaded.map((m) => m.manifest.id).join(', ') || '(无)'}`);
+        for (const e of r.errors) console.warn(`[mods] 装载错误: ${e.modId} ${e.error}`);
+      }
+    }
     // ★mod 调试句柄（2026-10-04;__swAtlas/__swResourcePacks 同族先例）：
     //   result()=装载结果;install(bytes)=装 .swmod zip 字节(重载生效)。探针用
     ;(window as unknown as { __swMods?: unknown }).__swMods = {

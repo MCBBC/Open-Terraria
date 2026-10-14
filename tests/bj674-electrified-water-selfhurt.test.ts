@@ -51,6 +51,8 @@
 //   M4 摘尘 226 支/后置修型 → B1 红;M5 摘点光 → B2 红;M6 摘电弧层 → C2/C3 红;
 //   M7 摘蓝雷粒子支 → B3 红。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { Player } from '../src/entities/Player';
@@ -58,7 +60,7 @@ import { Inventory } from '../src/items/Inventory';
 import { BuffType } from '../src/stats/Buffs';
 import type { GameHooks } from '../src/entities/types';
 import { StormLightning } from '../src/entities/proj1457';
-import { Renderer, electrifiedArcPhases } from '../src/render/Renderer';
+import { electrifiedArcPhases, drawElectrifiedArcFrames } from '../src/render/Renderer';
 
 const W = 140, H = 120;
 const POOL_X0 = 60, POOL_X1 = 92;      // 水池带
@@ -83,7 +85,7 @@ interface DustRec {
   post: { noGravity: boolean; vx: number; vy: number; x: number; y: number };
 }
 interface LightRec { x: number; y: number; r: number; g: number; b: number }
-interface PartRec { x: number; y: number; color: string }
+interface PartRec { x: number; y: number; color: string; bx: number; by: number; bh: number }
 interface DmgRec { dmg: number; x: number; y: number; pvp: boolean; ret: number }
 
 function makePlayer(w: World, px: number, py: number) {
@@ -103,7 +105,9 @@ function makePlayer(w: World, px: number, py: number) {
     },
     spawnDrop: () => null, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
-    spawnParticles: (x: number, y: number, color: string) => { partLog.push({ x, y, color }); },
+    spawnParticles: (x: number, y: number, color: string) => {
+      partLog.push({ x, y, color, bx: p.x, by: p.y, bh: p.h });   // 出生拍盒快照（防落定漂移误伤）
+    },
     addLightAt: (x: number, y: number, r: number, g: number, b: number) => {
       lightLog.push({ x, y, r, g, b });
     },
@@ -258,12 +262,15 @@ describe('BJ674 面②:感电/蓝雷玩家视觉（PlayerDrawSet.cs:1214-1239 �
     expect(blue.length, '600 拍×1/10≈60 组（松界 2%-25%）').toBeGreaterThan(600 * 0.02);
     expect(blue.length).toBeLessThan(600 * 0.25);
     expect(red.length, '红雷同构 1/10').toBeGreaterThan(600 * 0.02);
+    // 锚=NextVector2FromRectangle(Hitbox)（:1225/:1233）;Spawn_LightningSmall 本体再叠
+    // randomizedFrame 偏移 circular(6)×0.7 ≤4.2px（P57 :3640,编排器自有语义非锚面）。
+    const SPREAD = 6 * 0.7 + 0.01;
     for (const q of [...blue, ...red]) {
-      expect(q.x, 'PositionInWorld=NextVector2FromRectangle(Hitbox)（:1225/:1233）')
-        .toBeGreaterThanOrEqual(p.x - 0.01);
-      expect(q.x).toBeLessThanOrEqual(p.x + p.w + 0.01);
-      expect(q.y).toBeGreaterThanOrEqual(p.y - 0.01);
-      expect(q.y).toBeLessThanOrEqual(p.y + p.h + 0.01);
+      expect(q.x, '锚面=盒内随机点（±编排器 circular(6)×0.7 摆幅）')
+        .toBeGreaterThanOrEqual(q.bx - SPREAD);
+      expect(q.x).toBeLessThanOrEqual(q.bx + p.w + SPREAD);
+      expect(q.y).toBeGreaterThanOrEqual(q.by - SPREAD);
+      expect(q.y).toBeLessThanOrEqual(q.by + q.bh + SPREAD);
     }
   });
 });

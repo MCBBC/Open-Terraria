@@ -340,6 +340,12 @@ export function drawStripTrail(
   ctx: CanvasRenderingContext2D,
   renderer: Renderer,
   spec: TrailSpec,
+  onBlit?: (info: {
+    /** 光栅结果画布（模块 scratch,消费方须即刻消费——下一条带光栅会覆写） */
+    canvas: HTMLCanvasElement;
+    /** 源矩形（半分辨率档 rw×rh）与页域 dest（世界坐标 bx,by,bw,bh——调用方相机系） */
+    sw: number; sh: number; dx: number; dy: number; dw: number; dh: number;
+  }) => void,
 ): boolean {
   const pts = spec.pts.filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y));
   if (pts.length < 2) return false;
@@ -669,5 +675,9 @@ export function drawStripTrail(
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(scratch, 0, 0, rw, rh, bx, by, bw, bh);
   ctx.restore();
+  // ★BJ679 水罩 mask 镜像钩子（Renderer flushTrailShade 传入;GL 路径
+  //  早退不触发=余债登记）。scratch α=255（带内）/0（带外,putImageData 全幅
+  //  覆写）=形状精确;即刻消费（下一条带光栅覆写 scratch）。
+  if (onBlit) onBlit({ canvas: scratch, sw: rw, sh: rh, dx: bx, dy: by, dw: bw, dh: bh });
   return true;
 }

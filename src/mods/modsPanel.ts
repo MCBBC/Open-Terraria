@@ -278,11 +278,9 @@ export function openModsPanel(): void {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const pack = readModPack(bytes);
-        await store.install(pack.manifest, bytes, pack.iconDataUrl);
-        // ★D11:热重载(菜单态)
-      if (!(await tryHotReload(hintEl))) {
-        hintEl.textContent = `${text('Mods.SandboxWorld.ModsPanel.Installed')}: ${pack.manifest.name} v${pack.manifest.version} — ${text('Mods.SandboxWorld.ModsPanel.ReloadToApply')}`;
-      }
+        // ★2026-10-14 用户令「导入后不要自动启用」:导入=只落库,启用由用户勾选
+        await store.install(pack.manifest, bytes, pack.iconDataUrl, { enabled: false });
+        hintEl.textContent = `${text('Mods.SandboxWorld.ModsPanel.InstalledDisabled')}: ${pack.manifest.name} v${pack.manifest.version}`;
         void refresh();
       } catch (e) {
         errsEl.textContent = `${text('Mods.SandboxWorld.ModsPanel.InstallFail')}: ${(e as Error).message}`;

@@ -2512,10 +2512,43 @@ export function registerModItem(d: Partial<ItemDef> & { key: string; name: strin
   if (!d.key.startsWith('mod_')) throw new Error(`[mod-item] key 须 mod_ 前缀: ${d.key}`);
   if (byKey[d.key] !== undefined) throw new Error(`[mod-item] 重复注册: ${d.key}`);
   if (!(stableId >= 30000 && stableId <= 65535)) throw new Error(`[mod-item] stableId 越段: ${stableId}`);
-  if (ITEM_DEFS[stableId] !== undefined) throw new Error(`[mod-item] stableId 冲突: ${stableId}`);
+  // ★A1(2026-10-14):卸载占位覆写豁免——缺 mod 期读档注册的占位 def 让位于
+  //  重启用真 def(占位=同 stableId 惰性替身;摘除恒等映射防双射脏)
+  const prev = ITEM_DEFS[stableId] as ItemDef & { unloaded?: boolean } | undefined;
+  if (prev !== undefined) {
+    if (!prev.unloaded) throw new Error(`[mod-item] stableId 冲突: ${stableId}`);
+    ITEM_INTERNAL_OF_STABLE.delete(stableId);
+    ITEM_DEFS[stableId] = undefined as never;
+  }
   ITEM_DEFS[stableId] = { ...d, vid: stableId, maxStack: d.maxStack ?? 999 } as ItemDef;
   byKey[d.key] = stableId;
   // 恒等表扩展（plan-A ⑤ 同式：重建恒等 Uint16Array 并接长——live binding 消费纪律见 :2348）
+  if (stableId >= ITEM_STABLE_OF_INTERNAL.length) {
+    const next = new Uint16Array(stableId + 1);
+    next.set(ITEM_STABLE_OF_INTERNAL);
+    for (let i = ITEM_STABLE_OF_INTERNAL.length; i <= stableId; i++) next[i] = i;
+    ITEM_STABLE_OF_INTERNAL = next;
+  }
+  ITEM_INTERNAL_OF_STABLE.set(stableId, stableId);
+  return stableId;
+}
+
+/** ★A1(2026-10-14):缺 mod 存档占位恢复(tML UnloadedItem 语义)——读档遇未知
+ *  mod stable id(30000+)时注册惰性占位 def:全消费面(inv.add/tooltip/渲染/
+ *  序列化)拿到合法 def 恒等运转,槽位保真不被洗档;重启用 mod 时
+ *  registerModItem 覆写豁免让位真 def。占位=不可用/无贴图/不可堆叠语义。 */
+export function registerUnloadedItemPlaceholder(stableId: number): number {
+  if (!(stableId >= 30000 && stableId <= 65535)) return 0;
+  if (ITEM_DEFS[stableId] !== undefined) return stableId;   // 已占(真 def/既有占位)=幂等
+  ITEM_DEFS[stableId] = {
+    key: `mod_unloaded_${stableId}`,
+    name: `Unloaded Mod Item #${stableId}`,
+    vid: stableId,
+    maxStack: 999,
+    value: 0,
+    unloaded: true,
+  } as never;
+  byKey[`mod_unloaded_${stableId}`] = stableId;
   if (stableId >= ITEM_STABLE_OF_INTERNAL.length) {
     const next = new Uint16Array(stableId + 1);
     next.set(ITEM_STABLE_OF_INTERNAL);

@@ -73,9 +73,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+/** ★A9(2026-10-14):面板开启前的 uiBlocking 沿(关闭还原非覆写) */
+let researchSavedBlocking = false;
+
 export function openResearchPanel(game: Game): void {
   ensureCss();
   if (panel) { closeResearchPanel(); return; }
+  researchSavedBlocking = game.input.uiBlocking;   // ★A9(2026-10-14)
   game.input.uiBlocking = true;   // 面板打开封游戏输入（摇杆/世界触摸）
   const r = game.research;
   const inv = game.player.inv;
@@ -194,7 +198,7 @@ export function isResearchPanelOpen(): boolean {
 
 export function closeResearchPanel(): void {
   (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
-    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = false);
+    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = researchSavedBlocking);   // ★A9:还原非覆写
   panel?.remove();
   panel = null;
   if (escHandler) { window.removeEventListener('keydown', escHandler); escHandler = null; }

@@ -31,6 +31,11 @@ export class UserInterface {
 
   private history: UIState[] = [];
   private lastElementHover: UIElement | null = null;
+  /** ★A8(2026-10-14):程序化 hover 回写(kbdNav setFocus 消费)——程序化
+   *  mouseOver 不回写本字段=真实悬停与键盘焦点双系统失同步(KB-6/7 根因) */
+  setLastElementHover(el: UIElement | null): void {
+    this.lastElementHover = el;
+  }
   private left = new InputPointerCache();
   private right = new InputPointerCache();
   private clickDisabledTimeRemaining = 0;

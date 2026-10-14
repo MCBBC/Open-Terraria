@@ -154,10 +154,13 @@ export function tickModTileEntities(game: GameHooks): void {
 
 /** 存档序列化(SaveFile/SaveClient meta 装配供数;与 mods 供数同族防漏喂)。 */
 export function serializeModTEs(store: TileStore | null | undefined): import('../save/serialize').ModTESaveEntry[] {
-  if (registry.size === 0) return [];
+  // ★A1(2026-10-14):缺 mod 携带条目合流(读档 stash 的 unloadedTEs 原样回写
+  //  teMods 段=缺 mod 期存档不洗档;独立于注册面[registry 空也回写])
+  const carry = (store as unknown as { unloadedTEs?: Array<{ k: string; x: number; y: number; d?: Record<string, unknown> }> } | undefined)?.unloadedTEs ?? [];
+  if (registry.size === 0) return carry;
   if (netRole === 'client') return [];   // ★TE net sync:client 不落档(host 档权威)
   const b = bound.get(store ?? activeStore as TileStore);
-  if (!b) return [];
+  if (!b) return carry;
   const out: import('../save/serialize').ModTESaveEntry[] = [];
   for (const [tileInternal, entry] of registry) {
     const m = b.inst.get(tileInternal);
@@ -184,18 +187,25 @@ export function serializeModTEs(store: TileStore | null | undefined): import('..
       out.push({ k: entry.fullKey, x: inst.x, y: inst.y, d });
     }
   }
-  return out;
+  return [...out, ...carry.filter((c) => !out.some((o) => o.k === c.k && o.x === c.x && o.y === c.y))];
 }
 
 /** 读档回填(loadSaveData world 建成后;load 钩恢复/缺省直存回 state)。 */
 export function restoreModTEs(store: TileStore, entries: import('../save/serialize').ModTESaveEntry[] | undefined): void {
-  if (!entries?.length || registry.size === 0) return;
+  // ★A1(2026-10-14):registry 空也走携带面(stash 缺 mod 条目;在册条目循环天然空转)
+  if (!entries?.length) return;
+  // ★A1(2026-10-14):缺 mod 条目 stash 先行(不依赖 bind——registry 空时
+  //  bindModTileEntities 早退、bound 无桶,旧序=stash 永不可达)
+  const w = store as unknown as { unloadedTEs?: Array<{ k: string; x: number; y: number; d?: Record<string, unknown> }> };
+  for (const e of entries) {
+    if (byFullKey.get(e.k) === undefined) (w.unloadedTEs ??= []).push(e);   // 携带保真(不洗档)
+  }
   bindModTileEntities(store);
   const b = bound.get(store);
   if (!b) return;
   for (const e of entries) {
     const tileInternal = byFullKey.get(e.k);
-    if (tileInternal === undefined) continue;   // 缺 mod=静默降级(占位语义)
+    if (tileInternal === undefined) continue;   // 已 stash 携带面
     if ((e.d as Record<string, unknown> | undefined)?.__lost) {
       console.warn(`[mod-te] 读档: ${e.k}@${e.x},${e.y} 上局 save 钩 throw 弃存(占位不复活)`);
       continue;

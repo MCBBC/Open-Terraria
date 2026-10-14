@@ -1219,7 +1219,29 @@ export class PetFollower extends Entity {
     const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`);
     const ctx = r.ctx;
     if (!ctx || !img) return;
-    if (!this.params) { this.legacyDraw(ctx, img); return; }
+    // ★A10(2026-10-14):mod 宠物(spec 2000+)走声明帧竖排(ModProj 渲染约定:
+    //  贴图宽=单帧宽/高=frames×帧高;帧选择=(animTick/frameRate)%frames)——
+    //  旧 legacyDraw 横排帧假设=竖排帧表 mod 宠物取错帧。原版表外 id 照旧。
+    if (!this.params) {
+      const spec = modProjSpecOf(this.projId);
+      if (spec) {
+        const frames = Math.max(1, spec.frames ?? 1);
+        const fh = frames > 1 ? img.height / frames : img.height;
+        if (Number.isFinite(fh) && fh >= 1) {
+          const fi = frames > 1 ? Math.floor(this.animTick / (spec.frameRate ?? 6)) % frames : 0;
+          const pl = this.ownerRef();
+          const flip = pl ? pl.facing < 0 : false;
+          ctx.save();
+          ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+          if (flip) ctx.scale(-1, 1);
+          ctx.drawImage(img, 0, fi * fh, img.width, fh, -this.w / 2, -this.h / 2, this.w, this.h);
+          ctx.restore();
+          return;
+        }
+      }
+      this.legacyDraw(ctx, img);
+      return;
+    }
     // ★SW-BJ67 D3：1090 专支（滚动模式切绘 1047 壳表 + 拖尾/虹晕,详方法注）
     if (this.projId === 1090) { this.rainbowBoulderPetDraw(r, ctx); return; }
     const frames = Math.max(1, this.params.e.frames ?? 1);

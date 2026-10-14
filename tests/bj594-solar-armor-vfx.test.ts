@@ -119,7 +119,10 @@ describe('BJ594 面1：armorEffectDrawOutlines 四向脉冲描边（LegacyPlayer
     expect(PLY).toMatch(/ghostFade = 0;/);
     expect(PLY).toMatch(/ghostDir = 1;/);
     // canvas 等价习语：brightness(k)+globalAlpha(k)（GetImmuneAlphaPure Color.Multiply 全通道乘）
-    expect(RDR).toMatch(/ctx\.filter = `brightness\(\$\{s\.k\}\)`/);
+    // ★2026-10-12 结构刀后：四印同 k 亮度栈一次烘进 solarStampScratch（scx.filter
+    //   brightness 单次,drawImage 12→7）——逐印=globalAlpha×s.k 平绘。锁新式。
+    expect(RDR).toMatch(/scx\.filter = `brightness\(\$\{s0\.k\}\)`/);
+    expect(RDR).toMatch(/ctx\.globalAlpha \*= s\.k;/);
   });
 });
 

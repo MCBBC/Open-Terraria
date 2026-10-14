@@ -178,9 +178,13 @@ function windText(wind: number): string {
 }
 function rainText(maxRaining: number): string { return `${Math.round(maxRaining * 100)}%`; }
 
+/** ★A9(2026-10-14):面板开启前的 uiBlocking 沿(关闭还原非覆写) */
+let journeySavedBlocking = false;
+
 export function openJourneyPowersPanel(game: Game): void {
   ensureCss();
   if (panel) { closeJourneyPowersPanel(); return; }
+  journeySavedBlocking = game.input.uiBlocking;   // ★A9(2026-10-14):沿保存(close 还原非覆写)
   game.input.uiBlocking = true;
   if (category === 0) category = 3;   // 默认开时间页（原版主条无默认选中，UI 取常用页）
   panel = el('div', 'sw-jp-panel');
@@ -821,7 +825,7 @@ function applyRainSlider(game: Game, v: number): void {
 
 export function closeJourneyPowersPanel(): void {
   (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
-    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = false);
+    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = journeySavedBlocking);   // ★A9:还原非覆写
   for (const fn of panelCleanup) fn();
   panelCleanup = [];
   browserRefresh = null;

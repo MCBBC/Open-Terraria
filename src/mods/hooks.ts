@@ -1263,7 +1263,7 @@ export function runModNpcPostAi(e: Enemy, game: unknown): void {
   for (const h of globalNpcHooks.values()) h.postAi?.(e, game);
 }
 
-/** ModifyIncomingHit 值链(防御结算后;非有限返值跳过)。 */
+/** ModifyIncomingHit 值链(防前=tML HitModifiers 位[★A5 2026-10-14 移位];非有限返值跳过)。 */
 export function runModNpcIncomingHit(e: Enemy, value: number): number {
   if (globalNpcHooks.size === 0) return value;
   const ctx = { value };

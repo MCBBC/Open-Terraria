@@ -64,6 +64,10 @@ const setFocus = (list: UIElement[], idx: number): void => {
     el.kbdFocus = true;
     const d = el.getDimensions();
     el.mouseOver(new UIMouseEvent(el, { x: d.x + d.width / 2, y: d.y + d.height / 2 }));
+    // ★A8(2026-10-14):hover 回写(KB-6/7)——下帧 UserInterface.update 对
+    //  lastElementHover 恒等判定=鼠标仍停本元素时不重派 mouseOut(焦点视觉不再
+    //  被迁移沿抹掉);真实鼠标移入其他元素时 update 正常接管(双系统收敛)
+    VUI.ui.setLastElementHover(el);
   }
 };
 

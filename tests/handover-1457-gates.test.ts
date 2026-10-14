@@ -73,20 +73,25 @@ describe('1457 移交: 真眼免近战(GetMeleeCollisionData :96142-96144)', () 
   });
 });
 
-describe('1457 移交: 浸剂伴发 PotentAcid 395(StatusNPC meleeEnchant==1 → AddBuff(395,60t))', () => {
-  it('火浸剂命中 → potentAcidT ≥ 1(伴发)且 OnFire 照旧 3-7s', () => {
-    const { g, enemies } = swingGame([1], { imbue: BuffType.ImbueFire });
-    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
-    const slime = enemies[0];
-    expect(slime.potentAcidT).toBeGreaterThanOrEqual(1);   // ★1457 伴发
-    expect(slime.onFireT).toBeGreaterThanOrEqual(3);       // 原火浸剂链保留
-  });
-  it('对照:毒浸剂只上 venomT,不伴发 395(meleeEnchant==3 无此支)', () => {
+describe('1457 移交: 浸剂伴发 PotentAcid 395(StatusToNPC meleeEnchant==1 → AddBuff(395,60t))', () => {
+  // ★BJ678（2026-10-14）改判：伴发 395 属【毒液浸剂】支——原版 buff 71(毒液药剂)→
+  //  meleeEnchant==1（Player.cs:6504-6508 AddBuff(70)+AddBuff(395,60)）；火浸剂
+  //  buff 74→meleeEnchant==3（:6513-6515）仅 AddBuff(24)。旧锁把 395 挂火浸剂支
+  //  = buffId↔浸剂错位（与投射物侧 applyMeleeImbue 双胞胎相悖），随 BJ678 免疫
+  //  闸刀逐支对位复核一并归位（Game.ts 挥砍浸剂块同刀）。
+  it('毒液浸剂命中 → venomT ≥ 5 且伴发 potentAcidT ≥ 1(meleeEnchant==1 双 AddBuff)', () => {
     const { g, enemies } = swingGame([1], { imbue: BuffType.ImbueVenom });
     (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
     const slime = enemies[0];
     expect(slime.venomT).toBeGreaterThanOrEqual(5);
-    expect(slime.potentAcidT).toBe(0);
+    expect(slime.potentAcidT).toBeGreaterThanOrEqual(1);   // ★1457 伴发
+  });
+  it('对照:火浸剂只上 OnFire 3-7s,不伴发 395(meleeEnchant==3 无此支)', () => {
+    const { g, enemies } = swingGame([1], { imbue: BuffType.ImbueFire });
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
+    const slime = enemies[0];
+    expect(slime.onFireT).toBeGreaterThanOrEqual(3);       // 原火浸剂链保留
+    expect(slime.potentAcidT).toBe(0);                     // BJ678 归位：火支无 395
   });
   it('无浸剂命中 → potentAcidT 恒 0', () => {
     const { g, enemies } = swingGame([1]);

@@ -15016,6 +15016,12 @@ export class Enemy extends Entity {
     //   但 −def×0.5 为增伤（原版直算式,2026-08-13 对齐保留）。
     //   已知偏差登记：crit ×2 原版在防后（StrikeNPC :81990），仓内调用侧预倍——
     //   crit 会连带翻倍 pen/防（Game.ts 挥击侧,并行会话领走未动）
+    // ★A5(2026-10-14):GlobalNPC ModifyIncomingHit 移防前(tML HitModifiers 位
+    //  —StrikeNPC 头部对原始 Damage 修正后入防御链;DR/伤害帽族按 tML 语义
+    //  作用全链)。≥9999 演出通道门保持(R-A-M2)。旧防后位=R-A-M3 登记债清偿。
+    if (dmg < 9999) {
+      dmg = Math.max(1, Math.trunc(runModNpcIncomingHit(this, dmg)));
+    }
     const def = this.def.defense ?? 0;
     const penAdd = npcCheckArmorPenetration(def, armorPen, penPercent, {
       ichor: this.ichorT > 0, brokenArmor: this.brokenArmorT > 0, betsysCurse: this.betsysCurseT > 0,
@@ -15027,16 +15033,6 @@ export class Enemy extends Entity {
     //   （NPC.cs:82067）。旧 round() 在奇防非暴击面每击系统性 +1（例 10/7→6.5：
     //   原版 6、旧实现 7），统一换 trunc。
     dmg = Math.trunc(Math.max(1, dmg + penAdd - def * 0.5));
-    // ★B 批:GlobalNPC ModifyIncomingHit 值链(防御结算后;DR 族消费;空表直通;
-    //  消费侧 ≥1 钳=原版 floor 同相)。
-    //  ★红队 R-A-M2 勘位:≥9999=内联演出/级联死亡通道(四塔收刀 1e9/幽灵 9999/
-    //  EoW die 9999/DoT 杀 9999)——不进 mod 值链(伤害帽类 mod 断 1e9 致死=塔永生
-    //  软锁)。★R-A-M3 位次声明:本站=【防后】值链(tML ModifyIncomingHit=防前
-    //  HitModifiers 位)——接口注释已显式标注灾厄 DR 族语义选择,移植 mod 按
-    //  ctx.value=防御后实伤写入;防前位=登记 D 台账(B 批遗留)。
-    if (dmg < 9999) {
-      dmg = Math.max(1, Math.trunc(runModNpcIncomingHit(this, dmg)));
-    }
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     // （takenDamageMultiplier 段 NPC.cs:82070-82072 亦为 (int) 截断非 round）
@@ -15119,7 +15115,7 @@ export class Enemy extends Entity {
       }
       // ★D20-m1(2026-10-13):假人受理伤派发(onHitByAny/onHitAny killed=false;
       //  incomingHit 已在本分支前 :15026 过链=DR 族不重派)
-      this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);
+      this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)
       return true;
     }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
@@ -15314,7 +15310,7 @@ export class Enemy extends Entity {
         (this.realLifeHost as { __swModSilentHit?: boolean }).__swModSilentHit = true;
         this.realLifeHost.die(game);
         (this.realLifeHost as { __swModSilentHit?: boolean }).__swModSilentHit = false;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78864-78883)转为闭眼残肢/死亡演出,
@@ -15334,7 +15330,7 @@ export class Enemy extends Entity {
       if (this.vanillaId === 396 || this.vanillaId === 397
         || (this.vanillaId === 398 && this.ai0 !== 2)) {
         this.dontTakeDamage = true;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       // 猪鲨爆裂泡泡（NPC 371）：血尽不直死——checkDead（NPC.cs:78850-78855）
@@ -15347,7 +15343,7 @@ export class Enemy extends Entity {
       //   dukeBubbleAI :1363 每 tick 重写旗维持（台账①面）。
       if (this.vanillaId === 371 && this.ai0 !== 1) {
         this.dontTakeDamage = true;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
@@ -15367,7 +15363,7 @@ export class Enemy extends Entity {
       if (this.vanillaId === 246
         && (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 245)) {
         this.dontTakeDamage = true;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78884-78889）血尽转 ai2=1 死亡演出
@@ -15379,7 +15375,7 @@ export class Enemy extends Entity {
         //   绕门再结算（2t 窄缝）;真旗=全通道闸,演出期由 towerAI 每 tick 重写
         //   （R23b-P1 形态）,本行=原版 checkDead 位（AI tick 前的窗闭合）。
         this.dontTakeDamage = true;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       // 永恒水晶 548（NPC.cs:78891-78898）：血尽转败北演出——ai1=1/ai0=0/满血/
@@ -15396,7 +15392,7 @@ export class Enemy extends Entity {
         this.ai0 = 0;
         this.hp = this.maxHp;
         this.dontTakeDamageFromHostiles = true;
-        this.dispatchAcceptedHit(game, fromPlayer, rawDmg, crit, pierce, srcProjId);   // ★D20-M1
+        this.dispatchAcceptedHit(game, fromPlayer, dmg, crit, pierce, srcProjId);   // ★A4(2026-10-14):防后值(tML damageDone;旧=rawDmg 防前)   // ★D20-M1
         return false;
       }
       this.dead = true;
@@ -16041,8 +16037,8 @@ export class Enemy extends Entity {
       // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
       // ★R-B-F2:转移死幻影拍抑制窗(realLifeHost.__swModSilentHit)
       if (!(this as { __swModSilentHit?: boolean }).__swModSilentHit) {
-        if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
-        runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击
+        if (fromPlayer) runModOnHitAny(this, game, { damage: dmg, crit, killed: true, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });   // ★A4:防后
+        runModOnNpcHitByAny(this, game, { damage: dmg, crit, killed: true, projId: srcProjId });   // ★B 批:全域受击;★A4:防后
       }
       // ★D20-m3:mod 击杀双钩尾派发(tML OnKill 序;onHitByAny 之后)
       runModOnNpcDeath(this.vanillaId, this, game as unknown as Game);
@@ -16055,8 +16051,8 @@ export class Enemy extends Entity {
     //  =玩家来源受理伤害结算尾;fromPlayer 门=NPC 互伤/陷阱/环境伤不进;免疫帧/
     //  dontTakeDamage/零伤转换早退支不进=原版 OnHitNPC 同相）。
     //  零注册=零成本（runModOnHitAny 头门）。melee 探针=非弹幕穿面（pierce=0 近战惯例）。
-    if (fromPlayer) runModOnHitAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });
-    runModOnNpcHitByAny(this, game, { damage: rawDmg, crit, killed: false, projId: srcProjId });   // ★B 批:全域受击
+    if (fromPlayer) runModOnHitAny(this, game, { damage: dmg, crit, killed: false, projId: srcProjId, melee: srcProjId === 0 && pierce === 0 });   // ★A4:防后
+    runModOnNpcHitByAny(this, game, { damage: dmg, crit, killed: false, projId: srcProjId });   // ★A4:防后
     return false;
   }
 

@@ -110,9 +110,11 @@ describe('★BJ485 相位判据:窗界源序+机制锚（普查表的判定基�
   it('P2 摘除面调用图:drawBrightVines/drawWingOverlay 唯一调用方均在窗外域', () => {
     // drawBrightVines 全仓唯一调用点（render 7c,P1 已锚其在 compositeLight 后）
     expect(RDR.split('this.drawBrightVines(entities, cam, z,').length - 1).toBe(1);
-    // drawWingOverlay 全仓唯一调用点=flushWingGlow 体内（:15052 翼案约束自证窗外）
-    expect(RDR.split('this.drawWingOverlay(').length - 1).toBe(1);
-    expect(fnBody(RDR, 'private flushWingGlow(')).toContain('this.drawWingOverlay(');
+    // drawWingOverlay 调用点均=flushWingGlow 体内（:15052 翼案约束自证窗外;
+    // ★BJ679（2026-10-14）起两处=直绘+水罩 mask tgt 重放（mirrorPass=true,
+    // tgt=maskCtx）——两处同在 7e flush 内=窗外域判定不变,scratch 幂等同内容重烘）
+    expect(RDR.split('this.drawWingOverlay(').length - 1).toBe(2);
+    expect(fnBody(RDR, 'private flushWingGlow(').split('this.drawWingOverlay(').length - 1).toBe(2);
     // flushWingGlow 全仓唯一调用点在 compositeLight 之后（7e）
     expect(RDR.split('this.flushWingGlow(cam, z);').length - 1).toBe(1);
     const iComp = RDR.indexOf('this.compositeLight(cam, viewW, viewH');

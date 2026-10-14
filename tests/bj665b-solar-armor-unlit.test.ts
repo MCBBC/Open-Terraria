@@ -224,7 +224,8 @@ describe('BJ665b ④：层序锁（候选 B=甲件+被盖层随迁,禁 C 裸重�
 
   it('双绘去重：首遍收集完标记（坐椅/睡床早绘+主段=次遍回内联,lit 窗被队列版覆盖）', () => {
     expect(RDR).toContain('lunarCoverCollected = new WeakSet()');
-    expect(RDR).toContain('if (lunarHoist != null) this.lunarCoverCollected.add(p);');
+    // ★BJ681 扩 glowCover（glow 族随迁窗）——标记门同收
+    expect(RDR).toContain('if (lunarHoist != null || glowCover) this.lunarCoverCollected.add(p);');
   });
 
   it('恒色甲件队列位次=甲位 glow 前（星尘 GlowMask 叠层在甲件之上=原版逐件后随叠画序）', () => {

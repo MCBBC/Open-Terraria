@@ -210,6 +210,15 @@ export declare interface ModContext {
       show(): void; hide(): void; toggle(): void; close(): void;
     };
     closeAll(): void;
+    /** ★Tier1-a(2026-10-14):富 DOM overlay 页——HTML+CSS(自动 scope)+
+     *  data-act 声明式事件;ESC 收最上层;世界卸载全清 */
+    htmlPage(key: string, spec: {
+      html: string;
+      css?: string;
+      className?: string;
+      visible?: boolean;
+      actions?: Record<string, (el: HTMLElement, page: { key: string; readonly visible: boolean; readonly el: HTMLElement; q(sel: string): HTMLElement | null; setHtml(html: string): void; show(): void; hide(): void; toggle(): void; close(): void }) => void>;
+    }): { key: string; readonly visible: boolean; readonly el: HTMLElement; q(sel: string): HTMLElement | null; setHtml(html: string): void; show(): void; hide(): void; toggle(): void; close(): void };
   };
   /** ★刀5:具名修正槽(tML detour 等价物·修正形)。槽名封闭集:
    *  'Player.ApplyLifeAndOrMana'=治疗量修正 / 'Player.UpdateLifeRegen'=装备回复量修正;
@@ -241,6 +250,13 @@ export declare interface ModContext {
   config: {
     get(key: string): boolean | number | string;
     set(key: string, value: boolean | number | string): void;
+  };
+  /** ★Tier1-a(2026-10-14):per-mod 持久 KV 存储(任意 JSON 值;跨会话跨世界;
+   *  键空间 sandboxword.mods.<modId>.;配额 2MB/mod) */
+  storage: {
+    get<T>(key: string): Promise<T | null>;
+    set<T>(key: string, value: T): Promise<boolean>;
+    delete(key: string): Promise<void>;
   };
   /** mod 弹幕分配 id(fail-fast) */
   projIdOf(key: string): number;

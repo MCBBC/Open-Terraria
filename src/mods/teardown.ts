@@ -12,6 +12,7 @@
 //   VANILLA_NPCS 800+/TOWN_NPC_IDS mod 段/equip overlay/shops/recipes/armorSets/
 //   biomeFlags/bestiary entryCache/sceneMetrics 域注册面
 //   *mounts/hairs 的 countMax 顶:重置回原版常量(重装载时 bump 回来)
+import { registerDirectorHost } from './director';
 import { _resetModHooksForTests } from './hooks';
 import { _resetModBuffsForTests } from './buffs';
 import { _resetModMusicForTests } from './music';
@@ -56,6 +57,8 @@ import { _resetLiveModConfigsForTests } from './config';
 import { _resetModPortraitsForTests } from '../data/npcPortraits';
 import { _resetModKeybindsForTests } from '../core/Keybinds';
 import { _resetModRecipeSideTablesForTests } from '../data/vanillaRecipes';
+import { modHtmlUiTeardown } from './modHtmlUi';   // ★Tier1-a
+import { _resetModStorageForTests } from './modStorage';   // ★Tier1-a
 import { ITEM_DEFS, ITEM_BY_KEY, ITEM_INTERNAL_OF_STABLE } from '../data/items';
 import { TILE_BY_KEY, TILE_DEFS, WALL_DEFS, WALL_BY_KEY } from '../data/tiles';
 import { VANILLA_NPCS, TOWN_NPC_IDS } from '../data/vanillaNpcs';
@@ -92,6 +95,7 @@ function teardownDataTables(): void {
 
 /** 一口 teardown(D11:装卸/启停沿调,随后 loadModsPhase1 重跑) */
 export function unloadModsForHotReload(): void {
+  registerDirectorHost(null);   // ★导演模式宿主随卸载摘除（状态位归零,四读点恢复早退）
   teardownDataTables();
   _resetModHooksForTests();
   _resetModBuffsForTests();
@@ -135,6 +139,9 @@ export function unloadModsForHotReload(): void {
   _resetModPortraitsForTests();
   _resetModKeybindsForTests();
   _resetModRecipeSideTablesForTests();
+  // ★Tier1-a:DOM overlay 层/存储记账
+  modHtmlUiTeardown();
+  _resetModStorageForTests();
   // 引擎侧缓存哨兵(D11 清单)
   _resetModAchDefsForTests();
   _resetBestiaryEntryCacheForTests();

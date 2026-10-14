@@ -247,6 +247,13 @@ export interface ArmorGlowOp {
   /** pet 臂旋转（绕 pivot，doll 局部） */
   rot?: number;
   pivot?: [number, number];
+  /** ★BJ681 臂站标记（28_ArmOverItem 族=武器【之上】）：armMask 叠条
+   *  （PlayerDrawLayers.cs:3659-3663，非复合体）与复合前肩/前臂 cell
+   *  （28_ArmOverItemComposite :3693+ FrontShoulder/FrontArm 两件）。
+   *  缺省 undefined=13/17/21 站（武器【之下】，LegacyPlayerRenderer.cs:227-234
+   *  亲读：13/17/21 甲+glow < 26 盾 < 27 手持物 < 28 臂+臂glow）。flush 侧
+   *  按 arm 分两遍冲刷（under 遍在 flushLunarCovered 前/arm 遍在 itemGlow 后）。 */
+  arm?: true;
 }
 
 export interface ArmorGlowCtx {
@@ -319,9 +326,11 @@ function glowTex(mask: number): string {
 }
 
 /** 单条 glow 叠画 op（整帧 40×56 源 = 行×56；1118 高贴图越界钳由 flush 侧按
- *  img.height 收口——与坐骑 glow 层同习语） */
+ *  img.height 收口——与坐骑 glow 层同习语）。★BJ681 arm=true=28 臂站
+ *  （武器之上遍冲刷）。 */
 function stripOp(mask: number, srcRow: number, frameTop: number, rc: ResolvedGlowColor,
-  mul: number, e?: { jitter?: 2 | 4; jx?: [number, number]; jy?: [number, number] }): ArmorGlowOp {
+  mul: number, e?: { jitter?: 2 | 4; jx?: [number, number]; jy?: [number, number] },
+  arm = false): ArmorGlowOp {
   return {
     tex: glowTex(mask),
     sx: 0, sy: srcRow * FRAME_H, sw: FRAME_W, sh: FRAME_H,
@@ -331,6 +340,7 @@ function stripOp(mask: number, srcRow: number, frameTop: number, rc: ResolvedGlo
     ...armorGlowBakeBoost(rc, mul),               // ★BJ604件3 合成分解
     copies: e?.jitter,
     jx: e?.jx, jy: e?.jy,
+    ...(arm ? { arm: true as const } : {}),
   };
 }
 
@@ -339,7 +349,9 @@ export function isFemaleSkin(skinVariant: number): boolean {
 }
 
 /** 甲位 glow 叠画计划（PlayerDrawSet SetPassColors + 四叠画站 1:1 数据化）。
- *  op 序 = 原版层序：腿(13_Leggings) → 身(17_Torso) → 头(21_Head) → 臂(28_Arm)。 */
+ *  op 序 = 原版层序：腿(13_Leggings) → 身(17_Torso) → 头(21_Head) → 臂(28_Arm)。
+ *  ★BJ681：28 臂站 op 带 arm=true（flush 分两遍——under 遍武器下/arm 遍武器上,
+ *  LegacyPlayerRenderer.cs:227-234：13/17/21 glow < 27 手持物 < 28 臂 glow）。 */
 export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
   const ops: ArmorGlowOp[] = [];
   if (c.head <= 0 && c.body <= 0 && c.legs <= 0) return ops;
@@ -376,7 +388,8 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
       ? { jitter: 4 as const, jx: JITTER_APPR_BODY[0], jy: JITTER_APPR_BODY[1] }
       : undefined;
     ops.push(stripOp(mask, c.rowsBody, frameTop, rc, c.mul, jit));
-    if (body.armMask) ops.push(stripOp(body.armMask, c.rowsBody, frameTop, rc, c.mul));
+    // ★BJ681 armMask=28 臂站（:3659-3663 28_ArmOverItem 内,武器之上）——arm 标记
+    if (body.armMask) ops.push(stripOp(body.armMask, c.rowsBody, frameTop, rc, c.mul, undefined, true));
   }
   // ---- 身·复合半幅族（DrawCompositeArmorPiece :38-162）----
   const comp = c.body > 0 ? BODY_COMPOSITE_GLOW[c.body] : undefined;
@@ -388,12 +401,12 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
     const dyF = c.female ? 2 : 0;
     const hgY = COMPOSITE_BOB_ROWS.has(row) ? -2 : 0;
     const syOff = comp.tex ? 0 : 224;               // 专贴图整幅无偏移；同甲半幅 +224
-    const cells: Array<{ x: number; y: number; pet?: boolean }> = [
+    const cells: Array<{ x: number; y: number; pet?: boolean; arm?: boolean }> = [
       { x: 1, y: 1 + dyF },                         // 后肩
       c.pet ? { x: 8, y: c.pet.stretch, pet: true } : { x: arm[0], y: arm[1] + 2 },  // 后臂
       { x: torsoX, y: dyF },                        // 躯干
-      { x: 0, y: 1 + dyF },                         // 前肩
-      { x: arm[0], y: arm[1] },                     // 前臂
+      { x: 0, y: 1 + dyF, arm: true },              // 前肩（★BJ681 28_ArmOverItemComposite :3731=武器之上）
+      { x: arm[0], y: arm[1], arm: true },          // 前臂（★BJ681 28 站 :3766=武器之上）
     ];
     for (const cell of cells) {
       const base: ArmorGlowOp = {
@@ -410,6 +423,7 @@ export function armorGlowOps(c: ArmorGlowCtx): ArmorGlowOp[] {
         // 烘焙枢轴 (26,30)+hgY（PaperDoll PET_ARM_PIVOT）→ doll 局部 (6, 30+hgY)+frameTop
         base.pivot = [-FRAME_W / 2 + 26, frameTop + 30 + hgY];
       }
+      if (cell.arm) base.arm = true;   // ★BJ681 前肩/前臂=28 站（武器之上遍）
       ops.push(base);
     }
   }

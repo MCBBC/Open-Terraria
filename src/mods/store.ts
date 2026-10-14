@@ -72,7 +72,8 @@ export class ModStore {
   /** 安装:zip 字节落库 + 注册表行写 manifest 冗余字段。同 id 覆盖重装。
    *  ★P4 红蓝修正(D-m3):putZip 失败(IDB 不可用)即抛——旧实现注册表照写,
    *  UI 报"已安装"但 zip 未落,下次启动变"数据缺失"行 */
-  async install(manifest: ModManifest, bytes: Uint8Array, iconDataUrl?: string | null): Promise<ModRow> {
+  async install(manifest: ModManifest, bytes: Uint8Array, iconDataUrl?: string | null,
+    opts?: { enabled?: boolean }): Promise<ModRow> {
     const copy = new Uint8Array(bytes.length);
     copy.set(bytes);
     const ok = await this.storage.putZip(manifest.id, new Blob([copy], { type: 'application/zip' }));
@@ -85,7 +86,9 @@ export class ModStore {
       version: manifest.version,
       author: manifest.author ?? '',
       description: manifest.description ?? '',
-      enabled: true,
+      // ★2026-10-14 用户令「导入后不要自动启用」:面板导入传 enabled:false;
+      // 缺省 true 保持桌面目录同步/探针句柄等既有语义(D-M3 重装保留启停另走 setEnabled)
+      enabled: opts?.enabled ?? true,
       addedAt: Date.now(),
     };
     rows.push(row);

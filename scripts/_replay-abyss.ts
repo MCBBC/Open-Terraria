@@ -375,7 +375,35 @@ if (process.env.SW_FOSSIL_GRID === '1') {
     }
     if (mo || re) console.log(`  y${y0}-${y0+19}: 我=${mo}[${moLo},${moHi}] 真=${re}[${reLo},${reHi}]`);
   }
-  console.log('[fcls] 差格归因:');
+  // ★693 蛇身差位:y355-420 带内 我雕真留/我留真雕 的 x 坐标
+  {
+    const mineOnly: number[] = [], trueOnly: number[] = [];
+    for (let y = 355; y <= 420; y++) for (let x = 3940; x <= 4120; x++) {
+      const i = y * w + x;
+      const preHad = CS_TO_OURS(pre.type[i]) !== 0;
+      if (!preHad) continue;
+      const moC = !(store.flags[i] & 1), reC = CS_TO_OURS(post.type[i]) === 0;
+      if (moC && !reC) mineOnly.push(x);
+      else if (!moC && reC) trueOnly.push(x);
+    }
+    const tally = (arr: number[]) => { const m = new Map<number, number>(); for (const v of arr) m.set(v, (m.get(v) ?? 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([x, c]) => `x${x}:${c}`).join(' '); };
+    console.log(`[snake-diff] y355-420 我雕真留=${mineOnly.length} ${tally(mineOnly)}`);
+    console.log(`[snake-diff] y355-420 我留真雕=${trueOnly.length} ${tally(trueOnly)}`);
+  }
+  console.log('[fcls] 差格归因(实际键名):');
+  {
+    const seen = new Map<string, number>();
+    for (let y = 889; y <= 895; y++) for (let x = 4020; x <= 4045; x++) {
+      const i = y * w + x;
+      const moK = (store.flags[i] & 1) ? KEY_OF(store.type[i]) : 'empty';
+      const reK = KEY_OF(CS_TO_OURS(post.type[i]));
+      if (moK !== reK) {
+        const k = `(${x},${y}) 前=${KEY_OF(CS_TO_OURS(pre.type[i]))} 我=${moK} 真=${reK}`;
+        seen.set(k, (seen.get(k) ?? 0) + 1);
+      }
+    }
+    for (const [k, c] of seen) console.log(`  ${k} ×${c}`);
+  }
   for (const [k, c] of cls) console.log(`  ${k} ×${c}`);
 }
 for (const c of gs.mods.chests as Array<{ x: number; y: number }>) {

@@ -1,4 +1,6 @@
-// 公告/聊天列位置核对：注入消息 → 量 DOM 几何 vs 原版 (x=88, bottom=58, 行距21, 新在底)
+// 公告/聊天列位置核对：注入消息 → 量 DOM 几何 vs 原版 (x=88, 行高22, 最新行顶=58 自底
+// —— Main.cs:84 y=screenHeight-30-28-num5*22 ⇒ 最新行 bottomGap=58-22=36;BJ680 校正
+// 旧探针曾把行【顶】锚 58 误读为行底)
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
@@ -25,8 +27,8 @@ const out = await page.evaluate(() => {
     lineCount: lines.length,
     lines: lr,
     colors: lines.map((l) => l.style.color),
-    // 原版期望: x=88; 底行 bottomGap = 800-58 行底 → line1(第一条,上) bottomGap≈58+21
-    expect: { x: 88, newestBottomGap: 58, pitch: 21 },
+    // 原版期望: x=88; 最新(底)行 bottomGap=36(行顶 58);上一行 bottomGap≈36+22
+    expect: { x: 88, newestBottomGap: 36, pitch: 22 },
   };
 });
 console.log(JSON.stringify(out, null, 1));

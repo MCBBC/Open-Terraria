@@ -1,4 +1,5 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
+import { directorCamTarget, directorInputLocked } from '../mods/director';
 import { Achievements } from './Achievements';
 import { advanceGameTimeTick, globalTimeWrappedHourly } from './GameTime';   // ★BJ330 GTW 钟源（Main.TotalGameTime 等价）
 import { tileAnim } from '../render/TileAnim';
@@ -189,7 +190,7 @@ import {
 // spawnEmote 统一从 :163 的合并导入（spawnEmote, tickEmotes）取——重复导入已清
 import { itemUseSoundWav, itemUseSoundPerceivedVol } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
-import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing, applyBuffTicks, type StatusEnemyLike } from '../entities/projStatus';
+import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing, applyBuffTicks, debuffWriteAllowed, type StatusEnemyLike } from '../entities/projStatus';
 import { trySnapStrike, snapStrikeDust } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { equipKindOfInternal, isDyeItem } from '../data/vanillaEquip';
@@ -3702,6 +3703,30 @@ export class Game implements GameHooks {
   private destroyed = false;
   paused = false;
   private acc = 0;
+  // ---- ★interp 渲染插值（2026-10-14 用户立项,?interp=1 灰度缺省关）----
+  //  "Fix Your Timestep"（Gaffer on Games;Unity/Unreal fixed-timestep-interpolate
+  //  同款）:逻辑 60Hz+渲染 rAF 任意率的迟滞根治——120fps 下内容 60Hz 步进=每
+  //  位置停留两渲染帧,运动步长 0,2=「前一帧未消失」感（用户实报三连查定谳;
+  //  mblur 后期伪装路三连调证伪后治本刀）。渲染前按 alpha=acc/FIXED_DT 在
+  //  「上一逻辑步末↔当前步末」间 lerp 相机+玩家位【临时写,渲染后还原】——
+  //  插值相机=整个世界画面平滑（一切按相机变换绘制的内容全随动,单点杠杆）;
+  //  玩家必须成对（只插相机=玩家屏位反向漂移抖动）。渲染期消费面（绘制矩阵/
+  //  光照矩形/烘焙视口/悬停命中）用插值位=呈现帧的正确视口;还原保证 fixedUpdate
+  //  物理域零污染。60 档 alpha≈0=逐位恒等现状（零风险域）;120 档 alpha 0/0.5
+  //  交替=真中间帧。MVP 残差（登记）:NPC/弹/尘等实体不插=平滑背景上 60Hz 跳,
+  //  验收看是否二期铺全实体。传送/死亡/暂停不门控:tpVeil 拍渲染跳过、暂停门
+  //  在 render 包裹位（回 curr 位=与旧行为逐位,防暂停瞬间半步跳变）。
+  static interp = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('interp') === '1';
+    } catch { return false; }
+  })();
+  /** 插值快照（fixedUpdate 头拍=上一步末态）;-Infinity=未就绪（首步前不插） */
+  private _iPX = -Infinity;
+  private _iPY = -Infinity;
+  private _iCamX = -Infinity;
+  private _iCamY = -Infinity;
   /** 环境 cue 斜坡独立累加器（60Hz;暂停不停——UpdateAudio Main.cs:17222 同语义） */
   private audioAcc = 0;
   private lastTime = 0;
@@ -3727,6 +3752,8 @@ export class Game implements GameHooks {
   private pendingTimeSkip: number | null = null;
   /** 信息列图标点击边沿(防按住连切) */
   private _infoAccClickLatch = false;
+  /** ★A2:TE net 快照指纹(脏快照门;变更才上行) */
+  private _teNetLastFp = '';
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
@@ -6773,18 +6800,22 @@ export class Game implements GameHooks {
     // （Player.cs:25286-25330 只滤 drawingPlayerChat/editSign/editChest）——此前
     // 「背包打开不切栏」系误加；uiBlocking 只剩模态面板（暂停/图鉴/手册等）语义
     this.input.keydownHandlers.push((code, e) => {
-      // 聊天输入（原版 Enter 开聊语义）：联机态 + 无 UI 阻塞时打开。
+      // 聊天输入（原版 Enter 开聊语义,Main.cs:18447-18462 DoUpdate_Enter_ToggleChat:
+      //   门=!editSign!editChest!CaptureManager!ingameOptionsWindow(!gameMenu
+      //   !inFancyUI||menuChat)!Escape——无 netMode 项,单机/联机同权;uiBlocking=
+      //   本仓模态面板等价门）。BJ680:拆本仓自加的 `net?.active` 门——单机死亡/
+      //   NPC/事件消息同样要 Enter 历史回看(用户主诉面)。
       // 输入期键位豁免由 Input 的 INPUT 元素守卫承担（打字不触发跳跃/数字键）。
       // onSend 发送时解析 window.__swGame 活实例——不经构造期 this 闭包
       // （联机重连/世界切换会产生多 Game 实例,构造期捕获可能指向已退场实例）
-      if (code === 'Enter' && this.net?.active && !this.input.uiBlocking && this.spectatingSlot < 0) {
+      if (code === 'Enter' && !this.input.uiBlocking && this.spectatingSlot < 0) {
         this.chatInput ??= new ChatInput({
           onSend: (text, world) => {
             const g = (window as unknown as { __swGame?: Game }).__swGame;
             g?.sendChat(text, world);
           },
         });
-        this.chatInput.open();
+        this.chatInput.open(true);   // fromEnter:Menu_Open(SoundID 10,Main.cs:18453)
         return;
       }
       // Hotbar1-10（PlayerInput.cs:1920-1929 D1-D10；本仓 Digit1-Digit0 同键位）
@@ -9733,6 +9764,13 @@ export class Game implements GameHooks {
   }
 
   private fixedUpdate(dt: number) {
+    // ★interp 快照（2026-10-14,?interp=1）:上一步末态（进入本步即上一步末;0 步
+    //  渲染帧不重拍=插值域稳定;多步帧取最后一对=最新两步间,语义正确）。相机
+    //  follow 在本步尾——快照的是上步末相机位,插值域=上步末→本步末 ✓。
+    if (this.player) {
+      this._iPX = this.player.x; this._iPY = this.player.y;
+      this._iCamX = this.camera.x; this._iCamY = this.camera.y;
+    }
     // ★SW-BJ320 2026-09-24：MouseOversClear 拍位归一（Main.cs:17213 每 Update tick
     //  头清,与当 tick 内 claim 面【同 tick 耦合】——:17184 accumulator 门保证 0 步进
     //  帧不进清零,本仓等价面=非暂停 0 步进绘制帧不清,画上一 tick claim 态=原版
@@ -10325,6 +10363,15 @@ export class Game implements GameHooks {
       player.inputLeft = false;
       player.inputRight = false;
       player.inputDash = false;   // ★BJ508：观战态键面清零（releaseDash 置位臂照常重臂）
+    } else if (directorInputLocked()) {
+      // ★导演模式：cutscene 输入锁（观战同款整帧清零;UI 键不受影响——只清玩家控制面）
+      player.inputX = 0;
+      player.inputJump = false;
+      player.inputDown = false;
+      player.inputUp = false;
+      player.inputLeft = false;
+      player.inputRight = false;
+      player.inputDash = false;
     } else {
       // M5：移动/跳经键位表（Up/Down/Left/Right/Jump action；默认=WASD+方向键+Space）
       player.inputX = (inp.downAction('Left') ? -1 : 0) + (inp.downAction('Right') ? 1 : 0);
@@ -12507,8 +12554,10 @@ export class Game implements GameHooks {
     //  3-9/13-19 任一佩戴 5452 FPV 眼镜（Player.cs:14314-14316 虚荣支/:15574-15577
     //  功能支;本仓 DroneCameraTracker.tryTracking 内现算,Player.ts 零触碰）。
     const droneCam = !player.dead ? this.camera.droneTracker.tryTracking(this.player, player.inv) : null;
-    const camTX = specCam ? specCam.x : (droneCam ? droneCam.x : (golfCam ? golfCam.x : player.cx));
-    const camTY = specCam ? specCam.y : (droneCam ? droneCam.y : (golfCam ? golfCam.y : player.cy));
+    // ★导演模式（2026-10-14）：mod 相机目标优先于观战/无人机/高尔夫（cutscene 终裁定权）
+    const dCam = directorCamTarget();
+    const camTX = dCam ? dCam.x : (specCam ? specCam.x : (droneCam ? droneCam.x : (golfCam ? golfCam.x : player.cx)));
+    const camTY = dCam ? dCam.y : (specCam ? specCam.y : (droneCam ? droneCam.y : (golfCam ? golfCam.y : player.cy)));
     // ★X4 清偿刀D（2026-09-29）：netCameraTarget 写+发送门（原版 UpdateCameraPan
     // Main.cs:63650 置 LocalPlayer.netCameraTarget=trackedPosition + :63671-63676
     // 门 HasValue 翻转∨位移>160px → SendData(13)）。trackedPosition=本处三域并集
@@ -36958,17 +37007,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // （挥砍侧 applyMagmaStoneSwing 的时长掷公式保持 :6184-6198 三段掷不变）
       {
         const heldVidStatus = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1;
-        if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
-        if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
-        if (this.player.buffs.has(BuffType.ImbueFire)) {
-          e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
-          // ★1457 火浸剂伴发 PotentAcid(meleeEnchant==1 → AddBuff(395, 60t))
-          e.potentAcidT = Math.max(e.potentAcidT ?? 0, 1);
+        // ★BJ678（2026-10-14）：StatusToNPC 八支 AddBuff（Player.cs:6502-6531 逐支
+        //  70+395/39/24/72/69/31/20）全过 NPC.AddBuff buffImmune 拒绝门（NPC.cs:91037
+        //  `if (buffImmune[type]) return;` + DebuffImmunitySets 表 = data/vanillaNpcImmunity.ts）
+        //  ——骨蛇 39 [20,24,31,323] 等免疫族火浸剂挥砍不上火/纳米浸剂不困惑（曾八行
+        //  直写绕门,ImmuneToAll 37 键档全中）。闸=projStatus.debuffWriteAllowed 单源
+        //  （同块 applyFrostBurn/applyMagmaStoneSwing/applyWeaponStatusSwing 与投射物侧
+        //  applyMeleeImbue 已接,同构;时长掷保持在闸前=原版「掷后 AddBuff 拒」同拍,
+        //  RNG 消耗不变;debuffImmuneOverride 运行时豁免位语义单源自带）。
+        //  ★395 伴发归位：原版伴发在 meleeEnchant==1（毒液浸剂,buff 71→:6504-6508
+        //  AddBuff(70)+AddBuff(395,60)）支;火浸剂（buff 74→meleeEnchant 3,:6513-6515）
+        //  仅 AddBuff(24)——曾误挂火浸剂支（buffId↔浸剂对位复核纠出,与投射物侧
+        //  applyMeleeImbue 双胞胎对齐;handover-1457 旧锁随刀改判）。
+        if (this.player.buffs.has(BuffType.ImbueVenom)) {
+          const v70 = 5 + Math.random() * 5;              // 60×Next(5,10)t
+          if (debuffWriteAllowed(e, 70)) e.venomT = Math.max(e.venomT, v70);
+          // ★1457 毒液浸剂伴发 PotentAcid（meleeEnchant==1 → AddBuff(395, 60t)）
+          if (debuffWriteAllowed(e, 395)) e.potentAcidT = Math.max(e.potentAcidT ?? 0, 1);
         }
-        if (this.player.buffs.has(BuffType.ImbueGold)) e.midasT = 2;
-        if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
-        if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
-        if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+        if (this.player.buffs.has(BuffType.ImbueCursed)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(e, 39)) e.cursedT = Math.max(e.cursedT, v); }
+        if (this.player.buffs.has(BuffType.ImbueFire)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(e, 24)) e.onFireT = Math.max(e.onFireT, v); }
+        if (this.player.buffs.has(BuffType.ImbueGold) && debuffWriteAllowed(e, 72)) e.midasT = 2;
+        if (this.player.buffs.has(BuffType.ImbueIchor)) { const v = 10 + Math.random() * 10; if (debuffWriteAllowed(e, 69)) e.ichorT = Math.max(e.ichorT, v); }
+        if (this.player.buffs.has(BuffType.ImbueNano)) { const v = 1 + Math.random() * 3; if (debuffWriteAllowed(e, 31)) e.confusedT = Math.max(e.confusedT, v); }
+        if (this.player.buffs.has(BuffType.ImbuePoison)) { const v = 5 + Math.random() * 5; if (debuffWriteAllowed(e, 20)) e.poisonT = Math.max(e.poisonT, v); }
         // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
         applyFrostBurn(eq.frostBurn, e as unknown as Record<string, number>);
         // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
@@ -44660,7 +44722,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (num13 > 700) num13 = 700 + (num13 - 700) * 0.5;
           if (num13 > 900) num13 = 900 + (num13 - 900) * 0.25;
           if (Math.hypot(en.cx - p.cx, en.cy - p.cy) >= num13) continue;
-          en.confusedT = (90 + ok / 3 + Math.random() * (210 + ok / 6)) / 60;
+          // ★BJ678（2026-10-14）：反伤 AddBuff(31)（Player.cs:38719）同过 NPC.AddBuff
+          //  buffImmune 拒绝门（NPC.cs:91037）——骷髅族等数百 31 免疫族被反伤【不】
+          //  困惑（原版免疫;曾直写绕门）。时长掷保持在闸前=原版「掷后 AddBuff 拒」
+          //  同拍,RNG 消耗不变。
+          const d31 = (90 + ok / 3 + Math.random() * (210 + ok / 6)) / 60;
+          if (debuffWriteAllowed(en, 31)) en.confusedT = d31;
         }
       }
       const star = starCloakStarInfo(accVids, eq.starCloak);
@@ -53016,9 +53083,22 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     this.renderer.netActive = !!this.net?.active;
     // module100 天空氛围：联机 = 服务器 AmbienceServer 独占掷族（本地调度门关）
     this.renderer.sky.ambientRemoteDriven = !!this.net?.active;
-    // ★SW-FX27：渲染帧头翻转开关二次同步（原版 Main.cs:62944 在 Draw 头读
-    //  gravDir 置 GameViewMatrix.Effects——本仓双点同步，与 fixedUpdate 8295 对）
-    cam.flipY = this.player.gravDir === -1;
+    // ★interp 渲染插值（2026-10-14,?interp=1）:cam/player 临时写插值位,渲染后还原
+    //  （保存/还原不 try/finally 包调用体——render 抛异常=帧熔断停机（Game.start
+    //  捕获 running=false）,残留位无害;避免 120 行调用体缩进重排=并行会话 diff 面）。
+    //  暂停门:回 curr 位=与旧行为逐位（防暂停瞬间画面半步跳变;paused 时 fixedUpdate
+    //  冻结 prev/curr 不变,lerp 本恒等——门是防「暂停拍 acc 残值」的边缘半步偏移）。
+    const iA = Game.interp && this._iPX > -Infinity && !this.paused
+      ? Math.min(1, this.acc / FIXED_DT) : -1;   // 钳 1:steps≥5 雪崩残 acc 外推防御
+    let iRX = 0, iRY = 0, iRCamX = 0, iRCamY = 0;
+    if (iA >= 0) {
+      iRX = this.player.x; iRY = this.player.y;
+      iRCamX = cam.x; iRCamY = cam.y;
+      this.player.x = this._iPX + (iRX - this._iPX) * iA;
+      this.player.y = this._iPY + (iRY - this._iPY) * iA;
+      cam.x = this._iCamX + (iRCamX - this._iCamX) * iA;
+      cam.y = this._iCamY + (iRCamY - this._iCamY) * iA;
+    }
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
       L.r, L.g, L.b, L.rx, L.ry, L.rw, L.rh,
@@ -53140,7 +53220,16 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       })(),
       // 拴绳实体（锚桩 724 小动物 / 风筝桩 723 风筝）——Renderer 3.8 段绘制
       this.leashed,
+      // ★motionblur（2026-10-14）:暂停态旁路参数（画面静止=速度门天然 0,此参兜底
+      //  武装保持窗内的空转捕获;消费位=render 7x 段头收口 MotionBlur）。
+      this.paused,
     );
+    // ★interp 还原（2026-10-14）:渲染消费面（绘制/光照矩形/烘焙视口/悬停）已吃插值位
+    //  ——此处还原物理域真值,fixedUpdate/judder/mblur/glStat 等后续消费零污染。
+    if (iA >= 0) {
+      this.player.x = iRX; this.player.y = iRY;
+      cam.x = iRCamX; cam.y = iRCamY;
+    }
     // ★ghostblur（2026-10-07,?ghostblur=1 缺省关）:帧尾全屏 ghost/motion-blur
     //  accumulation pass——render() 完整返回后=本帧 glCanvas 一切 GL 写入落定的
     //  全路径唯一必经收口点（早退支覆盖;挂接点论证见 GhostBlur.ts 头注）。
@@ -53158,13 +53247,22 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   /** 聊天发送（v8 世界频道批）：房间频道本地即时回显（服务器不回发发送者,
    *  原版同语义）;世界频道回显来自服务器全服广播（含自己,约 1RTT）。
    *  M3：'/' 命令先行解析（ChatCommandProcessor.CreateOutgoingMessage 发起端等价）
-   *  ——识别为命令则本地执行 + 结果行走 channel2/3 广播,不再落普通聊天。 */
+   *  ——识别为命令则本地执行 + 结果行走 channel2/3 广播,不再落普通聊天。
+   *  BJ680：单机同权（原版 Enter 无 netMode 门,Main.cs:18451;netMode==0 的
+   *  Say=本地回显 Main.cs:18545-18548 ProcessIncomingMessage 本地形态）——
+   *  旧 `!net?.active` 早退曾令单机 Enter 全链哑火。 */
   private sendChat(text: string, world: boolean) {
     const net = this.net;
-    if (!net?.active) return;
     const msg = createOutgoingMessage(text);
     if (msg.command !== 'Say') {
       this.executeChatCommand(msg);
+      return;
+    }
+    if (!net?.active) {
+      // 单机（netMode==0）：Say 本地回显（同联机房间频道回显格式/难度色）
+      const nameSp = (this.player as { appearance?: { name?: string } }).appearance?.name ?? '玩家';
+      const rgbSp = chatColorOfDifficulty((this.player as { appearance?: { difficulty?: number } }).appearance?.difficulty);
+      this.cb.onChat?.(`<${nameSp}> ${text}`, rgbSp[0], rgbSp[1], rgbSp[2]);
       return;
     }
     if (world) {
@@ -53728,6 +53826,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         onTESnapshot: (entries) => {
           if (!setModTENetRoleIfCovered(entries)) {
             console.warn('[mod-te] 宿主 mod 集不一致(本端 TE mod 不在宿主快照,本地权威保留)');
+            // ★A3(2026-10-14):可见 toast(旧=仅 console,联机不对称静默)
+            this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.TEHostMismatch'));
             return;
           }
           applyModTESnapshot(entries);
@@ -53792,8 +53892,15 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       //  数小,全量帧价≈一条 setTile;server 镜像→晚进房补发)
       if (this.net.policy.isHost && this.tickCount % 120 === 0) {
         // ★R-B-1 保险丝:快照产/上行任何异常不熔断主循环(空窗≤下一周期自愈)
+        //  ★A2(2026-10-14):脏快照——JSON 指纹比对,未变更跳过上行(空 TE 且
+        //  从未发过=免空帧语义合并于此;变更含 0 条[清空]必发)
         try {
-          this.net.sendTEModule(snapshotModTEsForNet());
+          const snap = snapshotModTEsForNet();
+          const fp = JSON.stringify(snap);
+          if (fp !== this._teNetLastFp) {
+            this._teNetLastFp = fp;
+            this.net.sendTEModule(snap);
+          }
         } catch (err) { console.warn('[mod-te] net 上报失败(本周期跳过)', err); }
       }
       if (this.tickCount % 4 === 0) {

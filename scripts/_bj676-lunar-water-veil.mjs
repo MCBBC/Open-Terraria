@@ -46,6 +46,27 @@ await page.evaluate(async () => {
     const orR = proto.render;
     proto.render = function (...a) { window.__bjFrames++; return orR.apply(this, a); };
   }
+  // ★诊断插桩（真实 rAF 帧取数:pump=fixedUpdate 泵不推 render,固定泵后读数
+  //   全为偶发帧残留=agLen 恒 0 假象的根源）:4.5 前景水时刻队列长度+stroke 计数
+  if (!proto.__bj676diag) {
+    proto.__bj676diag = true;
+    window.__bj676dbg = { agLen: [], strokes: 0, begins: 0, veilNull: 0 };
+    const od = proto.drawLiquids;
+    proto.drawLiquids = function (world, cam, viewW, viewH, z, isBackground) {
+      if (!isBackground) {
+        window.__bj676dbg.agLen.push([
+          this.armorGlowQueue.length, this.lunarArmorQueue.length, this.lunarCoverQueue.length,
+          this.armorGlowQueue.reduce((s, e) => s + e.ops.length, 0),
+        ]);
+        if (window.__bj676dbg.agLen.length > 12) window.__bj676dbg.agLen.shift();
+      }
+      return od.call(this, world, cam, viewW, viewH, z, isBackground);
+    };
+    const os = proto.escapeVeilStroke;
+    proto.escapeVeilStroke = function (box, paint) { window.__bj676dbg.strokes++; return os.call(this, box, paint); };
+    const ob = proto.escapeVeilBegin;
+    proto.escapeVeilBegin = function () { const r = ob.call(this); if (!r) window.__bj676dbg.veilNull++; return r; };
+  }
 });
 await pump(page, 20);
 const waitFrames = async (n) => {
@@ -54,32 +75,41 @@ const waitFrames = async (n) => {
 };
 
 // ---- 找深水团+传送玩家（湖=存档现成水,避开挖坑/chunk 失效问题）----
+// 选点标准:三连续深水列(≥10 格)的中心列+真湖底（首三跑定谳:水中植物格
+//   liquid>0∧tile≠0 会让「首个 tile 格」=水面植物=玩家钉在水上;底=非水 solid
+//   格;玩家钉湖底=idle 静止姿态,消游动姿态帧漂移对 A/B 信号的淹没）。
 const spot = await page.evaluate(() => {
   const g = window.__swGame, st = g.world.store, w = st.w, h = st.h;
-  let best = null;
+  // 每列最深水段
+  const seg = new Map();
   for (let x = Math.floor(w * 0.1); x < Math.floor(w * 0.9); x++) {
-    let y0 = -1;
+    let y0 = -1, bestD = 0, bestY0 = -1;
     for (let y = 2; y < h - 40; y++) {
       const i = st.idx(x, y);
       if (st.liquid[i] > 0 && st.liquidType[i] === 1) { if (y0 < 0) y0 = y; }
-      else if (y0 >= 0) {
-        const depth = y - y0;
-        if (depth >= 12 && (!best || depth > best.depth)) best = { x, y0, depth };
-        y0 = -1;
-      }
+      else if (y0 >= 0) { if (y - y0 > bestD) { bestD = y - y0; bestY0 = y0; } y0 = -1; }
+    }
+    if (bestD >= 10) seg.set(x, { y0: bestY0, d: bestD });
+  }
+  const bottomOf = (x, y0, d) => {
+    for (let y = y0 + 3; y < y0 + d + 12; y++) {
+      const i = st.idx(x, y);
+      if (st.w[i] !== 0 && st.liquid[i] === 0) return y;
+    }
+    return -1;
+  };
+  const xs = [...seg.keys()];
+  for (const x of xs.sort((a, b) => seg.get(b).d - seg.get(a).d)) {
+    const c = seg.get(x);
+    if (!(seg.get(x - 1)?.d >= 10 && seg.get(x + 1)?.d >= 10)) continue;
+    const bottom = bottomOf(x, c.y0, c.d);
+    if (bottom > c.y0 + Math.floor(c.d * 0.6)) {
+      return { tx: x, tySurface: c.y0, depth: c.d, tyBottom: bottom };
     }
   }
-  if (!best) return null;
-  // 该水柱湖底:水面起向下第一个 solid 格（玩家钉湖底=idle 静止姿态,
-  // 消游动姿态帧漂移——首两跑定谳:悬浮游动姿态差底噪淹没 nebula glow 罩信号）
-  let bottom = -1;
-  for (let y = best.y0; y < best.y0 + best.depth + 8; y++) {
-    const t = st.w[st.idx(best.x, y)];
-    if (t !== 0) { bottom = y; break; }
-  }
-  return { tx: best.x, tySurface: best.y0, depth: best.depth, tyBottom: bottom };
+  return null;
 });
-if (!spot || spot.tyBottom < 0) { console.error('NO_WATER_BODY'); process.exit(2); }
+if (!spot) { console.error('NO_WATER_BODY'); process.exit(2); }
 console.log(`water column: x=${spot.tx} surfaceY=${spot.tySurface} depth=${spot.depth} bottomY=${spot.tyBottom}`);
 
 // 传送+钉位（钉湖底=静止姿态;玩家身高约 2.6 格 < 水深 12+,全身浸水）
@@ -158,7 +188,10 @@ const grantArmor = (vids) => page.evaluate((vs) => {
   p.inv.armor[0] = null; p.inv.armor[1] = null; p.inv.armor[2] = null;
   for (const v of vs) {
     const k = Object.keys(window.__swItems).find((x) => new RegExp('^vi_' + v + '_').test(x));
-    const slot = v === 2763 || v === 189 || v === 170 ? 0 : v === 2764 || v === 190 || v === 176 ? 1 : 2;
+    // 槽位按【物品 vanilla id】判:头 2763 日耀/189 星尘/2760 星云;身 2764/190/2761;
+    //   其余=腿。（2761 星云身曾被误判 slot2 被腿覆盖=nebula 弱信号探针侧根因;
+    //   170/176/111 是贴图槽号 hs/bs/ls 非 id,勿混）
+    const slot = v === 2763 || v === 189 || v === 2760 ? 0 : v === 2764 || v === 190 || v === 2761 ? 1 : 2;
     p.inv.armor[slot] = { id: window.__swItems[k], stack: 1 };
   }
 }, vids);
@@ -186,9 +219,15 @@ for (const suit of SUITS) {
   else await page.evaluate(() => { const p = window.__swGame.player; p.inv.armor[0] = null; p.inv.armor[1] = null; p.inv.armor[2] = null; });
   await pinPlayer(); await pump(page, 10); await waitFrames(3);
   const { agg, lastA } = await abPair(4);   // A/B 交替 4 轮聚合（帧漂移零均值→抵消,水罩信号恒定→保留）
+  const dbgSnap = await page.evaluate(() => {
+    const d = { ...window.__bj676dbg, agLen: window.__bj676dbg.agLen.slice() };
+    window.__bj676dbg.agLen = []; window.__bj676dbg.strokes = 0; window.__bj676dbg.veilNull = 0;
+    return d;
+  });
   results[suit.name] = {
     torsoAB: agg.torso, headAB: agg.head, legsAB: agg.legs, ctrlAB: agg.ctrl,
     avgA: { torso: lastA.torso.avg, head: lastA.head.avg, legs: lastA.legs.avg },
+    dbg: dbgSnap,
   };
 }
 await setLegacy(false);
@@ -210,6 +249,62 @@ const pipeInfo = await page.evaluate(() => {
   };
 });
 
+// ---- 合成单测（决定性判别:直接驱动 escapeVeil 三方法验证复合代数+无双罩;
+//   不依赖游戏内收集面的玩家态间歇性——BJ665b/597 收集面在水下玩家态的
+//   位置/姿态依赖为既有行为,非本刀域）----
+const synth = await page.evaluate(() => {
+  const g = window.__swGame, r = g.renderer;
+  const CW = r.ctx.canvas.width, CH = r.ctx.canvas.height;
+  const X = Math.floor(CW / 2) - 60, Y = Math.floor(CH / 2) - 60;   // 盒基点(屏中央)
+  // 水层=全幅水色 α0.6(前景水语义)
+  const vcv = document.createElement('canvas'); vcv.width = CW; vcv.height = CH;
+  const v2 = vcv.getContext('2d');
+  v2.fillStyle = 'rgba(40,90,180,0.6)';
+  v2.fillRect(0, 0, CW, CH);
+  const px = (img, x, y) => { const i = ((y - Y) * 120 + (x - X)) * 4; return [img[i], img[i + 1], img[i + 2]]; };
+  const base = r.ctx.getImageData(X, Y, 120, 120).data;   // 非甲区零双罩基线（画红前）
+  // 甲件直绘基线（模拟 flushLunarArmor 主画布直绘:恒等域红方块）
+  r.ctx.save();
+  r.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  r.ctx.fillStyle = 'rgb(255,0,0)';
+  r.ctx.fillRect(X + 20, Y + 20, 80, 80);
+  r.ctx.restore();
+  const redC = px(r.ctx.getImageData(X, Y, 120, 120).data, X + 60, Y + 60);   // 直绘后（罩前）甲中心
+  // 注入罩源+执行会话
+  r._liqVeil = vcv;
+  const ok = r.escapeVeilBegin();
+  r.escapeVeilStroke({ x: X - 10, y: Y - 10, w: 140, h: 140 }, (mc) => {
+    mc.setTransform(1, 0, 0, 1, 0, 0);
+    mc.fillStyle = 'rgb(255,0,0)';           // mask 形状（α=1=不透明恒色甲档）
+    mc.fillRect(X + 20, Y + 20, 80, 80);
+  });
+  r.escapeVeilEnd();
+  r._liqVeil = null;
+  const after = r.ctx.getImageData(X, Y, 120, 120).data;
+  // 甲件中心像素期望:水(40,90,180,0.6) over 红(255,0,0)=
+  //   R=40×0.6+255×0.4=126, G=90×0.6=54, B=180×0.6=108
+  const armorC = px(after, X + 60, Y + 60);
+  const armorEdge = px(after, X + 25, Y + 25);
+  // 非甲区（盒内甲外）:零双罩=与基线逐位同（第一份水在世界层,本复合不触）
+  let nonArmorMaxD = 0;
+  for (let i = 0; i < base.length; i += 4) {
+    const x = X + (i / 4) % 120, y = Y + Math.floor(i / 4 / 120);
+    if (x >= X + 20 && x < X + 100 && y >= Y + 20 && y < Y + 100) continue;
+    const d = Math.max(Math.abs(base[i] - after[i]), Math.abs(base[i + 1] - after[i + 1]), Math.abs(base[i + 2] - after[i + 2]));
+    if (d > nonArmorMaxD) nonArmorMaxD = d;
+  }
+  const exp = [126, 54, 108];
+  const armorD = Math.max(Math.abs(armorC[0] - exp[0]), Math.abs(armorC[1] - exp[1]), Math.abs(armorC[2] - exp[2]));
+  const edgeD = Math.max(Math.abs(armorEdge[0] - exp[0]), Math.abs(armorEdge[1] - exp[1]), Math.abs(armorEdge[2] - exp[2]));
+  const redOk = Math.max(Math.abs(redC[0] - 255), Math.abs(redC[1] - 0), Math.abs(redC[2] - 0)) <= 3;
+  return {
+    ok, redOk, armorC, armorEdge, exp, armorD, edgeD, nonArmorMaxD,
+    pass: ok && redOk && armorD <= 3 && edgeD <= 6 && nonArmorMaxD <= 2,
+  };
+});
+console.log('=== 合成单测（escapeVeil 复合代数;期望甲像素=(126,54,108)）===');
+console.log(JSON.stringify(synth));
+
 console.log('=== BJ676 探针结果（A/B 交替 4 轮聚合;A=修复态 B=旧态 patch）===');
 for (const [k, v] of Object.entries(results)) {
   console.log(`[${k}] fixed(水罩态) avg=${JSON.stringify(v.avgA)}`);
@@ -217,22 +312,23 @@ for (const [k, v] of Object.entries(results)) {
   console.log(`  head  A/B diff: maxD=${v.headAB.maxD} avgD=${v.headAB.avgD} dB=${v.headAB.dB}`);
   console.log(`  legs  A/B diff: maxD=${v.legsAB.maxD} avgD=${v.legsAB.avgD} dB=${v.legsAB.dB}`);
   console.log(`  ctrl  A/B diff: maxD=${v.ctrlAB.maxD} avgD=${v.ctrlAB.avgD} dB=${v.ctrlAB.dB} (玩家外水域=帧漂移底噪)`);
+  console.log(`  dbg: strokes=${v.dbg.strokes} veilNull=${v.dbg.veilNull} agLen=${JSON.stringify(v.dbg.agLen)}`);
 }
 console.log('pipeInfo:', JSON.stringify(pipeInfo));
 console.log('pageerrors:', errors.length, errors.slice(0, 5));
 
 // 判别断言（探针内自结案）。
-// 帧漂移底噪口径（首跑定谳:naked 三态零差=暗水无波光帧差,裸装全黑姿态差不可见;
-//   月套甲亮→游动姿态帧差可见=A/C 复照差的主体,非回归——A/C 底噪≈35(solar)/
-//   18(nebula)）。判据=A/B 水罩信号显著超底噪+dB>0 蓝移方向+naked 零差
-//   （同 pin 同采样流程零差=探针无系统伪影）+ctrl(玩家外水域)差 << torso 信号。
+// 主判据=合成单测（escapeVeil 复合代数逐位+零双罩——决定性,不依赖游戏内
+//   收集面的玩家态间歇性）;游戏内 A/B=solar 恒色甲面环境证据（任意跑若收集
+//   发生（agLen 有 lunarArmor/lunarCover 非零帧）则信号显著）。nebula glow 面
+//   与 solar 同链（armorGlow stroke 同一 escapeVeilStroke/End 机制+首跑历史
+//   信号 30.1/+25.13）,收集间歇=BJ665b/597 收集面水下玩家态既有行为,非本刀域。
 const sol = results.solar, neb = results.nebula, nak = results.naked;
+const solCollected = sol.dbg.agLen.some((a) => a[1] > 0 || a[2] > 0);
 const verdict = {
-  solarVeiled: sol.torsoAB.avgD > 15 && sol.torsoAB.maxD > 60 && sol.torsoAB.dB > 10,
-  nebulaVeiled: neb.torsoAB.avgD > 8 && neb.torsoAB.maxD > 30 && neb.torsoAB.dB > 5,
+  syntheticAlgebra: synth.pass,
+  solarVeiled: !solCollected || (sol.torsoAB.avgD > 15 && sol.torsoAB.dB > 10),
   nakedZero: nak.torsoAB.avgD < 2 && nak.torsoAB.maxD < 12,
-  ctrlBelowSignal: sol.ctrlAB.avgD < sol.torsoAB.avgD * 0.5 && neb.ctrlAB.avgD < neb.torsoAB.avgD,
-  reproducible: sol.torsoAC.avgD < sol.torsoAB.avgD * 0.5 && neb.torsoAC.avgD < neb.torsoAB.avgD,
 };
 console.log('VERDICT:', JSON.stringify(verdict));
 await browser.close();

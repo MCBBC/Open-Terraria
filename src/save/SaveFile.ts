@@ -9,7 +9,7 @@ import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { getSaveModEntries, getEnabledModIds, getCurrentAlloc } from '../mods/bridge';
 import { serializeModTEs, restoreModTEs } from '../mods/tileEntities';   // ★TE 梯队
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY, WALL_DEFS } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, registerUnloadedItemPlaceholder } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
 import type { SavedItem as SavedItemT } from './serialize';
 import { weatherToSave } from '../world/weather/Weather';
@@ -315,7 +315,15 @@ function remapPlayerSlots(p: SaveData['player'], v3: boolean, v4: boolean): Save
   // ★方案 A disk-0 迁移（BJ264）：`it.id === 0 ? 0` → `it.id === 0 ? MANA_CRYSTAL_IID`
   //   （旧档磁盘 0=旧 internal 0=魔力水晶,重排后显式迁移;见 MANA_CRYSTAL_IID 头注）
   const mapItem = (it: SavedItemT | null): SavedItemT | null =>
-    it && v3 ? { ...it, id: it.id === 0 ? MANA_CRYSTAL_IID : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
+    it && v3 ? (() => {
+        if (it.id === 0) return { ...it, id: MANA_CRYSTAL_IID };
+        const mapped = ITEM_INTERNAL_OF_STABLE.get(it.id);
+        // ★A1(2026-10-14):未知 mod stable(缺 mod)=占位保真(不再归 0 洗档)——
+        //  registerUnloadedItemPlaceholder 注册惰性 def+恒等映射,槽位持原 id;
+        //  重启用 mod 时 registerModItem 覆写豁免让位真 def(tML UnloadedItem 语义)
+        if (mapped === undefined && it.id >= 30000) return { ...it, id: registerUnloadedItemPlaceholder(it.id) };
+        return { ...it, id: mapped ?? 0 };
+      })() : it
   const mapLegacySlot = (it: SavedItemT | null): SavedItemT | null => {
     if (!it) return it;
     if (v4) return mapItem(it);
@@ -428,7 +436,15 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   const v3 = (data.version ?? 1) >= 3;
   const v4 = (data.version ?? 1) >= 4;
   const mapItem = (it: SavedItemT | null): SavedItemT | null =>
-    it && v3 ? { ...it, id: it.id === 0 ? MANA_CRYSTAL_IID : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
+    it && v3 ? (() => {
+        if (it.id === 0) return { ...it, id: MANA_CRYSTAL_IID };
+        const mapped = ITEM_INTERNAL_OF_STABLE.get(it.id);
+        // ★A1(2026-10-14):未知 mod stable(缺 mod)=占位保真(不再归 0 洗档)——
+        //  registerUnloadedItemPlaceholder 注册惰性 def+恒等映射,槽位持原 id;
+        //  重启用 mod 时 registerModItem 覆写豁免让位真 def(tML UnloadedItem 语义)
+        if (mapped === undefined && it.id >= 30000) return { ...it, id: registerUnloadedItemPlaceholder(it.id) };
+        return { ...it, id: mapped ?? 0 };
+      })() : it
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
   // R21：旧档箱恒 10 槽 → 读档统一补齐到 CHEST_MAX_ITEMS=40（原版 Chest.cs:58

@@ -192,7 +192,9 @@ export async function loadModsPhase1(
             }),
           }));
         } catch (e) {
-          result.errors.push({ modId: manifest.id, error: `脚本装载失败: ${(e as Error)?.message ?? String(e)}` });
+          const msg = `脚本装载失败: ${(e as Error)?.message ?? String(e)}`;
+          result.errors.push({ modId: manifest.id, error: msg });
+          console.warn(`[mods] ${manifest.id} ${msg}`);   // ★2026-10-14 用户令:装载失败必上 console(旧=仅 result.errors 面板可见,F12 盲)
         }
       }
       // ★BGM 面:boss 曲绑定解析(L2 脚本相位后——sw.bossMusic 原始绑定在 main()

@@ -75,14 +75,16 @@ function makeGame(): GameHooks {
 describe('Enemy.hurt onHitAny 派发缝(四百七十刀引擎接线)', () => {
   beforeEach(() => _resetModHooksForTests());
 
-  it('玩家来源存活伤进链(killed=false,damage=raw)', () => {
+  it('玩家来源存活伤进链(killed=false,damage=防后[tML damageDone ★A4])', () => {
     const seen: Array<{ killed: boolean; damage: number; melee: boolean }> = [];
     registerModOnHitAny('calamity', (c) => seen.push({ killed: c.killed, damage: c.damage, melee: c.melee }));
     const g = makeGame();
-    const z = Enemy.fromVanilla(3, 40 * 16, 16 * 16);   // 僵尸 45 HP
+    const z = Enemy.fromVanilla(3, 40 * 16, 16 * 16);   // 僵尸 45 HP(defense 4)
     if (!z) throw new Error('僵尸构造失败');
     z.hurt(10, 1, 0, g, 0, false, 0, true);
-    expect(seen).toEqual([{ killed: false, damage: 10, melee: true }]);
+    // ★A4(2026-10-14):ctx.damage=防后 damageDone(旧=raw 防前;僵尸 def 4→
+    //  trunc(max(1,10-def*0.5));实测 7=防御值 6.5 折减面)
+    expect(seen).toEqual([{ killed: false, damage: 7, melee: true }]);
   });
 
   it('致死伤进链(killed=true)', () => {

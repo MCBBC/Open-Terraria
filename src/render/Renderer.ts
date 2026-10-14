@@ -1,4 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
+import { directorPlayerHidden, runDirectorOverlay } from '../mods/director';
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, noteStarveProbeFail, noteStarveProbeOk, offStarveTransition, onStarveTransition, starvedEver, starvedLock, starveSnapshot } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY, houseBannerLightRow, houseBannerVisible, npcHousingCategory } from '../world/Housing';
@@ -332,6 +333,7 @@ import { GLSpriteLayer, type TexEntry } from './GLSpriteLayer';
 import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
 import { ghostFrameEnd } from './GhostBlur';   // ★ghostblur（2026-10-07;?ghostblur=1 缺省关,Game 帧 tick 尾收口）
 import { judderFrameEnd } from './JudderSmooth';   // ★juddersmooth（2026-10-10;?smooth=1 缺省关,同族收口点）
+import { motionBlurStep } from './MotionBlur';   // ★motionblur（2026-10-14;?mblur=1 灰度——速度门控世界域运动模糊）
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
@@ -950,9 +952,11 @@ export function drawElectrifiedArcFrames(ctx: CanvasRenderingContext2D,
   tex: CanvasImageSource | { width: number; height: number } | null | undefined,
   miscCounter: number, layer: 'back' | 'front'): void {
   const phases = electrifiedArcPhases(miscCounter, layer);
-  if (!phases.length || !tex || !(tex.width > 0)) return;
-  const fw = (tex as { width: number }).width;
-  const fh = (tex as { height: number }).height / 7;
+  if (!phases.length || !tex) return;
+  const fw = (tex as { width?: number }).width ?? 0;
+  const th = (tex as { height?: number }).height ?? 0;
+  if (!(fw > 0) || !(th > 0)) return;            // 贴图未就绪/空 → 安全跳过
+  const fh = th / 7;
   const cy = 4 - FRAME_H / 2;                    // pad−bodyFrame.Height/2（帧中心）
   ctx.save();
   ctx.globalAlpha = 100 / 255;                   // colorElectricity A=100（:456）
@@ -5632,6 +5636,9 @@ export class Renderer {
     remotePlayers: Player[] = [],
     invasion: { name: string; pct: number; label?: string } | null = null,
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
+    /** ★motionblur（2026-10-14）:暂停态旁路（画面静止=速度门天然 0,此参兜底
+     *  武装保持窗内的空转捕获）;Game.render 调用点传 this.paused。 */
+    paused = false,
   ) {
     this._diagFrame++;   // ★P0-A:诊断帧戳（swpipe 降级指纹/计数按帧去重的时基）
     // ★D18-F6(2026-10-13):全亮队列帧首清——冲刷侧清(17921 位)只盖「正常到达冲刷」
@@ -6835,7 +6842,7 @@ export class Renderer {
       // 湖面星闪 Spawn_LakeSparkle 同池）。步进在 Game.update updateFakeFishSchool
       drawFakeFishSchool(this);
     }
-    this.drawPlayer(player, world, swing, flicker);
+    if (!directorPlayerHidden()) this.drawPlayer(player, world, swing, flicker);   // ★导演模式:cutscene 可隐藏本体
     // ★第四批:mod 玩家外观自绘 overlay(drawPlayer 返回后;ModDrawCtx 受限算子面)
     runModPlayerPostDraw(player, this.buildModDrawCtx(player.cx, player.cy, cam));
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
@@ -6905,7 +6912,7 @@ export class Renderer {
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720；
     //     ★r15 R15-7：在 gore/尘【之后】= 水 0.6 半透明罩住碎块与尘——水中爆炸
     //     碎块/尘带水色,原版语义）：
-    this.drawLiquids(world, cam, viewW, viewH, z, false);
+    this.drawLiquids(world, cam, viewW, viewH, z, false, entities);   // ★BJ679:实体直绘逃逸族（茎蔓/Faeling/fairy/鹿角怪）入水罩谓词
 
     // 4.55 导线覆盖层 + 宏伟蓝图预览（★r15 R15-2：原版 DrawWires 唯二调用
     //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上。
@@ -7048,6 +7055,15 @@ export class Renderer {
       if (!cgGl) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
     }
 
+    // ★motionblur 7x 段头收口（2026-10-14,?mblur=1 灰度;挂接点论证见 MotionBlur.ts
+    //   头注【捕获面】）:此刻主画布=完整世界画面（c10e 纯帧=上方垫底已把 sky+glCanvas
+    //   垫入;非 c10e 单画布路径天然含世界;fullbright 分支跳垫底但画布同含世界）而
+    //   HUD/覆盖层未画=天然 HUD 排除（文字/准星恒清晰）。死亡灰化（7000 段,自绘主
+    //   画布全帧滤镜）在【本位之前】——dead 态由 MotionBlur 内部门重置旁路;后续
+    //   7-shine/voidlens/HUD 画在本位之后=恒清晰。速度源=cam（跟随相机,玩家运动
+    //   忠实代理含传送幕帘联动）。
+    motionBlurStep(ctx, cam.x, cam.y, undefined, paused, player.dead, z);
+
     // 7-shine. tileShine +0.39 加法支（Main.shine case 262-268 Gemspark：原版加在
     //    顶点色(光)上、与光照 L 无关 → 乘光合成后平加 sprite×0.39；设备矩形与
     //    drawCoatGlowGrid 同式含低清 wKg 约定。乘法 delta 支在世界段 2c'''.5）
@@ -7114,6 +7130,11 @@ export class Renderer {
     // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
     //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉
     this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
+    // ★BJ679（2026-10-14）水罩会话扩区:BJ676 登记的同性质逃逸队列九路收编——
+    //   会话从 7c（逃逸族首队列）起开、收口挪到 7f 拖尾后（收编清单+余债登记
+    //   见 7e 段 BJ676 头注 ★BJ679 段）。_liqVeil 缺席帧（无水/liqgl 批化）本调
+    //   用返 false=会话外全链零开销（各 flush 镜像 _veilActive 守卫恒 no-op）。
+    this.escapeVeilBegin();
     this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
     // 7d. 原版 Dust 全亮 pass（type 6/15/59-64 强制 White :38406——不受光照，
@@ -7201,25 +7222,53 @@ export class Renderer {
     //   glow 加法支残差 (1−αW)·L(W) 底色项（逃逸像素处世界层已含水,glow 加亮
     //   后再被罩=水色略深于原版;远小于旧病=glow 完全免水）;半透明逃逸像素罩量
     //   按 maskα 连续衰减（逐位满罩需阈值 mask,canvas 8bit 无原生,登记）。
-    //   同性质未修队列登记（原版均在主场景序列=水应罩,本刀只收月套面=用户
-    //   实报域;机制通用 escapeVeilStroke 逐队列可接入）:7e 翼光 wingGlow/
-    //   itemGlow/eyebrella 云盖、7e' 鞭线体、7f 拖尾、7c BrightVines、7d' Faeling
-    //   /fairy/鹿角怪、7d'' FadingParticles、7d''' 四塔 glow、flushNpcWhiteLift;
-    //   7g 导线 Bright/7h 狱火环原版在【水后】（:63259/:63264）=正确不罩。
-    this.escapeVeilBegin();
+    //   ★BJ679（2026-10-14）登记债收编:上述九队列已全接入会话（原版锚逐队列
+    //   见各 flush/直绘体内 BJ679 注）——7e 翼光 wingGlow（PlayerDrawLayers.cs:655
+    //   DrawPlayer_09_Wings→:63204 水前）/7e itemGlow 手持（:3148 DrawPlayer_27_
+    //   HeldItem→:63204）+掉落（Main.cs:39408-39437 DrawItems→:63226）/7e eyebrella
+    //   （:4157 DrawPlayer_38_EyebrellaCloud→:63204）/7e' 鞭线体（flag3 :36747-
+    //   36749→DrawProjectiles :63199）/7f 拖尾 CPU 光栅路（弹幕 Drawer→:63199）/
+    //   7c 茎蔓（Main.cs:22842-22868 下限色链段→DrawNPC 链→DrawNPCs :63183）/
+    //   7d' Faeling（:24462 case 677→DrawNPCDirect_Faeling :26809）+fairy 583-585
+    //   +鹿角怪 668（DrawNPCDirect_Deerclops :26714,红雾 :26743/:26795→:63183）/
+    //   7d'' FadingParticles（Main.cs:63207-63208 ParticleSystem_World_OverPlayers）/
+    //   7d''' 四塔 glow（Main.cs:24483-24520→:63183）/flushNpcWhiteLift（NPC 链→
+    //   :63183）——全部水前=水应罩 ✓。余债登记（GL/子链面,本刀不碰 GL 路）:
+    //   liqgl 批化帧 gate 路（FBO 回读,BJ676 既有）;gladd 旗开 itemGlow GL 会话
+    //   消费面（7x 前移位,队列空=无镜像笔）;拖尾 GL 路（obj55 SM2/obj58 tech 渲入
+    //   glfx.canvas 全幅上屏段,drawStripTrail onBlit 钩子不触发）;projFullbright
+    //   Queue 闭包族（BJ278 弹体全亮,消费位在 flushTrailShade 内=同性质新登记）;
+    //   翼光 overlay 的 betsy(40)/trail45(45) 两个子函数链（mirrorPass 跳过）;
+    //   7d drawVanillaDustPass 全亮尘（原版 DrawDust :63241 亦水前=同性质新登记,
+    //   逐尘镜像成本面待评估）。
+    //   7g 导线 Bright/7h 狱火环原版在【水后】（:63251/:63259/:63264）=正确不罩。
     // 7e² 恒色甲件（★BJ665b 2026-10-12：BJ594 登记架构债落地——日耀/星尘甲件
     //      SetPassColors 恒色 250³ 覆写采光基值=自发光甲。lit 实体窗烘除（PaperDoll
     //      lunarSplit）→ 合成后重绘；被盖层随迁在 7e⁴。位次=甲位 glow 前（星尘
     //      GlowMask 叠层在甲件之上=原版逐件后随叠画序））
     this.flushLunarArmor();
-    // 7e'''' 甲位 GlowMask（★BJ597 2026-10-10：SetPassColors 色面免光照=自发光
-    //      ——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。在翼光
-    //      后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族）
+    // 7e'''' 甲位 GlowMask·under 遍（★BJ597 2026-10-10：SetPassColors 色面免光照
+    //      =自发光——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。
+    //      在翼光后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族。
+    //      ★BJ681（2026-10-14 用户实报「甲盖武器」）分两遍冲刷：本遍=13/17/21 站
+    //      （腿/身/头,arm 未标 op）——原版序武器(27)【之下】→ 须在 7e⁴ 随迁重放
+    //      前;28 臂站 op 留队列由下方 itemGlow 后的 arm 遍消费）
     this.flushArmorGlow();
-    // 7e⁴ 恒色甲件被盖层随迁（★BJ665b：手持物/身前配饰/滑轮/坐骑前层等原版
-    //      18-38 层组——甲件恒色重绘在其下=层序保持（禁 C 裸重绘）;在甲位 glow 后
-    //      =原版 glow 逐件后随叠画 < 22 脸饰 < 27 手持物序;本槽在 itemGlow 前=
-    //      手持光罩仍在物品之上）
+    // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
+    //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
+    //      用户实报"半透的比较暗";drawPlayer 收集、此处消费。同槽判例=翼光/
+    //      眼球伞/四塔 GlowMask「原版硬编码色不受光照」合成后逃逸族。
+    //      ★BJ681 挪位（原在 7e''''' 后）：原版 26_SolarShield < 27_HeldItem
+    //      （LegacyPlayerRenderer.cs:233-235 亲读）=盾球在手持物【之下】;旧位在
+    //      7e⁴ 随迁重放后=盾球盖住挥舞武器=用户实报「日耀套甲盖武器」面真身。
+    //      今位=甲位 glow under 遍后（26 > 13/17/21 glow ✓）、7e⁴ 前（26 < 27 ✓）;
+    //      滑轮(24)/浮游圈前半(17)与盾球次序残差登记（R2 内容整窗重放无法夹层））
+    this.flushSolarShieldQueue(cam, z);
+    // 7e⁴ 恒色甲件+glow 族被盖层随迁（★BJ665b：手持物/身前配饰/滑轮/坐骑前层等
+    //      原版 18-38 层组——甲件恒色重绘在其下=层序保持（禁 C 裸重绘）;在甲位
+    //      glow under 遍后=原版 glow 逐件后随叠画 < 22 脸饰 < 27 手持物序;本槽在
+    //      itemGlow 前=手持光罩仍在物品之上。★BJ681 扩 glowCover:星云/漩涡等
+    //      glow 族武器/身前配饰同随迁=画回 glow 之上）
     this.flushLunarCovered();
     // 7e''''' Item.glowMask（★BJ601 2026-10-10：手持两段+掉落物光罩——光罩色不取
     //      光照=自发光,drawPlayer/drawUseItem/drawDrop 收集、此处消费。同槽判例=
@@ -7227,12 +7276,12 @@ export class Renderer {
     //      ★gladd 面②:旗开时队列已被垫底前 GL 会话消费（见 7x 头注——会话前移）,
     //      此处队列空=空转;GL 失败帧队列完整=本位 2D 原路径重放（兜底位不变）。
     this.flushItemGlow();
-    // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
-    //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
-    //      用户实报"半透的比较暗";drawPlayer 收集、此处消费。同槽判例=翼光/
-    //      眼球伞/四塔 GlowMask「原版硬编码色不受光照」合成后逃逸族）
-    this.flushSolarShieldQueue(cam, z);
-    this.escapeVeilEnd();   // ★BJ676 收口:「前景水层×mask」over 主画布（c10e 幂等垫底内含;itemGlow 在会话内不参=登记面）
+    // 7e''''·arm 甲位 GlowMask·arm 遍（★BJ681）：28_ArmOverItem 站 op（armMask
+    //      :3659-3663 + 复合前肩/前臂 28_ArmOverItemComposite）——原版序 27 手持
+    //      物 < 28 臂+臂glow（LegacyPlayerRenderer.cs:234-235）=臂 glow 在武器
+    //      【之上】→ 本遍在 7e⁴ 随迁重放+itemGlow 后（27 本体 < 27 光罩 < 28 臂
+    //      glow 全序保持）。甲虫 orb(37) 在臂 glow 之下的残差登记）
+    this.flushArmorGlow(true);
     // 7e''. 眼球伞云盖（A4 终版：min(头顶光照,170) 一次性施加的合成后逃逸；
     //      drawPlayer 收集、此处消费；在翼后=原版 38 层>9 层）
     this.flushEyebrellaCloud(cam, z);
@@ -7245,6 +7294,10 @@ export class Renderer {
     //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
     //     MissileProj 实体段收集）
     this.flushTrailShade(cam, z, viewW, viewH);
+    this.escapeVeilEnd();   // ★BJ676 收口（★BJ679 挪位）:「前景水层×mask」over 主画布
+    //   ——会话扩至 7c-7f 全逃逸族（c10e 幂等垫底内含;eyebrella/鞭线体/拖尾与
+    //   月套四 flush+itemGlow 同会话同收;7g 导线/7h 狱火环/BJ553 接口层在收口
+    //   后=原版水后序保持,正确不罩域零触碰）
 
     // 7g. 导线 Bright 档（★BJ583 2026-10-09）：DrawWires case 0=Color.White 免光照
     //     （Main.cs:59216-59225）——机械透镜 3619/宏伟蓝图 3611 装备后 builderAccStatus
@@ -7829,6 +7882,10 @@ export class Renderer {
     //     全屏地图（9.5 提前返）不画——原与现可见结果一致（列/文本均被图盖）。
     this.drawMouseTextLayer(ctx, player);
 
+    // 13.5 ★导演模式顶层绘制面（2026-10-14）：字幕/标题/黑幕/遮幅——MouseText 层后
+    //     = 全部 UI 之上;mod 侧自绘,引擎只给 ctx（屏幕坐标系,同 MouseText 层）
+    runDirectorOverlay(ctx, this.canvas.width, this.canvas.height);
+
     // 14. FPS 读数（★BJ305 用户明令新功能——设置「帧率显示」门禁;层位=MouseText
     //     收尾(步 13)之后=接口层之上,调试读数压全部 UI。拍照重渲(_capturePass)
     //     同画——与死亡屏/资源条等 HUD 层既有拍照行为一致,偏差登记）
@@ -8402,7 +8459,8 @@ export class Renderer {
     }
   }
 
-  private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
+  private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean,
+    veilEntities: Entity[] = []) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
     // isBackground：背景 pass（墙层之前，不透明）或前景 pass（实体之后，0.6）
     // ★BJ317：窗口改走 liquidDrawWindow 单源——左/右/上外扩 4 格（底缘保持原版 +5），
@@ -8420,11 +8478,33 @@ export class Renderer {
     if (!warpOn) clearWaterWarpDebug();
     // ★BJ676 前景水罩谓词（月套逃逸队列在 drawPlayer 实体段已填——实体段 4 <
     //   前景水 4.5,时序恒满足）:四队列=lunarArmor/armorGlow/lunarCovered/
-    //   solarShield（7e 月套域,escapeVeilEnd 消费）。非月套帧恒 false=液体
-    //   三路零触碰。星云套=armorGlow 面;日耀套=lunarArmor+armorGlow+
-    //   solarShield 盾球（用户实报「星云套或日耀套在水里水被装甲盖住」全查面）。
+    //   solarShield（7e 月套域,escapeVeilEnd 消费）。星云套=armorGlow 面;日耀套=
+    //   lunarArmor+armorGlow+solarShield 盾球（用户实报「星云套或日耀套在水里
+    //   水被装甲盖住」全查面）。
+    //   ★BJ679 扩区（2026-10-14）:九路同性质队列并入谓词（全在实体段 4 收集、
+    //   7c-7f 消费,时序同满足）——itemGlow/wingGlow/eyebrella/whipFullbright/
+    //   trailShade/towerGlow/npcWhiteLift 七队列 + 实体直绘族（7c 茎蔓 259/260、
+    //   7d' Faeling 677/fairy 583-585/鹿角怪 668,经 veilEntities 传入,仅 fg pass
+    //   传参,bg 缺省空表零扫）+FadingParticles（7d'',模块级粒子系统直查）。
+    //   非逃逸帧恒 false=液体三路零触碰不变;谓词过宽帧（如拖尾全走 GL 无镜像
+    //   笔/粒子全 delay）仅多付 fgCanvas 绕行,escapeVeilEnd 无笔空转零复合。
+    let veil679Ent = false;
+    for (const n of veilEntities) {
+      if (n instanceof Enemy && !n.dead && (n.vanillaId === 677 || n.vanillaId === 668
+        || n.vanillaId === 583 || n.vanillaId === 584 || n.vanillaId === 585
+        || ((n.vanillaId === 259 || n.vanillaId === 260) && n.ai0 >= 0 && n.ai1 >= 0))) {
+        veil679Ent = true; break;
+      }
+    }
+    let veil679Fade = false;
+    for (const f of fadingParticles.each()) { veil679Fade = true; break; }
     const veil676 = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0
-      || this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0;
+      || this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0
+      // ★BJ679 九路扩区（注见上）
+      || this.itemGlowQueue.length > 0 || this.wingGlowQueue.length > 0
+      || this.eyebrellaQueue.length > 0 || this.whipFullbrightQueue.length > 0
+      || this.trailShadeQueue.length > 0 || this.towerGlowQueue.length > 0
+      || this.npcWhiteLiftQueue.length > 0 || veil679Ent || veil679Fade;
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
     // warpMode 入参 = 表层逐格 bob 关闭（波动由全屏位移场交付）
     // 波光 glint 的场景亮度因子（obj19 :106-111 亮度项；地底暗光→glint→0）
@@ -10349,6 +10429,7 @@ export class Renderer {
       ctx.translate(px, py);
       if (f.rot) ctx.rotate(f.rot);
       if (f.scaleX !== 1 || f.scaleY !== 1) ctx.scale(f.scaleX, f.scaleY);
+      const vm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
       if (f.tintA > 0) {
         // 预乘 dst 衰减项（erase）——原贴图 alpha × tintA/255 × env
         const raw = atlas.ensureVImage(f.texKey);
@@ -10362,6 +10443,18 @@ export class Renderer {
       ctx.globalAlpha = Math.min(1, env);
       ctx.drawImage(tinted, -tinted.width / 2, -tinted.height / 2);
       ctx.restore();
+      // ★BJ679 水罩镜像（FadingParticles=原版 ParticleSystem_World_OverPlayers
+      //   Main.cs:63207-63208（DrawPlayers_AfterProjectiles :63204 之后）水前;
+      //   lighter 主拍 α=env 镜像,destination-out 削底拍不镜像——削掉的首份水
+      //   恰由本罩补回（npcWhiteLift 同式登记）;tintedOf 保形染=α 同原图）
+      if (vm) this.escapeVeilStroke(
+        Renderer.veilAabb(vm.a, vm.b, vm.c, vm.d, vm.e, vm.f,
+          -tinted.width / 2, -tinted.height / 2, tinted.width, tinted.height),
+        (mc) => {
+          mc.setTransform(vm);
+          mc.globalAlpha = Math.min(1, env);
+          mc.drawImage(tinted, -tinted.width / 2, -tinted.height / 2);
+        });
     }
     ctx.restore();
   }
@@ -14071,20 +14164,34 @@ export class Renderer {
     ctx.rotate(e.vx * 0.1);
     ctx.scale(scale, scale);
     if (e.facing < 0) ctx.scale(-1, 1);
+    const vm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
     ctx.globalAlpha = 0.5;
     ctx.drawImage(img, 0, sy, fw, fh, -fw / 2, -fh / 2 + footFlush, fw, fh);
     ctx.restore();
     ctx.globalAlpha = 1;
+    // ★BJ679 水罩镜像（fairy=583-585 FairyCritterPink/Green/Blue 仙灵,GetAlpha
+    //   Lerp(light,White,0.5) 自发光→NPC 链→DrawNPCs :63183 水前;vm=本体同枢
+    //   变换快照同式重放）
+    if (vm) this.escapeVeilStroke(
+      Renderer.veilAabb(vm.a, vm.b, vm.c, vm.d, vm.e, vm.f,
+        -fw / 2, -fh / 2 + footFlush, fw, fh),
+      (mc) => {
+        mc.setTransform(vm);
+        mc.globalAlpha = 0.5;
+        mc.drawImage(img, 0, sy, fw, fh, -fw / 2, -fh / 2 + footFlush, fw, fh);
+      });
   }
 
-  private drawFaeling(e: Enemy, world: World) {
+  /** ★BJ679:tgt 缺省=主画布（原路径）;传入=水罩 mask 重放（拖尾 17 段+主族
+   *  4-5 层全函数同式——visEffectFrames/历史轨迹/拖尾缓存帧内确定,双跑逐位） */
+  private drawFaeling(e: Enemy, world: World, tgt?: CanvasRenderingContext2D) {
     void world;
     if (!this.atlas) return;
     const img = this.atlas.ensureVImage('vanilla/NPC_677.png');
     if (!img || !(img.width > 0)) return;
     const cvs = this.faelingCanvases();
     if (!cvs) return;
-    const ctx = this.ctx;
+    const ctx = tgt ?? this.ctx;
     const tVis = visEffectFrames();
     const num2 = (((e.id * 0.11 + tVis / 360) % 1) + 1) % 1;
     const hsl = (h: number, s: number, l: number): [number, number, number] =>
@@ -14109,6 +14216,27 @@ export class Renderer {
     const num3 = 60;                                   // TrailCacheLength[677]（NPCID.cs:4805）
     const num4 = num3 - 1 - 5;                         // 54
     const depth = e.historyDepth();
+    // ★BJ679 水罩镜像（飞灵=Shimmerfly 677,原版 Main.cs:24462 case 677→
+    //   DrawNPCDirect_Faeling :26809（拖尾 :26321-26347 同语义）→DrawNPCs :63183
+    //   水前——不走 GetAlpha 自发光=逃逸族）。整函数 tgt 重放（黑剪影+lighter
+    //   混合在 mask 上=α 覆盖累积,形状=剪影∪加算=水罩面）;box=历史轨迹包络
+    //   ±(40+14·scale)（拖尾旋偏 ≤32/16+精灵 11·scale+余量;box 只裁复合域）;
+    //   camM=调用位（7d' 循环）相机矩阵快照;tgt 非空=镜像支不重入）
+    if (!tgt && this._veilActive) {
+      const camM = ctx.getTransform();
+      let hx0 = cx, hx1 = cx, hy0 = cy, hy1 = cy;
+      for (let i = num4; i >= 5; i -= 3) {
+        if (i >= depth) continue;
+        const x = e.histXAt(i), y = e.histYAt(i);
+        if (x < hx0) hx0 = x; if (x > hx1) hx1 = x;
+        if (y < hy0) hy0 = y; if (y > hy1) hy1 = y;
+      }
+      const pad = 40 + 14 * scale;
+      this.escapeVeilStroke(
+        Renderer.veilAabb(camM.a, camM.b, camM.c, camM.d, camM.e, camM.f,
+          hx0 - pad, hy0 - pad, (hx1 - hx0) + 2 * pad, (hy1 - hy0) + 2 * pad),
+        (mc) => { mc.setTransform(camM); this.drawFaeling(e, world, mc); });
+    }
     if (depth > 6) {
       const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
       const fromMax = Math.hypot(32, 16);
@@ -14807,6 +14935,7 @@ export class Renderer {
     ctx.save();
     ctx.translate(e.cx, e.y + e.h);
     ctx.scale(scale * (mirrored ? -1 : 1), scale);
+    const vm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
     for (const l of layers) {
       if (l.kind !== 'redGhost' && l.kind !== 'fog') continue;
       const c = l.kind === 'redGhost' ? red : fog;
@@ -14816,6 +14945,23 @@ export class Renderer {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+    // ★BJ679 水罩镜像（鹿角怪红雾环/前雾=原版 DrawNPCDirect_Deerclops
+    //   Main.cs:26714 固定顶点色 value2=(80,0,0,255)×0.5 :26743/color3=
+    //   (255,30,30,66) :26795 不经 GetAlpha→DrawNPCs :63183 水前;层循环逐层
+    //   同 α 重放,vm=本体同枢变换快照;box=dest 外扩 8px 容 l.dx/dy 层偏移）
+    if (vm) this.escapeVeilStroke(
+      Renderer.veilAabb(vm.a, vm.b, vm.c, vm.d, vm.e, vm.f,
+        -originX - 8, -originY - 8, sw + 16, sh + 16),
+      (mc) => {
+        mc.setTransform(vm);
+        for (const l of layers) {
+          if (l.kind !== 'redGhost' && l.kind !== 'fog') continue;
+          const c = l.kind === 'redGhost' ? red : fog;
+          if (!c) continue;
+          mc.globalAlpha = Math.max(0, Math.min(1, l.alpha));
+          mc.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + l.dx, -originY + l.dy, sw, sh);
+        }
+      });
   }
 
   /** 逐像素 Lerp 染色（DrawData Color.Lerp 语义）：白底向 targetRGB 按 t 偏移,
@@ -16286,9 +16432,22 @@ export class Renderer {
           ctx.save();
           ctx.translate(sxp, syp);
           ctx.rotate(rot);
+          const vm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
           ctx.drawImage(scratch, 0, 0, chain.sw, sh,
             (-chain.sw / 2) * z, (-chain.sh / 2) * z, chain.sw * z, chain.sh * z);
           ctx.restore();
+          // ★BJ679 水罩镜像（茎蔓=原版 Main.cs:22842-22868 真菌球 FungiBulb
+          //   259/GiantFungiBulb 260 链段下限色 (max(R,100),max(G,150),255)
+          //   强制亮彩→DrawNPCDirect :22723→DrawNPCs :63183 水前;scratch 经
+          //   source-atop 保形染=α 同链段,镜像形状精确;vm=段变换快照）
+          if (vm) this.escapeVeilStroke(
+            Renderer.veilAabb(vm.a, vm.b, vm.c, vm.d, vm.e, vm.f,
+              (-chain.sw / 2) * z, (-chain.sh / 2) * z, chain.sw * z, chain.sh * z),
+            (mc) => {
+              mc.setTransform(vm);
+              mc.drawImage(scratch, 0, 0, chain.sw, sh,
+                (-chain.sw / 2) * z, (-chain.sh / 2) * z, chain.sw * z, chain.sh * z);
+            });
         } else {
           running = false;
         }
@@ -17542,9 +17701,10 @@ export class Renderer {
    *  GLShimExecutor R3x 判例=坐标唯一真相）+ 纯 op 计划；冲刷 = setTransform 矩阵
    *  重放 × worldLowK 归一（worldCanvas→页全幅原点合成 ×(1/k) 关系，compositeLight
    *  :22270/:22701 drawImage(worldCanvas,0,0,viewW,viewH) 实证）。tex 存名 flush 侧
-   *  ensureVImage 懒加载（wingGlowQueue 同惯例，零跨拍 img 持有）。层序登记：本
-   *  flush 在 7e 翼光后=玩家之上（原版 glow 在本体链内、手持物/脸饰在其上——与
-   *  BJ504/677/668「此槽在玩家之上」既有偏差惯例同槽）。 */
+   *  ensureVImage 懒加载（wingGlowQueue 同惯例，零跨拍 img 持有）。层序（★BJ681
+   *  修「甲盖武器」后）：under 遍在 7e⁴ 随迁重放前=13/17/21 站在手持物(27)之下 ✓
+   *  /arm 遍（28 臂站）在 itemGlow 后=武器之上 ✓（原版 LegacyPlayerRenderer.cs:
+   *  227-234：13/17/21 glow < 22 < 23 < 24 < 26 盾 < 27 手持物 < 28 臂+臂glow）。 */
   private armorGlowQueue: Array<{ m: DOMMatrix; k: number; ops: ArmorGlowOp[] }> = [];
   /** 同帧双绘去重（坐椅/睡床玩家 r15 先于 NPC 早绘 + 主段再绘=原版 RefreshPlayerDrawOrder
    *  两档制,本仓双绘本体无害、glow 加算双份有害——首绘收集、次绘跳过;flush 期重置） */
@@ -17847,9 +18007,22 @@ export class Renderer {
         ctx.translate(sx, sy);
         ctx.rotate(Math.atan2(dy, dx) - Math.PI / 2);
         ctx.scale(z, z);
+        const qm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
         ctx.drawImage(tinted, 0, 0, tex.width, tex.height,
           -tex.width / 2, -2, tex.width, len + 2);
         ctx.restore();
+        // ★BJ679 水罩镜像（鞭线体=原版 DrawProjectiles :63199 水前面,flag3
+        //   :36747-36749 color2=color 免取光=逃逸族;直绘 identity 基座+段变换,
+        //   qm 快照同式重放,tintedTex 保形染帧 α 同）
+        if (qm) this.escapeVeilStroke(
+          Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
+            -tex.width / 2, -2, tex.width, len + 2),
+          (mc) => {
+            mc.setTransform(qm);
+            mc.globalAlpha = a / 255;
+            mc.drawImage(tinted, 0, 0, tex.width, tex.height,
+              -tex.width / 2, -2, tex.width, len + 2);
+          });
       }
     }
     ctx.restore();
@@ -17947,6 +18120,21 @@ export class Renderer {
         ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
         ctx.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
       }
+      // ★BJ679 水罩镜像（白提亮族=原版 NPC 绘制链 DrawNPCs :63183 水前面;
+      //   qm=相机×本体同枢变换快照。tintA 支镜像 lighter 主拍 α=1（destination-
+      //   out 削底拍不镜像——mask 记可见内容,削掉的首份水恰由本罩补回=净水量
+      //   ≈原版 1×;erasure 域差=BJ-C9 F5 既有登记不动）;缺省支 α 同式直读）
+      if (this._veilActive) {
+        const qm = ctx.getTransform();
+        const gaM = q.tintA !== undefined ? 1 : (q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4);
+        this.escapeVeilStroke(
+          Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f, -q.sw / 2, q.by, q.sw, q.sh),
+          (mc) => {
+            mc.setTransform(qm);
+            mc.globalAlpha = gaM;
+            mc.drawImage(imgT, 0, q.sy, q.sw, q.sh, -q.sw / 2, q.by, q.sw, q.sh);
+          });
+      }
       ctx.restore();
     }
     ctx.restore();
@@ -17966,6 +18154,10 @@ export class Renderer {
     ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = 'lighter';
+    // ★BJ679 水罩镜像（四塔/516 残影=原版 NPC 链 Main.cs:24483-24520 vel4 四向
+    //   Color(64,64,64,0)×Opacity →DrawNPCs :63183 水前;camT=相机矩阵快照,rot 支
+    //   qm=相机×本体同枢变换快照,逐拍同 α 重放;box=四向 dest 并集）
+    const camT = this._veilActive ? ctx.getTransform() : null;
     for (const q of this.towerGlowQueue) {
       const img2 = this.atlas?.ensureVImage(q.tex);
       if (!img2) continue;
@@ -17976,10 +18168,20 @@ export class Renderer {
           ctx.save();
           ctx.translate(q.cx!, q.cy!);
           ctx.rotate(q.rot);
+          const qm = this._veilActive ? ctx.getTransform() : null;
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
           ctx.restore();
+          if (qm) this.escapeVeilStroke(
+            Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
+              q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!),
+            (mc) => { mc.setTransform(qm); mc.globalAlpha = Math.max(0, Math.min(1, q.single!));
+              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!); });
         } else {
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+          if (camT) this.escapeVeilStroke(
+            Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
+            (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.single!));
+              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
         }
         continue;
       }
@@ -17990,10 +18192,20 @@ export class Renderer {
           ctx.save();
           ctx.translate(q.cx!, q.cy!);
           ctx.rotate(q.rot);
+          const qm = this._veilActive ? ctx.getTransform() : null;
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
           ctx.restore();
+          if (qm) this.escapeVeilStroke(
+            Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
+              q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!),
+            (mc) => { mc.setTransform(qm); mc.globalAlpha = Math.max(0, Math.min(1, q.overlay!));
+              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!); });
         } else {
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+          if (camT) this.escapeVeilStroke(
+            Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
+            (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.overlay!));
+              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
         }
       }
       ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
@@ -18005,15 +18217,40 @@ export class Renderer {
         ctx.save();
         ctx.translate(q.cx!, q.cy!);
         ctx.rotate(q.rot);
+        const qm = this._veilActive ? ctx.getTransform() : null;
         for (let k = 0; k < 4; k++) {
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
             q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
             q.sw * q.scale!, q.sh * q.scale!);
         }
         ctx.restore();
+        if (qm) this.escapeVeilStroke(
+          Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
+            q.bx! * q.scale! + offs[0][0], q.by! * q.scale! + offs[0][1],
+            q.sw * q.scale!, q.sh * q.scale!),
+          (mc) => { mc.setTransform(qm); mc.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+            for (let k = 0; k < 4; k++) {
+              mc.drawImage(img2, 0, q.sy, q.iw, q.gh,
+                q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
+                q.sw * q.scale!, q.sh * q.scale!);
+            } });
       } else {
         for (let k = 0; k < 4; k++) {
           ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+        }
+        if (camT) {
+          // box=四向 dest 并集（offs 偏移含入;box 只裁复合域,罩量由 paint 四笔精确）
+          let mnx = q.wx, mny = q.wy, mxx = q.wx + q.sw, mxy = q.wy + q.sh;
+          for (let k = 0; k < 4; k++) {
+            mnx = Math.min(mnx, q.wx + offs[k][0]); mny = Math.min(mny, q.wy + offs[k][1]);
+            mxx = Math.max(mxx, q.wx + offs[k][0] + q.sw); mxy = Math.max(mxy, q.wy + offs[k][1] + q.sh);
+          }
+          this.escapeVeilStroke(
+            Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, mnx, mny, mxx - mnx, mxy - mny),
+            (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+              for (let k = 0; k < 4; k++) {
+                mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+              } });
         }
       }
     }
@@ -18054,8 +18291,21 @@ export class Renderer {
     ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
     ctx.scale(z, z);
     ctx.translate(-camRX, -camRY);
+    // ★BJ679 水罩镜像（拖尾=原版弹幕 Drawer 全程不取光→DrawProjectiles :63199
+    //   水前面;CPU 光栅路 blit 位经 drawStripTrail onBlit 钩子逐条镜像——scratch
+    //   α=255（带内）/0（带外,putImageData 全幅覆写）=覆盖形状精确;GL 路
+    //   （obj55 SM2/obj58 tech 渲入 glfx.canvas 全幅上屏）不触发钩子+projFullbright
+    //   闭包族不镜像=余债登记,见 7e 头注 BJ679 段）
+    const veilCamM = this._veilActive ? ctx.getTransform() : null;
     for (const spec of queue) {
-      try { drawStripTrail(ctx, this, spec); } catch { /* 单条带失败不拖垮帧 */ }
+      try {
+        drawStripTrail(ctx, this, spec, veilCamM ? (bi) => {
+          this.escapeVeilStroke(
+            Renderer.veilAabb(veilCamM.a, veilCamM.b, veilCamM.c, veilCamM.d, veilCamM.e, veilCamM.f,
+              bi.dx, bi.dy, bi.dw, bi.dh),
+            (mc) => { mc.setTransform(veilCamM); mc.drawImage(bi.canvas, 0, 0, bi.sw, bi.sh, bi.dx, bi.dy, bi.dw, bi.dh); });
+        } : undefined);
+      } catch { /* 单条带失败不拖垮帧 */ }
     }
     ctx.restore();
     // GL 条带层上屏（'lighter' 加算——层内已按 XNA Additive 累积,主链直加;黑 texel
@@ -18099,6 +18349,11 @@ export class Renderer {
       ctx.translate(sx, sy);
       ctx.scale(e.p.facing * z, z);
       ctx.translate(e.anchor[0], e.anchor[1]);
+      // ★BJ679 水罩镜像基座（翼光=原版 PlayerDrawLayers.cs:655 DrawPlayer_09_Wings
+      //   →DrawPlayers_AfterProjectiles :63204 水前面;wm=锚位变换快照——主纹理
+      //   逐支镜像+overlay 整函数 tgt 重放,betsy(40)/trail45(45) 子链除外=余债
+      //   见 7e 头注 BJ679 段）
+      const wm = this._veilActive ? ctx.getTransform() : null;
       // ---- 全亮主纹理 ----
       // 44 彩虹翼：vanilla 主纹理 = Extra_171 灰度翼经 Misc "HallowBoss" pass 的
       // 烘焙图（PlayerRainbowWingsTextureContent.cs 1:1，烘焙一次缓存）——不是
@@ -18150,9 +18405,28 @@ export class Renderer {
             ctx.globalAlpha = 1;
           }
         }
+        // ★BJ679 主纹理镜像（一笔覆盖 fast/tinted/fallback 三支=同 dest 同 α;
+        //   sc 染色/烘焙图只动 RGB=α 与原图同,镜像用原图逐位等）
+        if (wm) this.escapeVeilStroke(
+          Renderer.veilAabb(wm.a, wm.b, wm.c, wm.d, wm.e, wm.f, -tw / 2, -fh / 2, tw, fh),
+          (mc) => { mc.setTransform(wm); mc.globalAlpha = a;
+            mc.drawImage(mainTex as CanvasImageSource, 0, e.fr * fh, tw, fh, -tw / 2, -fh / 2, tw, fh); });
       }
       // ---- 叠画 ----
       if (d.overlay) this.drawWingOverlay(e.p, e.slot, d, e.fr, cam, e.settled, e.clamp, e.vortexTint, e.dye);
+      // ★BJ679 overlay 镜像:整函数 tgt 重放（各分支 scratch 同内容幂等重烘,SM2
+      //   染面 ~40×56 双跑可承受;betsy/trail45 分支 mirrorPass 跳过=余债）;box=
+      //   主精灵外扩 8px（1.06 放大/±1.25 jitter/轨道偏移全在内;无主纹理翼用
+      //   120×96 保守框——box 只裁复合域,罩量由 paint 各分支 dest 精确）
+      if (wm && d.overlay) {
+        const fhM = mainTex ? Math.floor((mainTex instanceof HTMLImageElement ? mainTex.height : mainTex.height) / d.frames) : 96;
+        const twM = tw > 0 ? tw : 120;
+        this.escapeVeilStroke(
+          Renderer.veilAabb(wm.a, wm.b, wm.c, wm.d, wm.e, wm.f,
+            -twM / 2 - 8, -fhM / 2 - 8, twM + 16, fhM + 16),
+          (mc) => { mc.setTransform(wm);
+            this.drawWingOverlay(e.p, e.slot, d, e.fr, cam, e.settled, e.clamp, e.vortexTint, e.dye, mc, true); });
+      }
     }
     ctx.restore();
     this.wingGlowQueue.length = 0;
@@ -18164,9 +18438,10 @@ export class Renderer {
    *  beginFgPass/endFgPass 同机制产出;liqgl 批化帧禁批回 canvas gate 路（灰度债）。
    *  null=本帧无罩源（无月套队列/离屏失败帧）=escapeVeil 全链退化直绘零触碰。 */
   private _liqVeil: HTMLCanvasElement | null = null;
-  /** 罩会话激活（escapeVeilBegin/End 之间;false=四 flush 原路径零开销） */
+  /** 罩会话激活（escapeVeilBegin/End 之间;false=全逃逸 flush 原路径零开销——
+   *  ★BJ679 扩区后覆盖 7c-7f 十队列+月套四 flush 全部镜像点） */
   private _veilActive = false;
-  /** mask 画布（页域=主画布尺寸;会话期四 flush 累积,收口 destination-in 截形） */
+  /** mask 画布（页域=主画布尺寸;会话期各逃逸 flush/直绘累积,收口 destination-in 截形） */
   private _veilMask: HTMLCanvasElement | null = null;
   private _veilMaskCtx: CanvasRenderingContext2D | null = null;
   /** 复合 tmp（页域 AABB 尺寸中转;池化只增——bake 画布同惯例） */
@@ -18174,8 +18449,9 @@ export class Renderer {
   /** 会话累积包络（页域;null=尚无记录笔=收口空转） */
   private _veilBox: { x: number; y: number; w: number; h: number } | null = null;
 
-  /** ★BJ676 罩会话开（7e 段 flushLunarArmor 前,位次=翼光后——翼光本刀不参,登记见 7e 头注）:
-   *  veil 源缺席=false（月套队列空帧/直绘离屏失败帧=四 flush 原路径,判别面零开销）。 */
+  /** ★BJ676 罩会话开（★BJ679 扩区:7c 段 drawBrightVines 前=逃逸族首队列;会话覆盖
+   *  7c-7f 至 flushTrailShade 后收口,收编清单见 7e 头注 BJ679 段）:
+   *  veil 源缺席=false（无水帧/无逃逸队列帧/直绘离屏失败帧=全链原路径,判别面零开销）。 */
   private escapeVeilBegin(): boolean {
     this._veilActive = !!this._liqVeil && typeof document !== 'undefined';
     this._veilBox = null;
@@ -18236,15 +18512,16 @@ export class Renderer {
     mc.restore();
   }
 
-  /** ★BJ676 罩会话收口（7e 段 flushSolarShieldQueue 后）:「前景水层×mask」
-   *  source-over 主画布——destination-in 截形=水罩只落在逃逸族像素处,非逃逸
-   *  区域零触碰（世界层内第一份水不受影响=无双罩）。veil（世界层像素域）→页域
-   *  换算=全幅原点 ×(veil.width/canvas.width)（与 compositeLight 的 worldCanvas→
-   *  主画布 ×(1/k) 同关系,armorGlowQueue m×invK 直绘实证）。7e 段在呈现翻转点
-   *  （FX27）之前=页域未镜像,同域直绘。c10e 透明 HUD 域:source-over 单拍对
-   *  透明 dst=src 原样无衰减（BJ556 lighter 拍衰减病不适用）;幂等垫底先行=层序
-   *  恒在垫底画面之上（7c/7d 扫尾垫底既有,双保险零成本）。box 与主画布求交=
-   *  屏边玩家包络溢出的源区域越界裁剪。 */
+  /** ★BJ676 罩会话收口（★BJ679 挪位:7f 段 flushTrailShade 后=会话覆盖 7c-7f 全
+   *  逃逸族）:「前景水层×mask」source-over 主画布——destination-in 截形=水罩只
+   *  落在逃逸族像素处,非逃逸区域零触碰（世界层内第一份水不受影响=无双罩）。
+   *  veil（世界层像素域）→页域换算=全幅原点 ×(veil.width/canvas.width)（与
+   *  compositeLight 的 worldCanvas→主画布 ×(1/k) 同关系,armorGlowQueue m×invK
+   *  直绘实证）。7c-7f 段在呈现翻转点（FX27）之前=页域未镜像,同域直绘。c10e
+   *  透明 HUD 域:source-over 单拍对透明 dst=src 原样无衰减（BJ556 lighter 拍
+   *  衰减病不适用）;幂等垫底先行=层序恒在垫底画面之上（7c/7d 扫尾垫底+trail
+   *  自垫既有,双保险零成本）。box 与主画布求交=屏边玩家包络溢出的源区域
+   *  越界裁剪。*/
   private escapeVeilEnd(): void {
     const v = this._liqVeil, mask = this._veilMask, mc = this._veilMaskCtx;
     const b = this._veilBox;
@@ -18362,10 +18639,23 @@ export class Renderer {
   /** ★BJ597 甲位 GlowMask 冲刷（收集侧见 armorGlowQueue 注）：op 重放 = setTransform
    *  矩阵 ×(1/k)（worldCanvas→页全幅原点合成关系）+ blend 'lighter'(A=0 纯加法)/
    *  'source-over'(A>0)；1118 高贴图源行越界钳（与坐骑 glow 层同习语）；抖动档
-   *  Math.random（翼 jitter2 同习语,装饰面）；首绘去重 WeakSet 在此重置。 */
-  private flushArmorGlow(): void {
+   *  Math.random（翼 jitter2 同习语,装饰面）；首绘去重 WeakSet 在此重置。
+   *  ★BJ681 两遍制（arm 参）：under 遍（缺省）=13/17/21 站 op（腿/身/头,武器之下
+   *  ——7e⁴ 随迁重放【前】消费）;arm 遍（armPass=true）=28_ArmOverItem 站 op
+   *  （armMask+复合前肩/前臂,武器之上——itemGlow【后】消费,原版序 27 < 28,
+   *  LegacyPlayerRenderer.cs:234-235）。under 遍把 28 站 op 留队列（kept 换入,
+   *  arm 遍 drain;arm 遍若因故缺席,render 头逐帧重建 :5689 自愈）。 */
+  private flushArmorGlow(armPass = false): void {
     const q = this.armorGlowQueue;
-    this.armorGlowQueue = [];
+    if (armPass) {
+      this.armorGlowQueue = [];
+    } else {
+      // under 遍：28 臂站 op 抽出留队列（{m,k} 同条目浅拷）
+      this.armorGlowQueue = q.flatMap((e) => {
+        const armOps = e.ops.filter((o) => o.arm === true);
+        return armOps.length ? [{ ...e, ops: armOps }] : [];
+      });
+    }
     this.armorGlowCollected = new WeakSet();
     if (!q.length || !this.atlas) return;
     const ctx = this.ctx;
@@ -18375,6 +18665,7 @@ export class Renderer {
       const invK = e.k > 0 ? 1 / e.k : 1;
       const m = e.m;
       for (const op of e.ops) {
+        if ((op.arm === true) !== armPass) continue;   // ★BJ681 under/arm 两遍分拣
         const img = this.atlas.ensureVImage(op.tex);
         if (!img || img.width <= 0) continue;
         // 源行/源条越界钳（Glow_199/256/367/378 等 40×1118 尾行 2px 差）
@@ -18495,6 +18786,22 @@ export class Renderer {
           ctx.translate(op.ox ?? op.dx, op.oy ?? op.dy);
           ctx.rotate(op.rot);
           ctx.translate(-(op.ox ?? op.dx), -(op.oy ?? op.dy));
+        }
+        // ★BJ679 水罩镜像（手持=PlayerDrawLayers.cs:3148 DrawPlayer_27_HeldItem→
+        //   :63204、掉落=Main.cs:39408-39437 DrawItems→:63226,均水前面;op 一笔
+        //   镜像覆盖 bake/boost/R==A 三支（同 dest 同 α）;tint/bake 烘只动 RGB=
+        //   镜像用原图 α 同（BJ676 armorGlow 同判例）;qm=m×invK(+BJ603 旋臂)
+        //   合成矩阵快照。gladd 旗开帧队列已被 7x GL 会话消费=本位空转无镜像
+        //   =GL 余债登记（7e 头注））
+        if (this._veilActive && gClamped > 0) {
+          const qm = ctx.getTransform();
+          this.escapeVeilStroke(
+            Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f, op.dx, op.dy, dWidth, dHeight),
+            (mc) => {
+              mc.setTransform(qm);
+              mc.globalAlpha = gClamped;
+              mc.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx, op.dy, dWidth, dHeight);
+            });
         }
         // ★BJ604件3 同根配刀（2026-10-10）：over 支两旋钮分解（XNA 预乘合成
         //  RGB 面=r_f=tint、dst 衰减=a_f=alpha 独立两因子）。旧支 bake=tint+
@@ -18851,6 +19158,10 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
+    // ★BJ679 水罩镜像基座（眼球伞云盖=原版 PlayerDrawLayers.cs:4157
+    //   DrawPlayer_38_EyebrellaCloud→DrawPlayers_AfterProjectiles :63204 水前面;
+    //   屏域绝对 dest 三拷贝逐笔同式重放,veilBase=本位基座变换快照）
+    const veilBase = this._veilActive ? ctx.getTransform() : null;
     for (const e of this.eyebrellaQueue) {
       const [sx, sy] = cam.worldToScreen(e.wx, e.wy);
       const w = e.cw * z, h = e.ch * z;
@@ -18860,6 +19171,15 @@ export class Renderer {
         ctx.drawImage(e.src as CanvasImageSource,
           sx + (ox * z) - w / 2, sy + (oy * z) - h / 2, w, h);
         ctx.restore();
+        if (veilBase) this.escapeVeilStroke(
+          Renderer.veilAabb(veilBase.a, veilBase.b, veilBase.c, veilBase.d, veilBase.e, veilBase.f,
+            sx + (ox * z) - w / 2, sy + (oy * z) - h / 2, w, h),
+          (mc) => {
+            mc.setTransform(veilBase);
+            mc.globalAlpha = (100 / 255) * mul;
+            mc.drawImage(e.src as CanvasImageSource,
+              sx + (ox * z) - w / 2, sy + (oy * z) - h / 2, w, h);
+          });
       };
       drawCopy(-3 * Math.cos(e.num2 * Math.PI * 2), -3 * Math.sin(e.num2 * Math.PI * 2), 0.65);
       drawCopy(3 * Math.cos(e.num2 * Math.PI * 2), 3 * Math.sin(e.num2 * Math.PI * 2), 0.65);
@@ -19734,13 +20054,16 @@ export class Renderer {
 
   /** 翅膀叠画（flush 内调用，局部空间已镜像+锚点平移）。settled=drawinfo.stealth、
    *  clamp=s'、vortexTint=星璇 secondColor、dye=cWings 仿真——逐款 stealth 公式见
-   *  各 case 行号注；染料对全部叠画 DrawData 生效（原版 item.shader 同绑） */
+   *  各 case 行号注；染料对全部叠画 DrawData 生效（原版 item.shader 同绑）
+   *  ★BJ679:tgt 缺省=主画布（原路径）;tgt 传入+mirrorPass=true=水罩 mask 重放
+   *  （flushWingGlow 镜像支——betsy/trail45 子函数链分支 mirrorPass 跳过=余债） */
   private drawWingOverlay(p: Player, slot: number, d: import('../data/vanillaWingVisuals').WingDraw,
     fr: number, cam: Camera, settled: number, clamp: number,
-    vortexTint: [number, number, number] | null, dye: DyeApply | null): void {
+    vortexTint: [number, number, number] | null, dye: DyeApply | null,
+    tgt?: CanvasRenderingContext2D, mirrorPass = false): void {
     const atlas = this.atlas;
     if (!atlas || !d.overlay) return;
-    const ctx = this.ctx;
+    const ctx = tgt ?? this.ctx;
     const notGrappling = !p.grappleProjs.some((g) => g.latched);
     const ov = d.overlay;
     const slice = (file: string) => {
@@ -19947,10 +20270,12 @@ export class Renderer {
         break;
       }
       case 'betsy': {   // 40：8 片程序化摆动（:854-896）
+        if (mirrorPass) break;   // ★BJ679 余债:子函数链画 this.ctx,mask 重放跳过（7e 头注登记）
         this.drawBetsyWings(p, slot, fr, settled, dye);
         break;
       }
       case 'trail45': { // 45：拖尾（:2901；4 向轨道残影 (70,70,70,0)·f 的 A=0 死画
+        if (mirrorPass) break;   // ★BJ679 余债:同上
         this.drawStarboardTrail(p, cam);   //  原样跳过 :741-746）
         break;
       }
@@ -20671,6 +20996,15 @@ export class Renderer {
     // ★BJ665b：恒色甲件判定提升到函数域（迅猛龙藏身支只画头=头甲恒色单独成件;
     //  主支在 doll 块内赋值）——R1/R2/R3 被盖层重定向窗统一吃此门
     let lunarHoist: LunarConstPieces | null = null;
+    // ★BJ681（2026-10-14 用户实报「星云套和日耀套……挥动武器时,甲的绘制层级高于
+    //  武器本身,遮挡武器贴图」）glow 族被盖层随迁门：星云 170/176/111·漩涡
+    //  169/175/110 等 BJ597 甲位 glow 表族【无恒色覆写 lunarHoist=null】——glow
+    //  队列 7e'''' 合成后冲刷=画在 lit 窗手持物【之上】（原版 glow 在 13/17/21
+    //  甲层位=武器 27 之下,LegacyPlayerRenderer.cs:227-234）。落刀=R2/R3 重定向
+    //  窗扩至 glow 族（首绘收集块置位;R1 不扩=浮游圈前半 17 site2 域在头 glow
+    //  之下,hoist 反造 21 头 glow 反转,登记）。与 lunarHoist 同语义（双绘次遍
+    //  该块被 armorGlowCollected 拦=false,窗自然关闭）。
+    let glowCover = false;
     if (p.appearance && (!mntHidden || veloHead)) {
       if (veloHead) {
         let vh = dollEquipFromInv(p.inv, p.appearance, true);
@@ -20990,7 +21324,10 @@ export class Renderer {
                 }
               : null,
           });
-          if (agOps.length) this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps });
+          if (agOps.length) {
+            this.armorGlowQueue.push({ m: ctx.getTransform(), k: this._worldLowK, ops: agOps });
+            glowCover = true;   // ★BJ681 glow 族随迁门（R2/R3 窗开——武器/身前配饰画回 glow 之上）
+          }
           // ★BJ665b 恒色甲件入队（同块=armorGlowCollected 双绘去重免早绘/主段双份）：
           //  乘区/A 链与 armorDoll 逐式同源（vortex Lerp 通道 :1641-1644 / B×settled
           //  :1539-1541 / A×s'×gFade×bodyAlpha）——恒色 250³/252³ 在 flush 侧与 mul
@@ -21046,6 +21383,10 @@ export class Renderer {
         //  常态 false）时 tubeDraw 全 no-op,R1 会话=空 scratch 白跳舞蹈+blit
         //  （4 op/帧/玩家纯浪费,日耀套常驻面）。门镜像 tubeDraw 自身谓词
         //  （tubeTex 就绪）=内容精确镜像,逐位等价。
+        //  ★BJ681：R1【不】扩 glow 族——浮游圈前半=17_TorsoComposite site2（:2037-
+        //  2044,躯干甲后）,原版序在头 glow（21 :2357）之下、躯干 glow 之上;glow 族
+        //  hoist 之=整组浮到 21 头 glow 之上=反造反转（glow 加法半透,窗下无遮蔽病
+        //  ——恒色不透明 over 才是 R1 存在因）。躯干 glow 盖圈残留登记。
         const covR1 = lunarHoist != null && tubeTex != null && tubeTex.width > 0 && !this.lunarCoverCollected.has(p)
           ? this.lunarCoverBegin(ctx, p) : null;
         if (covR1) ctx = covR1.c;
@@ -21169,7 +21510,9 @@ export class Renderer {
     //      （pulley 门含 !mount.Active,:25815/:26481）,此处防御性同门）----
     // ★BJ665b R2 被盖层重定向：滑轮（24_Pulley）+身前配饰族（29/32 层组）——
     //  恒色甲件重绘在其下=原版层序保持（mntHidden 支两站本体不画,窗门同收）。
-    const covR2 = lunarHoist != null && !mntHidden && !this.lunarCoverCollected.has(p)
+    //  ★BJ681 扩 glow 族（glowCover）:24/29/32 原版序均在甲位 glow（13/17/21）
+    //  之上——glow 族甲窗开=配饰画回 glow 之上（同恒色族层序语义）。
+    const covR2 = (lunarHoist != null || glowCover) && !mntHidden && !this.lunarCoverCollected.has(p)
       ? this.lunarCoverBegin(ctx, p) : null;
     if (covR2) ctx = covR2.c;
     if (!mntHidden) this.drawPulleyLayer(ctx, p, !!swing);
@@ -21197,9 +21540,11 @@ export class Renderer {
     // 逃逸队列（eyebrellaQueue/wingGlowQueue 同族判例:drawPlayer 收集、7e 域
     // flushSolarShieldQueue 消费,直绘主画布=免光乘坐标系）。变换数学不仿 XNA
     // (int) 取整（全玩家层 float 惯例）;旋转/翻转/染面烘焙逐式原样。
-    // 层序登记：原版 26_SolarShield 在 27_HeldItem 之前（盾在手持物下层）;本仓
-    // 7e 槽在整玩家之上——与 BJ504/677/668/四塔 GlowMask「此槽在玩家之上」既有
-    // 偏差惯例同槽（50% 透盾下手持物仍透见,观感面仅挥摆重叠差）。
+    // 层序登记（★BJ681 2026-10-14 修「日耀套甲盖武器」）：原版 26_SolarShield 在
+    // 27_HeldItem 之前（盾在手持物下层,LegacyPlayerRenderer.cs:233-235 亲读）;旧
+    // 位 flush 在 7e⁴ 随迁重放后=盾球盖住挥舞武器（用户实报面）→ 冲刷挪至甲位 glow
+    // under 遍后、7e⁴ 前（26 > 13/17/21 glow ✓ / 26 < 27 ✓）。滑轮(24)/浮游圈前半
+    // (17 site2) 原版在盾【之下】、R2/R1 窗重放后在其上=残差登记（微小重叠面）。
     if (p.solarShields > 0 && !p.dead && !mntHidden) {
       const tex = this.atlas ? this.atlas.ensureVImage(`vanilla/Extra_${solarShieldTextureId(p.solarShields)}.png`) : null;
       if (tex) {
@@ -21276,7 +21621,10 @@ export class Renderer {
     const lunarR3Content = !!(heldDraw || (swing && swing.item >= 0 && !swing.noGraphic)
       || ((p.equipStats.beetleDef === true || p.equipStats.beetleOff === true) && !p.dead && !mntHidden)
       || mnt || cart);
-    const covR3 = lunarHoist != null && lunarR3Content && !this.lunarCoverCollected.has(p)
+    // ★BJ681 扩 glow 族（glowCover）:手持物(27)/挥舞/甲虫 orb(37)/坐骑前层(23)/
+    //  矿车原版序均在甲位 glow（13/17/21）之上——星云/漩涡等 glow 族此前武器
+    //  留 lit 窗=被 7e'''' glow 加色盖住（用户实报「甲盖武器」星云面真身）。
+    const covR3 = (lunarHoist != null || glowCover) && lunarR3Content && !this.lunarCoverCollected.has(p)
       ? this.lunarCoverBegin(ctx, p) : null;
     if (covR3) ctx = covR3.c;
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
@@ -21550,8 +21898,9 @@ export class Renderer {
     }
     if (covR3) { this.lunarCoverEnd(covR3); ctx = mainCtx; }
     // ★BJ665b：首遍收集完标记（坐椅/睡床双绘去重——次遍全窗回内联原路径,lit 窗
-    //  内容被合成后甲件+随迁重放覆盖,终像=队列版）
-    if (lunarHoist != null) this.lunarCoverCollected.add(p);
+    //  内容被合成后甲件+随迁重放覆盖,终像=队列版）。★BJ681 扩 glowCover（glow 族
+    //  双绘同语义:glowCover 次遍已被 armorGlowCollected 拦=false,此标记防御性同收）
+    if (lunarHoist != null || glowCover) this.lunarCoverCollected.add(p);
     // 使用类物品层已并入段 A（身体后图层）——原版 weaponDrawOrder 恒 BehindFrontArm
     // （PlayerDrawSet.cs:354），工具/武器/消耗品挥舞同一层序，勿在此双画
     // （旧"非工具画身体前"分支已退役，2026-08-22 手持层级统一）

@@ -37,13 +37,16 @@
 // 帧批化退位,转正前须 FBO gate 回读或 GL 侧复合）;非 warpOn 直绘路月套帧借
 // beginFgPass/endFgPass 同机制产出。bg pass 头帧界复位防跨帧陈旧。
 //
-// ── 同性质未修队列登记（原版均在主场景序列=水应罩;本刀只收月套面=用户实报
-//   域;escapeVeilStroke 机制通用,逐队列可接入）──
-// 7e 翼光 flushWingGlow / 7e''''' flushItemGlow / 7e'' flushEyebrellaCloud /
-// 7e' flushWhipFullbright / 7f flushTrailShade / 7c drawBrightVines /
-// 7d' Faeling 677+fairy 583-585+鹿角怪 668 / 7d'' drawFadingParticles /
-// 7d''' flushTowerGlow 四塔残影 / flushNpcWhiteLift（395/519 白提亮）。
-// 正确不罩域:7g drawWiresBright（原版 DrawWires :63259 在水后）/7h 狱火环
+// ── 同性质未修队列登记 → ★BJ679（2026-10-14）九路收编完毕──
+// BJ676 登记的未修队列已由 BJ679 全部接入会话（逐队列原版锚+镜像锁见
+// tests/bj679-water-veil-queues.test.ts）:7e 翼光 flushWingGlow / 7e'''''
+// flushItemGlow / 7e'' flushEyebrellaCloud / 7e' flushWhipFullbright /
+// 7f flushTrailShade（CPU 光栅路）/ 7c drawBrightVines / 7d' Faeling 677+
+// fairy 583-585+鹿角怪 668 / 7d'' drawFadingParticles / 7d''' flushTowerGlow
+// 四塔残影 / flushNpcWhiteLift（395/519 白提亮）。余债（GL/子链面）:
+// liqgl 批化 gate 路 / gladd itemGlow GL 会话 / 拖尾 GL 路（obj55/obj58）/
+// projFullbrightQueue 闭包族 / 翼光 overlay betsy·trail45 子链 / 7d 全亮尘。
+// 正确不罩域:7g drawWiresBright（原版 DrawWires :63251/:63259 在水后）/7h 狱火环
 // （:63264）/BJ553 标记/BJ422 标尺/BJ593 血条（接口层）。
 //
 // 判别力（旧码必红）:§2 三路水罩源/§3 会话序/§4 复合语义/§5 镜像同式——
@@ -67,14 +70,18 @@ describe('★BJ676 §1 原版层序定谳锁（Main.cs:63194-63266 亲读）', (
   });
 
   it('水后域（导线/狱火环）正确不罩的判据注', () => {
-    expect(RDR).toContain('7g 导线 Bright/7h 狱火环原版在【水后】（:63259/:63264）=正确不罩');
+    expect(RDR).toContain('7g 导线 Bright/7h 狱火环原版在【水后】（:63251/:63259/:63264）=正确不罩');
   });
 });
 
 describe('★BJ676 §2 水罩源三路统一（drawLiquids 前景 pass）', () => {
-  it('veil676 谓词=月套四队列（时序=drawPlayer 实体段 4 < 前景水 4.5 恒满足）', () => {
+  it('veil676 谓词=月套四队列+★BJ679 九路扩区（时序=实体段 4 收集 < 前景水 4.5 恒满足）', () => {
     expect(RDR).toContain('const veil676 = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0');
-    expect(RDR).toContain('|| this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0;');
+    expect(RDR).toContain('|| this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0');
+    expect(RDR).toContain('★BJ679 九路扩区（注见上）');
+    expect(RDR).toContain('|| this.npcWhiteLiftQueue.length > 0 || veil679Ent || veil679Fade;');
+    // 实体直绘族经 veilEntities 入谓词（仅 fg pass 传参）
+    expect(RDR).toContain('this.drawLiquids(world, cam, viewW, viewH, z, false, entities);');
   });
 
   it('liqgl 批化帧禁批回 canvas gate 路（fgCanvas 形态层保留）', () => {
@@ -103,31 +110,48 @@ describe('★BJ676 §2 水罩源三路统一（drawLiquids 前景 pass）', () =
   });
 });
 
-describe('★BJ676 §3 会话序（7e 段开/收位次）', () => {
-  it('escapeVeilBegin 在 flushWingGlow 后、flushLunarArmor 前（翼光不参=登记面）', () => {
-    const iWing = RDR.indexOf('this.flushWingGlow(cam, z);');
+describe('★BJ676 §3 会话序（★BJ679 扩区:7c-7f 开/收位次）', () => {
+  it('escapeVeilBegin 在 drawBrightVines 前（7c 首队列）;wingGlow 在会话内（BJ679 收编）', () => {
+    const iVines = RDR.indexOf('this.drawBrightVines(entities, cam, z');
     const iBegin = RDR.indexOf('this.escapeVeilBegin();');
+    const iWing = RDR.indexOf('this.flushWingGlow(cam, z);');
     const iLunar = RDR.indexOf('this.flushLunarArmor();');
-    expect(iWing).toBeGreaterThan(-1);
-    expect(iBegin).toBeGreaterThan(iWing);
-    expect(iLunar).toBeGreaterThan(iBegin);
+    expect(iVines).toBeGreaterThan(-1);
+    expect(iBegin).toBeGreaterThan(-1);
+    expect(iBegin).toBeLessThan(iVines);
+    expect(iWing).toBeGreaterThan(iBegin);
+    expect(iLunar).toBeGreaterThan(iWing);
   });
 
-  it('escapeVeilEnd 在 flushSolarShieldQueue 后（四 flush=lunarArmor/armorGlow/lunarCovered/solarShield 全在会话内;itemGlow 居中不参=登记）', () => {
+  it('escapeVeilEnd 在 flushTrailShade 后（7c-7f 十队列+月套四 flush 全在会话内;itemGlow 2D 路已参=BJ679）', () => {
+    const iVines = RDR.indexOf('this.drawBrightVines(entities, cam, z');
     const iArmor = RDR.indexOf('this.flushLunarArmor();');
     const iGlow = RDR.indexOf('this.flushArmorGlow();');
     const iCov = RDR.indexOf('this.flushLunarCovered();');
     const iItem = RDR.indexOf('this.flushItemGlow();');
     const iSolar = RDR.indexOf('this.flushSolarShieldQueue(cam, z);');
+    const iEye = RDR.indexOf('this.flushEyebrellaCloud(cam, z);');
+    const iWhip = RDR.indexOf('this.flushWhipFullbright(cam, z);');
+    const iTrail = RDR.indexOf('this.flushTrailShade(cam, z, viewW, viewH);');
     const iEnd = RDR.indexOf('this.escapeVeilEnd();');
-    expect(iArmor).toBeGreaterThan(-1);
+    expect(iVines).toBeGreaterThan(-1);
+    expect(iArmor).toBeGreaterThan(iVines);
     expect(iGlow).toBeGreaterThan(iArmor);
-    expect(iCov).toBeGreaterThan(iGlow);
+    // ★BJ681 盾球挪位（原版 26_SolarShield < 27 手持物=盾在武器下;旧位 itemGlow 后
+    //  =盾盖武器=用户实报「日耀套甲盖武器」）→ 今序:glow under 遍 < 盾 < 随迁重放
+    expect(iSolar).toBeGreaterThan(iGlow);
+    expect(iCov).toBeGreaterThan(iSolar);
     expect(iItem).toBeGreaterThan(iCov);
-    expect(iSolar).toBeGreaterThan(iItem);
-    expect(iEnd).toBeGreaterThan(iSolar);
-    // 会话覆盖=lunarArmor→armorGlow→lunarCovered→(itemGlow 缺席)→solarShield
-    expect(iEnd - iSolar).toBeLessThan(200);
+    // ★BJ681 armorGlow arm 遍（28 臂站=武器之上）在 itemGlow 后、eyebrella 前
+    const iArm = RDR.indexOf('this.flushArmorGlow(true);');
+    expect(iArm).toBeGreaterThan(iItem);
+    expect(iEye).toBeGreaterThan(iArm);
+    expect(iEye).toBeGreaterThan(iSolar);
+    expect(iWhip).toBeGreaterThan(iEye);
+    expect(iTrail).toBeGreaterThan(iWhip);
+    expect(iEnd).toBeGreaterThan(iTrail);
+    // 收口紧随 7f（eyebrella/鞭/拖尾同会话收）
+    expect(iEnd - iTrail).toBeLessThan(200);
   });
 });
 
@@ -165,7 +189,8 @@ describe('★BJ676 §5 四 flush mask 镜像（与主画布直绘完全同式）
   });
 
   it('flushArmorGlow:copies 内镜像（原图=α 同 tint;rot 支保守盒;blend 语义直绘保持）', () => {
-    const i = RDR.indexOf('private flushArmorGlow(): void {');
+    // ★BJ681 签名扩参（armPass 臂遍）;锁体不变
+    const i = RDR.indexOf('private flushArmorGlow(armPass = false): void {');
     const iEnd = RDR.indexOf('private flushItemGlow(): void {');
     const seg = RDR.slice(i, iEnd > i ? iEnd : i + 6500);
     expect(seg).toContain('mc.drawImage(img, op.sx, sy, op.sw, op.sh, op.dx + jx, op.dy + jy, op.sw, op.sh)');
