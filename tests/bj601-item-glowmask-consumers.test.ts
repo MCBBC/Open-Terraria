@@ -376,9 +376,9 @@ describe('BJ601 ⑥ Renderer 五站结构锁', () => {
     expect(RDR.includes('!HAND_GLOW_SKIP.has(heldVid)')).toBe(true);
   });
 
-  it('掉落站 miscCounter 传参（:39424 LocalPlayer.miscCounter）', () => {
-    expect(RDR.includes('private drawDrop(d: ItemDrop, miscCounter = 0)')).toBe(true);
-    expect(RDR.includes('this.drawDrop(e, player.miscCounter);')).toBe(true);
+  it('掉落站 miscCounter 传参（:39424 LocalPlayer.miscCounter;★BJ679 后签名扩 cam 参=水罩镜像直传）', () => {
+    expect(RDR.includes('private drawDrop(d: ItemDrop, miscCounter = 0, cam?: Camera)')).toBe(true);
+    expect(RDR.includes('this.drawDrop(e, player.miscCounter, cam);')).toBe(true);
   });
 
   it('静持站位次 = 本体后/火苗前（原版 glow :3499 < 火苗 :3567）——源序锁', () => {

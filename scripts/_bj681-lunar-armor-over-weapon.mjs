@@ -72,7 +72,7 @@ await page.evaluate(async () => {
       const orig = proto[k];
       if (!orig) continue;
       proto[k] = function (...a) {
-        window.__order.push(tag(this) + (k === 'lunarCoverBegin' ? `#${a[1]?.vanillaId ?? (a[1]?.name ?? 'p')}` : ''));
+        window.__order.push(tag(this, a) + (k === 'lunarCoverBegin' ? `#${a[1]?.vanillaId ?? (a[1]?.name ?? 'p')}` : ''));
         return orig.apply(this, a);
       };
     }

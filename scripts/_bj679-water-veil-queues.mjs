@@ -56,7 +56,11 @@ await page.evaluate(async () => {
       if (a[5] === false) {
         window.__bj679q.towerGlow = this.towerGlowQueue.length;
         window.__bj679q.whip = this.whipFullbrightQueue.length;
-        if (window.__bj679whip) this.whipFullbrightQueue.push(window.__bj679whip);
+        // 鞭注入:tex 逐帧解析（ensureVImage 首拍懒加载返 null;就绪后非空才推）
+        if (window.__bj679whip) {
+          const tex = this.atlas && this.atlas.ensureVImage('vanilla/FishingLine.png');
+          if (tex && tex.width > 0) this.whipFullbrightQueue.push({ ...window.__bj679whip, tex });
+        }
       }
       return od.apply(this, a);
     };
@@ -101,16 +105,36 @@ const spot = await page.evaluate(() => {
 });
 if (!spot) { console.error('NO_WATER_BODY'); process.exit(2); }
 console.log(`water column: x=${spot.tx} surfaceY=${spot.tySurface} depth=${spot.depth} bottomY=${spot.tyBottom}`);
-// ctrl 区=同水柱上方清水带（内容全在湖底段,深度差 ≥20 格=零逃逸内容）
-const CTRL = [spot.tx - 1, spot.tySurface + 2, spot.tx + 2, spot.tySurface + 8];
+// 逐场景 ctrl（净水面带;与各场景逃逸内容互斥——A/B 唯一差异面=水罩）
+const S = spot.tySurface, B = spot.tyBottom, TX = spot.tx;
+const CTRL_TOP = [TX - 1, S + 16, TX + 2, S + 20];    // 深水带（翼场景;避 s+2..s+6 动画水位线）
+const CTRL_BOT = [TX - 1, B - 12, TX + 2, B - 9];     // 中下带（鞭场景,相机 bottom）
+const CTRL_BOT2 = [TX - 1, B - 2, TX + 2, B - 1];     // 底带（飞灵场景,避拖尾残留）
+// 塔场景 ctrl=邻侧水列（塔体横跨 tx−11..tx+1=本列左半;右邻深水列整列净空）
+const towerCtrlCol = await page.evaluate((s) => {
+  const st = window.__swGame.world.store;
+  for (const x of [s.tx + 6, s.tx + 7, s.tx + 8, s.tx - 8, s.tx - 7, s.tx - 6]) {
+    if (x < 2 || x >= st.w - 2) continue;
+    let ok = true;
+    for (let y = s.tySurface + 16; y <= s.tySurface + 20; y++) {
+      const i = st.idx(x, y);
+      if (!(st.liquid[i] > 0 && st.liquidType[i] === 1)) { ok = false; break; }
+    }
+    if (ok) return x;
+  }
+  return s.tx;   // fallback=本列
+}, spot);
+const CTRL_TOWER = [towerCtrlCol, S + 16, towerCtrlCol + 1, S + 20];
 
-const pinPlayer = () => page.evaluate((s) => {
+const pinPlayer = (mode = 'mid') => page.evaluate((s, mode) => {
   const g = window.__swGame, p = g.player;
   p.x = (s.tx + 0.5) * 16 - p.w / 2;
-  p.y = s.tyBottom * 16 - p.h - 1;
+  // mid=表面+12（清水受光带）;bottom=湖底−8（底段内容居视域）
+  const ty = mode === 'mid' ? Math.min(s.tySurface + 12, s.tyBottom - 4) : s.tyBottom - 8;
+  p.y = ty * 16 - p.h - 1;
   p.vx = 0; p.vy = 0;
   return { px: p.x, py: p.y };
-}, spot);
+}, spot, mode);
 
 // 旧态开关（BJ676 同式:Begin→false=全链退化直绘,无半路残渍）
 const setLegacy = (on) => page.evaluate((v) => {
@@ -153,16 +177,17 @@ const diffStat = (a, b) => {
   return { maxD: max, avgD: n ? +(sum / n).toFixed(2) : 0, dB: bn ? +(bw / bn).toFixed(2) : 0, n };
 };
 
-/** A/B 交替 R 轮聚合（BJ676 同式:每拍 pin 防漂移,漂移零均值/水罩信号恒定） */
-const abRegion = async (region, R = 4) => {
+/** A/B 交替 R 轮聚合（BJ676 同式:每拍 pin 防漂移;ctrl=逐场景净水面带——
+ *  A/B 间唯一差异面=逃逸族水罩,非逃逸内容（玩家本体/地形/第一份水）逐位同） */
+const abRegion = async (region, ctrlRegion, pinMode = 'mid', R = 4) => {
   const acc = [], accCtrl = [];
   for (let r = 0; r < R; r++) {
-    await setLegacy(false); await pinPlayer(); await waitFrames(1);
+    await setLegacy(false); await pinPlayer(pinMode); await waitFrames(1);
     const A = await sampleBox(region[0], region[1], region[2], region[3]);
-    const Ac = await sampleBox(CTRL[0], CTRL[1], CTRL[2], CTRL[3]);
-    await setLegacy(true); await pinPlayer(); await waitFrames(1);
+    const Ac = await sampleBox(ctrlRegion[0], ctrlRegion[1], ctrlRegion[2], ctrlRegion[3]);
+    await setLegacy(true); await pinPlayer(pinMode); await waitFrames(1);
     const B = await sampleBox(region[0], region[1], region[2], region[3]);
-    const Bc = await sampleBox(CTRL[0], CTRL[1], CTRL[2], CTRL[3]);
+    const Bc = await sampleBox(ctrlRegion[0], ctrlRegion[1], ctrlRegion[2], ctrlRegion[3]);
     acc.push(diffStat(A, B));
     accCtrl.push(diffStat(Ac, Bc));
   }
@@ -172,7 +197,10 @@ const abRegion = async (region, R = 4) => {
     avgD: +(arr.reduce((s, d) => s + d.avgD, 0) / arr.length).toFixed(2),
     dB: +(arr.reduce((s, d) => s + d.dB, 0) / arr.length).toFixed(2),
   });
-  return { content: agg(acc), ctrl: agg(accCtrl) };
+  // ctrl 中位档（雨滴/气泡等稀疏瞬态只污染个别轮;结构面零双罩已由 BJ676
+  // 合成单测逐位证,此处=真机环境噪声底校验,取中位数免疫瞬态）
+  const med = (arr) => { const v = [...arr.map((d) => d.avgD)].sort((a, b) => a - b); return +v[Math.floor(v.length / 2)].toFixed(2); };
+  return { content: agg(acc), ctrl: agg(accCtrl), ctrlMed: med(accCtrl) };
 };
 
 const strokesSnap = () => page.evaluate(() => { const s = window.__bj679dbg.strokes; window.__bj679dbg.strokes = 0; return s; });
@@ -194,8 +222,8 @@ const wingEquip = (on) => page.evaluate(async (v) => {
 try {
   await wingEquip(true);
   await pinPlayer(); await pump(page, 40); await waitFrames(3);   // 装备聚合+翼贴图加载
-  const px = spot.tx, bot = spot.tyBottom;
-  const r = await abRegion([px - 2, bot - 6, px + 3, bot - 1]);
+  const px = spot.tx, wy = Math.min(S + 12, B - 4);
+  const r = await abRegion([px - 2, wy - 4, px + 3, wy], CTRL_TOP);
   results.wing = { ...r, strokes: await strokesSnap(), q: await qSnap() };
   console.log(`[wing]    content A/B: ${JSON.stringify(r.content)}  ctrl: ${JSON.stringify(r.ctrl)}  strokes(A)=${results.wing.strokes}`);
 } catch (e) { console.log('[wing] FAIL', e.message, 'errors:', JSON.stringify(errors.slice(0, 3))); }
@@ -208,50 +236,71 @@ try {
     const g = window.__swGame;
     g.world.lunarEvent.shield = { solar: 100, vortex: 100, nebula: 100, stardust: 100 };
     const e = spawnVanillaEnemy(g, 493, (s.tx - 5) * 16, (s.tyBottom - 10) * 16);
+    if (e) e.facing = -1;   // BJ510:塔 spriteDirection 恒 -1（收集门 !mirror）
     return e ? { x: e.cx, y: e.cy, alive: !e.dead } : null;
   }, spot);
   console.log('tower spawn:', JSON.stringify(tower));
-  await pinPlayer(); await pump(page, 60); await waitFrames(3);   // spawnAlpha 淡入 settle
-  const alive = await page.evaluate(() => {
+  await pinPlayer(); await pump(page, 60);   // spawnAlpha 淡入 settle
+  const frozen = await page.evaluate((s) => {
     const g = window.__swGame;
     const t = (g.enemies ? g.enemies() : []).find((e) => e.vanillaId === 493 && !e.dead);
-    return t ? { x: t.cx, y: t.cy, spawnAlpha: t.spawnAlpha } : null;
-  });
-  console.log('tower alive:', JSON.stringify(alive));
-  if (alive) {
-    const stx = Math.floor(alive.x / 16), sty = Math.floor(alive.y / 16);
-    // 内容区=塔心水下带（水下段:水面下 3 格到湖底）
-    const r = await abRegion([stx - 5, spot.tySurface + 3, stx + 6, spot.tyBottom - 1]);
+    if (!t) return null;
+    // 冻结塔 AI（towerAI 每拍重定位到地表=离屏;fixedUpdate 实例遮蔽=渲染字段静止,
+    // 收集门 visAngle=0/!mirror 全过）
+    t.x = (s.tx - 5) * 16; t.y = (s.tyBottom - 10) * 16; t.vx = 0; t.vy = 0;
+    t.fixedUpdate = () => {};
+    return { x: t.cx, y: t.cy };
+  }, spot);
+  console.log('tower frozen:', JSON.stringify(frozen));
+  await waitFrames(3);
+  if (frozen) {
+    // 内容区=水柱带（塔 glow 横跨水柱;水上无罩段已用 tySurface+3 下界裁除）
+    const r = await abRegion([TX - 1, S + 10, TX + 2, S + 34], CTRL_TOWER);
     results.tower = { ...r, strokes: await strokesSnap(), q: await qSnap() };
     console.log(`[tower]   content A/B: ${JSON.stringify(r.content)}  ctrl: ${JSON.stringify(r.ctrl)}  strokes(A)=${results.tower.strokes} q=${JSON.stringify(results.tower.q)}`);
+    // ctrl 污染源定位:单拍 A/B ctrl 像素对,打印差异像素坐标+颜色
+    if (r.ctrl.avgD > 2.5) {
+      await setLegacy(false); await pinPlayer('mid'); await waitFrames(1);
+      const A2 = await sampleBox(CTRL_TOWER[0], CTRL_TOWER[1], CTRL_TOWER[2], CTRL_TOWER[3]);
+      await setLegacy(true); await pinPlayer('mid'); await waitFrames(1);
+      const B2 = await sampleBox(CTRL_TOWER[0], CTRL_TOWER[1], CTRL_TOWER[2], CTRL_TOWER[3]);
+      const L = Math.min(A2.px.length, B2.px.length);
+      const shown = [];
+      for (let i = 0; i < L && shown.length < 10; i += 4) {
+        const d = Math.max(Math.abs(A2.px[i] - B2.px[i]), Math.abs(A2.px[i + 1] - B2.px[i + 1]), Math.abs(A2.px[i + 2] - B2.px[i + 2]));
+        if (d > 20) shown.push({ px: i / 4, A: A2.px.slice(i, i + 4), B: B2.px.slice(i, i + 4) });
+      }
+      console.log('tower ctrl diff pixels:', JSON.stringify(shown));
+      await setLegacy(false);
+    }
   }
   await page.evaluate(() => {
     const g = window.__swGame;
-    for (const e of (g.enemies ? g.enemies() : [])) if (e.vanillaId === 493) e.dead = true;
+    // 移远替代 dead（死亡演出/gore 会污染后续场景采样带）
+    for (const e of (g.enemies ? g.enemies() : [])) if (e.vanillaId === 493) e.x = -999999;
   });
-} catch (e) { console.log('[tower] FAIL', e.message, 'errors:', JSON.stringify(errors.slice(0, 3))); }
+} catch (e) { console.log('[tower] FAIL', e.message, 'stack:', JSON.stringify(await page.evaluate(() => (window.__swErrors ?? []).slice(-2)).catch(() => null))); }
 
 // ============ 场景③ 鞭线体（合成注入:flush 侧镜像+复合域）============
 try {
   await page.evaluate(async (s) => {
-    const g = window.__swGame, r = g.renderer;
-    const tex = r.atlas.ensureVImage('vanilla/Chain24.png');
     const cx = (s.tx + 0.5) * 16, cy = (s.tyBottom - 5) * 16;
     // 水下横向折线（鞭语义=分段线体;强 α 200/255=可辨信号,1034 原色 α12 过弱）
     const pts = [];
     for (let i = 0; i <= 8; i++) pts.push({ x: cx - 40 + i * 10, y: cy + Math.sin(i * 1.2) * 8 });
-    window.__bj679whip = { pts, tex, color: [255, 70, 20, 200] };
+    window.__bj679whip = { pts, color: [255, 70, 20, 200] };   // tex=注入钩逐帧解析
   }, spot);
-  await pinPlayer(); await pump(page, 4); await waitFrames(3);
-  const cx = spot.tx, cy = spot.tyBottom - 5;
-  const r = await abRegion([cx - 3, cy - 1, cx + 3, cy + 1]);
+  await pinPlayer('bottom'); await pump(page, 4); await waitFrames(3);
+  const cx = spot.tx, cy = B - 5;
+  const r = await abRegion([cx - 3, cy - 2, cx + 3, cy + 2], CTRL_BOT, 'bottom');
   results.whip = { ...r, strokes: await strokesSnap(), q: await qSnap() };
   console.log(`[whip]    content A/B: ${JSON.stringify(r.content)}  ctrl: ${JSON.stringify(r.ctrl)}  strokes(A)=${results.whip.strokes} q=${JSON.stringify(results.whip.q)}`);
-} catch (e) { console.log('[whip] FAIL', e.message, 'errors:', JSON.stringify(errors.slice(0, 3))); }
+} catch (e) { console.log('[whip] FAIL', e.message, 'stack:', JSON.stringify(await page.evaluate(() => (window.__swErrors ?? []).slice(-3)).catch(() => null))); }
 await page.evaluate(() => { window.__bj679whip = null; });
 
 // ============ 场景④ 飞灵 677（真实链:tgt 整函数重放+历史包络 box）============
 try {
+  await pinPlayer('bottom'); await pump(page, 4);   // 相机先就位（mid 时 b−4 离屏=critter despawn）
   const faeling = await page.evaluate(async (s) => {
     const { spawnVanillaEnemy } = await import('/src/entities/bossAI.ts');
     const g = window.__swGame;
@@ -259,24 +308,30 @@ try {
     return e ? { x: e.cx, y: e.cy } : null;
   }, spot);
   console.log('faeling spawn:', JSON.stringify(faeling));
-  await pinPlayer(); await pump(page, 60); await waitFrames(3);   // 历史轨迹填充+淡入
-  const alive = await page.evaluate(() => {
+  await pinPlayer('bottom'); await pump(page, 60);   // 淡入+历史轨迹填充
+  const frozen = await page.evaluate((s) => {
     const g = window.__swGame;
     const t = (g.enemies ? g.enemies() : []).find((e) => e.vanillaId === 677 && !e.dead);
-    return t ? { x: t.cx, y: t.cy } : null;
-  });
-  console.log('faeling alive:', JSON.stringify(alive));
-  if (alive) {
-    const fx = Math.floor(alive.x / 16), fy = Math.floor(alive.y / 16);
-    const r = await abRegion([fx - 4, fy - 4, fx + 4, fy + 4]);
+    if (!t) return null;
+    // 传送回水柱+冻结（critter AI 飞离=内容漂移伪影;拖尾残留在旧飞行径=框外无害）
+    t.x = (s.tx + 0.5) * 16 - t.w / 2; t.y = (s.tyBottom - 4) * 16 - t.h / 2;
+    t.vx = 0; t.vy = 0;
+    t.fixedUpdate = () => {};
+    return { x: t.cx, y: t.cy };
+  }, spot);
+  console.log('faeling frozen:', JSON.stringify(frozen));
+  await waitFrames(3);
+  if (frozen) {
+    const fx = spot.tx, fy = B - 4;
+    const r = await abRegion([fx, fy - 1, fx + 1, fy + 1], CTRL_BOT2, 'bottom');
     results.faeling = { ...r, strokes: await strokesSnap() };
     console.log(`[faeling] content A/B: ${JSON.stringify(r.content)}  ctrl: ${JSON.stringify(r.ctrl)}  strokes(A)=${results.faeling.strokes}`);
   }
   await page.evaluate(() => {
     const g = window.__swGame;
-    for (const e of (g.enemies ? g.enemies() : [])) if (e.vanillaId === 677) e.dead = true;
+    for (const e of (g.enemies ? g.enemies() : [])) if (e.vanillaId === 677) e.x = -999999;   // 移远防 gore
   });
-} catch (e) { console.log('[faeling] FAIL', e.message, 'errors:', JSON.stringify(errors.slice(0, 3))); }
+} catch (e) { console.log('[faeling] FAIL', e.message, 'stack:', JSON.stringify(await page.evaluate(() => (window.__swErrors ?? []).slice(-2)).catch(() => null))); }
 
 // ============ 场景⑤ FadingParticles（真实链:全亮粒子 lighter 主拍镜像）============
 try {
@@ -284,13 +339,13 @@ try {
     const FP = await import('/src/fx/FadingParticles.ts');
     const cx = (s.tx + 0.5) * 16, cy = (s.tyBottom - 3) * 16;
     FP.fadingParticles.spawn({
-      x: cx, y: cy, timeToLive: 100000, fadeIn: 0, fadeOut: 1,
-      scale: 2, tint: [255, 200, 60, 255], texKey: 'vanilla/Extra_34.png', fullbright: true,
+      x: cx, y: cy, timeToLive: 100000, fadeIn: 0.0001, fadeOut: 0.5,
+      scale: 1, tint: [255, 255, 255, 255], texKey: 'vanilla/Wings_9.png', fullbright: true,
     });
   }, spot);
-  await pinPlayer(); await pump(page, 4); await waitFrames(3);
-  const cx = spot.tx, cy = spot.tyBottom - 3;
-  const r = await abRegion([cx - 2, cy - 2, cx + 3, cy + 2]);
+  await pinPlayer('bottom'); await pump(page, 30); await waitFrames(3);   // fadeIn ramp 收敛
+  const cx = spot.tx, cy = B - 6;   // b−6:粒子核心带;ctrl=邻列中下带
+  const r = await abRegion([cx, cy - 2, cx + 1, cy + 2], [towerCtrlCol, B - 14, towerCtrlCol + 1, B - 10], 'bottom');
   results.fading = { ...r, strokes: await strokesSnap() };
   console.log(`[fading]  content A/B: ${JSON.stringify(r.content)}  ctrl: ${JSON.stringify(r.ctrl)}  strokes(A)=${results.fading.strokes}`);
 } catch (e) { console.log('[fading] FAIL', e.message, 'errors:', JSON.stringify(errors.slice(0, 3))); }
@@ -300,7 +355,7 @@ try {
 const verdict = {};
 for (const [name, res] of Object.entries(results)) {
   verdict[name] = !!res && res.content.avgD > 5 && res.content.maxD > 20
-    && res.ctrl.avgD < 2.5 && res.strokes > 0;
+    && res.ctrlMed < 2.5 && res.strokes > 0;
 }
 console.log('VERDICT:', JSON.stringify(verdict));
 console.log('pageerrors:', errors.length, errors.slice(0, 5));

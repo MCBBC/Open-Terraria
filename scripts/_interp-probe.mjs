@@ -4,7 +4,7 @@
 //     ∧ 渲染后还原=逻辑位（物理域零污染）
 //   ③60fps 驱动（elapsed 16.67ms）:alpha≈0 → A/B 逐字节（60 档零风险性质）
 // 同步驱动口径:running=false+g.frame 手推;vnow 步进=目标帧距。
-import { launchBrowser, openPage, bootstrap, createGame, pump } from '../tools/probe/lib/index.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump, spawnEnemy } from '../tools/probe/lib/index.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 import { createHash } from 'node:crypto';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5204';
@@ -92,6 +92,14 @@ async function snap() {
 }
 
 // ---- ①静止 A/B 逐字节 ----
+// ★二期①后 NPC/弹幕也插值——「静止」指玩家/相机;NPC 自主游走（向导闲逛）会让
+//   旗开/关产生合法差（NPC 画在插值位）——①的逐字节闸域必须清实体桶。
+await page.evaluate(() => {
+  const g = window.__swGame;
+  for (const k of ['enemies', 'drops', 'projectiles', 'npcs', 'props', 'critters']) {
+    g.entities[k].length = 0;
+  }
+});
 await waitFrame(4, 16.67);
 await page.evaluate(() => window.__interpSet(false));
 await waitFrame(2, 16.67);
@@ -146,6 +154,41 @@ const s3b = await snap();
 // 60fps 同步驱动:elapsed=16.67≈FIXED_DT → 每帧恰 1 步,acc≈0 → alpha≈0 → 逐位
 chk('③ 60fps A/B 逐字节（alpha≈0 零风险域）', s3a.b64 === s3b.b64,
   s3a.b64 === s3b.b64 ? md5(s3a.b64).slice(0, 8) : `A=${md5(s3a.b64).slice(0, 8)} B=${md5(s3b.b64).slice(0, 8)}`);
+
+// ---- ⑤实体插值（二期①）:快照就位+渲染后还原 ----
+// ★夹具判例:g.spawnEnemy 非平台入口（非法构造→实体缺字段→渲染 e.key 炸）——
+//   探针平台正路=entities.mjs spawnEnemy（Ctor/vid 反查全链）。
+const spAddr = await page.evaluate(() => ({
+  x: window.__swGame.player.x + 200,
+  y: window.__swGame.player.y - 60,
+}));
+const sp = await spawnEnemy(page, 3, spAddr.x, spAddr.y);
+chk('⑤ 夹具:spawn 敌人入桶', !!sp?.ok, JSON.stringify(sp).slice(0, 80));
+await page.evaluate(() => window.__pause(false));
+for (let i = 0; i < 12; i++) {
+  await page.evaluate(() => {
+    const g = window.__swGame;
+    window.__vnow += 8.33;
+    g.frame(window.__vnow);
+  });
+}
+const e5 = await page.evaluate(() => {
+  const g = window.__swGame;
+  const e = g.entities.enemies.find((x) => Number.isFinite(x.prevX));
+  if (!e) return null;
+  return {
+    prevX: e.prevX, x: e.x, prevY: e.prevY, y: e.y,
+    snapLive: Number.isFinite(e.prevX),
+    gap: Math.hypot(e.x - e.prevX, e.y - e.prevY),
+  };
+});
+chk('⑤ 实体快照就位（prevX 有限值）', !!e5 && e5.snapLive,
+  e5 ? `prev=(${e5.prevX.toFixed(1)},${e5.prevY.toFixed(1)}) curr=(${e5.x.toFixed(1)},${e5.y.toFixed(1)}) gap=${e5.gap.toFixed(2)}` : 'no-entity');
+// 还原:渲染后 e.x 必为物理位（=下帧 fixedUpdate 的输入）——读两次帧间位移合理性
+// （若插值残留,e.x 会停在半步中间位且 gap 恒微;物理位 gap=整步位移量级）
+chk('⑤ 还原健康（步进 gap>0 或静止,gap 有界）', !!e5 && e5.gap >= 0 && e5.gap < 40,
+  e5 ? `gap=${e5.gap.toFixed(2)}px` : '');
+await page.evaluate(() => window.__pause(true));
 
 if (pageErrors.length) { console.log('PAGE ERRORS:'); for (const e of pageErrors.slice(0, 5)) console.log('  ' + e); }
 await browser.close();

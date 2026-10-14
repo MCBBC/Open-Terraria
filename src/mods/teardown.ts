@@ -59,6 +59,8 @@ import { _resetModKeybindsForTests } from '../core/Keybinds';
 import { _resetModRecipeSideTablesForTests } from '../data/vanillaRecipes';
 import { modHtmlUiTeardown } from './modHtmlUi';   // ★Tier1-a
 import { _resetModStorageForTests } from './modStorage';   // ★Tier1-a
+import { _resetModShadersForTests } from './modShader';   // ★Tier1-b
+import { modWorkersTeardown } from './modWorker';   // ★Tier1-c
 import { ITEM_DEFS, ITEM_BY_KEY, ITEM_INTERNAL_OF_STABLE } from '../data/items';
 import { TILE_BY_KEY, TILE_DEFS, WALL_DEFS, WALL_BY_KEY } from '../data/tiles';
 import { VANILLA_NPCS, TOWN_NPC_IDS } from '../data/vanillaNpcs';
@@ -142,6 +144,8 @@ export function unloadModsForHotReload(): void {
   // ★Tier1-a:DOM overlay 层/存储记账
   modHtmlUiTeardown();
   _resetModStorageForTests();
+  _resetModShadersForTests();   // ★Tier1-b(shader 链随 hooks _reset 全清——runtimes 表独立清)
+  modWorkersTeardown();   // ★Tier1-c:worker 全 terminate
   // 引擎侧缓存哨兵(D11 清单)
   _resetModAchDefsForTests();
   _resetBestiaryEntryCacheForTests();

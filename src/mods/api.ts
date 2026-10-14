@@ -35,6 +35,10 @@ import {
   registerModNpcDraw, registerModItemDraw, registerVanillaOverride, registerGlobalNpcHooks, registerModPlayerPreHurt, registerModPlayerPostHurt, registerModPlayerRespawn, registerModPlayerUpdateDead, registerModPlayerModifyMoveSpeed, registerModPlayerDraw, registerModTooltip,
   type ModScreenFxPass, type ModSystemHooks, type ModUseCtx, type ModDrawCtx,
 } from './hooks';
+import { registerModShader } from './modShader';   // ★Tier1-b
+import { createModClipboard } from './modClipboard';   // ★Tier1-b
+import { createModNet } from './modNet';   // ★Tier1-c
+import { modWorkerOf } from './modWorker';   // ★Tier1-c
 import { modUiPanel, modUiCloseAllOf } from './ui';   // ★刀1:mod UI 宿主面板
 import { modHtmlUiPage } from './modHtmlUi';   // ★Tier1-a:富 DOM overlay
 import { createModStorage } from './modStorage';   // ★Tier1-a:持久 KV
@@ -186,6 +190,24 @@ export interface ModContext {
   /** mod 全屏后处理 pass(Renderer 7d 滤镜链最前执行;tML FilterManager.
    *  EndCapture MonoMod 前缀同位——lights-and-shadows 首消费方) */
   screenFx(pass: ModScreenFxPass): void;
+  /** ★Tier1-b(2026-10-14):GLSL 屏幕后处理声明面——只写片元源+uniforms
+   *  (float/vec2/vec3/vec4),引擎编译/绑纹理/链入 7d 滤镜链最前;编译失败=
+   *  warn+恒等直通(不炸帧)。采样器固定 uTexture;禁 #version/#extension */
+  shader(spec: { src: string; uniforms?: Record<string, number | readonly number[]> }): void;
+  /** ★Tier1-b(2026-10-14):剪贴板(写 256KB 限/读 3s 授权超时;读拒绝=null) */
+  clipboard: {
+    write(text: string): Promise<boolean>;
+    read(): Promise<string | null>;
+  };
+  /** ★Tier1-c(2026-10-14):联网 fetch(mod.json "net" 域白名单声明;未声明域
+   *  runtime throw;仅 https+localhost;超时 10s/响应 4MB 限) */
+  net: {
+    fetchJson<T>(url: string, opts?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs?: number }): Promise<T>;
+    fetchText(url: string, opts?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs?: number }): Promise<string>;
+  } | null;
+  /** ★Tier1-c(2026-10-14):计算卸载 worker(pack 内 workers/<path>.js;脚本声明
+   *  onmessageRun(data, reply)——引擎胶水 id 路由;run 结构化克隆往返) */
+  worker(path: string): { run<TIn, TOut>(data: TIn): Promise<TOut>; terminate(): void };
   /** 声明式配置读写(mod.json config 表声明的键;set 即持久化) */
   config: {
     get(key: string): boolean | number | string;
@@ -360,8 +382,14 @@ export function createModContext(
   opts?: {
     /** itemUse 上下文增强(applyBuff 等;装载器注入 buff 解析) */
     decorateUseCtx?: (ctx: ModUseCtx) => ModUseCtx;
+    /** ★Tier1-c:manifest net 域白名单(未声明=sw.net 整缺) */
+    manifestNetHosts?: string[];
+    /** ★Tier1-c:workers/<path> 脚本字节(loader 注入;缺=throw) */
+    workerScriptOf?: (path: string) => Uint8Array | null;
   },
 ): ModContext {
+  const manifestNetHosts = opts?.manifestNetHosts;
+  const workerScriptOf = opts?.workerScriptOf ?? (() => null);
   const idOf = (kind: 'items' | 'npcs' | 'tiles', key: string): number => {
     const full = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
     const id = alloc[kind].get(full);
@@ -497,6 +525,16 @@ export function createModContext(
     system(hooks) { registerSystem(hooks); },
     director(host) { registerDirectorHost(host); },
     screenFx(pass) { registerModScreenFx(pass); },
+    // ★Tier1-b:GLSL 声明面/剪贴板
+    shader(spec) { registerModShader(modId, spec as never); },
+    clipboard: createModClipboard(modId),
+    // ★Tier1-c:联网/worker
+    net: createModNet(modId, manifestNetHosts ?? []),
+    worker(path) {
+      const bytes = workerScriptOf(path);
+      if (!bytes) throw new Error(`[mod-api] mod ${modId} 引用未注册 worker 脚本: workers/${path}`);
+      return modWorkerOf(modId, path, bytes);
+    },
     projIdOf(key) { return idOf('projs' as 'items', key); },
     canUse(key, fn) {
       registerModCanUse(idOf('items', key), fn as Parameters<typeof registerModCanUse>[1]);

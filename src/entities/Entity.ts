@@ -33,6 +33,14 @@ export abstract class Entity {
    *  PickSentryLandingSpot spawnY=(首实心行−1)×16−24,h=50 盒底嵌 10px;BJ-C9-SP
    *  用户基准「平台可驻」=登记在案的故意分歧）——仅哨兵弹体置 true（MinionProj）。 */
   embedPlatSnap = false;
+  // ---- ★interp 渲染插值（2026-10-14 二期①,?interp=1）----
+  //  渲染插值快照（EntityManager.update 桶循环头拍=上一步末位,与玩家/相机快照
+  //  同语义）;NaN=未快照（出生首步前）——Game.render 插值段跳过（首帧画物理位）。
+  //  消费=Game.render 前 lerp 临时写+渲染后还原表（物理域零污染）;傀儡
+  //  （netPuppet）走 netAx/netAy 快照插值链,本字段同拍无害（傀儡位由快照驱动
+  //  恒速,prevX↔x 差≈快照步进,插值与既有 15Hz 桥叠加不冲突——渲染位消费统一）。
+  prevX = NaN;
+  prevY = NaN;
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946 默认 水/岩浆 .5、
    *  蜂蜜 .25、微光 .375）。1=dry 不减速；Enemy 侧 npcLiquid.updateNpcLiquid 每 tick 写，
    *  moveAndCollide 入口缩 dx/dy（velocity 不变——同 Collision_MoveWhileWet :93986） */
@@ -168,6 +176,11 @@ export class EntityManager {
         beginProjScanCtx((game as { player?: unknown }).player);
       }
       for (const e of list) {
+        // ★interp 快照（2026-10-14 二期①）:上一步末位（进入 e.fixedUpdate 即上一步末;
+        //  与 Game.fixedUpdate 头的玩家/相机快照同拍同语义）。出生首步前 prevX=NaN
+        //  （构造缺省）——渲染插值段跳过。两行/实体/步,微不足道。
+        e.prevX = e.x;
+        e.prevY = e.y;
         e.fixedUpdate(dt, game);
         // ★中央 CutTiles 收口（2026-09-01 清零审计）：原版 Projectile.cs:12516-12517 对
         //   全部 friendly 弹每 tick 弹盒(+1 外沿)砍 Main.tileCut 物（瓦罐/杂草/盆栽）。

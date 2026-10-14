@@ -159,8 +159,8 @@ describe('BJ-C1 F4 7d\'/7d\'\'\' 消费段方法化+闭包重放锁（M3 补行�
       }],
     };
     await flushWhiteLift(self)(CAM, Z, VW, VH);
-    // 队列不清空（帧头重建语义,消费位零改）
-    expect((self.npcWhiteLiftQueue as unknown[]).length).toBe(1);
+    // ★R-C-F6-a（2026-10-13）:冲刷尾自清=队列替换空表（liftQ 旧引用 1 条已消费）
+    expect((self.npcWhiteLiftQueue as unknown[]).length).toBe(0);
     const rounds = rec.ops.filter((o) => o.op === 'translate') as Array<{ a: unknown[] }>;
     // cam.x=100.35×2=200.7→round 201→/2=100.5;cam.y=200.65×2=401.3→round 401→/2=200.5
     expect(JSON.stringify(rounds[0].a)).toBe(JSON.stringify([400, 300]));            // vw/2,vh/2

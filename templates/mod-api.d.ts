@@ -246,7 +246,25 @@ export declare interface ModContext {
   /** mod 全屏后处理 pass(GL 滤镜链最前;输出须写 outFbo) */
   screenFx(pass: { id: string; exec: (gl: WebGL2RenderingContext, pipe: object,
     inputTex: WebGLTexture, outFbo: object, w: number, h: number, state: ModScreenFxState) => void }): void;
-  /** 声明式配置读写(mod.json config 表声明键;set 即持久化) */
+
+  /** ★Tier1-b(2026-10-14):GLSL 屏幕后处理声明面——只写片元源+uniforms
+   *  (float/vec2/vec3/vec4),引擎编译/绑纹理/链入 7d 滤镜链最前;编译失败=
+   *  warn+恒等直通。采样器固定 uTexture;禁 #version/#extension */
+  shader(spec: { src: string; uniforms?: Record<string, number | readonly number[]> }): void;
+  /** ★Tier1-b(2026-10-14):剪贴板(写 256KB 限/读 3s 授权超时;读拒绝=null) */
+  clipboard: {
+    write(text: string): Promise<boolean>;
+    read(): Promise<string | null>;
+  };
+  /** ★Tier1-c(2026-10-14):联网 fetch(mod.json "net" 域白名单声明;未声明=
+   *  null;仅 https+localhost;超时 10s/响应 4MB 限) */
+  net: {
+    fetchJson<T>(url: string, opts?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs?: number }): Promise<T>;
+    fetchText(url: string, opts?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs?: number }): Promise<string>;
+  } | null;
+  /** ★Tier1-c(2026-10-14):计算卸载 worker(pack 内 workers/<path>.js;脚本声明
+   *  onmessageRun(data, reply) 引擎胶水路由;run 结构化克隆往返) */
+  worker(path: string): { run<TIn, TOut>(data: TIn): Promise<TOut>; terminate(): void };  /** 声明式配置读写(mod.json config 表声明键;set 即持久化) */
   config: {
     get(key: string): boolean | number | string;
     set(key: string, value: boolean | number | string): void;

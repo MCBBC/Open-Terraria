@@ -79,6 +79,52 @@ try {
         const vi = atlas.vimages;
         check('gore 贴图注入(D8)', !!vi?.get?.(`vanilla/Gore_${goreId}.png`), `vanilla/Gore_${goreId}.png`);
         check('dust 贴图注入(D12)', !!vi?.get?.(`vanilla/Dust_${dustId}.png`), `vanilla/Dust_${dustId}.png`);
+        // ★Tier1-c(2026-10-14):worker 计算卸载+net 白名单
+        {
+          const w = (window).__swGame ? null : (await import('/src/mods/modWorker.ts'), null);
+          void w;
+          const { modWorkerOf } = await import('/src/mods/modWorker.ts');
+          const fibBytes = await (async () => {
+            // 从已装载 pack 取——探针装载走 MemStorage;直接 fetch dev server 不行(pack 是内存的)
+            // 经 loader 注入的 entry 侧句柄:main.js 已挂 window.__swTier1cWorker?未挂全局——
+            // 直取:重新从 pack bytes 拿(modsPanel install 的 bytes 探针持有)
+            return null;
+          })();
+          void fibBytes;
+          // worker 真往返:entry 已挂 sw.__tier1cWorker?main.js 侧挂全局探针句柄
+          let workerOk = false, fibVal = -1;
+          try {
+            const wv = (window).__tier1cWorkerHandle;
+            if (wv) {
+              const r = await wv.run({ n: 10 });
+              fibVal = r.fib;
+              workerOk = fibVal === 55;   // fib(10)=55
+            }
+          } catch { /* worker fail */ }
+          check('sw.worker 计算往返', workerOk, `fib(10)=${fibVal}`);
+          const { createModNet } = await import('/src/mods/modNet.ts');
+          const net = createModNet('e2e', ['api.example.com']);   // eslint-disable
+          check('sw.net 接口在(声明域)', net !== null);
+          let domainRejected = false;
+          try { await net.fetchText('https://evil.com/x'); } catch (e) { domainRejected = /域未声明/.test(String(e)); }
+          check('sw.net 域白名单拒', domainRejected);
+        }
+
+        // ★Tier1-a(2026-10-14):htmlPage DOM overlay+storage 持久 KV
+        {
+          const el = document.querySelector('.sw-modhtml-page');
+          check('htmlPage DOM 挂载', !!el && el.textContent.includes('tier1-ready'),
+            el ? el.textContent.slice(0, 40) : 'no .sw-modhtml-page');
+          const btn = document.querySelector('[data-act=ping]');
+          if (btn) btn.click();
+          const out = document.querySelector('[data-el=out]');
+          check('htmlPage data-act 事件', !!out && out.textContent.startsWith('pong-e2e'),
+            out?.textContent ?? 'no out');
+          const cssScope = !!document.querySelector('style') && [...document.querySelectorAll('style')]
+            .some((st) => st.textContent.includes('.sw-modhtml-e2e'));
+          check('htmlPage CSS scope', cssScope);
+        }
+
         // ★D15:textures/ui/*.png 约定目录注入(sw.ui.panel addImage 消费面)
         check('UI 贴图注入(D15)', !!vi?.get?.('vanilla/ModUI_e2e_e2e_img.png'), 'vanilla/ModUI_e2e_e2e_img.png');
         // ★D12-图鉴:mod NPC 自动入册(VANILLA_NPCS 注册链 → bestiaryEntries id≥800)

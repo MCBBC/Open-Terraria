@@ -30,6 +30,8 @@ export interface ModManifest {
   side: 'both' | 'client' | 'server';
   /** 依赖:modId → 版本约束(^1.2.3 前缀式或精确 x.y.z) */
   dependencies?: Record<string, string>;
+  /** ★Tier1-c(2026-10-14):联网域白名单(空/缺省=sw.net 整缺;*.x.y 子域通配) */
+  net?: string[];
   /** ★P2:声明式配置表(键→类型+缺省;entry 经 sw.config 读写;面板内联编辑) */
   config?: Record<string, {
     type: 'bool' | 'number' | 'string';

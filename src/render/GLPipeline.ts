@@ -83,6 +83,9 @@ export class GLPipeline {
   private fbos = new Map<string, PipelineFbo>();
   private programs = new Map<string, PipelineProgram>();
   private vao: WebGLVertexArrayObject | null = null;
+  /** ★Tier1-b(2026-10-14):单位 quad VAO 只读暴露(mod shader 面/恒等 blit 消费;
+   *  只读纪律=mod 不许写 VAO 内容,仅 bind+draw) */
+  get quadVao(): WebGLVertexArrayObject | null { return this.vao; }
   private presentProg: PipelineProgram | null = null;
   private frameW = 0;
   private frameH = 0;

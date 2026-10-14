@@ -184,6 +184,9 @@ export async function loadModsPhase1(
             throw new Error('scripts/main.js default export 须为函数 main(sw)');
           }
           (entry as ModEntry)(createModContext(manifest.id, plan.allocation, configState, {
+            // ★Tier1-c(2026-10-14):net 域白名单+worker 脚本字节注入
+            manifestNetHosts: manifest.net ?? [],
+            workerScriptOf: (wp) => pack.files.get(wp.startsWith('workers/') ? wp : `workers/${wp}`) ?? null,
             decorateUseCtx: (ctx) => ({
               ...ctx,
               applyBuff: (bkey: string, seconds: number) => {

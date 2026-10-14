@@ -3727,6 +3727,8 @@ export class Game implements GameHooks {
   private _iPY = -Infinity;
   private _iCamX = -Infinity;
   private _iCamY = -Infinity;
+  /** 二期①实体插值还原表（[e,x,y]×N 复用数组;渲染后遍历复位物理位） */
+  private _iEnt: unknown[] = [];
   /** 环境 cue 斜坡独立累加器（60Hz;暂停不停——UpdateAudio Main.cs:17222 同语义） */
   private audioAcc = 0;
   private lastTime = 0;
@@ -53098,6 +53100,23 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       this.player.y = this._iPY + (iRY - this._iPY) * iA;
       cam.x = this._iCamX + (iRCamX - this._iCamX) * iA;
       cam.y = this._iCamY + (iRCamY - this._iCamY) * iA;
+      // ★interp 二期①（2026-10-14,用户验收一期后点名:仆从/星尘守卫等召唤物在
+      //  平滑世界里仍 60Hz 跳）:NPC/敌怪/弹幕桶批量 lerp 临时写+还原表（渲染期
+      //  一切实体位置消费——绘制矩阵/光照采样/发射口/尘出生位——统一吃呈现帧位
+      //  =语义更对;渲染期无实体自写位（审计 2026-10-14:8409=采样槽读、24431=新尘
+      //  出生位,均无害）。prevX NaN（出生首步前）跳过=画物理位。drops/gore/尘留
+      //  二期②（量级与收益分级,见登记）。渲染中途死/移除实体由还原表复位物理位
+      //  （dead 实体复位无害）;渲染中途 spawn 的新实体不在表=零触碰。
+      this._iEnt.length = 0;
+      const entBuckets = [this.entities.npcs, this.entities.enemies, this.entities.projectiles];
+      for (const list of entBuckets) {
+        for (const e of list) {
+          if (!Number.isFinite(e.prevX)) continue;
+          this._iEnt.push(e, e.x, e.y);
+          e.x = e.prevX + (e.x - e.prevX) * iA;
+          e.y = e.prevY + (e.y - e.prevY) * iA;
+        }
+      }
     }
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
@@ -53227,6 +53246,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // ★interp 还原（2026-10-14）:渲染消费面（绘制/光照矩形/烘焙视口/悬停）已吃插值位
     //  ——此处还原物理域真值,fixedUpdate/judder/mblur/glStat 等后续消费零污染。
     if (iA >= 0) {
+      for (let k = 0; k < this._iEnt.length; k += 3) {
+        const e = this._iEnt[k] as Entity;
+        e.x = this._iEnt[k + 1] as number;
+        e.y = this._iEnt[k + 2] as number;
+      }
       this.player.x = iRX; this.player.y = iRY;
       cam.x = iRCamX; cam.y = iRCamY;
     }

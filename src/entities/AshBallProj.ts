@@ -78,8 +78,8 @@ export class AshBallProj extends Entity {
   private ai0 = 0;
   private rotation = 0;
   /** SW-L1 F1 同口径：上一 tick 积分前位（未嵌入）——Kill 爆心/铺设落点锚 */
-  private prevX = 0;
-  private prevY = 0;
+  private lastX = 0;   // ★改名避让 Entity.prevX（2026-10-14 interp 二期①基类新字段撞名;语义不变）
+  private lastY = 0;
   /** friendly 面 per-target 免疫镜（target.immune[owner]=10t 镜像;RollingBoulder 同款） */
   private immunities = new Map<number, number>();
   private readonly ashTileId: number;
@@ -89,8 +89,8 @@ export class AshBallProj extends Entity {
     // NewProjectile（Projectile.cs:10871-10873）：position = 入参 − width/2（中心锚）
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
-    this.prevX = this.x;
-    this.prevY = this.y;
+    this.lastX = this.x;
+    this.lastY = this.y;
     this.vx = vx;
     this.vy = vy;
     this.dmg = damage;
@@ -160,8 +160,8 @@ export class AshBallProj extends Entity {
         // （R2' F2 同谳）→ num16 停在半砖格=active → outer else :79298 → type 40
         // num18=0 → 不铺不掉=Vanish。爆心锚改钳位中心（x 不动,y=面顶+8−h/2）
         const surfHalf = st.half[st.idx(cx, cy)] !== 0;
-        const bx = surfHalf ? this.x + this.w / 2 : this.prevX + this.w / 2;
-        const by = surfHalf ? cy * 16 + 8 - this.h / 2 : this.prevY + this.h / 2;
+        const bx = surfHalf ? this.x + this.w / 2 : this.lastX + this.w / 2;
+        const by = surfHalf ? cy * 16 + 8 - this.h / 2 : this.lastY + this.h / 2;
         this.kill(game, bx, by, surfHalf ? { tx: cx, ty: cy } : undefined);
         return;
       }
@@ -172,8 +172,8 @@ export class AshBallProj extends Entity {
     this.rotation += 0.1;
     if (this.vy > 10) this.vy = 10;
     // F1 爆心回退锚：记录本拍积分前位（下一拍撞格 Kill 时作铺设/音尘爆心）
-    this.prevX = this.x;
-    this.prevY = this.y;
+    this.lastX = this.x;
+    this.lastY = this.y;
     this.x += this.vx;
     this.y += this.vy;
 

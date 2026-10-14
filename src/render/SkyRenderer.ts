@@ -1625,24 +1625,27 @@ export class SkyRenderer {
     tc.fillRect(0, 0, c.width, c.height);
     tc.globalCompositeOperation = 'destination-in';
     tc.drawImage(tex as CanvasImageSource, 0, 0);
-    if (this.tintCache2.size > 256) {
-      // 删最旧一半（Map 保插入序）——曾 clear-all 连热键一起清=晨昏期每帧重烘。
-      // ★池化：淘汰画布按尺寸键入池（cap 32/尺寸）供 miss 复用
-      let n = 0;
-      for (const k of this.tintCache2.keys()) {
-        if (n++ > 128) break;
-        const ev = this.tintCache2.get(k);
-        this.tintCache2.delete(k);
-        if (ev && ev.width > 0) {
-          const ek = `${ev.width}x${ev.height}`;
-          let ef = this.tintFree.get(ek);
-          if (!ef) { ef = []; this.tintFree.set(ek, ef); }
-          if (ef.length < 32) ef.push(ev);
-        }
-      }
-    }
     if (pooledT) bumpTexEpoch(c);   // ★shim er: 键换代（池取重烘铁律）
     this.tintCache2.set(key, c);
+    // ★evict-on-insert（2026-10-14 tintTex 229/s 回潮定谳刀,wingTexSource 83/s 同病
+    //   同款——池化三铁律第 0 条「供应率=消耗率」）:旧「size>256 批量删 128」窗口
+    //   结构=128 miss 纯分配期+批量入池 cap 32/尺寸（128 淘汰同尺寸只留 32,96 个
+    //   丢弃）=供应率 ~25%,稳态出生率≈miss 率（晨昏键 churn 3-4 带×量化桶穿越
+    //   ≈229/s 实测吻合）。修=插入即上限执行:每插一张淘汰最旧一张入池 → 供应
+    //   逐张锁定 miss 率 → 暖机后 births→0。LRU 语义等价（同容量 256,删最旧
+    //   一半的旧律本就是防 clear-all 连热键,逐张删同保插入序）;重烘频率=桶
+    //   语义不变,视觉零改动。
+    while (this.tintCache2.size > 256) {
+      const k0 = this.tintCache2.keys().next().value as string;
+      const ev = this.tintCache2.get(k0);
+      this.tintCache2.delete(k0);
+      if (ev && ev.width > 0) {
+        const ek = `${ev.width}x${ev.height}`;
+        let ef = this.tintFree.get(ek);
+        if (!ef) { ef = []; this.tintFree.set(ek, ef); }
+        if (ef.length < 32) ef.push(ev);
+      }
+    }
     return c;
   }
   /** 晨昏渐变贴图——Sunrise/Sunset 各自只有 4 色（原版资产实际存在的子集）：

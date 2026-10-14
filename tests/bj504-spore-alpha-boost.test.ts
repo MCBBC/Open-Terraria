@@ -103,7 +103,7 @@ describe('BJ504 C. Renderer 接线', () => {
       src.indexOf('npcWhiteLiftAlpha(e.vanillaId ?? -1) !== null'));
   });
   it('消费在 7d\' 段（光照合成后 source-over α=0.4,本体同枢重放;★BJ-C1 F4 方法化 flushNpcWhiteLift 重锚+F1 ga 恒量档）', () => {
-    expect(src).toContain('for (const q of this.npcWhiteLiftQueue) {');
+    expect(src).toContain('for (const q of liftQ) {');   // ★R-C-F6-a 冲刷尾自清改名
     // ★BJ-C1 F1：q.ga 显式档优先（516 恒量复绘）,缺省仍走 lerp 白提亮档
     expect(src).toContain('ctx.globalAlpha = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;');
     expect(src).toContain("ctx.globalCompositeOperation = 'source-over';");
@@ -115,7 +115,7 @@ describe('BJ504 C. Renderer 接线', () => {
   });
   it('槽序：先于 7d\'\'\' 四塔消费、晚于 drawFairyBright 判例行（同 7d\' 自发光域）', () => {
     const fairy = src.indexOf('this.drawFairyBright(ent);');
-    const consume = src.indexOf('for (const q of this.npcWhiteLiftQueue) {');
+    const consume = src.indexOf('for (const q of liftQ) {');   // ★R-C-F6-a 同上
     const tower = src.indexOf('for (const q of this.towerGlowQueue) {');
     expect(fairy).toBeGreaterThan(0);
     expect(consume).toBeGreaterThan(fairy);    // 7d' 域内（fairy 分支后）
