@@ -369,6 +369,10 @@ export interface ModContext {
     damage: number, knockback?: number, ownerIsPlayer?: boolean): void;
   /** 生成 mod NPC(rivals 批新增:多段体节/护卫体由主 AI 按需派生;入 enemies 桶) */
   spawnNpc(game: unknown, key: string, x: number, y: number): void;
+  /** ★第四批:生成尘埃(原版 dust type 数字;引擎尘池 6000 复用;返回
+   *  VDust 引用|null[池满]——mod 持引用可自管 scale/velocity) */
+  spawnDust(game: unknown, type: number, x: number, y: number,
+    vx?: number, vy?: number, alpha?: number, scale?: number): unknown | null;
   log(...args: unknown[]): void;
 }
 
@@ -773,6 +777,12 @@ export function createModContext(
       void import('../entities/Enemy').then(({ Enemy }) => {
         g.entities.add(Enemy.fromVanilla(nid, x, y), 'enemies');
       });
+    },
+    // ★第四批:尘埃生成(原版 type 数字;mod 键 400+ 段反查表未暴露=登记)
+    spawnDust(game, type, x, y, vx = 0, vy = 0, alpha = 0, scale = 1) {
+      const g = game as { spawnDust?(px: number, py: number, w: number, h: number, t: number,
+        sx: number, sy: number, a: number, c: null, sc: number): unknown | null };
+      return g.spawnDust ? g.spawnDust(x, y, 8, 8, type, vx, vy, alpha, null, scale) : null;
     },
     config: {
       get: (key) => config.get(key),

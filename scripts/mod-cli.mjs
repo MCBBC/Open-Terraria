@@ -4,8 +4,10 @@
 // 解耦,CLI 侧做轻 schema 校验(引擎侧 plan.ts 是权威校验,双闸互补)。
 //
 // 用法(在 game/ 目录):
-//   node scripts/mod-cli.mjs init <目标目录>          # 生成模板工程
-//   node scripts/mod-cli.mjs build <工程目录> [-o out.swmod]
+//   node scripts/mod-cli.mjs init <目标目录> [--ts|--js]   # 模板工程(缺省 js;
+//                                                          --ts=TypeScript 入口+tsconfig)
+//   node scripts/mod-cli.mjs build <工程目录> [-o out.swmod]  # 打包(scripts/*.ts
+//                                                          自动 esbuild 编译进包)
 //   node scripts/mod-cli.mjs validate <工程目录|.swmod>
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve, basename } from 'node:path';
@@ -73,10 +75,32 @@ const PNG_1PX = Buffer.from(
   'base64',
 );
 
-function cmdInit(dir) {
+const TEMPLATE_MAIN_TS = `// SandboxWorld mod 入口(TypeScript;内容数据走 content/*.json)
+// 类型契约=同目录 mod-api.d.ts(拷贝自引擎 templates/;IDE 悬停/补全全通)
+import type { ModContext } from '../mod-api.d.ts';
+
+export default function main(sw: ModContext): void {
+  sw.log('mod ready (TS)');
+
+  // 示例:弹幕命中钩(入口只挂行为;内容声明走 content/*.json)
+  // sw.projectileHook('example_bolt', {
+  //   onHit(p, _enemy, _game) { sw.log('hit @', p.x, p.y); },
+  // });
+
+  // 示例:浏览器独有接口(Tier1)
+  // const page = sw.ui.htmlPage('main', { html: '<div>hello</div>' });
+  // await sw.storage.set('first', true);   // 入口同步——异步面在钩内
+}
+
+// TS 编译链:build 命令自动经 esbuild 把 scripts/*.ts 编译为 scripts/main.js 进包;
+// tsconfig.json 仅作 IDE/类型检查(noEmit)——构建零配置。
+`;
+
+function cmdInit(dir, opts = {}) {
   if (!dir) die('init 需要 <目标目录>');
   const root = resolve(dir);
   if (existsSync(root)) die(`目录已存在: ${root}`);
+  const useTs = opts.ts === true;   // 缺省 js(与既有工程零迁移)
   mkdirSync(root, { recursive: true });
   const w = (p, data) => {
     mkdirSync(dirname(p), { recursive: true });
@@ -84,19 +108,31 @@ function cmdInit(dir) {
   };
   w(join(root, 'mod.json'), JSON.stringify(TEMPLATE_MANIFEST, null, 2) + '\n');
   w(join(root, 'content/items/example_sword.json'), JSON.stringify(TEMPLATE_ITEM, null, 2) + '\n');
-  w(join(root, 'scripts/main.js'), TEMPLATE_MAIN_JS);
   w(join(root, 'textures/items/example_sword.png'), PNG_1PX);
-  // 类型契约(P4):引擎 src/mods 手写镜像;TS 开发者 tsconfig include 它
+  if (useTs) w(join(root, 'scripts/main.ts'), TEMPLATE_MAIN_TS);
+  else w(join(root, 'scripts/main.js'), TEMPLATE_MAIN_JS);
+  // 类型契约(P4):两形态都拷(d.ts 零副作用;js 工程也享 IDE 类型)
   try {
     const apiDts = readFileSync(join(dirname(new URL(import.meta.url).pathname), '..', 'templates', 'mod-api.d.ts'));
     w(join(root, 'mod-api.d.ts'), apiDts);
-    w(join(root, 'tsconfig.json'), JSON.stringify({
-      compilerOptions: {
-        target: 'ES2020', module: 'ESNext', moduleResolution: 'Bundler',
-        strict: true, noEmit: true, skipLibCheck: true,
-      },
-      include: ['mod-api.d.ts', 'scripts/**/*.ts'],
-    }, null, 2) + '\n');
+    if (useTs) {
+      w(join(root, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020', module: 'ESNext', moduleResolution: 'Bundler',
+          strict: true, noEmit: true, skipLibCheck: true,
+        },
+        include: ['mod-api.d.ts', 'scripts/**/*.ts'],
+      }, null, 2) + '\n');
+    } else {
+      // js 工程:checkJs 可选开(悬停有类型;严格度低)
+      w(join(root, 'jsconfig.json'), JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020', module: 'ESNext', moduleResolution: 'Bundler',
+          checkJs: false, allowJs: true, noEmit: true, skipLibCheck: true,
+        },
+        include: ['mod-api.d.ts', 'scripts/**/*.js'],
+      }, null, 2) + '\n');
+    }
   } catch { /* 模板缺失=跳过(打包面不受影响) */ }
   w(join(root, 'README.md'), `# ${TEMPLATE_MANIFEST.name}\n\nSandboxWorld mod 工程。\n\n\`\`\`sh\n# 打包(在 game/ 目录):\nnode scripts/mod-cli.mjs build ${basename(root)}   # 输出到 mods/dist/<id>.swmod\n\`\`\`\n`);
   console.log(`[sw-mod] 模板工程已生成: ${root}`);
@@ -115,13 +151,34 @@ function walkFiles(root, rel = '', out = []) {
   return out;
 }
 
-function cmdBuild(dir, outPath) {
+async function cmdBuild(dir, outPath) {
   if (!dir) die('build 需要 <工程目录>');
   const root = resolve(dir);
   if (!existsSync(join(root, 'mod.json'))) die(`缺 mod.json: ${root}`);
   const files = walkFiles(root);
   const entries = {};
   for (const rel of files) entries[rel.split('\\').join('/')] = new Uint8Array(readFileSync(join(root, rel)));
+  // ★TS 工程:scripts/*.ts 自动编译为同名 .js 进包(esbuild;源 .ts 不入包——
+  //  引擎 blob 装载只认 js)。编译失败 fail-loud(包不带残缺 js)。js 工程零路径。
+  const tsFiles = Object.keys(entries).filter((f) => /^scripts\/.*\.ts$/.test(f));
+  if (tsFiles.length > 0) {
+    let esbuild;
+    try {
+      esbuild = await import('esbuild');
+    } catch {
+      die('TypeScript 工程需 esbuild(game/node_modules 已带;在 game/ 目录运行)');
+    }
+    for (const tsf of tsFiles) {
+      delete entries[tsf];
+      const jsf = tsf.replace(/\.ts$/, '.js');
+      // 同名 .js 已存在(js/ts 混放)= ts 优先但警告
+      if (entries[jsf]) console.warn(`[sw-mod] ${jsf} 与 ${tsf} 同名——ts 编译版覆盖`);
+      const r = await esbuild.transform(strFromU8(readFileSync(join(root, tsf))), {
+        loader: 'ts', format: 'esm', target: 'es2020',
+      });
+      entries[jsf] = new TextEncoder().encode(r.code);
+    }
+  }
   const manifest = JSON.parse(strFromU8(entries['mod.json']));
   if (!ID_RE.test(manifest.id ?? '')) die(`mod.json id 非法: ${manifest.id}`);
   // ★默认输出=mods/dist/(用户拍板 2026-10-06:swmod 不落 game 根;探针等消费方
@@ -200,10 +257,10 @@ function cmdValidate(target) {
 }
 
 switch (cmd) {
-  case 'init': cmdInit(arg); break;
+  case 'init': cmdInit(arg, { ts: process.argv.includes('--ts'), js: process.argv.includes('--js') }); break;
   case 'build': {
     const oi = process.argv.indexOf('-o');
-    cmdBuild(arg, oi > 0 ? process.argv[oi + 1] : undefined);
+    await cmdBuild(arg, oi > 0 ? process.argv[oi + 1] : undefined);
     break;
   }
   case 'validate': cmdValidate(arg); break;

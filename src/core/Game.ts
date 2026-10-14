@@ -11280,7 +11280,13 @@ export class Game implements GameHooks {
     //      的本仓等价）。此前缺失 = 死亡碎块冻结 + timeLeft 永不衰减（600 槽只进不出，
     //      池满后新 gore 静默丢弃）；2026-08-13 泡泡棒（§5 1450）实装时接通。
     //      Set 迭代期 kill() 删除已访元素安全（未访的不再被访） ----
-    for (const gp of liveGorePieces()) gp.fixedUpdate(dt, this);
+    // ★interp 快照（2026-10-14 二期②）:gore 走模块级 liveGorePieces（不经
+    //  EntityManager 桶）——同拍快照（上一步末位,EntityManager.update 同语义）。
+    for (const gp of liveGorePieces()) {
+      gp.prevX = gp.x;
+      gp.prevY = gp.y;
+      gp.fixedUpdate(dt, this);
+    }
 
     // ---- 拴绳实体（LeashedEntity.UpdateEntities，Main.cs:17895）----
     // 锚桩 724 小动物 / 风筝桩 723 风筝的 AI 推进 + 族点光（firefly/fairy/snail/
@@ -53100,23 +53106,28 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       this.player.y = this._iPY + (iRY - this._iPY) * iA;
       cam.x = this._iCamX + (iRCamX - this._iCamX) * iA;
       cam.y = this._iCamY + (iRCamY - this._iCamY) * iA;
-      // ★interp 二期①（2026-10-14,用户验收一期后点名:仆从/星尘守卫等召唤物在
-      //  平滑世界里仍 60Hz 跳）:NPC/敌怪/弹幕桶批量 lerp 临时写+还原表（渲染期
+      // ★interp 二期①②（2026-10-14）:①NPC/敌怪/弹幕（用户验收一期后点名:仆从/
+      //  星尘守卫等召唤物在平滑世界里仍 60Hz 跳）+②drops/props/critters/gore
+      //  （用户验①「体验不错,可以继续插」）——桶批量 lerp 临时写+还原表（渲染期
       //  一切实体位置消费——绘制矩阵/光照采样/发射口/尘出生位——统一吃呈现帧位
       //  =语义更对;渲染期无实体自写位（审计 2026-10-14:8409=采样槽读、24431=新尘
-      //  出生位,均无害）。prevX NaN（出生首步前）跳过=画物理位。drops/gore/尘留
-      //  二期②（量级与收益分级,见登记）。渲染中途死/移除实体由还原表复位物理位
-      //  （dead 实体复位无害）;渲染中途 spawn 的新实体不在表=零触碰。
+      //  出生位,均无害））。prevX NaN（出生首步前）跳过=画物理位。尘埃留③观察
+      //  （vanillaDust 独立渲染管线,量大单体小,用户未点名）。渲染中途死/移除实体
+      //  由还原表复位物理位（dead 实体复位无害）;渲染中途 spawn 的新实体不在表
+      //  =零触碰。gore 走模块级 liveGorePieces（快照在 11283 循环头,同拍）。
       this._iEnt.length = 0;
-      const entBuckets = [this.entities.npcs, this.entities.enemies, this.entities.projectiles];
+      const entBuckets = [this.entities.npcs, this.entities.enemies, this.entities.projectiles,
+        this.entities.drops, this.entities.props, this.entities.critters];
+      const iLerp = (e: Entity): void => {
+        if (!Number.isFinite(e.prevX)) return;
+        this._iEnt.push(e, e.x, e.y);
+        e.x = e.prevX + (e.x - e.prevX) * iA;
+        e.y = e.prevY + (e.y - e.prevY) * iA;
+      };
       for (const list of entBuckets) {
-        for (const e of list) {
-          if (!Number.isFinite(e.prevX)) continue;
-          this._iEnt.push(e, e.x, e.y);
-          e.x = e.prevX + (e.x - e.prevX) * iA;
-          e.y = e.prevY + (e.y - e.prevY) * iA;
-        }
+        for (const e of list) iLerp(e);
       }
+      for (const gp of liveGorePieces()) iLerp(gp);
     }
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,

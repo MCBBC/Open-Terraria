@@ -92,9 +92,10 @@ const origNext = rng.next.bind(rng);
   }
   if (!dumped2 && g >= TH_CLEARS_END) {
     dumped2 = true;
-    let a = 0;
-    for (let y = 893; y <= 901; y++) for (let x = 4022; x <= 4038; x++) if (store.flags[y * w + x] & 1) a++;
-    console.log(`[mid] 清场后盒 active=${a}/85(真推定 pre-platform 岛格=65[盒内 894-900 域])`);
+    let a = 0; const cells: string[] = [];
+    for (let y = 894; y <= 900; y++) for (let x = 4023; x <= 4037; x++) if (store.flags[y * w + x] & 1) { a++; cells.push(`${x},${y}`); }
+    console.log(`[mid] 清场后精确盒[894..900]×[4023..4037] active=${a}/105(真推定=65)`);
+    if (a !== 65) console.log(`[mid] active 格: ${cells.join(' ')}`);
   }
   return v;
 };

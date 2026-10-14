@@ -226,6 +226,12 @@ export declare interface ModContext {
    *  fn(ctx:{value,...}) → number=修正后值/undefined=不改;per-mod 单注册,值链 */
   vanillaOverride(slot: 'Player.ApplyLifeAndOrMana' | 'Player.UpdateLifeRegen', anchor: number,
     fn: (ctx: Record<string, unknown>) => number | void): void;
+  director(host: {
+    camTarget(): { x: number; y: number } | null;
+    inputLocked(): boolean;
+    playerHidden(): boolean;
+    overlay(ctx: CanvasRenderingContext2D, w: number, h: number): void;
+  }): void;
   /** ★B/C 批:全局 NPC 钩(tML GlobalNPC 形;全域 NPC 含原版) */
   globalNpc(spec: {
     preAi?(e: object, game: object): boolean | void;
@@ -384,6 +390,9 @@ export declare interface ModContext {
     damage: number, knockback?: number, ownerIsPlayer?: boolean): void;
   /** 生成 mod NPC(多段体节/护卫体由主 AI 按需派生) */
   spawnNpc(game: unknown, key: string, x: number, y: number): void;
+  /** ★第四批:生成尘埃(原版 dust type 数字;尘池 6000;返回 VDust 引用|null) */
+  spawnDust(game: object, type: number, x: number, y: number,
+    vx?: number, vy?: number, alpha?: number, scale?: number): unknown | null;
   log(...args: unknown[]): void;
 }
 
