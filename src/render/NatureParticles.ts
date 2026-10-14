@@ -93,6 +93,10 @@ export class NatureParticles {
   /** 滴水溅落音钩子（Game 注入 Sfx；Gore.cs :971-984：SoundID 39=Drip，
    *  落地 variant rand(0,1) / 入水 variant 2，位置 +8,+8；flag4 水型本模块内静音） */
   onDripSplash: ((x: number, y: number, wet: boolean) => void) | null = null;
+  /** ★清偿 C5/R5-F7a（2026-10-14）落叶岩浆焚毁尘钩（Game 注入 spawnDust；
+   *  Gore.cs :1138-1142：active=false + 5×Dust.NewDust(position, num=3, num=3,
+   *  31, 0f, -0.2f)——落地支/下落支两处岩浆消亡共用参数面） */
+  onLavaDust: ((x: number, y: number) => void) | null = null;
 
   clear(): void { this.leaves.length = 0; this.drips.length = 0; this.clouds.length = 0; this.windCounter = 0; this.airSpots.length = 0; }
   /** Game 每帧绑定当前世界 store */
@@ -144,11 +148,23 @@ export class NatureParticles {
         let moveX = l.vx;
         const liq = this.liquidAt(l.x + 4, l.y + 2);
         if (liq > 0) {
-          // 蜂蜜 X=0 / 岩浆消亡 / 水 X=风力；地下 X=0（:1128-1140）
+          if (liq === 2) {
+            // ★清偿 C5/R5-F7a：岩浆焚毁 = active=false + 5×尘31（:1136-1143）——
+            //  旧按风滑移支漏亡（tile.lava() 死亡面整支缺席）
+            l.dead = true;
+            this.onLavaDust?.(l.x, l.y);   // Dust.NewDust(position, 3, 3, 31, 0, -0.2)×5
+            continue;
+          }
+          // 蜂蜜 X=0 / 水 X=风力；地下 X=0（:1128-1140）
           moveX = liq === 3 ? 0 : wind;
           if (l.y > worldSurfacePx) moveX = 0;
         } else {
-          const tx = Math.floor((l.x + 4) / TILE), ty = Math.floor((l.y + 4) / TILE);
+          // ★清偿 C3/R5-F4（2026-10-14）：脚下门探针=(x+5.5, y+1.5)——原版数值式
+          //  vector=position+(12/2−4/2, 6−4)=(x+4,0) 后 point=(vector+(num,num)/2)
+          //  .ToTileCoordinates()（num=(int)(4×0.9)=3 → +1.5;Gore.cs:1106-1114）。
+          //  旧 (x+4,y+4) Y 偏 2.5px：叶落点 y mod16≥12 时 ty 落入下一行 → ty+1
+          //  越过脚下表面格=挖掉支承面后悬空叶不唤醒（BJ669f 伴生债）。
+          const tx = Math.floor((l.x + 5.5) / TILE), ty = Math.floor((l.y + 1.5) / TILE);
           if (!st.isSolid(tx, ty + 1)) {
             l.vy = 0.1; l.timeLeft = 0; l.alpha = Math.min(255, l.alpha + 20); // :1136-1140
           }
@@ -183,9 +199,20 @@ export class NatureParticles {
           l.vy = -1;
           l.vx = l.y > worldSurfacePx ? 0 : wind;
         } else if (liq === 2) {
-          l.dead = true; // 岩浆烧叶（:1130-1134）
+          // ★清偿 C5/R5-F7a：岩浆烧叶补尘（原版落地下支 :1136-1143 同参 5×尘31——
+          //  原文下落支液面只置 velocity.Y=-1 转落地支、由落地支焚毁,本仓即时亡
+          //  语义保留（R5-F7a 判谳面）,尘参数随落地支逐值对齐）
+          this.onLavaDust?.(l.x, l.y);   // Dust.NewDust(position, 3, 3, 31, 0, -0.2)×5
+          l.dead = true;
         }
       }
+      // ★清偿 C5/R5-F7a：下落支 timeLeft/alpha 衰减链（:1221-1228 与落地支同式——
+      //  DisappearSpeed/DisappearSpeedAlpha 叶族缺省恒 1,GoreID.cs:11-13;旧仅落地
+      //  支 :166-168 有衰减=下落叶永寿不褪色）。死亡面 = 公共尾 alpha≥255
+      //  （Gore.Update :1074-1077）。
+      if (l.timeLeft > 0) l.timeLeft -= 1;          // DisappearSpeed[type]=1
+      else l.alpha = Math.min(255, l.alpha + 1);    // DisappearSpeedAlpha[type]=1
+      if (l.alpha >= 255) l.dead = true;
       // 帧推进（Gore.Update :687-697：8 tick 一换，行在 4 帧组内循环）
       if (++l.rowCounter >= 8 && l.vy > 0.2) {
         l.rowCounter = 0;

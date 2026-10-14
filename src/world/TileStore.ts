@@ -1,5 +1,5 @@
 // SoA 多通道平面数组存储。所有热点代码只碰 TypedArray。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, onTileRegistered } from '../data/tiles';
 import { TileOpAction } from '../net/protocol';
 
 /** 液体类型唯一真源(原版 LiquidID +1 编码:Water=0→1/Lava=1→2/Honey=2→3,4=微光)。
@@ -254,8 +254,11 @@ export class TileStore {
       TILE_DEFS[this.type[i]]?.vanilla?.sheet ?? -1);         // 平台九件套补差集
   }
 
-  /** 实心 LUT(内部类型 id → 1/0;与 TILE_DEFS 同长,模块加载时构建一次) */
-  static readonly SOLID_LUT = (() => {
+  /** 实心 LUT(内部类型 id → 1/0;与 TILE_DEFS 同长,模块加载时构建一次;
+   *  ★mod tile 扩容(2026-10-14):mod tile 运行期注册后逐 tile 经 onTileRegistered
+   *  钩扩容+回填——否则 mod id(762+)越界读 undefined=永非实心,灾厄地形不可踩踏。
+   *  readonly 去除:扩容换引用,消费方全走 TileStore.SOLID_LUT 静态属性读取,安全) */
+  static SOLID_LUT = (() => {
     const lut = new Uint8Array(TILE_DEFS.length);
     for (let t = 0; t < TILE_DEFS.length; t++) lut[t] = TILE_DEFS[t]?.solid ? 1 : 0;
     return lut;
@@ -595,3 +598,14 @@ export class TileStore {
     this.liquidListeners.forEach((fn) => fn(x, y));
   }
 }
+
+// ★mod tile 实心扩容订阅(见 SOLID_LUT 注;类定义后挂=静态表已就绪):
+//  mod tile 运行期注册逐 tile 通知,越界则按 TILE_DEFS.length 重铸换引用。
+onTileRegistered((id, d) => {
+  if (id >= TileStore.SOLID_LUT.length) {
+    const next = new Uint8Array(TILE_DEFS.length);
+    next.set(TileStore.SOLID_LUT);
+    TileStore.SOLID_LUT = next;
+  }
+  TileStore.SOLID_LUT[id] = d.solid ? 1 : 0;
+});

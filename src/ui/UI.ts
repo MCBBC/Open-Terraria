@@ -1936,10 +1936,17 @@ export class UI {
     });
     // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
     // coarse 指针=touchLongPressMs 长按显示(mobile-adaptation-plan 模块④)
-    // ★反馈轮7:vanilla 布局显式传自身为 anchor——tooltip 定位回退的 slotEl(i,where)
+    // ★反馈轮7:布局显式传自身为 anchor——tooltip 定位回退的 slotEl(i,where)
     //  全局首匹配在开包态命中【隐藏热键栏】(0-9 DOM 序在前,rect=(0,0))→ 气泡钉
-    //  左上角(用户报 ESC 开包热栏格气泡错位);classic 不传=行为零变化白名单
-    bindHint(s, (host) => this.showSlotHintTouch(i, where, this._builtLayout === 'vanilla' ? host : undefined));   // ★BJ328:宿主经形参注入,闭包不自引 s
+    //  左上角(用户报 ESC 开包热栏格气泡错位)。
+    //  ★清偿A-F4（2026-10-14 定谳落刀）：classic 不再例外、恒传 host——旧「classic
+    //  不传=行为零变化白名单」系 BJ669e 前「槽矩形锚定」时代产物;BJ669e 后桌面定位
+    //  恒=光标锚（cursorTooltipPos,host 只作分支门不进定位式）,传 host 对 classic
+    //  桌面零行为差（override.anchor 只替换 slotEl 全局查组分这支）。而 classic+touch
+    //  长按不传 host → tooltipTouchAnchor=null → 落光标锚支,触屏无 mousemove 流 →
+    //  mouseX/mouseY 恒 0/陈旧（:2746 缺省）→ 气泡钉左上角,与反馈轮7 同病灶
+    //  （探针 v5 F4 部分实证:pre-fix left/top=14px/14px,post-fix=触屏元素矩形锚）
+    bindHint(s, (host) => this.showSlotHintTouch(i, where, host));   // ★BJ328:宿主经形参注入,闭包不自引 s
     s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
     s.addEventListener('contextmenu', (e) => e.preventDefault());
     return s;
@@ -2863,9 +2870,19 @@ export class UI {
       //  派发）由紧随其后的本臂同批纠正,快速跨槽不再钉旧位换内容。元素锚路径
       //  （重铸/buff/触屏长按）tooltipFollowsCursor=false 不跟随
       if (this.tooltipFollowsCursor && this.tooltip.style.display === 'block' && this.tooltipCursorSize) {
-        const { left, top } = this.cursorTooltipPos(this.tooltipCursorSize.tw, this.tooltipCursorSize.th);
-        this.tooltip.style.left = `${left}px`;
-        this.tooltip.style.top = `${top}px`;
+        // ★清偿A-F5（2026-10-14 定谳落刀）：悬停宿主被 DOM 移除（refreshAll 重建
+        //  合成行/搜索行族等）后 Chrome 不派发 mouseleave（节点移除≠边界事件）→
+        //  跟随臂携陈旧气泡永久漂移。宿主游离即隐藏+清跟随态（探针 v5 F5 部分:
+        //  remove 宿主后一拍 move → display none）。WeakRef 经 globalThis 查找
+        //  （lib ES2020 无 WeakRef 类型;bindHint.ts 同款纪律——不挽留宿主元素）
+        const host = this.tooltipCursorHostRef?.deref();
+        if (host && !host.isConnected) {
+          this.hideCursorTooltip();
+        } else {
+          const { left, top } = this.cursorTooltipPos(this.tooltipCursorSize.tw, this.tooltipCursorSize.th);
+          this.tooltip.style.left = `${left}px`;
+          this.tooltip.style.top = `${top}px`;
+        }
       }
       // 未持有物品时按下并移动 >4px → 整叠拾取开始拖拽
       if (this.dragFrom && !this.heldStack) {
@@ -2911,6 +2928,17 @@ export class UI {
           this.refreshHotbar();
         } else {
           this.pickUp(from.i, from.where);
+          // ★清偿A-F6（2026-10-14 定谳落刀）：原地左键拾取（无位移,本 mouseup 支
+          //  pickUp 路径）成功后槽已空,而原地点击不产生任何边界事件——旧内容气泡
+          //  残留且跟随臂携之漂移。原版=悬停空槽零 tooltip（ItemSlot.MouseHover
+          //  Terraria.UI/ItemSlot.cs:3174/:3179 item.IsAir 不置 hoverItemName →
+          //  MouseTextInner :20397 纯文本支零绘制）→ 隐藏=空槽悬停同相。门
+          //  tooltipFollowsCursor=只管光标支（元素锚气泡:重铸/buff/触屏长按不属
+          //  本槽悬停链,不动）。（探针 v5 F6 部分:原地 down/up → display none）
+          if (this.heldStack && this.tooltipFollowsCursor
+            && this.tooltip.style.display === 'block') {
+            this.hideCursorTooltip();
+          }
         }
       }
       this.refreshAll();
@@ -3679,6 +3707,10 @@ export class UI {
       this.tooltip.style.left = `${left}px`;
       this.tooltip.style.top = `${top}px`;
       this.tooltipFollowsCursor = true;
+      // ★清偿A-F5：记悬停宿主（WeakRef 弱持不挽留,BJ328 泄漏纪律）——mousemove
+      //  跟随臂逐拍 isConnected 检查,宿主被 DOM 移除（refreshAll 重建行族）即隐藏
+      const WR = (globalThis as unknown as { WeakRef?: new (t: object) => { deref(): HTMLElement | undefined } }).WeakRef;
+      this.tooltipCursorHostRef = WR ? new WR(slotEl) : null;
     }
     this.applyTooltipBg();   // ★终布局后量测烘底（原在定位前 = 旧约束宽）
   }
@@ -3767,19 +3799,44 @@ export class UI {
    *  内容只在 show 拍变化=缓存精确） */
   private tooltipFollowsCursor = false;
   private tooltipCursorSize: { tw: number; th: number } | null = null;
+  /** ★清偿A-F5：光标支悬停宿主（WeakRef 弱持,不挽留元素——BJ328 泄漏纪律同款）。
+   *  mousemove 跟随臂逐拍 isConnected 检查,宿主游离即隐藏气泡+清跟随态 */
+  private tooltipCursorHostRef: { deref(): HTMLElement | undefined } | null = null;
   /** 触屏长按元素锚标记（showSlotHintTouch 触屏支单写,showTooltipFor 单读即清） */
   private tooltipTouchAnchor: HTMLElement | null | undefined = undefined;
 
-  /** ★BJ669e2 光标锚定位公式单源（Main.cs:20378-20414,原 BJ669e 内联式迁移零行为差）：
-   *  X=mouseX+14/Y=mouseY+14、持物 +34 避让（:20386）、右/底缘 18 边距钳
-   *  （:20403-20412）。showTooltipFor 定位拍与 mousemove 跟随臂共用 */
+  /** ★BJ669e2 光标锚定位公式单源（Main.cs:20378-20392,原 BJ669e 内联式迁移）：
+   *  X=mouseX+14/Y=mouseY+14（:20378-20379）→ ThickMouse +6/+6（:20385-20389;
+   *  MouseBorderColor 默认 (64,64,64,64)≠Transparent :276 → :2684 默认档恒 true
+   *  ——★清偿A-F1 2026-10-14 补齐：此前丢 +6/+6,气泡恒贴光标 8px 视距（原版
+   *  14px）,与 Renderer.mouseTextAnchor（thickMouse 缺省 true 同建模）对齐）→
+   *  持物 X+=34 避让（:20390-20392）。
+   *  钳制真锚=MouseText_DrawItemTooltip :20561-20579（★清偿A-F2 注释重锚——此前
+   *  误锚 :20403-20412=num2 40 纯文本支）:文字盒缘钳 num4=4（:20563 悬停文本框
+   *  关）/18（:20565-20570 开,原版并文字原点 +8/+2——本仓 .sw-tooltip 自带
+   *  padding 9/13 已按盒模型承担该偏移,不再叠加）;按文字缘换算元素缘 pad=
+   *  num4−padding（opaque 开档盒右缘收 sw−4 与 DrawInvBG X−14..+14 盒几何同相,
+   *  1px 差=padR 13 vs num8 14;opaque 关档 pad 为负=元素不可见 padding 允许越出
+   *  屏、文字缘仍收 num4——与原版关档纯文字语义同相）。
+   *  showTooltipFor 定位拍与 mousemove 跟随臂共用 */
   private cursorTooltipPos(tw: number, th: number): { left: number; top: number } {
-    let left = this.mouseX + 14, top = this.mouseY + 14;
-    if (this.heldStack) left += 34;    // !mouseItem.IsAir → +34（:20386）
-    const pad = 18;
-    if (left + tw > window.innerWidth - pad) left = Math.max(0, window.innerWidth - tw - pad);
-    if (top + th > window.innerHeight - pad) top = Math.max(0, window.innerHeight - th - pad);
+    let left = this.mouseX + 14 + 6, top = this.mouseY + 14 + 6;   // +14 :20378-20379 / ThickMouse +6 :20385-20389
+    if (this.heldStack) left += 34;    // !mouseItem.IsAir → +34（:20390-20392）
+    const num4 = options.data.opaqueBoxBehindTooltips ? 18 : 4;   // :20565-20570 / :20563
+    const padX = num4 - 13, padY = num4 - 9;   // .sw-tooltip padding:9px 13px → 文字缘→元素缘补偿
+    if (left + tw > window.innerWidth - padX) left = Math.max(0, window.innerWidth - padX - tw);
+    if (top + th > window.innerHeight - padY) top = Math.max(0, window.innerHeight - padY - th);
     return { left, top };
+  }
+
+  /** ★清偿A-F5/F6（2026-10-14）：光标支气泡隐藏+跟随态清零单点（display none/
+   *  脉冲停/跟随门/尺寸缓存/宿主 WeakRef 一并清）。F5=宿主游离臂,F6=原地拾取 */
+  private hideCursorTooltip(): void {
+    this.tooltip.style.display = 'none';
+    this.tooltipFollowsCursor = false;
+    this.tooltipCursorSize = null;
+    this.tooltipCursorHostRef = null;
+    cancelAnimationFrame(this.tooltipPulseRaf);
   }
   private startTooltipPulse(): void {
     cancelAnimationFrame(this.tooltipPulseRaf);

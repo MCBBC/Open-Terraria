@@ -1204,7 +1204,7 @@ export class Dart extends Entity {
       this.alpha = st.alpha0 ?? 0;
       this.scale = st.scale ?? 1;
       this.rot = st.rot === 'align90' || st.rot === 'a45'
-        ? Math.atan2(vy, vx) + (st.rot === 'a45' ? Math.PI / 4 : Math.PI / 2) : 0;
+        ? Math.atan2(vy, vx) + (st.rot === 'a45' ? 0.785 : Math.PI / 2) : 0; // a45=同 :26911 字面（F3,首拍近似同式）
       this.dir = Math.sign(vx) || 1;
       if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
     } else if (vh) {
@@ -1593,10 +1593,21 @@ export class Dart extends Entity {
         else this.vx = 0;
       }
     }
+    // ---- AI_027 块尾垂直钳（Projectile.cs:26913-26915,★F2 清偿 2026-10-14）：
+    //      velocity.Y>16→16——aiStyle27 全型【每更新无条件】适用,不挂重力/accel 门
+    //      （与 :26770-26777 ×1.125 加速段平行独立）。vCap 既有消费面=重力门内
+    //      (:1588)/boulderStep(挂 gravDelay 门),均不适配无重力项 → 非 grav 表项
+    //      在此补表驱动钳（现役唯一消费者=115 三叉戟:0.2×1.125^29≈6.1 恒不及 16,
+    //      钳为对拍面完整性/外源高 vy 出膛一致性而设）----
+    if (st.vCap !== undefined && st.grav === undefined && this.vy > st.vCap) {
+      this.vy = st.vCap;
+    }
     // ---- 旋转（各 aiStyle 权威语义,见 DART_STYLE 头注）----
     switch (st.rot) {
       case 'align90': this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2; break;
-      case 'a45': this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4; break;
+      // 0.785=原版字面 0.785f（:26911,★F3 清偿 2026-10-14——非 π/4≈0.785398,残差
+      // 0.0004rad 视觉无感但字面 1:1 纪律;旧注 :24839 系 1456 世代残号已重锚）
+      case 'a45': this.rot = Math.atan2(this.vy, this.vx) + 0.785; break;
       case 'roll': this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * this.dir; break;
       case 'spin': this.rot += st.spinRate! * this.dir; break;
       case 'tilt': this.rot = this.vx * 0.125; break;          // 836 蒲公英籽 :43312
@@ -1881,8 +1892,13 @@ export class Dart extends Entity {
     //  脉冲（P.cs:26849-26891）,无通用渐入;fade 每拍 −50 会让脉冲 phase0 的 α+30 永远
     //  追不上 250 翻相门 → pulseDir 钉死 0 → scale −0.02/t 无界缩 → 过零负 scale
     //  =drawImage 负宽高镜像+|scale| 无界涨（用户两案根因,见 pulse 段注）
+    //  581 同此列（★F4 清偿 2026-10-14）：原版 α 零写面——SetDefaults alpha=255
+    //  恒定（P.cs:6308-6316）,通用 fade switch :56590-56615 无 581,缺省 GetAlpha 尾
+    //  :81507-81520（A=newColor.A−α）→ α255 恒 A=0=【本体永隐】,可视面唯一=AI 尘站
+    //  :57289-57306+Kill 尘 :73991-74004（本仓 dartStep 581 支同式）;旧通用缺省
+    //  fade −50/t ≈5 拍渐显=凭空造出原版没有的本体（R4 普查受害面全表仅 581）
     if (this.alpha > 0 && this.projId !== 596 && this.projId !== 290 && this.projId !== 291
-      && this.projId !== 115 && this.age > (st.fadeDelay ?? 0)) {
+      && this.projId !== 115 && this.projId !== 581 && this.age > (st.fadeDelay ?? 0)) {
       this.alpha -= st.fade === 'speed'
         ? Math.hypot(this.vx, this.vy) * 0.9
         : (typeof st.fade === 'number' ? st.fade : 50);
@@ -3115,7 +3131,8 @@ function laserScanTiles(game: GameHooks, cx: number, cy: number, dxu: number, dy
  *  射击怪→弹型映射（NPC.cs 发射点行号见 Enemy.ts 各调用点注释）。
  *  旋转语义（画布与 XNA 同为顺时针正,直接套用原版公式）:
  *   align90 = rotation = atan2(vy,vx)+π/2 每更新（AI_001 通用尾 :54868,贴图静止朝上）
- *   a45     = atan2+π/4（115 三叉戟 AI_027 :24839）
+ *   a45     = atan2+0.785 字面（115 三叉戟 AI_027 :26910-26911 原版 0.785f,非 π/4
+ *             ——★F3 清偿 2026-10-14;旧锚 :24839 系 1456 世代残号）
  *   roll    = += (|vx|+|vy|)*0.03*direction（aiStyle2 :21519:471 骨头/909 岩石/300 圣锤）
  *   spin    = += rate*direction（44 魔镰 AI_018 :23814 rate 0.8 / 96 诅咒焰 AI_008 :22669 rate 0.3 /
  *             31 沙球 AI_010 :55158 rate 0.1）
@@ -3148,7 +3165,7 @@ interface DartStyle {
   /** 前 N 拍免衰（577/576 localAI[1]>2 门,P.cs:56603-56613——批六 m1） */
   fadeDelay?: number;
   grav?: number; gravDelay?: number; xDamp?: number;   // 重力档(ai0 门)
-  vCap?: number;                                        // 垂直速度上限（31 沙球 10）
+  vCap?: number;                                        // 垂直速度上限（31 沙球 10;非 grav 项=AI_027 块尾无条件钳,dartStep 独立支消费——115=16 :26913-26915）
   /** 侧摩（31 沙球 AI_010 ai[0]==2 :55087-55100）：vx 每 tick ±N 向 0 收 */
   xFrict?: number;
   /** 31 沙球档：沿途 KillTile 清单击碎 + 落地 PlaceTile 沙 53（:75430-75536） */
@@ -3283,8 +3300,9 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    (2026-10-13 实报定谳):原版无通用渐入,fade −50/t 会钉死脉冲相位使 scale
   //    无界缩过零负=镜像+|scale| 涨;α 出场 255=GetAlpha A 直通「不透明」
   //    (:81448,draw 115 专属支消费)。加速 ×1.125@ai0<30(:26770-26777),光=ProjLight
-  //    0.5×(0.5,0.05,1)(:15205);Item8
-  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, pulse: true, life: 300,
+  //    0.5×(0.5,0.05,1)(:15205);Item8。块尾 vy>16 无条件钳（:26913-26915,★F2
+  //    2026-10-14）→ 表 vCap:16 经 dartStep 非 grav 独立支消费
+  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, pulse: true, life: 300, vCap: 16,
     accel: { from: 0, to: 30, mul: 1.125 }, sfx: ['Item_8'], fallback: '#B060FF' },
   // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3 = aiStyle28
   //  :26983-26992（★FX53:泛色 trail 退役,真尘站见 dartStep 128 支）;Item28
@@ -3326,7 +3344,9 @@ export const DART_STYLE: Record<number, DartStyle> = {
   438: { w: 8, h: 8, rot: 'align90', alpha0: 255, fade: 'speed', updates: 3,
     sfx: ['Item_12'], fallback: '#F0A0B0' },
   // 581 破甲刺（漩涡蜂后 426,RANGED_TABLE :6113 proj:581）：SetDefaults :6308-6316
-  //    10×10 aiStyle1 α255 penetrate-1 hostile——α 恒 255 无 fade（AI 全程无 α 写支）
+  //    10×10 aiStyle1 α255 penetrate-1 hostile——α 恒 255 无 fade（AI 全程无 α 写支,
+  //    通用 fade switch :56590-56615 无 581——★F4:fade 门排除列 2026-10-14 收编,
+  //    旧缺省 −50/t 渐显=假阳性本体）
   //    =本体恒隐、可视面全在 AI 尾尘 2×SelRandom(229,161,161)/update(:57288-57302);
   //    首拍音 Item17(:57291-57294);penetrate-1 穿透不消亡 → 命中口豁免(见 fixedUpdate)
   581: { w: 10, h: 10, rot: 'align90', alpha0: 255, sfx: ['Item_17'], fallback: '#C8D0F0' },

@@ -19,6 +19,7 @@ import { StyleDimension } from '../vui/core/StyleDimension';
 import type { UISpriteBatch } from '../vui/draw/UISpriteBatch';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { UIScale } from '../vui/draw/UIScale';
+import { installModKbdNav, invalidateModKbdNav, registerKbdFocusable } from './kbdNav';   // ★键盘导航域
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 
 /** mod 面板句柄(sw.ui.panel 产) */
@@ -84,6 +85,7 @@ function rebuildHostTree(): void {
   sync();
   modUiSyncDomGate();   // ★D19-F4:开合沿即同步(收板时指针不动也要还原 DOM PE)
   syncUiBlocking();     // ★D15余债:fullscreen 可见面变化沿
+  invalidateModKbdNav(); // ★键盘导航域:树变沿焦点列表失效
 }
 
 /** ★D15余债(2026-10-13):全屏页 uiBlocking 同步(IngameFancyUI 同位)——fullscreen
@@ -275,6 +277,7 @@ export function modUiPanel(
     draggable?: boolean; closable?: boolean; fullscreen?: boolean },
 ): ModPanelHandle {
   ensureDomGate();   // ★D19-F4:首面板挂 mousemove 同步臂(幂等)
+  installModKbdNav();   // ★键盘导航域:首面板挂 keydown 臂(幂等)
   const fullKey = `mod_${modId}_${key}`;
   const existing = panels.get(fullKey);
   if (existing) {
@@ -392,12 +395,14 @@ function makeHandle(p: PanelEntry): ModPanelHandle {
       b.top = StyleDimension.fromPixels(o.y);
       b.onClick(() => o.onClick());
       p.root.append(b);
+      registerKbdFocusable(b);   // ★键盘导航域:语义焦点集(标题栏/根不卷入)
     },
     addSlot(o) {
       const s = new UISlot(o);
       s.left = StyleDimension.fromPixels(o.x);
       s.top = StyleDimension.fromPixels(o.y);
       p.root.append(s);
+      registerKbdFocusable(s);   // ★键盘导航域
     },
     addImage(o) {
       const im = new ModUIImage(p.modId, o.tex, o.scale ?? 1, o.w, o.h);

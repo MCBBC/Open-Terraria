@@ -2298,6 +2298,16 @@ export const MOD_TREE_IDS = new Set<number>();
 export const MOD_SAPLING_TO_TREE = new Map<number, number>();
 export const MOD_TREE_BASE = new Map<number, number>();   // treeId → growsOn tile id
 
+/** mod tile 注册后置钩(★SOLID_LUT 扩容债:TileStore 等模块加载期按当时
+ *  TILE_DEFS.length 定长物化的表,mod tile 运行期注册后越界读=永非实心——
+ *  灾厄地形全程不可踩踏。消费方向 TileStore→tiles 单向 import,此处只挂
+ *  回调列表不反 import;TileStore 模块加载期订阅,注册期逐 tile 通知。
+ *  若注册早于 TileStore 加载,SOLID_LUT 构建时全量 TILE_DEFS 已含 mod 值,双序皆覆盖) */
+const TILE_REG_HOOKS: Array<(id: number, d: TileDef) => void> = [];
+export function onTileRegistered(fn: (id: number, d: TileDef) => void): void {
+  TILE_REG_HOOKS.push(fn);
+}
+
 export function registerModTile(d: Partial<TileDef> & { key: string; growsOn?: string | null; sapling?: string | null }, stableId: number): number {
   if (!d.key.startsWith('mod_')) throw new Error(`[mod-tile] key 须 mod_ 前缀: ${d.key}`);
   if (TILE_BY_KEY[d.key] !== undefined) throw new Error(`[mod-tile] 重复注册: ${d.key}`);
@@ -2337,6 +2347,7 @@ export function registerModTile(d: Partial<TileDef> & { key: string; growsOn?: s
   TILE_STABLE_OF_INTERNAL = ensureU16Capacity(TILE_STABLE_OF_INTERNAL, id);
   TILE_STABLE_OF_INTERNAL[id] = stableId;
   TILE_INTERNAL_OF_STABLE[stableId] = id;
+  for (const fn of TILE_REG_HOOKS) fn(id, TILE_DEFS[id] as TileDef);
   return id;
 }
 /** Uint16Array 容量接长(拷旧段原值+新段补 0;vanilla 段是 internal→stable 非恒等映射,

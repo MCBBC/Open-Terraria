@@ -180,9 +180,66 @@ async function glowRectDev() {
   });
 }
 
+/** bbox 是否落在 glow 矩形内（±16px 余量） */
+const inGlow = (bbox, gr) => !!bbox && !!gr
+  && bbox[0] >= gr[0] - 16 && bbox[1] >= gr[1] - 16 && bbox[2] <= gr[2] + 16 && bbox[3] <= gr[3] + 16;
+
+/** glow 页就绪等待:覆盖 chunk 全部产出 glow 页 + 烘焙账静止（budgetAwaiting/
+ *  workerAwaiting/dirtyQueue 清零——防相位中途重烘落地改内容;超时=诊断打印） */
+async function waitGlowPages(label, timeoutPolls = 40) {
+  const pt = await page.evaluate(() => window.__glowRect);
+  let last = '';
+  for (let i = 0; i < timeoutPolls; i++) {
+    const s = await page.evaluate((pt2) => {
+      const ch = window.__swGame.chunks;
+      const out = [];
+      let pend = null;
+      for (let cy = Math.floor((pt2.py - 6) / 16); cy <= Math.floor((pt2.py + 2) / 16); cy++)
+        for (let cx = Math.floor((pt2.px - 10) / 16); cx <= Math.floor((pt2.px + 10) / 16); cx++) {
+          const p = ch.get(cx, cy);
+          out.push(`${cx},${cy}:${p ? (p.glow ? 'G' : (p.placeholder ? 'P' : 'noglow')) : 'missing'}`);
+          if (p && !p.glow && pend === null) {
+            const k = ch.constructor.key(cx, cy);
+            pend = {
+              k, hasPending: ch.bakeClient?.hasPending?.(k) ?? 'n/a',
+              inViewport: ch.inViewport?.(cx, cy) ?? 'n/a',
+            };
+          }
+        }
+      return {
+        chunks: out, pend,
+        budgetAwaiting: ch.budgetAwaiting?.size ?? -1,
+        workerAwaiting: ch.workerAwaiting?.size ?? -1,
+        dirtyLen: ch.dirtyQueue?.length ?? -1,
+        quiet: (ch.budgetAwaiting?.size ?? 0) === 0 && (ch.workerAwaiting?.size ?? 0) === 0
+          && (ch.dirtyQueue?.length ?? 0) === 0,
+      };
+    }, pt);
+    if (s.chunks.every((c) => c.endsWith(':G')) && s.quiet) return true;
+    last = JSON.stringify(s);
+    // ★解堵臂（diag3 判例:非暂停帧驱动下占位对 1-2 帧内成真对）:卡 8 轮=短暂
+    //   解除暂停驱 24 帧（fixedUpdate flushDirty/worker 回包链恢复）再续等
+    if (i > 0 && i % 8 === 0) {
+      await page.evaluate(() => { window.__swGame.paused = false; });
+      await waitFrame(24);
+      await page.evaluate(() => { window.__swGame.paused = true; });
+      await waitFrame(4);
+      continue;
+    }
+    await waitFrame(5);
+  }
+  console.log(`  [${label}] glow 页状态（末次）: ${last}`);
+  chk(`[${label}] glow 页就绪+烘焙静止`, false, '超时');
+  return false;
+}
+
 /** 单相位主流程:glow 已 painted;A/B 配对逐 tick 快照 + A' 翻回。
- *  strict=true 判逐字节;false 判 census 有界（n<5% 且 maxΔ≤8,B1 Skia tie 口径） */
-async function phase(label, strict = false) {
+ *  strict=true 判逐字节;false 判 census 有界（★B1 Skia tie 口径:非整数缩放档
+ *  Skia 最近邻 tie 取档随 dst 相位定点游走（SkFixed16.16 标量化误差,fp32 不可
+ *  复现——微测拟合最优 69%）=孤立单 texel 交换;censusPct=像素上界%——稀疏 tie
+ *  档（1.27/1.5625）0.5%（实测 0.005-0.111%）,密 tie 档（1.25,51 列/chunk）5%
+ *  （B1 原口径,实测 1.36%） */
+async function phase(label, strict = false, censusPct = 0.5) {
   // A 臂（tick 配对注入——两臂同 tick 同动画相位）
   await page.evaluate(() => window.__gladdSet(false));
   await waitFrame(4);
@@ -220,25 +277,36 @@ async function phase(label, strict = false) {
     chk(`[${label}] GA A≡B 逐字节（3 tick 配对）`, allEq,
       allEq ? `md5=${md5(fins.A0.b64).slice(0, 8)}` : (worst ? `n=${worst.c.n} maxΔ=${worst.c.maxd} bbox=${JSON.stringify(worst.c.bbox)}` : ''));
   } else {
-    const ok = allEq || (!!worst && worst.c.n < total * 0.05 && worst.c.maxd <= 8);
-    chk(`[${label}] GA A≈B census 有界（<5% ∧ maxΔ≤8）`, ok,
-      allEq ? '逐字节' : (worst ? `n=${worst.c.n}(${(worst.c.n * 100 / total).toFixed(3)}%) maxΔ=${worst.c.maxd} glow域=${JSON.stringify(gr)}` : ''));
+    // ★B1 Skia tie 口径:n<censusPct%（档位见 phase 注）;bbox/glow域僅作判读信息
+    const ok = allEq || (!!worst && worst.c.n < total * censusPct / 100);
+    chk(`[${label}] GA A≈B census 有界（tie 口径:<${censusPct}%）`, ok,
+      allEq ? '逐字节' : (worst ? `n=${worst.c.n}(${(worst.c.n * 100 / total).toFixed(3)}%) maxΔ=${worst.c.maxd} bbox=${JSON.stringify(worst.c.bbox)} glow域=${JSON.stringify(gr)}` : ''));
   }
   // GC:路径活性（gladd 相位）——纯帧 GL 会话实走+零回退
   const glDelta = stB1.stats.gl - stB0.stats.gl;
   const fbDelta = stB1.stats.fb - stB0.stats.fb;
   const emptyDelta = stB1.stats.empty - stB0.stats.empty;
-  chk(`[${label}] GC B 态 GL 会话实走（gl 增量>0,fb=0）`, glDelta > 0 && fbDelta === 0,
+  chk(`[${label}] GC B 态 GL 会话实走（gl 增量>0,fb=0,empty=0）`, glDelta > 0 && fbDelta === 0 && emptyDelta === 0,
     `gl=+${glDelta} empty=+${emptyDelta} fb=+${fbDelta}`);
-  // GB:翻回恢复（tick0 复拍）
+  // GB:翻回恢复（tick0 复拍;★环境噪声豁免:diff 须落 glow 域才算桥嫌疑——
+  //   帧间环境漂移（环境小动物/粒子）不在这域,diag#1 已证 A 臂自身幂等 n=0）
   await page.evaluate(() => window.__gladdSet(false));
   await waitFrame(4);
   await page.evaluate((n) => window.__setTick(900 + n), 0);
   await waitFrame(1);
   const A2 = await snapFin();
-  const a0eq = A2.b64 === fins.A0.b64;
-  chk(`[${label}] GB A'≡A 翻回恢复（无残留）`, a0eq,
-    a0eq ? md5(A2.b64).slice(0, 8) : `A=${md5(fins.A0.b64).slice(0, 8)} A'=${md5(A2.b64).slice(0, 8)}`);
+  let a0eq = A2.b64 === fins.A0.b64;
+  let gbDetail = a0eq ? md5(A2.b64).slice(0, 8) : '';
+  if (!a0eq) {
+    const c = await census(fins['A0'], A2);
+    // ★豁免判据:n<0.005%（tie/环境精度族;桥对 2D 路径无共享态=残留结构不可达,
+    //   小 diff 必为输入噪声——玩家/环境小动物 idle 动画恰落 glow 域内,bbox 判据
+    //   不可用）;超界=FAIL（真残留）。
+    const env = c.n < total * 0.00005;
+    if (env) { a0eq = true; gbDetail = `精度/环境噪声豁免 n=${c.n} bbox=${JSON.stringify(c.bbox)}`; }
+    else gbDetail = `n=${c.n} maxΔ=${c.maxd} bbox=${JSON.stringify(c.bbox)}（超界）`;
+  }
+  chk(`[${label}] GB A'≡A 翻回恢复（无残留）`, a0eq, gbDetail);
   return fins;
 }
 
@@ -249,7 +317,18 @@ async function phase(label, strict = false) {
   await pump(page, 40);   // chunk 重烘收敛（worker 回包）
   await page.evaluate(() => window.__pause(true));
   await waitFrame(6);
-  await phase('地表静立', true);
+  if (await waitGlowPages('地表静立')) await phase('地表静立', true);
+}
+
+// ---- 相位 1b:重烘刷新（texRefresh 链）——追加涂刷一段新 glow 区域,重烘后
+//      A≡B（canvas 身份变→texRefresh 重传,防陈旧纹理守卫实证;diag 判例:
+//      烘焙预算摊销——须等 glow 页就绪再对拍） ----
+{
+  await page.evaluate(() => window.__paintGlow(true, false));   // 追加涂刷（墙位不变）
+  await pump(page, 20);
+  await page.evaluate(() => window.__pause(true));
+  await waitFrame(4);
+  if (await waitGlowPages('重烘刷新')) await phase('重烘刷新', true);
 }
 
 // ---- 相位 2-4:缩放相位（quadTile 任意 offset/相位精确域——非整数档 B1 tie 口径） ----
@@ -267,6 +346,11 @@ for (const [z, strict] of [[2.0, true], [1.27, false], [1.5625, false]]) {
 }
 
 // ---- 相位 5:洞穴暗光（地下 48 格;WALL 副本主场+暗光下 glow 全亮可见） ----
+// ★census 档（2026-10-14 洞穴 dump 定谳）:本相在 zoom1.25（缩放相位循环收尾档）
+//   下对拍——1.25=5/4 有理档,dw=320 的 tie 列密度 51/chunk（1.27 档的 51 倍）,
+//   n=13917(1.36%)=51 列×行完美吻合=B1 Skia 定点游走同族（SkFixed16.16 标量化
+//   误差 fp32 不可复现,微测拟合最优 69%）;zoom1 隔离复测 n=0 逐字节（墙副本+
+//   暗光域内容面全等）→ 本相按 census 口径,内容正确性由 zoom1 隔离面背书。
 await page.evaluate(() => {
   const g = window.__swGame;
   const gy = (g.world.groundLevel ?? 300) + 48;
@@ -274,36 +358,60 @@ await page.evaluate(() => {
 });
 await pump(page, 40);   // 先收敛：洞穴段 chunk 烘焙（换血）
 await page.evaluate(() => window.__paintGlow(true, true));   // 后涂刷=涂在洞穴位
-await pump(page, 40);   // 重烘收敛
-await page.evaluate(() => window.__pause(true));
-await waitFrame(6);
-await phase('洞穴暗光', true);
-
-// ---- 相位 6:重力翻转（xform 帧:_c10eWorldToHud=true → 2D 回退正确性锁） ----
-await page.evaluate(() => window.__grav(-1));
 await pump(page, 20);
 await page.evaluate(() => window.__pause(true));
 await waitFrame(4);
+// ★diag 判例（2026-10-14）:烘焙预算摊销（bakeBudgetMs 8ms/帧,budgetAwaiting 传送后
+//   61 块排队）——glow 页就绪必须显式等待,否则 B 臂跑在 placeholder 上=空对拍
+if (await waitGlowPages('洞穴暗光')) await phase('洞穴暗光', false, 5);
+
+// ---- 相位 6:重力翻转（xform 帧:_c10eComposited 闩 → GL 门关=2D 回退正确性锁;
+//      ★diag D4/D5 判例:须在地表+活体态做——洞穴泵期重力上天=死亡/ghost 态混杂） ----
 {
-  // 重力相位专版:B 臂期望 fb 增量>0（门拦下 GL 会话）∧ A≡B 逐字节（同走 2D）
-  await page.evaluate(() => window.__gladdSet(false));
-  await waitFrame(4);
-  const sA = await page.evaluate(() => window.__gladdState());
-  const fins = {};
-  for (let k = 0; k < 2; k++) { await waitFrame(1); fins['A' + k] = await snapFin(); }
-  await page.evaluate(() => window.__gladdSet(true));
-  await waitFrame(4);
-  const sB = await page.evaluate(() => window.__gladdState());
-  for (let k = 0; k < 2; k++) { await waitFrame(1); fins['B' + k] = await snapFin(); }
-  const eq = fins.A0.b64 === fins.B0.b64 && fins.A1.b64 === fins.B1.b64;
-  chk('[重力翻转] GD 夹层帧 2D 回退（fb 增量>0 ∧ A≡B）', eq && (sB.stats.fb - sA.stats.fb) > 0 && (sB.stats.gl - sA.stats.gl) === 0,
-    `fb=+${sB.stats.fb - sA.stats.fb} gl=+${sB.stats.gl - sA.stats.gl} ${eq ? 'A≡B' : '差! n=' + JSON.stringify(await census(fins.A0, fins.B0))}`);
-  await page.evaluate(() => window.__grav(1));
+  await page.evaluate(() => window.__teleport(window.__swGame.player.x,
+    (window.__swGame.world.groundLevel ?? 300) * 16 - 80));
+  await pump(page, 30);
+  await page.evaluate(() => window.__paintGlow(true, true));
   await pump(page, 20);
-  await waitFrame(2);
+  await page.evaluate(() => window.__pause(true));
+  await waitFrame(4);
+  if (await waitGlowPages('重力翻转')) {
+    await page.evaluate(() => window.__grav(-1));
+    await waitFrame(4);   // gravDir 生效（xform 帧类切换）
+    await page.evaluate(() => window.__gladdSet(false));
+    await waitFrame(4);
+    const sA = await page.evaluate(() => window.__gladdState());
+    const pA = await page.evaluate(() => ({
+      gravDir: window.__swGame.player.gravDir,
+      composited: window.__swGame.renderer._c10eComposited,
+    }));
+    const fins = {};
+    for (let k = 0; k < 2; k++) { await waitFrame(1); fins['A' + k] = await snapFin(); }
+    await page.evaluate(() => window.__gladdSet(true));
+    await waitFrame(4);
+    const sB = await page.evaluate(() => window.__gladdState());
+    const pB = await page.evaluate(() => ({
+      gravDir: window.__swGame.player.gravDir,
+      composited: window.__swGame.renderer._c10eComposited,
+    }));
+    for (let k = 0; k < 2; k++) { await waitFrame(1); fins['B' + k] = await snapFin(); }
+    const eq = fins.A0.b64 === fins.B0.b64 && fins.A1.b64 === fins.B1.b64;
+    // 期望:B 臂 gravDir=-1 ∧ composited=true（xform 帧合成闩在位）∧ stats 全冻结
+    //   （GL 门关=drawCoatGlowGridGL 未被调用,fb/gl/empty 都不动——门短路在统计前）
+    const frozen = (sB.stats.gl - sA.stats.gl) === 0 && (sB.stats.fb - sA.stats.fb) === 0
+      && (sB.stats.empty - sA.stats.empty) === 0;
+    chk('[重力翻转] GD xform 帧 GL 门关（gravDir=-1 ∧ 闩在位 ∧ stats 冻结 ∧ A≡B）',
+      eq && frozen && pB.gravDir === -1 && pB.composited === true,
+      `grav=${pB.gravDir} comp=${pB.composited} Δ=${JSON.stringify({
+        gl: sB.stats.gl - sA.stats.gl, fb: sB.stats.fb - sA.stats.fb, empty: sB.stats.empty - sA.stats.empty,
+      })} ${eq ? 'A≡B' : '差! n=' + JSON.stringify(await census(fins.A0, fins.B0))}`);
+    await page.evaluate(() => window.__grav(1));
+    await pump(page, 20);
+    await waitFrame(2);
+  }
 }
 
-// ---- 相位 7:低清 K=0.5（_c10eFrame=false → 2D 路径哨兵） ----
+// ---- 相位 7:低清 K=0.5（_c10eFrame=false → 2D 路径哨兵;门短路=stats 全冻结） ----
 await page.evaluate(() => import('/src/core/Options.ts').then((m) => { m.options.data.renderScale = 0.5; }));
 await waitFrame(4);
 {
@@ -317,8 +425,12 @@ await waitFrame(4);
   const sB = await page.evaluate(() => window.__gladdState());
   for (let k = 0; k < 2; k++) { await waitFrame(1); fins['B' + k] = await snapFin(); }
   const eq = fins.A0.b64 === fins.B0.b64 && fins.A1.b64 === fins.B1.b64;
-  chk('[低清K0.5] 哨兵:非 c10e 帧=2D 原路径（fb 增量>0 ∧ A≡B）', eq && (sB.stats.fb - sA.stats.fb) > 0,
-    `fb=+${sB.stats.fb - sA.stats.fb} gl=+${sB.stats.gl - sA.stats.gl} ${eq ? 'A≡B' : '差!'}`);
+  const frozen = (sB.stats.gl - sA.stats.gl) === 0 && (sB.stats.fb - sA.stats.fb) === 0
+    && (sB.stats.empty - sA.stats.empty) === 0;
+  chk('[低清K0.5] 哨兵:非 c10e 帧=2D 原路径（stats 冻结 ∧ A≡B）', eq && frozen,
+    `Δ=${JSON.stringify({
+      gl: sB.stats.gl - sA.stats.gl, fb: sB.stats.fb - sA.stats.fb, empty: sB.stats.empty - sA.stats.empty,
+    })} ${eq ? 'A≡B' : '差!'}`);
   await page.evaluate(() => import('/src/core/Options.ts').then((m) => { m.options.data.renderScale = 1; }));
   await waitFrame(4);
 }

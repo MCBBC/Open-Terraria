@@ -27,7 +27,7 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
-import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）
+import { ProjGhostRing, drawProjGhosts, projTrailingMode, xnaColorMulByte, onProjSpriteOverride } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）+★清偿 C1 量化单源/C2 失效钩
 import { hslToRgb255 } from '../render/AuroraSky';   // ★BJ650件1：864 辉光色 Main.hslToRgb 直译（:80378,同 projGhostTrail 消费源）
 import { ExplosiveTrapBlastProj } from './ExplosiveTrapBlast';   // ★BJ650件4：爆炸机关弹视觉实体（R15-F6 清偿）
 import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
@@ -2261,6 +2261,27 @@ export class MinionProj extends Entity {
     this.contact(game, dmg0 * (1 + 0.23 * this.dragonLocalAI0(game)), 7);
   }
 
+  /** ★清偿 C7/R2-F3（2026-10-14）：970 计数器 originalDamage 聚合面——原版
+   *  ResetProjectileCaches（Player.cs:12308-12309）每拍清零 + ownedProjectileCounts
+   *  收集循环 `case 970: highestAbigailCounterOriginalDamage=max(highest,od)`
+   *  （Player.cs:12296-12300,owner==whoAmI 域）,AI_062 963 档每拍
+   *  `originalDamage = highestAbigailCounterOriginalDamage`（Projectile.cs:66083）
+   *  ——本体伤害源=【最高伤害计数器】,非生成者快照。多计数器共存=原版可达面
+   *  （AI_164 首帧 peerCount>1 播 AbigailUpgrade :43974 同证;自由槽位重复使用
+   *  5114 不驱逐——freeUpMinionsForSummon 仅超预算才逐）。963 自身（projId!==970）
+   *  不入 max（原版 originalDamage 每拍由计数器侧重收,963 无活计数器时已被
+   *  UpdateAbigailStatus/maintainMinions 清理,兜底回落 self.damage）。 */
+  private abigailCounterOriginalDamage(game: GameHooks): number {
+    const projs = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles;
+    const own = this.ownerRef();
+    let mx = this.projId === 970 ? this.damage : -1;
+    for (const m of projs) {
+      if (m instanceof MinionProj && !m.dead && m.projId === 970
+        && m.ownerRef() === own && m.damage > mx) mx = m.damage;
+    }
+    return mx >= 0 ? mx : this.damage;
+  }
+
   /** 计数器（831 虎宝石 / 970 阿比盖尔计数，AI_164 :43946）：头顶环绕吸附、不攻击；
    *  派生唯一本体（档位随同类数），本体 noSlot 不占上限 */
   private counterHover(game: GameHooks, p: Player, dmg0: number): void {
@@ -2280,7 +2301,9 @@ export class MinionProj extends Entity {
       if (!tigers.length) this.spawnBody(game, want, this.damage);
       else if (tigers[0].projId !== want) { tigers[0].dead = true; this.spawnBody(game, want, this.damage); }
     } else if (!projs.some((m) => m instanceof MinionProj && !m.dead && m.projId === 963)) {
-      this.spawnBody(game, 963, this.damage);
+      // ★清偿 C7/R2-F3：出生伤害面=最高计数器 originalDamage（:66083 链）——
+      //  旧 this.damage=生成者快照,后入高伤计数器不生效
+      this.spawnBody(game, 963, this.abigailCounterOriginalDamage(game));
     }
     // AI_164 环绕：每层 4 个、层高 +12px、中心头顶 -61px（MountedCenter-21-40）
     const peers = projs.filter((m) => m instanceof MinionProj && !m.dead && m.projId === this.projId);
@@ -4938,6 +4961,13 @@ export class MinionProj extends Entity {
   }
 
   private abigailBody(game: GameHooks, p: Player, dmg0: number): void {
+    // ★清偿 C7/R2-F3（2026-10-14）：伤害源=highestAbigailCounterOriginalDamage——
+    //  原版 AI_062 963 档 :66083 每拍 `originalDamage=玩家侧最高 970 计数器值`,
+    //  live 伤 = (int)(originalDamage×minionDamage+5E-06f)（:16809-16813）。形参
+    //  dmg0 由 963 自身 damage（=出生拍生成者快照）推导,后入高伤计数器不生效,
+    //  退役——改每拍重收 max（abigailCounterOriginalDamage）。
+    void dmg0;
+    const dmgAbig = Math.max(1, truncCSf32MulBias(p.summonDamageMult, this.abigailCounterOriginalDamage(game)));
     const n = Math.max(1, this.peerCount(game, 970));
     const num2 = n - 1;
     // Main.hardMode（world.flags.hardMode；?. 防测试 mock 缺 flags）
@@ -5008,7 +5038,7 @@ export class MinionProj extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
-    this.contact(game, dmg0 * scale, 20);
+    this.contact(game, dmgAbig * scale, 20);
   }
 
   /** Collision.SolidCollision(position, width, height) 等价（盒覆盖格任一实心，
@@ -8813,14 +8843,17 @@ export class MinionProj extends Entity {
               });
           }
           // ★BJ606-R（2026-10-10 用户实报「攻击也不对」定谳补）：AI_137 放电视觉尘
-          //  （:70034-70056 1:1;1456 :65945 区块同式）——①场缘电弧（每拍 4 试×1/6 掷）：
+          //  （★清偿 C4=R5-F5 注释重锚 2026-10-14:70030-70052 1:1;1456 :65945 区块
+          //  同式）——①场缘电弧（每拍 4 试×1/6 掷）：
           //  随机单位向 |x|<0.12 跳过 → 目标点 = 场心 + 单位向×((H-40)/2)（=伤害域缘
           //  side/2-20 同径,:70040）→ 目标格非实心 ∧ AI_137_CanHit 通过 → 尘 226
           //  钉点（perfect=NewDustDirect 定点语义）,速度 = (塔锚-尘位).SafeNormalize
-          //  （塔锚 vector2=(盒顶心X, 盒顶+40) :70031-70032）,scale 0.7/fadeIn 1/
-          //  noGravity/noLight。②塔柱火花（非携行 4 试×1/10 掷,:70047-70056）:
-          //  盒 (盒顶心X-8, 盒顶+40, 16, H/2-40) 内尘 226,速度 ×0.6+(0,-2),scale 0.7。
-          //  `:70051 for(k<0)` = 原版死循环（必死支不可达判谳,不移植）。此前攻击面
+          //  （塔锚 vector2=(盒顶心X, 盒顶+40) :70029）,scale 0.7/fadeIn 1/
+          //  noGravity/noLight。②塔柱火花（非携行 4 试×1/10 掷,活支=l 循环
+          //  :70074-70085）：盒 (盒顶心X-8, 盒顶+40, 16, H/2-40) 内尘 226,速度
+          //  ×0.6+(0,-2),scale 0.7。`:70053 for(k=0;k<0)` = 原版零迭代死循环
+          //  （必死支不可达判谳,不移植;旧锚 :70047-70056/:70051 均错——:70047-70052
+          //  是 j 循环尾,k 循环头在 :70053）。此前攻击面
           //  仅伤害+声（C-3472）无任何视觉=「放电无电弧」观感缺失。
           if (game.spawnDust) {
             const anchorX = this.cx, anchorY = this.y + 40;   // vector2（盒顶心, 盒顶+40）
@@ -10175,7 +10208,9 @@ export class MinionProj extends Entity {
     //      原版 GetAlpha 恒白=只免自身压暗、不照亮环境,AI_169 零 AddLight）——
     //      本体/辉光/残影回世界层乘光,暗处偏暗=登记债 [bj669-864-luminous-channel]。
     //      色式不变（GetFloatingDaggerMinionGlowColor :80377-80381:hue=0.66+0.33×
-    //      (whoAmI%6)/6 六档蓝→品红、s=0.7/l=0.6、×0.7f 逐字节截断、A=(byte)178/4=44）;
+    //      (whoAmI%6)/6 六档蓝→品红、s=0.7/l=0.6、×0.7f 逐字节截断【★清偿 C1=R5-F1：
+    //      实现=xnaColorMulByte Math.trunc 单源,旧 Math.round 中点档 +1 退役】、
+    //      A=(byte)178/4=44）;
     //      源矩形 = value18（rectangle4.Y+=Height=帧 1 纯白模）;位 = Center+(0,gfxOffY)
     //      + rot 单位向 .RotatedBy(π/2·k)×2（世界系四向;dir 只翻贴图不翻位——
     //      XNA SpriteEffects 语义）;rotation/origin(帧心)/scale=1 同本体支。
@@ -11039,8 +11074,14 @@ let empressTintSeq = 0;
  *  cut=帧 1 白模黑染（A 衰减面）、add=帧 1 白模 rgb×0.7 染（rgb 贡献面）。
  *  XNA 预乘 One/InvSrcAlpha 分解（drawProjGhosts 864 档同式）：
  *  dst' = tex.rgb×C.rgb + dst×(1−tex.a×C.a)。帧 1=纯白模（BJ632 探针 340/340 全白）
- *  → source-atop 染=同形纯色剪影。烘焙失败（无 sheet/headless）缓存 null 防重试抖动。 */
+ *  → source-atop 染=同形纯色剪影。烘焙失败（无 sheet/headless）缓存 null 防重试抖动。
+ *  ★清偿 C1/R5-F1（2026-10-14）：rgb 量化=xnaColorMulByte 截断（XNA Color*float
+ *  逐字节 (byte) 截断,与 projGhostTrail GHOST_TINT[864] 同一函数——旧 Math.round
+ *  中点档 +1,hue0 (57,61,157)≠XNA (57,60,156)）。
+ *  ★清偿 C2/R5-F2：订阅 projGhostTrail 贴图覆盖通知——setProjSpriteOverride(864)
+ *  （素材包就地换图,RemasterRuntime 无 reload）清本缓存,下次烘焙吃新剪影。 */
 const GLOW864_CACHE = new Map<number, { cut: HTMLCanvasElement; add: HTMLCanvasElement } | null>();
+onProjSpriteOverride((id) => { if (id === 864) GLOW864_CACHE.clear(); });
 function glow864TexPair(k: number, rgb: readonly [number, number, number]): { cut: HTMLCanvasElement; add: HTMLCanvasElement } | null {
   if (GLOW864_CACHE.has(k)) return GLOW864_CACHE.get(k) ?? null;
   if (typeof document === 'undefined') return null;
@@ -11064,7 +11105,8 @@ function glow864TexPair(k: number, rgb: readonly [number, number, number]): { cu
     }
   };
   const cut = bake('rgb(0,0,0)');
-  const add = bake(`rgb(${Math.round(rgb[0] * 0.7)},${Math.round(rgb[1] * 0.7)},${Math.round(rgb[2] * 0.7)})`);
+  const rgbQ = xnaColorMulByte(rgb, 0.7);   // ★清偿 C1：XNA (byte)(c×0.7f) 截断（旧 Math.round）
+  const add = bake(`rgb(${rgbQ[0]},${rgbQ[1]},${rgbQ[2]})`);
   if (!cut || !add) return null;
   const pair = {
     cut: cut as HTMLCanvasElement,

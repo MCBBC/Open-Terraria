@@ -297,6 +297,22 @@ export declare interface ModContext {
   chestUnlockCondition(key: string, fn: (world: unknown) => boolean): void;
   /** ★一百一十七:mod 群系蔓延注册(tileMap=vanilla sheet→mod tile 键) */
   biomeConversion(spec: { spreads: string[]; tileMap: Record<number, string> }): void;
+  /** ★成就域(2026-10-14):mod 成就注册(原版条件状态机直接复用)。conditions:
+   *  npcKilled/itemPickup/itemCraft/tileDestroyed=引擎通知自动驱动(keys=mod/
+   *  vanilla 键或裸 vid;many=逐 id 独立);custom=mod 自管逻辑直完。 */
+  achievement(key: string, spec: {
+    title: string; desc?: string; category?: number; icon?: string;
+    conditions: Array<{ kind: 'npcKilled' | 'itemPickup' | 'itemCraft' | 'tileDestroyed' | 'custom';
+      keys?: Array<string | number>; many?: boolean }>;
+  }): void;
+  /** ★成就域:mod 成就直接完成(custom 条件消费;幂等;无实例沿=暂存回放) */
+  completeAchievement(key: string): void;
+  /** ★InfoDisplay 域(2026-10-14):mod 信息栏行(update 逐帧产文本 null=本帧省行) */
+  infoDisplay(key: string, spec: {
+    label: string;
+    update?(game: object): string | null;
+    gold?: boolean;
+  }): void;
   /** ★TE 梯队(2026-10-14):mod tile entity(tML ModTileEntity 形;绑定本 mod tile。
    *  放置[锚格]自愈建/破坏 onDestroy/逐 tick update/存读 save+load;state 须 JSON-able
    *  [缺省 save=state 直存]) */

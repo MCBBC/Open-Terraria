@@ -171,6 +171,7 @@ import { modPetInfoOf, modPetEntries } from '../mods/pets';   // ★刀3-2:mod �
 import { modWallMetaOf } from '../mods/walls';   // ★刀3-墙:mod 墙 meta(拆墙门消费)
 import { modUiBlockingPointer, modUiSetInGame } from '../mods/ui';   // ★刀1:mod UI 宿主(输入让位/在役旗)
 import { bindModTileEntities, unbindModTileEntities } from '../mods/tileEntities';   // ★TE 梯队
+import { resolveModInfoLines } from '../mods/infoDisplay';   // ★InfoDisplay 域
 import { takeModBiomeMusic, takeModFrameMusic, runModParryActive, runModParrySuccess } from '../mods/hooks';   // ★三百二十一刀/二刀:BGM 群系曲+AI 直写槽
 import { MOD_PROJ_ID_BASE } from '../mods/types';   // ★红队 R1-F7:MOD_NPC_ID_BASE 死 import 清理(域门已撤)
 import { ModProj } from '../entities/ModProj';
@@ -3464,9 +3465,24 @@ export function maintainMinionBuffs(
       if (usedSlots < player.maxMinions) {
         const owner = player;
         const c4281 = itemCombat(4281);   // Item.cs 4281 SetDefaults damage7/kb4
+        // ★清偿 C6/R2-F2（2026-10-14）：重生弹取【背包实例】词缀伤害面——原版
+        //  FindItem(4281)（Player.cs:10796,:56629-56637 逐格 type+stack>0）取
+        //  inventory[num] 后 `NewProjectile(..., item.damage, item.knockBack)` +
+        //  `originalDamage = item.damage`（:10799-10801）——词缀乘区已烘入实例
+        //  （Item.Prefix dmg/kb,仓内烘定习语=roundCSf32Mul(base, ps.dmg) Item.cs:577）。
+        //  旧 itemCombat(4281) 基础值 7/4 漏词缀（无情 57 dmg1.18 → 8 档缺失）。
+        //  找不到实例（countOf>0 但逐格不中=防御臂,原版不可达）回落基础值。
+        let birdDmg = Math.max(1, c4281?.damage ?? 7);
+        let birdKb = c4281?.knockBack ?? 4;
+        const inst4281 = player.inv.slots.find((s) => s && s.id === 4281 && s.stack > 0) ?? null;
+        if (inst4281) {
+          const ps4281 = inst4281.prefix ? prefixStat(inst4281.prefix) : null;
+          birdDmg = Math.max(1, roundCSf32Mul(c4281?.damage ?? 7, ps4281?.dmg ?? 1));
+          birdKb = birdKb * (ps4281?.kb ?? 1);
+        }
         const bird = new MinionProj(
           owner.cx - 8, owner.y, 759,     // base.Top（Center.X, position.Y）
-          Math.max(1, c4281?.damage ?? 7), c4281?.knockBack ?? 4,
+          birdDmg, birdKb,
           false, 0, false, () => owner,   // ★F5：AI_158 :49643 全程读 Main.player[owner] 不查 dead
         );
         spawn(bird);
@@ -7538,6 +7554,12 @@ export class Game implements GameHooks {
       // （其余 SoundID 均为 num2 原值）——原版滴水恒半量，此前传 1 偏大一倍
       this.sfx.playFiles(wet ? ['Drip_2'] : ['Drip_0', 'Drip_1'], 0.5, x, y);
     };
+    // ★清偿 C5/R5-F7a（2026-10-14）：落叶岩浆焚毁尘钩（Gore.cs:1138-1142 落地支
+    //  active=false + 5×Dust.NewDust(position, num=(int)(4×0.9)=3, num, 31, 0f, -0.2f)；
+    //  下落支焚毁同参——NatureParticles 落地/下落两支共用）
+    natureParticles.onLavaDust = (x, y) => {
+      for (let i = 0; i < 5; i++) this.spawnDust(x, y, 3, 3, 31, 0, -0.2);
+    };
     // ---- 天气系统接线：状态机已在 world.weather（存档/wld 导入回填）；
     //  天空云联动 + 雨滴/沙尘渲染器 attach；hooks 字段每帧由 fixedUpdate 刷新 ----
     this.renderer.sky.attachWeather(w.weather);
@@ -8736,6 +8758,7 @@ export class Game implements GameHooks {
     this.renderer.cbOnGpuPressure = null;
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
+    natureParticles.onLavaDust = null;   // ★清偿 C5/R5-F7a 同族钩解绑
     // ★BJ344（件3,合成层 +3/轮清偿）：Wiring 器件闭包组随实例摘除——attachDevices
     //  （:6880）挂的 device/teleportPair 箭头闭包捕 makeDeviceCtx() 全量（timeSkip/
     //  dropItem/spawnNpc/mechSpawnOk/itemSpawnOk → this=Game）,killTileCtxProvider
@@ -41705,6 +41728,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const w = this.world;
     const r = this.renderer;
     const clock = w.clock;
+    // ★InfoDisplay 域(2026-10-14):mod 信息栏行逐帧解析(头部恒跑——抑制期行
+    //  不画但解析无副作用;registry 空直通)
+    resolveModInfoLines(this);
     // ★BJ363 CanShowInfoAccs 输入面注入(Main.cs:3099-3110 talkNPC/chest 两腿)——
     //   此前 Renderer 调用点读 (player as {talking?}).talking/(renderer as
     //   {chestOpen?}).chestOpen 双幻影字段=恒 undefined,抑制门死码。sign 臂本仓

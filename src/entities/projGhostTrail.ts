@@ -344,6 +344,31 @@ const getLerp = (f0: number, f1: number, v: number) => clamp01((v - f0) / (f1 - 
 const BLUE: [number, number, number] = [0, 0, 255];
 const WHITE: [number, number, number] = [255, 255, 255];
 
+/** ★清偿 C1/R5-F1（2026-10-14）：XNA `Color * float` 逐字节截断量化单源——
+ *  (byte)(c×f) = C# 显式转换截断（仓内判例 AuroraSky.ts:23 + 同文件 :10958
+ *  「(byte)76.5=76」;Gore/Projectile 色式 ×0.7f 等同款）。消费位=GHOST_TINT[864]
+ *  与 MinionProj glow864TexPair（864 辉光 ×0.7f 双面）——旧 JS Math.round 中点档
+ *  +1（hue0 (57,61,157)≠XNA (57,60,156),R5 node 实算基准表六档三通道）。 */
+export function xnaColorMulByte(rgb: readonly [number, number, number], f: number): [number, number, number] {
+  return [Math.trunc(rgb[0] * f), Math.trunc(rgb[1] * f), Math.trunc(rgb[2] * f)];
+}
+
+// ---- ★清偿 C2/R5-F2（2026-10-14）：弹幕贴图覆盖通知注册表 ----
+// RemasterRuntime.setProjSpriteOverride（Arrow.ts）就地换图后,依赖 projSprite 的
+// 模块级烘焙缓存需失效（旧只清 Arrow 内 spriteCache/frameCache——GLOW864_CACHE
+// 永驻旧剪影,辉光贴素材包旧模）。接线选本模块=Arrow 与 MinionProj 双方既有依赖
+// （Arrow.ts:34 / MinionProj.ts:30 双向 import MinionProj↔Arrow 已成环,再拉直连
+// 会加深环;注册表习语零新边）。
+const projSpriteOverrideHooks: Array<(projId: number) => void> = [];
+/** 订阅贴图覆盖失效通知（模块加载期注册一次） */
+export function onProjSpriteOverride(fn: (projId: number) => void): void {
+  projSpriteOverrideHooks.push(fn);
+}
+/** setProjSpriteOverride 内派发（同步、逐订阅者,异常面=订阅者自担） */
+export function notifyProjSpriteOverride(projId: number): void {
+  for (const fn of projSpriteOverrideHooks) fn(projId);
+}
+
 export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
   // ★BJ371：409 剃刀台风（GetAlpha 409 专属支 P.cs:81148-81151 恒 (250,250,250,200)
   //  不读 α——本体/残影同色;aMul=1 = 单笔 source-over 档,A 侧 200/255 由调用位
@@ -385,13 +410,16 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
   864: (c) => {                                                              // FDMGlow A/=4 :31237-31240
     // ★BJ650件1（2026-10-12）色式精化（GetFloatingDaggerMinionGlowColor P.cs:80377-80381
     //  1:1）：hue = 0.66 + 0.33×(whoAmI%6)/6（6 档蓝→品红循环,随弹序异色——旧 0 档
-    //  近似登记③ retired）;s=0.7/l=0.6 → hslToRgb255;×0.7f = XNA 逐字节截断
-    //  （R/G/B 面,byte 噪声在染色 bake 面内）;A 面：255×0.7→(byte)178 → /4=44
+    //  近似登记③ retired）;s=0.7/l=0.6 → hslToRgb255;×0.7f = XNA 逐字节截断。
+    //  ★清偿 C1/R5-F1（2026-10-14）：量化点上移至本表=xnaColorMulByte 截断单源
+    //  （旧注释「byte 噪声在染色 bake 面内」实为下游 :629 Math.round=中点档 +1,
+    //  hue0 (57,61,157)≠XNA (57,60,156);与 MinionProj glow864TexPair 同函数）。
+    //  下游 tintedTex Math.round 对已整值幂等。A 面：255×0.7→(byte)178 → /4=44
     //  （C# byte 整除,旧 aMul=0.25 忽略 ×0.7 的 A 通道=1.45× 过亮,retired）。
     const hue = 0.66 + 0.33 * (((c.whoAmI ?? 0) % 6) / 6);
     const h0 = hslToRgb255(hue, 0.7, 0.6);
     return {
-      rgb: [h0[0] * 0.7, h0[1] * 0.7, h0[2] * 0.7],
+      rgb: xnaColorMulByte(h0, 0.7),
       aMul: Math.trunc(Math.trunc(255 * 0.7) / 4) / 255,   // (byte)178 → /4=44（byte 整除）→ 44/255
     };
   },

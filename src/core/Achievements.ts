@@ -39,6 +39,20 @@ export interface AchProgress {
   ratio: number | null;
 }
 
+/** ★成就 API(2026-10-14):mod 成就定义注册面——sw.achievement 装载期收集,
+ *  Achievements 实例构造时并入(实例创建恒后于 mod 装载:Game ctor=世界创建沿,
+ *  菜单实例=懒开面板沿)。持久化复用既有通道(completed 表 name=mod 全键)。 */
+const modAchDefs: AchDef[] = [];
+export function registerModAchievementDefs(defs: AchDef[]): void {
+  modAchDefs.push(...defs);
+}
+/** mod 成就 def 查(UI tooltip 字面回退——原版域 l10n 不经此) */
+export function modAchDefOf(name: string): AchDef | undefined { return modAchDefs.find((d) => d.name === name); }
+/** mod 直接完成待办(mod 在无实例沿调用 completeAchievement 的暂存;ctor 消费) */
+const modPendingComplete = new Set<string>();
+export function addPendingModCompletion(name: string): void { modPendingComplete.add(name); }
+export function clearPendingModCompletion(name: string): void { modPendingComplete.delete(name); }
+
 export class Achievements {
   private defs: AchDef[];
   private completed = new Map<string, boolean>();
@@ -48,9 +62,15 @@ export class Achievements {
   private store: AchStore | null;
 
   constructor(store?: AchStore | null) {
-    this.defs = ACH_DEFS;
+    this.defs = modAchDefs.length > 0 ? [...ACH_DEFS, ...modAchDefs] : ACH_DEFS;
     this.store = store ?? null;
     this.load();
+    // ★成就 API:mod 直接完成待办回放(实例创建晚于 mod 调用的沿)
+    if (modPendingComplete.size > 0) {
+      for (const name of modPendingComplete) {
+        if (this.defs.some((d) => d.name === name)) this.completeMod(name);
+      }
+    }
   }
 
   // ---- 持久化 ----
@@ -201,6 +221,18 @@ export class Achievements {
       this.condState.set(key, st);
       this.checkComplete(def);
     });
+  }
+
+  /** ★成就 API:mod 直接完成(sw.completeAchievement 消费;一次性幂等) */
+  completeMod(name: string): void {
+    const def = this.defOf(name);
+    if (!def) { modPendingComplete.add(name); return; }   // 未注册沿=暂存(重进/ctor 回放)
+    if (this.completed.get(name)) { clearPendingModCompletion(name); return; }
+    this.completed.set(name, true);
+    def.conditions.forEach((_, i) => this.condState.set(`${name}#${i}`, { done: true }));
+    this.unlockedQueue.push(name);
+    this.save();
+    clearPendingModCompletion(name);
   }
 
   /** CustomInt/FloatCondition.Value +=（HandleMining/HandleRunning/护士花费/树种橡实） */

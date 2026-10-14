@@ -81,12 +81,14 @@ describe('敌怪弹幕 DART_STYLE（对照 Projectile.cs）', () => {
     flyTicks(b, hooks, 2); expect(b.vy).toBeCloseTo(-4 + 0.05 * 2, 4);
   });
 
-  it('115 三叉戟：a45 旋转 = atan2+π/4（AI_027 :24839）+ ×1.125 加速至 ai0=30', () => {
+  it('115 三叉戟：a45 旋转 = atan2+0.785（AI_027 :26910-26911 原版字面 0.785f,非 π/4——F3）'
+    + '+ ×1.125 加速至 ai0=30 + 块尾 vy>16 钳在位（F2 :26913-26915）', () => {
     const { hooks } = dartHooks();
     const d = new Dart(20 * 16, 20 * 16, 0.2, 0, 80, 115);
     flyTicks(d, hooks, 30);
-    expect(d['rot']).toBeCloseTo(Math.PI / 4, 5);
+    expect(d['rot']).toBeCloseTo(0.785, 10);             // 字面 0.785（π/4=0.785398 会爆此锁）
     expect(d.vx).toBeCloseTo(0.2 * Math.pow(1.125, 29), 1); // ai0<30 每更新 ×1.125
+    expect(d.vy).toBe(0);                                // 平飞不触钳（钳消费面见 F2 判别锁）
   });
 
   it('302/84 渐入 alpha：|v|*0.9 恒减至 0（:52782 族）；257 恒减 10（:53036）', () => {

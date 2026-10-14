@@ -9893,14 +9893,17 @@ export class Enemy extends Entity {
     //      速 6、伤 15、±100、400+rand400）/ 恶魔 62/66 飞镰 44（20/40/60/80 连四、
     //      速 0.2 起步 AI_018 加速、伤 21、±100、300+rand300）/ 红恶魔 156 三叉戟
     //      115（20/40/60/80/100 连五、速 0.2 起步 AI_027、伤 80、±50、250+rand250；
-    //      出生点 = 中心 + 自身速度×5 + 弹向×100（cs:23538-23540,审计 batAI#7——
+    //      出生点 = 中心 + 自身速度×5 + 弹向×20（cs:23584-23595,★F1 清偿 2026-10-14——
+    //      num259/260 经 num261=num258/num261(:23589) 归一并 ×0.2（弹速 num258）,
+    //      :23595 的 ×100 作用在该已乘 0.2 的速度向量上 → 净偏移=单位弹向×0.2×100
+    //      =20px;旧「弹向×100」把 0.2 速率系数漏乘=出膛点 5 倍远。审计 batAI#7——
     //      曾漏速度前置使贴身三叉戟从脸后出膛）） ----
     const shooter = vid === 48
       ? { ticks: [30, 60, 90], spd: 6, dmg: 15, spread: 100, reset: 400, proj: 38, lead: 0, velLead: 0 }
       : vid === 62 || vid === 66
         ? { ticks: [20, 40, 60, 80], spd: 0.2, dmg: 21, spread: 100, reset: 300, proj: 44, lead: 0, velLead: 0 }
         : vid === 156
-          ? { ticks: [20, 40, 60, 80, 100], spd: 0.2, dmg: 80, spread: 50, reset: 250, proj: 115, lead: 100, velLead: 5 }
+          ? { ticks: [20, 40, 60, 80, 100], spd: 0.2, dmg: 80, spread: 50, reset: 250, proj: 115, lead: 20, velLead: 5 } // ★F1:lead=净 px 偏移（单位弹向×20——原版 ×100 作用在已乘 0.2 的弹速向量上 :23589/:23595）
           : null;
     if (shooter) {
       if (this.ai0 < 0) this.ai0 = 0; // 类字段默认 -1120 是史莱姆初值；原版 ai[0] 从 0 起步
@@ -9910,7 +9913,9 @@ export class Enemy extends Entity {
           const ox = player.cx - this.cx + (Math.random() * 2 - 1) * shooter.spread;
           const oy = player.cy - this.cy + (Math.random() * 2 - 1) * shooter.spread;
           const d = Math.hypot(ox, oy) || 1;
-          // 出生点 = 中心 + 速度×velLead + 弹向×lead（156：vector25 += velocity*5 后 + dir*100）
+          // 出生点 = 中心 + 速度×velLead + 弹向×lead（156：vector25 += velocity*5 后
+          // + num259*100（:23594-23595）——num259 已是 ×0.2 弹速向量（:23589-23591）
+          // → lead 表值口径=净 px 偏移,156=0.2×100=20;48/62/66 原版无偏移项=lead 0）
           this.shootDart(game,
             this.cx + this.vx * shooter.velLead + (ox / d) * shooter.lead,
             this.cy + this.vy * shooter.velLead + (oy / d) * shooter.lead,

@@ -24,6 +24,19 @@ function bodyOf(fnDecl: string, nextDecl: string): string {
   return UI_SRC.slice(start, end);
 }
 
+/** ★清偿A-F3（2026-10-14）：showTooltipFor 光标支域切片（`} else if (slotEl) {`
+ *  起、`tooltipFollowsCursor = true;` 止）。面①②原用 body.indexOf【首现】锚——
+ *  showTooltipFor 现为双分支（触屏元素锚支在前/光标锚支在后），首现只锁到触屏
+ *  支，光标支的清约束/终写序零锁=盲区（红蓝 R1 findings F3）：触屏支断言全绿时
+ *  光标支仍可单独劣化（M-A/M-C 型变异只动光标支即漏网）。锚漂移=以缺锚信息爆红。 */
+function cursorBranchOf(body: string): { src: string; base: number } {
+  const base = body.indexOf('} else if (slotEl) {');
+  const end = body.indexOf('this.tooltipFollowsCursor = true;', base);
+  expect(base, 'showTooltipFor 缺光标支开锚 } else if (slotEl) {').toBeGreaterThan(-1);
+  expect(end, 'showTooltipFor 缺光标支尾锚 tooltipFollowsCursor = true').toBeGreaterThan(base);
+  return { src: body.slice(base, end), base };
+}
+
 /** 三条 tooltip 路径（SW-TT1 同族①②③）= [声明锚, 体尾锚] */
 const TOOLTIP_FNS: Array<[string, string, string]> = [
   ['showTooltipFor', 'private showTooltipFor(', 'private shopTooltipContext('],
@@ -51,6 +64,19 @@ describe('BJ176 面① 时序哨（烘底在定位写 left/top 之后;三路径�
       expect(bg).toBeGreaterThan(topWrite);
     });
   }
+  // ★清偿A-F3：光标支第二组锚——showTooltipFor 首现终写在触屏支,光标支终写序
+  //  此前无锁（光标支专属变异=触屏支断言全绿漏网）
+  it('showTooltipFor 光标支(slotEl): 终写 left/top < 烘底（F3 第二组锚）', () => {
+    const body = bodyOf('private showTooltipFor(', 'private shopTooltipContext(');
+    const cb = cursorBranchOf(body);
+    const leftWrite = cb.src.indexOf('this.tooltip.style.left = `${left}px`;');
+    const topWrite = cb.src.indexOf('this.tooltip.style.top = `${top}px`;');
+    const bg = body.indexOf('this.applyTooltipBg()');
+    expect(leftWrite, '光标支缺终布局 left 写行').toBeGreaterThan(-1);
+    expect(topWrite, '光标支缺终布局 top 写行').toBeGreaterThan(-1);
+    expect(bg, '光标支: 烘底必须晚于定位写（光标支专属 M-A 变异锁）').toBeGreaterThan(cb.base + leftWrite);
+    expect(bg).toBeGreaterThan(cb.base + topWrite);
+  });
 });
 
 // ========================================================================
@@ -74,6 +100,20 @@ describe('BJ176 面② 清约束哨（量测前清 left/top=0px;三路径）', (
       expect(clearL).toBeLessThan(body.indexOf('this.tooltip.style.left = `${left}px`;'));
     });
   }
+  // ★清偿A-F3：光标支第二组锚——光标支的清约束行/量测序此前零锁（光标支专属
+  //  M-C 变异=首现锚全绿漏网）
+  it('showTooltipFor 光标支(slotEl): 清 left/top=0px 先于 offsetWidth 量测（F3 第二组锚）', () => {
+    const body = bodyOf('private showTooltipFor(', 'private shopTooltipContext(');
+    const cb = cursorBranchOf(body);
+    const clearL = cb.src.indexOf("this.tooltip.style.left = '0px';");
+    const clearT = cb.src.indexOf("this.tooltip.style.top = '0px';");
+    const measure = cb.src.indexOf('this.tooltip.offsetWidth');
+    expect(clearL, '光标支缺清旧 left 约束行').toBeGreaterThan(-1);
+    expect(clearT, '光标支缺清旧 top 约束行').toBeGreaterThan(-1);
+    expect(measure, '光标支缺 offsetWidth 量测行').toBeGreaterThan(-1);
+    expect(clearL, '光标支: 清约束必须先于量测（光标支专属 M-C 变异锁）').toBeLessThan(measure);
+    expect(clearT).toBeLessThan(measure);
+  });
 });
 
 // ========================================================================

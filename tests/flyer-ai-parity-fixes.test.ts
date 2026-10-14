@@ -178,7 +178,7 @@ describe('AI_014 蝙蝠（batAI）', () => {
     expect(bat2.ai1).toBe(0);
   });
 
-  it('#7 红魔 156 出生点含速度前置（中心+velocity×5+弹向×100）', () => {
+  it('#7 红魔 156 出生点含速度前置（中心+velocity×5+单位弹向×20;★清偿B-F1 重锚 NPC.cs:23584-23595——num261=num258/num261(:23589) 归一×0.2 后 :23595 ×100 作用在已乘 0.2 的速度向量→净偏移=单位弹向×20,旧「×100」系 num259 误读为单位向量）', () => {
     const g = makeGame(false);
     const demon = mkEnemy(156, 40, 20);
     demon.vx = 4; demon.vy = 0;
@@ -189,8 +189,8 @@ describe('AI_014 蝙蝠（batAI）', () => {
     const proj = g.__projectiles[0];
     // 弹向含 ±50 随机散布 → 用弹体自身速度方向回推期望出生点
     const spd = Math.hypot(proj.vx, proj.vy);
-    expect(proj.x).toBeCloseTo(demon.cx + demon.vx * 5 + proj.vx / spd * 100, 3);
-    expect(proj.y).toBeCloseTo(demon.cy + demon.vy * 5 + proj.vy / spd * 100, 3);
+    expect(proj.x).toBeCloseTo(demon.cx + demon.vx * 5 + proj.vx / spd * 20, 3);
+    expect(proj.y).toBeCloseTo(demon.cy + demon.vy * 5 + proj.vy / spd * 20, 3);
   });
 });
 

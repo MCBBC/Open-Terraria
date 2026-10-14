@@ -313,6 +313,10 @@ describe('⑤ BJ670 阿比盖尔双弹：右击 buff → 凭证 970 + 本体 963
     const body = makeMinion(pl, 963);              // 仅本体在场（凭证 970 已被任意途径灭）
     maintain(pl, [body]);                          // 拍 1：970 缺 → inService=false → DelBuff
     expect(pl.buffs.has(t), '凭证弹缺 → buff 摘（Player.cs:10946 置位门 + :10953 DelBuff）').toBe(false);
+    // ★R6-F3 清偿（2026-10-14）：拍 1 存活契约——本拍只摘 buff 不杀 963（摘除走的是
+    //  维护支 else 臂 DelBuff,杀支只在「buff 已不在」的槽位门臂）=两拍时序契约锁;
+    //  同拍内联实现（摘 buff 即连杀 killSet）在此红。
+    expect(body.dead, '拍 1 只摘 buff 不杀 963（963 灭须等拍 2 槽位门;同拍内联杀在此红）').toBe(false);
     maintain(pl, [body]);                          // 拍 2：槽位门 → 963 杀
     expect(body.dead, '次拍 963 灭（杀支不设 inService 门——旧门下本体永留）').toBe(true);
   });

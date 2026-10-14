@@ -12,6 +12,7 @@ import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
 import { registerModWavData, modProjRegs } from './hooks';
 import { modBuffRegs, registerModBuffIcon } from './buffs';
+import { modAchIconJobs, registerModAchIcon } from './modAchievements';   // ★成就域
 import { modItemGlowMaskId } from './drawspecs';   // ★刀2-C1:物品 glowmask 伪 id
 import { modTownNpcHeadIndex } from '../data/vanillaNpcs';
 import { registerModPortraitUrl } from '../data/npcPortraits';
@@ -386,6 +387,13 @@ export async function applyModAssets(atlas: import('../assets/SpriteAtlas').Spri
         const bytes = packTexBytes(pack, reg.texture);
         if (!bytes) { console.warn(`[mods] ${modId} buff 图标缺失: ${reg.texture}`); continue; }
         registerModBuffIcon(reg.modId, reg.key, bytes, (png) => URL.createObjectURL(new Blob([png], { type: 'image/png' })));
+      }
+      // ★成就域(2026-10-14):mod 成就图标(blob URL 通道=全环境一致,与 buff 图标同构)
+      for (const job of modAchIconJobs()) {
+        if (job.modId !== modId) continue;
+        const bytes = packTexBytes(pack, job.texPath);
+        if (!bytes) { console.warn(`[mods] ${modId} 成就图标缺失: ${job.texPath}`); continue; }
+        registerModAchIcon(job.fullKey, URL.createObjectURL(new Blob([bytes.slice()], { type: 'image/png' })));
       }
       continue;   // SW 支完成,跳过内存解码支
     }

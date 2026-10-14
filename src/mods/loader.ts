@@ -15,6 +15,8 @@ import { setModBridgeProvider, setSaveModsProvider, setEnabledModsProvider, setC
 import { createModContext, type ModEntry } from './api';
 import { loadModConfigValues, registerLiveModConfig } from './config';
 import { modBuffTypeOf } from './buffs';
+import { registerModTileEntity } from './tileEntities';   // ★TE 梯队(注:sw.tileEntity 直用;loader 侧无调用)
+import { buildModAchievementDefs } from './modAchievements';   // ★成就域
 
 /** L2 入口装载:浏览器=blob URL 动态 import(求值后即 revoke)。
  *  vite 生产构建对变量 URL 的动态 import 零转换(@vite-ignore)。
@@ -228,6 +230,8 @@ export async function loadModsPhase1(
       //  worker 只注册末位 mod 的 gen pass,前位全丢;旧单源保留兼容)
       setGenSrcsProvider(() => genSrcs);
       setGenSrcProvider(() => genSrcs[genSrcs.length - 1]?.src ?? null);
+      // ★成就域(2026-10-14):mod 成就定义翻译并入(分配表在册=全 mod 收集后)
+      buildModAchievementDefs(plan.allocation);
 
       // ★P5:主线程读档重映射同源(loadSaveData 主线程回退路径)
 

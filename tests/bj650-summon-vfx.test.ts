@@ -34,6 +34,13 @@
 //   M3 件2 ×0.5 摘除红 / M4 件3 冲刺门摘除红 / M5 件4 弹体生成摘除红 /
 //   M6 件4 帧机 3t→999t 红 / M7 件1 返工 whoAmI 槽位源回潮 id 红。各 ≥1 发,恰红断言。
 //
+// ★清偿 C（随从域 R5+R2 五债,2026-10-14）判别锁并入：
+//   C1/R5-F1 六档×3通道 XNA 截断数值锁（②首测,xnaColorMulByte 单源）/ C2/R5-F2
+//   setProjSpriteOverride(864) 缓存失效重烘锁（②末测）/ C6/R2-F2 216 重生弹词缀
+//   实例伤害面锁（⑦）/ C7/R2-F3 963 伤害源=最高计数器聚合锁（⑧,先定谳=多计数器
+//   共存可达——AI_164 AbigailUpgrade 音效同款可达面+自由槽位不驱逐）。
+//   C3/C5 落叶域锁在 tests/nature-particles.test.ts。
+//
 // 运行：cd game && npx vitest run tests/bj650-summon-vfx.test.ts
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -46,8 +53,10 @@ import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import { ExplosiveTrapBlastProj } from '../src/entities/ExplosiveTrapBlast';
 import { setProjSpriteOverride } from '../src/entities/Arrow';
-import { GHOST_TINT } from '../src/entities/projGhostTrail';
+import { GHOST_TINT, xnaColorMulByte } from '../src/entities/projGhostTrail';
 import { hslToRgb255 as hslToRgb255SelfTest } from '../src/render/AuroraSky';
+import { maintainMinionBuffs } from '../src/core/Game';
+import { BuffType } from '../src/stats/Buffs';
 import { withMutation, lockTargetFile, unlockTargetFile } from './mutation-guard';
 import type { GameHooks } from '../src/entities/types';
 
@@ -207,19 +216,25 @@ describe('① 源码锚（四件双侧亲读锚）', () => {
 // ===================== ② 件1：864 辉光叠层（M1/M2 红位） =====================
 
 describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
-  it('GHOST_TINT[864] hue 随 whoAmI 六档循环（0.66+0.33×(whoAmI%6)/6）', () => {
+  it('★清偿 C1/R5-F1：GHOST_TINT[864] 六档×3通道 XNA 截断数值锁（R5 node 实算基准表）', () => {
     const tint = GHOST_TINT[864]!;
-    const exp = (w: number): [number, number, number] => {
-      const [r, g, b] = hslToRgb255SelfTest(0.66 + 0.33 * ((w % 6) / 6), 0.7, 0.6);
-      return [r * 0.7, g * 0.7, b * 0.7];
-    };
-    const c0 = tint({ id: 864, i: 1, start: 12, end: 0, fade: 0.5, ai0: 0, ai1: 0,
-      timeLeft: 3600, opacity: 1, bodyScale: 1, vxLen: 1, rng: () => 0, whoAmI: 0 })!;
-    const c1 = tint({ id: 864, i: 1, start: 12, end: 0, fade: 0.5, ai0: 0, ai1: 0,
-      timeLeft: 3600, opacity: 1, bodyScale: 1, vxLen: 1, rng: () => 0, whoAmI: 1 })!;
-    const c6 = tint({ id: 864, i: 1, start: 12, end: 0, fade: 0.5, ai0: 0, ai1: 0,
-      timeLeft: 3600, opacity: 1, bodyScale: 1, vxLen: 1, rng: () => 0, whoAmI: 6 })!;
-    expect(c0.rgb[0]).toBeCloseTo(exp(0)[0], 4);      // whoAmI=0 → hue 0.66（蓝紫端）
+    // 基准 = hslToRgb255(0.66+0.33k/6, 0.7, 0.6) 后 ×0.7 逐字节 (byte) 截断——
+    // hue0=(57,60,156)（旧 JS Math.round=(57,61,157)）;hue1 b−1;hue2/3 r−1,b−1;
+    // hue4/5 r−1,b−1（R5 实算,hue 表见 projGhostTrail.xnaColorMulByte 注）
+    const XNA = [
+      [57, 60, 156], [86, 57, 156], [118, 57, 156], [151, 57, 156], [156, 57, 128], [156, 57, 95],
+    ];
+    const ctxFor = (w: number) => ({ id: 864, i: 1, start: 12, end: 0, fade: 0.5, ai0: 0, ai1: 0,
+      timeLeft: 3600, opacity: 1, bodyScale: 1, vxLen: 1, rng: () => 0, whoAmI: w });
+    for (let w = 0; w < 6; w++) {
+      const c = tint(ctxFor(w))!;
+      expect(c.rgb).toEqual(XNA[w]);                  // 数值锁主面（round 档全 +1 → 红）
+      const [r, g, b] = hslToRgb255SelfTest(0.66 + 0.33 * (w / 6), 0.7, 0.6);
+      expect(c.rgb).toEqual(xnaColorMulByte([r, g, b], 0.7));   // 与派生式同源（hsl 漂移守卫）
+    }
+    const c0 = tint(ctxFor(0))!;
+    const c1 = tint(ctxFor(1))!;
+    const c6 = tint(ctxFor(6))!;
     expect(c1.rgb).not.toEqual(c0.rgb);               // 弹序异色（旧 0 档近似恒同 → 红）
     expect(c6.rgb).toEqual(c0.rgb);                   // %6 回卷
     expect(c0.aMul).toBeCloseTo(44 / 255, 6);         // A 面 (byte)178/4=44（旧 0.25 → 红）
@@ -309,6 +324,46 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
     }
     last!.fixedUpdate(1 / 60, hooks);
     expect(fld(last, 'whoAmI')).toBe(6);
+  });
+
+  it('★清偿 C2/R5-F2：setProjSpriteOverride(864) → GLOW864_CACHE 失效重烘（换图后辉光吃新剪影）', () => {
+    const { hooks, player } = makeHooks([]);
+    const m = minion(player, hooks, 864, 50 * 16, 90 * 16);
+    (m as unknown as { whoAmI: number }).whoAmI = 0;
+    const mkSheet = (w: number, h: number): HTMLCanvasElement => {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      return cv as unknown as HTMLCanvasElement;
+    };
+    const ops: Array<{ m: string; a: unknown[] }> = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get(_t, k) {
+        if (k === 'canvas') return undefined;
+        if (k === 'getTransform') return () => ({ __m: 1 });
+        return (...a: unknown[]) => { ops.push({ m: String(k), a }); };
+      },
+      set(_t, k, v) { ops.push({ m: `set:${String(k)}`, a: [v] }); return true; },
+    });
+    const fakeR = (aw: number, ah: number) => ({
+      ctx,
+      atlas: { ensureVImage: () => ({ width: aw, height: ah }) },
+      lighting: { lightAt: () => [255, 255, 255] },
+      pushGlowOps: () => {},
+    });
+    const glowTexWidths = (os: Array<{ m: string; a: unknown[] }>): number[] =>
+      os.filter((o) => o.m === 'drawImage')
+        .map((o) => (o.a[0] as { width: number }).width)
+        .slice(1);                                   // 跳过本体 1 笔 → 辉光 8 笔（4 份×cut/add）
+    // 首烘：18×64 剪影（帧高 32）——染色对宽 18
+    setProjSpriteOverride(864, mkSheet(18, 64) as never);
+    (m as unknown as { draw(r: unknown): void }).draw(fakeR(18, 64));
+    expect(glowTexWidths(ops)).toEqual(Array(8).fill(18));
+    // 换图（RemasterRuntime 就地生效无 reload 场景）：override 派发失效通知 →
+    // 下次烘焙吃新剪影 26×96（帧高 48）——缓存不清则恒 18 → 红
+    setProjSpriteOverride(864, mkSheet(26, 96) as never);
+    ops.length = 0;
+    (m as unknown as { draw(r: unknown): void }).draw(fakeR(26, 96));
+    expect(glowTexWidths(ops)).toEqual(Array(8).fill(26));
   });
 });
 
@@ -501,6 +556,72 @@ describe('⑤ 件4：爆炸机关弹视觉面', () => {
   });
 });
 
+// ===================== ⑦ 清偿 C6/R2-F2：216 重生弹词缀实例伤害面 =====================
+
+describe('⑦ 清偿 C6/R2-F2：216 雀宝宝重生弹取背包实例词缀面（Player.cs:10796-10801）', () => {
+  const birdOf = (prefix?: number): MinionProj => {
+    const { player } = makeHooks([]);
+    player.inv.slots.fill(null);
+    player.inv.slots[0] = prefix ? { id: 4281, stack: 1, prefix } : { id: 4281, stack: 1 };
+    player.buffs.set(BuffType.BabyBird, 300);        // maxMinions 缺省基座 1（getter 只读）
+    const out: MinionProj[] = [];
+    maintainMinionBuffs(player, [], (m) => out.push(m));
+    expect(out.length).toBe(1);
+    return out[0];
+  };
+
+  it('无词缀实例 → 基础 7/4（FindItem 实例 damage/knockBack=基础值同面）', () => {
+    const b = birdOf();
+    expect(b.damage).toBe(7);
+    expect(b.knockback).toBe(4);
+  });
+
+  it('★判别主面：无情 57（dmg1.18/kb0.9）→ damage 8 非 7（旧 itemCombat 基础值 → 红）', () => {
+    const b = birdOf(57);
+    expect(b.damage).toBe(8);                        // roundCSf32Mul(7,1.18)=8
+    expect(b.knockback).toBeCloseTo(3.6, 6);         // 4×0.9
+  });
+});
+
+// ===================== ⑧ 清偿 C7/R2-F3：963 伤害源=最高计数器聚合 =====================
+
+describe('⑧ 清偿 C7/R2-F3：963 伤害源=highestAbigailCounterOriginalDamage（P.cs:12296-12300/:66083）', () => {
+  const counter = (player: Player, hooks: GameHooks, dmg: number): MinionProj => {
+    const m = new MinionProj(player.cx + 100, player.cy, 970, dmg, 0, false, 0, false, () => player);
+    m.id = ++minionSeq;
+    (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(m);
+    return m;
+  };
+
+  it('双计数器共存（自由槽位重复使用 5114 可达面）：963 出生伤害=max(6,20)=20（旧生成者快照 6 → 红）', () => {
+    const { hooks, player, added } = makeHooks([]);
+    const a = counter(player, hooks, 6);
+    counter(player, hooks, 20);
+    a.fixedUpdate(1 / 60, hooks);                    // 低伤计数器先拍 → 派生本体
+    const found = added.find((m) => m instanceof MinionProj && (m as MinionProj).projId === 963);
+    const body = found as MinionProj | undefined;
+    expect(body).toBeTruthy();
+    expect(body!.damage).toBe(20);
+  });
+
+  it('后入高伤计数器 → 存活 963 每拍伤害面随 max 刷新（:66083 每拍回填;旧快照 6 → 红）', () => {
+    const e = mkEnemy(60, 0, 0);
+    const { hooks, player, added } = makeHooks([e]);
+    const a = counter(player, hooks, 6);
+    a.fixedUpdate(1 / 60, hooks);
+    const found = added.find((m) => m instanceof MinionProj && (m as MinionProj).projId === 963);
+    const body = found as MinionProj | undefined;
+    expect(body).toBeTruthy();
+    expect(body!.damage).toBe(6);                    // 首拍=唯一计数器值
+    counter(player, hooks, 20);                      // 高伤计数器后入
+    e.cx = body!.cx; e.x = e.cx - e.w / 2; e.cy = body!.cy; e.y = e.cy - e.h / 2;
+    body!.fixedUpdate(1 / 60, hooks);
+    expect(e.hits.length).toBeGreaterThan(0);
+    // scale=1+0.55×(2−1)=1.55（hardMode 门=0.55 档）——max 面 20×1.55≈31;旧快照 6×1.55≈9.3 → 红
+    expect(e.hits[0]).toBeCloseTo(20 * 1.55, 4);
+  });
+});
+
 // ===================== ⑥ 变异自证（withMutation 三层守卫+sha256 对拍） =====================
 
 describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐字节还原 sha256）', () => {
@@ -552,7 +673,7 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
     mutate(PG,
       'const hue = 0.66 + 0.33 * (((c.whoAmI ?? 0) % 6) / 6);',
       'const hue = 0.66; // ★BJ650 M2 变异:whoAmI 0 档近似回潮',
-      'hue 随 whoAmI 六档循环');
+      'XNA 截断数值锁');   // ★清偿 C1 重锚：判别面=六档×3通道基准表锁（旧「hue 随 whoAmI 六档循环」已改名）
   });
 
   it('M3 件2 ×0.5 摘除 → 减半断言红', () => {

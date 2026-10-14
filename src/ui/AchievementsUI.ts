@@ -12,6 +12,7 @@ import type { Game } from '../core/Game';
 import { options } from '../core/Options';
 import { Lang } from '../i18n/Lang';
 import { ACH_CATEGORY } from '../data/vanillaAchievements';
+import { modAchDefOf } from '../core/Achievements';   // ★成就域:tooltip 字面回退
 import { tintedSliceDataUrl } from './vanillaKit';
 import { mouseTextInnerColor } from '../render/Renderer';
 
@@ -214,6 +215,13 @@ export function openAchievementsPanel(host: AchievementsHost, focusName?: string
       const icon = el('div', 'sw-ach-icon');
       const glyph = el('div', 'glyph');
       glyphStyle(glyph, a, def.name);
+      // ★成就域:mod 图标(blob URL;覆盖 sprite 域定位)
+      const modIcon = def.modIconUrl;
+      if (modIcon) {
+        glyph.style.backgroundImage = `url(${modIcon})`;
+        glyph.style.backgroundSize = 'contain';
+        glyph.style.backgroundPosition = 'center';
+      }
       icon.appendChild(glyph);
       const border = el('img') as HTMLImageElement;
       border.className = 'border';
@@ -222,8 +230,9 @@ export function openAchievementsPanel(host: AchievementsHost, focusName?: string
       icon.appendChild(border);
       row.appendChild(icon);
       const info = el('div', 'sw-ach-info');
-      info.appendChild(el('div', 'nm', Lang.text(`Achievements.${def.name}_Name`)));
-      info.appendChild(el('div', 'ds', Lang.text(`Achievements.${def.name}_Description`)));
+      // ★成就域(2026-10-14):mod 成就字面回退(def.title/desc 直挂;原版域 l10n 不变)
+      info.appendChild(el('div', 'nm', def.title ?? Lang.text(`Achievements.${def.name}_Name`)));
+      info.appendChild(el('div', 'ds', def.desc ?? Lang.text(`Achievements.${def.name}_Description`)));
       const p = a.progressOf(def.name);
       if (!done && (p.ratio != null || p.totalConds > 1)) {
         const bar = el('div', 'sw-ach-bar');
@@ -502,8 +511,10 @@ function showAchTip(achName: string, mx: number, my: number, heldGet: () => bool
   achTipMX = mx;
   achTipMY = my;
   achTipHeldGet = heldGet;
-  achTipNameEl!.textContent = Lang.text(`Achievements.${achName}_Name`);
-  achTipDescEl!.textContent = Lang.text(`Achievements.${achName}_Description`);
+  // ★成就域:mod 字面回退(modAchDefOf=mod defs 表;原版域恒 miss 走 l10n)
+  const tipDef = modAchDefOf(achName);
+  achTipNameEl!.textContent = tipDef?.title ?? Lang.text(`Achievements.${achName}_Name`);
+  achTipDescEl!.textContent = tipDef?.desc ?? Lang.text(`Achievements.${achName}_Description`);
   // 名称行色=GetItemNameColor(ItemRarityColor.StrongRed10=10) → rgb(255,40,100)
   // （Main.cs:20486-20489;mt=255 → num3=1 原生无乘区语义,脉冲走层 filter——UI
   //  .sw-tooltip rareEl 同约定）

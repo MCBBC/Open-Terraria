@@ -5,6 +5,7 @@
 // RareCreatures/CreatureCount/KillCount/DPS/Speed/Position/Depth;
 // 图标序(≠行序):0表/1天气/2渔/3罗盘/4深度/5雷达/6击杀/7月相(血月日食用8)/
 // 9秒表/10宝藏/11稀有/12DPS;hideInfo 按图标序且 num==8 归并 7(:46546-46548)。
+import { appendModInfoRows } from '../mods/infoDisplay';   // ★InfoDisplay 域
 import { Lang } from '../i18n/Lang';
 
 /** Player.cs:2442-2476 的 12 门禁(数值型为 0=无;bool 型) */
@@ -403,5 +404,10 @@ export function buildInfoAccRows(ctx: InfoAccCtx, hidden: boolean[], inventoryOp
   if (g.accDepthMeter > 0) {
     push(4, formatDepthText(ctx.bottomY, ctx.bottomY - 21, ctx.worldSurface, ctx.rockLevel, ctx.maxTilesX, ctx.maxTilesY), 99);
   }
+  // ★InfoDisplay 域(2026-10-14):mod 信息栏行追加(icon=-1/hideIndex=-1 哨兵;
+  //  原版 12 行域零扰动)
+  appendModInfoRows(rows, (r) => {
+    rows.push({ row: rows.length, ...r } as InfoAccRow);
+  });
   return rows;
 }

@@ -31,7 +31,7 @@ import { tintedTex } from '../render/StringLine';   // ★BJ-C9 F4：tint 档 ad
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
 // （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
-import { ProjGhostRing, drawProjGhosts, drawGreenBandTrail, projTrailingMode } from './projGhostTrail';
+import { ProjGhostRing, drawProjGhosts, drawGreenBandTrail, projTrailingMode, notifyProjSpriteOverride } from './projGhostTrail';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -248,11 +248,16 @@ export function projGridRect(
 /** 单帧裁切缓存（id+帧号 → canvas），多帧行按帧高切片 */
 const frameCache = new Map<string, HTMLCanvasElement>();
 /** 热补丁替换弹幕贴图(2026-08-19 素材重制):写 spriteCache + 清该 id 的
- *  frameCache 条目(键 `id|idx` 不含 texId,不自动失效)。RemasterRuntime 调用。 */
+ *  frameCache 条目(键 `id|idx` 不含 texId,不自动失效)。RemasterRuntime 调用。
+ *  ★清偿 C2/R5-F2（2026-10-14）：增派模块级失效通知（projGhostTrail 注册表,
+ *  Arrow↔MinionProj 已互 import 成环,通知面挂共同依赖零新边）——素材包覆盖
+ *  Projectile_864 后 MinionProj GLOW864_CACHE 旧剪影永驻,RemasterRuntime 就地
+ *  生效无 reload 场景辉光吃旧模。 */
 export function setProjSpriteOverride(projId: number, img: ImageBitmap | HTMLImageElement): void {
   spriteCache.set(projId, img);
   const prefix = `${projId}|`;
   for (const k of frameCache.keys()) if (k.startsWith(prefix)) frameCache.delete(k);
+  notifyProjSpriteOverride(projId);
 }
 /** 帧源矩形（projFrameImg 切片式照录,清偿刀 N 2026-09-30）——弹幕染料 pass 的
  *  t0Rect/uSourceRect 语义用（渐变族 T0 坐标须与原片源矩形同源）;非网格型=竖条

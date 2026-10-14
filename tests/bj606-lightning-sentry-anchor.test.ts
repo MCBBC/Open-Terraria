@@ -279,7 +279,12 @@ describe('BJ606-R ⑤：放电视觉尘锁（尘 226 场缘电弧+塔柱火花,P
     expect(col.every((d) => d.noGravity === true && d.noLight === true), 'noGravity/noLight（:70047-56）').toBe(true);
     expect(col.every((d) => (d.y as number) >= (m as unknown as { y: number }).y + 40 - 0.01
       && (d.y as number) <= (m as unknown as { y: number }).y + 40 + 120 + 16), '柱火盒 Y=盒顶+40 起（:70049）').toBe(true);
-    expect(col.every((d) => Math.abs((d.x as number) - 0) >= 0 || true), '占位').toBe(true);
+    // ★R6-F4 清偿（2026-10-14）：旧占位断言恒真（守卫失明面）→ 按生成式定界。
+    //  柱火盒 X：MinionProj 放电柱火段 spawnDust(this.cx − 8, this.y + 40, 16, ⌊side/2−40⌦, 226, …)
+    //  ——钩面收盒原参（随机落点在尘池内,不在此层）→ d.x = 盒顶心X−8 确定值、宽 16
+    //  =柱火盒 (盒顶心X−8, 盒顶+40, 16, H/2−40) 的 X 半边（vanilla :70047-70056）。
+    expect(col.every((d) => (d.x as number) === m.cx - 8 && (d.w as number) === 16),
+      '柱火盒 X=盒顶心±8（x=cx−8 盒左+宽 16;变异 x 偏移/盒宽漂移在此红）').toBe(true);
     // 电弧面：随机序列 [0(掷过), 0.65(角=234°,ux=-0.588|≥0.12,uy=-0.809→目标上行域=空气)] → 4 电弧钉点
     let k = 0;
     vi.mocked(Math.random).mockImplementation(() => (k++ % 2 === 0 ? 0 : 0.65));

@@ -166,3 +166,130 @@ describe('BJ386 落叶初速（Gore.cs :1413 SpecialAI==3 覆写 ×1）', () => 
     expect(np.leaves.length).toBe(0);
   });
 });
+
+// ============ ★清偿 C3/R5-F4 + C5/R5-F7a（2026-10-14 落叶域五债判别锁） ============
+
+/** 落叶域自由塑形 store（solid/liquid/liquidType 三面外露,探针几何用例需逐格布设） */
+function leafStore(w: number, h: number, solid: Uint8Array, liquid?: Uint8Array, liquidType?: Uint8Array) {
+  return {
+    w, h, solid,
+    flags: new Uint8Array(w * h).fill(1),
+    liquid: liquid ?? new Uint8Array(w * h),
+    liquidType: liquidType ?? new Uint8Array(w * h),
+    inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
+    idx: (x: number, y: number) => y * w + x,
+    isSolid: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && !!solid[y * w + x],
+  } as unknown as TileStore;
+}
+
+/** 落地/下落态手工叶（spawnLeaf 的 vy 由相位掷定,落地态用例需钉 vy=-1） */
+function handLeaf(x: number, y: number, vy: number) {
+  return {
+    x, y, vx: 0, vy, row: 0, rowGroup: 0, rowCounter: 0, col: 0,
+    alpha: 0, timeLeft: 900, scale: 1, gore: 910, dead: false,
+  };
+}
+
+// ★清偿 C3（R5-F4）：脚下门探针 (x+4,y+4)→(x+5.5,y+1.5)——原版数值式
+// vector=position+(12/2−4/2, 6−4)=(x+4,0) 后 point=(vector+(num,num)/2)
+// .ToTileCoordinates()（num=(int)(4×0.9)=3;Gore.cs:1106-1114）。旧 Y 偏 2.5px：
+// 叶落点 y mod16≥12 时 ty 落入下一行 → ty+1 越过脚下表面格=悬空叶不唤醒。
+describe('清偿 C3：落地支脚下门探针 (x+5.5, y+1.5)（Gore.cs:1106-1114）', () => {
+  it('① 落地叶 N 拍 y 恒定且不误唤醒（旧探针 y mod16=12 时逐拍误醒:alpha+20 早夭）', () => {
+    const np = new NatureParticles();
+    np.bindStore(fakeStore());                       // 地面行 10（y 160..176）
+    np.leaves.push(handLeaf(3 * 16 + 2, 10 * 16 - 4, -1));   // y=156,y mod16=12 格底带
+    for (let i = 0; i < 40; i++) np.updateLeaves(0, 11 * 16);
+    expect(np.leaves.length).toBe(1);                // 旧探针 13 拍内 alpha 255 早夭 → 红
+    expect(np.leaves[0].y).toBe(10 * 16 - 4);        // 落地支零 Y 写（BJ669f）
+    expect(np.leaves[0].vy).toBe(-1);                // 恒落地支（旧逐拍误醒 vy=0.1 → 红）
+    expect(np.leaves[0].alpha).toBe(0);              // 未褪色
+  });
+
+  it('② 挖掉脚下表面格 → vy=0.1 唤醒（含格底带 y mod16≥12 悬空叶场景）', () => {
+    const w = 8, h = 24;
+    const solid = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) { solid[10 * w + x] = 1; solid[11 * w + x] = 1; }
+    const np = new NatureParticles();
+    np.bindStore(leafStore(w, h, solid));
+    np.leaves.push(handLeaf(3 * 16 + 11, 10 * 16 - 4, -1));  // x=59（+4→col3,+5.5→col4）
+    for (let i = 0; i < 20; i++) np.updateLeaves(0, 11 * 16);
+    expect(np.leaves[0].vy).toBe(-1);                // 支承在位不唤醒
+    solid[10 * w + 3] = 0; solid[10 * w + 4] = 0;    // 挖掉脚下表面格
+    np.updateLeaves(0, 11 * 16);
+    expect(np.leaves[0].vy).toBe(0.1);               // 唤醒回下落支（:1136-1140）
+    expect(np.leaves[0].timeLeft).toBe(0);           // timeLeft=0 同拍置
+    expect(np.leaves[0].alpha).toBe(21);             // alpha+=20（:1140）+同拍衰减支+1
+                                                     //（timeLeft=0 → :1146-1150 else 臂）
+  });
+
+  it('③ X 探针 4→5.5 逐值：叶悬于支承列外一格 → 新探针唤醒（旧探针滞留支承列=漏检）', () => {
+    const w = 8, h = 24;
+    const solid = new Uint8Array(w * h);
+    solid[10 * w + 3] = 1; solid[11 * w + 3] = 1;    // 支承仅 col3（叶 x=59 本体在 col3 缘）
+    const np = new NatureParticles();
+    np.bindStore(leafStore(w, h, solid));
+    // 叶悬于 col4 空洞上方（x=59 → 新探针 col4/下查(4,10)=空气→醒；旧探针
+    // (x+4,y+4)=(63,160)→ty=10、下查(3,11)=实心→误判有支承永不醒）
+    np.leaves.push(handLeaf(59, 10 * 16 - 4, -1));
+    np.updateLeaves(0, 11 * 16);
+    expect(np.leaves[0].vy).toBe(0.1);               // 旧 (x+4) 滞留 col3 → 红
+  });
+});
+
+// ★清偿 C5（R5-F7a）：下落支 timeLeft/alpha 衰减链（:1221-1228,叶族
+// DisappearSpeed/DisappearSpeedAlpha 缺省恒 1=GoreID.cs:11-13）+ 岩浆焚毁亡+尘
+// （:1136-1143 active=false + 5×Dust.NewDust(position,3,3,31,0,-0.2)）。
+describe('清偿 C5：下落支衰减链 + 岩浆焚毁尘（Gore.cs :1221-1228 / :1136-1143）', () => {
+  it('下落叶 timeLeft 每拍 −1；耗尽后 alpha 每拍 +1；alpha≥255 亡（公共尾 :1074-1077）', () => {
+    const np = new NatureParticles();
+    np.bindStore(fakeStore());
+    const l = handLeaf(32, 20, 0.5);                 // 高空自由落（远离地面/液体）
+    np.leaves.push(l);
+    np.updateLeaves(0, 0);
+    expect(l.timeLeft).toBe(899);                    // 旧缺衰减链恒 900 → 红
+    expect(l.alpha).toBe(0);
+    l.timeLeft = 0;
+    np.updateLeaves(0, 0);
+    expect(l.alpha).toBe(1);
+    l.alpha = 254;
+    np.updateLeaves(0, 0);
+    expect(l.dead).toBe(true);                       // 旧永寿不褪色 → 红
+  });
+
+  it('落地支岩浆焚毁：即亡 + onLavaDust(position)（旧按风滑移支漏亡 → 红）', () => {
+    const w = 8, h = 24;
+    const solid = new Uint8Array(w * h);
+    const liquid = new Uint8Array(w * h);
+    const liquidType = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) { liquid[9 * w + x] = 255; liquidType[9 * w + x] = 2; }
+    const np = new NatureParticles();
+    np.bindStore(leafStore(w, h, solid, liquid, liquidType));
+    const calls: number[][] = [];
+    np.onLavaDust = (x, y) => calls.push([x, y]);
+    np.leaves.push(handLeaf(50, 142, -1));           // 液面探针 (x+4,y+2)=(54,144)→row9 岩浆
+    np.updateLeaves(0, 11 * 16);
+    expect(np.leaves.length).toBe(0);                // 即亡过滤（旧滑移存活 → 红）
+    expect(calls.length).toBe(1);                    // 一次焚毁尘（Game 侧展开 5×dust31）
+    expect(calls[0][0]).toBe(50);                    // position=叶位（Gore.cs:1141）
+    expect(calls[0][1]).toBe(142);
+  });
+
+  it('下落支岩浆焚毁补尘（同参面）', () => {
+    const w = 8, h = 24;
+    const solid = new Uint8Array(w * h);
+    const liquid = new Uint8Array(w * h);
+    const liquidType = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) {
+      for (const row of [8, 9]) { liquid[row * w + x] = 255; liquidType[row * w + x] = 2; }
+    }
+    const np = new NatureParticles();
+    np.bindStore(leafStore(w, h, solid, liquid, liquidType));
+    const calls: number[][] = [];
+    np.onLavaDust = (x, y) => calls.push([x, y]);
+    np.leaves.push(handLeaf(32, 100, 0.5));          // 下落,液面探针 (x+6,y+6)
+    for (let i = 0; i < 80 && !np.leaves[0]?.dead; i++) np.updateLeaves(0, 0);
+    expect(np.leaves.length).toBe(0);                // 岩浆焚毁
+    expect(calls.length).toBe(1);                    // 旧缺尘 → 红
+  });
+});

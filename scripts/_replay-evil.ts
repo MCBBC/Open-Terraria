@@ -159,6 +159,12 @@ const MOD_ID_TO_NAME = new Map<number, number>();   // cs id → 本仓 internal
     if (our !== undefined) MOD_ID_TO_NAME.set(Number(get('value')), our);
   }
   console.log('[replay] mod 名映射', MOD_ID_TO_NAME.size);
+  // ★判卷别名:cs 运行时 id 859=AstralChestLocked(tML TileLoader 按命名空间块顺序
+  //   分配;终版 twld tileMap 只收「在档格」而箱被后续 pass 消费=两侧 twld 均缺 859)。
+  //   钉定证据=PASS33 边界 +4 mod 格全 cs 859 且 2×2+chest(C# AstralChestGeneration
+  //   唯一放置面),C# 注册序 Tiles.Astral.AstralChestLocked 前恰 106 块(反演 753+106)。
+  const astralChest = TILE_BY_KEY['mod_calamity_astral_chest_locked'];
+  if (astralChest !== undefined && !MOD_ID_TO_NAME.has(859)) MOD_ID_TO_NAME.set(859, astralChest);
 }
 const CS_TO_OURS = (cs: number): number => cs === 0 ? 0 : cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? 0) : (MOD_ID_TO_NAME.get(cs) ?? 0);
 const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
@@ -214,11 +220,23 @@ console.log('[replay] pass fn 就绪:', Object.keys(wantFns).join(', '));
 
 // gs(同 _replay-sea 模板;真链 1.4.4.9 实跑参数;dungeon=(3421,207) golden.wld 实证;
 //   evil 0=corruption(golden-calamity.wld isCrimson=false))
+// ★Astral Chest 界=GenVars.dMinX/dMaxX/dMaxY(地牢爬行器 reach,1.4.0.5 WorldGen.cs:
+//   18040-18059 语义;dungeonMaxY=入口 207≠此)——真值不可由 tile 快照直读,按真箱
+//   (3821,974)+真链 dG=35 反演:dMaxX=3852/dMaxY=1000 唯一窄窗(att=12,P 前缀 4 掷),
+//   dMinX 在 x₁₂ 窗 [3188,3304) 内不敏感,取爬行界砖合值 3270(SW_ASTDMINX 可覆写)。
 function mkGs() {
   return {
     seed: translateSeed('9293480'),
     worldSurface: 337, rockLevel: 535, worldSurfaceLow: 246,
-    dungeonX: 3421, dungeonMaxY: 207, dungeonMinX: 0, dungeonMaxX: 4200,
+    // dungeonMaxY=GenVars.dMaxY(地牢爬行界;Astral 消费此值非入口 Y 207;引擎管线
+    //   由 DungeonPass 回填同口径 ★114 刀)。(3477,3909,1013)=att=13×真箱(3821,974)
+    //   唯一窗簇取值(2×13+7+P₂=dG 35;前 12 attempt 全斥实证;1.4.0.5 WorldGen.cs:
+    //   18040-18059 reach 语义与砖 bbox 的偏差=待深债;SW_ASTDMINX/ASTDMAXX/ASTDMAXY
+    //   可覆写)
+    dungeonX: 3421,
+    dungeonMinX: Number(process.env.SW_ASTDMINX ?? 3477),
+    dungeonMaxX: Number(process.env.SW_ASTDMAXX ?? 3909),
+    dungeonMaxY: Number(process.env.SW_ASTDMAXY ?? 1013),
     crimson: false,
     seedFlags: {},
     mods: {
@@ -300,6 +318,8 @@ function realIslandBox(snap: { type: Uint16Array }) {
   const rng = new RNG(gs.seed as number);
   curRng = rng;
   let draws = 0;
+  const segs: Array<[string, number]> = [];
+  (globalThis as { __evilSegMark?: (n: string) => void }).__evilSegMark = (nm: string) => segs.push([nm, draws]);
   {
     const proto = rng as unknown as Record<string, (...a: unknown[]) => unknown>;
     for (const m of ['next', 'nextInt', 'nextIntRange', 'range', 'nextBool', 'nextDouble']) {
@@ -308,12 +328,29 @@ function realIslandBox(snap: { type: Uint16Array }) {
       proto[m] = function (this: unknown, ...a: unknown[]) { draws++; return fn.apply(this, a); };
     }
   }
+  (globalThis as { __evilBlotchN?: number }).__evilBlotchN = 0;
   (wantFns['Evil Island'] as (...a: unknown[]) => void)(store, rng, gs);
   curRng = null;
-  console.log(`[EvilIsland] 掷数=${draws}(真链 SPY dN=2032079 偏差=${draws - 2032079})`);
+  (globalThis as { __evilSegMark?: (n: string) => void }).__evilSegMark = undefined;
+  console.log(`[EvilIsland] 掷数=${draws}(真链 SPY dN=2032079 偏差=${draws - 2032079}) blotch调用=${(globalThis as { __evilBlotchN?: number }).__evilBlotchN}(真链 SEGDELTA=332461)`);
+  {
+    let prev = 0;
+    const parts: string[] = [];
+    for (const [nm, at] of segs) { parts.push(`${nm}+${at - prev}`); prev = at; }
+    parts.push(`tail+${draws - prev}`);
+    console.log('[EvilIsland] 段谱:', parts.join(' '));
+  }
   console.log(`[EvilIsland] chests=${(gs.mods.chests as unknown[]).length}`, JSON.stringify(gs.mods.chests));
-  const rbox = realIslandBox(post), mbox = realIslandBox({ type: Uint16Array.from(store.type, (t) => (store.flags[store.type.indexOf(t)] ?? t)) });
-  void mbox;
+  const rbox = realIslandBox(post);
+  {   // 我方岛盒(有效型)
+    let bx0 = 1 << 30, bx1 = -1, cnt = 0;
+    const cloudId = SHEET_TO_INTERNAL.get(189) ?? -1;
+    for (let x = 0; x < w; x++) for (let y = 0; y < 300; y++) {
+      const i = y * w + x;
+      if ((store.flags[i] & 1) && store.type[i] === cloudId) { cnt++; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; }
+    }
+    console.log(`[EvilIsland] 我岛 cloud 包围盒: x∈[${bx0},${bx1}] n=${cnt}`);
+  }
   console.log(`[EvilIsland] 真岛 cloud 包围盒: x∈[${rbox.x0},${rbox.x1}] y∈[${rbox.y0},${rbox.y1}] n=${rbox.cnt}`);
   profile(store, post, 'EvilIsland', { x0: Math.max(0, rbox.x0 - 40), x1: Math.min(w, rbox.x1 + 40), y0: 0, y1: 400 });
   aggregate(store, post, 'EvilIsland');

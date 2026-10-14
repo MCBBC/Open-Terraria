@@ -351,6 +351,15 @@ for (let i = 0; i < n; i++) {
   }
 }
 console.log(`[replay] 墙 diff=${wallDiff} TOP8: ${[...wallByType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, c]) => `${k}:${c}`).join(' ') || '-'}`);
+if (wallDiff > 0 && wallDiff <= 64) {
+  console.log('[replay] 墙残差全列(格 我墙 真墙 我tile 真tile pre墙):');
+  for (let i = 0; i < n; i++) {
+    if (store.wall[i] !== post.wall[i]) {
+      const x = i % w, y = Math.floor(i / w);
+      console.log(`  (${x},${y}) 我墙=${store.wall[i]} 真墙=${post.wall[i]} 我tile=${KEY_OF(store.type[i])} 真tile=${KEY_OF(CS_TO_OURS(post.type[i]))} pre墙=${pre.wall[i]}`);
+    }
+  }
+}
 
 // 变化域行/列分布(真实 bbox x[989,1263] y[832,1044] 外扩)
 {

@@ -41,6 +41,8 @@ import { registerModBuff, modBuffTypeOf, type ModBuffSpec } from './buffs';
 import { registerModMusic, registerModBossMusic, modMusicIdOfFull } from './music';   // ★BGM 面
 import { registerGenPass } from '../world/gen/WorldGen';
 import { registerModTileEntity, getModTileEntitiesOfTile } from './tileEntities';   // ★TE 梯队
+import { collectModAchievement, completeModAchievement } from './modAchievements';   // ★成就域
+import { registerModInfoDisplay } from './infoDisplay';   // ★InfoDisplay 域
 import { registerModRecipeGroupItems } from '../data/vanillaRecipes';
 import { registerModArmorSet } from '../data/vanillaArmorSets';   // ★四百八十二刀
 import { registerModBiomeFlag } from '../world/SceneMetrics';   // ★一百二十刀
@@ -273,6 +275,24 @@ export interface ModContext {
   /** ★TE 梯队(2026-10-14):mod tile entity(tML ModTileEntity 形;绑定本 mod tile。
    *  放置[锚格 frame 0,0]自愈建/破坏 onDestroy/逐 tick update/存读 save+load 钩;
    *  state=自由对象,缺省 save=state 直存[须 JSON-able]) */
+  /** ★成就域(2026-10-14):mod 成就注册(原版条件状态机直接复用)。conditions:
+   *  npcKilled/itemPickup/itemCraft/tileDestroyed=引擎通知自动驱动(keys=mod/
+   *  vanilla 键或裸 vid;many=逐 id 独立);custom=mod 自管逻辑直完。持久化=
+   *  原版 completed 表。 */
+  achievement(key: string, spec: {
+    title: string; desc?: string; category?: number; icon?: string;
+    conditions: Array<{ kind: 'npcKilled' | 'itemPickup' | 'itemCraft' | 'tileDestroyed' | 'custom';
+      keys?: Array<string | number>; many?: boolean }>;
+  }): void;
+  /** ★成就域:mod 成就直接完成(custom 条件消费;幂等;无实例沿=暂存回放) */
+  completeAchievement(key: string): void;
+  /** ★InfoDisplay 域(2026-10-14):mod 信息栏行(原版 DrawInfoAccs 追加行;
+   *  update 逐帧产文本 null=本帧省行;label=悬停标签;gold=金行) */
+  infoDisplay(key: string, spec: {
+    label: string;
+    update?(game: unknown): string | null;
+    gold?: boolean;
+  }): void;
   tileEntity(tileKey: string, spec: {
     create?(): Record<string, unknown>;
     update?(te: { readonly x: number; readonly y: number; readonly key: string; state: Record<string, unknown> }, game: unknown): void;
@@ -588,6 +608,17 @@ export function createModContext(
       return rollNaturalPrefixForVid(vid, isPrefixableAccessory(vid), () => Math.random());
     },
     // ★一百二十刀:mod 群系旗(AbyssLayer 复合面;键→内部 id)
+    // ★成就域:mod 成就(收集;loader 出口统一翻译)
+    achievement(key, spec) {
+      collectModAchievement(modId, key, spec as never);
+    },
+    completeAchievement(key) {
+      completeModAchievement(modId, key);
+    },
+    // ★InfoDisplay 域:mod 信息栏行
+    infoDisplay(key, spec) {
+      registerModInfoDisplay(`mod_${modId}_${key}`, spec);
+    },
     // ★TE 梯队:mod tile entity(tiles 域 id 解析→registry)
     tileEntity(tileKey, spec) {
       registerModTileEntity(modId, idOf('tiles', tileKey), tileKey, spec as never);

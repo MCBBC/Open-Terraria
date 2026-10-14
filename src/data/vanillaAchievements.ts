@@ -31,6 +31,12 @@ export interface AchDef {
   name: string;
   conditions: AchCondDef[];
   category: number;   // 0=Slayer 1=Collector 2=Explorer 3=Challenger（-1=NoCategory）
+  /** ★成就 API(2026-10-14):mod 成就字面文本(l10n 键 `Achievements.<name>_Name` 的
+   *  直挂回退——UI 读序=def.title ?? Lang.text) */
+  title?: string;
+  desc?: string;
+  /** mod 图标 blob URL(portraits 通道同构;缺省=原版 sprite 域空 glyph) */
+  modIconUrl?: string;
 }
 
 const flag = (name: string): AchCondDef => ({ kind: 'flag', name });
