@@ -922,14 +922,16 @@ export class ZenithSword extends Entity {
   private spriteDir = 1;
   private owner: ArcOwner;
   private hitCd = new Map<number, number>();
-  /** oldPos/oldRot 拖尾环（TrailCacheLength=60、TrailingMode=4，ProjectileID.cs:293）：
-   *  每条目 [cx, cy, rot] 每 update 压一条（extraUpdates=1 → 每帧 2 条）；
-   *  在 AI 位移【前】压栈（Projectile.Update 内 :15728 拖尾段先于 AI_182）——
-   *  最新条 = 上一 update 末态（滞后本体一 update），首条 = 出生点 */
+  /** oldPos/oldRot 拖尾环（TrailCacheLength[933]=60、TrailingMode[933]=4，
+   *  ProjectileID.cs:385/:387）：每条目 [cx, cy, rot] 每 update 压一条
+   *  （extraUpdates=1 → 每 tick 2 条,环时长 30 游戏秒帧）。★BJ686 勘误（旧注称
+   *  「:15728 拖尾段先于 AI_182 压上一 update 末态」系误读）：1457 真序=Update
+   *  while 循环（:16780-16783,体内 numUpdates∈{0,-1}=子步 A/B）内 AI() :16880
+   *  在【前】、TrailingMode 块 :17197-17302 在【后】——压的是本子步 AI 末态 */
   private trail: number[] = [];
   /** oldSpriteDirection 环（残影镜像 XOR 用，:30572-30577）——与 trail 同步压/裁 */
   private trailDirs: number[] = [];
-  /** TrailingMode 4 玩家位移补偿（:15828-15841 numUpdates==0 时 oldPos += 玩家帧位移） */
+  /** TrailingMode 4 玩家位移补偿（:17274-17290 numUpdates==0 子步 A 时 oldPos += 玩家帧位移） */
   private lastOwnerX = 0;
   /** ★interp:最新一步的 TrailingMode 4 补偿向量（渲染期相位退回消费,见
    *  fixedUpdate 注;NaN=未步进（出生首步前）——渲染退回跳过）。 */
@@ -974,35 +976,43 @@ export class ZenithSword extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     // vanilla-projectiles 933 extraUpdates=1——AI 每 tick 跑两遍（整程 120 计数
     // 60 游戏秒帧耗尽；曾单跑=轨道慢一倍且滞空过久，2026-08-19 审查）
-    // TrailingMode 4 前置（:15828-15841）：拖尾整条平移玩家帧位移
+    // ★BJ686（2026-10-16 用户实报「飞行态圆弧变波浪,静止正常,FX24 首日即有」
+    //   定谳重排）：1457 Projectile.Update :16780 `numUpdates = extraUpdates` →
+    //   while 体以 numUpdates∈{0,-1} 各跑一遍=子步 A/B;TrailingMode 4 块
+    //   :17274-17290 在 AI() :16880 【之后】同循环体内：vector3=玩家本 tick 帧位移
+    //   （Player 先于 Projectile 更新）,下移循环逐条 `numUpdates==0 &&
+    //   oldPos[i]!=Zero → += vector3`（仅子步 A 补偿,玩家一 tick 内不动 ⇒ 两子步
+    //   新压条目天然同帧）,随后 oldPos[0]=本子步 AI 末态。旧序「fixedUpdate 头
+    //   补偿 → step 顶压上一子步末态」=子步 A 条目出生即落后一个玩家帧位移且
+    //   永不补偿（探针 _bj686-zenith-trail-probe:飞行态 odd 条目 frameErr 全表
+    //   −Δ/even 0、d 序列纯 ±Δ 交替、A2≈2Δ;静止 Δ=0 无症状）→ 条带直线连段
+    //   （FinalFractalHelper.Draw 用 PrepareStrip,无平滑插值）渲染成波浪。
     const odx = this.owner.x - this.lastOwnerX, ody = this.owner.y - this.lastOwnerY;
-    if (odx !== 0 || ody !== 0) {
-      for (let i = 0; i < this.trail.length; i += 3) { this.trail[i] += odx; this.trail[i + 1] += ody; }
-      this.lastOwnerX = this.owner.x;
-      this.lastOwnerY = this.owner.y;
-    }
+    this.lastOwnerX = this.owner.x;
+    this.lastOwnerY = this.owner.y;
     // ★interp 补偿相位快照（2026-10-15 用户实报「飞行挥天顶剑特效残影感;静止挥
     //  无」定谳）:整步平移（60Hz 大步）vs 插值相机（平滑）=拖尾带每步跳一个玩家
     //  位移——渲染期按 interpA 退回 (1−alpha)×最新步补偿（draw 内消费,见注）。
-    //  每步覆盖（含 0——静止步补偿=0 退回 0=恒等）。
+    //  每步覆盖（含 0——静止步补偿=0 退回 0=恒等）。★BJ686 重排后语义不变:
+    //  仍=本 tick 施加于拖尾的玩家帧位移（子步 A 补偿量）,每 tick 一拍快照。
     this.lastCompX = odx;
     this.lastCompY = ody;
-    this.step(game);
-    this.step(game);
+    this.step(game, odx, ody);   // 子步 A（numUpdates==0：TrailingMode 4 带补偿）
+    this.step(game, 0, 0);       // 子步 B（numUpdates==-1：无补偿）
   }
 
-  private step(game: GameHooks): void {
+  private step(game: GameHooks, compX = 0, compY = 0): void {
     if (this.counter === 0) game.playSfxFiles(['Item_169'], 1, this.cx, this.cy);   // :40439
-    // TrailingMode 4 记录（:15841-15843）：oldPos[0]/oldRot[0]/oldSpriteDirection[0]
-    // 在 Projectile.Update 内先于 AI_182 压栈——记录上一 update 末态
-    this.trail.push(this.cx, this.cy, this.rot);
-    if (this.trail.length > 60 * 3) this.trail.splice(0, this.trail.length - 60 * 3);
-    this.trailDirs.push(this.spriteDir);
-    if (this.trailDirs.length > 60) this.trailDirs.splice(0, this.trailDirs.length - 60);
     const spd = Math.hypot(this.vx, this.vy);
     const lv = ZenithSword.lerpV(900, 0, spd * 2);      // GetLerpValue(900,0,|vel|×2)
     this.counter += 0.7 + (2 - 0.7) * lv;               // Lerp(0.7,2,lv)
-    if (this.counter >= 120) { this.dead = true; return; }
+    if (this.counter >= 120) {
+      // :43923-43926 Kill() 早退（本子步位置未更新）——但 Update 循环体拖尾段
+      // :17197 在 AI/Damage 之后照跑:仍压未动末态（子步 B 死亡时同拍再压一次）
+      this.commitTrail(compX, compY);
+      this.dead = true;
+      return;
+    }
     const phase = ZenithSword.lerpV(0, 1, this.counter / 60);
     const va = Math.atan2(this.vy, this.vx);
     const num6 = this.vx > 0 ? 1 : -1;
@@ -1122,6 +1132,24 @@ export class ZenithSword extends Entity {
       e.hurt(applyBannerDamageDealt(game, e, dmg), this.spriteDir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitCd.set(e.id, 7);
     }
+    // TrailingMode 4 提交（:17197 块=AI :16880 与 Damage :17184 之【后】——
+    // 命中采样读压栈前旧环,与原版 Damage 内 oldPos 读序一致）
+    this.commitTrail(compX, compY);
+  }
+
+  /** TrailingMode 4 拖尾环提交（:17274-17290 逐字结构）：先整条 += 玩家帧位移
+   *  （compX/compY 仅子步 A 非 0=numUpdates==0 语义;`oldPos[i]!=Vector2.Zero`
+   *  跳过条件在本环=只含已写条目,天然满足）,再压本子步 AI 末态 oldPos[0]=
+   *  position/oldRot[0]/oldSpriteDirection[0]。★BJ686:补偿与压栈同块 interleaved
+   *  是均匀性关键——子步 A 补偿覆盖「上一子步及更老」条目,两新条目同帧出生。 */
+  private commitTrail(compX: number, compY: number): void {
+    if (compX !== 0 || compY !== 0) {
+      for (let i = 0; i < this.trail.length; i += 3) { this.trail[i] += compX; this.trail[i + 1] += compY; }
+    }
+    this.trail.push(this.cx, this.cy, this.rot);
+    if (this.trail.length > 60 * 3) this.trail.splice(0, this.trail.length - 60 * 3);
+    this.trailDirs.push(this.spriteDir);
+    if (this.trailDirs.length > 60) this.trailDirs.splice(0, this.trailDirs.length - 60);
   }
 
   /** Collision.CheckAABBvLineCollision 六参全式 1:1（1458 Collision.cs:275-371）——
