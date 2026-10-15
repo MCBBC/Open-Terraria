@@ -89,6 +89,12 @@ export interface VDust {
    *  npc.oldPos[1]）。闭包返回被跟实体【上一拍位移】；终清烟批（月总水蛭
    *  aiStyle82 d229 环 :37102-37116）为首个消费方。池复用安全：spawn() 归零。 */
   followEnt: (() => { dx: number; dy: number }) | null;
+  /** ★interp（2026-10-15 ③收刀）:本步跟随平移量（update 跟随支记录;undefined=
+   *  无跟随/出生首步前）。渲染期按 interpA 退回 (1−α)×本量——跟随=60Hz 整步平移
+   *  vs 插值相机=贴附尘跳步（SwingArc TrailingMode 4 补偿同构;用户普查令落刀）。
+   *  克隆不复制（cloneDust 出生跟随态归零语义 ✓ undefined 退回 0）。 */
+  lastFollowX?: number;
+  lastFollowY?: number;
   /** customData = Vector2（:906-912 吸向档）——velocity=(v×4 + 单位向·|v|)/5。
    *  终清波批接入：幻影之门 aiStyle108 聚尘/开门两段（P.cs:34435/:34640 族,
    *  门心快照）。followPlayer/followEnt 同档不共存（原版 customData 单值）。 */
@@ -544,8 +550,12 @@ export class VanillaDust {
       // customData=本体（:35310/:35322/:35368-35377））。active 门 = 闭包内
       // dead 判（父弹死 → 零位移,同 `if (projectile.active)`）。
       if ((d.type >= 86 && d.type <= 92) || d.type === 286) {
-        if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
-        else if (d.followEnt) { const q = d.followEnt(); d.x += q.dx; d.y += q.dy; }
+        // ★interp 跟随量记录（渲染期相位退回消费,见字段注）
+        if (d.followPlayer) { d.x += playerDx; d.y += playerDy; d.lastFollowX = playerDx; d.lastFollowY = playerDy; }
+        else if (d.followEnt) { const q = d.followEnt(); d.x += q.dx; d.y += q.dy; d.lastFollowX = q.dx; d.lastFollowY = q.dy; }
+        else { d.lastFollowX = 0; d.lastFollowY = 0; }
+      } else {
+        d.lastFollowX = 0; d.lastFollowY = 0;   // 非跟随档:归零（退回恒等）
       }
       // ---- 链 A 独占段（:883-1894 独占链：命中者跳过其余链接与 :1884 重力）----
       //  230/217/240 是独立段/无档型（非 883 链链接）：chainLink 不置位，重力门

@@ -2999,6 +2999,11 @@ export function mouseTextInnerColor(
  *  label 类（物品名）不走原版链,保持旧轨迹,新字段可缺省 */
 export interface DamageNumber {
   x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number;
+  /** ★interp（2026-10-15 ③收刀）:上一步末位快照（Game.fixedUpdate 步进循环头拍;
+   *  undefined=出生首步前——渲染退回跳过）。飘字 60Hz 上浮 7px/步在插值世界里
+   *  显糙（用户普查令落刀）;退回式与 SwingArc 补偿同构。 */
+  prevX?: number;
+  prevY?: number;
   label?: string;
   /** 拾取飘字（PopupText.NewText Item 分支）专属：合并身份键 = item key */
   pickupKey?: string;
@@ -7590,7 +7595,16 @@ export class Renderer {
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
     for (const d of dmgNumbers) {
-      const [sx, sy0] = cam.worldToScreen(d.x, d.y);
+      // ★interp 补偿退回（2026-10-15 ③收刀）:飘字步进 60Hz 上浮（7px/步）在
+      //  插值世界里跳步——渲染位=curr−Δ步×(1−interpA)（SwingArc 补偿同构;
+      //  prev 缺席（出生首步前）或 interpA=−1（旗关/暂停帧）=零退回逐位旧行为）。
+      const dIa = this.interpA;
+      const dPx = d.prevX, dPy = d.prevY;
+      const dx = dIa >= 0 && dPx !== undefined
+        ? d.x - (dPx + (d.x - dPx) * dIa) : 0;
+      const dy = dIa >= 0 && dPy !== undefined
+        ? d.y - (dPy + (d.y - dPy) * dIa) : 0;
+      const [sx, sy0] = cam.worldToScreen(d.x - dx, d.y - dy);
       // gravDir=−1 飘字 Y 屏幕镜像（Main.cs:63339-63343:num23 = screenHeight −
       // (position.Y − screenPosition.Y)——重力倒置(重力地球等)时飘字翻到对侧）
       const sy = player.gravDir === -1 ? viewH - sy0 : sy0;
@@ -9968,7 +9982,14 @@ export class Renderer {
         d.active = false;   // :38424-38430 出界失活
         continue;
       }
-      const [px, py] = cam.worldToScreen(d.x, d.y);
+      // ★interp 跟随相位退回（2026-10-15 ③收刀）:贴附尘（followPlayer/followEnt）
+      //  本步被整步平移跟随量（60Hz）vs 插值相机=跳步——渲染位=curr−跟随Δ×(1−
+      //  interpA)（SwingArc 补偿同构）。无跟随（lastFollow 缺省/0）或 interpA=−1
+      //  （旗关/暂停帧）=零退回逐位旧行为。
+      const dfa = this.interpA;
+      const dfx = dfa >= 0 && d.lastFollowX ? d.lastFollowX * (1 - dfa) : 0;
+      const dfy = dfa >= 0 && d.lastFollowY ? d.lastFollowY * (1 - dfa) : 0;
+      const [px, py] = cam.worldToScreen(d.x - dfx, d.y - dfy);
       // ★双轴通道消费位（2026-09-03 VDust 双轴基建）：带 scaleX/scaleY 的尘
       //  （PrettySparkle 编排粒子族）画旋转双臂星芒（PrettySparkleParticle.Draw
       //  :61-94 逐值,见 drawSparkleArms）——不走 Dust.png 帧/拖影/染料/colorPass

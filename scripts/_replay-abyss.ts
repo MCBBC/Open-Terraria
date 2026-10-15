@@ -6,7 +6,8 @@
 // gs:worldSurfaceLow=TerrainPass num5 初值式(fresh 流首掷确定,见下);
 //   sulphurAtLeft=false(SulphurousSea.cs:188 dungeonX<maxTilesX/2 零掷派生);
 //   sulphurYStart=gen-sea DetermineYStart 同式扫描(SulphurousSea.cs:228)。
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, existsSync, createReadStream } from 'node:fs';
+import readline from 'node:readline';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
@@ -285,6 +286,7 @@ const rng = new RNG(gs.seed as number);
   (globalThis as { __swAbyssSeg?: (n: number, name: string) => void }).__swAbyssSeg = (n, name) => {
     segs.push([name, n]);
     rawSegs.push([name, (globalThis as { __rawN?: number }).__rawN ?? 0]);
+    (globalThis as { __swAbyssSegs?: Array<[string, number]> }).__swAbyssSegs = segs;   // ★699at:首分歧段定位
   };
   (globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump = () => {
     let prev = 0, prevRaw = 0;
@@ -337,8 +339,144 @@ const rawNext = rng.next.bind(rng);
   if (drawVals.length < 16384) drawVals.push(v);
   return v;
 };
+// ★699at:全 pass V 值级日志启用(与真链 V 流全 pass 对拍定位首分歧)
+(globalThis as Record<string, unknown>).__swPassVLogOn = true;
+(globalThis as { __swPlaceLog?: number[] }).__swPlaceLog = process.env.SW_PLACE_LOG ? [] : undefined;
+if (process.env.SW_DUMP_AT) {
+  (globalThis as { __swDumpAt?: number }).__swDumpAt = Number(process.env.SW_DUMP_AT);
+  if (process.env.SW_DUMP_BOX) (globalThis as { __swDumpBox?: number[] }).__swDumpBox = process.env.SW_DUMP_BOX.split(',').map(Number);
+  (globalThis as { __swDumpOut?: string[] }).__swDumpOut = [];
+}
 (abyssFn as (...a: unknown[]) => void)(store, rng, gs);
+(globalThis as Record<string, unknown>).__swPassVLogOn = false;
+{
+  // ★699at 放置坐标流对拍:我方 walk+clumps 放置 [drawN,x,y] ↔ 真链 SF 行(N,x,y)。
+  //   掷值流全合而坐标差 = clumps ty 洞降漂移(无掷状态读)的直读判卷。
+  const PL = (globalThis as { __swPlaceLog?: number[] }).__swPlaceLog;
+  const sfLog = process.env.SW_TRUE_SF_LOG ?? '/tmp/genprobe-deent-sftf.log';
+  if (PL && PL.length && existsSync(sfLog)) {
+    const tN: number[] = [], tX: number[] = [], tY: number[] = [];
+    const rl = readline.createInterface({ input: createReadStream(sfLog), crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (line.charCodeAt(0) !== 83 /* 'S' */) continue;
+      const c = line.split('\t');
+      if (c[0] !== 'SF' || c.length < 4) continue;
+      tN.push(+c[1]); tX.push(+c[2]); tY.push(+c[3]);
+    }
+    const ours = PL.length / 3;
+    console.log(`[sf] 我方放置=${ours} 真链 SF=${tN.length}`);
+    const lim = Math.min(ours, tN.length);
+    let firstBad = -1, badCount = 0;
+    for (let i = 0; i < lim; i++) {
+      if (PL[i * 3 + 1] !== tX[i] || PL[i * 3 + 2] !== tY[i]) { if (firstBad < 0) firstBad = i; badCount++; }
+    }
+    console.log(`[sf] 比对 ${lim}:首坐标差@#${firstBad + 1}${firstBad >= 0 ? `(我 drawN=${PL[firstBad * 3]}↔真 N=${tN[firstBad]})` : ''} 差总数=${badCount}`);
+    if (firstBad >= 0) {
+      const lo = Math.max(0, firstBad - 8), hi = Math.min(lim, firstBad + 12);
+      for (let i = lo; i < hi; i++) {
+        const o = `(${PL[i * 3 + 1]},${PL[i * 3 + 2]})@${PL[i * 3]}`, t = `(${tX[i]},${tY[i]})@${tN[i]}`;
+        console.log(`[sf]   #${i + 1}${i === firstBad ? ' ★差' : '    '} 我=${o.padEnd(18)} 真=${t.padEnd(18)}${o === t ? '' : '  ≠'}`);
+      }
+    } else if (ours === tN.length) {
+      console.log('[sf] ★放置坐标流全合(walk+clumps 零分歧)!');
+    } else {
+      console.log(`[sf] ⚠前缀全合但长度差:我=${ours} 真=${tN.length}(Δ${ours - tN.length})`);
+    }
+  }
+}
+{
+  // ★699at 对拍仪:我方 PV(typed 压缩)↔ 真链 V 行(流式解析)。首值差=流位首分歧;
+  //   等价类 R(0,n)≡M(n)(值恒等标签互换)不算差;重同步探测区分多掷/少掷。
+  const PV = (globalThis as { __swPassVLog?: { kab: Int32Array; val: Float64Array; n: number } }).__swPassVLog;
+  if (PV && PV.n > 0) {
+    const trueLog = process.env.SW_TRUE_V_LOG ?? '/tmp/genprobe-deent-fullV.log';
+    console.log(`[pv] 我方 pass 掷数=${PV.n} 真链日志=${trueLog}`);
+    if (existsSync(trueLog)) {
+      const CAP = 41_000_000;
+      const tN = new Int32Array(CAP), tKab = new Int32Array(CAP);
+      const tVal = new Float64Array(CAP);
+      let tRows = 0;
+      const rl = readline.createInterface({ input: createReadStream(trueLog), crlfDelay: Infinity });
+      for await (const line of rl) {
+        if (line.charCodeAt(0) !== 86 /* 'V' */) continue;
+        const c = line.split('\t');
+        if (c.length < 6) continue;
+        const k = c[2] === 'D' ? 2 : c[2] === 'M' ? 1 : c[2] === 'R' ? 0 : -1;
+        if (k < 0 || tRows >= CAP) continue;
+        tN[tRows] = +c[1];
+        tKab[tRows] = (k << 26) | ((+c[3] + 512) << 13) | ((+c[4] + 512));
+        tVal[tRows] = +c[5];
+        tRows++;
+      }
+      console.log(`[pv] 真链 V 行=${tRows} N∈[${tN[0]},${tN[tRows - 1]}]`);
+      const un = (kab: number): string => {
+        const k = kab >>> 26, a = ((kab >>> 13) & 8191) - 512, b = (kab & 8191) - 512;
+        return `${k === 0 ? 'R' : k === 1 ? 'M' : 'D'}(${a}${k === 0 ? ',' : ''}${k === 1 ? '' : ''}${k === 0 ? b : k === 1 ? '' : ''})`;
+      };
+      const kOf = (kab: number) => kab >>> 26;
+      const aOf = (kab: number) => ((kab >>> 13) & 8191) - 512;
+      const bOf = (kab: number) => (kab & 8191) - 512;
+      const eq = (kabO: number, valO: number, kabT: number, valT: number): boolean => {
+        if (valO !== valT) return false;
+        if (kabO === kabT) return true;
+        const kO = kOf(kabO), kT = kOf(kabT);   // 等价类:R(0,n)≡M(n) 值恒等
+        return (kO === 0 && kT === 1 && aOf(kabO) === 0 && bOf(kabO) === aOf(kabT))
+          || (kO === 1 && kT === 0 && aOf(kabT) === 0 && bOf(kabT) === aOf(kabO));
+      };
+      const fpMatch = (j: number, probeK: number): boolean => {
+        for (let q = 0; q < probeK; q++) if (!eq(PV.kab[q], PV.val[q], tKab[j + q], tVal[j + q])) return false;
+        return true;
+      };
+      let j0 = -1, probeUsed = 0;
+      for (const probeK of [Math.min(64, PV.n, tRows), 24, 12, 6, 3, 2, 1]) {
+        if (probeK < 1 || PV.n < probeK) continue;
+        if (fpMatch(0, probeK)) { j0 = 0; probeUsed = probeK; break; }
+        const scanLim = probeK >= 24 ? tRows : Math.min(tRows, 2_000_000);
+        for (let j = 1; j + probeK <= scanLim; j++) if (fpMatch(j, probeK)) { j0 = j; probeUsed = probeK; break; }
+        if (j0 >= 0) break;
+      }
+      const segOf = (drawN: number): string => {
+        const segs = (globalThis as { __swAbyssSegs?: Array<[string, number]> }).__swAbyssSegs ?? [];
+        for (let q = segs.length - 1; q >= 0; q--) if (segs[q][1] <= drawN) return `${segs[q][0]}@${segs[q][1]}`;
+        return '?';
+      };
+      if (j0 < 0) {
+        console.log('[pv] ★对齐失败:我方首 64 指纹在真链全行无匹配(首分歧<64 掷或 pass 前流位错位)');
+        console.log(`[pv] 我方首 12:${Array.from({ length: 12 }, (_, q) => `${un(PV.kab[q])}=${PV.val[q]}`).join(' ')}`);
+        console.log(`[pv] 真链首 12:${Array.from({ length: 12 }, (_, q) => `${un(tKab[q])}=${tVal[q]}`).join(' ')}`);
+      } else {
+        console.log(`[pv] 对齐(probe=${probeUsed}):我方掷#1 ↔ 真链 N=${tN[j0]}(行${j0})`);
+        const lim = Math.min(PV.n, tRows - j0);
+        let firstBad = -1, badCount = 0;
+        for (let i = 0; i < lim; i++) {
+          if (!eq(PV.kab[i], PV.val[i], tKab[j0 + i], tVal[j0 + i])) { if (firstBad < 0) firstBad = i; badCount++; }
+        }
+        console.log(`[pv] 比对 ${lim} 掷:首值差@掷#${firstBad + 1}(drawN=${firstBad + 1},段=${firstBad >= 0 ? segOf(firstBad + 1) : '-'}) 值差总数=${badCount}`);
+        if (firstBad >= 0) {
+          const lo = Math.max(0, firstBad - 20), hi = Math.min(lim, firstBad + 20);
+          for (let i = lo; i < hi; i++) {
+            const o = `${un(PV.kab[i])}=${PV.val[i]}`, t = `${un(tKab[j0 + i])}=${tVal[j0 + i]}`;
+            console.log(`[pv]   #${i + 1}${i === firstBad ? ' ★差' : '     '} N=${tN[j0 + i]} 我=${o.padEnd(14)} 真=${t.padEnd(14)}${o === t ? '' : '  ≠'}`);
+          }
+          // 重同步探测:我方 [i+s..i+s+32) ≡ 真链 [i..i+32) ⇒ s>0 我多掷 s / s<0 我少掷 |s|
+          const win = 32;
+          const syncAt = (s: number): boolean => {
+            if (firstBad + s < 0 || firstBad + s + win > PV.n || firstBad + win > tRows - j0) return false;
+            for (let q = 0; q < win; q++) if (!eq(PV.kab[firstBad + s + q], PV.val[firstBad + s + q], tKab[j0 + firstBad + q], tVal[j0 + firstBad + q])) return false;
+            return true;
+          };
+          const shifts: number[] = [];
+          for (let s = -200; s <= 200; s++) if (syncAt(s)) shifts.push(s);
+          console.log(`[pv] 重同步位移 s(我多掷为正):${shifts.length ? shifts.join(',') : '无(±200 内不复流)'}`);
+        } else {
+          console.log(`[pv] ★全 ${lim} 掷值级全合(地形段零分歧)!`);
+        }
+      }
+    } else console.log('[pv] 真链日志不存在,跳过对拍');
+  }
+}
 console.log(`[replay] Abyss pass 掷数=${drawCount}`);
+for (const s of (globalThis as { __swDumpOut?: string[] }).__swDumpOut ?? []) console.log(s);   // ★699at 区域快照
 (globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump?.();
 drawCount = 0;
 // ★699ad 对拍仪:掷型序日志(全局 __swDecorVLog → /tmp/our-decor-vlog.txt)

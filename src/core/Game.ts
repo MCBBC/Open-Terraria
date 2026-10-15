@@ -12852,6 +12852,10 @@ export class Game implements GameHooks {
     this.popupNumActivePrev = labelActiveNow;
     for (let di = 0; di < this.dmgNumbers.length; di++) {
       const d = this.dmgNumbers[di];
+      // ★interp 快照（2026-10-15 ③收刀）:上一步末位（label/数字两支统一——
+      //  popupLabelStep 内也步进位置）;渲染期退回消费（Renderer 7592 循环头）。
+      d.prevX = d.x;
+      d.prevY = d.y;
       if (d.label) {
         // ---- PopupText.Update label 支（:651-748）1:1——本体抽为模块级纯函数
         // popupLabelStep（文件尾,tests/popup-antioverlap.test.ts 直测）----
