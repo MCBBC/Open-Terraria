@@ -84,9 +84,9 @@ await page.evaluate(async () => {
     pp.facing = 1; pp.dir = 1;
     gg.input.mouseX = Math.round(cv.width / 2 + 120);
     gg.input.mouseY = Math.round(cv.height / 2 - 8);
-    gg.input.mouseDown = true;
+    gg.input.mouseDown = true; gg.input.mouseHeld = true;
     for (let i = 0; i < ticks; i++) gg.fixedUpdate(1 / 60);
-    gg.input.mouseDown = false;
+    gg.input.mouseDown = false; gg.input.mouseHeld = false;
   };
 });
 await pump(page, 10);

@@ -3718,9 +3718,11 @@ export class Game implements GameHooks {
   //  在 render 包裹位（回 curr 位=与旧行为逐位,防暂停瞬间半步跳变）。
   static interp = (() => {
     try {
-      if (typeof location === 'undefined') return false;
-      return new URLSearchParams(location.search).get('interp') === '1';
-    } catch { return false; }
+      if (typeof location === 'undefined') return true;
+      // ★转正缺省开（2026-10-15 用户验收「角色移动观感很舒服/体验不错,可以继续
+      //  插」——一期+二期①②全验）;?interp=0 逃生门（judderSmooth 同款式）。
+      return new URLSearchParams(location.search).get('interp') !== '0';
+    } catch { return true; }
   })();
   /** 插值快照（fixedUpdate 头拍=上一步末态）;-Infinity=未就绪（首步前不插） */
   private _iPX = -Infinity;
@@ -53098,6 +53100,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //  冻结 prev/curr 不变,lerp 本恒等——门是防「暂停拍 acc 残值」的边缘半步偏移）。
     const iA = Game.interp && this._iPX > -Infinity && !this.paused
       ? Math.min(1, this.acc / FIXED_DT) : -1;   // 钳 1:steps≥5 雪崩残 acc 外推防御
+    this.renderer.interpA = iA;   // ★实体绘制端消费（SwingArc trail 补偿相位退回）
     let iRX = 0, iRY = 0, iRCamX = 0, iRCamY = 0;
     if (iA >= 0) {
       iRX = this.player.x; iRY = this.player.y;

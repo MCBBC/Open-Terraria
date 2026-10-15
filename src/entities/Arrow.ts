@@ -3515,12 +3515,60 @@ export class Arrow extends Entity {
     if (this.projId === 630) {
       const img630 = projSprite(630);
       if (img630 && img630.width > 0) {
-        const mp630 = r.mainPlayer as { facing?: number } | undefined;
+        const mp630 = r.mainPlayer as { facing?: number; cx?: number; y?: number; h?: number } | undefined;
         const face630 = Math.sign(this.vx) || mp630?.facing || 1;
+        const rot630 = Math.atan2(this.vy, this.vx);
+        // ★BJ682（2026-10-14 用户实报「弓还是被盔甲遮住,脱掉盔甲才正常」=BJ681
+        //  复诊）heldProj 载体层位随玩家层组走：原版 630 drawLayer=7 经 heldProj
+        //  在玩家绘制层组 27_HeldItem 开头位插入（Projectile.cs :6769-6780
+        //  drawLayer=7 + AI_075 尾 :68385 heldProj=whoAmI 钉手;PlayerDrawLayers.cs
+        //  :3154 记插入位 → PlayDrawData :4310-4330 DrawHeldProj）=甲+甲glow
+        //  (13-21)/盾(26) 之上、手持物(27)/臂glow(28) 之下。旧位=实体弹层
+        //  postPlayerDraws（7e 恒色甲重绘/甲位 glow 冲刷【前】）=载体被星尘/
+        //  日耀 250³/252³ 不透明恒色甲硬覆盖+glow 加色洗白（探针
+        //  _bj682i-carrier.mjs 定点 48²：stardust dark=456/wash=544）。改道
+        //  Renderer.heldProjCarrierQueue（7e⁴ 前冲刷=盾后武器前）。usesOwnerLight
+        //  =true（:6776;Main.cs :30069-30072 GetColor(mountedCenter)=玩家中心光）
+        //  ——收集时快照 16 级量化（eyebrella A4 同式）,满光直画原帧;fullbright
+        //  跳过烘焙。无队列环境（测试/mock）回退直画原路径。
+        const sink682 = r as unknown as {
+          heldProjCarrierQueue?: Array<(c: CanvasRenderingContext2D) => void>;
+          lighting?: { lightAt(tx: number, ty: number): [number, number, number] } | null;
+          fullbright?: boolean;
+          tintSliceRGB?: (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+            rgb: [number, number, number], alphaMul: number) => HTMLCanvasElement | null;
+        };
+        const q682 = sink682.heldProjCarrierQueue;
+        if (q682) {
+          const cx630 = this.cx, cy630 = this.cy;
+          let lq630: [number, number, number] | null = null;
+          if (!sink682.fullbright && sink682.lighting
+            && mp630?.cx !== undefined && mp630?.y !== undefined) {
+            const lc630 = sink682.lighting.lightAt(
+              Math.floor(mp630.cx / 16), Math.floor((mp630.y + (mp630.h ?? 42) / 2) / 16));
+            const q16 = (v: number) => Math.round(Math.min(255, v ?? 255) / 255 * 15) / 15;
+            lq630 = [q16(lc630[0]), q16(lc630[1]), q16(lc630[2])];
+            if (lq630[0] >= 0.999 && lq630[1] >= 0.999 && lq630[2] >= 0.999) lq630 = null;
+          }
+          q682.push((c: CanvasRenderingContext2D) => {
+            let src630: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img630;
+            if (lq630 && sink682.tintSliceRGB) {
+              src630 = sink682.tintSliceRGB(img630, 0, 0, img630.width, img630.height, lq630, 1) ?? img630;
+            }
+            c.save();
+            c.imageSmoothingEnabled = false;
+            c.translate(cx630, cy630);
+            c.rotate(rot630);
+            if (face630 < 0) { c.rotate(Math.PI); c.scale(-1, 1); }
+            c.drawImage(src630 as CanvasImageSource, -img630.width / 2, -img630.height / 2);
+            c.restore();
+          });
+          return;
+        }
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         ctx.translate(this.cx, this.cy);
-        ctx.rotate(Math.atan2(this.vy, this.vx));
+        ctx.rotate(rot630);
         if (face630 < 0) { ctx.rotate(Math.PI); ctx.scale(-1, 1); }
         ctx.drawImage(img630, -img630.width / 2, -img630.height / 2);
         ctx.restore();

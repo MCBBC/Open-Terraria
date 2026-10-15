@@ -7476,12 +7476,17 @@ export class UI {
       this.achAdvisorEl = null;   // 坏 advisor 自摘（成就顾问是 QoL 件，不拖垮背包刷新）
       console.warn('[UI] achAdvisor update failed, detached:', e);
     }
-    // 堆叠至附近宝箱双钮（Main.cs:41276 chest == -1 && npcShop == 0 门——开箱/商店
-    // 不显示；2026-09-02 拆双钮后帧固定：quick=0/1、smart=2/3（悬停态由钮自身
+    // 堆叠至附近宝箱双钮（chest == -1 && npcShop == 0 门,Main.cs:42548/1458:42554——
+    // 开箱/商店不显示；2026-09-02 拆双钮后帧固定：quick=0/1、smart=2/3（悬停态由钮自身
     // mouseenter/leave 切,此处只管显隐+title）
+    // ★BJ685b 用户明令分歧（2026-10-15）：制作菜单开着（modern 窗 ∨ classic 网格）恒显
+    //   ——与 vanilla 布局 quickStackXY(chestOpen, craftMenuOpen) 同门同语义（本簇在
+    //   classic 构建器下两态恒 false=行为无差,改门只为两布局单一规则;判例锚=
+    //   smart-cursor-dark-visibility-user-divergence）。原版平价面（制作菜单关+箱开=藏,
+    //   箱内三钮承接）不变。
     for (const [b, mode] of [[this.quickStackBtn, 'quick'], [this.qsSmartBtn, 'smart']] as const) {
       if (!b) continue;
-      b.style.display = this.openChest ? 'none' : '';
+      b.style.display = this.openChest && !(this.vinvModernCraftOpen || this.vinvPipsUseGrid) ? 'none' : '';
       // title 不走 GameUI.* 官译（带「右键点击切换堆叠方式」提示,双钮拆分后无此交互）
       b.title = mode === 'smart' ? '智能堆叠至附近宝箱' : '快速堆叠至附近宝箱';
     }
@@ -8732,7 +8737,13 @@ export class UI {
         paintQuick(e.currentTarget as HTMLElement);   // ★BJ328:形参注入(原 paintQuick() 闭包捕 b)
         this.game.sfx.play('menuTick', 1);
       });
-      pos(b, () => quickStackXY(!!this.vinvLayoutCtx?.chestOpen));
+      // ★BJ685b 用户明令分歧（2026-10-15）：craftMenuOpen=modern 窗可见 ∨ classic 网格
+      //   → 堆叠钮恒显（即使 chestOpen——原版 ChestUI.cs:81 让位藏箱条时 Main.cs:42548
+      //   chest==-1 门使堆叠 UI 整体不可达,用户实报 UX 断层,明令恒显;制作菜单关+
+      //   箱开仍藏=原版平价,箱内三钮承接）。两态位均已在 layoutVanilla 签名内
+      //   （modernOpen/PipsUseGrid/chestOpen 三位）→ 任一翻转必触发重排=pos 闭包重评。
+      //   判例锚=smart-cursor-dark-visibility-user-divergence（用户分歧协议）。
+      pos(b, () => quickStackXY(!!this.vinvLayoutCtx?.chestOpen, this.vinvModernCraftOpen || this.vinvPipsUseGrid));
     }
     // Sort(534,244):★SW-FX29 清偿(FX10 债③)——vanilla 点击=ItemSorting.SortInventory
     // (Main.cs:42602 左键释放→SortInventory()+PlaySound(12);悬停帧 :42588-42616 1:1;

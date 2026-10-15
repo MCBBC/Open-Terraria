@@ -305,7 +305,15 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
   //  ai[0] 三态分相（待机 4+fc/4·归位 14+fc/8·攻击闪 17+fc/3 wrap :30596-30620）/
   //  蓄力 num533 表（:30190-30215）/ 冲刺定帧 5/13/17（:30245-30262）;projFrames[533]=21
   //  Main.cs:8686）→ dFrame 通道直写（deadlySpherePhase 维护,draw 支消费）
-  755: [6, 5, 0],   // 血红杖：fc≥6 循环 5 帧
+  // ★BJ684（2026-10-15 用户实报「单只蝙蝠贴图不对」主凶定谳）：AI_156_BatOfLight
+  //  755 支帧机（Projectile.cs:52431-52438）`if (++frameCounter >= 6) { fc=0;
+  //  if (++frame >= Main.projFrames[type] - 1) frame = 0; }`——projFrames[755]=5
+  //  （Main.cs:8644）→ 循环域 0-3【四帧】,帧 4 永不显示（贴图 Projectile_755.png
+  //  44×160 实测：帧 0=240px 翅展全/1=124px 中拍/2=200px 下拍/3=124px（=帧 1 复制）
+  //  /4=仅 76px 的 8×12 小团残片——旧 [6,5,0] 每周期 1/5 时间显示该小团帧=「蝙蝠
+  //  缩成一团贴图不对」）。759 同形交叉验证（AI_158 :49646-49656 同 `++frame>=
+  //  projFrames-1`,projFrames[759]=5 → [6,4,0] 表既有）。
+  755: [6, 4, 0],   // 血红杖：fc≥6 循环 0-3（帧 4 小团残片永不显示）
   643: [3, 8, 0],   // ★BJ635：彩虹水晶塔 3t 帧循环（AI_123 :37787-37793 fc≥3 推帧
                     //  cap projFrames[643]=8 Main.cs:8615——BJ632 登记「643 3t 帧循环」
                     //  债清偿;641 月门 projFrames=1 静态不入表）
@@ -4268,7 +4276,13 @@ export class MinionProj extends Entity {
         // 首拍：PlaySound(0)=SoundDig rand 0-2（LegacySoundPlayer.cs:441-448）+ 尘 15×2
         // （:46622-46632,oldVelocity×0.2 初速/rand3≠0 → scale×1.3 vel×1.1/noGravity/
         // fadeIn 0）+ 圆缘随机冲量 4（:46633 NextVector2CircularEdge）
-        game.playSfxFiles(soundTrackFiles('dig'), 1, this.cx, this.cy);
+        // ★BJ683（2026-10-14 用户实报「SW 访问 sounds/dig.mp3 404」定谳）：PlaySound(0)
+        //  =LegacySoundPlayer case 0 挖掘音=Dig_0/1/2 随机（Sfx.WAV_MAP.dig 键域）,
+        //  原码 soundTrackFiles('dig') 走声轨表（vanilla-soundtracks.json,只载 snake
+        //  轨名）——'dig' 不在表 → 兜底分支把裸名当文件名返回 ['dig'] → ensureBuffer
+        //  fetch sounds/dig.opus/.mp3 双 404（盘上只有 Dig_0/1/2）→ 负缓存 15s →
+        //  合成兜底近似音。改走 Game.playSfx('dig')（WAV_MAP 正确展开 Dig_0/1/2）。
+        game.playSfx?.('dig', 1, this.cx, this.cy);
         for (let i = 0; i < 2; i++) {
           const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 15,
             this.vx * 0.2, this.vy * 0.2, 0, null, 1.4);
@@ -4492,6 +4506,13 @@ export class MinionProj extends Entity {
           break;
         }
         moveAndCollide(this, game.world, this.vx, this.vy);   // 子步位移（velocity 恒=触发拍截击速度）
+        // ★BJ684（2026-10-15 用户实报「魔眼法杖的魔焰眼冲刺没有伤害」）：原版伤害
+        //  走弹幕通用 Damage 面=UpdateProjectiles 每【子步】AI 后照跑（extraUpdates=1
+        //  :30156 → 冲刺全程 40 子步持续接触结算;388 idStaticNPCHitCooldown=12 门控
+        //  在 contactResolve 表内既有）——旧冲刺支循环尾 return 早退+零 contact 调用
+        //  =冲刺全程零伤（巡航支尾 :4650 的 contact 到不了）。每子步一次=原版
+        //  extraUpdates 双倍结算节奏。
+        this.contact(game, dmg0);
       }
       return;   // flag31/numUpdates=0 → 本拍止于冲刺子步（常态帧通道下一拍清）
     }
@@ -4767,31 +4788,14 @@ export class MinionProj extends Entity {
       if (this.tHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.tHit.set(en.id, 60);
-      // ★BJ492①（2026-10-04）掷率收编单源（BJ486/488/490/491 同域尾批）：原自造
-      //  `Math.random()<0.04` 基掷=原版偏离（幻影 4%）——946 EmpressBlade（Terraprisma
-      //  万花筒随从;SetDefaults :8924-8942 亲读,minion 旗）无 melee/ranged/magic 三类旗
-      //  → 三类掷 :12916-12927 整段不存在,本面掷率=rollVanillaHitCrit（kind=null 捷径
-      //  返假,零 RNG）+TimerCrit :12928（ref-crit 无条件消费,不短路）+武僧 688-690
-      //  强制掷 :12929-43（946 恒假,形位保留）——三段与 contact() :4916-4917 同构
-      //  （本面旧缺 TimerCrit/武僧消费,随刀补齐=Damage_PVE_Inner :12913-12943 全链）。
-      const rollCrit = rollVanillaHitCrit(this.projId, game);
-      const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
-      const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
-      const crit = rollCrit || timerCrit || monkCrit;
-      const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
-      const pen = owner?.equipStats?.armorPen ?? 0;
-      en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
-        game, pen, crit);
-      // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,946 体触同面）
-      if (!(en as { dontTakeDamage?: boolean }).dontTakeDamage) {
-        ghostHealProc(game, this.projId, this.pveNumHits,
-          en as unknown as Parameters<typeof ghostHealProc>[3]);
-        this.pveNumHits++;   // :14263
-      }
+      // ★BJ684（2026-10-15）：结算体收编 ai156Strike（tag 链补课,见该函数注）
+      this.ai156Strike(game, en, dmg0);
     }
     // ★清偿刀 Y2：城镇臂（946 体触走 Damage() 管线——CanDealDamage :12468 例外
     //  `(type!=946||ai[0]==0f)` → Damage_PVE_Inner 城镇同链;tHit 60t 每靶每轮一次,
-    //  StartAttack 清）。体触无 tag 结算面（同敌怪环）;4% 暴击掷逐靶独立。
+    //  StartAttack 清）。★BJ684 登记债：城镇臂 settle 仍未接 tag 乘区/TagCrit（原版
+    //  voodoo 放行后 :12947 tag ModifyHit 城镇同跑）——敌怪臂已随 ai156Strike 补课,
+    //  城镇 tag 面=登记债不扩刀（城镇靶 voodoo 窄门常态拒,实机暴露面小）。
     hitTownNpcs({ x: this.x, y: this.y, w: this.w, h: this.h }, game, dmg0, 0,
       'playerProj', this.projId, undefined, undefined,
       (n) => {
@@ -4850,18 +4854,30 @@ export class MinionProj extends Entity {
   }
 
   // ---- 血红蝙蝠杖 755（AI_156_BatOfLight 755 支 :52425-52647,与 946 同族）----
-  // 常数 num=66/num2=65/num3=126/num4=125/num5=67;待机=头顶弧列(-UnitY.RotatedBy(
-  // 4.398/total×(idx−mid))×40,idleRotation=0);攻击=减速段(ai0 66→65 vel×0.8 记起点)
-  // +绕敌半圆弧(枢轴后半程移玩家心,无 946 的 Y 摆相——Y×=sin(IndexForVisuals×2.3)×0.5
-  // 直接乘);链式失败回 ai0=0(无 −1 归位态,:52640-52647)
+  // ★BJ684 常数勘误（反编译 :52494-52506 亲读）：AI_156_Think 头部 num=60/num2=59/
+  //  num3=120/num4=119/num5=61 先算好,755 分支【只重赋 num=66 一行】——num2/num3/
+  //  num4/num5 不变（946 分支才整组重算 40/39/80/79/41）。即 755：起手 ai[0]=66,
+  //  减速门 ai[0]>=59（7 拍 vel×0.8）,弧冲程 lerp=GetLerpValue(59,0,ai[0])。旧注
+  //  「num2=65/num3=126/num4=125/num5=67」系把 946 的「分支内重算」模式误植到 755
+  //  （num3-5 在 755 攻击路径零消费,126/125/67 全为死值）。待机=头顶弧列
+  //  (-UnitY.RotatedBy(4.398/total×(idx−mid))×40);攻击=减速段+绕敌半圆弧(枢轴后半程
+  //  移玩家心,Y 摆相 Y×=sin(IndexForVisuals×2.3)×0.5 直接乘,无 946 的 0.8+0.2 底);
+  //  链式失败回 ai0=0(无 −1 归位态,:52640-52647)
   private bA0 = 0;
   private bA1 = 0;
   private bSX = 0; bSY = 0;
   private bHit = new Map<number, number>();
 
   private batOfLightBody(game: GameHooks, p: Player, dmg0: number): void {
-    const num = 66, num2 = 65, num3 = 126;
+    // ★BJ684 常数对齐（:52494-52506,755 只重赋 num=66;num2 保持 59 非 65——
+    //  减速段 66→59 共 7 拍,弧 lerp GetLerpValue(59,0,ai0)）
+    const num = 66, num2 = 59;
     if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) { this.bA0 = 0; this.bA1 = 0; }
+    // ★BJ684（用户实报「贴图不对」副凶）：755 支每拍 spriteDirection =
+    //  velocity.X≠0 ? sign(velocity.X) : player.direction（Projectile.cs:52446-52451,
+    //  在帧推进后/AI_156_Think 前）——旧零写位=facing 恒 1 永朝右。MINION_NO_FLIP
+    //  不含 755（draw 侧翻转面在位）,本位即唯一喂源。
+    this.facing = this.vx !== 0 ? (this.vx > 0 ? 1 : -1) : p.facing;
     const tgt = this.bA1 ? this.findEnemyById(game, this.bA1) : null;
     // ★SW-BJ56 2026-09-10：755 顶格光照 = DelegateMethods.CastLightOpen（Projectile.cs:
     //  52440-52441 v3_1=AI_156_GetColor()=Crimson(220,20,60)→ToVector3 ≈(0.863,0.078,
@@ -4881,7 +4897,7 @@ export class MinionProj extends Entity {
       // 待机（:52537-52548 flag 支）：头顶弧列 SmoothStep 0.45 + 1/20 起手
       // idleSpot = Center + (−UnitY).RotatedBy(θ)×40,θ=4.3982296/total×(idx−mid)
       // （(−UnitY).RotatedBy(θ) = (sinθ, −cosθ)——单只 θ=0 → 正上方 40px）
-      const g = this.tGroup(game);
+      const g = this.tGroup(game, 755);   // ★BJ684：pid=755（AI_GetMyGroupIndexAndFillBlackList 按型计数 :52538——旧缺省 946 恒空组 → fallback {0,1} → 全部蝙蝠 θ=0 叠同一待机点=用户实报「叠成一团」）
       const mid = (g.total - 1) / 2;
       const th = (4.3982296 / g.total) * (g.index - mid);
       const ix = p.cx + Math.sin(th) * 40;
@@ -4890,7 +4906,11 @@ export class MinionProj extends Entity {
       const t = 0.45, s = t * t * (3 - 2 * t);
       this.x += (ix - this.cx) * s;
       this.y += (iy - this.cy) * s;
-      this.rot = angleLerp(this.rot, 0, 0.2);   // idleRotation=0（755 支 :52556）
+      // ★BJ684 注释勘误：原版 755 rotation 出生后【零写位】（待机/攻击段均不更新,
+      //  :52556 AngleLerp 属 ai[0]==−1 归位分支,755 永不达）→ 恒 0。本行 rot 恒 0
+      //  时为无操作,行为等价保留（若未来 rot 被外部扰动则按原版本相应为不回拉——
+      //  此行即摘除面,现保留零差形）。
+      this.rot = angleLerp(this.rot, 0, 0.2);
       if (Math.floor(Math.random() * 20) === 0) {
         const en = this.tTarget(game, p.cx, p.cy);
         if (en) { this.bHit.clear(); this.bA0 = num; this.bA1 = en.id; }
@@ -4902,14 +4922,14 @@ export class MinionProj extends Entity {
     if (!tgt || tgt.dead || !canBeChasedBy(tgt as never)) { this.bA0 = 0; this.bA1 = 0; return; }
     this.bA0--;
     if (this.bA0 >= num2) {
-      // 减速段（:52590-52596）：velocity×0.8,至 65 记起点
+      // 减速段（:52590-52596）：velocity×0.8,至 59 记起点（66→59 共 7 拍）
       this.vx *= 0.8; this.vy *= 0.8;
       this.x += this.vx; this.y += this.vy;
       if (this.bA0 === num2) { this.bSX = this.cx; this.bSY = this.cy; }
       this.bHitTick(game, p, dmg0);
       return;
     }
-    const lerpV = clamp01((num2 - this.bA0) / num2);   // GetLerpValue(65,0,ai0)
+    const lerpV = clamp01((num2 - this.bA0) / num2);   // GetLerpValue(59,0,ai0)（:52597 num2=59）
     let vx0 = this.bSX, vy0 = this.bSY;
     if (lerpV >= 0.5) { vx0 = p.cx; vy0 = p.cy; }      // 后半程枢轴=玩家心
     const num9 = Math.atan2(tgt.cy - vy0, tgt.cx - vx0);
@@ -4936,8 +4956,9 @@ export class MinionProj extends Entity {
     }
   }
 
-  /** 755 体触结算（同 tHitTick,bHit 于起手/链式清） */
+  /** 755 体触结算（同 tHitTick,bHit 于起手/链式清;结算体=ai156Strike 共享） */
   private bHitTick(game: GameHooks, p: Player, dmg0: number): void {
+    void p;
     for (const [k, v] of this.bHit) {
       if (v <= 1) this.bHit.delete(k); else this.bHit.set(k, v - 1);
     }
@@ -4947,16 +4968,67 @@ export class MinionProj extends Entity {
       if (this.bHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.bHit.set(en.id, 60);
-      // ★BJ492①（2026-10-04）掷率收编单源（同 946 双臂）：755 BatOfLight（血红蝙蝠杖,
-      //  SetDefaults :7779-7793 亲读,minion 旗,与 946 同 aiStyle156 族）无三类旗 →
-      //  零类掷+TimerCrit :12928+武僧 :12929-43 形位（755 恒假）——旧幻影 4% 摘除。
-      const rollCrit = rollVanillaHitCrit(this.projId, game);
-      const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
-      const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
-      const crit = rollCrit || timerCrit || monkCrit;
-      const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
-      en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
-        game, owner?.equipStats?.armorPen ?? 0, crit);
+      this.ai156Strike(game, en, dmg0);
+    }
+  }
+
+  /** ★BJ684（2026-10-15 用户实报「血红法杖吃不到鞭标记的召唤标记伤害」）：
+   *  AI_156 族（755 BatOfLight/946 EmpressBlade）体触单敌结算——旧 bHitTick/
+   *  tHitTick 直 hurt【漏 tag 链】。原版 tag 伤在 Damage_PVE_Inner 集中施加
+   *  （Projectile.cs:12947-12961 `num15 += (int)((num17+bonusTagDamage)×
+   *  ProjectileID.Sets.SummonTagDamageMultiplier[type])`）对一切随从弹生效;
+   *  本函数=contact() 通用链 :7370-7450 同式移植：
+   *  · resolveWhipTagHit（tag 加伤/TagCrit 强制暴击/OnHit proc——黑收成 916 汇出
+   *    hurtFx→darkHarvestChain 延迟落地,W5 反序判例同形）
+   *  · 暴击源并链：rollVanillaHitCrit（BJ492① 收编,755/946 无三类旗恒假零 RNG）‖
+   *    TimerCrit :12928‖武僧 :12929-43‖golemCrit 6176 背包（rollGolemSentryCrit,
+   *    :12962-12965;755/946 非 sentry 恒假,形位对齐）——res.crit 的 ×2 已嵌
+   *    res.dmg,他源强制时补一次 ×2（BJ453 并链归位式）
+   *  · applyBannerDamageDealt（:13388-13390）/穿甲两源 pen0（玩家 AP+弹 AP
+   *    :13686-87）/击退=裸 kb+minionKB（:52477-52482）方向=随从→敌 sign（755/946
+   *    不在 MINION_PLAYER_ANCHOR_KB :13652-13660 switch 族）
+   *  · 命中尾：ghostHeal（:13877-84）+pveNumHits（:14263）+noteVanillaProjImmune
+   *    （localFace 观察面,localNPCHitCooldown=-1 写梯 :14175-14179 pierce=-3 清窗
+   *    不开窗,BJ436 档）+applyProjStatus（StatusNPC :13634+6185）+
+   *    emitSpawnHitVisuals（:13633 每靶一发）+attackFlash=24
+   *  冷却域保持族私表（bHit/tHit 60t+StartAttack 清,=localNPCHitCooldown=-1 轮次
+   *  免疫近似,既判例）,本函数只管单敌结算。
+   *  SUMMON_TAG_MUL:755/946 均无表项=乘子 1（原版 CreateFloatSet(1f, 864f, 0.669f)
+   *  唯一特例 864 Smolstar,ProjectileID.cs:37——亲读定谳,无漏表值）。 */
+  private ai156Strike(game: GameHooks, en: EnemyLike & { dead: boolean; id: number }, dmg0: number): void {
+    const add = (e: unknown, b: string) =>
+      (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
+    const pendingDirect: number[] = [];
+    (en as unknown as { hurtFx?: (d: number) => void }).hurtFx = (d: number) => { pendingDirect.push(d); };
+    const rollCrit = rollVanillaHitCrit(this.projId, game);
+    const timerCrit = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
+    const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
+    const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged, dmg0, game,
+      (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
+      this.ownerRef(), 0, this.projId);
+    const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);
+    const owner0 = this.ownerRef();
+    const o0 = owner0 as unknown as { equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;
+    const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
+    const pen0 = (o0?.equipStats?.armorPen ?? 0) + (projectileData(this.projId)?.armorPenetration ?? 0);
+    const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
+      ? (owner0.cx < en.cx ? 1 : -1)
+      : Math.sign(en.cx - this.cx);
+    const mainGated = en.dead || (en as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+    const critHit = res.crit || rollCrit || timerCrit || monkCrit || golemCrit;
+    en.hurt?.(applyBannerDamageDealt(game, en, critHit && !res.crit ? res.dmg * 2 : res.dmg),
+      kbDir * (this.knockback + mkb), 0, game, pen0, critHit, -3, true);
+    if (!mainGated) {
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        en as unknown as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;   // :14263
+      noteVanillaProjImmune(game, this.projId, en.id, { penetrate: -1, localFace: true });
+      applyProjStatus(this.projId, en as unknown as Record<string, number>,
+        { catalystBand: this.ownerRef()?.equipStats.catalystBand });
+      this.emitSpawnHitVisuals(game);
+      this.attackFlash = 24;
+      // ★W5 :13711 位（主命中受理后落地,916 伤落其他敌/源敌永免 _DarkHarvest.cs:18）
+      for (const d of pendingDirect) darkHarvestChain(game, d, en.cx, en.cy, en.id);
     }
   }
 
@@ -7808,6 +7880,11 @@ export class MinionProj extends Entity {
     //  533 落 16×16（原版 20×20）
     else if (projId === 387 || projId === 388) { this.w = 40; this.h = 20; }
     else if (projId === 533) { this.w = 20; this.h = 20; }
+    // ★BJ684（2026-10-15 连坐刀）：血红蝙蝠 755 真盒 10×10（SetDefaults :7781-7782
+    //  亲读——netImportant/width=10/height=10）——此前落 16×16 缺省 = 判定盒/
+    //  湿段采样盒偏大（bHitTick AABB 亦随盒偏大）。946 盒 7×7（scale 0.75×10 截 7）
+    //  已在 terraprismaAI 首拍 tInit 设置,不在此注册。
+    else if (projId === 755) { this.w = 10; this.h = 10; }
     // ★BJ634：刃杖 864 真盒 10×10（SetDefaults :8288-8289）——此前落 16×16 缺省
     //  = 判定盒/湿段采样盒偏大（编队悬浮锚命中面亦随盒偏移）
     else if (projId === 864) { this.w = 10; this.h = 10; }

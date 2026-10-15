@@ -122,10 +122,21 @@ function timerSpy(ret = true): { box: number[][]; fn: (g: unknown, x: number, y:
 describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', () => {
   it('1a 结构锁：三面单源三段式（rollCrit/timerCrit/monkCrit,消费不短路）+全文件零 Math.random()<0.04', () => {
     const s = SRC('entities/MinionProj.ts');
-    // 三段式现役形（敌怪臂 en×2 + 城镇臂 tn×1）——ref-crit 消费不短路=vanilla
-    //  TryConsumingTimerCrit(:12928) 无条件语义（|| 链内联会短路=禁）
+    // ★BJ684（2026-10-15）锁随刀走：755/946 敌怪臂结算体收编 ai156Strike（tag 链
+    //  补课,见 tests/bj684-sanguine-bats.test.ts §2）——三段式内联位迁移：
+    //  · 敌怪臂（en×2 → ai156Strike 单源 ×1）：三段仍在+并链 critHit（res.crit‖
+    //    rollCrit‖timerCrit‖monkCrit‖golemCrit,ref-crit 消费不短路=vanilla
+    //    TryConsumingTimerCrit(:12928) 无条件语义,|| 链内联会短路=禁）
+    //  · 城镇臂（tn×1,tHitTick settle 内原位未动）
     const triple = s.match(/const rollCrit = rollVanillaHitCrit\(this\.projId, game\);\s*\n\s*const timerCrit = tryConsumeTimerCritOf\(this\.ownerRef\(\), game, (en|tn)\.x, (en|tn)\.y, (en|tn)\.w, (en|tn)\.h\);\s*\n\s*const monkCrit = monkAuraForcedCrit\(this\.ownerRef\(\), this\.projId\);\s*\n\s*const crit = rollCrit \|\| timerCrit \|\| monkCrit;/g);
-    expect(triple?.length).toBe(3);                   // 946 敌怪臂/946 城镇臂/755 臂
+    expect(triple?.length).toBe(1);                   // 946 城镇臂（tHitTick settle 原位）
+    // 敌怪臂新形：ai156Strike 内三段+并链（摘任一段/摘并链必红）
+    const a156 = s.indexOf('private ai156Strike(');
+    const a156Block = s.slice(a156, s.indexOf('private abigailBody(', a156));
+    expect(a156Block).toContain('const rollCrit = rollVanillaHitCrit(this.projId, game);');
+    expect(a156Block).toContain('tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);');
+    expect(a156Block).toContain('const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);');
+    expect(a156Block).toContain('const critHit = res.crit || rollCrit || timerCrit || monkCrit || golemCrit;');
     expect(s).not.toContain('Math.random() < 0.04');  // ★幻影基掷复辟必红
   });
 
@@ -208,8 +219,10 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
 
   it('1f 武僧强制掷形位钉（:12929-43 全链;946/755 恒假零 RNG——contact() 面运行时=BJ491 §2c/2d 承载）', () => {
     const s = SRC('entities/MinionProj.ts');
-    // 三面 monkCrit 位=三段式内联（1a 同式已数）;此处钉消费端读位=三段式含 monk 臂
-    expect(s.match(/const monkCrit = monkAuraForcedCrit\(this\.ownerRef\(\), this\.projId\);/g)?.length).toBe(3);
+    // ★BJ684 锁随刀走：敌怪臂两处（tHitTick/bHitTick）收编 ai156Strike 单源
+    //  （三段内联+tag 并链）——monkCrit 行 3→2（ai156Strike 敌怪单源 + tHitTick
+    //  城镇 settle 原位）;此处钉消费端读位=三段式含 monk 臂
+    expect(s.match(/const monkCrit = monkAuraForcedCrit\(this\.ownerRef\(\), this\.projId\);/g)?.length).toBe(2);
     // 946/755 不达 688-690 门（(projId-688)>>>0>2 恒假）——1c/1d/1e rnd 未被调已证零 RNG
   });
 });

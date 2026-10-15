@@ -4338,6 +4338,11 @@ export class Renderer {
   /** ★B1 诊断面:最近一次 chunk 格段路径（'world-gl-wall'/'world-gl-tile'/
    *  'world-2d-wall'/'world-2d-tile'）;bglPathStats=全会话分布（F5/探针面） */
   bglPathUsed = '-';
+  /** ★interp（2026-10-15 天顶剑拖尾补偿相位刀）:当前渲染帧的插值分数（-1=非
+   *  interp 帧）。Game.render 每帧写;实体绘制端消费（SwingArc trail 位移补偿的
+   *  渲染期相位退回——fixedUpdate 的 TrailingMode 4 整步平移在插值相机下=拖尾带
+   *  每步跳一个玩家位移,用户实报「飞行挥天顶剑特效残影感;静止挥无」定谳)。 */
+  interpA = -1;
   bglPathStats: Record<string, number> = {};
   /** ★B2b 探针面：worldCanvas 建面次数（acc 稳态恒 0;非 acc 帧/降级帧首次 +1） */
   b2bWorldCanvasCreations = 0;
@@ -5720,6 +5725,7 @@ export class Renderer {
     this.towerGlowQueue.length = 0;   // ★BJ509 四塔 GlowMask 残影队列逐帧重建（drawNpcGlow vel4 收集,7d''' 消费）
     this.npcWhiteLiftQueue.length = 0;   // ★BJ504 白提亮 40% 复绘队列逐帧重建（drawEnemy 收集,7d' 消费）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
+    this.heldProjCarrierQueue.length = 0;   // ★BJ682 heldProj 载体队列逐帧重建（Arrow.draw 630 收集,7e⁴ 前冲刷）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
     this._frameEntities = entities;   // _moonLordCore（月总滤镜）drawScreenFilterChain 消费
@@ -7264,6 +7270,15 @@ export class Renderer {
     //      今位=甲位 glow under 遍后（26 > 13/17/21 glow ✓）、7e⁴ 前（26 < 27 ✓）;
     //      滑轮(24)/浮游圈前半(17)与盾球次序残差登记（R2 内容整窗重放无法夹层））
     this.flushSolarShieldQueue(cam, z);
+    // 7e³·⁵ heldProj 载体弹（★BJ682 2026-10-14 用户实报「弓还是被盔甲遮住,脱掉
+    //      盔甲才正常」=BJ681 复诊面）：630 幻象弓（noUseGraphic 武器 3540 Phantasm
+    //      的视觉主体）原版 drawLayer=7 经 heldProj 在玩家层组 27_HeldItem 开头位
+    //      插入（PlayerDrawLayers.cs :3154 → PlayDrawData :4310-4330 DrawHeldProj）
+    //      =甲+甲glow(13-21)/盾(26) 之上、手持物(27)/臂glow(28) 之下。旧位=实体
+    //      弹层 postPlayerDraws（本段冲刷【前】）=被恒色甲重绘/甲位 glow 盖住。
+    //      本槽=盾球(26)后、武器随迁重放(27)前——原版 27 开头插入位逐位复刻
+    //      （26 < 630 < 27,LegacyPlayerRenderer.cs:233-235 全序）。
+    this.flushHeldProjCarriers(cam, z, viewW, viewH);
     // 7e⁴ 恒色甲件+glow 族被盖层随迁（★BJ665b：手持物/身前配饰/滑轮/坐骑前层等
     //      原版 18-38 层组——甲件恒色重绘在其下=层序保持（禁 C 裸重绘）;在甲位
     //      glow under 遍后=原版 glow 逐件后随叠画 < 22 脸饰 < 27 手持物序;本槽在
@@ -17977,6 +17992,24 @@ export class Renderer {
    *  PrismProj.draw 登记 → drawPlayer 后冲刷(世界变换仍活,世界坐标闭包直画) */
   prismCrystalQueue: Array<() => void> = [];
 
+  /** ★BJ682 heldProj 载体弹延迟绘制队列（630 幻象弓——noUseGraphic 远程武器的
+   *  视觉主体,3540 Phantasm shoot=630）。原版层位=玩家绘制层组 27_HeldItem
+   *  开头插入位（Projectile.cs :6769-6780 drawLayer=7 + AI_075 尾 :68385
+   *  heldProj=whoAmI 钉手;PlayerDrawLayers.cs :3154 记插入位 → PlayDrawData
+   *  :4310-4330 到位 DrawHeldProj→DrawProjDirect）=甲+甲glow(13-21)/盾(26)
+   *  【之上】、手持物(27)/臂glow(28)【之下】。★BJ681 只随迁了玩家层组内的
+   *  武器贴图（drawUseItem→covR3 窗）——本载体仍走实体弹层 postPlayerDraws
+   *  （:6859,7e 恒色甲重绘/甲位 glow 冲刷【之前】）=被星尘/日耀 250³/252³
+   *  不透明恒色甲硬覆盖+glow 加色洗白（探针 _bj682i-carrier.mjs 定点 48²:
+   *  stardust dark=456/wash=544 vs nebula wash=286——恒色族覆盖面≈纯 glow 族
+   *  2 倍=用户实报「弓还是被盔甲遮住,脱掉盔甲才正常」面真身,BJ681 复诊）。
+   *  Arrow.draw 630 支收集（闭包冻结当帧几何+usesOwnerLight 玩家中心光快照,
+   *  Projectile.cs :6776 usesOwnerLight=true / Main.cs :30069-30072 GetColor(
+   *  mountedCenter)）、本类 flushHeldProjCarriers 消费（7e⁴ 前一槽=盾球后/
+   *  武器随迁重放前,原版 27 开头位逐位复刻）。705/615/611/460 等 aiStyle75
+   *  同族（本仓未实装 705/无用户报面）登记不收。 */
+  heldProjCarrierQueue: Array<(ctx: CanvasRenderingContext2D) => void> = [];
+
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
    *  28/45 White 无 s、9/29 主纹理×s²（:964-969 平方分支）；叠画 23/27/30×s、
@@ -18632,6 +18665,29 @@ export class Renderer {
           });
       }
       if (this.lunarCovPool.length < 8) this.lunarCovPool.push(e.cv);
+    }
+    ctx.restore();
+  }
+
+  /** ★BJ682 heldProj 载体弹冲刷（收集侧见 heldProjCarrierQueue 注）：
+   *  世界坐标闭包直画（projFullbrightQueue 冲刷同式相机变换——flushTrailShade
+   *  :18328 同源公式）;usesOwnerLight 玩家中心光已由收集侧快照烘焙进闭包源
+   *  （满光直画原帧）。层序=盾球(26)后、武器随迁重放(27)前（原版
+   *  DrawPlayer_27_HeldItem 开头插入位,PlayerDrawLayers.cs :3154）。 */
+  private flushHeldProjCarriers(cam: Camera, z: number, viewW: number, viewH: number): void {
+    const q = this.heldProjCarrierQueue;
+    if (!q.length) return;
+    this.heldProjCarrierQueue = [];
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    ctx.save();
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-camRX, -camRY);
+    for (const paint of q) {
+      try { paint(ctx); } catch { /* 单条失败不拖垮帧（projFullbright 同习语） */ }
     }
     ctx.restore();
   }

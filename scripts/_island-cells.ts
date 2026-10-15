@@ -77,6 +77,7 @@ const rng = new RNG(gs.seed as number);
   }
 }
 // 盒态 dump 钩子:掷数阈值(岛#0 尾=chasm3 末+3153;清后=+1+4924)
+const TH_CHASM3_END = 36198583;
 const TH_ISLAND_END = 36198583 + 3153;
 const TH_CLEARS_END = TH_ISLAND_END + 4924;
 let dumped1 = false, dumped2 = false;
@@ -84,6 +85,12 @@ const origNext = rng.next.bind(rng);
 (rng as { next: () => number }).next = () => {
   const v = origNext();
   const g = (globalThis as { __drawN?: number }).__drawN ?? 0;
+  if (!dumped1 && g >= TH_CHASM3_END) {
+    let a = 0; const cells: string[] = [];
+    for (let y = 894; y <= 897; y++) for (let x = 4034; x <= 4037; x++) if (store.flags[y * w + x] & 1) { a++; cells.push(`${x},${y}`); }
+    console.log(`[mid] chasm3 后右缘簇 active=${a}/16 格:${cells.join(' ')}`);
+    dumped1 = true;
+  }
   if (!dumped1 && g >= TH_ISLAND_END) {
     dumped1 = true;
     let a = 0;

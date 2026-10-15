@@ -377,8 +377,12 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
     expect(uiSrc).toMatch(/bestiaryXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
     expect(uiSrc).toMatch(/emoteXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
     expect(uiSrc).toMatch(/trashXY\(cosUiVisible\)\.scale/);
-    expect(uiSrc).toMatch(/quickStackXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42548 chest==-1 裸门
-    expect(uiSrc).toMatch(/sortXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42586 同
+    // ★BJ685b 用户明令分歧（2026-10-15,判例锚=smart-cursor-dark-visibility-user-divergence）：
+    //   原版 QuickStack 裸门 chest==-1（Main.cs:42548）改判为分歧门——制作菜单开着
+    //   （modern 窗 ∨ classic 网格）恒显（箱条被 ChestUI.cs:81 让位藏时堆叠 UI 不再整体
+    //   不可达）;craftMenuOpen=false 缺省=原版平价。Sort 钮不在分歧面,保原版裸门。
+    expect(uiSrc).toMatch(/quickStackXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen, this\.vinvModernCraftOpen \|\| this\.vinvPipsUseGrid\)/);   // ★BJ685b 分歧门（原 :42548 裸门改判）
+    expect(uiSrc).toMatch(/sortXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42586 同（不分歧,保原版）
   });
   it('列表滚轮 = ScrollCraftingList 整批直加（★SW-FX38 重锚:Main.cs:17593 Delta/120 截断档,CraftingUI.cs:574 focusRecipe += mouseWheel——旧 max(1,steps)+round 虚生档已废）', () => {
     expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent\): void \{/);

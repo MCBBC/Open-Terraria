@@ -712,3 +712,22 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
       'whoAmI 槽位快照');
   });
 });
+
+// ★BJ683（2026-10-14）：864 返航首拍挖掘音走 WAV_MAP（dig→Dig_0/1/2）——
+// 旧 soundTrackFiles('dig') 落声轨表兜底=裸名 ['dig'] fetch 双 404（用户实报
+// SW sounds/dig.mp3 404 根因）。锚=MinionProj.ts smolstarAI 返航态 playSfx('dig')。
+describe('BJ683 864 返航首拍挖掘音文件域（dig→Dig_0/1/2,非裸名）', () => {
+  it('源锚：返航态走 playSfx（WAV_MAP 键域），零 soundTrackFiles(\'dig\') 残留', () => {
+    const src = readFileSync(join(__dirname, '..', 'src', 'entities', 'MinionProj.ts'), 'utf8');
+    expect(src).toContain("game.playSfx?.('dig', 1, this.cx, this.cy);");
+    // 排除注释域（BJ683 注释自身引用旧串）——只锁代码面零残留
+    const codeOnly = src.replace(/^\s*\/\/.*$/gm, '');
+    expect(codeOnly).not.toContain("soundTrackFiles('dig')");
+  });
+  it('表域：vanilla-soundtracks.json 无 dig 键（兜底裸名=failure mode,证明旧码必 404）', async () => {
+    const tracks = JSON.parse(readFileSync(join(__dirname, '..', 'src', 'data', 'vanilla-soundtracks.json'), 'utf8'));
+    expect(tracks).not.toHaveProperty('dig');
+    const sfx = await import('../src/core/Sfx');
+    expect(sfx.WAV_MAP.dig).toEqual(['Dig_0', 'Dig_1', 'Dig_2']);
+  });
+});

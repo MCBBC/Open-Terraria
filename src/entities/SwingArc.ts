@@ -931,6 +931,10 @@ export class ZenithSword extends Entity {
   private trailDirs: number[] = [];
   /** TrailingMode 4 玩家位移补偿（:15828-15841 numUpdates==0 时 oldPos += 玩家帧位移） */
   private lastOwnerX = 0;
+  /** ★interp:最新一步的 TrailingMode 4 补偿向量（渲染期相位退回消费,见
+   *  fixedUpdate 注;NaN=未步进（出生首步前）——渲染退回跳过）。 */
+  private lastCompX = NaN;
+  private lastCompY = NaN;
   private lastOwnerY = 0;
   /** ★BJ486③ vanilla 弹 id（SetDefaults 933 :8859 melee=true）——rollVanillaHitCrit 锚 */
   readonly projId = 933;
@@ -977,6 +981,12 @@ export class ZenithSword extends Entity {
       this.lastOwnerX = this.owner.x;
       this.lastOwnerY = this.owner.y;
     }
+    // ★interp 补偿相位快照（2026-10-15 用户实报「飞行挥天顶剑特效残影感;静止挥
+    //  无」定谳）:整步平移（60Hz 大步）vs 插值相机（平滑）=拖尾带每步跳一个玩家
+    //  位移——渲染期按 interpA 退回 (1−alpha)×最新步补偿（draw 内消费,见注）。
+    //  每步覆盖（含 0——静止步补偿=0 退回 0=恒等）。
+    this.lastCompX = odx;
+    this.lastCompY = ody;
     this.step(game);
     this.step(game);
   }
@@ -1216,6 +1226,16 @@ export class ZenithSword extends Entity {
     //  (50) 误当 widthFunction 返回值——实际返回 trailWidth=25，default 档全宽 50=参数原值。
     //  恒宽（沿程无宽度变化）：:62-65 [1457]（旧注 :61-64 系 1456 行号）。
     const tw = prof.len / 2;
+    // ★interp 补偿相位退回（2026-10-15）:trail 数组=最新一步末的整步补偿态
+    //  （fixedUpdate 里全体 += 本步玩家位移）——插值相机下渲染位应=上步末态+
+    //  整步Δ×alpha ⇔ 当前态−Δ×(1−alpha)。r=Renderer 实例（实体绘制分发
+    //  ee.draw(this,cam)）;interpA=−1（旗关/暂停帧）或补偿未步进（NaN）=零退回
+    //  =逐位旧行为。本体 cx/cy 已在实体插值域（无需退回）;hitbox 的 lineAt 消费
+    //  在 fixedUpdate 域=物理位不退回 ✓。
+    const iA = (r as { interpA?: number }).interpA ?? -1;
+    const compOK = iA >= 0 && Number.isFinite(this.lastCompX);
+    const cbx = compOK ? this.lastCompX * (1 - iA) : 0;
+    const cby = compOK ? this.lastCompY * (1 - iA) : 0;
     const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: ImageBitmap | HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1) ?? null;
     // 本体淡入淡出包络（:30799-30801 num182 与 :30840 num186 同式同参 t=localAI[0]）
     const num182 = ZenithSword.lerpV(0, 20, this.counter) * ZenithSword.lerpV(68, 60, this.counter);
@@ -1238,7 +1258,7 @@ export class ZenithSword extends Entity {
         const ptsFS: Array<{ x: number; y: number; hw: number; rot: number; r: number; g: number; b: number; a: number }> = [];
         for (let i = n - 1; i >= 1; i--) {
           const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
-          ptsFS.push({ x: this.trail[i * 3], y: this.trail[i * 3 + 1], hw: tw,
+          ptsFS.push({ x: this.trail[i * 3] - cbx, y: this.trail[i * 3 + 1] - cby, hw: tw,
             rot: this.trail[i * 3 + 2],
             r: prof.color[0] / 255 * f, g: prof.color[1] / 255 * f, b: prof.color[2] / 255 * f, a: f * 0.5 });
         }
@@ -1298,7 +1318,7 @@ export class ZenithSword extends Entity {
       if (num159 >= 60) continue;
       const j = n - 1 - num159;
       if (j < 0) continue;
-      drawIcon(c, this.trail[j * 3], this.trail[j * 3 + 1],
+      drawIcon(c, this.trail[j * 3] - cbx, this.trail[j * 3 + 1] - cby,   // ★interp 补偿退回（见 draw 头注）
         this.trail[j * 3 + 2] - Math.PI / 4 * this.spriteDir,
         (this.trailDirs[j] === -1) !== (this.spriteDir === -1), 1,
         fractalGhostAlpha(this.counter, num159, this.opacity));

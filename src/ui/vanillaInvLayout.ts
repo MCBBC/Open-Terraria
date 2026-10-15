@@ -62,8 +62,15 @@ export function trashXY(chestOrShopOpen: boolean): { x: number; y: number; scale
 // ---- 2×2 快捷钮(Main.cs:42551/42588/43147/43093) ----
 //   QuickStack(498,244) 32×30 / Sort(534,244) 30×30 —— 开箱/商店不画(42548);
 //   Bestiary(498,278) / Emote(534,278) —— 开箱/商店移 (503,446)/(539,446)(43103-43108)
-export function quickStackXY(chestOrShopOpen: boolean): { x: number; y: number } | null {
-  return chestOrShopOpen ? null : { x: 498, y: 244 };
+//   ★BJ685b 用户明令分歧（2026-10-15,判例锚=smart-cursor-dark-visibility-user-divergence）：
+//   原版 chest==-1 && npcShop==0 门（Main.cs:42548,1458=:42554）在制作菜单让位藏箱条
+//   （ChestUI.cs:81）时 = 堆叠 UI 整体不可达（用户实报 UX 断层：箱条被吞、堆叠钮又藏，
+//   两头落空）。明令分歧 = 制作菜单开着（modern 窗可见 ∨ classic 网格）恒显堆叠钮，
+//   即使 openChest 仍在（箱逻辑开着不阻堆叠——quickStackAllChests 为 600px 盒扫，
+//   含开着的箱,原版 NearbyChests 同语义）;craftMenuOpen=false 缺省 = 原版平价
+//   （制作菜单关+箱开仍藏,箱内三钮承接）。Sort 钮不在此分歧面（用户明令只及堆叠钮）。
+export function quickStackXY(chestOrShopOpen: boolean, craftMenuOpen = false): { x: number; y: number } | null {
+  return chestOrShopOpen && !craftMenuOpen ? null : { x: 498, y: 244 };
 }
 export function sortXY(chestOrShopOpen: boolean): { x: number; y: number } | null {
   return chestOrShopOpen ? null : { x: 534, y: 244 };

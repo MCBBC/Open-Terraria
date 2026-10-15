@@ -50,28 +50,34 @@ const awaitImportResetTerrain = await import('../src/world/gen/WorldGen.ts');
 (globalThis as Record<string, unknown>).__calamityTileIdByKey = TILE_BY_KEY;
 (globalThis as unknown as { __calamityGenTiles?: Record<string, number> }).__calamityGenTiles = {};
 
-// 快照载入(x 主序→行主序;gzip)
+// 快照载入(x 主序→行主序;gzip)。★699ad v2=5 bytes/格(尾字节=slope|half<<3;
+//   旧 v1=4 bytes 自动兼容——斜率补 0)
 function loadSnap(pat: string) {
   const f = readdirSync(LOGS).filter((x) => x.endsWith(pat + '.bin.gz')).sort().pop();
   if (!f) throw new Error('快照未找到: ' + pat);
   const buf = gunzipSync(readFileSync(join2(LOGS, f)));
   const w = 4200, h = 1200, n = w * h;
+  const stride = buf.length >= n * 5 ? 5 : 4;
   const type = new Uint16Array(n), wall = new Uint16Array(n);
+  const slope = new Uint8Array(n), half = new Uint8Array(n);
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-    const o = (x * h + y) * 4;
+    const o = (x * h + y) * stride;
     type[y * w + x] = buf[o] | (buf[o + 1] << 8);
     wall[y * w + x] = buf[o + 2] | (buf[o + 3] << 8);
+    if (stride === 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; }
   }
-  return { type, wall, file: f };
+  return { type, wall, slope, half, file: f };
 }
 import { join as join2 } from 'node:path';
 
 // ── FNV 对账锁边界(genprobe.log PASS 行 tf ↔ 快照 type-FNV)──
+//   ★699ad:兼容 v1(4 bytes/格)与 v2(5 bytes/格,尾字节=slope/half)——stride 探测
 const fnvOf = (buf: Uint8Array): string => {
   const w = 4200, h = 1200;
+  const stride = buf.length >= w * h * 5 ? 5 : 4;
   let hh = 0x811c9dc5;
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-    const o = (x * h + y) * 4;
+    const o = (x * h + y) * stride;
     hh ^= buf[o]; hh = Math.imul(hh, 0x01000193) >>> 0;
     hh ^= buf[o + 1]; hh = Math.imul(hh, 0x01000193) >>> 0;
   }
@@ -140,9 +146,9 @@ const MOD_ID_TO_NAME = new Map<number, number>();   // cs id → 本仓 internal
 const CS_TO_OURS = (cs: number): number => cs === 0 ? 0 : cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? 0) : (MOD_ID_TO_NAME.get(cs) ?? 0);
 const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
 
-// store 构建
+// store 构建(★699ad:透传快照 slope/half——v2 5-byte 快照;v1 快照恒 0)
 const w = 4200, h = 1200, n = w * h;
-function buildStore(snap: { type: Uint16Array; wall: Uint16Array }) {
+function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8Array; half?: Uint8Array }) {
   const type = new Uint16Array(n), flags = new Uint8Array(n);
   const wall = new Uint16Array(n), liquid = new Uint8Array(n), liquidType = new Uint8Array(n);
   const wire = new Uint8Array(n), half = new Uint8Array(n), slope = new Uint8Array(n);
@@ -151,6 +157,8 @@ function buildStore(snap: { type: Uint16Array; wall: Uint16Array }) {
     const t = CS_TO_OURS(snap.type[i]);
     type[i] = t; flags[i] = t !== 0 ? 1 : 0;
     wall[i] = snap.wall[i];
+    slope[i] = snap.slope?.[i] ?? 0;
+    half[i] = snap.half?.[i] ?? 0;
   }
   return {
     w, h, type, flags, wall, liquid, liquidType, wire, half, slope, frameX, frameY,
@@ -333,7 +341,15 @@ const rawNext = rng.next.bind(rng);
 console.log(`[replay] Abyss pass 掷数=${drawCount}`);
 (globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump?.();
 drawCount = 0;
+// ★699ad 对拍仪:掷型序日志(全局 __swDecorVLog → /tmp/our-decor-vlog.txt)
+(globalThis as Record<string, unknown>).__swDecorVLog = [];
 (decorFn as (...a: unknown[]) => void)(store, rng, gs);
+{
+  const vl = (globalThis as Record<string, unknown>).__swDecorVLog as string[];
+  writeFileSync('/tmp/our-decor-vlog.txt', vl.join('\n'));
+  console.log(`[replay] decor vlog=${vl.length} 行已落盘`);
+  (globalThis as Record<string, unknown>).__swDecorVLog = undefined;
+}
 console.log(`[replay] Decorations 掷数=${drawCount}`);
 writeFileSync('/tmp/vals-replay-chunks.txt', CHUNKS.map((h, k) => `${k}\t${(h >>> 0).toString(16)}`).join('\n'));
 writeFileSync('/tmp/vals-replay.txt', VALS_OUT.join('\n'));
@@ -541,6 +557,17 @@ for (let i = 0; i < n; i++) {
     diffByType.set(key, (diffByType.get(key) ?? 0) + 1);
     if (!firstDiff) firstDiff = `首格(${x},${y}) 我=${KEY_OF(myEff)} 真=${KEY_OF(realT)}`;
   }
+}
+// ★699z 交集测试:diff 格集落盘(与熵域 E(C,B) 求交=系统性残差)
+if (process.env.SW_DUMP_DIFF_CELLS === '1') {
+  const cells: Array<[number, number]> = [];
+  for (let i2 = 0; i2 < n; i2++) {
+    const realT2 = CS_TO_OURS(post.type[i2]);
+    const myEff2 = (store.flags[i2] & 1) ? store.type[i2] : 0;
+    if (myEff2 !== realT2) cells.push([i2 % w, Math.floor(i2 / w), KEY_OF(myEff2), KEY_OF(realT2)]);
+  }
+  writeFileSync('/tmp/replay-diff-cells.json', JSON.stringify(cells));
+  console.log(`[diffcells] ${cells.length} 格已落盘`);
 }
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
 // 局部堑壕形状指标(y∈[260,380):mound+上层走廊,岛带 382 起,岛污染不入)
