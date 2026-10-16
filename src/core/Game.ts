@@ -1,5 +1,5 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
-import { directorCamTarget, directorInputLocked } from '../mods/director';
+import { directorCamTarget, directorInputLocked, directorMoveInput } from '../mods/director';
 import { Achievements } from './Achievements';
 import { advanceGameTimeTick, globalTimeWrappedHourly } from './GameTime';   // ★BJ330 GTW 钟源（Main.TotalGameTime 等价）
 import { tileAnim } from '../render/TileAnim';
@@ -2414,6 +2414,9 @@ const PERMANENT_USE_VIDS = new Set([
   4829, 4830, 4910,   // 宠物许可证（猫/狗/兔，Player.cs:44730-44745 ItemCheck_UsePetLicenses）
   // ★5340 银河珍珠补入（V2a 复核 ⚠️b：与五兄弟同档 useStyle4/Item92/45×45
   // Item.cs:42338-42347,曾漏→无举持动画无音;旗标置位后原版全惰性）
+  5289,               // ★BJ690（2026-10-16）矿车升级包入本域（原版=左键 ItemCheck 使用,
+  //  Player.cs:43933→ItemCheck_UseMinecartPowerUp :45587-45599;曾只落右键分派域=左键
+  //  no-op 不消耗不生效——用户实报「使用后没有被消耗」根因,详见 case 5289 注）
 ]);
 /** §4 乐器 + §5 趣味使用集（Player.cs:45892-46024 ItemCheck_PlayInstruments +
  *  :44429-44462 泡泡棒 + :50933-50951 通用 UseSound 段）——逻辑在
@@ -2477,10 +2480,11 @@ const SKIPS_INITIAL_USE_SOUND = new Set<number>([2350, 4870]);
 /** ★BJ568：PERM 支（:16711）内自带起手音的档——裸挥臂起手音豁免（防双播）。
  *  5337-5342 诸矿晶 Item92（:16725）/3335 恶魔之心 Item4（:16734）/5043 火把神
  *  pickup synth（:16764）/2756 性转 'drink'（:16791）/678 红药 'drink'（:16825）/
- *  4829/4830/4910 许可证 Item92（:16944）。1326/5335 传送杖（效果支无起手音——起手
- *  音归裸挥臂=原版 StartActualUse 面,vanilla UseSound=Item8 非 SkipsInitial）与
- *  1133/4988/3601（无 UseSound 数据）不豁免。 */
-const PERM_BARESOUND_EXEMPT = new Set<number>([3335, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 678, 4829, 4830, 4910]);
+ *  4829/4830/4910 许可证 Item92（:16944）/★BJ690 5289 矿车升级包 Item4（case 自播,
+ *  表值 Item_4——曾为裸挥数据居民,入 PERM 域后防双播）。1326/5335 传送杖（效果支无
+ *  起手音——起手音归裸挥臂=原版 StartActualUse 面,vanilla UseSound=Item8 非
+ *  SkipsInitial）与 1133/4988/3601（无 UseSound 数据）不豁免。 */
+const PERM_BARESOUND_EXEMPT = new Set<number>([3335, 5289, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 678, 4829, 4830, 4910]);
 // ★SW-FX9（2026-09-10）：THROWN_NO_RECOVERY_VIDS（949/2352/2353/4986/5577,2026-08-30
 //  蓝队 B1-3 恒消耗白名单）随 dropKey 回收链整体退役——原版投掷系【全族恒消耗】
 //  （各弹 Kill 段仅音/尘/gore/光环,无 Item.NewItem:949→166 P.cs:76268-76277、
@@ -10367,16 +10371,27 @@ export class Game implements GameHooks {
       player.inputLeft = false;
       player.inputRight = false;
       player.inputDash = false;   // ★BJ508：观战态键面清零（releaseDash 置位臂照常重臂）
-    } else if (directorInputLocked()) {
-      // ★导演模式：cutscene 输入锁（观战同款整帧清零;UI 键不受影响——只清玩家控制面）
-      player.inputX = 0;
-      player.inputJump = false;
-      player.inputDown = false;
-      player.inputUp = false;
-      player.inputLeft = false;
-      player.inputRight = false;
-      player.inputDash = false;
     } else {
+      const dMove = directorMoveInput();
+      if (dMove) {
+        // ★导演走位（2026-10-16）：脚本驱动角色移动/跳（walk/walkTo;优先于键鼠）
+        player.inputX = dMove.x;
+        player.inputJump = dMove.jump;
+        player.inputDown = dMove.down;
+        player.inputUp = dMove.jump;
+        player.inputLeft = dMove.x < 0;
+        player.inputRight = dMove.x > 0;
+        player.inputDash = false;
+      } else if (directorInputLocked()) {
+        // ★导演模式：cutscene 输入锁（观战同款整帧清零;UI 键不受影响）
+        player.inputX = 0;
+        player.inputJump = false;
+        player.inputDown = false;
+        player.inputUp = false;
+        player.inputLeft = false;
+        player.inputRight = false;
+        player.inputDash = false;
+      } else {
       // M5：移动/跳经键位表（Up/Down/Left/Right/Jump action；默认=WASD+方向键+Space）
       player.inputX = (inp.downAction('Left') ? -1 : 0) + (inp.downAction('Right') ? 1 : 0);
       player.inputJump = inp.downAction('Jump') || inp.downAction('Up');
@@ -10397,6 +10412,7 @@ export class Game implements GameHooks {
         const [aimWx, aimWy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         player.inputAimWorldX = aimWx;
         player.inputAimWorldY = aimWy;
+      }
       }
     }
     // controlTorch（TriggersSet.cs:794）：火把键电平——与智能选取同源绑定
@@ -17342,6 +17358,34 @@ export class Game implements GameHooks {
           p.useTime = 30;
           this.playUseSound(3335, 'pickup');   // UseSound Item4（Item.cs:30619）
           break;
+        case 5289: { // 矿车升级包（★BJ690 2026-10-16 用户实报「使用后没有被消耗」落刀：
+          // ItemCheck_UseMinecartPowerUp Player.cs:45587-45599,:43933 调用位=左键使用链
+          // ——本支即其 1:1 域。曾只落右键分派（BJ285-② 落刀域错置）→ 左键裸挥 no-op
+          // （探针 _bj690-minecart-kit.mjs A1/A2：连用 2 次零消耗零解锁零返还）,右键臂
+          // 已整撤（原版右键零使用面——快换表 :31764-31877 无 5289;旧臂序在 interactAt/
+          // 交谈前=持套件右键门/拉杆/NPC 误耗+格交互劫持面,撤除判别锁见
+          // tests/bj690-minecart-upgrade-kit.test.ts ③）。语义面（BJ285-② 原判保持）：
+          // ApplyItemTime + [!unlockedSuperCart→置位+SendData(4)] + 【每次使用】
+          // QuickSpawnItem(3353 机械矿车)——解锁面只置一次,消耗/返还每用必走（返还面
+          // 在解锁门外 :45597=原版矿车兑换机态:已解锁再用 −1 套件 +1 矿车）;通用消耗门
+          // :43612 consumable 每用扣 1。useTime=useAnimation=30（Item.cs:41993）;UseSound
+          // Item4（:41994,表值 Item_4）;无 CanUse 门（对照 3335 :52689 专家门——5289
+          // 任意世界可用）;非 autoReuse（case 体无 autoReuse 行）→ 吞按住连发。
+          if (!this.superCartUnlocked()) {
+            (this.world.flags as Record<string, boolean>).superCart = true;
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
+          }
+          consume();
+          const cartKeyBJ690 = VI(3353);
+          if (cartKeyBJ690 && ITEM_BY_KEY[cartKeyBJ690] !== undefined) {
+            const leftBJ690 = p.inv.add(ITEM_BY_KEY[cartKeyBJ690], 1);
+            if (leftBJ690 > 0) this.spawnDrop(this.player.cx, this.player.cy, cartKeyBJ690, leftBJ690);   // QuickSpawnItem 满包落地
+          }
+          p.useTime = 30;
+          this.playUseSound(5289, 'pickup');
+          this.input.mouseDown = false;   // 非 autoReuse——吞按住连发（松手再点才再用）
+          break;
+        }
         case 5337: if (!p.usedAegisCrystal) flagOnce(() => { p.usedAegisCrystal = true; }); p.useTime = 45; break;
         case 5338: if (!p.usedAegisFruit) flagOnce(() => { p.usedAegisFruit = true; }); p.useTime = 45; break;
         case 5339: if (!p.usedArcaneCrystal) flagOnce(() => { p.usedArcaneCrystal = true; }); p.useTime = 45; break;
@@ -30079,7 +30123,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 右键「格交互族 vs NPC 交谈」仲裁分派（★SW-BJ25 2026-09-07 抽方法+移位；
    *  ★SW-BJ52 2026-09-10 箱臂命中域收原版精确域，详箱臂注）：
-   *  序 = 宝箱（光标 tile 本体精确域）→ 矿车升级套件 5289 → 可疑之眼 43 →
+   *  序 = 宝箱（光标 tile 本体精确域）→ 可疑之眼 43 →
    *  PlaceTileOnAltUse 放置族 → interactAt 全格交互 → NPC 交谈。
    *  交谈臂原版锚 = HoverOverNPCs Main.cs:43807 `talkNPC != i &&
    *  !tileInteractionHappened`——格交互（TileInteractionsUse Player.cs:32358，
@@ -30117,8 +30161,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  对话不开（FX23 探针 R2 栈实锤：interactAt:合成站臂 ← rightClickTileNpcDispatch
     //  ← updateUse）。原版帧盒悬停闩天然仲裁双向：光标在帧盒内=NPC 赢；帧盒外
     //  （BJ25 猪罐主诉的光标落在罐格、向导只是邻位）=格臂照常，两用户案并存。
-    //  物品层右键臂（矿车套件/可疑之眼/altUse 放置族）在原版属 ItemCheck 域、
-    //  先于 LookForTileInteractions，不受闩辖——本仓分派序维持原位不闩。
+    //  物品层右键臂（可疑之眼/altUse 放置族）在原版属 ItemCheck 域、
+    //  先于 LookForTileInteractions，不受闩辖——本仓分派序维持原位不闩
+    // （★BJ690 后矿车套件 5289 臂已撤——原版右键零使用面,使用域=左键 ItemCheck
+    //  1:1,见下方撤臂 tombstone 注与 PERM 支 case 5289）。
     //  闩施放时不消费 rightDown（=原版闩只消 releaseUseTile，交谈消费仍在尾臂）。
     const bubbleLatch = (() => {
       const [mxS, myS] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -30161,27 +30207,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.dialogNpc) this.closeNpcDialog(true);
       this.interactAt(tx, ty);
       this.input.rightDown = false;
-    } else if (heldDef && (heldDef.vid ?? -1) === 5289) {
-      // 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45581-45590）：
-      // ApplyItemTime + [未解锁 → unlockedSuperCart=true + SendData(4)] + 【每次使用】
-      // QuickSpawnItem(3353 机械矿车)——consumable=true（Item.cs:41990）通用消耗门
-      // 每用扣 1。即每次使用 = −1 套件 +1 机械矿车（已解锁再用=矿车兑换机,原版同态:
-      // 套件商店可复购 → 2 金币=1 矿车的原版隐性兑换）。★BJ285-②（S6）：本仓曾
-      // 「仅解锁时消耗+无返还」自造守恒 → 1:1 对齐（消耗+返还面）。
-      // SuperCart 档（runSpeed 20/accel 0.1/jump 5.15,Mount.cs:371-379）持久化于
-      // 世界 flags——解锁支与返还面解耦（原版顺序同）。
-      if (!this.superCartUnlocked()) {
-        (this.world.flags as Record<string, boolean>).superCart = true;
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
-      }
-      this.player.inv.removeHeld(1);
-      const cartKey = VI(3353);
-      if (cartKey && ITEM_BY_KEY[cartKey] !== undefined) {
-        const left = this.player.inv.add(ITEM_BY_KEY[cartKey], 1);
-        if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, cartKey, left);   // QuickSpawnItem 满包落地
-      }
-      this.cb.onInventoryChanged();
-      this.input.rightDown = false;
+    /* ★BJ690（2026-10-16）矿车升级套件 5289 右键臂已整撤：原版使用域=左键 ItemCheck
+       （Player.cs:43933→ItemCheck_UseMinecartPowerUp :45587-45599）,右键零使用面
+       （快换表 :31764-31877 无 5289）。「每用消耗+返还 3353」语义面（BJ285-② 原判）
+       原样迁入左键 PERM 支 case 5289——本臂旧序在 interactAt/交谈前,持套件右键门/
+       拉杆/NPC = 误耗套件+格交互被劫持（原版此态右键=纯格交互）。判别锁=
+       tests/bj690-minecart-upgrade-kit.test.ts ③（右键不消耗+interactAt 透传）。 */
     } else if (heldDef && (heldDef.vid ?? -1) === 43) {
       if (!this.world.clock.isDay) {
         // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）

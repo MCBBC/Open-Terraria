@@ -16,6 +16,7 @@ import resourcesJson from '../../public/sprites/resources.json';
 import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
+import { mkCanvas } from '../render/canvasEnv';   // ★2026-10-16 Tree_Bodys 裁剪特例(Tree_Bodys=Tiles_5 左上区,见 loadAtlasFile)
 
 /** npc id → 动画帧数（SetDefaults 提取数据派生；懒加载 NPC 表用） */
 const vanillaNpcFrames: Record<string, number> = Object.fromEntries(
@@ -213,15 +214,55 @@ export class SpriteAtlas {
   /** 人工标注（annotator.html 导出）：sheet → spriteName → 方位标签 */
   annotations: Record<string, Record<string, string>> = {};
 
+  /** ★2026-10-16 地形表 vanilla 化改道表:atlas 条目名(切片几何键) → 实际加载的
+   *  vanilla 同名图(像素逐位一致,Python 全图对拍 diff=0)。Tree_Bodys 例外:无同名
+   *  vanilla 文件,装载时从 Tiles_5 左上 174×264 裁剪(见 loadAtlasFile onload 特例);
+   *  Tree_Branches/Tree_Tops 及 Tiles_0/1/6/Wall_1/2 为零活消费死资产,仍改道以
+   *  保持条目完整性(装载失败也不炸——onerror 静默,反正无人 rect() 它们)。 */
+  private static readonly TERRAIN_FROM_VANILLA: Readonly<Record<string, string>> = {
+    '地形/Tiles_0.png': 'vanilla/Tiles_0.png',
+    '地形/Tiles_1.png': 'vanilla/Tiles_1.png',
+    '地形/Tiles_2.png': 'vanilla/Tiles_2.png',
+    '地形/Tiles_3.png': 'vanilla/Tiles_3.png',
+    '地形/Tiles_6.png': 'vanilla/Tiles_6.png',
+    '地形/Tree_Bodys.png': 'vanilla/Tiles_5.png',
+    '地形/Tree_Branches.png': 'vanilla/Tree_Branches_0.png',
+    '地形/Tree_Tops.png': 'vanilla/Tree_Tops_0.png',
+    '地形/Wall_1.png': 'vanilla/Wall_1.png',
+    '地形/Wall_2.png': 'vanilla/Wall_2.png',
+  };
+
   /** 装载单张 atlas 表进 images（hardAlpha 二值化 + 异步 ImageBitmap 升格，
-   *  竞态守卫同旧内联版）。load() 启动预载与 preloadMaplesWorld() 共用 */
+   *  竞态守卫同旧内联版）。load() 启动预载与 preloadMaplesWorld() 共用。
+   *  ★2026-10-16 地形表 vanilla 化(用户判例:地形/*.png 与 vanilla 同名图像素级
+   *  逐位一致,Python 全图对拍 diff=0;Tree_Bodys=Tiles_5 左上 174×264 同像素):
+   *  实际加载的 png 源按 ATLAS_FILE_REMAP 改道 vanilla/——atlas.json 条目仅作
+   *  【切片几何表】保留(同名切片像素同位,整图全等⇒几何平移恒等),AutoTiler/
+   *  ChunkBake 消费面零改动;public/sprites/地形/ 目录随之退役(仅留 atlas.json
+   *  几何登记,不再有 png 文件)。 */
   private loadAtlasFile(f: string): Promise<void> {
     return new Promise<void>((resolve) => {
       const img = new Image();
       img.onload = () => {
         // 根源处理：整图硬 alpha —— 抗锯齿半透明像素（提取 PNG 的灰/黑镶边来源）
         // 二值化为 0/255，所有消费方（tile/墙/图标/角色）统一获得干净像素
-        const hc = hardAlpha(img);
+        let hc = hardAlpha(img);
+        // ★2026-10-16:Tree_Bodys 无 vanilla 同名文件——它=Tiles_5 左上 174×264
+        // 区域(像素已证),装载时从 Tiles_5 位图裁剪出该区域当 Tree_Bodys 图,
+        // 切片几何(Tree_Bodys_N,Unity y-up 域)与原图逐位同位。
+        if (f === '地形/Tree_Bodys.png') {
+          const t5 = this.images.get('vanilla/Tiles_5.png');
+          if (t5) {
+            const cv = mkCanvas(174, 264);
+            if (cv) {
+              const cx = cv.getContext('2d')!;
+              cx.imageSmoothingEnabled = false;
+              // Tiles_5 经 hardAlpha 后为 canvas/bitmap,先裁剪再统一走替换链
+              cx.drawImage(t5, 0, 0, 174, 264, 0, 0, 174, 264);
+              hc = cv as unknown as HTMLCanvasElement;
+            }
+          }
+        }
         this.images.set(f, hc);
         // ★异步升格 ImageBitmap(2026-08-19 双开 IOSurface 审计:hardAlpha 家族
         // 18 张/窗持久 canvas 后备;bitmap = CPU 常驻+绘制同走硬件+GPU 拷贝
@@ -242,7 +283,10 @@ export class SpriteAtlas {
         resolve();
       };
       img.onerror = () => resolve();
-      img.src = `sprites/${encodeURI(f)}`;
+      // ★2026-10-16 地形表 vanilla 化:实际 png 源改道(见 loadAtlasFile 头注);
+      //   srcOf 图上同名切片几何与像素逐位同位(整图全等已证)。
+      const srcOf = SpriteAtlas.TERRAIN_FROM_VANILLA[f] ?? f;
+      img.src = `sprites/${encodeURI(srcOf)}`;
     });
   }
 

@@ -7,7 +7,9 @@ mkdirSync('/tmp/probe-out/_director-iso', { recursive: true });
 const L = ledger();
 const wss = new WebSocketServer({ port: 7788 });
 let mod = null;
-wss.on('connection', ws => { mod = ws; });
+wss.on('connection', ws => {
+  ws.on('message', d => { try { const m = JSON.parse(d); if (m.op === 'hello' && (m.v ?? 0) >= 2) mod = ws; } catch {} });
+  if (!mod) mod = ws;  // 首个兜底 });
 
 let vite = null, ORIGIN = 'http://localhost:5199';
 try { const r = await fetch(ORIGIN, { signal: AbortSignal.timeout(1500) }); if (!r.ok) throw 0; } catch {
@@ -21,7 +23,7 @@ try {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log(`[${m.type()}]`, m.text().slice(0, 220)); });
   await gotoApp(page, ORIGIN, { tries: 40 });
   const inst = await page.evaluate(async () => {
-    const res = await fetch('/mods/dist/director.swmod');
+    const res = await fetch('/mods/dist/director.swmod?t=' + Date.now());
     const bytes = new Uint8Array(await res.arrayBuffer());
     const { ModStore } = await import('/src/mods/store.ts');
     const { readModPack } = await import('/src/mods/pack.ts');

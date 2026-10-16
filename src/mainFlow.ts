@@ -4,6 +4,7 @@ import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
 import { Game, grantStarterKit } from './core/Game';
 import { WorldGenAbortedError } from './world/gen/WorldGen';   // ★IIIII229 ① Esc 中止判别
 import { peekSaveDims, worldGenTimeoutMs } from './workers/WorldGenClient';   // ★BJ336 件1 读档超时扩面
+import { World } from './world/World';   // 空白世界直通道（导演模式 2026-10-16）
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { resolveTouchMode } from './core/input/touchMode';
@@ -770,6 +771,22 @@ function makeGame(): Game {
 
   // ---- 世界流程 ----
 
+  /** 新世界角色携带（★导演桥补正 2026-10-16 数据事故）：与 createWorldFlow 同段——
+   *  已有角色随身态则背包/装备/储物/buff 随角色进世界。__swFlow.newWorld 裸桥曾缺
+   *  此段=空 Inventory 玩家进场，一旦触发任何存档（BJ280 卸载守卫/退出即存档/
+   *  快速存档），doSave 的 charState 同步会把空 player 写进角色随身档
+   *  （sandboxworld.playerstate.<cid>）=「角色物品装备全丢」。 */
+  async function carryCharState(g: Game) {
+    const cid = charContextId();
+    rememberCharId(cid);
+    const cs = cid != null ? await charStore.getState(cid) : null;
+    if (cs) {
+      const sx = g.player.x, sy = g.player.y;
+      applyPlayer(g, { ...playerFromDiskForm(cs), x: sx, y: sy });
+      applyCharJourney(g, cs);   // 旅程力量玩家侧随身（IPersistentPerPlayerContent）
+    }
+  }
+
   async function newWorld(seed: string, w: number, h: number) {
     // ★顺序即正确性(#三开压测批续):先挂进度页与预热,再让出一个宏任务——
     // 预热定时器(0ms)必然先于本函数的续体执行,buildAssets 在【独立 task】跑完;
@@ -780,6 +797,33 @@ function makeGame(): Game {
     const g = makeGame();
     await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label ?? ''), p));   // label=undefined（粘滞文案）仅此合成探针路径，直收窄空串
+    await carryCharState(g);   // ★导演桥补正：角色随身态随角色进新世界（防空玩家存档覆写角色档）
+  }
+
+  /** 空白世界直通道（导演模式 2026-10-16）——不走 worldgen 流水线：
+   *  构造全零 World + 显式补出生点/地层线 + 出生台座，loadWorld(settled) 秒进。
+   *  供导演 mod 测试与自定义地形拍摄（buildScript/fillRect 现画）；真实地形仍走 newWorld。 */
+  async function blankWorld(w = 2100, h = 700) {
+    ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.4);
+    await startAssetPrewarm();
+    const g = makeGame();
+    await ensureCharAppearanceFiles();   // 与 newWorld 同链（角色贴图就绪再进世界）
+    const world = new World(w | 0, h | 0, 20261016, '空白世界');
+    const sx = Math.floor(w / 2), sy = Math.floor(h * 0.3);
+    world.spawnX = sx; world.spawnY = sy;
+    world.spawnX0 = sx; world.spawnY0 = sy;
+    world.groundLevel = Math.floor(h * 0.22);
+    world.rockLevel = Math.floor(h * 0.45);
+    world.lavaLine = Math.floor(h * 0.82);
+    // 出生台座：afterWorldLoad 落位=player 顶 (spawnY-3)*TILE、脚底踩 spawnY 行顶面
+    //（Game.ts :7996）——草面(sy)+泥土(sy+1..sy+3)；空白世界脚下无台座即坠落到底
+    const dirt = TILE_BY_KEY['dirt'] ?? 1, grass = TILE_BY_KEY['grass'] ?? 3;
+    for (let x = sx - 48; x <= sx + 48; x++) {
+      world.store.setTile(x, sy, grass);
+      for (let y = sy + 1; y <= sy + 3; y++) world.store.setTile(x, y, dirt);
+    }
+    await g.loadWorld(world, (label, p) => ui.showProgress(Lang.worldgenText(label ?? ''), p), { settled: true });
+    await carryCharState(g);   // ★导演桥补正：同 newWorld（防空玩家存档覆写角色档）
   }
 
   /** 把选中角色的外观应用到玩家（进游戏后调用）。联机时补发 SyncPlayer——
@@ -1359,7 +1403,11 @@ function makeGame(): Game {
   const menuTickCapOn = (() => {
     try {
       if ((window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell) return false;
-      return new URLSearchParams(location.search).get('menutickcap') !== '0';
+      // ★2026-10-16 用户实报后提频翻转:浏览器缺省钳 60=保守残留——menuTick 全链
+      //  dt 归一（frames=dtMs/(1000/60),速度与频率无关）,钳门只把横滚/云/天体
+      //  压成 60Hz 步进（120fps 屏=跳步,与游戏内 interp 前同型体感）;桌面壳早已
+      //  放开验证。翻转:缺省每 rAF tick（120fps 平滑）,?menutickcap=1 复刻旧行为。
+      return new URLSearchParams(location.search).get('menutickcap') === '1';
     } catch { return false; }
   })();
   const MENU_TICK_MIN_MS = 1000 / 60 - 2.5;
@@ -2230,6 +2278,7 @@ function makeGame(): Game {
   // 调试桥（puppeteer 脚本用）
   (window as unknown as { __swFlow?: unknown }).__swFlow = {
     newWorld: (seed: string, w: number, h: number) => newWorld(seed, w, h),
+    blankWorld: (w: number, h: number) => blankWorld(w, h),   // 空白世界直通道（导演/探针：免 worldgen 秒进）
     quickLoad,
     importWld,
     quitToMenu,

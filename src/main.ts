@@ -968,10 +968,10 @@ kvHas('sandboxworld.quicksave').catch((e) => {
             const rows = await store.listRows();
             const existing = rows.find((r) => r.id === pack.manifest.id);
             if (!existing || existing.version !== pack.manifest.version) {
-              await store.install(pack.manifest, bytes, (pack as import("./mods/types").ModPack).iconDataUrl);
-              // ★P4 红蓝修正(D-M3):版本覆盖重装保留用户启停态(install 缺省 enabled,
-              //  旧实现每次启动把面板停用强制翻回=目录压过注册表)
-              if (existing && !existing.enabled) await store.setEnabled(pack.manifest.id, false);
+              // ★2026-10-16 install 语义升级:重装自动保留 existing.enabled(store 内);
+              // 首装显式 enabled:true(目录=真相源,自动发现即启用——缺省已改 false)
+              await store.install(pack.manifest, bytes, (pack as import("./mods/types").ModPack).iconDataUrl,
+                { enabled: true });
             }
             // 同版本已装:不动启停态(用户面板语义权威)
           } catch (err) {
@@ -1002,7 +1002,9 @@ kvHas('sandboxworld.quicksave').catch((e) => {
           import('./mods/store'), import('./mods/pack'),
         ]);
         const pack = readModPack(bytes);
-        return new ModStore().install(pack.manifest, bytes, pack.iconDataUrl);
+        // ★2026-10-16:首装 enabled:true(探针/自动化路径靠 boot 装载=须启用态;
+        //  重装保留既有启停——store.install 语义)
+        return new ModStore().install(pack.manifest, bytes, pack.iconDataUrl, { enabled: true });
       },
     };
   } catch (err) {

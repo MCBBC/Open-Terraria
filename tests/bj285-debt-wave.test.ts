@@ -27,57 +27,76 @@ import { exportPlr, parsePlr } from '../src/save/PlrImport';
 import { createDecipheriv } from 'node:crypto';
 import type { GameHooks } from '../src/entities/types';
 import { languageManager } from '../src/i18n/LanguageManager';
+import { newWiresRadialState } from '../src/stats/wiresRadial';
 
 languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
 // ================================================================
-// ② C1 永久旗标消耗品（S6）
+// ② C1 永久旗标消耗品（S6）——★BJ690（2026-10-16）改判：5289 使用域自右键分派
+//    迁回左键 ItemCheck（原版 Player.cs:43933 调用位,右键零使用面）——本 describe
+//    随迁左键链驱动,消耗+返还+解锁断言面（BJ285-② 原判）不变。右键臂已整撤
+//    （持套件右键门/拉杆误耗+格交互劫持面,判别锁=tests/bj690-minecart-upgrade-kit.test.ts）。
 // ================================================================
-describe('BJ285-② 5289 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45581-45590）', () => {
-  /** 合成 Game 最小面：rightClickTileNpcDispatch 只读 input/camera/world/player/cb */
+describe('BJ285-② 5289 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45587-45599;★BJ690 域迁左键）', () => {
+  /** BJ568 stubGame 同构（updateUse 可驱动最小 Game 桩）——左键使用链 */
   function makeKitHarness(kits: number) {
-    const w = new World(80, 80, 30, 'bj285-kit');
-    const inv = new Inventory();
     const kitId = ITEM_BY_KEY['vi_5289_minecart_upgrade_kit'];
-    inv.slots[0] = { id: kitId, stack: kits };
-    inv.selected = 0;
-    const spawnDrop = vi.fn();
-    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
-      rightClickTileNpcDispatch: (tx: number, ty: number, held: unknown) => boolean;
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    const player = new Player(50 * 16, 90 * 16, new Inventory());
+    player.inv.slots[0] = { id: kitId, stack: kits };
+    player.inv.selected = 0;
+    g.player = player;
+    g.world = new World(120, 120, 30, 'bj285-kit');
+    g.entities = { critters: [], npcs: [], enemies: [], projectiles: [], add: () => {} };
+    g.input = {
+      mouseDown: false, mouseHeld: false, mouseX: 700, mouseY: 300,
+      rightDown: false, uiBlocking: false, downAction: () => false,
     };
-    g.world = w;
-    g.player = { inv };
-    g.input = { rightDown: true };
-    g._prevRightDown = false;
-    g.tileInteractHappened = false;
-    g.dialogNpc = null;
-    g.camera = { screenToWorld: () => [0, 0] };
-    g.npcChatBubbleHovered = () => false;
-    g.wiring = undefined;
-    g.cb = { onInventoryChanged: vi.fn(), onToast: vi.fn() };
-    g.spawnDrop = spawnDrop;
-    return { g, w, inv, spawnDrop };
+    g.camera = { tileUnder: () => [60, 60], screenToWorld: () => [800, 0], x: 800, y: 0 };
+    g.renderer = { canvas: { width: 800, height: 600 }, fullMap: { open: false }, timeUiHover: false, weatherUiHover: false };
+    g.smartCursor = { showing: false };
+    g.wiresRadial = newWiresRadialState();
+    g.annotateMode = false;
+    g.prevSwingMouse = false;
+    g.mining = null;
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g.achievements = { handleSpecialEvent: () => {} };
+    g.sfx = { play: () => {}, playWav: () => {}, playWavFile: () => {}, playFiles: () => {} };
+    g.playSfxFile = () => {};
+    g.playSfxWav = () => {};
+    g.playSfxFiles = () => {};
+    g.playUseSound = () => {};
+    const cb = { onInventoryChanged: vi.fn(), onToast: vi.fn() };
+    g.cb = cb;
+    g.spawnDrop = vi.fn();
+    const useLeft = () => {
+      player.useTime = 0;
+      (g.input as { mouseDown: boolean }).mouseDown = true;
+      (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
+      (g.input as { mouseDown: boolean }).mouseDown = false;
+    };
+    return { g, w: g.world as World, inv: player.inv, useLeft, cb };
   }
 
-  it('每次使用都消耗 1 并返还 3353 机械矿车（旧=仅解锁时消耗+无返还）', () => {
-    const { g, w, inv } = makeKitHarness(2);
+  it('每次使用都消耗 1 并返还 3353 机械矿车（旧=仅解锁时消耗+无返还;BJ690 前左键整缺）', () => {
+    const { w, inv, useLeft } = makeKitHarness(2);
     const cartId = ITEM_BY_KEY['vi_3353_mechanical_cart'];
     // 首用：解锁 + 消耗 + 返还
-    g.rightClickTileNpcDispatch(5, 5, { vid: 5289 });
+    useLeft();
     expect(inv.slots[0]!.stack).toBe(1);                       // 套件 −1（首用）
     expect(inv.slots.find((s) => s && s.id === cartId)?.stack).toBe(1);  // +1 机械矿车
-    expect(w.flags.superCart).toBe(true);                      // 解锁旗（unlockedSuperCart）
-    // 次用：已解锁仍消耗+返还（原版 :45589 QuickSpawnItem 在解锁门外=矿车兑换机）
-    (g.input as { rightDown: boolean }).rightDown = true;
-    g.rightClickTileNpcDispatch(5, 5, { vid: 5289 });
+    expect((w.flags as Record<string, boolean>).superCart).toBe(true);   // 解锁旗（unlockedSuperCart）
+    // 次用：已解锁仍消耗+返还（原版 :45597 QuickSpawnItem 在解锁门外=矿车兑换机）
+    useLeft();
     expect(inv.slots[0]).toBeNull();                           // 套件 −1（次用,旧实现=不耗）
     expect(inv.slots.find((s) => s && s.id === cartId)?.stack).toBe(2);  // +1 机械矿车
   });
 
   it('末枚套件使用：套件消失且仍返还矿车（消耗先于返还,QuickSpawnItem 同拍）', () => {
-    const { g, inv } = makeKitHarness(1);
+    const { inv, useLeft } = makeKitHarness(1);
     const cartId = ITEM_BY_KEY['vi_3353_mechanical_cart'];
-    g.rightClickTileNpcDispatch(5, 5, { vid: 5289 });
+    useLeft();
     expect(inv.slots[0]).toBeNull();                           // 套件耗尽
     expect(inv.slots.find((s) => s && s.id === cartId)?.stack).toBe(1);  // 返还照常
   });

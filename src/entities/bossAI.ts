@@ -244,10 +244,11 @@ const baseOf = (e: Enemy) => {
 // 注册表抽叶模块 enemyCtorRegistry.ts（2026-08-26 根修:活环导入序脆弱点,
 // 见该文件头注）;此处仅消费 getEnemyCtor()。
 
-export function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null {
+/** ax/ay=出生锚覆写（缺省 src 中心;★BJ688 地牢魂 288 随 checkDead 掉落锚重定位） */
+export function spawnPart(game: GameHooks, src: Enemy, id: number, ax?: number, ay?: number): Enemy | null {
   const enemyCtor = getEnemyCtor();
   if (!enemyCtor) return null;
-  const p = enemyCtor.fromVanilla(id, src.cx, src.cy);
+  const p = enemyCtor.fromVanilla(id, ax ?? src.cx, ay ?? src.cy);
   if (!p) return null;
   return addEnemy(game, p);
 }

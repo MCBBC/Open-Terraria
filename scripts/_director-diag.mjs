@@ -24,7 +24,7 @@ try {
   page.on('console', m => { const t = m.text(); if (m.type() === 'error' || t.includes('director') || t.includes('导演')) console.log('[console]', t.slice(0, 200)); });
   await gotoApp(page, ORIGIN, { tries: 40 });
   const inst = await page.evaluate(async () => {
-    const res = await fetch('/mods/dist/director.swmod');
+    const res = await fetch('/mods/dist/director.swmod?t=' + Date.now());
     const bytes = new Uint8Array(await res.arrayBuffer());
     const { ModStore } = await import('/src/mods/store.ts');
     const { readModPack } = await import('/src/mods/pack.ts');

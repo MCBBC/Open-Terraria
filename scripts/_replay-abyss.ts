@@ -60,14 +60,15 @@ function loadSnap(pat: string) {
   const w = 4200, h = 1200, n = w * h;
   const stride = buf.length >= n * 5 ? 5 : 4;
   const type = new Uint16Array(n), wall = new Uint16Array(n);
-  const slope = new Uint8Array(n), half = new Uint8Array(n);
+  const slope = new Uint8Array(n), half = new Uint8Array(n), act = new Uint8Array(n);
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
     const o = (x * h + y) * stride;
     type[y * w + x] = buf[o] | (buf[o + 1] << 8);
     wall[y * w + x] = buf[o + 2] | (buf[o + 3] << 8);
-    if (stride === 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; }
+    if (stride === 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; act[y * w + x] = (fl >> 4) & 1; }
+    // ★699az:v3 位 bit4=active(解 type0 二义:活泥土≠空格;旧档 bit4=0 回退 type≠0)
   }
-  return { type, wall, slope, half, file: f };
+  return { type, wall, slope, half, act, file: f };
 }
 import { join as join2 } from 'node:path';
 
@@ -149,14 +150,14 @@ const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
 
 // store 构建(★699ad:透传快照 slope/half——v2 5-byte 快照;v1 快照恒 0)
 const w = 4200, h = 1200, n = w * h;
-function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8Array; half?: Uint8Array }) {
+function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8Array; half?: Uint8Array; act?: Uint8Array }) {
   const type = new Uint16Array(n), flags = new Uint8Array(n);
   const wall = new Uint16Array(n), liquid = new Uint8Array(n), liquidType = new Uint8Array(n);
   const wire = new Uint8Array(n), half = new Uint8Array(n), slope = new Uint8Array(n);
   const frameX = new Uint16Array(n), frameY = new Uint16Array(n);
   for (let i = 0; i < n; i++) {
     const t = CS_TO_OURS(snap.type[i]);
-    type[i] = t; flags[i] = t !== 0 ? 1 : 0;
+    type[i] = t; flags[i] = (snap.act?.[i] || t !== 0) ? 1 : 0;   // ★699az:v3 bit4 权威(active-dirt 载活)
     wall[i] = snap.wall[i];
     slope[i] = snap.slope?.[i] ?? 0;
     half[i] = snap.half?.[i] ?? 0;
@@ -349,6 +350,9 @@ if (process.env.SW_DUMP_AT) {
 }
 (abyssFn as (...a: unknown[]) => void)(store, rng, gs);
 (globalThis as Record<string, unknown>).__swPassVLogOn = false;
+console.log(`[replay] Abyss pass 掷数=${drawCount}`);
+for (const s2 of (globalThis as { __swDumpOut?: string[] }).__swDumpOut ?? []) console.log(s2);   // ★699at 区域快照
+(globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump?.();
 {
   // ★699at 放置坐标流对拍:我方 walk+clumps 放置 [drawN,x,y] ↔ 真链 SF 行(N,x,y)。
   //   掷值流全合而坐标差 = clumps ty 洞降漂移(无掷状态读)的直读判卷。
@@ -383,6 +387,25 @@ if (process.env.SW_DUMP_AT) {
       console.log(`[sf] ⚠前缀全合但长度差:我=${ours} 真=${tN.length}(Δ${ours - tN.length})`);
     }
   }
+}
+drawCount = 0;
+(globalThis as Record<string, unknown>).__swDecorVLog = []; (globalThis as Record<string, unknown>).__swSlopeTrace = []; (globalThis as Record<string, unknown>).__swBlotchTrace = [];
+(globalThis as Record<string, unknown>).__swSSKills = [];
+(decorFn as (...a: unknown[]) => void)(store, rng, gs);
+{
+  const vl = (globalThis as Record<string, unknown>).__swDecorVLog as string[];
+  writeFileSync('/tmp/our-decor-vlog.txt', vl.join('\n'));
+{
+  const st = (globalThis as { __swSlopeTrace?: string[] }).__swSlopeTrace;
+  if (st && st.length) console.log('[slope-trace] ' + st.length + ' 条:\n' + st.join('\n'));
+}
+{
+  const bt = (globalThis as { __swBlotchTrace?: string[] }).__swBlotchTrace;
+  if (bt && bt.length) console.log('[blotch-trace]\n' + bt.join('\n'));
+}
+  console.log(`[replay] decor vlog=${vl.length} 行已落盘`);
+  writeFileSync('/tmp/ss-kills.txt', ((globalThis as Record<string, unknown>).__swSSKills as string[] | undefined)?.join('\n') ?? '');
+  (globalThis as Record<string, unknown>).__swDecorVLog = undefined;
 }
 {
   // ★699at 对拍仪:我方 PV(typed 压缩)↔ 真链 V 行(流式解析)。首值差=流位首分歧;
@@ -447,9 +470,10 @@ if (process.env.SW_DUMP_AT) {
       } else {
         console.log(`[pv] 对齐(probe=${probeUsed}):我方掷#1 ↔ 真链 N=${tN[j0]}(行${j0})`);
         const lim = Math.min(PV.n, tRows - j0);
+        const after = Number(process.env.SW_PV_AFTER ?? 0);
         let firstBad = -1, badCount = 0;
         for (let i = 0; i < lim; i++) {
-          if (!eq(PV.kab[i], PV.val[i], tKab[j0 + i], tVal[j0 + i])) { if (firstBad < 0) firstBad = i; badCount++; }
+          if (!eq(PV.kab[i], PV.val[i], tKab[j0 + i], tVal[j0 + i])) { if (firstBad < 0 && i >= after) firstBad = i; badCount++; }
         }
         console.log(`[pv] 比对 ${lim} 掷:首值差@掷#${firstBad + 1}(drawN=${firstBad + 1},段=${firstBad >= 0 ? segOf(firstBad + 1) : '-'}) 值差总数=${badCount}`);
         if (firstBad >= 0) {
@@ -474,19 +498,6 @@ if (process.env.SW_DUMP_AT) {
       }
     } else console.log('[pv] 真链日志不存在,跳过对拍');
   }
-}
-console.log(`[replay] Abyss pass 掷数=${drawCount}`);
-for (const s of (globalThis as { __swDumpOut?: string[] }).__swDumpOut ?? []) console.log(s);   // ★699at 区域快照
-(globalThis as { __swAbyssSegDump?: () => void }).__swAbyssSegDump?.();
-drawCount = 0;
-// ★699ad 对拍仪:掷型序日志(全局 __swDecorVLog → /tmp/our-decor-vlog.txt)
-(globalThis as Record<string, unknown>).__swDecorVLog = [];
-(decorFn as (...a: unknown[]) => void)(store, rng, gs);
-{
-  const vl = (globalThis as Record<string, unknown>).__swDecorVLog as string[];
-  writeFileSync('/tmp/our-decor-vlog.txt', vl.join('\n'));
-  console.log(`[replay] decor vlog=${vl.length} 行已落盘`);
-  (globalThis as Record<string, unknown>).__swDecorVLog = undefined;
 }
 console.log(`[replay] Decorations 掷数=${drawCount}`);
 writeFileSync('/tmp/vals-replay-chunks.txt', CHUNKS.map((h, k) => `${k}\t${(h >>> 0).toString(16)}`).join('\n'));
@@ -708,6 +719,17 @@ if (process.env.SW_DUMP_DIFF_CELLS === '1') {
   console.log(`[diffcells] ${cells.length} 格已落盘`);
 }
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
+// ★699aw:slope 对拍(藤种门/PlacePot 门读 slope——型差=0 而 slope 差=装饰段阻塞根因)
+{
+  let sdiff = 0;
+  const scells: string[] = [];
+  for (let i2 = 0; i2 < n; i2++) {
+    const x2 = i2 % w;
+    if (x2 < 3860 || x2 >= 4200) continue;   // 深渊域外=pass120 fallout 不涉
+    if (post.slope[i2] !== store.slope[i2]) { sdiff++; if (scells.length < 30) scells.push(`${x2},${Math.floor(i2 / w)} 我=${store.slope[i2]} 真=${post.slope[i2]}`); }
+  }
+  console.log(`[replay] slope 差=${sdiff}: ${scells.join(' | ')}`);
+}
 // 局部堑壕形状指标(y∈[260,380):mound+上层走廊,岛带 382 起,岛污染不入)
 {
   let band = 0;

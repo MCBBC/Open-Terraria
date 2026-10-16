@@ -224,7 +224,8 @@ describe('BJ568 普查：全 useStyle>0 非工具 vid 起手拍 exactly-once', (
     const doubles: string[] = [];
     const misses: string[] = [];
     // 裸挥数据居民（BJ568 定谳普测产物:全量居民中有 UseSound 表值者恰此六件——
-    // 三网+226 蠕虫合并对等件(func 226→227 缺档)+5437 贝壳手机坯+5289 矿车套件）
+    // 三网+226 蠕虫合并对等件(func 226→227 缺档)+5437 贝壳手机坯+5289 矿车套件
+    // ——★BJ690 后 5289 迁 PERM 支 case 自播,exactly-once 面不变仍属数据居民）
     const DATA_RESIDENTS = new Set([1991, 3183, 4821, 226, 5437, 5289]);
     let checked = 0;
     for (const vidStr of Object.keys(VANILLA_ITEM_KEY_BY_ID)) {
@@ -258,7 +259,8 @@ describe('BJ568 结构锁：裸挥臂起手 UseSound 门', () => {
   it('bareSoundClaimed 豁免面：combatWeapon 全 kind+弹药体系+PERM 发声档+孤儿投掷族', () => {
     expect(GAME_SRC).toMatch(/if \(combatWeapon\(def\)\) return true;/);
     expect(GAME_SRC).toMatch(/if \(c0 && \(c0\.useAmmo \|\| c0\.ammo \|\| c0\.shoot\)\) return true;/);
-    expect(GAME_SRC).toMatch(/const PERM_BARESOUND_EXEMPT = new Set<number>\(\[3335, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 678, 4829, 4830, 4910\]\);/);
+    // ★BJ690（2026-10-16）：5289 矿车升级包迁入 PERM 支（case 自播 Item4）→ 入豁免面
+    expect(GAME_SRC).toMatch(/const PERM_BARESOUND_EXEMPT = new Set<number>\(\[3335, 5289, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 678, 4829, 4830, 4910\]\);/);
     expect(GAME_SRC).toMatch(/ORPHAN_B1_BUFF_VIDS\.has\(vid\) \|\| ORPHAN_B2_VIDS\.has\(vid\)/);
   });
 });

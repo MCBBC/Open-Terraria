@@ -15647,6 +15647,30 @@ export class Enemy extends Entity {
       // 求值序对照 NPCLoot(:79628)：规则 → 钱币 → 心星（Boss 另有药水+心）。
       // 联机傀儡跳过：掉落权威在房主（真身死亡掉落经 msg21 广播，本地生成会被
       // 自己的 netDropSweep 当作本端掉落二次广播 → 幽灵物品+重复掉落）
+      // ★BJ688（2026-10-16 用户实报「打完毁灭者零掉落」定谳）：checkDead 掉落锚
+      //  重定位（NPC.cs:79003-79024 type==134 专支）——NPCLoot 前头 position 临时
+      //  顶替为【距 Main.player[target] 曼哈顿最近的在场 134/135/136 段】position，
+      //  掉落全落玩家交战处后再还原。毁灭者头常钻地/出屏（80 段链 ~3500px），缺位时
+      //  全套战利品生成在头位（探针 _bj688 实证：头移远 3150px 时 14-15 件掉落全部
+      //  落在头位 3px 内、距玩家 3110px = 玩家侧零可见「打完零掉落」）。锚=胜段中心
+      //  （DropItemFromNPC CommonCode.cs:13-14 position+w/2,+h/2）；窗口=整个掉落段
+      //  （规则+钱币+心星+Boss 药水+MP instanced 袋+地牢魂墙门,原版 NPCLoot 全程顶替
+      //  ——死亡音/尘/gore 在原版 HitEffect/78997 先行,不在此窗,仍用头真位）。
+      //  段 dead 不滤：级联 :15631 已先翻位而原版 active=false 在 NPCLoot 后才置
+      //  （数组在场=active 同义）;含头自身（原版扫描含 whoAmI 槽,头最近时锚=头）。
+      //  非 134 恒自身中心 = 零漂移（134 的规则集无位置条件,ctx.x/y 不受影响）。
+      let lootX = this.cx, lootY = this.cy;
+      if (this.vanillaId === 134) {
+        const tpBJ688 = this.targetRef(game) ?? game.player;
+        if (tpBJ688) {
+          let bestBJ688 = Infinity;
+          for (const o of game.enemies() as Enemy[]) {
+            if (o.vanillaId !== 134 && o.vanillaId !== 135 && o.vanillaId !== 136) continue;
+            const dBJ688 = Math.abs(o.cx - tpBJ688.cx) + Math.abs(o.cy - tpBJ688.cy);
+            if (dBJ688 < bestBJ688) { bestBJ688 = dBJ688; lootX = o.cx; lootY = o.cy; }
+          }
+        }
+      }
       const rng = new RNG(Math.floor(Math.random() * 1e9));
       // R14-A2：FTW（getGoodWorld）肉前骷髅族"杀之无掉落"早退门（NPCLoot 首行
       // NPC57:79645 `(getGoodWorld || !isThereAWorldSurface) && !downedBoss3 &&
@@ -15804,7 +15828,7 @@ export class Enemy extends Entity {
           const prefix = rollNaturalPrefixForVid(id, isPrefixableAccessory(ITEM_BY_KEY[key] ?? -1),
             () => Math.random());
           const v = vx0 !== undefined ? { vx: vx0, vy: vy0 ?? 0 } : dropVelocity(rng, id);
-          const drop = game.spawnDrop(px ?? this.cx, py ?? this.cy, key, n, v.vx, v.vy, undefined, prefix || undefined);
+          const drop = game.spawnDrop(px ?? lootX, py ?? lootY, key, n, v.vx, v.vy, undefined, prefix || undefined);   // ★BJ688:掉落锚=134 重定位位（余=自身中心）
           // 心(58)/星(184) 标记为 pickup：触碰回血/回蓝，不进背包
           if (drop) {
             if (id === 58) drop.pickup = 'heart';
@@ -15828,7 +15852,7 @@ export class Enemy extends Entity {
             if (lootPlayers && game.grantInstancedLoot) {
               for (const c of lootPlayers) {
                 if (!c.interacting) continue;   // npc.playerInteraction[slot]（:44）
-                game.grantInstancedLoot(c.slot, this.cx, this.cy, keyL ?? '', d.n, v.vx, v.vy, prefixL || undefined);
+                game.grantInstancedLoot(c.slot, lootX, lootY, keyL ?? '', d.n, v.vx, v.vy, prefixL || undefined);   // ★BJ688:instanced 袋随重定位锚（CommonCode.cs:29 npc.position=顶替位）
               }
             } else {
               spawn(d.id, d.n);   // 防御：MP 求值但发放钩子缺失（理论不可达）→ 世界掉落兜底
@@ -15865,9 +15889,11 @@ export class Enemy extends Entity {
             : (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon)
           && rollLuck(ctx.luck ?? 0, ctx.isExpert ? 9 : 13, () => rng.next()) === 0) {
           const st2 = game.world.store;
-          const wx = Math.floor(this.cx / TILE), wy = Math.floor(this.cy / TILE);
+          // ★BJ688:墙门与魂落点同用重定位锚（原版 :79889/:79891 读 base.Center=
+          // 顶替位;非 134 时锚=自身中心,零漂移）
+          const wx = Math.floor(lootX / TILE), wy = Math.floor(lootY / TILE);
           if (st2.inBounds(wx, wy) && DUNGEON_WALL_IDS.has(st2.wall[st2.idx(wx, wy)])) {
-            spawnPart(game, this, 288);
+            spawnPart(game, this, 288, lootX, lootY);
           }
         }
         // 双子 BeforeLoot（NPC.cs DoDeathEvents_BeforeLoot :79761）：另一只眼还活着时

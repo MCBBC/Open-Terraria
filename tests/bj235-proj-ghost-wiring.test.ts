@@ -290,11 +290,14 @@ describe('BJ235 ⑦ 接线位锁', () => {
 
   it('MinionProj：记录位=fixedUpdate 尾 contact 后;绘制片含 533 dA0 直喂', () => {
     const iContact = MINION.indexOf('this.contact(game, dmg0);');
-    const iRec = MINION.indexOf('this.recordGhostTrail();');
+    // ★BJ687（2026-10-16）：早退分发族（833-835/755）在分发位补 record（永远到不了
+    // 本尾——见 tests/bj687-sanguine-trail-record.test.ts §1）;本锁改锚【尾记录位】
+    // （contact 后首个 record）,分发位新记录不参与本比较。
+    const iRec = MINION.indexOf('this.recordGhostTrail();', iContact);
     expect(iRec).toBeGreaterThan(iContact);
     expect(MINION).toContain('ai0: this.projId === 533 ? this.dA0 : 0,');
     expect(MINION).toContain('drawProjGhosts(ctx, {');
-    expect(MINION).toContain("import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';");
+    expect(MINION).toContain("import { ProjGhostRing, drawProjGhosts, projTrailingMode, xnaColorMulByte, onProjSpriteOverride } from './projGhostTrail';");   // ★清偿C1/C2(2026-10-14)后键全量（旧三键陈旧锚校准）
   });
   it('RollingBoulder：1055 记录+绘制接线（记录在 moveAndCollide 后）', () => {
     expect(ROLL).toContain('if (this.projId === 1055 && this.ghostRing) {');

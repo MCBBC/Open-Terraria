@@ -9566,7 +9566,18 @@ export class MinionProj extends Entity {
     if (this.projId >= 626 && this.projId <= 628) { this.dragonSegment(game, p, dmg0); return; }
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
     if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
-    if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
+    // ★BJ687（2026-10-16 用户实报「血红法杖蝙蝠效果不对,移植版=当前效果」定谳）：
+    //  早退分发族的 TrailingMode 记录面普查——原版 UpdateTrails（:17197 块=AI 后
+    //  每 update 无条件跑一次）在本仓由 fixedUpdate 尾 :9914 recordGhostTrail 承载,
+    //  但早退族永远到不了那里,须各自体内补记录。mode≥0 全集核查：533（twinsStep/
+    //  deadlySpherePhase :4644/:6270）✓、864（smolstarAI 三处）✓、946（terraprisma_
+    //  Body 三处）✓——唯 755 血蝙蝠与 833-835 沙漠虎【零 record 调用】→ ghostRing
+    //  恒 undefined → drawProjGhosts 的 at(i) 恒 null → 绯红残影链（Main.cs:31188
+    //  AI_156_GetColor=Crimson / 833 族速度染 :31307-31314）整链从不渲染=用户截图
+    //  130（原版横长绯红带,簇 90-130px）vs 本仓探针 _bj687 弧中程 crimsonPx=42
+    //  （19×59,仅本体红晕）的主差面。探针/反编译双证;修=分发位 AI 后补一次
+    //  recordGhostTrail（=原版 UpdateTrails 位序,AI 末态入环）。
+    if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); this.recordGhostTrail(); return; }
     // ★BJ634：刃杖 864 = AI_169_Smolstars（:46559-46700 1:1,smolstarAI 注）——
     // 此前落通用飞行路径（追击恒速 5/索敌 700 每拍重选/无锁敌态机）= 用户实报
     // 「打 boss 老不打/追不上」根因
@@ -9575,7 +9586,7 @@ export class MinionProj extends Entity {
     //  通用 tgt 面——分派前置 tgt 块对该 id 空转一次,零副作用）
     if (this.projId === 759) { this.babyBirdStep(game, p, dmg0); return; }
     if (this.projId === 946) { this.terraprismaBody(game, p, dmg0); return; }
-    if (this.projId === 755) { this.batOfLightBody(game, p, dmg0); return; }
+    if (this.projId === 755) { this.batOfLightBody(game, p, dmg0); this.recordGhostTrail(); return; }   // ★BJ687 记录位（同上族注）
     if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
     // AI_062 五射手 1:1 速度曲线/随机冷却/射击门（:66067-67166,备案项①③）
     if (ai62) { this.ai62Step(game, p, dmg0, tgt); return; }
@@ -10245,6 +10256,106 @@ export class MinionProj extends Entity {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }
     const img = dFrameImg(this.projId, frame);
+    // ---- ★BJ687 face③（2026-10-16 用户实报「血红法杖蝙蝠效果不对,移植版=当前效果」
+    //      +原版截图 130 对拍三面定谳）755 光照域整支改道全亮队列：
+    //      · 残影 :31188 = AI_156_GetColor()=Crimson(220,20,60) 硬编码【替换】光照色
+    //        （不读格光）——旧画世界层被 compositeLight 全屏乘（含蝙蝠自身 Crimson
+    //        CastLight :52441）→ 残影暗红;
+    //      · 四向红晕 :31440-31450 = 同 Crimson A=120,原版层序在【本体前】（:31440
+    //        属链首块、本体走链尾通用绘制）——旧仓叠本体后=红纱洗白本体+层序反双偏;
+    //      · 本体 GetAlpha 专支（Projectile.cs:80790 `Lerp(newColor,White,0.75)`)=
+    //        75% 增白,语义=抵消自体 Crimson 施光对自身像素的染红（无此支本体被
+    //        自光乘成暗红团——探针 _bj687 弧中程实测本体最亮像素 L=45 RGB(102,13,60)
+    //        vs 原版截图 130 本体 L≈248 近白,六簇白心恒在绯红带下缘=层序+增白双证）。
+    //      修=755 整支（残影+红晕+本体）收编 queueProjFullbright（BJ-C1 F3/270/45/
+    //      BJ682 630 判例,光照合成后主画布重放）：本体 tint=Lerp(lightAt,White,0.75)
+    //      16 级量化烘焙（630 同式,满光/fullbright 跳过）;残影/红晕纯 Crimson 恒亮。
+    //      无队列环境（测试/mock）回退通用路径（世界层乘光=旧行为,零回归）。
+    //      层序登记债：全亮槽画在玩家/世界之上（270/45/BJ504 同槽惯例）。
+    //      ★锚位注：原版本体=通用尾绘 num151/152=0 → 帧左上锚盒左上（内容心
+    //      (18,10) → 盒心+(13,5)）;本仓未登记随从走盒心居中（else 支既有惯例,
+    //      755 同槽）——按 (17,11) 锚差维持仓内惯例,原版精确锚另立登记债
+    //      [bj687-755-anchor-topleft]（全域未登记随从普查面,非 755 独有）。
+    if (this.projId === 755 && img) {
+      const sinkB = (r as unknown as {
+        queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+        lighting?: { lightAt(tx: number, ty: number): [number, number, number] } | null;
+        fullbright?: boolean;
+        tintSliceRGB?: (img2: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
+          rgb: [number, number, number], alphaMul: number) => HTMLCanvasElement | null;
+      });
+      if (typeof sinkB.queueProjFullbright === 'function') {
+        const cx0 = this.cx, cy0 = this.cy;
+        const rot0 = this.rot;
+        const face0 = this.facing < 0 ? -1 : 1;
+        const w0 = this.w, h0 = this.h;
+        const ring0 = this.ghostRing ?? null;
+        const vxLen0 = Math.hypot(this.vx, this.vy);
+        const who0 = Math.max(0, this.whoAmI);
+        const gRaw755 = projSprite(755);
+        const gimg755 = gRaw755 && dyeVid > 0
+          ? (dyedProjCanvas(gRaw755, 0, 0, gRaw755.width, gRaw755.height, dyeVid, dyeOpt) ?? gRaw755)
+          : gRaw755;
+        const frames755 = projFrameCount(755);
+        const bodyAlpha755 = this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1;
+        const frame755 = frame;
+        // 本体 tint = Lerp(lightAt, White, 0.75)（GetAlpha :80790 逐字;light 先 16 级
+        // 量化再 lerp,630 同式;满光/fullbright → null=直画原帧）
+        let bodyTint: [number, number, number] | null = null;
+        if (!sinkB.fullbright && sinkB.lighting) {
+          const lc = sinkB.lighting.lightAt(Math.floor(cx0 / 16), Math.floor(cy0 / 16));
+          const q16 = (v: number) => Math.round(Math.min(255, v ?? 255) / 255 * 15) / 15;
+          const tint = [0.75 + 0.25 * q16(lc[0]), 0.75 + 0.25 * q16(lc[1]), 0.75 + 0.25 * q16(lc[2])] as [number, number, number];
+          if (tint[0] < 0.999 || tint[1] < 0.999 || tint[2] < 0.999) bodyTint = tint;
+        }
+        sinkB.queueProjFullbright((c: CanvasRenderingContext2D) => {
+          // ① 残影（:31134 循环,纯 Crimson,先于红晕/本体——原版链首块序）
+          if (ring0 && gimg755 && gimg755.width > 0) {
+            drawProjGhosts(c, {
+              ring: ring0, id: 755, tex: gimg755, frames: frames755, frame: frame755,
+              bodyW: w0, bodyH: h0, bodyRot: rot0, bodyScale: 1, bodyAlpha: bodyAlpha755,
+              ai0: 0, ai1: 0, timeLeft: 3600, opacity: 1, vxLen: vxLen0,
+              spriteDirection: face0, whoAmI: who0,
+            });
+          }
+          c.save();
+          c.imageSmoothingEnabled = false;
+          // ② 四向红晕（:31440-31450,Crimson A=120,【本体前】=原版层序翻正）
+          const halo755 = tintFrameCache(img, 'rgb(220,20,60)');
+          if (halo755) {
+            c.save();
+            c.translate(cx0, cy0);
+            if (rot0 !== 0) c.rotate(rot0);
+            if (face0 < 0) c.scale(-1, 1);
+            c.globalAlpha = (120 / 255) * bodyAlpha755;
+            for (let k = 0; k < 4; k++) {
+              const off = rot0 + (Math.PI / 2) * k;
+              c.save();
+              c.translate(Math.cos(off) * 2, Math.sin(off) * 2);
+              c.drawImage(halo755, -halo755.width / 2, -halo755.height / 2);
+              c.restore();
+            }
+            c.globalAlpha = 1;
+            c.restore();
+          }
+          // ③ 本体（GetAlpha :80790 = Lerp(light,White,0.75) 量化烘焙;满光直画）
+          {
+            let src755: CanvasImageSource = img;
+            if (bodyTint && sinkB.tintSliceRGB) {
+              src755 = sinkB.tintSliceRGB(img, 0, 0, img.width, img.height, bodyTint, 1) ?? img;
+            }
+            c.translate(cx0, cy0);
+            if (rot0 !== 0) c.rotate(rot0);
+            if (face0 < 0) c.scale(-1, 1);
+            if (bodyAlpha755 < 1) c.globalAlpha = bodyAlpha755;
+            c.drawImage(src755, -img.width / 2, -img.height / 2);
+          }
+          c.restore();
+        });
+        return;
+      }
+      // 无队列 → 落通用路径（世界层,旧行为）
+    }
     // ---- ★BJ235 随从通用残影（Main.cs:30609-31400 通用表;原版残影块先于本体绘制）——
     //      533 致命球（ai0 三态冲刺档 :31084-31098,dA0 直喂）/ 755 血蝙蝠（Crimson 特支
     //      :31190-31192）/ 833-835 沙漠虎（速度染+底心锚帧门 :30706-30721/:31307-31314）。

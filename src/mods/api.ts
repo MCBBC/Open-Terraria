@@ -186,6 +186,7 @@ export interface ModContext {
     inputLocked(): boolean;
     playerHidden(): boolean;
     overlay(ctx: CanvasRenderingContext2D, w: number, h: number): void;
+    moveInput(): { x: number; jump: boolean; down: boolean } | null;
   }): void;
   /** mod 全屏后处理 pass(Renderer 7d 滤镜链最前执行;tML FilterManager.
    *  EndCapture MonoMod 前缀同位——lights-and-shadows 首消费方) */

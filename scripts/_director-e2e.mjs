@@ -34,7 +34,7 @@ try {
   await gotoApp(page, ORIGIN, { tries: 40 });
   const inst = await page.evaluate(async () => {
     try {
-      const res = await fetch('/mods/dist/director.swmod');
+      const res = await fetch('/mods/dist/director.swmod?t=' + Date.now());
       if (!res.ok) return ['fetch ' + res.status];
       const bytes = new Uint8Array(await res.arrayBuffer());
       const { ModStore } = await import('/src/mods/store.ts');

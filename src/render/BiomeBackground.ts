@@ -1704,6 +1704,18 @@ export class BiomeBackground {
    *  不适用——菜单仅 0/2 槽活跃且非沙漠族）。!menuMode 时 no-op（严格旗控） */
   menuTick(dayTime: boolean, dtMs: number): void {
     if (!this.menuMode) return;
+    // ★2026-10-16 用户实报「瀑布远景游戏内会动,主菜单横滚不动」定谳修复:
+    //  冷启动主菜单无 Game 实例=fixedUpdate 不跑=GTW 恒 0（BJ330「标题菜单
+    //  fixedUpdate pre-world 照跑」论断在冷启动菜单不成立）→ menuBgCounter
+    //  恒 0 → 173 瀑布/341 等 counter 驱动动画全钉死第 0 帧。原版 Main.Update
+    //  菜单态照跑（TotalGameTime 推进）=原版菜单瀑布会动。修=菜单自累进钟
+    //  （60/s,dtMs 累进同游戏内 bgTick 式）;游戏内 menuMode=false 仍走 GTW
+    //  （原语义:暂停/失焦冻结=BJ330 用户拍板）。
+    this.menuClockAcc += dtMs;
+    while (this.menuClockAcc >= 16.6667) {
+      this.menuClockAcc -= 16.6667;
+      this.menuClock++;
+    }
     const frames = dtMs / (1000 / 60);
     this.bgStyle = dayTime ? Forest1 : Corruption;
     const speed = Math.min(0.02 * frames, 1);
@@ -1820,16 +1832,22 @@ export class BiomeBackground {
       // cs:62409-62412 槽0=91 → 本层 sc1.3×2/par0.42
       if (MENU_FOREST_STYLES[this.menuForestStyle]?.trees[0] === 91) { sc = scale * 1.3 / 1.34; pr = 0.42; }
       y -= (TEX_TOPROW[tex] ?? 0) * sc;
-      if (tex === 341) {
-        // GetBackgroundRect cs:62199-62202：2×2 帧（counter/15%4）+ Inflate(0,-2)
-        const im = this.img(341);
-        if (!im) return;
-        const idx = Math.floor(this.menuBgCounter() / 15) % 4;
-        const fw = im.width / 2, fh = im.height / 2;
-        src = [(idx % 2) * fw, Math.floor(idx / 2) * fh + 2, fw, fh - 4];
-        const tim = this.menuTinted(341, im, tint);
-        this.drawMenuLayer(ctx, camX, viewW, tim, pr, y, sc, dx, alpha, src, flip);
-        return;
+      // ★2026-10-16 BG_SHEET 泛化（用户实报「瀑布远景主菜单不动」二因之一）:
+      //  旧 menu 分支只特判 341——BG_SHEET 2×2 动画族的其余成员（281 样式10 山层
+      //  周期 5 等 19 个）在主菜单画静态整表。泛化=查表驱动（游戏内 1163 位同源
+      //  逻辑）:period=BG_SHEET[tex] → counter/period%4 取 2×2 帧+Inflate(0,-2)。
+      {
+        const period = BG_SHEET[tex];
+        if (period !== undefined) {
+          const im = this.img(tex);
+          if (!im) return;
+          const idx = Math.floor(this.menuBgCounter() / period) % 4;
+          const fw = im.width / 2, fh = im.height / 2;
+          src = [(idx % 2) * fw, Math.floor(idx / 2) * fh + 2, fw, fh - 4];
+          const tim = this.menuTinted(tex, im, tint);
+          this.drawMenuLayer(ctx, camX, viewW, tim, pr, y, sc, dx, alpha, src, flip);
+          return;
+        }
       }
     }
     const im = this.img(n);
@@ -1870,12 +1888,16 @@ export class BiomeBackground {
     ctx.restore();
   }
 
-  /** GetBackgroundCounter gameMenu 分支（cs:62214-62220 = GlobalTimeWrappedHourly×40）——
-   *  ★BJ330：GTW 钟源收编 GameTime 单源（标题菜单 fixedUpdate pre-world 照跑,
-   *  计数器照进;失焦/暂停冻结） */
+  /** GetBackgroundCounter gameMenu 分支（cs:62214-62220 = GlobalTimeWrappedHourly×40）。
+   *  ★BJ330：GTW 钟源收编 GameTime 单源;★2026-10-16 修复:冷启动主菜单无 Game
+   *  实例=GTW 恒 0（见 menuTick 头注定谳）——menuMode 用菜单自累进钟,游戏内
+   *  仍走 GTW（暂停/失焦冻结=用户拍板语义保留）。 */
   private menuBgCounter(): number {
-    return globalTimeWrappedHourly() * 40;
+    return this.menuMode ? this.menuClock : globalTimeWrappedHourly() * 40;
   }
+  /** ★菜单自累进钟（60/s,menuTick 推进;探针可读口） */
+  menuClock = 0;
+  private menuClockAcc = 0;
 
   /** 菜单层 tint 烘焙（multiply + destination-in 保 α；颜色按 4 单位量化桶，
    *  跨桶才重烘——晨昏连续扫描不逐帧重烘；近白由调用方传 null 免烘） */

@@ -78,21 +78,27 @@ export class ModStore {
     copy.set(bytes);
     const ok = await this.storage.putZip(manifest.id, new Blob([copy], { type: 'application/zip' }));
     if (!ok) throw new Error('zip 落库失败(存储不可用)');
-    const rows = (await this.listRows()).filter((r) => r.id !== manifest.id);
+    const rows = await this.listRows();
+    const existing = rows.find((r) => r.id === manifest.id);
+    // ★2026-10-16 用户令「重装已启用的 mod 不强行关闭」:重装保留既有启停态
+    //  (D-M3 桌面目录同步同款语义)。首装缺省=true(程序化安装语义;面板导入
+    //  显式传 enabled:false 落「导入不自动启用」——2026-10-14 用户令在调用方)
+    const enabled = existing
+    ? existing.enabled
+    : opts?.enabled ?? true;
     const row: ModRow = {
       id: manifest.id,
       name: manifest.name,
-      iconDataUrl: iconDataUrl ?? null,
+      iconDataUrl: iconDataUrl ?? existing?.iconDataUrl ?? null,
       version: manifest.version,
       author: manifest.author ?? '',
       description: manifest.description ?? '',
-      // ★2026-10-14 用户令「导入后不要自动启用」:面板导入传 enabled:false;
-      // 缺省 true 保持桌面目录同步/探针句柄等既有语义(D-M3 重装保留启停另走 setEnabled)
-      enabled: opts?.enabled ?? true,
-      addedAt: Date.now(),
+      enabled,
+      addedAt: existing?.addedAt ?? Date.now(),
     };
-    rows.push(row);
-    await this.saveRows(rows);
+    const next = rows.map((r) => (r.id === manifest.id ? row : r));
+    if (!existing) next.push(row);
+    await this.saveRows(next);
     return row;
   }
 
