@@ -99,8 +99,9 @@ export class BakeClient {
     });
     if (!ok || this.disposed) { this.fail('handshake timeout'); return false; }
     this.ready = true;
-    // 素材随包:自有过程 sheet 全量（TileSheetGen 画布位图副本）+ 地形 Maples +
+    // 素材随包:自有过程 sheet 全量（TileSheetGen 画布位图副本）+
     // 出生点预载的原版 Tiles/Wall 表——首波烘焙尽量一次到位,其余走 missing 需求拉取
+    // ★Maples 退役刀1(2026-10-17):地形 Maples 表 ship 随域退役删除(零消费)。
     await this.shipInitial();
     this.flushPreReady();
     return true;
@@ -114,19 +115,12 @@ export class BakeClient {
     // 才派发首波）。并行后 = 最慢一张 + 调度开销;ship 消息内容/传输面零变化
     // （表进 Map 无序语义,结果数组按完成序排列无影响）。
     const jobs: Array<Promise<void>> = [];
-    const maples: Array<{ file: string; bmp: ImageBitmap }> = [];
     const vimg: Array<{ file: string; bmp: ImageBitmap }> = [];
     const pushImg = (file: string, src: Parameters<typeof createImageBitmap>[0],
       out: Array<{ file: string; bmp: ImageBitmap }>) => {
       jobs.push(createImageBitmap(src).then((bmp) => { out.push({ file, bmp }); })
         .catch(() => { /* 降级 missing 链 */ }));
     };
-    for (const f of Object.keys(this.atlas.data.files)) {
-      if (!f.startsWith('地形/')) continue;
-      const src = this.atlas.images.get(f);
-      if (!src) continue;
-      pushImg(f, src, maples);
-    }
     for (const f of this.atlas.vimages.keys()) {
       if (!/^vanilla\/(Tiles|Wall)_/.test(f) && !f.startsWith('mod/')) continue;
       const src = this.atlas.vimages.get(f)!;
@@ -171,8 +165,8 @@ export class BakeClient {
           .catch(() => { /* 降级 missing 链(worker 色块兜底) */ }));
       }
     }
-    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList, modTiles, modTileMetas, wallKeys, modWallVmetas },
-      [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp), ...sheetList.map((s) => s.bmp)]);
+    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, sheets: sheetList, modTiles, modTileMetas, wallKeys, modWallVmetas },
+      [...vimg.map((v) => v.bmp), ...sheetList.map((s) => s.bmp)]);
   }
 
   /** chunk 重烘请求（flushDirty/get wbake 支路调用）。pending 去重;重复请求=在飞
@@ -389,22 +383,20 @@ export class BakeClient {
   private async shipFiles(files: string[], force: boolean): Promise<void> {
     if (!this.worker || this.dead) return;
     const vimg: Array<{ file: string; bmp: ImageBitmap }> = [];
-    const maples: Array<{ file: string; bmp: ImageBitmap }> = [];
     for (const f of files) {
       this.shipping.add(f);
-      const src = this.atlas.vimages.get(f) ?? this.atlas.images.get(f);
+      const src = this.atlas.vimages.get(f);
       if (!src) { this.shipping.delete(f); continue; }   // 主线程也缺:留 awaiting,落地链兜底
       try {
         const bmp = await createImageBitmap(src);
-        if (/^地形\//.test(f)) maples.push({ file: f, bmp });
-        else vimg.push({ file: f, bmp });
+        vimg.push({ file: f, bmp });
       } catch { /* 位图化失败:留 awaiting,下次结果再试 */ }
     }
-    if (!vimg.length && !maples.length) return;
-    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: [] },
-      [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp)]);
+    if (!vimg.length) return;
+    this.post({ type: 'ship', id: this.nextId++, vimages: vimg, sheets: [] },
+      [...vimg.map((v) => v.bmp)]);
     // 补送落地 → 等它的 chunk 重派（request 去重保平安;force=落地链,在飞也即时重派）
-    for (const f of [...vimg.map((v) => v.file), ...maples.map((m) => m.file)]) {
+    for (const f of [...vimg.map((v) => v.file)]) {
       const keys = this.awaitingByFile.get(f);
       this.shipping.delete(f);
       if (!keys) continue;

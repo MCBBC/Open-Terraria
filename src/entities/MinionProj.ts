@@ -1218,7 +1218,9 @@ const MINION_SUMMON_SFX: Record<number, Array<{ track: string; vol: number; at: 
 /** 随从射弹出膛音（原版在弹幕 AI 首帧 localAI[0]==0 处 PlaySound，等效落射弹生成帧）：
  *  374 毒刺 Item_17（:52670）/ 376 小鬼火球 Item_20（:52684）/ 378 蛛卵 Item_17（:23398）/
  *  967 猎犬弹 Item_60（:24971）/ 195 矮人掷矛 Item_17（:56298-56302）/ 389 双子激光眼
- *  Item_12（:56263-56267）/ 408 迷你鲨鱼龙 Item_19（:56201-56205 legacy PlaySound(4,x,y,19)）
+ *  Item_12（:56263-56267）/ 408 迷你鲨鱼龙 NPC_Killed_19（:56201-56205 legacy
+ *  PlaySound(4,x,y,19)=type4 NpcKilled 库 style19,★BJ692 勘误:旧译 Item_19 系
+ *  legacy 编号域误读——Item 库=type 2,整数首参是声音库编号非物品号）
  *  ——随从本体的 AI_026/AI_062 不播,但射出弹均为 aiStyle 1,吃 Projectile.AI_001 出膛
  *  音链 ai[1]==0 首拍（2026-09-03 dormant 族审计翻案:旧注"408/433/614/195/389/642
  *  原版无出膛音"只核了随从 AI 本体——433/614/642 仍属实无声,408/195/389 属 aiStyle 1 有声）。
@@ -1232,7 +1234,10 @@ const MINION_SHOT_SFX: Record<number, { track: string; vol: number }> = {
   967: { track: 'Item_60', vol: 0.7 },
   195: { track: 'Item_17', vol: 0.7 },
   389: { track: 'Item_12', vol: 0.7 },
-  408: { track: 'Item_19', vol: 0.7 },
+  // ★BJ692:408 原文 :56203 PlaySound(4,x,y,19)=legacy【type 4=NpcKilled 库 style 19】
+  // （LegacySoundPlayer case 4 SoundNpcKilled[num]）——非 Item_19（Item 库=type 2）,
+  // 旧译错库。NPC_Killed_19=Sfx.ts case4 表 rng('NPC_Killed_',1,68) 在册文件。
+  408: { track: 'NPC_Killed_19', vol: 0.7 },
 };
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */

@@ -33,14 +33,6 @@ import { tintRegion, tintRegionData, paintedAtlasProxy, tintedRect } from './Til
 import { TileStore } from '../world/TileStore';
 import { mkCanvas, type AnyCanvas, type Ctx2D } from './canvasEnv';
 
-// 我们的 tile → Maples RuleTile 规则名（有规则的走素材自动贴合，无规则回退程序化）
-// Grass 走人工标注（'@grass'）：Tiles_2.png 是多 tile 混排图集，自动分类不可靠；
-// 用 public/annotator.html 标注后写入 sprites/annotations.json。无标注时回退程序化。
-const TILE_RULES: Record<number, string> = {
-  // 泥土/石/草走原版 BlendRules；铁矿走原版表——均不再用 Maples 规则
-  13: '工作台', 14: '熔炉', 15: '铁砧',
-};
-
 /** 树族冠/枝标记帧判定（SW-FX12 荧光叠层补画用）：drawTreeCell 冠块入口
  *  `fy >= 198 && fx >= 22`（普通/宝石/装饰/灰烬树）与棕榈冠 `fx ∈ [88,132]`——
  *  这些格烘焙层为空（foliageOnly=false 早退 / 第四遍 continue→WindSway 摆动层）。
@@ -75,7 +67,11 @@ export interface ChunkBakeEnv {
   rockLevel: number;
   chests: Array<{ x: number; y: number; frame?: number }> | undefined;
   sheets: Map<number, SheetEntryLike>;
-  autotiler: { atlas: import('../assets/SpriteAtlas').SpriteAtlas; saplingSprite(x: number, y: number): import('../assets/SpriteAtlas').DrawRect | null; weedSprite(x: number, y: number): import('../assets/SpriteAtlas').DrawRect | null; tile(ruleName: string, st: TileStore, x: number, y: number, tileType: number, layer?: 'tile' | 'wall'): import('../assets/SpriteAtlas').DrawRect | null } | null;
+  /** ★Maples 退役刀1（2026-10-17）：原 autotiler 注入面（AutoTiler 实例）全弃——
+   *  三「活」函数被三重短路挡死（:356 sway skip/:371 def.vanilla 先吃/:419 TILE_RULES
+   *  三空壳规则恒 null,audit 2026-10-16 定谳+运行时探针 rectTally 全 0）。烘焙内核
+   *  的 vanilla 直取链只持 atlas 本体（原 env.autotiler.atlas,机械改道）。 */
+  atlas: import('../assets/SpriteAtlas').SpriteAtlas | null;
   wallTiler: VanillaWallTiler | null;
   truncatesWalls: number[];
   /** ★bakenoread 灰度（2026-10-08;?bakenoread=1,缺省关=现状逐位）：油漆 pass 禁止
@@ -184,25 +180,25 @@ export function bakeChunkIntoEnv(env: ChunkBakeEnv, cx: number, cy: number,
             //  （isDynamicAnimSheet/378/272）帧随节拍变,静态拷贝会错帧 → 登记债不接。
             const tdef = TILE_DEFS[st2.type[i]];
             const v = tdef?.vanilla;
-            if (env.autotiler && v
+            if (env.atlas && v
               && (swayBakeSkip(st2.type[i], st2.frameX[i]) || isTreeCrownFrame(v.sheet, st2.frameX[i], st2.frameY[i]))) {
               const x = x0 + lx, y = y0 + ly;
               const trees = { treeX: env.treeX, treeStyle: env.treeStyle,
                 treeTops: env.treeTops, worldSurface: env.groundLevel, worldW: st2.w };
               if (isTreeCrownFrame(v.sheet, st2.frameX[i], st2.frameY[i])) {
-                drawTreeCell(gctx, env.autotiler.atlas, st2, x, y, st2.frameX[i], st2.frameY[i],
+                drawTreeCell(gctx, env.atlas, st2, x, y, st2.frameX[i], st2.frameY[i],
                   px, py, v.sheet, true, trees, 0, undefined, st2.paint[i]);
               } else if (st2.paint[i] > 0
-                && tintedSwayCellForGlow(env.autotiler.atlas, st2, x, y, st2.type[i],
+                && tintedSwayCellForGlow(env.atlas, st2, x, y, st2.type[i],
                   st2.frameX[i], st2.frameY[i], st2.paint[i], trees)) {
                 // ★SW-RB11e 2026-09-10：sway 族补画同样要吃 paint（涂漆∧荧光并置时
                 //  叠层不得显原色）——tintedSwayCellForGlow = WindSway 摆动层染色
                 //  单源（scratch 画格+tintRegion,特判组分派同烘焙油漆 pass）。
-                gctx.drawImage(tintedSwayCellForGlow(env.autotiler.atlas, st2, x, y,
+                gctx.drawImage(tintedSwayCellForGlow(env.atlas, st2, x, y,
                   st2.type[i], st2.frameX[i], st2.frameY[i], st2.paint[i], trees)!,
                   px, py);
               } else {
-                drawVanillaCell(gctx, env.autotiler.atlas, v.sheet, v.frame, v.fw ?? 1, v.fh ?? 1,
+                drawVanillaCell(gctx, env.atlas, v.sheet, v.frame, v.fw ?? 1, v.fh ?? 1,
                   st2, x, y, st2.type[i],
                   (t) => t === st2.type[i] || frameMergesWith(st2.type[i], t),
                   px, py, st2.frameX[i], st2.frameY[i], trees);
@@ -283,7 +279,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
   // 顶部未覆盖 2px = 4px 天空横断（2026-08-28 用户实报腐化/洞穴石堆）。修 =
   // 沿用仙人掌 py=-TILE 整格重画法：凡上一行 tile 有效位移 >0，借 clip 只留
   // 溢出带，落位与原版逐像素一致；先于主遍 = 原版行序（上行先画、下行覆盖）。
-  if (env.autotiler) {
+  if (env.atlas) {
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0 + lx, y = y0 - 1;
       if (!st.inBounds(x, y)) continue;
@@ -298,7 +294,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       ctx.filter = actuated ? 'brightness(0.4)' : 'none';
       const sheet = def.vanilla.sheet;
       if (sheet === 80 && def.vanilla.frame === 'style') {
-        drawCactusCell(ctx, env.autotiler.atlas, st, x, y, type, lx * TILE, -TILE);
+        drawCactusCell(ctx, env.atlas, st, x, y, type, lx * TILE, -TILE);
         continue;
       }
       // 动态/覆盖绘制族不参与静态补绘（主遍/Renderer overlay 自管）
@@ -308,7 +304,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       if (tileDrawYOffsetOf(sheet, st.frameX[i], st.frameY[i]) > 0) {
         // ★paint-at-draw:溢出带随源格油漆染色（源染色,零读回）
         const pPt = st.paint[i];
-        const pAtlas = pPt > 0 ? paintedAtlasProxy(env.autotiler.atlas, pPt, paintSpecialFor(type, x, y, i, pPt)) : env.autotiler.atlas;
+        const pAtlas = pPt > 0 ? paintedAtlasProxy(env.atlas, pPt, paintSpecialFor(type, x, y, i, pPt)) : env.atlas;
         drawVanillaCell(
           ctx, pAtlas, sheet, def.vanilla.frame,
           def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
@@ -368,7 +364,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
       const pt = st.paint[i];
       const pSpecial = pt > 0 ? paintSpecialFor(type, x, y, i, pt) : undefined;
       // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
-      if (def.vanilla && env.autotiler) {
+      if (def.vanilla && env.atlas) {
         // ★2026-08-31 根治：动画格一律不进烘焙（isDynamicAnimSheet 谓词 =
         //   TILE_ANIM_RATE 全表 ∪ 笼族 ∪ 314），由 Renderer.drawAnimatedTileLayer
         //   逐帧补画。机制=含动画格的 chunk 在 rate 节拍整块失效（256 格×完整
@@ -379,7 +375,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
         if (isDynamicAnimSheet(def.vanilla.sheet)) continue;
         if (pt > 0) routedPaint.add(i);
         drawVanillaCell(
-          ctx, pt > 0 ? paintedAtlasProxy(env.autotiler.atlas, pt, pSpecial) : env.autotiler.atlas,
+          ctx, pt > 0 ? paintedAtlasProxy(env.atlas, pt, pSpecial) : env.atlas,
           def.vanilla.sheet, def.vanilla.frame,
           def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
           st, x, y, type,
@@ -397,50 +393,11 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
         );
         continue;
       }
-      // 树苗：Tree_Bodys 树干段作小苗（底部对齐）
-      if (type === T.SAPLING && env.autotiler) {
-        let r = env.autotiler.saplingSprite(x, y);
-        if (r) {
-          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px + (TILE - r.sw) / 2, py + TILE - r.sh, r.sw, r.sh);
-          continue;
-        }
-      }
-      // 杂草：Maples Tiles_3 杂草贴图（16×20，底部对齐，hash 选变体）
-      if (type === T.TALLGRASS && env.autotiler) {
-        let r = env.autotiler.weedSprite(x, y);
-        if (r) {
-          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px - (r.sw - TILE) / 2, py + TILE - r.sh, r.sw, r.sh);
-          continue;
-        }
-      }
-      // 有 RuleTile 规则的 tile 用 Maples 素材自动贴合
-      const ruleName = env.autotiler ? TILE_RULES[type] : undefined;
-      if (ruleName && env.autotiler) {
-        // 草皮覆盖件：保持原生透明（缺口露出背后的墙/天空），不做任何垫底/填充
-        if (ruleName === '@grass') {
-          let r = env.autotiler.tile(ruleName, st, x, y, type);
-          if (r) {
-            if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
-            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
-          }
-          continue;
-        }
-        let r = env.autotiler.tile(ruleName, st, x, y, type);
-        if (r) {
-          // 大图（树冠 80×80，宽>2格）跳过 —— 第三遍统一绘制（跨 chunk 补全 + 树叶盖树干）
-          if (r.sw > TILE * 2) continue;
-          if (pt > 0) { r = tintedRect(r, pt, pSpecial); routedPaint.add(i); }
-          // 按精灵原始尺寸绘制。树干等"宽≤2格、高>1格"的竖向件顶部对齐：
-          // 溢出向下伸，由更下方的格（后画）覆盖 —— 下层不压上层。
-          let dy = py + (TILE - r.sh) / 2;
-          if (r.sh > TILE && r.sw <= TILE * 2) dy = py;
-          const dx = px + (TILE - r.sw) / 2;
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
-          continue;
-        }
-      }
+      // ★Maples 退役刀1：原三段死支已删——①树苗(T.SAPLING)/②杂草(T.TALLGRASS)
+      //  支被 :356 sway skip 短路(两 sheet 20/3 均在 SWAYS_IN_WIND_BASIC_SHEETS,
+      //  摘出烘焙由 WindSway 动态层绘制,永不至此);③TILE_RULES 规则支(13/14/15)
+      //  指向 resources.json 三空壳规则恒 null。audit 2026-10-16 定谳+探针
+      //  autotilerTally 空。def.vanilla 支(:371)先吃一切原版件,下接 sheets 兜底。
       const entry = env.sheets.get(type);
       if (!entry) {
         ctx.fillStyle = '#FF00FF';
@@ -532,7 +489,7 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
   // ---- 第四遍：树静态部分（跨 chunk 外扩绘制） ----
   // 风摆动系统接管后：树冠/树枝标记帧不再烘焙（Renderer WindSway overlay 逐帧摆动），
   // 本遍只保留棕榈干身（倾斜跨列必须外扩遍）与蘑菇树顶（72 原版不摆动）。
-  if (env.autotiler) {
+  if (env.atlas) {
     const treeIds = ['v_72_mushroom_tree', 'v_323_palm_trees']
       .map((k) => TILE_BY_KEY[k]).filter((id) => id !== undefined);
     for (const v5 of treeIds) {
@@ -561,12 +518,12 @@ function bakeChunkBody(env: ChunkBakeEnv, cx: number, cy: number, wctx: Ctx2D, c
             const trunkSpecial = pp >= 1 && pp <= 12
               ? getTilePaintSettings(323, palmTreePaintStyle(st, tx, ty, st.w)) ?? undefined
               : undefined;
-            drawTreeCell(ctx, env.autotiler.atlas, st, tx, ty, fx, fy,
+            drawTreeCell(ctx, env.atlas, st, tx, ty, fx, fy,
               tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, false, trees,
               0, undefined, pp, trunkSpecial);
           } else {
             // 蘑菇树：顶格标记帧原版不摆动，保留烘焙（DrawTrees switch 无 case 72）
-            drawTreeCell(ctx, env.autotiler.atlas, st, tx, ty, fx, fy,
+            drawTreeCell(ctx, env.atlas, st, tx, ty, fx, fy,
               tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true, trees,
               0, undefined, st.paint[i]);   // ★IIIII227：同上（油漆 pass 后绘制）
           }

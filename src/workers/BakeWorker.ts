@@ -18,8 +18,7 @@
 // 工厂落 OffscreenCanvas;素材位图全部主线程 createImageBitmap 副本随包 transfer,
 // worker 内不发网络请求、不建 Image）。
 import { assertWorkerBootGate } from './workerBootGate';   // ★首导入 boot 闸（必须保持第一位;见该文件头注,x-ray 定谳防线）
-import { SpriteAtlas, type DrawRect } from '../assets/SpriteAtlas';
-import { AutoTiler } from '../render/AutoTiler';
+import { SpriteAtlas } from '../assets/SpriteAtlas';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { TILE_BY_KEY, applyModTileDefs, applyModWallKeys } from '../data/tiles';
 import { bakeChunkIntoEnv, type ChunkBakeEnv, type SheetEntryLike } from '../render/ChunkBake';
@@ -31,9 +30,11 @@ import { BAKE_S, BakeSliceStore, type BakeWorkerRequest, type BakeWorkerResponse
 assertWorkerBootGate('BakeWorker');   // 图求值后一拍扫 boot 残留（能力账见 workerBootGate 头注）
 
 /** worker 侧 atlas：SpriteAtlas 子类——元数据全量复用（JSON 静态导入同源），
- *  位图表（vimages/images/sheets 视图）由主线程 ship 消息预置；ensureVImage/rect
+ *  位图表（vimages/sheets 视图）由主线程 ship 消息预置；ensureVImage
  *  命中即记 consumed、图缺记 missing（回包上报 → 主线程 ship → 重派链）。
- *  ★绝不触父类懒加载（new Image/document）——worker 无 DOM。 */
+ *  ★绝不触父类懒加载（new Image/document）——worker 无 DOM。
+ *  ★Maples 退役刀1(2026-10-17)：rect override(Unity 切片取图)随 AutoTiler 域
+ *  退役删除——其唯一消费方=AutoTiler(audit 定谳),vanilla 直取链只走 ensureVImage。 */
 class WorkerAtlas extends SpriteAtlas {
   missing = new Set<string>();
   consumed = new Set<string>();
@@ -47,23 +48,9 @@ class WorkerAtlas extends SpriteAtlas {
     this.missing.add(file);
     return null;
   }
-
-  override rect(file: string, sprite: string): DrawRect | null {
-    const img = this.images.get(file);
-    const entry = this.data.files[file];
-    if (!img || !entry) {
-      this.missing.add(file);   // 图缺=晚到表语义（表到位重派）;sprite 缺=永久数据缺,不区分记账（主线程同样静默 null）
-      return null;
-    }
-    const s = entry.sprites.find((x) => x.name === sprite);
-    if (!s) return null;
-    this.consumed.add(file);
-    return { img, sx: s.x, sy: img.height - s.y - s.h, sw: s.w, sh: s.h };
-  }
 }
 
 const atlas = new WorkerAtlas();
-const autotiler = new AutoTiler(atlas);
 const wallTiler = new VanillaWallTiler(atlas);
 /** 自有 tile 过程 sheet 视图（主线程 TileSheetGen 画布的随包位图） */
 const workerSheets = new Map<number, SheetEntryLike>();
@@ -108,7 +95,7 @@ self.onmessage = (ev: MessageEvent<BakeWorkerRequest>) => {
         }
       }
       for (const { file, bmp } of msg.vimages) atlas.vimages.set(file, bmp);
-      for (const { file, bmp } of msg.maples) atlas.images.set(file, bmp);
+      // ★Maples 退役刀1:msg.maples(地形 Maples 表 ship)随域退役删除
       for (const s of msg.sheets) {
         workerSheets.set(s.id, { canvas: s.bmp, kind: s.kind, w: s.w, h: s.h });
       }
@@ -149,7 +136,7 @@ function bake(id: number, snap: import('./BakeProtocol').BakeSnapshot): void {
     groundLevel: snap.groundLevel, rockLevel: snap.rockLevel,
     chests,
     sheets: workerSheets,
-    autotiler,
+    atlas,   // ★Maples 退役刀1:原 autotiler 注入改 atlas 本体(ChunkBakeEnv.atlas)
     wallTiler,
     truncatesWalls: TRUNCATES_WALLS,
     noRead: NO_READ,

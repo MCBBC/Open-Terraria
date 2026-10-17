@@ -130,7 +130,7 @@ describe('BJ690 行为面：左键使用（ItemCheck 域,旧=无 case 完全 no-
     s.grantKits(3);
     s.useLeft();
     expect(kitStack(s.inv), '套件 −1（通用消耗门 :43612 面）').toBe(2);
-    expect((s.g.world.flags as Record<string, boolean>).superCart, 'unlockedSuperCart 置位').toBe(true);
+    expect(((s.g.world as { flags: Record<string, boolean> }).flags).superCart, 'unlockedSuperCart 置位').toBe(true);
     expect(cartCount(s.inv), '+1 机械矿车（QuickSpawnItem :45597）').toBe(1);
     expect(s.player.useTime, 'useTime 30（Item.cs:41993）').toBe(30);
     expect(s.sounds.some((x) => x === 'pus:5289:pickup'), 'UseSound Item4 起手拍恰一次').toBe(true);
@@ -152,13 +152,14 @@ describe('BJ690 行为面：左键使用（ItemCheck 域,旧=无 case 完全 no-
   });
   it('满包：返还溢出走 spawnDrop（QuickSpawnItem 世界落地面）', () => {
     const s = stubGame();
-    s.grantKits(1);
+    s.grantKits(2);                                              // 2 枚：耗 1 后槽位仍占
     for (let i = 1; i < s.inv.slots.length; i++) s.inv.slots[i] = { id: KIT_IID, stack: 1 };
     s.useLeft();
-    expect(s.inv.slots[0]).toBeNull();                          // 套件已耗
+    expect(s.inv.slots[0]!.stack, '套件 −1（槽位仍占=真满包）').toBe(1);
+    expect(cartCount(s.inv), '背包满 → 矿车不入包').toBe(0);
     const drop = (s.g.spawnDrop as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(drop, '满包 → spawnDrop(cart, 溢出 1)').toBeTruthy();
-    expect(drop[2]).toBe('vi_3353_mechanical_cart');
+    expect(drop[2]).toBe(VANILLA_ITEM_KEY_BY_ID[3353]);   // VI(3353) 规范键
     expect(drop[3]).toBe(1);
   });
   it('按住左键不连耗：非 autoReuse,一按只耗 1（松手再点才再用）', () => {
@@ -184,7 +185,7 @@ describe('BJ690 右键非使用通道（原版无右键使用面,旧臂=域错�
   function dispatchHarness() {
     const s = stubGame();
     s.grantKits(2);
-    (s.g.world.flags as Record<string, boolean>).superCart = true;   // 已解锁（排除解锁面干扰）
+    ((s.g.world as { flags: Record<string, boolean> }).flags).superCart = true;   // 已解锁（排除解锁面干扰）
     (s.g.input as { rightDown: boolean }).rightDown = true;
     (s.g as { _prevRightDown: boolean })._prevRightDown = false;
     (s.g as { tileInteractHappened: boolean }).tileInteractHappened = false;

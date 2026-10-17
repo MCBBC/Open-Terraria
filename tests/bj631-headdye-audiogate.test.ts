@@ -185,7 +185,8 @@ describe('BJ631 件1·渲染消费源锚（PaperDoll 头甲消费+body/legs 逐�
   });
 
   it('主合成消费位不变（sw-bj21 源锚兼容：skipHair 门=拆层时头甲归 overlay 路径）', () => {
-    expect(RDR).toContain('const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);');
+    // ★Maples 退役刀0(2026-10-17):p.appearance → app(渲染层缺省=默认纸娃娃,锚随迁)
+    expect(RDR).toContain('const doll = compositePaperDoll(app, dollEquip, dollOpts);');
   });
 });
 

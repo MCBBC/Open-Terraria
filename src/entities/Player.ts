@@ -9897,13 +9897,29 @@ export class Player extends Entity {
    *  门（:19697/:19731）：|vx| > (accRunSpeed+maxRunSpeed)/2 && vy==0 && 无坐骑。
    *  ★调用点必须嵌在爬坡分支（else-if B）内——分支入口门 |vx|<accRunSpeed 与尘门
    *  中点构成互斥带；裸装 accRun==maxRun → 带空永不触发（勿再提升为全局判定）。
+   *  脚步声（:20357-20361,函数头先于尘分支=翅靴/五靴型全分支播放）：hermesStepSound
+   *  三件套由 PlayerFrame 每帧重置（:36229-36231 默认 SoundType=17=Sounds/Run/
+   *  Cooldown=9;legs==140 → :36243-36245 覆写 SoundType=2 Style=24=Item_24/Cooldown=6
+   *  ——legs 贴图索引 140 全库唯一持有者=Djinn's Curse 3770,本仓 statOfInternal().ls
+   *  ===140 同源判定）。分派:LegacySoundPlayer case17 :857=SoundRun(:236 Load
+   *  "Sounds/Run")随机 pitch ±0.01 微抖不建模;case 2=Item 族 style=变体号。
    *  分支（按装备 vid 授予 :36285）：4874 泰拉闪耀=火尘6 / 3200·3990 航行靴=尘253×4 /
    *  1579 冰靴=雪尘76×2 / 4055 沙丘行者=沙尘32 / 3993 仙灵火花=仙尘61族×2 /
-   *  其余跑靴（赫尔墨斯 54/闪电 405/幽灵 898/霜花 1862 等）=白尘16+脚步声
-   *  （hermesStepSound=SoundID 17 冷却 9t :35517-35519）。鞋染料 shader 不建模。 */
+   *  其余跑靴（赫尔墨斯 54/闪电 405/幽灵 898/霜花 1862 等）=白尘16。
+   *  ★2026-10-17 Run 翻案修刀:旧实现误键 'Item_17'+误嵌普通支（仅无 bootFx 靴型
+   *  播声）——SoundType 17 是 Run 非 Item_17（两键同数字纯属巧合,sfx-wiring
+   *  DEAD_SLOTS 曾据零 'Run' 键消费误判死素材,同日翻案）。鞋染料 shader 不建模。 */
   private spawnFastRunParticles(game: GameHooks, maxRun: number, accRun: number): void {
     if (this.ridingMount || this.vy !== 0) return;
     if (Math.abs(this.vx) <= (accRun + maxRun) / 2) return;
+    // 脚步声（:20357-20361 头部位，先于尘分支）：runSoundDelay==0 ∧ vy==0（上双门已保）
+    const legsArmorId = this.inv.displayArmor()[2];   // displayArmor() 返回内部 id 数组（dollEquipFromInv 同源）
+    const legsSt = legsArmorId != null ? statOfInternal(legsArmorId) : null;
+    const djinnLegs = legsSt != null && legsSt.s === 'l' && legsSt.ls === 140;
+    if (this.runSoundDelay <= 0) {
+      game.playSfxFiles?.(djinnLegs ? ['Item_24'] : ['Run'], 1, this.cx, this.cy);
+      this.runSoundDelay = djinnLegs ? 6 : 9;
+    }
     const gd = this.gravDir;
     const off = gd === -1 ? -this.h : 0;
     const feetY = this.y + this.h + off;
@@ -9968,13 +9984,9 @@ export class Player extends Entity {
         d.noGravity = true; d.noLightEmittance = true;
       }
     } else {
-      // 普通跑靴：尘16 + 脚步声（SoundID 17 → Item_17，IntendedCooldown 9t）
+      // 普通跑靴：尘16（脚步声已在函数头 :20357 全分支播放,勿在此重复）
       const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 16, -this.vx * 0.5, this.vy * 0.5, 50, null, 1.5) : null;
       if (d) { d.dyeVid = shoeDye; d.vx *= 0.2; d.vy *= 0.2; }
-      if (this.runSoundDelay <= 0) {
-        game.playSfxFiles?.(['Item_17'], 1, this.cx, this.cy);
-        this.runSoundDelay = 9;
-      }
     }
   }
 

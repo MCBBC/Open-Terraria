@@ -316,7 +316,13 @@ export class ChloroLeafShot extends Entity {
     // 与 206/225 叶绿箭族先例同表）
     if (!this.burstDone) {
       this.burstDone = true;
-      game.playSfxWav?.('Item_6', 1, this.cx, this.cy);
+      // ★BJ692 复诊勘误（用户驳回首诊,定谳正确）:原版 :28264 是 legacy PlaySound(6,x,y)
+      // ——【type=6=Grass 割草声库】（LegacySoundPlayer.cs case 6 SoundGrass,±0.30 随机
+      // 音调）,绝非 Item_6!legacy 整数重载的编号域=声音库（2=Item,3=NpcHit,4=NpcKilled,
+      // 5=PlayerKilled,6=Grass,7=Grab,8/9=门…）,与 SoundID.ItemN=LegacySoundStyle(2,N)
+      // 名字重载完全两码事。旧译 'Item_6'=魔镜回城采样=用户实报「穿叶绿套攻击出魔镜音」
+      // 根因。修='chop' 逻辑键（Sfx.ts chop:['Grass']+put[-30,30]=原版同款方差）。
+      game.playSfx?.('chop', 1, this.cx, this.cy);
       for (let i = 0; i < 8; i++) {
         const ang = Math.random() * Math.PI * 2;
         const f = Math.random();
@@ -405,7 +411,9 @@ export class ChloroLeafShot extends Entity {
   private killWithFx(game: GameHooks): void {
     if (this.dead) return;
     this.dead = true;
-    game.playSfxWav?.('Item_6', 1, this.cx, this.cy);            // legacy PlaySound(6,:76022)
+    // ★BJ692 复诊勘误:legacy PlaySound(6,:76022)=type 6 Grass 割草声（同出生处注,
+    // 旧 'Item_6' 魔镜采样=误译,首诊「原版复用魔镜音」判谳作废——用户驳回正确）
+    game.playSfx?.('chop', 1, this.cx, this.cy);
     for (let i = 0; i < 15; i++) {                                // 15×d157（:76024-76031）
       const f = Math.random();
       game.spawnDust?.(this.x, this.y, this.w, this.h, 157,

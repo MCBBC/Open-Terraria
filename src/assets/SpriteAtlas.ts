@@ -7,16 +7,16 @@ const swTrace = (msg: string): void => {
   if (swTraceLazy) { swTraceLazy(msg); return; }
   void import('../net/AssetCache').then((m) => { swTraceLazy = m.swTrace; swTraceLazy(msg); }).catch(() => {});
 };
-// Unity 素材图集运行时加载器
-// 数据由 scripts/build-atlas.mjs 生成（public/sprites/atlas.json + resources.json）
+// ★Maples 双轨渲染体系全退役刀1④（2026-10-17）：Unity 素材图集面（atlas.json/
+// resources.json/annotations.json/地形·角色 png + rect/animFrames/loadAtlasFile/
+// load/preloadMaplesWorld/hardAlpha/images 表）随域全删——audit 2026-10-16 定谳:
+// 三「活」函数被烘焙链三重短路挡死+运行时探针 rectTally 全 0/autotilerTally 空;
+// 唯一活面=Player.png 兜底(刀0 已换默认纸娃娃)与 NPC_2/3/4/81 敌怪支(⑤已删)。
+// 本文件自此只承载原版素材命名空间（vanilla/vanilla-ui/图集子矩形/懒加载链）。
 // 原版素材由 scripts/vanilla-atlas.mjs 生成（public/sprites/vanilla.json，独立命名空间、无 Unity y 翻转）
-// 注意：Unity 精灵 rect 的 y 轴原点在【左下】，Canvas 在【左上】，取用时要翻转。
-import atlasJson from '../../public/sprites/atlas.json';
-import resourcesJson from '../../public/sprites/resources.json';
 import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
-import { mkCanvas } from '../render/canvasEnv';   // ★2026-10-16 Tree_Bodys 裁剪特例(Tree_Bodys=Tiles_5 左上区,见 loadAtlasFile)
 
 /** npc id → 动画帧数（SetDefaults 提取数据派生；懒加载 NPC 表用） */
 const vanillaNpcFrames: Record<string, number> = Object.fromEntries(
@@ -150,24 +150,6 @@ export function noteVuiConsumer(where: string): void {
   if (_vuiConsumerRing.length > 3) _vuiConsumerRing.shift();
 }
 
-/** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
-function hardAlpha(img: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = img.width; c.height = img.height;
-  const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0);
-  const d = ctx.getImageData(0, 0, c.width, c.height);
-  const px = d.data;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i + 3] >= 128) px[i + 3] = 255;
-    else {
-      px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0;
-    }
-  }
-  ctx.putImageData(d, 0, 0);
-  return c;
-}
-
 /** 驱逐 SW 资产缓存中该文件的条目(best-effort,失败静默——dev 无 SW 时
  *  caches API 仍可写,但无人读它,无副作用)。贴图加载失败时调用,让 TTL
  * 重试能拿到网络新字节而非同一份缓存毒。
@@ -197,10 +179,7 @@ export function evictSwCacheEntry(file: string): void {
 }
 
 export class SpriteAtlas {
-  data = atlasJson as unknown as AtlasData;
-  resources = resourcesJson as unknown as ResourcesData;
   vanilla = vanillaJson as unknown as VanillaData;
-  images = new Map<string, ImageBitmap | ImageBitmap | HTMLImageElement | HTMLCanvasElement>();
   /** ★ImageBitmap 化(2026-08-14 根治):drawImage(HTMLImageElement) 走浏览器
    *  懒解码缓存,GPU 压力下被驱逐→静默重解码(三份 trace 14-21 万次解码风暴)。
    *  createImageBitmap = 自持已解码像素(原版 Texture2D 语义):绘制永不重解码,
@@ -211,110 +190,6 @@ export class SpriteAtlas {
   /** UI 贴图（vanilla-ui/，干净像素不 hardAlpha——UI 有抗锯齿边缘） */
   uiimages = new Map<string, ImageBitmap | HTMLImageElement>();
   private uiFiles = (vanillaUiJson as { files: Record<string, string> }).files;
-  /** 人工标注（annotator.html 导出）：sheet → spriteName → 方位标签 */
-  annotations: Record<string, Record<string, string>> = {};
-
-  /** ★2026-10-16 地形表 vanilla 化改道表:atlas 条目名(切片几何键) → 实际加载的
-   *  vanilla 同名图(像素逐位一致,Python 全图对拍 diff=0)。Tree_Bodys 例外:无同名
-   *  vanilla 文件,装载时从 Tiles_5 左上 174×264 裁剪(见 loadAtlasFile onload 特例);
-   *  Tree_Branches/Tree_Tops 及 Tiles_0/1/6/Wall_1/2 为零活消费死资产,仍改道以
-   *  保持条目完整性(装载失败也不炸——onerror 静默,反正无人 rect() 它们)。 */
-  private static readonly TERRAIN_FROM_VANILLA: Readonly<Record<string, string>> = {
-    '地形/Tiles_0.png': 'vanilla/Tiles_0.png',
-    '地形/Tiles_1.png': 'vanilla/Tiles_1.png',
-    '地形/Tiles_2.png': 'vanilla/Tiles_2.png',
-    '地形/Tiles_3.png': 'vanilla/Tiles_3.png',
-    '地形/Tiles_6.png': 'vanilla/Tiles_6.png',
-    '地形/Tree_Bodys.png': 'vanilla/Tiles_5.png',
-    '地形/Tree_Branches.png': 'vanilla/Tree_Branches_0.png',
-    '地形/Tree_Tops.png': 'vanilla/Tree_Tops_0.png',
-    '地形/Wall_1.png': 'vanilla/Wall_1.png',
-    '地形/Wall_2.png': 'vanilla/Wall_2.png',
-  };
-
-  /** 装载单张 atlas 表进 images（hardAlpha 二值化 + 异步 ImageBitmap 升格，
-   *  竞态守卫同旧内联版）。load() 启动预载与 preloadMaplesWorld() 共用。
-   *  ★2026-10-16 地形表 vanilla 化(用户判例:地形/*.png 与 vanilla 同名图像素级
-   *  逐位一致,Python 全图对拍 diff=0;Tree_Bodys=Tiles_5 左上 174×264 同像素):
-   *  实际加载的 png 源按 ATLAS_FILE_REMAP 改道 vanilla/——atlas.json 条目仅作
-   *  【切片几何表】保留(同名切片像素同位,整图全等⇒几何平移恒等),AutoTiler/
-   *  ChunkBake 消费面零改动;public/sprites/地形/ 目录随之退役(仅留 atlas.json
-   *  几何登记,不再有 png 文件)。 */
-  private loadAtlasFile(f: string): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        // 根源处理：整图硬 alpha —— 抗锯齿半透明像素（提取 PNG 的灰/黑镶边来源）
-        // 二值化为 0/255，所有消费方（tile/墙/图标/角色）统一获得干净像素
-        let hc = hardAlpha(img);
-        // ★2026-10-16:Tree_Bodys 无 vanilla 同名文件——它=Tiles_5 左上 174×264
-        // 区域(像素已证),装载时从 Tiles_5 位图裁剪出该区域当 Tree_Bodys 图,
-        // 切片几何(Tree_Bodys_N,Unity y-up 域)与原图逐位同位。
-        if (f === '地形/Tree_Bodys.png') {
-          const t5 = this.images.get('vanilla/Tiles_5.png');
-          if (t5) {
-            const cv = mkCanvas(174, 264);
-            if (cv) {
-              const cx = cv.getContext('2d')!;
-              cx.imageSmoothingEnabled = false;
-              // Tiles_5 经 hardAlpha 后为 canvas/bitmap,先裁剪再统一走替换链
-              cx.drawImage(t5, 0, 0, 174, 264, 0, 0, 174, 264);
-              hc = cv as unknown as HTMLCanvasElement;
-            }
-          }
-        }
-        this.images.set(f, hc);
-        // ★异步升格 ImageBitmap(2026-08-19 双开 IOSurface 审计:hardAlpha 家族
-        // 18 张/窗持久 canvas 后备;bitmap = CPU 常驻+绘制同走硬件+GPU 拷贝
-        // 浏览器托管可驱逐 = 零持久面,与 vimages 350 张同形态)。烘焙源只在
-        // chunk 重烘时被 drawImage,转换无感;竞态守卫:仍是同一张才替换
-        if (typeof createImageBitmap === 'function') {
-          // ★预乘位图（2026-09-03 边缘暗晕定谳）：WebGL 规范对 ImageBitmap 源
-          //  **忽略 UNPACK_PREMULTIPLY_ALPHA_WEBGL**，位图自身 premultiplyAlpha
-          //  标志才生效——默认不预乘 → GLSpriteLayer 预乘着色器(`c.rgb*a` +
-          //  ONE/ONE_MINUS_SRC_ALPHA)把直 alpha 数据再乘一次 α = 边缘双重变暗
-          //  （3.4× 沙暴背景撕裂带上呈 3px 暗晕，用户实报"蓝色 stroke"）。
-          //  位图预乘后与 atlas canvas 路径(UNPACK 对 canvas 源生效)语义一致；
-          //  2D drawImage 消费方合成结果不变（规范等价）
-          createImageBitmap(hc, { premultiplyAlpha: 'premultiply' }).then((b) => {
-            if (this.images.get(f) === hc) this.images.set(f, b);
-          }).catch(() => { /* 保持 canvas,形态等价 */ });
-        }
-        resolve();
-      };
-      img.onerror = () => resolve();
-      // ★2026-10-16 地形表 vanilla 化:实际 png 源改道(见 loadAtlasFile 头注);
-      //   srcOf 图上同名切片几何与像素逐位同位(整图全等已证)。
-      const srcOf = SpriteAtlas.TERRAIN_FROM_VANILLA[f] ?? f;
-      img.src = `sprites/${encodeURI(srcOf)}`;
-    });
-  }
-
-  async load(onProgress?: (p: number) => void): Promise<void> {
-    // 启动预载 = 空集(2026-08-24 用户报"菜单加载 地形/Tiles_0"):
-    //  · 封面/* 已删(Maples 启动插画,全仓无消费方——菜单用 vanilla-ui/Logo)
-    //  · 地形/*(AutoTiler 草皮/树/墙规则表)与角色/*(敌人/玩家 Maples 贴图)全是
-    //    进世界后才消费的活资产——菜单零消费,改由 preloadMaplesWorld() 在世界
-    //    入口预载(rect() 无懒载兜底 + enemyAnimCache 空结果永久缓存,不能纯懒载)
-    // 原版 vanilla 素材与 vanilla-ui 贴图同样不在启动预载(8550 请求/主菜单 2GB 根因):
-    // 图块/墙/NPC 表 → Game.preloadSceneAssets 里 preloadTileSheetsFor 预载;
-    // 物品图标 → vicon 按需懒加载 + 进世界后 prefetchIcons() 后台补齐;
-    // UI 贴图 → vui() 按需懒加载(全部 11 处消费方每帧重查,首帧 null 自兜底)
-    const files = Object.keys(this.data.files).filter((f) => !f.startsWith('地形/') && !f.startsWith('角色/'));
-    let done = 0;
-    const total = files.length;
-    await Promise.all([
-      ...files.map((f) => this.loadAtlasFile(f).then(() => {
-        done++;
-        onProgress?.(done / total);
-      })),
-    ]);
-    // 人工标注（可选，缺失时回退）
-    try {
-      const r = await fetch('sprites/annotations.json');
-      if (r.ok) this.annotations = await r.json();
-    } catch { /* 无标注 */ }
-  }
 
   // ---- 原版素材 API（无 Unity y 翻转，按 TEdit 网格寻址） ----
 
@@ -696,17 +571,6 @@ export class SpriteAtlas {
     ]);
   }
 
-  /** Maples 世界贴图预载（2026-08-24 自启动预载迁入）：地形 10 张（AutoTiler
-   *  草皮/杂草/树苗/墙规则数据表）+ 角色 5 张（敌人/玩家 Maples 贴图路径）。
-   *  ★必须在首帧 chunk 烘焙前就位——rect() 只读 images 无懒载兜底，且
-   *  Renderer.enemyAnimCache 会把空帧表永久缓存（懒载晚到=史莱姆/僵尸永不渲染） */
-  private _maplesPreloaded = false;
-  async preloadMaplesWorld(): Promise<void> {
-    if (this._maplesPreloaded) return;
-    this._maplesPreloaded = true;
-    const files = Object.keys(this.data.files).filter((f) => f.startsWith('地形/') || f.startsWith('角色/'));
-    await Promise.all(files.map((f) => this.loadAtlasFile(f)));
-  }
   /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null。
    *  渲染路径一律用此入口(经 vimg 别名)——直接 vimages.get 会绕过懒加载与
    *  onVImageLoaded 重烘焙钩子(棕榈树干传送消失的根因)。
@@ -882,24 +746,6 @@ export class SpriteAtlas {
     })));
   }
 
-  has(file: string): boolean {
-    return this.images.has(file);
-  }
-
-  /** 取精灵绘制矩形（Unity y 翻转已处理）。找不到返回 null。 */
-  rect(file: string, sprite: string): DrawRect | null {
-    const img = this.images.get(file);
-    const entry = this.data.files[file];
-    if (!img || !entry) return null;
-    const s = entry.sprites.find((x) => x.name === sprite);
-    if (!s) return null;
-    return { img, sx: s.x, sy: img.height - s.y - s.h, sw: s.w, sh: s.h };
-  }
-
-  animFrames(anim: string): DrawRect[] {
-    const frames = this.resources.anims[anim] ?? [];
-    return frames.map((f) => this.rect(f.file, f.sprite)).filter(Boolean) as DrawRect[];
-  }
 }
 
 // ---- 物品图标：一律原版 Item_N（旧 Maples UI/ 图标层已整体移除） ----

@@ -139,6 +139,7 @@ describe('SW-BJ21 ③ 结构锁(取表/就绪门/预载/捏人预抢 同源)', (
     expect(src).not.toContain("UITextures.get('Player_0_15.png')");
   });
   it('实时链消费同一 compositePaperDoll(Renderer.drawPlayer 主烘焙入口)', () => {
-    expect(rendererSrc).toContain('const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);');
+    // ★Maples 退役刀0(2026-10-17):p.appearance → app(渲染层缺省=默认纸娃娃,锚随迁)
+    expect(rendererSrc).toContain('const doll = compositePaperDoll(app, dollEquip, dollOpts);');
   });
 });

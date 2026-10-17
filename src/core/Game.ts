@@ -479,7 +479,6 @@ import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, TORCH_ITEMS, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
-import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { windSway } from '../render/WindSway';
 import { natureParticles } from '../render/NatureParticles';
@@ -3658,7 +3657,6 @@ export class Game implements GameHooks {
   private flexLatchDown = false;
   assets: AssetBundle;
   atlas: SpriteAtlas | null = null;
-  autotiler: AutoTiler | null = null;
   world!: World;
   player!: Player;
   camera!: Camera;
@@ -6581,7 +6579,6 @@ export class Game implements GameHooks {
     };
     if (atlas) {
       this.atlas = atlas;
-      this.autotiler = new AutoTiler(atlas);
     }
     this.renderer = new Renderer(this.assets, atlas);
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
@@ -7105,7 +7102,9 @@ export class Game implements GameHooks {
     await Promise.all([
       a.preloadTileSheetsFor(tileSheets, wallIds),
       a.preloadMiscAndNpcs(),
-      a.preloadMaplesWorld(),   // 地形/角色 Maples 表(2026-08-24 自启动预载迁入)
+      // ★Maples 退役刀1(2026-10-17):preloadMaplesWorld(地形/角色 Maples 表)随域
+      // 退役删除——预载面零消费(atlas.json 仅 15 文件全在两前缀,rect() 无懒载兜底
+      // 的消费方已全删)。
     ]);
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadItemIcons'), 0.15);
     // 物品图标（6059 张/24MB）改为后台补齐——不再阻塞进图：渲染/道具栏走
@@ -7670,7 +7669,8 @@ export class Game implements GameHooks {
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     // atlas 传入 = 烘焙懒取自注册(晚到自动重烘,见 ChunkCache 构造器注释)
-    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler, this.atlas);
+    // ★Maples 退役刀1:第 3 参 AutoTiler → atlas 本体(烘焙 vanilla 直取链注入面)
+    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.atlas, wallTiler, this.atlas);
     // ★C4（2026-09-28）：烘焙 worker 装配（当日灰度,★同日转正——WBAKE_ENABLED
     // 缺省开,?wbake=0 逃生门关=零装配,主线程烘焙全链逐位现状）。装配后
     // flushDirty/get 的烘焙分派走 worker（进世界「终态保险全量标脏」级联与游玩中
@@ -45257,7 +45257,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 206/225 叶绿箭族（:76009-76018）：legacy PlaySound(6)+5×d40（206 带 alpha<255 门,
     // 玩家弹 alpha 恒 0 恒过门——同语义不设门）
     if (projId === 206 || projId === 225) {
-      this.sfx.play('dig', 1, x + w / 2, y + h / 2);   // legacy SoundID 6 = Dig 变体
+      // ★BJ692 同族连坐:legacy PlaySound(6,:76009-76018)=type 6 Grass 割草声——旧注
+      // 「=Dig 变体」系把 legacy 编号域误读（6=Grass 非 Dig;Dig 是 type 0）。'chop' 键
+      // =Grass 文件+±30 音调方差=原版同款。
+      this.sfx.play('chop', 1, x + w / 2, y + h / 2);
       for (let i = 0; i < 5; i++) this.spawnDust(x, y, w, h, 40);
       return;
     }
@@ -45454,6 +45457,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 追踪弹（锁定瞬间 friendly=true，Arrow 36 族块消费）
     if (projId === 306) {
       const cx = x + w / 2, cy = y + h / 2;
+      // ★BJ692 同族清欠:legacy PlaySound(3,x,y)=type 3 NpcHit 库 style 1=NPC_Hit_1
+      //（LegacySoundPlayer case 3;旧实现漏播——「legacy 编号域误读族」普查第三处）
+      this.playSfxWav('NPC_Hit_1', 1, cx, cy);
       for (let i = 0; i < 20; i++) {
         this.spawnDust(x, y, w, h, 184, 0, 0, 0, null, 1.1, true);   // scale×1.1（:78028-78033）
       }

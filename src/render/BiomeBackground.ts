@@ -1380,6 +1380,11 @@ export class BiomeBackground {
   clearTintCache(): void {
     for (const c of this.tintCache.values()) { c.width = 0; c.height = 0; }
     this.tintCache.clear();
+    // ★2026-10-17 红队 CONFIRMED 债清偿:caveBackTreeX 惰性一次写入(BiomeBackground
+    // 随 Renderer 跨世界复用)——切世界后世界 treeX 变了但缓存非空永不重掷=新世界
+    // 森林背景四段边界读旧世界树位(Forest1/Forest2 会话级钉死,features 探针 10 vs 0
+    // 定谳)。挂点=clearTintCache(世界装配处 Renderer.ts 同调,与 tint/纸娃娃缓存同批清账)。
+    this.caveBackTreeX = null;
   }
   private tintTexIds = new WeakMap<object, number>();
   private tintTexIdSeq = 0;

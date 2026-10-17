@@ -43,7 +43,11 @@ export class CharacterSaveWriteError extends Error {
 
 export interface CharacterMeta { id: number; name: string; difficulty: number; createdAt: number;
   /** 收藏（原版 UICharacterListItem 收藏钮；收藏行 ★ 前缀显示） */
-  favorite?: boolean; }
+  favorite?: boolean;
+  /** ★BJ691b 最后游玩（epoch ms;原版 lastTimePlayerWasSaved 语义——每次存档刷新）。
+   *  create（新建/导入）置 now;setState（doSave 每存档点/导入携态）拍刷新;
+   *  旧档缺省回退 createdAt。列表序消费见 list()（收藏→lastPlayed→名→id）。 */
+  lastPlayed?: number; }
 
 let nextId = 1;
 
@@ -114,7 +118,18 @@ export class CharacterStore {
     else this.onIndexWrite?.();   // ★BJ614：index 写成功 → players.index.json 覆盖式备份
   }
 
-  list(): CharacterMeta[] { return [...this.index]; }
+  /** ★BJ691b 显示序（镜像 WorldStore.list() 同构;原版锚=UICharacterSelect.cs:146-157
+   *  UpdatePlayersList `orderby IsFavorite desc, LastPlayed desc, Name, FileName`——
+   *  BJ691a 曾误锚 :178 缓存比对分支（名字序）=用户实测「导入仍垫底」复红根因）:
+   *  收藏 → lastPlayed 降序（新导入/新建/最近游玩置顶）→ 名（zh 音序,WorldStore
+   *  同参）→ id（文件名代位）。旧档无 lastPlayed 回退 createdAt。 */
+  list(): CharacterMeta[] {
+    return [...this.index].sort((a, b) =>
+      (Number(!!b.favorite) - Number(!!a.favorite))
+      || ((b.lastPlayed ?? b.createdAt ?? 0) - (a.lastPlayed ?? a.createdAt ?? 0))
+      || (a.name ?? '').localeCompare(b.name ?? '', 'zh')
+      || (a.id - b.id));
+  }
 
   /** 收藏切换（原版 FavoriteButtonClick）。
    *  收藏行禁删 = 原版语义：UICharacterListItem.cs:114-116 仅 !IsFavorite 才挂
@@ -166,7 +181,8 @@ export class CharacterStore {
 
   async create(a: Appearance): Promise<CharacterMeta> {
     await this.ensureLoaded();
-    const meta: CharacterMeta = { id: nextId++, name: a.name || '无名角色', difficulty: a.difficulty, createdAt: Date.now() };
+    const meta: CharacterMeta = { id: nextId++, name: a.name || '无名角色', difficulty: a.difficulty, createdAt: Date.now(),
+      lastPlayed: Date.now() };   // ★BJ691b 新建/导入=最新（原版 CreateAndSave→SavePlayer 即写 lastTimePlayerWasSaved 同相）
     this.index.push(meta);
     await this.saveIndex();
     // ★BJ618 件2（BJ616 probe F8 转正）：数据写失败（kvSet 'fail'）→ 导出兜底告警+
@@ -254,6 +270,10 @@ export class CharacterStore {
   }
 
   async setState(id: number, state: import('../save/serialize').SaveData['player']): Promise<void> {
+    // ★BJ691b 每存档点拍 lastPlayed（原版 lastTimePlayerWasSaved 唯一写位=SavePlayer;
+    //  doSave/导入携态两消费面同拍=「最近游玩的角色置顶」）。写败不拍（保持旧值,
+    //  与数据面同成败）。index 持久化随拍（小 JSON,一次 kv 写）。
+    const cm = this.index.find((x) => x.id === id);
     const json = JSON.stringify(state);
     // ★BJ618 件2（BJ616 probe F8）：随身态写败不再静默——导出兜底告警+抛（旧实现
     //  无告警=持久丢失;调用方 doSave .catch 面/复制角色路径 catch 感知,用户提示由
@@ -263,6 +283,11 @@ export class CharacterStore {
       const cm = this.index.find((x) => x.id === id);
       this.onWriteFailData?.(cm?.name ?? 'char', stateKey(id), json);
       throw new CharacterSaveWriteError(stateKey(id));
+    }
+    // ★BJ691b 成写后拍 lastPlayed + index 随拍持久化
+    if (cm && (cm.lastPlayed ?? 0) < Date.now()) {
+      cm.lastPlayed = Date.now();
+      await this.saveIndex();
     }
     // ★BJ614：随身态快照（原版 .plr 语义档——doSave 每存档同步点/复制角色路径共用）
     try { this.onStateWrite?.(id, json); }

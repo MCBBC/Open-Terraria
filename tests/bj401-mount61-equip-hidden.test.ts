@@ -177,10 +177,11 @@ describe('BJ401 源码锚锁：三门落位 + BJ358 锚不回退', () => {
     // 翅膀 wingSlot 门（DrawPlayer_09_Wings :657 同相）
     expect(src).toContain('!merfolkClearWings && !mntHidden ? wingAgg.logic : 0');
     // 纸娃娃门（AdjustmentsForPixieMount hideEntirePlayer 消费）
-    expect(src).toContain('if (p.appearance && !mntHidden)');
-    // legacy 精灵路径门
-    expect(src).toContain('if (!drawn && this.atlas && !mntHidden)');
-    // 程序化兜底路径门
+    // ★Maples 退役刀0(2026-10-17)：外观缺省化(app=p.appearance??defaultAppearance)后
+    //  门=纯 mntHidden;legacy Maples 精灵路径门已随域退役删除(其 !drawn 链只剩程序化兜底)
+    expect(src).toContain('if (!mntHidden)');
+    expect(src).toContain('const app = p.appearance ?? defaultAppearance();');
+    // 程序化兜底路径门(最后保险,原 legacy 门位)
     expect(src).toContain('if (!drawn && !mntHidden)');
     // 日曜盾球门（DrawPlayer_26_SolarShield）
     expect(src).toContain('p.solarShields > 0 && !p.dead && !mntHidden');

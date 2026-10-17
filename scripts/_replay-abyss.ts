@@ -136,16 +136,26 @@ const MOD_ID_TO_NAME = new Map<number, number>();   // cs id → 本仓 internal
   const root0 = payload(10, r) as Array<{ t: number; name: string; v: unknown }>;
   const tiles = (root0.find((t) => t.name === 'tiles')?.v ?? []) as Array<{ t: number; name: string; v: unknown }>;
   const tileMap = tiles.find((t) => t.name === 'tileMap')?.v as unknown[];
-  for (const e of tileMap) {
+  { let __abyss: string[] = []; let __unk: string[] = []; for (const e of tileMap) {
     const f = (Array.isArray(e) ? e : (e as { v: unknown }).v) as Array<{ name: string; v: unknown }>;
     const get = (nm: string) => f.find((x) => x.name === nm)?.v;
     const snake = String(get('name')).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
     const our = TILE_BY_KEY[`mod_calamity_${snake}`];
-    if (our !== undefined) MOD_ID_TO_NAME.set(Number(get('value')), our);
-  }
+    const val = Number(get('value'));
+    if (our !== undefined) MOD_ID_TO_NAME.set(val, our);
+    if (/pyre|voidstone|abyss_gravel|sulphurous_shale/i.test(snake)) __abyss.push(snake + '=' + val);
+    if (val >= 920 && val <= 935) __unk.push(snake + '=' + val);
+  } console.log('[replay] census abyss:', __abyss.join(' ')); console.log('[replay] census 920-935:', __unk.join(' ')); }
   console.log('[replay] mod 名映射', MOD_ID_TO_NAME.size);
+
 }
-const CS_TO_OURS = (cs: number): number => cs === 0 ? 0 : cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? 0) : (MOD_ID_TO_NAME.get(cs) ?? 0);
+// ★699bx census 缺失真链 id 回退:cs≥693(C# TileID.Count=TileID.cs:2121 直读)必为
+//   mod 型——绝不可回退 0(活泥土哨兵:vanilla sheet=0→Abyss 层写 flag2 true→
+//   误吞整个域((4103-4108,993-999) 全变 voidstone=diff 8 格之源(929=crag_
+//   stalagmite_large1(census 直证;json 缺→映射缺)。回退=762(首个 mod tile
+//   (abyss_giant_kelp1):sheet=1030≥域阈(层写不吞)+判卷两侧对称(快照同
+//   函数转换→两侧同显示)→diff 消。
+const CS_TO_OURS = (cs: number): number => cs === 0 ? 0 : cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? 0) : (MOD_ID_TO_NAME.get(cs) ?? (cs >= 693 ? 762 : 0));
 const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
 
 // store 构建(★699ad:透传快照 slope/half——v2 5-byte 快照;v1 快照恒 0)
@@ -162,11 +172,48 @@ function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8A
     slope[i] = snap.slope?.[i] ?? 0;
     half[i] = snap.half?.[i] ?? 0;
   }
+  // ★699bz slope 写追踪仪:Proxy 拦截目标格写入(env SW_SLOPE_SPY="x,y;x,y")——
+  //   stack 3 帧归因(判别哪个面清零 famA 97 格/确认 famB 23 格零写入)
+  let slopeOut: Uint8Array = slope;
+  const __spyCells = (process.env.SW_SLOPE_SPY || '').split(';').filter(Boolean).map((c) => { const [x, y] = c.split(',').map(Number); return y * w + x; });
+  if (__spyCells.length) {
+    const tgt = new Set(__spyCells);
+    const st0 = new Error().stack ?? '';
+    slopeOut = new Proxy(slope, {
+      get(t, p, r) { return Reflect.get(t, p, t); },
+      set(t, p, v, r) {
+        const i = typeof p === 'string' && /^\d+$/.test(p) ? +p : -1;
+        if (i >= 0 && tgt.has(i) && t[i] !== v) {
+          const __st = (new Error()).stack ?? '';
+          const __fr = __st.split('\n').slice(2, 5).map((l: string) => { const mm = /at (\S+)/.exec(l); return mm ? mm[1].split('/').pop() + ':' + (/:(\d+):/.exec(l)?.[1] ?? '?') : '?'; }).join(' <= ');
+          console.log(`[slspy] (${i % w},${Math.floor(i / w)}) ${t[i]} -> ${v} :: ${__fr}`);
+        }
+        return Reflect.set(t, p, v, t);
+      },
+    }) as unknown as Uint8Array;
+  }
   return {
-    w, h, type, flags, wall, liquid, liquidType, wire, half, slope, frameX, frameY,
+    w, h, type, flags, wall, liquid, liquidType, wire, half, slope: slopeOut, frameX, frameY,
     idx(x: number, y: number) { return y * w + x; },
     get(x: number, y: number) { return type[y * w + x]; },
-    setTile(x: number, y: number, t: number, fx = 0, fy = 0) { if (x < 0 || x >= w || y < 0 || y >= h) return; const i = y * w + x; type[i] = t; flags[i] = t !== 0 ? 1 : 0; frameX[i] = fx; frameY[i] = fy; },
+    setTile(x: number, y: number, t: number, fx = 0, fy = 0) {
+      // ★699bz 邻域清写 spy:env SW_CLEAR_SPY 目标格 5x5 邻域内的 setTile 全记(带相位)
+      {
+        const __cs = (globalThis as { __swClearSpyIdx?: Set<number> }).__swClearSpyIdx;
+        if (__cs && __cs.has(y * w + x)) {
+          const __ph = (globalThis as { __swPhase?: string }).__swPhase ?? '?';
+          console.log(`[clrspy] ${__ph} (${x},${y}) <- t=${t} act_after=${t !== 0 ? 1 : 0}`);
+        }
+      }
+      if ((globalThis as { __swWriteSpy?: boolean }).__swWriteSpy && (
+            (x === 4035 && y >= 555 && y <= 561) ||
+            (x >= 4009 && x <= 4010 && y >= 573 && y <= 574) ||
+            (x >= 4105 && x <= 4106 && y >= 996 && y <= 999))) {
+        const __st2 = (new Error()).stack ?? '';
+        const __fr2 = __st2.split('\n').slice(2, 6).map((l: string) => { const mm = /at (\S+)/.exec(l); return mm ? mm[1].split('/').pop() + ':' + (/:(\d+):/.exec(l)?.[1] ?? '?') : '?'; }).join(' <= ');
+        console.log(`[writespy] (${x},${y}) <- type=${t} :: ${__fr2}`);
+      }
+      if (x < 0 || x >= w || y < 0 || y >= h) return; const i = y * w + x; type[i] = t; flags[i] = t !== 0 ? 1 : 0; frameX[i] = fx; frameY[i] = fy; },
     setTileSilent(x: number, y: number, t: number, fx = 0, fy = 0) { this.setTile(x, y, t, fx, fy); },
     hasTile(x: number, y: number) { return (flags[y * w + x] & 1) !== 0; },
     purgeGhostTiles() { return 0; },
@@ -176,6 +223,7 @@ function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8A
 const pre = loadSnap(preFile.replace(/^genprobe-snap-\d+-/, '').replace('.bin.gz', ''));
 const post = loadSnap(postFile.replace(/^genprobe-snap-\d+-/, '').replace('.bin.gz', ''));
 const store = buildStore(pre);
+(globalThis as Record<string, unknown>).__swWriteSpy = process.env.SW_WRITE_SPY === '1';
 
 // ── worldSurfaceLow 定谳(★652b 勘误):GenVars.worldSurfaceLow = TerrainPass 列游走
 //   的 num5 运行最小值(TerrainPass.cs:91 num5=Math.Min(num3,num5) 逐列;:237 落盘)——
@@ -348,6 +396,27 @@ if (process.env.SW_DUMP_AT) {
   if (process.env.SW_DUMP_BOX) (globalThis as { __swDumpBox?: number[] }).__swDumpBox = process.env.SW_DUMP_BOX.split(',').map(Number);
   (globalThis as { __swDumpOut?: string[] }).__swDumpOut = [];
 }
+// ★699bz slope 相位仪:120 差格三点 dump(P0=main 前/P1=decor 前/P2=终态)——
+// 定位我方清零发生在 main 还是 decor pass(env SW_SLOPE_CELLS="x,y;x,y" 驱动)
+const __slCells = (process.env.SW_SLOPE_CELLS || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number) as [number, number]);
+const __slDump = (label: string) => {
+  if (!__slCells.length) return;
+  const lines: string[] = [];
+  for (const [x, y] of __slCells) {
+    const i = y * w + x;
+    lines.push(`${x},${y}: in=${pre.slope?.[i] ?? 0}/${pre.act?.[i] ?? 0} ours=${store.slope[i]}/${(store.flags[i] & 1) ? 1 : 0} t=${store.type[i]}`);
+  }
+  console.log(`[slphase ${label}] ${lines.join(' | ')}`);
+};
+__slDump('P0');
+// ★699bz 邻域 spy 目标集:目标格 5x5 邻域
+{
+  const csEnv = (process.env.SW_CLEAR_SPY || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number) as [number, number]);
+  const idx = new Set<number>();
+  for (const [tx, ty] of csEnv) for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < w && ny < h) idx.add(ny * w + nx); }
+  (globalThis as { __swClearSpyIdx?: Set<number> }).__swClearSpyIdx = idx;
+}
+(globalThis as { __swPhase?: string }).__swPhase = 'main';
 (abyssFn as (...a: unknown[]) => void)(store, rng, gs);
 (globalThis as Record<string, unknown>).__swPassVLogOn = false;
 console.log(`[replay] Abyss pass 掷数=${drawCount}`);
@@ -391,7 +460,11 @@ for (const s2 of (globalThis as { __swDumpOut?: string[] }).__swDumpOut ?? []) c
 drawCount = 0;
 (globalThis as Record<string, unknown>).__swDecorVLog = []; (globalThis as Record<string, unknown>).__swSlopeTrace = []; (globalThis as Record<string, unknown>).__swBlotchTrace = [];
 (globalThis as Record<string, unknown>).__swSSKills = [];
+__slDump('P1');
+(globalThis as { __swPhase?: string }).__swPhase = 'decor';
 (decorFn as (...a: unknown[]) => void)(store, rng, gs);
+(globalThis as { __swPhase?: string }).__swPhase = 'post';
+__slDump('P2');
 {
   const vl = (globalThis as Record<string, unknown>).__swDecorVLog as string[];
   writeFileSync('/tmp/our-decor-vlog.txt', vl.join('\n'));
@@ -718,17 +791,28 @@ if (process.env.SW_DUMP_DIFF_CELLS === '1') {
   writeFileSync('/tmp/replay-diff-cells.json', JSON.stringify(cells));
   console.log(`[diffcells] ${cells.length} 格已落盘`);
 }
+
+// ★699bu 残簇终态字节直读
+{
+  const cells2: Array<[number, number]> = [[4103,995],[4104,995],[4107,995],[4108,995],[4103,996],[4104,996],[4105,996],[4106,996],[4107,996],[4108,996],[4104,999],[4107,999],[4105,1000],[4106,1000],[4105,995],[4106,995]];
+  for (const [px, py] of cells2) {
+    const pi = py * w + px;
+    console.log(`[STATE] (${px},${py}) type=${store.type[pi]} act=${(store.flags[pi] & 1) ? 1 : 0} slope=${store.slope[pi]} half=${store.half[pi]}`);
+  }
+}
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
 // ★699aw:slope 对拍(藤种门/PlacePot 门读 slope——型差=0 而 slope 差=装饰段阻塞根因)
 {
-  let sdiff = 0;
+  let sdiff = 0, hdiff = 0;
   const scells: string[] = [];
   for (let i2 = 0; i2 < n; i2++) {
     const x2 = i2 % w;
     if (x2 < 3860 || x2 >= 4200) continue;   // 深渊域外=pass120 fallout 不涉
-    if (post.slope[i2] !== store.slope[i2]) { sdiff++; if (scells.length < 30) scells.push(`${x2},${Math.floor(i2 / w)} 我=${store.slope[i2]} 真=${post.slope[i2]}`); }
+    if (post.slope[i2] !== store.slope[i2]) { sdiff++; if (scells.length < 400) scells.push(`${x2},${Math.floor(i2 / w)} 我=${store.slope[i2]} 真=${post.slope[i2]} t=${(store.flags[i2] & 1) ? KEY_OF(store.type[i2]).replace('mod_calamity_', '') : 'E'} 惟t=${(post.act?.[i2] ?? 1) ? KEY_OF(CS_TO_OURS(post.type[i2])).replace('mod_calamity_', '') : 'E'}`); }
+    if ((post.half?.[i2] ?? 0) !== store.half[i2]) hdiff++;   // ★699bz half 轴并判(边界声明)
   }
   console.log(`[replay] slope 差=${sdiff}: ${scells.join(' | ')}`);
+  console.log(`[replay] half 差=${hdiff}`);
 }
 // 局部堑壕形状指标(y∈[260,380):mound+上层走廊,岛带 382 起,岛污染不入)
 {

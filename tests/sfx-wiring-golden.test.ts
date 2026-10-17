@@ -56,6 +56,15 @@ const B3_PENDING: string[] = [];
  *  - pal_chillet_attack：SoundID.cs:1084 WithVolume(0.35) 定义后全树零调用
  *    （PalChillet :1082/PalChilletJoy :1083 有消费,Attack 变体槽空置） */
 const DEAD_SLOTS: string[] = [
+  // ★Run 翻案(2026-10-17,同日两折):Maples 退役刀曾把 Run 入桶判死——判据
+  //  =全树 grep PlaySound(SoundID.Run)/PlaySound(17 零命中。实为字面 grep 盲区:
+  //  原版消费走 hermesStepSound 结构体数字域(PlayerFrame :36229-36231 每帧重置
+  //  SoundType=17/Cooldown=9;legs==140 Djinn's Curse :36243-36245 覆写 2/24/6),
+  //  SpawnFastRunParticles :20358-20361 PlaySound(hermesStepSound.SoundType,·,·,
+  //  SoundStyle)——grep 抓不到数字域赋值链。用户亲测原版有效+反编译逐行复核定谳:
+  //  Run 是活功能(SoundID.cs:56 Run=17;LegacySoundPlayer :236 Load("Sounds/Run")
+  //  +case17 :857 播放臂)。本仓接线=Player.ts spawnFastRunParticles 头部
+  //  (2026-10-17 修刀,旧实现误键 Item_17+误嵌普通支)。
   'Zombie_5',
   'Zombie_87',
   'Zombie_101',

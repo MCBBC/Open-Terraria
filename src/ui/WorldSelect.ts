@@ -17,6 +17,7 @@ import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
 import { parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
 import { saveClient } from '../workers/SaveClient';
+import { menuToast } from './menuToast';                // ★BJ691 alert→菜单 toast
 
 export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
@@ -345,6 +346,8 @@ export class WorldSelectPanel {
     for (const t of this.iconTimers) clearInterval(t);   // 上轮行内的轮播/故障动画定时器全清
     this.iconTimers.clear();
     this.body.innerHTML = '';
+    // ★BJ691b 回归 store 单源排序（WorldStore.list() 收藏→lastPlayed→名→id 既有
+    // 正确序——BJ691a 曾在面板侧再排名字序=把既有正确序降级,已回退勘误）
     const list = this.store.list();
     for (const meta of list) {
       const el = document.createElement('div');
@@ -442,7 +445,7 @@ export class WorldSelectPanel {
           aEl.click();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
         } catch (e) {
-          alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+          menuToast(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
         }
       });
       // 删除钮（收藏防删，UIWorldListItem.cs:151-157 原版仅 !IsFavorite 挂
@@ -451,13 +454,13 @@ export class WorldSelectPanel {
       del.className = 'sw-vitem-del';
       const delFn: (() => void) | null = m.favorite ? null : async () => {
         if (!confirm(Lang.text('Mods.SandboxWorld.WorldSelect.ConfirmDelete', m.name))) return;
-        // ★R13-F2：删除链异常 catch+告警（原版面板 alert 习语,同 ImportFail）——
+        // ★R13-F2：删除链异常 catch+告警（★BJ691 起 toast,原 alert 习语退役）——
         //  存储面抛不留 unhandled rejection,reload 自存储重读防行显示与实态漂移
         try {
           await this.store.delete(m.id);
         } catch (e) {
           console.warn('[worldSelect] 删除落库失败', e);
-          alert(Lang.text('Mods.SandboxWorld.CharSelect.DeleteFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+          menuToast(Lang.text('Mods.SandboxWorld.CharSelect.DeleteFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
         }
         await this.reload();
       };

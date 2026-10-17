@@ -412,8 +412,10 @@ describe('出膛音面金标·dormant 族（2026-09-03 任务一:9 型发射位�
       'MINION_SHOT_SFX 缺 195→Item_17').toBeTruthy();
     expect(src.match(/389: \{ track: 'Item_12', vol: 0\.7 \}/),
       'MINION_SHOT_SFX 缺 389→Item_12').toBeTruthy();
-    expect(src.match(/408: \{ track: 'Item_19', vol: 0\.7 \}/),
-      'MINION_SHOT_SFX 缺 408→Item_19').toBeTruthy();
+    // ★BJ692 勘误:408 原文 PlaySound(4,x,y,19)=legacy type4 NpcKilled 库 style19
+    //（非 Item 库——Item 库=type 2）;旧金标 'Item_19' 系编号域误读,随刀改判。
+    expect(src.match(/408: \{ track: 'NPC_Killed_19', vol: 0\.7 \}/),
+      'MINION_SHOT_SFX 缺 408→NPC_Killed_19').toBeTruthy();
     // 双消费口都在（ai62Step 口 + AI_026/aiStyle66 通用口）——漏一口=该族静音
     expect((src.match(/MINION_SHOT_SFX\[shooter\.shot\]/g) ?? []).length >= 2,
       'MINION_SHOT_SFX 消费口少于 2').toBeTruthy();

@@ -155,7 +155,7 @@ import { TOOL_CUTTER, TOOL_ACTUATOR, grandDesignPath, pathConnectionMasks } from
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import type { Baked } from './bitmapize';   // ★BJ665b 恒色件烘焙面类型（PaperDoll 同源）
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
-import { MALE_VARIANTS } from '../player/Appearance';
+import { MALE_VARIANTS, defaultAppearance } from '../player/Appearance';
 import type { Appearance } from '../player/Appearance';
 import { meleeThirdOf } from '../player/SwingPathMath';
 import { hairDyeColor } from '../player/HairDyeColor';
@@ -4589,6 +4589,15 @@ export class Renderer {
   /** ★P0-A 诊断帧戳（同帧多消费方 acquire 失败只记一次指纹/只计一帧 skip;
    *  render() 头推进——见 _diagFrame） */
   private _diagFrame = 0;
+  // ---- ★恒乘数尘帧缓存（2026-10-17 溶液枪尾尘风暴刀,见 A=0 支缓存注）----
+  /** A=0 族 GetAlpha 返【绝对常量】rgb 的型（非 1 档——=1 档已被 BJ360 直绘
+   *  吸收;scale 依赖型 160 族/rgbv 彩色档 183/258 排除）。溶液枪 110 主战场。 */
+  private static readonly DUST_CONST_MUL = new Set([110, 111, 112, 113, 114, 311, 312, 313, 181, 180, 175, 163, 205]);
+  private _dustConstFrame = -1;
+  private _dustConstKey = '';
+  private _dustConstSeq = -1;
+  /** s1 烘焙内容换代序号（每次 uploadScratchBake++——缓存命中判据=seq 未变） */
+  private _dustBakeSeq = 0;
   private _swPipeMarkFrame = -1;
   /** ★P0-A 降级指纹落账（帧去重）:失败因写归因面+composePath 记
    *  'lrecon-skip:swpipe-*'（此前置 unavailable 全程零日志零指纹=17 分钟盲区
@@ -10064,6 +10073,35 @@ export class Renderer {
           ctx.restore();
           continue;
         }
+        // ★恒乘数帧缓存（2026-10-17 溶液枪尾尘风暴刀,Windows 用户实报掉帧定谳:
+        //  spray 18 尘/tick≈1080/s 同型恒乘数尘逐尘「读回+64px 循环+上传」被
+        //  Windows 每 op 税放大 12-23ms/帧;Mac 实测尘 pass 2.34ms/tick=帧增量
+        //  >50%）。【A=0 族 GetAlpha 返常量 rgb 的型】（110-114/311-313=200/255、
+        //  181/180/175=200/255、163/205=250/255——scale 依赖型 160 族非恒排除;
+        //  rgbv 彩色档 183/258 保守排除;乘数=1 档已被 BJ360 直绘吸收）乘数帧内
+        //  恒定+尘动画帧同型共享 → 同帧同 (type,fx,fy) 烘焙产物全同 →【烘焙+上传
+        //  一次,余尘直绘 scratch】。★防同帧异 tint 撞键（I 类 bolt 同病,10076 注）:
+        //  缓存带烘焙序号,命中须 s1 未被其他烘焙触碰（交替型尘自然失效回烘焙,
+        //  正确性优先）。帧戳惰性清（_diagFrame）。
+        if (Renderer.DUST_CONST_MUL.has(d.type) && !d.color) {
+          const ck = `${d.type}:${d.fx},${d.fy}`;
+          if (this._dustConstFrame !== this._diagFrame) {
+            this._dustConstFrame = this._diagFrame;
+            this._dustConstKey = '';
+            this._dustConstSeq = -1;
+          }
+          if (this._dustConstKey === ck && this._dustConstSeq === this._dustBakeSeq) {
+            // 命中:s1 仍为本键烘焙态——直接绘制（跳过读回+循环+上传）
+            ctx.save();
+            ctx.translate(px, py);
+            if (d.rotation) ctx.rotate(d.rotation);
+            if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(s1, -4, -4);
+            ctx.restore();
+            continue;
+          }
+        }
         c1.clearRect(0, 0, 8, 8);
         c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
         const ida = c1.getImageData(0, 0, 8, 8);
@@ -10077,6 +10115,11 @@ export class Renderer {
         //  字节——同帧多尘异 tint 时先行尘 quad 全错拿末尘内容,I类 bolt 同病）
         //  ★P0 去画布化:ida=烘焙点现成 ImageData 直挂（快照零拷贝;canvas 出生风暴根治）
         this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）
+        this._dustBakeSeq++;   // ★恒乘数缓存序号（见上方缓存注——s1 内容换代标记）
+        if (Renderer.DUST_CONST_MUL.has(d.type) && !d.color) {
+          this._dustConstKey = `${d.type}:${d.fx},${d.fy}`;
+          this._dustConstSeq = this._dustBakeSeq;
+        }
         ctx.save();
         ctx.translate(px, py);
         if (d.rotation) ctx.rotate(d.rotation);
@@ -11385,21 +11428,6 @@ export class Renderer {
     this.ctx.drawImage(icon, d.x, d.y + bob, 12, 12);
     // ★刀2-C2:mod 物品 postDrawInWorld(占位图标回退点)
     mDraw?.postDrawInWorld?.(d, mctxAt());
-  }
-
-  // 敌人 → Maples 动画映射
-  private enemyAnimCache = new Map<string, ReturnType<SpriteAtlas['animFrames']>>();
-  private enemyAnim(key: string): ReturnType<SpriteAtlas['animFrames']> {
-    let f = this.enemyAnimCache.get(key);
-    if (!f) {
-      const map: Record<string, string> = {
-        slime_green: 'Slime/Jump', slime_blue: 'Slime/Jump',
-        zombie: 'Zombie/Walk',
-      };
-      f = this.atlas && map[key] ? this.atlas.animFrames(map[key]) : [];
-      this.enemyAnimCache.set(key, f);
-    }
-    return f;
   }
 
   // ===================== 血肉墙墙身三件套（Main.cs DrawWoF :37811-37966 1:1） =====================
@@ -12723,89 +12751,23 @@ export class Renderer {
       }
       return; // 表未加载完成：本帧不画（下帧懒加载完成）
     }
-    // ---- Maples 精灵优先 ----
-    if (this.atlas) {
-      let frames: ReturnType<SpriteAtlas['animFrames']> = [];
-      let anchor: 'feet' | 'center' = 'feet';
-      if (e.key.startsWith('slime')) { frames = this.enemyAnim(e.key); anchor = 'feet'; }
-      else if (e.key === 'zombie') { frames = this.enemyAnim(e.key); anchor = 'feet'; }
-      else if (e.key === 'cave_bat') {
-        // 洞穴蝙蝠：原版 NPC_49（44x32×5 帧扑翼），逐帧动画
-        if (!this.enemyAnimCache.has('bat49')) {
-          const list: ReturnType<SpriteAtlas['animFrames']> = [];
-          for (let k = 0; k < 5; k++) {
-            const r = this.atlas!.vnpc(49, k);
-            if (r) list.push(r);
-          }
-          this.enemyAnimCache.set('bat49', list);
-        }
-        frames = this.enemyAnimCache.get('bat49') ?? [];
-        anchor = 'center';
-      }
-      else if (e.key === 'demon_eye') {
-        // 恶魔之眼：NPC_2 双帧
-        frames = this.enemyAnimCache.get('deye') ?? [];
-        if (!frames.length) {
-          const file = this.atlas.data.files['角色/NPC_2.png'];
-          if (file) {
-            frames = file.sprites.map((sp) => this.atlas!.rect('角色/NPC_2.png', sp.name)).filter(Boolean) as typeof frames;
-          }
-          this.enemyAnimCache.set('deye', frames);
-        }
-        anchor = 'center';
-      }
-      else if (e.key === 'eye_of_cthulhu') {
-        // Boss 用 NPC_4：底部 3 帧 = 一阶段动画，顶部 3 帧 = 二阶段（实测对调）
-        if (!this.enemyAnimCache.has('eoc_p1')) {
-          const file = this.atlas.data.files['角色/NPC_4.png'];
-          const toFrames = (arr: typeof file.sprites) =>
-            arr.map((s) => this.atlas!.rect('角色/NPC_4.png', s.name)).filter(Boolean) as ReturnType<SpriteAtlas['animFrames']>;
-          if (file) {
-            const sorted = [...file.sprites].sort((a, b) => a.y - b.y); // 顶部在前
-            this.enemyAnimCache.set('eoc_p1', toFrames(sorted.slice(3, 6)));
-            this.enemyAnimCache.set('eoc_p2', toFrames(sorted.slice(0, 3)));
-          } else {
-            this.enemyAnimCache.set('eoc_p1', []);
-            this.enemyAnimCache.set('eoc_p2', []);
-          }
-        }
-        frames = e.phase === 2
-          ? (this.enemyAnimCache.get('eoc_p2') ?? [])
-          : (this.enemyAnimCache.get('eoc_p1') ?? []);
-        anchor = 'center';
-      }
-      if (frames.length) {
-        const rate = e.key === 'eye_of_cthulhu' ? (e.phase === 2 ? 6 : 10) : 12;
-        const idx = Math.floor(e.animT / rate) % frames.length;
-        const fr = frames[idx];
+    // ---- cave_bat：vanilla NPC_49 直取支（Maples 退役刀1⑤）----
+    // ★原「Maples 精灵优先」块已随域退役删除（slime/zombie/demon_eye/eoc 四支消费
+    //   角色/NPC_2·3·4·81 死资产,敌怪全走 vanillaId——audit 定谳唯一理论入口=
+    //   联机旧版房主原生键傀儡,回退程序化兜底层）。cave_bat 支按任务书保留改直取:
+    //   消费 vanilla NPC_49（44×32×5 帧扑翼）,独立于 enemyAnim 映射表——原实现经
+    //   enemyAnimCache 缓存（空表永久缓存=表晚到永不渲染缺陷一并消除）,现每帧
+    //   vnpc 直取（内部 lazyNpcMeta 表缓存,零额外开销）,锚点/速率/贴底 +4 语义不变。
+    if (e.key === 'cave_bat' && this.atlas) {
+      const fr = this.atlas.vnpc(49, Math.floor(e.animT / 12) % 5);
+      if (fr) {
         ctx.save();
         if (flash) ctx.filter = 'brightness(2.5)';
         else if (underwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
-        // 缩放贴合碰撞盒
-        const h = anchor === 'feet' ? e.h * 1.25 : e.h;
+        const h = e.h;
         const w = (fr.sw / fr.sh) * h;
-        if (anchor === 'feet') {
-          ctx.translate(e.cx, e.y + e.h);
-          // 素材默认朝左：向右移动时镜像（僵尸实测需要与其它怪一致的翻转）
-          const flip = -e.facing;
-          ctx.scale(flip, 1);
-          // 贴底：原版恒 +4 下沉（Main.cs:24741——透明边距沉入地面，见怪物主路径注）
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + 4, w, h);
-        } else if (e.key === 'demon_eye') {
-          // 恶魔之眼：以眼球为原点按移动方向自由旋转（贴图默认朝左，与 NPC 系素材一致）
-          const ang = Math.atan2(e.vy, e.vx) + Math.PI;
-          ctx.translate(e.cx, e.cy);
-          ctx.rotate(ang);
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
-        } else if (e.key === 'eye_of_cthulhu') {
-          // 朝向移动方向自由旋转（AI 端平滑追踪目标角度，变身时三圈自转叠加）
-          ctx.translate(e.cx, e.cy);
-          ctx.rotate(e.visAngle);
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
-        } else {
-          ctx.translate(e.cx, e.cy);
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
-        }
+        ctx.translate(e.cx, e.cy);
+        ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
         ctx.restore();
         ctx.filter = 'none';
         return;
@@ -20917,6 +20879,15 @@ export class Renderer {
       }
     }
 
+    // ★Maples 退役刀0（2026-10-17）：无外观会话（?play/?quickload 未建角色）渲染层
+    //  兜底换默认纸娃娃——`app = p.appearance ?? defaultAppearance()`，doll 合成/
+    //  dollEquipFromInv 全走默认外观（预载面=ensureAppearanceFiles(null) 已预载 v0
+    //  全通道+默认发型,Game.ts preloadSceneAssets 同源,零新增请求）。★只做渲染层
+    //  缺省：appearance 数据面不动（hardcore/死亡语音等玩法语义,出生赋值勿改）。
+    //  原 Maples Player.png 分支（角色/Player.png 帧 + runFramesCache/actionFramesCache）
+    //  已随本刀删除；程序化兜底层（assets.playerSheet）保留作最后保险。
+    const app = p.appearance ?? defaultAppearance();
+
     // ---- 配饰身上贴图·帧行（配饰审计系统性批 2026-08-22;2026-08-23 前移——
     // 背包/尾巴子层须画在翼层之前,playerFrameRows 有 swimPhase 相位副作用,
     // 一帧只许一次复算）----
@@ -20926,7 +20897,7 @@ export class Renderer {
      *  清空四字段 :36252-36256;OverrideHelmet 命中 → 头盔/发型双隐） */
     let facePlan: import('../data/vanillaAccDrawslots').FaceLayerSplitPlan | null = null;
     if (!mntHidden) {
-      accDollEquip = p.appearance ? dollEquipFromInv(p.inv, p.appearance, mnt?.type === 54) : null;
+      accDollEquip = dollEquipFromInv(p.inv, app, mnt?.type === 54);
       if (accDollEquip) {
         // ★BJ631 件1：狼/人鱼覆写保染料（同 drawDeadPlayerParts 注——shader 挂甲无关槽位）
         if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { ...accDollEquip, head: 38, body: 21, legs: 20 };
@@ -21082,9 +21053,9 @@ export class Renderer {
     //  之下,hoist 反造 21 头 glow 反转,登记）。与 lunarHoist 同语义（双绘次遍
     //  该块被 armorGlowCollected 拦=false,窗自然关闭）。
     let glowCover = false;
-    if (p.appearance && (!mntHidden || veloHead)) {
+    if (!mntHidden || veloHead) {
       if (veloHead) {
-        let vh = dollEquipFromInv(p.inv, p.appearance, true);
+        let vh = dollEquipFromInv(p.inv, app, true);
         // ★BJ631 件1：狼/人鱼覆写保染料（同 drawDeadPlayerParts 注）
         if (p.buffs.has(BuffType.Werewolf)) vh = { ...vh, head: 38, body: 21, legs: 20 };
         if (p.merman) vh = { ...vh, head: 39, body: 22, legs: 21 };
@@ -21095,7 +21066,7 @@ export class Renderer {
         lunarHoist = vl;
         const vlHead = vl?.head != null && !!vh.head;
         const headDoll = vh.head
-          ? compositePaperDoll(p.appearance, vh, { part: 'head', ...(vlHead ? { lunarSplit: true } : {}) })
+          ? compositePaperDoll(app, vh, { part: 'head', ...(vlHead ? { lunarSplit: true } : {}) })
           : null;
         if (headDoll) {
           ctx.save();
@@ -21108,7 +21079,7 @@ export class Renderer {
             // 染料已烘入件面））
             if (!this.armorGlowCollected.has(p)) {
               this.armorGlowCollected.add(p);
-              const vlBake = compositePaperDoll(p.appearance, vh, { part: 'head', lunarSplit: true, lunarPart: 'upper' });
+              const vlBake = compositePaperDoll(app, vh, { part: 'head', lunarSplit: true, lunarPart: 'upper' });
               if (vlBake) {
                 this.lunarArmorQueue.push({
                   m: ctx.getTransform(), k: this._worldLowK,
@@ -21125,7 +21096,7 @@ export class Renderer {
         }
       }
     }
-    if (p.appearance && !mntHidden) {
+    if (!mntHidden) {
       // 装备与帧行已在上方配饰身后族段复算（accDollEquip/accRows——一帧一次,
       // playerFrameRows 的 swimPhase 相位副作用禁双调）
       const dollEquip = accDollEquip!;
@@ -21170,14 +21141,14 @@ export class Renderer {
       const lunarSplit = lunar != null;
       const lunarOpt = lunarSplit ? { lunarSplit: true } : {};
       const dollOpts = { ...(hairSplit ? { skipHair: true } : {}), ...(facePlan?.skipFace ? { skipFace: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt, ...lunarOpt };
-      const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
+      const doll = compositePaperDoll(app, dollEquip, dollOpts);
       if (doll) {
         const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
         const f = dollFrameRows(doll, rows);
         // 贴底:原版玩家层恒 +4（PlayerDrawLayers :109/:203/:343 头/身/腿全层
         // `Position.Y+height−frameH+4f`——帧底透明边距一并沉入地面）
         const pad = 4;
-        const hairCol = dyeColor ?? p.appearance.hairColor;   // 拆层回画用（无染料=原生发色）
+        const hairCol = dyeColor ?? app.hairColor;   // 拆层回画用（无染料=原生发色）
         // ---- ★BJ594 日耀天闪套本体特效（用户实报"本体有特效"面,2026-10-09）：
         //      Player.cs:37371-37375 SetArmorEffectVisuals——full set（head171+body177
         //      +legs112）→ armorEffectDrawShadow+armorEffectDrawOutlines 双旗常开。
@@ -21221,10 +21192,10 @@ export class Renderer {
         //      lit 主烘焙面已烘除恒色件（lunarSplit）——stamps/残影同样需要件面
         //      覆盖（原版 stamp=全层组×GetImmuneAlphaPure(shadow),甲色=250³×k）。 ----
         const lunarUpper = lunarSplit
-          ? compositePaperDoll(p.appearance, dollEquip, { ...dollOpts, lunarPart: 'upper' })
+          ? compositePaperDoll(app, dollEquip, { ...dollOpts, lunarPart: 'upper' })
           : null;
         const lunarLegsBake = lunarSplit
-          ? compositePaperDoll(p.appearance, dollEquip, { ...dollOpts, lunarPart: 'legs' })
+          ? compositePaperDoll(app, dollEquip, { ...dollOpts, lunarPart: 'legs' })
           : null;
         /** stamp/残影的恒色件覆盖（同 filter/globalAlpha/偏移——f.img 已烘除甲件） */
         const stampLunarPiece = (bake: Baked | null, cv: number, ox: number, oy: number): void => {
@@ -21334,7 +21305,7 @@ export class Renderer {
           // ★C13-F2 socialGhost：皮肤族全 Transparent（:1489-1500）→ skin 层整支跳画
           if (!socialGhost) {
             const s2 = stF.skinMul;                    // s'²
-            const skinDoll = compositePaperDoll(p.appearance, dollEquip,
+            const skinDoll = compositePaperDoll(app, dollEquip,
               { skipHair: hairSplit, skipFace: facePlan?.skipFace, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
             if (skinDoll) {
               const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
@@ -21353,7 +21324,7 @@ export class Renderer {
           //   colorBodySkin/colorLegs → Transparent）;甲 A 钳 = globalAlpha ×ghostA
           //   （gFade 呼吸,99..151/255——PlayerDrawSet.cs:1501-1511 先钳,潜行
           //   :1523-1651 后乘,可交换）
-          const armorDoll = compositePaperDoll(p.appearance, dollEquip,
+          const armorDoll = compositePaperDoll(app, dollEquip,
             { layer: hairSplit ? 'armorNoHead' : 'armor', ...(socialGhost ? { ghostSkin: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt, ...lunarOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
@@ -21375,8 +21346,8 @@ export class Renderer {
           this.armorGlowCollected.add(p);
           const agOps = armorGlowOps({
             head: dollEquip.head ?? 0, body: dollEquip.body ?? 0, legs: dollEquip.legs ?? 0,
-            female: !MALE_VARIANTS.includes(p.appearance.skinVariant),
-            undershirt: p.appearance.undershirtColor,
+            female: !MALE_VARIANTS.includes(app.skinVariant),
+            undershirt: app.undershirtColor,
             rowsBody: rows.body, rowsLegs: rows.legs,
             sit: (sitOpt as { sitting?: import('../player/PaperDoll').DollSitting }).sitting ?? null,
             pet: petArm,
@@ -21517,64 +21488,11 @@ export class Renderer {
         drawn = true;
       }
     }
-    if (!drawn && this.atlas && !mntHidden) {
-      const idle = this.atlas.rect('角色/Player.png', 'Player_0');
-      const runFrames = this.runFramesCache ??= this.atlas.animFrames('Player/Run');
-      // 动作帧池（Player.png 12-22 号帧）
-      if (!this.actionFramesCache) {
-        const pool: Record<string, ReturnType<SpriteAtlas['rect']>> = {};
-        for (let k = 12; k <= 22; k++) {
-          const fr = this.atlas!.rect('角色/Player.png', 'Player_' + k);
-          if (fr) pool['Player_' + k] = fr;
-        }
-        this.actionFramesCache = pool;
-      }
-      const af = this.actionFramesCache;
-      let frame: typeof idle = null;
-      // use 期间：bodyFrame 行映射到动作帧池（行1→19 举 / 行2→20 挥 / 行3→21 收，
-      // 行0→12 / 行4→14；Player.cs:35876-35990 逐 useStyle 行档）
-      if (useRow >= 0) {
-        const rowFrame = af['Player_' + (useRow === 0 ? 12 : useRow === 4 ? 14 : 19 + useRow)];
-        frame = rowFrame ?? idle;
-      } else if (cart || mnt) {
-        frame = af['Player_21'] ?? idle;  // bodyFrame 行 3 → 动作帧池 21（收势/坐姿）
-      } else if (Math.abs(p.vx) > 0.3 && p.onGround) {
-        // ★行走循环优先于静持行（与纸娃娃路径同因：原版身体/腿分图层，静持只钉
-        // 身体行、腿照常走 legFrame 循环（cs:36178）；单层帧近似下静持行让位）
-        const idx = Math.floor((p.animTime * 1.3) / 8) % runFrames.length;   // 行走速率 1:1（:35829-35847 ×1.3/8）
-        frame = runFrames[idx] ?? idle;
-      } else if (staticHoldStyle === 2) {
-        frame = af['Player_20'] ?? idle; // holdStyle 2 → bodyFrame 行 2
-      } else if (staticHoldStyle === 4 && p.onGround && p.gravDir === 1) {
-        frame = idle;                    // holdStyle 4 → 站定行 0（:36046 需 gravDir==1）
-      } else if (staticHoldStyle) {
-        frame = af['Player_21'] ?? idle; // holdStyle 1/3/5 → bodyFrame 行 3
-      } else if (!p.onGround) {
-        // 空中（:35808-35816/:36121-36161）：无翼升降恒行5（收腿）→ 12；有翼
-        // 升/按住跳降=行6（张腿）→ 14；翼 22/28/45 恒行0 → idle
-        const wing = stEq.wing;
-        if (!wing) frame = af['Player_12'] ?? runFrames[0] ?? idle;
-        else if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) frame = idle;
-        else frame = ((p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0)
-          ? af['Player_14'] : af['Player_12']) ?? runFrames[0] ?? idle;
-      } else {
-        frame = idle;
-      }
-      if (frame) {
-        // 精灵视觉高度固定 56px（≈3.5 格）——与碰撞盒解耦，
-        // 碰撞盒缩小只影响物理，贴图保持高大观感不变
-        const h = 56;
-        const w = (frame.sw / frame.sh) * h;
-        // Maples 精灵默认朝左 → 内层翻转，画完还原（否则手持物会被一起翻到背后）
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, -w / 2, -h + 4, w, h);
-        ctx.restore();
-        drawn = true;
-      }
-    }
+    // ★Maples 退役刀0：原「角色/Player.png Maples 精灵分支」（idle/runFrames/
+    //  actionFramesCache 帧 + 行档映射,audit 2026-10-16 定谳=无外观会话唯一活面）
+    //  已删——无外观会话经上方 app=defaultAppearance() 走默认纸娃娃。
     if (!drawn && !mntHidden) {
-      // 程序化兜底（锚点同样为脚底中心）
+      // 程序化兜底（锚点同样为脚底中心）——最后保险（纸娃娃贴图全缺失时）
       const sheet = this.assets.playerSheet;
       const fw = this.assets.playerFrameW, fh = this.assets.playerFrameH;
       const frame = p.frame;
@@ -23004,9 +22922,6 @@ export class Renderer {
     }
     ctx.restore();
   }
-
-  private runFramesCache: ReturnType<SpriteAtlas['animFrames']> | null = null;
-  private actionFramesCache: Record<string, ReturnType<SpriteAtlas['rect']>> | null = null;
 
   /** Extra_48 表情总表（272×1092）懒加载——原版 TextureAssets.Extra[48] */
   private emoteSheetImg: ImageBitmap | HTMLImageElement | null = null;

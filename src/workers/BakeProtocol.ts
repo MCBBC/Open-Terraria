@@ -61,7 +61,8 @@ export type BakeWorkerRequest =
       noRead?: boolean }
   | { type: 'ship'; id: number;
       vimages: Array<{ file: string; bmp: ImageBitmap }>;
-      maples: Array<{ file: string; bmp: ImageBitmap }>;
+      /** ★Maples 退役刀1(2026-10-17):maples(地形 Maples 表)字段随域退役删除
+       *  ——worker 侧 images 表/rect 取图链零消费。 */
       sheets: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }>;
       modTiles?: Array<{ def: import('../data/tiles').TileDef; internal: number; stable: number }>;
       modTileMetas?: Array<{ stableId: number; meta: unknown }>;

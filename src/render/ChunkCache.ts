@@ -12,7 +12,7 @@ import { tileAnim, isDynamicAnimSheet } from './TileAnim';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { VanillaWallTiler } from './VanillaWallTiler';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
-import type { AutoTiler } from './AutoTiler';
+import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
 import { bakeChunkIntoEnv, type ChunkBakeEnv } from './ChunkBake';
 import type { BakeClient } from '../workers/BakeClient';
@@ -74,7 +74,9 @@ export class ChunkCache {
   private dirtySet = new Set<number>();
   sheets: Map<number, TileSheetEntry>;
   world: World;
-  autotiler: AutoTiler | null;
+  /** ★Maples 退役刀1：原 autotiler(AutoTiler 实例)字段改持 atlas 本体——烘焙内核
+   *  vanilla 直取链的唯一注入面(ChunkBakeEnv.atlas,机械改道)。 */
+  atlas: SpriteAtlas | null;
   wallTiler: VanillaWallTiler | null;
   truncatesWalls: number[] = [];
   /** 含动画 tile 的 chunk，按 sheet 分组（换帧时只重建对应 chunk，避免全量重烘焙） */
@@ -332,10 +334,10 @@ export class ChunkCache {
     this.bakeClient = null;
   }
 
-  constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null, atlas?: import('../assets/SpriteAtlas').SpriteAtlas | null) {
+  constructor(world: World, sheets: Map<number, TileSheetEntry>, atlas: SpriteAtlas | null = null, wallTiler: VanillaWallTiler | null = null, atlasForTracker?: SpriteAtlas | null) {
     this.world = world;
     this.sheets = sheets;
-    this.autotiler = autotiler;
+    this.atlas = atlas;
     this.wallTiler = wallTiler;
     // 原版 TileID.Sets.TruncatesWalls（54 玻璃 / 328 / 459 / 748）→ 内部 tile id。
     // ★曾写 'v_328_shadow_chest'/'v_459_'/'v_748_' 等不存在的 key → 映射 -1 被滤掉,
@@ -349,9 +351,10 @@ export class ChunkCache {
     // 含该表的 chunk(★2026-08-14 trace 实锤:进地牢 = 地牢墙/砖/背景批晚到 →
     // 旧版全量 invalidateAll = 384 chunk × 数百 drawImage 大表 = 15s 内 21 万次
     // 图像重解码风暴(GPU 内存压力致解码缓存反复驱逐)→ 渲染进程崩溃)
-    if (atlas) {
-      this.atlasRef = atlas;
-      atlas.bakeTracker = {
+    const trackerAtlas = atlasForTracker ?? atlas;
+    if (trackerAtlas) {
+      this.atlasRef = trackerAtlas;
+      trackerAtlas.bakeTracker = {
         _baking: false,
         note: (file: string) => {
           if (this._bakingKey === null) return;
@@ -853,7 +856,7 @@ export class ChunkCache {
       groundLevel: this.world.groundLevel, rockLevel: this.world.rockLevel,
       chests: this.world.chests,
       sheets: this.sheets,
-      autotiler: this.autotiler,
+      atlas: this.atlas,
       wallTiler: this.wallTiler,
       truncatesWalls: this.truncatesWalls,
       noRead: BAKE_NOREAD,

@@ -6,8 +6,9 @@
 //   ③ tile 表:vanilla.tiles[<伪 sheet id>] 元数据注册 + vimages[<meta.sheet>]
 //      (vmeta(sheetId) 读 vanilla.json 对象——运行时可写;伪 sheet≡stable id 恒等式,
 //      registerModTile 落的 vanilla.sheet=stableId 在此闭环)
-// 时序:loadAssets() 内 atlas.load() 之后、任何 chunk 烘焙之前(与 remaster/resourcepacks
-// 同窗)。失败静默不阻断启动(单图坏只缺该图)。
+// 时序:loadAssets() 内 UI 贴图预载之后、任何 chunk 烘焙之前(与 remaster/resourcepacks
+// 同窗;原「atlas.load() 之后」锚已随 Maples 域退役删除,2026-10-17)。失败静默不阻断
+// 启动(单图坏只缺该图)。
 import { getLoadedPacks, getModLoadResult } from './loader';
 import { discoverPackJsonPaths, readPackJson } from './pack';
 import { registerModWavData, modProjRegs } from './hooks';

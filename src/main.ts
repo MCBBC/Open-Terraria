@@ -226,7 +226,8 @@ initTileFrameCapture({
 async function loadAssets() {
   atlas = new SpriteAtlas();
   try {
-    await atlas.load();
+    // ★Maples 退役刀1(2026-10-17):atlas.load()(Maples atlas.json/resources.json/
+    // annotations.json 预载)随域退役删除——15 文件全为地形/角色 两前缀,消费面已全删。
     // 菜单首帧所需的 UI 贴图(面板/按钮/光标/logo)在显示主菜单前就位——
     // 否则 vui 懒加载下首帧控件用兜底样式闪一帧。
     // ★UI_ 全量族按子族排除(2026-08-13):素材全量入库后 UI_ 76→397 键,

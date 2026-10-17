@@ -14,6 +14,7 @@ import { parsePlr, exportPlr } from '../save/PlrImport';
 import type { SaveData } from '../save/serialize';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit } from './vanillaKit';
+import { menuToast } from './menuToast';               // ★BJ691 alert→菜单 toast（body 级逃逸面板层叠）
 
 export interface CharSelectFlow {
   /** id = CharacterMeta.id（流程层硬核消亡回写角色存档用；旧调用方可忽略） */
@@ -218,9 +219,10 @@ export class CharSelectPanel {
       const meta = await this.store.create(appearance);
       if (playerState) await this.store.setState(meta.id, playerState);
       await this.reload();
-      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportOk', appearance.name || `#${meta.id}`));
+      // ★BJ691 用户明令：alert→消息提示（toast，不打断）；列表序见 reload() 排序注
+      menuToast(Lang.text('Mods.SandboxWorld.CharSelect.ImportOk', appearance.name || `#${meta.id}`));
     } catch (e) {
-      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+      menuToast(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
     }
   }
 
@@ -234,7 +236,7 @@ export class CharSelectPanel {
     try {
       bytes = exportPlr(a, st ?? emptyPlayerState(a));
     } catch (e) {
-      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+      menuToast(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
       return;
     }
     const safe = (a.name || `character${meta.id}`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
@@ -282,6 +284,9 @@ export class CharSelectPanel {
     await this.store.ensureLoaded();
     this.body.innerHTML = '';
     this.items = [];
+    // ★BJ691b 列表序=store.list() 单源（CharacterStore.list() 收藏→lastPlayed→名→id,
+    // 镜像 WorldStore.list() 同构;原版 UpdatePlayersList :146-157 亲读——BJ691a 曾
+    // 误锚 :178 缓存比对分支的名字序=用户实测「导入仍垫底」复红根因,已勘误）
     for (const meta of this.store.list()) {
       const appearance = await this.store.get(meta.id);
       if (!appearance) continue;
@@ -357,13 +362,13 @@ export class CharSelectPanel {
       const delFn: (() => void) | null = meta.favorite ? null : async () => {
         if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete',
           a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
-        // ★R13-F2：删除链异常 catch+告警（原版面板 alert 习语,同 ImportFail）——
+        // ★R13-F2：删除链异常 catch+告警（★BJ691 起 toast,原 alert 习语退役）——
         //  存储面抛不留 unhandled rejection,reload 自存储重读防行显示与实态漂移
         try {
           await this.store.delete(meta.id);
         } catch (e) {
           console.warn('[charSelect] 删除落库失败', e);
-          alert(Lang.text('Mods.SandboxWorld.CharSelect.DeleteFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+          menuToast(Lang.text('Mods.SandboxWorld.CharSelect.DeleteFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
         }
         await this.reload();
       };

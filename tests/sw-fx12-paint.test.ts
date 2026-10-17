@@ -32,7 +32,6 @@ import { tintedVanillaRegion, tintRegion } from '../src/render/TileTint';
 import { drawTreeCell } from '../src/render/VanillaTiler';
 import { ChunkCache } from '../src/render/ChunkCache';
 import type { VanillaWallTiler } from '../src/render/VanillaWallTiler';
-import type { AutoTiler } from '../src/render/AutoTiler';
 import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 
 const DIRT = TILE_BY_KEY['dirt']!;
@@ -372,7 +371,7 @@ describe('SW-FX12 C2. 荧光叠层摆动族/冠标记格补画（DrawTrees :8290
     st.setTileSilent(10, 10, TILE_BY_KEY['tree']!, 22, 198);   // 冠标记帧（不进烘焙）
     st.setCoatSilent(10, 10, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
     const atlas = atlasStub({ 'vanilla/Tree_Tops_0.png': { width: 246, height: 80 } });
-    const cc = new ChunkCache(w, new Map(), { atlas } as unknown as AutoTiler, null as unknown as VanillaWallTiler);
+    const cc = new ChunkCache(w, new Map(), atlas, null as unknown as VanillaWallTiler);
     const wall = page(), tile = page();
     cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
     expect(made.length, '应创建 glow 画布').toBe(1);
@@ -397,14 +396,14 @@ describe('SW-FX12 C2. 荧光叠层摆动族/冠标记格补画（DrawTrees :8290
     st.setTileSilent(6, 6, plant, 18, 0);
     st.paint[st.idx(6, 6)] = 5;                              // 绿漆（paint 1-12 特判域）
     st.setCoatSilent(6, 6, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
-    const cc = new ChunkCache(w, new Map(), {
+    const cc = new ChunkCache(w, new Map(),
       // drawVanillaCell 消费 vframeAt/vImageFailed（帧查找+诊断）——桩回 null 走
       // reconFb 回退,断言只锚 tintRegion 染色调用,不锚帧内容
-      atlas: {
+      {
         ...atlasStub({}), vframeAt: () => null,
         vImageFailed: () => false, ensureVImage: () => null,
       } as unknown as SpriteAtlas,
-    } as unknown as AutoTiler, null as unknown as VanillaWallTiler);
+      null as unknown as VanillaWallTiler);
     const wall = page(), tile = page();
     cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
     // 建层数 ≥1（glow 层 + tintedSwayCell scratch 画布都走 createElement 桩）
@@ -421,7 +420,7 @@ describe('SW-FX12 C2. 荧光叠层摆动族/冠标记格补画（DrawTrees :8290
     const st = w.store;
     st.setTileSilent(3, 3, DIRT);
     st.setCoatSilent(3, 3, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
-    const cc = new ChunkCache(w, new Map(), { atlas: atlasStub({}) } as unknown as AutoTiler, null as unknown as VanillaWallTiler);
+    const cc = new ChunkCache(w, new Map(), atlasStub({}), null as unknown as VanillaWallTiler);
     const wall = page(), tile = page();
     cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
     expect(made.length).toBe(1);
@@ -433,7 +432,7 @@ describe('SW-FX12 C2. 荧光叠层摆动族/冠标记格补画（DrawTrees :8290
     made.length = 0;
     const w = new World(48, 40, 3, 'fx12-glow-none');
     w.store.setTileSilent(3, 3, DIRT);
-    const cc = new ChunkCache(w, new Map(), { atlas: atlasStub({}) } as unknown as AutoTiler, null);
+    const cc = new ChunkCache(w, new Map(), atlasStub({}), null);
     const wall = page(), tile = page();
     const pair = cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
     expect(pair.glow).toBeUndefined();
