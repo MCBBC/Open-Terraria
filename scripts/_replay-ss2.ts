@@ -59,17 +59,19 @@ function loadSnap(pat: string) {
   if (!f) throw new Error('快照未找到: ' + pat);
   const buf = gunzipSync(readFileSync(join2(LOGS, f)));
   const w = 4200, h = 1200, n = w * h;
-  const stride = buf.length >= n * 5 ? 5 : 4;
+  const stride = Math.round(buf.length / n);   // ★SS2 v3:4/5/6(6=+liquid)通用
   const type = new Uint16Array(n), wall = new Uint16Array(n);
   const slope = new Uint8Array(n), half = new Uint8Array(n), act = new Uint8Array(n);
+  const liquid = new Uint8Array(n), liquidType = new Uint8Array(n);
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
     const o = (x * h + y) * stride;
     type[y * w + x] = buf[o] | (buf[o + 1] << 8);
     wall[y * w + x] = buf[o + 2] | (buf[o + 3] << 8);
-    if (stride === 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; act[y * w + x] = (fl >> 4) & 1; }
-    // ★699az:v3 位 bit4=active(解 type0 二义:活泥土≠空格;旧档 bit4=0 回退 type≠0)
+    if (stride >= 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; act[y * w + x] = (fl >> 4) & 1; liquidType[y * w + x] = [1, 2, 3, 3][(fl >> 5) & 3]; }   // ★SS2 tML 0=water→我方 1=水(gen-abyss SetLiquid 约定)
+    // ★699az:v3 位 bit4=active;★SS2 v3(6B):bit5-6=liquidType + 尾字节=liquidAmount
+    if (stride === 6) liquid[y * w + x] = buf[o + 5];
   }
-  return { type, wall, slope, half, act, file: f };
+  return { type, wall, slope, half, act, liquid, liquidType, file: f };
 }
 import { join as join2 } from 'node:path';
 
@@ -77,7 +79,7 @@ import { join as join2 } from 'node:path';
 //   ★699ad:兼容 v1(4 bytes/格)与 v2(5 bytes/格,尾字节=slope/half)——stride 探测
 const fnvOf = (buf: Uint8Array): string => {
   const w = 4200, h = 1200;
-  const stride = buf.length >= w * h * 5 ? 5 : 4;
+  const stride = Math.round(buf.length / (w * h));   // ★SS2 v3:4/5/6 通用
   let hh = 0x811c9dc5;
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
     const o = (x * h + y) * stride;
@@ -156,7 +158,12 @@ const MOD_ID_TO_NAME = new Map<number, number>();   // cs id → 本仓 internal
 //   stalagmite_large1(census 直证;json 缺→映射缺)。回退=762(首个 mod tile
 //   (abyss_giant_kelp1):sheet=1030≥域阈(层写不吞)+判卷两侧对称(快照同
 //   函数转换→两侧同显示)→diff 消。
-const CS_TO_OURS = (cs: number): number => cs === 0 ? 0 : cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? 0) : (MOD_ID_TO_NAME.get(cs) ?? (cs >= 693 ? 762 : 0));
+// ★SS2-1 域修:cs=0(CS 泥土)走 sheet 映射→internal 1(dirt)。旧 cs===0?0 把泥土
+//   载成 internal 0=empty 哨兵——gen-sea 的 COVERT/DESTROYB=sheet 域检查
+//   (sheetOf(0)=undefined→-1 恒假)⇒ 泥土族候选全盲(beach dither 我 2,678 vs 真
+//   10,188=全差;dirt 内部 id=1 sheet=0 node 直证)。abyss replay 的 ★699az 哨兵
+//   域(其判卷四轴零)不涉——本修仅 SS2 副本。
+const CS_TO_OURS = (cs: number): number => cs < 753 ? (SHEET_TO_INTERNAL.get(cs) ?? (cs === 0 ? 1 : 0)) : (MOD_ID_TO_NAME.get(cs) ?? (cs >= 693 ? 762 : 0));
 const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
 
 {
@@ -171,17 +178,21 @@ const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
 }
 // store 构建(★699ad:透传快照 slope/half——v2 5-byte 快照;v1 快照恒 0)
 const w = 4200, h = 1200, n = w * h;
-function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8Array; half?: Uint8Array; act?: Uint8Array }) {
+function buildStore(snap: { type: Uint16Array; wall: Uint16Array; slope?: Uint8Array; half?: Uint8Array; act?: Uint8Array; liquid?: Uint8Array; liquidType?: Uint8Array }) {
   const type = new Uint16Array(n), flags = new Uint8Array(n);
   const wall = new Uint16Array(n), liquid = new Uint8Array(n), liquidType = new Uint8Array(n);
   const wire = new Uint8Array(n), half = new Uint8Array(n), slope = new Uint8Array(n);
   const frameX = new Uint16Array(n), frameY = new Uint16Array(n);
   for (let i = 0; i < n; i++) {
     const t = CS_TO_OURS(snap.type[i]);
-    type[i] = t; flags[i] = (snap.act?.[i] || t !== 0) ? 1 : 0;   // ★699az:v3 bit4 权威(active-dirt 载活)
+    // ★SS2-1:v3(bit4 在)纯 act 位——cs0→dirt(1) 后 `|| t!==0` 回退会把真空格
+    //   (cs=0,act=0)载成活泥土;v1 快照才用 type≠0 回退
+    type[i] = t; flags[i] = snap.act ? (snap.act[i] ? 1 : 0) : (t !== 0 ? 1 : 0);
     wall[i] = snap.wall[i];
     slope[i] = snap.slope?.[i] ?? 0;
     half[i] = snap.half?.[i] ?? 0;
+    liquid[i] = snap.liquid?.[i] ?? 0;
+    liquidType[i] = snap.liquidType?.[i] ?? 0;
   }
   // ★699bz slope 写追踪仪:Proxy 拦截目标格写入(env SW_SLOPE_SPY="x,y;x,y")——
   //   stack 3 帧归因(判别哪个面清零 famA 97 格/确认 famB 23 格零写入)
@@ -362,6 +373,19 @@ const rng = new RNG(gs.seed as number);
       proto[m] = function (this: unknown, ...a: unknown[]) {
         (globalThis as { __drawN?: number }).__drawN = ((globalThis as { __drawN?: number }).__drawN ?? 0) + 1;
         const v = fn.apply(this, a) as number;
+        // ★SS2 PV 捕获(replay 侧,方法名+实参→kind/a/b;gen-sea 无内置 __pv):
+        //   next()→D / nextInt(n)→M(n) / nextIntRange(a,b)→R(a,b) / nextBool(n)→M(n)
+        {
+          const P2 = (globalThis as { __swPassVLog?: { kab: Int32Array; val: Float64Array; n: number } }).__swPassVLog;
+          if (P2) {
+            let k2 = -1, ka2 = 0, kb2 = 0;
+            if (m === 'next') { k2 = 2; }
+            else if (m === 'nextInt') { k2 = 1; ka2 = a[0] as number; }
+            else if (m === 'nextIntRange' || m === 'intRange') { k2 = 0; ka2 = a[0] as number; kb2 = a[1] as number; }
+            else if (m === 'nextBool') { k2 = 1; ka2 = ((a[0] as number) ?? 2); }
+            if (k2 >= 0) { const i2 = P2.n; if (i2 < 40_000_000) { P2.kab[i2] = (k2 << 26) | ((ka2 + 512) << 13) | (kb2 + 512); P2.val[i2] = v; } P2.n++; }
+          }
+        }
         // ★652b:块哈希挂 proto 层(计全掷,含 nextInt——洗牌/前缀类非 next 掷不漏)
         if (typeof v === 'number') {
           const f = new Float64Array(1); f[0] = v; const u = new Uint32Array(f.buffer);
@@ -397,6 +421,9 @@ const rawNext = rng.next.bind(rng);
 };
 // ★699at:全 pass V 值级日志启用(与真链 V 流全 pass 对拍定位首分歧)
 (globalThis as Record<string, unknown>).__swPassVLogOn = true;
+// ★SS2:PV 容器 replay 侧自建(gen.ts Abyss pass 不跑,其闭包内的建容逻辑不触发)
+if (!(globalThis as Record<string, unknown>).__swPassVLog)
+  (globalThis as Record<string, unknown>).__swPassVLog = { kab: new Int32Array(40_000_000), val: new Float64Array(40_000_000), n: 0 };
 (globalThis as { __swPlaceLog?: number[] }).__swPlaceLog = process.env.SW_PLACE_LOG ? [] : undefined;
 if (process.env.SW_DUMP_AT) {
   (globalThis as { __swDumpAt?: number }).__swDumpAt = Number(process.env.SW_DUMP_AT);
@@ -424,7 +451,18 @@ __slDump('P0');
   (globalThis as { __swClearSpyIdx?: Set<number> }).__swClearSpyIdx = idx;
 }
 (globalThis as { __swPhase?: string }).__swPhase = 'ss2';
+console.log(`[liqprobe] (3839,245).liquid=${store.liquid[store.idx(3839, 245)]} (3833,245)=${store.liquid[store.idx(3833, 245)]} (3786,217)=${store.liquid[store.idx(3786, 217)]} ltype(3839,245)=${store.liquidType[store.idx(3839, 245)]}`);
+(globalThis as Record<string, unknown>).__swBeachTrace = [];
+(globalThis as Record<string, unknown>).__swTreeTrace = [];
 (ss2Fn as (...a: unknown[]) => void)(store, rng, gs);
+{
+  const bt = (globalThis as { __swBeachTrace?: string[] }).__swBeachTrace ?? [];
+  writeFileSync('/tmp/our-beach-trace.txt', bt.join('\n'));
+  console.log(`[beach] 候选数=${bt.length}(已落盘 /tmp/our-beach-trace.txt)`);
+  const tt = (globalThis as { __swTreeTrace?: string[] }).__swTreeTrace ?? [];
+  writeFileSync('/tmp/our-tree-trace.txt', tt.join('\n'));
+  console.log(`[tree] 命中数=${tt.length}(已落盘 /tmp/our-tree-trace.txt)`);
+}
 (globalThis as Record<string, unknown>).__swPassVLogOn = false;
 console.log(`[replay] Sulphur Sea 2 pass 掷数=${drawCount}`);
 for (const s2 of (globalThis as { __swDumpOut?: string[] }).__swDumpOut ?? []) console.log(s2);   // ★699at 区域快照
@@ -768,7 +806,9 @@ const xHi = Math.min(w, chasmX + 170);
 const yBands = new Map<number, number>();
 const xBands = new Map<number, number>();
 for (let i = 0; i < n; i++) {
-  const realT = CS_TO_OURS(post.type[i]);
+  // ★SS2-1:post 侧 act 位规范化(cs0→dirt(1) 域修后,真空格(cs=0,act=0)若直映
+  //   =dirt 假差 48%;有效型 = act ? CS_TO_OURS(type) : 0,与我方 flags 归一对称)
+  const realT = (post.act?.[i] ?? 1) ? CS_TO_OURS(post.type[i]) : 0;
   // ★652 终谳:chasm 清除只动 flags,type 数组留 stale——真链快照对 carved 格规范化 0,
   // 判卷口径同式:有效型 = flags&1 ? type : 0(否则 carved 格全是假差)
   const myEff = (store.flags[i] & 1) ? store.type[i] : 0;

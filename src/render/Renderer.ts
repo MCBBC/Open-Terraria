@@ -9884,8 +9884,8 @@ export class Renderer {
    *  产物（ida/idc/idd）本就在手,直传=快照零拷贝零新分配（霜月帧数千 bake
    *  的 canvas 出生风暴根治刀;缺省 undefined=snapBakeRegion 现取,语义同）。 */
   uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,
-    preBytes?: ImageData): void {
-    if (!Renderer.bgl || !Renderer.bglShim) return;
+    preBytes?: ImageData): string {
+    if (!Renderer.bgl || !Renderer.bglShim) return '';
     const sh = this.bglShimReg();
     sh.markDynamic(img);
     const f = this._diagFrame;
@@ -9898,12 +9898,31 @@ export class Renderer {
     const rec = this.scratchBakeSeqs.get(fam);
     const n = rec && rec.f === f ? rec.n + 1 : 1;
     this.scratchBakeSeqs.set(fam, { n, f });
-    sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);
+    const key = `${fam}:${n % ring}`;
+    sh.uploadScratchNow(img, key, rw, rh, preBytes);
+    return key;   // ★尘批（2026-10-17）:环键回传（内容冻结纹理=批纹理源）
   }
   /** 共享 scratch 烘焙环形序号（按家族独立;★R3b-6 帧界重置+触帧账:
    *  n=帧内序号,f=最近触帧——600 帧未触家族删账防瞬态实体 id 键驻留） */
   private scratchBakeSeqs = new Map<string, { n: number; f: number }>();
   private _scratchBakeSweepFrame = -1;
+  // ---- ★尘 ADD 批（2026-10-17 溶液枪尾尘风暴刀·二段,用户令「全部落干净+逐像素一致」）----
+  //  【批域】drawVanillaDustPass 的 A=0 加性族三支（恒等直绘 img 源/恒乘数缓存 s1 源/
+  //  读回烘焙 s1 源）——'lighter' 纯加法=可交换 → 段内序无关=逐位;与 premul 尘交错
+  //  的段边界【不重排】（GoreSegSpec 多段先例:pushLiquidAddBatch 原位入队）。
+  //  【纹理源】直绘=尘图集（静态）;烘焙/缓存=环键纹理（uploadScratchBake 返回,
+  //  texRefresh 内容冻结——批持有键到 flush 期零漂移,I 类 bolt 撞键病根除）。
+  //  【逐位论证】顶点四角=translate·rotate·scale 与 2D 变换栈同式;uv 带 quadSprite
+  //  同款 −1/4096 texel tie 补正;col 恒 (1,1,1,1)（乘数在烘焙/img 恒等）;tier-1
+  //  blend='lighter'。翻面口 ?dustbatch=0（灰度对拍后转正缺省开）。
+  static dustbatch = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('dustbatch') !== '0';
+    } catch { return false; }
+  })();
+  /** 恒乘数缓存的当前环键（烘焙时记录,缓存命中支的批纹理源） */
+  private _dustConstBakeKey = '';
   /** ★R3b-1（2026-09-27）:尘族烘焙环形容量 = 尘池上界（VanillaDust POOL=6000,
    *  Main.cs:734 dust=new Dust[6000]）。同帧烘焙数上界=池容量（A=0 直绘族逐尘
    *  1×dustTint + 43/66 带 color 再 1×dustColor、染料档 dustDye）——环形窗<池容量
@@ -9947,6 +9966,10 @@ export class Renderer {
    *  加性通道（下分支）本式 a=0 特例,保持不变;a>0 全量档（本体/拖影/colorPass/
    *  331 贴片）全部换烘焙对;染料 pass（shader 产物面）维持 source-over 不变式;
    *  Color.White 档（331 白心/纯白 drawImage）预乘=直色恒等,维持原样。 */
+  /** ★尘 ADD 批收集器（2026-10-17 溶液枪尾尘风暴刀·二段;逐位论证见 dustbatch 字段注）。
+   *  pass 级生命周期;分段保序=「交错边界冲段」（非批型尘绘制前 flush——段在
+   *  队列原位,pushLiquidAddBatch 保序入队语义）;烘焙桶按环键分桶（texRefresh
+   *  内容冻结=批纹理源零漂移）。replay=批通道失败/2D 回退的逐尘原式重放。 */
   private drawVanillaDustPass(fullbright: boolean, cam: Camera, player?: Player): void {
     const vd = this.vanillaDust;
     if (!vd) return;
@@ -9977,6 +10000,119 @@ export class Renderer {
     const s2 = (this.dustScratch2 ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const c1 = s1.getContext('2d', { willReadFrequently: true })!;
     const c2 = s2.getContext('2d', { willReadFrequently: true })!;
+    // ---- ★尘 ADD 批收集器（2026-10-17 溶液枪尾尘风暴刀·二段;逐位论证见 dustbatch
+    //  字段注。分段保序=交错边界冲段;烘焙桶按环键分桶=texRefresh 冻结纹理零漂移;
+    //  bake 域 replay=失败/回退路径【重烘焙+画】（s1 单槽内容随烘焙漂移,直绘
+    //  replay 会错拿——逐位优先;失败路径成本=原读回路径,无回归）----
+    const dbCtx = Renderer.dustbatch && this.bglEntShim?.active && this.bglEntShim.batchAvail();
+    /** 尘绘制原式（replay/直绘共用——img 源（恒等直绘支）或 s1 源（烘焙域） */
+    const dbDraw = (d2: { rotation?: number; scale: number }, x2: number, y2: number,
+      src: CanvasImageSource, fx: number, fy: number): void => {
+      ctx.save();
+      ctx.translate(x2, y2);
+      if (d2.rotation) ctx.rotate(d2.rotation);
+      if (d2.scale !== 1) ctx.scale(d2.scale, d2.scale);
+      ctx.globalCompositeOperation = 'lighter';
+      if (fx >= 0) ctx.drawImage(src, fx, fy, 8, 8, -4, -4, 8, 8);
+      else ctx.drawImage(src, -4, -4);
+      ctx.restore();
+    };
+    /** 顶点发射:四角=translate·rotate·scale 与 2D 变换栈同式;uv 带 quadSprite
+     *  同款 −1/4096 texel tie 补正;col 恒 (1,1,1,1)（乘数在烘焙/img 恒等） */
+    const dbEmit = (v: number[], fx: number, fy: number, uw: number, uh: number,
+      d2: { rotation?: number; scale: number }, px2: number, py2: number): void => {
+      const eps = -1 / 4096;
+      const u0 = (fx + eps) / uw, u1 = (fx + 8 + eps) / uw;
+      const w0 = (fy + eps) / uh, w1 = (fy + 8 + eps) / uh;
+      const sc = d2.scale, rot = d2.rotation || 0;
+      const cr = Math.cos(rot) * 4 * sc, sr = Math.sin(rot) * 4 * sc;
+      const x0 = px2 - cr + sr, y0 = py2 - sr - cr;   // (−4,−4)
+      const x1 = px2 + cr + sr, y1 = py2 + sr - cr;   // (4,−4)
+      const x2 = px2 + cr - sr, y2 = py2 + sr + cr;   // (4,4)
+      const x3 = px2 - cr - sr, y3 = py2 - sr + cr;   // (−4,4)
+      v.push(x0, y0, u0, w0, 1, 1, 1, 1, x1, y1, u1, w0, 1, 1, 1, 1,
+        x2, y2, u1, w1, 1, 1, 1, 1, x0, y0, u0, w0, 1, 1, 1, 1,
+        x2, y2, u1, w1, 1, 1, 1, 1, x3, y3, u0, w1, 1, 1, 1, 1);
+    };
+    // 收集态（dbCtx 才建——Map/数组 pass 级复用新建,量小）
+    type DbRec = { d: { rotation?: number; scale: number; fx: number; fy: number; type?: number }; px: number; py: number };
+    type DbBakeRec = { d: Parameters<typeof dbEmit>[5] & { fx: number; fy: number }; px: number; py: number; mR: number; mG: number; mB: number };
+    const dbImgV: number[] = [];
+    const dbImgR: DbRec[] = [];
+    const dbBakeBuckets = new Map<string, { v: number[]; r: DbBakeRec[] }>();
+    const dbBakeOrder: string[] = [];
+    let dbN = 0;
+    const dbA = dbCtx ? {
+      pushImg: (d: DbRec['d'], px: number, py: number): void => {
+        dbEmit(dbImgV, d.fx, d.fy, img.width, img.height, d, px, py);
+        dbImgR.push({ d, px, py });
+        dbN++;
+      },
+      pushBake: (d: DbBakeRec['d'], px: number, py: number, key: string, mR: number, mG: number, mB: number): void => {
+        if (!key) return;   // 环键缺席（防御）=不入批
+        let b = dbBakeBuckets.get(key);
+        if (!b) { b = { v: [], r: [] }; dbBakeBuckets.set(key, b); dbBakeOrder.push(key); }
+        dbEmit(b.v, 0, 0, 8, 8, d, px, py);   // s1 全幅 8×8（烘焙内容域）
+        b.r.push({ d, px, py, mR, mG, mB });
+        dbN++;
+      },
+      /** 冲段（交错边界/循环尾;段在 shim 队列原位=保序;bake 桶按入桶序） */
+      flush: (): void => {
+        if (!dbN) return;
+        const sh = this.bglEntShim!;
+        if (dbImgV.length) {
+          const quads = dbImgV.length / 48;
+          const data = new Float32Array(dbImgV);
+          const rec = dbImgR.slice();
+          const ok = sh.pushLiquidAddBatch(img, 'dust:atlas', data, quads, (ctx2) => {
+            for (const q of rec) dbDrawOn(ctx2, q.d, q.px, q.py, img, q.d.fx, q.d.fy);
+          });
+          if (!ok) for (const q of rec) dbDraw(q.d, q.px, q.py, img, q.d.fx, q.d.fy);
+          dbImgV.length = 0;
+          dbImgR.length = 0;
+        }
+        for (const key of dbBakeOrder) {
+          const b = dbBakeBuckets.get(key)!;
+          if (!b.v.length) continue;
+          const quads = b.v.length / 48;
+          const data = new Float32Array(b.v);
+          const rec = b.r.slice();
+          // bake 域 replay=重烘焙+画（s1 内容已漂移——重走读回支逐位还原）
+          const bakeReplay = (ctx2: CanvasRenderingContext2D): void => {
+            for (const q of rec) {
+              c1.clearRect(0, 0, 8, 8);
+              c1.drawImage(img, q.d.fx, q.d.fy, 8, 8, 0, 0, 8, 8);
+              const id2 = c1.getImageData(0, 0, 8, 8);
+              for (let i2 = 0; i2 < id2.data.length; i2 += 4) {
+                id2.data[i2] *= q.mR; id2.data[i2 + 1] *= q.mG; id2.data[i2 + 2] *= q.mB;
+              }
+              c1.putImageData(id2, 0, 0);
+              dbDrawOn(ctx2, q.d, q.px, q.py, s1, -1, -1);
+            }
+          };
+          const ok = sh.pushLiquidAddBatch(s1, key, data, quads, bakeReplay);
+          if (!ok) bakeReplay(ctx);
+          b.v.length = 0;
+          b.r.length = 0;
+        }
+        dbBakeOrder.length = 0;
+        dbBakeBuckets.clear();
+        dbN = 0;
+      },
+    } : null;
+    // dbDraw 的 ctx 参数版（replay 闭包用——目标 ctx 可能是回退 2D ctx 而非本 pass ctx）
+    function dbDrawOn(ctx2: CanvasRenderingContext2D,
+      d2: { rotation?: number; scale: number }, x2: number, y2: number,
+      src: CanvasImageSource, fx: number, fy: number): void {
+      ctx2.save();
+      ctx2.translate(x2, y2);
+      if (d2.rotation) ctx2.rotate(d2.rotation);
+      if (d2.scale !== 1) ctx2.scale(d2.scale, d2.scale);
+      ctx2.globalCompositeOperation = 'lighter';
+      if (fx >= 0) ctx2.drawImage(src, fx, fy, 8, 8, -4, -4, 8, 8);
+      else ctx2.drawImage(src, -4, -4);
+      ctx2.restore();
+    }
     // ★B2 动态源登记（s1 重着色面/s2 染料面内容每绘都变——执行器 flush 期
     //  texRefresh 全量重传;8×8 小面,重传成本可忽略）
     if (Renderer.bgl) {
@@ -10005,6 +10141,7 @@ export class Renderer {
       //  各档（编排池粒子无此四面）
       const axis = dustAxisScale(d);
       if (axis.dual) {
+        dbA?.flush();   // ★尘批交错边界（非批型绘制前冲段=保序）
         this.drawSparkleArms(d, px, py, axis.sx, axis.sy);
         continue;
       }
@@ -10015,6 +10152,7 @@ export class Renderer {
       //  光照合成后直绘)。α=(255-alpha)/255 缺省衰落档;无拖影/染料/帧(声明面无此三面)。
       //  贴图缺失=跳笔(占位语义,与 mod NPC 贴图缺省同相)。零 mod=分支恒 miss。
       if (d.modType !== undefined) {
+        dbA?.flush();   // ★尘批交错边界
         // ★D12 余债:motionType 重写后 d.type=运动档原版 type——载体 d.modType 才是
         //  原 mod type(贴图键/全亮桶都读它)
         const modImg = getModDustImg(d.modType);
@@ -10064,6 +10202,7 @@ export class Renderer {
         //  实测 getImageData≈1.5-2µs/枚×2 读回 → lit pass 4-9ms/帧 = 爆炸窗掉帧主因。
         //  43 乘数 (num+9)/10≠1、66 涉 disco colorPass 语义——两者保守留读回支。
         if (d.type !== 43 && d.type !== 66 && mR === 1 && mG === 1 && mB === 1) {
+          if (dbA) { dbA.pushImg(d, px, py); continue; }   // ★尘批（见 pass 头 dbA 注）
           ctx.save();
           ctx.translate(px, py);
           if (d.rotation) ctx.rotate(d.rotation);
@@ -10092,6 +10231,7 @@ export class Renderer {
           }
           if (this._dustConstKey === ck && this._dustConstSeq === this._dustBakeSeq) {
             // 命中:s1 仍为本键烘焙态——直接绘制（跳过读回+循环+上传）
+            if (dbA) { dbA.pushBake(d, px, py, this._dustConstBakeKey, mR, mG, mB); continue; }   // ★尘批（命中支:重烘焙参数=mR/mG/mB）
             ctx.save();
             ctx.translate(px, py);
             if (d.rotation) ctx.rotate(d.rotation);
@@ -10114,19 +10254,24 @@ export class Renderer {
         // ★变体①终扫:逐尘烘焙即刻上传（markDynamic 的 flush 期刷新读【末次】烘焙
         //  字节——同帧多尘异 tint 时先行尘 quad 全错拿末尘内容,I类 bolt 同病）
         //  ★P0 去画布化:ida=烘焙点现成 ImageData 直挂（快照零拷贝;canvas 出生风暴根治）
-        this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）
+        const bakeKey = this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）;★尘批:返回环键（内容冻结纹理=批纹理源）
         this._dustBakeSeq++;   // ★恒乘数缓存序号（见上方缓存注——s1 内容换代标记）
         if (Renderer.DUST_CONST_MUL.has(d.type) && !d.color) {
           this._dustConstKey = `${d.type}:${d.fx},${d.fy}`;
           this._dustConstSeq = this._dustBakeSeq;
+          this._dustConstBakeKey = bakeKey;
         }
-        ctx.save();
-        ctx.translate(px, py);
-        if (d.rotation) ctx.rotate(d.rotation);
-        if (d.scale !== 1) ctx.scale(d.scale, d.scale);
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.drawImage(s1, -4, -4);
-        ctx.restore();
+        if (dbA) { dbA.pushBake(d, px, py, bakeKey, mR, mG, mB); }   // ★尘批（烘焙后按本环键入桶）
+        else {
+          ctx.save();
+          ctx.translate(px, py);
+          if (d.rotation) ctx.rotate(d.rotation);
+          if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.drawImage(s1, -4, -4);
+          ctx.restore();
+        }
+        dbA?.flush();   // ★尘批交错边界（43/66 colorPass 第二画前——43/66 已不入批,此处保护同段他尘序）
         // ★F1：43 自定义色 GetColor 加性 pass（Main.cs:39696-39704 本体后的第二
         //  Draw，PackedValue!=0 即跑）——红心 (255,0,0) 等 GetColor 后 G/B 压 0 =
         //  彩色 glint（本体是白亮 sprite,无此 pass 彩色闪尘全成白闪）；White 色档 =
@@ -10159,6 +10304,7 @@ export class Renderer {
         }
         continue;
       }
+      dbA?.flush();   // ★尘批交错边界（premul 本体段前=A=0 支落空到达处）
       // 本体 pass（GetAlpha 精确通道）——预乘烘焙对（本体+通用拖影共用一份,
       //  拖影只是重画同色;264 ×0.3 档走 mul 参数,不另烘）
       const pair = this.dustPremulPair(img, d.fx, d.fy, rgb, rgb, rgb, a);
@@ -10302,6 +10448,7 @@ export class Renderer {
         ctx.restore();
       }
     }
+    dbA?.flush();   // ★尘批循环尾冲段（末段入队）
     ctx.restore();
   }
 

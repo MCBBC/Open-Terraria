@@ -83,3 +83,35 @@ describe('§3 Sfx 单源对照（chop 键=Grass+±30 方差=原版 case6 同款�
     expect(src).toContain("put(['Grass'], [-30, 30])");
   });
 });
+
+// ============================================================
+// §4 复核普查（2026-10-17 用户令「确认没有其它类似问题」——全仓 legacy 整数
+//    PlaySound 引用逐库号核对;第二只活体=75 小丑炸弹 Item_66）
+// ============================================================
+describe('§4 同族普查收尾（Dart 75 HappyBomb=case66 小丑笑;普查面）', () => {
+  it('Dart 75 首帧音：Zombie_121/122/123 随机（case66 Next(121,124)）;旧 Item_66 已清', () => {
+    const src = read(join(GAME, 'src', 'entities', 'Dart.ts'));
+    const i = src.indexOf('75: { w: 22, h: 22');
+    expect(i).toBeGreaterThan(-1);
+    const block = src.slice(i, i + 300);
+    expect(block).toContain("sfx: ['Zombie_121', 'Zombie_122', 'Zombie_123']");
+    expect(src).not.toContain("sfx: ['Item_66']");
+  });
+  it('反编译锚：case66=Next(121,124) Zombie 库 ×0.45（LegacySoundPlayer）', () => {
+    const src = read(join(VAN, 'Terraria.Audio', 'LegacySoundPlayer.cs'));
+    const i = src.indexOf('				case 66:');
+    expect(i).toBeGreaterThan(-1);
+    const block = src.slice(i, i + 900);
+    expect(block).toContain('Main.rand.Next(121, 124)');
+    expect(block).toContain('num2 * 0.45f');
+  });
+  it('喵刀 502 撞块 case37 语义登记（Item_57/58 随机×style·0.05——本仓 2026-08-13 登记不播=近似债非误译）', () => {
+    const van = read(join(VAN, 'Terraria', 'Projectile.cs'));
+    const i = van.indexOf('MathHelper.Clamp(++ai[0], 1f, 5f)');   // 502 撞块块内独有式（首处 else if type==502 是 SetDefaults）
+    expect(i).toBeGreaterThan(-1);
+    expect(van.slice(i, i + 240)).toContain('PlaySound(37, (int)position.X, (int)position.Y, 5 + (int)ai[0])');
+    const lsp = read(join(VAN, 'Terraria.Audio', 'LegacySoundPlayer.cs'));
+    const j = lsp.indexOf('Main.rand.Next(57, 59)');
+    expect(j).toBeGreaterThan(-1);   // case37 → Item_57/58
+  });
+});

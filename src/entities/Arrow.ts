@@ -159,7 +159,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { rollVanillaHitCrit, dealContacts } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ693 dealContacts=喵刀弹跳 AOE 结算单源
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
 /** 网格切片表（Main.cs 逐型特判——竖条 projFrames 模型装不下的多列网格图；
@@ -11170,8 +11170,21 @@ export class Arrow extends Entity {
   /** 喵刀弹 502 撞块档（HandleMovement :16794-16812——type 502 专支，先于
    *  通用 aiStyle-8 tink 链（:18165）命中，故弹跳只喵叫不 tink）：
    *  ai[0]=Clamp(+1,1,5) + PlaySound(37=Meowmere, style 5+ai0)（Item_57/58
-   *  随机、音量 ×0.5×style×0.05（style 6-10 → 0.15-0.25）、音高扰动 ±0.4
-   *  由双素材近似）；≥5 消亡；全速翻面（与 lastVelocity 逐轴对比后取负）。 */
+   *  随机、音高扰动 ±0.4 由双素材近似）；≥5 消亡；全速翻面（与 lastVelocity
+   *  逐轴对比后取负）。
+   *  ★BJ693 登记债①②③清偿（2026-10-17 BJ692 普查登记债开刀）：
+   *  ①音量系数勘误——旧 0.5×style×0.05（0.15-0.25）=原版一半；LSP case37 :1338
+   *    `num2 × Style×0.05` 无 ×0.5（旧式疑误并 case2 库内 style37 的 ×0.5 音量
+   *    微调面——那是 PlaySound(2,…,37) 的 Item_37 档,与喵刀 case37 不同物）。
+   *    修=style×0.05（style 6-10 → 0.30-0.50）。
+   *  ②彩虹尘环（:18340-18348）：dust66 ×(10+ai0×4) 环形爆发，色=hsl(i/n,1,0.5)
+   *    彩虹序（empressHslRgb=Main.hslToRgb 同式），速度=（0,−(3+ai0)) 绕随机基角
+   *    +环角×(1.05,1)×(0.8+rand×0.4)，noGravity，scale=1+ai0/3，NewDustPerfect
+   *    语义（perfect 通道——原版 NewDust(Center,0,0)+position/velocity 全覆写同构）。
+   *  ③弹跳扩大盒 AOE（:18350-18361）：盒临时扩 40+8×ai0（心锚定）+penetrate=-1
+   *    （dealContacts 纯结算无穿透消耗面=−1 语义免设）→Damage() 等价；cd 适配器
+   *    桥到 meowHitCd——与主命中环【同表】=原版 localNPCImmunity 同表同构（弹跳
+   *    AOE 与常规命中共享 10t 局部免疫）。owner 本机门（:18350）单机恒真免设。 */
   private meowBounceOff(game: GameHooks): boolean {
     const st = game.world.store;
     const solidAt = (px: number, py: number) => {
@@ -11180,8 +11193,9 @@ export class Arrow extends Entity {
     };
     this.meowCount = Math.max(1, Math.min(5, this.meowCount + 1));   // Clamp(:16796)
     const style = 5 + this.meowCount;
+    // ①喵叫音（case37）：音量 style×0.05（勘误——原版无 ×0.5）
     game.playSfxFiles([Math.random() < 0.5 ? 'Item_57' : 'Item_58'],
-      0.5 * style * 0.05, this.cx, this.cy);
+      style * 0.05, this.cx, this.cy);
     if (this.meowCount >= 5) { this.killNow(game); return true; }
     if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
       this.x -= this.vx;
@@ -11190,6 +11204,35 @@ export class Arrow extends Entity {
     if (!solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
       this.y -= this.vy;
       this.vy = -this.vy;
+    }
+    // ②彩虹尘环（:18340-18348）
+    {
+      const base = Math.random() * Math.PI * 2;          // RotatedByRandom(π)=任意基角
+      const r = 3 + this.meowCount;                       // (0,−(3+ai0)) 长度
+      const n = 10 + this.meowCount * 4;                  // num21 = 10+ai0×4
+      for (let i = 0; i < n; i++) {
+        const ang = base + Math.PI * 2 * i / n;
+        const jit = 0.8 + Math.random() * 0.4;            // 0.8+NextFloat×0.4
+        const rgb = empressHslRgb(i / n);                 // hsl(i/n,1,0.5) 彩虹序
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 66,
+          Math.cos(ang) * r * 1.05 * jit, Math.sin(ang) * r * jit,
+          0, { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 }, 1, true, true);
+        if (d) d.scale = 1 + this.meowCount / 3;          // scale=1+ai0/3（后置赋值）
+      }
+    }
+    // ③弹跳扩大盒 AOE（:18350-18361）：盒交换→dealContacts→还原
+    {
+      const aoeCd = {
+        tick: () => {},   // 主拍 tick 在 subStepAI meowHitCd 段同表已做,此处不双扣
+        peek: (id: number) => (this.meowHitCd.get(id) ?? 0) <= 0,
+        commit: (id: number, cdv: number) => { this.meowHitCd.set(id, cdv); },
+      } as unknown as Parameters<typeof dealContacts>[2];   // cd 参（第 3 位）duck 桥
+      const oldW = this.w, oldH = this.h, oldX = this.x, oldY = this.y;
+      const box = 40 + 8 * this.meowCount;
+      this.w = box; this.h = box;
+      this.x = this.cx - box / 2; this.y = this.cy - box / 2;
+      dealContacts(this, game, aoeCd, 10);                // localNPCHitCooldown=10 同表
+      this.w = oldW; this.h = oldH; this.x = oldX; this.y = oldY;
     }
     return true;
   }

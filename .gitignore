@@ -38,3 +38,5 @@ dist-analyze
 
 gl79/
 /mods/
+# 音效原始 wav 源(仓库外本地目录,经软链供 encode-sounds-opus 转码;勿提交链接本体
+# ——克隆侧为悬空链,git 亦不穿透软链,故整个移出跟踪)

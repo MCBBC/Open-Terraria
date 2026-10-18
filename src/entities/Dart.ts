@@ -1559,7 +1559,7 @@ export class Dart extends Entity {
     // 首更新发射音（AI_001 各型 ai[1]==0 分支:81/82→Item5 :52468 / 180→Item11 :52473 /
     // 84/257→Item12 :52408/:52418 / 572→Item17 :53410 / 44→Item8 :23723 / 115→Item8 :24835）;
     // 96 诅咒焰 Item20 :22543 / 288 金雨 Item17 :22820 / 128/177 霜爆 Item28 :24991
-    if (this.age === 0 && st.sfx) game.playSfxFiles(st.sfx, 0.8, this.cx, this.cy);
+    if (this.age === 0 && st.sfx) game.playSfxFiles(st.sfx, st.sfxVol ?? 0.8, this.cx, this.cy);
     // extraUpdates:原版每 tick 跑 1+extraUpdates 次完整 AI+位移(302 狙击 ×8 = 弹速 4→32px/t 的来源)
     const sub = 1 + (st.updates ?? 0);
     for (let i = 0; i < sub && !this.dead; i++) {
@@ -3184,6 +3184,9 @@ interface DartStyle {
   life?: number;
   trail?: { color: string; count: number; life?: number; grav?: number };
   sfx?: string[];                        // 发射音(原版 wav)
+  /** ★BJ693 债④：逐条目发射音音量（缺省 0.8=表惯例档;75 HappyBomb=case66 ×0.45
+   *  等原版显式系数档走本位,免每条目各建消费支） */
+  sfxVol?: number;
   rocket?: number;                       // Kill 爆炸盒半宽(303)
   /** Kill 爆炸伤害覆写（75 HappyBomb:飞行伤 80,爆炸 Resize(128) 后 damage=60
    *  :80116-80122——不覆写则沿用飞行伤） */
@@ -3400,10 +3403,14 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 75 HappyBomb(小丑 109 :60411-60417 投掷,伤 80/timeLeft 300):22×22 aiStyle16
   //    hostile penetrate-1(SetDefaults :1550-1557)。AI_016:age>5 起重力 0.2 +
   //    贴地 vx×0.97(:48390-48396),rot+=vx×0.1(:48444),撞块反弹 ±0.4(:19868-19876),
-  //    距玩家中心<40px 即 Kill(:47809-47820);首帧 PlaySound(66)=Item_66(:47804-47808);
+  //    距玩家中心<40px 即 Kill(:47809-47820);首帧 PlaySound(66)=★legacy type66=
+  //    Zombie_121/122/123 随机小丑笑声（LSP case66 Next(121,124),×0.45 音量±0.15
+  //    音调——★BJ692 复核普查第二只活体:旧译 'Item_66' 系整数编号域误读同族;
+  //    本表 sfx 消费口(:1562)固定 vol0.8 无逐条目音量面,×0.45 差=登记近似债）;
   //    Kill 爆炸=Item14 + 128×128 伤害盒伤 60 kb8(:80116-80122)+尘 31/6+Gore 61-63
   75: { w: 22, h: 22, rot: 'vxSpin', grav: 0.2, gravDelay: 5, life: 300,
-    bomb: true, proxKill: 40, rocket: 64, rocketDmg: 60, sfx: ['Item_66'], fallback: '#505048' },
+    bomb: true, proxKill: 40, rocket: 64, rocketDmg: 60, sfxVol: 0.45,
+    sfx: ['Zombie_121', 'Zombie_122', 'Zombie_123'], fallback: '#505048' },
   // 31 沙球(蚁狮 69 :24520 速12/伤10/timeLeft300/ai[0]=2 敌版):10×10。
   // 蚁狮档(AI_010 ai[0]==2 :55081-55100):重力 0.2 + vx 侧摩 ±0.04 向 0 收 + vy 钳 10
   // ——曾误用 ai[0]==1 落地态的 0.41(坠速翻倍,弧线错);spin 0.1 恒速(:55158);尘 32。
