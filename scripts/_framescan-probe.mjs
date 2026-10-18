@@ -2,11 +2,12 @@
 // patch drawImage 按帧(rAF 边界)聚合去重源,分 HTMLCanvasElement/ImageBitmap;
 // 另附常驻资产账(DOM canvas/chunk 页/云染缓存/单例)。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=240000 scripts/_framescan-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({

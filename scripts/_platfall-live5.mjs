@@ -1,10 +1,11 @@
 // 用户真实存档实机重放:loadJson 载入 Starter_World → 真实玩家/真实地形 →
 // 按 10:38 行为日志完整按键时间线行走 → 逐 tick 采样 + __SW_SLOPE_LOG 全量
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SAVE = '/Users/vinlic/Downloads/Starter_World-20260901-1123.sbw.json';
-const LOG = JSON.parse(readFileSync('/Users/vinlic/Downloads/behavior-log-Starter_World-2026-09-01T10-38-59-497Z.json', 'utf8'));
+const SAVE = needInput(join(DOWNLOADS, 'Starter_World-20260901-1123.sbw.json'));
+const LOG = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'behavior-log-Starter_World-2026-09-01T10-38-59-497Z.json')), 'utf8'));
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
@@ -73,7 +74,7 @@ const out = await page.evaluate(async ({ anchor, KEYS, END_T }) => {
   return { samples, slog: (window).__SW_SLOPE_LOG.slice(), equip };
 }, { anchor, KEYS, END_T });
 
-writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/pf5.json', JSON.stringify(out));
+writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/pf5.json'), JSON.stringify(out));
 console.log('[pf5] samples:', out.samples.length, 'slog:', out.slog.length);
 console.log('[pf5] 玩家装备:', JSON.stringify(out.equip));
 await browser.close();

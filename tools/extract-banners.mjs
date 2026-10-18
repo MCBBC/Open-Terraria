@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url';
 
 const VER = process.env.SW_ITEM_VER ?? '1457';
 const VER_ALLOWED = new Set(['1457', '1458']);
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria.GameContent/BannerSystem.cs`)) {
   console.error(`[extract-banners] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
   if (VER === '1456') console.error('  1456 锚集已退役（2026-09-03 基准切 1457,BJ284 落闸）；1456 对拍读时代快照。');

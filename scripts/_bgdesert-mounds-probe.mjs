@@ -1,11 +1,12 @@
 // 沙漠样式4背景"锯齿丘+粗树"来源定位探针(2026-09-03 用户实报"饥饿的庄园"远景锯齿)
 // 流程:5203 私有实例 → 同 seed(1247539775) 新建小世界 → 传送沙漠 → 截图
 // → 逐层关 248/249/250 二分 + 整体关 biomeBg,找出异常层绘制源
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const OUT = process.env.SW_OUT ?? '/Users/vinlic/.claude/jobs/4a66e745/tmp';
+const OUT = process.env.SW_OUT ?? join(HOME, '.claude/jobs/4a66e745/tmp');
 const SEED = '1247539775';
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1512, height: 862 } });

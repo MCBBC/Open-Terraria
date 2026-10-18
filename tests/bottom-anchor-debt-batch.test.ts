@@ -9,7 +9,7 @@
 //   于均匀】（θ=2πd mod 2π,三角密度 f(d)=1−|d| 两支预像密度和恒=1）——故本刀为文本
 //   1:1/单源收编,统计判别无差不是"未生效"；判别器 = 源哨兵（回退均匀掷即爆红）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Enemy } from '../src/entities/Enemy';
@@ -19,6 +19,9 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { findSpawnOnPlayerGenericPoint } from '../src/core/Game';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const W = 160, H = 140, FLOOR = 120;
@@ -78,7 +81,7 @@ function killAndCollect(
   return { parent, kids };
 }
 
-describe('死亡分裂族 Bottom 锚（NewNPC nPC.Bottom=(X,Y),NPC.cs:81594）', () => {
+describe.skipIf(EXT_MISSING)('死亡分裂族 Bottom 锚（NewNPC nPC.Bottom=(X,Y),NPC.cs:81594）', () => {
   it('115→116 饿魂:顶 = 父底−h（旧中心锚半盒低 h/2）', () => {
     const h = makeHooks();
     const { parent, kids } = killAndCollect(h, 115, 116);
@@ -149,7 +152,7 @@ describe('死亡分裂族 Bottom 锚（NewNPC nPC.Bottom=(X,Y),NPC.cs:81594）',
   });
 });
 
-describe('SpawnOnPlayer 通用支寻点（findSpawnOnPlayerGenericPoint,NPC.cs:81391-81454 1:1）', () => {
+describe.skipIf(EXT_MISSING)('SpawnOnPlayer 通用支寻点（findSpawnOnPlayerGenericPoint,NPC.cs:81391-81454 1:1）', () => {
   const VW = 1920, VH = 1080;
   const halfW = Math.floor(VW / TILE * 0.7);
 
@@ -199,7 +202,7 @@ describe('SpawnOnPlayer 通用支寻点（findSpawnOnPlayerGenericPoint,NPC.cs:8
   });
 });
 
-describe('清债哨兵:despawnTimer 18740 家族口径 + 405 三角单源（源级 tripwire）', () => {
+describe.skipIf(EXT_MISSING)('清债哨兵:despawnTimer 18740 家族口径 + 405 三角单源（源级 tripwire）', () => {
   const gameSrc = readFileSync(join(HERE, '../src/core/Game.ts'), 'utf8');
   const enemySrc = readFileSync(join(HERE, '../src/entities/Enemy.ts'), 'utf8');
   const qbSrc = readFileSync(join(HERE, '../src/entities/bossAI_queenbee_plantera.ts'), 'utf8');
@@ -236,7 +239,7 @@ describe('清债哨兵:despawnTimer 18740 家族口径 + 405 三角单源（源�
 //   ④ 血月小动物转化 Transform 底保留语义锁（:93033-93048 + :81912-81918/:81931）。
 // ============================================================================
 
-describe('SquidCloud 813 出鱿 619 Bottom 锚（BJ113-①,Projectile.cs:34509→NPC.cs:81594）', () => {
+describe.skipIf(EXT_MISSING)('SquidCloud 813 出鱿 619 Bottom 锚（BJ113-①,Projectile.cs:34509→NPC.cs:81594）', () => {
   it('ai[0]==90 出鱿鱼:底边 = 云中心（旧中心锚低 h/2=红）', () => {
     const h = makeHooks();
     const cloud = new SquidCloud(70 * TILE, 100 * TILE);   // 构造 (x,y)=中心
@@ -256,7 +259,7 @@ describe('SquidCloud 813 出鱿 619 Bottom 锚（BJ113-①,Projectile.cs:34509�
   });
 });
 
-describe('仪式圈弹 490 召 454/521 Bottom 锚（BJ113-②,Projectile.cs:32931/:32935→NPC.cs:81594）', () => {
+describe.skipIf(EXT_MISSING)('仪式圈弹 490 召 454/521 Bottom 锚（BJ113-②,Projectile.cs:32931/:32935→NPC.cs:81594）', () => {
   it('age==300 场上无 454 → 召幻影龙 454:底边 = 仪式弹中心;链段随头位', () => {
     const h = makeHooks();
     const src = Enemy.fromVanilla(439, 70 * TILE, 100 * TILE)!;
@@ -275,9 +278,10 @@ describe('仪式圈弹 490 召 454/521 Bottom 锚（BJ113-②,Projectile.cs:3293
   });
 });
 
-describe('msg202 Bottom 契约双端结构锁（BJ113-③,SummonIntent=202 线契约）', () => {
+describe.skipIf(EXT_MISSING)('msg202 Bottom 契约双端结构锁（BJ113-③,SummonIntent=202 线契约）', () => {
   const gameSrc = readFileSync(join(HERE, '../src/core/Game.ts'), 'utf8');
-  const simSrc = readFileSync(join(HERE, '../../server/src/sim/SimHost.ts'), 'utf8');
+  // ★C档可移植:缺档降级(server=仓库外;EXT_MISSING skip 兜底)
+  const simSrc = existsSync(join(HERE, '../../server/src/sim/SimHost.ts')) ? readFileSync(join(HERE, '../../server/src/sim/SimHost.ts'), 'utf8') : '';
 
   it('SimHost.summon Bottom 化:head/twin y=y−h（Game.summonBossAtTx 同式,:81452-81454+:81594）', () => {
     expect(simSrc, 'head.y = y - head.h（msg202 (x,y)=Bottom 锚点）').toMatch(/head\.y = y - head\.h;/);
@@ -296,7 +300,7 @@ describe('msg202 Bottom 契约双端结构锁（BJ113-③,SummonIntent=202 线�
   });
 });
 
-describe('血月小动物转化 Transform 语义锁（BJ113-④,NPC.cs:93033-93048+:81912-81918/:81931）', () => {
+describe.skipIf(EXT_MISSING)('血月小动物转化 Transform 语义锁（BJ113-④,NPC.cs:93033-93048+:81912-81918/:81931）', () => {
   const gameSrc = readFileSync(join(HERE, '../src/core/Game.ts'), 'utf8');
 
   it('小动物支桶迁移重建后补锚:左缘保持+底边对齐+速度保留+HP 比例结转', () => {

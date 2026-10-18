@@ -2,11 +2,12 @@
 // 双窗风暴根因=GPU 进程 IOSurface 按张计费(字节无关,16x16 也会失败)——
 // 先量清楚一页steady state 持有多少张 canvas、其中 chunk 烘焙占多少。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_canvascount-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({

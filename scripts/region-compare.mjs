@@ -1,11 +1,12 @@
 // 高分辨率区域对比:自建 vs 参考 wld(同一相对位置的局部 ASCII)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox']});
 const page = await browser.newPage();
 page.on('pageerror', e => console.log('ERR:', e.message));
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
-const wldBuf = Array.from(readFileSync('/Users/vinlic/Downloads/不负责任的女妖啤酒厂.wld'));
+const wldBuf = Array.from(readFileSync(needInput(join(DOWNLOADS, '不负责任的女妖啤酒厂.wld'))));
 const which = process.argv[2] || 'jungle';
 const out = await page.evaluate(async ([wldBuf, which]) => {
   const mod = await import('/src/world/gen/WorldGen.ts');

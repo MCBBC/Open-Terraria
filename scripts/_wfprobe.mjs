@@ -1,8 +1,9 @@
 // 瀑布帧验证探针:载入用户存档 → 传送到标注点(2891,835) → 截图 + 液体动画帧诊断
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-无能的智慧偏僻地区.json';
+const SAVE = needInput(join(DOWNLOADS, 'map-无能的智慧偏僻地区.json'));
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();

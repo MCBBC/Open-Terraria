@@ -1,8 +1,9 @@
 // 打印已知烟囱(4130..4133×428..444)全部格的 type/frameX/frameY，核对存档行数与发射锚位
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });

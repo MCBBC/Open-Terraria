@@ -1,7 +1,8 @@
 // _waterdbg:半砖水丢失管道定位——逐中间产物抓拍(bg 离屏水层 / 合成结果 / 主画布)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

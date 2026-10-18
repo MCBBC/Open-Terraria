@@ -1,8 +1,9 @@
 // _waterpath:定谳"水体透出背景"空洞路径——GL / 强制2D / 关闭 三态同位对拍。
 // 用户视角(种子世界地表湖),抓 warp path + 截图,绿色矩形空洞 = 背景透出。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const CX = 37329, CY = 4011;
 
 async function runPage(query, tag) {

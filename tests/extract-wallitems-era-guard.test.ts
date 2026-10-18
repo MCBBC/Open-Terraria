@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ284（2026-09-22）：extract-wallitems.mjs era guard 落闸守卫测试（BJ261 排期②
 // 【cwd footgun】清偿）。与 BJ283 line 锚版本闸组合（其写侧锚门收编进 --write-real 臂）：
@@ -27,12 +30,13 @@ const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 const SCRIPT = join(ROOT, 'tools', 'extract-wallitems.mjs');
 const LIVE = join(ROOT, 'src', 'data', 'vanilla-wallitems.json');
 const GAME_TRIGGER = "const GAME = join(dirname(fileURLToPath(import.meta.url)), '..');   // game/（cwd 免疫）";
-const GAME_ABS = `const GAME = ${JSON.stringify('/Users/vinlic/Project/GLM/SandboxWorld/game')};`;
+// ★C档可移植:mutant 重锚值运行时计算(=本仓 game/ 绝对路径)
+const GAME_ABS = `const GAME = ${JSON.stringify(ROOT)};`;
 
 const spawn = (args: string[] = [], env: Record<string, string> = {}, cwd?: string) =>
   spawnSync('node', [SCRIPT, ...args], { cwd: cwd ?? ROOT, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...env } });
 
-describe('extract-wallitems era guard（BJ284 落闸+BJ283 锚门组合）', () => {
+describe.skipIf(EXT_MISSING)('extract-wallitems era guard（BJ284 落闸+BJ283 锚门组合）', () => {
   it('行为面:缺省干跑对拍零写盘（exit 0+核心面双向零差+line 域二相报告+现库字节零改动）', () => {
     const before = md5(LIVE);
     const r = spawn();

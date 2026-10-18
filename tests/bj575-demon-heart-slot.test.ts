@@ -23,7 +23,7 @@
 // 本文件以桩 Worker 直驱 SaveClient.doSave worker 分支（生产数据流,save.worker 同核
 // serializeSave 重建,save.worker.ts:120-141 同式）复现/回归。
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { World } from '../src/world/World';
@@ -33,6 +33,9 @@ import { saveGame, loadSave, playerFromDiskForm } from '../src/save/SaveFile';
 import { serializeSave } from '../src/save/serialize';
 import { SaveClient } from '../src/workers/SaveClient';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
@@ -40,7 +43,7 @@ const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'u
 const saveFileSrc = readFileSync(new URL('../src/save/SaveFile.ts', import.meta.url), 'utf8');
 const saveClientSrc = readFileSync(new URL('../src/workers/SaveClient.ts', import.meta.url), 'utf8');
 const mainFlowSrc = readFileSync(new URL('../src/mainFlow.ts', import.meta.url), 'utf8');
-const vanillaPlayerCs = readFileSync(join(ROOT, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
+const vanillaPlayerCs = existsSync(join(ROOT, 'Terarria1457', 'Terraria', 'Player.cs')) ? readFileSync(join(ROOT, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** vid → 内部 id 权威反查（demon-heart-slots.test.ts 同口径） */
 const vidIdx = (vid: number): number =>
@@ -55,7 +58,7 @@ const mkHeartPlayer = (world: World): { player: Player; inv: Inventory } => {
 };
 
 // ============ 原版金标锚（防标杆漂移;sw-rb12a 同款反编译直读） ============
-describe('原版 1457 金标锚（Terarria1457/Terraria/Player.cs 亲读）', () => {
+describe.skipIf(EXT_MISSING)('原版 1457 金标锚（Terarria1457/Terraria/Player.cs 亲读）', () => {
   it('②存档面 :55430 fileIO.Write(newPlayer.extraAccessory) 在档', () => {
     expect(vanillaPlayerCs).toContain('fileIO.Write(newPlayer.extraAccessory);');
   });
@@ -72,7 +75,7 @@ describe('原版 1457 金标锚（Terarria1457/Terraria/Player.cs 亲读）', ()
 });
 
 // ============ ① 使用面（效果位;使用臂本体 consumable-remainder.test.ts 已源守卫） ============
-describe('① 使用恶魔之心 → 槽位出现（专家世界,无占格依赖）', () => {
+describe.skipIf(EXT_MISSING)('① 使用恶魔之心 → 槽位出现（专家世界,无占格依赖）', () => {
   it('Game case 3335 专家门+置位臂在位（源守卫）', () => {
     expect(gameSrc).toContain("case 3335: // 恶魔之心");
     expect(gameSrc).toContain('if (!(this.world.isExpert || this.world.isMaster)) break;');
@@ -92,7 +95,7 @@ describe('① 使用恶魔之心 → 槽位出现（专家世界,无占格依赖
 });
 
 // ============ ②⑤ 存档序列化面（sync 路径 round-trip） ============
-describe('② 存读档 → 槽位保持（saveGame sync 路径 round-trip）', () => {
+describe.skipIf(EXT_MISSING)('② 存读档 → 槽位保持（saveGame sync 路径 round-trip）', () => {
   it('extraAccessory=true 落盘 permanentUpgrades 并还原（⑤序列化面）', () => {
     const world = new World(64, 32, 42, 'bj575');
     const { player } = mkHeartPlayer(world);
@@ -157,7 +160,7 @@ class FakeSaveWorker {
   }
 }
 
-describe('★BJ575 真凶判别面：worker 生产主路径 extraAccessory 落盘（修复前恒缺键）', () => {
+describe.skipIf(EXT_MISSING)('★BJ575 真凶判别面：worker 生产主路径 extraAccessory 落盘（修复前恒缺键）', () => {
   it('SaveClient.doSave worker 分支:permanentUpgrades.extraAccessory=true 进 JSON 并可读档还原', async () => {
     vi.stubGlobal('Worker', FakeSaveWorker);
     FakeSaveWorker.reqs = [];
@@ -204,7 +207,7 @@ describe('★BJ575 真凶判别面：worker 生产主路径 extraAccessory 落�
 });
 
 // ============ ③④ 槽位显示面（Player.cs:18401-18409/:4259-4281） ============
-describe('③ 卸下饰品 → 槽位保持（extraAccessory 持久,解锁臂顶上）', () => {
+describe.skipIf(EXT_MISSING)('③ 卸下饰品 → 槽位保持（extraAccessory 持久,解锁臂顶上）', () => {
   it('占格卸下后 8 号格仍解锁+显示', () => {
     const inv = new Inventory();
     const acc = vidIdx(5452);

@@ -1,7 +1,8 @@
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 for (const id of [3, 17, 18, 22]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const { width: w, height: h, data } = png;
   const bandH = Math.min(16, h);
   let left = w, right = 0;

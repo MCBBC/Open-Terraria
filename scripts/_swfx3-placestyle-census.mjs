@@ -9,9 +9,10 @@
 //   ④ DefaultTo helper 族（PlaceableTile/Torch/MusicBox/Banner/Monolith/SeaShell）展开
 // 每条记录带形态标签+源行号（亲读核对用）；不可解条件标记 unresolved（拒值不拒产）。
 // 运行时对拍：/tmp/swfx3-items-bundle.mjs（esbuild 打包 src/data/items.ts,见 _swfx3-runtime-dump.ts）。
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = PROJECT_ROOT;
 const OUT = '/tmp/swfx3-gold-census.json';
 const VER = process.env.SWFX3_VER ?? '1457';
 const itemSrc = readFileSync(`${ROOT}/Terarria${VER}/Terraria/Item.cs`, 'utf8');

@@ -22,17 +22,20 @@
 //  ④结构锁：Game.ts 75 特判臂 / 1345 case 区间内无 removeHeld（消耗面禁回潮）
 //  ⑤ForceConsumption 表不含 75/1345
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import { heldItemUseStyle } from '../src/core/Game';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
-const PLAYER_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
-const ITEMID_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8');
-const GAME_TS = readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const PLAYER_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const ITEMID_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const GAME_TS = existsSync(join(REPO, 'game', 'src', 'core', 'Game.ts')) ? readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** 摘 SetDefaults switch(type) 主表内 `case N:` 起至下一个同级 `case`/`default` 的源码块 */
 // Item.cs 有多处 switch 含 case N（SetDefaults 主表/GetDrawHitbox 等）——主表判定:
@@ -50,7 +53,7 @@ function setDefaultsCaseMain(id: number): string {
 /** 效果字段族（itemTime 置位路径判据字段——见文件头金标） */
 const EFFECT_FIELD_RE = /\b(healLife|healMana|buffType|hairDye|createTile|createWall|shoot|mountType|pick|axe|hammer|makeNPC|tileWand|fishingPole|mana)\s*=/;
 
-describe('坠落星75/彩带1345 原版真值（SetDefaults 零效果字段）', () => {
+describe.skipIf(EXT_MISSING)('坠落星75/彩带1345 原版真值（SetDefaults 零效果字段）', () => {
   it('case 75: useStyle4/useTime=useAnimation=17/consumable/UseSound Item4 且零效果字段', () => {
     const body = setDefaultsCaseMain(75);
     expect(body).toContain('useStyle = 4');
@@ -83,7 +86,7 @@ describe('坠落星75/彩带1345 原版真值（SetDefaults 零效果字段）',
   });
 });
 
-describe('itemfunc 数据档 ≡ 原版真值', () => {
+describe.skipIf(EXT_MISSING)('itemfunc 数据档 ≡ 原版真值', () => {
   it('itemFuncOfVid(75) = {consumable:1, useStyle:4} 且零效果字段', () => {
     const f = itemFuncOfVid(75);
     expect(f?.consumable).toBe(1);
@@ -105,7 +108,7 @@ describe('itemfunc 数据档 ≡ 原版真值', () => {
   });
 });
 
-describe('ForceConsumption 覆写排除', () => {
+describe.skipIf(EXT_MISSING)('ForceConsumption 覆写排除', () => {
   it('ItemID.cs ForceConsumption 全表仅 6 项且不含 75/1345', () => {
     const m = /ForceConsumption = Factory\.CreateCustomSet<bool\?>\(null, new object\[(\d+)\]\s*\{([\s\S]*?)\}\);/.exec(ITEMID_CS);
     expect(m).not.toBeNull();
@@ -116,7 +119,7 @@ describe('ForceConsumption 覆写排除', () => {
   });
 });
 
-describe('结构锁：消耗面禁回潮（Game.ts）', () => {
+describe.skipIf(EXT_MISSING)('结构锁：消耗面禁回潮（Game.ts）', () => {
   /** 摘 Game.ts 中以 `{` 收尾的锚行起的完整配对块（臂/分支体） */
   function blockFromBraceLine(anchor: string): string {
     const idx = GAME_TS.indexOf(anchor);

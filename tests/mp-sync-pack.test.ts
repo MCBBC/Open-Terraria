@@ -12,6 +12,10 @@
 // Room 中继（排除发送者·条带过滤·进房补发·权威门）。全程 mock 传输层
 // （NetWriter/NetReader 字节流直连 + 假 ws，同 journey-mp/leashed-net-sync 先例）。
 // ============================================================================
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg, NetModule } from '../src/net/protocol';
 import {
@@ -78,7 +82,7 @@ function framesOfModule(sent: Uint8Array[], moduleId: number): NetReader[] {
 // ============================================================================
 // 1. module0 液体（NetLiquidModule）
 // ============================================================================
-describe('module0 液体联机收敛（NetLiquidModule.cs）', () => {
+describe.skipIf(EXT_MISSING)('module0 液体联机收敛（NetLiquidModule.cs）', () => {
   it('编解码往返：packed 坐标 + liquid/liquidType 逐格一致（含 +1 液型编码）', () => {
     const cells: LiquidCell[] = [
       { x: 100, y: 55, liquid: 255, liquidType: 1 },   // 水（仓库 +1 编码）
@@ -133,7 +137,7 @@ describe('module0 液体联机收敛（NetLiquidModule.cs）', () => {
 // ============================================================================
 // 2. module4 图鉴（NetBestiaryModule）
 // ============================================================================
-describe('module4 图鉴联机（NetBestiaryModule.cs）', () => {
+describe.skipIf(EXT_MISSING)('module4 图鉴联机（NetBestiaryModule.cs）', () => {
   it('BestiaryTracker：RegisterKill 携累计 / Sight/Chat 首次才 true（tracker flag 门）', () => {
     const b = new BestiaryTracker();
     expect(b.registerSight(3)).toBe(true);     // 首遇
@@ -199,7 +203,7 @@ describe('module4 图鉴联机（NetBestiaryModule.cs）', () => {
 // ============================================================================
 // 3. module8 编排粒子（NetParticlesModule）
 // ============================================================================
-describe('module8 编排粒子联机（NetParticlesModule.cs）', () => {
+describe.skipIf(EXT_MISSING)('module8 编排粒子联机（NetParticlesModule.cs）', () => {
   it('编解码：22B 载荷 1:1（type + Vector2×2 + i32 + u8）+ 微光两型常量对表', () => {
     const s = {
       posX: 1234.5, posY: -67.25, moveX: 8, moveY: -5.5,
@@ -248,7 +252,7 @@ describe('module8 编排粒子联机（NetParticlesModule.cs）', () => {
 // ============================================================================
 // 4. module100 天空氛围（NetAmbienceModule + AmbienceServer）
 // ============================================================================
-describe('module100 天空氛围联机（NetAmbienceModule.cs）', () => {
+describe.skipIf(EXT_MISSING)('module100 天空氛围联机（NetAmbienceModule.cs）', () => {
   it('编解码：{u8 slot, i32 seed, u8 type} 原版布局', () => {
     const frame = writeAmbienceModule(4, -123456789, 0);
     const r = new NetReader(frame.subarray(3));
@@ -313,7 +317,7 @@ describe('module100 天空氛围联机（NetAmbienceModule.cs）', () => {
 // ============================================================================
 // 5. module7 晶塔（NetTeleportPylonModule）
 // ============================================================================
-describe('module7 晶塔权威模块（NetTeleportPylonModule.cs）', () => {
+describe.skipIf(EXT_MISSING)('module7 晶塔权威模块（NetTeleportPylonModule.cs）', () => {
   it('编解码往返：sub0/1 增删 · sub2 请求者段可选（C→S 原生帧 0 / 中继帧回填）· sub3 回执文案', () => {
     // C→S 原生帧（无 requesterSlot——writePylonModule 补 0）
     const native = writePylonModule({ sub: PylonSub.PlayerRequestsTeleport, x: 100, y: 50, type: 2 });
@@ -374,7 +378,7 @@ describe('module7 晶塔权威模块（NetTeleportPylonModule.cs）', () => {
 // ============================================================================
 // 6. 玩家列表面板数据源（msg203 探针表 + Msg.Ping 回显差分）
 // ============================================================================
-describe('玩家列表面板数据源（msg203 / Msg.Ping）', () => {
+describe.skipIf(EXT_MISSING)('玩家列表面板数据源（msg203 / Msg.Ping）', () => {
   function mkNet(hooks: Record<string, unknown>) {
     const net = new ClientNet(
       { player: { appearance: null, hostile: false, team: 0, inv: { slots: [] } } } as never,
@@ -411,7 +415,7 @@ describe('玩家列表面板数据源（msg203 / Msg.Ping）', () => {
 // ============================================================================
 // 7. module2 地图 ping（NetPingModule + PingMapLayer）
 // ============================================================================
-describe('module2 地图 ping（NetPingModule.cs / PingMapLayer.cs）', () => {
+describe.skipIf(EXT_MISSING)('module2 地图 ping（NetPingModule.cs / PingMapLayer.cs）', () => {
   it('MapPingStore（Main.Pings）：容量 100 满员丢弃 / 15s 过期 / 10fps×5 帧动画', () => {
     const store = new MapPingStore();
     for (let i = 0; i < 150; i++) store.add(i, i * 100, 0);
@@ -452,7 +456,7 @@ describe('module2 地图 ping（NetPingModule.cs / PingMapLayer.cs）', () => {
 //    尾部条件携带（remaining 门，R16-13 prefix 尾读同构）；msg146 ShimmerActions
 //    不需要——微光转化产物经 SyncItem spawn 自然广播。
 // ============================================================================
-describe('msg21/145 微光尾段（op0 条件携带 + Room 中继透传）', () => {
+describe.skipIf(EXT_MISSING)('msg21/145 微光尾段（op0 条件携带 + Room 中继透传）', () => {
   const KEY = 'vi_50_MagicMirror';
 
   /** 手搓 op0 帧（len/msgId 头内含）：tail=false 模拟旧端 */

@@ -2,10 +2,11 @@
 //   A 全周期连续性：烟囱包围盒像素序列无"整块消失"帧（此前 n∈{6,7} 越界弃画）
 //   B 六相位稳定循环：≥4 个显著离散形态且按 rate8 周期回卷
 //   C tail 插桩：__swTileCap 无新增 tail-skip / fallback
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 if (!fs.existsSync(MAP)) { console.error('NO MAP'); process.exit(2); }
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 } });
 const page = await browser.newPage();

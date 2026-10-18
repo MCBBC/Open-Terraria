@@ -6,7 +6,7 @@
 //      + 首枚火箭出生点 x（resolveShotAnchor 同源）
 import puppeteer from 'puppeteer-core';
 import { writeFileSync } from 'node:fs';
-import { PNG } from '/Users/vinlic/Project/GLM/SandboxWorld/game/node_modules/pngjs/lib/png.js';
+import { PNG } from '../node_modules/pngjs/lib/png.js';
 const shotDir = '/tmp/vertup-probe';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

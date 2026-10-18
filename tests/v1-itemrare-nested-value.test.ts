@@ -14,7 +14,7 @@
 //     case 2202→S1② break-exit 集门 fail-loud）+脚本变异一发（V1 v1 apply 摘除→26 id 回落
 //     区域扫描基值 20/300/5000）。cp 变异副本,原文件 sha256 前后全等=零接触（禁 git checkout）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -24,10 +24,18 @@ import rareJson from '../src/data/vanilla-itemrare.json';
 import { groupDecraftItemId } from '../src/stats/Shimmer';
 import { itemStoreValue, computeSellValue } from '../src/stats/SellChain';
 import recipeDoc from '../src/data/vanilla-recipes.json';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const VALUE = valueJson as Record<string, number>;
 const RARE = rareJson as Record<string, number>;
 const SCRIPT = join(dirname(__dirname), 'tools', 'extract-itemrare.mjs');
+// ★C档可移植:extract-itemrare ROOT 已转 import.meta 相对——mutant 置 OS tmp 须前置重锚(era-guard ④ 习语)
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const PROJ = join(dirname(__dirname), '..');
+const relocateRoot = (s: string) => s.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(PROJ)};`);
+
 const SRC = () => readFileSync(SCRIPT, 'utf8');
 const ITEM_CS = join(dirname(__dirname), '..', 'Terarria1457', 'Terraria', 'Item.cs');
 const TMP = realpathSync(tmpdir());
@@ -73,7 +81,7 @@ const dumpOf = (ver: string) => {
   return JSON.parse(String(r.stdout)) as { RARE: Record<string, number>; VALUE: Record<string, number> };
 };
 
-describe('V1 case 体嵌套 per-type if 值域（U1 登债兑现+SD5 旗帜墙组落刀）', () => {
+describe.skipIf(EXT_MISSING)('V1 case 体嵌套 per-type if 值域（U1 登债兑现+SD5 旗帜墙组落刀）', () => {
   it('① 26 v1 id json 终值=钉表（19 错值修正+7 新增纯加;重产 diff 实证）', () => {
     for (const p of V1) {
       expect(VALUE[String(p.id)], `value[${p.id}] (${p.at})`).toBe(p.v);
@@ -174,7 +182,7 @@ describe('V1 case 体嵌套 per-type if 值域（U1 登债兑现+SD5 旗帜墙�
     writeFileSync(itemidCopy, readFileSync(join(dirname(__dirname), '..', 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8'));
     const mutant = join(dir, 'extract-mutant.mjs');
     // mutant 脚本 = 原脚本换读沙箱副本（★ROOT 硬编码路径改注入;其余逐字节原样）
-    const mutatedScript = 'const ITEM_COPY = ' + JSON.stringify(itemCopy) + ';\nconst ITEMID_COPY = ' + JSON.stringify(itemidCopy) + ';\n' + SRC()
+    const mutatedScript = 'const ITEM_COPY = ' + JSON.stringify(itemCopy) + ';\nconst ITEMID_COPY = ' + JSON.stringify(itemidCopy) + ';\n' + relocateRoot(SRC())
       .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8')", "readFileSync(ITEM_COPY, 'utf8')")
       .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria.ID/ItemID.cs`, 'utf8')", "readFileSync(ITEMID_COPY, 'utf8')");
     writeFileSync(mutant, mutatedScript);
@@ -187,7 +195,7 @@ describe('V1 case 体嵌套 per-type if 值域（U1 登债兑现+SD5 旗帜墙�
   const scriptMutant = (scriptMutation: (s: string) => string) => {
     const dir = mkdtempSync(join(TMP, 'v1-scriptmut-'));
     const mutant = join(dir, 'extract-mutant.mjs');
-    writeFileSync(mutant, scriptMutation(SRC()));
+    writeFileSync(mutant, scriptMutation(relocateRoot(SRC())));
     const r = spawnSync('node', [mutant, '--dump'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_ITEM_VER: '1457' },

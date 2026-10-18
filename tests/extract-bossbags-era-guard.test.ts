@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ215（2026-09-20）：extract-bossbags.mjs 重产禁令代码化 + era guard 落闸守卫测试。
 //
@@ -22,6 +25,11 @@ import { tmpdir } from 'node:os';
 // （本文件变异 M1/M2）。守卫测试习语 = extract-petai-era-guard.test.ts（BJ212）。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-bossbags.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE = join(process.cwd(), 'src', 'data', 'vanilla-bossbags.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
 // ★macOS /var→/private/var 符号链接：mutant 放 /var 下会因 import.meta.url 与 argv[1]
@@ -29,7 +37,7 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
-describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三分离）', () => {
+describe.skipIf(EXT_MISSING)('extract-bossbags era guard（重产禁令代码化 + 输出通道三分离）', () => {
   it('行为面:缺省干跑零写盘;★BJ222 数据面修正后真现库零漂移 exit 0;pair 轴判别力转合成毒化保持', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -178,7 +186,7 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
     const before = md5(LIVE);
     const beforeFake = md5(fakeLive);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = '`${ROOT}/game/src/data/vanilla-bossbags.json`';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-bossbags-mutant-live.mjs');
@@ -204,7 +212,7 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
     writeFileSync(fakeLive, '{"seeded":true}');    // 哨兵种子（≠工具产物,可判写发生）
     const beforeLive = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = '/vanilla-bossbags.json` : null);';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-bossbags-mutant.mjs');
@@ -232,7 +240,7 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
     const dir = mkdtempSync(join(TMP, 'bossbags-guard-'));
     const beforeLive = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = "'public void OpenBossBag'";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-bossbags-mutant-anchor.mjs');
@@ -251,7 +259,7 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
 // ================= ★G-1（BJ261 2026-09-22）fresh-only 轴（S3 普查案） =================
 // 现状 washOf 只算 live-only——变异实证 bossbags 现库删 spawn 恒绿（现库退化不可见）。
 // 补 fresh-only 轴（bags/spawns/fields/coinMap 逆向四轴,缺键型=itemrare 同族,非空拒）。
-describe('extract-bossbags G-1 fresh-only 轴（BJ261）', () => {
+describe.skipIf(EXT_MISSING)('extract-bossbags G-1 fresh-only 轴（BJ261）', () => {
   it('行为面:现库删 spawn → fresh-only 命名物证 exit 1（恒绿盲区收口）', () => {
     const dir = mkdtempSync(join(TMP, 'bossbags-g1-'));
     try {
@@ -281,7 +289,7 @@ describe('extract-bossbags G-1 fresh-only 轴（BJ261）', () => {
       const fixture = join(dir, 'degraded.json');
       writeFileSync(fixture, JSON.stringify(live, null, 1));
       const probeEnv = { ...process.env, SW_BOSSBAGS_JSON: fixture };
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = "for (const id of Object.keys(out)) {\n    if (!live.bags?.[id]) { wash.bagsFresh.push(id); continue; }";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-bossbags-mutant-freshonly.mjs');

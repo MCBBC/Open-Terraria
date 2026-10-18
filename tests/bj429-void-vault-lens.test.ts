@@ -25,7 +25,7 @@
 //   M6  tile 面 addFrX=54 回左半（BJ248 回退）  → T-B1+旧 bj248 T1 双红（防连带）
 //   M7  尘支方向向量 (0.5,1) 摘除/SafeNormalize 摘除 → T-A4 红
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,12 +40,15 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 import { tileAnim } from '../src/render/TileAnim';
 import { smartInteractTileFrame } from '../src/core/SmartInteractTiles';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VAULT = TILE_BY_KEY['v_491_void_vault']!;
 
 // ============================================================ A：纯算面（VoidLensHelper.cs 钉值）
-describe('★BJ429 A：透镜纯算面 1:1（VoidLensHelper.cs）', () => {
+describe.skipIf(EXT_MISSING)('★BJ429 A：透镜纯算面 1:1（VoidLensHelper.cs）', () => {
   it('T-A1 帧式=(int)((cnt+pos.X+pos.Y)%40)/5（:31;计数器 Main.cs:19410 回卷 40）', () => {
     // 中心格(0,0)：wx=8,wy=6 → 和 14 → tick0:14%40=14→⌊14/5⌋=2
     expect(voidLensFrameOf(0, 8, 6)).toBe(2);
@@ -138,7 +141,7 @@ describe('★BJ429 A：透镜纯算面 1:1（VoidLensHelper.cs）', () => {
 });
 
 // ============================================================ B：贴图面（盘上 PNG alpha 逐格）
-describe('★BJ429 B：贴图面——tile 面只含底座,悬浮体在 Projectile_734（判别核心）', () => {
+describe.skipIf(EXT_MISSING)('★BJ429 B：贴图面——tile 面只含底座,悬浮体在 Projectile_734（判别核心）', () => {
   const png = (rel: string): ReturnType<typeof PNG.sync.read> =>
     PNG.sync.read(readFileSync(join(ROOT, rel)));
 
@@ -310,7 +313,7 @@ afterEach(() => {
   tileAnim.tick = 0;
 });
 
-describe("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", () => {
+describe.skipIf(EXT_MISSING)("★BJ429 C：Renderer.drawVoidLenses 集成（render 2c'.0 层）", () => {
   it("T-C1 中心格触发：本体 sy=帧×48 落位心±半宽 + 点光 0.4/0.2/0.9 + 尘（回声移 7b0 flush=T-C6）", () => {
     // 库体 3×3 @ (10,20)..(12,22),中心格 (11,21) fx=fy=18;tick=0 → 帧=(0+184+342)%40/5=1
     const world = makeVaultWorld([

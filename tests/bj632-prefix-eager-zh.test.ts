@@ -7,16 +7,20 @@
 //  同族顺查（召唤系新前缀组 84-97）已含在全量对拍内，另显式钉值锁一批判别例。
 //  ★判别力：built.Prefix.Eager 改成 wiki 的「热切」→ ①红；names 常量映射错位 → ③红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
-const OFFICIAL_ZH = JSON.parse(
-  readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hans.Items.json'), 'utf8'),
-) as { Prefix: Record<string, string> };
-const OFFICIAL_ZH_HANT = JSON.parse(
-  readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hant.Items.json'), 'utf8'),
-) as { Prefix: Record<string, string> };
+// ★C档可移植:缺档降级(EXT_MISSING skip 兜底;describe 体收集期亦执行)
+const OFFICIAL_ZH = existsSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hans.Items.json'))
+  ? JSON.parse(readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hans.Items.json'), 'utf8')) as { Prefix: Record<string, string> }
+  : { Prefix: {} };
+const OFFICIAL_ZH_HANT = existsSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hant.Items.json'))
+  ? JSON.parse(readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria.Localization.Content.zh-Hant.Items.json'), 'utf8')) as { Prefix: Record<string, string> }
+  : { Prefix: {} };
 
 const BUILT_ZH = JSON.parse(readFileSync(join(GAME, 'public', 'l10n', 'zh-Hans.json'), 'utf8')) as {
   Prefix: Record<string, string>;
@@ -37,7 +41,7 @@ const SUMMON_GROUP: Array<[number, string]> = [
   [94, 'Skittish'], [95, 'Eager'], [96, 'Ballistic'], [97, 'Scraggling'],
 ];
 
-describe('BJ632-①:官方 zh-Hans 全 97 前缀逐字节对拍（Eager=渴望 定谳销案）', () => {
+describe.skipIf(EXT_MISSING)('BJ632-①:官方 zh-Hans 全 97 前缀逐字节对拍（Eager=渴望 定谳销案）', () => {
   it('built.Prefix 与反编译官方 zh-Hans.Items.json 全键全等（wiki「热切」≠官方「渴望」）', () => {
     const official = OFFICIAL_ZH.Prefix;
     expect(Object.keys(BUILT_ZH.Prefix).length).toBe(Object.keys(official).length);
@@ -59,7 +63,7 @@ describe('BJ632-①:官方 zh-Hans 全 97 前缀逐字节对拍（Eager=渴望 �
   });
 });
 
-describe('BJ632-②:召唤系新前缀组 84-97 逐型钉值（同族顺查收编）', () => {
+describe.skipIf(EXT_MISSING)('BJ632-②:召唤系新前缀组 84-97 逐型钉值（同族顺查收编）', () => {
   it('常量名映射（vanilla-prefix.json names 键=PrefixID.cs 亲读值）', () => {
     for (const [id, name] of SUMMON_GROUP) {
       expect(VANILLA_PREFIX.names[String(id)], `names[${id}]`).toBe(name);

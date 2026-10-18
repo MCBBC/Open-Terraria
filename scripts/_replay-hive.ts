@@ -2,12 +2,13 @@
 // 边界 FNV 对账:genprobe PASS 行 tf ↔ genprobe-snap-*.bin.gz type-FNV(C# Dump 同序:
 // x 外 y 内,低字节→高字节)。Giant Hive 输入=snap pre-Hives(PASS50 tf)/输出=post-Giant_Hive
 // (PASS51 tf);Mechanic Shed 输入=pre-Sunflowers(PASS87)/输出=post-Mechanic_Shed(PASS88)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const LOG_FILE = process.env.GENPROBE_LOG ?? join(LOGS, 'genprobe.log');
 const PASS_SEL = process.env.SW_PASS === 'shed' ? 'shed' : 'hive';
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');

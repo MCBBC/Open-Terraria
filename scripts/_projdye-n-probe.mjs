@@ -7,6 +7,7 @@
 //   面 E：cMinion fail-open 负证——宝宝史莱姆 266（minion=true）在 CritterShampoo(4762)
 //         不在库（Item_4762.png 缓存面缺）时不受 miscDyes[0] 染=通道隔离正确性
 // 像素判别：世界→屏幕（cam.worldToScreen）→ 画布读回均值;染前/染后均值差+PNG 落盘。
+import { REPO_ROOT } from './_pathlib.mjs';
 import { appendFileSync } from 'node:fs';
 const STEPLOG = '/tmp/projdye-n-progress.log';
 const step = (m) => { const l = `${new Date().toISOString().slice(11, 19)} ${m}`; try { appendFileSync(STEPLOG, l + '\n'); } catch {} console.log(l); };
@@ -14,7 +15,7 @@ import { launchBrowser, openPage, bootstrap, createGame, pump, front, godMode, s
 import { giveItems } from '../tools/probe/lib/entities.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5401';
-const OUT = (n) => `/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/proj-dye/${n}`;
+const OUT = (n) => `${REPO_ROOT}/docs/evidence/proj-dye/${n}`;
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errors = [];

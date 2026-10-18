@@ -9,10 +9,11 @@
 //     光标不迁移,两案并列取证）；
 //   C 松键终态采样。
 // 运行:node tools/probe.mjs run scripts/_bj430-craft-hold-probe.mjs --vite=<PORT>
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame, stage, sleep, ledger, savePageShot, front } from '../tools/probe/lib/index.mjs';
 
 const L = ledger();
-const EV = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/bj430';
+const EV = join(REPO_ROOT, 'docs/evidence/bj430');
 const browser = await launchBrowser({});
 try {
   const page = await openPage(browser, { errors: L.fails });

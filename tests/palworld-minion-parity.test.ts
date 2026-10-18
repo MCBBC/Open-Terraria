@@ -421,8 +421,11 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const f1094 = (shot as unknown as { onFireHit?: { buff: number; minT: number; maxT: number } }).onFireHit;
     expect(f1094).toEqual({ buff: 24, minT: 300, maxT: 599 });   // OnFire 档 Next(300,600)
   });
-  it('喷火通道：1113 弹速 31.5（num17=10.5 ×3 补偿 :60074）/1094 15（num17=5 :60072）', () => {
-    for (const [projId, spd] of [[1113, 31.5], [1094, 15]] as const) {
+  it('喷火通道：1113 弹速 10.5/1094 5（num17 原版字面 :60072/:60074）+ extraUpdates=2 子步=等效 31.5/15px/tick（★BJ642 ×3 字面补偿已退役,旧锁 31.5/15 系双重折算）', () => {
+    // ★BJ694 随刀改判（BJ689 登记「火绒狐 1106 红在途」销案）：BJ642 起 Arrow 消费
+    // vanilla-projectiles.json extraUpdates=2（1106 三子步/tick）→ 出生速度=原版字面
+    // num17（10.5/5）;旧测试锁 31.5/15 = 字面×3 旧补偿档（叠加引擎子步=三倍速）。
+    for (const [projId, spd] of [[1113, 10.5], [1094, 5]] as const) {
       const { hooks, added } = makeHooks();
       const m = new MinionProj(player.cx, player.cy, projId, 40, 3, false, 0, false, () => player);
       (m as { foxChannel: boolean }).foxChannel = true;
@@ -433,7 +436,8 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
       const flame = added.find((x) => x instanceof Arrow) as Arrow | undefined;
       expect(flame, `projId ${projId}`).toBeDefined();
       expect(flame!.projId).toBe(1106);
-      expect(Math.abs(flame!.vx - spd)).toBeLessThan(0.01);
+      expect(Math.abs(flame!.vx - spd), 'num17 原版字面（×3 由引擎子步承载）').toBeLessThan(0.01);
+      expect((flame as unknown as { extraUpdates: number }).extraUpdates, '引擎子步=2（三子步/tick=等效 ×3）').toBe(2);
     }
   });
   it('地狱火落敌：igniteHellfire 命中写 onFire3T 5-10s（AddBuff(323,Next(300,600)) :11315-11318）', () => {

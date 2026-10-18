@@ -1,8 +1,9 @@
 // 用户林区全树接缝扫描：导入 F5 报告 → 逐冠标记（含邻树重叠）× 无风微摆/强风
 // × zoom 1.27（报告值）→ 全透明行/半透明线双检测。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const full = JSON.parse(readFileSync(process.env.REPORT ?? '/Users/vinlic/Downloads/debug-report-模型根基-2026-08-17T10-48-36-594Z.json', 'utf8'));
+const full = JSON.parse(readFileSync(process.env.REPORT ?? needInput(join(DOWNLOADS, 'debug-report-模型根基-2026-08-17T10-48-36-594Z.json')), 'utf8'));
 const report = JSON.stringify({ tiles: { areaPlayer: full.tiles.areaPlayer } });
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 2 } });
 const page = await browser.newPage();

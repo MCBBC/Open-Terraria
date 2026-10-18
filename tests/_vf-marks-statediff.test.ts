@@ -2,11 +2,13 @@
 // 回答:69/69 差是世界状态被编辑过,还是导入/换算域系统性分歧。
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 
-describe('marks 状态差刮擦', () => {
+// ★C档收编:marks-FTW_V2 (6).json / marks-chain-dump.txt / FTW V2.wld → tests/fixtures/local
+describe.skipIf(localFixtureMissing('ftw-v2-marks.json') || localFixtureMissing('ftw-v2-marks-chain.txt'))('marks 状态差刮擦', () => {
   it('dump', () => {
-    const marks = JSON.parse(readFileSync('/Users/vinlic/Downloads/marks-FTW_V2 (6).json', 'utf8')).marks;
+    const marks = JSON.parse(readLocalFixtureText('ftw-v2-marks.json')).marks;
     const key2int: Record<string, number> = {};
     for (const m of marks) {
       key2int[m.typeKey] = m.typeId;
@@ -16,7 +18,7 @@ describe('marks 状态差刮擦', () => {
     }
     // 邻居键的内部 id 从用户倾倒反推不了,单独从 map json defs 拿——改用 marks 相邻格自证:
     // 直接解析 wld,与倾倒文件逐格比类型
-    const lines = readFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/marks-chain-dump.txt', 'utf8').split('\n').filter((l) => l && !l.startsWith('#'));
+    const lines = readLocalFixtureText('ftw-v2-marks-chain.txt').split('\n').filter((l) => l && !l.startsWith('#'));
     const mine = new Map<number[], string>();
     for (const line of lines) {
       const p = line.split(',');
@@ -25,7 +27,7 @@ describe('marks 状态差刮擦', () => {
     // rig wld(in-ftw 与 Downloads 双份都验)
     const wlds: Array<[string, ReturnType<typeof parseWld>]> = [];
     try { wlds.push(['in-ftw', parseWld(new Uint8Array(Buffer.from(readFileSync('/tmp/frame-oracle/in-ftw.wld').toString('base64'), 'base64')))]); } catch { /* 缺文件 */ }
-    try { wlds.push(['dl-ftw', parseWld(new Uint8Array(Buffer.from(readFileSync('/Users/vinlic/Downloads/FTW V2.wld').toString('base64'), 'base64')))]); } catch { /* 缺文件 */ }
+    try { wlds.push(['dl-ftw', parseWld(new Uint8Array(readLocalFixture('ftw-v2.wld')))]); } catch { /* 缺文件 */ }
     for (const [tag, wld] of wlds) {
       let sameType = 0, diffType = 0;
       const samples: string[] = [];

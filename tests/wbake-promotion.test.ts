@@ -9,16 +9,19 @@
 //  ③ 加载步骤键 Mods.SandboxWorld.Progress.RenderingWorld：12 语系 custom 源 +
 //     zh-Hans/en-US 构建产物（l10n-audit 同域）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GAME = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
 const MAINFLOW = readFileSync(join(ROOT, 'src/mainFlow.ts'), 'utf8');
 const CLIENT = readFileSync(join(ROOT, 'src/workers/BakeClient.ts'), 'utf8');
 
-describe('wbake 转正①：旗面翻转（缺省开+逃生门+node 判死）', () => {
+describe.skipIf(EXT_MISSING)('wbake 转正①：旗面翻转（缺省开+逃生门+node 判死）', () => {
   it('行为锁：node 无 location → WBAKE_ENABLED 恒 false（判死）', async () => {
     // ★超时宽限（2026-10-01）：动态导入=BakeClient 全图（ChunkCache→VanillaTiler→
     //  渲染面族,transform 实测 6-8s 且随导入图增重漂移）——5s 缺省超时伪红
@@ -40,7 +43,7 @@ describe('wbake 转正①：旗面翻转（缺省开+逃生门+node 判死）', 
   });
 });
 
-describe('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩家暂停）', () => {
+describe.skipIf(EXT_MISSING)('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩家暂停）', () => {
   it('开窗门：旗∧world∧chunks∧bakeClient——worker 降级（bakeClient=null）不开窗=零变化', () => {
     expect(GAME).toContain('beginEntryFreeze(timeoutMs = 3000): boolean {');
     expect(GAME).toContain('if (!this.world || !this.chunks || !this.chunks.bakeClient) return false;');
@@ -109,7 +112,7 @@ describe('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩�
   });
 });
 
-describe('wbake 转正③：加载步骤键 Mods.SandboxWorld.Progress.RenderingWorld', () => {
+describe.skipIf(EXT_MISSING)('wbake 转正③：加载步骤键 Mods.SandboxWorld.Progress.RenderingWorld', () => {
   const LANGS = ['de-DE', 'en-US', 'es-ES', 'fr-FR', 'it-IT', 'ja-JP', 'ko-KR', 'pl-PL', 'pt-BR', 'ru-RU', 'zh-Hans', 'zh-Hant'];
   const KEY = 'SandboxWorld.Progress.RenderingWorld';
 

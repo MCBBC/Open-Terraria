@@ -1,9 +1,10 @@
 // 水波缝检测:湖面中心列,表层格底边(整 y=242*16=3872)±3px 带内逐帧找
 // "水感骤降行"(缝=整行无水色调,上下行都是水)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/seam-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/seam-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();

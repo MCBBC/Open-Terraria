@@ -4,6 +4,7 @@
 import { it } from 'vitest';
 const itForensic = it.runIf(process.env.SW_WC_FORENSIC === '1');
 import { readFileSync, openSync, writeSync, closeSync } from 'node:fs';
+import { readLocalFixture } from './fixturePath';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { loadSaveData } from '../src/save/SaveFile';
 import { LiquidSim } from '../src/world/liquid/LiquidSim';
@@ -13,7 +14,7 @@ const log = (s: string) => { writeSync(LOG, s + '\n'); };
 const mem = () => { const m = process.memoryUsage(); return `heap=${Math.round(m.heapUsed/1e6)}MB rss=${Math.round(m.rss/1e6)}MB`; };
 
 itForensic('wc-verify2', async () => {
-  const b = readFileSync('/Users/vinlic/Downloads/天真的钴最高点.wld');
+  const b = readLocalFixture('naive-cobalt-peak.wld');
   const { world } = loadSaveData(parseWldToSave(new Uint8Array(b)).save);
   log(`T1 loaded ${mem()}`);
   const sim = new LiquidSim(world);

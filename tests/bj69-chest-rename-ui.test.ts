@@ -14,7 +14,10 @@
 //    可见——本仓编辑态=模态对话面板域,列位 ID6 恒不可见=不落（结构注）
 //  - 1458 同域核对：IngameFancyUI/ChestUI 行号零漂移（R12 批已核,msg33/msg69 位面同）
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { join, dirname } from 'node:path';
 
 import { UI } from '../src/ui/UI';
@@ -65,7 +68,7 @@ function typeNameOf(ui: Record<string, unknown>, chest: ChestData): string {
 
 // ---------------- ① 提交语义 ----------------
 
-describe('BJ69 R12 箱改名 UI 提交（ChestUI.RenameChestSubmit :836-853 1:1）', () => {
+describe.skipIf(EXT_MISSING)('BJ69 R12 箱改名 UI 提交（ChestUI.RenameChestSubmit :836-853 1:1）', () => {
   it('改名落地：chest.name 写入 + editedChestName 等价闩锁 + 型名域回写', () => {
     const { ui, chest, latched, refreshed } = mkUi();
     uiClicks = 0;
@@ -148,7 +151,7 @@ function mkNet(): { net: ClientNet; sent: Uint8Array[] } {
   return { net, sent: ws.sent };
 }
 
-describe('BJ69 ClientNet 改名闩锁（Player.editedChestName :33141-33145 等价 + NM:895-905 写语义）', () => {
+describe.skipIf(EXT_MISSING)('BJ69 ClientNet 改名闩锁（Player.editedChestName :33141-33145 等价 + NM:895-905 写语义）', () => {
   it('闩锁 → 下一条 msg33 携名串尾段并清闩（1..20 → u8 len + str）', () => {
     const { net, sent } = mkNet();
     net.chestRenameLatch('秘密基地');
@@ -199,7 +202,7 @@ describe('BJ69 ClientNet 改名闩锁（Player.editedChestName :33141-33145 等�
 interface RcStub { ws: { sent: Uint8Array[]; readyState: number; send(f: Uint8Array): void }; slot: number; state: number; isHost: boolean; lastX: number; lastY: number; lastPosAt: number; [k: string]: unknown }
 interface RoomStub { handle(c: RcStub, msgId: number, r: NetReader): void; flushOutbox(): void; newClient(ws: unknown): RcStub; readonly clients: Set<RcStub>; chestUserBySlot: Map<number, number> }
 
-describe('BJ69 全链活：UI 提交 → 闩锁 → msg33 尾段 → Room 改名受理 → msg69 广播', () => {
+describe.skipIf(EXT_MISSING)('BJ69 全链活：UI 提交 → 闩锁 → msg33 尾段 → Room 改名受理 → msg69 广播', () => {
   it('访客改名全链：本地写 + 关箱帧携尾段 + 权威受理 + 他人镜像（排除改名者）', async () => {
     const { Room } = await import('../../server/src/room');
     const { World } = await import('../src/world/World');
@@ -251,7 +254,7 @@ describe('BJ69 全链活：UI 提交 → 闩锁 → msg33 尾段 → Room 改名
 
 // ---------------- ④ 结构锁 ----------------
 
-describe('BJ69 结构锁（防静默回退）', () => {
+describe.skipIf(EXT_MISSING)('BJ69 结构锁（防静默回退）', () => {
   it('UI.ts：ID5 重命名钮 + 对话面板 + 提交/取消语义在位', () => {
     expect(UI_SRC).toContain("mkChestBtn(5, 'LegacyInterface.61', () => this.showChestRenameDialog()");
     expect(UI_SRC).toContain('() => (this.openChest?.x ?? -1) >= 0');          // :193 真箱域门
@@ -280,7 +283,7 @@ describe('BJ69 结构锁（防静默回退）', () => {
 //   88 → LegacyDresserType[frameX/54]（54=梳妆台 3-tile 档 stride,≠箱 36）。
 //   同一分支结构亦 = IngameFancyUI.OpenVirtualKeyboard(2) :102-119 defaultChestName
 //   （本仓 vinvChestTypeName 单源双消费：DrawName 回显 + 改名预填/型名换算）。
-describe('BJ91 RB17b④ 箱型名分支（DrawName :118-136 1:1,此前 467/88 两支整缺）', () => {
+describe.skipIf(EXT_MISSING)('BJ91 RB17b④ 箱型名分支（DrawName :118-136 1:1,此前 467/88 两支整缺）', () => {
   const mkTyped = (sheet: number, fx: number) => {
     const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
     const chest: ChestData = { x: 20, y: 10, items: [] };
@@ -326,7 +329,7 @@ describe('BJ91 RB17b④ 箱型名分支（DrawName :118-136 1:1,此前 467/88 �
 //   「箱已关而改名编辑态仍在」的可达态。本仓编辑态=模态对话面板域,收口 = closeChest
 //   （关箱单点:走远 tickChestAutoClose/死亡/关背包全汇）+ openChestPanel（异箱直开臂,
 //   OpenChest 重赋 chest 旧箱隐式关——Game.tryOpenChest 换箱路不经 closeChest）。
-describe('BJ91 RB17b⑤ 改名对话随箱收起（Player.cs:27742-27747/:33135-33141 生命周期等价）', () => {
+describe.skipIf(EXT_MISSING)('BJ91 RB17b⑤ 改名对话随箱收起（Player.cs:27742-27747/:33135-33141 生命周期等价）', () => {
   const mkDialogUi = (): { ui: Record<string, unknown>; removed: () => number } => {
     const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
     let removed = 0;

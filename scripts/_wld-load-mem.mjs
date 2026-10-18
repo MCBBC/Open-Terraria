@@ -1,11 +1,12 @@
 // 大世界导入+读档全链内存探针(2026-09-07):复现 preview「坚持很久仍崩」。
 // 链:5201 私有实例 → 世界列表导入 .wld(worker)→ Play 读档 → CDP 逐秒采样
 // JSHeap+Renderer 内存,捕获 target crashed。崩点=最后一条阶段日志。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/天真的钴最高点.wld';
+const WLD = needInput(join(DOWNLOADS, '天真的钴最高点.wld'));
 const host = process.env.SW_ORIGIN ?? 'http://localhost:5201';
 const LOG = fs.openSync('/tmp/wld-mem.log', 'w');
 const log = (s) => fs.writeSync(LOG, s + '\n');

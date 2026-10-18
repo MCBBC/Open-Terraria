@@ -1,13 +1,14 @@
 // 一次性诊断:神圣区不刷怪——用用户存档原位重放刷怪器
 import { describe, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { loadSave } from '../src/save/SaveFile';
 import { RNG } from '../src/core/rng';
 
-describe('hallow spawn repro', () => {
+// ★C档收编通道:原 .claude/jobs 会话临时件 sbw.json(已灭失,曾致本机红)→缺档=skip
+describe.skipIf(localFixtureMissing('hallow-spawn-sbw.json'))('hallow spawn repro', () => {
   it('存档原位 4000 次尝试', () => {
-    const saveText = readFileSync('/Users/vinlic/.claude/jobs/5b590baa/tmp/sbw.json', 'utf8');
+    const saveText = readLocalFixtureText('hallow-spawn-sbw.json');
     const sd = JSON.parse(saveText);
     const { world } = loadSave(saveText);
     const sp: any = new VanillaSpawner(world);

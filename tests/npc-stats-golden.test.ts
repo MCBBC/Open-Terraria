@@ -8,13 +8,18 @@
 //   ③ 解析器结构护栏:块数/id 覆盖/锚点值(防反编译树变动后解析静默半坏——同
 //     extract-itemcombat.mjs X-04 委托基数护栏教训)
 // 注意:依赖仓库内 Terarria1456/、Terarria1457/ 反编译树(与 npc-frame-golden 同惯例)。
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'Terarria1456'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error 纯 JS 提取库(无类型声明)
 import { recon } from '../tools/recon-npc-1456-1457.mjs';
 
-const r = recon();
+// ★C档可移植:recon 双树读;缺档=降级 null(EXT_MISSING skip 兜底)
+const r = !EXT_MISSING ? recon() : null;
 
-describe('NPC 数值三方对账金标(json × 1456 × 1457)', () => {
+describe.skipIf(EXT_MISSING)('NPC 数值三方对账金标(json × 1456 × 1457)', () => {
   it('① json 与 1456 SetDefaults 零漂移(CLASS A)', () => {
     expect(r.classA).toEqual([]);
   });

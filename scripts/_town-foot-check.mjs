@@ -1,10 +1,11 @@
 // 城镇 NPC 全量盒审计 v2:分批 8 键 + 相机步进,断言「运行时盒尺寸≡官方」与落脚贴合
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { writeFileSync, readFileSync } from 'node:fs';
 const CHROME = process.env.HOME + '/.cache/puppeteer/chrome/mac_arm-150.0.7871.24/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
-const RAWV = JSON.parse(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/public/sprites/vanilla-npcs.json', 'utf8'));
-const SRC = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/src/data/vanillaNpcs.ts', 'utf8');
+const RAWV = JSON.parse(readFileSync(join(REPO_ROOT, 'public/sprites/vanilla-npcs.json'), 'utf8'));
+const SRC = readFileSync(join(REPO_ROOT, 'src/data/vanillaNpcs.ts'), 'utf8');
 const SEG = SRC.slice(SRC.indexOf('TOWN_NPC_IDS'));
 const KMAP = Object.fromEntries([...SEG.matchAll(/ {2}([a-z_]+): \{ id: (\d+)/g)].map((m) => [m[1], +m[2]]));
 let KEYS = Object.keys(KMAP);

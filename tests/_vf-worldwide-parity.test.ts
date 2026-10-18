@@ -1,7 +1,7 @@
 // 全世界逐格解释器 vs 代码生成对拍(移植 /tmp/vf-codegen/allparity.mjs 的世界与驱动语义,
 // 但走本仓真实链路与 id 域契约)。世界 = 其 world.json(vanilla id 域)→ 经 TILE_DEFS 反查内部域。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -10,10 +10,13 @@ import {
   setFramingCodegenEnabled,
 } from '../src/render/VanillaFraming';
 import { TILE_DEFS } from '../src/data/tiles';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
 
-describe('vf codegen worldwide parity', () => {
+describe.skipIf(EXT_MISSING)('vf codegen worldwide parity', () => {
   it('interp == codegen over every active cell', () => {
     const main = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
     const solid = new Array(800).fill(false);

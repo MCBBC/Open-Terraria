@@ -5,7 +5,7 @@
 //   ③ 调试工作台残留(RELEASE=1 强制;非 RELEASE 仅警告):
 //      annotator/faeling-frames/hitbox-lab/sheet-probe/tree-inspect/water-audit/
 //      remaster .html + debug-save.sbw.json + hitbox-names.json
-//   ④ 体积台账:JS 总量与 chunk 明细(写 dist-private/size-ledger.json 供对比)
+//   ④ 体积台账:JS 总量与 chunk 明细(写 docs/size-ledger.json 供对比;★2026-10-18 自 dist-private/ 迁入——与 docs/asset-gap-report.json 同类审计快照归位,git mv 保留历史)
 // 已知不查(登记 TODO):F6/F2/F5 调试键名剥离属 B0-3(未实施),先不做假红。
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -68,13 +68,13 @@ for (const f of jsFiles) {
   ledger.push({ file: f.slice(DIST.length + 1), kb: +(size / 1024).toFixed(1) });
 }
 ledger.sort((a, b) => b.kb - a.kb);
-mkdirSync(join(DIST, '..', 'dist-private'), { recursive: true });
+mkdirSync(join(DIST, '..', 'docs'), { recursive: true });
 writeFileSync(
-  join(DIST, '..', 'dist-private', 'size-ledger.json'),
+  join(DIST, '..', 'docs', 'size-ledger.json'),
   JSON.stringify({ at: new Date().toISOString(), release: RELEASE, totalJsMb: +(totalJs / 1048576).toFixed(2), chunks: ledger }, null, 1),
 );
 
-console.log(`[audit-dist] JS 总量 ${(totalJs / 1048576).toFixed(2)}MB / ${jsFiles.length} chunk(台账 → dist-private/size-ledger.json)`);
+console.log(`[audit-dist] JS 总量 ${(totalJs / 1048576).toFixed(2)}MB / ${jsFiles.length} chunk(台账 → docs/size-ledger.json)`);
 for (const w of warns) console.warn(`[audit-dist] WARN ${w}`);
 if (errors.length) {
   console.error(`[audit-dist] ✗ ${errors.length} 处违规:`);

@@ -1,8 +1,9 @@
 // 假设:首发吞掉整叠弹药 → 后续无弹。读 stack 前后 + entities 桶全貌。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/ammo-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/ammo-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

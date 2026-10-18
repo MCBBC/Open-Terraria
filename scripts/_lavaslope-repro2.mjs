@@ -1,9 +1,10 @@
 // _lavaslope-repro2: 复现变体——液面【低于】岸坡砖顶(用户截图形态:岩浆面在坡砖之下)。
 // 水池/岩浆池 A/B,岸 = slope1 阶梯 3 级,池顶行留空(液面低一格)。含墙(地下形态)。
 // 另测:slope 砖自持液(模拟自然沉降残留)两种形态。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

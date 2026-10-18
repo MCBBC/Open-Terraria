@@ -3,12 +3,13 @@
 // 玩家坐标（debug-report）：tile(3910,285)，扫描窗 ±60。
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from '../tests/fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-10/十周年纪念种子(2).wld';
+const WLD = 'bj641-anniversary-seed.wld';   // ★C档收编+脱敏:原微信收件档(与 Downloads 副本 md5 全等)→ tests/fixtures/local
 
-it('BJ641 wld evidence', () => {
-  const buf = readFileSync(WLD);
+it.skipIf(localFixtureMissing(WLD))('BJ641 wld evidence', () => {
+  const buf = readLocalFixture(WLD);
   const wldRaw = parseWld(new Uint8Array(buf));
   const wld = wldRaw.tiles as unknown as { active: Uint8Array; type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array; wire: Uint8Array };
   const wldMeta = wldRaw;

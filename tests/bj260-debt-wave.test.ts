@@ -15,7 +15,7 @@
 //     Damage_PVE :12523;子步域 :17184 在 numUpdates 循环内）;908 实锤【证伪】
 //     （CanCutTiles :15421 显式排除）不测割、测排除面已对齐。
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { World } from '../src/world/World';
 import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
@@ -30,13 +30,16 @@ import { languageManager } from '../src/i18n/LanguageManager';
 import productJson from '../src/data/vanilla-vanity-effects.json';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
 // ================================================================
 // ① 社交槽 hasVanityEffects 门（提取产物承载）
 // ================================================================
-describe('BJ260-① SOCIAL_VANITY_EFFECTS_VIDS 提取器化（S7 漏修#1）', () => {
+describe.skipIf(EXT_MISSING)('BJ260-① SOCIAL_VANITY_EFFECTS_VIDS 提取器化（S7 漏修#1）', () => {
   const product = productJson as { all: number[]; social: number[]; _meta: { counts: Record<string, number> } };
 
   it('数据面：all=171/social=164/vanCoSet=7;抽检新件在集、van 同置 7 件扣除、音乐盒留集', () => {
@@ -117,7 +120,7 @@ function game409(w: World): GameHooks {
   } as unknown as GameHooks;
 }
 
-describe('BJ260-② 409 剃刀台风撞块支（:18629-18638 双轴全速反,无门/无消亡/无穿透消耗）', () => {
+describe.skipIf(EXT_MISSING)('BJ260-② 409 剃刀台风撞块支（:18629-18638 双轴全速反,无门/无消亡/无穿透消耗）', () => {
   it('X 撞墙：全速镜像不消亡,穿透 −1 不变（曾缺=首撞即灭）', () => {
     const w = emptyWorld();
     const g = game409(w);
@@ -186,7 +189,7 @@ function poolHooks(w: World, p: Player): GameHooks {
 }
 const INSIGNIA = vanillaItemKey(4989)!;   // 翱翔徽章（accfx jumpSpd +1.8 :19721-19724 聚合位）
 
-describe('BJ260-③ F1 湿链 jumpSpd 残项（覆写后补 UpdateJumpHeight 尾段）', () => {
+describe.skipIf(EXT_MISSING)('BJ260-③ F1 湿链 jumpSpd 残项（覆写后补 UpdateJumpHeight 尾段）', () => {
   it('水档起跳 = 6.01+1.8：首帧 vy=−7.61（重力 +0.2 同帧）、jumpHold 30、sustain 钉 −7.81', () => {
     const w = poolWorld();
     const p = new Player(40 * 16, 65 * 16, new Inventory());
@@ -236,7 +239,7 @@ describe('BJ260-③ F1 湿链 jumpSpd 残项（覆写后补 UpdateJumpHeight 尾
 // ================================================================
 // ④ F2 树妖叶 scale（Main.cs:32428/:32439 proj.scale）
 // ================================================================
-describe('BJ260-④ 树妖 586 叶精灵乘 scale（生长窗 age<100 scale=age/100）', () => {
+describe.skipIf(EXT_MISSING)('BJ260-④ 树妖 586 叶精灵乘 scale（生长窗 age<100 scale=age/100）', () => {
   interface Rec { args: unknown[] }
   function fakeRenderer(): { r: unknown; calls: Rec[] } {
     const calls: Rec[] = [];
@@ -290,7 +293,7 @@ describe('BJ260-④ 树妖 586 叶精灵乘 scale（生长窗 age<100 scale=age/
 // ================================================================
 // ⑤ BJ232 死亡段割面（叶弹 227 命中即亡当拍照割;908 证伪面）
 // ================================================================
-describe('BJ260-⑤ BJ232 死亡段割面（CutTiles :12517 先于 Damage_PVE :12523）', () => {
+describe.skipIf(EXT_MISSING)('BJ260-⑤ BJ232 死亡段割面（CutTiles :12517 先于 Damage_PVE :12523）', () => {
   it('叶弹 227 命中即亡拍：同拍割面在先（cut 先于 hurt 的时序账）+弹亡', () => {
     const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: string[] = [];

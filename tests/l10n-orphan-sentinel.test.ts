@@ -42,9 +42,12 @@
 // 防空转护栏:54 键自恰 + 每语言 custom/产物键数下限 + 活键在位(包被整删时
 // "零命中"断言会空转放行,活键锚兜底)。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'); // game/
 const CUSTOM_DIR = join(ROOT, '..', 'tools', 'l10n-custom');
@@ -158,7 +161,7 @@ function readJson(p: string): unknown {
   return JSON.parse(readFileSync(p, 'utf8'));
 }
 
-describe('l10n 孤儿键回插哨兵(刀 G 54 + 刀 S 6 = 60 摘键名单,全 12 语言双侧零命中)', () => {
+describe.skipIf(EXT_MISSING)('l10n 孤儿键回插哨兵(刀 G 54 + 刀 S 6 = 60 摘键名单,全 12 语言双侧零命中)', () => {
   it('名单自恰:恰 60 键且无重复(名单被裁剪/扩充时先红再议)', () => {
     expect(ORPHAN_KEYS).toHaveLength(60);
     expect(new Set(ORPHAN_KEYS).size).toBe(60);

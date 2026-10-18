@@ -1,9 +1,10 @@
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSaveData } from '../src/save/SaveFile';
 
-it('recon user save terrain', () => {
-  const json = readFileSync('/Users/vinlic/Downloads/map-Starter_World (25).json','utf8');
+it.skipIf(localFixtureMissing('starter-map-25.json'))('recon user save terrain', () => {
+  const json = readLocalFixtureText('starter-map-25.json');
   const { world, data } = loadSaveData(JSON.parse(json));
   const st = world.store;
   // marks.player 瓦片坐标

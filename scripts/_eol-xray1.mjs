@@ -1,7 +1,8 @@
 // EoL xray1: 帧结构(帧距分布/个位数帧/DroppedFrame) + 帧窗口导出供后续脚本复用
 // run: node --max-old-space-size=8192 scripts/_eol-xray1.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 const OUT = '/tmp/eol-frame-windows.json';
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];

@@ -5,10 +5,11 @@
 // cell α 在而最终画布塌=GL 上传/页纹理/段发射侧。附加账：可见 chunk 占位对数/
 // workerAwaiting/glDirtyPagesT·W 尺寸/_bglPageUploaded/bglPathStats 增量。
 // 用法: SW_ORIGIN=http://localhost:5207 node tools/run-diag.mjs scripts/_wb-blink-probe.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
-const MAP = process.env.WB_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = process.env.WB_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const RUN_MS = Number(process.env.WB_RUN_MS ?? 90000);
 const TX = Number(process.env.WB_TX ?? 3350);   // 目标 tile x(格)
 const TY = Number(process.env.WB_TY ?? 460);    // 目标 tile y(格,地下)

@@ -1,8 +1,9 @@
 // 解剖台导入测试：用用户 F5 报告 1:1 还原其身边林区 → 全树逐帧接缝扫描
 // （zoom 1.27=报告值 / DPR2 / 无风微摆+强风 / 全透明行+半透明线双检测）。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const full = JSON.parse(readFileSync('/Users/vinlic/Downloads/debug-report-模型根基-2026-08-17T10-48-36-594Z.json', 'utf8'));
+const full = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'debug-report-模型根基-2026-08-17T10-48-36-594Z.json')), 'utf8'));
 const report = JSON.stringify({ tiles: { areaPlayer: full.tiles.areaPlayer } });
 const browser = await puppeteer.launch({ protocolTimeout: 300000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 2 } });
 const page = await browser.newPage();

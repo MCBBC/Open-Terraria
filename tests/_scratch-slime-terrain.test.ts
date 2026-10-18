@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { TILE_DEFS } from '../src/data/tiles';
 
-describe('scratch 流浪汉舌地形窗口', () => {
+describe.skipIf(localFixtureMissing('wanderer-tongue-map.json'))('scratch 流浪汉舌地形窗口', () => {
   it('渲染标注点周边 ASCII', () => {
-    const json = readFileSync('/Users/vinlic/Downloads/map-流浪汉舌.json', 'utf8');
+    const json = readLocalFixtureText('wanderer-tongue-map.json');
     const { world } = loadSave(json);
     const st = world.store;
     const X0 = 1790, X1 = 1865, Y0 = 295, Y1 = 350;

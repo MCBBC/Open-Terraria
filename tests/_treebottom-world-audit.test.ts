@@ -7,8 +7,10 @@
 import { describe, it } from 'vitest';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 
-describe('tree-bottom audit seed 1814620304', () => {
+// ★C档可移植:档案 gz 不入 git,缺档=skip
+describe.skipIf(fixtureMissing('tb-8400-1814620304'))('tree-bottom audit seed 1814620304', () => {
   it('regen + scan', async () => {
     const world = loadFixtureWorld('tb-8400-1814620304');   // ★IIIII259 档案载入
     const st = world.store;

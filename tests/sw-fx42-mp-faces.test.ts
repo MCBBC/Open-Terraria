@@ -11,7 +11,10 @@
 // 标杆行号全部 1457（Terarria1457）；传输层 mock 同 journey-mp / mp-sync-pack 先例。
 // ============================================================================
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { NetWriter, NetReader, Msg, NetModule } from '../src/net/protocol';
 import {
   AnglerQuestSub, writeAnglerQuestModule, readAnglerQuestModule,
@@ -122,7 +125,7 @@ function seedChest(room: RoomStub, x: number, y: number): void {
 // 1. module15 渔夫任务/季节位
 // ============================================================================
 
-describe('SW-FX42 module15 渔夫任务/季节位编解码', () => {
+describe.skipIf(EXT_MISSING)('SW-FX42 module15 渔夫任务/季节位编解码', () => {
   it('sub0/sub1：{u8 sub, u8 value}，帧头 msg82+moduleId=15', () => {
     const q = writeAnglerQuestModule(AnglerQuestSub.Quest, 7);
     expect(q[2]).toBe(Msg.NetModules);
@@ -174,7 +177,7 @@ describe('SW-FX42 module15 渔夫任务/季节位编解码', () => {
   });
 });
 
-describe('SW-FX42 Room module15 权威门/记账/进房补发', () => {
+describe.skipIf(EXT_MISSING)('SW-FX42 Room module15 权威门/记账/进房补发', () => {
   it('非房主 sub0/sub2 断言静默丢弃；房主断言 → 服务器记账 + 排除发送者广播', async () => {
     const { room, mkClient } = await mkRoom();
     const host = mkClient(0, true);
@@ -232,7 +235,7 @@ describe('SW-FX42 Room module15 权威门/记账/进房补发', () => {
 // 2. 在用箱（msg31 锁 / msg33 公告 / msg80 镜像）
 // ============================================================================
 
-describe('SW-FX42 Room 在用箱（Chest.UsingChest Chest.cs:492-503 等价）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX42 Room 在用箱（Chest.UsingChest Chest.cs:492-503 等价）', () => {
   it('msg31 授予：内容帧 + 排除申请者的 msg80 广播 + 占用记账', async () => {
     const { room, mkClient } = await mkRoom();
     const host = mkClient(0, true);
@@ -330,7 +333,7 @@ describe('SW-FX42 Room 在用箱（Chest.UsingChest Chest.cs:492-503 等价）',
   }, 20000);
 });
 
-describe('SW-FX42 ClientNet 在用箱镜像', () => {
+describe.skipIf(EXT_MISSING)('SW-FX42 ClientNet 在用箱镜像', () => {
   it('msg80 → chestOpenByPlayer 镜像（-1 释放）+ 他人占用触发 onChestInUse、self 不触发', () => {
     const got: Array<[number, number]> = [];
     const net = new ClientNet({ player: { appearance: null, hostile: false, team: 0, inv: { slots: [] } } } as never, {
@@ -372,7 +375,7 @@ describe('SW-FX42 ClientNet 在用箱镜像', () => {
 // 3. 死亡收尾同步包文本面（msg118 SendPlayerDeath 本仓等价=chatBroadcast 单口）
 // ============================================================================
 
-describe('SW-FX42 死亡文本联机面（Player.cs:39221-39223 tripwire）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX42 死亡文本联机面（Player.cs:39221-39223 tripwire）', () => {
   const src = readFileSync('src/core/Game.ts', 'utf8');
   it('handlePlayerDeath 走 chatBroadcast（本地消息列+联机中继）,不再 newText 只显本端', () => {
     const iDeath = src.indexOf('private handlePlayerDeath()');

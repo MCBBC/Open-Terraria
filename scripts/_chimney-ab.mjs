@@ -1,10 +1,11 @@
 // 烟囱闪烁 A/B 因果实验(自包含):起 dev → 载 FTW_V2 → 基线闪烁量 → 清壁炉 → 复测
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
 const PORT = process.env.SW_PORT || '5217';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 
 const vite = spawn('npx', ['vite', '--port', PORT, '--strictPort'], {
   cwd: new URL('..', import.meta.url).pathname,

@@ -1,5 +1,6 @@
 // 双实例实验:两个独立 Chrome 实例各载存档世界跑 100s,数 IOSurface 失败。
 // 对照基线(2026-08-18):单实例双 tab = 27 次失败。
+import { HOME } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const N = 2;
@@ -9,9 +10,9 @@ const stderrLines = { };
 for (let i = 0; i < N; i++) {
   const b = await puppeteer.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: 'new', userDataDir: `/Users/vinlic/.claude/jobs/8405c930/tmp/twoinst-${i}`,
+    headless: 'new', userDataDir: `${HOME}/.claude/jobs/8405c930/tmp/twoinst-${i}`,
     args: ['--no-first-run', '--enable-logging', '--log-level=1',
-      `--log-file=/Users/vinlic/.claude/jobs/8405c930/tmp/twoinst-${i}/chrome.log`],
+      `--log-file=${HOME}/.claude/jobs/8405c930/tmp/twoinst-${i}/chrome.log`],
     defaultViewport: { width: 1280, height: 800 },
   });
   const p = await b.newPage();

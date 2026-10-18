@@ -2,10 +2,11 @@
 // 场景=地表上方(无墙)实心行,交替 full/half;逐列统计 tile 顶 8px 的透亮(天空)像素
 // ——vanilla :1609-1652 drawHalfBrickSeam 应盖住衔接列;泄漏=天空直透。
 // 用法:SW_ORIGIN=http://localhost:5204 node tools/run-diag.mjs --timeout=300000 scripts/_half-junction-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/halfjn-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/halfjn-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 }, protocolTimeout: 240000,
 });
 const page = await browser.newPage();
@@ -90,5 +91,5 @@ const out = await page.evaluate(() => {
   return { rows: res, cRowColSegs: cols, cam: [cam.x, cam.y, z] };
 });
 console.log(JSON.stringify(out, null, 1));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/halfjn.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/halfjn.png') });
 await browser.close();

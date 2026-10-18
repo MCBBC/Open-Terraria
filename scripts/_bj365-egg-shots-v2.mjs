@@ -2,6 +2,7 @@
 //  ①导入兼容报告对话框挡蛋 → 进世界后点「关闭」
 //  ②世界入场黑幕淡出未完即拍(EGG1-3 全黑) → 首拍前等 10s + 逐蛋画布亮度轮询
 //  ③EGG4(5422,1102) 周边水洞无干站位 → 二次尝试允许液体(仍须脚下实心)
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { startPrivateVite, killTree } from '../tools/probe/lib/vite.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/browser.mjs';
@@ -9,7 +10,7 @@ import { bootstrap } from '../tools/probe/lib/boot.mjs';
 import { waitForGame } from '../tools/probe/lib/game.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const WLD = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 const PORT = Number(process.env.BJ365_PORT ?? 5202);
 const EGGS = [[6280, 673], [783, 819], [2213, 909], [5422, 1102], [4900, 1431], [5139, 1508]];
 

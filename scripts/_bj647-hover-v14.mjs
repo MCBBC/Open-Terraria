@@ -1,9 +1,10 @@
 // ★BJ647-B v14 终局：zoom=1.24 + NPC 挪出 UI 区 + hover 循环逐帧抓名条 PNG——
 // 抓「黑框无字」（sil 黑剪影可见/tint 白字丢失）帧。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: false,
   defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 1 },

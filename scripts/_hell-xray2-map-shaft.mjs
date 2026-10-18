@@ -1,7 +1,8 @@
 // 解码 save v5 tiles(varint RLE),输出竖井列的深度×群系剖面
 // 格式(serialize.ts:48): 每条目 varint(run-1) varint(type) [varint frameX frameY 仅当 type!=0]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const d = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/map-天真的钴最高点 (4).json', 'utf8'));
+const d = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json')), 'utf8'));
 const W = d.header?.width ?? d.meta?.w ?? d.w ?? 6400;
 const H = d.header?.height ?? d.meta?.h ?? d.h ?? 1800;
 console.log('header keys:', Object.keys(d.header || {}).slice(0, 32).join(','));

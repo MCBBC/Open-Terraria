@@ -1,5 +1,6 @@
 // IIII256 绘制调用钩子:一帧内落在 slope1(3508,394)/slope2(3521,394) 目标矩形上的
 // 全部 drawImage/fillRect(含源矩形/alpha/图源尺寸) → 定性坡面水线亮边缺失方
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { launchBrowser, openPage, front } from '../tools/probe/lib/browser.mjs';
 import { cleanStorage, gotoApp, waitForBridge, dismissWelcome } from '../tools/probe/lib/boot.mjs';
@@ -29,7 +30,7 @@ const seedDef = (json) => {
     } catch { res(); }
   });
 };
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const page = await openPage(browser, { errors: [] });
 page.__probeOrigin = ORIGIN;

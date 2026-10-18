@@ -1,8 +1,9 @@
 // B2 终局裁决·trace 普查:事件面计数 + console 签名 + 时间窗
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import readline from 'node:readline';
 
-const TRACE = '/Users/vinlic/Downloads/Trace-20261006T033001.json';
+const TRACE = needInput(join(DOWNLOADS, 'Trace-20261006T033001.json'));
 
 const nameCount = new Map();       // name -> count (renderer main tid 30326041)
 const catCount = new Map();        // cat -> count

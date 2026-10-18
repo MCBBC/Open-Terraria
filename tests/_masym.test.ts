@@ -1,13 +1,14 @@
 // 方向不对称取证:新代码 vs 昨日旧代码(xPre 并集窗前),两结构两方向
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../src/core/constants';
 
-describe('方向不对称', () => {
+describe.skipIf(localFixtureMissing('starter-map-26.json'))('方向不对称', () => {
   it('双结构双向×新旧代码', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const mk = (xt: number, fp: number) => ({
       x: xt * TILE, y: fp - 42, w: 20, h: 42,
       vx: 0, vy: 0, onGround: true, hitWall: false, hitHead: false,

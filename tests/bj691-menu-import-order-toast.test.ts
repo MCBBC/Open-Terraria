@@ -101,9 +101,9 @@ describe('§2 面板/助手接线', () => {
     expect(src).toContain('for (const meta of this.store.list()) {');
     expect(src).not.toContain('charListCompare');
   });
-  it('WorldSelect.reload() 消费 store.list()（WorldStore.list() 既有正确序,面板不再降级）', () => {
+  it('WorldSelect.reload() 消费 store.list()（WorldStore.list() 既有正确序,面板不再降级;★BJ694 起经 sortWorldsForChar 透传,单源不变）', () => {
     const src = readFileSync(join(GAME, 'src', 'ui', 'WorldSelect.ts'), 'utf8');
-    expect(src).toContain('const list = this.store.list();');
+    expect(src).toContain('sortWorldsForChar(this.store.list(), ac)');
     expect(src).not.toContain('worldListCompare');
   });
   it('CharacterStore.list() 排序在位（M1 位）+ create 置 lastPlayed（M2 位）', () => {

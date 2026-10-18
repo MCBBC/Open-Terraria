@@ -12,6 +12,7 @@
 //          scripts/_entry-shaping-probe.mjs
 //   SW_TAG=baseline / SW_RUN_MS=75000 / SW_PROFILE_MS=25000 / SW_VW / SW_VH / SW_DPR
 // 【产物】/tmp/entry-shaping/<tag>.json(summary+rows)+ <tag>.cpuprofile + 截图。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, waitForBridge, gotoApp, waitForGame,
@@ -19,7 +20,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5218';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/entry-shaping';
 const TAG = process.env.SW_TAG || 'baseline';
 const RUN_MS = Number(process.env.SW_RUN_MS || 75_000);

@@ -7,7 +7,7 @@
 //  - 已知近似：OnSuccess/OnFailedRoll 条件链拍平为独立掉落（略偏慷慨）。
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植
 const raw = readFileSync(`${ROOT}/Terarria1405/GameContent/ItemDropRules/ItemDropDatabase.cs`, 'utf8');
 // 去注释/去换行
 const src = raw.replace(/\/\/[^\n]*/g, '').replace(/\n\s*/g, ' ');

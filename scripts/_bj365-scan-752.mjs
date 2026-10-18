@@ -1,9 +1,10 @@
 // BJ365: 扫描 wld 中 tile 752（巨型龙蛋/啮龙蛋）锚格坐标 + 深度/周边上下文
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 // @ts-ignore
 import { parseWld } from '../src/wld/WldParser.ts';
 
-const PATH = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const PATH = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 
 const buf = readFileSync(PATH);
 const w = parseWld(new Uint8Array(buf));

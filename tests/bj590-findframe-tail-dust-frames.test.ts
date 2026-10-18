@@ -30,7 +30,7 @@
 //    困难机械 4/5 :3655）、226（神庙 :3070）、660（史莱姆皇后仆从 bossAI_lategame
 //    :2082）;死=158。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { Enemy, FF_VXSDIR_GROUP } from '../src/entities/Enemy';
@@ -39,9 +39,12 @@ import { vanillaNpc } from '../src/data/vanillaNpcs';
 import { ECLIPSE_SPAWN_TABLE } from '../src/world/Eclipse';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
 const spawnerSrc = readFileSync(join(ROOT, 'src/world/spawn/VanillaSpawner.ts'), 'utf8');
@@ -73,7 +76,7 @@ function caseBody(src: string, head: string, stop: string): string {
 const body6266 = caseBody(npc1457, '\t\tcase 62:\n\t\tcase 66:', '\t\tcase 156:');
 const body156 = caseBody(npc1457, '\t\tcase 156:', '\t\tcase 63:');
 
-describe('BJ590 原版锚：件1 五型尘面（case 150..226 组 :75582-75619）', () => {
+describe.skipIf(EXT_MISSING)('BJ590 原版锚：件1 五型尘面（case 150..226 组 :75582-75619）', () => {
   it('151 熔岩蝠尘 6：每 tick、speed=v×0.2、α100、scale2、noGravity（:75587-75591）', () => {
     expect(fBody).toMatch(
       /if \(type == 151\)\s*\{\s*int num\d+ = Dust\.NewDust\(new Vector2\(position\.X, position\.Y\), width, height, 6, velocity\.X \* 0\.2f, velocity\.Y \* 0\.2f, 100, default\(Color\), 2f\);\s*Main\.dust\[num\d+\]\.noGravity = true;\s*\}/,
@@ -104,7 +107,7 @@ describe('BJ590 原版锚：件1 五型尘面（case 150..226 组 :75582-75619�
   });
 });
 
-describe('BJ590 原版锚：件2 专属 case 阈值（62/66/156/121/660）', () => {
+describe.skipIf(EXT_MISSING)('BJ590 原版锚：件2 专属 case 阈值（62/66/156/121/660）', () => {
   it('62/66：sdir=direction（非死区档）+ num6=num7=5 循环 25t ÷5 → 5t/帧×5 帧（:74683-74698）', () => {
     expect(body6266).toMatch(/spriteDirection = direction;/);
     expect(body6266).toMatch(/int num6 = 5;\s*int num7 = 5;/);
@@ -138,7 +141,7 @@ describe('BJ590 原版锚：件2 专属 case 阈值（62/66/156/121/660）', () 
 // ---------------------------------------------------------------------------
 // 本仓落刀锚（线位/单源/死面销案）
 // ---------------------------------------------------------------------------
-describe('BJ590 本仓锚', () => {
+describe.skipIf(EXT_MISSING)('BJ590 本仓锚', () => {
   it('FF_VXSDIR_GROUP 扩容 15→22（+7 同形死区档型）——本体 15 型全数在位', () => {
     const base = [48, 49, 51, 60, 82, 93, 137, 182, 210, 211, 253, 316, 634, 662, 664];
     expect(FF_VXSDIR_GROUP.size).toBe(22);
@@ -211,7 +214,7 @@ function dustGame(): { game: GameHooks; spawns: Array<Record<string, unknown>> }
 const drive = (e: Enemy, fn: string) =>
   (e as unknown as Record<string, (...a: unknown[]) => void>)[fn];
 
-describe('BJ590 行为级：151 熔岩蝠组内尘（每 tick 一拍,无掷门）', () => {
+describe.skipIf(EXT_MISSING)('BJ590 行为级：151 熔岩蝠组内尘（每 tick 一拍,无掷门）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('连 3 拍 3 粒：尘 6/盒=(x,y,w,h)/speed=v×0.2/α100/scale2/noGravity', () => {
@@ -248,7 +251,7 @@ describe('BJ590 行为级：151 熔岩蝠组内尘（每 tick 一拍,无掷门�
   });
 });
 
-describe('BJ590 行为级：150 冰蝠组内尘（1/10 掷门 + ×0.2 + noLight）', () => {
+describe.skipIf(EXT_MISSING)('BJ590 行为级：150 冰蝠组内尘（1/10 掷门 + ×0.2 + noLight）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('掷中（random<0.1）：尘 67/α90/scale1.5/speed=v×0.5 生成后 ×0.2/noGravity+noLight', () => {
@@ -287,7 +290,7 @@ describe('BJ590 行为级：150 冰蝠组内尘（1/10 掷门 + ×0.2 + noLight�
   });
 });
 
-describe('BJ590 行为级：零尘型/家族边界/无 game 契约', () => {
+describe.skipIf(EXT_MISSING)('BJ590 行为级：零尘型/家族边界/无 game 契约', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('152/158/226 纯帧档零尘面（连拍零尘,活面 152/226 与死面 158 同锁）', () => {
@@ -337,7 +340,7 @@ describe('BJ590 行为级：零尘型/家族边界/无 game 契约', () => {
 // ---------------------------------------------------------------------------
 // 件2 帧引擎行为级（FF_AI14_CASE_SPEC 表驱动——活面按原版落,死面零条目）
 // ---------------------------------------------------------------------------
-describe('BJ590 帧引擎：件2 活面阈值锁（vanillaFrameIdx）', () => {
+describe.skipIf(EXT_MISSING)('BJ590 帧引擎：件2 活面阈值锁（vanillaFrameIdx）', () => {
   const mk = (id: number) => {
     const e = Enemy.fromVanilla(id, 40 * TILE, 57 * TILE);
     if (!e) throw new Error(`fromVanilla(${id}) 失败`);

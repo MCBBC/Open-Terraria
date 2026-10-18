@@ -3,9 +3,10 @@
 //       909 岩石（start 5 step −1 短环）/ 261 大地之杖滚石（18..2 长环+灰染）。
 // 断言面：①canvas 读回——每弹身后 ghost 带内非背景像素计数 > 0（半透≠背景）；
 //        ②503 ghost 与本体旋转差 π/2 档不崩；③无 pageerror。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errs = [];

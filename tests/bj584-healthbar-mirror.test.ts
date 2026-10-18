@@ -24,14 +24,17 @@
 // 落刀：Renderer.SLIME_NO_MIRROR 表（= 原版 case 组 − {302,304}）+ drawEnemy 通用
 //   镜像门 `!slimeNoMirror` 排除（恒原生朝向 ≙ 原版 spriteDirection 字段默认 -1）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const npcSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
+const npcSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** 原版 FindFrame 史莱姆 case 组活体提取：定位 `case 1:` + `case 16:` + `case 59:`
  *  连排（FindFrame switch 内唯一）,收集连排 case（case 行间仅允许空白）直至断行。 */
@@ -50,7 +53,7 @@ function vanillaGroupIds(): number[] {
   return ids;
 }
 
-describe('BJ584 史莱姆族原版「从不镜像」语义', () => {
+describe.skipIf(EXT_MISSING)('BJ584 史莱姆族原版「从不镜像」语义', () => {
   it('原版 FindFrame case 组内仅 302/304 写 spriteDirection（活体锚）', () => {
     const marker = npcSrc.indexOf('case 1:\n\t\tcase 16:\n\t\tcase 59:');
     const body = npcSrc.slice(marker, npcSrc.indexOf('case 488:', marker));
@@ -85,7 +88,7 @@ describe('BJ584 史莱姆族原版「从不镜像」语义', () => {
   });
 });
 
-describe('BJ584 drawEnemy 通用镜像门消费', () => {
+describe.skipIf(EXT_MISSING)('BJ584 drawEnemy 通用镜像门消费', () => {
   it('通用 facing 镜像门带 !slimeNoMirror 排除（单点接线）', () => {
     expect(rendererSrc).toMatch(
       /const slimeNoMirror = Renderer\.SLIME_NO_MIRROR\.has\(idR\);/,
@@ -105,7 +108,7 @@ describe('BJ584 drawEnemy 通用镜像门消费', () => {
   });
 });
 
-describe('BJ584 血条面「不随朝向镜像」原版语义（本案定谳基面）', () => {
+describe.skipIf(EXT_MISSING)('BJ584 血条面「不随朝向镜像」原版语义（本案定谳基面）', () => {
   it('drawHealthBar 体零 facing/scale(-1) 消费（血条几何与朝向解耦）', () => {
     const sig = rendererSrc.indexOf('private drawHealthBar(');
     expect(sig, 'drawHealthBar 定义').toBeGreaterThan(0);

@@ -1,10 +1,11 @@
 // 链性能严测:①冷解(全新缓存,真实地形 500 格) ②热解 ③chunk 烘焙增量(链开 vs 关)
 // ④分配压力(每格 new Map + env spread 计数)。全部在页面内 performance.now 量测。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 1200, height: 800 } });

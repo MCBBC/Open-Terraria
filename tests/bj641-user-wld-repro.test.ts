@@ -16,6 +16,7 @@
 //   提炼命中——证唯一断环=箱锚出窗，链上其余全通。原版同构（非 SW 缺陷）→ 零生产码改动。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { loadSaveData } from '../src/save/SaveFile';
 import { Game } from '../src/core/Game';
@@ -24,14 +25,14 @@ import { deviceTable, type DeviceCtx } from '../src/world/wiring/devices';
 import { findExtractinatorChest } from '../src/world/Extractinator';
 import { ITEM_DEFS } from '../src/data/items';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-10/十周年纪念种子(2).wld';
+const WLD = 'bj641-anniversary-seed.wld';   // ★C档收编+脱敏:原微信收件档(与 Downloads 副本 md5 全等)→ tests/fixtures/local
 const EXT_ANCHOR = { x: 3912, y: 283 };   // wld 实测提炼机锚
 const TIMER = { x: 3911, y: 286 };        // wld 实测计时器（frameX=0 = 1s 档）
 const CHEST = { x: 3912, y: 280 };        // wld 实测箱锚（载雪泥/泥沙/化石）
 
 /** 用户真档全量导入（真 store/wire/chest 域）+ 真 extractinatorPullImpl 桥 */
 function loadUserWorld() {
-  const buf = readFileSync(WLD);
+  const buf = readLocalFixture(WLD);
   const { save } = parseWldToSave(new Uint8Array(buf));
   const { world } = loadSaveData(JSON.parse(JSON.stringify(save)));
   return world;
@@ -65,7 +66,7 @@ function makeRig(world: ReturnType<typeof loadUserWorld>) {
   return { world, w, pulls, drops };
 }
 
-describe('BJ641 用户世界档复现（真档导入）', () => {
+describe.skipIf(localFixtureMissing(WLD))('BJ641 用户世界档复现（真档导入）', () => {
   it('①真档域对账：箱锚/箱内容/线/计时器与 wld 直读一致', () => {
     const world = loadUserWorld();
     const st = world.store;

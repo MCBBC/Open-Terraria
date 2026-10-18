@@ -1,9 +1,10 @@
 // 加载用户存档 → 标注陶罐 (3385,189) → chunk 像素 vs 素材期望帧逐像素对比
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-12345世界 (2).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-12345世界 (2).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));

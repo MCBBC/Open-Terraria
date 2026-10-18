@@ -4,7 +4,7 @@
 // 用法: node tools/extract-tileframe-cosmetic.mjs [out.json]
 import fs from 'node:fs';
 
-const SRC = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria/WorldGen.cs';
+const SRC = `${process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '')}/Terarria1457/Terraria/WorldGen.cs`;   // ★C档可移植:仓库外反编译树
 const lines = fs.readFileSync(SRC, 'utf8').split('\n');
 const START = 82684, END = 86071;
 // 预筛除:tileLargeFrames==1 的 2D 变体表块(82992-83002,解释器 S.tileLargeFrames 恒 0 不达)

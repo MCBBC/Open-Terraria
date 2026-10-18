@@ -5,12 +5,13 @@
 //  → 泵 120 拍(rot 收敛) → 采样 rot/a169St → 整画布截图(docs/evidence/bj637-864-orientation/)。
 // 判据:每刃 |rot−π|<0.05(竖直);对照 A=冻结态强设 rot=π/2 复现旧横置(仅绘态)供比对。
 // 用法:SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs scripts/_bj637-rot-shot.mjs
-import { launchBrowser, openPage, bootstrap, createGame, pump, godMode } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
+import { REPO_ROOT, join } from './_pathlib.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump, godMode } from '../tools/probe/lib/index.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
-const OUT = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/bj637-864-orientation';
+const OUT = join(REPO_ROOT, 'docs/evidence/bj637-864-orientation');
 fs.mkdirSync(OUT, { recursive: true });
 
 const browser = await launchBrowser({});

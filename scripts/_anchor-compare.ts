@@ -1,12 +1,13 @@
 // ★628:锚点对比仪——本仓引擎逐 pass 状态 vs 实跑探针快照(双方都映射到 C# sheet 空间)
 // 用法:node /tmp/anchor-compare.mjs <probeSnapDir>
 // 本仓侧:onWorldPartial 逐 pass 落 sheet 空间 type 流快照(内存内),按序对探针快照求 FNV 并找首分歧
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS, registerModTile } from '../src/data/tiles';
 
-const snapDir = process.argv[2] ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const snapDir = process.argv[2] ?? needInput(TMOD_LOGS);
 // mod tile 注册(探针快照里 mod tile 用 C# id 761-1916;本仓映射只对 vanilla——
 // vanilla 面对比阶段 mod 格置 0xFFF0 哨兵即可分辨)
 const root = process.env.SW_GAME_ROOT ?? process.cwd();

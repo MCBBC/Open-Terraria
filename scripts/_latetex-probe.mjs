@@ -3,11 +3,12 @@
 // fallback+note)→ 表到达后验证精确重烘链:onBakeAssetArrived → markDirty →
 // flushDirty 重烘 → 屏幕像素出现木质色(自愈)或仍透明(链断=bug 复现)。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_latetex-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const DELAY_MS = 15000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

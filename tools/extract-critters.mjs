@@ -17,7 +17,7 @@
 // 合并进 public/sprites/vanilla-npcs.json：已有 id 更新 friendly/critter 标志，缺的补条目
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 const npcId = readFileSync(`${ROOT}/Terarria1457/Terraria.ID/NPCID.cs`, 'utf8');
 const npcCs = readFileSync(`${ROOT}/Terarria1457/Terraria/NPC.cs`, 'utf8');
 const mainCs = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');

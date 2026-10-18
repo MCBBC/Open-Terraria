@@ -93,7 +93,7 @@ describe('AES-128-ECB 纯 JS 解密', () => {
 // 期望值（旧 STABLE() helper 与被测映射同表同错=闭环抓不到,已拆;物证:vi_109_
 // mana_crystal 注册序 0 号位,裸下标重合率 0/6177）。
 // ★同日时间线改真（BJ146 旧叙事「历史导出=错位域」被实证推翻）：真档 id 域=
-// vid 直写正确——外部实证=用户私有历史档 /Users/vinlic/Downloads/Vinlic.plr
+// vid 直写正确——外部实证=用户私有历史 .plr 档(未收编;证据细节见案件档案)
 // （3456B,v325;用户私有不入仓,仅本注释记结论）,2026-09-18 经 parsePlr 实测:
 // armor[10-12]=5802/5803/5804 雪域家具套连续 vid（反编译 1457 ItemID.cs
 // SnowCandle=5802/SnowChair=5803/SnowChandelier=5804 同证;1.4.5 系列新品,

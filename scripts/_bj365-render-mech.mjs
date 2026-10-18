@@ -1,11 +1,12 @@
 // BJ365 机制取证 v3: 页内直调 drawVanillaCell(752 锚格) 隔离重画 → 判定绘制链哪一环丢失
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { startPrivateVite, killTree } from '../tools/probe/lib/vite.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/browser.mjs';
 import { bootstrap } from '../tools/probe/lib/boot.mjs';
 import { waitForGame } from '../tools/probe/lib/game.mjs';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const WLD = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 const PORT = Number(process.env.BJ365_PORT ?? 5203);
 const AX = 6280, AY = 673;
 

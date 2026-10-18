@@ -4,6 +4,7 @@
 //   · 256 行 rowSums（快速定位差异行）
 //   · 池/memo 统计（shineStats + poolDepth）
 //   · digest 两取（对拍纪律:第二取）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, waitForGame,
@@ -11,7 +12,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5204';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/shine-debt';
 const TAG = process.env.SW_TAG || 'sg';
 mkdirSync(OUT, { recursive: true });

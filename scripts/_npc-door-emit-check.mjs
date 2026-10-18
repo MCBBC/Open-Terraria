@@ -1,10 +1,11 @@
 // npcDoorNet 事件接线最小断言:复用 _npc-door-live 的沙盒(独立重跑),
 // 冻结 Math.random=0 促概率门首击必中,单次 drive 后必须见到 1 条 open 事件。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = process.env.VFP_MAP ?? '/Users/vinlic/Downloads/map-FTW_V2 (8).json';
+const MAP = process.env.VFP_MAP ?? needInput(join(DOWNLOADS, 'map-FTW_V2 (8).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -59,5 +60,5 @@ const out = await p.evaluate(async () => {
   };
 });
 console.log(JSON.stringify(out));
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/npc-door-emit.json', JSON.stringify(out));
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/npc-door-emit.json'), JSON.stringify(out));
 await b.close();

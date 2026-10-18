@@ -1,9 +1,10 @@
 // HorizonClouds 染色视觉验证:黎明窗(sunrise 高可见)下云应朝阳侧染暖色。
 // 用法:SW_ORIGIN=http://localhost:5204 node tools/run-diag.mjs --timeout=300000 scripts/_horizoncloud-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/hc-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/hc-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 }, protocolTimeout: 240000,
 });
 const page = await browser.newPage();
@@ -35,6 +36,6 @@ const out = await page.evaluate(() => {
   };
 });
 console.log('天体态:', JSON.stringify(out));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/horizoncloud.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/horizoncloud.png') });
 await browser.close();
 // 第二段:GL 云层状态 + 太阳近旁云像素采样

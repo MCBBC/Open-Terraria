@@ -7,11 +7,12 @@
 //   「pre-X」文件=X 完成态(探针语义:FNV 实证;nextIsMod 命名规则见 GenProbe.cs Dump)。
 // 真实增量(pre→post 快照差,26,012 格):cs#1916(VernalSoil 运行时 id)+1,090;
 //   vanilla 填充族 mud/草/泥墙等;变化域 bbox x[989,1263] y[832,1044]。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 

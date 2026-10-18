@@ -1,4 +1,5 @@
 // 读取页面的 __swErrors/__swErrorsFatal 原始栈(main.ts 错误环)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -40,7 +41,7 @@ const importBtn = await page.$('[data-act="import"]');
 if (importBtn) {
   await importBtn.click(); await new Promise((r) => setTimeout(r, 600));
   const fin = await page.$('.sw-vsel input[type=file]');
-  if (fin) { await fin.uploadFile('/Users/vinlic/Downloads/粗暴的椰子地段.wld'); await new Promise((r) => setTimeout(r, 12000)); }
+  if (fin) { await fin.uploadFile(needInput(join(DOWNLOADS, '粗暴的椰子地段.wld'))); await new Promise((r) => setTimeout(r, 12000)); }
 }
 log('imported');
 const items = await page.$$('.sw-vsel .sw-vitem');
@@ -155,7 +156,7 @@ for (let i = 0; i < 100; i++) {
         }
       } catch (e) { log('dismiss-err ' + e.message); }
       await new Promise((r2) => setTimeout(r2, 3000));
-      await page.screenshot({ path: '/Users/vinlic/Downloads/verify-流浪汉舌-导入后.png' });
+      await page.screenshot({ path: join(DOWNLOADS, 'verify-流浪汉舌-导入后.png') });
       log('SHOT-SAVED');
       break;
     }

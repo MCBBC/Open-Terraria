@@ -1,4 +1,5 @@
 // ★652b:chasm3 iter0 m,n 噪声指纹拟合(验证版 chasmCSharp + iter0 格级记录)
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -95,7 +96,7 @@ function chasmCSharp(
 }
 
 // ── 状态快照 ──
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 function fnvOf(buf: Uint8Array): string {
   let hh = 0x811c9dc5;
   for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {

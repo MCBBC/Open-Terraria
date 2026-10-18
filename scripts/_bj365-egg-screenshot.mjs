@@ -1,6 +1,7 @@
 // BJ365: 巨型龙蛋(tile 752)实机截图探针——私域 vite + importWld 进世界 + 逐蛋传送截图
 // 坐标源: scripts/_bj365-scan-752.mjs 对 wld 直扫锚格(frameX=0,frameY=0,2×2 左上)
 // 纪律: SW_NO_HMR=1 + 独立 SW_CACHE + 收尾 killTree 精确杀树(tools/probe/lib/vite.mjs)
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { startPrivateVite, killTree } from '../tools/probe/lib/vite.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/browser.mjs';
@@ -8,7 +9,7 @@ import { bootstrap } from '../tools/probe/lib/boot.mjs';
 import { waitForGame } from '../tools/probe/lib/game.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const WLD = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 const PORT = Number(process.env.BJ365_PORT ?? 5201);
 
 // 扫描所得 6 锚格(tile 坐标,2×2 左上)

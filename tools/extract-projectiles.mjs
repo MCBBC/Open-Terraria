@@ -88,7 +88,7 @@
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
 // ★2026-08-23 基准切换 1457：缺省源版本 1456→1457（裸跑不再把 1457 专属字段打回 1456;
 // 旧 1456 档仍可 SW_ITEM_VER=1456 显式取）

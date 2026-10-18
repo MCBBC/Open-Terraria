@@ -5,9 +5,9 @@
 #   zsh tools/convergence-matrix.sh cmp               # 对拍：输出 (ws,rl,id,moon) 差值表
 # 纪律：每条子命令带超时；完成打标记；结束查进程归零。
 set -u
-GAME=/Users/vinlic/Project/GLM/SandboxWorld/game
+GAME="$(cd "$(dirname "$0")/.." && pwd)"   # ★C档可移植:仓库根(game/)相对
 VSRV=/tmp/vserver
-ORACLE_RUNFILE_GLOB="/Users/vinlic/Library/Application Support/dotnet/runfile/caves-oracle-*/bin/debug/caves-oracle"
+ORACLE_RUNFILE_GLOB="$HOME/Library/Application Support/dotnet/runfile/caves-oracle-*/bin/debug/caves-oracle"   # ★C档可移植:本机对拍 oracle 面
 TIMEOUT_WRAP() { local cmd=$1 limit=$2; ( eval "$cmd" & p=$!; sleep "$limit"; kill $p 2>/dev/null ) & wait; }
 
 cmd=${1:-cmp}
@@ -24,7 +24,7 @@ if [ "$cmd" = gen ]; then
     fi
     # ② oracle 全链（金标旁路输出到 /tmp；用 runfile 二进制避免重建）
     if [ ! -s "$VSRV/oracle_$seed.txt" ]; then
-      ORACLE=$(ls -td /Users/vinlic/Library/Application\ Support/dotnet/runfile/caves-oracle-* 2>/dev/null | head -1)/bin/debug/caves-oracle
+      ORACLE=$(ls -td "$HOME/Library/Application Support"/dotnet/runfile/caves-oracle-* 2>/dev/null | head -1)/bin/debug/caves-oracle
       print "GEN oracle $seed ..."
       ( "$ORACLE" "$seed" 0 "$VSRV/chain_$seed.json" > "$VSRV/oracle_$seed.txt" 2>&1 & p=$!; sleep 400; kill $p 2>/dev/null ) & wait
     fi

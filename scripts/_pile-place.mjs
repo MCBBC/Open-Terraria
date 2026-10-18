@@ -2,9 +2,10 @@
 // 流程:①在合成平地上找到工作台可放锚点 A 与其点击格 C
 //      ②把障碍(tileCut 杂草/BreakableWhenPlacing 小石块/石块对照)放进 A 占位矩形内,
 //        用同一点击格 C 单发放置——石块必须被拒,杂草/小石块必须清除并放成。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

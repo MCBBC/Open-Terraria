@@ -7,12 +7,13 @@
 //   ③ 行为面:aura 区域 clip 截图 ×2 帧字节比对（相同=区域零动画=用户症状复现）
 //   ④ 伤害面:敌 hp 递减（隔空伤害确认在跳）
 // 运行: SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs --timeout=600000 scripts/_aura-runtime-recheck.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { pump } from '../tools/probe/lib/pump.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(1).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(1).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errs = [];

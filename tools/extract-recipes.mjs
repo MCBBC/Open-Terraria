@@ -12,7 +12,7 @@
 //   单独解析（AddStandardFurnitureSetRecipes 等 22 件套模板逐参展开）。
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457）。★BJ261 era guard①：白名单
 // {1457,1458}（Recipe.cs/ItemID.cs/Item.cs 读域 1457↔1458 逐字节全等,md5 实证;1456
 // 锚集随 BJ261 编码面重建退役——显式 1456 拒+指引,防旧基线重放洗 1457 终值）。

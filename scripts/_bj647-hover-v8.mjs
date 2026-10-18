@@ -1,8 +1,9 @@
 // ★BJ647-B v8 终局：日出时钟翻转 + 逐帧 diff 序列——抓瞬态暗帧的精确 tick 与区域。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 1 } });
 const page = await browser.newPage();
 const errors = [];

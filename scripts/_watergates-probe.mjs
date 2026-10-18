@@ -1,11 +1,12 @@
 // 浸润带新三门终验(2026-08-19):挡水族(玻璃54 平面不透带)/格栅546透带/
 // 土块对照。场景=地上悬空平台+日光(探针四坑规约:相机实时投影/强制白天)。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=240000 scripts/_watergates-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/watergates-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/watergates-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

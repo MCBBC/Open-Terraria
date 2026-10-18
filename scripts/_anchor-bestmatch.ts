@@ -1,4 +1,5 @@
 // ★628c:全锚点最优匹配——每个探针快照 vs 本仓全 pass 历史态,报最小逐格差
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateWorld } from '../src/world/gen/WorldGen';
@@ -11,7 +12,7 @@ for (let i = 1; i < TILE_DEFS.length; i++) {
   SHEET_OF[i] = d?.vanilla ? d.vanilla.sheet : 0xfff0;
 }
 
-const snapDir = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const snapDir = needInput(TMOD_LOGS);
 const snaps: Array<{ name: string; type: Uint16Array }> = [];
 for (const f of readdirSync(snapDir).sort()) {
   if (!f.startsWith('genprobe-snap-') || !f.endsWith('.bin')) continue;

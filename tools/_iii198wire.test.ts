@@ -11,7 +11,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 const W = 4200, H = 1200;
 
 it('iii198 wire compare', () => {
-  const buf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const buf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const wld = parseWld(new Uint8Array(buf.buffer, buf.byteOffset));
   const tw = wld.tilesWide;
   let id137 = -1;

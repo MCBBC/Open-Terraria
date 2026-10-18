@@ -1,6 +1,7 @@
 // 竖井剖面 v2(数组版,行主序已验证) + 行为日志 y(t) 分段
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const d = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/map-天真的钴最高点 (4).json', 'utf8'));
+const d = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json')), 'utf8'));
 const W = d.header.width, H = d.header.height;
 console.log('groundLevel:', d.header.groundLevel, 'rockLevel:', d.header.rockLevel, 'spawn:', JSON.stringify(d.header.spawn));
 const bytes = Buffer.from(d.tiles, 'base64');

@@ -1,7 +1,8 @@
 // EoL xray2 v2: 巨帧窗内拆解 —— per-sample 时间线(Profile.startTime+timeDeltas 累积)×JS调用方父链(prof5) + prof8 互证 + X/FunctionCall 聚合
 // run: node --max-old-space-size=8192 scripts/_eol-xray2.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 const MAIN_TID = 25363119, MPID = 97833;

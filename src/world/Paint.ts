@@ -1,6 +1,6 @@
 // 油漆（Paint）系统——1.4.5.6 反编译源码 1:1 移植。
 //
-// 权威源码对照（行号 = /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/）：
+// 权威源码对照（行号 = 仓库外基准树(game/ 的兄弟目录)Terarria1456/）：
 //   - PaintID 全表            Terraria.ID/PaintID.cs:5-69
 //   - paintColor（id→RGB）    Terraria/WorldGen.cs:43948-44061
 //   - coatingColor（涂层色）  Terraria/WorldGen.cs:44063-44071

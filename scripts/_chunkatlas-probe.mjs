@@ -7,11 +7,12 @@
 //    新建画布数应 ≈ 0(旧结构 = 每帧 8 张,数百张量级)
 //  ③ 页数上限:pageCount 随移动有界(≤ ceil(活动chunk/16)+1)
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_chunkatlas-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };

@@ -1,8 +1,9 @@
 // B2 终局裁决·trace 深提取:主线程 rAF 链+FunctionCall+真帧锚+GC,输出 /tmp/b2final-data.json
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import readline from 'node:readline';
 
-const TRACE = '/Users/vinlic/Downloads/Trace-20261006T033001.json';
+const TRACE = needInput(join(DOWNLOADS, 'Trace-20261006T033001.json'));
 const MAIN = { pid: 42978, tid: 30326041 };
 const COMP = { pid: 42978, tid: 30326053 };
 

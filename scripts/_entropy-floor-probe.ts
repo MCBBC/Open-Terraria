@@ -1,6 +1,7 @@
 // ★692:真链熵地板测量——旧金标轮终档 vs 统一轮终档,abyss 区(x≥3860)逐格 diff。
 // 若 ≈30k=我方重放残差 34,552≈熵地板(真输出=熵样,逐位不可追);
 // 若 ≈4k=仍有实现差,岛带二分继续。
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 
@@ -9,7 +10,7 @@ function tilesOf(path: string) {
   return w as unknown as { tiles: { type: Uint16Array; active: Uint8Array }; };
 }
 
-const A = tilesOf('/Users/vinlic/Project/GLM/SandboxWorld/game/mods/calamity/golden-oracle/golden-calamity.wld');
+const A = tilesOf(join(REPO_ROOT, 'mods/calamity/golden-oracle/golden-calamity.wld'));
 const B = tilesOf('/tmp/tml-golden/probe-consolidated/golden-calamity.wld');
 const W = 4200, H = 1200;
 const ta = A.tiles.type, aa = A.tiles.active, tb = B.tiles.type, ab = B.tiles.active;

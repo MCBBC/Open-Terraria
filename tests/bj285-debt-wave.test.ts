@@ -12,7 +12,7 @@
 //   ③ C3 Game.ts window 直读守卫普查（BJ259 连坐根治）——node-safe 全数标注+守卫。
 //   ④ 702 LifeFruitReplica 放置通路定谳（S7）。
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -28,6 +28,9 @@ import { createDecipheriv } from 'node:crypto';
 import type { GameHooks } from '../src/entities/types';
 import { languageManager } from '../src/i18n/LanguageManager';
 import { newWiresRadialState } from '../src/stats/wiresRadial';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
@@ -37,7 +40,7 @@ languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json',
 //    随迁左键链驱动,消耗+返还+解锁断言面（BJ285-② 原判）不变。右键臂已整撤
 //    （持套件右键门/拉杆误耗+格交互劫持面,判别锁=tests/bj690-minecart-upgrade-kit.test.ts）。
 // ================================================================
-describe('BJ285-② 5289 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45587-45599;★BJ690 域迁左键）', () => {
+describe.skipIf(EXT_MISSING)('BJ285-② 5289 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45587-45599;★BJ690 域迁左键）', () => {
   /** BJ568 stubGame 同构（updateUse 可驱动最小 Game 桩）——左键使用链 */
   function makeKitHarness(kits: number) {
     const kitId = ITEM_BY_KEY['vi_5289_minecart_upgrade_kit'];
@@ -102,7 +105,7 @@ describe('BJ285-② 5289 矿车升级套件（ItemCheck_UseMinecartPowerUp Playe
   });
 });
 
-describe('BJ285-② 5326 匠师面包（ItemCheck_UseArtisanLoaf Player.cs:45601-45609 + Chest.cs:2953）', () => {
+describe.skipIf(EXT_MISSING)('BJ285-② 5326 匠师面包（ItemCheck_UseArtisanLoaf Player.cs:45601-45609 + Chest.cs:2953）', () => {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const shopStockFor = (Game.prototype as any).shopStockFor as
     (this: any, npc: { npcKey: string; vanillaId: number }) => Array<[number, number]>;
@@ -176,7 +179,7 @@ describe('BJ285-② 5326 匠师面包（ItemCheck_UseArtisanLoaf Player.cs:45601
 // ================================================================
 // ① BJ232 死亡段割面批量修形（S7）——命中即亡弹死亡拍照割
 // ================================================================
-describe('BJ285-① BJ232 死亡段割面（CutTiles :12517 先于 Damage_PVE :12523 批量前置）', () => {
+describe.skipIf(EXT_MISSING)('BJ285-① BJ232 死亡段割面（CutTiles :12517 先于 Damage_PVE :12523 批量前置）', () => {
   const makeGame = (log: string[]) => {
     const victim = {
       x: 400, y: 400, w: 24, h: 42, id: 777, dead: false, vanillaId: 21,
@@ -280,7 +283,7 @@ describe('BJ285-① BJ232 死亡段割面（CutTiles :12517 先于 Damage_PVE :1
 // ================================================================
 // ③ C3 window 直读守卫普查（BJ259 连坐根治）
 // ================================================================
-describe('BJ285-③ C3 Game.ts window 直读守卫普查（node 环境）', () => {
+describe.skipIf(EXT_MISSING)('BJ285-③ C3 Game.ts window 直读守卫普查（node 环境）', () => {
   it('node 环境 import Game 模块冒烟（模块求值+原型面零 window 触碰）', () => {
     expect(typeof Game).toBe('function');
     expect(typeof (Game.prototype as unknown as Record<string, unknown>).fixedUpdate).toBe('function');
@@ -310,7 +313,7 @@ describe('BJ285-③ C3 Game.ts window 直读守卫普查（node 环境）', () =
 // ================================================================
 // ④ 702 LifeFruitReplica 破坏面归队（S7 定谳：原版无放置面→备案;破坏面落刀）
 // ================================================================
-describe('BJ285-④ 702 LifeFruitReplica（KillTile 尾段 WorldGen.cs:48443-48450）', () => {
+describe.skipIf(EXT_MISSING)('BJ285-④ 702 LifeFruitReplica（KillTile 尾段 WorldGen.cs:48443-48450）', () => {
   function makeTileHarness() {
     const w = new World(80, 80, 30, 'bj285-t702');
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {

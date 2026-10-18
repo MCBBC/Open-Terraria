@@ -1,8 +1,9 @@
 // _stairab:用户报告3 标注构型(湖岸阶梯+水线+藤蔓)1:1 复刻,warp on/off 逐格对拍。
 // 构型取自 debug-report3 tiles dump(2342-2360 × 254-265)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -62,7 +63,7 @@ console.log('site:', JSON.stringify(site), 'ids:', JSON.stringify(ids));
 // 用户构型表(RLE 解码自报告 dump;每格 [sheet, wall, liquid, half, slope] — sheet: -1=air, 2=grass, 52=vine, 0=空无墙)
 const CONFIG = await (async () => {
   const fs = await import('node:fs');
-  const raw = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/debug-report-浮夸的羡慕顶峰-2026-08-21T04-50-22-095Z.json', 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'debug-report-浮夸的羡慕顶峰-2026-08-21T04-50-22-095Z.json')), 'utf8'));
   const a = raw.tiles.areaCamera;
   const X0 = a.x0, Y0 = a.y0;
   const grid = [];

@@ -16,6 +16,18 @@ const BITRATE = '96k';          // Opus 主格式(游戏 SFX 下≈透明)
 const MP3_BITRATE = '96k';      // 回退格式(Safari 全兼容)
 
 mkdirSync(OUT, { recursive: true });
+// ★缺链卫兵(2026-10-18 用户令「clone 后全链可跑、仅转码步跳过」):
+//   assets-src/(本机软链→仓库外 wav 母带,gitignore 不入库)在他人 clone 后不存在——
+//   旧 readdirSync 直接 ENOENT 炸断 build:release && 链。改为:警告+exit 0 优雅跳过,
+//   发布链继续(public/sounds/ 的 863 个已转码 .opus 成品随 git 分发,游戏音效完整),
+//   仅失去「改 wav 母带后重转码」能力(需要时自备母带重建 ../assets-src/sounds/)。
+if (!existsSync(SRC)) {
+  console.warn(
+    '[encode-sounds] ⚠ 音源母带缺失(' + SRC + ')——转码步跳过。\n' +
+    '  · 本机形态:game/assets-src 软链 → 仓库外 wav 母带(不入库,见 ASSETS.md/回退备案)\n' +
+    '  · 影响:仅无法重转码;public/sounds/ 的既有 .opus/.mp3 成品不受影响,构建链继续');
+  process.exit(0);
+}
 const wavs = readdirSync(SRC).filter((f) => f.endsWith('.wav'));
 let done = 0, skipped = 0, failed = 0;
 const t0 = Date.now();

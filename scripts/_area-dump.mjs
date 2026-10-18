@@ -1,7 +1,8 @@
 // 案发区高精度剖面 dump:type/slope/half/wall/platform — (594,328)周边
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
-const path='/Users/vinlic/Downloads/map-Starter_World (23).json';
+const path=needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new'});
 const page=await browser.newPage();
 page.on('pageerror',e=>console.log('ERR:',e.message));

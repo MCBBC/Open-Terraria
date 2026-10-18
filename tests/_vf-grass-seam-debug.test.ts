@@ -1,7 +1,8 @@
 // 草↔泥边界漏缝诊断(用户标注 3996-3998×456/457,草上有树):离线帧对比。
 // 链(vanillaFrameFor) vs 旧路径(autoFrameAt),布局来自真 wld(全量,含边界外上下文)。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -9,11 +10,14 @@ import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant } from
 import { autoFrameAt } from '../src/render/VanillaTiler';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
 const FI_JSON = JSON.parse(readFileSync(join(dirname(fileURLToPath(new URL(import.meta.url))), 'golden/frameImportant.json'), 'utf8')) as number[];
 
-describe('草/泥边界漏缝诊断(用户 6 标注格)', () => {
+describe.skipIf(localFixtureMissing('ftw-v2.wld') || EXT_MISSING)('草/泥边界漏缝诊断(用户 6 标注格)', () => {
   it('链帧 vs 旧帧 @ (3994-4002, 454-460)', () => {
     // vanilla solid 表
     const main = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
@@ -27,9 +31,8 @@ describe('草/泥边界漏缝诊断(用户 6 标注格)', () => {
     setVanillaFrameImportant(fiArr);
 
     // wld → 内部 id store(运行时同域)
-    const wldBuf = new Uint8Array(readFileSync('/Users/vinlic/Downloads/FTW V2.wld'));
-    const wld = parseWld(readFileSync('/Users/vinlic/Downloads/FTW V2.wld').slice(-1) && new Uint8Array(readFileSync('/Users/vinlic/Downloads/FTW V2.wld')));
-    void wldBuf;
+    // ★C档收编:原 ~/Downloads/FTW V2.wld(旧双读行恒走右臂,合并为一行收编读)
+    const wld = parseWld(new Uint8Array(readLocalFixture('ftw-v2.wld')));
     const v2i = new Map<number, number>();
     for (let i = 0; i < TILE_DEFS.length; i++) {
       const v = TILE_DEFS[i]?.vanilla;

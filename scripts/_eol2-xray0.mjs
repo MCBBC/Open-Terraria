@@ -1,7 +1,8 @@
 // EoL2 xray0: trace 结构普查 + 帧距分布 + 慢帧时间轴(>25ms) + rAF 相位对齐
 // run: node --max-old-space-size=8192 scripts/_eol2-xray0.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 console.log('total events:', evs.length);

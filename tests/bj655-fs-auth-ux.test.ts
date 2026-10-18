@@ -10,8 +10,11 @@
 // 锁五面：A 幽灵链静默;B 读档链手势授权;C 授予后恢复+备份激活（行为面,真语义 mock
 // 句柄）;D 拒绝/忽略/SecurityError 静默+设置页状态机;E 退役面（源+l10n custom+产物）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ---- KvStore 值通道 mock（同 bj614 夹具形状） ----
 const kvMock = vi.hoisted(() => ({
@@ -103,7 +106,7 @@ const codeOf = (p: string): string =>
 // =====================================================================
 // A+B：mainFlow 结构锁（幽灵链静默 / 读档链手势授权 / toast 退役）
 // =====================================================================
-describe('BJ655 A组：幽灵/装配恢复链 prompt 静默锁（零 toast）', () => {
+describe.skipIf(EXT_MISSING)('BJ655 A组：幽灵/装配恢复链 prompt 静默锁（零 toast）', () => {
   it('A1 fsBackupRestoreMiss prompt 静默：会话提示状态机+auth toast 调用面整体退役', () => {
     const s = codeOf('../src/mainFlow.ts');
     // 状态机+toast 调用面零残留（变异一发：回插 fsBackupAuthHintFire → 本组+退役面恰红）
@@ -127,7 +130,7 @@ describe('BJ655 A组：幽灵/装配恢复链 prompt 静默锁（零 toast）', 
   });
 });
 
-describe('BJ655 B组：读档链手势授权锁（prompt=点击链内 requestPermission+重跑择源）', () => {
+describe.skipIf(EXT_MISSING)('BJ655 B组：读档链手势授权锁（prompt=点击链内 requestPermission+重跑择源）', () => {
   it('B1 手势授权块在位：missing∧prompt ∧ await fsBackupRequestPermission → 重跑 resolveLoadText', () => {
     const s = codeOf('../src/mainFlow.ts');
     expect(s).toContain('let resolved = await resolveLoadText(key, () => lsGetSafe(key));');
@@ -149,7 +152,7 @@ describe('BJ655 B组：读档链手势授权锁（prompt=点击链内 requestPer
 // =====================================================================
 // C+D：行为面（FsBackup 模块级,真语义 mock 句柄——授予/拒绝/忽略/无手势）
 // =====================================================================
-describe('BJ655 C组：授予后恢复+备份全链激活（读档手势授权的连锁面）', () => {
+describe.skipIf(EXT_MISSING)('BJ655 C组：授予后恢复+备份全链激活（读档手势授权的连锁面）', () => {
   it('C1 prompt → 手势授权 granted → restoreFromBackup 命中写回 IDB + 快照链复活', async () => {
     const dir: FakeAuthDir = fakeAuthDirHandle('MyBackups', {
       perm: 'prompt',
@@ -180,7 +183,7 @@ describe('BJ655 C组：授予后恢复+备份全链激活（读档手势授权�
   });
 });
 
-describe('BJ655 D组：未授/拒绝/无手势 → 静默+设置页状态机（零 toast 面）', () => {
+describe.skipIf(EXT_MISSING)('BJ655 D组：未授/拒绝/无手势 → 静默+设置页状态机（零 toast 面）', () => {
   it('D1 dismiss（prompt 维持）→ false+needs-permission;denied → false+broken', async () => {
     const dir: FakeAuthDir = fakeAuthDirHandle('B', { perm: 'prompt', requestBehavior: 'dismiss', files: {} });
     kvMock.values.set('sandboxworld.fsBackup.dir', dir);
@@ -219,7 +222,7 @@ describe('BJ655 D组：未授/拒绝/无手势 → 静默+设置页状态机（�
 // =====================================================================
 // E：FsBackupNeedAuth toast 退役面（源/l10n custom/构建产物三账）
 // =====================================================================
-describe('BJ655 E组：FsBackupNeedAuth toast 退役面', () => {
+describe.skipIf(EXT_MISSING)('BJ655 E组：FsBackupNeedAuth toast 退役面', () => {
   it('E1 mainFlow 源零引用;设置页授权常驻面（状态行+重授权按钮）仍在', () => {
     expect(codeOf('../src/mainFlow.ts')).not.toContain('FsBackupNeedAuth');
     const st = codeOf('../src/ui/Settings.ts');

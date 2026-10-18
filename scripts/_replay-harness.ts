@@ -2,6 +2,7 @@
 // 输入=探针 pre 快照(C# id 空间)→映射到本仓内部 id 空间→跑我方 pass fn→对拍 post 快照
 // 判卷域=本 pass 的 mod tile 增量(逐格位置+计数);流相位 N 走可观测反推(首掷二分)
 // 用法:node /tmp/replay-harness.mjs <preSnap.gz> <postSnap.gz> <passName>
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -21,7 +22,7 @@ const { TILE_DEFS, TILE_BY_KEY, registerModTile } = await import('../src/data/ti
 }
 
 // ---- 探针快照读入(x 主序转行主序;gzip) ----
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 function loadSnap(pattern: string): { type: Uint16Array; wall: Uint16Array } {
   const f = readdirSync(LOGS).find((x) => x.includes(pattern) && x.endsWith('.bin.gz'));
   if (!f) throw new Error(`快照未找到: ${pattern}`);

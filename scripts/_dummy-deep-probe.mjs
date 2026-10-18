@@ -1,9 +1,10 @@
 // 假人渲染深探:vframeAt(378) 命中率 + Tiles_378 drawImage 次数/落点。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (27).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (27).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('pageerror:', e.message));
@@ -45,5 +46,5 @@ const r = await page.evaluate(async () => {
   return stat;
 });
 console.log('深补统计:', JSON.stringify(r));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/dummy-deep.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/dummy-deep.png') });
 await browser.close();

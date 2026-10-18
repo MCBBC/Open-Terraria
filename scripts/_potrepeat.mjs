@@ -1,9 +1,10 @@
 // 陶罐烘焙非确定性证明:同一会话内,存储帧不变,强制重建 N 次 → chunk 内容应稳定
 // 若变化 = 烘焙非确定性实锤(并记录图像加载状态)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 
-const SAVE_TEXT = readFileSync('/Users/vinlic/Downloads/map-12345世界 (2).json', 'utf8');
+const SAVE_TEXT = readFileSync(needInput(join(DOWNLOADS, 'map-12345世界 (2).json')), 'utf8');
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 600000,

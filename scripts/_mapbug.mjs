@@ -1,7 +1,8 @@
 // Starter World (6).json 载入诊断：①卡顿（分段计时）②向导瞬移 ③Golfer 贴图条（帧高）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (6).json'));
 const json = fs.readFileSync(MAP, 'utf8');
 
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });

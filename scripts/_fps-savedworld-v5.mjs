@@ -16,7 +16,7 @@ await page.goto(URL + '/?v5=' + Date.now(), { waitUntil: 'domcontentloaded', tim
 console.log('==============================================================');
 console.log('请在弹出的浏览器窗口中手动操作：');
 console.log('  1. 标题 → 单人 → （选/新建角色）→ 世界列表');
-console.log('  2. 点「导入世界」选择 /Users/vinlic/Downloads/map-Starter_World (38).json');
+console.log('  2. 点「导入世界」选择 ~/Downloads/map-Starter_World (38).json');
 console.log('  3. 进入 Starter World');
 console.log('探针检测到进世界后自动开始采样（最多等 10 分钟）');
 console.log('==============================================================');

@@ -16,8 +16,11 @@
 //  H. 接线结构锚（mainFlow 四回调接线+loadFromKey 恢复+幽灵联动;WorldStore/CharacterStore
 //     钩子;Settings 开关/兼容门/重授权）+ l10n 双语言键全量（BJ371-403 判例:全语言闸）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ---- KvStore 值通道 mock（结构化克隆通道 kvPutValue/kvGetUnknown + kvDelete/kvSet;
 //      其余导出透传 actual——本模块不消费） ----
@@ -128,7 +131,7 @@ function freshMod(): Promise<typeof import('../src/save/FsBackup')> {
 
 const FROZEN = new Date(2026, 9, 10, 12, 34, 56);   // 20261010_123456
 
-describe('BJ614 A组：兼容门+开关流', () => {
+describe.skipIf(EXT_MISSING)('BJ614 A组：兼容门+开关流', () => {
   it('无 showDirectoryPicker（Firefox/Safari 形态）→ supported=false+状态 unsupported（开关禁用依据）', async () => {
     delete (globalThis as { showDirectoryPicker?: unknown }).showDirectoryPicker;
     const mod = await freshMod();
@@ -180,7 +183,7 @@ describe('BJ614 A组：兼容门+开关流', () => {
   });
 });
 
-describe('BJ614 B组：句柄 IDB round-trip + 竞态守卫', () => {
+describe.skipIf(EXT_MISSING)('BJ614 B组：句柄 IDB round-trip + 竞态守卫', () => {
   it('round-trip：kvGetUnknown 读回句柄 → 状态按 queryPermission 三态落（granted/prompt/denied）', async () => {
     for (const [perm, want] of [['granted', 'ready'], ['prompt', 'needs-permission'], ['denied', 'broken']] as const) {
       vi.resetModules();
@@ -210,7 +213,7 @@ describe('BJ614 B组：句柄 IDB round-trip + 竞态守卫', () => {
   });
 });
 
-describe('BJ614 C组：自动写链+轮转+index 覆盖档', () => {
+describe.skipIf(EXT_MISSING)('BJ614 C组：自动写链+轮转+index 覆盖档', () => {
   it('启用+granted → write spy 带文件名格式（{名}_{id}_YYYYMMDD_HHmmss.json）+内容全量', async () => {
     const dir = fakeDirHandle('MyBackups');
     kvMock.values.set('sandboxworld.fsBackup.dir', dir);
@@ -275,7 +278,7 @@ describe('BJ614 C组：自动写链+轮转+index 覆盖档', () => {
   });
 });
 
-describe('BJ614 D组：prompt 态静默跳过', () => {
+describe.skipIf(EXT_MISSING)('BJ614 D组：prompt 态静默跳过', () => {
   it('queryPermission=prompt → 不写目录+状态 needs-permission+失败链不计（跨会话常态,不强弹）', async () => {
     const dir = fakeDirHandle('MyBackups', { perm: 'prompt' });
     kvMock.values.set('sandboxworld.fsBackup.dir', dir);
@@ -300,7 +303,7 @@ describe('BJ614 D组：prompt 态静默跳过', () => {
   });
 });
 
-describe('BJ614 E组：失败降级+连败一次性提示', () => {
+describe.skipIf(EXT_MISSING)('BJ614 E组：失败降级+连败一次性提示', () => {
   it('写失败 → 状态 broken+连续 3 败一次性 toast（同一连败段不重报;成功重计）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const toastSpy = vi.fn();
@@ -346,7 +349,7 @@ describe('BJ614 E组：失败降级+连败一次性提示', () => {
   });
 });
 
-describe('BJ614 F组：纯函数（文件名/解析消歧/轮转核/键映射）', () => {
+describe.skipIf(EXT_MISSING)('BJ614 F组：纯函数（文件名/解析消歧/轮转核/键映射）', () => {
   it('buildFsBackupFilename：消毒+空名回退+三类中缀', async () => {
     const mod = await freshMod();
     expect(mod.buildFsBackupFilename('world', 'My World', 7, FROZEN)).toBe('My_World_7_20261010_123456.json');
@@ -402,7 +405,7 @@ describe('BJ614 F组：纯函数（文件名/解析消歧/轮转核/键映射）
   });
 });
 
-describe('BJ614 G组：读档自愈恢复链', () => {
+describe.skipIf(EXT_MISSING)('BJ614 G组：读档自愈恢复链', () => {
   it('IDB miss+备份有 → 最新档读出+kvSet 写回 IDB+返回文本（正常链续跑素材）', async () => {
     const dir = fakeDirHandle('MyBackups', {
       files: {
@@ -497,7 +500,7 @@ describe('BJ614 G组：读档自愈恢复链', () => {
   });
 });
 
-describe('BJ614 H组：接线结构锚+l10n 双语言', () => {
+describe.skipIf(EXT_MISSING)('BJ614 H组：接线结构锚+l10n 双语言', () => {
   const codeOf = (p: string) => readFileSync(resolve(__dirname, p), 'utf8').replace(/^\s*\/\/.*$/gm, '');
 
   it('mainFlow：四回调接线/连败 toast/恢复链注入/loadFromKey 恢复/幽灵联动在位', () => {

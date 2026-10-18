@@ -1,9 +1,10 @@
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox']});
 const page = await browser.newPage();
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
-const json = readFileSync('/Users/vinlic/Downloads/map-不负责任的女妖啤酒厂.json', 'utf8');
+const json = readFileSync(needInput(join(DOWNLOADS, 'map-不负责任的女妖啤酒厂.json')), 'utf8');
 const out = await page.evaluate(async ([j]) => {
   const { loadSave } = await import('/src/save/SaveFile.ts');
   const tiles = await import('/src/data/tiles.ts');

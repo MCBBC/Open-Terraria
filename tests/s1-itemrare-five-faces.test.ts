@@ -27,7 +27,7 @@
 //   fail-loud;红蓝 D2 潜伏面「改尾式全工具链不可见」就此闭合）+⑪脚本一发（解析值≡定谳
 //   钉值对拍漂移 fail-loud,证明机械解析层活体）。源变异走沙箱副本（v1 判例）,原树零接触。
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -36,11 +36,18 @@ import { realpathSync } from 'node:fs';
 import rareJson from '../src/data/vanilla-itemrare.json';
 import valueJson from '../src/data/vanilla-itemvalue.json';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1405', 'Terarria1456', 'Terarria1457', 'Terarria1458'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const RARE = rareJson as Record<string, number>;
 const VALUE = valueJson as Record<string, number>;
 const ROOT = join(dirname(__dirname), '..');
 const SCRIPT = join(dirname(__dirname), 'tools', 'extract-itemrare.mjs');
+// ★C档可移植:extract-itemrare ROOT 已转 import.meta 相对——mutant 置 OS tmp 须前置重锚(era-guard ④ 习语)
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (s: string) => s.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(ROOT)};`);
+
 const SRC = () => readFileSync(SCRIPT, 'utf8');
 const TMP = realpathSync(tmpdir());
 const ITEM_CS = join(ROOT, 'Terarria1457', 'Terraria', 'Item.cs');
@@ -122,7 +129,7 @@ const BAIT_RARE: Record<number, number> = {
 const BAIT_KEEP_ABSENT = [1994, 1998, 2006, 2157];
 const BAIT_KEEP_CASE0 = [5132];
 
-describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）', () => {
+describe.skipIf(EXT_MISSING)('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）', () => {
   it('①食物尾式:86 件逐件=钉表（尾式覆写 case SSV 死码;4022=6/1912=0/4010=0）', () => {
     const ids = Object.keys(FOOD_RARE).map(Number).sort((a, b) => a - b);
     expect(ids.length).toBe(86);
@@ -230,7 +237,7 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     const mutant = join(TMP, `s1-mutant-${createHash('md5').update(String(Math.random())).digest('hex').slice(0, 8)}.mjs`);
     readFileSync(SCRIPT); // touch
     const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-    writeFileSync(mutant, srcMutation(SRC()));
+    writeFileSync(mutant, srcMutation(relocateRoot(SRC())));
     const r = spawnSync('node', [mutant, '--dump'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_ITEM_VER: '1457' },
@@ -366,7 +373,7 @@ describe('S1 五段方法级 rare/value 面（extract-itemrare 五段续刀）',
     writeFileSync(itemCopy, itemMutation(readFileSync(ITEM_CS, 'utf8')));
     writeFileSync(itemidCopy, readFileSync(join(ROOT, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8'));
     const mutant = join(dir, 'extract-mutant.mjs');
-    const mutatedScript = 'const ITEM_COPY = ' + JSON.stringify(itemCopy) + ';\nconst ITEMID_COPY = ' + JSON.stringify(itemidCopy) + ';\n' + SRC()
+    const mutatedScript = 'const ITEM_COPY = ' + JSON.stringify(itemCopy) + ';\nconst ITEMID_COPY = ' + JSON.stringify(itemidCopy) + ';\n' + relocateRoot(SRC())
       .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8')", "readFileSync(ITEM_COPY, 'utf8')")
       .replace("readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria.ID/ItemID.cs`, 'utf8')", "readFileSync(ITEMID_COPY, 'utf8')");
     writeFileSync(mutant, mutatedScript);

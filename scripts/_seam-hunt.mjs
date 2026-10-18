@@ -1,10 +1,11 @@
 // ★一次性：动态物件发丝缝复现探针 v2 —— 注入用户存档(跳过损坏的世界生成),
 // 相机对准机器区,多缩放 × 双动画时刻截图 + 水平行缝能量扫描
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, copyFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5207';
-const SAVE_SRC = process.env.SW_SAVE ?? '/Users/vinlic/Downloads/Starter_World-20260831-2315.sbw.json';
+const SAVE_SRC = process.env.SW_SAVE ?? needInput(join(DOWNLOADS, 'Starter_World-20260831-2315.sbw.json'));
 // F5 报告(含 meta.render 渲染快照)——提供时按其重建相机/视口/动画时钟
 const LOG_SRC = process.env.SW_LOG ?? '';
 let renderMeta = null;

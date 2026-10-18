@@ -1,18 +1,19 @@
 // ★一次性诊断 v9：真实存档 vs 合成平台坡 差异定位
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { World } from '../src/world/World';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../src/core/constants';
 
-const SAVE = '/Users/vinlic/Downloads/Starter_World-20260831-2315.sbw.json';
+const SAVE = 'starter-sbw-20260831.json';   // ★C档收编:原 ~/Downloads/Starter_World-20260831-2315.sbw.json
 const W = 60, H = 40, BASE = 22;
 type BodyT = Parameters<typeof moveAndCollide>[0];
 
 function walkReal(): void {
-  const { world } = loadSave(readFileSync(SAVE, 'utf8'));
+  const { world } = loadSave(readLocalFixtureText(SAVE));
   const b = {
     x: 3196 * TILE, y: 389 * TILE - 42,
     w: 20, h: 42,
@@ -60,7 +61,7 @@ function walkSynth(pillarEveryCol: boolean): void {
   console.log(`[合成${pillarEveryCol ? '每列柱' : '稀柱'}] 空帧 ${air}/90 终x=${(b.x / TILE).toFixed(2)} 空@${marks.slice(0, 8).join(' ')}`);
 }
 
-describe('v9 隔离', () => {
+describe.skipIf(localFixtureMissing(SAVE))('v9 隔离', () => {
   it('三路对照', () => {
     walkReal();
     walkSynth(false);

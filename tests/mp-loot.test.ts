@@ -21,6 +21,10 @@
 //   × 单人/多人）+ module14 定向中继（房主门/合帧/伪造拒绝）+ msg16 尾段
 //   mana/luck 中继镜像。全程 mock 传输层（journey-mp/mp-sync-pack 同款）。
 // ============================================================================
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg, NetModule } from '../src/net/protocol';
 import {
@@ -108,7 +112,7 @@ const wsSent = (c: unknown) => (c as unknown as { ws: { sent: Uint8Array[] } }).
 // ============================================================================
 // ① 发色剂联机同步（msg4 PlayerInfo hairDye byte 的 JSON 化等价）
 // ============================================================================
-describe('发色剂联机（msg4 hairDye → SyncPlayer 外观 JSON）', () => {
+describe.skipIf(EXT_MISSING)('发色剂联机（msg4 hairDye → SyncPlayer 外观 JSON）', () => {
   it('PlayerSlot 分配时刻：上行 SyncPlayer 外观 JSON 并入 hairDye（NetMessage.cs:142）', () => {
     const net = mkNet({}, { appearance: { name: '甲', hair: 5 }, hairDye: 7 });
     feedNet(net, new NetWriter(Msg.PlayerSlot).u8(0).str('sess-1').finish());
@@ -186,7 +190,7 @@ function lootCtx(over: Partial<NpcDropCtx> = {}): NpcDropCtx {
   };
 }
 
-describe('Boss 袋族 per-client（DropLocalPerClientAndResetsNPCMoneyTo0）', () => {
+describe.skipIf(EXT_MISSING)('Boss 袋族 per-client（DropLocalPerClientAndResetsNPCMoneyTo0）', () => {
   it('MP 结算端：bossBag 标 scope=local 单条（单掷——各交互端同结果各得一份）+ 钱币清零', () => {
     const ctx = lootCtx({ lootPlayers: [
       { slot: 0, interacting: true }, { slot: 1, interacting: true }, { slot: 2, interacting: false },
@@ -209,7 +213,7 @@ describe('Boss 袋族 per-client（DropLocalPerClientAndResetsNPCMoneyTo0）', (
   });
 });
 
-describe('大师宠物/遗物族 perPlayer（DropPerPlayerOnThePlayer）', () => {
+describe.skipIf(EXT_MISSING)('大师宠物/遗物族 perPlayer（DropPerPlayerOnThePlayer）', () => {
   it('MP 结算端：逐交互玩家独立掷（槽序,CommonCode.cs:71-76）——未交互端永不中', () => {
     let slot0Only = 0, slot1Only = 0, both = 0, neither = 0;
     for (let seed = 0; seed < 400; seed++) {
@@ -252,7 +256,7 @@ describe('大师宠物/遗物族 perPlayer（DropPerPlayerOnThePlayer）', () =>
   });
 });
 
-describe('module14 定向中继（msg90 InstancedItem 语义）', () => {
+describe.skipIf(EXT_MISSING)('module14 定向中继（msg90 InstancedItem 语义）', () => {
   it('房主上行 → 按 targetSlot 定向（同目标合帧）,发送端不回环,非目标端不可见', async () => {
     const { room, mk } = await mkRoom();
     const host = mk(0, true);
@@ -321,7 +325,7 @@ describe('module14 定向中继（msg90 InstancedItem 语义）', () => {
   });
 });
 
-describe('msg16 尾段 luck/mana 镜像（closestPlayer 掉落结算数据源）', () => {
+describe.skipIf(EXT_MISSING)('msg16 尾段 luck/mana 镜像（closestPlayer 掉落结算数据源）', () => {
   it('客户端 → Room 中继保尾 → 对端 RemotePlayerState.luck/mana 落位;旧端无尾段保持缺省', async () => {    const { room, mk } = await mkRoom();
     const g1 = mk(1);
     const g2 = mk(2);
@@ -386,7 +390,7 @@ describe('msg16 尾段 luck/mana 镜像（closestPlayer 掉落结算数据源）
   });
 });
 
-describe('Enemy 死亡结算整合（per-client 发放 + closest 注入）', () => {
+describe.skipIf(EXT_MISSING)('Enemy 死亡结算整合（per-client 发放 + closest 注入）', () => {
   it('专家 Queen Slime 击杀：Boss 袋按交互端逐个 grant（未交互端不发放）;单人路径不走 grant', async () => {
     const { Enemy } = await import('../src/entities/Enemy');
     const w = new World(80, 80, 7, 'loot-settle');

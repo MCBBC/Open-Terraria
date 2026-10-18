@@ -5,13 +5,14 @@
 //   45s、玩家 godmode 站桩(免死亡断链;Windows 面含玩家输出,此处取 boss 侧负载共性)。
 //   trace = CDP Tracing(ReportEvents + enableSampling,含 .stack 类目)→ ProfileChunk
 //   落盘,与 DevTools 导出同构(trace-x-ray/stall-window 族直读)。
+import { HOME, join } from './_pathlib.mjs';
 import { writeFileSync } from 'node:fs';
 import { launchBrowser, openPage, bootstrap, createGame, godMode, spawnEnemy,
   saveCanvasShot, TRACE_CATEGORIES } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
 const FIGHT_MS = Number(process.env.QS_FIGHT_MS || 45000);
-const OUT = process.env.QS_OUT || '/Users/vinlic/.claude/jobs/d3098226/tmp/qs-mac-trace.json';
+const OUT = process.env.QS_OUT || join(HOME, '.claude/jobs/d3098226/tmp/qs-mac-trace.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await launchBrowser({
@@ -110,7 +111,7 @@ try {
   writeFileSync(OUT, JSON.stringify({ metadata: { probe: 'qs-mac-headed-trace', origin: ORIGIN, fightMs: FIGHT_MS }, traceEvents: events }));
   console.log('WROTE', OUT);
 
-  await saveCanvasShot(page, '/Users/vinlic/.claude/jobs/d3098226/tmp/qs-mac-fight.png');
+  await saveCanvasShot(page, join(HOME, '.claude/jobs/d3098226/tmp/qs-mac-fight.png'));
 } finally {
   await browser.close().catch(() => {});
 }

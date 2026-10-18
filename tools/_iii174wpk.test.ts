@@ -14,7 +14,7 @@ const EVIL = Number(process.env.SW_I174_EVIL ?? 0);
 const OUT = process.env.SW_I174_OUT ?? '/tmp/iii174-out/js-wpk-win.txt';
 const [WINA, WINB] = (process.env.SW_I174_WIN ?? '237000:239500').split(':').map(Number);
 const ABORT_SLOT = Number(process.env.SW_I174_ABORT_SLOT ?? 13);
-const G2D = process.env.SW_I174_G2 ?? '/Users/vinlic/GoldenChains/golden-waterpark';
+const G2D = process.env.SW_I174_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-waterpark`;
 
 const M8_FLAGS: Record<string, boolean> = {};
 for (const f of (process.env.SW_I174_FLAGS ?? '').split(',').filter(Boolean)) M8_FLAGS[f] = true;

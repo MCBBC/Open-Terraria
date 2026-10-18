@@ -2,10 +2,11 @@
 //   A 烘焙跳过：cap.bakes 无 wall 键增长；advancAnim 无墙循环（结构断言经页内源码 import）
 //   B 动态层活性：墙面像素随时间变化（逐格错相带滚动）
 //   C 静态墙零回归：相邻普通墙(石墙1)像素恒定
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP=needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});

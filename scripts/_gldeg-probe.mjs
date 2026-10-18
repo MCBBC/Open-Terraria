@@ -1,4 +1,5 @@
 // 复现地图退化块:开图后每 2s 采样,发现 #362CFF 族像素时转储三层数据源
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
@@ -72,7 +73,7 @@ for (let t = 0; t < 12; t++) {
 }
 await p.evaluate(() => clearInterval(window.__mut));
 if (found) {
-  await p.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/map_degraded.png' });
+  await p.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/map_degraded.png') });
   console.log('已截图 map_degraded.png');
 } else console.log('12s 内未复现退化块');
 await b.close(); process.exit(0);

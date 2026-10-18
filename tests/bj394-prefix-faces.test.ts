@@ -25,7 +25,7 @@
 //   件 4 l10n 孤儿键——SandboxWorld.Toast.BossFled 自 tools/l10n-custom 摘除+重建
 //     （BJ388 摘 BossFled 灰字 toast 登记债）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { RNG } from '../src/core/rng';
 import {
   rollNaturalPrefix, rollNaturalPrefixForVid, rollablePrefixes,
@@ -33,6 +33,9 @@ import {
 } from '../src/data/vanillaPrefixes';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { isPrefixableAccessory } from '../src/items/Inventory';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const iidOf = (vid: number): number => ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid] ?? ''] ?? -1;
 
@@ -46,7 +49,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 // ────────────────────────────── 件 1：制作链 TryGet 校验迁移 ──────────────────────────────
 
-describe('BJ394-件1 vanillaCraft roll 通道迁移（CraftingRequests.cs:122-131 → Item.cs:523-556）', () => {
+describe.skipIf(EXT_MISSING)('BJ394-件1 vanillaCraft roll 通道迁移（CraftingRequests.cs:122-131 → Item.cs:523-556）', () => {
   const KB0_MAGIC = 1244;   // kb==0 武器（TryGet kb 门判别域,同 BJ390 判例件;吹管 281 kb=3.5 非 0kb）
 
   it('判别域前提：1244 池内确有 kb 乘子词缀（旧通道假词缀可产出）', () => {
@@ -123,7 +126,7 @@ describe('BJ394-件1 vanillaCraft roll 通道迁移（CraftingRequests.cs:122-13
 
 // ────────────────────────────── 件 2：KillTile_DropItems 砖破面 ──────────────────────────────
 
-describe('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+存物词缀随行', () => {
+describe.skipIf(EXT_MISSING)('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+存物词缀随行', () => {
   const NATURES_GIFT = 223;   // 配饰（tile 61 fx==162,无 noPrefix→原版真掷）
   const WATER_BOLT = 165;     // 魔法（tile 50 fx==90,无 noPrefix→原版真掷）
   const ABIGAIL = 5114;       // tile 624 无 noPrefix=真掷召唤池（★X1 补）;tile 700 noPrefix=true→压制档
@@ -190,7 +193,7 @@ describe('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+�
 
 // ────────────────────────────── 件 3：QuickSpawnItem 族普查 ──────────────────────────────
 
-describe('BJ394-件3 QuickSpawnItem 族词缀普查（Player.cs:7174-7184 int 重载恒 Prefix(-1)）', () => {
+describe.skipIf(EXT_MISSING)('BJ394-件3 QuickSpawnItem 族词缀普查（Player.cs:7174-7184 int 重载恒 Prefix(-1)）', () => {
   it('礼盒代表：1909 拐杖糖剑/1921 暖手宝可掷（int 重载=真掷域）', () => {
     expect(rollablePrefixes(1909, false)).toEqual(PREFIX_POOLS.PrefixesForSwords);
     expect(isPrefixableAccessory(iidOf(1921))).toBe(true);
@@ -231,7 +234,7 @@ describe('BJ394-件3 QuickSpawnItem 族词缀普查（Player.cs:7174-7184 int �
 
 // ────────────────────────────── 件 4：l10n 孤儿键 ──────────────────────────────
 
-describe('BJ394-件4 SandboxWorld.Toast.BossFled 孤儿键摘除（BJ388 登记债）', () => {
+describe.skipIf(EXT_MISSING)('BJ394-件4 SandboxWorld.Toast.BossFled 孤儿键摘除（BJ388 登记债）', () => {
   it('源文件（tools/l10n-custom）与产物（public/l10n）双侧零 BossFled——★X1 补（2026-09-29）扩全 12 语言', () => {
     // 12 语言清单与 tools/l10n-custom/ 实际文件名一一对齐（X1 勘误:BJ394 件4 原只查
     //   zh-Hans/en-US 双语,其余 10 语言 custom+产物仍残留 BossFled,已摘除+重建）

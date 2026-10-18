@@ -38,10 +38,11 @@
 //     不迁（⑭a 同步即断）+放置后挖块→邻液回流（⑭b,TileFrame→AddWater :82621）；
 //     非固体保留面=①b 工作台占格液体
 // 运行：SW_ORIGIN=http://localhost:52xx node tools/run-diag.mjs scripts/_liquid-place.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });

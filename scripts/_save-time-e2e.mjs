@@ -1,7 +1,8 @@
 // 累计 playtime E2E v3:flow.doSave 真桥两次保存 → quicksave header.playTimeMs 单调累计
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: 'new', protocolTimeout: 600000,

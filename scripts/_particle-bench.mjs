@@ -1,8 +1,9 @@
 // 粒子原版运动律验证:火星上浮(y 减)、碎屑穿地不停驻(无碰撞)、寿命清退、2000 粒帧耗。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/pbench-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/pbench-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

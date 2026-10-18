@@ -2,6 +2,7 @@
 //   缺省(257 转正=足迹+位移门开) vs ?slopewave=0(灰度期=足迹缺席)
 // 基线:IIII255 on=16.638 / IIII256(亮线过画) 16.669-16.720。判据 Δavg<0.5%(vsync 噪声级)。
 // 用法: node tools/probe.mjs run scripts/_iii257-perf.mjs --vite=5306 --out=/tmp/iii257-out
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5306';
 const OUT = process.env.SW_PROBE_OUT ?? '/tmp/iii257-out';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (30).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[iii257p]', ...a);
 const seedDef = (json) => {

@@ -22,7 +22,7 @@
 //  · 帧引擎既有档（BAT_SKIP_LAST/6t 推进）已同构——Harpy 5t 档/蜂 2 倍速帧登记
 //    同域新债（见报告），不在本刀强扩。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { Enemy, FF_VXSDIR_GROUP } from '../src/entities/Enemy';
@@ -30,13 +30,16 @@ import { Renderer } from '../src/render/Renderer';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 import type { World as WorldT } from '../src/world/World';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1456', 'Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const npc1456 = readFileSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npc1456 = existsSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const GROUP = [48, 49, 51, 60, 82, 93, 137, 182, 210, 211, 253, 316, 634, 662, 664];
 const BEES = [210, 211];
@@ -62,7 +65,7 @@ function vanillaGroup(src: string): { labels: string[]; body: string } {
   return { labels, body: src.slice(start, end < 0 ? start + 4000 : end) };
 }
 
-describe('BJ588 原版 FindFrame 死区档大案组活体锚（1457）', () => {
+describe.skipIf(EXT_MISSING)('BJ588 原版 FindFrame 死区档大案组活体锚（1457）', () => {
   const g1457 = vanillaGroup(npc1457);
 
   it('15 型连排 case 组钉值（48/49/51/60/82/93/137/182/210/211/253/316/634/662/664）', () => {
@@ -94,7 +97,7 @@ describe('BJ588 原版 FindFrame 死区档大案组活体锚（1457）', () => {
   });
 });
 
-describe('BJ588 1456↔1457 交叉：死区档零漂移', () => {
+describe.skipIf(EXT_MISSING)('BJ588 1456↔1457 交叉：死区档零漂移', () => {
   it('1456 同组 15 型连排 + if/if 死区档 + 0.1/0.2 全同（BJ581 AI_005 三元判例不适用于本组）', () => {
     const g1456 = vanillaGroup(npc1456);
     expect(g1456.labels).toEqual(GROUP.map(String));
@@ -105,7 +108,7 @@ describe('BJ588 1456↔1457 交叉：死区档零漂移', () => {
   });
 });
 
-describe('BJ588 原版 AI 侧零写点锚（显示面唯一来源=FindFrame 组）', () => {
+describe.skipIf(EXT_MISSING)('BJ588 原版 AI 侧零写点锚（显示面唯一来源=FindFrame 组）', () => {
   /** SetDefaults `else if (type == N)` 块内 aiStyle 提取（块界=下一个 else if） */
   function vanillaAiStyle(src: string, id: number): number | null {
     const marker = src.indexOf(`else if (type == ${id})\n\t\t{`);
@@ -146,7 +149,7 @@ describe('BJ588 原版 AI 侧零写点锚（显示面唯一来源=FindFrame 组�
 // ---------------------------------------------------------------------------
 // 本仓落刀锚（任何一侧漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ588 本仓 Enemy 落刀锚', () => {
+describe.skipIf(EXT_MISSING)('BJ588 本仓 Enemy 落刀锚', () => {
   it('FF_VXSDIR_GROUP 单源表 = 15 型钉值（导出，Renderer 同源消费）', () => {
     // ★BJ590 族表扩容 +7（121/150/151/152/158/226/660 同 sign(vx) 死区档形态并入,
     //   NPC.cs:75582-75619+74826-74834 亲读）——BJ588 15 型本体不动,扩容见
@@ -178,7 +181,7 @@ describe('BJ588 本仓 Enemy 落刀锚', () => {
   });
 });
 
-describe('BJ588 本仓 Renderer 落刀锚', () => {
+describe.skipIf(EXT_MISSING)('BJ588 本仓 Renderer 落刀锚', () => {
   it('FF_VXSDIR_GROUP 单源导入 + ffSdirMirror 门 + ==1 翻转行（≙ Main.cs:23357-23361）', () => {
     // ★C12/R11（2026-10-11）扩面：FF_VXSDIR_EX 并入门（GROUP∪EX,六案组 11 型）——
     // 本锚随单源行更新（语义不变：==1 翻转行/通用门排他原样,见 tests/c12-npc-r11-clearance.test.ts）
@@ -270,7 +273,7 @@ const rotOf = (calls: Array<{ m: string; a: unknown[] }>) => calls.find((c) => c
 const flips = (calls: Array<{ m: string; a: unknown[] }>) =>
   calls.filter((c) => c.m === 'scale' && (c.a as number[])[0] === -1 && (c.a as number[])[1] === 1);
 
-describe('BJ588 行为级：蜂 210/211 恒镜像面翻正（全链逐拍）', () => {
+describe.skipIf(EXT_MISSING)('BJ588 行为级：蜂 210/211 恒镜像面翻正（全链逐拍）', () => {
   for (const vid of BEES) {
     it(`vid ${vid}：死区档 + 显示面随 ffSdir（AI 不写 facing）+ rotation=vx×0.2`, () => {
       const w = makeWorld();
@@ -322,7 +325,7 @@ describe('BJ588 行为级：蜂 210/211 恒镜像面翻正（全链逐拍）', (
   }
 });
 
-describe('BJ588 行为级：地狱蝠 60 两字段分离（全链逐拍）', () => {
+describe.skipIf(EXT_MISSING)('BJ588 行为级：地狱蝠 60 两字段分离（全链逐拍）', () => {
   it('玩家在右（AI direction=1）× vx<0 拍：facing=1 不动、ffSdir=-1 朝左 + rotate(vx×0.1)', () => {
     const w = makeWorld();
     const game = makeGame(w);
@@ -352,7 +355,7 @@ describe('BJ588 行为级：地狱蝠 60 两字段分离（全链逐拍）', () 
   });
 });
 
-describe('BJ588 行为级：13 非蜂型 rotation=vx×0.1 族锁 + 死区档（findFrameRotation 直驱）', () => {
+describe.skipIf(EXT_MISSING)('BJ588 行为级：13 非蜂型 rotation=vx×0.1 族锁 + 死区档（findFrameRotation 直驱）', () => {
   const nonBee = GROUP.filter((id) => !BEES.includes(id));
   for (const vid of nonBee) {
     it(`vid ${vid}：vx=±0.25 → visAngle=±0.025 / ffSdir=±1；vx=0 → 死区保前值`, () => {
@@ -374,7 +377,7 @@ describe('BJ588 行为级：13 非蜂型 rotation=vx×0.1 族锁 + 死区档（f
   }
 });
 
-describe('BJ588 行为级：幽灵 82（aiStyle22）渲染消费门', () => {
+describe.skipIf(EXT_MISSING)('BJ588 行为级：幽灵 82（aiStyle22）渲染消费门', () => {
   it('rotate(e.visAngle) + ffSdir 镜像（stR===22 既有支零改动收编）', () => {
     const w = makeWorld();
     const e = Enemy.fromVanilla(82, 40 * TILE, (FLOOR - 3) * TILE);

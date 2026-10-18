@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 
 const argv = process.argv.slice(2);
-let file = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria/Projectile.cs';
+let file = `${process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '')}/Terarria1457/Terraria/Projectile.cs`;   // ★C档可移植:仓库外反编译树
 let ids = [];
 for (const a of argv) {
   if (a.endsWith('.cs')) file = a;

@@ -19,6 +19,9 @@ import path from 'node:path';
 import { UI } from '../src/ui/UI';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { languageManager } from '../src/i18n/LanguageManager';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => fs.existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 languageManager.loadPackJson(JSON.parse(fs.readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
@@ -57,9 +60,10 @@ const linesOf = (html: string): string => {
 };
 
 // ============ ① 反编译重放哨（基线漂移守卫：原版重铸槽=背包同管,无降级面） ============
-describe('BJ407 ① 反编译锚重放（1457）', () => {
-  const cs = fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria.UI', 'ItemSlot.cs'), 'utf8');
-  const mn = fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs'), 'utf8');
+describe.skipIf(EXT_MISSING)('BJ407 ① 反编译锚重放（1457）', () => {
+  // ★C档可移植:缺档降级(describe 体收集期亦执行;EXT_MISSING skip 兜底)
+  const cs = fs.existsSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria.UI', 'ItemSlot.cs')) ? fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria.UI', 'ItemSlot.cs'), 'utf8') : '';
+  const mn = fs.existsSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs')) ? fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs'), 'utf8') : '';
 
   it('重铸槽 = ItemSlot.Draw(ref reforgeItem, 5)（ctx5,非自创 context）', () => {
     expect(mn).toContain('ItemSlot.Draw(spriteBatch, ref reforgeItem, 5,');
@@ -88,7 +92,7 @@ describe('BJ407 ① 反编译锚重放（1457）', () => {
 });
 
 // ============ ② 判别核心：重铸槽 ≡ 物品栏（同物同词缀 innerHTML 全等） ============
-describe('BJ407 ② 重铸槽/物品栏 tooltip 全等（饰品 + 武器两元）', () => {
+describe.skipIf(EXT_MISSING)('BJ407 ② 重铸槽/物品栏 tooltip 全等（饰品 + 武器两元）', () => {
   it('鲨牙项链+暴力：重铸槽悬停 = 物品栏悬停（行集全等,旧贫面即红）', () => {
     const rf = mkUi();
     rf.reforgeItem = { id: NECKLACE, stack: 1, prefix: VIOLENT };
@@ -112,7 +116,7 @@ describe('BJ407 ② 重铸槽/物品栏 tooltip 全等（饰品 + 武器两元�
 });
 
 // ============ ③ 行级判别（旧贫面缺的三层,用户实报三行逐字） ============
-describe('BJ407 ③ 重铸槽饰品行集（旧面全缺,本刀补齐）', () => {
+describe.skipIf(EXT_MISSING)('BJ407 ③ 重铸槽饰品行集（旧面全缺,本刀补齐）', () => {
   const rf = mkUi();
   rf.reforgeItem = { id: NECKLACE, stack: 1, prefix: VIOLENT };
   rf.showReforgeTooltip();
@@ -137,7 +141,7 @@ describe('BJ407 ③ 重铸槽饰品行集（旧面全缺,本刀补齐）', () =>
 });
 
 // ============ ④ 结构锁：showReforgeTooltip 内容面禁回退自装（变异即红） ============
-describe('BJ407 ④ 结构锁（内容装配单源,回退自装贫面即红）', () => {
+describe.skipIf(EXT_MISSING)('BJ407 ④ 结构锁（内容装配单源,回退自装贫面即红）', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'UI.ts'), 'utf8');
   const s = src.indexOf('private showReforgeTooltip(): void {');
   const e = src.indexOf('closeReforge(): void {', s);
@@ -158,7 +162,7 @@ describe('BJ407 ④ 结构锁（内容装配单源,回退自装贫面即红）',
 // −13 master 活色档同函数内逐帧重染（:20432/:20436）。本仓每帧重绘的承载 =
 // startTooltipPulse（rAF 逐帧 filter 亮度 + .sw-tooltip-rare 重染）——重铸路径曾缺
 // = 悬停 tooltip 静止死色（BJ407 登记债,与 BJ176 三面哨兵同批清偿）。
-describe('BJ407 ⑤ 脉冲面：重铸槽 tooltip 挂 startTooltipPulse（与物品栏同相）', () => {
+describe.skipIf(EXT_MISSING)('BJ407 ⑤ 脉冲面：重铸槽 tooltip 挂 startTooltipPulse（与物品栏同相）', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'UI.ts'), 'utf8');
 
   /** 函数体截取（sw-tt1-sentinel 同习语;锚漂移=爆红不静默放行） */

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant, setVanillaVariantMap, invalidateVanillaFrameAt, invalidateVanillaFrameArea, VANILLA_FRAME_SETS } from '../src/render/VanillaFraming';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
@@ -68,7 +69,9 @@ function frameExposedTop(probeType: number, baseType: number): { fx: number; fy:
 // ★vanilla TileID 域(与回滚后链一致;重做对齐时随域契约一并调整)
 const S = 53, C = 40, D = 0, ST = 1, CU = 7;
 
-describe('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
+// ★C档可移植:本闸门双依赖——仓库外反编译树 Terarria1457 + 收编档 ftw-v2.wld
+//   (原 ~/Downloads/FTW V2.wld);任一缺失=skip(clone 侧正常形态;本机在=真跑)
+describe.skipIf(!existsSync(`${ROOT}/Terarria1457/Terraria/WorldGen.cs`) || localFixtureMissing('ftw-v2.wld'))('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
   // ---------- 第 1 层:提取可复现(转译器 vs 反编译源 vs 入库程序 三方一致) ----------
   it('第1层·转译器重跑 === 入库 program.json(防手改/防源漂移)', () => {
     expect(existsSync(WORLDGEN_CS), '反编译树 Terarria1457 应存在').toBe(true);
@@ -243,9 +246,8 @@ describe('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
     }
     expect(dump.length, 'rig 倾倒格数').toBe(2091);
     // ★布局必须来自真世界(dump 矩形外的邻居参与分类/协商; rig 是整分区分帧)
-    const wldBin = atob(readFileSync('/Users/vinlic/Downloads/FTW V2.wld').toString('base64'));
-    const wldBuf = new Uint8Array(wldBin.length);
-    for (let k = 0; k < wldBin.length; k++) wldBuf[k] = wldBin.charCodeAt(k);
+    // ★C档收编:原 ~/Downloads/FTW V2.wld(旧 atob 往返冗余,直读收编档)
+    const wldBuf = new Uint8Array(readLocalFixture('ftw-v2.wld'));
     const wld = parseWld(wldBuf);
     const st = new TileStore(wld.tilesWide, wld.tilesHigh);
     const N = wld.tilesWide * wld.tilesHigh;

@@ -1,10 +1,11 @@
 // 有头模式 --disable-gpu 生效性验证(2026-08-18)终极版:WebGL UNMASKED_RENDERER
 // 字符串(SwiftShader=旗标生效;Apple M 系列=旗标没吃到)。弹窗 ~10s。
 // 用法:node tools/run-diag.mjs scripts/_disgpu-check.mjs  (DG_NOFLAG=1 = 对照组)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const SOFT = process.env.DG_NOFLAG !== '1';
 
 const browser = await puppeteer.launch({

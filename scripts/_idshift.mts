@@ -1,8 +1,9 @@
 // 验证 tile id 漂移:解码存档 → 读标注点 tile id → 对照当前 TILE_DEFS 索引
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles.ts';
 import fs from 'fs';
 
-const m = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (5).json', 'utf8'));
+const m = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (5).json')), 'utf8'));
 const w = m.header.width, h = m.header.height;
 const buf = Buffer.from(m.tiles, 'base64');
 function dec(p: { i: number }): number {

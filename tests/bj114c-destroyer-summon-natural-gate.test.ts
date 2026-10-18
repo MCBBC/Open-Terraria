@@ -20,10 +20,13 @@
 // 判别力：物品路径召唤必须保持 Bottom 契约原值（y−h）——覆写漂移=红；
 // 自然路径必须落地下覆写行——门失效=红。两路落点同格=夹具退化=红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { TILE } from '../src/core/constants.ts';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -46,7 +49,7 @@ async function mkSim(seed: number) {
 const headOf = (sim: SummonSimLike) =>
   sim.enemiesSnapshot().find((e) => !e.dead && e.vanillaId === 134);
 
-describe('BJ114-c SimHost.summon 毁灭者 134 落位门（物品路径原值/自然路径覆写）', () => {
+describe.skipIf(EXT_MISSING)('BJ114-c SimHost.summon 毁灭者 134 落位门（物品路径原值/自然路径覆写）', () => {
   it('物品路径（naturalPath 缺省 false）：Bottom 契约原值 y−h，无地下覆写', async () => {
     const { sim, w } = await mkSim(4242);
     const y = 8 * TILE;
@@ -83,10 +86,11 @@ describe('BJ114-c SimHost.summon 毁灭者 134 落位门（物品路径原值/�
   }, 30000);
 });
 
-describe('BJ114-c 双端结构锁（msg202 flags bit0 门）', () => {
+describe.skipIf(EXT_MISSING)('BJ114-c 双端结构锁（msg202 flags bit0 门）', () => {
   const gameSrc = readFileSync(join(HERE, '../src/core/Game.ts'), 'utf8');
-  const simSrc = readFileSync(join(HERE, '../../server/src/sim/SimHost.ts'), 'utf8');
-  const roomSrc = readFileSync(join(HERE, '../../server/src/room.ts'), 'utf8');
+  // ★C档可移植:缺档降级(server=仓库外;EXT_MISSING skip 兜底)
+  const simSrc = existsSync(join(HERE, '../../server/src/sim/SimHost.ts')) ? readFileSync(join(HERE, '../../server/src/sim/SimHost.ts'), 'utf8') : '';
+  const roomSrc = existsSync(join(HERE, '../../server/src/room.ts')) ? readFileSync(join(HERE, '../../server/src/room.ts'), 'utf8') : '';
   const clientSrc = readFileSync(join(HERE, '../src/net/ClientNet.ts'), 'utf8');
 
   it('SimHost：134 覆写门 = vanillaId===134 && naturalPath（无条件覆写回退=红）', () => {

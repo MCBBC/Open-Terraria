@@ -3,11 +3,12 @@
 // 场景重建 = 载入用户存档,把染料商放回屋顶,夜幕+玩家近/远两态:
 //   A(玩家在看) → 原版语义:不传送,继续打转(视野双矩形门 :53831-53846)
 //   B(玩家远离) → 原版 TeleportToHome 兜底:静默传送回家落地(:56063-56090)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5205';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (20).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (20).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });

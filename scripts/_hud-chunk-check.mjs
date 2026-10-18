@@ -1,8 +1,9 @@
 // 1+3 验证:防御盾 img 化(不再有 52×48 canvas)+ MAX_CHUNKS 192(页数 ≤2×12)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/hudcheck-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/hudcheck-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

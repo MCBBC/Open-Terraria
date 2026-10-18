@@ -1,4 +1,5 @@
 // ★628b:Terrain 锚点差异解剖——本仓原版地形 pass 后态 vs 探针 Terrain 快照
+import { TMOD_LOGS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
@@ -20,7 +21,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (d?.vanilla && !NAME_OF.has(d.vanilla.sheet)) NAME_OF.set(d.vanilla.sheet, d.key);
 }
 
-const buf = readFileSync('/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs/genprobe-snap-00-Terrain.bin');
+const buf = readFileSync(needInput(join(TMOD_LOGS, 'genprobe-snap-00-Terrain.bin')));
 const w = 4200, h = 1200, n = w * h;
 const real = new Uint16Array(n);
 for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {

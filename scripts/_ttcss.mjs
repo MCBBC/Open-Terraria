@@ -1,4 +1,5 @@
 // 独立页复刻 tooltip DOM/CSS：像素级验九宫底不透明度
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const browser = await puppeteer.launch({
@@ -6,7 +7,7 @@ const browser = await puppeteer.launch({
   headless: 'new', defaultViewport: { width: 400, height: 300 }, protocolTimeout: 60000,
 });
 const page = await browser.newPage();
-const img = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/public/sprites/vanilla/Inventory_Back13.png').toString('base64');
+const img = readFileSync(join(REPO_ROOT, 'public/sprites/vanilla/Inventory_Back13.png')).toString('base64');
 await page.setContent(`<body style="background:#fff;margin:0">
 <div id="tt" style="position:fixed;left:20px;top:20px;width:200px;height:120px;padding:9px 13px;
   font-size:13px;color:#fff;background:rgba(21,23,75,0.93);

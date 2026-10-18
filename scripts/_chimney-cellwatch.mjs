@@ -1,8 +1,9 @@
 // 烟囱格状态持续监控:有没有什么逻辑在改这些格子?
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 480, height: 360 } });
 const page = await browser.newPage();
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });

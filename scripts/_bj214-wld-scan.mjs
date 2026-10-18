@@ -1,11 +1,12 @@
 // BJ214: 用户 .wld 导出直扫——flags(三机械/hardMode) + tile 238/236/233/60 计数与分布。
 // 用途: 判定"打完三王无花苞"是门假(缺旗)还是链断(有旗无苞)。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser.ts';
 
 const FILES = [
-  '/Users/vinlic/Downloads/欺诈的灵魂祸根.wld',
-  '/Users/vinlic/Downloads/Starter World.wld',
+  needInput(join(DOWNLOADS, '欺诈的灵魂祸根.wld')),
+  needInput(join(DOWNLOADS, 'Starter World.wld')),
 ];
 
 const WANT = [238, 236, 233, 60, 226, 59];

@@ -1,12 +1,13 @@
 // 双水线现场复现(2026-08-19):用用户存档同种子(12345)重建世界,传送至报告现场
 // (湖面 y241,丛林水 waterStyle=3,荷叶/香蒲水面),截图+亮线扫描+间距。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=400000 scripts/_dline2-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dline2-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dline2-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();
@@ -77,5 +78,5 @@ const out = await page.evaluate(() => {
 }).catch((e) => ({ err: String(e).slice(0, 200) }));
 console.log('[现场]', JSON.stringify(out).slice(0, 1200));
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
-if (shot) fs.writeFileSync('/Users/vinlic/.claude/jobs/8405c930/tmp/dline2.png', shot);
+if (shot) fs.writeFileSync(join(HOME, '.claude/jobs/8405c930/tmp/dline2.png'), shot);
 await browser.close();

@@ -6,10 +6,11 @@
 //     [0, frames-1]*pitch —— 越界即历史“平铺第一格”病根复发（用纯函数可重复）
 //   C 重烘节律：cap.bakes 内 sheet 键在推进中按新速率增长（106 每5t、218 每5t、220 每5t）
 //   D 视觉佐证：锚格 18×18px 区带像素随时间出现 ≥2 个稳定离散形态（平铺病必 ≤1）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 if (!fs.existsSync(MAP)) { console.error('NO MAP:', MAP); process.exit(2); }
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 } });
 const page = await browser.newPage();

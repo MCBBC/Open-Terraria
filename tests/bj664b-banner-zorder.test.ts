@@ -31,16 +31,19 @@
 //  =tests/bj665c-hbanchor-wire.test.ts + c13 F5-wire 行为面）——本件夹具仍走
 //  默认锚路径不变（vid 1 无锚实体=真实常态路径）。
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
-const legacyLayerSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs'), 'utf8');
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const legacyLayerSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 function lineOf(src: string, needle: string): number {
   const i = src.indexOf(needle);
@@ -51,7 +54,7 @@ function lineOf(src: string, needle: string): number {
 // ---------------------------------------------------------------------------
 // ① 原版表序全段锚（血条盖名条=原版本相钉死;原版语义漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ664b ①原版 SetupDrawInterfaceLayers 表序全段锚（Main.cs:45467-45550）', () => {
+describe.skipIf(EXT_MISSING)('BJ664b ①原版 SetupDrawInterfaceLayers 表序全段锚（Main.cs:45467-45550）', () => {
   const seg = (name: string): string => {
     const i = mainSrc.indexOf(`"${name}"`);
     expect(i, `层名缺失: ${name}`).toBeGreaterThan(0);
@@ -112,7 +115,7 @@ describe('BJ664b ①原版 SetupDrawInterfaceLayers 表序全段锚（Main.cs:45
 // ---------------------------------------------------------------------------
 // ② 现盘位次锁（名条先画 < 血条后画 = 原版 9<16 同相;序反转即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ664b ②现盘位次锁（flushBannerLabels < flushEntityHealthBars）', () => {
+describe.skipIf(EXT_MISSING)('BJ664b ②现盘位次锁（flushBannerLabels < flushEntityHealthBars）', () => {
   it('调用序：drawScreenFilterChain（光照/滤镜链）< 名条 flush < 血条 flush（原版 链<9<16）', () => {
     const iChain = lineOf(rendererSrc, 'this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z, world);');
     const iBanner = lineOf(rendererSrc, 'this.flushBannerLabels(cam);');
@@ -200,7 +203,7 @@ type FlushRenderer = {
   flushEntityHealthBars(pass: unknown, cam: unknown): void;
 };
 
-describe('BJ664b ③血条盖名条场景锁（hover 名条+受伤 NPC 血条同屏重叠域）', () => {
+describe.skipIf(EXT_MISSING)('BJ664b ③血条盖名条场景锁（hover 名条+受伤 NPC 血条同屏重叠域）', () => {
   beforeAll(() => {
     (globalThis as Record<string, unknown>).Image = class {
       src = ''; onload: (() => void) | null = null;
@@ -287,7 +290,7 @@ describe('BJ664b ③血条盖名条场景锁（hover 名条+受伤 NPC 血条同
 // ---------------------------------------------------------------------------
 // ④ BJ648 免光照锁回归（暗档名条恒亮,独立于位次;位次勘误不得连带破迁层面）
 // ---------------------------------------------------------------------------
-describe('BJ664b ④BJ648 免光照面回归（暗档下名条色式/α 恒定,零光照消费）', () => {
+describe.skipIf(EXT_MISSING)('BJ664b ④BJ648 免光照面回归（暗档下名条色式/α 恒定,零光照消费）', () => {
   it('lightAt 暗档 [0,0,0]：flush 零光照读、白字/黑框色式与 α=1 恒定（迁层面不随位次勘误漂移）', () => {
     const rr = r as unknown as FlushRenderer;
     const lightAtCalls = { n: 0 };

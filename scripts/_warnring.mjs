@@ -1,8 +1,9 @@
 // warn-once + 警告环终验：陶罐像素基线 [112,48,172,140] + 无假越界警告 + __swWarns 入 F5 报告
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 
-const SAVE_TEXT = readFileSync('/Users/vinlic/Downloads/map-12345世界 (2).json', 'utf8');
+const SAVE_TEXT = readFileSync(needInput(join(DOWNLOADS, 'map-12345世界 (2).json')), 'utf8');
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 600000,

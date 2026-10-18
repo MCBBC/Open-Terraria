@@ -1,13 +1,14 @@
 // 用户标注区链帧倾倒(用用户自己的存档 map json = 现场真实状态):
 // 对 marks 里 111 格输出生产路径帧(vanillaFrameFor 缺省缓存语义)+ 八邻类型/half/slope。
 // 输出与 rig SWFR 行同构:x,y,typeInternal,fx,fy,n*:t
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
-const MARKS = '/Users/vinlic/Downloads/marks-FTW_V2 (6).json';
-const OUT = '/Users/vinlic/.claude/jobs/4a66e745/tmp/marks-chain-dump.txt';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
+const MARKS = needInput(join(DOWNLOADS, 'marks-FTW_V2 (6).json'));
+const OUT = join(HOME, '.claude/jobs/4a66e745/tmp/marks-chain-dump.txt');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const marks = JSON.parse(fs.readFileSync(MARKS, 'utf8')).marks;

@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ261（2026-09-22）：extract-recipes.mjs era guard 落闸守卫测试（S5 P2：红队 r25 债
 // 「干跑实测 357 条会被抹但无机械闸」清偿——原 R25-B5② 强制门只拦「现库独有被抹」单向,
@@ -28,12 +31,17 @@ import { tmpdir } from 'node:os';
 //   ④判别力自证（M1 摘干跑门/M2 毒化基数锚/M3 摘 fresh-only 轴=恒绿复现）。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-recipes.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE = join(process.cwd(), 'src', 'data', 'vanilla-recipes.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
 const TMP = realpathSync(tmpdir());   // ★macOS /var→/private/var 符号链接（itemrare 同案）
 const sandbox = (path: string) => ['--out', path];
 
-describe('extract-recipes era guard（BJ261 落闸 + 编码面重建）', () => {
+describe.skipIf(EXT_MISSING)('extract-recipes era guard（BJ261 落闸 + 编码面重建）', () => {
   it('行为面:缺省干跑对拍零写盘（exit 0+双向零差+现库字节零改动）', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -139,7 +147,7 @@ describe('extract-recipes era guard（BJ261 落闸 + 编码面重建）', () => 
     writeFileSync(fakeLive, '{"seeded":true}');
     const before = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = 'const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : null;';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-recipes-mutant.mjs');
@@ -160,7 +168,7 @@ describe('extract-recipes era guard（BJ261 落闸 + 编码面重建）', () => 
     const dir = mkdtempSync(join(TMP, 'recipes-guard-'));
     const before = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = 'if (out.length < 3400) throw';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-recipes-mutant-anchor.mjs');
@@ -186,7 +194,7 @@ describe('extract-recipes era guard（BJ261 落闸 + 编码面重建）', () => 
       const probeEnv = { ...process.env, SW_RECIPES_JSON: join(dir, 'degraded.json') };
       const real = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
       expect(real.status).toBe(1);
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = 'for (const [s, n] of fc) { if (n > (lc.get(s) ?? 0)) wash.freshOnly.push(JSON.parse(s)); }';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-recipes-mutant-freshonly.mjs');

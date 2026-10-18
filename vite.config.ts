@@ -23,7 +23,11 @@ function l10nAuditAuto(): Plugin {
   ];
   const stale = () => {
     if (!existsSync(join(ROOT, 'public', 'l10n', 'zh-Hans.json'))) return true;
-    const srcNew = Math.max(...sources.map((f) => statSync(f).mtimeMs));
+    // ★C 档可移植（2026-10-18）：l10n 源目录（仓库外 ../tools/l10n-custom）在 clone 侧
+    //   不存在——existsSync 守卫（缺源=不触发自动重建；产物 public/l10n 随仓跟踪，
+    //   校验由 tests/l10n-audit.test.ts 在仓内面锁定）。曾 clone 侧 statSync 直抛 ENOENT
+    //   → vitest 启动即崩（npm run test 全灭）。
+    const srcNew = Math.max(...sources.map((f) => (existsSync(f) ? statSync(f).mtimeMs : 0)));
     return statSync(join(ROOT, 'public', 'l10n', 'zh-Hans.json')).mtimeMs < srcNew;
   };
   const audit = async () => {

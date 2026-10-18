@@ -17,12 +17,15 @@
 //     RandomInt(-10,1)×0.15=[-1.5,0]（position 位同本体式,origin 反向系误读）。
 //   F9 注释病两处（LOW）——solarOutlineStamps k 行注释订正 + Grox ±0.125px 登记。
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   heldItemStealthDim, applyStealthToColor,
 } from '../src/render/heldItemStealthDim';
 import { advanceGhostAureole, resetGhostAureole, Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const RDR = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
@@ -30,15 +33,15 @@ const HSD = readFileSync(join(ROOT, 'src/render/heldItemStealthDim.ts'), 'utf8')
 const PAPER = readFileSync(join(ROOT, 'src/player/PaperDoll.ts'), 'utf8');
 const PLAYER_TS = readFileSync(join(ROOT, 'src/entities/Player.ts'), 'utf8');
 const AGLOW = readFileSync(join(ROOT, 'src/data/vanillaArmorGlow.ts'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
-const playerSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Player.cs'), 'utf8');
-const pdsSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawSet.cs'), 'utf8');
-const pdlSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawLayers.cs'), 'utf8');
-const utilsSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Utils.cs'), 'utf8');
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const playerSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Player.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const pdsSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawSet.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawSet.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const pdlSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawLayers.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.DataStructures/PlayerDrawLayers.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const utilsSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Utils.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Utils.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 // ===================== F1 星旋潜行 A 通道（判谳级） =====================
 
-describe('C13-F1 星旋潜行 A 因子 = s（原版锚+行为）', () => {
+describe.skipIf(EXT_MISSING)('C13-F1 星旋潜行 A 因子 = s（原版锚+行为）', () => {
   it('原版锚:Lerp 目标 W=0（PlayerDrawLayers.cs:3602-3604）+ MultiplyRGBA 乘 A（Utils.cs）', () => {
     const i = pdlSrc.indexOf('if (drawinfo.drawPlayer.setVortex && (flag | flag2))');
     expect(i, 'setVortex 支在位').toBeGreaterThan(0);
@@ -80,7 +83,7 @@ describe('C13-F1 星旋潜行 A 因子 = s（原版锚+行为）', () => {
 
 // ===================== F2 socialGhost 幽魂套 =====================
 
-describe('C13-F2 socialGhost 幽灵化外观（门+gFade 呼吸钟+皮肤/甲 α 面）', () => {
+describe.skipIf(EXT_MISSING)('C13-F2 socialGhost 幽灵化外观（门+gFade 呼吸钟+皮肤/甲 α 面）', () => {
   it('原版锚:全套门（Player.cs:37326-37328）', () => {
     expect(playerSrc).toContain(
       'if ((drawPlayer.head == 101 || drawPlayer.head == 156) && drawPlayer.body == 66 && drawPlayer.legs == 55)',
@@ -167,7 +170,7 @@ describe('C13-F2 socialGhost 幽灵化外观（门+gFade 呼吸钟+皮肤/甲 α
 
 // ===================== F3/F4 教徒 439/440+690 血条排除 =====================
 
-describe('C13-F3/F4 血条 439/440(ai0==5 门)+690 无条件排除', () => {
+describe.skipIf(EXT_MISSING)('C13-F3/F4 血条 439/440(ai0==5 门)+690 无条件排除', () => {
   it('原版锚:Main.cs:46710 门', () => {
     expect(mainSrc).toContain(
       'if ((!expertMode || type != 266) && type != 690 && ((type != 439 && type != 440) || npc[num2].ai[0] != 5f))',
@@ -182,7 +185,7 @@ describe('C13-F3/F4 血条 439/440(ai0==5 门)+690 无条件排除', () => {
 
 // ===================== F5 毁灭者/蠕虫血条锚+α =====================
 
-describe('C13-F5 毁灭者 destroyerHB 平滑+α=(B+1)/2;蠕虫头尾中点', () => {
+describe.skipIf(EXT_MISSING)('C13-F5 毁灭者 destroyerHB 平滑+α=(B+1)/2;蠕虫头尾中点', () => {
   it('原版锚:毁灭者支（Main.cs:46714-46752——scale 1.5/平滑/α/realLife）', () => {
     expect(mainSrc).toContain('destroyerHB = (destroyerHB * 49f + vector) / 50f;');
     expect(mainSrc).toContain('num6 = (num6 + 1f) / 2f;');
@@ -215,7 +218,7 @@ describe('C13-F5 毁灭者 destroyerHB 平滑+α=(B+1)/2;蠕虫头尾中点', ()
 // tests/bj665c-hbanchor-wire.test.ts。
 type HbOp = { kind: 'img'; dx: number; dy: number; dw: number; dh: number };
 
-describe('C13-F5-wire 锚经 flushEntityHealthBars 活线生效（BJ665c 坐标级行为锁）', () => {
+describe.skipIf(EXT_MISSING)('C13-F5-wire 锚经 flushEntityHealthBars 活线生效（BJ665c 坐标级行为锁）', () => {
   let rr: InstanceType<typeof Renderer>;
   beforeAll(() => {
     (globalThis as Record<string, unknown>).Image = class {
@@ -290,7 +293,7 @@ describe('C13-F5-wire 锚经 flushEntityHealthBars 活线生效（BJ665c 坐标�
 
 // ===================== F6 PvP 玩家血条升级 =====================
 
-describe('C13-F6 玩家血条 = DrawHealthBar 贴图版+原版门+stealth α+全亮域收编', () => {
+describe.skipIf(EXT_MISSING)('C13-F6 玩家血条 = DrawHealthBar 贴图版+原版门+stealth α+全亮域收编', () => {
   it('原版锚:玩家段门（Main.cs:46886——active&&!ghost&&!dead&&!invis&&life!=lifeMax2,无 hostile）', () => {
     expect(mainSrc).toContain(
       'if (k != myPlayer && player[k].active && !player[k].ghost && !player[k].dead && !player[k].invis && player[k].statLife != player[k].statLifeMax2)',
@@ -316,7 +319,7 @@ describe('C13-F6 玩家血条 = DrawHealthBar 贴图版+原版门+stealth α+全
 
 // ===================== F7 显示门（满血不画）判别力 =====================
 
-describe('C13-F7 血条显示门 life!=lifeMax（满血不画断言）', () => {
+describe.skipIf(EXT_MISSING)('C13-F7 血条显示门 life!=lifeMax（满血不画断言）', () => {
   it('原版锚:Main.cs:46606 life != lifeMax && ShowLife 门', () => {
     expect(mainSrc).toContain('if (npc[num2].life != npc[num2].lifeMax && npc[num2].ShowLife)');
   });
@@ -331,7 +334,7 @@ describe('C13-F7 血条显示门 life!=lifeMax（满血不画断言）', () => {
 
 // ===================== F8 学徒火 body205 抖动 y 反号 =====================
 
-describe('C13-F8 学徒火 body205 抖动 y∈[-1.5,0]（position 位,反号翻案）', () => {
+describe.skipIf(EXT_MISSING)('C13-F8 学徒火 body205 抖动 y∈[-1.5,0]（position 位,反号翻案）', () => {
   it('原版锚:body205 position 位抖动（PlayerDrawLayers.cs:3673-3683——+num4 直加,origin=bodyVect）', () => {
     const i = pdlSrc.indexOf('if (drawinfo.drawPlayer.body == 205)');
     const seg = pdlSrc.slice(i, i + 900);
@@ -352,7 +355,7 @@ describe('C13-F8 学徒火 body205 抖动 y∈[-1.5,0]（position 位,反号翻�
 
 // ===================== F9 注释病两处 =====================
 
-describe('C13-F9 注释病订正（solarOutlineStamps shadow 语义 + Grox ±0.125px 登记）', () => {
+describe.skipIf(EXT_MISSING)('C13-F9 注释病订正（solarOutlineStamps shadow 语义 + Grox ±0.125px 登记）', () => {
   it('solarOutlineStamps k 行:乘子 = 1−shadow = 1−ghostFade（实现 k=1-ghostFade 对,旧歧义注释退役）', () => {
     expect(PLAYER_TS).not.toContain('// shadow=ghostFade 全通道乘');
     expect(PLAYER_TS).toContain('const k = 1 - ghostFade;');

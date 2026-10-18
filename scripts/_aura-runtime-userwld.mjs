@@ -1,11 +1,12 @@
 // 闪电光环运行时复核③：用户 .wld 导入（无二次导航——同页 loadSaveData 换装）
 // 运行: SW_ORIGIN=http://localhost:4173 node tools/run-diag.mjs --timeout=600000 scripts/_aura-runtime-userwld.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { pump } from '../tools/probe/lib/pump.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.WLD_PATH || '/Users/vinlic/Downloads/十周年纪念种子(1).wld';
+const WLD = process.env.WLD_PATH || needInput(join(DOWNLOADS, '十周年纪念种子(1).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errs = [];

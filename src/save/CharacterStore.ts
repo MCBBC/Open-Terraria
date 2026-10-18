@@ -47,7 +47,12 @@ export interface CharacterMeta { id: number; name: string; difficulty: number; c
   /** ★BJ691b 最后游玩（epoch ms;原版 lastTimePlayerWasSaved 语义——每次存档刷新）。
    *  create（新建/导入）置 now;setState（doSave 每存档点/导入携态）拍刷新;
    *  旧档缺省回退 createdAt。列表序消费见 list()（收藏→lastPlayed→名→id）。 */
-  lastPlayed?: number; }
+  lastPlayed?: number;
+  /** ★BJ694（BJ691b 债②）：该角色游玩过的世界 id 集——原版
+   *  HasWorldBeenPlayedByActivePlayer（UIWorldSelect.cs:168 WorldMap.TryGetMapPath
+   *  =玩家×世界地图档存在）的仓内等价。写入位=mainFlow 进世界两路（loadWorldFlow/
+   *  createWorldFlow）;消费位=WorldSelectPanel 显示序第三前缀层。 */
+  playedWorlds?: number[]; }
 
 let nextId = 1;
 
@@ -292,6 +297,18 @@ export class CharacterStore {
     // ★BJ614：随身态快照（原版 .plr 语义档——doSave 每存档同步点/复制角色路径共用）
     try { this.onStateWrite?.(id, json); }
     catch (e) { console.warn('[charStore] onStateWrite 回调异常', e); }
+  }
+
+  /** ★BJ694：记录角色×世界游玩史（原版地图档存在的仓内等价,见 CharacterMeta.
+   *  playedWorlds 注）。幂等（已含=零写）;meta 缺席=静默（角色已删等边缘态）。 */
+  async recordPlayedWorld(id: number, worldId: number): Promise<void> {
+    await this.ensureLoaded();
+    const cm = this.index.find((x) => x.id === id);
+    if (!cm) return;
+    const set = cm.playedWorlds ?? (cm.playedWorlds = []);
+    if (set.includes(worldId)) return;
+    set.push(worldId);
+    await this.saveIndex();
   }
 
   /** 硬核消亡清随身态（原版 KillMeForGood 直接删 .plr 档；本仓留墓碑外观但

@@ -1,5 +1,5 @@
 import { launchBrowser, openPage, bootstrap, createGame, godMode,
-  freezeClock, saveCanvasShot, spawnTownNPC } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
+  freezeClock, saveCanvasShot, spawnTownNPC } from '../tools/probe/lib/index.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5220';
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});

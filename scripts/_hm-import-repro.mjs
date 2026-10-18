@@ -1,5 +1,6 @@
 // 用户存档复现(饥饿的庄园):导入 → 重置 hardMode → 真实 FIFO 转换 → M 图全程打开
 // → 消费收敛断言 + 截图 A(转换后) / B(redrawAll 参照) 逐字节对比
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const b = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1600, height: 900 } });
 const page = await b.newPage();
@@ -30,7 +31,7 @@ await sleep(500);
 for (let i = 0; i < 30 && !(await page.$('.sw-vsel-list .sw-vitem')); i++) await sleep(500);
 await page.click('.sw-vsel [data-act=import]');
 const fileInput = await page.$('input[type=file]');
-await fileInput.uploadFile('/Users/vinlic/Downloads/map-饥饿的庄园.json');
+await fileInput.uploadFile(needInput(join(DOWNLOADS, 'map-饥饿的庄园.json')));
 // 等导入完成(列表出现 饥饿的庄园)
 for (let i = 0; i < 60 && !(await page.evaluate(() => [...document.querySelectorAll('.sw-vsel-list .sw-vitem')].some(e => e.textContent.includes('饥饿的庄园')))); i++) await sleep(500);
 const idx = await page.evaluate(() => Math.max(0, [...document.querySelectorAll('.sw-vsel-list .sw-vitem')].findIndex(e => e.textContent.includes('饥饿的庄园'))));

@@ -1,12 +1,13 @@
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../src/core/constants';
 
-describe('双向基线', () => {
+describe.skipIf(localFixtureMissing('starter-map-26.json'))('双向基线', () => {
   it('左结构L→R 与 右结构R→L', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const mk = (xt: number, fp: number) => ({
       x: xt * TILE, y: fp - 42, w: 20, h: 42,
       vx: 0, vy: 0, onGround: true, hitWall: false, hitHead: false,

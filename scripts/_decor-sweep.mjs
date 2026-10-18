@@ -40,9 +40,10 @@
 // 几何：bl=底左原点（buildObj 行区 bly-(oh-1)..bly）；444 顶行=F-2 锚行=F-3；
 //       34/454 行区 F-3..F-1 锚行=F-4；389 行区 F-5..F-1 锚行 F/F-6；
 //       440 行区 F-4..F-2（背墙同域）；hangtop 行区 F-3..F-1 锚行=F-4
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

@@ -47,12 +47,12 @@ const GAME = join(dirname(fileURLToPath(import.meta.url)), '..');   // game/（c
 //   fail-closed：非法值/反编译目录不存在即拒。
 const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 const VER_ALLOWED = new Set(['1456', '1457']);
-if (!VER_ALLOWED.has(SRC_VER) || !existsSync(`/Users/vinlic/Project/GLM/SandboxWorld/Terarria${SRC_VER}/Terraria/Item.cs`)) {
+if (!VER_ALLOWED.has(SRC_VER) || !existsSync(`${join(GAME, '..')}/Terarria${SRC_VER}/Terraria/Item.cs`)) {
   console.error(`[extract-wallitems] 拒绝运行：SW_ITEM_VER="${SRC_VER}" 非法（白名单 1456/1457,且需存在 Terarria${SRC_VER}/ 反编译目录）。`);
   process.exit(1);
 }
-const ITEM_CS = `/Users/vinlic/Project/GLM/SandboxWorld/Terarria${SRC_VER}/Terraria/Item.cs`;
-const WALLID_CS = `/Users/vinlic/Project/GLM/SandboxWorld/Terarria${SRC_VER}/Terraria.ID/WallID.cs`;
+const ITEM_CS = `${join(GAME, '..')}/Terarria${SRC_VER}/Terraria/Item.cs`;   // ★C档可移植:仓库外反编译树
+const WALLID_CS = `${join(GAME, '..')}/Terarria${SRC_VER}/Terraria.ID/WallID.cs`;
 
 // ---- ★BJ284 输出通道三分离（头注见上；★M1 变异锚=干跑臂 null,守卫测试换假现库路径） ----
 const WRITE_REAL = process.argv.includes('--write-real');
@@ -268,7 +268,7 @@ for (const id of [...wallOf.keys()].sort((a, b) => a - b)) {
 const ASSN_RE = /\bcreateWall\s*=|DefaultToPlaceableWall\(/;
 const anchorOf = (lineNo) => {
   for (const ver of ['1456', '1457']) {
-    const srcLines = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/Terarria${ver}/Terraria/Item.cs`, 'utf8').split('\n');
+    const srcLines = readFileSync(`${join(GAME, '..')}/Terarria${ver}/Terraria/Item.cs`, 'utf8').split('\n');
     if (ASSN_RE.test(srcLines[lineNo - 1] ?? '')) return ver;
   }
   return null;

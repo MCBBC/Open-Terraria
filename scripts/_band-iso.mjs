@@ -1,13 +1,14 @@
 // 浸润带隔离测试:对指定格直接调用 drawLiquidBehindTilesOnly(黑底 scratch canvas),
 // 看带是否画/画在哪。同时画两次 pass(solidLayer true/false)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (5).json', 'utf8');
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (5).json')), 'utf8');
 const cells = JSON.parse(process.env.SW_CELLS ?? '[[879,284],[846,280],[882,282]]');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile11',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile11'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

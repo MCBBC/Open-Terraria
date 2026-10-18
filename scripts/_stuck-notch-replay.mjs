@@ -2,10 +2,11 @@
 //   从报告 areaCamera dump 逐格重建真实地形（sheet→内部 id），两只僵尸放报告
 //   坐标 (33408,3808)，泵 1800 tick 观察：逃逸/循环/位置轨迹。
 // 运行:SW_ORIGIN=http://localhost:5231 node tools/run-diag.mjs scripts/_stuck-notch-replay.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
-const report = JSON.parse(readFileSync('/Users/vinlic/Downloads/debug-report-氙奇葩-2026-08-25T04-00-25-182Z.json', 'utf8'));
+const report = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'debug-report-氙奇葩-2026-08-25T04-00-25-182Z.json')), 'utf8'));
 const area = report.tiles.areaCamera;
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

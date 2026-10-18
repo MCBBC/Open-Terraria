@@ -7,8 +7,8 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 
-string resDir = "/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources";
-string decDir = "/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456";
+string resDir = Environment.GetEnvironmentVariable("SW_TERRARIA_RES") ?? "../../Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources"; // ★C档可移植:本机 Steam 资源面,SW_TERRARIA_RES 可覆盖
+string decDir = Environment.GetEnvironmentVariable("SW_PROJECT_ROOT") ?? "../../.."; // ★C档可移植:decDir/Terarria1456
 AppDomain.CurrentDomain.AssemblyResolve += (s, e) => {
     var name = new AssemblyName(e.Name).Name + ".dll";
     foreach (var d in new[] { decDir, resDir }) {

@@ -1,8 +1,9 @@
 // 分析 NPC 贴图条首帧的"脸部偏侧"：上半身行的水平质心偏向哪边 = 面朝哪边
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 for (const id of [3, 17, 18, 22, 67]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const { width: w, height: h, data } = png;
   // 取首帧（高度整条的第 0 帧；帧高未知→取整条顶部 1/4 行带分析）
   const bandH = Math.min(h, 20);

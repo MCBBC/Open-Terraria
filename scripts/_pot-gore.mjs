@@ -13,10 +13,11 @@
 //  ④ frameX 带基变体（0/36/72,PlacePot :54557 genRand.Next(3)*36）不干扰分档
 //  ⑤ 素材链：vanilla/Gore_51.png 经 atlas.ensureVImage 懒载可得（Renderer.drawGorePiece 出口）
 // 运行：node tools/run-diag.mjs scripts/_pot-gore.mjs（SW_ORIGIN 指私有 vite 实例）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 
 const browser = await puppeteer.launch({

@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ215（2026-09-20）：extract-mounts.mjs + extract-expert.mjs era guard 落闸守卫测试。
 //
@@ -22,6 +25,11 @@ import { tmpdir } from 'node:os';
 
 const MOUNTS_SCRIPT = join(process.cwd(), 'tools', 'extract-mounts.mjs');
 const EXPERT_SCRIPT = join(process.cwd(), 'tools', 'extract-expert.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const MOUNTS_LIVE = join(process.cwd(), 'src', 'data', 'vanilla-mounts.json');
 const EXPERT_LIVE = join(process.cwd(), 'src', 'data', 'vanilla-expert.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
@@ -29,7 +37,7 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
-describe('extract-mounts era guard（B-form 干跑对拍 + 输出通道三分离）', () => {
+describe.skipIf(EXT_MISSING)('extract-mounts era guard（B-form 干跑对拍 + 输出通道三分离）', () => {
   it('行为面:缺省干跑零写盘（重产=现库逐字节零漂移 exit 0）', () => {
     const before = md5(MOUNTS_LIVE);
     const r = spawnSync('node', [MOUNTS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -135,7 +143,7 @@ describe('extract-mounts era guard（B-form 干跑对拍 + 输出通道三分离
   });
 });
 
-describe('extract-expert era guard（B-form 干跑对拍 + 输出通道三分离）', () => {
+describe.skipIf(EXT_MISSING)('extract-expert era guard（B-form 干跑对拍 + 输出通道三分离）', () => {
   it('行为面:缺省干跑零写盘（重产=现库逐字节零漂移 exit 0）', () => {
     const before = md5(EXPERT_LIVE);
     const r = spawnSync('node', [EXPERT_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -208,7 +216,7 @@ describe('extract-expert era guard（B-form 干跑对拍 + 输出通道三分离
     writeFileSync(fakeLive, '{"seeded":true}');
     const beforeLive = md5(EXPERT_LIVE);
     try {
-      const src = readFileSync(EXPERT_SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(EXPERT_SCRIPT, 'utf8'));
       const TRIGGER = '/vanilla-expert.json` : null);';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-expert-mutant.mjs');
@@ -229,7 +237,7 @@ describe('extract-expert era guard（B-form 干跑对拍 + 输出通道三分离
     const dir = mkdtempSync(join(TMP, 'expert-guard-'));
     const beforeLive = md5(EXPERT_LIVE);
     try {
-      const src = readFileSync(EXPERT_SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(EXPERT_SCRIPT, 'utf8'));
       const TRIGGER = "const REGIONS = ['SetDefaults1',";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-expert-mutant-anchor.mjs');

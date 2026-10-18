@@ -1,9 +1,10 @@
 // _exit-mem-xray2.mjs — CPU 画像分窗提取 + 慢帧窗 + worker 静默/身份鉴定
 // run: node scripts/_exit-mem-xray2.mjs [tracePath]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { scanTrace } from './_exit-mem-scan.mjs';
 
-const TRACE = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261004T130359.json';
+const TRACE = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261004T130359.json'));
 const OUT = '/tmp/exit-mem';
 const T0 = 816233258417; // recon window min
 

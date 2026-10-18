@@ -21,7 +21,7 @@
 //    Item4 起手音+非 autoReuse 吞按住连发）;②右键臂整撤（1:1:原版右键无使用面,
 //    BJ285-② 消耗+返还语义面原样迁入左键域——改判史见本文件与 bj285-debt-wave.test.ts）。
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import { Game } from '../src/core/Game';
@@ -31,11 +31,14 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { newWiresRadialState } from '../src/stats/wiresRadial';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
 const GAME_SRC = readFileSync(join(dirname(__dirname), 'src', 'core', 'Game.ts'), 'utf8');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
-const PLAYER_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const PLAYER_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const KIT_IID = ITEM_BY_KEY['vi_5289_minecart_upgrade_kit'];
 const CART_IID = ITEM_BY_KEY['vi_3353_mechanical_cart'];
@@ -97,7 +100,7 @@ const cartCount = (inv: Inventory) => inv.slots.reduce((n, s) => n + (s && s.id 
 // ================================================================
 // ① 数据面：反编译直读锚（Item.cs case 5289 / Player.cs 使用支）
 // ================================================================
-describe('BJ690 数据面：5289 原版定义与使用支（Item.cs/Player.cs 直读）', () => {
+describe.skipIf(EXT_MISSING)('BJ690 数据面：5289 原版定义与使用支（Item.cs/Player.cs 直读）', () => {
   it('Item.cs case 5289：consumable+useStyle4+useTime30+Item4+无 autoReuse（:41987-41997）', () => {
     const body = ITEM_CS.split('\n').slice(41986, 41997).join('\n');
     expect(body).toContain('case 5289:');
@@ -124,7 +127,7 @@ describe('BJ690 数据面：5289 原版定义与使用支（Item.cs/Player.cs �
 // ================================================================
 // ② 行为面：左键真实使用链（修复主面——旧=裸挥 no-op 不消耗）
 // ================================================================
-describe('BJ690 行为面：左键使用（ItemCheck 域,旧=无 case 完全 no-op）', () => {
+describe.skipIf(EXT_MISSING)('BJ690 行为面：左键使用（ItemCheck 域,旧=无 case 完全 no-op）', () => {
   it('首用：套件 −1 + superCart 解锁 + 返还 3353 机械矿车 + useTime 30 + Item4 起手音', () => {
     const s = stubGame();
     s.grantKits(3);
@@ -181,7 +184,7 @@ describe('BJ690 行为面：左键使用（ItemCheck 域,旧=无 case 完全 no-
 // ================================================================
 // ③ 右键非使用通道：原版右键=纯格交互（旧右键臂撤除判别面）
 // ================================================================
-describe('BJ690 右键非使用通道（原版无右键使用面,旧臂=域错置+劫持格交互）', () => {
+describe.skipIf(EXT_MISSING)('BJ690 右键非使用通道（原版无右键使用面,旧臂=域错置+劫持格交互）', () => {
   function dispatchHarness() {
     const s = stubGame();
     s.grantKits(2);
@@ -212,7 +215,7 @@ describe('BJ690 右键非使用通道（原版无右键使用面,旧臂=域错�
 // ================================================================
 // ④ 结构锁：域迁移在位（左键 case + 右键臂不回潮）
 // ================================================================
-describe('BJ690 结构锁', () => {
+describe.skipIf(EXT_MISSING)('BJ690 结构锁', () => {
   it('PERMANENT_USE_VIDS 含 5289（左键 ItemCheck 域单点分流）', () => {
     const m = GAME_SRC.match(/const PERMANENT_USE_VIDS = new Set\(\[([\s\S]*?)\]\);/);
     expect(m, 'PERMANENT_USE_VIDS 定义在位').toBeTruthy();

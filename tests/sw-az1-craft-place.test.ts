@@ -35,6 +35,9 @@ import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { rollablePrefixes } from '../src/data/vanillaPrefixes';   // ★SW-BM1 逐件 roll 行为面
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => fs.existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const woodIid = invIndexOfVanilla(9);
 const gelIid = invIndexOfVanilla(23);
@@ -51,7 +54,7 @@ const src = (p: string): string =>
 afterEach(() => { vi.restoreAllMocks(); });
 
 // ==================== R3：Shift 批量合成部分量（CraftItem :88-110） ====================
-describe('SW-AZ1 R3 批量合成部分量语义', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 R3 批量合成部分量语义', () => {
   it('料够 3 造 3：times=10 → 返 3、材料扣净（旧两阶段全量校验=不够 10 造 0）', () => {
     const inv = new Inventory();
     inv.slots[10] = { id: woodIid, stack: 30 };
@@ -158,7 +161,7 @@ describe('SW-AZ1 R3 批量合成部分量语义', () => {
 });
 
 // ==================== item4：CraftFromNearbyChests 开关作用域 ====================
-describe('SW-AZ1 item4 CraftFromNearbyChests 作用域（Recipe.cs:375-407）', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 item4 CraftFromNearbyChests 作用域（Recipe.cs:375-407）', () => {
   it('false = ③④旁路：附近世界箱与 bank tile 不计;①开箱容器照常入列', () => {
     const st = new TileStore(300, 300);
     st.setTile(100, 100, TILE_BY_KEY['v_29_piggy_bank']);
@@ -196,7 +199,7 @@ describe('SW-AZ1 item4 CraftFromNearbyChests 作用域（Recipe.cs:375-407）', 
 });
 
 // ==================== item5：弹体容器支（GetBanksInRangeOf 弹体段） ====================
-describe('SW-AZ1 item5 弹体容器 bank 支', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 item5 弹体容器 bank 支', () => {
   const banksOf = (items: unknown) => [{ items }] as unknown as
     ReadonlyArray<CraftItemSource | null | undefined>;
 
@@ -226,7 +229,7 @@ describe('SW-AZ1 item5 弹体容器 bank 支', () => {
 });
 
 // ==================== item1：光标持物镜像槽 58 ====================
-describe('SW-AZ1 item1 光标持物镜像槽（Inventory 层）', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 item1 光标持物镜像槽（Inventory 层）', () => {
   it('heldItem() 伪选中：镜像非空即 HeldItem（PickItemSelectionOverride :17528-17532）', () => {
     const inv = new Inventory();
     inv.slots[0] = { id: woodIid, stack: 9 };
@@ -270,7 +273,7 @@ describe('SW-AZ1 item1 光标持物镜像槽（Inventory 层）', () => {
 });
 
 // ==================== 结构锁（源文本锚,防静默回退） ====================
-describe('SW-AZ1 结构锁', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 结构锁', () => {
   const game = src('../src/core/Game.ts');
   const ui = src('../src/ui/UI.ts');
   const inv = src('../src/items/Inventory.ts');
@@ -398,7 +401,7 @@ describe('SW-AZ1 结构锁', () => {
 });
 
 // ==================== item1 行为面：光标持物 → tryPlace 消耗光标物（端到端） ====================
-describe('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
+describe.skipIf(EXT_MISSING)('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
   it('光标捏木材点世界 → 铺放且扣的是光标物 stack,热栏原物分毫不动（removeHeld 镜像臂）', () => {
     const iidOf = (vid: number): number => {
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -456,7 +459,7 @@ describe('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
 });
 
 // ==================== SW-RB4a 2026-09-06 红蓝对抗修复钉 ====================
-describe('SW-RB4a 修复钉', () => {
+describe.skipIf(EXT_MISSING)('SW-RB4a 修复钉', () => {
   const torchIid = invIndexOfVanilla(8);   // 火把（maxStack 999、无词缀域）
   const TORCH_MAX = ITEM_DEFS[torchIid]?.maxStack ?? 999;
 

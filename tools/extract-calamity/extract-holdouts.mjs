@@ -5,7 +5,8 @@
 // sw.itemUse(朝鼠标生成 holdout 弹;106 holdout 弹声明已在册)。
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-const SRC = process.env.CALAMITY_SRC ?? '/Users/vinlic/Project/GLM/SandboxWorld/CalamityModPublic';
+const PROJECT_ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植
+const SRC = process.env.CALAMITY_SRC ?? `${PROJECT_ROOT}/CalamityModPublic`;
 const ITEMS = join(process.cwd(), 'mods/calamity/content/items');
 const PROJS = join(process.cwd(), 'mods/calamity/content/projectiles');
 const OUT = join(process.cwd(), 'mods/calamity/holdouts.json');

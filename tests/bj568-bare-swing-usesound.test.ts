@@ -18,7 +18,7 @@
 // 锁面：①数据面（Item.cs/ItemID.cs 直读对拍）②行为面（起手/周期重播/单挥/无数据静/
 //  专支不回归）③全 vid exactly-once 普查 ④结构锁。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import { Game, heldItemUseStyle } from '../src/core/Game';
@@ -31,12 +31,15 @@ import { newWiresRadialState } from '../src/stats/wiresRadial';
 import { itemCombat } from '../src/data/vanillaItemCombat';
 import { itemUseSoundWav } from '../src/data/itemUseSound';
 import { combatWeapon } from '../src/data/vanillaItemCombat';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const LINES = ITEM_CS.split('\n');
-const ITEMID_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8');
-const GAME_SRC = readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8');
+const ITEMID_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const GAME_SRC = existsSync(join(REPO, 'game', 'src', 'core', 'Game.ts')) ? readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** Item.cs SetDefaults switch case 体提取（bj566 同构,单 case 域） */
 function caseBody(type: number): string {
@@ -108,7 +111,7 @@ function stubGame(heldVid: number) {
 
 // ================= ①数据面：三网 UseSound=Item1 + SkipsInitialUseSound 钉值 =================
 
-describe('BJ568 数据面：原版 UseSound 面（Item.cs/ItemID.cs 直读对拍）', () => {
+describe.skipIf(EXT_MISSING)('BJ568 数据面：原版 UseSound 面（Item.cs/ItemID.cs 直读对拍）', () => {
   it('三网 case 体含 UseSound=SoundID.Item1（:21313/:29549/:39488）且 autoReuse=true', () => {
     for (const vid of [1991, 3183, 4821]) {
       const body = caseBody(vid);
@@ -134,7 +137,7 @@ describe('BJ568 数据面：原版 UseSound 面（Item.cs/ItemID.cs 直读对拍
 
 // ================= ②行为面：裸挥臂起手拍 UseSound（updateUse 桩驱动） =================
 
-describe('BJ568 行为面：起手拍播/周期重播/单挥/无数据静/专支不回归', () => {
+describe.skipIf(EXT_MISSING)('BJ568 行为面：起手拍播/周期重播/单挥/无数据静/专支不回归', () => {
   it('①虫网 1991：起手拍播 UseSound（Item_1 钉值）', () => {
     const s = stubGame(1991);
     s.inp.mouseDown = true; s.inp.mouseHeld = true;
@@ -219,7 +222,7 @@ describe('BJ568 行为面：起手拍播/周期重播/单挥/无数据静/专支
 
 // ================= ③全 vid exactly-once 普查（双播/漏播机械对账） =================
 
-describe('BJ568 普查：全 useStyle>0 非工具 vid 起手拍 exactly-once', () => {
+describe.skipIf(EXT_MISSING)('BJ568 普查：全 useStyle>0 非工具 vid 起手拍 exactly-once', () => {
   it('3580 件桩驱动一拍点击帧：playUseSound(vid) ≤1 且数据裸挥居民=1', () => {
     const doubles: string[] = [];
     const misses: string[] = [];
@@ -250,7 +253,7 @@ describe('BJ568 普查：全 useStyle>0 非工具 vid 起手拍 exactly-once', (
 
 // ================= ④结构锁：起手音门与豁免面在位 =================
 
-describe('BJ568 结构锁：裸挥臂起手 UseSound 门', () => {
+describe.skipIf(EXT_MISSING)('BJ568 结构锁：裸挥臂起手 UseSound 门', () => {
   it('updateUse 裸挥 else 支含数据门+SkipsInitial 门+bareSoundClaimed 豁免+playUseSound', () => {
     expect(GAME_SRC).toMatch(/if \(itemUseSoundWav\(bareVid\) && !SKIPS_INITIAL_USE_SOUND\.has\(bareVid\)\n\s*&& !this\.bareSoundClaimed\(bareVid, heldDef\)\) \{/);
     expect(GAME_SRC).toMatch(/this\.playUseSound\(bareVid, 'throw'\);/);

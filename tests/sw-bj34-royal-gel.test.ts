@@ -16,7 +16,9 @@
 // 表外型原文恒开,补写为逐字 1:1）;122 充能/开火/垂直决策缺;索敌面此前已接。
 // 1458 增量：同链逐行比对零差异（Player.cs:14789/:2977/NPC.cs 同行号）,无需移植。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { join } from 'node:path';
 import { Enemy, CALMING_NO_AGGRO_TYPES, npcTypeNoAggro } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
@@ -25,10 +27,12 @@ import type { GameHooks } from '../src/entities/types';
 import type { Player as PlayerT } from '../src/entities/Player';
 
 const SRC = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
-const DECOMP_PLAYER = readFileSync(
-  join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
-const DECOMP_NPC = readFileSync(
-  join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'NPC.cs'), 'utf8');
+const DECOMP_PLAYER = existsSync(join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Player.cs'))
+  ? readFileSync(join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const DECOMP_NPC = existsSync(join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'NPC.cs'))
+  ? readFileSync(join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'NPC.cs'), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 // ---------------- 玩家桩（接触结算读 x/y/w/h/cx/cy/dead/luck/equipStats/buffs） ----------------
 interface StubPlayer {
@@ -99,7 +103,7 @@ function contactPair(world: World, vid: number, gel: boolean, playerOver: Partia
 }
 
 // ==================== 1. 原版锚：置位表金标（1457 反编译直读） ====================
-describe('SW-BJ34 原版锚（1457 反编译金标）', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ34 原版锚（1457 反编译金标）', () => {
   it('Player.cs 3090 块逐项置位表 ≡ CALMING_NO_AGGRO_TYPES（23 类,含 59 熔岩史莱姆）', () => {
     const set = [...DECOMP_PLAYER.matchAll(/npcTypeNoAggro\[(\d+)\] = true;/g)]
       .map((m) => Number(m[1]));
@@ -144,7 +148,7 @@ describe('SW-BJ34 原版锚（1457 反编译金标）', () => {
 });
 
 // ==================== 2. 判定子：装备旗专面（不含镇静） ====================
-describe('SW-BJ34 npcTypeNoAggro 判定子（=型在 23 类表 ∧ equipStats.royalGel）', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ34 npcTypeNoAggro 判定子（=型在 23 类表 ∧ equipStats.royalGel）', () => {
   it('凝胶装备：23 类逐型全真（含 59 熔岩）', () => {
     const p = asPlayer(stubPlayer({ equipStats: { royalGel: true } }));
     for (const vid of CALMING_NO_AGGRO_TYPES) {
@@ -169,7 +173,7 @@ describe('SW-BJ34 npcTypeNoAggro 判定子（=型在 23 类表 ∧ equipStats.ro
 });
 
 // ==================== 3. 接触面（用户实报根因,真实 fixedUpdate 行为） ====================
-describe('SW-BJ34 接触伤害面（Update_NPCCollision :31588 → 本仓 fixedUpdate 接触块）', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ34 接触伤害面（Update_NPCCollision :31588 → 本仓 fixedUpdate 接触块）', () => {
   it('★实报主案：装凝胶,熔岩史莱姆(59)贴身 → 零接触结算', () => {
     const w = flatWorld();
     const { e, p } = contactPair(w, 59, true);
@@ -218,7 +222,7 @@ describe('SW-BJ34 接触伤害面（Update_NPCCollision :31588 → 本仓 fixedU
 });
 
 // ==================== 4. AI 弹射门（AI_001 :61303/:61768/:61823/:61878/:61958/:62007） ====================
-describe('SW-BJ34 AI_001 弹射门（凝胶在身不蓄射）', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ34 AI_001 弹射门（凝胶在身不蓄射）', () => {
   const enemySrc = SRC(join('entities', 'Enemy.ts'));
 
   it('539 携物掷弹门（:61303）：!npcTypeNoAggro 已接,旧「省略登记」已清偿', () => {
@@ -266,7 +270,7 @@ describe('SW-BJ34 AI_001 弹射门（凝胶在身不蓄射）', () => {
 });
 
 // ==================== 5. 索敌面回归钉（此前已接,本批不回归） ====================
-describe('SW-BJ34 索敌面（TargetClosest :78490 +1000 / :78542 不面向门）', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ34 索敌面（TargetClosest :78490 +1000 / :78542 不面向门）', () => {
   it('熔岩史莱姆装凝胶:+1000 罚 + 不转身门保留旧朝向', () => {
     const e = Enemy.fromVanilla(59, 100 * 16, 50 * 16)!;
     e.facing = 1;                       // 旧朝向朝右

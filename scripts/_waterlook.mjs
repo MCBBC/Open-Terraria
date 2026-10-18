@@ -1,8 +1,9 @@
 // _waterlook:果冻管线活跃下的水体外貌序列抓拍(玩家搅水涟漪传播中)。
 // 连续 8 帧(每 200ms)截图,肉眼+像素检查透出背景的空洞;q3 vs q0 对照。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

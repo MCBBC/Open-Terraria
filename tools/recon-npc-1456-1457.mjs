@@ -35,8 +35,10 @@ const norm = (k, v) => (BOOL_KEYS.has(k) && typeof v === 'number' ? v !== 0 : v)
 
 // ---- 音效语义解析(与 src/data/vanillaNpcs.ts vanillaSoundFiles 同源) ----
 // 目的:'NPCHit1' ≡ 'NPC_Hit_1'(同 wav)、'NPC_Hit_53' ≠ 'DD2_DrakinHurt'(文件形 vs 声轨)
-const tracksJson = JSON.parse(readFileSync(join(ROOT, 'game/src/data/vanilla-soundtracks.json'), 'utf8'));
-const vnSrc = readFileSync(join(ROOT, 'game/src/data/vanillaNpcs.ts'), 'utf8');
+// ★C档可移植:自位置推导(原 join(ROOT,'game/src/...') 假定仓目录名=game)
+const GAME_SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
+const tracksJson = JSON.parse(readFileSync(join(GAME_SRC, 'src/data/vanilla-soundtracks.json'), 'utf8'));
+const vnSrc = readFileSync(join(GAME_SRC, 'src/data/vanillaNpcs.ts'), 'utf8');
 const ALIASES = {};
 {
   const m = vnSrc.match(/SOUND_NAME_ALIASES[^{]*\{([\s\S]*?)\}/);

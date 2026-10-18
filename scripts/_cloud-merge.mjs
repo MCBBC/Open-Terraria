@@ -1,9 +1,10 @@
 // #A 合并验证:白天+GL 云 → glfx 应出现 cloud: 纹理键且天空有云;?cloudgl=0 → 2D 兜底。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/cloudm-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/cloudm-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
@@ -52,5 +53,5 @@ for (let k = 0; k < 5; k++) {
   console.log(`[+${(k + 1) * 22}s]`, JSON.stringify(snap));
 }
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
-if (shot) fs.writeFileSync('/Users/vinlic/.claude/jobs/8405c930/tmp/cloud-merge.png', shot);
+if (shot) fs.writeFileSync(join(HOME, '.claude/jobs/8405c930/tmp/cloud-merge.png'), shot);
 await browser.close();

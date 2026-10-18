@@ -1,11 +1,12 @@
 // 丛林密度采样:自建 vs 参考,各取丛林中心列的成分剖面
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox']});
 const page = await browser.newPage();
 page.on('pageerror', e => console.log('ERR:', e.message));
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
-const wldBuf = Array.from(readFileSync('/Users/vinlic/Downloads/不负责任的女妖啤酒厂.wld'));
+const wldBuf = Array.from(readFileSync(needInput(join(DOWNLOADS, '不负责任的女妖啤酒厂.wld'))));
 const out = await page.evaluate(async ([wldBuf]) => {
   const mod = await import('/src/world/gen/WorldGen.ts');
   const { parseWldToSave } = await import('/src/wld/WldImport.ts');

@@ -3,11 +3,12 @@
 //   2 水与半砖浸润空缺几像素(锚 :512-515 半砖钳底墙 0.5 + TileDrawing solidLayer 带)
 //   3 静水自然扰动缺失(FilterWaterDistortion obj19 噪声位移 → WaterWaves.sampleDisplace)
 // 用法:SW_ORIGIN=http://localhost:5204 node tools/run-diag.mjs --timeout=240000 scripts/_water-symptoms-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/watersym-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/watersym-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();
@@ -185,6 +186,6 @@ for (const z of [1.73, 2.0]) {
 
 // 截图存档
 await zoomTo(1.73);
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/watersym-173.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/watersym-173.png') });
 await browser.close();
 console.log('DONE');

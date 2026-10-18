@@ -1,10 +1,11 @@
 // wld 帧虚拟化普查仪（参数化）:解析指定 .wld,输出每类型 存帧率/帧样本。
 // 用法: WLD=path OUT=/path/out.json SW_ORIGIN=... node tools/run-diag.mjs scripts/_wld-frame-survey.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = process.env.WLD ?? '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = process.env.WLD ?? needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const OUT = process.env.OUT ?? '/tmp/wld-frame-survey.json';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');

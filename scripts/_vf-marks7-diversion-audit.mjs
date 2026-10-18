@@ -1,11 +1,12 @@
 // 回落门漏网审计(第二批标注 34 格):
 // 对每格输出:diverted(重算 crossesForeignMergeDirt)/邻8类型(vanilla域)/链帧。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (7).json';
-const MARKS = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/marks-FTW_V2 (7).json', 'utf8')).marks;
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (7).json'));
+const MARKS = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'marks-FTW_V2 (7).json')), 'utf8')).marks;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -73,7 +74,7 @@ const res = await p.evaluate(async (marks) => {
   const notDiverted = rows.filter((r) => !r.foreignDiverts);
   return { total: rows.length, notDivertedCount: notDiverted.length, notDiverted: notDiverted.slice(0, 12), rows };
 }, MARKS);
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/marks7-audit.json', JSON.stringify(res.rows, null, 1));
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/marks7-audit.json'), JSON.stringify(res.rows, null, 1));
 console.log(JSON.stringify({ total: res.total, notDiverted: res.notDivertedCount }));
 for (const r of res.notDiverted ?? []) console.log(`#${r.no} (${r.x},${r.y}) ${r.k} centerVan=${r.centerVan} inDirt=${r.inDirt} nb=[${r.nbVan}] stamp=(${r.chainFx},${r.chainFy})`);
 await b.close();

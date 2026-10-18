@@ -10,7 +10,7 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const RUN = process.env.SW_III167 === '1';
-const G2D = process.env.SW_III167_G2 ?? '/Users/vinlic/GoldenChains/golden-waterpark';
+const G2D = process.env.SW_III167_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-waterpark`;
 const SEED = process.env.SW_III167_SEED ?? 'waterpark|20260905';
 const EVIL = Number(process.env.SW_III167_EVIL ?? 0);
 const OUTD = process.env.SW_III167_OUT ?? '/tmp/iii167-out/jsdump';

@@ -1,11 +1,12 @@
 // wld 导入守卫老人/地牢守卫一致性探针(2026-09-01 用户实报):
 //   不变式A: !downedBoss3 的 wld 导入 → 老人在地牢门口在场(可直接对话)
 //   不变式B: downedBoss3 置位后 → 老人自灭(:5327)+地牢池不再出守卫(68)
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5208';
-const WLD = process.env.SW_WLD ?? '/Users/vinlic/Project/GLM/SandboxWorld/game/tests/golden/wld/12345世界.wld';
+const WLD = process.env.SW_WLD ?? join(REPO_ROOT, 'tests/golden/wld/12345世界.wld');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });

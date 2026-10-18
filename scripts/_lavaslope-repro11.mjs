@@ -1,9 +1,10 @@
 // _lavaslope-repro11: 渲染泥穴岩浆湖 (1395,1080) 区域——用户截图最可能位置。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: 'new', defaultViewport: { width: 1280, height: 900 },

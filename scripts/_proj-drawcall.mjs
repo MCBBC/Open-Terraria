@@ -2,12 +2,13 @@
 // 不采样画面像素(此前误测源——世界像素噪声),直接记录 drawImage 调用的
 // 图像对象(类型/尺寸/src),回答"弹幕贴图到底有没有被绘制、画的是什么"。
 // 同一探针跑 4173(PROD,SW+zip) 与 5199(dev,直连) 两源对照。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const B = process.env.T || 'http://localhost:4173';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dc-profile-' + (B.match(/\d+/)?.[0] ?? 'x'),
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dc-profile-') + (B.match(/\d+/)?.[0] ?? 'x'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

@@ -2,11 +2,12 @@
 // markDirtyAround → invalidateVanillaFrameAt → vanillaFrameFor 重算)验证
 // 挖掘/回填/静默区域编辑三种路径下邻居帧现场刷新。
 // 2026-08-28 定谳的病灶:写入键 j*st.w+i 与失效键 j*100000+i 公式错位 ⇒ 失效删空。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 900, height: 600 } });

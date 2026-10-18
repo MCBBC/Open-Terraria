@@ -1,11 +1,12 @@
 // 快检:options.waveQuality 实际值 + gates + 注入计数(直接在页内打点)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (7).json', 'utf8');
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (7).json')), 'utf8');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wash-profile6',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wash-profile6'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

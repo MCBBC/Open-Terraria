@@ -1,10 +1,11 @@
 // 湖左缘(x342-368, y236-250)数据倒库:liquid/half/slope/tile sheet + 截图裁剪。
 // 目标:定位"半砖/坡面水没水面线"的确切几何。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dline5-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dline5-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();
@@ -51,5 +52,5 @@ for (const row of dump.err ? [dump] : dump) {
   console.log(`y${row.y} ${line}`);
 }
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
-if (shot) fs.writeFileSync('/Users/vinlic/.claude/jobs/8405c930/tmp/dline5.png', shot);
+if (shot) fs.writeFileSync(join(HOME, '.claude/jobs/8405c930/tmp/dline5.png'), shot);
 await browser.close();

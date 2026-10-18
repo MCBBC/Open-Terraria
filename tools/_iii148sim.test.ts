@@ -108,7 +108,7 @@ function cloneStore(st: TileStore): TileStore {
   const base = replay('base');
   // ---- ②b post-Piles 状态差(JS 重放 vs x86 077 dump)——定位 outcome 分歧格 ----
   {
-    const G2 = '/Users/vinlic/GoldenChains/golden-winter/';
+    const G2 = `${process.env.HOME ?? ''}/GoldenChains/golden-winter/`;
     const fs2 = await import('node:fs');
     const x77t = new Uint16Array(fs2.readFileSync(`${G2}077_Piles.typ`).buffer, 0, W * H);
     const x77a = new Uint8Array(fs2.readFileSync(`${G2}077_Piles.act`).buffer, 0, W * H);

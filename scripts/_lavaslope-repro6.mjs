@@ -1,10 +1,11 @@
 // _lavaslope-repro6: 用户世界实际岸缘候选渲染。冻结液体,玩家瞬移到候选上方,
 // fullbright 截图+逐候选裁剪。重点:slope1/2/3/4+邻液 与 半砖,水 vs 岩浆。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

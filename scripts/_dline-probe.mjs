@@ -1,12 +1,13 @@
 // 双水线实证探针(2026-08-19,用户实报"两条水面线正好差 1 格"):
 // 造一个静态水池(平地凹槽灌满),截图逐行扫"亮线"(高亮度水平行),数线与间距。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=240000 scripts/_dline-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dline-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dline-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
@@ -80,5 +81,5 @@ const out = await page.evaluate(() => {
 }).catch((e) => ({ err: String(e).slice(0, 200) }));
 console.log('[亮线扫描]', JSON.stringify(out));
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
-if (shot) fs.writeFileSync('/Users/vinlic/.claude/jobs/8405c930/tmp/dline.png', shot);
+if (shot) fs.writeFileSync(join(HOME, '.claude/jobs/8405c930/tmp/dline.png'), shot);
 await browser.close();

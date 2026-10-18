@@ -39,7 +39,7 @@ interface Row { label: string; n: number; tot: number[]; byBand: number[][]; act
     const mLoc = /\(.*(src\/[^\s?]+):(\d+):\d+\)/.exec(stackLine);
     if (!mLoc) return '?';
     const rel = mLoc[1].slice(mLoc[1].indexOf('src/'));
-    const abs = `/Users/vinlic/Project/GLM/SandboxWorld/game/${rel}`;
+    const abs = `${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${rel}`;
     let src = srcCache.get(abs);
     if (!src) { try { src = readFileSync(abs, 'utf8').split('\n'); } catch { src = []; } srcCache.set(abs, src); }
     const ln = +mLoc[2];

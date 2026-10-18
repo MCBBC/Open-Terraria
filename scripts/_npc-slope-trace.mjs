@@ -1,8 +1,9 @@
 // 染料商坡区逐 tick 物理追踪(补 F5 录制器缺口:vy/onGround/collideY/slope 周边态)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (21).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (21).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});

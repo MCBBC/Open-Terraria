@@ -12,13 +12,16 @@
 //  ★变异证红：每断言注「旧实现退化值」——M1 759 远档 Lerp→恒速 5 / M2 388 冲刺
 //  触发摘除 / M3 533 蓄力 ×0.9→×1.0 / M4 387 反推支摘除 各必恰红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { MinionProj, babyBirdHomeLocation } from '../src/entities/MinionProj';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
 
@@ -83,7 +86,7 @@ const fld = <T, K extends string>(o: T, k: K): unknown =>
 // ============================================================
 // ① 源码锚扫描（变异源码即红）
 // ============================================================
-describe('① 源码锚（AI_158 / AI_066 双侧亲读锚）', () => {
+describe.skipIf(EXT_MISSING)('① 源码锚（AI_158 / AI_066 双侧亲读锚）', () => {
   it('原版 AI_158_BabyBird 块内数值锚', () => {
     const src = readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
     const i = src.indexOf('private void AI_158_BabyBird()');
@@ -164,7 +167,7 @@ describe('① 源码锚（AI_158 / AI_066 双侧亲读锚）', () => {
 // ============================================================
 // ② 759 雀宝宝 AI_158 行为锁（旧=通用恒速 5/环形槽 → M1 红）
 // ============================================================
-describe('② 759 AI_158 行为锁', () => {
+describe.skipIf(EXT_MISSING)('② 759 AI_158 行为锁', () => {
   it('远档逼近 Lerp 0.15 → 稳态步距 6（旧通用恒速 5 → M1 红）', () => {
     const e = mkEnemy(1, 0, 0, 40, 40);
     const { hooks, player } = makeHooks([e]);
@@ -247,7 +250,7 @@ describe('② 759 AI_158 行为锁', () => {
 // ============================================================
 // ③ 387/388 双子 AI_066 flag29 行为锁（M2/M4 红位）
 // ============================================================
-describe('③ 387/388 AI_066 flag29 行为锁', () => {
+describe.skipIf(EXT_MISSING)('③ 387/388 AI_066 flag29 行为锁', () => {
   it('387 交战逼近：阻尼 (v×40+dir×6)/41 → 稳态 6（旧通用恒速 5 → 红）', () => {
     const e = mkEnemy(3, 0, 0);
     const { hooks, player } = makeHooks([e]);
@@ -349,7 +352,7 @@ describe('③ 387/388 AI_066 flag29 行为锁', () => {
 // ============================================================
 // ④ 533 致命球 AI_066 533 面行为锁（M3 红位）
 // ============================================================
-describe('④ 533 AI_066 533 面行为锁', () => {
+describe.skipIf(EXT_MISSING)('④ 533 AI_066 533 面行为锁', () => {
   it('蓄力段 velocity×0.9/拍（:30193;旧通用覆写恒速 5/×0.81 误档 → M3 红）', () => {
     const e = mkEnemy(9, 0, 0);
     const { hooks, player } = makeHooks([e]);
@@ -431,7 +434,7 @@ describe('④ 533 AI_066 533 面行为锁', () => {
 // ============================================================
 // ⑤ BJ632 三帧档债定谳锁（643 3t 循环 / 758 分段帧机 / 1119 状态帧）
 // ============================================================
-describe('⑤ BJ632 帧档债清偿锁', () => {
+describe.skipIf(EXT_MISSING)('⑤ BJ632 帧档债清偿锁', () => {
   it('643 彩虹水晶塔 3t 帧循环：MINION_FRAMES[643]=[3,8,0]（AI_123 :37787-37793 源锚）', () => {
     const src = readFileSync(join(GAME, 'src', 'entities', 'MinionProj.ts'), 'utf8');
     expect(src).toMatch(/643: \[3, 8, 0\]/);

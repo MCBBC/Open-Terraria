@@ -28,7 +28,7 @@
 //       node tools/extract-expert.mjs --dump             （stdout 全量表，recon 双实例用）
 import { readFileSync, writeFileSync, writeSync, existsSync, mkdirSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;
 // ★BJ183 2026-09-20 缺省 1456→1457——expert 位面 1456↔1457 对拍零漂移(43 条全等),
 // 裸跑不再锚旧版;1456 档留 SW_ITEM_VER=1456 显式回拍)

@@ -15,7 +15,7 @@
 //     物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 // --audit（tests/extract-audit 同法）：全量计算但不落盘，stdout 末行输出
 // pinned（表达式槽位钉死件）+ 基数供测试与已提交 JSON 比对——双向抓

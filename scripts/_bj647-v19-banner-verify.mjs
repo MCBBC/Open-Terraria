@@ -1,8 +1,9 @@
 // ★BJ648 落刀验证：夜晚旗区——迁层前名条灭/迁层后名条恒亮。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 1 }, args: ['--window-size=1530,960', '--window-position=30,30'] });
 const page = await browser.newPage();
 const errors = [];

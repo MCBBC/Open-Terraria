@@ -8,6 +8,9 @@
 // 巨石臂源级接线（用冰雹臂同款精确盒,不再手写中心化盒）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { resolve } from 'node:path';
 import { solidCollisionBox } from '../src/render/WeatherRenderer';
 import { TileStore } from '../src/world/TileStore';
@@ -17,7 +20,7 @@ import { TILE } from '../src/core/constants';
 const STONE = TILE_INTERNAL_BY_SHEET.get(1)!;      // 原版 sheet 1 石块
 const PLATFORM = TILE_INTERNAL_BY_SHEET.get(19)!;  // 原版 sheet 19 平台（tileSolidTop）
 
-describe('Collision.SolidCollision 左上锚语义（Collision.cs:2713-2746）', () => {
+describe.skipIf(EXT_MISSING)('Collision.SolidCollision 左上锚语义（Collision.cs:2713-2746）', () => {
   const bx = 100 * TILE, by = 40 * TILE;   // 盒=[1600,1640)×[640,672) → 格列 100-101、行 40-41
 
   it('空世界 → 无实心（clear）', () => {
@@ -63,7 +66,7 @@ describe('Collision.SolidCollision 左上锚语义（Collision.cs:2713-2746）',
   });
 });
 
-describe('Game.ts 巨石臂源级接线（清偿批④）', () => {
+describe.skipIf(EXT_MISSING)('Game.ts 巨石臂源级接线（清偿批④）', () => {
   const gamePath = resolve(process.cwd(), 'src/core/Game.ts');
 
   it('巨石臂清除盒 = 冰雹臂同款精确盒 solidCollisionBox(bst, bx, by, 32, 32)', () => {
@@ -89,7 +92,7 @@ describe('Game.ts 巨石臂源级接线（清偿批④）', () => {
   });
 });
 
-describe('巨石成就 34 边沿=条件旗（WorldGen.cs:72224-72240 两旗分离,R4-F6）', () => {
+describe.skipIf(EXT_MISSING)('巨石成就 34 边沿=条件旗（WorldGen.cs:72224-72240 两旗分离,R4-F6）', () => {
   const gamePath = resolve(process.cwd(), 'src/core/Game.ts');
 
   it('_isRainingBoulders 记账【条件旗】num；窗口旗独立门生成；关闭沿判据 !num && 旗', () => {

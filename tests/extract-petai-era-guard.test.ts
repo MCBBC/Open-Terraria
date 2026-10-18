@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ212（2026-09-20）：extract-petai.mjs 1457 重锚 + era guard 落闸守卫测试。
 //
@@ -20,6 +23,11 @@ import { tmpdir } from 'node:os';
 // 守卫测试习语 = extract-itemrare-era-guard.test.ts / extract-npcs-era-guard.test.ts。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-petai.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE = join(process.cwd(), 'src', 'data', 'vanilla-petai.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
 // ★macOS /var→/private/var 符号链接：mutant 脚本放 /var 下会因 import.meta.url 与
@@ -27,7 +35,7 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
-describe('extract-petai era guard（1457 重锚 + 输出通道三分离）', () => {
+describe.skipIf(EXT_MISSING)('extract-petai era guard（1457 重锚 + 输出通道三分离）', () => {
   it('行为面:缺省干跑零写盘（exit 0+家族分布摘要+现库字节零改动）', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -136,7 +144,7 @@ describe('extract-petai era guard（1457 重锚 + 输出通道三分离）', () 
     writeFileSync(fakeLive, '{"seeded":true}');         // 哨兵种子（≠工具产物,可判写发生）
     const beforeLive = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = '/vanilla-petai.json` : null);';   // OUT_JSON 干跑臂（null）尾部,全文件唯一
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-petai-mutant.mjs');
@@ -157,7 +165,7 @@ describe('extract-petai era guard（1457 重锚 + 输出通道三分离）', () 
     const dir = mkdtempSync(join(TMP, 'petai-guard-'));
     const beforeLive = md5(LIVE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = "AI026.text.indexOf('float num47 = 2000f;')";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-petai-mutant-anchor.mjs');

@@ -1,7 +1,8 @@
 // 直接解析原始 .wld:标注点 (3227,391) 的真实 vanilla tile id + frame
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { parseWld } from '../src/wld/WldParser.ts';
 import fs from 'fs';
-const buf = new Uint8Array(fs.readFileSync('/Users/vinlic/Downloads/Starter_World Master.wld'));
+const buf = new Uint8Array(fs.readFileSync(needInput(join(DOWNLOADS, 'Starter_World Master.wld'))));
 const wld = parseWld(buf);
 const w = wld.tilesWide;
 const idx = (x: number, y: number) => y * w + x;

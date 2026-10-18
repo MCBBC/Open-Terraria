@@ -1,8 +1,9 @@
 // 地狱直通车 trace 提取缓存:主线程 X 事件 + ProfileChunk(全部 id)+ 合成器帧
 // 一次性 parse 249MB,产出紧凑缓存 /tmp/hell-xray-cache.json
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-const path = '/Users/vinlic/Downloads/Trace-20261003T164745.json';
+const path = needInput(join(DOWNLOADS, 'Trace-20261003T164745.json'));
 console.time('parse');
 const t = JSON.parse(fs.readFileSync(path, 'utf8'));
 console.timeEnd('parse');

@@ -1,9 +1,10 @@
 // _lavaslope-repro13: 全图坡面×液体 候选聚类 → 输出簇中心(密度 top)。
 // 后续按簇跑 oracle。本次只输出簇清单。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

@@ -4,11 +4,12 @@
 //   smashPot → 断言①projectiles 桶出现 projId 518、中心=罐格中心 → 主循环实跑 5s
 //   （entities update+renderer draw 真链路）→ 断言②弹消亡(240t Kill)、③GoldCoin
 //   掉落 ∈[5,15] 枚（ai1 三档）、④无 pageerror、⑤弹在期截图留档。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5201';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({
   protocolTimeout: 600000,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

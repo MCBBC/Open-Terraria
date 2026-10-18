@@ -1,6 +1,6 @@
 // 背包布局灰度 flag(vanilla 1.4.5.7 布局重构)守卫 —— 2026-09-07 用户定策
 //
-// 口径(用户拍板,方案 /Users/vinlic/.claude/plans/compressed-beaming-stonebraker.md):
+// 口径(用户拍板,方案=本机 .claude/plans 会话件 compressed-beaming-stonebraker.md):
 //   · 完全 1:1 原版布局,但【缺省关】——验证通过前不替换现行布局(刀 7 才切缺省);
 //   · classic=现行 buildInventoryPanel 零行为改动;vanilla=双构建器分派。
 // 本文件随刀序增长:刀0=flag 面;刀1=几何/页码;刀2+=srcMatch 结构锁+classic canary。

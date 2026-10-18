@@ -1,8 +1,9 @@
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (27).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (27).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('pageerror:', e.message));
@@ -48,6 +49,6 @@ await page.evaluate(() => {
   g.player.y = 348 * 16 - 40;
 });
 await new Promise((r) => setTimeout(r, 1500));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/dummy-marker.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/dummy-marker.png') });
 console.log('marker screenshot saved');
 await browser.close();

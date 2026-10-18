@@ -6,7 +6,7 @@
 //   D 召唤物面:projId 864 在场,其包围盒逐帧白块率(180 帧)
 // 白闪判据:每帧白块率(>=240,>=240,>=240,α>0)序列峰谷交替。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs scripts/_bj632-bladestaff-probe.mjs
-import { launchBrowser, openPage, bootstrap, createGame, pump, giveItems, mouseHold, aimAt } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump, giveItems, mouseHold, aimAt } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
 const browser = await launchBrowser({});

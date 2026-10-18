@@ -5,14 +5,15 @@
 //   - beat.snapshot() 轨迹(k/p50/p95/vsync/reason):用户档真实成本分布下 v5 的拍选择;
 //   - 真实渲染帧 stamps 帧距统计(稳态后半 FPS/p50/std/jumps)=用户所见 FPS 读数稳定性。
 //  须 SW_HEADED=1 有头跑;SW_WORLD/SW_PLR 指定文件路径。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5265';
 const HEADED = process.env.SW_HEADED === '1';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const RUN_MS = Number(process.env.SW_RUN_MS ?? 20000);
-const WORLD = process.env.SW_WORLD ?? '/Users/vinlic/Downloads/map-Starter_World (37).json';
-const PLR = process.env.SW_PLR ?? '/Users/vinlic/Downloads/Vinlic (1).plr';
+const WORLD = process.env.SW_WORLD ?? needInput(join(DOWNLOADS, 'map-Starter_World (37).json'));
+const PLR = process.env.SW_PLR ?? needInput(join(DOWNLOADS, 'Vinlic (1).plr'));
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: HEADED ? false : 'new',

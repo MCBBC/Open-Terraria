@@ -17,13 +17,16 @@
 // 落刀：新增 Renderer.drawBossMapIcon（整贴图中心锚+黑/白环烘焙剪影按 idx+img 身份
 //   缓存,环几何与原版逐位同构）替换 drawHead 缺省裁剪调用。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BOSS_HEAD_INDEX } from '../src/data/vanillaNpcs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const npcidSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8');
+const npcidSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** PNG IHDR 尺寸（字节 16-24 大端宽高；3787-skyfracture 同款零依赖直读） */
 function pngSize(rel: string): { w: number; h: number } {
@@ -31,7 +34,7 @@ function pngSize(rel: string): { w: number; h: number } {
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
 
-describe('BJ458 ①原版锚：BossHeadTextures 四柱表（NPCID.cs:4867 反编译直读）', () => {
+describe.skipIf(EXT_MISSING)('BJ458 ①原版锚：BossHeadTextures 四柱表（NPCID.cs:4867 反编译直读）', () => {
   it('反编译源含 517→27/422→28/507→29/493→30（与 BOSS_HEAD_INDEX 消费值一致）', () => {
     const m = npcidSrc.match(/BossHeadTextures = Factory\.CreateIntSet\([^)]*\)/);
     expect(m, 'NPCID.cs BossHeadTextures 表行').toBeTruthy();
@@ -43,7 +46,7 @@ describe('BJ458 ①原版锚：BossHeadTextures 四柱表（NPCID.cs:4867 反编
   });
 });
 
-describe('BJ458 ②贴图真值：四柱头图标实尺 26×30（IHDR 直读,非 24×22）', () => {
+describe.skipIf(EXT_MISSING)('BJ458 ②贴图真值：四柱头图标实尺 26×30（IHDR 直读,非 24×22）', () => {
   it('NPC_Head_Boss_27..30 = 26×30——24×22 缺省源矩形必然裁掉下 8 行+右 2 列', () => {
     for (const idx of [27, 28, 29, 30]) {
       const s = pngSize(`../public/sprites/vanilla/NPC_Head_Boss_${idx}.png`);
@@ -61,7 +64,7 @@ describe('BJ458 ②贴图真值：四柱头图标实尺 26×30（IHDR 直读,非
   });
 });
 
-describe('BJ458 ③结构锁：boss 循环走整贴图 drawBossMapIcon（天然尺寸+烘焙环缓存）', () => {
+describe.skipIf(EXT_MISSING)('BJ458 ③结构锁：boss 循环走整贴图 drawBossMapIcon（天然尺寸+烘焙环缓存）', () => {
   it('boss 头绘制=drawBossMapIcon(img 天然 width/height)——缺省 24×22 裁剪调用已退役', () => {
     // 旧病灶指纹:drawHead(...NPC_Head_Boss...) 不传 sw/sh(吃 24×22 缺省)
     expect(rendererSrc).not.toMatch(

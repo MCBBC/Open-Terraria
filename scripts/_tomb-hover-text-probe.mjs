@@ -1,11 +1,12 @@
 // 墓碑/标牌悬停文本对齐取证探针(2026-09-01 用户实报"文字与底板错位"):
 // 合成 tombstone_v(2×2)+world.signs 悬停条目(死因\n日期 双行 epitaph),
 // 鼠标悬停 → 截图量底板/文字几何;并挂 fillText 探针记录 textAlign/baseline 泄漏态。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5206';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (20).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (20).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });

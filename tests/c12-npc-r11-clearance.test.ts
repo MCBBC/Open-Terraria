@@ -23,7 +23,7 @@
 //    同误——双正（结构+注;Math.random 域行为不可观）。玩家面原版序=游走在先
 //    （Player.cs:39415）保持。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { Enemy, FF_VXSDIR_EX } from '../src/entities/Enemy';
@@ -32,14 +32,17 @@ import { Renderer } from '../src/render/Renderer';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 import type { World as WorldT } from '../src/world/World';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
 const tombSrc = readFileSync(join(ROOT, 'src/entities/Tombstone.ts'), 'utf8');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const player1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/Player.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const player1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/Player.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const EX_IDS = [224, 330, 423, 558, 559, 560, 574, 575, 587, 612, 613];
 
@@ -58,7 +61,7 @@ function caseBlock(labels: number[]): string {
   return ffBody.slice(start, end < 0 ? start + 2000 : end);
 }
 
-describe('C12 原版锚：FindFrame 六案组（1457 亲读）', () => {
+describe.skipIf(EXT_MISSING)('C12 原版锚：FindFrame 六案组（1457 亲读）', () => {
   it('F1 case 558-560：sdir if/if 死区档 + rotation 双档（ai[0]==2 折叠 ToRotation/余 vx×0.1）', () => {
     const b = caseBlock([558, 559, 560]);
     expect(b).toMatch(
@@ -100,7 +103,7 @@ describe('C12 原版锚：FindFrame 六案组（1457 亲读）', () => {
   });
 });
 
-describe('C12 原版锚：F4/F5 墓碑双面', () => {
+describe.skipIf(EXT_MISSING)('C12 原版锚：F4/F5 墓碑双面', () => {
   it('F4 Player.DropTombstone：英文特例 "MMMM d, yyy"/余 ToString("D")（:39455-39461）', () => {
     const start = player1457.indexOf('\tpublic void DropTombstone(long coinsOwned');
     const end = player1457.indexOf('\n\tpublic ', start + 10);
@@ -126,7 +129,7 @@ describe('C12 原版锚：F4/F5 墓碑双面', () => {
 // ---------------------------------------------------------------------------
 // 本仓落刀锚（任何一侧漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('C12 本仓锚：Enemy 单源扩面', () => {
+describe.skipIf(EXT_MISSING)('C12 本仓锚：Enemy 单源扩面', () => {
   it('FF_VXSDIR_EX 单源表 = 11 型钉值（六案组,与 FF_VXSDIR_GROUP 零交集）', () => {
     expect([...FF_VXSDIR_EX].sort((a, b) => a - b)).toEqual(EX_IDS);
   });
@@ -161,7 +164,7 @@ describe('C12 本仓锚：Enemy 单源扩面', () => {
   });
 });
 
-describe('C12 本仓锚：Renderer 镜像门链收编', () => {
+describe.skipIf(EXT_MISSING)('C12 本仓锚：Renderer 镜像门链收编', () => {
   it('ffSdirMirror 门 = GROUP ∪ EX（==1 翻行不变,≙ Main.cs:23357-23361）', () => {
     expect(rendererSrc).toMatch(/import \{ FF_VXSDIR_GROUP, FF_VXSDIR_EX \} from '\.\.\/entities\/Enemy';/);
     expect(rendererSrc).toMatch(/const ffSdirMirror = FF_VXSDIR_GROUP\.has\(idR\) \|\| FF_VXSDIR_EX\.has\(idR\);/);
@@ -235,7 +238,7 @@ function mk(id: number): Enemy {
   return e;
 }
 
-describe('C12 行为级 F1：558-560 埃特尼亚飞龙（极性双档,M2 场景转正=DD2 极性有锁）', () => {
+describe.skipIf(EXT_MISSING)('C12 行为级 F1：558-560 埃特尼亚飞龙（极性双档,M2 场景转正=DD2 极性有锁）', () => {
   it('ffSdir 死区档 + 常态俯仰 vx×0.1（ai0≠2）', () => {
     const e = mk(558);
     e.ai0 = 0;
@@ -292,7 +295,7 @@ describe('C12 行为级 F1：558-560 埃特尼亚飞龙（极性双档,M2 场景
   });
 });
 
-describe('C12 行为级 F2：574/575 滑翔怪（ffSdir 单源 + 口部尘锚）', () => {
+describe.skipIf(EXT_MISSING)('C12 行为级 F2：574/575 滑翔怪（ffSdir 单源 + 口部尘锚）', () => {
   for (const vid of [574, 575]) {
     it(`vid ${vid}：ffSdir 死区档 + 口部锚读 ffSdir（陈旧 facing 不脱钩）`, () => {
       const w = makeWorld();
@@ -314,7 +317,7 @@ describe('C12 行为级 F2：574/575 滑翔怪（ffSdir 单源 + 口部尘锚）
   }
 });
 
-describe('C12 行为级 F3：死区档漏网四面', () => {
+describe.skipIf(EXT_MISSING)('C12 行为级 F3：死区档漏网四面', () => {
   it('330 骚灵：sdir 死区档 + rotation=vx×0.15 原样', () => {
     const e = mk(330);
     e.vx = 0.4;
@@ -381,7 +384,7 @@ describe('C12 行为级 F3：死区档漏网四面', () => {
 // ---------------------------------------------------------------------------
 // F4：墓碑碑文日期 locale（活动语言选择）
 // ---------------------------------------------------------------------------
-describe('C12 F4：longDate 按活动语言选 locale（Player.cs:39455-39461）', () => {
+describe.skipIf(EXT_MISSING)('C12 F4：longDate 按活动语言选 locale（Player.cs:39455-39461）', () => {
   it('en-US 特例式 "MMMM d, yyy"（无星期,数字年）', () => {
     expect(longDate('en-US')).toMatch(/^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
   });
@@ -417,7 +420,7 @@ function withRng(seeds: number[], fn: () => void): void {
   try { fn(); } finally { Math.random = orig; }
 }
 
-describe('C12 F5：城镇墓碑掷序对齐原版（NPC.cs:79086-79092）', () => {
+describe.skipIf(EXT_MISSING)('C12 F5：城镇墓碑掷序对齐原版（NPC.cs:79086-79092）', () => {
   it('定序行为锁：seeds=[抛币,游走init,游走步,款式,vx,vy] → roll5/−0.1/+2.0 复合', () => {
     let t!: Tombstone;
     // 抛币 0 → −0.1;游走 [0.5,0.82] → init=0/步+2.0 出环;款式 0.99999 → roll5 → 205;

@@ -1,8 +1,9 @@
 // 活机探针结果分析:分段帧距/fps 读数/迁移
+import { HOME, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import readline from 'node:readline';
 
-const SRC = '/Users/vinlic/.claude/projects/-Users-vinlic-Project-GLM-SandboxWorld/d3098226-687c-4541-b195-905156fcb457/tool-results/btibgo3od.txt';
+const SRC = join(HOME, '.claude/projects/-Users-vinlic-Project-GLM-SandboxWorld/d3098226-687c-4541-b195-905156fcb457/tool-results/btibgo3od.txt');
 const rl = readline.createInterface({ input: fs.createReadStream(SRC), crlfDelay: Infinity });
 let jsonLine = null, capturing = false;
 for await (const line of rl) {

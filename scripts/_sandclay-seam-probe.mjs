@@ -4,11 +4,12 @@
 //   B 逐格:SW 选帧 autoFrameAt(col,row) + 渲染 16×16 vs 贴图帧逐像素差异数
 //   C 渲染图 alpha 空洞普查:实心格内部透明像素坐标（透黑背景=可见缝的直接证据）
 //   D 掩码/连通判定:每格 8 向 same-type 邻居实况
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const OUT = process.env.OUT ?? '/tmp/sandclay-seam';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');

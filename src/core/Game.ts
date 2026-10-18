@@ -30213,28 +30213,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
        原样迁入左键 PERM 支 case 5289——本臂旧序在 interactAt/交谈前,持套件右键门/
        拉杆/NPC = 误耗套件+格交互被劫持（原版此态右键=纯格交互）。判别锁=
        tests/bj690-minecart-upgrade-kit.test.ts ③（右键不消耗+interactAt 透传）。 */
-    } else if (heldDef && (heldDef.vid ?? -1) === 43) {
-      if (!this.world.clock.isDay) {
-        // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）
-        if (this.useSuspiciousEye()) {
-          this.player.inv.removeHeld(1);
-          this.cb.onInventoryChanged();
-          // 成就：FLY_A_KITE_ON_A_WINDY_DAY（Player.ItemCheck_Shoot Player.cs:49980-49982：
-          // `projectile.aiStyle == 160 && Main.IsItAHappyWindyDay → HandleSpecialEvent(17)`
-          // ——原版风筝弹=aiStyle 160（DefaultToKite 投掷弹）使用即掷;本仓风筝为
-          // 锚桩+拴绳实体模型（登记模型差）,本放置点 = 玩家"使用风筝"等价位。
-          // IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2999）。
-          // ★BJ426 位次：消耗在成就【前】——原版钩子内扣件（PlaceTile 域）先于
-          // ItemCheck_Shoot 域成就,且成就面异常不得吞消耗（探针曾观测间歇跳扣）
-          if (this.world.weather?.shouldUseWindyDayMusic) {
-            this.achievements.handleSpecialEvent(17,
-              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
-          }
-        }
-      } else {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
-      }
-      this.input.rightDown = false;
+    /* ★BJ694（2026-10-19 BJ690 登记债清偿）：可疑的眼球 43 右键臂整撤——原版使用域=
+       左键 ItemCheck（左臂 :16776 在案,含门拦/挥动/消耗/useTime 全语义）;右键零使用面
+       （快换表 :31764-31877 无 43,SetDefaults 无 altFunctionUse）——旧臂三害：
+       ①持眼球右键=重复使用面（与左键双通道）;②臂序在 interactAt 前+rightDown 消费
+       =持眼球右键门/拉杆/NPC 被劫持成召唤尝试（原版此态右键=纯格交互,BJ690 同款）;
+       ③臂内还藏着一份【错域】FLY_A_KITE 风筝成就钩（夜晚成功召唤+大风天=错误触发——
+       风筝成就正位在风筝放置臂 :29367/:29819 两处,本臂那份系误植）。判别锁=
+       tests/bj694-registered-debts-batch2.test.ts §1。 */
     } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
       // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
       // doPlacementAction）：捕获小动物 → 锚桩 724 / 风筝 → 锚桩 723。

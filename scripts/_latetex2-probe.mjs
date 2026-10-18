@@ -1,9 +1,10 @@
 // 晚到贴图断点内窥(2026-08-19):wrap ensureVImage/note/onLoaded/onBakeAssetArrived,
 // 记录 Tiles_191 的完整生命周期,定位自愈链断点。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const DELAY_MS = 15000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await puppeteer.launch({

@@ -1,8 +1,9 @@
 // 烟囱逐帧截屏:进入世界后连拍 120 帧,保存为 PNG 序列用于肉眼检查消失帧
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 480, height: 360 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', String(e.message).slice(0, 160)));

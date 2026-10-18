@@ -1,11 +1,12 @@
 // 真实世界复现:载入用户存档(氙奇葩)→ 标记段(2602-2603,999-1000 上左坡)上车左行,
 // 测正常速度是否爬得上坡(用户报:正常速度上不去,极高冲劲才行,下坡顺畅)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WORLD = process.env.MC_WORLD ?? '/Users/vinlic/Downloads/map-氙奇葩 (5).json';
+const WORLD = process.env.MC_WORLD ?? needInput(join(DOWNLOADS, 'map-氙奇葩 (5).json'));
 const worldText = readFileSync(WORLD, 'utf8');
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });

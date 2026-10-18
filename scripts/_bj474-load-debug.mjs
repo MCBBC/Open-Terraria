@@ -1,9 +1,10 @@
 // BJ474 载入诊断：注入存档→?quickload 或手动 flow.quickLoad() 抓错
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/index.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
-const SAVE_PATH = process.env.SAVE || '/Users/vinlic/Downloads/map-天真的钴最高点 (3).json';
+const SAVE_PATH = process.env.SAVE || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (3).json'));
 const saveJson = readFileSync(SAVE_PATH, 'utf8');
 
 const browser = await launchBrowser({});

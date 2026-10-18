@@ -1,8 +1,9 @@
 // 验证 debug-line.html:启动→生成→现场还原→模拟标注→读回坐标。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dbgline-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dbgline-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();
@@ -51,6 +52,6 @@ const vis = await page.evaluate(() => {
 });
 console.log('[红像素]', JSON.stringify(vis), '点击(756,300) → first 应在 ±14px');
 const shot = 'ok';
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/debugline-check.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/debugline-check.png') });
 console.log('[截图]', shot);
 await browser.close();

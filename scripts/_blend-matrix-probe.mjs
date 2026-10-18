@@ -2,11 +2,12 @@
 // 断言:中心格渲染 = 全表最小差帧、零透明洞(实心)、(可选)零边缘暗像素。
 // 用法: PAIRS="7:1,63:1,40:53" OUT=/path.json SW_ORIGIN=... node tools/run-diag.mjs scripts/_blend-matrix-probe.mjs
 //   PAIRS 语法 "probeSheet:baseSheet,..."(SW 内部 id 由 key 表按 sheet 反查;找不到 key 的 sheet 跳过)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const OUT = process.env.OUT ?? '/tmp/blend-matrix.json';
 const PAIRS = process.env.PAIRS ?? '40:53,40:0,40:1,7:1,63:1,57:1';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

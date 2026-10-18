@@ -60,7 +60,7 @@
  *         敌靶同台 +200px（曼哈顿 200<1160/800,|Δx|<630/450 开火阈内）。
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Player } from '../src/entities/Player';
@@ -69,15 +69,18 @@ import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Arrow } from '../src/entities/Arrow';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MINION_TS = readFileSync(join(ROOT, 'src', 'entities', 'MinionProj.ts'), 'utf8');
 const GAME_TS = readFileSync(join(ROOT, 'src', 'core', 'Game.ts'), 'utf8');
 const ARROW_TS = readFileSync(join(ROOT, 'src', 'entities', 'Arrow.ts'), 'utf8');
 // 反编译标杆（定谳锚,防「按感觉改回」）
-const PLAYER_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
-const PROJ_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
-const ITEM_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+const PLAYER_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const PROJ_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const ITEM_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const priv = (o: object): Record<string, any> => o as unknown as Record<string, any>;
 
@@ -147,7 +150,7 @@ const shotsOf = (added: unknown[]): Arrow[] =>
 // ================================================================
 // ① (a) 定谳源锚 + Game 武装面结构锚
 // ================================================================
-describe('① (a) 首狐 return 定谳锚 + Game foxArmed 承载位', () => {
+describe.skipIf(EXT_MISSING)('① (a) 首狐 return 定谳锚 + Game foxArmed 承载位', () => {
   it('原版：TryUsingFoxsparksAbility 首狐即 return（:43697）——一次调用至多武装一只', () => {
     const at = PLAYER_CS.indexOf('private bool TryUsingFoxsparksAbility');
     expect(at).toBeGreaterThan(0);
@@ -230,7 +233,7 @@ describe('① (a) 首狐 return 定谳锚 + Game foxArmed 承载位', () => {
 // ================================================================
 // ② (b) 销案锚：reuseDelay 回填对重臂环零推迟（生产者唯一性+同拍序）
 // ================================================================
-describe('② (b) reuseDelay 销案锚：生产者唯一 + 同拍序 + 环零 1t', () => {
+describe.skipIf(EXT_MISSING)('② (b) reuseDelay 销案锚：生产者唯一 + 同拍序 + 环零 1t', () => {
   it('原版：reuseDelay 唯一生产者=ApplyItemAnimation（:4482）——召唤拍专属,武装拍不产', () => {
     const n = PLAYER_CS.split('reuseDelay = sItem.reuseDelay;').length - 1;
     expect(n, '全函数唯一赋值站（StartActualUse→ApplyItemAnimation 路径）').toBe(1);
@@ -269,7 +272,7 @@ describe('② (b) reuseDelay 销案锚：生产者唯一 + 同拍序 + 环零 1t
 // ================================================================
 // ③ (c) 定谳源锚 + 死支摘除
 // ================================================================
-describe('③ (c) 1113 ai[1] 循环定谳锚 + 死支摘除', () => {
+describe.skipIf(EXT_MISSING)('③ (c) 1113 ai[1] 循环定谳锚 + 死支摘除', () => {
   it('原版：idle 态 1097 支 L2 循环（:62742-62753）——flag8 双达 dec,1113 恒 3/-3 回卷 1', () => {
     const at = PROJ_CS.indexOf('num161 = 1097;');
     expect(at).toBeGreaterThan(0);
@@ -321,7 +324,7 @@ const driveShots = (m: MinionProj, h: ReturnType<typeof makeHooks>, n: number): 
   return marks;
 };
 
-describe('④ (c) 行为面：idle 1097 发射循环 + 拆弹自爆端到端', () => {
+describe.skipIf(EXT_MISSING)('④ (c) 行为面：idle 1097 发射循环 + 拆弹自爆端到端', () => {
   it('1113：五发循环 foxAi1=3/3/1/3/3（L2 -1/-2/回卷 0/-1/-2）,节拍恒 cd=30', () => {
     const h = makeHooks();
     const m = minion(h.player, 1113, MX, PLAT_Y - 8);

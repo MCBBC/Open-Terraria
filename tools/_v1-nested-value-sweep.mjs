@@ -7,7 +7,7 @@
 // 运行:node tools/run-diag.mjs tools/_v1-nested-value-sweep.mjs [ver...]
 import { readFileSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 
 function load(ver) {
   const src = readFileSync(`${ROOT}/Terarria${ver}/Terraria/Item.cs`, 'utf8');

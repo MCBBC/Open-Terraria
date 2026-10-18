@@ -1,8 +1,9 @@
 // #2 光标独占模式验证:游戏内 ui-canvas 80×dpr + transform 跟鼠标 + 光标像素非空。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/vuicur-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/vuicur-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

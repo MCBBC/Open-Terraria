@@ -3,11 +3,12 @@
 //   另验 expertOnly 覆盖门（armor[3] ctx10/misc[2] ctx18）与开包消失面。
 //   产物：game/docs/evidence/slot-cd/{report.json, hotbar-*.png, panel-*.png}
 //   跑法：SW_ORIGIN=http://localhost:5341 node tools/run-diag.mjs scripts/_slot-cd-probe.mjs
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5341';
-const OUT = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/slot-cd';
+const OUT = join(REPO_ROOT, 'docs/evidence/slot-cd');
 mkdirSync(OUT, { recursive: true });
 
 const browser = await puppeteer.launch({

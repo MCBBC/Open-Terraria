@@ -25,7 +25,11 @@
 //  ③阳性对照：门数据>0 件照常起挥（1874 回填件/1905 表载件）——防"全 miss 恒 0"
 //  ④结构锁：updateUse 臂门表达式在位（防静默回退/删除）
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { join, dirname } from 'node:path';
 
 import { heldItemUseStyle } from '../src/core/Game';
@@ -41,7 +45,7 @@ import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/item
 import { newWiresRadialState } from '../src/stats/wiresRadial';
 
 const REPO = join(dirname(__dirname), '..');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const LINES = ITEM_CS.split('\n');
 
 // ================= Item.cs useStyle 真值提取器（tools/_bj69-nouse-item-audit.mjs 同构） =================
@@ -56,7 +60,8 @@ function methodRange(name: string): [number, number] {
   }
   throw new Error(`method ${name} unbalanced`);
 }
-const REGIONS = ['SetDefaults1', 'SetDefaults2', 'SetDefaults3', 'SetDefaults4', 'SetDefaults5', 'SetFoodDefaults']
+// ★C档可移植:缺档降级(EXT_MISSING skip 兜底)——空表防收集期 throw
+const REGIONS = EXT_MISSING ? [] : ['SetDefaults1', 'SetDefaults2', 'SetDefaults3', 'SetDefaults4', 'SetDefaults5', 'SetFoodDefaults']
   .map((n) => [n, methodRange(n)] as const);
 
 /** DefaultTo* 辅助函数体顶层首个 useStyle 赋值 = 该族 useStyle 种子 */
@@ -79,7 +84,8 @@ for (const n of ['DefaultToPlaceableTile', 'DefaultToPlaceableWall', 'DefaultToC
   const v = helperUseStyle(n);
   if (v !== undefined) HELPERS[n] = v;
 }
-expect(Object.keys(HELPERS).length, 'DefaultTo* useStyle 种子表不得为空（提取器面漂移即断）').toBeGreaterThanOrEqual(15);
+// ★C档可移植:模块级哨兵断言在 EXT_MISSING 时静默(文件已整门 skip;防收集期红)
+if (!EXT_MISSING) expect(Object.keys(HELPERS).length, 'DefaultTo* useStyle 种子表不得为空（提取器面漂移即断）').toBeGreaterThanOrEqual(15);
 
 /** 单个 switch(type) 块的 case 标签组收集（花括号层级感知,不依赖 tab 深度;
  *  连续标签=fallthrough 组共享同一体）。lines 形参=可注入行源（else 链语义哨兵
@@ -415,6 +421,7 @@ import { HAIR_DYE_ITEM_IDS } from '../src/data/vanillaHairDyes';
 import { PLACE_TILE_ON_ALT_USE } from '../src/data/items';
 import { itemCombat } from '../src/data/vanillaItemCombat';
 
+
 const GAME_SRC = readFileSync(join(dirname(__dirname), 'src', 'core', 'Game.ts'), 'utf8');
 const parseSetInTest = (name: string): Set<number> => {
   const m = GAME_SRC.match(new RegExp(`(?:const|export const) ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
@@ -464,7 +471,7 @@ function reachesGenericArm(vid: number): boolean {
   return cons.length === 0 || cons.every((c) => c === 'critter' || c === 'mount');
 }
 
-describe('BJ69 非使用物门数据 ≡ Item.cs useStyle 真值（SetDefaults1..5+SetFoodDefaults 仿真）', () => {
+describe.skipIf(EXT_MISSING)('BJ69 非使用物门数据 ≡ Item.cs useStyle 真值（SetDefaults1..5+SetFoodDefaults 仿真）', () => {
   it('抽样锚定（手读 Item.cs 复核过的 10 件）', () => {
     // 袋族（无 useStyle,Item.cs:30544 共块） / 魔镜 50=4（:22514 族）/ 可疑眼球 43=4（:1888）/
     // 复原药水 226=9（:4200 组 226/227）/ 驯鹿铃铛 1914=1 / 兔子 1992=1（DefaultToCapturedCritter）/
@@ -556,7 +563,7 @@ function stubGame(heldVid: number) {
   return { g, player, added, sfxCalls, toasts, heldSlot: sel };
 }
 
-describe('BJ69 行为面：门静默集左键一帧零副作用 / 门数据>0 件照常起挥', () => {
+describe.skipIf(EXT_MISSING)('BJ69 行为面：门静默集左键一帧零副作用 / 门数据>0 件照常起挥', () => {
   it('袋 21 件全量（含 3861/3862 注册件）：左键一帧 no-op（无 swing/无音/无消耗/无 useTime/无实体/无 toast）', () => {
     expect([...BOSS_BAG_IDS].filter((v) => !VANILLA_ITEM_KEY_BY_ID[v]), '袋全件须已注册可持用（BJ69 数据管线）').toEqual([]);
     for (const vid of BOSS_BAG_IDS) {
@@ -609,7 +616,7 @@ describe('BJ69 行为面：门静默集左键一帧零副作用 / 门数据>0 �
 
 // ================= ④结构锁：门表达式在位（防静默回退/删除） =================
 
-describe('BJ69 结构锁', () => {
+describe.skipIf(EXT_MISSING)('BJ69 结构锁', () => {
   it('updateUse「其它物品」臂门表达式在位且消费 heldItemUseStyle（>0 相位）', () => {
     const gameSrc = readFileSync(join(dirname(__dirname), 'src', 'core', 'Game.ts'), 'utf8');
     expect(gameSrc).toMatch(/heldItemUseStyle\(heldDef\.vid \?\? -1\) > 0/);   // ★方案 A 重锚(BJ265)
@@ -622,7 +629,7 @@ describe('BJ69 结构锁', () => {
 
 // ================= RB17b note① 哨兵：区间支反解对拍 + 漆具支标记 =================
 
-describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', () => {
+describe.skipIf(EXT_MISSING)('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', () => {
   // 逐支锚 vid = 支内首个不被更早支区间覆盖的 id（支区间现互斥,首 id 即锚）
   const anchored: Array<{ vid: number; useStyle: number; branch: TopBranch }> = [];
   {
@@ -723,7 +730,7 @@ describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', ()
 // （修复前后全量对拍 6176 vid diff=0（★2026-09-17 勘误:vid 总数随提取域演进,现行 6176,同 tests/bj69-nouse-gate.test.ts:23 口径））;Item.cs 刷新引入带 useStyle 的 else 支
 // 即产假真值——本双哨兵封口：形态清单钉源态,合成体钉链语义。
 
-describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
+describe.skipIf(EXT_MISSING)('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
   it('形态哨兵：六区 else 系行形态清单钉死（全多行 bare else+后随 {,无 else-if/单行/无括号形态）', () => {
     let bare = 0, elseIf = 0, singleLine = 0, noBrace = 0, notAfterClose = 0;
     const bareLines: string[] = [];
@@ -809,7 +816,7 @@ describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
 //  · 构造③ 三层嵌套       `if A{if B{if C{X}else{Y}}else{W}}else{Z}`
 // C# 语义（标准语言语义,else 绑定最近未配对 if）: A 假→末 else;A 真入体内,
 // B/C 同理逐层。vid=10 锚=判决 prescribed 值（A 假→9）。
-describe('F4 嵌套 else 链态哨兵（红蓝2 定谳封口）', () => {
+describe.skipIf(EXT_MISSING)('F4 嵌套 else 链态哨兵（红蓝2 定谳封口）', () => {
   const run = (vid: number, body: readonly string[]): number => {
     let v = 0;
     execCaseBody(vid, 0, body.length - 1, (n) => { v = n; }, body);
@@ -906,7 +913,7 @@ describe('F4 嵌套 else 链态哨兵（红蓝2 定谳封口）', () => {
 //     覆写=外层守卫整弃,¬A∧B 支误采即红）
 //   · 构造⑤ `if (A) if (B) X; else Y;`：悬空 else 归最近未配对 if（C# 语义）——
 //     Y 取 A∧¬B（旧版 else 读内层链态=仅 ¬B,¬A 支误采即红）
-describe('BJ112-c 无括号 if 体嵌套 if 哨兵（C# 单语句体语义封口）', () => {
+describe.skipIf(EXT_MISSING)('BJ112-c 无括号 if 体嵌套 if 哨兵（C# 单语句体语义封口）', () => {
   const run = (vid: number, body: readonly string[]): number => {
     let v = 0;
     execCaseBody(vid, 0, body.length - 1, (n) => { v = n; }, body);

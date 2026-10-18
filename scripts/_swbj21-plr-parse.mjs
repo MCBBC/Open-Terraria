@@ -1,7 +1,8 @@
 // SW-BJ21:解析用户提供的 .plr(取 skinVariant/外观/装备),并探针该角色实机渲染
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const PLR = '/Users/vinlic/Downloads/无名角色 (4).plr';
+const PLR = needInput(join(DOWNLOADS, '无名角色 (4).plr'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5212';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

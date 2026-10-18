@@ -2,11 +2,12 @@
 // 边界定谳(FNV 对账 2026-10-12):探针 PASS 行 tf=该 pass 完成后状态;
 //   输入=snap-27-pre-Forsaken_Archive(86,296 mod 格=档案后=硫火狱前),
 //   输出=snap-28-pre-Brimstone_Crag(176,472 mod 格=硫火狱后,+90,176 与全链聚合吻合)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');
 

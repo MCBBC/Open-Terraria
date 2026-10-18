@@ -1,10 +1,11 @@
 // 一次性（BJ660 件1）：用户 .wld 导入全链真机复现——window 错误收集 + 储蓄面板面。
 // 走法：标题→单人→(建角)→世界列表→导入 .wld→进入世界→跑帧 8s→开背包→收错误。
+import { HOME, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const origin = process.env.SW_ORIGIN ?? 'http://localhost:5202';
 const WLD = process.env.BJ660_WLD
-  ?? '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-10/十周年纪念种子(2).wld';
+  ?? needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-10/十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 }, userDataDir: '/tmp/sw-pptr-bj660' });
 const page = await browser.newPage();
 const errors = [];

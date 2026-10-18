@@ -1,9 +1,10 @@
 // 双水线全宽扫描 v2:强制白天(dline3 疑似随机入夜全暗→零峰)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dline3-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dline3-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();
@@ -63,5 +64,5 @@ const out = await page.evaluate(() => {
 }).catch((e) => ({ err: String(e).slice(0, 200) }));
 console.log(JSON.stringify(out));
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
-if (shot) fs.writeFileSync('/Users/vinlic/.claude/jobs/8405c930/tmp/dline3.png', shot);
+if (shot) fs.writeFileSync(join(HOME, '.claude/jobs/8405c930/tmp/dline3.png'), shot);
 await browser.close();

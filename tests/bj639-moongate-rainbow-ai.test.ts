@@ -16,7 +16,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Player } from '../src/entities/Player';
@@ -24,6 +24,9 @@ import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { MinionProj, MoonGateBeam, RainbowCrystalBurst, discoHueAt, rgbToHslHue } from '../src/entities/MinionProj';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
 
@@ -89,7 +92,7 @@ const fld = <T, K extends string>(o: T, k: K): unknown =>
 // ============================================================
 // ① 源码锚扫描（双侧亲读锚——原版行为面/本仓承载块）
 // ============================================================
-describe('① 源码锚（AI_084 642 支 / aiStyle112 644 支 双侧亲读锚）', () => {
+describe.skipIf(EXT_MISSING)('① 源码锚（AI_084 642 支 / aiStyle112 644 支 双侧亲读锚）', () => {
   it('原版 AI_084 642 支数值锚（:31964-32213）', () => {
     const src = readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
     const i84 = src.indexOf('else if (aiStyle == 84)');
@@ -149,7 +152,7 @@ describe('① 源码锚（AI_084 642 支 / aiStyle112 644 支 双侧亲读锚）
 // ============================================================
 // ② 行为判别（真哨兵夹具直驱）
 // ============================================================
-describe('② 642 月门光束（AI_084 642 支）', () => {
+describe.skipIf(EXT_MISSING)('② 642 月门光束（AI_084 642 支）', () => {
   it('641 开火生成 MoonGateBeam（非 Arrow 直飞弹）——ai0=目标角+dir×π/6、方向=目标 X 符号', () => {
     const e = mkEnemy(1, 60 * 16 + 300, 110 * 16);
     const { hooks, player, added } = makeHooks([e]);
@@ -215,7 +218,7 @@ describe('② 642 月门光束（AI_084 642 支）', () => {
   });
 });
 
-describe('② 644 彩虹水晶爆裂（aiStyle112 644 支）', () => {
+describe.skipIf(EXT_MISSING)('② 644 彩虹水晶爆裂（aiStyle112 644 支）', () => {
   it('643 volley 生成真爆裂弹 ×3（旧=落点即时 AoE 无弹体 → 红）且 t=0 不伤害', () => {
     const e = mkEnemy(1, 60 * 16 + 200, 110 * 16);
     const { hooks, player, added } = makeHooks([e]);
@@ -276,7 +279,7 @@ describe('② 644 彩虹水晶爆裂（aiStyle112 644 支）', () => {
   });
 });
 
-describe('② 纯函数（Disco 色相链）', () => {
+describe.skipIf(EXT_MISSING)('② 纯函数（Disco 色相链）', () => {
   it('rgbToHslHue/discoHueAt（Main.cs:48743 + :19776 六相循环）', () => {
     expect(rgbToHslHue(255, 0, 0)).toBeCloseTo(0, 6);                  // 红相 hue=0
     expect(rgbToHslHue(0, 255, 0)).toBeCloseTo(1 / 3, 6);              // 绿相 1/3
@@ -293,7 +296,7 @@ describe('② 纯函数（Disco 色相链）', () => {
 // ③ 变异自证（恰红+逐字节还原+sha256 对拍,BJ606 习语）
 //    SW_BJ639_MUT=1 时本组跳过（变异运行读环境位跳过自证组,防递归）
 // ============================================================
-describe.skipIf(process.env.SW_BJ639_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
+describe.skipIf(EXT_MISSING || process.env.SW_BJ639_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
 
   const spawnVitest = (filter: string) => spawnSync(

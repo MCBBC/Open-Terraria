@@ -7,10 +7,13 @@
 // （SWPIPE_DEGRADE_TOAST 回滚口）;④F5 starve/swpipe 快照面。
 // node 可跑面:GLStats 半开试探行为锁（vi.resetModules 隔离模块态）+Renderer 侧
 // 原型实例行为锁（绕构造器判例 bj316——GLPipeline 需 DOM）+源码锚。
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
 const GLS = readFileSync(join(__dirname, '../src/render/GLStats.ts'), 'utf8');
@@ -42,7 +45,7 @@ function makeR(): { r: Renderer; a: Record<string, unknown> } {
   return { r, a };
 }
 
-describe('P0-A ① 降级全带指纹（markSwPipeSkip 帧去重+skip 计数）', () => {
+describe.skipIf(EXT_MISSING)('P0-A ① 降级全带指纹（markSwPipeSkip 帧去重+skip 计数）', () => {
   it('三失败因各自落 lrecon-skip:swpipe-* 指纹+composeSkipFrames 逐帧累计', () => {
     const { r, a } = makeR();
     (r as unknown as { markSwPipeSkip: (w: string) => void }).markSwPipeSkip('starvelock');
@@ -75,7 +78,7 @@ describe('P0-A ① 降级全带指纹（markSwPipeSkip 帧去重+skip 计数）'
   });
 });
 
-describe('P0-A ② 自愈提速（渐进闩+半开试探）', () => {
+describe.skipIf(EXT_MISSING)('P0-A ② 自愈提速（渐进闩+半开试探）', () => {
   it('armRetryLatch 渐进阶 2→3.5→5s 封顶（原 30s 定值闩反锁）', () => {
     const { r, a } = makeR();
     const arm = (r as unknown as { armRetryLatch: (k: 'swpipe' | 'cloud' | 'world') => void });
@@ -144,7 +147,7 @@ describe('P0-A ② 自愈提速（渐进闩+半开试探）', () => {
   });
 });
 
-describe('P0-A ③ 一次性降级 toast（BJ258 式明令分歧通道）', () => {
+describe.skipIf(EXT_MISSING)('P0-A ③ 一次性降级 toast（BJ258 式明令分歧通道）', () => {
   it('episode 首帧一次;episode 内不重复;SWPIPE_DEGRADE_TOAST=false 静默（回滚口）', () => {
     const { r, a } = makeR();
     const fired: number[] = [];

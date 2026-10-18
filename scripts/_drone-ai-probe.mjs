@@ -4,6 +4,7 @@
 //   面 3：点击收回（ItemCheck_TryDestroyingDrones）→ 弹消亡 + Kill 视觉单口
 //   面 4：5738 发射 → 弹 1105 在场 + 帧驱动 + 地面行驶
 //   面 5：y≤640 自毁链（TP 弹至世界顶 → Kill + 成就 TO_INFINITY_AND_BEYOND"Do"）
+import { REPO_ROOT } from './_pathlib.mjs';
 import { appendFileSync } from 'node:fs';
 const STEPLOG = '/tmp/drone-probe-progress.log';
 const step = (m) => { const l = `${new Date().toISOString().slice(11, 19)} ${m}`; try { appendFileSync(STEPLOG, l + '\n'); } catch {} console.log(l); };
@@ -11,7 +12,7 @@ import { launchBrowser, openPage, bootstrap, createGame, pump, front, godMode } 
 import { giveItems } from '../tools/probe/lib/entities.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5331';
-const SHOT = (n) => `/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/drone-ai/${n}.png`;
+const SHOT = (n) => `${REPO_ROOT}/docs/evidence/drone-ai/${n}.png`;
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errors = [];

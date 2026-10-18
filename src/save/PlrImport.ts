@@ -643,7 +643,11 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   const dead = !!st.dead;
   w.bool(dead);
   if (dead) w.i32(Math.max(0, Math.min(60000, st.respawnTimer ?? 0)));
-  w.i64(BigInt(Date.now()) * 10000n);         // lastTimePlayerWasSaved(UTC ticks)
+  // ★BJ694（BJ691b 债①清偿）：lastTimePlayerWasSaved = DateTime.UtcNow.ToBinary()
+  //（Player.cs:55563 亲读）——.NET DateTime 二进制 = 0001-01-01 纪元 ticks + Kind 位
+  //（Utc=2 <<62;FromBinary 读侧掩码解码）。旧式裸 Date.now()×10000 缺 621355968000000000
+  // 纪元基 → 原版 FromBinary 解得公元 0057 年（排序恒垫底/显示离谱,BJ691b 登记）。
+  w.i64(621355968000000000n + BigInt(Date.now()) * 10000n + (2n << 62n));
   w.i32(st.golferScoreAccumulated ?? 0);
   // creativeTracker:≥282 标记(false)+空献祭表(研究不导出,登记偏差)
   w.bool(false).i32(0);

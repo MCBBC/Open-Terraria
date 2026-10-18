@@ -1,7 +1,8 @@
 // BJ274: 导出 .wld 全图 halfBrick 坐标集（与 kv save 的 blocks 通道 diff）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { parseWld } from '../src/wld/WldParser.ts';
 import fs from 'node:fs';
-const buf = new Uint8Array(fs.readFileSync('/Users/vinlic/Downloads/有害的动物尸体树篱.wld'));
+const buf = new Uint8Array(fs.readFileSync(needInput(join(DOWNLOADS, '有害的动物尸体树篱.wld'))));
 const wld = parseWld(buf);
 const T = wld.tiles as any;
 const w = wld.tilesWide;

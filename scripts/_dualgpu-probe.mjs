@@ -9,13 +9,14 @@
 //   DGP_FLAGS="--a --b"     Chrome 旗标(默认=用户 play 同款三旗标)
 //   DGP_WORLD="8400x2400"   世界尺寸(默认大世界)
 //   DGP_SECS=100            双窗同跑观察时长
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const UDD = `${TMP}/dgp-profile`;
 const SECS = +(process.env.DGP_SECS || 100);
 const [WW, WH] = (process.env.DGP_WORLD || '8400x2400').split('x').map(Number);

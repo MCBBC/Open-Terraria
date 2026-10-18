@@ -2,10 +2,11 @@
 // 三层数据齐采:①主画布合成(找"亮背景"像素) ②chunk tile 层(泥土帧透明像素)
 // ③对照浸润带几何(哪条带该盖住)。输出漏光像素的世界px坐标 + 所在层。
 // 用法: SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs --timeout=300000 scripts/_dirtwater-leak-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/dirtwater-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/dirtwater-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 }, protocolTimeout: 240000,
 });
 const page = await browser.newPage();
@@ -75,5 +76,5 @@ const out = await page.evaluate(() => {
   return { rows, frames, cam: [cam.x, cam.y, z] };
 });
 console.log(JSON.stringify(out, null, 1));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/dirtwater-z4.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/8405c930/tmp/dirtwater-z4.png') });
 await browser.close();

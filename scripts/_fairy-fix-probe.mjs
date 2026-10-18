@@ -1,5 +1,6 @@
 // 仙灵 583-585 修复实机验证（2026-09-02）：帧速 4t/倾斜 vx×0.1/反翻镜像/
 // 呼吸尘 278/GetAlpha 半白/引导态 ai2=2 存活。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
@@ -60,6 +61,6 @@ const mirror = await page.evaluate(async () => {
   return { right, left, frameAdvance15t: (f2 - f1 + 4) % 4 };
 });
 console.log('镜像/倾斜/尘:', JSON.stringify(mirror));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/fairy-after.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/fairy-after.png') });
 console.log('errors:', JSON.stringify(errors.slice(0, 5)));
 await browser.close();

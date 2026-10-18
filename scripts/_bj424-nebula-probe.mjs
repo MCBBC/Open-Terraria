@@ -3,11 +3,12 @@
 // 通用尾支=旧 4 专支外的缺面武器面）→ 魔法命中怪 → Projectile.Damage_PVE_Inner
 // :13885-91 proc → ItemDrop(3453-55 NebulaPickup) 悬停浮游（ItemNoGravity 渲染面）
 // → 走上拾取 → Player.NebulaLevelup 叠档 + buff 栏三色图标。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5630';
 const OUT = new URL('../docs/evidence/bj424/', import.meta.url).pathname;
-const MAP = process.env.SW_MAP || '/Users/vinlic/Downloads/map-12345.json';
+const MAP = process.env.SW_MAP || needInput(join(DOWNLOADS, 'map-12345.json'));
 mkdirSync(OUT, { recursive: true });
 const browser = await puppeteer.launch({ protocolTimeout: 600000,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

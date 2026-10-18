@@ -1,9 +1,10 @@
 // wld 导入白屏崩溃回归探针：导入 Starter_World Master.wld → 开全屏地图 10s，
 // 统计 longtask 与 rAF 帧间隔（修复前：每 15 tick 全量重建 288 万像素雾画布）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
-const WLD = '/Users/vinlic/Downloads/Starter_World Master.wld';
+const WLD = needInput(join(DOWNLOADS, 'Starter_World Master.wld'));
 
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 800, height: 600 } });
 const page = await browser.newPage();

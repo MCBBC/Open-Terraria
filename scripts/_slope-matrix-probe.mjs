@@ -2,10 +2,11 @@
 // 物种形：玩家 20×42 / 僵尸 18×42 / 掉落物 12×12 / 小动物 10×10
 // 场景：s1/s2 45° 坡道（上行+下行）+ s3/s4 天花板坡对
 // 判定：持续嵌入（|err|>4 连续 >12 tick）= 阻尼卡进残留
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (21).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (21).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});

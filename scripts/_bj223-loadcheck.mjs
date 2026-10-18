@@ -1,9 +1,10 @@
 // ★BJ223 最小世界加载链检查——BJ219 报 __swLoadJson 卡死（worker 15 分钟不归）环境复现判别。
 // 断言：菜单可达 → __swLoadJson（真实地图 JSON）→ __swGame.world 在 90s 内就绪。
 // 绿=世界加载链正常（BJ219 卡死系其探针环境偶发/cache-sweep 反药）；红=真回归立刀。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 300000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errs = [];

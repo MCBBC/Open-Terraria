@@ -1,10 +1,11 @@
 // 全表孔洞地图:sheet53 每格(18 栅格)内容区透明像素数,字符图输出。
 // 目的:判定链帧值落进的是"过渡镂空区"还是"实心平铺区"。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -42,5 +43,5 @@ for (const SHEET of [53, 40]) {
   console.log(`\n=== sheet ${out.sheet} ${out.dims} meta(${out.metaCols}x${out.metaRows}) ===`);
   for (const g of out.grid) console.log(g.replace(/ /g, '·'));
 }
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/sheet-map.txt', 'done');
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/sheet-map.txt'), 'done');
 await b.close();

@@ -12,7 +12,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 const W = 4200, H = 1200, N = W * H;
 
 it('iii198 wld frames', () => {
-  const wldBuf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const wldBuf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const wld = parseWld(new Uint8Array(wldBuf.toArrayBuffer ? wldBuf.toArrayBuffer() : wldBuf.buffer.slice(wldBuf.byteOffset)));
   const tw = wld.tilesWide, th = wld.tilesHigh;
   console.log(`[wld] tiles=${tw}x${th} active=${wld.tiles.active.length}`);

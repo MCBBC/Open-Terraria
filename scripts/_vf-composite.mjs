@@ -1,15 +1,16 @@
 // 合成咬合实验:对每个标注格,取其真实九宫(以现场 store 为准),
 // 每格按链生产帧从官方表真画 16×16 拼成 (n*16)² 贴片 ×3 变体。
 // 判据:合成图内部同族区域应无缝;跨族交界应呈原版咬合形态而非穿墙黑洞。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
 const SAMPLES = [   // 每簇取代表,九宫足够大(7×7)
   { x: 3969, y: 469 }, { x: 3975, y: 470 }, { x: 4003, y: 465 },
 ];
-const OUTS = ['/Users/vinlic/.claude/jobs/4a66e745/tmp/composite-v0.png', '/Users/vinlic/.claude/jobs/4a66e745/tmp/composite-v1.png', '/Users/vinlic/.claude/jobs/4a66e745/tmp/composite-v2.png'];
+const OUTS = [join(HOME, '.claude/jobs/4a66e745/tmp/composite-v0.png'), join(HOME, '.claude/jobs/4a66e745/tmp/composite-v1.png'), join(HOME, '.claude/jobs/4a66e745/tmp/composite-v2.png')];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -59,6 +60,6 @@ const shots = await p.evaluate(async (samples) => {
 shots.forEach(() => {});
 void OUTS;
 for (let i = 0; i < shots.length; i++) {
-  fs.writeFileSync(`/Users/vinlic/.claude/jobs/4a66e745/tmp/comp-${Math.floor(i / 3)}-v${i % 3}.png`, Buffer.from(shots[i].split(',')[1], 'base64'));
+  fs.writeFileSync(`${HOME}/.claude/jobs/4a66e745/tmp/comp-${Math.floor(i / 3)}-v${i % 3}.png`, Buffer.from(shots[i].split(',')[1], 'base64'));
 }
 await b.close();

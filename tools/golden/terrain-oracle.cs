@@ -12,7 +12,7 @@ int evil = int.Parse(args[1]);
 string outPath = args[2];
 const int W = 4200, H = 1200;
 
-var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
+var asm = Assembly.LoadFrom(Environment.GetEnvironmentVariable("SW_TERRARIA_EXE") ?? "../../Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe"); // ★C档可移植
 var urType = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
 dynamic r = Activator.CreateInstance(urType, seed)!;
 

@@ -9,7 +9,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 import { RNG } from '../src/core/rng';
 
 const RUN = process.env.SW_I167_GRV === '1';
-const G2D = process.env.SW_I167_G2 ?? '/Users/vinlic/GoldenChains/golden-grvfix';
+const G2D = process.env.SW_I167_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-grvfix`;
 const SEED = process.env.SW_I167_SEED ?? 'nightofthelivingdead|20260903';
 const EVIL = Number(process.env.SW_I167_EVIL ?? 0);
 const OUTD = process.env.SW_I167_OUT ?? '/tmp/iii167-out/jsdump-grv';

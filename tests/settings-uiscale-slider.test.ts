@@ -6,14 +6,17 @@
 //     resize 事件(DOM 背包面板失效重排,vinvResizeHandler 同通道);
 //  ③ l10n 自定义表双语键在位(l10n-audit 只查缺失,不查「有键无控件」)。
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const settings = readFileSync(join(ROOT, 'src/ui/Settings.ts'), 'utf8');
 
-describe('设置面板 UI 缩放滑条(半成品收尾钉)', () => {
+describe.skipIf(EXT_MISSING)('设置面板 UI 缩放滑条(半成品收尾钉)', () => {
   it('① UiScale 标签滑条已接线,量程 0.75~1.5 步进 0.05', () => {
     expect(settings).toContain("Lang.text('Mods.SandboxWorld.Settings.UiScale')");
     expect(settings).toMatch(/this\.slider\(\s*Lang\.text\('Mods\.SandboxWorld\.Settings\.UiScale'\),\s*0\.75, 1\.5, 0\.05,/);

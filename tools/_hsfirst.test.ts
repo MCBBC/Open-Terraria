@@ -175,7 +175,7 @@ function clearRule(h: Uint8Array, s: Uint8Array, from: number, to: number): numb
         if (mLoc && !captured.has('s31')) {
           const rel = mLoc[1].slice(mLoc[1].indexOf('src/'));
           try {
-            const src = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/game/${rel}`, 'utf8').split('\n');
+            const src = readFileSync(`${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${rel}`, 'utf8').split('\n');
             for (let k = +mLoc[2]; k >= Math.max(0, +mLoc[2] - 2); k--) {
               if (/\/\/\s*▶Dungeon\b/.test(src[k - 1] ?? '')) { gsSnaps['s31'] = snapshotGenSolid(); dumpTag(store, 's31'); break; }
             }

@@ -1,10 +1,11 @@
 // 反查:烘焙实际画的帧 vs autoFrameAt 预测帧。对样例格渲染 16×16 在整张贴图内
 // 搜索最小色差帧(全 col×row),同时报告 paint/coat/half/slope 与 SW 所用 same 谓词掩码。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 1512, height: 862 } });

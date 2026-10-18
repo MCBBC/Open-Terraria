@@ -5,11 +5,12 @@
 //   gapjump       : 中段挖 3 列深坑(靠 obstacleJump 自动跳)
 //   doorreopen    : 关门在右侧,NPC 自然走向并开门(验证 family 修复后的到达性)
 // 输出 {reached, maxX, minX, stuckMs, ascended} ——reached=越过目标线。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = process.env.VFP_MAP ?? '/Users/vinlic/Downloads/map-FTW_V2 (8).json';
+const MAP = process.env.VFP_MAP ?? needInput(join(DOWNLOADS, 'map-FTW_V2 (8).json'));
 const STAGE = process.env.VFP_STAGE ?? 'slopeA';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
@@ -134,5 +135,5 @@ for (let k = 0; k < 130; k++) {
 }
 await p.evaluate(() => window.__terrainCleanup());
 console.log(JSON.stringify({ stage: STAGE, ...final }));
-fs.writeFileSync(`/Users/vinlic/.claude/jobs/4a66e745/tmp/npc-terrain-${STAGE}.json`, JSON.stringify({ stage: STAGE, ...final }));
+fs.writeFileSync(`${HOME}/.claude/jobs/4a66e745/tmp/npc-terrain-${STAGE}.json`, JSON.stringify({ stage: STAGE, ...final }));
 await b.close();

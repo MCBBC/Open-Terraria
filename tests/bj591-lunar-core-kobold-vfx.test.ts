@@ -36,7 +36,7 @@
 //    注行号 3459-3521 系 1456 代际,1457 全段 +93 → :3552-3614,逐条目 line 字段
 //    同步重锚（机械核=原版行切片含 SpawnNPC(id)）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Enemy } from '../src/entities/Enemy';
 import { GorePiece } from '../src/entities/GorePiece';
@@ -45,10 +45,13 @@ import { VANILLA_SPAWN_POOLS, poolFor } from '../src/data/vanillaNpcs';
 import { ECLIPSE_SPAWN_TABLE } from '../src/world/Eclipse';
 import type { GameHooks } from '../src/entities/types';
 import type { Player } from '../src/entities/Player';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const npcIdSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npcIdSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const moonlordSrc = readFileSync(join(ROOT, 'src/entities/bossAI_duke_moonlord.ts'), 'utf8');
 const eyeAiSrc = readFileSync(join(ROOT, 'src/entities/bossAI_lunar_misc.ts'), 'utf8');
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
@@ -93,7 +96,7 @@ const makeCore = (eye: Enemy) => {
   return e;
 };
 
-describe('BJ591 件1：月总核 398 FindFrame burst 面（NPC.cs:72712-72740）', () => {
+describe.skipIf(EXT_MISSING)('BJ591 件1：月总核 398 FindFrame burst 面（NPC.cs:72712-72740）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('原版锚：case 398 burst 在 if(frame.Y==0) 内、无哨兵（重复窗=帧机构造性推论）', () => {
@@ -216,7 +219,7 @@ const drive = (e: Enemy, game: GameHooks) =>
 const pushHist = (e: Enemy) =>
   (e as unknown as { recordTrailHistory(): void }).recordTrailHistory();
 
-describe('BJ591 件2：DD2 滑翔怪 574/575 FindFrame 尘面（NPC.cs:68658-68751）', () => {
+describe.skipIf(EXT_MISSING)('BJ591 件2：DD2 滑翔怪 574/575 FindFrame 尘面（NPC.cs:68658-68751）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('原版锚：case 574/575 共用块——落帧 9 八连火舌参 + 拖尾阶梯 + 落地乒乓', () => {
@@ -367,7 +370,7 @@ describe('BJ591 件2：DD2 滑翔怪 574/575 FindFrame 尘面（NPC.cs:68658-687
 // ---------------------------------------------------------------------------
 // 件3：数据卫生锚（零行为）
 // ---------------------------------------------------------------------------
-describe('BJ591 件3：jungle 158 勘误 + eclipse 行号重锚', () => {
+describe.skipIf(EXT_MISSING)('BJ591 件3：jungle 158 勘误 + eclipse 行号重锚', () => {
   it('jungle 池：内容零变 [51,158]（poolFor 运行时消费不变=零行为判据）', () => {
     expect(VANILLA_SPAWN_POOLS.jungle).toEqual([51, 158]);
     expect(poolFor(30, 100, 10, true, 'jungle')).toEqual([51, 158]);

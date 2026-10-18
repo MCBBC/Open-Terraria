@@ -1,11 +1,12 @@
 // 终极复现:真实存档 + 叠回 18:38 日志地形 + 完整按键时间线重放 + 屏幕录制
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
-const SAVE = '/Users/vinlic/Downloads/Starter_World-20260901-1123.sbw.json';
-const LOG = JSON.parse(readFileSync('/Users/vinlic/Downloads/behavior-log-Starter_World-2026-09-01T10-38-59-497Z.json', 'utf8'));
+const SAVE = needInput(join(DOWNLOADS, 'Starter_World-20260901-1123.sbw.json'));
+const LOG = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'behavior-log-Starter_World-2026-09-01T10-38-59-497Z.json')), 'utf8'));
 const CELLS = LOG.meta.terrain.cells;
-const OUT = '/Users/vinlic/.claude/jobs/4a66e745/tmp/pf8';
+const OUT = join(HOME, '.claude/jobs/4a66e745/tmp/pf8');
 mkdirSync(OUT, { recursive: true });
 
 const browser = await puppeteer.launch({

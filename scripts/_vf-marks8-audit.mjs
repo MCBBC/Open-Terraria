@@ -1,10 +1,11 @@
 // 第三批标注终审:生产路由(diverted/unified)+ 统一帧源缺口统计(+0 对齐)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (8).json';
-const MARKS = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/marks-FTW_V2 (8).json', 'utf8')).marks;
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (8).json'));
+const MARKS = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'marks-FTW_V2 (8).json')), 'utf8')).marks;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -75,5 +76,5 @@ const res = await p.evaluate(async (marks) => {
 const bad = res.filter(r => r.holes > 0);
 console.log(JSON.stringify({ total: res.length, holed: bad.length }));
 for (const r of res) console.log(`#${r.no} (${r.x},${r.y}) ${r.k} van=${r.van0} ${r.route} f=(${r.f[0]},${r.f[1]}) holes=${r.holes}${r.holes>0?' '+JSON.stringify(r.holeDirs):''} wire=${r.wire}`);
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/marks8-audit.json', JSON.stringify(res, null, 1));
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/marks8-audit.json'), JSON.stringify(res, null, 1));
 await b.close();

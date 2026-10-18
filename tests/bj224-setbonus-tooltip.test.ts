@@ -11,6 +11,9 @@
 // l10n 用真 zh-Hans（bestiary-ungated-tooltip.test.ts 同法）——文案逐字断言。
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => fs.existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import path from 'node:path';
 import { buildTooltipBody, assembleTooltipLines } from '../src/ui/itemTooltip';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
@@ -94,7 +97,7 @@ function linesOf(vid: number, ctx: ReturnType<typeof hoverCtx>) {
 const sbOf = (vid: number, ctx: ReturnType<typeof hoverCtx>) =>
   linesOf(vid, ctx).filter((l) => l.tag === 'setbonus');
 
-describe('BJ224 金标：tooltip lane ≡ ArmorSetBonuses.cs Initialize 重放', () => {
+describe.skipIf(EXT_MISSING)('BJ224 金标：tooltip lane ≡ ArmorSetBonuses.cs Initialize 重放', () => {
   it('64 套 / 170 三元组 / 注册序 / 主件位逐套对拍', () => {
     const golden = replayInitialize();
     expect(golden.length).toBe(64);
@@ -116,7 +119,7 @@ describe('BJ224 金标：tooltip lane ≡ ArmorSetBonuses.cs Initialize 重放',
   });
 });
 
-describe('BJ224 行为：套装奖励行（zh-Hans 实文案）', () => {
+describe.skipIf(EXT_MISSING)('BJ224 行为：套装奖励行（zh-Hans 实文案）', () => {
   it('① 时装件贝壳发夹 2417：无套装奖励行（佩戴/非佩戴悬停皆无=病灶主诉）', () => {
     expect(sbOf(2417, hoverCtx(false))).toHaveLength(0);
     expect(sbOf(2417, hoverCtx(true, 558, 551, 552))).toHaveLength(0);

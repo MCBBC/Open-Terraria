@@ -1,9 +1,10 @@
 // 耀斑贴图健康探针:验证 Misc_Sunflare_Lens_* 贴图加载与尺寸+耀斑像素采样
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const B = process.env.T || 'http://localhost:4173';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/flareprobe',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/flareprobe'),
   args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

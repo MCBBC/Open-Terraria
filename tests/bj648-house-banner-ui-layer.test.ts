@@ -29,21 +29,24 @@
 //  判别力（旧码必红）：①位次/无光域源码锚 ②直绘锁（恒等域+worldToScreen+零光照
 //  消费）③暗区行为锁（lightAt 暗档 stub 下文字色/alpha 恒定）④黑框色式+锚点数学。
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
-const legacyLayerSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs'), 'utf8');
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const legacyLayerSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.UI/LegacyGameInterfaceLayer.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 // ---------------------------------------------------------------------------
 // ① 原版接口层位次锚（原版语义漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ648 ①原版 DrawInterface_7 接口层锚', () => {
+describe.skipIf(EXT_MISSING)('BJ648 ①原版 DrawInterface_7 接口层锚', () => {
   it('SetupDrawInterfaceLayers 表序 4 Ruler < 7 TownNPCHouseBanners < 14 EntityHealthBars < 16 Map', () => {
     const iRuler = mainSrc.indexOf('"Vanilla: Ruler"');
     const iBanner = mainSrc.indexOf('"Vanilla: Town NPC House Banners"');
@@ -83,7 +86,7 @@ describe('BJ648 ①原版 DrawInterface_7 接口层锚', () => {
 // ---------------------------------------------------------------------------
 // ② 迁层后直绘锁（收集面/flush 面两段式 + 调用位次）
 // ---------------------------------------------------------------------------
-describe('BJ648 ②迁层直绘锁', () => {
+describe.skipIf(EXT_MISSING)('BJ648 ②迁层直绘锁', () => {
   const sigFlush = rendererSrc.indexOf('private flushBannerLabels(cam: Camera): void {');
   const flushBody = rendererSrc.slice(sigFlush, rendererSrc.indexOf('\n  /**', sigFlush + 10));
   const sigCollect = rendererSrc.indexOf('private drawHouseBanners(entities: unknown[], world: World, cam: Camera) {');
@@ -158,7 +161,7 @@ const mkCtx = (lightAtCalls: { n: number }) => {
   };
 };
 
-describe('BJ648 ③清晨暗区文字可见锁（lightAt 暗档下名条恒亮）', () => {
+describe.skipIf(EXT_MISSING)('BJ648 ③清晨暗区文字可见锁（lightAt 暗档下名条恒亮）', () => {
   beforeAll(() => {
     // Image 桩（bj583 同款,SkyRenderer loadTex 需要）
     (globalThis as Record<string, unknown>).Image = class {
@@ -245,7 +248,7 @@ describe('BJ648 ③清晨暗区文字可见锁（lightAt 暗档下名条恒亮�
 // ---------------------------------------------------------------------------
 // ④ 黑框色式对拍（迁层只改层不改色式——BJ647 前旧值逐字锁）
 // ---------------------------------------------------------------------------
-describe('BJ648 ④黑框色式对拍', () => {
+describe.skipIf(EXT_MISSING)('BJ648 ④黑框色式对拍', () => {
   const sigFlush = rendererSrc.indexOf('private flushBannerLabels(cam: Camera): void {');
   const flushBody = rendererSrc.slice(sigFlush, rendererSrc.indexOf('\n  /**', sigFlush + 10));
 

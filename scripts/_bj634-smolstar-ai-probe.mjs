@@ -8,8 +8,8 @@
 // 旧病灶对照(通用飞行路径):攻击恒速 5/索敌 700 每拍重选/无锁敌——boss 6px/t 移动下
 // 距离拉大或恒不接触、hp 零递减。
 // 用法:SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs scripts/_bj634-smolstar-ai-probe.mjs
-import { launchBrowser, openPage, bootstrap, createGame, pump, giveItems, godMode } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
-import { spawnEnemy } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/entities.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump, giveItems, godMode } from '../tools/probe/lib/index.mjs';
+import { spawnEnemy } from '../tools/probe/lib/entities.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
 const browser = await launchBrowser({});

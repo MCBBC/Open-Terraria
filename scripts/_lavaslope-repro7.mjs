@@ -1,10 +1,11 @@
 // _lavaslope-repro7: 定点解剖用户世界 (31,968) 岩浆 slope3 岸缘——
 // dump 7×7 tile 终态 + 4px/子格 ASCII 颜色分类图,标出浸润缺失带的世界格位置。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 const CX = Number(process.env.SW_CX || 31), CY = Number(process.env.SW_CY || 968);
 
 const b = await puppeteer.launch({

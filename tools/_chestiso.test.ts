@@ -203,7 +203,7 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
       const stackLine = (new Error().stack ?? '').split('\n').find((l) => l.includes('/src/') && !l.includes('rng.ts')) ?? '?';
       const mLoc = /\(.*(src\/[^\s?]+):(\d+):\d+\)/.exec(stackLine);
       if (!mLoc || !mLoc[1]!.includes('WorldGen.ts') || !store) return;
-      const abs = `/Users/vinlic/Project/GLM/SandboxWorld/game/${mLoc[1]!.slice(mLoc[1]!.indexOf('src/'))}`;
+      const abs = `${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${mLoc[1]!.slice(mLoc[1]!.indexOf('src/'))}`;
       const src = readFileSync(abs, 'utf8').split('\n');
       for (let k = +mLoc[2]; k >= Math.max(0, +mLoc[2] - 2); k--) {
         const cm = /\/\/\s*▶([^\s(（]+)/.exec(src[k - 1] ?? '');

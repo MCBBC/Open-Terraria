@@ -1,5 +1,6 @@
 // 武器全量覆盖清查（只读）：golden shoot 表 796 件 × 我方数据面逐字段 diff + 实现存在性 + 纯近战提取
 // 运行: node scripts/_coverage-audit.mjs   输出 /tmp/recon/_coverage-audit.json
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = new URL('..', import.meta.url).pathname; // game/
@@ -212,7 +213,7 @@ for (const [idS, c] of Object.entries(combatRaw)) {
 pureMeleeAll.sort((a, b) => a.id - b.id);
 
 // ItemID.cs 名字表
-const nameCs = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1458/Terraria.ID/ItemID.cs', 'utf8');
+const nameCs = readFileSync(join(PROJECT_ROOT, 'Terarria1458/Terraria.ID/ItemID.cs'), 'utf8');
 const names = {};
 for (const m of nameCs.matchAll(/public const short (\w+) = (\d+);/g)) names[Number(m[2])] = m[1];
 

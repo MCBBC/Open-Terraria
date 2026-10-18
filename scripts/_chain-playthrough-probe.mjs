@@ -3,6 +3,7 @@
 //   困难:   祭坛新矿→机械三王→世花→石巨人→邪教徒→四柱→月总(通关)
 // 每阶段: 真召唤入口(spawnBossOnPlayer=物品召唤共用链/娃娃投岩浆) → 击杀 →
 //         旗标/解锁断言;阶段边界 saveGame→loadJson 全量回环后继续(存档断线检查)。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5209';
@@ -25,7 +26,7 @@ const ok = (name, cond, info = '') => {
 // ★当前共享树 worldgen 在 pass4 生物群系崩(.inner)——并行会话在途编辑,链探针
 //   先用已知好存档驱动,worldgen 修复后可切回 newWorld('chain2026')
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (20).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (20).json'));
 const mapText = fs.readFileSync(MAP, 'utf8');
 await p.evaluate((t) => window.__swFlow.loadJson(t), mapText);
 await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });

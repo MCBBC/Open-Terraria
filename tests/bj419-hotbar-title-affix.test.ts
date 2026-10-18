@@ -23,6 +23,9 @@ import path from 'node:path';
 import { UI } from '../src/ui/UI';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { languageManager } from '../src/i18n/LanguageManager';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => fs.existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 languageManager.loadPackJson(JSON.parse(fs.readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
@@ -64,7 +67,7 @@ function mkUi(held: Held, mirror: Held = null): AnyUI {
 const titleOf = (ui: AnyUI): string => ui.hotbarNameEl.textContent as string;
 
 // ============ ① 判别核心：带前缀 = CombineFormat 组合名 ============
-describe('BJ419 ① hotbar 顶部单行名带词缀（zh-Hans 官方格式逐字）', () => {
+describe.skipIf(EXT_MISSING)('BJ419 ① hotbar 顶部单行名带词缀（zh-Hans 官方格式逐字）', () => {
   it('武器+传奇：‹传奇›铁阔剑（旧裸名「铁阔剑」即红）', () => {
     const ui = mkUi({ id: SWORD, stack: 1, prefix: LEGENDARY });
     ui.refreshHotbar();
@@ -85,7 +88,7 @@ describe('BJ419 ① hotbar 顶部单行名带词缀（zh-Hans 官方格式逐字
 });
 
 // ============ ② 零词缀/空手面逐字不变（本刀禁伤零变化白名单） ============
-describe('BJ419 ② 无词缀/空手回退不变', () => {
+describe.skipIf(EXT_MISSING)('BJ419 ② 无词缀/空手回退不变', () => {
   it('无前缀武器 = 裸名「铁阔剑」（AffixName prefix≤0 → Name,Item.cs:1197-1199）', () => {
     const ui = mkUi({ id: SWORD, stack: 1 });
     ui.refreshHotbar();
@@ -100,9 +103,10 @@ describe('BJ419 ② 无词缀/空手回退不变', () => {
 });
 
 // ============ ③ 反编译重放哨（1457 原文;漂移/误删即红） ============
-describe('BJ419 ③ 反编译重放哨（1457;1458 同位同文锚）', () => {
-  const mn = fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs'), 'utf8');
-  const im = fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+describe.skipIf(EXT_MISSING)('BJ419 ③ 反编译重放哨（1457;1458 同位同文锚）', () => {
+  // ★C档可移植:缺档降级(describe 体收集期亦执行;EXT_MISSING skip 兜底)
+  const mn = fs.existsSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs')) ? fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Main.cs'), 'utf8') : '';
+  const im = fs.existsSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Item.cs')) ? fs.readFileSync(path.join(__dirname, '..', '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';
 
   it('顶部名 = selectedItem.AffixName()（:44331;裸 .Name 面=病灶原语不存在）', () => {
     expect(mn).toContain('text = player[myPlayer].inventory[player[myPlayer].selectedItem].AffixName();');
@@ -128,7 +132,7 @@ describe('BJ419 ③ 反编译重放哨（1457;1458 同位同文锚）', () => {
 });
 
 // ============ ④ 同族普查结构锁（四个 AffixName 位全谱;任一位回退裸名即红） ============
-describe('BJ419 ④ 同族普查结构锁（AffixName 位全谱防回退）', () => {
+describe.skipIf(EXT_MISSING)('BJ419 ④ 同族普查结构锁（AffixName 位全谱防回退）', () => {
   const uiSrc = () => fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'UI.ts'), 'utf8');
   const gameSrc = () => fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'Game.ts'), 'utf8');
 

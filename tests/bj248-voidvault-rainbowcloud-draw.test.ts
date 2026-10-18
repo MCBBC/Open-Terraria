@@ -25,7 +25,7 @@
 //   M5  摘 isDynamicAnimSheet 719        → T5 红（退烘焙相位定格）
 //   M6  719 复活进 RATE/FRAMES/PITCH     → T6 红（golden「无多」域破坏）
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,9 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 import type { SpriteAtlas, DrawRect } from '../src/assets/SpriteAtlas';
 import vanillaJson from '../public/sprites/vanilla.json';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VAULT = TILE_BY_KEY['v_491_void_vault']!;
@@ -45,7 +48,7 @@ const VAULT = TILE_BY_KEY['v_491_void_vault']!;
 const st = new TileStore(40, 80);
 
 // ============================================================ 件 2：tile 491 恒右半（M1/M2）
-describe('★BJ248 drawAdjust case 491：无条件 addFrX=54（TileDrawing.cs:5405-5407）', () => {
+describe.skipIf(EXT_MISSING)('★BJ248 drawAdjust case 491：无条件 addFrX=54（TileDrawing.cs:5405-5407）', () => {
   it('T1 三列九格 sx=fx+54 恒右半（sy/尺寸不覆写）', () => {
     for (let dx = 0; dx < 3; dx++) {
       for (let dy = 0; dy < 3; dy++) {
@@ -106,7 +109,7 @@ describe('★BJ248 drawAdjust case 491：无条件 addFrX=54（TileDrawing.cs:54
 });
 
 // ============================================================ 件 3：tile 719 十四相时-位钟（M3/M4）
-describe('★BJ248 drawAdjust case 719：14 相时-位钟（TileDrawing.cs:4608-4616）', () => {
+describe.skipIf(EXT_MISSING)('★BJ248 drawAdjust case 719：14 相时-位钟（TileDrawing.cs:4608-4616）', () => {
   it('T3 钟式钉值：n=(x+y+⌊tick/4⌋)%14 → sx=fx+288·⌊n/4⌋ / sy=fy+270·(n%4)', () => {
     const fx = 54, fy = 36;
     // tick=0：n=(3+5)%14=8 → ⌊8/4⌋=2、8%4=0
@@ -126,7 +129,7 @@ describe('★BJ248 drawAdjust case 719：14 相时-位钟（TileDrawing.cs:4608-
 });
 
 // ============================================================ 动态层接线与三表禁域（M5/M6）
-describe('★BJ248 719 动态层特判 + 三表「无多」域不破', () => {
+describe.skipIf(EXT_MISSING)('★BJ248 719 动态层特判 + 三表「无多」域不破', () => {
   it('T5 isDynamicAnimSheet：719=true（进动态层防烘焙定格）;491=false（纯静态烘焙）', () => {
     expect(isDynamicAnimSheet(719)).toBe(true);
     expect(isDynamicAnimSheet(491)).toBe(false);
@@ -141,7 +144,7 @@ describe('★BJ248 719 动态层特判 + 三表「无多」域不破', () => {
 });
 
 // ============================================================ 数据面结构锁（图集容量）
-describe('★BJ248 数据面：Tiles_491/Tiles_719 容量与源图字节锁定', () => {
+describe.skipIf(EXT_MISSING)('★BJ248 数据面：Tiles_491/Tiles_719 容量与源图字节锁定', () => {
   it('T7 vanilla.json 条目：491 cols6/rows3/frameSize[[3,3]];719 cols64/rows60/frameSize[[1,1]]', () => {
     const t = (vanillaJson as unknown as Record<string, Record<string, {
       rows: number; cols: number; grid: number[]; stride: number[]; frameSize: number[][];

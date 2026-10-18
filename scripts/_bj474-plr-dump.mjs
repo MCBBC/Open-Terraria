@@ -1,9 +1,10 @@
 // BJ474：解析用户 .plr，dump 装备/染料（判定翼支 186+绿染料 vs 靴支仙尘 61）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/index.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
-const PLR_PATH = process.env.PLR || '/Users/vinlic/Downloads/Vinlic (1).plr';
+const PLR_PATH = process.env.PLR || needInput(join(DOWNLOADS, 'Vinlic (1).plr'));
 const raw = readFileSync(PLR_PATH);
 const b64 = raw.toString('base64');
 

@@ -1,8 +1,9 @@
 // 烘焙账本全景诊断：cap.bakes 全图 + 挂钟推进速率 + 动画注册表可见性
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 } });
 const page = await browser.newPage();
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });

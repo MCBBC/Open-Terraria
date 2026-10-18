@@ -3,11 +3,12 @@
 //  ② 模拟 F4(fill(1)+dirty=null+version++),检查 HUD 雾是否清、清后是否"回弹"
 //  ③ HUD 雾像素逐帧监视:40s 内出现"全亮帧"(雾覆盖骤降)的次数与时刻
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_fogwatch-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({

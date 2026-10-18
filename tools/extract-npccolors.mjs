@@ -16,7 +16,7 @@
 // 贴轮廓非方形）；gel（item 23）掉落时 type 1 且 netID∉{-1,-2,-5,-6} 继承 npc.color。
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 const npcCs = readFileSync(`${ROOT}/Terarria1457/Terraria/NPC.cs`, 'utf8');
 
 // ---------- 1) SetDefaults else-if 链 ----------

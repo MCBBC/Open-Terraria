@@ -6,12 +6,13 @@
 // gs:worldSurfaceLow=TerrainPass num5 初值式(fresh 流首掷确定,见下);
 //   sulphurAtLeft=false(SulphurousSea.cs:188 dungeonX<maxTilesX/2 零掷派生);
 //   sulphurYStart=gen-sea DetermineYStart 同式扫描(SulphurousSea.cs:228)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync, writeFileSync, existsSync, createReadStream } from 'node:fs';
 import readline from 'node:readline';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? needInput(TMOD_LOGS);
 const PROBE_LOG = process.env.GENPROBE_LOG ?? join2(LOGS, 'genprobe.log');
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');

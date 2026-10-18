@@ -1,14 +1,15 @@
 // 洗掠视觉验证:玩家跳入水,连拍 6 帧水线区截图 + 逐像素水线 Y 读数。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (7).json', 'utf8');
-const OUT = '/Users/vinlic/.claude/jobs/8405c930/tmp/wash';
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (7).json')), 'utf8');
+const OUT = join(HOME, '.claude/jobs/8405c930/tmp/wash');
 mkdirSync(OUT, { recursive: true });
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wash-profile2',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wash-profile2'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

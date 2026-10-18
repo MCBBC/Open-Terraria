@@ -43,7 +43,7 @@
 //   ④ 判别力自证：tests/extract-tables2-era-guard.test.ts（M1 摘干跑门/M3 摘 fresh-only 轴）。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // ---- ★BJ298 era guard ①②：基线白名单 + 输出通道开关（对拍在文末落盘段） ----
 // 基线档（2026-08-24 R24：默认随基准切到 Terarria1458 系刻意,维持;SW_RESEARCH_BASE 可覆盖）
 const VER = (process.env.SW_RESEARCH_BASE ?? process.env.SW_ITEM_VER ?? '1458')

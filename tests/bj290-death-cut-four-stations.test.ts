@@ -20,12 +20,15 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Arrow } from '../src/entities/Arrow';
 import { CounterweightProj, MolotovProj } from '../src/entities/WeaponProj';
 import { TrapShot } from '../src/entities/Dart';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 /** 割面/伤害序记录器：log = ['cut' | 'hurt' | 'fires', …] 按发生序 */
 type Log = string[];
@@ -78,7 +81,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 // ================================================================
 // ① Arrow 主命中管线：死亡拍割面（CutTiles :12517 先于 Damage_PVE :12523）
 // ================================================================
-describe('BJ290-① Arrow 死亡拍割面（木箭 penetrate 1 命中即亡拍照割）', () => {
+describe.skipIf(EXT_MISSING)('BJ290-① Arrow 死亡拍割面（木箭 penetrate 1 命中即亡拍照割）', () => {
   it('木箭首中即亡拍：割面先于 hurt（旧=中央割 !e.dead 门死亡拍整缺）', () => {
     const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: Log = [];
@@ -117,7 +120,7 @@ describe('BJ290-① Arrow 死亡拍割面（木箭 penetrate 1 命中即亡拍�
 // ================================================================
 // ② CounterweightProj -2 脱离克隆：penetrate 1 命中即亡拍照割
 // ================================================================
-describe('BJ290-② 配重球 -2 脱离态死亡拍割面（:64741-64744 penetrate 1）', () => {
+describe.skipIf(EXT_MISSING)('BJ290-② 配重球 -2 脱离态死亡拍割面（:64741-64744 penetrate 1）', () => {
   function makeCW(log: Log, en: unknown) {
     const { g } = makeGame(log, [en], { realPlayer: false });
     // realPlayer:false 桩缺 yoyoStringAnchor/equipStats → 换真 Player
@@ -171,7 +174,7 @@ describe('BJ290-② 配重球 -2 脱离态死亡拍割面（:64741-64744 penetra
 // ================================================================
 // ③ MolotovProj 399：命中敌 breakOpen 即亡拍照割（+期满定谳修订面）
 // ================================================================
-describe('BJ290-③ 燃烧瓶 399 死亡拍割面（penetrate 1 命中敌即裂）', () => {
+describe.skipIf(EXT_MISSING)('BJ290-③ 燃烧瓶 399 死亡拍割面（penetrate 1 命中敌即裂）', () => {
   function makeMolotov(log: Log, enemies: unknown[], x = 400, y = 416, vx = 1, vy = 0) {
     const fires = vi.fn(() => { log.push('fires'); });
     const { g } = makeGame(log, enemies, { realPlayer: false });
@@ -220,7 +223,7 @@ describe('BJ290-③ 燃烧瓶 399 死亡拍割面（penetrate 1 命中敌即裂�
 // ================================================================
 // ④ Dart 友方炮弹族：afterHit 计数归零亡拍照割（:781）
 // ================================================================
-describe('BJ290-④ TrapShot 炮弹族死亡拍割面（166 雪球 pen1 / 162 炮弹 pen4）', () => {
+describe.skipIf(EXT_MISSING)('BJ290-④ TrapShot 炮弹族死亡拍割面（166 雪球 pen1 / 162 炮弹 pen4）', () => {
   it('雪球 166 首中即亡拍：割面先于 hurt（vanilla friendly;:12516 门内）', () => {
     const log: Log = [];
     const en = victim(log);
@@ -253,7 +256,7 @@ describe('BJ290-④ TrapShot 炮弹族死亡拍割面（166 雪球 pen1 / 162 �
 // ================================================================
 // 边缘站定谳 + 结构锁（备案：Dart :820/:828 hostile 死亡位勿补割）
 // ================================================================
-describe('BJ290-件1 结构锁（修复站在位 + 备案站零补割）', () => {
+describe.skipIf(EXT_MISSING)('BJ290-件1 结构锁（修复站在位 + 备案站零补割）', () => {
   const src = (f: string) => readFileSync(resolve(__dirname, '..', 'src', 'entities', f), 'utf8');
 
   it('四站 cutTilesBox 调用位全数在位（源锚）', () => {

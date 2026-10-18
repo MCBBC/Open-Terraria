@@ -7,6 +7,7 @@
 //   E 回收面：右键取回 → 线圈 tile 消失 + 恰返 1 + 实体消散
 //   F 守恒面：全程物品总数账本对拍（复制链关闭）
 // 用法: SW_ORIGIN=http://localhost:5650 node tools/run-diag.mjs scripts/_bj426-kite-anchor-probe.mjs
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -244,7 +245,7 @@ ck('(F) 全程物品守恒（放置消耗+回收单返,无复制）',
 
 R.trace.push(`pageErrors=${JSON.stringify(pageErrs)}`);
 console.log(JSON.stringify(R, null, 1));
-const dir = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/bj426';
+const dir = join(REPO_ROOT, 'docs/evidence/bj426');
 mkdirSync(dir, { recursive: true });
 // 布置留档场景：一个在飞的风筝桩（B 桩 405）+ 手持风筝,复刻放置现场
 await page.evaluate((vid) => {

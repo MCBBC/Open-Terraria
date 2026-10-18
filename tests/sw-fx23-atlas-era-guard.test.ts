@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['terraria-assets', 'Terraria-Map-Editor'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★SW-FX23（2026-09-10）：vanilla-atlas.mjs 追加时代守卫——同族全量重跑事故已四发
 // （8/21、8/23 0042c846、09-10 15:41 与 17:44,FX22 定谳=键序洗牌→golden/SW 缓存链
@@ -11,7 +14,7 @@ import { join } from 'node:path';
 
 const SCRIPT = join(process.cwd(), 'scripts', 'vanilla-atlas.mjs');
 
-describe('vanilla-atlas 追加时代守卫（SW-FX23）', () => {
+describe.skipIf(EXT_MISSING)('vanilla-atlas 追加时代守卫（SW-FX23）', () => {
   it('行为面:追加时代下默认运行被拒（exit 1+指引走追加通道）,零写盘', () => {
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 60_000 });
     expect(r.status).toBe(1);
@@ -68,7 +71,7 @@ describe('vanilla-atlas 追加时代守卫（SW-FX23）', () => {
 // 关键键在册锁。vui() 无直连路径回退（SpriteAtlas.vui:json miss=恒 null）,这批键
 // 不在生成器白名单里、靠 bulk 拷贝或手修落册——8/25 手修 8 件 Camera 后,9/10 两发
 // 全量重跑各丢一次。任何再生成丢键立即在此爆红。
-describe('vanilla-ui vui 消费面关键键在册（SW-RB12c）', () => {
+describe.skipIf(EXT_MISSING)('vanilla-ui vui 消费面关键键在册（SW-RB12c）', () => {
   const ui = JSON.parse(readFileSync(join(process.cwd(), 'public', 'sprites', 'vanilla-ui.json'), 'utf8')) as { files: Record<string, string> };
   const REQUIRED = [
     ...Array.from({ length: 8 }, (_, i) => `UI_Camera_${i}.png`),   // CaptureMode.ts:1129 相机图标

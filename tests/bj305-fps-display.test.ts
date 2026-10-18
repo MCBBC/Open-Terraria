@@ -10,7 +10,7 @@
 //  数据源纪律：Game.fps（frameDts 最近 60 帧 rAF 均值）唯一数据源——Game.render 头
 //  按开关注入 renderer.fpsReadout，关闭时不取 getter（零开销）。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +31,9 @@ vi.mock('../src/save/KvStore', () => ({
 import { OptionsStore, options } from '../src/core/Options';
 import { kvGet, kvSet } from '../src/save/KvStore';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const srcOf = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
@@ -38,7 +41,7 @@ const srcOf = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
 // ============================================================
 // ① 缺省关 + load 卫门（Options.ts）
 // ============================================================
-describe('BJ305 ①Options.fpsDisplay 缺省/卫门', () => {
+describe.skipIf(EXT_MISSING)('BJ305 ①Options.fpsDisplay 缺省/卫门', () => {
   beforeEach(() => {
     vi.mocked(kvGet).mockResolvedValue(null);
   });
@@ -60,7 +63,7 @@ describe('BJ305 ①Options.fpsDisplay 缺省/卫门', () => {
 // ============================================================
 // ② 持久化 round-trip（options 通道 = KvStore 'sandboxworld.options'）
 // ============================================================
-describe('BJ305 ②持久化 round-trip', () => {
+describe.skipIf(EXT_MISSING)('BJ305 ②持久化 round-trip', () => {
   beforeEach(() => {
     vi.mocked(kvGet).mockResolvedValue(null);
     vi.mocked(kvSet).mockClear();
@@ -92,7 +95,7 @@ describe('BJ305 ②持久化 round-trip', () => {
 // ============================================================
 // ③ 设置行接线（Settings.ts game 组 + l10n 双语）
 // ============================================================
-describe('BJ305 ③设置行接线', () => {
+describe.skipIf(EXT_MISSING)('BJ305 ③设置行接线', () => {
   it('行位紧随「渲染帧率上限」FrameCap 行后（帧率族相邻）；toggle 范式读写 options', () => {
     const src = srcOf('src/ui/Settings.ts');
     const iCap = src.indexOf("options.set('frameCap'");
@@ -153,7 +156,7 @@ function runFpsDraw(enabled: boolean, readout: number | null): DrawRec[] {
   return draws;
 }
 
-describe('BJ305 ④HUD 显示门（drawFpsReadout）', () => {
+describe.skipIf(EXT_MISSING)('BJ305 ④HUD 显示门（drawFpsReadout）', () => {
   it('关门：选项关=零绘制（不进任何 fillText=零开销面）', () => {
     expect(runFpsDraw(false, 59.7)).toHaveLength(0);
   });
@@ -185,7 +188,7 @@ describe('BJ305 ④HUD 显示门（drawFpsReadout）', () => {
 // ============================================================
 // ⑤ 注入接线（Game.render 头 / Renderer 步 13 后）
 // ============================================================
-describe('BJ305 ⑤注入接线', () => {
+describe.skipIf(EXT_MISSING)('BJ305 ⑤注入接线', () => {
   it('Game.render 头按开关注入 this.fps（唯一数据源 frameDts,勿另算;关=null 不取 getter）', () => {
     expect(srcOf('src/core/Game.ts'))
       .toContain('this.renderer.fpsReadout = options.data.fpsDisplay ? this.fps : null;');

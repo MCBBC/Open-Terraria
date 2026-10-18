@@ -1,8 +1,9 @@
 // ★BJ252 探针：116 光束剑波（真圣剑 723）撞块 4 计实机验证。
 // 手段：入世界后经 __swGame 直生 116 弹（freezeClock 关闭——弹体 AI 需真拍）,
 // 朝右墙发射,记录每拍 vx 符号翻转与消亡拍;断言 3 次反弹 + 第 4 撞 Kill。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 300000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errs = [];

@@ -18,6 +18,7 @@
 // 【运行】SW_ORIGIN=http://localhost:5214 node tools/run-diag.mjs --timeout=280000 \
 //          scripts/_shine-debt-ab.mjs
 //   输出 /tmp/shine-debt/<tag>.json + <tag>-digests.json(tag=SW_TAG,缺省 run)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, gotoApp, waitForBridge, waitForGame,
@@ -25,7 +26,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5214';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/shine-debt';
 const TAG = process.env.SW_TAG || 'run';
 const VIEW = { width: Number(process.env.SW_VW || 1280), height: Number(process.env.SW_VH || 800), deviceScaleFactor: Number(process.env.SW_DPR || 2) };

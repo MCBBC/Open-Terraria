@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ298（2026-09-23）：E1 续批尾 era guard 落闸守卫测试（acc-drawslots / dyes /
 // shimmer / hairdyes / research / bestiary-spawn / bestiary / fishing / itemsorting
@@ -39,6 +42,8 @@ interface ToolSpec {
   /** ROOT 派生自 import.meta.url 的工具,mutant 置 tmp 须前置重锚（era-guard-family ④ 习语） */
   rootTrigger?: string;
   rootAbs?: string;
+  /** 重锚变量名（缺省 ROOT;fishing=ROOT0 家族变体） */
+  rootVar?: string;
   /** 1458 --write-real 是否合法定谳基线（research 特例=豁免禁写测试） */
   allow1458WriteReal?: boolean;
   m2: { trigger: string; poison: string; errTag: string };
@@ -54,7 +59,7 @@ const TOOLS: ToolSpec[] = [
     // ★M1 触发=干跑门臂条件+OUT_JSON 两行块（OUT_JSON 在 write-real/SW_OUT 臂内,单换行内死码）
     m1Trigger: "} else if (WRITE_REAL || SW_OUT) {\n  const OUT_JSON = WRITE_REAL ? TARGET : `${SW_OUT.replace(/\\/+$/, '')}/vanilla-acc-drawslots.json`;",
     rootTrigger: "const ROOT = new URL('../../', import.meta.url).pathname;",
-    rootAbs: '/Users/vinlic/Project/GLM/SandboxWorld/',
+    rootAbs: join(ROOT, '..') + '/',
     m2: {
       trigger: "['49', 'handOn', 2],",
       poison: "['49', 'handOn', 999],",
@@ -68,7 +73,7 @@ const TOOLS: ToolSpec[] = [
     outName: 'vanilla-dyes.json',
     rejectTag: '[extract-dyes]',
     rootTrigger: "const ROOT = join(here, '..');",
-    rootAbs: '/Users/vinlic/Project/GLM/SandboxWorld/game',
+    rootAbs: ROOT,
     m2: {
       trigger: "1007: ['ArmorColored', [1, 0, 0]],",
       poison: "1007: ['ArmorColoredX', [1, 0, 0]],",
@@ -81,6 +86,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_SHIMMER_JSON',
     outName: 'vanilla-shimmer.json',
     rejectTag: '[extract-shimmer]',
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: 'itemTransformTo: 300,',
       poison: 'itemTransformTo: 99999,',
@@ -94,7 +101,7 @@ const TOOLS: ToolSpec[] = [
     outName: 'vanilla-hairdyes.json',
     rejectTag: '[extract-hairdyes]',
     rootTrigger: "const ROOT = join(here, '..');",
-    rootAbs: '/Users/vinlic/Project/GLM/SandboxWorld/game',
+    rootAbs: ROOT,
     m2: {
       trigger: "removerCase: ['\\t\\tcase 1990:', 21293],",
       poison: "removerCase: ['\\t\\tcase 1990:', 99999],",
@@ -107,6 +114,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_RESEARCH_JSON',
     outName: 'vanilla-research.json',
     rejectTag: '[extract-research]',
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     allow1458WriteReal: true,   // ★基线 1458 系刻意（R24）,读域双档全等 → write-real 合法
     m2: {
       trigger: 'Object.keys(need).length < 6000',
@@ -120,6 +129,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_BESTIARYSPAWN_JSON',
     outName: 'vanilla-bestiary-spawn.json',
     rejectTag: '[extract-bestiary-spawn]',
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: 'if (nCond < 60 ||',
       poison: 'if (nCond < 6000 ||',
@@ -132,6 +143,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_BESTIARY_JSON',
     outName: 'vanilla-bestiary.json',
     rejectTag: '[extract-bestiary]',
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: 'Object.keys(data.npcStats).length !== 761) {',
       poison: 'Object.keys(data.npcStats).length !== 7610) {',
@@ -144,6 +157,9 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_FISHING_JSON',
     outName: 'vanilla-fishing.json',
     rejectTag: '[extract-fishing]',
+    rootTrigger: "const ROOT0 = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植",
+    rootAbs: join(ROOT, '..'),
+    rootVar: 'ROOT0',
     m2: {
       trigger: 'if (rules.length < 140) {',
       poison: 'if (rules.length < 9999) {',
@@ -156,6 +172,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_ITEMSORTING_JSON',
     outName: 'vanilla-itemsorting.json',
     rejectTag: '[extract-itemsorting]',
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: "if (!BUFF_INT_SETS.SortingPriorityFoodBuffs) throw new Error('BuffID.Sets.SortingPriorityFoodBuffs 缺档');",
       poison: "if (!BUFF_INT_SETS.SortingPriorityFoodBuffsX) throw new Error('BuffID.Sets.SortingPriorityFoodBuffs 缺档');",
@@ -167,7 +185,7 @@ const TOOLS: ToolSpec[] = [
 const spawn = (script: string, args: string[] = [], env: Record<string, string> = {}) =>
   spawnSync('node', [script, ...args], { cwd: ROOT, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...env } });
 
-describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
   describe('B 形九件（banners 同构四要素闸）', () => {
     for (const T of TOOLS) {
       const script = join(ROOT, 'tools', T.name);
@@ -264,7 +282,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
           // ROOT_TRIGGER 前置重锚（import.meta.url 派生工具的 mutant 置 tmp 必备习语）
           if (T.rootTrigger && T.rootAbs) {
             expect(src).toContain(T.rootTrigger);
-            src = src.replace(T.rootTrigger, `const ROOT = ${JSON.stringify(T.rootAbs)};`);
+            src = src.replace(T.rootTrigger, `const ${T.rootVar ?? 'ROOT'} = ${JSON.stringify(T.rootAbs)};`);
           }
           const td = T.m1Trigger ?? `/${T.outName}\` : null);`;
           expect(src).toContain(td);
@@ -289,7 +307,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
         try {
           let src = readFileSync(script, 'utf8');
           if (T.rootTrigger && T.rootAbs) {
-            src = src.replace(T.rootTrigger, `const ROOT = ${JSON.stringify(T.rootAbs)};`);
+            src = src.replace(T.rootTrigger, `const ${T.rootVar ?? 'ROOT'} = ${JSON.stringify(T.rootAbs)};`);
           }
           expect(src).toContain(T.m2.trigger);
           const mutant = join(dir, 'mutant-anchor.mjs');
@@ -317,7 +335,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
         let src = readFileSync(script, 'utf8');
         const RT = "const ROOT = new URL('../../', import.meta.url).pathname;";
         expect(src).toContain(RT);
-        src = src.replace(RT, `const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld/';`);
+        src = src.replace(RT, `const ROOT = ${JSON.stringify(join(ROOT, '..') + '/')};`);   // ★C档可移植:运行时计算
         const TRIGGER = 'for (const k of Object.keys(fresh)) if (!lk.has(k)) outW.freshOnly.push(`${prefix}.${k}`);';
         expect(src).toContain(TRIGGER);
         const mutant = join(dir, 'mutant-freshonly.mjs');
@@ -332,6 +350,10 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
 
   describe('降级面三件补缺省干跑臂（journey-browser / equip-prefix / itemfunc）', () => {
     const JB = join(ROOT, 'tools', 'extract-journey-browser.mjs');
+    // ★C档可移植:三器 ROOT 已转 import.meta 相对——mutant 置 tmp 须前置重锚
+    const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+    const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(ROOT, '..'))};`);
+
     const EP = join(ROOT, 'tools', 'extract-equip-prefix.mjs');
     const IF = join(ROOT, 'tools', 'extract-itemfunc.mjs');
     const JB_LIVE = join(ROOT, 'src', 'data', 'vanilla-journeycat.json');
@@ -369,7 +391,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
       try {
         const fake = join(dir, 'fake-jc.json');
         writeFileSync(fake, '{}');
-        const src = readFileSync(JB, 'utf8');
+        const src = relocateRoot(readFileSync(JB, 'utf8'));
         const td = 'const JC_LIVE = `${ROOT}/game/src/data/vanilla-journeycat.json`;';
         expect(src).toContain(td);
         const mutant = join(dir, 'mutant.mjs');
@@ -416,7 +438,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
       try {
         const fake = join(dir, 'fake-equip.json');
         writeFileSync(fake, '{}');
-        const src = readFileSync(EP, 'utf8');
+        const src = relocateRoot(readFileSync(EP, 'utf8'));
         const td = 'writeOut(`${ROOT}/game/src/data/vanilla-equip.json`, JSON.stringify(equip));';
         expect(src).toContain(td);
         const mutant = join(dir, 'mutant.mjs');
@@ -461,7 +483,7 @@ describe('extract-tables2 era guard（BJ298 E1 续批尾落闸）', () => {
       try {
         const fake = join(dir, 'fake-if.json');
         writeFileSync(fake, '{"seeded":true}');
-        let src = readFileSync(IF, 'utf8');
+        let src = relocateRoot(readFileSync(IF, 'utf8'));
         // ★mutant 置 tmp:相对兄弟 import（extract-itemcombat）重写为绝对路径
         src = src.replace("from './extract-itemcombat.mjs'", `from ${JSON.stringify(join(ROOT, 'tools', 'extract-itemcombat.mjs'))}`);
         const td = 'const LIVE_JSON = `${ROOT}/game/src/data/vanilla-itemfunc.json`;';

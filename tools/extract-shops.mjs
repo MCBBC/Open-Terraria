@@ -48,7 +48,7 @@ const GAME_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457,旧注"缺省 1456"系笔误）
 const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
-const SRC = `/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria`;
+const SRC = `${join(GAME_ROOT, '..')}/${TREE}/Terraria`;   // ★C档可移植:仓库外反编译树
 const itemSrc = readFileSync(`${SRC}/Item.cs`, 'utf8');
 const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 

@@ -3,9 +3,10 @@
 //   石板锚行 = F；A 罐 = 列 x0..x0+1 行 F-2..F-1（frameY 0/18，variant 0）；
 //   B 罐 = 列 x0+2..x0+3 同行（与 A 共边，variant 36）。
 // 原版语义预期：敲 A → 只清 A 的 4 格 + potLoot 恰 1 次；B 的 4 格完整保留。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5208';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

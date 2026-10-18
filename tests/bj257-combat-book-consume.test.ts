@@ -16,7 +16,7 @@
 // 修复面：Game.ts 战斗书支（bvid 4382/5336）——补 useSwing+playUseSound 起手面、
 //    useTime 30→45、门内补 removeHeld(1)（卷一同支同漏一并修）。
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import { Game } from '../src/core/Game';
@@ -34,9 +34,12 @@ import funcJson from '../src/data/vanilla-itemfunc.json';
 import combatJson from '../src/data/vanilla-itemcombat.json';
 import usesoundJson from '../src/data/vanilla-itemusesound.json';
 import zhHans from '../public/l10n/zh-Hans.json';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const LINES = ITEM_CS.split('\n');
 
 /** Item.cs case 块截取（自 `case N:` 行起至 `break;` 止——BJ69 提取器同式） */
@@ -52,7 +55,7 @@ function caseBlock(vid: number): string[] {
 }
 
 // ============ ① 原版锚（反编译直读——数据面漂移哨兵） ============
-describe('BJ257 原版锚：Item.cs case 5336/4382 消耗面直读', () => {
+describe.skipIf(EXT_MISSING)('BJ257 原版锚：Item.cs case 5336/4382 消耗面直读', () => {
   it('5336 卷二：consumable=true + useStyle 4 + 45/45 + Item92（:42327-42336）', () => {
     const b = caseBlock(5336);
     expect(b.join('\n')).toContain('consumable = true;');
@@ -143,7 +146,7 @@ function stubGame(heldVid: number, opts?: { withNpc?: boolean }) {
   };
 }
 
-describe('BJ257 行为面：卷二 5336 使用 → 效果生效 + 消耗 1（消耗面钉值）', () => {
+describe.skipIf(EXT_MISSING)('BJ257 行为面：卷二 5336 使用 → 效果生效 + 消耗 1（消耗面钉值）', () => {
   it('首次使用：旗标置位 + stack 1→0 + useTime=45 + 举持起挥 + Item_92 + 世界公告', () => {
     const s = stubGame(5336);
     s.run();
@@ -175,7 +178,7 @@ describe('BJ257 行为面：卷二 5336 使用 → 效果生效 + 消耗 1（消
   });
 });
 
-describe('BJ257 行为面：卷一 4382 同消耗面（同支同漏）', () => {
+describe.skipIf(EXT_MISSING)('BJ257 行为面：卷一 4382 同消耗面（同支同漏）', () => {
   it('首次使用：combatBookWasUsed 置位 + stack 1→0 + useTime=45', () => {
     const s = stubGame(4382);
     s.run();
@@ -195,7 +198,7 @@ describe('BJ257 行为面：卷一 4382 同消耗面（同支同漏）', () => {
 });
 
 // ============ ③ 结构锁（防静默回退——消耗门移出旗标门=变异哨兵锚） ============
-describe('BJ257 结构锁', () => {
+describe.skipIf(EXT_MISSING)('BJ257 结构锁', () => {
   const GAME_SRC = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
   it('战斗书支旗标门内含 removeHeld（消耗在效果支内=原版 :43612 同拍语义）', () => {
     const i = GAME_SRC.indexOf('else if (bvid === 4382 || bvid === 5336)');

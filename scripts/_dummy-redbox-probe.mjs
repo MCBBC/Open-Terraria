@@ -1,9 +1,10 @@
 // 判决实验:overlay 同帧读 transform + 世界坐标红块;截图判空间与遮挡。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (27).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (27).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('pageerror:', e.message));
@@ -41,5 +42,5 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 1500));
 const xf = await page.evaluate(() => window.__xfLog);
 console.log('overlay 内 transform:', JSON.stringify(xf));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/dummy-redbox.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/dummy-redbox.png') });
 await browser.close();

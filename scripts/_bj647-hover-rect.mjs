@@ -1,8 +1,9 @@
 // ★BJ647-B 副案取证 v2：hover 城镇 NPC「微透明黑长方形」——旗面快照+截图。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errors = [];

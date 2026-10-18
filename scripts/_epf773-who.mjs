@@ -1,6 +1,6 @@
-import { launchBrowser, openPage, closeAllBrowsers } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/browser.mjs';
-import { bootstrap } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/boot.mjs';
-import { createGame } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/game.mjs';
+import { launchBrowser, openPage, closeAllBrowsers } from '../tools/probe/lib/browser.mjs';
+import { bootstrap } from '../tools/probe/lib/boot.mjs';
+import { createGame } from '../tools/probe/lib/game.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5214';
 const main = async () => {
   const browser = await launchBrowser({ headed: false });

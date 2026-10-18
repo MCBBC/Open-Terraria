@@ -8,7 +8,7 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG } from '../src/core/rng';
 
 const RUN = process.env.SW_I174_GTRACE === '1';
-const G2D = process.env.SW_I174_G2 ?? '/Users/vinlic/GoldenChains/golden-grvfix';
+const G2D = process.env.SW_I174_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-grvfix`;
 const SEED = process.env.SW_I174_SEED ?? 'nightofthelivingdead|20260903';
 const EVIL = Number(process.env.SW_I174_EVIL ?? 0);
 const OUT = process.env.SW_I174_TRACE_OUT ?? '/tmp/iii174-out/jstrace-grv174.txt';

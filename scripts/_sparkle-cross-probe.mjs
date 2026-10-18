@@ -2,9 +2,10 @@
 // 流程：SW 清缓存换新模块 → 载真档 → 天顶剑齐射 → 冻结在星芒窗(counter∈[20,35])
 // → 截 A(sparkle on) → history.replaceState 关 sparkle → 截 B → 逐像素 diff。
 // 判据：A 相对 B 的【变暗像素】= 黑十字复现；全亮 = 无暗底。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const OUT = '/tmp/sparkle-repro';
 
 const browser = await puppeteer.launch({

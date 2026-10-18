@@ -7,11 +7,12 @@
 //   共享 genprobe.log 可能被并行会话截断→回退 /tmp/evil-judge/ 侧存档。
 // SPY 对账目标(真链 PASS 行 dN):Evil Island=2,032,079(dG=2,031,999,dM=80);
 //   Astral Chest=36(dG=35,dM=1)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const SIDE_LOG = '/tmp/evil-judge/genprobe-evil-run.log';
 const SIDE_SNAPS = '/tmp/evil-judge/snaps';
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');

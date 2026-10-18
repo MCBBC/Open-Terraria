@@ -1,8 +1,9 @@
 // _lavaslope-repro3: repro1 复跑 + 岸区 store 终态 dump + 三级台阶三角形像素采样。
 // 目标:找出"水爬满三级台阶"的绘制来源与岩浆的对应状态。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

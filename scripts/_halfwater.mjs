@@ -3,9 +3,10 @@
 //   构型:水线半砖 / 水下半砖(满液) / 水下半砖(部分液 100) / 满砖对照 / 池底半砖 /
 //         上邻有液的半砖(IsVisible 跳过门)
 // fullbright 免光照 + 常规两套截图;覆盖率以 fullbright 判(免光照暗误判)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

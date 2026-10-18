@@ -1,9 +1,10 @@
 // SW 缓存健康验证:warm 完成后,经页面 fetch(走 SW cache-first)取贴图→
 // createImageBitmap 解码;对照 fetch(cache:'reload') 直取网络。corrupt=SW 有毒。
+import { HOME } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: `/Users/vinlic/.claude/jobs/8405c930/tmp/swver-${process.env.TAG ?? 'x'}`,
+  headless: 'new', userDataDir: `${HOME}/.claude/jobs/8405c930/tmp/swver-${process.env.TAG ?? 'x'}`,
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

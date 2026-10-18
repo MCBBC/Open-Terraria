@@ -14,6 +14,9 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, existsSync } from 'no
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = resolve(__dirname, '..');
 const TOOL = resolve(GAME, 'tools', 'extract-vanity-effects.mjs');
@@ -41,7 +44,7 @@ afterEach(() => {
   for (const d of sandboxDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-describe('② 输出通道/① 版本白名单', () => {
+describe.skipIf(EXT_MISSING)('② 输出通道/① 版本白名单', () => {
   it('缺省干跑：exit 0 + 真库产物逐字节零写盘（干跑对拍闸零漂移）', () => {
     const before = sha(PRODUCT);
     const r = run();
@@ -89,7 +92,7 @@ describe('② 输出通道/① 版本白名单', () => {
   });
 });
 
-describe('③④ 锚 fail-loud + 判别力自证（变异证明闸）', () => {
+describe.skipIf(EXT_MISSING)('③④ 锚 fail-loud + 判别力自证（变异证明闸）', () => {
   function mkMutant(from: string, to: string): string {
     expect(src.includes(from), `变异锚缺失: ${from.slice(0, 50)}`).toBeTruthy();
     writeFileSync(MUTANT, src.replace(from, to));

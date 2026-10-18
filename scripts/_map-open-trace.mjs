@@ -1,9 +1,10 @@
 // ★开图 CDP trace 捕获:围绕冷开/热开各 2.5s 采 DevTools trace,交 trace-x-ray 分解
 // 用法: SW_ORIGIN=http://localhost:5208 node tools/run-diag.mjs scripts/_map-open-trace.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
-const MAP = process.env.MAP_PATH ?? '/Users/vinlic/Downloads/map-天真的钴最高点 (1).json';
+const MAP = process.env.MAP_PATH ?? needInput(join(DOWNLOADS, 'map-天真的钴最高点 (1).json'));
 const browser = await puppeteer.launch({
   protocolTimeout: 600000,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

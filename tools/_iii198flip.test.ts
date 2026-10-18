@@ -13,7 +13,7 @@ const W = 4200, H = 1200;
 const MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
 
 it('iii198 roll-gate flips', () => {
-  const buf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const buf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const wld = parseWld(new Uint8Array(buf.buffer, buf.byteOffset));
   const tw = wld.tilesWide;
   const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 
 // ★BJ183 2026-09-20 基准对齐 1456→1457（FishDropRules 两版源级 diff=0;Main.cs
 // anglerQuestItemNetIDs/AnglerQuestSwap 仅有行号平移,语义零漂移——对拍已证）
-const ROOT0 = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT0 = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植
 // ---- ★BJ298 era guard ①②：版本白名单 + 输出通道开关（对拍在文末落盘段） ----
 const VER = process.env.SW_ITEM_VER ?? '1457';
 const VER_ALLOWED = new Set(['1457', '1458']);

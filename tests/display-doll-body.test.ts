@@ -7,7 +7,9 @@
 // P3b（持握展示/物品姿态动画）/P3c（dye/mount/paint/女档/net）= 分期债（模块头注）。
 // 纯 node,无 DOM（BJ11 同风格:纯函数行为锁 + 源文本结构锁 + 数据面抽检）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import {
   DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, isValidDollPose,
   displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollUsesMaleTables,
@@ -16,10 +18,11 @@ import { DOLL_SUPPORTED_USE_STYLE_POSES } from '../src/world/FurnitureItems';
 
 const rendererSrc = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
 const dollSrc = readFileSync(new URL('../src/render/DisplayDoll.ts', import.meta.url), 'utf8');
-const tedSrc = readFileSync(
-  new URL('../../Terarria1457/Terraria.GameContent.Tile_Entities/TEDisplayDoll.cs', import.meta.url), 'utf8');
+const tedSrc = existsSync(new URL('../../Terarria1457/Terraria.GameContent.Tile_Entities/TEDisplayDoll.cs', import.meta.url))
+  ? readFileSync(new URL('../../Terarria1457/Terraria.GameContent.Tile_Entities/TEDisplayDoll.cs', import.meta.url), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
-describe('SW-BN6 假人 P3a ①数据面：_dollPlayer 固定外观 + 行档锚原版值', () => {
+describe.skipIf(EXT_MISSING)('SW-BN6 假人 P3a ①数据面：_dollPlayer 固定外观 + 行档锚原版值', () => {
   it('外观 = skinVariant 10 / hair 15 / 白肤（TEDisplayDoll.cs:118-121 逐值）', () => {
     expect(DOLL_APPEARANCE.skinVariant).toBe(10);
     expect(DOLL_APPEARANCE.hair).toBe(15);
@@ -51,7 +54,7 @@ describe('SW-BN6 假人 P3a ①数据面：_dollPlayer 固定外观 + 行档锚�
   });
 });
 
-describe('SW-BN6 假人 P3a ②行为面：pose → 形体行档（DisplayDollPoseID 0-8）', () => {
+describe.skipIf(EXT_MISSING)('SW-BN6 假人 P3a ②行为面：pose → 形体行档（DisplayDollPoseID 0-8）', () => {
   const equip = { head: null, body: null, legs: null };
   it('Standing(0) → 行 0/0、无坐姿、offsetY 0', () => {
     expect(displayDollRenderState(0, true, equip)).toEqual({
@@ -73,7 +76,7 @@ describe('SW-BN6 假人 P3a ②行为面：pose → 形体行档（DisplayDollPo
   });
 });
 
-describe('SW-BN6 假人 P3a ③行为面：IsValidPose（TEDisplayDoll.cs:135-153 1:1）', () => {
+describe.skipIf(EXT_MISSING)('SW-BN6 假人 P3a ③行为面：IsValidPose（TEDisplayDoll.cs:135-153 1:1）', () => {
   it('≤3 恒合法（(uint)testedPose <= 3u）', () => {
     for (const p of [0, 1, 2, 3]) expect(isValidDollPose(p, 0)).toBe(true);
   });
@@ -93,7 +96,7 @@ describe('SW-BN6 假人 P3a ③行为面：IsValidPose（TEDisplayDoll.cs:135-15
   });
 });
 
-describe('SW-BN6 假人 P3a ④行为面：三甲映射（内部 id → vid → hs/bs/ls）', () => {
+describe.skipIf(EXT_MISSING)('SW-BN6 假人 P3a ④行为面：三甲映射（内部 id → vid → hs/bs/ls）', () => {
   it('空槽三甲全 null;未知 id 容错 null', () => {
     expect(dollEquipFromSlots([null, null, null])).toEqual({ head: null, body: null, legs: null });
     expect(dollEquipFromSlots([{ id: 42424242 }, null, null]).head).toBeNull();
@@ -104,7 +107,7 @@ describe('SW-BN6 假人 P3a ④行为面：三甲映射（内部 id → vid → 
   });
 });
 
-describe('SW-BN6 假人 P3a ⑤结构锁：Renderer 接线位与兜底链', () => {
+describe.skipIf(EXT_MISSING)('SW-BN6 假人 P3a ⑤结构锁：Renderer 接线位与兜底链', () => {
   it('display_doll 支消费合成器:锚/朝向/行档/乘色调用在位', () => {
     expect(rendererSrc).toContain('const dollBake = dollState.sitting');
     expect(rendererSrc).toContain('compositePaperDoll(DOLL_APPEARANCE, dollEquip');

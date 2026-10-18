@@ -1,7 +1,8 @@
+import { PROJECT_ROOT, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 // NPC_67 蟹：帧高 34。分析帧 0 前腿/钳子伸出侧（下部行的左右伸出长度）
-const png = PNG.sync.read(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_67.png'));
+const png = PNG.sync.read(readFileSync(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_67.png')));
 const { width: w, data } = png;
 const FH = 34;
 // 帧的前腿带（底部 10 行）

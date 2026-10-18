@@ -2,11 +2,12 @@
 // 暂停中也持续。模拟用户环境 = 资产慢速长尾到达(所有 vanilla 图随机延迟
 // 300-900ms,把加载期拉长到分钟级)+ 90s 采样 + 30s 处暂停,聚栈定位。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=400000 scripts/_slowload-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const TMP = '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const TMP = join(HOME, '.claude/jobs/8405c930/tmp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({

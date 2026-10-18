@@ -33,7 +33,7 @@ SHEET[0] = 0;
       const mLoc = /\(.*(src\/[^\s?]+):(\d+):\d+\)/.exec(stackLine);
       if (!mLoc) return;
       const rel = mLoc[1]!.slice(mLoc[1]!.indexOf('src/'));
-      const src = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/game/${rel}`, 'utf8').split('\n');
+      const src = readFileSync(`${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${rel}`, 'utf8').split('\n');
       let label = '';
       for (let k = +mLoc[2]; k >= Math.max(0, +mLoc[2] - 2); k--) {
         const cm = /\/\/\s*▶([^\s(（]+)/.exec(src[k - 1] ?? '');

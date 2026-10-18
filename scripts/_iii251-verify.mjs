@@ -15,6 +15,7 @@
 //   32 设备 px/tile;足迹 α=5 三处齐备(mark1 三角/half 上半矩形/mark2 镜像三角)。
 // 用法(game/ 下):SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs \
 //   --timeout=600000 scripts/_iii251-verify.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,8 +27,8 @@ import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5301';
 const OUT = process.env.III251_OUT ?? '/tmp/iii251-out';
-const MAP = process.env.III251_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (30).json';
-const MARKS = process.env.III251_MARKS ?? '/Users/vinlic/Downloads/marks-Starter_World (45).json';
+const MAP = process.env.III251_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
+const MARKS = process.env.III251_MARKS ?? needInput(join(DOWNLOADS, 'marks-Starter_World (45).json'));
 mkdirSync(OUT, { recursive: true });
 mkdirSync(join(OUT, 'shots'), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

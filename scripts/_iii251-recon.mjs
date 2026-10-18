@@ -1,5 +1,6 @@
 // IIII251 现状定谳探针:Starter World(map 30)载入 → 池塘两处斜坡水缘 → 截图+波场/管线状态取证。
 // 用法(game/ 下):SW_ORIGIN=http://localhost:5301 node tools/run-diag.mjs scripts/_iii251-recon.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { saveCanvasShot } from '../tools/probe/lib/shot.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5301';
 const OUT = process.env.III251_OUT ?? '/tmp/iii251-out';
-const MAP = process.env.III251_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (30).json';
+const MAP = process.env.III251_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
 const QUERY = process.env.III251_QUERY ?? '';
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

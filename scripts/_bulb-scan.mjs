@@ -1,8 +1,9 @@
 // 存档花苞扫描：v3+ RLE 稳定 id 直扫（tile 238=世花球茎/236=生命果/237=蜥蜴祭坛/233=丛林植物）。
 // RLE 条目: varint(run-1) varint(type)[varint fx fy 仅 type!=0]（SaveFile.ts decode 同构）。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 
-const PATH = process.env.BULB_MAP ?? '/Users/vinlic/Downloads/map-可怕的洞穴小岛 (1).json';
+const PATH = process.env.BULB_MAP ?? needInput(join(DOWNLOADS, 'map-可怕的洞穴小岛 (1).json'));
 const d = JSON.parse(readFileSync(PATH, 'utf8'));
 const W = d.header.width, H = d.header.height, N = W * H;
 const b64 = atob ?? ((s) => Buffer.from(s, 'base64').toString('binary'));

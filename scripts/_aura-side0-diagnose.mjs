@@ -1,11 +1,12 @@
 // 闪电光环 side=0 诊断：用户世界 base 位点塔 sInit 失败根因（地面搜索轨迹）
 // 运行: SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs --timeout=600000 scripts/_aura-side0-diagnose.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { pump } from '../tools/probe/lib/pump.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.WLD_PATH || '/Users/vinlic/Downloads/十周年纪念种子(1).wld';
+const WLD = process.env.WLD_PATH || needInput(join(DOWNLOADS, '十周年纪念种子(1).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 await bootstrap(page, ORIGIN + '/?cloudcache=0');

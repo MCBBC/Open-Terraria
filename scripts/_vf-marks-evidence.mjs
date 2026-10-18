@@ -3,12 +3,13 @@
 // A. 每个标注格生产帧的官方源矩形 alpha 缺口统计(透明像素数+朝向分布)
 //    ——证明"缝隙"像素来自官方 Tiles_N 过渡帧本身,非绘制错位
 // B. 同机位截图 vf=1 / vf=0(vf=0 走 TEdit 近似,作"用户认可的旧观感"参照)
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
-const MARKS = JSON.parse(fs.readFileSync('/Users/vinlic/Downloads/marks-FTW_V2 (6).json', 'utf8')).marks;
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
+const MARKS = JSON.parse(fs.readFileSync(needInput(join(DOWNLOADS, 'marks-FTW_V2 (6).json')), 'utf8')).marks;
 const MODE = process.env.VFP_MODE ?? '1';   // 1|0
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
@@ -28,7 +29,7 @@ await sleep(800);
 // 机位:簇1/簇2 边界中心
 await p.evaluate(() => { const g = window.__swGame; g.player.x = 3963 * 16; g.player.y = 473 * 16; g.player.vx = 0; g.player.vy = 0; });
 await sleep(6000);
-await p.screenshot({ path: `/Users/vinlic/.claude/jobs/4a66e745/tmp/marks-vf${MODE}.png` });
+await p.screenshot({ path: `${HOME}/.claude/jobs/4a66e745/tmp/marks-vf${MODE}.png` });
 
 if (MODE === '1') {
   const stats = await p.evaluate(async (marks) => {
@@ -70,7 +71,7 @@ if (MODE === '1') {
     }
     return { count: res.length, holey: res.filter((r) => r.holes > 0), total: res.reduce((s2, r) => s2 + r.holes, 0) };
   }, MARKS);
-  fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/marks-notches.json', JSON.stringify(stats, null, 1));
+  fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/marks-notches.json'), JSON.stringify(stats, null, 1));
   console.log(JSON.stringify({ mode: MODE, shot: true, cells: stats.count, holeyCells: (stats.holey ?? []).length, totalHolePx: stats.total }));
 } else {
   console.log(JSON.stringify({ mode: MODE, shot: true }));

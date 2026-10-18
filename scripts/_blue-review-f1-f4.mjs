@@ -5,10 +5,11 @@
 //  F3 药草 alchBloom 先杀后转 → 先转换后杀（83 浸>16 岩浆+坏基 → 掉种子;反向不掉）
 //  F4 门双锚分支 tileCut 豁免 → 门洞内高草可放门（清格相清除）
 // 运行：SW_ORIGIN=http://localhost:52xx node tools/run-diag.mjs scripts/_blue-review-f1-f4.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

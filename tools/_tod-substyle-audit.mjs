@@ -13,7 +13,7 @@
 //   · 子样式缺省液体 = _baseObject（SetupBaseObject :1767-1768 water=Allowed/lava=NotAllowed）。
 import { readFileSync } from 'node:fs';
 
-const SRC = process.env.TOD_SRC ?? '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ObjectData/TileObjectData.cs';
+const SRC = process.env.TOD_SRC ?? `${process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '')}/Terarria1457/Terraria.ObjectData/TileObjectData.cs`;   // ★C档可移植
 const lines = readFileSync(SRC, 'utf8').split(/\r?\n/);
 
 const D = () => ({ water: 'allowed', lava: 'notAllowed' });

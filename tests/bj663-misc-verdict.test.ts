@@ -19,7 +19,7 @@
 //       ——24 碰撞键+12 文件 FrameSkip 草稿泄漏已删,产物差=10 语言 FrameSkip
 //       草稿值→en 兜底,余键序重排）→ 深度统一对账闸锁零容忍。
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -34,16 +34,20 @@ import { isVineAt } from '../src/render/VanillaFraming';
 import { projSecondCutEligible } from '../src/core/Game';
 import { CUT_EXCLUDE_VIDS, CUT_EXCLUDE_AISTYLES, CUT_EXCLUDE_VIDS_TAIL } from '../src/entities/Entity';
 import { flattenDeep, mergePacks } from '../scripts/l10n-merge.mjs';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const V = join(ROOT, '..', 'Terarria1457');
 const CUSTOM = join(ROOT, '..', 'tools', 'l10n-custom');
 const BUILT = join(ROOT, 'public', 'l10n');
-const MAIN_CS = readFileSync(join(V, 'Terraria', 'Main.cs'), 'utf8');
-const PROJ_CS = readFileSync(join(V, 'Terraria', 'Projectile.cs'), 'utf8');
-const TILEID_CS = readFileSync(join(V, 'Terraria.ID', 'TileID.cs'), 'utf8');
-const WORLDGEN_CS = readFileSync(join(V, 'Terraria', 'WorldGen.cs'), 'utf8');
+// ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const MAIN_CS = existsSync(join(V, 'Terraria', 'Main.cs')) ? readFileSync(join(V, 'Terraria', 'Main.cs'), 'utf8') : '';
+const PROJ_CS = existsSync(join(V, 'Terraria', 'Projectile.cs')) ? readFileSync(join(V, 'Terraria', 'Projectile.cs'), 'utf8') : '';
+const TILEID_CS = existsSync(join(V, 'Terraria.ID', 'TileID.cs')) ? readFileSync(join(V, 'Terraria.ID', 'TileID.cs'), 'utf8') : '';
+const WORLDGEN_CS = existsSync(join(V, 'Terraria', 'WorldGen.cs')) ? readFileSync(join(V, 'Terraria', 'WorldGen.cs'), 'utf8') : '';   // ★C档可移植:缺档降级
 const MINION_SRC = readFileSync(join(ROOT, 'src/entities/MinionProj.ts'), 'utf8');
 const GAME_SRC = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
 const VF_SRC = readFileSync(join(ROOT, 'src/render/VanillaFraming.ts'), 'utf8');
@@ -99,7 +103,7 @@ beforeAll(() => {
 
 // ===================== 件1：533 Glow_128 本体罩 =====================
 
-describe('BJ663件1：533 Glow_128 本体罩（Main.cs:31588-31591）', () => {
+describe.skipIf(EXT_MISSING)('BJ663件1：533 Glow_128 本体罩（Main.cs:31588-31591）', () => {
   it('原版锚：本体 :31578 后 else-if 533 支 White*0.3 同矩形同参（逐字）', () => {
     const i = MAIN_CS.indexOf('EntitySpriteDraw(value15, proj.Center + zero - screenPosition + new Vector2(0f, proj.gfxOffY + (float)num151), rectangle4, color48, rotation24, origin8, num192, dir);');
     expect(i, '本体绘 :31578 缺失').toBeGreaterThan(-1);
@@ -158,7 +162,7 @@ describe('BJ663件1：533 Glow_128 本体罩（Main.cs:31588-31591）', () => {
 
 // ===================== 件2：R15-F8 第二割面 =====================
 
-describe('BJ663件2：第二割面定谳+落刀（Projectile.cs:18021-18078）', () => {
+describe.skipIf(EXT_MISSING)('BJ663件2：第二割面定谳+落刀（Projectile.cs:18021-18078）', () => {
   it('原版锚：撞格拍门四因（:18021）+ 支 A 仅 484（:18027）+ 支 B 裂砖 1/3（:18059）', () => {
     const i = PROJ_CS.indexOf('if (owner == Main.myPlayer && CanCutTiles() && (friendly || hostile) && damage > 0)');
     expect(i, '第二割面门 :18021').toBeGreaterThan(-1);
@@ -218,7 +222,7 @@ describe('BJ663件2：第二割面定谳+落刀（Projectile.cs:18021-18078）',
 
 // ===================== 件3：isVineAt 域错重写 =====================
 
-describe('BJ663件3：isVineAt IsVine 1:1（BJ652 isRopeAt 同族）', () => {
+describe.skipIf(EXT_MISSING)('BJ663件3：isVineAt IsVine 1:1（BJ652 isRopeAt 同族）', () => {
   const int = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;
 
   it('原版锚：TileID.cs:237 八员 + TileFrame 消费位 :82652（CheckVines 支）', () => {
@@ -273,7 +277,7 @@ describe('BJ663件3：isVineAt IsVine 1:1（BJ652 isRopeAt 同族）', () => {
 
 // ===================== 件4：build-l10n 合并序定谳 + 全 custom 对账 =====================
 
-describe('BJ663件4：l10n 合并序定谳（BJ655 翻案）+ 深度统一对账闸', () => {
+describe.skipIf(EXT_MISSING)('BJ663件4：l10n 合并序定谳（BJ655 翻案）+ 深度统一对账闸', () => {
   /** 深度统一 flat∩嵌套碰撞检测（C1 顶层盲区补口）：任一完整路径若同时以
    *  「字面点分键」与「嵌套路径叶」（或两种点分形态）可达 = 碰撞。 */
   function collisions(src: string): Array<{ path: string; forms: string[] }> {

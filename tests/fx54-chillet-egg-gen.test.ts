@@ -21,6 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import type { TileStore } from '../src/world/TileStore';
 
@@ -41,7 +42,7 @@ function eggAnchors(st: TileStore): Array<{ x: number; y: number }> {
 }
 
 describe('fx54 巨型龙蛋生成金标', () => {
-  it('档案快照：固定种子最终蛋数（fixture 静态钉值）', () => {
+  it.skipIf(fixtureMissing('small', 'medium', 'iii6-remix'))('档案快照：固定种子最终蛋数（fixture 静态钉值）', () => {
     // 小世界(4200×1200, seed 9293480)=5；中世界(6400×1800, 同种子)=7；
     // remix(dontdigup)=6——均为生成端当拍快照（欠额=微群系直写压蛋,原版同款语义）。
     expect(eggAnchors(loadFixtureWorld('small').store)).toHaveLength(5);

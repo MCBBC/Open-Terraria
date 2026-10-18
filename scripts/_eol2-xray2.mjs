@@ -1,7 +1,8 @@
 // EoL2 xray2: 主线程 Profile(0x7) 自耗时归因 + 慢帧窗差分 + prof8 直扫防伪 + worker 身份
 // run: node --max-old-space-size=8192 scripts/_eol2-xray2.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 

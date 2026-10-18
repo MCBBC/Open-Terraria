@@ -12,7 +12,7 @@ import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
 it('iii198 wire injection', async () => {
-  const buf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const buf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const wld = parseWld(new Uint8Array(buf.buffer, buf.byteOffset));
   const tw = wld.tilesWide;
   let injected = 0;

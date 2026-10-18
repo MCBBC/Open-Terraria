@@ -1,5 +1,6 @@
 // IIII255 CPU 路 bob 验证(?wwarp=0 双臂:slopewave 0/1)——浸润带/斜面覆盖逐格 bob
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=600000 scripts/_iii255-cpubob.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -125,7 +126,7 @@ async function sample(page, tag) {
   return res;
 }
 
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const pageA = await openArm('?wwarp=0', 'cpu-off');
 const A = await sample(pageA, 'cpu-off');

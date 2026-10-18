@@ -11,17 +11,21 @@
 //     ±1/通道（截断 vs 四舍五入差）,非折算项须逐位相等;
 //   · 成员表须双向全等（缺失/多余/并串三类回归全锁死——F3 即「并串」型）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../src/data/vanillaFoodColors';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
-const CS = readFileSync(join(ROOT, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8');
+const CS = existsSync(join(ROOT, 'Terarria1457', 'Terraria.ID', 'ItemID.cs')) ? readFileSync(join(ROOT, 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 interface Entry { colors: Array<[number, number, number]>; folded: boolean[] }
 
 function extractVanillaTable(name: string): Map<number, Entry> {
+  if (CS === '') return new Map();   // ★C档可移植:缺档降级(describe 体收集期亦执行)
   const start = CS.indexOf(`public static Color[][] ${name}`);
   if (start === -1) throw new Error(`table ${name} not found`);
   const rest = CS.slice(start);
@@ -73,7 +77,7 @@ function diffTables(name: string, vanilla: Map<number, Entry>, repo: Record<numb
   return bad;
 }
 
-describe('SW-RB12a 饮用/食物尘色表金标（Terarria1457 ItemID.cs 现场重提对拍）', () => {
+describe.skipIf(EXT_MISSING)('SW-RB12a 饮用/食物尘色表金标（Terarria1457 ItemID.cs 现场重提对拍）', () => {
   const vDrink = extractVanillaTable('DrinkParticleColors');
   const vFood = extractVanillaTable('FoodParticleColors');
 

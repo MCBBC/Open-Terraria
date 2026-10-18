@@ -1,13 +1,14 @@
 // 原版化落地四时刻视觉验证:晨(t.275)/午(t.5)/昏(t.72)/夜(t.05)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const OUT = '/Users/vinlic/.claude/jobs/8405c930/tmp/wl-horizon';
+const OUT = join(HOME, '.claude/jobs/8405c930/tmp/wl-horizon');
 fs.mkdirSync(OUT, { recursive: true });
 const B = process.env.T || 'http://localhost:4173';
 const TIMES = [['dawn', 0.275], ['noon', 0.5], ['dusk', 0.72], ['night', 0.05]];
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wlhz',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wlhz'),
   args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
 });
 for (const [tag, tod] of TIMES) {

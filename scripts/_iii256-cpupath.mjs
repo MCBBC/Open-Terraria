@@ -1,4 +1,5 @@
 // IIII256 CPU 路(?wwarp=0)对照:排除 GL 全屏扭曲变量,看坡面水线亮边
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { launchBrowser, openPage, front } from '../tools/probe/lib/browser.mjs';
@@ -33,7 +34,7 @@ const seedDef = (json) => {
     } catch { res(); }
   });
 };
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const page = await openPage(browser, { errors: [] });
 page.__probeOrigin = ORIGIN;

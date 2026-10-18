@@ -5,9 +5,10 @@
 //  - DrawFrame / BeginFrame:合成器呈现面(impl/viz)
 //  - BeginMainThreadFrame:主线程帧起始
 // 真帧率裁决:呈现面每秒计数 vs rAF 调度率 vs 计数器读数(1000/mean gap)。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 
-const TRACE = '/Users/vinlic/Downloads/Trace-20261005T153007.json';
+const TRACE = needInput(join(DOWNLOADS, 'Trace-20261005T153007.json'));
 const buf = readFileSync(TRACE);
 const NL = 0x0a;
 const lineSlice = (pos) => {

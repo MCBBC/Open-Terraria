@@ -1,9 +1,10 @@
 // 用户存档僵尸凹龛卡死复现:__swLoadJson 载入真实存档 → 标记点(2069,240)生成僵尸群 → 600t 追踪
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/';
-const SAVE = readFileSync('/Users/vinlic/Downloads/map-氙奇葩 (6).json', 'utf8');
+const SAVE = readFileSync(needInput(join(DOWNLOADS, 'map-氙奇葩 (6).json')), 'utf8');
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 300000, defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message.slice(0, 200)));

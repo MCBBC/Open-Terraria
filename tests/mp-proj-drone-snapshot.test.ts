@@ -27,6 +27,10 @@
 // 桩口径：广播/工厂/应用 = rain-cloud-mp.test.ts（Object.create(Game.prototype)）；
 //         服务器中继 = mp-net-camera-target.test.ts（Room 真件 + fake ws）。
 // ============================================================================
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg } from '../src/net/protocol';
 import { ClientNet } from '../src/net/ClientNet';
@@ -137,7 +141,7 @@ function mkHooks(playerDead = false) {
 // ---------------------------------------------------------------------------
 // ① 广播分类（此前漏分类=kind1 回旋镖误分类的回归锁）
 // ---------------------------------------------------------------------------
-describe('刀G 广播分类：kind11（1020/1105）', () => {
+describe.skipIf(EXT_MISSING)('刀G 广播分类：kind11（1020/1105）', () => {
   it('①JimsDroneProj → kind11：tag=`1020,rotMilli`/aux=ai0/无 bit6·bit7（不落 kind1）', () => {
     const d = new JimsDroneProj(480, 352, 3, -2);
     d.ai0 = 5;                                   // bit0|bit2=right+up（:41674-41682 位包）
@@ -201,7 +205,7 @@ describe('刀G 广播分类：kind11（1020/1105）', () => {
 // ---------------------------------------------------------------------------
 // ③ 工厂反序列化 round-trip + netDroneSync
 // ---------------------------------------------------------------------------
-describe('刀G 工厂 case11：真类重建 round-trip', () => {
+describe.skipIf(EXT_MISSING)('刀G 工厂 case11：真类重建 round-trip', () => {
   it('③1020：ai0/rotation 逐值回填+盒 12×12+ownerDeadProbe 接线', () => {
     const rot = -2.418;
     const built = mkProj({ kind: 11, netId: (2 << 24) | 7, tag: `1020,${Math.round(rot * 1000)}`,
@@ -266,7 +270,7 @@ describe('刀G 工厂 case11：真类重建 round-trip', () => {
 // ---------------------------------------------------------------------------
 // ④ 端到端：傀儡本地 AI 照跑（分布式物理）+ 死亡镜像
 // ---------------------------------------------------------------------------
-describe('刀G 傀儡 AI 面：快照输入驱动本地模拟', () => {
+describe.skipIf(EXT_MISSING)('刀G 傀儡 AI 面：快照输入驱动本地模拟', () => {
   it('④同 ai0 双端位置收敛（非 owner 端照跑 AI 本体=Projectile.cs owner 门外共段）', () => {
     const a = mkHooks();
     const b = mkHooks();
@@ -348,7 +352,7 @@ describe('刀G 傀儡 AI 面：快照输入驱动本地模拟', () => {
 // ---------------------------------------------------------------------------
 // ⑤ 消亡链：alive-sweep 出 msg28 + destroy 背板停循环音
 // ---------------------------------------------------------------------------
-describe('刀G 消亡链', () => {
+describe.skipIf(EXT_MISSING)('刀G 消亡链', () => {
   it('⑤拥有端消亡 → 下拍广播出 msg28 netId（死弹不再产快照）', () => {
     const d = new JimsDroneProj(480, 352, 3, -2);
     const shell = broadcastShell(d);
@@ -376,7 +380,7 @@ describe('刀G 消亡链', () => {
 // ---------------------------------------------------------------------------
 // ⑥ 成就 owner 门（Projectile.cs:71981-71985）
 // ---------------------------------------------------------------------------
-describe('刀G 成就门：owner==Main.myPlayer 投影（onProjectileDeath flags.ownerLocal）', () => {
+describe.skipIf(EXT_MISSING)('刀G 成就门：owner==Main.myPlayer 投影（onProjectileDeath flags.ownerLocal）', () => {
   const call = (flags?: { ownerLocal?: boolean }, y = 600, h = 12) => {
     const g = protGame();
     const done: string[] = [];
@@ -509,7 +513,7 @@ async function mkRig(): Promise<{ room: RoomStub; rc: Record<'a' | 'b', RcStub>;
   return { room, rc: { a: mkClient(1), b: mkClient(2) }, relay };
 }
 
-describe('刀G 全链 wire round-trip + 服务器白名单', () => {
+describe.skipIf(EXT_MISSING)('刀G 全链 wire round-trip + 服务器白名单', () => {
   it('⑦上行 kind11 → 服务器中继（排除发送者）→ 接收解帧 → 工厂真类重建', async () => {
     const rig = await mkRig();
     const a = mkNet(1);

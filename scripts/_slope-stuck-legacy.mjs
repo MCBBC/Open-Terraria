@@ -1,8 +1,9 @@
 // 船区外标记点斜坡卡死复现：读真实几何 + 僵尸体驱动
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (21).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (21).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});

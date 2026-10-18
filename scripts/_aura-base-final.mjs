@@ -1,12 +1,13 @@
 // 闪电光环 base 位点终诊：强制有效落位（重试 aim 偏移）+ 光照采样 + 昼/夜两态
 // 运行: SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs --timeout=600000 scripts/_aura-base-final.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { pump } from '../tools/probe/lib/pump.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.WLD_PATH || '/Users/vinlic/Downloads/十周年纪念种子(1).wld';
+const WLD = process.env.WLD_PATH || needInput(join(DOWNLOADS, '十周年纪念种子(1).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errs = [];

@@ -1,7 +1,8 @@
+import { PROJECT_ROOT, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
-const a = PNG.sync.read(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_22.png'));
-const b = PNG.sync.read(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/TownNPCs/Guide_Default.png'));
+const a = PNG.sync.read(readFileSync(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_22.png')));
+const b = PNG.sync.read(readFileSync(join(PROJECT_ROOT, 'terraria-assets/Images/TownNPCs/Guide_Default.png')));
 let diff = 0;
 for (let i = 0; i < a.data.length; i += 4) {
   if (Math.abs(a.data[i] - b.data[i]) > 8 || Math.abs(a.data[i + 3] - b.data[i + 3]) > 8) diff++;

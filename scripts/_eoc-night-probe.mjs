@@ -1,11 +1,12 @@
 // EoC 自然召唤排查探针（2026-08-28 用户报：收到"邪恶存在"消息但整夜未生成）。
 // 流程：载 FTW V2 存档 → 关介绍面板 → 满足 roll 条件直接置 pending + 跳夜中段
 // → 捕获 [EoC-*] console 埋点 → 回读 pending/EoC 实体状态。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 

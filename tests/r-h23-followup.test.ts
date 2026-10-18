@@ -1,5 +1,5 @@
 // R-H23 终审批测试（2026-09-04 蓝队）——侏儒/巨石/放置钩批复核七修二 nit 逐项锁定。
-// 反编译真值锚（/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/）：
+// 反编译真值锚（仓库外 Terarria1457/ 树）：
 //   H2-1 WorldGen.cs:88124-88163 InAPlaceWithWind 两重载（Vector2 像素域 :88124-88129
 //        → int tile 域 :88141-88163）+ DoesWindBlowAtThisHeight :88131-88139 remix 翻转；
 //        TileDrawing.cs:4562-4564 贴图风门私有封装（489 风铃 2×3/:4802、490 风向标

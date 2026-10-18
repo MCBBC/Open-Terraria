@@ -1,4 +1,5 @@
 // ★699c 岛后/清后中界 dump:平台盒 105 格 active 态逐段(定位归纳断裂段)
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
@@ -18,7 +19,7 @@ const { RNG, translateSeed } = await import('../src/core/rng.ts');
 (globalThis as Record<string, unknown>).__calamityTileDefs = TILE_DEFS;
 (globalThis as Record<string, unknown>).__calamityTileIdByKey = TILE_BY_KEY;
 (globalThis as unknown as { __calamityGenTiles?: Record<string, number> }).__calamityGenTiles = {};
-const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? needInput(TMOD_LOGS);
 function loadSnap(pat: string) {
   const f = readdirSync(LOGS).filter((x) => x.endsWith(pat + '.bin.gz')).sort().pop();
   if (!f) throw new Error('快照未找到: ' + pat);

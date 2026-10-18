@@ -1,5 +1,6 @@
 // 行走帧前倾分析：帧 N 的头部带质心 vs 身体带质心水平偏移
 // 身体前倾侧 = 面朝方向（头向后仰、躯干前倾）
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 const FH = 56; // 城镇 NPC 帧高
@@ -12,7 +13,7 @@ function centroid(png, y0, y1) {
   return n ? sx / n : -1;
 }
 for (const id of [17, 18, 22]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const frame = 3; // 行走帧
   const yBase = frame * FH;
   const head = centroid(png, yBase + 2, yBase + 14);

@@ -1,7 +1,8 @@
 // EoL2 xray5: 按流命名空间重建归因(防跨流 id 碰撞)——主线程自耗时/慢帧差分/每秒签名 + worker 真身栈与忙曲线
 // run: node --max-old-space-size=8192 scripts/_eol2-xray5.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 

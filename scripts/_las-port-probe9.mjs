@@ -1,6 +1,7 @@
 // Lights And Shadows 探针 v9:用户真实存档(十周年纪念种子=极光世界)翻转复现+二分。
 // 假设:极光→farInterlayerActive→_c10eFrame=false→非分体帧链路 × mod 常驻链=翻转。
 // 二分腿:①mod 完整 ②mod pass 换纯直通(只保留"链常开"因子) ③mod 摘除。
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { zipSync } = require('fflate');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.LAS_WLD || '/Users/vinlic/Downloads/十周年纪念种子 (3).wld';
+const WLD = process.env.LAS_WLD || needInput(join(DOWNLOADS, '十周年纪念种子 (3).wld'));
 const SHOT = '/tmp/las-shots';
 fs.mkdirSync(SHOT, { recursive: true });
 const LOG = fs.openSync('/tmp/las-probe9.log', 'w');

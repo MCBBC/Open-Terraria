@@ -1,10 +1,11 @@
 // ★BJ647-B v15：旗帜黑底名条「字灭」复现——夜晚/清晨 vs 白天，鼠标悬旗布矩形。
 // 假说：名条画在世界层内（Renderer.ts:6585），后续 compositeLight 光照乘盖全屏——
 // 暗环境白字被乘暗=「文字消失只剩黑框」；原版 DrawInterface_7=UI 层无光直绘。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: false,
   defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 1 },

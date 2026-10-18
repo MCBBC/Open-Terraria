@@ -1,6 +1,7 @@
 // 用户标注区 (3985-4010×450-465) 全格对拍:链 vs compiled-1458 oracle(out-grass.txt)。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture } from './fixturePath';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -35,7 +36,7 @@ const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
     }
     expect(dump.length).toBe(416);
 
-    const wldBuf = new Uint8Array(readFileSync('/Users/vinlic/Downloads/FTW V2.wld'));
+    const wldBuf = new Uint8Array(readLocalFixture('ftw-v2.wld'));
     const wld = parseWld(wldBuf);
     const v2i = new Map<number, number>();
     for (let i = 0; i < TILE_DEFS.length; i++) {

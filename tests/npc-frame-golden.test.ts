@@ -4,6 +4,9 @@
 // spawner spawnBound 静默丢弃从未出现）——全部由本闸门三类检查覆盖。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { fileURLToPath } from 'node:url';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
 
@@ -29,8 +32,9 @@ function vanillaFrameCounts(): number[] {
   return vals;
 }
 
-describe('NPC 帧数金标硬闸门', () => {
-  const vanilla = vanillaFrameCounts();
+describe.skipIf(EXT_MISSING)('NPC 帧数金标硬闸门', () => {
+  // ★C档可移植:缺档降级(describe 体收集期亦执行;EXT_MISSING skip 兜底)
+  const vanilla = EXT_MISSING ? [] : vanillaFrameCounts();
 
   it('第1层·帧数全量对账：每条 json frames === Main.npcFrameCount[id]', () => {
     const bad: string[] = [];

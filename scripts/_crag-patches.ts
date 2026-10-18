@@ -1,8 +1,9 @@
 // ⑨ 焦余补丁触发行对账:从输出快照/我方终态分别提取 remains 连通域 x 范围
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import(root + '/src/data/tiles.ts');
 {
   let nextId = 1030;

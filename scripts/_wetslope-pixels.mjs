@@ -1,16 +1,17 @@
 // 像素级取证:对代表标注格导出合成画布的逐像素分类矩阵,
 // 定位"亮缝"精确落在坡面斜边的哪几行/列。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
-const MARKS = '/Users/vinlic/Downloads/marks-浮夸的羡慕顶峰 (1).json';
-const MAP = '/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (2).json';
+const MARKS = needInput(join(DOWNLOADS, 'marks-浮夸的羡慕顶峰 (1).json'));
+const MAP = needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (2).json'));
 const marksJson = JSON.parse(readFileSync(MARKS, 'utf8'));
 const mapStr = readFileSync(MAP, 'utf8');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile2',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile2'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

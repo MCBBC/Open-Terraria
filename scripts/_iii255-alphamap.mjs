@@ -1,6 +1,7 @@
 // IIII255 门控画布 α 精读 + 波场位移读数（ON 臂,快）
 // 设备坐标锚定:门控画布实测池塘水条带 = tile3509 左缘 device x=467, 每 tile 32px, 水行顶 y=406
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=300000 scripts/_iii255-alphamap.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { launchBrowser, openPage, front } from '../tools/probe/lib/browser.mjs';
@@ -36,7 +37,7 @@ const seedDef = (json) => {
   });
 };
 
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const page = await openPage(browser, { errors: [] });
 page.__probeOrigin = ORIGIN;

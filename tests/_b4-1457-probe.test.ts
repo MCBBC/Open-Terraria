@@ -7,10 +7,12 @@
 import { describe, it, expect } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 
 const sheetAt = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
 
-describe('批4 1457 worldgen 行为探针', () => {
+// ★C档可移植:档案 gz 不入 git,缺档=skip(tests/README.md 再产指引)
+describe.skipIf(fixtureMissing('small', 'b4-seed44'))('批4 1457 worldgen 行为探针', () => {
   it('HellFort 1457：门落点+塌墙开口+无悬挂（种子 9293480 小世界）', async () => {
     const world = loadFixtureWorld('small');   // ★IIIII259 档案载入（cfg=4200×1200/9293480/evil0）
     const st = world.store;

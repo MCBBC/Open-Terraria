@@ -11,6 +11,9 @@
 //   ⑥ SetID 9+ 消费点逐个核（vanillaSets1457.ts 头注处置台账）
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
@@ -44,7 +47,7 @@ const sheetId = (sheet: number): number => {
 // ① drawslots 1457 再生
 // ============================================================================
 
-describe('① drawslots：1457 再生（extract-acc-drawslots --ver=1457）', () => {
+describe.skipIf(EXT_MISSING)('① drawslots：1457 再生（extract-acc-drawslots --ver=1457）', () => {
   it('新配饰 6145-6195 族全量入表（抽查 1457 新增 16 条 vid 的槽位值）', () => {
     // 值 = tools/extract-acc-drawslots.mjs 对 Terarria1457/Terraria/Item.cs 的提取终态
     expect(accDrawSlotsOf(6156)).toMatchObject({ handOn: 27, handOff: 17 });
@@ -87,7 +90,7 @@ describe('① drawslots：1457 再生（extract-acc-drawslots --ver=1457）', ()
 // ② 拴绳新小动物两族
 // ============================================================================
 
-describe('② 拴绳：1457 注册序 + Turtle/AquaticWalker 两新族', () => {
+describe.skipIf(EXT_MISSING)('② 拴绳：1457 注册序 + Turtle/AquaticWalker 两新族', () => {
   it('Registry.RegisterAll 注册序 21 型（LeashedEntity.cs:118-142；0=null/1=kite）', () => {
     expect(PROTOTYPE_REGISTER_ORDER).toHaveLength(20);
     const want: Array<[string, number]> = [
@@ -192,7 +195,7 @@ function countSheet(st: TileStore, sheet: number): number {
   return n;
 }
 
-describe('③ TeleporterPass（TeleporterGenerator.cs 1:1，"beam me up"）', () => {
+describe.skipIf(EXT_MISSING)('③ TeleporterPass（TeleporterGenerator.cs 1:1，"beam me up"）', () => {
   // ★h ≥ worldSurface+300：TryFindTeleporterSpot 掷点带 = [worldSurface, h-200-100]
   //  （:129 Main.UnderworldLayer = maxTilesY-200），h 过小则上界 < 下界
   // 掷点带 [SURF, h-300]、地板贴带下缘 → TryFindTeleporterSpot 下落扫描最短
@@ -303,7 +306,7 @@ describe('③ TeleporterPass（TeleporterGenerator.cs 1:1，"beam me up"）', ()
 // ⑥ SetID 9+ 消费点定谳（处置台账 = vanillaSets1457.ts 头注）
 // ============================================================================
 
-describe('⑥ SetID 9+：小件接线与定谳', () => {
+describe.skipIf(EXT_MISSING)('⑥ SetID 9+：小件接线与定谳', () => {
   it('AccessoryIncompatibilityType 已接：模特配饰冲突槽（TEDisplayDoll.cs:747-752 + ItemSlot.cs:3482-3486）', () => {
     expect(ITEM_ACCESSORY_INCOMPATIBILITY_TYPE).toMatchObject({
       6168: 6168, 6169: 6168, 6193: 6168, 6194: 6168,

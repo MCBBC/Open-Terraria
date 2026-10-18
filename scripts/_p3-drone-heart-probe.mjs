@@ -17,6 +17,7 @@
 //         :8207——v2 教训：在局直开新世界=旧实例延迟 destroy 解绑新世界绑定）→
 //         createGame('fortheworthy') → getGoodAdjustments（:18040-18052 ⊂ Main.
 //         getGoodWorld 门 :17875-17878）→ 245 canDisplayBuffs=false → 零 331。
+import { REPO_ROOT } from './_pathlib.mjs';
 import { appendFileSync } from 'node:fs';
 const STEPLOG = '/tmp/p3-drone-heart-progress.log';
 const step = (m) => { const l = `${new Date().toISOString().slice(11, 19)} ${m}`; try { appendFileSync(STEPLOG, l + '\n'); } catch {} console.log(l); };
@@ -24,7 +25,7 @@ import { launchBrowser, openPage, bootstrap, createGame, pump, godMode, screensh
 import { giveItems, spawnEnemy, clearEnemies } from '../tools/probe/lib/entities.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5430';
-const OUT = (n) => `/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/p3-drone-heart/${n}`;
+const OUT = (n) => `${REPO_ROOT}/docs/evidence/p3-drone-heart/${n}`;
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errors = [];

@@ -17,6 +17,9 @@
 // l10n 用真 zh-Hans（bj224-setbonus-tooltip.test.ts 同法）——文案逐字断言。
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => fs.existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import path from 'node:path';
 import { assembleTooltipLines } from '../src/ui/itemTooltip';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
@@ -36,7 +39,7 @@ function socialLines(vid: number, socialSlot: boolean) {
   return lines.filter((l) => l.tag === 'social');
 }
 
-describe('BJ230 社交槽悬停提示行（1457 语义:tip[61] 单行三门）', () => {
+describe.skipIf(EXT_MISSING)('BJ230 社交槽悬停提示行（1457 语义:tip[61] 单行三门）', () => {
   it('① 功能件（铜短剑 4）在社交槽 → 单行「在社交栏中不起作用」（LegacyTooltip.61）', () => {
     const soc = socialLines(4, true);
     expect(soc).toHaveLength(1);
@@ -67,7 +70,7 @@ describe('BJ230 社交槽悬停提示行（1457 语义:tip[61] 单行三门）',
   });
 });
 
-describe('BJ230 门哨兵（UI.ts socialSlot 门 + 反编译置位面重放）', () => {
+describe.skipIf(EXT_MISSING)('BJ230 门哨兵（UI.ts socialSlot 门 + 反编译置位面重放）', () => {
   it('⑤ UI.ts 门 = armor&&i>=10（context 9∪11 全臂）,旧 dye/miscDye 臂已摘', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'UI.ts'), 'utf8');
     expect(src).toContain("socialSlot: where === 'armor' && i >= 10,");

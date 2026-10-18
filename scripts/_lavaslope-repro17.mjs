@@ -1,8 +1,9 @@
 // _lavaslope-repro17: 用户世界 (2018,1123) 岩浆半砖(wall=0, L/R/U=255) 的 drawImage 探针。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: 'new', defaultViewport: { width: 1280, height: 900 },

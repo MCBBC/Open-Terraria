@@ -1,14 +1,15 @@
 // 半砖格自身 16x16 像素转储:验证 IsHalfBrick 满格水体(行0-8 应为水色)是否渲染。
 // 窗口 = 半砖格 + 右侧标注格(32 宽)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (5).json', 'utf8');
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (5).json')), 'utf8');
 // [半砖格x, 半砖格y](标注格 = +1)
 const cells = JSON.parse(process.env.SW_CELLS ?? '[[881,282],[845,280]]');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile16',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile16'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
@@ -57,7 +58,7 @@ for (const [hx, hy] of cells) {
   console.log(`\n== half(${hx},${hy}) lq=${dump.halfLq} upLq=${dump.upLq} — 左16列=半砖格 右16列=标注格`);
   dump.rows.forEach((r, y) => console.log(` y${String(y).padStart(2, '0')} ` + r.join(' ')));
   await page.screenshot({
-    path: `/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope/half-${hx}-${hy}.png`,
+    path: `${HOME}/.claude/jobs/8405c930/tmp/wetslope/half-${hx}-${hy}.png`,
     clip: { x: 1280 / 2 - 96, y: 800 / 2 - 96, width: 192, height: 192 },
   });
 }

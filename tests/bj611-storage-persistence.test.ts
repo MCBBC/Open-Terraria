@@ -15,9 +15,12 @@
 //     磁盘总容量——C 盘剩 3GB 空闲时 quota 仍 10.3GB,环比抓不到磁盘变紧;触发面已按
 //     用户明令摘除,纯核保留待 re-arm;E 组摘除回归闸锁复发）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { EvictProbeCause, LsLike } from '../src/save/StoragePersistence';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ---- 模块级状态隔离：每用例 resetModules 后动态导入（persist 申请是会话单发语义） ----
 beforeEach(() => {
@@ -47,7 +50,7 @@ function freshMod(): Promise<typeof import('../src/save/StoragePersistence')> {
   return import('../src/save/StoragePersistence');
 }
 
-describe('BJ611 A组：persist 统一申请一次性 + 状态追踪', () => {
+describe.skipIf(EXT_MISSING)('BJ611 A组：persist 统一申请一次性 + 状态追踪', () => {
   it('授予：一次申请+结果落态;重入不再打底层 persist（一次性闸）', async () => {
     let persistCalls = 0;
     setNavigatorStorage({
@@ -97,7 +100,7 @@ describe('BJ611 A组：persist 统一申请一次性 + 状态追踪', () => {
   });
 });
 
-describe('BJ611 B组：一次性提醒门（localStorage 记忆）', () => {
+describe.skipIf(EXT_MISSING)('BJ611 B组：一次性提醒门（localStorage 记忆）', () => {
   function makeLs(): LsLike & { map: Map<string, string> } {
     const map = new Map<string, string>();
     return {
@@ -141,7 +144,7 @@ describe('BJ611 B组：一次性提醒门（localStorage 记忆）', () => {
   });
 });
 
-describe('BJ611 C组：estimate 预警阈值', () => {
+describe.skipIf(EXT_MISSING)('BJ611 C组：estimate 预警阈值', () => {
   const MB = 1024 * 1024;
 
   it('nearQuota：usage/quota ≥ 0.9（QuotaExceededError 写失败近在眼前）', async () => {
@@ -191,7 +194,7 @@ describe('BJ611 C组：estimate 预警阈值', () => {
   });
 });
 
-describe('BJ611 D组：幽灵检测（驱逐后首启）', () => {
+describe.skipIf(EXT_MISSING)('BJ611 D组：幽灵检测（驱逐后首启）', () => {
   it('probe 注入：keyMissing=幽灵;present=非幽灵;world+player 双列各自探测', async () => {
     const mod = await freshMod();
     const probe = async (key: string): Promise<EvictProbeCause> =>
@@ -297,7 +300,7 @@ describe('BJ611 D组：幽灵检测（驱逐后首启）', () => {
   });
 });
 
-describe('BJ611 F组（休眠态）：quota 环比骤降状态机纯核——2026-10-10 用户实测推翻前提'
+describe.skipIf(EXT_MISSING)('BJ611 F组（休眠态）：quota 环比骤降状态机纯核——2026-10-10 用户实测推翻前提'
   + '（Chromium M97+ quota 锚磁盘总容量,C 盘剩 3GB 空闲时 quota 仍 10.3GB,环比抓不到磁盘变紧）'
   + ',触发面已按用户明令摘除（toast 链/状态行 ↓ 角标/sbw.quotaTrend 写入）,纯核保留待 re-arm', () => {
   const GB = 1024 * 1024 * 1024;
@@ -367,7 +370,7 @@ describe('BJ611 F组（休眠态）：quota 环比骤降状态机纯核——202
   // quotaCrash 字段/LS 抛错降级）随触发面摘除一并删除——纯核休眠,接线面已不存在。
 });
 
-describe('BJ611 E组：接线结构锚（防回归退化）', () => {
+describe.skipIf(EXT_MISSING)('BJ611 E组：接线结构锚（防回归退化）', () => {
   const codeOf = (p: string) => readFileSync(resolve(__dirname, p), 'utf8').replace(/^\s*\/\/.*$/gm, '');
 
   it('mainFlow：BJ611 三查接线在位（申请/未授予提醒门/幽灵扫描/保存时 estimate 采样）', () => {

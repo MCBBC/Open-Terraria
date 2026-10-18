@@ -1,13 +1,14 @@
 // 草/泥边界 A/B 终版:同一脚本内 vf=1 与 vf=0 两趟,同点位烘焙裁剪+全屏图。
+import { DOWNLOADS, REPO_ROOT, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const PORT = 5209;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-  cwd: '/Users/vinlic/Project/GLM/SandboxWorld/game',
+  cwd: REPO_ROOT,
   env: { ...process.env, SW_NO_HMR: '1', SW_CACHE: '/tmp/sw-vite-5209' },
   stdio: 'ignore', detached: true,
 });

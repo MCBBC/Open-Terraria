@@ -1,8 +1,9 @@
 // 读 v_185/v_74 等装饰精灵帧的底部行(16x20 表),验证 2px 下探越界与灰色像素。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile14',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile14'),
   args: ['--no-first-run'], defaultViewport: { width: 400, height: 300 },
 });
 const page = await browser.newPage();

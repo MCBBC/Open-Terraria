@@ -10,11 +10,12 @@
 // 几何定谳:DesertDescription.cs:59-91(DefaultBlockScale=(4,2) → CombinedArea 宽 320,
 //   Inflate(10) 后 340 → Center.X=Left+170);Sunken Sea pass 只消费 ud.x0(扫墙列)与
 //   Center.X(ox)→判卷注入合成 ud{x0:S, x1:S+340},S 以 diff 最低为准(SW_UD_X0 可钉)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? needInput(TMOD_LOGS);
 const PASS = process.env.SW_PASS === 'vernal' ? 'vernal' : 'sunken';
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { RNG, translateSeed } = await import('../src/core/rng.ts');

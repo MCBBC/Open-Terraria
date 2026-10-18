@@ -1,8 +1,9 @@
 // 运行时 store 网格 dump:对齐表格 + 瀑布柱 RGB 采样
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-12345世界 (1).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-12345世界 (1).json'));
 const CX = 1485, CY = 590;
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });

@@ -3,7 +3,7 @@ import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
 const RUN = process.env.SW_I209R === '1';
 const JS_DIR = '/tmp/iii203-out/pipeslot-97';
-const GOLD = '/Users/vinlic/GoldenChains/golden-remix/dumps/097_Micro_Biomes';
+const GOLD = `${process.env.HOME ?? ''}/GoldenChains/golden-remix/dumps/097_Micro_Biomes`;
 const W = 4200;
 function le16(p: string): Uint16Array { const b = readFileSync(p); return new Uint16Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)); }
 (RUN ? it : it.skip)('iii209 rail scan', () => {

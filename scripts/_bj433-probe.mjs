@@ -2,10 +2,11 @@
 // 关键机制定谳：Track 只在「破块后 60t 窗内打到活格」才记录（Player.cs:46142 破块
 // 开窗→后续击打 Track；空格击不入分派 = :46038 active() 早退,原版同构）→ 玩家侧
 // 动态扫瞄（破块即移准星到上一活干格,真实玩家挥砍轨迹同相）。
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const EV = '/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/bj433';
+const EV = join(REPO_ROOT, 'docs/evidence/bj433');
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errs = [];

@@ -6,12 +6,13 @@
 // gs:worldSurfaceLow=TerrainPass num5 初值式(fresh 流首掷确定,见下);
 //   sulphurAtLeft=false(SulphurousSea.cs:188 dungeonX<maxTilesX/2 零掷派生);
 //   sulphurYStart=gen-sea DetermineYStart 同式扫描(SulphurousSea.cs:228)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync, writeFileSync, existsSync, createReadStream } from 'node:fs';
 import readline from 'node:readline';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = process.env.SW_SNAP_DIR ?? '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = process.env.SW_SNAP_DIR ?? needInput(TMOD_LOGS);
 const PROBE_LOG = process.env.GENPROBE_LOG ?? join2(LOGS, 'genprobe.log');
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import('../src/data/tiles.ts');
 const { ITEM_BY_KEY, registerModItem } = await import('../src/data/items.ts');
@@ -175,6 +176,18 @@ const KEY_OF = (id: number): string => TILE_DEFS[id]?.key ?? `#${id}`;
     try { registerModItem({ key: `mod_calamity_${f.replace('.json', '')}`, name: f.replace('.json', '') }, 30000 + itemN); itemN++; } catch { /* 幂等重跑 skip */ }
   }
   console.log(`[replay] mod item 注册=${itemN}`);
+}
+{
+  // ★SS2-8 schematics 装载(golden 同款;旧缺位=S={} ⇒ scrap 全静默跳过=流位缺 M(2) 族)
+  const sch: Record<string, unknown> = {};
+  const schDir = `${root}/mods/calamity/schematics`;
+  try {
+    for (const f of readdirSync(schDir)) {
+      if (f.endsWith('.json')) { try { sch[f.replace('.json', '')] = JSON.parse(readFileSync(`${schDir}/${f}`, 'utf8')); } catch { /* skip */ } }
+    }
+  } catch { /* 无目录 */ }
+  (globalThis as Record<string, unknown>).__calamitySchematics = sch;   // ★pass 读键=__calamitySchematics(gen-sea placeSch 直读)
+  console.log(`[replay] schematics 装载=${Object.keys(sch).length}`);
 }
 // store 构建(★699ad:透传快照 slope/half——v2 5-byte 快照;v1 快照恒 0)
 const w = 4200, h = 1200, n = w * h;

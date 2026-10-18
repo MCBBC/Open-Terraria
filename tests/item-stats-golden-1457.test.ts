@@ -10,13 +10,17 @@
 //   新弹 AI/贴图未实装前数据侧保留 1456 弹 id(见 recon FIX_SHOOT_KEEP)。
 // 注意:依赖仓库内 Terarria1456/、Terarria1457/ 反编译树(与 npc-stats-golden 同惯例)。
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'Terarria1456'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 // @ts-expect-error 纯 JS 提取库(无类型声明)
 import { recon, FIX_SHOOT_KEEP } from '../tools/recon-item-1456-1457.mjs';
 
-const r = await recon();
+// ★C档可移植:recon 双树读;缺档=降级 null(EXT_MISSING skip 兜底,防收集期红)
+const r = !EXT_MISSING ? await recon() : null;
 
-describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
+describe.skipIf(EXT_MISSING)('Item 数值三方对账金标(json × 1456 × 1457)', () => {
   // ★2026-08-23 基准切换 1457：ROLLBACK_1456 白名单已删除——json 全量取 1457 终值
   // （recon DRIFT=0 实证;曾按旧 1456 标杆钉 2209/5477/5688/4607/478 五条,现 1457 值
   // 400/50/15/2.5/3 即权威,白名单机制保留空集防未来"新内容未实装先切数据"场景）

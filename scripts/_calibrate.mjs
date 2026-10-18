@@ -1,3 +1,4 @@
+import { PROJECT_ROOT, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 function metrics(path, FH, frame = 0) {
@@ -18,8 +19,8 @@ function metrics(path, FH, frame = 0) {
   return { dL: fl - cl, dR: cr - fr, face: cr - fr > fl - cl ? '右' : '左', w };
 }
 // Player_0_0（肤色变体 0 皮肤 0）：原版玩家贴图必然朝右（direction==-1 才翻转）
-console.log('Player_0_0(校准:已知朝右):', JSON.stringify(metrics('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/Player_0_0.png', 56)));
-console.log('Guide NPC_22:', JSON.stringify(metrics('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_22.png', 56)));
-console.log('Merchant 17:', JSON.stringify(metrics('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_17.png', 56)));
-console.log('Nurse 18:', JSON.stringify(metrics('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_18.png', 56)));
-console.log('OldMan 37:', JSON.stringify(metrics('/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_37.png', 56)));
+console.log('Player_0_0(校准:已知朝右):', JSON.stringify(metrics(join(PROJECT_ROOT, 'terraria-assets/Images/Player_0_0.png'), 56)));
+console.log('Guide NPC_22:', JSON.stringify(metrics(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_22.png'), 56)));
+console.log('Merchant 17:', JSON.stringify(metrics(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_17.png'), 56)));
+console.log('Nurse 18:', JSON.stringify(metrics(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_18.png'), 56)));
+console.log('OldMan 37:', JSON.stringify(metrics(join(PROJECT_ROOT, 'terraria-assets/Images/NPC_37.png'), 56)));

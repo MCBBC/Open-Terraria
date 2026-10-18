@@ -12,13 +12,16 @@
 //  ★变异证红：每断言注「旧实现退化值」——M1 攻击钳 16→5 / M2 锁敌态机摘除（每拍
 //  重选最近）/ M3 命中转返航摘除 各必恰红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
 
@@ -85,7 +88,7 @@ const tg = (m: MinionProj): number => (m as unknown as { a169Tg: number }).a169T
 // ============================================================
 // ① AI_169 移动式逐参锁（源码扫描 + 行为锁）
 // ============================================================
-describe('① AI_169 移动式逐参锁（Projectile.cs:46559-46700 亲读锚）', () => {
+describe.skipIf(EXT_MISSING)('① AI_169 移动式逐参锁（Projectile.cs:46559-46700 亲读锚）', () => {
   it('原版块内数值锚（源码扫描,变异源码即红）', () => {
     const src = readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
     const i = src.indexOf('private void AI_169_Smolstars()');
@@ -179,7 +182,7 @@ describe('① AI_169 移动式逐参锁（Projectile.cs:46559-46700 亲读锚）
 // ============================================================
 // ② 索敌门锁（真 boss 盒夹具——防幻影）
 // ============================================================
-describe('② 索敌门锁（Minion_FindTargetInRange(800, skip=false) 1:1）', () => {
+describe.skipIf(EXT_MISSING)('② 索敌门锁（Minion_FindTargetInRange(800, skip=false) 1:1）', () => {
   it('boss 豁免 viewRect：boss 盒心屏外（y−700）但随从距 650 ≤800 → 照锁（旧 viewRect 无豁免 → 红）', () => {
     const { hooks, player } = makeHooks([]);
     // 随从在 (P.x+700, P.y-50)；boss 盒心 (P.x+700, P.y-700)：me 距 650≤800 ✔、
@@ -259,7 +262,7 @@ describe('② 索敌门锁（Minion_FindTargetInRange(800, skip=false) 1:1）', 
 // ============================================================
 // ③ 命中判定锁（接触伤/local 10 冷却/命中转返航）
 // ============================================================
-describe('③ 命中判定锁（:14129-14141 Damage_PVE_Inner 864 特支折算）', () => {
+describe.skipIf(EXT_MISSING)('③ 命中判定锁（:14129-14141 Damage_PVE_Inner 864 特支折算）', () => {
   it('锁定态接触 boss → hurt 结算 + 命中后转返航（M3 摘除 → a169St 恒 60 红）', () => {
     const boss = mkEnemy(51, 0, 0, 300, 300, true);
     const { hooks, player } = makeHooks([boss]);
@@ -313,7 +316,7 @@ describe('③ 命中判定锁（:14129-14141 Damage_PVE_Inner 864 特支折算�
 // ============================================================
 // ④ 闲置态（编队悬浮锚/分离力/返航节奏）
 // ============================================================
-describe('④ 闲置态与返航重整态（:46562-46584/:46617-46644/:46675-46698）', () => {
+describe.skipIf(EXT_MISSING)('④ 闲置态与返航重整态（:46562-46584/:46617-46644/:46675-46698）', () => {
   it('编队悬浮锚：total=3 三刃椭圆相位分离（:46575-46584 vec2=(12,2.4)×(total-1) 角差 2π/3）', () => {
     const { hooks, player } = makeHooks([]);
     const ms = [

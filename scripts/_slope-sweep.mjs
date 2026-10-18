@@ -1,7 +1,8 @@
 // 修复后回归:案发区所有坡格×双向接近,检测新增卡点(位移<4px且前方非实心)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto('http://localhost:5201',{waitUntil:'domcontentloaded'});

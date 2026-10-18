@@ -1,5 +1,6 @@
 // BJ366 修复验证: 私有 vite 实机载入用户 wld → 传送蛋锚旁 → 截图 + 调色板判分
 // 判据: 实机画面蛋+巢完整可见(修复前=18×18 残片甚至 0 命中);隔离重画粉像素大幅上升
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { startPrivateVite, killTree } from '../tools/probe/lib/vite.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/browser.mjs';
@@ -7,7 +8,7 @@ import { bootstrap } from '../tools/probe/lib/boot.mjs';
 import { waitForGame } from '../tools/probe/lib/game.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const WLD = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 const PORT = Number(process.env.BJ366_PORT ?? 5204);
 const EGGS = [[6280, 673], [783, 819], [2213, 909]];
 

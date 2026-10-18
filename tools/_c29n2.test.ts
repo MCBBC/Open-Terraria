@@ -45,7 +45,7 @@ const W = 4200, H = 1200;
     const stackLine = (new Error().stack ?? '').split('\n').find((l) => l.includes('/src/world/gen/WorldGen')) ?? '';
     const mLoc = /WorldGen\.ts:(\d+):/.exec(stackLine);
     if (!mLoc) return;
-    const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/src/world/gen/WorldGen.ts', 'utf8').split('\n');
+    const src = readFileSync(new URL('../src/world/gen/WorldGen.ts', import.meta.url).pathname, 'utf8').split('\n');
     const ln = +mLoc[1];
     const line2 = `${src[ln - 1] ?? ''}|${src[ln] ?? ''}`;
     const lab = /▶GlowingMushroomPatches/.test(line2) ? 'mushroom'

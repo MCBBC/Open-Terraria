@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { TILE_BY_KEY, TILE_STABLE_OF_INTERNAL } from '../src/data/tiles';
 
 
-describe('wld 导入:tile 17 = 熔炉(非铁砧)', () => {
+describe.skipIf(localFixtureMissing('starter-master.wld'))('wld 导入:tile 17 = 熔炉(非铁砧)', () => {
   it('标注区导入后:熔炉 3×2 帧完整,铁砧正常', () => {
-    const { save } = parseWldToSave(readFileSync('/Users/vinlic/Downloads/Starter_World Master.wld'));
+    const { save } = parseWldToSave(readLocalFixture('starter-master.wld'));
     const u8 = Buffer.from(save.tiles, 'base64');
     const W = save.header.width, H = save.header.height;
     const type = new Uint16Array(W * H), fx = new Uint16Array(W * H), fy = new Uint16Array(W * H);

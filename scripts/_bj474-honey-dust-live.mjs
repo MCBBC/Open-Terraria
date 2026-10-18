@@ -4,13 +4,14 @@
 //  →KeyA/KeyD 往复跑动复现用户操作→双口统计尘(vanillaDust.spawn 池底+spawnParticles
 //  层)+录尘 type/fx,fy/scale/alpha/color/坐标/玩家湿态/wetCount。
 //  臂 A=素跑;臂 B=OnFire 状态(用户首截图着火)。
-// 运行:SW_ORIGIN=http://localhost:5203 SAVE='/Users/vinlic/Downloads/map-天真的钴最高点 (3).json' \
+// 运行:SW_ORIGIN=http://localhost:5203 SAVE='~/Downloads/map-天真的钴最高点 (3).json' \
 //   node tools/run-diag.mjs scripts/_bj474-honey-dust-live.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/index.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const SAVE_PATH = process.env.SAVE || '/Users/vinlic/Downloads/map-天真的钴最高点 (3).json';
+const SAVE_PATH = process.env.SAVE || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (3).json'));
 const saveJson = readFileSync(SAVE_PATH, 'utf8');
 console.log('save json bytes:', saveJson.length);
 

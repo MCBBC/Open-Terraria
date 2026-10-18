@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ284（2026-09-22）：extract-gore.mjs era guard 落闸守卫测试。npcdrops（BJ261）同款习语：
 //
@@ -28,12 +31,13 @@ const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 const SCRIPT = join(ROOT, 'tools', 'extract-gore.mjs');
 const LIVE = join(ROOT, 'src', 'data', 'vanilla-gore.json');
 const ROOT_TRIGGER = "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');";
-const ROOT_ABS = `const ROOT = ${JSON.stringify('/Users/vinlic/Project/GLM/SandboxWorld/game')};`;
+// ★C档可移植:mutant 重锚值运行时计算(=本仓 game/ 绝对路径,零本机字面量)
+const ROOT_ABS = `const ROOT = ${JSON.stringify(ROOT)};`;
 
 const spawn = (args: string[] = [], env: Record<string, string> = {}) =>
   spawnSync('node', [SCRIPT, ...args], { cwd: ROOT, encoding: 'utf8', timeout: 600_000, env: { ...process.env, ...env } });
 
-describe('extract-gore era guard（BJ284 落闸;★BJ329 重锚 1457,1456 退役）', () => {
+describe.skipIf(EXT_MISSING)('extract-gore era guard（BJ284 落闸;★BJ329 重锚 1457,1456 退役）', () => {
   it('行为面:缺省干跑对拍零写盘（exit 0+双向零差+现库字节零改动）', () => {
     const before = md5(LIVE);
     const r = spawn();

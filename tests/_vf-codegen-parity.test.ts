@@ -1,6 +1,7 @@
 // 代码生成通道对拍 + 基准:解释器 vs tileframe-codegen.js,三方(含 rig 权威)逐位一致。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture } from './fixturePath';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -14,7 +15,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
 
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
-const FTW = '/Users/vinlic/Downloads/FTW V2.wld';
+const FTW = 'ftw-v2.wld';   // ★C档收编:原 ~/Downloads/FTW V2.wld(见 tests/fixtures/local/README.md)
 
 interface Row { x: number; y: number; type: number; fx: number; fy: number; fn: number }
 
@@ -42,7 +43,7 @@ function loadDump(path: string): Row[] {
     for (const t of FI_JSON) fiArr[t] = true;
     setVanillaFrameImportant(fiArr);
 
-    const wld = parseWld(new Uint8Array(readFileSync(FTW)));
+    const wld = parseWld(new Uint8Array(readLocalFixture(FTW)));
     const v2i = new Map<number, number>();
     for (let i = 0; i < TILE_DEFS.length; i++) {
       const v = TILE_DEFS[i]?.vanilla;

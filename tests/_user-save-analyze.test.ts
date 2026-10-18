@@ -1,14 +1,15 @@
 // 用户存档分析+转化复跑(饥饿的庄园:神圣带缺失归因)
 import { it, expect } from 'vitest';
 import * as fs from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { RNG } from '../src/core/rng';
 
-const SAVE = '/Users/vinlic/Downloads/map-饥饿的庄园.json';
+const SAVE = 'hungry-manor-map.json';   // ★C档收编:原 ~/Downloads/map-饥饿的庄园.json
 const CONV = new Set([117, 116, 164, 402, 403, 203, 234, 200, 401, 399, 25, 112, 163, 400, 398, 60, 661, 662]);
 
-it('analyze', () => {
-  const { world } = loadSave(fs.readFileSync(SAVE, 'utf8'));
+it.skipIf(localFixtureMissing(SAVE))('analyze', () => {
+  const { world } = loadSave(readLocalFixtureText(SAVE));
   const st = world.store;
   console.log('header:', world.name, st.w + 'x' + st.h, 'hardMode=', !!world.flags.hardMode,
     'convertedFlag=', !!world.flags.hardModeConverted, 'crimson=', world.crimson);
@@ -41,8 +42,8 @@ it('analyze', () => {
   }
 }, 240000);
 
-it('force rerun on saved state', async () => {
-  const { world } = loadSave(fs.readFileSync(SAVE, 'utf8'));
+it.skipIf(localFixtureMissing(SAVE))('force rerun on saved state', async () => {
+  const { world } = loadSave(readLocalFixtureText(SAVE));
   const { hardmodeRepairJob } = await import('../src/world/gen/vanilla/HardmodePass');
   const CONVH = new Set([117, 164, 402, 403, 109]);
   const cnt = (st: World['store']) => { let n = 0; for (let i = 0; i < st.type.length; i++) if (CONVH.has(st.type[i])) n++; return n; };

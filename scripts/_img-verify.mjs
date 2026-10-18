@@ -1,4 +1,5 @@
 // 贴图修复验证:导入原版 wld → 读档 → 类型采样断言 + 截图
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -28,7 +29,7 @@ const importBtn = await page.$('[data-act="import"]');
 if (importBtn) {
   await importBtn.click(); await new Promise((r) => setTimeout(r, 600));
   const fin = await page.$('.sw-vsel input[type=file]');
-  if (fin) { await fin.uploadFile('/Users/vinlic/Downloads/天真的钴最高点.wld'); await new Promise((r) => setTimeout(r, 15000)); }
+  if (fin) { await fin.uploadFile(needInput(join(DOWNLOADS, '天真的钴最高点.wld'))); await new Promise((r) => setTimeout(r, 15000)); }
 }
 log('imported');
 const items = await page.$$('.sw-vsel .sw-vitem');

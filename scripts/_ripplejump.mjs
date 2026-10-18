@@ -1,8 +1,9 @@
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const B = process.env.T || 'http://localhost:4173';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/rj',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/rj'),
   args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

@@ -8,6 +8,7 @@
 //   d. 时域差分（同 verify 口径, short+long 基线）
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=600000 \
 //   scripts/_iii255-forensics.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5304';
 const OUT = process.env.III255_OUT ?? '/tmp/iii255-out';
-const MAP = process.env.III251_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (30).json';
+const MAP = process.env.III251_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PROG = '/tmp/iii255-progress.log';

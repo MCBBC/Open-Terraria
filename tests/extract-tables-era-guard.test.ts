@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ284（2026-09-22）：五件小表提取器 era guard 落闸守卫测试（banners / mapcolors /
 // tile-collision / npcbestiaryoffset / cursor-icon-tables）。npcdrops（BJ261）同款习语：
@@ -42,8 +45,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_BANNERS_JSON',
     outName: 'vanilla-banners.json',
     rejectTag: '[extract-banners]',
-    rootTrigger: null, // 绝对路径 ROOT,mutant 免重锚
-    rootAbs: null,
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: "for (const sig of ['public static int NPCtoBanner', 'public static int BannerToItem', 'public static int BannerToNPC'])",
       poison: "for (const sig of ['public static int NPCtoBannerX', 'public static int BannerToItem', 'public static int BannerToNPC'])",
@@ -56,8 +59,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_MAPCOLORS_JSON',
     outName: 'vanilla-mapcolors.json',
     rejectTag: '[extract-mapcolors]',
-    rootTrigger: null,
-    rootAbs: null,
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: "const INIT_SIG = 'public static void Initialize()';",
       poison: "const INIT_SIG = 'public static void InitializeX()';",
@@ -71,7 +74,7 @@ const TOOLS: ToolSpec[] = [
     outName: 'vanilla-tilecollision.json',
     rejectTag: '[extract-tile-collision]',
     rootTrigger: "const ROOT = new URL('../../', import.meta.url).pathname;",
-    rootAbs: '/Users/vinlic/Project/GLM/SandboxWorld/',
+    rootAbs: join(ROOT, '..') + '/',
     m2: {
       trigger: '/Platforms = Factory\\.CreateBoolSet\\(([^)]*)\\)/',
       poison: '/PlatformsX = Factory\\.CreateBoolSet\\(([^)]*)\\)/',
@@ -85,7 +88,7 @@ const TOOLS: ToolSpec[] = [
     outName: 'vanilla-npcbestiaryoffset.json',
     rejectTag: '[extract-npcbestiaryoffset]',
     rootTrigger: "const ROOT = new URL('../../', import.meta.url).pathname;   // 仓库根（SandboxWorld/）",
-    rootAbs: '/Users/vinlic/Project/GLM/SandboxWorld/',
+    rootAbs: join(ROOT, '..') + '/',
     m2: {
       trigger: 'if (total < 600) throw new Error(`[extract-npcbestiaryoffset] 锚点失配: 合并基数 ${total} < 600（解析面漂移,禁止静默半表）`);',
       poison: 'if (total < 6000) throw new Error(`[extract-npcbestiaryoffset] 锚点失配: 合并基数 ${total} < 6000（解析面漂移,禁止静默半表）`);',
@@ -98,8 +101,8 @@ const TOOLS: ToolSpec[] = [
     probe: 'SW_HOVERICONS_JSON',
     outName: 'vanilla-hovericons.json',
     rejectTag: '[extract-cursor-icon-tables]',
-    rootTrigger: null,
-    rootAbs: null,
+    rootTrigger: "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)",
+    rootAbs: join(ROOT, '..'),
     m2: {
       trigger: "['beds', Object.keys(beds).length, 50],",
       poison: "['beds', Object.keys(beds).length, 5000],",
@@ -111,7 +114,7 @@ const TOOLS: ToolSpec[] = [
 const spawn = (script: string, args: string[] = [], env: Record<string, string> = {}) =>
   spawnSync('node', [script, ...args], { cwd: ROOT, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...env } });
 
-describe('extract-tables era guard（BJ284 五小件落闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-tables era guard（BJ284 五小件落闸）', () => {
   for (const T of TOOLS) {
     const script = join(ROOT, 'tools', T.name);
 
@@ -256,7 +259,9 @@ describe('extract-tables era guard（BJ284 五小件落闸）', () => {
       const real = spawn(script, [], probeEnv);
       expect(real.status).toBe(1);
       // 变异体:fresh-only 轴摘除 → exit 0（恒绿复现）
-      const src = readFileSync(script, 'utf8');
+      // ★C档可移植:ROOT 已转 import.meta 相对——mutant 置 tmp 须前置重锚(④ 习语)
+      const src = readFileSync(script, 'utf8')
+        .replace("const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)", `const ROOT = ${JSON.stringify(join(ROOT, '..'))};`);
       const TRIGGER = "for (const k of Object.keys(fresh)) if (!lk.has(k)) out.freshOnly.push(`${prefix}.${k}`);";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'mutant-freshonly.mjs');

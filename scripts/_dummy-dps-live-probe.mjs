@@ -1,9 +1,10 @@
 // DPS 计接线终验:给玩家挂 DPS 计量器态,打假人,读 getDPS 演进。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (27).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (27).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('pageerror:', e.message));

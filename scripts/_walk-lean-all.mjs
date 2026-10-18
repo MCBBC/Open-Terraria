@@ -1,10 +1,11 @@
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 const FH = 56;
 const data2 = JSON.parse(readFileSync('public/sprites/vanilla-npcs.json', 'utf8'));
 const EXTRA = { 17: 9, 18: 9, 19: 9, 20: 7, 22: 10, 38: 9, 54: 7, 107: 9, 108: 7, 37: 5 };
 function walkLean(id) {
-  const p = `/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`;
+  const p = `${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`;
   let png;
   try { png = PNG.sync.read(readFileSync(p)); } catch { return null; }
   const total = Math.floor(png.height / FH);

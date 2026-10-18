@@ -1,7 +1,8 @@
 // 宝箱视觉诊断：载入地图 → 相机对准一个宝箱 → 截图 → 按格分块像素方差
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.argv[2] || '/Users/vinlic/Downloads/map-可疑的螃蟹寺庙.json';
+const MAP = process.argv[2] || needInput(join(DOWNLOADS, 'map-可疑的螃蟹寺庙.json'));
 const json = fs.readFileSync(MAP, 'utf8');
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();

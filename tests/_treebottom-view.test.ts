@@ -4,8 +4,10 @@
 import { describe, it } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 
-describe('vandalized trunks scan', () => {
+// ★C档可移植:档案 gz 不入 git,缺档=skip
+describe.skipIf(fixtureMissing('tb-8400-1814620304'))('vandalized trunks scan', () => {
   it('scan full world', async () => {
     const world = loadFixtureWorld('tb-8400-1814620304');   // ★IIIII259 档案载入
     const st = world.store;

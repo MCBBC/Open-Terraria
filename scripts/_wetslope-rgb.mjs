@@ -1,17 +1,18 @@
 // 精确取证:标注格中心 16x16 + 右邻左 4 列的原始 RGB(hex)——
 // 区分"水色暗"(浸润带已覆盖)与"视差背景色"(漏光)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
-const MAP = '/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (4).json';
+const MAP = needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (4).json'));
 const mapStr = readFileSync(MAP, 'utf8');
-const marksJson = JSON.parse(readFileSync('/Users/vinlic/Downloads/marks-浮夸的羡慕顶峰 (3).json', 'utf8'));
+const marksJson = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'marks-浮夸的羡慕顶峰 (3).json')), 'utf8'));
 const byNo = new Map(marksJson.marks.map((m) => [m.no, m]));
 const picks = process.env.SW_PICKS ? process.env.SW_PICKS.split(',').map(Number) : [1, 3, 24];
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile8',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile8'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

@@ -34,7 +34,8 @@ import { Player } from '../src/entities/Player';
 import { VanillaDust } from '../src/fx/VanillaDust';
 import { solidCollisionPx, lavaCollisionPx, checkForGoodTeleportationSpot } from '../src/world/gen/vanilla/TeleportSpotCheck';
 import { seededRandom } from './seeded-rng';
-import { loadFixtureWorld } from './world-fixtures';   // ★IIIII259 测试世界档案库
+import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';   // ★IIIII259 测试世界档案库
 
 // ── 桩件（BJ43 sw-bj43-conch-landing.stubGame 同法;Object.create 不跑构造器,
 //      仅装配被测支消费的实例域——any 型桩,避免 Player/Camera 全形装配） ──
@@ -87,7 +88,7 @@ beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(0x6A
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 金标）', () => {
-  it('真世界·6 种子 8 连用：掷域/落位安全面/落点分布（OLD=spawn 恒 1 落点=红）', async () => {
+  it.skipIf(fixtureMissing('bj48-a', 'bj48-b', 'bj48-c', 'bj48-d', 'bj48-e', 'bj48-f'))('真世界·6 种子 8 连用：掷域/落位安全面/落点分布（OLD=spawn 恒 1 落点=红）', async () => {
     const seeds = ['bj48-a', 'bj48-b', 'bj48-c', 'bj48-d', 'bj48-e', 'bj48-f'];
     for (const seedText of seeds) {
       // ★IIIII259 档案载入（同种子 2000×700 世界;落点/安全面断言为运行时掷点,

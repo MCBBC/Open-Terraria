@@ -2,9 +2,10 @@
 // 通道A：包 bakeChunkInto —— 含锯木机 chunk 每次重烘时，【静态格】逐格哈希差分
 //        （16×16 格清单，剔除锯木机自身 3×3 足印与动画登记格）；若静态格跨烘变化=机制A实锤。
 // 通道B：屏幕级 meanAbsDiff（近锯木机 vs 远控区 × zoom1.25/2.0），全亮关。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 862 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 160)));

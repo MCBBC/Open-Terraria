@@ -1,9 +1,10 @@
 // 修复终验:真实存档 + 18:38 碰撞地形 + 用户新日志(14-13-15)完整键序重放
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SAVE = '/Users/vinlic/Downloads/Starter_World-20260901-1123.sbw.json';
-const LOG = JSON.parse(readFileSync('/Users/vinlic/Downloads/behavior-log-Starter_World-2026-09-01T14-13-15-987Z.json', 'utf8'));
+const SAVE = needInput(join(DOWNLOADS, 'Starter_World-20260901-1123.sbw.json'));
+const LOG = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'behavior-log-Starter_World-2026-09-01T14-13-15-987Z.json')), 'utf8'));
 const CELLS = LOG.meta.terrain.cells;
 
 const browser = await puppeteer.launch({
@@ -87,7 +88,7 @@ const out = await page.evaluate(async ({ anchor, KEYS, END_T }) => {
   return samples;
 }, { anchor, KEYS, END_T });
 
-writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/pf9.json', JSON.stringify(out));
+writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/pf9.json'), JSON.stringify(out));
 console.log('[pf9] samples:', out.length);
 // 30t 整点对拍用户日志
 const byT = new Map(out.map(p => [p.t, p]));

@@ -67,7 +67,7 @@
 //      Platform/PlatformNonHammered/PlanterBox 六臂（C14-F3）。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
-const SRC = process.env.TOD_SRC ?? '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ObjectData/TileObjectData.cs';
+const SRC = process.env.TOD_SRC ?? `${process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '')}/Terarria1457/Terraria.ObjectData/TileObjectData.cs`;   // ★C档可移植
 const OUT_RUNTIME = process.env.TOA_OUT ?? 'src/data/tile-anchors.json';
 const OUT_GOLDEN = process.env.TOA_GOLDEN ?? 'tests/golden/tile-anchor-authority.json';
 

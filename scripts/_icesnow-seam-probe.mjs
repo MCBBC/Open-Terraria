@@ -1,10 +1,11 @@
 // 冰(161)×雪(147)跨界漏缝取证探针：装载用户导出的 Starter_World 存档，
 // 传送到 marks 标注簇 (1905..1920 × 356..380)，输出格面帧表 + 接缝区截图。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5204';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (20).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (20).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });

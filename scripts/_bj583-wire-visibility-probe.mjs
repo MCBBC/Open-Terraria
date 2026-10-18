@@ -6,8 +6,8 @@
 //  判据：mode0(Bright,透镜缺省)格内红像素>0=暗区恒亮②;mode1(Normal)=0 红像素+maxR<20
 //  =吃乘光暗处不可见③（原版 Lighting.GetColor 相）;mode3(Hidden)=0。
 //  用法：SW_ORIGIN=http://localhost:<私有端口> node tools/run-diag.mjs scripts/_bj583-wire-visibility-probe.mjs
-import { launchBrowser, openPage, bootstrap, createGame, pump } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
-import { freezeClock } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/clock.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump } from '../tools/probe/lib/index.mjs';
+import { freezeClock } from '../tools/probe/lib/clock.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5267';
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});

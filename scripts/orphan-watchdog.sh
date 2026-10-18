@@ -9,7 +9,8 @@
 #   ④先 TERM 等 5s 再 KILL；全程写 LOG；无任何清单外动作
 STATE=/tmp/sw-orphan-watch.state
 LOG=/tmp/sw-orphan-watch.log
-PROJECT=/Users/vinlic/Project/GLM/SandboxWorld
+# 项目根:SW_PROJECT_ROOT 可覆写;缺省从脚本自身位置推导(本脚本在 <SW根>/game/scripts/)
+PROJECT="${SW_PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 now=$(date +%s)
 touch "$STATE"
 CAND=/tmp/sw-orphan-watch.candidates

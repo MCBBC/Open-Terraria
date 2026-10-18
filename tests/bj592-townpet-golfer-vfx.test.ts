@@ -51,18 +51,21 @@
 //    GorePiece.fixedUpdate 默认支承接（SpecialAI 表无 580-582=GoreID.cs:9 缺省 0,
 //    走默认重力支 :760-764 再被尾块覆写滚转）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { TownNPC, townNpcBaseFrame } from '../src/entities/TownNPC';
 import { GorePiece, resetGorePool, liveGorePieces } from '../src/entities/GorePiece';
 import { vanillaNpc } from '../src/data/vanillaNpcs';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const gore1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/Gore.cs'), 'utf8');
-const orch1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria.GameContent.Drawing/ParticleOrchestrator.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const gore1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/Gore.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Gore.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const orch1457 = existsSync(join(ROOT, '../Terarria1457/Terraria.GameContent.Drawing/ParticleOrchestrator.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.GameContent.Drawing/ParticleOrchestrator.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const townSrc = readFileSync(join(ROOT, 'src/entities/TownNPC.ts'), 'utf8');
 const goreSrc = readFileSync(join(ROOT, 'src/entities/GorePiece.ts'), 'utf8');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
@@ -103,7 +106,7 @@ const bodyDigest = digestionBody(orch1457);
 // ---------------------------------------------------------------------------
 // 原版活体锚（1457 源码直读——漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ592 原版锚：件1 case 22 组三面（:69709-69792）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 原版锚：件1 case 22 组三面（:69709-69792）', () => {
   it('① 困盹面 dust 216：位置式/速式(−dir,1)/后置整体 ÷2/scale0.8（:69719-69723）', () => {
     expect(body11).toMatch(
       /Dust\.NewDust\(base\.Center \+ Vector2\.UnitX \* -direction \* 8f - Vector2\.One \* 5f \+ Vector2\.UnitY \* 8f, 3, 6, 216, -direction, 1f\);\s*Dust dust = Main\.dust\[num\d+\];\s*dust\.velocity \/= 2f;\s*Main\.dust\[num\d+\]\.scale = 0\.8f;/,
@@ -175,7 +178,7 @@ describe('BJ592 原版锚：件1 case 22 组三面（:69709-69792）', () => {
   });
 });
 
-describe('BJ592 原版锚：件2 case 589 被绑高尔夫球手（:71804-71892）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 原版锚：件2 case 589 被绑高尔夫球手（:71804-71892）', () => {
   it('body 存在且帧带阈值齐备（12+:6t/11:Next(40,140)/8+:3t/7:Next(30,90)/4+:4t/1+:4t+Next(3)!≠0/0:Next(90,450)）', () => {
     expect(body589.length).toBeGreaterThan(1000);
     expect(body589).toMatch(/int num27 = frame\.Y \/ num;\s*frameCounter\+\+;\s*if \(velocity\.Y != 0f\)\s*\{\s*frame\.Y = 0;\s*frameCounter = 0\.0;\s*\}/);
@@ -205,7 +208,7 @@ describe('BJ592 原版锚：件2 case 589 被绑高尔夫球手（:71804-71892�
 // ---------------------------------------------------------------------------
 // 本仓锚（落刀面直读——被覆写/回滚即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ592 本仓锚：件1 case 11 面四刀 + ③ 猫坐姿（TownNPC.ts）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 本仓锚：件1 case 11 面四刀 + ③ 猫坐姿（TownNPC.ts）', () => {
   it('dust 216 ÷2 次序拨正：speed 形参全值（−facing,1）+ 结果侧折半（抖动随折）', () => {
     expect(townSrc).toMatch(
       /const d = game\.vanillaDust\.spawn\(\s*this\.cx - this\.facing \* 8 - 5, this\.cy \+ 3, 3, 6, 216,\s*-this\.facing, 1, 0, null, 0\.8\);\s*if \(d\) \{ d\.vx \/= 2; d\.vy \/= 2; d\.scale = 0\.8; \}/,
@@ -232,7 +235,7 @@ describe('BJ592 本仓锚：件1 case 11 面四刀 + ③ 猫坐姿（TownNPC.ts�
   });
 });
 
-describe('BJ592 本仓锚：件2 bound golfer 链（TownNPC.ts + Renderer.ts）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 本仓锚：件2 bound golfer 链（TownNPC.ts + Renderer.ts）', () => {
   it('bound 块挂接位 + 链骨架（阈值/回卷/腾空/回弹门）', () => {
     expect(townSrc).toMatch(/if \(this\.npcKey === 'golfer'\) this\.boundGolferFindFrame\(game\);/);
     expect(townSrc).toMatch(/const num27 = this\.frame;[^\n]*\n\s*this\.frameT\+\+;[^\n]*\n\s*if \(this\.vy !== 0\) \{[^\n]*\n\s*this\.frame = 0;\s*this\.frameT = 0;\s*\}/);
@@ -255,7 +258,7 @@ describe('BJ592 本仓锚：件2 bound golfer 链（TownNPC.ts + Renderer.ts）'
   });
 });
 
-describe('BJ592 本仓锚：gore 580-582 Update 特例（GorePiece.ts）+ 宠物域销案', () => {
+describe.skipIf(EXT_MISSING)('BJ592 本仓锚：gore 580-582 Update 特例（GorePiece.ts）+ 宠物域销案', () => {
   it('默认支尾块：rotation=0 + vx×0.95（Gore.cs:770-774 承接）', () => {
     expect(goreSrc).toMatch(/if \(t >= 580 && t <= 582\) \{\s*this\.rotation = 0;\s*this\.vx \*= 0\.95;\s*\}/);
   });
@@ -309,7 +312,7 @@ function pirateNpc(): TownNPC {
   return n;
 }
 
-describe('BJ592 行为级：件1 ① 困盹面 dust 216（÷2 次序=判别刃）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：件1 ① 困盹面 dust 216（÷2 次序=判别刃）', () => {
   afterEach(() => { resetGorePool(); vi.restoreAllMocks(); });
 
   it('counter==50 恰一拍：5 粒（3+Next(4)=3+2）、216、位置式、scale0.8', () => {
@@ -357,7 +360,7 @@ describe('BJ592 行为级：件1 ① 困盹面 dust 216（÷2 次序=判别刃�
   });
 });
 
-describe('BJ592 行为级：件1 ① gore 580-582 发射面（1/30 门+后置变换）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：件1 ① gore 580-582 发射面（1/30 门+后置变换）', () => {
   afterEach(() => { resetGorePool(); vi.restoreAllMocks(); });
 
   it('掷中：恰 1 团、type 580、锚=Center+UnitX×(−dir)×8、NewGore 抖动后 /=2+Y=|Y|+X=−|X|×dir', () => {
@@ -416,7 +419,7 @@ describe('BJ592 行为级：件1 ① gore 580-582 发射面（1/30 门+后置变
   });
 });
 
-describe('BJ592 行为级：件1 ② 舞面 danceDust（已同构销案锁——逐参）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：件1 ② 舞面 danceDust（已同构销案锁——逐参）', () => {
   afterEach(() => { resetGorePool(); vi.restoreAllMocks(); });
 
   it('−5→−4 切换拍 8 粒：139-143、锚 Center+(10×dir,−4)、vel 链（+dir×1.5→×2）、scale 0.7+r×0.3', () => {
@@ -447,7 +450,7 @@ describe('BJ592 行为级：件1 ② 舞面 danceDust（已同构销案锁——
   });
 });
 
-describe('BJ592 行为级：件1 ③ 坐姿帧（637 猫特例=判别刃）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：件1 ③ 坐姿帧（637 猫特例=判别刃）', () => {
   it('637 猫坐姿=绝对行 19（旧 base−3=25 红）;通用型仍 num60−3', () => {
     const cat = new TownNPC('town_cat', 500, 500);
     cat.onGround = true;
@@ -468,7 +471,7 @@ describe('BJ592 行为级：件1 ③ 坐姿帧（637 猫特例=判别刃）', ()
   });
 });
 
-describe('BJ592 行为级：件2 case 589 挥杆链+帧 9 落尘', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：件2 case 589 挥杆链+帧 9 落尘', () => {
   afterEach(() => { resetGorePool(); vi.restoreAllMocks(); });
 
   /** 绑缚高尔夫球手（rng=0 → 各 Next 取下界:90/40/30/5t 节拍最短链） */
@@ -551,7 +554,7 @@ describe('BJ592 行为级：件2 case 589 挥杆链+帧 9 落尘', () => {
   });
 });
 
-describe('BJ592 行为级：gore 580-582 Update 特例（Gore.cs:770-774 承接）', () => {
+describe.skipIf(EXT_MISSING)('BJ592 行为级：gore 580-582 Update 特例（Gore.cs:770-774 承接）', () => {
   afterEach(() => { resetGorePool(); vi.restoreAllMocks(); });
 
   it('581 一拍：vy+=0.2（默认重力支）→ rotation 归 0（覆写翻滚）+ vx×0.95', () => {

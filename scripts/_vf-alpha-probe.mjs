@@ -1,10 +1,11 @@
 // 官方表 alpha 数字取证:sheet 53/40/1 若干帧格的 16×16 内容区 alpha
 // ——边一圈 + 中心行/列,判定"内容区透明"是事实还是取样错位。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -44,5 +45,5 @@ const res = await p.evaluate(async () => {
   return report;
 });
 console.log(JSON.stringify(res, null, 1));
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/alpha-report.json', JSON.stringify(res, null, 1));
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/alpha-report.json'), JSON.stringify(res, null, 1));
 await b.close();

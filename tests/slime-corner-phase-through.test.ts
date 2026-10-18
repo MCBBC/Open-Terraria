@@ -19,13 +19,14 @@
 //      照常点火）、离楔后闩复位（episode 锚清位）；
 //   D. K2 站顶单元（BJ6 原件，坡面贴合语义不受 BJ9 触碰的守卫）；
 //   E. 结构锁（门只在 AI_001 漂移分支内；TileCollision 消费侧零触碰）；
-//   F. 真实存档重放（/Users/vinlic/Downloads/map-流浪汉舌.json，缺失时整组 skip）：
+//   F. 真实存档重放（wanderer-tongue-map.json 收编档，缺失时整组 skip）：
 //      实录姿态两体型不穿越 + 门关闭复现穿越。
 // ★夹具瞬态备案：柱嘴内 spawn 的 t=0 存在 BJ6 时代 K2 站顶 snap 瞬态（−12px 重锚，
 //  门开/关两 run 逐字节相同=非漂移路径，BJ9 零触碰）——故「前缘不进全实心」采用
 //  sticky-clean 不变式（首次洁净后不得再侵入），而非全程洁净。
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { moveAndCollide, type Body } from '../src/physics/TileCollision';
@@ -42,7 +43,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const GRASS = TILE_BY_KEY['grass']!;
-const SAVE_PATH = '/Users/vinlic/Downloads/map-流浪汉舌.json';
+const SAVE_PATH = 'wanderer-tongue-map.json';   // ★C档收编:原 ~/Downloads/map-流浪汉舌.json
 
 /**
  * 合成复刻流浪汉舌坡角（tile 坐标,行号对应实景观测）：
@@ -326,12 +327,12 @@ describe('SW-BJ9 坡角嵌固漂移穿墙硬化（刻意偏离原版：不穿越
 });
 
 // ---- F. 真实存档重放（标注点 (1825,317) 实景;存档缺失时整组 skip） ----
-describe.skipIf(!existsSync(SAVE_PATH))('SW-BJ9 真实存档重放:流浪汉舌坡角 (1825,317)', () => {
+describe.skipIf(localFixtureMissing(SAVE_PATH))('SW-BJ9 真实存档重放:流浪汉舌坡角 (1825,317)', () => {
   let world: World;
   beforeAll(async () => {
     // 延迟 import（7MB 存档仅本组需要）
     const { loadSave } = await import('../src/save/SaveFile');
-    ({ world } = loadSave(readFileSync(SAVE_PATH, 'utf8')));
+    ({ world } = loadSave(readLocalFixtureText(SAVE_PATH)));
   });
 
   it('夹具有效性:标注点周边地形与实录一致', () => {

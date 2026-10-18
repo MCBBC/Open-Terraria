@@ -1,4 +1,5 @@
 // 全量落脚校准:关补偿→批量实测原始埋深→/tmp/npc-audit/calib.json
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { writeFileSync, readFileSync } from 'node:fs';
 const CHROME = process.env.HOME + '/.cache/puppeteer/chrome/mac_arm-150.0.7871.24/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
@@ -7,7 +8,7 @@ const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5203';
 const EXCL_ROT = new Set([35,68,113,114,115,116,125,126,127,128,129,130,131,134,135,136,246,247,248,249,261,262,263,264,265,370,372,373,396,397,477,478,479,657]);
 const EXCL_STYLE = new Set([5,6,9,19,21,23,40,56,76]);
 const EXCL_SPECIAL = new Set([594,690,657,576,577,564,565,668,396,397,398,400,636,402,266,491,551,677,488,393]);
-const V = JSON.parse(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/public/sprites/vanilla-npcs.json', 'utf8'));
+const V = JSON.parse(readFileSync(join(REPO_ROOT, 'public/sprites/vanilla-npcs.json'), 'utf8'));
 const ALL_IDS = Object.keys(V).map(Number).filter((id) =>
   id > 0 && V[id].frames && !EXCL_ROT.has(id) && !EXCL_SPECIAL.has(id) && !EXCL_STYLE.has(V[id].aiStyle ?? 0));
 console.log(`待校准 ${ALL_IDS.length} 型`);

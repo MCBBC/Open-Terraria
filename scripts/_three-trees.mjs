@@ -1,8 +1,9 @@
 // 三树 1:1 像素剖面（新报告导入解剖台）：静止 vs 微摆，node 侧统一坐标换算。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-const REPORT = process.env.REPORT ?? '/Users/vinlic/Downloads/debug-report-模型根基-2026-08-18T08-47-06-154Z.json';
+const REPORT = process.env.REPORT ?? needInput(join(DOWNLOADS, 'debug-report-模型根基-2026-08-18T08-47-06-154Z.json'));
 const full = JSON.parse(readFileSync(REPORT, 'utf8'));
 const ap = full.tiles.areaPlayer;
 const browser = await puppeteer.launch({ protocolTimeout: 300000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1600, height: 1000 } });

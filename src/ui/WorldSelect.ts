@@ -27,6 +27,37 @@ export interface WorldSelectFlow {
   onImport(file: File): Promise<void>;
 }
 
+/** ★BJ694（BJ691b 债②清偿）：世界列表面「活动角色」上下文（原版 UIWorldSelect
+ *  排序三前缀层的会话语义,UIWorldSelect.cs:153-158）：
+ *  · CanWorldBeJoinedByActivePlayer（:163-168）= 旅程角色↔旅程世界匹配【压倒收藏】;
+ *  · HasWorldBeenPlayedByActivePlayer（:170-173）= 该角色玩过此世界（原版=地图档
+ *    存在,仓内等价=CharacterMeta.playedWorlds）;
+ *  · IsNewlyGenerated（:157 会话旗）——本仓创建流直达游戏不重列表面=不可观测,
+ *    登记不建模（世界创建后若未来接入「回列表选难度/种子」流再补）。
+ *  缺省 null=无角色上下文（无此两层,退 store 序）。 */
+export interface WorldSelectActiveChar {
+  difficulty: number;
+  playedWorlds?: number[];
+}
+
+/** ★BJ694 世界列表显示序（UIWorldSelect.cs:157-158 全序,node 可测单源）：
+ *  CanJoin（旅程匹配,压倒收藏）→ [IsNewlyGenerated 会话旗不建模,见上注] → 收藏 →
+ *  该角色玩过 → lastPlayed 降序 → 名（zh 音序）→ id。ac=null=store 序原样透传。 */
+export function sortWorldsForChar(
+  list: readonly WorldMeta[], ac: WorldSelectActiveChar | null,
+): WorldMeta[] {
+  if (!ac) return [...list];
+  const join = (w: WorldMeta) => (ac.difficulty === 3) === (w.difficulty === 3);
+  const played = (w: WorldMeta) => (ac.playedWorlds?.includes(w.id) ?? false);
+  return [...list].sort((a, b) =>
+    (Number(join(b)) - Number(join(a)))
+    || (Number(!!b.favorite) - Number(!!a.favorite))
+    || (Number(played(b)) - Number(played(a)))
+    || (b.lastPlayed - a.lastPlayed)
+    || a.name.localeCompare(b.name, 'zh')
+    || (a.id - b.id));
+}
+
 const SIZE_LABEL = (m: WorldMeta) => Lang.text(m.w >= 8400 ? 'UI.WorldSizeLarge' : m.w >= 6400 ? 'UI.WorldSizeMedium' : 'UI.WorldSizeSmall');
 const DIFF_LABEL = () => [Lang.text('UI.Normal'), Lang.text('GameUI.Expert'), Lang.text('UI.Master'), Lang.text('UI.Creative')];
 
@@ -168,7 +199,9 @@ export class WorldSelectPanel {
    *  时全清（行 DOM 随 innerHTML='' 丢弃,孤儿 interval 会一直改写死 img.src） */
   private iconTimers = new Set<ReturnType<typeof setInterval>>();
 
-  constructor(parent: HTMLElement, private store: WorldStore, private flow: WorldSelectFlow) {
+  constructor(parent: HTMLElement, private store: WorldStore, private flow: WorldSelectFlow,
+    /** ★BJ694 活动角色上下文（缺省 null=无角色域排序层,见 WorldSelectActiveChar 注） */
+    private activeChar: WorldSelectActiveChar | null = null) {
     ensureStyle();
     ensureWorldSelectStyle();
     this.panel = document.createElement('div');
@@ -346,9 +379,12 @@ export class WorldSelectPanel {
     for (const t of this.iconTimers) clearInterval(t);   // 上轮行内的轮播/故障动画定时器全清
     this.iconTimers.clear();
     this.body.innerHTML = '';
-    // ★BJ691b 回归 store 单源排序（WorldStore.list() 收藏→lastPlayed→名→id 既有
-    // 正确序——BJ691a 曾在面板侧再排名字序=把既有正确序降级,已回退勘误）
-    const list = this.store.list();
+    // ★BJ691b store 单源基础序（收藏→lastPlayed→名→id）;★BJ694 有活动角色时叠加
+    // 原版两前缀层（UIWorldSelect.cs:157-158 序:CanJoin → [IsNewlyGenerated 不建模]
+    // → IsFavorite → HasPlayedByActivePlayer → LastPlayed → Name → FileName）——
+    // 旅程角色↔旅程世界匹配【压倒收藏】（:163-168 亲读）,玩过史再分层。
+    const ac = this.activeChar;
+    let list: WorldMeta[] = sortWorldsForChar(this.store.list(), ac);
     for (const meta of list) {
       const el = document.createElement('div');
       el.className = 'sw-vitem sw-vpanel-item';

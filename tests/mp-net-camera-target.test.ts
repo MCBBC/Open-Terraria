@@ -21,6 +21,10 @@
 //   - 旧端观战回退：spectateSlot（msg150）目标位兜底（旧 client 无相机尾段）
 // 全程 mock 传输层（pvp-immune-net 同款假 ws 字节流直连）。
 // ============================================================================
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg } from '../src/net/protocol';
 import { ClientNet } from '../src/net/ClientNet';
@@ -190,7 +194,7 @@ function syncNpcHasNetId(rc: RcStub, netId: number): boolean {
 // ---------------------------------------------------------------------------
 // ① 发送门（Main.cs:63671-63676 四象限 + 单机零影响）
 // ---------------------------------------------------------------------------
-describe('刀D 发送门：notifyCameraTarget（HasValue 翻转 ∨ 位移>160px）', () => {
+describe.skipIf(EXT_MISSING)('刀D 发送门：notifyCameraTarget（HasValue 翻转 ∨ 位移>160px）', () => {
   it('net 未激活零发送（单机零影响）', () => {
     const net = mkNet(0);
     net.active = false;
@@ -256,7 +260,7 @@ describe('刀D 发送门：notifyCameraTarget（HasValue 翻转 ∨ 位移>160px
 // ---------------------------------------------------------------------------
 // ② 接收解码（MessageBuffer.cs:1049 等价）+ 降级矩阵
 // ---------------------------------------------------------------------------
-describe('刀D 接收面：msg13 尾段解码 + 旧形降级矩阵', () => {
+describe.skipIf(EXT_MISSING)('刀D 接收面：msg13 尾段解码 + 旧形降级矩阵', () => {
   it('bit5+尾段 → camTarget 逐值入镜像;team 段共存不错位', () => {
     const net = mkNet(0);
     feedNet(net, playerStateFrame(2, { x: 5, y: 6, cam: { x: 3000.5, y: -12.25 }, withTeam: true }));
@@ -294,7 +298,7 @@ describe('刀D 接收面：msg13 尾段解码 + 旧形降级矩阵', () => {
 // ---------------------------------------------------------------------------
 // ③ 服务器中继（room.ts PlayerState 位）+ NaN 弃段（S6）
 // ---------------------------------------------------------------------------
-describe('刀D 服务器面：尾段透传 + NaN 弃段 + AOI 判别', () => {
+describe.skipIf(EXT_MISSING)('刀D 服务器面：尾段透传 + NaN 弃段 + AOI 判别', () => {
   it('上行带尾 → 他人收到的重打包帧保留位+值（排除发送者）', async () => {
     const rig = await mkRig();
     // 接收端位置新鲜度（broadcastAt 盲端门——各先发一条定位 msg13）
@@ -388,7 +392,7 @@ describe('刀D 服务器面：尾段透传 + NaN 弃段 + AOI 判别', () => {
 // ---------------------------------------------------------------------------
 // ④ 全链 round-trip：ClientNet A → room → ClientNet B
 // ---------------------------------------------------------------------------
-describe('刀D 全链：发送门 → 服务器中继 → 接收镜像', () => {
+describe.skipIf(EXT_MISSING)('刀D 全链：发送门 → 服务器中继 → 接收镜像', () => {
   it('A notify(相机) → 强制 msg13 → B 侧 camTarget 逐值镜像;门不发时零包', async () => {
     const rig = await mkRig();
     const a = mkNet(1, { x: 0, y: 0 });

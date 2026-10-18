@@ -17,7 +17,9 @@
 //   value apply/S1⑥ apply 各一发（摘除→判别值翻转）+value 钉面漂移一发（fail-loud exit≠0）。
 //   原文件 sha256 前后全等=零接触。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -30,6 +32,11 @@ import { groupDecraftItemId } from '../src/stats/Shimmer';
 const RARE = rareJson as Record<string, number>;
 const VALUE = valueJson as Record<string, number>;
 const SCRIPT = join(dirname(__dirname), 'tools', 'extract-itemrare.mjs');
+// ★C档可移植:extract-itemrare ROOT 已转 import.meta 相对——mutant 置 OS tmp 须前置重锚(era-guard ④ 习语)
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const PROJ = join(dirname(__dirname), '..');
+const relocateRoot = (s: string) => s.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(PROJ)};`);
+
 const SRC = () => readFileSync(SCRIPT, 'utf8');
 const TMP = realpathSync(tmpdir());
 
@@ -64,7 +71,7 @@ const FISH_VALUE: Record<number, number> = {
 const RECUR_IDS = range(1803, 1807);
 const RECUR_TARGET_IDS = range(1533, 1537);
 
-describe('T4 value 面续刀（S1 登记债三件:守卫/链 value 面+递归+2320 污染修正）', () => {
+describe.skipIf(EXT_MISSING)('T4 value 面续刀（S1 登记债三件:守卫/链 value 面+递归+2320 污染修正）', () => {
   it('①守卫 value 面:10 族 base+覆写逐件=钉表（2104-13=37500 勘误面;1522/1533 缺键）', () => {
     for (const g of GUARD_VALUE) {
       for (const id of range(g.lo, g.hi)) {
@@ -156,7 +163,7 @@ describe('T4 value 面续刀（S1 登记债三件:守卫/链 value 面+递归+23
   const runMutant = (srcMutation: (s: string) => string) => {
     const mutant = join(TMP, `t4-mutant-${createHash('md5').update(String(Math.random())).digest('hex').slice(0, 8)}.mjs`);
     const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-    writeFileSync(mutant, srcMutation(SRC()));
+    writeFileSync(mutant, srcMutation(relocateRoot(SRC())));
     const r = spawnSync('node', [mutant, '--dump'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_ITEM_VER: '1457' },

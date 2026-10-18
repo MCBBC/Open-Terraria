@@ -1,8 +1,9 @@
 // _waterlook2:用户视角(相机 37329,4011 = 世界 seed 12345 地表湖)果冻管线外貌序列。
 // 玩家搅水,8 帧序列 + q0 对照;检查水线/边缘的透出背景空洞。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const CX = 37329, CY = 4011;
 
 const b = await puppeteer.launch({

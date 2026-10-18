@@ -1,10 +1,11 @@
 // v4:tick 相位关联取证——每帧记录:
 //   tick%5（壁炉重烘焙节拍）/%8（烟囱节奏）、bbox 内容签名、
 //   以及 atlas.vframe/vframeAt(内部 id 224) 调用监测(存在性/返回值)。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
-const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP = process.env.MAP || needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', String(e.message).slice(0, 160)));

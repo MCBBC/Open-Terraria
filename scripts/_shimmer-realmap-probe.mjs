@@ -1,8 +1,9 @@
 // 真档 E2E：用户世界（Starter_World 存档）玻璃窑/篝火基地区域，烘焙确定性取证。
 // 判据：含动画件的 chunk 在连续重烘中，【静态子区域】像素哈希是否随动画 tick 变化。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 862 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 200)));

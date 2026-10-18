@@ -2,7 +2,7 @@
 // 覆盖：paintColor/MapColor 色表、paintTile/paintWall 原语守卫、TileStore 存储与
 // KillTile/PlaceTile 清漆语义、存档往返（新字段 + 旧档缺省）、Item.paint/paintTool 表、
 // FindPaintOrCoating 弹药栏优先、SmartCursor 三策略目标集、史莱姆踩漆 lerp。
-// 权威行号（/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/）见各断言注释。
+// 权威行号（仓库外 Terarria1456/ 树）见各断言注释。
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { World } from '../src/world/World';

@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, mkdirSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★清债（2026-09-18，BJ114-e 同族普查）：extract-projectiles.mjs producer 追加时代守卫
 // ——vanilla-projectiles.json 现库含 producer 输出面之外的增量字段（鞭/多弹族
@@ -34,6 +37,11 @@ import { tmpdir } from 'node:os';
 // =真现库副本+alpha 洗列物证种子）复现洗库，真现库零接触。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-projectiles.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE = join(process.cwd(), 'src', 'data', 'vanilla-projectiles.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
 // ★macOS /var→/private/var 符号链接:import.meta.url 是 realpath 而 pathToFileURL(argv[1])
@@ -61,7 +69,7 @@ const LOSS_FIXTURE = JSON.stringify({
   16: { aiStyle: 9, width: 32, height: 32, light: 0.9, friendly: true, magic: true, ignoreWater: true },
 });
 
-describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反哺后增益面放行）', () => {
+describe.skipIf(EXT_MISSING)('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反哺后增益面放行）', () => {
   it('行为面:BJ127 反哺+BJ129③ 勘正重产后 vs 现库=零 diff 静默放行,现库字节零改动', () => {
     const dir = mkdtempSync(join(TMP, 'proj-guard-'));
     const out = join(dir, 'regen.json');
@@ -225,7 +233,7 @@ describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反
   });
 
   it('结构锁:拒绝路径守卫块内零写盘+双旗逃生门/损失面探测/活通道锚在位', () => {
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const guardStart = src.indexOf('const appendEra');
     const guardEnd = src.indexOf('process.exit(1)', guardStart);
     expect(guardStart).toBeGreaterThan(-1);
@@ -293,7 +301,7 @@ describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反
     const mutant = join(dir, 'extract-projectiles-mutant.mjs');
     const fixture = join(dir, 'loss.json');
     const out = join(dir, 'out.json');
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const appendEra = missingIds.length > 0 || lossKeys.length > 0;';
     expect(src).toContain(TRIGGER);
     writeFileSync(mutant, src.replace(TRIGGER, 'const appendEra = false; // ★变异:守卫判据摘除'));
@@ -374,7 +382,7 @@ describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反
     writeFileSync(join(fakeLive, 'vanilla-projectiles.json'), JSON.stringify(seeded));
     const fixture = join(dir, 'clean.json');
     writeFileSync(fixture, CLEAN_FIXTURE);
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const PROBE_ENV_SET = process.env.SW_PROJ_JSON !== undefined;';
     const OUT_LINE = 'const OUT_JSON = process.env.SW_OUT ?? `${ROOT}/game/src/data/vanilla-projectiles.json`;';
     expect(src).toContain(TRIGGER);
@@ -409,7 +417,7 @@ describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反
     const dir = mkdtempSync(join(TMP, 'proj-guard-'));
     const mutant = join(dir, 'extract-projectiles-mutant-j1.mjs');
     const out = join(dir, 'out.json');
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const g = /^UseGroupStaticImmunity\\((-?[\\d.]+)\\);$/.exec(l);';
     expect(src).toContain(TRIGGER);
     writeFileSync(mutant, src.replace(
@@ -441,7 +449,7 @@ describe('extract-projectiles 追加时代守卫（缺 id+损失面双判据;反
     const dir = mkdtempSync(join(TMP, 'proj-guard-'));
     const mutant = join(dir, 'extract-projectiles-mutant-j1b.mjs');
     const out = join(dir, 'out.json');
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = ", 'g'), g[1]));";
     expect(src).toContain(TRIGGER);
     writeFileSync(mutant, src.replace(

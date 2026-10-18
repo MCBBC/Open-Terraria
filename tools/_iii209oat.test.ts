@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 const RUN = process.env.SW_I209O === '1';
 const JS_DIR = '/tmp/iii209-out/pipeslot-99';
-const GOLD = '/Users/vinlic/GoldenChains/golden-remix/dumps/099_Cactus__Palm_Trees____Coral';
+const GOLD = `${process.env.HOME ?? ''}/GoldenChains/golden-remix/dumps/099_Cactus__Palm_Trees____Coral`;
 const W = 4200, H = 1200;
 function le16(p: string): Uint16Array { const b = readFileSync(p); return new Uint16Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)); }
 function u8(p: string): Uint8Array { const b = readFileSync(p); return new Uint8Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)); }

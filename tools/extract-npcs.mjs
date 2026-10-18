@@ -22,7 +22,7 @@
 // 输出 public/sprites/vanilla-npcs.json
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 
 // producer 输出面（守卫判据基线）：19 个 SetDefaults 白名单字段 + id/name/frames 框架字段
 const KEYS = ['lifeMax', 'damage', 'defense', 'knockBackResist', 'aiStyle', 'width', 'height',

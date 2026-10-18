@@ -1,6 +1,7 @@
 // ★生命水晶用户存档复现 v2:填墙消背景抖动噪声+火把稳定照明+水晶自动定位。
 // 三臂 A(2D)/B(bgl桥)/C(acc缺省) × 3 tick;中位数滤波;diff + 截屏。
 // 运行: SW_ORIGIN=http://localhost:5232 node tools/run-diag.mjs --timeout=600000 scripts/_lifeheart-usersave-ab.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, pump } from '../tools/probe/lib/index.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
@@ -8,7 +9,7 @@ import { PNG } from 'pngjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
 const OUT = '/tmp/lifeheart-ab';
 mkdirSync(OUT, { recursive: true });
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (34).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (34).json'));
 
 const browser = await launchBrowser({ viewport: { width: 1512, height: 862 } });
 const page = await openPage(browser, {});

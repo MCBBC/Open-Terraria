@@ -1,10 +1,11 @@
 // ★BJ649：酷酷史莱姆 Slachi「被推出房间外弹跳」逐拍取证。
 // 用户物证：behavior-log T01-50-17 town_slime_cool x 62438→62444 缓移、
 // y 4304→4337→4304 慢抛物线（33px 振幅/300t）、wm=0 恒、g=0 全程、悬浮 home 上方 6 格。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 1 }, args: ['--window-size=1530,960', '--window-position=30,30'] });
 const page = await browser.newPage();
 const errors = [];

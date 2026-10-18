@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 
 it('iii198 chest diff', async () => {
-  const buf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const buf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const wld = parseWld(new Uint8Array(buf.buffer, buf.byteOffset));
   const vset = new Set(wld.chests.map((c) => `${c.x},${c.y}`));
   const jsChests = (wld as unknown as Record<string, never>) && (await import('../src/world/gen/WorldGen'));

@@ -36,7 +36,7 @@
 // 输出：src/data/vanilla-petai.json
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 
 // ================= era guard：源版本 fail-closed + 输出通道三分离 =================
 // 白名单 1457/1458：本器锚点是版本特化（1457 局部号重排后 1456 旧号正则全数失配,

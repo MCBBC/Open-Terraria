@@ -1,9 +1,10 @@
 // _exit-mem-xray1.mjs — 分段时间轴 + 退出时刻定位 + 内存行为面证据
 // run: node scripts/_exit-mem-xray1.mjs [tracePath]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { scanTrace } from './_exit-mem-scan.mjs';
 
-const TRACE = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261004T130359.json';
+const TRACE = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261004T130359.json'));
 const OUT = '/tmp/exit-mem';
 const recon = JSON.parse(fs.readFileSync(OUT + '/recon.json', 'utf8'));
 const T0 = recon.summary.windowUs[0];

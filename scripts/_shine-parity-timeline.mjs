@@ -1,6 +1,7 @@
 // ★奇偶序依赖定谳·时间线面——从装载起逐拍轮询差异格状态:
 //   vimages.size / Tiles_178 在位 / pair 身份 / gem 16×16 区 byte-sum / memo fp
 // 目标:确定 gem 缺席是「首烘早于图到且从不重烘」还是「后到事件擦除」。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, waitForGame,
@@ -8,7 +9,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5204';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/shine-debt';
 const TAG = process.env.SW_TAG || 'tl';
 mkdirSync(OUT, { recursive: true });

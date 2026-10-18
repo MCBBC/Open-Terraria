@@ -1,9 +1,10 @@
 // ★BJ647-B v5：自然态复现（不 pin NPC——pin 拖动=自造伪影嫌疑）+ 暗像素增量差分
 // + hook 暗色 fillRect 捕获（caller 栈直定位）。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 1 } });
 const page = await browser.newPage();
 const errors = [];

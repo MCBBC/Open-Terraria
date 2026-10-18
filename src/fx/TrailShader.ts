@@ -427,6 +427,10 @@ export function drawStripTrail(
   // 挥天顶剑拖尾呈波纹锯齿"（站定=圆滑弧）：飞行时 trail 被玩家位移补偿拉长,
   // bbox 恒超旧阈 → 半分辨率上采样=边缘几何锯齿。SM2 codegen 直线代码 ~0.5µs/px,
   // 15 万 px 全分辨率 ≈ 7ms 可承受;超大带仍降半防帧炸。?trailres=1 强制全分辨率。
+  // ★BJ686 勘误注（2026-10-19 复审,原注系误诊残留）：该"波纹锯齿"实因=TrailingMode4
+  // 补偿时序（旧 fixedUpdate 头补偿+step 顶压上子步末态 → 每 tick 一错一对交替,已修
+  // 见 ZenithSword commitTrail）——半分辨率论当时是错误归因;本阈值/闸保留（超大带
+  // 防帧炸的真实性能面,与该病无关）。
   const rs = (() => {
     try { if (new URLSearchParams(location.search).get('trailres') === '1') return 1; } catch { /* 非浏览器 */ }
     return bw * bh > 150000 ? 0.5 : 1;

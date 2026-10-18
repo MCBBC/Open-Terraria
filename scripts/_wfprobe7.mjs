@@ -1,8 +1,9 @@
 // drawImage 插桩:捕获 Waterfall_8 贴图(512×40)的所有绘制调用,按世界坐标还原
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-12345世界 (1).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-12345世界 (1).json'));
 const CX = 1485, CY = 590;
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });

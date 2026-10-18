@@ -15,6 +15,7 @@
 // 【运行】SW_ORIGIN=http://localhost:5209 node tools/run-diag.mjs --timeout=280000 \
 //          scripts/_shine-mine-clamp.mjs          (缺省 default 臂)
 //   SW_ARMS=budget4 / shineoff / all 覆盖(all=顺序跑,timeout 需×3)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, gotoApp, waitForBridge, waitForGame,
@@ -22,7 +23,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5209';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/shine-mine';
 const ARM = process.env.SW_ARMS || 'default';
 const VIEW = { width: Number(process.env.SW_VW || 1280), height: Number(process.env.SW_VH || 800), deviceScaleFactor: Number(process.env.SW_DPR || 2) };

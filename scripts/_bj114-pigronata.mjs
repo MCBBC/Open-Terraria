@@ -1,8 +1,9 @@
 // BJ114 猪龙彩罐端到端探针（页面内实演）：放置 4×3 → 渲染 → 打碎 → 战利品。
 // 锚：Item 3746/tile 454/CheckChand 战利品掷（WorldGen.cs:53339-53414）。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (1).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (1).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5218';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

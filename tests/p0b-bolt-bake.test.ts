@@ -9,16 +9,19 @@
 // （MaxForksPerBolt/MaxForkDepth 反编译锚）;③GLShimExecutor 高频形状判例注。
 // node 可跑面:源码锚+vanilla 反编译锚+加算钳底等价性数学锁（8bit 模拟）;
 // 像素/帧耗对拍=scripts/_p0b-bolt-ab.mjs 探针（浏览器,雷帧 +11ms→+1-2ms 验收）。
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { arcSurgeWeaponGenerator, stormLightningGenerator } from '../src/fx/LightningGenerator';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const SRC = readFileSync(join(__dirname, '../src/entities/proj1457.ts'), 'utf8');
 const SHIM = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
-const VGEN = readFileSync(join(__dirname, '../../Terarria1457/Terraria.GameContent/LightningGenerator.cs'), 'utf8');
+const VGEN = existsSync(join(__dirname, '../../Terarria1457/Terraria.GameContent/LightningGenerator.cs')) ? readFileSync(join(__dirname, '../../Terarria1457/Terraria.GameContent/LightningGenerator.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
-describe('P0-B ① 专用化通道:整 bolt 单 scratch 烘焙', () => {
+describe.skipIf(EXT_MISSING)('P0-B ① 专用化通道:整 bolt 单 scratch 烘焙', () => {
   it('emit 闭包单源（烘焙/兜底共 consumption）——切片几何配色单实现', () => {
     // 逃生门:?boltbake=0 回原链（探针 A/B 面+回滚口;缺省烘焙开）
     expect(SRC).toContain('static BOLT_BAKE_OFF = (() => {');
@@ -84,7 +87,7 @@ describe('P0-B ① 专用化通道:整 bolt 单 scratch 烘焙', () => {
   });
 });
 
-describe('P0-B ③ 并发钳+强度门（vanilla 语义核对定谳）', () => {
+describe.skipIf(EXT_MISSING)('P0-B ③ 并发钳+强度门（vanilla 语义核对定谳）', () => {
   it('钳值 13=vanilla 生成上界（ArcSurge 3³ 展开）;风暴界 7 由生成端同参封顶', () => {
     expect(SRC).toContain('static readonly BOLT_DRAW_CAP = 13;');
     // 反编译锚:StormLightning 2/2 → ≤1+2+4=7;ArcSurge 3/3 → ≤1+3+9=13
@@ -108,7 +111,7 @@ describe('P0-B ③ 并发钳+强度门（vanilla 语义核对定谳）', () => {
   });
 });
 
-describe('P0-B ④ GLShimExecutor 高频形状判例登记', () => {
+describe.skipIf(EXT_MISSING)('P0-B ④ GLShimExecutor 高频形状判例登记', () => {
   it('rasterizePathOp 判例注在场:低频专用+高频须批化/预烘+fillText/strokeText 连带风险', () => {
     expect(SHIM).toContain('★P0-B 判例登记（2026-09-25 雷击风暴定谳）');
     expect(SHIM).toContain('必须在上游【批化/预烘】后走单 drawImage 动态源');

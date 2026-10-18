@@ -1,10 +1,11 @@
 // wasmflag xray0: 一次性提取(519MB 只 parse 一次) → /tmp/wasmflag-xray/extract.json
 // 产出:线程表/事件名普查/主线程 X 事件/FunctionCall/rAF/ProfileChunk 全样本/worker X 事件
 // run: node --max-old-space-size=16384 scripts/_wasmflag-xray0-extract.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const SRC = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T214631.json';
+const SRC = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T214631.json'));
 const OUTDIR = '/tmp/wasmflag-xray';
 fs.mkdirSync(OUTDIR, { recursive: true });
 

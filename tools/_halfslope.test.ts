@@ -105,7 +105,7 @@ interface Ev {
         if (mLoc) {
           const rel = mLoc[1].slice(mLoc[1].indexOf('src/'));
           try {
-            const src = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/game/${rel}`, 'utf8').split('\n');
+            const src = readFileSync(`${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${rel}`, 'utf8').split('\n');
             for (let k = +mLoc[2]; k >= Math.max(0, +mLoc[2] - 2); k--) {
               const cm = /\/\/\s*▶([^\s(（]+)/.exec(src[k - 1] ?? '');
               if (cm) { label = cm[1]; break; }

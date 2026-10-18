@@ -1,9 +1,10 @@
 // _lavaslope-repro4: 岸缘构型全矩阵——水/岩浆 A/B,地下(groundLevel 之下)+泥土墙背景。
 // 每构型 3×3 格间隔,枚举:坡向(1/2)×邻接(右满液/右满+下满/仅下满/右 230 表面液/上满液)
 // ×半砖两态。采样缺角三角形像素,水 vs 岩浆逐对出表。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

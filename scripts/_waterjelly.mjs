@@ -7,10 +7,11 @@
 //   B q3:2D 回退同样形变;C q3:旧路径深处 ≈0(只有表层 bob)= 改造前基线
 // 断言:三页 warp 调试态(A:'gl'/B:'2d'/C:'off')+ 零 pageerror。
 // 截图:A 页静水(入水前) vs 溅水(入水中) → tmp 目录(报告前后对比)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const SEED = '12345';
 const errors = { A: [], B: [], C: [] };
 

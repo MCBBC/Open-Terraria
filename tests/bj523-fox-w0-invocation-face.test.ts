@@ -48,7 +48,7 @@
  *  干台 row 92（x 70-90）;岩浆读相=上拍湿段尾值 → 入岩浆次拍才触发（BJ520 t1 同相）。
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Player } from '../src/entities/Player';
@@ -57,14 +57,17 @@ import { World } from '../src/world/World';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Arrow } from '../src/entities/Arrow';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MINION_TS = readFileSync(join(ROOT, 'src', 'entities', 'MinionProj.ts'), 'utf8');
 const GAME_TS = readFileSync(join(ROOT, 'src', 'core', 'Game.ts'), 'utf8');
 // 反编译标杆（定谳锚,防「按感觉改回」）
-const PLAYER_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8');
-const ITEM_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
-const PROJ_CS = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
+const PLAYER_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Player.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const ITEM_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const PROJ_CS = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs')) ? readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const priv = (o: object): Record<string, any> => o as unknown as Record<string, any>;
 
@@ -119,7 +122,7 @@ const LAVA_BASIN = (h: ReturnType<typeof makeHooks>): void => {
 // ================================================================
 // ① 定谳源锚：原版反证链（autoReuse 强制 releaseUseItem）+ 仓内落点
 // ================================================================
-describe('① 定谳源锚（原版 autoReuse 重臂链 + 仓内落刀位）', () => {
+describe.skipIf(EXT_MISSING)('① 定谳源锚（原版 autoReuse 重臂链 + 仓内落刀位）', () => {
   it('原版：狐杖 5664/6149 autoReuse=true + reuseDelay=2（Item.cs case 体）', () => {
     for (const vid of [5664, 6149]) {
       const at = ITEM_CS.indexOf(`case ${vid}:`);
@@ -174,7 +177,7 @@ describe('① 定谳源锚（原版 autoReuse 重臂链 + 仓内落刀位）', (
 // ================================================================
 // ② W0 相位面：foxT 归位 ⇒ 重按/重臂后首拍即出弹（ai[0]=1000f :60045 同相）
 // ================================================================
-describe('② W0 循环相位面（foxT 归位）', () => {
+describe.skipIf(EXT_MISSING)('② W0 循环相位面（foxT 归位）', () => {
   it('重按 immediacy：残留 foxT=2 下 W0 → 首个喷火拍即出弹', () => {
     const h = makeHooks();
     const m = minion(h.player, 1094, h.player.cx + 100, h.player.cy);
@@ -227,7 +230,7 @@ describe('② W0 循环相位面（foxT 归位）', () => {
 // ================================================================
 // ③ 攻击叫声调用面（Game foxW0 沿查门;once-per-tick;岩浆环节拍）
 // ================================================================
-describe('③ 攻击叫声调用面（foxAttackSoundGate × foxW0）', () => {
+describe.skipIf(EXT_MISSING)('③ 攻击叫声调用面（foxAttackSoundGate × foxW0）', () => {
   it('按下沿调用：门开即一响+重置 -21;持住期（无沿、非岩浆）不再查门', () => {
     const h = makeHooks();
     const m = minion(h.player, 1094, h.player.cx + 100, h.player.cy);
@@ -305,7 +308,7 @@ describe('③ 攻击叫声调用面（foxAttackSoundGate × foxW0）', () => {
 // ================================================================
 // ④ 复燃守恒（BJ521③ t3 面 + 「须重按」真子面=松手后）
 // ================================================================
-describe('④ 复燃守恒（自动复燃=原版;松手后须重按）', () => {
+describe.skipIf(EXT_MISSING)('④ 复燃守恒（自动复燃=原版;松手后须重按）', () => {
   it('持住穿越岩浆：出岩浆首拍自动复燃（含重臂环全链,BJ521③ t3 守恒面）', () => {
     const h = makeHooks();
     LAVA_BASIN(h);

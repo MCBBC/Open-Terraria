@@ -9,8 +9,9 @@
 import { it, expect } from 'vitest';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../src/data/tiles';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 
-it('雪面无杂草/花/蘑菇(冰与泥浆叠层除外)', async () => {
+it.skipIf(fixtureMissing('snow-12345-e-m1'))('雪面无杂草/花/蘑菇(冰与泥浆叠层除外)', async () => {
   const world = loadFixtureWorld('snow-12345-e-m1');
   const st = world.store;
   const SNOW = TILE_BY_KEY['snow']!;
@@ -25,7 +26,7 @@ it('雪面无杂草/花/蘑菇(冰与泥浆叠层除外)', async () => {
   expect(bad).toBe(0);
 }, 240_000);
 
-it('群系体检直方图断言:沙/冰面同样禁草花菇;邪恶草上必生邪恶植物(两邪恶)', async () => {
+it.skipIf(fixtureMissing('snow-12345-e-m1', 'snow-12345-e0', 'snow-12345-e1'))('群系体检直方图断言:沙/冰面同样禁草花菇;邪恶草上必生邪恶植物(两邪恶)', async () => {
   const mk = async (evil: -1 | 0 | 1) =>
     // ★IIIII259 档案载入（evil=-1 复用 t1 的 snow-12345-e-m1;name 字段 display-only
     //   差异('snow' vs 'b'),断言面只扫 tiles）

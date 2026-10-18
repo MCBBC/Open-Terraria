@@ -14,7 +14,9 @@
 //   单件清单漂移 fail-loud/S1⑤ 或块摘除（1710 回落 U1 基值 200=行源序判别面）。
 //   原文件 sha256 前后全等=零接触（cp 变异副本,禁 git checkout）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -29,6 +31,11 @@ import recipeDoc from '../src/data/vanilla-recipes.json';
 const VALUE = valueJson as Record<string, number>;
 const RARE = rareJson as Record<string, number>;
 const SCRIPT = join(dirname(__dirname), 'tools', 'extract-itemrare.mjs');
+// ★C档可移植:extract-itemrare ROOT 已转 import.meta 相对——mutant 置 OS tmp 须前置重锚(era-guard ④ 习语)
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const PROJ = join(dirname(__dirname), '..');
+const relocateRoot = (s: string) => s.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(PROJ)};`);
+
 const SRC = () => readFileSync(SCRIPT, 'utf8');
 const TMP = realpathSync(tmpdir());
 
@@ -76,7 +83,7 @@ const U1_IDS = new Set<number>();
 for (const g of U1) for (const id of range(g.lo, g.hi)) U1_IDS.add(id);
 const U1_OR_BLOCK_IDS = [1710, 1716, 1720, 2133, 2137, 2147, 2151, 2155, 2405, 2663]; // S1⑤ 或块终值覆写面
 
-describe('U1 方法级【无 rare】value 守卫 34 族（T4 census 主面落刀）', () => {
+describe.skipIf(EXT_MISSING)('U1 方法级【无 rare】value 守卫 34 族（T4 census 主面落刀）', () => {
   it('①35 面逐件=钉表（217 ids:34 census 族+1479-1480 else 面;per-type 覆写 2379/2389=100000;族内 10 id 终值=S1⑤ 或块覆写 100000）', () => {
     const OR_BLOCK = new Set(U1_OR_BLOCK_IDS);
     for (const g of U1) {
@@ -192,7 +199,7 @@ describe('U1 方法级【无 rare】value 守卫 34 族（T4 census 主面落刀
   const shaOf = () => createHash('sha256').update(readFileSync(SCRIPT)).digest('hex');
   const runMutant = (srcMutation: (s: string) => string) => {
     const mutant = join(TMP, `u1-mutant-${createHash('md5').update(String(Math.random())).digest('hex').slice(0, 8)}.mjs`);
-    writeFileSync(mutant, srcMutation(SRC()));
+    writeFileSync(mutant, srcMutation(relocateRoot(SRC())));
     const r = spawnSync('node', [mutant, '--dump'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
       env: { ...process.env, SW_ITEM_VER: '1457' },

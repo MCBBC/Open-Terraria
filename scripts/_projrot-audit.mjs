@@ -1,8 +1,9 @@
 // v4:按 combatWeapon() 派发语义(combatWeapon.ts:125-205)列"magic/shot 兜底 →
 // Arrow generic"的已登记武器 × 原版 rotation 分类(修复候选)。
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = PROJECT_ROOT;
 const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Projectile.cs`, 'utf8');
 const srcLines = src.split('\n');
 const combat = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, 'utf8'));

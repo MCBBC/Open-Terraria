@@ -19,9 +19,12 @@
 //  垫：fake-IDB + LS 桩真实读写链（bj615/bj617/bj618 同垫）;LS 抛错面用「一抛就换」
 //   夹具;模块级 nextId/openFailStreak/句柄态用 vi.resetModules 隔离。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { installFakeIdb, type FakeIdbHandle } from './fake-idb-util';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ---- 共享垫 ----
 const mem = new Map<string, string>();
@@ -103,7 +106,7 @@ afterEach(() => {
 // =====================================================================
 // A 组 F1：读序倒挂第五/六面收口（getState / load 三段择源）
 // =====================================================================
-describe('C11-A F1：getState/load 三段择源 IDB → FS 恢复链 → LS 兜底', () => {
+describe.skipIf(EXT_MISSING)('C11-A F1：getState/load 三段择源 IDB → FS 恢复链 → LS 兜底', () => {
   it('A1 CharacterStore.getState：IDB miss+LS 陈旧副本 → FS 恢复链被咨询并胜出（旧实现 kvGet 命中 LS 即短路）', async () => {
     mem.set(stateKeyOf(3), JSON.stringify({ inventory: [{ v: 'LS陈旧' }] }));
     const { CharacterStore: CS } = await import('../src/save/CharacterStore');
@@ -189,7 +192,7 @@ describe('C11-A F1：getState/load 三段择源 IDB → FS 恢复链 → LS 兜�
 // =====================================================================
 // B 组 F2：KvStore 原语层 LS 卫生垫 + boot 门/预查/删除 UI 收口
 // =====================================================================
-describe('C11-B F2：LS 卫生垫（隐私模式 LS 抛≠炸链）', () => {
+describe.skipIf(EXT_MISSING)('C11-B F2：LS 卫生垫（隐私模式 LS 抛≠炸链）', () => {
   it('B1 kvDelete：LS removeItem 抛 → 仍 resolves 且 IDB 删除照常执行（旧实现首语句裸删=IDB 删除全跳过=隐私面）', async () => {
     idb.map.set(dataKeyOf(5), '{"data":1}');
     await withThrowingLs(async () => {
@@ -232,7 +235,7 @@ describe('C11-B F2：LS 卫生垫（隐私模式 LS 抛≠炸链）', () => {
 // =====================================================================
 // C 组 F3+F6：doSave 契约（charState 并入全链 + 全链成功才报「世界已保存」）
 // =====================================================================
-describe('C11-C F3+F6：doSave 全链落定契约（结构锚）', () => {
+describe.skipIf(EXT_MISSING)('C11-C F3+F6：doSave 全链落定契约（结构锚）', () => {
   const flow = () => readFileSync(resolve(__dirname, '../src/mainFlow.ts'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
 
   it('C1 charState 写并入全链 Promise.all（BJ144「退出等保存完成」含 .plr 段——quitToMenu 放锁/saveAndReload reload 不再撕写）', () => {
@@ -262,7 +265,7 @@ describe('C11-C F3+F6：doSave 全链落定契约（结构锚）', () => {
 // =====================================================================
 // D 组 F4：幽灵扫描文案中性化 + playerstate 扫描面/恢复面
 // =====================================================================
-describe('C11-D F4：幽灵扫描中性化+playerstate 面', () => {
+describe.skipIf(EXT_MISSING)('C11-D F4：幽灵扫描中性化+playerstate 面', () => {
   it('D1 scanEvictedSaves：外观+随身态双缺（驱逐实锤）→ playerstate 补报;单缺（新角色合法形态）→ 不补测', async () => {
     const sp = await import('../src/save/StoragePersistence');
     // ① 外观缺+随身态缺 → 双报（补测面在位）
@@ -317,7 +320,7 @@ describe('C11-D F4：幽灵扫描中性化+playerstate 面', () => {
 // =====================================================================
 // E 组 F5：copy() 死码清扫锁
 // =====================================================================
-describe('C11-E F5：CharacterStore.copy 死码清扫（零生产调用方+影子用例连坐）', () => {
+describe.skipIf(EXT_MISSING)('C11-E F5：CharacterStore.copy 死码清扫（零生产调用方+影子用例连坐）', () => {
   it('E1 copy 方法已删（源+影子测试双锚）', () => {
     const src = readFileSync(resolve(__dirname, '../src/save/CharacterStore.ts'), 'utf8');
     const shadow = readFileSync(resolve(__dirname, '../tests/character-store.test.ts'), 'utf8');
@@ -330,7 +333,7 @@ describe('C11-E F5：CharacterStore.copy 死码清扫（零生产调用方+影�
 // =====================================================================
 // F 组 F7：persist 引用漂移修正锁
 // =====================================================================
-describe('C11-F F7：persist 注释引用对齐现行源（三判据→web.dev;驱逐机制→现行 MDN）', () => {
+describe.skipIf(EXT_MISSING)('C11-F F7：persist 注释引用对齐现行源（三判据→web.dev;驱逐机制→现行 MDN）', () => {
   it('F7 StoragePersistence 头注引现行 web.dev/articles/persistent-storage 与 MDN Storage API 章节页', () => {
     const s = readFileSync(resolve(__dirname, '../src/save/StoragePersistence.ts'), 'utf8');
     expect(s, '三判据现行源（MDN 现行页已不载 Chromium 三启发式）').toContain('web.dev/articles/persistent-storage');
@@ -342,7 +345,7 @@ describe('C11-F F7：persist 注释引用对齐现行源（三判据→web.dev;�
 // =====================================================================
 // G 组 F8：ensureLoaded 迁移门放宽（损坏 index 也走迁移）
 // =====================================================================
-describe('C11-G F8：迁移门 `!raw` 漏损坏 index 形态', () => {
+describe.skipIf(EXT_MISSING)('C11-G F8：迁移门 `!raw` 漏损坏 index 形态', () => {
   it('G1 损坏 index（raw 真值但 parse 抛）+遗留 quicksave → 迁移照走（旧实现门被 raw 真值卡死=迁移面失效）', async () => {
     idb.map.set(INDEX_KEY_W, '{corrupted-index!!!');
     mem.set('sandboxworld.quicksave', JSON.stringify({ header: { name: '遗留世界', seed: 3, width: 100, height: 100, created: 1700000000000 } }));

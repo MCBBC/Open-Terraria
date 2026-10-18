@@ -1,9 +1,10 @@
 // 真存档复现探针 v4：正式世界槽 IDB 写入 + 完整 UI 流（sp→新建角色→创建→世界列表→进入）。
 // 运行：SW_ORIGIN=http://localhost:4173 node tools/run-diag.mjs scripts/_fps-savedworld-v4.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (38).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (38).json'));
 const saveJson = readFileSync(SAVE, 'utf8');
 const URL = (process.env.SW_ORIGIN ?? 'http://localhost:4173');
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, defaultViewport: null, args: ['--window-size=1540,920'] });

@@ -7,7 +7,7 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const RUN = process.env.SW_I189 === '1';
-const G2 = '/Users/vinlic/GoldenChains/golden-waterpark';
+const G2 = `${process.env.HOME ?? ''}/GoldenChains/golden-waterpark`;
 const SEED = 'waterpark|20260905';
 
 const le16 = (p: string): Uint16Array => {

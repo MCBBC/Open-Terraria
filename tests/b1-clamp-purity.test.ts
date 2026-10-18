@@ -4,6 +4,10 @@
 // （MessageBuffer.cs:3888/:3894，Hurt 内经 CalculateDamagePlayersTake floor≥1 归一,
 // Main.cs:67146-67155）；msg27 快照读值即赋、TrySendData 复播零改写（:1701/:1744）；
 // 原版 msg44 弃槽无载荷（MessageBuffer.cs:4502 case 44 break）。
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg, PlayerHurtFlags, readPlayerHurt, writePlayerHurt } from '../src/net/protocol';
 
@@ -43,7 +47,7 @@ function parseFrames(frames: Uint8Array[]): Array<{ msgId: number; payload: NetR
   return out;
 }
 
-describe('★B1 msg117 写层：short 直写回绕语义（min(9999) 自造钳撤除）', () => {
+describe.skipIf(EXT_MISSING)('★B1 msg117 写层：short 直写回绕语义（min(9999) 自造钳撤除）', () => {
   it('32767 上界原样落线;40000 按 unchecked (short) 回绕 −25536（字节型同 C# 强转）', () => {
     const f = writePlayerHurt({ slot: 0, dmg: 32767, x: 0, y: 0, dir: 1, flags: 0 });
     const rr = new NetReader(f.subarray(3));
@@ -102,7 +106,7 @@ async function relay(room: RoomStub, c: RcStub, msgId: number, frame: Uint8Array
   room.flushOutbox();
 }
 
-describe('★B1 Room 中继分层：msg27 纯透传 / msg42·44 策略层上帽保留', () => {
+describe.skipIf(EXT_MISSING)('★B1 Room 中继分层：msg27 纯透传 / msg42·44 策略层上帽保留', () => {
   it('msg27：>9999 dmg 快照全量透传（协议语义=原版弹幕案零改写），kind>12 脏条仍剥', async () => {
     // ★X2 重锚（2026-10-01）:合法 kind 表三次上移（9=星璇之音/10=雨云/11=帕鲁机件
     //  双弹,room.ts 脏条门随更 >12）——脏样本 12→13 保「超门剥除」判别力

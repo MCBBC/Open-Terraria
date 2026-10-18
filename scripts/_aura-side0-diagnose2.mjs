@@ -1,10 +1,11 @@
 // side=0 二诊：失败塔位 (3301,307) 的搜索重放+carriedByBackpack+全错误栈
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 import { pump } from '../tools/probe/lib/pump.mjs';
 import { readFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.WLD_PATH || '/Users/vinlic/Downloads/十周年纪念种子(1).wld';
+const WLD = process.env.WLD_PATH || needInput(join(DOWNLOADS, '十周年纪念种子(1).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errs = [];

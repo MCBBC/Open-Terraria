@@ -1,13 +1,15 @@
 // ★一次性:平台阶梯交替处行走回放(真实存档地形)
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE, GRAVITY } from '../src/core/constants';
 
-describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275 定案）', () => {
+// ★C档可移植:用户取证存档收编 tests/fixtures/local(starter-map-26.json);缺档=skip 不红
+describe.skipIf(localFixtureMissing('starter-map-26.json'))('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275 定案）', () => {
   it('dump 3166/275 附近地形', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const st = world.store;
     const ch = (x: number, y: number) => {
       if (!st.inBounds(x, y)) return '?';
@@ -38,7 +40,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
    *  平平台着陆门槛(≤top+1)差 0.6px 边界失败 → 两侧都撒手。修 = 沉深门：脚沉
    *  入 vy0 ≤8px（坡顶过渡带）时钳 0 支持，深陷（竖柱里侧）维持原版跳过。 */
   it('站上顶斜坡不坠落、向右平滑登顶', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const b = {
       x: 3222.4 * TILE, y: 4401.6 - 42,
       w: 20, h: 42,
@@ -59,7 +61,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
   });
 
   it('从左阶梯向上行走全程登顶（行走链路回归）', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const b = {
       x: 3212 * TILE, y: 282 * TILE - 42,
       w: 20, h: 42,
@@ -81,7 +83,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
   });
 
   it('实心块→平台坡踏入不坠落（用户 marks 3166/275）', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const b = {
       x: 3158 * TILE, y: 4400 - 42,
       w: 20, h: 42,
@@ -112,7 +114,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
   });
 
   it('冲刺速度踏入斜坡跟随阶梯下行(用户 vx≈3.0)', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const b = {
       x: 3158 * TILE, y: 4400 - 42,
       w: 20, h: 42,
@@ -141,7 +143,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
     if (Math.abs(maxDrift) > 1.5) throw new Error(`阶梯下行漂移 maxDrift=${maxDrift.toFixed(2)}t`);
   });
   it('跳跃登顶后在顶台上落地(用户跳跃场景)', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     // 从左阶梯 (3220,277) 表面起跳向右,看是否落在顶台或阶梯上(不穿到更低的右阶梯)
     const b = {
       x: 3220.5 * TILE, y: 277 * TILE - 42 - 4,

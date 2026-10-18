@@ -1,8 +1,9 @@
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 const FH = 56;
 for (const id of [17, 18, 22]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const { width: w, data } = png;
   const y0 = 0;
   // 头部整体带 4..20：列直方图 → 左右两半质量

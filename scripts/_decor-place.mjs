@@ -12,9 +12,10 @@
 //                       运行时扫 ITEM_DEFS.tile×TILE_DEFS.decor,w×h>1）→ ow×oh 全存活
 //  ③dirtSingle          泥土单格放置对照 → 1/1
 //  ④sunflowerDigSupport 放置后立即挖其支撑草格（构造期外级联仍生效）→ 整株清除
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

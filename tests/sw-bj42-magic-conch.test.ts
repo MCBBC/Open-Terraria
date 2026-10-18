@@ -35,7 +35,8 @@ import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/item
 import { TILE_DEFS } from '../src/data/tiles';
 import { openFishingCrate } from '../src/data/vanillaFishingCrates';
 import { seededRandom } from './seeded-rng';
-import { loadFixture } from './world-fixtures';   // ★IIIII259 测试世界档案库
+import { loadFixture } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';   // ★IIIII259 测试世界档案库
 
 const ROOT = join(__dirname, '..');
 // 1457 WorldGen.cs:36424 两池 + Player.cs:8750-8759 八选一
@@ -96,7 +97,7 @@ describe('SW-BJ42 魔法海螺获得链', () => {
     }
   });
 
-  it('C. 世界生成面 6 种子普查（决定论）：浅层 1/4 池含海螺、深层池无海螺', async () => {
+  it.skipIf(fixtureMissing('bj42-a', 'bj42-b', 'bj42-c', 'bj42-d', 'bj42-e', 'bj42-f'))('C. 世界生成面 6 种子普查（决定论）：浅层 1/4 池含海螺、深层池无海螺', async () => {
     const perSeed: Array<{ seed: string; mains: number; conch: number }> = [];
     let shallowMains = 0;
     let deepMains = 0;

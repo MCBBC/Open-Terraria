@@ -1,8 +1,9 @@
 // _lavaslope-repro15: monkey-patch drawImage 计数——半砖格 (2101,411) 位置是否真的有
 // Liquid_1/Liquid_0 贴图的 drawImage 调用;以及该格最终像素。对照 slope 格 (2107,411)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

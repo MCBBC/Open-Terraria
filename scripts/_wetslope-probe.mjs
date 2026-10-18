@@ -1,12 +1,13 @@
 // 湿坡浸润探针:加载用户世界"浮夸的羡慕顶峰",对 136 标注格逐格导出
 // slope/half/liquid/liquidType/wall + 八邻同字段,并按 (type,slope,水位邻) 组合
 // 抽样截图 4×,定位"3-5px 透明像素"洞的精确位置。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
-const MARKS = '/Users/vinlic/Downloads/marks-浮夸的羡慕顶峰 (1).json';
-const MAP = '/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (2).json';
-const OUT = '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope';
+const MARKS = needInput(join(DOWNLOADS, 'marks-浮夸的羡慕顶峰 (1).json'));
+const MAP = needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (2).json'));
+const OUT = join(HOME, '.claude/jobs/8405c930/tmp/wetslope');
 import { mkdirSync } from 'node:fs';
 mkdirSync(OUT, { recursive: true });
 
@@ -15,7 +16,7 @@ const mapStr = readFileSync(MAP, 'utf8');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

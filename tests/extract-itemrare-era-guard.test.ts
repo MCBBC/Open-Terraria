@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, mkdirSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★清债（2026-09-18，BJ114-e 同族普查）：extract-itemrare.mjs producer 追加时代守卫——
 // 源版本 1456（现缺省已翻转 1457，见拍板#7A；本文件旧 1456 场景全部改【显式】注入）
@@ -28,6 +31,11 @@ import { tmpdir } from 'node:os';
 // OUT_DIR 换成沙箱假现库=真现库副本种子）复现 6147-6195 被洗，真现库零接触。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-itemrare.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE_RARE = join(process.cwd(), 'src', 'data', 'vanilla-itemrare.json');
 const LIVE_VALUE = join(process.cwd(), 'src', 'data', 'vanilla-itemvalue.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
@@ -52,7 +60,7 @@ const CLEAN_VALUE = JSON.stringify({ 757: 1000000, 319: 200 });
 const INCREMENT_RARE = JSON.stringify({ 3860: 8, 6147: 8 });
 const INCREMENT_VALUE = JSON.stringify({ 757: 1000000, 6147: 5000 });
 
-describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', () => {
+describe.skipIf(EXT_MISSING)('extract-itemrare 追加时代守卫（缺键型增量拦截面）', () => {
   it('行为面:现库增量态下【显式 1456】重放被拒（exit 1+物证+活通道指引）,现库字节零改动', () => {
     const dir = mkdtempSync(join(TMP, 'itemrare-guard-'));
     const beforeR = md5(LIVE_RARE);
@@ -99,7 +107,7 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
   });
 
   it('结构锁:拒绝路径守卫块内零写盘+双旗逃生门/动态探测/活通道锚在位', () => {
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const guardStart = src.indexOf('const appendEra');
     const guardEnd = src.indexOf('process.exit(1)', guardStart);
     expect(guardStart).toBeGreaterThan(-1);
@@ -213,7 +221,7 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
     const mutant = join(dir, 'extract-itemrare-mutant.mjs');
     const rareF = join(dir, 'rare.json');
     const valueF = join(dir, 'value.json');
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const appendEra = missingRare.length > 0 || missingValue.length > 0;';
     expect(src).toContain(TRIGGER);
     writeFileSync(mutant, src.replace(TRIGGER, 'const appendEra = false; // ★变异:守卫判据摘除'));
@@ -301,7 +309,7 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
     const valueF = join(dir, 'value.json');
     writeFileSync(rareF, CLEAN_RARE);
     writeFileSync(valueF, CLEAN_VALUE);
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const PROBE_ENV_SET = process.env.SW_ITEMRARE_JSON !== undefined || process.env.SW_ITEMVALUE_JSON !== undefined;';
     const OUT_LINE = 'const OUT_DIR = process.env.SW_OUT ?? `${ROOT}/game/src/data`;';
     expect(src).toContain(TRIGGER);

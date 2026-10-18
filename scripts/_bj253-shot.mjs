@@ -1,9 +1,10 @@
 // BJ253 视觉快照:弹生成在玩家视口内(上方 6 格),1.5s(淡入完成+喷币期)与
 // 3.6s(收缩淡出期)各截一帧,验证 GetAlpha 0.392 半透观感+帧推进+收缩。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5201';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({
   protocolTimeout: 600000,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

@@ -1,7 +1,7 @@
 // ============================================================================
 // 高尔夫球实体 1:1 —— Projectile.cs AI_149_GolfBall(:18924-18970) +
 // GolfHelper.cs 全量公式 + Terraria.Physics/BallCollision.cs 步进（world/golf/golfPhysics.ts）。
-// 行号注释对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/
+// 行号注释对准 仓库外基准树(game/ 的兄弟目录)Terarria1456/
 //   SetDefaults 721/739-752  :7344-7352  7×7、aiStyle 149、tileCollide=false、penetrate -1
 //   AI_149_GolfBall           :18924-18970
 //     · timeLeft<10 → 10（球永不消失）      :18926-18929

@@ -2,11 +2,12 @@
 //   Phase1 自然游走 30s(零干预);Phase2 开启 __forceWalk 原型压制(仍走完整
 //   fixedUpdate 流水线:碰撞/npcDoorUpdate/msg19 上行全真)。断言时序 关→开+carry
 //   →过门±2→关回。附带用户场景对照:NPC 起点在门外、home 标注在门内侧。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = process.env.VFP_MAP ?? '/Users/vinlic/Downloads/map-FTW_V2 (8).json';
+const MAP = process.env.VFP_MAP ?? needInput(join(DOWNLOADS, 'map-FTW_V2 (8).json'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 900, height: 640 } });
@@ -150,5 +151,5 @@ console.log(JSON.stringify({
   scanCalls: final.scanCalls, scanHandled: final.scanHandled,
   tail: final.samplesTail,
 }));
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/npc-door-live.json', JSON.stringify(final));
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/npc-door-live.json'), JSON.stringify(final));
 await b.close();

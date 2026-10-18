@@ -1,9 +1,10 @@
 // 瞳孔检测：头部带内最暗像素的位置（眼在面朝侧）+ 头发团块侧（背侧）
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 const FH = 56;
 for (const id of [17, 18, 22]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const { width: w, data } = png;
   const y0 = 0 * FH; // 帧 0 站立
   // 眼部带：头中下部（约 y+6..y+12）

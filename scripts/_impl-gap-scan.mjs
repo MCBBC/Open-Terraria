@@ -1,10 +1,11 @@
 // 全面功能实装扫描(2026-08-13):已登记 vi_ 物品 × 原版使用画像 → 分类清单。
 // 判定链:家族派发(combatWeapon 同构)→ 通用链(放置/药水/弹药/工具/钓)→
 // src 内 vi_<id>_ 字面引用(专属路径信号)→ 仍无着落 = 未实装候选。
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = PROJECT_ROOT;
 const combat = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, 'utf8'));
 const func = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-itemfunc.json`, 'utf8'));
 const itemsSrc = readFileSync(`${ROOT}/game/src/data/items.ts`, 'utf8');

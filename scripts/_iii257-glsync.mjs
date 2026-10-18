@@ -13,6 +13,7 @@
 //   C. warp 覆盖含坡面水面段——门控画布坡面条带 α≈5(足迹),平水面 α≈128(前景水)
 //   D. CCXXVI 语义保持——亮线出现、坡面石侧无亮线、干地零水色、中池亮线仍在
 // 用法: node tools/probe.mjs run scripts/_iii257-glsync.mjs --vite=5306 --out=/tmp/iii257-out
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,7 +25,7 @@ import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5306';
 const OUT = process.env.SW_PROBE_OUT ?? '/tmp/iii257-out';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (30).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[iii257]', ...a);

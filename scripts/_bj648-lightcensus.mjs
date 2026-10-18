@@ -1,8 +1,9 @@
 // BJ648 辅助:巫医房火把普查+深夜档光矩阵——定位 [253,240,202] 恒光的贡献源
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { launchBrowser, openPage, bootstrap, nextFrame, clockSet } from '../tools/probe/lib/index.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 await bootstrap(page, ORIGIN);

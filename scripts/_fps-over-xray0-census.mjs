@@ -1,9 +1,10 @@
 // fps-over 裁决 xray0:trace 事件普查(行级切片,47MB)
 // 目标:确认 trace 结构/线程表/关键锚事件名(FireAnimationFrame/DrawFrame/BeginFrame/
 // PageAnimator profile 节点)的存在性与数量,为后续帧率对账定锚。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 
-const TRACE = '/Users/vinlic/Downloads/Trace-20261005T153007.json';
+const TRACE = needInput(join(DOWNLOADS, 'Trace-20261005T153007.json'));
 const buf = readFileSync(TRACE);
 const NL = 0x0a;
 const lineSlice = (pos) => {

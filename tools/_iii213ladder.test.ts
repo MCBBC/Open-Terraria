@@ -1,11 +1,15 @@
 // ★IIIII213 一次性仪⑪：锚梯首分歧定位——逐锚 chk/skp/buffer/world-liq 对拍。
 // 用法：cd game && SW_I213LAD=1 npx vitest run tools/_iii213ladder.test.ts
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+
 const OUT = '/tmp/iii213-out';
+
+// ★C档可移植:/tmp 对拍产物(本机一次性诊断面;缺=skip 不红)
+const TMP_MISSING = !existsSync(`${OUT}/x86-iter1/K.chk-8`);
 const W = 4200, H = 1200;
 const ANCHORS = [8, 18, 28, 38, 48, 58, 68, 77, 78];
-it('iii213 anchor ladder', () => {
+it.skipIf(TMP_MISSING)('iii213 anchor ladder', () => {
   for (const a of ANCHORS) {
     const kc = readFileSync(`${OUT}/x86-iter1/K.chk-${a}`), jc = readFileSync(`${OUT}/jdump1/K.chk-${a}`);
     let dChk = 0; const chk: string[] = [];

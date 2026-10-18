@@ -3,7 +3,7 @@
 // paintCoatTile/paintCoatWall 原语（置位/幂等/清除/守卫）、涂层与油漆互不扰、
 // 存档往返（coat 通道 + 旧档缺省 + 废弃荧光漆 31 迁移）、光照消费（隐形格不挡光/
 // 放行天光）、FindPaintOrCoating 涂层侧、SmartCursor 三策略涂层项、回声腔扫描。
-// 权威行号（/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/）见各断言注释。
+// 权威行号（仓库外 Terarria1456/ 树）见各断言注释。
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { World } from '../src/world/World';

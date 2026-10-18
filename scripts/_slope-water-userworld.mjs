@@ -2,13 +2,14 @@
 //  map-Starter_World 36 导出=sandboxworld.save JSON)→?quickload 载入→玩家原位
 //  (丛林水池 slope2 阶梯)实况逐帧扫水体区——"闪帧"=像素色偏离自身时序中位>阈。
 //  双臂:B 缺省(liqgl) vs C ?liqgl=0。闪帧留全帧快照归档 /tmp。
-// 运行:SW_ORIGIN=http://localhost:5240 SAVE=/Users/vinlic/Downloads/map-Starter_World\ \(36\).json \
+// 运行:SW_ORIGIN=http://localhost:5240 SAVE=~/Downloads/map-Starter_World\ \(36\).json \
 //   node tools/run-diag.mjs scripts/_slope-water-userworld.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/index.mjs';
 import { writeFileSync } from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const SAVE_PATH = process.env.SAVE || '/Users/vinlic/Downloads/map-Starter_World (36).json';
+const SAVE_PATH = process.env.SAVE || needInput(join(DOWNLOADS, 'map-Starter_World (36).json'));
 const saveJson = (await import('node:fs')).readFileSync(SAVE_PATH, 'utf8');
 console.log('save json bytes:', saveJson.length);
 

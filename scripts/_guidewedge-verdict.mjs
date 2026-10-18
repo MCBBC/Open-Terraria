@@ -6,9 +6,10 @@
 //  门（!onGround && vy>=0 && !centerSolid → 交还原版物理）。
 // 场景：A 日志起点态端到端 / B 站台楔死态水平支救援 / C 存档原始位长跑
 //  / D 自然入场微路径三支（上部落入·2px 深嵌落入·邻列落入）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (28).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (28).json'));
 const json = fs.readFileSync(MAP, 'utf8');
 
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });

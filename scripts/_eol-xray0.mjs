@@ -1,7 +1,8 @@
 // EoL trace 结构探针:事件普查/线程表/ProfileChunk 存在性/时间跨度
 // run: node --max-old-space-size=8192 scripts/_eol-xray0.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 console.log('total events:', evs.length);

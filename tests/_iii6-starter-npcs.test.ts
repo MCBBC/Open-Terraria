@@ -28,6 +28,7 @@ import { describe, it, expect } from 'vitest';
 import { RNG, UnifiedRandom } from '../src/core/rng';
 import { starterNpcsPass } from '../src/world/gen/vanilla/StarterNPCsPass';
 import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';
 
 const CELEB_SEED = '1999040562';
 const W = 4200, H = 1200;
@@ -68,7 +69,8 @@ const X86_STARTERS: Array<{ key: string; givenName: string; anchor: [number, num
   { key: 'town_bunny', givenName: 'Boof', anchor: [281, 227], dir: 1 },
 ];
 
-describe('IIIIIII6 SpawnStarterNPCs（celebrationmk10 起始镇民）', () => {
+// ★C档可移植:档案 gz 不入 git,缺档=skip
+describe.skipIf(fixtureMissing('iii6-celeb-tenth', 'iii6-celeb-plain', 'iii6-celeb-remix', 'iii6-celeb-infected', 'iii6-purifythis', 'iii6-drunknotbees'))('IIIIIII6 SpawnStarterNPCs（celebrationmk10 起始镇民）', () => {
   it('十周年世界播种五名初始镇民：名单/名字掷流/homeless 锚与 x86 w.wld 全等', { timeout: 180_000 }, async () => {
     // ★IIIII259 档案载入（cfg=celeb-tenth，见 world-fixture-gen SPECS；下同）
     const world = loadFixtureWorld('iii6-celeb-tenth');
@@ -112,7 +114,7 @@ describe('IIIIIII6 SpawnStarterNPCs（celebrationmk10 起始镇民）', () => {
 //   链树原文序：infected(20,var1) > vampireSeed(633) > remix(441+savedTaxCollector)
 //   > drunk×const(124) > notBees(!const)(17) > getGood(38) > 裸 drunk(208) > 向导兜底
 //   （兜底 = Game.ts 承接域，pass 对普通种子零副作用——上一组用例锚定）。
-describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () => {
+describe.skipIf(fixtureMissing('iii6-celeb-tenth', 'iii6-celeb-plain', 'iii6-celeb-remix', 'iii6-celeb-infected', 'iii6-purifythis', 'iii6-drunknotbees'))('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () => {
   const BRANCHES: Array<{
     name: string; seedText: string; flags: Record<string, boolean>;
     key: string; type: keyof typeof POOLS;

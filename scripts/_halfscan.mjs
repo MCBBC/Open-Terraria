@@ -1,12 +1,13 @@
 // 全图扫描:半砖格的液体分布(半砖格有液 vs 上格有液半砖格无液),
 // 以及"水在半砖上"构型统计——判定我们存档的液体状态 vs 原版可达态。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (5).json', 'utf8');
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (5).json')), 'utf8');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile17',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wetslope-profile17'),
   args: ['--no-first-run'], defaultViewport: { width: 800, height: 600 },
 });
 const page = await browser.newPage();

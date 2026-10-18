@@ -1,5 +1,6 @@
 // 缩放全档扫描：用报告树 (2128,217) 的真实干件序列在解剖台重建，
 // 0.5→3.0 步 0.05 全扫，逐档检测交界带背景像素（缝）。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ protocolTimeout: 400000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 900 } });
 const page = await browser.newPage();
@@ -7,7 +8,7 @@ const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 120)));
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/tree-inspect.html', { waitUntil: 'networkidle0' });
 await new Promise(r => setTimeout(r, 1500));
-const REPORT = '/Users/vinlic/Downloads/debug-report-刺痛感炮轰-2026-08-19T11-04-37-270Z.json';
+const REPORT = needInput(join(DOWNLOADS, 'debug-report-刺痛感炮轰-2026-08-19T11-04-37-270Z.json'));
 const full = await import('node:fs').then(m => JSON.parse(m.readFileSync(REPORT, 'utf8')));
 await page.evaluate((json) => { document.getElementById('importBox').value = json; },
   JSON.stringify({ tiles: { areaPlayer: full.tiles.areaPlayer } }));

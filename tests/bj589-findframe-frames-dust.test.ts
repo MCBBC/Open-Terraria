@@ -16,7 +16,7 @@
 //    （Game.ts:51550）——explodeAt→TownNPC.hurt→broadcastDeathMessage（BJ562 死亡
 //    公告单源）→chatBroadcast，测试壳 Object.create(Game.prototype) 缺 cb 桩=预存红。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { Enemy, FF_VXSDIR_GROUP } from '../src/entities/Enemy';
@@ -25,10 +25,13 @@ import { vanillaNpc } from '../src/data/vanillaNpcs';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 import type { World as WorldT } from '../src/world/World';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const gameSrc = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
 const gateSrc = readFileSync(join(ROOT, 'tests/npc-damage-gate.test.ts'), 'utf8');
@@ -51,7 +54,7 @@ function vanillaGroupBody(src: string): string {
 }
 const gBody = vanillaGroupBody(npc1457);
 
-describe('BJ589 原版锚：蜂 3t / Harpy 5t / 组内尘参数', () => {
+describe.skipIf(EXT_MISSING)('BJ589 原版锚：蜂 3t / Harpy 5t / 组内尘参数', () => {
   it('蜂 210/211 frameCounter 双加（:75657-75661）——支内 ++ + 组尾 ++，阈值 6 ⇒ 3t/帧', () => {
     expect(gBody).toMatch(
       /if \(type == 210 \|\| type == 211\)\s*\{\s*frameCounter\+\+;\s*rotation = velocity\.X \* 0\.2f;\s*\}\s*frameCounter\+\+;/,
@@ -91,12 +94,13 @@ function vanillaFrameCounts(src: string): number[] {
   return [...seg.matchAll(/-?\d+/g)].map((m) => Number(m[0]));
 }
 
-describe('BJ589 全组逐型对拍表（vanilla npcFrameCount ↔ 本仓数据 ↔ 帧引擎行为）', () => {
+describe.skipIf(EXT_MISSING)('BJ589 全组逐型对拍表（vanilla npcFrameCount ↔ 本仓数据 ↔ 帧引擎行为）', () => {
   /** vanilla 源推导的期望档：thr（48→5/蜂双加→3/余 6）× cap（skip-last→frames-1） */
   const thrOf = (id: number) => (id === HARPY ? 5 : BEES.includes(id) ? 3 : 6);
   const capOf = (id: number, frames: number) => (SKIP_LAST.includes(id) ? frames - 1 : frames);
 
-  const counts = vanillaFrameCounts(mainSrc);
+  // ★C档可移植:缺档降级(EXT_MISSING skip 兜底;describe 体收集期亦执行)
+  const counts = EXT_MISSING ? ({} as ReturnType<typeof vanillaFrameCounts>) : vanillaFrameCounts(mainSrc);
 
   for (const id of GROUP) {
     it(`type ${id}：帧数对拍 + 帧引擎推进周期/访问帧行 = vanilla 档`, () => {
@@ -156,7 +160,7 @@ describe('BJ589 全组逐型对拍表（vanilla npcFrameCount ↔ 本仓数据 �
 // ---------------------------------------------------------------------------
 // 本仓落刀锚（线位/单源）
 // ---------------------------------------------------------------------------
-describe('BJ589 本仓锚', () => {
+describe.skipIf(EXT_MISSING)('BJ589 本仓锚', () => {
   it('findFrameRotation 传 game（fixedUpdate 线位）+ 组内尘在同拍层', () => {
     expect(enemySrc).toMatch(/this\.findFrameRotation\(game\);/);
     expect(enemySrc).toMatch(/if \(vid === 60\) \{/);
@@ -197,7 +201,7 @@ function dustGame(): { game: GameHooks; spawns: Array<Record<string, number | bo
 const drive = (e: Enemy, fn: string) =>
   (e as unknown as Record<string, (...a: unknown[]) => void>)[fn];
 
-describe('BJ589 行为级：60 地狱蝠组内尘（每 tick 一拍）', () => {
+describe.skipIf(EXT_MISSING)('BJ589 行为级：60 地狱蝠组内尘（每 tick 一拍）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('连 5 拍 5 粒：尘 6/盒=(x,y,w,h)/speed=v×0.2/α100/scale2/noGravity', () => {
@@ -229,7 +233,7 @@ describe('BJ589 行为级：60 地狱蝠组内尘（每 tick 一拍）', () => {
   });
 });
 
-describe('BJ589 行为级：634 孢子蝠组内尘（1/10 掷门 + ×0.1）', () => {
+describe.skipIf(EXT_MISSING)('BJ589 行为级：634 孢子蝠组内尘（1/10 掷门 + ×0.1）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('掷中（random<0.1）：尘 165/α50/scale1/speed=v 生成后 ×0.1/noGravity', () => {
@@ -271,7 +275,7 @@ describe('BJ589 行为级：634 孢子蝠组内尘（1/10 掷门 + ×0.1）', ()
 // 图鉴 dummy 折叠镜像（bestiaryDummyFrameIdx——dummy 同跑真 FindFrame,
 // UnlockableNPCEntryIcon :99-109；折叠与 vanillaFrameIdx 同刀拆档）
 // ---------------------------------------------------------------------------
-describe('BJ589 图鉴 dummy 折叠镜像：蜂 3t / Harpy 5t', () => {
+describe.skipIf(EXT_MISSING)('BJ589 图鉴 dummy 折叠镜像：蜂 3t / Harpy 5t', () => {
   const advanceOf = (fn: (t: number) => number): number => {
     const i0 = fn(0);
     for (let t = 1; t <= 240; t++) if (fn(t) !== i0) return t;
@@ -293,7 +297,7 @@ describe('BJ589 图鉴 dummy 折叠镜像：蜂 3t / Harpy 5t', () => {
 // ---------------------------------------------------------------------------
 // 渲染域回归哨（FF 组单源表/从不镜像族不被本刀扰动——BJ588 锚的镜像哨）
 // ---------------------------------------------------------------------------
-describe('BJ589 渲染域哨', () => {
+describe.skipIf(EXT_MISSING)('BJ589 渲染域哨', () => {
   it('FF_VXSDIR_GROUP 单源不动（Renderer 消费零漂移）', () => {
     // ★BJ590 族表扩容 +7（121/150/151/152/158/226/660 同死区档形态并入）——
     //   BJ589 的 15 型本体仍须全数在位

@@ -16,7 +16,7 @@ const SEED = process.env.SW_I167_SEED ?? 'waterpark|20260905';
 const EVIL = Number(process.env.SW_I167_EVIL ?? 0);
 const OUT = process.env.SW_I167_ROLLS_OUT ?? '/tmp/iii167-out/jsrolls-wpk.txt';
 const ABORT_SLOT = Number(process.env.SW_I167_ABORT_SLOT ?? 13);
-const G2D = process.env.SW_I167_G2 ?? '/Users/vinlic/GoldenChains/golden-waterpark';
+const G2D = process.env.SW_I167_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-waterpark`;
 
 const M8_FLAGS: Record<string, boolean> = {};
 for (const f of (process.env.SW_I167_FLAGS ?? '').split(',').filter(Boolean)) {

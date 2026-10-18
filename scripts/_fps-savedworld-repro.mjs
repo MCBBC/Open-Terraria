@@ -2,9 +2,10 @@
 // 与上一版差异：走游戏真实「导入世界」UI 把用户 Starter World 存档落库→进世界→
 // 出生点向右自然行走，逐秒对齐 fps 与 GLShimExecutor.degradeOps/flushes 账。
 // 运行：SW_ORIGIN=http://localhost:4173 node tools/run-diag.mjs scripts/_fps-savedworld-repro.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (38).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (38).json'));
 const URL = (process.env.SW_ORIGIN ?? 'http://localhost:4173') + '/?savedrepro=' + Date.now();
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, defaultViewport: null, args: ['--window-size=1540,920'] });
 const page = (await browser.pages())[0] ?? await browser.newPage();

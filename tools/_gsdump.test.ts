@@ -1,6 +1,6 @@
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { generateWorld } from '/Users/vinlic/Project/GLM/SandboxWorld/game/src/world/gen/WorldGen';
+import { generateWorld } from '../src/world/gen/WorldGen';   // ★C档可移植:改仓库内相对
 const RUN = !!process.env.SW_PARITY;
 (RUN ? it : it.skip)('dump gs at temple', async () => {
   const g0 = globalThis as { __swWallCap?: (tag: string, gs: object, st: object) => void };

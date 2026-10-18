@@ -7,10 +7,11 @@
 //   B: 沙×6|地牢砖×6 全砖交界;对照=沙|沙
 //   C: 水池 石壁|沙底 交界;对照=沙|沙(水下)
 // 用法: SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs --timeout=300000 scripts/_crossmerge-alpha-probe.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/crossmerge-profile4',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/crossmerge-profile4'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 }, protocolTimeout: 240000,
 });
 const page = await browser.newPage();

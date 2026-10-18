@@ -1,4 +1,5 @@
 // 全行走周期(帧2..N-extra)前倾均值：脚质心-头质心的均值偏移方向 = 面朝方向
+import { PROJECT_ROOT } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 const FH = 56;
@@ -12,7 +13,7 @@ function bandCentroid(png, y0, y1) {
 }
 const EXTRA = { 17: 9, 18: 9, 22: 10, 37: 5 };
 for (const id of [17, 18, 22]) {
-  const png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/terraria-assets/Images/NPC_${id}.png`));
+  const png = PNG.sync.read(readFileSync(`${PROJECT_ROOT}/terraria-assets/Images/NPC_${id}.png`));
   const total = Math.floor(png.height / FH);
   const walkEnd = total - EXTRA[id];
   let sum = 0, cnt = 0;

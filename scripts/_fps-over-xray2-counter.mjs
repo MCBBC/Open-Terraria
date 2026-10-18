@@ -1,7 +1,8 @@
 // fps-over 裁决 xray2:链身份配对+计数器滚动窗模拟+抖动形态+GPU 呈现面普查
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 
-const TRACE = '/Users/vinlic/Downloads/Trace-20261005T153007.json';
+const TRACE = needInput(join(DOWNLOADS, 'Trace-20261005T153007.json'));
 const buf = readFileSync(TRACE);
 const NL = 0x0a;
 const lineSlice = (pos) => {

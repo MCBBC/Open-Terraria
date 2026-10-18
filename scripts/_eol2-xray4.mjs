@@ -1,7 +1,8 @@
 // EoL2 xray4: node-id 跨流碰撞检验 + (若碰撞)按流命名空间重建归因
 // run: node --max-old-space-size=8192 scripts/_eol2-xray4.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 

@@ -1,9 +1,10 @@
 // ★BJ647-B v9：有头浏览器（headful）复现——合成器/GPU 管线与 headless 不同,
 // 黑矩形可能只在有头渲染路径出现。组合：量化 hover 循环+逐帧 diff+hook。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: false,
   defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 1 },

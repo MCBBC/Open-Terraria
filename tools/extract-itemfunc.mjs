@@ -92,7 +92,7 @@ import { pathToFileURL } from 'node:url';
 // （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
 import { EXTRA_USETURN, AMMO_ID } from './extract-itemcombat.mjs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // ★BJ298 2026-09-23 era guard 补缺省干跑臂（docs/era-guard-family.md 四之二续批排期③
 //   【降级面】清偿——原「缺省直跑仍写真库」半闸面收口;四之二部分闸表残缺面注销）：
 //   · 缺省（无 env 无旗）= 干跑对拍零写盘（重产 vs 现库双向路径级 diff——fresh-only/

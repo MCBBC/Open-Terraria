@@ -1,8 +1,9 @@
 // vicon 断环定位:swordId → atlasIcon → vicon(4) → vanilla.items['4'] / ensureVImage(Item_Atlas)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/vicon-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/vicon-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

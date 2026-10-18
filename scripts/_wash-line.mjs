@@ -1,12 +1,13 @@
 // 水线时间序列:玩家入水/出水全过程,每帧读玩家所在列的水线 Y(世界 px)。
 // 期望:入水瞬间水线被压下(下凹),出水瞬间被拉起(上凸),静止后回平。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const mapStr = readFileSync('/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (7).json', 'utf8');
+const mapStr = readFileSync(needInput(join(DOWNLOADS, 'map-浮夸的羡慕顶峰 (7).json')), 'utf8');
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wash-profile5',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wash-profile5'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

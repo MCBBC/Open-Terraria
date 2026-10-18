@@ -1,11 +1,12 @@
 // 烟囱(内部id)全图普查：每个物体的行数与 frameY 集合
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 400, height: 300 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 await page.goto('http://localhost:5201', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.loadJson, { timeout: 120000 });
-await page.evaluate(async (t) => { await window.__swFlow.loadJson(t); }, fs.readFileSync('/Users/vinlic/Downloads/map-FTW_V2 (10).json','utf8'));
+await page.evaluate(async (t) => { await window.__swFlow.loadJson(t); }, fs.readFileSync(needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json')),'utf8'));
 await page.waitForFunction(() => !!window.__swGame?.world?.store?.w, { timeout: 240000 });
 const out = await page.evaluate(() => {
   const st = window.__swGame.world.store;

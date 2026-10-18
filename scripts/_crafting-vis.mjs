@@ -1,3 +1,4 @@
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultViewport: { width: 480, height: 360 } });
@@ -5,7 +6,7 @@ const page = await browser.newPage();
 page.on('pageerror',(e)=>console.log('PE:',String(e.message).slice(0,160)));
 await page.goto(process.env.SW_ORIGIN||'http://localhost:5201',{waitUntil:'domcontentloaded',timeout:60000});
 await page.waitForFunction(()=>typeof window.__swFlow==='object'&&!!window.__swFlow?.loadJson,{timeout:120000});
-await page.evaluate(t=>window.__swFlow.loadJson(t), fs.readFileSync(process.env.MAP||'/Users/vinlic/Downloads/map-FTW_V2 (10).json','utf8'));
+await page.evaluate(t=>window.__swFlow.loadJson(t), fs.readFileSync(process.env.MAP||needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json')),'utf8'));
 await page.waitForFunction(()=>!!window.__swGame?.world?.store?.w,{timeout:120000});
 await new Promise(r=>setTimeout(r,500));
 await page.evaluate(()=>{

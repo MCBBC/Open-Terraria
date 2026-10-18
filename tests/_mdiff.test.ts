@@ -1,10 +1,11 @@
 import { describe, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixtureText, localFixtureMissing } from './fixturePath';
 import { loadSave } from '../src/save/SaveFile';
 
-describe('镜像结构差分', () => {
+describe.skipIf(localFixtureMissing('starter-map-26.json'))('镜像结构差分', () => {
   it('dump两结构碰撞图+程序化对比', () => {
-    const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
+    const { world } = loadSave(readLocalFixtureText('starter-map-26.json'));
     const st = world.store;
     const draw = (x0: number, x1: number, y0: number, y1: number, title: string) => {
       console.log(`\n== ${title} x[${x0}..${x1}]`);

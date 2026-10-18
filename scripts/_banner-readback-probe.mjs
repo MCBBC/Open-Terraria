@@ -1,8 +1,9 @@
 // 房旗回读修复验证：包桩 lightCtx.getImageData 计数 + 旗布染色仍生效
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-FTW_V2 (10).json';
+const MAP=needInput(join(DOWNLOADS, 'map-FTW_V2 (10).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 page.on('console',m=>{ if(m.text().includes('willReadFrequently')) console.log('WARN_STILL:',m.text().slice(0,80)); });

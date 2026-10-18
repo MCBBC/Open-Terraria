@@ -1,9 +1,10 @@
 // ★BJ647-B v4：复刻 v1 出现条件（手动钉相机 n.cy-260 与游戏回写对抗 + 玩家 x=n.cx-60
 // + pin 200ms）+ hook 记录差分 + 出现轮放大截图。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
 const errors = [];

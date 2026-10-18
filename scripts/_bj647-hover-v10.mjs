@@ -1,9 +1,10 @@
 // ★BJ647-B v10：对齐用户实况 zoom=1.24（debug-report render.camera.zoom 实测）——
 // 非整数缩放=亚像素采样/缝隙族。有头+hover 量化+逐帧 diff+截图。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: false,
   defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 1 },

@@ -4,7 +4,7 @@
 //   A 全链(hitSwitch 开计时器→updateMech 250t)  B tripWire 直打提取机格  C pullImpl 直调
 //   D 静态面(wire 覆盖/sheet/vid 桥)  E 手动交互回归(手持雪泥对准提取机)
 // 用法：SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs scripts/_bj623-probe.mjs
-import { launchBrowser, openPage, bootstrap, createGame, pump } from '/Users/vinlic/Project/GLM/SandboxWorld/game/tools/probe/lib/index.mjs';
+import { launchBrowser, openPage, bootstrap, createGame, pump } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
 const browser = await launchBrowser({});

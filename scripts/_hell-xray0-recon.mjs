@@ -1,6 +1,7 @@
 // 地狱直通车 trace 侦察:结构/主线程识别/ProfileChunk 存在性
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const path = '/Users/vinlic/Downloads/Trace-20261003T164745.json';
+const path = needInput(join(DOWNLOADS, 'Trace-20261003T164745.json'));
 const t = JSON.parse(fs.readFileSync(path, 'utf8'));
 const evs = t.traceEvents || [];
 console.log('events:', evs.length);

@@ -1,9 +1,10 @@
 // ★BJ647-B v3：黑矩形量化复现 + Canvas2D 绘制拦截（记录 clip 区内 fillRect/drawImage
 // 调用+caller 栈），hover on/off 各抓一帧序列做记录差分——直接量到是哪笔画的黑罩。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
 const errors = [];

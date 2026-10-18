@@ -1,10 +1,11 @@
 // 校正版合成(+0,+0 取样,16×16,栅距18):同标注代表格 9×9 邻域 ×3 变体。
 // ⚠️本探针绕过 vanillaChainFrame 直画链帧 ⇒ 反映不了回落/统一视图路由!端到端判定必须用 _vf-composite3(经 drawVanillaCell)。保留仅作帧级取证。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
 const SAMPLES = [{ x: 3969, y: 469 }, { x: 3975, y: 470 }, { x: 4003, y: 465 }];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
@@ -52,7 +53,7 @@ const shots = await p.evaluate(async (samples) => {
   return out;
 }, SAMPLES);
 for (let i = 0; i < shots.length; i++) {
-  fs.writeFileSync(`/Users/vinlic/.claude/jobs/4a66e745/tmp/c2g-${i}-v0.png`, Buffer.from(shots[i].split(',')[1], 'base64'));
+  fs.writeFileSync(`${HOME}/.claude/jobs/4a66e745/tmp/c2g-${i}-v0.png`, Buffer.from(shots[i].split(',')[1], 'base64'));
 }
 console.log(JSON.stringify({ count: shots.length }));
 await b.close();

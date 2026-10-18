@@ -1,12 +1,13 @@
 // vf 斜坡/半砖 A/B 截图探针:同存档同机位,分别以 ?vf=1 / ?vf=0 渲染截图。
 // VFP_MODE=1|0 决定链开关;输出 PNG 到 VFP_OUT(缺省 job tmp)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const MODE = process.env.VFP_MODE ?? '1';
-const OUT = process.env.VFP_OUT ?? `/Users/vinlic/.claude/jobs/4a66e745/tmp/vf-slope-${MODE}.png`;
+const OUT = process.env.VFP_OUT ?? `${HOME}/.claude/jobs/4a66e745/tmp/vf-slope-${MODE}.png`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 1200, height: 800 } });

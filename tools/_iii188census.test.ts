@@ -6,14 +6,18 @@
 //   F4/F5 模拟 finalize 帧净化现行逻辑：F4=会清(误杀集)按 type 分桶 / F5=越表但分带·折页解码放行(合法集)。
 // 用法：
 //   cd game && npx vitest run tools/_iii188census.test.ts            # 默认 drunk 链 #105
-//   SW_I188_DIR=/Users/vinlic/GoldenChains/golden-remix-fr SW_I188_TAG=remix npx vitest run tools/_iii188census.test.ts
+//   SW_I188_DIR=~/GoldenChains/golden-remix-fr SW_I188_TAG=remix npx vitest run tools/_iii188census.test.ts
 // 产物：/tmp/iii188-out/census-<tag>.json
 import { it as itRaw } from 'vitest';
 // ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I188_IDX=1 npx vitest run tools/_iii188census.test.ts
-const RUN = process.env.SW_I188_IDX === '1';
-const it = RUN ? itRaw : itRaw.skip;
-
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+
+const RUN = process.env.SW_I188_IDX === '1';
+// ★C档可移植(顺修预存本机红):模块级读 /tmp 产物曾无门——/tmp 灭失即收集期红;
+//   降为存在性门+惰性读(缺件=skip;真跑时缺件仍 fail-loud 于读点)
+const OUT0 = process.env.SW_I188_OUT ?? '/tmp/iii188-out';
+const RUN_OK = RUN && existsSync(`${OUT0}/sheet-dims.json`);
+const it = RUN_OK ? itRaw : itRaw.skip;
 import { TILE_DEFS } from '../src/data/tiles';
 import vanillaJson from '../public/sprites/vanilla.json';
 
@@ -24,9 +28,10 @@ const W = Number(process.env.SW_I188_W ?? 4200);
 const OUT = process.env.SW_I188_OUT ?? '/tmp/iii188-out';
 
 // 真 XNB 表宽高（terraria-assets PNG 实测，CLXI 批产物原样收编）
-const TRUE_DIM: Record<string, [number, number]> = JSON.parse(
-  readFileSync(`${OUT}/sheet-dims.json`, 'utf8'),
-);
+// ★C档可移植:模块级直读降为惰性(RUN 门控外不触盘;真跑缺件仍 fail-loud 于读点)
+let _TRUE_DIM: Record<string, [number, number]> | null = null;
+const TRUE_DIM = (): Record<string, [number, number]> =>
+  (_TRUE_DIM ??= JSON.parse(readFileSync(`${OUT}/sheet-dims.json`, 'utf8')));
 
 // ── finalize 现行逻辑逐字镜像（WorldGen.ts V_SHEET_DIM/RAW_SHEET_DIM/净化支）────────
 const V_SHEET_DIM: Record<number, [number, number]> = (() => {
@@ -97,7 +102,7 @@ it('iii188 census', () => {
       if (a !== 0 || b !== 0) t3.set(ty, (t3.get(ty) ?? 0) + 1);
       continue;
     }
-    const td = TRUE_DIM[String(sh)];
+    const td = TRUE_DIM()[String(sh)];
     if (!td) continue;
     const [tw, th] = td;
     // 归一哨兵后判越表（65535→0）

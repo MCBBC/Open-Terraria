@@ -6,6 +6,7 @@
 //  Tiles_752.png 全仓 38×36,SW drawAdjust case752 依原版 TileDrawing.cs:4577-4581
 //  请求 36×38 源矩形 → fit(sy+sh=38>imgH=36) 恒败 → 回退 18×18 格元(隔离重画 32px 粉),
 //  实机烘焙连格元也未上屏(活体画布精确调色板 0 命中)。
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { startPrivateVite, killTree } from '../tools/probe/lib/vite.mjs';
 import { launchBrowser, openPage } from '../tools/probe/lib/browser.mjs';
@@ -13,7 +14,7 @@ import { bootstrap } from '../tools/probe/lib/boot.mjs';
 import { waitForGame } from '../tools/probe/lib/game.mjs';
 import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld';
+const WLD = needInput(join(HOME, 'Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-09/天真的钴最高点(3).wld'));
 const PORT = Number(process.env.BJ365_PORT ?? 5203);
 const EGGS = [[6280, 673], [783, 819], [2213, 909], [5422, 1102], [4900, 1431], [5139, 1508]];
 

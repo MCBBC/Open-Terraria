@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ284（2026-09-22）：Projectile status 家族（extract-projstatus.mjs = StatusNPC 扁平
 // chance 表 / extract-statusplayer.mjs = StatusPlayer AST 表）era guard 落闸守卫测试。
@@ -26,12 +29,13 @@ const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
 const ROOT_TRIGGER = "const here = dirname(fileURLToPath(import.meta.url));\nconst ROOT = join(here, '..');";
-const ROOT_ABS = `const ROOT = ${JSON.stringify('/Users/vinlic/Project/GLM/SandboxWorld/game')};`;
+// ★C档可移植:mutant 重锚值运行时计算(=本仓 game/ 绝对路径)
+const ROOT_ABS = `const ROOT = ${JSON.stringify(ROOT)};`;
 
 const spawn = (script: string, args: string[] = [], env: Record<string, string> = {}) =>
   spawnSync('node', [script, ...args], { cwd: ROOT, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...env } });
 
-describe('extract-projstatus era guard（BJ284 落闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-projstatus era guard（BJ284 落闸）', () => {
   const script = join(ROOT, 'tools', 'extract-projstatus.mjs');
   const live = join(ROOT, 'src', 'data', 'vanilla-projstatus.json');
   const probe = 'SW_PROJSTATUS_JSON';
@@ -193,7 +197,7 @@ describe('extract-projstatus era guard（BJ284 落闸）', () => {
   });
 });
 
-describe('extract-statusplayer era guard（BJ284 落闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-statusplayer era guard（BJ284 落闸）', () => {
   const script = join(ROOT, 'tools', 'extract-statusplayer.mjs');
   const live = join(ROOT, 'src', 'data', 'vanilla-statusplayer.json');
   const probe = 'SW_STATUSPLAYER_JSON';

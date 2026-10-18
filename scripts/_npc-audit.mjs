@@ -6,6 +6,7 @@
 // 用法: SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs scripts/_npc-audit.mjs --timeout=900000
 //       AUDIT_MODE=full 跑全量 697 型(默认 quick ~60 代表型);AUDIT_IDS=3,6,46 指定子集。
 // 报告落盘 /tmp/npc-audit/report.json(nj可继续分批跑,__seen 集合防重)。
+import { PROJECT_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 
@@ -17,7 +18,7 @@ const REPORT_DIR = '/tmp/npc-audit';
 mkdirSync(REPORT_DIR, { recursive: true });
 const prevPath = `${REPORT_DIR}/report.json`;
 const PREV = existsSync(prevPath) ? JSON.parse(readFileSync(prevPath, 'utf8')) : { batchesDone: [] };
-const TRUTH_RAW = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/tools/generated/npc-draw-truth.json', 'utf8');
+const TRUTH_RAW = readFileSync(join(PROJECT_ROOT, 'tools/generated/npc-draw-truth.json'), 'utf8');
 
 const QUICK_IDS = [
   3, 5, 6, 4,                                  // 僵尸/恶魔眼/EoS/EoC(历史案主)

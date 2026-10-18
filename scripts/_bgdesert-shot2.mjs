@@ -1,9 +1,10 @@
 // 复用已就绪的5203页面状态——但每次探针都重开浏览器,所以这里独立重跑:进世界→传送→全页截图+二分
 // (与 _bgdesert-mounds-probe.mjs 同流程,仅截图方式改全页)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const OUT = process.env.SW_OUT ?? '/Users/vinlic/.claude/jobs/4a66e745/tmp';
+const OUT = process.env.SW_OUT ?? join(HOME, '.claude/jobs/4a66e745/tmp');
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1512, height: 862 } });
 const page = await browser.newPage();
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });

@@ -1,8 +1,9 @@
 // 空间 diff 剖面:remains/slag/ambience 差格落点
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 const root = process.env.SW_GAME_ROOT ?? process.cwd();
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const { TILE_BY_KEY, TILE_DEFS, registerModTile } = await import(root + '/src/data/tiles.ts');
 const { RNG, translateSeed } = await import(root + '/src/core/rng.ts');
 {

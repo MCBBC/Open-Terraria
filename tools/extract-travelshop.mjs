@@ -37,7 +37,7 @@ const GAME_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // 会回退——重产前先恢复提取器词表,见 BJ183 登记债）
 const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
-const chest = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria/Chest.cs`, 'utf8');
+const chest = readFileSync(`${join(GAME_ROOT, '..')}/${TREE}/Terraria/Chest.cs`, 'utf8');   // ★C档可移植
 
 // ★BJ217 词表恢复（BJ183/BJ215 登记债清偿）：条件原文（空白归一）→ 运行期 condOk
 //   token（Game.ts buildTravelStock condOk :38260-38290 词汇=盘上手补权威编码）。

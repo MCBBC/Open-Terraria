@@ -2,11 +2,12 @@
 // PerformanceObserver 收 >50ms 长任务。AB 模式经环境变量切:
 //   VFP_MODE=gen(默认)   —— 新默认引擎(tileframe-codegen)
 //   VFP_MODE=interp       —— localStorage sw_vanilla_framing_codegen=0 回解释器
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const MODE = process.env.VFP_MODE ?? 'gen';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');

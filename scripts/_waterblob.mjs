@@ -1,8 +1,9 @@
 // _waterblob:涟漪活跃期(玩家刚入水)逐帧抓拍 + 位移场采样,定谳"平绿矩形"空洞。
 // 抓 12 帧 ×120ms,每帧记录 blob 区域(屏 930-980/1100-1145, y 605-620)像素 + 位移。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const CX = 37329, CY = 4011;
 
 const b = await puppeteer.launch({

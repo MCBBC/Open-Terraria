@@ -1,5 +1,6 @@
 // 飞龙链节间距实测（2026-09-02 用户报"节间拉开 55-70px"）:生产式生成后缠斗 30s,
 // 逐秒采样每节 wormFollow 中心距(应恒 42±头速瞬态),并在 10s/25s 截图。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
@@ -49,8 +50,8 @@ for (let s = 0; s < 30; s++) {
   });
   const st = await page.evaluate(() => window.__wlinks());
   trace.push(st);
-  if (s === 10) await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/wlinks-10s.png' });
-  if (s === 25) await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/wlinks-25s.png' });
+  if (s === 10) await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/wlinks-10s.png') });
+  if (s === 25) await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/wlinks-25s.png') });
 }
 const maxLink = Math.max(...trace.flatMap((t) => t.links));
 const minLink = Math.min(...trace.flatMap((t) => t.links.filter((x) => x > 0)));

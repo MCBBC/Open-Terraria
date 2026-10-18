@@ -1,9 +1,10 @@
 // _lavaslope-repro8: 在用户世界找"宽岩浆面(≥12 连续表面格)且左端邻坡面砖"的岸缘——
 // 匹配用户截图形态(大池+长坡岸)。输出 top 候选。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

@@ -27,7 +27,7 @@
 //   ④ 判别力自证：tests/extract-bossbags-era-guard.test.ts（变异:摘干跑门=静默写库;
 //     毒化锚=fail-loud）。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 const VER = process.env.SW_ITEM_VER ?? '1457';
 const VER_ALLOWED = new Set(['1457', '1458']);
 if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria/Player.cs`)) {

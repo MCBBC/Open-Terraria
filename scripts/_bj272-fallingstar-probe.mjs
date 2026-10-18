@@ -2,10 +2,11 @@
 // 断言：①warmup=0 自然星下落穿过僵尸 → 掉血/击杀 + 落地 spawnDrop('vi_75_fallen_star')
 //      ②全链 warmup=180 Spawner 转正星后同样伤敌（AI_148 :54059 damage=1000）
 // 运行：SW_ORIGIN=http://localhost:5246 node tools/run-diag.mjs --timeout=300000 scripts/_bj272-fallingstar-probe.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1024, height: 720 } });
 const page = await browser.newPage();
 const errors = [];

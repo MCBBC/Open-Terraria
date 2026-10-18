@@ -1,10 +1,11 @@
 // _lavaslope-repro5: 载入用户世界"饥饿的庄园",全图扫描"液体表面格×邻格坡面砖"岸缘构型,
 // 输出候选清单+逐个截图,核对浸润是否按原版规则呈现。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

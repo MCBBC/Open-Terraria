@@ -4,9 +4,10 @@
 //   放行（★BJ428 断链修复层）→ useCombatWeapon case 'kite' → KiteProj(766) 出膛。
 // 观测面：inv.selected 切到风筝槽 / afkCounterForKiting 自然步进过阈 / 场上 projId=766
 //   活弹 / 截图留档 game/docs/evidence/bj428/。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const KITE_ID = 4367;          // vi_4367_KiteBlue（内置 id==vid）
 const KITE_PROJ = 766;         // KITE_ITEM_PROJ[4367]
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5670';

@@ -2,10 +2,11 @@
 // 用户症状:武器/弹幕/投掷物全隐形(dev+PROD 都坏,fresh 浏览器全绿)→ 唯一
 // dev/PROD 通用且精准命中弹幕+物品图集的机制 = remaster 包启动注入(IndexedDB)。
 // 本探针不动 IndexedDB(直调 runtime.apply),单会话内验证机制。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/rm-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/rm-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

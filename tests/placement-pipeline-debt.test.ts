@@ -1,5 +1,5 @@
 // 放置管线债清偿批（2026-09-04 蓝队）——四项遗留近似 + PlaceIt autoPaint 墙侧钩。
-// 反编译锚（/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/）：
+// 反编译锚（仓库外 Terarria1457/ 树）：
 //   ① PlaceIt_Walls autoPaint 三站点（Player.cs:39938-39942 PlaceThing_Walls /
 //      :40018-40023 Walls_FillEmptySpace / :40136-40141 TryReplacingWalls）——
 //      喷漆器族 2216/3061/5126（:14720-14734 = equipStats.autoPaint）+

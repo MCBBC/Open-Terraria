@@ -12,6 +12,10 @@
 //   进房全量同步 / 研究上报中继（slot 回填+排除发送者）/ 快照应用（雨分支）。
 // 全程 mock 传输层（NetWriter/NetReader 字节流直连 + 假 ws，同 leashed-net-sync 先例）。
 // ============================================================================
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg, NetModule } from '../src/net/protocol';
 import {
@@ -46,7 +50,7 @@ const WORLD0: JourneyWorldState = {
   stopBiomeSpread: false, difficultySlider: 0, windTarget: 0, cloudAlpha: 0,
 };
 
-describe('编解码（journeySync 字节级往返）', () => {
+describe.skipIf(EXT_MISSING)('编解码（journeySync 字节级往返）', () => {
   it('module5 sub0 世界态：帧头 + 逐字段往返', () => {
     const s: JourneyWorldState = {
       freezeTime: true, timeRate: 24, freezeRain: true, freezeWind: false,
@@ -118,7 +122,7 @@ describe('编解码（journeySync 字节级往返）', () => {
   });
 });
 
-describe('IsAvailableForPlayer（CreativePowersHelper :182-197）', () => {
+describe.skipIf(EXT_MISSING)('IsAvailableForPlayer（CreativePowersHelper :182-197）', () => {
   it('LockedForEveryone（0）= 全员拒（含房主——原版 default 分支无 host 豁免）', () => {
     expect(isPowerAvailableFor(PowerPermissionLevel.LockedForEveryone, true)).toBe(false);
     expect(isPowerAvailableFor(PowerPermissionLevel.LockedForEveryone, false)).toBe(false);
@@ -133,7 +137,7 @@ describe('IsAvailableForPlayer（CreativePowersHelper :182-197）', () => {
   });
 });
 
-describe('快照应用（applyJourneyWorldState）', () => {
+describe.skipIf(EXT_MISSING)('快照应用（applyJourneyWorldState）', () => {
   it('幂等覆写 + 雨分支（:1327-1337 slider>0 → StartRain / ==0 → StopRain）', () => {
     const w = new World(64, 32, 42, 'jm-test');
     w.difficulty = 3;
@@ -163,7 +167,7 @@ describe('快照应用（applyJourneyWorldState）', () => {
 // （无 DOM lib），vitest 不跨根跑，Room 类以相对路径导入 TS 源直测）
 // ---------------------------------------------------------------------------
 
-describe('ClientNet 收包分发（module5/6/9 → hooks）', () => {
+describe.skipIf(EXT_MISSING)('ClientNet 收包分发（module5/6/9 → hooks）', () => {
   function mkNet() {
     const got: string[] = [];
     const net = new ClientNet(
@@ -213,7 +217,7 @@ describe('ClientNet 收包分发（module5/6/9 → hooks）', () => {
   });
 });
 
-describe('研究进度上报（CreativeUI.SacrificeItem :308 语义）', () => {
+describe.skipIf(EXT_MISSING)('研究进度上报（CreativeUI.SacrificeItem :308 语义）', () => {
   it('Research.sacrifice 跨线 → newly 集合（_newlyUnlocked :134-141）+ 清除（:104-108）', async () => {
     const { Research } = await import('../src/stats/Research');
     const r = new Research(undefined, { count: 10, need: { '292': 3 }, override: {} });
@@ -261,7 +265,7 @@ function parseFrames(frames: Uint8Array[]): Array<{ msgId: number; payload: NetR
   return out;
 }
 
-describe('Room 旅程力量权威态（msg82 module5/6/9）', () => {
+describe.skipIf(EXT_MISSING)('Room 旅程力量权威态（msg82 module5/6/9）', () => {
   interface JourneyRelayEvent { kind: string; slot?: number; which?: number; state?: unknown }
 
   async function mkRoom() {

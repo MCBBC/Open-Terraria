@@ -1,6 +1,7 @@
 // ★digest 通道稳定性判别探针——装载即冻结+预热+digest(零挖掘),两跑对拍。
 // 【用途】隔离「烘焙产物逐位复现」的环境输入:若零挖掘两跑 digest 不等,差异来自
 //   装载期环境(atlas 晚到/帧计数依赖),与挖掘/池化/carry 无关。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, waitForBridge, waitForGame,
@@ -8,7 +9,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5214';
-const WORLD_JSON = process.env.SW_WORLD_JSON || '/Users/vinlic/Downloads/map-天真的钴最高点 (4).json';
+const WORLD_JSON = process.env.SW_WORLD_JSON || needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json'));
 const OUT = '/tmp/shine-debt';
 const TAG = process.env.SW_TAG || 'stab';
 mkdirSync(OUT, { recursive: true });

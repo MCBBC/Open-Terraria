@@ -1,5 +1,6 @@
 // IIII255 波场位移时序 + 缓冲环剖面（ON 臂）——mark1 为何零位移定谳
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=300000 scripts/_iii255-timeseries.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { launchBrowser, openPage, front } from '../tools/probe/lib/browser.mjs';
 import { cleanStorage, gotoApp, waitForBridge, dismissWelcome } from '../tools/probe/lib/boot.mjs';
@@ -34,7 +35,7 @@ const seedDef = (json) => {
   });
 };
 
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const page = await openPage(browser, { errors: [] });
 page.__probeOrigin = ORIGIN;

@@ -1,8 +1,9 @@
 // EoL xray3: 全局热点排序 —— 主线程自耗时×父链(prof5) + prof8 互证 + drawImage 采样统计 +
 //             worker busy(剔除 idle) + GPU 进程侧 + 每秒曲线(fps/presentBatch 自耗)
 // run: node --max-old-space-size=8192 scripts/_eol-xray3.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 const MAIN_TID = 25363119, MPID = 97833, MAIN = MPID + ':' + MAIN_TID;

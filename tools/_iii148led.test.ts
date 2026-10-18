@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const RUN = process.env.SW_I148 === '1';
-const G2 = process.env.SW_I148_G2 ?? '/Users/vinlic/GoldenChains/golden-winter';
+const G2 = process.env.SW_I148_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-winter`;
 const PRE = process.env.SW_I148_PRE ?? '/tmp/iii139-out/js-prepiles.typ';
 const PREACT = process.env.SW_I148_PREACT ?? '/tmp/iii139-out/js-prepiles.act';
 const OUT = process.env.SW_I148_OUT ?? '/tmp/iii148-out';

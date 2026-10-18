@@ -1,7 +1,8 @@
 // wasmflag xray6: A/B 基线 — 161320(早于 lightwasm?)的 LightWorker blur 面对照 + equipStats 调用方
 // run: node --max-old-space-size=8192 scripts/_wasmflag-xray6-ab-baseline.mjs [baselineTrace]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const BASE = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const BASE = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 
 if (process.argv[2] || true) {
   const t = JSON.parse(fs.readFileSync(BASE, 'utf8'));

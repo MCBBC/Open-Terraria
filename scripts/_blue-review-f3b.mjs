@@ -3,9 +3,10 @@
 //  → :46487-46490 按转换后 type 杀）——A:83+岩浆30+坏基 → 转 84 再杀=恒掉种子 312;
 //  B:84+岩浆10+坏基 → 转 83 再杀=正午无种子;C:好地基（陶罐 78）→ 转 84 不杀不掉。
 // 运行：SW_ORIGIN=http://localhost:52xx node tools/run-diag.mjs scripts/_blue-review-f3b.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP = process.env.SW_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();

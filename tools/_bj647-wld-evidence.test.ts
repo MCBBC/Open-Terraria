@@ -3,12 +3,13 @@
 // 海盗 x∈[62938,62954] y=4476；玩家 tile(3920,273)），画 ASCII 图找椅/床格。
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from '../tests/fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = 'bj641-anniversary-seed.wld';   // ★C档收编:原 ~/Downloads/十周年纪念种子(2).wld(与微信收件副本 md5 全等)
 
-it('BJ647 wld evidence', () => {
-  const buf = readFileSync(WLD);
+it.skipIf(localFixtureMissing(WLD))('BJ647 wld evidence', () => {
+  const buf = readLocalFixture(WLD);
   const wldRaw = parseWld(new Uint8Array(buf));
   const wld = wldRaw.tiles as unknown as { active: Uint8Array; type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array };
   const meta = wldRaw;

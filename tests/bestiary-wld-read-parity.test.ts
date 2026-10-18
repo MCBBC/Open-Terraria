@@ -22,7 +22,10 @@
 //  →「损坏容错」腿红；MUT-2 给 townRooms 段加 try/catch（容错越权放宽）→「townManager
 //  缺失必抛」腿红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { join, dirname } from 'node:path';
 import { exportWld } from '../src/wld/WldExport';
 import { parseWldToSave, combineHalfSlope } from '../src/wld/WldImport';
@@ -67,7 +70,7 @@ function pointersOf(bytes: Uint8Array): number[] {
   return p;
 }
 
-describe('拍板#11A:bestiary 段两读侧行为钉锁（游戏路径 parseWld ≡ 存档域 parseWldToSave）', () => {
+describe.skipIf(EXT_MISSING)('拍板#11A:bestiary 段两读侧行为钉锁（游戏路径 parseWld ≡ 存档域 parseWldToSave）', () => {
   it('段表归属锚:pointers[8]=bestiary 起点（Kills 计数+首键字节面,防 RB15c 错位复辟）', () => {
     const bytes = exportWld(mkWldSave({ k: { Zombie: 3 }, s: ['Slime'], c: ['Guide'] }));
     const p = pointersOf(bytes);

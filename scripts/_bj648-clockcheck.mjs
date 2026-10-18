@@ -1,8 +1,9 @@
 // BJ648 辅助:时钟钉住有效性 + 旗区/露天格 lightAt 对照
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { launchBrowser, openPage, bootstrap, nextFrame } from '../tools/probe/lib/index.mjs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 await bootstrap(page, ORIGIN);

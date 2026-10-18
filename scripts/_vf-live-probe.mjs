@@ -1,16 +1,17 @@
 // 自包含:起独立 vite(5209)→ 载入 FTW → 传送到标注区 → 倾倒运行时 store 类型/half/slope
 // + 运行时 vanillaFrameFor 帧 + 实际烘焙 chunk 像素(逐格 PNG)→ 退出。
 // 输出 /tmp/vf-live.json(数据)+ /tmp/vf-live-cells.png(实际渲染放大图)。
+import { DOWNLOADS, REPO_ROOT, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { spawn, execSync } from 'node:child_process';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const PORT = 5209;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-  cwd: '/Users/vinlic/Project/GLM/SandboxWorld/game',
+  cwd: REPO_ROOT,
   env: { ...process.env, SW_NO_HMR: '1', SW_CACHE: '/tmp/sw-vite-5209' },
   stdio: 'ignore', detached: true,
 });

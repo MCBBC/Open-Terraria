@@ -21,7 +21,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const TOOL = join(ROOT, 'game', 'tools');
+const TOOL = dirname(fileURLToPath(import.meta.url));   // ★C档可移植:自位置推导(原 join(ROOT,'game','tools') 假定仓目录名=game)
 
 // ---- 双版本提取器实例(子进程 --dump:提取器顶层执行读 SW_ITEM_VER,而 vitest 的
 //      模块运行器按路径缓存忽略 query-string,库模式双实例不可靠——子进程各带 env 最稳) ----

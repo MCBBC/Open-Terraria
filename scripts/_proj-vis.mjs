@@ -1,9 +1,10 @@
 const BASE = process.env.TARGET || 'http://localhost:5201';
 // 弹幕可见性诊断:SDMG 连射 + 逐帧扫描弹道带像素;抓 pageerror(冻结 TypeError vs 并行会话)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/projvis-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/projvis-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

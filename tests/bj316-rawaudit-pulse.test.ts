@@ -1,5 +1,5 @@
 // ★BJ316 2026-09-23 开包掉帧双刀结构锁+行为锁
-// 真机 trace 定谳（/Users/vinlic/Downloads/Trace-20260923T222003.json,120→82.5fps）:
+// 真机 trace 定谳（Trace-20260923T222003.json 本机取证件,120→82.5fps）:
 //   刀1 GLWorldCompose.uploadRaw 每帧 2×gl.getError 全管线 sync（关包 0.97ms/帧 →
 //       开包 4.03ms/帧=GPU 争用放大）→ 体检收审计窗（首 3 传+尺寸首见+recreate 重审）。
 //   刀2 UI vinvPulseTick 逐帧 setProperty('--invpulse') → 全槽 ::after opacity calc

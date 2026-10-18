@@ -2,11 +2,12 @@
 // 在用户世界泥穴岩浆湖区域:fullbright 截图 → 对视野内每个"活坡面/半砖×邻液"格,
 // 按 1457 TileDrawing.DrawTile_LiquidBehindTile 原文规则算【期望液体可见区】,
 // 与实际画布像素对勘 → 输出全部"应画未画"(露馅)与"不应画却画"的格。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

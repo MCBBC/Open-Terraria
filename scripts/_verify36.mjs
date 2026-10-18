@@ -1,7 +1,8 @@
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE=readFileSync('/Users/vinlic/Downloads/map-Starter_World (25).json','utf8');
+const SAVE=readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (25).json')),'utf8');
 const browser=await puppeteer.launch({executablePath:CHROME,headless:'new',
   defaultViewport:{width:1280,height:800},protocolTimeout:180000});
 const page=await browser.newPage();

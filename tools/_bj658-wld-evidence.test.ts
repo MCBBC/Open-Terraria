@@ -6,9 +6,10 @@
 // HallowUnsafe1-4；任务原文"墙95"误锚，反编译 WallID.cs:259 =BlueDungeonTileUnsafe）。
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from '../tests/fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 
-const WLD = '/Users/vinlic/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_t8s8tt2g2zq522_3ba6/msg/file/2026-10/十周年纪念种子(2).wld';
+const WLD = 'bj641-anniversary-seed.wld';   // ★C档收编+脱敏:原微信收件档(与 Downloads 副本 md5 全等)→ tests/fixtures/local
 
 // 原版天然实心地形（地表扫描白名单，vanilla id 域；少量误差可接受）
 const NAT_SOLID = new Set([1, 2, 23, 25, 53, 56, 57, 58, 59, 60, 70, 116, 117, 147, 161, 162, 163, 164, 199, 203, 211, 396, 397, 398, 399, 400, 401, 402, 403, 404]);
@@ -23,8 +24,8 @@ function dir8(dx: number, dy: number): string {
   return names[idx];
 }
 
-it('BJ658 wld gel-crystal evidence', () => {
-  const buf = readFileSync(WLD);
+it.skipIf(localFixtureMissing(WLD))('BJ658 wld gel-crystal evidence', () => {
+  const buf = readLocalFixture(WLD);
   const w = parseWld(new Uint8Array(buf));
   const t = w.tiles as unknown as { active: Uint8Array; type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array };
   console.log('meta:', JSON.stringify({

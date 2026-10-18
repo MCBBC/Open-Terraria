@@ -71,7 +71,7 @@ function makeProxy(name: string, arr: Uint16Array | Uint8Array): ProxyConstructo
         const { TILE_DEFS } = await import('../src/data/tiles');
         const fs2 = await import('node:fs');
         const sheet = TILE_DEFS.map((d: { vanilla?: { sheet?: number } }) => (typeof d?.vanilla?.sheet === 'number' ? d.vanilla.sheet : -1));
-        const x86 = new Uint16Array(fs2.readFileSync('/Users/vinlic/GoldenChains/golden-winter/076_Traps.typ').buffer, 0, n);
+        const x86 = new Uint16Array(fs2.readFileSync(`${process.env.HOME ?? ''}/GoldenChains/golden-winter/076_Traps.typ`).buffer, 0, n);
         const mapped = new Uint16Array(n);
         for (let k = 0; k < n; k++) mapped[k] = rawTyp![k] < sheet.length ? Math.max(sheet[rawTyp![k]], 0) : 0;
         const diffs: number[] = [];

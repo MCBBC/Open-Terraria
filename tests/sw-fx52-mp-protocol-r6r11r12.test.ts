@@ -11,7 +11,7 @@
 // 标杆行号全部 1457（Terarria1457）；传输层 mock 同 sw-fx42-mp-faces 先例。
 // ============================================================================
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { NetWriter, NetReader, Msg, NetModule,
   writeChestName, readChestName, readChestRenameTail,
   CHEST_NAME_MAX, CHEST_NAME_CLEAR } from '../src/net/protocol';
@@ -19,6 +19,9 @@ import { AnglerQuestSub } from '../src/net/syncModules';
 import { ClientNet } from '../src/net/ClientNet';
 import { World } from '../src/world/World';
 import { rollAnglerQuest, seededRng, ANGLER_QUEST_ITEMS } from '../src/data/vanillaFishing';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'server'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 /** 假 ws（sw-fx42 同款） */
 function fakeWs() {
@@ -141,7 +144,7 @@ function module15Subs(frames: Uint8Array[]): Array<{ sub: number; value: number 
 // 1. R12 编解码：msg69 ChestName + msg33 改名尾段
 // ============================================================================
 
-describe('SW-FX52-R12 msg69 ChestName 编解码（NetMessage.cs:1119-1126 / MessageBuffer.cs:3053-3074）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX52-R12 msg69 ChestName 编解码（NetMessage.cs:1119-1126 / MessageBuffer.cs:3053-3074）', () => {
   it('字节级往返：{i16 idx, i16 x, i16 y, str name}，帧头 msgId=69；\'\'=清名同样成帧', () => {
     const f = writeChestName(7, 120, 55, '宝箱A');
     expect(f[2]).toBe(69);
@@ -184,7 +187,7 @@ describe('SW-FX52-R12 msg69 ChestName 编解码（NetMessage.cs:1119-1126 / Mess
 // 2. R12 Room 面：改名受理门 + msg69 广播 + 授予名断言
 // ============================================================================
 
-describe('SW-FX52-R12 Room 改名受理（MessageBuffer.cs:1962-1969 等价）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX52-R12 Room 改名受理（MessageBuffer.cs:1962-1969 等价）', () => {
   it('改名广播：施加在用箱 + 广播排除改名者（:1969 TrySendData(69,-1,whoAmI,...)）', async () => {
     const { room, mkClient } = await mkRoom();
     const host = mkClient(0, true);
@@ -269,7 +272,7 @@ describe('SW-FX52-R12 Room 改名受理（MessageBuffer.cs:1962-1969 等价）',
 // 3. R12 客户端镜像：ClientNet 分发 + Game 消费面结构锁
 // ============================================================================
 
-describe('SW-FX52-R12 ClientNet msg69 镜像 + 消费面', () => {
+describe.skipIf(EXT_MISSING)('SW-FX52-R12 ClientNet msg69 镜像 + 消费面', () => {
   it('msg69 → onChestName 钩（MessageBuffer.cs:3053-3074 读面）；越界 idx 编解码层拒收', () => {
     const got: Array<{ idx: number; x: number; y: number; name: string }> = [];
     const net = new ClientNet(
@@ -298,7 +301,7 @@ describe('SW-FX52-R12 ClientNet msg69 镜像 + 消费面', () => {
 // 4. R11 SimHost 黎明拓展位：渔夫任务重掷 + module15 sub0 断言
 // ============================================================================
 
-describe('SW-FX52-R11 SimHost.dawnRolls 渔夫任务（UpdateTime_StartDay Main.cs:66352 → AnglerQuestSwap）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX52-R11 SimHost.dawnRolls 渔夫任务（UpdateTime_StartDay Main.cs:66352 → AnglerQuestSwap）', () => {
   interface SimLike { dawnRolls(): void }
 
   async function mkSimRoom(seed: number, dayCount: number) {
@@ -403,7 +406,7 @@ describe('SW-FX52-R11 SimHost.dawnRolls 渔夫任务（UpdateTime_StartDay Main.
 // 5. R6 免接线结构锁（8quater.3-B 判例维持）
 // ============================================================================
 
-describe('SW-FX52-R6 超级矿车 msg4 位免接线（NetMessage.cs:185-186 / MessageBuffer.cs:346-347）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX52-R6 超级矿车 msg4 位免接线（NetMessage.cs:185-186 / MessageBuffer.cs:346-347）', () => {
   it('线格式零位面：protocol.ts 不得出现 superCart 位（跨端消费面=零,死码位禁入）', () => {
     const src = readFileSync(new URL('../src/net/protocol.ts', import.meta.url), 'utf8');
     expect(src.match(/superCart/i)).toBeNull();

@@ -5,7 +5,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 
 it('iii201 slot58 diff', () => {
   if (process.env.SW_I201_D105 !== '1') return;
-  const G = '/Users/vinlic/GoldenChains/golden-waterpark/105_Final_Cleanup';
+  const G = `${process.env.HOME ?? ''}/GoldenChains/golden-waterpark/105_Final_Cleanup`;
   const JSD = '/tmp/iii201-out/js-slot58b';
   const W = 4200, H = 1200, N = W * H;
   const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

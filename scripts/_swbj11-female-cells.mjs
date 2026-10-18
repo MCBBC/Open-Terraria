@@ -1,8 +1,9 @@
+import { REPO_ROOT } from './_pathlib.mjs';
 import { PNG } from 'pngjs';
 import { readFileSync } from 'node:fs';
 function cellBounds(file, cx, cy) {
   let png;
-  try { png = PNG.sync.read(readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/game/public/sprites/vanilla/${file}`)); }
+  try { png = PNG.sync.read(readFileSync(`${REPO_ROOT}/public/sprites/vanilla/${file}`)); }
   catch { return `${file}: MISSING`; }
   let minX = 99, maxX = -1, minY = 99, maxY = -1;
   for (let y = cy * 56; y < Math.min((cy + 1) * 56, png.height); y++) {

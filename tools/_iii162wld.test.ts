@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 
 it('dump iamerror chests', () => {
-  const buf = readFileSync('/Users/vinlic/GoldenChains/i106/x86-iamerror/w.wld');
+  const buf = readFileSync(`${process.env.HOME ?? ''}/GoldenChains/i106/x86-iamerror/w.wld`);
   const w = parseWld(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
   for (const c of w.chests) {
     // 房1 树 i=406 (箱锚 x≈430-436,y≈286-292) / 房2 树 i=1518 (y≈315-322)

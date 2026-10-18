@@ -1,10 +1,11 @@
 // 官方素材可疑帧格放大取证:把标注格所用源矩形从官方 Tiles_N.png 裁出,
 // 以 12× 放大铺到灰底上拼图存 PNG,肉眼核对缺口形态。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
 const SAMPLES = [
   { x: 3969, y: 468, k: 'sand', sheet: 53 },
   { x: 3970, y: 469, k: 'clay', sheet: 40 },
@@ -13,7 +14,7 @@ const SAMPLES = [
   { x: 3975, y: 470, k: 'stone', sheet: 1 },
   { x: 4003, y: 465, k: 'ore_copper', sheet: 7 },
 ];
-const OUT = '/Users/vinlic/.claude/jobs/4a66e745/tmp/art-cells.png';
+const OUT = join(HOME, '.claude/jobs/4a66e745/tmp/art-cells.png');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -81,6 +82,6 @@ const shot = await p.evaluate(async (samples) => {
   fc.drawImage(cv, 0, 0);
   return { data: fontLayer.toDataURL('image/png'), labels };
 }, SAMPLES);
-fs.writeFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/art-cells.b64', shot.data.split(',')[1]);
+fs.writeFileSync(join(HOME, '.claude/jobs/4a66e745/tmp/art-cells.b64'), shot.data.split(',')[1]);
 console.log(JSON.stringify({ labels: shot.labels }));
 await b.close();

@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ261（2026-09-22）：extract-npcdrops.mjs 1457 重锚 + era guard 落闸守卫测试。
 //
@@ -29,6 +32,11 @@ import { tmpdir } from 'node:os';
 //   干跑门/M2 毒化锚/M3 摘 fresh-only 轴=G-1 bossbags 删 spawn 恒绿同族复现）。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-npcdrops.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE_DROPS = join(process.cwd(), 'src', 'data', 'vanilla-npcdrops.json');
 const LIVE_VALUE = join(process.cwd(), 'src', 'data', 'vanilla-npcvalue.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
@@ -36,7 +44,7 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
-describe('extract-npcdrops era guard（BJ261 1457 重锚 + 输出通道三分离）', () => {
+describe.skipIf(EXT_MISSING)('extract-npcdrops era guard（BJ261 1457 重锚 + 输出通道三分离）', () => {
   it('行为面:缺省干跑对拍零写盘（exit 0+双向零差+两活库字节零改动）', () => {
     const beforeD = md5(LIVE_DROPS);
     const beforeV = md5(LIVE_VALUE);
@@ -196,7 +204,7 @@ describe('extract-npcdrops era guard（BJ261 1457 重锚 + 输出通道三分离
     const beforeD = md5(LIVE_DROPS);
     const beforeV = md5(LIVE_VALUE);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TD = '/vanilla-npcdrops.json` : null);';
       const TV = '/vanilla-npcvalue.json` : null);';
       expect(src).toContain(TD);
@@ -223,7 +231,7 @@ describe('extract-npcdrops era guard（BJ261 1457 重锚 + 输出通道三分离
     const dir = mkdtempSync(join(TMP, 'npcdrops-guard-'));
     const beforeD = md5(LIVE_DROPS);
     try {
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = "'⑫ 179/83 6159 1/25', 'RegisterToMultipleNPCs(ItemDropRule.Common(6159, 25), 179, 83)'";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-npcdrops-mutant-anchor.mjs');
@@ -255,7 +263,7 @@ describe('extract-npcdrops era guard（BJ261 1457 重锚 + 输出通道三分离
       const real = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
       expect(real.status).toBe(1);
       // 变异体:fresh-only 轴摘除 → exit 0（恒绿复现）
-      const src = readFileSync(SCRIPT, 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
       const TRIGGER = 'if (liveV[k] === undefined) wash.valueFresh.push(`${k}:${v}`);';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-npcdrops-mutant-freshonly.mjs');

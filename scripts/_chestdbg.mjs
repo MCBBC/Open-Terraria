@@ -1,7 +1,8 @@
 // 宝箱贴图诊断：载入地图 → 找一个宝箱 → dump tile 数据 + 渲染帧参数
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const json = fs.readFileSync('/Users/vinlic/Downloads/map-荒唐的墓穴丛林.json', 'utf8');
+const json = fs.readFileSync(needInput(join(DOWNLOADS, 'map-荒唐的墓穴丛林.json')), 'utf8');
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));

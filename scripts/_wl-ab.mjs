@@ -1,15 +1,16 @@
 // worldLayer 夜景重写后 A/B 量化 v2:采样窗锚定真实地面(扫描实心格)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 
-const OUT = process.env.OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp/wl-ab3';
+const OUT = process.env.OUT || join(HOME, '.claude/jobs/8405c930/tmp/wl-ab3');
 fs.mkdirSync(OUT, { recursive: true });
 const B = process.env.T || 'http://localhost:4173';
 
 async function shot(mode, tod, tag) {
   const browser = await puppeteer.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: 'new', userDataDir: `/Users/vinlic/.claude/jobs/8405c930/tmp/wlab3-${mode}`,
+    headless: 'new', userDataDir: `${HOME}/.claude/jobs/8405c930/tmp/wlab3-${mode}`,
     args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
   });
   const page = await browser.newPage();

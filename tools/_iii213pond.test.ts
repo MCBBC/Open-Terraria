@@ -5,7 +5,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 
 const RUN = process.env.SW_I213 === '1';
 const JS_DIR = process.env.SW_I213_JS ?? '/tmp/iii209-out/pipeslot-98';
-const GOLD = process.env.SW_I213_GOLD ?? '/Users/vinlic/GoldenChains/golden-remix/dumps/098_Settle_Liquids_Again';
+const GOLD = process.env.SW_I213_GOLD ?? `${process.env.HOME ?? ''}/GoldenChains/golden-remix/dumps/098_Settle_Liquids_Again`;
 const W = 4200, H = 1200;
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

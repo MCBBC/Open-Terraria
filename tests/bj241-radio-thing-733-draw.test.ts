@@ -24,7 +24,7 @@
 //   M2  摘重建支折半                       → T3 红（vframeAt 收到裸 sy=54 → 表 OOB）
 //   M3  折半方向反（fy≥54 才 +54）          → T1/T2/T4 红（左右半互换）
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +38,9 @@ import { Wiring } from '../src/world/Wiring';
 import { switchMonolith } from '../src/world/wiring/devices';
 import type { SpriteAtlas, DrawRect } from '../src/assets/SpriteAtlas';
 import vanillaJson from '../public/sprites/vanilla.json';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RADIO = TILE_BY_KEY['v_733_radio_thing']!;
@@ -100,7 +103,7 @@ function drawAll(st: TileStore, atlas: SpriteAtlas, ctx: CanvasRenderingContext2
 }
 
 // ============================================================ 绘制权威面（M1/M3）
-describe('★BJ241 drawAdjust case 733：左右半 sheet 切换（TileDrawing.cs:6081-6088）', () => {
+describe.skipIf(EXT_MISSING)('★BJ241 drawAdjust case 733：左右半 sheet 切换（TileDrawing.cs:6081-6088）', () => {
   const st = new TileStore(40, 80);
 
   it('T1 off 态（frameY<54）→ addFrX+=54 取右半暗屏：sx∈{54,72,90}/sy 折回行带', () => {
@@ -148,7 +151,7 @@ describe('★BJ241 drawAdjust case 733：左右半 sheet 切换（TileDrawing.cs
 });
 
 // ============================================================ 右键合成面（用户实报场景）
-describe('★BJ241 右键→翻态→绘制（SwitchMonolith ±54 + 左右半映射复合）', () => {
+describe.skipIf(EXT_MISSING)('★BJ241 右键→翻态→绘制（SwitchMonolith ±54 + 左右半映射复合）', () => {
   it('T5 place off → switchMonolith → 绘制为左半亮屏（旧缺陷此场景平铺 (0,0)）', () => {
     const world = new World(60, 60, 7, 'open');
     const w = new Wiring(world.store);
@@ -176,7 +179,7 @@ describe('★BJ241 右键→翻态→绘制（SwitchMonolith ±54 + 左右半映
 });
 
 // ============================================================ 数据面结构锁（防表漂移/误补行）
-describe('★BJ241 数据面：Tiles_733 容量与源图字节锁定', () => {
+describe.skipIf(EXT_MISSING)('★BJ241 数据面：Tiles_733 容量与源图字节锁定', () => {
   it('T6 vanilla.json 733 条目 rows=3/cols=6/grid16/stride18/frameSize[3,3]', () => {
     const t = (vanillaJson as unknown as Record<string, Record<string, {
       rows: number; cols: number; grid: number[]; stride: number[]; frameSize: number[][];

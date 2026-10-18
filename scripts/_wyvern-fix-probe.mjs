@@ -1,5 +1,6 @@
 // 飞龙链段修复实机验证（2026-09-02）：直生 87 头 + 生产同款 14 段链，
 // 采样各段 vanillaId/间距/visAngle，并在飞行稳定后截图。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MACOS/Google Chrome'.replace('MACOS', 'MacOS');
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
@@ -51,6 +52,6 @@ const state = await page.evaluate(() => {
   return { n: chain.length, chain, hp: g.entities.enemies.filter((e) => e.vanillaId === 87).map((e) => e.hp)[0] };
 });
 console.log('链态:', JSON.stringify(state));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/wyvern-after.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/wyvern-after.png') });
 console.log('errors:', JSON.stringify(errors.slice(0, 5)));
 await browser.close();

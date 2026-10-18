@@ -21,11 +21,14 @@
 //  伴生债：864 原版辉光/残影面（Main.cs:30883 残影档/:31218 残影色/:31395 四份旋转辉光）
 //  本仓未实现 = 登记债（缺辉光 ≠ 白闪;独立刀）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setProjSpriteOverride, projFrameImg } from '../src/entities/Arrow';
 import { MinionProj } from '../src/entities/MinionProj';
 import { ITEM_GLOWMASK } from '../src/data/vanillaItemGlow';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
 
@@ -63,7 +66,7 @@ function csBlock(src: string, startMarker: string, endMarker: RegExp): string {
   return m && m.index != null ? rest.slice(0, m.index) : rest;
 }
 
-describe('BJ632-①:glowMask 候选销案（白模逐帧闪不成立于物品面）', () => {
+describe.skipIf(EXT_MISSING)('BJ632-①:glowMask 候选销案（白模逐帧闪不成立于物品面）', () => {
   it('原版 Item.cs SetDefaults case 4758 无 glowMask 赋值（源码扫描）', () => {
     const src = readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
     const block = csBlock(src, '\t\tcase 4758:', /\t\tcase /);
@@ -76,7 +79,7 @@ describe('BJ632-①:glowMask 候选销案（白模逐帧闪不成立于物品面
   });
 });
 
-describe('BJ632-②:物品图标面销案（单帧/不在 itemAnimations 注册表）', () => {
+describe.skipIf(EXT_MISSING)('BJ632-②:物品图标面销案（单帧/不在 itemAnimations 注册表）', () => {
   it('原版 Item_4758.png = 46×46 单帧（贴图头亲读）', () => {
     const png = readFileSync(join(GAME, '..', 'terraria-assets', 'Images', 'Item_4758.png'));
     // PNG IHDR: 宽高 @16..24（大端）
@@ -102,7 +105,7 @@ describe('BJ632-②:物品图标面销案（单帧/不在 itemAnimations 注册�
   });
 });
 
-describe('BJ632-③:真凶锁——召唤物主精灵恒帧 0（白帧只准进辉光层）', () => {
+describe.skipIf(EXT_MISSING)('BJ632-③:真凶锁——召唤物主精灵恒帧 0（白帧只准进辉光层）', () => {
   it('原版贴图 Projectile_864.png = 18×64（2 帧×32）+ Main.cs projFrames[864]=2', () => {
     const png = readFileSync(join(GAME, '..', 'terraria-assets', 'Images', 'Projectile_864.png'));
     expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([18, 64]);

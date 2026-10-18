@@ -4,12 +4,13 @@
 // compositeLight 乘光=白字灭黑框存;迁层后名条合成后直绘=框字同现。
 // 输出:/tmp/bj648-morning-label.png(全帧) + /tmp/bj648-morning-label-crop.png(名条 3× 放大)。
 // 运行:SW_ORIGIN=http://localhost:5202 node tools/run-diag.mjs --timeout=300000 scripts/_bj648-banner-label-morning.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { launchBrowser, openPage, bootstrap, waitForGame, ledger, nextFrame, freezeClock, clockSet } from '../tools/probe/lib/index.mjs';
 import { saveCanvasShot } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const WLD = '/Users/vinlic/Downloads/十周年纪念种子(2).wld';
+const WLD = needInput(join(DOWNLOADS, '十周年纪念种子(2).wld'));
 const L = ledger();
 
 const browser = await launchBrowser({});

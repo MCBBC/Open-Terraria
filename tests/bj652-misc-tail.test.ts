@@ -15,6 +15,8 @@
 //       （BJ517⑥/BJ592 两处合法 newGore 调用点入 universe,金标重冻捕获）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
@@ -65,7 +67,7 @@ function frameAt(types: Array<[number, number, number]>, cx: number, cy: number)
 
 // ═══════════ 件1:449/450/451 彩带族 rope 旗（Main.cs:9458-9460） ═══════════
 
-describe('BJ652 件1:彩带 449/450/451 def.rope 补装（攀爬/绳臂消费面）', () => {
+describe.skipIf(EXT_MISSING)('BJ652 件1:彩带 449/450/451 def.rope 补装（攀爬/绳臂消费面）', () => {
   it('1a 数据面:TILE_DEFS[v_449/450/451].rope=true（drop/非实心面不动）', () => {
     for (const key of ['v_449_blue_streamer', 'v_450_green_streamer', 'v_451_pink_streamer']) {
       const id = TILE_BY_KEY[key];
@@ -95,7 +97,7 @@ describe('BJ652 件1:彩带 449/450/451 def.rope 补装（攀爬/绳臂消费面
 
 // ═══════════ 件2:tileRope 九件全表 + IsRope 重写（域错+语义错双定谳） ═══════════
 
-describe('BJ652 件2:VanillaFraming tileRope 外员摘除 + isRopeAt IsRope 1:1', () => {
+describe.skipIf(EXT_MISSING)('BJ652 件2:VanillaFraming tileRope 外员摘除 + isRopeAt IsRope 1:1', () => {
   it('2a VANILLA_TILE_ROPE=九件全表逐值全等 Main.cs:9452-9460（外员 42/223/314/345 摘除）', () => {
     expect([...VANILLA_TILE_ROPE].sort((a, b) => a - b)).toEqual([213, 214, 353, 365, 366, 449, 450, 451, 504]);
     for (const w of [42, 223, 314, 345]) expect(VANILLA_TILE_ROPE.has(w), `外员 ${w} 摘除`).toBe(false);
@@ -174,7 +176,7 @@ describe('BJ652 件2:VanillaFraming tileRope 外员摘除 + isRopeAt IsRope 1:1'
 
 // ═══════════ 件3:wet 灭火门（ItemCheck_CheckCanUse_Inner Player.cs:52751） ═══════════
 
-describe('BJ652 件3:wet 禁射四弹型（85/15/34/1122——湿身灭火,岩浆豁免）', () => {
+describe.skipIf(EXT_MISSING)('BJ652 件3:wet 禁射四弹型（85/15/34/1122——湿身灭火,岩浆豁免）', () => {
   it('3a 数据面四件定谳:shoot 值 + 原版出处（506/1910 喷火器族/112 火花之花/218 火焰鞭/6173 电弧涌动）', () => {
     expect(itemCombat(506)?.shoot).toBe(85);   // Item.cs case 506 :7400 shoot=85
     expect(itemCombat(1910)?.shoot).toBe(85);  // case 1910 :20730（Elf Melter）
@@ -241,7 +243,7 @@ describe('BJ652 件3:wet 禁射四弹型（85/15/34/1122——湿身灭火,岩�
 
 // ═══════════ 件4:PlayHurtSound mount/狼人支（Player.cs:38946-38982） ═══════════
 
-describe('BJ652 件4:hurtVoicePlan mount/狼人支（BJ598 B3 待办销案）', () => {
+describe.skipIf(EXT_MISSING)('BJ652 件4:hurtVoicePlan mount/狼人支（BJ598 B3 待办销案）', () => {
   it('4a 坐骑五档音:52 狼骑(3,6)/54 迅猛龙(3,47)/55 鼠(4,4)/56 蝙蝠(4,4)/61 仙灵(3,5)', () => {
     expect(hurtVoicePlan({ mountType: 52 })).toMatchObject({ files: ['NPC_Hit_6'], source: 'mount' });
     expect(hurtVoicePlan({ mountType: 54 })).toMatchObject({ files: ['NPC_Hit_47'], source: 'mount' });
@@ -288,7 +290,7 @@ describe('BJ652 件4:hurtVoicePlan mount/狼人支（BJ598 B3 待办销案）', 
 
 // ═══════════ 件5:两验证定谳证据（非落刀件——重锚/重冻依据在档） ═══════════
 
-describe('BJ652 件5:z1-A7 重锚依据 + bj378 三红重冻依据', () => {
+describe.skipIf(EXT_MISSING)('BJ652 件5:z1-A7 重锚依据 + bj378 三红重冻依据', () => {
   it('5a z1-A7 重锚定谳:643 volley=真 644 爆裂弹实体×3（BJ639 批1②）,t=30 引爆面在位', () => {
     // 重锚根因：643 volley 已从「落点即时 AoE」重建为真 644 爆裂弹实体
     // （RainbowCrystalBurst 14×14 → t=30 引爆/t≥60 二段）——旧期望「单拍 fixedUpdate
@@ -316,8 +318,9 @@ describe('BJ652 件5:z1-A7 重锚依据 + bj378 三红重冻依据', () => {
 import { withMutation } from './mutation-guard';
 import { spawnSync } from 'node:child_process';
 
+
 // 内层全文件重跑经 SW_BJ652_MUT=1 跳过本 describe（防嵌套递归,BJ606 同法）
-describe.skipIf(process.env.SW_BJ652_MUT === '1')('BJ652 变异:逐刀恰红（守卫逐字节还原对拍由守卫 finally 内建）', () => {
+describe.skipIf(EXT_MISSING || process.env.SW_BJ652_MUT === '1')('BJ652 变异:逐刀恰红（守卫逐字节还原对拍由守卫 finally 内建）', () => {
   const spawnVitest = (): ReturnType<typeof spawnSync> => spawnSync(
     'npx', ['vitest', 'run', 'tests/bj652-misc-tail.test.ts', '--no-file-parallelism'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 420_000,

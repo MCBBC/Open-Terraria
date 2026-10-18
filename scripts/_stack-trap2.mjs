@@ -1,7 +1,8 @@
 // 全量栈版:不过滤,收全部写入者的函数行+相对偏移
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (23).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (23).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto('http://localhost:5201',{waitUntil:'domcontentloaded'});

@@ -1,9 +1,10 @@
 // 战斗态 IOSurface 复测(2026-08-19 TintAtlas 落地后):刷染色史莱姆群,
 // 量 tintAtlas 页数/条目 vs 旧 tintCache(上限 1024 张 canvas)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/combat-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/combat-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();

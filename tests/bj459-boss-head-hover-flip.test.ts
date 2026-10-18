@@ -17,15 +17,18 @@
 //   内层 scale(-1,1)=XNA 顶点序 flip→scale→rotate→translate 同构，剪影缓存键
 //   idx+img 不含 flip 维=零缓存冲突）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BOSS_HEAD_INDEX, bossHeadSpriteEffects, bossHeadHoverHit } from '../src/data/vanillaNpcs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const npcSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
-const npcidSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8');
+const npcSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npcidSrc = existsSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** PNG IHDR 尺寸（字节 16-24 大端宽高；bj458 同款零依赖直读） */
 function pngSize(rel: string): { w: number; h: number } {
@@ -41,7 +44,7 @@ function getBossHeadSpriteEffectsBody(): string {
   return body;
 }
 
-describe('BJ459 ①原版锚：GetBossHeadSpriteEffects 全族唯一例=491（NPC.cs:7661 反编译直读）', () => {
+describe.skipIf(EXT_MISSING)('BJ459 ①原版锚：GetBossHeadSpriteEffects 全族唯一例=491（NPC.cs:7661 反编译直读）', () => {
   it('函数体含且仅含 num==491 && spriteDirection==1 → FlipHorizontally 一例', () => {
     const body = getBossHeadSpriteEffectsBody();
     expect(body).toContain('SpriteEffects result = SpriteEffects.None;');
@@ -76,7 +79,7 @@ describe('BJ459 ①原版锚：GetBossHeadSpriteEffects 全族唯一例=491（NP
   });
 });
 
-describe('BJ459 ②悬停命中行为：bossHeadHoverHit（491/四柱/EoC 各一,真尺×headScale）', () => {
+describe.skipIf(EXT_MISSING)('BJ459 ②悬停命中行为：bossHeadHoverHit（491/四柱/EoC 各一,真尺×headScale）', () => {
   // 真尺（IHDR 直读）：荷兰人 26=30×28 / 四柱 27=26×30 / EoC 0=26×28
   const cases: Array<[string, number, number, number]> = [
     ['491 荷兰人(idx26)', 30, 28, 26],
@@ -120,7 +123,7 @@ describe('BJ459 ②悬停命中行为：bossHeadHoverHit（491/四柱/EoC 各一
   });
 });
 
-describe('BJ459 ③翻转位：bossHeadSpriteEffects（491&&sd==1 唯一翻,余恒 None）', () => {
+describe.skipIf(EXT_MISSING)('BJ459 ③翻转位：bossHeadSpriteEffects（491&&sd==1 唯一翻,余恒 None）', () => {
   it('491：spriteDirection==1 → 翻;-1/0 → 不翻', () => {
     expect(bossHeadSpriteEffects(491, 1)).toBe(true);
     expect(bossHeadSpriteEffects(491, -1)).toBe(false);
@@ -159,7 +162,7 @@ describe('BJ459 ③翻转位：bossHeadSpriteEffects（491&&sd==1 唯一翻,余�
   });
 });
 
-describe('BJ459 ④与 BJ458 描边/缓存零冲突', () => {
+describe.skipIf(EXT_MISSING)('BJ459 ④与 BJ458 描边/缓存零冲突', () => {
   it('剪影缓存键=idx+img 身份,不含 flip 维（翻转经 ctx 变换施加,不改烘焙面）', () => {
     expect(rendererSrc).toMatch(
       /bossHeadSilCache = new Map<number, \{ img: CanvasImageSource; b: HTMLCanvasElement; w: HTMLCanvasElement \}>/,

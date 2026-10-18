@@ -4,7 +4,7 @@
 //  ③ 严格链(原版语义)保持互斥边帧——统一视图是用户定案偏离域,不得污染严格链。
 // 锚点:WorldGen.cs:82796-82809(排除表派发)/TileID.cs:193/291/297。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import {
   vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables,
@@ -15,6 +15,9 @@ import { TILE_DEFS } from '../src/data/tiles';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 // 避免与 golden 测试文件互相依赖 node:url 差异,直接 import
 import { fileURLToPath } from 'node:url';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // vanilla solid/solidTop(与 golden 同源提取,主路径 ensure 一次)
 let _solidInit = false;
@@ -54,7 +57,7 @@ function centerFrame(probe: number, base: number, unified: boolean): { fx: numbe
     : vanillaFrameFor(st, 12, 12, st, 0, 200);
 }
 
-describe('冰雪互斥接缝对(vanilla 排除表 → 统一视图闭合)', () => {
+describe.skipIf(EXT_MISSING)('冰雪互斥接缝对(vanilla 排除表 → 统一视图闭合)', () => {
   it('判定表:官方排除对双向成立,非排除对一律 false', () => {
     expect(isVanillaSeamPair(147, 161)).toBe(true);   // 雪↔冰
     expect(isVanillaSeamPair(161, 147)).toBe(true);   // 冰↔雪(对称)

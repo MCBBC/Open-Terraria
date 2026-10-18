@@ -1,6 +1,6 @@
 // ============================================================================
 // GolfState.cs + GolfBallTrackRecord.cs 1:1（Terraria.GameContent.Golf/）
-// 行号注释对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/
+// 行号注释对准 仓库外基准树(game/ 的兄弟目录)Terarria1456/
 //   GolfBallTrackRecord.RecordHit        :10-13
 //   GolfBallTrackRecord.GetAccumulatedScore :15-21  ⌊总位移tile⌋ ÷ (击点段数+2)
 //   GolfBallTrackRecord.GetTrackInfo     :23-34

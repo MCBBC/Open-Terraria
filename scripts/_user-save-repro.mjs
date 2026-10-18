@@ -1,8 +1,9 @@
 // 用户存档重放探针:__swLoadJson 载入真实存档 → 站位标记点 → 右下投掷 → 逐帧记录
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SAVE=readFileSync(process.env.SAVE??'/Users/vinlic/Downloads/map-Starter_World (25).json','utf8');
+const SAVE=readFileSync(process.env.SAVE??needInput(join(DOWNLOADS, 'map-Starter_World (25).json')),'utf8');
 const browser=await puppeteer.launch({executablePath:CHROME,headless:'new',defaultViewport:{width:1280,height:800}});
 const page=await browser.newPage();
 page.on('pageerror',e=>console.log('[pageerror]',e.message.slice(0,160)));

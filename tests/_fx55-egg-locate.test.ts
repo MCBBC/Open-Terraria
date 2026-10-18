@@ -5,13 +5,14 @@
 // 不改任何源码/存档。
 import { describe, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 import { parseWldToSave } from '../src/wld/WldImport';
 import {
   TILE_BY_KEY, TILE_DEFS, TILE_STABLE_OF_INTERNAL,
 } from '../src/data/tiles';
 
-const WLD_PATH = '/Users/vinlic/Downloads/欺诈的灵魂祸根.wld';
+const WLD_PATH = 'fx55-soul-hex.wld';   // ★C档收编:原 ~/Downloads/欺诈的灵魂祸根.wld
 const OUT_PATH = '/tmp/fx55-egg-locate.json';
 
 /** 原版 tileSolid 近似：本仓 TILE_DEFS[].solid 对齐原版 Main.tileSolid（平台 19 为
@@ -22,9 +23,9 @@ for (let id = 0; id < TILE_DEFS.length; id++) {
   if (sh !== undefined && TILE_DEFS[id].solid) SOLID_SHEET.add(sh);
 }
 
-describe('FX55: 用户世界档 752 蛋扫描', () => {
+describe.skipIf(localFixtureMissing(WLD_PATH))('FX55: 用户世界档 752 蛋扫描', () => {
   it('scan', () => {
-    const buf = new Uint8Array(readFileSync(WLD_PATH));
+    const buf = readLocalFixture(WLD_PATH);
     const wld = parseWld(buf);
     const { save, report } = parseWldToSave(buf);
 

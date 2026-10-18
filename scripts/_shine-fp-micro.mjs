@@ -1,5 +1,6 @@
 // ★shineFpCache 微基准:同 pair 重复指纹调用 = 缓存命中(跳 mix2)的量化证明
 // run: SW_ORIGIN=http://localhost:5209 node tools/run-diag.mjs scripts/_shine-fp-micro.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import {
   launchBrowser, openPage, bootstrap, waitForBridge, waitForGame,
@@ -7,7 +8,7 @@ import {
 } from '../tools/probe/lib/index.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5209';
-const worldText = readFileSync('/Users/vinlic/Downloads/map-天真的钴最高点 (4).json', 'utf8');
+const worldText = readFileSync(needInput(join(DOWNLOADS, 'map-天真的钴最高点 (4).json')), 'utf8');
 const browser = await launchBrowser({ headed: true, viewport: { width: 1280, height: 800, deviceScaleFactor: 2 } });
 try {
   const page = await openPage(browser, { errors: [], maxErrors: 20 });

@@ -1,15 +1,16 @@
 // 自包含:起独立 vite(5209)→ 载入 FTW → 对比草/泥边界 6 格 链帧 vs 旧帧 → 截图 → 收服
+import { DOWNLOADS, REPO_ROOT, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { spawn, execSync } from 'node:child_process';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const PORT = 5209;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 起独立实例(独立缓存目录;detached 防超时连坐)
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-  cwd: '/Users/vinlic/Project/GLM/SandboxWorld/game',
+  cwd: REPO_ROOT,
   env: { ...process.env, SW_NO_HMR: '1', SW_CACHE: '/tmp/sw-vite-5209' },
   stdio: 'ignore', detached: true,
 });

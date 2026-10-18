@@ -7,9 +7,10 @@
 //   ty=267: 2355/2356=藤蔓+液255(墙2) 2357=草坡4
 //   ty=268: 2356=草半砖(液0,墙2) 2357=藤蔓(液0)
 // 上方(263-):大面积水(空气+液255)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

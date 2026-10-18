@@ -11,11 +11,14 @@
 // 判别域=纯逻辑（表/协议/通道）+ 接线源锚（R17 先例:readFileSync 源锚锁接线面）;
 // canvas 烘焙面由浏览器探针覆盖（docs/evidence/proj-dye-q3/）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { PROJ_PET, PROJ_LIGHT_PET, dyeChannelsOf, getProjDesiredDyeVid,
   CRITTER_SHAMPOO, type DyeInvSource } from '../src/data/projDye';
 import { ITEM_DEFS } from '../src/data/items';
 import { vanillaStatOfVid } from '../src/data/vanillaItemStats';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { writePlayerItems, readPlayerItems, ItemContainer, INV_SYNC_SIZES, NetReader }
   from '../src/net/protocol';
 
@@ -30,7 +33,7 @@ function iidOfVid(vid: number): number {
 const readJson = (u: URL): Record<string, unknown> => JSON.parse(readFileSync(u, 'utf8')) as Record<string, unknown>;
 
 // ===================== 件① 4762 CritterShampoo 注册面 =====================
-describe('件① 4762 CritterShampoo 注册面（先定谳:全在=零动作,BJ413 判例）', () => {
+describe.skipIf(EXT_MISSING)('件① 4762 CritterShampoo 注册面（先定谳:全在=零动作,BJ413 判例）', () => {
   it('ITEM_DEFS 自动注册循环覆盖 4762（vid 回填=方案A ⑥;projPet cMinion 唯一源配饰）', () => {
     const iid = iidOfVid(CRITTER_SHAMPOO);
     expect(iid, 'ITEM_DEFS vid 4762 缺库').toBeGreaterThan(0);
@@ -84,7 +87,7 @@ describe('件① 4762 CritterShampoo 注册面（先定谳:全在=零动作,BJ41
 });
 
 // ===================== 件② MP miscDyes 段（协议容器扩展） =====================
-describe('件② MP miscDyes 段（ItemContainer.MiscDyes=3）', () => {
+describe.skipIf(EXT_MISSING)('件② MP miscDyes 段（ItemContainer.MiscDyes=3）', () => {
   it('容器表/容量表（Q3 扩展面）', () => {
     expect(ItemContainer.MiscDyes).toBe(3);
     expect(INV_SYNC_SIZES).toEqual([58, 20, 10, 5]);
@@ -145,7 +148,7 @@ describe('件② MP miscDyes 段（ItemContainer.MiscDyes=3）', () => {
 });
 
 // ===================== 件③ PetFollower 三专绘支接染 =====================
-describe('件③ PetFollower 三专绘支接染（1090/764/legacyDraw）', () => {
+describe.skipIf(EXT_MISSING)('件③ PetFollower 三专绘支接染（1090/764/legacyDraw）', () => {
   const src = readFileSync(new URL('../src/entities/PetFollower.ts', import.meta.url), 'utf8');
   it('通道判定：1090/764 ∈ projPet ∧ dmg0 ∧ 非光宠 → cPet（GetProjectileDesiredShader 次序③）', () => {
     expect(PROJ_PET.has(1090)).toBe(true);

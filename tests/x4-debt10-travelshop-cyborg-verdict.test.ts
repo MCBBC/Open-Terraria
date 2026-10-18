@@ -35,16 +35,19 @@
 //   ③运行时面:shopStockFor(电子人) hardmode 前后差集恰=三件,hardmode 货架全表锁;
 //     旅行商臂 hardmode 前后库存恒同且永不含三件。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { Game } from '../src/core/Game';
 import shopstockJson from '../src/data/vanilla-shopstock.json';
 import travelshopJson from '../src/data/vanilla-travelshop.json';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
-const CHEST_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Chest.cs'), 'utf8');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
-const NPC_INTERACTIONS = readFileSync(join(REPO, 'Terarria1457', 'Terraria.GameContent', 'NPCInteractions.cs'), 'utf8');
+const CHEST_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Chest.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Chest.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const NPC_INTERACTIONS = existsSync(join(REPO, 'Terarria1457', 'Terraria.GameContent', 'NPCInteractions.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria.GameContent', 'NPCInteractions.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const SHOPS = (shopstockJson as {
   shops: Record<string, Array<{ id: number; price: number | null; cond: string | null }>>;
@@ -93,7 +96,7 @@ const shopStockFor = (Game.prototype as any).shopStockFor as (this: any, npc: { 
 const TRIO = [5452, 5451, 5738] as const;
 
 // ==================== ① 源码面：三件唯一归属=电子人 case 14 ====================
-describe('① 源码面（Terarria1457 亲读锚）', () => {
+describe.skipIf(EXT_MISSING)('① 源码面（Terarria1457 亲读锚）', () => {
   it('Chest.cs 三 id 唯一出现点=SetupShop case 14 段内（:2396-2400）', () => {
     const lines = CHEST_CS.split('\n');
     const hits: number[] = [];
@@ -147,7 +150,7 @@ describe('① 源码面（Terarria1457 亲读锚）', () => {
 });
 
 // ==================== ② 数据面：shopstock/values/travelshop 三表锚 ====================
-describe('② 数据面（vanilla-shopstock.json + vanilla-travelshop.json）', () => {
+describe.skipIf(EXT_MISSING)('② 数据面（vanilla-shopstock.json + vanilla-travelshop.json）', () => {
   it('shopstock 209（电子人）hardmode 三件套全表锁：id 序=源码序/cond=hardMode/price=100000（10 金）', () => {
     const cyborg = SHOPS['209'];
     for (const [idx, id] of TRIO.entries()) {
@@ -193,7 +196,7 @@ describe('② 数据面（vanilla-shopstock.json + vanilla-travelshop.json）', 
 });
 
 // ==================== ③ 运行时面：shopStockFor 判别差集 ====================
-describe('③ 运行时面（Game.shopStockFor 合成 this）', () => {
+describe.skipIf(EXT_MISSING)('③ 运行时面（Game.shopStockFor 合成 this）', () => {
   it('电子人(209) hardmode 前后差集恰=三件套;plain hardmode 货架全表锁（case 14 全门关态）', () => {
     const idsOf = (over: CtxOver) =>
       shopStockFor.call(makeCtx(over), { npcKey: 'cyborg', vanillaId: 209 }).map((e) => e[0]);

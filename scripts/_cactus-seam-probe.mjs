@@ -7,11 +7,12 @@
 //   A chunk(240,28) 顶部 0-1 行（世界 7168-7169）主干列——修复前=全透明，修复后=cell(3840,447) 源帧 rows14-15
 //   B chunk(240,27) cell(3840,447) 底部 254-255 行——修复前=padding 垃圾，修复后=rows12-13 正常内容
 //   C 缝带像素 vs Tiles_80 cell(0,1) rows14-15 逐像素相等率（期望 100%）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const OUT = process.env.OUT ?? '/tmp/cactus-seam';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');

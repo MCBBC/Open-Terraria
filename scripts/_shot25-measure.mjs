@@ -1,8 +1,9 @@
 // 截图 #25 测量：EoC 红虚线盒 vs 眼球精灵 bbox
+import { HOME, needInput, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 
-const png = PNG.sync.read(readFileSync('/Users/vinlic/.claude/image-cache/1bdeeb26-7226-4f3a-a605-6ffea3103e9d/25.png'));
+const png = PNG.sync.read(readFileSync(needInput(join(HOME, '.claude/image-cache/1bdeeb26-7226-4f3a-a605-6ffea3103e9d/25.png'))));
 console.log('image:', png.width, 'x', png.height);
 const px = (x, y) => {
   const i = (png.width * y + x) << 2;

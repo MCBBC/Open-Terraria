@@ -25,7 +25,7 @@
 //     （内容测试锚的是"当时生成的世界"）；生成过程自身的活性回归由必须生成的
 //     套件守卫（caves-checkpoint 逐 pass 链/world-final-hash/drunk-world-gen/
 //     gen-loot-passes/_fullgen-smoke）——使用策略见 tests/README.md「测试世界使用策略」。
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'fflate';
 import { loadSave } from '../src/save/SaveFile';
@@ -102,4 +102,27 @@ export function loadFixture(name: string): FixtureLoad {
 /** 只取世界（多数内容断言测试用） */
 export function loadFixtureWorld(name: string): World {
   return loadFixture(name).world;
+}
+
+// ★C 档测试可移植性（2026-10-18）：档案 gz 不入 git（.gitignore；由生成端本地再产）——
+//   他人 clone 缺档时消费端不再红，改 it/describe.skipIf(fixtureMissing(...)) 跳过
+//   （本机档案在=真跑，零语义变化）。与 tests/fixturePath.ts 的 localFixtureMissing
+//   同族：缺档提示一条 console，不 throw。
+const hinted = new Set<string>();
+export function fixtureMissing(...names: string[]): boolean {
+  const miss = names.filter((n) => {
+    const gz = existsSync(join(FIXTURE_DIR, `${n}.wld.json.gz`));
+    const meta = existsSync(join(FIXTURE_DIR, `${n}.fixture.json`));
+    return !(gz && meta);
+  });
+  for (const n of miss) {
+    if (hinted.has(n)) continue;
+    hinted.add(n);
+    console.warn(
+      `[world-fixtures] 档案 ${n} 缺失——相关用例将 skip。`
+      + ` 再产：SW_GEN_WORLD_FIXTURES=1 npx vitest run tests/world-fixture-gen.test.ts -t "${n}"`
+      + `（策略见 tests/README.md；clone 侧缺档=正常形态）`,
+    );
+  }
+  return miss.length > 0;
 }

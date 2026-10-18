@@ -24,7 +24,7 @@
 //   M1 LeashedCritter.ts respawnAll 删 FitsItem 清槽支 → A3/A4/A5 红;
 //   M2 VoidLens.ts voidLensComplementTint 系数 0.5→0 → B1/B2 红。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { TileStore } from '../src/world/TileStore';
@@ -39,18 +39,24 @@ import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/item
 import type { LeashedEnv } from '../src/entities/LeashedCritter';
 import type { FurnitureItemRecord } from '../src/world/FurnitureItems';
 import type { LeashedRetrieveHost } from '../src/net/leashedSync';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457', 'terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = resolve(__dirname, '..');
 const GAME = readFileSync(resolve(ROOT, 'src/core/Game.ts'), 'utf8');
 const RENDERER = readFileSync(resolve(ROOT, 'src/render/Renderer.ts'), 'utf8');
 const VLENS = readFileSync(resolve(ROOT, 'src/render/VoidLens.ts'), 'utf8');
-const VANILLA_NPC = readFileSync(resolve(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const ANCHOR_WITH_ITEM = readFileSync(
-  resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TELeashedEntityAnchorWithItem.cs'), 'utf8');
-const KITE_ANCHOR_CS = readFileSync(
-  resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TEKiteAnchor.cs'), 'utf8');
-const CRITTER_ANCHOR_CS = readFileSync(
-  resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TECritterAnchor.cs'), 'utf8');
+const VANILLA_NPC = existsSync(resolve(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(resolve(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const ANCHOR_WITH_ITEM = existsSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TELeashedEntityAnchorWithItem.cs'))
+  ? readFileSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TELeashedEntityAnchorWithItem.cs'), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const KITE_ANCHOR_CS = existsSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TEKiteAnchor.cs'))
+  ? readFileSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TEKiteAnchor.cs'), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const CRITTER_ANCHOR_CS = existsSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TECritterAnchor.cs'))
+  ? readFileSync(resolve(ROOT, '../Terarria1457/Terraria.GameContent.Tile_Entities/TECritterAnchor.cs'), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 // 24 件风筝（ItemID.cs:157 IsAKite 布尔集逐值;与 q4-kite-critter-domain 同源）
 const KITES = [4367, 4368, 4369, 4370, 4371, 4379,
@@ -98,7 +104,7 @@ const smuggledIid = (): number => {
 // ① BJ426 载入侧 FitsItem（D3 漏修#1）
 // ============================================================================
 
-describe('Z4-① BJ426 载入侧 FitsItem（OnWorldLoaded 清型门）', () => {
+describe.skipIf(EXT_MISSING)('Z4-① BJ426 载入侧 FitsItem（OnWorldLoaded 清型门）', () => {
   it('A1 原版源锁:OnWorldLoaded !FitsItem→itemType=0 + 两子类判据', () => {
     expect(ANCHOR_WITH_ITEM).toContain('public override void OnWorldLoaded()');
     expect(ANCHOR_WITH_ITEM).toContain('if (!FitsItem(itemType))');
@@ -211,7 +217,7 @@ describe('Z4-① BJ426 载入侧 FitsItem（OnWorldLoaded 清型门）', () => {
 // ② BJ429 VoidLens 白化半项（D4 真漏修）
 // ============================================================================
 
-describe('Z4-② BJ429 透镜白化补差（Lerp(光照,White,0.5) 半项）', () => {
+describe.skipIf(EXT_MISSING)('Z4-② BJ429 透镜白化补差（Lerp(光照,White,0.5) 半项）', () => {
   it('B1 合成代数恒等:基底 light + 补差 0.5×(255−light) ≡ Lerp(light,White,0.5)', () => {
     for (const l of [0, 1, 37, 64, 128, 200, 254, 255]) {
       const [tr] = voidLensComplementTint([l, l, l]);
@@ -260,7 +266,7 @@ describe('Z4-② BJ429 透镜白化补差（Lerp(光照,White,0.5) 半项）', (
 // ③ 注释归一批（D4/D6）
 // ============================================================================
 
-describe('Z4-③ 注释归一批', () => {
+describe.skipIf(EXT_MISSING)('Z4-③ 注释归一批', () => {
   it('C1 BJ431 勘误:954 ≠ Item_3069 同图（尺寸/md5 互异实测值入注;承重结论保留）', () => {
     const arrow = readFileSync(resolve(ROOT, 'src/entities/Arrow.ts'), 'utf8');
     // 旧不实表述移除（md5 6ec57d61 曾被标为「与 Item_3069 同图」的等值证）
@@ -324,7 +330,7 @@ describe('Z4-③ 注释归一批', () => {
 // ④ D7 被缚 TownNPC 落位横向对齐（+w/2 偏移）
 // ============================================================================
 
-describe('Z4-④ D7 被缚 TownNPC 落位横向对齐', () => {
+describe.skipIf(EXT_MISSING)('Z4-④ D7 被缚 TownNPC 落位横向对齐', () => {
   it('D1 构造器语义实证:x 参=左缘直赋,w 按 SetDefaults 盒宽——直传 tile 中心+8 即 +w/2 漂移', () => {
     const spawnCenterPx = 42 * 16 + 8;                     // vanilla NewNPC X = tile 中心
     const tn = new TownNPC('stylist', spawnCenterPx, 40 * 16);

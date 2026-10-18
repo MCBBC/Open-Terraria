@@ -230,7 +230,7 @@ function compareStore(st: TileStore, label: string, dumpIdx: number, note?: stri
         let label = '?';
         if (mLoc) {
           const rel = mLoc[1].slice(mLoc[1].indexOf('src/'));
-          const abs = `/Users/vinlic/Project/GLM/SandboxWorld/game/${rel}`;
+          const abs = `${new URL('../', import.meta.url).pathname.replace(/\/+$/, '')}/${rel}`;
           try {
             const src = readFileSync(abs, 'utf8').split('\n');
             const ln = +mLoc[2];

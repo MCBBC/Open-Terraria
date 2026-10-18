@@ -297,6 +297,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       return v != null && Number.isFinite(+v) ? +v : null;
     } catch { return null; }
   }
+  /** ★BJ694（BJ691b 债②）：世界列表面「活动角色」快照（原版 UIWorldSelect
+   *  ActivePlayer 语义:难度匹配层+游玩史层,见 WorldSelectActiveChar 注）。
+   *  charStore 未载/index 缺席 → null=无角色域层（调用面安全回退）。 */
+  function activeCharSnapshot(): { difficulty: number; playedWorlds?: number[] } | null {
+    const cid = charContextId();
+    if (cid == null) return null;
+    const cm = charStore.list().find((m) => m.id === cid);
+    return cm ? { difficulty: cm.difficulty, playedWorlds: cm.playedWorlds } : null;
+  }
   function rememberCharId(id: number | null): void {
     if (id == null) return;
     try { prefSet(LAST_CHAR_KEY, String(id)); } catch { /* 隐私模式等 */ }
@@ -1549,7 +1558,7 @@ function makeGame(): Game {
             onImport: (file) => importWorldFile(file),   // 导入入本地列表(建房选世界同面)
             onNew: () => { ui.toast(Lang.text('Mods.SandboxWorld.MP.CreateWorldInSingle')); },
             onBack: () => closeFlow(),
-          });
+          }, activeCharSnapshot());
         };
         new CharSelectPanel(holder, charStore, {
           onPlay: (a, id) => {
@@ -1662,13 +1671,18 @@ function makeGame(): Game {
         });
       },
       onBack: () => showCharacterSelect(),
-    });
+    }, activeCharSnapshot());
   }
 
   /** 从世界槽位读取并进入游戏（worker 内直读 IDB：免大 JSON 字符串主线程读取
    *  + 结构化克隆双开销；fallback 时 worldStore.load 取回全文走 loadFromJson） */
   async function loadWorldFlow(meta: WorldMeta) {
     currentWorld = meta;
+    // ★BJ694：角色×世界游玩史写入（原版地图档创建等价——进世界即记;幂等零写）
+    {
+      const cid = charContextId();
+      if (cid != null) void charStore.recordPlayedWorld(cid, meta.id);
+    }
     // 旧档（无 header.difficulty）以槽位 meta 回填世界难度；finally 清防泄漏到
     // 后续 quickLoad/文件导入路径（那些场景 fallback=null 不生效）
     difficultyFallback = meta.difficulty;
@@ -1785,6 +1799,8 @@ function makeGame(): Game {
     {
       const cid = charContextId();
       rememberCharId(cid);
+      // ★BJ694：新世界游玩史写入（与 loadWorldFlow 同面;幂等）
+      if (cid != null) void charStore.recordPlayedWorld(cid, meta.id);
       const cs = cid != null ? await charStore.getState(cid) : null;
       if (cs) {
         const sx = g.player.x, sy = g.player.y;

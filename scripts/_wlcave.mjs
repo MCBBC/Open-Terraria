@@ -1,13 +1,14 @@
 // 地下背景光照修复验证:深处未点燃区域背景应暗(世界层=旧路径≈同暗)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const OUT = '/Users/vinlic/.claude/jobs/8405c930/tmp/wl-cave';
+const OUT = join(HOME, '.claude/jobs/8405c930/tmp/wl-cave');
 fs.mkdirSync(OUT, { recursive: true });
 const B = process.env.T || 'http://localhost:4173';
 async function shot(qs, tag) {
   const browser = await puppeteer.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: 'new', userDataDir: `/Users/vinlic/.claude/jobs/8405c930/tmp/wlcave-${tag}`,
+    headless: 'new', userDataDir: `${HOME}/.claude/jobs/8405c930/tmp/wlcave-${tag}`,
     args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
   });
   const page = await browser.newPage();

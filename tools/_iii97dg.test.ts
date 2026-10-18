@@ -17,7 +17,7 @@ import { loadI66ReplayStore } from '../src/world/gen/vanilla/HalfBrickPass';
 
 const RUN = process.env.SW_I97DG === '1';
 const REPLAY = process.env.SW_I97_REPLAY !== '0';
-const G2 = process.env.SW_I97_G2 ?? '/Users/vinlic/GoldenChains/golden-ftw';
+const G2 = process.env.SW_I97_G2 ?? `${process.env.HOME ?? ''}/GoldenChains/golden-ftw`;
 const OUT = process.env.SW_I97_OUT ?? '/tmp/iii97-out/jsreplay';
 const SEEDV = process.env.SW_I97_SEED ?? '1.1.1.4.1671560105';
 const W = Number(process.env.SW_I97_W ?? 4200), H = Number(process.env.SW_I97_H ?? 1200);

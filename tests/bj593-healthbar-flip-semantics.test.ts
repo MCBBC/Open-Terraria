@@ -26,19 +26,22 @@
 //  同层登记不落刀:DD2 倒计时(:46866 同层)/镇民"!"(:46855 同层)仍在原位;
 //  原版 ShowLife/shimmerTransparency==0 门（:46605）本仓未建模。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Renderer } from '../src/render/Renderer';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
-const npcids = readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8');
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npcids = existsSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 // ---------------------------------------------------------------------------
 // ① 原版血条翻转语义活体锚（原版语义漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ593 原版血条翻转语义锚', () => {
+describe.skipIf(EXT_MISSING)('BJ593 原版血条翻转语义锚', () => {
   const sig = mainSrc.indexOf('public void DrawHealthBar(float X, float Y, int Health, int MaxHealth, float alpha, float scale = 1f, bool noFlip = false)');
   const body = mainSrc.slice(sig, sig + 4600);
 
@@ -88,7 +91,7 @@ describe('BJ593 原版血条翻转语义锚', () => {
 // ---------------------------------------------------------------------------
 // ② 本仓落刀后行为锁（血条与朝向两字段全解耦 + 全亮域单 pass 层序）
 // ---------------------------------------------------------------------------
-describe('BJ593 本仓血条零朝向消费（两字段分离族逐型安全）', () => {
+describe.skipIf(EXT_MISSING)('BJ593 本仓血条零朝向消费（两字段分离族逐型安全）', () => {
   const sig = rendererSrc.indexOf('private drawHealthBar(');
   const body = rendererSrc.slice(sig, rendererSrc.indexOf('\n  /**', sig + 10));
 
@@ -115,7 +118,7 @@ describe('BJ593 本仓血条零朝向消费（两字段分离族逐型安全）'
   });
 });
 
-describe('BJ593 全亮域单 pass（实体循环零血条调用,层序 4<14 同相）', () => {
+describe.skipIf(EXT_MISSING)('BJ593 全亮域单 pass（实体循环零血条调用,层序 4<14 同相）', () => {
   it('实体循环内零 drawHealthBar 直调（收集面替代）', () => {
     // 收集面三支 + 镇民支
     expect((rendererSrc.match(/hbPass\.push\(/g) ?? []).length).toBe(4);
@@ -155,7 +158,7 @@ describe('BJ593 全亮域单 pass（实体循环零血条调用,层序 4<14 同�
 // ---------------------------------------------------------------------------
 // ③ BJ581/BJ584 连续性（贴图镜像面不动,血条面解耦;两刀谳面不被本刀波及）
 // ---------------------------------------------------------------------------
-describe('BJ593 贴图镜像面连续性（BJ581/BJ584 谳面零波及）', () => {
+describe.skipIf(EXT_MISSING)('BJ593 贴图镜像面连续性（BJ581/BJ584 谳面零波及）', () => {
   it('黄蜂族仍随 vx 镜像+倾斜（tiltOnly5 含 176;SLIME_NO_MIRROR 零交集）', () => {
     expect(rendererSrc).toMatch(
       /const tiltOnly5 = stR === 5 && \(idR === 23 \|\| idR === 42 \|\| idR === 139 \|\| idR === 176 \|\| idR === 205\s*\|\| idR === 210 \|\| idR === 211 \|\| \(idR >= 231 && idR <= 235\)\);/,

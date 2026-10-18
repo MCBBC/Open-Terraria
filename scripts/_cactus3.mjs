@@ -1,3 +1,4 @@
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox'], defaultViewport:{width:1280,height:800}});
@@ -8,7 +9,7 @@ await page.type('input', 'cactuspx');
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
 await page.waitForFunction(() => window.__swGame?.player, {timeout: 120000});
-const buf = readFileSync('/Users/vinlic/Downloads/不负责任的女妖啤酒厂.wld');
+const buf = readFileSync(needInput(join(DOWNLOADS, '不负责任的女妖啤酒厂.wld')));
 const out = await page.evaluate(async (arr) => {
   const { parseWldToSave } = await import('/src/wld/WldImport.ts');
   const { loadSave } = await import('/src/save/SaveFile.ts');

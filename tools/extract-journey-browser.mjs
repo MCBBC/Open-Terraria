@@ -38,7 +38,7 @@
 //   · 锚 fail-loud/基数护栏：沿用既有 stats 出口（提取器健康度目检）。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 const WRITE_REAL = process.argv.includes('--write-real');
 const SW_FX53_OUT = process.env.SW_FX53_OUT;
 if (SW_FX53_OUT && WRITE_REAL) {

@@ -7,6 +7,7 @@
 //   面 B（件③ 三专绘支抽样）:764 Upbeat Star 陨星覆绘——miscDyes[0] 红染 vs 无染
 //     （Item_75 覆绘 EntitySpriteDraw Main.cs:38333 过染;1090/legacyDraw 由源锚+单测锁）
 // 像素判别：worldToScreen → 画布读回均值;基线/染后 PNG 落盘 docs/evidence/proj-dye-q3/。
+import { REPO_ROOT } from './_pathlib.mjs';
 import { appendFileSync } from 'node:fs';
 const STEPLOG = '/tmp/projdye-q3-progress.log';
 const step = (m) => { const l = `${new Date().toISOString().slice(11, 19)} ${m}`; try { appendFileSync(STEPLOG, l + '\n'); } catch {} console.log(l); };
@@ -14,7 +15,7 @@ import { launchBrowser, openPage, bootstrap, createGame, pump, godMode, screensh
 import { giveItems } from '../tools/probe/lib/entities.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5480';
-const OUT = (n) => `/Users/vinlic/Project/GLM/SandboxWorld/game/docs/evidence/proj-dye-q3/${n}`;
+const OUT = (n) => `${REPO_ROOT}/docs/evidence/proj-dye-q3/${n}`;
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 const errors = [];

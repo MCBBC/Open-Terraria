@@ -1,7 +1,7 @@
 // ============================================================================
 // 高尔夫球物理 1:1 —— Terraria.Physics/BallCollision.cs 全量移植
 // （GolfHelper.PhysicsProperties/ContactListener/OnPassThrough 一并内联）。
-// 行号注释全部对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/。
+// 行号注释全部对准 仓库外基准树(game/ 的兄弟目录)Terarria1456/。
 // ============================================================================
 //   BallCollision.Step          :24-89   主步进（drag→限速→子步→反弹→Resting）
 //   CheckForPassThrough         :91-123  穿过判定（实心格/坡面半砖/液体面）

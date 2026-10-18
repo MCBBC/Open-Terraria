@@ -1,4 +1,5 @@
 // A/B:硬刷进游戏 vs 正常进游戏——贴图加载状态对比(用户复现路径)
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -20,7 +21,7 @@ async function importWorld() {
   await new Promise((r) => setTimeout(r, 800));
   const fin = await page.$('.sw-vsel input[type=file]');
   if (!fin) return false;
-  await fin.uploadFile('/Users/vinlic/Downloads/粗暴的椰子地段.wld');
+  await fin.uploadFile(needInput(join(DOWNLOADS, '粗暴的椰子地段.wld')));
   await new Promise((r) => setTimeout(r, 15000));
   return true;
 }

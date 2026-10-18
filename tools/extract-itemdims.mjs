@@ -33,7 +33,7 @@
 //   --dump 对账通道不写盘不受守卫限制。
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 
 export function extractItemDims(src) {

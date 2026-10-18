@@ -5,9 +5,10 @@
 //   B 页(?wwarp=0,旧直画路径) 常规截图 + fullbright 截图
 // fullbright(免光照)下若藤蔓格出现满亮水 = 水有画、纯光照暗;仍空洞 = 水未画。
 // 单页串行 + bringToFront(rAF 后台冻结——上一版探针翻车点)。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const CX = 37329, CY = 4011;           // 用户 report 相机中心(世界 px)
 
 const b = await puppeteer.launch({

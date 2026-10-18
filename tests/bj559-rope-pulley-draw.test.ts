@@ -46,7 +46,7 @@
 //      T10/T11 仍绿（pulley 态不受影响）——恰红=判别面单腿；
 //   M8 pulleySnap 摘 pulley=true            → T8①/T9/T10/T11 红（吸附置位断链）。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,9 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['terraria-assets'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -66,7 +69,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const GOLD_SHA = '3fbfe97e0aa4bbcfa999b725afec72a902d784a1c51438dbdea7557f2523872e';
 
-describe('BJ559 T0 PlayerPulley.png 资产（AssetInitializer.cs:610 Images/PlayerPulley）', () => {
+describe.skipIf(EXT_MISSING)('BJ559 T0 PlayerPulley.png 资产（AssetInitializer.cs:610 Images/PlayerPulley）', () => {
   it('sha256 与 terraria-assets 提取源逐字节全等（三源对拍：terraria-assets=public=金标）', () => {
     const src = readFileSync(join(ROOT, '..', 'terraria-assets', 'Images', 'PlayerPulley.png'));
     const pub = readFileSync(join(ROOT, 'public', 'sprites', 'vanilla', 'PlayerPulley.png'));
@@ -120,7 +123,7 @@ function drawPulley(p: Player, atlas: unknown, inUse = false, img?: { width: num
   return { ops, files };
 }
 
-describe('BJ559 T1-T5 drawPulleyLayer（DrawPlayer_24_Pulley :3034-3056 钉值）', () => {
+describe.skipIf(EXT_MISSING)('BJ559 T1-T5 drawPulleyLayer（DrawPlayer_24_Pulley :3034-3056 钉值）', () => {
   it('T1 居中档（pulleyDir=1）：translate(3.5,−45)+rotate(−0.35)+源帧0——局部 rot 恒 −0.35（镜像吸收朝向）', () => {
     const p = new Player(0, 0, new Inventory());
     p.pulley = true;
@@ -226,7 +229,7 @@ function fakeHooks(w: World, p: Player): GameHooks {
 
 const tick = (p: Player, w: World): void => { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); };
 
-describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸附→帧推进→DashMovement）', () => {
+describe.skipIf(EXT_MISSING)('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸附→帧推进→DashMovement）', () => {
   it('T6 单步钉值：|vy|·0.75 + (vy≠0?0.75)——静止 0、vy=±3 → 3.0', () => {
     const p = new Player(0, 0, new Inventory());
     p.vy = 0;
@@ -326,7 +329,7 @@ describe('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块序=垂直链→X 吸
 //   恒不画;按 W/S 触发 FindPulley 置位后才出现=用户实测「静止不显、按上下键才显」。
 //   落刀：Player.ts branch1 门补 this.pulley（绳物理=pulley 唯一,原版对齐）;吸附拍
 //   置位链（pulleySnap :9932）本就正确（BJ559 T8① 在案）,不动。
-describe('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落刀判别面）', () => {
+describe.skipIf(EXT_MISSING)('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 门 this.pulley 落刀判别面）', () => {
   it('T10 吸附→松键静挂 12 拍 pulley 钉 true+滑轮绘制在场（静止恒显主判别）', () => {
     const w = ropeWorld();
     // 头格行 24（绳柱 14..34 中段）：y=24·16+8=392,身体中心 y+21=413 → 格 25（绳→branch1）

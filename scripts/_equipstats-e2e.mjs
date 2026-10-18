@@ -1,8 +1,9 @@
 // equipStats 记忆化 E2E:真实世界跑 60s,采 rAF 帧均 + MajorGC 频率对比口径。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/eqst-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/eqst-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

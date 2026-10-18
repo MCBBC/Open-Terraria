@@ -3,10 +3,11 @@
 //   B 相位域：cogAddFrY 全 tick 扫描 ∈ {0,90}
 //   C 实机账本：sheets[272] 的 oob/clamp/fallback 恒 0
 //   D 视觉留证：两时刻截图 /tmp/cog-a.png|b.png（间隔≥2 周期）
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (16).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (16).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});

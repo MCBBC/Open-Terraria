@@ -4,12 +4,13 @@
 // ③同 profile 再访:第一导航加载哪个 chunk?刷新一次后呢?
 // 判据:第一导航 chunk=A 旧名 → 复现;= REBUILT → 现行 sw.js 无此病(用户浏览器持旧 SW)。
 // 用法:node scripts/_sw-stale-repro.mjs
+import { REPO_ROOT } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
-const ROOT_A = '/Users/vinlic/Project/GLM/SandboxWorld/game/dist-analyze';
+const ROOT_A = join(REPO_ROOT, 'dist-analyze');
 const ROOT_B = '/tmp/sw-stale-repro-B';
 const PORT = 4193;
 const PROFILE = '/tmp/sw-stale-repro-profile';

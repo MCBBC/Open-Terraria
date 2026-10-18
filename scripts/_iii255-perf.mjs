@@ -3,6 +3,7 @@
 //  b. waterWaves.frame 微基准(固定输入 ×400)——_step 所在路径,flag 不应有任何差异
 //  c. ON 臂足迹序列微基准(gateFootprintCtx 清屏+3 次 α=0.02 小画+setTransform ×5000)
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=600000 scripts/_iii255-perf.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { launchBrowser, openPage, front } from '../tools/probe/lib/browser.mjs';
 import { cleanStorage, gotoApp, waitForBridge, dismissWelcome } from '../tools/probe/lib/boot.mjs';
@@ -28,7 +29,7 @@ const seedDef = (json) => {
     } catch { res(); }
   });
 };
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 
 async function openArm(tag, flagQuery) {

@@ -1,7 +1,7 @@
 // 高尔夫球手（NPC 588）商店分数门槛表 1:1 —— Chest.SetupShop case 22
 // （Chest.cs:3135-3245；本文件只收 extract-shops.mjs 未捕获的 golferScoreAccumulated
 //  门槛条目，常驻条目在 vanilla-shopstock.json）。
-// 行号注释对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/Chest.cs
+// 行号注释对准 仓库外基准树(game/ 的兄弟目录)Terarria1456/Terraria/Chest.cs
 //   >=500 四杆族 4039/4094/4093/4092   :3163-3177（R14-C27:曾 >500 少一档,1456/1457 同 >=）
 //   >500  高尔夫球箱 4265              :3183-3186
 //   >500  铜奖杯 4599                  :3190-3193

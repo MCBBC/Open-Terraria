@@ -2,6 +2,7 @@
 // 状态链:pre 快照 → fill 落格(层 tile)→ chasm 雕空 → 岛 overlay。
 // ★已知仪器局限:pre 快照无 active 位,type==0 的活性泥格与空格不可分(按空处理)。
 // 对照面:scripts/_replay-abyss.ts 的 [seg]/[island] 实测(掷数)。
+import { TMOD_LOGS, needInput } from './_pathlib.mjs';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -21,7 +22,7 @@ const VAN_SOLID = (() => {
 const SOLID_VAN = VAN_SOLID;
 const SOLID_MOD = new Set<number>([T_GRAVEL, T_PYRE, T_VOID, T_SHALE, T_PLANTY, T_SCORIA, 816]);
 
-const LOGS = '/Users/vinlic/Library/Application Support/Terraria/tModLoader/Logs';
+const LOGS = needInput(TMOD_LOGS);
 const W = 4200, H = 1200, N = W * H;
 
 // C# tile id 常量(Abyss 域消费面)

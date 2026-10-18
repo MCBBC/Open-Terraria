@@ -1,7 +1,8 @@
 // EoL2 xray6: 逐帧分箱(去污染) 慢帧vs健康帧构成差 + GPU线程忙曲线 + 30fps段帧级明细
 // run: node --max-old-space-size=8192 scripts/_eol2-xray6.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 const profTid = new Map(), profStart = new Map();

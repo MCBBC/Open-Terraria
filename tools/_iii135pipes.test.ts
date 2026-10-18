@@ -1,12 +1,12 @@
 // IIII104b：lava-trap 成功数普查 —— tile 135(wire-pipe) 在 MB pass 前后差 = 成功放置数。
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { it } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const W = 4200, H = 1200, N = W * H;
-const tPre = '/Users/vinlic/GoldenChains/golden-ftw-wir/096_Larva.typ';
-const tPost = '/Users/vinlic/GoldenChains/golden-ftw-wir/097_Micro_Biomes.typ';
+const tPre = `${process.env.HOME ?? ''}/GoldenChains/golden-ftw-wir/096_Larva.typ`;
+const tPost = `${process.env.HOME ?? ''}/GoldenChains/golden-ftw-wir/097_Micro_Biomes.typ`;
 const jd = process.env.SW_I135_JSOUT ?? '/tmp/iii135-out/jsdumps';
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -14,7 +14,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET[i] = s;
 }
 
-it('III135 lava trap census', () => {
+// ★C档可移植:GoldenChains 真值链+jsdumps 均本机对拍面(不可收编);缺=skip 不红
+it.skipIf(!existsSync(tPre) || !existsSync(tPost) || !existsSync(jd))('III135 lava trap census', () => {
   const le16 = (p: string) => new Uint16Array(readFileSync(p).buffer, 0, N);
   const t0 = le16(tPre), t1 = le16(tPost);
   let addT = 0, rmT = 0;

@@ -2,9 +2,10 @@
 // 单发 4956 → counter≈82 冻结帧 → 主画布读回 → 沿轨道环 16 条射线扫横截面：
 // 带厚(dev>25 连续段)/峰值增量/波纹起伏/带外暗变。原版参照（Zenith_(demo).gif f170，
 // 1x 缩放实测）：亮带 45-53px、峰值 +145、4 次波纹、带外零暗变。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
+const MAP = needInput(join(DOWNLOADS, 'map-Starter_World (12).json'));
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 200)));

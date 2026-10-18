@@ -4,6 +4,9 @@ import { readFileSync, writeFileSync, unlinkSync, mkdtempSync, rmSync, mkdirSync
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1405', 'Terraria-Map-Editor'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★债刀-3（2026-09-17）：extract-npcs.mjs producer 退役态守卫——1405 锚时代 producer
 // 对 vanilla-npcs.json 纯全量覆写（不读现有），误重跑一次洗掉 587-696 全部新增 NPC
@@ -24,6 +27,11 @@ import { tmpdir } from 'node:os';
 // 已修 findLast,干跑对拍恢复零漂移。守卫测试=下方 BJ207 段。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-npcs.mjs');
+// ★C档可移植:工具 ROOT 已转 import.meta 相对(era-guard-family ④ 习语)——
+//   mutant 置 OS tmp 须前置重锚到本仓项目根(game/ 父目录);工具无该行=无操作
+const ROOT_LINE = "const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)";
+const relocateRoot = (src: string) => src.replace(ROOT_LINE, `const ROOT = ${JSON.stringify(join(process.cwd(), '..'))};`);
+
 const LIVE = join(process.cwd(), 'public', 'sprites', 'vanilla-npcs.json');
 const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex');
 
@@ -38,7 +46,7 @@ const CLEAN_FIXTURE = JSON.stringify({
   3: { id: 3, name: 'Zombie', frames: 3, lifeMax: 45, damage: 14 },
 });
 
-describe('extract-npcs 追加时代守卫（债刀-3）', () => {
+describe.skipIf(EXT_MISSING)('extract-npcs 追加时代守卫（债刀-3）', () => {
   it('行为面:现库增量态下默认运行被拒（exit 1+活通道指引）,现库字节零改动', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000 });
@@ -61,7 +69,7 @@ describe('extract-npcs 追加时代守卫（债刀-3）', () => {
   });
 
   it('结构锁:守卫块内零写盘(拒绝路径的结构前提)+双旗逃生门与探测式在位', () => {
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const guardStart = src.indexOf('追加时代守卫');
     const guardEnd = src.indexOf('process.exit(1)', guardStart);
     expect(guardStart).toBeGreaterThan(-1);
@@ -124,7 +132,7 @@ describe('extract-npcs 追加时代守卫（债刀-3）', () => {
     const out = join(dir, 'out.json');
     const mutant = join(dir, 'extract-npcs-mutant.mjs');
     writeFileSync(fixture, INCREMENT_FIXTURE);
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     expect(src).toContain('beyondIds.length > 0 || extraFields.size > 0');
     writeFileSync(mutant, src.replace(
       'const appendEra = beyondIds.length > 0 || extraFields.size > 0;',
@@ -209,7 +217,7 @@ describe('extract-npcs 追加时代守卫（债刀-3）', () => {
     writeFileSync(join(fakeLive, 'vanilla-npcs.json'), JSON.stringify(seeded));
     const fixture = join(dir, 'clean.json');
     writeFileSync(fixture, CLEAN_FIXTURE);
-    const src = readFileSync(SCRIPT, 'utf8');
+    const src = relocateRoot(readFileSync(SCRIPT, 'utf8'));
     const TRIGGER = 'const PROBE_ENV_SET = process.env.SW_NPCS_JSON !== undefined;';
     const OUT_LINE = 'const OUT_JSON = process.env.SW_OUT ?? `${ROOT}/game/public/sprites/vanilla-npcs.json`;';
     expect(src).toContain(TRIGGER);
@@ -242,7 +250,7 @@ describe('extract-npcs 追加时代守卫（债刀-3）', () => {
 // ★BJ207 2026-09-20 ——— 合并语义提取器守卫（extract-npccolors / extract-critters，
 // 头注见上）：缺省干跑零写盘 + 写盘显式通道 + g1 footgun 拒跑 + 漂移拦截 + 判别力变异。
 // ============================================================
-describe('extract-npccolors / extract-critters 合并语义守卫（BJ207 干跑 fail-closed）', () => {
+describe.skipIf(EXT_MISSING)('extract-npccolors / extract-critters 合并语义守卫（BJ207 干跑 fail-closed）', () => {
   const SCRIPTS = {
     npccolors: join(process.cwd(), 'tools', 'extract-npccolors.mjs'),
     critters: join(process.cwd(), 'tools', 'extract-critters.mjs'),
@@ -350,7 +358,7 @@ describe('extract-npccolors / extract-critters 合并语义守卫（BJ207 干跑
       const dir = mkdtempSync(join(tmpdir(), 'npcs-merge-guard-'));
       const fakeLive = join(dir, 'vanilla-npcs.json');
       writeFileSync(fakeLive, JSON.stringify(seededFixture(tool)));   // 假现库=摘字段种子
-      const src = readFileSync(SCRIPTS[tool], 'utf8');
+      const src = relocateRoot(readFileSync(SCRIPTS[tool], 'utf8'));
       const TRIGGER = 'if (!OUT_PATH && !WRITE_REAL) {';
       const LIVE_LINE = 'const LIVE_OUT = `${ROOT}/game/public/sprites/vanilla-npcs.json`;';
       expect(src).toContain(TRIGGER);

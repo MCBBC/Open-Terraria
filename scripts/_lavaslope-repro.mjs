@@ -1,9 +1,10 @@
 // _lavaslope-repro: 用户实报"岩浆斜坡透明区没做浸润渲染露馅,水不会"。
 // 搭水/岩浆双池 A/B:左岸都是 slope1 阶梯(复刻截图岸形),液面与坡顶齐平。
 // fullbright 截图 + 岸区 ASCII 颜色分类图(水蓝/岩浆红/固体/背景),并 dump 坡面格 store 态。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

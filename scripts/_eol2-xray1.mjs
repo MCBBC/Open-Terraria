@@ -1,7 +1,8 @@
 // EoL2 xray1: Profile 流归属 + 真帧时间轴(PageAnimator/Commit) + 游戏自带 mark/measure 面 + 慢帧嵌套归因
 // run: node --max-old-space-size=8192 scripts/_eol2-xray1.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261005T020627.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261005T020627.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 const tidName = new Map();

@@ -1,6 +1,7 @@
 // Lights And Shadows 探针 v11:7d 入口 CTM 变换监视 + 新旧 godray A/B。
 // 假说:世界绘制段 save/restore 失衡泄漏 CTM→7d 全幅 drawImage 在泄漏变换下
 // 出翻转;mod 常驻链把它从"滤镜帧偶发"放大成"每帧必现"。
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { zipSync } = require('fflate');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.LAS_WLD || '/Users/vinlic/Downloads/十周年纪念种子 (3).wld';
+const WLD = process.env.LAS_WLD || needInput(join(DOWNLOADS, '十周年纪念种子 (3).wld'));
 const SHOT = '/tmp/las-shots';
 fs.mkdirSync(SHOT, { recursive: true });
 const LOG = fs.openSync('/tmp/las-probe11.log', 'w');

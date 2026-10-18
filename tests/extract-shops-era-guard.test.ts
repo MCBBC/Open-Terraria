@@ -4,6 +4,9 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, existsS
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// ★C档可移植:被守卫工具读仓库外反编译树/素材源(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ★BJ215（2026-09-20）：extract-travelshop.mjs + extract-shops.mjs era guard 落闸守卫测试。
 //
@@ -24,6 +27,11 @@ import { tmpdir } from 'node:os';
 // （本文件变异 M1/M2+cwd footgun 回归）。守卫测试习语 = extract-petai-era-guard.test.ts。
 
 const TS_SCRIPT = join(process.cwd(), 'tools', 'extract-travelshop.mjs');
+// ★C档可移植:双工具 GAME_ROOT 已转 import.meta 相对——mutant 置 OS tmp 须前置重锚
+//   到本仓 game/;工具无该行=无操作
+const GAME_ROOT_LINE = "const GAME_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');";
+const relocateGameRoot = (src: string) => src.replace(GAME_ROOT_LINE, `const GAME_ROOT = ${JSON.stringify(process.cwd())};`);
+
 const SS_SCRIPT = join(process.cwd(), 'tools', 'extract-shops.mjs');
 const TS_LIVE = join(process.cwd(), 'src', 'data', 'vanilla-travelshop.json');
 const SS_LIVE = join(process.cwd(), 'src', 'data', 'vanilla-shopstock.json');
@@ -31,7 +39,7 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 // ★macOS /var→/private/var 符号链接（petai/itemrare 同案）
 const TMP = realpathSync(tmpdir());
 
-describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
   it('行为面:缺省干跑零写盘;★BJ217 词表恢复后重产盖住现库（多重集逐值全等）exit 0', () => {
     const before = md5(TS_LIVE);
     const r = spawnSync('node', [TS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -72,7 +80,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     // 假现库：毒化假现库（注入重产缺条）→ 拒+差异清单;假现库/真库均零写入。
     const dir = mkdtempSync(join(TMP, 'travelshop-guard-'));
     try {
-      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(TS_SCRIPT, 'utf8'));
       const TRIGGER = "const LIVE_JSON = process.env.SW_TRAVELSHOP_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-travelshop.json');
@@ -114,7 +122,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     writeFileSync(fakeLive, '{"seeded":true}');
     const beforeLive = md5(TS_LIVE);
     try {
-      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(TS_SCRIPT, 'utf8'));
       const TRIGGER = 'process.argv[outIdx + 1] : null;';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-travelshop-mutant.mjs');
@@ -136,7 +144,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     const dir = mkdtempSync(join(TMP, 'travelshop-guard-'));
     const beforeLive = md5(TS_LIVE);
     try {
-      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(TS_SCRIPT, 'utf8'));
       const TRIGGER = "extractPool('SetupTravelShop_GetItem')";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-travelshop-mutant-anchor.mjs');
@@ -172,7 +180,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
   });
 });
 
-describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
+describe.skipIf(EXT_MISSING)('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
   it('行为面:缺省干跑零写盘;★BJ222 数据面修正后重产盖住现库 exit 0;干跑 loud 支转合成毒化保持', () => {
     const before = md5(SS_LIVE);
     const r = spawnSync('node', [SS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
@@ -188,7 +196,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     // BJ217 --write-real 守卫同款习语）：假现库注入重产缺条 → 裸跑必 exit 1+差异清单。
     const dir = mkdtempSync(join(TMP, 'shops-guard-'));
     try {
-      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(SS_SCRIPT, 'utf8'));
       const TRIGGER = "const LIVE_JSON = process.env.SW_SHOPSTOCK_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-shopstock.json');
@@ -236,7 +244,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     // 残差存在——一旦数据刀修正即失效）。mutant 重定向毒化假现库 → 拒+清单。
     const dir = mkdtempSync(join(TMP, 'shops-guard-'));
     try {
-      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(SS_SCRIPT, 'utf8'));
       const TRIGGER = "const LIVE_JSON = process.env.SW_SHOPSTOCK_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-shopstock.json');
@@ -276,7 +284,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     writeFileSync(fakeLive, '{"seeded":true}');
     const beforeLive = md5(SS_LIVE);
     try {
-      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(SS_SCRIPT, 'utf8'));
       const TRIGGER = 'process.argv[outIdx + 1] : null;';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-shops-mutant.mjs');
@@ -294,7 +302,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     const dir = mkdtempSync(join(TMP, 'shops-guard-'));
     const beforeLive = md5(SS_LIVE);
     try {
-      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(SS_SCRIPT, 'utf8'));
       const TRIGGER = "'public void SetupShop(int type)'";
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-shops-mutant-anchor.mjs');
@@ -314,7 +322,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
 // 现状 washOf 只算 live-only——变异实证现库删条恒绿（现库退化不可见）。★G-1/S3 处方：
 // travelshop=拒（B 形态重产面应盖住现库,缺键型=itemrare 同族）;shops=选报（60 条刻意
 // 剥离面=运行时直管恒非空,拒跑语义不成立,但轴向必须 loud 供人工判别）。
-describe('travelshop/shops G-1 fresh-only 轴（BJ261）', () => {
+describe.skipIf(EXT_MISSING)('travelshop/shops G-1 fresh-only 轴（BJ261）', () => {
   it('travelshop 行为面:现库删条 → fresh-only 命名物证 exit 1（恒绿盲区收口）', () => {
     const dir = mkdtempSync(join(TMP, 'g1-freshonly-'));
     try {
@@ -342,7 +350,7 @@ describe('travelshop/shops G-1 fresh-only 轴（BJ261）', () => {
       const fixture = join(dir, 'degraded.json');
       writeFileSync(fixture, JSON.stringify(live));
       const probeEnv = { ...process.env, SW_TRAVELSHOP_JSON: fixture };
-      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(TS_SCRIPT, 'utf8'));
       const TRIGGER = 'wash.itemsFresh = freshOnlyOf(live.items ?? [], items);';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-travelshop-mutant-freshonly.mjs');
@@ -387,7 +395,7 @@ describe('travelshop/shops G-1 fresh-only 轴（BJ261）', () => {
       const fixture = join(dir, 'degraded.json');
       writeFileSync(fixture, JSON.stringify(live));
       const probeEnv = { ...process.env, SW_SHOPSTOCK_JSON: fixture };
-      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const src = relocateGameRoot(readFileSync(SS_SCRIPT, 'utf8'));
       const TRIGGER = 'if (freshOnly.length) wash.shopsFresh[npc] = { n: freshOnly.length, samples: freshOnly.slice(0, 2).map(sig) };';
       expect(src).toContain(TRIGGER);
       const mutant = join(dir, 'extract-shops-mutant-freshonly.mjs');

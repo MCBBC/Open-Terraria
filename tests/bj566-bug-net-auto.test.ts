@@ -22,7 +22,7 @@
 //  ④结构锁：裸挥臂复用节拍门表达式在位
 import { describe, it, expect } from 'vitest';
 import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import { itemCombat } from '../src/data/vanillaItemCombat';
@@ -33,11 +33,14 @@ import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const REPO = join(dirname(__dirname), '..');
-const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
+const ITEM_CS = existsSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs')) ? readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const LINES = ITEM_CS.split('\n');
-const GAME_SRC = readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8');
+const GAME_SRC = existsSync(join(REPO, 'game', 'src', 'core', 'Game.ts')) ? readFileSync(join(REPO, 'game', 'src', 'core', 'Game.ts'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 /** Item.cs SetDefaults switch case 体提取（BJ69 methodRange 同构,单 case 域;
  *  反编译缩进：case 行=2 tab,体/break 行=3 tab） */
@@ -102,7 +105,7 @@ function stubGame(heldVid: number) {
 
 // ================= ①数据面：三网钉值 ≡ Item.cs 真值 =================
 
-describe('BJ566 数据面：三网 autoReuse 钉值（Item.cs SetDefaults 直读对拍）', () => {
+describe.skipIf(EXT_MISSING)('BJ566 数据面：三网 autoReuse 钉值（Item.cs SetDefaults 直读对拍）', () => {
   for (const n of NETS) {
     it(`${n.name}(${n.vid})：case 体含 autoReuse=true 且 useTime/useAnimation=${n.useTime}`, () => {
       const body = caseBody(n.vid);
@@ -131,7 +134,7 @@ describe('BJ566 数据面：三网 autoReuse 钉值（Item.cs SetDefaults 直读
 
 // ================= ②行为面：updateUse 桩驱动 =================
 
-describe('BJ566 行为面：裸挥臂复用节拍（updateUse 桩,挥击窗以手动 t-- 推进）', () => {
+describe.skipIf(EXT_MISSING)('BJ566 行为面：裸挥臂复用节拍（updateUse 桩,挥击窗以手动 t-- 推进）', () => {
   it('虫网 1991：按住连挥——周期走完同拍重启（≥3 周期）,周期内不重启', () => {
     const s = stubGame(1991);
     // 按住（浏览器 mousedown 双旗同置 Input.ts:241;持住帧 prevSwingMouse=true）
@@ -248,7 +251,7 @@ describe('BJ566 行为面：裸挥臂复用节拍（updateUse 桩,挥击窗以�
 
 // ================= ④结构锁 =================
 
-describe('BJ566 结构锁：裸挥臂复用节拍门在位', () => {
+describe.skipIf(EXT_MISSING)('BJ566 结构锁：裸挥臂复用节拍门在位', () => {
   it('updateUse「其它物品」else 支含 BJ566 复用节拍门（swingOver && (edge || autoReuseHeld)）', () => {
     expect(GAME_SRC).toMatch(/const bareOver = !this\.swing \|\| this\.swing\.t <= 1;/);
     expect(GAME_SRC).toMatch(/const bareEdge = inp\.mouseDown && !this\.prevSwingMouse;/);

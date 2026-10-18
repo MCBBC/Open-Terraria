@@ -1,8 +1,9 @@
 // BJ274: 解析原始 .wld —— 实报条带 (1830-1930, 290-300) 的 vanilla 真实态:
 // type/halfBrick/slope/liquid + frame。判别 halfBrick 唇格与水面是否原版自带。
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { parseWld } from '../src/wld/WldParser.ts';
 import fs from 'node:fs';
-const buf = new Uint8Array(fs.readFileSync('/Users/vinlic/Downloads/有害的动物尸体树篱.wld'));
+const buf = new Uint8Array(fs.readFileSync(needInput(join(DOWNLOADS, '有害的动物尸体树篱.wld'))));
 const wld = parseWld(buf);
 const w = wld.tilesWide;
 const idx = (x: number, y: number) => y * w + x;

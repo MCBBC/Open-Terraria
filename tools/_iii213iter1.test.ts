@@ -2,12 +2,16 @@
 // JS jdump1/K.* + j-entries-1.txt（基座 snap97-remix）。
 // 用法：cd game && SW_I213I1=1 npx vitest run tools/_iii213iter1.test.ts
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+
 const OUT = '/tmp/iii213-out';
+
+// ★C档可移植:/tmp 对拍产物(本机一次性诊断面;缺=skip 不红)
+const TMP_MISSING = !existsSync(`${OUT}/x86-iter1/K.liq`);
 const W = 4200, H = 1200;
 function le16(p: string): Uint16Array { const b = readFileSync(p); return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1); }
 function u8(p: string): Uint8Array { const b = readFileSync(p); return new Uint8Array(b.buffer, b.byteOffset, b.length); }
-it('iii213 iter1 anchor diff', () => {
+it.skipIf(TMP_MISSING)('iii213 iter1 anchor diff', () => {
   const kL = u8(`${OUT}/x86-iter1/K.liq`), jL = u8(`${OUT}/jdump1/K.liq`);
   const kA = u8(`${OUT}/x86-iter1/K.act`), jA = u8(`${OUT}/jdump1/K.act`);
   const kT = le16(`${OUT}/x86-iter1/K.typ`), jT = le16(`${OUT}/jdump1/K.typ`);

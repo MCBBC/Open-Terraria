@@ -5,7 +5,9 @@
 //  docs/audit/summon-draw-branch-registry-2026-09-07.md §4。
 //  变异判别力：摘任一专绘支/早退门即对应用例爆红（本批已逐一做摘刀验证）。
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MinionProj, minionTrueBox } from '../src/entities/MinionProj';
@@ -87,7 +89,7 @@ function mkMinion(projId: number, player: Player, sentry = false): MinionProj {
 // （:33444-33467,641 flag40=true）+ color87.A=0 → 主绘 :33571 纯加法。
 // 旧通用路 = 帧左上锚盒左上 → 60×60 精灵/32×32 盒偏 (+14,+14)。
 // =====================================================================
-describe('SW-FX6 债① 641 月门 A 支专绘（Main.cs:33161-33166 + :33444-33467 + :33571）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX6 债① 641 月门 A 支专绘（Main.cs:33161-33166 + :33444-33467 + :33571）', () => {
   const RING = 80;   // Extra_50 假贴图边
   function draw641(rot = 0) {
     const sprite = fakeTex(60, 60);
@@ -165,7 +167,7 @@ describe('SW-FX6 债① 641 月门 A 支专绘（Main.cs:33161-33166 + :33444-33
 // 非携行）;携行（ai[2]==1）不重锚 = B 支缺省盒心。AI_138 首行 spriteDirection=1
 // （:70379）→ dir≡None 恒不翻转。
 // =====================================================================
-describe('SW-FX6 债② 691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX6 债② 691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097）', () => {
   const DIMS: Record<number, [number, number]> = { 691: [26, 56], 692: [34, 56], 693: [46, 72] };
   it('结构锁：专绘块在位（Bottom 锚/origin fh−4/携行缺省盒心）', () => {
     expect(MINION_TS).toContain('if (this.sentry && TRAP_TOWER.has(this.projId) && img) {');
@@ -209,7 +211,7 @@ describe('SW-FX6 债② 691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097
 // :35047 Rectangle(x15, y25, num481, num482−1)、origin=(num153, 盒高/2+num151)
 // （num153=texW/4,num151 仅 377=−6 :30190）、ai[2]==1 取右半列。
 // =====================================================================
-describe('SW-FX6 债③ 308/377 半宽切片（Main.cs:34950-34957 + :35047）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX6 债③ 308/377 半宽切片（Main.cs:34950-34957 + :35047）', () => {
   it('结构锁：切片块/num151/携行选列/−1 shave 在位', () => {
     expect(MINION_TS).toContain('if ((this.projId === 308 || this.projId === 377)) {');
     expect(MINION_TS).toContain('const num151 = this.projId === 377 ? -6 : 0;');
@@ -259,7 +261,7 @@ describe('SW-FX6 债③ 308/377 半宽切片（Main.cs:34950-34957 + :35047）',
 // （Main.cs:34170-34174;Utils.cs:1301-1303 = 单位向量×(2,2)×NextFloat）
 // + CurrentDrawnEntityShader==0（常态）color106.A /= 2（:34175-34177）。
 // =====================================================================
-describe('SW-FX6 债④ 623 攻击态抖动 + 本体 A/2（Main.cs:34170-34177）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX6 债④ 623 攻击态抖动 + 本体 A/2（Main.cs:34170-34177）', () => {
   function mk623(gA0: number) {
     setProjSpriteOverride(623, fakeTex(108, 1748));                  // 19 帧×92
     const { player } = makeHooks();
@@ -307,7 +309,7 @@ describe('SW-FX6 债④ 623 攻击态抖动 + 本体 A/2（Main.cs:34170-34177�
 // hide 门整支跳过（Main.cs:22404-22406）= 隐形计数器;AI_164 照跑。
 // 【裁决】本批按原版落 hide（原「12×12 宝石刻意渲染」语义分叉退役,报告单列）。
 // =====================================================================
-describe('SW-FX6 债⑥ 831/970 hide=true 隐形计数器（Projectile.cs:8082/:9197 → Main.cs:22404-22406）', () => {
+describe.skipIf(EXT_MISSING)('SW-FX6 债⑥ 831/970 hide=true 隐形计数器（Projectile.cs:8082/:9197 → Main.cs:22404-22406）', () => {
   it('结构锁：hide 早退门在 draw 顶部、先于 33703 支与通用消费点', () => {
     const iHide = MINION_TS.indexOf('if (this.projId === 831 || this.projId === 970) return;');
     const i33703 = MINION_TS.indexOf('if (CENTER_ANCHOR_33703.has(this.projId) && img) {');
@@ -351,9 +353,10 @@ describe('SW-FX6 债⑥ 831/970 hide=true 隐形计数器（Projectile.cs:8082/:
 // 先于任何公共写点（:25883 不可达）→ dir≡SpriteEffects.None,无镜像发生。
 // BookProj 不建模翻转【正是 1:1】;本组锁死该语义,防按旧债注「补镜像」回潮。
 // =====================================================================
-describe('SW-FX6 债⑦ 1092 书弹 dir≡None 定谳（无刀,语义锁）', () => {
-  const PROJ_CS = readFileSync(join(DECOMPILE_DIR, 'Projectile.cs'), 'utf8');
-  const MAIN_CS = readFileSync(join(DECOMPILE_DIR, 'Main.cs'), 'utf8');
+describe.skipIf(EXT_MISSING)('SW-FX6 债⑦ 1092 书弹 dir≡None 定谳（无刀,语义锁）', () => {
+  // ★C档可移植:缺档降级(describe 体收集期亦执行;EXT_MISSING skip 兜底)
+  const PROJ_CS = existsSync(join(DECOMPILE_DIR, 'Projectile.cs')) ? readFileSync(join(DECOMPILE_DIR, 'Projectile.cs'), 'utf8') : '';
+  const MAIN_CS = existsSync(join(DECOMPILE_DIR, 'Main.cs')) ? readFileSync(join(DECOMPILE_DIR, 'Main.cs'), 'utf8') : '';
 
   it('反编译证据：SetDefaults 复位 spriteDirection=1（Projectile.cs:752）', () => {
     expect(PROJ_CS).toContain('\n\t\tspriteDirection = 1;');
@@ -392,7 +395,7 @@ describe('SW-FX6 债⑦ 1092 书弹 dir≡None 定谳（无刀,语义锁）', ()
 //  lightRGB 表（月门在暗处既不发光自身也吃不到自身光=几乎不可见）。643 原版
 //  无 AddLight（AI_123 全支唯一 AddLight 在 flag(641) 分支内）→ 恒 null。
 // =====================================================================
-describe('SW-RB11e 债①补刀：641 lightRGB (0.3,0.9,0.7)/643 无光（Projectile.cs:37744）', () => {
+describe.skipIf(EXT_MISSING)('SW-RB11e 债①补刀：641 lightRGB (0.3,0.9,0.7)/643 无光（Projectile.cs:37744）', () => {
   function lightOf(id: number): [number, number, number] | null {
     const { player } = makeHooks();
     return (mkMinion(id, player, true) as unknown as {

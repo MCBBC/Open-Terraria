@@ -30,7 +30,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // 变异自证内层 spawn 按仓内习语放宽
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withMutation } from './mutation-guard';
 import { Player } from '../src/entities/Player';
@@ -41,6 +41,9 @@ import { Arrow } from '../src/entities/Arrow';
 import { MysticSnakeCoil } from '../src/entities/MysticSnakeCoil';
 import type { VDust } from '../src/fx/VanillaDust';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 const GAME = join(__dirname, '..');
 
@@ -136,8 +139,9 @@ const wrapPi = (a: number): number => {
 // ============================================================
 // ① 源码锚扫描（反编译 1457 亲读锚——先定谳面）
 // ============================================================
-describe('① 源码锚（R16 F1-F12 反编译锚亲读）', () => {
-  const psrc = readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8');
+describe.skipIf(EXT_MISSING)('① 源码锚（R16 F1-F12 反编译锚亲读）', () => {
+  // ★C档可移植:缺档降级(describe 体收集期亦执行;EXT_MISSING skip 兜底)
+  const psrc = existsSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs')) ? readFileSync(join(GAME, '..', 'Terarria1457', 'Terraria', 'Projectile.cs'), 'utf8') : '';
 
   it('F1/F3/F4 锚（:30601 出膛/:6951+:468+:14036+:606-608 IDStatic 链/:80318-80341 爆花）', () => {
     // F1：387 激光 NewProjectile @Center（:30601）+ 389 盒 4×4（:4732-4743）
@@ -215,7 +219,7 @@ describe('① 源码锚（R16 F1-F12 反编译锚亲读）', () => {
 // ============================================================
 // ② 行为判别锁（F1-F12）
 // ============================================================
-describe('② 行为判别锁', () => {
+describe.skipIf(EXT_MISSING)('② 行为判别锁', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('F1 389 出膛锚=Center−2（弹心=随从发拍心;旧 −5 偏 3px → 红）', () => {
@@ -506,7 +510,7 @@ describe('② 行为判别锁', () => {
 // ③ 变异自证（恰红+withMutation 三层守卫,BJ643 债①纪律）
 //    SW_C16A_MUT=1 时本组跳过（内层独跑读环境位跳过自证组,防递归）
 // ============================================================
-describe.skipIf(process.env.SW_C16A_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
+describe.skipIf(EXT_MISSING || process.env.SW_C16A_MUT)('③ 变异自证（恰红+逐字节还原+sha256 对拍）', () => {
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
 
   const spawnVitest = (filter: string) => spawnSync(

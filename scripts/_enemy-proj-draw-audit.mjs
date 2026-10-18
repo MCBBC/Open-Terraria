@@ -1,9 +1,10 @@
 // 敌弹绘制尺寸对账盘点(G11):逐弹型列 贴图原生尺寸(IHDR) × SetDefaults(w/h/scale)
 //  × projFrames × 当前仓库画法 → 失真判定。经 tools/run-diag.mjs 运行。
+import { REPO_ROOT } from './_pathlib.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld/game';
+const ROOT = REPO_ROOT;
 const imgDir = path.join(ROOT, 'public/sprites/vanilla');
 const projData = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/data/vanilla-projectiles.json'), 'utf8'));
 const projFrames = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/data/vanilla-projframes.json'), 'utf8'));

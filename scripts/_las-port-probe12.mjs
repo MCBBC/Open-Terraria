@@ -1,5 +1,6 @@
 // Lights And Shadows 探针 v12:湿淋淋世界 A/B 判别(abOldGodray on/off)+缓冲读回。
 // 维度:时段×位置×天气×DPR;方向判定=太阳在画面上/下半(正午太阳应在上)。
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -10,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { zipSync } = require('fflate');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const WLD = process.env.LAS_WLD || '/Users/vinlic/Downloads/湿淋淋的谨慎小块田地 (1).wld';
+const WLD = process.env.LAS_WLD || needInput(join(DOWNLOADS, '湿淋淋的谨慎小块田地 (1).wld'));
 const DPR = Number(process.env.LAS_DPR || '1');
 const SHOT = '/tmp/las-shots';
 fs.mkdirSync(SHOT, { recursive: true });

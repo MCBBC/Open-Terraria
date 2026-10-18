@@ -8,12 +8,16 @@
 //   js-reseeds.txt     窗口前后各 8 个 reseed 标记（全局序号+站点）,闭合锚证据
 // 用法：cd game && SW_I184WIN=1 SW_I184_OUT=/tmp/iii184-out npx vitest run tools/_iii184win.test.ts
 import { it } from 'vitest';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG, UnifiedRandom } from '../src/core/rng';
 
 const RUN = process.env.SW_I184WIN === '1';
 const OUT = process.env.SW_I184_OUT ?? '/tmp/iii184-out';
+
+// ★C档可移植:/tmp 对拍产物(本机一次性诊断面;缺=skip 不红)
+const TMP_MISSING = !existsSync(`${OUT}/x86-rollwin65.txt`);
 const SEED = process.env.SW_I184_SEED ?? '1138154190';
 // DumpBox 范式：苔藓槽末盒快照（mile8 #65 首差 (1485,335) 邻域+余量）
 const BX0 = Number(process.env.SW_I184_BX0 ?? 1185);
@@ -136,7 +140,7 @@ const BY1 = Number(process.env.SW_I184_BY1 ?? 535);
 /** 离线对拍（免 worldgen）：x86 rollwin65 值流 ↔ 普适流 UnifiedRandom(seed) 前缀 ↔
  *  JS js-win65.txt 三方逐位;报首差位与 Δlen。附 x86 侧剔尾（RunPass 簿记骰 +1,LXVI 判例）。
  *  用法：npx vitest run tools/_iii184win.test.ts -t 'offline' */
-(it as (n: string, f: () => void) => void)('IIIII184 offline triple diff (no worldgen)', () => {
+(it.skipIf(TMP_MISSING) as unknown as (n: string, f: () => void) => void)('IIIII184 offline triple diff (no worldgen)', () => {
   const x86Path = `${OUT}/x86-rollwin65.txt`;
   const jsPath = `${OUT}/js-win65.txt`;
   const x86: number[] = [];

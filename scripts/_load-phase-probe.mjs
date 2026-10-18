@@ -1,8 +1,9 @@
 // 加载分段实测：fromPacket 计时 + worker 检查点日志
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN='http://localhost:5201';
-const MAP='/Users/vinlic/Downloads/map-Starter_World (16).json';
+const MAP=needInput(join(DOWNLOADS, 'map-Starter_World (16).json'));
 const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000});
 const page=await browser.newPage();
 const wkLogs=[];

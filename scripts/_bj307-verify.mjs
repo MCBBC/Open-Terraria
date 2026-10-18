@@ -3,6 +3,7 @@
 // 格内像素扫描。判据:修复后海面线坡面格【切角区】不得出现 LiquidSlope_0 主色
 // (9,61,191)=#093DBF(±3)——修复前增强把整格斜面水画在此处(用户实报色块)。
 // 用法(game/ 下):SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs scripts/_bj307-verify.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ import { saveCanvasShot } from '../tools/probe/lib/shot.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5201';
 const OUT = process.env.BJ307_OUT ?? '/tmp/bj307-out';
-const MAP = process.env.BJ307_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (33).json';
+const MAP = process.env.BJ307_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (33).json'));
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[bj307]', ...a);

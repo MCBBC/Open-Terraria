@@ -1,9 +1,10 @@
 // _waterfallab:同页同世界 A/B——waveQuality 3(果冻管线开) vs 0(关) 切换对拍。
 // 排除两页两世界的液体沉降差异(瀑布存在与否高度依赖液态)。
 // 上一版两页对拍发现"warp 构建瀑布消失"——本探针定谳是否为构建差异。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 const CX = 37329, CY = 4011;
 
 const b = await puppeteer.launch({

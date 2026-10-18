@@ -8,11 +8,12 @@
 //   A 关态：全部采样 ≡ 带帧 (144,0)
 //   B 开态：采样 ∈ {(144,72+i*72)|i=0..5}，≥2 档（在动），永不 ≡ 关态帧（无回闪）
 //   C 相位：A/B 左列 x 差 7（%6=1）→ 同时刻 idx 恒差 1
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const OUT = process.env.OUT ?? '/tmp/fountain-anim';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');

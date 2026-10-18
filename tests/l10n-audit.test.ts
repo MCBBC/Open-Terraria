@@ -11,6 +11,10 @@
 //    zh-Hans 恒 0（缺省语言全覆盖纪律硬闸）；
 //  ④ zh-Hans 裸键占位哨兵（J-1）：custom 值 = 键名回显（value===键尾段/整键）
 //    白名单外一律红；白名单失效条目（补译后未摘）同样红（自净闸）。
+import { existsSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n', 'tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 import { describe, it, expect } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,8 +38,9 @@ describe('l10n 键完整性（vite build 同源检查）', () => {
   });
 });
 
-describe('l10n 全 12 语言闸（清偿刀 O J-2 收敛形态）', () => {
-  const ALL = auditL10nAll(join(ROOT, 'src'));
+describe.skipIf(EXT_MISSING)('l10n 全 12 语言闸（清偿刀 O J-2 收敛形态）', () => {
+  // ★C档可便携:自有源分片在仓库外;缺档=降级(仅 describe2 skip,describe1 仓内面常跑)
+  const ALL = EXT_MISSING ? null : auditL10nAll(join(ROOT, 'src'));
 
   it('used→present 正向闸：全 12 语言零缺失（连 en 兜底都没有才红）', () => {
     expect(ALL.cultures).toEqual(CULTURES);
@@ -86,7 +91,7 @@ describe('l10n 全 12 语言闸（清偿刀 O J-2 收敛形态）', () => {
 });
 
 describe('zh-Hans 裸键占位哨兵（清偿刀 O J-1）', () => {
-  it('custom zh 零裸键占位（裁定白名单外）+ 白名单自恰（补译后须摘条目）', () => {
+  it.skipIf(EXT_MISSING)('custom zh 零裸键占位（裁定白名单外）+ 白名单自恰（补译后须摘条目）', () => {
     const { flagged, violations, stale } = zhBarePlaceholderAudit();
     expect(violations).toEqual([]);
     expect(stale).toEqual([]); // 白名单条目失效（已补译）→ 红，逼同步摘除

@@ -3,6 +3,7 @@
 //  2. endFgPass 时刻门控画布全量 PNG 落盘 + applyFullScreen 后再抓一张
 //  3. warp 调试态(liquidDebugState().warp) + isCpuRender
 // 用法(game/): SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs --timeout=300000 scripts/_iii255-gatesnap.mjs
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ const seedDef = (json) => {
   });
 };
 
-const saveJsonTxt = fs.readFileSync('/Users/vinlic/Downloads/map-Starter_World (30).json', 'utf8');
+const saveJsonTxt = fs.readFileSync(needInput(join(DOWNLOADS, 'map-Starter_World (30).json')), 'utf8');
 const browser = await launchBrowser({ errors: [] });
 const page = await openPage(browser, { errors: [] });
 page.__probeOrigin = ORIGIN;

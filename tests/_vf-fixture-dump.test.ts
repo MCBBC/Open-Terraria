@@ -4,12 +4,13 @@
 // ——全图 168MB/千万格会把逐格 interp 对拍拖到小时级)。跑一次即留盘。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readLocalFixture, localFixtureMissing } from './fixturePath';
 import { parseWld } from '../src/wld/WldParser';
 
-describe('vf worldwide 夹具再生', () => {
+describe.skipIf(localFixtureMissing('ftw-v2.wld'))('vf worldwide 夹具再生', () => {
   it('dump /tmp/vf-codegen/world.json(缺失时)', () => {
     if (existsSync('/tmp/vf-codegen/world.json')) return;   // 已在,跳过
-    const wld = parseWld(new Uint8Array(readFileSync('/Users/vinlic/Downloads/FTW V2.wld')));
+    const wld = parseWld(new Uint8Array(readLocalFixture('ftw-v2.wld')));
     const W = wld.tilesWide, H = wld.tilesHigh;
     const WIN = 360;
     // 粗扫 48×48 步长窗口活性密度,取最密窗口(地下带地形族最丰富)

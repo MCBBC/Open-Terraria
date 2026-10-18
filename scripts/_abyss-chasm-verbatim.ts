@@ -1,11 +1,12 @@
 // ★652b-3:gen.ts chasmGenerator 逐字提取计数(不经判卷仪计数栈,独立清点)。
 // 从 gen.ts 源码正则切出 chasmGenerator 函数体,以桩 store 运行 → 裁定 42/45 掷差归属。
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import { readFileSync } from 'node:fs';
 import { RNG, translateSeed } from '../src/core/rng.ts';
 
 const GEN_PATH = process.env.SW_GAME_ROOT
   ? `${process.env.SW_GAME_ROOT}/mods/calamity/src/gen.ts`
-  : '/Users/vinlic/Project/GLM/SandboxWorld/game/mods/calamity/src/gen.ts';
+  : join(REPO_ROOT, 'mods/calamity/src/gen.ts');
 const src = readFileSync(GEN_PATH, 'utf8');
 // 切出 "const chasmGenerator = (i, jScan, steps) => {" 到 "\n      };" (函数收口)
 const m = src.match(/const chasmGenerator = \(i, jScan, steps\) => \{[\s\S]*?\n      \};/);

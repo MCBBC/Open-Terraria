@@ -1,7 +1,8 @@
 // EoL xray4: presentBatch 风暴定性(次数×单价) + 深层调用方链 + worker 脚本身份 + equipStats worker 定性
 // run: node --max-old-space-size=8192 scripts/_eol-xray4.mjs [trace.json]
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import fs from 'node:fs';
-const PATH = process.argv[2] || '/Users/vinlic/Downloads/Trace-20261003T161320.json';
+const PATH = process.argv[2] || needInput(join(DOWNLOADS, 'Trace-20261003T161320.json'));
 const t = JSON.parse(fs.readFileSync(PATH, 'utf8'));
 const evs = t.traceEvents || [];
 const MAIN_TID = 25363119, MPID = 97833, MAIN = MPID + ':' + MAIN_TID;

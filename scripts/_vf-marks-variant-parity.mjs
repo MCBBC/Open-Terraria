@@ -1,11 +1,12 @@
 // 变体全等对质:游戏导入店(用户现档)上,注入 rig 见证序变体 fn + forceFresh,
 // 输出帧必须与 rig 原始 (fx,fy) 逐位相等(不存在任何归一化,oracle 注释:双轴漂移无单一公式)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
-const MAP = '/Users/vinlic/Downloads/map-FTW_V2 (6).json';
-const ROWS = JSON.parse(fs.readFileSync('/Users/vinlic/.claude/jobs/4a66e745/tmp/marks-rig.json', 'utf8'));
+const MAP = needInput(join(DOWNLOADS, 'map-FTW_V2 (6).json'));
+const ROWS = JSON.parse(fs.readFileSync(needInput(join(HOME, '.claude/jobs/4a66e745/tmp/marks-rig.json')), 'utf8'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const saveJson = fs.readFileSync(MAP, 'utf8');
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=metal'], defaultViewport: { width: 900, height: 600 } });

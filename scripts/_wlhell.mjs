@@ -1,9 +1,10 @@
 // 地狱亮度验证:深处背景/瓦片亮度+色偏(红橙环境)+脉动(两采样差)
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const B = process.env.T || 'http://localhost:4173';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wlhell',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/wlhell'),
   args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();

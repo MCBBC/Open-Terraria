@@ -27,7 +27,8 @@ import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../src/stats/TouchDamage';
 import { WALL_DUNGEON_SHEETS } from '../src/world/DungeonDualZones';
 import { TILE } from '../src/core/constants';
-import { loadFixtureWorld } from './world-fixtures';   // ★IIIII259 测试世界档案库
+import { loadFixtureWorld } from './world-fixtures';
+import { fixtureMissing } from './world-fixtures';   // ★IIIII259 测试世界档案库
 
 const PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]); // TileID.Sets.Platforms
 
@@ -238,7 +239,7 @@ function paintRect(st: TileStore, x0: number, x1: number, y0: number, y1: number
 describe('SW-BJ43 魔法海螺落点（TeleportHelpers.cs:49-241 金标）', () => {
   // 修复前实机探针（_bj43-crawl-probe,已删）实测：bj43-bR/bj43-cL/bj43-cR live=null
   // （迭代帽燃尽）、bj43-c 双洋全败 → 用户原地不动。金标复刻在同瓦全部成功落位。
-  it('真世界同瓦对拍：仓库爬行体与金标成败/落格全等（含修复前 null 种子）', async () => {
+  it.skipIf(fixtureMissing('bj43-b', 'bj43-c'))('真世界同瓦对拍：仓库爬行体与金标成败/落格全等（含修复前 null 种子）', async () => {
     for (const seed of ['bj43-b', 'bj43-c']) {
       const world = loadFixtureWorld(seed);   // ★IIIII259 档案载入（同种子同世界同落格）
       const ctx = makeCtx(world);

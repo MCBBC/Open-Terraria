@@ -1,10 +1,11 @@
 // _lavaslope-repro16: 近距离(fullbright, zoom 2)渲染 oracle 标记格:
 // 水岸 (1676,464)/(1679,456)/(1681,466) 与 岩浆半砖 (2018,1123)/(2027,1135)。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 const SPOTS = [
   ['water-s4', 1679, 456], ['water-s1', 1676, 464], ['water-hf', 1681, 466],
   ['lava-hf', 2018, 1123], ['lava-hf2', 2027, 1135],

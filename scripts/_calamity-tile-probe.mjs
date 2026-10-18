@@ -1,6 +1,7 @@
 // B5/B6 真机探针:tile 放置读回 + **mod NPC 贴图注入链定谳**(用户实报 NPC 全透明)——
 // vimages['vanilla/NPC_<id>.png'] 命中?vnpc 帧解析?drawEnemy 消费面?
 // ★page.evaluate import 必须带 .ts(vite dev 无扩展名=第二模块实例判例)。
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
@@ -24,7 +25,7 @@ for (let i = 0; i < 45; i++) {
   await new Promise((r) => setTimeout(r, 2000));
 }
 // node 侧直读包字节 → base64 过 evaluate(vite dev 静态/@fs 均被 fs.allow 拒;判例)
-const pkgB64 = Buffer.from(readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/mods/dist/calamity.swmod')).toString('base64');
+const pkgB64 = Buffer.from(readFileSync(join(REPO_ROOT, 'mods/dist/calamity.swmod'))).toString('base64');
 const install = await page.evaluate(async (b64) => {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);

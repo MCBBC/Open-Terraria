@@ -1,13 +1,14 @@
 // 回归基线+月亮点检:默认路径(无参)夜景 vs ?worldlayer=1;采样月亮屏位/天空顶/地面带/史莱姆
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const OUT = '/Users/vinlic/.claude/jobs/8405c930/tmp/wl-final';
+const OUT = join(HOME, '.claude/jobs/8405c930/tmp/wl-final');
 fs.mkdirSync(OUT, { recursive: true });
 const B = process.env.T || 'http://localhost:4173';
 async function shot(qs, tag) {
   const browser = await puppeteer.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: 'new', userDataDir: `/Users/vinlic/.claude/jobs/8405c930/tmp/wlf${tag}`,
+    headless: 'new', userDataDir: `${HOME}/.claude/jobs/8405c930/tmp/wlf${tag}`,
     args: ['--no-first-run', '--use-gl=angle'], defaultViewport: { width: 1280, height: 800 },
   });
   const page = await browser.newPage();

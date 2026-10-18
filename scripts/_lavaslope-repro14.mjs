@@ -1,8 +1,9 @@
 // _lavaslope-repro14: 深地下(groundLevel 之下)泥/土 半砖+坡面 × 邻液全包 构型,近距离截图。
 // 复刻用户世界 oracle 标记格的精确条件: t=25 mud, hf=1, L=R=U=255 lava, wall=0。
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
 
 const b = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

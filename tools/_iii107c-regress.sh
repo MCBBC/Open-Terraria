@@ -1,6 +1,6 @@
 #!/bin/bash
 # IIII107c 回归矩阵：金标十件套 + 护卫四件 + seed-parity + spot 十六线 + sparkle/grv 守恒
-cd /Users/vinlic/Project/GLM/SandboxWorld/game
+cd "$(dirname "$0")/.."   # ★C档可移植:仓库根(game/)
 OUT=/tmp/iii145-out/reg
 mkdir -p "$OUT"
 

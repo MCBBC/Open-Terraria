@@ -13,21 +13,24 @@
 //  同一个 compositePaperDoll——烘焙域差即实机差(单 drawImage 直绘,无二次合成)。
 // 本文件=数据锁(反编译 CopyVariant 表全网格认证)+结构锁+行为面单测。纯 node,无 DOM。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
 import { variantSheetName, VARIANT_SHEET_SOURCE } from '../src/player/PaperDoll';
 
 const src = readFileSync(new URL('../src/player/PaperDoll.ts', import.meta.url), 'utf8');
 const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 const ccSrc = readFileSync(new URL('../src/ui/CharCreation.ts', import.meta.url), 'utf8');
 const rendererSrc = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
-const csSrc = readFileSync(
-  new URL('../../Terarria1457/Terraria.Initializers/PlayerDataInitializer.cs', import.meta.url), 'utf8');
+const csSrc = existsSync(new URL('../../Terarria1457/Terraria.Initializers/PlayerDataInitializer.cs', import.meta.url))
+  ? readFileSync(new URL('../../Terarria1457/Terraria.Initializers/PlayerDataInitializer.cs', import.meta.url), 'utf8')
+  : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 const manifest: Record<string, unknown> = JSON.parse(
   readFileSync(new URL('../public/sprites/vanilla-ui.json', import.meta.url), 'utf8')).files as Record<string, unknown>;
 const inManifest = (n: string) => n in manifest;
 
 // ===================== ① 数据锁:反编译 CopyVariant 链全网格认证 =====================
-describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变体0-11×通道0-15)', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变体0-11×通道0-15)', () => {
   // 从反编译源解 LoadVariant/CopyVariant 调用 → 逐 (变体,通道) 独立推导原版取表文件
   const ownOf = new Map<number, number[]>();
   const copyOf = new Map<number, number>();
@@ -103,7 +106,7 @@ describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变�
 });
 
 // ===================== ② 行为面单测(合成谓词,不依赖清单) =====================
-describe('SW-BJ21 ② variantSheetName 链解析行为面', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ21 ② variantSheetName 链解析行为面', () => {
   const no = () => false;
   const only = (...names: string[]) => (n: string) => names.includes(n);
 
@@ -120,7 +123,7 @@ describe('SW-BJ21 ② variantSheetName 链解析行为面', () => {
 });
 
 // ===================== ③ 结构锁:四个消费面共用同一解析(防再分叉) =====================
-describe('SW-BJ21 ③ 结构锁(取表/就绪门/预载/捏人预抢 同源)', () => {
+describe.skipIf(EXT_MISSING)('SW-BJ21 ③ 结构锁(取表/就绪门/预载/捏人预抢 同源)', () => {
   it('sheetRect 取表走 variantSheetName(直落 0 的 ?? 链必须消失)', () => {
     expect(src).toContain('UITextures.get(variantSheetName(variant, sheet, (n) => UITextures.has(n)))');
     expect(src).not.toContain("UITextures.get(`Player_${variant}_${sheet}.png`) ?? UITextures.get(`Player_0_${sheet}.png`)");

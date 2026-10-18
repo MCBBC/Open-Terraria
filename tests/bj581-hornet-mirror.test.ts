@@ -25,7 +25,7 @@
 //      FloatyGross/Bee/Reaper/Ghost/SporeBat/PirateGhost/TorchGod）——BJ584 已登记的
 //      「地狱蝠族债」扩名至此（同款死区档：vx==0 保前值）。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { seededRandom, BATTERY_SEED } from './seeded-rng';
 import { World } from '../src/world/World';
@@ -33,6 +33,9 @@ import { Enemy } from '../src/entities/Enemy';
 import { NET_ID_MAP } from '../src/world/spawn/VanillaSpawner';
 import { Renderer } from '../src/render/Renderer';
 import type { GameHooks } from '../src/entities/types';
+// ★C档可移植:仓库外依赖(game/ 兄弟目录,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['Terarria1456', 'Terarria1457'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -41,17 +44,17 @@ const ROOT = join(__dirname, '..');
 const rendererSrc = readFileSync(join(ROOT, 'src/render/Renderer.ts'), 'utf8');
 const enemySrc = readFileSync(join(ROOT, 'src/entities/Enemy.ts'), 'utf8');
 const spawnerSrc = readFileSync(join(ROOT, 'src/world/spawn/VanillaSpawner.ts'), 'utf8');
-const npc1457 = readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8');
-const npc1456 = readFileSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs'), 'utf8');
-const npcids = readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8');
-const mainSrc = readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8');
+const npc1457 = existsSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npc1456 = existsSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs')) ? readFileSync(join(ROOT, '../Terarria1456/Terraria/NPC.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const npcids = existsSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria.ID/NPCID.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
+const mainSrc = existsSync(join(ROOT, '../Terarria1457/Terraria/Main.cs')) ? readFileSync(join(ROOT, '../Terarria1457/Terraria/Main.cs'), 'utf8') : '';   // ★C档可移植:缺档降级(EXT_MISSING skip 兜底)
 
 const HORNET_FAMILY = [42, 176, 205, 231, 232, 233, 234, 235];
 
 // ---------------------------------------------------------------------------
 // 原版活体锚（Terarria1457 源码直读，原版语义漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ581 原版黄蜂族「随面镜像」活体锚', () => {
+describe.skipIf(EXT_MISSING)('BJ581 原版黄蜂族「随面镜像」活体锚', () => {
   it('id 勘误钉值：MossHornet=176（非 280）/Hornet=42（210=Bee）/Moth=205/231-235', () => {
     expect(npcids).toContain('public const short Hornet = 42;');
     expect(npcids).toContain('public const short MossHornet = 176;');
@@ -129,7 +132,7 @@ describe('BJ581 原版黄蜂族「随面镜像」活体锚', () => {
 // ---------------------------------------------------------------------------
 // 本仓销案锚（无落刀——已 1:1 同相；任何一侧漂移即爆红）
 // ---------------------------------------------------------------------------
-describe('BJ581 本仓同相销案锚', () => {
+describe.skipIf(EXT_MISSING)('BJ581 本仓同相销案锚', () => {
   it('swarmerAI 黄蜂 facing 写点 = 1457 三元同构 + rotation vx*0.1', () => {
     expect(enemySrc).toMatch(/\} else if \(isHornet \|\| vid === 205\) \{/);
     expect(enemySrc).toMatch(
@@ -201,7 +204,7 @@ function sameCellPlayer(e: Enemy): Record<string, unknown> {
   return { cx, cy, dead: false, stealth: 0, itemAnimTicks: 0, useTime: 0 };
 }
 
-describe('BJ581 行为级逐拍采样：苔藓黄蜂 176 / 黄蜂 42', () => {
+describe.skipIf(EXT_MISSING)('BJ581 行为级逐拍采样：苔藓黄蜂 176 / 黄蜂 42', () => {
   for (const vid of [176, 42]) {
     it(`vid ${vid}：vx 序列 [0,+0.5,-0.5] → facing 逐拍 ≡ sign(vx)（镜像变号 2 次）+ visAngle=vx*0.1`, () => {
       const game = makeGame();

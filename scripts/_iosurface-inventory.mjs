@@ -1,9 +1,10 @@
 // IOSurface 占用盘点(2026-08-19):单页面养了多少张画布/GL 纹理,按家族分组。
 // 用法:SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_iosurface-inventory.mjs
+import { HOME, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/inv-profile',
+  headless: 'new', userDataDir: join(HOME, '.claude/jobs/8405c930/tmp/inv-profile'),
   args: ['--no-first-run'], defaultViewport: { width: 1512, height: 862 },
 });
 const page = await browser.newPage();

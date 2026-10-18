@@ -5,6 +5,7 @@
 //      (mark1 左坡1 / half 半砖 / mark2 右坡2 / flat 平水参照)
 //   b. 水线逐列剖析:每设备列找水体顶缘(首个"水色"行)与其亮度 → 白线连续性量化
 // 用法(game/): node tools/probe.mjs run scripts/_iii256-repro.mjs --vite=5305 --out=/tmp/iii256-out
+import { DOWNLOADS, needInput } from './_pathlib.mjs';
 import fs from 'node:fs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +17,7 @@ import { freezeClock } from '../tools/probe/lib/clock.mjs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5305';
 const OUT = process.env.SW_PROBE_OUT ?? '/tmp/iii256-out';
-const MAP = process.env.III256_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (30).json';
+const MAP = process.env.III256_MAP ?? needInput(join(DOWNLOADS, 'map-Starter_World (30).json'));
 const FLAG = process.env.III256_FLAG ?? '?slopewave=1';
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

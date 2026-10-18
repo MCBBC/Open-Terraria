@@ -1,10 +1,11 @@
 // _lavaslope-oracle: 对指定簇中心跑浸润 oracle(多簇循环)。
 // 用法: SW_CLUSTERS="3664,1136;1200,1104;3376,1104;1744,464;1616,496"
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5202';
-const OUT = process.env.SW_OUT || '/Users/vinlic/.claude/jobs/8405c930/tmp';
-const MAP = '/Users/vinlic/Downloads/map-饥饿的庄园 (1).json';
+const OUT = process.env.SW_OUT || join(HOME, '.claude/jobs/8405c930/tmp');
+const MAP = needInput(join(DOWNLOADS, 'map-饥饿的庄园 (1).json'));
 const CLUSTERS = (process.env.SW_CLUSTERS || '3664,1136;1200,1104;3376,1104;2032,1136;1744,464;1616,496')
   .split(';').map(s => s.split(',').map(Number));
 

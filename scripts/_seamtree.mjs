@@ -1,7 +1,8 @@
 // 用带缝帧（黏腻的虫子热喷泉报告）在解剖台复现树 (2164,219) 的交界缝
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const full = JSON.parse(readFileSync('/Users/vinlic/Downloads/debug-report-黏腻的虫子热喷泉-2026-08-19T16-38-03-419Z.json', 'utf8'));
+const full = JSON.parse(readFileSync(needInput(join(DOWNLOADS, 'debug-report-黏腻的虫子热喷泉-2026-08-19T16-38-03-419Z.json')), 'utf8'));
 const browser = await puppeteer.launch({ protocolTimeout: 240000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1600, height: 1000 } });
 const page = await browser.newPage();
 const errs = [];

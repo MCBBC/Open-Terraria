@@ -1,8 +1,9 @@
 // 水囊系统穷举：在口袋区各候选格生成史莱姆，各跑 600t，记录行为签名
 // （原地弹跳/逃逸路径/湿切换），定位"水面反复弹跳跳不起"的确切点位
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-const MAP = '/Users/vinlic/Downloads/map-害兽姐妹会.json';
+const MAP = needInput(join(DOWNLOADS, 'map-害兽姐妹会.json'));
 const json = fs.readFileSync(MAP, 'utf8');
 
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });

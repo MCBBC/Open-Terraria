@@ -16,10 +16,13 @@
 //   句柄经结构化克隆值通道装载（bj614 同构）;navigator.locks 面=node 可替换全局+
 //   fake LockManager（两请求者竞争矩阵）;模块级句柄/warn 态用 vi.resetModules 隔离。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { LoadTextResolution } from '../src/save/FsBackup';
 import { installFakeIdb, type FakeIdbHandle } from './fake-idb-util';
+// ★C档可移植:l10n 源目录(仓库外 tools/l10n-custom,clone 侧缺=正常形态)——缺则本文件 skip,本机在=真跑零语义变化
+const EXT_MISSING = !['tools/l10n-custom'].every((d) => existsSync(new URL(`../../${d}`, import.meta.url)));
+
 
 // ---- 共享垫 ----
 const mem = new Map<string, string>();
@@ -112,7 +115,7 @@ function expectSource<T extends LoadTextResolution['source']>(r: LoadTextResolut
 // =====================================================================
 // A 组 件1（终态）：Web Locks 会话锁——同世界/同角色已有会话拒载;降级放行
 // =====================================================================
-describe('BJ617 A组 件1：SessionLock Web Locks 会话锁', () => {
+describe.skipIf(EXT_MISSING)('BJ617 A组 件1：SessionLock Web Locks 会话锁', () => {
   it('A1 键面+兼容门：锁名域前缀防撞名;无 navigator.locks（老 Safari<16.4/非安全上下文）=unsupported 降级', async () => {
     const { worldLockKey, charLockKey, sessionLocksSupported, acquireSessionLock } = await import('../src/save/SessionLock');
     expect(worldLockKey(5)).toBe('sandboxworld.world-lock.5');
@@ -204,7 +207,7 @@ describe('BJ617 A组 件1：SessionLock Web Locks 会话锁', () => {
 // =====================================================================
 // B 组 件2：读序倒挂修复（probe F4 转正）
 // =====================================================================
-describe('BJ617 B组 件2：resolveLoadText 三段择源（IDB → FS 备份 → LS 副本）', () => {
+describe.skipIf(EXT_MISSING)('BJ617 B组 件2：resolveLoadText 三段择源（IDB → FS 备份 → LS 副本）', () => {
   it('B1 IDB 现值恒权威：命中直返,绝不咨询 FS（备份回写不得倒灌健康档）', async () => {
     idb.map.set('sandboxworld.world.1', '{"header":{"name":"IDB现值"}}');
     idb.map.set(FS_HANDLE_KEY, fakeDir('B', { '世界_1_20261010_000001.json': '{"header":{"name":"FS备份"}}' }));
@@ -290,7 +293,7 @@ describe('BJ617 B组 件2：resolveLoadText 三段择源（IDB → FS 备份 →
 // =====================================================================
 // C 组 件3：l10n 恢复文案陈旧草稿遮蔽修复
 // =====================================================================
-describe('BJ617 C组 件3：l10n 陈旧 flat 草稿不再遮蔽嵌套正确版', () => {
+describe.skipIf(EXT_MISSING)('BJ617 C组 件3：l10n 陈旧 flat 草稿不再遮蔽嵌套正确版', () => {
   const customRoot = resolve(__dirname, '..', '..', 'tools', 'l10n-custom');
   const builtRoot = resolve(__dirname, '..', 'public', 'l10n');
 

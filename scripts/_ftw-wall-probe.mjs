@@ -1,11 +1,12 @@
 // FTW V2 导入世界"半透明墙面板"复现探针 v2（2026-08-27 用户报）。
 // 采集：A 墙id/coat 分布 B tiler 直绘 alpha C 烘焙 chunk 墙层 cell alpha
 //   D 缺表登记 chunkSheets E hasTexture/元数据/vimages 状态 F markDirty 自愈验证
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const WLD = '/Users/vinlic/Downloads/FTW V2.wld';
+const WLD = needInput(join(DOWNLOADS, 'FTW V2.wld'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wldB64 = fs.readFileSync(WLD).toString('base64');
 

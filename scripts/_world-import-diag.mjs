@@ -1,6 +1,7 @@
 // 一次性:世界列表「导入世界」E2E(2026-08-27 用户需求)——
 //  标题→单人→(必要时建角)→世界列表→导入 .wld / 本仓 .json / 非法扩展名三案:
 //  断言行数+1、仍停在世界列表(不进世界)、按钮 loading 态复原、toast 文案。
+import { REPO_ROOT, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { writeFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -33,7 +34,7 @@ const out = { rows0 };
 
 // ---- 案1：导入 .wld ----
 const wldInput = await page.$('.sw-vsel input[type=file]');
-await wldInput.uploadFile('/Users/vinlic/Project/GLM/SandboxWorld/game/tests/golden/wld/12345世界.wld');
+await wldInput.uploadFile(join(REPO_ROOT, 'tests/golden/wld/12345世界.wld'));
 await page.waitForFunction((n) => document.querySelectorAll('.sw-vsel-list .sw-vitem').length > n,
   { timeout: 60000 }, rows0);
 await sleep(300);

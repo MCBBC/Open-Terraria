@@ -8,7 +8,8 @@
 //       （两洋承位判据 includePlatforms=false）。
 import { it, expect } from 'vitest';
 import { Game } from '../src/core/Game';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { readLocalFixture } from '../tests/fixturePath';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { loadSave } from '../src/save/SaveFile';
 import { World } from '../src/world/World';
@@ -253,13 +254,13 @@ function liveCalls(world: World, tag: string): void {
   //   (35,311)/(45,311)/(58,311) type12; 玩家落点 (40.6,310.7)）
   const candidates: Array<[string, string]> = [
     ['TMP_BJ275', '/tmp/bj275-user-map.wld'],
-    ['DL_WLD', '/Users/vinlic/Downloads/天真的钴最高点.wld'],
-    ['DL_WLD1', '/Users/vinlic/Downloads/天真的钴最高点(1).wld'],
+    ['DL_WLD', 'naive-cobalt-peak.wld'],      // ★C档收编:原 ~/Downloads/天真的钴最高点.wld
+    ['DL_WLD1', 'naive-cobalt-peak-1.wld'],  // ★C档收编:原 ~/Downloads/天真的钴最高点(1).wld
   ];
   let chosen: { name: string; world: World } | null = null;
   for (const [name, path] of candidates) {
     try {
-      const buf = new Uint8Array(readFileSync(path));
+      const buf = new Uint8Array(existsSync(path) ? readFileSync(path) : readLocalFixture(path));
       const { save } = parseWldToSave(buf);
       const { world } = loadSave(JSON.stringify(save));
       const st = world.store;

@@ -252,7 +252,7 @@
 
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = process.env.SW_PROJECT_ROOT ?? new URL('../../', import.meta.url).pathname.replace(/\/+$/, '');   // ★C档可移植:game/ 父目录(反编译树/TEdit/Calamity 源所在)
 // 源版本可选(★拍板#7A 2026-09-18 缺省翻转 1456→1457：现库 vanilla-itemrare/itemvalue
 //   已是 1457 终值态,裸跑重产恢复正常更新流;extract-projectiles.mjs 同族先例。
 //   1456 显式路径保留供 recon-item-1456-1457.mjs 双闸——其双实例均显式注入

@@ -7,11 +7,12 @@
 //  · 场景修正:柱区锚 tile~180(surface-120),四柱+仆从 spawn 在界内。
 //  · 逐 rAF 状态行+fixedUpdate 步计数包装+缩略图逐帧像素差(帧尾一致态)。
 //  运行:SW_ORIGIN=http://localhost:5205 node tools/run-diag.mjs --timeout=280000 scripts/_pillar-flash-repro.mjs
+import { DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { launchBrowser, openPage, bootstrap, createGame } from '../tools/probe/lib/index.mjs';
 
-const PLR_PATH = process.env.SW_PLR || '/Users/vinlic/Downloads/Vinlic (1).plr';
+const PLR_PATH = process.env.SW_PLR || needInput(join(DOWNLOADS, 'Vinlic (1).plr'));
 let plrB64 = '';
 try { plrB64 = readFileSync(PLR_PATH).toString('base64'); } catch { console.log('plr not found, fallback zenith-only'); }
 

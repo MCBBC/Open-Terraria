@@ -1,9 +1,10 @@
 // 假人(378/488)渲染复现:载入用户存档 → 定位 (3242,348) → 查 tile/NPC/锚/覆盖层输入。
+import { HOME, DOWNLOADS, needInput, join } from './_pathlib.mjs';
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
-const SAVE = '/Users/vinlic/Downloads/map-Starter_World (27).json';
+const SAVE = needInput(join(DOWNLOADS, 'map-Starter_World (27).json'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errors = [];
@@ -45,7 +46,7 @@ const st = await page.evaluate(() => {
 });
 console.log('载入态:', JSON.stringify(st));
 await new Promise((r) => setTimeout(r, 2500));
-await page.screenshot({ path: '/Users/vinlic/.claude/jobs/4a66e745/tmp/dummy-after.png' });
+await page.screenshot({ path: join(HOME, '.claude/jobs/4a66e745/tmp/dummy-after.png') });
 const st2 = await page.evaluate(() => {
   const g = window.__swGame;
   return {
