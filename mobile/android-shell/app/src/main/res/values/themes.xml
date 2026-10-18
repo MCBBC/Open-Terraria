@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- 原生黑底无标题全屏主题:零 appcompat 依赖,immersive 由 MainActivity 接管 -->
-    <style name="AppTheme" parent="android:Theme.Black.NoTitleBar.Fullscreen" />
-</resources>
