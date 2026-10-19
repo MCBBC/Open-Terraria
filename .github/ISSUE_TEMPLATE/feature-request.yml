@@ -41,4 +41,4 @@ body:
   - type: markdown
     attributes:
       value: |
-        > 💡 提示：想做 mod 的话可以先看 [Mod 开发指南](https://github.com/Vinlic/terraria-game/blob/main/game/docs/mod-dev-guide.md)——10 分钟就能跑起第一个 mod。
+        > 💡 提示：想做 mod 的话可以先看 [Mod 开发指南](https://github.com/SandboxWorldOnline/Open-Terraria/blob/main/docs/mod-dev-guide.md)——10 分钟就能跑起第一个 mod。
