@@ -38796,7 +38796,7 @@ trace 的 ConcurrentSweep 487ms/2+IncrementalSweep 325ms/115 非玩法期 DOM �
 
 ## ① 复现与根因（两矩形之谜）
 
-- **用户实报**：sandbox.vinlic.com 生产站,视口 ≈2000×1184,生成世界时预览面板缩到
+- **用户实报**：sandboxworld.online 生产站,视口 ≈2000×1184,生成世界时预览面板缩到
   ~300×55 疑似两个小矩形并排。`_iii258-repro.mjs` 四档视口真实创建流复现实锤：
   2000×1184（dpr 1/2 同面）面板 **141.4×40.4 逻辑 = 279×80 CSS**（scale 1.9733）、
   1920×1080 → 254×73 CSS、1000×592 → 113×32 CSS——全部不可读。
@@ -38864,7 +38864,7 @@ trace 的 ConcurrentSweep 487ms/2+IncrementalSweep 325ms/115 非玩法期 DOM �
 
 ## ⑤ 部署提醒
 
-- 修复在本地源码与私有 vite 实证;**生产站 sandbox.vinlic.com 需重新构建部署
+- 修复在本地源码与私有 vite 实证;**生产站 sandboxworld.online 需重新构建部署
   （dist 分片+SW 缓存版本链）方可见效**——旧净带代码已被用户浏览器 SW 缓存,
   部署后按 p0-p8 预热门观察（memory: cloudflare-pages-deploy 两坑）。
 - 产物 /tmp/iii258-out（verify 四档+天顶截图/repro 四档截图+repro-report.json）、

@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const host = process.env.HOST ?? 'sandbox.vinlic.com';
+const host = process.env.HOST ?? 'sandboxworld.online';
 const dir = `/tmp/cdn-persist-${host.split('.')[0]}`;
 const launch = () => puppeteer.launch({
   executablePath: CHROME, headless: 'new', userDataDir: dir,

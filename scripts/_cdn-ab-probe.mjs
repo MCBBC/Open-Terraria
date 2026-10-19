@@ -75,7 +75,7 @@ async function testDomain(host) {
 }
 
 const out = [];
-for (const host of ['sandbox.vinlic.com', 'world.vinlic.com']) {
+for (const host of ['sandboxworld.online', 'world.vinlic.com']) {
   const r = await testDomain(host);
   out.push(r);
   console.log(`\n===== ${r.host} =====`);

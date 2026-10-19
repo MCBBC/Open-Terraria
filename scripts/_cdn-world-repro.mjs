@@ -4,7 +4,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const host = process.env.HOST ?? 'sandbox.vinlic.com';
+const host = process.env.HOST ?? 'sandboxworld.online';
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',
   userDataDir: `/tmp/cdn-repro-${host.split('.')[0]}-${Date.now() % 100000}`,

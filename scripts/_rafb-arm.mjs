@@ -2,7 +2,7 @@
 // 本刀只采样定谳,不修任何东西。
 //
 // 用法(一律经 tools/run-diag.mjs,headful 真 Chrome,禁 --disable-gpu-vsync 等 flag):
-//   SW_ORIGIN=https://sandbox.vinlic.com RAFB_ARMS=idle,heavy \
+//   SW_ORIGIN=https://sandboxworld.online RAFB_ARMS=idle,heavy \
 //     node tools/run-diag.mjs --timeout=900000 scripts/_rafb-arm.mjs
 //
 // 环境:

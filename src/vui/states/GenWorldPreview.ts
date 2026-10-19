@@ -19,7 +19,7 @@ const COLUMNS_PER_FRAME = 64;
 const BITMAP_WIPE_MS = 1200;
 
 // ---- ★IIIII258 生成屏预览面板布局（可读优先；IIIII243 净带策略反转） ----
-// 用户实报（sandbox.vinlic.com ≈2000×1184 视口截图）：IIIII243 的「等比缩放进净带」
+// 用户实报（sandboxworld.online ≈2000×1184 视口截图）：IIIII243 的「等比缩放进净带」
 // 把面板缩到 141×40 逻辑（scale~1.97 → 279×80 CSS），不可读——净带（进度条绘制下沿
 // ↔ 提示条字形上沿）在桌面 UIScale 公式下恒 40.4 逻辑 px 高（aspect≥4/3 的窗口
 // logicalH≡600），且与 CSS 分辨率无关：分辨率越高 scale 越大，面板视觉尺寸占比反而

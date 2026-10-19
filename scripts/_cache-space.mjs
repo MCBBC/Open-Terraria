@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({
   headless: 'new', userDataDir: '/tmp/cache-space-' + (Date.now() % 100000), args: ['--no-proxy-server'],
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 const r = await page.evaluate(async () => {
   const c = await caches.open('space-test');
   const raw = 'sprites/vanilla/Backgrounds_Underworld 0.png';   // manifest 条目名(空格)

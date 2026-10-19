@@ -1,4 +1,4 @@
-// ★IIIII258 复现探针:生成预览面板过小(用户实报 sandbox.vinlic.com ≈2000×1184 视口,
+// ★IIIII258 复现探针:生成预览面板过小(用户实报 sandboxworld.online ≈2000×1184 视口,
 // 面板缩到 ~300×55 疑似双矩形)。本探针在多档视口×dpr 跑真实创建流,采样 layoutRects
 // + GenWorldPreview 内部位图模式状态(bitmapMode/revealX/show 尺寸——"双矩形"=擦除揭示
 // 中 show 缓冲左新右旧的分界假说),出全页合成截图 + 面板特写裁片。

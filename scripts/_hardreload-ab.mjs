@@ -11,7 +11,7 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 const CDP = await page.createCDPSession();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 // 等 warm 完成
 for (let i = 0; i < 100; i++) {
@@ -33,7 +33,7 @@ const snapshot = async (tag) => {
       for (const u of probe) {
         e.match[u.split('/').pop()] = {
           str: (await c.match(u))?.status ?? 'MISS',
-          req: (await c.match(new Request('https://sandbox.vinlic.com/' + u)))?.status ?? 'MISS',
+          req: (await c.match(new Request('https://sandboxworld.online/' + u)))?.status ?? 'MISS',
           inKeys: keys.some((r) => r.url.includes(u.split('/').pop())),
         };
       }

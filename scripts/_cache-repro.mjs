@@ -17,7 +17,7 @@ const browser = await puppeteer.launch({
   args: ['--no-proxy-server'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 log('SW controlled');
 // 等 warm 完成(轮询 cache 总数稳定)
@@ -49,7 +49,7 @@ const out = await page.evaluate(async () => {
     const m = await c.match('assets-zip/manifest.json');
     e.manifestEntries = m ? ((await m.json()).length ?? '?') : 'ABSENT';
     // 空格文件名的 match 双形态
-    const u1 = 'https://sandbox.vinlic.com/sprites/vanilla/Backgrounds_Underworld%200.png';
+    const u1 = 'https://sandboxworld.online/sprites/vanilla/Backgrounds_Underworld%200.png';
     e.matchPct20 = (await c.match(u1))?.status ?? 'MISS';
     // 找一个 zip 清单里的 wav/opus 的 URL 形态样例
     e.sampleUrls = keys.slice(0, 3).map((r) => r.url);

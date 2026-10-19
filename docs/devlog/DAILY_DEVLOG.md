@@ -3,7 +3,7 @@
 > **编纂方式**:由协调者以「日期」为游标,将当日 git 提交清单与 Claude 对话记录交由调研子代理撰写,逐日追加。目标:完整还原从代码诞生到今天的开发链路——每一天做了什么、为什么做、怎么做的、在系统中处于什么位置。
 >
 > **数据来源**:
-> - **主会话与子代理转录(每日摘要)**:`/tmp/devlog/days/<日期>.digest.tsv`,两源按 UTC+8 时间戳窗口合并——①2026-08-05~09-08:`ProjectRoot/session-archives/sessions/`(102 会话无损 md 导出,2026-09-08 由 `tools/export-session-archives.py` 生成,含此后被删除的会话;`ar<sid8>:pN`=主会话卷,`as<sid8>`=其子代理);②2026-08-09~今:`~/.claude/projects/-Users-vinlic-Project-GLM-SandboxWorld/*.jsonl` 与 `<会话>/subagents/*.jsonl`(`<sid8>:行号`=主会话,`ag…`=子代理)。类别:H=人类/A=Agent 文本/U=工具调用/D*=子代理/E=工具报错/C=斜杠命令/N=系统注入/S=会话摘要。需原文时按 src 回溯源文件。
+> - **主会话与子代理转录(每日摘要)**:`/tmp/devlog/days/<日期>.digest.tsv`,两源按 UTC+8 时间戳窗口合并——①2026-08-05~09-08:`ProjectRoot/session-archives/sessions/`(102 会话无损 md 导出,2026-09-08 由 `tools/export-session-archives.py` 生成,含此后被删除的会话;`ar<sid8>:pN`=主会话卷,`as<sid8>`=其子代理);②2026-08-09~今:`~/.claude/projects/<项目会话目录>/*.jsonl` 与 `<会话>/subagents/*.jsonl`(`<sid8>:行号`=主会话,`ag…`=子代理)。类别:H=人类/A=Agent 文本/U=工具调用/D*=子代理/E=工具报错/C=斜杠命令/N=系统注入/S=会话摘要。需原文时按 src 回溯源文件。
 > - **人类指令全量真档**:`~/.claude/history.jsonl`(project=`~/Project/GLM/SandboxWorld`),自 2026-08-05 起逐条存世;提取件 `/tmp/devlog/human-prompts/all.tsv`(时间|会话|项目|原文)
 > - **git 提交**:`game/` 仓库(08-06 起有提交;08-05 当日产出凝结于次日 first commit `02c8ad21`),逐日提取件 `/tmp/devlog/commits/<日期>.tsv`
 > - **完整性核验(2026-10-13)**:70 天(08-05~10-13)每日主会话记录在案

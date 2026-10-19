@@ -1,14 +1,14 @@
 // vsync 实况普查探针 v7：页面级独立 rAF 链测纯 vsync 序列 + 实时读 FrameBeat 状态。
-// 运行：SW_ORIGIN=https://sandbox.vinlic.com node tools/run-diag.mjs scripts/_fps-vsync-census.mjs
+// 运行：SW_ORIGIN=https://sandboxworld.online node tools/run-diag.mjs scripts/_fps-vsync-census.mjs
 // 操作：窗口弹出后手动进任意世界（读档/新开均可），进入后自动普查 15s。
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const URL = (process.env.SW_ORIGIN ?? 'https://sandbox.vinlic.com');
+const URL = (process.env.SW_ORIGIN ?? 'https://sandboxworld.online');
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, defaultViewport: null, protocolTimeout: 700000, args: ['--window-size=1540,960'] });
 const page = (await browser.pages())[0] ?? await browser.newPage();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await page.goto(URL + '/?v7=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(async () => {
-  await page.goto('https://sandbox.vinlic.com/?v7=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto('https://sandboxworld.online/?v7=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
 });
 console.log('请在弹出的浏览器窗口手动进入任意世界；进入后自动普查 15s');
 await page.waitForFunction(() => {

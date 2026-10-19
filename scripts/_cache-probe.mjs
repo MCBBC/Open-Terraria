@@ -10,7 +10,7 @@ const browser = await puppeteer.launch({
   args: ['--no-proxy-server'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 await new Promise((r) => setTimeout(r, 8000));
 log('loaded');
@@ -27,8 +27,8 @@ const out = await page.evaluate(async () => {
       if (req.url.includes('%20') || req.url.includes(' ')) entry.spaceUrls.push(req.url);
     }
     // 两种形态的 match 对照
-    const u1 = new Request('https://sandbox.vinlic.com/sprites/vanilla/Backgrounds_Underworld%200.png');
-    const u2 = new Request('https://sandbox.vinlic.com/sprites/vanilla/Backgrounds_Underworld 0.png');
+    const u1 = new Request('https://sandboxworld.online/sprites/vanilla/Backgrounds_Underworld%200.png');
+    const u2 = new Request('https://sandboxworld.online/sprites/vanilla/Backgrounds_Underworld 0.png');
     entry.matchPct20 = (await c.match(u1))?.status ?? 'MISS';
     entry.matchSpace = (await c.match(u2))?.status ?? 'MISS';
     entry.keysHasPct20 = keys.some((r) => r.url.includes('%200.png'));

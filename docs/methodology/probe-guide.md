@@ -4,7 +4,7 @@
 > 坑表每行:**现象 → 根因 → 解法 → 归入 API 哪个默认行为**。
 > 框架入口:`game/tools/probe.mjs`(CLI)+ `game/tools/probe/lib/*`(库);
 > 场景脚本仍可按老规矩 `node tools/run-diag.mjs` 跑(读 `SW_ORIGIN`)。
-> 证据链:每行标注 memory 判例名(`~/.claude/projects/-Users-vinlic-Project-GLM-SandboxWorld/memory/<名>.md`)。
+> 证据链:每行标注 memory 判例名(`~/.claude/projects/<项目会话目录>/memory/<名>.md`)。
 
 ---
 

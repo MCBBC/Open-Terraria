@@ -707,7 +707,7 @@ export function openAssetDiagPanel(): void {
     for (const n of ['sprites/vanilla/Projectile_29.png', 'sprites/vanilla/Gore_61.png',
       'sprites/vanilla/SplashScreens_Splash_6_2.png', 'sprites/vanilla/Backgrounds_Underworld 0.png',
       'sprites/vanilla/Cloud_0.png']) {
-      const u = 'https://sandbox.vinlic.com/' + n;
+      const u = 'https://sandboxworld.online/' + n;
       const mStr = await c.match(u).then((r) => (r ? `${r.status}` : 'MISS')).catch(() => 'ERR');
       const mIgn = await c.match(u, { ignoreVary: true }).then((r) => (r ? `${r.status}` : 'MISS')).catch(() => 'ERR');
       let mReq = 'KEYS无';

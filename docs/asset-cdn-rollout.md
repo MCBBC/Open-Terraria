@@ -1,7 +1,7 @@
 # 资产分片 CDN 化:方案A 落地与生产迁移计划(2026-10-13)
 
 > 状态(2026-10-13 更新):**preview 与生产均已切源**(v0.1.70-beta 起,双域 cdn.json 200,
-> 生产域 sandbox.vinlic.com 端到端探针 PASS:12900/12900 failed=0,npmmirror 通道 444 命中)。
+> 生产域 sandboxworld.online 端到端探针 PASS:12900/12900 failed=0,npmmirror 通道 444 命中)。
 > 回退机制已加固:黑洞超时(TTFB 20s/空闲 30s)+ 嫌疑降级(同 run + 跨重启),
 > **双 CDN 全不可用时自动回同源**——见第三节候选序与「回退保证」。
 

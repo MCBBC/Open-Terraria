@@ -10,7 +10,7 @@ const browser = await puppeteer.launch({
   args: ['--no-proxy-server'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 log('SW controlled');
 // 预置:等待首次 warm 完成

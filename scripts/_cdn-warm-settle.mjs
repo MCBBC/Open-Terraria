@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const origin = process.env.SW_ORIGIN ?? 'https://sandbox.vinlic.com';
+const origin = process.env.SW_ORIGIN ?? 'https://sandboxworld.online';
 const userDir = process.env.SW_USERDIR ?? '/tmp/cdn-boot-probe-p';
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new', userDataDir: userDir,

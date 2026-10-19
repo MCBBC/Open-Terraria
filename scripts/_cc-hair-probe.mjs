@@ -5,7 +5,7 @@ const browser = await puppeteer.launch({
   headless: 'new', userDataDir: process.env.SW_USERDIR ?? ('/tmp/cc-hair-' + (Date.now() % 100000)), args: ['--no-proxy-server'],
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 // 等揭幕(splash 移除+菜单可点;全新 profile 需等 warm 全量)
 for (let i = 0; i < 66; i++) {
   await new Promise((r) => setTimeout(r, 5000));

@@ -62,7 +62,7 @@ async function snap(tag) {
 }
 
 // ===== 第一轮:正常进入(基线) =====
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 log('SW ok');
 for (let i = 0; i < 60; i++) {

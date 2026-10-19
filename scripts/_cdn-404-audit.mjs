@@ -3,7 +3,7 @@
 // 判定:①②全 200 → 用户场景为窗口期 miss(已自愈);①在②404 → SW match 层 bug
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const host = process.env.HOST ?? 'sandbox.vinlic.com';
+const host = process.env.HOST ?? 'sandboxworld.online';
 const dir = '/tmp/cdn-404audit-' + (Date.now() % 100000);
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new', userDataDir: dir,
@@ -28,7 +28,7 @@ const r = await page.evaluate(async (names) => {
   const c = await caches.open(keys[0]);
   const out = [];
   for (const n of names) {
-    const u = 'https://sandbox.vinlic.com/' + n;
+    const u = 'https://sandboxworld.online/' + n;
     const inCache = !!(await c.match(u));
     const viaSw = await fetch(u).then((x) => x.status).catch((e) => 'ERR:' + String(e).slice(0, 30));
     out.push({ n: n.split('/').pop(), inCache, viaSw });

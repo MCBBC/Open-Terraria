@@ -5,7 +5,7 @@ const browser = await puppeteer.launch({
   args: ['--no-proxy-server'],
 });
 const page = await browser.newPage();
-await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('https://sandboxworld.online/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 const r = await page.evaluate(async () => {
   const out = {};
   const c = await caches.open('micro-test');
@@ -20,7 +20,7 @@ const r = await page.evaluate(async () => {
   out.keys = (await caches.keys()).map(async (k) => [k, (await (await caches.open(k)).keys()).length]);
   out.keysAll = await Promise.all(out.keys);
   // 相对名 vs 绝对 URL 双读
-  const hit2 = await c.match('https://sandbox.vinlic.com/' + name);
+  const hit2 = await c.match('https://sandboxworld.online/' + name);
   out.matchAbs = hit2 ? 'HIT' : 'MISS';
   // SW 控制下的经网请求(应 cache-first 命中真实条目)
   const real = await fetch(name).then((x) => x.status).catch((e) => String(e));

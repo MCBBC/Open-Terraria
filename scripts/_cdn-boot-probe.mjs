@@ -1,11 +1,11 @@
-// 线上冷启动诊断(2026-08-26):sandbox.vinlic.com 全新访客视角,p0 小片
+// 线上冷启动诊断(2026-08-26):sandboxworld.online 全新访客视角,p0 小片
 // (过渡图+标题曲)未落地的断链定位。产出:网络时序(zip 分片请求/console 错误/
 // SW 状态/Cache API 条目与哨兵键)。一次加载=裸窗口,再 reload 让 SW 接管。
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const origin = process.env.SW_ORIGIN ?? 'https://sandbox.vinlic.com';
+const origin = process.env.SW_ORIGIN ?? 'https://sandboxworld.online';
 mkdirSync('/tmp/cdn-boot-probe', { recursive: true });
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',

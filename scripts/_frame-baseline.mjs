@@ -9,7 +9,7 @@
 //   node tools/run-diag.mjs --timeout=180000 scripts/_frame-baseline.mjs \
 //     --mode=electron --url=http://localhost:5207/ --dur=60 [--label=Electron37]
 //   node tools/run-diag.mjs --timeout=180000 scripts/_frame-baseline.mjs \
-//     --mode=browser --browser=chrome|edge --url=https://sandbox.vinlic.com/ --dur=60
+//     --mode=browser --browser=chrome|edge --url=https://sandboxworld.online/ --dur=60
 //
 // 输出：一行 markdown 结果追加到 docs/frame-baseline.md（不存在则建表头）。
 // 正式 G0 建议：三方言 × 各 10 分钟 × 固定剧本；本仪器只负责"同一把尺子"。
