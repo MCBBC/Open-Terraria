@@ -5,7 +5,7 @@
 
 一个完全开放的 **Terraria 1.4.5.8** ，历经70天，总消耗1238亿Tokens，其中GLM-5.3贡献477亿，GLM-5.3-Flash贡献761亿，使用Claude Code作为Vibe Coding工具。
 
-未基于任何游戏引擎，完全基于Web平台原生实现，采用 Canvas 2D + WebGL2 混合渲染管线，部分模块采用Web Worker并行化处理或编译为WebAssembly以提升性能。
+未基于任何游戏引擎，完全基于Web平台原生实现，采用 Canvas 2D + WebGL2 混合渲染管线，部分模块采用Web Worker并行化处理或编译为WebAssembly以提升性能，当前最高帧率上限可支持120fps。
 
 支持移植mod、材质包、原版世界/角色存档导入导出。
 
