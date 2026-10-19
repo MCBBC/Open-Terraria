@@ -53,6 +53,8 @@ const awaitImportResetTerrain = await import('../src/world/gen/WorldGen.ts');
 (globalThis as Record<string, unknown>).__calamityTileIdByKey = TILE_BY_KEY;
 (globalThis as unknown as { __calamityGenTiles?: Record<string, number> }).__calamityGenTiles = {};
 (globalThis as unknown as { __swSettleTrace?: string[] }).__swSettleTrace = [];
+// ★SS2-29e deepwater 逐迭代候选 trace(对拍 oracle V-log R(60,310)/R(169,259) 对)
+(globalThis as unknown as { __dwTrace?: string[] }).__dwTrace = [];
 // ★SWATRACE2 表面带逐 origin 仪(env SW_SWATRACE=1 开;窗=oracle GENPROBE_SWA_TRACE_REG 同值)
 if (process.env.SW_SWATRACE) (globalThis as unknown as { __swSwaWin?: number[] }).__swSwaWin = [3860, 225, 4200, 260];
 (globalThis as unknown as { __swDeathVerdicts?: Map<string, string> }).__swDeathVerdicts = (() => {
@@ -72,6 +74,21 @@ if (process.env.SW_SWATRACE) (globalThis as unknown as { __swSwaWin?: number[] }
 (globalThis as unknown as { __swCLKeys?: Set<number> }).__swCLKeys = (() => {
   try {
     const raw = readFileSync(`${root}/mods/calamity/golden-oracle/sw-enter-checkingliquid.txt`, 'utf8');
+    const s = new Set<number>();
+    for (const e of raw.split(';')) {
+      if (!e) continue;
+      const c = e.split(',');
+      if (c.length < 2) continue;
+      s.add(parseInt(c[1], 10) * 4200 + parseInt(c[0], 10));
+    }
+    return s;
+  } catch { return new Set<number>(); }
+})();
+// ★SS2-29c settle 入口致动器位复原(oracle ACTSET 全图 dump;key=y*4200+x)——
+//   快照无致动位⇒我方 nactive 全真⇒WC 实心杀误灭致动格液体(36 格液差根)。
+(globalThis as unknown as { __swActKeys?: Set<number> }).__swActKeys = (() => {
+  try {
+    const raw = readFileSync(`${root}/mods/calamity/golden-oracle/sw-enter-actuators.txt`, 'utf8');
     const s = new Set<number>();
     for (const e of raw.split(';')) {
       if (!e) continue;
@@ -914,6 +931,7 @@ if (process.env.SW_DUMP_LIQDIFF === '1') {
   }
 }
 { const __tr = (globalThis as unknown as { __swSettleTrace?: string[] }).__swSettleTrace ?? []; console.log(`[settle-trace] 合并数=${__tr.length}`); __tr.forEach((l) => { console.log('[settle-trace] ' + l); }); }
+{ const __dw = (globalThis as unknown as { __dwTrace?: string[] }).__dwTrace ?? []; console.log(`[dw-trace] 条数=${__dw.length}`); __dw.forEach((l) => { console.log('[dw-trace] ' + l); }); }
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
 // ★699aw:slope 对拍(藤种门/PlacePot 门读 slope——型差=0 而 slope 差=装饰段阻塞根因)
 {

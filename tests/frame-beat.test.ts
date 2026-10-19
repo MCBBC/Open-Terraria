@@ -820,7 +820,8 @@ describe('锁帧档语义锁(源锚)', () => {
     expect(SETTINGS).toContain("Lang.text('Mods.SandboxWorld.Settings.FrameCapOff')");
     // Options:字段保留(兼容存档)
     expect(OPTIONS).toContain('frameCap: number;');
-    expect(OPTIONS).toContain('frameCap: 60,');
+    // ★BJ695：缺省 120（60→120,用户令;60Hz 屏=cap≥屏率 minK=1 行为与 60 档逐位全等）
+    expect(OPTIONS).toContain('frameCap: 120,');
     // l10n 产物:更新文案两语言在位(build-l10n 重建)
     for (const f of ['public/l10n/zh-Hans.json', 'public/l10n/en-US.json']) {
       const j = JSON.parse(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'));

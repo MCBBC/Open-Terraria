@@ -1,0 +1,95 @@
+name: "\U0001F41B Bug 报告"
+description: 行为异常、与原版不一致、崩溃/白屏
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！几件事能极大加快定位：
+
+        1. **游戏内按一下 `F5`** —— 会自动下载一份调试报告（含错误日志、最近行为记录、音频播放记录），把它拖进本 issue 即可；
+        2. 如果方便复述「原版是什么行为」，请尽量附**原版的截图/视频**作证——凭记忆的「原版应该是…」是本项目历史上最大的误报来源；
+        3. 版本号在**主菜单左下角**（形如 `0.1.72-beta 2610152332`）。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？预期应该发生什么？
+      placeholder: 例：骑着绿溜冰鞋在沥青路上跑，最高速度只有 20mph；原版应该明显更快。
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 尽量给出可照做的步骤序列（世界类型、角色状态、具体操作）。
+      placeholder: |
+        1. 新建经典小世界
+        2. 装备 XXX / 站在 XXX 上
+        3. 执行 XXX
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 问题类型
+      options:
+        - 与原版行为不一致（1:1 对齐问题）
+        - 功能性异常（崩溃 / 白屏 / 数值明显错误）
+        - 视觉/音效问题（贴图、动画、音效缺失或错位）
+        - 存档/联机问题
+        - 其他 / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: vanilla-evidence
+    attributes:
+      label: 原版的行为是什么？（选「与原版不一致」时必填）
+      description: |
+        请附证据：截图 / 视频 / wiki 链接均可，并注明你参考的原版版本（如 1.4.5.8 Steam 版）。
+        ⚠️ 仅凭印象的描述我们无法直接采信——历史上多条「原版如何」的实报最后都被证明记错了（包括我们自己）。
+      placeholder: 原版 1.4.5.8：截图如下……（或 wiki 链接）
+
+  - type: textarea
+    id: f5-report
+    attributes:
+      label: F5 调试报告
+      description: |
+        游戏内按一下 `F5` → 浏览器会下载 `debug-report-*.json`，直接拖进本框上传。
+        如果问题需要一段操作才触发：**长按 F5 约 1 秒**进入录制模式 → 复现问题 → 再长按 F5 结束，会得到包含完整操作回放的报告，价值最大。
+        （报不了也没关系，只是定位会慢一些。）
+
+  - type: input
+    id: version
+    attributes:
+      label: 游戏版本号
+      description: 主菜单左下角，形如 0.1.72-beta 2610152332
+      placeholder: "0.1.72-beta 2610152332"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: 运行环境
+      options:
+        - Chrome（桌面）
+        - Edge（桌面）
+        - Safari（桌面）
+        - Firefox（桌面）
+        - 手机浏览器（Android）
+        - 手机浏览器（iOS）
+        - 桌面壳 / 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: device
+    attributes:
+      label: 设备信息（可选）
+      description: 操作系统 / 大致硬件（如 M2 MacBook / 中端安卓机）——性能与渲染相关问题特别有用。

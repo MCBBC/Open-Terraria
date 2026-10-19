@@ -1,0 +1,44 @@
+name: "✨ 功能建议"
+description: 新内容、新功能、mod 生态相关
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: 你想要什么？
+      description: 一句话说清目标；如果原版有此功能，请描述原版的行为（最好附截图/视频/wiki 链接）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 使用场景 / 动机
+      description: 什么情况下需要它？解决什么问题？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 类别
+      options:
+        - 原版内容补全（还没移植到的原版功能）
+        - 新增内容 / 改进
+        - mod 相关（.swmod 制作或 tModLoader 兼容）
+        - 工具链 / 开发体验
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: 参考资料（可选）
+      description: wiki 链接、原版视频、tModLoader 对应实现……一切有助于对齐的证据。
+
+  - type: markdown
+    attributes:
+      value: |
+        > 💡 提示：想做 mod 的话可以先看 [Mod 开发指南](https://github.com/Vinlic/terraria-game/blob/main/game/docs/mod-dev-guide.md)——10 分钟就能跑起第一个 mod。

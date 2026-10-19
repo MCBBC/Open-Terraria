@@ -1,0 +1,51 @@
+name: "\U0001F422 性能问题"
+description: 掉帧、卡顿、加载慢
+title: "[Perf] "
+labels: ["performance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        性能问题高度依赖「场景证据」，以下两样任选其一就能让定位快一个量级：
+
+        - **F5 报告**：游戏内按 `F5`（含最近 2000 条行为记录）；
+        - **Chrome 性能录制**（首选）：`F12` → Performance 面板 → ⏺ Record → 复现卡顿（录 10~30 秒即可）→ Stop → 右键时间轴 **Save Profile…** 导出 `.json` 拖进本 issue。
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 什么场景下卡？
+      description: 越具体越好：进世界首帧？下雨？大量敌怪？特定 Boss？打开背包/地图？还是常驻慢？
+      placeholder: 例：史莱姆雨事件进行到 200+ 只怪时开始明显掉帧，平时正常。
+    validations:
+      required: true
+
+  - type: input
+    id: fps
+    attributes:
+      label: 帧率表现
+      description: 大致描述即可（平时 60 / 场景中掉到 20，或肉眼明显顿挫）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: trace
+    attributes:
+      label: 证据（F5 报告或 Chrome 性能录制）
+      description: 上文二选一，直接拖拽上传。Chrome 录制导出方法见顶部说明。
+
+  - type: input
+    id: version
+    attributes:
+      label: 游戏版本号
+      description: 主菜单左下角。
+    validations:
+      required: true
+
+  - type: textarea
+    id: device
+    attributes:
+      label: 设备与环境
+      description: 操作系统 / 浏览器 / 大致硬件档次。手机用户尤其请注明机型。
+    validations:
+      required: true

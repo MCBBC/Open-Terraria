@@ -346,7 +346,13 @@ export class OptionsStore {
     uiScale: 1,
     devMode: false,
     pvpEnabled: false,
-    frameCap: 60,
+    // ★BJ695（2026-10-19 用户令「默认帧率上限 120fps」）：缺省 60→120。60Hz 屏
+    // 机器=cap≥屏率 ⇒ FrameBeat minK=1 每 vsync 渲一次,行为与 cap=60 逐位全等
+    // （无任何变化）;高刷屏渲染力不足机=v5/v6 容量降档（beat 对齐顺延+p50 持续
+    // 超载降 k）稳驻 60 档=与旧缺省同效;游戏逻辑 fixedUpdate 恒 60Hz 与渲染解耦
+    // （速度零耦合）。已持久化选项的用户不受影响（Object.assign 覆盖缺省）。
+    // 缺省 60 系保守残留（interp 已转正缺省开+贴线抖动终局修复后的配套缺省）。
+    frameCap: 120,
     frameSkipMode: 'subtle',
     renderScale: 1,
     renderScaleAuto: true,

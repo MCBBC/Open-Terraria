@@ -1,6 +1,9 @@
 # Open Terraria
 
-一个完全开放的 Terraria 1.4.5.8，历经70天，总消耗1238亿Tokens，其中GLM-5.3贡献477亿，GLM-5.3-Flash贡献761亿，使用Claude Code作为Vibe Coding工具。
+> [!NOTE]
+> 当前代码仍在积极迭代更新，可能仍存在一些尚未解决的Bug，如果您发现游戏中与原版不一致的情况，欢迎在issue中提出问题
+
+一个完全开放的 **Terraria 1.4.5.8** ，历经70天，总消耗1238亿Tokens，其中GLM-5.3贡献477亿，GLM-5.3-Flash贡献761亿，使用Claude Code作为Vibe Coding工具。
 
 未基于任何游戏引擎，完全基于Web平台原生实现，采用 Canvas 2D + WebGL2 混合渲染管线，部分模块采用Web Worker并行化处理或编译为WebAssembly以提升性能。
 
@@ -10,9 +13,49 @@ Agent侧产生了112338条消息，工具调用数量达36815次
 
 150 万行 TypeScript（引擎 47 万手写 + 数据定义 2 万 + 测试 45 万 + 探针工具 46 万 + mod 参考实现 5.5 万），2600+ 测试用例，全部开发过程有逐日开发日志（[docs/devlog/DAILY_DEVLOG.md](docs/devlog/DAILY_DEVLOG.md)）存档。这个仓库本身，就是这场人机协作实验的完整记录。
 
+多人模式服务端仍在开发中，后续可能支持大型公共房间。
+
 ## 在线地址
 
-[sandboxworld.online](https://sandboxworld.online)
+[https://sandboxworld.online](https://sandboxworld.online)
+
+建议使用 Google Chrome 浏览器访问，以获得最佳游戏性能，如使用国内网络首次访问可能遇到网络延迟，请多加等待。
+
+如多次刷新无法访问，可尝试强制刷新以刷新Service Worker缓存状态。
+
+## 效果预览
+
+#### 世界生成（含9个彩蛋种子+37个秘密种子）
+
+同时支持导入原版*.wld格式存档和*.plr格式角色
+
+![shot-worldgen](docs/screenshots/shot-worldgen.png)
+
+![shot-worldgen-2](docs/screenshots/shot-worldgen-2.png)
+
+![shot-worldgen-3](docs/screenshots/shot-worldgen-3.png)
+
+#### 游玩演示
+
+![shot-gameplay-1](docs/screenshots/shot-gameplay-1.png)
+
+![shot-gameplay-2](docs/screenshots/shot-gameplay-2.png)
+
+![shot-gameplay-3](docs/screenshots/shot-gameplay-3.png)
+
+![shot-gameplay-4](docs/screenshots/shot-gameplay-4.png)
+
+#### 移植mod演示
+
+![shot-mod-list](docs/screenshots/shot-mod-list.png)
+
+![shot-mod-view](docs/screenshots/shot-mod-view.png)
+
+#### 材质包导入演示
+
+![shot-respack-list](docs/screenshots/shot-respack-list.png)
+
+![shot-respack-view](docs/screenshots/shot-respack-view.png)
 
 ## 快速开始
 
@@ -26,6 +69,8 @@ npm run build        # 产物 dist/
 ## Mod 开发
 
 **→ 完整指南:[docs/mod-dev-guide.md](docs/mod-dev-guide.md)**
+
+由于跨语言与平台的原因，无法支持tmod载入，建议通过AI精准转译到swmod（目前我们正在尝试全量转译灾厄mod）
 
 10 分钟从零做出第一个 mod(脚手架/L1 声明式内容 15 域/L2 脚本 API 总表/
 浏览器独有六接口/实战示例/发布):
