@@ -296,7 +296,7 @@ describe.skipIf(EXT_MISSING)('SW-AZ1 结构锁', () => {
     expect(game).toMatch(/this\.canChangeSelectionNow\(\)\) return;/);
   });
 
-  it('Game 手持消耗统一入口：58 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
+  it('Game 手持消耗统一入口：56 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
     // ★2026-09-08:56→57——SW-BN5 换墙批新增 ReplaceWall 消费位(Game.ts:21297,
     //  换墙消耗手持墙件=合法入账;行为面仍由"全走 removeHeld+无 removeAt 残留"两钉锁死)
     // ★RB17a-R7（2026-09-14）重锚:57→56——第 57 处（宝藏袋持用左键开包链 removeHeld）
@@ -319,7 +319,20 @@ describe.skipIf(EXT_MISSING)('SW-AZ1 结构锁', () => {
     //  Item.cs:36653-36664 无 consumable 行,ItemCheck_Shoot :48278-48334 消耗臂
     //  不适用）合法退役该消耗位（Game.ts 15602 段现无 removeHeld 调用）,锁数随
     //  实际消费位回落（az1 拍照重锚协议=BJ536 判例同式,非丢失扣减）。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(58);
+    // ★BJ690 重锚（2026-10-16,commit 360836f8）:58→57——矿车升级包 5289 右键臂
+    //  整撤（原版右键零使用面;使用域=左键 ItemCheck 1:1,消耗位在 case 5289 的
+    //  consume() 助手 Game.ts:17340 存续,非丢失扣减）,判别锁=
+    //  tests/bj690-minecart-upgrade-kit.test.ts ③。
+    // ★BJ694 重锚（2026-10-19,commit 0a86175f）:57→56——可疑的眼球 43 右键臂
+    //  整撤（原版使用域=左键 ItemCheck 左臂 :16776,消耗位 removeHeld(1) :16783
+    //  在案;右键臂=重复使用面+格交互劫持+错域风筝成就钩三害,整支退役非丢失扣减）,
+    //  判别锁=tests/bj694-registered-debts-batch2.test.ts §1。
+    // ★计数口径（2026-10-19 清偿刀亲核备案）:本锁数=正则 inv\.removeHeld\(1\)
+    //  字面调用次数;Game.ts 全文 removeHeld 字串 61 处=56 真调用+5 注释/文档提及
+    //  （:6347/:14997/:15291/:28181/:35054,皆非调用面）。统一入口纪律判据=
+    //  下两行 not 断言+加宽残留检测（removeAt(selected) 任意书写形态恒零）,锁数
+    //  仅拍照对齐盘上实况。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(56);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

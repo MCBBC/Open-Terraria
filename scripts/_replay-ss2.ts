@@ -52,6 +52,36 @@ const awaitImportResetTerrain = await import('../src/world/gen/WorldGen.ts');
 (globalThis as Record<string, unknown>).__calamityTileDefs = TILE_DEFS;
 (globalThis as Record<string, unknown>).__calamityTileIdByKey = TILE_BY_KEY;
 (globalThis as unknown as { __calamityGenTiles?: Record<string, number> }).__calamityGenTiles = {};
+(globalThis as unknown as { __swSettleTrace?: string[] }).__swSettleTrace = [];
+// ★SWATRACE2 表面带逐 origin 仪(env SW_SWATRACE=1 开;窗=oracle GENPROBE_SWA_TRACE_REG 同值)
+if (process.env.SW_SWATRACE) (globalThis as unknown as { __swSwaWin?: number[] }).__swSwaWin = [3860, 225, 4200, 260];
+(globalThis as unknown as { __swDeathVerdicts?: Map<string, string> }).__swDeathVerdicts = (() => {
+  try {
+    const m = new Map<string, string>();
+    const raw = readFileSync(`${root}/mods/calamity/golden-oracle/wc34-death-verdicts.txt`, 'utf8');
+    for (const e of raw.split(';')) {
+      if (!e) continue;
+      const [k, v] = e.split(':');
+      m.set(k, v);
+    }
+    return m;
+  } catch { return new Map(); }
+})();
+// ★SS2-24 settle 入口 stale checkingLiquid 旗集(oracle SW ENTER 双 dump:QW#4 遗留
+//   液数组∪液缓冲;key=y*4200+x)——WC#34 refill kill-tail AddWater 跳过面复原。
+(globalThis as unknown as { __swCLKeys?: Set<number> }).__swCLKeys = (() => {
+  try {
+    const raw = readFileSync(`${root}/mods/calamity/golden-oracle/sw-enter-checkingliquid.txt`, 'utf8');
+    const s = new Set<number>();
+    for (const e of raw.split(';')) {
+      if (!e) continue;
+      const c = e.split(',');
+      if (c.length < 2) continue;
+      s.add(parseInt(c[1], 10) * 4200 + parseInt(c[0], 10));
+    }
+    return s;
+  } catch { return new Set<number>(); }
+})();
 
 // 快照载入(x 主序→行主序;gzip)。★699ad v2=5 bytes/格(尾字节=slope|half<<3;
 //   旧 v1=4 bytes 自动兼容——斜率补 0)
@@ -68,7 +98,7 @@ function loadSnap(pat: string) {
     const o = (x * h + y) * stride;
     type[y * w + x] = buf[o] | (buf[o + 1] << 8);
     wall[y * w + x] = buf[o + 2] | (buf[o + 3] << 8);
-    if (stride >= 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; act[y * w + x] = (fl >> 4) & 1; liquidType[y * w + x] = [1, 2, 3, 3][(fl >> 5) & 3]; }   // ★SS2 tML 0=water→我方 1=水(gen-abyss SetLiquid 约定)
+    if (stride >= 5) { const fl = buf[o + 4]; slope[y * w + x] = fl & 7; half[y * w + x] = (fl >> 3) & 1; act[y * w + x] = (fl >> 4) & 1; liquidType[y * w + x] = [1, 2, 3, 4][(fl >> 5) & 3]; }   // ★SS2 tML 0=water/1=lava/2=honey/3=shimmer→我方 1/2/3/4(★2026-10-19 settle 修:旧 [1,2,3,3] 把 shimmer 折叠成 honey)
     // ★699az:v3 位 bit4=active;★SS2 v3(6B):bit5-6=liquidType + 尾字节=liquidAmount
     if (stride === 6) liquid[y * w + x] = buf[o + 5];
   }
@@ -81,11 +111,16 @@ import { join as join2 } from 'node:path';
 const fnvOf = (buf: Uint8Array): string => {
   const w = 4200, h = 1200;
   const stride = Math.round(buf.length / (w * h));   // ★SS2 v3:4/5/6 通用
+  // ★SS2-21h v4:快照存裸 TileType(stale 型保留)——FNV 对账须复刻 GenProbe
+  //   PASS 行语义 tv=HasTile?TileType:0(bit4=act 门;v3 及以前两语义同值)。
+  const actGated = stride >= 6;
   let hh = 0x811c9dc5;
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
     const o = (x * h + y) * stride;
-    hh ^= buf[o]; hh = Math.imul(hh, 0x01000193) >>> 0;
-    hh ^= buf[o + 1]; hh = Math.imul(hh, 0x01000193) >>> 0;
+    let t0 = buf[o], t1 = buf[o + 1];
+    if (actGated && !(buf[o + 4] & 16)) { t0 = 0; t1 = 0; }
+    hh ^= t0; hh = Math.imul(hh, 0x01000193) >>> 0;
+    hh ^= t1; hh = Math.imul(hh, 0x01000193) >>> 0;
   }
   return hh.toString(16).padStart(8, '0');
 };
@@ -378,6 +413,10 @@ const rng = new RNG(gs.seed as number);
     }
   };
 }
+// ★SS2-21d 静默样本消耗面:C# Next()(无参)DrawSpy 不钩(V-log 缺面)——hardened
+//   seed 掷等须消耗样本而不入 PV(包装前绑定原版 next 为 own-property,不进
+//   proto 包装循环)。
+(rng as unknown as { __silentNext?: () => number }).__silentNext = rng.next.bind(rng);
 {
   const proto = rng as unknown as Record<string, (...a: unknown[]) => unknown>;
   for (const m of Object.getOwnPropertyNames(Object.getPrototypeOf(rng))) {
@@ -466,6 +505,7 @@ __slDump('P0');
 (globalThis as { __swPhase?: string }).__swPhase = 'ss2';
 console.log(`[liqprobe] (3839,245).liquid=${store.liquid[store.idx(3839, 245)]} (3833,245)=${store.liquid[store.idx(3833, 245)]} (3786,217)=${store.liquid[store.idx(3786, 217)]} ltype(3839,245)=${store.liquidType[store.idx(3839, 245)]}`);
 (globalThis as Record<string, unknown>).__swBeachTrace = [];
+(globalThis as Record<string, unknown>).__swAmbTrace = [];
 (globalThis as Record<string, unknown>).__swTreeTrace = [];
 (ss2Fn as (...a: unknown[]) => void)(store, rng, gs);
 {
@@ -475,6 +515,9 @@ console.log(`[liqprobe] (3839,245).liquid=${store.liquid[store.idx(3839, 245)]} 
   const tt = (globalThis as { __swTreeTrace?: string[] }).__swTreeTrace ?? [];
   writeFileSync('/tmp/our-tree-trace.txt', tt.join('\n'));
   console.log(`[tree] 命中数=${tt.length}(已落盘 /tmp/our-tree-trace.txt)`);
+  const at = (globalThis as { __swAmbTrace?: string[] }).__swAmbTrace ?? [];
+  console.log(`[amb] 前 ${at.length} 个 upWater 格:`);
+  for (const l of at) console.log('  ' + l);
 }
 (globalThis as Record<string, unknown>).__swPassVLogOn = false;
 console.log(`[replay] Sulphur Sea 2 pass 掷数=${drawCount}`);
@@ -838,14 +881,28 @@ for (let i = 0; i < n; i++) {
 }
 // ★699z 交集测试:diff 格集落盘(与熵域 E(C,B) 求交=系统性残差)
 if (process.env.SW_DUMP_DIFF_CELLS === '1') {
-  const cells: Array<[number, number]> = [];
+  const cells: Array<[number, number, string, string]> = [];
   for (let i2 = 0; i2 < n; i2++) {
-    const realT2 = CS_TO_OURS(post.type[i2]);
+    // ★SS2-1 act 规范化(与主循环同式;旧版缺 act 门=2.4M 空vs泥假差)
+    const realT2 = (post.act?.[i2] ?? 1) ? CS_TO_OURS(post.type[i2]) : 0;
     const myEff2 = (store.flags[i2] & 1) ? store.type[i2] : 0;
     if (myEff2 !== realT2) cells.push([i2 % w, Math.floor(i2 / w), KEY_OF(myEff2), KEY_OF(realT2)]);
   }
   writeFileSync('/tmp/replay-diff-cells.json', JSON.stringify(cells));
   console.log(`[diffcells] ${cells.length} 格已落盘`);
+}
+
+// ★SS2-29 settle 终态全图液量 diff(liquid 不入判卷面——chest pass depthMap 液检
+//   分叉之源定位):store.liquid vs post.liquid 逐格比(env SW_DUMP_LIQDIFF=1)。
+if (process.env.SW_DUMP_LIQDIFF === '1') {
+  const lcells: Array<[number, number, number, number, number, number]> = [];
+  for (let i2 = 0; i2 < n; i2++) {
+    const rl = post.liquid[i2] ?? 0;
+    const ml = store.liquid[i2];
+    if (rl !== ml) lcells.push([i2 % w, Math.floor(i2 / w), ml, rl, store.liquidType[i2], 0]);
+  }
+  console.log(`[liqdiff] 全图液量差 ${lcells.length} 格;样本(前 40):`);
+  for (const c of lcells.slice(0, 40)) console.log(`  (${c[0]},${c[1]}) 我=${c[2]}(t${c[4]}) 真=${c[3]}`);
 }
 
 // ★699bu 残簇终态字节直读
@@ -856,6 +913,7 @@ if (process.env.SW_DUMP_DIFF_CELLS === '1') {
     console.log(`[STATE] (${px},${py}) type=${store.type[pi]} act=${(store.flags[pi] & 1) ? 1 : 0} slope=${store.slope[pi]} half=${store.half[pi]}`);
   }
 }
+{ const __tr = (globalThis as unknown as { __swSettleTrace?: string[] }).__swSettleTrace ?? []; console.log(`[settle-trace] 合并数=${__tr.length}`); __tr.forEach((l) => { console.log('[settle-trace] ' + l); }); }
 console.log(`[replay] 逐格 diff=${diff}/${n}(${((diff / n) * 100).toFixed(2)}%) 区内=${diffIn} 区外=${diffOut} ${firstDiff}`);
 // ★699aw:slope 对拍(藤种门/PlacePot 门读 slope——型差=0 而 slope 差=装饰段阻塞根因)
 {

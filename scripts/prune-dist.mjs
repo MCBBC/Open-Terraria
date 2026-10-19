@@ -49,10 +49,12 @@ for (const rel of PRUNE_DIRS) {
 // +调试存档不进发布包。dev 服务器不受影响(页面活在 public/,此处只裁 dist 拷贝)。
 // build:release 链默认带 STRIP_DEBUG=1;显式 STRIP_DEBUG=0 可保留;普通 build 不设=保留。
 if (process.env.STRIP_DEBUG === '1') {
+  // 2026-10-19 死键清理:hitbox-lab.html/hitbox-names.json 源件已删
+  // (832ede4c/04e24202),其生成器 build-hitbox-names.mjs 一并移除。
   const RELEASE_FILES = [
-    'annotator.html', 'faeling-frames.html', 'hitbox-lab.html', 'sheet-probe.html',
+    'annotator.html', 'faeling-frames.html', 'sheet-probe.html',
     'tree-inspect.html', 'water-audit.html', 'remaster.html',
-    'debug-save.sbw.json', 'hitbox-names.json',
+    'debug-save.sbw.json',
   ];
   let rFreed = 0, rCount = 0;
   for (const f of RELEASE_FILES) {

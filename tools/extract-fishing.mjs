@@ -395,7 +395,7 @@ const out = {
       'items 为空 = Stopper（命中即整表终止、返回 0）。',
       '曾用的"FishingRules/HookStats 400+ 条"是 1.4.0 旧类，1456 已删除——条数以本表为准，勿再引用。',
     ],
-    sources: [POP, BASE, MAIN],
+    sources: [POP, BASE, MAIN].map((p) => p.replace(`${ROOT0}/`, '')),   // ★0a86175f 现库态=相对形(机器绝对路径禁入产物,C档可移植);era-guard byte-perfect 锚
     helpers: HELPERS,
     ruleCount: rules.length,
     groupCounts: rules.reduce((a, r) => ((a[r.group] = (a[r.group] ?? 0) + 1), a), {}),
@@ -449,7 +449,7 @@ const stripProvenance = (o) => {
   if (c?._meta?.sources !== undefined) c._meta.sources = ['<exempt>'];
   return c;
 };
-const json = JSON.stringify(out, null, 1) + '\n';
+const json = JSON.stringify(out, null, 2) + '\n';   // ★0a86175f 现库态=2-space(原 1-space);era-guard byte-perfect 锚
 let live = null;
 if (existsSync(LIVE_JSON)) { try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损:不拦（npcdrops 同款） */ } }
 const wash = live === null ? null : deepWash(stripProvenance(live), stripProvenance(JSON.parse(json)));
