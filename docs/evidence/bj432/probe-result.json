@@ -1,0 +1,78 @@
+{
+  "scene": {
+    "sx": 2100,
+    "hGuide": {
+      "standX": 2111,
+      "standY": 292
+    },
+    "hFree": {
+      "standX": 2129,
+      "standY": 291
+    },
+    "nook": {
+      "x": 2120,
+      "y": 288,
+      "anchorX": 2123,
+      "anchorY": 297
+    },
+    "ws": 332
+  },
+  "s1": {
+    "downed_134": true,
+    "savedStylist": false,
+    "before": [
+      {
+        "id": 6,
+        "bound": true,
+        "home": null
+      }
+    ],
+    "after": [
+      {
+        "id": 6,
+        "bound": true,
+        "home": null,
+        "vd": 353
+      }
+    ],
+    "arrivalsSpawned": 0,
+    "webbedUntouched": true,
+    "verdict": "PASS 未救不入住"
+  },
+  "s2": {
+    "ok": true,
+    "talkReturned": true,
+    "bound": false,
+    "savedStylist": true,
+    "home": null,
+    "anchorTile": null,
+    "x": 33968,
+    "y": 4712,
+    "verdict": "PASS 解救转正"
+  },
+  "s3": {
+    "ok": true,
+    "home": {
+      "x": 2129,
+      "y": 291
+    },
+    "hd": false,
+    "anchor": {
+      "x": 2123,
+      "y": 297
+    },
+    "guideHome": {
+      "x": 2111,
+      "y": 292
+    },
+    "diag": null,
+    "isFreeHouse": true,
+    "verdict": "PASS 解救后入住"
+  },
+  "verdict": {
+    "S1": "PASS 未救不入住",
+    "S2": "PASS 解救转正",
+    "S3": "PASS 解救后入住",
+    "allPass": true
+  }
+}

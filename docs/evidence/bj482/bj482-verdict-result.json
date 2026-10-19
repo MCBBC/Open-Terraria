@@ -1,0 +1,203 @@
+{
+  "c10e-deep": {
+    "scene": {
+      "px0": 2103,
+      "top": 327,
+      "deepY": 330,
+      "light": [
+        153,
+        122,
+        214
+      ],
+      "c10e": true
+    },
+    "m": {
+      "c10e": true,
+      "compositedPre": true,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        153,
+        122,
+        214
+      ],
+      "aEcho": 0.202,
+      "tintSum": 139,
+      "ring": {
+        "n": 720,
+        "neg": 0,
+        "negAvg": null,
+        "posAvg": [
+          1.8,
+          0.5,
+          1.8
+        ],
+        "min": 0,
+        "maxNeg": 0,
+        "hudAlphaPartial": 0
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          0,
+          84.5,
+          25.8
+        ],
+        "errMax": 106,
+        "compSkipped": false
+      }
+    }
+  },
+  "c10e-open": {
+    "scene": {
+      "px0": 2133,
+      "top": 256,
+      "gy": 259,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "c10e": true
+    },
+    "m": {
+      "c10e": true,
+      "compositedPre": true,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "aEcho": 0.397,
+      "tintSum": 0,
+      "ring": {
+        "n": 720,
+        "neg": 0,
+        "negAvg": null,
+        "posAvg": [
+          10.6,
+          2.1,
+          7.1
+        ],
+        "min": 0,
+        "maxNeg": 0,
+        "hudAlphaPartial": 0
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          0,
+          0.2,
+          0.7
+        ],
+        "errMax": 18.4,
+        "compSkipped": true
+      }
+    }
+  },
+  "ctrl-deep": {
+    "scene": {
+      "px0": 2097,
+      "top": 327,
+      "deepY": 330,
+      "light": [
+        153,
+        122,
+        255
+      ],
+      "c10e": false
+    },
+    "m": {
+      "c10e": false,
+      "compositedPre": false,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        153,
+        122,
+        255
+      ],
+      "aEcho": 0.22,
+      "tintSum": 118,
+      "ring": {
+        "n": 720,
+        "neg": 0,
+        "negAvg": null,
+        "posAvg": [
+          1.8,
+          0.4,
+          1.7
+        ],
+        "min": 0,
+        "maxNeg": 0,
+        "hudAlphaPartial": 0
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          0,
+          76.2,
+          1.2
+        ],
+        "errMax": 106,
+        "compSkipped": false
+      }
+    }
+  },
+  "ctrl-open": {
+    "scene": {
+      "px0": 2127,
+      "top": 225,
+      "gy": 228,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "c10e": false
+    },
+    "m": {
+      "c10e": false,
+      "compositedPre": false,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "aEcho": 0.399,
+      "tintSum": 0,
+      "ring": {
+        "n": 720,
+        "neg": 0,
+        "negAvg": null,
+        "posAvg": [
+          8.4,
+          2.3,
+          4.3
+        ],
+        "min": 0,
+        "maxNeg": 0,
+        "hudAlphaPartial": 0
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          0,
+          0,
+          0
+        ],
+        "errMax": 0,
+        "compSkipped": true
+      }
+    }
+  },
+  "pageErrs": []
+}

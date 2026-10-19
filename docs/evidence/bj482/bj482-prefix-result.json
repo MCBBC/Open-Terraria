@@ -1,0 +1,162 @@
+{
+  "s1": {
+    "scene": {
+      "px0": 2104,
+      "top": 262,
+      "gy": 265,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "c10e": true
+    },
+    "m": {
+      "c10e": true,
+      "compositedPre": false,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "ring": {
+        "n": 95,
+        "neg": 95,
+        "addN": 0,
+        "negAvg": [
+          0.3,
+          -41.5,
+          -24.4
+        ],
+        "posAvg": null,
+        "min": -86.5,
+        "maxNeg": 86.5,
+        "hudAlphaPartial": 95
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          113.8,
+          152.2,
+          92.7
+        ],
+        "errMax": 174.7,
+        "absAvg": [
+          141.2,
+          60.1,
+          107.4
+        ]
+      }
+    }
+  },
+  "s2": {
+    "scene": {
+      "px0": 2096,
+      "top": 261,
+      "gy": 264,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "c10e": true
+    },
+    "m": {
+      "c10e": true,
+      "compositedPre": false,
+      "nComps": 2,
+      "nEcho": 2,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "ring": {
+        "n": 100,
+        "neg": 100,
+        "addN": 0,
+        "negAvg": [
+          3.8,
+          -49.7,
+          -22.6
+        ],
+        "posAvg": null,
+        "min": -70.4,
+        "maxNeg": 70.4,
+        "hudAlphaPartial": 100
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          114,
+          160.3,
+          86.5
+        ],
+        "errMax": 194,
+        "absAvg": [
+          141,
+          46.2,
+          111.6
+        ]
+      }
+    }
+  },
+  "ctrl": {
+    "scene": {
+      "px0": 2101,
+      "top": 253,
+      "gy": 256,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "c10e": false
+    },
+    "m": {
+      "c10e": false,
+      "compositedPre": false,
+      "nComps": 1,
+      "nEcho": 1,
+      "light": [
+        255,
+        255,
+        255
+      ],
+      "ring": {
+        "n": 720,
+        "neg": 0,
+        "addN": 720,
+        "negAvg": null,
+        "posAvg": [
+          5.6,
+          1.4,
+          5
+        ],
+        "min": 0,
+        "maxNeg": 0,
+        "hudAlphaPartial": 0
+      },
+      "body": {
+        "blitted": true,
+        "n": 144,
+        "errAvg": [
+          0,
+          22.5,
+          38.8
+        ],
+        "errMax": 68,
+        "absAvg": [
+          255,
+          255,
+          255
+        ]
+      }
+    }
+  },
+  "pageErrs": []
+}

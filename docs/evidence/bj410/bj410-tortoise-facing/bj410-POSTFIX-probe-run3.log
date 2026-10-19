@@ -1,0 +1,321 @@
+PASS: createGame
+PASS: spawn 154  {"ok":true,"id":8,"x":33927,"y":4267,"hp":400,"refFound":false}
+{
+ "A": {
+  "snap": {
+   "ok": true,
+   "id": 8,
+   "facing": 1,
+   "ai0": 0,
+   "ai1": 52,
+   "vx": 1,
+   "dx": 302.1099999999933,
+   "onGround": true,
+   "visAngle": 0,
+   "x": 33928.520000000026,
+   "y": 4272,
+   "w": 46,
+   "h": 32
+  },
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    306,
+    349,
+    369,
+    398
+   ]
+  },
+  "awayTicks": 0,
+  "total": 33,
+  "hist": [
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 310.8
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 311.6
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 312.3
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 312.9
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 313.5
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314.4
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314.8
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.2
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.4
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.5
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.5
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.4
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315.2
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 315
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314.8
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314.4
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 314
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 313.5
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 312.9
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 312.3
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 311.6
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 310.8
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 310
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 309.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 308.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 307.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 306.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 305.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 304.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 303.1
+   },
+   {
+    "ai0": 0,
+    "facing": 1,
+    "onG": true,
+    "away": false,
+    "dx": 302.1
+   }
+  ]
+ },
+ "B": {
+  "snap": {
+   "ok": true,
+   "id": 8,
+   "facing": -1,
+   "ai0": 0,
+   "ai1": 52,
+   "vx": -1,
+   "dx": -285.58000000000175,
+   "onGround": true,
+   "visAngle": 0,
+   "x": 33925.10000000003,
+   "y": 4272,
+   "w": 46,
+   "h": 32
+  },
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    894,
+    349,
+    957,
+    398
+   ]
+  }
+ },
+ "C": {
+  "ok": true
+ },
+ "C1": {
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    894,
+    349,
+    957,
+    398
+   ]
+  }
+ },
+ "C2": {
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    894,
+    349,
+    957,
+    398
+   ]
+  }
+ },
+ "OUT": "~/Project/GLM/SandboxWorld/game/docs/evidence/bj410/bj410-tortoise-facing"
+}

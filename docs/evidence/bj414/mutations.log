@@ -1,0 +1,15 @@
+BJ414 变异对拍（判别力证明;cp+sha256 逐字节还原）
+基线 sha256(src/ui/UI.ts) = 3ac069a748a7cefaa04bcd0469546f43d385695cd42c1a04e060de8b34ed9f43
+
+M1 容器级 pointer-events:auto 复入（buildBuffBar cssText 复原病灶）:
+  buff-band census: blocked 844/2268,faces: div@32,76 418x32=640(容器整带复活)+图标 64x3
+  e2e: buff-blank(440,91) attackLive=false(吞) / timespan=true / icon=false / hotbar-gap=true
+  → 判别力:容器面=病灶主因。还原后 sha256 同基线(逐字节)。
+
+M2 时长 span pointer-events:none 摘除（makeBuffBlock+makeNebulaBlock 两处）:
+  buff-band census: blocked 320/2268,faces: span@28/66/104,110 40x16=116 复活(容器面已无)
+  e2e: buff-timespan(40,118) attackLive=false(吞) / blank=true / icon=false / hotbar-gap=true
+  → 判别力:span 面=次病灶。还原后 sha256 同基线(逐字节)。
+
+修复态(spot 面预期): census 无容器面;blank/timespan/hotbar-gap attackLive=true;
+  icon/hotbar-slot attackLive=false(=原版 mouseInterface 逐图标/逐槽面)。

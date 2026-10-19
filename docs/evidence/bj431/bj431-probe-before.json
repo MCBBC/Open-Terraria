@@ -1,0 +1,24 @@
+{
+  "label": "BJ431 before-fix（Arrow.ts 未修状态;2026-09-23 探针实测）",
+  "probe": "scripts/_bj431-spark-probe.mjs",
+  "before_state": "Arrow 载体对 954 无专属 AI/α/重力处理：PROJ_ALPHA0 无 954 键（α≡0）→ GA 兜底 (255−0)/255=1 满显；projGravSpec aiStyle2 兜底 grav=0.3（投掷族档）；无尘尾支；无 60t 计寿",
+  "run1": {
+    "projectile@age3": { "vx": -7, "vy": 0.69, "alpha": 0, "life": 3597, "drawGlobalAlpha": null, "spriteVisible": true },
+    "projectile@age7": { "vy": 1.89, "vySlopePerTick": 0.3 },
+    "dust_d6_count_1s": 0,
+    "mana_deducted": 2,
+    "verdict": "40×40 魔杖占位贴图满显飞行 + 零火尘尾迹 + 0.3/t 抛物坠弧 + 寿命 3600t（原版 60t）"
+  },
+  "run2_reverted_state_check": {
+    "projectile@age19": { "vx": 7, "vy": 5.7, "alpha": 0, "life": 3581, "drawGlobalAlpha": null, "spriteVisible": true },
+    "dust_d6_count": 0
+  },
+  "vanilla_truth": {
+    "alpha": 255,
+    "sprite": "GetAlpha 缺省路径 (255−255)/255=0 恒隐（Projectile.cs:81507）;Projectile_954.png=魔杖占位图从未出画",
+    "visual": "火尘 6 尾迹（:23785-23796 掷率梯 10%→100%→衰减,noGravity/scale×1.6/vel×2+弹速）",
+    "gravity": "无通用重力;ai[0]≥20 后 vx×0.99 + vy+0.1（:23798-23802）",
+    "lifetime": "ai[0]≥60 Kill（:23776-23779）= 60t",
+    "hit": "OnFire! 24 号 50% 掷（:11397）+ ai[0]+=(60−ai0)/2 快进（:13051）"
+  }
+}

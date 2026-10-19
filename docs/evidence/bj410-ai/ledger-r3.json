@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "fails": [],
+  "lines": [
+    "PASS: createGame",
+    "PASS: build spawn arena  {\"ok\":true,\"sx\":2103,\"surf\":269}",
+    "PASS: R1 spawn 154  {\"ok\":true,\"id\":6,\"x\":33945,\"y\":4264,\"hp\":400,\"refFound\":false}",
+    "PASS: R1 基准读数(damage/defense 非 999,kb=0.3 档)  {\"ok\":true,\"id\":6,\"vid\":154,\"facing\":1,\"ai0\":0,\"ai1\":6,\"vx\":0.42,\"vy\":1.8,\"cx\":33969.5,\"cy\":4286.3,\"onGround\":false,\"wet\":false,\"dirY\":1,\"dmg\":55,\"dfn\":28,\"kbo\":0.30000001192092896,\"pdy\":-3}",
+    "PASS: R1 投毒落位  {\"ok\":true,\"poisoned\":{\"dmg\":999,\"dfn\":999,\"kbo\":0.5}}",
+    "PASS: R1 一拍复原(damage/defense 归基准+kb 归 0.3 档)  base={\"dmg\":55,\"dfn\":28} after={\"ok\":true,\"id\":6,\"vid\":154,\"facing\":1,\"ai0\":0,\"ai1\":9,\"vx\":0.63,\"vy\":0,\"cx\":33971.1,\"cy\":4288,\"onGround\":true,\"wet\":false,\"dirY\":1,\"dmg\":55,\"dfn\":28,\"kbo\":0.30000001192092896,\"pdy\":-5}",
+    "PASS: R1 spawn 496  {\"ok\":true,\"id\":7,\"x\":33954,\"y\":4269,\"hp\":50,\"refFound\":false}",
+    "PASS: R1 496 kbResist=0.75 档  {\"ok\":true,\"id\":7,\"vid\":496,\"facing\":1,\"ai0\":0,\"ai1\":3,\"vx\":0.21,\"vy\":0.9,\"cx\":33968.4,\"cy\":4281.8,\"onGround\":false,\"wet\":false,\"dirY\":1,\"dmg\":16,\"dfn\":12,\"kbo\":0.75,\"pdy\":1}",
+    "PASS: R2 spawn 154 入池  {\"ok\":true,\"id\":8,\"x\":34249,\"y\":4296,\"hp\":400,\"refFound\":false}",
+    "PASS: R2 链路(wet 见证+态 3 弹射发生)  trace0=[{\"cy\":4312.3,\"vy\":0.3,\"ai0\":0,\"wet\":true},{\"cy\":4317.1,\"vy\":1.9,\"ai0\":1,\"wet\":true},{\"cy\":4320,\"vy\":0,\"ai0\":1,\"wet\":true},{\"cy\":4320,\"vy\":0,\"ai0\":1,\"wet\":true},{\"cy\":4314.9,\"vy\":-10.1,\"ai0\":3,\"wet\":true}]",
+    "PASS: R2 wet 助推(minVy<-10.1=弹射后湿窗净上浮;旧缺助推 minVy≈-9.5 红)  wetSeen=true minVy=-10.42 last={\"ok\":true,\"id\":8,\"vid\":154,\"facing\":-1,\"ai0\":3,\"ai1\":4,\"vx\":-4.937,\"vy\":-10.26,\"cx\":34257.4,\"cy\":4289.1,\"onGround\":false,\"wet\":false,\"dirY\":-1,\"dmg\":55,\"dfn\":28,\"kbo\":0.30000001192092896,\"pdy\":-6}",
+    "PASS: R2 弹跳出水面(cy 越过水面 surfTop-8)或入下落态 4  minCy=4289.1 surfTop=4304 exited=true ai4=false"
+  ]
+}

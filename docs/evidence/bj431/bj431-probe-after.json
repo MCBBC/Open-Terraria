@@ -1,0 +1,20 @@
+{
+  "label": "BJ431 after-fix（Arrow.ts 修复态;family 扩展后终验 2026-10-01）",
+  "probe": "scripts/_bj431-spark-probe.mjs",
+  "fix_layers": [
+    "①绘制:PROJ_ALPHA0[504/954/979]=255 + GA case 共组 return 0 → 弹体恒隐（dust-visual 族同 294-296/376 式）",
+    "②AI:subStepAI 火花族支（Projectile.cs:23764-23803 1:1）——α 钉 255/sparkAi0 计寿/d6·d135 尘掷率梯/向心聚拢/noGravity/vel×2/scale×1.6/vel+=弹速/ai0≥20 拖坠/vy 钳 32/60t Kill",
+    "③物理:ctor 火花族 grav 覆写 0（纠正 projGravSpec aiStyle2=AI_THROWN 0.3 投掷兜底错位）",
+    "④命中:主环 504||954||979 受理命中 sparkHitFastForward()（ai[0]+=(60−ai0)/2,Damage_PVE_Inner :13051）",
+    "⑤命中 debuff:projStatus 表原有承载核验（954→OnFire24/979→Frostburn44/504→OnFire3(323)）"
+  ],
+  "run_final": {
+    "projectile@age9": { "vx": 7, "vy": -0.01, "alpha": 255, "life": 3591, "drawGlobalAlpha": 0, "spriteVisible": false },
+    "dust_d6_count@350ms": 5,
+    "dust_d6_count@1.2s": 36,
+    "projectile@t1200": "[]（60t AI 计寿杀,life 余额 3553 未耗）",
+    "prev_run_t1200_age43": { "vx": 5.49, "vy": 2.78, "vyCheck": "0.38 初值 + (43−20)×0.1 = 2.68≈2.78（子步对齐）", "vxDrag": "7×0.99^23≈5.50≈5.49" }
+  },
+  "expected_dust_total": "爬升 4.9 + 平台 10 + 衰减 ≈19.5 → ≈34.4/发（实测 36/37）",
+  "screenshots": ["bj431-early.png（火尘尾迹小火花,弹体不可见）", "bj431-late.png（60t 后消亡）"]
+}

@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "fails": [],
+  "lines": [
+    "PASS: createGame",
+    "PASS: build spawn arena  {\"ok\":true,\"sx\":2103,\"surf\":269}",
+    "PASS: S1 spawn 154  {\"ok\":true,\"id\":6,\"x\":33977,\"y\":4264,\"hp\":400,\"refFound\":false}",
+    "PASS: S1 基准读数(态 0,base 快照=damage/defense)  {\"ok\":true,\"vid\":154,\"ai0\":0,\"ai1\":5,\"vx\":0.35,\"vy\":1.5,\"cx\":34001,\"cy\":4284.5,\"dmg\":55,\"dfn\":28,\"base\":{\"dmg\":55,\"def\":28},\"pdx\":-183}",
+    "PASS: S1 态 3 强化(damage=trunc(base×2)/defense=base×2;旧:无强化写点=红)  expect dmg=110 dfn=56 got={\"ok\":true,\"vid\":154,\"ai0\":3,\"ai1\":12,\"vx\":9.672,\"vy\":-1.362,\"cx\":34119.9,\"cy\":4266.4,\"dmg\":110,\"dfn\":56,\"base\":{\"dmg\":55,\"def\":28},\"pdx\":298}",
+    "PASS: S1 回态 0 卸载(damage/defense 归 base;旧:强化残留=红)  {\"ok\":true,\"vid\":154,\"ai0\":0,\"ai1\":15,\"vx\":9.672,\"vy\":-0.302,\"cx\":34168.3,\"cy\":4262.1,\"dmg\":55,\"dfn\":28,\"base\":{\"dmg\":55,\"def\":28},\"pdx\":250}",
+    "PASS: S1 spawn 496  {\"ok\":true,\"id\":7,\"x\":33986,\"y\":4269,\"hp\":50,\"refFound\":false}",
+    "PASS: S1 496 态 3 强化 ×1.5 系数位(旧:×2 或无写点=红)  expect dmg=24 got={\"ok\":true,\"vid\":496,\"ai0\":3,\"ai1\":12,\"vx\":7.269,\"vy\":-0.666,\"cx\":34088.3,\"cy\":4271.2,\"dmg\":24,\"dfn\":24,\"base\":{\"dmg\":16,\"def\":12},\"pdx\":330}",
+    "PASS: S2 spawn 154 半空  {\"ok\":true,\"id\":8,\"x\":34105,\"y\":4168,\"hp\":400,\"refFound\":false}",
+    "PASS: S2a Y 门假(玩家悬上)不阻尼:vx=1.5/ai3=1.5（旧:+8 容差阻尼 1.2=红）  {\"ok\":true,\"vx\":1.5,\"ai3\":1.5,\"vy\":-0.02,\"gateY\":false,\"xOverlap\":true}",
+    "PASS: S2b Y 门真重叠阻尼:vx=1.2/ai3=0/vy=+0.4（托升+0.2+干重力+0.3;旧:缺托升=0.2 红）  {\"ok\":true,\"vx\":1.2,\"ai3\":0,\"vy\":0.4,\"gateY\":true,\"xOverlap\":true}",
+    "PASS: S3 spawn 417  {\"ok\":true,\"id\":9,\"x\":34265,\"y\":4218,\"hp\":700,\"refFound\":false}",
+    "PASS: S3 417 弹射拍 aggro 门保向 facing=-1（旧 raw sign→+1=红）  {\"ok\":true,\"facing\":-1,\"ai1\":1,\"ai0\":6}"
+  ]
+}

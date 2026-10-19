@@ -1,0 +1,44 @@
+{
+ "checks": [
+  {
+   "name": "(a) 首用出膛 1 只",
+   "ok": true,
+   "note": "kites=1"
+  },
+  {
+   "name": "(b) 在场连点 3 次仍 1 只（不重放出膛）",
+   "ok": true,
+   "note": "kites=1"
+  },
+  {
+   "name": "(c) 在场仍是首用实例",
+   "ok": true,
+   "note": "same=true"
+  },
+  {
+   "name": "(d) 按住左键放线 ai0 增长",
+   "ok": true,
+   "note": "ai0 290 -> 500"
+  },
+  {
+   "name": "(e) 换型：旧 766 亡（heldShoot Kill 门）+ 771 出膛且全场单只",
+   "ok": true,
+   "note": "kites=771"
+  },
+  {
+   "name": "(f) 右键收线到最短 → 消亡",
+   "ok": true,
+   "note": "kites=0"
+  },
+  {
+   "name": "(g) 消亡后再次使用放行（1 只）",
+   "ok": true,
+   "note": "kites=1"
+  }
+ ],
+ "trace": [
+  "after-a sel=0 held=4367 kites=1 useTime=0 anim=0 dead=false",
+  "after-b sel=0 held=4367 kites=1 useTime=0 anim=0 dead=false",
+  "after-f sel=0 held=4367 kites=0 useTime=0 anim=6 dead=true"
+ ]
+}

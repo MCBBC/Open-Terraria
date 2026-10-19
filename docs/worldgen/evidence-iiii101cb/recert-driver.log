@@ -1,0 +1,7 @@
+[goldens] rc=0
+[guards1] rc=0
+[seed-parity] rc=0
+[spot-g] rc=0
+[spot-s22222] rc=0
+[spot-m] rc=0
+recert-done 08:59:49

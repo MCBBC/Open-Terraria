@@ -1,0 +1,14 @@
+[probe] 复用现成实例 http://localhost:5750(不杀)
+PASS: bootstrap
+PASS: createGame
+PASS: stage
+PASS: layout-flip  {"layout":"classic","built":"classic"}
+PASS: install
+PASS: A-cell-found  {"mode":"classic","idx":2,"ok":true,"x":233,"y":398,"hover":false}
+[A-focus-click] {"focusV":0,"focusCreate":null,"n":{"vanillaCraft":0,"timesSum":0,"refresh":5,"rebuild":0}}
+PASS: B-cell-after-snap  {"mode":"classic","idx":2,"ok":true,"x":233,"y":398,"hover":true}
+[B-t0.45s] wood=59 {"ch":{"kind":"list","connected":true,"hover":true,"isLiveCell":true,"rect":{"x":20,"y":383,"w":426,"h":30}},"liveCellHover":true,"mouseX":233,"mouseY":398,"stackSplit":2,"superFastStack":0,"n":{"vanillaCraft":1,"timesSum":1,"refresh":6,"rebuild":0}}
+[B-t1.5s] {"hold":{"connected":true,"hover":true},"stackSplit":2,"superFastStack":0,"wood":43,"n":{"vanillaCraft":17,"timesSum":17,"refresh":23,"rebuild":0}}
+[C-final] {"wood":33,"n":{"vanillaCraft":25,"timesSum":27,"refresh":35,"rebuild":0},"craftHold":null}
+PASS: press-crafted-once  crafts=25
+[probe] 场景退出 code=0 signal=- 总耗时=42.1s → GREEN

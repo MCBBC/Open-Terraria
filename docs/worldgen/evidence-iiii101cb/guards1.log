@@ -1,0 +1,15 @@
+[atlas-lint] 754 表全自洽 ✓ (0 warn)
+[l10n-audit] 670 键全部命中 ✓
+
+ RUN  v2.1.9 ~/Project/GLM/SandboxWorld/game
+
+ ✓ tests/dungeon-1457-alignment.test.ts (23 tests) 30ms
+ ✓ tests/skyblock-anchor-sets.test.ts (3 tests) 3ms
+ ✓ tests/micro-biomes.test.ts (8 tests) 54ms
+ ✓ tests/worldgen-1457-rewire.test.ts (16 tests) 129ms
+
+ Test Files  4 passed (4)
+      Tests  50 passed (50)
+   Start at  08:57:24
+   Duration  2.05s (transform 1.52s, setup 0ms, collect 3.29s, tests 216ms, environment 1ms, prepare 223ms)
+

@@ -1,0 +1,20 @@
+{
+ "chain": "ftw",
+ "variant": "+wire (9th channel)",
+ "produced": "2026-09-01",
+ "recipe": "gc-run-wir.sh ftwwir 1 1.1.1.4.1671560105 - _ gold-ftw  (= runbook §4 ftw 行同配方, worldname 保持 gold-ftw)",
+ "rig_md5_bin_osx": "3248fc76ee0aeb376990361371690de4",
+ "rig_app": "/tmp/iii40-rig.app (L1 canon lineage — 与 golden-ftw 同源二进制)",
+ "runner": "/tmp/i135-run/gc-run-wir.sh = scripts/golden-chain-regen.sh 去掉收尾 rm *.wire 一行(其余逐字未动), 保留 canon JJHook 恒产 .wire 通道",
+ "wir_layout": "1 byte/tile, row-major y*W+x: bit0 red wire, bit1 blue(wire2), bit2 green(wire3), bit3 yellow(wire4), bit4 actuator, bit5 inActive() — 与 rrrr-era JJHook.AfterPass wr[] / i118 SW_DUMP_WIR 扩展 / JS TileStore.wire 三方位表一致",
+ "neutrality_proof": [
+   "canon binary rerun on FTW seed → 110 slots × 8ch vs ~/GoldenChains/golden-ftw: 880/880 files byte-equal (md5 sweep 2026-09-01)",
+   "pc.txt T/A/W/L 四列全 220 行逐行相同(仅 R:<count>:<hash> 掷流账柱面存在两代内 vacuous 差——per-pass reseed 下不跨 pass 传导); T/A/W/L 全等 ⇒ 接受集恒等 ⇒ .wire 新通道纯读态附加、零行为扰动"
+ ],
+ "channels": {
+  "typ": 106, "act": 106, "wal": 106, "liq": 106,
+  "half": 106, "slope": 106, "lty": 106, "inact": 106, "wir": 106
+ },
+ "slots": 106,
+ "notes": "-00x 瞬态槽(-004_PostFinSeed/-040_ShimBox/-041_ShimFill)亦带 .wir 副本; frx/fry 未保留(canon 跑法下与 8 通道认证无关)"
+}

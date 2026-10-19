@@ -1,0 +1,155 @@
+{
+  "scene": {
+    "deepY": 330,
+    "cx0": 2100,
+    "spawned": true
+  },
+  "parts": [
+    {
+      "id": 398,
+      "ai0": 3,
+      "spawnAlpha": 0,
+      "cx": 33514,
+      "cy": 5395,
+      "w": 46,
+      "h": 66
+    },
+    {
+      "id": 397,
+      "ai0": 2,
+      "spawnAlpha": 0,
+      "cx": 32991,
+      "cy": 5255,
+      "w": 46,
+      "h": 66
+    },
+    {
+      "id": 397,
+      "ai0": 0,
+      "spawnAlpha": 0,
+      "cx": 33990,
+      "cy": 5280,
+      "w": 46,
+      "h": 66
+    },
+    {
+      "id": 396,
+      "ai0": 2,
+      "spawnAlpha": 0,
+      "cx": 33514,
+      "cy": 4995,
+      "w": 38,
+      "h": 56
+    }
+  ],
+  "f1": [
+    {
+      "a": 241,
+      "b": 189,
+      "w": 761,
+      "h": 711,
+      "a0": 541071,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 0,
+      "b": 0,
+      "w": 555,
+      "h": 889,
+      "a0": 493395,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 631,
+      "b": 0,
+      "w": 649,
+      "h": 900,
+      "a0": 584100,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 151,
+      "b": 0,
+      "w": 941,
+      "h": 640,
+      "a0": 602240,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 242,
+      "b": 189,
+      "w": 761,
+      "h": 711,
+      "a0": 541071,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 0,
+      "b": 0,
+      "w": 553,
+      "h": 888,
+      "a0": 491064,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 627,
+      "b": 0,
+      "w": 653,
+      "h": 900,
+      "a0": 587700,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    },
+    {
+      "a": 152,
+      "b": 0,
+      "w": 941,
+      "h": 640,
+      "a0": 602240,
+      "aMid": 0,
+      "a255": 0,
+      "colored": 0,
+      "maxC": 0,
+      "bbox": null,
+      "sample": null
+    }
+  ],
+  "f3": {
+    "err": "no core"
+  },
+  "pageErrs": []
+}

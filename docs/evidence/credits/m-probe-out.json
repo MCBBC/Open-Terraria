@@ -1,0 +1,20 @@
+{
+ "probe": "scripts/_m-credits-player-probe.mjs",
+ "origin": "http://localhost:5410",
+ "px": {
+  "playerT": 27564,
+  "fallLit": 688,
+  "fallNegative": 0,
+  "landedLit": 675,
+  "outsideLit": 1125,
+  "afterLit": 0,
+  "appearanceSet": true
+ },
+ "pxNote": "fallLit/landedLit=玩家带非透明采样>0（下落 local=30 跳跃行5 半透/落地 local=150 站位）；fallNegative=同帧远离带对照 0；afterLit=local=600 淡出净空 0；outsideLit=段窗外带含收场画板 Extra_241 像素（画板窗未闭,非玩家泄漏）",
+ "shots": [
+  "m-player-falling.png",
+  "m-player-landed.png",
+  "m-player-lookleft.png"
+ ],
+ "errs": []
+}

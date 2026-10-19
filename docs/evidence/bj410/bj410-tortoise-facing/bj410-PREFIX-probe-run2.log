@@ -1,0 +1,86 @@
+PASS: createGame
+PASS: spawn 154  {"ok":true,"id":8,"x":33927,"y":4267,"hp":400,"refFound":false}
+{
+ "A": {
+  "snap": {
+   "ok": true,
+   "id": 8,
+   "facing": 1,
+   "ai0": 0,
+   "ai1": 52,
+   "vx": 1,
+   "dx": 302.1099999999933,
+   "onGround": true,
+   "visAngle": 0,
+   "x": 33928.520000000026,
+   "y": 4272,
+   "w": 46,
+   "h": 32
+  },
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    306,
+    349,
+    369,
+    398
+   ]
+  }
+ },
+ "B": {
+  "snap": {
+   "ok": true,
+   "id": 8,
+   "facing": -1,
+   "ai0": 0,
+   "ai1": 52,
+   "vx": -1,
+   "dx": -286.58000000000175,
+   "onGround": true,
+   "visAngle": 0,
+   "x": 33928.10000000003,
+   "y": 4272,
+   "w": 46,
+   "h": 32
+  },
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    895,
+    349,
+    958,
+    398
+   ]
+  }
+ },
+ "C": {
+  "ok": true
+ },
+ "C1": {
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    894,
+    349,
+    957,
+    398
+   ]
+  }
+ },
+ "C2": {
+  "eye": {
+   "ok": false,
+   "why": "no-eye-px",
+   "box": [
+    894,
+    349,
+    957,
+    398
+   ]
+  }
+ },
+ "OUT": "/tmp/probe-out-bj410/bj410-tortoise-facing"
+}

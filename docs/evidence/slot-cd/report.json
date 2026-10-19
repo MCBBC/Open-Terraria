@@ -1,0 +1,74 @@
+{
+  "origin": "http://localhost:5341",
+  "steps": {
+    "grant": {
+      "ok": true,
+      "key": "vi_188_healing_potion",
+      "healId": 188,
+      "hpBefore": 60,
+      "maxHp": 100
+    },
+    "baseline": {
+      "cdElCount": 10,
+      "slot0": {
+        "display": "none",
+        "opacity": ""
+      },
+      "buffActive": [
+        19
+      ]
+    },
+    "afterDrink": {
+      "hp": 100,
+      "maxHp": 100,
+      "potionSick": 59.4166666666667,
+      "slot0": {
+        "display": "block",
+        "opacity": "0.874"
+      },
+      "slot2": {
+        "display": "block",
+        "opacity": "0.726"
+      }
+    },
+    "afterExpiry": {
+      "potionSick": null,
+      "slot0": {
+        "display": "none",
+        "opacity": "0"
+      }
+    },
+    "expertGrant": {
+      "ok": true,
+      "cartId": 4745,
+      "lit": true
+    },
+    "expertFace": {
+      "armor3": {
+        "display": "block",
+        "opacity": "1"
+      },
+      "armor0": {
+        "display": "none",
+        "opacity": ""
+      },
+      "misc2": {
+        "display": "block",
+        "opacity": "1"
+      }
+    },
+    "panelOpen": {
+      "panelOpen": true,
+      "hotbarDisplay": "none",
+      "hotbarSlot0": {
+        "display": "none",
+        "opacity": "0.438"
+      },
+      "panelRow0": {
+        "display": "none",
+        "opacity": ""
+      }
+    }
+  },
+  "errs": []
+}

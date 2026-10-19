@@ -1,0 +1,138 @@
+{
+ "totalMods": 15859,
+ "totalLifetimeSubs": 396815166,
+ "tiers": {
+  "1M+": {
+   "count": 79,
+   "subs": 215668575
+  },
+  "100k-1M": {
+   "count": 390,
+   "subs": 120982951
+  },
+  "10k-100k": {
+   "count": 1493,
+   "subs": 44687161
+  },
+  "1k-10k": {
+   "count": 3840,
+   "subs": 13169031
+  },
+  "<1k": {
+   "count": 10057,
+   "subs": 2307448
+  }
+ },
+ "primaryCategory": [
+  [
+   "new content",
+   7450
+  ],
+  [
+   "Gameplay Tweaks",
+   2205
+  ],
+  [
+   "(未打标)",
+   2187
+  ],
+  [
+   "quality of life",
+   1523
+  ],
+  [
+   "Visual Tweaks",
+   799
+  ],
+  [
+   "Utilities",
+   723
+  ],
+  [
+   "Translation",
+   428
+  ],
+  [
+   "Audio Tweaks",
+   235
+  ],
+  [
+   "Custom World Gen",
+   189
+  ],
+  [
+   "library",
+   120
+  ]
+ ],
+ "syncDistribution": {
+  "Both": 14643,
+  "Client": 929,
+  "NoSync": 89,
+  "(未标)": 192,
+  "Server": 6
+ },
+ "versions": {
+  "1.4.3": 2427,
+  "1.4.4": 12790,
+  "1.4.5": 1
+ },
+ "topLangs": [
+  [
+   "English",
+   10521
+  ],
+  [
+   "Chinese",
+   2405
+  ],
+  [
+   "Russian",
+   1371
+  ],
+  [
+   "Spanish",
+   628
+  ],
+  [
+   "Portuguese",
+   437
+  ],
+  [
+   "German",
+   370
+  ],
+  [
+   "French",
+   338
+  ],
+  [
+   "Polish",
+   310
+  ],
+  [
+   "Italian",
+   285
+  ]
+ ],
+ "createdYear": {
+  "2011": 1,
+  "2021": 350,
+  "2022": 2450,
+  "2023": 2849,
+  "2024": 2405,
+  "2025": 3611,
+  "2026": 4193
+ },
+ "updatedYear": {
+  "2012": 1,
+  "2021": 91,
+  "2022": 1543,
+  "2023": 2714,
+  "2024": 2315,
+  "2025": 3700,
+  "2026": 5495
+ },
+ "updatedWithin90d": 2538,
+ "updatedWithin365d": 6351
+}

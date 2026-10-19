@@ -1,0 +1,70 @@
+{
+  "when": "2026-09-30T06:40:58.124Z",
+  "origin": "http://localhost:5510",
+  "results": [
+    {
+      "name": "S1 projFrameImg(826,0)=112×80（旧病灶 336×27）",
+      "pass": true,
+      "ok": true,
+      "w": 112,
+      "h": 80,
+      "frames": 3,
+      "avg": [
+        173,
+        35,
+        126
+      ],
+      "px": 2188
+    },
+    {
+      "name": "S1 projFrameCount(826)=3",
+      "pass": true,
+      "frames": 3
+    },
+    {
+      "0": 173,
+      "1": 35,
+      "2": 126,
+      "name": "S1 帧0 主色偏粉（R>G,B;猪龙粉变体）",
+      "pass": true
+    },
+    {
+      "name": "S2 热栏装填 4613 猪龙风筝",
+      "pass": true,
+      "id": 4613,
+      "heldId": 4613
+    },
+    {
+      "name": "S2 KiteProj 826 在场滞空",
+      "pass": true,
+      "found": true,
+      "projId": 826,
+      "frame": 0,
+      "ai0": 250,
+      "alive": true,
+      "x": 33891,
+      "y": 4302,
+      "droop": 0,
+      "wind": 0.5,
+      "kiteCount": 1
+    },
+    {
+      "name": "S2 单只在场（三只之谜=单 draw 横带,非连放）",
+      "pass": true,
+      "kiteCount": 1
+    },
+    {
+      "name": "S2 frame 恒 0（=ai[1] 无写入,粉变体 P.cs:49544）",
+      "pass": true,
+      "frame": 0
+    },
+    {
+      "name": "S3 帧源矩形 {0,0,112,80}（染料 pass 同源）",
+      "pass": true,
+      "sx": 0,
+      "sy": 0,
+      "sw": 112,
+      "sh": 80
+    }
+  ]
+}

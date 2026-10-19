@@ -1,0 +1,40 @@
+{
+ "viewport": {
+  "w": 1280,
+  "h": 800
+ },
+ "layout": "vanilla",
+ "pvpSwordCount": 1,
+ "pvpSword": {
+  "rect": {
+   "x": 1053,
+   "y": 379,
+   "w": 38,
+   "h": 38,
+   "display": "block"
+  },
+  "bgSize": "200% 700%",
+  "bgPos": "0% 0%",
+  "inlineStylePos": "0% 0%",
+  "overlayChild": true
+ },
+ "advisorAll": [
+  {
+   "x": 501,
+   "y": 20,
+   "w": 58,
+   "h": 61.3,
+   "display": "flex",
+   "inlineCls": false,
+   "text": "木材！！"
+  }
+ ],
+ "advisorInlineClass": false,
+ "pvpHover": {
+  "hoverMatches": true,
+  "posAfterHover": "0% 0%",
+  "overlayShown": "block",
+  "overlayPos": "0% 100%",
+  "opacity": "1"
+ }
+}

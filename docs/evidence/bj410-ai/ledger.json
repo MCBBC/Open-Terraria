@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "fails": [],
+  "lines": [
+    "PASS: createGame",
+    "PASS: build spawn arena  {\"ok\":true,\"sx\":2103,\"surf\":269}",
+    "PASS: S1 玩家落位(坑左 64px,站立)  {\"x\":33264,\"y\":4262,\"og\":true}",
+    "PASS: S1 spawn 154  {\"ok\":true,\"id\":6,\"x\":33145,\"y\":4264,\"hp\":400,\"refFound\":false}",
+    "PASS: S1 折返发生(facing=-1,vx<0)  last={\"ok\":true,\"id\":6,\"vid\":154,\"facing\":-1,\"ai0\":0,\"ai1\":173,\"ai2\":0,\"vx\":-0.52,\"vy\":0,\"cx\":33326.3,\"cy\":4288,\"onGround\":true,\"wet\":false,\"visAngle\":0,\"pdx\":-52,\"pdy\":-5,\"py\":4262} trace0=[{\"cx\":33183.3,\"cy\":4288,\"vy\":0,\"facing\":1,\"vx\":1,\"ai0\":0},{\"cx\":33204.3,\"cy\":4288,\"vy\":0,\"facing\":1,\"vx\":1,\"ai0\":0}] traceN=[{\"cx\":33312.3,\"cy\":4288,\"vy\":0,\"facing\":1,\"vx\":1,\"ai0\":0},{\"cx\":33326.3,\"cy\":4288,\"vy\":0,\"facing\":-1,\"vx\":-0.52,\"ai0\":0}]",
+    "PASS: S1 折返后全速离崖(awayPx>20,|vx|≥0.95,无回翻)  {\"ok\":true,\"awayPx\":128.6,\"vxLast\":-1,\"cxLast\":33197.7,\"reflip\":false}",
+    "PASS: S2 spawn 154  {\"ok\":true,\"id\":10,\"x\":34025,\"y\":4264,\"hp\":400,\"refFound\":false}",
+    "PASS: S2 进旋冲态 ai0=3  pumpUntil={\"ok\":true,\"ticks\":119,\"final\":{\"ticks\":119}} snap={\"ok\":true,\"id\":10,\"vid\":154,\"facing\":1,\"ai0\":3,\"ai1\":9,\"ai2\":0.3,\"vx\":-9.838,\"vy\":0,\"cx\":34039.8,\"cy\":4288,\"onGround\":true,\"wet\":false,\"visAngle\":3,\"pdx\":-190,\"pdy\":-5,\"py\":4262}",
+    "PASS: S2 受击即断(旋冲→态0)  pre={\"ok\":true,\"pre\":{\"ai0\":3,\"vx\":-9.84,\"visAngle\":3.3}} post={\"ok\":true,\"id\":10,\"vid\":154,\"facing\":-1,\"ai0\":0,\"ai1\":2,\"ai2\":0.3,\"vx\":-6.297,\"vy\":0,\"cx\":34015.8,\"cy\":4288,\"onGround\":true,\"wet\":false,\"visAngle\":3.3,\"pdx\":-166,\"pdy\":-5,\"py\":4262}",
+    "PASS: S3 spawn 496  {\"ok\":true,\"id\":12,\"x\":34258,\"y\":4301,\"hp\":50,\"refFound\":false}",
+    "PASS: S3 496 入水湿而不满蓄(ai0=0,ai1<400)  {\"ok\":true,\"id\":12,\"vid\":496,\"facing\":1,\"ai0\":0,\"ai1\":47,\"ai2\":0,\"vx\":0.5,\"vy\":0,\"cx\":34283.3,\"cy\":4325,\"onGround\":true,\"wet\":true,\"visAngle\":0,\"pdx\":-129,\"pdy\":-42,\"py\":4262}",
+    "PASS: S3 spawn 153 对照  {\"ok\":true,\"id\":13,\"x\":34249,\"y\":4296,\"hp\":470,\"refFound\":false}",
+    "PASS: S3 153 对照 wet→1000 快速转态 1  {\"ok\":true,\"id\":13,\"vid\":153,\"facing\":1,\"ai0\":1,\"ai1\":2,\"ai2\":0,\"vx\":0.035,\"vy\":0.9,\"cx\":34272.2,\"cy\":4313.4,\"onGround\":false,\"wet\":true,\"visAngle\":0,\"pdx\":-118,\"pdy\":-30,\"py\":4262}"
+  ]
+}

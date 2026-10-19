@@ -1,0 +1,48 @@
+{
+  "when": "2026-10-08T08:26:18.211Z",
+  "origin": "http://localhost:5201",
+  "results": [
+    {
+      "name": "装填 3611 到热栏",
+      "pass": true,
+      "id": 3611,
+      "wireId": 530,
+      "heldId": 3611,
+      "key": "vi_3611_WireKite",
+      "selected": 0
+    },
+    {
+      "name": "击1 设锚 grandAnchor",
+      "pass": false,
+      "grandAnchor": null,
+      "useTime": 0
+    },
+    {
+      "name": "击2 执行铺线(t1 wire 位)",
+      "pass": false,
+      "before0": 0,
+      "after1": 0,
+      "afterMid": 0,
+      "wireStackLeft": 200,
+      "grandAnchor": null
+    },
+    {
+      "name": "S2 松开后锚保留(等二次点击执行)",
+      "pass": false,
+      "grandAnchor": null,
+      "useTime": 0
+    },
+    {
+      "name": "S4 门面干净",
+      "pass": true,
+      "useTime": 0,
+      "cced": false,
+      "dead": false,
+      "selected": 0,
+      "heldId": 3611,
+      "uiBlocking": false,
+      "blockMouse": false,
+      "delayUseItem": false
+    }
+  ]
+}

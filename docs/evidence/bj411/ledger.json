@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "fails": [],
+  "lines": [
+    "PASS: createGame",
+    "PASS: spawn 23  {\"ok\":true,\"id\":8,\"x\":33899,\"y\":4212,\"hp\":26,\"refFound\":false}",
+    "PASS: 流星头火尾:60t≈60 发 dust6(每 tick 1 发±变步长,全 d6,盒 22×22)  {\"enemyAlive\":true,\"logN\":63,\"d6N\":63,\"logN60\":63,\"allD6\":true,\"scales\":[2],\"ng\":0,\"box22\":true,\"perTick\":false}",
+    "PASS: 流星头火尾:入参 scale2 恒一(α100 走 spawnDust 8 参,scale 无抖档)  {\"scales\":[2],\"ng\":0}",
+    "PASS: 截图 meteor-head-trail.png  ~/Project/GLM/SandboxWorld/game/docs/evidence/bj411",
+    "PASS: tileIdBySheet(37) 陨石  {\"ok\":true,\"id\":31,\"key\":\"ore_meteorite\"}",
+    "PASS: 陨石火星:600t 陨石带内 d6 成批(>10)且 scale 三档齐  {\"d6Total\":1186,\"inPatchN\":495,\"scales\":{\"0\":170,\"1\":158,\"2\":167},\"ngN\":0}",
+    "PASS: 陨石火星:活尘池 d6 存在且含 noGravity 悬浮档(scale>1 档)  {\"liveN\":75,\"ngN\":60}",
+    "PASS: 截图 meteorite-embers.png  ~/Project/GLM/SandboxWorld/game/docs/evidence/bj411",
+    "PASS: 陨石破坏:格被清(type→0)  {\"beforeType\":31,\"beforeSheet\":31,\"afterType\":0,\"tileGone\":true,\"allLogN\":10,\"allTypes\":[6,23],\"breakN\":10,\"breakIds\":[6,23],\"hitN\":3,\"hitIds\":[23],\"breakBoxOK\":true}",
+    "PASS: 陨石破坏尘:恰 10 发 id∈{6,23}  {\"beforeType\":31,\"beforeSheet\":31,\"afterType\":0,\"tileGone\":true,\"allLogN\":10,\"allTypes\":[6,23],\"breakN\":10,\"breakIds\":[6,23],\"hitN\":3,\"hitIds\":[23],\"breakBoxOK\":true}",
+    "PASS: 陨石挖掘尘(fail 档):恰 3 发 id∈{6,23}  {\"beforeType\":31,\"beforeSheet\":31,\"afterType\":0,\"tileGone\":true,\"allLogN\":10,\"allTypes\":[6,23],\"breakN\":10,\"breakIds\":[6,23],\"hitN\":3,\"hitIds\":[23],\"breakBoxOK\":true}",
+    "PASS: 陨石破坏尘盒=格 16×16  {\"beforeType\":31,\"beforeSheet\":31,\"afterType\":0,\"tileGone\":true,\"allLogN\":10,\"allTypes\":[6,23],\"breakN\":10,\"breakIds\":[6,23],\"hitN\":3,\"hitIds\":[23],\"breakBoxOK\":true}",
+    "PASS: 截图 meteorite-mining-dust.png  ~/Project/GLM/SandboxWorld/game/docs/evidence/bj411"
+  ]
+}

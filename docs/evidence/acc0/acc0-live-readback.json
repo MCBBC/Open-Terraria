@@ -1,0 +1,46 @@
+{
+  "grant": {
+    "ok": true,
+    "key": "vi_4762_CritterShampoo",
+    "iid": 4762,
+    "second": "vi_2276_DiamondRing"
+  },
+  "rects": {
+    "inv": {
+      "x": 280.1000061035156,
+      "y": 42.099998474121094
+    },
+    "inv6": {
+      "x": 327.1000061035156,
+      "y": 42.099998474121094
+    },
+    "acc": {
+      "x": 1210.0999755859375,
+      "y": 598.1000061035156
+    },
+    "van": {
+      "x": 1163.0999755859375,
+      "y": 598.1000061035156
+    }
+  },
+  "readback": {
+    "armor3": {
+      "id": 4762,
+      "is4762": true
+    },
+    "armor13": null,
+    "slot5Left": null,
+    "slot6": "vi_2276_DiamondRing",
+    "heldAfter": null,
+    "unlocked3": true
+  },
+  "readback2": {
+    "armor3": true,
+    "armor13": true
+  },
+  "verdict": {
+    "functionalEquip": true,
+    "socialStill": true,
+    "noHeldResidue": true
+  }
+}

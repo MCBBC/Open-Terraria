@@ -1,0 +1,89 @@
+{
+ "ok": true,
+ "endTime": 28410,
+ "sumLines": 179,
+ "expectedEnd": 28410,
+ "endTimeOk": true,
+ "treeWaitDelay": 72,
+ "treeGrowingIdx": 2,
+ "treeHoldIdx": 8,
+ "doorIdx770": 2,
+ "doorIdx772": 2,
+ "doorWin": 830,
+ "chest": [
+  {
+   "L": 10,
+   "src": "seq",
+   "f": [
+    0,
+    3
+   ]
+  },
+  {
+   "L": 25,
+   "src": "seq",
+   "f": [
+    0,
+    6
+   ]
+  },
+  {
+   "L": 160,
+   "src": "frame",
+   "f": [
+    0,
+    5
+   ]
+  },
+  {
+   "L": 250,
+   "src": "seq",
+   "f": [
+    0,
+    11
+   ]
+  },
+  {
+   "L": 400,
+   "src": "seq",
+   "f": [
+    0,
+    13
+   ]
+  }
+ ],
+ "dryWin": [
+  true,
+  false
+ ],
+ "tavTime": 987,
+ "tavDx700": -150,
+ "jumperT": 690,
+ "jumperWin": 80,
+ "item6": true,
+ "blink": {
+  "d": 180,
+  "delay": 622,
+  "active": true,
+  "gone": false,
+  "rowExpect": 20
+ },
+ "sceneT": {
+  "bye": 7218,
+  "tree": 15233,
+  "chest": 14061,
+  "princess": 27405
+ },
+ "treeHoldLit": 2000,
+ "jumperLit": 2000,
+ "chestHoldLit": 1200,
+ "shots": [
+  "c6-tree-growing",
+  "c6-tree-hold",
+  "c6-chest-open",
+  "c6-chest-hold",
+  "c6-jumper-airborne",
+  "c6-blink-princess"
+ ],
+ "errs": []
+}

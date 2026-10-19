@@ -1,0 +1,7 @@
+OK  (a) 首用出膛 1 只 | kites=1
+RED  (b) 在场连点 3 次仍 1 只（不重放出膛） | kites=0
+RED  (c) 在场仍是首用实例 | same=false
+RED  (d) 按住左键放线 ai0 增长 | ai0 260 -> 260
+RED  (e) 换型：旧 766 亡（heldShoot Kill 门）+ 771 出膛且全场单只 | kites=
+OK  (f) 右键收线到最短 → 消亡 | kites=0
+RED  (g) 消亡后再次使用放行（1 只） | kites=0

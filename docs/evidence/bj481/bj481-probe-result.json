@@ -1,0 +1,168 @@
+{
+  "info0": {
+    "bgl": true,
+    "bglShim": true,
+    "b2b": true,
+    "cloudPipe": true,
+    "cpu": false,
+    "pathUsed": "b2b-acc-ent",
+    "pathStats": {
+      "b2b-acc": 58,
+      "world-gl-wall": 58,
+      "b2b-acc-behind": 58,
+      "world-gl-tile": 58,
+      "b2b-acc-ent": 58
+    },
+    "fullbright": false,
+    "hasScratch": false,
+    "hasMethod": true
+  },
+  "info1": {
+    "pathUsed": "b2b-acc-ent",
+    "pathStats": {
+      "b2b-acc": 847,
+      "world-gl-wall": 847,
+      "b2b-acc-behind": 847,
+      "world-gl-tile": 847,
+      "b2b-acc-ent": 847,
+      "b2b-acc-degraded": 155
+    },
+    "mlfloorSeq": null,
+    "scratchSize": [
+      941,
+      626
+    ]
+  },
+  "scene": {
+    "deepY": 330,
+    "cx0": 2097,
+    "spawned": true,
+    "w": 46,
+    "h": 66
+  },
+  "parts": {
+    "parts": [
+      {
+        "id": 398,
+        "cx": 33553,
+        "cy": 5391
+      },
+      {
+        "id": 397,
+        "cx": 33200,
+        "cy": 5276
+      },
+      {
+        "id": 397,
+        "cx": 33973,
+        "cy": 5265
+      },
+      {
+        "id": 396,
+        "cx": 33553,
+        "cy": 4991
+      }
+    ],
+    "lights": [
+      [
+        38,
+        38,
+        38
+      ],
+      [
+        8,
+        8,
+        9
+      ],
+      [
+        20,
+        20,
+        20
+      ],
+      [
+        158,
+        158,
+        161
+      ]
+    ]
+  },
+  "dark": {
+    "frames": 115,
+    "passthrough": 320,
+    "nBlits": 16,
+    "nChecked": 2082870,
+    "nMismatch": 0,
+    "nChanged": 2154737,
+    "nEmpty": 0,
+    "zeroChangedBlits": 0,
+    "maxAbsDelta": 77,
+    "blitHeads": [
+      {
+        "a": 276,
+        "b": 195,
+        "w": 761,
+        "h": 705,
+        "rw": 761,
+        "rh": 705,
+        "checked": 269323,
+        "mismatch": 0,
+        "changedPx": 272827,
+        "empty": false,
+        "sample": null,
+        "maxAbs": 65
+      },
+      {
+        "a": 0,
+        "b": 0,
+        "w": 762,
+        "h": 900,
+        "rw": 762,
+        "rh": 900,
+        "checked": 64950,
+        "mismatch": 0,
+        "changedPx": 67484,
+        "empty": false,
+        "sample": null,
+        "maxAbs": 74
+      },
+      {
+        "a": 619,
+        "b": 0,
+        "w": 661,
+        "h": 900,
+        "rw": 661,
+        "rh": 900,
+        "checked": 67582,
+        "mismatch": 0,
+        "changedPx": 72018,
+        "empty": false,
+        "sample": null,
+        "maxAbs": 71
+      }
+    ]
+  },
+  "armC": {
+    "dReg": [
+      200,
+      100,
+      50
+    ],
+    "dFresh": [
+      200,
+      100,
+      50
+    ]
+  },
+  "bright": {
+    "frames": 120,
+    "passthrough": 0,
+    "nBlits": 0,
+    "nChecked": 0,
+    "nMismatch": 0,
+    "nChanged": 0,
+    "nEmpty": 0,
+    "zeroChangedBlits": 0,
+    "maxAbsDelta": 0
+  },
+  "pageErrs": []
+}

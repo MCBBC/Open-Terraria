@@ -1,0 +1,78 @@
+{
+  "when": "2026-09-30T05:18:19.947Z",
+  "origin": "http://localhost:5461",
+  "results": [
+    {
+      "name": "页内 kite item 键注册",
+      "pass": true,
+      "kiteKey": "vi_4367_KiteBlue",
+      "hasItems": true
+    },
+    {
+      "name": "热栏装填 4367",
+      "pass": true,
+      "id": 4367,
+      "heldId": 4367,
+      "key": "vi_4367_KiteBlue"
+    },
+    {
+      "name": "S1 风筝出膛（KiteProj 766 在场）",
+      "pass": true,
+      "found": true,
+      "projId": 766,
+      "ai0": 250,
+      "x": 33673,
+      "y": 4224,
+      "playerY": 4265,
+      "wind": 0.5,
+      "localAI1": 0,
+      "frame": 1,
+      "dead": false,
+      "bucket": 1
+    },
+    {
+      "name": "S1 线长初值 250",
+      "pass": true,
+      "ai0": 250
+    },
+    {
+      "name": "S1 120t 滞空存活",
+      "pass": true,
+      "alive": true,
+      "y": 4258,
+      "playerTop": 4262,
+      "wind": 0.5,
+      "droop": 0
+    },
+    {
+      "name": "S4 buff 383 腾灵续期中",
+      "pass": true,
+      "kiteBuff": 23.766666666666623
+    },
+    {
+      "name": "S2a 放线钳 500",
+      "pass": true,
+      "ai0": 500
+    },
+    {
+      "name": "S2b 收线至 4 → Kill（风筝消亡）",
+      "pass": true,
+      "ai0": null,
+      "alive": false
+    },
+    {
+      "name": "S3 无风滞空不消亡",
+      "pass": true,
+      "alive": true,
+      "droop": 0.65,
+      "y": 4318
+    },
+    {
+      "name": "S3 下垂累积(localAI1>0)",
+      "pass": true,
+      "alive": true,
+      "droop": 0.65,
+      "y": 4318
+    }
+  ]
+}

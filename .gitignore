@@ -7,7 +7,7 @@
 /dist-analyze
 
 /build
-/docs
+# docs/ 已开放入库(2026-10-19):判例档案/开发日志/方法论随仓库公开;仅排除内部子目录(如需要)
 /logs
 /tmp
 /shots

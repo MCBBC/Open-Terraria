@@ -1,0 +1,138 @@
+[
+ {
+  "vp": "1280x800",
+  "K": 1,
+  "advisor": {
+   "x": 501,
+   "y": 20,
+   "w": 58,
+   "h": 61.3,
+   "display": "block"
+  },
+  "advisorCard": {
+   "x": 501,
+   "y": 20,
+   "w": 58,
+   "h": 61.3,
+   "display": "flex"
+  },
+  "defense": {
+   "x": 1050,
+   "y": 719,
+   "w": 40,
+   "h": 36,
+   "display": "block"
+  },
+  "settings": {
+   "x": 1012,
+   "y": 725.69,
+   "w": 36,
+   "h": 25,
+   "display": "block"
+  },
+  "minimapStyle": 1,
+  "fullscreenMap": false
+ },
+ {
+  "vp": "900x900",
+  "K": 1,
+  "advisor": {
+   "x": 676,
+   "y": 775,
+   "w": 58,
+   "h": 61.3,
+   "display": "block"
+  },
+  "advisorCard": {
+   "x": 676,
+   "y": 775,
+   "w": 58,
+   "h": 61.3,
+   "display": "flex"
+  },
+  "defense": {
+   "x": 670,
+   "y": 775,
+   "w": 40,
+   "h": 36,
+   "display": "block"
+  },
+  "settings": {
+   "x": 772,
+   "y": 867.5,
+   "w": 36,
+   "h": 25,
+   "display": "block"
+  },
+  "minimapStyle": 1,
+  "fullscreenMap": false
+ },
+ {
+  "vp": "800x800",
+  "K": 1,
+  "advisor": {
+   "x": 576,
+   "y": 719,
+   "w": 58,
+   "h": 61.3,
+   "display": "block"
+  },
+  "advisorCard": {
+   "x": 576,
+   "y": 719,
+   "w": 58,
+   "h": 61.3,
+   "display": "flex"
+  },
+  "defense": {
+   "x": 570,
+   "y": 719,
+   "w": 40,
+   "h": 36,
+   "display": "block"
+  },
+  "settings": {
+   "x": 532,
+   "y": 725.69,
+   "w": 36,
+   "h": 25,
+   "display": "block"
+  },
+  "minimapStyle": 1,
+  "fullscreenMap": false
+ },
+ {
+  "vp": "800x600",
+  "K": 0.769231,
+  "advisor": {
+   "x": 501,
+   "y": 20,
+   "w": 58,
+   "h": 61.3,
+   "display": "block"
+  },
+  "advisorCard": {
+   "x": 501,
+   "y": 20,
+   "w": 58,
+   "h": 61.3,
+   "display": "flex"
+  },
+  "defense": {
+   "x": 810,
+   "y": 699,
+   "w": 40,
+   "h": 36,
+   "display": "block"
+  },
+  "settings": {
+   "x": 772,
+   "y": 705.69,
+   "w": 36,
+   "h": 25,
+   "display": "block"
+  },
+  "minimapStyle": 1,
+  "fullscreenMap": false
+ }
+]

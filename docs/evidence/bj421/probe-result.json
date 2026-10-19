@@ -1,0 +1,88 @@
+{
+ "layout": "vanilla",
+ "shopOpen": true,
+ "savingsCopper": 6730,
+ "split": [
+  30,
+  67,
+  0,
+  0
+ ],
+ "happinessMul": 1,
+ "happyText": "100%",
+ "merchantVid": 17,
+ "K": 1,
+ "cntRects": [
+  "(504,333) 6x12",
+  "(528,333) 6x12",
+  "(552,333) 12x12",
+  "(576,333) 12x12"
+ ],
+ "iconRects": [
+  "(505,323) 20x20",
+  "(529,323) 20x20",
+  "(553,323) 20x20",
+  "(577,323) 20x20"
+ ],
+ "happyRect": "(504,354) 24x24",
+ "happyTxtRect": "(530,356) 28x17",
+ "labelRect": "(504,298) 26x17",
+ "logical": {
+  "cntBand": [
+   333,
+   345
+  ],
+  "iconTop": 354,
+  "txtTop": 356,
+  "iconCenters": [
+   [
+    515,
+    333
+   ],
+   [
+    539,
+    333
+   ],
+   [
+    563,
+    333
+   ],
+   [
+    587,
+    333
+   ]
+  ],
+  "cntTops": [
+   333,
+   333,
+   333,
+   333
+  ],
+  "expectedIcons": [
+   [
+    515,
+    333
+   ],
+   [
+    539,
+    333
+   ],
+   [
+    563,
+    333
+   ],
+   [
+    587,
+    333
+   ]
+  ]
+ },
+ "gaps": {
+  "cntBottom_to_happyIconTop": 9,
+  "cntBottom_to_happyTextTop": 11
+ },
+ "countsText": "0,0,67,30",
+ "centersOk": true,
+ "topsOk": true,
+ "VERDICT": "PASS 不重叠"
+}

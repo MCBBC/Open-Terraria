@@ -1,0 +1,105 @@
+{
+  "scene": {
+    "dX": 3552,
+    "dY": 331,
+    "ws": 361,
+    "gy": 332,
+    "sx0": 3582,
+    "sx1": 3589,
+    "floorY": 422,
+    "omHome": {
+      "x": 3552,
+      "y": 329
+    },
+    "omPos": {
+      "x": 3552,
+      "y": 330
+    }
+  },
+  "oldSim": {
+    "trials": 300,
+    "embed": 279,
+    "inShaft": 11,
+    "shaftBrick": 0,
+    "belowWs": 0,
+    "noSolid": 21
+  },
+  "newSim": {
+    "trials": 300,
+    "valid": 300,
+    "onPlatform": 0,
+    "inShaft": 0,
+    "first": {
+      "spawnX": 3592,
+      "spawnY": 314,
+      "homeX": 3552,
+      "homeY": 330,
+      "dir": -1
+    }
+  },
+  "newSimInvalid": 0,
+  "s2": {
+    "spawned": 1,
+    "detail": [
+      {
+        "x": 35751,
+        "y": 4376,
+        "anchor": {
+          "x": 2195,
+          "y": 271
+        },
+        "home": null,
+        "hd": true,
+        "bodyClear": true,
+        "fx": 2235,
+        "fy": 276
+      }
+    ],
+    "homeAll": [
+      "party_girl"
+    ],
+    "made": [
+      "guide",
+      "merchant",
+      "nurse",
+      "arms_dealer",
+      "goblin_tinkerer",
+      "wizard",
+      "dryad",
+      "demolitionist",
+      "witch_doctor",
+      "steampunker",
+      "mechanic",
+      "angler",
+      "cyborg",
+      "pirate",
+      "clothier"
+    ],
+    "boundStyCleared": 0,
+    "diag": {
+      "isDay": true,
+      "tod": 0.3,
+      "ff": false,
+      "homelessSpawnTimeout": 0,
+      "invasion": false,
+      "homelessNonExempt": false,
+      "homelessList": [],
+      "n": 17
+    },
+    "omAnchorExcluded": true,
+    "dX": 3552,
+    "shaft": [
+      3582,
+      3589
+    ]
+  },
+  "verdict": {
+    "oldEmbedRate": 0.93,
+    "oldShaftBrick": 0,
+    "newInvalid": 0,
+    "newValidRate": 1,
+    "stylistSpawned": 1,
+    "stylistBodyClear": true,
+    "stylistNotAtDungeon": true
+  }
+}

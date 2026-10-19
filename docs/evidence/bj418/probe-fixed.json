@@ -1,0 +1,5226 @@
+shot fail A-close Protocol error (Page.captureScreenshot): Invalid parameters Failed to deserialize params.clip.x - BINDINGS: double value expected at position 65
+shot fail B-far Protocol error (Page.captureScreenshot): Invalid parameters Failed to deserialize params.clip.x - BINDINGS: double value expected at position 65
+{
+ "A": {
+  "n": 0
+ },
+ "B": {
+  "n": 0
+ },
+ "C": {
+  "n": 0
+ },
+ "raw": {
+  "A": [
+   {
+    "lai3": 16,
+    "ai0": 0,
+    "ai1": 89,
+    "dist": 189,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 15,
+    "ai0": 0,
+    "ai1": 90,
+    "dist": 186,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 14,
+    "ai0": 0,
+    "ai1": 91,
+    "dist": 182,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 13,
+    "ai0": 0,
+    "ai1": 92,
+    "dist": 179,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 12,
+    "ai0": 0,
+    "ai1": 93,
+    "dist": 176,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 11,
+    "ai0": 0,
+    "ai1": 94,
+    "dist": 172,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 10,
+    "ai0": 0,
+    "ai1": 95,
+    "dist": 169,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 9,
+    "ai0": 0,
+    "ai1": 96,
+    "dist": 166,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 8,
+    "ai0": 0,
+    "ai1": 97,
+    "dist": 163,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 7,
+    "ai0": 0,
+    "ai1": 98,
+    "dist": 159,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 6,
+    "ai0": 0,
+    "ai1": 99,
+    "dist": 156,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 5,
+    "ai0": 0,
+    "ai1": 100,
+    "dist": 153,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 4,
+    "ai0": 0,
+    "ai1": 101,
+    "dist": 149,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 3,
+    "ai0": 0,
+    "ai1": 102,
+    "dist": 146,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 2,
+    "ai0": 0,
+    "ai1": 103,
+    "dist": 143,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 1,
+    "ai0": 0,
+    "ai1": 104,
+    "dist": 140,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 0,
+    "dist": 139,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 1,
+    "dist": 138,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 2,
+    "dist": 137,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 3,
+    "dist": 137,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 4,
+    "dist": 136,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 5,
+    "dist": 136,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 6,
+    "dist": 135,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 7,
+    "dist": 135,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 8,
+    "dist": 135,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 9,
+    "dist": 134,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 10,
+    "dist": 134,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 11,
+    "dist": 134,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 12,
+    "dist": 134,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 13,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 14,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 15,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 16,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 17,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 18,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 19,
+    "dist": 133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 20,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 21,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 22,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 23,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 24,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 25,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 26,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 27,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 28,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 29,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 30,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 31,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 32,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 33,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 34,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 35,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 36,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 37,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 38,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 39,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 40,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 41,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 42,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 43,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 44,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 45,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 46,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 47,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 48,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 49,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 50,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 51,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 52,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 53,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 54,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 1,
+    "ai1": 55,
+    "dist": 132,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   }
+  ],
+  "B": [
+   {
+    "lai3": 25,
+    "ai0": 0,
+    "ai1": 1,
+    "dist": 1198,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 26,
+    "ai0": 0,
+    "ai1": 2,
+    "dist": 1197,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 27,
+    "ai0": 0,
+    "ai1": 3,
+    "dist": 1195,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 28,
+    "ai0": 0,
+    "ai1": 4,
+    "dist": 1192,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 29,
+    "ai0": 0,
+    "ai1": 5,
+    "dist": 1190,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 6,
+    "dist": 1187,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 7,
+    "dist": 1184,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 8,
+    "dist": 1181,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 9,
+    "dist": 1178,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 10,
+    "dist": 1174,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 11,
+    "dist": 1171,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 12,
+    "dist": 1168,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 13,
+    "dist": 1164,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 14,
+    "dist": 1161,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 15,
+    "dist": 1157,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 16,
+    "dist": 1154,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 17,
+    "dist": 1151,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 18,
+    "dist": 1147,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 19,
+    "dist": 1144,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 20,
+    "dist": 1140,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 21,
+    "dist": 1137,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 22,
+    "dist": 1133,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 23,
+    "dist": 1130,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 24,
+    "dist": 1126,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 25,
+    "dist": 1123,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 26,
+    "dist": 1119,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 27,
+    "dist": 1116,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 28,
+    "dist": 1112,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 29,
+    "dist": 1109,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 30,
+    "dist": 1105,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 31,
+    "dist": 1102,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 32,
+    "dist": 1099,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 33,
+    "dist": 1095,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 34,
+    "dist": 1092,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 35,
+    "dist": 1088,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 36,
+    "dist": 1085,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 37,
+    "dist": 1081,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 38,
+    "dist": 1078,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 39,
+    "dist": 1074,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 40,
+    "dist": 1071,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 41,
+    "dist": 1067,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 42,
+    "dist": 1064,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 43,
+    "dist": 1060,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 44,
+    "dist": 1057,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 45,
+    "dist": 1053,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 46,
+    "dist": 1050,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 47,
+    "dist": 1047,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 48,
+    "dist": 1043,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 49,
+    "dist": 1040,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 50,
+    "dist": 1036,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 51,
+    "dist": 1033,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 52,
+    "dist": 1029,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 53,
+    "dist": 1026,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 54,
+    "dist": 1022,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 55,
+    "dist": 1019,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 56,
+    "dist": 1015,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 57,
+    "dist": 1012,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 58,
+    "dist": 1008,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 59,
+    "dist": 1005,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 60,
+    "dist": 1002,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 61,
+    "dist": 998,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 62,
+    "dist": 995,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 63,
+    "dist": 991,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 64,
+    "dist": 988,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 65,
+    "dist": 984,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 66,
+    "dist": 981,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   }
+  ],
+  "C": [
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 68,
+    "dist": 453,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "ai1": 69,
+    "dist": 450,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 29,
+    "ai0": 0,
+    "ai1": 70,
+    "dist": 446,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 28,
+    "ai0": 0,
+    "ai1": 71,
+    "dist": 443,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 27,
+    "ai0": 0,
+    "ai1": 72,
+    "dist": 440,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 26,
+    "ai0": 0,
+    "ai1": 73,
+    "dist": 436,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 25,
+    "ai0": 0,
+    "ai1": 74,
+    "dist": 433,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 24,
+    "ai0": 0,
+    "ai1": 75,
+    "dist": 430,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 23,
+    "ai0": 0,
+    "ai1": 76,
+    "dist": 427,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 22,
+    "ai0": 0,
+    "ai1": 77,
+    "dist": 423,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 21,
+    "ai0": 0,
+    "ai1": 78,
+    "dist": 420,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 20,
+    "ai0": 0,
+    "ai1": 79,
+    "dist": 390,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 19,
+    "ai0": 0,
+    "ai1": 80,
+    "dist": 386,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 18,
+    "ai0": 0,
+    "ai1": 81,
+    "dist": 383,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 17,
+    "ai0": 0,
+    "ai1": 82,
+    "dist": 380,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 16,
+    "ai0": 0,
+    "ai1": 83,
+    "dist": 377,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 15,
+    "ai0": 0,
+    "ai1": 84,
+    "dist": 373,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 14,
+    "ai0": 0,
+    "ai1": 85,
+    "dist": 370,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 13,
+    "ai0": 0,
+    "ai1": 86,
+    "dist": 367,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 12,
+    "ai0": 0,
+    "ai1": 87,
+    "dist": 364,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 11,
+    "ai0": 0,
+    "ai1": 88,
+    "dist": 360,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 10,
+    "ai0": 0,
+    "ai1": 89,
+    "dist": 357,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 9,
+    "ai0": 0,
+    "ai1": 90,
+    "dist": 376,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 8,
+    "ai0": 0,
+    "ai1": 91,
+    "dist": 373,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 7,
+    "ai0": 0,
+    "ai1": 92,
+    "dist": 370,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 6,
+    "ai0": 0,
+    "ai1": 93,
+    "dist": 366,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 5,
+    "ai0": 0,
+    "ai1": 94,
+    "dist": 363,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 4,
+    "ai0": 0,
+    "ai1": 95,
+    "dist": 360,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 3,
+    "ai0": 0,
+    "ai1": 96,
+    "dist": 357,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 2,
+    "ai0": 0,
+    "ai1": 97,
+    "dist": 354,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 1,
+    "ai0": 0,
+    "ai1": 98,
+    "dist": 350,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 99,
+    "dist": 347,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 100,
+    "dist": 343,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 101,
+    "dist": 313,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 102,
+    "dist": 310,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 103,
+    "dist": 307,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 104,
+    "dist": 303,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 105,
+    "dist": 300,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 106,
+    "dist": 297,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 107,
+    "dist": 294,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 108,
+    "dist": 291,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 109,
+    "dist": 288,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 110,
+    "dist": 284,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 111,
+    "dist": 281,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 112,
+    "dist": 300,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 113,
+    "dist": 297,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 114,
+    "dist": 293,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 115,
+    "dist": 290,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 116,
+    "dist": 287,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 117,
+    "dist": 284,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 118,
+    "dist": 281,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "ai1": 119,
+    "dist": 278,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 0,
+    "dist": 277,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 1,
+    "dist": 276,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 2,
+    "dist": 276,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 3,
+    "dist": 248,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 4,
+    "dist": 248,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 5,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 6,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 7,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 8,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 9,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 10,
+    "dist": 248,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 11,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 12,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 13,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 14,
+    "dist": 247,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 15,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 16,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 17,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 18,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 19,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   },
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "ai1": 20,
+    "dist": 246,
+    "err": null,
+    "n": 0,
+    "a": null,
+    "all": []
+   }
+  ]
+ },
+ "px": {
+  "far": [
+   {
+    "lai3": 0,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 487,
+    "opaque": 16900
+   },
+   {
+    "lai3": 3,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 426,
+    "opaque": 16900
+   },
+   {
+    "lai3": 6,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 931,
+    "opaque": 16900
+   },
+   {
+    "lai3": 9,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 1045,
+    "opaque": 16900
+   },
+   {
+    "lai3": 12,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 1111,
+    "opaque": 16900
+   },
+   {
+    "lai3": 15,
+    "ai0": 3,
+    "dist": 551,
+    "purple": 1143,
+    "opaque": 15990
+   },
+   {
+    "lai3": 18,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1097,
+    "opaque": 15470
+   },
+   {
+    "lai3": 21,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1101,
+    "opaque": 15665
+   },
+   {
+    "lai3": 23,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1081,
+    "opaque": 15600
+   },
+   {
+    "lai3": 26,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1026,
+    "opaque": 15600
+   },
+   {
+    "lai3": 29,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1072,
+    "opaque": 15860
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1085,
+    "opaque": 15925
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1066,
+    "opaque": 15990
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1080,
+    "opaque": 16185
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1078,
+    "opaque": 16185
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1048,
+    "opaque": 16120
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1055,
+    "opaque": 16185
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1055,
+    "opaque": 16120
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1045,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1050,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1036,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1036,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1031,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1027,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1016,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1014,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1007,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1012,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1002,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1013,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1018,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1011,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1002,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 995,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 986,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1026,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1029,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1016,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1005,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1005,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1034,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1031,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1005,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 903,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 815,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 933,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 988,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1013,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1016,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1018,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1014,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1055,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1056,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1053,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1051,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1047,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1067,
+    "opaque": 16055
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1069,
+    "opaque": 16575
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1055,
+    "opaque": 16380
+   },
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 551,
+    "purple": 1088,
+    "opaque": 16250
+   }
+  ],
+  "near": [
+   {
+    "lai3": 30,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 1046,
+    "opaque": 16185
+   },
+   {
+    "lai3": 27,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 1097,
+    "opaque": 16900
+   },
+   {
+    "lai3": 24,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 584,
+    "opaque": 16900
+   },
+   {
+    "lai3": 21,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 1072,
+    "opaque": 16900
+   },
+   {
+    "lai3": 19,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 1548,
+    "opaque": 16900
+   },
+   {
+    "lai3": 16,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2035,
+    "opaque": 16900
+   },
+   {
+    "lai3": 13,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2331,
+    "opaque": 16900
+   },
+   {
+    "lai3": 10,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2505,
+    "opaque": 16900
+   },
+   {
+    "lai3": 7,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2566,
+    "opaque": 16900
+   },
+   {
+    "lai3": 4,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2645,
+    "opaque": 16900
+   },
+   {
+    "lai3": 1,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2718,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2729,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2760,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2786,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2818,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2816,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 3173,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 4287,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 4745,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 5070,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 5166,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 4994,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 4762,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 4331,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 3912,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 3487,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 3079,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2853,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 2511,
+    "opaque": 16900
+   },
+   {
+    "lai3": 0,
+    "ai0": 0,
+    "dist": 213,
+    "purple": 1991,
+    "opaque": 16900
+   }
+  ]
+ },
+ "meta": {
+  "errors": [],
+  "diag": {
+   "hookedCount": 612,
+   "firstCtx": 2,
+   "lastHookedBefore": true
+  },
+  "ctxIds": [
+   [
+    1,
+    0
+   ],
+   [
+    2,
+    0
+   ],
+   [
+    3,
+    0
+   ],
+   [
+    4,
+    0
+   ],
+   [
+    5,
+    0
+   ],
+   [
+    6,
+    0
+   ],
+   [
+    7,
+    0
+   ],
+   [
+    8,
+    0
+   ],
+   [
+    9,
+    0
+   ],
+   [
+    10,
+    0
+   ],
+   [
+    11,
+    0
+   ],
+   [
+    12,
+    0
+   ],
+   [
+    13,
+    0
+   ],
+   [
+    14,
+    0
+   ],
+   [
+    15,
+    0
+   ],
+   [
+    16,
+    0
+   ],
+   [
+    17,
+    0
+   ],
+   [
+    18,
+    0
+   ],
+   [
+    19,
+    0
+   ],
+   [
+    20,
+    0
+   ],
+   [
+    21,
+    0
+   ],
+   [
+    22,
+    0
+   ],
+   [
+    23,
+    0
+   ],
+   [
+    24,
+    0
+   ],
+   [
+    25,
+    0
+   ],
+   [
+    26,
+    0
+   ],
+   [
+    27,
+    0
+   ],
+   [
+    28,
+    0
+   ],
+   [
+    29,
+    0
+   ],
+   [
+    30,
+    0
+   ],
+   [
+    31,
+    0
+   ],
+   [
+    32,
+    0
+   ],
+   [
+    33,
+    0
+   ],
+   [
+    34,
+    0
+   ],
+   [
+    35,
+    0
+   ],
+   [
+    36,
+    0
+   ],
+   [
+    37,
+    0
+   ],
+   [
+    38,
+    0
+   ],
+   [
+    39,
+    0
+   ],
+   [
+    40,
+    0
+   ],
+   [
+    41,
+    0
+   ],
+   [
+    42,
+    0
+   ],
+   [
+    43,
+    0
+   ],
+   [
+    44,
+    0
+   ],
+   [
+    45,
+    0
+   ],
+   [
+    46,
+    0
+   ],
+   [
+    47,
+    0
+   ],
+   [
+    48,
+    0
+   ],
+   [
+    49,
+    0
+   ],
+   [
+    50,
+    0
+   ],
+   [
+    51,
+    0
+   ],
+   [
+    52,
+    0
+   ],
+   [
+    53,
+    0
+   ],
+   [
+    54,
+    0
+   ],
+   [
+    55,
+    0
+   ],
+   [
+    56,
+    0
+   ],
+   [
+    57,
+    0
+   ],
+   [
+    58,
+    0
+   ],
+   [
+    59,
+    0
+   ],
+   [
+    60,
+    0
+   ],
+   [
+    61,
+    0
+   ],
+   [
+    62,
+    0
+   ],
+   [
+    63,
+    0
+   ],
+   [
+    64,
+    0
+   ],
+   [
+    65,
+    0
+   ],
+   [
+    66,
+    0
+   ],
+   [
+    67,
+    0
+   ],
+   [
+    68,
+    0
+   ],
+   [
+    69,
+    0
+   ],
+   [
+    70,
+    0
+   ],
+   [
+    71,
+    0
+   ],
+   [
+    72,
+    0
+   ],
+   [
+    73,
+    0
+   ],
+   [
+    74,
+    0
+   ],
+   [
+    75,
+    0
+   ],
+   [
+    76,
+    0
+   ],
+   [
+    77,
+    0
+   ],
+   [
+    78,
+    0
+   ],
+   [
+    79,
+    0
+   ],
+   [
+    80,
+    0
+   ],
+   [
+    81,
+    0
+   ],
+   [
+    82,
+    0
+   ],
+   [
+    83,
+    0
+   ],
+   [
+    84,
+    0
+   ],
+   [
+    85,
+    0
+   ],
+   [
+    86,
+    0
+   ],
+   [
+    87,
+    0
+   ],
+   [
+    88,
+    0
+   ],
+   [
+    89,
+    0
+   ],
+   [
+    90,
+    0
+   ],
+   [
+    91,
+    0
+   ],
+   [
+    92,
+    0
+   ],
+   [
+    93,
+    0
+   ],
+   [
+    94,
+    0
+   ],
+   [
+    95,
+    0
+   ],
+   [
+    96,
+    0
+   ],
+   [
+    97,
+    0
+   ],
+   [
+    98,
+    0
+   ],
+   [
+    99,
+    0
+   ],
+   [
+    100,
+    0
+   ],
+   [
+    101,
+    0
+   ],
+   [
+    102,
+    0
+   ],
+   [
+    103,
+    0
+   ],
+   [
+    104,
+    0
+   ],
+   [
+    105,
+    0
+   ],
+   [
+    106,
+    0
+   ],
+   [
+    107,
+    0
+   ],
+   [
+    108,
+    0
+   ],
+   [
+    109,
+    0
+   ],
+   [
+    110,
+    0
+   ],
+   [
+    111,
+    0
+   ],
+   [
+    112,
+    0
+   ],
+   [
+    113,
+    0
+   ],
+   [
+    114,
+    0
+   ],
+   [
+    115,
+    0
+   ],
+   [
+    116,
+    0
+   ],
+   [
+    117,
+    0
+   ],
+   [
+    118,
+    0
+   ],
+   [
+    119,
+    0
+   ],
+   [
+    120,
+    0
+   ],
+   [
+    121,
+    0
+   ],
+   [
+    122,
+    0
+   ],
+   [
+    123,
+    0
+   ],
+   [
+    124,
+    0
+   ],
+   [
+    125,
+    0
+   ],
+   [
+    126,
+    0
+   ],
+   [
+    127,
+    0
+   ],
+   [
+    128,
+    0
+   ],
+   [
+    129,
+    0
+   ],
+   [
+    130,
+    0
+   ],
+   [
+    131,
+    0
+   ],
+   [
+    132,
+    0
+   ],
+   [
+    133,
+    0
+   ],
+   [
+    134,
+    0
+   ],
+   [
+    135,
+    0
+   ],
+   [
+    136,
+    0
+   ],
+   [
+    137,
+    0
+   ],
+   [
+    138,
+    0
+   ],
+   [
+    139,
+    0
+   ],
+   [
+    140,
+    0
+   ],
+   [
+    141,
+    0
+   ],
+   [
+    142,
+    0
+   ],
+   [
+    143,
+    0
+   ],
+   [
+    144,
+    0
+   ],
+   [
+    145,
+    0
+   ],
+   [
+    146,
+    0
+   ],
+   [
+    147,
+    0
+   ],
+   [
+    148,
+    0
+   ],
+   [
+    149,
+    0
+   ],
+   [
+    150,
+    0
+   ],
+   [
+    151,
+    0
+   ],
+   [
+    152,
+    0
+   ],
+   [
+    153,
+    0
+   ],
+   [
+    154,
+    0
+   ],
+   [
+    155,
+    0
+   ],
+   [
+    156,
+    0
+   ],
+   [
+    157,
+    0
+   ],
+   [
+    158,
+    0
+   ],
+   [
+    159,
+    0
+   ],
+   [
+    160,
+    0
+   ],
+   [
+    161,
+    0
+   ],
+   [
+    162,
+    0
+   ],
+   [
+    163,
+    0
+   ],
+   [
+    164,
+    0
+   ],
+   [
+    165,
+    0
+   ],
+   [
+    166,
+    0
+   ],
+   [
+    167,
+    0
+   ],
+   [
+    168,
+    0
+   ],
+   [
+    169,
+    0
+   ],
+   [
+    170,
+    0
+   ],
+   [
+    171,
+    0
+   ],
+   [
+    172,
+    0
+   ],
+   [
+    173,
+    0
+   ],
+   [
+    174,
+    0
+   ],
+   [
+    175,
+    0
+   ],
+   [
+    176,
+    0
+   ],
+   [
+    177,
+    0
+   ],
+   [
+    178,
+    0
+   ],
+   [
+    179,
+    0
+   ],
+   [
+    180,
+    0
+   ],
+   [
+    181,
+    0
+   ],
+   [
+    182,
+    0
+   ],
+   [
+    183,
+    0
+   ],
+   [
+    184,
+    0
+   ],
+   [
+    185,
+    0
+   ],
+   [
+    186,
+    0
+   ],
+   [
+    187,
+    0
+   ],
+   [
+    188,
+    0
+   ],
+   [
+    189,
+    0
+   ],
+   [
+    190,
+    0
+   ],
+   [
+    191,
+    0
+   ],
+   [
+    192,
+    0
+   ],
+   [
+    193,
+    0
+   ],
+   [
+    194,
+    0
+   ],
+   [
+    195,
+    0
+   ],
+   [
+    196,
+    0
+   ],
+   [
+    197,
+    0
+   ],
+   [
+    198,
+    0
+   ],
+   [
+    199,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    201,
+    0
+   ],
+   [
+    202,
+    0
+   ],
+   [
+    203,
+    0
+   ],
+   [
+    204,
+    0
+   ],
+   [
+    205,
+    0
+   ],
+   [
+    206,
+    0
+   ],
+   [
+    207,
+    0
+   ],
+   [
+    208,
+    0
+   ],
+   [
+    209,
+    0
+   ],
+   [
+    210,
+    0
+   ],
+   [
+    211,
+    0
+   ],
+   [
+    212,
+    0
+   ],
+   [
+    213,
+    0
+   ],
+   [
+    214,
+    0
+   ],
+   [
+    215,
+    0
+   ],
+   [
+    216,
+    0
+   ],
+   [
+    217,
+    0
+   ],
+   [
+    218,
+    0
+   ],
+   [
+    219,
+    0
+   ],
+   [
+    220,
+    0
+   ],
+   [
+    221,
+    0
+   ],
+   [
+    222,
+    0
+   ],
+   [
+    223,
+    0
+   ],
+   [
+    224,
+    0
+   ],
+   [
+    225,
+    0
+   ],
+   [
+    226,
+    0
+   ],
+   [
+    227,
+    0
+   ],
+   [
+    228,
+    0
+   ],
+   [
+    229,
+    0
+   ],
+   [
+    230,
+    0
+   ],
+   [
+    231,
+    0
+   ],
+   [
+    232,
+    0
+   ],
+   [
+    233,
+    0
+   ],
+   [
+    234,
+    0
+   ],
+   [
+    235,
+    0
+   ],
+   [
+    236,
+    0
+   ],
+   [
+    237,
+    0
+   ],
+   [
+    238,
+    0
+   ],
+   [
+    239,
+    0
+   ],
+   [
+    240,
+    0
+   ],
+   [
+    241,
+    0
+   ],
+   [
+    242,
+    0
+   ],
+   [
+    243,
+    0
+   ],
+   [
+    244,
+    0
+   ],
+   [
+    245,
+    0
+   ],
+   [
+    246,
+    0
+   ],
+   [
+    247,
+    0
+   ],
+   [
+    248,
+    0
+   ],
+   [
+    249,
+    0
+   ],
+   [
+    250,
+    0
+   ],
+   [
+    251,
+    0
+   ],
+   [
+    252,
+    0
+   ],
+   [
+    253,
+    0
+   ],
+   [
+    254,
+    0
+   ],
+   [
+    255,
+    0
+   ],
+   [
+    256,
+    0
+   ],
+   [
+    257,
+    0
+   ],
+   [
+    258,
+    0
+   ],
+   [
+    259,
+    0
+   ],
+   [
+    260,
+    0
+   ],
+   [
+    261,
+    0
+   ],
+   [
+    262,
+    0
+   ],
+   [
+    263,
+    0
+   ],
+   [
+    264,
+    0
+   ],
+   [
+    265,
+    0
+   ],
+   [
+    266,
+    0
+   ],
+   [
+    267,
+    0
+   ],
+   [
+    268,
+    0
+   ],
+   [
+    269,
+    0
+   ],
+   [
+    270,
+    0
+   ],
+   [
+    271,
+    0
+   ],
+   [
+    272,
+    0
+   ],
+   [
+    273,
+    0
+   ],
+   [
+    274,
+    0
+   ],
+   [
+    275,
+    0
+   ],
+   [
+    276,
+    0
+   ],
+   [
+    277,
+    0
+   ],
+   [
+    278,
+    0
+   ],
+   [
+    279,
+    0
+   ],
+   [
+    280,
+    0
+   ],
+   [
+    281,
+    0
+   ],
+   [
+    282,
+    0
+   ],
+   [
+    283,
+    0
+   ],
+   [
+    284,
+    0
+   ],
+   [
+    285,
+    0
+   ],
+   [
+    286,
+    0
+   ],
+   [
+    287,
+    0
+   ],
+   [
+    288,
+    0
+   ],
+   [
+    289,
+    0
+   ],
+   [
+    290,
+    0
+   ],
+   [
+    291,
+    0
+   ],
+   [
+    292,
+    0
+   ],
+   [
+    293,
+    0
+   ],
+   [
+    294,
+    0
+   ],
+   [
+    295,
+    0
+   ],
+   [
+    296,
+    0
+   ],
+   [
+    297,
+    0
+   ],
+   [
+    298,
+    0
+   ],
+   [
+    299,
+    0
+   ],
+   [
+    300,
+    0
+   ],
+   [
+    301,
+    0
+   ],
+   [
+    302,
+    0
+   ],
+   [
+    303,
+    0
+   ],
+   [
+    304,
+    0
+   ],
+   [
+    305,
+    0
+   ],
+   [
+    306,
+    0
+   ],
+   [
+    307,
+    0
+   ],
+   [
+    308,
+    0
+   ],
+   [
+    309,
+    0
+   ],
+   [
+    310,
+    0
+   ],
+   [
+    311,
+    0
+   ],
+   [
+    312,
+    0
+   ],
+   [
+    313,
+    0
+   ],
+   [
+    314,
+    0
+   ],
+   [
+    315,
+    0
+   ],
+   [
+    316,
+    0
+   ],
+   [
+    317,
+    0
+   ],
+   [
+    318,
+    0
+   ],
+   [
+    319,
+    0
+   ],
+   [
+    320,
+    0
+   ],
+   [
+    321,
+    0
+   ],
+   [
+    322,
+    0
+   ],
+   [
+    323,
+    0
+   ],
+   [
+    324,
+    0
+   ],
+   [
+    325,
+    0
+   ],
+   [
+    326,
+    0
+   ],
+   [
+    327,
+    0
+   ],
+   [
+    328,
+    0
+   ],
+   [
+    329,
+    0
+   ],
+   [
+    330,
+    0
+   ],
+   [
+    331,
+    0
+   ],
+   [
+    332,
+    0
+   ],
+   [
+    333,
+    0
+   ],
+   [
+    334,
+    0
+   ],
+   [
+    335,
+    0
+   ],
+   [
+    336,
+    0
+   ],
+   [
+    337,
+    0
+   ],
+   [
+    338,
+    0
+   ],
+   [
+    339,
+    0
+   ],
+   [
+    340,
+    0
+   ],
+   [
+    341,
+    0
+   ],
+   [
+    342,
+    0
+   ],
+   [
+    343,
+    0
+   ],
+   [
+    344,
+    0
+   ],
+   [
+    345,
+    0
+   ],
+   [
+    346,
+    0
+   ],
+   [
+    347,
+    0
+   ],
+   [
+    348,
+    0
+   ],
+   [
+    349,
+    0
+   ],
+   [
+    350,
+    0
+   ],
+   [
+    351,
+    0
+   ],
+   [
+    352,
+    0
+   ],
+   [
+    353,
+    0
+   ],
+   [
+    354,
+    0
+   ],
+   [
+    355,
+    0
+   ],
+   [
+    356,
+    0
+   ],
+   [
+    357,
+    0
+   ],
+   [
+    358,
+    0
+   ],
+   [
+    359,
+    0
+   ],
+   [
+    360,
+    0
+   ],
+   [
+    361,
+    0
+   ],
+   [
+    362,
+    0
+   ],
+   [
+    363,
+    0
+   ],
+   [
+    364,
+    0
+   ],
+   [
+    365,
+    0
+   ],
+   [
+    366,
+    0
+   ],
+   [
+    367,
+    0
+   ],
+   [
+    368,
+    0
+   ],
+   [
+    369,
+    0
+   ],
+   [
+    370,
+    0
+   ],
+   [
+    371,
+    0
+   ],
+   [
+    372,
+    0
+   ],
+   [
+    373,
+    0
+   ],
+   [
+    374,
+    0
+   ],
+   [
+    375,
+    0
+   ],
+   [
+    376,
+    0
+   ],
+   [
+    377,
+    0
+   ],
+   [
+    378,
+    0
+   ],
+   [
+    379,
+    0
+   ],
+   [
+    380,
+    0
+   ],
+   [
+    381,
+    0
+   ],
+   [
+    382,
+    0
+   ],
+   [
+    383,
+    0
+   ],
+   [
+    384,
+    0
+   ],
+   [
+    385,
+    0
+   ],
+   [
+    386,
+    0
+   ],
+   [
+    387,
+    0
+   ],
+   [
+    388,
+    0
+   ],
+   [
+    389,
+    0
+   ],
+   [
+    390,
+    0
+   ],
+   [
+    391,
+    0
+   ],
+   [
+    392,
+    0
+   ],
+   [
+    393,
+    0
+   ],
+   [
+    394,
+    0
+   ],
+   [
+    395,
+    0
+   ],
+   [
+    396,
+    0
+   ],
+   [
+    397,
+    0
+   ],
+   [
+    398,
+    0
+   ],
+   [
+    399,
+    0
+   ],
+   [
+    400,
+    0
+   ],
+   [
+    401,
+    0
+   ],
+   [
+    402,
+    0
+   ],
+   [
+    403,
+    0
+   ],
+   [
+    404,
+    0
+   ],
+   [
+    405,
+    0
+   ],
+   [
+    406,
+    0
+   ],
+   [
+    407,
+    0
+   ],
+   [
+    408,
+    0
+   ],
+   [
+    409,
+    0
+   ],
+   [
+    410,
+    0
+   ],
+   [
+    411,
+    0
+   ],
+   [
+    412,
+    0
+   ],
+   [
+    413,
+    0
+   ],
+   [
+    414,
+    0
+   ],
+   [
+    415,
+    0
+   ],
+   [
+    416,
+    0
+   ],
+   [
+    417,
+    0
+   ],
+   [
+    418,
+    0
+   ],
+   [
+    419,
+    0
+   ],
+   [
+    420,
+    0
+   ],
+   [
+    421,
+    0
+   ],
+   [
+    422,
+    0
+   ],
+   [
+    423,
+    0
+   ],
+   [
+    424,
+    0
+   ],
+   [
+    425,
+    0
+   ],
+   [
+    426,
+    0
+   ],
+   [
+    427,
+    0
+   ],
+   [
+    428,
+    0
+   ],
+   [
+    429,
+    0
+   ],
+   [
+    430,
+    0
+   ],
+   [
+    431,
+    0
+   ],
+   [
+    432,
+    0
+   ],
+   [
+    433,
+    0
+   ],
+   [
+    434,
+    0
+   ],
+   [
+    435,
+    0
+   ],
+   [
+    436,
+    0
+   ],
+   [
+    437,
+    0
+   ],
+   [
+    438,
+    0
+   ],
+   [
+    439,
+    0
+   ],
+   [
+    440,
+    0
+   ],
+   [
+    441,
+    0
+   ],
+   [
+    442,
+    0
+   ],
+   [
+    443,
+    0
+   ],
+   [
+    444,
+    0
+   ],
+   [
+    445,
+    0
+   ],
+   [
+    446,
+    0
+   ],
+   [
+    447,
+    0
+   ],
+   [
+    448,
+    0
+   ],
+   [
+    449,
+    0
+   ],
+   [
+    450,
+    0
+   ],
+   [
+    451,
+    0
+   ],
+   [
+    452,
+    0
+   ],
+   [
+    453,
+    0
+   ],
+   [
+    454,
+    0
+   ],
+   [
+    455,
+    0
+   ],
+   [
+    456,
+    0
+   ],
+   [
+    457,
+    0
+   ],
+   [
+    458,
+    0
+   ],
+   [
+    459,
+    0
+   ],
+   [
+    460,
+    0
+   ],
+   [
+    461,
+    0
+   ],
+   [
+    462,
+    0
+   ],
+   [
+    463,
+    0
+   ],
+   [
+    464,
+    0
+   ],
+   [
+    465,
+    0
+   ],
+   [
+    466,
+    0
+   ],
+   [
+    467,
+    0
+   ],
+   [
+    468,
+    0
+   ],
+   [
+    469,
+    0
+   ],
+   [
+    470,
+    0
+   ],
+   [
+    471,
+    0
+   ],
+   [
+    472,
+    0
+   ],
+   [
+    473,
+    0
+   ],
+   [
+    474,
+    0
+   ],
+   [
+    475,
+    0
+   ],
+   [
+    476,
+    0
+   ],
+   [
+    477,
+    0
+   ],
+   [
+    478,
+    0
+   ],
+   [
+    479,
+    0
+   ],
+   [
+    480,
+    0
+   ],
+   [
+    481,
+    0
+   ],
+   [
+    482,
+    0
+   ],
+   [
+    483,
+    0
+   ],
+   [
+    484,
+    0
+   ],
+   [
+    485,
+    0
+   ],
+   [
+    486,
+    0
+   ],
+   [
+    487,
+    0
+   ],
+   [
+    488,
+    0
+   ],
+   [
+    489,
+    0
+   ],
+   [
+    490,
+    0
+   ],
+   [
+    491,
+    0
+   ],
+   [
+    492,
+    0
+   ],
+   [
+    493,
+    0
+   ],
+   [
+    494,
+    0
+   ],
+   [
+    495,
+    0
+   ],
+   [
+    496,
+    0
+   ],
+   [
+    497,
+    0
+   ],
+   [
+    498,
+    0
+   ],
+   [
+    499,
+    0
+   ],
+   [
+    500,
+    0
+   ],
+   [
+    501,
+    0
+   ],
+   [
+    502,
+    0
+   ],
+   [
+    503,
+    0
+   ],
+   [
+    504,
+    0
+   ],
+   [
+    505,
+    0
+   ],
+   [
+    506,
+    0
+   ],
+   [
+    507,
+    0
+   ],
+   [
+    508,
+    0
+   ],
+   [
+    509,
+    0
+   ],
+   [
+    510,
+    0
+   ],
+   [
+    511,
+    0
+   ],
+   [
+    512,
+    0
+   ],
+   [
+    513,
+    0
+   ],
+   [
+    514,
+    0
+   ],
+   [
+    515,
+    0
+   ],
+   [
+    516,
+    0
+   ],
+   [
+    517,
+    0
+   ],
+   [
+    518,
+    0
+   ],
+   [
+    519,
+    0
+   ],
+   [
+    520,
+    0
+   ],
+   [
+    521,
+    0
+   ],
+   [
+    522,
+    0
+   ],
+   [
+    523,
+    0
+   ],
+   [
+    524,
+    0
+   ],
+   [
+    525,
+    0
+   ],
+   [
+    526,
+    0
+   ],
+   [
+    527,
+    0
+   ],
+   [
+    528,
+    0
+   ],
+   [
+    529,
+    0
+   ],
+   [
+    530,
+    0
+   ],
+   [
+    531,
+    0
+   ],
+   [
+    532,
+    0
+   ],
+   [
+    533,
+    0
+   ],
+   [
+    534,
+    0
+   ],
+   [
+    535,
+    0
+   ],
+   [
+    536,
+    0
+   ],
+   [
+    537,
+    0
+   ],
+   [
+    538,
+    0
+   ],
+   [
+    539,
+    0
+   ],
+   [
+    540,
+    0
+   ],
+   [
+    541,
+    0
+   ],
+   [
+    542,
+    0
+   ],
+   [
+    543,
+    0
+   ],
+   [
+    544,
+    0
+   ],
+   [
+    545,
+    0
+   ],
+   [
+    546,
+    0
+   ],
+   [
+    547,
+    0
+   ],
+   [
+    548,
+    0
+   ],
+   [
+    549,
+    0
+   ],
+   [
+    550,
+    0
+   ],
+   [
+    551,
+    0
+   ],
+   [
+    552,
+    0
+   ],
+   [
+    553,
+    0
+   ],
+   [
+    554,
+    0
+   ],
+   [
+    555,
+    0
+   ],
+   [
+    556,
+    0
+   ],
+   [
+    557,
+    0
+   ],
+   [
+    558,
+    0
+   ],
+   [
+    559,
+    0
+   ],
+   [
+    560,
+    0
+   ],
+   [
+    561,
+    0
+   ],
+   [
+    562,
+    0
+   ],
+   [
+    563,
+    0
+   ],
+   [
+    564,
+    0
+   ],
+   [
+    565,
+    0
+   ],
+   [
+    566,
+    0
+   ],
+   [
+    567,
+    0
+   ],
+   [
+    568,
+    0
+   ],
+   [
+    569,
+    0
+   ],
+   [
+    570,
+    0
+   ],
+   [
+    571,
+    0
+   ],
+   [
+    572,
+    0
+   ],
+   [
+    573,
+    0
+   ],
+   [
+    574,
+    0
+   ],
+   [
+    575,
+    0
+   ],
+   [
+    576,
+    0
+   ],
+   [
+    577,
+    0
+   ],
+   [
+    578,
+    0
+   ],
+   [
+    579,
+    0
+   ],
+   [
+    580,
+    0
+   ],
+   [
+    581,
+    0
+   ],
+   [
+    582,
+    0
+   ],
+   [
+    583,
+    0
+   ],
+   [
+    584,
+    0
+   ],
+   [
+    585,
+    0
+   ],
+   [
+    586,
+    0
+   ],
+   [
+    587,
+    0
+   ],
+   [
+    588,
+    0
+   ],
+   [
+    589,
+    0
+   ],
+   [
+    590,
+    0
+   ],
+   [
+    591,
+    0
+   ],
+   [
+    592,
+    0
+   ],
+   [
+    593,
+    0
+   ],
+   [
+    594,
+    0
+   ],
+   [
+    595,
+    0
+   ],
+   [
+    596,
+    0
+   ],
+   [
+    597,
+    0
+   ],
+   [
+    598,
+    0
+   ],
+   [
+    599,
+    0
+   ],
+   [
+    600,
+    0
+   ],
+   [
+    601,
+    0
+   ],
+   [
+    602,
+    0
+   ],
+   [
+    603,
+    0
+   ],
+   [
+    604,
+    0
+   ],
+   [
+    605,
+    0
+   ],
+   [
+    606,
+    0
+   ],
+   [
+    607,
+    0
+   ],
+   [
+    608,
+    0
+   ],
+   [
+    609,
+    0
+   ],
+   [
+    610,
+    0
+   ],
+   [
+    611,
+    0
+   ],
+   [
+    612,
+    0
+   ]
+  ],
+  "allSets": 0
+ }
+}

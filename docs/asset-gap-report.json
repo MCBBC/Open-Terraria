@@ -1,0 +1,475 @@
+{
+  "generated": 1786604292731,
+  "summary": {
+    "vanillaImages": 14998,
+    "vanillaSounds": 852,
+    "have": 15850,
+    "missing": 0
+  },
+  "groups": [
+    {
+      "cat": "Acc_*/Armor_*（穿戴表）",
+      "reason": "经 vanilla-ui 消费（748 键）；差集=未实装配件/盔甲样式",
+      "mechanism": "⭐ 纸娃娃穿戴样式——部分实装（差集需人工）",
+      "total": 989,
+      "have": 989,
+      "missing": []
+    },
+    {
+      "cat": "散装机制小图（兜底）",
+      "reason": "散件（染料调色盘/鱼线/减益覆层/专属机制图层：宝石大件/飞毯/光盘/荧光瓶等）",
+      "mechanism": "杂项——逐文件需人工",
+      "total": 514,
+      "have": 514,
+      "missing": []
+    },
+    {
+      "cat": "散装机制小图",
+      "reason": "散件（Boss 部件/装饰/成就星/UI 图标）",
+      "mechanism": "杂项——逐文件需人工",
+      "total": 49,
+      "have": 49,
+      "missing": []
+    },
+    {
+      "cat": "BackPack_*",
+      "reason": "背包展开态贴图（旅商主题背包）",
+      "mechanism": "背包 UI 主题——未实装",
+      "total": 9,
+      "have": 9,
+      "missing": []
+    },
+    {
+      "cat": "Backgrounds/Ambience（天空环境实体）",
+      "reason": "仅 Meteor（天幕流星）已接",
+      "mechanism": "⭐ AmbientSky 天空实体系统——仅 1/N（天空水母/鸟群/流星雨视觉等未做）",
+      "total": 29,
+      "have": 29,
+      "missing": []
+    },
+    {
+      "cat": "Backgrounds/*（群系背景）",
+      "reason": "BiomeBackground 已接主群系；差集=地狱层细节/圣殿/微光湖等背景层",
+      "mechanism": "⭐ 群系背景——部分实装（差集需人工）",
+      "total": 14,
+      "have": 14,
+      "missing": []
+    },
+    {
+      "cat": "Buff_*（Buff 图标）",
+      "reason": "388/389 已拷（差集见清单）",
+      "mechanism": "Buff 系统——素材已覆盖",
+      "total": 388,
+      "have": 388,
+      "missing": []
+    },
+    {
+      "cat": "Cage*（小动物笼）",
+      "reason": "笼子物品在库但放置态渲染（笼顶/栖木）未接",
+      "mechanism": "⭐ 小动物笼放置渲染——未实装",
+      "total": 5,
+      "have": 5,
+      "missing": []
+    },
+    {
+      "cat": "Chain*（链条族）",
+      "reason": "Chain41-43 已接（幽灵链）；其余=墙链/宝石链/血肉墙市长链等装饰链",
+      "mechanism": "链条渲染族——部分实装（差集需人工）",
+      "total": 60,
+      "have": 60,
+      "missing": []
+    },
+    {
+      "cat": "Cloud_*（云）",
+      "reason": "0-3 常规云已接；9-21 雨云/风暴云未拷",
+      "mechanism": "⭐ 天气视觉（雨/风暴云渲染）——未实装",
+      "total": 41,
+      "have": 41,
+      "missing": []
+    },
+    {
+      "cat": "Extra_*（杂项机制表）",
+      "reason": "已接 ~40 张（派对帽/月总肢体/荷兰船/表情等）；缺失项=对应 Main.cs 专属绘制分支的 NPC/系统未移植",
+      "mechanism": "⭐ 逐 id 机制——多数关联未实装系统（需人工对号）",
+      "total": 304,
+      "have": 304,
+      "missing": []
+    },
+    {
+      "cat": "Flame_*（火焰族）",
+      "reason": "Flame.png 已接（岩浆宽限条）；UI 火焰动画/蓝焰等未取",
+      "mechanism": "火焰渲染族——部分实装",
+      "total": 18,
+      "have": 18,
+      "missing": []
+    },
+    {
+      "cat": "Gem 检测/锁/链",
+      "reason": "宝石大件装饰（宝石检测器/锁链）",
+      "mechanism": "杂项机制——未实装（需人工）",
+      "total": 6,
+      "have": 6,
+      "missing": []
+    },
+    {
+      "cat": "Glow_*（发光覆层）",
+      "reason": "仅月总族/已实装 Boss 的 Glow 表已接，全量发光叠层未做",
+      "mechanism": "⭐ Glow 叠层系统——部分实装",
+      "total": 379,
+      "have": 379,
+      "missing": []
+    },
+    {
+      "cat": "GolemLights（石巨人灯光）",
+      "reason": "石巨人入场灯光演出未接",
+      "mechanism": "Boss 入场演出——未实装",
+      "total": 3,
+      "have": 3,
+      "missing": []
+    },
+    {
+      "cat": "Gore_*（死亡碎块）",
+      "reason": "仅 boss 专属/特殊 gore 已接线（~60 张），常规怪碎片未做",
+      "mechanism": "⭐ Gore 碎块系统——部分实装（缺全量化）",
+      "total": 1403,
+      "have": 1403,
+      "missing": []
+    },
+    {
+      "cat": "Inventory_*（背包 UI）",
+      "reason": "背包 UI 已自研原版样式；原版 Inventory_ 族未逐张取",
+      "mechanism": "背包 UI——自研替代（视觉差异可忽略）",
+      "total": 26,
+      "have": 26,
+      "missing": []
+    },
+    {
+      "cat": "ItemFlame_*（火把火苗）",
+      "reason": "火把族动态火苗覆层未接（火把光已用其它路径）",
+      "mechanism": "⭐ ItemFlame 火苗系统——未实装",
+      "total": 32,
+      "have": 32,
+      "missing": []
+    },
+    {
+      "cat": "Item_*（物品图标）",
+      "reason": "数据级全量消费（Item_Atlas 打包，vanilla.json 6059 条）",
+      "mechanism": "物品系统——已覆盖",
+      "total": 6085,
+      "have": 6085,
+      "missing": []
+    },
+    {
+      "cat": "LiquidSlope_*（液体斜坡）",
+      "reason": "液体渲染为直角矩形，斜面贴合表未接",
+      "mechanism": "⭐ 液体斜坡渲染——未实装",
+      "total": 15,
+      "have": 15,
+      "missing": []
+    },
+    {
+      "cat": "Liquid_*（液体）",
+      "reason": "0-14 全量已接",
+      "mechanism": "液体系统——已覆盖",
+      "total": 15,
+      "have": 15,
+      "missing": []
+    },
+    {
+      "cat": "Map_*（全屏地图）",
+      "reason": "全屏地图仅 Default 皮肤",
+      "mechanism": "⭐ 全屏地图皮肤——未实装",
+      "total": 8,
+      "have": 8,
+      "missing": []
+    },
+    {
+      "cat": "Misc/MoonExplosion（月总登场爆炸）",
+      "reason": "月总召唤爆炸演出（骨骼飞散）未接",
+      "mechanism": "⭐ 月总登场演出——未实装",
+      "total": 5,
+      "have": 5,
+      "missing": []
+    },
+    {
+      "cat": "Misc/星云天空",
+      "reason": "星云塔天空层（背景+行星+浮岩）未接",
+      "mechanism": "⭐ 月塔战天空效果——部分实装（天幕色已接，装饰层未做）",
+      "total": 6,
+      "have": 6,
+      "missing": []
+    },
+    {
+      "cat": "Misc/*（杂项）",
+      "reason": "water_* 已接；差集=波纹/高尔夫轮廓等装饰细节",
+      "mechanism": "⭐ 杂项——逐文件需人工",
+      "total": 30,
+      "have": 30,
+      "missing": []
+    },
+    {
+      "cat": "Misc/日耀天空",
+      "reason": "日耀塔天空层（耀斑/行星）未接",
+      "mechanism": "⭐ 月塔战天空效果——装饰层未做",
+      "total": 3,
+      "have": 3,
+      "missing": []
+    },
+    {
+      "cat": "Misc/星尘天空",
+      "reason": "星尘塔天空层（星空+行星）未接",
+      "mechanism": "⭐ 月塔战天空效果——装饰层未做",
+      "total": 2,
+      "have": 2,
+      "missing": []
+    },
+    {
+      "cat": "Misc/Sunflare（日耀耀斑）",
+      "reason": "日耀耀斑光效未接",
+      "mechanism": "⭐ 日耀光效——未实装",
+      "total": 8,
+      "have": 8,
+      "missing": []
+    },
+    {
+      "cat": "Tiles_*（图块表）",
+      "reason": "白名单 753 条 tile 表全量已拷",
+      "mechanism": "图块系统——已覆盖",
+      "total": 857,
+      "have": 857,
+      "missing": []
+    },
+    {
+      "cat": "Moon_*（月亮）",
+      "reason": "moonType 0-8+霜/南瓜已接",
+      "mechanism": "月亮系统——已覆盖",
+      "total": 12,
+      "have": 12,
+      "missing": []
+    },
+    {
+      "cat": "Mount_*（坐骑）",
+      "reason": "坐骑系统未实装（猪鲨/海盗船/独角兽/驯鹿等）",
+      "mechanism": "⭐ 坐骑系统——未实装",
+      "total": 29,
+      "have": 29,
+      "missing": []
+    },
+    {
+      "cat": "NPC_*（怪物/城镇表）",
+      "reason": "全量已拷（719 张 ≥ 原版 717）",
+      "mechanism": "NPC 系统——素材已覆盖",
+      "total": 742,
+      "have": 742,
+      "missing": []
+    },
+    {
+      "cat": "NPC_Head*（头像/旗帜头）",
+      "reason": "城镇头像+Boss 头已拷（旗帜头索引表已全 8 史莱姆）",
+      "mechanism": "旗帜/图鉴头像——已覆盖",
+      "total": 121,
+      "have": 121,
+      "missing": []
+    },
+    {
+      "cat": "Player_*（角色部件）",
+      "reason": "发型 228+帽发 228+身体帧表/manifest 经 vanilla-ui 已拷",
+      "mechanism": "角色系统——已覆盖",
+      "total": 545,
+      "have": 545,
+      "missing": []
+    },
+    {
+      "cat": "Projectile_*（投射物表）",
+      "reason": "文件级全量已拷",
+      "mechanism": "投射物系统——素材已覆盖（AI 按需接入）",
+      "total": 1109,
+      "have": 1109,
+      "missing": []
+    },
+    {
+      "cat": "Rudolph（驯鹿）",
+      "reason": "驯鹿坐骑（圣诞礼物）",
+      "mechanism": "⭐ 坐骑系统——未实装",
+      "total": 3,
+      "have": 3,
+      "missing": []
+    },
+    {
+      "cat": "SplashScreens（启动画面）",
+      "reason": "主菜单背景已用部分（封面图集）；原版启动闪屏未接",
+      "mechanism": "主菜单/闪屏——部分实装",
+      "total": 33,
+      "have": 33,
+      "missing": []
+    },
+    {
+      "cat": "Sun/云底",
+      "reason": "Sun 已接",
+      "mechanism": "天空系统——已覆盖",
+      "total": 1,
+      "have": 1,
+      "missing": []
+    },
+    {
+      "cat": "TownNPCs（城镇 NPC 变体）",
+      "reason": "_Party 全量已接；_Shimmered=微光变体、_Transformed=动物学家狼人态未实装",
+      "mechanism": "⭐ 城镇 NPC 变体（微光/变身）——未实装",
+      "total": 211,
+      "have": 211,
+      "missing": []
+    },
+    {
+      "cat": "Trash（垃圾桶 UI）",
+      "reason": "背包垃圾桶未实装",
+      "mechanism": "⭐ 背包垃圾桶——未实装",
+      "total": 1,
+      "have": 1,
+      "missing": []
+    },
+    {
+      "cat": "Tree_*（树冠/树枝）",
+      "reason": "32 样式全量已拷",
+      "mechanism": "树系统——已覆盖",
+      "total": 64,
+      "have": 64,
+      "missing": []
+    },
+    {
+      "cat": "UI/*（界面）",
+      "reason": "vanilla-ui 白名单 170 项在库；差集=未实装界面（全屏地图/创造模式/合影模式等）",
+      "mechanism": "⭐ UI 系统——差集逐目录需人工",
+      "total": 239,
+      "have": 239,
+      "missing": []
+    },
+    {
+      "cat": "UI/Bestiary（图鉴）",
+      "reason": "图鉴 UI 已接部分；差集=图鉴页框/图标细节",
+      "mechanism": "图鉴 UI——部分实装",
+      "total": 29,
+      "have": 29,
+      "missing": []
+    },
+    {
+      "cat": "UI/CharCreation（角色创建）",
+      "reason": "角色创建已接；差集=发色预设等细节",
+      "mechanism": "角色创建 UI——部分实装",
+      "total": 26,
+      "have": 26,
+      "missing": []
+    },
+    {
+      "cat": "UI/Creative（旅程模式）",
+      "reason": "旅程模式 UI（研究/时间倍率面板）未全接",
+      "mechanism": "⭐ 旅程模式 UI——部分实装",
+      "total": 13,
+      "have": 13,
+      "missing": []
+    },
+    {
+      "cat": "UI/Minimap（小地图皮肤）",
+      "reason": "9 款皮肤全量已接",
+      "mechanism": "小地图系统——已覆盖",
+      "total": 36,
+      "have": 36,
+      "missing": []
+    },
+    {
+      "cat": "UI/资源条",
+      "reason": "Classic/Fancy 已接",
+      "mechanism": "资源条系统——已覆盖",
+      "total": 15,
+      "have": 15,
+      "missing": []
+    },
+    {
+      "cat": "Wires_*（电路图标）",
+      "reason": "电路系统已实装；Wires_ 点阵图标族未取",
+      "mechanism": "电路 UI 图标——未取（功能已覆盖）",
+      "total": 12,
+      "have": 12,
+      "missing": []
+    },
+    {
+      "cat": "Wall_*（墙表）",
+      "reason": "白名单 366 条墙表全量已拷",
+      "mechanism": "墙系统——已覆盖",
+      "total": 366,
+      "have": 366,
+      "missing": []
+    },
+    {
+      "cat": "Waterfall_*（瀑布胶片）",
+      "reason": "0-14/25-27 主表已接（21/28），差集见清单",
+      "mechanism": "瀑布系统——基本覆盖",
+      "total": 28,
+      "have": 28,
+      "missing": []
+    },
+    {
+      "cat": "Wings_*（翅膀）",
+      "reason": "52 张已拷（vanilla 51，超集）",
+      "mechanism": "翅膀系统——已覆盖",
+      "total": 51,
+      "have": 51,
+      "missing": []
+    },
+    {
+      "cat": "Xmas_*（圣诞）",
+      "reason": "圣诞节日 UI/礼物图标",
+      "mechanism": "节日系统——未实装",
+      "total": 6,
+      "have": 6,
+      "missing": []
+    },
+    {
+      "cat": "鱼缸/水碗",
+      "reason": "观赏鱼缸放置渲染",
+      "mechanism": "杂项放置物——未实装",
+      "total": 3,
+      "have": 3,
+      "missing": []
+    },
+    {
+      "cat": "Sounds/*（未分组）",
+      "reason": "散装音效（具体物品/事件专属）",
+      "mechanism": "⭐ 音效接线——差集需人工",
+      "total": 128,
+      "have": 128,
+      "missing": []
+    },
+    {
+      "cat": "Sounds/*（效果音）",
+      "reason": "295 张已拷；差集=SfxName 键表未覆盖的音效",
+      "mechanism": "⭐ 音效接线（SfxName 表）——差集需人工",
+      "total": 479,
+      "have": 479,
+      "missing": []
+    },
+    {
+      "cat": "Sounds/Custom/*（召唤物/专属武器音）",
+      "reason": "随从/专属武器/城镇 NPC 专属音效未接线",
+      "mechanism": "⭐ 音效接线（SfxName 表）——差集需人工",
+      "total": 21,
+      "have": 21,
+      "missing": []
+    },
+    {
+      "cat": "Sounds/*（环境音循环）",
+      "reason": "雨/暴风雪/沙暴环境音循环未接",
+      "mechanism": "⭐ 天气环境音（loop）系统——未实装",
+      "total": 2,
+      "have": 2,
+      "missing": []
+    },
+    {
+      "cat": "Sounds/Custom/dd2_*",
+      "reason": "13 张已接（塔音/出怪门音）；差集=Betsy 全组+各敌怪 hurt/death/施法音未接线",
+      "mechanism": "⭐ DD2 敌怪音效——差集需接线",
+      "total": 222,
+      "have": 222,
+      "missing": []
+    }
+  ]
+}

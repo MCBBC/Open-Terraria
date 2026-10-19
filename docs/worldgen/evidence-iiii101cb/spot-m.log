@@ -1,0 +1,30 @@
+[atlas-lint] 754 表全自洽 ✓ (0 warn)
+[l10n-audit] 670 键全部命中 ✓
+
+ RUN  v2.1.9 ~/Project/GLM/SandboxWorld/game
+
+stdout | tools/_iii100spot.test.ts
+[LT109load] mark=undefined mk=false
+
+stdout | tools/_iii100spot.test.ts > five-key-slot parity chain=m
+#000_Terrain ← 槽末#0·原版地形            A=     0 T=     0 W=     0 L=     0 Hf=     0 Sl=     0 Lt=     0 Ia=     0 ✓
+
+stdout | tools/_iii100spot.test.ts > five-key-slot parity chain=m
+#045_Wet_Jungle ← LihzahrdTemple       A=     0 T=     0 W=     0 L=     0 Hf=     0 Sl=     0 Lt=     0 Ia=     0 ✓
+#046_Jungle_Temple ← Beehives             A=     0 T=     0 W=     0 L=     0 Hf=     0 Sl=     0 Lt=     0 Ia=     0 ✓
+#047_Hives ← JungleShrines        A=     0 T=     0 W=     0 L=     0 Hf=     0 Sl=     0 Lt=     0 Ia=     0 ✓
+
+stdout | tools/_iii100spot.test.ts > five-key-slot parity chain=m
+#105_Final_Cleanup ← 槽末#58·终清理            A=     0 T=     0 W=     0 L=     0 Hf=     0 Sl=     0 Lt=     0 Ia=     0 ✓
+
+stdout | tools/_iii100spot.test.ts > five-key-slot parity chain=m
+m: 五点全绿 ✓
+
+ ✓ tools/_iii100spot.test.ts (1 test) 47792ms
+   ✓ five-key-slot parity chain=m 47788ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  08:58:58
+   Duration  51.09s (transform 2.14s, setup 0ms, collect 2.89s, tests 47.79s, environment 0ms, prepare 51ms)
+

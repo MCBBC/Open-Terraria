@@ -1,0 +1,60 @@
+{
+  "when": "2026-10-08T09:17:36.052Z",
+  "origin": "http://localhost:5201",
+  "results": [
+    {
+      "name": "S1 远距(22 格)起手落锚+吞边沿",
+      "pass": true,
+      "anchor": [
+        2124,
+        268
+      ],
+      "useTime": 10,
+      "mouseDown": false,
+      "inv": [
+        2124,
+        268
+      ]
+    },
+    {
+      "name": "S2 松开执行 L 铺线(vanilla 段序)+耗线对账",
+      "pass": true,
+      "rel": {
+        "anchor": [
+          2124,
+          268
+        ],
+        "end": [
+          2130,
+          268
+        ]
+      },
+      "nCells": 7,
+      "nWired": 7,
+      "stack": 193
+    },
+    {
+      "name": "S3 右键取消(路由消亡不执行+吞右键)",
+      "pass": true,
+      "anchor": null,
+      "rightDown": false,
+      "s3wire": 0
+    },
+    {
+      "name": "S4 剪线路由拆除+不耗线材",
+      "pass": true,
+      "rel4": {
+        "anchor": [
+          2124,
+          268
+        ],
+        "end": [
+          2124,
+          268
+        ]
+      },
+      "stillWired": 0,
+      "stack": 193
+    }
+  ]
+}
