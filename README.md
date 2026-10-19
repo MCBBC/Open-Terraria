@@ -105,3 +105,8 @@ node scripts/mod-cli.mjs build mods/my_mod       # → mods/dist/my_mod.swmod
 ## 技术栈
 
 TypeScript · Canvas 2D · WebGL2 · Vite · vitest · Web Assembly · Web Worker
+
+## 致谢
+
+- 感谢 [c.c.c.](https://linux.do/u/12311/summary) 对项目提供持续测试和验证
+- 感谢 [Linux.do](https://linux.do) 社区对项目的推广与反馈
