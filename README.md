@@ -45,6 +45,8 @@ Agent侧产生了112338条消息，工具调用数量达36815次
 
 ![shot-gameplay-4](docs/screenshots/shot-gameplay-4.png)
 
+![shot-gameplay-5](docs/screenshots/shot-gameplay-5.png)
+
 #### 移植mod演示
 
 ![shot-mod-list](docs/screenshots/shot-mod-list.png)
